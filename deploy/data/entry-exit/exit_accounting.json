@@ -1,0 +1,19 @@
+{
+  "generated_at": 1771663916,
+  "metrics": {
+    "accepted_packets": 0,
+    "dropped_packets": 0,
+    "accepted_bytes": 0,
+    "dropped_bytes": 0,
+    "accepted_tier1_packets": 0,
+    "accepted_tier2_packets": 0,
+    "accepted_tier3_packets": 0,
+    "dropped_tier1_packets": 0,
+    "dropped_tier2_packets": 0,
+    "dropped_tier3_packets": 0,
+    "dropped_token_revoked": 0,
+    "dropped_token_key_epoch": 0,
+    "active_sessions": 0,
+    "accounting_updated_unix": 0
+  }
+}

@@ -1,0 +1,13 @@
+# test log
+getenv TMPDIR
+open /tmp/TestLoadTrustedKeysAndTOFU1185681803/001/trusted.txt
+stat /tmp/TestLoadTrustedKeysAndTOFU1185681803/001
+open /tmp/TestLoadTrustedKeysAndTOFU1185681803/001/trusted.txt
+open /tmp/TestLoadTrustedKeysAndTOFU1185681803/001/trusted.txt
+open /tmp/TestLoadTrustedKeysAndTOFU1185681803/001/trusted.txt
+open /tmp/TestLoadTrustedKeysAndTOFU1185681803/001/trusted.txt
+open /tmp
+getenv TMPDIR
+open /tmp/TestStrictTrustRejectsUnknown3001450056/001/trusted.txt
+open /tmp/TestStrictTrustRejectsUnknown3001450056/001/trusted.txt
+open /tmp

@@ -1,0 +1,20 @@
+[Unit]
+Description=Privacy Node Issuer Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=privacynode
+Group=privacynode
+WorkingDirectory=/var/lib/privacynode
+EnvironmentFile=-/etc/privacynode/common.env
+EnvironmentFile=-/etc/privacynode/issuer.env
+ExecStart=/usr/local/bin/node --issuer
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
+

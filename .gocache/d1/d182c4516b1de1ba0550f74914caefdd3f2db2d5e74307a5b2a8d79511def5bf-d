@@ -1,0 +1,7 @@
+# test log
+getenv TMPDIR
+stat /tmp/TestSaveLoadSubjects3579963736/001
+open /tmp/TestSaveLoadSubjects3579963736/001/subjects.json
+stat /tmp/TestSaveLoadSubjects3579963736/001/subjects.json
+open /tmp/TestSaveLoadSubjects3579963736/001/subjects.json
+open /tmp

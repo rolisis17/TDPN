@@ -1,0 +1,7 @@
+./frame.go
+./opaque.go
+./packet.go
+./wireguard.go
+./frame_test.go
+./opaque_test.go
+./wireguard_test.go

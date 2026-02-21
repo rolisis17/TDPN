@@ -1,0 +1,21 @@
+# test log
+getenv TMPDIR
+open /tmp/TestLoadTrustedKeysAndTOFU2701607831/001/trusted.txt
+stat /tmp/TestLoadTrustedKeysAndTOFU2701607831/001
+open /tmp/TestLoadTrustedKeysAndTOFU2701607831/001/trusted.txt
+open /tmp/TestLoadTrustedKeysAndTOFU2701607831/001/trusted.txt
+open /tmp/TestLoadTrustedKeysAndTOFU2701607831/001/trusted.txt
+open /tmp/TestLoadTrustedKeysAndTOFU2701607831/001/trusted.txt
+open /tmp
+getenv TMPDIR
+open /tmp/TestStrictTrustRejectsUnknown1970492954/001/trusted.txt
+open /tmp/TestStrictTrustRejectsUnknown1970492954/001/trusted.txt
+open /tmp
+getenv TMPDIR
+open /tmp/TestStrictTrustAcceptsKeysetWhenOnePinnedAndPinsNew2453199882/001/trusted.txt
+open /tmp/TestStrictTrustAcceptsKeysetWhenOnePinnedAndPinsNew2453199882/001/trusted.txt
+stat /tmp/TestStrictTrustAcceptsKeysetWhenOnePinnedAndPinsNew2453199882/001
+open /tmp/TestStrictTrustAcceptsKeysetWhenOnePinnedAndPinsNew2453199882/001/trusted.txt
+open /tmp/TestStrictTrustAcceptsKeysetWhenOnePinnedAndPinsNew2453199882/001/trusted.txt
+open /tmp/TestStrictTrustAcceptsKeysetWhenOnePinnedAndPinsNew2453199882/001/trusted.txt
+open /tmp

@@ -1,0 +1,7 @@
+./client_command.go
+./client_noop.go
+./client_types.go
+./command.go
+./keys.go
+./noop.go
+./types.go

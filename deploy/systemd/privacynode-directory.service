@@ -1,0 +1,20 @@
+[Unit]
+Description=Privacy Node Directory Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=privacynode
+Group=privacynode
+WorkingDirectory=/var/lib/privacynode
+EnvironmentFile=-/etc/privacynode/common.env
+EnvironmentFile=-/etc/privacynode/directory.env
+ExecStart=/usr/local/bin/node --directory
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
+

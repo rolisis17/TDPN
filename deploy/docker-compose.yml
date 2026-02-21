@@ -1,0 +1,89 @@
+services:
+  directory:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    command: ["--directory"]
+    environment:
+      DIRECTORY_ADDR: "0.0.0.0:8081"
+      DIRECTORY_OPERATOR_ID: "op-main"
+      ENTRY_URL: "http://entry-exit:8083"
+      EXIT_CONTROL_URL: "http://entry-exit:8084"
+      ENTRY_ENDPOINT: "entry-exit:51820"
+      EXIT_ENDPOINT: "entry-exit:51821"
+      DIRECTORY_PRIVATE_KEY_FILE: "/app/data/directory_ed25519.key"
+    volumes:
+      - ./data/directory:/app/data
+    ports:
+      - "8081:8081"
+    restart: unless-stopped
+
+  issuer:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    command: ["--issuer"]
+    environment:
+      ISSUER_ADDR: "0.0.0.0:8082"
+      ISSUER_ID: "issuer-main"
+      ISSUER_PRIVATE_KEY_FILE: "/app/data/issuer_ed25519.key"
+      ISSUER_PREVIOUS_PUBKEYS_FILE: "/app/data/issuer_previous_pubkeys.txt"
+      ISSUER_EPOCHS_FILE: "/app/data/issuer_epochs.json"
+      ISSUER_SUBJECTS_FILE: "/app/data/issuer_subjects.json"
+      ISSUER_REVOCATIONS_FILE: "/app/data/issuer_revocations.json"
+      ISSUER_ADMIN_TOKEN: "change-me"
+    volumes:
+      - ./data/issuer:/app/data
+    ports:
+      - "8082:8082"
+    restart: unless-stopped
+
+  entry-exit:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    command: ["--entry", "--exit"]
+    depends_on:
+      - directory
+      - issuer
+    environment:
+      ENTRY_ADDR: "0.0.0.0:8083"
+      EXIT_ADDR: "0.0.0.0:8084"
+      ENTRY_DATA_ADDR: "0.0.0.0:51820"
+      EXIT_DATA_ADDR: "0.0.0.0:51821"
+      DIRECTORY_URL: "http://directory:8081"
+      ISSUER_URL: "http://issuer:8082"
+      ENTRY_OPEN_RPS: "20"
+      ENTRY_PUZZLE_DIFFICULTY: "1"
+      ENTRY_BAN_THRESHOLD: "3"
+      ENTRY_BAN_SEC: "45"
+      EXIT_REVOCATION_REFRESH_SEC: "15"
+      EXIT_ACCOUNTING_FILE: "/app/data/exit_accounting.json"
+    volumes:
+      - ./data/entry-exit:/app/data
+    ports:
+      - "8083:8083"
+      - "8084:8084"
+      - "51820:51820/udp"
+      - "51821:51821/udp"
+    restart: unless-stopped
+
+  client-demo:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    command: ["--client"]
+    depends_on:
+      - directory
+      - issuer
+      - entry-exit
+    environment:
+      DIRECTORY_URL: "http://directory:8081"
+      ISSUER_URL: "http://issuer:8082"
+      ENTRY_URL: "http://entry-exit:8083"
+      EXIT_CONTROL_URL: "http://entry-exit:8084"
+      CLIENT_BOOTSTRAP_INTERVAL_SEC: "5"
+    profiles:
+      - demo
+    restart: "no"
+

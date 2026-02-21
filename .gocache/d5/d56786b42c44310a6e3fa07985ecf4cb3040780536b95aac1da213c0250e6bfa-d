@@ -1,0 +1,4 @@
+./command.go
+./noop.go
+./types.go
+./command_test.go

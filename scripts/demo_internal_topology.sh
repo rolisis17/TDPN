@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
+export DATA_PLANE_MODE="${DATA_PLANE_MODE:-opaque}"
+export CLIENT_INNER_SOURCE="${CLIENT_INNER_SOURCE:-udp}"
+export CLIENT_INNER_UDP_ADDR="${CLIENT_INNER_UDP_ADDR:-127.0.0.1:51900}"
+export CLIENT_OPAQUE_SINK_ADDR="${CLIENT_OPAQUE_SINK_ADDR:-127.0.0.1:51910}"
+export CLIENT_OPAQUE_DRAIN_MS="${CLIENT_OPAQUE_DRAIN_MS:-1800}"
+export CLIENT_BOOTSTRAP_INTERVAL_SEC="${CLIENT_BOOTSTRAP_INTERVAL_SEC:-2}"
+export EXIT_OPAQUE_ECHO="${EXIT_OPAQUE_ECHO:-1}"
+export EXIT_OPAQUE_SINK_ADDR="${EXIT_OPAQUE_SINK_ADDR:-}"
+
+export WG_BACKEND="${WG_BACKEND:-noop}"
+export CLIENT_WG_BACKEND="${CLIENT_WG_BACKEND:-noop}"
+
+export WGIO_FROM_WG_ADDR="${WGIO_FROM_WG_ADDR:-127.0.0.1:52000}"
+export WGIO_TO_CLIENT_ADDR="${WGIO_TO_CLIENT_ADDR:-127.0.0.1:51900}"
+export WGIO_FROM_EXIT_ADDR="${WGIO_FROM_EXIT_ADDR:-127.0.0.1:51910}"
+export WGIO_TO_WG_ADDR="${WGIO_TO_WG_ADDR:-127.0.0.1:52001}"
+
+export WGIOTAP_ADDR="${WGIOTAP_ADDR:-127.0.0.1:52001}"
+
+export WGIOINJECT_TARGET_ADDR="${WGIOINJECT_TARGET_ADDR:-127.0.0.1:52000}"
+export WGIOINJECT_INTERVAL_MS="${WGIOINJECT_INTERVAL_MS:-120}"
+export WGIOINJECT_WG_LIKE_PCT="${WGIOINJECT_WG_LIKE_PCT:-90}"
+
+mkdir -p .gocache
+export GOCACHE="${GOCACHE:-$ROOT_DIR/.gocache}"
+
+DURATION="${DEMO_DURATION_SEC:-15}"
+
+echo "[demo] running internal topology for ${DURATION}s"
+echo "[demo] mode=${DATA_PLANE_MODE} source=${CLIENT_INNER_SOURCE} wg_backend=${WG_BACKEND} client_wg_backend=${CLIENT_WG_BACKEND}"
+
+timeout "${DURATION}s" go run ./cmd/node \
+  --directory --issuer --entry --exit --client --wgio --wgiotap --wgioinject

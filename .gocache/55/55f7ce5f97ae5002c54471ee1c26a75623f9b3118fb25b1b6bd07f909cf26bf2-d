@@ -1,0 +1,7 @@
+# test log
+getenv TMPDIR
+open /tmp/TestLoadOrCreateKeypairPersists2462788530/001/dir.key
+stat /tmp/TestLoadOrCreateKeypairPersists2462788530/001
+open /tmp/TestLoadOrCreateKeypairPersists2462788530/001/dir.key
+open /tmp/TestLoadOrCreateKeypairPersists2462788530/001/dir.key
+open /tmp

@@ -1,0 +1,12 @@
+# test log
+getenv TMPDIR
+open /tmp/TestRunPreflightOK1381051088/001/client.key
+open /tmp/TestRunPreflightOK1381051088/001/client.key
+open /tmp
+getenv TMPDIR
+open /tmp/TestRunPreflightMissingWG4264433381/001/exit.key
+open /tmp
+getenv TMPDIR
+open /tmp/TestRunPreflightBadInterface1144847793/001/exit.key
+open /tmp/TestRunPreflightBadInterface1144847793/001/exit.key
+open /tmp

@@ -1,0 +1,20 @@
+[Unit]
+Description=Privacy Node Entry+Exit Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/var/lib/privacynode
+EnvironmentFile=-/etc/privacynode/common.env
+EnvironmentFile=-/etc/privacynode/entry-exit.env
+ExecStart=/usr/local/bin/node --entry --exit
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
+

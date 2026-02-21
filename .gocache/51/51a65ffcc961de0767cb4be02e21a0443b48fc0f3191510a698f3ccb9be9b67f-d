@@ -1,0 +1,14 @@
+# test log
+getenv TMPDIR
+open /tmp/TestLoadOrCreateKeypairPersists3687696447/001/issuer.key
+stat /tmp/TestLoadOrCreateKeypairPersists3687696447/001
+open /tmp/TestLoadOrCreateKeypairPersists3687696447/001/issuer.key
+open /tmp/TestLoadOrCreateKeypairPersists3687696447/001/issuer.key
+open /tmp
+getenv TMPDIR
+stat /tmp/TestSaveLoadSubjects252273170/001
+open /tmp/TestSaveLoadSubjects252273170/001/subjects.json
+stat /tmp/TestSaveLoadSubjects252273170/001/subjects.json
+open /tmp/TestSaveLoadSubjects252273170/001/subjects.json
+open /tmp
+stat .

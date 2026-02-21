@@ -1,0 +1,8 @@
+./descriptor.go
+./selection_feed.go
+./token.go
+./trust_feed.go
+./descriptor_test.go
+./selection_feed_test.go
+./token_test.go
+./trust_feed_test.go

@@ -1,0 +1,4 @@
+./service.go
+./lifecycle_test.go
+./persistence_test.go
+./service_test.go

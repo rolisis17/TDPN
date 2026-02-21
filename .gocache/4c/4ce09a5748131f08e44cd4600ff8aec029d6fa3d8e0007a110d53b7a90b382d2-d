@@ -1,0 +1,6 @@
+./app.go
+./client.go
+./directory_trust.go
+./directory_trust_test.go
+./federation_test.go
+./puzzle_test.go
