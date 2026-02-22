@@ -109,6 +109,12 @@ func New() *Service {
 			keyHistory = n
 		}
 	}
+	tokenTTL := 10 * time.Minute
+	if v := os.Getenv("ISSUER_TOKEN_TTL_SEC"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			tokenTTL = time.Duration(n) * time.Second
+		}
+	}
 	revocationFeedTTL := 30 * time.Second
 	if v := os.Getenv("ISSUER_REVOCATION_FEED_TTL_SEC"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -143,7 +149,7 @@ func New() *Service {
 	return &Service{
 		addr:                addr,
 		issuerID:            issuerID,
-		tokenTTL:            10 * time.Minute,
+		tokenTTL:            tokenTTL,
 		revocationFeedTTL:   revocationFeedTTL,
 		trustFeedTTL:        trustFeedTTL,
 		trustConfidence:     trustConfidence,
@@ -294,10 +300,34 @@ func (s *Service) handleIssueToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Subject = strings.TrimSpace(req.Subject)
+	tokenType := crypto.NormalizeTokenType(req.TokenType)
+	if tokenType == "" {
+		http.Error(w, "invalid token_type", http.StatusBadRequest)
+		return
+	}
+	popPubKey, err := crypto.NormalizeEd25519PublicKey(req.PopPubKey)
+	if err != nil {
+		http.Error(w, "invalid pop_pub_key", http.StatusBadRequest)
+		return
+	}
 
-	effectiveTier := s.effectiveTierFor(req.Subject, req.Tier)
 	keyEpoch, priv := s.signingKeySnapshot()
-	claims := baseClaimsForTier(s.issuerID, req.Subject, keyEpoch, effectiveTier, time.Now().Add(s.tokenTTL), req.ExitScope)
+	expires := time.Now().Add(s.tokenTTL)
+	var claims crypto.CapabilityClaims
+	switch tokenType {
+	case crypto.TokenTypeClientAccess:
+		effectiveTier := s.effectiveTierFor(req.Subject, req.Tier)
+		claims = baseClaimsForTier(s.issuerID, req.Subject, keyEpoch, "exit", tokenType, popPubKey, effectiveTier, expires, req.ExitScope)
+	case crypto.TokenTypeProviderRole:
+		if req.Subject == "" {
+			http.Error(w, "subject required for provider_role", http.StatusBadRequest)
+			return
+		}
+		claims = baseProviderClaims(s.issuerID, req.Subject, keyEpoch, clampTier(req.Tier), popPubKey, expires)
+	default:
+		http.Error(w, "unsupported token_type", http.StatusBadRequest)
+		return
+	}
 	tok, err := crypto.SignClaims(claims, priv)
 	if err != nil {
 		http.Error(w, "failed to sign token", http.StatusInternalServerError)
@@ -968,19 +998,21 @@ func (s *Service) handlePubKeys(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func baseClaimsForTier(issuerID string, subject string, keyEpoch int64, tier int, expires time.Time, exitScope []string) crypto.CapabilityClaims {
+func baseClaimsForTier(issuerID string, subject string, keyEpoch int64, audience string, tokenType string, cnfPubKey string, tier int, expires time.Time, exitScope []string) crypto.CapabilityClaims {
 	claims := crypto.CapabilityClaims{
 		Issuer:     issuerID,
-		Audience:   "exit",
+		Audience:   strings.TrimSpace(audience),
 		Subject:    strings.TrimSpace(subject),
 		KeyEpoch:   keyEpoch,
-		Tier:       tier,
+		TokenType:  tokenType,
+		CNFEd25519: strings.TrimSpace(cnfPubKey),
+		Tier:       clampTier(tier),
 		ExpiryUnix: expires.Unix(),
 		TokenID:    fmt.Sprintf("%d", time.Now().UnixNano()),
 		ExitScope:  exitScope,
 	}
 
-	switch tier {
+	switch claims.Tier {
 	case 1:
 		claims.BWKbps = 512
 		claims.ConnRate = 20
@@ -997,6 +1029,21 @@ func baseClaimsForTier(issuerID string, subject string, keyEpoch int64, tier int
 		claims.MaxConns = 500
 	}
 
+	return claims
+}
+
+func baseProviderClaims(issuerID string, subject string, keyEpoch int64, tier int, cnfPubKey string, expires time.Time) crypto.CapabilityClaims {
+	claims := crypto.CapabilityClaims{
+		Issuer:     issuerID,
+		Audience:   "provider",
+		Subject:    strings.TrimSpace(subject),
+		KeyEpoch:   keyEpoch,
+		TokenType:  crypto.TokenTypeProviderRole,
+		CNFEd25519: strings.TrimSpace(cnfPubKey),
+		Tier:       clampTier(tier),
+		ExpiryUnix: expires.Unix(),
+		TokenID:    fmt.Sprintf("%d", time.Now().UnixNano()),
+	}
 	return claims
 }
 
@@ -1466,6 +1513,16 @@ func cloneRevocations(in map[string]int64) map[string]int64 {
 		out[k] = v
 	}
 	return out
+}
+
+func clampTier(tier int) int {
+	if tier < 1 {
+		return 1
+	}
+	if tier > 3 {
+		return 3
+	}
+	return tier
 }
 
 func clampUnit(v float64) float64 {

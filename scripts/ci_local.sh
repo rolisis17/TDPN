@@ -34,11 +34,20 @@ echo "[ci] challenge integration"
 echo "[ci] revocation integration"
 ./scripts/integration_revocation.sh
 
+echo "[ci] token-proof replay integration"
+./scripts/integration_token_proof_replay.sh
+
+echo "[ci] provider api integration"
+./scripts/integration_provider_api.sh
+
 echo "[ci] federation integration"
 ./scripts/integration_federation.sh
 
 echo "[ci] operator-quorum integration"
 ./scripts/integration_operator_quorum.sh
+
+echo "[ci] distinct-operator integration"
+./scripts/integration_distinct_operators.sh
 
 echo "[ci] directory-sync integration"
 ./scripts/integration_directory_sync.sh
@@ -52,11 +61,20 @@ echo "[ci] trust-feed integration"
 echo "[ci] opaque-source integration"
 ./scripts/integration_opaque_source_downlink.sh
 
+echo "[ci] session-reuse integration"
+./scripts/integration_session_reuse.sh
+
+echo "[ci] session-handoff integration"
+./scripts/integration_session_handoff.sh
+
 echo "[ci] issuer-trust-sync integration"
 ./scripts/integration_issuer_trust_sync.sh
 
 echo "[ci] issuer-dispute integration"
 ./scripts/integration_issuer_dispute.sh
+
+echo "[ci] adjudication-window-cap integration"
+./scripts/integration_adjudication_window_caps.sh
 
 echo "[ci] multi-issuer integration"
 ./scripts/integration_multi_issuer.sh

@@ -40,8 +40,17 @@ trap cleanup EXIT
 
 sleep 4
 
+pop_json=$(go run ./cmd/tokenpop gen)
+pop_pub=$(echo "$pop_json" | sed -n 's/.*"public_key":"\([^"]*\)".*/\1/p')
+pop_priv=$(echo "$pop_json" | sed -n 's/.*"private_key":"\([^"]*\)".*/\1/p')
+if [[ -z "$pop_pub" || -z "$pop_priv" ]]; then
+  echo "failed to generate token PoP keypair"
+  echo "$pop_json"
+  exit 1
+fi
+
 token_json=$(curl -sS -X POST http://127.0.0.1:8082/v1/token -H 'Content-Type: application/json' \
-  --data '{"tier":1,"subject":"client-load-1","exit_scope":["exit-local-1"]}')
+  --data "{\"tier\":1,\"subject\":\"client-load-1\",\"token_type\":\"client_access\",\"pop_pub_key\":\"$pop_pub\",\"exit_scope\":[\"exit-local-1\"]}")
 token=$(echo "$token_json" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
 if [[ -z "$token" ]]; then
   echo "failed to issue token for load segment"
@@ -50,9 +59,25 @@ if [[ -z "$token" ]]; then
   exit 1
 fi
 
+client_pub="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+token_proof_nonce="$(date +%s%N)-load-chaos"
+token_proof=$(go run ./cmd/tokenpop sign \
+  --private-key "$pop_priv" \
+  --token "$token" \
+  --exit-id "exit-local-1" \
+  --proof-nonce "$token_proof_nonce" \
+  --client-inner-pub "$client_pub" \
+  --transport "policy-json" \
+  --requested-mtu 1280 \
+  --requested-region "local" | sed -n 's/.*"proof":"\([^"]*\)".*/\1/p')
+if [[ -z "$token_proof" ]]; then
+  echo "failed to sign token proof"
+  exit 1
+fi
+
 payload_file=/tmp/load_chaos_path_open.json
 cat >"$payload_file" <<JSON
-{"exit_id":"exit-local-1","token":"$token","transport":"policy-json","requested_mtu":1280,"requested_region":"local"}
+{"exit_id":"exit-local-1","token":"$token","token_proof":"$token_proof","token_proof_nonce":"$token_proof_nonce","client_inner_pub":"$client_pub","transport":"policy-json","requested_mtu":1280,"requested_region":"local"}
 JSON
 
 responses=/tmp/load_chaos_responses.log

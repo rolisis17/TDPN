@@ -605,6 +605,160 @@ func TestSyncPeerRelaysAggregatesPeerTrustAttestations(t *testing.T) {
 	}
 }
 
+func TestSyncPeerRelaysOperatorQuorumFailure(t *testing.T) {
+	urlA := "http://peer-a.local"
+	urlB := "http://peer-b.local"
+	pubA, privA, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygenA: %v", err)
+	}
+	pubB, privB, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygenB: %v", err)
+	}
+	now := time.Now()
+	relayA := signedDescriptor(t, proto.RelayDescriptor{
+		RelayID:    "exit-a",
+		Role:       "exit",
+		OperatorID: "op-a",
+		Endpoint:   "127.0.0.1:51821",
+		ValidUntil: now.Add(time.Minute),
+	}, privA)
+	relayB := signedDescriptor(t, proto.RelayDescriptor{
+		RelayID:    "exit-b",
+		Role:       "exit",
+		OperatorID: "op-b",
+		Endpoint:   "127.0.0.1:52821",
+		ValidUntil: now.Add(time.Minute),
+	}, privB)
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		urlA + "/v1/pubkeys": jsonResp(proto.DirectoryPubKeysResponse{
+			Operator: "operator-shared",
+			PubKeys:  []string{base64.RawURLEncoding.EncodeToString(pubA)},
+		}),
+		urlA + "/v1/relays": jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{relayA}}),
+		urlB + "/v1/pubkeys": jsonResp(proto.DirectoryPubKeysResponse{
+			Operator: "operator-shared",
+			PubKeys:  []string{base64.RawURLEncoding.EncodeToString(pubB)},
+		}),
+		urlB + "/v1/relays": jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{relayB}}),
+	}
+	s := &Service{
+		peerURLs:          []string{urlA, urlB},
+		peerMinVotes:      1,
+		peerMinOperators:  2,
+		peerRelays:        make(map[string]proto.RelayDescriptor),
+		peerRelayETags:    make(map[string]string),
+		peerRelayCache:    make(map[string][]proto.RelayDescriptor),
+		peerScoreETags:    make(map[string]string),
+		peerScoreCache:    make(map[string]map[string]proto.RelaySelectionScore),
+		peerTrustETags:    make(map[string]string),
+		peerTrustCache:    make(map[string]map[string]proto.RelayTrustAttestation),
+		issuerTrustETags:  make(map[string]string),
+		issuerTrustCache:  make(map[string]map[string]proto.RelayTrustAttestation),
+		peerHintPubKeys:   make(map[string]string),
+		peerHintOperators: make(map[string]string),
+		httpClient:        &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+	}
+	err = s.syncPeerRelays(context.Background())
+	if err == nil {
+		t.Fatalf("expected operator quorum failure")
+	}
+	if !strings.Contains(err.Error(), "peer operator quorum not met") {
+		t.Fatalf("expected peer operator quorum error, got %v", err)
+	}
+}
+
+func TestSyncPeerRelaysTrustVotesDedupByOperator(t *testing.T) {
+	urlA := "http://peer-a.local"
+	urlB := "http://peer-b.local"
+	pubA, privA, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygenA: %v", err)
+	}
+	pubB, privB, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygenB: %v", err)
+	}
+	now := time.Now()
+	relayA := signedDescriptor(t, proto.RelayDescriptor{
+		RelayID:    "exit-shared",
+		Role:       "exit",
+		OperatorID: "op-shared",
+		Endpoint:   "127.0.0.1:51821",
+		ValidUntil: now.Add(time.Minute),
+	}, privA)
+	relayB := signedDescriptor(t, proto.RelayDescriptor{
+		RelayID:    "exit-shared",
+		Role:       "exit",
+		OperatorID: "op-shared",
+		Endpoint:   "127.0.0.1:51821",
+		ValidUntil: now.Add(time.Minute),
+	}, privB)
+	trustA := proto.RelayTrustAttestationFeedResponse{
+		Operator:    "operator-shared",
+		GeneratedAt: now.Unix(),
+		ExpiresAt:   now.Add(30 * time.Second).Unix(),
+		Attestations: []proto.RelayTrustAttestation{
+			{RelayID: "exit-shared", Role: "exit", OperatorID: "op-shared", Reputation: 0.9, Confidence: 0.9},
+		},
+	}
+	sigA, err := crypto.SignRelayTrustAttestationFeed(trustA, privA)
+	if err != nil {
+		t.Fatalf("sign trustA: %v", err)
+	}
+	trustA.Signature = sigA
+	trustB := proto.RelayTrustAttestationFeedResponse{
+		Operator:    "operator-shared",
+		GeneratedAt: now.Unix(),
+		ExpiresAt:   now.Add(30 * time.Second).Unix(),
+		Attestations: []proto.RelayTrustAttestation{
+			{RelayID: "exit-shared", Role: "exit", OperatorID: "op-shared", Reputation: 0.7, Confidence: 0.8},
+		},
+	}
+	sigB, err := crypto.SignRelayTrustAttestationFeed(trustB, privB)
+	if err != nil {
+		t.Fatalf("sign trustB: %v", err)
+	}
+	trustB.Signature = sigB
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		urlA + "/v1/pubkeys": jsonResp(proto.DirectoryPubKeysResponse{
+			Operator: "operator-shared",
+			PubKeys:  []string{base64.RawURLEncoding.EncodeToString(pubA)},
+		}),
+		urlA + "/v1/relays":             jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{relayA}}),
+		urlA + "/v1/trust-attestations": jsonResp(trustA),
+		urlB + "/v1/pubkeys": jsonResp(proto.DirectoryPubKeysResponse{
+			Operator: "operator-shared",
+			PubKeys:  []string{base64.RawURLEncoding.EncodeToString(pubB)},
+		}),
+		urlB + "/v1/relays":             jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{relayB}}),
+		urlB + "/v1/trust-attestations": jsonResp(trustB),
+	}
+	s := &Service{
+		peerURLs:          []string{urlA, urlB},
+		peerMinVotes:      1,
+		peerMinOperators:  1,
+		peerTrustMinVotes: 2,
+		peerRelays:        make(map[string]proto.RelayDescriptor),
+		peerTrust:         make(map[string]proto.RelayTrustAttestation),
+		peerRelayETags:    make(map[string]string),
+		peerRelayCache:    make(map[string][]proto.RelayDescriptor),
+		peerTrustETags:    make(map[string]string),
+		peerTrustCache:    make(map[string]map[string]proto.RelayTrustAttestation),
+		peerHintPubKeys:   make(map[string]string),
+		peerHintOperators: make(map[string]string),
+		httpClient:        &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+	}
+	if err := s.syncPeerRelays(context.Background()); err != nil {
+		t.Fatalf("syncPeerRelays: %v", err)
+	}
+	gotMap := s.snapshotPeerTrust()
+	if _, ok := gotMap[relayKey("exit-shared", "exit")]; ok {
+		t.Fatalf("expected trust attestation dropped by operator-deduped vote threshold")
+	}
+}
+
 func TestSyncIssuerTrustAggregatesAttestations(t *testing.T) {
 	urlA := "http://issuer-a.local"
 	urlB := "http://issuer-b.local"
@@ -690,6 +844,130 @@ func TestSyncIssuerTrustAggregatesAttestations(t *testing.T) {
 	}
 	if got.BondScore < 0.49 || got.BondScore > 0.51 {
 		t.Fatalf("expected averaged bond score around 0.5, got %f", got.BondScore)
+	}
+}
+
+func TestSyncIssuerTrustOperatorQuorumFailure(t *testing.T) {
+	urlA := "http://issuer-a.local"
+	urlB := "http://issuer-b.local"
+	pubA, privA, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygenA: %v", err)
+	}
+	pubB, privB, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygenB: %v", err)
+	}
+	now := time.Now()
+	trustA := proto.RelayTrustAttestationFeedResponse{
+		Operator:    "issuer-shared",
+		GeneratedAt: now.Unix(),
+		ExpiresAt:   now.Add(30 * time.Second).Unix(),
+		Attestations: []proto.RelayTrustAttestation{
+			{RelayID: "exit-a", Role: "exit", OperatorID: "op-a", Reputation: 0.8, Confidence: 0.9},
+		},
+	}
+	sigA, err := crypto.SignRelayTrustAttestationFeed(trustA, privA)
+	if err != nil {
+		t.Fatalf("sign trustA: %v", err)
+	}
+	trustA.Signature = sigA
+	trustB := proto.RelayTrustAttestationFeedResponse{
+		Operator:    "issuer-shared",
+		GeneratedAt: now.Unix(),
+		ExpiresAt:   now.Add(30 * time.Second).Unix(),
+		Attestations: []proto.RelayTrustAttestation{
+			{RelayID: "exit-b", Role: "exit", OperatorID: "op-b", Reputation: 0.7, Confidence: 0.8},
+		},
+	}
+	sigB, err := crypto.SignRelayTrustAttestationFeed(trustB, privB)
+	if err != nil {
+		t.Fatalf("sign trustB: %v", err)
+	}
+	trustB.Signature = sigB
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		urlA + "/v1/pubkeys":      jsonResp(proto.IssuerPubKeysResponse{Issuer: "issuer-shared", PubKeys: []string{base64.RawURLEncoding.EncodeToString(pubA)}}),
+		urlA + "/v1/trust/relays": jsonResp(trustA),
+		urlB + "/v1/pubkeys":      jsonResp(proto.IssuerPubKeysResponse{Issuer: "issuer-shared", PubKeys: []string{base64.RawURLEncoding.EncodeToString(pubB)}}),
+		urlB + "/v1/trust/relays": jsonResp(trustB),
+	}
+	s := &Service{
+		issuerTrustURLs:     []string{urlA, urlB},
+		issuerMinOperators:  2,
+		issuerTrustMinVotes: 1,
+		issuerTrust:         make(map[string]proto.RelayTrustAttestation),
+		issuerTrustETags:    make(map[string]string),
+		issuerTrustCache:    make(map[string]map[string]proto.RelayTrustAttestation),
+		httpClient:          &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+	}
+	err = s.syncIssuerTrust(context.Background())
+	if err == nil {
+		t.Fatalf("expected issuer operator quorum failure")
+	}
+	if !strings.Contains(err.Error(), "issuer operator quorum not met") {
+		t.Fatalf("expected issuer operator quorum error, got %v", err)
+	}
+}
+
+func TestSyncIssuerTrustVotesDedupByOperator(t *testing.T) {
+	urlA := "http://issuer-a.local"
+	urlB := "http://issuer-b.local"
+	pubA, privA, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygenA: %v", err)
+	}
+	pubB, privB, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygenB: %v", err)
+	}
+	now := time.Now()
+	trustA := proto.RelayTrustAttestationFeedResponse{
+		Operator:    "issuer-shared",
+		GeneratedAt: now.Unix(),
+		ExpiresAt:   now.Add(30 * time.Second).Unix(),
+		Attestations: []proto.RelayTrustAttestation{
+			{RelayID: "exit-shared", Role: "exit", OperatorID: "op-shared", Reputation: 0.9, Confidence: 0.9},
+		},
+	}
+	sigA, err := crypto.SignRelayTrustAttestationFeed(trustA, privA)
+	if err != nil {
+		t.Fatalf("sign trustA: %v", err)
+	}
+	trustA.Signature = sigA
+	trustB := proto.RelayTrustAttestationFeedResponse{
+		Operator:    "issuer-shared",
+		GeneratedAt: now.Unix(),
+		ExpiresAt:   now.Add(30 * time.Second).Unix(),
+		Attestations: []proto.RelayTrustAttestation{
+			{RelayID: "exit-shared", Role: "exit", OperatorID: "op-shared", Reputation: 0.7, Confidence: 0.8},
+		},
+	}
+	sigB, err := crypto.SignRelayTrustAttestationFeed(trustB, privB)
+	if err != nil {
+		t.Fatalf("sign trustB: %v", err)
+	}
+	trustB.Signature = sigB
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		urlA + "/v1/pubkeys":      jsonResp(proto.IssuerPubKeysResponse{Issuer: "issuer-shared", PubKeys: []string{base64.RawURLEncoding.EncodeToString(pubA)}}),
+		urlA + "/v1/trust/relays": jsonResp(trustA),
+		urlB + "/v1/pubkeys":      jsonResp(proto.IssuerPubKeysResponse{Issuer: "issuer-shared", PubKeys: []string{base64.RawURLEncoding.EncodeToString(pubB)}}),
+		urlB + "/v1/trust/relays": jsonResp(trustB),
+	}
+	s := &Service{
+		issuerTrustURLs:     []string{urlA, urlB},
+		issuerMinOperators:  1,
+		issuerTrustMinVotes: 2,
+		issuerTrust:         make(map[string]proto.RelayTrustAttestation),
+		issuerTrustETags:    make(map[string]string),
+		issuerTrustCache:    make(map[string]map[string]proto.RelayTrustAttestation),
+		httpClient:          &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+	}
+	if err := s.syncIssuerTrust(context.Background()); err != nil {
+		t.Fatalf("syncIssuerTrust: %v", err)
+	}
+	gotMap := s.snapshotIssuerTrust()
+	if _, ok := gotMap[relayKey("exit-shared", "exit")]; ok {
+		t.Fatalf("expected issuer attestation dropped by operator-deduped vote threshold")
 	}
 }
 
@@ -785,6 +1063,102 @@ func TestSyncIssuerTrustAppliesDisputeVoteThreshold(t *testing.T) {
 	}
 }
 
+func TestSyncIssuerTrustAdjudicationMetadataThreshold(t *testing.T) {
+	urlA := "http://issuer-a.local"
+	urlB := "http://issuer-b.local"
+	pubA, privA, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygenA: %v", err)
+	}
+	pubB, privB, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygenB: %v", err)
+	}
+	now := time.Now()
+	disputeUntilA := now.Add(5 * time.Minute).Unix()
+	disputeUntilB := now.Add(7 * time.Minute).Unix()
+	trustA := proto.RelayTrustAttestationFeedResponse{
+		Operator:    "issuer-a",
+		GeneratedAt: now.Unix(),
+		ExpiresAt:   now.Add(30 * time.Second).Unix(),
+		Attestations: []proto.RelayTrustAttestation{
+			{
+				RelayID:      "exit-shared",
+				Role:         "exit",
+				OperatorID:   "op-shared",
+				Reputation:   0.80,
+				Confidence:   0.9,
+				TierCap:      2,
+				DisputeUntil: disputeUntilA,
+				DisputeCase:  "case-a",
+				DisputeRef:   "evidence://a",
+			},
+		},
+	}
+	sigA, err := crypto.SignRelayTrustAttestationFeed(trustA, privA)
+	if err != nil {
+		t.Fatalf("sign trustA: %v", err)
+	}
+	trustA.Signature = sigA
+	trustB := proto.RelayTrustAttestationFeedResponse{
+		Operator:    "issuer-b",
+		GeneratedAt: now.Unix(),
+		ExpiresAt:   now.Add(30 * time.Second).Unix(),
+		Attestations: []proto.RelayTrustAttestation{
+			{
+				RelayID:      "exit-shared",
+				Role:         "exit",
+				OperatorID:   "op-shared",
+				Reputation:   0.75,
+				Confidence:   0.8,
+				TierCap:      2,
+				DisputeUntil: disputeUntilB,
+				DisputeCase:  "case-b",
+				DisputeRef:   "evidence://b",
+			},
+		},
+	}
+	sigB, err := crypto.SignRelayTrustAttestationFeed(trustB, privB)
+	if err != nil {
+		t.Fatalf("sign trustB: %v", err)
+	}
+	trustB.Signature = sigB
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		urlA + "/v1/pubkeys":      jsonResp(proto.IssuerPubKeysResponse{Issuer: "issuer-a", PubKeys: []string{base64.RawURLEncoding.EncodeToString(pubA)}}),
+		urlA + "/v1/trust/relays": jsonResp(trustA),
+		urlB + "/v1/pubkeys":      jsonResp(proto.IssuerPubKeysResponse{Issuer: "issuer-b", PubKeys: []string{base64.RawURLEncoding.EncodeToString(pubB)}}),
+		urlB + "/v1/trust/relays": jsonResp(trustB),
+	}
+
+	s := &Service{
+		issuerTrustURLs:       []string{urlA, urlB},
+		issuerTrustMinVotes:   1,
+		issuerDisputeMinVotes: 1,
+		adjudicationMetaMin:   2,
+		issuerTrust:           make(map[string]proto.RelayTrustAttestation),
+		issuerTrustETags:      make(map[string]string),
+		issuerTrustCache:      make(map[string]map[string]proto.RelayTrustAttestation),
+		httpClient:            &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+	}
+	if err := s.syncIssuerTrust(context.Background()); err != nil {
+		t.Fatalf("syncIssuerTrust: %v", err)
+	}
+	gotMap := s.snapshotIssuerTrust()
+	got, ok := gotMap[relayKey("exit-shared", "exit")]
+	if !ok {
+		t.Fatalf("expected aggregated issuer trust attestation")
+	}
+	if got.TierCap != 2 {
+		t.Fatalf("expected dispute tier cap retained, got %d", got.TierCap)
+	}
+	if got.DisputeUntil == 0 {
+		t.Fatalf("expected dispute_until retained")
+	}
+	if got.DisputeCase != "" || got.DisputeRef != "" {
+		t.Fatalf("expected dispute metadata omitted below adjudication meta threshold, got case=%q ref=%q", got.DisputeCase, got.DisputeRef)
+	}
+}
+
 func TestSyncIssuerTrustAppliesAppealVoteThreshold(t *testing.T) {
 	urlA := "http://issuer-a.local"
 	urlB := "http://issuer-b.local"
@@ -869,6 +1243,156 @@ func TestSyncIssuerTrustAppliesAppealVoteThreshold(t *testing.T) {
 	}
 	if got.AppealCase != "" || got.AppealRef != "" {
 		t.Fatalf("expected appeal metadata omitted below vote threshold, got case=%q ref=%q", got.AppealCase, got.AppealRef)
+	}
+}
+
+func TestSyncIssuerTrustDisputeAndAppealConsensusResistsOutlier(t *testing.T) {
+	urlA := "http://issuer-a.local"
+	urlB := "http://issuer-b.local"
+	urlC := "http://issuer-c.local"
+	pubA, privA, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygenA: %v", err)
+	}
+	pubB, privB, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygenB: %v", err)
+	}
+	pubC, privC, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygenC: %v", err)
+	}
+	now := time.Now()
+	disputeNear := now.Add(5 * time.Minute).Unix()
+	disputeMid := now.Add(6 * time.Minute).Unix()
+	disputeFar := now.Add(45 * time.Minute).Unix()
+	appealNear := now.Add(7 * time.Minute).Unix()
+	appealMid := now.Add(8 * time.Minute).Unix()
+	appealFar := now.Add(60 * time.Minute).Unix()
+
+	trustA := proto.RelayTrustAttestationFeedResponse{
+		Operator:    "issuer-a",
+		GeneratedAt: now.Unix(),
+		ExpiresAt:   now.Add(30 * time.Second).Unix(),
+		Attestations: []proto.RelayTrustAttestation{
+			{
+				RelayID:      "exit-shared",
+				Role:         "exit",
+				OperatorID:   "op-shared",
+				Reputation:   0.70,
+				Confidence:   0.8,
+				TierCap:      1,
+				DisputeUntil: disputeFar,
+				DisputeCase:  "case-outlier",
+				DisputeRef:   "evidence://outlier",
+				AppealUntil:  appealFar,
+				AppealCase:   "appeal-outlier",
+				AppealRef:    "evidence://appeal-outlier",
+			},
+		},
+	}
+	sigA, err := crypto.SignRelayTrustAttestationFeed(trustA, privA)
+	if err != nil {
+		t.Fatalf("sign trustA: %v", err)
+	}
+	trustA.Signature = sigA
+
+	trustB := proto.RelayTrustAttestationFeedResponse{
+		Operator:    "issuer-b",
+		GeneratedAt: now.Unix(),
+		ExpiresAt:   now.Add(30 * time.Second).Unix(),
+		Attestations: []proto.RelayTrustAttestation{
+			{
+				RelayID:      "exit-shared",
+				Role:         "exit",
+				OperatorID:   "op-shared",
+				Reputation:   0.80,
+				Confidence:   0.9,
+				TierCap:      3,
+				DisputeUntil: disputeMid,
+				DisputeCase:  "case-major",
+				DisputeRef:   "evidence://major",
+				AppealUntil:  appealMid,
+				AppealCase:   "appeal-major",
+				AppealRef:    "evidence://appeal-major",
+			},
+		},
+	}
+	sigB, err := crypto.SignRelayTrustAttestationFeed(trustB, privB)
+	if err != nil {
+		t.Fatalf("sign trustB: %v", err)
+	}
+	trustB.Signature = sigB
+
+	trustC := proto.RelayTrustAttestationFeedResponse{
+		Operator:    "issuer-c",
+		GeneratedAt: now.Unix(),
+		ExpiresAt:   now.Add(30 * time.Second).Unix(),
+		Attestations: []proto.RelayTrustAttestation{
+			{
+				RelayID:      "exit-shared",
+				Role:         "exit",
+				OperatorID:   "op-shared",
+				Reputation:   0.78,
+				Confidence:   0.85,
+				TierCap:      3,
+				DisputeUntil: disputeNear,
+				DisputeCase:  "case-major",
+				DisputeRef:   "evidence://major",
+				AppealUntil:  appealNear,
+				AppealCase:   "appeal-major",
+				AppealRef:    "evidence://appeal-major",
+			},
+		},
+	}
+	sigC, err := crypto.SignRelayTrustAttestationFeed(trustC, privC)
+	if err != nil {
+		t.Fatalf("sign trustC: %v", err)
+	}
+	trustC.Signature = sigC
+
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		urlA + "/v1/pubkeys":      jsonResp(proto.IssuerPubKeysResponse{Issuer: "issuer-a", PubKeys: []string{base64.RawURLEncoding.EncodeToString(pubA)}}),
+		urlA + "/v1/trust/relays": jsonResp(trustA),
+		urlB + "/v1/pubkeys":      jsonResp(proto.IssuerPubKeysResponse{Issuer: "issuer-b", PubKeys: []string{base64.RawURLEncoding.EncodeToString(pubB)}}),
+		urlB + "/v1/trust/relays": jsonResp(trustB),
+		urlC + "/v1/pubkeys":      jsonResp(proto.IssuerPubKeysResponse{Issuer: "issuer-c", PubKeys: []string{base64.RawURLEncoding.EncodeToString(pubC)}}),
+		urlC + "/v1/trust/relays": jsonResp(trustC),
+	}
+
+	s := &Service{
+		issuerTrustURLs:       []string{urlA, urlB, urlC},
+		issuerMinOperators:    3,
+		issuerTrustMinVotes:   1,
+		issuerDisputeMinVotes: 2,
+		issuerAppealMinVotes:  2,
+		issuerTrust:           make(map[string]proto.RelayTrustAttestation),
+		issuerTrustETags:      make(map[string]string),
+		issuerTrustCache:      make(map[string]map[string]proto.RelayTrustAttestation),
+		httpClient:            &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+	}
+	if err := s.syncIssuerTrust(context.Background()); err != nil {
+		t.Fatalf("syncIssuerTrust: %v", err)
+	}
+	gotMap := s.snapshotIssuerTrust()
+	got, ok := gotMap[relayKey("exit-shared", "exit")]
+	if !ok {
+		t.Fatalf("expected aggregated issuer trust attestation")
+	}
+	if got.TierCap != 3 {
+		t.Fatalf("expected majority dispute tier cap=3, got %d", got.TierCap)
+	}
+	if got.DisputeUntil != disputeMid {
+		t.Fatalf("expected median dispute_until=%d, got %d", disputeMid, got.DisputeUntil)
+	}
+	if got.DisputeCase != "case-major" || got.DisputeRef != "evidence://major" {
+		t.Fatalf("expected majority dispute metadata, got case=%q ref=%q", got.DisputeCase, got.DisputeRef)
+	}
+	if got.AppealUntil != appealMid {
+		t.Fatalf("expected median appeal_until=%d, got %d", appealMid, got.AppealUntil)
+	}
+	if got.AppealCase != "appeal-major" || got.AppealRef != "evidence://appeal-major" {
+		t.Fatalf("expected majority appeal metadata, got case=%q ref=%q", got.AppealCase, got.AppealRef)
 	}
 }
 
@@ -977,6 +1501,335 @@ func TestSyncPeerRelaysAppliesAppealVoteThreshold(t *testing.T) {
 	}
 	if got.AppealCase != "" || got.AppealRef != "" {
 		t.Fatalf("expected appeal metadata omitted below peer appeal threshold, got case=%q ref=%q", got.AppealCase, got.AppealRef)
+	}
+}
+
+func TestSyncPeerRelaysDisputeAndAppealConsensusResistsOutlier(t *testing.T) {
+	urlA := "http://peer-a.local"
+	urlB := "http://peer-b.local"
+	urlC := "http://peer-c.local"
+	pubA, privA, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygenA: %v", err)
+	}
+	pubB, privB, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygenB: %v", err)
+	}
+	pubC, privC, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygenC: %v", err)
+	}
+	now := time.Now()
+	relayA := signedDescriptor(t, proto.RelayDescriptor{
+		RelayID:    "exit-shared",
+		Role:       "exit",
+		OperatorID: "op-shared",
+		Endpoint:   "127.0.0.1:51821",
+		ValidUntil: now.Add(time.Minute),
+	}, privA)
+	relayB := signedDescriptor(t, proto.RelayDescriptor{
+		RelayID:    "exit-shared",
+		Role:       "exit",
+		OperatorID: "op-shared",
+		Endpoint:   "127.0.0.1:51821",
+		ValidUntil: now.Add(time.Minute),
+	}, privB)
+	relayC := signedDescriptor(t, proto.RelayDescriptor{
+		RelayID:    "exit-shared",
+		Role:       "exit",
+		OperatorID: "op-shared",
+		Endpoint:   "127.0.0.1:51821",
+		ValidUntil: now.Add(time.Minute),
+	}, privC)
+
+	disputeNear := now.Add(5 * time.Minute).Unix()
+	disputeMid := now.Add(6 * time.Minute).Unix()
+	disputeFar := now.Add(45 * time.Minute).Unix()
+	appealNear := now.Add(7 * time.Minute).Unix()
+	appealMid := now.Add(8 * time.Minute).Unix()
+	appealFar := now.Add(60 * time.Minute).Unix()
+
+	trustA := proto.RelayTrustAttestationFeedResponse{
+		Operator:    "op-a",
+		GeneratedAt: now.Unix(),
+		ExpiresAt:   now.Add(30 * time.Second).Unix(),
+		Attestations: []proto.RelayTrustAttestation{
+			{
+				RelayID:      "exit-shared",
+				Role:         "exit",
+				OperatorID:   "op-shared",
+				Reputation:   0.70,
+				Confidence:   0.8,
+				TierCap:      1,
+				DisputeUntil: disputeFar,
+				DisputeCase:  "case-outlier",
+				DisputeRef:   "evidence://outlier",
+				AppealUntil:  appealFar,
+				AppealCase:   "appeal-outlier",
+				AppealRef:    "evidence://appeal-outlier",
+			},
+		},
+	}
+	sigA, err := crypto.SignRelayTrustAttestationFeed(trustA, privA)
+	if err != nil {
+		t.Fatalf("sign trustA: %v", err)
+	}
+	trustA.Signature = sigA
+
+	trustB := proto.RelayTrustAttestationFeedResponse{
+		Operator:    "op-b",
+		GeneratedAt: now.Unix(),
+		ExpiresAt:   now.Add(30 * time.Second).Unix(),
+		Attestations: []proto.RelayTrustAttestation{
+			{
+				RelayID:      "exit-shared",
+				Role:         "exit",
+				OperatorID:   "op-shared",
+				Reputation:   0.80,
+				Confidence:   0.9,
+				TierCap:      3,
+				DisputeUntil: disputeMid,
+				DisputeCase:  "case-major",
+				DisputeRef:   "evidence://major",
+				AppealUntil:  appealMid,
+				AppealCase:   "appeal-major",
+				AppealRef:    "evidence://appeal-major",
+			},
+		},
+	}
+	sigB, err := crypto.SignRelayTrustAttestationFeed(trustB, privB)
+	if err != nil {
+		t.Fatalf("sign trustB: %v", err)
+	}
+	trustB.Signature = sigB
+
+	trustC := proto.RelayTrustAttestationFeedResponse{
+		Operator:    "op-c",
+		GeneratedAt: now.Unix(),
+		ExpiresAt:   now.Add(30 * time.Second).Unix(),
+		Attestations: []proto.RelayTrustAttestation{
+			{
+				RelayID:      "exit-shared",
+				Role:         "exit",
+				OperatorID:   "op-shared",
+				Reputation:   0.78,
+				Confidence:   0.85,
+				TierCap:      3,
+				DisputeUntil: disputeNear,
+				DisputeCase:  "case-major",
+				DisputeRef:   "evidence://major",
+				AppealUntil:  appealNear,
+				AppealCase:   "appeal-major",
+				AppealRef:    "evidence://appeal-major",
+			},
+		},
+	}
+	sigC, err := crypto.SignRelayTrustAttestationFeed(trustC, privC)
+	if err != nil {
+		t.Fatalf("sign trustC: %v", err)
+	}
+	trustC.Signature = sigC
+
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		urlA + "/v1/pubkey":             jsonResp(map[string]string{"pub_key": base64.RawURLEncoding.EncodeToString(pubA)}),
+		urlA + "/v1/relays":             jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{relayA}}),
+		urlA + "/v1/trust-attestations": jsonResp(trustA),
+		urlB + "/v1/pubkey":             jsonResp(map[string]string{"pub_key": base64.RawURLEncoding.EncodeToString(pubB)}),
+		urlB + "/v1/relays":             jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{relayB}}),
+		urlB + "/v1/trust-attestations": jsonResp(trustB),
+		urlC + "/v1/pubkey":             jsonResp(map[string]string{"pub_key": base64.RawURLEncoding.EncodeToString(pubC)}),
+		urlC + "/v1/relays":             jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{relayC}}),
+		urlC + "/v1/trust-attestations": jsonResp(trustC),
+	}
+	s := &Service{
+		operatorID:          "op-local",
+		peerURLs:            []string{urlA, urlB, urlC},
+		peerMinVotes:        1,
+		peerTrustMinVotes:   1,
+		peerDisputeMinVotes: 2,
+		peerAppealMinVotes:  2,
+		peerRelays:          make(map[string]proto.RelayDescriptor),
+		peerTrust:           make(map[string]proto.RelayTrustAttestation),
+		peerRelayETags:      make(map[string]string),
+		peerRelayCache:      make(map[string][]proto.RelayDescriptor),
+		peerTrustETags:      make(map[string]string),
+		peerTrustCache:      make(map[string]map[string]proto.RelayTrustAttestation),
+		httpClient:          &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+	}
+	if err := s.syncPeerRelays(context.Background()); err != nil {
+		t.Fatalf("syncPeerRelays: %v", err)
+	}
+	gotMap := s.snapshotPeerTrust()
+	got, ok := gotMap[relayKey("exit-shared", "exit")]
+	if !ok {
+		t.Fatalf("expected aggregated trust attestation")
+	}
+	if got.TierCap != 3 {
+		t.Fatalf("expected majority dispute tier cap=3, got %d", got.TierCap)
+	}
+	if got.DisputeUntil != disputeMid {
+		t.Fatalf("expected median dispute_until=%d, got %d", disputeMid, got.DisputeUntil)
+	}
+	if got.DisputeCase != "case-major" || got.DisputeRef != "evidence://major" {
+		t.Fatalf("expected majority dispute metadata, got case=%q ref=%q", got.DisputeCase, got.DisputeRef)
+	}
+	if got.AppealUntil != appealMid {
+		t.Fatalf("expected median appeal_until=%d, got %d", appealMid, got.AppealUntil)
+	}
+	if got.AppealCase != "appeal-major" || got.AppealRef != "evidence://appeal-major" {
+		t.Fatalf("expected majority appeal metadata, got case=%q ref=%q", got.AppealCase, got.AppealRef)
+	}
+}
+
+func TestSyncIssuerTrustCapsAdjudicationWindows(t *testing.T) {
+	urlA := "http://issuer-a.local"
+	pubA, privA, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygenA: %v", err)
+	}
+	now := time.Now()
+	trustA := proto.RelayTrustAttestationFeedResponse{
+		Operator:    "issuer-a",
+		GeneratedAt: now.Unix(),
+		ExpiresAt:   now.Add(30 * time.Second).Unix(),
+		Attestations: []proto.RelayTrustAttestation{
+			{
+				RelayID:      "exit-shared",
+				Role:         "exit",
+				OperatorID:   "op-shared",
+				Reputation:   0.75,
+				Confidence:   0.9,
+				TierCap:      2,
+				DisputeUntil: now.Add(24 * time.Hour).Unix(),
+				DisputeCase:  "case-capped",
+				DisputeRef:   "evidence://capped",
+				AppealUntil:  now.Add(36 * time.Hour).Unix(),
+				AppealCase:   "appeal-capped",
+				AppealRef:    "evidence://appeal-capped",
+			},
+		},
+	}
+	sigA, err := crypto.SignRelayTrustAttestationFeed(trustA, privA)
+	if err != nil {
+		t.Fatalf("sign trustA: %v", err)
+	}
+	trustA.Signature = sigA
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		urlA + "/v1/pubkeys":      jsonResp(proto.IssuerPubKeysResponse{Issuer: "issuer-a", PubKeys: []string{base64.RawURLEncoding.EncodeToString(pubA)}}),
+		urlA + "/v1/trust/relays": jsonResp(trustA),
+	}
+	s := &Service{
+		issuerTrustURLs:       []string{urlA},
+		issuerTrustMinVotes:   1,
+		issuerDisputeMinVotes: 1,
+		issuerAppealMinVotes:  1,
+		disputeMaxTTL:         5 * time.Minute,
+		appealMaxTTL:          3 * time.Minute,
+		issuerTrust:           make(map[string]proto.RelayTrustAttestation),
+		issuerTrustETags:      make(map[string]string),
+		issuerTrustCache:      make(map[string]map[string]proto.RelayTrustAttestation),
+		httpClient:            &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+	}
+	if err := s.syncIssuerTrust(context.Background()); err != nil {
+		t.Fatalf("syncIssuerTrust: %v", err)
+	}
+	gotMap := s.snapshotIssuerTrust()
+	got, ok := gotMap[relayKey("exit-shared", "exit")]
+	if !ok {
+		t.Fatalf("expected aggregated issuer trust attestation")
+	}
+	disputeLower := time.Now().Add(4 * time.Minute).Unix()
+	disputeUpper := time.Now().Add(5*time.Minute + 2*time.Second).Unix()
+	if got.DisputeUntil < disputeLower || got.DisputeUntil > disputeUpper {
+		t.Fatalf("expected dispute_until capped near 5m horizon, got %d", got.DisputeUntil)
+	}
+	appealLower := time.Now().Add(2 * time.Minute).Unix()
+	appealUpper := time.Now().Add(3*time.Minute + 2*time.Second).Unix()
+	if got.AppealUntil < appealLower || got.AppealUntil > appealUpper {
+		t.Fatalf("expected appeal_until capped near 3m horizon, got %d", got.AppealUntil)
+	}
+}
+
+func TestSyncPeerRelaysCapsAdjudicationWindows(t *testing.T) {
+	urlA := "http://peer-a.local"
+	pubA, privA, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygenA: %v", err)
+	}
+	now := time.Now()
+	relayA := signedDescriptor(t, proto.RelayDescriptor{
+		RelayID:    "exit-shared",
+		Role:       "exit",
+		OperatorID: "op-shared",
+		Endpoint:   "127.0.0.1:51821",
+		ValidUntil: now.Add(time.Minute),
+	}, privA)
+	trustA := proto.RelayTrustAttestationFeedResponse{
+		Operator:    "op-a",
+		GeneratedAt: now.Unix(),
+		ExpiresAt:   now.Add(30 * time.Second).Unix(),
+		Attestations: []proto.RelayTrustAttestation{
+			{
+				RelayID:      "exit-shared",
+				Role:         "exit",
+				OperatorID:   "op-shared",
+				Reputation:   0.8,
+				Confidence:   0.9,
+				TierCap:      2,
+				DisputeUntil: now.Add(20 * time.Hour).Unix(),
+				DisputeCase:  "case-peer-capped",
+				DisputeRef:   "evidence://peer-capped",
+				AppealUntil:  now.Add(20 * time.Hour).Unix(),
+				AppealCase:   "appeal-peer-capped",
+				AppealRef:    "evidence://appeal-peer-capped",
+			},
+		},
+	}
+	sigA, err := crypto.SignRelayTrustAttestationFeed(trustA, privA)
+	if err != nil {
+		t.Fatalf("sign trustA: %v", err)
+	}
+	trustA.Signature = sigA
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		urlA + "/v1/pubkey":             jsonResp(map[string]string{"pub_key": base64.RawURLEncoding.EncodeToString(pubA)}),
+		urlA + "/v1/relays":             jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{relayA}}),
+		urlA + "/v1/trust-attestations": jsonResp(trustA),
+	}
+	s := &Service{
+		operatorID:          "op-local",
+		peerURLs:            []string{urlA},
+		peerMinVotes:        1,
+		peerTrustMinVotes:   1,
+		peerDisputeMinVotes: 1,
+		peerAppealMinVotes:  1,
+		disputeMaxTTL:       4 * time.Minute,
+		appealMaxTTL:        2 * time.Minute,
+		peerRelays:          make(map[string]proto.RelayDescriptor),
+		peerTrust:           make(map[string]proto.RelayTrustAttestation),
+		peerRelayETags:      make(map[string]string),
+		peerRelayCache:      make(map[string][]proto.RelayDescriptor),
+		peerTrustETags:      make(map[string]string),
+		peerTrustCache:      make(map[string]map[string]proto.RelayTrustAttestation),
+		httpClient:          &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+	}
+	if err := s.syncPeerRelays(context.Background()); err != nil {
+		t.Fatalf("syncPeerRelays: %v", err)
+	}
+	gotMap := s.snapshotPeerTrust()
+	got, ok := gotMap[relayKey("exit-shared", "exit")]
+	if !ok {
+		t.Fatalf("expected aggregated peer trust attestation")
+	}
+	disputeLower := time.Now().Add(3 * time.Minute).Unix()
+	disputeUpper := time.Now().Add(4*time.Minute + 2*time.Second).Unix()
+	if got.DisputeUntil < disputeLower || got.DisputeUntil > disputeUpper {
+		t.Fatalf("expected dispute_until capped near 4m horizon, got %d", got.DisputeUntil)
+	}
+	appealLower := time.Now().Add(1 * time.Minute).Unix()
+	appealUpper := time.Now().Add(2*time.Minute + 2*time.Second).Unix()
+	if got.AppealUntil < appealLower || got.AppealUntil > appealUpper {
+		t.Fatalf("expected appeal_until capped near 2m horizon, got %d", got.AppealUntil)
 	}
 }
 
@@ -1156,6 +2009,78 @@ func TestSyncPeerRelaysDiscoversNewPeerFromPeerFeed(t *testing.T) {
 	}
 }
 
+func TestIngestDiscoveredPeersRequiresOperatorVotes(t *testing.T) {
+	now := time.Now().UTC()
+	discoveredURL := "http://peer-new.local"
+	s := &Service{
+		localURL:              "http://local-dir",
+		peerURLs:              []string{"http://seed-a.local", "http://seed-b.local"},
+		peerDiscoveryEnabled:  true,
+		peerDiscoveryTTL:      10 * time.Minute,
+		peerDiscoveryMax:      16,
+		peerDiscoveryMinVotes: 2,
+		discoveredPeers:       make(map[string]time.Time),
+		discoveredPeerVoters:  make(map[string]map[string]time.Time),
+		peerHintPubKeys:       make(map[string]string),
+		peerHintOperators:     make(map[string]string),
+	}
+	hints := []proto.DirectoryPeerHint{{URL: discoveredURL, Operator: "op-new"}}
+	if imported := s.ingestDiscoveredPeers("http://seed-a.local", "op-seed-a", hints, now); imported != 0 {
+		t.Fatalf("expected no discovery before quorum, got imported=%d", imported)
+	}
+	if containsString(s.snapshotSyncPeers(now), discoveredURL) {
+		t.Fatalf("did not expect discovered peer before quorum")
+	}
+	if imported := s.ingestDiscoveredPeers("http://seed-b.local", "op-seed-a", hints, now.Add(time.Second)); imported != 0 {
+		t.Fatalf("expected duplicate source operator to be ignored, got imported=%d", imported)
+	}
+	if imported := s.ingestDiscoveredPeers("http://seed-b.local", "op-seed-b", hints, now.Add(2*time.Second)); imported != 1 {
+		t.Fatalf("expected discovery once quorum reached, got imported=%d", imported)
+	}
+	if !containsString(s.snapshotSyncPeers(now.Add(3*time.Second)), discoveredURL) {
+		t.Fatalf("expected discovered peer after quorum")
+	}
+	if got := s.peerHintOperator(discoveredURL); got != "op-new" {
+		t.Fatalf("expected discovered peer hint operator to persist, got %q", got)
+	}
+}
+
+func TestSnapshotSyncPeersPrunesDiscoveredPeerWhenVoteQuorumDrops(t *testing.T) {
+	now := time.Now().UTC()
+	discoveredURL := "http://peer-unstable.local"
+	s := &Service{
+		localURL:              "http://local-dir",
+		peerDiscoveryEnabled:  true,
+		peerDiscoveryTTL:      10 * time.Minute,
+		peerDiscoveryMinVotes: 2,
+		discoveredPeers: map[string]time.Time{
+			discoveredURL: now.Add(9 * time.Minute),
+		},
+		discoveredPeerVoters: map[string]map[string]time.Time{
+			discoveredURL: {
+				"op-seed-a": now.Add(9 * time.Minute),
+				"op-seed-b": now,
+			},
+		},
+		peerHintPubKeys: map[string]string{
+			discoveredURL: "key",
+		},
+		peerHintOperators: map[string]string{
+			discoveredURL: "op-discovered",
+		},
+	}
+	peers := s.snapshotSyncPeers(now.Add(11 * time.Minute))
+	if containsString(peers, discoveredURL) {
+		t.Fatalf("expected discovered peer pruned after quorum dropped below minimum")
+	}
+	if _, ok := s.discoveredPeers[discoveredURL]; ok {
+		t.Fatalf("expected discovered peer removed from cache")
+	}
+	if _, ok := s.discoveredPeerVoters[discoveredURL]; ok {
+		t.Fatalf("expected discovered voter set removed from cache")
+	}
+}
+
 func TestHandleGossipRelaysImportsVerifiedDescriptors(t *testing.T) {
 	peerURL := "http://peer-a.local"
 	pub, priv, err := crypto.GenerateEd25519Keypair()
@@ -1225,6 +2150,101 @@ func TestSelectionFromTrustAttestationAppealMitigatesDisputePenalty(t *testing.T
 	}
 	if withAppeal.AbusePenalty >= base.AbusePenalty {
 		t.Fatalf("expected appeal to reduce dispute penalty: base=%f appeal=%f", base.AbusePenalty, withAppeal.AbusePenalty)
+	}
+}
+
+func TestBuildTrustAttestationsAppliesAdjudicationMetadataThreshold(t *testing.T) {
+	nowUnix := time.Now().Unix()
+	s := &Service{
+		adjudicationMetaMin: 2,
+		peerTrust: map[string]proto.RelayTrustAttestation{
+			relayKey("exit-a", "exit"): {
+				RelayID:      "exit-a",
+				Role:         "exit",
+				OperatorID:   "op-a",
+				Reputation:   0.8,
+				Confidence:   0.9,
+				TierCap:      2,
+				DisputeUntil: nowUnix + 300,
+				DisputeCase:  "case-peer",
+				DisputeRef:   "evidence://peer",
+				AppealUntil:  nowUnix + 360,
+				AppealCase:   "appeal-peer",
+				AppealRef:    "evidence://appeal-peer",
+			},
+		},
+		issuerTrust: map[string]proto.RelayTrustAttestation{
+			relayKey("exit-a", "exit"): {
+				RelayID:      "exit-a",
+				Role:         "exit",
+				OperatorID:   "op-a",
+				Reputation:   0.7,
+				Confidence:   0.8,
+				TierCap:      2,
+				DisputeUntil: nowUnix + 320,
+				DisputeCase:  "case-issuer",
+				DisputeRef:   "evidence://issuer",
+				AppealUntil:  nowUnix + 380,
+				AppealCase:   "appeal-issuer",
+				AppealRef:    "evidence://appeal-issuer",
+			},
+		},
+	}
+	out := s.buildTrustAttestations(nil)
+	if len(out) != 1 {
+		t.Fatalf("expected one aggregated trust attestation, got %d", len(out))
+	}
+	got := out[0]
+	if got.TierCap != 2 {
+		t.Fatalf("expected tier cap retained, got %d", got.TierCap)
+	}
+	if got.DisputeUntil == 0 || got.AppealUntil == 0 {
+		t.Fatalf("expected dispute/appeal windows retained")
+	}
+	if got.DisputeCase != "" || got.DisputeRef != "" {
+		t.Fatalf("expected dispute metadata omitted below adjudication meta threshold, got case=%q ref=%q", got.DisputeCase, got.DisputeRef)
+	}
+	if got.AppealCase != "" || got.AppealRef != "" {
+		t.Fatalf("expected appeal metadata omitted below adjudication meta threshold, got case=%q ref=%q", got.AppealCase, got.AppealRef)
+	}
+}
+
+func TestBuildTrustAttestationsCapsAdjudicationWindows(t *testing.T) {
+	nowUnix := time.Now().Unix()
+	s := &Service{
+		disputeMaxTTL: 2 * time.Minute,
+		appealMaxTTL:  1 * time.Minute,
+		peerTrust: map[string]proto.RelayTrustAttestation{
+			relayKey("exit-a", "exit"): {
+				RelayID:      "exit-a",
+				Role:         "exit",
+				OperatorID:   "op-a",
+				Reputation:   0.8,
+				Confidence:   0.9,
+				TierCap:      2,
+				DisputeUntil: nowUnix + int64((12*time.Hour)/time.Second),
+				DisputeCase:  "case-peer",
+				DisputeRef:   "evidence://peer",
+				AppealUntil:  nowUnix + int64((12*time.Hour)/time.Second),
+				AppealCase:   "appeal-peer",
+				AppealRef:    "evidence://appeal-peer",
+			},
+		},
+	}
+	out := s.buildTrustAttestations(nil)
+	if len(out) != 1 {
+		t.Fatalf("expected one aggregated trust attestation, got %d", len(out))
+	}
+	got := out[0]
+	disputeLower := time.Now().Add(90 * time.Second).Unix()
+	disputeUpper := time.Now().Add(2*time.Minute + 2*time.Second).Unix()
+	if got.DisputeUntil < disputeLower || got.DisputeUntil > disputeUpper {
+		t.Fatalf("expected dispute_until capped near 2m horizon, got %d", got.DisputeUntil)
+	}
+	appealLower := time.Now().Add(30 * time.Second).Unix()
+	appealUpper := time.Now().Add(1*time.Minute + 2*time.Second).Unix()
+	if got.AppealUntil < appealLower || got.AppealUntil > appealUpper {
+		t.Fatalf("expected appeal_until capped near 1m horizon, got %d", got.AppealUntil)
 	}
 }
 

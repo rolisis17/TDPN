@@ -31,6 +31,7 @@ type sessionState struct {
 	expiresUnix    int64
 	transport      string
 	clientDataAddr string
+	clientLastSeen int64
 }
 
 type exitRoute struct {
@@ -61,20 +62,21 @@ type Service struct {
 	httpSrv               *http.Server
 	udpConn               *net.UDPConn
 
-	mu               sync.RWMutex
-	sessions         map[string]sessionState
-	exitRouteCache   map[string]exitRoute
-	openRPS          int
-	openBanThreshold int
-	openBanDuration  time.Duration
-	openMaxInflight  int
-	openInflightSem  chan struct{}
-	puzzleDifficulty int
-	puzzleAdaptive   bool
-	puzzleMax        int
-	puzzleSecret     string
-	buckets          map[string]rateBucket
-	abuse            map[string]abuseState
+	mu                sync.RWMutex
+	sessions          map[string]sessionState
+	exitRouteCache    map[string]exitRoute
+	openRPS           int
+	openBanThreshold  int
+	openBanDuration   time.Duration
+	openMaxInflight   int
+	openInflightSem   chan struct{}
+	clientRebindAfter time.Duration
+	puzzleDifficulty  int
+	puzzleAdaptive    bool
+	puzzleMax         int
+	puzzleSecret      string
+	buckets           map[string]rateBucket
+	abuse             map[string]abuseState
 }
 
 type rateBucket struct {
@@ -153,6 +155,10 @@ func New() *Service {
 	if v, err := strconv.Atoi(os.Getenv("ENTRY_MAX_CONCURRENT_OPENS")); err == nil && v > 0 {
 		openMaxInflight = v
 	}
+	clientRebindAfter := time.Duration(0)
+	if v, err := strconv.Atoi(os.Getenv("ENTRY_CLIENT_REBIND_SEC")); err == nil && v > 0 {
+		clientRebindAfter = time.Duration(v) * time.Second
+	}
 	var openInflightSem chan struct{}
 	if openMaxInflight > 0 {
 		openInflightSem = make(chan struct{}, openMaxInflight)
@@ -188,6 +194,7 @@ func New() *Service {
 		openBanDuration:       openBanDuration,
 		openMaxInflight:       openMaxInflight,
 		openInflightSem:       openInflightSem,
+		clientRebindAfter:     clientRebindAfter,
 		puzzleDifficulty:      puzzleDifficulty,
 		puzzleAdaptive:        puzzleAdaptive,
 		puzzleMax:             puzzleMax,
@@ -198,9 +205,9 @@ func New() *Service {
 }
 
 func (s *Service) Run(ctx context.Context) error {
-	log.Printf("entry route discovery: directories=%d min_sources=%d min_operators=%d min_votes=%d trust_strict=%t rps=%d ban_threshold=%d ban_sec=%d max_inflight=%d",
+	log.Printf("entry route discovery: directories=%d min_sources=%d min_operators=%d min_votes=%d trust_strict=%t rps=%d ban_threshold=%d ban_sec=%d max_inflight=%d client_rebind_sec=%d",
 		len(s.directoryURLs), maxInt(1, s.directoryMinSources), maxInt(1, s.directoryMinOperators), maxInt(1, s.directoryMinVotes), s.directoryTrustStrict,
-		s.openRPS, s.openBanThreshold, int(s.openBanDuration/time.Second), s.openMaxInflight)
+		s.openRPS, s.openBanThreshold, int(s.openBanDuration/time.Second), s.openMaxInflight, int(s.clientRebindAfter/time.Second))
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/path/open", s.handlePathOpen)
 	mux.HandleFunc("/v1/path/close", s.handlePathClose)
@@ -271,9 +278,18 @@ func (s *Service) startUDP(ctx context.Context, errCh chan<- error) error {
 				s.mu.Unlock()
 				continue
 			}
-			state, targetAddr := routePacketTarget(state, srcAddr.String())
+			prevClient := state.clientDataAddr
+			state, targetAddr, routed := routePacketTarget(state, srcAddr.String(), now, int64(s.clientRebindAfter/time.Second))
 			s.sessions[sessionID] = state
 			s.mu.Unlock()
+			if !routed {
+				log.Printf("entry dropped packet session=%s reason=source-mismatch src=%s client=%s exit=%s",
+					sessionID, srcAddr.String(), prevClient, state.exitDataAddr)
+				continue
+			}
+			if prevClient != "" && state.clientDataAddr != prevClient {
+				log.Printf("entry client source rebind session=%s old=%s new=%s", sessionID, prevClient, state.clientDataAddr)
+			}
 			if targetAddr == "" {
 				continue
 			}
@@ -303,6 +319,11 @@ func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
 	var req proto.PathOpenRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(req.TokenProof) == "" {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: "token-proof-required"})
 		return
 	}
 	route, err := s.resolveExitRoute(r.Context(), req.ExitID)
@@ -502,12 +523,31 @@ func remoteIP(remoteAddr string) string {
 	return host
 }
 
-func routePacketTarget(state sessionState, sourceAddr string) (sessionState, string) {
+func routePacketTarget(state sessionState, sourceAddr string, nowUnix int64, rebindAfterSec int64) (sessionState, string, bool) {
 	if sameUDPAddr(sourceAddr, state.exitDataAddr) {
-		return state, state.clientDataAddr
+		if strings.TrimSpace(state.clientDataAddr) == "" {
+			return state, "", false
+		}
+		return state, state.clientDataAddr, true
 	}
-	state.clientDataAddr = sourceAddr
-	return state, state.exitDataAddr
+	if strings.TrimSpace(state.clientDataAddr) == "" {
+		state.clientDataAddr = sourceAddr
+		state.clientLastSeen = nowUnix
+		return state, state.exitDataAddr, true
+	}
+	if sameUDPAddr(sourceAddr, state.clientDataAddr) {
+		state.clientLastSeen = nowUnix
+		return state, state.exitDataAddr, true
+	}
+	if rebindAfterSec > 0 {
+		lastSeen := state.clientLastSeen
+		if lastSeen == 0 || nowUnix-lastSeen >= rebindAfterSec {
+			state.clientDataAddr = sourceAddr
+			state.clientLastSeen = nowUnix
+			return state, state.exitDataAddr, true
+		}
+	}
+	return state, "", false
 }
 
 func sameUDPAddr(a, b string) bool {

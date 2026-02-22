@@ -33,6 +33,8 @@ type RelayDescriptor struct {
 type PathOpenRequest struct {
 	ExitID          string `json:"exit_id"`
 	Token           string `json:"token"`
+	TokenProof      string `json:"token_proof,omitempty"`
+	TokenProofNonce string `json:"token_proof_nonce,omitempty"`
 	ClientInnerPub  string `json:"client_inner_pub"`
 	Transport       string `json:"transport,omitempty"`
 	RequestedMTU    int    `json:"requested_mtu"`
@@ -66,6 +68,8 @@ type RelayListResponse struct {
 type IssueTokenRequest struct {
 	Tier      int      `json:"tier"`
 	Subject   string   `json:"subject,omitempty"`
+	TokenType string   `json:"token_type,omitempty"`
+	PopPubKey string   `json:"pop_pub_key,omitempty"`
 	ExitScope []string `json:"exit_scope,omitempty"`
 }
 
@@ -280,4 +284,30 @@ type DirectoryPeerHint struct {
 	URL      string `json:"url"`
 	Operator string `json:"operator,omitempty"`
 	PubKey   string `json:"pub_key,omitempty"`
+}
+
+type ProviderRelayUpsertRequest struct {
+	Token         string   `json:"token,omitempty"`
+	RelayID       string   `json:"relay_id"`
+	Role          string   `json:"role"`
+	PubKey        string   `json:"pub_key"`
+	Endpoint      string   `json:"endpoint"`
+	ControlURL    string   `json:"control_url"`
+	CountryCode   string   `json:"country_code,omitempty"`
+	GeoConfidence float64  `json:"geo_confidence,omitempty"`
+	Region        string   `json:"region,omitempty"`
+	Capabilities  []string `json:"capabilities,omitempty"`
+	Reputation    float64  `json:"reputation_score,omitempty"`
+	Uptime        float64  `json:"uptime_score,omitempty"`
+	Capacity      float64  `json:"capacity_score,omitempty"`
+	AbusePenalty  float64  `json:"abuse_penalty,omitempty"`
+	BondScore     float64  `json:"bond_score,omitempty"`
+	StakeScore    float64  `json:"stake_score,omitempty"`
+	ValidForSec   int64    `json:"valid_for_sec,omitempty"`
+}
+
+type ProviderRelayUpsertResponse struct {
+	Accepted bool            `json:"accepted"`
+	Reason   string          `json:"reason,omitempty"`
+	Relay    RelayDescriptor `json:"relay,omitempty"`
 }

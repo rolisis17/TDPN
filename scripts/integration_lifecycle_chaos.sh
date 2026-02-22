@@ -50,8 +50,18 @@ if [[ "$ready" -ne 1 ]]; then
   exit 1
 fi
 
+client_pub="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+pop_json=$(go run ./cmd/tokenpop gen)
+pop_pub=$(echo "$pop_json" | sed -n 's/.*"public_key":"\([^"]*\)".*/\1/p')
+pop_priv=$(echo "$pop_json" | sed -n 's/.*"private_key":"\([^"]*\)".*/\1/p')
+if [[ -z "$pop_pub" || -z "$pop_priv" ]]; then
+  echo "failed to generate seed token PoP keypair"
+  echo "$pop_json"
+  exit 1
+fi
+
 token_json=$(curl -sS -X POST "http://127.0.0.1:${ISSUER_PORT}/v1/token" -H 'Content-Type: application/json' \
-  --data '{"tier":1,"subject":"client-chaos-seed","exit_scope":["exit-local-1"]}')
+  --data "{\"tier\":1,\"subject\":\"client-chaos-seed\",\"token_type\":\"client_access\",\"pop_pub_key\":\"$pop_pub\",\"exit_scope\":[\"exit-local-1\"]}")
 token=$(echo "$token_json" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
 jti=$(echo "$token_json" | sed -n 's/.*"jti":"\([^"]*\)".*/\1/p')
 
@@ -62,9 +72,23 @@ if [[ -z "$token" || -z "$jti" ]]; then
   exit 1
 fi
 
+token_proof=$(go run ./cmd/tokenpop sign \
+  --private-key "$pop_priv" \
+  --token "$token" \
+  --exit-id "exit-local-1" \
+  --proof-nonce "seed-${jti}" \
+  --client-inner-pub "$client_pub" \
+  --transport "policy-json" \
+  --requested-mtu 1280 \
+  --requested-region "local" | sed -n 's/.*"proof":"\([^"]*\)".*/\1/p')
+if [[ -z "$token_proof" ]]; then
+  echo "failed to sign seed token proof"
+  exit 1
+fi
+
 payload_file=/tmp/lifecycle_chaos_payload.json
 cat >"$payload_file" <<JSON
-{"exit_id":"exit-local-1","token":"$token","transport":"policy-json","requested_mtu":1280,"requested_region":"local"}
+{"exit_id":"exit-local-1","token":"$token","token_proof":"$token_proof","token_proof_nonce":"seed-${jti}","client_inner_pub":"$client_pub","transport":"policy-json","requested_mtu":1280,"requested_region":"local"}
 JSON
 
 race_log=/tmp/lifecycle_chaos_race.log
@@ -109,12 +133,33 @@ fresh_log=/tmp/lifecycle_chaos_fresh.log
 : >"$fresh_log"
 (
   for _ in $(seq 1 18); do
+    popj=$(go run ./cmd/tokenpop gen || true)
+    pop_pub_iter=$(echo "$popj" | sed -n 's/.*"public_key":"\([^"]*\)".*/\1/p')
+    pop_priv_iter=$(echo "$popj" | sed -n 's/.*"private_key":"\([^"]*\)".*/\1/p')
+    if [[ -z "$pop_pub_iter" || -z "$pop_priv_iter" ]]; then
+      sleep 0.15
+      continue
+    fi
     tj=$(curl -sS -X POST "http://127.0.0.1:${ISSUER_PORT}/v1/token" -H 'Content-Type: application/json' \
-      --data '{"tier":1,"subject":"client-chaos-fresh","exit_scope":["exit-local-1"]}' || true)
+      --data "{\"tier\":1,\"subject\":\"client-chaos-fresh\",\"token_type\":\"client_access\",\"pop_pub_key\":\"$pop_pub_iter\",\"exit_scope\":[\"exit-local-1\"]}" || true)
     tk=$(echo "$tj" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
     if [[ -n "$tk" ]]; then
+      fresh_nonce="fresh-$RANDOM-$(date +%s%N)"
+      tp=$(go run ./cmd/tokenpop sign \
+        --private-key "$pop_priv_iter" \
+        --token "$tk" \
+        --exit-id "exit-local-1" \
+        --proof-nonce "$fresh_nonce" \
+        --client-inner-pub "$client_pub" \
+        --transport "policy-json" \
+        --requested-mtu 1280 \
+        --requested-region "local" | sed -n 's/.*"proof":"\([^"]*\)".*/\1/p')
+      if [[ -z "$tp" ]]; then
+        sleep 0.15
+        continue
+      fi
       pl=$(cat <<JSON
-{"exit_id":"exit-local-1","token":"$tk","transport":"policy-json","requested_mtu":1280,"requested_region":"local"}
+{"exit_id":"exit-local-1","token":"$tk","token_proof":"$tp","token_proof_nonce":"$fresh_nonce","client_inner_pub":"$client_pub","transport":"policy-json","requested_mtu":1280,"requested_region":"local"}
 JSON
 )
       curl -sS -X POST "http://127.0.0.1:${ENTRY_PORT}/v1/path/open" -H 'Content-Type: application/json' --data "$pl" >>"$fresh_log" || true

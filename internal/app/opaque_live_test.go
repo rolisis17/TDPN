@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -36,7 +37,8 @@ func TestDrainOpaqueDownlinkLiveModeDropsNonWireGuard(t *testing.T) {
 	defer sinkConn.Close()
 
 	const sessionID = "session-live"
-	wgPayload := []byte{1, 0, 0, 0, 9, 8, 7}
+	wgPayload := make([]byte, 32)
+	wgPayload[0] = 4
 	nonWGPayload := []byte("not-wireguard")
 
 	go func() {
@@ -127,4 +129,111 @@ func TestDrainOpaqueDownlinkNonLiveAllowsOpaquePayload(t *testing.T) {
 	if !bytes.Equal(buf[:n], payload) {
 		t.Fatalf("unexpected payload on sink got=%q want=%q", string(buf[:n]), string(payload))
 	}
+}
+
+func TestSendOpaqueTrafficSessionModeRequiresInitialUplink(t *testing.T) {
+	entry, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+	if err != nil {
+		t.Fatalf("listen entry udp: %v", err)
+	}
+	defer entry.Close()
+
+	c := &Client{
+		innerSource:       "udp",
+		innerUDPAddr:      freeUDPAddr(t),
+		wgBackend:         "command",
+		liveWGMode:        false,
+		opaqueSessionSec:  1,
+		opaqueInitialUpMS: 200,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	err = c.sendOpaqueTraffic(ctx, entry.LocalAddr().String(), "session-no-uplink")
+	if err == nil {
+		t.Fatalf("expected missing uplink error")
+	}
+	if !strings.Contains(err.Error(), "received no UDP packets") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestSendOpaqueTrafficSessionModeForwardsDelayedDownlink(t *testing.T) {
+	entry, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+	if err != nil {
+		t.Fatalf("listen entry udp: %v", err)
+	}
+	defer entry.Close()
+
+	sink, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+	if err != nil {
+		t.Fatalf("listen sink udp: %v", err)
+	}
+	defer sink.Close()
+
+	const sessionID = "session-persistent"
+	downPayload := []byte("delayed-downlink")
+	go func() {
+		buf := make([]byte, 64*1024)
+		n, src, readErr := entry.ReadFromUDP(buf)
+		if readErr != nil || n <= 0 {
+			return
+		}
+		time.Sleep(120 * time.Millisecond)
+		frame := relay.BuildDatagram(sessionID, relay.BuildOpaquePayload(1, downPayload))
+		_, _ = entry.WriteToUDP(frame, src)
+	}()
+
+	innerAddr := freeUDPAddr(t)
+	go func() {
+		time.Sleep(80 * time.Millisecond)
+		innerTarget, err := net.ResolveUDPAddr("udp", innerAddr)
+		if err != nil {
+			return
+		}
+		conn, err := net.DialUDP("udp", nil, innerTarget)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_, _ = conn.Write([]byte{1, 2, 3, 4, 5})
+	}()
+
+	c := &Client{
+		innerSource:       "udp",
+		innerUDPAddr:      innerAddr,
+		opaqueSinkAddr:    sink.LocalAddr().String(),
+		wgBackend:         "command",
+		liveWGMode:        false,
+		opaqueSessionSec:  1,
+		opaqueInitialUpMS: 500,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	if err := c.sendOpaqueTraffic(ctx, entry.LocalAddr().String(), sessionID); err != nil {
+		t.Fatalf("sendOpaqueTraffic session mode failed: %v", err)
+	}
+
+	buf := make([]byte, 256)
+	if err := sink.SetReadDeadline(time.Now().Add(500 * time.Millisecond)); err != nil {
+		t.Fatalf("set sink deadline: %v", err)
+	}
+	n, _, err := sink.ReadFromUDP(buf)
+	if err != nil {
+		t.Fatalf("read sink packet: %v", err)
+	}
+	if !bytes.Equal(buf[:n], downPayload) {
+		t.Fatalf("unexpected sink payload got=%q want=%q", string(buf[:n]), string(downPayload))
+	}
+}
+
+func freeUDPAddr(t *testing.T) string {
+	t.Helper()
+	l, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+	if err != nil {
+		t.Fatalf("reserve udp addr: %v", err)
+	}
+	defer l.Close()
+	return l.LocalAddr().String()
 }

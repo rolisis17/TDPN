@@ -41,12 +41,19 @@ What this does:
 3. Runs integration checks:
    - challenge
    - revocation
+   - token-proof replay
+   - provider api
+   - distinct operators
    - federation
    - directory sync
    - selection feed
    - trust feed
+   - opaque source
+   - session reuse
+   - session handoff
    - issuer trust sync
    - issuer dispute
+   - multi-issuer
    - load/chaos
 
 Expected result:
@@ -96,6 +103,18 @@ Revocation:
 ./scripts/integration_revocation.sh
 ```
 
+Token proof replay guard:
+
+```bash
+./scripts/integration_token_proof_replay.sh
+```
+
+Provider API (`provider_role` enforcement):
+
+```bash
+./scripts/integration_provider_api.sh
+```
+
 Federated directory (multi-source quorum/votes):
 
 ```bash
@@ -106,6 +125,12 @@ Directory operator quorum:
 
 ```bash
 ./scripts/integration_operator_quorum.sh
+```
+
+Distinct entry/exit operators (anti-collusion pair filter):
+
+```bash
+./scripts/integration_distinct_operators.sh
 ```
 
 Optional stricter anti-capture mode:
@@ -120,6 +145,7 @@ Directory peer sync (operator-to-operator pull sync):
 Optional stricter sync conflict policy:
 - set `DIRECTORY_PEER_MIN_VOTES=2` (or higher) on syncing directories
 - this forces peer descriptor agreement before a relay is imported during conflicts
+- set `DIRECTORY_PEER_MIN_OPERATORS=2` (or higher) so one peer operator cannot satisfy sync quorum via multiple endpoints
 
 Selection feed (signed scoring metadata):
 
@@ -139,10 +165,19 @@ Issuer trust ingestion by directory:
 ./scripts/integration_issuer_trust_sync.sh
 ```
 
+Optional stricter issuer anti-capture policy:
+- set `DIRECTORY_ISSUER_MIN_OPERATORS=2` (or higher) so one issuer operator cannot satisfy trust sync quorum via multiple URLs
+
 Issuer dispute lifecycle:
 
 ```bash
 ./scripts/integration_issuer_dispute.sh
+```
+
+Adjudication horizon cap enforcement:
+
+```bash
+./scripts/integration_adjudication_window_caps.sh
 ```
 
 Directory push-gossip ingest:
@@ -157,10 +192,41 @@ Directory peer discovery (seeded decentralized membership):
 ./scripts/integration_peer_discovery.sh
 ```
 
+Optional stricter discovery anti-capture policy:
+- set `DIRECTORY_PEER_DISCOVERY_MIN_VOTES=2` (or higher) so one peer operator cannot unilaterally admit newly discovered peers
+
+Peer discovery quorum behavior (single-source blocked, multi-source admitted):
+
+```bash
+./scripts/integration_peer_discovery_quorum.sh
+```
+
+Optional stricter adjudication metadata policy:
+- set `DIRECTORY_ADJUDICATION_META_MIN_VOTES=2` (or higher) so `case_id` / `evidence_ref` fields require broader agreement than basic dispute/appeal activation
+- set `DIRECTORY_DISPUTE_MAX_TTL_SEC` / `DIRECTORY_APPEAL_MAX_TTL_SEC` to bounded windows (for example `86400`) so imported dispute/appeal windows cannot be pushed arbitrarily far into the future by colluding operators
+
 Exit opaque source downlink return path:
 
 ```bash
 ./scripts/integration_opaque_source_downlink.sh
+```
+
+Persistent opaque-session bridge (delayed downlink timing):
+
+```bash
+./scripts/integration_persistent_opaque_session.sh
+```
+
+Active session reuse across bootstrap cycles:
+
+```bash
+./scripts/integration_session_reuse.sh
+```
+
+Active session refresh handoff (open new path, then close old path):
+
+```bash
+./scripts/integration_session_handoff.sh
 ```
 
 Multi-issuer exit trust:
@@ -185,6 +251,12 @@ HTTP cache/anti-entropy behavior:
 
 ```bash
 ./scripts/integration_http_cache.sh
+```
+
+Directory automatic key rotation policy:
+
+```bash
+./scripts/integration_directory_auto_key_rotation.sh
 ```
 
 Key epoch rotation enforcement:
@@ -213,15 +285,25 @@ All deep checks in one command:
 - `integration_revocation.sh`:
   previously valid token is denied after issuer revokes it and exit refreshes feed.
 
+- `integration_token_proof_replay.sh`:
+  with replay guard enabled, exit denies repeated `token_proof_nonce` reuse for the same token and accepts a fresh nonce.
+
+- `integration_provider_api.sh`:
+  directory accepts relay upsert from `provider_role` token and rejects `client_access` token for the same API.
+
 - `integration_federation.sh`:
   client can use multiple directories with source/operator quorum and vote thresholds.
 
 - `integration_operator_quorum.sh`:
   client bootstrap fails when quorum is met only by multiple endpoints of one operator, and succeeds when distinct operators are available.
 
+- `integration_distinct_operators.sh`:
+  with `CLIENT_REQUIRE_DISTINCT_OPERATORS=1`, client rejects same-operator entry/exit pairs and succeeds once distinct entry/exit operators are published.
+
 - `integration_directory_sync.sh`:
   one directory imports relays from a peer directory and client can use synced relay data.
   With `DIRECTORY_PEER_MIN_VOTES`, conflicting peer variants can be dropped unless enough peers agree.
+  With `DIRECTORY_PEER_MIN_OPERATORS`, sync requires distinct peer operators and ignores duplicate votes from one operator.
 
 - `integration_directory_gossip.sh`:
   a directory accepts signed peer push data on `/v1/gossip/relays` and publishes imported relays.
@@ -232,6 +314,15 @@ All deep checks in one command:
 - `integration_opaque_source_downlink.sh`:
   exit accepts injected downlink bytes on `EXIT_OPAQUE_SOURCE_ADDR`, forwards them into the active opaque session, and client receives them on sink path (live mode additionally requires session-framed source packets).
 
+- `integration_persistent_opaque_session.sh`:
+  with `CLIENT_OPAQUE_SESSION_SEC>0`, client keeps opaque uplink/downlink bridging active long enough to receive delayed downlink probes that would miss a short drain-only window.
+
+- `integration_session_reuse.sh`:
+  with `CLIENT_SESSION_REUSE=1`, client keeps the path active and reuses the same session on subsequent bootstrap cycles instead of immediate close/reopen churn.
+
+- `integration_session_handoff.sh`:
+  with short token TTL plus refresh lead, client opens a replacement session first, then closes the old session, preserving continuity across refresh.
+
 - `integration_selection_feed.sh`:
   client can require signed selection feed and still bootstrap successfully.
 
@@ -240,9 +331,13 @@ All deep checks in one command:
 
 - `integration_issuer_trust_sync.sh`:
   directory ingests issuer-signed trust attestations and merges those signals into published trust/selection outputs.
+  With `DIRECTORY_ISSUER_MIN_OPERATORS`, sync requires distinct issuer operators and dedupes duplicate votes from one issuer operator.
 
 - `integration_issuer_dispute.sh`:
   issuer applies a temporary dispute cap, opens/resolves appeal state, and validates trust-feed dispute/appeal signaling including case/evidence metadata.
+
+- `integration_adjudication_window_caps.sh`:
+  directory ingests far-future dispute/appeal windows from issuer trust feed and caps them to configured local horizons before publication.
 
 - `integration_lifecycle_chaos.sh`:
   races revocation enforcement and dispute apply/clear loops while path-open traffic continues, then checks for expected revoked denials and no crash/panic.
@@ -255,6 +350,9 @@ All deep checks in one command:
 
 - `integration_http_cache.sh`:
   directory `ETag` + `If-None-Match` returns `304` when relay/feed payloads are unchanged (incremental sync path).
+
+- `integration_directory_auto_key_rotation.sh`:
+  directory auto-rotates signing keys and enforces bounded previous-key history retention.
 
 - `integration_key_epoch_rotation.sh`:
   old token is denied after issuer rotates signing key epoch; freshly issued token remains accepted.
@@ -290,7 +388,9 @@ If client does not bootstrap:
 2. Confirm directory response:
    - `curl -s http://127.0.0.1:8081/v1/relays`
 3. Confirm issuer response:
-   - `curl -s -X POST http://127.0.0.1:8082/v1/token -H 'Content-Type: application/json' --data '{"tier":1,"subject":"client-debug-1","exit_scope":["exit-local-1"]}'`
+   - `pop=$(go run ./cmd/tokenpop gen)`
+   - `pop_pub=$(echo "$pop" | sed -n 's/.*"public_key":"\([^"]*\)".*/\1/p')`
+   - `curl -s -X POST http://127.0.0.1:8082/v1/token -H 'Content-Type: application/json' --data "{\"tier\":1,\"subject\":\"client-debug-1\",\"token_type\":\"client_access\",\"pop_pub_key\":\"$pop_pub\",\"exit_scope\":[\"exit-local-1\"]}"`
 4. Confirm entry health:
    - `curl -s http://127.0.0.1:8083/v1/health`
 5. Re-run one integration script to isolate issue.

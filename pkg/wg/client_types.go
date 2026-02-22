@@ -11,6 +11,7 @@ type ClientSessionConfig struct {
 	ClientInnerIP    string
 	Endpoint         string
 	AllowedIPs       string
+	InstallRoute     bool
 	MTU              int
 	KeepaliveSec     int
 }

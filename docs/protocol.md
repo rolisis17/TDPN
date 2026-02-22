@@ -54,8 +54,10 @@ Directory federation note:
 ## Capability Token (signed)
 Claims (JSON payload):
 - `iss`: issuer id
-- `aud`: `exit`
+- `aud`: `exit` (client access) or `provider` (provider role)
 - `sub`: optional client subject identity
+- `token_type`: `client_access` or `provider_role`
+- `cnf_ed25519`: base64url Ed25519 pubkey used to validate `token_proof`
 - `exp`: unix expiry (5-15 min)
 - `jti`: unique token id
 - `tier`: `1 | 2 | 3`
@@ -82,6 +84,10 @@ Serialization for MVP:
   - Signed peer-membership feed for decentralized directory discovery.
 - `POST /v1/token`
   - Returns capability token for requester and effective tier.
+  - Request includes `token_type` and `pop_pub_key`; response token is bound to that key via `cnf_ed25519`.
+- `POST /v1/provider/relay/upsert`
+  - Provider-role token gated relay advertisement endpoint for directory ingestion.
+  - Requires `aud=provider` + `token_type=provider_role`.
 - `GET /v1/pubkeys`
   - Returns current and previous issuer pubkeys to support key rollover windows.
 - `GET /v1/trust/relays`
@@ -194,29 +200,41 @@ Directory peer-membership feed shape:
 - Client verifies selection feed signatures against directory pubkey.
 - Client verifies trust-attestation feed signatures against directory pubkey.
 - Strict mode supports trusted key pinning (`DIRECTORY_TRUST_STRICT=1`) with optional TOFU bootstrap.
+- Directory signing keys can auto-rotate (`DIRECTORY_KEY_ROTATE_SEC`) with bounded rollover history (`DIRECTORY_KEY_HISTORY`) published at `/v1/pubkeys` to preserve trust continuity.
 - Client can query multiple directories (`DIRECTORY_URLS`) and require source quorum (`DIRECTORY_MIN_SOURCES`).
 - Client can also require distinct operator quorum (`DIRECTORY_MIN_OPERATORS`, override `CLIENT_DIRECTORY_MIN_OPERATORS`) so one operator cannot satisfy quorum via multiple endpoints.
 - Relay descriptors can require multi-source agreement (`DIRECTORY_MIN_RELAY_VOTES`) before selection; votes are deduped by operator identity when available.
 - Selection-feed score overrides can require multi-source agreement (`CLIENT_SELECTION_FEED_MIN_VOTES`) before use.
 - Trust-feed attestation overrides can require multi-source agreement (`CLIENT_TRUST_FEED_MIN_VOTES`) before use.
 - Entry also verifies descriptor signatures/pubkeys during `exit_id` route resolution and can enforce source/operator quorum plus vote thresholds (`ENTRY_DIRECTORY_MIN_SOURCES`, `ENTRY_DIRECTORY_MIN_OPERATORS`, `ENTRY_DIRECTORY_MIN_RELAY_VOTES`).
+- Entry binds each active session to the first observed client UDP source by default (source-lock) and drops mismatched sources; optional delayed rebind can be enabled with `ENTRY_CLIENT_REBIND_SEC`.
 - Directory peer sync can run with trusted peer key pinning (`DIRECTORY_PEER_TRUST_STRICT`) and optional TOFU bootstrap (`DIRECTORY_PEER_TRUST_TOFU`).
+- Directory peer sync can require distinct source operators (`DIRECTORY_PEER_MIN_OPERATORS`, fallback `DIRECTORY_MIN_OPERATORS`) before accepting a sync round.
 - Directory peer sync conflict handling can require matching peer descriptor votes (`DIRECTORY_PEER_MIN_VOTES`) per relay key.
-- Directory peer sync can require matching peer score votes (`DIRECTORY_PEER_SCORE_MIN_VOTES`), trust-attestation votes (`DIRECTORY_PEER_TRUST_MIN_VOTES`), dispute votes (`DIRECTORY_PEER_DISPUTE_MIN_VOTES`), appeal votes (`DIRECTORY_PEER_APPEAL_MIN_VOTES`), and enforce hop limits (`DIRECTORY_PEER_MAX_HOPS`) to resist sync loops.
+- Directory peer sync can require matching peer score votes (`DIRECTORY_PEER_SCORE_MIN_VOTES`), trust-attestation votes (`DIRECTORY_PEER_TRUST_MIN_VOTES`), dispute votes (`DIRECTORY_PEER_DISPUTE_MIN_VOTES`), appeal votes (`DIRECTORY_PEER_APPEAL_MIN_VOTES`), and enforce hop limits (`DIRECTORY_PEER_MAX_HOPS`) to resist sync loops; votes are deduped per source operator.
 - Directory peer gossip fanout can be enabled (`DIRECTORY_GOSSIP_SEC`, `DIRECTORY_GOSSIP_FANOUT`) for lower-latency relay propagation.
-- Directory can also ingest issuer-signed trust attestations (`DIRECTORY_ISSUER_TRUST_URLS`) and require issuer trust/dispute/appeal vote thresholds (`DIRECTORY_ISSUER_TRUST_MIN_VOTES`, `DIRECTORY_ISSUER_DISPUTE_MIN_VOTES`, `DIRECTORY_ISSUER_APPEAL_MIN_VOTES`) before using those signals.
-- Seeded dynamic peer discovery can be enabled with `DIRECTORY_PEER_DISCOVERY` and bounded with `DIRECTORY_PEER_DISCOVERY_MAX` / `DIRECTORY_PEER_DISCOVERY_TTL_SEC`.
-- When signed peer hints include `pub_key`, directory verifies `/v1/pubkey` response matches the hinted key before importing data.
+- Directory can also ingest issuer-signed trust attestations (`DIRECTORY_ISSUER_TRUST_URLS`) and require issuer operator quorum (`DIRECTORY_ISSUER_MIN_OPERATORS`, fallback `DIRECTORY_MIN_OPERATORS`) plus issuer trust/dispute/appeal vote thresholds (`DIRECTORY_ISSUER_TRUST_MIN_VOTES`, `DIRECTORY_ISSUER_DISPUTE_MIN_VOTES`, `DIRECTORY_ISSUER_APPEAL_MIN_VOTES`) before using those signals (votes are deduped per issuer operator).
+- For dispute/appeal metadata aggregation, tier-cap uses vote consensus and expiry windows use median time selection to reduce outlier influence.
+- Adjudication metadata fields (`case_id`, `evidence_ref`) can require independent vote quorum before publication via `DIRECTORY_ADJUDICATION_META_MIN_VOTES`.
+- Dispute/appeal windows are also bounded by configurable max horizons (`DIRECTORY_DISPUTE_MAX_TTL_SEC`, `DIRECTORY_APPEAL_MAX_TTL_SEC`) before publication and scoring, limiting long-window capture attempts.
+- Seeded dynamic peer discovery can be enabled with `DIRECTORY_PEER_DISCOVERY`, bounded with `DIRECTORY_PEER_DISCOVERY_MAX` / `DIRECTORY_PEER_DISCOVERY_TTL_SEC`, and gated by distinct source-operator sightings via `DIRECTORY_PEER_DISCOVERY_MIN_VOTES`.
+- When signed peer hints include `pub_key`, directory verifies `/v1/pubkeys` (or legacy `/v1/pubkey`) response matches a hinted key before importing data.
 
 ## Session Establishment
 1. Client queries one or more directories for entry/exit descriptors.
    - Client selection can prefer healthy entry/exit control endpoints and same-region pairs when available.
+   - Optional pair hardening can require distinct entry/exit operators (`CLIENT_REQUIRE_DISTINCT_OPERATORS=1`) to reduce single-operator collusion risk.
+   - Optional pair continuity can prefer the most recently successful pair for a bounded window (`CLIENT_STICKY_PAIR_SEC`) to reduce churn.
+   - Optional session continuity can reuse an active path across bootstrap cycles (`CLIENT_SESSION_REUSE=1`) and refresh near expiry (`CLIENT_SESSION_REFRESH_LEAD_SEC`) via open-new/close-old handoff.
    - Client may retry `path/open` across alternate ranked entry/exit pairs when a candidate is unavailable.
   - Client can optionally require preferred exit locality (country first, region fallback), minimum `geo_confidence`, and configurable fallback order (`country`, `region`, `region-prefix`, `global`).
    - Client can optionally cap selected exits per operator to reduce concentration.
    - If signed exit score metadata is present (descriptor and/or selection feed), client applies weighted random exit ordering with an exploration floor.
    - If signed trust-attestation metadata is present, client blends bond/stake/reputation signals into ranking using attestation confidence.
 2. Client requests short-lived token from issuer.
+   - Request includes token class (`token_type`) and a PoP public key (`pop_pub_key`).
+   - For path-open tokens use `token_type=client_access`.
+   - Issuer token lifetime is configurable (`ISSUER_TOKEN_TTL_SEC`).
 3. Client opens control session to selected entry `control_url`.
 4. Through outer tunnel, client sends `PATH_OPEN` to entry:
 
@@ -225,6 +243,8 @@ Directory peer-membership feed shape:
   "msg": "PATH_OPEN",
   "exit_id": "exit-us-01",
   "token": "<signed-token>",
+  "token_proof": "base64url-ed25519-signature-over-path-open-fields",
+  "token_proof_nonce": "client-generated-unique-nonce",
   "client_inner_pub": "base64-key",
   "transport": "wireguard-udp",
   "requested_mtu": 1280,
@@ -235,7 +255,9 @@ Directory peer-membership feed shape:
 ```
 
 5. Entry resolves `exit_id` from directory descriptors (`control_url` + data `endpoint`) and opens forwarding state keyed by flow/session id.
-6. Exit validates token and replies via entry:
+6. Exit validates token claims, token class, and `token_proof` against `cnf_ed25519`.
+   - Optional replay guard mode requires unique `token_proof_nonce` per token lifetime.
+   - Then exit replies via entry:
 
 ```json
 {
@@ -290,16 +312,20 @@ Directory peer-membership feed shape:
 
 Implementation note:
 - Exit supports `WG_BACKEND=noop` (default) and `WG_BACKEND=command`.
-- `command` mode applies peer config using `wg`/`ip` commands on `PATH_OPEN` and removes peer on `PATH_CLOSE`.
+- `command` mode applies peer config using `wg`/`ip` commands on `PATH_OPEN`, explicitly brings the WG interface up, and removes peer on `PATH_CLOSE`.
 - In `command` mode, startup preflight validates `wg`/`ip` binaries, configured interface availability, and private key path readability.
 - Client supports `CLIENT_WG_BACKEND=noop` (default) and `CLIENT_WG_BACKEND=command`.
-- In client command mode, `PATH_OPEN_ACK` hints are used to configure/remove client peer state.
+- In client command mode, `PATH_OPEN_ACK` hints are used to configure/remove client peer state and bring the client WG interface up.
 - Client command mode requires `DATA_PLANE_MODE=opaque` and `CLIENT_INNER_SOURCE=udp`; synthetic payload fallback is disabled.
+- Client command mode supports configurable `allowed-ips` via `CLIENT_WG_ALLOWED_IPS` and optional route installation via `CLIENT_WG_INSTALL_ROUTE=1`.
 - Client can source opaque payloads from local UDP (`CLIENT_INNER_SOURCE=udp`) to mimic real interface output.
 - Client can emit received downlink opaque payload bytes to local UDP (`CLIENT_OPAQUE_SINK_ADDR`) to mimic interface input (required in live WG mode).
+- Client can keep a path open in persistent opaque bridging mode (`CLIENT_OPAQUE_SESSION_SEC>0`) to continuously relay uplink/downlink packets for a bounded session duration.
+- In command/live-style operation (no synthetic fallback), client requires first uplink UDP packet within `CLIENT_OPAQUE_INITIAL_UPLINK_TIMEOUT_MS` or bootstrap fails fast.
 - Exit can forward accepted opaque payload bytes to local UDP sink (`EXIT_OPAQUE_SINK_ADDR`) to mimic interface/input handoff (required in live WG mode).
 - Exit can ingest raw downlink opaque payload bytes from UDP source (`EXIT_OPAQUE_SOURCE_ADDR`) and inject them into active sessions toward entry/client.
-- In live WG mode (`CLIENT_LIVE_WG_MODE=1`, `EXIT_LIVE_WG_MODE=1`), both client and exit drop opaque payloads that do not look like WireGuard transport packets, and exit downlink source packets must be session-framed datagrams.
+- Exit source-lock binds each active session to one uplink peer source by default and drops mismatched sources; optional delayed rebind can be enabled with `EXIT_PEER_REBIND_SEC`.
+- In live WG mode (`CLIENT_LIVE_WG_MODE=1`, `EXIT_LIVE_WG_MODE=1`), both client and exit drop opaque payloads that fail WireGuard framing plus type-aware minimum-length checks, and exit downlink source packets must be session-framed datagrams.
 - Optional `wgio` role in `node` bridges WG-side UDP and relay-side UDP sockets in one process.
 - Optional `wgiotap` role in `node` can observe WG-side downlink UDP and report packet stats.
 - Optional `wgioinject` role in `node` can generate WG-like/non-WG UDP test packets for uplink simulation.

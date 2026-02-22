@@ -1,0 +1,16 @@
+{
+  "exit-local-1": {
+    "subject": "exit-local-1",
+    "kind": "relay-exit",
+    "tier": 2,
+    "reputation": 0.95,
+    "bond": 500,
+    "tier_cap": 2,
+    "dispute_until": 1771859803,
+    "appeal_until": 1771845403,
+    "dispute_case_id": "case-caps-dispute",
+    "dispute_evidence_ref": "evidence://caps-dispute",
+    "appeal_case_id": "case-caps-appeal",
+    "appeal_evidence_ref": "evidence://caps-appeal"
+  }
+}

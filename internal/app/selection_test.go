@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"privacynode/pkg/proto"
 )
@@ -279,6 +280,106 @@ func TestRankRelayPairsAppliesExitOperatorCap(t *testing.T) {
 		if _, ok2 := seenExits["exit-a2"]; !ok2 {
 			t.Fatalf("expected one operator a exit included")
 		}
+	}
+}
+
+func TestRankRelayPairsDistinctOperators(t *testing.T) {
+	c := &Client{
+		entryURL:           "http://fallback-entry.local",
+		exitControlURL:     "http://fallback-exit.local",
+		healthCheckEnabled: false,
+		requireDistinctOps: true,
+	}
+	relays := []proto.RelayDescriptor{
+		{RelayID: "entry-a", Role: "entry", ControlURL: "entry-a.local", OperatorID: "op-a"},
+		{RelayID: "entry-b", Role: "entry", ControlURL: "entry-b.local", OperatorID: "op-b"},
+		{RelayID: "exit-a", Role: "exit", ControlURL: "exit-a.local", OperatorID: "op-a"},
+		{RelayID: "exit-c", Role: "exit", ControlURL: "exit-c.local", OperatorID: "op-c"},
+	}
+	pairs := c.rankRelayPairs(context.Background(), relays)
+	if len(pairs) == 0 {
+		t.Fatalf("expected non-empty pairs with distinct operators available")
+	}
+	for _, pair := range pairs {
+		if pair.entry.OperatorID == pair.exit.OperatorID {
+			t.Fatalf("expected distinct operators, got pair=%s->%s op=%s",
+				pair.entry.RelayID, pair.exit.RelayID, pair.entry.OperatorID)
+		}
+	}
+	for _, pair := range pairs {
+		if pair.entry.RelayID == "entry-a" && pair.exit.RelayID == "exit-a" {
+			t.Fatalf("same-operator pair should be filtered")
+		}
+	}
+}
+
+func TestRankRelayPairsDistinctOperatorsRequiresMetadata(t *testing.T) {
+	c := &Client{
+		entryURL:           "http://fallback-entry.local",
+		exitControlURL:     "http://fallback-exit.local",
+		healthCheckEnabled: false,
+		requireDistinctOps: true,
+	}
+	relays := []proto.RelayDescriptor{
+		{RelayID: "entry-a", Role: "entry", ControlURL: "entry-a.local"},
+		{RelayID: "exit-b", Role: "exit", ControlURL: "exit-b.local", OperatorID: "op-b"},
+	}
+	pairs := c.rankRelayPairs(context.Background(), relays)
+	if len(pairs) != 0 {
+		t.Fatalf("expected no pairs when operator metadata missing under distinct-operator mode, got %d", len(pairs))
+	}
+}
+
+func TestRankRelayPairsAppliesStickyPairPreference(t *testing.T) {
+	c := &Client{
+		entryURL:           "http://fallback-entry.local",
+		exitControlURL:     "http://fallback-exit.local",
+		healthCheckEnabled: false,
+		stickyPairSec:      60,
+		lastSelectedEntry:  "entry-b",
+		lastSelectedExit:   "exit-b",
+		lastSelectedAt:     time.Now(),
+	}
+	relays := []proto.RelayDescriptor{
+		{RelayID: "entry-a", Role: "entry", ControlURL: "entry-a.local"},
+		{RelayID: "entry-b", Role: "entry", ControlURL: "entry-b.local"},
+		{RelayID: "exit-a", Role: "exit", ControlURL: "exit-a.local"},
+		{RelayID: "exit-b", Role: "exit", ControlURL: "exit-b.local"},
+	}
+	pairs := c.rankRelayPairs(context.Background(), relays)
+	if len(pairs) < 2 {
+		t.Fatalf("expected multiple pairs, got %d", len(pairs))
+	}
+	if pairs[0].entry.RelayID != "entry-b" || pairs[0].exit.RelayID != "exit-b" {
+		t.Fatalf("expected sticky pair first, got entry=%s exit=%s", pairs[0].entry.RelayID, pairs[0].exit.RelayID)
+	}
+}
+
+func TestRankRelayPairsStickyPairExpires(t *testing.T) {
+	c := &Client{
+		entryURL:           "http://fallback-entry.local",
+		exitControlURL:     "http://fallback-exit.local",
+		healthCheckEnabled: false,
+		stickyPairSec:      1,
+		lastSelectedEntry:  "entry-b",
+		lastSelectedExit:   "exit-b",
+		lastSelectedAt:     time.Now().Add(-3 * time.Second),
+	}
+	relays := []proto.RelayDescriptor{
+		{RelayID: "entry-a", Role: "entry", ControlURL: "entry-a.local"},
+		{RelayID: "entry-b", Role: "entry", ControlURL: "entry-b.local"},
+		{RelayID: "exit-a", Role: "exit", ControlURL: "exit-a.local"},
+		{RelayID: "exit-b", Role: "exit", ControlURL: "exit-b.local"},
+	}
+	pairs := c.rankRelayPairs(context.Background(), relays)
+	if len(pairs) == 0 {
+		t.Fatalf("expected non-empty pair list")
+	}
+	if pairs[0].entry.RelayID != "entry-a" || pairs[0].exit.RelayID != "exit-a" {
+		t.Fatalf("expected default first pair when sticky expired, got entry=%s exit=%s", pairs[0].entry.RelayID, pairs[0].exit.RelayID)
+	}
+	if c.lastSelectedEntry != "" || c.lastSelectedExit != "" {
+		t.Fatalf("expected expired sticky pair state cleared")
 	}
 }
 

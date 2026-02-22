@@ -1,0 +1,11 @@
+# test log
+getenv TMPDIR
+open /tmp/TestResolveExitRouteStrictTrustRejectsUnknownKey2214935957/001/trusted_keys.txt
+open /tmp/TestResolveExitRouteStrictTrustRejectsUnknownKey2214935957/001/trusted_keys.txt
+open /tmp
+getenv GODEBUG
+getenv RES_OPTIONS
+getenv HOSTALIASES
+open /etc/nsswitch.conf
+open /etc/resolv.conf
+stat /etc/mdns.allow

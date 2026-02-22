@@ -48,9 +48,13 @@ type Client struct {
 	innerMaxPkts          int
 	opaqueSinkAddr        string
 	opaqueDrainMS         int
+	opaqueSessionSec      int
+	opaqueInitialUpMS     int
 	wgBackend             string
 	wgInterface           string
 	wgPrivateKey          string
+	wgAllowedIPs          string
+	wgInstallRoute        bool
 	wgManager             wg.ClientManager
 	liveWGMode            bool
 	healthCheckEnabled    bool
@@ -62,6 +66,13 @@ type Client struct {
 	localityFallbackOrder []string
 	strictExitLocality    bool
 	maxExitsPerOperator   int
+	requireDistinctOps    bool
+	stickyPairSec         int
+	lastSelectedEntry     string
+	lastSelectedExit      string
+	lastSelectedAt        time.Time
+	sessionReuse          bool
+	sessionRefreshLeadSec int
 	pathOpenMaxAttempts   int
 	maxPairCandidates     int
 	bootstrapInterval     time.Duration
@@ -73,6 +84,8 @@ type Client struct {
 	trustFeedDisable      bool
 	trustFeedRequire      bool
 	trustFeedMinVotes     int
+	activeSession         clientActiveSession
+	activeMu              sync.Mutex
 	healthMu              sync.Mutex
 	healthCache           map[string]healthProbeState
 	httpClient            *http.Client
@@ -86,6 +99,18 @@ type healthProbeState struct {
 type relayPair struct {
 	entry proto.RelayDescriptor
 	exit  proto.RelayDescriptor
+}
+
+type clientActiveSession struct {
+	sessionID       string
+	sessionExp      int64
+	transport       string
+	entryDataAddr   string
+	entryControlURL string
+	sessionKeyID    string
+	exitInnerPub    string
+	entryRelayID    string
+	exitRelayID     string
 }
 
 func NewClient() *Client {
@@ -164,6 +189,14 @@ func NewClient() *Client {
 	if v, err := strconv.Atoi(os.Getenv("CLIENT_OPAQUE_DRAIN_MS")); err == nil && v > 0 {
 		opaqueDrainMS = v
 	}
+	opaqueSessionSec := 0
+	if v, err := strconv.Atoi(os.Getenv("CLIENT_OPAQUE_SESSION_SEC")); err == nil && v > 0 {
+		opaqueSessionSec = v
+	}
+	opaqueInitialUpMS := 1500
+	if v, err := strconv.Atoi(os.Getenv("CLIENT_OPAQUE_INITIAL_UPLINK_TIMEOUT_MS")); err == nil && v > 0 {
+		opaqueInitialUpMS = v
+	}
 	wgBackend := os.Getenv("CLIENT_WG_BACKEND")
 	if wgBackend == "" {
 		wgBackend = "noop"
@@ -173,6 +206,11 @@ func NewClient() *Client {
 		wgInterface = "wg-client0"
 	}
 	wgPrivateKey := os.Getenv("CLIENT_WG_PRIVATE_KEY_PATH")
+	wgAllowedIPs := strings.TrimSpace(os.Getenv("CLIENT_WG_ALLOWED_IPS"))
+	if wgAllowedIPs == "" {
+		wgAllowedIPs = "0.0.0.0/0"
+	}
+	wgInstallRoute := os.Getenv("CLIENT_WG_INSTALL_ROUTE") == "1"
 	liveWGMode := os.Getenv("CLIENT_LIVE_WG_MODE") == "1"
 	healthCheckEnabled := os.Getenv("CLIENT_SELECTION_HEALTHCHECK") != "0"
 	if os.Getenv("CLIENT_HEALTHCHECK_DISABLE") == "1" {
@@ -199,6 +237,16 @@ func NewClient() *Client {
 	maxExitsPerOperator := 0
 	if v, err := strconv.Atoi(os.Getenv("CLIENT_MAX_EXITS_PER_OPERATOR")); err == nil && v > 0 {
 		maxExitsPerOperator = v
+	}
+	requireDistinctOps := os.Getenv("CLIENT_REQUIRE_DISTINCT_OPERATORS") == "1"
+	stickyPairSec := 0
+	if v, err := strconv.Atoi(os.Getenv("CLIENT_STICKY_PAIR_SEC")); err == nil && v > 0 {
+		stickyPairSec = v
+	}
+	sessionReuse := os.Getenv("CLIENT_SESSION_REUSE") == "1"
+	sessionRefreshLeadSec := 20
+	if v, err := strconv.Atoi(os.Getenv("CLIENT_SESSION_REFRESH_LEAD_SEC")); err == nil && v > 0 {
+		sessionRefreshLeadSec = v
 	}
 	pathOpenMaxAttempts := 4
 	if v, err := strconv.Atoi(os.Getenv("CLIENT_PATH_OPEN_MAX_ATTEMPTS")); err == nil && v > 0 {
@@ -270,9 +318,13 @@ func NewClient() *Client {
 		innerMaxPkts:          innerMaxPkts,
 		opaqueSinkAddr:        opaqueSinkAddr,
 		opaqueDrainMS:         opaqueDrainMS,
+		opaqueSessionSec:      opaqueSessionSec,
+		opaqueInitialUpMS:     opaqueInitialUpMS,
 		wgBackend:             wgBackend,
 		wgInterface:           wgInterface,
 		wgPrivateKey:          wgPrivateKey,
+		wgAllowedIPs:          wgAllowedIPs,
+		wgInstallRoute:        wgInstallRoute,
 		wgManager:             wgManager,
 		liveWGMode:            liveWGMode,
 		healthCheckEnabled:    healthCheckEnabled,
@@ -284,6 +336,10 @@ func NewClient() *Client {
 		localityFallbackOrder: localityFallbackOrder,
 		strictExitLocality:    strictExitLocality,
 		maxExitsPerOperator:   maxExitsPerOperator,
+		requireDistinctOps:    requireDistinctOps,
+		stickyPairSec:         stickyPairSec,
+		sessionReuse:          sessionReuse,
+		sessionRefreshLeadSec: sessionRefreshLeadSec,
 		pathOpenMaxAttempts:   pathOpenMaxAttempts,
 		maxPairCandidates:     maxPairCandidates,
 		bootstrapInterval:     time.Duration(bootstrapIntervalSec) * time.Second,
@@ -305,8 +361,8 @@ func (c *Client) Run(ctx context.Context) error {
 	if bootstrapInterval <= 0 {
 		bootstrapInterval = 5 * time.Second
 	}
-	log.Printf("client role enabled: directories=%d min_sources=%d min_operators=%d min_votes=%d issuer=%s subject=%s entry=%s mode=%s source=%s trust_strict=%t wg_backend=%s iface=%s health_check=%t path_attempts=%d exit_country=%s exit_region=%s min_geo_confidence=%.2f locality_fallback=%s strict_locality=%t max_exits_per_operator=%d exit_exploration_pct=%d selection_feed_disable=%t selection_feed_require=%t selection_feed_min_votes=%d trust_feed_disable=%t trust_feed_require=%t trust_feed_min_votes=%d bootstrap_interval_sec=%d",
-		len(c.directoryURLs), c.directoryMinSources, c.directoryMinOperators, c.directoryMinVotes, c.issuerURL, c.subject, c.entryURL, c.dataMode, c.innerSource, c.trustStrict, c.wgBackend, c.wgInterface, c.healthCheckEnabled, c.pathOpenMaxAttempts, c.preferredExitCountry, c.preferredExitRegion, c.minGeoConfidence, strings.Join(c.localityFallbackOrder, ","), c.strictExitLocality, c.maxExitsPerOperator, c.exitExplorationPct, c.selectionFeedDisable, c.selectionFeedRequire, c.selectionFeedMinVotes, c.trustFeedDisable, c.trustFeedRequire, c.trustFeedMinVotes, int(bootstrapInterval/time.Second))
+	log.Printf("client role enabled: directories=%d min_sources=%d min_operators=%d min_votes=%d issuer=%s subject=%s entry=%s mode=%s source=%s trust_strict=%t wg_backend=%s iface=%s allowed_ips=%s install_route=%t opaque_session_sec=%d opaque_initial_uplink_timeout_ms=%d health_check=%t path_attempts=%d exit_country=%s exit_region=%s min_geo_confidence=%.2f locality_fallback=%s strict_locality=%t max_exits_per_operator=%d distinct_operators=%t sticky_pair_sec=%d session_reuse=%t refresh_lead_sec=%d exit_exploration_pct=%d selection_feed_disable=%t selection_feed_require=%t selection_feed_min_votes=%d trust_feed_disable=%t trust_feed_require=%t trust_feed_min_votes=%d bootstrap_interval_sec=%d",
+		len(c.directoryURLs), c.directoryMinSources, c.directoryMinOperators, c.directoryMinVotes, c.issuerURL, c.subject, c.entryURL, c.dataMode, c.innerSource, c.trustStrict, c.wgBackend, c.wgInterface, c.wgAllowedIPs, c.wgInstallRoute, c.opaqueSessionSec, c.opaqueInitialUpMS, c.healthCheckEnabled, c.pathOpenMaxAttempts, c.preferredExitCountry, c.preferredExitRegion, c.minGeoConfidence, strings.Join(c.localityFallbackOrder, ","), c.strictExitLocality, c.maxExitsPerOperator, c.requireDistinctOps, c.stickyPairSec, c.sessionReuse, c.sessionRefreshLeadSec, c.exitExplorationPct, c.selectionFeedDisable, c.selectionFeedRequire, c.selectionFeedMinVotes, c.trustFeedDisable, c.trustFeedRequire, c.trustFeedMinVotes, int(bootstrapInterval/time.Second))
 	if err := c.validateRuntimeConfig(); err != nil {
 		return err
 	}
@@ -329,6 +385,9 @@ func (c *Client) Run(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			_ = c.closeActiveSession(shutdownCtx, "shutdown")
+			cancel()
 			return ctx.Err()
 		case <-ticker.C:
 			if err := c.bootstrap(ctx); err != nil {
@@ -371,6 +430,10 @@ func (c *Client) validateRuntimeConfig() error {
 }
 
 func (c *Client) bootstrap(ctx context.Context) error {
+	if c.tryReuseActiveSession(ctx, time.Now()) {
+		return nil
+	}
+
 	relays, err := c.fetchRelaysFederated(ctx)
 	if err != nil {
 		return err
@@ -395,23 +458,48 @@ func (c *Client) bootstrap(ctx context.Context) error {
 	_, err = attemptPairs(pairs, c.pathOpenMaxAttempts, func(pair relayPair) error {
 		entryControlURL = c.entryControlURLFor(pair.entry)
 		exitControlURL = c.exitControlURLFor(pair.exit)
+		popPub, popPriv, err := crypto.GenerateEd25519Keypair()
+		if err != nil {
+			return fmt.Errorf("generate token proof key: %w", err)
+		}
+		popPubB64 := crypto.EncodeEd25519PublicKey(popPub)
+		if popPubB64 == "" {
+			return fmt.Errorf("encode token proof key failed")
+		}
 
 		tok, err := c.issueToken(ctx, proto.IssueTokenRequest{
 			Tier:      1,
 			Subject:   c.subject,
+			TokenType: crypto.TokenTypeClientAccess,
+			PopPubKey: popPubB64,
 			ExitScope: []string{pair.exit.RelayID},
 		})
 		if err != nil {
 			return fmt.Errorf("issue token for exit=%s: %w", pair.exit.RelayID, err)
 		}
-		resp, err := c.openPathWithChallenge(ctx, entryControlURL, proto.PathOpenRequest{
+		openReq := proto.PathOpenRequest{
 			ExitID:          pair.exit.RelayID,
 			Token:           tok.Token,
+			TokenProofNonce: randomProofNonce(),
 			ClientInnerPub:  c.clientWGPub,
 			Transport:       requestedTransport(c.dataMode),
 			RequestedMTU:    1280,
 			RequestedRegion: pair.exit.Region,
+		}
+		tokenProof, err := crypto.SignPathOpenProof(popPriv, crypto.PathOpenProofInput{
+			Token:           openReq.Token,
+			ExitID:          openReq.ExitID,
+			TokenProofNonce: openReq.TokenProofNonce,
+			ClientInnerPub:  openReq.ClientInnerPub,
+			Transport:       openReq.Transport,
+			RequestedMTU:    openReq.RequestedMTU,
+			RequestedRegion: openReq.RequestedRegion,
 		})
+		if err != nil {
+			return fmt.Errorf("sign token proof for exit=%s: %w", pair.exit.RelayID, err)
+		}
+		openReq.TokenProof = tokenProof
+		resp, err := c.openPathWithChallenge(ctx, entryControlURL, openReq)
 		if err != nil {
 			return err
 		}
@@ -423,6 +511,7 @@ func (c *Client) bootstrap(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	c.rememberSelectedPair(selectedPair, time.Now())
 
 	if pathResp.SessionID == "" || pathResp.EntryDataAddr == "" {
 		return fmt.Errorf("path open missing session data")
@@ -430,7 +519,11 @@ func (c *Client) bootstrap(ctx context.Context) error {
 	if pathResp.Transport != "" && pathResp.Transport != requestedTransport(c.dataMode) {
 		return fmt.Errorf("path transport mismatch: requested=%s got=%s", requestedTransport(c.dataMode), pathResp.Transport)
 	}
-	if pathResp.Transport == "wireguard-udp" {
+	transport := pathResp.Transport
+	if transport == "" {
+		transport = requestedTransport(c.dataMode)
+	}
+	if transport == "wireguard-udp" {
 		log.Printf("client received wg-session config: key_id=%s exit_pub=%s client_ip=%s exit_ip=%s mtu=%d keepalive=%ds",
 			pathResp.SessionKeyID,
 			pathResp.ExitInnerPub,
@@ -447,7 +540,8 @@ func (c *Client) bootstrap(ctx context.Context) error {
 			ExitPublicKey:    pathResp.ExitInnerPub,
 			ClientInnerIP:    pathResp.ClientInnerIP,
 			Endpoint:         pathResp.EntryDataAddr,
-			AllowedIPs:       "0.0.0.0/0",
+			AllowedIPs:       c.wgAllowedIPs,
+			InstallRoute:     c.wgInstallRoute,
 			MTU:              pathResp.InnerMTU,
 			KeepaliveSec:     pathResp.KeepaliveSec,
 		}
@@ -456,26 +550,8 @@ func (c *Client) bootstrap(ctx context.Context) error {
 		}
 	}
 
-	switch c.dataMode {
-	case "opaque":
-		if err := c.sendOpaqueTraffic(ctx, pathResp.EntryDataAddr, pathResp.SessionID); err != nil {
-			return err
-		}
-	default:
-		if err := c.sendJSONInnerPacket(pathResp.EntryDataAddr, pathResp.SessionID, proto.InnerPacket{
-			DestinationPort: 443,
-			Payload:         "hello-over-two-hop",
-			Nonce:           randomNonce(),
-		}); err != nil {
-			return err
-		}
-		if err := c.sendJSONInnerPacket(pathResp.EntryDataAddr, pathResp.SessionID, proto.InnerPacket{
-			DestinationPort: 25,
-			Payload:         "smtp-probe",
-			Nonce:           randomNonce(),
-		}); err != nil {
-			return err
-		}
+	if err := c.sendTrafficForTransport(ctx, transport, pathResp.EntryDataAddr, pathResp.SessionID); err != nil {
+		return err
 	}
 
 	log.Printf("client selected entry=%s (%s) exit=%s (%s) token_exp=%d",
@@ -485,19 +561,36 @@ func (c *Client) bootstrap(ctx context.Context) error {
 		exitControlURL,
 		tokenResp.Expires,
 	)
-	if err := c.closePath(ctx, entryControlURL, proto.PathCloseRequest{SessionID: pathResp.SessionID}); err != nil {
+	session := clientActiveSession{
+		sessionID:       pathResp.SessionID,
+		sessionExp:      pathResp.SessionExp,
+		transport:       transport,
+		entryDataAddr:   pathResp.EntryDataAddr,
+		entryControlURL: entryControlURL,
+		sessionKeyID:    pathResp.SessionKeyID,
+		exitInnerPub:    pathResp.ExitInnerPub,
+		entryRelayID:    selectedPair.entry.RelayID,
+		exitRelayID:     selectedPair.exit.RelayID,
+	}
+	previousSession, hadPreviousSession := c.snapshotActiveSession()
+	if c.sessionReuse {
+		if !c.activeSessionNeedsRefresh(session, time.Now()) {
+			c.storeActiveSession(session)
+			log.Printf("client keeping active session session=%s entry=%s exit=%s exp=%d",
+				session.sessionID, session.entryRelayID, session.exitRelayID, session.sessionExp)
+			if hadPreviousSession && strings.TrimSpace(previousSession.sessionID) != "" && previousSession.sessionID != session.sessionID {
+				c.completeSessionHandoff(previousSession, session)
+			}
+			return nil
+		}
+		log.Printf("client skipping active-session replace reason=near-expiry session=%s exp=%d lead_sec=%d",
+			session.sessionID, session.sessionExp, int(c.sessionRefreshLead()/time.Second))
+	}
+	if err := c.closeSession(ctx, session); err != nil {
 		return err
 	}
-	if pathResp.Transport == "wireguard-udp" {
-		cfg := wg.ClientSessionConfig{
-			SessionID:     pathResp.SessionID,
-			SessionKeyID:  pathResp.SessionKeyID,
-			Interface:     c.wgInterface,
-			ExitPublicKey: pathResp.ExitInnerPub,
-		}
-		if err := c.wgManager.RemoveClientSession(ctx, cfg); err != nil {
-			return fmt.Errorf("client wg remove failed: %w", err)
-		}
+	if !c.sessionReuse || !hadPreviousSession {
+		c.clearActiveSession()
 	}
 	return nil
 }
@@ -507,6 +600,31 @@ func requestedTransport(mode string) string {
 		return "wireguard-udp"
 	}
 	return "policy-json"
+}
+
+func (c *Client) sendTrafficForTransport(ctx context.Context, transport string, entryDataAddr string, sessionID string) error {
+	switch transport {
+	case "wireguard-udp":
+		return c.sendOpaqueTraffic(ctx, entryDataAddr, sessionID)
+	case "policy-json":
+		if err := c.sendJSONInnerPacket(entryDataAddr, sessionID, proto.InnerPacket{
+			DestinationPort: 443,
+			Payload:         "hello-over-two-hop",
+			Nonce:           randomNonce(),
+		}); err != nil {
+			return err
+		}
+		if err := c.sendJSONInnerPacket(entryDataAddr, sessionID, proto.InnerPacket{
+			DestinationPort: 25,
+			Payload:         "smtp-probe",
+			Nonce:           randomNonce(),
+		}); err != nil {
+			return err
+		}
+		return nil
+	default:
+		return fmt.Errorf("unsupported transport: %s", transport)
+	}
 }
 
 func (c *Client) sendOpaqueTraffic(ctx context.Context, entryDataAddr string, sessionID string) error {
@@ -535,6 +653,9 @@ func (c *Client) sendOpaqueTraffic(ctx context.Context, entryDataAddr string, se
 
 	sendOpaque := func(payload []byte) error {
 		return c.sendOpaqueInnerPacketConn(outerConn, sessionID, randomNonce(), payload)
+	}
+	if c.opaqueSessionSec > 0 {
+		return c.runOpaqueSession(ctx, outerConn, sessionID, sinkConn, sendOpaque)
 	}
 
 	upCount := 0
@@ -580,6 +701,130 @@ func (c *Client) sendOpaqueTraffic(ctx context.Context, entryDataAddr string, se
 	return nil
 }
 
+func (c *Client) runOpaqueSession(ctx context.Context, outerConn *net.UDPConn, sessionID string, sinkConn *net.UDPConn, sendOpaque func([]byte) error) error {
+	duration := time.Duration(c.opaqueSessionSec) * time.Second
+	if duration <= 0 {
+		return nil
+	}
+	sessionCtx, cancel := context.WithTimeout(ctx, duration)
+	defer cancel()
+
+	var (
+		uplinkCount   int
+		downlinkCount int
+		firstErr      error
+		errMu         sync.Mutex
+		seenMu        sync.Once
+		workers       sync.WaitGroup
+	)
+	seenUplink := make(chan struct{})
+	setErr := func(err error) {
+		if err == nil {
+			return
+		}
+		errMu.Lock()
+		if firstErr == nil {
+			firstErr = err
+			cancel()
+		}
+		errMu.Unlock()
+	}
+	markUplink := func() {
+		seenMu.Do(func() {
+			close(seenUplink)
+		})
+	}
+
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		count, err := c.drainOpaqueDownlink(sessionCtx, outerConn, sessionID, sinkConn, duration)
+		downlinkCount = count
+		if err != nil && sessionCtx.Err() == nil {
+			setErr(err)
+		}
+	}()
+
+	switch c.innerSource {
+	case "udp":
+		addr, err := net.ResolveUDPAddr("udp", c.innerUDPAddr)
+		if err != nil {
+			cancel()
+			workers.Wait()
+			return err
+		}
+		innerConn, err := net.ListenUDP("udp", addr)
+		if err != nil {
+			cancel()
+			workers.Wait()
+			return err
+		}
+		defer innerConn.Close()
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			count, err := c.forwardOpaqueFromUDPContinuous(sessionCtx, innerConn, sendOpaque, markUplink)
+			uplinkCount = count
+			if err != nil && sessionCtx.Err() == nil {
+				setErr(err)
+			}
+		}()
+	default:
+		if !c.allowSyntheticFallback() {
+			cancel()
+			workers.Wait()
+			return fmt.Errorf("command WG mode requires CLIENT_INNER_SOURCE=udp")
+		}
+		wgLike := []byte{1, 0, 0, 0, 10, 11, 12, 13}
+		if err := sendOpaque(wgLike); err != nil {
+			cancel()
+			workers.Wait()
+			return err
+		}
+		if err := sendOpaque([]byte("wg-like-datagram")); err != nil {
+			cancel()
+			workers.Wait()
+			return err
+		}
+		uplinkCount = 2
+		markUplink()
+	}
+
+	if !c.allowSyntheticFallback() {
+		select {
+		case <-seenUplink:
+		case <-time.After(c.opaqueInitialUplinkTimeout()):
+			cancel()
+			workers.Wait()
+			return fmt.Errorf("command/live WG mode received no UDP packets from %s within %s", c.innerUDPAddr, c.opaqueInitialUplinkTimeout())
+		case <-sessionCtx.Done():
+			cancel()
+			workers.Wait()
+			return fmt.Errorf("command/live WG mode received no UDP packets from %s", c.innerUDPAddr)
+		}
+	}
+
+	<-sessionCtx.Done()
+	workers.Wait()
+
+	errMu.Lock()
+	err := firstErr
+	errMu.Unlock()
+	if err != nil {
+		return err
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if uplinkCount > 0 {
+		log.Printf("client forwarded opaque udp packets count=%d", uplinkCount)
+	}
+	if downlinkCount > 0 {
+		log.Printf("client downlink opaque packets count=%d sink=%s", downlinkCount, c.opaqueSinkAddr)
+	}
+	return nil
+}
+
 func (c *Client) forwardOpaqueFromUDP(ctx context.Context, sendFrame func([]byte) error) (int, error) {
 	addr, err := net.ResolveUDPAddr("udp", c.innerUDPAddr)
 	if err != nil {
@@ -591,7 +836,7 @@ func (c *Client) forwardOpaqueFromUDP(ctx context.Context, sendFrame func([]byte
 	}
 	defer conn.Close()
 
-	_ = conn.SetReadDeadline(time.Now().Add(1500 * time.Millisecond))
+	_ = conn.SetReadDeadline(time.Now().Add(c.opaqueInitialUplinkTimeout()))
 	buf := make([]byte, 64*1024)
 	count := 0
 	for count < c.innerMaxPkts {
@@ -617,6 +862,40 @@ func (c *Client) forwardOpaqueFromUDP(ctx context.Context, sendFrame func([]byte
 		count++
 	}
 	return count, nil
+}
+
+func (c *Client) forwardOpaqueFromUDPContinuous(ctx context.Context, conn *net.UDPConn, sendFrame func([]byte) error, onPacket func()) (int, error) {
+	buf := make([]byte, 64*1024)
+	count := 0
+	for {
+		select {
+		case <-ctx.Done():
+			return count, nil
+		default:
+		}
+		_ = conn.SetReadDeadline(time.Now().Add(250 * time.Millisecond))
+		n, _, readErr := conn.ReadFromUDP(buf)
+		if readErr != nil {
+			if ne, ok := readErr.(net.Error); ok && ne.Timeout() {
+				continue
+			}
+			if ctx.Err() != nil {
+				return count, nil
+			}
+			return count, readErr
+		}
+		if n <= 0 {
+			continue
+		}
+		payload := append([]byte(nil), buf[:n]...)
+		if err := sendFrame(payload); err != nil {
+			return count, err
+		}
+		count++
+		if onPacket != nil {
+			onPacket()
+		}
+	}
 }
 
 func (c *Client) drainOpaqueDownlink(ctx context.Context, outerConn *net.UDPConn, sessionID string, sinkConn *net.UDPConn, window time.Duration) (int, error) {
@@ -656,7 +935,7 @@ func (c *Client) drainOpaqueDownlink(ctx context.Context, outerConn *net.UDPConn
 		if opaqueErr != nil {
 			continue
 		}
-		if c.liveWGMode && !relay.LooksLikeWireGuardMessage(raw) {
+		if c.liveWGMode && !relay.LooksLikePlausibleWireGuardMessage(raw) {
 			log.Printf("client dropped opaque downlink reason=non-wireguard-live payload_len=%d", len(raw))
 			continue
 		}
@@ -676,8 +955,187 @@ func minDuration(a time.Duration, b time.Duration) time.Duration {
 	return b
 }
 
+func (c *Client) rememberSelectedPair(pair relayPair, now time.Time) {
+	if strings.TrimSpace(pair.entry.RelayID) == "" || strings.TrimSpace(pair.exit.RelayID) == "" {
+		return
+	}
+	c.lastSelectedEntry = pair.entry.RelayID
+	c.lastSelectedExit = pair.exit.RelayID
+	c.lastSelectedAt = now
+}
+
+func (c *Client) applyStickyPairPreference(pairs []relayPair, now time.Time) []relayPair {
+	if len(pairs) <= 1 || c.stickyPairSec <= 0 {
+		return pairs
+	}
+	if strings.TrimSpace(c.lastSelectedEntry) == "" || strings.TrimSpace(c.lastSelectedExit) == "" || c.lastSelectedAt.IsZero() {
+		return pairs
+	}
+	maxAge := time.Duration(c.stickyPairSec) * time.Second
+	age := now.Sub(c.lastSelectedAt)
+	if age > maxAge {
+		c.lastSelectedEntry = ""
+		c.lastSelectedExit = ""
+		c.lastSelectedAt = time.Time{}
+		return pairs
+	}
+	idx := -1
+	for i, pair := range pairs {
+		if pair.entry.RelayID == c.lastSelectedEntry && pair.exit.RelayID == c.lastSelectedExit {
+			idx = i
+			break
+		}
+	}
+	if idx <= 0 {
+		return pairs
+	}
+	sticky := pairs[idx]
+	copy(pairs[1:idx+1], pairs[0:idx])
+	pairs[0] = sticky
+	log.Printf("client sticky pair preference applied entry=%s exit=%s age_sec=%d",
+		sticky.entry.RelayID, sticky.exit.RelayID, int(age/time.Second))
+	return pairs
+}
+
+func (c *Client) storeActiveSession(session clientActiveSession) {
+	if strings.TrimSpace(session.sessionID) == "" {
+		return
+	}
+	c.activeMu.Lock()
+	c.activeSession = session
+	c.activeMu.Unlock()
+}
+
+func (c *Client) snapshotActiveSession() (clientActiveSession, bool) {
+	c.activeMu.Lock()
+	defer c.activeMu.Unlock()
+	if strings.TrimSpace(c.activeSession.sessionID) == "" {
+		return clientActiveSession{}, false
+	}
+	return c.activeSession, true
+}
+
+func (c *Client) clearActiveSession() {
+	c.activeMu.Lock()
+	c.activeSession = clientActiveSession{}
+	c.activeMu.Unlock()
+}
+
+func (c *Client) sessionRefreshLead() time.Duration {
+	sec := c.sessionRefreshLeadSec
+	if sec <= 0 {
+		sec = 20
+	}
+	return time.Duration(sec) * time.Second
+}
+
+func (c *Client) activeSessionNeedsRefresh(session clientActiveSession, now time.Time) bool {
+	if session.sessionExp <= 0 {
+		return true
+	}
+	expAt := time.Unix(session.sessionExp, 0)
+	return !expAt.After(now.Add(c.sessionRefreshLead()))
+}
+
+func (c *Client) closeSession(ctx context.Context, session clientActiveSession) error {
+	if strings.TrimSpace(session.sessionID) == "" || strings.TrimSpace(session.entryControlURL) == "" {
+		return nil
+	}
+	if err := c.closePath(ctx, session.entryControlURL, proto.PathCloseRequest{SessionID: session.sessionID}); err != nil {
+		return err
+	}
+	if session.transport == "wireguard-udp" {
+		cfg := wg.ClientSessionConfig{
+			SessionID:     session.sessionID,
+			SessionKeyID:  session.sessionKeyID,
+			Interface:     c.wgInterface,
+			ExitPublicKey: session.exitInnerPub,
+		}
+		if err := c.wgManager.RemoveClientSession(ctx, cfg); err != nil {
+			return fmt.Errorf("client wg remove failed: %w", err)
+		}
+	}
+	return nil
+}
+
+func (c *Client) completeSessionHandoff(previous clientActiveSession, next clientActiveSession) {
+	closeCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := c.closeSession(closeCtx, previous); err != nil {
+		log.Printf("client session handoff close-old failed old_session=%s new_session=%s err=%v",
+			previous.sessionID, next.sessionID, err)
+		return
+	}
+	log.Printf("client session handoff complete old_session=%s new_session=%s old_entry=%s old_exit=%s new_entry=%s new_exit=%s",
+		previous.sessionID, next.sessionID, previous.entryRelayID, previous.exitRelayID, next.entryRelayID, next.exitRelayID)
+}
+
+func (c *Client) closeActiveSession(ctx context.Context, reason string) error {
+	session, ok := c.snapshotActiveSession()
+	if !ok {
+		return nil
+	}
+	c.clearActiveSession()
+	if err := c.closeSession(ctx, session); err != nil {
+		return err
+	}
+	log.Printf("client closed active session session=%s reason=%s", session.sessionID, reason)
+	return nil
+}
+
+func (c *Client) tryReuseActiveSession(ctx context.Context, now time.Time) bool {
+	if !c.sessionReuse {
+		return false
+	}
+	session, ok := c.snapshotActiveSession()
+	if !ok {
+		return false
+	}
+	if session.sessionExp <= 0 {
+		log.Printf("client active session refresh required session=%s remaining_sec=unknown lead_sec=%d",
+			session.sessionID, int(c.sessionRefreshLead()/time.Second))
+		if err := c.closeActiveSession(ctx, "invalid-expiry"); err != nil {
+			log.Printf("client active session close failed session=%s err=%v", session.sessionID, err)
+		}
+		return false
+	}
+	if c.activeSessionNeedsRefresh(session, now) {
+		remaining := int(time.Until(time.Unix(session.sessionExp, 0)) / time.Second)
+		log.Printf("client active session refresh required session=%s remaining_sec=%d lead_sec=%d",
+			session.sessionID, remaining, int(c.sessionRefreshLead()/time.Second))
+		if remaining <= 0 {
+			if err := c.closeActiveSession(ctx, "expired"); err != nil {
+				log.Printf("client active session close failed session=%s err=%v", session.sessionID, err)
+			}
+		}
+		return false
+	}
+	if err := c.sendTrafficForTransport(ctx, session.transport, session.entryDataAddr, session.sessionID); err != nil {
+		log.Printf("client active session reuse failed session=%s err=%v", session.sessionID, err)
+		if cerr := c.closeActiveSession(ctx, "reuse-failed"); cerr != nil {
+			log.Printf("client active session cleanup failed session=%s err=%v", session.sessionID, cerr)
+		}
+		return false
+	}
+	c.rememberSelectedPair(relayPair{
+		entry: proto.RelayDescriptor{RelayID: session.entryRelayID},
+		exit:  proto.RelayDescriptor{RelayID: session.exitRelayID},
+	}, now)
+	log.Printf("client reused active session session=%s entry=%s exit=%s exp=%d",
+		session.sessionID, session.entryRelayID, session.exitRelayID, session.sessionExp)
+	return true
+}
+
 func (c *Client) allowSyntheticFallback() bool {
 	return !c.liveWGMode && c.wgBackend != "command"
+}
+
+func (c *Client) opaqueInitialUplinkTimeout() time.Duration {
+	ms := c.opaqueInitialUpMS
+	if ms <= 0 {
+		ms = 1500
+	}
+	return time.Duration(ms) * time.Millisecond
 }
 
 func (c *Client) sendJSONInnerPacket(entryDataAddr string, sessionID string, inner proto.InnerPacket) error {
@@ -737,6 +1195,14 @@ func randomNonce() uint64 {
 		return 1
 	}
 	return nonce
+}
+
+func randomProofNonce() string {
+	buf := make([]byte, 12)
+	if _, err := io.ReadFull(crand.Reader, buf); err != nil {
+		return fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(buf)
 }
 
 func randomWGPublicKeyLike() string {
@@ -1474,12 +1940,26 @@ func (c *Client) rankRelayPairs(ctx context.Context, relays []proto.RelayDescrip
 
 	pairs := make([]relayPair, 0, len(healthyEntries)*len(selectedExits))
 	seen := make(map[string]struct{})
+	droppedSameOperator := 0
+	droppedMissingOperator := 0
 	addPair := func(entry proto.RelayDescriptor, exit proto.RelayDescriptor) {
 		key := entry.RelayID + "|" + exit.RelayID
 		if _, ok := seen[key]; ok {
 			return
 		}
 		seen[key] = struct{}{}
+		if c.requireDistinctOps {
+			entryOperator := strings.TrimSpace(entry.OperatorID)
+			exitOperator := strings.TrimSpace(exit.OperatorID)
+			if entryOperator == "" || exitOperator == "" {
+				droppedMissingOperator++
+				return
+			}
+			if entryOperator == exitOperator {
+				droppedSameOperator++
+				return
+			}
+		}
 		pairs = append(pairs, relayPair{entry: entry, exit: exit})
 	}
 
@@ -1498,6 +1978,11 @@ func (c *Client) rankRelayPairs(ctx context.Context, relays []proto.RelayDescrip
 		for _, x := range selectedExits {
 			addPair(e, x)
 		}
+	}
+	pairs = c.applyStickyPairPreference(pairs, time.Now())
+	if c.requireDistinctOps && (droppedSameOperator > 0 || droppedMissingOperator > 0) {
+		log.Printf("client distinct-operator filter applied: dropped_same_operator=%d dropped_missing_operator=%d",
+			droppedSameOperator, droppedMissingOperator)
 	}
 	if c.maxPairCandidates > 0 && len(pairs) > c.maxPairCandidates {
 		pairs = pairs[:c.maxPairCandidates]

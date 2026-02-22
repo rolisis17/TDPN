@@ -35,51 +35,55 @@ type sessionInfo struct {
 	clientInnerIP string
 	clientPubKey  string
 	peerAddr      string
+	peerLastSeen  int64
 	downNonce     uint64
 }
 
 type Service struct {
-	addr                 string
-	dataAddr             string
-	issuerURL            string
-	issuerURLs           []string
-	revocationsURL       string
-	revocationsURLs      []string
-	dataMode             string
-	opaqueSinkAddr       string
-	opaqueSourceAddr     string
-	opaqueEcho           bool
-	wgPubKey             string
-	wgExitIP             string
-	wgMTU                int
-	wgKeepaliveSec       int
-	ipAllocCursor        uint32
-	wgInterface          string
-	wgPrivateKey         string
-	wgListenPort         int
-	wgBackend            string
-	wgManager            wg.Manager
-	liveWGMode           bool
-	egressBackend        string
-	egressIface          string
-	egressCIDR           string
-	egressChain          string
-	egressConfigured     bool
-	revocationRefreshSec int
-	accountingFile       string
-	accountingFlushSec   int
-	enforcer             *policy.Enforcer
-	httpClient           *http.Client
-	httpSrv              *http.Server
-	udpConn              *net.UDPConn
-	opaqueSourceConn     *net.UDPConn
-	opaqueSinkUDP        *net.UDPAddr
+	addr                  string
+	dataAddr              string
+	issuerURL             string
+	issuerURLs            []string
+	revocationsURL        string
+	revocationsURLs       []string
+	dataMode              string
+	opaqueSinkAddr        string
+	opaqueSourceAddr      string
+	opaqueEcho            bool
+	wgPubKey              string
+	wgExitIP              string
+	wgMTU                 int
+	wgKeepaliveSec        int
+	ipAllocCursor         uint32
+	wgInterface           string
+	wgPrivateKey          string
+	wgListenPort          int
+	wgBackend             string
+	wgManager             wg.Manager
+	liveWGMode            bool
+	egressBackend         string
+	egressIface           string
+	egressCIDR            string
+	egressChain           string
+	egressConfigured      bool
+	tokenProofReplayGuard bool
+	peerRebindAfter       time.Duration
+	revocationRefreshSec  int
+	accountingFile        string
+	accountingFlushSec    int
+	enforcer              *policy.Enforcer
+	httpClient            *http.Client
+	httpSrv               *http.Server
+	udpConn               *net.UDPConn
+	opaqueSourceConn      *net.UDPConn
+	opaqueSinkUDP         *net.UDPAddr
 
 	mu                sync.RWMutex
 	issuerPub         ed25519.PublicKey
 	issuerPubs        map[string]ed25519.PublicKey
 	issuerKeyIssuer   map[string]string
 	sessions          map[string]sessionInfo
+	proofNonceSeen    map[string]map[string]int64
 	metrics           exitMetrics
 	revokedJTI        map[string]int64
 	minTokenEpoch     map[string]int64
@@ -87,24 +91,26 @@ type Service struct {
 }
 
 type exitMetrics struct {
-	AcceptedPackets        uint64 `json:"accepted_packets"`
-	DroppedPackets         uint64 `json:"dropped_packets"`
-	AcceptedBytes          uint64 `json:"accepted_bytes"`
-	DroppedBytes           uint64 `json:"dropped_bytes"`
-	AcceptedTier1Packets   uint64 `json:"accepted_tier1_packets"`
-	AcceptedTier2Packets   uint64 `json:"accepted_tier2_packets"`
-	AcceptedTier3Packets   uint64 `json:"accepted_tier3_packets"`
-	DroppedTier1Packets    uint64 `json:"dropped_tier1_packets"`
-	DroppedTier2Packets    uint64 `json:"dropped_tier2_packets"`
-	DroppedTier3Packets    uint64 `json:"dropped_tier3_packets"`
-	DroppedTokenRevoked    uint64 `json:"dropped_token_revoked"`
-	DroppedTokenKeyEpoch   uint64 `json:"dropped_token_key_epoch"`
-	DroppedNonWGLive       uint64 `json:"dropped_non_wg_live"`
-	ForwardedDownlinkPkts  uint64 `json:"forwarded_downlink_packets"`
-	ForwardedDownlinkBytes uint64 `json:"forwarded_downlink_bytes"`
-	DroppedDownlinkPkts    uint64 `json:"dropped_downlink_packets"`
-	ActiveSessions         uint64 `json:"active_sessions"`
-	AccountingUpdatedUnix  int64  `json:"accounting_updated_unix"`
+	AcceptedPackets         uint64 `json:"accepted_packets"`
+	DroppedPackets          uint64 `json:"dropped_packets"`
+	AcceptedBytes           uint64 `json:"accepted_bytes"`
+	DroppedBytes            uint64 `json:"dropped_bytes"`
+	AcceptedTier1Packets    uint64 `json:"accepted_tier1_packets"`
+	AcceptedTier2Packets    uint64 `json:"accepted_tier2_packets"`
+	AcceptedTier3Packets    uint64 `json:"accepted_tier3_packets"`
+	DroppedTier1Packets     uint64 `json:"dropped_tier1_packets"`
+	DroppedTier2Packets     uint64 `json:"dropped_tier2_packets"`
+	DroppedTier3Packets     uint64 `json:"dropped_tier3_packets"`
+	DroppedTokenRevoked     uint64 `json:"dropped_token_revoked"`
+	DroppedTokenKeyEpoch    uint64 `json:"dropped_token_key_epoch"`
+	DroppedTokenProofReplay uint64 `json:"dropped_token_proof_replay"`
+	DroppedSourceMismatch   uint64 `json:"dropped_source_mismatch"`
+	DroppedNonWGLive        uint64 `json:"dropped_non_wg_live"`
+	ForwardedDownlinkPkts   uint64 `json:"forwarded_downlink_packets"`
+	ForwardedDownlinkBytes  uint64 `json:"forwarded_downlink_bytes"`
+	DroppedDownlinkPkts     uint64 `json:"dropped_downlink_packets"`
+	ActiveSessions          uint64 `json:"active_sessions"`
+	AccountingUpdatedUnix   int64  `json:"accounting_updated_unix"`
 }
 
 func New() *Service {
@@ -199,6 +205,13 @@ func New() *Service {
 	if egressChain == "" {
 		egressChain = "PRIVNODE_EGRESS"
 	}
+	tokenProofReplayGuard := os.Getenv("EXIT_TOKEN_PROOF_REPLAY_GUARD") == "1"
+	peerRebindAfter := time.Duration(0)
+	if v := os.Getenv("EXIT_PEER_REBIND_SEC"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			peerRebindAfter = time.Duration(n) * time.Second
+		}
+	}
 	revocationRefreshSec := 15
 	if v := os.Getenv("EXIT_REVOCATION_REFRESH_SEC"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -214,47 +227,51 @@ func New() *Service {
 	}
 
 	return &Service{
-		addr:                 addr,
-		dataAddr:             dataAddr,
-		issuerURL:            issuerURL,
-		issuerURLs:           issuerURLs,
-		revocationsURL:       revocationsURL,
-		revocationsURLs:      revocationsURLs,
-		dataMode:             dataMode,
-		opaqueSinkAddr:       opaqueSinkAddr,
-		opaqueSourceAddr:     opaqueSourceAddr,
-		opaqueEcho:           opaqueEcho,
-		wgPubKey:             wgPubKey,
-		wgExitIP:             wgExitIP,
-		wgMTU:                1280,
-		wgKeepaliveSec:       25,
-		ipAllocCursor:        2,
-		wgInterface:          wgInterface,
-		wgPrivateKey:         wgPrivateKey,
-		wgListenPort:         wgListenPort,
-		wgBackend:            wgBackend,
-		wgManager:            wgManager,
-		liveWGMode:           liveWGMode,
-		egressBackend:        egressBackend,
-		egressIface:          egressIface,
-		egressCIDR:           egressCIDR,
-		egressChain:          egressChain,
-		revocationRefreshSec: revocationRefreshSec,
-		accountingFile:       accountingFile,
-		accountingFlushSec:   accountingFlushSec,
-		enforcer:             policy.NewEnforcer(),
-		httpClient:           &http.Client{Timeout: 5 * time.Second},
-		issuerPubs:           make(map[string]ed25519.PublicKey),
-		issuerKeyIssuer:      make(map[string]string),
-		sessions:             make(map[string]sessionInfo),
-		revokedJTI:           make(map[string]int64),
-		minTokenEpoch:        make(map[string]int64),
-		revocationVersion:    make(map[string]int64),
+		addr:                  addr,
+		dataAddr:              dataAddr,
+		issuerURL:             issuerURL,
+		issuerURLs:            issuerURLs,
+		revocationsURL:        revocationsURL,
+		revocationsURLs:       revocationsURLs,
+		dataMode:              dataMode,
+		opaqueSinkAddr:        opaqueSinkAddr,
+		opaqueSourceAddr:      opaqueSourceAddr,
+		opaqueEcho:            opaqueEcho,
+		wgPubKey:              wgPubKey,
+		wgExitIP:              wgExitIP,
+		wgMTU:                 1280,
+		wgKeepaliveSec:        25,
+		ipAllocCursor:         2,
+		wgInterface:           wgInterface,
+		wgPrivateKey:          wgPrivateKey,
+		wgListenPort:          wgListenPort,
+		wgBackend:             wgBackend,
+		wgManager:             wgManager,
+		liveWGMode:            liveWGMode,
+		egressBackend:         egressBackend,
+		egressIface:           egressIface,
+		egressCIDR:            egressCIDR,
+		egressChain:           egressChain,
+		tokenProofReplayGuard: tokenProofReplayGuard,
+		peerRebindAfter:       peerRebindAfter,
+		revocationRefreshSec:  revocationRefreshSec,
+		accountingFile:        accountingFile,
+		accountingFlushSec:    accountingFlushSec,
+		enforcer:              policy.NewEnforcer(),
+		httpClient:            &http.Client{Timeout: 5 * time.Second},
+		issuerPubs:            make(map[string]ed25519.PublicKey),
+		issuerKeyIssuer:       make(map[string]string),
+		sessions:              make(map[string]sessionInfo),
+		proofNonceSeen:        make(map[string]map[string]int64),
+		revokedJTI:            make(map[string]int64),
+		minTokenEpoch:         make(map[string]int64),
+		revocationVersion:     make(map[string]int64),
 	}
 }
 
 func (s *Service) Run(ctx context.Context) error {
-	log.Printf("exit wg backend=%s iface=%s opaque_echo=%t", s.wgBackend, s.wgInterface, s.opaqueEcho)
+	log.Printf("exit wg backend=%s iface=%s opaque_echo=%t token_proof_replay_guard=%t peer_rebind_sec=%d",
+		s.wgBackend, s.wgInterface, s.opaqueEcho, s.tokenProofReplayGuard, int(s.peerRebindAfter/time.Second))
 	if err := s.validateRuntimeConfig(); err != nil {
 		return err
 	}
@@ -421,6 +438,14 @@ func (s *Service) startUDP(ctx context.Context, errCh chan<- error) error {
 				if err != nil {
 					continue
 				}
+				if srcAddr != nil {
+					allowed, _, currentPeer := s.allowSessionPeer(sessionID, srcAddr.String(), time.Now())
+					if !allowed {
+						log.Printf("exit dropped opaque packet session=%s reason=source-mismatch src=%s peer=%s", sessionID, srcAddr.String(), currentPeer)
+						s.recordSourceMismatchDrop(uint64(len(raw)))
+						continue
+					}
+				}
 				claims, err := s.authorizeNonce(sessionID, nonce, time.Now())
 				if err != nil {
 					log.Printf("exit dropped opaque packet session=%s reason=%v", sessionID, err)
@@ -428,9 +453,17 @@ func (s *Service) startUDP(ctx context.Context, errCh chan<- error) error {
 					continue
 				}
 				if srcAddr != nil {
-					s.bindSessionPeer(sessionID, srcAddr.String(), time.Now())
+					allowed, rebound, previousPeer := s.bindSessionPeer(sessionID, srcAddr.String(), time.Now())
+					if !allowed {
+						log.Printf("exit dropped opaque packet session=%s reason=peer-bind-failed src=%s", sessionID, srcAddr.String())
+						s.recordDrop(uint64(len(raw)), claims.Tier)
+						continue
+					}
+					if rebound {
+						log.Printf("exit peer source rebind session=%s old=%s new=%s", sessionID, previousPeer, srcAddr.String())
+					}
 				}
-				if s.liveWGMode && !relay.LooksLikeWireGuardMessage(raw) {
+				if s.liveWGMode && !relay.LooksLikePlausibleWireGuardMessage(raw) {
 					log.Printf("exit dropped opaque packet session=%s reason=non-wireguard-live payload_len=%d", sessionID, len(raw))
 					s.recordNonWGLiveDrop(uint64(len(raw)), claims.Tier)
 					continue
@@ -453,6 +486,14 @@ func (s *Service) startUDP(ctx context.Context, errCh chan<- error) error {
 				if err := json.Unmarshal(payload, &inner); err != nil {
 					continue
 				}
+				if srcAddr != nil {
+					allowed, _, currentPeer := s.allowSessionPeer(sessionID, srcAddr.String(), time.Now())
+					if !allowed {
+						log.Printf("exit dropped packet session=%s reason=source-mismatch src=%s peer=%s", sessionID, srcAddr.String(), currentPeer)
+						s.recordSourceMismatchDrop(uint64(len(inner.Payload)))
+						continue
+					}
+				}
 				claims, err := s.authorizePacket(sessionID, inner, time.Now())
 				if err != nil {
 					log.Printf("exit dropped packet session=%s reason=%v dest_port=%d", sessionID, err, inner.DestinationPort)
@@ -460,7 +501,15 @@ func (s *Service) startUDP(ctx context.Context, errCh chan<- error) error {
 					continue
 				}
 				if srcAddr != nil {
-					s.bindSessionPeer(sessionID, srcAddr.String(), time.Now())
+					allowed, rebound, previousPeer := s.bindSessionPeer(sessionID, srcAddr.String(), time.Now())
+					if !allowed {
+						log.Printf("exit dropped packet session=%s reason=peer-bind-failed src=%s", sessionID, srcAddr.String())
+						s.recordDrop(uint64(len(inner.Payload)), claims.Tier)
+						continue
+					}
+					if rebound {
+						log.Printf("exit peer source rebind session=%s old=%s new=%s", sessionID, previousPeer, srcAddr.String())
+					}
 				}
 				log.Printf("exit accepted packet session=%s dest_port=%d payload_len=%d", sessionID, inner.DestinationPort, len(inner.Payload))
 				s.recordAccept(uint64(len(inner.Payload)), claims.Tier)
@@ -539,6 +588,9 @@ func (s *Service) startOpaqueSource(ctx context.Context, errCh chan<- error) err
 
 func (s *Service) parseOpaqueDownlinkPacket(frame []byte, now time.Time) (string, []byte, bool) {
 	if sessionID, payload, err := relay.ParseDatagram(frame); err == nil && strings.TrimSpace(sessionID) != "" {
+		if s.liveWGMode && !relay.LooksLikePlausibleWireGuardMessage(payload) {
+			return "", nil, false
+		}
 		return sessionID, append([]byte(nil), payload...), true
 	}
 	if s.liveWGMode {
@@ -595,21 +647,92 @@ func (s *Service) resolveDownlinkTarget(sessionID string, now time.Time) (string
 	return target, session.downNonce, true
 }
 
-func (s *Service) bindSessionPeer(sessionID string, peerAddr string, now time.Time) {
+func (s *Service) allowSessionPeer(sessionID string, peerAddr string, now time.Time) (bool, bool, string) {
 	peerAddr = strings.TrimSpace(peerAddr)
 	if sessionID == "" || peerAddr == "" {
-		return
+		return false, false, ""
+	}
+	nowUnix := now.Unix()
+	rebindAfterSec := int64(s.peerRebindAfter / time.Second)
+	s.mu.RLock()
+	session, ok := s.sessions[sessionID]
+	s.mu.RUnlock()
+	if !ok {
+		return false, false, ""
+	}
+	if nowUnix >= session.claims.ExpiryUnix {
+		return false, false, strings.TrimSpace(session.peerAddr)
+	}
+	return peerSessionDecision(session, peerAddr, nowUnix, rebindAfterSec)
+}
+
+func (s *Service) bindSessionPeer(sessionID string, peerAddr string, now time.Time) (bool, bool, string) {
+	peerAddr = strings.TrimSpace(peerAddr)
+	if sessionID == "" || peerAddr == "" {
+		return false, false, ""
 	}
 	s.mu.Lock()
 	session, ok := s.sessions[sessionID]
 	if !ok {
 		s.mu.Unlock()
-		return
+		return false, false, ""
+	}
+	nowUnix := now.Unix()
+	if nowUnix >= session.claims.ExpiryUnix {
+		delete(s.sessions, sessionID)
+		s.metrics.ActiveSessions = uint64(len(s.sessions))
+		s.mu.Unlock()
+		return false, false, strings.TrimSpace(session.peerAddr)
+	}
+	allowed, rebound, previousPeer := peerSessionDecision(session, peerAddr, nowUnix, int64(s.peerRebindAfter/time.Second))
+	if !allowed {
+		s.mu.Unlock()
+		return false, false, previousPeer
 	}
 	session.peerAddr = peerAddr
-	session.lastActivity = now
+	session.peerLastSeen = nowUnix
 	s.sessions[sessionID] = session
 	s.mu.Unlock()
+	return true, rebound, previousPeer
+}
+
+func peerSessionDecision(session sessionInfo, peerAddr string, nowUnix int64, rebindAfterSec int64) (bool, bool, string) {
+	peerAddr = strings.TrimSpace(peerAddr)
+	currentPeer := strings.TrimSpace(session.peerAddr)
+	if peerAddr == "" {
+		return false, false, currentPeer
+	}
+	if currentPeer == "" {
+		return true, false, ""
+	}
+	if sameUDPAddr(peerAddr, currentPeer) {
+		return true, false, currentPeer
+	}
+	if rebindAfterSec > 0 {
+		lastSeen := session.peerLastSeen
+		if lastSeen <= 0 && !session.lastActivity.IsZero() {
+			lastSeen = session.lastActivity.Unix()
+		}
+		if lastSeen <= 0 || nowUnix-lastSeen >= rebindAfterSec {
+			return true, true, currentPeer
+		}
+	}
+	return false, false, currentPeer
+}
+
+func sameUDPAddr(a, b string) bool {
+	aa, errA := net.ResolveUDPAddr("udp", a)
+	bb, errB := net.ResolveUDPAddr("udp", b)
+	if errA != nil || errB != nil {
+		return a == b
+	}
+	if aa.Port != bb.Port {
+		return false
+	}
+	if aa.IP == nil || bb.IP == nil {
+		return aa.IP.String() == bb.IP.String()
+	}
+	return aa.IP.Equal(bb.IP)
 }
 
 func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
@@ -622,6 +745,9 @@ func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
+	}
+	if req.Transport == "" {
+		req.Transport = "policy-json"
 	}
 
 	claims, issuerKeyID, err := s.verifyToken(req.Token)
@@ -645,6 +771,17 @@ func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: "token key epoch expired"})
 		return
 	}
+	if err := verifyPathOpenTokenProof(req, claims); err != nil {
+		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: err.Error()})
+		return
+	}
+	if err := s.checkAndRememberProofNonce(claims, req, nowUnix); err != nil {
+		if err.Error() == "token proof replay" {
+			s.recordTokenProofReplayDrop()
+		}
+		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: err.Error()})
+		return
+	}
 
 	if len(claims.ExitScope) > 0 {
 		allowed := false
@@ -662,9 +799,6 @@ func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
 	if req.SessionID == "" {
 		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: "missing session_id"})
 		return
-	}
-	if req.Transport == "" {
-		req.Transport = "policy-json"
 	}
 	if s.dataMode == "opaque" && req.Transport != "wireguard-udp" {
 		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: "transport must be wireguard-udp in opaque mode"})
@@ -799,6 +933,15 @@ func validatePathOpenClaims(claims crypto.CapabilityClaims, nowUnix int64) error
 	if strings.TrimSpace(claims.Audience) != "exit" {
 		return errors.New("token audience invalid")
 	}
+	if strings.TrimSpace(claims.TokenType) != crypto.TokenTypeClientAccess {
+		return errors.New("token type invalid")
+	}
+	if strings.TrimSpace(claims.CNFEd25519) == "" {
+		return errors.New("token proof key missing")
+	}
+	if _, err := crypto.ParseEd25519PublicKey(claims.CNFEd25519); err != nil {
+		return errors.New("token proof key invalid")
+	}
 	if claims.Tier < 1 || claims.Tier > 3 {
 		return errors.New("token tier invalid")
 	}
@@ -811,6 +954,68 @@ func validatePathOpenClaims(claims crypto.CapabilityClaims, nowUnix int64) error
 	if claims.Tier > 1 && strings.TrimSpace(claims.Subject) == "" {
 		return errors.New("token subject required for tier>1")
 	}
+	return nil
+}
+
+func verifyPathOpenTokenProof(req proto.PathOpenRequest, claims crypto.CapabilityClaims) error {
+	pub, err := crypto.ParseEd25519PublicKey(claims.CNFEd25519)
+	if err != nil {
+		return errors.New("token proof key invalid")
+	}
+	input := crypto.PathOpenProofInput{
+		Token:           req.Token,
+		ExitID:          req.ExitID,
+		TokenProofNonce: req.TokenProofNonce,
+		ClientInnerPub:  req.ClientInnerPub,
+		Transport:       req.Transport,
+		RequestedMTU:    req.RequestedMTU,
+		RequestedRegion: req.RequestedRegion,
+	}
+	if err := crypto.VerifyPathOpenProof(req.TokenProof, pub, input); err != nil {
+		return errors.New("token proof invalid")
+	}
+	return nil
+}
+
+func (s *Service) checkAndRememberProofNonce(claims crypto.CapabilityClaims, req proto.PathOpenRequest, nowUnix int64) error {
+	if !s.tokenProofReplayGuard {
+		return nil
+	}
+	tokenID := strings.TrimSpace(claims.TokenID)
+	if tokenID == "" {
+		return errors.New("token id missing")
+	}
+	nonce := strings.TrimSpace(req.TokenProofNonce)
+	if nonce == "" {
+		return errors.New("token proof nonce required")
+	}
+	if len(nonce) > 256 {
+		return errors.New("token proof nonce invalid")
+	}
+	exp := claims.ExpiryUnix
+	if exp <= nowUnix {
+		exp = nowUnix + 1
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.proofNonceSeen == nil {
+		s.proofNonceSeen = make(map[string]map[string]int64)
+	}
+	seen := s.proofNonceSeen[tokenID]
+	if seen == nil {
+		seen = make(map[string]int64)
+		s.proofNonceSeen[tokenID] = seen
+	}
+	for k, until := range seen {
+		if nowUnix >= until {
+			delete(seen, k)
+		}
+	}
+	if _, exists := seen[nonce]; exists {
+		return errors.New("token proof replay")
+	}
+	seen[nonce] = exp
 	return nil
 }
 
@@ -848,9 +1053,23 @@ func (s *Service) authorizeNonce(sessionID string, nonce uint64, now time.Time) 
 func (s *Service) cleanupExpiredSessions(now time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	nowUnix := now.Unix()
 	for sid, session := range s.sessions {
-		if now.Unix() >= session.claims.ExpiryUnix {
+		if nowUnix >= session.claims.ExpiryUnix {
 			delete(s.sessions, sid)
+		}
+	}
+	for tokenID, seen := range s.proofNonceSeen {
+		active := false
+		for nonce, until := range seen {
+			if nowUnix >= until {
+				delete(seen, nonce)
+				continue
+			}
+			active = true
+		}
+		if !active {
+			delete(s.proofNonceSeen, tokenID)
 		}
 	}
 	s.metrics.ActiveSessions = uint64(len(s.sessions))
@@ -1121,6 +1340,22 @@ func (s *Service) recordRevokedTokenDrop() {
 func (s *Service) recordKeyEpochTokenDrop() {
 	s.mu.Lock()
 	s.metrics.DroppedTokenKeyEpoch++
+	s.metrics.AccountingUpdatedUnix = time.Now().Unix()
+	s.mu.Unlock()
+}
+
+func (s *Service) recordTokenProofReplayDrop() {
+	s.mu.Lock()
+	s.metrics.DroppedTokenProofReplay++
+	s.metrics.AccountingUpdatedUnix = time.Now().Unix()
+	s.mu.Unlock()
+}
+
+func (s *Service) recordSourceMismatchDrop(bytes uint64) {
+	s.mu.Lock()
+	s.metrics.DroppedSourceMismatch++
+	s.metrics.DroppedPackets++
+	s.metrics.DroppedBytes += bytes
 	s.metrics.AccountingUpdatedUnix = time.Now().Unix()
 	s.mu.Unlock()
 }

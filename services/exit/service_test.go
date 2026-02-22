@@ -53,8 +53,15 @@ func TestAuthorizePacketExpiredDenied(t *testing.T) {
 
 func TestValidatePathOpenClaims(t *testing.T) {
 	now := time.Now().Unix()
+	popPub, _, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	popPubB64 := crypto.EncodeEd25519PublicKey(popPub)
 	good := crypto.CapabilityClaims{
 		Audience:   "exit",
+		TokenType:  crypto.TokenTypeClientAccess,
+		CNFEd25519: popPubB64,
 		Subject:    "client-a",
 		Tier:       2,
 		ExpiryUnix: now + 60,
@@ -72,6 +79,31 @@ func TestValidatePathOpenClaims(t *testing.T) {
 			name: "bad audience",
 			claims: crypto.CapabilityClaims{
 				Audience:   "entry",
+				TokenType:  crypto.TokenTypeClientAccess,
+				CNFEd25519: popPubB64,
+				Subject:    "client-a",
+				Tier:       1,
+				ExpiryUnix: now + 60,
+				TokenID:    "jti-1",
+			},
+		},
+		{
+			name: "bad token type",
+			claims: crypto.CapabilityClaims{
+				Audience:   "exit",
+				TokenType:  crypto.TokenTypeProviderRole,
+				CNFEd25519: popPubB64,
+				Subject:    "client-a",
+				Tier:       1,
+				ExpiryUnix: now + 60,
+				TokenID:    "jti-1",
+			},
+		},
+		{
+			name: "missing token proof key",
+			claims: crypto.CapabilityClaims{
+				Audience:   "exit",
+				TokenType:  crypto.TokenTypeClientAccess,
 				Subject:    "client-a",
 				Tier:       1,
 				ExpiryUnix: now + 60,
@@ -82,6 +114,8 @@ func TestValidatePathOpenClaims(t *testing.T) {
 			name: "bad tier",
 			claims: crypto.CapabilityClaims{
 				Audience:   "exit",
+				TokenType:  crypto.TokenTypeClientAccess,
+				CNFEd25519: popPubB64,
 				Subject:    "client-a",
 				Tier:       0,
 				ExpiryUnix: now + 60,
@@ -92,6 +126,8 @@ func TestValidatePathOpenClaims(t *testing.T) {
 			name: "missing token id",
 			claims: crypto.CapabilityClaims{
 				Audience:   "exit",
+				TokenType:  crypto.TokenTypeClientAccess,
+				CNFEd25519: popPubB64,
 				Subject:    "client-a",
 				Tier:       1,
 				ExpiryUnix: now + 60,
@@ -101,6 +137,8 @@ func TestValidatePathOpenClaims(t *testing.T) {
 			name: "expired",
 			claims: crypto.CapabilityClaims{
 				Audience:   "exit",
+				TokenType:  crypto.TokenTypeClientAccess,
+				CNFEd25519: popPubB64,
 				Subject:    "client-a",
 				Tier:       1,
 				ExpiryUnix: now - 1,
@@ -111,6 +149,8 @@ func TestValidatePathOpenClaims(t *testing.T) {
 			name: "tier2 missing subject",
 			claims: crypto.CapabilityClaims{
 				Audience:   "exit",
+				TokenType:  crypto.TokenTypeClientAccess,
+				CNFEd25519: popPubB64,
 				Tier:       2,
 				ExpiryUnix: now + 60,
 				TokenID:    "jti-1",
@@ -124,6 +164,74 @@ func TestValidatePathOpenClaims(t *testing.T) {
 				t.Fatalf("expected validation error")
 			}
 		})
+	}
+}
+
+func TestVerifyPathOpenTokenProof(t *testing.T) {
+	popPub, popPriv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	claims := crypto.CapabilityClaims{
+		CNFEd25519: crypto.EncodeEd25519PublicKey(popPub),
+	}
+	req := proto.PathOpenRequest{
+		ExitID:          "exit-local-1",
+		Token:           "tok-1",
+		TokenProofNonce: "nonce-1",
+		ClientInnerPub:  "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+		Transport:       "policy-json",
+		RequestedMTU:    1280,
+		RequestedRegion: "local",
+	}
+	req.TokenProof, err = crypto.SignPathOpenProof(popPriv, crypto.PathOpenProofInput{
+		Token:           req.Token,
+		ExitID:          req.ExitID,
+		TokenProofNonce: req.TokenProofNonce,
+		ClientInnerPub:  req.ClientInnerPub,
+		Transport:       req.Transport,
+		RequestedMTU:    req.RequestedMTU,
+		RequestedRegion: req.RequestedRegion,
+	})
+	if err != nil {
+		t.Fatalf("sign proof: %v", err)
+	}
+	if err := verifyPathOpenTokenProof(req, claims); err != nil {
+		t.Fatalf("expected token proof verification success, got %v", err)
+	}
+
+	req.ExitID = "exit-other"
+	if err := verifyPathOpenTokenProof(req, claims); err == nil {
+		t.Fatalf("expected token proof verification failure for mutated request")
+	}
+}
+
+func TestCheckAndRememberProofNonceDisabled(t *testing.T) {
+	s := &Service{tokenProofReplayGuard: false}
+	claims := crypto.CapabilityClaims{TokenID: "jti-1", ExpiryUnix: time.Now().Add(time.Minute).Unix()}
+	req := proto.PathOpenRequest{}
+	if err := s.checkAndRememberProofNonce(claims, req, time.Now().Unix()); err != nil {
+		t.Fatalf("expected disabled guard to allow request, got %v", err)
+	}
+}
+
+func TestCheckAndRememberProofNonceReplay(t *testing.T) {
+	now := time.Now().Unix()
+	s := &Service{
+		tokenProofReplayGuard: true,
+		proofNonceSeen:        make(map[string]map[string]int64),
+	}
+	claims := crypto.CapabilityClaims{TokenID: "jti-1", ExpiryUnix: now + 60}
+	req := proto.PathOpenRequest{TokenProofNonce: "nonce-1"}
+	if err := s.checkAndRememberProofNonce(claims, req, now); err != nil {
+		t.Fatalf("first nonce should pass: %v", err)
+	}
+	if err := s.checkAndRememberProofNonce(claims, req, now); err == nil {
+		t.Fatalf("expected nonce replay rejection")
+	}
+	req2 := proto.PathOpenRequest{TokenProofNonce: "nonce-2"}
+	if err := s.checkAndRememberProofNonce(claims, req2, now); err != nil {
+		t.Fatalf("second nonce should pass: %v", err)
 	}
 }
 
@@ -458,6 +566,126 @@ func TestParseOpaqueDownlinkPacketLiveModeRequiresFraming(t *testing.T) {
 	}
 	if sid, payload, ok := s.parseOpaqueDownlinkPacket([]byte("raw-from-kernel"), now); ok {
 		t.Fatalf("expected live mode raw downlink drop, got sid=%s payload_len=%d", sid, len(payload))
+	}
+}
+
+func TestParseOpaqueDownlinkPacketLiveModeRequiresPlausibleWireGuard(t *testing.T) {
+	now := time.Now()
+	s := &Service{
+		liveWGMode: true,
+		sessions: map[string]sessionInfo{
+			"sid-1": {
+				claims:       crypto.CapabilityClaims{ExpiryUnix: now.Add(time.Minute).Unix()},
+				seenNonces:   map[uint64]struct{}{},
+				peerAddr:     "127.0.0.1:51820",
+				sessionKeyID: "k1",
+			},
+		},
+	}
+	shortWG := []byte{4, 0, 0, 0, 1}
+	if sid, payload, ok := s.parseOpaqueDownlinkPacket(relay.BuildDatagram("sid-1", shortWG), now); ok {
+		t.Fatalf("expected short wireguard-like payload rejected, got sid=%s payload_len=%d", sid, len(payload))
+	}
+	validWG := make([]byte, 32)
+	validWG[0] = 4
+	sid, payload, ok := s.parseOpaqueDownlinkPacket(relay.BuildDatagram("sid-1", validWG), now)
+	if !ok {
+		t.Fatalf("expected plausible wireguard payload accepted")
+	}
+	if sid != "sid-1" || len(payload) != len(validWG) {
+		t.Fatalf("unexpected parsed live payload sid=%s payload_len=%d", sid, len(payload))
+	}
+}
+
+func TestAllowSessionPeerRejectsMismatchByDefault(t *testing.T) {
+	now := time.Now()
+	s := &Service{
+		sessions: map[string]sessionInfo{
+			"sid-1": {
+				claims:       crypto.CapabilityClaims{ExpiryUnix: now.Add(time.Minute).Unix()},
+				seenNonces:   map[uint64]struct{}{},
+				peerAddr:     "127.0.0.1:51820",
+				peerLastSeen: now.Unix(),
+			},
+		},
+	}
+	allowed, rebound, current := s.allowSessionPeer("sid-1", "127.0.0.1:51899", now.Add(time.Second))
+	if allowed {
+		t.Fatalf("expected mismatch source rejected without rebind window")
+	}
+	if rebound {
+		t.Fatalf("did not expect rebound flag")
+	}
+	if current != "127.0.0.1:51820" {
+		t.Fatalf("expected current peer reported, got %s", current)
+	}
+}
+
+func TestAllowSessionPeerAllowsRebindAfterThreshold(t *testing.T) {
+	now := time.Now()
+	s := &Service{
+		peerRebindAfter: 10 * time.Second,
+		sessions: map[string]sessionInfo{
+			"sid-1": {
+				claims:       crypto.CapabilityClaims{ExpiryUnix: now.Add(time.Minute).Unix()},
+				seenNonces:   map[uint64]struct{}{},
+				peerAddr:     "127.0.0.1:51820",
+				peerLastSeen: now.Unix(),
+			},
+		},
+	}
+	allowedEarly, reboundEarly, _ := s.allowSessionPeer("sid-1", "127.0.0.1:51899", now.Add(5*time.Second))
+	if allowedEarly || reboundEarly {
+		t.Fatalf("expected early rebind rejection before threshold")
+	}
+	allowedLate, reboundLate, current := s.allowSessionPeer("sid-1", "127.0.0.1:51899", now.Add(11*time.Second))
+	if !allowedLate || !reboundLate {
+		t.Fatalf("expected rebind allowed after threshold")
+	}
+	if current != "127.0.0.1:51820" {
+		t.Fatalf("expected previous peer retained before commit, got %s", current)
+	}
+}
+
+func TestBindSessionPeerCommitsRebind(t *testing.T) {
+	now := time.Now()
+	s := &Service{
+		peerRebindAfter: 10 * time.Second,
+		sessions: map[string]sessionInfo{
+			"sid-1": {
+				claims:       crypto.CapabilityClaims{ExpiryUnix: now.Add(time.Minute).Unix()},
+				seenNonces:   map[uint64]struct{}{},
+				peerAddr:     "127.0.0.1:51820",
+				peerLastSeen: now.Unix(),
+			},
+		},
+	}
+	allowed, rebound, previous := s.bindSessionPeer("sid-1", "127.0.0.1:51899", now.Add(12*time.Second))
+	if !allowed || !rebound {
+		t.Fatalf("expected bindSessionPeer to commit rebind")
+	}
+	if previous != "127.0.0.1:51820" {
+		t.Fatalf("expected previous peer reported, got %s", previous)
+	}
+	got := s.sessions["sid-1"]
+	if got.peerAddr != "127.0.0.1:51899" {
+		t.Fatalf("expected peer address rebound, got %s", got.peerAddr)
+	}
+	if got.peerLastSeen != now.Add(12*time.Second).Unix() {
+		t.Fatalf("expected peer last seen updated, got %d", got.peerLastSeen)
+	}
+}
+
+func TestRecordSourceMismatchDropUpdatesMetrics(t *testing.T) {
+	s := &Service{}
+	s.recordSourceMismatchDrop(12)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.metrics.DroppedSourceMismatch != 1 {
+		t.Fatalf("expected mismatch counter incremented")
+	}
+	if s.metrics.DroppedPackets != 1 || s.metrics.DroppedBytes != 12 {
+		t.Fatalf("expected drop counters updated, got packets=%d bytes=%d", s.metrics.DroppedPackets, s.metrics.DroppedBytes)
 	}
 }
 

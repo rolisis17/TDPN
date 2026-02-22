@@ -39,8 +39,8 @@ func TestCommandConfigureSession(t *testing.T) {
 		t.Fatalf("configure failed: %v", err)
 	}
 
-	if len(fr.calls) != 4 {
-		t.Fatalf("expected 4 commands, got %d", len(fr.calls))
+	if len(fr.calls) != 5 {
+		t.Fatalf("expected 5 commands, got %d", len(fr.calls))
 	}
 	if fr.calls[0].name != "wg" {
 		t.Fatalf("expected first command wg, got %s", fr.calls[0].name)
@@ -48,6 +48,9 @@ func TestCommandConfigureSession(t *testing.T) {
 	wantFirst := []string{"set", "wg0", "private-key", "/tmp/exit.key", "listen-port", "51820"}
 	if !reflect.DeepEqual(fr.calls[0].args, wantFirst) {
 		t.Fatalf("first command mismatch: got %v want %v", fr.calls[0].args, wantFirst)
+	}
+	if fr.calls[1].name != "ip" || !reflect.DeepEqual(fr.calls[1].args, []string{"link", "set", "dev", "wg0", "up"}) {
+		t.Fatalf("expected interface-up command, got name=%s args=%v", fr.calls[1].name, fr.calls[1].args)
 	}
 }
 

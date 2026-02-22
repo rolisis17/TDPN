@@ -46,6 +46,9 @@ func (m *CommandManager) ConfigureSession(ctx context.Context, cfg SessionConfig
 		"listen-port", strconv.Itoa(cfg.ListenPort)); err != nil {
 		return err
 	}
+	if err := m.runner.Run(ctx, "ip", "link", "set", "dev", cfg.Interface, "up"); err != nil {
+		return err
+	}
 	if cfg.ExitInnerIP != "" {
 		if err := m.runner.Run(ctx, "ip", "addr", "replace", cfg.ExitInnerIP, "dev", cfg.Interface); err != nil {
 			return err

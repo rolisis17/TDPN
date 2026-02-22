@@ -76,5 +76,7 @@ Before exposing anything public:
 1. Run `./scripts/ci_local.sh`.
 2. Run `./scripts/integration_load_chaos.sh`.
 3. Run `./scripts/integration_lifecycle_chaos.sh`.
-4. Verify issuer key/epoch files persist across restart.
-5. If enabling command egress backend, validate firewall rules in a disposable environment first.
+4. Run `./scripts/integration_directory_auto_key_rotation.sh` if you plan to enable `DIRECTORY_KEY_ROTATE_SEC`.
+5. Set adjudication policy bounds (`DIRECTORY_ADJUDICATION_META_MIN_VOTES`, `DIRECTORY_DISPUTE_MAX_TTL_SEC`, `DIRECTORY_APPEAL_MAX_TTL_SEC`) to your risk tolerance before enabling federated trust sync.
+6. Verify issuer key/epoch files and directory key history files persist across restart.
+7. If enabling command egress backend, validate firewall rules in a disposable environment first.
