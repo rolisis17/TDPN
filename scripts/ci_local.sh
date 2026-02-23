@@ -46,6 +46,15 @@ echo "[ci] federation integration"
 echo "[ci] operator-quorum integration"
 ./scripts/integration_operator_quorum.sh
 
+echo "[ci] sync-status-chaos integration"
+./scripts/integration_sync_status_chaos.sh
+
+echo "[ci] peer-discovery-backoff integration"
+./scripts/integration_peer_discovery_backoff.sh
+
+echo "[ci] peer-discovery-require-hint integration"
+./scripts/integration_peer_discovery_require_hint.sh
+
 echo "[ci] distinct-operator integration"
 ./scripts/integration_distinct_operators.sh
 
@@ -61,6 +70,12 @@ echo "[ci] trust-feed integration"
 echo "[ci] opaque-source integration"
 ./scripts/integration_opaque_source_downlink.sh
 
+echo "[ci] opaque-udp-only integration"
+./scripts/integration_opaque_udp_only.sh
+
+echo "[ci] entry-live-wg-filter integration"
+./scripts/integration_entry_live_wg_filter.sh
+
 echo "[ci] session-reuse integration"
 ./scripts/integration_session_reuse.sh
 
@@ -75,6 +90,12 @@ echo "[ci] issuer-dispute integration"
 
 echo "[ci] adjudication-window-cap integration"
 ./scripts/integration_adjudication_window_caps.sh
+
+echo "[ci] adjudication-quorum integration"
+./scripts/integration_adjudication_quorum.sh
+
+echo "[ci] adjudication-operator-quorum integration"
+./scripts/integration_adjudication_operator_quorum.sh
 
 echo "[ci] multi-issuer integration"
 ./scripts/integration_multi_issuer.sh

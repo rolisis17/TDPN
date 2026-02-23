@@ -1,8 +1,8 @@
 {
-  "version": 234,
-  "key_epoch": 72,
-  "min_token_epoch": 72,
+  "version": 304,
+  "key_epoch": 74,
+  "min_token_epoch": 74,
   "revocations": {
-    "1771773406207794640": 1771773526
+    "1771828811928409380": 1771828932
   }
 }

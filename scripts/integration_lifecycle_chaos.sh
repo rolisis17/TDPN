@@ -37,8 +37,8 @@ trap cleanup EXIT
 
 ready=0
 for _ in $(seq 1 40); do
-  if curl -fsS "http://127.0.0.1:${ENTRY_PORT}/v1/health" >/dev/null && \
-    curl -fsS "http://127.0.0.1:${ISSUER_PORT}/v1/pubkey" >/dev/null; then
+  if curl -fsS "http://127.0.0.1:${ENTRY_PORT}/v1/health" >/dev/null 2>&1 && \
+    curl -fsS "http://127.0.0.1:${ISSUER_PORT}/v1/pubkey" >/dev/null 2>&1; then
     ready=1
     break
   fi

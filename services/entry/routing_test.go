@@ -1,6 +1,10 @@
 package entry
 
-import "testing"
+import (
+	"testing"
+
+	"privacynode/pkg/relay"
+)
 
 func TestRoutePacketTargetClientToExit(t *testing.T) {
 	state := sessionState{exitDataAddr: "127.0.0.1:51821"}
@@ -107,5 +111,45 @@ func TestSameUDPAddrLocalhostEquivalent(t *testing.T) {
 	}
 	if sameUDPAddr("127.0.0.1:1234", "127.0.0.1:1235") {
 		t.Fatalf("expected different ports to not match")
+	}
+}
+
+func TestNormalizePathTransportFallback(t *testing.T) {
+	if got := normalizePathTransport("", "wireguard-udp"); got != "wireguard-udp" {
+		t.Fatalf("expected request fallback, got %q", got)
+	}
+	if got := normalizePathTransport("", ""); got != "policy-json" {
+		t.Fatalf("expected policy-json default, got %q", got)
+	}
+}
+
+func TestAllowForwardPayloadLiveModeAllowsPlausibleWireGuard(t *testing.T) {
+	raw := make([]byte, 32)
+	raw[0] = 4
+	payload := relay.BuildOpaquePayload(1, raw)
+	ok, reason := allowForwardPayload("wireguard-udp", payload, true)
+	if !ok {
+		t.Fatalf("expected payload allowed, reason=%s", reason)
+	}
+}
+
+func TestAllowForwardPayloadLiveModeRejectsNonWireGuard(t *testing.T) {
+	payload := relay.BuildOpaquePayload(1, []byte("not-wireguard"))
+	ok, reason := allowForwardPayload("wireguard-udp", payload, true)
+	if ok {
+		t.Fatalf("expected payload rejected")
+	}
+	if reason != "non-wireguard-live" {
+		t.Fatalf("expected non-wireguard-live reason, got %q", reason)
+	}
+}
+
+func TestAllowForwardPayloadLiveModeRejectsMalformedOpaque(t *testing.T) {
+	ok, reason := allowForwardPayload("wireguard-udp", []byte{1, 2, 3}, true)
+	if ok {
+		t.Fatalf("expected malformed opaque rejected")
+	}
+	if reason != "invalid-opaque-live" {
+		t.Fatalf("expected invalid-opaque-live reason, got %q", reason)
 	}
 }

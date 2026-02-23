@@ -1,0 +1,14 @@
+./client_command.go
+./client_noop.go
+./client_types.go
+./command.go
+./keys.go
+./noop.go
+./preflight.go
+./pubkey.go
+./types.go
+./client_command_test.go
+./command_test.go
+./keys_test.go
+./preflight_test.go
+./pubkey_test.go

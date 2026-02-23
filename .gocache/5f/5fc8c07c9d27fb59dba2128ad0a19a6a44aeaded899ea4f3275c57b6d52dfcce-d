@@ -1,0 +1,9 @@
+./service.go
+./governance_status_test.go
+./key_test.go
+./provider_api_test.go
+./pubkeys_test.go
+./selection_feed_test.go
+./service_test.go
+./sync_status_test.go
+./sync_test.go

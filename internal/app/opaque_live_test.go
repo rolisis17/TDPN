@@ -131,6 +131,57 @@ func TestDrainOpaqueDownlinkNonLiveAllowsOpaquePayload(t *testing.T) {
 	}
 }
 
+func TestForwardOpaqueFromUDPLiveModeDropsNonWireGuard(t *testing.T) {
+	innerAddr := freeUDPAddr(t)
+	c := &Client{
+		innerUDPAddr:      innerAddr,
+		innerMaxPkts:      2,
+		opaqueInitialUpMS: 350,
+		liveWGMode:        true,
+	}
+
+	nonWGPayload := []byte("not-wireguard")
+	wgPayload := make([]byte, 32)
+	wgPayload[0] = 4
+
+	go func() {
+		time.Sleep(40 * time.Millisecond)
+		target, err := net.ResolveUDPAddr("udp", innerAddr)
+		if err != nil {
+			return
+		}
+		conn, err := net.DialUDP("udp", nil, target)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_, _ = conn.Write(nonWGPayload)
+		_, _ = conn.Write(wgPayload)
+	}()
+
+	var forwarded [][]byte
+	sendFrame := func(payload []byte) error {
+		forwarded = append(forwarded, append([]byte(nil), payload...))
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	count, err := c.forwardOpaqueFromUDP(ctx, sendFrame)
+	if err != nil {
+		t.Fatalf("forwardOpaqueFromUDP: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected one live-compatible packet forwarded, got %d", count)
+	}
+	if len(forwarded) != 1 {
+		t.Fatalf("expected one payload forwarded, got %d", len(forwarded))
+	}
+	if !bytes.Equal(forwarded[0], wgPayload) {
+		t.Fatalf("unexpected forwarded payload got=%x want=%x", forwarded[0], wgPayload)
+	}
+}
+
 func TestSendOpaqueTrafficSessionModeRequiresInitialUplink(t *testing.T) {
 	entry, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
 	if err != nil {

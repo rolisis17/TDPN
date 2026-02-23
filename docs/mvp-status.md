@@ -23,10 +23,15 @@
 - WG session metadata exchange (`exit_inner_pub`, IPs, MTU, keepalive, session key id).
 - Pluggable WG backends on both client/exit (`noop` + `command`).
 - Command WG configuration hardening: explicit client/exit interface-up and optional client route installation for configured allowed IPs.
+- Client/exit command backends auto-derive WireGuard public keys from configured private keys when `CLIENT_WG_PUBLIC_KEY` / `EXIT_WG_PUBKEY` are unset/invalid, with fail-fast mismatch detection against configured keys.
 - Command-backend runtime preflight (`wg`/`ip`, interface, key path) and strict no-synthetic fallback in command/live modes.
+- Exit command-mode port/bridge hardening: explicit `EXIT_WG_LISTEN_PORT` separation from `EXIT_DATA_ADDR` plus optional per-session WG kernel proxy bridging (`EXIT_WG_KERNEL_PROXY`).
+- Client optional UDP-only opaque uplink enforcement (`CLIENT_DISABLE_SYNTHETIC_FALLBACK`) for real packet-origin traffic in non-command scaffolds.
 - Live-WG guardrails: required downlink/uplink sink wiring in live mode and non-WireGuard payload drop on exit live path.
 - Live-WG downlink source hardening: raw downlink source packets must be session-framed in live mode.
 - Live-WG packet plausibility hardening: live mode requires valid WireGuard framing plus type-aware minimum packet lengths on client/exit paths.
+- Live-WG uplink hardening: client drops non-plausible WireGuard payloads at ingress before entry forwarding in live mode.
+- Optional entry live-WG forwarding hardening (`ENTRY_LIVE_WG_MODE`): entry drops malformed/non-plausible opaque payloads for `wireguard-udp` sessions before forwarding.
 - Exit session source-lock hardening on data plane (drop mismatched peer source by default, optional delayed rebind).
 - Client persistent opaque-session bridging mode (`CLIENT_OPAQUE_SESSION_SEC`) with initial uplink readiness gating for command/live-style operation.
 - Exit opaque downlink source ingestion (`EXIT_OPAQUE_SOURCE_ADDR`) with session-bound return forwarding and metrics.
@@ -53,9 +58,13 @@
 - Directory federation anti-capture hardening: peer/issuer operator quorum controls (`DIRECTORY_PEER_MIN_OPERATORS`, `DIRECTORY_ISSUER_MIN_OPERATORS`) plus operator-deduped trust/dispute/appeal vote counting.
 - Directory peer sync (pull-based) with signature verification, optional peer key pinning/TOFU trust, quorum-style conflict resolution (`DIRECTORY_PEER_MIN_VOTES`), and local re-signing for published descriptors.
 - Directory peer sync anti-entropy hardening: ETag incremental pulls, per-peer cache reuse, hop-limited loop resistance (`origin_operator`/`hop_count`), and peer score vote thresholds (`DIRECTORY_PEER_SCORE_MIN_VOTES`).
+- Directory admin sync observability endpoint (`/v1/admin/sync-status`) with per-run quorum outcome and distinct-source operator tracking.
 - Directory peer push-gossip relay ingestion (`/v1/gossip/relays`) with signature verification and periodic fanout scheduler (`DIRECTORY_GOSSIP_SEC`, `DIRECTORY_GOSSIP_FANOUT`).
 - Signed directory peer-membership feed (`/v1/peers`) with seeded dynamic peer discovery (`DIRECTORY_PEER_DISCOVERY*`).
 - Directory peer discovery quorum hardening: discovered peers can require multiple distinct source-operator sightings before sync admission (`DIRECTORY_PEER_DISCOVERY_MIN_VOTES`).
+- Directory peer discovery hint-admission hardening: optional requirement that discovered peers include signed operator + pubkey hints before sync admission (`DIRECTORY_PEER_DISCOVERY_REQUIRE_HINT`).
+- Directory discovered-peer health hardening: repeated discovered-peer sync failures trigger cooldown/backoff suppression (`DIRECTORY_PEER_DISCOVERY_FAIL_THRESHOLD`, `DIRECTORY_PEER_DISCOVERY_BACKOFF_SEC`, `DIRECTORY_PEER_DISCOVERY_MAX_BACKOFF_SEC`).
+- Directory admin peer membership observability endpoint (`/v1/admin/peer-status`) exposing configured/discovered eligibility, cooldown, and per-peer failure metadata.
 - Signed directory peer-hint metadata (`peer_hints`) with discovery-time peer pubkey hint pinning.
 - Directory peer sync trust aggregation: signed peer trust-attestation ingestion with vote thresholding (`DIRECTORY_PEER_TRUST_MIN_VOTES`) and operator-deduped voting.
 - Directory peer dispute aggregation: vote-thresholded dispute metadata propagation (`DIRECTORY_PEER_DISPUTE_MIN_VOTES`) with operator-deduped voting.
@@ -65,8 +74,13 @@
 - Directory issuer appeal aggregation: independent vote-thresholded appeal metadata propagation (`DIRECTORY_ISSUER_APPEAL_MIN_VOTES`) with operator-deduped voting.
 - Outlier-resistant adjudication aggregation: dispute tier caps use consensus voting and dispute/appeal windows use median time selection.
 - Adjudication metadata quorum controls: `case_id` / `evidence_ref` publication can be gated independently with `DIRECTORY_ADJUDICATION_META_MIN_VOTES`.
+- Adjudication metadata pair-integrity hardening: published `case_id` and `evidence_ref` are selected from the same voted source pair (no cross-source field mixing).
+- Final adjudication publication quorum controls: aggregated dispute/appeal signals can require final vote and ratio thresholds (`DIRECTORY_FINAL_DISPUTE_MIN_VOTES`, `DIRECTORY_FINAL_APPEAL_MIN_VOTES`, `DIRECTORY_FINAL_ADJUDICATION_MIN_RATIO`).
+- Final adjudication operator quorum controls: aggregated dispute/appeal publication can require distinct operator count (`DIRECTORY_FINAL_ADJUDICATION_MIN_OPERATORS`).
+- Final adjudication policy consistency hardening: final quorum/operator thresholds now gate both trust-attestation publication and trust-derived selection scoring.
 - Adjudication window horizon caps: dispute/appeal windows are bounded before aggregation/publication (`DIRECTORY_DISPUTE_MAX_TTL_SEC`, `DIRECTORY_APPEAL_MAX_TTL_SEC`).
 - Directory trust aggregation appeal propagation (`appeal_until`) with vote-thresholded blending into published attestations.
+- Directory admin governance observability endpoint (`/v1/admin/governance-status`) exposing effective adjudication policy, upstream dispute/appeal signal+operator counts/ids, suppressed-vs-published adjudication counters, and per-relay suppression details.
 - Token revocation feed (`/v1/revocations`) with exit-side periodic enforcement.
 - Signed/epoch-style revocation feed (`generated_at`/`expires_at` + signature) with exit-side verification.
 - Exit multi-issuer token verification and revocation feed enforcement (`ISSUER_URLS`, `ISSUER_REVOCATIONS_URLS`).
@@ -77,12 +91,12 @@
 - Directory signer rollover policy: persistent key file, bounded previous-key history (`DIRECTORY_KEY_HISTORY`), and optional automatic key rotation (`DIRECTORY_KEY_ROTATE_SEC`).
 - Advanced exit locality policy: geo-confidence-gated country/region matching with configurable fallback order.
 - Production-hardened exit command egress scaffolding: dedicated NAT chain setup/cleanup and accounting snapshot export.
-- Local/CI automation scripts (`scripts/ci_local.sh`, challenge/revocation/token-proof-replay/provider-api/federation/operator-quorum/distinct-operators/directory-sync/directory-gossip/selection-feed/trust-feed/opaque-source/persistent-opaque-session/session-reuse/session-handoff/issuer-trust-sync/issuer-dispute/adjudication-window-caps/multi-issuer/load-chaos integrations, GitHub Actions workflow).
-- Extended deep test suite (`integration_http_cache`, `integration_directory_auto_key_rotation`, `integration_key_epoch_rotation`, `integration_directory_gossip`, `integration_operator_quorum`, `integration_distinct_operators`, `integration_peer_discovery`, `integration_peer_discovery_quorum`, `integration_opaque_source_downlink`, `integration_persistent_opaque_session`, `integration_session_reuse`, `integration_session_handoff`, `integration_trust_feed`, `integration_issuer_trust_sync`, `integration_issuer_dispute`, `integration_adjudication_window_caps`, `integration_lifecycle_chaos`, `integration_stress_bootstrap`, `deep_test_suite`).
+- Local/CI automation scripts (`scripts/ci_local.sh`, challenge/revocation/token-proof-replay/provider-api/federation/operator-quorum/sync-status-chaos/distinct-operators/directory-sync/directory-gossip/selection-feed/trust-feed/opaque-source/opaque-udp-only/entry-live-wg-filter/persistent-opaque-session/session-reuse/session-handoff/issuer-trust-sync/issuer-dispute/adjudication-window-caps/adjudication-quorum/adjudication-operator-quorum/multi-issuer/load-chaos integrations, GitHub Actions workflow).
+- Extended deep test suite (`integration_http_cache`, `integration_directory_auto_key_rotation`, `integration_key_epoch_rotation`, `integration_directory_gossip`, `integration_operator_quorum`, `integration_sync_status_chaos`, `integration_distinct_operators`, `integration_peer_discovery`, `integration_peer_discovery_quorum`, `integration_peer_discovery_backoff`, `integration_peer_discovery_require_hint`, `integration_opaque_source_downlink`, `integration_opaque_udp_only`, `integration_entry_live_wg_filter`, `integration_persistent_opaque_session`, `integration_session_reuse`, `integration_session_handoff`, `integration_trust_feed`, `integration_issuer_trust_sync`, `integration_issuer_dispute`, `integration_adjudication_window_caps`, `integration_adjudication_quorum`, `integration_adjudication_operator_quorum`, `integration_lifecycle_chaos`, `integration_stress_bootstrap`, `deep_test_suite`).
 - Operational deployment assets (Docker Compose + systemd service units/env templates).
 
 ## In Progress / Partial
-- Real WG interface packet plumbing is scaffolded; bidirectional opaque relay through entry/client/exit is in place (including exit downlink source path), but production end-to-end cryptographic WG interface integration remains pending.
+- Real WG interface packet plumbing is scaffolded; bidirectional opaque relay through entry/client/exit is in place (including exit downlink source path and optional exit-side command-mode WG UDP kernel-proxy bridge), but production end-to-end cryptographic WG interface integration remains pending.
 - Federated reputation/trust exchange includes directory peer score aggregation, peer trust-attestation exchange, issuer trust/dispute ingestion, appeal propagation, case/evidence metadata exchange, and client/entry/directory operator quorum controls; governance and anti-capture policy are still partial.
 - Directory anti-entropy includes pull sync + ETag + push-gossip fanout + signed seeded peer discovery; broader internet-scale membership/discovery remains partial.
 

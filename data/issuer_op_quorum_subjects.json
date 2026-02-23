@@ -1,0 +1,13 @@
+{
+  "exit-local-1": {
+    "subject": "exit-local-1",
+    "kind": "relay-exit",
+    "tier": 1,
+    "reputation": 0.95,
+    "bond": 550,
+    "tier_cap": 1,
+    "dispute_until": 1771832408,
+    "dispute_case_id": "case-operator-quorum",
+    "dispute_evidence_ref": "evidence://operator-quorum"
+  }
+}

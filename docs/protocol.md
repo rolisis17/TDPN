@@ -88,6 +88,15 @@ Serialization for MVP:
 - `POST /v1/provider/relay/upsert`
   - Provider-role token gated relay advertisement endpoint for directory ingestion.
   - Requires `aud=provider` + `token_type=provider_role`.
+- `GET /v1/admin/sync-status`
+  - Directory admin endpoint exposing latest peer/issuer sync quorum outcome (`success_sources`, distinct `source_operators`, quorum state, error).
+  - Requires `X-Admin-Token`.
+- `GET /v1/admin/governance-status`
+  - Directory admin endpoint exposing effective adjudication policy (`meta_min_votes`, final vote thresholds/ratio), upstream dispute/appeal signal counts, upstream operator counts/IDs, suppressed-vs-published adjudication counters, and per-relay suppression details.
+  - Requires `X-Admin-Token`.
+- `GET /v1/admin/peer-status`
+  - Directory admin endpoint exposing configured/discovered peer membership, eligibility, cooldown state, voter/operator counts, and last sync success/failure metadata.
+  - Requires `X-Admin-Token`.
 - `GET /v1/pubkeys`
   - Returns current and previous issuer pubkeys to support key rollover windows.
 - `GET /v1/trust/relays`
@@ -212,12 +221,21 @@ Directory peer-membership feed shape:
 - Directory peer sync can require distinct source operators (`DIRECTORY_PEER_MIN_OPERATORS`, fallback `DIRECTORY_MIN_OPERATORS`) before accepting a sync round.
 - Directory peer sync conflict handling can require matching peer descriptor votes (`DIRECTORY_PEER_MIN_VOTES`) per relay key.
 - Directory peer sync can require matching peer score votes (`DIRECTORY_PEER_SCORE_MIN_VOTES`), trust-attestation votes (`DIRECTORY_PEER_TRUST_MIN_VOTES`), dispute votes (`DIRECTORY_PEER_DISPUTE_MIN_VOTES`), appeal votes (`DIRECTORY_PEER_APPEAL_MIN_VOTES`), and enforce hop limits (`DIRECTORY_PEER_MAX_HOPS`) to resist sync loops; votes are deduped per source operator.
+- Directory records latest peer/issuer sync quorum outcomes for operator accountability (`/v1/admin/sync-status`).
+- Directory admin can inspect current adjudication policy, aggregate disputed/appeal publication state, and per-relay suppression details via `/v1/admin/governance-status`.
 - Directory peer gossip fanout can be enabled (`DIRECTORY_GOSSIP_SEC`, `DIRECTORY_GOSSIP_FANOUT`) for lower-latency relay propagation.
 - Directory can also ingest issuer-signed trust attestations (`DIRECTORY_ISSUER_TRUST_URLS`) and require issuer operator quorum (`DIRECTORY_ISSUER_MIN_OPERATORS`, fallback `DIRECTORY_MIN_OPERATORS`) plus issuer trust/dispute/appeal vote thresholds (`DIRECTORY_ISSUER_TRUST_MIN_VOTES`, `DIRECTORY_ISSUER_DISPUTE_MIN_VOTES`, `DIRECTORY_ISSUER_APPEAL_MIN_VOTES`) before using those signals (votes are deduped per issuer operator).
 - For dispute/appeal metadata aggregation, tier-cap uses vote consensus and expiry windows use median time selection to reduce outlier influence.
+- For adjudication metadata integrity, `case_id` and `evidence_ref` are selected and published as a voted pair; mismatched cross-source field mixing is rejected.
 - Adjudication metadata fields (`case_id`, `evidence_ref`) can require independent vote quorum before publication via `DIRECTORY_ADJUDICATION_META_MIN_VOTES`.
+- Final dispute/appeal publication in directory trust feed can additionally require configurable aggregated vote thresholds and ratio quorum (`DIRECTORY_FINAL_DISPUTE_MIN_VOTES`, `DIRECTORY_FINAL_APPEAL_MIN_VOTES`, `DIRECTORY_FINAL_ADJUDICATION_MIN_RATIO`).
+- Final dispute/appeal publication can also require distinct operator quorum via `DIRECTORY_FINAL_ADJUDICATION_MIN_OPERATORS`.
+- Final adjudication quorum policy is applied consistently to both published trust attestations and trust-derived selection scoring.
 - Dispute/appeal windows are also bounded by configurable max horizons (`DIRECTORY_DISPUTE_MAX_TTL_SEC`, `DIRECTORY_APPEAL_MAX_TTL_SEC`) before publication and scoring, limiting long-window capture attempts.
 - Seeded dynamic peer discovery can be enabled with `DIRECTORY_PEER_DISCOVERY`, bounded with `DIRECTORY_PEER_DISCOVERY_MAX` / `DIRECTORY_PEER_DISCOVERY_TTL_SEC`, and gated by distinct source-operator sightings via `DIRECTORY_PEER_DISCOVERY_MIN_VOTES`.
+- Optional strict hint gate (`DIRECTORY_PEER_DISCOVERY_REQUIRE_HINT=1`) requires discovered peers to carry signed `operator` + `pub_key` hints before admission.
+- Discovered peers can be temporarily cooled down after repeated sync failures using `DIRECTORY_PEER_DISCOVERY_FAIL_THRESHOLD`, `DIRECTORY_PEER_DISCOVERY_BACKOFF_SEC`, and `DIRECTORY_PEER_DISCOVERY_MAX_BACKOFF_SEC` (exponential backoff for unstable peers).
+- Directory admin can inspect discovered-peer eligibility/cooldown state through `/v1/admin/peer-status`.
 - When signed peer hints include `pub_key`, directory verifies `/v1/pubkeys` (or legacy `/v1/pubkey`) response matches a hinted key before importing data.
 
 ## Session Establishment
@@ -314,9 +332,15 @@ Implementation note:
 - Exit supports `WG_BACKEND=noop` (default) and `WG_BACKEND=command`.
 - `command` mode applies peer config using `wg`/`ip` commands on `PATH_OPEN`, explicitly brings the WG interface up, and removes peer on `PATH_CLOSE`.
 - In `command` mode, startup preflight validates `wg`/`ip` binaries, configured interface availability, and private key path readability.
+- In `command` mode, `EXIT_WG_LISTEN_PORT` must be distinct from `EXIT_DATA_ADDR` port; startup fails on conflicts.
+- In `command` mode, exit derives `exit_inner_pub` from `EXIT_WG_PRIVATE_KEY_PATH` when `EXIT_WG_PUBKEY` is unset/invalid.
+- In `command` mode, exit fails startup if configured `EXIT_WG_PUBKEY` does not match the private key-derived public key.
 - Client supports `CLIENT_WG_BACKEND=noop` (default) and `CLIENT_WG_BACKEND=command`.
 - In client command mode, `PATH_OPEN_ACK` hints are used to configure/remove client peer state and bring the client WG interface up.
 - Client command mode requires `DATA_PLANE_MODE=opaque` and `CLIENT_INNER_SOURCE=udp`; synthetic payload fallback is disabled.
+- In client command mode, client derives `CLIENT_WG_PUBLIC_KEY` from `CLIENT_WG_PRIVATE_KEY_PATH` when unset/invalid.
+- In client command mode, client fails startup if configured `CLIENT_WG_PUBLIC_KEY` does not match the private key-derived public key.
+- `CLIENT_DISABLE_SYNTHETIC_FALLBACK=1` can enforce UDP-origin opaque uplink traffic even outside command/live mode.
 - Client command mode supports configurable `allowed-ips` via `CLIENT_WG_ALLOWED_IPS` and optional route installation via `CLIENT_WG_INSTALL_ROUTE=1`.
 - Client can source opaque payloads from local UDP (`CLIENT_INNER_SOURCE=udp`) to mimic real interface output.
 - Client can emit received downlink opaque payload bytes to local UDP (`CLIENT_OPAQUE_SINK_ADDR`) to mimic interface input (required in live WG mode).
@@ -324,8 +348,9 @@ Implementation note:
 - In command/live-style operation (no synthetic fallback), client requires first uplink UDP packet within `CLIENT_OPAQUE_INITIAL_UPLINK_TIMEOUT_MS` or bootstrap fails fast.
 - Exit can forward accepted opaque payload bytes to local UDP sink (`EXIT_OPAQUE_SINK_ADDR`) to mimic interface/input handoff (required in live WG mode).
 - Exit can ingest raw downlink opaque payload bytes from UDP source (`EXIT_OPAQUE_SOURCE_ADDR`) and inject them into active sessions toward entry/client.
+- Exit can optionally bridge opaque WG payloads into local WG UDP socket I/O with `EXIT_WG_KERNEL_PROXY=1` (command mode), using per-session loopback proxy sockets tied to `EXIT_WG_LISTEN_PORT`.
 - Exit source-lock binds each active session to one uplink peer source by default and drops mismatched sources; optional delayed rebind can be enabled with `EXIT_PEER_REBIND_SEC`.
-- In live WG mode (`CLIENT_LIVE_WG_MODE=1`, `EXIT_LIVE_WG_MODE=1`), both client and exit drop opaque payloads that fail WireGuard framing plus type-aware minimum-length checks, and exit downlink source packets must be session-framed datagrams.
+- In live WG mode (`CLIENT_LIVE_WG_MODE=1`, `EXIT_LIVE_WG_MODE=1`), client drops non-plausible WG payloads on uplink before forwarding, client/exit drop non-plausible WG payloads on downlink ingress, exit downlink source packets must be session-framed datagrams, and entry can optionally enforce live WG plausibility checks with `ENTRY_LIVE_WG_MODE=1`.
 - Optional `wgio` role in `node` bridges WG-side UDP and relay-side UDP sockets in one process.
 - Optional `wgiotap` role in `node` can observe WG-side downlink UDP and report packet stats.
 - Optional `wgioinject` role in `node` can generate WG-like/non-WG UDP test packets for uplink simulation.

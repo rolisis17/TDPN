@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"encoding/base64"
+	"errors"
 	"testing"
 	"time"
 )
@@ -30,6 +32,11 @@ func TestAllowSyntheticFallback(t *testing.T) {
 		{
 			name:   "command-live-disabled",
 			client: Client{wgBackend: "command", liveWGMode: true},
+			want:   false,
+		},
+		{
+			name:   "explicit-disable",
+			client: Client{wgBackend: "noop", liveWGMode: false, disableSynthetic: true},
 			want:   false,
 		},
 	}
@@ -66,6 +73,110 @@ func TestValidateRuntimeConfigCommandModeRequiresOpaqueUDP(t *testing.T) {
 	}
 	if err := c.validateRuntimeConfig(); err == nil {
 		t.Fatalf("expected command mode validation error for non-opaque config")
+	}
+}
+
+func TestValidateRuntimeConfigDisableSyntheticRequiresUDPSource(t *testing.T) {
+	c := &Client{
+		dataMode:         "opaque",
+		innerSource:      "synthetic",
+		wgBackend:        "noop",
+		disableSynthetic: true,
+	}
+	if err := c.validateRuntimeConfig(); err == nil {
+		t.Fatalf("expected validation error when synthetic fallback disabled without udp source")
+	}
+}
+
+func TestEnsureCommandWGPubKeyDerivesWhenUnset(t *testing.T) {
+	original := deriveClientWGPublicFromPrivateFile
+	defer func() { deriveClientWGPublicFromPrivateFile = original }()
+
+	validPub := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	called := 0
+	deriveClientWGPublicFromPrivateFile = func(_ context.Context, privateKeyPath string) (string, error) {
+		called++
+		if privateKeyPath != "/tmp/wg-client.key" {
+			t.Fatalf("unexpected private key path: %s", privateKeyPath)
+		}
+		return validPub, nil
+	}
+
+	c := &Client{
+		wgBackend:    "command",
+		wgPrivateKey: "/tmp/wg-client.key",
+		clientWGPub:  "",
+	}
+	if err := c.ensureCommandWGPubKey(context.Background()); err != nil {
+		t.Fatalf("ensure command wg pubkey: %v", err)
+	}
+	if called != 1 {
+		t.Fatalf("expected one derive call, got %d", called)
+	}
+	if c.clientWGPub != validPub {
+		t.Fatalf("expected derived pubkey, got %q", c.clientWGPub)
+	}
+}
+
+func TestEnsureCommandWGPubKeySkipsDeriveWhenAlreadyValid(t *testing.T) {
+	original := deriveClientWGPublicFromPrivateFile
+	defer func() { deriveClientWGPublicFromPrivateFile = original }()
+
+	called := 0
+	validPub := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	deriveClientWGPublicFromPrivateFile = func(context.Context, string) (string, error) {
+		called++
+		return validPub, nil
+	}
+
+	c := &Client{
+		wgBackend:   "command",
+		clientWGPub: validPub,
+	}
+	if err := c.ensureCommandWGPubKey(context.Background()); err != nil {
+		t.Fatalf("ensure command wg pubkey: %v", err)
+	}
+	if called != 1 {
+		t.Fatalf("expected derive call for consistency check, got %d", called)
+	}
+}
+
+func TestEnsureCommandWGPubKeyRejectsMismatch(t *testing.T) {
+	original := deriveClientWGPublicFromPrivateFile
+	defer func() { deriveClientWGPublicFromPrivateFile = original }()
+
+	configuredPub := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	derivedPubBytes := make([]byte, 32)
+	derivedPubBytes[0] = 1
+	derivedPub := base64.StdEncoding.EncodeToString(derivedPubBytes)
+
+	deriveClientWGPublicFromPrivateFile = func(context.Context, string) (string, error) {
+		return derivedPub, nil
+	}
+
+	c := &Client{
+		wgBackend:   "command",
+		clientWGPub: configuredPub,
+	}
+	if err := c.ensureCommandWGPubKey(context.Background()); err == nil {
+		t.Fatalf("expected mismatch error")
+	}
+}
+
+func TestEnsureCommandWGPubKeyReturnsDeriveError(t *testing.T) {
+	original := deriveClientWGPublicFromPrivateFile
+	defer func() { deriveClientWGPublicFromPrivateFile = original }()
+
+	deriveClientWGPublicFromPrivateFile = func(context.Context, string) (string, error) {
+		return "", errors.New("derive failed")
+	}
+
+	c := &Client{
+		wgBackend:    "command",
+		wgPrivateKey: "/tmp/wg-client.key",
+	}
+	if err := c.ensureCommandWGPubKey(context.Background()); err == nil {
+		t.Fatalf("expected derive error")
 	}
 }
 

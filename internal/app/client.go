@@ -55,8 +55,11 @@ type Client struct {
 	wgPrivateKey          string
 	wgAllowedIPs          string
 	wgInstallRoute        bool
+	wgKernelProxy         bool
+	wgProxyAddr           string
 	wgManager             wg.ClientManager
 	liveWGMode            bool
+	disableSynthetic      bool
 	healthCheckEnabled    bool
 	healthCheckTimeout    time.Duration
 	healthCacheTTL        time.Duration
@@ -112,6 +115,8 @@ type clientActiveSession struct {
 	entryRelayID    string
 	exitRelayID     string
 }
+
+var deriveClientWGPublicFromPrivateFile = wg.DerivePublicKeyFromPrivateFile
 
 func NewClient() *Client {
 	directoryURL := os.Getenv("DIRECTORY_URL")
@@ -211,7 +216,13 @@ func NewClient() *Client {
 		wgAllowedIPs = "0.0.0.0/0"
 	}
 	wgInstallRoute := os.Getenv("CLIENT_WG_INSTALL_ROUTE") == "1"
+	wgKernelProxy := os.Getenv("CLIENT_WG_KERNEL_PROXY") == "1"
+	wgProxyAddr := strings.TrimSpace(os.Getenv("CLIENT_WG_PROXY_ADDR"))
+	if wgProxyAddr == "" {
+		wgProxyAddr = "127.0.0.1:0"
+	}
 	liveWGMode := os.Getenv("CLIENT_LIVE_WG_MODE") == "1"
+	disableSynthetic := os.Getenv("CLIENT_DISABLE_SYNTHETIC_FALLBACK") == "1"
 	healthCheckEnabled := os.Getenv("CLIENT_SELECTION_HEALTHCHECK") != "0"
 	if os.Getenv("CLIENT_HEALTHCHECK_DISABLE") == "1" {
 		healthCheckEnabled = false
@@ -325,8 +336,11 @@ func NewClient() *Client {
 		wgPrivateKey:          wgPrivateKey,
 		wgAllowedIPs:          wgAllowedIPs,
 		wgInstallRoute:        wgInstallRoute,
+		wgKernelProxy:         wgKernelProxy,
+		wgProxyAddr:           wgProxyAddr,
 		wgManager:             wgManager,
 		liveWGMode:            liveWGMode,
+		disableSynthetic:      disableSynthetic,
 		healthCheckEnabled:    healthCheckEnabled,
 		healthCheckTimeout:    time.Duration(healthTimeoutMS) * time.Millisecond,
 		healthCacheTTL:        time.Duration(healthCacheSec) * time.Second,
@@ -361,14 +375,17 @@ func (c *Client) Run(ctx context.Context) error {
 	if bootstrapInterval <= 0 {
 		bootstrapInterval = 5 * time.Second
 	}
-	log.Printf("client role enabled: directories=%d min_sources=%d min_operators=%d min_votes=%d issuer=%s subject=%s entry=%s mode=%s source=%s trust_strict=%t wg_backend=%s iface=%s allowed_ips=%s install_route=%t opaque_session_sec=%d opaque_initial_uplink_timeout_ms=%d health_check=%t path_attempts=%d exit_country=%s exit_region=%s min_geo_confidence=%.2f locality_fallback=%s strict_locality=%t max_exits_per_operator=%d distinct_operators=%t sticky_pair_sec=%d session_reuse=%t refresh_lead_sec=%d exit_exploration_pct=%d selection_feed_disable=%t selection_feed_require=%t selection_feed_min_votes=%d trust_feed_disable=%t trust_feed_require=%t trust_feed_min_votes=%d bootstrap_interval_sec=%d",
-		len(c.directoryURLs), c.directoryMinSources, c.directoryMinOperators, c.directoryMinVotes, c.issuerURL, c.subject, c.entryURL, c.dataMode, c.innerSource, c.trustStrict, c.wgBackend, c.wgInterface, c.wgAllowedIPs, c.wgInstallRoute, c.opaqueSessionSec, c.opaqueInitialUpMS, c.healthCheckEnabled, c.pathOpenMaxAttempts, c.preferredExitCountry, c.preferredExitRegion, c.minGeoConfidence, strings.Join(c.localityFallbackOrder, ","), c.strictExitLocality, c.maxExitsPerOperator, c.requireDistinctOps, c.stickyPairSec, c.sessionReuse, c.sessionRefreshLeadSec, c.exitExplorationPct, c.selectionFeedDisable, c.selectionFeedRequire, c.selectionFeedMinVotes, c.trustFeedDisable, c.trustFeedRequire, c.trustFeedMinVotes, int(bootstrapInterval/time.Second))
+	log.Printf("client role enabled: directories=%d min_sources=%d min_operators=%d min_votes=%d issuer=%s subject=%s entry=%s mode=%s source=%s trust_strict=%t wg_backend=%s iface=%s allowed_ips=%s install_route=%t synthetic_fallback=%t opaque_session_sec=%d opaque_initial_uplink_timeout_ms=%d health_check=%t path_attempts=%d exit_country=%s exit_region=%s min_geo_confidence=%.2f locality_fallback=%s strict_locality=%t max_exits_per_operator=%d distinct_operators=%t sticky_pair_sec=%d session_reuse=%t refresh_lead_sec=%d exit_exploration_pct=%d selection_feed_disable=%t selection_feed_require=%t selection_feed_min_votes=%d trust_feed_disable=%t trust_feed_require=%t trust_feed_min_votes=%d bootstrap_interval_sec=%d",
+		len(c.directoryURLs), c.directoryMinSources, c.directoryMinOperators, c.directoryMinVotes, c.issuerURL, c.subject, c.entryURL, c.dataMode, c.innerSource, c.trustStrict, c.wgBackend, c.wgInterface, c.wgAllowedIPs, c.wgInstallRoute, c.allowSyntheticFallback(), c.opaqueSessionSec, c.opaqueInitialUpMS, c.healthCheckEnabled, c.pathOpenMaxAttempts, c.preferredExitCountry, c.preferredExitRegion, c.minGeoConfidence, strings.Join(c.localityFallbackOrder, ","), c.strictExitLocality, c.maxExitsPerOperator, c.requireDistinctOps, c.stickyPairSec, c.sessionReuse, c.sessionRefreshLeadSec, c.exitExplorationPct, c.selectionFeedDisable, c.selectionFeedRequire, c.selectionFeedMinVotes, c.trustFeedDisable, c.trustFeedRequire, c.trustFeedMinVotes, int(bootstrapInterval/time.Second))
 	if err := c.validateRuntimeConfig(); err != nil {
 		return err
 	}
 	if c.wgBackend == "command" {
 		if err := wg.PreflightCommandClientBackend(ctx, c.wgInterface, c.wgPrivateKey); err != nil {
 			return fmt.Errorf("client wg preflight failed: %w", err)
+		}
+		if err := c.ensureCommandWGPubKey(ctx); err != nil {
+			return fmt.Errorf("client wg pubkey init failed: %w", err)
 		}
 	}
 	if c.dataMode == "opaque" && !wg.IsValidPublicKey(c.clientWGPub) {
@@ -425,6 +442,28 @@ func (c *Client) validateRuntimeConfig() error {
 		if strings.TrimSpace(c.opaqueSinkAddr) == "" {
 			return fmt.Errorf("CLIENT_LIVE_WG_MODE requires CLIENT_OPAQUE_SINK_ADDR")
 		}
+	}
+	if c.dataMode == "opaque" && !c.allowSyntheticFallback() && c.innerSource != "udp" {
+		return fmt.Errorf("CLIENT_INNER_SOURCE=udp required when synthetic fallback is disabled")
+	}
+	return nil
+}
+
+func (c *Client) ensureCommandWGPubKey(ctx context.Context) error {
+	if c.wgBackend != "command" {
+		return nil
+	}
+	configured := strings.TrimSpace(c.clientWGPub)
+	derived, err := deriveClientWGPublicFromPrivateFile(ctx, c.wgPrivateKey)
+	if err != nil {
+		return err
+	}
+	if wg.IsValidPublicKey(configured) && configured != derived {
+		return fmt.Errorf("configured CLIENT_WG_PUBLIC_KEY does not match CLIENT_WG_PRIVATE_KEY_PATH")
+	}
+	c.clientWGPub = derived
+	if configured == "" || configured != derived {
+		log.Printf("client derived CLIENT_WG_PUBLIC_KEY from private key file")
 	}
 	return nil
 }
@@ -856,6 +895,10 @@ func (c *Client) forwardOpaqueFromUDP(ctx context.Context, sendFrame func([]byte
 			continue
 		}
 		payload := append([]byte(nil), buf[:n]...)
+		if c.liveWGMode && !relay.LooksLikePlausibleWireGuardMessage(payload) {
+			log.Printf("client dropped opaque uplink reason=non-wireguard-live payload_len=%d", len(payload))
+			continue
+		}
 		if err := sendFrame(payload); err != nil {
 			return count, err
 		}
@@ -888,6 +931,10 @@ func (c *Client) forwardOpaqueFromUDPContinuous(ctx context.Context, conn *net.U
 			continue
 		}
 		payload := append([]byte(nil), buf[:n]...)
+		if c.liveWGMode && !relay.LooksLikePlausibleWireGuardMessage(payload) {
+			log.Printf("client dropped opaque uplink reason=non-wireguard-live payload_len=%d", len(payload))
+			continue
+		}
 		if err := sendFrame(payload); err != nil {
 			return count, err
 		}
@@ -1127,7 +1174,7 @@ func (c *Client) tryReuseActiveSession(ctx context.Context, now time.Time) bool 
 }
 
 func (c *Client) allowSyntheticFallback() bool {
-	return !c.liveWGMode && c.wgBackend != "command"
+	return !c.disableSynthetic && !c.liveWGMode && c.wgBackend != "command"
 }
 
 func (c *Client) opaqueInitialUplinkTimeout() time.Duration {

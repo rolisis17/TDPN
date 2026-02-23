@@ -23,77 +23,97 @@ import (
 )
 
 type Service struct {
-	addr                  string
-	localURL              string
-	operatorID            string
-	pubKey                ed25519.PublicKey
-	privKey               ed25519.PrivateKey
-	server                *http.Server
-	entryEndpoints        []string
-	endpointRotateSec     int64
-	descriptorEpoch       time.Duration
-	descriptorTTL         time.Duration
-	selectionFeedTTL      time.Duration
-	selectionEpoch        time.Duration
-	trustFeedTTL          time.Duration
-	trustEpoch            time.Duration
-	adminToken            string
-	previousPubKeysFile   string
-	providerIssuerURLs    []string
-	providerRelayMaxTTL   time.Duration
-	issuerTrustURLs       []string
-	issuerSyncSec         int
-	issuerTrustMinVotes   int
-	issuerDisputeMinVotes int
-	issuerAppealMinVotes  int
-	peerURLs              []string
-	peerSyncSec           int
-	gossipSec             int
-	gossipFanout          int
-	peerListTTL           time.Duration
-	peerDiscoveryEnabled  bool
-	peerDiscoveryMax      int
-	peerDiscoveryTTL      time.Duration
-	peerDiscoveryMinVotes int
-	peerMinOperators      int
-	peerMinVotes          int
-	peerScoreMinVotes     int
-	peerTrustMinVotes     int
-	peerDisputeMinVotes   int
-	peerAppealMinVotes    int
-	adjudicationMetaMin   int
-	disputeMaxTTL         time.Duration
-	appealMaxTTL          time.Duration
-	issuerMinOperators    int
-	peerMaxHops           int
-	peerMu                sync.RWMutex
-	peerRelays            map[string]proto.RelayDescriptor
-	providerMu            sync.RWMutex
-	providerRelays        map[string]proto.RelayDescriptor
-	peerScores            map[string]proto.RelaySelectionScore
-	peerTrust             map[string]proto.RelayTrustAttestation
-	issuerTrust           map[string]proto.RelayTrustAttestation
-	discoveredPeers       map[string]time.Time
-	discoveredPeerVoters  map[string]map[string]time.Time
-	peerHintPubKeys       map[string]string
-	peerHintOperators     map[string]string
-	peerRelayETags        map[string]string
-	peerRelayCache        map[string][]proto.RelayDescriptor
-	peerScoreETags        map[string]string
-	peerScoreCache        map[string]map[string]proto.RelaySelectionScore
-	peerTrustETags        map[string]string
-	peerTrustCache        map[string]map[string]proto.RelayTrustAttestation
-	issuerTrustETags      map[string]string
-	issuerTrustCache      map[string]map[string]proto.RelayTrustAttestation
-	peerTrustStrict       bool
-	peerTrustTOFU         bool
-	peerTrustFile         string
-	peerTrustMu           sync.Mutex
-	keyMu                 sync.RWMutex
-	httpClient            *http.Client
-	privateKeyPath        string
-	keyRotateEvery        time.Duration
-	keyHistory            int
+	addr                     string
+	localURL                 string
+	operatorID               string
+	pubKey                   ed25519.PublicKey
+	privKey                  ed25519.PrivateKey
+	server                   *http.Server
+	entryEndpoints           []string
+	endpointRotateSec        int64
+	descriptorEpoch          time.Duration
+	descriptorTTL            time.Duration
+	selectionFeedTTL         time.Duration
+	selectionEpoch           time.Duration
+	trustFeedTTL             time.Duration
+	trustEpoch               time.Duration
+	adminToken               string
+	previousPubKeysFile      string
+	providerIssuerURLs       []string
+	providerRelayMaxTTL      time.Duration
+	issuerTrustURLs          []string
+	issuerSyncSec            int
+	issuerTrustMinVotes      int
+	issuerDisputeMinVotes    int
+	issuerAppealMinVotes     int
+	peerURLs                 []string
+	peerSyncSec              int
+	gossipSec                int
+	gossipFanout             int
+	peerListTTL              time.Duration
+	peerDiscoveryEnabled     bool
+	peerDiscoveryMax         int
+	peerDiscoveryTTL         time.Duration
+	peerDiscoveryMinVotes    int
+	peerDiscoveryRequireHint bool
+	peerDiscoveryFailN       int
+	peerDiscoveryBackoff     time.Duration
+	peerDiscoveryBackoffMax  time.Duration
+	peerMinOperators         int
+	peerMinVotes             int
+	peerScoreMinVotes        int
+	peerTrustMinVotes        int
+	peerDisputeMinVotes      int
+	peerAppealMinVotes       int
+	adjudicationMetaMin      int
+	finalAdjudicationOps     int
+	finalDisputeMinVotes     int
+	finalAppealMinVotes      int
+	finalAdjudicationMin     float64
+	disputeMaxTTL            time.Duration
+	appealMaxTTL             time.Duration
+	issuerMinOperators       int
+	peerMaxHops              int
+	peerMu                   sync.RWMutex
+	peerRelays               map[string]proto.RelayDescriptor
+	providerMu               sync.RWMutex
+	providerRelays           map[string]proto.RelayDescriptor
+	peerScores               map[string]proto.RelaySelectionScore
+	peerTrust                map[string]proto.RelayTrustAttestation
+	issuerTrust              map[string]proto.RelayTrustAttestation
+	discoveredPeers          map[string]time.Time
+	discoveredPeerVoters     map[string]map[string]time.Time
+	discoveredPeerHealth     map[string]discoveredPeerHealth
+	peerHintPubKeys          map[string]string
+	peerHintOperators        map[string]string
+	peerRelayETags           map[string]string
+	peerRelayCache           map[string][]proto.RelayDescriptor
+	peerScoreETags           map[string]string
+	peerScoreCache           map[string]map[string]proto.RelaySelectionScore
+	peerTrustETags           map[string]string
+	peerTrustCache           map[string]map[string]proto.RelayTrustAttestation
+	issuerTrustETags         map[string]string
+	issuerTrustCache         map[string]map[string]proto.RelayTrustAttestation
+	peerTrustStrict          bool
+	peerTrustTOFU            bool
+	peerTrustFile            string
+	peerTrustMu              sync.Mutex
+	syncStatusMu             sync.RWMutex
+	peerSyncStatus           proto.DirectorySyncRunStatus
+	issuerSyncStatus         proto.DirectorySyncRunStatus
+	keyMu                    sync.RWMutex
+	httpClient               *http.Client
+	privateKeyPath           string
+	keyRotateEvery           time.Duration
+	keyHistory               int
+}
+
+type discoveredPeerHealth struct {
+	lastSuccess         time.Time
+	lastFailure         time.Time
+	consecutiveFailures int
+	cooldownUntil       time.Time
+	lastError           string
 }
 
 func New() *Service {
@@ -175,6 +195,22 @@ func New() *Service {
 	if v, err := strconv.Atoi(os.Getenv("DIRECTORY_PEER_DISCOVERY_MIN_VOTES")); err == nil && v > 0 {
 		peerDiscoveryMinVotes = v
 	}
+	peerDiscoveryRequireHint := os.Getenv("DIRECTORY_PEER_DISCOVERY_REQUIRE_HINT") == "1"
+	peerDiscoveryFailN := 3
+	if v, err := strconv.Atoi(os.Getenv("DIRECTORY_PEER_DISCOVERY_FAIL_THRESHOLD")); err == nil && v > 0 {
+		peerDiscoveryFailN = v
+	}
+	peerDiscoveryBackoff := 60 * time.Second
+	if v, err := strconv.Atoi(os.Getenv("DIRECTORY_PEER_DISCOVERY_BACKOFF_SEC")); err == nil && v > 0 {
+		peerDiscoveryBackoff = time.Duration(v) * time.Second
+	}
+	peerDiscoveryBackoffMax := 15 * time.Minute
+	if v, err := strconv.Atoi(os.Getenv("DIRECTORY_PEER_DISCOVERY_MAX_BACKOFF_SEC")); err == nil && v > 0 {
+		peerDiscoveryBackoffMax = time.Duration(v) * time.Second
+	}
+	if peerDiscoveryBackoffMax < peerDiscoveryBackoff {
+		peerDiscoveryBackoffMax = peerDiscoveryBackoff
+	}
 	issuerSyncSec := 10
 	if v, err := strconv.Atoi(os.Getenv("DIRECTORY_ISSUER_SYNC_SEC")); err == nil && v > 0 {
 		issuerSyncSec = v
@@ -211,6 +247,16 @@ func New() *Service {
 	if v, err := strconv.Atoi(os.Getenv("DIRECTORY_ADJUDICATION_META_MIN_VOTES")); err == nil && v > 0 {
 		adjudicationMetaMin = v
 	}
+	finalAdjudicationOps := 1
+	if v, err := strconv.Atoi(os.Getenv("DIRECTORY_FINAL_ADJUDICATION_MIN_OPERATORS")); err == nil && v > 0 {
+		finalAdjudicationOps = v
+	}
+	finalAdjudicationMin := 0.5
+	if raw := strings.TrimSpace(os.Getenv("DIRECTORY_FINAL_ADJUDICATION_MIN_RATIO")); raw != "" {
+		if v, err := strconv.ParseFloat(raw, 64); err == nil {
+			finalAdjudicationMin = clampScore(v)
+		}
+	}
 	disputeMaxTTL := 7 * 24 * time.Hour
 	if v, err := strconv.Atoi(os.Getenv("DIRECTORY_DISPUTE_MAX_TTL_SEC")); err == nil && v > 0 {
 		disputeMaxTTL = time.Duration(v) * time.Second
@@ -234,6 +280,14 @@ func New() *Service {
 	issuerAppealMinVotes := issuerDisputeMinVotes
 	if v, err := strconv.Atoi(os.Getenv("DIRECTORY_ISSUER_APPEAL_MIN_VOTES")); err == nil && v > 0 {
 		issuerAppealMinVotes = v
+	}
+	finalDisputeMinVotes := maxInt(1, maxInt(peerDisputeMinVotes, issuerDisputeMinVotes))
+	if v, err := strconv.Atoi(os.Getenv("DIRECTORY_FINAL_DISPUTE_MIN_VOTES")); err == nil && v > 0 {
+		finalDisputeMinVotes = v
+	}
+	finalAppealMinVotes := maxInt(1, maxInt(peerAppealMinVotes, issuerAppealMinVotes))
+	if v, err := strconv.Atoi(os.Getenv("DIRECTORY_FINAL_APPEAL_MIN_VOTES")); err == nil && v > 0 {
+		finalAppealMinVotes = v
 	}
 	peerMaxHops := 2
 	if v, err := strconv.Atoi(os.Getenv("DIRECTORY_PEER_MAX_HOPS")); err == nil && v > 0 {
@@ -285,70 +339,79 @@ func New() *Service {
 		keyHistory = v
 	}
 	return &Service{
-		addr:                  addr,
-		localURL:              localURL,
-		operatorID:            operatorID,
-		entryEndpoints:        eps,
-		endpointRotateSec:     rotateSec,
-		descriptorEpoch:       descriptorEpoch,
-		descriptorTTL:         descriptorTTL,
-		selectionFeedTTL:      selectionFeedTTL,
-		selectionEpoch:        selectionEpoch,
-		trustFeedTTL:          trustFeedTTL,
-		trustEpoch:            trustEpoch,
-		adminToken:            adminToken,
-		previousPubKeysFile:   previousPubKeysFile,
-		providerIssuerURLs:    providerIssuerURLs,
-		providerRelayMaxTTL:   providerRelayMaxTTL,
-		issuerTrustURLs:       issuerTrustURLs,
-		issuerSyncSec:         issuerSyncSec,
-		issuerTrustMinVotes:   issuerTrustMinVotes,
-		issuerDisputeMinVotes: issuerDisputeMinVotes,
-		issuerAppealMinVotes:  issuerAppealMinVotes,
-		peerURLs:              peerURLs,
-		peerSyncSec:           peerSyncSec,
-		gossipSec:             gossipSec,
-		gossipFanout:          gossipFanout,
-		peerListTTL:           peerListTTL,
-		peerDiscoveryEnabled:  peerDiscoveryEnabled,
-		peerDiscoveryMax:      peerDiscoveryMax,
-		peerDiscoveryTTL:      peerDiscoveryTTL,
-		peerDiscoveryMinVotes: peerDiscoveryMinVotes,
-		peerMinOperators:      peerMinOperators,
-		peerMinVotes:          peerMinVotes,
-		peerScoreMinVotes:     peerScoreMinVotes,
-		peerTrustMinVotes:     peerTrustMinVotes,
-		peerDisputeMinVotes:   peerDisputeMinVotes,
-		peerAppealMinVotes:    peerAppealMinVotes,
-		adjudicationMetaMin:   adjudicationMetaMin,
-		disputeMaxTTL:         disputeMaxTTL,
-		appealMaxTTL:          appealMaxTTL,
-		issuerMinOperators:    issuerMinOperators,
-		peerMaxHops:           peerMaxHops,
-		peerRelays:            make(map[string]proto.RelayDescriptor),
-		providerRelays:        make(map[string]proto.RelayDescriptor),
-		peerScores:            make(map[string]proto.RelaySelectionScore),
-		peerTrust:             make(map[string]proto.RelayTrustAttestation),
-		issuerTrust:           make(map[string]proto.RelayTrustAttestation),
-		discoveredPeers:       make(map[string]time.Time),
-		discoveredPeerVoters:  make(map[string]map[string]time.Time),
-		peerHintPubKeys:       make(map[string]string),
-		peerHintOperators:     make(map[string]string),
-		peerRelayETags:        make(map[string]string),
-		peerRelayCache:        make(map[string][]proto.RelayDescriptor),
-		peerScoreETags:        make(map[string]string),
-		peerScoreCache:        make(map[string]map[string]proto.RelaySelectionScore),
-		peerTrustETags:        make(map[string]string),
-		peerTrustCache:        make(map[string]map[string]proto.RelayTrustAttestation),
-		issuerTrustETags:      make(map[string]string),
-		issuerTrustCache:      make(map[string]map[string]proto.RelayTrustAttestation),
-		peerTrustStrict:       peerTrustStrict,
-		peerTrustTOFU:         peerTrustTOFU,
-		peerTrustFile:         peerTrustFile,
-		httpClient:            &http.Client{Timeout: 5 * time.Second},
-		privateKeyPath:        privateKeyPath,
-		keyRotateEvery:        keyRotateEvery,
-		keyHistory:            keyHistory,
+		addr:                     addr,
+		localURL:                 localURL,
+		operatorID:               operatorID,
+		entryEndpoints:           eps,
+		endpointRotateSec:        rotateSec,
+		descriptorEpoch:          descriptorEpoch,
+		descriptorTTL:            descriptorTTL,
+		selectionFeedTTL:         selectionFeedTTL,
+		selectionEpoch:           selectionEpoch,
+		trustFeedTTL:             trustFeedTTL,
+		trustEpoch:               trustEpoch,
+		adminToken:               adminToken,
+		previousPubKeysFile:      previousPubKeysFile,
+		providerIssuerURLs:       providerIssuerURLs,
+		providerRelayMaxTTL:      providerRelayMaxTTL,
+		issuerTrustURLs:          issuerTrustURLs,
+		issuerSyncSec:            issuerSyncSec,
+		issuerTrustMinVotes:      issuerTrustMinVotes,
+		issuerDisputeMinVotes:    issuerDisputeMinVotes,
+		issuerAppealMinVotes:     issuerAppealMinVotes,
+		peerURLs:                 peerURLs,
+		peerSyncSec:              peerSyncSec,
+		gossipSec:                gossipSec,
+		gossipFanout:             gossipFanout,
+		peerListTTL:              peerListTTL,
+		peerDiscoveryEnabled:     peerDiscoveryEnabled,
+		peerDiscoveryMax:         peerDiscoveryMax,
+		peerDiscoveryTTL:         peerDiscoveryTTL,
+		peerDiscoveryMinVotes:    peerDiscoveryMinVotes,
+		peerDiscoveryRequireHint: peerDiscoveryRequireHint,
+		peerDiscoveryFailN:       peerDiscoveryFailN,
+		peerDiscoveryBackoff:     peerDiscoveryBackoff,
+		peerDiscoveryBackoffMax:  peerDiscoveryBackoffMax,
+		peerMinOperators:         peerMinOperators,
+		peerMinVotes:             peerMinVotes,
+		peerScoreMinVotes:        peerScoreMinVotes,
+		peerTrustMinVotes:        peerTrustMinVotes,
+		peerDisputeMinVotes:      peerDisputeMinVotes,
+		peerAppealMinVotes:       peerAppealMinVotes,
+		adjudicationMetaMin:      adjudicationMetaMin,
+		finalAdjudicationOps:     finalAdjudicationOps,
+		finalDisputeMinVotes:     finalDisputeMinVotes,
+		finalAppealMinVotes:      finalAppealMinVotes,
+		finalAdjudicationMin:     finalAdjudicationMin,
+		disputeMaxTTL:            disputeMaxTTL,
+		appealMaxTTL:             appealMaxTTL,
+		issuerMinOperators:       issuerMinOperators,
+		peerMaxHops:              peerMaxHops,
+		peerRelays:               make(map[string]proto.RelayDescriptor),
+		providerRelays:           make(map[string]proto.RelayDescriptor),
+		peerScores:               make(map[string]proto.RelaySelectionScore),
+		peerTrust:                make(map[string]proto.RelayTrustAttestation),
+		issuerTrust:              make(map[string]proto.RelayTrustAttestation),
+		discoveredPeers:          make(map[string]time.Time),
+		discoveredPeerVoters:     make(map[string]map[string]time.Time),
+		discoveredPeerHealth:     make(map[string]discoveredPeerHealth),
+		peerHintPubKeys:          make(map[string]string),
+		peerHintOperators:        make(map[string]string),
+		peerRelayETags:           make(map[string]string),
+		peerRelayCache:           make(map[string][]proto.RelayDescriptor),
+		peerScoreETags:           make(map[string]string),
+		peerScoreCache:           make(map[string]map[string]proto.RelaySelectionScore),
+		peerTrustETags:           make(map[string]string),
+		peerTrustCache:           make(map[string]map[string]proto.RelayTrustAttestation),
+		issuerTrustETags:         make(map[string]string),
+		issuerTrustCache:         make(map[string]map[string]proto.RelayTrustAttestation),
+		peerTrustStrict:          peerTrustStrict,
+		peerTrustTOFU:            peerTrustTOFU,
+		peerTrustFile:            peerTrustFile,
+		httpClient:               &http.Client{Timeout: 5 * time.Second},
+		privateKeyPath:           privateKeyPath,
+		keyRotateEvery:           keyRotateEvery,
+		keyHistory:               keyHistory,
 	}
 }
 
@@ -372,13 +435,16 @@ func (s *Service) Run(ctx context.Context) error {
 	mux.HandleFunc("/v1/pubkey", s.handlePubKey)
 	mux.HandleFunc("/v1/pubkeys", s.handlePubKeys)
 	mux.HandleFunc("/v1/admin/rotate-key", s.handleRotateKey)
+	mux.HandleFunc("/v1/admin/sync-status", s.handleSyncStatus)
+	mux.HandleFunc("/v1/admin/governance-status", s.handleGovernanceStatus)
+	mux.HandleFunc("/v1/admin/peer-status", s.handlePeerStatus)
 
 	s.server = &http.Server{
 		Addr:    s.addr,
 		Handler: mux,
 	}
-	log.Printf("directory federation policy: peers=%d peer_min_operators=%d peer_min_votes=%d peer_discovery_min_votes=%d adjudication_meta_min_votes=%d dispute_max_ttl_sec=%d appeal_max_ttl_sec=%d issuer_urls=%d issuer_min_operators=%d issuer_min_votes=%d provider_issuer_urls=%d provider_relay_max_ttl_sec=%d key_rotate_sec=%d key_history=%d",
-		len(s.peerURLs), s.peerMinOperators, s.peerMinVotes, maxInt(1, s.peerDiscoveryMinVotes), maxInt(1, s.adjudicationMetaMin), int(s.disputeMaxTTL/time.Second), int(s.appealMaxTTL/time.Second), len(s.issuerTrustURLs), s.issuerMinOperators, s.issuerTrustMinVotes, len(s.providerIssuerURLs), int(s.providerRelayMaxTTL/time.Second), int(s.keyRotateEvery/time.Second), s.effectiveKeyHistory())
+	log.Printf("directory federation policy: peers=%d peer_min_operators=%d peer_min_votes=%d peer_discovery_min_votes=%d peer_discovery_require_hint=%t peer_discovery_fail_threshold=%d peer_discovery_backoff_sec=%d peer_discovery_max_backoff_sec=%d adjudication_meta_min_votes=%d final_dispute_min_votes=%d final_appeal_min_votes=%d final_adjudication_min_operators=%d final_adjudication_min_ratio=%.2f dispute_max_ttl_sec=%d appeal_max_ttl_sec=%d issuer_urls=%d issuer_min_operators=%d issuer_min_votes=%d provider_issuer_urls=%d provider_relay_max_ttl_sec=%d key_rotate_sec=%d key_history=%d",
+		len(s.peerURLs), s.peerMinOperators, s.peerMinVotes, maxInt(1, s.peerDiscoveryMinVotes), s.peerDiscoveryRequireHint, maxInt(1, s.peerDiscoveryFailN), int(s.peerDiscoveryBackoff/time.Second), int(s.peerDiscoveryBackoffMax/time.Second), maxInt(1, s.adjudicationMetaMin), s.effectiveFinalDisputeMinVotes(), s.effectiveFinalAppealMinVotes(), s.effectiveFinalAdjudicationMinOperators(), s.effectiveFinalAdjudicationMinRatio(), int(s.disputeMaxTTL/time.Second), int(s.appealMaxTTL/time.Second), len(s.issuerTrustURLs), s.issuerMinOperators, s.issuerTrustMinVotes, len(s.providerIssuerURLs), int(s.providerRelayMaxTTL/time.Second), int(s.keyRotateEvery/time.Second), s.effectiveKeyHistory())
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -464,8 +530,23 @@ func (s *Service) runKeyRotation(ctx context.Context) {
 	}
 }
 
-func (s *Service) syncPeerRelays(ctx context.Context) error {
+func (s *Service) syncPeerRelays(ctx context.Context) (retErr error) {
+	startedAt := time.Now().UTC()
 	peerURLs := s.snapshotSyncPeers(time.Now())
+	success := 0
+	successOperators := make(map[string]struct{})
+	requiredOperators := maxInt(1, s.peerMinOperators)
+	defer func() {
+		s.setPeerSyncStatus(proto.DirectorySyncRunStatus{
+			LastRunAt:         startedAt.Unix(),
+			Success:           retErr == nil,
+			SuccessSources:    success,
+			SourceOperators:   operatorSetList(successOperators),
+			RequiredOperators: requiredOperators,
+			QuorumMet:         success > 0 && len(successOperators) >= requiredOperators,
+			Error:             errorString(retErr),
+		})
+	}()
 	if len(peerURLs) == 0 {
 		return nil
 	}
@@ -497,14 +578,14 @@ func (s *Service) syncPeerRelays(ctx context.Context) error {
 		stakeScore   float64
 		confidence   float64
 		disputeVotes int
+		disputeOps   map[string]struct{}
 		disputeCaps  map[int]int
 		disputeUntil []int64
-		disputeCase  map[string]int
-		disputeRef   map[string]int
+		disputeMeta  map[adjudicationMetadataPair]int
 		appealVotes  int
+		appealOps    map[string]struct{}
 		appealUntil  []int64
-		appealCase   map[string]int
-		appealRef    map[string]int
+		appealMeta   map[adjudicationMetadataPair]int
 	}
 	candidates := make(map[string]map[string]peerCandidate)
 	relayVoters := make(map[string]map[string]map[string]struct{})
@@ -516,7 +597,6 @@ func (s *Service) syncPeerRelays(ctx context.Context) error {
 	if minVotes <= 0 {
 		minVotes = 1
 	}
-	requiredOperators := maxInt(1, s.peerMinOperators)
 	scoreMinVotes := s.peerScoreMinVotes
 	if scoreMinVotes <= 0 {
 		scoreMinVotes = 1
@@ -534,14 +614,14 @@ func (s *Service) syncPeerRelays(ctx context.Context) error {
 		appealMinVotes = disputeMinVotes
 	}
 	metaMinVotes := maxInt(1, s.adjudicationMetaMin)
-	success := 0
-	successOperators := make(map[string]struct{})
 	var lastErr error
 	nowUnix := time.Now().Unix()
 	for _, peerURL := range peerURLs {
+		peerNow := time.Now().UTC()
 		pubs, declaredOperator, err := s.fetchPeerPubKeys(ctx, peerURL)
 		if err != nil {
 			lastErr = err
+			s.recordPeerSyncFailure(peerURL, peerNow, fmt.Errorf("fetch peer pubkeys: %w", err))
 			continue
 		}
 		sourceOperator := normalizeSourceOperator(declaredOperator, pubs, peerURL)
@@ -555,8 +635,10 @@ func (s *Service) syncPeerRelays(ctx context.Context) error {
 		relays, err := s.fetchPeerRelaysWithPubs(ctx, peerURL, pubs)
 		if err != nil {
 			lastErr = err
+			s.recordPeerSyncFailure(peerURL, peerNow, fmt.Errorf("fetch peer relays: %w", err))
 			continue
 		}
+		s.recordPeerSyncSuccess(peerURL, peerNow)
 		scores, scoreErr := s.fetchPeerSelectionScores(ctx, peerURL, pubs)
 		if scoreErr != nil {
 			lastErr = scoreErr
@@ -645,34 +727,12 @@ func (s *Service) syncPeerRelays(ctx context.Context) error {
 				}
 				cand.disputeCaps[capTier]++
 				cand.disputeUntil = append(cand.disputeUntil, until)
-				if caseID := normalizeCaseID(att.DisputeCase); caseID != "" {
-					if cand.disputeCase == nil {
-						cand.disputeCase = make(map[string]int)
-					}
-					cand.disputeCase[caseID]++
-				}
-				if evidence := normalizeEvidenceRef(att.DisputeRef); evidence != "" {
-					if cand.disputeRef == nil {
-						cand.disputeRef = make(map[string]int)
-					}
-					cand.disputeRef[evidence]++
-				}
+				recordMetadataPairVote(&cand.disputeMeta, att.DisputeCase, att.DisputeRef)
 			}
 			if appealUntil, ok := s.activeAppeal(att, nowUnix); ok {
 				cand.appealVotes++
 				cand.appealUntil = append(cand.appealUntil, appealUntil)
-				if caseID := normalizeCaseID(att.AppealCase); caseID != "" {
-					if cand.appealCase == nil {
-						cand.appealCase = make(map[string]int)
-					}
-					cand.appealCase[caseID]++
-				}
-				if evidence := normalizeEvidenceRef(att.AppealRef); evidence != "" {
-					if cand.appealRef == nil {
-						cand.appealRef = make(map[string]int)
-					}
-					cand.appealRef[evidence]++
-				}
+				recordMetadataPairVote(&cand.appealMeta, att.AppealCase, att.AppealRef)
 			}
 			trustCandidates[key] = cand
 		}
@@ -752,14 +812,12 @@ func (s *Service) syncPeerRelays(ctx context.Context) error {
 			if tierCap, ok := pickConsensusTier(cand.disputeCaps); ok {
 				att.TierCap = tierCap
 				att.DisputeUntil = pickMedianUnix(cand.disputeUntil)
-				att.DisputeCase = pickVotedString(cand.disputeCase, metaMinVotes)
-				att.DisputeRef = pickVotedString(cand.disputeRef, metaMinVotes)
+				att.DisputeCase, att.DisputeRef = pickVotedMetadataPair(cand.disputeMeta, metaMinVotes)
 			}
 		}
 		if cand.appealVotes >= appealMinVotes {
 			att.AppealUntil = pickMedianUnix(cand.appealUntil)
-			att.AppealCase = pickVotedString(cand.appealCase, metaMinVotes)
-			att.AppealRef = pickVotedString(cand.appealRef, metaMinVotes)
+			att.AppealCase, att.AppealRef = pickVotedMetadataPair(cand.appealMeta, metaMinVotes)
 		}
 		mergedTrust[key] = att
 	}
@@ -849,7 +907,22 @@ func (s *Service) pushGossipRelays(ctx context.Context, peerURL string, in proto
 	return nil
 }
 
-func (s *Service) syncIssuerTrust(ctx context.Context) error {
+func (s *Service) syncIssuerTrust(ctx context.Context) (retErr error) {
+	startedAt := time.Now().UTC()
+	success := 0
+	successOperators := make(map[string]struct{})
+	requiredOperators := maxInt(1, s.issuerMinOperators)
+	defer func() {
+		s.setIssuerSyncStatus(proto.DirectorySyncRunStatus{
+			LastRunAt:         startedAt.Unix(),
+			Success:           retErr == nil,
+			SuccessSources:    success,
+			SourceOperators:   operatorSetList(successOperators),
+			RequiredOperators: requiredOperators,
+			QuorumMet:         success > 0 && len(successOperators) >= requiredOperators,
+			Error:             errorString(retErr),
+		})
+	}()
 	if len(s.issuerTrustURLs) == 0 {
 		return nil
 	}
@@ -866,14 +939,14 @@ func (s *Service) syncIssuerTrust(ctx context.Context) error {
 		stakeScore   float64
 		confidence   float64
 		disputeVotes int
+		disputeOps   map[string]struct{}
 		disputeCaps  map[int]int
 		disputeUntil []int64
-		disputeCase  map[string]int
-		disputeRef   map[string]int
+		disputeMeta  map[adjudicationMetadataPair]int
 		appealVotes  int
+		appealOps    map[string]struct{}
 		appealUntil  []int64
-		appealCase   map[string]int
-		appealRef    map[string]int
+		appealMeta   map[adjudicationMetadataPair]int
 	}
 	minVotes := s.issuerTrustMinVotes
 	if minVotes <= 0 {
@@ -888,11 +961,8 @@ func (s *Service) syncIssuerTrust(ctx context.Context) error {
 		appealMinVotes = disputeMinVotes
 	}
 	metaMinVotes := maxInt(1, s.adjudicationMetaMin)
-	requiredOperators := maxInt(1, s.issuerMinOperators)
 	candidates := make(map[string]trustCandidate)
 	trustVoters := make(map[string]map[string]struct{})
-	success := 0
-	successOperators := make(map[string]struct{})
 	var lastErr error
 	nowUnix := time.Now().Unix()
 	for _, issuerURL := range s.issuerTrustURLs {
@@ -941,34 +1011,12 @@ func (s *Service) syncIssuerTrust(ctx context.Context) error {
 				}
 				cand.disputeCaps[capTier]++
 				cand.disputeUntil = append(cand.disputeUntil, until)
-				if caseID := normalizeCaseID(att.DisputeCase); caseID != "" {
-					if cand.disputeCase == nil {
-						cand.disputeCase = make(map[string]int)
-					}
-					cand.disputeCase[caseID]++
-				}
-				if evidence := normalizeEvidenceRef(att.DisputeRef); evidence != "" {
-					if cand.disputeRef == nil {
-						cand.disputeRef = make(map[string]int)
-					}
-					cand.disputeRef[evidence]++
-				}
+				recordMetadataPairVote(&cand.disputeMeta, att.DisputeCase, att.DisputeRef)
 			}
 			if appealUntil, ok := s.activeAppeal(att, nowUnix); ok {
 				cand.appealVotes++
 				cand.appealUntil = append(cand.appealUntil, appealUntil)
-				if caseID := normalizeCaseID(att.AppealCase); caseID != "" {
-					if cand.appealCase == nil {
-						cand.appealCase = make(map[string]int)
-					}
-					cand.appealCase[caseID]++
-				}
-				if evidence := normalizeEvidenceRef(att.AppealRef); evidence != "" {
-					if cand.appealRef == nil {
-						cand.appealRef = make(map[string]int)
-					}
-					cand.appealRef[evidence]++
-				}
+				recordMetadataPairVote(&cand.appealMeta, att.AppealCase, att.AppealRef)
 			}
 			candidates[key] = cand
 		}
@@ -1007,14 +1055,12 @@ func (s *Service) syncIssuerTrust(ctx context.Context) error {
 			if tierCap, ok := pickConsensusTier(cand.disputeCaps); ok {
 				att.TierCap = tierCap
 				att.DisputeUntil = pickMedianUnix(cand.disputeUntil)
-				att.DisputeCase = pickVotedString(cand.disputeCase, metaMinVotes)
-				att.DisputeRef = pickVotedString(cand.disputeRef, metaMinVotes)
+				att.DisputeCase, att.DisputeRef = pickVotedMetadataPair(cand.disputeMeta, metaMinVotes)
 			}
 		}
 		if cand.appealVotes >= appealMinVotes {
 			att.AppealUntil = pickMedianUnix(cand.appealUntil)
-			att.AppealCase = pickVotedString(cand.appealCase, metaMinVotes)
-			att.AppealRef = pickVotedString(cand.appealRef, metaMinVotes)
+			att.AppealCase, att.AppealRef = pickVotedMetadataPair(cand.appealMeta, metaMinVotes)
 		}
 		merged[key] = att
 	}
@@ -1433,6 +1479,9 @@ func (s *Service) snapshotSyncPeers(now time.Time) []string {
 	if s.discoveredPeerVoters == nil {
 		s.discoveredPeerVoters = make(map[string]map[string]time.Time)
 	}
+	if s.discoveredPeerHealth == nil {
+		s.discoveredPeerHealth = make(map[string]discoveredPeerHealth)
+	}
 	if s.peerHintPubKeys == nil {
 		s.peerHintPubKeys = make(map[string]string)
 	}
@@ -1441,6 +1490,9 @@ func (s *Service) snapshotSyncPeers(now time.Time) []string {
 	}
 	s.pruneDiscoveredPeersLocked(now)
 	for peerURL := range s.discoveredPeers {
+		if s.isDiscoveredPeerCoolingDownLocked(peerURL, now) {
+			continue
+		}
 		peers = append(peers, peerURL)
 	}
 	s.peerMu.Unlock()
@@ -1508,6 +1560,7 @@ func (s *Service) ingestDiscoveredPeers(sourceURL string, sourceOperator string,
 	sourceURL = normalizePeerURL(sourceURL)
 	sourceOperator = normalizeSourceOperator(sourceOperator, nil, sourceURL)
 	requiredVotes := maxInt(1, s.peerDiscoveryMinVotes)
+	requireHint := s.peerDiscoveryRequireHint
 	discovered := 0
 
 	s.peerMu.Lock()
@@ -1516,6 +1569,9 @@ func (s *Service) ingestDiscoveredPeers(sourceURL string, sourceOperator string,
 	}
 	if s.discoveredPeerVoters == nil {
 		s.discoveredPeerVoters = make(map[string]map[string]time.Time)
+	}
+	if s.discoveredPeerHealth == nil {
+		s.discoveredPeerHealth = make(map[string]discoveredPeerHealth)
 	}
 	if s.peerHintPubKeys == nil {
 		s.peerHintPubKeys = make(map[string]string)
@@ -1534,6 +1590,11 @@ func (s *Service) ingestDiscoveredPeers(sourceURL string, sourceOperator string,
 		}
 		if key := normalizePeerPubKey(hint.PubKey); key != "" {
 			s.peerHintPubKeys[peerURL] = key
+		}
+		if requireHint {
+			if normalizeOperatorID(s.peerHintOperators[peerURL]) == "" || normalizePeerPubKey(s.peerHintPubKeys[peerURL]) == "" {
+				continue
+			}
 		}
 		if s.isConfiguredPeerLocked(peerURL) {
 			continue
@@ -1559,7 +1620,7 @@ func (s *Service) ingestDiscoveredPeers(sourceURL string, sourceOperator string,
 }
 
 func (s *Service) pruneDiscoveredPeersLocked(now time.Time) {
-	if len(s.discoveredPeers) == 0 && len(s.discoveredPeerVoters) == 0 {
+	if len(s.discoveredPeers) == 0 && len(s.discoveredPeerVoters) == 0 && len(s.discoveredPeerHealth) == 0 {
 		return
 	}
 	ttl := s.peerDiscoveryTTL
@@ -1583,6 +1644,7 @@ func (s *Service) pruneDiscoveredPeersLocked(now time.Time) {
 		if seenAt.Before(cutoff) || quorumDropped {
 			delete(s.discoveredPeers, peerURL)
 			delete(s.discoveredPeerVoters, peerURL)
+			delete(s.discoveredPeerHealth, peerURL)
 			delete(s.peerHintPubKeys, peerURL)
 			delete(s.peerHintOperators, peerURL)
 		}
@@ -1611,6 +1673,7 @@ func (s *Service) trimDiscoveredPeersLocked() {
 	for i := maxPeers; i < len(list); i++ {
 		delete(s.discoveredPeers, list[i].url)
 		delete(s.discoveredPeerVoters, list[i].url)
+		delete(s.discoveredPeerHealth, list[i].url)
 		delete(s.peerHintPubKeys, list[i].url)
 		delete(s.peerHintOperators, list[i].url)
 	}
@@ -1631,6 +1694,95 @@ func (s *Service) isConfiguredPeerLocked(peerURL string) bool {
 		}
 	}
 	return false
+}
+
+func (s *Service) isDiscoveredPeerCoolingDownLocked(peerURL string, now time.Time) bool {
+	health, ok := s.discoveredPeerHealth[peerURL]
+	if !ok {
+		return false
+	}
+	return !health.cooldownUntil.IsZero() && now.Before(health.cooldownUntil)
+}
+
+func (s *Service) isDiscoveredPeer(peerURL string) bool {
+	peerURL = normalizePeerURL(peerURL)
+	if peerURL == "" {
+		return false
+	}
+	s.peerMu.RLock()
+	defer s.peerMu.RUnlock()
+	_, ok := s.discoveredPeers[peerURL]
+	return ok
+}
+
+func (s *Service) recordPeerSyncSuccess(peerURL string, now time.Time) {
+	peerURL = normalizePeerURL(peerURL)
+	if peerURL == "" || !s.isDiscoveredPeer(peerURL) {
+		return
+	}
+	s.peerMu.Lock()
+	if s.discoveredPeerHealth == nil {
+		s.discoveredPeerHealth = make(map[string]discoveredPeerHealth)
+	}
+	health := s.discoveredPeerHealth[peerURL]
+	health.lastSuccess = now
+	health.consecutiveFailures = 0
+	health.cooldownUntil = time.Time{}
+	health.lastError = ""
+	s.discoveredPeerHealth[peerURL] = health
+	s.peerMu.Unlock()
+}
+
+func (s *Service) recordPeerSyncFailure(peerURL string, now time.Time, err error) {
+	peerURL = normalizePeerURL(peerURL)
+	if peerURL == "" || !s.isDiscoveredPeer(peerURL) {
+		return
+	}
+	s.peerMu.Lock()
+	if s.discoveredPeerHealth == nil {
+		s.discoveredPeerHealth = make(map[string]discoveredPeerHealth)
+	}
+	health := s.discoveredPeerHealth[peerURL]
+	health.lastFailure = now
+	health.consecutiveFailures++
+	if err != nil {
+		msg := strings.TrimSpace(err.Error())
+		if len(msg) > 256 {
+			msg = msg[:256]
+		}
+		health.lastError = msg
+	}
+	failThreshold := maxInt(1, s.peerDiscoveryFailN)
+	if health.consecutiveFailures >= failThreshold {
+		base := s.peerDiscoveryBackoff
+		if base <= 0 {
+			base = 60 * time.Second
+		}
+		maxBackoff := s.peerDiscoveryBackoffMax
+		if maxBackoff < base {
+			maxBackoff = base
+		}
+		step := health.consecutiveFailures - failThreshold
+		if step < 0 {
+			step = 0
+		}
+		backoff := base
+		for i := 0; i < step; i++ {
+			if backoff >= maxBackoff {
+				backoff = maxBackoff
+				break
+			}
+			next := backoff * 2
+			if next <= 0 || next > maxBackoff {
+				backoff = maxBackoff
+				break
+			}
+			backoff = next
+		}
+		health.cooldownUntil = now.Add(backoff)
+	}
+	s.discoveredPeerHealth[peerURL] = health
+	s.peerMu.Unlock()
 }
 
 func (s *Service) preparePeerDescriptor(desc proto.RelayDescriptor) (proto.RelayDescriptor, bool) {
@@ -2397,10 +2549,7 @@ func (s *Service) buildSelectionScores(relays []proto.RelayDescriptor) []proto.R
 	nowUnix := time.Now().Unix()
 	disputeMaxUntil := s.maxDisputeUntil(nowUnix)
 	appealMaxUntil := s.maxAppealUntil(nowUnix)
-	for _, att := range s.snapshotPeerTrust() {
-		add(selectionFromTrustAttestationCapped(att, nowUnix, disputeMaxUntil, appealMaxUntil))
-	}
-	for _, att := range s.snapshotIssuerTrust() {
+	for _, att := range s.buildTrustAttestations(relays) {
 		add(selectionFromTrustAttestationCapped(att, nowUnix, disputeMaxUntil, appealMaxUntil))
 	}
 
@@ -2444,18 +2593,22 @@ func (s *Service) buildTrustAttestations(relays []proto.RelayDescriptor) []proto
 		stakeScore   float64
 		confidence   float64
 		disputeVotes int
+		disputeOps   map[string]struct{}
 		disputeCaps  map[int]int
 		disputeUntil []int64
-		disputeCase  map[string]int
-		disputeRef   map[string]int
+		disputeMeta  map[adjudicationMetadataPair]int
 		appealVotes  int
+		appealOps    map[string]struct{}
 		appealUntil  []int64
-		appealCase   map[string]int
-		appealRef    map[string]int
+		appealMeta   map[adjudicationMetadataPair]int
 	}
 	agg := make(map[string]trustAgg)
 	nowUnix := time.Now().Unix()
 	metaMinVotes := maxInt(1, s.adjudicationMetaMin)
+	disputeMinVotes := s.effectiveFinalDisputeMinVotes()
+	appealMinVotes := s.effectiveFinalAppealMinVotes()
+	adjudicationMinOperators := s.effectiveFinalAdjudicationMinOperators()
+	adjudicationMinRatio := s.effectiveFinalAdjudicationMinRatio()
 	add := func(att proto.RelayTrustAttestation) {
 		role := strings.TrimSpace(att.Role)
 		if role == "" {
@@ -2468,8 +2621,13 @@ func (s *Service) buildTrustAttestations(relays []proto.RelayDescriptor) []proto
 		a := agg[key]
 		a.relayID = att.RelayID
 		a.role = role
-		if strings.TrimSpace(att.OperatorID) != "" {
-			a.operatorID = strings.TrimSpace(att.OperatorID)
+		attOperator := normalizeOperatorID(att.OperatorID)
+		if attOperator != "" {
+			a.operatorID = attOperator
+		}
+		voteOperator := attOperator
+		if voteOperator == "" {
+			voteOperator = "operator-unknown"
 		}
 		a.count++
 		a.reputation += clampScore(att.Reputation)
@@ -2481,39 +2639,25 @@ func (s *Service) buildTrustAttestations(relays []proto.RelayDescriptor) []proto
 		a.confidence += clampScore(att.Confidence)
 		if capTier, until, ok := s.activeDispute(att, nowUnix); ok {
 			a.disputeVotes++
+			if a.disputeOps == nil {
+				a.disputeOps = make(map[string]struct{})
+			}
+			a.disputeOps[voteOperator] = struct{}{}
 			if a.disputeCaps == nil {
 				a.disputeCaps = make(map[int]int)
 			}
 			a.disputeCaps[capTier]++
 			a.disputeUntil = append(a.disputeUntil, until)
-			if caseID := normalizeCaseID(att.DisputeCase); caseID != "" {
-				if a.disputeCase == nil {
-					a.disputeCase = make(map[string]int)
-				}
-				a.disputeCase[caseID]++
-			}
-			if evidence := normalizeEvidenceRef(att.DisputeRef); evidence != "" {
-				if a.disputeRef == nil {
-					a.disputeRef = make(map[string]int)
-				}
-				a.disputeRef[evidence]++
-			}
+			recordMetadataPairVote(&a.disputeMeta, att.DisputeCase, att.DisputeRef)
 		}
 		if appealUntil, ok := s.activeAppeal(att, nowUnix); ok {
 			a.appealVotes++
+			if a.appealOps == nil {
+				a.appealOps = make(map[string]struct{})
+			}
+			a.appealOps[voteOperator] = struct{}{}
 			a.appealUntil = append(a.appealUntil, appealUntil)
-			if caseID := normalizeCaseID(att.AppealCase); caseID != "" {
-				if a.appealCase == nil {
-					a.appealCase = make(map[string]int)
-				}
-				a.appealCase[caseID]++
-			}
-			if evidence := normalizeEvidenceRef(att.AppealRef); evidence != "" {
-				if a.appealRef == nil {
-					a.appealRef = make(map[string]int)
-				}
-				a.appealRef[evidence]++
-			}
+			recordMetadataPairVote(&a.appealMeta, att.AppealCase, att.AppealRef)
 		}
 		agg[key] = a
 	}
@@ -2566,18 +2710,18 @@ func (s *Service) buildTrustAttestations(relays []proto.RelayDescriptor) []proto
 			StakeScore:   clampScore(a.stakeScore / n),
 			Confidence:   clampScore(a.confidence / n),
 		}
-		if a.disputeVotes > 0 {
+		if meetsAdjudicationQuorum(a.disputeVotes, a.count, disputeMinVotes, adjudicationMinRatio) &&
+			len(a.disputeOps) >= adjudicationMinOperators {
 			if tierCap, ok := pickConsensusTier(a.disputeCaps); ok {
 				att.TierCap = tierCap
 				att.DisputeUntil = pickMedianUnix(a.disputeUntil)
-				att.DisputeCase = pickVotedString(a.disputeCase, metaMinVotes)
-				att.DisputeRef = pickVotedString(a.disputeRef, metaMinVotes)
+				att.DisputeCase, att.DisputeRef = pickVotedMetadataPair(a.disputeMeta, metaMinVotes)
 			}
 		}
-		if a.appealVotes > 0 {
+		if meetsAdjudicationQuorum(a.appealVotes, a.count, appealMinVotes, adjudicationMinRatio) &&
+			len(a.appealOps) >= adjudicationMinOperators {
 			att.AppealUntil = pickMedianUnix(a.appealUntil)
-			att.AppealCase = pickVotedString(a.appealCase, metaMinVotes)
-			att.AppealRef = pickVotedString(a.appealRef, metaMinVotes)
+			att.AppealCase, att.AppealRef = pickVotedMetadataPair(a.appealMeta, metaMinVotes)
 		}
 		out = append(out, att)
 	}
@@ -2773,6 +2917,19 @@ func normalizeHTTPURL(raw string) string {
 
 func relayKey(relayID, role string) string {
 	return relayID + "|" + role
+}
+
+func splitRelayKey(v string) (string, string, bool) {
+	relayID, role, ok := strings.Cut(v, "|")
+	relayID = strings.TrimSpace(relayID)
+	role = strings.TrimSpace(role)
+	if !ok || relayID == "" {
+		return "", "", false
+	}
+	if role == "" {
+		role = "exit"
+	}
+	return relayID, role, true
 }
 
 func verifyRelayDescriptorAny(desc proto.RelayDescriptor, pubs []ed25519.PublicKey) error {
@@ -3131,6 +3288,52 @@ func normalizeEvidenceRef(v string) string {
 	return v
 }
 
+type adjudicationMetadataPair struct {
+	caseID      string
+	evidenceRef string
+}
+
+func recordMetadataPairVote(target *map[adjudicationMetadataPair]int, caseID string, evidenceRef string) {
+	caseID = normalizeCaseID(caseID)
+	evidenceRef = normalizeEvidenceRef(evidenceRef)
+	if caseID == "" || evidenceRef == "" {
+		return
+	}
+	if *target == nil {
+		*target = make(map[adjudicationMetadataPair]int)
+	}
+	(*target)[adjudicationMetadataPair{caseID: caseID, evidenceRef: evidenceRef}]++
+}
+
+func pickVotedMetadataPair(votes map[adjudicationMetadataPair]int, minVotes int) (string, string) {
+	if len(votes) == 0 {
+		return "", ""
+	}
+	if minVotes <= 0 {
+		minVotes = 1
+	}
+	best := adjudicationMetadataPair{}
+	bestVotes := 0
+	for pair, count := range votes {
+		if count < minVotes {
+			continue
+		}
+		if pair.caseID == "" || pair.evidenceRef == "" {
+			continue
+		}
+		if count > bestVotes ||
+			(count == bestVotes && (best.caseID == "" || pair.caseID < best.caseID ||
+				(pair.caseID == best.caseID && pair.evidenceRef < best.evidenceRef))) {
+			best = pair
+			bestVotes = count
+		}
+	}
+	if bestVotes <= 0 {
+		return "", ""
+	}
+	return best.caseID, best.evidenceRef
+}
+
 func scoreWithDefault(key string, fallback float64) float64 {
 	raw := strings.TrimSpace(os.Getenv(key))
 	if raw == "" {
@@ -3214,6 +3417,31 @@ func (s *Service) maxDisputeUntil(nowUnix int64) int64 {
 
 func (s *Service) maxAppealUntil(nowUnix int64) int64 {
 	return maxUntilFromTTL(nowUnix, s.appealMaxTTL)
+}
+
+func (s *Service) effectiveFinalDisputeMinVotes() int {
+	if s.finalDisputeMinVotes > 0 {
+		return s.finalDisputeMinVotes
+	}
+	return maxInt(1, maxInt(s.peerDisputeMinVotes, s.issuerDisputeMinVotes))
+}
+
+func (s *Service) effectiveFinalAppealMinVotes() int {
+	if s.finalAppealMinVotes > 0 {
+		return s.finalAppealMinVotes
+	}
+	return maxInt(1, maxInt(s.peerAppealMinVotes, s.issuerAppealMinVotes))
+}
+
+func (s *Service) effectiveFinalAdjudicationMinOperators() int {
+	if s.finalAdjudicationOps > 0 {
+		return s.finalAdjudicationOps
+	}
+	return 1
+}
+
+func (s *Service) effectiveFinalAdjudicationMinRatio() float64 {
+	return clampScore(s.finalAdjudicationMin)
 }
 
 func (s *Service) activeDispute(att proto.RelayTrustAttestation, nowUnix int64) (int, int64, bool) {
@@ -3302,6 +3530,23 @@ func pickVotedString(votes map[string]int, minVotes int) string {
 	return bestValue
 }
 
+func meetsAdjudicationQuorum(votes int, total int, minVotes int, minRatio float64) bool {
+	if votes <= 0 || total <= 0 {
+		return false
+	}
+	if minVotes <= 0 {
+		minVotes = 1
+	}
+	if votes < minVotes {
+		return false
+	}
+	minRatio = clampScore(minRatio)
+	if minRatio <= 0 {
+		return true
+	}
+	return float64(votes)/float64(total) >= minRatio
+}
+
 func disputePenaltyFromTierCap(tierCap int) float64 {
 	switch tierCap {
 	case 1:
@@ -3358,6 +3603,53 @@ func maxUntilFromTTL(nowUnix int64, ttl time.Duration) int64 {
 	return nowUnix + sec
 }
 
+func errorString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return strings.TrimSpace(err.Error())
+}
+
+func operatorSetList(in map[string]struct{}) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(in))
+	for operator := range in {
+		operator = strings.TrimSpace(operator)
+		if operator == "" {
+			continue
+		}
+		out = append(out, operator)
+	}
+	sort.Strings(out)
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func operatorSetDifference(left map[string]struct{}, right map[string]struct{}) map[string]struct{} {
+	if len(left) == 0 {
+		return nil
+	}
+	out := make(map[string]struct{})
+	for operator := range left {
+		if _, ok := right[operator]; ok {
+			continue
+		}
+		op := strings.TrimSpace(operator)
+		if op == "" {
+			continue
+		}
+		out[op] = struct{}{}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 func tickerC(t *time.Ticker) <-chan time.Time {
 	if t == nil {
 		return nil
@@ -3399,6 +3691,14 @@ func cloneTrustAttestations(in map[string]proto.RelayTrustAttestation) map[strin
 	out := make(map[string]proto.RelayTrustAttestation, len(in))
 	for k, v := range in {
 		out[k] = v
+	}
+	return out
+}
+
+func cloneDirectorySyncRunStatus(in proto.DirectorySyncRunStatus) proto.DirectorySyncRunStatus {
+	out := in
+	if len(in.SourceOperators) > 0 {
+		out.SourceOperators = append([]string(nil), in.SourceOperators...)
 	}
 	return out
 }
@@ -3462,6 +3762,174 @@ func (s *Service) handleRotateKey(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
+func (s *Service) handleSyncStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if strings.TrimSpace(r.Header.Get("X-Admin-Token")) != s.adminToken {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	peer, issuer := s.snapshotSyncStatus()
+	resp := proto.DirectorySyncStatusResponse{
+		GeneratedAt: time.Now().UTC().Unix(),
+		Peer:        peer,
+		Issuer:      issuer,
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func (s *Service) handlePeerStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if strings.TrimSpace(r.Header.Get("X-Admin-Token")) != s.adminToken {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	now := time.Now().UTC()
+	resp := proto.DirectoryPeerStatusResponse{
+		GeneratedAt: now.Unix(),
+		Peers:       s.snapshotPeerStatus(now),
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func (s *Service) handleGovernanceStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if strings.TrimSpace(r.Header.Get("X-Admin-Token")) != s.adminToken {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	now := time.Now().UTC()
+	resp := s.snapshotGovernanceStatus(now)
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func (s *Service) snapshotPeerStatus(now time.Time) []proto.DirectoryPeerStatus {
+	s.peerMu.Lock()
+	defer s.peerMu.Unlock()
+	if s.discoveredPeers == nil {
+		s.discoveredPeers = make(map[string]time.Time)
+	}
+	if s.discoveredPeerVoters == nil {
+		s.discoveredPeerVoters = make(map[string]map[string]time.Time)
+	}
+	if s.discoveredPeerHealth == nil {
+		s.discoveredPeerHealth = make(map[string]discoveredPeerHealth)
+	}
+	if s.peerHintPubKeys == nil {
+		s.peerHintPubKeys = make(map[string]string)
+	}
+	if s.peerHintOperators == nil {
+		s.peerHintOperators = make(map[string]string)
+	}
+	s.pruneDiscoveredPeersLocked(now)
+
+	peerMap := make(map[string]proto.DirectoryPeerStatus)
+	ensure := func(url string) proto.DirectoryPeerStatus {
+		url = normalizePeerURL(url)
+		if url == "" {
+			return proto.DirectoryPeerStatus{}
+		}
+		status, ok := peerMap[url]
+		if !ok {
+			status = proto.DirectoryPeerStatus{URL: url}
+		}
+		return status
+	}
+	store := func(status proto.DirectoryPeerStatus) {
+		if strings.TrimSpace(status.URL) == "" {
+			return
+		}
+		peerMap[status.URL] = status
+	}
+
+	for _, url := range s.peerURLs {
+		status := ensure(url)
+		if status.URL == "" {
+			continue
+		}
+		status.Configured = true
+		store(status)
+	}
+	for url, seenAt := range s.discoveredPeers {
+		status := ensure(url)
+		if status.URL == "" {
+			continue
+		}
+		status.Discovered = true
+		status.LastSeenAt = seenAt.Unix()
+		store(status)
+	}
+	for url, hintOperator := range s.peerHintOperators {
+		status := ensure(url)
+		if status.URL == "" {
+			continue
+		}
+		status.HintOperator = normalizeOperatorID(hintOperator)
+		store(status)
+	}
+	for url, hintPub := range s.peerHintPubKeys {
+		status := ensure(url)
+		if status.URL == "" {
+			continue
+		}
+		status.HintPubKey = normalizePeerPubKey(hintPub)
+		store(status)
+	}
+	for url, voters := range s.discoveredPeerVoters {
+		status := ensure(url)
+		if status.URL == "" {
+			continue
+		}
+		status.VoteOperators = len(voters)
+		store(status)
+	}
+	for url, health := range s.discoveredPeerHealth {
+		status := ensure(url)
+		if status.URL == "" {
+			continue
+		}
+		if !health.lastSuccess.IsZero() {
+			status.LastSuccessAt = health.lastSuccess.Unix()
+		}
+		if !health.lastFailure.IsZero() {
+			status.LastFailureAt = health.lastFailure.Unix()
+		}
+		if !health.cooldownUntil.IsZero() {
+			status.CooldownUntil = health.cooldownUntil.Unix()
+		}
+		status.ConsecutiveFailures = health.consecutiveFailures
+		status.LastError = strings.TrimSpace(health.lastError)
+		store(status)
+	}
+
+	keys := make([]string, 0, len(peerMap))
+	for url := range peerMap {
+		keys = append(keys, url)
+	}
+	sort.Strings(keys)
+	out := make([]proto.DirectoryPeerStatus, 0, len(keys))
+	for _, url := range keys {
+		status := peerMap[url]
+		if status.Discovered {
+			status.CoolingDown = s.isDiscoveredPeerCoolingDownLocked(url, now)
+		}
+		status.Eligible = status.Configured || (status.Discovered && !status.CoolingDown)
+		out = append(out, status)
+	}
+	return out
+}
+
 func writeJSONWithETag(w http.ResponseWriter, r *http.Request, payload interface{}) error {
 	b, err := json.Marshal(payload)
 	if err != nil {
@@ -3493,6 +3961,241 @@ func (s *Service) currentKeypair() (ed25519.PublicKey, ed25519.PrivateKey) {
 	pub := append(ed25519.PublicKey(nil), s.pubKey...)
 	priv := append(ed25519.PrivateKey(nil), s.privKey...)
 	return pub, priv
+}
+
+func (s *Service) setPeerSyncStatus(status proto.DirectorySyncRunStatus) {
+	s.syncStatusMu.Lock()
+	s.peerSyncStatus = status
+	s.syncStatusMu.Unlock()
+}
+
+func (s *Service) setIssuerSyncStatus(status proto.DirectorySyncRunStatus) {
+	s.syncStatusMu.Lock()
+	s.issuerSyncStatus = status
+	s.syncStatusMu.Unlock()
+}
+
+func (s *Service) snapshotSyncStatus() (proto.DirectorySyncRunStatus, proto.DirectorySyncRunStatus) {
+	s.syncStatusMu.RLock()
+	defer s.syncStatusMu.RUnlock()
+	return cloneDirectorySyncRunStatus(s.peerSyncStatus), cloneDirectorySyncRunStatus(s.issuerSyncStatus)
+}
+
+func (s *Service) snapshotGovernanceStatus(now time.Time) proto.DirectoryGovernanceStatusResponse {
+	peerTrust := s.snapshotPeerTrust()
+	issuerTrust := s.snapshotIssuerTrust()
+	peerCandidates := len(peerTrust)
+	issuerCandidates := len(issuerTrust)
+	relays := s.buildRelayDescriptors(s.stableTime(now, s.descriptorEpoch))
+	aggregated := s.buildTrustAttestations(relays)
+	relayOperators := make(map[string]string, len(relays)+len(aggregated))
+	for _, desc := range relays {
+		role := strings.TrimSpace(desc.Role)
+		if role == "" {
+			role = "exit"
+		}
+		if strings.TrimSpace(desc.RelayID) == "" {
+			continue
+		}
+		if operator := normalizeOperatorID(desc.OperatorID); operator != "" {
+			relayOperators[relayKey(desc.RelayID, role)] = operator
+		}
+	}
+	for _, att := range aggregated {
+		role := strings.TrimSpace(att.Role)
+		if role == "" {
+			role = "exit"
+		}
+		if strings.TrimSpace(att.RelayID) == "" {
+			continue
+		}
+		if operator := normalizeOperatorID(att.OperatorID); operator != "" {
+			relayOperators[relayKey(att.RelayID, role)] = operator
+		}
+	}
+	operatorForSignal := func(relayID string, role string, operatorID string) string {
+		if operator := normalizeOperatorID(operatorID); operator != "" {
+			return operator
+		}
+		return normalizeOperatorID(relayOperators[relayKey(relayID, role)])
+	}
+	nowUnix := now.Unix()
+	disputed := 0
+	appealed := 0
+	disputeSignals := make(map[string]struct{})
+	appealSignals := make(map[string]struct{})
+	disputeSignalOperators := make(map[string]struct{})
+	appealSignalOperators := make(map[string]struct{})
+	disputedOperators := make(map[string]struct{})
+	appealedOperators := make(map[string]struct{})
+	disputeRelayOperators := make(map[string]map[string]struct{})
+	appealRelayOperators := make(map[string]map[string]struct{})
+	publishedDisputeRelayOperators := make(map[string]map[string]struct{})
+	publishedAppealRelayOperators := make(map[string]map[string]struct{})
+	publishedDisputeRelays := make(map[string]struct{})
+	publishedAppealRelays := make(map[string]struct{})
+	markRelayOperator := func(target map[string]map[string]struct{}, relay string, operator string) {
+		operator = normalizeOperatorID(operator)
+		if relay == "" || operator == "" {
+			return
+		}
+		bucket, ok := target[relay]
+		if !ok {
+			bucket = make(map[string]struct{})
+			target[relay] = bucket
+		}
+		bucket[operator] = struct{}{}
+	}
+	markSignal := func(att proto.RelayTrustAttestation) {
+		role := strings.TrimSpace(att.Role)
+		if role == "" {
+			role = "exit"
+		}
+		if role != "exit" || strings.TrimSpace(att.RelayID) == "" {
+			return
+		}
+		key := relayKey(att.RelayID, role)
+		if _, _, ok := s.activeDispute(att, nowUnix); ok {
+			disputeSignals[key] = struct{}{}
+			if operator := operatorForSignal(att.RelayID, role, att.OperatorID); operator != "" {
+				disputeSignalOperators[operator] = struct{}{}
+				markRelayOperator(disputeRelayOperators, key, operator)
+			}
+		}
+		if _, ok := s.activeAppeal(att, nowUnix); ok {
+			appealSignals[key] = struct{}{}
+			if operator := operatorForSignal(att.RelayID, role, att.OperatorID); operator != "" {
+				appealSignalOperators[operator] = struct{}{}
+				markRelayOperator(appealRelayOperators, key, operator)
+			}
+		}
+	}
+	for _, desc := range relays {
+		markSignal(proto.RelayTrustAttestation{
+			RelayID:      desc.RelayID,
+			Role:         desc.Role,
+			OperatorID:   desc.OperatorID,
+			TierCap:      0,
+			DisputeUntil: 0,
+			AppealUntil:  0,
+		})
+	}
+	for _, att := range peerTrust {
+		markSignal(att)
+	}
+	for _, att := range issuerTrust {
+		markSignal(att)
+	}
+	for _, att := range aggregated {
+		role := strings.TrimSpace(att.Role)
+		if role == "" {
+			role = "exit"
+		}
+		key := relayKey(att.RelayID, role)
+		if _, _, ok := s.activeDispute(att, nowUnix); ok {
+			disputed++
+			publishedDisputeRelays[key] = struct{}{}
+			if operator := operatorForSignal(att.RelayID, role, att.OperatorID); operator != "" {
+				disputedOperators[operator] = struct{}{}
+				markRelayOperator(publishedDisputeRelayOperators, key, operator)
+			}
+		}
+		if _, ok := s.activeAppeal(att, nowUnix); ok {
+			appealed++
+			publishedAppealRelays[key] = struct{}{}
+			if operator := operatorForSignal(att.RelayID, role, att.OperatorID); operator != "" {
+				appealedOperators[operator] = struct{}{}
+				markRelayOperator(publishedAppealRelayOperators, key, operator)
+			}
+		}
+	}
+	suppressedDisputed := maxInt(0, len(disputeSignals)-disputed)
+	suppressedAppealed := maxInt(0, len(appealSignals)-appealed)
+	suppressedDisputeOperatorsSet := operatorSetDifference(disputeSignalOperators, disputedOperators)
+	suppressedAppealOperatorsSet := operatorSetDifference(appealSignalOperators, appealedOperators)
+	disputeSignalOperatorIDs := operatorSetList(disputeSignalOperators)
+	appealSignalOperatorIDs := operatorSetList(appealSignalOperators)
+	aggregatedDisputedOperatorIDs := operatorSetList(disputedOperators)
+	aggregatedAppealedOperatorIDs := operatorSetList(appealedOperators)
+	suppressedDisputeOperatorIDs := operatorSetList(suppressedDisputeOperatorsSet)
+	suppressedAppealOperatorIDs := operatorSetList(suppressedAppealOperatorsSet)
+	relayKeysSet := make(map[string]struct{})
+	for key := range disputeSignals {
+		relayKeysSet[key] = struct{}{}
+	}
+	for key := range appealSignals {
+		relayKeysSet[key] = struct{}{}
+	}
+	for key := range publishedDisputeRelays {
+		relayKeysSet[key] = struct{}{}
+	}
+	for key := range publishedAppealRelays {
+		relayKeysSet[key] = struct{}{}
+	}
+	relayKeys := make([]string, 0, len(relayKeysSet))
+	for key := range relayKeysSet {
+		relayKeys = append(relayKeys, key)
+	}
+	sort.Strings(relayKeys)
+	relayStatuses := make([]proto.DirectoryGovernanceRelayStatus, 0, len(relayKeys))
+	for _, key := range relayKeys {
+		relayID, role, ok := splitRelayKey(key)
+		if !ok {
+			continue
+		}
+		_, upstreamDisputeSignal := disputeSignals[key]
+		_, upstreamAppealSignal := appealSignals[key]
+		_, publishedDisputed := publishedDisputeRelays[key]
+		_, publishedAppealed := publishedAppealRelays[key]
+		relayStatuses = append(relayStatuses, proto.DirectoryGovernanceRelayStatus{
+			RelayID:                      relayID,
+			Role:                         role,
+			UpstreamDisputeSignal:        upstreamDisputeSignal,
+			UpstreamAppealSignal:         upstreamAppealSignal,
+			UpstreamDisputeOperatorIDs:   operatorSetList(disputeRelayOperators[key]),
+			UpstreamAppealOperatorIDs:    operatorSetList(appealRelayOperators[key]),
+			PublishedDisputed:            publishedDisputed,
+			PublishedAppealed:            publishedAppealed,
+			PublishedDisputeOperatorIDs:  operatorSetList(publishedDisputeRelayOperators[key]),
+			PublishedAppealOperatorIDs:   operatorSetList(publishedAppealRelayOperators[key]),
+			SuppressedDisputed:           upstreamDisputeSignal && !publishedDisputed,
+			SuppressedAppealed:           upstreamAppealSignal && !publishedAppealed,
+			SuppressedDisputeOperatorIDs: operatorSetList(operatorSetDifference(disputeRelayOperators[key], publishedDisputeRelayOperators[key])),
+			SuppressedAppealOperatorIDs:  operatorSetList(operatorSetDifference(appealRelayOperators[key], publishedAppealRelayOperators[key])),
+		})
+	}
+	return proto.DirectoryGovernanceStatusResponse{
+		GeneratedAt: nowUnix,
+		Policy: proto.DirectoryAdjudicationPolicy{
+			MetaMinVotes:      maxInt(1, s.adjudicationMetaMin),
+			FinalDisputeMin:   s.effectiveFinalDisputeMinVotes(),
+			FinalAppealMin:    s.effectiveFinalAppealMinVotes(),
+			FinalMinOperators: s.effectiveFinalAdjudicationMinOperators(),
+			FinalDisputeRatio: s.effectiveFinalAdjudicationMinRatio(),
+		},
+		PeerTrustCandidates:           peerCandidates,
+		IssuerTrustCandidates:         issuerCandidates,
+		AggregatedTrustAttestations:   len(aggregated),
+		AggregatedDisputeSignals:      len(disputeSignals),
+		AggregatedAppealSignals:       len(appealSignals),
+		DisputeSignalOperators:        len(disputeSignalOperators),
+		AppealSignalOperators:         len(appealSignalOperators),
+		DisputeSignalOperatorIDs:      disputeSignalOperatorIDs,
+		AppealSignalOperatorIDs:       appealSignalOperatorIDs,
+		AggregatedDisputed:            disputed,
+		AggregatedAppealed:            appealed,
+		AggregatedDisputedOperators:   len(disputedOperators),
+		AggregatedAppealedOperators:   len(appealedOperators),
+		AggregatedDisputedOperatorIDs: aggregatedDisputedOperatorIDs,
+		AggregatedAppealedOperatorIDs: aggregatedAppealedOperatorIDs,
+		SuppressedDisputed:            suppressedDisputed,
+		SuppressedAppealed:            suppressedAppealed,
+		SuppressedDisputeOperators:    len(suppressedDisputeOperatorsSet),
+		SuppressedAppealOperators:     len(suppressedAppealOperatorsSet),
+		SuppressedDisputeOperatorIDs:  suppressedDisputeOperatorIDs,
+		SuppressedAppealOperatorIDs:   suppressedAppealOperatorIDs,
+		Relays:                        relayStatuses,
+	}
 }
 
 func (s *Service) rotateSigningKey() error {

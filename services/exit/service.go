@@ -59,6 +59,8 @@ type Service struct {
 	wgPrivateKey          string
 	wgListenPort          int
 	wgBackend             string
+	wgKernelProxy         bool
+	wgKernelTargetUDP     *net.UDPAddr
 	wgManager             wg.Manager
 	liveWGMode            bool
 	egressBackend         string
@@ -83,6 +85,7 @@ type Service struct {
 	issuerPubs        map[string]ed25519.PublicKey
 	issuerKeyIssuer   map[string]string
 	sessions          map[string]sessionInfo
+	wgSessionProxies  map[string]*net.UDPConn
 	proofNonceSeen    map[string]map[string]int64
 	metrics           exitMetrics
 	revokedJTI        map[string]int64
@@ -112,6 +115,8 @@ type exitMetrics struct {
 	ActiveSessions          uint64 `json:"active_sessions"`
 	AccountingUpdatedUnix   int64  `json:"accounting_updated_unix"`
 }
+
+var deriveWGPublicKeyFromPrivateFile = wg.DerivePublicKeyFromPrivateFile
 
 func New() *Service {
 	addr := os.Getenv("EXIT_ADDR")
@@ -168,11 +173,17 @@ func New() *Service {
 		wgInterface = "wg-exit0"
 	}
 	wgPrivateKey := os.Getenv("EXIT_WG_PRIVATE_KEY_PATH")
-	wgListenPort := 51821
+	wgListenPort := 51831
+	if raw := strings.TrimSpace(os.Getenv("EXIT_WG_LISTEN_PORT")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 && parsed <= 65535 {
+			wgListenPort = parsed
+		}
+	}
 	wgBackend := os.Getenv("WG_BACKEND")
 	if wgBackend == "" {
 		wgBackend = "noop"
 	}
+	wgKernelProxy := os.Getenv("EXIT_WG_KERNEL_PROXY") == "1"
 	var wgManager wg.Manager
 	switch wgBackend {
 	case "command":
@@ -246,6 +257,7 @@ func New() *Service {
 		wgPrivateKey:          wgPrivateKey,
 		wgListenPort:          wgListenPort,
 		wgBackend:             wgBackend,
+		wgKernelProxy:         wgKernelProxy,
 		wgManager:             wgManager,
 		liveWGMode:            liveWGMode,
 		egressBackend:         egressBackend,
@@ -262,6 +274,7 @@ func New() *Service {
 		issuerPubs:            make(map[string]ed25519.PublicKey),
 		issuerKeyIssuer:       make(map[string]string),
 		sessions:              make(map[string]sessionInfo),
+		wgSessionProxies:      make(map[string]*net.UDPConn),
 		proofNonceSeen:        make(map[string]map[string]int64),
 		revokedJTI:            make(map[string]int64),
 		minTokenEpoch:         make(map[string]int64),
@@ -270,15 +283,28 @@ func New() *Service {
 }
 
 func (s *Service) Run(ctx context.Context) error {
-	log.Printf("exit wg backend=%s iface=%s opaque_echo=%t token_proof_replay_guard=%t peer_rebind_sec=%d",
-		s.wgBackend, s.wgInterface, s.opaqueEcho, s.tokenProofReplayGuard, int(s.peerRebindAfter/time.Second))
+	log.Printf("exit wg backend=%s iface=%s listen_port=%d kernel_proxy=%t opaque_echo=%t token_proof_replay_guard=%t peer_rebind_sec=%d",
+		s.wgBackend, s.wgInterface, s.wgListenPort, s.wgKernelProxy, s.opaqueEcho, s.tokenProofReplayGuard, int(s.peerRebindAfter/time.Second))
 	if err := s.validateRuntimeConfig(); err != nil {
 		return err
 	}
+	defer s.closeAllWGKernelSessionProxies()
 	if s.wgBackend == "command" {
 		if err := wg.PreflightCommandBackend(ctx, s.wgInterface, s.wgPrivateKey); err != nil {
 			return fmt.Errorf("exit wg preflight failed: %w", err)
 		}
+		if err := s.ensureCommandWGPubKey(ctx); err != nil {
+			return fmt.Errorf("exit wg pubkey init failed: %w", err)
+		}
+	}
+	if s.wgKernelProxy {
+		targetAddr := fmt.Sprintf("127.0.0.1:%d", s.wgListenPort)
+		target, err := net.ResolveUDPAddr("udp", targetAddr)
+		if err != nil {
+			return fmt.Errorf("invalid wg kernel proxy target: %w", err)
+		}
+		s.wgKernelTargetUDP = target
+		log.Printf("exit wg kernel proxy target=%s", targetAddr)
 	}
 	if s.opaqueSinkAddr != "" {
 		sink, err := net.ResolveUDPAddr("udp", s.opaqueSinkAddr)
@@ -347,6 +373,7 @@ func (s *Service) Run(ctx context.Context) error {
 			if s.opaqueSourceConn != nil {
 				_ = s.opaqueSourceConn.Close()
 			}
+			s.closeAllWGKernelSessionProxies()
 			if err := s.flushAccountingSnapshot(time.Now()); err != nil {
 				log.Printf("exit accounting flush failed: %v", err)
 			}
@@ -375,12 +402,36 @@ func (s *Service) Run(ctx context.Context) error {
 }
 
 func (s *Service) validateRuntimeConfig() error {
+	if s.wgListenPort == 0 {
+		s.wgListenPort = 51831
+	}
+	if s.wgListenPort <= 0 || s.wgListenPort > 65535 {
+		return fmt.Errorf("EXIT_WG_LISTEN_PORT must be in 1..65535")
+	}
 	if s.wgBackend == "command" {
 		if s.dataMode != "opaque" {
 			return fmt.Errorf("WG_BACKEND=command requires DATA_PLANE_MODE=opaque")
 		}
 		if s.wgPrivateKey == "" {
 			return fmt.Errorf("WG_BACKEND=command requires EXIT_WG_PRIVATE_KEY_PATH")
+		}
+		if strings.TrimSpace(s.dataAddr) == "" {
+			s.dataAddr = "127.0.0.1:51821"
+		}
+		dataPort, err := udpPortOf(s.dataAddr)
+		if err != nil {
+			return fmt.Errorf("invalid EXIT_DATA_ADDR: %w", err)
+		}
+		if dataPort == s.wgListenPort {
+			return fmt.Errorf("EXIT_DATA_ADDR port conflicts with EXIT_WG_LISTEN_PORT; choose distinct ports")
+		}
+	}
+	if s.wgKernelProxy {
+		if s.dataMode != "opaque" {
+			return fmt.Errorf("EXIT_WG_KERNEL_PROXY requires DATA_PLANE_MODE=opaque")
+		}
+		if s.wgBackend != "command" {
+			return fmt.Errorf("EXIT_WG_KERNEL_PROXY requires WG_BACKEND=command")
 		}
 	}
 	if s.liveWGMode {
@@ -402,6 +453,25 @@ func (s *Service) validateRuntimeConfig() error {
 		if strings.TrimSpace(s.opaqueSourceAddr) == "" {
 			return fmt.Errorf("EXIT_LIVE_WG_MODE requires EXIT_OPAQUE_SOURCE_ADDR")
 		}
+	}
+	return nil
+}
+
+func (s *Service) ensureCommandWGPubKey(ctx context.Context) error {
+	if s.wgBackend != "command" {
+		return nil
+	}
+	configured := strings.TrimSpace(s.wgPubKey)
+	derived, err := deriveWGPublicKeyFromPrivateFile(ctx, s.wgPrivateKey)
+	if err != nil {
+		return err
+	}
+	if wg.IsValidPublicKey(configured) && configured != derived {
+		return fmt.Errorf("configured EXIT_WG_PUBKEY does not match EXIT_WG_PRIVATE_KEY_PATH")
+	}
+	s.wgPubKey = derived
+	if configured == "" || configured != derived {
+		log.Printf("exit derived wg public key from private key file")
 	}
 	return nil
 }
@@ -473,7 +543,16 @@ func (s *Service) startUDP(ctx context.Context, errCh chan<- error) error {
 				} else {
 					log.Printf("exit accepted opaque packet session=%s payload_len=%d wg_like=false", sessionID, len(raw))
 				}
-				if s.opaqueEcho && srcAddr != nil {
+				forwardedToWG := false
+				if s.wgKernelProxy {
+					if err := s.forwardOpaqueToWGKernel(sessionID, raw); err != nil {
+						log.Printf("exit dropped opaque packet session=%s reason=wg-kernel-proxy-failed err=%v", sessionID, err)
+						s.recordDrop(uint64(len(raw)), claims.Tier)
+						continue
+					}
+					forwardedToWG = true
+				}
+				if s.opaqueEcho && srcAddr != nil && !forwardedToWG {
 					echoFrame := relay.BuildDatagram(sessionID, payload)
 					_, _ = conn.WriteToUDP(echoFrame, srcAddr)
 				}
@@ -630,8 +709,13 @@ func (s *Service) resolveDownlinkTarget(sessionID string, now time.Time) (string
 		return "", 0, false
 	}
 	if now.Unix() >= session.claims.ExpiryUnix {
+		staleProxy := s.wgSessionProxies[sessionID]
+		delete(s.wgSessionProxies, sessionID)
 		delete(s.sessions, sessionID)
 		s.metrics.ActiveSessions = uint64(len(s.sessions))
+		if staleProxy != nil {
+			_ = staleProxy.Close()
+		}
 		return "", 0, false
 	}
 	target := strings.TrimSpace(session.peerAddr)
@@ -645,6 +729,121 @@ func (s *Service) resolveDownlinkTarget(sessionID string, now time.Time) (string
 	session.lastActivity = now
 	s.sessions[sessionID] = session
 	return target, session.downNonce, true
+}
+
+func (s *Service) forwardOpaqueToWGKernel(sessionID string, payload []byte) error {
+	if !s.wgKernelProxy {
+		return nil
+	}
+	proxyConn, err := s.ensureWGSessionProxy(sessionID)
+	if err != nil {
+		return err
+	}
+	target := s.wgKernelTargetUDP
+	if target == nil {
+		target, err = net.ResolveUDPAddr("udp", fmt.Sprintf("127.0.0.1:%d", s.wgListenPort))
+		if err != nil {
+			return err
+		}
+		s.wgKernelTargetUDP = target
+	}
+	_, err = proxyConn.WriteToUDP(payload, target)
+	return err
+}
+
+func (s *Service) ensureWGSessionProxy(sessionID string) (*net.UDPConn, error) {
+	s.mu.RLock()
+	existing := s.wgSessionProxies[sessionID]
+	s.mu.RUnlock()
+	if existing != nil {
+		return existing, nil
+	}
+
+	proxyConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+	if err != nil {
+		return nil, err
+	}
+
+	s.mu.Lock()
+	if existing := s.wgSessionProxies[sessionID]; existing != nil {
+		s.mu.Unlock()
+		_ = proxyConn.Close()
+		return existing, nil
+	}
+	if s.wgSessionProxies == nil {
+		s.wgSessionProxies = make(map[string]*net.UDPConn)
+	}
+	s.wgSessionProxies[sessionID] = proxyConn
+	s.mu.Unlock()
+
+	go s.runWGSessionProxy(sessionID, proxyConn)
+	return proxyConn, nil
+}
+
+func (s *Service) runWGSessionProxy(sessionID string, proxyConn *net.UDPConn) {
+	buf := make([]byte, 64*1024)
+	for {
+		n, _, err := proxyConn.ReadFromUDP(buf)
+		if err != nil {
+			return
+		}
+		if n <= 0 {
+			continue
+		}
+		payload := append([]byte(nil), buf[:n]...)
+		if s.liveWGMode && !relay.LooksLikePlausibleWireGuardMessage(payload) {
+			s.recordDownlinkDrop()
+			continue
+		}
+		targetAddr, nonce, ok := s.resolveDownlinkTarget(sessionID, time.Now())
+		if !ok {
+			s.recordDownlinkDrop()
+			continue
+		}
+		targetUDP, err := net.ResolveUDPAddr("udp", targetAddr)
+		if err != nil {
+			s.recordDownlinkDrop()
+			continue
+		}
+		frame := relay.BuildDatagram(sessionID, relay.BuildOpaquePayload(nonce, payload))
+		if s.udpConn == nil {
+			s.recordDownlinkDrop()
+			continue
+		}
+		if _, err := s.udpConn.WriteToUDP(frame, targetUDP); err != nil {
+			s.recordDownlinkDrop()
+			continue
+		}
+		s.recordDownlinkForward(uint64(len(payload)))
+	}
+}
+
+func (s *Service) closeWGSessionProxy(sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	s.mu.Lock()
+	proxyConn := s.wgSessionProxies[sessionID]
+	delete(s.wgSessionProxies, sessionID)
+	s.mu.Unlock()
+	if proxyConn != nil {
+		_ = proxyConn.Close()
+	}
+}
+
+func (s *Service) closeAllWGKernelSessionProxies() {
+	s.mu.Lock()
+	proxies := make([]*net.UDPConn, 0, len(s.wgSessionProxies))
+	for sessionID, proxyConn := range s.wgSessionProxies {
+		delete(s.wgSessionProxies, sessionID)
+		if proxyConn != nil {
+			proxies = append(proxies, proxyConn)
+		}
+	}
+	s.mu.Unlock()
+	for _, proxyConn := range proxies {
+		_ = proxyConn.Close()
+	}
 }
 
 func (s *Service) allowSessionPeer(sessionID string, peerAddr string, now time.Time) (bool, bool, string) {
@@ -733,6 +932,17 @@ func sameUDPAddr(a, b string) bool {
 		return aa.IP.String() == bb.IP.String()
 	}
 	return aa.IP.Equal(bb.IP)
+}
+
+func udpPortOf(addr string) (int, error) {
+	udpAddr, err := net.ResolveUDPAddr("udp", strings.TrimSpace(addr))
+	if err != nil {
+		return 0, err
+	}
+	if udpAddr.Port <= 0 || udpAddr.Port > 65535 {
+		return 0, fmt.Errorf("invalid udp port")
+	}
+	return udpAddr.Port, nil
 }
 
 func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
@@ -824,6 +1034,8 @@ func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
 	clientIP := s.allocateClientInnerIP()
 
 	s.mu.Lock()
+	staleProxy := s.wgSessionProxies[req.SessionID]
+	delete(s.wgSessionProxies, req.SessionID)
 	s.sessions[req.SessionID] = sessionInfo{
 		claims:        claims,
 		seenNonces:    make(map[uint64]struct{}),
@@ -835,6 +1047,9 @@ func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
 	}
 	s.metrics.ActiveSessions = uint64(len(s.sessions))
 	s.mu.Unlock()
+	if staleProxy != nil {
+		_ = staleProxy.Close()
+	}
 
 	if req.Transport == "wireguard-udp" {
 		wgCfg := wg.SessionConfig{
@@ -850,6 +1065,7 @@ func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
 			KeepaliveSec:   s.wgKeepaliveSec,
 		}
 		if err := s.wgManager.ConfigureSession(r.Context(), wgCfg); err != nil {
+			s.closeWGSessionProxy(req.SessionID)
 			s.mu.Lock()
 			delete(s.sessions, req.SessionID)
 			s.mu.Unlock()
@@ -891,11 +1107,16 @@ func (s *Service) handlePathClose(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	session, exists := s.sessions[req.SessionID]
+	staleProxy := s.wgSessionProxies[req.SessionID]
+	delete(s.wgSessionProxies, req.SessionID)
 	if exists {
 		delete(s.sessions, req.SessionID)
 		s.metrics.ActiveSessions = uint64(len(s.sessions))
 	}
 	s.mu.Unlock()
+	if staleProxy != nil {
+		_ = staleProxy.Close()
+	}
 	w.Header().Set("Content-Type", "application/json")
 	if !exists {
 		_ = json.NewEncoder(w).Encode(proto.PathCloseResponse{Closed: false, Reason: "unknown-session"})
@@ -1052,11 +1273,15 @@ func (s *Service) authorizeNonce(sessionID string, nonce uint64, now time.Time) 
 
 func (s *Service) cleanupExpiredSessions(now time.Time) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	var staleProxies []*net.UDPConn
 	nowUnix := now.Unix()
 	for sid, session := range s.sessions {
 		if nowUnix >= session.claims.ExpiryUnix {
 			delete(s.sessions, sid)
+			if proxyConn := s.wgSessionProxies[sid]; proxyConn != nil {
+				staleProxies = append(staleProxies, proxyConn)
+			}
+			delete(s.wgSessionProxies, sid)
 		}
 	}
 	for tokenID, seen := range s.proofNonceSeen {
@@ -1073,6 +1298,10 @@ func (s *Service) cleanupExpiredSessions(now time.Time) {
 		}
 	}
 	s.metrics.ActiveSessions = uint64(len(s.sessions))
+	s.mu.Unlock()
+	for _, proxyConn := range staleProxies {
+		_ = proxyConn.Close()
+	}
 }
 
 func (s *Service) verifyToken(token string) (crypto.CapabilityClaims, string, error) {

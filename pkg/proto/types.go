@@ -286,6 +286,96 @@ type DirectoryPeerHint struct {
 	PubKey   string `json:"pub_key,omitempty"`
 }
 
+type DirectoryPeerStatus struct {
+	URL                 string `json:"url"`
+	Configured          bool   `json:"configured"`
+	Discovered          bool   `json:"discovered"`
+	Eligible            bool   `json:"eligible"`
+	CoolingDown         bool   `json:"cooling_down"`
+	HintOperator        string `json:"hint_operator,omitempty"`
+	HintPubKey          string `json:"hint_pub_key,omitempty"`
+	VoteOperators       int    `json:"vote_operators,omitempty"`
+	LastSeenAt          int64  `json:"last_seen_at,omitempty"`
+	LastSuccessAt       int64  `json:"last_success_at,omitempty"`
+	LastFailureAt       int64  `json:"last_failure_at,omitempty"`
+	ConsecutiveFailures int    `json:"consecutive_failures,omitempty"`
+	CooldownUntil       int64  `json:"cooldown_until,omitempty"`
+	LastError           string `json:"last_error,omitempty"`
+}
+
+type DirectoryPeerStatusResponse struct {
+	GeneratedAt int64                 `json:"generated_at,omitempty"`
+	Peers       []DirectoryPeerStatus `json:"peers"`
+}
+
+type DirectorySyncRunStatus struct {
+	LastRunAt         int64    `json:"last_run_at,omitempty"`
+	Success           bool     `json:"success"`
+	SuccessSources    int      `json:"success_sources,omitempty"`
+	SourceOperators   []string `json:"source_operators,omitempty"`
+	RequiredOperators int      `json:"required_operators,omitempty"`
+	QuorumMet         bool     `json:"quorum_met"`
+	Error             string   `json:"error,omitempty"`
+}
+
+type DirectorySyncStatusResponse struct {
+	GeneratedAt int64                  `json:"generated_at,omitempty"`
+	Peer        DirectorySyncRunStatus `json:"peer"`
+	Issuer      DirectorySyncRunStatus `json:"issuer"`
+}
+
+type DirectoryAdjudicationPolicy struct {
+	MetaMinVotes      int     `json:"meta_min_votes"`
+	FinalDisputeMin   int     `json:"final_dispute_min_votes"`
+	FinalAppealMin    int     `json:"final_appeal_min_votes"`
+	FinalMinOperators int     `json:"final_adjudication_min_operators"`
+	FinalDisputeRatio float64 `json:"final_adjudication_min_ratio"`
+}
+
+type DirectoryGovernanceRelayStatus struct {
+	RelayID                      string   `json:"relay_id"`
+	Role                         string   `json:"role,omitempty"`
+	UpstreamDisputeSignal        bool     `json:"upstream_dispute_signal"`
+	UpstreamAppealSignal         bool     `json:"upstream_appeal_signal"`
+	UpstreamDisputeOperatorIDs   []string `json:"upstream_dispute_operator_ids,omitempty"`
+	UpstreamAppealOperatorIDs    []string `json:"upstream_appeal_operator_ids,omitempty"`
+	PublishedDisputed            bool     `json:"published_disputed"`
+	PublishedAppealed            bool     `json:"published_appealed"`
+	PublishedDisputeOperatorIDs  []string `json:"published_dispute_operator_ids,omitempty"`
+	PublishedAppealOperatorIDs   []string `json:"published_appeal_operator_ids,omitempty"`
+	SuppressedDisputed           bool     `json:"suppressed_disputed"`
+	SuppressedAppealed           bool     `json:"suppressed_appealed"`
+	SuppressedDisputeOperatorIDs []string `json:"suppressed_dispute_operator_ids,omitempty"`
+	SuppressedAppealOperatorIDs  []string `json:"suppressed_appeal_operator_ids,omitempty"`
+}
+
+type DirectoryGovernanceStatusResponse struct {
+	GeneratedAt                   int64                            `json:"generated_at,omitempty"`
+	Policy                        DirectoryAdjudicationPolicy      `json:"policy"`
+	PeerTrustCandidates           int                              `json:"peer_trust_candidates"`
+	IssuerTrustCandidates         int                              `json:"issuer_trust_candidates"`
+	AggregatedTrustAttestations   int                              `json:"aggregated_trust_attestations"`
+	AggregatedDisputeSignals      int                              `json:"aggregated_dispute_signals"`
+	AggregatedAppealSignals       int                              `json:"aggregated_appeal_signals"`
+	DisputeSignalOperators        int                              `json:"dispute_signal_operators"`
+	AppealSignalOperators         int                              `json:"appeal_signal_operators"`
+	DisputeSignalOperatorIDs      []string                         `json:"dispute_signal_operator_ids,omitempty"`
+	AppealSignalOperatorIDs       []string                         `json:"appeal_signal_operator_ids,omitempty"`
+	AggregatedDisputed            int                              `json:"aggregated_disputed"`
+	AggregatedAppealed            int                              `json:"aggregated_appealed"`
+	AggregatedDisputedOperators   int                              `json:"aggregated_disputed_operators"`
+	AggregatedAppealedOperators   int                              `json:"aggregated_appealed_operators"`
+	AggregatedDisputedOperatorIDs []string                         `json:"aggregated_disputed_operator_ids,omitempty"`
+	AggregatedAppealedOperatorIDs []string                         `json:"aggregated_appealed_operator_ids,omitempty"`
+	SuppressedDisputed            int                              `json:"suppressed_disputed"`
+	SuppressedAppealed            int                              `json:"suppressed_appealed"`
+	SuppressedDisputeOperators    int                              `json:"suppressed_dispute_operators"`
+	SuppressedAppealOperators     int                              `json:"suppressed_appeal_operators"`
+	SuppressedDisputeOperatorIDs  []string                         `json:"suppressed_dispute_operator_ids,omitempty"`
+	SuppressedAppealOperatorIDs   []string                         `json:"suppressed_appeal_operator_ids,omitempty"`
+	Relays                        []DirectoryGovernanceRelayStatus `json:"relays,omitempty"`
+}
+
 type ProviderRelayUpsertRequest struct {
 	Token         string   `json:"token,omitempty"`
 	RelayID       string   `json:"relay_id"`

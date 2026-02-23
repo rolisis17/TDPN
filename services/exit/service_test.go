@@ -1,9 +1,12 @@
 package exit
 
 import (
+	"context"
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -486,6 +489,134 @@ func TestValidateRuntimeConfigCommandModeRequiresOpaque(t *testing.T) {
 	}
 }
 
+func TestValidateRuntimeConfigCommandModeRejectsPortConflict(t *testing.T) {
+	s := &Service{
+		dataMode:     "opaque",
+		dataAddr:     "127.0.0.1:51831",
+		wgBackend:    "command",
+		wgPrivateKey: "/tmp/wg-exit.key",
+		wgListenPort: 51831,
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected port conflict validation error")
+	}
+	if !strings.Contains(err.Error(), "conflicts") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigKernelProxyRequiresCommandBackend(t *testing.T) {
+	s := &Service{
+		dataMode:       "opaque",
+		dataAddr:       "127.0.0.1:51821",
+		wgBackend:      "noop",
+		wgKernelProxy:  true,
+		wgListenPort:   51831,
+		wgPrivateKey:   "",
+		opaqueSinkAddr: "",
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected kernel proxy validation error")
+	}
+	if !strings.Contains(err.Error(), "WG_BACKEND=command") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestEnsureCommandWGPubKeyDerivesWhenUnset(t *testing.T) {
+	original := deriveWGPublicKeyFromPrivateFile
+	defer func() { deriveWGPublicKeyFromPrivateFile = original }()
+
+	validPub := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	called := 0
+	deriveWGPublicKeyFromPrivateFile = func(_ context.Context, privateKeyPath string) (string, error) {
+		called++
+		if privateKeyPath != "/tmp/wg-exit.key" {
+			t.Fatalf("unexpected private key path: %s", privateKeyPath)
+		}
+		return validPub, nil
+	}
+
+	s := &Service{
+		wgBackend:    "command",
+		wgPrivateKey: "/tmp/wg-exit.key",
+		wgPubKey:     "",
+	}
+	if err := s.ensureCommandWGPubKey(context.Background()); err != nil {
+		t.Fatalf("ensure command wg pubkey: %v", err)
+	}
+	if called != 1 {
+		t.Fatalf("expected one derive call, got %d", called)
+	}
+	if s.wgPubKey != validPub {
+		t.Fatalf("expected derived pubkey, got %q", s.wgPubKey)
+	}
+}
+
+func TestEnsureCommandWGPubKeySkipsDeriveWhenAlreadyValid(t *testing.T) {
+	original := deriveWGPublicKeyFromPrivateFile
+	defer func() { deriveWGPublicKeyFromPrivateFile = original }()
+
+	called := 0
+	validPub := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	deriveWGPublicKeyFromPrivateFile = func(context.Context, string) (string, error) {
+		called++
+		return validPub, nil
+	}
+
+	s := &Service{
+		wgBackend: "command",
+		wgPubKey:  validPub,
+	}
+	if err := s.ensureCommandWGPubKey(context.Background()); err != nil {
+		t.Fatalf("ensure command wg pubkey: %v", err)
+	}
+	if called != 1 {
+		t.Fatalf("expected derive call for consistency check, got %d", called)
+	}
+}
+
+func TestEnsureCommandWGPubKeyRejectsMismatch(t *testing.T) {
+	original := deriveWGPublicKeyFromPrivateFile
+	defer func() { deriveWGPublicKeyFromPrivateFile = original }()
+
+	configuredPub := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	derivedPubBytes := make([]byte, 32)
+	derivedPubBytes[0] = 1
+	derivedPub := base64.StdEncoding.EncodeToString(derivedPubBytes)
+
+	deriveWGPublicKeyFromPrivateFile = func(context.Context, string) (string, error) {
+		return derivedPub, nil
+	}
+
+	s := &Service{
+		wgBackend: "command",
+		wgPubKey:  configuredPub,
+	}
+	if err := s.ensureCommandWGPubKey(context.Background()); err == nil {
+		t.Fatalf("expected mismatch error")
+	}
+}
+
+func TestEnsureCommandWGPubKeyReturnsDeriveError(t *testing.T) {
+	original := deriveWGPublicKeyFromPrivateFile
+	defer func() { deriveWGPublicKeyFromPrivateFile = original }()
+
+	deriveWGPublicKeyFromPrivateFile = func(context.Context, string) (string, error) {
+		return "", os.ErrInvalid
+	}
+
+	s := &Service{
+		wgBackend:    "command",
+		wgPrivateKey: "/tmp/wg-exit.key",
+	}
+	if err := s.ensureCommandWGPubKey(context.Background()); err == nil {
+		t.Fatalf("expected derive error")
+	}
+}
+
 func TestApplyRevocationFeedSetsMinTokenEpoch(t *testing.T) {
 	pub, priv, err := crypto.GenerateEd25519Keypair()
 	if err != nil {
@@ -594,6 +725,97 @@ func TestParseOpaqueDownlinkPacketLiveModeRequiresPlausibleWireGuard(t *testing.
 	}
 	if sid != "sid-1" || len(payload) != len(validWG) {
 		t.Fatalf("unexpected parsed live payload sid=%s payload_len=%d", sid, len(payload))
+	}
+}
+
+func TestWGKernelProxyRoundTrip(t *testing.T) {
+	exitDataConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+	if err != nil {
+		t.Fatalf("listen exit data: %v", err)
+	}
+	defer exitDataConn.Close()
+
+	clientPeerConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+	if err != nil {
+		t.Fatalf("listen client peer: %v", err)
+	}
+	defer clientPeerConn.Close()
+
+	wgEmulatorConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+	if err != nil {
+		t.Fatalf("listen wg emulator: %v", err)
+	}
+	defer wgEmulatorConn.Close()
+
+	now := time.Now()
+	s := &Service{
+		wgKernelProxy:     true,
+		wgListenPort:      wgEmulatorConn.LocalAddr().(*net.UDPAddr).Port,
+		wgKernelTargetUDP: wgEmulatorConn.LocalAddr().(*net.UDPAddr),
+		udpConn:           exitDataConn,
+		sessions: map[string]sessionInfo{
+			"sid-1": {
+				claims:       crypto.CapabilityClaims{ExpiryUnix: now.Add(time.Minute).Unix()},
+				seenNonces:   map[uint64]struct{}{},
+				peerAddr:     clientPeerConn.LocalAddr().String(),
+				peerLastSeen: now.Unix(),
+			},
+		},
+		wgSessionProxies: make(map[string]*net.UDPConn),
+	}
+	defer s.closeAllWGKernelSessionProxies()
+
+	uplink := make([]byte, 32)
+	uplink[0] = 4
+	uplink[4] = 0x42
+	wgReply := append([]byte("wg-down-"), uplink...)
+
+	wgReadErr := make(chan error, 1)
+	go func() {
+		buf := make([]byte, 2048)
+		_ = wgEmulatorConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		n, src, err := wgEmulatorConn.ReadFromUDP(buf)
+		if err != nil {
+			wgReadErr <- err
+			return
+		}
+		if string(buf[:n]) != string(uplink) {
+			wgReadErr <- errors.New("wg emulator uplink mismatch")
+			return
+		}
+		_, err = wgEmulatorConn.WriteToUDP(wgReply, src)
+		wgReadErr <- err
+	}()
+
+	if err := s.forwardOpaqueToWGKernel("sid-1", uplink); err != nil {
+		t.Fatalf("forwardOpaqueToWGKernel failed: %v", err)
+	}
+	if err := <-wgReadErr; err != nil {
+		t.Fatalf("wg emulator flow failed: %v", err)
+	}
+
+	buf := make([]byte, 4096)
+	_ = clientPeerConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	n, _, err := clientPeerConn.ReadFromUDP(buf)
+	if err != nil {
+		t.Fatalf("read client peer frame: %v", err)
+	}
+	sessionID, payload, err := relay.ParseDatagram(buf[:n])
+	if err != nil {
+		t.Fatalf("parse downlink frame: %v", err)
+	}
+	if sessionID != "sid-1" {
+		t.Fatalf("unexpected session id: %s", sessionID)
+	}
+	nonce, raw, err := relay.ParseOpaquePayload(payload)
+	if err != nil {
+		t.Fatalf("parse opaque downlink payload: %v", err)
+	}
+	if nonce == 0 {
+		t.Fatalf("expected non-zero downlink nonce")
+	}
+	if string(raw) != string(wgReply) {
+		t.Fatalf("unexpected downlink payload got=%x want=%x", raw, wgReply)
 	}
 }
 

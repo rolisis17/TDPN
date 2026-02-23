@@ -2045,6 +2045,53 @@ func TestIngestDiscoveredPeersRequiresOperatorVotes(t *testing.T) {
 	}
 }
 
+func TestIngestDiscoveredPeersRequireHint(t *testing.T) {
+	now := time.Now().UTC()
+	discoveredURL := "http://peer-hinted.local"
+	validHintKey := base64.RawURLEncoding.EncodeToString(make([]byte, ed25519.PublicKeySize))
+	s := &Service{
+		localURL:                 "http://local-dir",
+		peerURLs:                 []string{"http://seed-a.local"},
+		peerDiscoveryEnabled:     true,
+		peerDiscoveryRequireHint: true,
+		peerDiscoveryTTL:         10 * time.Minute,
+		peerDiscoveryMax:         16,
+		peerDiscoveryMinVotes:    1,
+		discoveredPeers:          make(map[string]time.Time),
+		discoveredPeerVoters:     make(map[string]map[string]time.Time),
+		discoveredPeerHealth:     make(map[string]discoveredPeerHealth),
+		peerHintPubKeys:          make(map[string]string),
+		peerHintOperators:        make(map[string]string),
+	}
+
+	if imported := s.ingestDiscoveredPeers("http://seed-a.local", "op-seed-a", []proto.DirectoryPeerHint{{URL: discoveredURL}}, now); imported != 0 {
+		t.Fatalf("expected no discovery without peer hint metadata, got imported=%d", imported)
+	}
+	if containsString(s.snapshotSyncPeers(now), discoveredURL) {
+		t.Fatalf("did not expect discovered peer without hint metadata")
+	}
+
+	if imported := s.ingestDiscoveredPeers("http://seed-a.local", "op-seed-a", []proto.DirectoryPeerHint{{URL: discoveredURL, Operator: "op-hinted"}}, now.Add(time.Second)); imported != 0 {
+		t.Fatalf("expected no discovery without hinted pubkey, got imported=%d", imported)
+	}
+	if containsString(s.snapshotSyncPeers(now.Add(2*time.Second)), discoveredURL) {
+		t.Fatalf("did not expect discovered peer without hinted pubkey")
+	}
+
+	if imported := s.ingestDiscoveredPeers("http://seed-a.local", "op-seed-a", []proto.DirectoryPeerHint{{URL: discoveredURL, Operator: "op-hinted", PubKey: validHintKey}}, now.Add(3*time.Second)); imported != 1 {
+		t.Fatalf("expected discovery once full hint metadata is present, got imported=%d", imported)
+	}
+	if !containsString(s.snapshotSyncPeers(now.Add(4*time.Second)), discoveredURL) {
+		t.Fatalf("expected discovered peer once hint requirement is satisfied")
+	}
+	if got := s.peerHintOperator(discoveredURL); got != "op-hinted" {
+		t.Fatalf("expected persisted hinted operator, got %q", got)
+	}
+	if got := s.peerHintPubKey(discoveredURL); got != validHintKey {
+		t.Fatalf("expected persisted hinted pubkey, got %q", got)
+	}
+}
+
 func TestSnapshotSyncPeersPrunesDiscoveredPeerWhenVoteQuorumDrops(t *testing.T) {
 	now := time.Now().UTC()
 	discoveredURL := "http://peer-unstable.local"
@@ -2206,6 +2253,153 @@ func TestBuildTrustAttestationsAppliesAdjudicationMetadataThreshold(t *testing.T
 	}
 	if got.AppealCase != "" || got.AppealRef != "" {
 		t.Fatalf("expected appeal metadata omitted below adjudication meta threshold, got case=%q ref=%q", got.AppealCase, got.AppealRef)
+	}
+}
+
+func TestBuildTrustAttestationsAppliesFinalAdjudicationRatio(t *testing.T) {
+	nowUnix := time.Now().Unix()
+	s := &Service{
+		finalDisputeMinVotes: 1,
+		finalAppealMinVotes:  1,
+		finalAdjudicationMin: 0.51,
+		peerTrust: map[string]proto.RelayTrustAttestation{
+			relayKey("exit-local-1", "exit"): {
+				RelayID:      "exit-local-1",
+				Role:         "exit",
+				OperatorID:   "op-a",
+				Reputation:   0.8,
+				Confidence:   0.9,
+				TierCap:      1,
+				DisputeUntil: nowUnix + 300,
+				AppealUntil:  nowUnix + 300,
+			},
+		},
+	}
+	relays := s.buildRelayDescriptors(time.Now().UTC())
+	out := s.buildTrustAttestations(relays)
+	if len(out) == 0 {
+		t.Fatalf("expected aggregated trust attestations")
+	}
+	var got proto.RelayTrustAttestation
+	found := false
+	for _, att := range out {
+		if att.RelayID == "exit-local-1" && att.Role == "exit" {
+			got = att
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected exit-local-1 attestation")
+	}
+	if got.TierCap != 0 || got.DisputeUntil != 0 {
+		t.Fatalf("expected dispute signal suppressed by final ratio quorum, got tier_cap=%d dispute_until=%d", got.TierCap, got.DisputeUntil)
+	}
+	if got.AppealUntil != 0 {
+		t.Fatalf("expected appeal signal suppressed by final ratio quorum, got appeal_until=%d", got.AppealUntil)
+	}
+}
+
+func TestBuildTrustAttestationsAppliesFinalAdjudicationOperatorQuorum(t *testing.T) {
+	nowUnix := time.Now().Unix()
+	s := &Service{
+		finalDisputeMinVotes: 1,
+		finalAppealMinVotes:  1,
+		finalAdjudicationOps: 2,
+		finalAdjudicationMin: 0,
+		peerTrust: map[string]proto.RelayTrustAttestation{
+			relayKey("exit-local-1", "exit"): {
+				RelayID:      "exit-local-1",
+				Role:         "exit",
+				OperatorID:   "op-a",
+				Reputation:   0.8,
+				Confidence:   0.9,
+				TierCap:      1,
+				DisputeUntil: nowUnix + 300,
+			},
+		},
+	}
+	out := s.buildTrustAttestations(nil)
+	if len(out) != 1 {
+		t.Fatalf("expected one aggregated trust attestation, got %d", len(out))
+	}
+	if out[0].TierCap != 0 || out[0].DisputeUntil != 0 {
+		t.Fatalf("expected dispute suppressed with one disputed operator under min=2, got tier_cap=%d dispute_until=%d", out[0].TierCap, out[0].DisputeUntil)
+	}
+
+	s.issuerTrust = map[string]proto.RelayTrustAttestation{
+		relayKey("exit-local-1", "exit"): {
+			RelayID:      "exit-local-1",
+			Role:         "exit",
+			OperatorID:   "op-b",
+			Reputation:   0.82,
+			Confidence:   0.92,
+			TierCap:      1,
+			DisputeUntil: nowUnix + 320,
+		},
+	}
+	out = s.buildTrustAttestations(nil)
+	if len(out) != 1 {
+		t.Fatalf("expected one aggregated trust attestation after second operator, got %d", len(out))
+	}
+	if out[0].TierCap == 0 || out[0].DisputeUntil == 0 {
+		t.Fatalf("expected dispute published after operator quorum met, got tier_cap=%d dispute_until=%d", out[0].TierCap, out[0].DisputeUntil)
+	}
+}
+
+func TestBuildSelectionScoresRespectsFinalAdjudicationOperatorQuorum(t *testing.T) {
+	nowUnix := time.Now().Unix()
+	relays := []proto.RelayDescriptor{
+		{
+			RelayID:      "exit-local-1",
+			Role:         "exit",
+			OperatorID:   "op-local",
+			Reputation:   0.7,
+			Uptime:       0.7,
+			Capacity:     0.7,
+			AbusePenalty: 0,
+			BondScore:    0.7,
+			StakeScore:   0.7,
+		},
+	}
+	s := &Service{
+		finalDisputeMinVotes: 1,
+		finalAdjudicationOps: 2,
+		finalAdjudicationMin: 0,
+		peerTrust: map[string]proto.RelayTrustAttestation{
+			relayKey("exit-local-1", "exit"): {
+				RelayID:      "exit-local-1",
+				Role:         "exit",
+				OperatorID:   "op-a",
+				TierCap:      1,
+				DisputeUntil: nowUnix + 600,
+			},
+		},
+	}
+	scores := s.buildSelectionScores(relays)
+	if len(scores) != 1 {
+		t.Fatalf("expected one score, got %d", len(scores))
+	}
+	basePenalty := scores[0].AbusePenalty
+	if basePenalty > 0.2 {
+		t.Fatalf("expected dispute penalty suppressed without operator quorum, got %f", basePenalty)
+	}
+
+	s.issuerTrust = map[string]proto.RelayTrustAttestation{
+		relayKey("exit-local-1", "exit"): {
+			RelayID:      "exit-local-1",
+			Role:         "exit",
+			OperatorID:   "op-b",
+			TierCap:      1,
+			DisputeUntil: nowUnix + 620,
+		},
+	}
+	scores = s.buildSelectionScores(relays)
+	if len(scores) != 1 {
+		t.Fatalf("expected one score after second operator, got %d", len(scores))
+	}
+	if scores[0].AbusePenalty <= basePenalty+0.1 {
+		t.Fatalf("expected higher abuse penalty after operator quorum met, before=%f after=%f", basePenalty, scores[0].AbusePenalty)
 	}
 }
 

@@ -34,6 +34,9 @@ echo "[deep] directory gossip"
 echo "[deep] operator quorum"
 ./scripts/integration_operator_quorum.sh
 
+echo "[deep] sync status chaos"
+./scripts/integration_sync_status_chaos.sh
+
 echo "[deep] distinct operators"
 ./scripts/integration_distinct_operators.sh
 
@@ -43,8 +46,20 @@ echo "[deep] peer discovery"
 echo "[deep] peer discovery quorum"
 ./scripts/integration_peer_discovery_quorum.sh
 
+echo "[deep] peer discovery backoff"
+./scripts/integration_peer_discovery_backoff.sh
+
+echo "[deep] peer discovery require hint"
+./scripts/integration_peer_discovery_require_hint.sh
+
 echo "[deep] opaque source downlink"
 ./scripts/integration_opaque_source_downlink.sh
+
+echo "[deep] opaque udp-only"
+./scripts/integration_opaque_udp_only.sh
+
+echo "[deep] entry live-wg filter"
+./scripts/integration_entry_live_wg_filter.sh
 
 echo "[deep] persistent opaque session"
 ./scripts/integration_persistent_opaque_session.sh
@@ -66,6 +81,12 @@ echo "[deep] issuer dispute"
 
 echo "[deep] adjudication window caps"
 ./scripts/integration_adjudication_window_caps.sh
+
+echo "[deep] adjudication quorum"
+./scripts/integration_adjudication_quorum.sh
+
+echo "[deep] adjudication operator quorum"
+./scripts/integration_adjudication_operator_quorum.sh
 
 echo "[deep] lifecycle chaos"
 ./scripts/integration_lifecycle_chaos.sh

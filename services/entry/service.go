@@ -48,6 +48,7 @@ type routeCandidate struct {
 type Service struct {
 	addr                  string
 	dataAddr              string
+	liveWGMode            bool
 	exitControlURL        string
 	exitDataAddr          string
 	directoryURLs         []string
@@ -139,6 +140,7 @@ func New() *Service {
 	if v, err := strconv.Atoi(os.Getenv("ENTRY_EXIT_ROUTE_TTL_SEC")); err == nil && v > 0 {
 		routeTTL = time.Duration(v) * time.Second
 	}
+	liveWGMode := os.Getenv("ENTRY_LIVE_WG_MODE") == "1"
 	openRPS := 20
 	if v, err := strconv.Atoi(os.Getenv("ENTRY_OPEN_RPS")); err == nil && v > 0 {
 		openRPS = v
@@ -176,6 +178,7 @@ func New() *Service {
 	return &Service{
 		addr:                  addr,
 		dataAddr:              dataAddr,
+		liveWGMode:            liveWGMode,
 		exitControlURL:        exitControlURL,
 		exitDataAddr:          exitDataAddr,
 		directoryURLs:         directoryURLs,
@@ -205,9 +208,9 @@ func New() *Service {
 }
 
 func (s *Service) Run(ctx context.Context) error {
-	log.Printf("entry route discovery: directories=%d min_sources=%d min_operators=%d min_votes=%d trust_strict=%t rps=%d ban_threshold=%d ban_sec=%d max_inflight=%d client_rebind_sec=%d",
+	log.Printf("entry route discovery: directories=%d min_sources=%d min_operators=%d min_votes=%d trust_strict=%t live_wg_mode=%t rps=%d ban_threshold=%d ban_sec=%d max_inflight=%d client_rebind_sec=%d",
 		len(s.directoryURLs), maxInt(1, s.directoryMinSources), maxInt(1, s.directoryMinOperators), maxInt(1, s.directoryMinVotes), s.directoryTrustStrict,
-		s.openRPS, s.openBanThreshold, int(s.openBanDuration/time.Second), s.openMaxInflight, int(s.clientRebindAfter/time.Second))
+		s.liveWGMode, s.openRPS, s.openBanThreshold, int(s.openBanDuration/time.Second), s.openMaxInflight, int(s.clientRebindAfter/time.Second))
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/path/open", s.handlePathOpen)
 	mux.HandleFunc("/v1/path/close", s.handlePathClose)
@@ -293,6 +296,11 @@ func (s *Service) startUDP(ctx context.Context, errCh chan<- error) error {
 			if targetAddr == "" {
 				continue
 			}
+			if ok, reason := allowForwardPayload(state.transport, payload, s.liveWGMode); !ok {
+				log.Printf("entry dropped packet session=%s reason=%s transport=%s src=%s payload_len=%d",
+					sessionID, reason, state.transport, srcAddr.String(), len(payload))
+				continue
+			}
 
 			target, resolveErr := net.ResolveUDPAddr("udp", targetAddr)
 			if resolveErr != nil {
@@ -321,9 +329,17 @@ func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
+	if strings.TrimSpace(req.Transport) == "" {
+		req.Transport = "policy-json"
+	}
 	if strings.TrimSpace(req.TokenProof) == "" {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: "token-proof-required"})
+		return
+	}
+	if s.liveWGMode && req.Transport != "wireguard-udp" {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: "transport must be wireguard-udp in entry live mode"})
 		return
 	}
 	route, err := s.resolveExitRoute(r.Context(), req.ExitID)
@@ -384,17 +400,19 @@ func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
 		if expires == 0 {
 			expires = time.Now().Add(10 * time.Minute).Unix()
 		}
+		transport := normalizePathTransport(resp.Transport, req.Transport)
 		s.mu.Lock()
 		s.sessions[sessionID] = sessionState{
 			exitDataAddr:   route.dataAddr,
 			exitControlURL: route.controlURL,
 			expiresUnix:    expires,
-			transport:      resp.Transport,
+			transport:      transport,
 		}
 		s.mu.Unlock()
 		resp.SessionID = sessionID
 		resp.EntryDataAddr = s.dataAddr
 		resp.SessionExp = expires
+		resp.Transport = transport
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -660,6 +678,34 @@ func randomSessionID() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(buf), nil
+}
+
+func normalizePathTransport(fromExit string, fromRequest string) string {
+	transport := strings.TrimSpace(fromExit)
+	if transport == "" {
+		transport = strings.TrimSpace(fromRequest)
+	}
+	if transport == "" {
+		transport = "policy-json"
+	}
+	return transport
+}
+
+func allowForwardPayload(transport string, payload []byte, liveWGMode bool) (bool, string) {
+	if !liveWGMode {
+		return true, ""
+	}
+	if strings.TrimSpace(transport) != "wireguard-udp" {
+		return true, ""
+	}
+	_, raw, err := relay.ParseOpaquePayload(payload)
+	if err != nil {
+		return false, "invalid-opaque-live"
+	}
+	if !relay.LooksLikePlausibleWireGuardMessage(raw) {
+		return false, "non-wireguard-live"
+	}
+	return true, ""
 }
 
 func (s *Service) handleHealth(w http.ResponseWriter, r *http.Request) {

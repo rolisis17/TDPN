@@ -142,6 +142,12 @@ Directory peer sync (operator-to-operator pull sync):
 ./scripts/integration_directory_sync.sh
 ```
 
+Directory sync-status failure/recovery observability under peer churn:
+
+```bash
+./scripts/integration_sync_status_chaos.sh
+```
+
 Optional stricter sync conflict policy:
 - set `DIRECTORY_PEER_MIN_VOTES=2` (or higher) on syncing directories
 - this forces peer descriptor agreement before a relay is imported during conflicts
@@ -180,6 +186,18 @@ Adjudication horizon cap enforcement:
 ./scripts/integration_adjudication_window_caps.sh
 ```
 
+Final adjudication vote/ratio quorum enforcement:
+
+```bash
+./scripts/integration_adjudication_quorum.sh
+```
+
+Final adjudication operator-quorum enforcement:
+
+```bash
+./scripts/integration_adjudication_operator_quorum.sh
+```
+
 Directory push-gossip ingest:
 
 ```bash
@@ -194,6 +212,7 @@ Directory peer discovery (seeded decentralized membership):
 
 Optional stricter discovery anti-capture policy:
 - set `DIRECTORY_PEER_DISCOVERY_MIN_VOTES=2` (or higher) so one peer operator cannot unilaterally admit newly discovered peers
+- set `DIRECTORY_PEER_DISCOVERY_REQUIRE_HINT=1` so newly discovered peers must include signed operator and pubkey hints before admission
 
 Peer discovery quorum behavior (single-source blocked, multi-source admitted):
 
@@ -201,14 +220,43 @@ Peer discovery quorum behavior (single-source blocked, multi-source admitted):
 ./scripts/integration_peer_discovery_quorum.sh
 ```
 
+Peer discovery failure backoff + admin peer-status observability:
+
+```bash
+./scripts/integration_peer_discovery_backoff.sh
+```
+
+Peer discovery strict hint-gate behavior (loose mode admits, strict mode blocks peers without signed hints):
+
+```bash
+./scripts/integration_peer_discovery_require_hint.sh
+```
+
+Optional stricter unstable-peer suppression policy:
+- lower `DIRECTORY_PEER_DISCOVERY_FAIL_THRESHOLD` (for example `1`) to quarantine flaky discovered peers faster
+- increase `DIRECTORY_PEER_DISCOVERY_BACKOFF_SEC` / `DIRECTORY_PEER_DISCOVERY_MAX_BACKOFF_SEC` to keep repeatedly failing discovered peers out of active sync sets longer
+
 Optional stricter adjudication metadata policy:
 - set `DIRECTORY_ADJUDICATION_META_MIN_VOTES=2` (or higher) so `case_id` / `evidence_ref` fields require broader agreement than basic dispute/appeal activation
 - set `DIRECTORY_DISPUTE_MAX_TTL_SEC` / `DIRECTORY_APPEAL_MAX_TTL_SEC` to bounded windows (for example `86400`) so imported dispute/appeal windows cannot be pushed arbitrarily far into the future by colluding operators
+- set `DIRECTORY_FINAL_DISPUTE_MIN_VOTES`, `DIRECTORY_FINAL_APPEAL_MIN_VOTES`, `DIRECTORY_FINAL_ADJUDICATION_MIN_OPERATORS`, and `DIRECTORY_FINAL_ADJUDICATION_MIN_RATIO` to require stronger final publication quorum for dispute/appeal signals in the directory trust feed
 
 Exit opaque source downlink return path:
 
 ```bash
 ./scripts/integration_opaque_source_downlink.sh
+```
+
+Client opaque UDP-only source enforcement (synthetic fallback disabled):
+
+```bash
+./scripts/integration_opaque_udp_only.sh
+```
+
+Entry live-WG forwarding filter:
+
+```bash
+./scripts/integration_entry_live_wg_filter.sh
 ```
 
 Persistent opaque-session bridge (delayed downlink timing):
@@ -311,8 +359,15 @@ All deep checks in one command:
 - `integration_peer_discovery.sh`:
   a seed-connected directory learns additional peer URLs from signed `/v1/peers` feed data (including peer hints) and then imports relays from discovered peers.
 
+- `integration_peer_discovery_backoff.sh`:
+  a discovered peer that repeatedly fails sync is temporarily excluded by cooldown/backoff policy, and `/v1/admin/peer-status` reflects cooling state (`eligible=false`, `cooling_down=true`) plus failure metadata.
+
+- `integration_peer_discovery_require_hint.sh`:
+  `DIRECTORY_PEER_DISCOVERY_REQUIRE_HINT=1` prevents admission of peers lacking signed `operator`+`pub_key` hints, while loose mode still admits them.
+
 - `integration_opaque_source_downlink.sh`:
   exit accepts injected downlink bytes on `EXIT_OPAQUE_SOURCE_ADDR`, forwards them into the active opaque session, and client receives them on sink path (live mode additionally requires session-framed source packets).
+  In command mode, optional `EXIT_WG_KERNEL_PROXY=1` can bridge accepted opaque packets into local WG UDP socket I/O on `EXIT_WG_LISTEN_PORT` (must differ from `EXIT_DATA_ADDR` port).
 
 - `integration_persistent_opaque_session.sh`:
   with `CLIENT_OPAQUE_SESSION_SEC>0`, client keeps opaque uplink/downlink bridging active long enough to receive delayed downlink probes that would miss a short drain-only window.
@@ -338,6 +393,21 @@ All deep checks in one command:
 
 - `integration_adjudication_window_caps.sh`:
   directory ingests far-future dispute/appeal windows from issuer trust feed and caps them to configured local horizons before publication.
+
+- `integration_adjudication_quorum.sh`:
+  directory governance policy can suppress final dispute publication when aggregated vote ratio does not meet `DIRECTORY_FINAL_ADJUDICATION_MIN_RATIO`; `/v1/admin/governance-status` reports the active policy, upstream dispute signal/operator counts, operator-id sets, suppressed-vs-published disputed counters, and per-relay suppression details.
+
+- `integration_adjudication_operator_quorum.sh`:
+  directory governance policy can suppress final dispute publication when disputed signals come from fewer than `DIRECTORY_FINAL_ADJUDICATION_MIN_OPERATORS` distinct operators.
+
+- `integration_sync_status_chaos.sh`:
+  directory admin sync-status endpoint reports failed quorum while peer is down, success with operator attribution after recovery, and failure again after peer loss.
+
+- `integration_opaque_udp_only.sh`:
+  client accepts UDP-origin opaque uplink traffic with synthetic fallback disabled and rejects synthetic-source configuration in strict mode.
+
+- `integration_entry_live_wg_filter.sh`:
+  with `ENTRY_LIVE_WG_MODE=1`, entry drops malformed/non-WG opaque packets for `wireguard-udp` sessions while still forwarding plausible WG packets to exit.
 
 - `integration_lifecycle_chaos.sh`:
   races revocation enforcement and dispute apply/clear loops while path-open traffic continues, then checks for expected revoked denials and no crash/panic.
