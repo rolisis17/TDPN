@@ -13,6 +13,7 @@ cd "$DEPLOY_DIR"
 
 docker compose down --remove-orphans >/tmp/docker_stack_down.log 2>&1 || true
 docker compose up -d --build directory issuer entry-exit >/tmp/docker_stack_up.log 2>&1
+docker compose --profile demo build client-demo >/tmp/docker_stack_client_build.log 2>&1
 
 cleanup() {
   docker compose down --remove-orphans >/tmp/docker_stack_down.log 2>&1 || true

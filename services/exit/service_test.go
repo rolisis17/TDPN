@@ -525,6 +525,19 @@ func TestValidateRuntimeConfigKernelProxyRequiresCommandBackend(t *testing.T) {
 	}
 }
 
+func TestValidateRuntimeConfigRejectsNegativeCleanupInterval(t *testing.T) {
+	s := &Service{
+		sessionCleanupSec: -1,
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected cleanup interval validation error")
+	}
+	if !strings.Contains(err.Error(), "EXIT_SESSION_CLEANUP_SEC") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestEnsureCommandWGPubKeyDerivesWhenUnset(t *testing.T) {
 	original := deriveWGPublicKeyFromPrivateFile
 	defer func() { deriveWGPublicKeyFromPrivateFile = original }()
@@ -816,6 +829,89 @@ func TestWGKernelProxyRoundTrip(t *testing.T) {
 	}
 	if string(raw) != string(wgReply) {
 		t.Fatalf("unexpected downlink payload got=%x want=%x", raw, wgReply)
+	}
+}
+
+func TestForwardOpaqueToWGKernelEnforcesProxySessionLimit(t *testing.T) {
+	wgEmulatorConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+	if err != nil {
+		t.Fatalf("listen wg emulator: %v", err)
+	}
+	defer wgEmulatorConn.Close()
+
+	s := &Service{
+		wgKernelProxy:     true,
+		wgKernelProxyMax:  1,
+		wgKernelTargetUDP: wgEmulatorConn.LocalAddr().(*net.UDPAddr),
+		wgSessionProxies:  make(map[string]*net.UDPConn),
+		wgProxyLastSeen:   make(map[string]int64),
+	}
+	defer s.closeAllWGKernelSessionProxies()
+
+	if err := s.forwardOpaqueToWGKernel("sid-1", []byte{1, 2, 3}); err != nil {
+		t.Fatalf("expected first session proxy creation to succeed: %v", err)
+	}
+	err = s.forwardOpaqueToWGKernel("sid-2", []byte{4, 5, 6})
+	if err == nil {
+		t.Fatalf("expected proxy session limit error")
+	}
+	if !errors.Is(err, errWGProxySessionLimit) {
+		t.Fatalf("expected session limit error, got: %v", err)
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.metrics.WGProxyLimitDrops != 1 {
+		t.Fatalf("expected one wg proxy limit drop, got %d", s.metrics.WGProxyLimitDrops)
+	}
+	if s.metrics.ActiveWGProxySessions != 1 {
+		t.Fatalf("expected one active wg proxy session, got %d", s.metrics.ActiveWGProxySessions)
+	}
+}
+
+func TestCleanupExpiredSessionsClosesIdleWGProxySessions(t *testing.T) {
+	now := time.Now()
+	proxyConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+	if err != nil {
+		t.Fatalf("listen proxy: %v", err)
+	}
+
+	s := &Service{
+		wgKernelProxy:     true,
+		wgKernelProxyIdle: 2 * time.Second,
+		sessions: map[string]sessionInfo{
+			"sid-1": {
+				claims:       crypto.CapabilityClaims{ExpiryUnix: now.Add(time.Minute).Unix()},
+				seenNonces:   map[uint64]struct{}{},
+				lastActivity: now.Add(-10 * time.Second),
+			},
+		},
+		wgSessionProxies: map[string]*net.UDPConn{
+			"sid-1": proxyConn,
+		},
+		wgProxyLastSeen: map[string]int64{
+			"sid-1": now.Add(-10 * time.Second).Unix(),
+		},
+		proofNonceSeen: make(map[string]map[string]int64),
+	}
+	s.cleanupExpiredSessions(now)
+
+	s.mu.RLock()
+	_, stillOpen := s.wgSessionProxies["sid-1"]
+	closed := s.metrics.WGProxyClosed
+	idleClosed := s.metrics.WGProxyIdleClosed
+	active := s.metrics.ActiveWGProxySessions
+	s.mu.RUnlock()
+	if stillOpen {
+		t.Fatalf("expected idle wg proxy session removed")
+	}
+	if closed != 1 || idleClosed != 1 {
+		t.Fatalf("expected one idle proxy close, got closed=%d idle_closed=%d", closed, idleClosed)
+	}
+	if active != 0 {
+		t.Fatalf("expected zero active wg proxy sessions, got %d", active)
+	}
+	if _, err := proxyConn.WriteToUDP([]byte("x"), proxyConn.LocalAddr().(*net.UDPAddr)); err == nil {
+		t.Fatalf("expected closed proxy connection write to fail")
 	}
 }
 

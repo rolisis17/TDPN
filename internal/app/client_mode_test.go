@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -85,6 +86,25 @@ func TestValidateRuntimeConfigDisableSyntheticRequiresUDPSource(t *testing.T) {
 	}
 	if err := c.validateRuntimeConfig(); err == nil {
 		t.Fatalf("expected validation error when synthetic fallback disabled without udp source")
+	}
+}
+
+func TestValidateRuntimeConfigKernelProxyRequiresCommandBackend(t *testing.T) {
+	c := &Client{
+		dataMode:         "opaque",
+		innerSource:      "synthetic",
+		wgBackend:        "noop",
+		wgKernelProxy:    true,
+		wgProxyAddr:      "127.0.0.1:0",
+		wgPrivateKey:     "",
+		disableSynthetic: true,
+	}
+	err := c.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected kernel proxy validation error")
+	}
+	if !strings.Contains(err.Error(), "CLIENT_WG_BACKEND=command") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -209,6 +229,84 @@ func TestNewClientReadsOpaqueSessionEnv(t *testing.T) {
 	}
 	if c.sessionRefreshLeadSec != 55 {
 		t.Fatalf("expected CLIENT_SESSION_REFRESH_LEAD_SEC parsed, got %d", c.sessionRefreshLeadSec)
+	}
+}
+
+func TestNewClientReadsWGKernelProxyEnv(t *testing.T) {
+	t.Setenv("CLIENT_WG_KERNEL_PROXY", "1")
+	t.Setenv("CLIENT_WG_PROXY_ADDR", "127.0.0.1:52999")
+	c := NewClient()
+	if !c.wgKernelProxy {
+		t.Fatalf("expected CLIENT_WG_KERNEL_PROXY parsed true")
+	}
+	if c.wgProxyAddr != "127.0.0.1:52999" {
+		t.Fatalf("expected CLIENT_WG_PROXY_ADDR parsed, got %s", c.wgProxyAddr)
+	}
+}
+
+func TestNewClientReadsBootstrapBackoffEnv(t *testing.T) {
+	t.Setenv("CLIENT_BOOTSTRAP_INTERVAL_SEC", "3")
+	t.Setenv("CLIENT_BOOTSTRAP_BACKOFF_MAX_SEC", "11")
+	t.Setenv("CLIENT_BOOTSTRAP_JITTER_PCT", "37")
+	t.Setenv("CLIENT_BOOTSTRAP_INITIAL_DELAY_SEC", "4")
+	c := NewClient()
+	if c.bootstrapInterval != 3*time.Second {
+		t.Fatalf("expected CLIENT_BOOTSTRAP_INTERVAL_SEC parsed, got %s", c.bootstrapInterval)
+	}
+	if c.bootstrapBackoffMax != 11*time.Second {
+		t.Fatalf("expected CLIENT_BOOTSTRAP_BACKOFF_MAX_SEC parsed, got %s", c.bootstrapBackoffMax)
+	}
+	if c.bootstrapJitterPct != 37 {
+		t.Fatalf("expected CLIENT_BOOTSTRAP_JITTER_PCT parsed, got %d", c.bootstrapJitterPct)
+	}
+	if c.bootstrapInitialDelay != 4*time.Second {
+		t.Fatalf("expected CLIENT_BOOTSTRAP_INITIAL_DELAY_SEC parsed, got %s", c.bootstrapInitialDelay)
+	}
+}
+
+func TestBootstrapDelayForFailures(t *testing.T) {
+	base := 2 * time.Second
+	maxDelay := 9 * time.Second
+	cases := []struct {
+		failures int
+		want     time.Duration
+	}{
+		{failures: 0, want: 2 * time.Second},
+		{failures: 1, want: 2 * time.Second},
+		{failures: 2, want: 4 * time.Second},
+		{failures: 3, want: 8 * time.Second},
+		{failures: 4, want: 9 * time.Second},
+		{failures: 9, want: 9 * time.Second},
+	}
+	for _, tc := range cases {
+		if got := bootstrapDelayForFailures(base, maxDelay, tc.failures); got != tc.want {
+			t.Fatalf("failures=%d got=%s want=%s", tc.failures, got, tc.want)
+		}
+	}
+}
+
+func TestBootstrapDelayWithJitter(t *testing.T) {
+	delay := 10 * time.Second
+	maxDelay := 20 * time.Second
+	if got := bootstrapDelayWithJitter(delay, maxDelay, 0, 0.9); got != delay {
+		t.Fatalf("expected unchanged delay without jitter, got %s", got)
+	}
+	if got := bootstrapDelayWithJitter(delay, maxDelay, 20, 0.0); got != 8*time.Second {
+		t.Fatalf("expected low-bound jitter, got %s", got)
+	}
+	if got := bootstrapDelayWithJitter(delay, maxDelay, 20, 0.5); got != 10*time.Second {
+		t.Fatalf("expected center jitter, got %s", got)
+	}
+	if got := bootstrapDelayWithJitter(delay, maxDelay, 20, 1.0); got != 12*time.Second {
+		t.Fatalf("expected high-bound jitter, got %s", got)
+	}
+}
+
+func TestBootstrapDelayWithJitterClampsMax(t *testing.T) {
+	delay := 10 * time.Second
+	maxDelay := 10 * time.Second
+	if got := bootstrapDelayWithJitter(delay, maxDelay, 40, 1.0); got != 10*time.Second {
+		t.Fatalf("expected jittered delay clamped to max, got %s", got)
 	}
 }
 

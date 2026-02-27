@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net"
 	"strings"
 	"testing"
@@ -276,6 +277,104 @@ func TestSendOpaqueTrafficSessionModeForwardsDelayedDownlink(t *testing.T) {
 	}
 	if !bytes.Equal(buf[:n], downPayload) {
 		t.Fatalf("unexpected sink payload got=%q want=%q", string(buf[:n]), string(downPayload))
+	}
+}
+
+func TestWGKernelProxyTrafficRoundTrip(t *testing.T) {
+	entry, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+	if err != nil {
+		t.Fatalf("listen entry udp: %v", err)
+	}
+	defer entry.Close()
+
+	c := &Client{
+		wgBackend:         "command",
+		wgKernelProxy:     true,
+		wgProxyAddr:       "127.0.0.1:0",
+		liveWGMode:        false,
+		opaqueSessionSec:  1,
+		opaqueInitialUpMS: 600,
+	}
+
+	const sessionID = "sid-kernel-proxy"
+	proxy, err := c.newWGKernelProxy(entry.LocalAddr().String(), sessionID)
+	if err != nil {
+		t.Fatalf("newWGKernelProxy: %v", err)
+	}
+	defer proxy.close()
+
+	uplink := make([]byte, 32)
+	uplink[0] = 4
+	uplink[4] = 0x42
+	downlink := append([]byte("downlink-"), uplink...)
+
+	entryErr := make(chan error, 1)
+	go func() {
+		buf := make([]byte, 64*1024)
+		_ = entry.SetReadDeadline(time.Now().Add(2 * time.Second))
+		n, src, err := entry.ReadFromUDP(buf)
+		if err != nil {
+			entryErr <- err
+			return
+		}
+		sid, payload, err := relay.ParseDatagram(buf[:n])
+		if err != nil {
+			entryErr <- err
+			return
+		}
+		if sid != sessionID {
+			entryErr <- errors.New("session mismatch")
+			return
+		}
+		_, raw, err := relay.ParseOpaquePayload(payload)
+		if err != nil {
+			entryErr <- err
+			return
+		}
+		if !bytes.Equal(raw, uplink) {
+			entryErr <- errors.New("uplink payload mismatch")
+			return
+		}
+		frame := relay.BuildDatagram(sessionID, relay.BuildOpaquePayload(1, downlink))
+		_, err = entry.WriteToUDP(frame, src)
+		entryErr <- err
+	}()
+
+	peerTarget, err := net.ResolveUDPAddr("udp", proxy.listenAddr())
+	if err != nil {
+		t.Fatalf("resolve proxy listen addr: %v", err)
+	}
+	peerConn, err := net.DialUDP("udp", nil, peerTarget)
+	if err != nil {
+		t.Fatalf("dial proxy listen addr: %v", err)
+	}
+	defer peerConn.Close()
+
+	downlinkCh := make(chan []byte, 1)
+	go func() {
+		time.Sleep(80 * time.Millisecond)
+		_, _ = peerConn.Write(uplink)
+		buf := make([]byte, 64*1024)
+		_ = peerConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		n, err := peerConn.Read(buf)
+		if err != nil {
+			downlinkCh <- nil
+			return
+		}
+		downlinkCh <- append([]byte(nil), buf[:n]...)
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := c.runWGKernelProxyTraffic(ctx, proxy); err != nil {
+		t.Fatalf("runWGKernelProxyTraffic: %v", err)
+	}
+	if err := <-entryErr; err != nil {
+		t.Fatalf("entry flow failed: %v", err)
+	}
+	gotDown := <-downlinkCh
+	if !bytes.Equal(gotDown, downlink) {
+		t.Fatalf("downlink mismatch got=%x want=%x", gotDown, downlink)
 	}
 }
 

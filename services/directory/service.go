@@ -41,6 +41,9 @@ type Service struct {
 	previousPubKeysFile      string
 	providerIssuerURLs       []string
 	providerRelayMaxTTL      time.Duration
+	providerMinEntryTier     int
+	providerMinExitTier      int
+	providerMaxPerOperator   int
 	issuerTrustURLs          []string
 	issuerSyncSec            int
 	issuerTrustMinVotes      int
@@ -56,6 +59,7 @@ type Service struct {
 	peerDiscoveryTTL         time.Duration
 	peerDiscoveryMinVotes    int
 	peerDiscoveryRequireHint bool
+	peerDiscoveryMaxPerSrc   int
 	peerDiscoveryFailN       int
 	peerDiscoveryBackoff     time.Duration
 	peerDiscoveryBackoffMax  time.Duration
@@ -67,6 +71,7 @@ type Service struct {
 	peerAppealMinVotes       int
 	adjudicationMetaMin      int
 	finalAdjudicationOps     int
+	finalAdjudicationSources int
 	finalDisputeMinVotes     int
 	finalAppealMinVotes      int
 	finalAdjudicationMin     float64
@@ -196,6 +201,10 @@ func New() *Service {
 		peerDiscoveryMinVotes = v
 	}
 	peerDiscoveryRequireHint := os.Getenv("DIRECTORY_PEER_DISCOVERY_REQUIRE_HINT") == "1"
+	peerDiscoveryMaxPerSrc := 0
+	if v, err := strconv.Atoi(os.Getenv("DIRECTORY_PEER_DISCOVERY_MAX_PER_SOURCE")); err == nil && v > 0 {
+		peerDiscoveryMaxPerSrc = v
+	}
 	peerDiscoveryFailN := 3
 	if v, err := strconv.Atoi(os.Getenv("DIRECTORY_PEER_DISCOVERY_FAIL_THRESHOLD")); err == nil && v > 0 {
 		peerDiscoveryFailN = v
@@ -250,6 +259,10 @@ func New() *Service {
 	finalAdjudicationOps := 1
 	if v, err := strconv.Atoi(os.Getenv("DIRECTORY_FINAL_ADJUDICATION_MIN_OPERATORS")); err == nil && v > 0 {
 		finalAdjudicationOps = v
+	}
+	finalAdjudicationSources := 1
+	if v, err := strconv.Atoi(os.Getenv("DIRECTORY_FINAL_ADJUDICATION_MIN_SOURCES")); err == nil && v > 0 {
+		finalAdjudicationSources = v
 	}
 	finalAdjudicationMin := 0.5
 	if raw := strings.TrimSpace(os.Getenv("DIRECTORY_FINAL_ADJUDICATION_MIN_RATIO")); raw != "" {
@@ -311,6 +324,24 @@ func New() *Service {
 	if v, err := strconv.Atoi(os.Getenv("DIRECTORY_PROVIDER_RELAY_MAX_TTL_SEC")); err == nil && v > 0 {
 		providerRelayMaxTTL = time.Duration(v) * time.Second
 	}
+	providerMinEntryTier := 1
+	if v := strings.TrimSpace(os.Getenv("DIRECTORY_PROVIDER_MIN_ENTRY_TIER")); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil {
+			providerMinEntryTier = clampProviderTier(parsed)
+		}
+	}
+	providerMinExitTier := 1
+	if v := strings.TrimSpace(os.Getenv("DIRECTORY_PROVIDER_MIN_EXIT_TIER")); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil {
+			providerMinExitTier = clampProviderTier(parsed)
+		}
+	}
+	providerMaxPerOperator := 0
+	if v := strings.TrimSpace(os.Getenv("DIRECTORY_PROVIDER_MAX_RELAYS_PER_OPERATOR")); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			providerMaxPerOperator = parsed
+		}
+	}
 	peerTrustStrict := os.Getenv("DIRECTORY_PEER_TRUST_STRICT") == "1"
 	peerTrustTOFU := os.Getenv("DIRECTORY_PEER_TRUST_TOFU") != "0"
 	peerTrustFile := os.Getenv("DIRECTORY_PEER_TRUSTED_KEYS_FILE")
@@ -354,6 +385,9 @@ func New() *Service {
 		previousPubKeysFile:      previousPubKeysFile,
 		providerIssuerURLs:       providerIssuerURLs,
 		providerRelayMaxTTL:      providerRelayMaxTTL,
+		providerMinEntryTier:     providerMinEntryTier,
+		providerMinExitTier:      providerMinExitTier,
+		providerMaxPerOperator:   providerMaxPerOperator,
 		issuerTrustURLs:          issuerTrustURLs,
 		issuerSyncSec:            issuerSyncSec,
 		issuerTrustMinVotes:      issuerTrustMinVotes,
@@ -369,6 +403,7 @@ func New() *Service {
 		peerDiscoveryTTL:         peerDiscoveryTTL,
 		peerDiscoveryMinVotes:    peerDiscoveryMinVotes,
 		peerDiscoveryRequireHint: peerDiscoveryRequireHint,
+		peerDiscoveryMaxPerSrc:   peerDiscoveryMaxPerSrc,
 		peerDiscoveryFailN:       peerDiscoveryFailN,
 		peerDiscoveryBackoff:     peerDiscoveryBackoff,
 		peerDiscoveryBackoffMax:  peerDiscoveryBackoffMax,
@@ -380,6 +415,7 @@ func New() *Service {
 		peerAppealMinVotes:       peerAppealMinVotes,
 		adjudicationMetaMin:      adjudicationMetaMin,
 		finalAdjudicationOps:     finalAdjudicationOps,
+		finalAdjudicationSources: finalAdjudicationSources,
 		finalDisputeMinVotes:     finalDisputeMinVotes,
 		finalAppealMinVotes:      finalAppealMinVotes,
 		finalAdjudicationMin:     finalAdjudicationMin,
@@ -443,8 +479,8 @@ func (s *Service) Run(ctx context.Context) error {
 		Addr:    s.addr,
 		Handler: mux,
 	}
-	log.Printf("directory federation policy: peers=%d peer_min_operators=%d peer_min_votes=%d peer_discovery_min_votes=%d peer_discovery_require_hint=%t peer_discovery_fail_threshold=%d peer_discovery_backoff_sec=%d peer_discovery_max_backoff_sec=%d adjudication_meta_min_votes=%d final_dispute_min_votes=%d final_appeal_min_votes=%d final_adjudication_min_operators=%d final_adjudication_min_ratio=%.2f dispute_max_ttl_sec=%d appeal_max_ttl_sec=%d issuer_urls=%d issuer_min_operators=%d issuer_min_votes=%d provider_issuer_urls=%d provider_relay_max_ttl_sec=%d key_rotate_sec=%d key_history=%d",
-		len(s.peerURLs), s.peerMinOperators, s.peerMinVotes, maxInt(1, s.peerDiscoveryMinVotes), s.peerDiscoveryRequireHint, maxInt(1, s.peerDiscoveryFailN), int(s.peerDiscoveryBackoff/time.Second), int(s.peerDiscoveryBackoffMax/time.Second), maxInt(1, s.adjudicationMetaMin), s.effectiveFinalDisputeMinVotes(), s.effectiveFinalAppealMinVotes(), s.effectiveFinalAdjudicationMinOperators(), s.effectiveFinalAdjudicationMinRatio(), int(s.disputeMaxTTL/time.Second), int(s.appealMaxTTL/time.Second), len(s.issuerTrustURLs), s.issuerMinOperators, s.issuerTrustMinVotes, len(s.providerIssuerURLs), int(s.providerRelayMaxTTL/time.Second), int(s.keyRotateEvery/time.Second), s.effectiveKeyHistory())
+	log.Printf("directory federation policy: peers=%d peer_min_operators=%d peer_min_votes=%d peer_discovery_min_votes=%d peer_discovery_require_hint=%t peer_discovery_max_per_source=%d peer_discovery_fail_threshold=%d peer_discovery_backoff_sec=%d peer_discovery_max_backoff_sec=%d adjudication_meta_min_votes=%d final_dispute_min_votes=%d final_appeal_min_votes=%d final_adjudication_min_operators=%d final_adjudication_min_sources=%d final_adjudication_min_ratio=%.2f dispute_max_ttl_sec=%d appeal_max_ttl_sec=%d issuer_urls=%d issuer_min_operators=%d issuer_min_votes=%d provider_issuer_urls=%d provider_relay_max_ttl_sec=%d provider_min_entry_tier=%d provider_min_exit_tier=%d provider_max_relays_per_operator=%d key_rotate_sec=%d key_history=%d",
+		len(s.peerURLs), s.peerMinOperators, s.peerMinVotes, maxInt(1, s.peerDiscoveryMinVotes), s.peerDiscoveryRequireHint, maxInt(0, s.peerDiscoveryMaxPerSrc), maxInt(1, s.peerDiscoveryFailN), int(s.peerDiscoveryBackoff/time.Second), int(s.peerDiscoveryBackoffMax/time.Second), maxInt(1, s.adjudicationMetaMin), s.effectiveFinalDisputeMinVotes(), s.effectiveFinalAppealMinVotes(), s.effectiveFinalAdjudicationMinOperators(), s.effectiveFinalAdjudicationMinSources(), s.effectiveFinalAdjudicationMinRatio(), int(s.disputeMaxTTL/time.Second), int(s.appealMaxTTL/time.Second), len(s.issuerTrustURLs), s.issuerMinOperators, s.issuerTrustMinVotes, len(s.providerIssuerURLs), int(s.providerRelayMaxTTL/time.Second), s.effectiveProviderMinEntryTier(), s.effectiveProviderMinExitTier(), s.effectiveProviderMaxRelaysPerOperator(), int(s.keyRotateEvery/time.Second), s.effectiveKeyHistory())
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -1561,6 +1597,7 @@ func (s *Service) ingestDiscoveredPeers(sourceURL string, sourceOperator string,
 	sourceOperator = normalizeSourceOperator(sourceOperator, nil, sourceURL)
 	requiredVotes := maxInt(1, s.peerDiscoveryMinVotes)
 	requireHint := s.peerDiscoveryRequireHint
+	maxPerSource := s.peerDiscoveryMaxPerSource()
 	discovered := 0
 
 	s.peerMu.Lock()
@@ -1603,6 +1640,10 @@ func (s *Service) ingestDiscoveredPeers(sourceURL string, sourceOperator string,
 			if s.discoveredPeerVoters[peerURL] == nil {
 				s.discoveredPeerVoters[peerURL] = make(map[string]time.Time)
 			}
+			if _, seen := s.discoveredPeerVoters[peerURL][sourceOperator]; !seen && maxPerSource > 0 &&
+				s.activeDiscoveredPeerVotesBySourceLocked(sourceOperator) >= maxPerSource {
+				continue
+			}
 			s.discoveredPeerVoters[peerURL][sourceOperator] = now
 		}
 		if s.activeDiscoveredPeerVotesLocked(peerURL) < requiredVotes {
@@ -1617,6 +1658,13 @@ func (s *Service) ingestDiscoveredPeers(sourceURL string, sourceOperator string,
 	s.trimDiscoveredPeersLocked()
 	s.peerMu.Unlock()
 	return discovered
+}
+
+func (s *Service) peerDiscoveryMaxPerSource() int {
+	if s.peerDiscoveryMaxPerSrc > 0 {
+		return s.peerDiscoveryMaxPerSrc
+	}
+	return 0
 }
 
 func (s *Service) pruneDiscoveredPeersLocked(now time.Time) {
@@ -1685,6 +1733,20 @@ func (s *Service) activeDiscoveredPeerVotesLocked(peerURL string) int {
 		return 0
 	}
 	return len(voters)
+}
+
+func (s *Service) activeDiscoveredPeerVotesBySourceLocked(sourceOperator string) int {
+	sourceOperator = strings.TrimSpace(sourceOperator)
+	if sourceOperator == "" || len(s.discoveredPeerVoters) == 0 {
+		return 0
+	}
+	count := 0
+	for _, voters := range s.discoveredPeerVoters {
+		if _, ok := voters[sourceOperator]; ok {
+			count++
+		}
+	}
+	return count
 }
 
 func (s *Service) isConfiguredPeerLocked(peerURL string) bool {
@@ -2202,7 +2264,10 @@ func (s *Service) handleProviderRelayUpsert(w http.ResponseWriter, r *http.Reque
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	s.upsertProviderRelay(desc)
+	if err := s.upsertProviderRelay(desc); err != nil {
+		http.Error(w, err.Error(), http.StatusTooManyRequests)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(proto.ProviderRelayUpsertResponse{Accepted: true, Relay: desc})
 }
@@ -2293,6 +2358,10 @@ func (s *Service) buildProviderRelayDescriptor(req proto.ProviderRelayUpsertRequ
 	if role != "entry" && role != "exit" {
 		return proto.RelayDescriptor{}, fmt.Errorf("provider relay role must be entry or exit")
 	}
+	minTier := s.providerTierMinForRole(role)
+	if claims.Tier < minTier {
+		return proto.RelayDescriptor{}, fmt.Errorf("provider token tier below minimum for role")
+	}
 	relayID := strings.TrimSpace(req.RelayID)
 	if relayID == "" {
 		return proto.RelayDescriptor{}, fmt.Errorf("provider relay_id is required")
@@ -2352,19 +2421,69 @@ func (s *Service) buildProviderRelayDescriptor(req proto.ProviderRelayUpsertRequ
 	return desc, nil
 }
 
-func (s *Service) upsertProviderRelay(desc proto.RelayDescriptor) {
+func (s *Service) upsertProviderRelay(desc proto.RelayDescriptor) error {
 	key := relayKey(desc.RelayID, desc.Role)
 	desc.Signature = ""
 	s.providerMu.Lock()
+	defer s.providerMu.Unlock()
 	if s.providerRelays == nil {
 		s.providerRelays = make(map[string]proto.RelayDescriptor)
 	}
 	prev, ok := s.providerRelays[key]
+	maxPerOperator := s.effectiveProviderMaxRelaysPerOperator()
+	if maxPerOperator > 0 {
+		count := s.providerRelayCountByOperatorLocked(desc.OperatorID)
+		if ok && normalizeOperatorID(prev.OperatorID) != normalizeOperatorID(desc.OperatorID) {
+			if count >= maxPerOperator {
+				return fmt.Errorf("provider operator relay limit reached")
+			}
+		}
+		if !ok && count >= maxPerOperator {
+			return fmt.Errorf("provider operator relay limit reached")
+		}
+	}
 	if ok && prev.ValidUntil.After(desc.ValidUntil) {
 		desc.ValidUntil = prev.ValidUntil
 	}
 	s.providerRelays[key] = desc
-	s.providerMu.Unlock()
+	return nil
+}
+
+func (s *Service) effectiveProviderMinEntryTier() int {
+	return clampProviderTier(s.providerMinEntryTier)
+}
+
+func (s *Service) effectiveProviderMinExitTier() int {
+	return clampProviderTier(s.providerMinExitTier)
+}
+
+func (s *Service) effectiveProviderMaxRelaysPerOperator() int {
+	if s.providerMaxPerOperator > 0 {
+		return s.providerMaxPerOperator
+	}
+	return 0
+}
+
+func (s *Service) providerTierMinForRole(role string) int {
+	role = strings.TrimSpace(strings.ToLower(role))
+	if role == "exit" {
+		return s.effectiveProviderMinExitTier()
+	}
+	return s.effectiveProviderMinEntryTier()
+}
+
+func (s *Service) providerRelayCountByOperatorLocked(operatorID string) int {
+	operatorID = normalizeOperatorID(operatorID)
+	if operatorID == "" || len(s.providerRelays) == 0 {
+		return 0
+	}
+	count := 0
+	for _, desc := range s.providerRelays {
+		if normalizeOperatorID(desc.OperatorID) == operatorID {
+			count++
+		}
+	}
+	return count
 }
 
 func (s *Service) isKnownPeer(peerURL string) bool {
@@ -2597,10 +2716,12 @@ func (s *Service) buildTrustAttestations(relays []proto.RelayDescriptor) []proto
 		disputeCaps  map[int]int
 		disputeUntil []int64
 		disputeMeta  map[adjudicationMetadataPair]int
+		disputeSrcs  map[string]struct{}
 		appealVotes  int
 		appealOps    map[string]struct{}
 		appealUntil  []int64
 		appealMeta   map[adjudicationMetadataPair]int
+		appealSrcs   map[string]struct{}
 	}
 	agg := make(map[string]trustAgg)
 	nowUnix := time.Now().Unix()
@@ -2608,8 +2729,9 @@ func (s *Service) buildTrustAttestations(relays []proto.RelayDescriptor) []proto
 	disputeMinVotes := s.effectiveFinalDisputeMinVotes()
 	appealMinVotes := s.effectiveFinalAppealMinVotes()
 	adjudicationMinOperators := s.effectiveFinalAdjudicationMinOperators()
+	adjudicationMinSources := s.effectiveFinalAdjudicationMinSources()
 	adjudicationMinRatio := s.effectiveFinalAdjudicationMinRatio()
-	add := func(att proto.RelayTrustAttestation) {
+	add := func(att proto.RelayTrustAttestation, sourceClass string) {
 		role := strings.TrimSpace(att.Role)
 		if role == "" {
 			role = "exit"
@@ -2643,6 +2765,10 @@ func (s *Service) buildTrustAttestations(relays []proto.RelayDescriptor) []proto
 				a.disputeOps = make(map[string]struct{})
 			}
 			a.disputeOps[voteOperator] = struct{}{}
+			if a.disputeSrcs == nil {
+				a.disputeSrcs = make(map[string]struct{})
+			}
+			a.disputeSrcs[sourceClass] = struct{}{}
 			if a.disputeCaps == nil {
 				a.disputeCaps = make(map[int]int)
 			}
@@ -2656,6 +2782,10 @@ func (s *Service) buildTrustAttestations(relays []proto.RelayDescriptor) []proto
 				a.appealOps = make(map[string]struct{})
 			}
 			a.appealOps[voteOperator] = struct{}{}
+			if a.appealSrcs == nil {
+				a.appealSrcs = make(map[string]struct{})
+			}
+			a.appealSrcs[sourceClass] = struct{}{}
 			a.appealUntil = append(a.appealUntil, appealUntil)
 			recordMetadataPairVote(&a.appealMeta, att.AppealCase, att.AppealRef)
 		}
@@ -2677,13 +2807,13 @@ func (s *Service) buildTrustAttestations(relays []proto.RelayDescriptor) []proto
 			BondScore:    relayDesc.BondScore,
 			StakeScore:   relayDesc.StakeScore,
 			Confidence:   1,
-		})
+		}, "descriptor")
 	}
 	for _, att := range s.snapshotPeerTrust() {
-		add(att)
+		add(att, "peer")
 	}
 	for _, att := range s.snapshotIssuerTrust() {
-		add(att)
+		add(att, "issuer")
 	}
 
 	keys := make([]string, 0, len(agg))
@@ -2711,7 +2841,8 @@ func (s *Service) buildTrustAttestations(relays []proto.RelayDescriptor) []proto
 			Confidence:   clampScore(a.confidence / n),
 		}
 		if meetsAdjudicationQuorum(a.disputeVotes, a.count, disputeMinVotes, adjudicationMinRatio) &&
-			len(a.disputeOps) >= adjudicationMinOperators {
+			len(a.disputeOps) >= adjudicationMinOperators &&
+			len(a.disputeSrcs) >= adjudicationMinSources {
 			if tierCap, ok := pickConsensusTier(a.disputeCaps); ok {
 				att.TierCap = tierCap
 				att.DisputeUntil = pickMedianUnix(a.disputeUntil)
@@ -2719,7 +2850,8 @@ func (s *Service) buildTrustAttestations(relays []proto.RelayDescriptor) []proto
 			}
 		}
 		if meetsAdjudicationQuorum(a.appealVotes, a.count, appealMinVotes, adjudicationMinRatio) &&
-			len(a.appealOps) >= adjudicationMinOperators {
+			len(a.appealOps) >= adjudicationMinOperators &&
+			len(a.appealSrcs) >= adjudicationMinSources {
 			att.AppealUntil = pickMedianUnix(a.appealUntil)
 			att.AppealCase, att.AppealRef = pickVotedMetadataPair(a.appealMeta, metaMinVotes)
 		}
@@ -3356,6 +3488,17 @@ func clampScore(v float64) float64 {
 	return v
 }
 
+func clampProviderTier(v int) int {
+	switch {
+	case v < 1:
+		return 1
+	case v > 3:
+		return 3
+	default:
+		return v
+	}
+}
+
 func normalizeDispute(tierCap int, disputeUntil int64, nowUnix int64) (int, int64) {
 	return normalizeDisputeWithMax(tierCap, disputeUntil, nowUnix, 0)
 }
@@ -3436,6 +3579,13 @@ func (s *Service) effectiveFinalAppealMinVotes() int {
 func (s *Service) effectiveFinalAdjudicationMinOperators() int {
 	if s.finalAdjudicationOps > 0 {
 		return s.finalAdjudicationOps
+	}
+	return 1
+}
+
+func (s *Service) effectiveFinalAdjudicationMinSources() int {
+	if s.finalAdjudicationSources > 0 {
+		return s.finalAdjudicationSources
 	}
 	return 1
 }
@@ -4171,6 +4321,7 @@ func (s *Service) snapshotGovernanceStatus(now time.Time) proto.DirectoryGoverna
 			FinalDisputeMin:   s.effectiveFinalDisputeMinVotes(),
 			FinalAppealMin:    s.effectiveFinalAppealMinVotes(),
 			FinalMinOperators: s.effectiveFinalAdjudicationMinOperators(),
+			FinalMinSources:   s.effectiveFinalAdjudicationMinSources(),
 			FinalDisputeRatio: s.effectiveFinalAdjudicationMinRatio(),
 		},
 		PeerTrustCandidates:           peerCandidates,

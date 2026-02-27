@@ -10,6 +10,9 @@ export GOCACHE="${GOCACHE:-$ROOT_DIR/.gocache}"
 timeout 25s env \
   DIRECTORY_PROVIDER_ISSUER_URLS=http://127.0.0.1:8082 \
   DIRECTORY_ISSUER_TRUST_URLS=http://127.0.0.1:8082 \
+  DIRECTORY_PROVIDER_MIN_EXIT_TIER=2 \
+  DIRECTORY_PROVIDER_MIN_ENTRY_TIER=1 \
+  DIRECTORY_PROVIDER_MAX_RELAYS_PER_OPERATOR=2 \
   ISSUER_URL=http://127.0.0.1:8082 \
   go run ./cmd/node --directory --issuer >/tmp/provider_api_node.log 2>&1 &
 node_pid=$!
@@ -25,12 +28,12 @@ if [[ -z "$provider_pop_pub" ]]; then
   exit 1
 fi
 
-provider_token_json=$(curl -sS -X POST http://127.0.0.1:8082/v1/token -H 'Content-Type: application/json' \
+provider_token_t1_json=$(curl -sS -X POST http://127.0.0.1:8082/v1/token -H 'Content-Type: application/json' \
   --data "{\"tier\":1,\"subject\":\"provider-op-1\",\"token_type\":\"provider_role\",\"pop_pub_key\":\"$provider_pop_pub\"}")
-provider_token=$(echo "$provider_token_json" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
-if [[ -z "$provider_token" ]]; then
+provider_token_t1=$(echo "$provider_token_t1_json" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+if [[ -z "$provider_token_t1" ]]; then
   echo "failed to issue provider token"
-  echo "$provider_token_json"
+  echo "$provider_token_t1_json"
   cat /tmp/provider_api_node.log
   exit 1
 fi
@@ -48,13 +51,76 @@ upsert_payload=$(cat <<JSON
 JSON
 )
 
+status_low_exit=$(curl -sS -o /tmp/provider_api_low_exit.json -w '%{http_code}' \
+  -X POST http://127.0.0.1:8081/v1/provider/relay/upsert \
+  -H "Authorization: Bearer $provider_token_t1" \
+  -H 'Content-Type: application/json' \
+  --data "$upsert_payload")
+if [[ "$status_low_exit" != "400" ]]; then
+  echo "expected tier1 provider token rejected for exit relay with min exit tier=2"
+  echo "status=$status_low_exit body=$(cat /tmp/provider_api_low_exit.json)"
+  cat /tmp/provider_api_node.log
+  exit 1
+fi
+
+entry_payload=$(cat <<JSON
+{"relay_id":"entry-provider-1","role":"entry","pub_key":"$relay_pub","endpoint":"127.0.0.1:52820","control_url":"http://127.0.0.1:9283","country_code":"US","region":"us-east","capabilities":["wg","tiered-policy"],"valid_for_sec":120}
+JSON
+)
+
+entry_resp=$(curl -sS -X POST http://127.0.0.1:8081/v1/provider/relay/upsert \
+  -H "Authorization: Bearer $provider_token_t1" \
+  -H 'Content-Type: application/json' \
+  --data "$entry_payload")
+if ! echo "$entry_resp" | rg -q '"accepted":true'; then
+  echo "expected tier1 provider relay upsert accepted for entry role"
+  echo "$entry_resp"
+  cat /tmp/provider_api_node.log
+  exit 1
+fi
+
+provider_pop_t2_json=$(go run ./cmd/tokenpop gen)
+provider_pop_t2_pub=$(echo "$provider_pop_t2_json" | sed -n 's/.*"public_key":"\([^"]*\)".*/\1/p')
+if [[ -z "$provider_pop_t2_pub" ]]; then
+  echo "failed to generate provider tier2 pop key"
+  echo "$provider_pop_t2_json"
+  exit 1
+fi
+
+provider_token_t2_json=$(curl -sS -X POST http://127.0.0.1:8082/v1/token -H 'Content-Type: application/json' \
+  --data "{\"tier\":2,\"subject\":\"provider-op-1\",\"token_type\":\"provider_role\",\"pop_pub_key\":\"$provider_pop_t2_pub\"}")
+provider_token_t2=$(echo "$provider_token_t2_json" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+if [[ -z "$provider_token_t2" ]]; then
+  echo "failed to issue provider tier2 token"
+  echo "$provider_token_t2_json"
+  cat /tmp/provider_api_node.log
+  exit 1
+fi
+
 upsert_resp=$(curl -sS -X POST http://127.0.0.1:8081/v1/provider/relay/upsert \
-  -H "Authorization: Bearer $provider_token" \
+  -H "Authorization: Bearer $provider_token_t2" \
   -H 'Content-Type: application/json' \
   --data "$upsert_payload")
 if ! echo "$upsert_resp" | rg -q '"accepted":true'; then
-  echo "expected provider relay upsert accepted"
+  echo "expected tier2 provider relay upsert accepted for exit role"
   echo "$upsert_resp"
+  cat /tmp/provider_api_node.log
+  exit 1
+fi
+
+third_payload=$(cat <<JSON
+{"relay_id":"entry-provider-2","role":"entry","pub_key":"$relay_pub","endpoint":"127.0.0.1:52822","control_url":"http://127.0.0.1:9285","country_code":"US","region":"us-east","capabilities":["wg","tiered-policy"],"valid_for_sec":120}
+JSON
+)
+
+status_cap=$(curl -sS -o /tmp/provider_api_cap.json -w '%{http_code}' \
+  -X POST http://127.0.0.1:8081/v1/provider/relay/upsert \
+  -H "Authorization: Bearer $provider_token_t2" \
+  -H 'Content-Type: application/json' \
+  --data "$third_payload")
+if [[ "$status_cap" != "429" ]]; then
+  echo "expected provider operator relay cap to reject third advertised relay"
+  echo "status=$status_cap body=$(cat /tmp/provider_api_cap.json)"
   cat /tmp/provider_api_node.log
   exit 1
 fi

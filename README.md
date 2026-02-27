@@ -37,6 +37,7 @@ You asked for client and server in one program. The current scaffold is built ex
 - [x] Adjudication metadata pair integrity (`case_id` + `evidence_ref`) so published metadata always comes from the same voted signal pair
 - [x] Adjudication window horizon caps for anti-capture hardening (`DIRECTORY_DISPUTE_MAX_TTL_SEC`, `DIRECTORY_APPEAL_MAX_TTL_SEC`)
 - [x] Final trust-feed adjudication quorum controls (`DIRECTORY_FINAL_DISPUTE_MIN_VOTES`, `DIRECTORY_FINAL_APPEAL_MIN_VOTES`, `DIRECTORY_FINAL_ADJUDICATION_MIN_RATIO`)
+- [x] Final trust-feed adjudication source quorum control (`DIRECTORY_FINAL_ADJUDICATION_MIN_SOURCES`)
 - [x] Session hardening: expiry propagation + nonce-based replay rejection on exit
 - [x] Descriptor signature verification on client
 - [x] Federated directory fetch (multi-source quorum + relay vote threshold)
@@ -48,12 +49,14 @@ You asked for client and server in one program. The current scaffold is built ex
 - [x] Signed directory peer-membership feed (`/v1/peers`) + seeded dynamic peer discovery
 - [x] Signed directory peer hints (`peer_hints`) with discovery-time pubkey hint verification
 - [x] Optional strict discovered-peer admission policy requiring signed operator+pubkey hints (`DIRECTORY_PEER_DISCOVERY_REQUIRE_HINT`)
+- [x] Optional discovered-peer per-source admission cap (`DIRECTORY_PEER_DISCOVERY_MAX_PER_SOURCE`) to limit how many peers one source operator can add at once
 - [x] Directory discovered-peer failure backoff + admin peer status endpoint (`/v1/admin/peer-status`)
 - [x] Entry handshake anti-abuse controls (rate limit + optional challenge puzzle)
 - [x] Issuer trust lifecycle APIs (subject profile/promotions/reputation/bond/dispute)
 - [x] Issuer appeal lifecycle APIs (open/resolve appeals with trust-feed signaling)
 - [x] Token identity hardening (`sub` claim + client-subject tier gating + relay-subject tier-1 pinning)
 - [x] Provider-role-protected directory relay upsert API (`/v1/provider/relay/upsert`)
+- [x] Provider operator relay-admission cap (`DIRECTORY_PROVIDER_MAX_RELAYS_PER_OPERATOR`) to limit per-operator relay concentration in provider upserts
 - [x] Issuer-signed relay trust feed (`/v1/trust/relays`) + directory trust ingestion
 - [x] Live-WG runtime guardrails (strict sink requirements + non-WG/pattern-invalid payload drop on both exit and client downlink)
 - [x] Optional entry live-WG forwarding guardrail (`ENTRY_LIVE_WG_MODE=1`) to drop malformed/non-WG opaque packets before forwarding
@@ -64,8 +67,10 @@ You asked for client and server in one program. The current scaffold is built ex
 - [x] Optional active path reuse across bootstrap cycles (`CLIENT_SESSION_REUSE`) with proactive refresh lead and seamless handoff before expiry
 - [x] Command WG interface-up hardening (client + exit) with optional client route installation for configured allowed IPs
 - [x] Client/exit command backends auto-derive WireGuard public keys from configured private keys when public key envs are unset/invalid
+- [x] Optional client command-mode WG kernel proxy (`CLIENT_WG_KERNEL_PROXY=1`) to bridge WG UDP packets directly through session-framed opaque path without external injector/tap process
 - [x] Exit command-mode WG kernel proxy option (`EXIT_WG_KERNEL_PROXY=1`) to inject accepted opaque uplink into local WG UDP socket and relay WG downlink back through entry/client
 - [x] Exit command-mode listen-port separation (`EXIT_WG_LISTEN_PORT`) with fail-fast conflict detection against `EXIT_DATA_ADDR`
+- [x] Exit WG kernel-proxy operational safeguards (session cap, idle cleanup, and proxy lifecycle metrics)
 - [x] Exit opaque downlink source ingestion (`EXIT_OPAQUE_SOURCE_ADDR`) for live return-path wiring
 - [x] Signed revocation feed (issuer) with periodic verification/enforcement on exit
 - [x] Exit multi-issuer trust (verify tokens/revocations across multiple issuers)
@@ -86,6 +91,44 @@ go run ./cmd/node --wgiotap
 go run ./cmd/node --wgioinject
 ./scripts/demo_internal_topology.sh
 ```
+
+Simple installer + menu launcher (for easier testing):
+
+```bash
+./scripts/install_easy_mode.sh
+./bin/privacynode-easy
+```
+
+Windows 11 + WSL2 bootstrap:
+
+```powershell
+./scripts/windows/wsl2_bootstrap.ps1
+./scripts/windows/wsl2_run_easy.ps1
+```
+
+Windows `cmd.exe` wrappers:
+
+```cmd
+scripts\windows\wsl2_bootstrap.cmd
+scripts\windows\wsl2_run_easy.cmd
+scripts\windows\wsl2_easy.cmd bootstrap
+scripts\windows\wsl2_easy.cmd run
+```
+
+Script-only easy mode:
+
+```bash
+./scripts/easy_node.sh server-up --public-host <PUBLIC_IP_OR_DNS>
+./scripts/easy_node.sh client-test \
+  --directory-urls http://<SERVER_IP>:8081 \
+  --issuer-url http://<SERVER_IP>:8082 \
+  --entry-url http://<SERVER_IP>:8083 \
+  --exit-url http://<SERVER_IP>:8084
+```
+
+3-machine test guide:
+- `docs/easy-3-machine-test.md`
+- `docs/windows-wsl2.md` (Windows 11 + WSL2)
 
 Optional env vars:
 - `DIRECTORY_ADDR` (default `127.0.0.1:8081`)
@@ -146,11 +189,13 @@ Optional env vars:
 - `WG_BACKEND` (`noop` default, `command` for `wg`/`ip` CLI integration; requires `DATA_PLANE_MODE=opaque`)
 - `CLIENT_WG_PUBLIC_KEY` (base64 32-byte key; in `CLIENT_WG_BACKEND=command`, auto-derived from `CLIENT_WG_PRIVATE_KEY_PATH` if unset/invalid, and startup fails if a configured key mismatches the derived key; otherwise auto-generated if missing)
 - `CLIENT_SUBJECT` (optional client identity subject used for token issuance; leave unset for anonymous tier-1 behavior)
-- `CLIENT_WG_BACKEND` (`noop` default, `command` for client-side `wg`/`ip` integration; requires `DATA_PLANE_MODE=opaque` and `CLIENT_INNER_SOURCE=udp`)
+- `CLIENT_WG_BACKEND` (`noop` default, `command` for client-side `wg`/`ip` integration; requires `DATA_PLANE_MODE=opaque` and either `CLIENT_INNER_SOURCE=udp` or `CLIENT_WG_KERNEL_PROXY=1`)
 - `CLIENT_WG_INTERFACE` (default `wg-client0`)
 - `CLIENT_WG_PRIVATE_KEY_PATH` (required when `CLIENT_WG_BACKEND=command`)
 - `CLIENT_WG_ALLOWED_IPS` (default `0.0.0.0/0`; peer `allowed-ips` used in client command backend)
 - `CLIENT_WG_INSTALL_ROUTE` (`1` installs `ip route replace <allowed_ip> dev <iface>` for each CIDR in `CLIENT_WG_ALLOWED_IPS`)
+- `CLIENT_WG_KERNEL_PROXY` (`1` enables client-side kernel proxy bridge between local WG UDP endpoint and entry opaque tunnel in command mode)
+- `CLIENT_WG_PROXY_ADDR` (default `127.0.0.1:0`; UDP listen address used as local WG peer endpoint when `CLIENT_WG_KERNEL_PROXY=1`)
 - `CLIENT_INNER_SOURCE` (`synthetic` default, `udp` to read opaque payloads from local UDP socket)
 - `CLIENT_DISABLE_SYNTHETIC_FALLBACK` (`1` requires UDP-origin opaque uplink traffic and disables synthetic payload fallback)
 - `CLIENT_INNER_UDP_ADDR` (default `127.0.0.1:51900`, used when `CLIENT_INNER_SOURCE=udp`)
@@ -182,11 +227,17 @@ Optional env vars:
 - `CLIENT_TRUST_FEED_REQUIRE` (`1` requires valid signed trust feed from each successful directory source)
 - `CLIENT_TRUST_FEED_MIN_VOTES` (default `1`; minimum trust-feed votes required before trust attestations are applied)
 - `CLIENT_BOOTSTRAP_INTERVAL_SEC` (default `5`; client bootstrap retry interval)
+- `CLIENT_BOOTSTRAP_BACKOFF_MAX_SEC` (default `CLIENT_BOOTSTRAP_INTERVAL_SEC`; max retry interval used for exponential bootstrap backoff on consecutive failures)
+- `CLIENT_BOOTSTRAP_JITTER_PCT` (default `0`; random retry jitter percentage `0..90` applied around computed bootstrap delay to reduce retry synchronization)
+- `CLIENT_BOOTSTRAP_INITIAL_DELAY_SEC` (default `0`; optional startup delay before the first bootstrap attempt, useful when client starts before local issuer/directory roles)
 - `EXIT_WG_INTERFACE` (default `wg-exit0`)
 - `EXIT_WG_PUBKEY` (optional base64 32-byte key; in `WG_BACKEND=command`, auto-derived from `EXIT_WG_PRIVATE_KEY_PATH` if unset/invalid, and startup fails if a configured key mismatches the derived key)
 - `EXIT_WG_PRIVATE_KEY_PATH` (required when `WG_BACKEND=command`)
 - `EXIT_WG_LISTEN_PORT` (default `51831`; WireGuard UDP listen port in command mode; must differ from `EXIT_DATA_ADDR` port)
 - `EXIT_WG_KERNEL_PROXY` (`1` enables exit-side per-session kernel-proxy bridging between accepted opaque packets and local WG UDP socket in command mode)
+- `EXIT_WG_KERNEL_PROXY_MAX_SESSIONS` (default `2048`; max concurrent exit WG kernel-proxy session sockets before new proxy allocations are rejected)
+- `EXIT_WG_KERNEL_PROXY_IDLE_SEC` (default `120`; idle timeout for automatic closure of inactive exit WG proxy session sockets, `0` disables idle cleanup)
+- `EXIT_SESSION_CLEANUP_SEC` (default `30`; cleanup cadence for expired sessions and idle WG proxy sockets)
 - `EXIT_WG_EXIT_IP` (default `10.90.0.1/32`)
 - `EXIT_OPAQUE_SINK_ADDR` (optional UDP sink for accepted opaque payload bytes; required when `EXIT_LIVE_WG_MODE=1`)
 - `EXIT_OPAQUE_SOURCE_ADDR` (optional UDP listener for downlink payload injection into active opaque sessions; required when `EXIT_LIVE_WG_MODE=1` and packets must be session-framed in live mode)
@@ -215,6 +266,7 @@ Optional env vars:
 - `DIRECTORY_PEER_DISCOVERY_MAX` (default `64`; cap discovered peer set size)
 - `DIRECTORY_PEER_DISCOVERY_TTL_SEC` (default `900`; expire stale discovered peers)
 - `DIRECTORY_PEER_DISCOVERY_MIN_VOTES` (default `1`; minimum distinct source-operator sightings required before a discovered peer is admitted to sync set)
+- `DIRECTORY_PEER_DISCOVERY_MAX_PER_SOURCE` (default `0` disabled; when `>0`, cap active discovered-peer votes contributed by one source operator)
 - `DIRECTORY_PEER_DISCOVERY_REQUIRE_HINT` (`1` requires discovered peers to include both signed `operator` and `pub_key` hints before admission)
 - `DIRECTORY_PEER_DISCOVERY_FAIL_THRESHOLD` (default `3`; consecutive discovered-peer sync failures before temporary cooldown)
 - `DIRECTORY_PEER_DISCOVERY_BACKOFF_SEC` (default `60`; initial discovered-peer cooldown duration in seconds)
@@ -229,6 +281,7 @@ Optional env vars:
 - `DIRECTORY_FINAL_DISPUTE_MIN_VOTES` (default `max(DIRECTORY_PEER_DISPUTE_MIN_VOTES, DIRECTORY_ISSUER_DISPUTE_MIN_VOTES)`; minimum final aggregated votes before publishing `tier_cap`/`dispute_until`)
 - `DIRECTORY_FINAL_APPEAL_MIN_VOTES` (default `max(DIRECTORY_PEER_APPEAL_MIN_VOTES, DIRECTORY_ISSUER_APPEAL_MIN_VOTES)`; minimum final aggregated votes before publishing `appeal_until`)
 - `DIRECTORY_FINAL_ADJUDICATION_MIN_OPERATORS` (default `1`; minimum distinct operator signals required before final dispute/appeal publication)
+- `DIRECTORY_FINAL_ADJUDICATION_MIN_SOURCES` (default `1`; minimum distinct adjudication source classes required before final dispute/appeal publication; source classes are descriptor, peer trust, issuer trust)
 - `DIRECTORY_FINAL_ADJUDICATION_MIN_RATIO` (default `0.5`; minimum disputed/appeal vote ratio over final aggregated attestations required to publish adjudication signals)
 - `DIRECTORY_DISPUTE_MAX_TTL_SEC` (default `604800`; maximum accepted dispute horizon from peer/issuer trust signals before capping)
 - `DIRECTORY_APPEAL_MAX_TTL_SEC` (default `604800`; maximum accepted appeal horizon from peer/issuer trust signals before capping)
@@ -239,11 +292,14 @@ Optional env vars:
 - `DIRECTORY_ISSUER_TRUST_URLS` (comma-separated issuer URLs for directory trust-attestation ingestion)
 - `DIRECTORY_PROVIDER_ISSUER_URLS` (comma-separated issuer URLs accepted for provider-role token verification on provider relay upserts; defaults to issuer trust URLs)
 - `DIRECTORY_PROVIDER_RELAY_MAX_TTL_SEC` (default `300`; max provider-advertised relay descriptor TTL)
+- `DIRECTORY_PROVIDER_MAX_RELAYS_PER_OPERATOR` (default `0` disabled; when `>0`, cap active provider-advertised relays per operator across entry+exit roles)
 - `DIRECTORY_ISSUER_SYNC_SEC` (default `10`; issuer trust sync interval in seconds)
 - `DIRECTORY_ISSUER_MIN_OPERATORS` (fallback `DIRECTORY_MIN_OPERATORS`; minimum distinct issuer operators required for each issuer sync round)
 - `DIRECTORY_ISSUER_TRUST_MIN_VOTES` (default `1`; minimum matching issuer votes required for imported issuer trust attestations)
 - `DIRECTORY_ISSUER_DISPUTE_MIN_VOTES` (default `DIRECTORY_ISSUER_TRUST_MIN_VOTES`; minimum issuer dispute votes required before imported dispute metadata is propagated)
 - `DIRECTORY_ISSUER_APPEAL_MIN_VOTES` (default `DIRECTORY_ISSUER_DISPUTE_MIN_VOTES`; minimum issuer appeal votes required before imported appeal metadata is propagated)
+- `DIRECTORY_PROVIDER_MIN_ENTRY_TIER` (default `1`; minimum `provider_role` token tier required to advertise `entry` relays via `/v1/provider/relay/upsert`)
+- `DIRECTORY_PROVIDER_MIN_EXIT_TIER` (default `1`; minimum `provider_role` token tier required to advertise `exit` relays via `/v1/provider/relay/upsert`)
 - `DIRECTORY_SELECTION_FEED_TTL_SEC` (default `30`; signed selection feed TTL)
 - `DIRECTORY_SELECTION_FEED_EPOCH_SEC` (default `10`; generated_at stabilization window for selection-feed cacheability)
 - `DIRECTORY_TRUST_FEED_TTL_SEC` (default `30`; signed trust-attestation feed TTL)
@@ -337,11 +393,13 @@ Opaque mode (`DATA_PLANE_MODE=opaque`):
 - exit command mode requires distinct `EXIT_DATA_ADDR` and `EXIT_WG_LISTEN_PORT` UDP ports (fail-fast on conflicts)
 - if `CLIENT_WG_BACKEND=command`, client configures/removes peer using exit hints from `path/open`
 - command client backend startup preflight checks `wg`/`ip` binaries, interface presence, and key path readability
+- if `CLIENT_WG_KERNEL_PROXY=1`, client points WG peer endpoint to `CLIENT_WG_PROXY_ADDR` and bridges WG UDP packets to/from entry via session-framed opaque datagrams
 - if `CLIENT_INNER_SOURCE=udp`, client forwards received UDP packets as opaque payloads instead of synthetic test datagrams
-- if `CLIENT_DISABLE_SYNTHETIC_FALLBACK=1`, client requires `CLIENT_INNER_SOURCE=udp` and fails bootstrap instead of generating synthetic opaque payloads
+- if `CLIENT_DISABLE_SYNTHETIC_FALLBACK=1`, client requires `CLIENT_INNER_SOURCE=udp` (or `CLIENT_WG_KERNEL_PROXY=1`) and fails bootstrap instead of generating synthetic opaque payloads
 - if `EXIT_OPAQUE_SINK_ADDR` is set, exit emits accepted opaque payload bytes to that UDP address
 - if `EXIT_OPAQUE_SOURCE_ADDR` is set, exit accepts raw downlink payload bytes and forwards them into active sessions
 - if `EXIT_WG_KERNEL_PROXY=1`, exit maps accepted opaque WG payloads into local WG UDP (`EXIT_WG_LISTEN_PORT`) and relays WG downlink packets back into session-framed opaque returns
+- exit WG kernel proxy supports operational guardrails: `EXIT_WG_KERNEL_PROXY_MAX_SESSIONS` limits per-session proxy fanout, `EXIT_WG_KERNEL_PROXY_IDLE_SEC` reaps stale proxy sockets, and `/v1/metrics` exposes `wg_proxy_*` counters
 - exit source-lock binds session uplink to one peer source by default (prevents source hijack); optional delayed rebind can be enabled with `EXIT_PEER_REBIND_SEC`
 - in live WG mode (`CLIENT_LIVE_WG_MODE=1`, `EXIT_LIVE_WG_MODE=1`), sink/source addresses are mandatory, client/exit drop opaque payloads that fail WireGuard framing + minimum-length checks (including client uplink filtering before entry forwarding), entry can enforce additional wireguard plausibility checks with `ENTRY_LIVE_WG_MODE=1`, and raw downlink source packets must be session-framed
 - with `--wgio`, `node` forwards UDP between WG-side and relay-side handoff sockets
@@ -366,22 +424,34 @@ CI and tests:
 - `./scripts/integration_federation.sh` (multi-directory quorum/vote integration check)
 - `./scripts/integration_operator_quorum.sh` (distinct-directory-operator quorum enforcement check)
 - `./scripts/integration_sync_status_chaos.sh` (directory sync-status failure/recovery observability under peer churn)
+- `./scripts/integration_directory_operator_churn_scale.sh` (multi-operator directory churn/quorum resilience check with transit-source loss/recovery)
 - `./scripts/integration_directory_sync.sh` (directory peer sync integration check)
 - `./scripts/integration_directory_gossip.sh` (directory push-gossip ingestion integration check)
 - `./scripts/integration_peer_discovery.sh` (seeded directory peer discovery + discovered-peer relay import check)
 - `./scripts/integration_peer_discovery_quorum.sh` (peer discovery admission quorum: single-source blocked, multi-source admitted)
 - `./scripts/integration_peer_discovery_backoff.sh` (discovered-peer failure cooldown/backoff + admin peer-status endpoint check)
 - `./scripts/integration_peer_discovery_require_hint.sh` (strict discovery hint-gate check: loose mode admits, strict mode blocks peers without signed hints)
+- `./scripts/integration_peer_discovery_source_cap.sh` (per-source discovery cap check: one source can only admit capped peers, multiple sources can still admit additional peers)
 - `./scripts/integration_selection_feed.sh` (signed selection-feed requirement integration check)
 - `./scripts/integration_trust_feed.sh` (signed trust-feed requirement + bond/stake signal integration check)
 - `./scripts/integration_opaque_source_downlink.sh` (exit opaque source downlink return-path integration check)
 - `./scripts/integration_opaque_udp_only.sh` (client UDP-only opaque input enforcement check with synthetic fallback disabled)
+- `./scripts/integration_client_wg_kernel_proxy.sh` (client command-mode WG kernel proxy bridge check with mocked `wg`/`ip` binaries)
+- `./scripts/integration_exit_wg_proxy_limit.sh` (exit WG proxy session-cap enforcement: verifies proxy limit drops while traffic is still accepted for at least one active session)
+- `./scripts/integration_exit_wg_proxy_idle_cleanup.sh` (exit WG proxy idle-timeout reaping verification via `wg_proxy_idle_closed` + `active_wg_proxy_sessions` metrics)
 - `./scripts/integration_entry_live_wg_filter.sh` (entry live-WG opaque forwarding filter check: non-WG dropped, plausible WG forwarded)
+- `./scripts/integration_exit_live_wg_mode.sh` (exit live-WG mode check: non-WG opaque payloads dropped while plausible WG-like traffic is accepted and proxied)
+- `./scripts/integration_live_wg_full_path.sh` (client+entry+exit live-WG strict path check: client drops non-WG ingress while plausible WG-like traffic traverses full path and activates exit WG proxy metrics)
+- `./scripts/integration_client_bootstrap_recovery.sh` (client-first startup recovery check with delayed infrastructure bring-up and retry backoff validation)
+- `./scripts/integration_client_startup_burst.sh` (parallel client startup burst with bootstrap jitter/backoff controls and success/traffic assertions)
 - `./scripts/integration_issuer_trust_sync.sh` (directory ingestion of issuer trust attestations check)
 - `./scripts/integration_issuer_dispute.sh` (issuer dispute + appeal lifecycle with case/evidence metadata and trust-signal checks)
 - `./scripts/integration_adjudication_window_caps.sh` (directory dispute/appeal horizon cap enforcement check against far-future issuer signals)
 - `./scripts/integration_adjudication_quorum.sh` (directory final adjudication vote/ratio quorum suppression + governance-status signal/operator + per-relay suppression checks)
 - `./scripts/integration_adjudication_operator_quorum.sh` (directory final adjudication distinct-operator quorum suppression check)
+- `./scripts/integration_adjudication_source_quorum.sh` (directory final adjudication distinct-source quorum suppression check)
+- `./scripts/integration_real_wg_privileged.sh` (manual Linux root-only real `wg`/`ip` command-backend integration check; not part of CI)
+- `./scripts/integration_real_wg_privileged_matrix.sh` (manual Linux root-only multi-profile wrapper around privileged real-WG integration)
 - `./scripts/integration_lifecycle_chaos.sh` (adversarial dispute/revocation race and stability check; included in deep suite)
 - `./scripts/integration_multi_issuer.sh` (exit multi-issuer token/revocation integration check)
 - `./scripts/integration_load_chaos.sh` (entry load guardrails + directory peer churn resilience check)
@@ -411,7 +481,7 @@ deploy/                 # docker-compose + systemd deployment assets
 ```
 
 ## Next implementation target
-1. Bind `CLIENT_INNER_SOURCE=udp` and exit `EXIT_OPAQUE_SINK_ADDR`/`EXIT_OPAQUE_SOURCE_ADDR` flows to real WireGuard interface I/O end-to-end.
+1. Complete production end-to-end WireGuard interface plumbing (building on `CLIENT_WG_KERNEL_PROXY` / `EXIT_WG_KERNEL_PROXY`) and remove remaining scaffold-only packet paths.
 2. Expand issuer-backed trust lifecycle into cross-operator adjudication/dispute governance.
 3. Add larger-scale chaos/stress suites and deployment hardening for beta environments.
 

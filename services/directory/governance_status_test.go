@@ -23,29 +23,30 @@ func TestHandleGovernanceStatusRequiresAdminToken(t *testing.T) {
 func TestHandleGovernanceStatusReturnsPolicyAndCounts(t *testing.T) {
 	nowUnix := time.Now().Unix()
 	s := &Service{
-		adminToken:           "secret",
-		adjudicationMetaMin:  2,
-		finalDisputeMinVotes: 2,
-		finalAppealMinVotes:  2,
-		finalAdjudicationOps: 2,
-		finalAdjudicationMin: 0.6,
-		peerTrust:            map[string]proto.RelayTrustAttestation{},
-		issuerTrust:          map[string]proto.RelayTrustAttestation{},
-		peerScores:           map[string]proto.RelaySelectionScore{},
-		peerRelays:           map[string]proto.RelayDescriptor{},
-		providerRelays:       map[string]proto.RelayDescriptor{},
-		discoveredPeers:      map[string]time.Time{},
-		discoveredPeerVoters: map[string]map[string]time.Time{},
-		peerHintPubKeys:      map[string]string{},
-		peerHintOperators:    map[string]string{},
-		peerRelayETags:       map[string]string{},
-		peerRelayCache:       map[string][]proto.RelayDescriptor{},
-		peerScoreETags:       map[string]string{},
-		peerScoreCache:       map[string]map[string]proto.RelaySelectionScore{},
-		peerTrustETags:       map[string]string{},
-		peerTrustCache:       map[string]map[string]proto.RelayTrustAttestation{},
-		issuerTrustETags:     map[string]string{},
-		issuerTrustCache:     map[string]map[string]proto.RelayTrustAttestation{},
+		adminToken:               "secret",
+		adjudicationMetaMin:      2,
+		finalDisputeMinVotes:     2,
+		finalAppealMinVotes:      2,
+		finalAdjudicationOps:     2,
+		finalAdjudicationSources: 2,
+		finalAdjudicationMin:     0.6,
+		peerTrust:                map[string]proto.RelayTrustAttestation{},
+		issuerTrust:              map[string]proto.RelayTrustAttestation{},
+		peerScores:               map[string]proto.RelaySelectionScore{},
+		peerRelays:               map[string]proto.RelayDescriptor{},
+		providerRelays:           map[string]proto.RelayDescriptor{},
+		discoveredPeers:          map[string]time.Time{},
+		discoveredPeerVoters:     map[string]map[string]time.Time{},
+		peerHintPubKeys:          map[string]string{},
+		peerHintOperators:        map[string]string{},
+		peerRelayETags:           map[string]string{},
+		peerRelayCache:           map[string][]proto.RelayDescriptor{},
+		peerScoreETags:           map[string]string{},
+		peerScoreCache:           map[string]map[string]proto.RelaySelectionScore{},
+		peerTrustETags:           map[string]string{},
+		peerTrustCache:           map[string]map[string]proto.RelayTrustAttestation{},
+		issuerTrustETags:         map[string]string{},
+		issuerTrustCache:         map[string]map[string]proto.RelayTrustAttestation{},
 	}
 	s.peerTrust[relayKey("exit-local-1", "exit")] = proto.RelayTrustAttestation{
 		RelayID:      "exit-local-1",
@@ -81,6 +82,9 @@ func TestHandleGovernanceStatusReturnsPolicyAndCounts(t *testing.T) {
 	}
 	if out.Policy.FinalMinOperators != 2 {
 		t.Fatalf("unexpected operator policy: %+v", out.Policy)
+	}
+	if out.Policy.FinalMinSources != 2 {
+		t.Fatalf("unexpected source policy: %+v", out.Policy)
 	}
 	if out.Policy.FinalDisputeRatio != 0.6 {
 		t.Fatalf("unexpected ratio policy: %+v", out.Policy)

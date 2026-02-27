@@ -40,7 +40,64 @@ Notes:
 - Change `ISSUER_ADMIN_TOKEN` before non-local use.
 - `entry-exit` is one process running both roles (`--entry --exit`).
 
-## 2) systemd units
+## 2) Easy installer + launcher (for simple testing)
+
+Files:
+- `scripts/install_easy_mode.sh`
+- `scripts/easy_node.sh`
+- `tools/easy_mode/easy_mode_ui.cpp`
+
+Install launcher:
+
+```bash
+./scripts/install_easy_mode.sh
+```
+
+Run interactive menu:
+
+```bash
+./bin/privacynode-easy
+```
+
+Quick non-interactive examples:
+
+```bash
+./scripts/easy_node.sh server-up --public-host <PUBLIC_IP_OR_DNS>
+./scripts/easy_node.sh client-test \
+  --directory-urls http://<SERVER_IP>:8081 \
+  --issuer-url http://<SERVER_IP>:8082 \
+  --entry-url http://<SERVER_IP>:8083 \
+  --exit-url http://<SERVER_IP>:8084
+```
+
+For a full 3-machine flow, see `docs/easy-3-machine-test.md`.
+
+## 3) Windows 11 + WSL2
+
+Files:
+- `scripts/install_wsl2_mode.sh` (run in WSL)
+- `scripts/windows/wsl2_bootstrap.ps1` (run in PowerShell)
+- `scripts/windows/wsl2_run_easy.ps1` (run launcher from PowerShell)
+- `scripts/windows/wsl2_bootstrap.cmd` (Windows Command Prompt wrapper)
+- `scripts/windows/wsl2_run_easy.cmd` (Windows Command Prompt wrapper)
+- `scripts/windows/wsl2_easy.cmd` (combined Command Prompt helper)
+- `docs/windows-wsl2.md`
+
+Quick start from PowerShell:
+
+```powershell
+./scripts/windows/wsl2_bootstrap.ps1
+./scripts/windows/wsl2_run_easy.ps1
+```
+
+Or from `cmd.exe`:
+
+```cmd
+scripts\windows\wsl2_bootstrap.cmd
+scripts\windows\wsl2_run_easy.cmd
+```
+
+## 4) systemd units
 
 Files:
 - `deploy/systemd/privacynode-directory.service`
@@ -70,7 +127,7 @@ Install steps (Linux):
    - `systemctl status privacynode-issuer.service`
    - `systemctl status privacynode-entry-exit.service`
 
-## 3) Recommended pre-production checks
+## 5) Recommended pre-production checks
 
 Before exposing anything public:
 1. Run `./scripts/ci_local.sh`.
@@ -78,12 +135,23 @@ Before exposing anything public:
 3. Run `./scripts/integration_lifecycle_chaos.sh`.
 4. Run `./scripts/integration_directory_auto_key_rotation.sh` if you plan to enable `DIRECTORY_KEY_ROTATE_SEC`.
 5. Run `./scripts/integration_sync_status_chaos.sh` and verify `/v1/admin/sync-status` auth + quorum reporting behavior for your topology.
-6. Run `./scripts/integration_peer_discovery_backoff.sh` and verify `/v1/admin/peer-status` shows discovered-peer cooldown eligibility and failure metadata under peer instability.
-7. Run `./scripts/integration_peer_discovery_require_hint.sh` if you enforce strict discovery hints (`DIRECTORY_PEER_DISCOVERY_REQUIRE_HINT=1`) and confirm only peers with signed operator+pubkey hints are admitted.
-8. Run `./scripts/integration_adjudication_quorum.sh` and verify `/v1/admin/governance-status` reflects your final adjudication policy plus suppressed-vs-published dispute counters and per-relay suppression details.
-9. Run `./scripts/integration_adjudication_operator_quorum.sh` and verify operator-quorum suppression behavior for your governance settings.
-10. If enabling live WG filtering on entry (`ENTRY_LIVE_WG_MODE=1`), run `./scripts/integration_entry_live_wg_filter.sh`.
-11. Set adjudication policy bounds (`DIRECTORY_ADJUDICATION_META_MIN_VOTES`, `DIRECTORY_FINAL_DISPUTE_MIN_VOTES`, `DIRECTORY_FINAL_APPEAL_MIN_VOTES`, `DIRECTORY_FINAL_ADJUDICATION_MIN_OPERATORS`, `DIRECTORY_FINAL_ADJUDICATION_MIN_RATIO`, `DIRECTORY_DISPUTE_MAX_TTL_SEC`, `DIRECTORY_APPEAL_MAX_TTL_SEC`) to your risk tolerance before enabling federated trust sync.
-12. If you disable synthetic client fallback (`CLIENT_DISABLE_SYNTHETIC_FALLBACK=1`), validate your UDP uplink producer path with `./scripts/integration_opaque_udp_only.sh`.
-13. Verify issuer key/epoch files and directory key history files persist across restart.
-14. If enabling command egress backend, validate firewall rules in a disposable environment first.
+6. Run `./scripts/integration_directory_operator_churn_scale.sh` to validate multi-operator quorum behavior under transit/seed churn.
+7. Run `./scripts/integration_peer_discovery_backoff.sh` and verify `/v1/admin/peer-status` shows discovered-peer cooldown eligibility and failure metadata under peer instability.
+8. Run `./scripts/integration_peer_discovery_require_hint.sh` if you enforce strict discovery hints (`DIRECTORY_PEER_DISCOVERY_REQUIRE_HINT=1`) and confirm only peers with signed operator+pubkey hints are admitted.
+9. Run `./scripts/integration_peer_discovery_source_cap.sh` if you enforce per-source discovery flood controls (`DIRECTORY_PEER_DISCOVERY_MAX_PER_SOURCE`).
+10. If you enable live WireGuard filtering on exit (`EXIT_LIVE_WG_MODE=1`), run `./scripts/integration_exit_live_wg_mode.sh`.
+11. If you enable strict live path on both sides (`CLIENT_LIVE_WG_MODE=1`, `EXIT_LIVE_WG_MODE=1`), run `./scripts/integration_live_wg_full_path.sh`.
+12. Run `./scripts/integration_adjudication_quorum.sh` and verify `/v1/admin/governance-status` reflects your final adjudication policy plus suppressed-vs-published dispute counters and per-relay suppression details.
+13. Run `./scripts/integration_adjudication_operator_quorum.sh` and verify operator-quorum suppression behavior for your governance settings.
+14. Run `./scripts/integration_adjudication_source_quorum.sh` and verify source-class quorum suppression behavior for your governance settings.
+15. If enabling live WG filtering on entry (`ENTRY_LIVE_WG_MODE=1`), run `./scripts/integration_entry_live_wg_filter.sh`.
+16. Run `./scripts/integration_client_bootstrap_recovery.sh` to validate client retry/backoff recovery when client starts before local control-plane services.
+17. Run `./scripts/integration_client_startup_burst.sh` to validate parallel client bootstrap behavior under jitter/backoff settings.
+18. Set adjudication policy bounds (`DIRECTORY_ADJUDICATION_META_MIN_VOTES`, `DIRECTORY_FINAL_DISPUTE_MIN_VOTES`, `DIRECTORY_FINAL_APPEAL_MIN_VOTES`, `DIRECTORY_FINAL_ADJUDICATION_MIN_OPERATORS`, `DIRECTORY_FINAL_ADJUDICATION_MIN_SOURCES`, `DIRECTORY_FINAL_ADJUDICATION_MIN_RATIO`, `DIRECTORY_DISPUTE_MAX_TTL_SEC`, `DIRECTORY_APPEAL_MAX_TTL_SEC`) to your risk tolerance before enabling federated trust sync.
+19. Set provider relay admission tiers (`DIRECTORY_PROVIDER_MIN_ENTRY_TIER`, `DIRECTORY_PROVIDER_MIN_EXIT_TIER`) and optional provider concentration cap (`DIRECTORY_PROVIDER_MAX_RELAYS_PER_OPERATOR`) for your rollout stage.
+20. Set discovery flood controls (`DIRECTORY_PEER_DISCOVERY_MAX_PER_SOURCE`) so one source operator cannot introduce unlimited discovered peers in one cycle.
+21. If you disable synthetic client fallback (`CLIENT_DISABLE_SYNTHETIC_FALLBACK=1`), validate your UDP uplink producer path with `./scripts/integration_opaque_udp_only.sh`.
+22. Verify issuer key/epoch files and directory key history files persist across restart.
+23. If enabling command egress backend, validate firewall rules in a disposable environment first.
+24. If enabling WG kernel proxy bridges (`CLIENT_WG_KERNEL_PROXY=1`, `EXIT_WG_KERNEL_PROXY=1`), keep `EXIT_WG_LISTEN_PORT` distinct from `EXIT_DATA_ADDR`, tune `EXIT_WG_KERNEL_PROXY_MAX_SESSIONS` / `EXIT_WG_KERNEL_PROXY_IDLE_SEC` / `EXIT_SESSION_CLEANUP_SEC`, and validate packet flow in a disposable environment first.
+25. For real interface validation on Linux hosts, run `sudo ./scripts/integration_real_wg_privileged.sh` and `sudo ./scripts/integration_real_wg_privileged_matrix.sh` from a disposable test machine before exposing public traffic.

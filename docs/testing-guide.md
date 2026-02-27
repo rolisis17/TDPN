@@ -24,6 +24,12 @@ Required:
 - `rg` (ripgrep)
 - Linux/macOS shell
 
+Optional easy launcher path:
+- `./scripts/install_easy_mode.sh`
+- `./bin/privacynode-easy`
+- `docs/easy-3-machine-test.md`
+- `docs/windows-wsl2.md` (Windows 11 + WSL2 path)
+
 Project root:
 - run all commands from repository root
 
@@ -148,6 +154,12 @@ Directory sync-status failure/recovery observability under peer churn:
 ./scripts/integration_sync_status_chaos.sh
 ```
 
+Directory multi-operator churn/quorum resilience:
+
+```bash
+./scripts/integration_directory_operator_churn_scale.sh
+```
+
 Optional stricter sync conflict policy:
 - set `DIRECTORY_PEER_MIN_VOTES=2` (or higher) on syncing directories
 - this forces peer descriptor agreement before a relay is imported during conflicts
@@ -198,6 +210,12 @@ Final adjudication operator-quorum enforcement:
 ./scripts/integration_adjudication_operator_quorum.sh
 ```
 
+Final adjudication source-quorum enforcement:
+
+```bash
+./scripts/integration_adjudication_source_quorum.sh
+```
+
 Directory push-gossip ingest:
 
 ```bash
@@ -212,6 +230,7 @@ Directory peer discovery (seeded decentralized membership):
 
 Optional stricter discovery anti-capture policy:
 - set `DIRECTORY_PEER_DISCOVERY_MIN_VOTES=2` (or higher) so one peer operator cannot unilaterally admit newly discovered peers
+- set `DIRECTORY_PEER_DISCOVERY_MAX_PER_SOURCE` (for example `8`) so one source operator cannot flood discovery with unlimited peer additions
 - set `DIRECTORY_PEER_DISCOVERY_REQUIRE_HINT=1` so newly discovered peers must include signed operator and pubkey hints before admission
 
 Peer discovery quorum behavior (single-source blocked, multi-source admitted):
@@ -232,6 +251,12 @@ Peer discovery strict hint-gate behavior (loose mode admits, strict mode blocks 
 ./scripts/integration_peer_discovery_require_hint.sh
 ```
 
+Peer discovery per-source admission cap behavior:
+
+```bash
+./scripts/integration_peer_discovery_source_cap.sh
+```
+
 Optional stricter unstable-peer suppression policy:
 - lower `DIRECTORY_PEER_DISCOVERY_FAIL_THRESHOLD` (for example `1`) to quarantine flaky discovered peers faster
 - increase `DIRECTORY_PEER_DISCOVERY_BACKOFF_SEC` / `DIRECTORY_PEER_DISCOVERY_MAX_BACKOFF_SEC` to keep repeatedly failing discovered peers out of active sync sets longer
@@ -239,7 +264,7 @@ Optional stricter unstable-peer suppression policy:
 Optional stricter adjudication metadata policy:
 - set `DIRECTORY_ADJUDICATION_META_MIN_VOTES=2` (or higher) so `case_id` / `evidence_ref` fields require broader agreement than basic dispute/appeal activation
 - set `DIRECTORY_DISPUTE_MAX_TTL_SEC` / `DIRECTORY_APPEAL_MAX_TTL_SEC` to bounded windows (for example `86400`) so imported dispute/appeal windows cannot be pushed arbitrarily far into the future by colluding operators
-- set `DIRECTORY_FINAL_DISPUTE_MIN_VOTES`, `DIRECTORY_FINAL_APPEAL_MIN_VOTES`, `DIRECTORY_FINAL_ADJUDICATION_MIN_OPERATORS`, and `DIRECTORY_FINAL_ADJUDICATION_MIN_RATIO` to require stronger final publication quorum for dispute/appeal signals in the directory trust feed
+- set `DIRECTORY_FINAL_DISPUTE_MIN_VOTES`, `DIRECTORY_FINAL_APPEAL_MIN_VOTES`, `DIRECTORY_FINAL_ADJUDICATION_MIN_OPERATORS`, `DIRECTORY_FINAL_ADJUDICATION_MIN_SOURCES`, and `DIRECTORY_FINAL_ADJUDICATION_MIN_RATIO` to require stronger final publication quorum for dispute/appeal signals in the directory trust feed
 
 Exit opaque source downlink return path:
 
@@ -253,10 +278,68 @@ Client opaque UDP-only source enforcement (synthetic fallback disabled):
 ./scripts/integration_opaque_udp_only.sh
 ```
 
+Client command-mode WG kernel proxy bridge (mocked `wg`/`ip`):
+
+```bash
+./scripts/integration_client_wg_kernel_proxy.sh
+```
+
+Exit WG proxy limit enforcement (mocked `wg`/`ip`):
+
+```bash
+./scripts/integration_exit_wg_proxy_limit.sh
+```
+
+Exit WG proxy idle cleanup metrics (mocked `wg`/`ip`):
+
+```bash
+./scripts/integration_exit_wg_proxy_idle_cleanup.sh
+```
+
+Real command-backend WireGuard integration (Linux + root required):
+
+```bash
+sudo ./scripts/integration_real_wg_privileged.sh
+```
+
+Real command-backend WireGuard profile matrix (Linux + root required):
+
+```bash
+sudo ./scripts/integration_real_wg_privileged_matrix.sh
+```
+
+If this fails immediately:
+- ensure WireGuard kernel support exists (`ip link add dev wg-test0 type wireguard` should succeed, then `ip link del wg-test0`)
+- install/enable WireGuard tools/module for your distro before retrying
+
 Entry live-WG forwarding filter:
 
 ```bash
 ./scripts/integration_entry_live_wg_filter.sh
+```
+
+Exit live-WG mode drop/accept behavior (non-WG dropped, WG-like accepted):
+
+```bash
+./scripts/integration_exit_live_wg_mode.sh
+```
+
+Full live-WG strict path (client+entry+exit):
+
+```bash
+./scripts/integration_live_wg_full_path.sh
+```
+
+Client bootstrap delayed-infrastructure recovery:
+
+```bash
+./scripts/integration_client_bootstrap_recovery.sh
+```
+
+Client parallel startup burst (jitter/backoff behavior under load):
+
+```bash
+./scripts/integration_client_startup_burst.sh
 ```
 
 Persistent opaque-session bridge (delayed downlink timing):
@@ -337,7 +420,7 @@ All deep checks in one command:
   with replay guard enabled, exit denies repeated `token_proof_nonce` reuse for the same token and accepts a fresh nonce.
 
 - `integration_provider_api.sh`:
-  directory accepts relay upsert from `provider_role` token and rejects `client_access` token for the same API.
+  directory accepts relay upsert from `provider_role` token, rejects `client_access` token for the same API, enforces role-specific minimum provider tiers for `entry` vs `exit`, and enforces optional per-operator provider relay cap.
 
 - `integration_federation.sh`:
   client can use multiple directories with source/operator quorum and vote thresholds.
@@ -365,9 +448,19 @@ All deep checks in one command:
 - `integration_peer_discovery_require_hint.sh`:
   `DIRECTORY_PEER_DISCOVERY_REQUIRE_HINT=1` prevents admission of peers lacking signed `operator`+`pub_key` hints, while loose mode still admits them.
 
+- `integration_peer_discovery_source_cap.sh`:
+  `DIRECTORY_PEER_DISCOVERY_MAX_PER_SOURCE` limits how many discovered peers one source operator can add; additional peers are still admitted when announced by distinct source operators.
+
+- `integration_exit_live_wg_mode.sh`:
+  in `EXIT_LIVE_WG_MODE=1`, exit drops non-WireGuard opaque payloads (`dropped_non_wg_live`) while still accepting/proxying plausible WG-like traffic (`accepted_packets`, `wg_proxy_created`).
+
+- `integration_live_wg_full_path.sh`:
+  with `CLIENT_LIVE_WG_MODE=1` + `EXIT_LIVE_WG_MODE=1`, client drops non-WireGuard ingress before entry forwarding while plausible WG-like packets still traverse end-to-end and activate exit WG proxy metrics.
+
 - `integration_opaque_source_downlink.sh`:
   exit accepts injected downlink bytes on `EXIT_OPAQUE_SOURCE_ADDR`, forwards them into the active opaque session, and client receives them on sink path (live mode additionally requires session-framed source packets).
   In command mode, optional `EXIT_WG_KERNEL_PROXY=1` can bridge accepted opaque packets into local WG UDP socket I/O on `EXIT_WG_LISTEN_PORT` (must differ from `EXIT_DATA_ADDR` port).
+  Optional client command-mode bridge: `CLIENT_WG_KERNEL_PROXY=1` + `CLIENT_WG_PROXY_ADDR` can bind local WG UDP endpoint directly to the opaque session path.
 
 - `integration_persistent_opaque_session.sh`:
   with `CLIENT_OPAQUE_SESSION_SEC>0`, client keeps opaque uplink/downlink bridging active long enough to receive delayed downlink probes that would miss a short drain-only window.
@@ -400,14 +493,41 @@ All deep checks in one command:
 - `integration_adjudication_operator_quorum.sh`:
   directory governance policy can suppress final dispute publication when disputed signals come from fewer than `DIRECTORY_FINAL_ADJUDICATION_MIN_OPERATORS` distinct operators.
 
+- `integration_adjudication_source_quorum.sh`:
+  directory governance policy can suppress final dispute publication when disputed signals come from fewer than `DIRECTORY_FINAL_ADJUDICATION_MIN_SOURCES` distinct adjudication source classes.
+
 - `integration_sync_status_chaos.sh`:
   directory admin sync-status endpoint reports failed quorum while peer is down, success with operator attribution after recovery, and failure again after peer loss.
+
+- `integration_directory_operator_churn_scale.sh`:
+  validates larger multi-operator topology behavior: relay import across transit operators, quorum drop on one transit loss, quorum recovery after restart, and relay continuity under seed churn.
 
 - `integration_opaque_udp_only.sh`:
   client accepts UDP-origin opaque uplink traffic with synthetic fallback disabled and rejects synthetic-source configuration in strict mode.
 
+- `integration_client_wg_kernel_proxy.sh`:
+  client command backend can bind a local WG proxy UDP endpoint (`CLIENT_WG_KERNEL_PROXY=1`) and relay packets through entry/exit using mocked `wg`/`ip` commands in non-privileged test environments.
+
+- `integration_exit_wg_proxy_limit.sh`:
+  with `EXIT_WG_KERNEL_PROXY_MAX_SESSIONS=1`, concurrent client sessions trigger `wg_proxy_limit_drops` while one active proxy session still carries accepted traffic.
+
+- `integration_exit_wg_proxy_idle_cleanup.sh`:
+  with short `EXIT_WG_KERNEL_PROXY_IDLE_SEC` and `EXIT_SESSION_CLEANUP_SEC`, exit reaps inactive proxy sockets and reports `wg_proxy_idle_closed` with `active_wg_proxy_sessions=0`.
+
+- `integration_real_wg_privileged.sh`:
+  Linux root-only manual integration check for real `wg`/`ip` command backends (no mocks), including actual interface bring-up, interface peer wiring checks (`wg show` peers/endpoints/listen-port), and WG-kernel-proxy packet-flow verification.
+
+- `integration_real_wg_privileged_matrix.sh`:
+  Linux root-only wrapper that runs privileged real-WG integration across multiple interface/port/startup profiles to catch environment-specific regressions.
+
 - `integration_entry_live_wg_filter.sh`:
   with `ENTRY_LIVE_WG_MODE=1`, entry drops malformed/non-WG opaque packets for `wireguard-udp` sessions while still forwarding plausible WG packets to exit.
+
+- `integration_client_bootstrap_recovery.sh`:
+  client starts before directory/issuer/entry/exit are online, records bootstrap failures, then recovers automatically after infrastructure comes up and forwards packets successfully.
+
+- `integration_client_startup_burst.sh`:
+  runs many clients in parallel with bootstrap jitter/backoff settings and checks that a healthy majority establish paths without panics while exit traffic counters advance.
 
 - `integration_lifecycle_chaos.sh`:
   races revocation enforcement and dispute apply/clear loops while path-open traffic continues, then checks for expected revoked denials and no crash/panic.

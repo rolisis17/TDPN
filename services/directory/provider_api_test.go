@@ -169,6 +169,192 @@ func TestHandleProviderRelayUpsertRejectsClientAccessToken(t *testing.T) {
 	}
 }
 
+func TestHandleProviderRelayUpsertRejectsLowTierExitProvider(t *testing.T) {
+	issuerPub, issuerPriv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("issuer keygen: %v", err)
+	}
+	relayPub, _, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("relay keygen: %v", err)
+	}
+	issuerURL := "http://issuer.local"
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		issuerURL + "/v1/pubkeys": jsonResp(proto.IssuerPubKeysResponse{
+			Issuer:  "issuer-local",
+			PubKeys: []string{base64.RawURLEncoding.EncodeToString(issuerPub)},
+		}),
+	}
+	s := &Service{
+		httpClient:           &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		entryEndpoints:       []string{"127.0.0.1:51820"},
+		endpointRotateSec:    30,
+		providerIssuerURLs:   []string{issuerURL},
+		providerRelayMaxTTL:  3 * time.Minute,
+		providerMinEntryTier: 1,
+		providerMinExitTier:  2,
+		providerRelays:       make(map[string]proto.RelayDescriptor),
+	}
+
+	token := signProviderTestToken(t, issuerPriv, crypto.CapabilityClaims{
+		Issuer:     "issuer-local",
+		Audience:   "provider",
+		Subject:    "provider-op-low",
+		TokenType:  crypto.TokenTypeProviderRole,
+		Tier:       1,
+		ExpiryUnix: time.Now().Add(5 * time.Minute).Unix(),
+		TokenID:    "provider-token-low",
+	})
+
+	in := proto.ProviderRelayUpsertRequest{
+		RelayID:    "exit-provider-low",
+		Role:       "exit",
+		PubKey:     base64.RawURLEncoding.EncodeToString(relayPub),
+		Endpoint:   "127.0.0.1:52821",
+		ControlURL: "http://127.0.0.1:9284",
+	}
+	body, _ := json.Marshal(in)
+	req := httptest.NewRequest(http.MethodPost, "/v1/provider/relay/upsert", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+	s.handleProviderRelayUpsert(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for low-tier exit provider token, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleProviderRelayUpsertAllowsTier1EntryProvider(t *testing.T) {
+	issuerPub, issuerPriv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("issuer keygen: %v", err)
+	}
+	relayPub, _, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("relay keygen: %v", err)
+	}
+	issuerURL := "http://issuer.local"
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		issuerURL + "/v1/pubkeys": jsonResp(proto.IssuerPubKeysResponse{
+			Issuer:  "issuer-local",
+			PubKeys: []string{base64.RawURLEncoding.EncodeToString(issuerPub)},
+		}),
+	}
+	s := &Service{
+		httpClient:           &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		entryEndpoints:       []string{"127.0.0.1:51820"},
+		endpointRotateSec:    30,
+		providerIssuerURLs:   []string{issuerURL},
+		providerRelayMaxTTL:  3 * time.Minute,
+		providerMinEntryTier: 1,
+		providerMinExitTier:  2,
+		providerRelays:       make(map[string]proto.RelayDescriptor),
+	}
+
+	token := signProviderTestToken(t, issuerPriv, crypto.CapabilityClaims{
+		Issuer:     "issuer-local",
+		Audience:   "provider",
+		Subject:    "provider-op-entry",
+		TokenType:  crypto.TokenTypeProviderRole,
+		Tier:       1,
+		ExpiryUnix: time.Now().Add(5 * time.Minute).Unix(),
+		TokenID:    "provider-token-entry",
+	})
+
+	in := proto.ProviderRelayUpsertRequest{
+		RelayID:      "entry-provider-tier1",
+		Role:         "entry",
+		PubKey:       base64.RawURLEncoding.EncodeToString(relayPub),
+		Endpoint:     "127.0.0.1:52820",
+		ControlURL:   "http://127.0.0.1:9283",
+		Capabilities: []string{"wg", "tiered-policy"},
+	}
+	body, _ := json.Marshal(in)
+	req := httptest.NewRequest(http.MethodPost, "/v1/provider/relay/upsert", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+	s.handleProviderRelayUpsert(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 for tier1 entry provider token, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleProviderRelayUpsertRejectsOverOperatorRelayLimit(t *testing.T) {
+	issuerPub, issuerPriv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("issuer keygen: %v", err)
+	}
+	relayPubA, _, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("relay A keygen: %v", err)
+	}
+	relayPubB, _, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("relay B keygen: %v", err)
+	}
+	issuerURL := "http://issuer.local"
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		issuerURL + "/v1/pubkeys": jsonResp(proto.IssuerPubKeysResponse{
+			Issuer:  "issuer-local",
+			PubKeys: []string{base64.RawURLEncoding.EncodeToString(issuerPub)},
+		}),
+	}
+	s := &Service{
+		httpClient:             &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		entryEndpoints:         []string{"127.0.0.1:51820"},
+		endpointRotateSec:      30,
+		providerIssuerURLs:     []string{issuerURL},
+		providerRelayMaxTTL:    3 * time.Minute,
+		providerMinEntryTier:   1,
+		providerMinExitTier:    1,
+		providerMaxPerOperator: 1,
+		providerRelays:         make(map[string]proto.RelayDescriptor),
+	}
+
+	token := signProviderTestToken(t, issuerPriv, crypto.CapabilityClaims{
+		Issuer:     "issuer-local",
+		Audience:   "provider",
+		Subject:    "provider-op-cap",
+		TokenType:  crypto.TokenTypeProviderRole,
+		Tier:       2,
+		ExpiryUnix: time.Now().Add(5 * time.Minute).Unix(),
+		TokenID:    "provider-token-cap",
+	})
+
+	first := proto.ProviderRelayUpsertRequest{
+		RelayID:      "provider-cap-entry-1",
+		Role:         "entry",
+		PubKey:       base64.RawURLEncoding.EncodeToString(relayPubA),
+		Endpoint:     "127.0.0.1:52820",
+		ControlURL:   "http://127.0.0.1:9283",
+		Capabilities: []string{"wg", "tiered-policy"},
+	}
+	firstBody, _ := json.Marshal(first)
+	firstReq := httptest.NewRequest(http.MethodPost, "/v1/provider/relay/upsert", bytes.NewReader(firstBody))
+	firstReq.Header.Set("Authorization", "Bearer "+token)
+	firstRR := httptest.NewRecorder()
+	s.handleProviderRelayUpsert(firstRR, firstReq)
+	if firstRR.Code != http.StatusOK {
+		t.Fatalf("expected first relay upsert accepted, got %d body=%s", firstRR.Code, firstRR.Body.String())
+	}
+
+	second := proto.ProviderRelayUpsertRequest{
+		RelayID:      "provider-cap-exit-2",
+		Role:         "exit",
+		PubKey:       base64.RawURLEncoding.EncodeToString(relayPubB),
+		Endpoint:     "127.0.0.1:52821",
+		ControlURL:   "http://127.0.0.1:9284",
+		Capabilities: []string{"wg", "tiered-policy"},
+	}
+	secondBody, _ := json.Marshal(second)
+	secondReq := httptest.NewRequest(http.MethodPost, "/v1/provider/relay/upsert", bytes.NewReader(secondBody))
+	secondReq.Header.Set("Authorization", "Bearer "+token)
+	secondRR := httptest.NewRecorder()
+	s.handleProviderRelayUpsert(secondRR, secondReq)
+	if secondRR.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 once operator relay cap reached, got %d body=%s", secondRR.Code, secondRR.Body.String())
+	}
+}
+
 func signProviderTestToken(t *testing.T, priv ed25519.PrivateKey, claims crypto.CapabilityClaims) string {
 	t.Helper()
 	tok, err := crypto.SignClaims(claims, priv)

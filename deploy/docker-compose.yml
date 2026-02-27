@@ -6,11 +6,12 @@ services:
     command: ["--directory"]
     environment:
       DIRECTORY_ADDR: "0.0.0.0:8081"
+      DIRECTORY_PUBLIC_URL: "${DIRECTORY_PUBLIC_URL:-http://directory:8081}"
       DIRECTORY_OPERATOR_ID: "op-main"
-      ENTRY_URL: "http://entry-exit:8083"
-      EXIT_CONTROL_URL: "http://entry-exit:8084"
-      ENTRY_ENDPOINT: "entry-exit:51820"
-      EXIT_ENDPOINT: "entry-exit:51821"
+      ENTRY_URL: "${ENTRY_URL_PUBLIC:-http://entry-exit:8083}"
+      EXIT_CONTROL_URL: "${EXIT_CONTROL_URL_PUBLIC:-http://entry-exit:8084}"
+      ENTRY_ENDPOINT: "${ENTRY_ENDPOINT_PUBLIC:-entry-exit:51820}"
+      EXIT_ENDPOINT: "${EXIT_ENDPOINT_PUBLIC:-entry-exit:51821}"
       DIRECTORY_PRIVATE_KEY_FILE: "/app/data/directory_ed25519.key"
     volumes:
       - ./data/directory:/app/data
@@ -51,8 +52,8 @@ services:
       EXIT_ADDR: "0.0.0.0:8084"
       ENTRY_DATA_ADDR: "0.0.0.0:51820"
       EXIT_DATA_ADDR: "0.0.0.0:51821"
-      DIRECTORY_URL: "http://directory:8081"
-      ISSUER_URL: "http://issuer:8082"
+      DIRECTORY_URL: "${CORE_DIRECTORY_URL:-http://directory:8081}"
+      ISSUER_URL: "${CORE_ISSUER_URL:-http://issuer:8082}"
       ENTRY_OPEN_RPS: "20"
       ENTRY_PUZZLE_DIFFICULTY: "1"
       ENTRY_BAN_THRESHOLD: "3"
@@ -78,12 +79,11 @@ services:
       - issuer
       - entry-exit
     environment:
-      DIRECTORY_URL: "http://directory:8081"
-      ISSUER_URL: "http://issuer:8082"
-      ENTRY_URL: "http://entry-exit:8083"
-      EXIT_CONTROL_URL: "http://entry-exit:8084"
+      DIRECTORY_URL: "${CLIENT_DIRECTORY_URL:-http://directory:8081}"
+      ISSUER_URL: "${CLIENT_ISSUER_URL:-http://issuer:8082}"
+      ENTRY_URL: "${CLIENT_ENTRY_URL:-http://entry-exit:8083}"
+      EXIT_CONTROL_URL: "${CLIENT_EXIT_CONTROL_URL:-http://entry-exit:8084}"
       CLIENT_BOOTSTRAP_INTERVAL_SEC: "5"
     profiles:
       - demo
     restart: "no"
-

@@ -329,6 +329,7 @@ type DirectoryAdjudicationPolicy struct {
 	FinalDisputeMin   int     `json:"final_dispute_min_votes"`
 	FinalAppealMin    int     `json:"final_appeal_min_votes"`
 	FinalMinOperators int     `json:"final_adjudication_min_operators"`
+	FinalMinSources   int     `json:"final_adjudication_min_sources"`
 	FinalDisputeRatio float64 `json:"final_adjudication_min_ratio"`
 }
 

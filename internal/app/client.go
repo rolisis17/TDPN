@@ -79,6 +79,9 @@ type Client struct {
 	pathOpenMaxAttempts   int
 	maxPairCandidates     int
 	bootstrapInterval     time.Duration
+	bootstrapBackoffMax   time.Duration
+	bootstrapJitterPct    int
+	bootstrapInitialDelay time.Duration
 	exitExplorationPct    int
 	exitSelectionSeed     int64
 	selectionFeedDisable  bool
@@ -300,6 +303,28 @@ func NewClient() *Client {
 	if v, err := strconv.Atoi(os.Getenv("CLIENT_BOOTSTRAP_INTERVAL_SEC")); err == nil && v > 0 {
 		bootstrapIntervalSec = v
 	}
+	bootstrapBackoffMaxSec := bootstrapIntervalSec
+	if v, err := strconv.Atoi(os.Getenv("CLIENT_BOOTSTRAP_BACKOFF_MAX_SEC")); err == nil && v > 0 {
+		bootstrapBackoffMaxSec = v
+	}
+	if bootstrapBackoffMaxSec < bootstrapIntervalSec {
+		bootstrapBackoffMaxSec = bootstrapIntervalSec
+	}
+	bootstrapJitterPct := 0
+	if v, err := strconv.Atoi(os.Getenv("CLIENT_BOOTSTRAP_JITTER_PCT")); err == nil {
+		switch {
+		case v < 0:
+			bootstrapJitterPct = 0
+		case v > 90:
+			bootstrapJitterPct = 90
+		default:
+			bootstrapJitterPct = v
+		}
+	}
+	bootstrapInitialDelaySec := 0
+	if v, err := strconv.Atoi(os.Getenv("CLIENT_BOOTSTRAP_INITIAL_DELAY_SEC")); err == nil && v > 0 {
+		bootstrapInitialDelaySec = v
+	}
 	var wgManager wg.ClientManager
 	switch wgBackend {
 	case "command":
@@ -357,6 +382,9 @@ func NewClient() *Client {
 		pathOpenMaxAttempts:   pathOpenMaxAttempts,
 		maxPairCandidates:     maxPairCandidates,
 		bootstrapInterval:     time.Duration(bootstrapIntervalSec) * time.Second,
+		bootstrapBackoffMax:   time.Duration(bootstrapBackoffMaxSec) * time.Second,
+		bootstrapJitterPct:    bootstrapJitterPct,
+		bootstrapInitialDelay: time.Duration(bootstrapInitialDelaySec) * time.Second,
 		exitExplorationPct:    exitExplorationPct,
 		exitSelectionSeed:     exitSelectionSeed,
 		selectionFeedDisable:  selectionFeedDisable,
@@ -375,8 +403,16 @@ func (c *Client) Run(ctx context.Context) error {
 	if bootstrapInterval <= 0 {
 		bootstrapInterval = 5 * time.Second
 	}
-	log.Printf("client role enabled: directories=%d min_sources=%d min_operators=%d min_votes=%d issuer=%s subject=%s entry=%s mode=%s source=%s trust_strict=%t wg_backend=%s iface=%s allowed_ips=%s install_route=%t synthetic_fallback=%t opaque_session_sec=%d opaque_initial_uplink_timeout_ms=%d health_check=%t path_attempts=%d exit_country=%s exit_region=%s min_geo_confidence=%.2f locality_fallback=%s strict_locality=%t max_exits_per_operator=%d distinct_operators=%t sticky_pair_sec=%d session_reuse=%t refresh_lead_sec=%d exit_exploration_pct=%d selection_feed_disable=%t selection_feed_require=%t selection_feed_min_votes=%d trust_feed_disable=%t trust_feed_require=%t trust_feed_min_votes=%d bootstrap_interval_sec=%d",
-		len(c.directoryURLs), c.directoryMinSources, c.directoryMinOperators, c.directoryMinVotes, c.issuerURL, c.subject, c.entryURL, c.dataMode, c.innerSource, c.trustStrict, c.wgBackend, c.wgInterface, c.wgAllowedIPs, c.wgInstallRoute, c.allowSyntheticFallback(), c.opaqueSessionSec, c.opaqueInitialUpMS, c.healthCheckEnabled, c.pathOpenMaxAttempts, c.preferredExitCountry, c.preferredExitRegion, c.minGeoConfidence, strings.Join(c.localityFallbackOrder, ","), c.strictExitLocality, c.maxExitsPerOperator, c.requireDistinctOps, c.stickyPairSec, c.sessionReuse, c.sessionRefreshLeadSec, c.exitExplorationPct, c.selectionFeedDisable, c.selectionFeedRequire, c.selectionFeedMinVotes, c.trustFeedDisable, c.trustFeedRequire, c.trustFeedMinVotes, int(bootstrapInterval/time.Second))
+	bootstrapBackoffMax := c.bootstrapBackoffMax
+	if bootstrapBackoffMax < bootstrapInterval {
+		bootstrapBackoffMax = bootstrapInterval
+	}
+	initialDelay := c.bootstrapInitialDelay
+	if initialDelay < 0 {
+		initialDelay = 0
+	}
+	log.Printf("client role enabled: directories=%d min_sources=%d min_operators=%d min_votes=%d issuer=%s subject=%s entry=%s mode=%s source=%s trust_strict=%t wg_backend=%s iface=%s allowed_ips=%s install_route=%t wg_kernel_proxy=%t wg_proxy_addr=%s synthetic_fallback=%t opaque_session_sec=%d opaque_initial_uplink_timeout_ms=%d health_check=%t path_attempts=%d exit_country=%s exit_region=%s min_geo_confidence=%.2f locality_fallback=%s strict_locality=%t max_exits_per_operator=%d distinct_operators=%t sticky_pair_sec=%d session_reuse=%t refresh_lead_sec=%d exit_exploration_pct=%d selection_feed_disable=%t selection_feed_require=%t selection_feed_min_votes=%d trust_feed_disable=%t trust_feed_require=%t trust_feed_min_votes=%d bootstrap_interval_sec=%d bootstrap_backoff_max_sec=%d bootstrap_jitter_pct=%d bootstrap_initial_delay_sec=%d",
+		len(c.directoryURLs), c.directoryMinSources, c.directoryMinOperators, c.directoryMinVotes, c.issuerURL, c.subject, c.entryURL, c.dataMode, c.innerSource, c.trustStrict, c.wgBackend, c.wgInterface, c.wgAllowedIPs, c.wgInstallRoute, c.wgKernelProxy, c.wgProxyAddr, c.allowSyntheticFallback(), c.opaqueSessionSec, c.opaqueInitialUpMS, c.healthCheckEnabled, c.pathOpenMaxAttempts, c.preferredExitCountry, c.preferredExitRegion, c.minGeoConfidence, strings.Join(c.localityFallbackOrder, ","), c.strictExitLocality, c.maxExitsPerOperator, c.requireDistinctOps, c.stickyPairSec, c.sessionReuse, c.sessionRefreshLeadSec, c.exitExplorationPct, c.selectionFeedDisable, c.selectionFeedRequire, c.selectionFeedMinVotes, c.trustFeedDisable, c.trustFeedRequire, c.trustFeedMinVotes, int(bootstrapInterval/time.Second), int(bootstrapBackoffMax/time.Second), c.bootstrapJitterPct, int(initialDelay/time.Second))
 	if err := c.validateRuntimeConfig(); err != nil {
 		return err
 	}
@@ -393,33 +429,75 @@ func (c *Client) Run(ctx context.Context) error {
 		c.clientWGPub = randomWGPublicKeyLike()
 	}
 
-	if err := c.bootstrap(ctx); err != nil {
-		log.Printf("client bootstrap failed: %v", err)
-	}
-
-	ticker := time.NewTicker(bootstrapInterval)
-	defer ticker.Stop()
-	for {
+	if initialDelay > 0 {
+		log.Printf("client initial bootstrap delay=%s", initialDelay)
 		select {
 		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(initialDelay):
+		}
+	}
+
+	consecutiveFailures := 0
+	attemptBootstrap := func(initial bool) {
+		if err := c.bootstrap(ctx); err != nil {
+			if initial {
+				log.Printf("client bootstrap failed: %v", err)
+			} else {
+				log.Printf("client bootstrap retry failed: %v", err)
+			}
+			consecutiveFailures++
+			return
+		}
+		if consecutiveFailures > 0 {
+			log.Printf("client bootstrap recovered after failures=%d", consecutiveFailures)
+		}
+		consecutiveFailures = 0
+	}
+	attemptBootstrap(true)
+
+	for {
+		wait := bootstrapDelayForFailures(bootstrapInterval, bootstrapBackoffMax, consecutiveFailures)
+		wait = bootstrapDelayWithJitter(wait, bootstrapBackoffMax, c.bootstrapJitterPct, mrand.Float64())
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			_ = c.closeActiveSession(shutdownCtx, "shutdown")
 			cancel()
 			return ctx.Err()
-		case <-ticker.C:
-			if err := c.bootstrap(ctx); err != nil {
-				log.Printf("client bootstrap retry failed: %v", err)
-			}
+		case <-timer.C:
+			attemptBootstrap(false)
 		}
 	}
 }
 
 func (c *Client) validateRuntimeConfig() error {
+	if c.wgKernelProxy {
+		if c.dataMode != "opaque" {
+			return fmt.Errorf("CLIENT_WG_KERNEL_PROXY requires DATA_PLANE_MODE=opaque")
+		}
+		if c.wgBackend != "command" {
+			return fmt.Errorf("CLIENT_WG_KERNEL_PROXY requires CLIENT_WG_BACKEND=command")
+		}
+		if strings.TrimSpace(c.wgProxyAddr) == "" {
+			return fmt.Errorf("CLIENT_WG_KERNEL_PROXY requires CLIENT_WG_PROXY_ADDR")
+		}
+		if _, err := net.ResolveUDPAddr("udp", c.wgProxyAddr); err != nil {
+			return fmt.Errorf("invalid CLIENT_WG_PROXY_ADDR: %w", err)
+		}
+	}
 	if c.wgBackend == "command" {
 		if c.dataMode != "opaque" {
 			return fmt.Errorf("CLIENT_WG_BACKEND=command requires DATA_PLANE_MODE=opaque")
 		}
-		if c.innerSource != "udp" {
+		if c.innerSource != "udp" && !c.wgKernelProxy {
 			return fmt.Errorf("CLIENT_WG_BACKEND=command requires CLIENT_INNER_SOURCE=udp")
 		}
 		if c.wgPrivateKey == "" {
@@ -430,7 +508,7 @@ func (c *Client) validateRuntimeConfig() error {
 		if c.dataMode != "opaque" {
 			return fmt.Errorf("CLIENT_LIVE_WG_MODE requires DATA_PLANE_MODE=opaque")
 		}
-		if c.innerSource != "udp" {
+		if c.innerSource != "udp" && !c.wgKernelProxy {
 			return fmt.Errorf("CLIENT_LIVE_WG_MODE requires CLIENT_INNER_SOURCE=udp")
 		}
 		if c.wgBackend != "command" {
@@ -439,11 +517,11 @@ func (c *Client) validateRuntimeConfig() error {
 		if c.wgPrivateKey == "" {
 			return fmt.Errorf("CLIENT_LIVE_WG_MODE requires CLIENT_WG_PRIVATE_KEY_PATH")
 		}
-		if strings.TrimSpace(c.opaqueSinkAddr) == "" {
+		if strings.TrimSpace(c.opaqueSinkAddr) == "" && !c.wgKernelProxy {
 			return fmt.Errorf("CLIENT_LIVE_WG_MODE requires CLIENT_OPAQUE_SINK_ADDR")
 		}
 	}
-	if c.dataMode == "opaque" && !c.allowSyntheticFallback() && c.innerSource != "udp" {
+	if c.dataMode == "opaque" && !c.allowSyntheticFallback() && c.innerSource != "udp" && !c.wgKernelProxy {
 		return fmt.Errorf("CLIENT_INNER_SOURCE=udp required when synthetic fallback is disabled")
 	}
 	return nil
@@ -562,6 +640,15 @@ func (c *Client) bootstrap(ctx context.Context) error {
 	if transport == "" {
 		transport = requestedTransport(c.dataMode)
 	}
+	var wgKernelProxy *clientWGKernelProxy
+	if transport == "wireguard-udp" && c.wgKernelProxy {
+		proxy, err := c.newWGKernelProxy(pathResp.EntryDataAddr, pathResp.SessionID)
+		if err != nil {
+			return fmt.Errorf("client wg kernel proxy init failed: %w", err)
+		}
+		wgKernelProxy = proxy
+		defer wgKernelProxy.close()
+	}
 	if transport == "wireguard-udp" {
 		log.Printf("client received wg-session config: key_id=%s exit_pub=%s client_ip=%s exit_ip=%s mtu=%d keepalive=%ds",
 			pathResp.SessionKeyID,
@@ -584,13 +671,22 @@ func (c *Client) bootstrap(ctx context.Context) error {
 			MTU:              pathResp.InnerMTU,
 			KeepaliveSec:     pathResp.KeepaliveSec,
 		}
+		if wgKernelProxy != nil {
+			cfg.Endpoint = wgKernelProxy.listenAddr()
+		}
 		if err := c.wgManager.ConfigureClientSession(ctx, cfg); err != nil {
 			return fmt.Errorf("client wg configure failed: %w", err)
 		}
 	}
 
-	if err := c.sendTrafficForTransport(ctx, transport, pathResp.EntryDataAddr, pathResp.SessionID); err != nil {
-		return err
+	if wgKernelProxy != nil {
+		if err := c.runWGKernelProxyTraffic(ctx, wgKernelProxy); err != nil {
+			return err
+		}
+	} else {
+		if err := c.sendTrafficForTransport(ctx, transport, pathResp.EntryDataAddr, pathResp.SessionID); err != nil {
+			return err
+		}
 	}
 
 	log.Printf("client selected entry=%s (%s) exit=%s (%s) token_exp=%d",
@@ -664,6 +760,253 @@ func (c *Client) sendTrafficForTransport(ctx context.Context, transport string, 
 	default:
 		return fmt.Errorf("unsupported transport: %s", transport)
 	}
+}
+
+type clientWGKernelProxy struct {
+	sessionID string
+	entryAddr string
+	outerConn *net.UDPConn
+	wgConn    *net.UDPConn
+	peerMu    sync.RWMutex
+	wgPeer    *net.UDPAddr
+}
+
+func (c *Client) newWGKernelProxy(entryDataAddr string, sessionID string) (*clientWGKernelProxy, error) {
+	entryUDP, err := net.ResolveUDPAddr("udp", entryDataAddr)
+	if err != nil {
+		return nil, err
+	}
+	outerConn, err := net.DialUDP("udp", nil, entryUDP)
+	if err != nil {
+		return nil, err
+	}
+	listenAddr, err := net.ResolveUDPAddr("udp", c.wgProxyAddr)
+	if err != nil {
+		_ = outerConn.Close()
+		return nil, fmt.Errorf("resolve CLIENT_WG_PROXY_ADDR: %w", err)
+	}
+	wgConn, err := net.ListenUDP("udp", listenAddr)
+	if err != nil {
+		_ = outerConn.Close()
+		return nil, fmt.Errorf("listen CLIENT_WG_PROXY_ADDR: %w", err)
+	}
+	return &clientWGKernelProxy{
+		sessionID: sessionID,
+		entryAddr: entryDataAddr,
+		outerConn: outerConn,
+		wgConn:    wgConn,
+	}, nil
+}
+
+func (p *clientWGKernelProxy) listenAddr() string {
+	if p == nil || p.wgConn == nil {
+		return ""
+	}
+	return p.wgConn.LocalAddr().String()
+}
+
+func (p *clientWGKernelProxy) close() {
+	if p == nil {
+		return
+	}
+	if p.outerConn != nil {
+		_ = p.outerConn.Close()
+	}
+	if p.wgConn != nil {
+		_ = p.wgConn.Close()
+	}
+}
+
+func (p *clientWGKernelProxy) setWGPeer(peer *net.UDPAddr) {
+	if p == nil || peer == nil {
+		return
+	}
+	peerCopy := &net.UDPAddr{IP: append([]byte(nil), peer.IP...), Port: peer.Port, Zone: peer.Zone}
+	p.peerMu.Lock()
+	p.wgPeer = peerCopy
+	p.peerMu.Unlock()
+}
+
+func (p *clientWGKernelProxy) wgPeerAddr() *net.UDPAddr {
+	if p == nil {
+		return nil
+	}
+	p.peerMu.RLock()
+	defer p.peerMu.RUnlock()
+	if p.wgPeer == nil {
+		return nil
+	}
+	return &net.UDPAddr{IP: append([]byte(nil), p.wgPeer.IP...), Port: p.wgPeer.Port, Zone: p.wgPeer.Zone}
+}
+
+func (c *Client) opaqueBridgeWindow() time.Duration {
+	if c.opaqueSessionSec > 0 {
+		return time.Duration(c.opaqueSessionSec) * time.Second
+	}
+	if c.opaqueDrainMS > 0 {
+		return time.Duration(c.opaqueDrainMS) * time.Millisecond
+	}
+	return 1200 * time.Millisecond
+}
+
+func (c *Client) runWGKernelProxyTraffic(ctx context.Context, proxy *clientWGKernelProxy) error {
+	if proxy == nil {
+		return nil
+	}
+	window := c.opaqueBridgeWindow()
+	sessionCtx, cancel := context.WithTimeout(ctx, window)
+	defer cancel()
+
+	var (
+		uplinkCount   int
+		downlinkCount int
+		firstErr      error
+		errMu         sync.Mutex
+		seenUplink    sync.Once
+		workers       sync.WaitGroup
+	)
+	seenUplinkCh := make(chan struct{})
+	setErr := func(err error) {
+		if err == nil {
+			return
+		}
+		errMu.Lock()
+		if firstErr == nil {
+			firstErr = err
+			cancel()
+		}
+		errMu.Unlock()
+	}
+	markUplink := func() {
+		seenUplink.Do(func() {
+			close(seenUplinkCh)
+		})
+	}
+
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		buf := make([]byte, 64*1024)
+		for {
+			if err := proxy.wgConn.SetReadDeadline(time.Now().Add(250 * time.Millisecond)); err != nil {
+				setErr(err)
+				return
+			}
+			n, src, err := proxy.wgConn.ReadFromUDP(buf)
+			if err != nil {
+				if ne, ok := err.(net.Error); ok && ne.Timeout() {
+					if sessionCtx.Err() != nil {
+						return
+					}
+					continue
+				}
+				if sessionCtx.Err() != nil || strings.Contains(err.Error(), "closed") {
+					return
+				}
+				setErr(err)
+				return
+			}
+			if n <= 0 {
+				continue
+			}
+			payload := append([]byte(nil), buf[:n]...)
+			if c.liveWGMode && !relay.LooksLikePlausibleWireGuardMessage(payload) {
+				log.Printf("client dropped wg-kernel uplink reason=non-wireguard-live payload_len=%d", len(payload))
+				continue
+			}
+			proxy.setWGPeer(src)
+			if err := c.sendOpaqueInnerPacketConn(proxy.outerConn, proxy.sessionID, randomNonce(), payload); err != nil {
+				setErr(err)
+				return
+			}
+			uplinkCount++
+			markUplink()
+		}
+	}()
+
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		buf := make([]byte, 64*1024)
+		for {
+			if err := proxy.outerConn.SetReadDeadline(time.Now().Add(250 * time.Millisecond)); err != nil {
+				setErr(err)
+				return
+			}
+			n, err := proxy.outerConn.Read(buf)
+			if err != nil {
+				if ne, ok := err.(net.Error); ok && ne.Timeout() {
+					if sessionCtx.Err() != nil {
+						return
+					}
+					continue
+				}
+				if sessionCtx.Err() != nil || strings.Contains(err.Error(), "closed") {
+					return
+				}
+				setErr(err)
+				return
+			}
+			if n <= 0 {
+				continue
+			}
+			sid, payload, parseErr := relay.ParseDatagram(buf[:n])
+			if parseErr != nil || sid != proxy.sessionID {
+				continue
+			}
+			_, raw, opaqueErr := relay.ParseOpaquePayload(payload)
+			if opaqueErr != nil {
+				continue
+			}
+			if c.liveWGMode && !relay.LooksLikePlausibleWireGuardMessage(raw) {
+				log.Printf("client dropped wg-kernel downlink reason=non-wireguard-live payload_len=%d", len(raw))
+				continue
+			}
+			peer := proxy.wgPeerAddr()
+			if peer == nil {
+				continue
+			}
+			if _, err := proxy.wgConn.WriteToUDP(raw, peer); err != nil {
+				setErr(err)
+				return
+			}
+			downlinkCount++
+		}
+	}()
+
+	if !c.allowSyntheticFallback() {
+		select {
+		case <-seenUplinkCh:
+		case <-time.After(c.opaqueInitialUplinkTimeout()):
+			cancel()
+			workers.Wait()
+			return fmt.Errorf("command/live WG mode received no WG proxy packets on %s within %s", proxy.listenAddr(), c.opaqueInitialUplinkTimeout())
+		case <-sessionCtx.Done():
+			cancel()
+			workers.Wait()
+			return fmt.Errorf("command/live WG mode received no WG proxy packets on %s", proxy.listenAddr())
+		}
+	}
+
+	<-sessionCtx.Done()
+	workers.Wait()
+
+	errMu.Lock()
+	err := firstErr
+	errMu.Unlock()
+	if err != nil {
+		return err
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if uplinkCount > 0 {
+		log.Printf("client wg-kernel proxy uplink packets=%d", uplinkCount)
+	}
+	if downlinkCount > 0 {
+		log.Printf("client wg-kernel proxy downlink packets=%d", downlinkCount)
+	}
+	return nil
 }
 
 func (c *Client) sendOpaqueTraffic(ctx context.Context, entryDataAddr string, sessionID string) error {
@@ -1175,6 +1518,60 @@ func (c *Client) tryReuseActiveSession(ctx context.Context, now time.Time) bool 
 
 func (c *Client) allowSyntheticFallback() bool {
 	return !c.disableSynthetic && !c.liveWGMode && c.wgBackend != "command"
+}
+
+func bootstrapDelayForFailures(base time.Duration, maxDelay time.Duration, failures int) time.Duration {
+	if base <= 0 {
+		base = 5 * time.Second
+	}
+	if maxDelay < base {
+		maxDelay = base
+	}
+	delay := base
+	if failures <= 1 {
+		return delay
+	}
+	for i := 1; i < failures; i++ {
+		if delay >= maxDelay {
+			return maxDelay
+		}
+		next := delay * 2
+		if next < delay || next > maxDelay {
+			return maxDelay
+		}
+		delay = next
+	}
+	return delay
+}
+
+func bootstrapDelayWithJitter(delay time.Duration, maxDelay time.Duration, jitterPct int, randUnit float64) time.Duration {
+	if delay <= 0 {
+		return delay
+	}
+	if maxDelay > 0 && delay > maxDelay {
+		delay = maxDelay
+	}
+	if jitterPct <= 0 {
+		return delay
+	}
+	if jitterPct > 90 {
+		jitterPct = 90
+	}
+	if randUnit < 0 {
+		randUnit = 0
+	} else if randUnit > 1 {
+		randUnit = 1
+	}
+	spread := float64(jitterPct) / 100.0
+	factor := (1 - spread) + (2 * spread * randUnit)
+	jittered := time.Duration(float64(delay) * factor)
+	if jittered < time.Millisecond {
+		jittered = time.Millisecond
+	}
+	if maxDelay > 0 && jittered > maxDelay {
+		return maxDelay
+	}
+	return jittered
 }
 
 func (c *Client) opaqueInitialUplinkTimeout() time.Duration {
@@ -1913,7 +2310,12 @@ func (c *Client) issueToken(ctx context.Context, in proto.IssueTokenRequest) (pr
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return out, fmt.Errorf("issuer returned status %d", resp.StatusCode)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		msg := strings.TrimSpace(string(body))
+		if msg == "" {
+			return out, fmt.Errorf("issuer returned status %d", resp.StatusCode)
+		}
+		return out, fmt.Errorf("issuer returned status %d: %s", resp.StatusCode, msg)
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {

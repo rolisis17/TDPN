@@ -1,5 +1,5 @@
 {
-  "generated_at": 1771663916,
+  "generated_at": 1772194442,
   "metrics": {
     "accepted_packets": 0,
     "dropped_packets": 0,
@@ -13,6 +13,18 @@
     "dropped_tier3_packets": 0,
     "dropped_token_revoked": 0,
     "dropped_token_key_epoch": 0,
+    "dropped_token_proof_replay": 0,
+    "dropped_source_mismatch": 0,
+    "dropped_non_wg_live": 0,
+    "forwarded_downlink_packets": 0,
+    "forwarded_downlink_bytes": 0,
+    "dropped_downlink_packets": 0,
+    "wg_proxy_created": 0,
+    "wg_proxy_closed": 0,
+    "wg_proxy_idle_closed": 0,
+    "wg_proxy_errors": 0,
+    "wg_proxy_limit_drops": 0,
+    "active_wg_proxy_sessions": 0,
     "active_sessions": 0,
     "accounting_updated_unix": 0
   }

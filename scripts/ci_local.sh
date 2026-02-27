@@ -49,11 +49,17 @@ echo "[ci] operator-quorum integration"
 echo "[ci] sync-status-chaos integration"
 ./scripts/integration_sync_status_chaos.sh
 
+echo "[ci] directory-operator-churn-scale integration"
+./scripts/integration_directory_operator_churn_scale.sh
+
 echo "[ci] peer-discovery-backoff integration"
 ./scripts/integration_peer_discovery_backoff.sh
 
 echo "[ci] peer-discovery-require-hint integration"
 ./scripts/integration_peer_discovery_require_hint.sh
+
+echo "[ci] peer-discovery-source-cap integration"
+./scripts/integration_peer_discovery_source_cap.sh
 
 echo "[ci] distinct-operator integration"
 ./scripts/integration_distinct_operators.sh
@@ -73,8 +79,26 @@ echo "[ci] opaque-source integration"
 echo "[ci] opaque-udp-only integration"
 ./scripts/integration_opaque_udp_only.sh
 
+echo "[ci] client-wg-kernel-proxy integration"
+./scripts/integration_client_wg_kernel_proxy.sh
+
+echo "[ci] exit-wg-proxy-limit integration"
+./scripts/integration_exit_wg_proxy_limit.sh
+
+echo "[ci] exit-wg-proxy-idle-cleanup integration"
+./scripts/integration_exit_wg_proxy_idle_cleanup.sh
+
 echo "[ci] entry-live-wg-filter integration"
 ./scripts/integration_entry_live_wg_filter.sh
+
+echo "[ci] exit-live-wg-mode integration"
+./scripts/integration_exit_live_wg_mode.sh
+
+echo "[ci] live-wg-full-path integration"
+./scripts/integration_live_wg_full_path.sh
+
+echo "[ci] client-bootstrap-recovery integration"
+./scripts/integration_client_bootstrap_recovery.sh
 
 echo "[ci] session-reuse integration"
 ./scripts/integration_session_reuse.sh
@@ -96,6 +120,9 @@ echo "[ci] adjudication-quorum integration"
 
 echo "[ci] adjudication-operator-quorum integration"
 ./scripts/integration_adjudication_operator_quorum.sh
+
+echo "[ci] adjudication-source-quorum integration"
+./scripts/integration_adjudication_source_quorum.sh
 
 echo "[ci] multi-issuer integration"
 ./scripts/integration_multi_issuer.sh

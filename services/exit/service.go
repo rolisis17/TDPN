@@ -60,6 +60,9 @@ type Service struct {
 	wgListenPort          int
 	wgBackend             string
 	wgKernelProxy         bool
+	wgKernelProxyMax      int
+	wgKernelProxyIdle     time.Duration
+	sessionCleanupSec     int
 	wgKernelTargetUDP     *net.UDPAddr
 	wgManager             wg.Manager
 	liveWGMode            bool
@@ -86,6 +89,7 @@ type Service struct {
 	issuerKeyIssuer   map[string]string
 	sessions          map[string]sessionInfo
 	wgSessionProxies  map[string]*net.UDPConn
+	wgProxyLastSeen   map[string]int64
 	proofNonceSeen    map[string]map[string]int64
 	metrics           exitMetrics
 	revokedJTI        map[string]int64
@@ -112,6 +116,12 @@ type exitMetrics struct {
 	ForwardedDownlinkPkts   uint64 `json:"forwarded_downlink_packets"`
 	ForwardedDownlinkBytes  uint64 `json:"forwarded_downlink_bytes"`
 	DroppedDownlinkPkts     uint64 `json:"dropped_downlink_packets"`
+	WGProxyCreated          uint64 `json:"wg_proxy_created"`
+	WGProxyClosed           uint64 `json:"wg_proxy_closed"`
+	WGProxyIdleClosed       uint64 `json:"wg_proxy_idle_closed"`
+	WGProxyErrors           uint64 `json:"wg_proxy_errors"`
+	WGProxyLimitDrops       uint64 `json:"wg_proxy_limit_drops"`
+	ActiveWGProxySessions   uint64 `json:"active_wg_proxy_sessions"`
 	ActiveSessions          uint64 `json:"active_sessions"`
 	AccountingUpdatedUnix   int64  `json:"accounting_updated_unix"`
 }
@@ -184,6 +194,24 @@ func New() *Service {
 		wgBackend = "noop"
 	}
 	wgKernelProxy := os.Getenv("EXIT_WG_KERNEL_PROXY") == "1"
+	wgKernelProxyMax := 2048
+	if v := os.Getenv("EXIT_WG_KERNEL_PROXY_MAX_SESSIONS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			wgKernelProxyMax = n
+		}
+	}
+	wgKernelProxyIdle := 2 * time.Minute
+	if v := os.Getenv("EXIT_WG_KERNEL_PROXY_IDLE_SEC"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			wgKernelProxyIdle = time.Duration(n) * time.Second
+		}
+	}
+	sessionCleanupSec := 30
+	if v := os.Getenv("EXIT_SESSION_CLEANUP_SEC"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			sessionCleanupSec = n
+		}
+	}
 	var wgManager wg.Manager
 	switch wgBackend {
 	case "command":
@@ -258,6 +286,9 @@ func New() *Service {
 		wgListenPort:          wgListenPort,
 		wgBackend:             wgBackend,
 		wgKernelProxy:         wgKernelProxy,
+		wgKernelProxyMax:      wgKernelProxyMax,
+		wgKernelProxyIdle:     wgKernelProxyIdle,
+		sessionCleanupSec:     sessionCleanupSec,
 		wgManager:             wgManager,
 		liveWGMode:            liveWGMode,
 		egressBackend:         egressBackend,
@@ -275,6 +306,7 @@ func New() *Service {
 		issuerKeyIssuer:       make(map[string]string),
 		sessions:              make(map[string]sessionInfo),
 		wgSessionProxies:      make(map[string]*net.UDPConn),
+		wgProxyLastSeen:       make(map[string]int64),
 		proofNonceSeen:        make(map[string]map[string]int64),
 		revokedJTI:            make(map[string]int64),
 		minTokenEpoch:         make(map[string]int64),
@@ -283,8 +315,8 @@ func New() *Service {
 }
 
 func (s *Service) Run(ctx context.Context) error {
-	log.Printf("exit wg backend=%s iface=%s listen_port=%d kernel_proxy=%t opaque_echo=%t token_proof_replay_guard=%t peer_rebind_sec=%d",
-		s.wgBackend, s.wgInterface, s.wgListenPort, s.wgKernelProxy, s.opaqueEcho, s.tokenProofReplayGuard, int(s.peerRebindAfter/time.Second))
+	log.Printf("exit wg backend=%s iface=%s listen_port=%d kernel_proxy=%t kernel_proxy_max_sessions=%d kernel_proxy_idle_sec=%d opaque_echo=%t token_proof_replay_guard=%t peer_rebind_sec=%d",
+		s.wgBackend, s.wgInterface, s.wgListenPort, s.wgKernelProxy, s.effectiveWGKernelProxyMax(), int(s.wgKernelProxyIdle/time.Second), s.opaqueEcho, s.tokenProofReplayGuard, int(s.peerRebindAfter/time.Second))
 	if err := s.validateRuntimeConfig(); err != nil {
 		return err
 	}
@@ -353,7 +385,11 @@ func (s *Service) Run(ctx context.Context) error {
 	defer refreshTicker.Stop()
 	revocationTicker := time.NewTicker(time.Duration(s.revocationRefreshSec) * time.Second)
 	defer revocationTicker.Stop()
-	cleanupTicker := time.NewTicker(30 * time.Second)
+	cleanupEvery := s.sessionCleanupSec
+	if cleanupEvery <= 0 {
+		cleanupEvery = 30
+	}
+	cleanupTicker := time.NewTicker(time.Duration(cleanupEvery) * time.Second)
 	defer cleanupTicker.Stop()
 	var accountingTicker *time.Ticker
 	if s.accountingFile != "" {
@@ -402,6 +438,18 @@ func (s *Service) Run(ctx context.Context) error {
 }
 
 func (s *Service) validateRuntimeConfig() error {
+	if s.wgKernelProxyMax < 0 {
+		return fmt.Errorf("EXIT_WG_KERNEL_PROXY_MAX_SESSIONS must be >=0")
+	}
+	if s.wgKernelProxyIdle < 0 {
+		return fmt.Errorf("EXIT_WG_KERNEL_PROXY_IDLE_SEC must be >=0")
+	}
+	if s.sessionCleanupSec < 0 {
+		return fmt.Errorf("EXIT_SESSION_CLEANUP_SEC must be >0")
+	}
+	if s.sessionCleanupSec == 0 {
+		s.sessionCleanupSec = 30
+	}
 	if s.wgListenPort == 0 {
 		s.wgListenPort = 51831
 	}
@@ -455,6 +503,13 @@ func (s *Service) validateRuntimeConfig() error {
 		}
 	}
 	return nil
+}
+
+func (s *Service) effectiveWGKernelProxyMax() int {
+	if s.wgKernelProxyMax > 0 {
+		return s.wgKernelProxyMax
+	}
+	return 2048
 }
 
 func (s *Service) ensureCommandWGPubKey(ctx context.Context) error {
@@ -709,8 +764,7 @@ func (s *Service) resolveDownlinkTarget(sessionID string, now time.Time) (string
 		return "", 0, false
 	}
 	if now.Unix() >= session.claims.ExpiryUnix {
-		staleProxy := s.wgSessionProxies[sessionID]
-		delete(s.wgSessionProxies, sessionID)
+		staleProxy := s.takeWGProxyLocked(sessionID, false)
 		delete(s.sessions, sessionID)
 		s.metrics.ActiveSessions = uint64(len(s.sessions))
 		if staleProxy != nil {
@@ -728,6 +782,12 @@ func (s *Service) resolveDownlinkTarget(sessionID string, now time.Time) (string
 	}
 	session.lastActivity = now
 	s.sessions[sessionID] = session
+	if _, ok := s.wgSessionProxies[sessionID]; ok {
+		if s.wgProxyLastSeen == nil {
+			s.wgProxyLastSeen = make(map[string]int64)
+		}
+		s.wgProxyLastSeen[sessionID] = now.Unix()
+	}
 	return target, session.downNonce, true
 }
 
@@ -737,25 +797,39 @@ func (s *Service) forwardOpaqueToWGKernel(sessionID string, payload []byte) erro
 	}
 	proxyConn, err := s.ensureWGSessionProxy(sessionID)
 	if err != nil {
+		if errors.Is(err, errWGProxySessionLimit) {
+			s.recordWGProxyLimitDrop()
+		} else {
+			s.recordWGProxyError()
+		}
 		return err
 	}
 	target := s.wgKernelTargetUDP
 	if target == nil {
 		target, err = net.ResolveUDPAddr("udp", fmt.Sprintf("127.0.0.1:%d", s.wgListenPort))
 		if err != nil {
+			s.recordWGProxyError()
 			return err
 		}
 		s.wgKernelTargetUDP = target
 	}
 	_, err = proxyConn.WriteToUDP(payload, target)
+	if err != nil {
+		s.recordWGProxyError()
+		return err
+	}
+	s.markWGProxyActivity(sessionID, time.Now())
 	return err
 }
+
+var errWGProxySessionLimit = errors.New("wg-kernel-proxy session limit reached")
 
 func (s *Service) ensureWGSessionProxy(sessionID string) (*net.UDPConn, error) {
 	s.mu.RLock()
 	existing := s.wgSessionProxies[sessionID]
 	s.mu.RUnlock()
 	if existing != nil {
+		s.markWGProxyActivity(sessionID, time.Now())
 		return existing, nil
 	}
 
@@ -766,14 +840,30 @@ func (s *Service) ensureWGSessionProxy(sessionID string) (*net.UDPConn, error) {
 
 	s.mu.Lock()
 	if existing := s.wgSessionProxies[sessionID]; existing != nil {
+		if s.wgProxyLastSeen == nil {
+			s.wgProxyLastSeen = make(map[string]int64)
+		}
+		s.wgProxyLastSeen[sessionID] = time.Now().Unix()
 		s.mu.Unlock()
 		_ = proxyConn.Close()
 		return existing, nil
 	}
+	if maxSessions := s.effectiveWGKernelProxyMax(); maxSessions > 0 && len(s.wgSessionProxies) >= maxSessions {
+		s.mu.Unlock()
+		_ = proxyConn.Close()
+		return nil, errWGProxySessionLimit
+	}
 	if s.wgSessionProxies == nil {
 		s.wgSessionProxies = make(map[string]*net.UDPConn)
 	}
+	if s.wgProxyLastSeen == nil {
+		s.wgProxyLastSeen = make(map[string]int64)
+	}
 	s.wgSessionProxies[sessionID] = proxyConn
+	s.wgProxyLastSeen[sessionID] = time.Now().Unix()
+	s.metrics.WGProxyCreated++
+	s.metrics.ActiveWGProxySessions = uint64(len(s.wgSessionProxies))
+	s.metrics.AccountingUpdatedUnix = time.Now().Unix()
 	s.mu.Unlock()
 
 	go s.runWGSessionProxy(sessionID, proxyConn)
@@ -791,6 +881,7 @@ func (s *Service) runWGSessionProxy(sessionID string, proxyConn *net.UDPConn) {
 			continue
 		}
 		payload := append([]byte(nil), buf[:n]...)
+		s.markWGProxyActivity(sessionID, time.Now())
 		if s.liveWGMode && !relay.LooksLikePlausibleWireGuardMessage(payload) {
 			s.recordDownlinkDrop()
 			continue
@@ -823,8 +914,7 @@ func (s *Service) closeWGSessionProxy(sessionID string) {
 		return
 	}
 	s.mu.Lock()
-	proxyConn := s.wgSessionProxies[sessionID]
-	delete(s.wgSessionProxies, sessionID)
+	proxyConn := s.takeWGProxyLocked(sessionID, false)
 	s.mu.Unlock()
 	if proxyConn != nil {
 		_ = proxyConn.Close()
@@ -834,16 +924,48 @@ func (s *Service) closeWGSessionProxy(sessionID string) {
 func (s *Service) closeAllWGKernelSessionProxies() {
 	s.mu.Lock()
 	proxies := make([]*net.UDPConn, 0, len(s.wgSessionProxies))
-	for sessionID, proxyConn := range s.wgSessionProxies {
-		delete(s.wgSessionProxies, sessionID)
-		if proxyConn != nil {
-			proxies = append(proxies, proxyConn)
+	for sessionID := range s.wgSessionProxies {
+		proxy := s.takeWGProxyLocked(sessionID, false)
+		if proxy != nil {
+			proxies = append(proxies, proxy)
 		}
 	}
 	s.mu.Unlock()
 	for _, proxyConn := range proxies {
 		_ = proxyConn.Close()
 	}
+}
+
+func (s *Service) takeWGProxyLocked(sessionID string, idle bool) *net.UDPConn {
+	if sessionID == "" {
+		return nil
+	}
+	proxyConn := s.wgSessionProxies[sessionID]
+	delete(s.wgSessionProxies, sessionID)
+	delete(s.wgProxyLastSeen, sessionID)
+	if proxyConn != nil {
+		s.metrics.WGProxyClosed++
+		if idle {
+			s.metrics.WGProxyIdleClosed++
+		}
+		s.metrics.AccountingUpdatedUnix = time.Now().Unix()
+	}
+	s.metrics.ActiveWGProxySessions = uint64(len(s.wgSessionProxies))
+	return proxyConn
+}
+
+func (s *Service) markWGProxyActivity(sessionID string, now time.Time) {
+	if strings.TrimSpace(sessionID) == "" {
+		return
+	}
+	s.mu.Lock()
+	if _, ok := s.wgSessionProxies[sessionID]; ok {
+		if s.wgProxyLastSeen == nil {
+			s.wgProxyLastSeen = make(map[string]int64)
+		}
+		s.wgProxyLastSeen[sessionID] = now.Unix()
+	}
+	s.mu.Unlock()
 }
 
 func (s *Service) allowSessionPeer(sessionID string, peerAddr string, now time.Time) (bool, bool, string) {
@@ -878,9 +1000,13 @@ func (s *Service) bindSessionPeer(sessionID string, peerAddr string, now time.Ti
 	}
 	nowUnix := now.Unix()
 	if nowUnix >= session.claims.ExpiryUnix {
+		staleProxy := s.takeWGProxyLocked(sessionID, false)
 		delete(s.sessions, sessionID)
 		s.metrics.ActiveSessions = uint64(len(s.sessions))
 		s.mu.Unlock()
+		if staleProxy != nil {
+			_ = staleProxy.Close()
+		}
 		return false, false, strings.TrimSpace(session.peerAddr)
 	}
 	allowed, rebound, previousPeer := peerSessionDecision(session, peerAddr, nowUnix, int64(s.peerRebindAfter/time.Second))
@@ -1034,8 +1160,7 @@ func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
 	clientIP := s.allocateClientInnerIP()
 
 	s.mu.Lock()
-	staleProxy := s.wgSessionProxies[req.SessionID]
-	delete(s.wgSessionProxies, req.SessionID)
+	staleProxy := s.takeWGProxyLocked(req.SessionID, false)
 	s.sessions[req.SessionID] = sessionInfo{
 		claims:        claims,
 		seenNonces:    make(map[uint64]struct{}),
@@ -1107,8 +1232,7 @@ func (s *Service) handlePathClose(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	session, exists := s.sessions[req.SessionID]
-	staleProxy := s.wgSessionProxies[req.SessionID]
-	delete(s.wgSessionProxies, req.SessionID)
+	staleProxy := s.takeWGProxyLocked(req.SessionID, false)
 	if exists {
 		delete(s.sessions, req.SessionID)
 		s.metrics.ActiveSessions = uint64(len(s.sessions))
@@ -1248,8 +1372,12 @@ func (s *Service) authorizeNonce(sessionID string, nonce uint64, now time.Time) 
 		return crypto.CapabilityClaims{}, errors.New("unknown-session")
 	}
 	if now.Unix() >= session.claims.ExpiryUnix {
+		staleProxy := s.takeWGProxyLocked(sessionID, false)
 		delete(s.sessions, sessionID)
 		s.mu.Unlock()
+		if staleProxy != nil {
+			_ = staleProxy.Close()
+		}
 		return crypto.CapabilityClaims{}, errors.New("session-expired")
 	}
 	if nonce == 0 {
@@ -1278,10 +1406,33 @@ func (s *Service) cleanupExpiredSessions(now time.Time) {
 	for sid, session := range s.sessions {
 		if nowUnix >= session.claims.ExpiryUnix {
 			delete(s.sessions, sid)
-			if proxyConn := s.wgSessionProxies[sid]; proxyConn != nil {
+			if proxyConn := s.takeWGProxyLocked(sid, false); proxyConn != nil {
 				staleProxies = append(staleProxies, proxyConn)
 			}
-			delete(s.wgSessionProxies, sid)
+		}
+	}
+	if s.wgKernelProxyIdle > 0 {
+		cutoff := now.Add(-s.wgKernelProxyIdle).Unix()
+		idleSessions := make([]string, 0)
+		for sid := range s.wgSessionProxies {
+			lastSeen := s.wgProxyLastSeen[sid]
+			if lastSeen <= 0 {
+				if session, ok := s.sessions[sid]; ok {
+					if session.peerLastSeen > 0 {
+						lastSeen = session.peerLastSeen
+					} else if !session.lastActivity.IsZero() {
+						lastSeen = session.lastActivity.Unix()
+					}
+				}
+			}
+			if lastSeen > 0 && lastSeen <= cutoff {
+				idleSessions = append(idleSessions, sid)
+			}
+		}
+		for _, sid := range idleSessions {
+			if proxyConn := s.takeWGProxyLocked(sid, true); proxyConn != nil {
+				staleProxies = append(staleProxies, proxyConn)
+			}
 		}
 	}
 	for tokenID, seen := range s.proofNonceSeen {
@@ -1298,6 +1449,7 @@ func (s *Service) cleanupExpiredSessions(now time.Time) {
 		}
 	}
 	s.metrics.ActiveSessions = uint64(len(s.sessions))
+	s.metrics.ActiveWGProxySessions = uint64(len(s.wgSessionProxies))
 	s.mu.Unlock()
 	for _, proxyConn := range staleProxies {
 		_ = proxyConn.Close()
@@ -1523,6 +1675,8 @@ func (s *Service) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	s.mu.RLock()
 	m := s.metrics
+	m.ActiveSessions = uint64(len(s.sessions))
+	m.ActiveWGProxySessions = uint64(len(s.wgSessionProxies))
 	s.mu.RUnlock()
 	_ = json.NewEncoder(w).Encode(m)
 }
@@ -1621,6 +1775,20 @@ func (s *Service) recordDownlinkDrop() {
 	s.mu.Unlock()
 }
 
+func (s *Service) recordWGProxyError() {
+	s.mu.Lock()
+	s.metrics.WGProxyErrors++
+	s.metrics.AccountingUpdatedUnix = time.Now().Unix()
+	s.mu.Unlock()
+}
+
+func (s *Service) recordWGProxyLimitDrop() {
+	s.mu.Lock()
+	s.metrics.WGProxyLimitDrops++
+	s.metrics.AccountingUpdatedUnix = time.Now().Unix()
+	s.mu.Unlock()
+}
+
 func (s *Service) configureEgress(ctx context.Context) error {
 	if s.egressBackend != "command" {
 		return nil
@@ -1694,6 +1862,7 @@ func (s *Service) flushAccountingSnapshot(now time.Time) error {
 	s.mu.RLock()
 	metrics := s.metrics
 	metrics.ActiveSessions = uint64(len(s.sessions))
+	metrics.ActiveWGProxySessions = uint64(len(s.wgSessionProxies))
 	s.mu.RUnlock()
 	snapshot := map[string]interface{}{
 		"generated_at": now.Unix(),

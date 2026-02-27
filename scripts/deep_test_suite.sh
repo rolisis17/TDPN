@@ -37,6 +37,9 @@ echo "[deep] operator quorum"
 echo "[deep] sync status chaos"
 ./scripts/integration_sync_status_chaos.sh
 
+echo "[deep] directory operator churn scale"
+./scripts/integration_directory_operator_churn_scale.sh
+
 echo "[deep] distinct operators"
 ./scripts/integration_distinct_operators.sh
 
@@ -52,14 +55,35 @@ echo "[deep] peer discovery backoff"
 echo "[deep] peer discovery require hint"
 ./scripts/integration_peer_discovery_require_hint.sh
 
+echo "[deep] peer discovery source cap"
+./scripts/integration_peer_discovery_source_cap.sh
+
 echo "[deep] opaque source downlink"
 ./scripts/integration_opaque_source_downlink.sh
 
 echo "[deep] opaque udp-only"
 ./scripts/integration_opaque_udp_only.sh
 
+echo "[deep] client wg kernel proxy"
+./scripts/integration_client_wg_kernel_proxy.sh
+
+echo "[deep] exit wg proxy limit"
+./scripts/integration_exit_wg_proxy_limit.sh
+
+echo "[deep] exit wg proxy idle cleanup"
+./scripts/integration_exit_wg_proxy_idle_cleanup.sh
+
 echo "[deep] entry live-wg filter"
 ./scripts/integration_entry_live_wg_filter.sh
+
+echo "[deep] exit live-wg mode"
+./scripts/integration_exit_live_wg_mode.sh
+
+echo "[deep] live-wg full path"
+./scripts/integration_live_wg_full_path.sh
+
+echo "[deep] client bootstrap recovery"
+./scripts/integration_client_bootstrap_recovery.sh
 
 echo "[deep] persistent opaque session"
 ./scripts/integration_persistent_opaque_session.sh
@@ -88,8 +112,14 @@ echo "[deep] adjudication quorum"
 echo "[deep] adjudication operator quorum"
 ./scripts/integration_adjudication_operator_quorum.sh
 
+echo "[deep] adjudication source quorum"
+./scripts/integration_adjudication_source_quorum.sh
+
 echo "[deep] lifecycle chaos"
 ./scripts/integration_lifecycle_chaos.sh
+
+echo "[deep] client startup burst"
+./scripts/integration_client_startup_burst.sh
 
 echo "[deep] stress bootstrap"
 ./scripts/integration_stress_bootstrap.sh
