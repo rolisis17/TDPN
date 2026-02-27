@@ -35,10 +35,28 @@ if ($Distro -ne "") {
   $wslArgs += @("-d", $Distro)
 }
 $wslArgs += @("--", "wslpath", "-a", $repoRootWindows)
-$repoRootWsl = (& wsl.exe @wslArgs).Trim()
-if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($repoRootWsl)) {
-  throw "failed to convert repo path to WSL path"
+
+$repoRootWslRaw = & wsl.exe @wslArgs 2>&1
+$wslPathExit = $LASTEXITCODE
+if ($wslPathExit -ne 0) {
+  $details = ($repoRootWslRaw | Out-String).Trim()
+  if ([string]::IsNullOrWhiteSpace($details)) {
+    $details = "no output"
+  }
+  if ($Distro -eq "") {
+    throw "failed to convert repo path to WSL path. Ensure a default WSL distro exists or pass -Distro. Details: $details"
+  }
+  throw "failed to convert repo path to WSL path for distro '$Distro'. Details: $details"
 }
+
+$repoRootWslText = ($repoRootWslRaw | Out-String).Trim()
+if ([string]::IsNullOrWhiteSpace($repoRootWslText)) {
+  if ($Distro -eq "") {
+    throw "failed to convert repo path to WSL path (empty output). Ensure a default WSL distro exists or pass -Distro."
+  }
+  throw "failed to convert repo path to WSL path for distro '$Distro' (empty output)."
+}
+$repoRootWsl = $repoRootWslText
 
 $installFlag = "--auto-install"
 if ($NoAutoInstall) {
@@ -57,7 +75,7 @@ Write-Host ""
 Write-Host "WSL2 bootstrap complete." -ForegroundColor Green
 Write-Host "To run launcher:" -ForegroundColor Yellow
 if ($Distro -ne "") {
-  Write-Host "wsl -d $Distro -- bash -lc \"cd '$repoRootWsl' && ./bin/privacynode-easy\""
+  Write-Host "wsl -d $Distro -- bash -lc \"cd '$repoRootWsl'; ./bin/privacynode-easy\""
 } else {
-  Write-Host "wsl -- bash -lc \"cd '$repoRootWsl' && ./bin/privacynode-easy\""
+  Write-Host "wsl -- bash -lc \"cd '$repoRootWsl'; ./bin/privacynode-easy\""
 }

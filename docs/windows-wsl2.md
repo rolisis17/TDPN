@@ -88,6 +88,20 @@ Important for WSL/docker client runs:
 PowerShell script says `wsl.exe not found`:
 - install/enable WSL2 first
 
+`The token '&&' is not a valid statement separator in this version`:
+- you are likely on Windows PowerShell 5.x
+- use the provided wrappers instead of manual `&&` one-liners:
+  - `scripts\windows\wsl2_bootstrap.cmd`
+  - `scripts\windows\wsl2_run_easy.cmd`
+- or run commands on separate lines
+
+`You cannot call a method on a null-valued expression` around `$repoRootWsl`:
+- usually means no default distro is configured or `wslpath` failed
+- pass distro explicitly, for example:
+  - `scripts\windows\wsl2_bootstrap.cmd -Distro Ubuntu-22.04`
+  - `scripts\windows\wsl2_run_easy.cmd -Distro Ubuntu-22.04`
+- verify distros with `wsl -l -v`
+
 Client cannot reach endpoints:
 - verify Windows firewall/cloud security groups
 - verify TCP 8081-8084 and UDP 51820-51821 are open on server machines
