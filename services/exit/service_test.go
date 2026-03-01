@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -525,6 +527,50 @@ func TestValidateRuntimeConfigKernelProxyRequiresCommandBackend(t *testing.T) {
 	}
 }
 
+func TestValidateRuntimeConfigBetaStrictRequiresLiveKernelReplayGuard(t *testing.T) {
+	s := &Service{
+		betaStrict:            true,
+		dataMode:              "opaque",
+		dataAddr:              "127.0.0.1:51821",
+		wgBackend:             "command",
+		wgPrivateKey:          "/tmp/wg-exit.key",
+		wgKernelProxy:         true,
+		wgListenPort:          51831,
+		liveWGMode:            true,
+		opaqueEcho:            false,
+		opaqueSinkAddr:        "127.0.0.1:53011",
+		opaqueSourceAddr:      "127.0.0.1:53012",
+		tokenProofReplayGuard: true,
+	}
+	if err := s.validateRuntimeConfig(); err != nil {
+		t.Fatalf("expected strict config to validate, got %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigBetaStrictRejectsNoReplayGuard(t *testing.T) {
+	s := &Service{
+		betaStrict:            true,
+		dataMode:              "opaque",
+		dataAddr:              "127.0.0.1:51821",
+		wgBackend:             "command",
+		wgPrivateKey:          "/tmp/wg-exit.key",
+		wgKernelProxy:         true,
+		wgListenPort:          51831,
+		liveWGMode:            true,
+		opaqueEcho:            false,
+		opaqueSinkAddr:        "127.0.0.1:53011",
+		opaqueSourceAddr:      "127.0.0.1:53012",
+		tokenProofReplayGuard: false,
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected strict mode validation failure")
+	}
+	if !strings.Contains(err.Error(), "EXIT_TOKEN_PROOF_REPLAY_GUARD") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestValidateRuntimeConfigRejectsNegativeCleanupInterval(t *testing.T) {
 	s := &Service{
 		sessionCleanupSec: -1,
@@ -535,6 +581,119 @@ func TestValidateRuntimeConfigRejectsNegativeCleanupInterval(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "EXIT_SESSION_CLEANUP_SEC") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigRejectsNegativeStartupSyncTimeout(t *testing.T) {
+	s := &Service{
+		startupSyncTimeout: -1 * time.Second,
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected startup sync timeout validation error")
+	}
+	if !strings.Contains(err.Error(), "EXIT_STARTUP_SYNC_TIMEOUT_SEC") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestNewBetaStrictDefaultStartupSyncTimeout(t *testing.T) {
+	t.Setenv("BETA_STRICT_MODE", "1")
+	t.Setenv("EXIT_BETA_STRICT", "0")
+	t.Setenv("EXIT_STARTUP_SYNC_TIMEOUT_SEC", "")
+
+	s := New()
+	if s.startupSyncTimeout != 30*time.Second {
+		t.Fatalf("expected strict default startup sync timeout 30s, got %s", s.startupSyncTimeout)
+	}
+}
+
+func TestNewCommandBackendDefaultStartupSyncTimeout(t *testing.T) {
+	t.Setenv("BETA_STRICT_MODE", "0")
+	t.Setenv("EXIT_BETA_STRICT", "0")
+	t.Setenv("WG_BACKEND", "command")
+	t.Setenv("EXIT_STARTUP_SYNC_TIMEOUT_SEC", "")
+
+	s := New()
+	if s.startupSyncTimeout != 8*time.Second {
+		t.Fatalf("expected command default startup sync timeout 8s, got %s", s.startupSyncTimeout)
+	}
+}
+
+func TestNewStartupSyncTimeoutOverride(t *testing.T) {
+	t.Setenv("BETA_STRICT_MODE", "0")
+	t.Setenv("EXIT_BETA_STRICT", "0")
+	t.Setenv("WG_BACKEND", "command")
+	t.Setenv("EXIT_STARTUP_SYNC_TIMEOUT_SEC", "7")
+
+	s := New()
+	if s.startupSyncTimeout != 7*time.Second {
+		t.Fatalf("expected startup sync timeout override 7s, got %s", s.startupSyncTimeout)
+	}
+}
+
+func TestEnsureStartupIssuerSyncTimeout(t *testing.T) {
+	s := &Service{
+		issuerURLs:         []string{"http://127.0.0.1:1"},
+		revocationsURLs:    []string{"http://127.0.0.1:1/v1/revocations"},
+		httpClient:         &http.Client{Timeout: 60 * time.Millisecond},
+		startupSyncTimeout: 250 * time.Millisecond,
+		issuerPubs:         map[string]ed25519.PublicKey{},
+		revokedJTI:         map[string]int64{},
+		minTokenEpoch:      map[string]int64{},
+		revocationVersion:  map[string]int64{},
+	}
+	err := s.ensureStartupIssuerSync(context.Background())
+	if err == nil {
+		t.Fatalf("expected startup sync timeout error")
+	}
+	if !strings.Contains(err.Error(), "timeout") {
+		t.Fatalf("expected timeout error, got %v", err)
+	}
+}
+
+func TestEnsureStartupIssuerSyncSuccess(t *testing.T) {
+	pub, _, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	pubB64 := base64.RawURLEncoding.EncodeToString(pub)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/pubkeys":
+			_ = json.NewEncoder(w).Encode(proto.IssuerPubKeysResponse{
+				PubKeys: []string{pubB64},
+				Issuer:  "issuer-local",
+			})
+		case "/v1/revocations":
+			_ = json.NewEncoder(w).Encode(proto.RevocationListResponse{
+				Issuer:      "issuer-local",
+				GeneratedAt: time.Now().Unix(),
+				ExpiresAt:   time.Now().Add(time.Minute).Unix(),
+				Revocations: []proto.Revocation{},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	s := &Service{
+		issuerURLs:         []string{srv.URL},
+		revocationsURLs:    []string{srv.URL + "/v1/revocations"},
+		httpClient:         srv.Client(),
+		startupSyncTimeout: time.Second,
+		issuerPubs:         map[string]ed25519.PublicKey{},
+		issuerKeyIssuer:    map[string]string{},
+		revokedJTI:         map[string]int64{},
+		minTokenEpoch:      map[string]int64{},
+		revocationVersion:  map[string]int64{},
+	}
+	if err := s.ensureStartupIssuerSync(context.Background()); err != nil {
+		t.Fatalf("expected startup sync success, got %v", err)
+	}
+	if len(s.issuerPubs) == 0 {
+		t.Fatalf("expected issuer keys loaded after startup sync")
 	}
 }
 

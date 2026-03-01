@@ -2,6 +2,7 @@
 
 ## Completed
 - Unified single-binary runtime with multi-role support (`client`, `entry`, `exit`, `directory`, `issuer`, `wgio`, `wgiotap`, `wgioinject`).
+- Single-process role URL auto-wiring for combined-role runs (`ISSUER_URL`/`DIRECTORY_URL`/`ENTRY_URL`/`EXIT_CONTROL_URL` inferred from matching `*_ADDR` when unset).
 - Control plane: relay directory, token issuer, path open/close.
 - Two-hop session forwarding (`client -> entry -> exit`) with split trust semantics.
 - Opaque-mode bidirectional forwarding scaffold (`client -> entry -> exit -> entry -> client`) for WG-like tunnel traffic simulation.
@@ -14,6 +15,9 @@
 - Optional client sticky pair continuity window (`CLIENT_STICKY_PAIR_SEC`) to prefer the last successful entry/exit pair when still eligible.
 - Optional client active-session reuse (`CLIENT_SESSION_REUSE`) with proactive refresh lead (`CLIENT_SESSION_REFRESH_LEAD_SEC`) and seamless open-new/close-old handoff.
 - Client bootstrap resilience controls with optional startup delay, exponential retry backoff, and configurable jitter (`CLIENT_BOOTSTRAP_INITIAL_DELAY_SEC`, `CLIENT_BOOTSTRAP_BACKOFF_MAX_SEC`, `CLIENT_BOOTSTRAP_JITTER_PCT`).
+- Client startup control-plane sync gating (`CLIENT_STARTUP_SYNC_TIMEOUT_SEC`) to wait/fail on missing issuer+directory readiness before first bootstrap attempt.
+- Command-backend startup sync defaults: client now defaults `CLIENT_STARTUP_SYNC_TIMEOUT_SEC=8` and exit defaults `EXIT_STARTUP_SYNC_TIMEOUT_SEC=8` in `*_WG_BACKEND=command` mode (strict mode still enforces stronger defaults), reducing control-plane startup race failures in real-WG profiles.
+- Directory/issuer readiness endpoints (`GET /v1/health`) for lightweight startup dependency checks.
 - Reputation-weighted exit ordering with exploration floor (when signed score metadata is present).
 - Signed directory selection feed endpoint with client-side signature/expiry verification and optional feed vote thresholding.
 - Signed directory trust-attestation feed (`/v1/trust-attestations`) with bond/stake signals and client-side signature/expiry verification.
@@ -32,6 +36,8 @@
 - Exit command-mode port/bridge hardening: explicit `EXIT_WG_LISTEN_PORT` separation from `EXIT_DATA_ADDR` plus optional per-session WG kernel proxy bridging (`EXIT_WG_KERNEL_PROXY`).
 - Exit WG kernel-proxy safeguards: configurable per-node proxy session cap + idle proxy reaping (`EXIT_WG_KERNEL_PROXY_MAX_SESSIONS`, `EXIT_WG_KERNEL_PROXY_IDLE_SEC`) with lifecycle counters in `/v1/metrics`.
 - Exit session/proxy cleanup cadence control (`EXIT_SESSION_CLEANUP_SEC`) for deterministic idle-reap behavior and testability.
+- Exit startup issuer-sync gating (`EXIT_STARTUP_SYNC_TIMEOUT_SEC`) to wait/fail on missing issuer key+revocation material before serving traffic.
+- Client startup-sync integration coverage (`integration_client_startup_sync.sh`) for fail-closed timeout and delayed-success readiness behavior.
 - Client optional UDP-only opaque uplink enforcement (`CLIENT_DISABLE_SYNTHETIC_FALLBACK`) for real packet-origin traffic in non-command scaffolds.
 - Live-WG guardrails: required downlink/uplink sink wiring in live mode and non-WireGuard payload drop on exit live path.
 - Live-WG downlink source hardening: raw downlink source packets must be session-framed in live mode.
@@ -51,7 +57,12 @@
 - Issuer configurable token lifetime (`ISSUER_TOKEN_TTL_SEC`) for short-lived path/session tuning.
 - Issuer dispute lifecycle admin APIs (apply/clear temporary tier caps with audit trail).
 - Issuer appeal lifecycle admin APIs (open/resolve appeal windows with temporary dispute-pressure relaxation).
+- Issuer stake lifecycle admin API (`/v1/admin/subject/stake/apply`) with stake-aware tier recommendation.
 - Issuer adjudication metadata lifecycle (`case_id` / `evidence_ref`) for dispute/appeal workflows and trust-feed signaling.
+- Issuer anonymous credential groundwork: admin issue/revoke APIs plus pseudonymous `anon_cred` token issuance path (`anon_cred_id` claim).
+- Issuer anonymous credential dispute lifecycle admin APIs (`/v1/admin/anon-credential/dispute`, `/v1/admin/anon-credential/dispute/clear`, `/v1/admin/anon-credential/get`) with temporary tier-cap enforcement during token issuance and operator-visible state inspection.
+- Anonymous credential end-to-end integration coverage (`integration_anon_credential.sh`) for issue -> token mint/path-open -> revoke -> mint denial flow.
+- Anonymous credential dispute integration coverage (`integration_anon_credential_dispute.sh`) for issue -> dispute tier-cap -> clear -> tier restore flow.
 - Token subject hardening: `sub` claim issuance, client-vs-relay subject typing, and relay/unknown subject Tier-1 token pinning.
 - Token class hardening: split `client_access` vs `provider_role` capability tokens plus PoP-bound path-open proofs (`token_proof` verified against token `cnf_ed25519`).
 - Optional PoP replay guard on exit (`EXIT_TOKEN_PROOF_REPLAY_GUARD=1`): one-time `token_proof_nonce` enforcement per token lifetime.
@@ -71,8 +82,10 @@
 - Multi-operator directory churn-scale integration coverage (`integration_directory_operator_churn_scale.sh`) validates quorum drop/recovery under transit and seed churn.
 - Directory peer push-gossip relay ingestion (`/v1/gossip/relays`) with signature verification and periodic fanout scheduler (`DIRECTORY_GOSSIP_SEC`, `DIRECTORY_GOSSIP_FANOUT`).
 - Signed directory peer-membership feed (`/v1/peers`) with seeded dynamic peer discovery (`DIRECTORY_PEER_DISCOVERY*`).
+- DNS-seed assisted directory membership discovery (`DIRECTORY_PEER_DISCOVERY_DNS_SEEDS`, `DIRECTORY_PEER_DISCOVERY_DNS_REFRESH_SEC`).
 - Directory peer discovery quorum hardening: discovered peers can require multiple distinct source-operator sightings before sync admission (`DIRECTORY_PEER_DISCOVERY_MIN_VOTES`).
 - Directory peer discovery source-flood hardening: optional per-source admission cap limits active discovered-peer votes contributed by one operator (`DIRECTORY_PEER_DISCOVERY_MAX_PER_SOURCE`).
+- Directory peer discovery operator-concentration hardening: optional per-operator admission cap limits active discovered peers sharing one hinted operator id (`DIRECTORY_PEER_DISCOVERY_MAX_PER_OPERATOR`).
 - Directory peer discovery hint-admission hardening: optional requirement that discovered peers include signed operator + pubkey hints before sync admission (`DIRECTORY_PEER_DISCOVERY_REQUIRE_HINT`).
 - Directory discovered-peer health hardening: repeated discovered-peer sync failures trigger cooldown/backoff suppression (`DIRECTORY_PEER_DISCOVERY_FAIL_THRESHOLD`, `DIRECTORY_PEER_DISCOVERY_BACKOFF_SEC`, `DIRECTORY_PEER_DISCOVERY_MAX_BACKOFF_SEC`).
 - Directory admin peer membership observability endpoint (`/v1/admin/peer-status`) exposing configured/discovered eligibility, cooldown, and per-peer failure metadata.
@@ -93,6 +106,9 @@
 - Adjudication window horizon caps: dispute/appeal windows are bounded before aggregation/publication (`DIRECTORY_DISPUTE_MAX_TTL_SEC`, `DIRECTORY_APPEAL_MAX_TTL_SEC`).
 - Directory trust aggregation appeal propagation (`appeal_until`) with vote-thresholded blending into published attestations.
 - Directory admin governance observability endpoint (`/v1/admin/governance-status`) exposing effective adjudication policy, upstream dispute/appeal signal+operator counts/ids, suppressed-vs-published adjudication counters, and per-relay suppression details.
+- Cross-role beta strict-mode runtime guardrails (`BETA_STRICT_MODE` + role-specific overrides) for client/entry/exit/directory/issuer configuration hardening, including client trust strictness and startup sync requirements.
+- Directory strict-governance integration coverage (`integration_directory_beta_strict.sh`) for fail-closed strict policy validation and strict startup success.
+- Directory beta strict policy hardening now enforces stronger quorum floors (`DIRECTORY_PEER_MIN_OPERATORS>=2`, `DIRECTORY_PEER_MIN_VOTES>=2`, `DIRECTORY_PEER_DISCOVERY_MIN_VOTES>=2`, `DIRECTORY_PEER_DISCOVERY_MAX_PER_SOURCE>0`, `DIRECTORY_PEER_DISCOVERY_MAX_PER_OPERATOR>0`, at least 2 `DIRECTORY_ISSUER_TRUST_URLS`, `DIRECTORY_ISSUER_MIN_OPERATORS>=2`, `DIRECTORY_ISSUER_TRUST_MIN_VOTES>=2`, `DIRECTORY_ISSUER_DISPUTE_MIN_VOTES>=2`, `DIRECTORY_ISSUER_APPEAL_MIN_VOTES>=2`, `DIRECTORY_FINAL_ADJUDICATION_MIN_SOURCES>=2`, `DIRECTORY_FINAL_DISPUTE_MIN_VOTES>=2`, `DIRECTORY_FINAL_APPEAL_MIN_VOTES>=2`).
 - Token revocation feed (`/v1/revocations`) with exit-side periodic enforcement.
 - Signed/epoch-style revocation feed (`generated_at`/`expires_at` + signature) with exit-side verification.
 - Exit multi-issuer token verification and revocation feed enforcement (`ISSUER_URLS`, `ISSUER_REVOCATIONS_URLS`).
@@ -103,20 +119,23 @@
 - Directory signer rollover policy: persistent key file, bounded previous-key history (`DIRECTORY_KEY_HISTORY`), and optional automatic key rotation (`DIRECTORY_KEY_ROTATE_SEC`).
 - Advanced exit locality policy: geo-confidence-gated country/region matching with configurable fallback order.
 - Production-hardened exit command egress scaffolding: dedicated NAT chain setup/cleanup and accounting snapshot export.
-- Local/CI automation scripts (`scripts/ci_local.sh`, challenge/revocation/token-proof-replay/provider-api/federation/operator-quorum/sync-status-chaos/directory-operator-churn-scale/peer-discovery-source-cap/distinct-operators/directory-sync/directory-gossip/selection-feed/trust-feed/opaque-source/opaque-udp-only/client-wg-kernel-proxy/exit-wg-proxy-limit/exit-wg-proxy-idle-cleanup/entry-live-wg-filter/exit-live-wg-mode/live-wg-full-path/client-bootstrap-recovery/persistent-opaque-session/session-reuse/session-handoff/issuer-trust-sync/issuer-dispute/adjudication-window-caps/adjudication-quorum/adjudication-operator-quorum/adjudication-source-quorum/multi-issuer/load-chaos integrations, GitHub Actions workflow).
-- Extended deep test suite (`integration_http_cache`, `integration_directory_auto_key_rotation`, `integration_key_epoch_rotation`, `integration_directory_gossip`, `integration_operator_quorum`, `integration_sync_status_chaos`, `integration_directory_operator_churn_scale`, `integration_distinct_operators`, `integration_peer_discovery`, `integration_peer_discovery_quorum`, `integration_peer_discovery_backoff`, `integration_peer_discovery_require_hint`, `integration_peer_discovery_source_cap`, `integration_opaque_source_downlink`, `integration_opaque_udp_only`, `integration_client_wg_kernel_proxy`, `integration_exit_wg_proxy_limit`, `integration_exit_wg_proxy_idle_cleanup`, `integration_entry_live_wg_filter`, `integration_exit_live_wg_mode`, `integration_live_wg_full_path`, `integration_client_bootstrap_recovery`, `integration_client_startup_burst`, `integration_persistent_opaque_session`, `integration_session_reuse`, `integration_session_handoff`, `integration_trust_feed`, `integration_issuer_trust_sync`, `integration_issuer_dispute`, `integration_adjudication_window_caps`, `integration_adjudication_quorum`, `integration_adjudication_operator_quorum`, `integration_adjudication_source_quorum`, `integration_lifecycle_chaos`, `integration_stress_bootstrap`, `deep_test_suite`).
+- Local/CI automation scripts (`scripts/ci_local.sh`, challenge/revocation/token-proof-replay/provider-api/federation/operator-quorum/sync-status-chaos/directory-operator-churn-scale/peer-discovery-source-cap/peer-discovery-operator-cap/distinct-operators/directory-sync/directory-gossip/selection-feed/trust-feed/opaque-source/opaque-udp-only/client-wg-kernel-proxy/exit-wg-proxy-limit/exit-wg-proxy-idle-cleanup/entry-live-wg-filter/exit-live-wg-mode/live-wg-full-path/client-bootstrap-recovery/persistent-opaque-session/session-reuse/session-handoff/issuer-trust-sync/issuer-dispute/adjudication-window-caps/adjudication-quorum/adjudication-operator-quorum/adjudication-source-quorum/multi-issuer/load-chaos integrations, GitHub Actions workflow).
+- Extended deep test suite (`integration_http_cache`, `integration_directory_auto_key_rotation`, `integration_key_epoch_rotation`, `integration_directory_gossip`, `integration_operator_quorum`, `integration_sync_status_chaos`, `integration_directory_operator_churn_scale`, `integration_distinct_operators`, `integration_peer_discovery`, `integration_peer_discovery_quorum`, `integration_peer_discovery_backoff`, `integration_peer_discovery_require_hint`, `integration_peer_discovery_source_cap`, `integration_opaque_source_downlink`, `integration_opaque_udp_only`, `integration_client_wg_kernel_proxy`, `integration_exit_wg_proxy_limit`, `integration_exit_wg_proxy_idle_cleanup`, `integration_entry_live_wg_filter`, `integration_exit_live_wg_mode`, `integration_live_wg_full_path`, `integration_client_bootstrap_recovery`, `integration_exit_startup_sync`, `integration_client_startup_burst`, `integration_persistent_opaque_session`, `integration_session_reuse`, `integration_session_handoff`, `integration_trust_feed`, `integration_issuer_trust_sync`, `integration_issuer_dispute`, `integration_anon_credential`, `integration_adjudication_window_caps`, `integration_adjudication_quorum`, `integration_adjudication_operator_quorum`, `integration_adjudication_source_quorum`, `integration_lifecycle_chaos`, `integration_stress_bootstrap`, `deep_test_suite`).
+- Extended deep test suite (`integration_http_cache`, `integration_directory_auto_key_rotation`, `integration_key_epoch_rotation`, `integration_directory_gossip`, `integration_operator_quorum`, `integration_sync_status_chaos`, `integration_directory_beta_strict`, `integration_directory_operator_churn_scale`, `integration_distinct_operators`, `integration_peer_discovery`, `integration_peer_discovery_quorum`, `integration_peer_discovery_backoff`, `integration_peer_discovery_require_hint`, `integration_peer_discovery_source_cap`, `integration_opaque_source_downlink`, `integration_opaque_udp_only`, `integration_client_wg_kernel_proxy`, `integration_exit_wg_proxy_limit`, `integration_exit_wg_proxy_idle_cleanup`, `integration_entry_live_wg_filter`, `integration_exit_live_wg_mode`, `integration_live_wg_full_path`, `integration_client_bootstrap_recovery`, `integration_client_bootstrap_recovery_matrix`, `integration_exit_startup_sync`, `integration_client_startup_burst`, `integration_persistent_opaque_session`, `integration_session_reuse`, `integration_session_handoff`, `integration_trust_feed`, `integration_issuer_trust_sync`, `integration_issuer_dispute`, `integration_anon_credential`, `integration_adjudication_window_caps`, `integration_adjudication_quorum`, `integration_adjudication_operator_quorum`, `integration_adjudication_source_quorum`, `integration_lifecycle_chaos`, `integration_stress_bootstrap`, `integration_load_chaos_matrix`, `deep_test_suite`).
 - Operational deployment assets (Docker Compose + systemd service units/env templates).
+- 3-machine beta automation runner (`integration_3machine_beta_validate.sh`) with endpoint health checks, federation operator-floor validation, and machine-C client bootstrap validation against both directory sources.
 
 ## In Progress / Partial
 - Real WG interface packet plumbing is scaffolded; bidirectional opaque relay through entry/client/exit is in place (including exit downlink source path and optional client/exit command-mode WG UDP kernel-proxy bridges), and Linux root-only manual validation is available via `scripts/integration_real_wg_privileged.sh` and `scripts/integration_real_wg_privileged_matrix.sh`; production end-to-end cryptographic WG interface integration remains pending.
-- Federated reputation/trust exchange includes directory peer score aggregation, peer trust-attestation exchange, issuer trust/dispute ingestion, appeal propagation, case/evidence metadata exchange, and client/entry/directory operator quorum controls; governance and anti-capture policy are still partial.
-- Directory anti-entropy includes pull sync + ETag + push-gossip fanout + signed seeded peer discovery; broader internet-scale membership/discovery remains partial.
+- Federated reputation/trust exchange includes directory peer score aggregation, peer trust-attestation exchange, issuer trust/dispute ingestion, appeal propagation, case/evidence metadata exchange, stake-aware issuer lifecycle, and client/entry/directory operator quorum controls; governance and anti-capture policy are still partial.
+- Directory anti-entropy includes pull sync + ETag + push-gossip fanout + signed seeded peer discovery + DNS-seed discovery; broader internet-scale membership/discovery remains partial.
+- Anonymous credential support now includes issue/revoke plus dispute-time tier-cap controls during token issuance; fully unlinkable blind-signature flows remain pending.
 
 ## Not Started / Remaining
 - Full production WireGuard interface plumbing (live encrypted payload I/O only).
 - Full federated identity/bond/stake/reputation lifecycle with robust cross-operator adjudication governance and anti-capture controls.
-- Privacy-preserving credentials (blind-signed/revocable anonymous credentials) integrated into tier upgrades and dispute workflows.
-- Broad decentralized directory peer discovery/membership management (beyond static peer lists).
+- Full privacy-preserving credentials (blind-signed/revocable anonymous credentials with unlinkable issuance).
+- Broad decentralized directory peer discovery/membership management (beyond seeded peer lists and DNS-seed discovery).
 
 ## Suggested Next Milestones
 1. Real WireGuard packet path: bind client/exit command backends to live interfaces and replace synthetic payload generation with interface I/O only.

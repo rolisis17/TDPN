@@ -37,6 +37,9 @@ echo "[deep] operator quorum"
 echo "[deep] sync status chaos"
 ./scripts/integration_sync_status_chaos.sh
 
+echo "[deep] directory beta strict"
+./scripts/integration_directory_beta_strict.sh
+
 echo "[deep] directory operator churn scale"
 ./scripts/integration_directory_operator_churn_scale.sh
 
@@ -57,6 +60,9 @@ echo "[deep] peer discovery require hint"
 
 echo "[deep] peer discovery source cap"
 ./scripts/integration_peer_discovery_source_cap.sh
+
+echo "[deep] peer discovery operator cap"
+./scripts/integration_peer_discovery_operator_cap.sh
 
 echo "[deep] opaque source downlink"
 ./scripts/integration_opaque_source_downlink.sh
@@ -85,6 +91,15 @@ echo "[deep] live-wg full path"
 echo "[deep] client bootstrap recovery"
 ./scripts/integration_client_bootstrap_recovery.sh
 
+echo "[deep] client bootstrap recovery matrix"
+./scripts/integration_client_bootstrap_recovery_matrix.sh
+
+echo "[deep] client startup sync"
+./scripts/integration_client_startup_sync.sh
+
+echo "[deep] exit startup sync"
+./scripts/integration_exit_startup_sync.sh
+
 echo "[deep] persistent opaque session"
 ./scripts/integration_persistent_opaque_session.sh
 
@@ -103,6 +118,12 @@ echo "[deep] issuer trust sync"
 echo "[deep] issuer dispute"
 ./scripts/integration_issuer_dispute.sh
 
+echo "[deep] anonymous credential"
+./scripts/integration_anon_credential.sh
+
+echo "[deep] anonymous credential dispute"
+./scripts/integration_anon_credential_dispute.sh
+
 echo "[deep] adjudication window caps"
 ./scripts/integration_adjudication_window_caps.sh
 
@@ -118,6 +139,9 @@ echo "[deep] adjudication source quorum"
 echo "[deep] lifecycle chaos"
 ./scripts/integration_lifecycle_chaos.sh
 
+echo "[deep] lifecycle chaos matrix"
+./scripts/integration_lifecycle_chaos_matrix.sh
+
 echo "[deep] client startup burst"
 ./scripts/integration_client_startup_burst.sh
 
@@ -126,5 +150,8 @@ echo "[deep] stress bootstrap"
 
 echo "[deep] load chaos"
 ./scripts/integration_load_chaos.sh
+
+echo "[deep] load chaos matrix"
+./scripts/integration_load_chaos_matrix.sh
 
 echo "[deep] ok"

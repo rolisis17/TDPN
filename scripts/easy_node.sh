@@ -15,10 +15,16 @@ Usage:
   ./scripts/easy_node.sh server-logs
   ./scripts/easy_node.sh server-down
   ./scripts/easy_node.sh client-test --directory-urls URL[,URL...] --issuer-url URL --entry-url URL --exit-url URL [--min-sources N] [--exit-country CC] [--exit-region REGION] [--timeout-sec N]
+  ./scripts/easy_node.sh three-machine-validate --directory-a URL --directory-b URL --issuer-url URL --entry-url URL --exit-url URL [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--exit-country CC] [--exit-region REGION]
+  ./scripts/easy_node.sh machine-a-test [--public-host HOST] [--report-file PATH]
+  ./scripts/easy_node.sh machine-b-test --peer-directory-a URL [--public-host HOST] [--min-operators N] [--federation-timeout-sec N] [--report-file PATH]
+  ./scripts/easy_node.sh machine-c-test --directory-a URL --directory-b URL --issuer-url URL --entry-url URL --exit-url URL [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--exit-country CC] [--exit-region REGION] [--report-file PATH]
 
 Notes:
   - server-up runs directory + issuer + entry-exit using deploy/docker-compose.yml.
   - client-test runs client-demo with --no-deps (no local server required on the client machine).
+  - three-machine-validate runs health + federation checks then runs client-test with both directories.
+  - machine-a-test/machine-b-test/machine-c-test are machine-role-specific automated validations with optional report files.
   - For a 3-machine test: run server-up on machine A and B, then run client-test on machine C with both directory URLs.
 USAGE
 }
@@ -208,6 +214,26 @@ server_down() {
   compose_server down --remove-orphans
 }
 
+three_machine_validate() {
+  ensure_deps_or_die
+  "$ROOT_DIR/scripts/integration_3machine_beta_validate.sh" "$@"
+}
+
+machine_a_test() {
+  ensure_deps_or_die
+  "$ROOT_DIR/scripts/integration_machine_a_server_check.sh" "$@"
+}
+
+machine_b_test() {
+  ensure_deps_or_die
+  "$ROOT_DIR/scripts/integration_machine_b_federation_check.sh" "$@"
+}
+
+machine_c_test() {
+  ensure_deps_or_die
+  "$ROOT_DIR/scripts/integration_machine_c_client_check.sh" "$@"
+}
+
 client_test() {
   local directory_urls=""
   local issuer_url=""
@@ -351,6 +377,22 @@ main() {
     client-test)
       shift
       client_test "$@"
+      ;;
+    three-machine-validate)
+      shift
+      three_machine_validate "$@"
+      ;;
+    machine-a-test)
+      shift
+      machine_a_test "$@"
+      ;;
+    machine-b-test)
+      shift
+      machine_b_test "$@"
+      ;;
+    machine-c-test)
+      shift
+      machine_c_test "$@"
       ;;
     -h|--help|help|"")
       usage

@@ -7,12 +7,29 @@ cd "$ROOT_DIR"
 mkdir -p .gocache
 export GOCACHE="${GOCACHE:-$ROOT_DIR/.gocache}"
 
-DIR_PORT=8381
-ISSUER_PORT=8382
-ENTRY_PORT=8383
-EXIT_PORT=8384
-ENTRY_DATA_PORT=53820
-EXIT_DATA_PORT=53821
+LIFECYCLE_CHAOS_TAG="${LIFECYCLE_CHAOS_TAG:-base}"
+DIR_PORT="${DIR_PORT:-8381}"
+ISSUER_PORT="${ISSUER_PORT:-8382}"
+ENTRY_PORT="${ENTRY_PORT:-8383}"
+EXIT_PORT="${EXIT_PORT:-8384}"
+ENTRY_DATA_PORT="${ENTRY_DATA_PORT:-53820}"
+EXIT_DATA_PORT="${EXIT_DATA_PORT:-53821}"
+CHAOS_TIMEOUT_SEC="${CHAOS_TIMEOUT_SEC:-60}"
+READY_ATTEMPTS="${READY_ATTEMPTS:-40}"
+READY_SLEEP_SEC="${READY_SLEEP_SEC:-0.25}"
+RACE_LOOPS="${RACE_LOOPS:-20}"
+RACE_SLEEP_SEC="${RACE_SLEEP_SEC:-0.2}"
+DISPUTE_LOOPS="${DISPUTE_LOOPS:-14}"
+DISPUTE_SLEEP_SEC="${DISPUTE_SLEEP_SEC:-0.12}"
+FRESH_LOOPS="${FRESH_LOOPS:-18}"
+FRESH_SLEEP_SEC="${FRESH_SLEEP_SEC:-0.15}"
+
+NODE_LOG="/tmp/lifecycle_chaos_node_${LIFECYCLE_CHAOS_TAG}.log"
+REVOKE_LOG="/tmp/lifecycle_chaos_revoke_${LIFECYCLE_CHAOS_TAG}.json"
+DISPUTE_LOG="/tmp/lifecycle_chaos_dispute_${LIFECYCLE_CHAOS_TAG}.log"
+RACE_LOG="/tmp/lifecycle_chaos_race_${LIFECYCLE_CHAOS_TAG}.log"
+FRESH_LOG="/tmp/lifecycle_chaos_fresh_${LIFECYCLE_CHAOS_TAG}.log"
+PAYLOAD_FILE="/tmp/lifecycle_chaos_payload_${LIFECYCLE_CHAOS_TAG}.json"
 
 DIRECTORY_ADDR="127.0.0.1:${DIR_PORT}" \
 ISSUER_ADDR="127.0.0.1:${ISSUER_PORT}" \
@@ -27,7 +44,7 @@ EXIT_CONTROL_URL="http://127.0.0.1:${EXIT_PORT}" \
 DIRECTORY_ISSUER_TRUST_URLS="http://127.0.0.1:${ISSUER_PORT}" \
 DIRECTORY_ISSUER_SYNC_SEC=1 \
 EXIT_REVOCATION_REFRESH_SEC=1 \
-timeout 60s go run ./cmd/node --directory --issuer --entry --exit >/tmp/lifecycle_chaos_node.log 2>&1 &
+timeout "${CHAOS_TIMEOUT_SEC}s" go run ./cmd/node --directory --issuer --entry --exit >"${NODE_LOG}" 2>&1 &
 node_pid=$!
 
 cleanup() {
@@ -36,17 +53,17 @@ cleanup() {
 trap cleanup EXIT
 
 ready=0
-for _ in $(seq 1 40); do
+for _ in $(seq 1 "${READY_ATTEMPTS}"); do
   if curl -fsS "http://127.0.0.1:${ENTRY_PORT}/v1/health" >/dev/null 2>&1 && \
     curl -fsS "http://127.0.0.1:${ISSUER_PORT}/v1/pubkey" >/dev/null 2>&1; then
     ready=1
     break
   fi
-  sleep 0.25
+  sleep "${READY_SLEEP_SEC}"
 done
 if [[ "$ready" -ne 1 ]]; then
   echo "lifecycle chaos stack did not become ready"
-  cat /tmp/lifecycle_chaos_node.log
+  cat "${NODE_LOG}"
   exit 1
 fi
 
@@ -68,7 +85,7 @@ jti=$(echo "$token_json" | sed -n 's/.*"jti":"\([^"]*\)".*/\1/p')
 if [[ -z "$token" || -z "$jti" ]]; then
   echo "failed to parse token/jti for lifecycle chaos seed token"
   echo "$token_json"
-  cat /tmp/lifecycle_chaos_node.log
+  cat "${NODE_LOG}"
   exit 1
 fi
 
@@ -86,21 +103,19 @@ if [[ -z "$token_proof" ]]; then
   exit 1
 fi
 
-payload_file=/tmp/lifecycle_chaos_payload.json
-cat >"$payload_file" <<JSON
+cat >"$PAYLOAD_FILE" <<JSON
 {"exit_id":"exit-local-1","token":"$token","token_proof":"$token_proof","token_proof_nonce":"seed-${jti}","client_inner_pub":"$client_pub","transport":"policy-json","requested_mtu":1280,"requested_region":"local"}
 JSON
 
-race_log=/tmp/lifecycle_chaos_race.log
-: >"$race_log"
+: >"${RACE_LOG}"
 
 (
-  for _ in $(seq 1 20); do
+  for _ in $(seq 1 "${RACE_LOOPS}"); do
     curl -sS -X POST "http://127.0.0.1:${ENTRY_PORT}/v1/path/open" \
       -H 'Content-Type: application/json' \
-      --data @"$payload_file" >>"$race_log" || true
-    printf "\n" >>"$race_log"
-    sleep 0.2
+      --data @"${PAYLOAD_FILE}" >>"${RACE_LOG}" || true
+    printf "\n" >>"${RACE_LOG}"
+    sleep "${RACE_SLEEP_SEC}"
   done
 ) &
 race_pid=$!
@@ -110,34 +125,33 @@ until_ts=$(( $(date +%s) + 180 ))
 curl -sS -X POST "http://127.0.0.1:${ISSUER_PORT}/v1/admin/revoke-token" \
   -H 'X-Admin-Token: dev-admin-token' \
   -H 'Content-Type: application/json' \
-  --data "{\"jti\":\"$jti\",\"until\":$until_ts}" >/tmp/lifecycle_chaos_revoke.json
+  --data "{\"jti\":\"$jti\",\"until\":$until_ts}" >"${REVOKE_LOG}"
 
 (
-  for _ in $(seq 1 14); do
+  for _ in $(seq 1 "${DISPUTE_LOOPS}"); do
     du=$(( $(date +%s) + 180 ))
     curl -sS -X POST "http://127.0.0.1:${ISSUER_PORT}/v1/admin/subject/dispute" \
       -H 'X-Admin-Token: dev-admin-token' \
       -H 'Content-Type: application/json' \
       --data "{\"subject\":\"exit-local-1\",\"tier_cap\":1,\"until\":$du,\"reason\":\"chaos-cycle\"}" >/dev/null || true
-    sleep 0.12
+    sleep "${DISPUTE_SLEEP_SEC}"
     curl -sS -X POST "http://127.0.0.1:${ISSUER_PORT}/v1/admin/subject/dispute/clear" \
       -H 'X-Admin-Token: dev-admin-token' \
       -H 'Content-Type: application/json' \
       --data '{"subject":"exit-local-1","reason":"chaos-cycle-clear"}' >/dev/null || true
-    sleep 0.12
+    sleep "${DISPUTE_SLEEP_SEC}"
   done
-) >/tmp/lifecycle_chaos_dispute.log 2>&1 &
+) >"${DISPUTE_LOG}" 2>&1 &
 dispute_pid=$!
 
-fresh_log=/tmp/lifecycle_chaos_fresh.log
-: >"$fresh_log"
+: >"${FRESH_LOG}"
 (
-  for _ in $(seq 1 18); do
+  for _ in $(seq 1 "${FRESH_LOOPS}"); do
     popj=$(go run ./cmd/tokenpop gen || true)
     pop_pub_iter=$(echo "$popj" | sed -n 's/.*"public_key":"\([^"]*\)".*/\1/p')
     pop_priv_iter=$(echo "$popj" | sed -n 's/.*"private_key":"\([^"]*\)".*/\1/p')
     if [[ -z "$pop_pub_iter" || -z "$pop_priv_iter" ]]; then
-      sleep 0.15
+      sleep "${FRESH_SLEEP_SEC}"
       continue
     fi
     tj=$(curl -sS -X POST "http://127.0.0.1:${ISSUER_PORT}/v1/token" -H 'Content-Type: application/json' \
@@ -155,17 +169,17 @@ fresh_log=/tmp/lifecycle_chaos_fresh.log
         --requested-mtu 1280 \
         --requested-region "local" | sed -n 's/.*"proof":"\([^"]*\)".*/\1/p')
       if [[ -z "$tp" ]]; then
-        sleep 0.15
+        sleep "${FRESH_SLEEP_SEC}"
         continue
       fi
       pl=$(cat <<JSON
 {"exit_id":"exit-local-1","token":"$tk","token_proof":"$tp","token_proof_nonce":"$fresh_nonce","client_inner_pub":"$client_pub","transport":"policy-json","requested_mtu":1280,"requested_region":"local"}
 JSON
 )
-      curl -sS -X POST "http://127.0.0.1:${ENTRY_PORT}/v1/path/open" -H 'Content-Type: application/json' --data "$pl" >>"$fresh_log" || true
-      printf "\n" >>"$fresh_log"
+      curl -sS -X POST "http://127.0.0.1:${ENTRY_PORT}/v1/path/open" -H 'Content-Type: application/json' --data "$pl" >>"${FRESH_LOG}" || true
+      printf "\n" >>"${FRESH_LOG}"
     fi
-    sleep 0.15
+    sleep "${FRESH_SLEEP_SEC}"
   done
 ) &
 fresh_pid=$!
@@ -174,32 +188,32 @@ wait "$race_pid"
 wait "$dispute_pid"
 wait "$fresh_pid"
 
-accepted_seed=$(rg -c '"accepted":true' "$race_log" || true)
-revoked_seed=$(rg -c 'token revoked' "$race_log" || true)
+accepted_seed=$(rg -c '"accepted":true' "${RACE_LOG}" || true)
+revoked_seed=$(rg -c 'token revoked' "${RACE_LOG}" || true)
 if [[ "$accepted_seed" -lt 1 ]]; then
   echo "expected at least one accepted open before revocation in race loop"
-  cat "$race_log"
-  cat /tmp/lifecycle_chaos_node.log
+  cat "${RACE_LOG}"
+  cat "${NODE_LOG}"
   exit 1
 fi
 if [[ "$revoked_seed" -lt 1 ]]; then
   echo "expected revoked-token denial during race loop"
-  cat "$race_log"
-  cat /tmp/lifecycle_chaos_node.log
+  cat "${RACE_LOG}"
+  cat "${NODE_LOG}"
   exit 1
 fi
 
-accepted_fresh=$(rg -c '"accepted":true' "$fresh_log" || true)
+accepted_fresh=$(rg -c '"accepted":true' "${FRESH_LOG}" || true)
 if [[ "$accepted_fresh" -lt 3 ]]; then
   echo "expected fresh token opens to continue under dispute/revocation churn"
-  cat "$fresh_log"
-  cat /tmp/lifecycle_chaos_node.log
+  cat "${FRESH_LOG}"
+  cat "${NODE_LOG}"
   exit 1
 fi
 
-if rg -q 'panic:' /tmp/lifecycle_chaos_node.log; then
+if rg -q 'panic:' "${NODE_LOG}"; then
   echo "unexpected panic during lifecycle chaos run"
-  cat /tmp/lifecycle_chaos_node.log
+  cat "${NODE_LOG}"
   exit 1
 fi
 
@@ -208,7 +222,7 @@ revoked_drops=$(echo "$metrics" | sed -n 's/.*"dropped_token_revoked":\([0-9][0-
 if [[ -z "$revoked_drops" || "$revoked_drops" -lt 1 ]]; then
   echo "expected dropped_token_revoked metrics > 0 after chaos race"
   echo "$metrics"
-  cat /tmp/lifecycle_chaos_node.log
+  cat "${NODE_LOG}"
   exit 1
 fi
 
@@ -216,7 +230,7 @@ audit=$(curl -sS "http://127.0.0.1:${ISSUER_PORT}/v1/admin/audit?limit=40" -H 'X
 if ! echo "$audit" | rg -q 'subject-dispute-apply'; then
   echo "expected dispute apply events in issuer audit"
   echo "$audit"
-  cat /tmp/lifecycle_chaos_node.log
+  cat "${NODE_LOG}"
   exit 1
 fi
 

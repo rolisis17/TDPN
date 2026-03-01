@@ -1,9 +1,0 @@
-./service.go
-./audit_test.go
-./epoch_test.go
-./key_test.go
-./lifecycle_test.go
-./persistence_test.go
-./pubkeys_test.go
-./revocation_feed_test.go
-./service_test.go

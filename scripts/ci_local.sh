@@ -49,6 +49,9 @@ echo "[ci] operator-quorum integration"
 echo "[ci] sync-status-chaos integration"
 ./scripts/integration_sync_status_chaos.sh
 
+echo "[ci] directory-beta-strict integration"
+./scripts/integration_directory_beta_strict.sh
+
 echo "[ci] directory-operator-churn-scale integration"
 ./scripts/integration_directory_operator_churn_scale.sh
 
@@ -60,6 +63,9 @@ echo "[ci] peer-discovery-require-hint integration"
 
 echo "[ci] peer-discovery-source-cap integration"
 ./scripts/integration_peer_discovery_source_cap.sh
+
+echo "[ci] peer-discovery-operator-cap integration"
+./scripts/integration_peer_discovery_operator_cap.sh
 
 echo "[ci] distinct-operator integration"
 ./scripts/integration_distinct_operators.sh
@@ -100,6 +106,12 @@ echo "[ci] live-wg-full-path integration"
 echo "[ci] client-bootstrap-recovery integration"
 ./scripts/integration_client_bootstrap_recovery.sh
 
+echo "[ci] client-startup-sync integration"
+./scripts/integration_client_startup_sync.sh
+
+echo "[ci] exit-startup-sync integration"
+./scripts/integration_exit_startup_sync.sh
+
 echo "[ci] session-reuse integration"
 ./scripts/integration_session_reuse.sh
 
@@ -111,6 +123,12 @@ echo "[ci] issuer-trust-sync integration"
 
 echo "[ci] issuer-dispute integration"
 ./scripts/integration_issuer_dispute.sh
+
+echo "[ci] anonymous credential integration"
+./scripts/integration_anon_credential.sh
+
+echo "[ci] anonymous credential dispute integration"
+./scripts/integration_anon_credential_dispute.sh
 
 echo "[ci] adjudication-window-cap integration"
 ./scripts/integration_adjudication_window_caps.sh
@@ -129,5 +147,15 @@ echo "[ci] multi-issuer integration"
 
 echo "[ci] load/chaos integration"
 ./scripts/integration_load_chaos.sh
+
+if [[ "${CI_LOCAL_INCLUDE_LOAD_CHAOS_MATRIX:-0}" == "1" ]]; then
+  echo "[ci] load/chaos matrix integration"
+  ./scripts/integration_load_chaos_matrix.sh
+fi
+
+if [[ "${CI_LOCAL_INCLUDE_LIFECYCLE_CHAOS_MATRIX:-0}" == "1" ]]; then
+  echo "[ci] lifecycle chaos matrix integration"
+  ./scripts/integration_lifecycle_chaos_matrix.sh
+fi
 
 echo "[ci] ok"

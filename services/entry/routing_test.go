@@ -1,6 +1,7 @@
 package entry
 
 import (
+	"strings"
 	"testing"
 
 	"privacynode/pkg/relay"
@@ -151,5 +152,31 @@ func TestAllowForwardPayloadLiveModeRejectsMalformedOpaque(t *testing.T) {
 	}
 	if reason != "invalid-opaque-live" {
 		t.Fatalf("expected invalid-opaque-live reason, got %q", reason)
+	}
+}
+
+func TestValidateRuntimeConfigBetaStrict(t *testing.T) {
+	s := &Service{
+		betaStrict:           true,
+		liveWGMode:           true,
+		directoryTrustStrict: true,
+	}
+	if err := s.validateRuntimeConfig(); err != nil {
+		t.Fatalf("expected strict config valid, got %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigBetaStrictRejectsNonLive(t *testing.T) {
+	s := &Service{
+		betaStrict:           true,
+		liveWGMode:           false,
+		directoryTrustStrict: true,
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected strict validation error")
+	}
+	if !strings.Contains(err.Error(), "ENTRY_LIVE_WG_MODE") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

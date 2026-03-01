@@ -65,6 +65,26 @@ func TestValidateRuntimeConfigLiveModeRequiresSink(t *testing.T) {
 	}
 }
 
+func TestValidateRuntimeConfigLiveModeRejectsSyntheticSource(t *testing.T) {
+	c := &Client{
+		dataMode:       "opaque",
+		innerSource:    "synthetic",
+		wgBackend:      "command",
+		wgPrivateKey:   "/tmp/wg.key",
+		wgKernelProxy:  true,
+		wgProxyAddr:    "127.0.0.1:0",
+		liveWGMode:     true,
+		opaqueSinkAddr: "127.0.0.1:53030",
+	}
+	err := c.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected live mode validation error for synthetic source")
+	}
+	if !strings.Contains(err.Error(), "CLIENT_INNER_SOURCE=synthetic") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestValidateRuntimeConfigCommandModeRequiresOpaqueUDP(t *testing.T) {
 	c := &Client{
 		dataMode:     "json",
@@ -104,6 +124,110 @@ func TestValidateRuntimeConfigKernelProxyRequiresCommandBackend(t *testing.T) {
 		t.Fatalf("expected kernel proxy validation error")
 	}
 	if !strings.Contains(err.Error(), "CLIENT_WG_BACKEND=command") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigRejectsSubjectAndAnonCredTogether(t *testing.T) {
+	c := &Client{
+		dataMode:    "opaque",
+		innerSource: "udp",
+		wgBackend:   "noop",
+		subject:     "client-a",
+		anonCred:    "credential-token",
+	}
+	err := c.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected subject+anon credential validation error")
+	}
+	if !strings.Contains(err.Error(), "CLIENT_ANON_CRED") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigBetaStrictRequiresCommandKernelLive(t *testing.T) {
+	c := &Client{
+		betaStrict:         true,
+		trustStrict:        true,
+		dataMode:           "opaque",
+		innerSource:        "udp",
+		wgBackend:          "command",
+		wgPrivateKey:       "/tmp/wg.key",
+		wgKernelProxy:      true,
+		wgProxyAddr:        "127.0.0.1:0",
+		liveWGMode:         true,
+		disableSynthetic:   true,
+		startupSyncTimeout: time.Second,
+	}
+	if err := c.validateRuntimeConfig(); err != nil {
+		t.Fatalf("expected strict config to validate, got %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigBetaStrictRejectsWeakMode(t *testing.T) {
+	c := &Client{
+		betaStrict:         true,
+		trustStrict:        true,
+		dataMode:           "opaque",
+		innerSource:        "udp",
+		wgBackend:          "command",
+		wgPrivateKey:       "/tmp/wg.key",
+		wgKernelProxy:      false,
+		liveWGMode:         true,
+		disableSynthetic:   true,
+		opaqueSinkAddr:     "127.0.0.1:53030",
+		startupSyncTimeout: time.Second,
+	}
+	err := c.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected strict mode validation failure")
+	}
+	if !strings.Contains(err.Error(), "CLIENT_WG_KERNEL_PROXY") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigBetaStrictRejectsMissingTrustStrict(t *testing.T) {
+	c := &Client{
+		betaStrict:         true,
+		trustStrict:        false,
+		dataMode:           "opaque",
+		innerSource:        "udp",
+		wgBackend:          "command",
+		wgPrivateKey:       "/tmp/wg.key",
+		wgKernelProxy:      true,
+		wgProxyAddr:        "127.0.0.1:0",
+		liveWGMode:         true,
+		disableSynthetic:   true,
+		startupSyncTimeout: time.Second,
+	}
+	err := c.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected strict mode validation failure")
+	}
+	if !strings.Contains(err.Error(), "DIRECTORY_TRUST_STRICT") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigBetaStrictRejectsMissingStartupSyncTimeout(t *testing.T) {
+	c := &Client{
+		betaStrict:       true,
+		trustStrict:      true,
+		dataMode:         "opaque",
+		innerSource:      "udp",
+		wgBackend:        "command",
+		wgPrivateKey:     "/tmp/wg.key",
+		wgKernelProxy:    true,
+		wgProxyAddr:      "127.0.0.1:0",
+		liveWGMode:       true,
+		disableSynthetic: true,
+	}
+	err := c.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected strict mode validation failure")
+	}
+	if !strings.Contains(err.Error(), "CLIENT_STARTUP_SYNC_TIMEOUT_SEC") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -261,6 +385,39 @@ func TestNewClientReadsBootstrapBackoffEnv(t *testing.T) {
 	}
 	if c.bootstrapInitialDelay != 4*time.Second {
 		t.Fatalf("expected CLIENT_BOOTSTRAP_INITIAL_DELAY_SEC parsed, got %s", c.bootstrapInitialDelay)
+	}
+}
+
+func TestNewClientCommandBackendDefaultStartupSyncTimeout(t *testing.T) {
+	t.Setenv("CLIENT_WG_BACKEND", "command")
+	t.Setenv("CLIENT_STARTUP_SYNC_TIMEOUT_SEC", "")
+	t.Setenv("BETA_STRICT_MODE", "0")
+	t.Setenv("CLIENT_BETA_STRICT", "0")
+	c := NewClient()
+	if c.startupSyncTimeout != 8*time.Second {
+		t.Fatalf("expected command default startup sync timeout 8s, got %s", c.startupSyncTimeout)
+	}
+}
+
+func TestNewClientStartupSyncTimeoutOverride(t *testing.T) {
+	t.Setenv("CLIENT_WG_BACKEND", "command")
+	t.Setenv("CLIENT_STARTUP_SYNC_TIMEOUT_SEC", "5")
+	t.Setenv("BETA_STRICT_MODE", "0")
+	t.Setenv("CLIENT_BETA_STRICT", "0")
+	c := NewClient()
+	if c.startupSyncTimeout != 5*time.Second {
+		t.Fatalf("expected startup sync timeout override 5s, got %s", c.startupSyncTimeout)
+	}
+}
+
+func TestNewClientStrictStartupSyncTimeoutDefault(t *testing.T) {
+	t.Setenv("CLIENT_WG_BACKEND", "command")
+	t.Setenv("CLIENT_STARTUP_SYNC_TIMEOUT_SEC", "")
+	t.Setenv("BETA_STRICT_MODE", "1")
+	t.Setenv("CLIENT_BETA_STRICT", "0")
+	c := NewClient()
+	if c.startupSyncTimeout != 10*time.Second {
+		t.Fatalf("expected strict startup sync timeout 10s, got %s", c.startupSyncTimeout)
 	}
 }
 

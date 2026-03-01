@@ -40,11 +40,16 @@ type Service struct {
 	trustOperatorID     string
 	disputeDefaultTTL   time.Duration
 	adminToken          string
+	betaStrict          bool
 	mu                  sync.RWMutex
 	subjects            map[string]proto.SubjectProfile
 	subjectsFile        string
 	revocations         map[string]int64
 	revocationsFile     string
+	anonRevocations     map[string]int64
+	anonRevocationsFile string
+	anonDisputes        map[string]anonymousCredentialDispute
+	anonDisputesFile    string
 	audit               []proto.AuditEvent
 	auditFile           string
 	auditMax            int
@@ -74,6 +79,14 @@ func New() *Service {
 	revocationsFile := os.Getenv("ISSUER_REVOCATIONS_FILE")
 	if revocationsFile == "" {
 		revocationsFile = "data/issuer_revocations.json"
+	}
+	anonRevocationsFile := os.Getenv("ISSUER_ANON_REVOCATIONS_FILE")
+	if anonRevocationsFile == "" {
+		anonRevocationsFile = "data/issuer_anon_revocations.json"
+	}
+	anonDisputesFile := os.Getenv("ISSUER_ANON_DISPUTES_FILE")
+	if anonDisputesFile == "" {
+		anonDisputesFile = "data/issuer_anon_disputes.json"
 	}
 	auditFile := os.Getenv("ISSUER_AUDIT_FILE")
 	if auditFile == "" {
@@ -146,6 +159,7 @@ func New() *Service {
 			disputeDefaultTTL = time.Duration(n) * time.Second
 		}
 	}
+	betaStrict := os.Getenv("BETA_STRICT_MODE") == "1" || os.Getenv("ISSUER_BETA_STRICT") == "1"
 	return &Service{
 		addr:                addr,
 		issuerID:            issuerID,
@@ -162,10 +176,15 @@ func New() *Service {
 		keyRotateSec:        keyRotateSec,
 		keyHistory:          keyHistory,
 		adminToken:          adminToken,
+		betaStrict:          betaStrict,
 		subjects:            make(map[string]proto.SubjectProfile),
 		subjectsFile:        subjectsFile,
 		revocations:         make(map[string]int64),
 		revocationsFile:     revocationsFile,
+		anonRevocations:     make(map[string]int64),
+		anonRevocationsFile: anonRevocationsFile,
+		anonDisputes:        make(map[string]anonymousCredentialDispute),
+		anonDisputesFile:    anonDisputesFile,
 		audit:               make([]proto.AuditEvent, 0, 128),
 		auditFile:           auditFile,
 		auditMax:            auditMax,
@@ -175,11 +194,20 @@ func New() *Service {
 }
 
 func (s *Service) Run(ctx context.Context) error {
+	if err := s.validateRuntimeConfig(); err != nil {
+		return err
+	}
 	if err := s.loadSubjects(); err != nil {
 		log.Printf("issuer subjects load warning: %v", err)
 	}
 	if err := s.loadRevocations(); err != nil {
 		log.Printf("issuer revocations load warning: %v", err)
+	}
+	if err := s.loadAnonRevocations(); err != nil {
+		log.Printf("issuer anonymous credential revocations load warning: %v", err)
+	}
+	if err := s.loadAnonDisputes(); err != nil {
+		log.Printf("issuer anonymous credential disputes load warning: %v", err)
 	}
 	if err := s.loadAudit(); err != nil {
 		log.Printf("issuer audit load warning: %v", err)
@@ -195,6 +223,7 @@ func (s *Service) Run(ctx context.Context) error {
 	s.privKey = priv
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/health", s.handleHealth)
 	mux.HandleFunc("/v1/token", s.handleIssueToken)
 	mux.HandleFunc("/v1/pubkey", s.handlePubKey)
 	mux.HandleFunc("/v1/pubkeys", s.handlePubKeys)
@@ -203,12 +232,18 @@ func (s *Service) Run(ctx context.Context) error {
 	mux.HandleFunc("/v1/admin/subject/promote", s.handlePromoteSubject)
 	mux.HandleFunc("/v1/admin/subject/reputation/apply", s.handleApplyReputation)
 	mux.HandleFunc("/v1/admin/subject/bond/apply", s.handleApplyBond)
+	mux.HandleFunc("/v1/admin/subject/stake/apply", s.handleApplyStake)
 	mux.HandleFunc("/v1/admin/subject/dispute", s.handleApplyDispute)
 	mux.HandleFunc("/v1/admin/subject/dispute/clear", s.handleClearDispute)
 	mux.HandleFunc("/v1/admin/subject/appeal/open", s.handleOpenAppeal)
 	mux.HandleFunc("/v1/admin/subject/appeal/resolve", s.handleResolveAppeal)
 	mux.HandleFunc("/v1/admin/subject/recompute-tier", s.handleRecomputeTier)
 	mux.HandleFunc("/v1/admin/subject/get", s.handleGetSubject)
+	mux.HandleFunc("/v1/admin/anon-credential/issue", s.handleIssueAnonymousCredential)
+	mux.HandleFunc("/v1/admin/anon-credential/revoke", s.handleRevokeAnonymousCredential)
+	mux.HandleFunc("/v1/admin/anon-credential/dispute", s.handleApplyAnonymousCredentialDispute)
+	mux.HandleFunc("/v1/admin/anon-credential/dispute/clear", s.handleClearAnonymousCredentialDispute)
+	mux.HandleFunc("/v1/admin/anon-credential/get", s.handleGetAnonymousCredentialStatus)
 	mux.HandleFunc("/v1/admin/audit", s.handleGetAudit)
 	mux.HandleFunc("/v1/admin/revoke-token", s.handleRevokeToken)
 	mux.HandleFunc("/v1/revocations", s.handleRevocations)
@@ -246,6 +281,22 @@ func (s *Service) Run(ctx context.Context) error {
 			}
 		}
 	}
+}
+
+func (s *Service) validateRuntimeConfig() error {
+	if !s.betaStrict {
+		return nil
+	}
+	if strings.TrimSpace(s.adminToken) == "" || s.adminToken == "dev-admin-token" {
+		return fmt.Errorf("BETA_STRICT_MODE requires non-default ISSUER_ADMIN_TOKEN")
+	}
+	if s.keyRotateSec <= 0 {
+		return fmt.Errorf("BETA_STRICT_MODE requires ISSUER_KEY_ROTATE_SEC>0")
+	}
+	if s.tokenTTL <= 0 || s.tokenTTL > 15*time.Minute {
+		return fmt.Errorf("BETA_STRICT_MODE requires ISSUER_TOKEN_TTL_SEC in 1..900")
+	}
+	return nil
 }
 
 func (s *Service) loadOrCreateKeypair() (ed25519.PublicKey, ed25519.PrivateKey, error) {
@@ -300,6 +351,7 @@ func (s *Service) handleIssueToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Subject = strings.TrimSpace(req.Subject)
+	req.AnonCred = strings.TrimSpace(req.AnonCred)
 	tokenType := crypto.NormalizeTokenType(req.TokenType)
 	if tokenType == "" {
 		http.Error(w, "invalid token_type", http.StatusBadRequest)
@@ -313,11 +365,39 @@ func (s *Service) handleIssueToken(w http.ResponseWriter, r *http.Request) {
 
 	keyEpoch, priv := s.signingKeySnapshot()
 	expires := time.Now().Add(s.tokenTTL)
+	nowUnix := time.Now().Unix()
 	var claims crypto.CapabilityClaims
 	switch tokenType {
 	case crypto.TokenTypeClientAccess:
-		effectiveTier := s.effectiveTierFor(req.Subject, req.Tier)
-		claims = baseClaimsForTier(s.issuerID, req.Subject, keyEpoch, "exit", tokenType, popPubKey, effectiveTier, expires, req.ExitScope)
+		if req.AnonCred != "" {
+			if req.Subject != "" {
+				http.Error(w, "subject must be empty when anon_cred is provided", http.StatusBadRequest)
+				return
+			}
+			cred, err := s.verifyAnonymousCredential(req.AnonCred, nowUnix)
+			if err != nil {
+				http.Error(w, "invalid anon_cred", http.StatusBadRequest)
+				return
+			}
+			if s.isAnonCredentialRevoked(cred.CredentialID, nowUnix) {
+				http.Error(w, "anonymous credential revoked", http.StatusForbidden)
+				return
+			}
+			effectiveTier := clampTier(req.Tier)
+			credTier := clampTier(cred.Tier)
+			if effectiveTier > credTier {
+				effectiveTier = credTier
+			}
+			if capTier, ok := s.activeAnonCredentialTierCap(cred.CredentialID, nowUnix); ok && effectiveTier > capTier {
+				effectiveTier = capTier
+			}
+			subject := anonymousSubjectAlias(cred.CredentialID)
+			claims = baseClaimsForTier(s.issuerID, subject, keyEpoch, "exit", tokenType, popPubKey, effectiveTier, expires, req.ExitScope)
+			claims.AnonCredID = cred.CredentialID
+		} else {
+			effectiveTier := s.effectiveTierFor(req.Subject, req.Tier)
+			claims = baseClaimsForTier(s.issuerID, req.Subject, keyEpoch, "exit", tokenType, popPubKey, effectiveTier, expires, req.ExitScope)
+		}
 	case crypto.TokenTypeProviderRole:
 		if req.Subject == "" {
 			http.Error(w, "subject required for provider_role", http.StatusBadRequest)
@@ -367,6 +447,7 @@ func (s *Service) handleUpsertSubject(w http.ResponseWriter, r *http.Request) {
 		Tier:         applyTierCap(req.Tier, prev, time.Now().Unix()),
 		Reputation:   req.Reputation,
 		Bond:         req.Bond,
+		Stake:        req.Stake,
 		TierCap:      prev.TierCap,
 		DisputeUntil: prev.DisputeUntil,
 		AppealUntil:  prev.AppealUntil,
@@ -521,6 +602,50 @@ func (s *Service) handleApplyBond(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(p)
 }
 
+func (s *Service) handleApplyStake(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req proto.ApplyStakeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(req.Subject) == "" {
+		http.Error(w, "missing subject", http.StatusBadRequest)
+		return
+	}
+	s.mu.Lock()
+	p := s.subjects[req.Subject]
+	beforeTier := p.Tier
+	p.Subject = req.Subject
+	p.Kind = normalizeSubjectKind(p.Kind, "")
+	p.Stake = maxFloat(0, p.Stake+req.Delta)
+	p.Tier = recommendedTier(p)
+	p.Tier = applyTierCap(p.Tier, p, time.Now().Unix())
+	s.subjects[req.Subject] = p
+	s.mu.Unlock()
+	if err := s.saveSubjects(); err != nil {
+		http.Error(w, "failed to persist subject", http.StatusInternalServerError)
+		return
+	}
+	s.recordAudit(proto.AuditEvent{
+		Action:     "subject-stake-apply",
+		Subject:    req.Subject,
+		Reason:     req.Reason,
+		Delta:      req.Delta,
+		Value:      p.Stake,
+		TierBefore: beforeTier,
+		TierAfter:  p.Tier,
+	})
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(p)
+}
+
 func (s *Service) handleRecomputeTier(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAdmin(w, r) {
 		return
@@ -588,6 +713,219 @@ func (s *Service) handleGetSubject(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(p)
+}
+
+func (s *Service) handleIssueAnonymousCredential(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req proto.IssueAnonymousCredentialRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	credentialID := strings.TrimSpace(req.CredentialID)
+	if credentialID == "" {
+		credentialID = defaultCredentialID()
+	}
+	nowUnix := time.Now().Unix()
+	expiresAt := req.ExpiresAt
+	if expiresAt <= nowUnix {
+		expiresAt = time.Now().Add(24 * time.Hour).Unix()
+	}
+	claims := anonymousCredentialClaims{
+		Issuer:       s.issuerID,
+		CredentialID: credentialID,
+		Tier:         clampTier(req.Tier),
+		ExpiryUnix:   expiresAt,
+	}
+	_, priv := s.signingKeySnapshot()
+	credential, err := signAnonymousCredential(claims, priv)
+	if err != nil {
+		http.Error(w, "failed to sign anonymous credential", http.StatusInternalServerError)
+		return
+	}
+	s.recordAudit(proto.AuditEvent{
+		Action:  "anon-credential-issue",
+		Subject: credentialID,
+		Reason:  req.Reason,
+		Value:   float64(expiresAt),
+	})
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(proto.IssueAnonymousCredentialResponse{
+		Credential: credential,
+		ExpiresAt:  expiresAt,
+	})
+}
+
+func (s *Service) handleRevokeAnonymousCredential(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req proto.RevokeAnonymousCredentialRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	credentialID := strings.TrimSpace(req.CredentialID)
+	if credentialID == "" {
+		http.Error(w, "missing credential_id", http.StatusBadRequest)
+		return
+	}
+	until := req.Until
+	if until <= time.Now().Unix() {
+		until = time.Now().Add(24 * time.Hour).Unix()
+	}
+	s.mu.Lock()
+	s.anonRevocations[credentialID] = until
+	s.mu.Unlock()
+	if err := s.saveAnonRevocations(); err != nil {
+		http.Error(w, "failed to persist anonymous credential revocation", http.StatusInternalServerError)
+		return
+	}
+	s.recordAudit(proto.AuditEvent{
+		Action:  "anon-credential-revoke",
+		Subject: credentialID,
+		Reason:  req.Reason,
+		Value:   float64(until),
+	})
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"credential_id": credentialID,
+		"until":         until,
+	})
+}
+
+func (s *Service) handleApplyAnonymousCredentialDispute(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req proto.ApplyAnonymousCredentialDisputeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	credentialID := strings.TrimSpace(req.CredentialID)
+	if credentialID == "" {
+		http.Error(w, "missing credential_id", http.StatusBadRequest)
+		return
+	}
+	tierCap := clampTier(req.TierCap)
+	now := time.Now()
+	nowUnix := now.Unix()
+	until := req.Until
+	if until <= nowUnix {
+		until = now.Add(s.disputeDefaultTTL).Unix()
+	}
+	dispute := anonymousCredentialDispute{
+		TierCap:      tierCap,
+		DisputeUntil: until,
+		CaseID:       normalizeCaseID(req.CaseID),
+		EvidenceRef:  normalizeEvidenceRef(req.EvidenceRef),
+	}
+	s.mu.Lock()
+	s.anonDisputes[credentialID] = dispute
+	s.mu.Unlock()
+	if err := s.saveAnonDisputes(); err != nil {
+		http.Error(w, "failed to persist anonymous credential dispute", http.StatusInternalServerError)
+		return
+	}
+	s.recordAudit(proto.AuditEvent{
+		Action:      "anon-credential-dispute-apply",
+		Subject:     credentialID,
+		Reason:      req.Reason,
+		CaseID:      dispute.CaseID,
+		EvidenceRef: dispute.EvidenceRef,
+		Value:       float64(dispute.DisputeUntil),
+		TierAfter:   dispute.TierCap,
+	})
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"credential_id": credentialID,
+		"tier_cap":      dispute.TierCap,
+		"dispute_until": dispute.DisputeUntil,
+		"case_id":       dispute.CaseID,
+		"evidence_ref":  dispute.EvidenceRef,
+	})
+}
+
+func (s *Service) handleClearAnonymousCredentialDispute(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req proto.ClearAnonymousCredentialDisputeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	credentialID := strings.TrimSpace(req.CredentialID)
+	if credentialID == "" {
+		http.Error(w, "missing credential_id", http.StatusBadRequest)
+		return
+	}
+	s.mu.Lock()
+	delete(s.anonDisputes, credentialID)
+	s.mu.Unlock()
+	if err := s.saveAnonDisputes(); err != nil {
+		http.Error(w, "failed to persist anonymous credential dispute clear", http.StatusInternalServerError)
+		return
+	}
+	s.recordAudit(proto.AuditEvent{
+		Action:  "anon-credential-dispute-clear",
+		Subject: credentialID,
+		Reason:  req.Reason,
+	})
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"credential_id": credentialID,
+		"cleared":       true,
+	})
+}
+
+func (s *Service) handleGetAnonymousCredentialStatus(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	credentialID := strings.TrimSpace(r.URL.Query().Get("credential_id"))
+	if credentialID == "" {
+		http.Error(w, "missing credential_id", http.StatusBadRequest)
+		return
+	}
+	status, revChanged, disputeChanged := s.snapshotAnonymousCredentialStatus(credentialID, time.Now().Unix())
+	if revChanged {
+		if err := s.saveAnonRevocations(); err != nil {
+			http.Error(w, "failed to persist anonymous credential revocation cleanup", http.StatusInternalServerError)
+			return
+		}
+	}
+	if disputeChanged {
+		if err := s.saveAnonDisputes(); err != nil {
+			http.Error(w, "failed to persist anonymous credential dispute cleanup", http.StatusInternalServerError)
+			return
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(status)
 }
 
 func (s *Service) handleApplyDispute(w http.ResponseWriter, r *http.Request) {
@@ -920,6 +1258,123 @@ func (s *Service) requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
+func (s *Service) verifyAnonymousCredential(credential string, nowUnix int64) (anonymousCredentialClaims, error) {
+	claims, payload, sig, err := parseAnonymousCredential(credential)
+	if err != nil {
+		return anonymousCredentialClaims{}, err
+	}
+	if strings.TrimSpace(claims.Issuer) != s.issuerID {
+		return anonymousCredentialClaims{}, fmt.Errorf("anonymous credential issuer mismatch")
+	}
+	if strings.TrimSpace(claims.CredentialID) == "" {
+		return anonymousCredentialClaims{}, fmt.Errorf("anonymous credential id missing")
+	}
+	if claims.Tier < 1 || claims.Tier > 3 {
+		return anonymousCredentialClaims{}, fmt.Errorf("anonymous credential tier invalid")
+	}
+	if claims.ExpiryUnix <= nowUnix {
+		return anonymousCredentialClaims{}, fmt.Errorf("anonymous credential expired")
+	}
+	pubs := make([]ed25519.PublicKey, 0, 4)
+	s.mu.RLock()
+	if len(s.pubKey) == ed25519.PublicKeySize {
+		pubs = append(pubs, append(ed25519.PublicKey(nil), s.pubKey...))
+	}
+	s.mu.RUnlock()
+	prev, err := loadPreviousPubKeys(s.previousPubKeysFile)
+	if err == nil {
+		for _, key := range prev {
+			raw, decErr := base64.RawURLEncoding.DecodeString(strings.TrimSpace(key))
+			if decErr != nil || len(raw) != ed25519.PublicKeySize {
+				continue
+			}
+			pubs = append(pubs, ed25519.PublicKey(raw))
+		}
+	}
+	for _, pub := range pubs {
+		if len(pub) != ed25519.PublicKeySize {
+			continue
+		}
+		if ed25519.Verify(pub, payload, sig) {
+			return claims, nil
+		}
+	}
+	return anonymousCredentialClaims{}, fmt.Errorf("anonymous credential signature verification failed")
+}
+
+func (s *Service) isAnonCredentialRevoked(credentialID string, nowUnix int64) bool {
+	credentialID = strings.TrimSpace(credentialID)
+	if credentialID == "" {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	until, ok := s.anonRevocations[credentialID]
+	if !ok {
+		return false
+	}
+	if nowUnix >= until {
+		delete(s.anonRevocations, credentialID)
+		return false
+	}
+	return true
+}
+
+func (s *Service) activeAnonCredentialTierCap(credentialID string, nowUnix int64) (int, bool) {
+	credentialID = strings.TrimSpace(credentialID)
+	if credentialID == "" {
+		return 0, false
+	}
+	s.mu.RLock()
+	dispute, ok := s.anonDisputes[credentialID]
+	s.mu.RUnlock()
+	if !ok {
+		return 0, false
+	}
+	if dispute.DisputeUntil <= nowUnix {
+		return 0, false
+	}
+	if dispute.TierCap < 1 || dispute.TierCap > 3 {
+		return 0, false
+	}
+	return dispute.TierCap, true
+}
+
+func (s *Service) snapshotAnonymousCredentialStatus(credentialID string, nowUnix int64) (proto.AnonymousCredentialStatusResponse, bool, bool) {
+	status := proto.AnonymousCredentialStatusResponse{CredentialID: strings.TrimSpace(credentialID)}
+	if status.CredentialID == "" {
+		return status, false, false
+	}
+	revChanged := false
+	disputeChanged := false
+
+	s.mu.Lock()
+	if until, ok := s.anonRevocations[status.CredentialID]; ok {
+		if nowUnix >= until {
+			delete(s.anonRevocations, status.CredentialID)
+			revChanged = true
+		} else {
+			status.Revoked = true
+			status.RevokedUntil = until
+		}
+	}
+	if dispute, ok := s.anonDisputes[status.CredentialID]; ok {
+		if dispute.DisputeUntil <= nowUnix || dispute.TierCap < 1 || dispute.TierCap > 3 {
+			delete(s.anonDisputes, status.CredentialID)
+			disputeChanged = true
+		} else {
+			status.Disputed = true
+			status.DisputeTier = dispute.TierCap
+			status.DisputeUntil = dispute.DisputeUntil
+			status.CaseID = dispute.CaseID
+			status.EvidenceRef = dispute.EvidenceRef
+		}
+	}
+	s.mu.Unlock()
+
+	return status, revChanged, disputeChanged
+}
+
 func (s *Service) effectiveTierFor(subject string, requested int) int {
 	if requested < 1 {
 		requested = 1
@@ -996,6 +1451,15 @@ func (s *Service) handlePubKeys(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		http.Error(w, "encode error", http.StatusInternalServerError)
 	}
+}
+
+func (s *Service) handleHealth(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("ok"))
 }
 
 func baseClaimsForTier(issuerID string, subject string, keyEpoch int64, audience string, tokenType string, cnfPubKey string, tier int, expires time.Time, exitScope []string) crypto.CapabilityClaims {
@@ -1129,6 +1593,10 @@ func (s *Service) buildRelayTrustFeed(now time.Time) (proto.RelayTrustAttestatio
 			continue
 		}
 		bondScore := normalizedBondScore(p.Bond, bondMax)
+		stakeScore := normalizedBondScore(p.Stake, bondMax)
+		if stakeScore == 0 && p.Bond > 0 {
+			stakeScore = bondScore
+		}
 		attConfidence := confidence
 		abusePenalty := 0.0
 		disputeTierCap := 0
@@ -1163,7 +1631,7 @@ func (s *Service) buildRelayTrustFeed(now time.Time) (proto.RelayTrustAttestatio
 			Reputation:   clampUnit(p.Reputation),
 			AbusePenalty: abusePenalty,
 			BondScore:    bondScore,
-			StakeScore:   bondScore,
+			StakeScore:   stakeScore,
 			Confidence:   attConfidence,
 			TierCap:      disputeTierCap,
 			DisputeUntil: disputeUntil,
@@ -1358,11 +1826,111 @@ func (s *Service) loadRevocations() error {
 	return nil
 }
 
+func (s *Service) saveAnonRevocations() error {
+	s.mu.RLock()
+	store := cloneRevocations(s.anonRevocations)
+	s.mu.RUnlock()
+	data, err := json.MarshalIndent(store, "", "  ")
+	if err != nil {
+		return err
+	}
+	dir := filepath.Dir(s.anonRevocationsFile)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(s.anonRevocationsFile, data, 0o644)
+}
+
+func (s *Service) loadAnonRevocations() error {
+	b, err := os.ReadFile(s.anonRevocationsFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	store := map[string]int64{}
+	if err := json.Unmarshal(b, &store); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.anonRevocations = store
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *Service) saveAnonDisputes() error {
+	if strings.TrimSpace(s.anonDisputesFile) == "" {
+		return nil
+	}
+	s.mu.RLock()
+	store := make(map[string]anonymousCredentialDispute, len(s.anonDisputes))
+	for k, v := range s.anonDisputes {
+		store[k] = v
+	}
+	s.mu.RUnlock()
+	data, err := json.MarshalIndent(store, "", "  ")
+	if err != nil {
+		return err
+	}
+	dir := filepath.Dir(s.anonDisputesFile)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(s.anonDisputesFile, data, 0o644)
+}
+
+func (s *Service) loadAnonDisputes() error {
+	if strings.TrimSpace(s.anonDisputesFile) == "" {
+		return nil
+	}
+	b, err := os.ReadFile(s.anonDisputesFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	rawStore := map[string]anonymousCredentialDispute{}
+	if err := json.Unmarshal(b, &rawStore); err != nil {
+		return err
+	}
+	store := make(map[string]anonymousCredentialDispute, len(rawStore))
+	for id, dispute := range rawStore {
+		id = strings.TrimSpace(id)
+		dispute.TierCap = clampTier(dispute.TierCap)
+		dispute.CaseID = normalizeCaseID(dispute.CaseID)
+		dispute.EvidenceRef = normalizeEvidenceRef(dispute.EvidenceRef)
+		if id == "" || dispute.DisputeUntil <= 0 {
+			continue
+		}
+		store[id] = dispute
+	}
+	s.mu.Lock()
+	s.anonDisputes = store
+	s.mu.Unlock()
+	return nil
+}
+
 type revocationStore struct {
 	Version       int64            `json:"version"`
 	KeyEpoch      int64            `json:"key_epoch,omitempty"`
 	MinTokenEpoch int64            `json:"min_token_epoch,omitempty"`
 	Revocations   map[string]int64 `json:"revocations"`
+}
+
+type anonymousCredentialDispute struct {
+	TierCap      int    `json:"tier_cap,omitempty"`
+	DisputeUntil int64  `json:"dispute_until,omitempty"`
+	CaseID       string `json:"case_id,omitempty"`
+	EvidenceRef  string `json:"evidence_ref,omitempty"`
+}
+
+type anonymousCredentialClaims struct {
+	Issuer       string `json:"iss"`
+	CredentialID string `json:"cred_id"`
+	Tier         int    `json:"tier"`
+	ExpiryUnix   int64  `json:"exp"`
 }
 
 type issuerEpochState struct {
@@ -1400,6 +1968,49 @@ func (s *Service) loadOrCreateEpochState() error {
 		return err
 	}
 	return s.saveEpochState()
+}
+
+func signAnonymousCredential(claims anonymousCredentialClaims, priv ed25519.PrivateKey) (string, error) {
+	payload, err := json.Marshal(claims)
+	if err != nil {
+		return "", err
+	}
+	sig := ed25519.Sign(priv, payload)
+	return base64.RawURLEncoding.EncodeToString(payload) + "." + base64.RawURLEncoding.EncodeToString(sig), nil
+}
+
+func parseAnonymousCredential(credential string) (anonymousCredentialClaims, []byte, []byte, error) {
+	var claims anonymousCredentialClaims
+	payloadB64, sigB64, ok := strings.Cut(strings.TrimSpace(credential), ".")
+	if !ok || payloadB64 == "" || sigB64 == "" {
+		return claims, nil, nil, fmt.Errorf("invalid anonymous credential format")
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(payloadB64)
+	if err != nil {
+		return claims, nil, nil, fmt.Errorf("invalid anonymous credential payload encoding")
+	}
+	sig, err := base64.RawURLEncoding.DecodeString(sigB64)
+	if err != nil {
+		return claims, nil, nil, fmt.Errorf("invalid anonymous credential signature encoding")
+	}
+	if len(sig) != ed25519.SignatureSize {
+		return claims, nil, nil, fmt.Errorf("invalid anonymous credential signature size")
+	}
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return claims, nil, nil, fmt.Errorf("invalid anonymous credential claims")
+	}
+	return claims, payload, sig, nil
+}
+
+func anonymousSubjectAlias(credentialID string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(credentialID)))
+	return "anon:" + base64.RawURLEncoding.EncodeToString(sum[:12])
+}
+
+func defaultCredentialID() string {
+	raw := fmt.Sprintf("%d-%d", time.Now().UnixNano(), os.Getpid())
+	sum := sha256.Sum256([]byte(raw))
+	return base64.RawURLEncoding.EncodeToString(sum[:18])
 }
 
 func (s *Service) saveEpochState() error {
@@ -1592,10 +2203,11 @@ func recommendedTier(p proto.SubjectProfile) int {
 	if tier > 3 {
 		tier = 3
 	}
-	if p.Reputation >= 0.95 && p.Bond >= 500 {
+	stakeOrBond := maxFloat(p.Bond, p.Stake)
+	if p.Reputation >= 0.95 && stakeOrBond >= 500 {
 		return 3
 	}
-	if p.Reputation >= 0.8 || p.Bond >= 100 {
+	if p.Reputation >= 0.8 || p.Bond >= 100 || p.Stake >= 100 {
 		if tier < 2 {
 			return 2
 		}

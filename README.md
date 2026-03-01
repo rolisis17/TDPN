@@ -15,9 +15,10 @@ You asked for client and server in one program. The current scaffold is built ex
 
 ## Current status
 - [x] Unified node runtime with role flags
+- [x] Single-process role URL auto-wiring (`*_ADDR` -> `*_URL` when unset) for combined role runs
 - [x] Protocol and threat model docs
 - [x] Tier policy package with tier-1 SMTP block test
-- [x] HTTP control plane endpoints (`/v1/relays`, `/v1/selection-feed`, `/v1/trust-attestations`, `/v1/token`)
+- [x] HTTP control plane endpoints (`/v1/health`, `/v1/relays`, `/v1/selection-feed`, `/v1/trust-attestations`, `/v1/token`)
 - [x] Basic path-open handshake (`client -> entry -> exit`) with split token classes (`client_access` / `provider_role`) and PoP-bound token proof verification
 - [x] UDP session forwarding (`client -> entry -> exit`) with per-packet tier policy enforcement
 - [x] Opaque-mode bidirectional relay forwarding (`client -> entry -> exit -> entry -> client`) with session-bound routing
@@ -50,6 +51,7 @@ You asked for client and server in one program. The current scaffold is built ex
 - [x] Signed directory peer hints (`peer_hints`) with discovery-time pubkey hint verification
 - [x] Optional strict discovered-peer admission policy requiring signed operator+pubkey hints (`DIRECTORY_PEER_DISCOVERY_REQUIRE_HINT`)
 - [x] Optional discovered-peer per-source admission cap (`DIRECTORY_PEER_DISCOVERY_MAX_PER_SOURCE`) to limit how many peers one source operator can add at once
+- [x] Optional discovered-peer per-operator admission cap (`DIRECTORY_PEER_DISCOVERY_MAX_PER_OPERATOR`) to limit how many peers sharing one hinted operator id can be active at once
 - [x] Directory discovered-peer failure backoff + admin peer status endpoint (`/v1/admin/peer-status`)
 - [x] Entry handshake anti-abuse controls (rate limit + optional challenge puzzle)
 - [x] Issuer trust lifecycle APIs (subject profile/promotions/reputation/bond/dispute)
@@ -77,6 +79,10 @@ You asked for client and server in one program. The current scaffold is built ex
 - [x] Exit issuer-claim binding against verified issuer-key metadata (anti-spoof hardening)
 - [x] Revocation feed version + token key-epoch enforcement on exit
 - [x] Automated issuer key-epoch rotation groundwork (epoch state + previous pubkey retention)
+- [x] Beta strict-mode runtime guardrails (`BETA_STRICT_MODE`) across client/entry/exit/directory/issuer
+- [x] DNS-seed-assisted directory peer discovery (`DIRECTORY_PEER_DISCOVERY_DNS_SEEDS`)
+- [x] Issuer stake lifecycle API (`/v1/admin/subject/stake/apply`) with independent trust-feed `stake_score`
+- [x] Anonymous credential lifecycle (`/v1/admin/anon-credential/issue`, `/v1/admin/anon-credential/revoke`, `/v1/admin/anon-credential/dispute`, `/v1/admin/anon-credential/dispute/clear`, `/v1/admin/anon-credential/get`, `/v1/token` `anon_cred`)
 - [x] Load/chaos integration automation (`integration_load_chaos.sh`)
 - [x] Deployment assets (`deploy/docker-compose.yml`, `deploy/systemd/*.service`)
 - [ ] WireGuard-backed two-hop forwarding on live interfaces (production-grade)
@@ -124,6 +130,25 @@ Script-only easy mode:
   --issuer-url http://<SERVER_IP>:8082 \
   --entry-url http://<SERVER_IP>:8083 \
   --exit-url http://<SERVER_IP>:8084
+
+./scripts/easy_node.sh three-machine-validate \
+  --directory-a http://<A_SERVER_IP>:8081 \
+  --directory-b http://<B_SERVER_IP>:8081 \
+  --issuer-url http://<A_SERVER_IP>:8082 \
+  --entry-url http://<A_SERVER_IP>:8083 \
+  --exit-url http://<A_SERVER_IP>:8084 \
+  --min-sources 2 \
+  --min-operators 2
+
+# machine-specific automated validation (use on each host)
+./scripts/easy_node.sh machine-a-test --public-host <A_SERVER_IP_OR_DNS>
+./scripts/easy_node.sh machine-b-test --peer-directory-a http://<A_SERVER_IP_OR_DNS>:8081 --public-host <B_SERVER_IP_OR_DNS>
+./scripts/easy_node.sh machine-c-test \
+  --directory-a http://<A_SERVER_IP_OR_DNS>:8081 \
+  --directory-b http://<B_SERVER_IP_OR_DNS>:8081 \
+  --issuer-url http://<A_SERVER_IP_OR_DNS>:8082 \
+  --entry-url http://<A_SERVER_IP_OR_DNS>:8083 \
+  --exit-url http://<A_SERVER_IP_OR_DNS>:8084
 ```
 
 3-machine test guide:
@@ -135,6 +160,7 @@ Optional env vars:
 - `ISSUER_ADDR` (default `127.0.0.1:8082`)
 - `ENTRY_ADDR` (default `127.0.0.1:8083`)
 - `EXIT_ADDR` (default `127.0.0.1:8084`)
+- `BETA_STRICT_MODE` (`1` enables strict beta-grade runtime guardrails across client/entry/exit/directory/issuer)
 - `ENTRY_COUNTRY_CODE` (default `ZZ`; directory descriptor metadata for entry locality)
 - `EXIT_COUNTRY_CODE` (default `ZZ`; directory descriptor metadata for exit locality)
 - `ENTRY_REGION` (default `local`; directory descriptor metadata for entry region)
@@ -151,6 +177,7 @@ Optional env vars:
 - `EXIT_BOND_SCORE` (default `0`; signed exit descriptor bond/stake trust signal `0..1`)
 - `EXIT_STAKE_SCORE` (default `0`; signed exit descriptor stake trust signal `0..1`)
 - `DIRECTORY_URL` (default `http://127.0.0.1:8081`)
+- `DIRECTORY_URL` auto-wires from `DIRECTORY_ADDR` when `--directory --client` run together and `DIRECTORY_URL` is unset
 - `DIRECTORY_URLS` (comma-separated directory URLs; enables federated source quorum)
 - `DIRECTORY_MIN_SOURCES` (default `1`; minimum successful directories required)
 - `DIRECTORY_MIN_OPERATORS` (default `1`; minimum distinct directory operators required)
@@ -170,10 +197,16 @@ Optional env vars:
 - `ENTRY_DIRECTORY_TRUST_TOFU` (fallback `DIRECTORY_TRUST_TOFU`; TOFU bootstrap for strict entry trust mode)
 - `ENTRY_DIRECTORY_TRUSTED_KEYS_FILE` (fallback `DIRECTORY_TRUSTED_KEYS_FILE`; default `data/entry_trusted_directory_keys.txt`)
 - `ENTRY_LIVE_WG_MODE` (`1` enables entry-side live WireGuard plausibility checks for `wireguard-udp` opaque sessions)
+- `ENTRY_BETA_STRICT` (`1` enables strict beta checks only for entry role)
 - `ISSUER_URL` (default `http://127.0.0.1:8082`)
+- `ISSUER_URL` auto-wires from `ISSUER_ADDR` when `--issuer` is combined with `--entry`/`--exit`/`--client` and `ISSUER_URL` is unset
+- `ENTRY_URL` auto-wires from `ENTRY_ADDR` when `--entry` is combined with `--directory`/`--client` and `ENTRY_URL` is unset
+- `EXIT_CONTROL_URL` auto-wires from `EXIT_ADDR` when `--exit` is combined with `--directory`/`--client` and `EXIT_CONTROL_URL` is unset
 - `ISSUER_URLS` (comma-separated issuer base URLs; exit verifies tokens against all fetched issuer pubkeys)
 - `ISSUER_PRIVATE_KEY_FILE` (default `data/issuer_ed25519.key`, persistent issuer signing key)
 - `ISSUER_PREVIOUS_PUBKEYS_FILE` (default `data/issuer_previous_pubkeys.txt`; optional previous issuer pubkeys for rollover exposure at `/v1/pubkeys`)
+- `ISSUER_ANON_REVOCATIONS_FILE` (default `data/issuer_anon_revocations.json`; revoked anonymous credential ids)
+- `ISSUER_ANON_DISPUTES_FILE` (default `data/issuer_anon_disputes.json`; anonymous credential dispute tier-cap windows)
 - `ISSUER_REVOCATION_FEED_TTL_SEC` (default `30`; signed revocation feed max age)
 - `ISSUER_TRUST_FEED_TTL_SEC` (default `30`; signed issuer relay-trust feed max age)
 - `ISSUER_TRUST_CONFIDENCE` (default `1`; default trust confidence used in `/v1/trust/relays`)
@@ -181,6 +214,7 @@ Optional env vars:
 - `ISSUER_TRUST_OPERATOR_ID` (optional operator id to stamp into issuer trust attestations)
 - `ISSUER_TOKEN_TTL_SEC` (default `600`; issued token lifetime in seconds)
 - `ISSUER_DISPUTE_DEFAULT_TTL_SEC` (default `86400`; fallback active-dispute duration when admin request omits/uses stale `until`)
+- `ISSUER_BETA_STRICT` (`1` enables strict beta checks only for issuer role)
 - `ENTRY_URL` (default `http://127.0.0.1:8083`)
 - `EXIT_CONTROL_URL` (default `http://127.0.0.1:8084`)
 - `ENTRY_DATA_ADDR` (default `127.0.0.1:51820`)
@@ -189,6 +223,7 @@ Optional env vars:
 - `WG_BACKEND` (`noop` default, `command` for `wg`/`ip` CLI integration; requires `DATA_PLANE_MODE=opaque`)
 - `CLIENT_WG_PUBLIC_KEY` (base64 32-byte key; in `CLIENT_WG_BACKEND=command`, auto-derived from `CLIENT_WG_PRIVATE_KEY_PATH` if unset/invalid, and startup fails if a configured key mismatches the derived key; otherwise auto-generated if missing)
 - `CLIENT_SUBJECT` (optional client identity subject used for token issuance; leave unset for anonymous tier-1 behavior)
+- `CLIENT_ANON_CRED` (optional anonymous credential token for pseudonymous client token issuance; cannot be combined with `CLIENT_SUBJECT`)
 - `CLIENT_WG_BACKEND` (`noop` default, `command` for client-side `wg`/`ip` integration; requires `DATA_PLANE_MODE=opaque` and either `CLIENT_INNER_SOURCE=udp` or `CLIENT_WG_KERNEL_PROXY=1`)
 - `CLIENT_WG_INTERFACE` (default `wg-client0`)
 - `CLIENT_WG_PRIVATE_KEY_PATH` (required when `CLIENT_WG_BACKEND=command`)
@@ -230,6 +265,8 @@ Optional env vars:
 - `CLIENT_BOOTSTRAP_BACKOFF_MAX_SEC` (default `CLIENT_BOOTSTRAP_INTERVAL_SEC`; max retry interval used for exponential bootstrap backoff on consecutive failures)
 - `CLIENT_BOOTSTRAP_JITTER_PCT` (default `0`; random retry jitter percentage `0..90` applied around computed bootstrap delay to reduce retry synchronization)
 - `CLIENT_BOOTSTRAP_INITIAL_DELAY_SEC` (default `0`; optional startup delay before the first bootstrap attempt, useful when client starts before local issuer/directory roles)
+- `CLIENT_STARTUP_SYNC_TIMEOUT_SEC` (default `0`, but defaults to `8` automatically when `CLIENT_WG_BACKEND=command`; when `>0`, client waits for issuer/directory readiness (`/v1/health` with fallback to `/v1/pubkeys` and `/v1/relays`) before first bootstrap attempt)
+- `CLIENT_BETA_STRICT` (`1` enables strict beta checks only for client role; requires `DIRECTORY_TRUST_STRICT=1` and `CLIENT_STARTUP_SYNC_TIMEOUT_SEC>0`)
 - `EXIT_WG_INTERFACE` (default `wg-exit0`)
 - `EXIT_WG_PUBKEY` (optional base64 32-byte key; in `WG_BACKEND=command`, auto-derived from `EXIT_WG_PRIVATE_KEY_PATH` if unset/invalid, and startup fails if a configured key mismatches the derived key)
 - `EXIT_WG_PRIVATE_KEY_PATH` (required when `WG_BACKEND=command`)
@@ -265,8 +302,11 @@ Optional env vars:
 - `DIRECTORY_PEER_DISCOVERY` (`1` default; enable seeded dynamic peer discovery from trusted peers)
 - `DIRECTORY_PEER_DISCOVERY_MAX` (default `64`; cap discovered peer set size)
 - `DIRECTORY_PEER_DISCOVERY_TTL_SEC` (default `900`; expire stale discovered peers)
+- `DIRECTORY_PEER_DISCOVERY_DNS_SEEDS` (comma-separated DNS TXT seed names; each TXT record can advertise `url=https://dir.example` and optional `operator=<id>;pub_key=<base64url-ed25519-pubkey>`)
+- `DIRECTORY_PEER_DISCOVERY_DNS_REFRESH_SEC` (default `120` when DNS seeds are configured; TXT lookup refresh cadence)
 - `DIRECTORY_PEER_DISCOVERY_MIN_VOTES` (default `1`; minimum distinct source-operator sightings required before a discovered peer is admitted to sync set)
 - `DIRECTORY_PEER_DISCOVERY_MAX_PER_SOURCE` (default `0` disabled; when `>0`, cap active discovered-peer votes contributed by one source operator)
+- `DIRECTORY_PEER_DISCOVERY_MAX_PER_OPERATOR` (default `0` disabled; when `>0`, cap active discovered peers that share the same hinted operator id)
 - `DIRECTORY_PEER_DISCOVERY_REQUIRE_HINT` (`1` requires discovered peers to include both signed `operator` and `pub_key` hints before admission)
 - `DIRECTORY_PEER_DISCOVERY_FAIL_THRESHOLD` (default `3`; consecutive discovered-peer sync failures before temporary cooldown)
 - `DIRECTORY_PEER_DISCOVERY_BACKOFF_SEC` (default `60`; initial discovered-peer cooldown duration in seconds)
@@ -300,6 +340,7 @@ Optional env vars:
 - `DIRECTORY_ISSUER_APPEAL_MIN_VOTES` (default `DIRECTORY_ISSUER_DISPUTE_MIN_VOTES`; minimum issuer appeal votes required before imported appeal metadata is propagated)
 - `DIRECTORY_PROVIDER_MIN_ENTRY_TIER` (default `1`; minimum `provider_role` token tier required to advertise `entry` relays via `/v1/provider/relay/upsert`)
 - `DIRECTORY_PROVIDER_MIN_EXIT_TIER` (default `1`; minimum `provider_role` token tier required to advertise `exit` relays via `/v1/provider/relay/upsert`)
+- `DIRECTORY_BETA_STRICT` (`1` enables strict beta checks only for directory role)
 - `DIRECTORY_SELECTION_FEED_TTL_SEC` (default `30`; signed selection feed TTL)
 - `DIRECTORY_SELECTION_FEED_EPOCH_SEC` (default `10`; generated_at stabilization window for selection-feed cacheability)
 - `DIRECTORY_TRUST_FEED_TTL_SEC` (default `30`; signed trust-attestation feed TTL)
@@ -320,8 +361,10 @@ Optional env vars:
 - `EXIT_ACCOUNTING_FILE` (optional JSON metrics/accounting snapshot file)
 - `EXIT_ACCOUNTING_FLUSH_SEC` (default `10`; accounting snapshot write interval)
 - `EXIT_REVOCATION_REFRESH_SEC` (default `15`)
+- `EXIT_STARTUP_SYNC_TIMEOUT_SEC` (default `0`, but defaults to `8` automatically when `WG_BACKEND=command`; when `>0`, exit waits for issuer keys + revocation feed readiness before serving; strict beta mode defaults to `30`)
 - `EXIT_PEER_REBIND_SEC` (default `0`; when `>0`, allow exit session peer source rebind after inactivity window)
 - `EXIT_TOKEN_PROOF_REPLAY_GUARD` (`1` enables nonce replay guard for `token_proof_nonce` on path open)
+- `EXIT_BETA_STRICT` (`1` enables strict beta checks only for exit role)
 - `CLIENT_EXIT_MIN_GEO_CONFIDENCE` (default `0`; required minimum `geo_confidence` for country/region matching)
 - `CLIENT_EXIT_LOCALITY_FALLBACK_ORDER` (default `country,region,region-prefix,global`; configurable locality fallback policy)
 - `ISSUER_REVOCATIONS_URL` (default `$ISSUER_URL/v1/revocations`)
@@ -334,6 +377,7 @@ Optional env vars:
 - `ENTRY_EXIT_ROUTE_TTL_SEC` (default `30`, entry cache TTL for `exit_id` -> route lookup via directory)
 
 Control API:
+- `GET /v1/health` (directory/issuer/entry/exit)
 - `GET /v1/relays` (directory)
 - `GET /v1/selection-feed` (directory)
 - `GET /v1/trust-attestations` (directory)
@@ -352,12 +396,18 @@ Control API:
 - `POST /v1/admin/subject/promote` (issuer admin)
 - `POST /v1/admin/subject/reputation/apply` (issuer admin)
 - `POST /v1/admin/subject/bond/apply` (issuer admin)
+- `POST /v1/admin/subject/stake/apply` (issuer admin)
 - `POST /v1/admin/subject/dispute` (issuer admin)
 - `POST /v1/admin/subject/dispute/clear` (issuer admin)
 - `POST /v1/admin/subject/appeal/open` (issuer admin)
 - `POST /v1/admin/subject/appeal/resolve` (issuer admin)
 - `POST /v1/admin/subject/recompute-tier` (issuer admin)
 - `GET /v1/admin/subject/get?subject=<id>` (issuer admin)
+- `POST /v1/admin/anon-credential/issue` (issuer admin)
+- `POST /v1/admin/anon-credential/revoke` (issuer admin)
+- `POST /v1/admin/anon-credential/dispute` (issuer admin)
+- `POST /v1/admin/anon-credential/dispute/clear` (issuer admin)
+- `GET /v1/admin/anon-credential/get?credential_id=<id>` (issuer admin)
 - `GET /v1/admin/audit` (issuer admin)
 - `POST /v1/admin/revoke-token` (issuer admin)
 - `GET /v1/revocations` (issuer revocation feed)
@@ -417,6 +467,7 @@ Anti-abuse entry controls:
 
 CI and tests:
 - `./scripts/ci_local.sh` (unit tests + internal topology assertions)
+- set `CI_LOCAL_INCLUDE_LOAD_CHAOS_MATRIX=1` to include `integration_load_chaos_matrix.sh` in local CI runs
 - `.github/workflows/ci.yml` runs the local CI script on push/PR
 - `./scripts/load_path_open.sh` (basic entry path-open load script)
 - `./scripts/integration_challenge.sh` (entry challenge/anti-abuse integration check)
@@ -424,6 +475,7 @@ CI and tests:
 - `./scripts/integration_federation.sh` (multi-directory quorum/vote integration check)
 - `./scripts/integration_operator_quorum.sh` (distinct-directory-operator quorum enforcement check)
 - `./scripts/integration_sync_status_chaos.sh` (directory sync-status failure/recovery observability under peer churn)
+- `./scripts/integration_directory_beta_strict.sh` (directory strict-governance guardrail check: expected fail with missing strict prerequisites, healthy startup with strict policy env)
 - `./scripts/integration_directory_operator_churn_scale.sh` (multi-operator directory churn/quorum resilience check with transit-source loss/recovery)
 - `./scripts/integration_directory_sync.sh` (directory peer sync integration check)
 - `./scripts/integration_directory_gossip.sh` (directory push-gossip ingestion integration check)
@@ -432,6 +484,7 @@ CI and tests:
 - `./scripts/integration_peer_discovery_backoff.sh` (discovered-peer failure cooldown/backoff + admin peer-status endpoint check)
 - `./scripts/integration_peer_discovery_require_hint.sh` (strict discovery hint-gate check: loose mode admits, strict mode blocks peers without signed hints)
 - `./scripts/integration_peer_discovery_source_cap.sh` (per-source discovery cap check: one source can only admit capped peers, multiple sources can still admit additional peers)
+- `./scripts/integration_peer_discovery_operator_cap.sh` (per-operator discovery cap check: peers sharing one hinted operator id are capped while peers from different operators are still admitted)
 - `./scripts/integration_selection_feed.sh` (signed selection-feed requirement integration check)
 - `./scripts/integration_trust_feed.sh` (signed trust-feed requirement + bond/stake signal integration check)
 - `./scripts/integration_opaque_source_downlink.sh` (exit opaque source downlink return-path integration check)
@@ -443,18 +496,26 @@ CI and tests:
 - `./scripts/integration_exit_live_wg_mode.sh` (exit live-WG mode check: non-WG opaque payloads dropped while plausible WG-like traffic is accepted and proxied)
 - `./scripts/integration_live_wg_full_path.sh` (client+entry+exit live-WG strict path check: client drops non-WG ingress while plausible WG-like traffic traverses full path and activates exit WG proxy metrics)
 - `./scripts/integration_client_bootstrap_recovery.sh` (client-first startup recovery check with delayed infrastructure bring-up and retry backoff validation)
+- `./scripts/integration_client_bootstrap_recovery_matrix.sh` (multi-profile startup recovery stability matrix over varying delay/backoff/jitter settings, including startup-sync gated no-failure profile)
+- `./scripts/integration_client_startup_sync.sh` (client startup sync gate check: timeout when control plane is unavailable, delayed success once issuer+directory become reachable)
+- `./scripts/integration_exit_startup_sync.sh` (exit startup issuer-sync gate check: timeout when issuer is unavailable, delayed success once issuer becomes reachable)
 - `./scripts/integration_client_startup_burst.sh` (parallel client startup burst with bootstrap jitter/backoff controls and success/traffic assertions)
 - `./scripts/integration_issuer_trust_sync.sh` (directory ingestion of issuer trust attestations check)
 - `./scripts/integration_issuer_dispute.sh` (issuer dispute + appeal lifecycle with case/evidence metadata and trust-signal checks)
+- `./scripts/integration_anon_credential.sh` (issuer anonymous-credential issue/revoke + token issuance/path-open behavior check)
+- `./scripts/integration_anon_credential_dispute.sh` (issuer anonymous-credential dispute tier-cap apply/clear behavior check during token issuance)
 - `./scripts/integration_adjudication_window_caps.sh` (directory dispute/appeal horizon cap enforcement check against far-future issuer signals)
 - `./scripts/integration_adjudication_quorum.sh` (directory final adjudication vote/ratio quorum suppression + governance-status signal/operator + per-relay suppression checks)
 - `./scripts/integration_adjudication_operator_quorum.sh` (directory final adjudication distinct-operator quorum suppression check)
 - `./scripts/integration_adjudication_source_quorum.sh` (directory final adjudication distinct-source quorum suppression check)
 - `./scripts/integration_real_wg_privileged.sh` (manual Linux root-only real `wg`/`ip` command-backend integration check; not part of CI)
-- `./scripts/integration_real_wg_privileged_matrix.sh` (manual Linux root-only multi-profile wrapper around privileged real-WG integration)
+- `./scripts/integration_real_wg_privileged_matrix.sh` (manual Linux root-only multi-profile wrapper around privileged real-WG integration, including strict beta-role profile)
 - `./scripts/integration_lifecycle_chaos.sh` (adversarial dispute/revocation race and stability check; included in deep suite)
+- `./scripts/integration_lifecycle_chaos_matrix.sh` (multi-profile lifecycle/dispute/revocation chaos wrapper for higher churn coverage)
 - `./scripts/integration_multi_issuer.sh` (exit multi-issuer token/revocation integration check)
 - `./scripts/integration_load_chaos.sh` (entry load guardrails + directory peer churn resilience check)
+- `./scripts/integration_load_chaos_matrix.sh` (multi-profile load/chaos stress wrapper across varying rate-limit and pressure settings)
+- `./scripts/beta_preflight.sh` (closed-beta preflight runner: unit tests + strict-governance + anonymous-credential dispute + bootstrap/load/lifecycle matrices; optional privileged WG matrix with `BETA_PREFLIGHT_PRIVILEGED=1`)
 - `./scripts/integration_http_cache.sh` (directory ETag/If-None-Match behavior check)
 - `./scripts/integration_directory_auto_key_rotation.sh` (directory automatic key rotation + bounded previous-key history enforcement)
 - `./scripts/integration_key_epoch_rotation.sh` (issuer key rotation + stale-epoch token denial check)

@@ -56,6 +56,7 @@ Claims (JSON payload):
 - `iss`: issuer id
 - `aud`: `exit` (client access) or `provider` (provider role)
 - `sub`: optional client subject identity
+- `anon_cred_id`: optional anonymous credential id when issuer minted from pseudonymous credential
 - `token_type`: `client_access` or `provider_role`
 - `cnf_ed25519`: base64url Ed25519 pubkey used to validate `token_proof`
 - `exp`: unix expiry (5-15 min)
@@ -72,6 +73,8 @@ Serialization for MVP:
 - `base64url(payload) + "." + base64url(ed25519_signature(payload))`
 
 ## Control Plane Endpoints
+- `GET /v1/health`
+  - Lightweight readiness endpoint served by directory/issuer/entry/exit.
 - `GET /v1/relays`
   - Returns signed descriptors from one directory operator.
 - `GET /v1/selection-feed`
@@ -85,6 +88,7 @@ Serialization for MVP:
 - `POST /v1/token`
   - Returns capability token for requester and effective tier.
   - Request includes `token_type` and `pop_pub_key`; response token is bound to that key via `cnf_ed25519`.
+  - Client token requests can optionally include `anon_cred` instead of `subject` for pseudonymous tiering.
 - `POST /v1/provider/relay/upsert`
   - Provider-role token gated relay advertisement endpoint for directory ingestion.
   - Requires `aud=provider` + `token_type=provider_role`.
@@ -107,12 +111,18 @@ Serialization for MVP:
 - `POST /v1/admin/subject/promote`
 - `POST /v1/admin/subject/reputation/apply`
 - `POST /v1/admin/subject/bond/apply`
+- `POST /v1/admin/subject/stake/apply`
 - `POST /v1/admin/subject/dispute`
 - `POST /v1/admin/subject/dispute/clear`
 - `POST /v1/admin/subject/appeal/open`
 - `POST /v1/admin/subject/appeal/resolve`
 - `POST /v1/admin/subject/recompute-tier`
 - `GET /v1/admin/subject/get?subject=<id>`
+- `POST /v1/admin/anon-credential/issue`
+- `POST /v1/admin/anon-credential/revoke`
+- `POST /v1/admin/anon-credential/dispute`
+- `POST /v1/admin/anon-credential/dispute/clear`
+- `GET /v1/admin/anon-credential/get?credential_id=<id>`
 - `GET /v1/admin/audit`
 - `POST /v1/admin/revoke-token`
 - `GET /v1/revocations`
@@ -236,7 +246,9 @@ Directory peer-membership feed shape:
 - Final adjudication quorum policy is applied consistently to both published trust attestations and trust-derived selection scoring.
 - Dispute/appeal windows are also bounded by configurable max horizons (`DIRECTORY_DISPUTE_MAX_TTL_SEC`, `DIRECTORY_APPEAL_MAX_TTL_SEC`) before publication and scoring, limiting long-window capture attempts.
 - Seeded dynamic peer discovery can be enabled with `DIRECTORY_PEER_DISCOVERY`, bounded with `DIRECTORY_PEER_DISCOVERY_MAX` / `DIRECTORY_PEER_DISCOVERY_TTL_SEC`, and gated by distinct source-operator sightings via `DIRECTORY_PEER_DISCOVERY_MIN_VOTES`.
+- Optional DNS TXT seed discovery can be enabled with `DIRECTORY_PEER_DISCOVERY_DNS_SEEDS`; each TXT record may advertise peers as `url=https://dir.example` with optional `operator=<id>` and `pub_key=<base64url-ed25519-pubkey>` hint fields.
 - Optional per-source admission cap (`DIRECTORY_PEER_DISCOVERY_MAX_PER_SOURCE`) can limit how many active discovered peers one source operator can contribute at a time.
+- Optional per-operator admission cap (`DIRECTORY_PEER_DISCOVERY_MAX_PER_OPERATOR`) can limit how many active discovered peers with the same hinted operator id are admitted at once.
 - Optional strict hint gate (`DIRECTORY_PEER_DISCOVERY_REQUIRE_HINT=1`) requires discovered peers to carry signed `operator` + `pub_key` hints before admission.
 - Discovered peers can be temporarily cooled down after repeated sync failures using `DIRECTORY_PEER_DISCOVERY_FAIL_THRESHOLD`, `DIRECTORY_PEER_DISCOVERY_BACKOFF_SEC`, and `DIRECTORY_PEER_DISCOVERY_MAX_BACKOFF_SEC` (exponential backoff for unstable peers).
 - Directory admin can inspect discovered-peer eligibility/cooldown state through `/v1/admin/peer-status`.
@@ -256,6 +268,8 @@ Directory peer-membership feed shape:
 2. Client requests short-lived token from issuer.
    - Request includes token class (`token_type`) and a PoP public key (`pop_pub_key`).
    - For path-open tokens use `token_type=client_access`.
+   - Optional anonymous credential (`anon_cred`) allows pseudonymous Tier-2/3 issuance without exposing a stable user subject string.
+   - Issuer can temporarily cap anonymous credential tier during dispute windows (`/v1/admin/anon-credential/dispute`) and clear caps after adjudication (`/v1/admin/anon-credential/dispute/clear`).
    - Issuer token lifetime is configurable (`ISSUER_TOKEN_TTL_SEC`).
 3. Client opens control session to selected entry `control_url`.
 4. Through outer tunnel, client sends `PATH_OPEN` to entry:
@@ -336,14 +350,17 @@ Implementation note:
 - Exit supports `WG_BACKEND=noop` (default) and `WG_BACKEND=command`.
 - `command` mode applies peer config using `wg`/`ip` commands on `PATH_OPEN`, explicitly brings the WG interface up, and removes peer on `PATH_CLOSE`.
 - In `command` mode, startup preflight validates `wg`/`ip` binaries, configured interface availability, and private key path readability.
+- In `command` mode, exit defaults `EXIT_STARTUP_SYNC_TIMEOUT_SEC=8` (unless explicitly set) so startup waits for issuer key/revocation readiness before serving traffic.
 - In `command` mode, `EXIT_WG_LISTEN_PORT` must be distinct from `EXIT_DATA_ADDR` port; startup fails on conflicts.
 - In `command` mode, exit derives `exit_inner_pub` from `EXIT_WG_PRIVATE_KEY_PATH` when `EXIT_WG_PUBKEY` is unset/invalid.
 - In `command` mode, exit fails startup if configured `EXIT_WG_PUBKEY` does not match the private key-derived public key.
 - Client supports `CLIENT_WG_BACKEND=noop` (default) and `CLIENT_WG_BACKEND=command`.
 - In client command mode, `PATH_OPEN_ACK` hints are used to configure/remove client peer state and bring the client WG interface up.
 - Client command mode requires `DATA_PLANE_MODE=opaque` and either `CLIENT_INNER_SOURCE=udp` or `CLIENT_WG_KERNEL_PROXY=1`; synthetic payload fallback is disabled.
+- In client command mode, client defaults `CLIENT_STARTUP_SYNC_TIMEOUT_SEC=8` (unless explicitly set) so startup waits for issuer/directory readiness before first bootstrap.
 - In client command mode, client derives `CLIENT_WG_PUBLIC_KEY` from `CLIENT_WG_PRIVATE_KEY_PATH` when unset/invalid.
 - In client command mode, client fails startup if configured `CLIENT_WG_PUBLIC_KEY` does not match the private key-derived public key.
+- Client startup can be dependency-gated with `CLIENT_STARTUP_SYNC_TIMEOUT_SEC` to wait for issuer/directory readiness (`/v1/health`, with fallback to `/v1/pubkeys` and `/v1/relays`) before first bootstrap.
 - Client can optionally run session-bound WG kernel proxy bridging with `CLIENT_WG_KERNEL_PROXY=1`, binding a local UDP endpoint (`CLIENT_WG_PROXY_ADDR`) as WG peer endpoint and relaying packets via entry opaque datagrams.
 - `CLIENT_DISABLE_SYNTHETIC_FALLBACK=1` can enforce UDP-origin opaque uplink traffic even outside command/live mode.
 - Client command mode supports configurable `allowed-ips` via `CLIENT_WG_ALLOWED_IPS` and optional route installation via `CLIENT_WG_INSTALL_ROUTE=1`.
@@ -391,6 +408,7 @@ Implementation note:
 
 Issuer subject lifecycle note:
 - Subject profiles can carry temporary dispute controls (`tier_cap`, `dispute_until`).
+- Subject profiles can carry independent stake state (`stake`) alongside reputation/bond for tier recommendation and trust scoring.
 - Subjects can carry temporary adjudication appeals (`appeal_until`) while disputes are under review.
 - Dispute and appeal actions can attach `case_id` / `evidence_ref` metadata, which propagates through issuer and directory trust attestations with vote thresholding.
 - While dispute is active, token tier eligibility is capped and issuer/directory trust attestations publish elevated `abuse_penalty` with reduced `confidence`.
@@ -416,7 +434,7 @@ Issuer subject lifecycle note:
   client retries with solved `puzzle_nonce` and `puzzle_digest`.
 
 ## Future Compatibility
-- Replace issuer auth with blind-signed or anonymous credentials.
+- Upgrade anonymous credentials to blind-signed/revocable credentials with unlinkable issuance.
 - Add multi-entry/multi-exit path selection and rotation.
 - Expand directory discovery from seeded peer feeds to broader internet-scale membership exchange.
 - Add federated selection-feed exchange/gossip across directory operators.

@@ -72,6 +72,19 @@ Or directly in WSL shell:
 
 Use the same flow documented in `docs/easy-3-machine-test.md`.
 
+From WSL on machine C, you can run the automated validator:
+
+```bash
+./scripts/easy_node.sh three-machine-validate \
+  --directory-a http://A_PUBLIC_IP_OR_DNS:8081 \
+  --directory-b http://B_PUBLIC_IP_OR_DNS:8081 \
+  --issuer-url http://A_PUBLIC_IP_OR_DNS:8082 \
+  --entry-url http://A_PUBLIC_IP_OR_DNS:8083 \
+  --exit-url http://A_PUBLIC_IP_OR_DNS:8084 \
+  --min-sources 2 \
+  --min-operators 2
+```
+
 Important for WSL/docker client runs:
 - do not use `127.0.0.1` / `localhost` for remote machines in `client-test`
 - use reachable IP/DNS for machine A/B endpoints

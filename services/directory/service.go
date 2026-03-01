@@ -9,7 +9,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	urlpkg "net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -60,9 +62,12 @@ type Service struct {
 	peerDiscoveryMinVotes    int
 	peerDiscoveryRequireHint bool
 	peerDiscoveryMaxPerSrc   int
+	peerDiscoveryMaxPerOp    int
 	peerDiscoveryFailN       int
 	peerDiscoveryBackoff     time.Duration
 	peerDiscoveryBackoffMax  time.Duration
+	peerDiscoveryDNSSeeds    []string
+	peerDiscoveryDNSRefresh  time.Duration
 	peerMinOperators         int
 	peerMinVotes             int
 	peerScoreMinVotes        int
@@ -102,6 +107,7 @@ type Service struct {
 	peerTrustStrict          bool
 	peerTrustTOFU            bool
 	peerTrustFile            string
+	betaStrict               bool
 	peerTrustMu              sync.Mutex
 	syncStatusMu             sync.RWMutex
 	peerSyncStatus           proto.DirectorySyncRunStatus
@@ -111,6 +117,7 @@ type Service struct {
 	privateKeyPath           string
 	keyRotateEvery           time.Duration
 	keyHistory               int
+	dnsLookupTXT             func(context.Context, string) ([]string, error)
 }
 
 type discoveredPeerHealth struct {
@@ -120,6 +127,8 @@ type discoveredPeerHealth struct {
 	cooldownUntil       time.Time
 	lastError           string
 }
+
+const discoveredPeerUnknownOperator = "_unknown"
 
 func New() *Service {
 	addr := os.Getenv("DIRECTORY_ADDR")
@@ -205,6 +214,10 @@ func New() *Service {
 	if v, err := strconv.Atoi(os.Getenv("DIRECTORY_PEER_DISCOVERY_MAX_PER_SOURCE")); err == nil && v > 0 {
 		peerDiscoveryMaxPerSrc = v
 	}
+	peerDiscoveryMaxPerOp := 0
+	if v, err := strconv.Atoi(os.Getenv("DIRECTORY_PEER_DISCOVERY_MAX_PER_OPERATOR")); err == nil && v > 0 {
+		peerDiscoveryMaxPerOp = v
+	}
 	peerDiscoveryFailN := 3
 	if v, err := strconv.Atoi(os.Getenv("DIRECTORY_PEER_DISCOVERY_FAIL_THRESHOLD")); err == nil && v > 0 {
 		peerDiscoveryFailN = v
@@ -219,6 +232,14 @@ func New() *Service {
 	}
 	if peerDiscoveryBackoffMax < peerDiscoveryBackoff {
 		peerDiscoveryBackoffMax = peerDiscoveryBackoff
+	}
+	peerDiscoveryDNSSeeds := parseDNSSeeds(splitCSV(os.Getenv("DIRECTORY_PEER_DISCOVERY_DNS_SEEDS")))
+	peerDiscoveryDNSRefresh := time.Duration(0)
+	if len(peerDiscoveryDNSSeeds) > 0 {
+		peerDiscoveryDNSRefresh = 2 * time.Minute
+	}
+	if v, err := strconv.Atoi(os.Getenv("DIRECTORY_PEER_DISCOVERY_DNS_REFRESH_SEC")); err == nil && v > 0 {
+		peerDiscoveryDNSRefresh = time.Duration(v) * time.Second
 	}
 	issuerSyncSec := 10
 	if v, err := strconv.Atoi(os.Getenv("DIRECTORY_ISSUER_SYNC_SEC")); err == nil && v > 0 {
@@ -348,6 +369,7 @@ func New() *Service {
 	if peerTrustFile == "" {
 		peerTrustFile = "data/directory_peer_trusted_keys.txt"
 	}
+	betaStrict := os.Getenv("BETA_STRICT_MODE") == "1" || os.Getenv("DIRECTORY_BETA_STRICT") == "1"
 	adminToken := os.Getenv("DIRECTORY_ADMIN_TOKEN")
 	if adminToken == "" {
 		adminToken = "dev-admin-token"
@@ -404,9 +426,12 @@ func New() *Service {
 		peerDiscoveryMinVotes:    peerDiscoveryMinVotes,
 		peerDiscoveryRequireHint: peerDiscoveryRequireHint,
 		peerDiscoveryMaxPerSrc:   peerDiscoveryMaxPerSrc,
+		peerDiscoveryMaxPerOp:    peerDiscoveryMaxPerOp,
 		peerDiscoveryFailN:       peerDiscoveryFailN,
 		peerDiscoveryBackoff:     peerDiscoveryBackoff,
 		peerDiscoveryBackoffMax:  peerDiscoveryBackoffMax,
+		peerDiscoveryDNSSeeds:    peerDiscoveryDNSSeeds,
+		peerDiscoveryDNSRefresh:  peerDiscoveryDNSRefresh,
 		peerMinOperators:         peerMinOperators,
 		peerMinVotes:             peerMinVotes,
 		peerScoreMinVotes:        peerScoreMinVotes,
@@ -444,14 +469,19 @@ func New() *Service {
 		peerTrustStrict:          peerTrustStrict,
 		peerTrustTOFU:            peerTrustTOFU,
 		peerTrustFile:            peerTrustFile,
+		betaStrict:               betaStrict,
 		httpClient:               &http.Client{Timeout: 5 * time.Second},
 		privateKeyPath:           privateKeyPath,
 		keyRotateEvery:           keyRotateEvery,
 		keyHistory:               keyHistory,
+		dnsLookupTXT:             net.DefaultResolver.LookupTXT,
 	}
 }
 
 func (s *Service) Run(ctx context.Context) error {
+	if err := s.validateRuntimeConfig(); err != nil {
+		return err
+	}
 	pub, priv, err := s.loadOrCreateKeypair()
 	if err != nil {
 		return fmt.Errorf("directory key init: %w", err)
@@ -462,6 +492,7 @@ func (s *Service) Run(ctx context.Context) error {
 	s.keyMu.Unlock()
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/health", s.handleHealth)
 	mux.HandleFunc("/v1/relays", s.handleRelays)
 	mux.HandleFunc("/v1/selection-feed", s.handleSelectionFeed)
 	mux.HandleFunc("/v1/trust-attestations", s.handleTrustAttestations)
@@ -479,8 +510,8 @@ func (s *Service) Run(ctx context.Context) error {
 		Addr:    s.addr,
 		Handler: mux,
 	}
-	log.Printf("directory federation policy: peers=%d peer_min_operators=%d peer_min_votes=%d peer_discovery_min_votes=%d peer_discovery_require_hint=%t peer_discovery_max_per_source=%d peer_discovery_fail_threshold=%d peer_discovery_backoff_sec=%d peer_discovery_max_backoff_sec=%d adjudication_meta_min_votes=%d final_dispute_min_votes=%d final_appeal_min_votes=%d final_adjudication_min_operators=%d final_adjudication_min_sources=%d final_adjudication_min_ratio=%.2f dispute_max_ttl_sec=%d appeal_max_ttl_sec=%d issuer_urls=%d issuer_min_operators=%d issuer_min_votes=%d provider_issuer_urls=%d provider_relay_max_ttl_sec=%d provider_min_entry_tier=%d provider_min_exit_tier=%d provider_max_relays_per_operator=%d key_rotate_sec=%d key_history=%d",
-		len(s.peerURLs), s.peerMinOperators, s.peerMinVotes, maxInt(1, s.peerDiscoveryMinVotes), s.peerDiscoveryRequireHint, maxInt(0, s.peerDiscoveryMaxPerSrc), maxInt(1, s.peerDiscoveryFailN), int(s.peerDiscoveryBackoff/time.Second), int(s.peerDiscoveryBackoffMax/time.Second), maxInt(1, s.adjudicationMetaMin), s.effectiveFinalDisputeMinVotes(), s.effectiveFinalAppealMinVotes(), s.effectiveFinalAdjudicationMinOperators(), s.effectiveFinalAdjudicationMinSources(), s.effectiveFinalAdjudicationMinRatio(), int(s.disputeMaxTTL/time.Second), int(s.appealMaxTTL/time.Second), len(s.issuerTrustURLs), s.issuerMinOperators, s.issuerTrustMinVotes, len(s.providerIssuerURLs), int(s.providerRelayMaxTTL/time.Second), s.effectiveProviderMinEntryTier(), s.effectiveProviderMinExitTier(), s.effectiveProviderMaxRelaysPerOperator(), int(s.keyRotateEvery/time.Second), s.effectiveKeyHistory())
+	log.Printf("directory federation policy: peers=%d peer_min_operators=%d peer_min_votes=%d peer_discovery_min_votes=%d peer_discovery_require_hint=%t peer_discovery_max_per_source=%d peer_discovery_max_per_operator=%d peer_discovery_fail_threshold=%d peer_discovery_backoff_sec=%d peer_discovery_max_backoff_sec=%d peer_discovery_dns_seeds=%d peer_discovery_dns_refresh_sec=%d adjudication_meta_min_votes=%d final_dispute_min_votes=%d final_appeal_min_votes=%d final_adjudication_min_operators=%d final_adjudication_min_sources=%d final_adjudication_min_ratio=%.2f dispute_max_ttl_sec=%d appeal_max_ttl_sec=%d issuer_urls=%d issuer_min_operators=%d issuer_min_votes=%d provider_issuer_urls=%d provider_relay_max_ttl_sec=%d provider_min_entry_tier=%d provider_min_exit_tier=%d provider_max_relays_per_operator=%d key_rotate_sec=%d key_history=%d",
+		len(s.peerURLs), s.peerMinOperators, s.peerMinVotes, maxInt(1, s.peerDiscoveryMinVotes), s.peerDiscoveryRequireHint, maxInt(0, s.peerDiscoveryMaxPerSrc), maxInt(0, s.peerDiscoveryMaxPerOp), maxInt(1, s.peerDiscoveryFailN), int(s.peerDiscoveryBackoff/time.Second), int(s.peerDiscoveryBackoffMax/time.Second), len(s.peerDiscoveryDNSSeeds), int(s.peerDiscoveryDNSRefresh/time.Second), maxInt(1, s.adjudicationMetaMin), s.effectiveFinalDisputeMinVotes(), s.effectiveFinalAppealMinVotes(), s.effectiveFinalAdjudicationMinOperators(), s.effectiveFinalAdjudicationMinSources(), s.effectiveFinalAdjudicationMinRatio(), int(s.disputeMaxTTL/time.Second), int(s.appealMaxTTL/time.Second), len(s.issuerTrustURLs), s.issuerMinOperators, s.issuerTrustMinVotes, len(s.providerIssuerURLs), int(s.providerRelayMaxTTL/time.Second), s.effectiveProviderMinEntryTier(), s.effectiveProviderMinExitTier(), s.effectiveProviderMaxRelaysPerOperator(), int(s.keyRotateEvery/time.Second), s.effectiveKeyHistory())
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -508,7 +539,71 @@ func (s *Service) Run(ctx context.Context) error {
 	}
 }
 
+func (s *Service) validateRuntimeConfig() error {
+	if !s.betaStrict {
+		return nil
+	}
+	if !s.peerDiscoveryEnabled {
+		return fmt.Errorf("BETA_STRICT_MODE requires DIRECTORY_PEER_DISCOVERY=1")
+	}
+	if s.peerMinOperators < 2 {
+		return fmt.Errorf("BETA_STRICT_MODE requires DIRECTORY_PEER_MIN_OPERATORS>=2")
+	}
+	if s.peerMinVotes < 2 {
+		return fmt.Errorf("BETA_STRICT_MODE requires DIRECTORY_PEER_MIN_VOTES>=2")
+	}
+	if maxInt(1, s.peerDiscoveryMinVotes) < 2 {
+		return fmt.Errorf("BETA_STRICT_MODE requires DIRECTORY_PEER_DISCOVERY_MIN_VOTES>=2")
+	}
+	if len(s.issuerTrustURLs) < 2 {
+		return fmt.Errorf("BETA_STRICT_MODE requires at least 2 DIRECTORY_ISSUER_TRUST_URLS")
+	}
+	if s.issuerMinOperators < 2 {
+		return fmt.Errorf("BETA_STRICT_MODE requires DIRECTORY_ISSUER_MIN_OPERATORS>=2")
+	}
+	if s.issuerTrustMinVotes < 2 {
+		return fmt.Errorf("BETA_STRICT_MODE requires DIRECTORY_ISSUER_TRUST_MIN_VOTES>=2")
+	}
+	if s.issuerDisputeMinVotes < 2 {
+		return fmt.Errorf("BETA_STRICT_MODE requires DIRECTORY_ISSUER_DISPUTE_MIN_VOTES>=2")
+	}
+	if s.issuerAppealMinVotes < 2 {
+		return fmt.Errorf("BETA_STRICT_MODE requires DIRECTORY_ISSUER_APPEAL_MIN_VOTES>=2")
+	}
+	if !s.peerDiscoveryRequireHint {
+		return fmt.Errorf("BETA_STRICT_MODE requires DIRECTORY_PEER_DISCOVERY_REQUIRE_HINT=1")
+	}
+	if s.peerDiscoveryMaxPerSource() <= 0 {
+		return fmt.Errorf("BETA_STRICT_MODE requires DIRECTORY_PEER_DISCOVERY_MAX_PER_SOURCE>0")
+	}
+	if s.peerDiscoveryMaxPerOperator() <= 0 {
+		return fmt.Errorf("BETA_STRICT_MODE requires DIRECTORY_PEER_DISCOVERY_MAX_PER_OPERATOR>0")
+	}
+	if !s.peerTrustStrict {
+		return fmt.Errorf("BETA_STRICT_MODE requires DIRECTORY_PEER_TRUST_STRICT=1")
+	}
+	if s.finalAdjudicationOps < 2 {
+		return fmt.Errorf("BETA_STRICT_MODE requires DIRECTORY_FINAL_ADJUDICATION_MIN_OPERATORS>=2")
+	}
+	if s.effectiveFinalAdjudicationMinSources() < 2 {
+		return fmt.Errorf("BETA_STRICT_MODE requires DIRECTORY_FINAL_ADJUDICATION_MIN_SOURCES>=2")
+	}
+	if s.effectiveFinalDisputeMinVotes() < 2 {
+		return fmt.Errorf("BETA_STRICT_MODE requires DIRECTORY_FINAL_DISPUTE_MIN_VOTES>=2")
+	}
+	if s.effectiveFinalAppealMinVotes() < 2 {
+		return fmt.Errorf("BETA_STRICT_MODE requires DIRECTORY_FINAL_APPEAL_MIN_VOTES>=2")
+	}
+	if s.keyRotateEvery <= 0 {
+		return fmt.Errorf("BETA_STRICT_MODE requires DIRECTORY_KEY_ROTATE_SEC>0")
+	}
+	return nil
+}
+
 func (s *Service) runPeerSync(ctx context.Context) {
+	if err := s.syncDNSDiscoveredPeers(ctx, time.Now()); err != nil && len(s.peerDiscoveryDNSSeeds) > 0 {
+		log.Printf("directory dns peer discovery initial failed: %v", err)
+	}
 	if err := s.syncPeerRelays(ctx); err != nil && len(s.peerURLs) > 0 {
 		log.Printf("directory peer sync initial failed: %v", err)
 	}
@@ -523,6 +618,11 @@ func (s *Service) runPeerSync(ctx context.Context) {
 	if s.gossipSec > 0 && len(s.peerURLs) > 0 {
 		gossipTicker = time.NewTicker(time.Duration(maxInt(1, s.gossipSec)) * time.Second)
 		defer gossipTicker.Stop()
+	}
+	var dnsTicker *time.Ticker
+	if len(s.peerDiscoveryDNSSeeds) > 0 && s.peerDiscoveryDNSRefresh > 0 {
+		dnsTicker = time.NewTicker(s.peerDiscoveryDNSRefresh)
+		defer dnsTicker.Stop()
 	}
 	for {
 		select {
@@ -539,6 +639,10 @@ func (s *Service) runPeerSync(ctx context.Context) {
 		case <-tickerC(gossipTicker):
 			if err := s.gossipPeerRelays(ctx); err != nil {
 				log.Printf("directory gossip push failed: %v", err)
+			}
+		case <-tickerC(dnsTicker):
+			if err := s.syncDNSDiscoveredPeers(ctx, time.Now()); err != nil {
+				log.Printf("directory dns peer discovery refresh failed: %v", err)
 			}
 		}
 	}
@@ -1598,6 +1702,7 @@ func (s *Service) ingestDiscoveredPeers(sourceURL string, sourceOperator string,
 	requiredVotes := maxInt(1, s.peerDiscoveryMinVotes)
 	requireHint := s.peerDiscoveryRequireHint
 	maxPerSource := s.peerDiscoveryMaxPerSource()
+	maxPerOperator := s.peerDiscoveryMaxPerOperator()
 	discovered := 0
 
 	s.peerMu.Lock()
@@ -1619,7 +1724,7 @@ func (s *Service) ingestDiscoveredPeers(sourceURL string, sourceOperator string,
 	s.pruneDiscoveredPeersLocked(now)
 	for _, hint := range hints {
 		peerURL := normalizePeerURL(hint.URL)
-		if peerURL == "" || peerURL == self || peerURL == sourceURL {
+		if peerURL == "" {
 			continue
 		}
 		if operator := normalizeOperatorID(hint.Operator); operator != "" {
@@ -1627,6 +1732,9 @@ func (s *Service) ingestDiscoveredPeers(sourceURL string, sourceOperator string,
 		}
 		if key := normalizePeerPubKey(hint.PubKey); key != "" {
 			s.peerHintPubKeys[peerURL] = key
+		}
+		if peerURL == self || peerURL == sourceURL {
+			continue
 		}
 		if requireHint {
 			if normalizeOperatorID(s.peerHintOperators[peerURL]) == "" || normalizePeerPubKey(s.peerHintPubKeys[peerURL]) == "" {
@@ -1649,6 +1757,13 @@ func (s *Service) ingestDiscoveredPeers(sourceURL string, sourceOperator string,
 		if s.activeDiscoveredPeerVotesLocked(peerURL) < requiredVotes {
 			continue
 		}
+		hintOperatorKey := discoveredPeerOperatorKey(s.peerHintOperators[peerURL])
+		if maxPerOperator > 0 {
+			if _, alreadyDiscovered := s.discoveredPeers[peerURL]; !alreadyDiscovered &&
+				s.activeDiscoveredPeersByHintOperatorLocked(hintOperatorKey) >= maxPerOperator {
+				continue
+			}
+		}
 		prev, ok := s.discoveredPeers[peerURL]
 		if !ok || now.After(prev) {
 			s.discoveredPeers[peerURL] = now
@@ -1660,9 +1775,125 @@ func (s *Service) ingestDiscoveredPeers(sourceURL string, sourceOperator string,
 	return discovered
 }
 
+func (s *Service) syncDNSDiscoveredPeers(ctx context.Context, now time.Time) error {
+	if !s.peerDiscoveryEnabled || len(s.peerDiscoveryDNSSeeds) == 0 {
+		return nil
+	}
+	lookup := s.dnsLookupTXT
+	if lookup == nil {
+		return fmt.Errorf("dns txt lookup unavailable")
+	}
+	totalDiscovered := 0
+	var errs []string
+	for _, seed := range s.peerDiscoveryDNSSeeds {
+		records, err := lookup(ctx, seed)
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("%s:%v", seed, err))
+			continue
+		}
+		hints := parseDNSPeerHints(records)
+		if len(hints) == 0 {
+			continue
+		}
+		sourceOperator := "dns-seed:" + seed
+		discovered := s.ingestDiscoveredPeers("", sourceOperator, hints, now)
+		totalDiscovered += discovered
+	}
+	if totalDiscovered > 0 {
+		log.Printf("directory dns peer discovery admitted=%d seeds=%d", totalDiscovered, len(s.peerDiscoveryDNSSeeds))
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("dns seed lookup errors: %s", strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+func parseDNSPeerHints(records []string) []proto.DirectoryPeerHint {
+	if len(records) == 0 {
+		return nil
+	}
+	hints := make([]proto.DirectoryPeerHint, 0, len(records))
+	for _, rec := range records {
+		hint, ok := parseDNSPeerHintRecord(rec)
+		if !ok {
+			continue
+		}
+		hints = append(hints, hint)
+	}
+	return normalizePeerHints(nil, hints)
+}
+
+func parseDNSPeerHintRecord(record string) (proto.DirectoryPeerHint, bool) {
+	record = strings.TrimSpace(record)
+	if record == "" {
+		return proto.DirectoryPeerHint{}, false
+	}
+	if validDNSDiscoveryURL(record) {
+		return proto.DirectoryPeerHint{URL: normalizePeerURL(record)}, true
+	}
+
+	fields := strings.Fields(strings.NewReplacer(";", " ", ",", " ").Replace(record))
+	if len(fields) == 0 {
+		return proto.DirectoryPeerHint{}, false
+	}
+	hint := proto.DirectoryPeerHint{}
+	for _, field := range fields {
+		key, value, ok := strings.Cut(field, "=")
+		if !ok {
+			continue
+		}
+		key = strings.ToLower(strings.TrimSpace(key))
+		value = strings.TrimSpace(value)
+		switch key {
+		case "url", "peer", "peer_url", "peer-url":
+			if hint.URL == "" {
+				hint.URL = normalizePeerURL(value)
+			}
+		case "operator", "op":
+			if hint.Operator == "" {
+				hint.Operator = normalizeOperatorID(value)
+			}
+		case "pub_key", "pubkey", "pub-key":
+			if hint.PubKey == "" {
+				hint.PubKey = normalizePeerPubKey(value)
+			}
+		}
+	}
+	if !validDNSDiscoveryURL(hint.URL) {
+		return proto.DirectoryPeerHint{}, false
+	}
+	return hint, true
+}
+
+func validDNSDiscoveryURL(raw string) bool {
+	url := normalizePeerURL(raw)
+	if url == "" {
+		return false
+	}
+	parsed, err := urlpkg.Parse(url)
+	if err != nil {
+		return false
+	}
+	host := strings.TrimSpace(parsed.Hostname())
+	if host == "" {
+		return false
+	}
+	if !strings.Contains(host, ".") && net.ParseIP(host) == nil {
+		return false
+	}
+	return true
+}
+
 func (s *Service) peerDiscoveryMaxPerSource() int {
 	if s.peerDiscoveryMaxPerSrc > 0 {
 		return s.peerDiscoveryMaxPerSrc
+	}
+	return 0
+}
+
+func (s *Service) peerDiscoveryMaxPerOperator() int {
+	if s.peerDiscoveryMaxPerOp > 0 {
+		return s.peerDiscoveryMaxPerOp
 	}
 	return 0
 }
@@ -1747,6 +1978,28 @@ func (s *Service) activeDiscoveredPeerVotesBySourceLocked(sourceOperator string)
 		}
 	}
 	return count
+}
+
+func (s *Service) activeDiscoveredPeersByHintOperatorLocked(hintOperator string) int {
+	hintOperator = discoveredPeerOperatorKey(hintOperator)
+	if hintOperator == "" || len(s.discoveredPeers) == 0 {
+		return 0
+	}
+	count := 0
+	for peerURL := range s.discoveredPeers {
+		if discoveredPeerOperatorKey(s.peerHintOperators[peerURL]) == hintOperator {
+			count++
+		}
+	}
+	return count
+}
+
+func discoveredPeerOperatorKey(operator string) string {
+	operator = normalizeOperatorID(operator)
+	if operator != "" {
+		return operator
+	}
+	return discoveredPeerUnknownOperator
 }
 
 func (s *Service) isConfiguredPeerLocked(peerURL string) bool {
@@ -2968,6 +3221,30 @@ func splitCSV(raw string) []string {
 	return out
 }
 
+func parseDNSSeeds(seeds []string) []string {
+	if len(seeds) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(seeds))
+	seen := make(map[string]struct{}, len(seeds))
+	for _, seed := range seeds {
+		seed = strings.ToLower(strings.TrimSpace(seed))
+		seed = strings.TrimSuffix(seed, ".")
+		if seed == "" {
+			continue
+		}
+		if strings.Contains(seed, "/") || strings.Contains(seed, "://") {
+			continue
+		}
+		if _, ok := seen[seed]; ok {
+			continue
+		}
+		seen[seed] = struct{}{}
+		out = append(out, seed)
+	}
+	return out
+}
+
 func normalizePeerURL(raw string) string {
 	v := normalizeHTTPURL(raw)
 	return strings.TrimRight(v, "/")
@@ -3891,6 +4168,15 @@ func (s *Service) handlePubKeys(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		http.Error(w, "encode error", http.StatusInternalServerError)
 	}
+}
+
+func (s *Service) handleHealth(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("ok"))
 }
 
 func (s *Service) handleRotateKey(w http.ResponseWriter, r *http.Request) {

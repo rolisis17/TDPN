@@ -31,6 +31,7 @@ Menu options:
 - client test against remote server(s)
 - server status/logs/down
 - built-in 3-machine checklist
+- built-in 3-machine validation runner
 
 ## 3) Non-interactive mode (script backend)
 
@@ -69,6 +70,53 @@ Optional on Machine A to federate both ways:
   --exit-url http://A_PUBLIC_IP_OR_DNS:8084 \
   --min-sources 2
 ```
+
+Automated validation (recommended on machine C):
+
+```bash
+./scripts/easy_node.sh three-machine-validate \
+  --directory-a http://A_PUBLIC_IP_OR_DNS:8081 \
+  --directory-b http://B_PUBLIC_IP_OR_DNS:8081 \
+  --issuer-url http://A_PUBLIC_IP_OR_DNS:8082 \
+  --entry-url http://A_PUBLIC_IP_OR_DNS:8083 \
+  --exit-url http://A_PUBLIC_IP_OR_DNS:8084 \
+  --min-sources 2 \
+  --min-operators 2
+```
+
+This runs:
+- endpoint health checks (`directory`, `issuer`, `entry`, `exit`)
+- federation operator-floor check on both directories
+- client path bootstrap validation with both directory sources
+
+Role-specific automated checks (recommended before full C run):
+
+Machine A:
+
+```bash
+./scripts/easy_node.sh machine-a-test --public-host A_PUBLIC_IP_OR_DNS
+```
+
+Machine B:
+
+```bash
+./scripts/easy_node.sh machine-b-test \
+  --peer-directory-a http://A_PUBLIC_IP_OR_DNS:8081 \
+  --public-host B_PUBLIC_IP_OR_DNS
+```
+
+Machine C:
+
+```bash
+./scripts/easy_node.sh machine-c-test \
+  --directory-a http://A_PUBLIC_IP_OR_DNS:8081 \
+  --directory-b http://B_PUBLIC_IP_OR_DNS:8081 \
+  --issuer-url http://A_PUBLIC_IP_OR_DNS:8082 \
+  --entry-url http://A_PUBLIC_IP_OR_DNS:8083 \
+  --exit-url http://A_PUBLIC_IP_OR_DNS:8084
+```
+
+Each command prints (and can store) a test report file to share for debugging.
 
 Success signal:
 - output contains `client selected entry=`

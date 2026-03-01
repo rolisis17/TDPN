@@ -95,6 +95,37 @@ What to expect:
 
 This is the simplest full path test.
 
+3-machine external beta validation (machine C runner):
+
+```bash
+./scripts/integration_3machine_beta_validate.sh \
+  --directory-a http://A_PUBLIC_IP_OR_DNS:8081 \
+  --directory-b http://B_PUBLIC_IP_OR_DNS:8081 \
+  --issuer-url http://A_PUBLIC_IP_OR_DNS:8082 \
+  --entry-url http://A_PUBLIC_IP_OR_DNS:8083 \
+  --exit-url http://A_PUBLIC_IP_OR_DNS:8084 \
+  --min-sources 2 \
+  --min-operators 2
+```
+
+Machine-role quick checks (run on each host before full 3-machine run):
+
+```bash
+# machine A
+./scripts/easy_node.sh machine-a-test --public-host A_PUBLIC_IP_OR_DNS
+
+# machine B
+./scripts/easy_node.sh machine-b-test --peer-directory-a http://A_PUBLIC_IP_OR_DNS:8081 --public-host B_PUBLIC_IP_OR_DNS
+
+# machine C
+./scripts/easy_node.sh machine-c-test \
+  --directory-a http://A_PUBLIC_IP_OR_DNS:8081 \
+  --directory-b http://B_PUBLIC_IP_OR_DNS:8081 \
+  --issuer-url http://A_PUBLIC_IP_OR_DNS:8082 \
+  --entry-url http://A_PUBLIC_IP_OR_DNS:8083 \
+  --exit-url http://A_PUBLIC_IP_OR_DNS:8084
+```
+
 ## 5) How to test specific features
 
 Challenge / anti-abuse:
@@ -153,6 +184,16 @@ Directory sync-status failure/recovery observability under peer churn:
 ```bash
 ./scripts/integration_sync_status_chaos.sh
 ```
+
+Directory beta strict-mode guardrail behavior:
+
+```bash
+./scripts/integration_directory_beta_strict.sh
+```
+
+In strict mode, discovery anti-capture caps are fail-closed:
+- `DIRECTORY_PEER_DISCOVERY_MAX_PER_SOURCE>0`
+- `DIRECTORY_PEER_DISCOVERY_MAX_PER_OPERATOR>0`
 
 Directory multi-operator churn/quorum resilience:
 
@@ -231,7 +272,9 @@ Directory peer discovery (seeded decentralized membership):
 Optional stricter discovery anti-capture policy:
 - set `DIRECTORY_PEER_DISCOVERY_MIN_VOTES=2` (or higher) so one peer operator cannot unilaterally admit newly discovered peers
 - set `DIRECTORY_PEER_DISCOVERY_MAX_PER_SOURCE` (for example `8`) so one source operator cannot flood discovery with unlimited peer additions
+- set `DIRECTORY_PEER_DISCOVERY_MAX_PER_OPERATOR` (for example `4`) so one hinted operator cannot dominate discovery with many endpoints
 - set `DIRECTORY_PEER_DISCOVERY_REQUIRE_HINT=1` so newly discovered peers must include signed operator and pubkey hints before admission
+- for DNS seed mode, publish TXT records as `url=https://dir.example;operator=<id>;pub_key=<base64url-ed25519-pubkey>` when strict hint admission is enabled
 
 Peer discovery quorum behavior (single-source blocked, multi-source admitted):
 
@@ -255,6 +298,12 @@ Peer discovery per-source admission cap behavior:
 
 ```bash
 ./scripts/integration_peer_discovery_source_cap.sh
+```
+
+Peer discovery per-operator admission cap behavior:
+
+```bash
+./scripts/integration_peer_discovery_operator_cap.sh
 ```
 
 Optional stricter unstable-peer suppression policy:
@@ -336,10 +385,43 @@ Client bootstrap delayed-infrastructure recovery:
 ./scripts/integration_client_bootstrap_recovery.sh
 ```
 
+Client bootstrap recovery matrix:
+
+```bash
+./scripts/integration_client_bootstrap_recovery_matrix.sh
+```
+
+Startup sync gating profile (within the matrix):
+- `startup_sync_gate` uses `CLIENT_STARTUP_SYNC_TIMEOUT_SEC` so client waits for control-plane readiness and avoids initial bootstrap failures while infrastructure is still starting.
+
+Client startup sync gate (timeout + delayed-success recovery):
+
+```bash
+./scripts/integration_client_startup_sync.sh
+```
+
+Exit startup issuer-sync gate (timeout + delayed-success recovery):
+
+```bash
+./scripts/integration_exit_startup_sync.sh
+```
+
 Client parallel startup burst (jitter/backoff behavior under load):
 
 ```bash
 ./scripts/integration_client_startup_burst.sh
+```
+
+Anonymous credential end-to-end issue/revoke flow:
+
+```bash
+./scripts/integration_anon_credential.sh
+```
+
+Anonymous credential dispute tier-cap flow:
+
+```bash
+./scripts/integration_anon_credential_dispute.sh
 ```
 
 Persistent opaque-session bridge (delayed downlink timing):
@@ -372,10 +454,28 @@ Load + chaos resilience:
 ./scripts/integration_load_chaos.sh
 ```
 
+Load + chaos profile matrix:
+
+```bash
+./scripts/integration_load_chaos_matrix.sh
+```
+
 Adversarial lifecycle chaos (dispute/revocation race):
 
 ```bash
 ./scripts/integration_lifecycle_chaos.sh
+```
+
+Adversarial lifecycle chaos matrix (multi-profile):
+
+```bash
+./scripts/integration_lifecycle_chaos_matrix.sh
+```
+
+Closed-beta preflight bundle:
+
+```bash
+./scripts/beta_preflight.sh
 ```
 
 HTTP cache/anti-entropy behavior:
@@ -451,6 +551,9 @@ All deep checks in one command:
 - `integration_peer_discovery_source_cap.sh`:
   `DIRECTORY_PEER_DISCOVERY_MAX_PER_SOURCE` limits how many discovered peers one source operator can add; additional peers are still admitted when announced by distinct source operators.
 
+- `integration_peer_discovery_operator_cap.sh`:
+  `DIRECTORY_PEER_DISCOVERY_MAX_PER_OPERATOR` limits how many discovered peers sharing the same hinted operator id can be admitted at once, while still allowing peers from other operators.
+
 - `integration_exit_live_wg_mode.sh`:
   in `EXIT_LIVE_WG_MODE=1`, exit drops non-WireGuard opaque payloads (`dropped_non_wg_live`) while still accepting/proxying plausible WG-like traffic (`accepted_packets`, `wg_proxy_created`).
 
@@ -499,6 +602,9 @@ All deep checks in one command:
 - `integration_sync_status_chaos.sh`:
   directory admin sync-status endpoint reports failed quorum while peer is down, success with operator attribution after recovery, and failure again after peer loss.
 
+- `integration_directory_beta_strict.sh`:
+  directory strict-mode config guardrails fail closed with missing prerequisites, and startup succeeds once strict governance requirements are supplied.
+
 - `integration_directory_operator_churn_scale.sh`:
   validates larger multi-operator topology behavior: relay import across transit operators, quorum drop on one transit loss, quorum recovery after restart, and relay continuity under seed churn.
 
@@ -526,17 +632,41 @@ All deep checks in one command:
 - `integration_client_bootstrap_recovery.sh`:
   client starts before directory/issuer/entry/exit are online, records bootstrap failures, then recovers automatically after infrastructure comes up and forwards packets successfully.
 
+- `integration_client_bootstrap_recovery_matrix.sh`:
+  runs startup recovery across multiple delay/backoff/jitter profiles (including startup-sync gating) to catch race-induced flakiness in bootstrap behavior.
+
+- `integration_client_startup_sync.sh`:
+  client with `CLIENT_STARTUP_SYNC_TIMEOUT_SEC` fails closed when issuer/directory are unavailable, then succeeds once control-plane readiness is restored.
+
+- `integration_exit_startup_sync.sh`:
+  exit with `EXIT_STARTUP_SYNC_TIMEOUT_SEC` fails closed when issuer endpoints are unavailable, then succeeds when issuer comes online before timeout.
+
 - `integration_client_startup_burst.sh`:
   runs many clients in parallel with bootstrap jitter/backoff settings and checks that a healthy majority establish paths without panics while exit traffic counters advance.
 
+- `integration_anon_credential.sh`:
+  issuer issues an anonymous credential, client-access token minting with `anon_cred` succeeds, path-open succeeds, then credential revocation blocks further token minting.
+
+- `integration_anon_credential_dispute.sh`:
+  issuer applies a temporary anonymous-credential dispute cap, verifies admin status via `/v1/admin/anon-credential/get`, token minting from `anon_cred` is tier-capped during the dispute window, and clearing the dispute restores baseline credential tier.
+
 - `integration_lifecycle_chaos.sh`:
   races revocation enforcement and dispute apply/clear loops while path-open traffic continues, then checks for expected revoked denials and no crash/panic.
+
+- `integration_lifecycle_chaos_matrix.sh`:
+  runs lifecycle chaos validation across multiple churn profiles (open/dispute/reissue cadence) to catch timing-sensitive regressions.
 
 - `integration_multi_issuer.sh`:
   exit accepts token from a secondary issuer and then denies it after that issuer revokes the token.
 
 - `integration_load_chaos.sh`:
-  entry anti-abuse controls trigger under handshake load, and directory peer churn does not break client bootstrap after sync.
+  entry anti-abuse controls trigger under handshake load, custom-port descriptor control URLs remain correct (`ENTRY_URL`/`EXIT_CONTROL_URL`), and directory peer churn does not break client bootstrap after sync.
+
+- `integration_load_chaos_matrix.sh`:
+  runs load/chaos validation across multiple pressure profiles (RPS/puzzle/ban thresholds and concurrent opens) to surface tuning-sensitive regressions.
+
+- `integration_3machine_beta_validate.sh`:
+  from machine C, verifies A/B endpoint health, federation operator-floor on both directories, then runs client bootstrap against both directory sources for real cross-host setup validation.
 
 - `integration_http_cache.sh`:
   directory `ETag` + `If-None-Match` returns `304` when relay/feed payloads are unchanged (incremental sync path).

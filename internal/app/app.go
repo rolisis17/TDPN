@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
+	"strings"
 
 	"privacynode/services/directory"
 	"privacynode/services/entry"
@@ -36,6 +38,8 @@ type Config struct {
 }
 
 func Run(ctx context.Context, cfg Config) error {
+	autoWireRoleURLs(cfg.Roles)
+
 	var runners []func(context.Context) error
 
 	if cfg.Roles.Directory {
@@ -92,4 +96,33 @@ func Run(ctx context.Context, cfg Config) error {
 
 	log.Println("node stopped")
 	return nil
+}
+
+func autoWireRoleURLs(roles Roles) {
+	if roles.Issuer && (roles.Entry || roles.Exit || roles.Client) {
+		setURLFromAddrIfUnset("ISSUER_URL", "ISSUER_ADDR")
+	}
+	if roles.Directory && roles.Client {
+		setURLFromAddrIfUnset("DIRECTORY_URL", "DIRECTORY_ADDR")
+	}
+	if roles.Entry && (roles.Client || roles.Directory) {
+		setURLFromAddrIfUnset("ENTRY_URL", "ENTRY_ADDR")
+	}
+	if roles.Exit && (roles.Client || roles.Directory) {
+		setURLFromAddrIfUnset("EXIT_CONTROL_URL", "EXIT_ADDR")
+	}
+}
+
+func setURLFromAddrIfUnset(urlEnv string, addrEnv string) {
+	if strings.TrimSpace(os.Getenv(urlEnv)) != "" {
+		return
+	}
+	addr := strings.TrimSpace(os.Getenv(addrEnv))
+	if addr == "" {
+		return
+	}
+	if !strings.Contains(addr, "://") {
+		addr = "http://" + addr
+	}
+	_ = os.Setenv(urlEnv, addr)
 }

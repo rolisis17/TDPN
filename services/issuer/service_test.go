@@ -1,6 +1,9 @@
 package issuer
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -80,5 +83,52 @@ func TestNewReadsTokenTTLFromEnv(t *testing.T) {
 	svc := New()
 	if svc.tokenTTL != 45*time.Second {
 		t.Fatalf("expected token ttl 45s, got %s", svc.tokenTTL)
+	}
+}
+
+func TestValidateRuntimeConfigBetaStrict(t *testing.T) {
+	s := &Service{
+		betaStrict:   true,
+		adminToken:   "super-secret-admin-token",
+		keyRotateSec: 60,
+		tokenTTL:     10 * time.Minute,
+	}
+	if err := s.validateRuntimeConfig(); err != nil {
+		t.Fatalf("expected strict config valid, got %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigBetaStrictRejectsDefaultAdminToken(t *testing.T) {
+	s := &Service{
+		betaStrict:   true,
+		adminToken:   "dev-admin-token",
+		keyRotateSec: 60,
+		tokenTTL:     10 * time.Minute,
+	}
+	if err := s.validateRuntimeConfig(); err == nil {
+		t.Fatalf("expected strict config rejection")
+	}
+}
+
+func TestHandleHealth(t *testing.T) {
+	s := &Service{}
+	req := httptest.NewRequest(http.MethodGet, "/v1/health", nil)
+	rr := httptest.NewRecorder()
+	s.handleHealth(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	if strings.TrimSpace(rr.Body.String()) != "ok" {
+		t.Fatalf("expected ok body, got %q", rr.Body.String())
+	}
+}
+
+func TestHandleHealthMethodNotAllowed(t *testing.T) {
+	s := &Service{}
+	req := httptest.NewRequest(http.MethodPost, "/v1/health", nil)
+	rr := httptest.NewRecorder()
+	s.handleHealth(rr, req)
+	if rr.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405, got %d", rr.Code)
 	}
 }

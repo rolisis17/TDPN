@@ -1,5 +1,0 @@
-./service.go
-./challenge_test.go
-./discovery_test.go
-./path_open_test.go
-./routing_test.go

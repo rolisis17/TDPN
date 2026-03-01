@@ -1,6 +1,0 @@
-./service.go
-./key_test.go
-./pubkeys_test.go
-./selection_feed_test.go
-./service_test.go
-./sync_test.go

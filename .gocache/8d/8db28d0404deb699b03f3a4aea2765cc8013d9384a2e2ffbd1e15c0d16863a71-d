@@ -1,9 +1,0 @@
-./app.go
-./client.go
-./directory_trust.go
-./client_mode_test.go
-./directory_trust_test.go
-./federation_test.go
-./path_open_test.go
-./puzzle_test.go
-./selection_test.go

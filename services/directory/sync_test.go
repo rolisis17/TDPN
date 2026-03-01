@@ -2092,24 +2092,52 @@ func TestIngestDiscoveredPeersRequireHint(t *testing.T) {
 	}
 }
 
+func TestIngestDiscoveredPeersStoresSourceHintMetadata(t *testing.T) {
+	now := time.Now().UTC()
+	sourceURL := "http://seed-a.local"
+	validHintKey := base64.RawURLEncoding.EncodeToString(make([]byte, ed25519.PublicKeySize))
+	s := &Service{
+		localURL:              "http://local-dir",
+		peerURLs:              []string{sourceURL},
+		peerDiscoveryEnabled:  true,
+		peerDiscoveryTTL:      10 * time.Minute,
+		peerDiscoveryMax:      16,
+		peerDiscoveryMinVotes: 1,
+		discoveredPeers:       make(map[string]time.Time),
+		discoveredPeerVoters:  make(map[string]map[string]time.Time),
+		discoveredPeerHealth:  make(map[string]discoveredPeerHealth),
+		peerHintPubKeys:       make(map[string]string),
+		peerHintOperators:     make(map[string]string),
+	}
+	if imported := s.ingestDiscoveredPeers(sourceURL, "op-source", []proto.DirectoryPeerHint{{URL: sourceURL, Operator: "op-seed-a", PubKey: validHintKey}}, now); imported != 0 {
+		t.Fatalf("expected no peer admission for source self-hint, got imported=%d", imported)
+	}
+	if got := s.peerHintOperator(sourceURL); got != "op-seed-a" {
+		t.Fatalf("expected source hint operator persisted, got %q", got)
+	}
+	if got := s.peerHintPubKey(sourceURL); got != validHintKey {
+		t.Fatalf("expected source hint pubkey persisted, got %q", got)
+	}
+}
+
 func TestIngestDiscoveredPeersMaxPerSource(t *testing.T) {
 	now := time.Now().UTC()
 	urlA := "http://peer-a.local"
 	urlB := "http://peer-b.local"
 	urlC := "http://peer-c.local"
 	s := &Service{
-		localURL:                "http://local-dir",
-		peerURLs:                []string{"http://seed-a.local"},
-		peerDiscoveryEnabled:    true,
-		peerDiscoveryTTL:        10 * time.Minute,
-		peerDiscoveryMax:        16,
-		peerDiscoveryMinVotes:   1,
-		peerDiscoveryMaxPerSrc:  2,
-		discoveredPeers:         make(map[string]time.Time),
-		discoveredPeerVoters:    make(map[string]map[string]time.Time),
-		discoveredPeerHealth:    make(map[string]discoveredPeerHealth),
-		peerHintPubKeys:         make(map[string]string),
-		peerHintOperators:       make(map[string]string),
+		localURL:               "http://local-dir",
+		peerURLs:               []string{"http://seed-a.local"},
+		peerDiscoveryEnabled:   true,
+		peerDiscoveryTTL:       10 * time.Minute,
+		peerDiscoveryMax:       16,
+		peerDiscoveryMinVotes:  1,
+		peerDiscoveryMaxPerSrc: 2,
+		discoveredPeers:        make(map[string]time.Time),
+		discoveredPeerVoters:   make(map[string]map[string]time.Time),
+		discoveredPeerHealth:   make(map[string]discoveredPeerHealth),
+		peerHintPubKeys:        make(map[string]string),
+		peerHintOperators:      make(map[string]string),
 	}
 	hints := []proto.DirectoryPeerHint{
 		{URL: urlA, Operator: "op-a"},
@@ -2128,6 +2156,85 @@ func TestIngestDiscoveredPeersMaxPerSource(t *testing.T) {
 	}
 	if got := s.activeDiscoveredPeerVotesBySourceLocked("op-seed-a"); got != 2 {
 		t.Fatalf("expected two active votes for source operator, got %d", got)
+	}
+}
+
+func TestIngestDiscoveredPeersMaxPerOperator(t *testing.T) {
+	now := time.Now().UTC()
+	urlA := "http://peer-a.local"
+	urlB := "http://peer-b.local"
+	urlC := "http://peer-c.local"
+	s := &Service{
+		localURL:              "http://local-dir",
+		peerURLs:              []string{"http://seed-a.local"},
+		peerDiscoveryEnabled:  true,
+		peerDiscoveryTTL:      10 * time.Minute,
+		peerDiscoveryMax:      16,
+		peerDiscoveryMinVotes: 1,
+		peerDiscoveryMaxPerOp: 1,
+		discoveredPeers:       make(map[string]time.Time),
+		discoveredPeerVoters:  make(map[string]map[string]time.Time),
+		discoveredPeerHealth:  make(map[string]discoveredPeerHealth),
+		peerHintPubKeys:       make(map[string]string),
+		peerHintOperators:     make(map[string]string),
+	}
+	hints := []proto.DirectoryPeerHint{
+		{URL: urlA, Operator: "op-shared"},
+		{URL: urlB, Operator: "op-shared"},
+		{URL: urlC, Operator: "op-other"},
+	}
+	if imported := s.ingestDiscoveredPeers("http://seed-a.local", "op-seed-a", hints, now); imported != 2 {
+		t.Fatalf("expected one discovered peer per hinted operator, got imported=%d", imported)
+	}
+	peers := s.snapshotSyncPeers(now.Add(time.Second))
+	if !containsString(peers, urlA) {
+		t.Fatalf("expected first op-shared discovered peer admitted")
+	}
+	if containsString(peers, urlB) {
+		t.Fatalf("did not expect second op-shared discovered peer admitted under per-operator cap")
+	}
+	if !containsString(peers, urlC) {
+		t.Fatalf("expected discovered peer from different hinted operator admitted")
+	}
+	if got := s.activeDiscoveredPeersByHintOperatorLocked("op-shared"); got != 1 {
+		t.Fatalf("expected one active discovered peer for op-shared, got %d", got)
+	}
+}
+
+func TestIngestDiscoveredPeersMaxPerOperatorWithoutHintsUsesUnknownBucket(t *testing.T) {
+	now := time.Now().UTC()
+	urlA := "http://peer-a.local"
+	urlB := "http://peer-b.local"
+	s := &Service{
+		localURL:              "http://local-dir",
+		peerURLs:              []string{"http://seed-a.local"},
+		peerDiscoveryEnabled:  true,
+		peerDiscoveryTTL:      10 * time.Minute,
+		peerDiscoveryMax:      16,
+		peerDiscoveryMinVotes: 1,
+		peerDiscoveryMaxPerOp: 1,
+		discoveredPeers:       make(map[string]time.Time),
+		discoveredPeerVoters:  make(map[string]map[string]time.Time),
+		discoveredPeerHealth:  make(map[string]discoveredPeerHealth),
+		peerHintPubKeys:       make(map[string]string),
+		peerHintOperators:     make(map[string]string),
+	}
+	hints := []proto.DirectoryPeerHint{
+		{URL: urlA},
+		{URL: urlB},
+	}
+	if imported := s.ingestDiscoveredPeers("http://seed-a.local", "op-seed-a", hints, now); imported != 1 {
+		t.Fatalf("expected unknown-operator cap to admit one discovered peer, got imported=%d", imported)
+	}
+	peers := s.snapshotSyncPeers(now.Add(time.Second))
+	if !containsString(peers, urlA) {
+		t.Fatalf("expected first unknown-hint discovered peer admitted")
+	}
+	if containsString(peers, urlB) {
+		t.Fatalf("did not expect second unknown-hint discovered peer under per-operator cap")
+	}
+	if got := s.activeDiscoveredPeersByHintOperatorLocked(discoveredPeerUnknownOperator); got != 1 {
+		t.Fatalf("expected one active discovered peer in unknown operator bucket, got %d", got)
 	}
 }
 

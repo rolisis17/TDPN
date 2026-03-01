@@ -40,6 +40,20 @@ func TestEffectiveTierFor(t *testing.T) {
 	}
 }
 
+func TestEffectiveTierForUsesStake(t *testing.T) {
+	s := &Service{subjects: map[string]proto.SubjectProfile{}}
+	s.subjects["carol"] = proto.SubjectProfile{
+		Subject:    "carol",
+		Kind:       proto.SubjectKindClient,
+		Tier:       1,
+		Reputation: 0.96,
+		Stake:      550,
+	}
+	if got := s.effectiveTierFor("carol", 3); got != 3 {
+		t.Fatalf("expected tier 3 from stake+reputation, got %d", got)
+	}
+}
+
 func TestEffectiveTierForRelaySubjectStaysTier1(t *testing.T) {
 	s := &Service{subjects: map[string]proto.SubjectProfile{}}
 	s.subjects["exit-a"] = proto.SubjectProfile{

@@ -76,6 +76,8 @@ type Service struct {
 	revocationRefreshSec  int
 	accountingFile        string
 	accountingFlushSec    int
+	startupSyncTimeout    time.Duration
+	betaStrict            bool
 	enforcer              *policy.Enforcer
 	httpClient            *http.Client
 	httpSrv               *http.Server
@@ -264,6 +266,20 @@ func New() *Service {
 			accountingFlushSec = n
 		}
 	}
+	startupSyncTimeout := time.Duration(0)
+	if v := strings.TrimSpace(os.Getenv("EXIT_STARTUP_SYNC_TIMEOUT_SEC")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			startupSyncTimeout = time.Duration(n) * time.Second
+		}
+	}
+	betaStrict := os.Getenv("BETA_STRICT_MODE") == "1" || os.Getenv("EXIT_BETA_STRICT") == "1"
+	if startupSyncTimeout <= 0 {
+		if betaStrict {
+			startupSyncTimeout = 30 * time.Second
+		} else if wgBackend == "command" {
+			startupSyncTimeout = 8 * time.Second
+		}
+	}
 
 	return &Service{
 		addr:                  addr,
@@ -300,6 +316,8 @@ func New() *Service {
 		revocationRefreshSec:  revocationRefreshSec,
 		accountingFile:        accountingFile,
 		accountingFlushSec:    accountingFlushSec,
+		startupSyncTimeout:    startupSyncTimeout,
+		betaStrict:            betaStrict,
 		enforcer:              policy.NewEnforcer(),
 		httpClient:            &http.Client{Timeout: 5 * time.Second},
 		issuerPubs:            make(map[string]ed25519.PublicKey),
@@ -315,8 +333,8 @@ func New() *Service {
 }
 
 func (s *Service) Run(ctx context.Context) error {
-	log.Printf("exit wg backend=%s iface=%s listen_port=%d kernel_proxy=%t kernel_proxy_max_sessions=%d kernel_proxy_idle_sec=%d opaque_echo=%t token_proof_replay_guard=%t peer_rebind_sec=%d",
-		s.wgBackend, s.wgInterface, s.wgListenPort, s.wgKernelProxy, s.effectiveWGKernelProxyMax(), int(s.wgKernelProxyIdle/time.Second), s.opaqueEcho, s.tokenProofReplayGuard, int(s.peerRebindAfter/time.Second))
+	log.Printf("exit wg backend=%s iface=%s listen_port=%d kernel_proxy=%t kernel_proxy_max_sessions=%d kernel_proxy_idle_sec=%d opaque_echo=%t token_proof_replay_guard=%t peer_rebind_sec=%d startup_sync_timeout_sec=%d beta_strict=%t",
+		s.wgBackend, s.wgInterface, s.wgListenPort, s.wgKernelProxy, s.effectiveWGKernelProxyMax(), int(s.wgKernelProxyIdle/time.Second), s.opaqueEcho, s.tokenProofReplayGuard, int(s.peerRebindAfter/time.Second), int(s.startupSyncTimeout/time.Second), s.betaStrict)
 	if err := s.validateRuntimeConfig(); err != nil {
 		return err
 	}
@@ -346,11 +364,8 @@ func (s *Service) Run(ctx context.Context) error {
 		s.opaqueSinkUDP = sink
 		log.Printf("exit opaque sink enabled addr=%s", s.opaqueSinkAddr)
 	}
-	if err := s.refreshIssuerKeys(ctx); err != nil {
-		log.Printf("exit startup key fetch failed: %v", err)
-	}
-	if err := s.refreshRevocations(ctx); err != nil {
-		log.Printf("exit startup revocation fetch failed: %v", err)
+	if err := s.ensureStartupIssuerSync(ctx); err != nil {
+		return err
 	}
 	if err := s.configureEgress(ctx); err != nil {
 		log.Printf("exit egress setup failed: %v", err)
@@ -438,6 +453,9 @@ func (s *Service) Run(ctx context.Context) error {
 }
 
 func (s *Service) validateRuntimeConfig() error {
+	if s.startupSyncTimeout < 0 {
+		return fmt.Errorf("EXIT_STARTUP_SYNC_TIMEOUT_SEC must be >=0")
+	}
 	if s.wgKernelProxyMax < 0 {
 		return fmt.Errorf("EXIT_WG_KERNEL_PROXY_MAX_SESSIONS must be >=0")
 	}
@@ -502,7 +520,74 @@ func (s *Service) validateRuntimeConfig() error {
 			return fmt.Errorf("EXIT_LIVE_WG_MODE requires EXIT_OPAQUE_SOURCE_ADDR")
 		}
 	}
+	if s.betaStrict {
+		if s.dataMode != "opaque" {
+			return fmt.Errorf("BETA_STRICT_MODE requires DATA_PLANE_MODE=opaque")
+		}
+		if s.wgBackend != "command" {
+			return fmt.Errorf("BETA_STRICT_MODE requires WG_BACKEND=command")
+		}
+		if !s.wgKernelProxy {
+			return fmt.Errorf("BETA_STRICT_MODE requires EXIT_WG_KERNEL_PROXY=1")
+		}
+		if !s.liveWGMode {
+			return fmt.Errorf("BETA_STRICT_MODE requires EXIT_LIVE_WG_MODE=1")
+		}
+		if s.opaqueEcho {
+			return fmt.Errorf("BETA_STRICT_MODE requires EXIT_OPAQUE_ECHO=0")
+		}
+		if !s.tokenProofReplayGuard {
+			return fmt.Errorf("BETA_STRICT_MODE requires EXIT_TOKEN_PROOF_REPLAY_GUARD=1")
+		}
+	}
 	return nil
+}
+
+func (s *Service) ensureStartupIssuerSync(ctx context.Context) error {
+	if s.startupSyncTimeout <= 0 {
+		if err := s.refreshIssuerKeys(ctx); err != nil {
+			log.Printf("exit startup key fetch failed: %v", err)
+		}
+		if err := s.refreshRevocations(ctx); err != nil {
+			log.Printf("exit startup revocation fetch failed: %v", err)
+		}
+		return nil
+	}
+	deadline := time.Now().Add(s.startupSyncTimeout)
+	wait := 200 * time.Millisecond
+	attempts := 0
+	var keyErr error
+	var revErr error
+	for {
+		attempts++
+		keyErr = s.refreshIssuerKeys(ctx)
+		revErr = s.refreshRevocations(ctx)
+		if keyErr == nil && revErr == nil {
+			log.Printf("exit startup issuer sync ready attempts=%d", attempts)
+			return nil
+		}
+		if time.Now().After(deadline) {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(wait):
+		}
+		if wait < 2*time.Second {
+			wait *= 2
+			if wait > 2*time.Second {
+				wait = 2 * time.Second
+			}
+		}
+	}
+	if keyErr != nil {
+		log.Printf("exit startup key fetch failed: %v", keyErr)
+	}
+	if revErr != nil {
+		log.Printf("exit startup revocation fetch failed: %v", revErr)
+	}
+	return fmt.Errorf("exit startup issuer sync timeout after %s", s.startupSyncTimeout)
 }
 
 func (s *Service) effectiveWGKernelProxyMax() int {

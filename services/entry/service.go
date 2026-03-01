@@ -49,6 +49,7 @@ type Service struct {
 	addr                  string
 	dataAddr              string
 	liveWGMode            bool
+	betaStrict            bool
 	exitControlURL        string
 	exitDataAddr          string
 	directoryURLs         []string
@@ -141,6 +142,7 @@ func New() *Service {
 		routeTTL = time.Duration(v) * time.Second
 	}
 	liveWGMode := os.Getenv("ENTRY_LIVE_WG_MODE") == "1"
+	betaStrict := os.Getenv("BETA_STRICT_MODE") == "1" || os.Getenv("ENTRY_BETA_STRICT") == "1"
 	openRPS := 20
 	if v, err := strconv.Atoi(os.Getenv("ENTRY_OPEN_RPS")); err == nil && v > 0 {
 		openRPS = v
@@ -179,6 +181,7 @@ func New() *Service {
 		addr:                  addr,
 		dataAddr:              dataAddr,
 		liveWGMode:            liveWGMode,
+		betaStrict:            betaStrict,
 		exitControlURL:        exitControlURL,
 		exitDataAddr:          exitDataAddr,
 		directoryURLs:         directoryURLs,
@@ -208,6 +211,9 @@ func New() *Service {
 }
 
 func (s *Service) Run(ctx context.Context) error {
+	if err := s.validateRuntimeConfig(); err != nil {
+		return err
+	}
 	log.Printf("entry route discovery: directories=%d min_sources=%d min_operators=%d min_votes=%d trust_strict=%t live_wg_mode=%t rps=%d ban_threshold=%d ban_sec=%d max_inflight=%d client_rebind_sec=%d",
 		len(s.directoryURLs), maxInt(1, s.directoryMinSources), maxInt(1, s.directoryMinOperators), maxInt(1, s.directoryMinVotes), s.directoryTrustStrict,
 		s.liveWGMode, s.openRPS, s.openBanThreshold, int(s.openBanDuration/time.Second), s.openMaxInflight, int(s.clientRebindAfter/time.Second))
@@ -242,6 +248,18 @@ func (s *Service) Run(ctx context.Context) error {
 		}
 		return err
 	}
+}
+
+func (s *Service) validateRuntimeConfig() error {
+	if s.betaStrict {
+		if !s.liveWGMode {
+			return fmt.Errorf("BETA_STRICT_MODE requires ENTRY_LIVE_WG_MODE=1")
+		}
+		if !s.directoryTrustStrict {
+			return fmt.Errorf("BETA_STRICT_MODE requires ENTRY_DIRECTORY_TRUST_STRICT=1")
+		}
+	}
+	return nil
 }
 
 func (s *Service) startUDP(ctx context.Context, errCh chan<- error) error {

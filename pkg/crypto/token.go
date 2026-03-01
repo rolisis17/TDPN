@@ -20,6 +20,7 @@ type CapabilityClaims struct {
 	Issuer     string   `json:"iss"`
 	Audience   string   `json:"aud"`
 	Subject    string   `json:"sub,omitempty"`
+	AnonCredID string   `json:"anon_cred_id,omitempty"`
 	KeyEpoch   int64    `json:"key_epoch,omitempty"`
 	TokenType  string   `json:"token_type,omitempty"`
 	CNFEd25519 string   `json:"cnf_ed25519,omitempty"`

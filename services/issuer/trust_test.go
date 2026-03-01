@@ -35,6 +35,7 @@ func TestHandleRelayTrustSignsAndNormalizes(t *testing.T) {
 				TierCap:      1,
 				DisputeUntil: time.Now().Add(time.Hour).Unix(),
 			},
+			"exit-d": {Subject: "exit-d", Kind: proto.SubjectKindRelayExit, Reputation: 0.85, Bond: 0, Stake: 400},
 			"client-alice": {
 				Subject:    "client-alice",
 				Kind:       proto.SubjectKindClient,
@@ -54,8 +55,8 @@ func TestHandleRelayTrustSignsAndNormalizes(t *testing.T) {
 	if err := json.NewDecoder(rr.Body).Decode(&out); err != nil {
 		t.Fatalf("decode trust feed: %v", err)
 	}
-	if len(out.Attestations) != 3 {
-		t.Fatalf("expected 3 relay attestations, got %d", len(out.Attestations))
+	if len(out.Attestations) != 4 {
+		t.Fatalf("expected 4 relay attestations, got %d", len(out.Attestations))
 	}
 	if err := crypto.VerifyRelayTrustAttestationFeed(out, pub, time.Now()); err != nil {
 		t.Fatalf("verify trust feed: %v", err)
@@ -64,8 +65,9 @@ func TestHandleRelayTrustSignsAndNormalizes(t *testing.T) {
 	a := out.Attestations[0]
 	b := out.Attestations[1]
 	c := out.Attestations[2]
-	if a.RelayID != "exit-a" || b.RelayID != "exit-b" || c.RelayID != "exit-c" {
-		t.Fatalf("expected sorted relay ids, got %s, %s, %s", a.RelayID, b.RelayID, c.RelayID)
+	d := out.Attestations[3]
+	if a.RelayID != "exit-a" || b.RelayID != "exit-b" || c.RelayID != "exit-c" || d.RelayID != "exit-d" {
+		t.Fatalf("expected sorted relay ids, got %s, %s, %s, %s", a.RelayID, b.RelayID, c.RelayID, d.RelayID)
 	}
 	if a.BondScore < 0.49 || a.BondScore > 0.51 {
 		t.Fatalf("expected normalized bond score ~0.5, got %f", a.BondScore)
@@ -87,5 +89,8 @@ func TestHandleRelayTrustSignsAndNormalizes(t *testing.T) {
 	}
 	if c.AbusePenalty <= 0.6 {
 		t.Fatalf("expected elevated abuse penalty for disputed relay, got %f", c.AbusePenalty)
+	}
+	if d.StakeScore < 0.79 || d.StakeScore > 0.81 {
+		t.Fatalf("expected stake score from explicit stake ~0.8, got %f", d.StakeScore)
 	}
 }

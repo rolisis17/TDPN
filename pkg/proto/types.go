@@ -71,12 +71,56 @@ type IssueTokenRequest struct {
 	TokenType string   `json:"token_type,omitempty"`
 	PopPubKey string   `json:"pop_pub_key,omitempty"`
 	ExitScope []string `json:"exit_scope,omitempty"`
+	AnonCred  string   `json:"anon_cred,omitempty"`
 }
 
 type IssueTokenResponse struct {
 	Token   string `json:"token"`
 	Expires int64  `json:"expires"`
 	JTI     string `json:"jti,omitempty"`
+}
+
+type IssueAnonymousCredentialRequest struct {
+	CredentialID string `json:"credential_id"`
+	Tier         int    `json:"tier"`
+	ExpiresAt    int64  `json:"expires_at,omitempty"`
+	Reason       string `json:"reason,omitempty"`
+}
+
+type IssueAnonymousCredentialResponse struct {
+	Credential string `json:"credential"`
+	ExpiresAt  int64  `json:"expires_at"`
+}
+
+type RevokeAnonymousCredentialRequest struct {
+	CredentialID string `json:"credential_id"`
+	Until        int64  `json:"until,omitempty"`
+	Reason       string `json:"reason,omitempty"`
+}
+
+type ApplyAnonymousCredentialDisputeRequest struct {
+	CredentialID string `json:"credential_id"`
+	TierCap      int    `json:"tier_cap,omitempty"`
+	Until        int64  `json:"until,omitempty"`
+	CaseID       string `json:"case_id,omitempty"`
+	EvidenceRef  string `json:"evidence_ref,omitempty"`
+	Reason       string `json:"reason,omitempty"`
+}
+
+type ClearAnonymousCredentialDisputeRequest struct {
+	CredentialID string `json:"credential_id"`
+	Reason       string `json:"reason,omitempty"`
+}
+
+type AnonymousCredentialStatusResponse struct {
+	CredentialID string `json:"credential_id"`
+	Revoked      bool   `json:"revoked"`
+	RevokedUntil int64  `json:"revoked_until,omitempty"`
+	Disputed     bool   `json:"disputed"`
+	DisputeTier  int    `json:"dispute_tier_cap,omitempty"`
+	DisputeUntil int64  `json:"dispute_until,omitempty"`
+	CaseID       string `json:"case_id,omitempty"`
+	EvidenceRef  string `json:"evidence_ref,omitempty"`
 }
 
 type InnerPacket struct {
@@ -100,6 +144,7 @@ type SubjectProfile struct {
 	Tier         int     `json:"tier"`
 	Reputation   float64 `json:"reputation"`
 	Bond         float64 `json:"bond"`
+	Stake        float64 `json:"stake,omitempty"`
 	TierCap      int     `json:"tier_cap,omitempty"`
 	DisputeUntil int64   `json:"dispute_until,omitempty"`
 	AppealUntil  int64   `json:"appeal_until,omitempty"`
@@ -115,6 +160,7 @@ type UpsertSubjectRequest struct {
 	Tier       int     `json:"tier"`
 	Reputation float64 `json:"reputation"`
 	Bond       float64 `json:"bond"`
+	Stake      float64 `json:"stake,omitempty"`
 }
 
 type PromoteSubjectRequest struct {
@@ -130,6 +176,12 @@ type ApplyReputationRequest struct {
 }
 
 type ApplyBondRequest struct {
+	Subject string  `json:"subject"`
+	Delta   float64 `json:"delta"`
+	Reason  string  `json:"reason,omitempty"`
+}
+
+type ApplyStakeRequest struct {
 	Subject string  `json:"subject"`
 	Delta   float64 `json:"delta"`
 	Reason  string  `json:"reason,omitempty"`

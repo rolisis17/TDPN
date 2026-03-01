@@ -36,6 +36,7 @@ type Client struct {
 	directoryMinVotes     int
 	issuerURL             string
 	subject               string
+	anonCred              string
 	entryURL              string
 	exitControlURL        string
 	dataMode              string
@@ -82,6 +83,7 @@ type Client struct {
 	bootstrapBackoffMax   time.Duration
 	bootstrapJitterPct    int
 	bootstrapInitialDelay time.Duration
+	startupSyncTimeout    time.Duration
 	exitExplorationPct    int
 	exitSelectionSeed     int64
 	selectionFeedDisable  bool
@@ -95,6 +97,7 @@ type Client struct {
 	healthMu              sync.Mutex
 	healthCache           map[string]healthProbeState
 	httpClient            *http.Client
+	betaStrict            bool
 }
 
 type healthProbeState struct {
@@ -161,6 +164,7 @@ func NewClient() *Client {
 		issuerURL = "http://127.0.0.1:8082"
 	}
 	subject := strings.TrimSpace(os.Getenv("CLIENT_SUBJECT"))
+	anonCred := strings.TrimSpace(os.Getenv("CLIENT_ANON_CRED"))
 	entryURL := os.Getenv("ENTRY_URL")
 	if entryURL == "" {
 		entryURL = "http://127.0.0.1:8083"
@@ -325,6 +329,18 @@ func NewClient() *Client {
 	if v, err := strconv.Atoi(os.Getenv("CLIENT_BOOTSTRAP_INITIAL_DELAY_SEC")); err == nil && v > 0 {
 		bootstrapInitialDelaySec = v
 	}
+	startupSyncTimeoutSec := 0
+	if v, err := strconv.Atoi(os.Getenv("CLIENT_STARTUP_SYNC_TIMEOUT_SEC")); err == nil && v > 0 {
+		startupSyncTimeoutSec = v
+	}
+	betaStrict := os.Getenv("BETA_STRICT_MODE") == "1" || os.Getenv("CLIENT_BETA_STRICT") == "1"
+	if startupSyncTimeoutSec <= 0 {
+		if betaStrict {
+			startupSyncTimeoutSec = 10
+		} else if wgBackend == "command" {
+			startupSyncTimeoutSec = 8
+		}
+	}
 	var wgManager wg.ClientManager
 	switch wgBackend {
 	case "command":
@@ -342,6 +358,7 @@ func NewClient() *Client {
 		directoryMinVotes:     directoryMinVotes,
 		issuerURL:             issuerURL,
 		subject:               subject,
+		anonCred:              anonCred,
 		entryURL:              entryURL,
 		exitControlURL:        exitControlURL,
 		dataMode:              dataMode,
@@ -385,6 +402,7 @@ func NewClient() *Client {
 		bootstrapBackoffMax:   time.Duration(bootstrapBackoffMaxSec) * time.Second,
 		bootstrapJitterPct:    bootstrapJitterPct,
 		bootstrapInitialDelay: time.Duration(bootstrapInitialDelaySec) * time.Second,
+		startupSyncTimeout:    time.Duration(startupSyncTimeoutSec) * time.Second,
 		exitExplorationPct:    exitExplorationPct,
 		exitSelectionSeed:     exitSelectionSeed,
 		selectionFeedDisable:  selectionFeedDisable,
@@ -395,6 +413,7 @@ func NewClient() *Client {
 		trustFeedMinVotes:     trustFeedMinVotes,
 		healthCache:           make(map[string]healthProbeState),
 		httpClient:            &http.Client{Timeout: 5 * time.Second},
+		betaStrict:            betaStrict,
 	}
 }
 
@@ -411,8 +430,8 @@ func (c *Client) Run(ctx context.Context) error {
 	if initialDelay < 0 {
 		initialDelay = 0
 	}
-	log.Printf("client role enabled: directories=%d min_sources=%d min_operators=%d min_votes=%d issuer=%s subject=%s entry=%s mode=%s source=%s trust_strict=%t wg_backend=%s iface=%s allowed_ips=%s install_route=%t wg_kernel_proxy=%t wg_proxy_addr=%s synthetic_fallback=%t opaque_session_sec=%d opaque_initial_uplink_timeout_ms=%d health_check=%t path_attempts=%d exit_country=%s exit_region=%s min_geo_confidence=%.2f locality_fallback=%s strict_locality=%t max_exits_per_operator=%d distinct_operators=%t sticky_pair_sec=%d session_reuse=%t refresh_lead_sec=%d exit_exploration_pct=%d selection_feed_disable=%t selection_feed_require=%t selection_feed_min_votes=%d trust_feed_disable=%t trust_feed_require=%t trust_feed_min_votes=%d bootstrap_interval_sec=%d bootstrap_backoff_max_sec=%d bootstrap_jitter_pct=%d bootstrap_initial_delay_sec=%d",
-		len(c.directoryURLs), c.directoryMinSources, c.directoryMinOperators, c.directoryMinVotes, c.issuerURL, c.subject, c.entryURL, c.dataMode, c.innerSource, c.trustStrict, c.wgBackend, c.wgInterface, c.wgAllowedIPs, c.wgInstallRoute, c.wgKernelProxy, c.wgProxyAddr, c.allowSyntheticFallback(), c.opaqueSessionSec, c.opaqueInitialUpMS, c.healthCheckEnabled, c.pathOpenMaxAttempts, c.preferredExitCountry, c.preferredExitRegion, c.minGeoConfidence, strings.Join(c.localityFallbackOrder, ","), c.strictExitLocality, c.maxExitsPerOperator, c.requireDistinctOps, c.stickyPairSec, c.sessionReuse, c.sessionRefreshLeadSec, c.exitExplorationPct, c.selectionFeedDisable, c.selectionFeedRequire, c.selectionFeedMinVotes, c.trustFeedDisable, c.trustFeedRequire, c.trustFeedMinVotes, int(bootstrapInterval/time.Second), int(bootstrapBackoffMax/time.Second), c.bootstrapJitterPct, int(initialDelay/time.Second))
+	log.Printf("client role enabled: directories=%d min_sources=%d min_operators=%d min_votes=%d issuer=%s subject=%s anon_cred=%t entry=%s mode=%s source=%s trust_strict=%t wg_backend=%s iface=%s allowed_ips=%s install_route=%t wg_kernel_proxy=%t wg_proxy_addr=%s synthetic_fallback=%t opaque_session_sec=%d opaque_initial_uplink_timeout_ms=%d health_check=%t path_attempts=%d exit_country=%s exit_region=%s min_geo_confidence=%.2f locality_fallback=%s strict_locality=%t max_exits_per_operator=%d distinct_operators=%t sticky_pair_sec=%d session_reuse=%t refresh_lead_sec=%d exit_exploration_pct=%d selection_feed_disable=%t selection_feed_require=%t selection_feed_min_votes=%d trust_feed_disable=%t trust_feed_require=%t trust_feed_min_votes=%d bootstrap_interval_sec=%d bootstrap_backoff_max_sec=%d bootstrap_jitter_pct=%d bootstrap_initial_delay_sec=%d startup_sync_timeout_sec=%d beta_strict=%t",
+		len(c.directoryURLs), c.directoryMinSources, c.directoryMinOperators, c.directoryMinVotes, c.issuerURL, c.subject, c.anonCred != "", c.entryURL, c.dataMode, c.innerSource, c.trustStrict, c.wgBackend, c.wgInterface, c.wgAllowedIPs, c.wgInstallRoute, c.wgKernelProxy, c.wgProxyAddr, c.allowSyntheticFallback(), c.opaqueSessionSec, c.opaqueInitialUpMS, c.healthCheckEnabled, c.pathOpenMaxAttempts, c.preferredExitCountry, c.preferredExitRegion, c.minGeoConfidence, strings.Join(c.localityFallbackOrder, ","), c.strictExitLocality, c.maxExitsPerOperator, c.requireDistinctOps, c.stickyPairSec, c.sessionReuse, c.sessionRefreshLeadSec, c.exitExplorationPct, c.selectionFeedDisable, c.selectionFeedRequire, c.selectionFeedMinVotes, c.trustFeedDisable, c.trustFeedRequire, c.trustFeedMinVotes, int(bootstrapInterval/time.Second), int(bootstrapBackoffMax/time.Second), c.bootstrapJitterPct, int(initialDelay/time.Second), int(c.startupSyncTimeout/time.Second), c.betaStrict)
 	if err := c.validateRuntimeConfig(); err != nil {
 		return err
 	}
@@ -436,6 +455,9 @@ func (c *Client) Run(ctx context.Context) error {
 			return ctx.Err()
 		case <-time.After(initialDelay):
 		}
+	}
+	if err := c.ensureStartupControlPlaneSync(ctx); err != nil {
+		return err
 	}
 
 	consecutiveFailures := 0
@@ -479,6 +501,9 @@ func (c *Client) Run(ctx context.Context) error {
 }
 
 func (c *Client) validateRuntimeConfig() error {
+	if c.anonCred != "" && c.subject != "" {
+		return fmt.Errorf("CLIENT_ANON_CRED cannot be combined with CLIENT_SUBJECT")
+	}
 	if c.wgKernelProxy {
 		if c.dataMode != "opaque" {
 			return fmt.Errorf("CLIENT_WG_KERNEL_PROXY requires DATA_PLANE_MODE=opaque")
@@ -508,6 +533,9 @@ func (c *Client) validateRuntimeConfig() error {
 		if c.dataMode != "opaque" {
 			return fmt.Errorf("CLIENT_LIVE_WG_MODE requires DATA_PLANE_MODE=opaque")
 		}
+		if strings.EqualFold(strings.TrimSpace(c.innerSource), "synthetic") {
+			return fmt.Errorf("CLIENT_LIVE_WG_MODE does not allow CLIENT_INNER_SOURCE=synthetic")
+		}
 		if c.innerSource != "udp" && !c.wgKernelProxy {
 			return fmt.Errorf("CLIENT_LIVE_WG_MODE requires CLIENT_INNER_SOURCE=udp")
 		}
@@ -523,6 +551,135 @@ func (c *Client) validateRuntimeConfig() error {
 	}
 	if c.dataMode == "opaque" && !c.allowSyntheticFallback() && c.innerSource != "udp" && !c.wgKernelProxy {
 		return fmt.Errorf("CLIENT_INNER_SOURCE=udp required when synthetic fallback is disabled")
+	}
+	if c.betaStrict {
+		if c.dataMode != "opaque" {
+			return fmt.Errorf("BETA_STRICT_MODE requires DATA_PLANE_MODE=opaque")
+		}
+		if !c.trustStrict {
+			return fmt.Errorf("BETA_STRICT_MODE requires DIRECTORY_TRUST_STRICT=1")
+		}
+		if c.wgBackend != "command" {
+			return fmt.Errorf("BETA_STRICT_MODE requires CLIENT_WG_BACKEND=command")
+		}
+		if !c.wgKernelProxy {
+			return fmt.Errorf("BETA_STRICT_MODE requires CLIENT_WG_KERNEL_PROXY=1")
+		}
+		if !c.liveWGMode {
+			return fmt.Errorf("BETA_STRICT_MODE requires CLIENT_LIVE_WG_MODE=1")
+		}
+		if c.allowSyntheticFallback() {
+			return fmt.Errorf("BETA_STRICT_MODE requires synthetic fallback disabled")
+		}
+		if c.startupSyncTimeout <= 0 {
+			return fmt.Errorf("BETA_STRICT_MODE requires CLIENT_STARTUP_SYNC_TIMEOUT_SEC>0")
+		}
+	}
+	return nil
+}
+
+func (c *Client) ensureStartupControlPlaneSync(ctx context.Context) error {
+	if c.startupSyncTimeout <= 0 {
+		return nil
+	}
+	deadline := time.Now().Add(c.startupSyncTimeout)
+	wait := 200 * time.Millisecond
+	attempts := 0
+	var issuerErr error
+	var directoryErr error
+	for {
+		attempts++
+		issuerErr = c.probeIssuerReady(ctx)
+		directoryErr = c.probeDirectoryReady(ctx)
+		if issuerErr == nil && directoryErr == nil {
+			log.Printf("client startup control-plane sync ready attempts=%d", attempts)
+			return nil
+		}
+		if time.Now().After(deadline) {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(wait):
+		}
+		if wait < 2*time.Second {
+			wait *= 2
+			if wait > 2*time.Second {
+				wait = 2 * time.Second
+			}
+		}
+	}
+	if issuerErr != nil {
+		log.Printf("client startup issuer readiness failed: %v", issuerErr)
+	}
+	if directoryErr != nil {
+		log.Printf("client startup directory readiness failed: %v", directoryErr)
+	}
+	return fmt.Errorf("client startup control-plane sync timeout after %s", c.startupSyncTimeout)
+}
+
+func (c *Client) probeIssuerReady(ctx context.Context) error {
+	issuerURL := strings.TrimSpace(c.issuerURL)
+	if issuerURL == "" {
+		return fmt.Errorf("issuer url is empty")
+	}
+	baseURL := normalizeControlURL(issuerURL)
+	if err := c.probeHTTP200(ctx, baseURL, "/v1/health"); err == nil {
+		return nil
+	}
+	return c.probeHTTP200(ctx, baseURL, "/v1/pubkeys")
+}
+
+func (c *Client) probeDirectoryReady(ctx context.Context) error {
+	dirURLs := c.directoryURLs
+	if len(dirURLs) == 0 && strings.TrimSpace(c.directoryURL) != "" {
+		dirURLs = []string{c.directoryURL}
+	}
+	if len(dirURLs) == 0 {
+		return fmt.Errorf("no directory URLs configured")
+	}
+	var lastErr error
+	for _, rawURL := range dirURLs {
+		baseURL := normalizeControlURL(rawURL)
+		if err := c.probeHTTP200(ctx, baseURL, "/v1/health"); err == nil {
+			return nil
+		}
+		if err := c.probeHTTP200(ctx, baseURL, "/v1/relays"); err == nil {
+			return nil
+		} else {
+			lastErr = err
+		}
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("directory probe failed")
+	}
+	return lastErr
+}
+
+func (c *Client) probeHTTP200(ctx context.Context, baseURL string, path string) error {
+	baseURL = normalizeControlURL(baseURL)
+	if baseURL == "" {
+		return fmt.Errorf("empty probe base URL")
+	}
+	probeTimeout := c.healthCheckTimeout
+	if probeTimeout <= 0 {
+		probeTimeout = time.Second
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(checkCtx, http.MethodGet, joinURL(baseURL, path), nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("status %d", resp.StatusCode)
 	}
 	return nil
 }
@@ -590,6 +747,7 @@ func (c *Client) bootstrap(ctx context.Context) error {
 			TokenType: crypto.TokenTypeClientAccess,
 			PopPubKey: popPubB64,
 			ExitScope: []string{pair.exit.RelayID},
+			AnonCred:  c.anonCred,
 		})
 		if err != nil {
 			return fmt.Errorf("issue token for exit=%s: %w", pair.exit.RelayID, err)
