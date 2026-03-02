@@ -76,9 +76,9 @@ trim_url() {
 extract_operators() {
   local payload="$1"
   local matches
-  matches="$(printf '%s\n' "$payload" | rg -o '"operator":"[^"]+"' || true)"
+  matches="$(printf '%s\n' "$payload" | rg -o '"(operator_id|operator|origin_operator)":"[^"]+"' || true)"
   printf '%s\n' "$matches" |
-    sed -E 's/^"operator":"([^"]+)"$/\1/' |
+    sed -E 's/^"(operator_id|operator|origin_operator)":"([^"]+)"$/\2/' |
     awk 'NF > 0' |
     sort -u
 }
@@ -200,14 +200,24 @@ for _ in $(seq 1 "$federation_timeout_sec"); do
 done
 
 if [[ "$federated" -ne 1 ]]; then
+  local_ops="$(operator_count_from_url "http://127.0.0.1:8081")"
+  peer_ops="$(operator_count_from_url "${peer_directory_a}")"
   echo "federation operator floor not reached on machine B directory"
   echo "required min operators: $min_operators"
-  echo "observed operators: $(operator_count_from_url "http://127.0.0.1:8081")"
+  echo "observed local operators: $local_ops"
+  echo "observed peer-A operators: $peer_ops"
   echo "--- machine B relays ---"
   payload="$(curl -fsS "http://127.0.0.1:8081/v1/relays" 2>/dev/null || true)"
   printf '%s\n' "$payload"
   echo "--- machine B operator ids ---"
   extract_operators "$payload" || true
+  echo "--- machine A operator ids (via --peer-directory-a) ---"
+  peer_payload="$(curl -fsS "${peer_directory_a}/v1/relays" 2>/dev/null || true)"
+  extract_operators "$peer_payload" || true
+  if [[ "$local_ops" =~ ^[0-9]+$ ]] && [[ "$peer_ops" =~ ^[0-9]+$ ]] && ((local_ops >= 1)) && ((peer_ops >= 1)); then
+    echo "hint: federation may be missing from machine B directory config (DIRECTORY_PEERS),"
+    echo "      or machine A and machine B may be using the same DIRECTORY_OPERATOR_ID."
+  fi
   exit 1
 fi
 

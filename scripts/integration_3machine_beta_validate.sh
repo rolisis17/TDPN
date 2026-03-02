@@ -73,11 +73,11 @@ unique_operator_count() {
     return
   fi
   local matches
-  matches="$(printf '%s\n' "$payload" | rg -o '"operator":"[^"]+"' || true)"
+  matches="$(printf '%s\n' "$payload" | rg -o '"(operator_id|operator|origin_operator)":"[^"]+"' || true)"
   local count
   count="$(
     printf '%s\n' "$matches" |
-      sed -E 's/^"operator":"([^"]+)"$/\1/' |
+      sed -E 's/^"(operator_id|operator|origin_operator)":"([^"]+)"$/\2/' |
       awk 'NF > 0' |
       sort -u |
       wc -l |
@@ -87,6 +87,16 @@ unique_operator_count() {
     count="0"
   fi
   echo "$count"
+}
+
+extract_operators() {
+  local payload="$1"
+  local matches
+  matches="$(printf '%s\n' "$payload" | rg -o '"(operator_id|operator|origin_operator)":"[^"]+"' || true)"
+  printf '%s\n' "$matches" |
+    sed -E 's/^"(operator_id|operator|origin_operator)":"([^"]+)"$/\2/' |
+    awk 'NF > 0' |
+    sort -u
 }
 
 directory_a=""
@@ -207,13 +217,24 @@ done
 if [[ "$federated" -ne 1 ]]; then
   echo "federation check failed: operator floor not reached on both directories"
   echo "required min operators per directory: $min_operators"
-  echo "directory A operators: $(unique_operator_count "$directory_a")"
-  echo "directory B operators: $(unique_operator_count "$directory_b")"
+  a_ops="$(unique_operator_count "$directory_a")"
+  b_ops="$(unique_operator_count "$directory_b")"
+  echo "directory A operators: $a_ops"
+  echo "directory B operators: $b_ops"
   echo "--- directory A relays ---"
-  curl -fsS "${directory_a}/v1/relays" || true
+  a_payload="$(curl -fsS "${directory_a}/v1/relays" || true)"
+  printf '%s\n' "$a_payload"
+  echo "--- directory A operator ids ---"
+  extract_operators "$a_payload" || true
   echo
   echo "--- directory B relays ---"
-  curl -fsS "${directory_b}/v1/relays" || true
+  b_payload="$(curl -fsS "${directory_b}/v1/relays" || true)"
+  printf '%s\n' "$b_payload"
+  echo "--- directory B operator ids ---"
+  extract_operators "$b_payload" || true
+  if [[ "$a_ops" =~ ^[0-9]+$ ]] && [[ "$b_ops" =~ ^[0-9]+$ ]] && ((a_ops >= 1)) && ((b_ops >= 1)); then
+    echo "hint: if both lists show the same operator id, set unique DIRECTORY_OPERATOR_ID per machine."
+  fi
   echo
   exit 1
 fi
