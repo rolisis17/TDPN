@@ -4,6 +4,10 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+default_log_dir() {
+  echo "${EASY_NODE_LOG_DIR:-$ROOT_DIR/.easy-node-logs}"
+}
+
 usage() {
   cat <<'USAGE'
 Usage:
@@ -24,6 +28,7 @@ Usage:
 Purpose:
   Run on machine C (client host). Wraps full 3-machine validation and
   stores a single report file for sharing/debugging.
+  Default report path is ./.easy-node-logs (override with EASY_NODE_LOG_DIR).
 USAGE
 }
 
@@ -62,7 +67,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$report_file" ]]; then
-  report_file="/tmp/privacynode_machine_c_test_$(date +%Y%m%d_%H%M%S).log"
+  report_file="$(default_log_dir)/privacynode_machine_c_test_$(date +%Y%m%d_%H%M%S).log"
 fi
 mkdir -p "$(dirname "$report_file")"
 exec > >(tee -a "$report_file") 2>&1

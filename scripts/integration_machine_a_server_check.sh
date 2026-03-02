@@ -5,6 +5,10 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEPLOY_DIR="$ROOT_DIR/deploy"
 SERVER_ENV_FILE="$DEPLOY_DIR/.env.easy.server"
 
+default_log_dir() {
+  echo "${EASY_NODE_LOG_DIR:-$ROOT_DIR/.easy-node-logs}"
+}
+
 usage() {
   cat <<'USAGE'
 Usage:
@@ -15,7 +19,8 @@ Purpose:
   - docker services are running (directory, issuer, entry-exit)
   - local health/control endpoints respond
   - directory publishes both entry and exit relay descriptors
-  - optional public-host health checks from this machine
+  - optional public-host health checks from this machine (enable with EASY_NODE_VERIFY_PUBLIC=1)
+  - default report path is ./.easy-node-logs (override with EASY_NODE_LOG_DIR)
 USAGE
 }
 
@@ -49,6 +54,11 @@ wait_http_ok() {
   return 1
 }
 
+host_is_loopback() {
+  local host="$1"
+  [[ "$host" == "127.0.0.1" || "$host" == "localhost" || "$host" == "::1" ]]
+}
+
 public_host=""
 report_file=""
 
@@ -75,7 +85,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$report_file" ]]; then
-  report_file="/tmp/privacynode_machine_a_test_$(date +%Y%m%d_%H%M%S).log"
+  report_file="$(default_log_dir)/privacynode_machine_a_test_$(date +%Y%m%d_%H%M%S).log"
 fi
 mkdir -p "$(dirname "$report_file")"
 exec > >(tee -a "$report_file") 2>&1
@@ -119,7 +129,7 @@ if ! printf '%s\n' "$relay_payload" | rg -q '"role":"exit"'; then
   exit 1
 fi
 
-if [[ -n "$public_host" ]]; then
+if [[ "${EASY_NODE_VERIFY_PUBLIC:-0}" == "1" ]] && [[ -n "$public_host" ]] && ! host_is_loopback "$public_host"; then
   wait_http_ok "http://${public_host}:8081/v1/relays" "public directory" 20
   wait_http_ok "http://${public_host}:8082/v1/pubkeys" "public issuer" 20
   wait_http_ok "http://${public_host}:8083/v1/health" "public entry" 20

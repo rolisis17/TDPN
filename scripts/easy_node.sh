@@ -6,6 +6,17 @@ DEPLOY_DIR="$ROOT_DIR/deploy"
 SERVER_ENV_FILE="$DEPLOY_DIR/.env.easy.server"
 CLIENT_ENV_FILE="$DEPLOY_DIR/.env.easy.client"
 
+default_log_dir() {
+  echo "${EASY_NODE_LOG_DIR:-$ROOT_DIR/.easy-node-logs}"
+}
+
+prepare_log_dir() {
+  local dir
+  dir="$(default_log_dir)"
+  mkdir -p "$dir"
+  echo "$dir"
+}
+
 usage() {
   cat <<'USAGE'
 Usage:
@@ -25,6 +36,7 @@ Notes:
   - client-test runs client-demo with --no-deps (no local server required on the client machine).
   - three-machine-validate runs health + federation checks then runs client-test with both directories.
   - machine-a-test/machine-b-test/machine-c-test are machine-role-specific automated validations with optional report files.
+  - default logs are written to ./.easy-node-logs (override with EASY_NODE_LOG_DIR).
   - For a 3-machine test: run server-up on machine A and B, then run client-test on machine C with both directory URLs.
 USAGE
 }
@@ -91,8 +103,13 @@ random_token() {
 }
 
 ensure_deps_or_die() {
-  if ! check_dependencies >/tmp/easy_node_depcheck.log 2>&1; then
-    cat /tmp/easy_node_depcheck.log
+  local log_dir
+  local log_file
+  log_dir="$(prepare_log_dir)"
+  log_file="$log_dir/easy_node_depcheck.log"
+  if ! check_dependencies >"$log_file" 2>&1; then
+    cat "$log_file"
+    echo "dependency check log: $log_file"
     exit 1
   fi
 }
@@ -316,7 +333,10 @@ CLIENT_ENTRY_URL=${entry_url}
 CLIENT_EXIT_CONTROL_URL=${exit_url}
 EOF_CLIENT
 
-  local out="/tmp/easy_node_client_test.log"
+  local log_dir
+  local out
+  log_dir="$(prepare_log_dir)"
+  out="$log_dir/easy_node_client_test_$(date +%Y%m%d_%H%M%S).log"
   rm -f "$out"
 
   if looks_like_loopback_url "$first_dir" || looks_like_loopback_url "$issuer_url" || looks_like_loopback_url "$entry_url" || looks_like_loopback_url "$exit_url"; then
@@ -359,12 +379,14 @@ EOF_CLIENT
 
   if rg -q 'client selected entry=' "$out"; then
     echo "client test: ok"
+    echo "client test log: $out"
     echo "key log lines:"
     rg 'client selected entry=|client received wg-session config|bootstrap failed' "$out" || true
     return 0
   fi
 
   echo "client test: failed"
+  echo "client test log: $out"
   cat "$out"
   return 1
 }

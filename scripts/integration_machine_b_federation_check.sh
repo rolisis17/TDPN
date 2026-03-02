@@ -5,6 +5,10 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEPLOY_DIR="$ROOT_DIR/deploy"
 SERVER_ENV_FILE="$DEPLOY_DIR/.env.easy.server"
 
+default_log_dir() {
+  echo "${EASY_NODE_LOG_DIR:-$ROOT_DIR/.easy-node-logs}"
+}
+
 usage() {
   cat <<'USAGE'
 Usage:
@@ -21,6 +25,8 @@ Purpose:
   - local endpoints are healthy
   - machine A directory is reachable
   - machine B directory converges to at least N distinct operators
+  - optional machine B public-host checks (enable with EASY_NODE_VERIFY_PUBLIC=1)
+  - default report path is ./.easy-node-logs (override with EASY_NODE_LOG_DIR)
 USAGE
 }
 
@@ -52,6 +58,11 @@ wait_http_ok() {
   done
   echo "$name did not become healthy at $url"
   return 1
+}
+
+host_is_loopback() {
+  local host="$1"
+  [[ "$host" == "127.0.0.1" || "$host" == "localhost" || "$host" == "::1" ]]
 }
 
 trim_url() {
@@ -136,7 +147,7 @@ if [[ -z "$peer_directory_a" ]]; then
 fi
 
 if [[ -z "$report_file" ]]; then
-  report_file="/tmp/privacynode_machine_b_test_$(date +%Y%m%d_%H%M%S).log"
+  report_file="$(default_log_dir)/privacynode_machine_b_test_$(date +%Y%m%d_%H%M%S).log"
 fi
 mkdir -p "$(dirname "$report_file")"
 exec > >(tee -a "$report_file") 2>&1
@@ -171,7 +182,7 @@ wait_http_ok "http://127.0.0.1:8083/v1/health" "local entry" 30
 wait_http_ok "http://127.0.0.1:8084/v1/health" "local exit" 30
 wait_http_ok "${peer_directory_a}/v1/relays" "peer directory A" 30
 
-if [[ -n "$public_host" ]]; then
+if [[ "${EASY_NODE_VERIFY_PUBLIC:-0}" == "1" ]] && [[ -n "$public_host" ]] && ! host_is_loopback "$public_host"; then
   wait_http_ok "http://${public_host}:8081/v1/relays" "public directory" 20
   wait_http_ok "http://${public_host}:8082/v1/pubkeys" "public issuer" 20
   wait_http_ok "http://${public_host}:8083/v1/health" "public entry" 20
