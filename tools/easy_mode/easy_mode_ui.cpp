@@ -119,6 +119,113 @@ struct TestSuite {
   bool privileged;
 };
 
+struct ABHosts {
+  std::string aHost;
+  std::string bHost;
+};
+
+std::string hostsConfigPath(const std::string &root) {
+  return (std::filesystem::path(root) / "data" / "easy_mode_hosts.conf").string();
+}
+
+std::string stripSchemeAndPath(const std::string &raw) {
+  std::string v = trim(raw);
+  if (v.empty()) {
+    return "";
+  }
+  const std::string http = "http://";
+  const std::string https = "https://";
+  if (v.rfind(http, 0) == 0) {
+    v = v.substr(http.size());
+  } else if (v.rfind(https, 0) == 0) {
+    v = v.substr(https.size());
+  }
+  size_t slash = v.find('/');
+  if (slash != std::string::npos) {
+    v = v.substr(0, slash);
+  }
+  return trim(v);
+}
+
+std::string normalizeHostInput(const std::string &raw) {
+  std::string v = stripSchemeAndPath(raw);
+  return trim(v);
+}
+
+std::string endpointFromHost(const std::string &host, int port) {
+  std::ostringstream ss;
+  ss << "http://" << host << ":" << port;
+  return ss.str();
+}
+
+ABHosts loadABHosts(const std::string &root) {
+  ABHosts out;
+  std::ifstream in(hostsConfigPath(root));
+  if (!in.is_open()) {
+    return out;
+  }
+  std::string line;
+  while (std::getline(in, line)) {
+    line = trim(line);
+    if (line.empty() || line[0] == '#') {
+      continue;
+    }
+    size_t eq = line.find('=');
+    if (eq == std::string::npos) {
+      continue;
+    }
+    std::string k = trim(line.substr(0, eq));
+    std::string v = normalizeHostInput(line.substr(eq + 1));
+    if (k == "MACHINE_A_HOST") {
+      out.aHost = v;
+    } else if (k == "MACHINE_B_HOST") {
+      out.bHost = v;
+    }
+  }
+  return out;
+}
+
+bool saveABHosts(const std::string &root, const ABHosts &hosts) {
+  std::filesystem::path dataDir = std::filesystem::path(root) / "data";
+  std::error_code ec;
+  std::filesystem::create_directories(dataDir, ec);
+
+  std::ofstream out(hostsConfigPath(root), std::ios::trunc);
+  if (!out.is_open()) {
+    return false;
+  }
+  out << "MACHINE_A_HOST=" << hosts.aHost << "\n";
+  out << "MACHINE_B_HOST=" << hosts.bHost << "\n";
+  return true;
+}
+
+bool hasBothHosts(const ABHosts &hosts) {
+  return !trim(hosts.aHost).empty() && !trim(hosts.bHost).empty();
+}
+
+void configureABHostsInteractive(const std::string &root, ABHosts &hosts, bool forcePrompt) {
+  bool promptForUpdate = forcePrompt || !hasBothHosts(hosts);
+  if (!promptForUpdate) {
+    std::ostringstream prompt;
+    prompt << "Use saved machine hosts? A=" << hosts.aHost << " B=" << hosts.bHost << " (Y/n)";
+    bool keep = parseYesNo(readLine(prompt.str(), "y"), true);
+    if (keep) {
+      return;
+    }
+  }
+  hosts.aHost = normalizeHostInput(readLine("Machine A IP/host", hosts.aHost));
+  hosts.bHost = normalizeHostInput(readLine("Machine B IP/host", hosts.bHost));
+  if (!hasBothHosts(hosts)) {
+    std::cout << "both Machine A and Machine B hosts are required\n";
+    return;
+  }
+  if (!saveABHosts(root, hosts)) {
+    std::cout << "warning: could not save host config file\n";
+  } else {
+    std::cout << "saved host config: " << hostsConfigPath(root) << "\n";
+  }
+}
+
 int runTestSuites(const std::string &root, const std::vector<TestSuite> &suites, bool allowSudo) {
   int passed = 0;
   int failed = 0;
@@ -168,7 +275,7 @@ void showTestMenu() {
   std::cout << "0) Back\n";
 }
 
-void runTestsInteractive(const std::string &root, const std::string &script) {
+void runTestsInteractive(const std::string &root, const std::string &script, ABHosts &hosts) {
   for (;;) {
     showTestMenu();
     std::cout << "Selection: ";
@@ -203,7 +310,8 @@ void runTestsInteractive(const std::string &root, const std::string &script) {
       suites.push_back({"Unit tests", "go test ./...", false});
       suites.push_back({"Beta preflight", "./scripts/beta_preflight.sh", false});
     } else if (choice == "8") {
-      std::string host = readLine("Machine A public host/IP (optional)", "");
+      configureABHostsInteractive(root, hosts, false);
+      std::string host = readLine("Machine A public host/IP (optional)", hosts.aHost);
       std::string report = readLine("Report file path (optional)", "");
       std::ostringstream cmd;
       cmd << shellEscape(script) << " machine-a-test";
@@ -215,8 +323,9 @@ void runTestsInteractive(const std::string &root, const std::string &script) {
       }
       suites.push_back({"Machine A server test", cmd.str(), false});
     } else if (choice == "9") {
-      std::string peerA = readLine("Machine A directory URL (e.g. http://A:8081)");
-      std::string host = readLine("Machine B public host/IP (optional)", "");
+      configureABHostsInteractive(root, hosts, false);
+      std::string peerA = readLine("Machine A directory URL", endpointFromHost(hosts.aHost, 8081));
+      std::string host = readLine("Machine B public host/IP (optional)", hosts.bHost);
       std::string minOperators = readLine("Minimum operators on machine B", "2");
       std::string federationTimeout = readLine("Federation wait timeout sec", "90");
       std::string report = readLine("Report file path (optional)", "");
@@ -237,11 +346,12 @@ void runTestsInteractive(const std::string &root, const std::string &script) {
       }
       suites.push_back({"Machine B federation test", cmd.str(), false});
     } else if (choice == "10") {
-      std::string dirA = readLine("Directory A URL (e.g. http://A:8081)");
-      std::string dirB = readLine("Directory B URL (e.g. http://B:8081)");
-      std::string issuer = readLine("Issuer URL (e.g. http://A:8082)");
-      std::string entry = readLine("Entry control URL fallback (e.g. http://A:8083)");
-      std::string exitUrl = readLine("Exit control URL fallback (e.g. http://A:8084)");
+      configureABHostsInteractive(root, hosts, false);
+      std::string dirA = readLine("Directory A URL", endpointFromHost(hosts.aHost, 8081));
+      std::string dirB = readLine("Directory B URL", endpointFromHost(hosts.bHost, 8081));
+      std::string issuer = readLine("Issuer URL", endpointFromHost(hosts.aHost, 8082));
+      std::string entry = readLine("Entry control URL fallback", endpointFromHost(hosts.aHost, 8083));
+      std::string exitUrl = readLine("Exit control URL fallback", endpointFromHost(hosts.aHost, 8084));
       std::string minSources = readLine("Minimum directory sources", "2");
       std::string minOperators = readLine("Minimum operators per directory", "2");
       std::string federationTimeout = readLine("Federation wait timeout sec", "90");
@@ -304,6 +414,7 @@ int main() {
   }
 
   const std::string script = scriptPath.string();
+  ABHosts hosts = loadABHosts(root);
 
   std::cout << "Privacynode Easy Launcher\n";
   std::cout << "repo: " << root << "\n";
@@ -319,6 +430,7 @@ int main() {
     std::cout << "7) Show 3-machine test guide\n";
     std::cout << "8) Run 3-machine validation\n";
     std::cout << "9) Run automated tests\n";
+    std::cout << "10) Configure machine A/B hosts\n";
     std::cout << "0) Exit\n";
     std::cout << "Selection: ";
 
@@ -336,14 +448,32 @@ int main() {
     }
 
     if (choice == "2") {
-      std::string host = readLine("Public host/IP for this server machine (required)");
+      configureABHostsInteractive(root, hosts, false);
+      std::string role = readLine("Server role for this machine (A/B/custom)", "A");
+      std::string host;
+      std::string peersDefault;
+      if (!role.empty() && (role[0] == 'A' || role[0] == 'a')) {
+        host = hosts.aHost;
+        bool federateWithB = parseYesNo(readLine("Peer with Machine B directory? (y/N)", "n"), false);
+        if (federateWithB && !hosts.bHost.empty()) {
+          peersDefault = endpointFromHost(hosts.bHost, 8081);
+        }
+      } else if (!role.empty() && (role[0] == 'B' || role[0] == 'b')) {
+        host = hosts.bHost;
+        if (!hosts.aHost.empty()) {
+          peersDefault = endpointFromHost(hosts.aHost, 8081);
+        }
+      } else {
+        host = readLine("Public host/IP for this server machine (required)");
+      }
+      host = normalizeHostInput(readLine("Public host/IP for this server machine (required)", host));
       if (host.empty()) {
         std::cout << "host is required\n";
         continue;
       }
       std::string operatorId = readLine("Operator ID", "");
       std::string adminToken = readLine("Issuer admin token (blank=auto)", "");
-      std::string peers = readLine("Peer directory URLs CSV (optional, for federation)", "");
+      std::string peers = readLine("Peer directory URLs CSV (optional, for federation)", peersDefault);
 
       std::ostringstream cmd;
       cmd << shellEscape(script) << " server-up"
@@ -362,10 +492,11 @@ int main() {
     }
 
     if (choice == "3") {
-      std::string dirs = readLine("Directory URLs CSV (e.g. http://A:8081,http://B:8081)");
-      std::string issuer = readLine("Issuer URL (e.g. http://A:8082)");
-      std::string entry = readLine("Entry control URL fallback (e.g. http://A:8083)");
-      std::string exitUrl = readLine("Exit control URL fallback (e.g. http://A:8084)");
+      configureABHostsInteractive(root, hosts, false);
+      std::string dirs = readLine("Directory URLs CSV", endpointFromHost(hosts.aHost, 8081) + "," + endpointFromHost(hosts.bHost, 8081));
+      std::string issuer = readLine("Issuer URL", endpointFromHost(hosts.aHost, 8082));
+      std::string entry = readLine("Entry control URL fallback", endpointFromHost(hosts.aHost, 8083));
+      std::string exitUrl = readLine("Exit control URL fallback", endpointFromHost(hosts.aHost, 8084));
       std::string minSources = readLine("Minimum directory sources", "1");
       std::string country = readLine("Preferred exit country code (optional)", "");
       std::string region = readLine("Preferred exit region (optional)", "");
@@ -415,11 +546,12 @@ int main() {
     }
 
     if (choice == "8") {
-      std::string dirA = readLine("Directory A URL (e.g. http://A:8081)");
-      std::string dirB = readLine("Directory B URL (e.g. http://B:8081)");
-      std::string issuer = readLine("Issuer URL (e.g. http://A:8082)");
-      std::string entry = readLine("Entry control URL fallback (e.g. http://A:8083)");
-      std::string exitUrl = readLine("Exit control URL fallback (e.g. http://A:8084)");
+      configureABHostsInteractive(root, hosts, false);
+      std::string dirA = readLine("Directory A URL", endpointFromHost(hosts.aHost, 8081));
+      std::string dirB = readLine("Directory B URL", endpointFromHost(hosts.bHost, 8081));
+      std::string issuer = readLine("Issuer URL", endpointFromHost(hosts.aHost, 8082));
+      std::string entry = readLine("Entry control URL fallback", endpointFromHost(hosts.aHost, 8083));
+      std::string exitUrl = readLine("Exit control URL fallback", endpointFromHost(hosts.aHost, 8084));
       std::string minSources = readLine("Minimum directory sources", "2");
       std::string minOperators = readLine("Minimum operators per directory", "2");
       std::string federationTimeout = readLine("Federation wait timeout sec", "90");
@@ -454,7 +586,12 @@ int main() {
     }
 
     if (choice == "9") {
-      runTestsInteractive(root, script);
+      runTestsInteractive(root, script, hosts);
+      continue;
+    }
+
+    if (choice == "10") {
+      configureABHostsInteractive(root, hosts, true);
       continue;
     }
 
