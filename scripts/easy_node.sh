@@ -67,13 +67,18 @@ wait_http_ok() {
   local attempts="${3:-30}"
   local i
   for ((i = 1; i <= attempts; i++)); do
-    if curl -fsS "$url" >/dev/null 2>&1; then
+    if curl -fsS --connect-timeout 2 --max-time 4 "$url" >/dev/null 2>&1; then
       return 0
     fi
     sleep 1
   done
   echo "$name did not become healthy at $url"
   return 1
+}
+
+host_is_loopback() {
+  local host="$1"
+  [[ "$host" == "127.0.0.1" || "$host" == "localhost" || "$host" == "::1" ]]
 }
 
 random_token() {
@@ -183,10 +188,19 @@ server_up() {
 
   compose_server up -d --build directory issuer entry-exit
 
-  wait_http_ok "http://${public_host}:8081/v1/relays" "directory" 40 || { compose_server logs --tail=80 directory; exit 1; }
-  wait_http_ok "http://${public_host}:8082/v1/pubkeys" "issuer" 40 || { compose_server logs --tail=80 issuer; exit 1; }
-  wait_http_ok "http://${public_host}:8083/v1/health" "entry" 40 || { compose_server logs --tail=120 entry-exit; exit 1; }
-  wait_http_ok "http://${public_host}:8084/v1/health" "exit" 40 || { compose_server logs --tail=120 entry-exit; exit 1; }
+  # Always validate local container reachability first.
+  wait_http_ok "http://127.0.0.1:8081/v1/relays" "local directory" 40 || { compose_server logs --tail=80 directory; exit 1; }
+  wait_http_ok "http://127.0.0.1:8082/v1/pubkeys" "local issuer" 40 || { compose_server logs --tail=80 issuer; exit 1; }
+  wait_http_ok "http://127.0.0.1:8083/v1/health" "local entry" 40 || { compose_server logs --tail=120 entry-exit; exit 1; }
+  wait_http_ok "http://127.0.0.1:8084/v1/health" "local exit" 40 || { compose_server logs --tail=120 entry-exit; exit 1; }
+
+  # Optional public endpoint validation (can fail on NAT loopback setups).
+  if [[ "${EASY_NODE_VERIFY_PUBLIC:-0}" == "1" ]] && ! host_is_loopback "$public_host"; then
+    wait_http_ok "http://${public_host}:8081/v1/relays" "public directory" 15 || { compose_server logs --tail=80 directory; exit 1; }
+    wait_http_ok "http://${public_host}:8082/v1/pubkeys" "public issuer" 15 || { compose_server logs --tail=80 issuer; exit 1; }
+    wait_http_ok "http://${public_host}:8083/v1/health" "public entry" 15 || { compose_server logs --tail=120 entry-exit; exit 1; }
+    wait_http_ok "http://${public_host}:8084/v1/health" "public exit" 15 || { compose_server logs --tail=120 entry-exit; exit 1; }
+  fi
 
   echo "server stack started"
   echo "env file: $SERVER_ENV_FILE"

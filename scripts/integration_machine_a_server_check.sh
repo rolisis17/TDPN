@@ -40,7 +40,7 @@ wait_http_ok() {
   local attempts="${3:-30}"
   local i
   for ((i = 1; i <= attempts; i++)); do
-    if curl -fsS "$url" >/dev/null 2>&1; then
+    if curl -fsS --connect-timeout 2 --max-time 4 "$url" >/dev/null 2>&1; then
       return 0
     fi
     sleep 1
