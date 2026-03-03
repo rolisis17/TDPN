@@ -283,6 +283,8 @@ client_test() {
   local exit_country=""
   local exit_region=""
   local timeout_sec="35"
+  local build_timeout_sec="${EASY_NODE_CLIENT_BUILD_TIMEOUT_SEC:-180}"
+  local force_build="${EASY_NODE_CLIENT_FORCE_BUILD:-0}"
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -360,14 +362,27 @@ EOF_CLIENT
   wait_http_ok "${entry_url%/}/v1/health" "entry" 8 || return 1
   wait_http_ok "${exit_url%/}/v1/health" "exit" 8 || return 1
 
-  if ! (
-    cd "$DEPLOY_DIR"
-    timeout 300s env COMPOSE_INTERACTIVE_NO_CLI=1 COMPOSE_MENU=0 docker compose --profile demo build client-demo >"$build_log" 2>&1
-  ); then
-    echo "client image build failed or timed out"
-    echo "client build log: $build_log"
-    cat "$build_log"
-    return 1
+  local do_build=0
+  if [[ "$force_build" == "1" ]]; then
+    do_build=1
+  elif ! docker image inspect deploy-client-demo:latest >/dev/null 2>&1; then
+    do_build=1
+  fi
+
+  if [[ "$do_build" -eq 1 ]]; then
+    echo "client test: building client image (timeout=${build_timeout_sec}s)"
+    if ! (
+      cd "$DEPLOY_DIR"
+      timeout --foreground -k 15s "${build_timeout_sec}s" env COMPOSE_INTERACTIVE_NO_CLI=1 COMPOSE_MENU=0 docker compose --profile demo build client-demo >"$build_log" 2>&1
+    ); then
+      echo "client image build failed or timed out"
+      echo "client build log: $build_log"
+      cat "$build_log"
+      return 1
+    fi
+    echo "client test: build done"
+  else
+    echo "client test: using existing deploy-client-demo:latest image (set EASY_NODE_CLIENT_FORCE_BUILD=1 to rebuild)"
   fi
 
   local -a run_cmd
@@ -396,7 +411,7 @@ EOF_CLIENT
 
   (
     cd "$DEPLOY_DIR"
-    timeout "${timeout_sec}s" "${run_cmd[@]}" >"$out" 2>&1
+    timeout --foreground -k 10s "${timeout_sec}s" "${run_cmd[@]}" >"$out" 2>&1
   ) || true
 
   if rg -q 'client selected entry=' "$out"; then

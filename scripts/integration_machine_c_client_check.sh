@@ -74,8 +74,21 @@ exec > >(tee -a "$report_file") 2>&1
 
 echo "[machine-c-test] started at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "[machine-c-test] report: $report_file"
+overall_timeout_sec="${MACHINE_C_TEST_TIMEOUT_SEC:-720}"
+echo "[machine-c-test] overall timeout: ${overall_timeout_sec}s (override with MACHINE_C_TEST_TIMEOUT_SEC)"
+echo "[machine-c-test] running 3-machine validation..."
 
-"$ROOT_DIR/scripts/integration_3machine_beta_validate.sh" "${pass_args[@]}"
+set +e
+timeout --foreground -k 20s "${overall_timeout_sec}s" "$ROOT_DIR/scripts/integration_3machine_beta_validate.sh" "${pass_args[@]}"
+rc=$?
+set -e
+if [[ "$rc" -eq 124 || "$rc" -eq 137 ]]; then
+  echo "[machine-c-test] timed out after ${overall_timeout_sec}s"
+  exit 1
+fi
+if [[ "$rc" -ne 0 ]]; then
+  exit "$rc"
+fi
 
 echo "[machine-c-test] ok"
 echo "[machine-c-test] report saved: $report_file"

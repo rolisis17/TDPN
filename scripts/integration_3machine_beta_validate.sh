@@ -55,7 +55,11 @@ wait_http_ok() {
   local i
   for ((i = 1; i <= attempts; i++)); do
     if curl -fsS --connect-timeout 2 --max-time 4 "$url" >/dev/null 2>&1; then
+      echo "[health] $name ok ($url)"
       return 0
+    fi
+    if ((i == 1 || i % 5 == 0)); then
+      echo "[health] waiting for $name ($url) attempt=$i/$attempts"
     fi
     sleep 1
   done
@@ -108,6 +112,7 @@ min_sources="2"
 min_operators="2"
 federation_timeout_sec="90"
 client_timeout_sec="45"
+health_attempts="${THREE_MACHINE_HEALTH_ATTEMPTS:-12}"
 exit_country=""
 exit_region=""
 
@@ -197,16 +202,20 @@ for endpoint in "$directory_a" "$directory_b" "$issuer_url" "$entry_url" "$exit_
   fi
 done
 
-wait_http_ok "${directory_a}/v1/relays" "directory A" 30
-wait_http_ok "${directory_b}/v1/relays" "directory B" 30
-wait_http_ok "${issuer_url}/v1/pubkeys" "issuer" 30
-wait_http_ok "${entry_url}/v1/health" "entry" 30
-wait_http_ok "${exit_url}/v1/health" "exit" 30
+wait_http_ok "${directory_a}/v1/relays" "directory A" "$health_attempts"
+wait_http_ok "${directory_b}/v1/relays" "directory B" "$health_attempts"
+wait_http_ok "${issuer_url}/v1/pubkeys" "issuer" "$health_attempts"
+wait_http_ok "${entry_url}/v1/health" "entry" "$health_attempts"
+wait_http_ok "${exit_url}/v1/health" "exit" "$health_attempts"
 
 federated=0
+echo "[federation] waiting for operator floor: min_operators=$min_operators timeout=${federation_timeout_sec}s"
 for _ in $(seq 1 "$federation_timeout_sec"); do
   a_ops="$(unique_operator_count "$directory_a")"
   b_ops="$(unique_operator_count "$directory_b")"
+  if (( _ == 1 || _ % 10 == 0 )); then
+    echo "[federation] progress second=$_/$federation_timeout_sec a_ops=$a_ops b_ops=$b_ops"
+  fi
   if [[ "$a_ops" =~ ^[0-9]+$ ]] && [[ "$b_ops" =~ ^[0-9]+$ ]] && ((a_ops >= min_operators)) && ((b_ops >= min_operators)); then
     federated=1
     break
