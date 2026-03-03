@@ -344,7 +344,9 @@ EOF_CLIENT
 
   local log_dir
   local out
+  local build_log
   log_dir="$(prepare_log_dir)"
+  build_log="$log_dir/easy_node_client_build_$(date +%Y%m%d_%H%M%S).log"
   out="$log_dir/easy_node_client_test_$(date +%Y%m%d_%H%M%S).log"
   rm -f "$out"
 
@@ -358,14 +360,25 @@ EOF_CLIENT
   wait_http_ok "${entry_url%/}/v1/health" "entry" 8 || return 1
   wait_http_ok "${exit_url%/}/v1/health" "exit" 8 || return 1
 
-  (cd "$DEPLOY_DIR" && docker compose --profile demo build client-demo >/dev/null)
+  if ! (
+    cd "$DEPLOY_DIR"
+    timeout 300s env COMPOSE_INTERACTIVE_NO_CLI=1 COMPOSE_MENU=0 docker compose --profile demo build client-demo >"$build_log" 2>&1
+  ); then
+    echo "client image build failed or timed out"
+    echo "client build log: $build_log"
+    cat "$build_log"
+    return 1
+  fi
 
   local -a run_cmd
   run_cmd=(
+    env
+    COMPOSE_INTERACTIVE_NO_CLI=1
+    COMPOSE_MENU=0
     docker compose
     --env-file "$CLIENT_ENV_FILE"
     --profile demo
-    run --no-deps --rm
+    run -T --no-deps --rm
     -e "DIRECTORY_URLS=$directory_urls"
     -e "DIRECTORY_MIN_SOURCES=$min_sources"
     -e "ISSUER_URL=$issuer_url"
