@@ -25,9 +25,9 @@ Usage:
   ./scripts/easy_node.sh server-status
   ./scripts/easy_node.sh server-logs
   ./scripts/easy_node.sh server-down
-  ./scripts/easy_node.sh client-test [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--min-sources N] [--exit-country CC] [--exit-region REGION] [--timeout-sec N] [--distinct-operators [0|1]] [--beta-profile [0|1]]
-  ./scripts/easy_node.sh three-machine-validate [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--exit-country CC] [--exit-region REGION] [--distinct-operators [0|1]] [--beta-profile [0|1]]
-  ./scripts/easy_node.sh three-machine-soak [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--rounds N] [--pause-sec N] [--fault-every N] [--fault-command CMD] [--continue-on-fail [0|1]] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--exit-country CC] [--exit-region REGION] [--distinct-operators [0|1]] [--beta-profile [0|1]] [--report-file PATH]
+  ./scripts/easy_node.sh client-test [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--min-sources N] [--exit-country CC] [--exit-region REGION] [--timeout-sec N] [--distinct-operators [0|1]] [--min-selection-lines N] [--min-entry-operators N] [--min-exit-operators N] [--require-cross-operator-pair [0|1]] [--beta-profile [0|1]]
+  ./scripts/easy_node.sh three-machine-validate [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-a-url URL] [--issuer-b-url URL] [--entry-url URL] [--exit-url URL] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--client-min-selection-lines N] [--client-min-entry-operators N] [--client-min-exit-operators N] [--client-require-cross-operator-pair [0|1]] [--exit-country CC] [--exit-region REGION] [--distinct-operators [0|1]] [--require-issuer-quorum [0|1]] [--beta-profile [0|1]]
+  ./scripts/easy_node.sh three-machine-soak [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-a-url URL] [--issuer-b-url URL] [--entry-url URL] [--exit-url URL] [--rounds N] [--pause-sec N] [--fault-every N] [--fault-command CMD] [--continue-on-fail [0|1]] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--client-min-selection-lines N] [--client-min-entry-operators N] [--client-min-exit-operators N] [--client-require-cross-operator-pair [0|1]] [--exit-country CC] [--exit-region REGION] [--distinct-operators [0|1]] [--require-issuer-quorum [0|1]] [--beta-profile [0|1]] [--report-file PATH]
   ./scripts/easy_node.sh machine-a-test [--public-host HOST] [--report-file PATH]
   ./scripts/easy_node.sh machine-b-test --peer-directory-a URL [--public-host HOST] [--min-operators N] [--federation-timeout-sec N] [--report-file PATH]
   ./scripts/easy_node.sh machine-c-test [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--exit-country CC] [--exit-region REGION] [--distinct-operators [0|1]] [--beta-profile [0|1]] [--report-file PATH]
@@ -358,6 +358,7 @@ DIRECTORY_MIN_OPERATORS=2
 DIRECTORY_MIN_RELAY_VOTES=2
 ENTRY_DIRECTORY_MIN_OPERATORS=2
 ENTRY_DIRECTORY_MIN_RELAY_VOTES=2
+ENTRY_REQUIRE_DISTINCT_EXIT_OPERATOR=1
 DIRECTORY_PEER_MIN_OPERATORS=2
 DIRECTORY_PEER_MIN_VOTES=2
 DIRECTORY_PEER_DISCOVERY_MIN_VOTES=2
@@ -651,6 +652,10 @@ client_test() {
   local build_timeout_sec="${EASY_NODE_CLIENT_BUILD_TIMEOUT_SEC:-180}"
   local force_build="${EASY_NODE_CLIENT_FORCE_BUILD:-0}"
   local require_distinct_operators="${CLIENT_REQUIRE_DISTINCT_OPERATORS:-0}"
+  local min_selection_lines="${EASY_NODE_CLIENT_MIN_SELECTION_LINES:-1}"
+  local min_entry_operators="${EASY_NODE_CLIENT_MIN_ENTRY_OPERATORS:-1}"
+  local min_exit_operators="${EASY_NODE_CLIENT_MIN_EXIT_OPERATORS:-1}"
+  local require_cross_operator_pair="${EASY_NODE_CLIENT_REQUIRE_CROSS_OPERATOR_PAIR:-0}"
   local beta_profile="${EASY_NODE_BETA_PROFILE:-0}"
   local bootstrap_directory=""
   local discovery_wait_sec="${EASY_NODE_DISCOVERY_WAIT_SEC:-12}"
@@ -711,6 +716,27 @@ client_test() {
           shift
         fi
         ;;
+      --min-selection-lines)
+        min_selection_lines="${2:-}"
+        shift 2
+        ;;
+      --min-entry-operators)
+        min_entry_operators="${2:-}"
+        shift 2
+        ;;
+      --min-exit-operators)
+        min_exit_operators="${2:-}"
+        shift 2
+        ;;
+      --require-cross-operator-pair)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          require_cross_operator_pair="${2:-}"
+          shift 2
+        else
+          require_cross_operator_pair="1"
+          shift
+        fi
+        ;;
       --beta-profile)
         if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
           beta_profile="${2:-}"
@@ -729,6 +755,14 @@ client_test() {
 
   if [[ "$require_distinct_operators" != "0" && "$require_distinct_operators" != "1" ]]; then
     echo "client-test requires CLIENT_REQUIRE_DISTINCT_OPERATORS or --distinct-operators to be 0 or 1"
+    exit 2
+  fi
+  if [[ "$require_cross_operator_pair" != "0" && "$require_cross_operator_pair" != "1" ]]; then
+    echo "client-test requires --require-cross-operator-pair to be 0 or 1"
+    exit 2
+  fi
+  if ! [[ "$min_selection_lines" =~ ^[0-9]+$ && "$min_entry_operators" =~ ^[0-9]+$ && "$min_exit_operators" =~ ^[0-9]+$ ]]; then
+    echo "client-test requires --min-selection-lines, --min-entry-operators and --min-exit-operators to be numeric"
     exit 2
   fi
   if [[ "$beta_profile" != "0" && "$beta_profile" != "1" ]]; then
@@ -871,6 +905,92 @@ EOF_CLIENT
   ) || true
 
   if rg -q 'client selected entry=' "$out"; then
+    local same_ops missing_ops selection_count entry_op_count exit_op_count cross_pair_count
+    read -r same_ops missing_ops selection_count entry_op_count exit_op_count cross_pair_count < <(
+        awk '
+          /client selected entry=/ {
+            selected++
+            entry_op=""
+            exit_op=""
+            for (i = 1; i <= NF; i++) {
+              if ($i ~ /^entry_op=/) {
+                entry_op = substr($i, 10)
+              } else if ($i ~ /^exit_op=/) {
+                exit_op = substr($i, 9)
+              }
+            }
+            if (entry_op == "" || exit_op == "") {
+              missing++
+            } else if (entry_op == exit_op) {
+              same++
+            } else {
+              cross++
+            }
+            if (entry_op != "") {
+              entry_seen[entry_op] = 1
+            }
+            if (exit_op != "") {
+              exit_seen[exit_op] = 1
+            }
+          }
+          END {
+            entry_count = 0
+            exit_count = 0
+            for (k in entry_seen) {
+              entry_count++
+            }
+            for (k in exit_seen) {
+              exit_count++
+            }
+            if (same == "") {
+              same = 0
+            }
+            if (missing == "") {
+              missing = 0
+            }
+            if (selected == "") {
+              selected = 0
+            }
+            if (cross == "") {
+              cross = 0
+            }
+            printf "%d %d %d %d %d %d\n", same, missing, selected, entry_count, exit_count, cross
+          }
+        ' "$out"
+      )
+    echo "client selection summary: selections=$selection_count entry_ops=$entry_op_count exit_ops=$exit_op_count cross_pairs=$cross_pair_count same_ops=$same_ops missing_ops=$missing_ops"
+    if ((selection_count < min_selection_lines)); then
+      echo "client test: failed selection volume validation (observed=$selection_count required=$min_selection_lines)"
+      echo "client test log: $out"
+      rg 'client selected entry=' "$out" || true
+      return 1
+    fi
+    if ((entry_op_count < min_entry_operators)); then
+      echo "client test: failed entry-operator diversity validation (observed=$entry_op_count required=$min_entry_operators)"
+      echo "client test log: $out"
+      rg 'client selected entry=' "$out" || true
+      return 1
+    fi
+    if ((exit_op_count < min_exit_operators)); then
+      echo "client test: failed exit-operator diversity validation (observed=$exit_op_count required=$min_exit_operators)"
+      echo "client test log: $out"
+      rg 'client selected entry=' "$out" || true
+      return 1
+    fi
+    if [[ "$require_cross_operator_pair" == "1" ]] && ((cross_pair_count < 1)); then
+      echo "client test: failed cross-operator-pair validation (observed=$cross_pair_count required>=1)"
+      echo "client test log: $out"
+      rg 'client selected entry=' "$out" || true
+      return 1
+    fi
+    if [[ "$require_distinct_operators" == "1" ]]; then
+      if ((same_ops > 0 || missing_ops > 0)); then
+        echo "client test: failed distinct-operator validation (same_ops=$same_ops missing_ops=$missing_ops)"
+        echo "client test log: $out"
+        rg 'client selected entry=' "$out" || true
+        return 1
+      fi
+    fi
     echo "client test: ok"
     echo "client test log: $out"
     echo "key log lines:"

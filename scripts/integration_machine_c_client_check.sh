@@ -17,14 +17,23 @@ Usage:
     [--bootstrap-directory URL] \
     [--discovery-wait-sec N] \
     [--issuer-url URL] \
+    [--issuer-a-url URL] \
+    [--issuer-b-url URL] \
     [--entry-url URL] \
     [--exit-url URL] \
     [--min-sources N] \
     [--min-operators N] \
     [--federation-timeout-sec N] \
     [--timeout-sec N] \
+    [--client-min-selection-lines N] \
+    [--client-min-entry-operators N] \
+    [--client-min-exit-operators N] \
+    [--client-require-cross-operator-pair [0|1]] \
     [--exit-country CC] \
     [--exit-region REGION] \
+    [--distinct-operators [0|1]] \
+    [--require-issuer-quorum [0|1]] \
+    [--beta-profile [0|1]] \
     [--report-file PATH]
 
 Purpose:
@@ -48,22 +57,9 @@ while [[ $# -gt 0 ]]; do
       exit 0
       ;;
     *)
+      # Pass-through all arguments verbatim to the underlying validator.
       pass_args+=("$1")
       shift
-      if [[ ${#pass_args[@]} -gt 0 ]]; then
-        last="${pass_args[${#pass_args[@]}-1]}"
-        case "$last" in
-          --directory-a|--directory-b|--bootstrap-directory|--discovery-wait-sec|--issuer-url|--entry-url|--exit-url|--min-sources|--min-operators|--federation-timeout-sec|--timeout-sec|--exit-country|--exit-region|--distinct-operators|--beta-profile)
-            if [[ $# -eq 0 ]]; then
-              echo "missing value for $last"
-              usage
-              exit 2
-            fi
-            pass_args+=("$1")
-            shift
-            ;;
-        esac
-      fi
       ;;
   esac
 done

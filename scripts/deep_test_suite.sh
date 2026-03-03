@@ -40,6 +40,9 @@ echo "[deep] sync status chaos"
 echo "[deep] directory beta strict"
 ./scripts/integration_directory_beta_strict.sh
 
+echo "[deep] cross-role beta strict"
+./scripts/integration_beta_strict_roles.sh
+
 echo "[deep] directory operator churn scale"
 ./scripts/integration_directory_operator_churn_scale.sh
 
@@ -88,6 +91,9 @@ echo "[deep] exit live-wg mode"
 echo "[deep] live-wg full path"
 ./scripts/integration_live_wg_full_path.sh
 
+echo "[deep] strict live-wg full path"
+./scripts/integration_live_wg_full_path_strict.sh
+
 echo "[deep] client bootstrap recovery"
 ./scripts/integration_client_bootstrap_recovery.sh
 
@@ -99,6 +105,9 @@ echo "[deep] client startup sync"
 
 echo "[deep] exit startup sync"
 ./scripts/integration_exit_startup_sync.sh
+
+echo "[deep] beta fault matrix"
+./scripts/integration_beta_fault_matrix.sh
 
 echo "[deep] persistent opaque session"
 ./scripts/integration_persistent_opaque_session.sh

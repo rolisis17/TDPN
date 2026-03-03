@@ -157,9 +157,14 @@ func TestAllowForwardPayloadLiveModeRejectsMalformedOpaque(t *testing.T) {
 
 func TestValidateRuntimeConfigBetaStrict(t *testing.T) {
 	s := &Service{
-		betaStrict:           true,
-		liveWGMode:           true,
-		directoryTrustStrict: true,
+		betaStrict:            true,
+		liveWGMode:            true,
+		directoryTrustStrict:  true,
+		requireDistinctExitOp: true,
+		operatorID:            "op-entry",
+		directoryURLs:         []string{"http://127.0.0.1:8081"},
+		directoryMinSources:   1,
+		directoryMinOperators: 1,
 	}
 	if err := s.validateRuntimeConfig(); err != nil {
 		t.Fatalf("expected strict config valid, got %v", err)
@@ -177,6 +182,80 @@ func TestValidateRuntimeConfigBetaStrictRejectsNonLive(t *testing.T) {
 		t.Fatalf("expected strict validation error")
 	}
 	if !strings.Contains(err.Error(), "ENTRY_LIVE_WG_MODE") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigBetaStrictRejectsMissingDistinctExitOperator(t *testing.T) {
+	s := &Service{
+		betaStrict:            true,
+		liveWGMode:            true,
+		directoryTrustStrict:  true,
+		requireDistinctExitOp: false,
+		operatorID:            "op-entry",
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected strict validation error")
+	}
+	if !strings.Contains(err.Error(), "ENTRY_REQUIRE_DISTINCT_EXIT_OPERATOR") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigBetaStrictRejectsMultiDirectoryWithoutSourceQuorum(t *testing.T) {
+	s := &Service{
+		betaStrict:            true,
+		liveWGMode:            true,
+		directoryTrustStrict:  true,
+		requireDistinctExitOp: true,
+		operatorID:            "op-entry",
+		directoryURLs:         []string{"http://127.0.0.1:8081", "http://127.0.0.1:8085"},
+		directoryMinSources:   1,
+		directoryMinOperators: 2,
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected strict validation error")
+	}
+	if !strings.Contains(err.Error(), "ENTRY_DIRECTORY_MIN_SOURCES>=2") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigBetaStrictRejectsMultiDirectoryWithoutOperatorQuorum(t *testing.T) {
+	s := &Service{
+		betaStrict:            true,
+		liveWGMode:            true,
+		directoryTrustStrict:  true,
+		requireDistinctExitOp: true,
+		operatorID:            "op-entry",
+		directoryURLs:         []string{"http://127.0.0.1:8081", "http://127.0.0.1:8085"},
+		directoryMinSources:   2,
+		directoryMinOperators: 1,
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected strict validation error")
+	}
+	if !strings.Contains(err.Error(), "ENTRY_DIRECTORY_MIN_OPERATORS>=2") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigRejectsDistinctOperatorWithoutEntryOperatorID(t *testing.T) {
+	s := &Service{
+		betaStrict:            false,
+		liveWGMode:            false,
+		directoryTrustStrict:  false,
+		requireDistinctExitOp: true,
+		operatorID:            "",
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "ENTRY_OPERATOR_ID") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

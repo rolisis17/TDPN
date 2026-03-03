@@ -17,6 +17,8 @@ Usage:
     [--bootstrap-directory URL] \
     [--discovery-wait-sec N] \
     [--issuer-url URL] \
+    [--issuer-a-url URL] \
+    [--issuer-b-url URL] \
     [--entry-url URL] \
     [--exit-url URL] \
     [--rounds N] \
@@ -28,9 +30,14 @@ Usage:
     [--min-operators N] \
     [--federation-timeout-sec N] \
     [--timeout-sec N] \
+    [--client-min-selection-lines N] \
+    [--client-min-entry-operators N] \
+    [--client-min-exit-operators N] \
+    [--client-require-cross-operator-pair [0|1]] \
     [--exit-country CC] \
     [--exit-region REGION] \
     [--distinct-operators [0|1]] \
+    [--require-issuer-quorum [0|1]] \
     [--beta-profile [0|1]] \
     [--report-file PATH]
 
@@ -59,6 +66,8 @@ trim_url() {
 directory_a=""
 directory_b=""
 issuer_url=""
+issuer_a_url=""
+issuer_b_url=""
 entry_url=""
 exit_url=""
 bootstrap_directory=""
@@ -72,10 +81,15 @@ min_sources="2"
 min_operators="2"
 federation_timeout_sec="90"
 client_timeout_sec="45"
+client_min_selection_lines="${THREE_MACHINE_CLIENT_MIN_SELECTION_LINES:-0}"
+client_min_entry_operators="${THREE_MACHINE_CLIENT_MIN_ENTRY_OPERATORS:-0}"
+client_min_exit_operators="${THREE_MACHINE_CLIENT_MIN_EXIT_OPERATORS:-0}"
+client_require_cross_operator_pair="${THREE_MACHINE_CLIENT_REQUIRE_CROSS_OPERATOR_PAIR:-}"
 exit_country=""
 exit_region=""
 beta_profile="${THREE_MACHINE_BETA_PROFILE:-1}"
 distinct_operators="${THREE_MACHINE_DISTINCT_OPERATORS:-}"
+require_issuer_quorum="${THREE_MACHINE_REQUIRE_ISSUER_QUORUM:-}"
 report_file=""
 
 while [[ $# -gt 0 ]]; do
@@ -90,6 +104,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --issuer-url)
       issuer_url="${2:-}"
+      shift 2
+      ;;
+    --issuer-a-url)
+      issuer_a_url="${2:-}"
+      shift 2
+      ;;
+    --issuer-b-url)
+      issuer_b_url="${2:-}"
       shift 2
       ;;
     --bootstrap-directory)
@@ -149,6 +171,27 @@ while [[ $# -gt 0 ]]; do
       client_timeout_sec="${2:-}"
       shift 2
       ;;
+    --client-min-selection-lines)
+      client_min_selection_lines="${2:-}"
+      shift 2
+      ;;
+    --client-min-entry-operators)
+      client_min_entry_operators="${2:-}"
+      shift 2
+      ;;
+    --client-min-exit-operators)
+      client_min_exit_operators="${2:-}"
+      shift 2
+      ;;
+    --client-require-cross-operator-pair)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+        client_require_cross_operator_pair="${2:-}"
+        shift 2
+      else
+        client_require_cross_operator_pair="1"
+        shift
+      fi
+      ;;
     --exit-country)
       exit_country="${2:-}"
       shift 2
@@ -172,6 +215,15 @@ while [[ $# -gt 0 ]]; do
         shift 2
       else
         beta_profile="1"
+        shift
+      fi
+      ;;
+    --require-issuer-quorum)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+        require_issuer_quorum="${2:-}"
+        shift 2
+      else
+        require_issuer_quorum="1"
         shift
       fi
       ;;
@@ -203,7 +255,15 @@ if [[ -n "$distinct_operators" && "$distinct_operators" != "0" && "$distinct_ope
   echo "--distinct-operators must be 0 or 1"
   exit 2
 fi
-if ! [[ "$rounds" =~ ^[0-9]+$ && "$pause_sec" =~ ^[0-9]+$ && "$fault_every" =~ ^[0-9]+$ && "$min_sources" =~ ^[0-9]+$ && "$min_operators" =~ ^[0-9]+$ && "$federation_timeout_sec" =~ ^[0-9]+$ && "$client_timeout_sec" =~ ^[0-9]+$ && "$discovery_wait_sec" =~ ^[0-9]+$ ]]; then
+if [[ -n "$require_issuer_quorum" && "$require_issuer_quorum" != "0" && "$require_issuer_quorum" != "1" ]]; then
+  echo "--require-issuer-quorum must be 0 or 1"
+  exit 2
+fi
+if [[ -n "$client_require_cross_operator_pair" && "$client_require_cross_operator_pair" != "0" && "$client_require_cross_operator_pair" != "1" ]]; then
+  echo "--client-require-cross-operator-pair must be 0 or 1"
+  exit 2
+fi
+if ! [[ "$rounds" =~ ^[0-9]+$ && "$pause_sec" =~ ^[0-9]+$ && "$fault_every" =~ ^[0-9]+$ && "$min_sources" =~ ^[0-9]+$ && "$min_operators" =~ ^[0-9]+$ && "$federation_timeout_sec" =~ ^[0-9]+$ && "$client_timeout_sec" =~ ^[0-9]+$ && "$discovery_wait_sec" =~ ^[0-9]+$ && "$client_min_selection_lines" =~ ^[0-9]+$ && "$client_min_entry_operators" =~ ^[0-9]+$ && "$client_min_exit_operators" =~ ^[0-9]+$ ]]; then
   echo "numeric arguments must be integers"
   exit 2
 fi
@@ -223,6 +283,20 @@ if [[ -z "$distinct_operators" ]]; then
     distinct_operators="0"
   fi
 fi
+if [[ -z "$require_issuer_quorum" ]]; then
+  if [[ "$beta_profile" == "1" ]]; then
+    require_issuer_quorum="1"
+  else
+    require_issuer_quorum="0"
+  fi
+fi
+if [[ -z "$client_require_cross_operator_pair" ]]; then
+  if [[ "$beta_profile" == "1" && "$distinct_operators" == "1" ]]; then
+    client_require_cross_operator_pair="1"
+  else
+    client_require_cross_operator_pair="0"
+  fi
+fi
 
 if [[ "$beta_profile" == "1" ]]; then
   if ((min_sources < 2)); then
@@ -231,6 +305,26 @@ if [[ "$beta_profile" == "1" ]]; then
   if ((min_operators < 2)); then
     min_operators="2"
   fi
+  if ((client_min_selection_lines < 8)); then
+    client_min_selection_lines="8"
+  fi
+  if [[ "$distinct_operators" == "1" ]]; then
+    if ((client_min_entry_operators < 2)); then
+      client_min_entry_operators="2"
+    fi
+    if ((client_min_exit_operators < 2)); then
+      client_min_exit_operators="2"
+    fi
+  fi
+fi
+if ((client_min_selection_lines < 1)); then
+  client_min_selection_lines="1"
+fi
+if ((client_min_entry_operators < 1)); then
+  client_min_entry_operators="1"
+fi
+if ((client_min_exit_operators < 1)); then
+  client_min_exit_operators="1"
 fi
 
 need_cmd bash
@@ -241,6 +335,8 @@ need_cmd tee
 directory_a="$(trim_url "$directory_a")"
 directory_b="$(trim_url "$directory_b")"
 issuer_url="$(trim_url "$issuer_url")"
+issuer_a_url="$(trim_url "$issuer_a_url")"
+issuer_b_url="$(trim_url "$issuer_b_url")"
 entry_url="$(trim_url "$entry_url")"
 exit_url="$(trim_url "$exit_url")"
 bootstrap_directory="$(trim_url "$bootstrap_directory")"
@@ -259,7 +355,7 @@ exec > >(tee -a "$report_file") 2>&1
 
 echo "[3machine-soak] started at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "[3machine-soak] report: $report_file"
-echo "[3machine-soak] rounds=$rounds pause_sec=$pause_sec beta_profile=$beta_profile distinct_operators=$distinct_operators"
+echo "[3machine-soak] rounds=$rounds pause_sec=$pause_sec beta_profile=$beta_profile distinct_operators=$distinct_operators require_issuer_quorum=$require_issuer_quorum client_min_selection_lines=$client_min_selection_lines client_min_entry_operators=$client_min_entry_operators client_min_exit_operators=$client_min_exit_operators client_require_cross_operator_pair=$client_require_cross_operator_pair"
 
 passed=0
 failed=0
@@ -288,7 +384,12 @@ for round in $(seq 1 "$rounds"); do
     --min-operators "$min_operators"
     --federation-timeout-sec "$federation_timeout_sec"
     --timeout-sec "$client_timeout_sec"
+    --client-min-selection-lines "$client_min_selection_lines"
+    --client-min-entry-operators "$client_min_entry_operators"
+    --client-min-exit-operators "$client_min_exit_operators"
+    --client-require-cross-operator-pair "$client_require_cross_operator_pair"
     --distinct-operators "$distinct_operators"
+    --require-issuer-quorum "$require_issuer_quorum"
     --beta-profile "$beta_profile"
   )
   if [[ -n "$directory_a" ]]; then
@@ -302,6 +403,12 @@ for round in $(seq 1 "$rounds"); do
   fi
   if [[ -n "$issuer_url" ]]; then
     cmd+=(--issuer-url "$issuer_url")
+  fi
+  if [[ -n "$issuer_a_url" ]]; then
+    cmd+=(--issuer-a-url "$issuer_a_url")
+  fi
+  if [[ -n "$issuer_b_url" ]]; then
+    cmd+=(--issuer-b-url "$issuer_b_url")
   fi
   if [[ -n "$entry_url" ]]; then
     cmd+=(--entry-url "$entry_url")
@@ -339,6 +446,55 @@ done
 
 echo
 echo "[3machine-soak] summary passed=$passed failed=$failed total=$rounds"
+if [[ -f "$report_file" ]]; then
+  if rg -q "^client selection summary:" "$report_file"; then
+    read -r observed min_sel avg_sel max_sel min_entry avg_entry max_entry min_exit avg_exit max_exit min_cross avg_cross max_cross < <(
+      awk '
+        /^client selection summary:/ {
+          sel = entry = exitv = cross = 0
+          for (i = 1; i <= NF; i++) {
+            if ($i ~ /^selections=/) {
+              split($i, a, "="); sel = a[2] + 0
+            } else if ($i ~ /^entry_ops=/) {
+              split($i, a, "="); entry = a[2] + 0
+            } else if ($i ~ /^exit_ops=/) {
+              split($i, a, "="); exitv = a[2] + 0
+            } else if ($i ~ /^cross_pairs=/) {
+              split($i, a, "="); cross = a[2] + 0
+            }
+          }
+          c++
+          sum_sel += sel
+          sum_entry += entry
+          sum_exit += exitv
+          sum_cross += cross
+          if (c == 1 || sel < min_sel) min_sel = sel
+          if (c == 1 || sel > max_sel) max_sel = sel
+          if (c == 1 || entry < min_entry) min_entry = entry
+          if (c == 1 || entry > max_entry) max_entry = entry
+          if (c == 1 || exitv < min_exit) min_exit = exitv
+          if (c == 1 || exitv > max_exit) max_exit = exitv
+          if (c == 1 || cross < min_cross) min_cross = cross
+          if (c == 1 || cross > max_cross) max_cross = cross
+        }
+        END {
+          if (c == 0) {
+            print "0 0 0 0 0 0 0 0 0 0 0 0 0"
+            exit
+          }
+          printf "%d %d %.2f %d %d %.2f %d %d %.2f %d %d %.2f %d\n",
+            c, min_sel, sum_sel/c, max_sel,
+            min_entry, sum_entry/c, max_entry,
+            min_exit, sum_exit/c, max_exit,
+            min_cross, sum_cross/c, max_cross
+        }
+      ' "$report_file"
+    )
+    echo "[3machine-soak] client diversity trend observed=$observed selections(min/avg/max)=${min_sel}/${avg_sel}/${max_sel} entry_ops(min/avg/max)=${min_entry}/${avg_entry}/${max_entry} exit_ops(min/avg/max)=${min_exit}/${avg_exit}/${max_exit} cross_pairs(min/avg/max)=${min_cross}/${avg_cross}/${max_cross}"
+  else
+    echo "[3machine-soak] client diversity trend unavailable (no client selection summaries found)"
+  fi
+fi
 if ((failed > 0)); then
   exit 1
 fi

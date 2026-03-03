@@ -52,6 +52,9 @@ echo "[ci] sync-status-chaos integration"
 echo "[ci] directory-beta-strict integration"
 ./scripts/integration_directory_beta_strict.sh
 
+echo "[ci] cross-role-beta-strict integration"
+./scripts/integration_beta_strict_roles.sh
+
 echo "[ci] directory-operator-churn-scale integration"
 ./scripts/integration_directory_operator_churn_scale.sh
 
@@ -103,6 +106,9 @@ echo "[ci] exit-live-wg-mode integration"
 echo "[ci] live-wg-full-path integration"
 ./scripts/integration_live_wg_full_path.sh
 
+echo "[ci] strict live-wg-full-path integration"
+./scripts/integration_live_wg_full_path_strict.sh
+
 echo "[ci] client-bootstrap-recovery integration"
 ./scripts/integration_client_bootstrap_recovery.sh
 
@@ -111,6 +117,11 @@ echo "[ci] client-startup-sync integration"
 
 echo "[ci] exit-startup-sync integration"
 ./scripts/integration_exit_startup_sync.sh
+
+if [[ "${CI_LOCAL_INCLUDE_BETA_FAULT_MATRIX:-0}" == "1" ]]; then
+  echo "[ci] beta-fault-matrix integration"
+  ./scripts/integration_beta_fault_matrix.sh
+fi
 
 echo "[ci] session-reuse integration"
 ./scripts/integration_session_reuse.sh

@@ -574,6 +574,17 @@ func (c *Client) validateRuntimeConfig() error {
 		if c.startupSyncTimeout <= 0 {
 			return fmt.Errorf("BETA_STRICT_MODE requires CLIENT_STARTUP_SYNC_TIMEOUT_SEC>0")
 		}
+		if !c.requireDistinctOps {
+			return fmt.Errorf("BETA_STRICT_MODE requires CLIENT_REQUIRE_DISTINCT_OPERATORS=1")
+		}
+		if len(c.directoryURLs) > 1 {
+			if c.directoryMinSources < 2 {
+				return fmt.Errorf("BETA_STRICT_MODE requires DIRECTORY_MIN_SOURCES>=2 when multiple DIRECTORY_URLS are configured")
+			}
+			if c.directoryMinOperators < 2 {
+				return fmt.Errorf("BETA_STRICT_MODE requires CLIENT_DIRECTORY_MIN_OPERATORS>=2 when multiple DIRECTORY_URLS are configured")
+			}
+		}
 	}
 	return nil
 }
@@ -847,11 +858,13 @@ func (c *Client) bootstrap(ctx context.Context) error {
 		}
 	}
 
-	log.Printf("client selected entry=%s (%s) exit=%s (%s) token_exp=%d",
+	log.Printf("client selected entry=%s (%s) entry_op=%s exit=%s (%s) exit_op=%s token_exp=%d",
 		selectedPair.entry.RelayID,
 		entryControlURL,
+		strings.TrimSpace(selectedPair.entry.OperatorID),
 		selectedPair.exit.RelayID,
 		exitControlURL,
+		strings.TrimSpace(selectedPair.exit.OperatorID),
 		tokenResp.Expires,
 	)
 	session := clientActiveSession{

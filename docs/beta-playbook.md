@@ -122,6 +122,8 @@ If machine C only knows one server IP, use bootstrap discovery:
 
 - Server:
   - quorum floors for federation and relay voting (`>=2` operator/vote defaults)
+  - entry-side anti-collusion guardrail (`ENTRY_REQUIRE_DISTINCT_EXIT_OPERATOR=1`)
+  - exit source-lock hardening (`EXIT_PEER_REBIND_SEC=0` in strict runtime)
   - peer discovery anti-concentration caps
   - bounded provider relay concentration, split-role enforcement, and shorter token TTL
 - Client:
@@ -132,3 +134,6 @@ If machine C only knows one server IP, use bootstrap discovery:
 Note:
 - this beta profile is a safe operational preset for the current workflow.
 - full fail-closed runtime `BETA_STRICT_MODE=1` requires additional live-WG and governance prerequisites and should be rolled out separately.
+- strict runtime also requires both client and entry anti-collusion toggles (`CLIENT_REQUIRE_DISTINCT_OPERATORS=1`, `ENTRY_REQUIRE_DISTINCT_EXIT_OPERATOR=1`).
+- strict runtime with multiple directory URLs also requires multi-source/operator quorum floors (`DIRECTORY_MIN_SOURCES>=2`, `CLIENT_DIRECTORY_MIN_OPERATORS>=2`, `ENTRY_DIRECTORY_MIN_SOURCES>=2`, `ENTRY_DIRECTORY_MIN_OPERATORS>=2`).
+- strict runtime with multiple issuer URLs on exit also requires issuer quorum floors and identity binding (`EXIT_ISSUER_MIN_SOURCES>=2`, `EXIT_ISSUER_MIN_OPERATORS>=2`, `EXIT_ISSUER_REQUIRE_ID=1`).

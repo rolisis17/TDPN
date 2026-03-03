@@ -541,6 +541,8 @@ func TestValidateRuntimeConfigBetaStrictRequiresLiveKernelReplayGuard(t *testing
 		opaqueSinkAddr:        "127.0.0.1:53011",
 		opaqueSourceAddr:      "127.0.0.1:53012",
 		tokenProofReplayGuard: true,
+		peerRebindAfter:       0,
+		startupSyncTimeout:    8 * time.Second,
 	}
 	if err := s.validateRuntimeConfig(); err != nil {
 		t.Fatalf("expected strict config to validate, got %v", err)
@@ -561,12 +563,154 @@ func TestValidateRuntimeConfigBetaStrictRejectsNoReplayGuard(t *testing.T) {
 		opaqueSinkAddr:        "127.0.0.1:53011",
 		opaqueSourceAddr:      "127.0.0.1:53012",
 		tokenProofReplayGuard: false,
+		peerRebindAfter:       0,
+		startupSyncTimeout:    8 * time.Second,
 	}
 	err := s.validateRuntimeConfig()
 	if err == nil {
 		t.Fatalf("expected strict mode validation failure")
 	}
 	if !strings.Contains(err.Error(), "EXIT_TOKEN_PROOF_REPLAY_GUARD") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigBetaStrictRejectsPeerRebind(t *testing.T) {
+	s := &Service{
+		betaStrict:            true,
+		dataMode:              "opaque",
+		dataAddr:              "127.0.0.1:51821",
+		wgBackend:             "command",
+		wgPrivateKey:          "/tmp/wg-exit.key",
+		wgKernelProxy:         true,
+		wgListenPort:          51831,
+		liveWGMode:            true,
+		opaqueEcho:            false,
+		opaqueSinkAddr:        "127.0.0.1:53011",
+		opaqueSourceAddr:      "127.0.0.1:53012",
+		tokenProofReplayGuard: true,
+		peerRebindAfter:       5 * time.Second,
+		startupSyncTimeout:    8 * time.Second,
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected strict mode validation failure")
+	}
+	if !strings.Contains(err.Error(), "EXIT_PEER_REBIND_SEC=0") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigBetaStrictRejectsMissingStartupSyncTimeout(t *testing.T) {
+	s := &Service{
+		betaStrict:            true,
+		dataMode:              "opaque",
+		dataAddr:              "127.0.0.1:51821",
+		wgBackend:             "command",
+		wgPrivateKey:          "/tmp/wg-exit.key",
+		wgKernelProxy:         true,
+		wgListenPort:          51831,
+		liveWGMode:            true,
+		opaqueEcho:            false,
+		opaqueSinkAddr:        "127.0.0.1:53011",
+		opaqueSourceAddr:      "127.0.0.1:53012",
+		tokenProofReplayGuard: true,
+		peerRebindAfter:       0,
+		startupSyncTimeout:    0,
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected strict mode validation failure")
+	}
+	if !strings.Contains(err.Error(), "EXIT_STARTUP_SYNC_TIMEOUT_SEC>0") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigBetaStrictRejectsMultiIssuerWithoutSourceQuorum(t *testing.T) {
+	s := &Service{
+		betaStrict:            true,
+		dataMode:              "opaque",
+		dataAddr:              "127.0.0.1:51821",
+		wgBackend:             "command",
+		wgPrivateKey:          "/tmp/wg-exit.key",
+		wgKernelProxy:         true,
+		wgListenPort:          51831,
+		liveWGMode:            true,
+		opaqueEcho:            false,
+		opaqueSinkAddr:        "127.0.0.1:53011",
+		opaqueSourceAddr:      "127.0.0.1:53012",
+		tokenProofReplayGuard: true,
+		peerRebindAfter:       0,
+		startupSyncTimeout:    8 * time.Second,
+		issuerURLs:            []string{"http://127.0.0.1:8082", "http://127.0.0.1:8086"},
+		issuerMinSources:      1,
+		issuerMinOperators:    2,
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected strict mode validation failure")
+	}
+	if !strings.Contains(err.Error(), "EXIT_ISSUER_MIN_SOURCES>=2") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigBetaStrictRejectsMultiIssuerWithoutOperatorQuorum(t *testing.T) {
+	s := &Service{
+		betaStrict:            true,
+		dataMode:              "opaque",
+		dataAddr:              "127.0.0.1:51821",
+		wgBackend:             "command",
+		wgPrivateKey:          "/tmp/wg-exit.key",
+		wgKernelProxy:         true,
+		wgListenPort:          51831,
+		liveWGMode:            true,
+		opaqueEcho:            false,
+		opaqueSinkAddr:        "127.0.0.1:53011",
+		opaqueSourceAddr:      "127.0.0.1:53012",
+		tokenProofReplayGuard: true,
+		peerRebindAfter:       0,
+		startupSyncTimeout:    8 * time.Second,
+		issuerURLs:            []string{"http://127.0.0.1:8082", "http://127.0.0.1:8086"},
+		issuerMinSources:      2,
+		issuerMinOperators:    1,
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected strict mode validation failure")
+	}
+	if !strings.Contains(err.Error(), "EXIT_ISSUER_MIN_OPERATORS>=2") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigBetaStrictRejectsMultiIssuerWithoutIdentityRequirement(t *testing.T) {
+	s := &Service{
+		betaStrict:            true,
+		dataMode:              "opaque",
+		dataAddr:              "127.0.0.1:51821",
+		wgBackend:             "command",
+		wgPrivateKey:          "/tmp/wg-exit.key",
+		wgKernelProxy:         true,
+		wgListenPort:          51831,
+		liveWGMode:            true,
+		opaqueEcho:            false,
+		opaqueSinkAddr:        "127.0.0.1:53011",
+		opaqueSourceAddr:      "127.0.0.1:53012",
+		tokenProofReplayGuard: true,
+		peerRebindAfter:       0,
+		startupSyncTimeout:    8 * time.Second,
+		issuerURLs:            []string{"http://127.0.0.1:8082", "http://127.0.0.1:8086"},
+		issuerMinSources:      2,
+		issuerMinOperators:    2,
+		issuerRequireID:       false,
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected strict mode validation failure")
+	}
+	if !strings.Contains(err.Error(), "EXIT_ISSUER_REQUIRE_ID=1") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -694,6 +838,125 @@ func TestEnsureStartupIssuerSyncSuccess(t *testing.T) {
 	}
 	if len(s.issuerPubs) == 0 {
 		t.Fatalf("expected issuer keys loaded after startup sync")
+	}
+}
+
+func newIssuerPubKeyServer(t *testing.T, issuerID string) *httptest.Server {
+	t.Helper()
+	pub, _, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	pubB64 := base64.RawURLEncoding.EncodeToString(pub)
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/pubkeys":
+			_ = json.NewEncoder(w).Encode(proto.IssuerPubKeysResponse{
+				PubKeys: []string{pubB64},
+				Issuer:  issuerID,
+			})
+		case "/v1/revocations":
+			_ = json.NewEncoder(w).Encode(proto.RevocationListResponse{
+				Issuer:      issuerID,
+				GeneratedAt: time.Now().Unix(),
+				ExpiresAt:   time.Now().Add(time.Minute).Unix(),
+				Revocations: []proto.Revocation{},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+}
+
+func TestRefreshIssuerKeysRequiresSourceQuorum(t *testing.T) {
+	srv := newIssuerPubKeyServer(t, "issuer-a")
+	defer srv.Close()
+
+	s := &Service{
+		issuerURLs:         []string{srv.URL, "http://127.0.0.1:1"},
+		issuerMinSources:   2,
+		issuerMinOperators: 1,
+		httpClient:         &http.Client{Timeout: 80 * time.Millisecond},
+		issuerPubs:         map[string]ed25519.PublicKey{},
+		issuerKeyIssuer:    map[string]string{},
+		minTokenEpoch:      map[string]int64{},
+	}
+	err := s.refreshIssuerKeys(context.Background())
+	if err == nil {
+		t.Fatalf("expected source quorum failure")
+	}
+	if !strings.Contains(err.Error(), "issuer source quorum not met") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRefreshIssuerKeysRequiresOperatorQuorum(t *testing.T) {
+	srvA := newIssuerPubKeyServer(t, "issuer-same")
+	defer srvA.Close()
+	srvB := newIssuerPubKeyServer(t, "issuer-same")
+	defer srvB.Close()
+
+	s := &Service{
+		issuerURLs:         []string{srvA.URL, srvB.URL},
+		issuerMinSources:   2,
+		issuerMinOperators: 2,
+		httpClient:         &http.Client{Timeout: 100 * time.Millisecond},
+		issuerPubs:         map[string]ed25519.PublicKey{},
+		issuerKeyIssuer:    map[string]string{},
+		minTokenEpoch:      map[string]int64{},
+	}
+	err := s.refreshIssuerKeys(context.Background())
+	if err == nil {
+		t.Fatalf("expected operator quorum failure")
+	}
+	if !strings.Contains(err.Error(), "issuer operator quorum not met") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRefreshIssuerKeysWithSourceAndOperatorQuorum(t *testing.T) {
+	srvA := newIssuerPubKeyServer(t, "issuer-a")
+	defer srvA.Close()
+	srvB := newIssuerPubKeyServer(t, "issuer-b")
+	defer srvB.Close()
+
+	s := &Service{
+		issuerURLs:         []string{srvA.URL, srvB.URL},
+		issuerMinSources:   2,
+		issuerMinOperators: 2,
+		httpClient:         &http.Client{Timeout: 100 * time.Millisecond},
+		issuerPubs:         map[string]ed25519.PublicKey{},
+		issuerKeyIssuer:    map[string]string{},
+		minTokenEpoch:      map[string]int64{},
+	}
+	if err := s.refreshIssuerKeys(context.Background()); err != nil {
+		t.Fatalf("expected issuer key refresh success, got %v", err)
+	}
+	if len(s.issuerPubs) == 0 {
+		t.Fatalf("expected issuer keys populated")
+	}
+}
+
+func TestRefreshIssuerKeysRequiresIssuerIdentityWhenConfigured(t *testing.T) {
+	srv := newIssuerPubKeyServer(t, "")
+	defer srv.Close()
+
+	s := &Service{
+		issuerURLs:         []string{srv.URL},
+		issuerMinSources:   1,
+		issuerMinOperators: 1,
+		issuerRequireID:    true,
+		httpClient:         &http.Client{Timeout: 100 * time.Millisecond},
+		issuerPubs:         map[string]ed25519.PublicKey{},
+		issuerKeyIssuer:    map[string]string{},
+		minTokenEpoch:      map[string]int64{},
+	}
+	err := s.refreshIssuerKeys(context.Background())
+	if err == nil {
+		t.Fatalf("expected issuer identity validation failure")
+	}
+	if !strings.Contains(err.Error(), "issuer identity missing for source") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

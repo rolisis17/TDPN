@@ -23,10 +23,14 @@ run_step() {
 
 run_step "unit tests" go test ./...
 run_step "directory strict governance" ./scripts/integration_directory_beta_strict.sh
+run_step "cross-role strict guardrails" ./scripts/integration_beta_strict_roles.sh
+run_step "distinct-operator anti-collusion" ./scripts/integration_distinct_operators.sh
 run_step "peer discovery operator cap" ./scripts/integration_peer_discovery_operator_cap.sh
 run_step "anonymous credential dispute" ./scripts/integration_anon_credential_dispute.sh
 run_step "client bootstrap recovery matrix" ./scripts/integration_client_bootstrap_recovery_matrix.sh
 run_step "client startup sync" ./scripts/integration_client_startup_sync.sh
+run_step "beta fault matrix" ./scripts/integration_beta_fault_matrix.sh
+run_step "strict live-wg full path" ./scripts/integration_live_wg_full_path_strict.sh
 run_step "load chaos matrix" ./scripts/integration_load_chaos_matrix.sh
 run_step "lifecycle chaos matrix" ./scripts/integration_lifecycle_chaos_matrix.sh
 

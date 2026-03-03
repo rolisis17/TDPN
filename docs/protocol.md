@@ -259,6 +259,7 @@ Directory peer-membership feed shape:
 1. Client queries one or more directories for entry/exit descriptors.
    - Client selection can prefer healthy entry/exit control endpoints and same-region pairs when available.
    - Optional pair hardening can require distinct entry/exit operators (`CLIENT_REQUIRE_DISTINCT_OPERATORS=1`) to reduce single-operator collusion risk.
+   - Entry can also enforce distinct entry/exit operators server-side (`ENTRY_REQUIRE_DISTINCT_EXIT_OPERATOR=1`) to prevent client-side bypass.
    - Optional pair continuity can prefer the most recently successful pair for a bounded window (`CLIENT_STICKY_PAIR_SEC`) to reduce churn.
    - Optional session continuity can reuse an active path across bootstrap cycles (`CLIENT_SESSION_REUSE=1`) and refresh near expiry (`CLIENT_SESSION_REFRESH_LEAD_SEC`) via open-new/close-old handoff.
    - Client may retry `path/open` across alternate ranked entry/exit pairs when a candidate is unavailable.

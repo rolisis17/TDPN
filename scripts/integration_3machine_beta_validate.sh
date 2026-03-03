@@ -13,15 +13,22 @@ Usage:
     [--bootstrap-directory URL] \
     [--discovery-wait-sec N] \
     [--issuer-url URL] \
+    [--issuer-a-url URL] \
+    [--issuer-b-url URL] \
     [--entry-url URL] \
     [--exit-url URL] \
     [--min-sources N] \
     [--min-operators N] \
     [--federation-timeout-sec N] \
     [--timeout-sec N] \
+    [--client-min-selection-lines N] \
+    [--client-min-entry-operators N] \
+    [--client-min-exit-operators N] \
+    [--client-require-cross-operator-pair [0|1]] \
     [--exit-country CC] \
     [--exit-region REGION] \
     [--distinct-operators [0|1]] \
+    [--require-issuer-quorum [0|1]] \
     [--beta-profile [0|1]]
 
 Purpose:
@@ -229,9 +236,55 @@ extract_operators() {
     sort -u
 }
 
+extract_role_operators() {
+  local payload="$1"
+  local role="$2"
+  local matches
+  matches="$(printf '%s\n' "$payload" | rg -o "\"role\":\"${role}\"[^\\}]*\"operator_id\":\"[^\"]+\"" || true)"
+  printf '%s\n' "$matches" |
+    rg -o '"operator_id":"[^"]+"' |
+    sed -E 's/^"operator_id":"([^"]+)"$/\1/' |
+    awk 'NF > 0' |
+    sort -u
+}
+
+role_operator_count() {
+  local payload="$1"
+  local role="$2"
+  local count
+  count="$(
+    extract_role_operators "$payload" "$role" |
+      wc -l |
+      tr -d ' '
+  )"
+  if [[ -z "$count" ]]; then
+    count="0"
+  fi
+  echo "$count"
+}
+
+issuer_id_from_pubkeys_payload() {
+  local payload="$1"
+  printf '%s\n' "$payload" |
+    rg -o '"issuer":"[^"]+"' |
+    head -n 1 |
+    sed -E 's/^"issuer":"([^"]+)"$/\1/'
+}
+
+issuer_payload_has_keys() {
+  local payload="$1"
+  if printf '%s\n' "$payload" | rg -q '"pub_keys"[[:space:]]*:[[:space:]]*\[[[:space:]]*"'; then
+    echo "1"
+  else
+    echo "0"
+  fi
+}
+
 directory_a=""
 directory_b=""
 issuer_url=""
+issuer_a_url=""
+issuer_b_url=""
 entry_url=""
 exit_url=""
 bootstrap_directory=""
@@ -242,11 +295,16 @@ min_sources="2"
 min_operators="2"
 federation_timeout_sec="90"
 client_timeout_sec="45"
+client_min_selection_lines="${THREE_MACHINE_CLIENT_MIN_SELECTION_LINES:-0}"
+client_min_entry_operators="${THREE_MACHINE_CLIENT_MIN_ENTRY_OPERATORS:-0}"
+client_min_exit_operators="${THREE_MACHINE_CLIENT_MIN_EXIT_OPERATORS:-0}"
+client_require_cross_operator_pair="${THREE_MACHINE_CLIENT_REQUIRE_CROSS_OPERATOR_PAIR:-}"
 health_attempts="${THREE_MACHINE_HEALTH_ATTEMPTS:-12}"
 exit_country=""
 exit_region=""
 beta_profile="${THREE_MACHINE_BETA_PROFILE:-1}"
 distinct_operators="${THREE_MACHINE_DISTINCT_OPERATORS:-}"
+require_issuer_quorum="${THREE_MACHINE_REQUIRE_ISSUER_QUORUM:-}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -268,6 +326,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --issuer-url)
       issuer_url="${2:-}"
+      shift 2
+      ;;
+    --issuer-a-url)
+      issuer_a_url="${2:-}"
+      shift 2
+      ;;
+    --issuer-b-url)
+      issuer_b_url="${2:-}"
       shift 2
       ;;
     --entry-url)
@@ -293,6 +359,27 @@ while [[ $# -gt 0 ]]; do
     --timeout-sec)
       client_timeout_sec="${2:-}"
       shift 2
+      ;;
+    --client-min-selection-lines)
+      client_min_selection_lines="${2:-}"
+      shift 2
+      ;;
+    --client-min-entry-operators)
+      client_min_entry_operators="${2:-}"
+      shift 2
+      ;;
+    --client-min-exit-operators)
+      client_min_exit_operators="${2:-}"
+      shift 2
+      ;;
+    --client-require-cross-operator-pair)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+        client_require_cross_operator_pair="${2:-}"
+        shift 2
+      else
+        client_require_cross_operator_pair="1"
+        shift
+      fi
       ;;
     --exit-country)
       exit_country="${2:-}"
@@ -320,6 +407,15 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --require-issuer-quorum)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+        require_issuer_quorum="${2:-}"
+        shift 2
+      else
+        require_issuer_quorum="1"
+        shift
+      fi
+      ;;
     -h|--help|help)
       usage
       exit 0
@@ -340,9 +436,17 @@ if [[ -n "$distinct_operators" && "$distinct_operators" != "0" && "$distinct_ope
   echo "--distinct-operators must be 0 or 1"
   exit 2
 fi
+if [[ -n "$require_issuer_quorum" && "$require_issuer_quorum" != "0" && "$require_issuer_quorum" != "1" ]]; then
+  echo "--require-issuer-quorum must be 0 or 1"
+  exit 2
+fi
+if [[ -n "$client_require_cross_operator_pair" && "$client_require_cross_operator_pair" != "0" && "$client_require_cross_operator_pair" != "1" ]]; then
+  echo "--client-require-cross-operator-pair must be 0 or 1"
+  exit 2
+fi
 
-if ! [[ "$min_sources" =~ ^[0-9]+$ && "$min_operators" =~ ^[0-9]+$ && "$federation_timeout_sec" =~ ^[0-9]+$ && "$client_timeout_sec" =~ ^[0-9]+$ && "$discovery_wait_sec" =~ ^[0-9]+$ ]]; then
-  echo "--min-sources, --min-operators, --federation-timeout-sec, --timeout-sec and --discovery-wait-sec must be numeric"
+if ! [[ "$min_sources" =~ ^[0-9]+$ && "$min_operators" =~ ^[0-9]+$ && "$federation_timeout_sec" =~ ^[0-9]+$ && "$client_timeout_sec" =~ ^[0-9]+$ && "$discovery_wait_sec" =~ ^[0-9]+$ && "$client_min_selection_lines" =~ ^[0-9]+$ && "$client_min_entry_operators" =~ ^[0-9]+$ && "$client_min_exit_operators" =~ ^[0-9]+$ ]]; then
+  echo "--min-sources, --min-operators, --federation-timeout-sec, --timeout-sec, --discovery-wait-sec and client diversity thresholds must be numeric"
   exit 2
 fi
 
@@ -353,6 +457,20 @@ if [[ -z "$distinct_operators" ]]; then
     distinct_operators="0"
   fi
 fi
+if [[ -z "$require_issuer_quorum" ]]; then
+  if [[ "$beta_profile" == "1" ]]; then
+    require_issuer_quorum="1"
+  else
+    require_issuer_quorum="0"
+  fi
+fi
+if [[ -z "$client_require_cross_operator_pair" ]]; then
+  if [[ "$beta_profile" == "1" && "$distinct_operators" == "1" ]]; then
+    client_require_cross_operator_pair="1"
+  else
+    client_require_cross_operator_pair="0"
+  fi
+fi
 
 if [[ "$beta_profile" == "1" ]]; then
   if ((min_sources < 2)); then
@@ -361,7 +479,29 @@ if [[ "$beta_profile" == "1" ]]; then
   if ((min_operators < 2)); then
     min_operators="2"
   fi
+  if ((client_min_selection_lines < 8)); then
+    client_min_selection_lines="8"
+  fi
+  if [[ "$distinct_operators" == "1" ]]; then
+    if ((client_min_entry_operators < 2)); then
+      client_min_entry_operators="2"
+    fi
+    if ((client_min_exit_operators < 2)); then
+      client_min_exit_operators="2"
+    fi
+  fi
 fi
+if ((client_min_selection_lines < 1)); then
+  client_min_selection_lines="1"
+fi
+if ((client_min_entry_operators < 1)); then
+  client_min_entry_operators="1"
+fi
+if ((client_min_exit_operators < 1)); then
+  client_min_exit_operators="1"
+fi
+
+echo "[client-diversity] thresholds selection_lines>=$client_min_selection_lines entry_ops>=$client_min_entry_operators exit_ops>=$client_min_exit_operators cross_operator_pair=$client_require_cross_operator_pair"
 
 if [[ -n "$bootstrap_directory" ]]; then
   bootstrap_directory="$(trim_url "$bootstrap_directory")"
@@ -407,10 +547,19 @@ fi
 directory_a="$(trim_url "$directory_a")"
 directory_b="$(trim_url "$directory_b")"
 issuer_url="$(trim_url "$issuer_url")"
+issuer_a_url="$(trim_url "$issuer_a_url")"
+issuer_b_url="$(trim_url "$issuer_b_url")"
 entry_url="$(trim_url "$entry_url")"
 exit_url="$(trim_url "$exit_url")"
 
-for endpoint in "$directory_a" "$directory_b" "$issuer_url" "$entry_url" "$exit_url"; do
+if [[ -z "$issuer_a_url" ]]; then
+  issuer_a_url="$(url_from_host_port "$(host_from_url "$directory_a")" 8082)"
+fi
+if [[ -z "$issuer_b_url" ]]; then
+  issuer_b_url="$(url_from_host_port "$(host_from_url "$directory_b")" 8082)"
+fi
+
+for endpoint in "$directory_a" "$directory_b" "$issuer_url" "$issuer_a_url" "$issuer_b_url" "$entry_url" "$exit_url"; do
   if looks_loopback "$endpoint"; then
     echo "warning: loopback URL detected: $endpoint"
     echo "         for real 3-machine tests, use reachable public/private hostnames."
@@ -463,6 +612,67 @@ if [[ "$federated" -ne 1 ]]; then
   exit 1
 fi
 
+if [[ "$distinct_operators" == "1" ]]; then
+  combined_relays="$(printf '%s\n%s\n' "$(curl -fsS "${directory_a}/v1/relays" || true)" "$(curl -fsS "${directory_b}/v1/relays" || true)")"
+  entry_ops="$(role_operator_count "$combined_relays" "entry")"
+  exit_ops="$(role_operator_count "$combined_relays" "exit")"
+  if [[ "$entry_ops" =~ ^[0-9]+$ ]] && [[ "$exit_ops" =~ ^[0-9]+$ ]] && ((entry_ops < 2 || exit_ops < 2)); then
+    echo "distinct-operator preflight failed: insufficient role operator diversity"
+    echo "required: entry_ops>=2 and exit_ops>=2 across both directories"
+    echo "observed: entry_ops=$entry_ops exit_ops=$exit_ops"
+    echo "--- entry operators ---"
+    extract_role_operators "$combined_relays" "entry" || true
+    echo "--- exit operators ---"
+    extract_role_operators "$combined_relays" "exit" || true
+    exit 1
+  fi
+fi
+
+if [[ "$require_issuer_quorum" == "1" ]]; then
+  wait_http_ok "${issuer_a_url}/v1/pubkeys" "issuer A" "$health_attempts"
+  wait_http_ok "${issuer_b_url}/v1/pubkeys" "issuer B" "$health_attempts"
+
+  issuer_quorum_ok=0
+  echo "[issuer-quorum] waiting for issuer identity floor: min_operators=$min_operators timeout=${federation_timeout_sec}s"
+  for _ in $(seq 1 "$federation_timeout_sec"); do
+    issuer_a_payload="$(curl -fsS "${issuer_a_url}/v1/pubkeys" 2>/dev/null || true)"
+    issuer_b_payload="$(curl -fsS "${issuer_b_url}/v1/pubkeys" 2>/dev/null || true)"
+    issuer_a_id="$(issuer_id_from_pubkeys_payload "$issuer_a_payload")"
+    issuer_b_id="$(issuer_id_from_pubkeys_payload "$issuer_b_payload")"
+    issuer_a_keys="$(issuer_payload_has_keys "$issuer_a_payload")"
+    issuer_b_keys="$(issuer_payload_has_keys "$issuer_b_payload")"
+    issuer_ops="$(
+      printf '%s\n%s\n' "$issuer_a_id" "$issuer_b_id" |
+        awk 'NF > 0' |
+        sort -u |
+        wc -l |
+        tr -d ' '
+    )"
+    if (( _ == 1 || _ % 10 == 0 )); then
+      echo "[issuer-quorum] progress second=$_/$federation_timeout_sec issuer_ops=${issuer_ops:-0} a_keys=$issuer_a_keys b_keys=$issuer_b_keys a_id=${issuer_a_id:-<none>} b_id=${issuer_b_id:-<none>}"
+    fi
+    if [[ "$issuer_a_keys" == "1" && "$issuer_b_keys" == "1" ]] &&
+      [[ "$issuer_ops" =~ ^[0-9]+$ ]] &&
+      ((issuer_ops >= min_operators)); then
+      issuer_quorum_ok=1
+      break
+    fi
+    sleep 1
+  done
+
+  if [[ "$issuer_quorum_ok" -ne 1 ]]; then
+    echo "issuer quorum check failed: identity floor not reached on issuer feeds"
+    echo "required min issuer operators: $min_operators"
+    echo "issuer A url: $issuer_a_url id=${issuer_a_id:-<none>} has_keys=${issuer_a_keys:-0}"
+    echo "issuer B url: $issuer_b_url id=${issuer_b_id:-<none>} has_keys=${issuer_b_keys:-0}"
+    echo "--- issuer A payload ---"
+    printf '%s\n' "${issuer_a_payload:-}"
+    echo "--- issuer B payload ---"
+    printf '%s\n' "${issuer_b_payload:-}"
+    exit 1
+  fi
+fi
+
 client_cmd=(
   ./scripts/easy_node.sh client-test
   --directory-urls "${directory_a},${directory_b}"
@@ -472,6 +682,10 @@ client_cmd=(
   --min-sources "$min_sources"
   --timeout-sec "$client_timeout_sec"
   --distinct-operators "$distinct_operators"
+  --min-selection-lines "$client_min_selection_lines"
+  --min-entry-operators "$client_min_entry_operators"
+  --min-exit-operators "$client_min_exit_operators"
+  --require-cross-operator-pair "$client_require_cross_operator_pair"
   --beta-profile "$beta_profile"
 )
 if [[ -n "$exit_country" ]]; then

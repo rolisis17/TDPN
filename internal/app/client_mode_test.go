@@ -158,6 +158,7 @@ func TestValidateRuntimeConfigBetaStrictRequiresCommandKernelLive(t *testing.T) 
 		liveWGMode:         true,
 		disableSynthetic:   true,
 		startupSyncTimeout: time.Second,
+		requireDistinctOps: true,
 	}
 	if err := c.validateRuntimeConfig(); err != nil {
 		t.Fatalf("expected strict config to validate, got %v", err)
@@ -177,6 +178,7 @@ func TestValidateRuntimeConfigBetaStrictRejectsWeakMode(t *testing.T) {
 		disableSynthetic:   true,
 		opaqueSinkAddr:     "127.0.0.1:53030",
 		startupSyncTimeout: time.Second,
+		requireDistinctOps: true,
 	}
 	err := c.validateRuntimeConfig()
 	if err == nil {
@@ -200,6 +202,7 @@ func TestValidateRuntimeConfigBetaStrictRejectsMissingTrustStrict(t *testing.T) 
 		liveWGMode:         true,
 		disableSynthetic:   true,
 		startupSyncTimeout: time.Second,
+		requireDistinctOps: true,
 	}
 	err := c.validateRuntimeConfig()
 	if err == nil {
@@ -212,22 +215,101 @@ func TestValidateRuntimeConfigBetaStrictRejectsMissingTrustStrict(t *testing.T) 
 
 func TestValidateRuntimeConfigBetaStrictRejectsMissingStartupSyncTimeout(t *testing.T) {
 	c := &Client{
-		betaStrict:       true,
-		trustStrict:      true,
-		dataMode:         "opaque",
-		innerSource:      "udp",
-		wgBackend:        "command",
-		wgPrivateKey:     "/tmp/wg.key",
-		wgKernelProxy:    true,
-		wgProxyAddr:      "127.0.0.1:0",
-		liveWGMode:       true,
-		disableSynthetic: true,
+		betaStrict:         true,
+		trustStrict:        true,
+		dataMode:           "opaque",
+		innerSource:        "udp",
+		wgBackend:          "command",
+		wgPrivateKey:       "/tmp/wg.key",
+		wgKernelProxy:      true,
+		wgProxyAddr:        "127.0.0.1:0",
+		liveWGMode:         true,
+		disableSynthetic:   true,
+		requireDistinctOps: true,
 	}
 	err := c.validateRuntimeConfig()
 	if err == nil {
 		t.Fatalf("expected strict mode validation failure")
 	}
 	if !strings.Contains(err.Error(), "CLIENT_STARTUP_SYNC_TIMEOUT_SEC") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigBetaStrictRejectsMissingDistinctOperators(t *testing.T) {
+	c := &Client{
+		betaStrict:         true,
+		trustStrict:        true,
+		dataMode:           "opaque",
+		innerSource:        "udp",
+		wgBackend:          "command",
+		wgPrivateKey:       "/tmp/wg.key",
+		wgKernelProxy:      true,
+		wgProxyAddr:        "127.0.0.1:0",
+		liveWGMode:         true,
+		disableSynthetic:   true,
+		startupSyncTimeout: time.Second,
+		requireDistinctOps: false,
+	}
+	err := c.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected strict mode validation failure")
+	}
+	if !strings.Contains(err.Error(), "CLIENT_REQUIRE_DISTINCT_OPERATORS") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigBetaStrictRejectsMultiDirectoryWithoutSourceQuorum(t *testing.T) {
+	c := &Client{
+		betaStrict:            true,
+		trustStrict:           true,
+		dataMode:              "opaque",
+		innerSource:           "udp",
+		wgBackend:             "command",
+		wgPrivateKey:          "/tmp/wg.key",
+		wgKernelProxy:         true,
+		wgProxyAddr:           "127.0.0.1:0",
+		liveWGMode:            true,
+		disableSynthetic:      true,
+		startupSyncTimeout:    time.Second,
+		requireDistinctOps:    true,
+		directoryURLs:         []string{"http://127.0.0.1:8081", "http://127.0.0.1:8085"},
+		directoryMinSources:   1,
+		directoryMinOperators: 2,
+	}
+	err := c.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected strict mode validation failure")
+	}
+	if !strings.Contains(err.Error(), "DIRECTORY_MIN_SOURCES>=2") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigBetaStrictRejectsMultiDirectoryWithoutOperatorQuorum(t *testing.T) {
+	c := &Client{
+		betaStrict:            true,
+		trustStrict:           true,
+		dataMode:              "opaque",
+		innerSource:           "udp",
+		wgBackend:             "command",
+		wgPrivateKey:          "/tmp/wg.key",
+		wgKernelProxy:         true,
+		wgProxyAddr:           "127.0.0.1:0",
+		liveWGMode:            true,
+		disableSynthetic:      true,
+		startupSyncTimeout:    time.Second,
+		requireDistinctOps:    true,
+		directoryURLs:         []string{"http://127.0.0.1:8081", "http://127.0.0.1:8085"},
+		directoryMinSources:   2,
+		directoryMinOperators: 1,
+	}
+	err := c.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected strict mode validation failure")
+	}
+	if !strings.Contains(err.Error(), "CLIENT_DIRECTORY_MIN_OPERATORS>=2") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

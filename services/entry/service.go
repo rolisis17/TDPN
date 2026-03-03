@@ -37,6 +37,7 @@ type sessionState struct {
 type exitRoute struct {
 	controlURL string
 	dataAddr   string
+	operatorID string
 	fetchedAt  time.Time
 }
 
@@ -50,6 +51,8 @@ type Service struct {
 	dataAddr              string
 	liveWGMode            bool
 	betaStrict            bool
+	operatorID            string
+	requireDistinctExitOp bool
 	exitControlURL        string
 	exitDataAddr          string
 	directoryURLs         []string
@@ -143,6 +146,11 @@ func New() *Service {
 	}
 	liveWGMode := os.Getenv("ENTRY_LIVE_WG_MODE") == "1"
 	betaStrict := os.Getenv("BETA_STRICT_MODE") == "1" || os.Getenv("ENTRY_BETA_STRICT") == "1"
+	operatorID := strings.TrimSpace(os.Getenv("ENTRY_OPERATOR_ID"))
+	if operatorID == "" {
+		operatorID = strings.TrimSpace(os.Getenv("DIRECTORY_OPERATOR_ID"))
+	}
+	requireDistinctExitOp := os.Getenv("ENTRY_REQUIRE_DISTINCT_EXIT_OPERATOR") == "1"
 	openRPS := 20
 	if v, err := strconv.Atoi(os.Getenv("ENTRY_OPEN_RPS")); err == nil && v > 0 {
 		openRPS = v
@@ -182,6 +190,8 @@ func New() *Service {
 		dataAddr:              dataAddr,
 		liveWGMode:            liveWGMode,
 		betaStrict:            betaStrict,
+		operatorID:            operatorID,
+		requireDistinctExitOp: requireDistinctExitOp,
 		exitControlURL:        exitControlURL,
 		exitDataAddr:          exitDataAddr,
 		directoryURLs:         directoryURLs,
@@ -214,9 +224,9 @@ func (s *Service) Run(ctx context.Context) error {
 	if err := s.validateRuntimeConfig(); err != nil {
 		return err
 	}
-	log.Printf("entry route discovery: directories=%d min_sources=%d min_operators=%d min_votes=%d trust_strict=%t live_wg_mode=%t rps=%d ban_threshold=%d ban_sec=%d max_inflight=%d client_rebind_sec=%d",
+	log.Printf("entry route discovery: directories=%d min_sources=%d min_operators=%d min_votes=%d trust_strict=%t live_wg_mode=%t distinct_exit_operator=%t operator_id=%s rps=%d ban_threshold=%d ban_sec=%d max_inflight=%d client_rebind_sec=%d",
 		len(s.directoryURLs), maxInt(1, s.directoryMinSources), maxInt(1, s.directoryMinOperators), maxInt(1, s.directoryMinVotes), s.directoryTrustStrict,
-		s.liveWGMode, s.openRPS, s.openBanThreshold, int(s.openBanDuration/time.Second), s.openMaxInflight, int(s.clientRebindAfter/time.Second))
+		s.liveWGMode, s.requireDistinctExitOp, strings.TrimSpace(s.operatorID), s.openRPS, s.openBanThreshold, int(s.openBanDuration/time.Second), s.openMaxInflight, int(s.clientRebindAfter/time.Second))
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/path/open", s.handlePathOpen)
 	mux.HandleFunc("/v1/path/close", s.handlePathClose)
@@ -251,12 +261,26 @@ func (s *Service) Run(ctx context.Context) error {
 }
 
 func (s *Service) validateRuntimeConfig() error {
+	if s.requireDistinctExitOp && strings.TrimSpace(s.operatorID) == "" {
+		return fmt.Errorf("ENTRY_REQUIRE_DISTINCT_EXIT_OPERATOR=1 requires ENTRY_OPERATOR_ID or DIRECTORY_OPERATOR_ID")
+	}
 	if s.betaStrict {
 		if !s.liveWGMode {
 			return fmt.Errorf("BETA_STRICT_MODE requires ENTRY_LIVE_WG_MODE=1")
 		}
 		if !s.directoryTrustStrict {
 			return fmt.Errorf("BETA_STRICT_MODE requires ENTRY_DIRECTORY_TRUST_STRICT=1")
+		}
+		if !s.requireDistinctExitOp {
+			return fmt.Errorf("BETA_STRICT_MODE requires ENTRY_REQUIRE_DISTINCT_EXIT_OPERATOR=1")
+		}
+		if len(s.directoryURLs) > 1 {
+			if s.directoryMinSources < 2 {
+				return fmt.Errorf("BETA_STRICT_MODE requires ENTRY_DIRECTORY_MIN_SOURCES>=2 when multiple DIRECTORY_URLS are configured")
+			}
+			if s.directoryMinOperators < 2 {
+				return fmt.Errorf("BETA_STRICT_MODE requires ENTRY_DIRECTORY_MIN_OPERATORS>=2 when multiple DIRECTORY_URLS are configured")
+			}
 		}
 	}
 	return nil
@@ -365,6 +389,15 @@ func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: "unknown-exit"})
 		return
+	}
+	if s.requireDistinctExitOp {
+		entryOp := strings.TrimSpace(s.operatorID)
+		exitOp := strings.TrimSpace(route.operatorID)
+		if entryOp == "" || exitOp == "" || entryOp == exitOp {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: "entry-exit-operator-collision"})
+			return
+		}
 	}
 	clientIP := remoteIP(r.RemoteAddr)
 	if s.isBanned(clientIP, time.Now()) {
@@ -739,6 +772,7 @@ func (s *Service) resolveExitRoute(ctx context.Context, exitID string) (exitRout
 	fallback := exitRoute{
 		controlURL: normalizeHTTPURL(s.exitControlURL),
 		dataAddr:   strings.TrimSpace(s.exitDataAddr),
+		operatorID: strings.TrimSpace(s.operatorID),
 	}
 	if exitID == "" {
 		return fallback, nil
@@ -784,9 +818,10 @@ func (s *Service) resolveExitRoute(ctx context.Context, exitID string) (exitRout
 			route := normalizeRoute(exitRoute{
 				controlURL: normalizeHTTPURL(desc.ControlURL),
 				dataAddr:   strings.TrimSpace(desc.Endpoint),
+				operatorID: strings.TrimSpace(desc.OperatorID),
 				fetchedAt:  now,
 			}, fallback)
-			key := route.controlURL + "|" + route.dataAddr
+			key := route.controlURL + "|" + route.dataAddr + "|" + route.operatorID
 			if _, ok := seenFromSource[key]; ok {
 				continue
 			}

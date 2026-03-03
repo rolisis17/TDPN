@@ -44,6 +44,9 @@ type Service struct {
 	dataAddr              string
 	issuerURL             string
 	issuerURLs            []string
+	issuerMinSources      int
+	issuerMinOperators    int
+	issuerRequireID       bool
 	revocationsURL        string
 	revocationsURLs       []string
 	dataMode              string
@@ -149,6 +152,18 @@ func New() *Service {
 	}
 	issuerURLs = normalizeHTTPURLs(issuerURLs)
 	issuerURL = issuerURLs[0]
+	issuerMinSources := 1
+	if raw := strings.TrimSpace(os.Getenv("EXIT_ISSUER_MIN_SOURCES")); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			issuerMinSources = n
+		}
+	}
+	issuerMinOperators := 1
+	if raw := strings.TrimSpace(os.Getenv("EXIT_ISSUER_MIN_OPERATORS")); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			issuerMinOperators = n
+		}
+	}
 	revocationsURL := os.Getenv("ISSUER_REVOCATIONS_URL")
 	revocationsURLs := splitCSV(os.Getenv("ISSUER_REVOCATIONS_URLS"))
 	if len(revocationsURLs) == 0 {
@@ -273,6 +288,11 @@ func New() *Service {
 		}
 	}
 	betaStrict := os.Getenv("BETA_STRICT_MODE") == "1" || os.Getenv("EXIT_BETA_STRICT") == "1"
+	rawIssuerRequireID := strings.TrimSpace(os.Getenv("EXIT_ISSUER_REQUIRE_ID"))
+	issuerRequireID := rawIssuerRequireID == "1"
+	if rawIssuerRequireID == "" && betaStrict && len(issuerURLs) > 1 {
+		issuerRequireID = true
+	}
 	if startupSyncTimeout <= 0 {
 		if betaStrict {
 			startupSyncTimeout = 30 * time.Second
@@ -286,6 +306,9 @@ func New() *Service {
 		dataAddr:              dataAddr,
 		issuerURL:             issuerURL,
 		issuerURLs:            issuerURLs,
+		issuerMinSources:      issuerMinSources,
+		issuerMinOperators:    issuerMinOperators,
+		issuerRequireID:       issuerRequireID,
 		revocationsURL:        revocationsURL,
 		revocationsURLs:       revocationsURLs,
 		dataMode:              dataMode,
@@ -333,8 +356,8 @@ func New() *Service {
 }
 
 func (s *Service) Run(ctx context.Context) error {
-	log.Printf("exit wg backend=%s iface=%s listen_port=%d kernel_proxy=%t kernel_proxy_max_sessions=%d kernel_proxy_idle_sec=%d opaque_echo=%t token_proof_replay_guard=%t peer_rebind_sec=%d startup_sync_timeout_sec=%d beta_strict=%t",
-		s.wgBackend, s.wgInterface, s.wgListenPort, s.wgKernelProxy, s.effectiveWGKernelProxyMax(), int(s.wgKernelProxyIdle/time.Second), s.opaqueEcho, s.tokenProofReplayGuard, int(s.peerRebindAfter/time.Second), int(s.startupSyncTimeout/time.Second), s.betaStrict)
+	log.Printf("exit wg backend=%s iface=%s listen_port=%d kernel_proxy=%t kernel_proxy_max_sessions=%d kernel_proxy_idle_sec=%d opaque_echo=%t token_proof_replay_guard=%t peer_rebind_sec=%d startup_sync_timeout_sec=%d issuer_min_sources=%d issuer_min_operators=%d issuer_require_id=%t beta_strict=%t",
+		s.wgBackend, s.wgInterface, s.wgListenPort, s.wgKernelProxy, s.effectiveWGKernelProxyMax(), int(s.wgKernelProxyIdle/time.Second), s.opaqueEcho, s.tokenProofReplayGuard, int(s.peerRebindAfter/time.Second), int(s.startupSyncTimeout/time.Second), s.issuerMinSources, s.issuerMinOperators, s.issuerRequireID, s.betaStrict)
 	if err := s.validateRuntimeConfig(); err != nil {
 		return err
 	}
@@ -538,6 +561,23 @@ func (s *Service) validateRuntimeConfig() error {
 		}
 		if !s.tokenProofReplayGuard {
 			return fmt.Errorf("BETA_STRICT_MODE requires EXIT_TOKEN_PROOF_REPLAY_GUARD=1")
+		}
+		if s.peerRebindAfter > 0 {
+			return fmt.Errorf("BETA_STRICT_MODE requires EXIT_PEER_REBIND_SEC=0")
+		}
+		if s.startupSyncTimeout <= 0 {
+			return fmt.Errorf("BETA_STRICT_MODE requires EXIT_STARTUP_SYNC_TIMEOUT_SEC>0")
+		}
+		if len(s.issuerURLs) > 1 {
+			if s.issuerMinSources < 2 {
+				return fmt.Errorf("BETA_STRICT_MODE requires EXIT_ISSUER_MIN_SOURCES>=2 when multiple ISSUER_URLS are configured")
+			}
+			if s.issuerMinOperators < 2 {
+				return fmt.Errorf("BETA_STRICT_MODE requires EXIT_ISSUER_MIN_OPERATORS>=2 when multiple ISSUER_URLS are configured")
+			}
+			if !s.issuerRequireID {
+				return fmt.Errorf("BETA_STRICT_MODE requires EXIT_ISSUER_REQUIRE_ID=1 when multiple ISSUER_URLS are configured")
+			}
 		}
 	}
 	return nil
@@ -1609,12 +1649,26 @@ func (s *Service) refreshIssuerKeys(ctx context.Context) error {
 	updated := make(map[string]ed25519.PublicKey)
 	updatedIssuers := make(map[string]string)
 	updatedMinEpoch := make(map[string]int64)
+	successSources := 0
+	successOperators := make(map[string]struct{})
 	var lastErr error
 	for _, issuerURL := range s.issuerURLs {
 		bundle, err := s.fetchIssuerPubKeysFrom(ctx, issuerURL)
 		if err != nil {
 			lastErr = err
 			continue
+		}
+		sourceOperator := strings.TrimSpace(bundle.issuerID)
+		if sourceOperator == "" && s.issuerRequireID {
+			lastErr = fmt.Errorf("issuer identity missing for source %s", normalizeHTTPURL(issuerURL))
+			continue
+		}
+		successSources++
+		if sourceOperator == "" {
+			sourceOperator = normalizeHTTPURL(issuerURL)
+		}
+		if sourceOperator != "" {
+			successOperators[sourceOperator] = struct{}{}
 		}
 		for _, pub := range bundle.pubs {
 			keyID := issuerKeyID(pub)
@@ -1634,6 +1688,20 @@ func (s *Service) refreshIssuerKeys(ctx context.Context) error {
 			lastErr = errors.New("no issuer keys fetched")
 		}
 		return lastErr
+	}
+	requiredSources := s.issuerMinSources
+	if requiredSources < 1 {
+		requiredSources = 1
+	}
+	if successSources < requiredSources {
+		return fmt.Errorf("issuer source quorum not met: success=%d required=%d", successSources, requiredSources)
+	}
+	requiredOperators := s.issuerMinOperators
+	if requiredOperators < 1 {
+		requiredOperators = 1
+	}
+	if len(successOperators) < requiredOperators {
+		return fmt.Errorf("issuer operator quorum not met: operators=%d required=%d", len(successOperators), requiredOperators)
 	}
 	s.mu.Lock()
 	s.issuerPubs = updated
