@@ -8,17 +8,21 @@ usage() {
   cat <<'USAGE'
 Usage:
   ./scripts/integration_3machine_beta_validate.sh \
-    --directory-a URL \
-    --directory-b URL \
-    --issuer-url URL \
-    --entry-url URL \
-    --exit-url URL \
+    [--directory-a URL] \
+    [--directory-b URL] \
+    [--bootstrap-directory URL] \
+    [--discovery-wait-sec N] \
+    [--issuer-url URL] \
+    [--entry-url URL] \
+    [--exit-url URL] \
     [--min-sources N] \
     [--min-operators N] \
     [--federation-timeout-sec N] \
     [--timeout-sec N] \
     [--exit-country CC] \
-    [--exit-region REGION]
+    [--exit-region REGION] \
+    [--distinct-operators [0|1]] \
+    [--beta-profile [0|1]]
 
 Purpose:
   Run from machine C (client host) to validate a 3-machine beta setup:
@@ -41,6 +45,128 @@ trim_url() {
     value="${value%/}"
   done
   echo "$value"
+}
+
+hostport_from_url() {
+  local value="$1"
+  value="${value#http://}"
+  value="${value#https://}"
+  value="${value%%/*}"
+  echo "$value"
+}
+
+host_from_hostport() {
+  local value="$1"
+  if [[ "$value" == \[*\]* ]]; then
+    echo "${value%%]*}]"
+    return
+  fi
+  local colon_count
+  colon_count="$(printf '%s' "$value" | awk -F: '{print NF-1}')"
+  if [[ "$colon_count" == "1" ]]; then
+    local maybe_port="${value##*:}"
+    if [[ "$maybe_port" =~ ^[0-9]+$ ]]; then
+      echo "${value%:*}"
+      return
+    fi
+  fi
+  echo "$value"
+}
+
+host_from_url() {
+  host_from_hostport "$(hostport_from_url "$1")"
+}
+
+normalize_host_for_endpoint() {
+  local host="$1"
+  if [[ "$host" == \[*\] ]]; then
+    echo "$host"
+    return
+  fi
+  if [[ "$host" == *:* ]]; then
+    echo "[$host]"
+    return
+  fi
+  echo "$host"
+}
+
+url_from_host_port() {
+  local host="$1"
+  local port="$2"
+  printf 'http://%s:%s' "$(normalize_host_for_endpoint "$host")" "$port"
+}
+
+discover_directory_urls() {
+  local bootstrap_url="$1"
+  local wait_sec="${2:-12}"
+  local min_hosts="${3:-2}"
+  local seed_host
+  bootstrap_url="$(trim_url "$bootstrap_url")"
+  seed_host="$(host_from_url "$bootstrap_url")"
+
+  declare -A seen_hosts=()
+  if [[ -n "$seed_host" ]]; then
+    seen_hosts["$seed_host"]=1
+  fi
+
+  local i payload relay_urls peer_urls endpoint_values u h count
+  for ((i = 1; i <= wait_sec; i++)); do
+    payload="$(curl -fsS --connect-timeout 2 --max-time 4 "${bootstrap_url}/v1/relays" 2>/dev/null || true)"
+    relay_urls="$(printf '%s\n' "$payload" | rg -o '"control_url":"https?://[^"]+"' || true)"
+    endpoint_values="$(printf '%s\n' "$payload" | rg -o '"endpoint":"[^"]+"' || true)"
+    while IFS= read -r u; do
+      u="$(printf '%s' "$u" | sed -E 's/^"control_url":"(https?:\/\/[^"]+)"$/\1/')"
+      h="$(host_from_url "$u")"
+      if [[ -n "$h" ]]; then
+        seen_hosts["$h"]=1
+      fi
+    done <<<"$relay_urls"
+    while IFS= read -r u; do
+      u="$(printf '%s' "$u" | sed -E 's/^"endpoint":"([^"]+)"$/\1/')"
+      h="$(host_from_hostport "$u")"
+      if [[ -n "$h" ]]; then
+        seen_hosts["$h"]=1
+      fi
+    done <<<"$endpoint_values"
+
+    payload="$(curl -fsS --connect-timeout 2 --max-time 4 "${bootstrap_url}/v1/peers" 2>/dev/null || true)"
+    peer_urls="$(printf '%s\n' "$payload" | rg -o '"url":"https?://[^"]+"' || true)"
+    while IFS= read -r u; do
+      u="$(printf '%s' "$u" | sed -E 's/^"url":"(https?:\/\/[^"]+)"$/\1/')"
+      h="$(host_from_url "$u")"
+      if [[ -n "$h" ]]; then
+        seen_hosts["$h"]=1
+      fi
+    done <<<"$peer_urls"
+
+    count="${#seen_hosts[@]}"
+    if ((count >= min_hosts)); then
+      break
+    fi
+    sleep 1
+  done
+
+  local out=()
+  if [[ -n "$seed_host" ]]; then
+    out+=("$(url_from_host_port "$seed_host" 8081)")
+    unset 'seen_hosts[$seed_host]'
+  fi
+  local sorted_hosts
+  sorted_hosts="$(printf '%s\n' "${!seen_hosts[@]}" | awk 'NF > 0' | sort -u)"
+  while IFS= read -r h; do
+    [[ -z "$h" ]] && continue
+    out+=("$(url_from_host_port "$h" 8081)")
+  done <<<"$sorted_hosts"
+
+  local joined=""
+  local item
+  for item in "${out[@]}"; do
+    if [[ -n "$joined" ]]; then
+      joined+=","
+    fi
+    joined+="$item"
+  done
+  echo "$joined"
 }
 
 looks_loopback() {
@@ -108,6 +234,10 @@ directory_b=""
 issuer_url=""
 entry_url=""
 exit_url=""
+bootstrap_directory=""
+discovery_wait_sec="${THREE_MACHINE_DISCOVERY_WAIT_SEC:-12}"
+bootstrap_discovered=""
+bootstrap_host=""
 min_sources="2"
 min_operators="2"
 federation_timeout_sec="90"
@@ -115,6 +245,8 @@ client_timeout_sec="45"
 health_attempts="${THREE_MACHINE_HEALTH_ATTEMPTS:-12}"
 exit_country=""
 exit_region=""
+beta_profile="${THREE_MACHINE_BETA_PROFILE:-1}"
+distinct_operators="${THREE_MACHINE_DISTINCT_OPERATORS:-}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -124,6 +256,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --directory-b)
       directory_b="${2:-}"
+      shift 2
+      ;;
+    --bootstrap-directory)
+      bootstrap_directory="${2:-}"
+      shift 2
+      ;;
+    --discovery-wait-sec)
+      discovery_wait_sec="${2:-}"
       shift 2
       ;;
     --issuer-url)
@@ -162,6 +302,24 @@ while [[ $# -gt 0 ]]; do
       exit_region="${2:-}"
       shift 2
       ;;
+    --distinct-operators)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+        distinct_operators="${2:-}"
+        shift 2
+      else
+        distinct_operators="1"
+        shift
+      fi
+      ;;
+    --beta-profile)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+        beta_profile="${2:-}"
+        shift 2
+      else
+        beta_profile="1"
+        shift
+      fi
+      ;;
     -h|--help|help)
       usage
       exit 0
@@ -174,8 +332,65 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ "$beta_profile" != "0" && "$beta_profile" != "1" ]]; then
+  echo "--beta-profile must be 0 or 1"
+  exit 2
+fi
+if [[ -n "$distinct_operators" && "$distinct_operators" != "0" && "$distinct_operators" != "1" ]]; then
+  echo "--distinct-operators must be 0 or 1"
+  exit 2
+fi
+
+if ! [[ "$min_sources" =~ ^[0-9]+$ && "$min_operators" =~ ^[0-9]+$ && "$federation_timeout_sec" =~ ^[0-9]+$ && "$client_timeout_sec" =~ ^[0-9]+$ && "$discovery_wait_sec" =~ ^[0-9]+$ ]]; then
+  echo "--min-sources, --min-operators, --federation-timeout-sec, --timeout-sec and --discovery-wait-sec must be numeric"
+  exit 2
+fi
+
+if [[ -z "$distinct_operators" ]]; then
+  if [[ "$beta_profile" == "1" ]]; then
+    distinct_operators="1"
+  else
+    distinct_operators="0"
+  fi
+fi
+
+if [[ "$beta_profile" == "1" ]]; then
+  if ((min_sources < 2)); then
+    min_sources="2"
+  fi
+  if ((min_operators < 2)); then
+    min_operators="2"
+  fi
+fi
+
+if [[ -n "$bootstrap_directory" ]]; then
+  bootstrap_directory="$(trim_url "$bootstrap_directory")"
+  bootstrap_discovered="$(discover_directory_urls "$bootstrap_directory" "$discovery_wait_sec" "$min_sources")"
+  if [[ -z "$directory_a" ]]; then
+    directory_a="$(printf '%s' "$bootstrap_discovered" | cut -d',' -f1)"
+  fi
+  if [[ -z "$directory_b" ]]; then
+    directory_b="$(printf '%s' "$bootstrap_discovered" | cut -d',' -f2)"
+    if [[ "$directory_b" == "$directory_a" ]]; then
+      directory_b=""
+    fi
+  fi
+  bootstrap_host="$(host_from_url "$bootstrap_directory")"
+  if [[ -z "$issuer_url" && -n "$bootstrap_host" ]]; then
+    issuer_url="$(url_from_host_port "$bootstrap_host" 8082)"
+  fi
+  if [[ -z "$entry_url" && -n "$bootstrap_host" ]]; then
+    entry_url="$(url_from_host_port "$bootstrap_host" 8083)"
+  fi
+  if [[ -z "$exit_url" && -n "$bootstrap_host" ]]; then
+    exit_url="$(url_from_host_port "$bootstrap_host" 8084)"
+  fi
+fi
+
 if [[ -z "$directory_a" || -z "$directory_b" || -z "$issuer_url" || -z "$entry_url" || -z "$exit_url" ]]; then
-  echo "all endpoint URLs are required"
+  echo "missing required endpoint URLs"
+  echo "provide explicit directory/issuer/entry/exit URLs"
+  echo "or provide --bootstrap-directory with reachable peers."
   usage
   exit 2
 fi
@@ -256,6 +471,8 @@ client_cmd=(
   --exit-url "$exit_url"
   --min-sources "$min_sources"
   --timeout-sec "$client_timeout_sec"
+  --distinct-operators "$distinct_operators"
+  --beta-profile "$beta_profile"
 )
 if [[ -n "$exit_country" ]]; then
   client_cmd+=(--exit-country "$exit_country")

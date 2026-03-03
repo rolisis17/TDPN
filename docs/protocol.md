@@ -56,7 +56,7 @@ Claims (JSON payload):
 - `iss`: issuer id
 - `aud`: `exit` (client access) or `provider` (provider role)
 - `sub`: optional client subject identity
-- `anon_cred_id`: optional anonymous credential id when issuer minted from pseudonymous credential
+- `anon_cred_id`: optional anonymous credential presentation id when issuer minted from pseudonymous credential (raw credential id is hidden by default)
 - `token_type`: `client_access` or `provider_role`
 - `cnf_ed25519`: base64url Ed25519 pubkey used to validate `token_proof`
 - `exp`: unix expiry (5-15 min)
@@ -94,6 +94,7 @@ Serialization for MVP:
   - Requires `aud=provider` + `token_type=provider_role`.
   - Optional role-tier gates can require higher provider token tier for exit advertisements (`DIRECTORY_PROVIDER_MIN_EXIT_TIER`) than for entry advertisements (`DIRECTORY_PROVIDER_MIN_ENTRY_TIER`).
   - Optional per-operator admission cap (`DIRECTORY_PROVIDER_MAX_RELAYS_PER_OPERATOR`) can limit how many active relays one provider operator may advertise.
+  - Optional split-role enforcement (`DIRECTORY_PROVIDER_SPLIT_ROLES=1`) can prevent one provider operator from advertising both entry and exit roles at the same time.
 - `GET /v1/admin/sync-status`
   - Directory admin endpoint exposing latest peer/issuer sync quorum outcome (`success_sources`, distinct `source_operators`, quorum state, error).
   - Requires `X-Admin-Token`.
@@ -269,6 +270,7 @@ Directory peer-membership feed shape:
    - Request includes token class (`token_type`) and a PoP public key (`pop_pub_key`).
    - For path-open tokens use `token_type=client_access`.
    - Optional anonymous credential (`anon_cred`) allows pseudonymous Tier-2/3 issuance without exposing a stable user subject string.
+   - By default, issuer emits a per-token anonymous credential presentation id (`anon_cred_id`) instead of the raw credential id, reducing cross-session linkability at exit operators.
    - Issuer can temporarily cap anonymous credential tier during dispute windows (`/v1/admin/anon-credential/dispute`) and clear caps after adjudication (`/v1/admin/anon-credential/dispute/clear`).
    - Issuer token lifetime is configurable (`ISSUER_TOKEN_TTL_SEC`).
 3. Client opens control session to selected entry `control_url`.

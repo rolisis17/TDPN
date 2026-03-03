@@ -69,11 +69,149 @@ func TestHandleIssueTokenWithAnonymousCredential(t *testing.T) {
 	if claims.Tier != 2 {
 		t.Fatalf("expected tier capped by anon credential to 2, got %d", claims.Tier)
 	}
-	if claims.AnonCredID != "cred-1" {
-		t.Fatalf("expected anon credential id in token claims, got %q", claims.AnonCredID)
+	if claims.AnonCredID == "cred-1" {
+		t.Fatalf("expected non-raw anon credential id in token claims, got %q", claims.AnonCredID)
+	}
+	if len(claims.AnonCredID) < 6 || claims.AnonCredID[:4] != "acp:" {
+		t.Fatalf("expected anonymized anon credential presentation id, got %q", claims.AnonCredID)
 	}
 	if claims.Subject == "" || claims.Subject[:5] != "anon:" {
 		t.Fatalf("expected anonymous subject alias, got %q", claims.Subject)
+	}
+}
+
+func TestHandleIssueTokenWithAnonymousCredentialUsesUniquePresentationIDs(t *testing.T) {
+	pub, priv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	s := &Service{
+		issuerID:            "issuer-local",
+		pubKey:              pub,
+		privKey:             priv,
+		tokenTTL:            5 * time.Minute,
+		keyEpoch:            3,
+		minTokenEpoch:       3,
+		anonRevocations:     map[string]int64{},
+		revocations:         map[string]int64{},
+		subjects:            map[string]proto.SubjectProfile{},
+		previousPubKeysFile: "",
+	}
+	anonCred, err := signAnonymousCredential(anonymousCredentialClaims{
+		Issuer:       "issuer-local",
+		CredentialID: "cred-reuse",
+		Tier:         2,
+		ExpiryUnix:   time.Now().Add(20 * time.Minute).Unix(),
+	}, priv)
+	if err != nil {
+		t.Fatalf("sign anonymous credential: %v", err)
+	}
+	popPub, _, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("pop keygen: %v", err)
+	}
+	reqBody, err := json.Marshal(proto.IssueTokenRequest{
+		Tier:      2,
+		TokenType: crypto.TokenTypeClientAccess,
+		PopPubKey: crypto.EncodeEd25519PublicKey(popPub),
+		AnonCred:  anonCred,
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	req1 := httptest.NewRequest(http.MethodPost, "/v1/token", bytes.NewReader(reqBody))
+	rr1 := httptest.NewRecorder()
+	s.handleIssueToken(rr1, req1)
+	if rr1.Code != http.StatusOK {
+		t.Fatalf("expected first token issue 200, got %d body=%s", rr1.Code, rr1.Body.String())
+	}
+	req2 := httptest.NewRequest(http.MethodPost, "/v1/token", bytes.NewReader(reqBody))
+	rr2 := httptest.NewRecorder()
+	s.handleIssueToken(rr2, req2)
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("expected second token issue 200, got %d body=%s", rr2.Code, rr2.Body.String())
+	}
+
+	var out1 proto.IssueTokenResponse
+	if err := json.NewDecoder(rr1.Body).Decode(&out1); err != nil {
+		t.Fatalf("decode first response: %v", err)
+	}
+	var out2 proto.IssueTokenResponse
+	if err := json.NewDecoder(rr2.Body).Decode(&out2); err != nil {
+		t.Fatalf("decode second response: %v", err)
+	}
+	claims1, err := crypto.VerifyClaims(out1.Token, pub)
+	if err != nil {
+		t.Fatalf("verify first token: %v", err)
+	}
+	claims2, err := crypto.VerifyClaims(out2.Token, pub)
+	if err != nil {
+		t.Fatalf("verify second token: %v", err)
+	}
+	if claims1.AnonCredID == claims2.AnonCredID {
+		t.Fatalf("expected unique presentation ids per token, got id=%q", claims1.AnonCredID)
+	}
+	if claims1.Subject != claims2.Subject {
+		t.Fatalf("expected stable anonymous subject alias across tokens")
+	}
+}
+
+func TestHandleIssueTokenWithAnonymousCredentialExposeRawID(t *testing.T) {
+	pub, priv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	s := &Service{
+		issuerID:            "issuer-local",
+		pubKey:              pub,
+		privKey:             priv,
+		tokenTTL:            5 * time.Minute,
+		keyEpoch:            3,
+		minTokenEpoch:       3,
+		anonCredExposeID:    true,
+		anonRevocations:     map[string]int64{},
+		revocations:         map[string]int64{},
+		subjects:            map[string]proto.SubjectProfile{},
+		previousPubKeysFile: "",
+	}
+	anonCred, err := signAnonymousCredential(anonymousCredentialClaims{
+		Issuer:       "issuer-local",
+		CredentialID: "cred-visible",
+		Tier:         2,
+		ExpiryUnix:   time.Now().Add(20 * time.Minute).Unix(),
+	}, priv)
+	if err != nil {
+		t.Fatalf("sign anonymous credential: %v", err)
+	}
+	popPub, _, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("pop keygen: %v", err)
+	}
+	reqBody, err := json.Marshal(proto.IssueTokenRequest{
+		Tier:      2,
+		TokenType: crypto.TokenTypeClientAccess,
+		PopPubKey: crypto.EncodeEd25519PublicKey(popPub),
+		AnonCred:  anonCred,
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/token", bytes.NewReader(reqBody))
+	rr := httptest.NewRecorder()
+	s.handleIssueToken(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected token issue 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var out proto.IssueTokenResponse
+	if err := json.NewDecoder(rr.Body).Decode(&out); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	claims, err := crypto.VerifyClaims(out.Token, pub)
+	if err != nil {
+		t.Fatalf("verify token: %v", err)
+	}
+	if claims.AnonCredID != "cred-visible" {
+		t.Fatalf("expected raw anon credential id when expose flag is set, got %q", claims.AnonCredID)
 	}
 }
 

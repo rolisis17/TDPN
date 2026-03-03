@@ -62,12 +62,14 @@ Run interactive menu:
 Quick non-interactive examples:
 
 ```bash
-./scripts/easy_node.sh server-up --public-host <PUBLIC_IP_OR_DNS>
+./scripts/easy_node.sh server-up --public-host <PUBLIC_IP_OR_DNS> --beta-profile
 ./scripts/easy_node.sh client-test \
   --directory-urls http://<SERVER_IP>:8081 \
   --issuer-url http://<SERVER_IP>:8082 \
   --entry-url http://<SERVER_IP>:8083 \
-  --exit-url http://<SERVER_IP>:8084
+  --exit-url http://<SERVER_IP>:8084 \
+  --beta-profile 1 \
+  --distinct-operators 1
 
 ./scripts/easy_node.sh three-machine-validate \
   --directory-a http://<A_SERVER_IP>:8081 \
@@ -76,7 +78,31 @@ Quick non-interactive examples:
   --entry-url http://<A_SERVER_IP>:8083 \
   --exit-url http://<A_SERVER_IP>:8084 \
   --min-sources 2 \
-  --min-operators 2
+  --min-operators 2 \
+  --beta-profile 1 \
+  --distinct-operators 1
+
+./scripts/easy_node.sh three-machine-soak \
+  --directory-a http://<A_SERVER_IP>:8081 \
+  --directory-b http://<B_SERVER_IP>:8081 \
+  --issuer-url http://<A_SERVER_IP>:8082 \
+  --entry-url http://<A_SERVER_IP>:8083 \
+  --exit-url http://<A_SERVER_IP>:8084 \
+  --rounds 12 \
+  --pause-sec 5 \
+  --beta-profile 1 \
+  --distinct-operators 1
+
+./scripts/easy_node.sh discover-hosts \
+  --bootstrap-directory http://<KNOWN_SERVER_IP>:8081 \
+  --wait-sec 20 \
+  --write-config 1
+
+./scripts/easy_node.sh machine-c-test \
+  --bootstrap-directory http://<KNOWN_SERVER_IP>:8081 \
+  --discovery-wait-sec 20 \
+  --beta-profile 1 \
+  --distinct-operators 1
 
 ./scripts/easy_node.sh machine-a-test --public-host <A_SERVER_IP_OR_DNS>
 ./scripts/easy_node.sh machine-b-test --peer-directory-a http://<A_SERVER_IP_OR_DNS>:8081 --public-host <B_SERVER_IP_OR_DNS>
@@ -85,10 +111,13 @@ Quick non-interactive examples:
   --directory-b http://<B_SERVER_IP_OR_DNS>:8081 \
   --issuer-url http://<A_SERVER_IP_OR_DNS>:8082 \
   --entry-url http://<A_SERVER_IP_OR_DNS>:8083 \
-  --exit-url http://<A_SERVER_IP_OR_DNS>:8084
+  --exit-url http://<A_SERVER_IP_OR_DNS>:8084 \
+  --beta-profile 1 \
+  --distinct-operators 1
 ```
 
 For a full 3-machine flow, see `docs/easy-3-machine-test.md`.
+For a frozen closed-beta command set, see `docs/beta-playbook.md`.
 
 ## 3) Windows 11 + WSL2
 
@@ -172,15 +201,18 @@ Before exposing anything public:
 22. Run `./scripts/integration_client_startup_burst.sh` to validate parallel client bootstrap behavior under jitter/backoff settings.
 23. Set adjudication policy bounds (`DIRECTORY_ADJUDICATION_META_MIN_VOTES`, `DIRECTORY_FINAL_DISPUTE_MIN_VOTES`, `DIRECTORY_FINAL_APPEAL_MIN_VOTES`, `DIRECTORY_FINAL_ADJUDICATION_MIN_OPERATORS`, `DIRECTORY_FINAL_ADJUDICATION_MIN_SOURCES`, `DIRECTORY_FINAL_ADJUDICATION_MIN_RATIO`, `DIRECTORY_DISPUTE_MAX_TTL_SEC`, `DIRECTORY_APPEAL_MAX_TTL_SEC`) to your risk tolerance before enabling federated trust sync.
 24. Set provider relay admission tiers (`DIRECTORY_PROVIDER_MIN_ENTRY_TIER`, `DIRECTORY_PROVIDER_MIN_EXIT_TIER`) and optional provider concentration cap (`DIRECTORY_PROVIDER_MAX_RELAYS_PER_OPERATOR`) for your rollout stage.
-25. Set discovery flood controls (`DIRECTORY_PEER_DISCOVERY_MAX_PER_SOURCE`, `DIRECTORY_PEER_DISCOVERY_MAX_PER_OPERATOR`) so one source operator cannot introduce unlimited discovered peers and one hinted operator cannot dominate discovery with many endpoints.
-26. If you disable synthetic client fallback (`CLIENT_DISABLE_SYNTHETIC_FALLBACK=1`), validate your UDP uplink producer path with `./scripts/integration_opaque_udp_only.sh`.
-27. Verify issuer key/epoch files and directory key history files persist across restart.
-28. If enabling command egress backend, validate firewall rules in a disposable environment first.
-29. If enabling WG kernel proxy bridges (`CLIENT_WG_KERNEL_PROXY=1`, `EXIT_WG_KERNEL_PROXY=1`), keep `EXIT_WG_LISTEN_PORT` distinct from `EXIT_DATA_ADDR`, tune `EXIT_WG_KERNEL_PROXY_MAX_SESSIONS` / `EXIT_WG_KERNEL_PROXY_IDLE_SEC` / `EXIT_SESSION_CLEANUP_SEC`, and validate packet flow in a disposable environment first.
-30. For real interface validation on Linux hosts, run `sudo ./scripts/integration_real_wg_privileged.sh` and `sudo ./scripts/integration_real_wg_privileged_matrix.sh` from a disposable test machine before exposing public traffic.
-31. For closed beta hardening, run `./scripts/integration_directory_beta_strict.sh` and verify strict governance environment settings are fail-closed when incomplete and healthy when complete.
-32. For closed beta hardening, enable `BETA_STRICT_MODE=1` (or role-specific strict toggles) and verify all roles boot with strict settings only.
-33. If using DNS seed discovery (`DIRECTORY_PEER_DISCOVERY_DNS_SEEDS`), verify TXT records publish only trusted peer URLs and, in strict hint mode, include signed hint fields (`operator`, `pub_key`) for admitted peers.
-34. If using anonymous credentials, run `./scripts/integration_anon_credential.sh` and verify issuer admin controls for `/v1/admin/anon-credential/issue` and `/v1/admin/anon-credential/revoke`, plus credential revocation behavior during token issuance.
-35. If using anonymous credentials, run `./scripts/integration_anon_credential_dispute.sh` and verify `/v1/admin/anon-credential/dispute` / `/v1/admin/anon-credential/dispute/clear` temporarily cap and then restore token minting tier for the same credential, and verify `/v1/admin/anon-credential/get` reflects current revoke/dispute state.
-36. For cross-host validation before beta rollout, run `./scripts/integration_3machine_beta_validate.sh` from a client machine (machine C) with two server directories (machines A/B) and verify both multi-source bootstrap and federation operator-floor checks pass.
+25. If you want stronger anti-capture policy for provider advertisements, enable `DIRECTORY_PROVIDER_SPLIT_ROLES=1` so one provider operator cannot advertise both entry and exit roles simultaneously.
+26. Set discovery flood controls (`DIRECTORY_PEER_DISCOVERY_MAX_PER_SOURCE`, `DIRECTORY_PEER_DISCOVERY_MAX_PER_OPERATOR`) so one source operator cannot introduce unlimited discovered peers and one hinted operator cannot dominate discovery with many endpoints.
+27. If you disable synthetic client fallback (`CLIENT_DISABLE_SYNTHETIC_FALLBACK=1`), validate your UDP uplink producer path with `./scripts/integration_opaque_udp_only.sh`.
+28. Verify issuer key/epoch files and directory key history files persist across restart.
+29. If enabling command egress backend, validate firewall rules in a disposable environment first.
+30. If enabling WG kernel proxy bridges (`CLIENT_WG_KERNEL_PROXY=1`, `EXIT_WG_KERNEL_PROXY=1`), keep `EXIT_WG_LISTEN_PORT` distinct from `EXIT_DATA_ADDR`, tune `EXIT_WG_KERNEL_PROXY_MAX_SESSIONS` / `EXIT_WG_KERNEL_PROXY_IDLE_SEC` / `EXIT_SESSION_CLEANUP_SEC`, and validate packet flow in a disposable environment first.
+31. For real interface validation on Linux hosts, run `sudo ./scripts/integration_real_wg_privileged.sh` and `sudo ./scripts/integration_real_wg_privileged_matrix.sh` from a disposable test machine before exposing public traffic.
+32. For closed beta hardening, run `./scripts/integration_directory_beta_strict.sh` and verify strict governance environment settings are fail-closed when incomplete and healthy when complete.
+33. For closed beta hardening, enable `BETA_STRICT_MODE=1` (or role-specific strict toggles) and verify all roles boot with strict settings only.
+34. If using DNS seed discovery (`DIRECTORY_PEER_DISCOVERY_DNS_SEEDS`), verify TXT records publish only trusted peer URLs and, in strict hint mode, include signed hint fields (`operator`, `pub_key`) for admitted peers.
+35. If using anonymous credentials, keep `ISSUER_ANON_CRED_EXPOSE_ID=0` (default) unless you explicitly need legacy raw-id compatibility.
+36. If using anonymous credentials, run `./scripts/integration_anon_credential.sh` and verify issuer admin controls for `/v1/admin/anon-credential/issue` and `/v1/admin/anon-credential/revoke`, plus credential revocation behavior during token issuance.
+37. If using anonymous credentials, run `./scripts/integration_anon_credential_dispute.sh` and verify `/v1/admin/anon-credential/dispute` / `/v1/admin/anon-credential/dispute/clear` temporarily cap and then restore token minting tier for the same credential, and verify `/v1/admin/anon-credential/get` reflects current revoke/dispute state.
+38. For cross-host validation before beta rollout, run `./scripts/integration_3machine_beta_validate.sh` from a client machine (machine C) with two server directories (machines A/B) and verify both multi-source bootstrap and federation operator-floor checks pass.
+39. Run `./scripts/integration_3machine_beta_soak.sh` from machine C for repeated rounds (and optional injected faults) before inviting external beta testers.

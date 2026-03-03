@@ -12,11 +12,13 @@ usage() {
   cat <<'USAGE'
 Usage:
   ./scripts/integration_machine_c_client_check.sh \
-    --directory-a URL \
-    --directory-b URL \
-    --issuer-url URL \
-    --entry-url URL \
-    --exit-url URL \
+    [--directory-a URL] \
+    [--directory-b URL] \
+    [--bootstrap-directory URL] \
+    [--discovery-wait-sec N] \
+    [--issuer-url URL] \
+    [--entry-url URL] \
+    [--exit-url URL] \
     [--min-sources N] \
     [--min-operators N] \
     [--federation-timeout-sec N] \
@@ -51,7 +53,7 @@ while [[ $# -gt 0 ]]; do
       if [[ ${#pass_args[@]} -gt 0 ]]; then
         last="${pass_args[${#pass_args[@]}-1]}"
         case "$last" in
-          --directory-a|--directory-b|--issuer-url|--entry-url|--exit-url|--min-sources|--min-operators|--federation-timeout-sec|--timeout-sec|--exit-country|--exit-region)
+          --directory-a|--directory-b|--bootstrap-directory|--discovery-wait-sec|--issuer-url|--entry-url|--exit-url|--min-sources|--min-operators|--federation-timeout-sec|--timeout-sec|--exit-country|--exit-region|--distinct-operators|--beta-profile)
             if [[ $# -eq 0 ]]; then
               echo "missing value for $last"
               usage

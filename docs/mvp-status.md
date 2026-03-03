@@ -60,6 +60,7 @@
 - Issuer stake lifecycle admin API (`/v1/admin/subject/stake/apply`) with stake-aware tier recommendation.
 - Issuer adjudication metadata lifecycle (`case_id` / `evidence_ref`) for dispute/appeal workflows and trust-feed signaling.
 - Issuer anonymous credential groundwork: admin issue/revoke APIs plus pseudonymous `anon_cred` token issuance path (`anon_cred_id` claim).
+- Anonymous credential token-linkability hardening: issuer now emits per-token anonymized `anon_cred_id` presentation ids by default (`ISSUER_ANON_CRED_EXPOSE_ID=1` for legacy raw-id behavior).
 - Issuer anonymous credential dispute lifecycle admin APIs (`/v1/admin/anon-credential/dispute`, `/v1/admin/anon-credential/dispute/clear`, `/v1/admin/anon-credential/get`) with temporary tier-cap enforcement during token issuance and operator-visible state inspection.
 - Anonymous credential end-to-end integration coverage (`integration_anon_credential.sh`) for issue -> token mint/path-open -> revoke -> mint denial flow.
 - Anonymous credential dispute integration coverage (`integration_anon_credential_dispute.sh`) for issue -> dispute tier-cap -> clear -> tier restore flow.
@@ -69,6 +70,7 @@
 - Provider-role directory API: token-gated provider relay advertisement (`/v1/provider/relay/upsert`) with issuer pubkey verification and bounded relay TTL.
 - Provider relay role-tier policy controls (`DIRECTORY_PROVIDER_MIN_ENTRY_TIER`, `DIRECTORY_PROVIDER_MIN_EXIT_TIER`) to gate advertised entry/exit roles by provider token tier.
 - Provider relay concentration hardening: optional per-operator relay cap for provider upserts (`DIRECTORY_PROVIDER_MAX_RELAYS_PER_OPERATOR`).
+- Provider anti-capture split-role policy: optional per-operator entry/exit separation for provider upserts (`DIRECTORY_PROVIDER_SPLIT_ROLES=1`, auto-enabled in `BETA_STRICT_MODE`).
 - Persisted issuer subject profile store on disk.
 - Persisted issuer signing key on disk (`ISSUER_PRIVATE_KEY_FILE`).
 - Issuer epoch persistence + optional automatic signing-key rotation (`ISSUER_EPOCHS_FILE`, `ISSUER_KEY_ROTATE_SEC`, `ISSUER_KEY_HISTORY`).
@@ -124,6 +126,9 @@
 - Extended deep test suite (`integration_http_cache`, `integration_directory_auto_key_rotation`, `integration_key_epoch_rotation`, `integration_directory_gossip`, `integration_operator_quorum`, `integration_sync_status_chaos`, `integration_directory_beta_strict`, `integration_directory_operator_churn_scale`, `integration_distinct_operators`, `integration_peer_discovery`, `integration_peer_discovery_quorum`, `integration_peer_discovery_backoff`, `integration_peer_discovery_require_hint`, `integration_peer_discovery_source_cap`, `integration_opaque_source_downlink`, `integration_opaque_udp_only`, `integration_client_wg_kernel_proxy`, `integration_exit_wg_proxy_limit`, `integration_exit_wg_proxy_idle_cleanup`, `integration_entry_live_wg_filter`, `integration_exit_live_wg_mode`, `integration_live_wg_full_path`, `integration_client_bootstrap_recovery`, `integration_client_bootstrap_recovery_matrix`, `integration_exit_startup_sync`, `integration_client_startup_burst`, `integration_persistent_opaque_session`, `integration_session_reuse`, `integration_session_handoff`, `integration_trust_feed`, `integration_issuer_trust_sync`, `integration_issuer_dispute`, `integration_anon_credential`, `integration_adjudication_window_caps`, `integration_adjudication_quorum`, `integration_adjudication_operator_quorum`, `integration_adjudication_source_quorum`, `integration_lifecycle_chaos`, `integration_stress_bootstrap`, `integration_load_chaos_matrix`, `deep_test_suite`).
 - Operational deployment assets (Docker Compose + systemd service units/env templates).
 - 3-machine beta automation runner (`integration_3machine_beta_validate.sh`) with endpoint health checks, federation operator-floor validation, and machine-C client bootstrap validation against both directory sources.
+- Easy-mode beta profile defaults (`--beta-profile`) for server/client/3-machine scripts, including safer quorum/anti-concentration defaults and client distinct-operator pairing by default.
+- 3-machine beta soak/fault runner (`integration_3machine_beta_soak.sh`) for repeated cross-network validation rounds with optional fault-command injection and consolidated reporting.
+- One-bootstrap host discovery workflow (`discover-hosts`, `--bootstrap-directory`) for machine-C validation and easy-mode launcher flows that auto-discover peer server URLs from a single known directory endpoint.
 
 ## In Progress / Partial
 - Real WG interface packet plumbing is scaffolded; bidirectional opaque relay through entry/client/exit is in place (including exit downlink source path and optional client/exit command-mode WG UDP kernel-proxy bridges), and Linux root-only manual validation is available via `scripts/integration_real_wg_privileged.sh` and `scripts/integration_real_wg_privileged_matrix.sh`; production end-to-end cryptographic WG interface integration remains pending.

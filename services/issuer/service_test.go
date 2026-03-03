@@ -110,6 +110,19 @@ func TestValidateRuntimeConfigBetaStrictRejectsDefaultAdminToken(t *testing.T) {
 	}
 }
 
+func TestValidateRuntimeConfigBetaStrictRejectsExposedAnonCredentialIDs(t *testing.T) {
+	s := &Service{
+		betaStrict:       true,
+		adminToken:       "super-secret-admin-token",
+		keyRotateSec:     60,
+		tokenTTL:         10 * time.Minute,
+		anonCredExposeID: true,
+	}
+	if err := s.validateRuntimeConfig(); err == nil {
+		t.Fatalf("expected strict config rejection")
+	}
+}
+
 func TestHandleHealth(t *testing.T) {
 	s := &Service{}
 	req := httptest.NewRequest(http.MethodGet, "/v1/health", nil)

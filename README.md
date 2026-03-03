@@ -124,12 +124,14 @@ scripts\windows\wsl2_easy.cmd run
 Script-only easy mode:
 
 ```bash
-./scripts/easy_node.sh server-up --public-host <PUBLIC_IP_OR_DNS>
+./scripts/easy_node.sh server-up --public-host <PUBLIC_IP_OR_DNS> --beta-profile
 ./scripts/easy_node.sh client-test \
   --directory-urls http://<SERVER_IP>:8081 \
   --issuer-url http://<SERVER_IP>:8082 \
   --entry-url http://<SERVER_IP>:8083 \
-  --exit-url http://<SERVER_IP>:8084
+  --exit-url http://<SERVER_IP>:8084 \
+  --beta-profile 1 \
+  --distinct-operators 1
 
 ./scripts/easy_node.sh three-machine-validate \
   --directory-a http://<A_SERVER_IP>:8081 \
@@ -138,7 +140,31 @@ Script-only easy mode:
   --entry-url http://<A_SERVER_IP>:8083 \
   --exit-url http://<A_SERVER_IP>:8084 \
   --min-sources 2 \
-  --min-operators 2
+  --min-operators 2 \
+  --beta-profile 1 \
+  --distinct-operators 1
+
+./scripts/easy_node.sh three-machine-soak \
+  --directory-a http://<A_SERVER_IP>:8081 \
+  --directory-b http://<B_SERVER_IP>:8081 \
+  --issuer-url http://<A_SERVER_IP>:8082 \
+  --entry-url http://<A_SERVER_IP>:8083 \
+  --exit-url http://<A_SERVER_IP>:8084 \
+  --rounds 12 \
+  --pause-sec 5 \
+  --beta-profile 1 \
+  --distinct-operators 1
+
+# one-bootstrap mode (auto-discover other server hosts/URLs)
+./scripts/easy_node.sh discover-hosts \
+  --bootstrap-directory http://<KNOWN_SERVER_IP>:8081 \
+  --write-config 1
+
+./scripts/easy_node.sh machine-c-test \
+  --bootstrap-directory http://<KNOWN_SERVER_IP>:8081 \
+  --discovery-wait-sec 20 \
+  --beta-profile 1 \
+  --distinct-operators 1
 
 # machine-specific automated validation (use on each host)
 ./scripts/easy_node.sh machine-a-test --public-host <A_SERVER_IP_OR_DNS>
@@ -148,14 +174,18 @@ Script-only easy mode:
   --directory-b http://<B_SERVER_IP_OR_DNS>:8081 \
   --issuer-url http://<A_SERVER_IP_OR_DNS>:8082 \
   --entry-url http://<A_SERVER_IP_OR_DNS>:8083 \
-  --exit-url http://<A_SERVER_IP_OR_DNS>:8084
+  --exit-url http://<A_SERVER_IP_OR_DNS>:8084 \
+  --beta-profile 1 \
+  --distinct-operators 1
 ```
 
 3-machine test guide:
 - `docs/easy-3-machine-test.md`
+- `docs/beta-playbook.md` (frozen closed-beta command set)
 - `docs/windows-wsl2.md` (Windows 11 + WSL2)
 
 Optional env vars:
+- `EASY_NODE_BETA_PROFILE` (`1` enables easy-mode beta defaults in `server-up` and `client-test`)
 - `DIRECTORY_ADDR` (default `127.0.0.1:8081`)
 - `ISSUER_ADDR` (default `127.0.0.1:8082`)
 - `ENTRY_ADDR` (default `127.0.0.1:8083`)

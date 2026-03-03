@@ -40,6 +40,7 @@ type Service struct {
 	trustOperatorID     string
 	disputeDefaultTTL   time.Duration
 	adminToken          string
+	anonCredExposeID    bool
 	betaStrict          bool
 	mu                  sync.RWMutex
 	subjects            map[string]proto.SubjectProfile
@@ -159,6 +160,7 @@ func New() *Service {
 			disputeDefaultTTL = time.Duration(n) * time.Second
 		}
 	}
+	anonCredExposeID := os.Getenv("ISSUER_ANON_CRED_EXPOSE_ID") == "1"
 	betaStrict := os.Getenv("BETA_STRICT_MODE") == "1" || os.Getenv("ISSUER_BETA_STRICT") == "1"
 	return &Service{
 		addr:                addr,
@@ -176,6 +178,7 @@ func New() *Service {
 		keyRotateSec:        keyRotateSec,
 		keyHistory:          keyHistory,
 		adminToken:          adminToken,
+		anonCredExposeID:    anonCredExposeID,
 		betaStrict:          betaStrict,
 		subjects:            make(map[string]proto.SubjectProfile),
 		subjectsFile:        subjectsFile,
@@ -296,6 +299,9 @@ func (s *Service) validateRuntimeConfig() error {
 	if s.tokenTTL <= 0 || s.tokenTTL > 15*time.Minute {
 		return fmt.Errorf("BETA_STRICT_MODE requires ISSUER_TOKEN_TTL_SEC in 1..900")
 	}
+	if s.anonCredExposeID {
+		return fmt.Errorf("BETA_STRICT_MODE requires ISSUER_ANON_CRED_EXPOSE_ID=0")
+	}
 	return nil
 }
 
@@ -393,7 +399,7 @@ func (s *Service) handleIssueToken(w http.ResponseWriter, r *http.Request) {
 			}
 			subject := anonymousSubjectAlias(cred.CredentialID)
 			claims = baseClaimsForTier(s.issuerID, subject, keyEpoch, "exit", tokenType, popPubKey, effectiveTier, expires, req.ExitScope)
-			claims.AnonCredID = cred.CredentialID
+			claims.AnonCredID = anonymousCredentialPresentationID(s.issuerID, cred.CredentialID, claims.TokenID, s.anonCredExposeID)
 		} else {
 			effectiveTier := s.effectiveTierFor(req.Subject, req.Tier)
 			claims = baseClaimsForTier(s.issuerID, req.Subject, keyEpoch, "exit", tokenType, popPubKey, effectiveTier, expires, req.ExitScope)
@@ -2005,6 +2011,20 @@ func parseAnonymousCredential(credential string) (anonymousCredentialClaims, []b
 func anonymousSubjectAlias(credentialID string) string {
 	sum := sha256.Sum256([]byte(strings.TrimSpace(credentialID)))
 	return "anon:" + base64.RawURLEncoding.EncodeToString(sum[:12])
+}
+
+func anonymousCredentialPresentationID(issuerID string, credentialID string, tokenID string, exposeRaw bool) string {
+	credID := strings.TrimSpace(credentialID)
+	if exposeRaw {
+		return credID
+	}
+	tokenID = strings.TrimSpace(tokenID)
+	issuerID = strings.TrimSpace(issuerID)
+	if credID == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte("anon-pres-v1|" + issuerID + "|" + credID + "|" + tokenID))
+	return "acp:" + base64.RawURLEncoding.EncodeToString(sum[:18])
 }
 
 func defaultCredentialID() string {

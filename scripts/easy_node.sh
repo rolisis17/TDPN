@@ -21,20 +21,23 @@ usage() {
   cat <<'USAGE'
 Usage:
   ./scripts/easy_node.sh check
-  ./scripts/easy_node.sh server-up --public-host HOST [--operator-id ID] [--issuer-admin-token TOKEN] [--peer-directories URLS]
+  ./scripts/easy_node.sh server-up [--public-host HOST] [--operator-id ID] [--issuer-admin-token TOKEN] [--peer-directories URLS] [--bootstrap-directory URL] [--beta-profile [0|1]]
   ./scripts/easy_node.sh server-status
   ./scripts/easy_node.sh server-logs
   ./scripts/easy_node.sh server-down
-  ./scripts/easy_node.sh client-test --directory-urls URL[,URL...] --issuer-url URL --entry-url URL --exit-url URL [--min-sources N] [--exit-country CC] [--exit-region REGION] [--timeout-sec N] [--distinct-operators [0|1]]
-  ./scripts/easy_node.sh three-machine-validate --directory-a URL --directory-b URL --issuer-url URL --entry-url URL --exit-url URL [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--exit-country CC] [--exit-region REGION]
+  ./scripts/easy_node.sh client-test [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--min-sources N] [--exit-country CC] [--exit-region REGION] [--timeout-sec N] [--distinct-operators [0|1]] [--beta-profile [0|1]]
+  ./scripts/easy_node.sh three-machine-validate [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--exit-country CC] [--exit-region REGION] [--distinct-operators [0|1]] [--beta-profile [0|1]]
+  ./scripts/easy_node.sh three-machine-soak [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--rounds N] [--pause-sec N] [--fault-every N] [--fault-command CMD] [--continue-on-fail [0|1]] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--exit-country CC] [--exit-region REGION] [--distinct-operators [0|1]] [--beta-profile [0|1]] [--report-file PATH]
   ./scripts/easy_node.sh machine-a-test [--public-host HOST] [--report-file PATH]
   ./scripts/easy_node.sh machine-b-test --peer-directory-a URL [--public-host HOST] [--min-operators N] [--federation-timeout-sec N] [--report-file PATH]
-  ./scripts/easy_node.sh machine-c-test --directory-a URL --directory-b URL --issuer-url URL --entry-url URL --exit-url URL [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--exit-country CC] [--exit-region REGION] [--report-file PATH]
+  ./scripts/easy_node.sh machine-c-test [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--exit-country CC] [--exit-region REGION] [--distinct-operators [0|1]] [--beta-profile [0|1]] [--report-file PATH]
+  ./scripts/easy_node.sh discover-hosts --bootstrap-directory URL [--wait-sec N] [--min-hosts N] [--write-config [0|1]]
 
 Notes:
   - server-up runs directory + issuer + entry-exit using deploy/docker-compose.yml.
   - client-test runs client-demo with --no-deps (no local server required on the client machine).
   - three-machine-validate runs health + federation checks then runs client-test with both directories.
+  - bootstrap discovery mode lets you provide one directory URL and auto-discover other server hosts.
   - machine-a-test/machine-b-test/machine-c-test are machine-role-specific automated validations with optional report files.
   - default logs are written to ./.easy-node-logs (override with EASY_NODE_LOG_DIR).
   - For a 3-machine test: run server-up on machine A and B, then run client-test on machine C with both directory URLs.
@@ -93,6 +96,201 @@ host_is_loopback() {
   [[ "$host" == "127.0.0.1" || "$host" == "localhost" || "$host" == "::1" ]]
 }
 
+hosts_config_file() {
+  echo "$ROOT_DIR/data/easy_mode_hosts.conf"
+}
+
+trim_url() {
+  local value="$1"
+  while [[ "$value" == */ ]]; do
+    value="${value%/}"
+  done
+  echo "$value"
+}
+
+hostport_from_url() {
+  local value="$1"
+  value="${value#http://}"
+  value="${value#https://}"
+  value="${value%%/*}"
+  echo "$value"
+}
+
+host_from_hostport() {
+  local value="$1"
+  if [[ "$value" == \[*\]* ]]; then
+    # Bracketed IPv6 literal, with optional :port.
+    echo "${value%%]*}]"
+    return
+  fi
+  local colon_count
+  colon_count="$(printf '%s' "$value" | awk -F: '{print NF-1}')"
+  if [[ "$colon_count" == "1" ]]; then
+    local maybe_port="${value##*:}"
+    if [[ "$maybe_port" =~ ^[0-9]+$ ]]; then
+      echo "${value%:*}"
+      return
+    fi
+  fi
+  echo "$value"
+}
+
+host_from_url() {
+  local value="$1"
+  host_from_hostport "$(hostport_from_url "$value")"
+}
+
+normalize_host_for_endpoint() {
+  local host="$1"
+  host="$(trim_url "$host")"
+  if [[ "$host" == \[*\] ]]; then
+    echo "$host"
+    return
+  fi
+  if [[ "$host" == *:* ]]; then
+    echo "[$host]"
+    return
+  fi
+  echo "$host"
+}
+
+url_from_host_port() {
+  local host="$1"
+  local port="$2"
+  printf 'http://%s:%s' "$(normalize_host_for_endpoint "$host")" "$port"
+}
+
+discover_directory_urls() {
+  local bootstrap_url="$1"
+  local wait_sec="${2:-12}"
+  local min_hosts="${3:-2}"
+  local seed_host
+  bootstrap_url="$(trim_url "$bootstrap_url")"
+  seed_host="$(host_from_url "$bootstrap_url")"
+
+  declare -A seen_hosts=()
+  if [[ -n "$seed_host" ]]; then
+    seen_hosts["$seed_host"]=1
+  fi
+
+  local i payload relay_urls peer_urls endpoint_values u h count
+  for ((i = 1; i <= wait_sec; i++)); do
+    payload="$(curl -fsS --connect-timeout 2 --max-time 4 "${bootstrap_url}/v1/relays" 2>/dev/null || true)"
+    relay_urls="$(printf '%s\n' "$payload" | rg -o '"control_url":"https?://[^"]+"' || true)"
+    endpoint_values="$(printf '%s\n' "$payload" | rg -o '"endpoint":"[^"]+"' || true)"
+    while IFS= read -r u; do
+      u="$(printf '%s' "$u" | sed -E 's/^"control_url":"(https?:\/\/[^"]+)"$/\1/')"
+      h="$(host_from_url "$u")"
+      if [[ -n "$h" ]]; then
+        seen_hosts["$h"]=1
+      fi
+    done <<<"$relay_urls"
+    while IFS= read -r u; do
+      u="$(printf '%s' "$u" | sed -E 's/^"endpoint":"([^"]+)"$/\1/')"
+      h="$(host_from_hostport "$u")"
+      if [[ -n "$h" ]]; then
+        seen_hosts["$h"]=1
+      fi
+    done <<<"$endpoint_values"
+
+    payload="$(curl -fsS --connect-timeout 2 --max-time 4 "${bootstrap_url}/v1/peers" 2>/dev/null || true)"
+    peer_urls="$(printf '%s\n' "$payload" | rg -o '"url":"https?://[^"]+"' || true)"
+    while IFS= read -r u; do
+      u="$(printf '%s' "$u" | sed -E 's/^"url":"(https?:\/\/[^"]+)"$/\1/')"
+      h="$(host_from_url "$u")"
+      if [[ -n "$h" ]]; then
+        seen_hosts["$h"]=1
+      fi
+    done <<<"$peer_urls"
+
+    count="${#seen_hosts[@]}"
+    if ((count >= min_hosts)); then
+      break
+    fi
+    sleep 1
+  done
+
+  if [[ -z "$seed_host" ]]; then
+    seed_host="$(host_from_url "$bootstrap_url")"
+  fi
+
+  local out=()
+  if [[ -n "$seed_host" ]]; then
+    out+=("$(url_from_host_port "$seed_host" 8081)")
+    unset 'seen_hosts[$seed_host]'
+  fi
+
+  local sorted_hosts
+  sorted_hosts="$(printf '%s\n' "${!seen_hosts[@]}" | awk 'NF > 0' | sort -u)"
+  while IFS= read -r h; do
+    [[ -z "$h" ]] && continue
+    out+=("$(url_from_host_port "$h" 8081)")
+  done <<<"$sorted_hosts"
+
+  local joined=""
+  local item
+  for item in "${out[@]}"; do
+    if [[ -n "$joined" ]]; then
+      joined+=","
+    fi
+    joined+="$item"
+  done
+  echo "$joined"
+}
+
+merge_url_csv() {
+  local left="$1"
+  local right="$2"
+  local combined
+  combined="$(
+    {
+      printf '%s' "$left" | tr ',' '\n'
+      printf '\n'
+      printf '%s' "$right" | tr ',' '\n'
+    } | awk 'NF > 0' | awk '!seen[$0]++'
+  )"
+  printf '%s\n' "$combined" | paste -sd, -
+}
+
+detect_local_host() {
+  local candidate=""
+  if command -v tailscale >/dev/null 2>&1; then
+    candidate="$(tailscale ip -4 2>/dev/null | awk 'NF > 0 {print; exit}' || true)"
+    if [[ -n "$candidate" ]]; then
+      echo "$candidate"
+      return
+    fi
+  fi
+
+  if command -v ip >/dev/null 2>&1; then
+    candidate="$(ip route get 1.1.1.1 2>/dev/null | awk '/src/ {for (i=1; i<=NF; i++) if ($i=="src") {print $(i+1); exit}}' || true)"
+    if [[ -n "$candidate" && "$candidate" != "127.0.0.1" ]]; then
+      echo "$candidate"
+      return
+    fi
+  fi
+
+  if command -v hostname >/dev/null 2>&1; then
+    candidate="$(hostname -I 2>/dev/null | awk '{for (i=1; i<=NF; i++) if ($i !~ /^127\./) {print $i; exit}}' || true)"
+    if [[ -n "$candidate" ]]; then
+      echo "$candidate"
+      return
+    fi
+  fi
+}
+
+write_hosts_config() {
+  local host_a="$1"
+  local host_b="$2"
+  local file
+  file="$(hosts_config_file)"
+  mkdir -p "$(dirname "$file")"
+  cat >"$file" <<EOF_HOSTS
+MACHINE_A_HOST=$host_a
+MACHINE_B_HOST=$host_b
+EOF_HOSTS
+}
+
 random_token() {
   if command -v openssl >/dev/null 2>&1; then
     openssl rand -hex 16
@@ -127,6 +325,7 @@ write_server_env() {
   local operator_id="$2"
   local issuer_admin_token="$3"
   local peer_dirs="$4"
+  local beta_profile="$5"
   local relay_suffix
   relay_suffix="$(printf '%s' "$operator_id" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9-' '-')"
   relay_suffix="${relay_suffix#-}"
@@ -152,6 +351,23 @@ EOF_ENV
     echo "DIRECTORY_SYNC_SEC=5" >>"$SERVER_ENV_FILE"
     echo "DIRECTORY_GOSSIP_SEC=5" >>"$SERVER_ENV_FILE"
   fi
+
+  if [[ "$beta_profile" == "1" ]]; then
+    cat >>"$SERVER_ENV_FILE" <<'EOF_BETA'
+DIRECTORY_MIN_OPERATORS=2
+DIRECTORY_MIN_RELAY_VOTES=2
+ENTRY_DIRECTORY_MIN_OPERATORS=2
+ENTRY_DIRECTORY_MIN_RELAY_VOTES=2
+DIRECTORY_PEER_MIN_OPERATORS=2
+DIRECTORY_PEER_MIN_VOTES=2
+DIRECTORY_PEER_DISCOVERY_MIN_VOTES=2
+DIRECTORY_PEER_DISCOVERY_MAX_PER_SOURCE=8
+DIRECTORY_PEER_DISCOVERY_MAX_PER_OPERATOR=4
+DIRECTORY_PROVIDER_MAX_RELAYS_PER_OPERATOR=32
+DIRECTORY_PROVIDER_SPLIT_ROLES=1
+ISSUER_TOKEN_TTL_SEC=300
+EOF_BETA
+  fi
 }
 
 first_csv_item() {
@@ -170,6 +386,8 @@ server_up() {
   local operator_id=""
   local issuer_admin_token=""
   local peer_dirs=""
+  local bootstrap_directory=""
+  local beta_profile="${EASY_NODE_BETA_PROFILE:-0}"
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -189,6 +407,19 @@ server_up() {
         peer_dirs="${2:-}"
         shift 2
         ;;
+      --bootstrap-directory)
+        bootstrap_directory="${2:-}"
+        shift 2
+        ;;
+      --beta-profile)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          beta_profile="${2:-}"
+          shift 2
+        else
+          beta_profile="1"
+          shift
+        fi
+        ;;
       *)
         echo "unknown arg for server-up: $1"
         exit 2
@@ -196,9 +427,28 @@ server_up() {
     esac
   done
 
-  if [[ -z "$public_host" ]]; then
-    echo "server-up requires --public-host"
+  if [[ "$beta_profile" != "0" && "$beta_profile" != "1" ]]; then
+    echo "server-up requires --beta-profile (or EASY_NODE_BETA_PROFILE) to be 0 or 1"
     exit 2
+  fi
+
+  if [[ -n "$bootstrap_directory" ]]; then
+    bootstrap_directory="$(trim_url "$bootstrap_directory")"
+    if [[ -z "$peer_dirs" ]]; then
+      peer_dirs="$bootstrap_directory"
+    else
+      peer_dirs="$(merge_url_csv "$peer_dirs" "$bootstrap_directory")"
+    fi
+  fi
+
+  if [[ -z "$public_host" ]]; then
+    public_host="$(detect_local_host || true)"
+    if [[ -n "$public_host" ]]; then
+      echo "server-up auto-detected public host: $public_host"
+    else
+      echo "server-up requires --public-host (or a detectable local host)"
+      exit 2
+    fi
   fi
 
   ensure_deps_or_die
@@ -210,7 +460,7 @@ server_up() {
     issuer_admin_token="$(random_token)"
   fi
 
-  write_server_env "$public_host" "$operator_id" "$issuer_admin_token" "$peer_dirs"
+  write_server_env "$public_host" "$operator_id" "$issuer_admin_token" "$peer_dirs" "$beta_profile"
 
   compose_server up -d --build directory issuer entry-exit
 
@@ -232,11 +482,25 @@ server_up() {
   echo "env file: $SERVER_ENV_FILE"
   echo "operator_id: $operator_id"
   echo "issuer_admin_token: $issuer_admin_token"
+  if [[ "$beta_profile" == "1" ]]; then
+    echo "beta profile: enabled (quorum and anti-concentration defaults applied)"
+  fi
   echo "health checks:"
   echo "  curl http://${public_host}:8081/v1/relays"
   echo "  curl http://${public_host}:8082/v1/pubkeys"
   echo "  curl http://${public_host}:8083/v1/health"
   echo "  curl http://${public_host}:8084/v1/health"
+
+  if [[ -n "$peer_dirs" ]]; then
+    local local_host
+    local_host="$(host_from_hostport "$public_host")"
+    local bootstrap_host
+    bootstrap_host="$(host_from_url "$(first_csv_item "$peer_dirs")")"
+    if [[ -n "$local_host" && -n "$bootstrap_host" && "$local_host" != "$bootstrap_host" ]]; then
+      write_hosts_config "$bootstrap_host" "$local_host"
+      echo "updated host config: $(hosts_config_file)"
+    fi
+  fi
 }
 
 server_status() {
@@ -257,6 +521,107 @@ server_down() {
 three_machine_validate() {
   ensure_deps_or_die
   "$ROOT_DIR/scripts/integration_3machine_beta_validate.sh" "$@"
+}
+
+three_machine_soak() {
+  ensure_deps_or_die
+  "$ROOT_DIR/scripts/integration_3machine_beta_soak.sh" "$@"
+}
+
+discover_hosts() {
+  local bootstrap_directory=""
+  local wait_sec="${EASY_NODE_DISCOVERY_WAIT_SEC:-12}"
+  local min_hosts="2"
+  local write_config="0"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --bootstrap-directory)
+        bootstrap_directory="${2:-}"
+        shift 2
+        ;;
+      --wait-sec)
+        wait_sec="${2:-}"
+        shift 2
+        ;;
+      --min-hosts)
+        min_hosts="${2:-}"
+        shift 2
+        ;;
+      --write-config)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          write_config="${2:-}"
+          shift 2
+        else
+          write_config="1"
+          shift
+        fi
+        ;;
+      -h|--help|help)
+        usage
+        return 0
+        ;;
+      *)
+        echo "unknown arg for discover-hosts: $1"
+        exit 2
+        ;;
+    esac
+  done
+
+  if [[ -z "$bootstrap_directory" ]]; then
+    echo "discover-hosts requires --bootstrap-directory URL"
+    exit 2
+  fi
+  if ! [[ "$wait_sec" =~ ^[0-9]+$ && "$min_hosts" =~ ^[0-9]+$ ]]; then
+    echo "discover-hosts requires numeric --wait-sec and --min-hosts"
+    exit 2
+  fi
+  if [[ "$write_config" != "0" && "$write_config" != "1" ]]; then
+    echo "discover-hosts requires --write-config to be 0 or 1"
+    exit 2
+  fi
+
+  need_cmd curl || exit 2
+  need_cmd rg || exit 2
+
+  bootstrap_directory="$(trim_url "$bootstrap_directory")"
+  local discovered_csv
+  discovered_csv="$(discover_directory_urls "$bootstrap_directory" "$wait_sec" "$min_hosts")"
+  if [[ -z "$discovered_csv" ]]; then
+    echo "no hosts discovered from $bootstrap_directory"
+    exit 1
+  fi
+
+  echo "bootstrap_directory=$bootstrap_directory"
+  echo "discovered_directory_urls=$discovered_csv"
+
+  local discovered_hosts
+  discovered_hosts="$(
+    printf '%s\n' "$discovered_csv" | tr ',' '\n' | sed '/^$/d' |
+      while IFS= read -r u; do host_from_url "$u"; done |
+      awk 'NF > 0' | sort -u
+  )"
+  echo "discovered_hosts:"
+  printf '%s\n' "$discovered_hosts"
+
+  if [[ "$write_config" == "1" ]]; then
+    local host_a host_b bootstrap_host
+    bootstrap_host="$(host_from_url "$bootstrap_directory")"
+    if [[ -n "$bootstrap_host" ]]; then
+      host_a="$bootstrap_host"
+      host_b="$(printf '%s\n' "$discovered_hosts" | awk -v bootstrap="$bootstrap_host" '$0 != bootstrap {print; exit}')"
+    else
+      host_a="$(printf '%s\n' "$discovered_hosts" | sed -n '1p')"
+      host_b="$(printf '%s\n' "$discovered_hosts" | sed -n '2p')"
+    fi
+    if [[ -n "$host_a" && -n "$host_b" ]]; then
+      write_hosts_config "$host_a" "$host_b"
+      echo "updated host config: $(hosts_config_file)"
+    else
+      echo "not enough hosts to update config (need at least 2)"
+      exit 1
+    fi
+  fi
 }
 
 machine_a_test() {
@@ -286,6 +651,11 @@ client_test() {
   local build_timeout_sec="${EASY_NODE_CLIENT_BUILD_TIMEOUT_SEC:-180}"
   local force_build="${EASY_NODE_CLIENT_FORCE_BUILD:-0}"
   local require_distinct_operators="${CLIENT_REQUIRE_DISTINCT_OPERATORS:-0}"
+  local beta_profile="${EASY_NODE_BETA_PROFILE:-0}"
+  local bootstrap_directory=""
+  local discovery_wait_sec="${EASY_NODE_DISCOVERY_WAIT_SEC:-12}"
+  local min_sources_set=0
+  local distinct_set=0
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -295,6 +665,14 @@ client_test() {
         ;;
       --issuer-url)
         issuer_url="${2:-}"
+        shift 2
+        ;;
+      --bootstrap-directory)
+        bootstrap_directory="${2:-}"
+        shift 2
+        ;;
+      --discovery-wait-sec)
+        discovery_wait_sec="${2:-}"
         shift 2
         ;;
       --entry-url)
@@ -307,6 +685,7 @@ client_test() {
         ;;
       --min-sources)
         min_sources="${2:-}"
+        min_sources_set=1
         shift 2
         ;;
       --exit-country)
@@ -324,9 +703,20 @@ client_test() {
       --distinct-operators)
         if [[ "${2:-}" == "0" || "${2:-}" == "1" ]]; then
           require_distinct_operators="${2:-}"
+          distinct_set=1
           shift 2
         else
           require_distinct_operators="1"
+          distinct_set=1
+          shift
+        fi
+        ;;
+      --beta-profile)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          beta_profile="${2:-}"
+          shift 2
+        else
+          beta_profile="1"
           shift
         fi
         ;;
@@ -337,12 +727,54 @@ client_test() {
     esac
   done
 
-  if [[ -z "$directory_urls" || -z "$issuer_url" || -z "$entry_url" || -z "$exit_url" ]]; then
-    echo "client-test requires --directory-urls --issuer-url --entry-url --exit-url"
-    exit 2
-  fi
   if [[ "$require_distinct_operators" != "0" && "$require_distinct_operators" != "1" ]]; then
     echo "client-test requires CLIENT_REQUIRE_DISTINCT_OPERATORS or --distinct-operators to be 0 or 1"
+    exit 2
+  fi
+  if [[ "$beta_profile" != "0" && "$beta_profile" != "1" ]]; then
+    echo "client-test requires --beta-profile (or EASY_NODE_BETA_PROFILE) to be 0 or 1"
+    exit 2
+  fi
+  if [[ "$beta_profile" == "1" ]]; then
+    if [[ "$distinct_set" -eq 0 ]]; then
+      require_distinct_operators="1"
+    fi
+    if [[ "$min_sources_set" -eq 0 ]] && [[ "$directory_urls" == *,* ]]; then
+      min_sources="2"
+    fi
+  fi
+
+  if [[ -n "$bootstrap_directory" ]]; then
+    bootstrap_directory="$(trim_url "$bootstrap_directory")"
+    if ! [[ "$discovery_wait_sec" =~ ^[0-9]+$ ]]; then
+      echo "client-test requires --discovery-wait-sec to be numeric"
+      exit 2
+    fi
+    local discovered
+    discovered="$(discover_directory_urls "$bootstrap_directory" "$discovery_wait_sec" "$min_sources")"
+    if [[ -z "$directory_urls" ]]; then
+      directory_urls="$discovered"
+    else
+      directory_urls="$(merge_url_csv "$directory_urls" "$discovered")"
+    fi
+
+    local bootstrap_host
+    bootstrap_host="$(host_from_url "$bootstrap_directory")"
+    if [[ -z "$issuer_url" && -n "$bootstrap_host" ]]; then
+      issuer_url="$(url_from_host_port "$bootstrap_host" 8082)"
+    fi
+    if [[ -z "$entry_url" && -n "$bootstrap_host" ]]; then
+      entry_url="$(url_from_host_port "$bootstrap_host" 8083)"
+    fi
+    if [[ -z "$exit_url" && -n "$bootstrap_host" ]]; then
+      exit_url="$(url_from_host_port "$bootstrap_host" 8084)"
+    fi
+  fi
+
+  if [[ -z "$directory_urls" || -z "$issuer_url" || -z "$entry_url" || -z "$exit_url" ]]; then
+    echo "client-test requires directory, issuer, entry and exit URLs."
+    echo "provide explicit --directory-urls/--issuer-url/--entry-url/--exit-url"
+    echo "or use --bootstrap-directory for automatic discovery."
     exit 2
   fi
 
@@ -398,6 +830,9 @@ EOF_CLIENT
   else
     echo "client test: using existing deploy-client-demo:latest image (set EASY_NODE_CLIENT_FORCE_BUILD=1 to rebuild)"
   fi
+  if [[ "$beta_profile" == "1" ]]; then
+    echo "client test: beta profile enabled (distinct operators + multi-source defaults)"
+  fi
 
   local -a run_cmd
   run_cmd=(
@@ -416,6 +851,12 @@ EOF_CLIENT
     -e "CLIENT_BOOTSTRAP_INTERVAL_SEC=2"
     -e "CLIENT_REQUIRE_DISTINCT_OPERATORS=$require_distinct_operators"
   )
+  if [[ "$beta_profile" == "1" ]]; then
+    run_cmd+=(
+      -e "DIRECTORY_MIN_OPERATORS=2"
+      -e "CLIENT_DIRECTORY_MIN_OPERATORS=2"
+    )
+  fi
   if [[ -n "$exit_country" ]]; then
     run_cmd+=(-e "CLIENT_EXIT_COUNTRY=$exit_country")
   fi
@@ -470,6 +911,10 @@ main() {
       shift
       three_machine_validate "$@"
       ;;
+    three-machine-soak)
+      shift
+      three_machine_soak "$@"
+      ;;
     machine-a-test)
       shift
       machine_a_test "$@"
@@ -481,6 +926,10 @@ main() {
     machine-c-test)
       shift
       machine_c_test "$@"
+      ;;
+    discover-hosts)
+      shift
+      discover_hosts "$@"
       ;;
     -h|--help|help|"")
       usage

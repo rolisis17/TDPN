@@ -105,7 +105,31 @@ This is the simplest full path test.
   --entry-url http://A_PUBLIC_IP_OR_DNS:8083 \
   --exit-url http://A_PUBLIC_IP_OR_DNS:8084 \
   --min-sources 2 \
-  --min-operators 2
+  --min-operators 2 \
+  --beta-profile 1 \
+  --distinct-operators 1
+```
+
+3-machine soak/fault validation (machine C runner):
+
+```bash
+./scripts/integration_3machine_beta_soak.sh \
+  --directory-a http://A_PUBLIC_IP_OR_DNS:8081 \
+  --directory-b http://B_PUBLIC_IP_OR_DNS:8081 \
+  --issuer-url http://A_PUBLIC_IP_OR_DNS:8082 \
+  --entry-url http://A_PUBLIC_IP_OR_DNS:8083 \
+  --exit-url http://A_PUBLIC_IP_OR_DNS:8084 \
+  --rounds 12 \
+  --pause-sec 5 \
+  --beta-profile 1 \
+  --distinct-operators 1
+
+# one-bootstrap mode (auto-discovery)
+./scripts/integration_machine_c_client_check.sh \
+  --bootstrap-directory http://KNOWN_SERVER_IP:8081 \
+  --discovery-wait-sec 20 \
+  --beta-profile 1 \
+  --distinct-operators 1
 ```
 
 Machine-role quick checks (run on each host before full 3-machine run):

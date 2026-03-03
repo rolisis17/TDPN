@@ -41,7 +41,8 @@ All commands below run from repo root.
 
 ```bash
 ./scripts/easy_node.sh server-up \
-  --public-host A_PUBLIC_IP_OR_DNS
+  --public-host A_PUBLIC_IP_OR_DNS \
+  --beta-profile
 ```
 
 ### Machine B (server + federated with A)
@@ -49,7 +50,8 @@ All commands below run from repo root.
 ```bash
 ./scripts/easy_node.sh server-up \
   --public-host B_PUBLIC_IP_OR_DNS \
-  --peer-directories http://A_PUBLIC_IP_OR_DNS:8081
+  --peer-directories http://A_PUBLIC_IP_OR_DNS:8081 \
+  --beta-profile
 ```
 
 Optional on Machine A to federate both ways:
@@ -57,7 +59,8 @@ Optional on Machine A to federate both ways:
 ```bash
 ./scripts/easy_node.sh server-up \
   --public-host A_PUBLIC_IP_OR_DNS \
-  --peer-directories http://B_PUBLIC_IP_OR_DNS:8081
+  --peer-directories http://B_PUBLIC_IP_OR_DNS:8081 \
+  --beta-profile
 ```
 
 ### Machine C (client)
@@ -68,7 +71,9 @@ Optional on Machine A to federate both ways:
   --issuer-url http://A_PUBLIC_IP_OR_DNS:8082 \
   --entry-url http://A_PUBLIC_IP_OR_DNS:8083 \
   --exit-url http://A_PUBLIC_IP_OR_DNS:8084 \
-  --min-sources 2
+  --min-sources 2 \
+  --distinct-operators 1 \
+  --beta-profile 1
 ```
 
 Automated validation (recommended on machine C):
@@ -81,7 +86,9 @@ Automated validation (recommended on machine C):
   --entry-url http://A_PUBLIC_IP_OR_DNS:8083 \
   --exit-url http://A_PUBLIC_IP_OR_DNS:8084 \
   --min-sources 2 \
-  --min-operators 2
+  --min-operators 2 \
+  --distinct-operators 1 \
+  --beta-profile 1
 ```
 
 This runs:
@@ -113,7 +120,9 @@ Machine C:
   --directory-b http://B_PUBLIC_IP_OR_DNS:8081 \
   --issuer-url http://A_PUBLIC_IP_OR_DNS:8082 \
   --entry-url http://A_PUBLIC_IP_OR_DNS:8083 \
-  --exit-url http://A_PUBLIC_IP_OR_DNS:8084
+  --exit-url http://A_PUBLIC_IP_OR_DNS:8084 \
+  --beta-profile 1 \
+  --distinct-operators 1
 ```
 
 Each command prints (and can store) a test report file to share for debugging.
@@ -123,6 +132,38 @@ Success signal:
 
 Important:
 - on machine C, do not use `127.0.0.1` / `localhost` for A/B URLs; use reachable IP/DNS of machine A/B.
+
+One-bootstrap mode (you know only one server IP):
+
+```bash
+# discover server hosts from one known directory and update data/easy_mode_hosts.conf
+./scripts/easy_node.sh discover-hosts \
+  --bootstrap-directory http://KNOWN_SERVER_IP:8081 \
+  --wait-sec 20 \
+  --write-config 1
+
+# run full machine-C validation from one bootstrap URL
+./scripts/easy_node.sh machine-c-test \
+  --bootstrap-directory http://KNOWN_SERVER_IP:8081 \
+  --discovery-wait-sec 20 \
+  --beta-profile 1 \
+  --distinct-operators 1
+```
+
+Soak test from machine C (optional, recommended before closed beta):
+
+```bash
+./scripts/easy_node.sh three-machine-soak \
+  --directory-a http://A_PUBLIC_IP_OR_DNS:8081 \
+  --directory-b http://B_PUBLIC_IP_OR_DNS:8081 \
+  --issuer-url http://A_PUBLIC_IP_OR_DNS:8082 \
+  --entry-url http://A_PUBLIC_IP_OR_DNS:8083 \
+  --exit-url http://A_PUBLIC_IP_OR_DNS:8084 \
+  --rounds 12 \
+  --pause-sec 5 \
+  --beta-profile 1 \
+  --distinct-operators 1
+```
 
 ## 4) Ports to open on server machines
 

@@ -46,6 +46,7 @@ type Service struct {
 	providerMinEntryTier     int
 	providerMinExitTier      int
 	providerMaxPerOperator   int
+	providerSplitRoles       bool
 	issuerTrustURLs          []string
 	issuerSyncSec            int
 	issuerTrustMinVotes      int
@@ -363,6 +364,7 @@ func New() *Service {
 			providerMaxPerOperator = parsed
 		}
 	}
+	providerSplitRoles := os.Getenv("DIRECTORY_PROVIDER_SPLIT_ROLES") == "1"
 	peerTrustStrict := os.Getenv("DIRECTORY_PEER_TRUST_STRICT") == "1"
 	peerTrustTOFU := os.Getenv("DIRECTORY_PEER_TRUST_TOFU") != "0"
 	peerTrustFile := os.Getenv("DIRECTORY_PEER_TRUSTED_KEYS_FILE")
@@ -370,6 +372,9 @@ func New() *Service {
 		peerTrustFile = "data/directory_peer_trusted_keys.txt"
 	}
 	betaStrict := os.Getenv("BETA_STRICT_MODE") == "1" || os.Getenv("DIRECTORY_BETA_STRICT") == "1"
+	if betaStrict {
+		providerSplitRoles = true
+	}
 	adminToken := os.Getenv("DIRECTORY_ADMIN_TOKEN")
 	if adminToken == "" {
 		adminToken = "dev-admin-token"
@@ -410,6 +415,7 @@ func New() *Service {
 		providerMinEntryTier:     providerMinEntryTier,
 		providerMinExitTier:      providerMinExitTier,
 		providerMaxPerOperator:   providerMaxPerOperator,
+		providerSplitRoles:       providerSplitRoles,
 		issuerTrustURLs:          issuerTrustURLs,
 		issuerSyncSec:            issuerSyncSec,
 		issuerTrustMinVotes:      issuerTrustMinVotes,
@@ -510,8 +516,8 @@ func (s *Service) Run(ctx context.Context) error {
 		Addr:    s.addr,
 		Handler: mux,
 	}
-	log.Printf("directory federation policy: peers=%d peer_min_operators=%d peer_min_votes=%d peer_discovery_min_votes=%d peer_discovery_require_hint=%t peer_discovery_max_per_source=%d peer_discovery_max_per_operator=%d peer_discovery_fail_threshold=%d peer_discovery_backoff_sec=%d peer_discovery_max_backoff_sec=%d peer_discovery_dns_seeds=%d peer_discovery_dns_refresh_sec=%d adjudication_meta_min_votes=%d final_dispute_min_votes=%d final_appeal_min_votes=%d final_adjudication_min_operators=%d final_adjudication_min_sources=%d final_adjudication_min_ratio=%.2f dispute_max_ttl_sec=%d appeal_max_ttl_sec=%d issuer_urls=%d issuer_min_operators=%d issuer_min_votes=%d provider_issuer_urls=%d provider_relay_max_ttl_sec=%d provider_min_entry_tier=%d provider_min_exit_tier=%d provider_max_relays_per_operator=%d key_rotate_sec=%d key_history=%d",
-		len(s.peerURLs), s.peerMinOperators, s.peerMinVotes, maxInt(1, s.peerDiscoveryMinVotes), s.peerDiscoveryRequireHint, maxInt(0, s.peerDiscoveryMaxPerSrc), maxInt(0, s.peerDiscoveryMaxPerOp), maxInt(1, s.peerDiscoveryFailN), int(s.peerDiscoveryBackoff/time.Second), int(s.peerDiscoveryBackoffMax/time.Second), len(s.peerDiscoveryDNSSeeds), int(s.peerDiscoveryDNSRefresh/time.Second), maxInt(1, s.adjudicationMetaMin), s.effectiveFinalDisputeMinVotes(), s.effectiveFinalAppealMinVotes(), s.effectiveFinalAdjudicationMinOperators(), s.effectiveFinalAdjudicationMinSources(), s.effectiveFinalAdjudicationMinRatio(), int(s.disputeMaxTTL/time.Second), int(s.appealMaxTTL/time.Second), len(s.issuerTrustURLs), s.issuerMinOperators, s.issuerTrustMinVotes, len(s.providerIssuerURLs), int(s.providerRelayMaxTTL/time.Second), s.effectiveProviderMinEntryTier(), s.effectiveProviderMinExitTier(), s.effectiveProviderMaxRelaysPerOperator(), int(s.keyRotateEvery/time.Second), s.effectiveKeyHistory())
+	log.Printf("directory federation policy: peers=%d peer_min_operators=%d peer_min_votes=%d peer_discovery_min_votes=%d peer_discovery_require_hint=%t peer_discovery_max_per_source=%d peer_discovery_max_per_operator=%d peer_discovery_fail_threshold=%d peer_discovery_backoff_sec=%d peer_discovery_max_backoff_sec=%d peer_discovery_dns_seeds=%d peer_discovery_dns_refresh_sec=%d adjudication_meta_min_votes=%d final_dispute_min_votes=%d final_appeal_min_votes=%d final_adjudication_min_operators=%d final_adjudication_min_sources=%d final_adjudication_min_ratio=%.2f dispute_max_ttl_sec=%d appeal_max_ttl_sec=%d issuer_urls=%d issuer_min_operators=%d issuer_min_votes=%d provider_issuer_urls=%d provider_relay_max_ttl_sec=%d provider_min_entry_tier=%d provider_min_exit_tier=%d provider_max_relays_per_operator=%d provider_split_roles=%t key_rotate_sec=%d key_history=%d",
+		len(s.peerURLs), s.peerMinOperators, s.peerMinVotes, maxInt(1, s.peerDiscoveryMinVotes), s.peerDiscoveryRequireHint, maxInt(0, s.peerDiscoveryMaxPerSrc), maxInt(0, s.peerDiscoveryMaxPerOp), maxInt(1, s.peerDiscoveryFailN), int(s.peerDiscoveryBackoff/time.Second), int(s.peerDiscoveryBackoffMax/time.Second), len(s.peerDiscoveryDNSSeeds), int(s.peerDiscoveryDNSRefresh/time.Second), maxInt(1, s.adjudicationMetaMin), s.effectiveFinalDisputeMinVotes(), s.effectiveFinalAppealMinVotes(), s.effectiveFinalAdjudicationMinOperators(), s.effectiveFinalAdjudicationMinSources(), s.effectiveFinalAdjudicationMinRatio(), int(s.disputeMaxTTL/time.Second), int(s.appealMaxTTL/time.Second), len(s.issuerTrustURLs), s.issuerMinOperators, s.issuerTrustMinVotes, len(s.providerIssuerURLs), int(s.providerRelayMaxTTL/time.Second), s.effectiveProviderMinEntryTier(), s.effectiveProviderMinExitTier(), s.effectiveProviderMaxRelaysPerOperator(), s.providerSplitRoles, int(s.keyRotateEvery/time.Second), s.effectiveKeyHistory())
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -2698,7 +2704,33 @@ func (s *Service) upsertProviderRelay(desc proto.RelayDescriptor) error {
 	if ok && prev.ValidUntil.After(desc.ValidUntil) {
 		desc.ValidUntil = prev.ValidUntil
 	}
+	if err := s.enforceProviderSplitRolesLocked(key, desc); err != nil {
+		return err
+	}
 	s.providerRelays[key] = desc
+	return nil
+}
+
+func (s *Service) enforceProviderSplitRolesLocked(relayKey string, desc proto.RelayDescriptor) error {
+	if !s.providerSplitRoles {
+		return nil
+	}
+	operatorID := normalizeOperatorID(desc.OperatorID)
+	if operatorID == "" {
+		return nil
+	}
+	for key, existing := range s.providerRelays {
+		if key == relayKey {
+			continue
+		}
+		if normalizeOperatorID(existing.OperatorID) != operatorID {
+			continue
+		}
+		if strings.TrimSpace(existing.Role) == strings.TrimSpace(desc.Role) {
+			continue
+		}
+		return fmt.Errorf("provider split-role policy violation")
+	}
 	return nil
 }
 
