@@ -25,7 +25,7 @@ Usage:
   ./scripts/easy_node.sh server-status
   ./scripts/easy_node.sh server-logs
   ./scripts/easy_node.sh server-down
-  ./scripts/easy_node.sh client-test --directory-urls URL[,URL...] --issuer-url URL --entry-url URL --exit-url URL [--min-sources N] [--exit-country CC] [--exit-region REGION] [--timeout-sec N]
+  ./scripts/easy_node.sh client-test --directory-urls URL[,URL...] --issuer-url URL --entry-url URL --exit-url URL [--min-sources N] [--exit-country CC] [--exit-region REGION] [--timeout-sec N] [--distinct-operators [0|1]]
   ./scripts/easy_node.sh three-machine-validate --directory-a URL --directory-b URL --issuer-url URL --entry-url URL --exit-url URL [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--exit-country CC] [--exit-region REGION]
   ./scripts/easy_node.sh machine-a-test [--public-host HOST] [--report-file PATH]
   ./scripts/easy_node.sh machine-b-test --peer-directory-a URL [--public-host HOST] [--min-operators N] [--federation-timeout-sec N] [--report-file PATH]
@@ -285,6 +285,7 @@ client_test() {
   local timeout_sec="35"
   local build_timeout_sec="${EASY_NODE_CLIENT_BUILD_TIMEOUT_SEC:-180}"
   local force_build="${EASY_NODE_CLIENT_FORCE_BUILD:-0}"
+  local require_distinct_operators="${CLIENT_REQUIRE_DISTINCT_OPERATORS:-0}"
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -320,6 +321,15 @@ client_test() {
         timeout_sec="${2:-}"
         shift 2
         ;;
+      --distinct-operators)
+        if [[ "${2:-}" == "0" || "${2:-}" == "1" ]]; then
+          require_distinct_operators="${2:-}"
+          shift 2
+        else
+          require_distinct_operators="1"
+          shift
+        fi
+        ;;
       *)
         echo "unknown arg for client-test: $1"
         exit 2
@@ -329,6 +339,10 @@ client_test() {
 
   if [[ -z "$directory_urls" || -z "$issuer_url" || -z "$entry_url" || -z "$exit_url" ]]; then
     echo "client-test requires --directory-urls --issuer-url --entry-url --exit-url"
+    exit 2
+  fi
+  if [[ "$require_distinct_operators" != "0" && "$require_distinct_operators" != "1" ]]; then
+    echo "client-test requires CLIENT_REQUIRE_DISTINCT_OPERATORS or --distinct-operators to be 0 or 1"
     exit 2
   fi
 
@@ -400,6 +414,7 @@ EOF_CLIENT
     -e "ENTRY_URL=$entry_url"
     -e "EXIT_CONTROL_URL=$exit_url"
     -e "CLIENT_BOOTSTRAP_INTERVAL_SEC=2"
+    -e "CLIENT_REQUIRE_DISTINCT_OPERATORS=$require_distinct_operators"
   )
   if [[ -n "$exit_country" ]]; then
     run_cmd+=(-e "CLIENT_EXIT_COUNTRY=$exit_country")
