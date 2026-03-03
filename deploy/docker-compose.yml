@@ -7,11 +7,15 @@ services:
     environment:
       DIRECTORY_ADDR: "0.0.0.0:8081"
       DIRECTORY_PUBLIC_URL: "${DIRECTORY_PUBLIC_URL:-http://directory:8081}"
-      DIRECTORY_OPERATOR_ID: "op-main"
+      DIRECTORY_OPERATOR_ID: "${DIRECTORY_OPERATOR_ID:-op-main}"
       ENTRY_URL: "${ENTRY_URL_PUBLIC:-http://entry-exit:8083}"
       EXIT_CONTROL_URL: "${EXIT_CONTROL_URL_PUBLIC:-http://entry-exit:8084}"
       ENTRY_ENDPOINT: "${ENTRY_ENDPOINT_PUBLIC:-entry-exit:51820}"
       EXIT_ENDPOINT: "${EXIT_ENDPOINT_PUBLIC:-entry-exit:51821}"
+      DIRECTORY_PEERS: "${DIRECTORY_PEERS:-}"
+      DIRECTORY_SYNC_SEC: "${DIRECTORY_SYNC_SEC:-0}"
+      DIRECTORY_GOSSIP_SEC: "${DIRECTORY_GOSSIP_SEC:-0}"
+      DIRECTORY_GOSSIP_FANOUT: "${DIRECTORY_GOSSIP_FANOUT:-2}"
       DIRECTORY_PRIVATE_KEY_FILE: "/app/data/directory_ed25519.key"
     volumes:
       - ./data/directory:/app/data
