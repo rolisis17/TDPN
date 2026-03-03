@@ -8,6 +8,8 @@ services:
       DIRECTORY_ADDR: "0.0.0.0:8081"
       DIRECTORY_PUBLIC_URL: "${DIRECTORY_PUBLIC_URL:-http://directory:8081}"
       DIRECTORY_OPERATOR_ID: "${DIRECTORY_OPERATOR_ID:-op-main}"
+      ENTRY_RELAY_ID: "${ENTRY_RELAY_ID:-entry-local-1}"
+      EXIT_RELAY_ID: "${EXIT_RELAY_ID:-exit-local-1}"
       ENTRY_URL: "${ENTRY_URL_PUBLIC:-http://entry-exit:8083}"
       EXIT_CONTROL_URL: "${EXIT_CONTROL_URL_PUBLIC:-http://entry-exit:8084}"
       ENTRY_ENDPOINT: "${ENTRY_ENDPOINT_PUBLIC:-entry-exit:51820}"

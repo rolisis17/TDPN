@@ -127,6 +127,13 @@ write_server_env() {
   local operator_id="$2"
   local issuer_admin_token="$3"
   local peer_dirs="$4"
+  local relay_suffix
+  relay_suffix="$(printf '%s' "$operator_id" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9-' '-')"
+  relay_suffix="${relay_suffix#-}"
+  relay_suffix="${relay_suffix%-}"
+  if [[ -z "$relay_suffix" ]]; then
+    relay_suffix="node"
+  fi
 
   cat >"$SERVER_ENV_FILE" <<EOF_ENV
 DIRECTORY_PUBLIC_URL=http://${public_host}:8081
@@ -135,6 +142,8 @@ EXIT_CONTROL_URL_PUBLIC=http://${public_host}:8084
 ENTRY_ENDPOINT_PUBLIC=${public_host}:51820
 EXIT_ENDPOINT_PUBLIC=${public_host}:51821
 DIRECTORY_OPERATOR_ID=${operator_id}
+ENTRY_RELAY_ID=entry-${relay_suffix}
+EXIT_RELAY_ID=exit-${relay_suffix}
 ISSUER_ADMIN_TOKEN=${issuer_admin_token}
 EOF_ENV
 

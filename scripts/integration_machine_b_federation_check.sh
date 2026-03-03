@@ -83,6 +83,16 @@ extract_operators() {
     sort -u
 }
 
+extract_relay_ids() {
+  local payload="$1"
+  local matches
+  matches="$(printf '%s\n' "$payload" | rg -o '"relay_id":"[^"]+"' || true)"
+  printf '%s\n' "$matches" |
+    sed -E 's/^"relay_id":"([^"]+)"$/\1/' |
+    awk 'NF > 0' |
+    sort -u
+}
+
 operator_count_from_url() {
   local base_url
   base_url="$(trim_url "$1")"
@@ -214,9 +224,21 @@ if [[ "$federated" -ne 1 ]]; then
   echo "--- machine A operator ids (via --peer-directory-a) ---"
   peer_payload="$(curl -fsS "${peer_directory_a}/v1/relays" 2>/dev/null || true)"
   extract_operators "$peer_payload" || true
+  local_relay_ids="$(extract_relay_ids "$payload" || true)"
+  peer_relay_ids="$(extract_relay_ids "$peer_payload" || true)"
+  relay_overlap="$(
+    comm -12 \
+      <(printf '%s\n' "$local_relay_ids" | awk 'NF > 0' | sort -u) \
+      <(printf '%s\n' "$peer_relay_ids" | awk 'NF > 0' | sort -u) || true
+  )"
   if [[ "$local_ops" =~ ^[0-9]+$ ]] && [[ "$peer_ops" =~ ^[0-9]+$ ]] && ((local_ops >= 1)) && ((peer_ops >= 1)); then
     echo "hint: federation may be missing from machine B directory config (DIRECTORY_PEERS),"
     echo "      or machine A and machine B may be using the same DIRECTORY_OPERATOR_ID."
+  fi
+  if [[ -n "$relay_overlap" ]]; then
+    echo "hint: machine A and machine B share relay_id values:"
+    printf '%s\n' "$relay_overlap"
+    echo "      set unique ENTRY_RELAY_ID/EXIT_RELAY_ID per machine (easy_node now auto-derives these from operator id)."
   fi
   exit 1
 fi
