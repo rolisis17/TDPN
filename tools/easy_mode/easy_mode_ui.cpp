@@ -618,7 +618,8 @@ void quickServerConnect(const std::string &root, const std::string &script, ABHo
       std::string count = readLine("How many invite keys", "1");
       std::ostringstream inviteCmd;
       inviteCmd << shellEscape(script) << " invite-generate"
-                << " --count " << shellEscape(count);
+                << " --count " << shellEscape(count)
+                << " --issuer-url " << shellEscape("http://127.0.0.1:8082");
       runCommand(inviteCmd.str());
     }
   }

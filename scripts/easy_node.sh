@@ -955,6 +955,12 @@ server_env_value() {
 }
 
 default_issuer_url_for_invites() {
+  # Prefer local issuer endpoint when this command runs on a server machine.
+  if curl -fsS --connect-timeout 2 --max-time 4 "http://127.0.0.1:8082/v1/pubkeys" >/dev/null 2>&1; then
+    echo "http://127.0.0.1:8082"
+    return
+  fi
+
   local issuer_url=""
   local directory_public_url=""
   local public_host=""
@@ -1046,6 +1052,7 @@ invite_generate() {
   local generated=0
   local attempts=0
   local max_attempts=$((count * 8))
+  local last_error=""
   if ((max_attempts < 8)); then
     max_attempts=8
   fi
@@ -1055,23 +1062,45 @@ invite_generate() {
     if ((attempts > max_attempts)); then
       echo "invite-generate failed: could not create requested keys after $max_attempts attempts"
       echo "check issuer URL/admin token: issuer=$issuer_url"
+      if [[ -n "$last_error" ]]; then
+        echo "last error:"
+        echo "$last_error"
+      fi
       exit 1
     fi
     key="${prefix}-$(random_token | tr -cd 'a-zA-Z0-9' | tr '[:upper:]' '[:lower:]' | head -c 22)"
     if [[ -z "$key" ]]; then
       continue
     fi
-    if "$upsert_script" \
+    local upsert_out=""
+    set +e
+    upsert_out="$("$upsert_script" \
       --issuer-url "$issuer_url" \
       --admin-token "$admin_token" \
       --subject "$key" \
       --kind "client" \
-      --tier "$tier" >/dev/null 2>&1; then
+      --tier "$tier" 2>&1)"
+    local upsert_rc=$?
+    set -e
+    if [[ $upsert_rc -eq 0 ]]; then
       generated=$((generated + 1))
       echo "$key"
+    else
+      last_error="$upsert_out"
+      if [[ "$upsert_out" == *"401"* || "$upsert_out" == *"403"* ]]; then
+        echo "invite-generate failed: issuer rejected admin token (issuer=$issuer_url)"
+        if [[ -n "$last_error" ]]; then
+          echo "$last_error"
+        fi
+        exit 1
+      fi
     fi
   done
   echo "invite keys generated: $generated (issuer=$issuer_url)"
+  if [[ -n "$last_error" && "$generated" -lt "$count" ]]; then
+    echo "last invite-generate error:"
+    echo "$last_error"
+  fi
 }
 
 invite_check() {
