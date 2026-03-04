@@ -94,7 +94,7 @@ std::string detectRepoRoot() {
 
 void showThreeMachineGuide() {
   std::cout << "\n3-machine quick flow\n";
-  std::cout << "1) Machine A: server-up with A public IP/host and --beta-profile\n";
+  std::cout << "1) Machine A: server-up with A public IP/host and --beta-profile (IDs auto-generated)\n";
   std::cout << "2) Machine B: server-up with B public IP/host, --peer-directories=http://A:8081 and --beta-profile\n";
   std::cout << "3) Machine A (optional): rerun server-up with --peer-directories=http://B:8081\n";
   std::cout << "4) Machine C: client-test with --directory-urls=http://A:8081,http://B:8081 --beta-profile --distinct-operators\n";
@@ -636,17 +636,14 @@ int main() {
       std::string role = readLine("Server role for this machine (A/B/custom)", "A");
       std::string host;
       std::string peersDefault;
-      std::string operatorDefault;
       if (!role.empty() && (role[0] == 'A' || role[0] == 'a')) {
         host = hosts.aHost;
-        operatorDefault = "op-a";
         bool federateWithB = parseYesNo(readLine("Peer with Machine B directory? (Y/n)", "y"), true);
         if (federateWithB && !hosts.bHost.empty()) {
           peersDefault = endpointFromHost(hosts.bHost, 8081);
         }
       } else if (!role.empty() && (role[0] == 'B' || role[0] == 'b')) {
         host = hosts.bHost;
-        operatorDefault = "op-b";
         if (!hosts.aHost.empty()) {
           peersDefault = endpointFromHost(hosts.aHost, 8081);
         }
@@ -654,7 +651,8 @@ int main() {
         host = readLine("Public host/IP for this server machine (blank=auto-detect)");
       }
       host = normalizePublicHostInput(readLine("Public host/IP for this server machine (blank=auto-detect)", host));
-      std::string operatorId = trim(readLine("Operator ID", operatorDefault));
+      std::string operatorId = trim(readLine("Operator ID (blank=auto unique)", ""));
+      std::string issuerId = trim(readLine("Issuer ID (blank=auto unique)", ""));
       std::string adminToken = readLine("Issuer admin token (blank=auto)", "");
       bool betaProfile = parseYesNo(readLine("Enable beta profile defaults? (Y/n)", "y"), true);
       std::string peers = normalizeEndpointCSV(readLine("Peer directory URLs CSV (optional, for federation)", peersDefault), 8081);
@@ -667,6 +665,9 @@ int main() {
       }
       if (!operatorId.empty()) {
         cmd << " --operator-id " << shellEscape(operatorId);
+      }
+      if (!issuerId.empty()) {
+        cmd << " --issuer-id " << shellEscape(issuerId);
       }
       if (!adminToken.empty()) {
         cmd << " --issuer-admin-token " << shellEscape(adminToken);

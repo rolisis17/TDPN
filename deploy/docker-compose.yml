@@ -18,7 +18,8 @@ services:
       DIRECTORY_SYNC_SEC: "${DIRECTORY_SYNC_SEC:-0}"
       DIRECTORY_GOSSIP_SEC: "${DIRECTORY_GOSSIP_SEC:-0}"
       DIRECTORY_GOSSIP_FANOUT: "${DIRECTORY_GOSSIP_FANOUT:-2}"
-      DIRECTORY_PRIVATE_KEY_FILE: "/app/data/directory_ed25519.key"
+      DIRECTORY_PRIVATE_KEY_FILE: "${DIRECTORY_PRIVATE_KEY_FILE:-/app/data/directory_ed25519.key}"
+      DIRECTORY_PREVIOUS_PUBKEYS_FILE: "${DIRECTORY_PREVIOUS_PUBKEYS_FILE:-/app/data/directory_previous_pubkeys.txt}"
     volumes:
       - ./data/directory:/app/data
     ports:
@@ -32,13 +33,16 @@ services:
     command: ["--issuer"]
     environment:
       ISSUER_ADDR: "0.0.0.0:8082"
-      ISSUER_ID: "issuer-main"
-      ISSUER_PRIVATE_KEY_FILE: "/app/data/issuer_ed25519.key"
-      ISSUER_PREVIOUS_PUBKEYS_FILE: "/app/data/issuer_previous_pubkeys.txt"
-      ISSUER_EPOCHS_FILE: "/app/data/issuer_epochs.json"
-      ISSUER_SUBJECTS_FILE: "/app/data/issuer_subjects.json"
-      ISSUER_REVOCATIONS_FILE: "/app/data/issuer_revocations.json"
-      ISSUER_ADMIN_TOKEN: "change-me"
+      ISSUER_ID: "${ISSUER_ID:-issuer-main}"
+      ISSUER_PRIVATE_KEY_FILE: "${ISSUER_PRIVATE_KEY_FILE:-/app/data/issuer_ed25519.key}"
+      ISSUER_PREVIOUS_PUBKEYS_FILE: "${ISSUER_PREVIOUS_PUBKEYS_FILE:-/app/data/issuer_previous_pubkeys.txt}"
+      ISSUER_EPOCHS_FILE: "${ISSUER_EPOCHS_FILE:-/app/data/issuer_epochs.json}"
+      ISSUER_SUBJECTS_FILE: "${ISSUER_SUBJECTS_FILE:-/app/data/issuer_subjects.json}"
+      ISSUER_REVOCATIONS_FILE: "${ISSUER_REVOCATIONS_FILE:-/app/data/issuer_revocations.json}"
+      ISSUER_ANON_REVOCATIONS_FILE: "${ISSUER_ANON_REVOCATIONS_FILE:-/app/data/issuer_anon_revocations.json}"
+      ISSUER_ANON_DISPUTES_FILE: "${ISSUER_ANON_DISPUTES_FILE:-/app/data/issuer_anon_disputes.json}"
+      ISSUER_AUDIT_FILE: "${ISSUER_AUDIT_FILE:-/app/data/issuer_audit.json}"
+      ISSUER_ADMIN_TOKEN: "${ISSUER_ADMIN_TOKEN:-change-me}"
     volumes:
       - ./data/issuer:/app/data
     ports:

@@ -280,6 +280,17 @@ issuer_payload_has_keys() {
   fi
 }
 
+issuer_pubkeys_from_payload() {
+  local payload="$1"
+  printf '%s\n' "$payload" |
+    rg -o '"pub_keys"[[:space:]]*:[[:space:]]*\[[^]]*\]' |
+    sed -E 's/^.*\[(.*)\].*$/\1/' |
+    tr ',' '\n' |
+    sed -E 's/^[[:space:]]*"([^"]+)"[[:space:]]*$/\1/' |
+    awk 'NF > 0' |
+    sort -u
+}
+
 directory_a=""
 directory_b=""
 issuer_url=""
@@ -633,7 +644,7 @@ if [[ "$require_issuer_quorum" == "1" ]]; then
   wait_http_ok "${issuer_b_url}/v1/pubkeys" "issuer B" "$health_attempts"
 
   issuer_quorum_ok=0
-  echo "[issuer-quorum] waiting for issuer identity floor: min_operators=$min_operators timeout=${federation_timeout_sec}s"
+  echo "[issuer-quorum] waiting for issuer identity+key floor: min_operators=$min_operators min_distinct_keys=2 timeout=${federation_timeout_sec}s"
   for _ in $(seq 1 "$federation_timeout_sec"); do
     issuer_a_payload="$(curl -fsS "${issuer_a_url}/v1/pubkeys" 2>/dev/null || true)"
     issuer_b_payload="$(curl -fsS "${issuer_b_url}/v1/pubkeys" 2>/dev/null || true)"
@@ -641,6 +652,13 @@ if [[ "$require_issuer_quorum" == "1" ]]; then
     issuer_b_id="$(issuer_id_from_pubkeys_payload "$issuer_b_payload")"
     issuer_a_keys="$(issuer_payload_has_keys "$issuer_a_payload")"
     issuer_b_keys="$(issuer_payload_has_keys "$issuer_b_payload")"
+    issuer_key_count="$(
+      printf '%s\n%s\n' "$(issuer_pubkeys_from_payload "$issuer_a_payload")" "$(issuer_pubkeys_from_payload "$issuer_b_payload")" |
+        awk 'NF > 0' |
+        sort -u |
+        wc -l |
+        tr -d ' '
+    )"
     issuer_ops="$(
       printf '%s\n%s\n' "$issuer_a_id" "$issuer_b_id" |
         awk 'NF > 0' |
@@ -649,11 +667,13 @@ if [[ "$require_issuer_quorum" == "1" ]]; then
         tr -d ' '
     )"
     if (( _ == 1 || _ % 10 == 0 )); then
-      echo "[issuer-quorum] progress second=$_/$federation_timeout_sec issuer_ops=${issuer_ops:-0} a_keys=$issuer_a_keys b_keys=$issuer_b_keys a_id=${issuer_a_id:-<none>} b_id=${issuer_b_id:-<none>}"
+      echo "[issuer-quorum] progress second=$_/$federation_timeout_sec issuer_ops=${issuer_ops:-0} issuer_keys=${issuer_key_count:-0} a_keys=$issuer_a_keys b_keys=$issuer_b_keys a_id=${issuer_a_id:-<none>} b_id=${issuer_b_id:-<none>}"
     fi
     if [[ "$issuer_a_keys" == "1" && "$issuer_b_keys" == "1" ]] &&
       [[ "$issuer_ops" =~ ^[0-9]+$ ]] &&
-      ((issuer_ops >= min_operators)); then
+      [[ "$issuer_key_count" =~ ^[0-9]+$ ]] &&
+      ((issuer_ops >= min_operators)) &&
+      ((issuer_key_count >= 2)); then
       issuer_quorum_ok=1
       break
     fi
@@ -661,14 +681,23 @@ if [[ "$require_issuer_quorum" == "1" ]]; then
   done
 
   if [[ "$issuer_quorum_ok" -ne 1 ]]; then
-    echo "issuer quorum check failed: identity floor not reached on issuer feeds"
+    echo "issuer quorum check failed: identity/key floor not reached on issuer feeds"
     echo "required min issuer operators: $min_operators"
+    echo "required min distinct issuer keys: 2"
+    echo "observed issuer operators: ${issuer_ops:-0}"
+    echo "observed distinct issuer keys: ${issuer_key_count:-0}"
     echo "issuer A url: $issuer_a_url id=${issuer_a_id:-<none>} has_keys=${issuer_a_keys:-0}"
     echo "issuer B url: $issuer_b_url id=${issuer_b_id:-<none>} has_keys=${issuer_b_keys:-0}"
     echo "--- issuer A payload ---"
     printf '%s\n' "${issuer_a_payload:-}"
     echo "--- issuer B payload ---"
     printf '%s\n' "${issuer_b_payload:-}"
+    if [[ "${issuer_a_id:-}" == "${issuer_b_id:-}" ]]; then
+      echo "hint: machine A and B are sharing the same ISSUER_ID; set unique ISSUER_ID/--issuer-id per server."
+    fi
+    if [[ "${issuer_key_count:-0}" =~ ^[0-9]+$ ]] && ((issuer_key_count < 2)); then
+      echo "hint: machine A and B appear to share issuer key material; regenerate issuer data on one machine and restart server-up."
+    fi
     exit 1
   fi
 fi

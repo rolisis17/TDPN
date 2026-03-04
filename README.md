@@ -179,6 +179,10 @@ Script-only easy mode:
   --distinct-operators 1
 ```
 
+`server-up` note:
+- if `--operator-id` / `--issuer-id` are omitted, unique IDs are auto-generated and persisted in `deploy/data/easy_node_identity.conf`.
+- directory/issuer signing key file names are derived from those IDs to avoid accidental key reuse across machines.
+
 3-machine test guide:
 - `docs/easy-3-machine-test.md`
 - `docs/beta-playbook.md` (frozen closed-beta command set)

@@ -2,6 +2,11 @@
 
 This path is for fast manual testing with minimal setup.
 
+Identity defaults:
+- `server-up` auto-generates unique `operator_id` and `issuer_id` when not provided.
+- IDs are persisted per machine in `deploy/data/easy_node_identity.conf`.
+- Relay IDs and signing key files are derived from those IDs, so machine A/B do not collide by default.
+
 ## 1) Install the easy launcher
 
 From repo root:

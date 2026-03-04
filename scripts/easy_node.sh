@@ -21,7 +21,7 @@ usage() {
   cat <<'USAGE'
 Usage:
   ./scripts/easy_node.sh check
-  ./scripts/easy_node.sh server-up [--public-host HOST] [--operator-id ID] [--issuer-admin-token TOKEN] [--peer-directories URLS] [--bootstrap-directory URL] [--beta-profile [0|1]]
+  ./scripts/easy_node.sh server-up [--public-host HOST] [--operator-id ID] [--issuer-id ID] [--issuer-admin-token TOKEN] [--peer-directories URLS] [--bootstrap-directory URL] [--beta-profile [0|1]]
   ./scripts/easy_node.sh server-status
   ./scripts/easy_node.sh server-logs
   ./scripts/easy_node.sh server-down
@@ -252,6 +252,34 @@ merge_url_csv() {
   printf '%s\n' "$combined" | paste -sd, -
 }
 
+split_csv_lines() {
+  local csv="$1"
+  printf '%s' "$csv" |
+    tr ',' '\n' |
+    sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//' |
+    awk 'NF > 0'
+}
+
+filter_peer_dirs_excluding_host() {
+  local peer_dirs="$1"
+  local local_host="$2"
+  local out=""
+  local peer
+  local peer_host
+  while IFS= read -r peer; do
+    [[ -z "$peer" ]] && continue
+    peer_host="$(host_from_url "$peer")"
+    if [[ -n "$local_host" && -n "$peer_host" && "$peer_host" == "$local_host" ]]; then
+      continue
+    fi
+    if [[ -n "$out" ]]; then
+      out+=","
+    fi
+    out+="$peer"
+  done < <(split_csv_lines "$peer_dirs")
+  echo "$out"
+}
+
 detect_local_host() {
   local candidate=""
   if command -v tailscale >/dev/null 2>&1; then
@@ -291,6 +319,22 @@ MACHINE_B_HOST=$host_b
 EOF_HOSTS
 }
 
+identity_config_file() {
+  echo "$DEPLOY_DIR/data/easy_node_identity.conf"
+}
+
+sanitize_id_component() {
+  local raw="$1"
+  local out
+  out="$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9-' '-')"
+  out="${out#-}"
+  out="${out%-}"
+  if [[ -z "$out" ]]; then
+    out="node"
+  fi
+  echo "$out"
+}
+
 random_token() {
   if command -v openssl >/dev/null 2>&1; then
     openssl rand -hex 16
@@ -298,6 +342,99 @@ random_token() {
   fi
   # Fallback token when openssl is unavailable.
   date +%s%N
+}
+
+random_id_suffix() {
+  local token
+  token="$(random_token | tr -cd 'a-zA-Z0-9' | tr '[:upper:]' '[:lower:]' | head -c 10)"
+  if [[ -z "$token" ]]; then
+    token="$(date +%s%N | tail -c 11)"
+  fi
+  echo "$token"
+}
+
+identity_value() {
+  local file="$1"
+  local key="$2"
+  if [[ ! -f "$file" ]]; then
+    return 0
+  fi
+  awk -F= -v k="$key" '$1 == k {print substr($0, index($0, "=") + 1); exit}' "$file"
+}
+
+write_identity_config() {
+  local operator_id="$1"
+  local issuer_id="$2"
+  local file
+  file="$(identity_config_file)"
+  mkdir -p "$(dirname "$file")"
+  cat >"$file" <<EOF_ID
+EASY_NODE_OPERATOR_ID=${operator_id}
+EASY_NODE_ISSUER_ID=${issuer_id}
+EOF_ID
+}
+
+directory_has_operator_id() {
+  local directory_url="$1"
+  local operator_id="$2"
+  local payload
+  payload="$(curl -fsS --connect-timeout 2 --max-time 4 "$(trim_url "$directory_url")/v1/relays" 2>/dev/null || true)"
+  if [[ -z "$payload" ]]; then
+    return 1
+  fi
+  if printf '%s\n' "$payload" |
+    rg -o '"(operator_id|operator|origin_operator)":"[^"]+"' |
+    sed -E 's/^"(operator_id|operator|origin_operator)":"([^"]+)"$/\2/' |
+    awk -v target="$operator_id" '$0 == target {found=1} END {exit(found ? 0 : 1)}'; then
+    return 0
+  fi
+  return 1
+}
+
+issuer_id_from_url() {
+  local issuer_url="$1"
+  local payload
+  payload="$(curl -fsS --connect-timeout 2 --max-time 4 "$(trim_url "$issuer_url")/v1/pubkeys" 2>/dev/null || true)"
+  if [[ -z "$payload" ]]; then
+    return 0
+  fi
+  printf '%s\n' "$payload" |
+    rg -o '"issuer":"[^"]+"' |
+    head -n 1 |
+    sed -E 's/^"issuer":"([^"]+)"$/\1/'
+}
+
+operator_id_conflicts_with_peers() {
+  local operator_id="$1"
+  local peer_dirs="$2"
+  local peer
+  while IFS= read -r peer; do
+    [[ -z "$peer" ]] && continue
+    if directory_has_operator_id "$peer" "$operator_id"; then
+      return 0
+    fi
+  done < <(split_csv_lines "$peer_dirs")
+  return 1
+}
+
+issuer_id_conflicts_with_peers() {
+  local issuer_id="$1"
+  local peer_dirs="$2"
+  local peer
+  local peer_host
+  local peer_issuer_url
+  local peer_issuer_id
+  while IFS= read -r peer; do
+    [[ -z "$peer" ]] && continue
+    peer_host="$(host_from_url "$peer")"
+    [[ -z "$peer_host" ]] && continue
+    peer_issuer_url="$(url_from_host_port "$peer_host" 8082)"
+    peer_issuer_id="$(issuer_id_from_url "$peer_issuer_url")"
+    if [[ -n "$peer_issuer_id" && "$peer_issuer_id" == "$issuer_id" ]]; then
+      return 0
+    fi
+  done < <(split_csv_lines "$peer_dirs")
+  return 1
 }
 
 ensure_deps_or_die() {
@@ -323,16 +460,17 @@ compose_server() {
 write_server_env() {
   local public_host="$1"
   local operator_id="$2"
-  local issuer_admin_token="$3"
-  local peer_dirs="$4"
-  local beta_profile="$5"
+  local issuer_id="$3"
+  local issuer_admin_token="$4"
+  local peer_dirs="$5"
+  local beta_profile="$6"
   local relay_suffix
-  relay_suffix="$(printf '%s' "$operator_id" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9-' '-')"
-  relay_suffix="${relay_suffix#-}"
-  relay_suffix="${relay_suffix%-}"
-  if [[ -z "$relay_suffix" ]]; then
-    relay_suffix="node"
+  local issuer_suffix
+  relay_suffix="$(sanitize_id_component "$operator_id")"
+  if [[ -z "$issuer_id" ]]; then
+    issuer_id="issuer-$(random_id_suffix)"
   fi
+  issuer_suffix="$(sanitize_id_component "$issuer_id")"
 
   cat >"$SERVER_ENV_FILE" <<EOF_ENV
 DIRECTORY_PUBLIC_URL=http://${public_host}:8081
@@ -343,6 +481,17 @@ EXIT_ENDPOINT_PUBLIC=${public_host}:51821
 DIRECTORY_OPERATOR_ID=${operator_id}
 ENTRY_RELAY_ID=entry-${relay_suffix}
 EXIT_RELAY_ID=exit-${relay_suffix}
+DIRECTORY_PRIVATE_KEY_FILE=/app/data/directory_${relay_suffix}_ed25519.key
+DIRECTORY_PREVIOUS_PUBKEYS_FILE=/app/data/directory_${relay_suffix}_previous_pubkeys.txt
+ISSUER_ID=${issuer_id}
+ISSUER_PRIVATE_KEY_FILE=/app/data/issuer_${issuer_suffix}_ed25519.key
+ISSUER_PREVIOUS_PUBKEYS_FILE=/app/data/issuer_${issuer_suffix}_previous_pubkeys.txt
+ISSUER_EPOCHS_FILE=/app/data/issuer_${issuer_suffix}_epochs.json
+ISSUER_SUBJECTS_FILE=/app/data/issuer_${issuer_suffix}_subjects.json
+ISSUER_REVOCATIONS_FILE=/app/data/issuer_${issuer_suffix}_revocations.json
+ISSUER_ANON_REVOCATIONS_FILE=/app/data/issuer_${issuer_suffix}_anon_revocations.json
+ISSUER_ANON_DISPUTES_FILE=/app/data/issuer_${issuer_suffix}_anon_disputes.json
+ISSUER_AUDIT_FILE=/app/data/issuer_${issuer_suffix}_audit.json
 ISSUER_ADMIN_TOKEN=${issuer_admin_token}
 EOF_ENV
 
@@ -385,6 +534,9 @@ looks_like_loopback_url() {
 server_up() {
   local public_host=""
   local operator_id=""
+  local operator_id_explicit="0"
+  local issuer_id=""
+  local issuer_id_explicit="0"
   local issuer_admin_token=""
   local peer_dirs=""
   local bootstrap_directory=""
@@ -398,6 +550,12 @@ server_up() {
         ;;
       --operator-id)
         operator_id="${2:-}"
+        operator_id_explicit="1"
+        shift 2
+        ;;
+      --issuer-id)
+        issuer_id="${2:-}"
+        issuer_id_explicit="1"
         shift 2
         ;;
       --issuer-admin-token)
@@ -452,16 +610,73 @@ server_up() {
     fi
   fi
 
+  local local_host
+  local_host="$(host_from_hostport "$public_host")"
+  if [[ -n "$peer_dirs" ]]; then
+    peer_dirs="$(filter_peer_dirs_excluding_host "$peer_dirs" "$local_host")"
+  fi
+
   ensure_deps_or_die
 
+  local identity_file
+  local stored_operator_id
+  local stored_issuer_id
+  identity_file="$(identity_config_file)"
+  stored_operator_id="$(identity_value "$identity_file" "EASY_NODE_OPERATOR_ID")"
+  stored_issuer_id="$(identity_value "$identity_file" "EASY_NODE_ISSUER_ID")"
+
   if [[ -z "$operator_id" ]]; then
-    operator_id="op-${HOSTNAME:-node}"
+    if [[ -n "$stored_operator_id" ]]; then
+      operator_id="$stored_operator_id"
+    else
+      operator_id="op-$(random_id_suffix)"
+    fi
+  fi
+  if [[ -z "$issuer_id" ]]; then
+    if [[ -n "$stored_issuer_id" ]]; then
+      issuer_id="$stored_issuer_id"
+    else
+      issuer_id="issuer-$(random_id_suffix)"
+    fi
   fi
   if [[ -z "$issuer_admin_token" ]]; then
     issuer_admin_token="$(random_token)"
   fi
 
-  write_server_env "$public_host" "$operator_id" "$issuer_admin_token" "$peer_dirs" "$beta_profile"
+  if [[ -n "$peer_dirs" ]]; then
+    local operator_attempts=0
+    while operator_id_conflicts_with_peers "$operator_id" "$peer_dirs"; do
+      if [[ "$operator_id_explicit" == "1" ]]; then
+        echo "server-up refused: --operator-id '$operator_id' already exists on peer directories."
+        echo "choose a unique operator id or omit --operator-id for automatic unique generation."
+        exit 2
+      fi
+      operator_id="op-$(random_id_suffix)"
+      operator_attempts=$((operator_attempts + 1))
+      if ((operator_attempts >= 8)); then
+        echo "server-up could not generate a unique operator id after ${operator_attempts} attempts."
+        exit 1
+      fi
+    done
+
+    local issuer_attempts=0
+    while issuer_id_conflicts_with_peers "$issuer_id" "$peer_dirs"; do
+      if [[ "$issuer_id_explicit" == "1" ]]; then
+        echo "server-up refused: --issuer-id '$issuer_id' already exists on peer directories."
+        echo "choose a unique issuer id or omit --issuer-id for automatic unique generation."
+        exit 2
+      fi
+      issuer_id="issuer-$(random_id_suffix)"
+      issuer_attempts=$((issuer_attempts + 1))
+      if ((issuer_attempts >= 8)); then
+        echo "server-up could not generate a unique issuer id after ${issuer_attempts} attempts."
+        exit 1
+      fi
+    done
+  fi
+
+  write_identity_config "$operator_id" "$issuer_id"
+  write_server_env "$public_host" "$operator_id" "$issuer_id" "$issuer_admin_token" "$peer_dirs" "$beta_profile"
 
   compose_server up -d --build directory issuer entry-exit
 
@@ -482,6 +697,8 @@ server_up() {
   echo "server stack started"
   echo "env file: $SERVER_ENV_FILE"
   echo "operator_id: $operator_id"
+  echo "issuer_id: $issuer_id"
+  echo "identity file: $identity_file"
   echo "issuer_admin_token: $issuer_admin_token"
   if [[ "$beta_profile" == "1" ]]; then
     echo "beta profile: enabled (quorum and anti-concentration defaults applied)"
@@ -493,8 +710,6 @@ server_up() {
   echo "  curl http://${public_host}:8084/v1/health"
 
   if [[ -n "$peer_dirs" ]]; then
-    local local_host
-    local_host="$(host_from_hostport "$public_host")"
     local bootstrap_host
     bootstrap_host="$(host_from_url "$(first_csv_item "$peer_dirs")")"
     if [[ -n "$local_host" && -n "$bootstrap_host" && "$local_host" != "$bootstrap_host" ]]; then
