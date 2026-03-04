@@ -6,6 +6,9 @@ Identity defaults:
 - `server-up` auto-generates unique `operator_id` and `issuer_id` when not provided.
 - IDs are persisted per machine in `deploy/data/easy_node_identity.conf`.
 - Relay IDs and signing key files are derived from those IDs, so machine A/B do not collide by default.
+- Optional invite-only mode: `server-up --client-allowlist 1 --allow-anon-cred 0` plus `./scripts/beta_subject_upsert.sh` lets only allowlisted client subjects receive tokens.
+- Batch invite-only onboarding: `./scripts/beta_subject_batch_upsert.sh --issuer-url <ISSUER_URL> --admin-token <TOKEN> --csv invited_clients.csv`.
+- In invite-only mode, pass `--subject <CLIENT_ID>` to `client-test`/`machine-c-test`.
 
 ## 1) Install the easy launcher
 
@@ -168,6 +171,27 @@ Soak test from machine C (optional, recommended before closed beta):
   --pause-sec 5 \
   --beta-profile 1 \
   --distinct-operators 1
+```
+
+Single-command pilot bundle from machine C (validate + soak + snapshots):
+
+```bash
+./scripts/beta_pilot_runbook.sh \
+  --directory-a http://A_PUBLIC_IP_OR_DNS:8081 \
+  --directory-b http://B_PUBLIC_IP_OR_DNS:8081 \
+  --issuer-url http://A_PUBLIC_IP_OR_DNS:8082 \
+  --entry-url http://A_PUBLIC_IP_OR_DNS:8083 \
+  --exit-url http://A_PUBLIC_IP_OR_DNS:8084 \
+  --subject client-alice \
+  --rounds 10 \
+  --pause-sec 5 \
+  --beta-profile 1
+```
+
+Optional client path diversity tuning on machine C:
+
+```bash
+export CLIENT_ENTRY_ROTATION_SEC=15
 ```
 
 ## 4) Ports to open on server machines

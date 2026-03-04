@@ -200,26 +200,6 @@ std::string normalizeEndpointURL(const std::string &raw, int defaultPort) {
   return "http://" + v;
 }
 
-std::string normalizeEndpointCSV(const std::string &raw, int defaultPort) {
-  std::stringstream ss(raw);
-  std::string item;
-  std::vector<std::string> out;
-  while (std::getline(ss, item, ',')) {
-    std::string normalized = normalizeEndpointURL(item, defaultPort);
-    if (!normalized.empty()) {
-      out.push_back(normalized);
-    }
-  }
-  std::ostringstream joined;
-  for (size_t i = 0; i < out.size(); i++) {
-    if (i > 0) {
-      joined << ",";
-    }
-    joined << out[i];
-  }
-  return joined.str();
-}
-
 std::string endpointFromHost(const std::string &host, int port) {
   std::ostringstream ss;
   ss << "http://" << host << ":" << port;
@@ -574,41 +554,93 @@ void runTestsInteractive(const std::string &root, const std::string &script, ABH
   }
 }
 
-} // namespace
+void quickClientConnect(const std::string &script, ABHosts &hosts) {
+  std::string defaultBootstrap = !hosts.aHost.empty() ? endpointFromHost(hosts.aHost, 8081) :
+                                 (!hosts.bHost.empty() ? endpointFromHost(hosts.bHost, 8081) : "");
+  std::string bootstrapDir = normalizeEndpointURL(readLine("Server IP/host or bootstrap URL", defaultBootstrap), 8081);
+  std::string inviteKey = trim(readLine("Invite key", ""));
+  std::string timeoutSec = readLine("Connection timeout sec", "45");
+  std::string discoveryWait = readLine("Discovery wait sec", "12");
+  if (bootstrapDir.empty()) {
+    std::cout << "server IP/host is required\n";
+    return;
+  }
+  if (inviteKey.empty()) {
+    std::cout << "invite key is required\n";
+    return;
+  }
+  std::ostringstream cmd;
+  cmd << shellEscape(script) << " client-test"
+      << " --bootstrap-directory " << shellEscape(bootstrapDir)
+      << " --discovery-wait-sec " << shellEscape(discoveryWait)
+      << " --subject " << shellEscape(inviteKey)
+      << " --min-sources 1"
+      << " --timeout-sec " << shellEscape(timeoutSec)
+      << " --beta-profile 1"
+      << " --distinct-operators 1";
+  runCommand(cmd.str());
+}
 
-int main() {
-  std::string root = detectRepoRoot();
-  if (root.empty()) {
-    std::cerr << "could not detect repo root; run from repo root or set PRIVACYNODE_ROOT\n";
-    return 1;
+void quickServerConnect(const std::string &root, const std::string &script, ABHosts &hosts) {
+  std::string hostDefault = !hosts.aHost.empty() ? hosts.aHost : (!hosts.bHost.empty() ? hosts.bHost : "");
+  std::string host = normalizePublicHostInput(readLine("Public host/IP for this server", hostDefault));
+  std::string peerDefault = "";
+  if (!host.empty() && host == hosts.aHost && !hosts.bHost.empty()) {
+    peerDefault = hosts.bHost;
+  } else if (!host.empty() && host == hosts.bHost && !hosts.aHost.empty()) {
+    peerDefault = hosts.aHost;
+  }
+  std::string peerHost = normalizePublicHostInput(readLine("Peer server IP/host (optional)", peerDefault));
+  if (host.empty()) {
+    std::cout << "public host/IP is required\n";
+    return;
   }
 
-  std::filesystem::path scriptPath = std::filesystem::path(root) / "scripts" / "easy_node.sh";
-  if (!std::filesystem::exists(scriptPath)) {
-    std::cerr << "missing script: " << scriptPath << "\n";
-    return 1;
+  std::ostringstream cmd;
+  cmd << shellEscape(script) << " server-up"
+      << " --public-host " << shellEscape(host)
+      << " --client-allowlist 1"
+      << " --allow-anon-cred 0"
+      << " --beta-profile 1";
+  if (!peerHost.empty()) {
+    cmd << " --peer-directories " << shellEscape(endpointFromHost(peerHost, 8081));
+  }
+  int rc = runCommand(cmd.str());
+
+  bool saveHosts = parseYesNo(readLine("Save/update Machine A/B host config? (y/N)", "n"), false);
+  if (saveHosts) {
+    configureABHostsInteractive(root, hosts, true);
   }
 
-  const std::string script = scriptPath.string();
-  ABHosts hosts = loadABHosts(root);
+  if (rc == 0) {
+    bool genInvite = parseYesNo(readLine("Generate invite key now? (Y/n)", "y"), true);
+    if (genInvite) {
+      std::string count = readLine("How many invite keys", "1");
+      std::ostringstream inviteCmd;
+      inviteCmd << shellEscape(script) << " invite-generate"
+                << " --count " << shellEscape(count);
+      runCommand(inviteCmd.str());
+    }
+  }
+}
 
-  std::cout << "Privacynode Easy Launcher\n";
-  std::cout << "repo: " << root << "\n";
-
+void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts &hosts) {
   for (;;) {
-    std::cout << "\nChoose action:\n";
+    std::cout << "\nAdvanced options:\n";
     std::cout << "1) Check dependencies\n";
-    std::cout << "2) Start/update SERVER stack\n";
-    std::cout << "3) Client test against remote server(s)\n";
-    std::cout << "4) Server status\n";
-    std::cout << "5) Server logs\n";
-    std::cout << "6) Stop server stack\n";
-    std::cout << "7) Show 3-machine test guide\n";
+    std::cout << "2) Server status\n";
+    std::cout << "3) Server logs\n";
+    std::cout << "4) Stop server stack\n";
+    std::cout << "5) Generate invite key(s)\n";
+    std::cout << "6) Check invite key\n";
+    std::cout << "7) Disable invite key\n";
     std::cout << "8) Run 3-machine validation\n";
-    std::cout << "9) Run automated tests\n";
-    std::cout << "10) Configure machine A/B hosts\n";
-    std::cout << "11) Run 3-machine soak test\n";
-    std::cout << "0) Exit\n";
+    std::cout << "9) Run 3-machine soak test\n";
+    std::cout << "10) Run pilot runbook bundle\n";
+    std::cout << "11) Run automated tests\n";
+    std::cout << "12) Configure machine A/B hosts\n";
+    std::cout << "13) Show 3-machine test guide\n";
+    std::cout << "0) Back\n";
     std::cout << "Selection: ";
 
     std::string choice;
@@ -616,153 +648,84 @@ int main() {
     choice = trim(choice);
 
     if (choice == "0") {
-      return 0;
+      return;
     }
-
     if (choice == "1") {
       runCommand(shellEscape(script) + " check");
       continue;
     }
-
-      if (choice == "2") {
-      if (hasBothHosts(hosts)) {
-        std::ostringstream prompt;
-        prompt << "Use saved machine hosts? A=" << hosts.aHost << " B=" << hosts.bHost << " (Y/n)";
-        bool keep = parseYesNo(readLine(prompt.str(), "y"), true);
-        if (!keep) {
-          configureABHostsInteractive(root, hosts, true);
-        }
-      }
-      std::string role = readLine("Server role for this machine (A/B/custom)", "A");
-      std::string host;
-      std::string peersDefault;
-      if (!role.empty() && (role[0] == 'A' || role[0] == 'a')) {
-        host = hosts.aHost;
-        bool federateWithB = parseYesNo(readLine("Peer with Machine B directory? (Y/n)", "y"), true);
-        if (federateWithB && !hosts.bHost.empty()) {
-          peersDefault = endpointFromHost(hosts.bHost, 8081);
-        }
-      } else if (!role.empty() && (role[0] == 'B' || role[0] == 'b')) {
-        host = hosts.bHost;
-        if (!hosts.aHost.empty()) {
-          peersDefault = endpointFromHost(hosts.aHost, 8081);
-        }
-      } else {
-        host = readLine("Public host/IP for this server machine (blank=auto-detect)");
-      }
-      host = normalizePublicHostInput(readLine("Public host/IP for this server machine (blank=auto-detect)", host));
-      std::string operatorId = trim(readLine("Operator ID (blank=auto unique)", ""));
-      std::string issuerId = trim(readLine("Issuer ID (blank=auto unique)", ""));
-      std::string adminToken = readLine("Issuer admin token (blank=auto)", "");
-      bool betaProfile = parseYesNo(readLine("Enable beta profile defaults? (Y/n)", "y"), true);
-      std::string peers = normalizeEndpointCSV(readLine("Peer directory URLs CSV (optional, for federation)", peersDefault), 8081);
-      std::string bootstrapDir = normalizeEndpointURL(readLine("Bootstrap directory URL (optional, if you only know one server IP)", ""), 8081);
-
-      std::ostringstream cmd;
-      cmd << shellEscape(script) << " server-up";
-      if (!host.empty()) {
-        cmd << " --public-host " << shellEscape(host);
-      }
-      if (!operatorId.empty()) {
-        cmd << " --operator-id " << shellEscape(operatorId);
-      }
-      if (!issuerId.empty()) {
-        cmd << " --issuer-id " << shellEscape(issuerId);
-      }
-      if (!adminToken.empty()) {
-        cmd << " --issuer-admin-token " << shellEscape(adminToken);
-      }
-      if (!peers.empty()) {
-        cmd << " --peer-directories " << shellEscape(peers);
-      }
-      if (!bootstrapDir.empty()) {
-        cmd << " --bootstrap-directory " << shellEscape(bootstrapDir);
-      }
-      cmd << " --beta-profile " << (betaProfile ? "1" : "0");
-      runCommand(cmd.str());
-      continue;
-    }
-
-    if (choice == "3") {
-      bool autoDiscover = parseYesNo(readLine("Use one bootstrap directory and auto-discover peers? (Y/n)", "y"), true);
-      std::string bootstrapDefault = !hosts.aHost.empty() ? endpointFromHost(hosts.aHost, 8081) : (!hosts.bHost.empty() ? endpointFromHost(hosts.bHost, 8081) : "");
-      std::string bootstrapDir;
-      std::string dirs;
-      std::string issuer;
-      std::string entry;
-      std::string exitUrl;
-      std::string discoveryWait = "12";
-      if (autoDiscover) {
-        bootstrapDir = normalizeEndpointURL(readLine("Bootstrap directory URL", bootstrapDefault), 8081);
-        discoveryWait = readLine("Bootstrap discovery wait sec", "12");
-      } else {
-        configureABHostsInteractive(root, hosts, false);
-        dirs = normalizeEndpointCSV(readLine("Directory URLs CSV", endpointFromHost(hosts.aHost, 8081) + "," + endpointFromHost(hosts.bHost, 8081)), 8081);
-        issuer = normalizeEndpointURL(readLine("Issuer URL", endpointFromHost(hosts.aHost, 8082)), 8082);
-        entry = normalizeEndpointURL(readLine("Entry control URL fallback", endpointFromHost(hosts.aHost, 8083)), 8083);
-        exitUrl = normalizeEndpointURL(readLine("Exit control URL fallback", endpointFromHost(hosts.aHost, 8084)), 8084);
-      }
-      std::string minSources = readLine("Minimum directory sources", "1");
-      std::string country = readLine("Preferred exit country code (optional)", "");
-      std::string region = readLine("Preferred exit region (optional)", "");
-      std::string timeoutSec = readLine("Client test timeout sec", "40");
-      bool betaProfile = parseYesNo(readLine("Enable beta profile defaults? (Y/n)", "y"), true);
-      bool distinct = parseYesNo(readLine("Require distinct entry/exit operators? (Y/n)", betaProfile ? "y" : "n"), betaProfile);
-
-      if (autoDiscover && bootstrapDir.empty()) {
-        std::cout << "bootstrap directory URL is required\n";
-        continue;
-      }
-      if (!autoDiscover && (dirs.empty() || issuer.empty() || entry.empty() || exitUrl.empty())) {
-        std::cout << "directory URLs, issuer URL, entry URL and exit URL are required\n";
-        continue;
-      }
-
-      std::ostringstream cmd;
-      cmd << shellEscape(script) << " client-test"
-          << " --min-sources " << shellEscape(minSources)
-          << " --timeout-sec " << shellEscape(timeoutSec)
-          << " --beta-profile " << (betaProfile ? "1" : "0")
-          << " --distinct-operators " << (distinct ? "1" : "0");
-      if (autoDiscover) {
-        cmd << " --bootstrap-directory " << shellEscape(bootstrapDir)
-            << " --discovery-wait-sec " << shellEscape(discoveryWait);
-      } else {
-        cmd << " --directory-urls " << shellEscape(dirs)
-            << " --issuer-url " << shellEscape(issuer)
-            << " --entry-url " << shellEscape(entry)
-            << " --exit-url " << shellEscape(exitUrl);
-      }
-      if (!country.empty()) {
-        cmd << " --exit-country " << shellEscape(country);
-      }
-      if (!region.empty()) {
-        cmd << " --exit-region " << shellEscape(region);
-      }
-      runCommand(cmd.str());
-      continue;
-    }
-
-    if (choice == "4") {
+    if (choice == "2") {
       runCommand(shellEscape(script) + " server-status");
       continue;
     }
-
-    if (choice == "5") {
+    if (choice == "3") {
       runCommand(shellEscape(script) + " server-logs");
       continue;
     }
-
-    if (choice == "6") {
+    if (choice == "4") {
       runCommand(shellEscape(script) + " server-down");
       continue;
     }
-
-    if (choice == "7") {
-      showThreeMachineGuide();
+    if (choice == "5") {
+      std::string count = readLine("How many keys", "1");
+      std::string prefix = readLine("Key prefix", "inv");
+      std::string tier = readLine("Tier (1/2/3)", "1");
+      std::string issuer = normalizeEndpointURL(readLine("Issuer URL (optional)", ""), 8082);
+      std::string adminToken = trim(readLine("Admin token (optional; blank=read from server env)", ""));
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " invite-generate"
+          << " --count " << shellEscape(count)
+          << " --prefix " << shellEscape(prefix)
+          << " --tier " << shellEscape(tier);
+      if (!issuer.empty()) {
+        cmd << " --issuer-url " << shellEscape(issuer);
+      }
+      if (!adminToken.empty()) {
+        cmd << " --admin-token " << shellEscape(adminToken);
+      }
+      runCommand(cmd.str());
       continue;
     }
-
+    if (choice == "6") {
+      std::string key = trim(readLine("Invite key", ""));
+      std::string issuer = normalizeEndpointURL(readLine("Issuer URL (optional)", ""), 8082);
+      std::string adminToken = trim(readLine("Admin token (optional; blank=read from server env)", ""));
+      if (key.empty()) {
+        std::cout << "invite key is required\n";
+        continue;
+      }
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " invite-check"
+          << " --key " << shellEscape(key);
+      if (!issuer.empty()) {
+        cmd << " --issuer-url " << shellEscape(issuer);
+      }
+      if (!adminToken.empty()) {
+        cmd << " --admin-token " << shellEscape(adminToken);
+      }
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "7") {
+      std::string key = trim(readLine("Invite key to disable", ""));
+      std::string issuer = normalizeEndpointURL(readLine("Issuer URL (optional)", ""), 8082);
+      std::string adminToken = trim(readLine("Admin token (optional; blank=read from server env)", ""));
+      if (key.empty()) {
+        std::cout << "invite key is required\n";
+        continue;
+      }
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " invite-disable"
+          << " --key " << shellEscape(key);
+      if (!issuer.empty()) {
+        cmd << " --issuer-url " << shellEscape(issuer);
+      }
+      if (!adminToken.empty()) {
+        cmd << " --admin-token " << shellEscape(adminToken);
+      }
+      runCommand(cmd.str());
+      continue;
+    }
     if (choice == "8") {
       bool autoDiscover = parseYesNo(readLine("Use one bootstrap directory and auto-discover peers? (Y/n)", "y"), true);
       std::string bootstrapDefault = !hosts.aHost.empty() ? endpointFromHost(hosts.aHost, 8081) : (!hosts.bHost.empty() ? endpointFromHost(hosts.bHost, 8081) : "");
@@ -788,8 +751,7 @@ int main() {
       std::string minOperators = readLine("Minimum operators per directory", "2");
       std::string federationTimeout = readLine("Federation wait timeout sec", "90");
       std::string timeoutSec = readLine("Client validation timeout sec", "50");
-      std::string country = readLine("Preferred exit country code (optional)", "");
-      std::string region = readLine("Preferred exit region (optional)", "");
+      std::string subject = trim(readLine("Client subject key (optional)", ""));
       bool betaProfile = parseYesNo(readLine("Enable beta profile defaults? (Y/n)", "y"), true);
       bool distinct = parseYesNo(readLine("Require distinct entry/exit operators? (Y/n)", betaProfile ? "y" : "n"), betaProfile);
 
@@ -810,6 +772,9 @@ int main() {
           << " --timeout-sec " << shellEscape(timeoutSec)
           << " --beta-profile " << (betaProfile ? "1" : "0")
           << " --distinct-operators " << (distinct ? "1" : "0");
+      if (!subject.empty()) {
+        cmd << " --subject " << shellEscape(subject);
+      }
       if (autoDiscover) {
         cmd << " --bootstrap-directory " << shellEscape(bootstrapDir)
             << " --discovery-wait-sec " << shellEscape(discoveryWait);
@@ -820,45 +785,10 @@ int main() {
             << " --entry-url " << shellEscape(entry)
             << " --exit-url " << shellEscape(exitUrl);
       }
-      if (!country.empty()) {
-        cmd << " --exit-country " << shellEscape(country);
-      }
-      if (!region.empty()) {
-        cmd << " --exit-region " << shellEscape(region);
-      }
       runCommand(cmd.str());
       continue;
     }
-
     if (choice == "9") {
-      runTestsInteractive(root, script, hosts);
-      continue;
-    }
-
-    if (choice == "10") {
-      bool autoDiscoverHosts = parseYesNo(readLine("Auto-discover machine A/B hosts from one bootstrap directory? (Y/n)", "y"), true);
-      if (autoDiscoverHosts) {
-        std::string bootstrapDefault = !hosts.aHost.empty() ? endpointFromHost(hosts.aHost, 8081) : (!hosts.bHost.empty() ? endpointFromHost(hosts.bHost, 8081) : "");
-        std::string bootstrapDir = normalizeEndpointURL(readLine("Bootstrap directory URL", bootstrapDefault), 8081);
-        std::string waitSec = readLine("Discovery wait sec", "20");
-        if (bootstrapDir.empty()) {
-          std::cout << "bootstrap directory URL is required\n";
-          continue;
-        }
-        std::ostringstream cmd;
-        cmd << shellEscape(script) << " discover-hosts"
-            << " --bootstrap-directory " << shellEscape(bootstrapDir)
-            << " --wait-sec " << shellEscape(waitSec)
-            << " --write-config 1";
-        runCommand(cmd.str());
-        hosts = loadABHosts(root);
-      } else {
-        configureABHostsInteractive(root, hosts, true);
-      }
-      continue;
-    }
-
-    if (choice == "11") {
       bool autoDiscover = parseYesNo(readLine("Use one bootstrap directory and auto-discover peers? (Y/n)", "y"), true);
       std::string bootstrapDefault = !hosts.aHost.empty() ? endpointFromHost(hosts.aHost, 8081) : (!hosts.bHost.empty() ? endpointFromHost(hosts.bHost, 8081) : "");
       std::string bootstrapDir;
@@ -885,13 +815,9 @@ int main() {
       std::string minOperators = readLine("Minimum operators per directory", "2");
       std::string federationTimeout = readLine("Federation wait timeout sec", "90");
       std::string timeoutSec = readLine("Client validation timeout sec", "50");
-      std::string faultEvery = readLine("Inject fault every N rounds (0=off)", "0");
-      std::string faultCommand = readLine("Fault command (optional)", "");
-      bool continueOnFail = parseYesNo(readLine("Continue when a round fails? (y/N)", "n"), false);
+      std::string subject = trim(readLine("Client subject key (optional)", ""));
       bool betaProfile = parseYesNo(readLine("Enable beta profile defaults? (Y/n)", "y"), true);
       bool distinct = parseYesNo(readLine("Require distinct entry/exit operators? (Y/n)", betaProfile ? "y" : "n"), betaProfile);
-      std::string country = readLine("Preferred exit country code (optional)", "");
-      std::string region = readLine("Preferred exit region (optional)", "");
       if (autoDiscover && bootstrapDir.empty()) {
         std::cout << "bootstrap directory URL is required\n";
         continue;
@@ -908,9 +834,11 @@ int main() {
           << " --min-operators " << shellEscape(minOperators)
           << " --federation-timeout-sec " << shellEscape(federationTimeout)
           << " --timeout-sec " << shellEscape(timeoutSec)
-          << " --continue-on-fail " << (continueOnFail ? "1" : "0")
           << " --beta-profile " << (betaProfile ? "1" : "0")
           << " --distinct-operators " << (distinct ? "1" : "0");
+      if (!subject.empty()) {
+        cmd << " --subject " << shellEscape(subject);
+      }
       if (autoDiscover) {
         cmd << " --bootstrap-directory " << shellEscape(bootstrapDir)
             << " --discovery-wait-sec " << shellEscape(discoveryWait);
@@ -921,22 +849,148 @@ int main() {
             << " --entry-url " << shellEscape(entry)
             << " --exit-url " << shellEscape(exitUrl);
       }
-      if (!faultEvery.empty()) {
-        cmd << " --fault-every " << shellEscape(faultEvery);
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "10") {
+      bool autoDiscover = parseYesNo(readLine("Use one bootstrap directory and auto-discover peers? (Y/n)", "y"), true);
+      std::string bootstrapDefault = !hosts.aHost.empty() ? endpointFromHost(hosts.aHost, 8081) : (!hosts.bHost.empty() ? endpointFromHost(hosts.bHost, 8081) : "");
+      std::string bootstrapDir;
+      std::string dirA;
+      std::string dirB;
+      std::string issuer;
+      std::string entry;
+      std::string exitUrl;
+      std::string discoveryWait = "12";
+      if (autoDiscover) {
+        bootstrapDir = normalizeEndpointURL(readLine("Bootstrap directory URL", bootstrapDefault), 8081);
+        discoveryWait = readLine("Bootstrap discovery wait sec", "12");
+      } else {
+        configureABHostsInteractive(root, hosts, false);
+        dirA = normalizeEndpointURL(readLine("Directory A URL", endpointFromHost(hosts.aHost, 8081)), 8081);
+        dirB = normalizeEndpointURL(readLine("Directory B URL", endpointFromHost(hosts.bHost, 8081)), 8081);
+        issuer = normalizeEndpointURL(readLine("Issuer URL", endpointFromHost(hosts.aHost, 8082)), 8082);
+        entry = normalizeEndpointURL(readLine("Entry control URL fallback", endpointFromHost(hosts.aHost, 8083)), 8083);
+        exitUrl = normalizeEndpointURL(readLine("Exit control URL fallback", endpointFromHost(hosts.aHost, 8084)), 8084);
       }
-      if (!faultCommand.empty()) {
-        cmd << " --fault-command " << shellEscape(faultCommand);
+      std::string rounds = readLine("Soak rounds", "10");
+      std::string pauseSec = readLine("Pause between rounds sec", "5");
+      std::string subject = trim(readLine("Client subject key (optional)", ""));
+      bool betaProfile = parseYesNo(readLine("Enable beta profile defaults? (Y/n)", "y"), true);
+      bool distinct = parseYesNo(readLine("Require distinct entry/exit operators? (Y/n)", betaProfile ? "y" : "n"), betaProfile);
+      if (autoDiscover && bootstrapDir.empty()) {
+        std::cout << "bootstrap directory URL is required\n";
+        continue;
       }
-      if (!country.empty()) {
-        cmd << " --exit-country " << shellEscape(country);
+      if (!autoDiscover && (dirA.empty() || dirB.empty() || issuer.empty() || entry.empty() || exitUrl.empty())) {
+        std::cout << "directory A/B, issuer URL, entry URL and exit URL are required\n";
+        continue;
       }
-      if (!region.empty()) {
-        cmd << " --exit-region " << shellEscape(region);
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " pilot-runbook"
+          << " --rounds " << shellEscape(rounds)
+          << " --pause-sec " << shellEscape(pauseSec)
+          << " --beta-profile " << (betaProfile ? "1" : "0")
+          << " --distinct-operators " << (distinct ? "1" : "0");
+      if (!subject.empty()) {
+        cmd << " --subject " << shellEscape(subject);
+      }
+      if (autoDiscover) {
+        cmd << " --bootstrap-directory " << shellEscape(bootstrapDir)
+            << " --discovery-wait-sec " << shellEscape(discoveryWait);
+      } else {
+        cmd << " --directory-a " << shellEscape(dirA)
+            << " --directory-b " << shellEscape(dirB)
+            << " --issuer-url " << shellEscape(issuer)
+            << " --entry-url " << shellEscape(entry)
+            << " --exit-url " << shellEscape(exitUrl);
       }
       runCommand(cmd.str());
       continue;
     }
+    if (choice == "11") {
+      runTestsInteractive(root, script, hosts);
+      continue;
+    }
+    if (choice == "12") {
+      bool autoDiscoverHosts = parseYesNo(readLine("Auto-discover machine A/B hosts from one bootstrap directory? (Y/n)", "y"), true);
+      if (autoDiscoverHosts) {
+        std::string bootstrapDefault = !hosts.aHost.empty() ? endpointFromHost(hosts.aHost, 8081) : (!hosts.bHost.empty() ? endpointFromHost(hosts.bHost, 8081) : "");
+        std::string bootstrapDir = normalizeEndpointURL(readLine("Bootstrap directory URL", bootstrapDefault), 8081);
+        std::string waitSec = readLine("Discovery wait sec", "20");
+        if (bootstrapDir.empty()) {
+          std::cout << "bootstrap directory URL is required\n";
+          continue;
+        }
+        std::ostringstream cmd;
+        cmd << shellEscape(script) << " discover-hosts"
+            << " --bootstrap-directory " << shellEscape(bootstrapDir)
+            << " --wait-sec " << shellEscape(waitSec)
+            << " --write-config 1";
+        runCommand(cmd.str());
+        hosts = loadABHosts(root);
+      } else {
+        configureABHostsInteractive(root, hosts, true);
+      }
+      continue;
+    }
+    if (choice == "13") {
+      showThreeMachineGuide();
+      continue;
+    }
 
+    std::cout << "invalid selection\n";
+  }
+}
+
+} // namespace
+
+int main() {
+  std::string root = detectRepoRoot();
+  if (root.empty()) {
+    std::cerr << "could not detect repo root; run from repo root or set PRIVACYNODE_ROOT\n";
+    return 1;
+  }
+
+  std::filesystem::path scriptPath = std::filesystem::path(root) / "scripts" / "easy_node.sh";
+  if (!std::filesystem::exists(scriptPath)) {
+    std::cerr << "missing script: " << scriptPath << "\n";
+    return 1;
+  }
+
+  const std::string script = scriptPath.string();
+  ABHosts hosts = loadABHosts(root);
+
+  std::cout << "Privacynode Easy Launcher\n";
+  std::cout << "repo: " << root << "\n";
+
+  for (;;) {
+    std::cout << "\nMain menu:\n";
+    std::cout << "1) Connect as CLIENT (simple)\n";
+    std::cout << "2) Connect as SERVER (simple)\n";
+    std::cout << "3) Other options (tests/config)\n";
+    std::cout << "0) Exit\n";
+    std::cout << "Selection: ";
+
+    std::string choice;
+    std::getline(std::cin, choice);
+    choice = trim(choice);
+
+    if (choice == "0") {
+      return 0;
+    }
+    if (choice == "1") {
+      quickClientConnect(script, hosts);
+      continue;
+    }
+    if (choice == "2") {
+      quickServerConnect(root, script, hosts);
+      continue;
+    }
+    if (choice == "3") {
+      runAdvancedMenu(root, script, hosts);
+      continue;
+    }
     std::cout << "invalid selection\n";
   }
 }

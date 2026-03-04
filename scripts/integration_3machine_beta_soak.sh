@@ -21,6 +21,8 @@ Usage:
     [--issuer-b-url URL] \
     [--entry-url URL] \
     [--exit-url URL] \
+    [--subject ID] \
+    [--anon-cred TOKEN] \
     [--rounds N] \
     [--pause-sec N] \
     [--fault-every N] \
@@ -70,6 +72,8 @@ issuer_a_url=""
 issuer_b_url=""
 entry_url=""
 exit_url=""
+client_subject=""
+client_anon_cred=""
 bootstrap_directory=""
 discovery_wait_sec="${THREE_MACHINE_DISCOVERY_WAIT_SEC:-12}"
 rounds="${THREE_MACHINE_SOAK_ROUNDS:-12}"
@@ -128,6 +132,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --exit-url)
       exit_url="${2:-}"
+      shift 2
+      ;;
+    --subject)
+      client_subject="${2:-}"
+      shift 2
+      ;;
+    --anon-cred)
+      client_anon_cred="${2:-}"
       shift 2
       ;;
     --rounds)
@@ -261,6 +273,10 @@ if [[ -n "$require_issuer_quorum" && "$require_issuer_quorum" != "0" && "$requir
 fi
 if [[ -n "$client_require_cross_operator_pair" && "$client_require_cross_operator_pair" != "0" && "$client_require_cross_operator_pair" != "1" ]]; then
   echo "--client-require-cross-operator-pair must be 0 or 1"
+  exit 2
+fi
+if [[ -n "$client_subject" && -n "$client_anon_cred" ]]; then
+  echo "set only one of --subject or --anon-cred"
   exit 2
 fi
 if ! [[ "$rounds" =~ ^[0-9]+$ && "$pause_sec" =~ ^[0-9]+$ && "$fault_every" =~ ^[0-9]+$ && "$min_sources" =~ ^[0-9]+$ && "$min_operators" =~ ^[0-9]+$ && "$federation_timeout_sec" =~ ^[0-9]+$ && "$client_timeout_sec" =~ ^[0-9]+$ && "$discovery_wait_sec" =~ ^[0-9]+$ && "$client_min_selection_lines" =~ ^[0-9]+$ && "$client_min_entry_operators" =~ ^[0-9]+$ && "$client_min_exit_operators" =~ ^[0-9]+$ ]]; then
@@ -415,6 +431,12 @@ for round in $(seq 1 "$rounds"); do
   fi
   if [[ -n "$exit_url" ]]; then
     cmd+=(--exit-url "$exit_url")
+  fi
+  if [[ -n "$client_subject" ]]; then
+    cmd+=(--subject "$client_subject")
+  fi
+  if [[ -n "$client_anon_cred" ]]; then
+    cmd+=(--anon-cred "$client_anon_cred")
   fi
   if [[ -n "$exit_country" ]]; then
     cmd+=(--exit-country "$exit_country")

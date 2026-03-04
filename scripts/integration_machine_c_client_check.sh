@@ -21,6 +21,8 @@ Usage:
     [--issuer-b-url URL] \
     [--entry-url URL] \
     [--exit-url URL] \
+    [--subject ID] \
+    [--anon-cred TOKEN] \
     [--min-sources N] \
     [--min-operators N] \
     [--federation-timeout-sec N] \

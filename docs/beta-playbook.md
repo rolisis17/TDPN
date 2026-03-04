@@ -21,6 +21,8 @@ This freezes a practical beta profile that is strict enough for operator separat
   --public-host A_PUBLIC_IP_OR_DNS \
   --operator-id op-a \
   --peer-directories http://B_PUBLIC_IP_OR_DNS:8081 \
+  --client-allowlist 1 \
+  --allow-anon-cred 0 \
   --beta-profile 1
 ```
 
@@ -31,7 +33,52 @@ This freezes a practical beta profile that is strict enough for operator separat
   --public-host B_PUBLIC_IP_OR_DNS \
   --operator-id op-b \
   --peer-directories http://A_PUBLIC_IP_OR_DNS:8081 \
+  --client-allowlist 1 \
+  --allow-anon-cred 0 \
   --beta-profile 1
+```
+
+## 2.1) Invite-only client onboarding (allowlist)
+
+Run on machine A and machine B issuers:
+
+```bash
+./scripts/beta_subject_upsert.sh \
+  --issuer-url http://A_PUBLIC_IP_OR_DNS:8082 \
+  --admin-token "<ISSUER_ADMIN_TOKEN_FROM_SERVER_UP>" \
+  --subject client-alice \
+  --kind client \
+  --tier 1
+
+./scripts/beta_subject_upsert.sh \
+  --issuer-url http://B_PUBLIC_IP_OR_DNS:8082 \
+  --admin-token "<ISSUER_ADMIN_TOKEN_FROM_SERVER_UP>" \
+  --subject client-alice \
+  --kind client \
+  --tier 1
+```
+
+Client-side:
+
+```bash
+export CLIENT_SUBJECT=client-alice
+```
+
+With `--client-allowlist 1`, unknown or empty subjects are denied token issuance.
+
+Batch onboarding option (CSV):
+
+```bash
+cat > invited_clients.csv <<'EOF'
+subject,kind,tier,reputation,bond,stake
+client-alice,client,1,0,0,0
+client-bob,client,1,0,0,0
+EOF
+
+./scripts/beta_subject_batch_upsert.sh \
+  --issuer-url http://A_PUBLIC_IP_OR_DNS:8082 \
+  --admin-token "<ISSUER_ADMIN_TOKEN_FROM_SERVER_UP>" \
+  --csv invited_clients.csv
 ```
 
 ## 3) Quick role checks
@@ -59,6 +106,7 @@ Machine B:
   --issuer-url http://A_PUBLIC_IP_OR_DNS:8082 \
   --entry-url http://A_PUBLIC_IP_OR_DNS:8083 \
   --exit-url http://A_PUBLIC_IP_OR_DNS:8084 \
+  --subject client-alice \
   --min-sources 2 \
   --min-operators 2 \
   --beta-profile 1 \
@@ -101,7 +149,31 @@ Optional fault injection:
   --distinct-operators 1
 ```
 
-## 6) One-bootstrap mode
+## 6) One-command pilot runbook (machine C)
+
+This runs one strict validation pass, then soak rounds, then collects endpoint snapshots into one `.tar.gz` bundle:
+
+```bash
+./scripts/beta_pilot_runbook.sh \
+  --directory-a http://A_PUBLIC_IP_OR_DNS:8081 \
+  --directory-b http://B_PUBLIC_IP_OR_DNS:8081 \
+  --issuer-url http://A_PUBLIC_IP_OR_DNS:8082 \
+  --entry-url http://A_PUBLIC_IP_OR_DNS:8083 \
+  --exit-url http://A_PUBLIC_IP_OR_DNS:8084 \
+  --subject client-alice \
+  --rounds 10 \
+  --pause-sec 5 \
+  --beta-profile 1
+```
+
+Optional path diversity tuning on machine C:
+
+```bash
+export CLIENT_ENTRY_ROTATION_SEC=15
+./scripts/beta_pilot_runbook.sh --bootstrap-directory http://KNOWN_SERVER_IP:8081 --subject client-alice --beta-profile 1
+```
+
+## 7) One-bootstrap mode
 
 If machine C only knows one server IP, use bootstrap discovery:
 
@@ -118,7 +190,7 @@ If machine C only knows one server IP, use bootstrap discovery:
   --distinct-operators 1
 ```
 
-## 7) What `--beta-profile` changes in easy mode
+## 8) What `--beta-profile` changes in easy mode
 
 - Server:
   - quorum floors for federation and relay voting (`>=2` operator/vote defaults)

@@ -105,6 +105,11 @@ Simple installer + menu launcher (for easier testing):
 ./bin/privacynode-easy
 ```
 
+Launcher start screen now has 3 primary options:
+- `Connect as CLIENT (simple)` -> asks for server IP/bootstrap URL + invite key.
+- `Connect as SERVER (simple)` -> asks for server IP and optional peer IP, then starts invite-only beta defaults.
+- `Other options (tests/config)` -> machine tests, soak/pilot runbook, host config, invite key management.
+
 Windows 11 + WSL2 bootstrap:
 
 ```powershell
@@ -125,6 +130,12 @@ Script-only easy mode:
 
 ```bash
 ./scripts/easy_node.sh server-up --public-host <PUBLIC_IP_OR_DNS> --beta-profile
+
+# invite-key flow (server side)
+./scripts/easy_node.sh invite-generate --count 3
+./scripts/easy_node.sh invite-check --key <INVITE_KEY>
+./scripts/easy_node.sh invite-disable --key <INVITE_KEY>
+
 ./scripts/easy_node.sh client-test \
   --directory-urls http://<SERVER_IP>:8081 \
   --issuer-url http://<SERVER_IP>:8082 \
@@ -154,6 +165,18 @@ Script-only easy mode:
   --pause-sec 5 \
   --beta-profile 1 \
   --distinct-operators 1
+
+# one-command pilot validation + soak + report bundle (machine C)
+./scripts/beta_pilot_runbook.sh \
+  --directory-a http://<A_SERVER_IP>:8081 \
+  --directory-b http://<B_SERVER_IP>:8081 \
+  --issuer-url http://<A_SERVER_IP>:8082 \
+  --entry-url http://<A_SERVER_IP>:8083 \
+  --exit-url http://<A_SERVER_IP>:8084 \
+  --subject client-alice \
+  --rounds 10 \
+  --pause-sec 5 \
+  --beta-profile 1
 
 # one-bootstrap mode (auto-discover other server hosts/URLs)
 ./scripts/easy_node.sh discover-hosts \
@@ -239,6 +262,8 @@ Optional env vars:
 - `ISSUER_URLS` (comma-separated issuer base URLs; exit verifies tokens against all fetched issuer pubkeys)
 - `ISSUER_PRIVATE_KEY_FILE` (default `data/issuer_ed25519.key`, persistent issuer signing key)
 - `ISSUER_PREVIOUS_PUBKEYS_FILE` (default `data/issuer_previous_pubkeys.txt`; optional previous issuer pubkeys for rollover exposure at `/v1/pubkeys`)
+- `ISSUER_CLIENT_ALLOWLIST_ONLY` (`1` requires `client_access` token requests to use a known `kind=client` subject profile; blocks unknown/empty subjects)
+- `ISSUER_ALLOW_ANON_CRED` (default `1`; set `0` to disable anonymous-credential token issuance)
 - `ISSUER_ANON_REVOCATIONS_FILE` (default `data/issuer_anon_revocations.json`; revoked anonymous credential ids)
 - `ISSUER_ANON_DISPUTES_FILE` (default `data/issuer_anon_disputes.json`; anonymous credential dispute tier-cap windows)
 - `ISSUER_REVOCATION_FEED_TTL_SEC` (default `30`; signed revocation feed max age)
@@ -283,6 +308,8 @@ Optional env vars:
 - `CLIENT_MAX_EXITS_PER_OPERATOR` (default `0`; when `>0`, cap selected exits per operator before pair ranking)
 - `CLIENT_REQUIRE_DISTINCT_OPERATORS` (`1` requires entry/exit pair operators to differ and to be present in relay descriptors)
 - `CLIENT_STICKY_PAIR_SEC` (default `0`; when `>0`, prefer the most recently successful entry/exit pair for this duration if still available)
+- `CLIENT_ENTRY_ROTATION_SEC` (default `0`; when `>0`, rotate entry ordering every N seconds before pair ranking to improve cross-operator path diversity)
+- `CLIENT_ENTRY_ROTATION_SEED` (optional int64; stable per-client offset for entry rotation windows)
 - `CLIENT_SESSION_REUSE` (`1` enables active path reuse across bootstrap cycles; client avoids immediate close/reopen when session remains healthy)
 - `CLIENT_SESSION_REFRESH_LEAD_SEC` (default `20`; proactive refresh lead window before session expiry when `CLIENT_SESSION_REUSE=1`, with open-new/close-old handoff)
 - `CLIENT_PATH_OPEN_MAX_ATTEMPTS` (default `4`; max ranked entry/exit pairs tried per bootstrap cycle)

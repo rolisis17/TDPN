@@ -383,6 +383,43 @@ func TestRankRelayPairsStickyPairExpires(t *testing.T) {
 	}
 }
 
+func TestApplyEntryRotationDisabled(t *testing.T) {
+	c := &Client{
+		entryRotationSec: 0,
+	}
+	entries := []proto.RelayDescriptor{
+		{RelayID: "entry-a", Role: "entry"},
+		{RelayID: "entry-b", Role: "entry"},
+	}
+	got := c.applyEntryRotation(entries, time.Unix(120, 0))
+	if len(got) != len(entries) {
+		t.Fatalf("unexpected rotated length: got=%d want=%d", len(got), len(entries))
+	}
+	if got[0].RelayID != "entry-a" || got[1].RelayID != "entry-b" {
+		t.Fatalf("rotation should be disabled, got order=%s,%s", got[0].RelayID, got[1].RelayID)
+	}
+}
+
+func TestApplyEntryRotationDeterministic(t *testing.T) {
+	c := &Client{
+		entryRotationSec:  10,
+		entryRotationSeed: 2,
+	}
+	entries := []proto.RelayDescriptor{
+		{RelayID: "entry-a", Role: "entry"},
+		{RelayID: "entry-b", Role: "entry"},
+		{RelayID: "entry-c", Role: "entry"},
+	}
+	// now=20s => slot=2, len=3, seed=2 => shift=(2+2)%3=1
+	got := c.applyEntryRotation(entries, time.Unix(20, 0))
+	if len(got) != 3 {
+		t.Fatalf("unexpected rotated length: %d", len(got))
+	}
+	if got[0].RelayID != "entry-b" || got[1].RelayID != "entry-c" || got[2].RelayID != "entry-a" {
+		t.Fatalf("unexpected deterministic rotation order: %s,%s,%s", got[0].RelayID, got[1].RelayID, got[2].RelayID)
+	}
+}
+
 func TestCapExitsPerOperatorFallbackRelayID(t *testing.T) {
 	exits := []proto.RelayDescriptor{
 		{RelayID: "x1", Role: "exit"},

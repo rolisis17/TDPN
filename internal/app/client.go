@@ -72,6 +72,8 @@ type Client struct {
 	maxExitsPerOperator   int
 	requireDistinctOps    bool
 	stickyPairSec         int
+	entryRotationSec      int
+	entryRotationSeed     int64
 	lastSelectedEntry     string
 	lastSelectedExit      string
 	lastSelectedAt        time.Time
@@ -261,6 +263,16 @@ func NewClient() *Client {
 	if v, err := strconv.Atoi(os.Getenv("CLIENT_STICKY_PAIR_SEC")); err == nil && v > 0 {
 		stickyPairSec = v
 	}
+	entryRotationSec := 0
+	if v, err := strconv.Atoi(os.Getenv("CLIENT_ENTRY_ROTATION_SEC")); err == nil && v > 0 {
+		entryRotationSec = v
+	}
+	var entryRotationSeed int64
+	if v := strings.TrimSpace(os.Getenv("CLIENT_ENTRY_ROTATION_SEED")); v != "" {
+		if parsed, err := strconv.ParseInt(v, 10, 64); err == nil {
+			entryRotationSeed = parsed
+		}
+	}
 	sessionReuse := os.Getenv("CLIENT_SESSION_REUSE") == "1"
 	sessionRefreshLeadSec := 20
 	if v, err := strconv.Atoi(os.Getenv("CLIENT_SESSION_REFRESH_LEAD_SEC")); err == nil && v > 0 {
@@ -394,6 +406,8 @@ func NewClient() *Client {
 		maxExitsPerOperator:   maxExitsPerOperator,
 		requireDistinctOps:    requireDistinctOps,
 		stickyPairSec:         stickyPairSec,
+		entryRotationSec:      entryRotationSec,
+		entryRotationSeed:     entryRotationSeed,
 		sessionReuse:          sessionReuse,
 		sessionRefreshLeadSec: sessionRefreshLeadSec,
 		pathOpenMaxAttempts:   pathOpenMaxAttempts,
@@ -430,8 +444,8 @@ func (c *Client) Run(ctx context.Context) error {
 	if initialDelay < 0 {
 		initialDelay = 0
 	}
-	log.Printf("client role enabled: directories=%d min_sources=%d min_operators=%d min_votes=%d issuer=%s subject=%s anon_cred=%t entry=%s mode=%s source=%s trust_strict=%t wg_backend=%s iface=%s allowed_ips=%s install_route=%t wg_kernel_proxy=%t wg_proxy_addr=%s synthetic_fallback=%t opaque_session_sec=%d opaque_initial_uplink_timeout_ms=%d health_check=%t path_attempts=%d exit_country=%s exit_region=%s min_geo_confidence=%.2f locality_fallback=%s strict_locality=%t max_exits_per_operator=%d distinct_operators=%t sticky_pair_sec=%d session_reuse=%t refresh_lead_sec=%d exit_exploration_pct=%d selection_feed_disable=%t selection_feed_require=%t selection_feed_min_votes=%d trust_feed_disable=%t trust_feed_require=%t trust_feed_min_votes=%d bootstrap_interval_sec=%d bootstrap_backoff_max_sec=%d bootstrap_jitter_pct=%d bootstrap_initial_delay_sec=%d startup_sync_timeout_sec=%d beta_strict=%t",
-		len(c.directoryURLs), c.directoryMinSources, c.directoryMinOperators, c.directoryMinVotes, c.issuerURL, c.subject, c.anonCred != "", c.entryURL, c.dataMode, c.innerSource, c.trustStrict, c.wgBackend, c.wgInterface, c.wgAllowedIPs, c.wgInstallRoute, c.wgKernelProxy, c.wgProxyAddr, c.allowSyntheticFallback(), c.opaqueSessionSec, c.opaqueInitialUpMS, c.healthCheckEnabled, c.pathOpenMaxAttempts, c.preferredExitCountry, c.preferredExitRegion, c.minGeoConfidence, strings.Join(c.localityFallbackOrder, ","), c.strictExitLocality, c.maxExitsPerOperator, c.requireDistinctOps, c.stickyPairSec, c.sessionReuse, c.sessionRefreshLeadSec, c.exitExplorationPct, c.selectionFeedDisable, c.selectionFeedRequire, c.selectionFeedMinVotes, c.trustFeedDisable, c.trustFeedRequire, c.trustFeedMinVotes, int(bootstrapInterval/time.Second), int(bootstrapBackoffMax/time.Second), c.bootstrapJitterPct, int(initialDelay/time.Second), int(c.startupSyncTimeout/time.Second), c.betaStrict)
+	log.Printf("client role enabled: directories=%d min_sources=%d min_operators=%d min_votes=%d issuer=%s subject=%s anon_cred=%t entry=%s mode=%s source=%s trust_strict=%t wg_backend=%s iface=%s allowed_ips=%s install_route=%t wg_kernel_proxy=%t wg_proxy_addr=%s synthetic_fallback=%t opaque_session_sec=%d opaque_initial_uplink_timeout_ms=%d health_check=%t path_attempts=%d exit_country=%s exit_region=%s min_geo_confidence=%.2f locality_fallback=%s strict_locality=%t max_exits_per_operator=%d distinct_operators=%t sticky_pair_sec=%d entry_rotation_sec=%d entry_rotation_seed_set=%t session_reuse=%t refresh_lead_sec=%d exit_exploration_pct=%d selection_feed_disable=%t selection_feed_require=%t selection_feed_min_votes=%d trust_feed_disable=%t trust_feed_require=%t trust_feed_min_votes=%d bootstrap_interval_sec=%d bootstrap_backoff_max_sec=%d bootstrap_jitter_pct=%d bootstrap_initial_delay_sec=%d startup_sync_timeout_sec=%d beta_strict=%t",
+		len(c.directoryURLs), c.directoryMinSources, c.directoryMinOperators, c.directoryMinVotes, c.issuerURL, c.subject, c.anonCred != "", c.entryURL, c.dataMode, c.innerSource, c.trustStrict, c.wgBackend, c.wgInterface, c.wgAllowedIPs, c.wgInstallRoute, c.wgKernelProxy, c.wgProxyAddr, c.allowSyntheticFallback(), c.opaqueSessionSec, c.opaqueInitialUpMS, c.healthCheckEnabled, c.pathOpenMaxAttempts, c.preferredExitCountry, c.preferredExitRegion, c.minGeoConfidence, strings.Join(c.localityFallbackOrder, ","), c.strictExitLocality, c.maxExitsPerOperator, c.requireDistinctOps, c.stickyPairSec, c.entryRotationSec, c.entryRotationSeed != 0, c.sessionReuse, c.sessionRefreshLeadSec, c.exitExplorationPct, c.selectionFeedDisable, c.selectionFeedRequire, c.selectionFeedMinVotes, c.trustFeedDisable, c.trustFeedRequire, c.trustFeedMinVotes, int(bootstrapInterval/time.Second), int(bootstrapBackoffMax/time.Second), c.bootstrapJitterPct, int(initialDelay/time.Second), int(c.startupSyncTimeout/time.Second), c.betaStrict)
 	if err := c.validateRuntimeConfig(); err != nil {
 		return err
 	}
@@ -1516,6 +1530,45 @@ func minDuration(a time.Duration, b time.Duration) time.Duration {
 	return b
 }
 
+func (c *Client) applyEntryRotation(entries []proto.RelayDescriptor, now time.Time) []proto.RelayDescriptor {
+	if len(entries) <= 1 || c.entryRotationSec <= 0 {
+		return entries
+	}
+	window := int64(c.entryRotationSec)
+	if window <= 0 {
+		return entries
+	}
+
+	seed := c.entryRotationSeed
+	if seed == 0 {
+		s := sha256.Sum256([]byte(strings.TrimSpace(c.clientWGPub)))
+		for i := 0; i < 8; i++ {
+			seed = (seed << 8) | int64(s[i])
+		}
+		if seed < 0 {
+			seed = -seed
+		}
+	}
+	n := int64(len(entries))
+	slotMod := (now.Unix() / window) % n
+	if slotMod < 0 {
+		slotMod += n
+	}
+	seedMod := seed % n
+	if seedMod < 0 {
+		seedMod += n
+	}
+	shift := int((slotMod + seedMod) % n)
+	if shift == 0 {
+		return entries
+	}
+
+	rotated := append([]proto.RelayDescriptor{}, entries[shift:]...)
+	rotated = append(rotated, entries[:shift]...)
+	log.Printf("client entry rotation applied shift=%d entries=%d", shift, len(entries))
+	return rotated
+}
+
 func (c *Client) rememberSelectedPair(pair relayPair, now time.Time) {
 	if strings.TrimSpace(pair.entry.RelayID) == "" || strings.TrimSpace(pair.exit.RelayID) == "" {
 		return
@@ -2534,6 +2587,8 @@ func (c *Client) rankRelayPairs(ctx context.Context, relays []proto.RelayDescrip
 			healthyExits = exits
 		}
 	}
+	now := time.Now()
+	healthyEntries = c.applyEntryRotation(healthyEntries, now)
 	selectedExits, localityMode := c.selectPreferredExits(healthyExits)
 	if localityMode != "" {
 		log.Printf("client exit locality selection mode=%s candidates=%d", localityMode, len(selectedExits))
@@ -2599,7 +2654,7 @@ func (c *Client) rankRelayPairs(ctx context.Context, relays []proto.RelayDescrip
 			addPair(e, x)
 		}
 	}
-	pairs = c.applyStickyPairPreference(pairs, time.Now())
+	pairs = c.applyStickyPairPreference(pairs, now)
 	if c.requireDistinctOps && (droppedSameOperator > 0 || droppedMissingOperator > 0) {
 		log.Printf("client distinct-operator filter applied: dropped_same_operator=%d dropped_missing_operator=%d",
 			droppedSameOperator, droppedMissingOperator)

@@ -116,6 +116,13 @@ Quick non-interactive examples:
   --distinct-operators 1
 ```
 
+Invite-only beta option:
+- add `--client-allowlist 1 --allow-anon-cred 0` to `server-up` so only explicitly onboarded client subjects can receive tokens.
+- onboard subjects with `./scripts/beta_subject_upsert.sh --issuer-url <ISSUER_URL> --admin-token <TOKEN> --subject <CLIENT_ID> --kind client --tier 1`.
+- batch onboarding: `./scripts/beta_subject_batch_upsert.sh --issuer-url <ISSUER_URL> --admin-token <TOKEN> --csv invited_clients.csv`.
+- pass `--subject <CLIENT_ID>` to `client-test`/`machine-c-test` for invited users.
+- one-command validation+soak bundle from machine C: `./scripts/beta_pilot_runbook.sh ...` (outputs `.tar.gz` report bundle under `.easy-node-logs`).
+
 For a full 3-machine flow, see `docs/easy-3-machine-test.md`.
 For a frozen closed-beta command set, see `docs/beta-playbook.md`.
 

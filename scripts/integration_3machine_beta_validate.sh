@@ -17,6 +17,8 @@ Usage:
     [--issuer-b-url URL] \
     [--entry-url URL] \
     [--exit-url URL] \
+    [--subject ID] \
+    [--anon-cred TOKEN] \
     [--min-sources N] \
     [--min-operators N] \
     [--federation-timeout-sec N] \
@@ -298,6 +300,8 @@ issuer_a_url=""
 issuer_b_url=""
 entry_url=""
 exit_url=""
+client_subject=""
+client_anon_cred=""
 bootstrap_directory=""
 discovery_wait_sec="${THREE_MACHINE_DISCOVERY_WAIT_SEC:-12}"
 bootstrap_discovered=""
@@ -357,6 +361,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --min-sources)
       min_sources="${2:-}"
+      shift 2
+      ;;
+    --subject)
+      client_subject="${2:-}"
+      shift 2
+      ;;
+    --anon-cred)
+      client_anon_cred="${2:-}"
       shift 2
       ;;
     --min-operators)
@@ -453,6 +465,10 @@ if [[ -n "$require_issuer_quorum" && "$require_issuer_quorum" != "0" && "$requir
 fi
 if [[ -n "$client_require_cross_operator_pair" && "$client_require_cross_operator_pair" != "0" && "$client_require_cross_operator_pair" != "1" ]]; then
   echo "--client-require-cross-operator-pair must be 0 or 1"
+  exit 2
+fi
+if [[ -n "$client_subject" && -n "$client_anon_cred" ]]; then
+  echo "set only one of --subject or --anon-cred"
   exit 2
 fi
 
@@ -717,6 +733,12 @@ client_cmd=(
   --require-cross-operator-pair "$client_require_cross_operator_pair"
   --beta-profile "$beta_profile"
 )
+if [[ -n "$client_subject" ]]; then
+  client_cmd+=(--subject "$client_subject")
+fi
+if [[ -n "$client_anon_cred" ]]; then
+  client_cmd+=(--anon-cred "$client_anon_cred")
+fi
 if [[ -n "$exit_country" ]]; then
   client_cmd+=(--exit-country "$exit_country")
 fi

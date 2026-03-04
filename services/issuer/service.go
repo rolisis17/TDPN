@@ -40,6 +40,8 @@ type Service struct {
 	trustOperatorID     string
 	disputeDefaultTTL   time.Duration
 	adminToken          string
+	clientAllowlistOnly bool
+	disableAnonCred     bool
 	anonCredExposeID    bool
 	betaStrict          bool
 	mu                  sync.RWMutex
@@ -161,6 +163,8 @@ func New() *Service {
 		}
 	}
 	anonCredExposeID := os.Getenv("ISSUER_ANON_CRED_EXPOSE_ID") == "1"
+	clientAllowlistOnly := os.Getenv("ISSUER_CLIENT_ALLOWLIST_ONLY") == "1"
+	disableAnonCred := os.Getenv("ISSUER_ALLOW_ANON_CRED") == "0"
 	betaStrict := os.Getenv("BETA_STRICT_MODE") == "1" || os.Getenv("ISSUER_BETA_STRICT") == "1"
 	return &Service{
 		addr:                addr,
@@ -178,6 +182,8 @@ func New() *Service {
 		keyRotateSec:        keyRotateSec,
 		keyHistory:          keyHistory,
 		adminToken:          adminToken,
+		clientAllowlistOnly: clientAllowlistOnly,
+		disableAnonCred:     disableAnonCred,
 		anonCredExposeID:    anonCredExposeID,
 		betaStrict:          betaStrict,
 		subjects:            make(map[string]proto.SubjectProfile),
@@ -376,6 +382,10 @@ func (s *Service) handleIssueToken(w http.ResponseWriter, r *http.Request) {
 	switch tokenType {
 	case crypto.TokenTypeClientAccess:
 		if req.AnonCred != "" {
+			if s.disableAnonCred {
+				http.Error(w, "anonymous credential token issuance disabled", http.StatusForbidden)
+				return
+			}
 			if req.Subject != "" {
 				http.Error(w, "subject must be empty when anon_cred is provided", http.StatusBadRequest)
 				return
@@ -401,6 +411,10 @@ func (s *Service) handleIssueToken(w http.ResponseWriter, r *http.Request) {
 			claims = baseClaimsForTier(s.issuerID, subject, keyEpoch, "exit", tokenType, popPubKey, effectiveTier, expires, req.ExitScope)
 			claims.AnonCredID = anonymousCredentialPresentationID(s.issuerID, cred.CredentialID, claims.TokenID, s.anonCredExposeID)
 		} else {
+			if s.clientAllowlistOnly && !s.subjectEligibleForClientToken(req.Subject) {
+				http.Error(w, "client subject not allowlisted", http.StatusForbidden)
+				return
+			}
 			effectiveTier := s.effectiveTierFor(req.Subject, req.Tier)
 			claims = baseClaimsForTier(s.issuerID, req.Subject, keyEpoch, "exit", tokenType, popPubKey, effectiveTier, expires, req.ExitScope)
 		}
@@ -1412,6 +1426,20 @@ func (s *Service) effectiveTierFor(subject string, requested int) int {
 		return requested
 	}
 	return eligible
+}
+
+func (s *Service) subjectEligibleForClientToken(subject string) bool {
+	subject = strings.TrimSpace(subject)
+	if subject == "" {
+		return false
+	}
+	s.mu.RLock()
+	p, ok := s.subjects[subject]
+	s.mu.RUnlock()
+	if !ok {
+		return false
+	}
+	return normalizeSubjectKind(p.Kind, "") == proto.SubjectKindClient
 }
 
 func (s *Service) handlePubKey(w http.ResponseWriter, r *http.Request) {

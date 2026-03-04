@@ -1,2 +1,30 @@
-.gocahe/*
+# Go build cache
+.gocache/
+.gocahe/
+
+# Local logs and run artifacts
 .easy-node-logs/
+:8081
+
+# Local server env (contains admin/operator secrets)
+deploy/.env.easy.server
+
+# Generated runtime data for docker/easy-mode runs
+deploy/data/
+data/easy_mode_hosts.conf
+data/issuer_subjects.json
+data/issuer_revocations.json
+data/issuer_anon_revocations.json
+data/issuer_anon_disputes.json
+data/issuer_audit.json
+data/issuer_epochs.json
+data/issuer_previous_pubkeys.txt
+data/directory_previous_pubkeys.txt
+data/directory_peer_trusted_keys.txt
+
+# Sensitive key material
+*.key
+*.pem
+*.p12
+*.pfx
+*.pk8

@@ -21,16 +21,20 @@ usage() {
   cat <<'USAGE'
 Usage:
   ./scripts/easy_node.sh check
-  ./scripts/easy_node.sh server-up [--public-host HOST] [--operator-id ID] [--issuer-id ID] [--issuer-admin-token TOKEN] [--peer-directories URLS] [--bootstrap-directory URL] [--beta-profile [0|1]]
+  ./scripts/easy_node.sh server-up [--public-host HOST] [--operator-id ID] [--issuer-id ID] [--issuer-admin-token TOKEN] [--peer-directories URLS] [--bootstrap-directory URL] [--client-allowlist [0|1]] [--allow-anon-cred [0|1]] [--beta-profile [0|1]]
   ./scripts/easy_node.sh server-status
   ./scripts/easy_node.sh server-logs
   ./scripts/easy_node.sh server-down
-  ./scripts/easy_node.sh client-test [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--min-sources N] [--exit-country CC] [--exit-region REGION] [--timeout-sec N] [--distinct-operators [0|1]] [--min-selection-lines N] [--min-entry-operators N] [--min-exit-operators N] [--require-cross-operator-pair [0|1]] [--beta-profile [0|1]]
-  ./scripts/easy_node.sh three-machine-validate [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-a-url URL] [--issuer-b-url URL] [--entry-url URL] [--exit-url URL] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--client-min-selection-lines N] [--client-min-entry-operators N] [--client-min-exit-operators N] [--client-require-cross-operator-pair [0|1]] [--exit-country CC] [--exit-region REGION] [--distinct-operators [0|1]] [--require-issuer-quorum [0|1]] [--beta-profile [0|1]]
-  ./scripts/easy_node.sh three-machine-soak [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-a-url URL] [--issuer-b-url URL] [--entry-url URL] [--exit-url URL] [--rounds N] [--pause-sec N] [--fault-every N] [--fault-command CMD] [--continue-on-fail [0|1]] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--client-min-selection-lines N] [--client-min-entry-operators N] [--client-min-exit-operators N] [--client-require-cross-operator-pair [0|1]] [--exit-country CC] [--exit-region REGION] [--distinct-operators [0|1]] [--require-issuer-quorum [0|1]] [--beta-profile [0|1]] [--report-file PATH]
+  ./scripts/easy_node.sh client-test [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--exit-country CC] [--exit-region REGION] [--timeout-sec N] [--distinct-operators [0|1]] [--min-selection-lines N] [--min-entry-operators N] [--min-exit-operators N] [--require-cross-operator-pair [0|1]] [--beta-profile [0|1]]
+  ./scripts/easy_node.sh three-machine-validate [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-a-url URL] [--issuer-b-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--client-min-selection-lines N] [--client-min-entry-operators N] [--client-min-exit-operators N] [--client-require-cross-operator-pair [0|1]] [--exit-country CC] [--exit-region REGION] [--distinct-operators [0|1]] [--require-issuer-quorum [0|1]] [--beta-profile [0|1]]
+  ./scripts/easy_node.sh three-machine-soak [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-a-url URL] [--issuer-b-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--rounds N] [--pause-sec N] [--fault-every N] [--fault-command CMD] [--continue-on-fail [0|1]] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--client-min-selection-lines N] [--client-min-entry-operators N] [--client-min-exit-operators N] [--client-require-cross-operator-pair [0|1]] [--exit-country CC] [--exit-region REGION] [--distinct-operators [0|1]] [--require-issuer-quorum [0|1]] [--beta-profile [0|1]] [--report-file PATH]
+  ./scripts/easy_node.sh pilot-runbook [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-a-url URL] [--issuer-b-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--rounds N] [--pause-sec N] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--client-min-selection-lines N] [--client-min-entry-operators N] [--client-min-exit-operators N] [--client-require-cross-operator-pair [0|1]] [--distinct-operators [0|1]] [--require-issuer-quorum [0|1]] [--beta-profile [0|1]] [--bundle-dir PATH]
+  ./scripts/easy_node.sh invite-generate [--issuer-url URL] [--admin-token TOKEN] [--count N] [--prefix PREFIX] [--tier 1|2|3]
+  ./scripts/easy_node.sh invite-check --key KEY [--issuer-url URL] [--admin-token TOKEN]
+  ./scripts/easy_node.sh invite-disable --key KEY [--issuer-url URL] [--admin-token TOKEN]
   ./scripts/easy_node.sh machine-a-test [--public-host HOST] [--report-file PATH]
   ./scripts/easy_node.sh machine-b-test --peer-directory-a URL [--public-host HOST] [--min-operators N] [--federation-timeout-sec N] [--report-file PATH]
-  ./scripts/easy_node.sh machine-c-test [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--exit-country CC] [--exit-region REGION] [--distinct-operators [0|1]] [--beta-profile [0|1]] [--report-file PATH]
+  ./scripts/easy_node.sh machine-c-test [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--exit-country CC] [--exit-region REGION] [--distinct-operators [0|1]] [--beta-profile [0|1]] [--report-file PATH]
   ./scripts/easy_node.sh discover-hosts --bootstrap-directory URL [--wait-sec N] [--min-hosts N] [--write-config [0|1]]
 
 Notes:
@@ -464,6 +468,8 @@ write_server_env() {
   local issuer_admin_token="$4"
   local peer_dirs="$5"
   local beta_profile="$6"
+  local client_allowlist="$7"
+  local allow_anon_cred="$8"
   local relay_suffix
   local issuer_suffix
   relay_suffix="$(sanitize_id_component "$operator_id")"
@@ -493,6 +499,8 @@ ISSUER_ANON_REVOCATIONS_FILE=/app/data/issuer_${issuer_suffix}_anon_revocations.
 ISSUER_ANON_DISPUTES_FILE=/app/data/issuer_${issuer_suffix}_anon_disputes.json
 ISSUER_AUDIT_FILE=/app/data/issuer_${issuer_suffix}_audit.json
 ISSUER_ADMIN_TOKEN=${issuer_admin_token}
+ISSUER_CLIENT_ALLOWLIST_ONLY=${client_allowlist}
+ISSUER_ALLOW_ANON_CRED=${allow_anon_cred}
 EOF_ENV
 
   if [[ -n "$peer_dirs" ]]; then
@@ -540,6 +548,8 @@ server_up() {
   local issuer_admin_token=""
   local peer_dirs=""
   local bootstrap_directory=""
+  local client_allowlist="${EASY_NODE_CLIENT_ALLOWLIST_ONLY:-0}"
+  local allow_anon_cred="${EASY_NODE_ALLOW_ANON_CRED:-1}"
   local beta_profile="${EASY_NODE_BETA_PROFILE:-0}"
 
   while [[ $# -gt 0 ]]; do
@@ -570,6 +580,24 @@ server_up() {
         bootstrap_directory="${2:-}"
         shift 2
         ;;
+      --client-allowlist)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          client_allowlist="${2:-}"
+          shift 2
+        else
+          client_allowlist="1"
+          shift
+        fi
+        ;;
+      --allow-anon-cred)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          allow_anon_cred="${2:-}"
+          shift 2
+        else
+          allow_anon_cred="0"
+          shift
+        fi
+        ;;
       --beta-profile)
         if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
           beta_profile="${2:-}"
@@ -588,6 +616,14 @@ server_up() {
 
   if [[ "$beta_profile" != "0" && "$beta_profile" != "1" ]]; then
     echo "server-up requires --beta-profile (or EASY_NODE_BETA_PROFILE) to be 0 or 1"
+    exit 2
+  fi
+  if [[ "$client_allowlist" != "0" && "$client_allowlist" != "1" ]]; then
+    echo "server-up requires --client-allowlist (or EASY_NODE_CLIENT_ALLOWLIST_ONLY) to be 0 or 1"
+    exit 2
+  fi
+  if [[ "$allow_anon_cred" != "0" && "$allow_anon_cred" != "1" ]]; then
+    echo "server-up requires --allow-anon-cred (or EASY_NODE_ALLOW_ANON_CRED) to be 0 or 1"
     exit 2
   fi
 
@@ -676,7 +712,7 @@ server_up() {
   fi
 
   write_identity_config "$operator_id" "$issuer_id"
-  write_server_env "$public_host" "$operator_id" "$issuer_id" "$issuer_admin_token" "$peer_dirs" "$beta_profile"
+  write_server_env "$public_host" "$operator_id" "$issuer_id" "$issuer_admin_token" "$peer_dirs" "$beta_profile" "$client_allowlist" "$allow_anon_cred"
 
   compose_server up -d --build directory issuer entry-exit
 
@@ -703,6 +739,8 @@ server_up() {
   if [[ "$beta_profile" == "1" ]]; then
     echo "beta profile: enabled (quorum and anti-concentration defaults applied)"
   fi
+  echo "client_allowlist: $client_allowlist"
+  echo "allow_anon_cred: $allow_anon_cred"
   echo "health checks:"
   echo "  curl http://${public_host}:8081/v1/relays"
   echo "  curl http://${public_host}:8082/v1/pubkeys"
@@ -855,18 +893,279 @@ machine_c_test() {
   "$ROOT_DIR/scripts/integration_machine_c_client_check.sh" "$@"
 }
 
+pilot_runbook() {
+  ensure_deps_or_die
+  "$ROOT_DIR/scripts/beta_pilot_runbook.sh" "$@"
+}
+
+server_env_value() {
+  local key="$1"
+  identity_value "$SERVER_ENV_FILE" "$key"
+}
+
+default_issuer_url_for_invites() {
+  local issuer_url=""
+  local directory_public_url=""
+  local public_host=""
+
+  directory_public_url="$(server_env_value "DIRECTORY_PUBLIC_URL")"
+  if [[ -n "$directory_public_url" ]]; then
+    public_host="$(host_from_url "$directory_public_url")"
+    if [[ -n "$public_host" ]]; then
+      issuer_url="$(url_from_host_port "$public_host" 8082)"
+    fi
+  fi
+  if [[ -z "$issuer_url" ]]; then
+    issuer_url="http://127.0.0.1:8082"
+  fi
+  echo "$issuer_url"
+}
+
+invite_generate() {
+  local issuer_url="${ISSUER_URL:-}"
+  local admin_token="${ISSUER_ADMIN_TOKEN:-}"
+  local count="1"
+  local prefix="inv"
+  local tier="1"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --issuer-url)
+        issuer_url="${2:-}"
+        shift 2
+        ;;
+      --admin-token)
+        admin_token="${2:-}"
+        shift 2
+        ;;
+      --count)
+        count="${2:-}"
+        shift 2
+        ;;
+      --prefix)
+        prefix="${2:-}"
+        shift 2
+        ;;
+      --tier)
+        tier="${2:-}"
+        shift 2
+        ;;
+      -h|--help|help)
+        usage
+        return 0
+        ;;
+      *)
+        echo "unknown arg for invite-generate: $1"
+        exit 2
+        ;;
+    esac
+  done
+
+  if [[ -z "$issuer_url" ]]; then
+    issuer_url="$(default_issuer_url_for_invites)"
+  fi
+  issuer_url="$(trim_url "$issuer_url")"
+
+  if [[ -z "$admin_token" ]]; then
+    admin_token="$(server_env_value "ISSUER_ADMIN_TOKEN")"
+  fi
+  if [[ -z "$admin_token" ]]; then
+    echo "invite-generate requires --admin-token or ISSUER_ADMIN_TOKEN in $SERVER_ENV_FILE"
+    exit 2
+  fi
+  if ! [[ "$count" =~ ^[0-9]+$ ]] || ((count < 1)); then
+    echo "invite-generate requires --count >= 1"
+    exit 2
+  fi
+  if [[ "$tier" != "1" && "$tier" != "2" && "$tier" != "3" ]]; then
+    echo "invite-generate requires --tier 1|2|3"
+    exit 2
+  fi
+  prefix="$(printf '%s' "$prefix" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-_')"
+  if [[ -z "$prefix" ]]; then
+    prefix="inv"
+  fi
+
+  local upsert_script="$ROOT_DIR/scripts/beta_subject_upsert.sh"
+  if [[ ! -x "$upsert_script" ]]; then
+    echo "missing helper script: $upsert_script"
+    exit 2
+  fi
+
+  local generated=0
+  local attempts=0
+  local max_attempts=$((count * 8))
+  if ((max_attempts < 8)); then
+    max_attempts=8
+  fi
+  local key
+  while ((generated < count)); do
+    attempts=$((attempts + 1))
+    if ((attempts > max_attempts)); then
+      echo "invite-generate failed: could not create requested keys after $max_attempts attempts"
+      echo "check issuer URL/admin token: issuer=$issuer_url"
+      exit 1
+    fi
+    key="${prefix}-$(random_token | tr -cd 'a-zA-Z0-9' | tr '[:upper:]' '[:lower:]' | head -c 22)"
+    if [[ -z "$key" ]]; then
+      continue
+    fi
+    if "$upsert_script" \
+      --issuer-url "$issuer_url" \
+      --admin-token "$admin_token" \
+      --subject "$key" \
+      --kind "client" \
+      --tier "$tier" >/dev/null 2>&1; then
+      generated=$((generated + 1))
+      echo "$key"
+    fi
+  done
+  echo "invite keys generated: $generated (issuer=$issuer_url)"
+}
+
+invite_check() {
+  local key=""
+  local issuer_url="${ISSUER_URL:-}"
+  local admin_token="${ISSUER_ADMIN_TOKEN:-}"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --key|--subject)
+        key="${2:-}"
+        shift 2
+        ;;
+      --issuer-url)
+        issuer_url="${2:-}"
+        shift 2
+        ;;
+      --admin-token)
+        admin_token="${2:-}"
+        shift 2
+        ;;
+      -h|--help|help)
+        usage
+        return 0
+        ;;
+      *)
+        echo "unknown arg for invite-check: $1"
+        exit 2
+        ;;
+    esac
+  done
+
+  key="$(trim "$key")"
+  if [[ -z "$key" ]]; then
+    echo "invite-check requires --key"
+    exit 2
+  fi
+  if [[ -z "$issuer_url" ]]; then
+    issuer_url="$(default_issuer_url_for_invites)"
+  fi
+  issuer_url="$(trim_url "$issuer_url")"
+  if [[ -z "$admin_token" ]]; then
+    admin_token="$(server_env_value "ISSUER_ADMIN_TOKEN")"
+  fi
+  if [[ -z "$admin_token" ]]; then
+    echo "invite-check requires --admin-token or ISSUER_ADMIN_TOKEN in $SERVER_ENV_FILE"
+    exit 2
+  fi
+
+  local payload
+  payload="$(curl -fsS "${issuer_url}/v1/admin/subject/get?subject=${key}" \
+    -H "Authorization: Bearer ${admin_token}" 2>/dev/null || true)"
+  if [[ -z "$payload" ]]; then
+    echo "invite key not found: $key"
+    exit 1
+  fi
+
+  local kind tier
+  kind="$(printf '%s\n' "$payload" | rg -o '"kind":"[^"]+"' | head -n 1 | sed -E 's/^"kind":"([^"]+)"$/\1/')"
+  tier="$(printf '%s\n' "$payload" | rg -o '"tier":[0-9]+' | head -n 1 | sed -E 's/^"tier":([0-9]+)$/\1/')"
+  if [[ "$kind" == "client" && "${tier:-0}" -ge 1 ]]; then
+    echo "invite key valid: key=$key kind=$kind tier=$tier issuer=$issuer_url"
+    return 0
+  fi
+  echo "invite key not eligible for client use: key=$key kind=${kind:-unknown} tier=${tier:-unknown}"
+  return 1
+}
+
+invite_disable() {
+  local key=""
+  local issuer_url="${ISSUER_URL:-}"
+  local admin_token="${ISSUER_ADMIN_TOKEN:-}"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --key|--subject)
+        key="${2:-}"
+        shift 2
+        ;;
+      --issuer-url)
+        issuer_url="${2:-}"
+        shift 2
+        ;;
+      --admin-token)
+        admin_token="${2:-}"
+        shift 2
+        ;;
+      -h|--help|help)
+        usage
+        return 0
+        ;;
+      *)
+        echo "unknown arg for invite-disable: $1"
+        exit 2
+        ;;
+    esac
+  done
+
+  key="$(trim "$key")"
+  if [[ -z "$key" ]]; then
+    echo "invite-disable requires --key"
+    exit 2
+  fi
+  if [[ -z "$issuer_url" ]]; then
+    issuer_url="$(default_issuer_url_for_invites)"
+  fi
+  issuer_url="$(trim_url "$issuer_url")"
+  if [[ -z "$admin_token" ]]; then
+    admin_token="$(server_env_value "ISSUER_ADMIN_TOKEN")"
+  fi
+  if [[ -z "$admin_token" ]]; then
+    echo "invite-disable requires --admin-token or ISSUER_ADMIN_TOKEN in $SERVER_ENV_FILE"
+    exit 2
+  fi
+
+  local upsert_script="$ROOT_DIR/scripts/beta_subject_upsert.sh"
+  if [[ ! -x "$upsert_script" ]]; then
+    echo "missing helper script: $upsert_script"
+    exit 2
+  fi
+  "$upsert_script" \
+    --issuer-url "$issuer_url" \
+    --admin-token "$admin_token" \
+    --subject "$key" \
+    --kind "relay-exit" \
+    --tier "1" >/dev/null
+  echo "invite key disabled: $key (issuer=$issuer_url)"
+}
+
 client_test() {
   local directory_urls=""
   local issuer_url=""
   local entry_url=""
   local exit_url=""
   local min_sources="1"
+  local client_subject="${CLIENT_SUBJECT:-}"
+  local client_anon_cred="${CLIENT_ANON_CRED:-}"
   local exit_country=""
   local exit_region=""
   local timeout_sec="35"
   local build_timeout_sec="${EASY_NODE_CLIENT_BUILD_TIMEOUT_SEC:-180}"
   local force_build="${EASY_NODE_CLIENT_FORCE_BUILD:-0}"
   local require_distinct_operators="${CLIENT_REQUIRE_DISTINCT_OPERATORS:-0}"
+  local entry_rotation_sec="${CLIENT_ENTRY_ROTATION_SEC:-0}"
+  local entry_rotation_seed="${CLIENT_ENTRY_ROTATION_SEED:-0}"
   local min_selection_lines="${EASY_NODE_CLIENT_MIN_SELECTION_LINES:-1}"
   local min_entry_operators="${EASY_NODE_CLIENT_MIN_ENTRY_OPERATORS:-1}"
   local min_exit_operators="${EASY_NODE_CLIENT_MIN_EXIT_OPERATORS:-1}"
@@ -906,6 +1205,14 @@ client_test() {
       --min-sources)
         min_sources="${2:-}"
         min_sources_set=1
+        shift 2
+        ;;
+      --subject)
+        client_subject="${2:-}"
+        shift 2
+        ;;
+      --anon-cred)
+        client_anon_cred="${2:-}"
         shift 2
         ;;
       --exit-country)
@@ -976,6 +1283,14 @@ client_test() {
     echo "client-test requires --require-cross-operator-pair to be 0 or 1"
     exit 2
   fi
+  if ! [[ "$entry_rotation_sec" =~ ^[0-9]+$ ]]; then
+    echo "client-test requires CLIENT_ENTRY_ROTATION_SEC to be numeric"
+    exit 2
+  fi
+  if ! [[ "$entry_rotation_seed" =~ ^-?[0-9]+$ ]]; then
+    echo "client-test requires CLIENT_ENTRY_ROTATION_SEED to be numeric"
+    exit 2
+  fi
   if ! [[ "$min_selection_lines" =~ ^[0-9]+$ && "$min_entry_operators" =~ ^[0-9]+$ && "$min_exit_operators" =~ ^[0-9]+$ ]]; then
     echo "client-test requires --min-selection-lines, --min-entry-operators and --min-exit-operators to be numeric"
     exit 2
@@ -991,6 +1306,10 @@ client_test() {
     if [[ "$min_sources_set" -eq 0 ]] && [[ "$directory_urls" == *,* ]]; then
       min_sources="2"
     fi
+  fi
+  if [[ -n "$client_subject" && -n "$client_anon_cred" ]]; then
+    echo "client-test requires exactly one of --subject or --anon-cred"
+    exit 2
   fi
 
   if [[ -n "$bootstrap_directory" ]]; then
@@ -1037,6 +1356,8 @@ CLIENT_DIRECTORY_URL=${first_dir}
 CLIENT_ISSUER_URL=${issuer_url}
 CLIENT_ENTRY_URL=${entry_url}
 CLIENT_EXIT_CONTROL_URL=${exit_url}
+CLIENT_ENTRY_ROTATION_SEC=${entry_rotation_sec}
+CLIENT_ENTRY_ROTATION_SEED=${entry_rotation_seed}
 EOF_CLIENT
 
   local log_dir
@@ -1099,7 +1420,15 @@ EOF_CLIENT
     -e "EXIT_CONTROL_URL=$exit_url"
     -e "CLIENT_BOOTSTRAP_INTERVAL_SEC=2"
     -e "CLIENT_REQUIRE_DISTINCT_OPERATORS=$require_distinct_operators"
+    -e "CLIENT_ENTRY_ROTATION_SEC=$entry_rotation_sec"
+    -e "CLIENT_ENTRY_ROTATION_SEED=$entry_rotation_seed"
   )
+  if [[ -n "$client_subject" ]]; then
+    run_cmd+=(-e "CLIENT_SUBJECT=$client_subject")
+  fi
+  if [[ -n "$client_anon_cred" ]]; then
+    run_cmd+=(-e "CLIENT_ANON_CRED=$client_anon_cred")
+  fi
   if [[ "$beta_profile" == "1" ]]; then
     run_cmd+=(
       -e "DIRECTORY_MIN_OPERATORS=2"
@@ -1250,6 +1579,18 @@ main() {
       shift
       three_machine_soak "$@"
       ;;
+    invite-generate)
+      shift
+      invite_generate "$@"
+      ;;
+    invite-check)
+      shift
+      invite_check "$@"
+      ;;
+    invite-disable)
+      shift
+      invite_disable "$@"
+      ;;
     machine-a-test)
       shift
       machine_a_test "$@"
@@ -1261,6 +1602,10 @@ main() {
     machine-c-test)
       shift
       machine_c_test "$@"
+      ;;
+    pilot-runbook)
+      shift
+      pilot_runbook "$@"
       ;;
     discover-hosts)
       shift
