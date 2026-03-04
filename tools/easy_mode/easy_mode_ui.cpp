@@ -628,18 +628,20 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
   for (;;) {
     std::cout << "\nAdvanced options:\n";
     std::cout << "1) Check dependencies\n";
-    std::cout << "2) Server status\n";
-    std::cout << "3) Server logs\n";
-    std::cout << "4) Stop server stack\n";
-    std::cout << "5) Generate invite key(s)\n";
-    std::cout << "6) Check invite key\n";
-    std::cout << "7) Disable invite key\n";
-    std::cout << "8) Run 3-machine validation\n";
-    std::cout << "9) Run 3-machine soak test\n";
-    std::cout << "10) Run pilot runbook bundle\n";
-    std::cout << "11) Run automated tests\n";
-    std::cout << "12) Configure machine A/B hosts\n";
-    std::cout << "13) Show 3-machine test guide\n";
+    std::cout << "2) Install Ubuntu dependencies\n";
+    std::cout << "3) Server status\n";
+    std::cout << "4) Server logs\n";
+    std::cout << "5) Stop server stack\n";
+    std::cout << "6) Stop ALL local docker resources\n";
+    std::cout << "7) Generate invite key(s)\n";
+    std::cout << "8) Check invite key\n";
+    std::cout << "9) Disable invite key\n";
+    std::cout << "10) Run 3-machine validation\n";
+    std::cout << "11) Run 3-machine soak test\n";
+    std::cout << "12) Run pilot runbook bundle\n";
+    std::cout << "13) Run automated tests\n";
+    std::cout << "14) Configure machine A/B hosts\n";
+    std::cout << "15) Show 3-machine test guide\n";
     std::cout << "0) Back\n";
     std::cout << "Selection: ";
 
@@ -651,22 +653,41 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       return;
     }
     if (choice == "1") {
-      runCommand(shellEscape(script) + " check");
+      int rc = runCommand(shellEscape(script) + " check");
+      if (rc != 0) {
+        bool installNow = parseYesNo(readLine("Install Ubuntu dependencies now? (y/N)", "n"), false);
+        if (installNow) {
+          runCommand(shellEscape(script) + " install-deps-ubuntu");
+        }
+      }
       continue;
     }
     if (choice == "2") {
-      runCommand(shellEscape(script) + " server-status");
+      runCommand(shellEscape(script) + " install-deps-ubuntu");
       continue;
     }
     if (choice == "3") {
-      runCommand(shellEscape(script) + " server-logs");
+      runCommand(shellEscape(script) + " server-status");
       continue;
     }
     if (choice == "4") {
-      runCommand(shellEscape(script) + " server-down");
+      runCommand(shellEscape(script) + " server-logs");
       continue;
     }
     if (choice == "5") {
+      runCommand(shellEscape(script) + " server-down");
+      continue;
+    }
+    if (choice == "6") {
+      bool confirm = parseYesNo(readLine("Stop and remove all local Privacynode docker resources? (y/N)", "n"), false);
+      if (confirm) {
+        runCommand(shellEscape(script) + " stop-all");
+      } else {
+        std::cout << "cancelled\n";
+      }
+      continue;
+    }
+    if (choice == "7") {
       std::string count = readLine("How many keys", "1");
       std::string prefix = readLine("Key prefix", "inv");
       std::string tier = readLine("Tier (1/2/3)", "1");
@@ -686,7 +707,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       runCommand(cmd.str());
       continue;
     }
-    if (choice == "6") {
+    if (choice == "8") {
       std::string key = trim(readLine("Invite key", ""));
       std::string issuer = normalizeEndpointURL(readLine("Issuer URL (optional)", ""), 8082);
       std::string adminToken = trim(readLine("Admin token (optional; blank=read from server env)", ""));
@@ -706,7 +727,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       runCommand(cmd.str());
       continue;
     }
-    if (choice == "7") {
+    if (choice == "9") {
       std::string key = trim(readLine("Invite key to disable", ""));
       std::string issuer = normalizeEndpointURL(readLine("Issuer URL (optional)", ""), 8082);
       std::string adminToken = trim(readLine("Admin token (optional; blank=read from server env)", ""));
@@ -726,7 +747,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       runCommand(cmd.str());
       continue;
     }
-    if (choice == "8") {
+    if (choice == "10") {
       bool autoDiscover = parseYesNo(readLine("Use one bootstrap directory and auto-discover peers? (Y/n)", "y"), true);
       std::string bootstrapDefault = !hosts.aHost.empty() ? endpointFromHost(hosts.aHost, 8081) : (!hosts.bHost.empty() ? endpointFromHost(hosts.bHost, 8081) : "");
       std::string bootstrapDir;
@@ -788,7 +809,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       runCommand(cmd.str());
       continue;
     }
-    if (choice == "9") {
+    if (choice == "11") {
       bool autoDiscover = parseYesNo(readLine("Use one bootstrap directory and auto-discover peers? (Y/n)", "y"), true);
       std::string bootstrapDefault = !hosts.aHost.empty() ? endpointFromHost(hosts.aHost, 8081) : (!hosts.bHost.empty() ? endpointFromHost(hosts.bHost, 8081) : "");
       std::string bootstrapDir;
@@ -852,7 +873,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       runCommand(cmd.str());
       continue;
     }
-    if (choice == "10") {
+    if (choice == "12") {
       bool autoDiscover = parseYesNo(readLine("Use one bootstrap directory and auto-discover peers? (Y/n)", "y"), true);
       std::string bootstrapDefault = !hosts.aHost.empty() ? endpointFromHost(hosts.aHost, 8081) : (!hosts.bHost.empty() ? endpointFromHost(hosts.bHost, 8081) : "");
       std::string bootstrapDir;
@@ -908,11 +929,11 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       runCommand(cmd.str());
       continue;
     }
-    if (choice == "11") {
+    if (choice == "13") {
       runTestsInteractive(root, script, hosts);
       continue;
     }
-    if (choice == "12") {
+    if (choice == "14") {
       bool autoDiscoverHosts = parseYesNo(readLine("Auto-discover machine A/B hosts from one bootstrap directory? (Y/n)", "y"), true);
       if (autoDiscoverHosts) {
         std::string bootstrapDefault = !hosts.aHost.empty() ? endpointFromHost(hosts.aHost, 8081) : (!hosts.bHost.empty() ? endpointFromHost(hosts.bHost, 8081) : "");
@@ -934,7 +955,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       }
       continue;
     }
-    if (choice == "13") {
+    if (choice == "15") {
       showThreeMachineGuide();
       continue;
     }

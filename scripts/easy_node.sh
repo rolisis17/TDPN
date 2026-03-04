@@ -25,6 +25,8 @@ Usage:
   ./scripts/easy_node.sh server-status
   ./scripts/easy_node.sh server-logs
   ./scripts/easy_node.sh server-down
+  ./scripts/easy_node.sh stop-all
+  ./scripts/easy_node.sh install-deps-ubuntu
   ./scripts/easy_node.sh client-test [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--exit-country CC] [--exit-region REGION] [--timeout-sec N] [--distinct-operators [0|1]] [--min-selection-lines N] [--min-entry-operators N] [--min-exit-operators N] [--require-cross-operator-pair [0|1]] [--beta-profile [0|1]]
   ./scripts/easy_node.sh three-machine-validate [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-a-url URL] [--issuer-b-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--client-min-selection-lines N] [--client-min-entry-operators N] [--client-min-exit-operators N] [--client-require-cross-operator-pair [0|1]] [--exit-country CC] [--exit-region REGION] [--distinct-operators [0|1]] [--require-issuer-quorum [0|1]] [--beta-profile [0|1]]
   ./scripts/easy_node.sh three-machine-soak [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-a-url URL] [--issuer-b-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--rounds N] [--pause-sec N] [--fault-every N] [--fault-command CMD] [--continue-on-fail [0|1]] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--client-min-selection-lines N] [--client-min-entry-operators N] [--client-min-exit-operators N] [--client-require-cross-operator-pair [0|1]] [--exit-country CC] [--exit-region REGION] [--distinct-operators [0|1]] [--require-issuer-quorum [0|1]] [--beta-profile [0|1]] [--report-file PATH]
@@ -772,6 +774,55 @@ server_down() {
   compose_server down --remove-orphans
 }
 
+cleanup_client_demo_artifacts() {
+  local stale_runs=""
+
+  stale_runs="$(docker ps -aq --filter "name=deploy-client-demo-run-" || true)"
+  if [[ -n "$stale_runs" ]]; then
+    # Best-effort cleanup for interrupted client runs.
+    docker rm -f $stale_runs >/dev/null 2>&1 || true
+  fi
+
+  # Remove dangling default network if it is no longer in use.
+  if docker network inspect deploy_default >/dev/null 2>&1; then
+    docker network rm deploy_default >/dev/null 2>&1 || true
+  fi
+}
+
+stop_all() {
+  ensure_deps_or_die
+
+  compose_server down --remove-orphans >/dev/null 2>&1 || true
+  (
+    cd "$DEPLOY_DIR"
+    env COMPOSE_INTERACTIVE_NO_CLI=1 COMPOSE_MENU=0 docker compose --profile demo down --remove-orphans >/dev/null 2>&1 || true
+  )
+  cleanup_client_demo_artifacts
+
+  local compose_ids=""
+  compose_ids="$(docker ps -aq --filter "label=com.docker.compose.project=deploy" || true)"
+  if [[ -n "$compose_ids" ]]; then
+    docker rm -f $compose_ids >/dev/null 2>&1 || true
+  fi
+
+  local compose_networks=""
+  compose_networks="$(docker network ls -q --filter "label=com.docker.compose.project=deploy" || true)"
+  if [[ -n "$compose_networks" ]]; then
+    docker network rm $compose_networks >/dev/null 2>&1 || true
+  fi
+
+  echo "all local Privacynode docker resources are stopped"
+}
+
+install_deps_ubuntu() {
+  local installer="$ROOT_DIR/scripts/install_deps_ubuntu.sh"
+  if [[ ! -x "$installer" ]]; then
+    echo "missing installer script: $installer"
+    exit 2
+  fi
+  "$installer"
+}
+
 three_machine_validate() {
   ensure_deps_or_die
   "$ROOT_DIR/scripts/integration_3machine_beta_validate.sh" "$@"
@@ -1347,6 +1398,7 @@ client_test() {
   fi
 
   ensure_deps_or_die
+  cleanup_client_demo_artifacts
 
   local first_dir
   first_dir="$(first_csv_item "$directory_urls")"
@@ -1566,6 +1618,12 @@ main() {
       ;;
     server-down)
       server_down
+      ;;
+    stop-all)
+      stop_all
+      ;;
+    install-deps-ubuntu)
+      install_deps_ubuntu
       ;;
     client-test)
       shift
