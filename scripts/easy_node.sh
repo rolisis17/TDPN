@@ -365,7 +365,16 @@ identity_value() {
   if [[ ! -f "$file" ]]; then
     return 0
   fi
-  awk -F= -v k="$key" '$1 == k {print substr($0, index($0, "=") + 1); exit}' "$file"
+  awk -F= -v k="$key" '
+    $1 == k {
+      v = substr($0, index($0, "=") + 1)
+      gsub(/\r/, "", v)
+      sub(/^[[:space:]]+/, "", v)
+      sub(/[[:space:]]+$/, "", v)
+      print v
+      exit
+    }
+  ' "$file"
 }
 
 write_identity_config() {
@@ -978,9 +987,30 @@ default_issuer_url_for_invites() {
   echo "$issuer_url"
 }
 
+resolve_invite_admin_token() {
+  local cli_token="${1:-}"
+  local file_token=""
+
+  if [[ -n "$cli_token" ]]; then
+    printf '%s\n' "$cli_token" | tr -d '\r'
+    return
+  fi
+
+  file_token="$(server_env_value "ISSUER_ADMIN_TOKEN" | tr -d '\r')"
+  if [[ -n "$file_token" ]]; then
+    echo "$file_token"
+    return
+  fi
+
+  if [[ -n "${ISSUER_ADMIN_TOKEN:-}" ]]; then
+    printf '%s\n' "${ISSUER_ADMIN_TOKEN}" | tr -d '\r'
+    return
+  fi
+}
+
 invite_generate() {
   local issuer_url="${ISSUER_URL:-}"
-  local admin_token="${ISSUER_ADMIN_TOKEN:-}"
+  local admin_token=""
   local count="1"
   local prefix="inv"
   local tier="1"
@@ -1023,9 +1053,7 @@ invite_generate() {
   fi
   issuer_url="$(trim_url "$issuer_url")"
 
-  if [[ -z "$admin_token" ]]; then
-    admin_token="$(server_env_value "ISSUER_ADMIN_TOKEN")"
-  fi
+  admin_token="$(resolve_invite_admin_token "$admin_token")"
   if [[ -z "$admin_token" ]]; then
     echo "invite-generate requires --admin-token or ISSUER_ADMIN_TOKEN in $SERVER_ENV_FILE"
     exit 2
@@ -1106,7 +1134,7 @@ invite_generate() {
 invite_check() {
   local key=""
   local issuer_url="${ISSUER_URL:-}"
-  local admin_token="${ISSUER_ADMIN_TOKEN:-}"
+  local admin_token=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -1142,9 +1170,7 @@ invite_check() {
     issuer_url="$(default_issuer_url_for_invites)"
   fi
   issuer_url="$(trim_url "$issuer_url")"
-  if [[ -z "$admin_token" ]]; then
-    admin_token="$(server_env_value "ISSUER_ADMIN_TOKEN")"
-  fi
+  admin_token="$(resolve_invite_admin_token "$admin_token")"
   if [[ -z "$admin_token" ]]; then
     echo "invite-check requires --admin-token or ISSUER_ADMIN_TOKEN in $SERVER_ENV_FILE"
     exit 2
@@ -1152,7 +1178,7 @@ invite_check() {
 
   local payload
   payload="$(curl -fsS "${issuer_url}/v1/admin/subject/get?subject=${key}" \
-    -H "Authorization: Bearer ${admin_token}" 2>/dev/null || true)"
+    -H "X-Admin-Token: ${admin_token}" 2>/dev/null || true)"
   if [[ -z "$payload" ]]; then
     echo "invite key not found: $key"
     exit 1
@@ -1172,7 +1198,7 @@ invite_check() {
 invite_disable() {
   local key=""
   local issuer_url="${ISSUER_URL:-}"
-  local admin_token="${ISSUER_ADMIN_TOKEN:-}"
+  local admin_token=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -1208,9 +1234,7 @@ invite_disable() {
     issuer_url="$(default_issuer_url_for_invites)"
   fi
   issuer_url="$(trim_url "$issuer_url")"
-  if [[ -z "$admin_token" ]]; then
-    admin_token="$(server_env_value "ISSUER_ADMIN_TOKEN")"
-  fi
+  admin_token="$(resolve_invite_admin_token "$admin_token")"
   if [[ -z "$admin_token" ]]; then
     echo "invite-disable requires --admin-token or ISSUER_ADMIN_TOKEN in $SERVER_ENV_FILE"
     exit 2

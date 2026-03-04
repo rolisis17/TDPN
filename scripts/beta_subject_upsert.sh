@@ -99,7 +99,7 @@ echo "upserting subject profile: subject=${subject} kind=${kind} tier=${tier}"
 curl -fsS -X POST "${issuer_url}/v1/admin/subject/upsert" \
   --connect-timeout 4 \
   --max-time 12 \
-  -H "Authorization: Bearer ${admin_token}" \
+  -H "X-Admin-Token: ${admin_token}" \
   -H "Content-Type: application/json" \
   --data "$payload"
 echo
@@ -107,5 +107,5 @@ echo "reading back subject profile:"
 curl -fsS "${issuer_url}/v1/admin/subject/get?subject=${subject}" \
   --connect-timeout 4 \
   --max-time 12 \
-  -H "Authorization: Bearer ${admin_token}"
+  -H "X-Admin-Token: ${admin_token}"
 echo
