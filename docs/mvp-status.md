@@ -123,7 +123,7 @@
 - Optional mTLS transport helper wiring across control-plane services/clients (`MTLS_ENABLE` + cert/key/CA envs) and easy-mode mTLS bootstrap tooling (`scripts/bootstrap_mtls.sh`).
 - Easy-node authority signer maintenance commands (`admin-signing-status`, `admin-signing-rotate`) and strict deployment preflight (`prod-preflight`).
 - Easy-node signer rotation supports bounded key history retention (`--key-history`) and prod preflight supports optional live endpoint reachability checks (`--check-live`).
-- Prod preflight hardening now also verifies non-default directory/puzzle secrets and private-file permission posture (env + TLS/private signing keys not group/world accessible).
+- Prod preflight hardening now also verifies non-default directory/puzzle secrets, effective `ENTRY_PUZZLE_DIFFICULTY>0`, and private-file permission posture (env + TLS/private signing keys not group/world accessible).
 - Runtime strict-mode hardening: entry and directory now fail-closed on default/weak runtime secrets (`ENTRY_PUZZLE_SECRET`, `DIRECTORY_ADMIN_TOKEN`) in beta/prod strict mode, and entry strict mode now also requires challenge puzzles enabled (`ENTRY_PUZZLE_DIFFICULTY>0`).
 - Issuer strict-mode hardening: when token-based issuer admin auth is enabled, strict mode now fail-closes on weak `ISSUER_ADMIN_TOKEN` (non-default and length>=16), while signed-only admin mode remains supported.
 - Easy-node server secret rotation command (`rotate-server-secrets`) with integration coverage (`integration_rotate_server_secrets.sh`).

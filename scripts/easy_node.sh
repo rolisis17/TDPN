@@ -3425,6 +3425,18 @@ prod_preflight() {
   else
     check_fail "ENTRY_PUZZLE_SECRET must be set, non-default, and len>=16"
   fi
+  local entry_puzzle_difficulty_raw entry_puzzle_difficulty
+  entry_puzzle_difficulty_raw="$(identity_value "$env_file" "ENTRY_PUZZLE_DIFFICULTY")"
+  entry_puzzle_difficulty="$entry_puzzle_difficulty_raw"
+  if [[ -z "$entry_puzzle_difficulty" ]]; then
+    # docker-compose default is 1 when unset
+    entry_puzzle_difficulty="1"
+  fi
+  if [[ "$entry_puzzle_difficulty" =~ ^[0-9]+$ ]] && ((entry_puzzle_difficulty > 0)); then
+    check_ok "ENTRY_PUZZLE_DIFFICULTY effective >0 (${entry_puzzle_difficulty})"
+  else
+    check_fail "ENTRY_PUZZLE_DIFFICULTY must be >0 in prod profile (effective value: ${entry_puzzle_difficulty_raw:-default})"
+  fi
 
   local private_files=("$env_file" "$key_file" "$client_key_file")
   local pf pf_mode

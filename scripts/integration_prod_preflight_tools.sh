@@ -139,6 +139,23 @@ if ! rg -q "ENTRY_PUZZLE_SECRET must be set, non-default, and len>=16" /tmp/inte
 fi
 
 sed -i -E 's/^ENTRY_PUZZLE_SECRET=.*/ENTRY_PUZZLE_SECRET=prod-entry-puzzle-secret-1234567890/' "$AUTH_ENV"
+if rg -q '^ENTRY_PUZZLE_DIFFICULTY=' "$AUTH_ENV"; then
+  sed -i -E 's/^ENTRY_PUZZLE_DIFFICULTY=.*/ENTRY_PUZZLE_DIFFICULTY=0/' "$AUTH_ENV"
+else
+  echo "ENTRY_PUZZLE_DIFFICULTY=0" >>"$AUTH_ENV"
+fi
+if ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_puzzle_fail.log 2>&1; then
+  echo "expected prod-preflight to fail with ENTRY_PUZZLE_DIFFICULTY=0"
+  cat /tmp/integration_prod_preflight_puzzle_fail.log
+  exit 1
+fi
+if ! rg -q "ENTRY_PUZZLE_DIFFICULTY must be >0 in prod profile" /tmp/integration_prod_preflight_puzzle_fail.log; then
+  echo "missing expected entry puzzle difficulty failure signal in prod-preflight output"
+  cat /tmp/integration_prod_preflight_puzzle_fail.log
+  exit 1
+fi
+sed -i -E 's/^ENTRY_PUZZLE_DIFFICULTY=.*/ENTRY_PUZZLE_DIFFICULTY=1/' "$AUTH_ENV"
+
 chmod 644 "$tls_dir/tls/client.key" 2>/dev/null || true
 if ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_perm_fail.log 2>&1; then
   echo "expected prod-preflight to fail when private key permissions are too open"
