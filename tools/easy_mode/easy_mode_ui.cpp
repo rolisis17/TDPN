@@ -694,7 +694,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
     std::cout << "3) Server status\n";
     std::cout << "4) Server logs\n";
     std::cout << "5) Stop server stack\n";
-    std::cout << "6) Stop ALL local docker resources\n";
+    std::cout << "6) Stop ALL local resources (docker + wg-only stack)\n";
     std::cout << "7) Generate invite key(s)\n";
     std::cout << "8) Check invite key\n";
     std::cout << "9) Disable invite key\n";
@@ -751,9 +751,23 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       continue;
     }
     if (choice == "6") {
-      bool confirm = parseYesNo(readLine("Stop and remove all local Privacynode docker resources? (y/N)", "n"), false);
+      bool confirm = parseYesNo(readLine("Stop and remove all local Privacynode resources? (y/N)", "n"), false);
       if (confirm) {
-        runCommand(shellEscape(script) + " stop-all");
+        std::ostringstream cmd;
+        cmd << shellEscape(script) << " stop-all"
+            << " --with-wg-only 1"
+            << " --force-iface-cleanup 1";
+        bool hasWgState = std::filesystem::exists(std::filesystem::path(root) / "deploy" / "data" / "wg_only_stack.state");
+        if (!isRootUser() && hasWgState) {
+          bool useSudo = parseYesNo(readLine("WG-only stack detected. Run stop-all with sudo for full cleanup? (Y/n)", "y"), true);
+          if (useSudo) {
+            runCommand("sudo " + cmd.str());
+          } else {
+            runCommand(cmd.str());
+          }
+        } else {
+          runCommand(cmd.str());
+        }
       } else {
         std::cout << "cancelled\n";
       }

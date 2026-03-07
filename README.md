@@ -153,6 +153,9 @@ sudo ./scripts/easy_node.sh wg-only-stack-up --strict-beta 1
 sudo ./scripts/easy_node.sh wg-only-stack-down --force-iface-cleanup 1
 sudo ./scripts/easy_node.sh wg-only-stack-selftest --strict-beta 1
 
+# stop all local resources; use sudo to also clean wg-only interfaces/processes
+sudo ./scripts/easy_node.sh stop-all --with-wg-only 1 --force-iface-cleanup 1
+
 ./scripts/easy_node.sh client-test \
   --directory-urls http://<SERVER_IP>:8081 \
   --issuer-url http://<SERVER_IP>:8082 \

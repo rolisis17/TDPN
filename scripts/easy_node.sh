@@ -28,7 +28,7 @@ Usage:
   ./scripts/easy_node.sh server-status
   ./scripts/easy_node.sh server-logs
   ./scripts/easy_node.sh server-down
-  ./scripts/easy_node.sh stop-all
+  ./scripts/easy_node.sh stop-all [--with-wg-only [0|1]] [--force-iface-cleanup [0|1]]
   ./scripts/easy_node.sh install-deps-ubuntu
   ./scripts/easy_node.sh wg-only-check
   ./scripts/easy_node.sh wg-only-local-test [--matrix [0|1]] [--strict-beta [0|1]] [--timeout-sec N]
@@ -62,6 +62,7 @@ Notes:
   - wg-only-local-test runs host real-WireGuard integration checks (Linux + root required).
   - wg-only-stack-up/status/down manages a reusable host real-WireGuard demo stack (Linux + root required).
   - wg-only-stack-selftest runs stack-up + client-test + stack-down as one command (Linux + root required).
+  - stop-all can also clean WG-only stack state/process/interfaces when requested (root needed for interface cleanup).
   - three-machine-validate runs health + federation checks then runs client-test with both directories.
   - bootstrap discovery mode lets you provide one directory URL and auto-discover other server hosts.
   - machine-a-test/machine-b-test/machine-c-test are machine-role-specific automated validations with optional report files.
@@ -1524,7 +1525,65 @@ cleanup_client_demo_artifacts() {
 }
 
 stop_all() {
+  local with_wg_only="1"
+  local force_iface_cleanup="1"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --with-wg-only)
+        if [[ $# -ge 2 && "${2:-}" != --* ]]; then
+          with_wg_only="${2:-}"
+          shift 2
+        else
+          with_wg_only="1"
+          shift
+        fi
+        ;;
+      --force-iface-cleanup)
+        if [[ $# -ge 2 && "${2:-}" != --* ]]; then
+          force_iface_cleanup="${2:-}"
+          shift 2
+        else
+          force_iface_cleanup="1"
+          shift
+        fi
+        ;;
+      *)
+        echo "unknown arg for stop-all: $1"
+        exit 2
+        ;;
+    esac
+  done
+  if [[ "$with_wg_only" != "0" && "$with_wg_only" != "1" ]]; then
+    echo "stop-all requires --with-wg-only to be 0 or 1"
+    exit 2
+  fi
+  if [[ "$force_iface_cleanup" != "0" && "$force_iface_cleanup" != "1" ]]; then
+    echo "stop-all requires --force-iface-cleanup to be 0 or 1"
+    exit 2
+  fi
+
   ensure_deps_or_die
+
+  if [[ "$with_wg_only" == "1" ]]; then
+    local state_file
+    state_file="$(wg_only_state_file)"
+    if [[ -f "$state_file" ]]; then
+      if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+        wg_only_stack_down --force-iface-cleanup "$force_iface_cleanup" >/dev/null 2>&1 || true
+        echo "wg-only stack cleanup: done"
+      else
+        local pid
+        pid="$(identity_value "$state_file" "WG_ONLY_PID")"
+        if [[ -n "$pid" ]] && kill -0 "$pid" >/dev/null 2>&1; then
+          echo "wg-only stack cleanup: skipped (root required)."
+          echo "run: sudo ./scripts/easy_node.sh wg-only-stack-down --force-iface-cleanup $force_iface_cleanup"
+        else
+          rm -f "$state_file" >/dev/null 2>&1 || true
+          echo "wg-only stack cleanup: cleared stale state file"
+        fi
+      fi
+    fi
+  fi
 
   compose_with_env "$AUTHORITY_ENV_FILE" down --remove-orphans >/dev/null 2>&1 || true
   compose_with_env "$PROVIDER_ENV_FILE" down --remove-orphans >/dev/null 2>&1 || true
@@ -3782,7 +3841,8 @@ main() {
       server_down
       ;;
     stop-all)
-      stop_all
+      shift
+      stop_all "$@"
       ;;
     install-deps-ubuntu)
       install_deps_ubuntu
