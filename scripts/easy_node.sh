@@ -32,6 +32,9 @@ Usage:
   ./scripts/easy_node.sh install-deps-ubuntu
   ./scripts/easy_node.sh wg-only-check
   ./scripts/easy_node.sh wg-only-local-test [--matrix [0|1]] [--strict-beta [0|1]] [--timeout-sec N]
+  ./scripts/easy_node.sh wg-only-stack-up [--strict-beta [0|1]] [--detach [0|1]] [--base-port N] [--client-iface IFACE] [--exit-iface IFACE] [--force-iface-reset [0|1]] [--cleanup-ifaces [0|1]] [--log-file PATH]
+  ./scripts/easy_node.sh wg-only-stack-status
+  ./scripts/easy_node.sh wg-only-stack-down [--force-iface-cleanup [0|1]]
   ./scripts/easy_node.sh client-test [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--exit-country CC] [--exit-region REGION] [--timeout-sec N] [--distinct-operators [0|1]] [--min-selection-lines N] [--min-entry-operators N] [--min-exit-operators N] [--require-cross-operator-pair [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]]
   ./scripts/easy_node.sh three-machine-validate [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-a-url URL] [--issuer-b-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--client-min-selection-lines N] [--client-min-entry-operators N] [--client-min-exit-operators N] [--client-require-cross-operator-pair [0|1]] [--exit-country CC] [--exit-region REGION] [--distinct-operators [0|1]] [--require-issuer-quorum [0|1]] [--beta-profile [0|1]]
   ./scripts/easy_node.sh three-machine-soak [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-a-url URL] [--issuer-b-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--rounds N] [--pause-sec N] [--fault-every N] [--fault-command CMD] [--continue-on-fail [0|1]] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--client-min-selection-lines N] [--client-min-entry-operators N] [--client-min-exit-operators N] [--client-require-cross-operator-pair [0|1]] [--exit-country CC] [--exit-region REGION] [--distinct-operators [0|1]] [--require-issuer-quorum [0|1]] [--beta-profile [0|1]] [--report-file PATH]
@@ -56,6 +59,7 @@ Notes:
   - prod-preflight validates strict prod profile wiring (mTLS material, HTTPS URLs, and authority signer config).
   - client-test runs client-demo with --no-deps (no local server required on the client machine).
   - wg-only-local-test runs host real-WireGuard integration checks (Linux + root required).
+  - wg-only-stack-up/status/down manages a reusable host real-WireGuard demo stack (Linux + root required).
   - three-machine-validate runs health + federation checks then runs client-test with both directories.
   - bootstrap discovery mode lets you provide one directory URL and auto-discover other server hosts.
   - machine-a-test/machine-b-test/machine-c-test are machine-role-specific automated validations with optional report files.
@@ -1686,6 +1690,453 @@ wg_only_local_test() {
   return 1
 }
 
+wg_only_state_file() {
+  echo "$DEPLOY_DIR/data/wg_only_stack.state"
+}
+
+wg_only_stack_status() {
+  local state_file
+  state_file="$(wg_only_state_file)"
+  if [[ ! -f "$state_file" ]]; then
+    echo "wg-only stack status: not running"
+    return 0
+  fi
+
+  local pid client_iface exit_iface log_file strict_beta dir_url issuer_url entry_url exit_url
+  pid="$(identity_value "$state_file" "WG_ONLY_PID")"
+  client_iface="$(identity_value "$state_file" "WG_ONLY_CLIENT_IFACE")"
+  exit_iface="$(identity_value "$state_file" "WG_ONLY_EXIT_IFACE")"
+  log_file="$(identity_value "$state_file" "WG_ONLY_LOG_FILE")"
+  strict_beta="$(identity_value "$state_file" "WG_ONLY_STRICT_BETA")"
+  dir_url="$(identity_value "$state_file" "WG_ONLY_DIRECTORY_URL")"
+  issuer_url="$(identity_value "$state_file" "WG_ONLY_ISSUER_URL")"
+  entry_url="$(identity_value "$state_file" "WG_ONLY_ENTRY_URL")"
+  exit_url="$(identity_value "$state_file" "WG_ONLY_EXIT_URL")"
+
+  local running="0"
+  if [[ -n "$pid" ]] && kill -0 "$pid" >/dev/null 2>&1; then
+    running="1"
+  fi
+
+  echo "wg-only stack status:"
+  echo "  running: $running"
+  echo "  pid: ${pid:-unknown}"
+  echo "  strict_beta: ${strict_beta:-unknown}"
+  echo "  client_iface: ${client_iface:-unknown}"
+  echo "  exit_iface: ${exit_iface:-unknown}"
+  echo "  directory_url: ${dir_url:-unknown}"
+  echo "  issuer_url: ${issuer_url:-unknown}"
+  echo "  entry_url: ${entry_url:-unknown}"
+  echo "  exit_url: ${exit_url:-unknown}"
+  echo "  log_file: ${log_file:-unknown}"
+  if [[ "$running" == "0" ]]; then
+    echo "note: state file is stale; run wg-only-stack-down to clean up."
+  fi
+  return 0
+}
+
+wg_only_stack_up() {
+  local strict_beta="${EASY_NODE_WG_ONLY_STACK_STRICT_BETA:-1}"
+  local detach="${EASY_NODE_WG_ONLY_STACK_DETACH:-1}"
+  local base_port="${EASY_NODE_WG_ONLY_STACK_BASE_PORT:-19080}"
+  local client_iface="${EASY_NODE_WG_ONLY_STACK_CLIENT_IFACE:-wgcstack0}"
+  local exit_iface="${EASY_NODE_WG_ONLY_STACK_EXIT_IFACE:-wgestack0}"
+  local force_iface_reset="${EASY_NODE_WG_ONLY_STACK_FORCE_IFACE_RESET:-0}"
+  local cleanup_ifaces="${EASY_NODE_WG_ONLY_STACK_CLEANUP_IFACES:-1}"
+  local log_file="${EASY_NODE_WG_ONLY_STACK_LOG_FILE:-}"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --strict-beta)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          strict_beta="${2:-}"
+          shift 2
+        else
+          strict_beta="1"
+          shift
+        fi
+        ;;
+      --detach)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          detach="${2:-}"
+          shift 2
+        else
+          detach="1"
+          shift
+        fi
+        ;;
+      --base-port)
+        base_port="${2:-}"
+        shift 2
+        ;;
+      --client-iface)
+        client_iface="${2:-}"
+        shift 2
+        ;;
+      --exit-iface)
+        exit_iface="${2:-}"
+        shift 2
+        ;;
+      --force-iface-reset)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          force_iface_reset="${2:-}"
+          shift 2
+        else
+          force_iface_reset="1"
+          shift
+        fi
+        ;;
+      --cleanup-ifaces)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          cleanup_ifaces="${2:-}"
+          shift 2
+        else
+          cleanup_ifaces="1"
+          shift
+        fi
+        ;;
+      --log-file)
+        log_file="${2:-}"
+        shift 2
+        ;;
+      *)
+        echo "unknown arg for wg-only-stack-up: $1"
+        exit 2
+        ;;
+    esac
+  done
+
+  if [[ "$strict_beta" != "0" && "$strict_beta" != "1" ]]; then
+    echo "wg-only-stack-up requires --strict-beta to be 0 or 1"
+    exit 2
+  fi
+  if [[ "$detach" != "0" && "$detach" != "1" ]]; then
+    echo "wg-only-stack-up requires --detach to be 0 or 1"
+    exit 2
+  fi
+  if [[ "$force_iface_reset" != "0" && "$force_iface_reset" != "1" ]]; then
+    echo "wg-only-stack-up requires --force-iface-reset to be 0 or 1"
+    exit 2
+  fi
+  if [[ "$cleanup_ifaces" != "0" && "$cleanup_ifaces" != "1" ]]; then
+    echo "wg-only-stack-up requires --cleanup-ifaces to be 0 or 1"
+    exit 2
+  fi
+  if ! [[ "$base_port" =~ ^[0-9]+$ ]] || ((base_port < 1024 || base_port > 65400)); then
+    echo "wg-only-stack-up requires --base-port in 1024..65400"
+    exit 2
+  fi
+  if [[ -z "$client_iface" || -z "$exit_iface" ]]; then
+    echo "wg-only-stack-up requires non-empty --client-iface and --exit-iface"
+    exit 2
+  fi
+
+  if ! wg_only_check; then
+    exit 1
+  fi
+
+  local state_file
+  state_file="$(wg_only_state_file)"
+  mkdir -p "$(dirname "$state_file")"
+  if [[ -f "$state_file" ]]; then
+    local existing_pid
+    existing_pid="$(identity_value "$state_file" "WG_ONLY_PID")"
+    if [[ -n "$existing_pid" ]] && kill -0 "$existing_pid" >/dev/null 2>&1; then
+      echo "wg-only stack appears to be already running (pid=$existing_pid)"
+      echo "use './scripts/easy_node.sh wg-only-stack-status' or './scripts/easy_node.sh wg-only-stack-down'"
+      exit 1
+    fi
+    rm -f "$state_file"
+  fi
+
+  local dir_port issuer_port entry_port exit_port entry_data_port exit_data_port exit_wg_port proxy_port sink_port source_port
+  dir_port=$((base_port + 1))
+  issuer_port=$((base_port + 2))
+  entry_port=$((base_port + 3))
+  exit_port=$((base_port + 4))
+  entry_data_port=$((base_port + 100))
+  exit_data_port=$((base_port + 101))
+  exit_wg_port=$((base_port + 102))
+  proxy_port=$((base_port + 103))
+  sink_port=$((base_port + 104))
+  source_port=$((base_port + 105))
+  if ((source_port > 65535)); then
+    echo "wg-only-stack-up computed ports exceed 65535; lower --base-port"
+    exit 2
+  fi
+
+  local directory_url issuer_url entry_url exit_url entry_data_addr exit_data_addr
+  directory_url="http://127.0.0.1:${dir_port}"
+  issuer_url="http://127.0.0.1:${issuer_port}"
+  entry_url="http://127.0.0.1:${entry_port}"
+  exit_url="http://127.0.0.1:${exit_port}"
+  entry_data_addr="127.0.0.1:${entry_data_port}"
+  exit_data_addr="127.0.0.1:${exit_data_port}"
+
+  if [[ "$force_iface_reset" == "1" ]]; then
+    ip link delete "$client_iface" >/dev/null 2>&1 || true
+    ip link delete "$exit_iface" >/dev/null 2>&1 || true
+  fi
+  if ip link show dev "$client_iface" >/dev/null 2>&1; then
+    echo "wg-only-stack-up refused: interface '$client_iface' already exists"
+    echo "use --force-iface-reset 1 or choose a different --client-iface"
+    exit 1
+  fi
+  if ip link show dev "$exit_iface" >/dev/null 2>&1; then
+    echo "wg-only-stack-up refused: interface '$exit_iface' already exists"
+    echo "use --force-iface-reset 1 or choose a different --exit-iface"
+    exit 1
+  fi
+
+  if ! ip link add dev "$client_iface" type wireguard >/dev/null 2>&1; then
+    echo "failed to create wireguard interface '$client_iface'"
+    exit 1
+  fi
+  if ! ip link add dev "$exit_iface" type wireguard >/dev/null 2>&1; then
+    ip link delete "$client_iface" >/dev/null 2>&1 || true
+    echo "failed to create wireguard interface '$exit_iface'"
+    exit 1
+  fi
+
+  local key_dir client_key_file exit_key_file client_wg_pub exit_wg_pub
+  key_dir="$DEPLOY_DIR/data/wg_only"
+  mkdir -p "$key_dir"
+  client_key_file="$key_dir/client_${client_iface}.key"
+  exit_key_file="$key_dir/exit_${exit_iface}.key"
+  if [[ ! -f "$client_key_file" ]]; then
+    wg genkey >"$client_key_file"
+  fi
+  if [[ ! -f "$exit_key_file" ]]; then
+    wg genkey >"$exit_key_file"
+  fi
+  chmod 600 "$client_key_file" "$exit_key_file" 2>/dev/null || true
+  if ! client_wg_pub="$(wg pubkey <"$client_key_file")"; then
+    ip link delete "$client_iface" >/dev/null 2>&1 || true
+    ip link delete "$exit_iface" >/dev/null 2>&1 || true
+    echo "failed to derive client wireguard public key"
+    exit 1
+  fi
+  if ! exit_wg_pub="$(wg pubkey <"$exit_key_file")"; then
+    ip link delete "$client_iface" >/dev/null 2>&1 || true
+    ip link delete "$exit_iface" >/dev/null 2>&1 || true
+    echo "failed to derive exit wireguard public key"
+    exit 1
+  fi
+
+  local log_dir
+  log_dir="$(prepare_log_dir)"
+  if [[ -z "$log_file" ]]; then
+    log_file="$log_dir/easy_node_wg_only_stack_$(date +%Y%m%d_%H%M%S).log"
+  fi
+  mkdir -p "$(dirname "$log_file")"
+
+  local -a env_vars
+  env_vars=(
+    "WG_ONLY_MODE=1"
+    "DATA_PLANE_MODE=opaque"
+    "DIRECTORY_ADDR=127.0.0.1:${dir_port}"
+    "ISSUER_ADDR=127.0.0.1:${issuer_port}"
+    "ENTRY_ADDR=127.0.0.1:${entry_port}"
+    "EXIT_ADDR=127.0.0.1:${exit_port}"
+    "DIRECTORY_URL=${directory_url}"
+    "ISSUER_URL=${issuer_url}"
+    "ENTRY_URL=${entry_url}"
+    "EXIT_CONTROL_URL=${exit_url}"
+    "ENTRY_DATA_ADDR=${entry_data_addr}"
+    "ENTRY_ENDPOINT=${entry_data_addr}"
+    "EXIT_DATA_ADDR=${exit_data_addr}"
+    "EXIT_ENDPOINT=${exit_data_addr}"
+    "CLIENT_WG_BACKEND=command"
+    "WG_BACKEND=command"
+    "CLIENT_WG_PRIVATE_KEY_PATH=${client_key_file}"
+    "CLIENT_WG_PUBLIC_KEY=${client_wg_pub}"
+    "EXIT_WG_PRIVATE_KEY_PATH=${exit_key_file}"
+    "EXIT_WG_PUBKEY=${exit_wg_pub}"
+    "CLIENT_WG_INTERFACE=${client_iface}"
+    "EXIT_WG_INTERFACE=${exit_iface}"
+    "CLIENT_WG_INSTALL_ROUTE=0"
+    "CLIENT_WG_KERNEL_PROXY=1"
+    "CLIENT_WG_PROXY_ADDR=127.0.0.1:${proxy_port}"
+    "CLIENT_INNER_SOURCE=udp"
+    "CLIENT_DISABLE_SYNTHETIC_FALLBACK=1"
+    "CLIENT_LIVE_WG_MODE=1"
+    "DIRECTORY_TRUST_STRICT=1"
+    "ENTRY_LIVE_WG_MODE=1"
+    "ENTRY_DIRECTORY_TRUST_STRICT=1"
+    "EXIT_LIVE_WG_MODE=1"
+    "EXIT_TOKEN_PROOF_REPLAY_GUARD=1"
+    "EXIT_PEER_REBIND_SEC=0"
+    "EXIT_STARTUP_SYNC_TIMEOUT_SEC=8"
+    "CLIENT_STARTUP_SYNC_TIMEOUT_SEC=8"
+    "EXIT_OPAQUE_SINK_ADDR=127.0.0.1:${sink_port}"
+    "EXIT_OPAQUE_SOURCE_ADDR=127.0.0.1:${source_port}"
+    "EXIT_WG_LISTEN_PORT=${exit_wg_port}"
+    "EXIT_WG_KERNEL_PROXY=1"
+  )
+
+  if [[ "$strict_beta" == "1" ]]; then
+    env_vars+=(
+      "BETA_STRICT_MODE=1"
+      "CLIENT_BETA_STRICT=1"
+      "ENTRY_BETA_STRICT=1"
+      "EXIT_BETA_STRICT=1"
+      "CLIENT_REQUIRE_DISTINCT_OPERATORS=1"
+      "ENTRY_REQUIRE_DISTINCT_EXIT_OPERATOR=1"
+      "ENTRY_OPERATOR_ID=op-entry"
+      "EXIT_OPERATOR_ID=op-exit"
+    )
+  fi
+
+  local pid=""
+  if [[ "$detach" == "1" ]]; then
+    local pid_tmp
+    pid_tmp="$(mktemp)"
+    (
+      cd "$ROOT_DIR"
+      nohup env "${env_vars[@]}" go run ./cmd/node --directory --issuer --entry --exit --client >"$log_file" 2>&1 &
+      echo "$!" >"$pid_tmp"
+    )
+    pid="$(cat "$pid_tmp")"
+    rm -f "$pid_tmp"
+    sleep 1
+    if [[ -z "$pid" ]] || ! kill -0 "$pid" >/dev/null 2>&1; then
+      echo "wg-only stack failed to start; log follows:"
+      cat "$log_file"
+      ip link delete "$client_iface" >/dev/null 2>&1 || true
+      ip link delete "$exit_iface" >/dev/null 2>&1 || true
+      exit 1
+    fi
+
+    if ! wait_http_ok "${directory_url}/v1/relays" "wg-only directory" 30; then
+      kill "$pid" >/dev/null 2>&1 || true
+      sleep 1
+      ip link delete "$client_iface" >/dev/null 2>&1 || true
+      ip link delete "$exit_iface" >/dev/null 2>&1 || true
+      echo "wg-only stack did not become healthy; log follows:"
+      cat "$log_file"
+      exit 1
+    fi
+
+    cat >"$state_file" <<EOF_STATE
+WG_ONLY_PID=$pid
+WG_ONLY_CLIENT_IFACE=$client_iface
+WG_ONLY_EXIT_IFACE=$exit_iface
+WG_ONLY_LOG_FILE=$log_file
+WG_ONLY_STRICT_BETA=$strict_beta
+WG_ONLY_CLEANUP_IFACES=$cleanup_ifaces
+WG_ONLY_DIRECTORY_URL=$directory_url
+WG_ONLY_ISSUER_URL=$issuer_url
+WG_ONLY_ENTRY_URL=$entry_url
+WG_ONLY_EXIT_URL=$exit_url
+EOF_STATE
+    secure_file_permissions "$state_file"
+
+    echo "wg-only stack started"
+    echo "  pid: $pid"
+    echo "  strict_beta: $strict_beta"
+    echo "  directory: $directory_url"
+    echo "  issuer: $issuer_url"
+    echo "  entry: $entry_url"
+    echo "  exit: $exit_url"
+    echo "  log: $log_file"
+    echo "use './scripts/easy_node.sh wg-only-stack-status' to inspect"
+    echo "use './scripts/easy_node.sh wg-only-stack-down' to stop"
+    return 0
+  fi
+
+  echo "wg-only stack starting in foreground (strict_beta=$strict_beta)"
+  echo "log: $log_file"
+  echo "press Ctrl+C to stop"
+  (
+    cd "$ROOT_DIR"
+    env "${env_vars[@]}" go run ./cmd/node --directory --issuer --entry --exit --client
+  ) 2>&1 | tee "$log_file"
+  local rc=$?
+  if [[ "$cleanup_ifaces" == "1" ]]; then
+    ip link delete "$client_iface" >/dev/null 2>&1 || true
+    ip link delete "$exit_iface" >/dev/null 2>&1 || true
+  fi
+  return "$rc"
+}
+
+wg_only_stack_down() {
+  local force_iface_cleanup="0"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --force-iface-cleanup)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          force_iface_cleanup="${2:-}"
+          shift 2
+        else
+          force_iface_cleanup="1"
+          shift
+        fi
+        ;;
+      *)
+        echo "unknown arg for wg-only-stack-down: $1"
+        exit 2
+        ;;
+    esac
+  done
+  if [[ "$force_iface_cleanup" != "0" && "$force_iface_cleanup" != "1" ]]; then
+    echo "wg-only-stack-down requires --force-iface-cleanup to be 0 or 1"
+    exit 2
+  fi
+  if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+    echo "wg-only-stack-down requires root privileges (run with sudo)"
+    exit 1
+  fi
+
+  local state_file
+  state_file="$(wg_only_state_file)"
+  if [[ ! -f "$state_file" ]]; then
+    echo "wg-only stack is not running (no state file)"
+    return 0
+  fi
+
+  local pid client_iface exit_iface cleanup_ifaces
+  pid="$(identity_value "$state_file" "WG_ONLY_PID")"
+  client_iface="$(identity_value "$state_file" "WG_ONLY_CLIENT_IFACE")"
+  exit_iface="$(identity_value "$state_file" "WG_ONLY_EXIT_IFACE")"
+  cleanup_ifaces="$(identity_value "$state_file" "WG_ONLY_CLEANUP_IFACES")"
+  if [[ "$cleanup_ifaces" != "1" ]]; then
+    cleanup_ifaces="0"
+  fi
+
+  if [[ -n "$pid" ]] && kill -0 "$pid" >/dev/null 2>&1; then
+    kill "$pid" >/dev/null 2>&1 || true
+    local i
+    for i in $(seq 1 20); do
+      if ! kill -0 "$pid" >/dev/null 2>&1; then
+        break
+      fi
+      sleep 0.2
+    done
+    if kill -0 "$pid" >/dev/null 2>&1; then
+      kill -9 "$pid" >/dev/null 2>&1 || true
+    fi
+    echo "wg-only stack process stopped (pid=$pid)"
+  else
+    echo "wg-only stack process was not running"
+  fi
+
+  if [[ "$cleanup_ifaces" == "1" || "$force_iface_cleanup" == "1" ]]; then
+    if [[ -n "$client_iface" ]]; then
+      ip link delete "$client_iface" >/dev/null 2>&1 || true
+    fi
+    if [[ -n "$exit_iface" ]]; then
+      ip link delete "$exit_iface" >/dev/null 2>&1 || true
+    fi
+    echo "wg-only stack interfaces cleaned up"
+  else
+    echo "wg-only stack interfaces left intact (set --force-iface-cleanup 1 to remove)"
+  fi
+
+  rm -f "$state_file"
+  echo "wg-only stack state cleared"
+  return 0
+}
+
 three_machine_validate() {
   ensure_deps_or_die
   "$ROOT_DIR/scripts/integration_3machine_beta_validate.sh" "$@"
@@ -3150,6 +3601,17 @@ main() {
       ;;
     wg-only-check)
       wg_only_check
+      ;;
+    wg-only-stack-up)
+      shift
+      wg_only_stack_up "$@"
+      ;;
+    wg-only-stack-status)
+      wg_only_stack_status
+      ;;
+    wg-only-stack-down)
+      shift
+      wg_only_stack_down "$@"
       ;;
     wg-only-local-test)
       shift

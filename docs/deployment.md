@@ -130,6 +130,9 @@ Quick non-interactive examples:
 # host real-WireGuard preflight and local validation (Linux + sudo required)
 ./scripts/easy_node.sh wg-only-check
 sudo ./scripts/easy_node.sh wg-only-local-test --matrix 1
+sudo ./scripts/easy_node.sh wg-only-stack-up --strict-beta 1
+./scripts/easy_node.sh wg-only-stack-status
+sudo ./scripts/easy_node.sh wg-only-stack-down --force-iface-cleanup 1
 ```
 
 Invite-only beta option:

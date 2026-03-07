@@ -710,6 +710,9 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
     std::cout << "19) Rotate admin signing key\n";
     std::cout << "20) WG-only preflight (Linux/root)\n";
     std::cout << "21) WG-only local test (real WireGuard)\n";
+    std::cout << "22) WG-only stack up (real WireGuard, background)\n";
+    std::cout << "23) WG-only stack status\n";
+    std::cout << "24) WG-only stack down\n";
     std::cout << "0) Back\n";
     std::cout << "Selection: ";
 
@@ -1094,6 +1097,49 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --matrix " << (matrix ? "1" : "0")
           << " --strict-beta " << (strictBeta ? "1" : "0")
           << " --timeout-sec " << shellEscape(timeoutSec);
+      if (!isRootUser()) {
+        bool useSudo = parseYesNo(readLine("Run with sudo? (Y/n)", "y"), true);
+        if (useSudo) {
+          runCommand("sudo " + cmd.str());
+        } else {
+          runCommand(cmd.str());
+        }
+      } else {
+        runCommand(cmd.str());
+      }
+      continue;
+    }
+    if (choice == "22") {
+      bool strictBeta = parseYesNo(readLine("Strict beta profile? (Y/n)", "y"), true);
+      std::string basePort = trim(readLine("Base port (blank=default 19080)", ""));
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " wg-only-stack-up"
+          << " --strict-beta " << (strictBeta ? "1" : "0")
+          << " --detach 1";
+      if (!basePort.empty()) {
+        cmd << " --base-port " << shellEscape(basePort);
+      }
+      if (!isRootUser()) {
+        bool useSudo = parseYesNo(readLine("Run with sudo? (Y/n)", "y"), true);
+        if (useSudo) {
+          runCommand("sudo " + cmd.str());
+        } else {
+          runCommand(cmd.str());
+        }
+      } else {
+        runCommand(cmd.str());
+      }
+      continue;
+    }
+    if (choice == "23") {
+      runCommand(shellEscape(script) + " wg-only-stack-status");
+      continue;
+    }
+    if (choice == "24") {
+      bool forceIfaceCleanup = parseYesNo(readLine("Force interface cleanup? (y/N)", "n"), false);
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " wg-only-stack-down"
+          << " --force-iface-cleanup " << (forceIfaceCleanup ? "1" : "0");
       if (!isRootUser()) {
         bool useSudo = parseYesNo(readLine("Run with sudo? (Y/n)", "y"), true);
         if (useSudo) {
