@@ -25,6 +25,7 @@ run_step "unit tests" go test ./...
 run_step "rotate server secrets" ./scripts/integration_rotate_server_secrets.sh
 run_step "directory strict governance" ./scripts/integration_directory_beta_strict.sh
 run_step "cross-role strict guardrails" ./scripts/integration_beta_strict_roles.sh
+run_step "easy-node client profile env wiring" ./scripts/integration_easy_node_client_profile_env.sh
 run_step "distinct-operator anti-collusion" ./scripts/integration_distinct_operators.sh
 run_step "peer discovery operator cap" ./scripts/integration_peer_discovery_operator_cap.sh
 run_step "anonymous credential dispute" ./scripts/integration_anon_credential_dispute.sh

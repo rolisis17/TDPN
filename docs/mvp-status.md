@@ -151,6 +151,7 @@
 - Real WG privileged integration defaults now run with UDP inner source and synthetic fallback disabled (`CLIENT_INNER_SOURCE=udp`, `CLIENT_DISABLE_SYNTHETIC_FALLBACK=1`) to keep beta WG validation on real packet ingress only.
 - Command-mode WG proxy integrations now also run with UDP inner source and synthetic fallback disabled (`integration_client_wg_kernel_proxy.sh`, `integration_exit_wg_proxy_limit.sh`, `integration_exit_wg_proxy_idle_cleanup.sh`) to keep proxy-path coverage aligned with real packet ingress behavior.
 - Easy-mode profile wiring clarified: `server-up --prod-profile` remains fail-closed strict runtime, while `client-test --prod-profile` uses mTLS/trust hardening in demo-container flows (strict live-WG fail-closed remains validated by wg-only/strict integration scripts).
+- Easy-node client profile env guard coverage (`integration_easy_node_client_profile_env.sh`) now verifies beta/prod demo client presets apply intended env hardening without injecting strict live-WG runtime flags.
 - One-bootstrap host discovery workflow (`discover-hosts`, `--bootstrap-directory`) for machine-C validation and easy-mode launcher flows that auto-discover peer server URLs from a single known directory endpoint.
 
 ## In Progress / Partial

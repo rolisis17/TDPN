@@ -43,6 +43,9 @@ echo "[ci] provider api integration"
 echo "[ci] easy-node role guard integration"
 ./scripts/integration_easy_node_role_guard.sh
 
+echo "[ci] easy-node client profile env integration"
+./scripts/integration_easy_node_client_profile_env.sh
+
 echo "[ci] rotate-server-secrets integration"
 ./scripts/integration_rotate_server_secrets.sh
 
