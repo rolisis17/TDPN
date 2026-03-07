@@ -855,11 +855,14 @@ write_authority_env() {
   local admin_signers_file_container="${12:-}"
   local admin_sign_key_id="${13:-}"
   local admin_sign_key_file_local="${14:-}"
+  local issuer_admin_token_effective="$issuer_admin_token"
   local public_scheme="http"
   local relay_suffix
   local issuer_suffix
   if [[ "$prod_profile" == "1" ]]; then
     public_scheme="https"
+    # In strict prod profile token admin auth is disabled; avoid persisting an unused token.
+    issuer_admin_token_effective=""
   fi
   relay_suffix="$(sanitize_id_component "$operator_id")"
   if [[ -z "$issuer_id" ]]; then
@@ -888,7 +891,7 @@ ISSUER_REVOCATIONS_FILE=/app/data/issuer_${issuer_suffix}_revocations.json
 ISSUER_ANON_REVOCATIONS_FILE=/app/data/issuer_${issuer_suffix}_anon_revocations.json
 ISSUER_ANON_DISPUTES_FILE=/app/data/issuer_${issuer_suffix}_anon_disputes.json
 ISSUER_AUDIT_FILE=/app/data/issuer_${issuer_suffix}_audit.json
-ISSUER_ADMIN_TOKEN=${issuer_admin_token}
+ISSUER_ADMIN_TOKEN=${issuer_admin_token_effective}
 DIRECTORY_ADMIN_TOKEN=${directory_admin_token}
 ENTRY_PUZZLE_SECRET=${entry_puzzle_secret}
 ISSUER_CLIENT_ALLOWLIST_ONLY=${client_allowlist}
@@ -1432,10 +1435,14 @@ server_up() {
     echo "operator_id: $operator_id"
     echo "issuer_id: $issuer_id"
     echo "identity file: $identity_file"
-    if [[ "$show_admin_token" == "1" ]]; then
-      echo "issuer_admin_token: $issuer_admin_token"
+    if [[ "$prod_profile" == "1" ]]; then
+      echo "issuer_admin_token: [disabled in prod profile; signed admin auth only]"
     else
-      echo "issuer_admin_token: [hidden] (set --show-admin-token to print)"
+      if [[ "$show_admin_token" == "1" ]]; then
+        echo "issuer_admin_token: $issuer_admin_token"
+      else
+        echo "issuer_admin_token: [hidden] (set --show-admin-token to print)"
+      fi
     fi
     echo "directory_admin_token: [hidden]"
     echo "entry_puzzle_secret: [hidden]"
@@ -1623,6 +1630,8 @@ rotate_server_secrets() {
   fi
 
   local directory_admin_token entry_puzzle_secret issuer_admin_token=""
+  local issuer_token_disabled="0"
+  local issuer_allow_token=""
   directory_admin_token="$(random_token)"
   entry_puzzle_secret="$(random_token)"
 
@@ -1630,8 +1639,14 @@ rotate_server_secrets() {
   set_env_kv "$env_file" "ENTRY_PUZZLE_SECRET" "$entry_puzzle_secret"
 
   if [[ "$mode" == "authority" && "$rotate_issuer_admin" == "1" ]]; then
-    issuer_admin_token="$(random_token)"
-    set_env_kv "$env_file" "ISSUER_ADMIN_TOKEN" "$issuer_admin_token"
+    issuer_allow_token="$(identity_value "$env_file" "ISSUER_ADMIN_ALLOW_TOKEN")"
+    if [[ "$issuer_allow_token" == "0" ]]; then
+      issuer_token_disabled="1"
+      set_env_kv "$env_file" "ISSUER_ADMIN_TOKEN" ""
+    else
+      issuer_admin_token="$(random_token)"
+      set_env_kv "$env_file" "ISSUER_ADMIN_TOKEN" "$issuer_admin_token"
+    fi
   fi
   secure_file_permissions "$env_file"
 
@@ -1651,7 +1666,9 @@ rotate_server_secrets() {
   if [[ "$show_secrets" == "1" ]]; then
     echo "directory_admin_token: $directory_admin_token"
     echo "entry_puzzle_secret: $entry_puzzle_secret"
-    if [[ -n "$issuer_admin_token" ]]; then
+    if [[ "$issuer_token_disabled" == "1" ]]; then
+      echo "issuer_admin_token: [disabled by ISSUER_ADMIN_ALLOW_TOKEN=0]"
+    elif [[ -n "$issuer_admin_token" ]]; then
       echo "issuer_admin_token: $issuer_admin_token"
     elif [[ "$mode" == "authority" ]]; then
       echo "issuer_admin_token: [unchanged]"
@@ -1660,7 +1677,9 @@ rotate_server_secrets() {
     echo "directory_admin_token: [hidden]"
     echo "entry_puzzle_secret: [hidden]"
     if [[ "$mode" == "authority" ]]; then
-      if [[ "$rotate_issuer_admin" == "1" ]]; then
+      if [[ "$issuer_token_disabled" == "1" ]]; then
+        echo "issuer_admin_token: [disabled by ISSUER_ADMIN_ALLOW_TOKEN=0]"
+      elif [[ "$rotate_issuer_admin" == "1" ]]; then
         echo "issuer_admin_token: [hidden]"
       else
         echo "issuer_admin_token: [unchanged]"
@@ -3483,6 +3502,8 @@ prod_preflight() {
     local require_signed allow_token key_id key_path signers_container signers_local
     require_signed="$(identity_value "$env_file" "ISSUER_ADMIN_REQUIRE_SIGNED")"
     allow_token="$(identity_value "$env_file" "ISSUER_ADMIN_ALLOW_TOKEN")"
+    local issuer_admin_token_val
+    issuer_admin_token_val="$(identity_value "$env_file" "ISSUER_ADMIN_TOKEN")"
     key_id="$(identity_value "$env_file" "ISSUER_ADMIN_SIGNING_KEY_ID")"
     key_path="$(identity_value "$env_file" "ISSUER_ADMIN_SIGNING_PRIVATE_KEY_FILE_LOCAL")"
     signers_container="$(identity_value "$env_file" "ISSUER_ADMIN_SIGNING_KEYS_FILE")"
@@ -3499,6 +3520,11 @@ prod_preflight() {
       check_ok "ISSUER_ADMIN_ALLOW_TOKEN=0"
     else
       check_fail "ISSUER_ADMIN_ALLOW_TOKEN must be 0 on authority prod profile"
+    fi
+    if [[ -z "$issuer_admin_token_val" ]]; then
+      check_ok "ISSUER_ADMIN_TOKEN cleared when token auth disabled"
+    else
+      check_fail "ISSUER_ADMIN_TOKEN must be empty when ISSUER_ADMIN_ALLOW_TOKEN=0"
     fi
     if [[ -n "$key_id" ]]; then
       check_ok "admin signing key id configured"

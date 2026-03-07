@@ -235,6 +235,7 @@ sudo ./scripts/easy_node.sh stop-all --with-wg-only 1 --force-iface-cleanup 1
 - easy-mode `server-up` auto-generates and stores non-default `DIRECTORY_ADMIN_TOKEN` and `ENTRY_PUZZLE_SECRET` (both hidden in output unless you inspect env files).
 - `rotate-server-secrets` rotates `DIRECTORY_ADMIN_TOKEN` + `ENTRY_PUZZLE_SECRET` (and `ISSUER_ADMIN_TOKEN` on authority nodes) with optional restart.
 - `server-up --prod-profile 1` forces strict fail-closed runtime (`BETA_STRICT_MODE=1`, `PROD_STRICT_MODE=1`), enables mTLS, and on authority nodes requires signed issuer-admin auth (`ISSUER_ADMIN_REQUIRE_SIGNED=1`, token admin auth disabled).
+- in strict prod profile on authority nodes, `ISSUER_ADMIN_TOKEN` is cleared (empty) so token admin auth material is not persisted when signed admin auth is enforced.
 - `client-test --prod-profile 1` applies mTLS + trust-hardening client checks in the container demo path; full strict live-WG fail-closed validation is covered by wg-only/strict integration flows.
 - `client-test` now performs both pre-run and post-run demo-container cleanup to reduce stale `deploy-client-demo-run-*` container/network leftovers after timeouts or failed runs.
 - `invite-generate`, `invite-check`, and `invite-disable` support either token auth (`--admin-token`) or signed auth (`--admin-key-file` + `--admin-key-id`).

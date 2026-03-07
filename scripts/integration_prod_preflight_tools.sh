@@ -71,6 +71,19 @@ EOF_MODE
 ./scripts/easy_node.sh admin-signing-status >/tmp/integration_prod_preflight_status.log 2>&1
 ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_ok.log 2>&1
 
+echo "ISSUER_ADMIN_TOKEN=legacy-admin-token-1234567890" >>"$AUTH_ENV"
+if ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_token_fail.log 2>&1; then
+  echo "expected prod-preflight to fail when ISSUER_ADMIN_TOKEN is set while token auth is disabled"
+  cat /tmp/integration_prod_preflight_token_fail.log
+  exit 1
+fi
+if ! rg -q "ISSUER_ADMIN_TOKEN must be empty when ISSUER_ADMIN_ALLOW_TOKEN=0" /tmp/integration_prod_preflight_token_fail.log; then
+  echo "missing expected issuer admin token disablement failure signal in prod-preflight output"
+  cat /tmp/integration_prod_preflight_token_fail.log
+  exit 1
+fi
+sed -i -E 's/^ISSUER_ADMIN_TOKEN=.*/ISSUER_ADMIN_TOKEN=/' "$AUTH_ENV"
+
 first_key_id="$(env_value "$AUTH_ENV" "ISSUER_ADMIN_SIGNING_KEY_ID")"
 ./scripts/easy_node.sh admin-signing-rotate --restart-issuer 0 --key-history 2 >/tmp/integration_prod_preflight_rotate2.log 2>&1
 second_key_id="$(env_value "$AUTH_ENV" "ISSUER_ADMIN_SIGNING_KEY_ID")"
