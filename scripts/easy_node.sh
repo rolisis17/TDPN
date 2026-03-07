@@ -3967,6 +3967,7 @@ EOF_CLIENT
     cd "$DEPLOY_DIR"
     timeout --foreground -k 10s "${timeout_sec}s" "${run_cmd[@]}" >"$out" 2>&1
   ) || true
+  cleanup_client_demo_artifacts
 
   if rg -q 'client selected entry=' "$out"; then
     local same_ops missing_ops selection_count entry_op_count exit_op_count cross_pair_count

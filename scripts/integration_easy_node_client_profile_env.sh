@@ -51,6 +51,14 @@ if [[ "${1:-}" == "image" && "${2:-}" == "inspect" ]]; then
   exit 0
 fi
 
+if [[ "${1:-}" == "ps" && "${2:-}" == "-aq" ]]; then
+  args=" $* "
+  if [[ "$args" == *"deploy-client-demo-run-"* ]]; then
+    printf 'demo-run-id\n'
+  fi
+  exit 0
+fi
+
 if [[ "${1:-}" == "compose" ]]; then
   args=" $* "
   if [[ "$args" == *" run "* ]]; then
@@ -125,6 +133,12 @@ if rg -q -- "-e PROD_STRICT_MODE=1" "$BETA_CAPTURE"; then
   cat "$BETA_CAPTURE"
   exit 1
 fi
+beta_cleanup_count="$(rg -c -- "rm -f demo-run-id" "$BETA_CAPTURE" || echo "0")"
+if [[ -z "$beta_cleanup_count" || "$beta_cleanup_count" -lt 2 ]]; then
+  echo "missing expected pre/post client demo cleanup calls in beta profile (rm count=$beta_cleanup_count)"
+  cat "$BETA_CAPTURE"
+  exit 1
+fi
 
 PROD_CAPTURE="$TMP_DIR/prod_capture.log"
 run_client_test_capture "$PROD_CAPTURE" "0" "1"
@@ -150,6 +164,12 @@ if rg -q -- "-e BETA_STRICT_MODE=1" "$PROD_CAPTURE"; then
 fi
 if rg -q -- "-e PROD_STRICT_MODE=1" "$PROD_CAPTURE"; then
   echo "unexpected prod strict-mode env injected for client-test prod profile"
+  cat "$PROD_CAPTURE"
+  exit 1
+fi
+prod_cleanup_count="$(rg -c -- "rm -f demo-run-id" "$PROD_CAPTURE" || echo "0")"
+if [[ -z "$prod_cleanup_count" || "$prod_cleanup_count" -lt 2 ]]; then
+  echo "missing expected pre/post client demo cleanup calls in prod profile (rm count=$prod_cleanup_count)"
   cat "$PROD_CAPTURE"
   exit 1
 fi

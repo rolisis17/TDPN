@@ -236,6 +236,7 @@ sudo ./scripts/easy_node.sh stop-all --with-wg-only 1 --force-iface-cleanup 1
 - `rotate-server-secrets` rotates `DIRECTORY_ADMIN_TOKEN` + `ENTRY_PUZZLE_SECRET` (and `ISSUER_ADMIN_TOKEN` on authority nodes) with optional restart.
 - `server-up --prod-profile 1` forces strict fail-closed runtime (`BETA_STRICT_MODE=1`, `PROD_STRICT_MODE=1`), enables mTLS, and on authority nodes requires signed issuer-admin auth (`ISSUER_ADMIN_REQUIRE_SIGNED=1`, token admin auth disabled).
 - `client-test --prod-profile 1` applies mTLS + trust-hardening client checks in the container demo path; full strict live-WG fail-closed validation is covered by wg-only/strict integration flows.
+- `client-test` now performs both pre-run and post-run demo-container cleanup to reduce stale `deploy-client-demo-run-*` container/network leftovers after timeouts or failed runs.
 - `invite-generate`, `invite-check`, and `invite-disable` support either token auth (`--admin-token`) or signed auth (`--admin-key-file` + `--admin-key-id`).
 - `admin-signing-status` / `admin-signing-rotate` are authority-only signer maintenance helpers.
 - `admin-signing-rotate --key-history N` preserves recent signer public keys for smoother key transitions.
