@@ -57,7 +57,7 @@ Notes:
   - server-up --mode authority runs directory + issuer + entry-exit.
   - server-up --mode provider runs directory + entry-exit only (no local issuer/admin token).
   - rotate-server-secrets rotates local server secret material in env files; use --restart 1 to apply immediately.
-  - --prod-profile enables fail-closed production strict mode (requires mTLS + signed issuer-admin auth).
+  - server-up --prod-profile enables fail-closed production strict mode (requires mTLS + signed issuer-admin auth).
   - admin-signing-status/admin-signing-rotate are authority-only issuer admin signer maintenance tools.
   - prod-preflight validates strict prod profile wiring (mTLS material, HTTPS URLs, and authority signer config).
   - client-test runs client-demo with --no-deps (no local server required on the client machine).
@@ -3895,7 +3895,8 @@ EOF_CLIENT
     echo "client test: beta profile enabled (distinct operators + multi-source defaults)"
   fi
   if [[ "$prod_profile" == "1" ]]; then
-    echo "client test: prod profile enabled (mTLS + fail-closed strict mode)"
+    echo "client test: prod profile enabled (mTLS + trust hardening)"
+    echo "note: full fail-closed strict runtime is validated via wg-only/strict integration flows"
   fi
 
   local -a run_cmd
@@ -3927,12 +3928,10 @@ EOF_CLIENT
     run_cmd+=(
       -e "DIRECTORY_MIN_OPERATORS=2"
       -e "CLIENT_DIRECTORY_MIN_OPERATORS=2"
-      -e "BETA_STRICT_MODE=1"
     )
   fi
   if [[ "$prod_profile" == "1" ]]; then
     run_cmd+=(
-      -e "PROD_STRICT_MODE=1"
       -e "MTLS_ENABLE=1"
       -e "MTLS_CA_FILE=/app/tls/ca.crt"
       -e "MTLS_CLIENT_CERT_FILE=/app/tls/client.crt"
