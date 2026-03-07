@@ -213,6 +213,30 @@ func TestValidateRuntimeConfigBetaStrictRejectsMissingTrustStrict(t *testing.T) 
 	}
 }
 
+func TestValidateRuntimeConfigBetaStrictRejectsNonUDPInnerSource(t *testing.T) {
+	c := &Client{
+		betaStrict:         true,
+		trustStrict:        true,
+		dataMode:           "opaque",
+		innerSource:        "",
+		wgBackend:          "command",
+		wgPrivateKey:       "/tmp/wg.key",
+		wgKernelProxy:      true,
+		wgProxyAddr:        "127.0.0.1:0",
+		liveWGMode:         true,
+		disableSynthetic:   true,
+		startupSyncTimeout: time.Second,
+		requireDistinctOps: true,
+	}
+	err := c.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected strict mode validation failure")
+	}
+	if !strings.Contains(err.Error(), "CLIENT_INNER_SOURCE=udp") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestValidateRuntimeConfigBetaStrictRejectsMissingStartupSyncTimeout(t *testing.T) {
 	c := &Client{
 		betaStrict:         true,

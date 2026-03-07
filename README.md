@@ -254,7 +254,7 @@ Optional env vars:
 - `ISSUER_ADDR` (default `127.0.0.1:8082`)
 - `ENTRY_ADDR` (default `127.0.0.1:8083`)
 - `EXIT_ADDR` (default `127.0.0.1:8084`)
-- `BETA_STRICT_MODE` (`1` enables strict beta-grade runtime guardrails across client/entry/exit/directory/issuer)
+- `BETA_STRICT_MODE` (`1` enables strict beta-grade runtime guardrails across client/entry/exit/directory/issuer; client strict mode requires `CLIENT_INNER_SOURCE=udp`)
 - `ENTRY_COUNTRY_CODE` (default `ZZ`; directory descriptor metadata for entry locality)
 - `EXIT_COUNTRY_CODE` (default `ZZ`; directory descriptor metadata for exit locality)
 - `ENTRY_REGION` (default `local`; directory descriptor metadata for entry region)
@@ -550,6 +550,7 @@ Opaque mode (`DATA_PLANE_MODE=opaque`):
 - if `CLIENT_WG_KERNEL_PROXY=1`, client points WG peer endpoint to `CLIENT_WG_PROXY_ADDR` and bridges WG UDP packets to/from entry via session-framed opaque datagrams
 - if `CLIENT_INNER_SOURCE=udp`, client forwards received UDP packets as opaque payloads instead of synthetic test datagrams
 - if `CLIENT_INNER_SOURCE` is unset, client now auto-defaults to `udp` for command backend, kernel-proxy, live-WG, and strict/WG-only profiles
+- `BETA_STRICT_MODE=1` now explicitly requires `CLIENT_INNER_SOURCE=udp` (fail-closed if misconfigured)
 - if `CLIENT_DISABLE_SYNTHETIC_FALLBACK=1`, client requires `CLIENT_INNER_SOURCE=udp` (or `CLIENT_WG_KERNEL_PROXY=1`) and fails bootstrap instead of generating synthetic opaque payloads
 - if `EXIT_OPAQUE_SINK_ADDR` is set, exit emits accepted opaque payload bytes to that UDP address
 - if `EXIT_OPAQUE_SOURCE_ADDR` is set, exit accepts raw downlink payload bytes and forwards them into active sessions

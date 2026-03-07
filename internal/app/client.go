@@ -631,6 +631,9 @@ func (c *Client) validateRuntimeConfig() error {
 		if !c.wgKernelProxy {
 			return fmt.Errorf("BETA_STRICT_MODE requires CLIENT_WG_KERNEL_PROXY=1")
 		}
+		if c.innerSource != "udp" {
+			return fmt.Errorf("BETA_STRICT_MODE requires CLIENT_INNER_SOURCE=udp")
+		}
 		if !c.liveWGMode {
 			return fmt.Errorf("BETA_STRICT_MODE requires CLIENT_LIVE_WG_MODE=1")
 		}
