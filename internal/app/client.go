@@ -192,9 +192,11 @@ func NewClient() *Client {
 	if trustFile == "" {
 		trustFile = "data/trusted_directory_keys.txt"
 	}
-	innerSource := os.Getenv("CLIENT_INNER_SOURCE")
+	innerSource := strings.TrimSpace(os.Getenv("CLIENT_INNER_SOURCE"))
+	innerSourceDefaulted := false
 	if innerSource == "" {
 		innerSource = "synthetic"
+		innerSourceDefaulted = true
 	}
 	innerUDPAddr := os.Getenv("CLIENT_INNER_UDP_ADDR")
 	if innerUDPAddr == "" {
@@ -353,6 +355,9 @@ func NewClient() *Client {
 	wgOnlyMode := os.Getenv("WG_ONLY_MODE") == "1" || os.Getenv("CLIENT_WG_ONLY_MODE") == "1"
 	if prodStrict {
 		wgOnlyMode = true
+	}
+	if innerSourceDefaulted && (wgBackend == "command" || wgKernelProxy || liveWGMode || betaStrict || wgOnlyMode) {
+		innerSource = "udp"
 	}
 	if startupSyncTimeoutSec <= 0 {
 		if betaStrict || wgOnlyMode {

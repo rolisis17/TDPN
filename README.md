@@ -548,6 +548,7 @@ Opaque mode (`DATA_PLANE_MODE=opaque`):
 - command client backend startup preflight checks `wg`/`ip` binaries, interface presence, and key path readability
 - if `CLIENT_WG_KERNEL_PROXY=1`, client points WG peer endpoint to `CLIENT_WG_PROXY_ADDR` and bridges WG UDP packets to/from entry via session-framed opaque datagrams
 - if `CLIENT_INNER_SOURCE=udp`, client forwards received UDP packets as opaque payloads instead of synthetic test datagrams
+- if `CLIENT_INNER_SOURCE` is unset, client now auto-defaults to `udp` for command backend, kernel-proxy, live-WG, and strict/WG-only profiles
 - if `CLIENT_DISABLE_SYNTHETIC_FALLBACK=1`, client requires `CLIENT_INNER_SOURCE=udp` (or `CLIENT_WG_KERNEL_PROXY=1`) and fails bootstrap instead of generating synthetic opaque payloads
 - if `EXIT_OPAQUE_SINK_ADDR` is set, exit emits accepted opaque payload bytes to that UDP address
 - if `EXIT_OPAQUE_SOURCE_ADDR` is set, exit accepts raw downlink payload bytes and forwards them into active sessions

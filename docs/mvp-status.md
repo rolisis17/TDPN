@@ -18,6 +18,7 @@
 - Client bootstrap resilience controls with optional startup delay, exponential retry backoff, and configurable jitter (`CLIENT_BOOTSTRAP_INITIAL_DELAY_SEC`, `CLIENT_BOOTSTRAP_BACKOFF_MAX_SEC`, `CLIENT_BOOTSTRAP_JITTER_PCT`).
 - Client startup control-plane sync gating (`CLIENT_STARTUP_SYNC_TIMEOUT_SEC`) to wait/fail on missing issuer+directory readiness before first bootstrap attempt.
 - Command-backend startup sync defaults: client now defaults `CLIENT_STARTUP_SYNC_TIMEOUT_SEC=8` and exit defaults `EXIT_STARTUP_SYNC_TIMEOUT_SEC=8` in `*_WG_BACKEND=command` mode (strict mode still enforces stronger defaults), reducing control-plane startup race failures in real-WG profiles.
+- Client startup defaults now auto-select `CLIENT_INNER_SOURCE=udp` when unset in command/backend proxy/live/strict paths, reducing misconfig failures for real-WG-oriented profiles while preserving `synthetic` default in noop mode.
 - Directory/issuer readiness endpoints (`GET /v1/health`) for lightweight startup dependency checks.
 - Reputation-weighted exit ordering with exploration floor (when signed score metadata is present).
 - Signed directory selection feed endpoint with client-side signature/expiry verification and optional feed vote thresholding.

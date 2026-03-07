@@ -510,6 +510,48 @@ func TestNewClientReadsBootstrapBackoffEnv(t *testing.T) {
 	}
 }
 
+func TestNewClientDefaultInnerSourceSyntheticInNoopMode(t *testing.T) {
+	t.Setenv("CLIENT_INNER_SOURCE", "")
+	t.Setenv("CLIENT_WG_BACKEND", "noop")
+	t.Setenv("CLIENT_WG_KERNEL_PROXY", "0")
+	t.Setenv("CLIENT_LIVE_WG_MODE", "0")
+	t.Setenv("BETA_STRICT_MODE", "0")
+	t.Setenv("CLIENT_BETA_STRICT", "0")
+	t.Setenv("WG_ONLY_MODE", "0")
+	c := NewClient()
+	if c.innerSource != "synthetic" {
+		t.Fatalf("expected noop-mode default inner source synthetic, got %q", c.innerSource)
+	}
+}
+
+func TestNewClientCommandBackendDefaultsInnerSourceUDP(t *testing.T) {
+	t.Setenv("CLIENT_INNER_SOURCE", "")
+	t.Setenv("CLIENT_WG_BACKEND", "command")
+	t.Setenv("CLIENT_WG_KERNEL_PROXY", "0")
+	t.Setenv("CLIENT_LIVE_WG_MODE", "0")
+	t.Setenv("BETA_STRICT_MODE", "0")
+	t.Setenv("CLIENT_BETA_STRICT", "0")
+	t.Setenv("WG_ONLY_MODE", "0")
+	c := NewClient()
+	if c.innerSource != "udp" {
+		t.Fatalf("expected command-mode default inner source udp, got %q", c.innerSource)
+	}
+}
+
+func TestNewClientKernelProxyDefaultsInnerSourceUDP(t *testing.T) {
+	t.Setenv("CLIENT_INNER_SOURCE", "")
+	t.Setenv("CLIENT_WG_BACKEND", "noop")
+	t.Setenv("CLIENT_WG_KERNEL_PROXY", "1")
+	t.Setenv("CLIENT_LIVE_WG_MODE", "0")
+	t.Setenv("BETA_STRICT_MODE", "0")
+	t.Setenv("CLIENT_BETA_STRICT", "0")
+	t.Setenv("WG_ONLY_MODE", "0")
+	c := NewClient()
+	if c.innerSource != "udp" {
+		t.Fatalf("expected kernel-proxy default inner source udp, got %q", c.innerSource)
+	}
+}
+
 func TestNewClientCommandBackendDefaultStartupSyncTimeout(t *testing.T) {
 	t.Setenv("CLIENT_WG_BACKEND", "command")
 	t.Setenv("CLIENT_STARTUP_SYNC_TIMEOUT_SEC", "")
