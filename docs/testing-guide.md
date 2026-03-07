@@ -22,6 +22,8 @@ Required:
 - Go installed (`go version`)
 - `curl`
 - `rg` (ripgrep)
+- `jq`
+- `openssl`
 - Linux/macOS shell
 
 Optional easy launcher path:
