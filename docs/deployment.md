@@ -137,6 +137,9 @@ sudo ./scripts/easy_node.sh wg-only-stack-selftest --strict-beta 1
 
 # full local cleanup (docker + wg-only stack); run with sudo for interface cleanup
 sudo ./scripts/easy_node.sh stop-all --with-wg-only 1 --force-iface-cleanup 1
+
+# rotate local server secret material (directory/puzzle, plus issuer token on authority nodes)
+./scripts/easy_node.sh rotate-server-secrets --restart 1
 ```
 
 Invite-only beta option:

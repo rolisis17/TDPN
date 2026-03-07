@@ -514,6 +514,12 @@ Closed-beta preflight bundle:
 ./scripts/beta_preflight.sh
 ```
 
+Easy-node secret rotation flow:
+
+```bash
+./scripts/integration_rotate_server_secrets.sh
+```
+
 HTTP cache/anti-entropy behavior:
 
 ```bash

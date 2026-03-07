@@ -43,6 +43,9 @@ echo "[ci] provider api integration"
 echo "[ci] easy-node role guard integration"
 ./scripts/integration_easy_node_role_guard.sh
 
+echo "[ci] rotate-server-secrets integration"
+./scripts/integration_rotate_server_secrets.sh
+
 echo "[ci] prod preflight/admin-signing integration"
 ./scripts/integration_prod_preflight_tools.sh
 

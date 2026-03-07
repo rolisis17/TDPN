@@ -156,6 +156,9 @@ sudo ./scripts/easy_node.sh wg-only-stack-selftest --strict-beta 1
 # stop all local resources; use sudo to also clean wg-only interfaces/processes
 sudo ./scripts/easy_node.sh stop-all --with-wg-only 1 --force-iface-cleanup 1
 
+# rotate server secret material in active env file
+./scripts/easy_node.sh rotate-server-secrets --restart 1
+
 ./scripts/easy_node.sh client-test \
   --directory-urls http://<SERVER_IP>:8081 \
   --issuer-url http://<SERVER_IP>:8082 \
@@ -230,6 +233,7 @@ sudo ./scripts/easy_node.sh stop-all --with-wg-only 1 --force-iface-cleanup 1
 - directory/issuer signing key file names are derived from those IDs to avoid accidental key reuse across machines.
 - authority admin token is hidden in output by default; use `--show-admin-token 1` only when you explicitly need to view it.
 - easy-mode `server-up` auto-generates and stores non-default `DIRECTORY_ADMIN_TOKEN` and `ENTRY_PUZZLE_SECRET` (both hidden in output unless you inspect env files).
+- `rotate-server-secrets` rotates `DIRECTORY_ADMIN_TOKEN` + `ENTRY_PUZZLE_SECRET` (and `ISSUER_ADMIN_TOKEN` on authority nodes) with optional restart.
 - `--prod-profile 1` forces strict fail-closed runtime (`BETA_STRICT_MODE=1`, `PROD_STRICT_MODE=1`), enables mTLS, and on authority nodes requires signed issuer-admin auth (`ISSUER_ADMIN_REQUIRE_SIGNED=1`, token admin auth disabled).
 - `invite-generate`, `invite-check`, and `invite-disable` support either token auth (`--admin-token`) or signed auth (`--admin-key-file` + `--admin-key-id`).
 - `admin-signing-status` / `admin-signing-rotate` are authority-only signer maintenance helpers.

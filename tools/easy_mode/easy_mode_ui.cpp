@@ -714,6 +714,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
     std::cout << "23) WG-only stack status\n";
     std::cout << "24) WG-only stack down\n";
     std::cout << "25) WG-only stack selftest (up->client test->down)\n";
+    std::cout << "26) Rotate local server secrets\n";
     std::cout << "0) Back\n";
     std::cout << "Selection: ";
 
@@ -1192,6 +1193,18 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       } else {
         runCommand(cmd.str());
       }
+      continue;
+    }
+    if (choice == "26") {
+      bool restart = parseYesNo(readLine("Restart server services after rotating secrets? (Y/n)", "y"), true);
+      bool rotateIssuerAdmin = parseYesNo(readLine("Rotate issuer admin token too (authority mode)? (Y/n)", "y"), true);
+      bool showSecrets = parseYesNo(readLine("Show generated secrets in console? (y/N)", "n"), false);
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " rotate-server-secrets"
+          << " --restart " << (restart ? "1" : "0")
+          << " --rotate-issuer-admin " << (rotateIssuerAdmin ? "1" : "0")
+          << " --show-secrets " << (showSecrets ? "1" : "0");
+      runCommand(cmd.str());
       continue;
     }
 

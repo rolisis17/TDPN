@@ -28,6 +28,7 @@ Usage:
   ./scripts/easy_node.sh server-status
   ./scripts/easy_node.sh server-logs
   ./scripts/easy_node.sh server-down
+  ./scripts/easy_node.sh rotate-server-secrets [--restart [0|1]] [--rotate-issuer-admin [0|1]] [--show-secrets [0|1]]
   ./scripts/easy_node.sh stop-all [--with-wg-only [0|1]] [--force-iface-cleanup [0|1]]
   ./scripts/easy_node.sh install-deps-ubuntu
   ./scripts/easy_node.sh wg-only-check
@@ -55,6 +56,7 @@ Usage:
 Notes:
   - server-up --mode authority runs directory + issuer + entry-exit.
   - server-up --mode provider runs directory + entry-exit only (no local issuer/admin token).
+  - rotate-server-secrets rotates local server secret material in env files; use --restart 1 to apply immediately.
   - --prod-profile enables fail-closed production strict mode (requires mTLS + signed issuer-admin auth).
   - admin-signing-status/admin-signing-rotate are authority-only issuer admin signer maintenance tools.
   - prod-preflight validates strict prod profile wiring (mTLS material, HTTPS URLs, and authority signer config).
@@ -1546,6 +1548,120 @@ server_down() {
   local env_file
   env_file="$(active_server_env_file)"
   compose_with_env "$env_file" down --remove-orphans
+}
+
+rotate_server_secrets() {
+  local restart="1"
+  local rotate_issuer_admin="1"
+  local show_secrets="0"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --restart)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          restart="${2:-}"
+          shift 2
+        else
+          restart="1"
+          shift
+        fi
+        ;;
+      --rotate-issuer-admin)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          rotate_issuer_admin="${2:-}"
+          shift 2
+        else
+          rotate_issuer_admin="1"
+          shift
+        fi
+        ;;
+      --show-secrets)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          show_secrets="${2:-}"
+          shift 2
+        else
+          show_secrets="1"
+          shift
+        fi
+        ;;
+      -h|--help|help)
+        usage
+        return 0
+        ;;
+      *)
+        echo "unknown arg for rotate-server-secrets: $1"
+        exit 2
+        ;;
+    esac
+  done
+
+  if [[ "$restart" != "0" && "$restart" != "1" ]]; then
+    echo "rotate-server-secrets requires --restart to be 0 or 1"
+    exit 2
+  fi
+  if [[ "$rotate_issuer_admin" != "0" && "$rotate_issuer_admin" != "1" ]]; then
+    echo "rotate-server-secrets requires --rotate-issuer-admin to be 0 or 1"
+    exit 2
+  fi
+  if [[ "$show_secrets" != "0" && "$show_secrets" != "1" ]]; then
+    echo "rotate-server-secrets requires --show-secrets to be 0 or 1"
+    exit 2
+  fi
+
+  local mode env_file
+  mode="$(active_server_mode)"
+  env_file="$(active_server_env_file)"
+  if [[ ! -f "$env_file" ]]; then
+    echo "rotate-server-secrets requires existing env file: $env_file"
+    exit 2
+  fi
+
+  local directory_admin_token entry_puzzle_secret issuer_admin_token=""
+  directory_admin_token="$(random_token)"
+  entry_puzzle_secret="$(random_token)"
+
+  set_env_kv "$env_file" "DIRECTORY_ADMIN_TOKEN" "$directory_admin_token"
+  set_env_kv "$env_file" "ENTRY_PUZZLE_SECRET" "$entry_puzzle_secret"
+
+  if [[ "$mode" == "authority" && "$rotate_issuer_admin" == "1" ]]; then
+    issuer_admin_token="$(random_token)"
+    set_env_kv "$env_file" "ISSUER_ADMIN_TOKEN" "$issuer_admin_token"
+  fi
+  secure_file_permissions "$env_file"
+
+  if [[ "$restart" == "1" ]]; then
+    ensure_deps_or_die
+    if [[ "$mode" == "authority" ]]; then
+      compose_with_env "$env_file" up -d directory issuer entry-exit
+    else
+      compose_with_env "$env_file" up -d --no-deps directory entry-exit
+    fi
+  fi
+
+  echo "server secrets rotated"
+  echo "mode: $mode"
+  echo "env file: $env_file"
+  echo "restart: $restart"
+  if [[ "$show_secrets" == "1" ]]; then
+    echo "directory_admin_token: $directory_admin_token"
+    echo "entry_puzzle_secret: $entry_puzzle_secret"
+    if [[ -n "$issuer_admin_token" ]]; then
+      echo "issuer_admin_token: $issuer_admin_token"
+    elif [[ "$mode" == "authority" ]]; then
+      echo "issuer_admin_token: [unchanged]"
+    fi
+  else
+    echo "directory_admin_token: [hidden]"
+    echo "entry_puzzle_secret: [hidden]"
+    if [[ "$mode" == "authority" ]]; then
+      if [[ "$rotate_issuer_admin" == "1" ]]; then
+        echo "issuer_admin_token: [hidden]"
+      else
+        echo "issuer_admin_token: [unchanged]"
+      fi
+    fi
+    echo "use --show-secrets 1 only when explicitly needed."
+  fi
 }
 
 cleanup_client_demo_artifacts() {
@@ -3952,6 +4068,10 @@ main() {
       ;;
     server-down)
       server_down
+      ;;
+    rotate-server-secrets)
+      shift
+      rotate_server_secrets "$@"
       ;;
     stop-all)
       shift

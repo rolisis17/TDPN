@@ -25,6 +25,9 @@ echo "[deep] provider api"
 echo "[deep] easy-node role guard"
 ./scripts/integration_easy_node_role_guard.sh
 
+echo "[deep] rotate-server-secrets"
+./scripts/integration_rotate_server_secrets.sh
+
 echo "[deep] prod preflight/admin-signing"
 ./scripts/integration_prod_preflight_tools.sh
 
