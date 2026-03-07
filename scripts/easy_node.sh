@@ -95,6 +95,7 @@ check_dependencies() {
   need_cmd rg || ok=0
   need_cmd jq || ok=0
   need_cmd go || ok=0
+  need_cmd openssl || ok=0
 
   if ! docker compose version >/dev/null 2>&1; then
     echo "missing dependency: docker compose plugin"
@@ -647,8 +648,13 @@ random_token() {
     openssl rand -hex 16
     return
   fi
-  # Fallback token when openssl is unavailable.
-  date +%s%N
+  # Fallback entropy path when openssl is unavailable.
+  if [[ -r /dev/urandom ]] && command -v od >/dev/null 2>&1; then
+    od -An -N16 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n'
+    return
+  fi
+  # Last-resort fallback.
+  date +%s%N | sha256sum | awk '{print substr($1,1,32)}'
 }
 
 random_id_suffix() {

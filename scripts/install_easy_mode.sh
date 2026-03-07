@@ -23,6 +23,7 @@ Dependencies:
   - g++
   - ripgrep (`rg`)
   - jq
+  - openssl
 USAGE
 }
 
@@ -91,6 +92,11 @@ fi
 if ! have_cmd jq; then
   echo "missing: jq"
   maybe_install_pkg jq || missing=1
+fi
+
+if ! have_cmd openssl; then
+  echo "missing: openssl"
+  maybe_install_pkg openssl || missing=1
 fi
 
 if [[ "$missing" -ne 0 ]]; then
