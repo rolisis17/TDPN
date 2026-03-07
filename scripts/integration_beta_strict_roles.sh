@@ -19,6 +19,7 @@ ENTRY_DATA_ADDR="127.0.0.1:61983"
 ISSUER_ADDR="127.0.0.1:18682"
 
 CLIENT_FAIL_LOG="/tmp/integration_beta_strict_roles_client_fail.log"
+CLIENT_INNER_SOURCE_FAIL_LOG="/tmp/integration_beta_strict_roles_client_inner_source_fail.log"
 CLIENT_MULTI_DIR_FAIL_LOG="/tmp/integration_beta_strict_roles_client_multi_dir_fail.log"
 CLIENT_MULTI_DIR_OP_FAIL_LOG="/tmp/integration_beta_strict_roles_client_multi_dir_operator_fail.log"
 ENTRY_FAIL_LOG="/tmp/integration_beta_strict_roles_entry_fail.log"
@@ -34,7 +35,7 @@ ISSUER_FAIL_LOG="/tmp/integration_beta_strict_roles_issuer_fail.log"
 ISSUER_SHORT_TOKEN_FAIL_LOG="/tmp/integration_beta_strict_roles_issuer_short_token_fail.log"
 ENTRY_OK_LOG="/tmp/integration_beta_strict_roles_entry_ok.log"
 ISSUER_OK_LOG="/tmp/integration_beta_strict_roles_issuer_ok.log"
-rm -f "$CLIENT_FAIL_LOG" "$CLIENT_MULTI_DIR_FAIL_LOG" "$CLIENT_MULTI_DIR_OP_FAIL_LOG" "$ENTRY_FAIL_LOG" "$ENTRY_PUZZLE_FAIL_LOG" "$ENTRY_MULTI_DIR_FAIL_LOG" "$ENTRY_MULTI_DIR_OP_FAIL_LOG" "$EXIT_FAIL_LOG" "$EXIT_REBIND_FAIL_LOG" "$EXIT_MULTI_ISSUER_FAIL_LOG" "$EXIT_MULTI_ISSUER_OP_FAIL_LOG" "$EXIT_MULTI_ISSUER_ID_FAIL_LOG" "$ISSUER_FAIL_LOG" "$ISSUER_SHORT_TOKEN_FAIL_LOG" "$ENTRY_OK_LOG" "$ISSUER_OK_LOG"
+rm -f "$CLIENT_FAIL_LOG" "$CLIENT_INNER_SOURCE_FAIL_LOG" "$CLIENT_MULTI_DIR_FAIL_LOG" "$CLIENT_MULTI_DIR_OP_FAIL_LOG" "$ENTRY_FAIL_LOG" "$ENTRY_PUZZLE_FAIL_LOG" "$ENTRY_MULTI_DIR_FAIL_LOG" "$ENTRY_MULTI_DIR_OP_FAIL_LOG" "$EXIT_FAIL_LOG" "$EXIT_REBIND_FAIL_LOG" "$EXIT_MULTI_ISSUER_FAIL_LOG" "$EXIT_MULTI_ISSUER_OP_FAIL_LOG" "$EXIT_MULTI_ISSUER_ID_FAIL_LOG" "$ISSUER_FAIL_LOG" "$ISSUER_SHORT_TOKEN_FAIL_LOG" "$ENTRY_OK_LOG" "$ISSUER_OK_LOG"
 
 if CLIENT_BETA_STRICT=1 timeout 12s go run ./cmd/node --client >"$CLIENT_FAIL_LOG" 2>&1; then
   echo "expected strict client startup failure with default client config"
@@ -42,8 +43,31 @@ if CLIENT_BETA_STRICT=1 timeout 12s go run ./cmd/node --client >"$CLIENT_FAIL_LO
   exit 1
 fi
 if ! rg -q "BETA_STRICT_MODE requires DATA_PLANE_MODE=opaque" "$CLIENT_FAIL_LOG"; then
-  echo "missing expected strict client validation signal"
-  cat "$CLIENT_FAIL_LOG"
+	echo "missing expected strict client validation signal"
+	cat "$CLIENT_FAIL_LOG"
+	exit 1
+fi
+
+if CLIENT_BETA_STRICT=1 \
+  DIRECTORY_TRUST_STRICT=1 \
+  DATA_PLANE_MODE=opaque \
+  CLIENT_WG_BACKEND=command \
+  CLIENT_WG_PRIVATE_KEY_PATH=/tmp/fake-client.key \
+  CLIENT_WG_KERNEL_PROXY=1 \
+  CLIENT_WG_PROXY_ADDR=127.0.0.1:0 \
+  CLIENT_LIVE_WG_MODE=1 \
+  CLIENT_INNER_SOURCE=none \
+  CLIENT_DISABLE_SYNTHETIC_FALLBACK=1 \
+  CLIENT_STARTUP_SYNC_TIMEOUT_SEC=8 \
+  CLIENT_REQUIRE_DISTINCT_OPERATORS=1 \
+  timeout 12s go run ./cmd/node --client >"$CLIENT_INNER_SOURCE_FAIL_LOG" 2>&1; then
+  echo "expected strict client startup failure with non-udp inner source"
+  cat "$CLIENT_INNER_SOURCE_FAIL_LOG"
+  exit 1
+fi
+if ! rg -q "BETA_STRICT_MODE requires CLIENT_INNER_SOURCE=udp" "$CLIENT_INNER_SOURCE_FAIL_LOG"; then
+  echo "missing expected strict client inner-source validation signal"
+  cat "$CLIENT_INNER_SOURCE_FAIL_LOG"
   exit 1
 fi
 
