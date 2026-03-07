@@ -22,6 +22,7 @@ Dependencies:
   - curl
   - g++
   - ripgrep (`rg`)
+  - jq
 USAGE
 }
 
@@ -85,6 +86,11 @@ fi
 if ! have_cmd rg; then
   echo "missing: ripgrep (rg)"
   maybe_install_pkg ripgrep || missing=1
+fi
+
+if ! have_cmd jq; then
+  echo "missing: jq"
+  maybe_install_pkg jq || missing=1
 fi
 
 if [[ "$missing" -ne 0 ]]; then

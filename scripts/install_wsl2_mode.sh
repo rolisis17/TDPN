@@ -21,6 +21,7 @@ What it installs (optional, Debian/Ubuntu only):
   - curl
   - g++
   - ripgrep
+  - jq
 
 Then it runs:
   ./scripts/install_easy_mode.sh [--auto-install]
@@ -84,6 +85,9 @@ if ! have_cmd g++; then
 fi
 if ! have_cmd rg; then
   extra_pkgs+=(ripgrep)
+fi
+if ! have_cmd jq; then
+  extra_pkgs+=(jq)
 fi
 
 if [[ ${#extra_pkgs[@]} -gt 0 ]]; then
