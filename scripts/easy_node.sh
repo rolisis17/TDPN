@@ -35,6 +35,7 @@ Usage:
   ./scripts/easy_node.sh wg-only-stack-up [--strict-beta [0|1]] [--detach [0|1]] [--base-port N] [--client-iface IFACE] [--exit-iface IFACE] [--force-iface-reset [0|1]] [--cleanup-ifaces [0|1]] [--log-file PATH]
   ./scripts/easy_node.sh wg-only-stack-status
   ./scripts/easy_node.sh wg-only-stack-down [--force-iface-cleanup [0|1]]
+  ./scripts/easy_node.sh wg-only-stack-selftest [--strict-beta [0|1]] [--base-port N] [--timeout-sec N] [--min-selection-lines N] [--force-iface-reset [0|1]] [--cleanup-ifaces [0|1]] [--keep-stack [0|1]]
   ./scripts/easy_node.sh client-test [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--exit-country CC] [--exit-region REGION] [--timeout-sec N] [--distinct-operators [0|1]] [--min-selection-lines N] [--min-entry-operators N] [--min-exit-operators N] [--require-cross-operator-pair [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]]
   ./scripts/easy_node.sh three-machine-validate [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-a-url URL] [--issuer-b-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--client-min-selection-lines N] [--client-min-entry-operators N] [--client-min-exit-operators N] [--client-require-cross-operator-pair [0|1]] [--exit-country CC] [--exit-region REGION] [--distinct-operators [0|1]] [--require-issuer-quorum [0|1]] [--beta-profile [0|1]]
   ./scripts/easy_node.sh three-machine-soak [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-a-url URL] [--issuer-b-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--rounds N] [--pause-sec N] [--fault-every N] [--fault-command CMD] [--continue-on-fail [0|1]] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--client-min-selection-lines N] [--client-min-entry-operators N] [--client-min-exit-operators N] [--client-require-cross-operator-pair [0|1]] [--exit-country CC] [--exit-region REGION] [--distinct-operators [0|1]] [--require-issuer-quorum [0|1]] [--beta-profile [0|1]] [--report-file PATH]
@@ -60,6 +61,7 @@ Notes:
   - client-test runs client-demo with --no-deps (no local server required on the client machine).
   - wg-only-local-test runs host real-WireGuard integration checks (Linux + root required).
   - wg-only-stack-up/status/down manages a reusable host real-WireGuard demo stack (Linux + root required).
+  - wg-only-stack-selftest runs stack-up + client-test + stack-down as one command (Linux + root required).
   - three-machine-validate runs health + federation checks then runs client-test with both directories.
   - bootstrap discovery mode lets you provide one directory URL and auto-discover other server hosts.
   - machine-a-test/machine-b-test/machine-c-test are machine-role-specific automated validations with optional report files.
@@ -2016,6 +2018,33 @@ wg_only_stack_up() {
       cat "$log_file"
       exit 1
     fi
+    if ! wait_http_ok "${issuer_url}/v1/pubkeys" "wg-only issuer" 30; then
+      kill "$pid" >/dev/null 2>&1 || true
+      sleep 1
+      ip link delete "$client_iface" >/dev/null 2>&1 || true
+      ip link delete "$exit_iface" >/dev/null 2>&1 || true
+      echo "wg-only stack issuer did not become healthy; log follows:"
+      cat "$log_file"
+      exit 1
+    fi
+    if ! wait_http_ok "${entry_url}/v1/health" "wg-only entry" 30; then
+      kill "$pid" >/dev/null 2>&1 || true
+      sleep 1
+      ip link delete "$client_iface" >/dev/null 2>&1 || true
+      ip link delete "$exit_iface" >/dev/null 2>&1 || true
+      echo "wg-only stack entry did not become healthy; log follows:"
+      cat "$log_file"
+      exit 1
+    fi
+    if ! wait_http_ok "${exit_url}/v1/health" "wg-only exit" 30; then
+      kill "$pid" >/dev/null 2>&1 || true
+      sleep 1
+      ip link delete "$client_iface" >/dev/null 2>&1 || true
+      ip link delete "$exit_iface" >/dev/null 2>&1 || true
+      echo "wg-only stack exit did not become healthy; log follows:"
+      cat "$log_file"
+      exit 1
+    fi
 
     cat >"$state_file" <<EOF_STATE
 WG_ONLY_PID=$pid
@@ -2134,6 +2163,165 @@ wg_only_stack_down() {
 
   rm -f "$state_file"
   echo "wg-only stack state cleared"
+  return 0
+}
+
+wg_only_stack_selftest() {
+  local strict_beta="${EASY_NODE_WG_ONLY_SELFTEST_STRICT_BETA:-1}"
+  local base_port="${EASY_NODE_WG_ONLY_SELFTEST_BASE_PORT:-19080}"
+  local timeout_sec="${EASY_NODE_WG_ONLY_SELFTEST_TIMEOUT_SEC:-80}"
+  local min_selection_lines="${EASY_NODE_WG_ONLY_SELFTEST_MIN_SELECTION_LINES:-8}"
+  local force_iface_reset="${EASY_NODE_WG_ONLY_SELFTEST_FORCE_IFACE_RESET:-1}"
+  local cleanup_ifaces="${EASY_NODE_WG_ONLY_SELFTEST_CLEANUP_IFACES:-1}"
+  local keep_stack="${EASY_NODE_WG_ONLY_SELFTEST_KEEP_STACK:-0}"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --strict-beta)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          strict_beta="${2:-}"
+          shift 2
+        else
+          strict_beta="1"
+          shift
+        fi
+        ;;
+      --base-port)
+        base_port="${2:-}"
+        shift 2
+        ;;
+      --timeout-sec)
+        timeout_sec="${2:-}"
+        shift 2
+        ;;
+      --min-selection-lines)
+        min_selection_lines="${2:-}"
+        shift 2
+        ;;
+      --force-iface-reset)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          force_iface_reset="${2:-}"
+          shift 2
+        else
+          force_iface_reset="1"
+          shift
+        fi
+        ;;
+      --cleanup-ifaces)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          cleanup_ifaces="${2:-}"
+          shift 2
+        else
+          cleanup_ifaces="1"
+          shift
+        fi
+        ;;
+      --keep-stack)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          keep_stack="${2:-}"
+          shift 2
+        else
+          keep_stack="1"
+          shift
+        fi
+        ;;
+      *)
+        echo "unknown arg for wg-only-stack-selftest: $1"
+        exit 2
+        ;;
+    esac
+  done
+
+  if [[ "$strict_beta" != "0" && "$strict_beta" != "1" ]]; then
+    echo "wg-only-stack-selftest requires --strict-beta to be 0 or 1"
+    exit 2
+  fi
+  if [[ "$force_iface_reset" != "0" && "$force_iface_reset" != "1" ]]; then
+    echo "wg-only-stack-selftest requires --force-iface-reset to be 0 or 1"
+    exit 2
+  fi
+  if [[ "$cleanup_ifaces" != "0" && "$cleanup_ifaces" != "1" ]]; then
+    echo "wg-only-stack-selftest requires --cleanup-ifaces to be 0 or 1"
+    exit 2
+  fi
+  if [[ "$keep_stack" != "0" && "$keep_stack" != "1" ]]; then
+    echo "wg-only-stack-selftest requires --keep-stack to be 0 or 1"
+    exit 2
+  fi
+  if ! [[ "$base_port" =~ ^[0-9]+$ ]] || ((base_port < 1024 || base_port > 65400)); then
+    echo "wg-only-stack-selftest requires --base-port in 1024..65400"
+    exit 2
+  fi
+  if ! [[ "$timeout_sec" =~ ^[0-9]+$ ]] || ((timeout_sec < 40)); then
+    echo "wg-only-stack-selftest requires --timeout-sec >= 40"
+    exit 2
+  fi
+  if ! [[ "$min_selection_lines" =~ ^[0-9]+$ ]] || ((min_selection_lines < 1)); then
+    echo "wg-only-stack-selftest requires --min-selection-lines >= 1"
+    exit 2
+  fi
+
+  if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+    echo "wg-only-stack-selftest requires root privileges (run with sudo)"
+    exit 1
+  fi
+
+  local started="0"
+  wg_only_stack_selftest_cleanup() {
+    if [[ "$started" == "1" && "$keep_stack" == "0" ]]; then
+      wg_only_stack_down --force-iface-cleanup "$cleanup_ifaces" >/dev/null 2>&1 || true
+    fi
+  }
+  trap wg_only_stack_selftest_cleanup EXIT INT TERM
+
+  echo "wg-only stack selftest: starting stack"
+  wg_only_stack_up \
+    --strict-beta "$strict_beta" \
+    --detach 1 \
+    --base-port "$base_port" \
+    --force-iface-reset "$force_iface_reset" \
+    --cleanup-ifaces "$cleanup_ifaces"
+  started="1"
+
+  local state_file directory_url issuer_url entry_url exit_url
+  state_file="$(wg_only_state_file)"
+  directory_url="$(identity_value "$state_file" "WG_ONLY_DIRECTORY_URL")"
+  issuer_url="$(identity_value "$state_file" "WG_ONLY_ISSUER_URL")"
+  entry_url="$(identity_value "$state_file" "WG_ONLY_ENTRY_URL")"
+  exit_url="$(identity_value "$state_file" "WG_ONLY_EXIT_URL")"
+  if [[ -z "$directory_url" || -z "$issuer_url" || -z "$entry_url" || -z "$exit_url" ]]; then
+    echo "wg-only-stack-selftest failed: missing stack endpoint state"
+    exit 1
+  fi
+
+  echo "wg-only stack selftest: running client validation"
+  if ! client_test \
+    --directory-urls "$directory_url" \
+    --issuer-url "$issuer_url" \
+    --entry-url "$entry_url" \
+    --exit-url "$exit_url" \
+    --timeout-sec "$timeout_sec" \
+    --min-sources 1 \
+    --min-selection-lines "$min_selection_lines" \
+    --min-entry-operators 1 \
+    --min-exit-operators 1 \
+    --require-cross-operator-pair 1 \
+    --distinct-operators "$strict_beta" \
+    --beta-profile "$strict_beta"; then
+    echo "wg-only stack selftest: failed"
+    exit 1
+  fi
+
+  if [[ "$keep_stack" == "1" ]]; then
+    echo "wg-only stack selftest: ok (stack left running)"
+    trap - EXIT INT TERM
+    return 0
+  fi
+
+  wg_only_stack_down --force-iface-cleanup "$cleanup_ifaces"
+  started="0"
+  trap - EXIT INT TERM
+  echo "wg-only stack selftest: ok"
   return 0
 }
 
@@ -3612,6 +3800,10 @@ main() {
     wg-only-stack-down)
       shift
       wg_only_stack_down "$@"
+      ;;
+    wg-only-stack-selftest)
+      shift
+      wg_only_stack_selftest "$@"
       ;;
     wg-only-local-test)
       shift

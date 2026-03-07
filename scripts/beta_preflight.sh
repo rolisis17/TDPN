@@ -42,6 +42,9 @@ if [[ "${BETA_PREFLIGHT_PRIVILEGED:-0}" == "1" ]]; then
     exit 1
   fi
   run_step "real wireguard privileged matrix" ./scripts/integration_real_wg_privileged_matrix.sh
+  if [[ "${BETA_PREFLIGHT_INCLUDE_WG_ONLY_STACK_SELFTEST:-0}" == "1" ]]; then
+    run_step "wg-only stack lifecycle selftest" ./scripts/integration_wg_only_stack_selftest.sh
+  fi
 fi
 
 echo "[beta-preflight] ok"

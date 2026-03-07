@@ -713,6 +713,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
     std::cout << "22) WG-only stack up (real WireGuard, background)\n";
     std::cout << "23) WG-only stack status\n";
     std::cout << "24) WG-only stack down\n";
+    std::cout << "25) WG-only stack selftest (up->client test->down)\n";
     std::cout << "0) Back\n";
     std::cout << "Selection: ";
 
@@ -1140,6 +1141,33 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       std::ostringstream cmd;
       cmd << shellEscape(script) << " wg-only-stack-down"
           << " --force-iface-cleanup " << (forceIfaceCleanup ? "1" : "0");
+      if (!isRootUser()) {
+        bool useSudo = parseYesNo(readLine("Run with sudo? (Y/n)", "y"), true);
+        if (useSudo) {
+          runCommand("sudo " + cmd.str());
+        } else {
+          runCommand(cmd.str());
+        }
+      } else {
+        runCommand(cmd.str());
+      }
+      continue;
+    }
+    if (choice == "25") {
+      bool strictBeta = parseYesNo(readLine("Strict beta profile? (Y/n)", "y"), true);
+      std::string timeoutSec = readLine("Client validation timeout sec", "80");
+      std::string minSelection = readLine("Minimum selection lines", "8");
+      std::string basePort = trim(readLine("Base port (blank=default 19080)", ""));
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " wg-only-stack-selftest"
+          << " --strict-beta " << (strictBeta ? "1" : "0")
+          << " --timeout-sec " << shellEscape(timeoutSec)
+          << " --min-selection-lines " << shellEscape(minSelection)
+          << " --force-iface-reset 1"
+          << " --cleanup-ifaces 1";
+      if (!basePort.empty()) {
+        cmd << " --base-port " << shellEscape(basePort);
+      }
       if (!isRootUser()) {
         bool useSudo = parseYesNo(readLine("Run with sudo? (Y/n)", "y"), true);
         if (useSudo) {

@@ -381,6 +381,12 @@ Real command-backend WireGuard profile matrix (Linux + root required):
 sudo ./scripts/integration_real_wg_privileged_matrix.sh
 ```
 
+WG-only stack lifecycle selftest (stack up + client validation + cleanup, Linux + root required):
+
+```bash
+sudo ./scripts/integration_wg_only_stack_selftest.sh
+```
+
 If this fails immediately:
 - ensure WireGuard kernel support exists (`ip link add dev wg-test0 type wireguard` should succeed, then `ip link del wg-test0`)
 - install/enable WireGuard tools/module for your distro before retrying
