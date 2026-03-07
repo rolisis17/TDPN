@@ -563,7 +563,7 @@ Opaque mode (`DATA_PLANE_MODE=opaque`):
 
 Anti-abuse entry controls:
 - `ENTRY_OPEN_RPS` (default `20`) controls per-IP path-open limit per second
-- `ENTRY_PUZZLE_DIFFICULTY` (default `0`; set `1..6` to enable challenge puzzle)
+- `ENTRY_PUZZLE_DIFFICULTY` (default `0`; set `1..6` to enable challenge puzzle, and strict beta/prod requires `>0`)
 - `ENTRY_PUZZLE_SECRET` (default `entry-secret-default`; strict beta/prod requires non-default value with length>=16)
 - `ENTRY_PUZZLE_ADAPTIVE` (default `1`, increases challenge difficulty with overload)
 - `ENTRY_BAN_THRESHOLD` + `ENTRY_BAN_SEC` add temporary source bans after repeated over-limit opens

@@ -305,6 +305,9 @@ func (s *Service) validateRuntimeConfig() error {
 		if len(secret) < 16 {
 			return fmt.Errorf("BETA_STRICT_MODE requires ENTRY_PUZZLE_SECRET length>=16")
 		}
+		if s.puzzleDifficulty <= 0 {
+			return fmt.Errorf("BETA_STRICT_MODE requires ENTRY_PUZZLE_DIFFICULTY>0")
+		}
 		if len(s.directoryURLs) > 1 {
 			if s.directoryMinSources < 2 {
 				return fmt.Errorf("BETA_STRICT_MODE requires ENTRY_DIRECTORY_MIN_SOURCES>=2 when multiple DIRECTORY_URLS are configured")

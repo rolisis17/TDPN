@@ -163,6 +163,7 @@ func TestValidateRuntimeConfigBetaStrict(t *testing.T) {
 		requireDistinctExitOp: true,
 		operatorID:            "op-entry",
 		puzzleSecret:          "entry-secret-012345",
+		puzzleDifficulty:      1,
 		directoryURLs:         []string{"http://127.0.0.1:8081"},
 		directoryMinSources:   1,
 		directoryMinOperators: 1,
@@ -180,6 +181,7 @@ func TestValidateRuntimeConfigBetaStrictRejectsDefaultPuzzleSecret(t *testing.T)
 		requireDistinctExitOp: true,
 		operatorID:            "op-entry",
 		puzzleSecret:          "entry-secret-default",
+		puzzleDifficulty:      1,
 	}
 	err := s.validateRuntimeConfig()
 	if err == nil {
@@ -198,6 +200,7 @@ func TestValidateRuntimeConfigBetaStrictRejectsEmptyPuzzleSecret(t *testing.T) {
 		requireDistinctExitOp: true,
 		operatorID:            "op-entry",
 		puzzleSecret:          "",
+		puzzleDifficulty:      1,
 	}
 	err := s.validateRuntimeConfig()
 	if err == nil {
@@ -216,6 +219,7 @@ func TestValidateRuntimeConfigBetaStrictRejectsShortPuzzleSecret(t *testing.T) {
 		requireDistinctExitOp: true,
 		operatorID:            "op-entry",
 		puzzleSecret:          "too-short",
+		puzzleDifficulty:      1,
 	}
 	err := s.validateRuntimeConfig()
 	if err == nil {
@@ -226,12 +230,32 @@ func TestValidateRuntimeConfigBetaStrictRejectsShortPuzzleSecret(t *testing.T) {
 	}
 }
 
+func TestValidateRuntimeConfigBetaStrictRejectsZeroPuzzleDifficulty(t *testing.T) {
+	s := &Service{
+		betaStrict:            true,
+		liveWGMode:            true,
+		directoryTrustStrict:  true,
+		requireDistinctExitOp: true,
+		operatorID:            "op-entry",
+		puzzleSecret:          "entry-secret-012345",
+		puzzleDifficulty:      0,
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected strict validation error")
+	}
+	if !strings.Contains(err.Error(), "ENTRY_PUZZLE_DIFFICULTY>0") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestValidateRuntimeConfigBetaStrictRejectsNonLive(t *testing.T) {
 	s := &Service{
 		betaStrict:           true,
 		liveWGMode:           false,
 		directoryTrustStrict: true,
 		puzzleSecret:         "entry-secret-012345",
+		puzzleDifficulty:     1,
 	}
 	err := s.validateRuntimeConfig()
 	if err == nil {
@@ -250,6 +274,7 @@ func TestValidateRuntimeConfigBetaStrictRejectsMissingDistinctExitOperator(t *te
 		requireDistinctExitOp: false,
 		operatorID:            "op-entry",
 		puzzleSecret:          "entry-secret-012345",
+		puzzleDifficulty:      1,
 	}
 	err := s.validateRuntimeConfig()
 	if err == nil {
@@ -268,6 +293,7 @@ func TestValidateRuntimeConfigBetaStrictRejectsMultiDirectoryWithoutSourceQuorum
 		requireDistinctExitOp: true,
 		operatorID:            "op-entry",
 		puzzleSecret:          "entry-secret-012345",
+		puzzleDifficulty:      1,
 		directoryURLs:         []string{"http://127.0.0.1:8081", "http://127.0.0.1:8085"},
 		directoryMinSources:   1,
 		directoryMinOperators: 2,
@@ -289,6 +315,7 @@ func TestValidateRuntimeConfigBetaStrictRejectsMultiDirectoryWithoutOperatorQuor
 		requireDistinctExitOp: true,
 		operatorID:            "op-entry",
 		puzzleSecret:          "entry-secret-012345",
+		puzzleDifficulty:      1,
 		directoryURLs:         []string{"http://127.0.0.1:8081", "http://127.0.0.1:8085"},
 		directoryMinSources:   2,
 		directoryMinOperators: 1,
