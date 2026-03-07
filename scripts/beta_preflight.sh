@@ -45,6 +45,9 @@ if [[ "${BETA_PREFLIGHT_PRIVILEGED:-0}" == "1" ]]; then
   if [[ "${BETA_PREFLIGHT_INCLUDE_WG_ONLY_STACK_SELFTEST:-0}" == "1" ]]; then
     run_step "wg-only stack lifecycle selftest" ./scripts/integration_wg_only_stack_selftest.sh
   fi
+  if [[ "${BETA_PREFLIGHT_INCLUDE_STOP_ALL_WG_ONLY_CLEANUP:-0}" == "1" ]]; then
+    run_step "stop-all wg-only cleanup" ./scripts/integration_stop_all_wg_only_cleanup.sh
+  fi
 fi
 
 echo "[beta-preflight] ok"
