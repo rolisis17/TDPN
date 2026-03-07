@@ -126,6 +126,10 @@ Quick non-interactive examples:
   --exit-url http://<A_SERVER_IP_OR_DNS>:8084 \
   --beta-profile 1 \
   --distinct-operators 1
+
+# host real-WireGuard preflight and local validation (Linux + sudo required)
+./scripts/easy_node.sh wg-only-check
+sudo ./scripts/easy_node.sh wg-only-local-test --matrix 1
 ```
 
 Invite-only beta option:

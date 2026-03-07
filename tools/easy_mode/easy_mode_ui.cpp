@@ -708,6 +708,8 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
     std::cout << "17) Prod preflight check\n";
     std::cout << "18) Admin signing status\n";
     std::cout << "19) Rotate admin signing key\n";
+    std::cout << "20) WG-only preflight (Linux/root)\n";
+    std::cout << "21) WG-only local test (real WireGuard)\n";
     std::cout << "0) Back\n";
     std::cout << "Selection: ";
 
@@ -1077,6 +1079,31 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --restart-issuer " << (restartIssuer ? "1" : "0")
           << " --key-history " << shellEscape(keyHistory);
       runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "20") {
+      runCommand(shellEscape(script) + " wg-only-check");
+      continue;
+    }
+    if (choice == "21") {
+      bool matrix = parseYesNo(readLine("Run matrix profile set? (Y/n)", "y"), true);
+      bool strictBeta = parseYesNo(readLine("Use strict beta profile when non-matrix? (Y/n)", "y"), true);
+      std::string timeoutSec = readLine("Timeout sec for non-matrix run", "150");
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " wg-only-local-test"
+          << " --matrix " << (matrix ? "1" : "0")
+          << " --strict-beta " << (strictBeta ? "1" : "0")
+          << " --timeout-sec " << shellEscape(timeoutSec);
+      if (!isRootUser()) {
+        bool useSudo = parseYesNo(readLine("Run with sudo? (Y/n)", "y"), true);
+        if (useSudo) {
+          runCommand("sudo " + cmd.str());
+        } else {
+          runCommand(cmd.str());
+        }
+      } else {
+        runCommand(cmd.str());
+      }
       continue;
     }
 

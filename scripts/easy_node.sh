@@ -30,6 +30,8 @@ Usage:
   ./scripts/easy_node.sh server-down
   ./scripts/easy_node.sh stop-all
   ./scripts/easy_node.sh install-deps-ubuntu
+  ./scripts/easy_node.sh wg-only-check
+  ./scripts/easy_node.sh wg-only-local-test [--matrix [0|1]] [--strict-beta [0|1]] [--timeout-sec N]
   ./scripts/easy_node.sh client-test [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--exit-country CC] [--exit-region REGION] [--timeout-sec N] [--distinct-operators [0|1]] [--min-selection-lines N] [--min-entry-operators N] [--min-exit-operators N] [--require-cross-operator-pair [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]]
   ./scripts/easy_node.sh three-machine-validate [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-a-url URL] [--issuer-b-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--client-min-selection-lines N] [--client-min-entry-operators N] [--client-min-exit-operators N] [--client-require-cross-operator-pair [0|1]] [--exit-country CC] [--exit-region REGION] [--distinct-operators [0|1]] [--require-issuer-quorum [0|1]] [--beta-profile [0|1]]
   ./scripts/easy_node.sh three-machine-soak [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-a-url URL] [--issuer-b-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--rounds N] [--pause-sec N] [--fault-every N] [--fault-command CMD] [--continue-on-fail [0|1]] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--client-min-selection-lines N] [--client-min-entry-operators N] [--client-min-exit-operators N] [--client-require-cross-operator-pair [0|1]] [--exit-country CC] [--exit-region REGION] [--distinct-operators [0|1]] [--require-issuer-quorum [0|1]] [--beta-profile [0|1]] [--report-file PATH]
@@ -53,6 +55,7 @@ Notes:
   - admin-signing-status/admin-signing-rotate are authority-only issuer admin signer maintenance tools.
   - prod-preflight validates strict prod profile wiring (mTLS material, HTTPS URLs, and authority signer config).
   - client-test runs client-demo with --no-deps (no local server required on the client machine).
+  - wg-only-local-test runs host real-WireGuard integration checks (Linux + root required).
   - three-machine-validate runs health + federation checks then runs client-test with both directories.
   - bootstrap discovery mode lets you provide one directory URL and auto-discover other server hosts.
   - machine-a-test/machine-b-test/machine-c-test are machine-role-specific automated validations with optional report files.
@@ -1549,6 +1552,140 @@ install_deps_ubuntu() {
   "$installer"
 }
 
+wg_only_check() {
+  local ok=1
+  echo "wg-only preflight checks:"
+  if [[ "$(uname -s)" == "Linux" ]]; then
+    echo "  [ok] linux kernel"
+  else
+    echo "  [fail] requires Linux (found: $(uname -s))"
+    ok=0
+  fi
+
+  for cmd in go wg ip timeout rg curl; do
+    if command -v "$cmd" >/dev/null 2>&1; then
+      echo "  [ok] command: $cmd"
+    else
+      echo "  [fail] missing command: $cmd"
+      ok=0
+    fi
+  done
+
+  if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+    echo "  [ok] running as root"
+  else
+    echo "  [fail] root privileges required (re-run with sudo)"
+    ok=0
+  fi
+
+  if [[ $ok -eq 1 ]]; then
+    local probe_iface="wgpvtst$RANDOM"
+    if ip link add dev "$probe_iface" type wireguard >/dev/null 2>&1; then
+      ip link delete "$probe_iface" >/dev/null 2>&1 || true
+      echo "  [ok] can create wireguard interface"
+    else
+      echo "  [fail] cannot create wireguard interface (kernel module/capabilities issue)"
+      ok=0
+    fi
+  fi
+
+  if [[ $ok -eq 1 ]]; then
+    echo "wg-only preflight: ok"
+    return 0
+  fi
+  echo "wg-only preflight: failed"
+  return 1
+}
+
+wg_only_local_test() {
+  local matrix="${EASY_NODE_WG_ONLY_MATRIX:-1}"
+  local strict_beta="${EASY_NODE_WG_ONLY_STRICT_BETA:-1}"
+  local timeout_sec="${EASY_NODE_WG_ONLY_TIMEOUT_SEC:-150}"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --matrix)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          matrix="${2:-}"
+          shift 2
+        else
+          matrix="1"
+          shift
+        fi
+        ;;
+      --strict-beta)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          strict_beta="${2:-}"
+          shift 2
+        else
+          strict_beta="1"
+          shift
+        fi
+        ;;
+      --timeout-sec)
+        timeout_sec="${2:-}"
+        shift 2
+        ;;
+      *)
+        echo "unknown arg for wg-only-local-test: $1"
+        exit 2
+        ;;
+    esac
+  done
+
+  if [[ "$matrix" != "0" && "$matrix" != "1" ]]; then
+    echo "wg-only-local-test requires --matrix to be 0 or 1"
+    exit 2
+  fi
+  if [[ "$strict_beta" != "0" && "$strict_beta" != "1" ]]; then
+    echo "wg-only-local-test requires --strict-beta to be 0 or 1"
+    exit 2
+  fi
+  if ! [[ "$timeout_sec" =~ ^[0-9]+$ ]] || ((timeout_sec < 30)); then
+    echo "wg-only-local-test requires --timeout-sec >= 30"
+    exit 2
+  fi
+
+  if ! wg_only_check; then
+    exit 1
+  fi
+
+  local log_dir out
+  log_dir="$(prepare_log_dir)"
+  out="$log_dir/easy_node_wg_only_test_$(date +%Y%m%d_%H%M%S).log"
+  rm -f "$out"
+
+  echo "wg-only local test started"
+  echo "matrix: $matrix"
+  echo "strict_beta: $strict_beta"
+  echo "timeout_sec: $timeout_sec"
+  echo "report: $out"
+
+  local -a cmd
+  if [[ "$matrix" == "1" ]]; then
+    cmd=("./scripts/integration_real_wg_privileged_matrix.sh")
+  else
+    cmd=(
+      env
+      "SCRIPT_TIMEOUT_SEC=$timeout_sec"
+      "STRICT_BETA_PROFILE=$strict_beta"
+      "./scripts/integration_real_wg_privileged.sh"
+    )
+  fi
+
+  if "${cmd[@]}" >"$out" 2>&1; then
+    echo "wg-only local test: ok"
+    echo "log: $out"
+    rg "real wg privileged integration check ok|real wg privileged matrix integration check ok|profile=.* ok" "$out" || true
+    return 0
+  fi
+
+  echo "wg-only local test: failed"
+  echo "log: $out"
+  cat "$out"
+  return 1
+}
+
 three_machine_validate() {
   ensure_deps_or_die
   "$ROOT_DIR/scripts/integration_3machine_beta_validate.sh" "$@"
@@ -3010,6 +3147,13 @@ main() {
       ;;
     install-deps-ubuntu)
       install_deps_ubuntu
+      ;;
+    wg-only-check)
+      wg_only_check
+      ;;
+    wg-only-local-test)
+      shift
+      wg_only_local_test "$@"
       ;;
     client-test)
       shift

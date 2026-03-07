@@ -145,6 +145,10 @@ Script-only easy mode:
 ./scripts/easy_node.sh admin-signing-rotate --restart-issuer 1 --key-history 3
 ./scripts/easy_node.sh prod-preflight --days-min 14 --check-live 1 --timeout-sec 12
 
+# host real-WireGuard preflight and local validation (Linux + sudo required)
+./scripts/easy_node.sh wg-only-check
+sudo ./scripts/easy_node.sh wg-only-local-test --matrix 1
+
 ./scripts/easy_node.sh client-test \
   --directory-urls http://<SERVER_IP>:8081 \
   --issuer-url http://<SERVER_IP>:8082 \
