@@ -384,7 +384,7 @@ Optional env vars:
 - `WGIOINJECT_TARGET_ADDR` (default `127.0.0.1:52000`, injector target)
 - `WGIOINJECT_INTERVAL_MS` (default `200`)
 - `WGIOINJECT_WG_LIKE_PCT` (default `80`, percentage of WG-like packets)
-- `ISSUER_ADMIN_TOKEN` (default `dev-admin-token`)
+- `ISSUER_ADMIN_TOKEN` (default `dev-admin-token`; in strict beta mode with token-admin auth enabled, must be non-default and length>=16)
 - `ISSUER_SUBJECTS_FILE` (default `data/issuer_subjects.json`)
 - `ISSUER_REVOCATIONS_FILE` (default `data/issuer_revocations.json`)
 - `ENTRY_ENDPOINTS` (comma-separated rotating entry endpoints for directory)

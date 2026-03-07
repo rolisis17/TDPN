@@ -351,6 +351,9 @@ func (s *Service) validateRuntimeConfig() error {
 	if adminTokenAuthEnabled && (strings.TrimSpace(s.adminToken) == "" || s.adminToken == "dev-admin-token") {
 		return fmt.Errorf("BETA_STRICT_MODE requires non-default ISSUER_ADMIN_TOKEN")
 	}
+	if adminTokenAuthEnabled && len(strings.TrimSpace(s.adminToken)) < 16 {
+		return fmt.Errorf("BETA_STRICT_MODE requires ISSUER_ADMIN_TOKEN length>=16")
+	}
 	if s.keyRotateSec <= 0 {
 		return fmt.Errorf("BETA_STRICT_MODE requires ISSUER_KEY_ROTATE_SEC>0")
 	}

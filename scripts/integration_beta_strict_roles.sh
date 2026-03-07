@@ -30,9 +30,10 @@ EXIT_MULTI_ISSUER_FAIL_LOG="/tmp/integration_beta_strict_roles_exit_multi_issuer
 EXIT_MULTI_ISSUER_OP_FAIL_LOG="/tmp/integration_beta_strict_roles_exit_multi_issuer_operator_fail.log"
 EXIT_MULTI_ISSUER_ID_FAIL_LOG="/tmp/integration_beta_strict_roles_exit_multi_issuer_id_fail.log"
 ISSUER_FAIL_LOG="/tmp/integration_beta_strict_roles_issuer_fail.log"
+ISSUER_SHORT_TOKEN_FAIL_LOG="/tmp/integration_beta_strict_roles_issuer_short_token_fail.log"
 ENTRY_OK_LOG="/tmp/integration_beta_strict_roles_entry_ok.log"
 ISSUER_OK_LOG="/tmp/integration_beta_strict_roles_issuer_ok.log"
-rm -f "$CLIENT_FAIL_LOG" "$CLIENT_MULTI_DIR_FAIL_LOG" "$CLIENT_MULTI_DIR_OP_FAIL_LOG" "$ENTRY_FAIL_LOG" "$ENTRY_MULTI_DIR_FAIL_LOG" "$ENTRY_MULTI_DIR_OP_FAIL_LOG" "$EXIT_FAIL_LOG" "$EXIT_REBIND_FAIL_LOG" "$EXIT_MULTI_ISSUER_FAIL_LOG" "$EXIT_MULTI_ISSUER_OP_FAIL_LOG" "$EXIT_MULTI_ISSUER_ID_FAIL_LOG" "$ISSUER_FAIL_LOG" "$ENTRY_OK_LOG" "$ISSUER_OK_LOG"
+rm -f "$CLIENT_FAIL_LOG" "$CLIENT_MULTI_DIR_FAIL_LOG" "$CLIENT_MULTI_DIR_OP_FAIL_LOG" "$ENTRY_FAIL_LOG" "$ENTRY_MULTI_DIR_FAIL_LOG" "$ENTRY_MULTI_DIR_OP_FAIL_LOG" "$EXIT_FAIL_LOG" "$EXIT_REBIND_FAIL_LOG" "$EXIT_MULTI_ISSUER_FAIL_LOG" "$EXIT_MULTI_ISSUER_OP_FAIL_LOG" "$EXIT_MULTI_ISSUER_ID_FAIL_LOG" "$ISSUER_FAIL_LOG" "$ISSUER_SHORT_TOKEN_FAIL_LOG" "$ENTRY_OK_LOG" "$ISSUER_OK_LOG"
 
 if CLIENT_BETA_STRICT=1 timeout 12s go run ./cmd/node --client >"$CLIENT_FAIL_LOG" 2>&1; then
   echo "expected strict client startup failure with default client config"
@@ -268,6 +269,22 @@ fi
 if ! rg -q "BETA_STRICT_MODE requires non-default ISSUER_ADMIN_TOKEN" "$ISSUER_FAIL_LOG"; then
   echo "missing expected strict issuer validation signal"
   cat "$ISSUER_FAIL_LOG"
+  exit 1
+fi
+
+if ISSUER_BETA_STRICT=1 \
+  ISSUER_ADMIN_TOKEN=short-token \
+  ISSUER_KEY_ROTATE_SEC=60 \
+  ISSUER_TOKEN_TTL_SEC=300 \
+  ISSUER_ANON_CRED_EXPOSE_ID=0 \
+  timeout 12s go run ./cmd/node --issuer >"$ISSUER_SHORT_TOKEN_FAIL_LOG" 2>&1; then
+  echo "expected strict issuer startup failure with short admin token"
+  cat "$ISSUER_SHORT_TOKEN_FAIL_LOG"
+  exit 1
+fi
+if ! rg -q "BETA_STRICT_MODE requires ISSUER_ADMIN_TOKEN length>=16" "$ISSUER_SHORT_TOKEN_FAIL_LOG"; then
+  echo "missing expected strict issuer token-length validation signal"
+  cat "$ISSUER_SHORT_TOKEN_FAIL_LOG"
   exit 1
 fi
 

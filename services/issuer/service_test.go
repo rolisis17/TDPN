@@ -1,6 +1,7 @@
 package issuer
 
 import (
+	"crypto/ed25519"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -107,6 +108,40 @@ func TestValidateRuntimeConfigBetaStrictRejectsDefaultAdminToken(t *testing.T) {
 	}
 	if err := s.validateRuntimeConfig(); err == nil {
 		t.Fatalf("expected strict config rejection")
+	}
+}
+
+func TestValidateRuntimeConfigBetaStrictRejectsShortAdminToken(t *testing.T) {
+	s := &Service{
+		betaStrict:   true,
+		adminToken:   "short-token",
+		keyRotateSec: 60,
+		tokenTTL:     10 * time.Minute,
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected strict config rejection")
+	}
+	if err.Error() != "BETA_STRICT_MODE requires ISSUER_ADMIN_TOKEN length>=16" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigBetaStrictSignedOnlyAllowsEmptyToken(t *testing.T) {
+	s := &Service{
+		betaStrict:         true,
+		adminToken:         "",
+		adminAllowToken:    false,
+		adminAllowTokenSet: true,
+		adminRequireSigned: true,
+		adminPubKeys: map[string]ed25519.PublicKey{
+			"k1": make(ed25519.PublicKey, ed25519.PublicKeySize),
+		},
+		keyRotateSec: 60,
+		tokenTTL:     10 * time.Minute,
+	}
+	if err := s.validateRuntimeConfig(); err != nil {
+		t.Fatalf("expected strict config valid in signed-only mode, got %v", err)
 	}
 }
 
