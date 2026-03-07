@@ -139,8 +139,8 @@ Prod strict additions:
 - bootstrap certs: `./scripts/easy_node.sh bootstrap-mtls --out-dir deploy/tls --public-host <PUBLIC_IP_OR_DNS>`.
 - run `server-up --prod-profile 1` to enforce fail-closed strict defaults (`PROD_STRICT_MODE=1`) on top of beta strict.
 - authority invite/admin commands auto-switch to signed auth in prod profile; they also support explicit signed credentials (`--admin-key-file`, `--admin-key-id`).
-- use `./scripts/easy_node.sh admin-signing-status` and `./scripts/easy_node.sh admin-signing-rotate --restart-issuer 1` for signer maintenance on authority nodes.
-- use `./scripts/easy_node.sh prod-preflight --days-min 14` before external beta/production traffic cutover.
+- use `./scripts/easy_node.sh admin-signing-status` and `./scripts/easy_node.sh admin-signing-rotate --restart-issuer 1 --key-history 3` for signer maintenance on authority nodes.
+- use `./scripts/easy_node.sh prod-preflight --days-min 14 --check-live 1 --timeout-sec 12` before external beta/production traffic cutover.
 
 For a full 3-machine flow, see `docs/easy-3-machine-test.md`.
 For a frozen closed-beta command set, see `docs/beta-playbook.md`.

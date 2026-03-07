@@ -142,8 +142,8 @@ Script-only easy mode:
 ./scripts/easy_node.sh invite-generate --count 3
 # (invite commands auto-use signed admin auth when prod profile is active)
 ./scripts/easy_node.sh admin-signing-status
-./scripts/easy_node.sh admin-signing-rotate --restart-issuer 1
-./scripts/easy_node.sh prod-preflight --days-min 14
+./scripts/easy_node.sh admin-signing-rotate --restart-issuer 1 --key-history 3
+./scripts/easy_node.sh prod-preflight --days-min 14 --check-live 1 --timeout-sec 12
 
 ./scripts/easy_node.sh client-test \
   --directory-urls http://<SERVER_IP>:8081 \
@@ -221,7 +221,8 @@ Script-only easy mode:
 - `--prod-profile 1` forces strict fail-closed runtime (`BETA_STRICT_MODE=1`, `PROD_STRICT_MODE=1`), enables mTLS, and on authority nodes requires signed issuer-admin auth (`ISSUER_ADMIN_REQUIRE_SIGNED=1`, token admin auth disabled).
 - `invite-generate`, `invite-check`, and `invite-disable` support either token auth (`--admin-token`) or signed auth (`--admin-key-file` + `--admin-key-id`).
 - `admin-signing-status` / `admin-signing-rotate` are authority-only signer maintenance helpers.
-- `prod-preflight` validates strict prod wiring (HTTPS URLs, mTLS files/cert age, and authority signer mapping).
+- `admin-signing-rotate --key-history N` preserves recent signer public keys for smoother key transitions.
+- `prod-preflight` validates strict prod wiring (HTTPS URLs, mTLS files/cert age, authority signer mapping) and can optionally check live endpoints (`--check-live 1`).
 
 3-machine test guide:
 - `docs/easy-3-machine-test.md`

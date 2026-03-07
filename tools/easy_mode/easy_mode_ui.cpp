@@ -1055,9 +1055,13 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
     }
     if (choice == "17") {
       std::string daysMin = readLine("Minimum cert validity days", "14");
+      bool checkLive = parseYesNo(readLine("Check live endpoints now? (y/N)", "n"), false);
+      std::string timeoutSec = readLine("Live endpoint timeout sec", "12");
       std::ostringstream cmd;
       cmd << shellEscape(script) << " prod-preflight"
-          << " --days-min " << shellEscape(daysMin);
+          << " --days-min " << shellEscape(daysMin)
+          << " --check-live " << (checkLive ? "1" : "0")
+          << " --timeout-sec " << shellEscape(timeoutSec);
       runCommand(cmd.str());
       continue;
     }
@@ -1067,9 +1071,11 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
     }
     if (choice == "19") {
       bool restartIssuer = parseYesNo(readLine("Restart issuer after rotation? (Y/n)", "y"), true);
+      std::string keyHistory = readLine("Signing key history size", "3");
       std::ostringstream cmd;
       cmd << shellEscape(script) << " admin-signing-rotate"
-          << " --restart-issuer " << (restartIssuer ? "1" : "0");
+          << " --restart-issuer " << (restartIssuer ? "1" : "0")
+          << " --key-history " << shellEscape(keyHistory);
       runCommand(cmd.str());
       continue;
     }

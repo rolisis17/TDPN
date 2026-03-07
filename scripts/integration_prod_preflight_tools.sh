@@ -9,6 +9,12 @@ MODE_FILE="$ROOT_DIR/deploy/data/easy_node_server_mode.conf"
 backup_env=""
 backup_mode=""
 
+env_value() {
+  local file="$1"
+  local key="$2"
+  awk -F= -v k="$key" '$1==k{print substr($0,index($0,"=")+1); exit}' "$file"
+}
+
 cleanup() {
   if [[ -n "$backup_env" && -f "$backup_env" ]]; then
     cp "$backup_env" "$AUTH_ENV"
@@ -58,9 +64,51 @@ cat >"$MODE_FILE" <<'EOF_MODE'
 EASY_NODE_SERVER_MODE=authority
 EOF_MODE
 
-./scripts/easy_node.sh admin-signing-rotate --restart-issuer 0 >/tmp/integration_prod_preflight_rotate.log 2>&1
+./scripts/easy_node.sh admin-signing-rotate --restart-issuer 0 --key-history 2 >/tmp/integration_prod_preflight_rotate.log 2>&1
 ./scripts/easy_node.sh admin-signing-status >/tmp/integration_prod_preflight_status.log 2>&1
 ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_ok.log 2>&1
+
+first_key_id="$(env_value "$AUTH_ENV" "ISSUER_ADMIN_SIGNING_KEY_ID")"
+./scripts/easy_node.sh admin-signing-rotate --restart-issuer 0 --key-history 2 >/tmp/integration_prod_preflight_rotate2.log 2>&1
+second_key_id="$(env_value "$AUTH_ENV" "ISSUER_ADMIN_SIGNING_KEY_ID")"
+if [[ -z "$first_key_id" || -z "$second_key_id" || "$first_key_id" == "$second_key_id" ]]; then
+  echo "expected signer key id to rotate"
+  cat /tmp/integration_prod_preflight_rotate.log /tmp/integration_prod_preflight_rotate2.log 2>/dev/null || true
+  exit 1
+fi
+signers_file="$ROOT_DIR/deploy/data/issuer/issuer_admin_signers.txt"
+if [[ ! -f "$signers_file" ]]; then
+  echo "missing signer file after rotate: $signers_file"
+  exit 1
+fi
+if ! rg -q "^${first_key_id}=" "$signers_file"; then
+  echo "expected previous key to remain in signer history"
+  cat "$signers_file"
+  exit 1
+fi
+if ! rg -q "^${second_key_id}=" "$signers_file"; then
+  echo "expected new key in signer history"
+  cat "$signers_file"
+  exit 1
+fi
+line_count="$(awk 'NF > 0 && $0 !~ /^#/ {n++} END {print n + 0}' "$signers_file")"
+if [[ "$line_count" != "2" ]]; then
+  echo "expected signer history size=2, got $line_count"
+  cat "$signers_file"
+  exit 1
+fi
+./scripts/easy_node.sh admin-signing-status >/tmp/integration_prod_preflight_status2.log 2>&1
+
+if ./scripts/easy_node.sh prod-preflight --days-min 0 --check-live 1 --timeout-sec 1 >/tmp/integration_prod_preflight_live_fail.log 2>&1; then
+  echo "expected live preflight to fail when endpoints are down"
+  cat /tmp/integration_prod_preflight_live_fail.log
+  exit 1
+fi
+if ! rg -q "live endpoint unreachable" /tmp/integration_prod_preflight_live_fail.log; then
+  echo "missing expected live endpoint failure signal"
+  cat /tmp/integration_prod_preflight_live_fail.log
+  exit 1
+fi
 
 sed -i -E 's/^MTLS_ENABLE=.*/MTLS_ENABLE=0/' "$AUTH_ENV"
 if ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_fail.log 2>&1; then

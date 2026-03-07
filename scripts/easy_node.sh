@@ -38,8 +38,8 @@ Usage:
   ./scripts/easy_node.sh invite-check --key KEY [--issuer-url URL] [--admin-token TOKEN] [--admin-key-file FILE] [--admin-key-id ID]
   ./scripts/easy_node.sh invite-disable --key KEY [--issuer-url URL] [--admin-token TOKEN] [--admin-key-file FILE] [--admin-key-id ID]
   ./scripts/easy_node.sh admin-signing-status
-  ./scripts/easy_node.sh admin-signing-rotate [--restart-issuer [0|1]]
-  ./scripts/easy_node.sh prod-preflight [--days-min N]
+  ./scripts/easy_node.sh admin-signing-rotate [--restart-issuer [0|1]] [--key-history N]
+  ./scripts/easy_node.sh prod-preflight [--days-min N] [--check-live [0|1]] [--timeout-sec N]
   ./scripts/easy_node.sh bootstrap-mtls [--out-dir DIR] [--public-host HOST] [--san HOST] [--days N] [--rotate-leaf [0|1]] [--rotate-ca [0|1]]
   ./scripts/easy_node.sh machine-a-test [--public-host HOST] [--report-file PATH]
   ./scripts/easy_node.sh machine-b-test --peer-directory-a URL [--public-host HOST] [--min-operators N] [--federation-timeout-sec N] [--report-file PATH]
@@ -247,16 +247,22 @@ bootstrap_mtls() {
 
 ensure_admin_signing_material() {
   local rotate="${1:-0}"
+  local history_raw="${2:-${EASY_NODE_ADMIN_SIGNING_KEY_HISTORY:-3}}"
   local issuer_data_dir="$DEPLOY_DIR/data/issuer"
   local key_file="$issuer_data_dir/issuer_admin_signer.key"
   local key_id_file="$issuer_data_dir/issuer_admin_signer.keyid"
   local signers_file="$issuer_data_dir/issuer_admin_signers.txt"
   local signers_file_container="/app/data/issuer_admin_signers.txt"
   local inspect_json key_id pub_key
+  local key_history=3
+
+  if [[ "$history_raw" =~ ^[0-9]+$ ]] && ((history_raw > 0)); then
+    key_history="$history_raw"
+  fi
 
   mkdir -p "$issuer_data_dir"
   if [[ "$rotate" == "1" ]]; then
-    rm -f "$key_file" "$key_id_file" "$signers_file"
+    rm -f "$key_file" "$key_id_file"
   fi
   if [[ ! -f "$key_file" ]]; then
     (
@@ -275,7 +281,29 @@ ensure_admin_signing_material() {
     echo "failed to inspect issuer admin signing key material"
     exit 1
   fi
-  printf '%s=%s\n' "$key_id" "$pub_key" >"$signers_file"
+
+  local signers_tmp
+  signers_tmp="$(mktemp)"
+  {
+    printf '%s=%s\n' "$key_id" "$pub_key"
+    if [[ -f "$signers_file" ]]; then
+      cat "$signers_file"
+    fi
+  } | awk '
+      NF == 0 { next }
+      /^#/ { next }
+      {
+        split($0, p, "=")
+        k = p[1]
+        if (k == "") next
+        if (!(k in seen)) {
+          seen[k] = 1
+          print $0
+        }
+      }
+    ' | head -n "$key_history" >"$signers_tmp"
+  mv "$signers_tmp" "$signers_file"
+
   printf '%s\n' "$key_id" >"$key_id_file"
   secure_file_permissions "$key_file"
   chmod 644 "$signers_file" "$key_id_file" 2>/dev/null || true
@@ -2129,6 +2157,14 @@ admin_signing_status() {
     echo "status: signer public-key file missing derived key mapping"
     return 1
   fi
+  local first_key_id key_count
+  first_key_id="$(awk -F= 'NF > 0 {print $1; exit}' "$signers_local")"
+  key_count="$(awk 'NF > 0 && $0 !~ /^#/ {n++} END {print n + 0}' "$signers_local")"
+  echo "signing_key_history_count: $key_count"
+  if [[ "$first_key_id" != "$derived_id" ]]; then
+    echo "status: signer public-key file does not prioritize active key"
+    return 1
+  fi
   echo "status: ok"
 }
 
@@ -2138,6 +2174,7 @@ admin_signing_rotate() {
   need_cmd go || exit 2
 
   local restart_issuer="1"
+  local key_history="${EASY_NODE_ADMIN_SIGNING_KEY_HISTORY:-3}"
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --restart-issuer)
@@ -2149,6 +2186,10 @@ admin_signing_rotate() {
           shift
         fi
         ;;
+      --key-history)
+        key_history="${2:-}"
+        shift 2
+        ;;
       -h|--help|help)
         usage
         return 0
@@ -2159,9 +2200,13 @@ admin_signing_rotate() {
         ;;
     esac
   done
+  if ! [[ "$key_history" =~ ^[0-9]+$ ]] || ((key_history < 1)); then
+    echo "admin-signing-rotate requires --key-history >= 1"
+    exit 2
+  fi
 
   local material key_file key_id signers_local signers_container
-  material="$(ensure_admin_signing_material 1)"
+  material="$(ensure_admin_signing_material 1 "$key_history")"
   IFS='|' read -r key_file key_id signers_local signers_container <<<"$material"
   if [[ -z "$key_file" || -z "$key_id" || -z "$signers_container" ]]; then
     echo "admin-signing-rotate failed to generate signing material"
@@ -2173,12 +2218,14 @@ admin_signing_rotate() {
   set_env_kv "$AUTHORITY_ENV_FILE" "ISSUER_ADMIN_SIGNING_KEYS_FILE" "$signers_container"
   set_env_kv "$AUTHORITY_ENV_FILE" "ISSUER_ADMIN_REQUIRE_SIGNED" "1"
   set_env_kv "$AUTHORITY_ENV_FILE" "ISSUER_ADMIN_ALLOW_TOKEN" "0"
+  set_env_kv "$AUTHORITY_ENV_FILE" "EASY_NODE_ADMIN_SIGNING_KEY_HISTORY" "$key_history"
   secure_file_permissions "$AUTHORITY_ENV_FILE"
 
   echo "admin signing key rotated"
   echo "key_id: $key_id"
   echo "key_file: $key_file"
   echo "signers_file: $signers_local"
+  echo "key_history: $key_history"
 
   if [[ "$restart_issuer" == "1" ]]; then
     compose_with_env "$AUTHORITY_ENV_FILE" up -d issuer
@@ -2204,10 +2251,25 @@ prod_preflight() {
   need_cmd go || exit 2
 
   local days_min="14"
+  local check_live="${EASY_NODE_PROD_PREFLIGHT_CHECK_LIVE:-0}"
+  local timeout_sec="${EASY_NODE_PROD_PREFLIGHT_TIMEOUT_SEC:-12}"
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --days-min)
         days_min="${2:-}"
+        shift 2
+        ;;
+      --check-live)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          check_live="${2:-}"
+          shift 2
+        else
+          check_live="1"
+          shift
+        fi
+        ;;
+      --timeout-sec)
+        timeout_sec="${2:-}"
         shift 2
         ;;
       -h|--help|help)
@@ -2222,6 +2284,14 @@ prod_preflight() {
   done
   if ! [[ "$days_min" =~ ^[0-9]+$ ]]; then
     echo "prod-preflight requires --days-min to be numeric"
+    exit 2
+  fi
+  if [[ "$check_live" != "0" && "$check_live" != "1" ]]; then
+    echo "prod-preflight requires --check-live to be 0 or 1"
+    exit 2
+  fi
+  if ! [[ "$timeout_sec" =~ ^[0-9]+$ ]] || ((timeout_sec < 1)); then
+    echo "prod-preflight requires --timeout-sec >= 1"
     exit 2
   fi
 
@@ -2391,7 +2461,78 @@ prod_preflight() {
     fi
   fi
 
-  echo "prod preflight summary: checks=$check_total failures=$fail mode=$mode env=$env_file"
+  if [[ "$check_live" == "1" ]]; then
+    local live_issuer_url=""
+    if [[ "$mode" == "authority" ]]; then
+      if [[ -n "$directory_public_url" ]]; then
+        local directory_host
+        directory_host="$(host_from_url "$directory_public_url")"
+        if [[ -n "$directory_host" ]]; then
+          live_issuer_url="$(url_from_host_port "$directory_host" 8082)"
+          if is_https_url "$directory_public_url"; then
+            live_issuer_url="$(ensure_url_scheme "$live_issuer_url" "https")"
+          else
+            live_issuer_url="$(ensure_url_scheme "$live_issuer_url" "http")"
+          fi
+        fi
+      fi
+      if [[ -z "$live_issuer_url" ]]; then
+        live_issuer_url="$(ensure_url_scheme "127.0.0.1:8082" "https")"
+      fi
+    else
+      live_issuer_url="$(identity_value "$env_file" "CORE_ISSUER_URL")"
+      if [[ -z "$live_issuer_url" ]]; then
+        live_issuer_url="$(identity_value "$env_file" "ISSUER_URL")"
+      fi
+    fi
+
+    check_live_endpoint() {
+      local label="$1"
+      local url="$2"
+      local -a tls_opts=()
+      mapfile -t tls_opts < <(curl_tls_opts_for_url "$url")
+      if wait_http_ok_with_opts "$url" "live ${label}" "$timeout_sec" "${tls_opts[@]}"; then
+        check_ok "live endpoint healthy: $label ($url)"
+      else
+        check_fail "live endpoint unreachable: $label ($url)"
+      fi
+    }
+
+    if [[ -n "$directory_public_url" ]]; then
+      check_live_endpoint "directory" "${directory_public_url%/}/v1/relays"
+    fi
+    if [[ -n "$entry_public_url" ]]; then
+      check_live_endpoint "entry" "${entry_public_url%/}/v1/health"
+    fi
+    if [[ -n "$exit_public_url" ]]; then
+      check_live_endpoint "exit" "${exit_public_url%/}/v1/health"
+    fi
+    if [[ -n "$live_issuer_url" ]]; then
+      check_live_endpoint "issuer" "${live_issuer_url%/}/v1/pubkeys"
+    fi
+
+    if [[ "$mode" == "authority" && -n "$live_issuer_url" ]]; then
+      local token_probe_code token_probe_body
+      token_probe_body="$(mktemp)"
+      local -a tls_opts=()
+      mapfile -t tls_opts < <(curl_tls_opts_for_url "$live_issuer_url")
+      token_probe_code="$(
+        curl -sS -o "$token_probe_body" -w "%{http_code}" \
+          --connect-timeout 3 --max-time 8 \
+          "${tls_opts[@]}" \
+          -H "X-Admin-Token: preflight-invalid-token" \
+          "${live_issuer_url%/}/v1/admin/subject/get?subject=preflight-token-check" || true
+      )"
+      if [[ "$token_probe_code" == "401" || "$token_probe_code" == "403" ]]; then
+        check_ok "issuer admin token path rejected as expected in strict mode (code=$token_probe_code)"
+      else
+        check_fail "issuer admin token path unexpectedly accepted/unreachable (code=${token_probe_code:-none})"
+      fi
+      rm -f "$token_probe_body"
+    fi
+  fi
+
+  echo "prod preflight summary: checks=$check_total failures=$fail mode=$mode env=$env_file check_live=$check_live"
   if ((fail > 0)); then
     return 1
   fi
