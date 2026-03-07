@@ -115,6 +115,7 @@
 - Exit beta strict-mode now also fail-closes on source-lock weakening, startup readiness, and conditional multi-issuer quorum policy (`EXIT_PEER_REBIND_SEC=0`, `EXIT_STARTUP_SYNC_TIMEOUT_SEC>0`, and `EXIT_ISSUER_MIN_SOURCES>=2`/`EXIT_ISSUER_MIN_OPERATORS>=2` plus `EXIT_ISSUER_REQUIRE_ID=1` when multiple `ISSUER_URLS` are configured).
 - Directory strict-governance integration coverage (`integration_directory_beta_strict.sh`) for fail-closed strict policy validation and strict startup success.
 - Cross-role strict guardrail integration coverage (`integration_beta_strict_roles.sh`) for client/entry/exit/issuer fail-closed validation and strict entry+issuer startup checks.
+- WireGuard-only fail-closed mode (`WG_ONLY_MODE` + role-specific overrides) across client/entry/exit with integration coverage (`integration_wg_only_mode.sh`), and automatic enablement under `PROD_STRICT_MODE`.
 - Production strict fail-closed profile wiring (`PROD_STRICT_MODE`) across client/entry/exit/directory/issuer with beta-strict prerequisite enforcement.
 - Issuer admin-action signing support (`X-Admin-Key-Id`/`X-Admin-Timestamp`/`X-Admin-Nonce`/`X-Admin-Signature`) with replay-window + nonce replay guard.
 - Optional mTLS transport helper wiring across control-plane services/clients (`MTLS_ENABLE` + cert/key/CA envs) and easy-mode mTLS bootstrap tooling (`scripts/bootstrap_mtls.sh`).

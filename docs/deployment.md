@@ -246,7 +246,8 @@ Before exposing anything public:
 41. For stricter cross-host anti-collusion and issuer drift checks, keep `--distinct-operators=1` and `--require-issuer-quorum=1` enabled on 3-machine validate/soak runs (default under `--beta-profile=1`), and require minimum client selection diversity (`--client-min-selection-lines`, `--client-min-entry-operators`, `--client-min-exit-operators`, `--client-require-cross-operator-pair`) so the client actually exercises multi-operator paths.
 42. If enforcing anti-collusion (`CLIENT_REQUIRE_DISTINCT_OPERATORS=1` and/or `ENTRY_REQUIRE_DISTINCT_EXIT_OPERATOR=1`), run `./scripts/integration_distinct_operators.sh` and verify same-operator paths are rejected while distinct-operator paths pass.
 43. For strict runtime guardrails across roles, run `./scripts/integration_beta_strict_roles.sh` and verify client/entry/exit/issuer fail closed on weak config and entry/issuer boot when strict prerequisites are met.
-44. For strict live WireGuard-mode behavior (non-privileged shim path), run `./scripts/integration_live_wg_full_path_strict.sh` and verify strict startup signals plus end-to-end plausible WireGuard packet forwarding/drop behavior.
-45. Run `./scripts/integration_beta_fault_matrix.sh` to validate startup-race and sync-loss recovery paths in one pass before external beta tests.
-46. Run `./scripts/integration_easy_node_role_guard.sh` to verify provider nodes are blocked from invite/admin actions while authority nodes are allowed past the role gate.
-47. Run `./scripts/integration_prod_preflight_tools.sh` to verify easy-node strict prod preflight and authority signer rotate/status flows.
+44. Run `./scripts/integration_wg_only_mode.sh` to verify wireguard-only fail-closed guardrails (`WG_ONLY_MODE`) reject scaffold/non-WG dataplane configuration before runtime.
+45. For strict live WireGuard-mode behavior (non-privileged shim path), run `./scripts/integration_live_wg_full_path_strict.sh` and verify strict startup signals plus end-to-end plausible WireGuard packet forwarding/drop behavior.
+46. Run `./scripts/integration_beta_fault_matrix.sh` to validate startup-race and sync-loss recovery paths in one pass before external beta tests.
+47. Run `./scripts/integration_easy_node_role_guard.sh` to verify provider nodes are blocked from invite/admin actions while authority nodes are allowed past the role gate.
+48. Run `./scripts/integration_prod_preflight_tools.sh` to verify easy-node strict prod preflight and authority signer rotate/status flows.

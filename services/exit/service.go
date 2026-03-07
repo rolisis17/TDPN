@@ -70,6 +70,7 @@ type Service struct {
 	wgKernelTargetUDP     *net.UDPAddr
 	wgManager             wg.Manager
 	liveWGMode            bool
+	wgOnlyMode            bool
 	egressBackend         string
 	egressIface           string
 	egressCIDR            string
@@ -291,6 +292,10 @@ func New() *Service {
 	}
 	betaStrict := os.Getenv("BETA_STRICT_MODE") == "1" || os.Getenv("EXIT_BETA_STRICT") == "1"
 	prodStrict := os.Getenv("PROD_STRICT_MODE") == "1" || os.Getenv("EXIT_PROD_STRICT") == "1"
+	wgOnlyMode := os.Getenv("WG_ONLY_MODE") == "1" || os.Getenv("EXIT_WG_ONLY_MODE") == "1"
+	if prodStrict {
+		wgOnlyMode = true
+	}
 	rawIssuerRequireID := strings.TrimSpace(os.Getenv("EXIT_ISSUER_REQUIRE_ID"))
 	issuerRequireID := rawIssuerRequireID == "1"
 	if rawIssuerRequireID == "" && betaStrict && len(issuerURLs) > 1 {
@@ -299,7 +304,7 @@ func New() *Service {
 	if startupSyncTimeout <= 0 {
 		if betaStrict {
 			startupSyncTimeout = 30 * time.Second
-		} else if wgBackend == "command" {
+		} else if wgOnlyMode || wgBackend == "command" {
 			startupSyncTimeout = 8 * time.Second
 		}
 	}
@@ -333,6 +338,7 @@ func New() *Service {
 		sessionCleanupSec:     sessionCleanupSec,
 		wgManager:             wgManager,
 		liveWGMode:            liveWGMode,
+		wgOnlyMode:            wgOnlyMode,
 		egressBackend:         egressBackend,
 		egressIface:           egressIface,
 		egressCIDR:            egressCIDR,
@@ -366,8 +372,8 @@ func (s *Service) Run(ctx context.Context) error {
 	}
 	s.httpClient = httpClient
 
-	log.Printf("exit wg backend=%s iface=%s listen_port=%d kernel_proxy=%t kernel_proxy_max_sessions=%d kernel_proxy_idle_sec=%d opaque_echo=%t token_proof_replay_guard=%t peer_rebind_sec=%d startup_sync_timeout_sec=%d issuer_min_sources=%d issuer_min_operators=%d issuer_require_id=%t beta_strict=%t",
-		s.wgBackend, s.wgInterface, s.wgListenPort, s.wgKernelProxy, s.effectiveWGKernelProxyMax(), int(s.wgKernelProxyIdle/time.Second), s.opaqueEcho, s.tokenProofReplayGuard, int(s.peerRebindAfter/time.Second), int(s.startupSyncTimeout/time.Second), s.issuerMinSources, s.issuerMinOperators, s.issuerRequireID, s.betaStrict)
+	log.Printf("exit wg backend=%s iface=%s listen_port=%d kernel_proxy=%t kernel_proxy_max_sessions=%d kernel_proxy_idle_sec=%d opaque_echo=%t token_proof_replay_guard=%t peer_rebind_sec=%d startup_sync_timeout_sec=%d issuer_min_sources=%d issuer_min_operators=%d issuer_require_id=%t wg_only=%t beta_strict=%t",
+		s.wgBackend, s.wgInterface, s.wgListenPort, s.wgKernelProxy, s.effectiveWGKernelProxyMax(), int(s.wgKernelProxyIdle/time.Second), s.opaqueEcho, s.tokenProofReplayGuard, int(s.peerRebindAfter/time.Second), int(s.startupSyncTimeout/time.Second), s.issuerMinSources, s.issuerMinOperators, s.issuerRequireID, s.wgOnlyMode, s.betaStrict)
 	if err := s.validateRuntimeConfig(); err != nil {
 		return err
 	}
@@ -556,6 +562,32 @@ func (s *Service) validateRuntimeConfig() error {
 		}
 		if strings.TrimSpace(s.opaqueSourceAddr) == "" {
 			return fmt.Errorf("EXIT_LIVE_WG_MODE requires EXIT_OPAQUE_SOURCE_ADDR")
+		}
+	}
+	if s.wgOnlyMode {
+		if s.dataMode != "opaque" {
+			return fmt.Errorf("WG_ONLY_MODE requires DATA_PLANE_MODE=opaque")
+		}
+		if s.wgBackend != "command" {
+			return fmt.Errorf("WG_ONLY_MODE requires WG_BACKEND=command")
+		}
+		if !s.wgKernelProxy {
+			return fmt.Errorf("WG_ONLY_MODE requires EXIT_WG_KERNEL_PROXY=1")
+		}
+		if !s.liveWGMode {
+			return fmt.Errorf("WG_ONLY_MODE requires EXIT_LIVE_WG_MODE=1")
+		}
+		if s.opaqueEcho {
+			return fmt.Errorf("WG_ONLY_MODE requires EXIT_OPAQUE_ECHO=0")
+		}
+		if strings.TrimSpace(s.opaqueSinkAddr) == "" {
+			return fmt.Errorf("WG_ONLY_MODE requires EXIT_OPAQUE_SINK_ADDR")
+		}
+		if strings.TrimSpace(s.opaqueSourceAddr) == "" {
+			return fmt.Errorf("WG_ONLY_MODE requires EXIT_OPAQUE_SOURCE_ADDR")
+		}
+		if s.startupSyncTimeout <= 0 {
+			return fmt.Errorf("WG_ONLY_MODE requires EXIT_STARTUP_SYNC_TIMEOUT_SEC>0")
 		}
 	}
 	if s.betaStrict {

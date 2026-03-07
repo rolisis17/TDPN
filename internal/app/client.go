@@ -61,6 +61,7 @@ type Client struct {
 	wgProxyAddr           string
 	wgManager             wg.ClientManager
 	liveWGMode            bool
+	wgOnlyMode            bool
 	disableSynthetic      bool
 	healthCheckEnabled    bool
 	healthCheckTimeout    time.Duration
@@ -349,8 +350,12 @@ func NewClient() *Client {
 	}
 	betaStrict := os.Getenv("BETA_STRICT_MODE") == "1" || os.Getenv("CLIENT_BETA_STRICT") == "1"
 	prodStrict := os.Getenv("PROD_STRICT_MODE") == "1" || os.Getenv("CLIENT_PROD_STRICT") == "1"
+	wgOnlyMode := os.Getenv("WG_ONLY_MODE") == "1" || os.Getenv("CLIENT_WG_ONLY_MODE") == "1"
+	if prodStrict {
+		wgOnlyMode = true
+	}
 	if startupSyncTimeoutSec <= 0 {
-		if betaStrict {
+		if betaStrict || wgOnlyMode {
 			startupSyncTimeoutSec = 10
 		} else if wgBackend == "command" {
 			startupSyncTimeoutSec = 8
@@ -397,6 +402,7 @@ func NewClient() *Client {
 		wgProxyAddr:           wgProxyAddr,
 		wgManager:             wgManager,
 		liveWGMode:            liveWGMode,
+		wgOnlyMode:            wgOnlyMode,
 		disableSynthetic:      disableSynthetic,
 		healthCheckEnabled:    healthCheckEnabled,
 		healthCheckTimeout:    time.Duration(healthTimeoutMS) * time.Millisecond,
@@ -454,8 +460,8 @@ func (c *Client) Run(ctx context.Context) error {
 	if initialDelay < 0 {
 		initialDelay = 0
 	}
-	log.Printf("client role enabled: directories=%d min_sources=%d min_operators=%d min_votes=%d issuer=%s subject=%s anon_cred=%t entry=%s mode=%s source=%s trust_strict=%t wg_backend=%s iface=%s allowed_ips=%s install_route=%t wg_kernel_proxy=%t wg_proxy_addr=%s synthetic_fallback=%t opaque_session_sec=%d opaque_initial_uplink_timeout_ms=%d health_check=%t path_attempts=%d exit_country=%s exit_region=%s min_geo_confidence=%.2f locality_fallback=%s strict_locality=%t max_exits_per_operator=%d distinct_operators=%t sticky_pair_sec=%d entry_rotation_sec=%d entry_rotation_seed_set=%t session_reuse=%t refresh_lead_sec=%d exit_exploration_pct=%d selection_feed_disable=%t selection_feed_require=%t selection_feed_min_votes=%d trust_feed_disable=%t trust_feed_require=%t trust_feed_min_votes=%d bootstrap_interval_sec=%d bootstrap_backoff_max_sec=%d bootstrap_jitter_pct=%d bootstrap_initial_delay_sec=%d startup_sync_timeout_sec=%d beta_strict=%t",
-		len(c.directoryURLs), c.directoryMinSources, c.directoryMinOperators, c.directoryMinVotes, c.issuerURL, c.subject, c.anonCred != "", c.entryURL, c.dataMode, c.innerSource, c.trustStrict, c.wgBackend, c.wgInterface, c.wgAllowedIPs, c.wgInstallRoute, c.wgKernelProxy, c.wgProxyAddr, c.allowSyntheticFallback(), c.opaqueSessionSec, c.opaqueInitialUpMS, c.healthCheckEnabled, c.pathOpenMaxAttempts, c.preferredExitCountry, c.preferredExitRegion, c.minGeoConfidence, strings.Join(c.localityFallbackOrder, ","), c.strictExitLocality, c.maxExitsPerOperator, c.requireDistinctOps, c.stickyPairSec, c.entryRotationSec, c.entryRotationSeed != 0, c.sessionReuse, c.sessionRefreshLeadSec, c.exitExplorationPct, c.selectionFeedDisable, c.selectionFeedRequire, c.selectionFeedMinVotes, c.trustFeedDisable, c.trustFeedRequire, c.trustFeedMinVotes, int(bootstrapInterval/time.Second), int(bootstrapBackoffMax/time.Second), c.bootstrapJitterPct, int(initialDelay/time.Second), int(c.startupSyncTimeout/time.Second), c.betaStrict)
+	log.Printf("client role enabled: directories=%d min_sources=%d min_operators=%d min_votes=%d issuer=%s subject=%s anon_cred=%t entry=%s mode=%s source=%s trust_strict=%t wg_backend=%s iface=%s allowed_ips=%s install_route=%t wg_kernel_proxy=%t wg_proxy_addr=%s synthetic_fallback=%t opaque_session_sec=%d opaque_initial_uplink_timeout_ms=%d health_check=%t path_attempts=%d exit_country=%s exit_region=%s min_geo_confidence=%.2f locality_fallback=%s strict_locality=%t max_exits_per_operator=%d distinct_operators=%t sticky_pair_sec=%d entry_rotation_sec=%d entry_rotation_seed_set=%t session_reuse=%t refresh_lead_sec=%d exit_exploration_pct=%d selection_feed_disable=%t selection_feed_require=%t selection_feed_min_votes=%d trust_feed_disable=%t trust_feed_require=%t trust_feed_min_votes=%d bootstrap_interval_sec=%d bootstrap_backoff_max_sec=%d bootstrap_jitter_pct=%d bootstrap_initial_delay_sec=%d startup_sync_timeout_sec=%d wg_only=%t beta_strict=%t",
+		len(c.directoryURLs), c.directoryMinSources, c.directoryMinOperators, c.directoryMinVotes, c.issuerURL, c.subject, c.anonCred != "", c.entryURL, c.dataMode, c.innerSource, c.trustStrict, c.wgBackend, c.wgInterface, c.wgAllowedIPs, c.wgInstallRoute, c.wgKernelProxy, c.wgProxyAddr, c.allowSyntheticFallback(), c.opaqueSessionSec, c.opaqueInitialUpMS, c.healthCheckEnabled, c.pathOpenMaxAttempts, c.preferredExitCountry, c.preferredExitRegion, c.minGeoConfidence, strings.Join(c.localityFallbackOrder, ","), c.strictExitLocality, c.maxExitsPerOperator, c.requireDistinctOps, c.stickyPairSec, c.entryRotationSec, c.entryRotationSeed != 0, c.sessionReuse, c.sessionRefreshLeadSec, c.exitExplorationPct, c.selectionFeedDisable, c.selectionFeedRequire, c.selectionFeedMinVotes, c.trustFeedDisable, c.trustFeedRequire, c.trustFeedMinVotes, int(bootstrapInterval/time.Second), int(bootstrapBackoffMax/time.Second), c.bootstrapJitterPct, int(initialDelay/time.Second), int(c.startupSyncTimeout/time.Second), c.wgOnlyMode, c.betaStrict)
 	if err := c.validateRuntimeConfig(); err != nil {
 		return err
 	}
@@ -580,6 +586,32 @@ func (c *Client) validateRuntimeConfig() error {
 	}
 	if c.dataMode == "opaque" && !c.allowSyntheticFallback() && c.innerSource != "udp" && !c.wgKernelProxy {
 		return fmt.Errorf("CLIENT_INNER_SOURCE=udp required when synthetic fallback is disabled")
+	}
+	if c.wgOnlyMode {
+		if c.dataMode != "opaque" {
+			return fmt.Errorf("WG_ONLY_MODE requires DATA_PLANE_MODE=opaque")
+		}
+		if c.wgBackend != "command" {
+			return fmt.Errorf("WG_ONLY_MODE requires CLIENT_WG_BACKEND=command")
+		}
+		if !c.wgKernelProxy {
+			return fmt.Errorf("WG_ONLY_MODE requires CLIENT_WG_KERNEL_PROXY=1")
+		}
+		if !c.liveWGMode {
+			return fmt.Errorf("WG_ONLY_MODE requires CLIENT_LIVE_WG_MODE=1")
+		}
+		if c.innerSource != "udp" {
+			return fmt.Errorf("WG_ONLY_MODE requires CLIENT_INNER_SOURCE=udp")
+		}
+		if !c.disableSynthetic {
+			return fmt.Errorf("WG_ONLY_MODE requires CLIENT_DISABLE_SYNTHETIC_FALLBACK=1")
+		}
+		if c.startupSyncTimeout <= 0 {
+			return fmt.Errorf("WG_ONLY_MODE requires CLIENT_STARTUP_SYNC_TIMEOUT_SEC>0")
+		}
+		if strings.TrimSpace(c.wgPrivateKey) == "" {
+			return fmt.Errorf("WG_ONLY_MODE requires CLIENT_WG_PRIVATE_KEY_PATH")
+		}
 	}
 	if c.betaStrict {
 		if c.dataMode != "opaque" {

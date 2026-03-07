@@ -51,6 +51,7 @@ type Service struct {
 	addr                  string
 	dataAddr              string
 	liveWGMode            bool
+	wgOnlyMode            bool
 	betaStrict            bool
 	prodStrict            bool
 	operatorID            string
@@ -149,6 +150,10 @@ func New() *Service {
 	liveWGMode := os.Getenv("ENTRY_LIVE_WG_MODE") == "1"
 	betaStrict := os.Getenv("BETA_STRICT_MODE") == "1" || os.Getenv("ENTRY_BETA_STRICT") == "1"
 	prodStrict := os.Getenv("PROD_STRICT_MODE") == "1" || os.Getenv("ENTRY_PROD_STRICT") == "1"
+	wgOnlyMode := os.Getenv("WG_ONLY_MODE") == "1" || os.Getenv("ENTRY_WG_ONLY_MODE") == "1"
+	if prodStrict {
+		wgOnlyMode = true
+	}
 	operatorID := strings.TrimSpace(os.Getenv("ENTRY_OPERATOR_ID"))
 	if operatorID == "" {
 		operatorID = strings.TrimSpace(os.Getenv("DIRECTORY_OPERATOR_ID"))
@@ -192,6 +197,7 @@ func New() *Service {
 		addr:                  addr,
 		dataAddr:              dataAddr,
 		liveWGMode:            liveWGMode,
+		wgOnlyMode:            wgOnlyMode,
 		betaStrict:            betaStrict,
 		prodStrict:            prodStrict,
 		operatorID:            operatorID,
@@ -234,9 +240,9 @@ func (s *Service) Run(ctx context.Context) error {
 	if err := s.validateRuntimeConfig(); err != nil {
 		return err
 	}
-	log.Printf("entry route discovery: directories=%d min_sources=%d min_operators=%d min_votes=%d trust_strict=%t live_wg_mode=%t distinct_exit_operator=%t operator_id=%s rps=%d ban_threshold=%d ban_sec=%d max_inflight=%d client_rebind_sec=%d",
+	log.Printf("entry route discovery: directories=%d min_sources=%d min_operators=%d min_votes=%d trust_strict=%t live_wg_mode=%t wg_only=%t distinct_exit_operator=%t operator_id=%s rps=%d ban_threshold=%d ban_sec=%d max_inflight=%d client_rebind_sec=%d",
 		len(s.directoryURLs), maxInt(1, s.directoryMinSources), maxInt(1, s.directoryMinOperators), maxInt(1, s.directoryMinVotes), s.directoryTrustStrict,
-		s.liveWGMode, s.requireDistinctExitOp, strings.TrimSpace(s.operatorID), s.openRPS, s.openBanThreshold, int(s.openBanDuration/time.Second), s.openMaxInflight, int(s.clientRebindAfter/time.Second))
+		s.liveWGMode, s.wgOnlyMode, s.requireDistinctExitOp, strings.TrimSpace(s.operatorID), s.openRPS, s.openBanThreshold, int(s.openBanDuration/time.Second), s.openMaxInflight, int(s.clientRebindAfter/time.Second))
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/path/open", s.handlePathOpen)
 	mux.HandleFunc("/v1/path/close", s.handlePathClose)
@@ -278,6 +284,9 @@ func (s *Service) validateRuntimeConfig() error {
 	}
 	if s.requireDistinctExitOp && strings.TrimSpace(s.operatorID) == "" {
 		return fmt.Errorf("ENTRY_REQUIRE_DISTINCT_EXIT_OPERATOR=1 requires ENTRY_OPERATOR_ID or DIRECTORY_OPERATOR_ID")
+	}
+	if s.wgOnlyMode && !s.liveWGMode {
+		return fmt.Errorf("WG_ONLY_MODE requires ENTRY_LIVE_WG_MODE=1")
 	}
 	if s.betaStrict {
 		if !s.liveWGMode {

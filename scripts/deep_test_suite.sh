@@ -100,6 +100,9 @@ echo "[deep] live-wg full path"
 echo "[deep] strict live-wg full path"
 ./scripts/integration_live_wg_full_path_strict.sh
 
+echo "[deep] wg-only-mode guardrails"
+./scripts/integration_wg_only_mode.sh
+
 echo "[deep] client bootstrap recovery"
 ./scripts/integration_client_bootstrap_recovery.sh
 

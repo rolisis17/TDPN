@@ -259,3 +259,36 @@ func TestValidateRuntimeConfigRejectsDistinctOperatorWithoutEntryOperatorID(t *t
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestValidateRuntimeConfigWGOnlyRequiresLiveMode(t *testing.T) {
+	s := &Service{
+		wgOnlyMode: true,
+		liveWGMode: false,
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected wg-only validation error")
+	}
+	if !strings.Contains(err.Error(), "WG_ONLY_MODE requires ENTRY_LIVE_WG_MODE=1") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigWGOnlyAcceptsLiveMode(t *testing.T) {
+	s := &Service{
+		wgOnlyMode: true,
+		liveWGMode: true,
+	}
+	if err := s.validateRuntimeConfig(); err != nil {
+		t.Fatalf("expected wg-only config valid, got %v", err)
+	}
+}
+
+func TestNewProdStrictEnablesWGOnly(t *testing.T) {
+	t.Setenv("PROD_STRICT_MODE", "1")
+	t.Setenv("ENTRY_PROD_STRICT", "0")
+	s := New()
+	if !s.wgOnlyMode {
+		t.Fatalf("expected prod strict mode to enable wg-only mode")
+	}
+}

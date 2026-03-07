@@ -115,6 +115,9 @@ echo "[ci] live-wg-full-path integration"
 echo "[ci] strict live-wg-full-path integration"
 ./scripts/integration_live_wg_full_path_strict.sh
 
+echo "[ci] wg-only-mode guardrails integration"
+./scripts/integration_wg_only_mode.sh
+
 echo "[ci] client-bootstrap-recovery integration"
 ./scripts/integration_client_bootstrap_recovery.sh
 

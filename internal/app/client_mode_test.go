@@ -314,6 +314,46 @@ func TestValidateRuntimeConfigBetaStrictRejectsMultiDirectoryWithoutOperatorQuor
 	}
 }
 
+func TestValidateRuntimeConfigWGOnlyRequiresDisableSynthetic(t *testing.T) {
+	c := &Client{
+		wgOnlyMode:         true,
+		dataMode:           "opaque",
+		innerSource:        "udp",
+		wgBackend:          "command",
+		wgPrivateKey:       "/tmp/wg.key",
+		wgKernelProxy:      true,
+		wgProxyAddr:        "127.0.0.1:0",
+		liveWGMode:         true,
+		disableSynthetic:   false,
+		startupSyncTimeout: time.Second,
+	}
+	err := c.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected wg-only validation failure")
+	}
+	if !strings.Contains(err.Error(), "WG_ONLY_MODE requires CLIENT_DISABLE_SYNTHETIC_FALLBACK=1") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigWGOnlyAcceptsValidConfig(t *testing.T) {
+	c := &Client{
+		wgOnlyMode:         true,
+		dataMode:           "opaque",
+		innerSource:        "udp",
+		wgBackend:          "command",
+		wgPrivateKey:       "/tmp/wg.key",
+		wgKernelProxy:      true,
+		wgProxyAddr:        "127.0.0.1:0",
+		liveWGMode:         true,
+		disableSynthetic:   true,
+		startupSyncTimeout: time.Second,
+	}
+	if err := c.validateRuntimeConfig(); err != nil {
+		t.Fatalf("expected wg-only config valid, got %v", err)
+	}
+}
+
 func TestEnsureCommandWGPubKeyDerivesWhenUnset(t *testing.T) {
 	original := deriveClientWGPublicFromPrivateFile
 	defer func() { deriveClientWGPublicFromPrivateFile = original }()
@@ -500,6 +540,25 @@ func TestNewClientStrictStartupSyncTimeoutDefault(t *testing.T) {
 	c := NewClient()
 	if c.startupSyncTimeout != 10*time.Second {
 		t.Fatalf("expected strict startup sync timeout 10s, got %s", c.startupSyncTimeout)
+	}
+}
+
+func TestNewClientWGOnlyStartupSyncTimeoutDefault(t *testing.T) {
+	t.Setenv("WG_ONLY_MODE", "1")
+	t.Setenv("CLIENT_STARTUP_SYNC_TIMEOUT_SEC", "")
+	t.Setenv("BETA_STRICT_MODE", "0")
+	t.Setenv("CLIENT_BETA_STRICT", "0")
+	c := NewClient()
+	if c.startupSyncTimeout != 10*time.Second {
+		t.Fatalf("expected wg-only startup sync timeout 10s, got %s", c.startupSyncTimeout)
+	}
+}
+
+func TestNewClientProdStrictEnablesWGOnly(t *testing.T) {
+	t.Setenv("PROD_STRICT_MODE", "1")
+	c := NewClient()
+	if !c.wgOnlyMode {
+		t.Fatalf("expected prod strict mode to enable wg-only mode")
 	}
 }
 

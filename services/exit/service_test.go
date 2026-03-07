@@ -527,6 +527,50 @@ func TestValidateRuntimeConfigKernelProxyRequiresCommandBackend(t *testing.T) {
 	}
 }
 
+func TestValidateRuntimeConfigWGOnlyRequiresStartupSyncTimeout(t *testing.T) {
+	s := &Service{
+		wgOnlyMode:         true,
+		dataMode:           "opaque",
+		dataAddr:           "127.0.0.1:51821",
+		wgBackend:          "command",
+		wgPrivateKey:       "/tmp/wg-exit.key",
+		wgKernelProxy:      true,
+		wgListenPort:       51831,
+		liveWGMode:         true,
+		opaqueEcho:         false,
+		opaqueSinkAddr:     "127.0.0.1:53011",
+		opaqueSourceAddr:   "127.0.0.1:53012",
+		startupSyncTimeout: 0,
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected wg-only validation failure")
+	}
+	if !strings.Contains(err.Error(), "WG_ONLY_MODE requires EXIT_STARTUP_SYNC_TIMEOUT_SEC>0") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigWGOnlyAcceptsValidConfig(t *testing.T) {
+	s := &Service{
+		wgOnlyMode:         true,
+		dataMode:           "opaque",
+		dataAddr:           "127.0.0.1:51821",
+		wgBackend:          "command",
+		wgPrivateKey:       "/tmp/wg-exit.key",
+		wgKernelProxy:      true,
+		wgListenPort:       51831,
+		liveWGMode:         true,
+		opaqueEcho:         false,
+		opaqueSinkAddr:     "127.0.0.1:53011",
+		opaqueSourceAddr:   "127.0.0.1:53012",
+		startupSyncTimeout: 8 * time.Second,
+	}
+	if err := s.validateRuntimeConfig(); err != nil {
+		t.Fatalf("expected wg-only config valid, got %v", err)
+	}
+}
+
 func TestValidateRuntimeConfigBetaStrictRequiresLiveKernelReplayGuard(t *testing.T) {
 	s := &Service{
 		betaStrict:            true,
@@ -761,6 +805,29 @@ func TestNewCommandBackendDefaultStartupSyncTimeout(t *testing.T) {
 	s := New()
 	if s.startupSyncTimeout != 8*time.Second {
 		t.Fatalf("expected command default startup sync timeout 8s, got %s", s.startupSyncTimeout)
+	}
+}
+
+func TestNewWGOnlyDefaultStartupSyncTimeout(t *testing.T) {
+	t.Setenv("BETA_STRICT_MODE", "0")
+	t.Setenv("EXIT_BETA_STRICT", "0")
+	t.Setenv("WG_BACKEND", "noop")
+	t.Setenv("WG_ONLY_MODE", "1")
+	t.Setenv("EXIT_STARTUP_SYNC_TIMEOUT_SEC", "")
+
+	s := New()
+	if s.startupSyncTimeout != 8*time.Second {
+		t.Fatalf("expected wg-only default startup sync timeout 8s, got %s", s.startupSyncTimeout)
+	}
+}
+
+func TestNewProdStrictEnablesWGOnly(t *testing.T) {
+	t.Setenv("PROD_STRICT_MODE", "1")
+	t.Setenv("EXIT_PROD_STRICT", "0")
+
+	s := New()
+	if !s.wgOnlyMode {
+		t.Fatalf("expected prod strict mode to enable wg-only mode")
 	}
 }
 
