@@ -149,6 +149,7 @@
 - 3-machine beta soak/fault runner (`integration_3machine_beta_soak.sh`) for repeated cross-network validation rounds with optional fault-command injection and consolidated reporting.
 - Beta fault-injection matrix (`integration_beta_fault_matrix.sh`) now covers client/exit startup races and sync-loss recovery paths (client bootstrap recovery + directory sync chaos) as a single runnable suite.
 - Real WG privileged integration defaults now run with UDP inner source and synthetic fallback disabled (`CLIENT_INNER_SOURCE=udp`, `CLIENT_DISABLE_SYNTHETIC_FALLBACK=1`) to keep beta WG validation on real packet ingress only.
+- Command-mode WG proxy integrations now also run with UDP inner source and synthetic fallback disabled (`integration_client_wg_kernel_proxy.sh`, `integration_exit_wg_proxy_limit.sh`, `integration_exit_wg_proxy_idle_cleanup.sh`) to keep proxy-path coverage aligned with real packet ingress behavior.
 - One-bootstrap host discovery workflow (`discover-hosts`, `--bootstrap-directory`) for machine-C validation and easy-mode launcher flows that auto-discover peer server URLs from a single known directory endpoint.
 
 ## In Progress / Partial
