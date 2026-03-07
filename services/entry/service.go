@@ -299,10 +299,10 @@ func (s *Service) validateRuntimeConfig() error {
 			return fmt.Errorf("BETA_STRICT_MODE requires ENTRY_REQUIRE_DISTINCT_EXIT_OPERATOR=1")
 		}
 		secret := strings.TrimSpace(s.puzzleSecret)
-		if secret == "entry-secret-default" {
+		if secret == "" || secret == "entry-secret-default" {
 			return fmt.Errorf("BETA_STRICT_MODE requires non-default ENTRY_PUZZLE_SECRET")
 		}
-		if secret != "" && len(secret) < 16 {
+		if len(secret) < 16 {
 			return fmt.Errorf("BETA_STRICT_MODE requires ENTRY_PUZZLE_SECRET length>=16")
 		}
 		if len(s.directoryURLs) > 1 {

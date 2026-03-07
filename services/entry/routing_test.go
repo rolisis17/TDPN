@@ -190,6 +190,24 @@ func TestValidateRuntimeConfigBetaStrictRejectsDefaultPuzzleSecret(t *testing.T)
 	}
 }
 
+func TestValidateRuntimeConfigBetaStrictRejectsEmptyPuzzleSecret(t *testing.T) {
+	s := &Service{
+		betaStrict:            true,
+		liveWGMode:            true,
+		directoryTrustStrict:  true,
+		requireDistinctExitOp: true,
+		operatorID:            "op-entry",
+		puzzleSecret:          "",
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected strict validation error")
+	}
+	if !strings.Contains(err.Error(), "non-default ENTRY_PUZZLE_SECRET") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestValidateRuntimeConfigBetaStrictRejectsShortPuzzleSecret(t *testing.T) {
 	s := &Service{
 		betaStrict:            true,
@@ -213,6 +231,7 @@ func TestValidateRuntimeConfigBetaStrictRejectsNonLive(t *testing.T) {
 		betaStrict:           true,
 		liveWGMode:           false,
 		directoryTrustStrict: true,
+		puzzleSecret:         "entry-secret-012345",
 	}
 	err := s.validateRuntimeConfig()
 	if err == nil {
@@ -230,6 +249,7 @@ func TestValidateRuntimeConfigBetaStrictRejectsMissingDistinctExitOperator(t *te
 		directoryTrustStrict:  true,
 		requireDistinctExitOp: false,
 		operatorID:            "op-entry",
+		puzzleSecret:          "entry-secret-012345",
 	}
 	err := s.validateRuntimeConfig()
 	if err == nil {
@@ -247,6 +267,7 @@ func TestValidateRuntimeConfigBetaStrictRejectsMultiDirectoryWithoutSourceQuorum
 		directoryTrustStrict:  true,
 		requireDistinctExitOp: true,
 		operatorID:            "op-entry",
+		puzzleSecret:          "entry-secret-012345",
 		directoryURLs:         []string{"http://127.0.0.1:8081", "http://127.0.0.1:8085"},
 		directoryMinSources:   1,
 		directoryMinOperators: 2,
@@ -267,6 +288,7 @@ func TestValidateRuntimeConfigBetaStrictRejectsMultiDirectoryWithoutOperatorQuor
 		directoryTrustStrict:  true,
 		requireDistinctExitOp: true,
 		operatorID:            "op-entry",
+		puzzleSecret:          "entry-secret-012345",
 		directoryURLs:         []string{"http://127.0.0.1:8081", "http://127.0.0.1:8085"},
 		directoryMinSources:   2,
 		directoryMinOperators: 1,

@@ -65,6 +65,38 @@ func TestValidateRuntimeConfigBetaStrictRejectsDefaultAdminToken(t *testing.T) {
 	}
 }
 
+func TestValidateRuntimeConfigBetaStrictRejectsEmptyAdminToken(t *testing.T) {
+	s := &Service{
+		betaStrict:               true,
+		peerDiscoveryEnabled:     true,
+		peerMinOperators:         2,
+		peerMinVotes:             2,
+		adminToken:               "",
+		issuerTrustURLs:          []string{"http://issuer-a.local", "http://issuer-b.local"},
+		issuerMinOperators:       2,
+		issuerTrustMinVotes:      2,
+		issuerDisputeMinVotes:    2,
+		issuerAppealMinVotes:     2,
+		peerDiscoveryMinVotes:    2,
+		peerDiscoveryRequireHint: true,
+		peerDiscoveryMaxPerSrc:   4,
+		peerDiscoveryMaxPerOp:    4,
+		peerTrustStrict:          true,
+		finalAdjudicationOps:     2,
+		finalAdjudicationSources: 2,
+		finalDisputeMinVotes:     2,
+		finalAppealMinVotes:      2,
+		keyRotateEvery:           time.Second,
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected strict config rejection for empty admin token")
+	}
+	if err.Error() != "BETA_STRICT_MODE requires non-default DIRECTORY_ADMIN_TOKEN" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestValidateRuntimeConfigBetaStrictRejectsShortAdminToken(t *testing.T) {
 	s := &Service{
 		betaStrict:               true,
@@ -103,6 +135,7 @@ func TestValidateRuntimeConfigBetaStrictRejectsWeakSettings(t *testing.T) {
 		peerDiscoveryEnabled:     true,
 		peerMinOperators:         2,
 		peerMinVotes:             2,
+		adminToken:               "directory-admin-012345",
 		issuerTrustURLs:          []string{"http://issuer-a.local", "http://issuer-b.local"},
 		issuerMinOperators:       2,
 		issuerTrustMinVotes:      2,
@@ -130,6 +163,7 @@ func TestValidateRuntimeConfigBetaStrictRejectsWeakQuorumVotes(t *testing.T) {
 		peerDiscoveryEnabled:     true,
 		peerMinOperators:         2,
 		peerMinVotes:             1,
+		adminToken:               "directory-admin-012345",
 		issuerTrustURLs:          []string{"http://issuer-a.local", "http://issuer-b.local"},
 		issuerMinOperators:       2,
 		issuerTrustMinVotes:      2,
@@ -161,6 +195,7 @@ func TestValidateRuntimeConfigBetaStrictRejectsWeakDiscoveryVotes(t *testing.T) 
 		peerDiscoveryEnabled:     true,
 		peerMinOperators:         2,
 		peerMinVotes:             2,
+		adminToken:               "directory-admin-012345",
 		issuerTrustURLs:          []string{"http://issuer-a.local", "http://issuer-b.local"},
 		issuerMinOperators:       2,
 		issuerTrustMinVotes:      2,
@@ -192,6 +227,7 @@ func TestValidateRuntimeConfigBetaStrictRejectsMissingDiscoverySourceCap(t *test
 		peerDiscoveryEnabled:     true,
 		peerMinOperators:         2,
 		peerMinVotes:             2,
+		adminToken:               "directory-admin-012345",
 		issuerTrustURLs:          []string{"http://issuer-a.local", "http://issuer-b.local"},
 		issuerMinOperators:       2,
 		issuerTrustMinVotes:      2,
@@ -223,6 +259,7 @@ func TestValidateRuntimeConfigBetaStrictRejectsMissingDiscoveryOperatorCap(t *te
 		peerDiscoveryEnabled:     true,
 		peerMinOperators:         2,
 		peerMinVotes:             2,
+		adminToken:               "directory-admin-012345",
 		issuerTrustURLs:          []string{"http://issuer-a.local", "http://issuer-b.local"},
 		issuerMinOperators:       2,
 		issuerTrustMinVotes:      2,
@@ -254,6 +291,7 @@ func TestValidateRuntimeConfigBetaStrictRejectsWeakFinalSources(t *testing.T) {
 		peerDiscoveryEnabled:     true,
 		peerMinOperators:         2,
 		peerMinVotes:             2,
+		adminToken:               "directory-admin-012345",
 		issuerTrustURLs:          []string{"http://issuer-a.local", "http://issuer-b.local"},
 		issuerMinOperators:       2,
 		issuerTrustMinVotes:      2,
@@ -285,6 +323,7 @@ func TestValidateRuntimeConfigBetaStrictRejectsWeakIssuerURLSet(t *testing.T) {
 		peerDiscoveryEnabled:     true,
 		peerMinOperators:         2,
 		peerMinVotes:             2,
+		adminToken:               "directory-admin-012345",
 		issuerTrustURLs:          []string{"http://issuer-a.local"},
 		issuerMinOperators:       2,
 		issuerTrustMinVotes:      2,
@@ -316,6 +355,7 @@ func TestValidateRuntimeConfigBetaStrictRejectsWeakIssuerVotes(t *testing.T) {
 		peerDiscoveryEnabled:     true,
 		peerMinOperators:         2,
 		peerMinVotes:             2,
+		adminToken:               "directory-admin-012345",
 		issuerTrustURLs:          []string{"http://issuer-a.local", "http://issuer-b.local"},
 		issuerMinOperators:       2,
 		issuerTrustMinVotes:      1,

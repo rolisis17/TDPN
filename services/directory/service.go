@@ -622,10 +622,10 @@ func (s *Service) validateRuntimeConfig() error {
 		return fmt.Errorf("BETA_STRICT_MODE requires DIRECTORY_KEY_ROTATE_SEC>0")
 	}
 	adminToken := strings.TrimSpace(s.adminToken)
-	if adminToken == "dev-admin-token" {
+	if adminToken == "" || adminToken == "dev-admin-token" {
 		return fmt.Errorf("BETA_STRICT_MODE requires non-default DIRECTORY_ADMIN_TOKEN")
 	}
-	if adminToken != "" && len(adminToken) < 16 {
+	if len(adminToken) < 16 {
 		return fmt.Errorf("BETA_STRICT_MODE requires DIRECTORY_ADMIN_TOKEN length>=16")
 	}
 	if s.prodStrict {
