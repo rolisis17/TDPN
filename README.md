@@ -616,7 +616,7 @@ CI and tests:
 - `./scripts/integration_adjudication_quorum.sh` (directory final adjudication vote/ratio quorum suppression + governance-status signal/operator + per-relay suppression checks)
 - `./scripts/integration_adjudication_operator_quorum.sh` (directory final adjudication distinct-operator quorum suppression check)
 - `./scripts/integration_adjudication_source_quorum.sh` (directory final adjudication distinct-source quorum suppression check)
-- `./scripts/integration_real_wg_privileged.sh` (manual Linux root-only real `wg`/`ip` command-backend integration check; not part of CI)
+- `./scripts/integration_real_wg_privileged.sh` (manual Linux root-only real `wg`/`ip` command-backend integration check; now includes early required-port occupancy preflight checks; not part of CI)
 - `./scripts/integration_real_wg_privileged_matrix.sh` (manual Linux root-only multi-profile wrapper around privileged real-WG integration, including strict beta-role profile)
 - `./scripts/integration_lifecycle_chaos.sh` (adversarial dispute/revocation race and stability check; included in deep suite)
 - `./scripts/integration_lifecycle_chaos_matrix.sh` (multi-profile lifecycle/dispute/revocation chaos wrapper for higher churn coverage)

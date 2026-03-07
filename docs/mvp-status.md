@@ -32,7 +32,7 @@
 - Command WG configuration hardening: explicit client/exit interface-up and optional client route installation for configured allowed IPs.
 - Client/exit command backends auto-derive WireGuard public keys from configured private keys when `CLIENT_WG_PUBLIC_KEY` / `EXIT_WG_PUBKEY` are unset/invalid, with fail-fast mismatch detection against configured keys.
 - Command-backend runtime preflight (`wg`/`ip`, interface, key path) and strict no-synthetic fallback in command/live modes.
-- Linux root-only real WG privileged integration script now validates actual interface peer wiring (`wg show` peers/endpoints/listen-port) and directory-advertised relay operator metadata in addition to packet-path metrics/log checks.
+- Linux root-only real WG privileged integration script now validates actual interface peer wiring (`wg show` peers/endpoints/listen-port) and directory-advertised relay operator metadata in addition to packet-path metrics/log checks, with early preflight failure on occupied required ports.
 - Linux root-only real WG profile-matrix wrapper (`integration_real_wg_privileged_matrix.sh`) exercises privileged validation across multiple interface/port/startup profiles.
 - Client command-mode optional per-session WG kernel proxy bridge (`CLIENT_WG_KERNEL_PROXY`, `CLIENT_WG_PROXY_ADDR`) for local WG UDP endpoint integration.
 - Exit command-mode port/bridge hardening: explicit `EXIT_WG_LISTEN_PORT` separation from `EXIT_DATA_ADDR` plus optional per-session WG kernel proxy bridging (`EXIT_WG_KERNEL_PROXY`).

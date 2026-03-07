@@ -104,6 +104,43 @@ if [[ "$STRICT_BETA_PROFILE" == "1" ]]; then
   fi
 fi
 
+addr_port() {
+  local addr="$1"
+  local fallback_port="${2:-}"
+  local port
+  if [[ "$addr" == *:* ]]; then
+    port="${addr##*:}"
+  else
+    port="$fallback_port"
+  fi
+  if [[ -z "$port" || ! "$port" =~ ^[0-9]+$ ]]; then
+    return 1
+  fi
+  echo "$port"
+}
+
+assert_port_free() {
+  local proto="$1"
+  local port="$2"
+  local label="$3"
+  if ! command -v ss >/dev/null 2>&1; then
+    return 0
+  fi
+  local ss_args
+  if [[ "$proto" == "tcp" ]]; then
+    ss_args="-H -ltn"
+  else
+    ss_args="-H -lun"
+  fi
+  local matches
+  matches="$(ss $ss_args | awk -v p=":$port" '$5 ~ p"$" || $5 ~ p"[^0-9]" { print }')"
+  if [[ -n "$matches" ]]; then
+    echo "preflight failed: ${label} port ${port}/${proto} already in use"
+    echo "$matches"
+    exit 1
+  fi
+}
+
 cleanup() {
   kill "${node_pid:-}" >/dev/null 2>&1 || true
   ip link delete "$CLIENT_IFACE" >/dev/null 2>&1 || true
@@ -131,6 +168,21 @@ CLIENT_WG_PUB="$(wg pubkey <"$CLIENT_KEY_FILE")"
 EXIT_WG_PUB="$(wg pubkey <"$EXIT_KEY_FILE")"
 
 rm -f "$LOG_FILE"
+
+assert_port_free tcp "$(addr_port "$DIRECTORY_ADDR")" "DIRECTORY_ADDR"
+assert_port_free tcp "$(addr_port "$ISSUER_ADDR")" "ISSUER_ADDR"
+assert_port_free tcp "$(addr_port "$ENTRY_ADDR")" "ENTRY_ADDR"
+assert_port_free tcp "$(addr_port "$EXIT_ADDR")" "EXIT_ADDR"
+assert_port_free udp "$(addr_port "$CLIENT_PROXY_ADDR")" "CLIENT_PROXY_ADDR"
+assert_port_free udp "$(addr_port "$ENTRY_DATA_ADDR")" "ENTRY_DATA_ADDR"
+assert_port_free udp "$(addr_port "$EXIT_DATA_ADDR")" "EXIT_DATA_ADDR"
+assert_port_free udp "$(addr_port "$EXIT_WG_PORT" "$EXIT_WG_PORT")" "EXIT_WG_PORT"
+if [[ -n "$EXIT_OPAQUE_SINK_ADDR" ]]; then
+  assert_port_free udp "$(addr_port "$EXIT_OPAQUE_SINK_ADDR")" "EXIT_OPAQUE_SINK_ADDR"
+fi
+if [[ -n "$EXIT_OPAQUE_SOURCE_ADDR" ]]; then
+  assert_port_free udp "$(addr_port "$EXIT_OPAQUE_SOURCE_ADDR")" "EXIT_OPAQUE_SOURCE_ADDR"
+fi
 
 DATA_PLANE_MODE=opaque \
 CLIENT_WG_BACKEND=command \
