@@ -582,6 +582,7 @@ CI and tests:
 - `./scripts/integration_revocation.sh` (issuer->exit revocation propagation check)
 - `./scripts/integration_easy_node_role_guard.sh` (easy-node authority-vs-provider role guard for invite commands)
 - `./scripts/integration_easy_node_client_profile_env.sh` (easy-node client profile env wiring guard: beta/prod demo presets keep expected hardening envs without forcing strict live-WG runtime flags)
+- `./scripts/integration_easy_node_prod_server_env.sh` (easy-node authority prod-profile wiring guard: signed admin auth enabled, token auth disabled, token cleared)
 - `./scripts/integration_prod_preflight_tools.sh` (easy-node prod preflight + admin signing rotate/status checks)
 - `./scripts/integration_federation.sh` (multi-directory quorum/vote integration check)
 - `./scripts/integration_operator_quorum.sh` (distinct-directory-operator quorum enforcement check)
