@@ -25,6 +25,7 @@ import (
 	"privacynode/pkg/crypto"
 	"privacynode/pkg/proto"
 	"privacynode/pkg/relay"
+	"privacynode/pkg/securehttp"
 	"privacynode/pkg/wg"
 )
 
@@ -100,6 +101,7 @@ type Client struct {
 	healthCache           map[string]healthProbeState
 	httpClient            *http.Client
 	betaStrict            bool
+	prodStrict            bool
 }
 
 type healthProbeState struct {
@@ -346,6 +348,7 @@ func NewClient() *Client {
 		startupSyncTimeoutSec = v
 	}
 	betaStrict := os.Getenv("BETA_STRICT_MODE") == "1" || os.Getenv("CLIENT_BETA_STRICT") == "1"
+	prodStrict := os.Getenv("PROD_STRICT_MODE") == "1" || os.Getenv("CLIENT_PROD_STRICT") == "1"
 	if startupSyncTimeoutSec <= 0 {
 		if betaStrict {
 			startupSyncTimeoutSec = 10
@@ -428,10 +431,17 @@ func NewClient() *Client {
 		healthCache:           make(map[string]healthProbeState),
 		httpClient:            &http.Client{Timeout: 5 * time.Second},
 		betaStrict:            betaStrict,
+		prodStrict:            prodStrict,
 	}
 }
 
 func (c *Client) Run(ctx context.Context) error {
+	httpClient, err := securehttp.NewClient(5 * time.Second)
+	if err != nil {
+		return fmt.Errorf("client http tls init: %w", err)
+	}
+	c.httpClient = httpClient
+
 	bootstrapInterval := c.bootstrapInterval
 	if bootstrapInterval <= 0 {
 		bootstrapInterval = 5 * time.Second
@@ -515,6 +525,11 @@ func (c *Client) Run(ctx context.Context) error {
 }
 
 func (c *Client) validateRuntimeConfig() error {
+	if securehttp.Enabled() {
+		if err := securehttp.Validate(); err != nil {
+			return fmt.Errorf("invalid mTLS config: %w", err)
+		}
+	}
 	if c.anonCred != "" && c.subject != "" {
 		return fmt.Errorf("CLIENT_ANON_CRED cannot be combined with CLIENT_SUBJECT")
 	}
@@ -598,6 +613,17 @@ func (c *Client) validateRuntimeConfig() error {
 			if c.directoryMinOperators < 2 {
 				return fmt.Errorf("BETA_STRICT_MODE requires CLIENT_DIRECTORY_MIN_OPERATORS>=2 when multiple DIRECTORY_URLS are configured")
 			}
+		}
+	}
+	if c.prodStrict {
+		if !c.betaStrict {
+			return fmt.Errorf("PROD_STRICT_MODE requires BETA_STRICT_MODE=1")
+		}
+		if !securehttp.Enabled() {
+			return fmt.Errorf("PROD_STRICT_MODE requires MTLS_ENABLE=1")
+		}
+		if c.trustTOFU {
+			return fmt.Errorf("PROD_STRICT_MODE requires DIRECTORY_TRUST_TOFU=0")
 		}
 	}
 	return nil

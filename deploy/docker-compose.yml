@@ -20,8 +20,15 @@ services:
       DIRECTORY_GOSSIP_FANOUT: "${DIRECTORY_GOSSIP_FANOUT:-2}"
       DIRECTORY_PRIVATE_KEY_FILE: "${DIRECTORY_PRIVATE_KEY_FILE:-/app/data/directory_ed25519.key}"
       DIRECTORY_PREVIOUS_PUBKEYS_FILE: "${DIRECTORY_PREVIOUS_PUBKEYS_FILE:-/app/data/directory_previous_pubkeys.txt}"
+      MTLS_ENABLE: "${MTLS_ENABLE:-0}"
+      MTLS_CERT_FILE: "${MTLS_DIRECTORY_CERT_FILE:-/app/tls/node.crt}"
+      MTLS_KEY_FILE: "${MTLS_DIRECTORY_KEY_FILE:-/app/tls/node.key}"
+      MTLS_CA_FILE: "${MTLS_CA_FILE:-/app/tls/ca.crt}"
+      MTLS_REQUIRE_CLIENT_CERT: "${MTLS_REQUIRE_CLIENT_CERT:-1}"
+      MTLS_MIN_VERSION: "${MTLS_MIN_VERSION:-1.3}"
     volumes:
       - ./data/directory:/app/data
+      - ./tls:/app/tls:ro
     ports:
       - "8081:8081"
     restart: unless-stopped
@@ -43,8 +50,15 @@ services:
       ISSUER_ANON_DISPUTES_FILE: "${ISSUER_ANON_DISPUTES_FILE:-/app/data/issuer_anon_disputes.json}"
       ISSUER_AUDIT_FILE: "${ISSUER_AUDIT_FILE:-/app/data/issuer_audit.json}"
       ISSUER_ADMIN_TOKEN: "${ISSUER_ADMIN_TOKEN:-change-me}"
+      MTLS_ENABLE: "${MTLS_ENABLE:-0}"
+      MTLS_CERT_FILE: "${MTLS_ISSUER_CERT_FILE:-/app/tls/node.crt}"
+      MTLS_KEY_FILE: "${MTLS_ISSUER_KEY_FILE:-/app/tls/node.key}"
+      MTLS_CA_FILE: "${MTLS_CA_FILE:-/app/tls/ca.crt}"
+      MTLS_REQUIRE_CLIENT_CERT: "${MTLS_REQUIRE_CLIENT_CERT:-1}"
+      MTLS_MIN_VERSION: "${MTLS_MIN_VERSION:-1.3}"
     volumes:
       - ./data/issuer:/app/data
+      - ./tls:/app/tls:ro
     ports:
       - "8082:8082"
     restart: unless-stopped
@@ -70,8 +84,15 @@ services:
       ENTRY_BAN_SEC: "45"
       EXIT_REVOCATION_REFRESH_SEC: "15"
       EXIT_ACCOUNTING_FILE: "/app/data/exit_accounting.json"
+      MTLS_ENABLE: "${MTLS_ENABLE:-0}"
+      MTLS_CERT_FILE: "${MTLS_ENTRY_EXIT_CERT_FILE:-/app/tls/node.crt}"
+      MTLS_KEY_FILE: "${MTLS_ENTRY_EXIT_KEY_FILE:-/app/tls/node.key}"
+      MTLS_CA_FILE: "${MTLS_CA_FILE:-/app/tls/ca.crt}"
+      MTLS_REQUIRE_CLIENT_CERT: "${MTLS_REQUIRE_CLIENT_CERT:-1}"
+      MTLS_MIN_VERSION: "${MTLS_MIN_VERSION:-1.3}"
     volumes:
       - ./data/entry-exit:/app/data
+      - ./tls:/app/tls:ro
     ports:
       - "8083:8083"
       - "8084:8084"
@@ -94,6 +115,13 @@ services:
       ENTRY_URL: "${CLIENT_ENTRY_URL:-http://entry-exit:8083}"
       EXIT_CONTROL_URL: "${CLIENT_EXIT_CONTROL_URL:-http://entry-exit:8084}"
       CLIENT_BOOTSTRAP_INTERVAL_SEC: "5"
+      MTLS_ENABLE: "${MTLS_ENABLE:-0}"
+      MTLS_CERT_FILE: "${MTLS_CLIENT_CERT_FILE:-/app/tls/client.crt}"
+      MTLS_KEY_FILE: "${MTLS_CLIENT_KEY_FILE:-/app/tls/client.key}"
+      MTLS_CA_FILE: "${MTLS_CA_FILE:-/app/tls/ca.crt}"
+      MTLS_MIN_VERSION: "${MTLS_MIN_VERSION:-1.3}"
     profiles:
       - demo
+    volumes:
+      - ./tls:/app/tls:ro
     restart: "no"

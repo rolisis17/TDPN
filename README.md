@@ -107,8 +107,8 @@ Simple installer + menu launcher (for easier testing):
 
 Launcher start screen now has 3 primary options:
 - `Connect as CLIENT (simple)` -> asks for server IP/bootstrap URL + invite key.
-- `Connect as SERVER (simple)` -> asks for server IP and optional peer IP, then starts invite-only beta defaults.
-- `Other options (tests/config)` -> machine tests, soak/pilot runbook, host config, invite key management.
+- `Connect as SERVER (simple, provider default)` -> asks for server IP and optional peer IP; starts provider mode by default and asks for explicit confirmation before enabling authority/admin mode. Supports optional `PROD` profile (mTLS + strict fail-closed settings).
+- `Other options (tests/config)` -> machine tests, soak/pilot runbook, host config, invite key management, and mTLS bootstrap/rotation.
 
 Windows 11 + WSL2 bootstrap:
 
@@ -135,6 +135,12 @@ Script-only easy mode:
 ./scripts/easy_node.sh invite-generate --count 3
 ./scripts/easy_node.sh invite-check --key <INVITE_KEY>
 ./scripts/easy_node.sh invite-disable --key <INVITE_KEY>
+
+# production-strict profile (HTTPS + mTLS + signed issuer-admin actions)
+./scripts/easy_node.sh server-up --mode authority --public-host <PUBLIC_IP_OR_DNS> --prod-profile 1
+./scripts/easy_node.sh bootstrap-mtls --out-dir deploy/tls --public-host <PUBLIC_IP_OR_DNS>
+./scripts/easy_node.sh invite-generate --count 3
+# (invite commands auto-use signed admin auth when prod profile is active)
 
 ./scripts/easy_node.sh client-test \
   --directory-urls http://<SERVER_IP>:8081 \
@@ -203,8 +209,14 @@ Script-only easy mode:
 ```
 
 `server-up` note:
+- `--mode authority` runs `directory + issuer + entry-exit` (admin-capable node).
+- `--mode provider` runs `directory + entry-exit` only and requires `--authority-directory` / `--authority-issuer` (no local issuer admin token).
+- admin invite commands (`invite-generate`, `invite-check`, `invite-disable`) are authority-only and are blocked on provider nodes.
 - if `--operator-id` / `--issuer-id` are omitted, unique IDs are auto-generated and persisted in `deploy/data/easy_node_identity.conf`.
 - directory/issuer signing key file names are derived from those IDs to avoid accidental key reuse across machines.
+- authority admin token is hidden in output by default; use `--show-admin-token 1` only when you explicitly need to view it.
+- `--prod-profile 1` forces strict fail-closed runtime (`BETA_STRICT_MODE=1`, `PROD_STRICT_MODE=1`), enables mTLS, and on authority nodes requires signed issuer-admin auth (`ISSUER_ADMIN_REQUIRE_SIGNED=1`, token admin auth disabled).
+- `invite-generate`, `invite-check`, and `invite-disable` support either token auth (`--admin-token`) or signed auth (`--admin-key-file` + `--admin-key-id`).
 
 3-machine test guide:
 - `docs/easy-3-machine-test.md`

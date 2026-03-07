@@ -17,8 +17,10 @@ import (
 	"sync"
 	"time"
 
+	"privacynode/pkg/adminauth"
 	"privacynode/pkg/crypto"
 	"privacynode/pkg/proto"
+	"privacynode/pkg/securehttp"
 )
 
 type Service struct {
@@ -40,10 +42,20 @@ type Service struct {
 	trustOperatorID     string
 	disputeDefaultTTL   time.Duration
 	adminToken          string
+	adminAllowToken     bool
+	adminAllowTokenSet  bool
+	adminRequireSigned  bool
+	adminSignedWindow   time.Duration
+	adminKeysFile       string
+	adminKeysInline     string
+	adminPubKeys        map[string]ed25519.PublicKey
+	adminSeenNonce      map[string]int64
+	adminAuthMu         sync.Mutex
 	clientAllowlistOnly bool
 	disableAnonCred     bool
 	anonCredExposeID    bool
 	betaStrict          bool
+	prodStrict          bool
 	mu                  sync.RWMutex
 	subjects            map[string]proto.SubjectProfile
 	subjectsFile        string
@@ -75,6 +87,18 @@ func New() *Service {
 	if adminToken == "" {
 		adminToken = "dev-admin-token"
 	}
+	adminAllowTokenRaw := strings.TrimSpace(os.Getenv("ISSUER_ADMIN_ALLOW_TOKEN"))
+	adminAllowToken := adminAllowTokenRaw != "0"
+	adminAllowTokenSet := adminAllowTokenRaw != ""
+	adminRequireSigned := os.Getenv("ISSUER_ADMIN_REQUIRE_SIGNED") == "1"
+	adminSignedWindow := 90 * time.Second
+	if v := strings.TrimSpace(os.Getenv("ISSUER_ADMIN_SIGNED_WINDOW_SEC")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			adminSignedWindow = time.Duration(n) * time.Second
+		}
+	}
+	adminKeysFile := strings.TrimSpace(os.Getenv("ISSUER_ADMIN_SIGNING_KEYS_FILE"))
+	adminKeysInline := strings.TrimSpace(os.Getenv("ISSUER_ADMIN_SIGNING_KEYS"))
 	subjectsFile := os.Getenv("ISSUER_SUBJECTS_FILE")
 	if subjectsFile == "" {
 		subjectsFile = "data/issuer_subjects.json"
@@ -166,6 +190,7 @@ func New() *Service {
 	clientAllowlistOnly := os.Getenv("ISSUER_CLIENT_ALLOWLIST_ONLY") == "1"
 	disableAnonCred := os.Getenv("ISSUER_ALLOW_ANON_CRED") == "0"
 	betaStrict := os.Getenv("BETA_STRICT_MODE") == "1" || os.Getenv("ISSUER_BETA_STRICT") == "1"
+	prodStrict := os.Getenv("PROD_STRICT_MODE") == "1" || os.Getenv("ISSUER_PROD_STRICT") == "1"
 	return &Service{
 		addr:                addr,
 		issuerID:            issuerID,
@@ -182,10 +207,19 @@ func New() *Service {
 		keyRotateSec:        keyRotateSec,
 		keyHistory:          keyHistory,
 		adminToken:          adminToken,
+		adminAllowToken:     adminAllowToken,
+		adminAllowTokenSet:  adminAllowTokenSet,
+		adminRequireSigned:  adminRequireSigned,
+		adminSignedWindow:   adminSignedWindow,
+		adminKeysFile:       adminKeysFile,
+		adminKeysInline:     adminKeysInline,
+		adminPubKeys:        make(map[string]ed25519.PublicKey),
+		adminSeenNonce:      make(map[string]int64),
 		clientAllowlistOnly: clientAllowlistOnly,
 		disableAnonCred:     disableAnonCred,
 		anonCredExposeID:    anonCredExposeID,
 		betaStrict:          betaStrict,
+		prodStrict:          prodStrict,
 		subjects:            make(map[string]proto.SubjectProfile),
 		subjectsFile:        subjectsFile,
 		revocations:         make(map[string]int64),
@@ -203,6 +237,9 @@ func New() *Service {
 }
 
 func (s *Service) Run(ctx context.Context) error {
+	if err := s.loadAdminSigningKeys(); err != nil {
+		return fmt.Errorf("issuer admin signing-key init: %w", err)
+	}
 	if err := s.validateRuntimeConfig(); err != nil {
 		return err
 	}
@@ -261,7 +298,7 @@ func (s *Service) Run(ctx context.Context) error {
 	errCh := make(chan error, 1)
 	go func() {
 		log.Printf("issuer listening on %s", s.addr)
-		errCh <- s.httpSrv.ListenAndServe()
+		errCh <- securehttp.ListenAndServe(s.httpSrv)
 	}()
 
 	var rotateTicker *time.Ticker
@@ -293,10 +330,25 @@ func (s *Service) Run(ctx context.Context) error {
 }
 
 func (s *Service) validateRuntimeConfig() error {
+	if securehttp.Enabled() {
+		if err := securehttp.Validate(); err != nil {
+			return fmt.Errorf("invalid mTLS config: %w", err)
+		}
+	}
+	adminTokenAuthEnabled := s.isAdminTokenAuthEnabled()
+	if !adminTokenAuthEnabled && !s.adminRequireSigned {
+		return fmt.Errorf("issuer admin auth misconfigured: no admin auth method enabled")
+	}
+	if s.adminRequireSigned && len(s.adminPubKeys) == 0 {
+		return fmt.Errorf("ISSUER_ADMIN_REQUIRE_SIGNED=1 requires admin signing keys")
+	}
 	if !s.betaStrict {
+		if s.prodStrict {
+			return fmt.Errorf("PROD_STRICT_MODE requires BETA_STRICT_MODE=1")
+		}
 		return nil
 	}
-	if strings.TrimSpace(s.adminToken) == "" || s.adminToken == "dev-admin-token" {
+	if adminTokenAuthEnabled && (strings.TrimSpace(s.adminToken) == "" || s.adminToken == "dev-admin-token") {
 		return fmt.Errorf("BETA_STRICT_MODE requires non-default ISSUER_ADMIN_TOKEN")
 	}
 	if s.keyRotateSec <= 0 {
@@ -307,6 +359,17 @@ func (s *Service) validateRuntimeConfig() error {
 	}
 	if s.anonCredExposeID {
 		return fmt.Errorf("BETA_STRICT_MODE requires ISSUER_ANON_CRED_EXPOSE_ID=0")
+	}
+	if s.prodStrict {
+		if !securehttp.Enabled() {
+			return fmt.Errorf("PROD_STRICT_MODE requires MTLS_ENABLE=1")
+		}
+		if !s.adminRequireSigned {
+			return fmt.Errorf("PROD_STRICT_MODE requires ISSUER_ADMIN_REQUIRE_SIGNED=1")
+		}
+		if adminTokenAuthEnabled {
+			return fmt.Errorf("PROD_STRICT_MODE requires ISSUER_ADMIN_ALLOW_TOKEN=0")
+		}
 	}
 	return nil
 }
@@ -1271,11 +1334,148 @@ func (s *Service) handleRelayTrust(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) requireAdmin(w http.ResponseWriter, r *http.Request) bool {
-	if r.Header.Get("X-Admin-Token") != s.adminToken {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	adminTokenAuthEnabled := s.isAdminTokenAuthEnabled()
+	if s.adminRequireSigned {
+		if err := s.verifySignedAdminRequest(r); err == nil {
+			return true
+		}
+		if !adminTokenAuthEnabled {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return false
+		}
+	}
+	if adminTokenAuthEnabled && strings.TrimSpace(r.Header.Get("X-Admin-Token")) == s.adminToken {
+		return true
+	}
+	http.Error(w, "unauthorized", http.StatusUnauthorized)
+	return false
+}
+
+func (s *Service) isAdminTokenAuthEnabled() bool {
+	if s.adminAllowToken {
+		return true
+	}
+	if s.adminRequireSigned {
 		return false
 	}
-	return true
+	if s.adminAllowTokenSet {
+		return false
+	}
+	return strings.TrimSpace(s.adminToken) != ""
+}
+
+func (s *Service) verifySignedAdminRequest(r *http.Request) error {
+	keyID, ts, nonce, sig, err := adminauth.ParseAdminHeaders(r)
+	if err != nil {
+		return err
+	}
+	if s.adminSignedWindow <= 0 {
+		return fmt.Errorf("admin signed window disabled")
+	}
+	now := time.Now().Unix()
+	windowSec := int64(s.adminSignedWindow / time.Second)
+	if windowSec <= 0 {
+		windowSec = 1
+	}
+	if ts < now-windowSec || ts > now+windowSec {
+		return fmt.Errorf("admin signature timestamp outside allowed window")
+	}
+	body, err := adminauth.ReadBodyPreserve(r)
+	if err != nil {
+		return fmt.Errorf("read body: %w", err)
+	}
+	pub, ok := s.adminPubKeys[keyID]
+	if !ok {
+		return fmt.Errorf("unknown admin key id")
+	}
+	if err := adminauth.Verify(pub, sig, r.Method, adminauth.PathWithQuery(r.URL), body, ts, nonce); err != nil {
+		return err
+	}
+	if err := s.claimAdminNonce(keyID, nonce, now, windowSec); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Service) claimAdminNonce(keyID string, nonce string, now int64, windowSec int64) error {
+	nonceKey := keyID + "|" + strings.TrimSpace(nonce)
+	expireAt := now + windowSec
+	cutoff := now - windowSec
+
+	s.adminAuthMu.Lock()
+	defer s.adminAuthMu.Unlock()
+	for k, v := range s.adminSeenNonce {
+		if v <= cutoff {
+			delete(s.adminSeenNonce, k)
+		}
+	}
+	if exp, ok := s.adminSeenNonce[nonceKey]; ok && exp > cutoff {
+		return fmt.Errorf("replayed admin nonce")
+	}
+	s.adminSeenNonce[nonceKey] = expireAt
+	return nil
+}
+
+func (s *Service) loadAdminSigningKeys() error {
+	keys := make(map[string]ed25519.PublicKey)
+	addKey := func(kid string, pubRaw string) error {
+		kid = strings.TrimSpace(kid)
+		if kid == "" {
+			return fmt.Errorf("missing key id")
+		}
+		pub, err := adminauth.ParsePublicKey(pubRaw)
+		if err != nil {
+			return fmt.Errorf("invalid admin key %s: %w", kid, err)
+		}
+		keys[kid] = pub
+		return nil
+	}
+
+	parseLine := func(line string) error {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			return nil
+		}
+		var kid, pub string
+		if strings.Contains(line, "=") {
+			parts := strings.SplitN(line, "=", 2)
+			kid = strings.TrimSpace(parts[0])
+			pub = strings.TrimSpace(parts[1])
+		} else if strings.Contains(line, ":") {
+			parts := strings.SplitN(line, ":", 2)
+			kid = strings.TrimSpace(parts[0])
+			pub = strings.TrimSpace(parts[1])
+		} else {
+			fields := strings.Fields(line)
+			if len(fields) != 2 {
+				return fmt.Errorf("invalid admin key line: %q", line)
+			}
+			kid = fields[0]
+			pub = fields[1]
+		}
+		return addKey(kid, pub)
+	}
+
+	if raw := strings.TrimSpace(s.adminKeysInline); raw != "" {
+		for _, item := range strings.Split(raw, ",") {
+			if err := parseLine(item); err != nil {
+				return err
+			}
+		}
+	}
+	if path := strings.TrimSpace(s.adminKeysFile); path != "" {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("read admin signing key file: %w", err)
+		}
+		for _, line := range strings.Split(string(b), "\n") {
+			if err := parseLine(line); err != nil {
+				return err
+			}
+		}
+	}
+	s.adminPubKeys = keys
+	return nil
 }
 
 func (s *Service) verifyAnonymousCredential(credential string, nowUnix int64) (anonymousCredentialClaims, error) {

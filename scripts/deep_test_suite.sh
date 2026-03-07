@@ -22,6 +22,9 @@ echo "[deep] token proof replay"
 echo "[deep] provider api"
 ./scripts/integration_provider_api.sh
 
+echo "[deep] easy-node role guard"
+./scripts/integration_easy_node_role_guard.sh
+
 echo "[deep] directory key rotation"
 ./scripts/integration_directory_key_rotation.sh
 

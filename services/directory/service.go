@@ -22,6 +22,7 @@ import (
 
 	"privacynode/pkg/crypto"
 	"privacynode/pkg/proto"
+	"privacynode/pkg/securehttp"
 )
 
 type Service struct {
@@ -109,6 +110,7 @@ type Service struct {
 	peerTrustTOFU            bool
 	peerTrustFile            string
 	betaStrict               bool
+	prodStrict               bool
 	peerTrustMu              sync.Mutex
 	syncStatusMu             sync.RWMutex
 	peerSyncStatus           proto.DirectorySyncRunStatus
@@ -372,6 +374,7 @@ func New() *Service {
 		peerTrustFile = "data/directory_peer_trusted_keys.txt"
 	}
 	betaStrict := os.Getenv("BETA_STRICT_MODE") == "1" || os.Getenv("DIRECTORY_BETA_STRICT") == "1"
+	prodStrict := os.Getenv("PROD_STRICT_MODE") == "1" || os.Getenv("DIRECTORY_PROD_STRICT") == "1"
 	if betaStrict {
 		providerSplitRoles = true
 	}
@@ -476,6 +479,7 @@ func New() *Service {
 		peerTrustTOFU:            peerTrustTOFU,
 		peerTrustFile:            peerTrustFile,
 		betaStrict:               betaStrict,
+		prodStrict:               prodStrict,
 		httpClient:               &http.Client{Timeout: 5 * time.Second},
 		privateKeyPath:           privateKeyPath,
 		keyRotateEvery:           keyRotateEvery,
@@ -485,6 +489,12 @@ func New() *Service {
 }
 
 func (s *Service) Run(ctx context.Context) error {
+	httpClient, err := securehttp.NewClient(5 * time.Second)
+	if err != nil {
+		return fmt.Errorf("directory http tls init: %w", err)
+	}
+	s.httpClient = httpClient
+
 	if err := s.validateRuntimeConfig(); err != nil {
 		return err
 	}
@@ -522,7 +532,7 @@ func (s *Service) Run(ctx context.Context) error {
 	errCh := make(chan error, 1)
 	go func() {
 		log.Printf("directory listening on %s", s.addr)
-		errCh <- s.server.ListenAndServe()
+		errCh <- securehttp.ListenAndServe(s.server)
 	}()
 	if len(s.peerURLs) > 0 || len(s.issuerTrustURLs) > 0 {
 		go s.runPeerSync(ctx)
@@ -546,7 +556,15 @@ func (s *Service) Run(ctx context.Context) error {
 }
 
 func (s *Service) validateRuntimeConfig() error {
+	if securehttp.Enabled() {
+		if err := securehttp.Validate(); err != nil {
+			return fmt.Errorf("invalid mTLS config: %w", err)
+		}
+	}
 	if !s.betaStrict {
+		if s.prodStrict {
+			return fmt.Errorf("PROD_STRICT_MODE requires BETA_STRICT_MODE=1")
+		}
 		return nil
 	}
 	if !s.peerDiscoveryEnabled {
@@ -602,6 +620,14 @@ func (s *Service) validateRuntimeConfig() error {
 	}
 	if s.keyRotateEvery <= 0 {
 		return fmt.Errorf("BETA_STRICT_MODE requires DIRECTORY_KEY_ROTATE_SEC>0")
+	}
+	if s.prodStrict {
+		if !securehttp.Enabled() {
+			return fmt.Errorf("PROD_STRICT_MODE requires MTLS_ENABLE=1")
+		}
+		if s.peerTrustTOFU {
+			return fmt.Errorf("PROD_STRICT_MODE requires DIRECTORY_PEER_TRUST_TOFU=0")
+		}
 	}
 	return nil
 }

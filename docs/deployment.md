@@ -62,7 +62,19 @@ Run interactive menu:
 Quick non-interactive examples:
 
 ```bash
-./scripts/easy_node.sh server-up --public-host <PUBLIC_IP_OR_DNS> --beta-profile
+# authority/admin node (runs directory + issuer + entry + exit)
+./scripts/easy_node.sh server-up --mode authority --public-host <PUBLIC_IP_OR_DNS> --beta-profile
+
+# authority/admin node with strict production profile (mTLS + signed admin auth)
+./scripts/easy_node.sh server-up --mode authority --public-host <PUBLIC_IP_OR_DNS> --prod-profile 1
+
+# provider node (runs directory + entry + exit, no local issuer admin)
+./scripts/easy_node.sh server-up --mode provider \
+  --public-host <PROVIDER_IP_OR_DNS> \
+  --authority-directory http://<AUTHORITY_IP_OR_DNS>:8081 \
+  --authority-issuer http://<AUTHORITY_IP_OR_DNS>:8082 \
+  --beta-profile
+
 ./scripts/easy_node.sh client-test \
   --directory-urls http://<SERVER_IP>:8081 \
   --issuer-url http://<SERVER_IP>:8082 \
@@ -122,6 +134,11 @@ Invite-only beta option:
 - batch onboarding: `./scripts/beta_subject_batch_upsert.sh --issuer-url <ISSUER_URL> --admin-token <TOKEN> --csv invited_clients.csv`.
 - pass `--subject <CLIENT_ID>` to `client-test`/`machine-c-test` for invited users.
 - one-command validation+soak bundle from machine C: `./scripts/beta_pilot_runbook.sh ...` (outputs `.tar.gz` report bundle under `.easy-node-logs`).
+
+Prod strict additions:
+- bootstrap certs: `./scripts/easy_node.sh bootstrap-mtls --out-dir deploy/tls --public-host <PUBLIC_IP_OR_DNS>`.
+- run `server-up --prod-profile 1` to enforce fail-closed strict defaults (`PROD_STRICT_MODE=1`) on top of beta strict.
+- authority invite/admin commands auto-switch to signed auth in prod profile; they also support explicit signed credentials (`--admin-key-file`, `--admin-key-id`).
 
 For a full 3-machine flow, see `docs/easy-3-machine-test.md`.
 For a frozen closed-beta command set, see `docs/beta-playbook.md`.
@@ -229,3 +246,4 @@ Before exposing anything public:
 43. For strict runtime guardrails across roles, run `./scripts/integration_beta_strict_roles.sh` and verify client/entry/exit/issuer fail closed on weak config and entry/issuer boot when strict prerequisites are met.
 44. For strict live WireGuard-mode behavior (non-privileged shim path), run `./scripts/integration_live_wg_full_path_strict.sh` and verify strict startup signals plus end-to-end plausible WireGuard packet forwarding/drop behavior.
 45. Run `./scripts/integration_beta_fault_matrix.sh` to validate startup-race and sync-loss recovery paths in one pass before external beta tests.
+46. Run `./scripts/integration_easy_node_role_guard.sh` to verify provider nodes are blocked from invite/admin actions while authority nodes are allowed past the role gate.

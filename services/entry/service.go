@@ -23,6 +23,7 @@ import (
 	nodecrypto "privacynode/pkg/crypto"
 	"privacynode/pkg/proto"
 	"privacynode/pkg/relay"
+	"privacynode/pkg/securehttp"
 )
 
 type sessionState struct {
@@ -51,6 +52,7 @@ type Service struct {
 	dataAddr              string
 	liveWGMode            bool
 	betaStrict            bool
+	prodStrict            bool
 	operatorID            string
 	requireDistinctExitOp bool
 	exitControlURL        string
@@ -146,6 +148,7 @@ func New() *Service {
 	}
 	liveWGMode := os.Getenv("ENTRY_LIVE_WG_MODE") == "1"
 	betaStrict := os.Getenv("BETA_STRICT_MODE") == "1" || os.Getenv("ENTRY_BETA_STRICT") == "1"
+	prodStrict := os.Getenv("PROD_STRICT_MODE") == "1" || os.Getenv("ENTRY_PROD_STRICT") == "1"
 	operatorID := strings.TrimSpace(os.Getenv("ENTRY_OPERATOR_ID"))
 	if operatorID == "" {
 		operatorID = strings.TrimSpace(os.Getenv("DIRECTORY_OPERATOR_ID"))
@@ -190,6 +193,7 @@ func New() *Service {
 		dataAddr:              dataAddr,
 		liveWGMode:            liveWGMode,
 		betaStrict:            betaStrict,
+		prodStrict:            prodStrict,
 		operatorID:            operatorID,
 		requireDistinctExitOp: requireDistinctExitOp,
 		exitControlURL:        exitControlURL,
@@ -221,6 +225,12 @@ func New() *Service {
 }
 
 func (s *Service) Run(ctx context.Context) error {
+	httpClient, err := securehttp.NewClient(5 * time.Second)
+	if err != nil {
+		return fmt.Errorf("entry http tls init: %w", err)
+	}
+	s.httpClient = httpClient
+
 	if err := s.validateRuntimeConfig(); err != nil {
 		return err
 	}
@@ -236,7 +246,7 @@ func (s *Service) Run(ctx context.Context) error {
 	errCh := make(chan error, 2)
 	go func() {
 		log.Printf("entry listening on %s", s.addr)
-		errCh <- s.httpSrv.ListenAndServe()
+		errCh <- securehttp.ListenAndServe(s.httpSrv)
 	}()
 
 	if err := s.startUDP(ctx, errCh); err != nil {
@@ -261,6 +271,11 @@ func (s *Service) Run(ctx context.Context) error {
 }
 
 func (s *Service) validateRuntimeConfig() error {
+	if securehttp.Enabled() {
+		if err := securehttp.Validate(); err != nil {
+			return fmt.Errorf("invalid mTLS config: %w", err)
+		}
+	}
 	if s.requireDistinctExitOp && strings.TrimSpace(s.operatorID) == "" {
 		return fmt.Errorf("ENTRY_REQUIRE_DISTINCT_EXIT_OPERATOR=1 requires ENTRY_OPERATOR_ID or DIRECTORY_OPERATOR_ID")
 	}
@@ -281,6 +296,17 @@ func (s *Service) validateRuntimeConfig() error {
 			if s.directoryMinOperators < 2 {
 				return fmt.Errorf("BETA_STRICT_MODE requires ENTRY_DIRECTORY_MIN_OPERATORS>=2 when multiple DIRECTORY_URLS are configured")
 			}
+		}
+	}
+	if s.prodStrict {
+		if !s.betaStrict {
+			return fmt.Errorf("PROD_STRICT_MODE requires BETA_STRICT_MODE=1")
+		}
+		if !securehttp.Enabled() {
+			return fmt.Errorf("PROD_STRICT_MODE requires MTLS_ENABLE=1")
+		}
+		if s.directoryTrustTOFU {
+			return fmt.Errorf("PROD_STRICT_MODE requires ENTRY_DIRECTORY_TRUST_TOFU=0")
 		}
 	}
 	return nil

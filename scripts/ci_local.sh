@@ -40,6 +40,9 @@ echo "[ci] token-proof replay integration"
 echo "[ci] provider api integration"
 ./scripts/integration_provider_api.sh
 
+echo "[ci] easy-node role guard integration"
+./scripts/integration_easy_node_role_guard.sh
+
 echo "[ci] federation integration"
 ./scripts/integration_federation.sh
 

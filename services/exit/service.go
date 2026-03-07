@@ -23,6 +23,7 @@ import (
 	"privacynode/pkg/policy"
 	"privacynode/pkg/proto"
 	"privacynode/pkg/relay"
+	"privacynode/pkg/securehttp"
 	"privacynode/pkg/wg"
 )
 
@@ -81,6 +82,7 @@ type Service struct {
 	accountingFlushSec    int
 	startupSyncTimeout    time.Duration
 	betaStrict            bool
+	prodStrict            bool
 	enforcer              *policy.Enforcer
 	httpClient            *http.Client
 	httpSrv               *http.Server
@@ -288,6 +290,7 @@ func New() *Service {
 		}
 	}
 	betaStrict := os.Getenv("BETA_STRICT_MODE") == "1" || os.Getenv("EXIT_BETA_STRICT") == "1"
+	prodStrict := os.Getenv("PROD_STRICT_MODE") == "1" || os.Getenv("EXIT_PROD_STRICT") == "1"
 	rawIssuerRequireID := strings.TrimSpace(os.Getenv("EXIT_ISSUER_REQUIRE_ID"))
 	issuerRequireID := rawIssuerRequireID == "1"
 	if rawIssuerRequireID == "" && betaStrict && len(issuerURLs) > 1 {
@@ -341,6 +344,7 @@ func New() *Service {
 		accountingFlushSec:    accountingFlushSec,
 		startupSyncTimeout:    startupSyncTimeout,
 		betaStrict:            betaStrict,
+		prodStrict:            prodStrict,
 		enforcer:              policy.NewEnforcer(),
 		httpClient:            &http.Client{Timeout: 5 * time.Second},
 		issuerPubs:            make(map[string]ed25519.PublicKey),
@@ -356,6 +360,12 @@ func New() *Service {
 }
 
 func (s *Service) Run(ctx context.Context) error {
+	httpClient, err := securehttp.NewClient(5 * time.Second)
+	if err != nil {
+		return fmt.Errorf("exit http tls init: %w", err)
+	}
+	s.httpClient = httpClient
+
 	log.Printf("exit wg backend=%s iface=%s listen_port=%d kernel_proxy=%t kernel_proxy_max_sessions=%d kernel_proxy_idle_sec=%d opaque_echo=%t token_proof_replay_guard=%t peer_rebind_sec=%d startup_sync_timeout_sec=%d issuer_min_sources=%d issuer_min_operators=%d issuer_require_id=%t beta_strict=%t",
 		s.wgBackend, s.wgInterface, s.wgListenPort, s.wgKernelProxy, s.effectiveWGKernelProxyMax(), int(s.wgKernelProxyIdle/time.Second), s.opaqueEcho, s.tokenProofReplayGuard, int(s.peerRebindAfter/time.Second), int(s.startupSyncTimeout/time.Second), s.issuerMinSources, s.issuerMinOperators, s.issuerRequireID, s.betaStrict)
 	if err := s.validateRuntimeConfig(); err != nil {
@@ -409,7 +419,7 @@ func (s *Service) Run(ctx context.Context) error {
 	errCh := make(chan error, 2)
 	go func() {
 		log.Printf("exit listening on %s", s.addr)
-		errCh <- s.httpSrv.ListenAndServe()
+		errCh <- securehttp.ListenAndServe(s.httpSrv)
 	}()
 
 	if err := s.startUDP(ctx, errCh); err != nil {
@@ -476,6 +486,11 @@ func (s *Service) Run(ctx context.Context) error {
 }
 
 func (s *Service) validateRuntimeConfig() error {
+	if securehttp.Enabled() {
+		if err := securehttp.Validate(); err != nil {
+			return fmt.Errorf("invalid mTLS config: %w", err)
+		}
+	}
 	if s.startupSyncTimeout < 0 {
 		return fmt.Errorf("EXIT_STARTUP_SYNC_TIMEOUT_SEC must be >=0")
 	}
@@ -578,6 +593,26 @@ func (s *Service) validateRuntimeConfig() error {
 			if !s.issuerRequireID {
 				return fmt.Errorf("BETA_STRICT_MODE requires EXIT_ISSUER_REQUIRE_ID=1 when multiple ISSUER_URLS are configured")
 			}
+		}
+	}
+	if s.prodStrict {
+		if !s.betaStrict {
+			return fmt.Errorf("PROD_STRICT_MODE requires BETA_STRICT_MODE=1")
+		}
+		if !securehttp.Enabled() {
+			return fmt.Errorf("PROD_STRICT_MODE requires MTLS_ENABLE=1")
+		}
+		if len(s.issuerURLs) < 2 {
+			return fmt.Errorf("PROD_STRICT_MODE requires at least 2 ISSUER_URLS")
+		}
+		if s.issuerMinSources < 2 {
+			return fmt.Errorf("PROD_STRICT_MODE requires EXIT_ISSUER_MIN_SOURCES>=2")
+		}
+		if s.issuerMinOperators < 2 {
+			return fmt.Errorf("PROD_STRICT_MODE requires EXIT_ISSUER_MIN_OPERATORS>=2")
+		}
+		if !s.issuerRequireID {
+			return fmt.Errorf("PROD_STRICT_MODE requires EXIT_ISSUER_REQUIRE_ID=1")
 		}
 	}
 	return nil

@@ -130,6 +130,28 @@ std::string hostsConfigPath(const std::string &root) {
   return (std::filesystem::path(root) / "data" / "easy_mode_hosts.conf").string();
 }
 
+std::string serverModePath(const std::string &root) {
+  return (std::filesystem::path(root) / "deploy" / "data" / "easy_node_server_mode.conf").string();
+}
+
+std::string loadServerMode(const std::string &root) {
+  std::ifstream in(serverModePath(root));
+  if (!in.is_open()) {
+    return "";
+  }
+  std::string line;
+  while (std::getline(in, line)) {
+    line = trim(line);
+    if (line.empty() || line[0] == '#') {
+      continue;
+    }
+    if (line.rfind("EASY_NODE_SERVER_MODE=", 0) == 0) {
+      return trim(line.substr(std::string("EASY_NODE_SERVER_MODE=").size()));
+    }
+  }
+  return "";
+}
+
 std::string stripSchemeAndPath(const std::string &raw) {
   std::string v = trim(raw);
   if (v.empty()) {
@@ -561,6 +583,7 @@ void quickClientConnect(const std::string &script, ABHosts &hosts) {
   std::string inviteKey = trim(readLine("Invite key", ""));
   std::string timeoutSec = readLine("Connection timeout sec", "45");
   std::string discoveryWait = readLine("Discovery wait sec", "12");
+  bool prodProfile = parseYesNo(readLine("Use PROD profile (mTLS + strict fail-closed)? (y/N)", "n"), false);
   if (bootstrapDir.empty()) {
     std::cout << "server IP/host is required\n";
     return;
@@ -577,6 +600,7 @@ void quickClientConnect(const std::string &script, ABHosts &hosts) {
       << " --min-sources 1"
       << " --timeout-sec " << shellEscape(timeoutSec)
       << " --beta-profile 1"
+      << " --prod-profile " << (prodProfile ? "1" : "0")
       << " --distinct-operators 1";
   runCommand(cmd.str());
 }
@@ -584,6 +608,14 @@ void quickClientConnect(const std::string &script, ABHosts &hosts) {
 void quickServerConnect(const std::string &root, const std::string &script, ABHosts &hosts) {
   std::string hostDefault = !hosts.aHost.empty() ? hosts.aHost : (!hosts.bHost.empty() ? hosts.bHost : "");
   std::string host = normalizePublicHostInput(readLine("Public host/IP for this server", hostDefault));
+  bool authorityMode = parseYesNo(readLine("Is this your AUTHORITY admin machine? (y/N)", "n"), false);
+  if (authorityMode) {
+    bool confirmAuthority = parseYesNo(readLine("Authority mode can create/disable invite keys. Continue? (y/N)", "n"), false);
+    if (!confirmAuthority) {
+      authorityMode = false;
+      std::cout << "using provider mode\n";
+    }
+  }
   std::string peerDefault = "";
   if (!host.empty() && host == hosts.aHost && !hosts.bHost.empty()) {
     peerDefault = hosts.bHost;
@@ -595,15 +627,39 @@ void quickServerConnect(const std::string &root, const std::string &script, ABHo
     std::cout << "public host/IP is required\n";
     return;
   }
+  bool prodProfile = parseYesNo(readLine("Enable PROD profile (mTLS + strict fail-closed)? (y/N)", "n"), false);
 
   std::ostringstream cmd;
   cmd << shellEscape(script) << " server-up"
+      << " --mode " << (authorityMode ? "authority" : "provider")
       << " --public-host " << shellEscape(host)
-      << " --client-allowlist 1"
-      << " --allow-anon-cred 0"
-      << " --beta-profile 1";
-  if (!peerHost.empty()) {
-    cmd << " --peer-directories " << shellEscape(endpointFromHost(peerHost, 8081));
+      << " --beta-profile 1"
+      << " --prod-profile " << (prodProfile ? "1" : "0");
+  if (authorityMode) {
+    cmd << " --client-allowlist 1"
+        << " --allow-anon-cred 0";
+    if (!peerHost.empty()) {
+      cmd << " --peer-directories " << shellEscape(endpointFromHost(peerHost, 8081));
+    }
+  } else {
+    std::string authorityDirDefault = !peerHost.empty() ? endpointFromHost(peerHost, 8081) : "";
+    std::string authorityDir = normalizeEndpointURL(readLine("Authority directory URL", authorityDirDefault), 8081);
+    std::string authorityIssuerDefault = "";
+    if (!authorityDir.empty()) {
+      std::string authorityHost = normalizePublicHostInput(authorityDir);
+      authorityHost = stripSchemeAndPath(authorityHost);
+      if (!authorityHost.empty()) {
+        authorityIssuerDefault = endpointFromHost(normalizePublicHostInput(authorityHost), 8082);
+      }
+    }
+    std::string authorityIssuer = normalizeEndpointURL(readLine("Authority issuer URL", authorityIssuerDefault), 8082);
+    if (authorityDir.empty() || authorityIssuer.empty()) {
+      std::cout << "authority directory and issuer URLs are required for provider mode\n";
+      return;
+    }
+    cmd << " --authority-directory " << shellEscape(authorityDir)
+        << " --authority-issuer " << shellEscape(authorityIssuer)
+        << " --peer-directories " << shellEscape(authorityDir);
   }
   int rc = runCommand(cmd.str());
 
@@ -612,22 +668,27 @@ void quickServerConnect(const std::string &root, const std::string &script, ABHo
     configureABHostsInteractive(root, hosts, true);
   }
 
-  if (rc == 0) {
+  if (rc == 0 && authorityMode) {
     bool genInvite = parseYesNo(readLine("Generate invite key now? (Y/n)", "y"), true);
     if (genInvite) {
       std::string count = readLine("How many invite keys", "1");
       std::ostringstream inviteCmd;
       inviteCmd << shellEscape(script) << " invite-generate"
-                << " --count " << shellEscape(count)
-                << " --issuer-url " << shellEscape("http://127.0.0.1:8082");
+                << " --count " << shellEscape(count);
       runCommand(inviteCmd.str());
     }
+  } else if (rc == 0) {
+    std::cout << "provider mode started (no local admin/invite controls)\n";
   }
 }
 
 void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts &hosts) {
   for (;;) {
+    std::string serverMode = loadServerMode(root);
     std::cout << "\nAdvanced options:\n";
+    if (serverMode == "authority" || serverMode == "provider") {
+      std::cout << "Active server mode: " << serverMode << "\n";
+    }
     std::cout << "1) Check dependencies\n";
     std::cout << "2) Install Ubuntu dependencies\n";
     std::cout << "3) Server status\n";
@@ -643,6 +704,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
     std::cout << "13) Run automated tests\n";
     std::cout << "14) Configure machine A/B hosts\n";
     std::cout << "15) Show 3-machine test guide\n";
+    std::cout << "16) Bootstrap/rotate mTLS certs\n";
     std::cout << "0) Back\n";
     std::cout << "Selection: ";
 
@@ -689,6 +751,10 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       continue;
     }
     if (choice == "7") {
+      if (serverMode != "authority") {
+        std::cout << "invite key management is authority-only. Start server in authority mode on your admin machine.\n";
+        continue;
+      }
       std::string count = readLine("How many keys", "1");
       std::string prefix = readLine("Key prefix", "inv");
       std::string tier = readLine("Tier (1/2/3)", "1");
@@ -709,6 +775,10 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       continue;
     }
     if (choice == "8") {
+      if (serverMode != "authority") {
+        std::cout << "invite key management is authority-only. Start server in authority mode on your admin machine.\n";
+        continue;
+      }
       std::string key = trim(readLine("Invite key", ""));
       std::string issuer = normalizeEndpointURL(readLine("Issuer URL (optional)", ""), 8082);
       std::string adminToken = trim(readLine("Admin token (optional; blank=read from server env)", ""));
@@ -729,6 +799,10 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       continue;
     }
     if (choice == "9") {
+      if (serverMode != "authority") {
+        std::cout << "invite key management is authority-only. Start server in authority mode on your admin machine.\n";
+        continue;
+      }
       std::string key = trim(readLine("Invite key to disable", ""));
       std::string issuer = normalizeEndpointURL(readLine("Issuer URL (optional)", ""), 8082);
       std::string adminToken = trim(readLine("Admin token (optional; blank=read from server env)", ""));
@@ -960,6 +1034,22 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       showThreeMachineGuide();
       continue;
     }
+    if (choice == "16") {
+      std::string outDir = readLine("TLS output dir", "deploy/tls");
+      std::string publicHost = normalizePublicHostInput(readLine("Primary public host/IP (optional)", ""));
+      std::string rotateLeaf = parseYesNo(readLine("Rotate leaf certs? (y/N)", "n"), false) ? "1" : "0";
+      std::string rotateCA = parseYesNo(readLine("Rotate CA cert/key? (y/N)", "n"), false) ? "1" : "0";
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " bootstrap-mtls"
+          << " --out-dir " << shellEscape(outDir)
+          << " --rotate-leaf " << shellEscape(rotateLeaf)
+          << " --rotate-ca " << shellEscape(rotateCA);
+      if (!publicHost.empty()) {
+        cmd << " --public-host " << shellEscape(publicHost);
+      }
+      runCommand(cmd.str());
+      continue;
+    }
 
     std::cout << "invalid selection\n";
   }
@@ -989,7 +1079,7 @@ int main() {
   for (;;) {
     std::cout << "\nMain menu:\n";
     std::cout << "1) Connect as CLIENT (simple)\n";
-    std::cout << "2) Connect as SERVER (simple)\n";
+    std::cout << "2) Connect as SERVER (simple, provider default)\n";
     std::cout << "3) Other options (tests/config)\n";
     std::cout << "0) Exit\n";
     std::cout << "Selection: ";

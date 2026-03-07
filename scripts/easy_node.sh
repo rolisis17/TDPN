@@ -3,7 +3,10 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEPLOY_DIR="$ROOT_DIR/deploy"
-SERVER_ENV_FILE="$DEPLOY_DIR/.env.easy.server"
+AUTHORITY_ENV_FILE="$DEPLOY_DIR/.env.easy.server"
+PROVIDER_ENV_FILE="$DEPLOY_DIR/.env.easy.provider"
+# Backward-compatible alias for older helpers that expect SERVER_ENV_FILE.
+SERVER_ENV_FILE="$AUTHORITY_ENV_FILE"
 CLIENT_ENV_FILE="$DEPLOY_DIR/.env.easy.client"
 
 default_log_dir() {
@@ -21,26 +24,29 @@ usage() {
   cat <<'USAGE'
 Usage:
   ./scripts/easy_node.sh check
-  ./scripts/easy_node.sh server-up [--public-host HOST] [--operator-id ID] [--issuer-id ID] [--issuer-admin-token TOKEN] [--peer-directories URLS] [--bootstrap-directory URL] [--client-allowlist [0|1]] [--allow-anon-cred [0|1]] [--beta-profile [0|1]]
+  ./scripts/easy_node.sh server-up [--mode authority|provider] [--public-host HOST] [--operator-id ID] [--issuer-id ID] [--issuer-admin-token TOKEN] [--authority-directory URL] [--authority-issuer URL] [--peer-directories URLS] [--bootstrap-directory URL] [--client-allowlist [0|1]] [--allow-anon-cred [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]] [--show-admin-token [0|1]]
   ./scripts/easy_node.sh server-status
   ./scripts/easy_node.sh server-logs
   ./scripts/easy_node.sh server-down
   ./scripts/easy_node.sh stop-all
   ./scripts/easy_node.sh install-deps-ubuntu
-  ./scripts/easy_node.sh client-test [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--exit-country CC] [--exit-region REGION] [--timeout-sec N] [--distinct-operators [0|1]] [--min-selection-lines N] [--min-entry-operators N] [--min-exit-operators N] [--require-cross-operator-pair [0|1]] [--beta-profile [0|1]]
+  ./scripts/easy_node.sh client-test [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--exit-country CC] [--exit-region REGION] [--timeout-sec N] [--distinct-operators [0|1]] [--min-selection-lines N] [--min-entry-operators N] [--min-exit-operators N] [--require-cross-operator-pair [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]]
   ./scripts/easy_node.sh three-machine-validate [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-a-url URL] [--issuer-b-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--client-min-selection-lines N] [--client-min-entry-operators N] [--client-min-exit-operators N] [--client-require-cross-operator-pair [0|1]] [--exit-country CC] [--exit-region REGION] [--distinct-operators [0|1]] [--require-issuer-quorum [0|1]] [--beta-profile [0|1]]
   ./scripts/easy_node.sh three-machine-soak [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-a-url URL] [--issuer-b-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--rounds N] [--pause-sec N] [--fault-every N] [--fault-command CMD] [--continue-on-fail [0|1]] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--client-min-selection-lines N] [--client-min-entry-operators N] [--client-min-exit-operators N] [--client-require-cross-operator-pair [0|1]] [--exit-country CC] [--exit-region REGION] [--distinct-operators [0|1]] [--require-issuer-quorum [0|1]] [--beta-profile [0|1]] [--report-file PATH]
   ./scripts/easy_node.sh pilot-runbook [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-a-url URL] [--issuer-b-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--rounds N] [--pause-sec N] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--client-min-selection-lines N] [--client-min-entry-operators N] [--client-min-exit-operators N] [--client-require-cross-operator-pair [0|1]] [--distinct-operators [0|1]] [--require-issuer-quorum [0|1]] [--beta-profile [0|1]] [--bundle-dir PATH]
-  ./scripts/easy_node.sh invite-generate [--issuer-url URL] [--admin-token TOKEN] [--count N] [--prefix PREFIX] [--tier 1|2|3]
-  ./scripts/easy_node.sh invite-check --key KEY [--issuer-url URL] [--admin-token TOKEN]
-  ./scripts/easy_node.sh invite-disable --key KEY [--issuer-url URL] [--admin-token TOKEN]
+  ./scripts/easy_node.sh invite-generate [--issuer-url URL] [--admin-token TOKEN] [--admin-key-file FILE] [--admin-key-id ID] [--count N] [--prefix PREFIX] [--tier 1|2|3]
+  ./scripts/easy_node.sh invite-check --key KEY [--issuer-url URL] [--admin-token TOKEN] [--admin-key-file FILE] [--admin-key-id ID]
+  ./scripts/easy_node.sh invite-disable --key KEY [--issuer-url URL] [--admin-token TOKEN] [--admin-key-file FILE] [--admin-key-id ID]
+  ./scripts/easy_node.sh bootstrap-mtls [--out-dir DIR] [--public-host HOST] [--san HOST] [--days N] [--rotate-leaf [0|1]] [--rotate-ca [0|1]]
   ./scripts/easy_node.sh machine-a-test [--public-host HOST] [--report-file PATH]
   ./scripts/easy_node.sh machine-b-test --peer-directory-a URL [--public-host HOST] [--min-operators N] [--federation-timeout-sec N] [--report-file PATH]
   ./scripts/easy_node.sh machine-c-test [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--exit-country CC] [--exit-region REGION] [--distinct-operators [0|1]] [--beta-profile [0|1]] [--report-file PATH]
   ./scripts/easy_node.sh discover-hosts --bootstrap-directory URL [--wait-sec N] [--min-hosts N] [--write-config [0|1]]
 
 Notes:
-  - server-up runs directory + issuer + entry-exit using deploy/docker-compose.yml.
+  - server-up --mode authority runs directory + issuer + entry-exit.
+  - server-up --mode provider runs directory + entry-exit only (no local issuer/admin token).
+  - --prod-profile enables fail-closed production strict mode (requires mTLS + signed issuer-admin auth).
   - client-test runs client-demo with --no-deps (no local server required on the client machine).
   - three-machine-validate runs health + federation checks then runs client-test with both directories.
   - bootstrap discovery mode lets you provide one directory URL and auto-discover other server hosts.
@@ -57,12 +63,21 @@ need_cmd() {
   fi
 }
 
+secure_file_permissions() {
+  local file="$1"
+  if [[ -f "$file" ]]; then
+    chmod 600 "$file" 2>/dev/null || true
+  fi
+}
+
 check_dependencies() {
   local ok=1
   need_cmd docker || ok=0
   need_cmd curl || ok=0
   need_cmd timeout || ok=0
   need_cmd rg || ok=0
+  need_cmd jq || ok=0
+  need_cmd go || ok=0
 
   if ! docker compose version >/dev/null 2>&1; then
     echo "missing dependency: docker compose plugin"
@@ -97,6 +112,23 @@ wait_http_ok() {
   return 1
 }
 
+wait_http_ok_with_opts() {
+  local url="$1"
+  local name="$2"
+  local attempts="${3:-30}"
+  shift 3
+  local i
+  local -a opts=("$@")
+  for ((i = 1; i <= attempts; i++)); do
+    if curl -fsS --connect-timeout 2 --max-time 6 "${opts[@]}" "$url" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  echo "$name did not become healthy at $url"
+  return 1
+}
+
 host_is_loopback() {
   local host="$1"
   [[ "$host" == "127.0.0.1" || "$host" == "localhost" || "$host" == "::1" ]]
@@ -104,6 +136,13 @@ host_is_loopback() {
 
 hosts_config_file() {
   echo "$ROOT_DIR/data/easy_mode_hosts.conf"
+}
+
+trim() {
+  local value="$1"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "$value"
 }
 
 trim_url() {
@@ -164,6 +203,199 @@ url_from_host_port() {
   local host="$1"
   local port="$2"
   printf 'http://%s:%s' "$(normalize_host_for_endpoint "$host")" "$port"
+}
+
+ensure_url_scheme() {
+  local raw="$1"
+  local scheme="$2"
+  raw="$(trim_url "$raw")"
+  scheme="$(trim "$scheme")"
+  if [[ -z "$raw" || -z "$scheme" ]]; then
+    echo "$raw"
+    return
+  fi
+  if [[ "$raw" == "$scheme://"* ]]; then
+    echo "$raw"
+    return
+  fi
+  if [[ "$raw" == http://* || "$raw" == https://* ]]; then
+    echo "${scheme}://${raw#*://}"
+    return
+  fi
+  echo "${scheme}://${raw}"
+}
+
+is_https_url() {
+  local raw
+  raw="$(trim "$1")"
+  [[ "$raw" == https://* ]]
+}
+
+bootstrap_mtls() {
+  local script="$ROOT_DIR/scripts/bootstrap_mtls.sh"
+  if [[ ! -x "$script" ]]; then
+    echo "missing helper script: $script"
+    exit 2
+  fi
+  "$script" "$@"
+}
+
+ensure_admin_signing_material() {
+  local issuer_data_dir="$DEPLOY_DIR/data/issuer"
+  local key_file="$issuer_data_dir/issuer_admin_signer.key"
+  local key_id_file="$issuer_data_dir/issuer_admin_signer.keyid"
+  local signers_file="$issuer_data_dir/issuer_admin_signers.txt"
+  local signers_file_container="/app/data/issuer_admin_signers.txt"
+  local inspect_json key_id pub_key
+
+  mkdir -p "$issuer_data_dir"
+  if [[ ! -f "$key_file" ]]; then
+    (
+      cd "$ROOT_DIR"
+      go run ./cmd/adminsig gen --private-key-out "$key_file" --key-id-out "$key_id_file" >/dev/null
+    )
+  fi
+
+  inspect_json="$(
+    cd "$ROOT_DIR"
+    go run ./cmd/adminsig inspect --private-key-file "$key_file"
+  )"
+  key_id="$(printf '%s\n' "$inspect_json" | jq -r '.key_id')"
+  pub_key="$(printf '%s\n' "$inspect_json" | jq -r '.public_key')"
+  if [[ -z "$key_id" || -z "$pub_key" || "$key_id" == "null" || "$pub_key" == "null" ]]; then
+    echo "failed to inspect issuer admin signing key material"
+    exit 1
+  fi
+  printf '%s=%s\n' "$key_id" "$pub_key" >"$signers_file"
+  printf '%s\n' "$key_id" >"$key_id_file"
+  secure_file_permissions "$key_file"
+  chmod 644 "$signers_file" "$key_id_file" 2>/dev/null || true
+
+  echo "$key_file|$key_id|$signers_file|$signers_file_container"
+}
+
+resolve_invite_admin_auth() {
+  local cli_token="${1:-}"
+  local cli_key_file="${2:-}"
+  local cli_key_id="${3:-}"
+  local env_token env_key_file env_key_id
+
+  if [[ -n "$cli_token" ]]; then
+    echo "token|$cli_token||"
+    return
+  fi
+  if [[ -n "$cli_key_file" && -n "$cli_key_id" ]]; then
+    echo "signed||$cli_key_file|$cli_key_id"
+    return
+  fi
+
+  env_key_file="$(server_env_value "ISSUER_ADMIN_SIGNING_PRIVATE_KEY_FILE_LOCAL" | tr -d '\r')"
+  env_key_id="$(server_env_value "ISSUER_ADMIN_SIGNING_KEY_ID" | tr -d '\r')"
+  if [[ -n "$env_key_file" && -n "$env_key_id" ]]; then
+    echo "signed||$env_key_file|$env_key_id"
+    return
+  fi
+
+  env_token="$(resolve_invite_admin_token "")"
+  if [[ -n "$env_token" ]]; then
+    echo "token|$env_token||"
+    return
+  fi
+
+  echo "none|||"
+}
+
+resolve_local_mtls_material() {
+  local ca cert key
+  ca="$(server_env_value "EASY_NODE_MTLS_CA_FILE_LOCAL" | tr -d '\r')"
+  cert="$(server_env_value "EASY_NODE_MTLS_CLIENT_CERT_FILE_LOCAL" | tr -d '\r')"
+  key="$(server_env_value "EASY_NODE_MTLS_CLIENT_KEY_FILE_LOCAL" | tr -d '\r')"
+  if [[ -z "$ca" ]]; then
+    ca="$DEPLOY_DIR/tls/ca.crt"
+  fi
+  if [[ -z "$cert" ]]; then
+    cert="$DEPLOY_DIR/tls/client.crt"
+  fi
+  if [[ -z "$key" ]]; then
+    key="$DEPLOY_DIR/tls/client.key"
+  fi
+  echo "$ca|$cert|$key"
+}
+
+curl_tls_opts_for_url() {
+  local url="$1"
+  if ! is_https_url "$url"; then
+    return
+  fi
+  local triple ca cert key
+  triple="$(resolve_local_mtls_material)"
+  IFS='|' read -r ca cert key <<<"$triple"
+  if [[ -f "$ca" ]]; then
+    printf '%s\n' "--cacert" "$ca"
+  fi
+  if [[ -f "$cert" && -f "$key" ]]; then
+    printf '%s\n' "--cert" "$cert" "--key" "$key"
+  fi
+}
+
+build_admin_header_args() {
+  local method="$1"
+  local url="$2"
+  local body_file="$3"
+  local auth_mode="$4"
+  local admin_token="$5"
+  local admin_key_file="$6"
+  local admin_key_id="$7"
+  local out_var="$8"
+  local -a header_args=()
+
+  if [[ "$auth_mode" == "signed" ]]; then
+    if [[ -z "$admin_key_file" || -z "$admin_key_id" ]]; then
+      echo "missing admin signing credentials" >&2
+      return 1
+    fi
+    if [[ ! -f "$admin_key_file" ]]; then
+      echo "admin signing key file not found: $admin_key_file" >&2
+      return 1
+    fi
+    local sign_json
+    local -a sign_cmd=(
+      go run ./cmd/adminsig sign
+      --private-key-file "$admin_key_file"
+      --key-id "$admin_key_id"
+      --method "$method"
+      --url "$url"
+    )
+    if [[ -n "$body_file" ]]; then
+      sign_cmd+=(--body-file "$body_file")
+    fi
+    sign_json="$(
+      cd "$ROOT_DIR"
+      "${sign_cmd[@]}"
+    )"
+
+    local h_key_id h_ts h_nonce h_sig
+    h_key_id="$(printf '%s\n' "$sign_json" | jq -r '.headers["X-Admin-Key-Id"]')"
+    h_ts="$(printf '%s\n' "$sign_json" | jq -r '.headers["X-Admin-Timestamp"]')"
+    h_nonce="$(printf '%s\n' "$sign_json" | jq -r '.headers["X-Admin-Nonce"]')"
+    h_sig="$(printf '%s\n' "$sign_json" | jq -r '.headers["X-Admin-Signature"]')"
+    if [[ -z "$h_key_id" || -z "$h_ts" || -z "$h_nonce" || -z "$h_sig" || "$h_key_id" == "null" || "$h_sig" == "null" ]]; then
+      echo "failed to generate signed admin headers" >&2
+      return 1
+    fi
+    header_args+=(-H "X-Admin-Key-Id: ${h_key_id}")
+    header_args+=(-H "X-Admin-Timestamp: ${h_ts}")
+    header_args+=(-H "X-Admin-Nonce: ${h_nonce}")
+    header_args+=(-H "X-Admin-Signature: ${h_sig}")
+  else
+    if [[ -z "$admin_token" ]]; then
+      echo "missing admin token" >&2
+      return 1
+    fi
+    header_args+=(-H "X-Admin-Token: ${admin_token}")
+  fi
+
+  eval "$out_var=(\"\${header_args[@]}\")"
 }
 
 discover_directory_urls() {
@@ -258,6 +490,22 @@ merge_url_csv() {
   printf '%s\n' "$combined" | paste -sd, -
 }
 
+normalize_url_csv_scheme() {
+  local csv="$1"
+  local scheme="$2"
+  local out=""
+  local item normalized
+  while IFS= read -r item; do
+    [[ -z "$item" ]] && continue
+    normalized="$(ensure_url_scheme "$item" "$scheme")"
+    if [[ -n "$out" ]]; then
+      out+=","
+    fi
+    out+="$normalized"
+  done < <(split_csv_lines "$csv")
+  echo "$out"
+}
+
 split_csv_lines() {
   local csv="$1"
   printf '%s' "$csv" |
@@ -329,6 +577,10 @@ identity_config_file() {
   echo "$DEPLOY_DIR/data/easy_node_identity.conf"
 }
 
+server_mode_file() {
+  echo "$DEPLOY_DIR/data/easy_node_server_mode.conf"
+}
+
 sanitize_id_component() {
   local raw="$1"
   local out
@@ -387,6 +639,61 @@ write_identity_config() {
 EASY_NODE_OPERATOR_ID=${operator_id}
 EASY_NODE_ISSUER_ID=${issuer_id}
 EOF_ID
+  secure_file_permissions "$file"
+}
+
+write_server_mode() {
+  local mode="$1"
+  local file
+  file="$(server_mode_file)"
+  mkdir -p "$(dirname "$file")"
+  cat >"$file" <<EOF_MODE
+EASY_NODE_SERVER_MODE=${mode}
+EASY_NODE_SERVER_MODE_UPDATED_UNIX=$(date +%s)
+EOF_MODE
+  secure_file_permissions "$file"
+}
+
+active_server_mode() {
+  local mode_file mode
+  mode_file="$(server_mode_file)"
+  mode="$(identity_value "$mode_file" "EASY_NODE_SERVER_MODE")"
+  if [[ -n "$mode" ]]; then
+    echo "$mode"
+    return
+  fi
+  if [[ -f "$AUTHORITY_ENV_FILE" && ! -f "$PROVIDER_ENV_FILE" ]]; then
+    echo "authority"
+    return
+  fi
+  if [[ -f "$PROVIDER_ENV_FILE" && ! -f "$AUTHORITY_ENV_FILE" ]]; then
+    echo "provider"
+    return
+  fi
+  echo "unknown"
+}
+
+active_server_env_file() {
+  local mode
+  mode="$(active_server_mode)"
+  if [[ "$mode" == "provider" ]]; then
+    echo "$PROVIDER_ENV_FILE"
+    return
+  fi
+  echo "$AUTHORITY_ENV_FILE"
+}
+
+require_authority_mode() {
+  local action="$1"
+  local mode
+  mode="$(active_server_mode)"
+  if [[ "$mode" == "authority" ]]; then
+    return
+  fi
+  echo "$action is allowed only on authority nodes."
+  echo "detected mode: $mode"
+  echo "run server-up --mode authority on your admin machine."
+  exit 2
 }
 
 directory_has_operator_id() {
@@ -464,15 +771,21 @@ ensure_deps_or_die() {
   fi
 }
 
-compose_server() {
-  if [[ -f "$SERVER_ENV_FILE" ]]; then
-    (cd "$DEPLOY_DIR" && docker compose --env-file "$SERVER_ENV_FILE" "$@")
+compose_with_env() {
+  local env_file="$1"
+  shift
+  if [[ -f "$env_file" ]]; then
+    (cd "$DEPLOY_DIR" && docker compose --env-file "$env_file" "$@")
   else
     (cd "$DEPLOY_DIR" && docker compose "$@")
   fi
 }
 
-write_server_env() {
+compose_server() {
+  compose_with_env "$AUTHORITY_ENV_FILE" "$@"
+}
+
+write_authority_env() {
   local public_host="$1"
   local operator_id="$2"
   local issuer_id="$3"
@@ -481,18 +794,27 @@ write_server_env() {
   local beta_profile="$6"
   local client_allowlist="$7"
   local allow_anon_cred="$8"
+  local prod_profile="$9"
+  local admin_signers_file_container="${10:-}"
+  local admin_sign_key_id="${11:-}"
+  local admin_sign_key_file_local="${12:-}"
+  local public_scheme="http"
   local relay_suffix
   local issuer_suffix
+  if [[ "$prod_profile" == "1" ]]; then
+    public_scheme="https"
+  fi
   relay_suffix="$(sanitize_id_component "$operator_id")"
   if [[ -z "$issuer_id" ]]; then
     issuer_id="issuer-$(random_id_suffix)"
   fi
   issuer_suffix="$(sanitize_id_component "$issuer_id")"
 
-  cat >"$SERVER_ENV_FILE" <<EOF_ENV
-DIRECTORY_PUBLIC_URL=http://${public_host}:8081
-ENTRY_URL_PUBLIC=http://${public_host}:8083
-EXIT_CONTROL_URL_PUBLIC=http://${public_host}:8084
+  cat >"$AUTHORITY_ENV_FILE" <<EOF_ENV
+EASY_NODE_SERVER_MODE=authority
+DIRECTORY_PUBLIC_URL=${public_scheme}://${public_host}:8081
+ENTRY_URL_PUBLIC=${public_scheme}://${public_host}:8083
+EXIT_CONTROL_URL_PUBLIC=${public_scheme}://${public_host}:8084
 ENTRY_ENDPOINT_PUBLIC=${public_host}:51820
 EXIT_ENDPOINT_PUBLIC=${public_host}:51821
 DIRECTORY_OPERATOR_ID=${operator_id}
@@ -513,15 +835,16 @@ ISSUER_ADMIN_TOKEN=${issuer_admin_token}
 ISSUER_CLIENT_ALLOWLIST_ONLY=${client_allowlist}
 ISSUER_ALLOW_ANON_CRED=${allow_anon_cred}
 EOF_ENV
+  secure_file_permissions "$AUTHORITY_ENV_FILE"
 
   if [[ -n "$peer_dirs" ]]; then
-    echo "DIRECTORY_PEERS=${peer_dirs}" >>"$SERVER_ENV_FILE"
-    echo "DIRECTORY_SYNC_SEC=5" >>"$SERVER_ENV_FILE"
-    echo "DIRECTORY_GOSSIP_SEC=5" >>"$SERVER_ENV_FILE"
+    echo "DIRECTORY_PEERS=${peer_dirs}" >>"$AUTHORITY_ENV_FILE"
+    echo "DIRECTORY_SYNC_SEC=5" >>"$AUTHORITY_ENV_FILE"
+    echo "DIRECTORY_GOSSIP_SEC=5" >>"$AUTHORITY_ENV_FILE"
   fi
 
   if [[ "$beta_profile" == "1" ]]; then
-    cat >>"$SERVER_ENV_FILE" <<'EOF_BETA'
+    cat >>"$AUTHORITY_ENV_FILE" <<'EOF_BETA'
 DIRECTORY_MIN_OPERATORS=2
 DIRECTORY_MIN_RELAY_VOTES=2
 ENTRY_DIRECTORY_MIN_OPERATORS=2
@@ -537,6 +860,117 @@ DIRECTORY_PROVIDER_SPLIT_ROLES=1
 ISSUER_TOKEN_TTL_SEC=300
 EOF_BETA
   fi
+  if [[ "$prod_profile" == "1" ]]; then
+    cat >>"$AUTHORITY_ENV_FILE" <<EOF_PROD
+BETA_STRICT_MODE=1
+PROD_STRICT_MODE=1
+MTLS_ENABLE=1
+MTLS_CA_FILE=/app/tls/ca.crt
+MTLS_CERT_FILE=/app/tls/node.crt
+MTLS_KEY_FILE=/app/tls/node.key
+MTLS_CLIENT_CERT_FILE=/app/tls/node.crt
+MTLS_CLIENT_KEY_FILE=/app/tls/node.key
+MTLS_REQUIRE_CLIENT_CERT=1
+MTLS_MIN_VERSION=1.3
+DIRECTORY_TRUST_STRICT=1
+DIRECTORY_TRUST_TOFU=0
+ENTRY_DIRECTORY_TRUST_STRICT=1
+ENTRY_DIRECTORY_TRUST_TOFU=0
+DIRECTORY_PEER_TRUST_STRICT=1
+DIRECTORY_PEER_TRUST_TOFU=0
+ISSUER_ADMIN_REQUIRE_SIGNED=1
+ISSUER_ADMIN_ALLOW_TOKEN=0
+ISSUER_ADMIN_SIGNED_WINDOW_SEC=90
+ISSUER_ADMIN_SIGNING_KEYS_FILE=${admin_signers_file_container}
+ISSUER_ADMIN_SIGNING_PRIVATE_KEY_FILE_LOCAL=${admin_sign_key_file_local}
+ISSUER_ADMIN_SIGNING_KEY_ID=${admin_sign_key_id}
+EASY_NODE_MTLS_CA_FILE_LOCAL=${DEPLOY_DIR}/tls/ca.crt
+EASY_NODE_MTLS_CLIENT_CERT_FILE_LOCAL=${DEPLOY_DIR}/tls/client.crt
+EASY_NODE_MTLS_CLIENT_KEY_FILE_LOCAL=${DEPLOY_DIR}/tls/client.key
+EOF_PROD
+  fi
+  secure_file_permissions "$AUTHORITY_ENV_FILE"
+}
+
+write_provider_env() {
+  local public_host="$1"
+  local operator_id="$2"
+  local peer_dirs="$3"
+  local beta_profile="$4"
+  local authority_issuer="$5"
+  local prod_profile="$6"
+  local public_scheme="http"
+  local relay_suffix
+
+  if [[ "$prod_profile" == "1" ]]; then
+    public_scheme="https"
+  fi
+  relay_suffix="$(sanitize_id_component "$operator_id")"
+  authority_issuer="$(trim_url "$authority_issuer")"
+
+  cat >"$PROVIDER_ENV_FILE" <<EOF_ENV
+EASY_NODE_SERVER_MODE=provider
+DIRECTORY_PUBLIC_URL=${public_scheme}://${public_host}:8081
+ENTRY_URL_PUBLIC=${public_scheme}://${public_host}:8083
+EXIT_CONTROL_URL_PUBLIC=${public_scheme}://${public_host}:8084
+ENTRY_ENDPOINT_PUBLIC=${public_host}:51820
+EXIT_ENDPOINT_PUBLIC=${public_host}:51821
+DIRECTORY_OPERATOR_ID=${operator_id}
+ENTRY_RELAY_ID=entry-${relay_suffix}
+EXIT_RELAY_ID=exit-${relay_suffix}
+DIRECTORY_PRIVATE_KEY_FILE=/app/data/directory_${relay_suffix}_ed25519.key
+DIRECTORY_PREVIOUS_PUBKEYS_FILE=/app/data/directory_${relay_suffix}_previous_pubkeys.txt
+CORE_DIRECTORY_URL=${public_scheme}://directory:8081
+CORE_ISSUER_URL=${authority_issuer}
+EOF_ENV
+  secure_file_permissions "$PROVIDER_ENV_FILE"
+
+  if [[ -n "$peer_dirs" ]]; then
+    echo "DIRECTORY_PEERS=${peer_dirs}" >>"$PROVIDER_ENV_FILE"
+    echo "DIRECTORY_SYNC_SEC=5" >>"$PROVIDER_ENV_FILE"
+    echo "DIRECTORY_GOSSIP_SEC=5" >>"$PROVIDER_ENV_FILE"
+  fi
+
+  if [[ "$beta_profile" == "1" ]]; then
+    cat >>"$PROVIDER_ENV_FILE" <<'EOF_BETA'
+DIRECTORY_MIN_OPERATORS=2
+DIRECTORY_MIN_RELAY_VOTES=2
+ENTRY_DIRECTORY_MIN_OPERATORS=2
+ENTRY_DIRECTORY_MIN_RELAY_VOTES=2
+ENTRY_REQUIRE_DISTINCT_EXIT_OPERATOR=1
+DIRECTORY_PEER_MIN_OPERATORS=2
+DIRECTORY_PEER_MIN_VOTES=2
+DIRECTORY_PEER_DISCOVERY_MIN_VOTES=2
+DIRECTORY_PEER_DISCOVERY_MAX_PER_SOURCE=8
+DIRECTORY_PEER_DISCOVERY_MAX_PER_OPERATOR=4
+DIRECTORY_PROVIDER_MAX_RELAYS_PER_OPERATOR=32
+DIRECTORY_PROVIDER_SPLIT_ROLES=1
+EOF_BETA
+  fi
+  if [[ "$prod_profile" == "1" ]]; then
+    cat >>"$PROVIDER_ENV_FILE" <<'EOF_PROD'
+BETA_STRICT_MODE=1
+PROD_STRICT_MODE=1
+MTLS_ENABLE=1
+MTLS_CA_FILE=/app/tls/ca.crt
+MTLS_CERT_FILE=/app/tls/node.crt
+MTLS_KEY_FILE=/app/tls/node.key
+MTLS_CLIENT_CERT_FILE=/app/tls/node.crt
+MTLS_CLIENT_KEY_FILE=/app/tls/node.key
+MTLS_REQUIRE_CLIENT_CERT=1
+MTLS_MIN_VERSION=1.3
+DIRECTORY_TRUST_STRICT=1
+DIRECTORY_TRUST_TOFU=0
+ENTRY_DIRECTORY_TRUST_STRICT=1
+ENTRY_DIRECTORY_TRUST_TOFU=0
+DIRECTORY_PEER_TRUST_STRICT=1
+DIRECTORY_PEER_TRUST_TOFU=0
+EASY_NODE_MTLS_CA_FILE_LOCAL=${DEPLOY_DIR}/tls/ca.crt
+EASY_NODE_MTLS_CLIENT_CERT_FILE_LOCAL=${DEPLOY_DIR}/tls/client.crt
+EASY_NODE_MTLS_CLIENT_KEY_FILE_LOCAL=${DEPLOY_DIR}/tls/client.key
+EOF_PROD
+  fi
+  secure_file_permissions "$PROVIDER_ENV_FILE"
 }
 
 first_csv_item() {
@@ -551,20 +985,32 @@ looks_like_loopback_url() {
 }
 
 server_up() {
+  local mode="${EASY_NODE_SERVER_MODE:-authority}"
   local public_host=""
   local operator_id=""
   local operator_id_explicit="0"
   local issuer_id=""
   local issuer_id_explicit="0"
   local issuer_admin_token=""
+  local issuer_admin_token_explicit="0"
   local peer_dirs=""
   local bootstrap_directory=""
+  local authority_directory="${EASY_NODE_AUTHORITY_DIRECTORY:-}"
+  local authority_issuer="${EASY_NODE_AUTHORITY_ISSUER:-}"
   local client_allowlist="${EASY_NODE_CLIENT_ALLOWLIST_ONLY:-0}"
+  local client_allowlist_explicit="0"
   local allow_anon_cred="${EASY_NODE_ALLOW_ANON_CRED:-1}"
+  local allow_anon_cred_explicit="0"
   local beta_profile="${EASY_NODE_BETA_PROFILE:-0}"
+  local prod_profile="${EASY_NODE_PROD_PROFILE:-0}"
+  local show_admin_token="${EASY_NODE_SHOW_ADMIN_TOKEN:-0}"
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      --mode)
+        mode="${2:-}"
+        shift 2
+        ;;
       --public-host)
         public_host="${2:-}"
         shift 2
@@ -581,6 +1027,15 @@ server_up() {
         ;;
       --issuer-admin-token)
         issuer_admin_token="${2:-}"
+        issuer_admin_token_explicit="1"
+        shift 2
+        ;;
+      --authority-directory)
+        authority_directory="${2:-}"
+        shift 2
+        ;;
+      --authority-issuer)
+        authority_issuer="${2:-}"
         shift 2
         ;;
       --peer-directories)
@@ -594,18 +1049,22 @@ server_up() {
       --client-allowlist)
         if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
           client_allowlist="${2:-}"
+          client_allowlist_explicit="1"
           shift 2
         else
           client_allowlist="1"
+          client_allowlist_explicit="1"
           shift
         fi
         ;;
       --allow-anon-cred)
         if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
           allow_anon_cred="${2:-}"
+          allow_anon_cred_explicit="1"
           shift 2
         else
           allow_anon_cred="0"
+          allow_anon_cred_explicit="1"
           shift
         fi
         ;;
@@ -618,6 +1077,24 @@ server_up() {
           shift
         fi
         ;;
+      --prod-profile)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          prod_profile="${2:-}"
+          shift 2
+        else
+          prod_profile="1"
+          shift
+        fi
+        ;;
+      --show-admin-token)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          show_admin_token="${2:-}"
+          shift 2
+        else
+          show_admin_token="1"
+          shift
+        fi
+        ;;
       *)
         echo "unknown arg for server-up: $1"
         exit 2
@@ -625,8 +1102,23 @@ server_up() {
     esac
   done
 
+  if [[ "$mode" != "authority" && "$mode" != "provider" ]]; then
+    echo "server-up requires --mode authority|provider"
+    exit 2
+  fi
   if [[ "$beta_profile" != "0" && "$beta_profile" != "1" ]]; then
     echo "server-up requires --beta-profile (or EASY_NODE_BETA_PROFILE) to be 0 or 1"
+    exit 2
+  fi
+  if [[ "$prod_profile" != "0" && "$prod_profile" != "1" ]]; then
+    echo "server-up requires --prod-profile (or EASY_NODE_PROD_PROFILE) to be 0 or 1"
+    exit 2
+  fi
+  if [[ "$prod_profile" == "1" ]]; then
+    beta_profile="1"
+  fi
+  if [[ "$show_admin_token" != "0" && "$show_admin_token" != "1" ]]; then
+    echo "server-up requires --show-admin-token (or EASY_NODE_SHOW_ADMIN_TOKEN) to be 0 or 1"
     exit 2
   fi
   if [[ "$client_allowlist" != "0" && "$client_allowlist" != "1" ]]; then
@@ -638,12 +1130,20 @@ server_up() {
     exit 2
   fi
 
+  local url_scheme="http"
+  if [[ "$prod_profile" == "1" ]]; then
+    url_scheme="https"
+  fi
+
   if [[ -n "$bootstrap_directory" ]]; then
-    bootstrap_directory="$(trim_url "$bootstrap_directory")"
+    bootstrap_directory="$(ensure_url_scheme "$bootstrap_directory" "$url_scheme")"
     if [[ -z "$peer_dirs" ]]; then
       peer_dirs="$bootstrap_directory"
     else
       peer_dirs="$(merge_url_csv "$peer_dirs" "$bootstrap_directory")"
+    fi
+    if [[ "$mode" == "provider" && -z "$authority_directory" ]]; then
+      authority_directory="$bootstrap_directory"
     fi
   fi
 
@@ -659,6 +1159,45 @@ server_up() {
 
   local local_host
   local_host="$(host_from_hostport "$public_host")"
+  if [[ "$mode" == "provider" ]]; then
+    if [[ -z "$authority_directory" && -n "$peer_dirs" ]]; then
+      authority_directory="$(first_csv_item "$peer_dirs")"
+    fi
+    if [[ -z "$authority_directory" ]]; then
+      echo "server-up --mode provider requires --authority-directory (or --bootstrap-directory)"
+      exit 2
+    fi
+    authority_directory="$(ensure_url_scheme "$authority_directory" "$url_scheme")"
+    local authority_host
+    authority_host="$(host_from_url "$authority_directory")"
+    if [[ -z "$authority_issuer" && -n "$authority_host" ]]; then
+      authority_issuer="$(url_from_host_port "$authority_host" 8082)"
+    fi
+    if [[ -z "$authority_issuer" ]]; then
+      echo "server-up --mode provider requires --authority-issuer URL"
+      exit 2
+    fi
+    authority_issuer="$(ensure_url_scheme "$authority_issuer" "$url_scheme")"
+    if [[ -z "$peer_dirs" ]]; then
+      peer_dirs="$authority_directory"
+    else
+      peer_dirs="$(merge_url_csv "$peer_dirs" "$authority_directory")"
+    fi
+    if [[ "$issuer_admin_token_explicit" == "1" ]]; then
+      echo "note: --issuer-admin-token is ignored in provider mode (no local issuer/admin)."
+    fi
+    if [[ "$issuer_id_explicit" == "1" ]]; then
+      echo "note: --issuer-id is ignored in provider mode."
+    fi
+    if [[ "$client_allowlist_explicit" == "1" || "$allow_anon_cred_explicit" == "1" ]]; then
+      echo "note: --client-allowlist/--allow-anon-cred are issuer settings and are ignored in provider mode."
+    fi
+  fi
+
+  if [[ -n "$peer_dirs" ]]; then
+    peer_dirs="$(normalize_url_csv_scheme "$peer_dirs" "$url_scheme")"
+  fi
+
   if [[ -n "$peer_dirs" ]]; then
     peer_dirs="$(filter_peer_dirs_excluding_host "$peer_dirs" "$local_host")"
   fi
@@ -679,15 +1218,20 @@ server_up() {
       operator_id="op-$(random_id_suffix)"
     fi
   fi
-  if [[ -z "$issuer_id" ]]; then
-    if [[ -n "$stored_issuer_id" ]]; then
-      issuer_id="$stored_issuer_id"
-    else
-      issuer_id="issuer-$(random_id_suffix)"
+
+  if [[ "$mode" == "authority" ]]; then
+    if [[ -z "$issuer_id" ]]; then
+      if [[ -n "$stored_issuer_id" ]]; then
+        issuer_id="$stored_issuer_id"
+      else
+        issuer_id="issuer-$(random_id_suffix)"
+      fi
     fi
-  fi
-  if [[ -z "$issuer_admin_token" ]]; then
-    issuer_admin_token="$(random_token)"
+    if [[ -z "$issuer_admin_token" ]]; then
+      issuer_admin_token="$(random_token)"
+    fi
+  else
+    issuer_id="${stored_issuer_id:-}"
   fi
 
   if [[ -n "$peer_dirs" ]]; then
@@ -705,7 +1249,9 @@ server_up() {
         exit 1
       fi
     done
+  fi
 
+  if [[ "$mode" == "authority" && -n "$peer_dirs" ]]; then
     local issuer_attempts=0
     while issuer_id_conflicts_with_peers "$issuer_id" "$peer_dirs"; do
       if [[ "$issuer_id_explicit" == "1" ]]; then
@@ -722,41 +1268,163 @@ server_up() {
     done
   fi
 
+  local admin_sign_key_file_local=""
+  local admin_sign_key_id=""
+  local admin_signers_file_local=""
+  local admin_signers_file_container=""
+  if [[ "$prod_profile" == "1" ]]; then
+    local -a mtls_args
+    mtls_args=(--out-dir "$DEPLOY_DIR/tls")
+    if [[ -n "$local_host" ]]; then
+      mtls_args+=(--public-host "$local_host")
+    fi
+    if [[ -n "$public_host" && "$public_host" != "$local_host" ]]; then
+      mtls_args+=(--san "$public_host")
+    fi
+    if [[ -n "$peer_dirs" ]]; then
+      local peer_url peer_host
+      while IFS= read -r peer_url; do
+        [[ -z "$peer_url" ]] && continue
+        peer_host="$(host_from_url "$peer_url")"
+        if [[ -n "$peer_host" ]]; then
+          mtls_args+=(--san "$peer_host")
+        fi
+      done < <(split_csv_lines "$peer_dirs")
+    fi
+    if [[ "$mode" == "provider" && -n "$authority_directory" ]]; then
+      local authority_host
+      authority_host="$(host_from_url "$authority_directory")"
+      if [[ -n "$authority_host" ]]; then
+        mtls_args+=(--san "$authority_host")
+      fi
+    fi
+    bootstrap_mtls "${mtls_args[@]}"
+    if [[ "$mode" == "authority" ]]; then
+      local signer_material
+      signer_material="$(ensure_admin_signing_material)"
+      IFS='|' read -r admin_sign_key_file_local admin_sign_key_id admin_signers_file_local admin_signers_file_container <<<"$signer_material"
+      if [[ -z "$admin_sign_key_file_local" || -z "$admin_sign_key_id" || -z "$admin_signers_file_container" ]]; then
+        echo "server-up failed to initialize issuer admin signing material"
+        exit 1
+      fi
+    fi
+  fi
+
   write_identity_config "$operator_id" "$issuer_id"
-  write_server_env "$public_host" "$operator_id" "$issuer_id" "$issuer_admin_token" "$peer_dirs" "$beta_profile" "$client_allowlist" "$allow_anon_cred"
 
-  compose_server up -d --build directory issuer entry-exit
+  if [[ "$mode" == "authority" ]]; then
+    write_authority_env "$public_host" "$operator_id" "$issuer_id" "$issuer_admin_token" "$peer_dirs" "$beta_profile" "$client_allowlist" "$allow_anon_cred" "$prod_profile" "$admin_signers_file_container" "$admin_sign_key_id" "$admin_sign_key_file_local"
+    compose_with_env "$AUTHORITY_ENV_FILE" up -d --build directory issuer entry-exit
 
-  # Always validate local container reachability first.
-  wait_http_ok "http://127.0.0.1:8081/v1/relays" "local directory" 40 || { compose_server logs --tail=80 directory; exit 1; }
-  wait_http_ok "http://127.0.0.1:8082/v1/pubkeys" "local issuer" 40 || { compose_server logs --tail=80 issuer; exit 1; }
-  wait_http_ok "http://127.0.0.1:8083/v1/health" "local entry" 40 || { compose_server logs --tail=120 entry-exit; exit 1; }
-  wait_http_ok "http://127.0.0.1:8084/v1/health" "local exit" 40 || { compose_server logs --tail=120 entry-exit; exit 1; }
+    local -a local_opts
+    local -a public_opts
+    mapfile -t local_opts < <(curl_tls_opts_for_url "${url_scheme}://127.0.0.1:8081")
+    mapfile -t public_opts < <(curl_tls_opts_for_url "${url_scheme}://${public_host}:8081")
 
-  # Optional public endpoint validation (can fail on NAT loopback setups).
-  if [[ "${EASY_NODE_VERIFY_PUBLIC:-0}" == "1" ]] && ! host_is_loopback "$public_host"; then
-    wait_http_ok "http://${public_host}:8081/v1/relays" "public directory" 15 || { compose_server logs --tail=80 directory; exit 1; }
-    wait_http_ok "http://${public_host}:8082/v1/pubkeys" "public issuer" 15 || { compose_server logs --tail=80 issuer; exit 1; }
-    wait_http_ok "http://${public_host}:8083/v1/health" "public entry" 15 || { compose_server logs --tail=120 entry-exit; exit 1; }
-    wait_http_ok "http://${public_host}:8084/v1/health" "public exit" 15 || { compose_server logs --tail=120 entry-exit; exit 1; }
+    # Always validate local container reachability first.
+    wait_http_ok_with_opts "${url_scheme}://127.0.0.1:8081/v1/relays" "local directory" 40 "${local_opts[@]}" || { compose_with_env "$AUTHORITY_ENV_FILE" logs --tail=80 directory; exit 1; }
+    wait_http_ok_with_opts "${url_scheme}://127.0.0.1:8082/v1/pubkeys" "local issuer" 40 "${local_opts[@]}" || { compose_with_env "$AUTHORITY_ENV_FILE" logs --tail=80 issuer; exit 1; }
+    wait_http_ok_with_opts "${url_scheme}://127.0.0.1:8083/v1/health" "local entry" 40 "${local_opts[@]}" || { compose_with_env "$AUTHORITY_ENV_FILE" logs --tail=120 entry-exit; exit 1; }
+    wait_http_ok_with_opts "${url_scheme}://127.0.0.1:8084/v1/health" "local exit" 40 "${local_opts[@]}" || { compose_with_env "$AUTHORITY_ENV_FILE" logs --tail=120 entry-exit; exit 1; }
+
+    # Optional public endpoint validation (can fail on NAT loopback setups).
+    if [[ "${EASY_NODE_VERIFY_PUBLIC:-0}" == "1" ]] && ! host_is_loopback "$public_host"; then
+      wait_http_ok_with_opts "${url_scheme}://${public_host}:8081/v1/relays" "public directory" 15 "${public_opts[@]}" || { compose_with_env "$AUTHORITY_ENV_FILE" logs --tail=80 directory; exit 1; }
+      wait_http_ok_with_opts "${url_scheme}://${public_host}:8082/v1/pubkeys" "public issuer" 15 "${public_opts[@]}" || { compose_with_env "$AUTHORITY_ENV_FILE" logs --tail=80 issuer; exit 1; }
+      wait_http_ok_with_opts "${url_scheme}://${public_host}:8083/v1/health" "public entry" 15 "${public_opts[@]}" || { compose_with_env "$AUTHORITY_ENV_FILE" logs --tail=120 entry-exit; exit 1; }
+      wait_http_ok_with_opts "${url_scheme}://${public_host}:8084/v1/health" "public exit" 15 "${public_opts[@]}" || { compose_with_env "$AUTHORITY_ENV_FILE" logs --tail=120 entry-exit; exit 1; }
+    fi
+    write_server_mode "authority"
+
+    echo "server stack started"
+    echo "mode: authority"
+    echo "env file: $AUTHORITY_ENV_FILE"
+    echo "operator_id: $operator_id"
+    echo "issuer_id: $issuer_id"
+    echo "identity file: $identity_file"
+    if [[ "$show_admin_token" == "1" ]]; then
+      echo "issuer_admin_token: $issuer_admin_token"
+    else
+      echo "issuer_admin_token: [hidden] (set --show-admin-token to print)"
+    fi
+    if [[ "$beta_profile" == "1" ]]; then
+      echo "beta profile: enabled (quorum and anti-concentration defaults applied)"
+    fi
+    echo "client_allowlist: $client_allowlist"
+    echo "allow_anon_cred: $allow_anon_cred"
+    if [[ "$prod_profile" == "1" ]]; then
+      echo "prod profile: enabled (mTLS + signed admin controls enforced)"
+      echo "admin_signing_key_id: $admin_sign_key_id"
+      echo "admin_signing_public_keys_file: $admin_signers_file_local"
+    fi
+    echo "health checks:"
+    if [[ "$prod_profile" == "1" ]]; then
+      local mtls_material ca_file cert_file key_file
+      mtls_material="$(resolve_local_mtls_material)"
+      IFS='|' read -r ca_file cert_file key_file <<<"$mtls_material"
+      echo "  curl --cacert $ca_file --cert $cert_file --key $key_file ${url_scheme}://${public_host}:8081/v1/relays"
+      echo "  curl --cacert $ca_file --cert $cert_file --key $key_file ${url_scheme}://${public_host}:8082/v1/pubkeys"
+      echo "  curl --cacert $ca_file --cert $cert_file --key $key_file ${url_scheme}://${public_host}:8083/v1/health"
+      echo "  curl --cacert $ca_file --cert $cert_file --key $key_file ${url_scheme}://${public_host}:8084/v1/health"
+    else
+      echo "  curl ${url_scheme}://${public_host}:8081/v1/relays"
+      echo "  curl ${url_scheme}://${public_host}:8082/v1/pubkeys"
+      echo "  curl ${url_scheme}://${public_host}:8083/v1/health"
+      echo "  curl ${url_scheme}://${public_host}:8084/v1/health"
+    fi
+  else
+    write_provider_env "$public_host" "$operator_id" "$peer_dirs" "$beta_profile" "$authority_issuer" "$prod_profile"
+    compose_with_env "$PROVIDER_ENV_FILE" up -d --build --no-deps directory entry-exit
+
+    local -a local_opts
+    local -a public_opts
+    local -a issuer_opts
+    mapfile -t local_opts < <(curl_tls_opts_for_url "${url_scheme}://127.0.0.1:8081")
+    mapfile -t public_opts < <(curl_tls_opts_for_url "${url_scheme}://${public_host}:8081")
+    mapfile -t issuer_opts < <(curl_tls_opts_for_url "${authority_issuer}")
+
+    wait_http_ok_with_opts "${url_scheme}://127.0.0.1:8081/v1/relays" "local directory" 40 "${local_opts[@]}" || { compose_with_env "$PROVIDER_ENV_FILE" logs --tail=80 directory; exit 1; }
+    wait_http_ok_with_opts "${url_scheme}://127.0.0.1:8083/v1/health" "local entry" 40 "${local_opts[@]}" || { compose_with_env "$PROVIDER_ENV_FILE" logs --tail=120 entry-exit; exit 1; }
+    wait_http_ok_with_opts "${url_scheme}://127.0.0.1:8084/v1/health" "local exit" 40 "${local_opts[@]}" || { compose_with_env "$PROVIDER_ENV_FILE" logs --tail=120 entry-exit; exit 1; }
+    wait_http_ok_with_opts "${authority_issuer}/v1/pubkeys" "authority issuer" 20 "${issuer_opts[@]}" || {
+      echo "provider mode requires reachable authority issuer."
+      exit 1
+    }
+
+    if [[ "${EASY_NODE_VERIFY_PUBLIC:-0}" == "1" ]] && ! host_is_loopback "$public_host"; then
+      wait_http_ok_with_opts "${url_scheme}://${public_host}:8081/v1/relays" "public directory" 15 "${public_opts[@]}" || { compose_with_env "$PROVIDER_ENV_FILE" logs --tail=80 directory; exit 1; }
+      wait_http_ok_with_opts "${url_scheme}://${public_host}:8083/v1/health" "public entry" 15 "${public_opts[@]}" || { compose_with_env "$PROVIDER_ENV_FILE" logs --tail=120 entry-exit; exit 1; }
+      wait_http_ok_with_opts "${url_scheme}://${public_host}:8084/v1/health" "public exit" 15 "${public_opts[@]}" || { compose_with_env "$PROVIDER_ENV_FILE" logs --tail=120 entry-exit; exit 1; }
+    fi
+    write_server_mode "provider"
+
+    echo "server stack started"
+    echo "mode: provider"
+    echo "env file: $PROVIDER_ENV_FILE"
+    echo "operator_id: $operator_id"
+    echo "identity file: $identity_file"
+    if [[ "$beta_profile" == "1" ]]; then
+      echo "beta profile: enabled (quorum and anti-concentration defaults applied)"
+    fi
+    if [[ "$prod_profile" == "1" ]]; then
+      echo "prod profile: enabled (mTLS + strict trust checks enforced)"
+    fi
+    echo "authority_directory: $authority_directory"
+    echo "authority_issuer: $authority_issuer"
+    echo "health checks:"
+    if [[ "$prod_profile" == "1" ]]; then
+      local mtls_material ca_file cert_file key_file
+      mtls_material="$(resolve_local_mtls_material)"
+      IFS='|' read -r ca_file cert_file key_file <<<"$mtls_material"
+      echo "  curl --cacert $ca_file --cert $cert_file --key $key_file ${url_scheme}://${public_host}:8081/v1/relays"
+      echo "  curl --cacert $ca_file --cert $cert_file --key $key_file ${url_scheme}://${public_host}:8083/v1/health"
+      echo "  curl --cacert $ca_file --cert $cert_file --key $key_file ${url_scheme}://${public_host}:8084/v1/health"
+    else
+      echo "  curl ${url_scheme}://${public_host}:8081/v1/relays"
+      echo "  curl ${url_scheme}://${public_host}:8083/v1/health"
+      echo "  curl ${url_scheme}://${public_host}:8084/v1/health"
+    fi
   fi
-
-  echo "server stack started"
-  echo "env file: $SERVER_ENV_FILE"
-  echo "operator_id: $operator_id"
-  echo "issuer_id: $issuer_id"
-  echo "identity file: $identity_file"
-  echo "issuer_admin_token: $issuer_admin_token"
-  if [[ "$beta_profile" == "1" ]]; then
-    echo "beta profile: enabled (quorum and anti-concentration defaults applied)"
-  fi
-  echo "client_allowlist: $client_allowlist"
-  echo "allow_anon_cred: $allow_anon_cred"
-  echo "health checks:"
-  echo "  curl http://${public_host}:8081/v1/relays"
-  echo "  curl http://${public_host}:8082/v1/pubkeys"
-  echo "  curl http://${public_host}:8083/v1/health"
-  echo "  curl http://${public_host}:8084/v1/health"
 
   if [[ -n "$peer_dirs" ]]; then
     local bootstrap_host
@@ -770,17 +1438,28 @@ server_up() {
 
 server_status() {
   ensure_deps_or_die
-  compose_server ps
+  local env_file
+  env_file="$(active_server_env_file)"
+  compose_with_env "$env_file" ps
 }
 
 server_logs() {
   ensure_deps_or_die
-  compose_server logs --tail=150 directory issuer entry-exit
+  local env_file mode
+  env_file="$(active_server_env_file)"
+  mode="$(active_server_mode)"
+  if [[ "$mode" == "provider" ]]; then
+    compose_with_env "$env_file" logs --tail=150 directory entry-exit
+  else
+    compose_with_env "$env_file" logs --tail=150 directory issuer entry-exit
+  fi
 }
 
 server_down() {
   ensure_deps_or_die
-  compose_server down --remove-orphans
+  local env_file
+  env_file="$(active_server_env_file)"
+  compose_with_env "$env_file" down --remove-orphans
 }
 
 cleanup_client_demo_artifacts() {
@@ -801,7 +1480,8 @@ cleanup_client_demo_artifacts() {
 stop_all() {
   ensure_deps_or_die
 
-  compose_server down --remove-orphans >/dev/null 2>&1 || true
+  compose_with_env "$AUTHORITY_ENV_FILE" down --remove-orphans >/dev/null 2>&1 || true
+  compose_with_env "$PROVIDER_ENV_FILE" down --remove-orphans >/dev/null 2>&1 || true
   (
     cd "$DEPLOY_DIR"
     env COMPOSE_INTERACTIVE_NO_CLI=1 COMPOSE_MENU=0 docker compose --profile demo down --remove-orphans >/dev/null 2>&1 || true
@@ -964,25 +1644,34 @@ server_env_value() {
 }
 
 default_issuer_url_for_invites() {
-  # Prefer local issuer endpoint when this command runs on a server machine.
-  if curl -fsS --connect-timeout 2 --max-time 4 "http://127.0.0.1:8082/v1/pubkeys" >/dev/null 2>&1; then
-    echo "http://127.0.0.1:8082"
-    return
-  fi
-
   local issuer_url=""
   local directory_public_url=""
   local public_host=""
+  local scheme="http"
+  local local_issuer_url=""
+  local -a local_opts
 
-  directory_public_url="$(server_env_value "DIRECTORY_PUBLIC_URL")"
+  directory_public_url="$(trim_url "$(server_env_value "DIRECTORY_PUBLIC_URL")")"
+  if is_https_url "$directory_public_url"; then
+    scheme="https"
+  fi
+  local_issuer_url="$(ensure_url_scheme "127.0.0.1:8082" "$scheme")"
+  mapfile -t local_opts < <(curl_tls_opts_for_url "$local_issuer_url")
+
+  # Prefer local issuer endpoint when this command runs on a server machine.
+  if curl -fsS --connect-timeout 2 --max-time 6 "${local_opts[@]}" "${local_issuer_url}/v1/pubkeys" >/dev/null 2>&1; then
+    echo "$local_issuer_url"
+    return
+  fi
+
   if [[ -n "$directory_public_url" ]]; then
     public_host="$(host_from_url "$directory_public_url")"
     if [[ -n "$public_host" ]]; then
-      issuer_url="$(url_from_host_port "$public_host" 8082)"
+      issuer_url="$(ensure_url_scheme "$(url_from_host_port "$public_host" 8082)" "$scheme")"
     fi
   fi
   if [[ -z "$issuer_url" ]]; then
-    issuer_url="http://127.0.0.1:8082"
+    issuer_url="$local_issuer_url"
   fi
   echo "$issuer_url"
 }
@@ -1009,8 +1698,11 @@ resolve_invite_admin_token() {
 }
 
 invite_generate() {
+  require_authority_mode "invite-generate"
   local issuer_url="${ISSUER_URL:-}"
   local admin_token=""
+  local admin_key_file=""
+  local admin_key_id=""
   local count="1"
   local prefix="inv"
   local tier="1"
@@ -1023,6 +1715,14 @@ invite_generate() {
         ;;
       --admin-token)
         admin_token="${2:-}"
+        shift 2
+        ;;
+      --admin-key-file)
+        admin_key_file="${2:-}"
+        shift 2
+        ;;
+      --admin-key-id)
+        admin_key_id="${2:-}"
         shift 2
         ;;
       --count)
@@ -1052,10 +1752,21 @@ invite_generate() {
     issuer_url="$(default_issuer_url_for_invites)"
   fi
   issuer_url="$(trim_url "$issuer_url")"
+  if [[ "$issuer_url" != http://* && "$issuer_url" != https://* ]]; then
+    issuer_url="$(ensure_url_scheme "$issuer_url" "http")"
+  fi
+  if [[ -n "$admin_key_file" || -n "$admin_key_id" ]]; then
+    if [[ -z "$admin_key_file" || -z "$admin_key_id" ]]; then
+      echo "invite-generate requires --admin-key-file and --admin-key-id together"
+      exit 2
+    fi
+  fi
 
-  admin_token="$(resolve_invite_admin_token "$admin_token")"
-  if [[ -z "$admin_token" ]]; then
-    echo "invite-generate requires --admin-token or ISSUER_ADMIN_TOKEN in $SERVER_ENV_FILE"
+  local auth_details auth_mode
+  auth_details="$(resolve_invite_admin_auth "$admin_token" "$admin_key_file" "$admin_key_id")"
+  IFS='|' read -r auth_mode admin_token admin_key_file admin_key_id <<<"$auth_details"
+  if [[ "$auth_mode" == "none" ]]; then
+    echo "invite-generate requires admin auth (--admin-token or --admin-key-file + --admin-key-id)"
     exit 2
   fi
   if ! [[ "$count" =~ ^[0-9]+$ ]] || ((count < 1)); then
@@ -1089,7 +1800,7 @@ invite_generate() {
     attempts=$((attempts + 1))
     if ((attempts > max_attempts)); then
       echo "invite-generate failed: could not create requested keys after $max_attempts attempts"
-      echo "check issuer URL/admin token: issuer=$issuer_url"
+      echo "check issuer URL/admin auth: issuer=$issuer_url"
       if [[ -n "$last_error" ]]; then
         echo "last error:"
         echo "$last_error"
@@ -1101,13 +1812,20 @@ invite_generate() {
       continue
     fi
     local upsert_out=""
+    local -a upsert_cmd=(
+      "$upsert_script"
+      --issuer-url "$issuer_url"
+      --subject "$key"
+      --kind "client"
+      --tier "$tier"
+    )
+    if [[ "$auth_mode" == "signed" ]]; then
+      upsert_cmd+=(--admin-key-file "$admin_key_file" --admin-key-id "$admin_key_id")
+    else
+      upsert_cmd+=(--admin-token "$admin_token")
+    fi
     set +e
-    upsert_out="$("$upsert_script" \
-      --issuer-url "$issuer_url" \
-      --admin-token "$admin_token" \
-      --subject "$key" \
-      --kind "client" \
-      --tier "$tier" 2>&1)"
+    upsert_out="$("${upsert_cmd[@]}" 2>&1)"
     local upsert_rc=$?
     set -e
     if [[ $upsert_rc -eq 0 ]]; then
@@ -1116,7 +1834,7 @@ invite_generate() {
     else
       last_error="$upsert_out"
       if [[ "$upsert_out" == *"401"* || "$upsert_out" == *"403"* ]]; then
-        echo "invite-generate failed: issuer rejected admin token (issuer=$issuer_url)"
+        echo "invite-generate failed: issuer rejected admin auth (issuer=$issuer_url)"
         if [[ -n "$last_error" ]]; then
           echo "$last_error"
         fi
@@ -1132,9 +1850,12 @@ invite_generate() {
 }
 
 invite_check() {
+  require_authority_mode "invite-check"
   local key=""
   local issuer_url="${ISSUER_URL:-}"
   local admin_token=""
+  local admin_key_file=""
+  local admin_key_id=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -1148,6 +1869,14 @@ invite_check() {
         ;;
       --admin-token)
         admin_token="${2:-}"
+        shift 2
+        ;;
+      --admin-key-file)
+        admin_key_file="${2:-}"
+        shift 2
+        ;;
+      --admin-key-id)
+        admin_key_id="${2:-}"
         shift 2
         ;;
       -h|--help|help)
@@ -1170,15 +1899,32 @@ invite_check() {
     issuer_url="$(default_issuer_url_for_invites)"
   fi
   issuer_url="$(trim_url "$issuer_url")"
-  admin_token="$(resolve_invite_admin_token "$admin_token")"
-  if [[ -z "$admin_token" ]]; then
-    echo "invite-check requires --admin-token or ISSUER_ADMIN_TOKEN in $SERVER_ENV_FILE"
+  if [[ "$issuer_url" != http://* && "$issuer_url" != https://* ]]; then
+    issuer_url="$(ensure_url_scheme "$issuer_url" "http")"
+  fi
+  if [[ -n "$admin_key_file" || -n "$admin_key_id" ]]; then
+    if [[ -z "$admin_key_file" || -z "$admin_key_id" ]]; then
+      echo "invite-check requires --admin-key-file and --admin-key-id together"
+      exit 2
+    fi
+  fi
+
+  local auth_details auth_mode
+  auth_details="$(resolve_invite_admin_auth "$admin_token" "$admin_key_file" "$admin_key_id")"
+  IFS='|' read -r auth_mode admin_token admin_key_file admin_key_id <<<"$auth_details"
+  if [[ "$auth_mode" == "none" ]]; then
+    echo "invite-check requires admin auth (--admin-token or --admin-key-file + --admin-key-id)"
     exit 2
   fi
 
+  local request_url="${issuer_url}/v1/admin/subject/get?subject=${key}"
+  local -a header_args=()
+  local -a tls_args=()
+  build_admin_header_args "GET" "$request_url" "" "$auth_mode" "$admin_token" "$admin_key_file" "$admin_key_id" header_args
+  mapfile -t tls_args < <(curl_tls_opts_for_url "$issuer_url")
+
   local payload
-  payload="$(curl -fsS "${issuer_url}/v1/admin/subject/get?subject=${key}" \
-    -H "X-Admin-Token: ${admin_token}" 2>/dev/null || true)"
+  payload="$(curl -fsS --connect-timeout 4 --max-time 12 "${tls_args[@]}" "${header_args[@]}" "$request_url" 2>/dev/null || true)"
   if [[ -z "$payload" ]]; then
     echo "invite key not found: $key"
     exit 1
@@ -1196,9 +1942,12 @@ invite_check() {
 }
 
 invite_disable() {
+  require_authority_mode "invite-disable"
   local key=""
   local issuer_url="${ISSUER_URL:-}"
   local admin_token=""
+  local admin_key_file=""
+  local admin_key_id=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -1212,6 +1961,14 @@ invite_disable() {
         ;;
       --admin-token)
         admin_token="${2:-}"
+        shift 2
+        ;;
+      --admin-key-file)
+        admin_key_file="${2:-}"
+        shift 2
+        ;;
+      --admin-key-id)
+        admin_key_id="${2:-}"
         shift 2
         ;;
       -h|--help|help)
@@ -1234,9 +1991,21 @@ invite_disable() {
     issuer_url="$(default_issuer_url_for_invites)"
   fi
   issuer_url="$(trim_url "$issuer_url")"
-  admin_token="$(resolve_invite_admin_token "$admin_token")"
-  if [[ -z "$admin_token" ]]; then
-    echo "invite-disable requires --admin-token or ISSUER_ADMIN_TOKEN in $SERVER_ENV_FILE"
+  if [[ "$issuer_url" != http://* && "$issuer_url" != https://* ]]; then
+    issuer_url="$(ensure_url_scheme "$issuer_url" "http")"
+  fi
+  if [[ -n "$admin_key_file" || -n "$admin_key_id" ]]; then
+    if [[ -z "$admin_key_file" || -z "$admin_key_id" ]]; then
+      echo "invite-disable requires --admin-key-file and --admin-key-id together"
+      exit 2
+    fi
+  fi
+
+  local auth_details auth_mode
+  auth_details="$(resolve_invite_admin_auth "$admin_token" "$admin_key_file" "$admin_key_id")"
+  IFS='|' read -r auth_mode admin_token admin_key_file admin_key_id <<<"$auth_details"
+  if [[ "$auth_mode" == "none" ]]; then
+    echo "invite-disable requires admin auth (--admin-token or --admin-key-file + --admin-key-id)"
     exit 2
   fi
 
@@ -1245,12 +2014,19 @@ invite_disable() {
     echo "missing helper script: $upsert_script"
     exit 2
   fi
-  "$upsert_script" \
-    --issuer-url "$issuer_url" \
-    --admin-token "$admin_token" \
-    --subject "$key" \
-    --kind "relay-exit" \
-    --tier "1" >/dev/null
+  local -a upsert_cmd=(
+    "$upsert_script"
+    --issuer-url "$issuer_url"
+    --subject "$key"
+    --kind "relay-exit"
+    --tier "1"
+  )
+  if [[ "$auth_mode" == "signed" ]]; then
+    upsert_cmd+=(--admin-key-file "$admin_key_file" --admin-key-id "$admin_key_id")
+  else
+    upsert_cmd+=(--admin-token "$admin_token")
+  fi
+  "${upsert_cmd[@]}" >/dev/null
   echo "invite key disabled: $key (issuer=$issuer_url)"
 }
 
@@ -1275,6 +2051,7 @@ client_test() {
   local min_exit_operators="${EASY_NODE_CLIENT_MIN_EXIT_OPERATORS:-1}"
   local require_cross_operator_pair="${EASY_NODE_CLIENT_REQUIRE_CROSS_OPERATOR_PAIR:-0}"
   local beta_profile="${EASY_NODE_BETA_PROFILE:-0}"
+  local prod_profile="${EASY_NODE_PROD_PROFILE:-0}"
   local bootstrap_directory=""
   local discovery_wait_sec="${EASY_NODE_DISCOVERY_WAIT_SEC:-12}"
   local min_sources_set=0
@@ -1372,6 +2149,15 @@ client_test() {
           shift
         fi
         ;;
+      --prod-profile)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          prod_profile="${2:-}"
+          shift 2
+        else
+          prod_profile="1"
+          shift
+        fi
+        ;;
       *)
         echo "unknown arg for client-test: $1"
         exit 2
@@ -1403,6 +2189,13 @@ client_test() {
     echo "client-test requires --beta-profile (or EASY_NODE_BETA_PROFILE) to be 0 or 1"
     exit 2
   fi
+  if [[ "$prod_profile" != "0" && "$prod_profile" != "1" ]]; then
+    echo "client-test requires --prod-profile (or EASY_NODE_PROD_PROFILE) to be 0 or 1"
+    exit 2
+  fi
+  if [[ "$prod_profile" == "1" ]]; then
+    beta_profile="1"
+  fi
   if [[ "$beta_profile" == "1" ]]; then
     if [[ "$distinct_set" -eq 0 ]]; then
       require_distinct_operators="1"
@@ -1416,8 +2209,13 @@ client_test() {
     exit 2
   fi
 
+  local client_url_scheme="http"
+  if [[ "$prod_profile" == "1" ]]; then
+    client_url_scheme="https"
+  fi
+
   if [[ -n "$bootstrap_directory" ]]; then
-    bootstrap_directory="$(trim_url "$bootstrap_directory")"
+    bootstrap_directory="$(ensure_url_scheme "$bootstrap_directory" "$client_url_scheme")"
     if ! [[ "$discovery_wait_sec" =~ ^[0-9]+$ ]]; then
       echo "client-test requires --discovery-wait-sec to be numeric"
       exit 2
@@ -1449,6 +2247,10 @@ client_test() {
     echo "or use --bootstrap-directory for automatic discovery."
     exit 2
   fi
+  directory_urls="$(normalize_url_csv_scheme "$directory_urls" "$client_url_scheme")"
+  issuer_url="$(ensure_url_scheme "$issuer_url" "$client_url_scheme")"
+  entry_url="$(ensure_url_scheme "$entry_url" "$client_url_scheme")"
+  exit_url="$(ensure_url_scheme "$exit_url" "$client_url_scheme")"
 
   ensure_deps_or_die
   cleanup_client_demo_artifacts
@@ -1478,10 +2280,15 @@ EOF_CLIENT
     echo "      this only works when those addresses are reachable from inside the client container."
   fi
 
-  wait_http_ok "${first_dir%/}/v1/pubkeys" "directory" 8 || return 1
-  wait_http_ok "${issuer_url%/}/v1/pubkeys" "issuer" 8 || return 1
-  wait_http_ok "${entry_url%/}/v1/health" "entry" 8 || return 1
-  wait_http_ok "${exit_url%/}/v1/health" "exit" 8 || return 1
+  local -a dir_opts issuer_opts entry_opts exit_opts
+  mapfile -t dir_opts < <(curl_tls_opts_for_url "$first_dir")
+  mapfile -t issuer_opts < <(curl_tls_opts_for_url "$issuer_url")
+  mapfile -t entry_opts < <(curl_tls_opts_for_url "$entry_url")
+  mapfile -t exit_opts < <(curl_tls_opts_for_url "$exit_url")
+  wait_http_ok_with_opts "${first_dir%/}/v1/pubkeys" "directory" 8 "${dir_opts[@]}" || return 1
+  wait_http_ok_with_opts "${issuer_url%/}/v1/pubkeys" "issuer" 8 "${issuer_opts[@]}" || return 1
+  wait_http_ok_with_opts "${entry_url%/}/v1/health" "entry" 8 "${entry_opts[@]}" || return 1
+  wait_http_ok_with_opts "${exit_url%/}/v1/health" "exit" 8 "${exit_opts[@]}" || return 1
 
   local do_build=0
   if [[ "$force_build" == "1" ]]; then
@@ -1507,6 +2314,9 @@ EOF_CLIENT
   fi
   if [[ "$beta_profile" == "1" ]]; then
     echo "client test: beta profile enabled (distinct operators + multi-source defaults)"
+  fi
+  if [[ "$prod_profile" == "1" ]]; then
+    echo "client test: prod profile enabled (mTLS + fail-closed strict mode)"
   fi
 
   local -a run_cmd
@@ -1538,6 +2348,20 @@ EOF_CLIENT
     run_cmd+=(
       -e "DIRECTORY_MIN_OPERATORS=2"
       -e "CLIENT_DIRECTORY_MIN_OPERATORS=2"
+      -e "BETA_STRICT_MODE=1"
+    )
+  fi
+  if [[ "$prod_profile" == "1" ]]; then
+    run_cmd+=(
+      -e "PROD_STRICT_MODE=1"
+      -e "MTLS_ENABLE=1"
+      -e "MTLS_CA_FILE=/app/tls/ca.crt"
+      -e "MTLS_CLIENT_CERT_FILE=/app/tls/client.crt"
+      -e "MTLS_CLIENT_KEY_FILE=/app/tls/client.key"
+      -e "MTLS_CERT_FILE=/app/tls/client.crt"
+      -e "MTLS_KEY_FILE=/app/tls/client.key"
+      -e "DIRECTORY_TRUST_STRICT=1"
+      -e "DIRECTORY_TRUST_TOFU=0"
     )
   fi
   if [[ -n "$exit_country" ]]; then
@@ -1701,6 +2525,10 @@ main() {
     invite-disable)
       shift
       invite_disable "$@"
+      ;;
+    bootstrap-mtls)
+      shift
+      bootstrap_mtls "$@"
       ;;
     machine-a-test)
       shift
