@@ -58,7 +58,10 @@ MTLS_CERT_FILE=$tls_dir/tls/node.crt
 MTLS_KEY_FILE=$tls_dir/tls/node.key
 ISSUER_ADMIN_REQUIRE_SIGNED=1
 ISSUER_ADMIN_ALLOW_TOKEN=0
+DIRECTORY_ADMIN_TOKEN=prod-directory-admin-token-1234567890
+ENTRY_PUZZLE_SECRET=prod-entry-puzzle-secret-1234567890
 EOF_ENV
+chmod 600 "$AUTH_ENV" 2>/dev/null || true
 
 cat >"$MODE_FILE" <<'EOF_MODE'
 EASY_NODE_SERVER_MODE=authority
@@ -119,6 +122,32 @@ fi
 if ! rg -q "MTLS_ENABLE must be 1" /tmp/integration_prod_preflight_fail.log; then
   echo "missing expected MTLS failure signal in prod-preflight output"
   cat /tmp/integration_prod_preflight_fail.log
+  exit 1
+fi
+
+sed -i -E 's/^MTLS_ENABLE=.*/MTLS_ENABLE=1/' "$AUTH_ENV"
+sed -i -E 's/^ENTRY_PUZZLE_SECRET=.*/ENTRY_PUZZLE_SECRET=entry-secret-default/' "$AUTH_ENV"
+if ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_secret_fail.log 2>&1; then
+  echo "expected prod-preflight to fail with default ENTRY_PUZZLE_SECRET"
+  cat /tmp/integration_prod_preflight_secret_fail.log
+  exit 1
+fi
+if ! rg -q "ENTRY_PUZZLE_SECRET must be set, non-default, and len>=16" /tmp/integration_prod_preflight_secret_fail.log; then
+  echo "missing expected entry puzzle secret failure signal in prod-preflight output"
+  cat /tmp/integration_prod_preflight_secret_fail.log
+  exit 1
+fi
+
+sed -i -E 's/^ENTRY_PUZZLE_SECRET=.*/ENTRY_PUZZLE_SECRET=prod-entry-puzzle-secret-1234567890/' "$AUTH_ENV"
+chmod 644 "$tls_dir/tls/client.key" 2>/dev/null || true
+if ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_perm_fail.log 2>&1; then
+  echo "expected prod-preflight to fail when private key permissions are too open"
+  cat /tmp/integration_prod_preflight_perm_fail.log
+  exit 1
+fi
+if ! rg -q "private file permissions too open" /tmp/integration_prod_preflight_perm_fail.log; then
+  echo "missing expected private file permission failure signal in prod-preflight output"
+  cat /tmp/integration_prod_preflight_perm_fail.log
   exit 1
 fi
 

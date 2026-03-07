@@ -122,6 +122,7 @@
 - Optional mTLS transport helper wiring across control-plane services/clients (`MTLS_ENABLE` + cert/key/CA envs) and easy-mode mTLS bootstrap tooling (`scripts/bootstrap_mtls.sh`).
 - Easy-node authority signer maintenance commands (`admin-signing-status`, `admin-signing-rotate`) and strict deployment preflight (`prod-preflight`).
 - Easy-node signer rotation supports bounded key history retention (`--key-history`) and prod preflight supports optional live endpoint reachability checks (`--check-live`).
+- Prod preflight hardening now also verifies non-default directory/puzzle secrets and private-file permission posture (env + TLS/private signing keys not group/world accessible).
 - Directory beta strict policy hardening now enforces stronger quorum floors (`DIRECTORY_PEER_MIN_OPERATORS>=2`, `DIRECTORY_PEER_MIN_VOTES>=2`, `DIRECTORY_PEER_DISCOVERY_MIN_VOTES>=2`, `DIRECTORY_PEER_DISCOVERY_MAX_PER_SOURCE>0`, `DIRECTORY_PEER_DISCOVERY_MAX_PER_OPERATOR>0`, at least 2 `DIRECTORY_ISSUER_TRUST_URLS`, `DIRECTORY_ISSUER_MIN_OPERATORS>=2`, `DIRECTORY_ISSUER_TRUST_MIN_VOTES>=2`, `DIRECTORY_ISSUER_DISPUTE_MIN_VOTES>=2`, `DIRECTORY_ISSUER_APPEAL_MIN_VOTES>=2`, `DIRECTORY_FINAL_ADJUDICATION_MIN_SOURCES>=2`, `DIRECTORY_FINAL_DISPUTE_MIN_VOTES>=2`, `DIRECTORY_FINAL_APPEAL_MIN_VOTES>=2`).
 - Token revocation feed (`/v1/revocations`) with exit-side periodic enforcement.
 - Signed/epoch-style revocation feed (`generated_at`/`expires_at` + signature) with exit-side verification.

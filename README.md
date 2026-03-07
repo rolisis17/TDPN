@@ -229,6 +229,7 @@ sudo ./scripts/easy_node.sh stop-all --with-wg-only 1 --force-iface-cleanup 1
 - if `--operator-id` / `--issuer-id` are omitted, unique IDs are auto-generated and persisted in `deploy/data/easy_node_identity.conf`.
 - directory/issuer signing key file names are derived from those IDs to avoid accidental key reuse across machines.
 - authority admin token is hidden in output by default; use `--show-admin-token 1` only when you explicitly need to view it.
+- easy-mode `server-up` auto-generates and stores non-default `DIRECTORY_ADMIN_TOKEN` and `ENTRY_PUZZLE_SECRET` (both hidden in output unless you inspect env files).
 - `--prod-profile 1` forces strict fail-closed runtime (`BETA_STRICT_MODE=1`, `PROD_STRICT_MODE=1`), enables mTLS, and on authority nodes requires signed issuer-admin auth (`ISSUER_ADMIN_REQUIRE_SIGNED=1`, token admin auth disabled).
 - `invite-generate`, `invite-check`, and `invite-disable` support either token auth (`--admin-token`) or signed auth (`--admin-key-file` + `--admin-key-id`).
 - `admin-signing-status` / `admin-signing-rotate` are authority-only signer maintenance helpers.
@@ -242,6 +243,8 @@ sudo ./scripts/easy_node.sh stop-all --with-wg-only 1 --force-iface-cleanup 1
 
 Optional env vars:
 - `EASY_NODE_BETA_PROFILE` (`1` enables easy-mode beta defaults in `server-up` and `client-test`)
+- `EASY_NODE_DIRECTORY_ADMIN_TOKEN` (optional override for `server-up` generated `DIRECTORY_ADMIN_TOKEN`)
+- `EASY_NODE_ENTRY_PUZZLE_SECRET` (optional override for `server-up` generated `ENTRY_PUZZLE_SECRET`)
 - `DIRECTORY_ADDR` (default `127.0.0.1:8081`)
 - `ISSUER_ADDR` (default `127.0.0.1:8082`)
 - `ENTRY_ADDR` (default `127.0.0.1:8083`)

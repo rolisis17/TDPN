@@ -24,7 +24,7 @@ usage() {
   cat <<'USAGE'
 Usage:
   ./scripts/easy_node.sh check
-  ./scripts/easy_node.sh server-up [--mode authority|provider] [--public-host HOST] [--operator-id ID] [--issuer-id ID] [--issuer-admin-token TOKEN] [--authority-directory URL] [--authority-issuer URL] [--peer-directories URLS] [--bootstrap-directory URL] [--client-allowlist [0|1]] [--allow-anon-cred [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]] [--show-admin-token [0|1]]
+  ./scripts/easy_node.sh server-up [--mode authority|provider] [--public-host HOST] [--operator-id ID] [--issuer-id ID] [--issuer-admin-token TOKEN] [--directory-admin-token TOKEN] [--entry-puzzle-secret SECRET] [--authority-directory URL] [--authority-issuer URL] [--peer-directories URLS] [--bootstrap-directory URL] [--client-allowlist [0|1]] [--allow-anon-cred [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]] [--show-admin-token [0|1]]
   ./scripts/easy_node.sh server-status
   ./scripts/easy_node.sh server-logs
   ./scripts/easy_node.sh server-down
@@ -837,14 +837,16 @@ write_authority_env() {
   local operator_id="$2"
   local issuer_id="$3"
   local issuer_admin_token="$4"
-  local peer_dirs="$5"
-  local beta_profile="$6"
-  local client_allowlist="$7"
-  local allow_anon_cred="$8"
-  local prod_profile="$9"
-  local admin_signers_file_container="${10:-}"
-  local admin_sign_key_id="${11:-}"
-  local admin_sign_key_file_local="${12:-}"
+  local directory_admin_token="$5"
+  local entry_puzzle_secret="$6"
+  local peer_dirs="$7"
+  local beta_profile="$8"
+  local client_allowlist="$9"
+  local allow_anon_cred="${10}"
+  local prod_profile="${11}"
+  local admin_signers_file_container="${12:-}"
+  local admin_sign_key_id="${13:-}"
+  local admin_sign_key_file_local="${14:-}"
   local public_scheme="http"
   local relay_suffix
   local issuer_suffix
@@ -879,6 +881,8 @@ ISSUER_ANON_REVOCATIONS_FILE=/app/data/issuer_${issuer_suffix}_anon_revocations.
 ISSUER_ANON_DISPUTES_FILE=/app/data/issuer_${issuer_suffix}_anon_disputes.json
 ISSUER_AUDIT_FILE=/app/data/issuer_${issuer_suffix}_audit.json
 ISSUER_ADMIN_TOKEN=${issuer_admin_token}
+DIRECTORY_ADMIN_TOKEN=${directory_admin_token}
+ENTRY_PUZZLE_SECRET=${entry_puzzle_secret}
 ISSUER_CLIENT_ALLOWLIST_ONLY=${client_allowlist}
 ISSUER_ALLOW_ANON_CRED=${allow_anon_cred}
 EOF_ENV
@@ -942,10 +946,12 @@ EOF_PROD
 write_provider_env() {
   local public_host="$1"
   local operator_id="$2"
-  local peer_dirs="$3"
-  local beta_profile="$4"
-  local authority_issuer="$5"
-  local prod_profile="$6"
+  local directory_admin_token="$3"
+  local entry_puzzle_secret="$4"
+  local peer_dirs="$5"
+  local beta_profile="$6"
+  local authority_issuer="$7"
+  local prod_profile="$8"
   local public_scheme="http"
   local relay_suffix
 
@@ -967,6 +973,8 @@ ENTRY_RELAY_ID=entry-${relay_suffix}
 EXIT_RELAY_ID=exit-${relay_suffix}
 DIRECTORY_PRIVATE_KEY_FILE=/app/data/directory_${relay_suffix}_ed25519.key
 DIRECTORY_PREVIOUS_PUBKEYS_FILE=/app/data/directory_${relay_suffix}_previous_pubkeys.txt
+DIRECTORY_ADMIN_TOKEN=${directory_admin_token}
+ENTRY_PUZZLE_SECRET=${entry_puzzle_secret}
 CORE_DIRECTORY_URL=${public_scheme}://directory:8081
 CORE_ISSUER_URL=${authority_issuer}
 EOF_ENV
@@ -1040,6 +1048,8 @@ server_up() {
   local issuer_id_explicit="0"
   local issuer_admin_token=""
   local issuer_admin_token_explicit="0"
+  local directory_admin_token="${EASY_NODE_DIRECTORY_ADMIN_TOKEN:-}"
+  local entry_puzzle_secret="${EASY_NODE_ENTRY_PUZZLE_SECRET:-}"
   local peer_dirs=""
   local bootstrap_directory=""
   local authority_directory="${EASY_NODE_AUTHORITY_DIRECTORY:-}"
@@ -1075,6 +1085,14 @@ server_up() {
       --issuer-admin-token)
         issuer_admin_token="${2:-}"
         issuer_admin_token_explicit="1"
+        shift 2
+        ;;
+      --directory-admin-token)
+        directory_admin_token="${2:-}"
+        shift 2
+        ;;
+      --entry-puzzle-secret)
+        entry_puzzle_secret="${2:-}"
         shift 2
         ;;
       --authority-directory)
@@ -1251,6 +1269,23 @@ server_up() {
 
   ensure_deps_or_die
 
+  if [[ -z "$directory_admin_token" ]]; then
+    directory_admin_token="$(random_token)"
+  fi
+  if [[ -z "$entry_puzzle_secret" ]]; then
+    entry_puzzle_secret="$(random_token)"
+  fi
+  if [[ "$prod_profile" == "1" ]]; then
+    if [[ "$directory_admin_token" == "dev-admin-token" || "${#directory_admin_token}" -lt 16 ]]; then
+      echo "server-up requires a strong DIRECTORY_ADMIN_TOKEN in prod profile (len>=16, non-default)"
+      exit 2
+    fi
+    if [[ "$entry_puzzle_secret" == "entry-secret-default" || "${#entry_puzzle_secret}" -lt 16 ]]; then
+      echo "server-up requires a strong ENTRY_PUZZLE_SECRET in prod profile (len>=16, non-default)"
+      exit 2
+    fi
+  fi
+
   local identity_file
   local stored_operator_id
   local stored_issuer_id
@@ -1360,7 +1395,7 @@ server_up() {
   write_identity_config "$operator_id" "$issuer_id"
 
   if [[ "$mode" == "authority" ]]; then
-    write_authority_env "$public_host" "$operator_id" "$issuer_id" "$issuer_admin_token" "$peer_dirs" "$beta_profile" "$client_allowlist" "$allow_anon_cred" "$prod_profile" "$admin_signers_file_container" "$admin_sign_key_id" "$admin_sign_key_file_local"
+    write_authority_env "$public_host" "$operator_id" "$issuer_id" "$issuer_admin_token" "$directory_admin_token" "$entry_puzzle_secret" "$peer_dirs" "$beta_profile" "$client_allowlist" "$allow_anon_cred" "$prod_profile" "$admin_signers_file_container" "$admin_sign_key_id" "$admin_sign_key_file_local"
     compose_with_env "$AUTHORITY_ENV_FILE" up -d --build directory issuer entry-exit
 
     local -a local_opts
@@ -1394,6 +1429,8 @@ server_up() {
     else
       echo "issuer_admin_token: [hidden] (set --show-admin-token to print)"
     fi
+    echo "directory_admin_token: [hidden]"
+    echo "entry_puzzle_secret: [hidden]"
     if [[ "$beta_profile" == "1" ]]; then
       echo "beta profile: enabled (quorum and anti-concentration defaults applied)"
     fi
@@ -1420,7 +1457,7 @@ server_up() {
       echo "  curl ${url_scheme}://${public_host}:8084/v1/health"
     fi
   else
-    write_provider_env "$public_host" "$operator_id" "$peer_dirs" "$beta_profile" "$authority_issuer" "$prod_profile"
+    write_provider_env "$public_host" "$operator_id" "$directory_admin_token" "$entry_puzzle_secret" "$peer_dirs" "$beta_profile" "$authority_issuer" "$prod_profile"
     compose_with_env "$PROVIDER_ENV_FILE" up -d --build --no-deps directory entry-exit
 
     local -a local_opts
@@ -1450,6 +1487,8 @@ server_up() {
     echo "env file: $PROVIDER_ENV_FILE"
     echo "operator_id: $operator_id"
     echo "identity file: $identity_file"
+    echo "directory_admin_token: [hidden]"
+    echo "entry_puzzle_secret: [hidden]"
     if [[ "$beta_profile" == "1" ]]; then
       echo "beta profile: enabled (quorum and anti-concentration defaults applied)"
     fi
@@ -2529,6 +2568,37 @@ cert_not_after_unix() {
   echo "$end_epoch"
 }
 
+file_mode_octal() {
+  local file="$1"
+  local mode=""
+  if mode="$(stat -c "%a" "$file" 2>/dev/null)"; then
+    :
+  elif mode="$(stat -f "%Lp" "$file" 2>/dev/null)"; then
+    :
+  else
+    return 1
+  fi
+  mode="$(printf '%s' "$mode" | tr -cd '0-7')"
+  if [[ -z "$mode" ]]; then
+    return 1
+  fi
+  echo "$mode"
+}
+
+private_file_mode_secure() {
+  local file="$1"
+  local mode oct
+  mode="$(file_mode_octal "$file" || true)"
+  if [[ -z "$mode" ]]; then
+    return 2
+  fi
+  oct=$((8#$mode))
+  if (( (oct & 0077) == 0 )); then
+    return 0
+  fi
+  return 1
+}
+
 default_issuer_url_for_invites() {
   local issuer_url=""
   local directory_public_url=""
@@ -3219,6 +3289,38 @@ prod_preflight() {
     fi
   done
 
+  local directory_admin_token entry_puzzle_secret
+  directory_admin_token="$(identity_value "$env_file" "DIRECTORY_ADMIN_TOKEN")"
+  entry_puzzle_secret="$(identity_value "$env_file" "ENTRY_PUZZLE_SECRET")"
+  if [[ -n "$directory_admin_token" && "$directory_admin_token" != "dev-admin-token" && "${#directory_admin_token}" -ge 16 ]]; then
+    check_ok "DIRECTORY_ADMIN_TOKEN configured and non-default"
+  else
+    check_fail "DIRECTORY_ADMIN_TOKEN must be set, non-default, and len>=16"
+  fi
+  if [[ -n "$entry_puzzle_secret" && "$entry_puzzle_secret" != "entry-secret-default" && "${#entry_puzzle_secret}" -ge 16 ]]; then
+    check_ok "ENTRY_PUZZLE_SECRET configured and non-default"
+  else
+    check_fail "ENTRY_PUZZLE_SECRET must be set, non-default, and len>=16"
+  fi
+
+  local private_files=("$env_file" "$key_file" "$client_key_file")
+  local pf pf_mode
+  for pf in "${private_files[@]}"; do
+    if [[ ! -f "$pf" ]]; then
+      continue
+    fi
+    pf_mode="$(file_mode_octal "$pf" || true)"
+    if private_file_mode_secure "$pf"; then
+      check_ok "private file permissions secure (no group/other access): $pf mode=${pf_mode:-unknown}"
+    else
+      if [[ -n "$pf_mode" ]]; then
+        check_fail "private file permissions too open: $pf mode=${pf_mode} (expected group/other=0)"
+      else
+        check_fail "unable to read file permissions: $pf"
+      fi
+    fi
+  done
+
   local now_epoch min_epoch
   now_epoch="$(date -u +%s)"
   min_epoch=$((now_epoch + days_min * 86400))
@@ -3268,11 +3370,22 @@ prod_preflight() {
     else
       check_fail "missing ISSUER_ADMIN_SIGNING_KEY_ID"
     fi
-    if [[ -f "$key_path" ]]; then
-      check_ok "admin signing key exists: $key_path"
-      local inspect_json derived_id derived_pub
-      inspect_json="$(
-        cd "$ROOT_DIR"
+      if [[ -f "$key_path" ]]; then
+        check_ok "admin signing key exists: $key_path"
+        local key_mode
+        key_mode="$(file_mode_octal "$key_path" || true)"
+        if private_file_mode_secure "$key_path"; then
+          check_ok "admin signing private key permissions secure (no group/other access): $key_path mode=${key_mode:-unknown}"
+        else
+          if [[ -n "$key_mode" ]]; then
+            check_fail "admin signing private key permissions too open: $key_path mode=${key_mode} (expected group/other=0)"
+          else
+            check_fail "unable to read admin signing private key permissions: $key_path"
+          fi
+        fi
+        local inspect_json derived_id derived_pub
+        inspect_json="$(
+          cd "$ROOT_DIR"
         go run ./cmd/adminsig inspect --private-key-file "$key_path"
       )"
       derived_id="$(printf '%s\n' "$inspect_json" | rg -o '"key_id":"[^"]+"' | head -n1 | sed -E 's/^"key_id":"([^"]+)"$/\1/')"

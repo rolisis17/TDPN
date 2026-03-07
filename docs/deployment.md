@@ -37,7 +37,7 @@ Data locations:
 - `deploy/data/entry-exit`
 
 Notes:
-- Change `ISSUER_ADMIN_TOKEN` before non-local use.
+- In easy-mode `server-up`, issuer/directory/puzzle secrets are auto-generated; if you override manually, avoid defaults and keep them private.
 - `entry-exit` is one process running both roles (`--entry --exit`).
 
 ## 2) Easy installer + launcher (for simple testing)
