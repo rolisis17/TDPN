@@ -22,6 +22,7 @@ CLIENT_FAIL_LOG="/tmp/integration_beta_strict_roles_client_fail.log"
 CLIENT_MULTI_DIR_FAIL_LOG="/tmp/integration_beta_strict_roles_client_multi_dir_fail.log"
 CLIENT_MULTI_DIR_OP_FAIL_LOG="/tmp/integration_beta_strict_roles_client_multi_dir_operator_fail.log"
 ENTRY_FAIL_LOG="/tmp/integration_beta_strict_roles_entry_fail.log"
+ENTRY_PUZZLE_FAIL_LOG="/tmp/integration_beta_strict_roles_entry_puzzle_fail.log"
 ENTRY_MULTI_DIR_FAIL_LOG="/tmp/integration_beta_strict_roles_entry_multi_dir_fail.log"
 ENTRY_MULTI_DIR_OP_FAIL_LOG="/tmp/integration_beta_strict_roles_entry_multi_dir_operator_fail.log"
 EXIT_FAIL_LOG="/tmp/integration_beta_strict_roles_exit_fail.log"
@@ -33,7 +34,7 @@ ISSUER_FAIL_LOG="/tmp/integration_beta_strict_roles_issuer_fail.log"
 ISSUER_SHORT_TOKEN_FAIL_LOG="/tmp/integration_beta_strict_roles_issuer_short_token_fail.log"
 ENTRY_OK_LOG="/tmp/integration_beta_strict_roles_entry_ok.log"
 ISSUER_OK_LOG="/tmp/integration_beta_strict_roles_issuer_ok.log"
-rm -f "$CLIENT_FAIL_LOG" "$CLIENT_MULTI_DIR_FAIL_LOG" "$CLIENT_MULTI_DIR_OP_FAIL_LOG" "$ENTRY_FAIL_LOG" "$ENTRY_MULTI_DIR_FAIL_LOG" "$ENTRY_MULTI_DIR_OP_FAIL_LOG" "$EXIT_FAIL_LOG" "$EXIT_REBIND_FAIL_LOG" "$EXIT_MULTI_ISSUER_FAIL_LOG" "$EXIT_MULTI_ISSUER_OP_FAIL_LOG" "$EXIT_MULTI_ISSUER_ID_FAIL_LOG" "$ISSUER_FAIL_LOG" "$ISSUER_SHORT_TOKEN_FAIL_LOG" "$ENTRY_OK_LOG" "$ISSUER_OK_LOG"
+rm -f "$CLIENT_FAIL_LOG" "$CLIENT_MULTI_DIR_FAIL_LOG" "$CLIENT_MULTI_DIR_OP_FAIL_LOG" "$ENTRY_FAIL_LOG" "$ENTRY_PUZZLE_FAIL_LOG" "$ENTRY_MULTI_DIR_FAIL_LOG" "$ENTRY_MULTI_DIR_OP_FAIL_LOG" "$EXIT_FAIL_LOG" "$EXIT_REBIND_FAIL_LOG" "$EXIT_MULTI_ISSUER_FAIL_LOG" "$EXIT_MULTI_ISSUER_OP_FAIL_LOG" "$EXIT_MULTI_ISSUER_ID_FAIL_LOG" "$ISSUER_FAIL_LOG" "$ISSUER_SHORT_TOKEN_FAIL_LOG" "$ENTRY_OK_LOG" "$ISSUER_OK_LOG"
 
 if CLIENT_BETA_STRICT=1 timeout 12s go run ./cmd/node --client >"$CLIENT_FAIL_LOG" 2>&1; then
   echo "expected strict client startup failure with default client config"
@@ -106,6 +107,23 @@ fi
 if ! rg -q "BETA_STRICT_MODE requires ENTRY_LIVE_WG_MODE=1" "$ENTRY_FAIL_LOG"; then
   echo "missing expected strict entry validation signal"
   cat "$ENTRY_FAIL_LOG"
+  exit 1
+fi
+
+if ENTRY_BETA_STRICT=1 \
+  ENTRY_LIVE_WG_MODE=1 \
+  ENTRY_DIRECTORY_TRUST_STRICT=1 \
+  ENTRY_REQUIRE_DISTINCT_EXIT_OPERATOR=1 \
+  ENTRY_PUZZLE_SECRET=integration-entry-secret-0001 \
+  ENTRY_OPERATOR_ID=op-entry \
+  timeout 12s go run ./cmd/node --entry >"$ENTRY_PUZZLE_FAIL_LOG" 2>&1; then
+  echo "expected strict entry startup failure with disabled puzzle difficulty"
+  cat "$ENTRY_PUZZLE_FAIL_LOG"
+  exit 1
+fi
+if ! rg -q "BETA_STRICT_MODE requires ENTRY_PUZZLE_DIFFICULTY>0" "$ENTRY_PUZZLE_FAIL_LOG"; then
+  echo "missing expected strict entry puzzle difficulty validation signal"
+  cat "$ENTRY_PUZZLE_FAIL_LOG"
   exit 1
 fi
 
