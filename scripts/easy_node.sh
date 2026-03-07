@@ -37,6 +37,9 @@ Usage:
   ./scripts/easy_node.sh invite-generate [--issuer-url URL] [--admin-token TOKEN] [--admin-key-file FILE] [--admin-key-id ID] [--count N] [--prefix PREFIX] [--tier 1|2|3]
   ./scripts/easy_node.sh invite-check --key KEY [--issuer-url URL] [--admin-token TOKEN] [--admin-key-file FILE] [--admin-key-id ID]
   ./scripts/easy_node.sh invite-disable --key KEY [--issuer-url URL] [--admin-token TOKEN] [--admin-key-file FILE] [--admin-key-id ID]
+  ./scripts/easy_node.sh admin-signing-status
+  ./scripts/easy_node.sh admin-signing-rotate [--restart-issuer [0|1]]
+  ./scripts/easy_node.sh prod-preflight [--days-min N]
   ./scripts/easy_node.sh bootstrap-mtls [--out-dir DIR] [--public-host HOST] [--san HOST] [--days N] [--rotate-leaf [0|1]] [--rotate-ca [0|1]]
   ./scripts/easy_node.sh machine-a-test [--public-host HOST] [--report-file PATH]
   ./scripts/easy_node.sh machine-b-test --peer-directory-a URL [--public-host HOST] [--min-operators N] [--federation-timeout-sec N] [--report-file PATH]
@@ -47,6 +50,8 @@ Notes:
   - server-up --mode authority runs directory + issuer + entry-exit.
   - server-up --mode provider runs directory + entry-exit only (no local issuer/admin token).
   - --prod-profile enables fail-closed production strict mode (requires mTLS + signed issuer-admin auth).
+  - admin-signing-status/admin-signing-rotate are authority-only issuer admin signer maintenance tools.
+  - prod-preflight validates strict prod profile wiring (mTLS material, HTTPS URLs, and authority signer config).
   - client-test runs client-demo with --no-deps (no local server required on the client machine).
   - three-machine-validate runs health + federation checks then runs client-test with both directories.
   - bootstrap discovery mode lets you provide one directory URL and auto-discover other server hosts.
@@ -241,6 +246,7 @@ bootstrap_mtls() {
 }
 
 ensure_admin_signing_material() {
+  local rotate="${1:-0}"
   local issuer_data_dir="$DEPLOY_DIR/data/issuer"
   local key_file="$issuer_data_dir/issuer_admin_signer.key"
   local key_id_file="$issuer_data_dir/issuer_admin_signer.keyid"
@@ -249,6 +255,9 @@ ensure_admin_signing_material() {
   local inspect_json key_id pub_key
 
   mkdir -p "$issuer_data_dir"
+  if [[ "$rotate" == "1" ]]; then
+    rm -f "$key_file" "$key_id_file" "$signers_file"
+  fi
   if [[ ! -f "$key_file" ]]; then
     (
       cd "$ROOT_DIR"
@@ -1643,6 +1652,20 @@ server_env_value() {
   identity_value "$SERVER_ENV_FILE" "$key"
 }
 
+cert_not_after_unix() {
+  local cert_file="$1"
+  local end_raw end_epoch
+  end_raw="$(openssl x509 -in "$cert_file" -noout -enddate 2>/dev/null | sed -E 's/^notAfter=//')"
+  if [[ -z "$end_raw" ]]; then
+    return 1
+  fi
+  end_epoch="$(date -u -d "$end_raw" +%s 2>/dev/null || true)"
+  if [[ -z "$end_epoch" ]]; then
+    return 1
+  fi
+  echo "$end_epoch"
+}
+
 default_issuer_url_for_invites() {
   local issuer_url=""
   local directory_public_url=""
@@ -2028,6 +2051,351 @@ invite_disable() {
   fi
   "${upsert_cmd[@]}" >/dev/null
   echo "invite key disabled: $key (issuer=$issuer_url)"
+}
+
+set_env_kv() {
+  local env_file="$1"
+  local key="$2"
+  local value="$3"
+  local escaped
+  escaped="$(printf '%s' "$value" | sed -e 's/[&|]/\\&/g')"
+  if rg -q "^${key}=" "$env_file"; then
+    sed -i -E "s|^${key}=.*$|${key}=${escaped}|" "$env_file"
+  else
+    printf '%s=%s\n' "$key" "$value" >>"$env_file"
+  fi
+}
+
+admin_signing_status() {
+  require_authority_mode "admin-signing-status"
+  ensure_deps_or_die
+  need_cmd go || exit 2
+
+  local env_file="$AUTHORITY_ENV_FILE"
+  if [[ ! -f "$env_file" ]]; then
+    echo "admin-signing-status requires authority env file: $env_file"
+    exit 2
+  fi
+
+  local key_file key_id signers_container signers_local
+  key_file="$(identity_value "$env_file" "ISSUER_ADMIN_SIGNING_PRIVATE_KEY_FILE_LOCAL")"
+  key_id="$(identity_value "$env_file" "ISSUER_ADMIN_SIGNING_KEY_ID")"
+  signers_container="$(identity_value "$env_file" "ISSUER_ADMIN_SIGNING_KEYS_FILE")"
+
+  if [[ -z "$key_file" ]]; then
+    key_file="$DEPLOY_DIR/data/issuer/issuer_admin_signer.key"
+  fi
+  if [[ -z "$signers_container" ]]; then
+    signers_container="/app/data/issuer_admin_signers.txt"
+  fi
+  signers_local="$DEPLOY_DIR/data/issuer/$(basename "$signers_container")"
+  if [[ -z "$key_id" && -f "${key_file}.keyid" ]]; then
+    key_id="$(tr -d '\r\n' <"${key_file}.keyid")"
+  fi
+
+  echo "authority env: $env_file"
+  echo "admin_signing_key_file: $key_file"
+  echo "admin_signing_key_id: ${key_id:-<unset>}"
+  echo "admin_signing_pubkeys_file(local): $signers_local"
+  echo "admin_signing_pubkeys_file(container): $signers_container"
+
+  if [[ ! -f "$key_file" ]]; then
+    echo "status: missing private signing key file"
+    return 1
+  fi
+  if [[ ! -f "$signers_local" ]]; then
+    echo "status: missing signer public-key file"
+    return 1
+  fi
+
+  local inspect_json derived_id derived_pub
+  inspect_json="$(
+    cd "$ROOT_DIR"
+    go run ./cmd/adminsig inspect --private-key-file "$key_file"
+  )"
+  derived_id="$(printf '%s\n' "$inspect_json" | rg -o '"key_id":"[^"]+"' | head -n1 | sed -E 's/^"key_id":"([^"]+)"$/\1/')"
+  derived_pub="$(printf '%s\n' "$inspect_json" | rg -o '"public_key":"[^"]+"' | head -n1 | sed -E 's/^"public_key":"([^"]+)"$/\1/')"
+  if [[ -z "$derived_id" || -z "$derived_pub" ]]; then
+    echo "status: failed to inspect signing key"
+    return 1
+  fi
+  echo "derived_key_id: $derived_id"
+
+  if [[ -n "$key_id" && "$key_id" != "$derived_id" ]]; then
+    echo "status: key id mismatch (env=$key_id derived=$derived_id)"
+    return 1
+  fi
+  if ! rg -q "^${derived_id}=${derived_pub}$" "$signers_local"; then
+    echo "status: signer public-key file missing derived key mapping"
+    return 1
+  fi
+  echo "status: ok"
+}
+
+admin_signing_rotate() {
+  require_authority_mode "admin-signing-rotate"
+  ensure_deps_or_die
+  need_cmd go || exit 2
+
+  local restart_issuer="1"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --restart-issuer)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          restart_issuer="${2:-}"
+          shift 2
+        else
+          restart_issuer="1"
+          shift
+        fi
+        ;;
+      -h|--help|help)
+        usage
+        return 0
+        ;;
+      *)
+        echo "unknown arg for admin-signing-rotate: $1"
+        exit 2
+        ;;
+    esac
+  done
+
+  local material key_file key_id signers_local signers_container
+  material="$(ensure_admin_signing_material 1)"
+  IFS='|' read -r key_file key_id signers_local signers_container <<<"$material"
+  if [[ -z "$key_file" || -z "$key_id" || -z "$signers_container" ]]; then
+    echo "admin-signing-rotate failed to generate signing material"
+    exit 1
+  fi
+
+  set_env_kv "$AUTHORITY_ENV_FILE" "ISSUER_ADMIN_SIGNING_PRIVATE_KEY_FILE_LOCAL" "$key_file"
+  set_env_kv "$AUTHORITY_ENV_FILE" "ISSUER_ADMIN_SIGNING_KEY_ID" "$key_id"
+  set_env_kv "$AUTHORITY_ENV_FILE" "ISSUER_ADMIN_SIGNING_KEYS_FILE" "$signers_container"
+  set_env_kv "$AUTHORITY_ENV_FILE" "ISSUER_ADMIN_REQUIRE_SIGNED" "1"
+  set_env_kv "$AUTHORITY_ENV_FILE" "ISSUER_ADMIN_ALLOW_TOKEN" "0"
+  secure_file_permissions "$AUTHORITY_ENV_FILE"
+
+  echo "admin signing key rotated"
+  echo "key_id: $key_id"
+  echo "key_file: $key_file"
+  echo "signers_file: $signers_local"
+
+  if [[ "$restart_issuer" == "1" ]]; then
+    compose_with_env "$AUTHORITY_ENV_FILE" up -d issuer
+    local scheme issuer_url
+    scheme="http"
+    if [[ "$(identity_value "$AUTHORITY_ENV_FILE" "PROD_STRICT_MODE")" == "1" ]]; then
+      scheme="https"
+    fi
+    issuer_url="${scheme}://127.0.0.1:8082/v1/pubkeys"
+    local -a tls_opts
+    mapfile -t tls_opts < <(curl_tls_opts_for_url "${scheme}://127.0.0.1:8082")
+    wait_http_ok_with_opts "$issuer_url" "issuer after signer rotate" 40 "${tls_opts[@]}" || {
+      compose_with_env "$AUTHORITY_ENV_FILE" logs --tail=120 issuer
+      exit 1
+    }
+    echo "issuer restarted with rotated signing key"
+  fi
+}
+
+prod_preflight() {
+  ensure_deps_or_die
+  need_cmd openssl || exit 2
+  need_cmd go || exit 2
+
+  local days_min="14"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --days-min)
+        days_min="${2:-}"
+        shift 2
+        ;;
+      -h|--help|help)
+        usage
+        return 0
+        ;;
+      *)
+        echo "unknown arg for prod-preflight: $1"
+        exit 2
+        ;;
+    esac
+  done
+  if ! [[ "$days_min" =~ ^[0-9]+$ ]]; then
+    echo "prod-preflight requires --days-min to be numeric"
+    exit 2
+  fi
+
+  local mode env_file
+  mode="$(active_server_mode)"
+  env_file="$(active_server_env_file)"
+  if [[ ! -f "$env_file" ]]; then
+    echo "prod-preflight requires an existing server env file: $env_file"
+    exit 2
+  fi
+
+  local fail=0
+  local check_total=0
+  check_ok() {
+    local msg="$1"
+    check_total=$((check_total + 1))
+    echo "[ok] $msg"
+  }
+  check_fail() {
+    local msg="$1"
+    check_total=$((check_total + 1))
+    fail=$((fail + 1))
+    echo "[fail] $msg"
+  }
+
+  local prod_strict beta_strict mtls_enable
+  prod_strict="$(identity_value "$env_file" "PROD_STRICT_MODE")"
+  beta_strict="$(identity_value "$env_file" "BETA_STRICT_MODE")"
+  mtls_enable="$(identity_value "$env_file" "MTLS_ENABLE")"
+  if [[ "$prod_strict" == "1" ]]; then
+    check_ok "PROD_STRICT_MODE=1"
+  else
+    check_fail "PROD_STRICT_MODE must be 1"
+  fi
+  if [[ "$beta_strict" == "1" ]]; then
+    check_ok "BETA_STRICT_MODE=1"
+  else
+    check_fail "BETA_STRICT_MODE must be 1"
+  fi
+  if [[ "$mtls_enable" == "1" ]]; then
+    check_ok "MTLS_ENABLE=1"
+  else
+    check_fail "MTLS_ENABLE must be 1"
+  fi
+
+  local public_urls=()
+  local directory_public_url entry_public_url exit_public_url
+  directory_public_url="$(identity_value "$env_file" "DIRECTORY_PUBLIC_URL")"
+  entry_public_url="$(identity_value "$env_file" "ENTRY_URL_PUBLIC")"
+  exit_public_url="$(identity_value "$env_file" "EXIT_CONTROL_URL_PUBLIC")"
+  [[ -n "$directory_public_url" ]] && public_urls+=("$directory_public_url")
+  [[ -n "$entry_public_url" ]] && public_urls+=("$entry_public_url")
+  [[ -n "$exit_public_url" ]] && public_urls+=("$exit_public_url")
+  local u
+  for u in "${public_urls[@]}"; do
+    if is_https_url "$u"; then
+      check_ok "HTTPS URL set: $u"
+    else
+      check_fail "non-HTTPS URL in prod profile: $u"
+    fi
+  done
+
+  local ca_file cert_file key_file client_cert_file client_key_file
+  ca_file="$(identity_value "$env_file" "EASY_NODE_MTLS_CA_FILE_LOCAL")"
+  cert_file="$(identity_value "$env_file" "MTLS_CERT_FILE")"
+  key_file="$(identity_value "$env_file" "MTLS_KEY_FILE")"
+  client_cert_file="$(identity_value "$env_file" "EASY_NODE_MTLS_CLIENT_CERT_FILE_LOCAL")"
+  client_key_file="$(identity_value "$env_file" "EASY_NODE_MTLS_CLIENT_KEY_FILE_LOCAL")"
+  [[ -z "$ca_file" ]] && ca_file="$DEPLOY_DIR/tls/ca.crt"
+  if [[ -z "$cert_file" ]]; then
+    cert_file="$DEPLOY_DIR/tls/node.crt"
+  elif [[ "$cert_file" == /app/tls/* ]]; then
+    cert_file="$DEPLOY_DIR/tls/$(basename "$cert_file")"
+  fi
+  if [[ -z "$key_file" ]]; then
+    key_file="$DEPLOY_DIR/tls/node.key"
+  elif [[ "$key_file" == /app/tls/* ]]; then
+    key_file="$DEPLOY_DIR/tls/$(basename "$key_file")"
+  fi
+  [[ -z "$client_cert_file" ]] && client_cert_file="$DEPLOY_DIR/tls/client.crt"
+  [[ -z "$client_key_file" ]] && client_key_file="$DEPLOY_DIR/tls/client.key"
+
+  local required_files=("$ca_file" "$cert_file" "$key_file" "$client_cert_file" "$client_key_file")
+  local f
+  for f in "${required_files[@]}"; do
+    if [[ -f "$f" ]]; then
+      check_ok "file exists: $f"
+    else
+      check_fail "missing file: $f"
+    fi
+  done
+
+  local now_epoch min_epoch
+  now_epoch="$(date -u +%s)"
+  min_epoch=$((now_epoch + days_min * 86400))
+  local certs_to_check=("$ca_file" "$cert_file" "$client_cert_file")
+  for f in "${certs_to_check[@]}"; do
+    if [[ ! -f "$f" ]]; then
+      continue
+    fi
+    local not_after
+    not_after="$(cert_not_after_unix "$f" || true)"
+    if [[ -z "$not_after" ]]; then
+      check_fail "failed to parse certificate expiry: $f"
+      continue
+    fi
+    if ((not_after > min_epoch)); then
+      local days_left
+      days_left=$(((not_after - now_epoch) / 86400))
+      check_ok "certificate valid >= ${days_min}d: $f (${days_left}d left)"
+    else
+      check_fail "certificate expires too soon (<${days_min}d): $f"
+    fi
+  done
+
+  if [[ "$mode" == "authority" ]]; then
+    local require_signed allow_token key_id key_path signers_container signers_local
+    require_signed="$(identity_value "$env_file" "ISSUER_ADMIN_REQUIRE_SIGNED")"
+    allow_token="$(identity_value "$env_file" "ISSUER_ADMIN_ALLOW_TOKEN")"
+    key_id="$(identity_value "$env_file" "ISSUER_ADMIN_SIGNING_KEY_ID")"
+    key_path="$(identity_value "$env_file" "ISSUER_ADMIN_SIGNING_PRIVATE_KEY_FILE_LOCAL")"
+    signers_container="$(identity_value "$env_file" "ISSUER_ADMIN_SIGNING_KEYS_FILE")"
+    [[ -z "$key_path" ]] && key_path="$DEPLOY_DIR/data/issuer/issuer_admin_signer.key"
+    [[ -z "$signers_container" ]] && signers_container="/app/data/issuer_admin_signers.txt"
+    signers_local="$DEPLOY_DIR/data/issuer/$(basename "$signers_container")"
+
+    if [[ "$require_signed" == "1" ]]; then
+      check_ok "ISSUER_ADMIN_REQUIRE_SIGNED=1"
+    else
+      check_fail "ISSUER_ADMIN_REQUIRE_SIGNED must be 1 on authority prod profile"
+    fi
+    if [[ "$allow_token" == "0" ]]; then
+      check_ok "ISSUER_ADMIN_ALLOW_TOKEN=0"
+    else
+      check_fail "ISSUER_ADMIN_ALLOW_TOKEN must be 0 on authority prod profile"
+    fi
+    if [[ -n "$key_id" ]]; then
+      check_ok "admin signing key id configured"
+    else
+      check_fail "missing ISSUER_ADMIN_SIGNING_KEY_ID"
+    fi
+    if [[ -f "$key_path" ]]; then
+      check_ok "admin signing key exists: $key_path"
+      local inspect_json derived_id derived_pub
+      inspect_json="$(
+        cd "$ROOT_DIR"
+        go run ./cmd/adminsig inspect --private-key-file "$key_path"
+      )"
+      derived_id="$(printf '%s\n' "$inspect_json" | rg -o '"key_id":"[^"]+"' | head -n1 | sed -E 's/^"key_id":"([^"]+)"$/\1/')"
+      derived_pub="$(printf '%s\n' "$inspect_json" | rg -o '"public_key":"[^"]+"' | head -n1 | sed -E 's/^"public_key":"([^"]+)"$/\1/')"
+      if [[ -n "$derived_id" && -n "$key_id" && "$derived_id" == "$key_id" ]]; then
+        check_ok "admin signing key id matches private key"
+      else
+        check_fail "admin signing key id does not match private key"
+      fi
+      if [[ -f "$signers_local" && -n "$derived_id" && -n "$derived_pub" ]]; then
+        if rg -q "^${derived_id}=${derived_pub}$" "$signers_local"; then
+          check_ok "signers file includes active signing key mapping"
+        else
+          check_fail "signers file missing active signing key mapping"
+        fi
+      else
+        check_fail "missing admin signers file: $signers_local"
+      fi
+    else
+      check_fail "missing admin signing private key file: $key_path"
+    fi
+  fi
+
+  echo "prod preflight summary: checks=$check_total failures=$fail mode=$mode env=$env_file"
+  if ((fail > 0)); then
+    return 1
+  fi
+  return 0
 }
 
 client_test() {
@@ -2525,6 +2893,18 @@ main() {
     invite-disable)
       shift
       invite_disable "$@"
+      ;;
+    admin-signing-status)
+      shift
+      admin_signing_status "$@"
+      ;;
+    admin-signing-rotate)
+      shift
+      admin_signing_rotate "$@"
+      ;;
+    prod-preflight)
+      shift
+      prod_preflight "$@"
       ;;
     bootstrap-mtls)
       shift

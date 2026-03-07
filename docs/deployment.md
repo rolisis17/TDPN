@@ -139,6 +139,8 @@ Prod strict additions:
 - bootstrap certs: `./scripts/easy_node.sh bootstrap-mtls --out-dir deploy/tls --public-host <PUBLIC_IP_OR_DNS>`.
 - run `server-up --prod-profile 1` to enforce fail-closed strict defaults (`PROD_STRICT_MODE=1`) on top of beta strict.
 - authority invite/admin commands auto-switch to signed auth in prod profile; they also support explicit signed credentials (`--admin-key-file`, `--admin-key-id`).
+- use `./scripts/easy_node.sh admin-signing-status` and `./scripts/easy_node.sh admin-signing-rotate --restart-issuer 1` for signer maintenance on authority nodes.
+- use `./scripts/easy_node.sh prod-preflight --days-min 14` before external beta/production traffic cutover.
 
 For a full 3-machine flow, see `docs/easy-3-machine-test.md`.
 For a frozen closed-beta command set, see `docs/beta-playbook.md`.
@@ -247,3 +249,4 @@ Before exposing anything public:
 44. For strict live WireGuard-mode behavior (non-privileged shim path), run `./scripts/integration_live_wg_full_path_strict.sh` and verify strict startup signals plus end-to-end plausible WireGuard packet forwarding/drop behavior.
 45. Run `./scripts/integration_beta_fault_matrix.sh` to validate startup-race and sync-loss recovery paths in one pass before external beta tests.
 46. Run `./scripts/integration_easy_node_role_guard.sh` to verify provider nodes are blocked from invite/admin actions while authority nodes are allowed past the role gate.
+47. Run `./scripts/integration_prod_preflight_tools.sh` to verify easy-node strict prod preflight and authority signer rotate/status flows.

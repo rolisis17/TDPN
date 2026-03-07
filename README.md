@@ -141,6 +141,9 @@ Script-only easy mode:
 ./scripts/easy_node.sh bootstrap-mtls --out-dir deploy/tls --public-host <PUBLIC_IP_OR_DNS>
 ./scripts/easy_node.sh invite-generate --count 3
 # (invite commands auto-use signed admin auth when prod profile is active)
+./scripts/easy_node.sh admin-signing-status
+./scripts/easy_node.sh admin-signing-rotate --restart-issuer 1
+./scripts/easy_node.sh prod-preflight --days-min 14
 
 ./scripts/easy_node.sh client-test \
   --directory-urls http://<SERVER_IP>:8081 \
@@ -217,6 +220,8 @@ Script-only easy mode:
 - authority admin token is hidden in output by default; use `--show-admin-token 1` only when you explicitly need to view it.
 - `--prod-profile 1` forces strict fail-closed runtime (`BETA_STRICT_MODE=1`, `PROD_STRICT_MODE=1`), enables mTLS, and on authority nodes requires signed issuer-admin auth (`ISSUER_ADMIN_REQUIRE_SIGNED=1`, token admin auth disabled).
 - `invite-generate`, `invite-check`, and `invite-disable` support either token auth (`--admin-token`) or signed auth (`--admin-key-file` + `--admin-key-id`).
+- `admin-signing-status` / `admin-signing-rotate` are authority-only signer maintenance helpers.
+- `prod-preflight` validates strict prod wiring (HTTPS URLs, mTLS files/cert age, and authority signer mapping).
 
 3-machine test guide:
 - `docs/easy-3-machine-test.md`
@@ -545,6 +550,8 @@ CI and tests:
 - `./scripts/load_path_open.sh` (basic entry path-open load script)
 - `./scripts/integration_challenge.sh` (entry challenge/anti-abuse integration check)
 - `./scripts/integration_revocation.sh` (issuer->exit revocation propagation check)
+- `./scripts/integration_easy_node_role_guard.sh` (easy-node authority-vs-provider role guard for invite commands)
+- `./scripts/integration_prod_preflight_tools.sh` (easy-node prod preflight + admin signing rotate/status checks)
 - `./scripts/integration_federation.sh` (multi-directory quorum/vote integration check)
 - `./scripts/integration_operator_quorum.sh` (distinct-directory-operator quorum enforcement check)
 - `./scripts/integration_sync_status_chaos.sh` (directory sync-status failure/recovery observability under peer churn)

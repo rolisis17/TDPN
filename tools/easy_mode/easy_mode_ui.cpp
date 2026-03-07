@@ -705,6 +705,9 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
     std::cout << "14) Configure machine A/B hosts\n";
     std::cout << "15) Show 3-machine test guide\n";
     std::cout << "16) Bootstrap/rotate mTLS certs\n";
+    std::cout << "17) Prod preflight check\n";
+    std::cout << "18) Admin signing status\n";
+    std::cout << "19) Rotate admin signing key\n";
     std::cout << "0) Back\n";
     std::cout << "Selection: ";
 
@@ -1047,6 +1050,26 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       if (!publicHost.empty()) {
         cmd << " --public-host " << shellEscape(publicHost);
       }
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "17") {
+      std::string daysMin = readLine("Minimum cert validity days", "14");
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " prod-preflight"
+          << " --days-min " << shellEscape(daysMin);
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "18") {
+      runCommand(shellEscape(script) + " admin-signing-status");
+      continue;
+    }
+    if (choice == "19") {
+      bool restartIssuer = parseYesNo(readLine("Restart issuer after rotation? (Y/n)", "y"), true);
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " admin-signing-rotate"
+          << " --restart-issuer " << (restartIssuer ? "1" : "0");
       runCommand(cmd.str());
       continue;
     }
