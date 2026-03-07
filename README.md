@@ -438,6 +438,7 @@ Optional env vars:
 - `DIRECTORY_PROVIDER_MIN_ENTRY_TIER` (default `1`; minimum `provider_role` token tier required to advertise `entry` relays via `/v1/provider/relay/upsert`)
 - `DIRECTORY_PROVIDER_MIN_EXIT_TIER` (default `1`; minimum `provider_role` token tier required to advertise `exit` relays via `/v1/provider/relay/upsert`)
 - `DIRECTORY_BETA_STRICT` (`1` enables strict beta checks only for directory role)
+- `DIRECTORY_ADMIN_TOKEN` (default `dev-admin-token`; in strict beta/prod modes must be non-default and length>=16)
 - `DIRECTORY_SELECTION_FEED_TTL_SEC` (default `30`; signed selection feed TTL)
 - `DIRECTORY_SELECTION_FEED_EPOCH_SEC` (default `10`; generated_at stabilization window for selection-feed cacheability)
 - `DIRECTORY_TRUST_FEED_TTL_SEC` (default `30`; signed trust-attestation feed TTL)
@@ -445,6 +446,7 @@ Optional env vars:
 - `ENTRY_GEO_CONFIDENCE` (default `1`; descriptor geolocation confidence `0..1` for entry locality metadata)
 - `EXIT_GEO_CONFIDENCE` (default `1`; descriptor geolocation confidence `0..1` for exit locality metadata)
 - `ENTRY_PUZZLE_ADAPTIVE` (`1` default, adaptive puzzle difficulty under load)
+- `ENTRY_PUZZLE_SECRET` (default `entry-secret-default`; in strict beta/prod modes must be non-default and length>=16)
 - `ENTRY_BAN_THRESHOLD` (default `3`; temporary source ban strikes after repeated over-limit opens)
 - `ENTRY_BAN_SEC` (default `45`; temporary source ban duration)
 - `ENTRY_MAX_CONCURRENT_OPENS` (default `128`; max concurrent in-flight path-open handling)
@@ -560,7 +562,7 @@ Opaque mode (`DATA_PLANE_MODE=opaque`):
 Anti-abuse entry controls:
 - `ENTRY_OPEN_RPS` (default `20`) controls per-IP path-open limit per second
 - `ENTRY_PUZZLE_DIFFICULTY` (default `0`; set `1..6` to enable challenge puzzle)
-- `ENTRY_PUZZLE_SECRET` (default `entry-secret-default`)
+- `ENTRY_PUZZLE_SECRET` (default `entry-secret-default`; strict beta/prod requires non-default value with length>=16)
 - `ENTRY_PUZZLE_ADAPTIVE` (default `1`, increases challenge difficulty with overload)
 - `ENTRY_BAN_THRESHOLD` + `ENTRY_BAN_SEC` add temporary source bans after repeated over-limit opens
 - `ENTRY_MAX_CONCURRENT_OPENS` adds non-blocking in-flight path-open shielding

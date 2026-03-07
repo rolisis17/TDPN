@@ -162,12 +162,49 @@ func TestValidateRuntimeConfigBetaStrict(t *testing.T) {
 		directoryTrustStrict:  true,
 		requireDistinctExitOp: true,
 		operatorID:            "op-entry",
+		puzzleSecret:          "entry-secret-012345",
 		directoryURLs:         []string{"http://127.0.0.1:8081"},
 		directoryMinSources:   1,
 		directoryMinOperators: 1,
 	}
 	if err := s.validateRuntimeConfig(); err != nil {
 		t.Fatalf("expected strict config valid, got %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigBetaStrictRejectsDefaultPuzzleSecret(t *testing.T) {
+	s := &Service{
+		betaStrict:            true,
+		liveWGMode:            true,
+		directoryTrustStrict:  true,
+		requireDistinctExitOp: true,
+		operatorID:            "op-entry",
+		puzzleSecret:          "entry-secret-default",
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected strict validation error")
+	}
+	if !strings.Contains(err.Error(), "non-default ENTRY_PUZZLE_SECRET") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigBetaStrictRejectsShortPuzzleSecret(t *testing.T) {
+	s := &Service{
+		betaStrict:            true,
+		liveWGMode:            true,
+		directoryTrustStrict:  true,
+		requireDistinctExitOp: true,
+		operatorID:            "op-entry",
+		puzzleSecret:          "too-short",
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected strict validation error")
+	}
+	if !strings.Contains(err.Error(), "ENTRY_PUZZLE_SECRET length>=16") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
