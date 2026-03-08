@@ -46,6 +46,9 @@ echo "[ci] easy-node role guard integration"
 echo "[ci] easy-node client profile env integration"
 ./scripts/integration_easy_node_client_profile_env.sh
 
+echo "[ci] 3-machine prod-profile wiring integration"
+./scripts/integration_3machine_prod_profile_wiring.sh
+
 echo "[ci] rotate-server-secrets integration"
 ./scripts/integration_rotate_server_secrets.sh
 

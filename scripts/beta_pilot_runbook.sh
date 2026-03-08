@@ -3,6 +3,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
+VALIDATE_SCRIPT="${THREE_MACHINE_VALIDATE_SCRIPT:-$ROOT_DIR/scripts/integration_3machine_beta_validate.sh}"
+SOAK_SCRIPT="${THREE_MACHINE_SOAK_SCRIPT:-$ROOT_DIR/scripts/integration_3machine_beta_soak.sh}"
 
 default_log_dir() {
   echo "${EASY_NODE_LOG_DIR:-$ROOT_DIR/.easy-node-logs}"
@@ -474,6 +476,14 @@ need_cmd tar
 need_cmd date
 need_cmd tee
 need_cmd timeout
+if [[ ! -x "$VALIDATE_SCRIPT" ]]; then
+  echo "validate script not executable: $VALIDATE_SCRIPT"
+  exit 2
+fi
+if [[ ! -x "$SOAK_SCRIPT" ]]; then
+  echo "soak script not executable: $SOAK_SCRIPT"
+  exit 2
+fi
 
 directory_a="$(trim_url "$directory_a")"
 directory_b="$(trim_url "$directory_b")"
@@ -560,7 +570,7 @@ anon_cred_set=$([[ -n "$client_anon_cred" ]] && echo 1 || echo 0)
 EOF
 
 validate_cmd=(
-  "$ROOT_DIR/scripts/integration_3machine_beta_validate.sh"
+  "$VALIDATE_SCRIPT"
   --directory-a "$directory_a"
   --directory-b "$directory_b"
   --issuer-url "$issuer_url"
@@ -606,7 +616,7 @@ echo "[pilot-runbook] validation ok"
 
 soak_log="$bundle_dir/soak.log"
 soak_cmd=(
-  "$ROOT_DIR/scripts/integration_3machine_beta_soak.sh"
+  "$SOAK_SCRIPT"
   --directory-a "$directory_a"
   --directory-b "$directory_b"
   --issuer-url "$issuer_url"

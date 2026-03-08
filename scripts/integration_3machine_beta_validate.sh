@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
+EASY_NODE_SH="${EASY_NODE_SH:-./scripts/easy_node.sh}"
 
 usage() {
   cat <<'USAGE'
@@ -599,6 +600,10 @@ need_cmd curl
 need_cmd rg
 need_cmd timeout
 need_cmd docker
+if [[ ! -x "$EASY_NODE_SH" ]]; then
+  echo "client launcher script not executable: $EASY_NODE_SH"
+  exit 2
+fi
 if ! docker compose version >/dev/null 2>&1; then
   echo "missing required dependency: docker compose plugin"
   exit 2
@@ -752,7 +757,7 @@ if [[ "$require_issuer_quorum" == "1" ]]; then
 fi
 
 client_cmd=(
-  ./scripts/easy_node.sh client-test
+  "$EASY_NODE_SH" client-test
   --directory-urls "${directory_a},${directory_b}"
   --issuer-url "$issuer_url"
   --entry-url "$entry_url"

@@ -727,6 +727,8 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
     std::cout << "24) WG-only stack down\n";
     std::cout << "25) WG-only stack selftest (up->client test->down)\n";
     std::cout << "26) Rotate local server secrets\n";
+    std::cout << "27) Real 3-machine PROD WG validate (Linux/root)\n";
+    std::cout << "28) Real 3-machine PROD WG soak (Linux/root)\n";
     std::cout << "0) Back\n";
     std::cout << "Selection: ";
 
@@ -1235,6 +1237,164 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --rotate-issuer-admin " << (rotateIssuerAdmin ? "1" : "0")
           << " --show-secrets " << (showSecrets ? "1" : "0");
       runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "27") {
+      bool autoDiscover = parseYesNo(readLine("Use one bootstrap directory and auto-discover peers? (Y/n)", "y"), true);
+      std::string bootstrapDefault = !hosts.aHost.empty() ? endpointFromHost(hosts.aHost, 8081) : (!hosts.bHost.empty() ? endpointFromHost(hosts.bHost, 8081) : "");
+      std::string bootstrapDir;
+      std::string dirA;
+      std::string dirB;
+      std::string issuer;
+      std::string entry;
+      std::string exitUrl;
+      std::string discoveryWait = "20";
+      if (autoDiscover) {
+        bootstrapDir = normalizeEndpointURL(readLine("Bootstrap directory URL", bootstrapDefault), 8081);
+        discoveryWait = readLine("Bootstrap discovery wait sec", "20");
+      } else {
+        configureABHostsInteractive(root, hosts, false);
+        dirA = normalizeEndpointURL(readLine("Directory A URL", endpointFromHost(hosts.aHost, 8081)), 8081);
+        dirB = normalizeEndpointURL(readLine("Directory B URL", endpointFromHost(hosts.bHost, 8081)), 8081);
+        issuer = normalizeEndpointURL(readLine("Issuer URL", endpointFromHost(hosts.aHost, 8082)), 8082);
+        entry = normalizeEndpointURL(readLine("Entry control URL fallback", endpointFromHost(hosts.aHost, 8083)), 8083);
+        exitUrl = normalizeEndpointURL(readLine("Exit control URL fallback", endpointFromHost(hosts.aHost, 8084)), 8084);
+      }
+      std::string subject = trim(readLine("Client subject key (optional)", ""));
+      std::string clientTimeout = readLine("Client timeout sec", "120");
+      std::string wgSessionSec = readLine("WG session sec", "45");
+      bool strictDistinct = parseYesNo(readLine("Require distinct entry/exit operators? (Y/n)", "y"), true);
+      bool skipControl = parseYesNo(readLine("Skip control-plane precheck? (y/N)", "n"), false);
+      std::string mtlsCA = readLine("mTLS CA file", "deploy/tls/ca.crt");
+      std::string mtlsCert = readLine("mTLS client cert file", "deploy/tls/client.crt");
+      std::string mtlsKey = readLine("mTLS client key file", "deploy/tls/client.key");
+      std::string report = readLine("Report file path (optional)", "");
+      if (autoDiscover && bootstrapDir.empty()) {
+        std::cout << "bootstrap directory URL is required\n";
+        continue;
+      }
+      if (!autoDiscover && (dirA.empty() || dirB.empty() || issuer.empty() || entry.empty() || exitUrl.empty())) {
+        std::cout << "directory A/B, issuer URL, entry URL and exit URL are required\n";
+        continue;
+      }
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " prod-wg-validate"
+          << " --client-timeout-sec " << shellEscape(clientTimeout)
+          << " --wg-session-sec " << shellEscape(wgSessionSec)
+          << " --strict-distinct " << (strictDistinct ? "1" : "0")
+          << " --skip-control-plane-check " << (skipControl ? "1" : "0")
+          << " --mtls-ca-file " << shellEscape(mtlsCA)
+          << " --mtls-client-cert-file " << shellEscape(mtlsCert)
+          << " --mtls-client-key-file " << shellEscape(mtlsKey);
+      if (!subject.empty()) {
+        cmd << " --subject " << shellEscape(subject);
+      }
+      if (autoDiscover) {
+        cmd << " --bootstrap-directory " << shellEscape(bootstrapDir)
+            << " --discovery-wait-sec " << shellEscape(discoveryWait);
+      } else {
+        cmd << " --directory-a " << shellEscape(dirA)
+            << " --directory-b " << shellEscape(dirB)
+            << " --issuer-url " << shellEscape(issuer)
+            << " --entry-url " << shellEscape(entry)
+            << " --exit-url " << shellEscape(exitUrl);
+      }
+      if (!report.empty()) {
+        cmd << " --report-file " << shellEscape(report);
+      }
+      if (!isRootUser()) {
+        bool useSudo = parseYesNo(readLine("Run with sudo? (Y/n)", "y"), true);
+        if (useSudo) {
+          runCommand("sudo " + cmd.str());
+        } else {
+          runCommand(cmd.str());
+        }
+      } else {
+        runCommand(cmd.str());
+      }
+      continue;
+    }
+    if (choice == "28") {
+      bool autoDiscover = parseYesNo(readLine("Use one bootstrap directory and auto-discover peers? (Y/n)", "y"), true);
+      std::string bootstrapDefault = !hosts.aHost.empty() ? endpointFromHost(hosts.aHost, 8081) : (!hosts.bHost.empty() ? endpointFromHost(hosts.bHost, 8081) : "");
+      std::string bootstrapDir;
+      std::string dirA;
+      std::string dirB;
+      std::string issuer;
+      std::string entry;
+      std::string exitUrl;
+      std::string discoveryWait = "20";
+      if (autoDiscover) {
+        bootstrapDir = normalizeEndpointURL(readLine("Bootstrap directory URL", bootstrapDefault), 8081);
+        discoveryWait = readLine("Bootstrap discovery wait sec", "20");
+      } else {
+        configureABHostsInteractive(root, hosts, false);
+        dirA = normalizeEndpointURL(readLine("Directory A URL", endpointFromHost(hosts.aHost, 8081)), 8081);
+        dirB = normalizeEndpointURL(readLine("Directory B URL", endpointFromHost(hosts.bHost, 8081)), 8081);
+        issuer = normalizeEndpointURL(readLine("Issuer URL", endpointFromHost(hosts.aHost, 8082)), 8082);
+        entry = normalizeEndpointURL(readLine("Entry control URL fallback", endpointFromHost(hosts.aHost, 8083)), 8083);
+        exitUrl = normalizeEndpointURL(readLine("Exit control URL fallback", endpointFromHost(hosts.aHost, 8084)), 8084);
+      }
+      std::string subject = trim(readLine("Client subject key (optional)", ""));
+      std::string rounds = readLine("Soak rounds", "10");
+      std::string pauseSec = readLine("Pause between rounds sec", "8");
+      std::string faultEvery = readLine("Inject fault every N rounds (0=off)", "0");
+      std::string faultCommand = readLine("Fault command (optional)", "");
+      bool continueOnFail = parseYesNo(readLine("Continue when a round fails? (y/N)", "n"), false);
+      bool strictDistinct = parseYesNo(readLine("Require distinct entry/exit operators? (Y/n)", "y"), true);
+      bool skipControl = parseYesNo(readLine("Skip control-plane precheck in each round? (Y/n)", "y"), true);
+      std::string mtlsCA = readLine("mTLS CA file", "deploy/tls/ca.crt");
+      std::string mtlsCert = readLine("mTLS client cert file", "deploy/tls/client.crt");
+      std::string mtlsKey = readLine("mTLS client key file", "deploy/tls/client.key");
+      std::string report = readLine("Report file path (optional)", "");
+      if (autoDiscover && bootstrapDir.empty()) {
+        std::cout << "bootstrap directory URL is required\n";
+        continue;
+      }
+      if (!autoDiscover && (dirA.empty() || dirB.empty() || issuer.empty() || entry.empty() || exitUrl.empty())) {
+        std::cout << "directory A/B, issuer URL, entry URL and exit URL are required\n";
+        continue;
+      }
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " prod-wg-soak"
+          << " --rounds " << shellEscape(rounds)
+          << " --pause-sec " << shellEscape(pauseSec)
+          << " --fault-every " << shellEscape(faultEvery)
+          << " --continue-on-fail " << (continueOnFail ? "1" : "0")
+          << " --strict-distinct " << (strictDistinct ? "1" : "0")
+          << " --skip-control-plane-check " << (skipControl ? "1" : "0")
+          << " --mtls-ca-file " << shellEscape(mtlsCA)
+          << " --mtls-client-cert-file " << shellEscape(mtlsCert)
+          << " --mtls-client-key-file " << shellEscape(mtlsKey);
+      if (!faultCommand.empty()) {
+        cmd << " --fault-command " << shellEscape(faultCommand);
+      }
+      if (!subject.empty()) {
+        cmd << " --subject " << shellEscape(subject);
+      }
+      if (autoDiscover) {
+        cmd << " --bootstrap-directory " << shellEscape(bootstrapDir)
+            << " --discovery-wait-sec " << shellEscape(discoveryWait);
+      } else {
+        cmd << " --directory-a " << shellEscape(dirA)
+            << " --directory-b " << shellEscape(dirB)
+            << " --issuer-url " << shellEscape(issuer)
+            << " --entry-url " << shellEscape(entry)
+            << " --exit-url " << shellEscape(exitUrl);
+      }
+      if (!report.empty()) {
+        cmd << " --report-file " << shellEscape(report);
+      }
+      if (!isRootUser()) {
+        bool useSudo = parseYesNo(readLine("Run with sudo? (Y/n)", "y"), true);
+        if (useSudo) {
+          runCommand("sudo " + cmd.str());
+        } else {
+          runCommand(cmd.str());
+        }
+      } else {
+        runCommand(cmd.str());
+      }
       continue;
     }
 

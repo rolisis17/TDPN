@@ -173,6 +173,44 @@ Soak test from machine C (optional, recommended before closed beta):
   --distinct-operators 1
 ```
 
+Real cross-machine production-profile WG dataplane validation from machine C (Linux root):
+
+```bash
+sudo ./scripts/easy_node.sh prod-wg-validate \
+  --directory-a https://A_PUBLIC_IP_OR_DNS:8081 \
+  --directory-b https://B_PUBLIC_IP_OR_DNS:8081 \
+  --issuer-url https://A_PUBLIC_IP_OR_DNS:8082 \
+  --entry-url https://A_PUBLIC_IP_OR_DNS:8083 \
+  --exit-url https://A_PUBLIC_IP_OR_DNS:8084 \
+  --subject client-alice \
+  --strict-distinct 1 \
+  --skip-control-plane-check 0 \
+  --mtls-ca-file deploy/tls/ca.crt \
+  --mtls-client-cert-file deploy/tls/client.crt \
+  --mtls-client-key-file deploy/tls/client.key
+```
+
+Real cross-machine production-profile WG dataplane soak/fault run:
+
+```bash
+sudo ./scripts/easy_node.sh prod-wg-soak \
+  --rounds 12 \
+  --pause-sec 10 \
+  --fault-every 4 \
+  --fault-command "ssh user@B 'cd /repo && ./scripts/easy_node.sh server-up --mode provider --prod-profile 1 --beta-profile 1 --public-host B_PUBLIC_IP_OR_DNS'" \
+  --directory-a https://A_PUBLIC_IP_OR_DNS:8081 \
+  --directory-b https://B_PUBLIC_IP_OR_DNS:8081 \
+  --issuer-url https://A_PUBLIC_IP_OR_DNS:8082 \
+  --entry-url https://A_PUBLIC_IP_OR_DNS:8083 \
+  --exit-url https://A_PUBLIC_IP_OR_DNS:8084 \
+  --subject client-alice \
+  --strict-distinct 1 \
+  --skip-control-plane-check 1 \
+  --mtls-ca-file deploy/tls/ca.crt \
+  --mtls-client-cert-file deploy/tls/client.crt \
+  --mtls-client-key-file deploy/tls/client.key
+```
+
 Single-command pilot bundle from machine C (validate + soak + snapshots):
 
 ```bash

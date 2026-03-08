@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
+VALIDATE_SCRIPT="${THREE_MACHINE_VALIDATE_SCRIPT:-$ROOT_DIR/scripts/integration_3machine_beta_validate.sh}"
 
 default_log_dir() {
   echo "${EASY_NODE_LOG_DIR:-$ROOT_DIR/.easy-node-logs}"
@@ -366,6 +367,10 @@ need_cmd bash
 need_cmd date
 need_cmd timeout
 need_cmd tee
+if [[ ! -x "$VALIDATE_SCRIPT" ]]; then
+  echo "validate script not executable: $VALIDATE_SCRIPT"
+  exit 2
+fi
 
 directory_a="$(trim_url "$directory_a")"
 directory_b="$(trim_url "$directory_b")"
@@ -414,7 +419,7 @@ for round in $(seq 1 "$rounds"); do
   fi
 
   cmd=(
-    "$ROOT_DIR/scripts/integration_3machine_beta_validate.sh"
+    "$VALIDATE_SCRIPT"
     --min-sources "$min_sources"
     --min-operators "$min_operators"
     --federation-timeout-sec "$federation_timeout_sec"
