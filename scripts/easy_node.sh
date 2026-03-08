@@ -355,6 +355,35 @@ resolve_invite_admin_auth() {
   echo "none|||"
 }
 
+enforce_invite_auth_mode_or_die() {
+  local action="$1"
+  local auth_mode="$2"
+  local require_signed allow_token
+  require_signed="$(server_env_value "ISSUER_ADMIN_REQUIRE_SIGNED" | tr -d '\r')"
+  allow_token="$(server_env_value "ISSUER_ADMIN_ALLOW_TOKEN" | tr -d '\r')"
+
+  if [[ "$auth_mode" == "none" ]]; then
+    if [[ "$require_signed" == "1" || "$allow_token" == "0" ]]; then
+      echo "${action} requires signed admin auth (--admin-key-file + --admin-key-id)"
+      echo "token admin auth is disabled for this authority (ISSUER_ADMIN_ALLOW_TOKEN=0)"
+    else
+      echo "${action} requires admin auth (--admin-token or --admin-key-file + --admin-key-id)"
+    fi
+    exit 2
+  fi
+
+  if [[ "$auth_mode" == "token" && "$allow_token" == "0" ]]; then
+    echo "${action} refused: token admin auth is disabled for this authority (ISSUER_ADMIN_ALLOW_TOKEN=0)"
+    echo "use signed admin auth: --admin-key-file + --admin-key-id"
+    exit 2
+  fi
+  if [[ "$auth_mode" != "signed" && "$require_signed" == "1" ]]; then
+    echo "${action} refused: signed admin auth is required (ISSUER_ADMIN_REQUIRE_SIGNED=1)"
+    echo "use signed admin auth: --admin-key-file + --admin-key-id"
+    exit 2
+  fi
+}
+
 resolve_local_mtls_material() {
   local ca cert key
   ca="$(server_env_value "EASY_NODE_MTLS_CA_FILE_LOCAL" | tr -d '\r')"
@@ -2863,10 +2892,7 @@ invite_generate() {
   local auth_details auth_mode
   auth_details="$(resolve_invite_admin_auth "$admin_token" "$admin_key_file" "$admin_key_id")"
   IFS='|' read -r auth_mode admin_token admin_key_file admin_key_id <<<"$auth_details"
-  if [[ "$auth_mode" == "none" ]]; then
-    echo "invite-generate requires admin auth (--admin-token or --admin-key-file + --admin-key-id)"
-    exit 2
-  fi
+  enforce_invite_auth_mode_or_die "invite-generate" "$auth_mode"
   if ! [[ "$count" =~ ^[0-9]+$ ]] || ((count < 1)); then
     echo "invite-generate requires --count >= 1"
     exit 2
@@ -3010,10 +3036,7 @@ invite_check() {
   local auth_details auth_mode
   auth_details="$(resolve_invite_admin_auth "$admin_token" "$admin_key_file" "$admin_key_id")"
   IFS='|' read -r auth_mode admin_token admin_key_file admin_key_id <<<"$auth_details"
-  if [[ "$auth_mode" == "none" ]]; then
-    echo "invite-check requires admin auth (--admin-token or --admin-key-file + --admin-key-id)"
-    exit 2
-  fi
+  enforce_invite_auth_mode_or_die "invite-check" "$auth_mode"
 
   local request_url="${issuer_url}/v1/admin/subject/get?subject=${key}"
   local -a header_args=()
@@ -3102,10 +3125,7 @@ invite_disable() {
   local auth_details auth_mode
   auth_details="$(resolve_invite_admin_auth "$admin_token" "$admin_key_file" "$admin_key_id")"
   IFS='|' read -r auth_mode admin_token admin_key_file admin_key_id <<<"$auth_details"
-  if [[ "$auth_mode" == "none" ]]; then
-    echo "invite-disable requires admin auth (--admin-token or --admin-key-file + --admin-key-id)"
-    exit 2
-  fi
+  enforce_invite_auth_mode_or_die "invite-disable" "$auth_mode"
 
   local upsert_script="$ROOT_DIR/scripts/beta_subject_upsert.sh"
   if [[ ! -x "$upsert_script" ]]; then
