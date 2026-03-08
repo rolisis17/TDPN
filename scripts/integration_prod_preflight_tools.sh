@@ -5,8 +5,10 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 AUTH_ENV="$ROOT_DIR/deploy/.env.easy.server"
+PROVIDER_ENV="$ROOT_DIR/deploy/.env.easy.provider"
 MODE_FILE="$ROOT_DIR/deploy/data/easy_node_server_mode.conf"
 backup_env=""
+backup_provider=""
 backup_mode=""
 
 env_value() {
@@ -22,6 +24,12 @@ cleanup() {
   else
     rm -f "$AUTH_ENV"
   fi
+  if [[ -n "$backup_provider" && -f "$backup_provider" ]]; then
+    cp "$backup_provider" "$PROVIDER_ENV"
+    rm -f "$backup_provider"
+  else
+    rm -f "$PROVIDER_ENV"
+  fi
   if [[ -n "$backup_mode" && -f "$backup_mode" ]]; then
     cp "$backup_mode" "$MODE_FILE"
     rm -f "$backup_mode"
@@ -35,6 +43,10 @@ mkdir -p "$ROOT_DIR/deploy/data"
 if [[ -f "$AUTH_ENV" ]]; then
   backup_env="$(mktemp)"
   cp "$AUTH_ENV" "$backup_env"
+fi
+if [[ -f "$PROVIDER_ENV" ]]; then
+  backup_provider="$(mktemp)"
+  cp "$PROVIDER_ENV" "$backup_provider"
 fi
 if [[ -f "$MODE_FILE" ]]; then
   backup_mode="$(mktemp)"
@@ -178,6 +190,75 @@ fi
 if ! rg -q "private file permissions too open" /tmp/integration_prod_preflight_perm_fail.log; then
   echo "missing expected private file permission failure signal in prod-preflight output"
   cat /tmp/integration_prod_preflight_perm_fail.log
+  exit 1
+fi
+chmod 600 "$tls_dir/tls/client.key" 2>/dev/null || true
+
+write_provider_env_file() {
+  local core_issuer="$1"
+  local admin_token="${2:-}"
+  local sign_key_id="${3:-}"
+  cat >"$PROVIDER_ENV" <<EOF_PROVIDER
+PROD_STRICT_MODE=1
+BETA_STRICT_MODE=1
+MTLS_ENABLE=1
+DIRECTORY_PUBLIC_URL=https://127.0.0.1:8081
+ENTRY_URL_PUBLIC=https://127.0.0.1:8083
+EXIT_CONTROL_URL_PUBLIC=https://127.0.0.1:8084
+EASY_NODE_MTLS_CA_FILE_LOCAL=$tls_dir/tls/ca.crt
+EASY_NODE_MTLS_CLIENT_CERT_FILE_LOCAL=$tls_dir/tls/client.crt
+EASY_NODE_MTLS_CLIENT_KEY_FILE_LOCAL=$tls_dir/tls/client.key
+MTLS_CERT_FILE=$tls_dir/tls/node.crt
+MTLS_KEY_FILE=$tls_dir/tls/node.key
+DIRECTORY_ADMIN_TOKEN=prod-provider-directory-admin-token-1234567890
+ENTRY_PUZZLE_SECRET=prod-provider-entry-puzzle-secret-1234567890
+CORE_ISSUER_URL=$core_issuer
+ISSUER_ADMIN_TOKEN=$admin_token
+ISSUER_ADMIN_SIGNING_KEY_ID=$sign_key_id
+EOF_PROVIDER
+  chmod 600 "$PROVIDER_ENV" 2>/dev/null || true
+}
+
+cat >"$MODE_FILE" <<'EOF_MODE_PROVIDER'
+EASY_NODE_SERVER_MODE=provider
+EOF_MODE_PROVIDER
+
+write_provider_env_file "https://issuer.example:8082"
+./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_provider_ok.log 2>&1
+
+write_provider_env_file "http://issuer.example:8082"
+if ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_provider_issuer_scheme_fail.log 2>&1; then
+  echo "expected provider prod-preflight to fail with non-HTTPS CORE_ISSUER_URL"
+  cat /tmp/integration_prod_preflight_provider_issuer_scheme_fail.log
+  exit 1
+fi
+if ! rg -q "provider CORE_ISSUER_URL must be HTTPS" /tmp/integration_prod_preflight_provider_issuer_scheme_fail.log; then
+  echo "missing expected provider CORE_ISSUER_URL HTTPS failure signal"
+  cat /tmp/integration_prod_preflight_provider_issuer_scheme_fail.log
+  exit 1
+fi
+
+write_provider_env_file "https://issuer.example:8082" "legacy-provider-admin-token"
+if ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_provider_token_fail.log 2>&1; then
+  echo "expected provider prod-preflight to fail when ISSUER_ADMIN_TOKEN is persisted"
+  cat /tmp/integration_prod_preflight_provider_token_fail.log
+  exit 1
+fi
+if ! rg -q "provider env must not persist ISSUER_ADMIN_TOKEN" /tmp/integration_prod_preflight_provider_token_fail.log; then
+  echo "missing expected provider token persistence failure signal"
+  cat /tmp/integration_prod_preflight_provider_token_fail.log
+  exit 1
+fi
+
+write_provider_env_file "https://issuer.example:8082" "" "provider-signer-id"
+if ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_provider_signer_fail.log 2>&1; then
+  echo "expected provider prod-preflight to fail when signing material is persisted"
+  cat /tmp/integration_prod_preflight_provider_signer_fail.log
+  exit 1
+fi
+if ! rg -q "provider env must not include issuer admin signing material" /tmp/integration_prod_preflight_provider_signer_fail.log; then
+  echo "missing expected provider signer material failure signal"
+  cat /tmp/integration_prod_preflight_provider_signer_fail.log
   exit 1
 fi
 

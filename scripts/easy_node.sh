@@ -3588,6 +3588,34 @@ prod_preflight() {
     else
       check_fail "missing admin signing private key file: $key_path"
     fi
+  elif [[ "$mode" == "provider" ]]; then
+    local provider_core_issuer_url provider_admin_token
+    local provider_sign_key_id provider_sign_key_file provider_sign_keys_file
+    provider_core_issuer_url="$(identity_value "$env_file" "CORE_ISSUER_URL")"
+    provider_admin_token="$(identity_value "$env_file" "ISSUER_ADMIN_TOKEN")"
+    provider_sign_key_id="$(identity_value "$env_file" "ISSUER_ADMIN_SIGNING_KEY_ID")"
+    provider_sign_key_file="$(identity_value "$env_file" "ISSUER_ADMIN_SIGNING_PRIVATE_KEY_FILE_LOCAL")"
+    provider_sign_keys_file="$(identity_value "$env_file" "ISSUER_ADMIN_SIGNING_KEYS_FILE")"
+
+    if [[ -n "$provider_core_issuer_url" ]]; then
+      if is_https_url "$provider_core_issuer_url"; then
+        check_ok "provider CORE_ISSUER_URL uses HTTPS"
+      else
+        check_fail "provider CORE_ISSUER_URL must be HTTPS"
+      fi
+    else
+      check_fail "provider CORE_ISSUER_URL must be configured"
+    fi
+    if [[ -z "$provider_admin_token" ]]; then
+      check_ok "provider ISSUER_ADMIN_TOKEN not persisted"
+    else
+      check_fail "provider env must not persist ISSUER_ADMIN_TOKEN"
+    fi
+    if [[ -z "$provider_sign_key_id" && -z "$provider_sign_key_file" && -z "$provider_sign_keys_file" ]]; then
+      check_ok "provider env does not include issuer admin signing material"
+    else
+      check_fail "provider env must not include issuer admin signing material"
+    fi
   fi
 
   if [[ "$check_live" == "1" ]]; then
