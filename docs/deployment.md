@@ -66,7 +66,7 @@ Quick non-interactive examples:
 ./scripts/easy_node.sh server-up --mode authority --public-host <PUBLIC_IP_OR_DNS> --beta-profile
 
 # authority/admin node with strict production profile (mTLS + signed admin auth)
-./scripts/easy_node.sh server-up --mode authority --public-host <PUBLIC_IP_OR_DNS> --prod-profile 1
+./scripts/easy_node.sh server-up --mode authority --public-host <PUBLIC_IP_OR_DNS> --peer-directories https://<PEER_DIRECTORY_IP_OR_DNS>:8081 --prod-profile 1
 
 # provider node (runs directory + entry + exit, no local issuer admin)
 ./scripts/easy_node.sh server-up --mode provider \
@@ -152,6 +152,8 @@ Invite-only beta option:
 Prod strict additions:
 - bootstrap certs: `./scripts/easy_node.sh bootstrap-mtls --out-dir deploy/tls --public-host <PUBLIC_IP_OR_DNS>`.
 - run `server-up --prod-profile 1` to enforce fail-closed strict defaults (`PROD_STRICT_MODE=1`) on top of beta strict.
+- prod profile requires at least one peer directory from a distinct authority/issuer operator so strict issuer quorum has at least two issuer URLs.
+- prod profile auto-wires WG command-backend runtime defaults (`WG_BACKEND=command`, live WG filters, exit WG kernel proxy, and issuer quorum URL feeds) and sets entry-exit compose runtime privileges (`ENTRY_EXIT_USER=0:0`, `ENTRY_EXIT_PRIVILEGED=true`).
 - authority invite/admin commands auto-switch to signed auth in prod profile; they also support explicit signed credentials (`--admin-key-file`, `--admin-key-id`).
 - use `./scripts/easy_node.sh admin-signing-status` and `./scripts/easy_node.sh admin-signing-rotate --restart-issuer 1 --key-history 3` for signer maintenance on authority nodes.
 - use `./scripts/easy_node.sh prod-preflight --days-min 14 --check-live 1 --timeout-sec 12` before external beta/production traffic cutover.

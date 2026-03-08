@@ -103,13 +103,33 @@ set -euo pipefail
 echo "{}"
 EOF_CURL
 
-chmod +x "$TMP_BIN/docker" "$TMP_BIN/curl"
+cat >"$TMP_BIN/wg" <<'EOF_WG'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" == "genkey" ]]; then
+  echo "test-wg-private-key"
+  exit 0
+fi
+exit 0
+EOF_WG
+
+chmod +x "$TMP_BIN/docker" "$TMP_BIN/curl" "$TMP_BIN/wg"
+
+if PATH="$TMP_BIN:$PATH" EASY_NODE_VERIFY_PUBLIC=0 ./scripts/easy_node.sh server-up \
+  --mode authority \
+  --public-host 203.0.113.10 \
+  --prod-profile 1 >/tmp/integration_easy_node_prod_server_env_quorum_fail.log 2>&1; then
+  echo "expected prod server-up to fail without peer issuer quorum"
+  cat /tmp/integration_easy_node_prod_server_env_quorum_fail.log
+  exit 1
+fi
 
 PATH="$TMP_BIN:$PATH" \
 EASY_NODE_VERIFY_PUBLIC=0 \
 ./scripts/easy_node.sh server-up \
   --mode authority \
   --public-host 203.0.113.10 \
+  --peer-directories https://198.51.100.20:8081 \
   --beta-profile 1 \
   --prod-profile 1 >/tmp/integration_easy_node_prod_server_env.log 2>&1
 
@@ -154,6 +174,16 @@ require_eq "$(env_value "$AUTH_ENV" "ISSUER_ADMIN_TOKEN")" "" "ISSUER_ADMIN_TOKE
 require_nonempty "$(env_value "$AUTH_ENV" "ISSUER_ADMIN_SIGNING_KEY_ID")" "ISSUER_ADMIN_SIGNING_KEY_ID"
 require_nonempty "$(env_value "$AUTH_ENV" "ISSUER_ADMIN_SIGNING_PRIVATE_KEY_FILE_LOCAL")" "ISSUER_ADMIN_SIGNING_PRIVATE_KEY_FILE_LOCAL"
 require_nonempty "$(env_value "$AUTH_ENV" "ISSUER_ADMIN_SIGNING_KEYS_FILE")" "ISSUER_ADMIN_SIGNING_KEYS_FILE"
+require_eq "$(env_value "$AUTH_ENV" "WG_BACKEND")" "command" "WG_BACKEND"
+require_eq "$(env_value "$AUTH_ENV" "ENTRY_LIVE_WG_MODE")" "1" "ENTRY_LIVE_WG_MODE"
+require_eq "$(env_value "$AUTH_ENV" "EXIT_LIVE_WG_MODE")" "1" "EXIT_LIVE_WG_MODE"
+require_eq "$(env_value "$AUTH_ENV" "EXIT_WG_KERNEL_PROXY")" "1" "EXIT_WG_KERNEL_PROXY"
+require_eq "$(env_value "$AUTH_ENV" "ENTRY_EXIT_USER")" "0:0" "ENTRY_EXIT_USER"
+require_eq "$(env_value "$AUTH_ENV" "ENTRY_EXIT_PRIVILEGED")" "true" "ENTRY_EXIT_PRIVILEGED"
+require_nonempty "$(env_value "$AUTH_ENV" "EXIT_WG_PRIVATE_KEY_PATH")" "EXIT_WG_PRIVATE_KEY_PATH"
+require_nonempty "$(env_value "$AUTH_ENV" "EXIT_WG_INTERFACE")" "EXIT_WG_INTERFACE"
+require_eq "$(env_value "$AUTH_ENV" "ISSUER_URLS")" "https://203.0.113.10:8082,https://198.51.100.20:8082" "ISSUER_URLS"
+require_eq "$(env_value "$AUTH_ENV" "DIRECTORY_ISSUER_TRUST_URLS")" "https://203.0.113.10:8082,https://198.51.100.20:8082" "DIRECTORY_ISSUER_TRUST_URLS"
 
 PATH="$TMP_BIN:$PATH" \
 EASY_NODE_VERIFY_PUBLIC=0 \
@@ -162,7 +192,7 @@ EASY_NODE_VERIFY_PUBLIC=0 \
   --public-host 198.51.100.20 \
   --authority-directory https://203.0.113.10:8081 \
   --authority-issuer https://203.0.113.10:8082 \
-  --peer-directories https://203.0.113.10:8081 \
+  --peer-directories https://203.0.113.10:8081,https://198.51.100.30:8081 \
   --beta-profile 1 \
   --prod-profile 1 >/tmp/integration_easy_node_prod_server_env_provider.log 2>&1
 
@@ -179,5 +209,15 @@ require_eq "$(env_value "$PROVIDER_ENV" "ISSUER_ADMIN_TOKEN")" "" "provider ISSU
 require_eq "$(env_value "$PROVIDER_ENV" "ISSUER_ADMIN_SIGNING_KEY_ID")" "" "provider ISSUER_ADMIN_SIGNING_KEY_ID"
 require_eq "$(env_value "$PROVIDER_ENV" "ISSUER_ADMIN_SIGNING_PRIVATE_KEY_FILE_LOCAL")" "" "provider ISSUER_ADMIN_SIGNING_PRIVATE_KEY_FILE_LOCAL"
 require_eq "$(env_value "$PROVIDER_ENV" "ISSUER_ADMIN_SIGNING_KEYS_FILE")" "" "provider ISSUER_ADMIN_SIGNING_KEYS_FILE"
+require_eq "$(env_value "$PROVIDER_ENV" "WG_BACKEND")" "command" "provider WG_BACKEND"
+require_eq "$(env_value "$PROVIDER_ENV" "ENTRY_LIVE_WG_MODE")" "1" "provider ENTRY_LIVE_WG_MODE"
+require_eq "$(env_value "$PROVIDER_ENV" "EXIT_LIVE_WG_MODE")" "1" "provider EXIT_LIVE_WG_MODE"
+require_eq "$(env_value "$PROVIDER_ENV" "EXIT_WG_KERNEL_PROXY")" "1" "provider EXIT_WG_KERNEL_PROXY"
+require_eq "$(env_value "$PROVIDER_ENV" "ENTRY_EXIT_USER")" "0:0" "provider ENTRY_EXIT_USER"
+require_eq "$(env_value "$PROVIDER_ENV" "ENTRY_EXIT_PRIVILEGED")" "true" "provider ENTRY_EXIT_PRIVILEGED"
+require_nonempty "$(env_value "$PROVIDER_ENV" "EXIT_WG_PRIVATE_KEY_PATH")" "provider EXIT_WG_PRIVATE_KEY_PATH"
+require_nonempty "$(env_value "$PROVIDER_ENV" "EXIT_WG_INTERFACE")" "provider EXIT_WG_INTERFACE"
+require_eq "$(env_value "$PROVIDER_ENV" "ISSUER_URLS")" "https://203.0.113.10:8082,https://198.51.100.30:8082" "provider ISSUER_URLS"
+require_eq "$(env_value "$PROVIDER_ENV" "DIRECTORY_ISSUER_TRUST_URLS")" "https://203.0.113.10:8082,https://198.51.100.30:8082" "provider DIRECTORY_ISSUER_TRUST_URLS"
 
 echo "easy-node prod authority/provider env integration check ok"

@@ -137,7 +137,7 @@ Script-only easy mode:
 ./scripts/easy_node.sh invite-disable --key <INVITE_KEY>
 
 # production-strict profile (HTTPS + mTLS + signed issuer-admin actions)
-./scripts/easy_node.sh server-up --mode authority --public-host <PUBLIC_IP_OR_DNS> --prod-profile 1
+./scripts/easy_node.sh server-up --mode authority --public-host <PUBLIC_IP_OR_DNS> --peer-directories https://<PEER_DIRECTORY_IP_OR_DNS>:8081 --prod-profile 1
 ./scripts/easy_node.sh bootstrap-mtls --out-dir deploy/tls --public-host <PUBLIC_IP_OR_DNS>
 ./scripts/easy_node.sh invite-generate --count 3
 # (invite commands auto-use signed admin auth when prod profile is active)
@@ -234,7 +234,8 @@ sudo ./scripts/easy_node.sh stop-all --with-wg-only 1 --force-iface-cleanup 1
 - authority admin token is hidden in output by default; use `--show-admin-token 1` only when you explicitly need to view it.
 - easy-mode `server-up` auto-generates and stores non-default `DIRECTORY_ADMIN_TOKEN` and `ENTRY_PUZZLE_SECRET` (both hidden in output unless you inspect env files).
 - `rotate-server-secrets` rotates `DIRECTORY_ADMIN_TOKEN` + `ENTRY_PUZZLE_SECRET` (and `ISSUER_ADMIN_TOKEN` on authority nodes) with optional restart.
-- `server-up --prod-profile 1` forces strict fail-closed runtime (`BETA_STRICT_MODE=1`, `PROD_STRICT_MODE=1`), enables mTLS, and on authority nodes requires signed issuer-admin auth (`ISSUER_ADMIN_REQUIRE_SIGNED=1`, token admin auth disabled).
+- `server-up --prod-profile 1` forces strict fail-closed runtime (`BETA_STRICT_MODE=1`, `PROD_STRICT_MODE=1`), enables mTLS, enables live command-backend WG dataplane defaults, and on authority nodes requires signed issuer-admin auth (`ISSUER_ADMIN_REQUIRE_SIGNED=1`, token admin auth disabled).
+- `server-up --prod-profile 1` requires at least 2 issuer URLs for strict issuer quorum; include at least one peer directory from a distinct authority/issuer operator.
 - in strict prod profile on authority nodes, `ISSUER_ADMIN_TOKEN` is cleared (empty) so token admin auth material is not persisted when signed admin auth is enforced.
 - `client-test --prod-profile 1` applies mTLS + trust-hardening client checks in the container demo path; full strict live-WG fail-closed validation is covered by wg-only/strict integration flows.
 - `client-test` now performs both pre-run and post-run demo-container cleanup to reduce stale `deploy-client-demo-run-*` container/network leftovers after timeouts or failed runs.
@@ -371,9 +372,12 @@ Optional env vars:
 - `EXIT_WG_PUBKEY` (optional base64 32-byte key; in `WG_BACKEND=command`, auto-derived from `EXIT_WG_PRIVATE_KEY_PATH` if unset/invalid, and startup fails if a configured key mismatches the derived key)
 - `EXIT_WG_PRIVATE_KEY_PATH` (required when `WG_BACKEND=command`)
 - `EXIT_WG_LISTEN_PORT` (default `51831`; WireGuard UDP listen port in command mode; must differ from `EXIT_DATA_ADDR` port)
+- `EXIT_WG_AUTO_CREATE_INTERFACE` (`1` auto-creates `EXIT_WG_INTERFACE` at startup when privileges allow)
 - `EXIT_WG_KERNEL_PROXY` (`1` enables exit-side per-session kernel-proxy bridging between accepted opaque packets and local WG UDP socket in command mode)
 - `EXIT_WG_KERNEL_PROXY_MAX_SESSIONS` (default `2048`; max concurrent exit WG kernel-proxy session sockets before new proxy allocations are rejected)
 - `EXIT_WG_KERNEL_PROXY_IDLE_SEC` (default `120`; idle timeout for automatic closure of inactive exit WG proxy session sockets, `0` disables idle cleanup)
+- `ENTRY_EXIT_USER` (compose runtime user for `entry-exit`; easy-mode prod profile sets `0:0` for WG command backend management)
+- `ENTRY_EXIT_PRIVILEGED` (compose privileged mode for `entry-exit`; easy-mode prod profile sets `true` for WG interface creation)
 - `EXIT_SESSION_CLEANUP_SEC` (default `30`; cleanup cadence for expired sessions and idle WG proxy sockets)
 - `EXIT_WG_EXIT_IP` (default `10.90.0.1/32`)
 - `EXIT_OPAQUE_SINK_ADDR` (optional UDP sink for accepted opaque payload bytes; required when `EXIT_LIVE_WG_MODE=1`)

@@ -699,6 +699,61 @@ sanitize_id_component() {
   echo "$out"
 }
 
+safe_wg_iface_name() {
+  local raw="$1"
+  local cleaned
+  cleaned="$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9')"
+  if [[ -z "$cleaned" ]]; then
+    cleaned="node"
+  fi
+  cleaned="${cleaned:0:9}"
+  printf 'wge%s' "$cleaned"
+}
+
+csv_count() {
+  local csv="$1"
+  awk 'NF > 0 {n++} END {print n + 0}' < <(split_csv_lines "$csv")
+}
+
+build_issuer_urls_csv() {
+  local base_issuer_url="$1"
+  local peer_dirs="$2"
+  local scheme="$3"
+  local out=""
+  declare -A seen=()
+
+  add_url() {
+    local candidate
+    candidate="$(trim_url "$(ensure_url_scheme "$1" "$scheme")")"
+    if [[ -z "$candidate" ]]; then
+      return
+    fi
+    if [[ -n "${seen[$candidate]+x}" ]]; then
+      return
+    fi
+    seen["$candidate"]=1
+    if [[ -n "$out" ]]; then
+      out+=","
+    fi
+    out+="$candidate"
+  }
+
+  if [[ -n "$base_issuer_url" ]]; then
+    add_url "$base_issuer_url"
+  fi
+
+  local peer peer_host peer_issuer
+  while IFS= read -r peer; do
+    [[ -z "$peer" ]] && continue
+    peer_host="$(host_from_url "$peer")"
+    [[ -z "$peer_host" ]] && continue
+    peer_issuer="$(url_from_host_port "$peer_host" 8082)"
+    add_url "$peer_issuer"
+  done < <(split_csv_lines "$peer_dirs")
+
+  echo "$out"
+}
+
 random_token() {
   if command -v openssl >/dev/null 2>&1; then
     openssl rand -hex 16
@@ -911,6 +966,9 @@ write_authority_env() {
   local admin_signers_file_container="${12:-}"
   local admin_sign_key_id="${13:-}"
   local admin_sign_key_file_local="${14:-}"
+  local issuer_urls_csv="${15:-}"
+  local exit_wg_private_key_path="${16:-}"
+  local exit_wg_interface="${17:-}"
   local issuer_admin_token_effective="$issuer_admin_token"
   local public_scheme="http"
   local relay_suffix
@@ -982,6 +1040,7 @@ EOF_BETA
     cat >>"$AUTHORITY_ENV_FILE" <<EOF_PROD
 BETA_STRICT_MODE=1
 PROD_STRICT_MODE=1
+DATA_PLANE_MODE=opaque
 MTLS_ENABLE=1
 MTLS_CA_FILE=/app/tls/ca.crt
 MTLS_CERT_FILE=/app/tls/node.crt
@@ -996,6 +1055,42 @@ ENTRY_DIRECTORY_TRUST_STRICT=1
 ENTRY_DIRECTORY_TRUST_TOFU=0
 DIRECTORY_PEER_TRUST_STRICT=1
 DIRECTORY_PEER_TRUST_TOFU=0
+DIRECTORY_PEER_DISCOVERY_REQUIRE_HINT=1
+DIRECTORY_ISSUER_TRUST_URLS=${issuer_urls_csv}
+DIRECTORY_PROVIDER_ISSUER_URLS=${issuer_urls_csv}
+DIRECTORY_ISSUER_MIN_OPERATORS=2
+DIRECTORY_ISSUER_TRUST_MIN_VOTES=2
+DIRECTORY_ISSUER_DISPUTE_MIN_VOTES=2
+DIRECTORY_ISSUER_APPEAL_MIN_VOTES=2
+DIRECTORY_FINAL_ADJUDICATION_MIN_OPERATORS=2
+DIRECTORY_FINAL_ADJUDICATION_MIN_SOURCES=2
+DIRECTORY_FINAL_DISPUTE_MIN_VOTES=2
+DIRECTORY_FINAL_APPEAL_MIN_VOTES=2
+DIRECTORY_KEY_ROTATE_SEC=86400
+ISSUER_URLS=${issuer_urls_csv}
+ENTRY_OPERATOR_ID=${operator_id}
+ENTRY_LIVE_WG_MODE=1
+WG_BACKEND=command
+EXIT_WG_PRIVATE_KEY_PATH=${exit_wg_private_key_path}
+EXIT_WG_INTERFACE=${exit_wg_interface}
+EXIT_WG_AUTO_CREATE_INTERFACE=1
+EXIT_WG_KERNEL_PROXY=1
+EXIT_LIVE_WG_MODE=1
+EXIT_OPAQUE_ECHO=0
+EXIT_OPAQUE_SINK_ADDR=127.0.0.1:51982
+EXIT_OPAQUE_SOURCE_ADDR=127.0.0.1:51983
+EXIT_TOKEN_PROOF_REPLAY_GUARD=1
+EXIT_PEER_REBIND_SEC=0
+EXIT_STARTUP_SYNC_TIMEOUT_SEC=30
+EXIT_ISSUER_MIN_SOURCES=2
+EXIT_ISSUER_MIN_OPERATORS=2
+EXIT_ISSUER_REQUIRE_ID=1
+ENTRY_PUZZLE_DIFFICULTY=1
+ISSUER_KEY_ROTATE_SEC=86400
+ISSUER_TOKEN_TTL_SEC=300
+ISSUER_ANON_CRED_EXPOSE_ID=0
+ENTRY_EXIT_USER=0:0
+ENTRY_EXIT_PRIVILEGED=true
 ISSUER_ADMIN_REQUIRE_SIGNED=1
 ISSUER_ADMIN_ALLOW_TOKEN=0
 ISSUER_ADMIN_SIGNED_WINDOW_SEC=90
@@ -1019,6 +1114,9 @@ write_provider_env() {
   local beta_profile="$6"
   local authority_issuer="$7"
   local prod_profile="$8"
+  local issuer_urls_csv="$9"
+  local exit_wg_private_key_path="${10:-}"
+  local exit_wg_interface="${11:-}"
   local public_scheme="http"
   local relay_suffix
 
@@ -1070,9 +1168,10 @@ DIRECTORY_PROVIDER_SPLIT_ROLES=1
 EOF_BETA
   fi
   if [[ "$prod_profile" == "1" ]]; then
-    cat >>"$PROVIDER_ENV_FILE" <<'EOF_PROD'
+    cat >>"$PROVIDER_ENV_FILE" <<EOF_PROD
 BETA_STRICT_MODE=1
 PROD_STRICT_MODE=1
+DATA_PLANE_MODE=opaque
 MTLS_ENABLE=1
 MTLS_CA_FILE=/app/tls/ca.crt
 MTLS_CERT_FILE=/app/tls/node.crt
@@ -1087,6 +1186,39 @@ ENTRY_DIRECTORY_TRUST_STRICT=1
 ENTRY_DIRECTORY_TRUST_TOFU=0
 DIRECTORY_PEER_TRUST_STRICT=1
 DIRECTORY_PEER_TRUST_TOFU=0
+DIRECTORY_PEER_DISCOVERY_REQUIRE_HINT=1
+DIRECTORY_ISSUER_TRUST_URLS=${issuer_urls_csv}
+DIRECTORY_PROVIDER_ISSUER_URLS=${issuer_urls_csv}
+DIRECTORY_ISSUER_MIN_OPERATORS=2
+DIRECTORY_ISSUER_TRUST_MIN_VOTES=2
+DIRECTORY_ISSUER_DISPUTE_MIN_VOTES=2
+DIRECTORY_ISSUER_APPEAL_MIN_VOTES=2
+DIRECTORY_FINAL_ADJUDICATION_MIN_OPERATORS=2
+DIRECTORY_FINAL_ADJUDICATION_MIN_SOURCES=2
+DIRECTORY_FINAL_DISPUTE_MIN_VOTES=2
+DIRECTORY_FINAL_APPEAL_MIN_VOTES=2
+DIRECTORY_KEY_ROTATE_SEC=86400
+ISSUER_URLS=${issuer_urls_csv}
+ENTRY_OPERATOR_ID=${operator_id}
+ENTRY_LIVE_WG_MODE=1
+WG_BACKEND=command
+EXIT_WG_PRIVATE_KEY_PATH=${exit_wg_private_key_path}
+EXIT_WG_INTERFACE=${exit_wg_interface}
+EXIT_WG_AUTO_CREATE_INTERFACE=1
+EXIT_WG_KERNEL_PROXY=1
+EXIT_LIVE_WG_MODE=1
+EXIT_OPAQUE_ECHO=0
+EXIT_OPAQUE_SINK_ADDR=127.0.0.1:51982
+EXIT_OPAQUE_SOURCE_ADDR=127.0.0.1:51983
+EXIT_TOKEN_PROOF_REPLAY_GUARD=1
+EXIT_PEER_REBIND_SEC=0
+EXIT_STARTUP_SYNC_TIMEOUT_SEC=30
+EXIT_ISSUER_MIN_SOURCES=2
+EXIT_ISSUER_MIN_OPERATORS=2
+EXIT_ISSUER_REQUIRE_ID=1
+ENTRY_PUZZLE_DIFFICULTY=1
+ENTRY_EXIT_USER=0:0
+ENTRY_EXIT_PRIVILEGED=true
 EASY_NODE_MTLS_CA_FILE_LOCAL=${DEPLOY_DIR}/tls/ca.crt
 EASY_NODE_MTLS_CLIENT_CERT_FILE_LOCAL=${DEPLOY_DIR}/tls/client.crt
 EASY_NODE_MTLS_CLIENT_KEY_FILE_LOCAL=${DEPLOY_DIR}/tls/client.key
@@ -1459,10 +1591,37 @@ server_up() {
     fi
   fi
 
+  local issuer_urls_csv=""
+  local issuer_urls_count=0
+  local exit_wg_interface=""
+  local exit_wg_private_key_local=""
+  local exit_wg_private_key_container=""
+  if [[ "$prod_profile" == "1" ]]; then
+    local base_issuer_url
+    if [[ "$mode" == "authority" ]]; then
+      base_issuer_url="$(url_from_host_port "$public_host" 8082)"
+    else
+      base_issuer_url="$authority_issuer"
+    fi
+    issuer_urls_csv="$(build_issuer_urls_csv "$base_issuer_url" "$peer_dirs" "$url_scheme")"
+    issuer_urls_count="$(csv_count "$issuer_urls_csv")"
+    if ((issuer_urls_count < 2)); then
+      echo "server-up --prod-profile requires at least 2 issuer URLs for strict quorum."
+      echo "current issuer URLs (${issuer_urls_count}): ${issuer_urls_csv:-none}"
+      echo "add at least one peer directory from a distinct authority/issuer operator."
+      exit 2
+    fi
+    local relay_suffix_for_wg
+    relay_suffix_for_wg="$(sanitize_id_component "$operator_id")"
+    exit_wg_interface="$(safe_wg_iface_name "$relay_suffix_for_wg")"
+    exit_wg_private_key_local="$DEPLOY_DIR/data/entry-exit/exit_${relay_suffix_for_wg}_wg.key"
+    exit_wg_private_key_container="/app/data/$(basename "$exit_wg_private_key_local")"
+  fi
+
   write_identity_config "$operator_id" "$issuer_id"
 
   if [[ "$mode" == "authority" ]]; then
-    write_authority_env "$public_host" "$operator_id" "$issuer_id" "$issuer_admin_token" "$directory_admin_token" "$entry_puzzle_secret" "$peer_dirs" "$beta_profile" "$client_allowlist" "$allow_anon_cred" "$prod_profile" "$admin_signers_file_container" "$admin_sign_key_id" "$admin_sign_key_file_local"
+    write_authority_env "$public_host" "$operator_id" "$issuer_id" "$issuer_admin_token" "$directory_admin_token" "$entry_puzzle_secret" "$peer_dirs" "$beta_profile" "$client_allowlist" "$allow_anon_cred" "$prod_profile" "$admin_signers_file_container" "$admin_sign_key_id" "$admin_sign_key_file_local" "$issuer_urls_csv" "$exit_wg_private_key_container" "$exit_wg_interface"
     compose_with_env "$AUTHORITY_ENV_FILE" up -d --build directory issuer entry-exit
 
     local -a local_opts
@@ -1511,6 +1670,9 @@ server_up() {
       echo "prod profile: enabled (mTLS + signed admin controls enforced)"
       echo "admin_signing_key_id: $admin_sign_key_id"
       echo "admin_signing_public_keys_file: $admin_signers_file_local"
+      echo "issuer_urls: $issuer_urls_csv"
+      echo "exit_wg_interface: $exit_wg_interface"
+      echo "exit_wg_private_key_file: $exit_wg_private_key_local"
     fi
     echo "health checks:"
     if [[ "$prod_profile" == "1" ]]; then
@@ -1528,7 +1690,7 @@ server_up() {
       echo "  curl ${url_scheme}://${public_host}:8084/v1/health"
     fi
   else
-    write_provider_env "$public_host" "$operator_id" "$directory_admin_token" "$entry_puzzle_secret" "$peer_dirs" "$beta_profile" "$authority_issuer" "$prod_profile"
+    write_provider_env "$public_host" "$operator_id" "$directory_admin_token" "$entry_puzzle_secret" "$peer_dirs" "$beta_profile" "$authority_issuer" "$prod_profile" "$issuer_urls_csv" "$exit_wg_private_key_container" "$exit_wg_interface"
     compose_with_env "$PROVIDER_ENV_FILE" up -d --build --no-deps directory entry-exit
 
     local -a local_opts
@@ -1565,6 +1727,9 @@ server_up() {
     fi
     if [[ "$prod_profile" == "1" ]]; then
       echo "prod profile: enabled (mTLS + strict trust checks enforced)"
+      echo "issuer_urls: $issuer_urls_csv"
+      echo "exit_wg_interface: $exit_wg_interface"
+      echo "exit_wg_private_key_file: $exit_wg_private_key_local"
     fi
     echo "authority_directory: $authority_directory"
     echo "authority_issuer: $authority_issuer"
@@ -3511,6 +3676,136 @@ prod_preflight() {
     check_ok "ENTRY_PUZZLE_DIFFICULTY effective >0 (${entry_puzzle_difficulty})"
   else
     check_fail "ENTRY_PUZZLE_DIFFICULTY must be >0 in prod profile (effective value: ${entry_puzzle_difficulty_raw:-default})"
+  fi
+
+  local data_mode wg_backend entry_live_wg exit_live_wg exit_wg_kernel_proxy
+  local exit_wg_private_key_path exit_wg_interface exit_wg_auto_create
+  local exit_opaque_sink exit_opaque_source exit_issuer_min_sources exit_issuer_min_operators
+  local exit_issuer_require_id issuer_urls_csv issuer_urls_n directory_issuer_urls_csv directory_issuer_urls_n
+  local entry_exit_user entry_exit_privileged
+  data_mode="$(identity_value "$env_file" "DATA_PLANE_MODE")"
+  wg_backend="$(identity_value "$env_file" "WG_BACKEND")"
+  entry_live_wg="$(identity_value "$env_file" "ENTRY_LIVE_WG_MODE")"
+  exit_live_wg="$(identity_value "$env_file" "EXIT_LIVE_WG_MODE")"
+  exit_wg_kernel_proxy="$(identity_value "$env_file" "EXIT_WG_KERNEL_PROXY")"
+  exit_wg_private_key_path="$(identity_value "$env_file" "EXIT_WG_PRIVATE_KEY_PATH")"
+  exit_wg_interface="$(identity_value "$env_file" "EXIT_WG_INTERFACE")"
+  exit_wg_auto_create="$(identity_value "$env_file" "EXIT_WG_AUTO_CREATE_INTERFACE")"
+  exit_opaque_sink="$(identity_value "$env_file" "EXIT_OPAQUE_SINK_ADDR")"
+  exit_opaque_source="$(identity_value "$env_file" "EXIT_OPAQUE_SOURCE_ADDR")"
+  exit_issuer_min_sources="$(identity_value "$env_file" "EXIT_ISSUER_MIN_SOURCES")"
+  exit_issuer_min_operators="$(identity_value "$env_file" "EXIT_ISSUER_MIN_OPERATORS")"
+  exit_issuer_require_id="$(identity_value "$env_file" "EXIT_ISSUER_REQUIRE_ID")"
+  issuer_urls_csv="$(identity_value "$env_file" "ISSUER_URLS")"
+  issuer_urls_n="$(csv_count "$issuer_urls_csv")"
+  directory_issuer_urls_csv="$(identity_value "$env_file" "DIRECTORY_ISSUER_TRUST_URLS")"
+  directory_issuer_urls_n="$(csv_count "$directory_issuer_urls_csv")"
+  entry_exit_user="$(identity_value "$env_file" "ENTRY_EXIT_USER")"
+  entry_exit_privileged="$(identity_value "$env_file" "ENTRY_EXIT_PRIVILEGED")"
+
+  if [[ "$data_mode" == "opaque" ]]; then
+    check_ok "DATA_PLANE_MODE=opaque"
+  else
+    check_fail "DATA_PLANE_MODE must be opaque in prod profile"
+  fi
+  if [[ "$wg_backend" == "command" ]]; then
+    check_ok "WG_BACKEND=command"
+  else
+    check_fail "WG_BACKEND must be command in prod profile"
+  fi
+  if [[ "$entry_live_wg" == "1" ]]; then
+    check_ok "ENTRY_LIVE_WG_MODE=1"
+  else
+    check_fail "ENTRY_LIVE_WG_MODE must be 1 in prod profile"
+  fi
+  if [[ "$exit_live_wg" == "1" ]]; then
+    check_ok "EXIT_LIVE_WG_MODE=1"
+  else
+    check_fail "EXIT_LIVE_WG_MODE must be 1 in prod profile"
+  fi
+  if [[ "$exit_wg_kernel_proxy" == "1" ]]; then
+    check_ok "EXIT_WG_KERNEL_PROXY=1"
+  else
+    check_fail "EXIT_WG_KERNEL_PROXY must be 1 in prod profile"
+  fi
+  if [[ "$exit_wg_auto_create" == "1" ]]; then
+    check_ok "EXIT_WG_AUTO_CREATE_INTERFACE=1"
+  else
+    check_fail "EXIT_WG_AUTO_CREATE_INTERFACE must be 1 in prod profile"
+  fi
+  if [[ -n "$exit_wg_interface" ]]; then
+    check_ok "EXIT_WG_INTERFACE configured"
+  else
+    check_fail "EXIT_WG_INTERFACE must be configured"
+  fi
+  if [[ -n "$exit_opaque_sink" ]]; then
+    check_ok "EXIT_OPAQUE_SINK_ADDR configured"
+  else
+    check_fail "EXIT_OPAQUE_SINK_ADDR must be configured"
+  fi
+  if [[ -n "$exit_opaque_source" ]]; then
+    check_ok "EXIT_OPAQUE_SOURCE_ADDR configured"
+  else
+    check_fail "EXIT_OPAQUE_SOURCE_ADDR must be configured"
+  fi
+  if [[ "$exit_issuer_min_sources" =~ ^[0-9]+$ ]] && ((exit_issuer_min_sources >= 2)); then
+    check_ok "EXIT_ISSUER_MIN_SOURCES>=2 (${exit_issuer_min_sources})"
+  else
+    check_fail "EXIT_ISSUER_MIN_SOURCES must be >=2 in prod profile"
+  fi
+  if [[ "$exit_issuer_min_operators" =~ ^[0-9]+$ ]] && ((exit_issuer_min_operators >= 2)); then
+    check_ok "EXIT_ISSUER_MIN_OPERATORS>=2 (${exit_issuer_min_operators})"
+  else
+    check_fail "EXIT_ISSUER_MIN_OPERATORS must be >=2 in prod profile"
+  fi
+  if [[ "$exit_issuer_require_id" == "1" ]]; then
+    check_ok "EXIT_ISSUER_REQUIRE_ID=1"
+  else
+    check_fail "EXIT_ISSUER_REQUIRE_ID must be 1 in prod profile"
+  fi
+  if ((issuer_urls_n >= 2)); then
+    check_ok "ISSUER_URLS count>=2 (${issuer_urls_n})"
+  else
+    check_fail "ISSUER_URLS must contain at least 2 URLs in prod profile"
+  fi
+  if ((directory_issuer_urls_n >= 2)); then
+    check_ok "DIRECTORY_ISSUER_TRUST_URLS count>=2 (${directory_issuer_urls_n})"
+  else
+    check_fail "DIRECTORY_ISSUER_TRUST_URLS must contain at least 2 URLs in prod profile"
+  fi
+  if [[ -n "$exit_wg_private_key_path" ]]; then
+    local exit_wg_private_key_local
+    exit_wg_private_key_local="$exit_wg_private_key_path"
+    if [[ "$exit_wg_private_key_local" == /app/data/* ]]; then
+      exit_wg_private_key_local="$DEPLOY_DIR/data/entry-exit/$(basename "$exit_wg_private_key_local")"
+    fi
+    if [[ -f "$exit_wg_private_key_local" ]]; then
+      check_ok "exit wg private key exists: $exit_wg_private_key_local"
+      local exit_key_mode
+      exit_key_mode="$(file_mode_octal "$exit_wg_private_key_local" || true)"
+      if private_file_mode_secure "$exit_wg_private_key_local"; then
+        check_ok "exit wg private key permissions secure: $exit_wg_private_key_local mode=${exit_key_mode:-unknown}"
+      else
+        check_fail "exit wg private key permissions too open: $exit_wg_private_key_local mode=${exit_key_mode:-unknown}"
+      fi
+    else
+      check_fail "missing exit wg private key file: $exit_wg_private_key_local"
+    fi
+  else
+    check_fail "EXIT_WG_PRIVATE_KEY_PATH must be configured"
+  fi
+  case "$entry_exit_user" in
+    "0"|"0:0"|"root"|"root:root")
+      check_ok "ENTRY_EXIT_USER has root privileges (${entry_exit_user})"
+      ;;
+    *)
+      check_fail "ENTRY_EXIT_USER must be root/0 in prod profile (found: ${entry_exit_user:-unset})"
+      ;;
+  esac
+  if [[ "$entry_exit_privileged" == "1" || "$entry_exit_privileged" == "true" ]]; then
+    check_ok "ENTRY_EXIT_PRIVILEGED enabled (${entry_exit_privileged})"
+  else
+    check_fail "ENTRY_EXIT_PRIVILEGED must be true/1 in prod profile"
   fi
 
   local private_files=("$env_file" "$key_file" "$client_key_file")
