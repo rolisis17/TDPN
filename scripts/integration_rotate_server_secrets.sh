@@ -85,6 +85,34 @@ if [[ -z "$new_issuer_token" || "$new_issuer_token" == "old-issuer-token" || "${
   exit 1
 fi
 
+cat >"$AUTH_ENV" <<'EOF_AUTH_SIGNED_ONLY'
+DIRECTORY_ADMIN_TOKEN=old-directory-token-2
+ENTRY_PUZZLE_SECRET=old-entry-secret-2
+ISSUER_ADMIN_TOKEN=legacy-admin-token
+ISSUER_ADMIN_ALLOW_TOKEN=0
+EOF_AUTH_SIGNED_ONLY
+
+./scripts/easy_node.sh rotate-server-secrets --restart 0 --rotate-issuer-admin 1 >/tmp/integration_rotate_server_secrets_authority_signed_only.log 2>&1
+
+new_dir_token_signed_only="$(env_value "$AUTH_ENV" "DIRECTORY_ADMIN_TOKEN")"
+new_entry_secret_signed_only="$(env_value "$AUTH_ENV" "ENTRY_PUZZLE_SECRET")"
+new_issuer_token_signed_only="$(env_value "$AUTH_ENV" "ISSUER_ADMIN_TOKEN")"
+if [[ -z "$new_dir_token_signed_only" || "$new_dir_token_signed_only" == "old-directory-token-2" || "${#new_dir_token_signed_only}" -lt 16 ]]; then
+  echo "authority signed-only rotate did not refresh DIRECTORY_ADMIN_TOKEN"
+  cat /tmp/integration_rotate_server_secrets_authority_signed_only.log
+  exit 1
+fi
+if [[ -z "$new_entry_secret_signed_only" || "$new_entry_secret_signed_only" == "old-entry-secret-2" || "${#new_entry_secret_signed_only}" -lt 16 ]]; then
+  echo "authority signed-only rotate did not refresh ENTRY_PUZZLE_SECRET"
+  cat /tmp/integration_rotate_server_secrets_authority_signed_only.log
+  exit 1
+fi
+if [[ -n "$new_issuer_token_signed_only" ]]; then
+  echo "authority signed-only rotate unexpectedly left ISSUER_ADMIN_TOKEN set"
+  cat /tmp/integration_rotate_server_secrets_authority_signed_only.log
+  exit 1
+fi
+
 auth_mode="$(stat -c '%a' "$AUTH_ENV" 2>/dev/null || true)"
 if [[ -n "$auth_mode" && "$auth_mode" != "600" ]]; then
   echo "authority env permissions not hardened after rotate (expected 600, got ${auth_mode})"
