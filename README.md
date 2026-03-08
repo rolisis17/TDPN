@@ -628,7 +628,7 @@ CI and tests:
 - `./scripts/integration_multi_issuer.sh` (exit multi-issuer token/revocation integration check)
 - `./scripts/integration_load_chaos.sh` (entry load guardrails + directory peer churn resilience check)
 - `./scripts/integration_load_chaos_matrix.sh` (multi-profile load/chaos stress wrapper across varying rate-limit and pressure settings)
-- `./scripts/beta_preflight.sh` (closed-beta preflight runner: unit tests + strict-governance + easy-node prod preflight/admin-signing checks + anonymous-credential dispute + bootstrap/load/lifecycle matrices; optional privileged WG matrix with `BETA_PREFLIGHT_PRIVILEGED=1`)
+- `./scripts/beta_preflight.sh` (closed-beta preflight runner: unit tests + strict-governance + easy-node role/auth/prod-preflight checks + anonymous-credential dispute + bootstrap/load/lifecycle matrices; optional privileged WG matrix with `BETA_PREFLIGHT_PRIVILEGED=1`)
 - `./scripts/integration_http_cache.sh` (directory ETag/If-None-Match behavior check)
 - `./scripts/integration_directory_auto_key_rotation.sh` (directory automatic key rotation + bounded previous-key history enforcement)
 - `./scripts/integration_key_epoch_rotation.sh` (issuer key rotation + stale-epoch token denial check)
