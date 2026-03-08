@@ -241,7 +241,7 @@ sudo ./scripts/easy_node.sh stop-all --with-wg-only 1 --force-iface-cleanup 1
 - `invite-generate`, `invite-check`, and `invite-disable` support either token auth (`--admin-token`) or signed auth (`--admin-key-file` + `--admin-key-id`).
 - `admin-signing-status` / `admin-signing-rotate` are authority-only signer maintenance helpers.
 - `admin-signing-rotate --key-history N` preserves recent signer public keys for smoother key transitions.
-- `prod-preflight` validates strict prod wiring (HTTPS URLs, mTLS files/cert age, authority signer mapping, secret posture, and effective entry puzzle difficulty) and can optionally check live endpoints (`--check-live 1`).
+- `prod-preflight` validates strict prod wiring (HTTPS URLs, non-private public hosts, mTLS files/cert age, authority signer mapping, secret posture, and effective entry puzzle difficulty) and can optionally check live endpoints (`--check-live 1`).
 
 3-machine test guide:
 - `docs/easy-3-machine-test.md`

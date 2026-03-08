@@ -60,9 +60,9 @@ cat >"$AUTH_ENV" <<EOF_ENV
 PROD_STRICT_MODE=1
 BETA_STRICT_MODE=1
 MTLS_ENABLE=1
-DIRECTORY_PUBLIC_URL=https://127.0.0.1:8081
-ENTRY_URL_PUBLIC=https://127.0.0.1:8083
-EXIT_CONTROL_URL_PUBLIC=https://127.0.0.1:8084
+DIRECTORY_PUBLIC_URL=https://203.0.113.10:8081
+ENTRY_URL_PUBLIC=https://203.0.113.10:8083
+EXIT_CONTROL_URL_PUBLIC=https://203.0.113.10:8084
 EASY_NODE_MTLS_CA_FILE_LOCAL=$tls_dir/tls/ca.crt
 EASY_NODE_MTLS_CLIENT_CERT_FILE_LOCAL=$tls_dir/tls/client.crt
 EASY_NODE_MTLS_CLIENT_KEY_FILE_LOCAL=$tls_dir/tls/client.key
@@ -138,6 +138,19 @@ if ! rg -q "live endpoint unreachable" /tmp/integration_prod_preflight_live_fail
   exit 1
 fi
 
+sed -i -E 's#^DIRECTORY_PUBLIC_URL=.*#DIRECTORY_PUBLIC_URL=https://127.0.0.1:8081#' "$AUTH_ENV"
+if ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_public_host_fail.log 2>&1; then
+  echo "expected prod-preflight to fail with private/loopback public URL host"
+  cat /tmp/integration_prod_preflight_public_host_fail.log
+  exit 1
+fi
+if ! rg -q "public URL host must not be private/loopback in prod profile" /tmp/integration_prod_preflight_public_host_fail.log; then
+  echo "missing expected public host private/loopback failure signal in prod-preflight output"
+  cat /tmp/integration_prod_preflight_public_host_fail.log
+  exit 1
+fi
+sed -i -E 's#^DIRECTORY_PUBLIC_URL=.*#DIRECTORY_PUBLIC_URL=https://203.0.113.10:8081#' "$AUTH_ENV"
+
 sed -i -E 's/^MTLS_ENABLE=.*/MTLS_ENABLE=0/' "$AUTH_ENV"
 if ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_fail.log 2>&1; then
   echo "expected prod-preflight to fail when MTLS_ENABLE=0"
@@ -202,9 +215,9 @@ write_provider_env_file() {
 PROD_STRICT_MODE=1
 BETA_STRICT_MODE=1
 MTLS_ENABLE=1
-DIRECTORY_PUBLIC_URL=https://127.0.0.1:8081
-ENTRY_URL_PUBLIC=https://127.0.0.1:8083
-EXIT_CONTROL_URL_PUBLIC=https://127.0.0.1:8084
+DIRECTORY_PUBLIC_URL=https://203.0.113.20:8081
+ENTRY_URL_PUBLIC=https://203.0.113.20:8083
+EXIT_CONTROL_URL_PUBLIC=https://203.0.113.20:8084
 EASY_NODE_MTLS_CA_FILE_LOCAL=$tls_dir/tls/ca.crt
 EASY_NODE_MTLS_CLIENT_CERT_FILE_LOCAL=$tls_dir/tls/client.crt
 EASY_NODE_MTLS_CLIENT_KEY_FILE_LOCAL=$tls_dir/tls/client.key
@@ -225,6 +238,18 @@ EOF_MODE_PROVIDER
 
 write_provider_env_file "https://issuer.example:8082"
 ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_provider_ok.log 2>&1
+
+write_provider_env_file "https://127.0.0.1:8082"
+if ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_provider_issuer_private_host_fail.log 2>&1; then
+  echo "expected provider prod-preflight to fail with private/loopback CORE_ISSUER_URL host"
+  cat /tmp/integration_prod_preflight_provider_issuer_private_host_fail.log
+  exit 1
+fi
+if ! rg -q "provider CORE_ISSUER_URL host must not be private/loopback" /tmp/integration_prod_preflight_provider_issuer_private_host_fail.log; then
+  echo "missing expected provider CORE_ISSUER_URL private host failure signal"
+  cat /tmp/integration_prod_preflight_provider_issuer_private_host_fail.log
+  exit 1
+fi
 
 write_provider_env_file "http://issuer.example:8082"
 if ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_provider_issuer_scheme_fail.log 2>&1; then

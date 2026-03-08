@@ -152,6 +152,33 @@ host_is_loopback() {
   [[ "$host" == "127.0.0.1" || "$host" == "localhost" || "$host" == "::1" ]]
 }
 
+host_is_private_or_loopback() {
+  local host="$1"
+  local h
+  h="$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')"
+  h="${h#[}"
+  h="${h%]}"
+  if host_is_loopback "$h"; then
+    return 0
+  fi
+  if [[ "$h" == 10.* ]]; then
+    return 0
+  fi
+  if [[ "$h" == 192.168.* ]]; then
+    return 0
+  fi
+  if [[ "$h" =~ ^172\.([1][6-9]|2[0-9]|3[0-1])\. ]]; then
+    return 0
+  fi
+  if [[ "$h" == 169.254.* ]]; then
+    return 0
+  fi
+  if [[ "$h" == fc* || "$h" == fd* || "$h" == fe80:* ]]; then
+    return 0
+  fi
+  return 1
+}
+
 hosts_config_file() {
   echo "$ROOT_DIR/data/easy_mode_hosts.conf"
 }
@@ -3419,6 +3446,15 @@ prod_preflight() {
     else
       check_fail "non-HTTPS URL in prod profile: $u"
     fi
+    local public_host
+    public_host="$(host_from_url "$u")"
+    if [[ -z "$public_host" ]]; then
+      check_fail "unable to parse public URL host: $u"
+    elif host_is_private_or_loopback "$public_host"; then
+      check_fail "public URL host must not be private/loopback in prod profile: $u"
+    else
+      check_ok "public URL host is non-private: $u"
+    fi
   done
 
   local ca_file cert_file key_file client_cert_file client_key_file
@@ -3602,6 +3638,15 @@ prod_preflight() {
         check_ok "provider CORE_ISSUER_URL uses HTTPS"
       else
         check_fail "provider CORE_ISSUER_URL must be HTTPS"
+      fi
+      local provider_issuer_host
+      provider_issuer_host="$(host_from_url "$provider_core_issuer_url")"
+      if [[ -z "$provider_issuer_host" ]]; then
+        check_fail "provider CORE_ISSUER_URL host parse failed"
+      elif host_is_private_or_loopback "$provider_issuer_host"; then
+        check_fail "provider CORE_ISSUER_URL host must not be private/loopback"
+      else
+        check_ok "provider CORE_ISSUER_URL host is non-private"
       fi
     else
       check_fail "provider CORE_ISSUER_URL must be configured"
