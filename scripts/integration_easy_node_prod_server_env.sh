@@ -12,6 +12,7 @@ for cmd in bash go jq rg; do
 done
 
 AUTH_ENV="$ROOT_DIR/deploy/.env.easy.server"
+PROVIDER_ENV="$ROOT_DIR/deploy/.env.easy.provider"
 MODE_FILE="$ROOT_DIR/deploy/data/easy_node_server_mode.conf"
 IDENTITY_FILE="$ROOT_DIR/deploy/data/easy_node_identity.conf"
 TLS_DIR="$ROOT_DIR/deploy/tls"
@@ -58,6 +59,7 @@ restore_dir() {
 
 cleanup() {
   restore_file "$AUTH_ENV" "auth_env"
+  restore_file "$PROVIDER_ENV" "provider_env"
   restore_file "$MODE_FILE" "mode_file"
   restore_file "$IDENTITY_FILE" "identity_file"
   restore_file "$HOSTS_FILE" "hosts_file"
@@ -68,6 +70,7 @@ cleanup() {
 trap cleanup EXIT
 
 backup_file "$AUTH_ENV" "auth_env"
+backup_file "$PROVIDER_ENV" "provider_env"
 backup_file "$MODE_FILE" "mode_file"
 backup_file "$IDENTITY_FILE" "identity_file"
 backup_file "$HOSTS_FILE" "hosts_file"
@@ -152,4 +155,29 @@ require_nonempty "$(env_value "$AUTH_ENV" "ISSUER_ADMIN_SIGNING_KEY_ID")" "ISSUE
 require_nonempty "$(env_value "$AUTH_ENV" "ISSUER_ADMIN_SIGNING_PRIVATE_KEY_FILE_LOCAL")" "ISSUER_ADMIN_SIGNING_PRIVATE_KEY_FILE_LOCAL"
 require_nonempty "$(env_value "$AUTH_ENV" "ISSUER_ADMIN_SIGNING_KEYS_FILE")" "ISSUER_ADMIN_SIGNING_KEYS_FILE"
 
-echo "easy-node prod authority env integration check ok"
+PATH="$TMP_BIN:$PATH" \
+EASY_NODE_VERIFY_PUBLIC=0 \
+./scripts/easy_node.sh server-up \
+  --mode provider \
+  --public-host 198.51.100.20 \
+  --authority-directory https://203.0.113.10:8081 \
+  --authority-issuer https://203.0.113.10:8082 \
+  --peer-directories https://203.0.113.10:8081 \
+  --beta-profile 1 \
+  --prod-profile 1 >/tmp/integration_easy_node_prod_server_env_provider.log 2>&1
+
+if [[ ! -f "$PROVIDER_ENV" ]]; then
+  echo "missing provider env file after server-up: $PROVIDER_ENV"
+  cat /tmp/integration_easy_node_prod_server_env_provider.log
+  exit 1
+fi
+
+require_eq "$(env_value "$PROVIDER_ENV" "PROD_STRICT_MODE")" "1" "provider PROD_STRICT_MODE"
+require_eq "$(env_value "$PROVIDER_ENV" "BETA_STRICT_MODE")" "1" "provider BETA_STRICT_MODE"
+require_eq "$(env_value "$PROVIDER_ENV" "CORE_ISSUER_URL")" "https://203.0.113.10:8082" "provider CORE_ISSUER_URL"
+require_eq "$(env_value "$PROVIDER_ENV" "ISSUER_ADMIN_TOKEN")" "" "provider ISSUER_ADMIN_TOKEN"
+require_eq "$(env_value "$PROVIDER_ENV" "ISSUER_ADMIN_SIGNING_KEY_ID")" "" "provider ISSUER_ADMIN_SIGNING_KEY_ID"
+require_eq "$(env_value "$PROVIDER_ENV" "ISSUER_ADMIN_SIGNING_PRIVATE_KEY_FILE_LOCAL")" "" "provider ISSUER_ADMIN_SIGNING_PRIVATE_KEY_FILE_LOCAL"
+require_eq "$(env_value "$PROVIDER_ENV" "ISSUER_ADMIN_SIGNING_KEYS_FILE")" "" "provider ISSUER_ADMIN_SIGNING_KEYS_FILE"
+
+echo "easy-node prod authority/provider env integration check ok"
