@@ -31,7 +31,8 @@ Usage:
     [--exit-region REGION] \
     [--distinct-operators [0|1]] \
     [--require-issuer-quorum [0|1]] \
-    [--beta-profile [0|1]]
+    [--beta-profile [0|1]] \
+    [--prod-profile [0|1]]
 
 Purpose:
   Run from machine C (client host) to validate a 3-machine beta setup:
@@ -54,6 +55,15 @@ trim_url() {
     value="${value%/}"
   done
   echo "$value"
+}
+
+url_scheme_from_url() {
+  local value="$1"
+  if [[ "$value" == https://* ]]; then
+    echo "https"
+  else
+    echo "http"
+  fi
 }
 
 hostport_from_url() {
@@ -102,7 +112,8 @@ normalize_host_for_endpoint() {
 url_from_host_port() {
   local host="$1"
   local port="$2"
-  printf 'http://%s:%s' "$(normalize_host_for_endpoint "$host")" "$port"
+  local scheme="${3:-http}"
+  printf '%s://%s:%s' "$scheme" "$(normalize_host_for_endpoint "$host")" "$port"
 }
 
 discover_directory_urls() {
@@ -110,7 +121,9 @@ discover_directory_urls() {
   local wait_sec="${2:-12}"
   local min_hosts="${3:-2}"
   local seed_host
+  local seed_scheme
   bootstrap_url="$(trim_url "$bootstrap_url")"
+  seed_scheme="$(url_scheme_from_url "$bootstrap_url")"
   seed_host="$(host_from_url "$bootstrap_url")"
 
   declare -A seen_hosts=()
@@ -157,14 +170,14 @@ discover_directory_urls() {
 
   local out=()
   if [[ -n "$seed_host" ]]; then
-    out+=("$(url_from_host_port "$seed_host" 8081)")
+    out+=("$(url_from_host_port "$seed_host" 8081 "$seed_scheme")")
     unset 'seen_hosts[$seed_host]'
   fi
   local sorted_hosts
   sorted_hosts="$(printf '%s\n' "${!seen_hosts[@]}" | awk 'NF > 0' | sort -u)"
   while IFS= read -r h; do
     [[ -z "$h" ]] && continue
-    out+=("$(url_from_host_port "$h" 8081)")
+    out+=("$(url_from_host_port "$h" 8081 "$seed_scheme")")
   done <<<"$sorted_hosts"
 
   local joined=""
@@ -318,6 +331,7 @@ health_attempts="${THREE_MACHINE_HEALTH_ATTEMPTS:-12}"
 exit_country=""
 exit_region=""
 beta_profile="${THREE_MACHINE_BETA_PROFILE:-1}"
+prod_profile="${THREE_MACHINE_PROD_PROFILE:-0}"
 distinct_operators="${THREE_MACHINE_DISTINCT_OPERATORS:-}"
 require_issuer_quorum="${THREE_MACHINE_REQUIRE_ISSUER_QUORUM:-}"
 
@@ -430,6 +444,15 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --prod-profile)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+        prod_profile="${2:-}"
+        shift 2
+      else
+        prod_profile="1"
+        shift
+      fi
+      ;;
     --require-issuer-quorum)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
         require_issuer_quorum="${2:-}"
@@ -455,6 +478,10 @@ if [[ "$beta_profile" != "0" && "$beta_profile" != "1" ]]; then
   echo "--beta-profile must be 0 or 1"
   exit 2
 fi
+if [[ "$prod_profile" != "0" && "$prod_profile" != "1" ]]; then
+  echo "--prod-profile must be 0 or 1"
+  exit 2
+fi
 if [[ -n "$distinct_operators" && "$distinct_operators" != "0" && "$distinct_operators" != "1" ]]; then
   echo "--distinct-operators must be 0 or 1"
   exit 2
@@ -475,6 +502,10 @@ fi
 if ! [[ "$min_sources" =~ ^[0-9]+$ && "$min_operators" =~ ^[0-9]+$ && "$federation_timeout_sec" =~ ^[0-9]+$ && "$client_timeout_sec" =~ ^[0-9]+$ && "$discovery_wait_sec" =~ ^[0-9]+$ && "$client_min_selection_lines" =~ ^[0-9]+$ && "$client_min_entry_operators" =~ ^[0-9]+$ && "$client_min_exit_operators" =~ ^[0-9]+$ ]]; then
   echo "--min-sources, --min-operators, --federation-timeout-sec, --timeout-sec, --discovery-wait-sec and client diversity thresholds must be numeric"
   exit 2
+fi
+
+if [[ "$prod_profile" == "1" ]]; then
+  beta_profile="1"
 fi
 
 if [[ -z "$distinct_operators" ]]; then
@@ -531,7 +562,9 @@ fi
 echo "[client-diversity] thresholds selection_lines>=$client_min_selection_lines entry_ops>=$client_min_entry_operators exit_ops>=$client_min_exit_operators cross_operator_pair=$client_require_cross_operator_pair"
 
 if [[ -n "$bootstrap_directory" ]]; then
+  bootstrap_scheme=""
   bootstrap_directory="$(trim_url "$bootstrap_directory")"
+  bootstrap_scheme="$(url_scheme_from_url "$bootstrap_directory")"
   bootstrap_discovered="$(discover_directory_urls "$bootstrap_directory" "$discovery_wait_sec" "$min_sources")"
   if [[ -z "$directory_a" ]]; then
     directory_a="$(printf '%s' "$bootstrap_discovered" | cut -d',' -f1)"
@@ -544,13 +577,13 @@ if [[ -n "$bootstrap_directory" ]]; then
   fi
   bootstrap_host="$(host_from_url "$bootstrap_directory")"
   if [[ -z "$issuer_url" && -n "$bootstrap_host" ]]; then
-    issuer_url="$(url_from_host_port "$bootstrap_host" 8082)"
+    issuer_url="$(url_from_host_port "$bootstrap_host" 8082 "$bootstrap_scheme")"
   fi
   if [[ -z "$entry_url" && -n "$bootstrap_host" ]]; then
-    entry_url="$(url_from_host_port "$bootstrap_host" 8083)"
+    entry_url="$(url_from_host_port "$bootstrap_host" 8083 "$bootstrap_scheme")"
   fi
   if [[ -z "$exit_url" && -n "$bootstrap_host" ]]; then
-    exit_url="$(url_from_host_port "$bootstrap_host" 8084)"
+    exit_url="$(url_from_host_port "$bootstrap_host" 8084 "$bootstrap_scheme")"
   fi
 fi
 
@@ -580,10 +613,10 @@ entry_url="$(trim_url "$entry_url")"
 exit_url="$(trim_url "$exit_url")"
 
 if [[ -z "$issuer_a_url" ]]; then
-  issuer_a_url="$(url_from_host_port "$(host_from_url "$directory_a")" 8082)"
+  issuer_a_url="$(url_from_host_port "$(host_from_url "$directory_a")" 8082 "$(url_scheme_from_url "$directory_a")")"
 fi
 if [[ -z "$issuer_b_url" ]]; then
-  issuer_b_url="$(url_from_host_port "$(host_from_url "$directory_b")" 8082)"
+  issuer_b_url="$(url_from_host_port "$(host_from_url "$directory_b")" 8082 "$(url_scheme_from_url "$directory_b")")"
 fi
 
 for endpoint in "$directory_a" "$directory_b" "$issuer_url" "$issuer_a_url" "$issuer_b_url" "$entry_url" "$exit_url"; do
@@ -732,6 +765,7 @@ client_cmd=(
   --min-exit-operators "$client_min_exit_operators"
   --require-cross-operator-pair "$client_require_cross_operator_pair"
   --beta-profile "$beta_profile"
+  --prod-profile "$prod_profile"
 )
 if [[ -n "$client_subject" ]]; then
   client_cmd+=(--subject "$client_subject")

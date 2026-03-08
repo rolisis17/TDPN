@@ -41,6 +41,7 @@ Usage:
     [--distinct-operators [0|1]] \
     [--require-issuer-quorum [0|1]] \
     [--beta-profile [0|1]] \
+    [--prod-profile [0|1]] \
     [--report-file PATH]
 
 Purpose:
@@ -92,6 +93,7 @@ client_require_cross_operator_pair="${THREE_MACHINE_CLIENT_REQUIRE_CROSS_OPERATO
 exit_country=""
 exit_region=""
 beta_profile="${THREE_MACHINE_BETA_PROFILE:-1}"
+prod_profile="${THREE_MACHINE_PROD_PROFILE:-0}"
 distinct_operators="${THREE_MACHINE_DISTINCT_OPERATORS:-}"
 require_issuer_quorum="${THREE_MACHINE_REQUIRE_ISSUER_QUORUM:-}"
 report_file=""
@@ -230,6 +232,15 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --prod-profile)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+        prod_profile="${2:-}"
+        shift 2
+      else
+        prod_profile="1"
+        shift
+      fi
+      ;;
     --require-issuer-quorum)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
         require_issuer_quorum="${2:-}"
@@ -263,6 +274,10 @@ if [[ "$beta_profile" != "0" && "$beta_profile" != "1" ]]; then
   echo "--beta-profile must be 0 or 1"
   exit 2
 fi
+if [[ "$prod_profile" != "0" && "$prod_profile" != "1" ]]; then
+  echo "--prod-profile must be 0 or 1"
+  exit 2
+fi
 if [[ -n "$distinct_operators" && "$distinct_operators" != "0" && "$distinct_operators" != "1" ]]; then
   echo "--distinct-operators must be 0 or 1"
   exit 2
@@ -290,6 +305,10 @@ fi
 if ((fault_every > 0)) && [[ -z "$fault_command" ]]; then
   echo "--fault-command is required when --fault-every is greater than 0"
   exit 2
+fi
+
+if [[ "$prod_profile" == "1" ]]; then
+  beta_profile="1"
 fi
 
 if [[ -z "$distinct_operators" ]]; then
@@ -371,7 +390,7 @@ exec > >(tee -a "$report_file") 2>&1
 
 echo "[3machine-soak] started at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "[3machine-soak] report: $report_file"
-echo "[3machine-soak] rounds=$rounds pause_sec=$pause_sec beta_profile=$beta_profile distinct_operators=$distinct_operators require_issuer_quorum=$require_issuer_quorum client_min_selection_lines=$client_min_selection_lines client_min_entry_operators=$client_min_entry_operators client_min_exit_operators=$client_min_exit_operators client_require_cross_operator_pair=$client_require_cross_operator_pair"
+echo "[3machine-soak] rounds=$rounds pause_sec=$pause_sec beta_profile=$beta_profile prod_profile=$prod_profile distinct_operators=$distinct_operators require_issuer_quorum=$require_issuer_quorum client_min_selection_lines=$client_min_selection_lines client_min_entry_operators=$client_min_entry_operators client_min_exit_operators=$client_min_exit_operators client_require_cross_operator_pair=$client_require_cross_operator_pair"
 
 passed=0
 failed=0
@@ -407,6 +426,7 @@ for round in $(seq 1 "$rounds"); do
     --distinct-operators "$distinct_operators"
     --require-issuer-quorum "$require_issuer_quorum"
     --beta-profile "$beta_profile"
+    --prod-profile "$prod_profile"
   )
   if [[ -n "$directory_a" ]]; then
     cmd+=(--directory-a "$directory_a")

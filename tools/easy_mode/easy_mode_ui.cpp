@@ -445,6 +445,11 @@ void runTestsInteractive(const std::string &root, const std::string &script, ABH
       std::string region = readLine("Preferred exit region (optional)", "");
       bool betaProfile = parseYesNo(readLine("Enable beta profile defaults? (Y/n)", "y"), true);
       bool distinct = parseYesNo(readLine("Require distinct entry/exit operators? (Y/n)", betaProfile ? "y" : "n"), betaProfile);
+      bool prodProfile = parseYesNo(readLine("Enable PROD profile (mTLS + strict fail-closed)? (y/N)", "n"), false);
+      if (prodProfile) {
+        betaProfile = true;
+        distinct = true;
+      }
       std::string report = readLine("Report file path (optional)", "");
       if (autoDiscover && bootstrapDir.empty()) {
         std::cout << "bootstrap directory URL is required\n";
@@ -461,6 +466,7 @@ void runTestsInteractive(const std::string &root, const std::string &script, ABH
           << " --federation-timeout-sec " << shellEscape(federationTimeout)
           << " --timeout-sec " << shellEscape(timeoutSec)
           << " --beta-profile " << (betaProfile ? "1" : "0")
+          << " --prod-profile " << (prodProfile ? "1" : "0")
           << " --distinct-operators " << (distinct ? "1" : "0");
       if (autoDiscover) {
         cmd << " --bootstrap-directory " << shellEscape(bootstrapDir)
@@ -514,6 +520,11 @@ void runTestsInteractive(const std::string &root, const std::string &script, ABH
       bool continueOnFail = parseYesNo(readLine("Continue when a round fails? (y/N)", "n"), false);
       bool betaProfile = parseYesNo(readLine("Enable beta profile defaults? (Y/n)", "y"), true);
       bool distinct = parseYesNo(readLine("Require distinct entry/exit operators? (Y/n)", betaProfile ? "y" : "n"), betaProfile);
+      bool prodProfile = parseYesNo(readLine("Enable PROD profile (mTLS + strict fail-closed)? (y/N)", "n"), false);
+      if (prodProfile) {
+        betaProfile = true;
+        distinct = true;
+      }
       std::string country = readLine("Preferred exit country code (optional)", "");
       std::string region = readLine("Preferred exit region (optional)", "");
       std::string report = readLine("Report file path (optional)", "");
@@ -535,6 +546,7 @@ void runTestsInteractive(const std::string &root, const std::string &script, ABH
           << " --timeout-sec " << shellEscape(timeoutSec)
           << " --continue-on-fail " << (continueOnFail ? "1" : "0")
           << " --beta-profile " << (betaProfile ? "1" : "0")
+          << " --prod-profile " << (prodProfile ? "1" : "0")
           << " --distinct-operators " << (distinct ? "1" : "0");
       if (autoDiscover) {
         cmd << " --bootstrap-directory " << shellEscape(bootstrapDir)
@@ -874,6 +886,11 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       std::string subject = trim(readLine("Client subject key (optional)", ""));
       bool betaProfile = parseYesNo(readLine("Enable beta profile defaults? (Y/n)", "y"), true);
       bool distinct = parseYesNo(readLine("Require distinct entry/exit operators? (Y/n)", betaProfile ? "y" : "n"), betaProfile);
+      bool prodProfile = parseYesNo(readLine("Enable PROD profile (mTLS + strict fail-closed)? (y/N)", "n"), false);
+      if (prodProfile) {
+        betaProfile = true;
+        distinct = true;
+      }
 
       if (autoDiscover && bootstrapDir.empty()) {
         std::cout << "bootstrap directory URL is required\n";
@@ -891,6 +908,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --federation-timeout-sec " << shellEscape(federationTimeout)
           << " --timeout-sec " << shellEscape(timeoutSec)
           << " --beta-profile " << (betaProfile ? "1" : "0")
+          << " --prod-profile " << (prodProfile ? "1" : "0")
           << " --distinct-operators " << (distinct ? "1" : "0");
       if (!subject.empty()) {
         cmd << " --subject " << shellEscape(subject);
@@ -938,6 +956,11 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       std::string subject = trim(readLine("Client subject key (optional)", ""));
       bool betaProfile = parseYesNo(readLine("Enable beta profile defaults? (Y/n)", "y"), true);
       bool distinct = parseYesNo(readLine("Require distinct entry/exit operators? (Y/n)", betaProfile ? "y" : "n"), betaProfile);
+      bool prodProfile = parseYesNo(readLine("Enable PROD profile (mTLS + strict fail-closed)? (y/N)", "n"), false);
+      if (prodProfile) {
+        betaProfile = true;
+        distinct = true;
+      }
       if (autoDiscover && bootstrapDir.empty()) {
         std::cout << "bootstrap directory URL is required\n";
         continue;
@@ -955,6 +978,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --federation-timeout-sec " << shellEscape(federationTimeout)
           << " --timeout-sec " << shellEscape(timeoutSec)
           << " --beta-profile " << (betaProfile ? "1" : "0")
+          << " --prod-profile " << (prodProfile ? "1" : "0")
           << " --distinct-operators " << (distinct ? "1" : "0");
       if (!subject.empty()) {
         cmd << " --subject " << shellEscape(subject);
@@ -998,6 +1022,11 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       std::string subject = trim(readLine("Client subject key (optional)", ""));
       bool betaProfile = parseYesNo(readLine("Enable beta profile defaults? (Y/n)", "y"), true);
       bool distinct = parseYesNo(readLine("Require distinct entry/exit operators? (Y/n)", betaProfile ? "y" : "n"), betaProfile);
+      bool prodProfile = parseYesNo(readLine("Enable PROD profile (mTLS + strict fail-closed)? (y/N)", "n"), false);
+      if (prodProfile) {
+        betaProfile = true;
+        distinct = true;
+      }
       if (autoDiscover && bootstrapDir.empty()) {
         std::cout << "bootstrap directory URL is required\n";
         continue;
@@ -1011,6 +1040,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --rounds " << shellEscape(rounds)
           << " --pause-sec " << shellEscape(pauseSec)
           << " --beta-profile " << (betaProfile ? "1" : "0")
+          << " --prod-profile " << (prodProfile ? "1" : "0")
           << " --distinct-operators " << (distinct ? "1" : "0");
       if (!subject.empty()) {
         cmd << " --subject " << shellEscape(subject);
