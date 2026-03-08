@@ -158,6 +158,7 @@
 - Invite/admin auth policy fail-fast: easy-node invite commands now reject token auth locally when authority is configured signed-only (`ISSUER_ADMIN_ALLOW_TOKEN=0` / `ISSUER_ADMIN_REQUIRE_SIGNED=1`) to avoid late issuer `401` errors.
 - Provider prod-profile preflight hygiene: strict preflight now enforces `CORE_ISSUER_URL` HTTPS and rejects persisted issuer admin token/signing material on provider nodes.
 - Easy-node client profile env guard coverage (`integration_easy_node_client_profile_env.sh`) now verifies beta/prod demo client presets apply intended env hardening without injecting strict live-WG runtime flags.
+- Beta preflight now includes easy-node prod preflight/admin-signing integration coverage (`integration_prod_preflight_tools.sh`) by default.
 - One-bootstrap host discovery workflow (`discover-hosts`, `--bootstrap-directory`) for machine-C validation and easy-mode launcher flows that auto-discover peer server URLs from a single known directory endpoint.
 
 ## In Progress / Partial

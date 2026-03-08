@@ -28,6 +28,7 @@ run_step "cross-role strict guardrails" ./scripts/integration_beta_strict_roles.
 run_step "easy-node client profile env wiring" ./scripts/integration_easy_node_client_profile_env.sh
 run_step "easy-node prod authority env wiring" ./scripts/integration_easy_node_prod_server_env.sh
 run_step "easy-node invite auth policy" ./scripts/integration_easy_node_invite_auth_policy.sh
+run_step "easy-node prod preflight tools" ./scripts/integration_prod_preflight_tools.sh
 run_step "distinct-operator anti-collusion" ./scripts/integration_distinct_operators.sh
 run_step "peer discovery operator cap" ./scripts/integration_peer_discovery_operator_cap.sh
 run_step "anonymous credential dispute" ./scripts/integration_anon_credential_dispute.sh
