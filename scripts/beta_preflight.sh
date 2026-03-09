@@ -22,6 +22,7 @@ run_step() {
 }
 
 run_step "unit tests" go test ./...
+run_step "secret hygiene" ./scripts/integration_secret_hygiene.sh
 run_step "rotate server secrets" ./scripts/integration_rotate_server_secrets.sh
 run_step "directory strict governance" ./scripts/integration_directory_beta_strict.sh
 run_step "cross-role strict guardrails" ./scripts/integration_beta_strict_roles.sh

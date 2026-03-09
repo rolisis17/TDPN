@@ -21,6 +21,9 @@ Use this before making the repository public.
 
 ## 3) Secret hygiene
 1. Verify no secrets in tracked files:
+   ```bash
+   ./scripts/integration_secret_hygiene.sh
+   ```
    - keys, tokens, cert private keys, `.env` credentials
 2. Rotate any credentials used during development.
 3. If anything leaked previously, rewrite git history and rotate credentials.
