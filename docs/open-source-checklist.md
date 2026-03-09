@@ -14,6 +14,7 @@ Use this before making the repository public.
    - Dependabot security updates
    - Secret scanning (including push protection)
    - Code scanning (if available)
+   - Dependency review gate on pull requests
    - Baseline repo config check:
      ```bash
      ./scripts/integration_security_baseline.sh

@@ -33,6 +33,7 @@ echo "[security-baseline] checking required files"
 require_file "SECURITY.md"
 require_file ".github/dependabot.yml"
 require_file ".github/workflows/security.yml"
+require_file ".github/workflows/dependency-review.yml"
 
 echo "[security-baseline] checking dependabot ecosystems"
 require_match ".github/dependabot.yml" 'package-ecosystem:\s*"gomod"' "gomod updates configured"
@@ -43,5 +44,6 @@ require_match ".github/workflows/security.yml" 'github/codeql-action/init@v3' "C
 require_match ".github/workflows/security.yml" 'languages:\s*go' "CodeQL go language target"
 require_match ".github/workflows/security.yml" 'govulncheck' "govulncheck job"
 require_match ".github/workflows/security.yml" 'schedule:' "scheduled security scan"
+require_match ".github/workflows/dependency-review.yml" 'actions/dependency-review-action@v4' "dependency review action"
 
 echo "[security-baseline] ok"
