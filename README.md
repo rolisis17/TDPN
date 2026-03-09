@@ -11,7 +11,7 @@ This repository starts a decentralized privacy network where one `node` program 
 - wg I/O injector (internal test packet source)
 
 ## Why this shape
-You asked for client and server in one program. The current scaffold is built exactly that way: role flags enable any combination in one process.
+Client and server in one program allowing the user to be part of the network as provider and also as client. The current scaffold is built exactly that way: role flags enable any combination in one process.
 
 ## Current status
 - [x] Unified node runtime with role flags
