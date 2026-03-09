@@ -112,6 +112,26 @@ This is the simplest full path test.
   --distinct-operators 1
 ```
 
+Real client VPN smoke test (machine C / tester host, Linux root):
+
+```bash
+sudo ./scripts/easy_node.sh client-vpn-preflight \
+  --bootstrap-directory http://A_PUBLIC_IP_OR_DNS:8081
+
+sudo ./scripts/easy_node.sh client-vpn-up \
+  --bootstrap-directory http://A_PUBLIC_IP_OR_DNS:8081 \
+  --subject <INVITE_KEY> \
+  --beta-profile 1 \
+  --distinct-operators 1
+
+./scripts/easy_node.sh client-vpn-status
+sudo ./scripts/easy_node.sh client-vpn-down
+# prod profile enables operator-floor checks by default (>=2 entry and >=2 exit operators).
+# for single-operator lab tests only, append: --operator-floor-check 0
+# prod profile also enables issuer-quorum checks by default (>=2 distinct issuer IDs with keys).
+# for single-issuer lab tests only, append: --issuer-quorum-check 0
+```
+
 3-machine soak/fault validation (machine C runner):
 
 ```bash
@@ -132,6 +152,34 @@ This is the simplest full path test.
   --discovery-wait-sec 20 \
   --beta-profile 1 \
   --distinct-operators 1
+```
+
+Production-grade 3-machine gate (strict control + real WG from machine C, Linux root):
+
+```bash
+sudo ./scripts/easy_node.sh three-machine-prod-gate \
+  --directory-a https://A_PUBLIC_IP_OR_DNS:8081 \
+  --directory-b https://B_PUBLIC_IP_OR_DNS:8081 \
+  --issuer-url https://A_PUBLIC_IP_OR_DNS:8082 \
+  --entry-url https://A_PUBLIC_IP_OR_DNS:8083 \
+  --exit-url https://A_PUBLIC_IP_OR_DNS:8084 \
+  --wg-max-consecutive-failures 2 \
+  --wg-soak-summary-json .easy-node-logs/prod_gate_wg_soak_summary.json \
+  --gate-summary-json .easy-node-logs/prod_gate_summary.json \
+  --strict-distinct 1
+
+# same gate flow + automatic diagnostics bundle archive
+sudo ./scripts/easy_node.sh three-machine-prod-bundle \
+  --bundle-dir .easy-node-logs/prod_gate_bundle \
+  --directory-a https://A_PUBLIC_IP_OR_DNS:8081 \
+  --directory-b https://B_PUBLIC_IP_OR_DNS:8081 \
+  --issuer-url https://A_PUBLIC_IP_OR_DNS:8082 \
+  --entry-url https://A_PUBLIC_IP_OR_DNS:8083 \
+  --exit-url https://A_PUBLIC_IP_OR_DNS:8084 \
+  --strict-distinct 1
+
+# quick checklist reminder output
+./scripts/easy_node.sh three-machine-reminder
 ```
 
 Machine-role quick checks (run on each host before full 3-machine run):

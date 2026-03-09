@@ -129,6 +129,9 @@ scripts\windows\wsl2_easy.cmd run
 Script-only easy mode:
 
 ```bash
+# optional: preflight peer/identity/quorum readiness before starting server
+./scripts/easy_node.sh server-preflight --mode provider --authority-directory http://<AUTHORITY_IP_OR_DNS>:8081 --authority-issuer http://<AUTHORITY_IP_OR_DNS>:8082 --peer-directories http://<AUTHORITY_IP_OR_DNS>:8081 --beta-profile 1
+
 ./scripts/easy_node.sh server-up --public-host <PUBLIC_IP_OR_DNS> --beta-profile
 
 # invite-key flow (server side)
@@ -167,6 +170,18 @@ sudo ./scripts/easy_node.sh stop-all --with-wg-only 1 --force-iface-cleanup 1
   --beta-profile 1 \
   --distinct-operators 1
 
+# real client VPN mode (host WireGuard interface, Linux + sudo)
+sudo ./scripts/easy_node.sh client-vpn-preflight \
+  --bootstrap-directory http://<SERVER_IP>:8081 \
+  --prod-profile 0
+sudo ./scripts/easy_node.sh client-vpn-up \
+  --bootstrap-directory http://<SERVER_IP>:8081 \
+  --subject <INVITE_KEY> \
+  --beta-profile 1 \
+  --distinct-operators 1
+./scripts/easy_node.sh client-vpn-status
+sudo ./scripts/easy_node.sh client-vpn-down
+
 ./scripts/easy_node.sh three-machine-validate \
   --directory-a http://<A_SERVER_IP>:8081 \
   --directory-b http://<B_SERVER_IP>:8081 \
@@ -188,6 +203,34 @@ sudo ./scripts/easy_node.sh stop-all --with-wg-only 1 --force-iface-cleanup 1
   --pause-sec 5 \
   --beta-profile 1 \
   --distinct-operators 1
+
+# full production-grade 3-machine sequence (strict control + real WG)
+sudo ./scripts/easy_node.sh three-machine-prod-gate \
+  --directory-a https://<A_SERVER_IP>:8081 \
+  --directory-b https://<B_SERVER_IP>:8081 \
+  --issuer-url https://<A_SERVER_IP>:8082 \
+  --entry-url https://<A_SERVER_IP>:8083 \
+  --exit-url https://<A_SERVER_IP>:8084 \
+  --strict-distinct 1
+# optional: tune sustained WG soak failure guard (default 2 consecutive failures)
+#   --wg-max-consecutive-failures 2
+# optional: persist machine-readable WG soak summary JSON
+#   --wg-soak-summary-json .easy-node-logs/prod_gate_wg_soak_summary.json
+# optional: persist overall prod-gate summary JSON (step statuses + failure step/rc)
+#   --gate-summary-json .easy-node-logs/prod_gate_summary.json
+
+# same sequence + automatic diagnostics bundle (.tar.gz)
+sudo ./scripts/easy_node.sh three-machine-prod-bundle \
+  --bundle-dir .easy-node-logs/prod_gate_bundle \
+  --directory-a https://<A_SERVER_IP>:8081 \
+  --directory-b https://<B_SERVER_IP>:8081 \
+  --issuer-url https://<A_SERVER_IP>:8082 \
+  --entry-url https://<A_SERVER_IP>:8083 \
+  --exit-url https://<A_SERVER_IP>:8084 \
+  --strict-distinct 1
+
+# print true 3-machine reminder checklist
+./scripts/easy_node.sh three-machine-reminder
 
 # one-command pilot validation + soak + report bundle (machine C)
 ./scripts/beta_pilot_runbook.sh \
@@ -231,6 +274,7 @@ sudo ./scripts/easy_node.sh stop-all --with-wg-only 1 --force-iface-cleanup 1
 - admin invite commands (`invite-generate`, `invite-check`, `invite-disable`) are authority-only and are blocked on provider nodes.
 - if `--operator-id` / `--issuer-id` are omitted, unique IDs are auto-generated and persisted in `deploy/data/easy_node_identity.conf`.
 - directory/issuer signing key file names are derived from those IDs to avoid accidental key reuse across machines.
+- when peer directories are configured, beta/prod runs fail-fast on peer identity verification failures by default (`--peer-identity-strict auto` -> strict); temporary diagnostics bypass: `--peer-identity-strict 0`.
 - authority admin token is hidden in output by default; use `--show-admin-token 1` only when you explicitly need to view it.
 - easy-mode `server-up` auto-generates and stores non-default `DIRECTORY_ADMIN_TOKEN` and `ENTRY_PUZZLE_SECRET` (both hidden in output unless you inspect env files).
 - `rotate-server-secrets` rotates `DIRECTORY_ADMIN_TOKEN` + `ENTRY_PUZZLE_SECRET` (and `ISSUER_ADMIN_TOKEN` on authority nodes) with optional restart.
@@ -248,11 +292,19 @@ sudo ./scripts/easy_node.sh stop-all --with-wg-only 1 --force-iface-cleanup 1
 - `docs/easy-3-machine-test.md`
 - `docs/beta-playbook.md` (frozen closed-beta command set)
 - `docs/windows-wsl2.md` (Windows 11 + WSL2)
+- `docs/open-source-checklist.md` (safe path to publish repo)
+- `docs/license-decision.md` (license rationale; current choice is Apache-2.0)
+
+## License
+
+This project is licensed under the Apache License 2.0.
+See `LICENSE`.
 
 Optional env vars:
 - `EASY_NODE_BETA_PROFILE` (`1` enables easy-mode beta defaults in `server-up` and `client-test`)
 - `EASY_NODE_DIRECTORY_ADMIN_TOKEN` (optional override for `server-up` generated `DIRECTORY_ADMIN_TOKEN`)
 - `EASY_NODE_ENTRY_PUZZLE_SECRET` (optional override for `server-up` generated `ENTRY_PUZZLE_SECRET`)
+- `EASY_NODE_PEER_IDENTITY_STRICT` (`auto` default; `1` enforces peer identity uniqueness checks, `0` bypasses during diagnostics)
 - `DIRECTORY_ADDR` (default `127.0.0.1:8081`)
 - `ISSUER_ADDR` (default `127.0.0.1:8082`)
 - `ENTRY_ADDR` (default `127.0.0.1:8083`)

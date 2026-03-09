@@ -247,5 +247,516 @@ if ! rg -q -- '--prod-profile 1' "$RUNBOOK_SOAK_CAPTURE"; then
   exit 1
 fi
 
-echo "3-machine prod-profile wiring integration check ok"
+FAKE_GATE="$TMP_DIR/fake_prod_gate.sh"
+GATE_CAPTURE="$TMP_DIR/prod_gate_args.log"
+cat >"$FAKE_GATE" <<'EOF_FAKE_GATE'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >>"${GATE_CAPTURE_FILE:?}"
+exit 0
+EOF_FAKE_GATE
+chmod +x "$FAKE_GATE"
 
+echo "[wiring] easy_node -> prod gate forwarding"
+PATH="$TMP_BIN:$PATH" \
+GATE_CAPTURE_FILE="$GATE_CAPTURE" \
+THREE_MACHINE_PROD_GATE_SCRIPT="$FAKE_GATE" \
+./scripts/easy_node.sh three-machine-prod-gate \
+  --directory-a https://dir-a:8081 \
+  --directory-b https://dir-b:8081 \
+  --issuer-url https://issuer-main:8082 \
+  --entry-url https://entry-main:8083 \
+  --exit-url https://exit-main:8084 \
+  --strict-distinct 1 \
+  --wg-max-consecutive-failures 3 \
+  --wg-soak-summary-json /tmp/prod_gate_wg_soak_summary.json \
+  --gate-summary-json /tmp/prod_gate_summary.json \
+  --control-soak-rounds 2 \
+  --skip-wg 1 >/tmp/integration_3machine_prod_profile_wiring_gate.log 2>&1
+
+if ! rg -q -- '--strict-distinct 1' "$GATE_CAPTURE"; then
+  echo "easy_node prod gate wiring failed: --strict-distinct 1 missing"
+  cat "$GATE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--skip-wg 1' "$GATE_CAPTURE"; then
+  echo "easy_node prod gate wiring failed: --skip-wg 1 missing"
+  cat "$GATE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--wg-max-consecutive-failures 3' "$GATE_CAPTURE"; then
+  echo "easy_node prod gate wiring failed: --wg-max-consecutive-failures 3 missing"
+  cat "$GATE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--wg-soak-summary-json /tmp/prod_gate_wg_soak_summary.json' "$GATE_CAPTURE"; then
+  echo "easy_node prod gate wiring failed: --wg-soak-summary-json missing"
+  cat "$GATE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--gate-summary-json /tmp/prod_gate_summary.json' "$GATE_CAPTURE"; then
+  echo "easy_node prod gate wiring failed: --gate-summary-json missing"
+  cat "$GATE_CAPTURE"
+  exit 1
+fi
+
+echo "[wiring] easy_node reminder command output"
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh three-machine-reminder | rg -q 'True 3-machine production reminder checklist'; then
+  echo "easy_node reminder command missing expected checklist heading"
+  exit 1
+fi
+
+echo "[wiring] easy_node client-vpn-preflight help dispatch"
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh client-vpn-preflight --help | rg -q 'client-vpn-preflight'; then
+  echo "easy_node client-vpn-preflight command help dispatch failed"
+  exit 1
+fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh client-vpn-preflight --help | rg -q -- '--operator-floor-check'; then
+  echo "easy_node client-vpn-preflight help missing --operator-floor-check"
+  exit 1
+fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh client-vpn-preflight --help | rg -q -- '--issuer-quorum-check'; then
+  echo "easy_node client-vpn-preflight help missing --issuer-quorum-check"
+  exit 1
+fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh prod-wg-soak --help | rg -q -- '--max-consecutive-failures'; then
+  echo "easy_node prod-wg-soak help missing --max-consecutive-failures"
+  exit 1
+fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh prod-wg-soak --help | rg -q -- '--summary-json'; then
+  echo "easy_node prod-wg-soak help missing --summary-json"
+  exit 1
+fi
+
+FAKE_GATE_VALIDATE="$TMP_DIR/fake_gate_validate.sh"
+FAKE_GATE_SOAK="$TMP_DIR/fake_gate_soak.sh"
+FAKE_GATE_WG_VALIDATE="$TMP_DIR/fake_gate_wg_validate.sh"
+FAKE_GATE_WG_SOAK="$TMP_DIR/fake_gate_wg_soak.sh"
+GATE_VALIDATE_CAPTURE="$TMP_DIR/gate_validate_args.log"
+GATE_SOAK_CAPTURE="$TMP_DIR/gate_soak_args.log"
+GATE_WG_VALIDATE_CAPTURE="$TMP_DIR/gate_wg_validate_args.log"
+GATE_WG_SOAK_CAPTURE="$TMP_DIR/gate_wg_soak_args.log"
+
+cat >"$FAKE_GATE_VALIDATE" <<'EOF_FAKE_GATE_VALIDATE'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >>"${GATE_VALIDATE_CAPTURE_FILE:?}"
+exit 0
+EOF_FAKE_GATE_VALIDATE
+
+cat >"$FAKE_GATE_SOAK" <<'EOF_FAKE_GATE_SOAK'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >>"${GATE_SOAK_CAPTURE_FILE:?}"
+exit 0
+EOF_FAKE_GATE_SOAK
+
+cat >"$FAKE_GATE_WG_VALIDATE" <<'EOF_FAKE_GATE_WG_VALIDATE'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >>"${GATE_WG_VALIDATE_CAPTURE_FILE:?}"
+exit 0
+EOF_FAKE_GATE_WG_VALIDATE
+
+cat >"$FAKE_GATE_WG_SOAK" <<'EOF_FAKE_GATE_WG_SOAK'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >>"${GATE_WG_SOAK_CAPTURE_FILE:?}"
+summary_json=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --summary-json)
+      summary_json="${2:-}"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+if [[ -n "$summary_json" ]]; then
+  mkdir -p "$(dirname "$summary_json")"
+  cat >"$summary_json" <<'EOF_SUMMARY'
+{
+  "status": "fail",
+  "rounds_requested": 3,
+  "rounds_passed": 1,
+  "rounds_failed": 2,
+  "max_consecutive_failures_seen": 2,
+  "max_consecutive_failures_limit": 2,
+  "report_file": "/tmp/fake.log",
+  "summary_generated_at_utc": "2026-03-09T00:00:00Z",
+  "failure_classes": {
+    "endpoint_connectivity": 2,
+    "timeout": 1
+  }
+}
+EOF_SUMMARY
+fi
+exit 0
+EOF_FAKE_GATE_WG_SOAK
+
+chmod +x "$FAKE_GATE_VALIDATE" "$FAKE_GATE_SOAK" "$FAKE_GATE_WG_VALIDATE" "$FAKE_GATE_WG_SOAK"
+
+echo "[wiring] prod gate script control-step forwarding"
+PATH="$TMP_BIN:$PATH" \
+GATE_VALIDATE_CAPTURE_FILE="$GATE_VALIDATE_CAPTURE" \
+GATE_SOAK_CAPTURE_FILE="$GATE_SOAK_CAPTURE" \
+GATE_WG_VALIDATE_CAPTURE_FILE="$GATE_WG_VALIDATE_CAPTURE" \
+GATE_WG_SOAK_CAPTURE_FILE="$GATE_WG_SOAK_CAPTURE" \
+THREE_MACHINE_BETA_VALIDATE_SCRIPT="$FAKE_GATE_VALIDATE" \
+THREE_MACHINE_BETA_SOAK_SCRIPT="$FAKE_GATE_SOAK" \
+THREE_MACHINE_PROD_WG_VALIDATE_SCRIPT="$FAKE_GATE_WG_VALIDATE" \
+THREE_MACHINE_PROD_WG_SOAK_SCRIPT="$FAKE_GATE_WG_SOAK" \
+./scripts/integration_3machine_prod_gate.sh \
+  --directory-a https://dir-a:8081 \
+  --directory-b https://dir-b:8081 \
+  --issuer-url https://issuer-main:8082 \
+  --entry-url https://entry-main:8083 \
+  --exit-url https://exit-main:8084 \
+  --control-soak-rounds 2 \
+  --skip-wg 1 >/tmp/integration_3machine_prod_profile_wiring_prod_gate.log 2>&1
+
+if ! rg -q -- '--prod-profile 1' "$GATE_VALIDATE_CAPTURE"; then
+  echo "prod gate wiring failed: validate call missing --prod-profile 1"
+  cat "$GATE_VALIDATE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-issuer-quorum 1' "$GATE_VALIDATE_CAPTURE"; then
+  echo "prod gate wiring failed: validate call missing --require-issuer-quorum 1"
+  cat "$GATE_VALIDATE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--rounds 2' "$GATE_SOAK_CAPTURE"; then
+  echo "prod gate wiring failed: soak call missing --rounds 2"
+  cat "$GATE_SOAK_CAPTURE"
+  exit 1
+fi
+if [[ -s "$GATE_WG_VALIDATE_CAPTURE" || -s "$GATE_WG_SOAK_CAPTURE" ]]; then
+  echo "prod gate wiring failed: WG scripts should not run when --skip-wg 1"
+  cat "$GATE_WG_VALIDATE_CAPTURE" "$GATE_WG_SOAK_CAPTURE"
+  exit 1
+fi
+
+: >"$GATE_WG_VALIDATE_CAPTURE"
+: >"$GATE_WG_SOAK_CAPTURE"
+
+echo "[wiring] prod gate script wg-step summary output"
+WG_SUMMARY_FILE="$TMP_DIR/prod_gate_wg_summary.json"
+GATE_SUMMARY_FILE="$TMP_DIR/prod_gate_summary.json"
+WG_GATE_LOG="/tmp/integration_3machine_prod_profile_wiring_prod_gate_wg.log"
+PATH="$TMP_BIN:$PATH" \
+GATE_VALIDATE_CAPTURE_FILE="$GATE_VALIDATE_CAPTURE" \
+GATE_SOAK_CAPTURE_FILE="$GATE_SOAK_CAPTURE" \
+GATE_WG_VALIDATE_CAPTURE_FILE="$GATE_WG_VALIDATE_CAPTURE" \
+GATE_WG_SOAK_CAPTURE_FILE="$GATE_WG_SOAK_CAPTURE" \
+THREE_MACHINE_BETA_VALIDATE_SCRIPT="$FAKE_GATE_VALIDATE" \
+THREE_MACHINE_BETA_SOAK_SCRIPT="$FAKE_GATE_SOAK" \
+THREE_MACHINE_PROD_WG_VALIDATE_SCRIPT="$FAKE_GATE_WG_VALIDATE" \
+THREE_MACHINE_PROD_WG_SOAK_SCRIPT="$FAKE_GATE_WG_SOAK" \
+THREE_MACHINE_PROD_GATE_ALLOW_NON_ROOT=1 \
+./scripts/integration_3machine_prod_gate.sh \
+  --directory-a https://dir-a:8081 \
+  --directory-b https://dir-b:8081 \
+  --issuer-url https://issuer-main:8082 \
+  --entry-url https://entry-main:8083 \
+  --exit-url https://exit-main:8084 \
+  --skip-control-soak 1 \
+  --wg-soak-rounds 1 \
+  --wg-soak-pause-sec 0 \
+  --wg-soak-summary-json "$WG_SUMMARY_FILE" \
+  --gate-summary-json "$GATE_SUMMARY_FILE" >"$WG_GATE_LOG" 2>&1
+
+if [[ ! -s "$GATE_WG_VALIDATE_CAPTURE" || ! -s "$GATE_WG_SOAK_CAPTURE" ]]; then
+  echo "prod gate wiring failed: WG scripts should run when --skip-wg 0"
+  cat "$GATE_WG_VALIDATE_CAPTURE" "$GATE_WG_SOAK_CAPTURE"
+  cat "$WG_GATE_LOG"
+  exit 1
+fi
+if ! rg -q -- '--summary-json' "$GATE_WG_SOAK_CAPTURE"; then
+  echo "prod gate wiring failed: WG soak call missing --summary-json forwarding"
+  cat "$GATE_WG_SOAK_CAPTURE"
+  cat "$WG_GATE_LOG"
+  exit 1
+fi
+if ! rg -q '\[prod-gate\] wg_soak_summary status=fail .* top_failure_class=endpoint_connectivity top_failure_count=2 ' "$WG_GATE_LOG"; then
+  echo "prod gate wiring failed: compact WG soak summary output missing/incorrect"
+  cat "$WG_GATE_LOG"
+  exit 1
+fi
+if [[ ! -f "$GATE_SUMMARY_FILE" ]]; then
+  echo "prod gate wiring failed: gate summary json missing on successful run"
+  cat "$WG_GATE_LOG"
+  exit 1
+fi
+if ! rg -q '"status": "ok"' "$GATE_SUMMARY_FILE"; then
+  echo "prod gate wiring failed: gate summary status missing/incorrect on successful run"
+  cat "$GATE_SUMMARY_FILE"
+  cat "$WG_GATE_LOG"
+  exit 1
+fi
+if ! rg -q '"wg_soak_status": "fail"' "$GATE_SUMMARY_FILE"; then
+  echo "prod gate wiring failed: gate summary missing embedded WG status"
+  cat "$GATE_SUMMARY_FILE"
+  cat "$WG_GATE_LOG"
+  exit 1
+fi
+if ! rg -q '"prod_wg_soak": "ok"' "$GATE_SUMMARY_FILE"; then
+  echo "prod gate wiring failed: gate summary missing per-step status for prod_wg_soak"
+  cat "$GATE_SUMMARY_FILE"
+  cat "$WG_GATE_LOG"
+  exit 1
+fi
+
+echo "[wiring] prod gate script summary on failure path"
+FAKE_GATE_WG_SOAK_FAIL="$TMP_DIR/fake_gate_wg_soak_fail.sh"
+cat >"$FAKE_GATE_WG_SOAK_FAIL" <<'EOF_FAKE_GATE_WG_SOAK_FAIL'
+#!/usr/bin/env bash
+set -euo pipefail
+summary_json=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --summary-json)
+      summary_json="${2:-}"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+if [[ -n "$summary_json" ]]; then
+  mkdir -p "$(dirname "$summary_json")"
+  cat >"$summary_json" <<'EOF_SUMMARY_FAIL'
+{
+  "status": "fail",
+  "rounds_requested": 2,
+  "rounds_passed": 0,
+  "rounds_failed": 2,
+  "max_consecutive_failures_seen": 2,
+  "max_consecutive_failures_limit": 2,
+  "report_file": "/tmp/fake_fail.log",
+  "summary_generated_at_utc": "2026-03-09T00:00:01Z",
+  "failure_classes": {
+    "timeout": 2
+  }
+}
+EOF_SUMMARY_FAIL
+fi
+exit 1
+EOF_FAKE_GATE_WG_SOAK_FAIL
+chmod +x "$FAKE_GATE_WG_SOAK_FAIL"
+
+GATE_SUMMARY_FAIL_FILE="$TMP_DIR/prod_gate_summary_fail.json"
+WG_GATE_FAIL_LOG="/tmp/integration_3machine_prod_profile_wiring_prod_gate_wg_fail.log"
+set +e
+PATH="$TMP_BIN:$PATH" \
+GATE_VALIDATE_CAPTURE_FILE="$GATE_VALIDATE_CAPTURE" \
+GATE_SOAK_CAPTURE_FILE="$GATE_SOAK_CAPTURE" \
+GATE_WG_VALIDATE_CAPTURE_FILE="$GATE_WG_VALIDATE_CAPTURE" \
+GATE_WG_SOAK_CAPTURE_FILE="$GATE_WG_SOAK_CAPTURE" \
+THREE_MACHINE_BETA_VALIDATE_SCRIPT="$FAKE_GATE_VALIDATE" \
+THREE_MACHINE_BETA_SOAK_SCRIPT="$FAKE_GATE_SOAK" \
+THREE_MACHINE_PROD_WG_VALIDATE_SCRIPT="$FAKE_GATE_WG_VALIDATE" \
+THREE_MACHINE_PROD_WG_SOAK_SCRIPT="$FAKE_GATE_WG_SOAK_FAIL" \
+THREE_MACHINE_PROD_GATE_ALLOW_NON_ROOT=1 \
+./scripts/integration_3machine_prod_gate.sh \
+  --directory-a https://dir-a:8081 \
+  --directory-b https://dir-b:8081 \
+  --issuer-url https://issuer-main:8082 \
+  --entry-url https://entry-main:8083 \
+  --exit-url https://exit-main:8084 \
+  --skip-control-soak 1 \
+  --wg-soak-rounds 1 \
+  --wg-soak-pause-sec 0 \
+  --wg-soak-summary-json "$WG_SUMMARY_FILE" \
+  --gate-summary-json "$GATE_SUMMARY_FAIL_FILE" >"$WG_GATE_FAIL_LOG" 2>&1
+gate_fail_rc=$?
+set -e
+if [[ "$gate_fail_rc" -eq 0 ]]; then
+  echo "prod gate wiring failed: expected non-zero rc on failing WG soak path"
+  cat "$WG_GATE_FAIL_LOG"
+  exit 1
+fi
+if [[ ! -f "$GATE_SUMMARY_FAIL_FILE" ]]; then
+  echo "prod gate wiring failed: missing gate summary json on failing path"
+  cat "$WG_GATE_FAIL_LOG"
+  exit 1
+fi
+if ! rg -q '"status": "fail"' "$GATE_SUMMARY_FAIL_FILE" || ! rg -q '"failed_step": "prod_wg_soak"' "$GATE_SUMMARY_FAIL_FILE"; then
+  echo "prod gate wiring failed: failure summary missing status/failed_step"
+  cat "$GATE_SUMMARY_FAIL_FILE"
+  cat "$WG_GATE_FAIL_LOG"
+  exit 1
+fi
+if ! rg -q '\[prod-gate\] wg_soak_summary status=fail .* top_failure_class=timeout top_failure_count=2 ' "$WG_GATE_FAIL_LOG"; then
+  echo "prod gate wiring failed: compact WG summary missing on failing path"
+  cat "$WG_GATE_FAIL_LOG"
+  exit 1
+fi
+
+FAKE_BUNDLE_GATE="$TMP_DIR/fake_bundle_gate.sh"
+BUNDLE_CAPTURE="$TMP_DIR/prod_bundle_gate_args.log"
+BUNDLE_SOURCE_STEP_LOGS="$TMP_DIR/fake_bundle_step_logs_src"
+cat >"$FAKE_BUNDLE_GATE" <<'EOF_FAKE_BUNDLE_GATE'
+#!/usr/bin/env bash
+set -euo pipefail
+
+printf '%s\n' "$*" >>"${BUNDLE_CAPTURE_FILE:?}"
+
+report_file=""
+wg_summary=""
+gate_summary=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --report-file)
+      report_file="${2:-}"
+      shift 2
+      ;;
+    --wg-soak-summary-json)
+      wg_summary="${2:-}"
+      shift 2
+      ;;
+    --gate-summary-json)
+      gate_summary="${2:-}"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
+mkdir -p "${BUNDLE_SOURCE_STEP_LOGS_DIR:?}"
+printf 'step log marker\n' >"${BUNDLE_SOURCE_STEP_LOGS_DIR}/marker.log"
+
+if [[ -n "$report_file" ]]; then
+  mkdir -p "$(dirname "$report_file")"
+  {
+    printf '[prod-gate] fake gate running\n'
+    printf '[prod-gate] step_logs: %s\n' "${BUNDLE_SOURCE_STEP_LOGS_DIR}"
+  } >"$report_file"
+fi
+if [[ -n "$wg_summary" ]]; then
+  mkdir -p "$(dirname "$wg_summary")"
+  cat >"$wg_summary" <<'EOF_WG_SUMMARY'
+{
+  "status": "ok",
+  "rounds_requested": 1,
+  "rounds_passed": 1,
+  "rounds_failed": 0
+}
+EOF_WG_SUMMARY
+fi
+if [[ -n "$gate_summary" ]]; then
+  mkdir -p "$(dirname "$gate_summary")"
+  cat >"$gate_summary" <<EOF_GATE_SUMMARY
+{
+  "status": "ok",
+  "failed_step": "",
+  "step_logs": "${BUNDLE_SOURCE_STEP_LOGS_DIR}"
+}
+EOF_GATE_SUMMARY
+fi
+
+exit "${FAKE_BUNDLE_GATE_RC:-0}"
+EOF_FAKE_BUNDLE_GATE
+chmod +x "$FAKE_BUNDLE_GATE"
+
+echo "[wiring] prod gate bundle script success path"
+BUNDLE_DIR_OK="$TMP_DIR/prod_gate_bundle_ok"
+set +e
+PATH="$TMP_BIN:$PATH" \
+BUNDLE_CAPTURE_FILE="$BUNDLE_CAPTURE" \
+BUNDLE_SOURCE_STEP_LOGS_DIR="$BUNDLE_SOURCE_STEP_LOGS" \
+THREE_MACHINE_PROD_GATE_SCRIPT="$FAKE_BUNDLE_GATE" \
+./scripts/prod_gate_bundle.sh \
+  --bundle-dir "$BUNDLE_DIR_OK" \
+  --strict-distinct 1 \
+  --skip-wg 1 >/tmp/integration_3machine_prod_profile_wiring_bundle_ok.log 2>&1
+bundle_ok_rc=$?
+set -e
+if [[ "$bundle_ok_rc" -ne 0 ]]; then
+  echo "prod gate bundle wiring failed: expected success rc=0"
+  cat /tmp/integration_3machine_prod_profile_wiring_bundle_ok.log
+  exit 1
+fi
+if [[ ! -f "${BUNDLE_DIR_OK}.tar.gz" ]]; then
+  echo "prod gate bundle wiring failed: bundle tarball missing on success"
+  ls -la "$TMP_DIR"
+  cat /tmp/integration_3machine_prod_profile_wiring_bundle_ok.log
+  exit 1
+fi
+if [[ ! -f "$BUNDLE_DIR_OK/step_logs/marker.log" ]]; then
+  echo "prod gate bundle wiring failed: copied step logs missing"
+  find "$BUNDLE_DIR_OK" -maxdepth 3 -type f -print || true
+  cat /tmp/integration_3machine_prod_profile_wiring_bundle_ok.log
+  exit 1
+fi
+if ! rg -q -- '--strict-distinct 1' "$BUNDLE_CAPTURE"; then
+  echo "prod gate bundle wiring failed: forwarded gate args missing"
+  cat "$BUNDLE_CAPTURE"
+  exit 1
+fi
+if ! rg -q 'gate_rc=0' "$BUNDLE_DIR_OK/metadata.txt"; then
+  echo "prod gate bundle wiring failed: metadata missing gate_rc=0"
+  cat "$BUNDLE_DIR_OK/metadata.txt"
+  exit 1
+fi
+
+echo "[wiring] prod gate bundle script failure path"
+BUNDLE_DIR_FAIL="$TMP_DIR/prod_gate_bundle_fail"
+set +e
+PATH="$TMP_BIN:$PATH" \
+BUNDLE_CAPTURE_FILE="$BUNDLE_CAPTURE" \
+BUNDLE_SOURCE_STEP_LOGS_DIR="$BUNDLE_SOURCE_STEP_LOGS" \
+FAKE_BUNDLE_GATE_RC=17 \
+THREE_MACHINE_PROD_GATE_SCRIPT="$FAKE_BUNDLE_GATE" \
+./scripts/prod_gate_bundle.sh \
+  --bundle-dir "$BUNDLE_DIR_FAIL" \
+  --skip-wg 1 >/tmp/integration_3machine_prod_profile_wiring_bundle_fail.log 2>&1
+bundle_fail_rc=$?
+set -e
+if [[ "$bundle_fail_rc" -ne 17 ]]; then
+  echo "prod gate bundle wiring failed: expected rc=17 on failing path (got $bundle_fail_rc)"
+  cat /tmp/integration_3machine_prod_profile_wiring_bundle_fail.log
+  exit 1
+fi
+if [[ ! -f "${BUNDLE_DIR_FAIL}.tar.gz" ]]; then
+  echo "prod gate bundle wiring failed: bundle tarball missing on failure"
+  ls -la "$TMP_DIR"
+  cat /tmp/integration_3machine_prod_profile_wiring_bundle_fail.log
+  exit 1
+fi
+if ! rg -q 'gate_rc=17' "$BUNDLE_DIR_FAIL/metadata.txt"; then
+  echo "prod gate bundle wiring failed: metadata missing gate_rc=17"
+  cat "$BUNDLE_DIR_FAIL/metadata.txt"
+  exit 1
+fi
+
+echo "[wiring] easy_node -> prod bundle dispatch"
+EASY_BUNDLE_DIR="$TMP_DIR/easy_node_prod_bundle"
+set +e
+PATH="$TMP_BIN:$PATH" \
+BUNDLE_CAPTURE_FILE="$BUNDLE_CAPTURE" \
+BUNDLE_SOURCE_STEP_LOGS_DIR="$BUNDLE_SOURCE_STEP_LOGS" \
+THREE_MACHINE_PROD_BUNDLE_SCRIPT="./scripts/prod_gate_bundle.sh" \
+THREE_MACHINE_PROD_GATE_SCRIPT="$FAKE_BUNDLE_GATE" \
+./scripts/easy_node.sh three-machine-prod-bundle \
+  --bundle-dir "$EASY_BUNDLE_DIR" \
+  --skip-wg 1 >/tmp/integration_3machine_prod_profile_wiring_easy_bundle.log 2>&1
+easy_bundle_rc=$?
+set -e
+if [[ "$easy_bundle_rc" -ne 0 ]]; then
+  echo "easy_node prod bundle wiring failed: non-zero rc"
+  cat /tmp/integration_3machine_prod_profile_wiring_easy_bundle.log
+  exit 1
+fi
+if [[ ! -f "${EASY_BUNDLE_DIR}.tar.gz" ]]; then
+  echo "easy_node prod bundle wiring failed: expected tarball missing"
+  ls -la "$TMP_DIR"
+  cat /tmp/integration_3machine_prod_profile_wiring_easy_bundle.log
+  exit 1
+fi
+
+echo "3-machine prod-profile wiring integration check ok"

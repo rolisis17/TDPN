@@ -97,9 +97,10 @@ void showThreeMachineGuide() {
   std::cout << "1) Machine A: server-up with A public IP/host and --beta-profile (IDs auto-generated)\n";
   std::cout << "2) Machine B: server-up with B public IP/host, --peer-directories=http://A:8081 and --beta-profile\n";
   std::cout << "3) Machine A (optional): rerun server-up with --peer-directories=http://B:8081\n";
-  std::cout << "4) Machine C: client-test with --directory-urls=http://A:8081,http://B:8081 --beta-profile --distinct-operators\n";
+  std::cout << "4) Machine C: client-vpn-up for real VPN usage (or client-test for quick dry-run)\n";
   std::cout << "5) One-IP mode: use machine-C bootstrap discovery from one known directory URL\n";
-  std::cout << "6) Success signal: client log contains 'client selected entry='\n\n";
+  std::cout << "6) Run full production sequence from machine C: three-machine-prod-bundle\n";
+  std::cout << "7) Success signal: client log has selections and real WG shows handshake+transfer\n\n";
 }
 
 bool isRootUser() {
@@ -226,6 +227,23 @@ std::string endpointFromHost(const std::string &host, int port) {
   std::ostringstream ss;
   ss << "http://" << host << ":" << port;
   return ss.str();
+}
+
+void appendOptionalAdminAuthArgs(std::ostringstream &cmd) {
+  std::string adminToken = trim(readLine("Admin token (optional; blank=auto from local authority env)", ""));
+  bool useSigned = parseYesNo(readLine("Use signed admin key auth? (y/N)", "n"), false);
+  if (useSigned) {
+    std::string keyFile = trim(readLine("Admin signing private key file", ""));
+    std::string keyId = trim(readLine("Admin signing key id", ""));
+    if (!keyFile.empty() && !keyId.empty()) {
+      cmd << " --admin-key-file " << shellEscape(keyFile)
+          << " --admin-key-id " << shellEscape(keyId);
+    } else {
+      std::cout << "signed auth not fully provided; falling back to token/env auth\n";
+    }
+  } else if (!adminToken.empty()) {
+    cmd << " --admin-token " << shellEscape(adminToken);
+  }
 }
 
 ABHosts loadABHosts(const std::string &root) {
@@ -593,9 +611,9 @@ void quickClientConnect(const std::string &script, ABHosts &hosts) {
                                  (!hosts.bHost.empty() ? endpointFromHost(hosts.bHost, 8081) : "");
   std::string bootstrapDir = normalizeEndpointURL(readLine("Server IP/host or bootstrap URL", defaultBootstrap), 8081);
   std::string inviteKey = trim(readLine("Invite key", ""));
-  std::string timeoutSec = readLine("Connection timeout sec", "45");
-  std::string discoveryWait = readLine("Discovery wait sec", "12");
+  std::string discoveryWait = readLine("Discovery wait sec", "20");
   bool prodProfile = parseYesNo(readLine("Use PROD profile (mTLS + strict fail-closed)? (y/N)", "n"), false);
+  bool realVPN = parseYesNo(readLine("Run real VPN mode (host WireGuard interface)? (Y/n)", "y"), true);
   if (bootstrapDir.empty()) {
     std::cout << "server IP/host is required\n";
     return;
@@ -605,16 +623,72 @@ void quickClientConnect(const std::string &script, ABHosts &hosts) {
     return;
   }
   std::ostringstream cmd;
-  cmd << shellEscape(script) << " client-test"
-      << " --bootstrap-directory " << shellEscape(bootstrapDir)
-      << " --discovery-wait-sec " << shellEscape(discoveryWait)
-      << " --subject " << shellEscape(inviteKey)
-      << " --min-sources 1"
-      << " --timeout-sec " << shellEscape(timeoutSec)
-      << " --beta-profile 1"
-      << " --prod-profile " << (prodProfile ? "1" : "0")
-      << " --distinct-operators 1";
-  runCommand(cmd.str());
+  if (realVPN) {
+    std::string iface = trim(readLine("VPN interface name", "wgvpn0"));
+    std::string readyTimeout = readLine("VPN ready timeout sec", "35");
+    bool runPreflight = parseYesNo(readLine("Run VPN preflight first? (Y/n)", "y"), true);
+    if (runPreflight) {
+      std::ostringstream preflightCmd;
+      preflightCmd << shellEscape(script) << " client-vpn-preflight"
+                   << " --bootstrap-directory " << shellEscape(bootstrapDir)
+                   << " --discovery-wait-sec " << shellEscape(discoveryWait)
+                   << " --prod-profile " << (prodProfile ? "1" : "0")
+                   << " --interface " << shellEscape(iface);
+      if (!isRootUser()) {
+        bool useSudoPreflight = parseYesNo(readLine("Run preflight with sudo? (Y/n)", "y"), true);
+        if (useSudoPreflight) {
+          if (runCommand("sudo " + preflightCmd.str()) != 0) {
+            std::cout << "preflight failed; stopping client connect flow\n";
+            return;
+          }
+        } else {
+          if (runCommand(preflightCmd.str()) != 0) {
+            std::cout << "preflight failed; stopping client connect flow\n";
+            return;
+          }
+        }
+      } else {
+        if (runCommand(preflightCmd.str()) != 0) {
+          std::cout << "preflight failed; stopping client connect flow\n";
+          return;
+        }
+      }
+    }
+    cmd << shellEscape(script) << " client-vpn-up"
+        << " --bootstrap-directory " << shellEscape(bootstrapDir)
+        << " --discovery-wait-sec " << shellEscape(discoveryWait)
+        << " --subject " << shellEscape(inviteKey)
+        << " --min-sources 1"
+        << " --min-operators 1"
+        << " --beta-profile 1"
+        << " --prod-profile " << (prodProfile ? "1" : "0")
+        << " --distinct-operators 1"
+        << " --interface " << shellEscape(iface)
+        << " --ready-timeout-sec " << shellEscape(readyTimeout);
+    if (!isRootUser()) {
+      bool useSudo = parseYesNo(readLine("Run with sudo? (Y/n)", "y"), true);
+      if (useSudo) {
+        runCommand("sudo " + cmd.str());
+      } else {
+        runCommand(cmd.str());
+      }
+    } else {
+      runCommand(cmd.str());
+    }
+    std::cout << "Use Other options -> 32 (status) and 33 (down); option 31 reruns preflight.\n";
+  } else {
+    std::string timeoutSec = readLine("Connection timeout sec", "45");
+    cmd << shellEscape(script) << " client-test"
+        << " --bootstrap-directory " << shellEscape(bootstrapDir)
+        << " --discovery-wait-sec " << shellEscape(discoveryWait)
+        << " --subject " << shellEscape(inviteKey)
+        << " --min-sources 1"
+        << " --timeout-sec " << shellEscape(timeoutSec)
+        << " --beta-profile 1"
+        << " --prod-profile " << (prodProfile ? "1" : "0")
+        << " --distinct-operators 1";
+    runCommand(cmd.str());
+  }
 }
 
 void quickServerConnect(const std::string &root, const std::string &script, ABHosts &hosts) {
@@ -640,22 +714,36 @@ void quickServerConnect(const std::string &root, const std::string &script, ABHo
     return;
   }
   bool prodProfile = parseYesNo(readLine("Enable PROD profile (mTLS + strict fail-closed)? (y/N)", "n"), false);
+  bool runPreflight = parseYesNo(readLine("Run server preflight before startup? (Y/n)", "y"), true);
+  std::string peerIdentityStrict = trim(readLine("Peer identity strict mode (auto/1/0)", "auto"));
+  if (peerIdentityStrict != "auto" && peerIdentityStrict != "1" && peerIdentityStrict != "0") {
+    std::cout << "invalid peer identity strict mode; using auto\n";
+    peerIdentityStrict = "auto";
+  }
+  std::string preflightTimeout = readLine("Preflight timeout sec", "8");
+
+  std::string modeValue = authorityMode ? "authority" : "provider";
+  std::string peerDirectoriesArg = "";
+  std::string authorityDir = "";
+  std::string authorityIssuer = "";
 
   std::ostringstream cmd;
   cmd << shellEscape(script) << " server-up"
-      << " --mode " << (authorityMode ? "authority" : "provider")
+      << " --mode " << modeValue
       << " --public-host " << shellEscape(host)
       << " --beta-profile 1"
-      << " --prod-profile " << (prodProfile ? "1" : "0");
+      << " --prod-profile " << (prodProfile ? "1" : "0")
+      << " --peer-identity-strict " << shellEscape(peerIdentityStrict);
   if (authorityMode) {
     cmd << " --client-allowlist 1"
         << " --allow-anon-cred 0";
     if (!peerHost.empty()) {
-      cmd << " --peer-directories " << shellEscape(endpointFromHost(peerHost, 8081));
+      peerDirectoriesArg = endpointFromHost(peerHost, 8081);
+      cmd << " --peer-directories " << shellEscape(peerDirectoriesArg);
     }
   } else {
     std::string authorityDirDefault = !peerHost.empty() ? endpointFromHost(peerHost, 8081) : "";
-    std::string authorityDir = normalizeEndpointURL(readLine("Authority directory URL", authorityDirDefault), 8081);
+    authorityDir = normalizeEndpointURL(readLine("Authority directory URL", authorityDirDefault), 8081);
     std::string authorityIssuerDefault = "";
     if (!authorityDir.empty()) {
       std::string authorityHost = normalizePublicHostInput(authorityDir);
@@ -664,15 +752,44 @@ void quickServerConnect(const std::string &root, const std::string &script, ABHo
         authorityIssuerDefault = endpointFromHost(normalizePublicHostInput(authorityHost), 8082);
       }
     }
-    std::string authorityIssuer = normalizeEndpointURL(readLine("Authority issuer URL", authorityIssuerDefault), 8082);
+    authorityIssuer = normalizeEndpointURL(readLine("Authority issuer URL", authorityIssuerDefault), 8082);
     if (authorityDir.empty() || authorityIssuer.empty()) {
       std::cout << "authority directory and issuer URLs are required for provider mode\n";
       return;
     }
+    peerDirectoriesArg = authorityDir;
     cmd << " --authority-directory " << shellEscape(authorityDir)
         << " --authority-issuer " << shellEscape(authorityIssuer)
-        << " --peer-directories " << shellEscape(authorityDir);
+        << " --peer-directories " << shellEscape(peerDirectoriesArg);
   }
+
+  if (runPreflight) {
+    std::string minPeerOpsDefault = peerDirectoriesArg.empty() ? "0" : "1";
+    std::string minPeerOps = readLine("Preflight minimum distinct peer operators", minPeerOpsDefault);
+    std::ostringstream preflightCmd;
+    preflightCmd << shellEscape(script) << " server-preflight"
+                 << " --mode " << shellEscape(modeValue)
+                 << " --public-host " << shellEscape(host)
+                 << " --beta-profile 1"
+                 << " --prod-profile " << (prodProfile ? "1" : "0")
+                 << " --peer-identity-strict " << shellEscape(peerIdentityStrict)
+                 << " --min-peer-operators " << shellEscape(minPeerOps)
+                 << " --timeout-sec " << shellEscape(preflightTimeout);
+    if (!peerDirectoriesArg.empty()) {
+      preflightCmd << " --peer-directories " << shellEscape(peerDirectoriesArg);
+    }
+    if (!authorityDir.empty()) {
+      preflightCmd << " --authority-directory " << shellEscape(authorityDir);
+    }
+    if (!authorityIssuer.empty()) {
+      preflightCmd << " --authority-issuer " << shellEscape(authorityIssuer);
+    }
+    if (runCommand(preflightCmd.str()) != 0) {
+      std::cout << "server preflight failed; not starting server-up\n";
+      return;
+    }
+  }
+
   int rc = runCommand(cmd.str());
 
   bool saveHosts = parseYesNo(readLine("Save/update Machine A/B host config? (y/N)", "n"), false);
@@ -729,6 +846,13 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
     std::cout << "26) Rotate local server secrets\n";
     std::cout << "27) Real 3-machine PROD WG validate (Linux/root)\n";
     std::cout << "28) Real 3-machine PROD WG soak (Linux/root)\n";
+    std::cout << "29) Full 3-machine PROD gate + diagnostics bundle\n";
+    std::cout << "30) Show true 3-machine reminder checklist\n";
+    std::cout << "31) Client VPN preflight (real mode)\n";
+    std::cout << "32) Client VPN status (real mode)\n";
+    std::cout << "33) Client VPN down (real mode)\n";
+    std::cout << "34) Client VPN up (real mode, full manual)\n";
+    std::cout << "35) Server preflight (peer/identity/quorum checks)\n";
     std::cout << "0) Back\n";
     std::cout << "Selection: ";
 
@@ -797,7 +921,6 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       std::string prefix = readLine("Key prefix", "inv");
       std::string tier = readLine("Tier (1/2/3)", "1");
       std::string issuer = normalizeEndpointURL(readLine("Issuer URL (optional)", ""), 8082);
-      std::string adminToken = trim(readLine("Admin token (optional; blank=read from server env)", ""));
       std::ostringstream cmd;
       cmd << shellEscape(script) << " invite-generate"
           << " --count " << shellEscape(count)
@@ -806,9 +929,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       if (!issuer.empty()) {
         cmd << " --issuer-url " << shellEscape(issuer);
       }
-      if (!adminToken.empty()) {
-        cmd << " --admin-token " << shellEscape(adminToken);
-      }
+      appendOptionalAdminAuthArgs(cmd);
       runCommand(cmd.str());
       continue;
     }
@@ -819,7 +940,6 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       }
       std::string key = trim(readLine("Invite key", ""));
       std::string issuer = normalizeEndpointURL(readLine("Issuer URL (optional)", ""), 8082);
-      std::string adminToken = trim(readLine("Admin token (optional; blank=read from server env)", ""));
       if (key.empty()) {
         std::cout << "invite key is required\n";
         continue;
@@ -830,9 +950,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       if (!issuer.empty()) {
         cmd << " --issuer-url " << shellEscape(issuer);
       }
-      if (!adminToken.empty()) {
-        cmd << " --admin-token " << shellEscape(adminToken);
-      }
+      appendOptionalAdminAuthArgs(cmd);
       runCommand(cmd.str());
       continue;
     }
@@ -843,7 +961,6 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       }
       std::string key = trim(readLine("Invite key to disable", ""));
       std::string issuer = normalizeEndpointURL(readLine("Issuer URL (optional)", ""), 8082);
-      std::string adminToken = trim(readLine("Admin token (optional; blank=read from server env)", ""));
       if (key.empty()) {
         std::cout << "invite key is required\n";
         continue;
@@ -854,9 +971,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       if (!issuer.empty()) {
         cmd << " --issuer-url " << shellEscape(issuer);
       }
-      if (!adminToken.empty()) {
-        cmd << " --admin-token " << shellEscape(adminToken);
-      }
+      appendOptionalAdminAuthArgs(cmd);
       runCommand(cmd.str());
       continue;
     }
@@ -1269,6 +1384,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       std::string mtlsCert = readLine("mTLS client cert file", "deploy/tls/client.crt");
       std::string mtlsKey = readLine("mTLS client key file", "deploy/tls/client.key");
       std::string report = readLine("Report file path (optional)", "");
+      std::string summaryJson = readLine("WG soak summary JSON path (optional)", "");
       if (autoDiscover && bootstrapDir.empty()) {
         std::cout << "bootstrap directory URL is required\n";
         continue;
@@ -1301,6 +1417,9 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       }
       if (!report.empty()) {
         cmd << " --report-file " << shellEscape(report);
+      }
+      if (!summaryJson.empty()) {
+        cmd << " --summary-json " << shellEscape(summaryJson);
       }
       if (!isRootUser()) {
         bool useSudo = parseYesNo(readLine("Run with sudo? (Y/n)", "y"), true);
@@ -1338,6 +1457,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       std::string subject = trim(readLine("Client subject key (optional)", ""));
       std::string rounds = readLine("Soak rounds", "10");
       std::string pauseSec = readLine("Pause between rounds sec", "8");
+      std::string maxConsecutiveFailures = readLine("Max consecutive failures before abort", "2");
       std::string faultEvery = readLine("Inject fault every N rounds (0=off)", "0");
       std::string faultCommand = readLine("Fault command (optional)", "");
       bool continueOnFail = parseYesNo(readLine("Continue when a round fails? (y/N)", "n"), false);
@@ -1347,6 +1467,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       std::string mtlsCert = readLine("mTLS client cert file", "deploy/tls/client.crt");
       std::string mtlsKey = readLine("mTLS client key file", "deploy/tls/client.key");
       std::string report = readLine("Report file path (optional)", "");
+      std::string wgSoakSummaryJson = readLine("WG soak summary JSON path (optional)", "");
       if (autoDiscover && bootstrapDir.empty()) {
         std::cout << "bootstrap directory URL is required\n";
         continue;
@@ -1359,6 +1480,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       cmd << shellEscape(script) << " prod-wg-soak"
           << " --rounds " << shellEscape(rounds)
           << " --pause-sec " << shellEscape(pauseSec)
+          << " --max-consecutive-failures " << shellEscape(maxConsecutiveFailures)
           << " --fault-every " << shellEscape(faultEvery)
           << " --continue-on-fail " << (continueOnFail ? "1" : "0")
           << " --strict-distinct " << (strictDistinct ? "1" : "0")
@@ -1385,6 +1507,9 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       if (!report.empty()) {
         cmd << " --report-file " << shellEscape(report);
       }
+      if (!wgSoakSummaryJson.empty()) {
+        cmd << " --summary-json " << shellEscape(wgSoakSummaryJson);
+      }
       if (!isRootUser()) {
         bool useSudo = parseYesNo(readLine("Run with sudo? (Y/n)", "y"), true);
         if (useSudo) {
@@ -1395,6 +1520,476 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       } else {
         runCommand(cmd.str());
       }
+      continue;
+    }
+    if (choice == "29") {
+      bool autoDiscover = parseYesNo(readLine("Use one bootstrap directory and auto-discover peers? (Y/n)", "y"), true);
+      std::string bootstrapDefault = !hosts.aHost.empty() ? endpointFromHost(hosts.aHost, 8081) : (!hosts.bHost.empty() ? endpointFromHost(hosts.bHost, 8081) : "");
+      std::string bootstrapDir;
+      std::string dirA;
+      std::string dirB;
+      std::string issuer;
+      std::string entry;
+      std::string exitUrl;
+      std::string discoveryWait = "20";
+      if (autoDiscover) {
+        bootstrapDir = normalizeEndpointURL(readLine("Bootstrap directory URL", bootstrapDefault), 8081);
+        discoveryWait = readLine("Bootstrap discovery wait sec", "20");
+      } else {
+        configureABHostsInteractive(root, hosts, false);
+        dirA = normalizeEndpointURL(readLine("Directory A URL", endpointFromHost(hosts.aHost, 8081)), 8081);
+        dirB = normalizeEndpointURL(readLine("Directory B URL", endpointFromHost(hosts.bHost, 8081)), 8081);
+        issuer = normalizeEndpointURL(readLine("Issuer URL", endpointFromHost(hosts.aHost, 8082)), 8082);
+        entry = normalizeEndpointURL(readLine("Entry control URL fallback", endpointFromHost(hosts.aHost, 8083)), 8083);
+        exitUrl = normalizeEndpointURL(readLine("Exit control URL fallback", endpointFromHost(hosts.aHost, 8084)), 8084);
+      }
+      std::string subject = trim(readLine("Client subject key (optional)", ""));
+      std::string controlSoakRounds = readLine("Control soak rounds", "10");
+      std::string controlSoakPause = readLine("Control soak pause sec", "5");
+      std::string wgSoakRounds = readLine("WG soak rounds", "10");
+      std::string wgSoakPause = readLine("WG soak pause sec", "8");
+      std::string wgMaxConsecutiveFailures = readLine("WG max consecutive failures before abort", "2");
+      std::string controlTimeout = readLine("Control timeout sec", "50");
+      std::string wgClientTimeout = readLine("WG client timeout sec", "120");
+      std::string wgSessionSec = readLine("WG session sec", "45");
+      std::string faultEvery = readLine("Inject WG fault every N rounds (0=off)", "0");
+      std::string faultCommand = readLine("WG fault command (optional)", "");
+      bool continueOnFail = parseYesNo(readLine("Continue when WG soak round fails? (y/N)", "n"), false);
+      bool strictDistinct = parseYesNo(readLine("Require distinct entry/exit operators? (Y/n)", "y"), true);
+      bool skipControlSoak = parseYesNo(readLine("Skip control-plane soak step? (y/N)", "n"), false);
+      bool skipWG = parseYesNo(readLine("Skip real-WG steps (control only)? (y/N)", "n"), false);
+      bool skipWGSoak = parseYesNo(readLine("Skip real-WG soak step? (y/N)", "n"), false);
+      std::string mtlsCA = readLine("mTLS CA file", "deploy/tls/ca.crt");
+      std::string mtlsCert = readLine("mTLS client cert file", "deploy/tls/client.crt");
+      std::string mtlsKey = readLine("mTLS client key file", "deploy/tls/client.key");
+      std::string bundleDir = readLine("Bundle directory (optional)", "");
+      if (autoDiscover && bootstrapDir.empty()) {
+        std::cout << "bootstrap directory URL is required\n";
+        continue;
+      }
+      if (!autoDiscover && (dirA.empty() || dirB.empty() || issuer.empty() || entry.empty() || exitUrl.empty())) {
+        std::cout << "directory A/B, issuer URL, entry URL and exit URL are required\n";
+        continue;
+      }
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " three-machine-prod-bundle"
+          << " --discovery-wait-sec " << shellEscape(discoveryWait)
+          << " --control-soak-rounds " << shellEscape(controlSoakRounds)
+          << " --control-soak-pause-sec " << shellEscape(controlSoakPause)
+          << " --wg-soak-rounds " << shellEscape(wgSoakRounds)
+          << " --wg-soak-pause-sec " << shellEscape(wgSoakPause)
+          << " --wg-max-consecutive-failures " << shellEscape(wgMaxConsecutiveFailures)
+          << " --control-timeout-sec " << shellEscape(controlTimeout)
+          << " --wg-client-timeout-sec " << shellEscape(wgClientTimeout)
+          << " --wg-session-sec " << shellEscape(wgSessionSec)
+          << " --fault-every " << shellEscape(faultEvery)
+          << " --continue-on-fail " << (continueOnFail ? "1" : "0")
+          << " --strict-distinct " << (strictDistinct ? "1" : "0")
+          << " --skip-control-soak " << (skipControlSoak ? "1" : "0")
+          << " --skip-wg " << (skipWG ? "1" : "0")
+          << " --skip-wg-soak " << (skipWGSoak ? "1" : "0")
+          << " --mtls-ca-file " << shellEscape(mtlsCA)
+          << " --mtls-client-cert-file " << shellEscape(mtlsCert)
+          << " --mtls-client-key-file " << shellEscape(mtlsKey);
+      if (!faultCommand.empty()) {
+        cmd << " --fault-command " << shellEscape(faultCommand);
+      }
+      if (!subject.empty()) {
+        cmd << " --subject " << shellEscape(subject);
+      }
+      if (autoDiscover) {
+        cmd << " --bootstrap-directory " << shellEscape(bootstrapDir);
+      } else {
+        cmd << " --directory-a " << shellEscape(dirA)
+            << " --directory-b " << shellEscape(dirB)
+            << " --issuer-url " << shellEscape(issuer)
+            << " --entry-url " << shellEscape(entry)
+            << " --exit-url " << shellEscape(exitUrl);
+      }
+      if (!bundleDir.empty()) {
+        cmd << " --bundle-dir " << shellEscape(bundleDir);
+      }
+      if (!skipWG && !isRootUser()) {
+        bool useSudo = parseYesNo(readLine("Run with sudo? (Y/n)", "y"), true);
+        if (useSudo) {
+          runCommand("sudo " + cmd.str());
+        } else {
+          runCommand(cmd.str());
+        }
+      } else {
+        runCommand(cmd.str());
+      }
+      continue;
+    }
+    if (choice == "30") {
+      runCommand(shellEscape(script) + " three-machine-reminder");
+      continue;
+    }
+    if (choice == "31") {
+      bool autoDiscover = parseYesNo(readLine("Use one bootstrap directory and auto-discover peers? (Y/n)", "y"), true);
+      std::string bootstrapDefault = !hosts.aHost.empty() ? endpointFromHost(hosts.aHost, 8081) : (!hosts.bHost.empty() ? endpointFromHost(hosts.bHost, 8081) : "");
+      std::string bootstrapDir;
+      std::string dirA;
+      std::string dirB;
+      std::string issuer;
+      std::string entry;
+      std::string exitUrl;
+      std::string discoveryWait = "20";
+      if (autoDiscover) {
+        bootstrapDir = normalizeEndpointURL(readLine("Bootstrap directory URL", bootstrapDefault), 8081);
+        discoveryWait = readLine("Bootstrap discovery wait sec", "20");
+      } else {
+        configureABHostsInteractive(root, hosts, false);
+        dirA = normalizeEndpointURL(readLine("Directory A URL", endpointFromHost(hosts.aHost, 8081)), 8081);
+        dirB = normalizeEndpointURL(readLine("Directory B URL", endpointFromHost(hosts.bHost, 8081)), 8081);
+        issuer = normalizeEndpointURL(readLine("Issuer URL", endpointFromHost(hosts.aHost, 8082)), 8082);
+        entry = normalizeEndpointURL(readLine("Entry control URL fallback", endpointFromHost(hosts.aHost, 8083)), 8083);
+        exitUrl = normalizeEndpointURL(readLine("Exit control URL fallback", endpointFromHost(hosts.aHost, 8084)), 8084);
+      }
+      bool prodProfile = parseYesNo(readLine("Use PROD profile? (y/N)", "n"), false);
+      bool operatorFloorCheck = parseYesNo(
+          readLine("Enforce operator floor check (>=2 entry/exit operators)? (Y/n)", prodProfile ? "y" : "n"),
+          prodProfile);
+      bool issuerQuorumCheck = parseYesNo(
+          readLine("Enforce issuer quorum check (>=2 distinct issuer IDs)? (Y/n)", prodProfile ? "y" : "n"),
+          prodProfile);
+      std::string issuerMinOperators = readLine("Issuer min operators (when quorum check enabled)", "2");
+      std::string issuerURLs = trim(readLine("Extra issuer URLs CSV (optional; auto-derived if blank)", ""));
+      std::string iface = trim(readLine("VPN interface name", "wgvpn0"));
+      std::string timeoutSec = readLine("Endpoint/preflight timeout sec", "12");
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " client-vpn-preflight"
+          << " --discovery-wait-sec " << shellEscape(discoveryWait)
+          << " --prod-profile " << (prodProfile ? "1" : "0")
+          << " --operator-floor-check " << (operatorFloorCheck ? "1" : "0")
+          << " --issuer-quorum-check " << (issuerQuorumCheck ? "1" : "0")
+          << " --issuer-min-operators " << shellEscape(issuerMinOperators)
+          << " --interface " << shellEscape(iface)
+          << " --timeout-sec " << shellEscape(timeoutSec);
+      if (autoDiscover) {
+        if (bootstrapDir.empty()) {
+          std::cout << "bootstrap directory URL is required\n";
+          continue;
+        }
+        cmd << " --bootstrap-directory " << shellEscape(bootstrapDir);
+      } else {
+        if (dirA.empty() || dirB.empty() || issuer.empty() || entry.empty() || exitUrl.empty()) {
+          std::cout << "directory A/B, issuer URL, entry URL and exit URL are required\n";
+          continue;
+        }
+        cmd << " --directory-urls " << shellEscape(dirA + "," + dirB)
+            << " --issuer-url " << shellEscape(issuer)
+            << " --entry-url " << shellEscape(entry)
+            << " --exit-url " << shellEscape(exitUrl);
+      }
+      if (!issuerURLs.empty()) {
+        cmd << " --issuer-urls " << shellEscape(issuerURLs);
+      }
+      if (!isRootUser()) {
+        bool useSudo = parseYesNo(readLine("Run with sudo? (Y/n)", "y"), true);
+        if (useSudo) {
+          runCommand("sudo " + cmd.str());
+        } else {
+          runCommand(cmd.str());
+        }
+      } else {
+        runCommand(cmd.str());
+      }
+      continue;
+    }
+    if (choice == "32") {
+      runCommand(shellEscape(script) + " client-vpn-status");
+      continue;
+    }
+    if (choice == "33") {
+      bool forceIface = parseYesNo(readLine("Force interface cleanup? (Y/n)", "y"), true);
+      bool keepKey = parseYesNo(readLine("Keep client key file? (Y/n)", "y"), true);
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " client-vpn-down"
+          << " --force-iface-cleanup " << (forceIface ? "1" : "0")
+          << " --keep-key " << (keepKey ? "1" : "0");
+      if (!isRootUser()) {
+        bool useSudo = parseYesNo(readLine("Run with sudo? (Y/n)", "y"), true);
+        if (useSudo) {
+          runCommand("sudo " + cmd.str());
+        } else {
+          runCommand(cmd.str());
+        }
+      } else {
+        runCommand(cmd.str());
+      }
+      continue;
+    }
+    if (choice == "34") {
+      bool autoDiscover = parseYesNo(readLine("Use one bootstrap directory and auto-discover peers? (Y/n)", "y"), true);
+      std::string bootstrapDefault = !hosts.aHost.empty() ? endpointFromHost(hosts.aHost, 8081) : (!hosts.bHost.empty() ? endpointFromHost(hosts.bHost, 8081) : "");
+      std::string bootstrapDir;
+      std::string dirA;
+      std::string dirB;
+      std::string issuer;
+      std::string entry;
+      std::string exitUrl;
+      std::string discoveryWait = "20";
+      if (autoDiscover) {
+        bootstrapDir = normalizeEndpointURL(readLine("Bootstrap directory URL", bootstrapDefault), 8081);
+        discoveryWait = readLine("Bootstrap discovery wait sec", "20");
+      } else {
+        configureABHostsInteractive(root, hosts, false);
+        dirA = normalizeEndpointURL(readLine("Directory A URL", endpointFromHost(hosts.aHost, 8081)), 8081);
+        dirB = normalizeEndpointURL(readLine("Directory B URL", endpointFromHost(hosts.bHost, 8081)), 8081);
+        issuer = normalizeEndpointURL(readLine("Issuer URL", endpointFromHost(hosts.aHost, 8082)), 8082);
+        entry = normalizeEndpointURL(readLine("Entry control URL", endpointFromHost(hosts.aHost, 8083)), 8083);
+        exitUrl = normalizeEndpointURL(readLine("Exit control URL", endpointFromHost(hosts.aHost, 8084)), 8084);
+      }
+
+      bool useAnonCred = parseYesNo(readLine("Use anonymous credential token instead of invite subject? (y/N)", "n"), false);
+      std::string subject = "";
+      std::string anonCred = "";
+      if (useAnonCred) {
+        anonCred = trim(readLine("Anonymous credential token", ""));
+      } else {
+        subject = trim(readLine("Invite subject key", ""));
+      }
+
+      std::string minSources = readLine("Minimum directory sources", "2");
+      std::string minOperators = readLine("Minimum operators", "2");
+      bool betaProfile = parseYesNo(readLine("Enable beta profile defaults? (Y/n)", "y"), true);
+      bool prodProfile = parseYesNo(readLine("Enable PROD profile (mTLS + strict fail-closed)? (y/N)", "n"), false);
+      bool distinct = parseYesNo(readLine("Require distinct entry/exit operators? (Y/n)", betaProfile ? "y" : "n"), betaProfile);
+      if (prodProfile) {
+        betaProfile = true;
+        distinct = true;
+      }
+      bool operatorFloorCheck = parseYesNo(
+          readLine("Enforce operator floor check (>=2 entry/exit operators)? (Y/n)", prodProfile ? "y" : "n"),
+          prodProfile);
+      bool issuerQuorumCheck = parseYesNo(
+          readLine("Enforce issuer quorum check (>=2 distinct issuer IDs)? (Y/n)", prodProfile ? "y" : "n"),
+          prodProfile);
+      std::string issuerMinOperators = readLine("Issuer min operators (when quorum check enabled)", "2");
+      std::string issuerURLs = trim(readLine("Extra issuer URLs CSV (optional; auto-derived if blank)", ""));
+
+      std::string iface = trim(readLine("VPN interface name", "wgvpn0"));
+      std::string proxyAddr = trim(readLine("WG proxy address", "127.0.0.1:57960"));
+      std::string privateKeyFile = trim(readLine("Client private key file (optional)", ""));
+      std::string allowedIPs = trim(readLine("Allowed IPs", "0.0.0.0/0"));
+      bool installRoute = parseYesNo(readLine("Install default route through VPN? (y/N)", "n"), false);
+      std::string startupSyncTimeout = readLine("Startup sync timeout sec", "25");
+      std::string readyTimeout = readLine("Ready timeout sec", "35");
+      bool forceRestart = parseYesNo(readLine("Force restart if VPN already running? (Y/n)", "y"), true);
+      bool foreground = parseYesNo(readLine("Run in foreground? (y/N)", "n"), false);
+      std::string mtlsCA = trim(readLine("mTLS CA file (optional)", ""));
+      std::string mtlsCert = trim(readLine("mTLS client cert file (optional)", ""));
+      std::string mtlsKey = trim(readLine("mTLS client key file (optional)", ""));
+      std::string logFile = trim(readLine("Client log file (optional)", ""));
+      bool runPreflight = parseYesNo(readLine("Run client-vpn-preflight first? (Y/n)", "y"), true);
+      std::string preflightTimeout = readLine("Preflight timeout sec", "12");
+
+      if (autoDiscover && bootstrapDir.empty()) {
+        std::cout << "bootstrap directory URL is required\n";
+        continue;
+      }
+      if (!autoDiscover && (dirA.empty() || dirB.empty() || issuer.empty() || entry.empty() || exitUrl.empty())) {
+        std::cout << "directory A/B, issuer URL, entry URL and exit URL are required\n";
+        continue;
+      }
+      if (useAnonCred && anonCred.empty()) {
+        std::cout << "anonymous credential token is required in anon mode\n";
+        continue;
+      }
+      if (!useAnonCred && subject.empty()) {
+        std::cout << "invite subject key is required\n";
+        continue;
+      }
+      if (iface.empty() || proxyAddr.empty() || allowedIPs.empty()) {
+        std::cout << "interface, proxy address and allowed IPs are required\n";
+        continue;
+      }
+
+      if (runPreflight) {
+        std::ostringstream preflightCmd;
+        preflightCmd << shellEscape(script) << " client-vpn-preflight"
+                     << " --discovery-wait-sec " << shellEscape(discoveryWait)
+                     << " --prod-profile " << (prodProfile ? "1" : "0")
+                     << " --operator-floor-check " << (operatorFloorCheck ? "1" : "0")
+                     << " --issuer-quorum-check " << (issuerQuorumCheck ? "1" : "0")
+                     << " --issuer-min-operators " << shellEscape(issuerMinOperators)
+                     << " --interface " << shellEscape(iface)
+                     << " --timeout-sec " << shellEscape(preflightTimeout);
+        if (autoDiscover) {
+          preflightCmd << " --bootstrap-directory " << shellEscape(bootstrapDir);
+        } else {
+          preflightCmd << " --directory-urls " << shellEscape(dirA + "," + dirB)
+                       << " --issuer-url " << shellEscape(issuer)
+                       << " --entry-url " << shellEscape(entry)
+                       << " --exit-url " << shellEscape(exitUrl);
+        }
+        if (!issuerURLs.empty()) {
+          preflightCmd << " --issuer-urls " << shellEscape(issuerURLs);
+        }
+        if (!mtlsCA.empty()) {
+          preflightCmd << " --mtls-ca-file " << shellEscape(mtlsCA);
+        }
+        if (!mtlsCert.empty()) {
+          preflightCmd << " --mtls-client-cert-file " << shellEscape(mtlsCert);
+        }
+        if (!mtlsKey.empty()) {
+          preflightCmd << " --mtls-client-key-file " << shellEscape(mtlsKey);
+        }
+        int preflightRc = 0;
+        if (!isRootUser()) {
+          bool useSudoPreflight = parseYesNo(readLine("Run preflight with sudo? (Y/n)", "y"), true);
+          if (useSudoPreflight) {
+            preflightRc = runCommand("sudo " + preflightCmd.str());
+          } else {
+            preflightRc = runCommand(preflightCmd.str());
+          }
+        } else {
+          preflightRc = runCommand(preflightCmd.str());
+        }
+        if (preflightRc != 0) {
+          std::cout << "preflight failed; not starting client-vpn-up\n";
+          continue;
+        }
+      }
+
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " client-vpn-up"
+          << " --discovery-wait-sec " << shellEscape(discoveryWait)
+          << " --min-sources " << shellEscape(minSources)
+          << " --min-operators " << shellEscape(minOperators)
+          << " --distinct-operators " << (distinct ? "1" : "0")
+          << " --beta-profile " << (betaProfile ? "1" : "0")
+          << " --prod-profile " << (prodProfile ? "1" : "0")
+          << " --operator-floor-check " << (operatorFloorCheck ? "1" : "0")
+          << " --issuer-quorum-check " << (issuerQuorumCheck ? "1" : "0")
+          << " --issuer-min-operators " << shellEscape(issuerMinOperators)
+          << " --interface " << shellEscape(iface)
+          << " --proxy-addr " << shellEscape(proxyAddr)
+          << " --allowed-ips " << shellEscape(allowedIPs)
+          << " --install-route " << (installRoute ? "1" : "0")
+          << " --startup-sync-timeout-sec " << shellEscape(startupSyncTimeout)
+          << " --ready-timeout-sec " << shellEscape(readyTimeout)
+          << " --force-restart " << (forceRestart ? "1" : "0")
+          << " --foreground " << (foreground ? "1" : "0");
+      if (autoDiscover) {
+        cmd << " --bootstrap-directory " << shellEscape(bootstrapDir);
+      } else {
+        cmd << " --directory-urls " << shellEscape(dirA + "," + dirB)
+            << " --issuer-url " << shellEscape(issuer)
+            << " --entry-url " << shellEscape(entry)
+            << " --exit-url " << shellEscape(exitUrl);
+      }
+      if (!issuerURLs.empty()) {
+        cmd << " --issuer-urls " << shellEscape(issuerURLs);
+      }
+      if (useAnonCred) {
+        cmd << " --anon-cred " << shellEscape(anonCred);
+      } else {
+        cmd << " --subject " << shellEscape(subject);
+      }
+      if (!privateKeyFile.empty()) {
+        cmd << " --private-key-file " << shellEscape(privateKeyFile);
+      }
+      if (!mtlsCA.empty()) {
+        cmd << " --mtls-ca-file " << shellEscape(mtlsCA);
+      }
+      if (!mtlsCert.empty()) {
+        cmd << " --mtls-client-cert-file " << shellEscape(mtlsCert);
+      }
+      if (!mtlsKey.empty()) {
+        cmd << " --mtls-client-key-file " << shellEscape(mtlsKey);
+      }
+      if (!logFile.empty()) {
+        cmd << " --log-file " << shellEscape(logFile);
+      }
+
+      if (!isRootUser()) {
+        bool useSudo = parseYesNo(readLine("Run client-vpn-up with sudo? (Y/n)", "y"), true);
+        if (useSudo) {
+          runCommand("sudo " + cmd.str());
+        } else {
+          runCommand(cmd.str());
+        }
+      } else {
+        runCommand(cmd.str());
+      }
+      continue;
+    }
+    if (choice == "35") {
+      std::string modeDefault = loadServerMode(root);
+      if (modeDefault != "authority" && modeDefault != "provider") {
+        modeDefault = "provider";
+      }
+      std::string modeInput = trim(readLine("Mode (authority/provider)", modeDefault));
+      std::string mode = (modeInput == "authority") ? "authority" : "provider";
+      bool autoDiscover = parseYesNo(readLine("Use one bootstrap directory and auto-discover peers? (Y/n)", "y"), true);
+      std::string bootstrapDefault = !hosts.aHost.empty() ? endpointFromHost(hosts.aHost, 8081) : (!hosts.bHost.empty() ? endpointFromHost(hosts.bHost, 8081) : "");
+      std::string bootstrapDir;
+      std::string peerDirs;
+      if (autoDiscover) {
+        bootstrapDir = normalizeEndpointURL(readLine("Bootstrap directory URL", bootstrapDefault), 8081);
+      } else {
+        peerDirs = trim(readLine("Peer directory URLs CSV", ""));
+      }
+      std::string authorityDir = "";
+      std::string authorityIssuer = "";
+      if (mode == "provider") {
+        std::string authorityDirDefault = !hosts.aHost.empty() ? endpointFromHost(hosts.aHost, 8081) : bootstrapDefault;
+        authorityDir = normalizeEndpointURL(readLine("Authority directory URL", authorityDirDefault), 8081);
+        std::string authorityIssuerDefault = !hosts.aHost.empty() ? endpointFromHost(hosts.aHost, 8082) : "";
+        authorityIssuer = normalizeEndpointURL(readLine("Authority issuer URL", authorityIssuerDefault), 8082);
+      }
+      std::string publicHost = normalizePublicHostInput(readLine("Public host/IP for this server (optional)", ""));
+      std::string operatorId = trim(readLine("Operator ID override (optional)", ""));
+      std::string issuerId = "";
+      if (mode == "authority") {
+        issuerId = trim(readLine("Issuer ID override (optional)", ""));
+      }
+      bool betaProfile = parseYesNo(readLine("Enable beta profile defaults? (Y/n)", "y"), true);
+      bool prodProfile = parseYesNo(readLine("Enable PROD profile? (y/N)", "n"), false);
+      if (prodProfile) {
+        betaProfile = true;
+      }
+      std::string strictMode = trim(readLine("Peer identity strict mode (auto/1/0)", "auto"));
+      std::string minPeerOperators = readLine("Min distinct peer operators", betaProfile ? "1" : "0");
+      std::string timeoutSec = readLine("HTTP timeout sec", "8");
+
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " server-preflight"
+          << " --mode " << shellEscape(mode)
+          << " --beta-profile " << (betaProfile ? "1" : "0")
+          << " --prod-profile " << (prodProfile ? "1" : "0")
+          << " --peer-identity-strict " << shellEscape(strictMode)
+          << " --min-peer-operators " << shellEscape(minPeerOperators)
+          << " --timeout-sec " << shellEscape(timeoutSec);
+      if (!publicHost.empty()) {
+        cmd << " --public-host " << shellEscape(publicHost);
+      }
+      if (autoDiscover) {
+        if (bootstrapDir.empty()) {
+          std::cout << "bootstrap directory URL is required\n";
+          continue;
+        }
+        cmd << " --bootstrap-directory " << shellEscape(bootstrapDir);
+      } else if (!peerDirs.empty()) {
+        cmd << " --peer-directories " << shellEscape(peerDirs);
+      }
+      if (!operatorId.empty()) {
+        cmd << " --operator-id " << shellEscape(operatorId);
+      }
+      if (mode == "authority" && !issuerId.empty()) {
+        cmd << " --issuer-id " << shellEscape(issuerId);
+      }
+      if (mode == "provider") {
+        if (authorityDir.empty() || authorityIssuer.empty()) {
+          std::cout << "authority directory and authority issuer are required for provider mode\n";
+          continue;
+        }
+        cmd << " --authority-directory " << shellEscape(authorityDir)
+            << " --authority-issuer " << shellEscape(authorityIssuer);
+      }
+      runCommand(cmd.str());
       continue;
     }
 

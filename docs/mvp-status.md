@@ -165,6 +165,19 @@
 - Beta preflight now includes easy-node prod preflight/admin-signing integration coverage (`integration_prod_preflight_tools.sh`) by default.
 - Beta preflight now also includes easy-node role-gate coverage (`integration_easy_node_role_guard.sh`) so provider-vs-authority invite/admin command boundaries are checked by default.
 - One-bootstrap host discovery workflow (`discover-hosts`, `--bootstrap-directory`) for machine-C validation and easy-mode launcher flows that auto-discover peer server URLs from a single known directory endpoint.
+- Real client VPN lifecycle helpers (`easy_node.sh client-vpn-up|client-vpn-status|client-vpn-down`) now allow machine-C/external testers to run a host WireGuard tunnel session against A/B server network paths with minimal manual env setup.
+- Real client VPN preflight helper (`easy_node.sh client-vpn-preflight`) now validates host prerequisites and A/B endpoint reachability before starting real client VPN sessions, and can enforce operator-floor diversity checks (`--operator-floor-check`) plus issuer quorum checks (`--issuer-quorum-check`, `--issuer-min-operators`), default-on in prod profile.
+- Production-grade 3-machine gate runner (`integration_3machine_prod_gate.sh` + `easy_node.sh three-machine-prod-gate`) now sequences strict control validation/soak and real-WG validation/soak from machine C with one command.
+- Production gate diagnostics bundler (`scripts/prod_gate_bundle.sh` + `easy_node.sh three-machine-prod-bundle`) now wraps the gate flow and always emits a shareable `.tar.gz` with gate log, summaries, metadata, and step logs (when available), including failing runs.
+- Beta preflight now includes full 3-machine prod-profile wiring coverage (`integration_3machine_prod_profile_wiring.sh`), so gate/bundle dispatch and artifact-forwarding regressions are caught earlier.
+- Easy-node startup identity guard now fail-fast verifies peer `operator_id` / `issuer_id` uniqueness in beta/prod when peers are configured (`--peer-identity-strict auto|1`) and supports explicit diagnostics bypass (`--peer-identity-strict 0`); covered by `integration_easy_node_peer_identity_guard.sh`.
+- Easy-node `server-preflight` command now validates peer directory reachability, provider authority-issuer health, identity collision risk, and prod issuer-readiness before `server-up`; covered by `integration_easy_node_server_preflight.sh` and wired into beta preflight/CI.
+- Real-WG soak hardening now fails on missing per-round dataplane summary, requires positive per-round accepted-packet deltas, and stops early on sustained consecutive failures (`prod-wg-soak --max-consecutive-failures`, gate pass-through `--wg-max-consecutive-failures`).
+- Real-WG soak now emits per-round failure classes (`class=...`) and summary class histograms (`failure_class <name>=<count>`) to speed triage of production soak regressions.
+- Real-WG soak now supports machine-readable result artifacts (`prod-wg-soak --summary-json`, gate pass-through `--wg-soak-summary-json`) including pass/fail counts and failure-class totals for automated runbook/CI checks.
+- Production gate now prints a compact WG soak summary line (status, pass/fail counts, max consecutive failures, top failure class/count) from the summary artifact, including failed WG-soak exits.
+- Production gate now supports an overall machine-readable summary artifact (`--gate-summary-json`) containing per-step status plus failure-step/rc metadata, suitable for CI/pilot ingestion.
+- Easy-mode true 3-machine reminder output (`easy_node.sh three-machine-reminder`) and launcher wiring now provide a reusable production test checklist.
 
 ## In Progress / Partial
 - Real WG interface packet plumbing is scaffolded; bidirectional opaque relay through entry/client/exit is in place (including exit downlink source path and optional client/exit command-mode WG UDP kernel-proxy bridges), and Linux root-only manual validation is available via `scripts/integration_real_wg_privileged.sh` and `scripts/integration_real_wg_privileged_matrix.sh`; production end-to-end cryptographic WG interface integration remains pending.
@@ -184,3 +197,8 @@
 3. Cross-operator adjudication: formalize appeal voting, evidence exchange, and anti-capture safeguards.
 4. Attach issuer-backed trust attestations to privacy-preserving identity primitives (revocable anonymous credentials).
 5. Expand stress/chaos coverage toward beta-scale traffic patterns and fault domains.
+6. Cross-platform client rollout (deferred until Linux beta is stable):
+   - Phase A: portability groundwork (separate Linux-specific interface/runtime adapters, keep config schema/platform-neutral).
+   - Phase B: Windows client beta (connect/disconnect/status + installer + diagnostics), Linux servers remain authoritative.
+   - Phase C: macOS client beta with the same UX contract and diagnostics.
+   - Phase D: after stable client betas, decide whether non-Linux provider/exit support is worth the operational complexity.

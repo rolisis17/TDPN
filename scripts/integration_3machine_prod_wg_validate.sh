@@ -217,6 +217,18 @@ wait_http_ok() {
   return 1
 }
 
+metric_int_field() {
+  local payload="$1"
+  local field="$2"
+  local value
+  value="$(printf '%s\n' "$payload" | rg -o "\"${field}\"[[:space:]]*:[[:space:]]*[0-9]+" | head -n1 | sed -E 's/.*:[[:space:]]*([0-9]+)$/\1/' || true)"
+  if [[ -z "$value" || ! "$value" =~ ^[0-9]+$ ]]; then
+    echo "0"
+    return
+  fi
+  echo "$value"
+}
+
 looks_loopback() {
   local value="$1"
   [[ "$value" == *"127.0.0.1"* || "$value" == *"localhost"* ]]
@@ -522,6 +534,12 @@ wait_http_ok "${exit_url}/v1/health" "exit" 20
 wait_http_ok "${exit_a_url}/v1/metrics" "exit A metrics" 20
 wait_http_ok "${exit_b_url}/v1/metrics" "exit B metrics" 20
 
+baseline_metrics_a="$(curl -fsS "${exit_a_url}/v1/metrics" 2>/dev/null || true)"
+baseline_metrics_b="$(curl -fsS "${exit_b_url}/v1/metrics" 2>/dev/null || true)"
+baseline_accepted_a="$(metric_int_field "$baseline_metrics_a" "accepted_packets")"
+baseline_accepted_b="$(metric_int_field "$baseline_metrics_b" "accepted_packets")"
+echo "[3machine-prod-wg] baseline accepted_packets: exit_a=$baseline_accepted_a exit_b=$baseline_accepted_b"
+
 if [[ "$skip_control_plane_check" == "0" ]]; then
   echo "[3machine-prod-wg] running control-plane precheck via integration_3machine_beta_validate.sh"
   validate_cmd=(
@@ -757,18 +775,23 @@ fi
 metrics_ok=0
 latest_metrics_a=""
 latest_metrics_b=""
+latest_accepted_a="$baseline_accepted_a"
+latest_accepted_b="$baseline_accepted_b"
 for _ in $(seq 1 180); do
   latest_metrics_a="$(curl -fsS "${exit_a_url}/v1/metrics" 2>/dev/null || true)"
   latest_metrics_b="$(curl -fsS "${exit_b_url}/v1/metrics" 2>/dev/null || true)"
-  if echo "$latest_metrics_a" | rg -q '"accepted_packets"[[:space:]]*:[[:space:]]*[1-9][0-9]*' ||
-    echo "$latest_metrics_b" | rg -q '"accepted_packets"[[:space:]]*:[[:space:]]*[1-9][0-9]*'; then
+  latest_accepted_a="$(metric_int_field "$latest_metrics_a" "accepted_packets")"
+  latest_accepted_b="$(metric_int_field "$latest_metrics_b" "accepted_packets")"
+  if ((latest_accepted_a > baseline_accepted_a || latest_accepted_b > baseline_accepted_b)); then
     metrics_ok=1
     break
   fi
   sleep 0.25
 done
 if [[ "$metrics_ok" -ne 1 ]]; then
-  echo "exit metrics did not show accepted_packets>0 on A or B"
+  echo "exit metrics did not advance accepted_packets on A or B"
+  echo "baseline: exit_a=${baseline_accepted_a} exit_b=${baseline_accepted_b}"
+  echo "latest:   exit_a=${latest_accepted_a} exit_b=${latest_accepted_b}"
   echo "exit A metrics: $latest_metrics_a"
   echo "exit B metrics: $latest_metrics_b"
   cat "$client_log"
@@ -784,5 +807,8 @@ fi
 echo "[3machine-prod-wg] client log: $client_log"
 echo "[3machine-prod-wg] key selection lines:"
 rg 'client selected entry=' "$client_log" || true
+delta_a=$((latest_accepted_a - baseline_accepted_a))
+delta_b=$((latest_accepted_b - baseline_accepted_b))
+delta_total=$((delta_a + delta_b))
+echo "[3machine-prod-wg] dataplane-summary handshake_epoch=${hs:-0} rx_bytes=${rx:-0} tx_bytes=${tx:-0} exit_a_accepted_packets=${latest_accepted_a} exit_b_accepted_packets=${latest_accepted_b} accepted_delta_a=${delta_a} accepted_delta_b=${delta_b} accepted_delta_total=${delta_total}"
 echo "[3machine-prod-wg] success"
-

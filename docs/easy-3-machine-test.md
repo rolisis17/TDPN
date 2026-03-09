@@ -4,6 +4,7 @@ This path is for fast manual testing with minimal setup.
 
 Identity defaults:
 - `server-up` auto-generates unique `operator_id` and `issuer_id` when not provided.
+- With peer directories configured, `server-up` now fail-fast checks ID uniqueness against peers by default in beta/prod (`--peer-identity-strict auto`); temporary bypass for diagnostics: `--peer-identity-strict 0`.
 - IDs are persisted per machine in `deploy/data/easy_node_identity.conf`.
 - Relay IDs and signing key files are derived from those IDs, so machine A/B do not collide by default.
 - Optional invite-only mode: `server-up --client-allowlist 1 --allow-anon-cred 0` plus `./scripts/beta_subject_upsert.sh` lets only allowlisted client subjects receive tokens.
@@ -82,6 +83,26 @@ Optional on Machine A to federate both ways:
   --min-sources 2 \
   --distinct-operators 1 \
   --beta-profile 1
+```
+
+Real client VPN mode (for external testers on Linux):
+
+```bash
+sudo ./scripts/easy_node.sh client-vpn-preflight \
+  --bootstrap-directory http://A_PUBLIC_IP_OR_DNS:8081
+
+sudo ./scripts/easy_node.sh client-vpn-up \
+  --bootstrap-directory http://A_PUBLIC_IP_OR_DNS:8081 \
+  --subject <INVITE_KEY> \
+  --beta-profile 1 \
+  --distinct-operators 1
+
+./scripts/easy_node.sh client-vpn-status
+sudo ./scripts/easy_node.sh client-vpn-down
+# prod profile enables operator-floor checks by default (>=2 entry and >=2 exit operators).
+# for single-operator lab tests only, append: --operator-floor-check 0
+# prod profile also enables issuer-quorum checks by default (>=2 distinct issuer IDs with keys).
+# for single-issuer lab tests only, append: --issuer-quorum-check 0
 ```
 
 Automated validation (recommended on machine C):
@@ -196,6 +217,8 @@ Real cross-machine production-profile WG dataplane soak/fault run:
 sudo ./scripts/easy_node.sh prod-wg-soak \
   --rounds 12 \
   --pause-sec 10 \
+  --max-consecutive-failures 2 \
+  --summary-json .easy-node-logs/prod_wg_soak_summary.json \
   --fault-every 4 \
   --fault-command "ssh user@B 'cd /repo && ./scripts/easy_node.sh server-up --mode provider --prod-profile 1 --beta-profile 1 --public-host B_PUBLIC_IP_OR_DNS'" \
   --directory-a https://A_PUBLIC_IP_OR_DNS:8081 \
@@ -209,6 +232,43 @@ sudo ./scripts/easy_node.sh prod-wg-soak \
   --mtls-ca-file deploy/tls/ca.crt \
   --mtls-client-cert-file deploy/tls/client.crt \
   --mtls-client-key-file deploy/tls/client.key
+```
+
+One-command production gate (recommended once A/B are already up):
+
+```bash
+sudo ./scripts/easy_node.sh three-machine-prod-gate \
+  --directory-a https://A_PUBLIC_IP_OR_DNS:8081 \
+  --directory-b https://B_PUBLIC_IP_OR_DNS:8081 \
+  --issuer-url https://A_PUBLIC_IP_OR_DNS:8082 \
+  --entry-url https://A_PUBLIC_IP_OR_DNS:8083 \
+  --exit-url https://A_PUBLIC_IP_OR_DNS:8084 \
+  --wg-max-consecutive-failures 2 \
+  --wg-soak-summary-json .easy-node-logs/prod_gate_wg_soak_summary.json \
+  --gate-summary-json .easy-node-logs/prod_gate_summary.json \
+  --strict-distinct 1
+
+# same gate with automatic diagnostics bundle (.tar.gz)
+sudo ./scripts/easy_node.sh three-machine-prod-bundle \
+  --bundle-dir .easy-node-logs/prod_gate_bundle \
+  --directory-a https://A_PUBLIC_IP_OR_DNS:8081 \
+  --directory-b https://B_PUBLIC_IP_OR_DNS:8081 \
+  --issuer-url https://A_PUBLIC_IP_OR_DNS:8082 \
+  --entry-url https://A_PUBLIC_IP_OR_DNS:8083 \
+  --exit-url https://A_PUBLIC_IP_OR_DNS:8084 \
+  --strict-distinct 1
+```
+
+It runs this sequence:
+- strict control-plane validate
+- control-plane soak
+- real WG validate
+- real WG soak
+
+Quick reminder checklist (any time):
+
+```bash
+./scripts/easy_node.sh three-machine-reminder
 ```
 
 Single-command pilot bundle from machine C (validate + soak + snapshots):

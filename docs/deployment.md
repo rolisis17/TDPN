@@ -62,6 +62,14 @@ Run interactive menu:
 Quick non-interactive examples:
 
 ```bash
+# optional preflight before server-up (peer reachability + identity/quorum readiness)
+./scripts/easy_node.sh server-preflight \
+  --mode provider \
+  --authority-directory http://<AUTHORITY_IP_OR_DNS>:8081 \
+  --authority-issuer http://<AUTHORITY_IP_OR_DNS>:8082 \
+  --peer-directories http://<AUTHORITY_IP_OR_DNS>:8081 \
+  --beta-profile 1
+
 # authority/admin node (runs directory + issuer + entry + exit)
 ./scripts/easy_node.sh server-up --mode authority --public-host <PUBLIC_IP_OR_DNS> --beta-profile
 
@@ -82,6 +90,21 @@ Quick non-interactive examples:
   --exit-url http://<SERVER_IP>:8084 \
   --beta-profile 1 \
   --distinct-operators 1
+
+# real client VPN session (Linux + sudo)
+sudo ./scripts/easy_node.sh client-vpn-preflight \
+  --bootstrap-directory http://<SERVER_IP>:8081
+sudo ./scripts/easy_node.sh client-vpn-up \
+  --bootstrap-directory http://<SERVER_IP>:8081 \
+  --subject <INVITE_KEY> \
+  --beta-profile 1 \
+  --distinct-operators 1
+./scripts/easy_node.sh client-vpn-status
+sudo ./scripts/easy_node.sh client-vpn-down
+# prod profile enables operator-floor checks by default (>=2 entry and >=2 exit operators).
+# for single-operator lab tests only, append: --operator-floor-check 0
+# prod profile also enables issuer-quorum checks by default (>=2 distinct issuer IDs with keys).
+# for single-issuer lab tests only, append: --issuer-quorum-check 0
 
 ./scripts/easy_node.sh three-machine-validate \
   --directory-a http://<A_SERVER_IP>:8081 \
@@ -153,6 +176,7 @@ Prod strict additions:
 - bootstrap certs: `./scripts/easy_node.sh bootstrap-mtls --out-dir deploy/tls --public-host <PUBLIC_IP_OR_DNS>`.
 - run `server-up --prod-profile 1` to enforce fail-closed strict defaults (`PROD_STRICT_MODE=1`) on top of beta strict.
 - prod profile requires at least one peer directory from a distinct authority/issuer operator so strict issuer quorum has at least two issuer URLs.
+- when peers are configured, `server-up` now fail-fast verifies local `operator_id`/`issuer_id` uniqueness against peer feeds by default in beta/prod (`--peer-identity-strict auto` -> strict); use `--peer-identity-strict 0` only as a temporary diagnostics bypass.
 - prod profile auto-wires WG command-backend runtime defaults (`WG_BACKEND=command`, live WG filters, exit WG kernel proxy, and issuer quorum URL feeds) and sets entry-exit compose runtime privileges (`ENTRY_EXIT_USER=0:0`, `ENTRY_EXIT_PRIVILEGED=true`).
 - authority invite/admin commands auto-switch to signed auth in prod profile; they also support explicit signed credentials (`--admin-key-file`, `--admin-key-id`).
 - use `./scripts/easy_node.sh admin-signing-status` and `./scripts/easy_node.sh admin-signing-rotate --restart-issuer 1 --key-history 3` for signer maintenance on authority nodes.
@@ -260,11 +284,12 @@ Before exposing anything public:
 39. For cross-host validation before beta rollout, run `./scripts/integration_3machine_beta_validate.sh` from a client machine (machine C) with two server directories (machines A/B) and verify both multi-source bootstrap and federation operator-floor checks pass.
 40. Run `./scripts/integration_3machine_beta_soak.sh` from machine C for repeated rounds (and optional injected faults) before inviting external beta testers.
 41. For stricter cross-host anti-collusion and issuer drift checks, keep `--distinct-operators=1` and `--require-issuer-quorum=1` enabled on 3-machine validate/soak runs (default under `--beta-profile=1`), and require minimum client selection diversity (`--client-min-selection-lines`, `--client-min-entry-operators`, `--client-min-exit-operators`, `--client-require-cross-operator-pair`) so the client actually exercises multi-operator paths.
-42. If enforcing anti-collusion (`CLIENT_REQUIRE_DISTINCT_OPERATORS=1` and/or `ENTRY_REQUIRE_DISTINCT_EXIT_OPERATOR=1`), run `./scripts/integration_distinct_operators.sh` and verify same-operator paths are rejected while distinct-operator paths pass.
-43. For strict runtime guardrails across roles, run `./scripts/integration_beta_strict_roles.sh` and verify client/entry/exit/issuer fail closed on weak config and entry/issuer boot when strict prerequisites are met.
-44. Run `./scripts/integration_wg_only_mode.sh` to verify wireguard-only fail-closed guardrails (`WG_ONLY_MODE`) reject scaffold/non-WG dataplane configuration before runtime.
-45. For strict live WireGuard-mode behavior (non-privileged shim path), run `./scripts/integration_live_wg_full_path_strict.sh` and verify strict startup signals plus end-to-end plausible WireGuard packet forwarding/drop behavior.
-46. Run `./scripts/integration_beta_fault_matrix.sh` to validate startup-race and sync-loss recovery paths in one pass before external beta tests.
-47. Run `./scripts/integration_easy_node_role_guard.sh` to verify provider nodes are blocked from invite/admin actions while authority nodes are allowed past the role gate.
-48. Run `./scripts/integration_easy_node_invite_auth_policy.sh` to verify invite/admin commands fail fast when authority token auth is disabled (`ISSUER_ADMIN_ALLOW_TOKEN=0`) and require signed admin credentials.
-49. Run `./scripts/integration_prod_preflight_tools.sh` to verify easy-node strict prod preflight and authority signer rotate/status flows.
+42. For production-grade cross-machine sign-off, run `sudo ./scripts/easy_node.sh three-machine-prod-gate ...` from machine C (Linux root) to execute strict control validate/soak plus real-WG validate/soak in one sequence (`--wg-max-consecutive-failures` controls sustained WG soak failure threshold, default `2`; `--wg-soak-summary-json` writes a machine-readable WG soak result artifact; `--gate-summary-json` writes the overall gate result with per-step statuses/failure metadata). Use `sudo ./scripts/easy_node.sh three-machine-prod-bundle ...` when you also want an always-generated diagnostics bundle tarball for sharing/debug.
+43. If enforcing anti-collusion (`CLIENT_REQUIRE_DISTINCT_OPERATORS=1` and/or `ENTRY_REQUIRE_DISTINCT_EXIT_OPERATOR=1`), run `./scripts/integration_distinct_operators.sh` and verify same-operator paths are rejected while distinct-operator paths pass.
+44. For strict runtime guardrails across roles, run `./scripts/integration_beta_strict_roles.sh` and verify client/entry/exit/issuer fail closed on weak config and entry/issuer boot when strict prerequisites are met.
+45. Run `./scripts/integration_wg_only_mode.sh` to verify wireguard-only fail-closed guardrails (`WG_ONLY_MODE`) reject scaffold/non-WG dataplane configuration before runtime.
+46. For strict live WireGuard-mode behavior (non-privileged shim path), run `./scripts/integration_live_wg_full_path_strict.sh` and verify strict startup signals plus end-to-end plausible WireGuard packet forwarding/drop behavior.
+47. Run `./scripts/integration_beta_fault_matrix.sh` to validate startup-race and sync-loss recovery paths in one pass before external beta tests.
+48. Run `./scripts/integration_easy_node_role_guard.sh` to verify provider nodes are blocked from invite/admin actions while authority nodes are allowed past the role gate.
+49. Run `./scripts/integration_easy_node_invite_auth_policy.sh` to verify invite/admin commands fail fast when authority token auth is disabled (`ISSUER_ADMIN_ALLOW_TOKEN=0`) and require signed admin credentials.
+50. Run `./scripts/integration_prod_preflight_tools.sh` to verify easy-node strict prod preflight and authority signer rotate/status flows.

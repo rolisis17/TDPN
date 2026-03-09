@@ -29,7 +29,13 @@ run_step "easy-node client profile env wiring" ./scripts/integration_easy_node_c
 run_step "easy-node prod authority env wiring" ./scripts/integration_easy_node_prod_server_env.sh
 run_step "easy-node role guard" ./scripts/integration_easy_node_role_guard.sh
 run_step "easy-node invite auth policy" ./scripts/integration_easy_node_invite_auth_policy.sh
+run_step "easy-node peer identity guard" ./scripts/integration_easy_node_peer_identity_guard.sh
+run_step "easy-node server preflight" ./scripts/integration_easy_node_server_preflight.sh
 run_step "easy-node prod preflight tools" ./scripts/integration_prod_preflight_tools.sh
+run_step "client-vpn issuer quorum" ./scripts/integration_client_vpn_issuer_quorum.sh
+run_step "client-vpn operator floor" ./scripts/integration_client_vpn_operator_floor.sh
+run_step "3-machine prod-profile wiring" ./scripts/integration_3machine_prod_profile_wiring.sh
+run_step "3-machine prod wg soak stall guard" ./scripts/integration_3machine_prod_wg_soak_stall_guard.sh
 run_step "distinct-operator anti-collusion" ./scripts/integration_distinct_operators.sh
 run_step "peer discovery operator cap" ./scripts/integration_peer_discovery_operator_cap.sh
 run_step "anonymous credential dispute" ./scripts/integration_anon_credential_dispute.sh

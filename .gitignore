@@ -8,6 +8,7 @@
 
 # Local server env (contains admin/operator secrets)
 deploy/.env.easy.server
+deploy/.env.easy.provider
 
 # Generated runtime data for docker/easy-mode runs
 deploy/data/

@@ -24,7 +24,8 @@ usage() {
   cat <<'USAGE'
 Usage:
   ./scripts/easy_node.sh check
-  ./scripts/easy_node.sh server-up [--mode authority|provider] [--public-host HOST] [--operator-id ID] [--issuer-id ID] [--issuer-admin-token TOKEN] [--directory-admin-token TOKEN] [--entry-puzzle-secret SECRET] [--authority-directory URL] [--authority-issuer URL] [--peer-directories URLS] [--bootstrap-directory URL] [--client-allowlist [0|1]] [--allow-anon-cred [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]] [--show-admin-token [0|1]]
+  ./scripts/easy_node.sh server-preflight [--mode authority|provider] [--public-host HOST] [--operator-id ID] [--issuer-id ID] [--authority-directory URL] [--authority-issuer URL] [--peer-directories URLS] [--bootstrap-directory URL] [--peer-identity-strict 0|1|auto] [--min-peer-operators N] [--timeout-sec N] [--beta-profile [0|1]] [--prod-profile [0|1]]
+  ./scripts/easy_node.sh server-up [--mode authority|provider] [--public-host HOST] [--operator-id ID] [--issuer-id ID] [--issuer-admin-token TOKEN] [--directory-admin-token TOKEN] [--entry-puzzle-secret SECRET] [--authority-directory URL] [--authority-issuer URL] [--peer-directories URLS] [--bootstrap-directory URL] [--peer-identity-strict 0|1|auto] [--client-allowlist [0|1]] [--allow-anon-cred [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]] [--show-admin-token [0|1]]
   ./scripts/easy_node.sh server-status
   ./scripts/easy_node.sh server-logs
   ./scripts/easy_node.sh server-down
@@ -38,10 +39,17 @@ Usage:
   ./scripts/easy_node.sh wg-only-stack-down [--force-iface-cleanup [0|1]]
   ./scripts/easy_node.sh wg-only-stack-selftest [--strict-beta [0|1]] [--base-port N] [--timeout-sec N] [--min-selection-lines N] [--force-iface-reset [0|1]] [--cleanup-ifaces [0|1]] [--keep-stack [0|1]]
   ./scripts/easy_node.sh client-test [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--exit-country CC] [--exit-region REGION] [--timeout-sec N] [--distinct-operators [0|1]] [--min-selection-lines N] [--min-entry-operators N] [--min-exit-operators N] [--require-cross-operator-pair [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]]
+  ./scripts/easy_node.sh client-vpn-preflight [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-urls URL[,URL...]] [--entry-url URL] [--exit-url URL] [--prod-profile [0|1]] [--interface IFACE] [--timeout-sec N] [--require-root [0|1]] [--operator-floor-check [0|1]] [--issuer-quorum-check [0|1]] [--issuer-min-operators N] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH]
+  ./scripts/easy_node.sh client-vpn-up [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-urls URL[,URL...]] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--distinct-operators [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]] [--operator-floor-check [0|1]] [--issuer-quorum-check [0|1]] [--issuer-min-operators N] [--interface IFACE] [--proxy-addr HOST:PORT] [--private-key-file PATH] [--allowed-ips CIDR] [--install-route [0|1]] [--startup-sync-timeout-sec N] [--ready-timeout-sec N] [--force-restart [0|1]] [--foreground [0|1]] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH] [--log-file PATH]
+  ./scripts/easy_node.sh client-vpn-status
+  ./scripts/easy_node.sh client-vpn-down [--force-iface-cleanup [0|1]] [--iface IFACE] [--keep-key [0|1]]
   ./scripts/easy_node.sh three-machine-validate [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-a-url URL] [--issuer-b-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--client-min-selection-lines N] [--client-min-entry-operators N] [--client-min-exit-operators N] [--client-require-cross-operator-pair [0|1]] [--exit-country CC] [--exit-region REGION] [--distinct-operators [0|1]] [--require-issuer-quorum [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]]
   ./scripts/easy_node.sh three-machine-soak [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-a-url URL] [--issuer-b-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--rounds N] [--pause-sec N] [--fault-every N] [--fault-command CMD] [--continue-on-fail [0|1]] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--client-min-selection-lines N] [--client-min-entry-operators N] [--client-min-exit-operators N] [--client-require-cross-operator-pair [0|1]] [--exit-country CC] [--exit-region REGION] [--distinct-operators [0|1]] [--require-issuer-quorum [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]] [--report-file PATH]
+  ./scripts/easy_node.sh three-machine-prod-gate [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--control-timeout-sec N] [--control-soak-rounds N] [--control-soak-pause-sec N] [--wg-client-timeout-sec N] [--wg-session-sec N] [--wg-soak-rounds N] [--wg-soak-pause-sec N] [--wg-max-consecutive-failures N] [--wg-soak-summary-json PATH] [--gate-summary-json PATH] [--fault-every N] [--fault-command CMD] [--continue-on-fail [0|1]] [--strict-distinct [0|1]] [--skip-control-soak [0|1]] [--skip-wg [0|1]] [--skip-wg-soak [0|1]] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH] [--report-file PATH]
+  ./scripts/easy_node.sh three-machine-prod-bundle [--bundle-dir PATH] [three-machine-prod-gate args...]
+  ./scripts/easy_node.sh three-machine-reminder
   ./scripts/easy_node.sh prod-wg-validate [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--exit-a-url URL] [--exit-b-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--control-timeout-sec N] [--client-timeout-sec N] [--wg-session-sec N] [--client-iface IFACE] [--client-proxy-addr HOST:PORT] [--inject-attempts N] [--strict-distinct [0|1]] [--skip-control-plane-check [0|1]] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH] [--report-file PATH]
-  ./scripts/easy_node.sh prod-wg-soak [--rounds N] [--pause-sec N] [--fault-every N] [--fault-command CMD] [--continue-on-fail [0|1]] [--report-file PATH] [prod-wg-validate args...]
+  ./scripts/easy_node.sh prod-wg-soak [--rounds N] [--pause-sec N] [--fault-every N] [--fault-command CMD] [--continue-on-fail [0|1]] [--max-consecutive-failures N] [--summary-json PATH] [--report-file PATH] [prod-wg-validate args...]
   ./scripts/easy_node.sh pilot-runbook [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-a-url URL] [--issuer-b-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--rounds N] [--pause-sec N] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--client-min-selection-lines N] [--client-min-entry-operators N] [--client-min-exit-operators N] [--client-require-cross-operator-pair [0|1]] [--distinct-operators [0|1]] [--require-issuer-quorum [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]] [--bundle-dir PATH]
   ./scripts/easy_node.sh invite-generate [--issuer-url URL] [--admin-token TOKEN] [--admin-key-file FILE] [--admin-key-id ID] [--count N] [--prefix PREFIX] [--tier 1|2|3]
   ./scripts/easy_node.sh invite-check --key KEY [--issuer-url URL] [--admin-token TOKEN] [--admin-key-file FILE] [--admin-key-id ID]
@@ -56,8 +64,10 @@ Usage:
   ./scripts/easy_node.sh discover-hosts --bootstrap-directory URL [--wait-sec N] [--min-hosts N] [--write-config [0|1]]
 
 Notes:
+  - server-preflight validates peer/issuer reachability plus identity/quorum readiness before server-up.
   - server-up --mode authority runs directory + issuer + entry-exit.
   - server-up --mode provider runs directory + entry-exit only (no local issuer/admin token).
+  - server-up peer identity checks default to strict in beta/prod when peers are configured; use --peer-identity-strict 0 only for temporary bypass during diagnostics.
   - rotate-server-secrets rotates local server secret material in env files; use --restart 1 to apply immediately.
   - server-up --prod-profile enables fail-closed production strict mode (requires mTLS + signed issuer-admin auth).
   - admin-signing-status/admin-signing-rotate are authority-only issuer admin signer maintenance tools.
@@ -66,8 +76,13 @@ Notes:
   - wg-only-local-test runs host real-WireGuard integration checks (Linux + root required).
   - wg-only-stack-up/status/down manages a reusable host real-WireGuard demo stack (Linux + root required).
   - wg-only-stack-selftest runs stack-up + client-test + stack-down as one command (Linux + root required).
-  - stop-all can also clean WG-only stack state/process/interfaces when requested (root needed for interface cleanup).
+  - stop-all can also clean WG-only and client-vpn state/process/interfaces when requested (root needed for interface cleanup).
   - three-machine-validate runs health + federation checks then runs client-test with both directories.
+  - client-vpn-preflight checks host prerequisites, endpoint reachability, and optional operator/issuer quorum diversity before starting client-vpn-up.
+  - client-vpn-up runs a real local VPN client (host WireGuard interface) for external testers; use client-vpn-down to stop/cleanup.
+  - three-machine-prod-gate runs production-grade 3-machine sequencing (strict control validate + control soak + real WG validate + WG soak).
+  - three-machine-prod-bundle runs the same gate and always produces a shareable diagnostics tarball bundle.
+  - three-machine-reminder prints the true 3-machine production test checklist.
   - prod-wg-validate/prod-wg-soak run real WireGuard dataplane validation from machine C (Linux root) in production strict profile.
   - bootstrap discovery mode lets you provide one directory URL and auto-discover other server hosts.
   - machine-a-test/machine-b-test/machine-c-test are machine-role-specific automated validations with optional report files.
@@ -869,42 +884,62 @@ directory_has_operator_id() {
   local directory_url="$1"
   local operator_id="$2"
   local payload
-  payload="$(curl -fsS --connect-timeout 2 --max-time 4 "$(trim_url "$directory_url")/v1/relays" 2>/dev/null || true)"
+  local -a tls_opts
+  mapfile -t tls_opts < <(curl_tls_opts_for_url "$directory_url")
+  payload="$(curl -fsS --connect-timeout 2 --max-time 4 "${tls_opts[@]}" "$(trim_url "$directory_url")/v1/relays" 2>/dev/null || true)"
   if [[ -z "$payload" ]]; then
-    return 1
+    return 2
   fi
-  if printf '%s\n' "$payload" |
-    rg -o '"(operator_id|operator|origin_operator)":"[^"]+"' |
-    sed -E 's/^"(operator_id|operator|origin_operator)":"([^"]+)"$/\2/' |
-    awk -v target="$operator_id" '$0 == target {found=1} END {exit(found ? 0 : 1)}'; then
+
+  local ids
+  if ! ids="$(printf '%s\n' "$payload" | jq -r '.relays[]? | ((.operator_id // .operator // .origin_operator // "") | tostring)' 2>/dev/null)"; then
+    return 2
+  fi
+  if printf '%s\n' "$ids" | awk -v target="$operator_id" '$0 == target {found=1} END {exit(found ? 0 : 1)}'; then
     return 0
   fi
   return 1
 }
 
-issuer_id_from_url() {
+issuer_id_from_url_checked() {
   local issuer_url="$1"
   local payload
-  payload="$(curl -fsS --connect-timeout 2 --max-time 4 "$(trim_url "$issuer_url")/v1/pubkeys" 2>/dev/null || true)"
+  local -a tls_opts
+  mapfile -t tls_opts < <(curl_tls_opts_for_url "$issuer_url")
+  payload="$(curl -fsS --connect-timeout 2 --max-time 4 "${tls_opts[@]}" "$(trim_url "$issuer_url")/v1/pubkeys" 2>/dev/null || true)"
   if [[ -z "$payload" ]]; then
-    return 0
+    return 2
   fi
-  printf '%s\n' "$payload" |
-    rg -o '"issuer":"[^"]+"' |
-    head -n 1 |
-    sed -E 's/^"issuer":"([^"]+)"$/\1/'
+  local issuer_id
+  if ! issuer_id="$(printf '%s\n' "$payload" | jq -r '(.issuer // "") | tostring' 2>/dev/null)"; then
+    return 2
+  fi
+  if [[ "$issuer_id" == "null" ]]; then
+    issuer_id=""
+  fi
+  printf '%s\n' "$issuer_id"
+  return 0
 }
 
 operator_id_conflicts_with_peers() {
   local operator_id="$1"
   local peer_dirs="$2"
   local peer
+  local unknown=0
   while IFS= read -r peer; do
     [[ -z "$peer" ]] && continue
     if directory_has_operator_id "$peer" "$operator_id"; then
       return 0
+    else
+      local rc=$?
+      if [[ "$rc" == "2" ]]; then
+        unknown=1
+      fi
     fi
   done < <(split_csv_lines "$peer_dirs")
+  if [[ "$unknown" == "1" ]]; then
+    return 2
+  fi
   return 1
 }
 
@@ -915,16 +950,29 @@ issuer_id_conflicts_with_peers() {
   local peer_host
   local peer_issuer_url
   local peer_issuer_id
+  local unknown=0
   while IFS= read -r peer; do
     [[ -z "$peer" ]] && continue
     peer_host="$(host_from_url "$peer")"
     [[ -z "$peer_host" ]] && continue
     peer_issuer_url="$(url_from_host_port "$peer_host" 8082)"
-    peer_issuer_id="$(issuer_id_from_url "$peer_issuer_url")"
+    if peer_issuer_id="$(issuer_id_from_url_checked "$peer_issuer_url" 2>/dev/null)"; then
+      :
+    else
+      local rc=$?
+      if [[ "$rc" == "2" ]]; then
+        unknown=1
+        continue
+      fi
+      continue
+    fi
     if [[ -n "$peer_issuer_id" && "$peer_issuer_id" == "$issuer_id" ]]; then
       return 0
     fi
   done < <(split_csv_lines "$peer_dirs")
+  if [[ "$unknown" == "1" ]]; then
+    return 2
+  fi
   return 1
 }
 
@@ -938,6 +986,116 @@ ensure_deps_or_die() {
     echo "dependency check log: $log_file"
     exit 1
   fi
+}
+
+ensure_client_vpn_deps_or_die() {
+  local missing=0
+  local cmd
+  for cmd in go wg ip curl rg timeout jq; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+      echo "missing dependency for client-vpn: $cmd"
+      missing=1
+    fi
+  done
+  if [[ "$missing" -ne 0 ]]; then
+    echo "install dependencies with: ./scripts/easy_node.sh install-deps-ubuntu"
+    exit 1
+  fi
+}
+
+client_vpn_operator_floor_summary() {
+  local directory_urls="$1"
+  local timeout_sec="${2:-8}"
+  declare -A all_ops=()
+  declare -A entry_ops=()
+  declare -A exit_ops=()
+  local missing_operator=0
+  local fetch_fail=0
+  local parse_fail=0
+  local directory_url payload parsed role op
+  local -a tls_opts
+
+  while IFS= read -r directory_url; do
+    [[ -z "$directory_url" ]] && continue
+    mapfile -t tls_opts < <(curl_tls_opts_for_url "$directory_url")
+    payload="$(curl -fsS --connect-timeout 2 --max-time "$timeout_sec" "${tls_opts[@]}" "${directory_url%/}/v1/relays" 2>/dev/null || true)"
+    if [[ -z "$payload" ]]; then
+      fetch_fail=$((fetch_fail + 1))
+      continue
+    fi
+
+    parsed=0
+    while IFS=$'\t' read -r role op; do
+      parsed=1
+      role="$(trim "$role")"
+      op="$(trim "$op")"
+      [[ -z "$role" ]] && continue
+      if [[ -z "$op" || "$op" == "null" ]]; then
+        if [[ "$role" == "entry" || "$role" == "exit" ]]; then
+          missing_operator=$((missing_operator + 1))
+        fi
+        continue
+      fi
+      all_ops["$op"]=1
+      if [[ "$role" == "entry" ]]; then
+        entry_ops["$op"]=1
+      elif [[ "$role" == "exit" ]]; then
+        exit_ops["$op"]=1
+      fi
+    done < <(printf '%s\n' "$payload" | jq -r '.relays[]? | [(.role // ""), ((.operator_id // .operator // .origin_operator // "") | tostring)] | @tsv' 2>/dev/null || true)
+
+    if [[ "$parsed" -eq 0 ]]; then
+      if ! printf '%s\n' "$payload" | jq -e '.relays' >/dev/null 2>&1; then
+        parse_fail=$((parse_fail + 1))
+      fi
+    fi
+  done < <(split_csv_lines "$directory_urls")
+
+  echo "${#all_ops[@]}|${#entry_ops[@]}|${#exit_ops[@]}|$missing_operator|$fetch_fail|$parse_fail"
+}
+
+client_vpn_issuer_quorum_summary() {
+  local issuer_urls="$1"
+  local timeout_sec="${2:-8}"
+  declare -A issuer_ids=()
+  local missing_issuer=0
+  local missing_keys=0
+  local fetch_fail=0
+  local parse_fail=0
+  local issuer_url payload issuer_id key_count
+  local -a tls_opts
+
+  while IFS= read -r issuer_url; do
+    [[ -z "$issuer_url" ]] && continue
+    mapfile -t tls_opts < <(curl_tls_opts_for_url "$issuer_url")
+    payload="$(curl -fsS --connect-timeout 2 --max-time "$timeout_sec" "${tls_opts[@]}" "${issuer_url%/}/v1/pubkeys" 2>/dev/null || true)"
+    if [[ -z "$payload" ]]; then
+      fetch_fail=$((fetch_fail + 1))
+      continue
+    fi
+
+    if ! printf '%s\n' "$payload" | jq -e '.pub_keys' >/dev/null 2>&1; then
+      parse_fail=$((parse_fail + 1))
+      continue
+    fi
+
+    issuer_id="$(printf '%s\n' "$payload" | jq -r '(.issuer // "") | tostring' 2>/dev/null || true)"
+    key_count="$(printf '%s\n' "$payload" | jq -r '((.pub_keys // []) | length)' 2>/dev/null || true)"
+    if [[ -z "$issuer_id" || "$issuer_id" == "null" ]]; then
+      missing_issuer=$((missing_issuer + 1))
+    else
+      issuer_ids["$issuer_id"]=1
+    fi
+    if ! [[ "$key_count" =~ ^[0-9]+$ ]]; then
+      parse_fail=$((parse_fail + 1))
+      continue
+    fi
+    if ((key_count < 1)); then
+      missing_keys=$((missing_keys + 1))
+    fi
+  done < <(split_csv_lines "$issuer_urls")
+
+  echo "${#issuer_ids[@]}|$missing_issuer|$missing_keys|$fetch_fail|$parse_fail"
 }
 
 compose_with_env() {
@@ -1241,6 +1399,367 @@ looks_like_loopback_url() {
   [[ "$u" == *"127.0.0.1"* || "$u" == *"localhost"* ]]
 }
 
+server_preflight() {
+  local mode="${EASY_NODE_SERVER_MODE:-authority}"
+  local public_host=""
+  local operator_id=""
+  local issuer_id=""
+  local authority_directory="${EASY_NODE_AUTHORITY_DIRECTORY:-}"
+  local authority_issuer="${EASY_NODE_AUTHORITY_ISSUER:-}"
+  local peer_dirs=""
+  local bootstrap_directory=""
+  local beta_profile="${EASY_NODE_BETA_PROFILE:-0}"
+  local prod_profile="${EASY_NODE_PROD_PROFILE:-0}"
+  local peer_identity_strict="${EASY_NODE_PEER_IDENTITY_STRICT:-auto}"
+  local min_peer_operators="${EASY_NODE_SERVER_PREFLIGHT_MIN_PEER_OPERATORS:-1}"
+  local timeout_sec="${EASY_NODE_SERVER_PREFLIGHT_TIMEOUT_SEC:-8}"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --mode)
+        mode="${2:-}"
+        shift 2
+        ;;
+      --public-host)
+        public_host="${2:-}"
+        shift 2
+        ;;
+      --operator-id)
+        operator_id="${2:-}"
+        shift 2
+        ;;
+      --issuer-id)
+        issuer_id="${2:-}"
+        shift 2
+        ;;
+      --authority-directory)
+        authority_directory="${2:-}"
+        shift 2
+        ;;
+      --authority-issuer)
+        authority_issuer="${2:-}"
+        shift 2
+        ;;
+      --peer-directories)
+        peer_dirs="${2:-}"
+        shift 2
+        ;;
+      --bootstrap-directory)
+        bootstrap_directory="${2:-}"
+        shift 2
+        ;;
+      --peer-identity-strict)
+        peer_identity_strict="${2:-}"
+        shift 2
+        ;;
+      --min-peer-operators)
+        min_peer_operators="${2:-}"
+        shift 2
+        ;;
+      --timeout-sec)
+        timeout_sec="${2:-}"
+        shift 2
+        ;;
+      --beta-profile)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          beta_profile="${2:-}"
+          shift 2
+        else
+          beta_profile="1"
+          shift
+        fi
+        ;;
+      --prod-profile)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          prod_profile="${2:-}"
+          shift 2
+        else
+          prod_profile="1"
+          shift
+        fi
+        ;;
+      -h|--help|help)
+        usage
+        return 0
+        ;;
+      *)
+        echo "unknown arg for server-preflight: $1"
+        exit 2
+        ;;
+    esac
+  done
+
+  if [[ "$mode" != "authority" && "$mode" != "provider" ]]; then
+    echo "server-preflight requires --mode authority|provider"
+    exit 2
+  fi
+  if [[ "$beta_profile" != "0" && "$beta_profile" != "1" ]]; then
+    echo "server-preflight requires --beta-profile to be 0 or 1"
+    exit 2
+  fi
+  if [[ "$prod_profile" != "0" && "$prod_profile" != "1" ]]; then
+    echo "server-preflight requires --prod-profile to be 0 or 1"
+    exit 2
+  fi
+  if [[ "$prod_profile" == "1" ]]; then
+    beta_profile="1"
+  fi
+  if [[ "$peer_identity_strict" != "0" && "$peer_identity_strict" != "1" && "$peer_identity_strict" != "auto" ]]; then
+    echo "server-preflight requires --peer-identity-strict to be 0, 1, or auto"
+    exit 2
+  fi
+  if ! [[ "$min_peer_operators" =~ ^[0-9]+$ ]] || ((min_peer_operators < 0)); then
+    echo "server-preflight requires --min-peer-operators to be >= 0"
+    exit 2
+  fi
+  if ! [[ "$timeout_sec" =~ ^[0-9]+$ ]] || ((timeout_sec < 2)); then
+    echo "server-preflight requires --timeout-sec to be >= 2"
+    exit 2
+  fi
+
+  local url_scheme="http"
+  if [[ "$prod_profile" == "1" ]]; then
+    url_scheme="https"
+  fi
+
+  if [[ -n "$bootstrap_directory" ]]; then
+    bootstrap_directory="$(ensure_url_scheme "$bootstrap_directory" "$url_scheme")"
+    if [[ -z "$peer_dirs" ]]; then
+      peer_dirs="$bootstrap_directory"
+    else
+      peer_dirs="$(merge_url_csv "$peer_dirs" "$bootstrap_directory")"
+    fi
+    if [[ "$mode" == "provider" && -z "$authority_directory" ]]; then
+      authority_directory="$bootstrap_directory"
+    fi
+  fi
+
+  local local_host=""
+  if [[ -n "$public_host" ]]; then
+    local_host="$(host_from_hostport "$public_host")"
+  else
+    local_host="$(detect_local_host || true)"
+  fi
+
+  if [[ "$mode" == "provider" ]]; then
+    if [[ -z "$authority_directory" && -n "$peer_dirs" ]]; then
+      authority_directory="$(first_csv_item "$peer_dirs")"
+    fi
+    if [[ -z "$authority_directory" ]]; then
+      echo "server-preflight --mode provider requires --authority-directory (or --bootstrap-directory)"
+      exit 2
+    fi
+    authority_directory="$(ensure_url_scheme "$authority_directory" "$url_scheme")"
+    local authority_host
+    authority_host="$(host_from_url "$authority_directory")"
+    if [[ -z "$authority_issuer" && -n "$authority_host" ]]; then
+      authority_issuer="$(url_from_host_port "$authority_host" 8082)"
+    fi
+    if [[ -z "$authority_issuer" ]]; then
+      echo "server-preflight --mode provider requires --authority-issuer URL"
+      exit 2
+    fi
+    authority_issuer="$(ensure_url_scheme "$authority_issuer" "$url_scheme")"
+    if [[ -z "$peer_dirs" ]]; then
+      peer_dirs="$authority_directory"
+    else
+      peer_dirs="$(merge_url_csv "$peer_dirs" "$authority_directory")"
+    fi
+  fi
+
+  if [[ -n "$peer_dirs" ]]; then
+    peer_dirs="$(normalize_url_csv_scheme "$peer_dirs" "$url_scheme")"
+    peer_dirs="$(filter_peer_dirs_excluding_host "$peer_dirs" "$local_host")"
+  fi
+
+  local peer_identity_strict_effective="$peer_identity_strict"
+  if [[ "$peer_identity_strict_effective" == "auto" ]]; then
+    if [[ -n "$peer_dirs" && ( "$beta_profile" == "1" || "$prod_profile" == "1" ) ]]; then
+      peer_identity_strict_effective="1"
+    else
+      peer_identity_strict_effective="0"
+    fi
+  fi
+
+  for cmd in curl jq rg; do
+    need_cmd "$cmd" || exit 2
+  done
+
+  local identity_file stored_operator_id stored_issuer_id candidate_operator_id candidate_issuer_id
+  identity_file="$(identity_config_file)"
+  stored_operator_id="$(identity_value "$identity_file" "EASY_NODE_OPERATOR_ID")"
+  stored_issuer_id="$(identity_value "$identity_file" "EASY_NODE_ISSUER_ID")"
+  candidate_operator_id="${operator_id:-$stored_operator_id}"
+  candidate_issuer_id="${issuer_id:-$stored_issuer_id}"
+
+  local failures=0
+  local warnings=0
+  local peer_count=0
+  declare -A peer_ops_seen=()
+  declare -A peer_issuer_seen=()
+
+  echo "server preflight started"
+  echo "mode: $mode"
+  echo "prod_profile: $prod_profile beta_profile: $beta_profile"
+  echo "peer_identity_strict: $peer_identity_strict_effective (configured=$peer_identity_strict)"
+  echo "timeout_sec: $timeout_sec"
+  if [[ -n "$peer_dirs" ]]; then
+    echo "peer_directories: $peer_dirs"
+  else
+    echo "peer_directories: [none]"
+  fi
+  if [[ "$mode" == "provider" ]]; then
+    echo "authority_directory: $authority_directory"
+    echo "authority_issuer: $authority_issuer"
+  fi
+
+  if [[ -n "$peer_dirs" ]]; then
+    local peer_url peer_payload peer_ops peer_op_count peer_host peer_issuer_url peer_issuer_id
+    local peer_fetch_fail=0
+    local peer_parse_fail=0
+    while IFS= read -r peer_url; do
+      [[ -z "$peer_url" ]] && continue
+      peer_count=$((peer_count + 1))
+      local -a peer_tls_opts
+      mapfile -t peer_tls_opts < <(curl_tls_opts_for_url "$peer_url")
+      peer_payload="$(curl -fsS --connect-timeout 2 --max-time "$timeout_sec" "${peer_tls_opts[@]}" "$(trim_url "$peer_url")/v1/relays" 2>/dev/null || true)"
+      if [[ -z "$peer_payload" ]]; then
+        echo "[peer] fail: ${peer_url}/v1/relays unreachable"
+        peer_fetch_fail=$((peer_fetch_fail + 1))
+        continue
+      fi
+      if ! peer_ops="$(printf '%s\n' "$peer_payload" | jq -r '.relays[]? | ((.operator_id // .operator // .origin_operator // "") | tostring)' 2>/dev/null)"; then
+        echo "[peer] fail: ${peer_url}/v1/relays payload parse failed"
+        peer_parse_fail=$((peer_parse_fail + 1))
+        continue
+      fi
+      peer_op_count="$(printf '%s\n' "$peer_ops" | awk 'NF > 0' | sort -u | wc -l | tr -d ' ')"
+      echo "[peer] ok: ${peer_url} operators=${peer_op_count}"
+      while IFS= read -r op; do
+        [[ -z "$op" ]] && continue
+        peer_ops_seen["$op"]=1
+      done < <(printf '%s\n' "$peer_ops" | awk 'NF > 0')
+
+      peer_host="$(host_from_url "$peer_url")"
+      if [[ -n "$peer_host" ]]; then
+        peer_issuer_url="$(url_from_host_port "$peer_host" 8082)"
+        local -a issuer_tls_opts
+        mapfile -t issuer_tls_opts < <(curl_tls_opts_for_url "$peer_issuer_url")
+        peer_issuer_id="$(curl -fsS --connect-timeout 2 --max-time "$timeout_sec" "${issuer_tls_opts[@]}" "$(trim_url "$peer_issuer_url")/v1/pubkeys" 2>/dev/null | jq -r '(.issuer // "") | tostring' 2>/dev/null || true)"
+        if [[ -n "$peer_issuer_id" && "$peer_issuer_id" != "null" ]]; then
+          peer_issuer_seen["$peer_issuer_id"]=1
+        fi
+      fi
+    done < <(split_csv_lines "$peer_dirs")
+
+    local peer_distinct_ops="${#peer_ops_seen[@]}"
+    echo "[peer] summary: peers=$peer_count distinct_operators=$peer_distinct_ops"
+    if ((peer_distinct_ops < min_peer_operators)); then
+      echo "[peer] fail: distinct operator floor not met (required=${min_peer_operators}, got=${peer_distinct_ops})"
+      failures=$((failures + 1))
+    fi
+    if ((peer_fetch_fail > 0 || peer_parse_fail > 0)); then
+      if [[ "$peer_identity_strict_effective" == "1" ]]; then
+        echo "[peer] fail: peer directory verification incomplete (fetch_fail=${peer_fetch_fail}, parse_fail=${peer_parse_fail})"
+        failures=$((failures + 1))
+      else
+        echo "[peer] warning: peer directory verification incomplete (fetch_fail=${peer_fetch_fail}, parse_fail=${peer_parse_fail})"
+        warnings=$((warnings + 1))
+      fi
+    fi
+  fi
+
+  if [[ "$mode" == "provider" ]]; then
+    local -a authority_tls_opts
+    mapfile -t authority_tls_opts < <(curl_tls_opts_for_url "$authority_issuer")
+    local authority_payload authority_issuer_id authority_key_count
+    authority_payload="$(curl -fsS --connect-timeout 2 --max-time "$timeout_sec" "${authority_tls_opts[@]}" "$(trim_url "$authority_issuer")/v1/pubkeys" 2>/dev/null || true)"
+    if [[ -z "$authority_payload" ]]; then
+      echo "[issuer] fail: authority issuer unreachable: ${authority_issuer}/v1/pubkeys"
+      failures=$((failures + 1))
+    elif ! authority_issuer_id="$(printf '%s\n' "$authority_payload" | jq -r '(.issuer // "") | tostring' 2>/dev/null)"; then
+      echo "[issuer] fail: authority issuer payload parse failed"
+      failures=$((failures + 1))
+    else
+      authority_key_count="$(printf '%s\n' "$authority_payload" | jq -r '((.pub_keys // []) | length)' 2>/dev/null || echo "0")"
+      if ! [[ "$authority_key_count" =~ ^[0-9]+$ ]] || ((authority_key_count < 1)); then
+        echo "[issuer] fail: authority issuer has no active pubkeys"
+        failures=$((failures + 1))
+      else
+        if [[ "$authority_issuer_id" == "null" ]]; then
+          authority_issuer_id=""
+        fi
+        echo "[issuer] ok: authority_issuer_id=${authority_issuer_id:-unknown} pub_keys=${authority_key_count}"
+      fi
+    fi
+  fi
+
+  if [[ "$mode" == "authority" && "$prod_profile" == "1" && -n "$peer_dirs" ]]; then
+    local peer_issuer_count="${#peer_issuer_seen[@]}"
+    echo "[issuer] peer issuer ids observed: ${peer_issuer_count}"
+    if ((peer_issuer_count < 1)); then
+      echo "[issuer] fail: prod profile requires at least one reachable peer issuer id (self + peer => quorum of 2 issuer URLs)"
+      failures=$((failures + 1))
+    fi
+  fi
+
+  if [[ -n "$peer_dirs" && -n "$candidate_operator_id" ]]; then
+    local op_rc=0
+    if operator_id_conflicts_with_peers "$candidate_operator_id" "$peer_dirs"; then
+      op_rc=0
+    else
+      op_rc=$?
+    fi
+    if [[ "$op_rc" == "0" ]]; then
+      echo "[identity] fail: operator_id collision with peers: $candidate_operator_id"
+      failures=$((failures + 1))
+    elif [[ "$op_rc" == "2" ]]; then
+      if [[ "$peer_identity_strict_effective" == "1" ]]; then
+        echo "[identity] fail: could not verify operator_id collision status against peers"
+        failures=$((failures + 1))
+      else
+        echo "[identity] warning: operator_id collision status unknown (peer verify incomplete)"
+        warnings=$((warnings + 1))
+      fi
+    else
+      echo "[identity] ok: operator_id candidate clear: $candidate_operator_id"
+    fi
+  elif [[ -n "$peer_dirs" ]]; then
+    echo "[identity] note: operator_id not provided/stored; collision check skipped"
+  fi
+
+  if [[ "$mode" == "authority" && -n "$peer_dirs" && -n "$candidate_issuer_id" ]]; then
+    local issuer_rc=0
+    if issuer_id_conflicts_with_peers "$candidate_issuer_id" "$peer_dirs"; then
+      issuer_rc=0
+    else
+      issuer_rc=$?
+    fi
+    if [[ "$issuer_rc" == "0" ]]; then
+      echo "[identity] fail: issuer_id collision with peers: $candidate_issuer_id"
+      failures=$((failures + 1))
+    elif [[ "$issuer_rc" == "2" ]]; then
+      if [[ "$peer_identity_strict_effective" == "1" ]]; then
+        echo "[identity] fail: could not verify issuer_id collision status against peers"
+        failures=$((failures + 1))
+      else
+        echo "[identity] warning: issuer_id collision status unknown (peer verify incomplete)"
+        warnings=$((warnings + 1))
+      fi
+    else
+      echo "[identity] ok: issuer_id candidate clear: $candidate_issuer_id"
+    fi
+  elif [[ "$mode" == "authority" && -n "$peer_dirs" ]]; then
+    echo "[identity] note: issuer_id not provided/stored; collision check skipped"
+  fi
+
+  if ((failures > 0)); then
+    echo "server preflight: FAILED (failures=${failures}, warnings=${warnings})"
+    return 1
+  fi
+  echo "server preflight: ok (warnings=${warnings})"
+}
+
 server_up() {
   local mode="${EASY_NODE_SERVER_MODE:-authority}"
   local public_host=""
@@ -1256,6 +1775,7 @@ server_up() {
   local bootstrap_directory=""
   local authority_directory="${EASY_NODE_AUTHORITY_DIRECTORY:-}"
   local authority_issuer="${EASY_NODE_AUTHORITY_ISSUER:-}"
+  local peer_identity_strict="${EASY_NODE_PEER_IDENTITY_STRICT:-auto}"
   local client_allowlist="${EASY_NODE_CLIENT_ALLOWLIST_ONLY:-0}"
   local client_allowlist_explicit="0"
   local allow_anon_cred="${EASY_NODE_ALLOW_ANON_CRED:-1}"
@@ -1311,6 +1831,10 @@ server_up() {
         ;;
       --bootstrap-directory)
         bootstrap_directory="${2:-}"
+        shift 2
+        ;;
+      --peer-identity-strict)
+        peer_identity_strict="${2:-}"
         shift 2
         ;;
       --client-allowlist)
@@ -1396,6 +1920,10 @@ server_up() {
     echo "server-up requires --allow-anon-cred (or EASY_NODE_ALLOW_ANON_CRED) to be 0 or 1"
     exit 2
   fi
+  if [[ "$peer_identity_strict" != "0" && "$peer_identity_strict" != "1" && "$peer_identity_strict" != "auto" ]]; then
+    echo "server-up requires --peer-identity-strict (or EASY_NODE_PEER_IDENTITY_STRICT) to be 0, 1, or auto"
+    exit 2
+  fi
 
   local url_scheme="http"
   if [[ "$prod_profile" == "1" ]]; then
@@ -1469,6 +1997,15 @@ server_up() {
     peer_dirs="$(filter_peer_dirs_excluding_host "$peer_dirs" "$local_host")"
   fi
 
+  local peer_identity_strict_effective="$peer_identity_strict"
+  if [[ "$peer_identity_strict_effective" == "auto" ]]; then
+    if [[ -n "$peer_dirs" && ( "$beta_profile" == "1" || "$prod_profile" == "1" ) ]]; then
+      peer_identity_strict_effective="1"
+    else
+      peer_identity_strict_effective="0"
+    fi
+  fi
+
   ensure_deps_or_die
 
   if [[ -z "$directory_admin_token" ]]; then
@@ -1518,40 +2055,6 @@ server_up() {
     issuer_id="${stored_issuer_id:-}"
   fi
 
-  if [[ -n "$peer_dirs" ]]; then
-    local operator_attempts=0
-    while operator_id_conflicts_with_peers "$operator_id" "$peer_dirs"; do
-      if [[ "$operator_id_explicit" == "1" ]]; then
-        echo "server-up refused: --operator-id '$operator_id' already exists on peer directories."
-        echo "choose a unique operator id or omit --operator-id for automatic unique generation."
-        exit 2
-      fi
-      operator_id="op-$(random_id_suffix)"
-      operator_attempts=$((operator_attempts + 1))
-      if ((operator_attempts >= 8)); then
-        echo "server-up could not generate a unique operator id after ${operator_attempts} attempts."
-        exit 1
-      fi
-    done
-  fi
-
-  if [[ "$mode" == "authority" && -n "$peer_dirs" ]]; then
-    local issuer_attempts=0
-    while issuer_id_conflicts_with_peers "$issuer_id" "$peer_dirs"; do
-      if [[ "$issuer_id_explicit" == "1" ]]; then
-        echo "server-up refused: --issuer-id '$issuer_id' already exists on peer directories."
-        echo "choose a unique issuer id or omit --issuer-id for automatic unique generation."
-        exit 2
-      fi
-      issuer_id="issuer-$(random_id_suffix)"
-      issuer_attempts=$((issuer_attempts + 1))
-      if ((issuer_attempts >= 8)); then
-        echo "server-up could not generate a unique issuer id after ${issuer_attempts} attempts."
-        exit 1
-      fi
-    done
-  fi
-
   local admin_sign_key_file_local=""
   local admin_sign_key_id=""
   local admin_signers_file_local=""
@@ -1592,6 +2095,78 @@ server_up() {
         exit 1
       fi
     fi
+  fi
+
+  if [[ -n "$peer_dirs" ]]; then
+    local operator_attempts=0
+    while true; do
+      local op_check_rc=0
+      if operator_id_conflicts_with_peers "$operator_id" "$peer_dirs"; then
+        op_check_rc=0
+      else
+        op_check_rc=$?
+      fi
+      if [[ "$op_check_rc" == "0" ]]; then
+        if [[ "$operator_id_explicit" == "1" ]]; then
+          echo "server-up refused: --operator-id '$operator_id' already exists on peer directories."
+          echo "choose a unique operator id or omit --operator-id for automatic unique generation."
+          exit 2
+        fi
+        operator_id="op-$(random_id_suffix)"
+        operator_attempts=$((operator_attempts + 1))
+        if ((operator_attempts >= 8)); then
+          echo "server-up could not generate a unique operator id after ${operator_attempts} attempts."
+          exit 1
+        fi
+        continue
+      fi
+      if [[ "$op_check_rc" == "2" ]]; then
+        if [[ "$peer_identity_strict_effective" == "1" ]]; then
+          echo "server-up refused: could not verify operator-id uniqueness against peer directories."
+          echo "check peer directory reachability and mTLS trust/certs, then retry."
+          echo "temporary bypass (diagnostics only): --peer-identity-strict 0"
+          exit 2
+        fi
+        echo "warning: operator-id uniqueness check skipped (peer directory unavailable/unparseable)."
+      fi
+      break
+    done
+  fi
+
+  if [[ "$mode" == "authority" && -n "$peer_dirs" ]]; then
+    local issuer_attempts=0
+    while true; do
+      local issuer_check_rc=0
+      if issuer_id_conflicts_with_peers "$issuer_id" "$peer_dirs"; then
+        issuer_check_rc=0
+      else
+        issuer_check_rc=$?
+      fi
+      if [[ "$issuer_check_rc" == "0" ]]; then
+        if [[ "$issuer_id_explicit" == "1" ]]; then
+          echo "server-up refused: --issuer-id '$issuer_id' already exists on peer directories."
+          echo "choose a unique issuer id or omit --issuer-id for automatic unique generation."
+          exit 2
+        fi
+        issuer_id="issuer-$(random_id_suffix)"
+        issuer_attempts=$((issuer_attempts + 1))
+        if ((issuer_attempts >= 8)); then
+          echo "server-up could not generate a unique issuer id after ${issuer_attempts} attempts."
+          exit 1
+        fi
+        continue
+      fi
+      if [[ "$issuer_check_rc" == "2" ]]; then
+        if [[ "$peer_identity_strict_effective" == "1" ]]; then
+          echo "server-up refused: could not verify issuer-id uniqueness against peer directories."
+          echo "check peer issuer reachability and mTLS trust/certs, then retry."
+          echo "temporary bypass (diagnostics only): --peer-identity-strict 0"
+          exit 2
+        fi
+        echo "warning: issuer-id uniqueness check skipped (peer issuer unavailable/unparseable)."
+      fi
+      break
+    done
   fi
 
   local issuer_urls_csv=""
@@ -1667,6 +2242,9 @@ server_up() {
     if [[ "$beta_profile" == "1" ]]; then
       echo "beta profile: enabled (quorum and anti-concentration defaults applied)"
     fi
+    if [[ -n "$peer_dirs" ]]; then
+      echo "peer_identity_strict: $peer_identity_strict_effective (configured=$peer_identity_strict)"
+    fi
     echo "client_allowlist: $client_allowlist"
     echo "allow_anon_cred: $allow_anon_cred"
     if [[ "$prod_profile" == "1" ]]; then
@@ -1727,6 +2305,9 @@ server_up() {
     echo "entry_puzzle_secret: [hidden]"
     if [[ "$beta_profile" == "1" ]]; then
       echo "beta profile: enabled (quorum and anti-concentration defaults applied)"
+    fi
+    if [[ -n "$peer_dirs" ]]; then
+      echo "peer_identity_strict: $peer_identity_strict_effective (configured=$peer_identity_strict)"
     fi
     if [[ "$prod_profile" == "1" ]]; then
       echo "prod profile: enabled (mTLS + strict trust checks enforced)"
@@ -1985,6 +2566,25 @@ stop_all() {
           rm -f "$state_file" >/dev/null 2>&1 || true
           echo "wg-only stack cleanup: cleared stale state file"
         fi
+      fi
+    fi
+  fi
+
+  local client_vpn_state
+  client_vpn_state="$(client_vpn_state_file)"
+  if [[ -f "$client_vpn_state" ]]; then
+    if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+      client_vpn_down --force-iface-cleanup "$force_iface_cleanup" --keep-key 1 >/dev/null 2>&1 || true
+      echo "client-vpn cleanup: done"
+    else
+      local client_pid
+      client_pid="$(identity_value "$client_vpn_state" "CLIENT_VPN_PID")"
+      if [[ -n "$client_pid" ]] && kill -0 "$client_pid" >/dev/null 2>&1; then
+        echo "client-vpn cleanup: skipped (root required)."
+        echo "run: sudo ./scripts/easy_node.sh client-vpn-down --force-iface-cleanup $force_iface_cleanup"
+      else
+        rm -f "$client_vpn_state" >/dev/null 2>&1 || true
+        echo "client-vpn cleanup: cleared stale state file"
       fi
     fi
   fi
@@ -2797,6 +3397,51 @@ three_machine_validate() {
 three_machine_soak() {
   ensure_deps_or_die
   "$ROOT_DIR/scripts/integration_3machine_beta_soak.sh" "$@"
+}
+
+three_machine_prod_gate() {
+  ensure_deps_or_die
+  local gate_script="${THREE_MACHINE_PROD_GATE_SCRIPT:-$ROOT_DIR/scripts/integration_3machine_prod_gate.sh}"
+  "$gate_script" "$@"
+}
+
+three_machine_prod_bundle() {
+  ensure_deps_or_die
+  local bundle_script="${THREE_MACHINE_PROD_BUNDLE_SCRIPT:-$ROOT_DIR/scripts/prod_gate_bundle.sh}"
+  "$bundle_script" "$@"
+}
+
+three_machine_reminder() {
+  cat <<'REMINDER'
+True 3-machine production reminder checklist
+
+Run order:
+  1) Machine A: authority/provider stack healthy
+  2) Machine B: provider stack healthy and federating with A
+  3) Machine C: strict control-plane validation
+  4) Machine C: control-plane soak/fault
+  5) Machine C (Linux root): real WG production dataplane validate
+  6) Machine C (Linux root): real WG production dataplane soak/fault
+
+Recommended commands:
+  ./scripts/easy_node.sh machine-a-test --public-host A_HOST
+  ./scripts/easy_node.sh machine-b-test --peer-directory-a http://A_HOST:8081 --public-host B_HOST
+  ./scripts/easy_node.sh three-machine-validate --directory-a http://A_HOST:8081 --directory-b http://B_HOST:8081 --issuer-url http://A_HOST:8082 --entry-url http://A_HOST:8083 --exit-url http://A_HOST:8084 --beta-profile 1 --prod-profile 1 --distinct-operators 1
+  ./scripts/easy_node.sh three-machine-soak --directory-a http://A_HOST:8081 --directory-b http://B_HOST:8081 --issuer-url http://A_HOST:8082 --entry-url http://A_HOST:8083 --exit-url http://A_HOST:8084 --rounds 12 --pause-sec 5 --beta-profile 1 --prod-profile 1 --distinct-operators 1
+  sudo ./scripts/easy_node.sh prod-wg-validate --directory-a https://A_HOST:8081 --directory-b https://B_HOST:8081 --issuer-url https://A_HOST:8082 --entry-url https://A_HOST:8083 --exit-url https://A_HOST:8084 --strict-distinct 1
+  sudo ./scripts/easy_node.sh prod-wg-soak --directory-a https://A_HOST:8081 --directory-b https://B_HOST:8081 --issuer-url https://A_HOST:8082 --entry-url https://A_HOST:8083 --exit-url https://A_HOST:8084 --rounds 12 --pause-sec 10 --strict-distinct 1
+
+One-command sequence:
+  sudo ./scripts/easy_node.sh three-machine-prod-gate --directory-a https://A_HOST:8081 --directory-b https://B_HOST:8081 --issuer-url https://A_HOST:8082 --entry-url https://A_HOST:8083 --exit-url https://A_HOST:8084
+  sudo ./scripts/easy_node.sh three-machine-prod-bundle --bundle-dir .easy-node-logs/prod_gate_bundle --directory-a https://A_HOST:8081 --directory-b https://B_HOST:8081 --issuer-url https://A_HOST:8082 --entry-url https://A_HOST:8083 --exit-url https://A_HOST:8084
+
+Pass criteria:
+  - both directories show at least 2 operators
+  - issuer quorum checks pass with distinct issuer identities in strict profile
+  - client selection shows distinct entry/exit operator pairing
+  - real WG validation shows handshake + transfer and exit accepted_packets > 0
+  - soak runs complete with zero failed rounds
+REMINDER
 }
 
 prod_wg_validate() {
@@ -4496,11 +5141,1144 @@ EOF_CLIENT
   return 1
 }
 
+client_vpn_preflight() {
+  local directory_urls=""
+  local issuer_url=""
+  local issuer_urls=""
+  local entry_url=""
+  local exit_url=""
+  local bootstrap_directory=""
+  local discovery_wait_sec="${EASY_NODE_DISCOVERY_WAIT_SEC:-20}"
+  local prod_profile="${EASY_NODE_PROD_PROFILE:-0}"
+  local interface_name="${CLIENT_WG_INTERFACE:-wgvpn0}"
+  local timeout_sec="${EASY_NODE_CLIENT_VPN_PREFLIGHT_TIMEOUT_SEC:-12}"
+  local require_root="1"
+  local operator_floor_check="${EASY_NODE_CLIENT_VPN_OPERATOR_FLOOR_CHECK:-}"
+  local issuer_quorum_check="${EASY_NODE_CLIENT_VPN_ISSUER_QUORUM_CHECK:-}"
+  local issuer_min_operators="${EASY_NODE_CLIENT_VPN_ISSUER_MIN_OPERATORS:-2}"
+  local mtls_ca_file="$DEPLOY_DIR/tls/ca.crt"
+  local mtls_client_cert_file="$DEPLOY_DIR/tls/client.crt"
+  local mtls_client_key_file="$DEPLOY_DIR/tls/client.key"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --directory-urls)
+        directory_urls="${2:-}"
+        shift 2
+        ;;
+      --bootstrap-directory)
+        bootstrap_directory="${2:-}"
+        shift 2
+        ;;
+      --discovery-wait-sec)
+        discovery_wait_sec="${2:-}"
+        shift 2
+        ;;
+      --issuer-url)
+        issuer_url="${2:-}"
+        shift 2
+        ;;
+      --issuer-urls)
+        issuer_urls="${2:-}"
+        shift 2
+        ;;
+      --entry-url)
+        entry_url="${2:-}"
+        shift 2
+        ;;
+      --exit-url)
+        exit_url="${2:-}"
+        shift 2
+        ;;
+      --prod-profile)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          prod_profile="${2:-}"
+          shift 2
+        else
+          prod_profile="1"
+          shift
+        fi
+        ;;
+      --interface)
+        interface_name="${2:-}"
+        shift 2
+        ;;
+      --timeout-sec)
+        timeout_sec="${2:-}"
+        shift 2
+        ;;
+      --require-root)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          require_root="${2:-}"
+          shift 2
+        else
+          require_root="1"
+          shift
+        fi
+        ;;
+      --operator-floor-check)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          operator_floor_check="${2:-}"
+          shift 2
+        else
+          operator_floor_check="1"
+          shift
+        fi
+        ;;
+      --issuer-quorum-check)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          issuer_quorum_check="${2:-}"
+          shift 2
+        else
+          issuer_quorum_check="1"
+          shift
+        fi
+        ;;
+      --issuer-min-operators)
+        issuer_min_operators="${2:-}"
+        shift 2
+        ;;
+      --mtls-ca-file)
+        mtls_ca_file="${2:-}"
+        shift 2
+        ;;
+      --mtls-client-cert-file)
+        mtls_client_cert_file="${2:-}"
+        shift 2
+        ;;
+      --mtls-client-key-file)
+        mtls_client_key_file="${2:-}"
+        shift 2
+        ;;
+      -h|--help|help)
+        usage
+        return 0
+        ;;
+      *)
+        echo "unknown arg for client-vpn-preflight: $1"
+        exit 2
+        ;;
+    esac
+  done
+
+  ensure_client_vpn_deps_or_die
+
+  if [[ "$prod_profile" != "0" && "$prod_profile" != "1" ]]; then
+    echo "client-vpn-preflight requires --prod-profile 0 or 1"
+    exit 2
+  fi
+  if [[ "$require_root" != "0" && "$require_root" != "1" ]]; then
+    echo "client-vpn-preflight requires --require-root 0 or 1"
+    exit 2
+  fi
+  if [[ -z "$operator_floor_check" ]]; then
+    if [[ "$prod_profile" == "1" ]]; then
+      operator_floor_check="1"
+    else
+      operator_floor_check="0"
+    fi
+  fi
+  if [[ "$operator_floor_check" != "0" && "$operator_floor_check" != "1" ]]; then
+    echo "client-vpn-preflight requires --operator-floor-check 0 or 1"
+    exit 2
+  fi
+  if [[ -z "$issuer_quorum_check" ]]; then
+    if [[ "$prod_profile" == "1" ]]; then
+      issuer_quorum_check="1"
+    else
+      issuer_quorum_check="0"
+    fi
+  fi
+  if [[ "$issuer_quorum_check" != "0" && "$issuer_quorum_check" != "1" ]]; then
+    echo "client-vpn-preflight requires --issuer-quorum-check 0 or 1"
+    exit 2
+  fi
+  if ! [[ "$issuer_min_operators" =~ ^[0-9]+$ ]] || ((issuer_min_operators < 1)); then
+    echo "client-vpn-preflight requires --issuer-min-operators >= 1"
+    exit 2
+  fi
+  if ! [[ "$discovery_wait_sec" =~ ^[0-9]+$ && "$timeout_sec" =~ ^[0-9]+$ ]]; then
+    echo "client-vpn-preflight requires numeric --discovery-wait-sec and --timeout-sec"
+    exit 2
+  fi
+  if [[ -z "$interface_name" ]]; then
+    echo "client-vpn-preflight requires --interface"
+    exit 2
+  fi
+
+  local client_url_scheme="http"
+  if [[ "$prod_profile" == "1" ]]; then
+    client_url_scheme="https"
+  fi
+
+  if [[ -n "$bootstrap_directory" ]]; then
+    bootstrap_directory="$(ensure_url_scheme "$bootstrap_directory" "$client_url_scheme")"
+    local discovered
+    discovered="$(discover_directory_urls "$bootstrap_directory" "$discovery_wait_sec" 1)"
+    if [[ -z "$directory_urls" ]]; then
+      directory_urls="$discovered"
+    else
+      directory_urls="$(merge_url_csv "$directory_urls" "$discovered")"
+    fi
+    local bootstrap_host
+    bootstrap_host="$(host_from_url "$bootstrap_directory")"
+    if [[ -z "$issuer_url" && -n "$bootstrap_host" ]]; then
+      issuer_url="$(url_from_host_port "$bootstrap_host" 8082)"
+    fi
+    if [[ -z "$entry_url" && -n "$bootstrap_host" ]]; then
+      entry_url="$(url_from_host_port "$bootstrap_host" 8083)"
+    fi
+    if [[ -z "$exit_url" && -n "$bootstrap_host" ]]; then
+      exit_url="$(url_from_host_port "$bootstrap_host" 8084)"
+    fi
+  fi
+
+  if [[ -z "$directory_urls" || -z "$issuer_url" || -z "$entry_url" || -z "$exit_url" ]]; then
+    echo "client-vpn-preflight requires directory, issuer, entry and exit URLs"
+    exit 2
+  fi
+
+  directory_urls="$(normalize_url_csv_scheme "$directory_urls" "$client_url_scheme")"
+  issuer_url="$(ensure_url_scheme "$issuer_url" "$client_url_scheme")"
+  entry_url="$(ensure_url_scheme "$entry_url" "$client_url_scheme")"
+  exit_url="$(ensure_url_scheme "$exit_url" "$client_url_scheme")"
+  if [[ -z "$issuer_urls" ]]; then
+    issuer_urls="$issuer_url"
+  fi
+  issuer_urls="$(merge_url_csv "$issuer_urls" "$issuer_url")"
+  local durl dhost
+  while IFS= read -r durl; do
+    [[ -z "$durl" ]] && continue
+    dhost="$(host_from_url "$durl")"
+    if [[ -n "$dhost" ]]; then
+      issuer_urls="$(merge_url_csv "$issuer_urls" "$(url_from_host_port "$dhost" 8082)")"
+    fi
+  done < <(split_csv_lines "$directory_urls")
+  issuer_urls="$(normalize_url_csv_scheme "$issuer_urls" "$client_url_scheme")"
+
+  local fail=0
+  local first_dir
+  first_dir="$(first_csv_item "$directory_urls")"
+
+  echo "client-vpn preflight:"
+  echo "  directory_urls: $directory_urls"
+  echo "  issuer_url: $issuer_url"
+  echo "  entry_url: $entry_url"
+  echo "  exit_url: $exit_url"
+  echo "  interface: $interface_name"
+  echo "  prod_profile: $prod_profile"
+  echo "  operator_floor_check: $operator_floor_check"
+  echo "  issuer_quorum_check: $issuer_quorum_check"
+  echo "  issuer_urls: $issuer_urls"
+
+  local -a dir_opts issuer_opts entry_opts exit_opts
+  mapfile -t dir_opts < <(curl_tls_opts_for_url "$first_dir")
+  mapfile -t issuer_opts < <(curl_tls_opts_for_url "$issuer_url")
+  mapfile -t entry_opts < <(curl_tls_opts_for_url "$entry_url")
+  mapfile -t exit_opts < <(curl_tls_opts_for_url "$exit_url")
+
+  if wait_http_ok_with_opts "${first_dir%/}/v1/pubkeys" "directory" "$timeout_sec" "${dir_opts[@]}"; then
+    echo "  [ok] directory reachable"
+  else
+    echo "  [fail] directory unreachable"
+    fail=$((fail + 1))
+  fi
+  if wait_http_ok_with_opts "${issuer_url%/}/v1/pubkeys" "issuer" "$timeout_sec" "${issuer_opts[@]}"; then
+    echo "  [ok] issuer reachable"
+  else
+    echo "  [fail] issuer unreachable"
+    fail=$((fail + 1))
+  fi
+  if wait_http_ok_with_opts "${entry_url%/}/v1/health" "entry" "$timeout_sec" "${entry_opts[@]}"; then
+    echo "  [ok] entry reachable"
+  else
+    echo "  [fail] entry unreachable"
+    fail=$((fail + 1))
+  fi
+  if wait_http_ok_with_opts "${exit_url%/}/v1/health" "exit" "$timeout_sec" "${exit_opts[@]}"; then
+    echo "  [ok] exit reachable"
+  else
+    echo "  [fail] exit unreachable"
+    fail=$((fail + 1))
+  fi
+
+  if [[ "$operator_floor_check" == "1" ]]; then
+    local all_ops entry_ops exit_ops missing_ops fetch_fail parse_fail
+    IFS='|' read -r all_ops entry_ops exit_ops missing_ops fetch_fail parse_fail < <(client_vpn_operator_floor_summary "$directory_urls" "$timeout_sec")
+    echo "  operator diversity: all_ops=$all_ops entry_ops=$entry_ops exit_ops=$exit_ops missing_operator_fields=$missing_ops fetch_failures=$fetch_fail parse_failures=$parse_fail"
+    if ((fetch_fail > 0)); then
+      echo "  [fail] could not fetch relay set from all configured directories"
+      fail=$((fail + 1))
+    fi
+    if ((parse_fail > 0)); then
+      echo "  [fail] failed to parse one or more directory relay payloads"
+      fail=$((fail + 1))
+    fi
+    if ((missing_ops > 0)); then
+      echo "  [fail] relay descriptors missing operator metadata"
+      fail=$((fail + 1))
+    fi
+    if ((all_ops < 2)); then
+      echo "  [fail] operator floor not met (need >=2 distinct operators, observed=$all_ops)"
+      fail=$((fail + 1))
+    fi
+    if ((entry_ops < 2)); then
+      echo "  [fail] entry operator floor not met (need >=2, observed=$entry_ops)"
+      fail=$((fail + 1))
+    fi
+    if ((exit_ops < 2)); then
+      echo "  [fail] exit operator floor not met (need >=2, observed=$exit_ops)"
+      fail=$((fail + 1))
+    fi
+  fi
+
+  if [[ "$issuer_quorum_check" == "1" ]]; then
+    local issuer_ops missing_issuer missing_keys issuer_fetch_fail issuer_parse_fail
+    IFS='|' read -r issuer_ops missing_issuer missing_keys issuer_fetch_fail issuer_parse_fail < <(client_vpn_issuer_quorum_summary "$issuer_urls" "$timeout_sec")
+    echo "  issuer diversity: issuer_ops=$issuer_ops missing_issuer_ids=$missing_issuer missing_key_sets=$missing_keys fetch_failures=$issuer_fetch_fail parse_failures=$issuer_parse_fail"
+    if ((issuer_fetch_fail > 0)); then
+      echo "  [fail] could not fetch pubkeys from all configured issuer URLs"
+      fail=$((fail + 1))
+    fi
+    if ((issuer_parse_fail > 0)); then
+      echo "  [fail] failed to parse one or more issuer pubkey payloads"
+      fail=$((fail + 1))
+    fi
+    if ((missing_issuer > 0)); then
+      echo "  [fail] issuer feed missing issuer identity"
+      fail=$((fail + 1))
+    fi
+    if ((missing_keys > 0)); then
+      echo "  [fail] issuer feed missing signing keys"
+      fail=$((fail + 1))
+    fi
+    if ((issuer_ops < issuer_min_operators)); then
+      echo "  [fail] issuer operator floor not met (need >=$issuer_min_operators distinct issuers, observed=$issuer_ops)"
+      fail=$((fail + 1))
+    fi
+  fi
+
+  if [[ "$prod_profile" == "1" ]]; then
+    local f
+    for f in "$mtls_ca_file" "$mtls_client_cert_file" "$mtls_client_key_file"; do
+      if [[ -f "$f" ]]; then
+        echo "  [ok] mTLS file exists: $f"
+      else
+        echo "  [fail] missing mTLS file: $f"
+        fail=$((fail + 1))
+      fi
+    done
+  fi
+
+  if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+    if ip link show dev "$interface_name" >/dev/null 2>&1; then
+      echo "  [warn] interface already exists: $interface_name (client-vpn-up will replace it)"
+    fi
+    local probe_iface="wgpchk$((RANDOM % 9000 + 1000))"
+    if ip link add dev "$probe_iface" type wireguard >/dev/null 2>&1; then
+      ip link delete "$probe_iface" >/dev/null 2>&1 || true
+      echo "  [ok] wireguard interface create/delete check passed"
+    else
+      echo "  [fail] unable to create wireguard interface (kernel/module/capability issue)"
+      fail=$((fail + 1))
+    fi
+  else
+    if [[ "$require_root" == "1" ]]; then
+      echo "  [fail] run preflight with sudo for real VPN validation"
+      fail=$((fail + 1))
+    else
+      echo "  [warn] not running as root; skipped interface capability checks"
+    fi
+  fi
+
+  if ((fail > 0)); then
+    echo "client-vpn preflight: FAIL (issues=$fail)"
+    return 1
+  fi
+  echo "client-vpn preflight: OK"
+  return 0
+}
+
+client_vpn_state_file() {
+  echo "$DEPLOY_DIR/data/client_vpn.state"
+}
+
+client_vpn_status() {
+  local state_file
+  state_file="$(client_vpn_state_file)"
+  if [[ ! -f "$state_file" ]]; then
+    echo "client-vpn is not running (no state file)"
+    return 0
+  fi
+
+  local pid iface log_file key_file proxy_addr directory_urls issuer_url issuer_urls entry_url exit_url subject prod_profile beta_profile
+  pid="$(identity_value "$state_file" "CLIENT_VPN_PID")"
+  iface="$(identity_value "$state_file" "CLIENT_VPN_IFACE")"
+  log_file="$(identity_value "$state_file" "CLIENT_VPN_LOG_FILE")"
+  key_file="$(identity_value "$state_file" "CLIENT_VPN_KEY_FILE")"
+  proxy_addr="$(identity_value "$state_file" "CLIENT_VPN_PROXY_ADDR")"
+  directory_urls="$(identity_value "$state_file" "CLIENT_VPN_DIRECTORY_URLS")"
+  issuer_url="$(identity_value "$state_file" "CLIENT_VPN_ISSUER_URL")"
+  issuer_urls="$(identity_value "$state_file" "CLIENT_VPN_ISSUER_URLS")"
+  entry_url="$(identity_value "$state_file" "CLIENT_VPN_ENTRY_URL")"
+  exit_url="$(identity_value "$state_file" "CLIENT_VPN_EXIT_URL")"
+  subject="$(identity_value "$state_file" "CLIENT_VPN_SUBJECT")"
+  prod_profile="$(identity_value "$state_file" "CLIENT_VPN_PROD_PROFILE")"
+  beta_profile="$(identity_value "$state_file" "CLIENT_VPN_BETA_PROFILE")"
+
+  local running="no"
+  if [[ -n "$pid" ]] && kill -0 "$pid" >/dev/null 2>&1; then
+    running="yes"
+  fi
+
+  echo "client-vpn status:"
+  echo "  running: $running"
+  echo "  pid: ${pid:-unknown}"
+  echo "  interface: ${iface:-unknown}"
+  echo "  proxy_addr: ${proxy_addr:-unknown}"
+  echo "  subject: ${subject:-none}"
+  echo "  beta_profile: ${beta_profile:-0}"
+  echo "  prod_profile: ${prod_profile:-0}"
+  echo "  directory_urls: ${directory_urls:-unknown}"
+  echo "  issuer_url: ${issuer_url:-unknown}"
+  echo "  issuer_urls: ${issuer_urls:-unknown}"
+  echo "  entry_url: ${entry_url:-unknown}"
+  echo "  exit_url: ${exit_url:-unknown}"
+  echo "  key_file: ${key_file:-unknown}"
+  echo "  log_file: ${log_file:-unknown}"
+
+  if [[ -n "$iface" ]]; then
+    if ip link show dev "$iface" >/dev/null 2>&1; then
+      echo "  interface_state: present"
+      ip -brief address show dev "$iface" 2>/dev/null || true
+      wg show "$iface" 2>/dev/null || true
+    else
+      echo "  interface_state: missing"
+    fi
+  fi
+
+  if [[ -n "$log_file" && -f "$log_file" ]]; then
+    echo "  recent log lines:"
+    tail -n 15 "$log_file" || true
+  fi
+}
+
+client_vpn_down() {
+  local force_iface_cleanup="1"
+  local iface_override=""
+  local keep_key="1"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --force-iface-cleanup)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          force_iface_cleanup="${2:-}"
+          shift 2
+        else
+          force_iface_cleanup="1"
+          shift
+        fi
+        ;;
+      --iface)
+        iface_override="${2:-}"
+        shift 2
+        ;;
+      --keep-key)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          keep_key="${2:-}"
+          shift 2
+        else
+          keep_key="1"
+          shift
+        fi
+        ;;
+      -h|--help|help)
+        usage
+        return 0
+        ;;
+      *)
+        echo "unknown arg for client-vpn-down: $1"
+        exit 2
+        ;;
+    esac
+  done
+  if [[ "$force_iface_cleanup" != "0" && "$force_iface_cleanup" != "1" ]]; then
+    echo "client-vpn-down requires --force-iface-cleanup 0 or 1"
+    exit 2
+  fi
+  if [[ "$keep_key" != "0" && "$keep_key" != "1" ]]; then
+    echo "client-vpn-down requires --keep-key 0 or 1"
+    exit 2
+  fi
+
+  local state_file
+  state_file="$(client_vpn_state_file)"
+  local pid="" iface="" key_file=""
+  if [[ -f "$state_file" ]]; then
+    pid="$(identity_value "$state_file" "CLIENT_VPN_PID")"
+    iface="$(identity_value "$state_file" "CLIENT_VPN_IFACE")"
+    key_file="$(identity_value "$state_file" "CLIENT_VPN_KEY_FILE")"
+  fi
+  if [[ -n "$iface_override" ]]; then
+    iface="$iface_override"
+  fi
+
+  if [[ -n "$pid" ]] && kill -0 "$pid" >/dev/null 2>&1; then
+    kill "$pid" >/dev/null 2>&1 || true
+    local i
+    for i in $(seq 1 20); do
+      if ! kill -0 "$pid" >/dev/null 2>&1; then
+        break
+      fi
+      sleep 0.2
+    done
+    if kill -0 "$pid" >/dev/null 2>&1; then
+      kill -9 "$pid" >/dev/null 2>&1 || true
+    fi
+    echo "client-vpn process stopped (pid=$pid)"
+  fi
+
+  if [[ "$force_iface_cleanup" == "1" && -n "$iface" ]]; then
+    if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+      echo "client-vpn interface cleanup requires root: sudo ./scripts/easy_node.sh client-vpn-down --iface $iface"
+    else
+      ip link delete "$iface" >/dev/null 2>&1 || true
+      echo "client-vpn interface cleaned: $iface"
+    fi
+  fi
+
+  if [[ -f "$state_file" ]]; then
+    rm -f "$state_file"
+  fi
+  if [[ "$keep_key" == "0" && -n "$key_file" && -f "$key_file" ]]; then
+    rm -f "$key_file"
+  fi
+  echo "client-vpn state cleared"
+}
+
+client_vpn_up() {
+  local directory_urls=""
+  local issuer_url=""
+  local issuer_urls=""
+  local entry_url=""
+  local exit_url=""
+  local bootstrap_directory=""
+  local discovery_wait_sec="${EASY_NODE_DISCOVERY_WAIT_SEC:-20}"
+  local client_subject="${CLIENT_SUBJECT:-}"
+  local client_anon_cred="${CLIENT_ANON_CRED:-}"
+  local min_sources="1"
+  local min_operators="1"
+  local require_distinct_operators="${CLIENT_REQUIRE_DISTINCT_OPERATORS:-1}"
+  local beta_profile="${EASY_NODE_BETA_PROFILE:-1}"
+  local prod_profile="${EASY_NODE_PROD_PROFILE:-0}"
+  local operator_floor_check="${EASY_NODE_CLIENT_VPN_OPERATOR_FLOOR_CHECK:-}"
+  local issuer_quorum_check="${EASY_NODE_CLIENT_VPN_ISSUER_QUORUM_CHECK:-}"
+  local issuer_min_operators="${EASY_NODE_CLIENT_VPN_ISSUER_MIN_OPERATORS:-2}"
+  local interface_name="${CLIENT_WG_INTERFACE:-wgvpn0}"
+  local proxy_addr="${CLIENT_WG_PROXY_ADDR:-127.0.0.1:57970}"
+  local private_key_file=""
+  local allowed_ips="${CLIENT_WG_ALLOWED_IPS:-0.0.0.0/0}"
+  local install_route="${CLIENT_WG_INSTALL_ROUTE:-1}"
+  local startup_sync_timeout_sec="${CLIENT_STARTUP_SYNC_TIMEOUT_SEC:-12}"
+  local ready_timeout_sec="${EASY_NODE_CLIENT_VPN_READY_TIMEOUT_SEC:-35}"
+  local force_restart="0"
+  local foreground="0"
+  local mtls_ca_file="$DEPLOY_DIR/tls/ca.crt"
+  local mtls_client_cert_file="$DEPLOY_DIR/tls/client.crt"
+  local mtls_client_key_file="$DEPLOY_DIR/tls/client.key"
+  local log_file=""
+  local min_sources_set=0
+  local min_operators_set=0
+  local distinct_set=0
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --directory-urls)
+        directory_urls="${2:-}"
+        shift 2
+        ;;
+      --bootstrap-directory)
+        bootstrap_directory="${2:-}"
+        shift 2
+        ;;
+      --discovery-wait-sec)
+        discovery_wait_sec="${2:-}"
+        shift 2
+        ;;
+      --issuer-url)
+        issuer_url="${2:-}"
+        shift 2
+        ;;
+      --issuer-urls)
+        issuer_urls="${2:-}"
+        shift 2
+        ;;
+      --entry-url)
+        entry_url="${2:-}"
+        shift 2
+        ;;
+      --exit-url)
+        exit_url="${2:-}"
+        shift 2
+        ;;
+      --subject)
+        client_subject="${2:-}"
+        shift 2
+        ;;
+      --anon-cred)
+        client_anon_cred="${2:-}"
+        shift 2
+        ;;
+      --min-sources)
+        min_sources="${2:-}"
+        min_sources_set=1
+        shift 2
+        ;;
+      --min-operators)
+        min_operators="${2:-}"
+        min_operators_set=1
+        shift 2
+        ;;
+      --distinct-operators)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          require_distinct_operators="${2:-}"
+          distinct_set=1
+          shift 2
+        else
+          require_distinct_operators="1"
+          distinct_set=1
+          shift
+        fi
+        ;;
+      --beta-profile)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          beta_profile="${2:-}"
+          shift 2
+        else
+          beta_profile="1"
+          shift
+        fi
+        ;;
+      --prod-profile)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          prod_profile="${2:-}"
+          shift 2
+        else
+          prod_profile="1"
+          shift
+        fi
+        ;;
+      --operator-floor-check)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          operator_floor_check="${2:-}"
+          shift 2
+        else
+          operator_floor_check="1"
+          shift
+        fi
+        ;;
+      --issuer-quorum-check)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          issuer_quorum_check="${2:-}"
+          shift 2
+        else
+          issuer_quorum_check="1"
+          shift
+        fi
+        ;;
+      --issuer-min-operators)
+        issuer_min_operators="${2:-}"
+        shift 2
+        ;;
+      --interface)
+        interface_name="${2:-}"
+        shift 2
+        ;;
+      --proxy-addr)
+        proxy_addr="${2:-}"
+        shift 2
+        ;;
+      --private-key-file)
+        private_key_file="${2:-}"
+        shift 2
+        ;;
+      --allowed-ips)
+        allowed_ips="${2:-}"
+        shift 2
+        ;;
+      --install-route)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          install_route="${2:-}"
+          shift 2
+        else
+          install_route="1"
+          shift
+        fi
+        ;;
+      --startup-sync-timeout-sec)
+        startup_sync_timeout_sec="${2:-}"
+        shift 2
+        ;;
+      --ready-timeout-sec)
+        ready_timeout_sec="${2:-}"
+        shift 2
+        ;;
+      --force-restart)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          force_restart="${2:-}"
+          shift 2
+        else
+          force_restart="1"
+          shift
+        fi
+        ;;
+      --foreground)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          foreground="${2:-}"
+          shift 2
+        else
+          foreground="1"
+          shift
+        fi
+        ;;
+      --mtls-ca-file)
+        mtls_ca_file="${2:-}"
+        shift 2
+        ;;
+      --mtls-client-cert-file)
+        mtls_client_cert_file="${2:-}"
+        shift 2
+        ;;
+      --mtls-client-key-file)
+        mtls_client_key_file="${2:-}"
+        shift 2
+        ;;
+      --log-file)
+        log_file="${2:-}"
+        shift 2
+        ;;
+      -h|--help|help)
+        usage
+        return 0
+        ;;
+      *)
+        echo "unknown arg for client-vpn-up: $1"
+        exit 2
+        ;;
+    esac
+  done
+
+  ensure_client_vpn_deps_or_die
+
+  if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+    echo "client-vpn-up requires root privileges (run with sudo)"
+    exit 1
+  fi
+  if [[ "$require_distinct_operators" != "0" && "$require_distinct_operators" != "1" ]]; then
+    echo "client-vpn-up requires --distinct-operators 0 or 1"
+    exit 2
+  fi
+  if [[ "$beta_profile" != "0" && "$beta_profile" != "1" ]]; then
+    echo "client-vpn-up requires --beta-profile 0 or 1"
+    exit 2
+  fi
+  if [[ "$prod_profile" != "0" && "$prod_profile" != "1" ]]; then
+    echo "client-vpn-up requires --prod-profile 0 or 1"
+    exit 2
+  fi
+  if [[ -z "$operator_floor_check" ]]; then
+    if [[ "$prod_profile" == "1" ]]; then
+      operator_floor_check="1"
+    else
+      operator_floor_check="0"
+    fi
+  fi
+  if [[ "$operator_floor_check" != "0" && "$operator_floor_check" != "1" ]]; then
+    echo "client-vpn-up requires --operator-floor-check 0 or 1"
+    exit 2
+  fi
+  if [[ -z "$issuer_quorum_check" ]]; then
+    if [[ "$prod_profile" == "1" ]]; then
+      issuer_quorum_check="1"
+    else
+      issuer_quorum_check="0"
+    fi
+  fi
+  if [[ "$issuer_quorum_check" != "0" && "$issuer_quorum_check" != "1" ]]; then
+    echo "client-vpn-up requires --issuer-quorum-check 0 or 1"
+    exit 2
+  fi
+  if ! [[ "$issuer_min_operators" =~ ^[0-9]+$ ]] || ((issuer_min_operators < 1)); then
+    echo "client-vpn-up requires --issuer-min-operators >= 1"
+    exit 2
+  fi
+  if [[ "$install_route" != "0" && "$install_route" != "1" ]]; then
+    echo "client-vpn-up requires --install-route 0 or 1"
+    exit 2
+  fi
+  if [[ "$force_restart" != "0" && "$force_restart" != "1" ]]; then
+    echo "client-vpn-up requires --force-restart 0 or 1"
+    exit 2
+  fi
+  if [[ "$foreground" != "0" && "$foreground" != "1" ]]; then
+    echo "client-vpn-up requires --foreground 0 or 1"
+    exit 2
+  fi
+  if ! [[ "$min_sources" =~ ^[0-9]+$ && "$min_operators" =~ ^[0-9]+$ && "$discovery_wait_sec" =~ ^[0-9]+$ && "$startup_sync_timeout_sec" =~ ^[0-9]+$ && "$ready_timeout_sec" =~ ^[0-9]+$ ]]; then
+    echo "client-vpn-up requires numeric --min-sources, --min-operators, --discovery-wait-sec, --startup-sync-timeout-sec and --ready-timeout-sec"
+    exit 2
+  fi
+  if [[ -z "$interface_name" ]]; then
+    echo "client-vpn-up requires --interface"
+    exit 2
+  fi
+  if [[ -z "$proxy_addr" ]]; then
+    echo "client-vpn-up requires --proxy-addr"
+    exit 2
+  fi
+  if [[ -n "$client_subject" && -n "$client_anon_cred" ]]; then
+    echo "client-vpn-up requires exactly one of --subject or --anon-cred"
+    exit 2
+  fi
+
+  local client_url_scheme="http"
+  if [[ "$prod_profile" == "1" ]]; then
+    beta_profile="1"
+    client_url_scheme="https"
+  fi
+  if [[ "$beta_profile" == "1" ]]; then
+    if [[ "$distinct_set" -eq 0 ]]; then
+      require_distinct_operators="1"
+    fi
+    if [[ "$min_sources_set" -eq 0 ]] && [[ "$directory_urls" == *,* ]]; then
+      min_sources="2"
+    fi
+    if [[ "$min_operators_set" -eq 0 ]] && [[ "$directory_urls" == *,* ]]; then
+      min_operators="2"
+    fi
+  fi
+
+  if [[ -n "$bootstrap_directory" ]]; then
+    bootstrap_directory="$(ensure_url_scheme "$bootstrap_directory" "$client_url_scheme")"
+    local discovered
+    discovered="$(discover_directory_urls "$bootstrap_directory" "$discovery_wait_sec" "$min_sources")"
+    if [[ -z "$directory_urls" ]]; then
+      directory_urls="$discovered"
+    else
+      directory_urls="$(merge_url_csv "$directory_urls" "$discovered")"
+    fi
+    local bootstrap_host
+    bootstrap_host="$(host_from_url "$bootstrap_directory")"
+    if [[ -z "$issuer_url" && -n "$bootstrap_host" ]]; then
+      issuer_url="$(url_from_host_port "$bootstrap_host" 8082)"
+    fi
+    if [[ -z "$entry_url" && -n "$bootstrap_host" ]]; then
+      entry_url="$(url_from_host_port "$bootstrap_host" 8083)"
+    fi
+    if [[ -z "$exit_url" && -n "$bootstrap_host" ]]; then
+      exit_url="$(url_from_host_port "$bootstrap_host" 8084)"
+    fi
+  fi
+
+  if [[ -z "$directory_urls" || -z "$issuer_url" || -z "$entry_url" || -z "$exit_url" ]]; then
+    echo "client-vpn-up requires directory, issuer, entry and exit URLs."
+    echo "provide explicit --directory-urls/--issuer-url/--entry-url/--exit-url"
+    echo "or use --bootstrap-directory for automatic discovery."
+    exit 2
+  fi
+
+  directory_urls="$(normalize_url_csv_scheme "$directory_urls" "$client_url_scheme")"
+  issuer_url="$(ensure_url_scheme "$issuer_url" "$client_url_scheme")"
+  entry_url="$(ensure_url_scheme "$entry_url" "$client_url_scheme")"
+  exit_url="$(ensure_url_scheme "$exit_url" "$client_url_scheme")"
+  if [[ -z "$issuer_urls" ]]; then
+    issuer_urls="$issuer_url"
+  fi
+  issuer_urls="$(merge_url_csv "$issuer_urls" "$issuer_url")"
+  local durl dhost
+  while IFS= read -r durl; do
+    [[ -z "$durl" ]] && continue
+    dhost="$(host_from_url "$durl")"
+    if [[ -n "$dhost" ]]; then
+      issuer_urls="$(merge_url_csv "$issuer_urls" "$(url_from_host_port "$dhost" 8082)")"
+    fi
+  done < <(split_csv_lines "$directory_urls")
+  issuer_urls="$(normalize_url_csv_scheme "$issuer_urls" "$client_url_scheme")"
+  if [[ "$beta_profile" == "1" ]]; then
+    if [[ "$min_sources_set" -eq 0 ]] && [[ "$directory_urls" == *,* ]]; then
+      min_sources="2"
+    fi
+    if [[ "$min_operators_set" -eq 0 ]] && [[ "$directory_urls" == *,* ]]; then
+      min_operators="2"
+    fi
+  fi
+
+  local first_dir
+  first_dir="$(first_csv_item "$directory_urls")"
+  local -a dir_opts issuer_opts entry_opts exit_opts
+  mapfile -t dir_opts < <(curl_tls_opts_for_url "$first_dir")
+  mapfile -t issuer_opts < <(curl_tls_opts_for_url "$issuer_url")
+  mapfile -t entry_opts < <(curl_tls_opts_for_url "$entry_url")
+  mapfile -t exit_opts < <(curl_tls_opts_for_url "$exit_url")
+  wait_http_ok_with_opts "${first_dir%/}/v1/pubkeys" "directory" 15 "${dir_opts[@]}" || exit 1
+  wait_http_ok_with_opts "${issuer_url%/}/v1/pubkeys" "issuer" 15 "${issuer_opts[@]}" || exit 1
+  wait_http_ok_with_opts "${entry_url%/}/v1/health" "entry" 15 "${entry_opts[@]}" || exit 1
+  wait_http_ok_with_opts "${exit_url%/}/v1/health" "exit" 15 "${exit_opts[@]}" || exit 1
+
+  if [[ "$operator_floor_check" == "1" ]]; then
+    local all_ops entry_ops exit_ops missing_ops fetch_fail parse_fail
+    IFS='|' read -r all_ops entry_ops exit_ops missing_ops fetch_fail parse_fail < <(client_vpn_operator_floor_summary "$directory_urls" 8)
+    if ((fetch_fail > 0)); then
+      echo "client-vpn-up operator-floor check failed: could not fetch relays from all configured directories (failures=$fetch_fail)"
+      exit 1
+    fi
+    if ((parse_fail > 0)); then
+      echo "client-vpn-up operator-floor check failed: parse errors while reading directory relays (errors=$parse_fail)"
+      exit 1
+    fi
+    if ((missing_ops > 0)); then
+      echo "client-vpn-up operator-floor check failed: relay descriptors missing operator metadata (count=$missing_ops)"
+      exit 1
+    fi
+    if ((all_ops < 2)); then
+      echo "client-vpn-up operator-floor check failed: need >=2 distinct operators (observed=$all_ops)"
+      exit 1
+    fi
+    if ((entry_ops < 2)); then
+      echo "client-vpn-up operator-floor check failed: need >=2 entry operators (observed=$entry_ops)"
+      exit 1
+    fi
+    if ((exit_ops < 2)); then
+      echo "client-vpn-up operator-floor check failed: need >=2 exit operators (observed=$exit_ops)"
+      exit 1
+    fi
+  fi
+
+  if [[ "$issuer_quorum_check" == "1" ]]; then
+    local issuer_ops missing_issuer missing_keys issuer_fetch_fail issuer_parse_fail
+    IFS='|' read -r issuer_ops missing_issuer missing_keys issuer_fetch_fail issuer_parse_fail < <(client_vpn_issuer_quorum_summary "$issuer_urls" 8)
+    if ((issuer_fetch_fail > 0)); then
+      echo "client-vpn-up issuer-quorum check failed: could not fetch all issuer feeds (failures=$issuer_fetch_fail)"
+      exit 1
+    fi
+    if ((issuer_parse_fail > 0)); then
+      echo "client-vpn-up issuer-quorum check failed: parse errors while reading issuer feeds (errors=$issuer_parse_fail)"
+      exit 1
+    fi
+    if ((missing_issuer > 0)); then
+      echo "client-vpn-up issuer-quorum check failed: issuer identity missing from one or more feeds (count=$missing_issuer)"
+      exit 1
+    fi
+    if ((missing_keys > 0)); then
+      echo "client-vpn-up issuer-quorum check failed: issuer feed missing pub_keys (count=$missing_keys)"
+      exit 1
+    fi
+    if ((issuer_ops < issuer_min_operators)); then
+      echo "client-vpn-up issuer-quorum check failed: need >=$issuer_min_operators distinct issuer identities (observed=$issuer_ops)"
+      exit 1
+    fi
+  fi
+
+  local state_file
+  state_file="$(client_vpn_state_file)"
+  mkdir -p "$(dirname "$state_file")"
+  if [[ -f "$state_file" ]]; then
+    local old_pid
+    old_pid="$(identity_value "$state_file" "CLIENT_VPN_PID")"
+    if [[ -n "$old_pid" ]] && kill -0 "$old_pid" >/dev/null 2>&1; then
+      if [[ "$force_restart" == "1" ]]; then
+        client_vpn_down --force-iface-cleanup 1 --keep-key 1 >/dev/null 2>&1 || true
+      else
+        echo "client-vpn appears to be running already (pid=$old_pid)"
+        echo "use --force-restart 1 or run ./scripts/easy_node.sh client-vpn-down first"
+        exit 1
+      fi
+    else
+      rm -f "$state_file" >/dev/null 2>&1 || true
+    fi
+  fi
+
+  if [[ -z "$private_key_file" ]]; then
+    private_key_file="$DEPLOY_DIR/data/client_vpn/${interface_name}.key"
+  fi
+  mkdir -p "$(dirname "$private_key_file")"
+  if [[ ! -f "$private_key_file" ]]; then
+    wg genkey >"$private_key_file"
+  fi
+  secure_file_permissions "$private_key_file"
+
+  if [[ "$prod_profile" == "1" ]]; then
+    for f in "$mtls_ca_file" "$mtls_client_cert_file" "$mtls_client_key_file"; do
+      if [[ ! -f "$f" ]]; then
+        echo "missing mTLS file for prod profile: $f"
+        exit 2
+      fi
+    done
+  fi
+
+  local log_dir
+  log_dir="$(prepare_log_dir)"
+  if [[ -z "$log_file" ]]; then
+    log_file="$log_dir/easy_node_client_vpn_$(date +%Y%m%d_%H%M%S).log"
+  fi
+  rm -f "$log_file"
+
+  ip link delete "$interface_name" >/dev/null 2>&1 || true
+
+  local trusted_keys_file="${DIRECTORY_TRUSTED_KEYS_FILE:-data/trusted_directory_keys.txt}"
+  local trusted_keys_dir
+  if [[ "$trusted_keys_file" == /* ]]; then
+    trusted_keys_dir="$(dirname "$trusted_keys_file")"
+  else
+    trusted_keys_dir="$ROOT_DIR/$(dirname "$trusted_keys_file")"
+  fi
+  mkdir -p "$trusted_keys_dir" >/dev/null 2>&1 || true
+
+  local -a env_vars
+  env_vars=(
+    "DATA_PLANE_MODE=opaque"
+    "DIRECTORY_URLS=$directory_urls"
+    "DIRECTORY_MIN_SOURCES=$min_sources"
+    "CLIENT_DIRECTORY_MIN_OPERATORS=$min_operators"
+    "DIRECTORY_TRUST_STRICT=1"
+    "DIRECTORY_TRUST_TOFU=$([[ "$prod_profile" == "1" ]] && echo 0 || echo 1)"
+    "DIRECTORY_TRUSTED_KEYS_FILE=$trusted_keys_file"
+    "ISSUER_URL=$issuer_url"
+    "ENTRY_URL=$entry_url"
+    "EXIT_CONTROL_URL=$exit_url"
+    "CLIENT_WG_BACKEND=command"
+    "CLIENT_WG_INTERFACE=$interface_name"
+    "CLIENT_WG_PRIVATE_KEY_PATH=$private_key_file"
+    "CLIENT_WG_ALLOWED_IPS=$allowed_ips"
+    "CLIENT_WG_INSTALL_ROUTE=$install_route"
+    "CLIENT_WG_KERNEL_PROXY=1"
+    "CLIENT_WG_PROXY_ADDR=$proxy_addr"
+    "CLIENT_INNER_SOURCE=udp"
+    "CLIENT_DISABLE_SYNTHETIC_FALLBACK=1"
+    "CLIENT_LIVE_WG_MODE=1"
+    "CLIENT_REQUIRE_DISTINCT_OPERATORS=$require_distinct_operators"
+    "CLIENT_BOOTSTRAP_INTERVAL_SEC=2"
+    "CLIENT_BOOTSTRAP_BACKOFF_MAX_SEC=4"
+    "CLIENT_BOOTSTRAP_JITTER_PCT=10"
+    "CLIENT_STARTUP_SYNC_TIMEOUT_SEC=$startup_sync_timeout_sec"
+    "BETA_STRICT_MODE=$beta_profile"
+    "PROD_STRICT_MODE=$prod_profile"
+  )
+  if [[ -n "$client_subject" ]]; then
+    env_vars+=("CLIENT_SUBJECT=$client_subject")
+  fi
+  if [[ -n "$client_anon_cred" ]]; then
+    env_vars+=("CLIENT_ANON_CRED=$client_anon_cred")
+  fi
+  if [[ "$prod_profile" == "1" ]]; then
+    env_vars+=(
+      "MTLS_ENABLE=1"
+      "MTLS_CA_FILE=$mtls_ca_file"
+      "MTLS_CLIENT_CERT_FILE=$mtls_client_cert_file"
+      "MTLS_CLIENT_KEY_FILE=$mtls_client_key_file"
+      "MTLS_CERT_FILE=$mtls_client_cert_file"
+      "MTLS_KEY_FILE=$mtls_client_key_file"
+    )
+  fi
+
+  if [[ "$foreground" == "1" ]]; then
+    echo "client-vpn starting in foreground"
+    echo "log: $log_file"
+    (
+      cd "$ROOT_DIR"
+      env "${env_vars[@]}" go run ./cmd/node --client
+    ) 2>&1 | tee -a "$log_file"
+    return $?
+  fi
+
+  local pid=""
+  local pid_tmp
+  pid_tmp="$(mktemp)"
+  (
+    cd "$ROOT_DIR"
+    nohup env "${env_vars[@]}" go run ./cmd/node --client >"$log_file" 2>&1 &
+    echo "$!" >"$pid_tmp"
+  )
+  pid="$(cat "$pid_tmp")"
+  rm -f "$pid_tmp"
+
+  if [[ -z "$pid" ]] || ! kill -0 "$pid" >/dev/null 2>&1; then
+    echo "client-vpn failed to start; log follows:"
+    cat "$log_file"
+    exit 1
+  fi
+
+  local ready=0
+  local i
+  for i in $(seq 1 "$ready_timeout_sec"); do
+    if ! kill -0 "$pid" >/dev/null 2>&1; then
+      echo "client-vpn exited before tunnel became ready"
+      cat "$log_file"
+      exit 1
+    fi
+    if rg -q "client received wg-session config" "$log_file"; then
+      ready=1
+      break
+    fi
+    sleep 1
+  done
+  if [[ "$ready" -ne 1 ]]; then
+    echo "client-vpn did not receive wg-session config within ${ready_timeout_sec}s"
+    echo "log: $log_file"
+    tail -n 120 "$log_file" || true
+    kill "$pid" >/dev/null 2>&1 || true
+    wait "$pid" >/dev/null 2>&1 || true
+    ip link delete "$interface_name" >/dev/null 2>&1 || true
+    exit 1
+  fi
+
+  if ! ip link show dev "$interface_name" >/dev/null 2>&1; then
+    echo "client-vpn missing interface after session config: $interface_name"
+    kill "$pid" >/dev/null 2>&1 || true
+    wait "$pid" >/dev/null 2>&1 || true
+    exit 1
+  fi
+
+  cat >"$state_file" <<EOF_STATE
+CLIENT_VPN_PID=$pid
+CLIENT_VPN_IFACE=$interface_name
+CLIENT_VPN_LOG_FILE=$log_file
+CLIENT_VPN_KEY_FILE=$private_key_file
+CLIENT_VPN_PROXY_ADDR=$proxy_addr
+CLIENT_VPN_DIRECTORY_URLS=$directory_urls
+CLIENT_VPN_ISSUER_URL=$issuer_url
+CLIENT_VPN_ISSUER_URLS=$issuer_urls
+CLIENT_VPN_ENTRY_URL=$entry_url
+CLIENT_VPN_EXIT_URL=$exit_url
+CLIENT_VPN_SUBJECT=$client_subject
+CLIENT_VPN_BETA_PROFILE=$beta_profile
+CLIENT_VPN_PROD_PROFILE=$prod_profile
+EOF_STATE
+  secure_file_permissions "$state_file"
+
+  echo "client-vpn started"
+  echo "  pid: $pid"
+  echo "  interface: $interface_name"
+  echo "  allowed_ips: $allowed_ips"
+  echo "  install_route: $install_route"
+  echo "  subject: ${client_subject:-none}"
+  echo "  directory_urls: $directory_urls"
+  echo "  operator_floor_check: $operator_floor_check"
+  echo "  issuer_quorum_check: $issuer_quorum_check"
+  echo "  issuer_urls: $issuer_urls"
+  echo "  log: $log_file"
+  echo "use './scripts/easy_node.sh client-vpn-status' to inspect"
+  echo "use 'sudo ./scripts/easy_node.sh client-vpn-down' to stop and cleanup"
+}
+
 main() {
   local cmd="${1:-}"
   case "$cmd" in
     check)
       check_dependencies
+      ;;
+    server-preflight)
+      shift
+      server_preflight "$@"
       ;;
     server-up)
       shift
@@ -4552,6 +6330,22 @@ main() {
       shift
       client_test "$@"
       ;;
+    client-vpn-preflight)
+      shift
+      client_vpn_preflight "$@"
+      ;;
+    client-vpn-up)
+      shift
+      client_vpn_up "$@"
+      ;;
+    client-vpn-status)
+      shift
+      client_vpn_status "$@"
+      ;;
+    client-vpn-down)
+      shift
+      client_vpn_down "$@"
+      ;;
     three-machine-validate)
       shift
       three_machine_validate "$@"
@@ -4559,6 +6353,18 @@ main() {
     three-machine-soak)
       shift
       three_machine_soak "$@"
+      ;;
+    three-machine-prod-gate)
+      shift
+      three_machine_prod_gate "$@"
+      ;;
+    three-machine-prod-bundle)
+      shift
+      three_machine_prod_bundle "$@"
+      ;;
+    three-machine-reminder)
+      shift
+      three_machine_reminder "$@"
       ;;
     prod-wg-validate)
       shift
