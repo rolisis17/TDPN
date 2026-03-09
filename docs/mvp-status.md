@@ -179,6 +179,7 @@
 - Production gate now supports an overall machine-readable summary artifact (`--gate-summary-json`) containing per-step status plus failure-step/rc metadata, suitable for CI/pilot ingestion.
 - Easy-mode true 3-machine reminder output (`easy_node.sh three-machine-reminder`) and launcher wiring now provide a reusable production test checklist.
 - Secret-hygiene integration guard (`integration_secret_hygiene.sh`) now scans tracked artifacts for forbidden runtime files and high-confidence inline secret patterns, and is wired into both `ci_local.sh` and `beta_preflight.sh`.
+- Security-baseline automation now includes Dependabot config (`.github/dependabot.yml`), dedicated security workflow (`.github/workflows/security.yml`, CodeQL + `govulncheck`), and local baseline guard coverage (`integration_security_baseline.sh`) wired into `ci_local.sh` and `beta_preflight.sh`.
 
 ## In Progress / Partial
 - Real WG interface packet plumbing is scaffolded; bidirectional opaque relay through entry/client/exit is in place (including exit downlink source path and optional client/exit command-mode WG UDP kernel-proxy bridges), and Linux root-only manual validation is available via `scripts/integration_real_wg_privileged.sh` and `scripts/integration_real_wg_privileged_matrix.sh`; production end-to-end cryptographic WG interface integration remains pending.

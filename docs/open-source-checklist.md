@@ -14,6 +14,10 @@ Use this before making the repository public.
    - Dependabot security updates
    - Secret scanning (including push protection)
    - Code scanning (if available)
+   - Baseline repo config check:
+     ```bash
+     ./scripts/integration_security_baseline.sh
+     ```
 3. Set branch protection on `main`:
    - Require PR reviews
    - Require status checks

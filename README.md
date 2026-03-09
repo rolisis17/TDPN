@@ -642,6 +642,7 @@ CI and tests:
 - `./scripts/integration_easy_node_invite_auth_policy.sh` (easy-node invite/admin fail-fast policy guard when token auth is disabled on authority)
 - `./scripts/integration_prod_preflight_tools.sh` (easy-node prod preflight + admin signing rotate/status checks, including provider-mode strict env hygiene)
 - `./scripts/integration_secret_hygiene.sh` (tracked-artifact and inline secret scan guard for safe open-source publishing)
+- `./scripts/integration_security_baseline.sh` (open-source security baseline guard for `SECURITY.md`, Dependabot config, and security workflow coverage)
 - `./scripts/integration_federation.sh` (multi-directory quorum/vote integration check)
 - `./scripts/integration_operator_quorum.sh` (distinct-directory-operator quorum enforcement check)
 - `./scripts/integration_sync_status_chaos.sh` (directory sync-status failure/recovery observability under peer churn)
