@@ -653,6 +653,8 @@ CI and tests:
 - `./scripts/integration_release_sbom.sh` (SBOM generation/schema regression guard)
 - `./scripts/release_verify_tag.sh --version vX.Y.Z --require-head-match 1 [--require-signature 0|1]` (annotated-tag verification + optional signed-tag enforcement)
 - `./scripts/integration_release_tag_verify.sh` (tag verification regression guard for missing/lightweight/signed/head-mismatch paths)
+- `./scripts/release_policy_gate.sh --version vX.Y.Z --release-dir dist/vX.Y.Z --require-tag-exists 1 --require-tag-notes 1` (release artifact/note policy enforcement gate)
+- `./scripts/integration_release_policy_gate.sh` (release policy gate regression guard for missing artifacts/checksum tamper/tag-note policy)
 - `./scripts/integration_federation.sh` (multi-directory quorum/vote integration check)
 - `./scripts/integration_operator_quorum.sh` (distinct-directory-operator quorum enforcement check)
 - `./scripts/integration_sync_status_chaos.sh` (directory sync-status failure/recovery observability under peer churn)

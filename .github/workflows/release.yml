@@ -31,6 +31,11 @@ jobs:
       - name: Prepare release artifacts
         run: ./scripts/release_prepare.sh --version "${GITHUB_REF_NAME}" --out-dir dist --require-tag-match 1
 
+      - name: Enforce release policy gate
+        run: ./scripts/release_policy_gate.sh --version "${GITHUB_REF_NAME}" --release-dir "dist/${GITHUB_REF_NAME}" --require-tag-exists 1 --require-tag-notes "${RELEASE_REQUIRE_TAG_NOTES:-1}"
+        env:
+          RELEASE_REQUIRE_TAG_NOTES: ${{ vars.RELEASE_REQUIRE_TAG_NOTES }}
+
       - name: Upload workflow artifact bundle
         uses: actions/upload-artifact@v4
         with:

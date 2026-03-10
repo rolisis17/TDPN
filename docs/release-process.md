@@ -28,6 +28,7 @@ Quick verification:
 ./scripts/integration_release_integrity.sh
 ./scripts/integration_release_sbom.sh
 ./scripts/integration_release_tag_verify.sh
+./scripts/integration_release_policy_gate.sh
 ```
 
 ## 3) Tag and push
@@ -44,9 +45,13 @@ When the tag is pushed, `.github/workflows/release.yml` will:
    - points at workflow `HEAD`
    - optional signed-tag enforcement via repository variable `RELEASE_REQUIRE_SIGNED_TAG=1`
 2. Rebuild release artifacts with `--require-tag-match 1`
-3. Upload workflow artifacts
-4. Publish files to the GitHub Release
-5. Emit provenance attestations for:
+3. Enforce release policy gate (`release_policy_gate.sh`):
+   - required release files and binaries exist
+   - `sha256sums.txt` validates cleanly
+   - optional tag-note heading enforcement via `RELEASE_REQUIRE_TAG_NOTES=1` (enabled by default in workflow)
+4. Upload workflow artifacts
+5. Publish files to the GitHub Release
+6. Emit provenance attestations for:
    - `sha256sums.txt`
    - `sbom_go_modules_<version>.json`
 
@@ -62,6 +67,10 @@ When the tag is pushed, `.github/workflows/release.yml` will:
 - Explicit tag verification:
   ```bash
   ./scripts/release_verify_tag.sh --version v0.1.0 --require-head-match 1 --require-signature 0
+  ```
+- Explicit release policy gate:
+  ```bash
+  ./scripts/release_policy_gate.sh --version v0.1.0 --release-dir dist/v0.1.0 --require-tag-exists 1 --require-tag-notes 1
   ```
 - Generate SBOM only (for diagnostics):
   ```bash

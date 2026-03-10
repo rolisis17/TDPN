@@ -28,6 +28,9 @@ echo "[ci] release sbom integration"
 echo "[ci] release tag verify integration"
 ./scripts/integration_release_tag_verify.sh
 
+echo "[ci] release policy gate integration"
+./scripts/integration_release_policy_gate.sh
+
 echo "[ci] internal topology smoke"
 DEMO_DURATION_SEC="${DEMO_DURATION_SEC:-8}" ./scripts/demo_internal_topology.sh >/tmp/ci_demo.log 2>&1 || true
 if ! rg -q "exit accepted opaque packet" /tmp/ci_demo.log; then
