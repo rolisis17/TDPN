@@ -293,6 +293,7 @@ sudo ./scripts/easy_node.sh three-machine-prod-bundle \
 - `docs/beta-playbook.md` (frozen closed-beta command set)
 - `docs/windows-wsl2.md` (Windows 11 + WSL2)
 - `docs/open-source-checklist.md` (safe path to publish repo)
+- `docs/github-security-baseline.md` (GitHub branch-protection/security baseline runbook + automation command flow)
 - `docs/license-decision.md` (license rationale; current choice is Apache-2.0)
 
 ## License
@@ -643,6 +644,7 @@ CI and tests:
 - `./scripts/integration_prod_preflight_tools.sh` (easy-node prod preflight + admin signing rotate/status checks, including provider-mode strict env hygiene)
 - `./scripts/integration_secret_hygiene.sh` (tracked-artifact and inline secret scan guard for safe open-source publishing)
 - `./scripts/integration_security_baseline.sh` (open-source security baseline guard for `SECURITY.md`, Dependabot config, and security workflow coverage)
+- `./scripts/github_repo_security_baseline.sh status --repo <owner/repo>` (GitHub branch-protection + repo security baseline check; `apply` mode can enforce the baseline)
 - `./scripts/integration_federation.sh` (multi-directory quorum/vote integration check)
 - `./scripts/integration_operator_quorum.sh` (distinct-directory-operator quorum enforcement check)
 - `./scripts/integration_sync_status_chaos.sh` (directory sync-status failure/recovery observability under peer churn)

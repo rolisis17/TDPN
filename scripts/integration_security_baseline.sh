@@ -34,6 +34,8 @@ require_file "SECURITY.md"
 require_file ".github/dependabot.yml"
 require_file ".github/workflows/security.yml"
 require_file ".github/workflows/dependency-review.yml"
+require_file "scripts/github_repo_security_baseline.sh"
+require_file "docs/github-security-baseline.md"
 
 echo "[security-baseline] checking dependabot ecosystems"
 require_match ".github/dependabot.yml" 'package-ecosystem:\s*"gomod"' "gomod updates configured"
@@ -45,5 +47,9 @@ require_match ".github/workflows/security.yml" 'languages:\s*go' "CodeQL go lang
 require_match ".github/workflows/security.yml" 'govulncheck' "govulncheck job"
 require_match ".github/workflows/security.yml" 'schedule:' "scheduled security scan"
 require_match ".github/workflows/dependency-review.yml" 'actions/dependency-review-action@v4' "dependency review action"
+require_match "scripts/github_repo_security_baseline.sh" 'Usage:' "repo security baseline usage"
+require_match "scripts/github_repo_security_baseline.sh" 'status' "repo security baseline status mode"
+require_match "scripts/github_repo_security_baseline.sh" 'apply' "repo security baseline apply mode"
+require_match "docs/open-source-checklist.md" 'github_repo_security_baseline.sh' "open-source checklist references repo baseline command"
 
 echo "[security-baseline] ok"

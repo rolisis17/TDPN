@@ -18,6 +18,7 @@ Use this before making the repository public.
    - Baseline repo config check:
      ```bash
      ./scripts/integration_security_baseline.sh
+     ./scripts/github_repo_security_baseline.sh status --repo <owner/repo> --branch main
      ```
 3. Set branch protection on `main`:
    - Require PR reviews
