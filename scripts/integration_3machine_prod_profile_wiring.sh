@@ -267,6 +267,12 @@ THREE_MACHINE_PROD_GATE_SCRIPT="$FAKE_GATE" \
   --issuer-url https://issuer-main:8082 \
   --entry-url https://entry-main:8083 \
   --exit-url https://exit-main:8084 \
+  --control-fault-every 2 \
+  --control-fault-command test-control-fault \
+  --control-continue-on-fail 1 \
+  --wg-fault-every 3 \
+  --wg-fault-command test-wg-fault \
+  --wg-continue-on-fail 1 \
   --strict-distinct 1 \
   --wg-max-consecutive-failures 3 \
   --wg-soak-summary-json /tmp/prod_gate_wg_soak_summary.json \
@@ -291,6 +297,26 @@ if ! rg -q -- '--wg-max-consecutive-failures 3' "$GATE_CAPTURE"; then
 fi
 if ! rg -q -- '--wg-soak-summary-json /tmp/prod_gate_wg_soak_summary.json' "$GATE_CAPTURE"; then
   echo "easy_node prod gate wiring failed: --wg-soak-summary-json missing"
+  cat "$GATE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--control-fault-every 2' "$GATE_CAPTURE"; then
+  echo "easy_node prod gate wiring failed: --control-fault-every 2 missing"
+  cat "$GATE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--control-fault-command test-control-fault' "$GATE_CAPTURE"; then
+  echo "easy_node prod gate wiring failed: --control-fault-command missing"
+  cat "$GATE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--wg-fault-every 3' "$GATE_CAPTURE"; then
+  echo "easy_node prod gate wiring failed: --wg-fault-every 3 missing"
+  cat "$GATE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--wg-fault-command test-wg-fault' "$GATE_CAPTURE"; then
+  echo "easy_node prod gate wiring failed: --wg-fault-command missing"
   cat "$GATE_CAPTURE"
   exit 1
 fi
@@ -414,6 +440,9 @@ THREE_MACHINE_PROD_WG_SOAK_SCRIPT="$FAKE_GATE_WG_SOAK" \
   --issuer-url https://issuer-main:8082 \
   --entry-url https://entry-main:8083 \
   --exit-url https://exit-main:8084 \
+  --control-fault-every 2 \
+  --control-fault-command test-control-fault \
+  --control-continue-on-fail 1 \
   --control-soak-rounds 2 \
   --skip-wg 1 >/tmp/integration_3machine_prod_profile_wiring_prod_gate.log 2>&1
 
@@ -429,6 +458,21 @@ if ! rg -q -- '--require-issuer-quorum 1' "$GATE_VALIDATE_CAPTURE"; then
 fi
 if ! rg -q -- '--rounds 2' "$GATE_SOAK_CAPTURE"; then
   echo "prod gate wiring failed: soak call missing --rounds 2"
+  cat "$GATE_SOAK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--fault-every 2' "$GATE_SOAK_CAPTURE"; then
+  echo "prod gate wiring failed: control soak call missing --fault-every 2"
+  cat "$GATE_SOAK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--fault-command test-control-fault' "$GATE_SOAK_CAPTURE"; then
+  echo "prod gate wiring failed: control soak call missing --fault-command test-control-fault"
+  cat "$GATE_SOAK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--continue-on-fail 1' "$GATE_SOAK_CAPTURE"; then
+  echo "prod gate wiring failed: control soak call missing --continue-on-fail 1"
   cat "$GATE_SOAK_CAPTURE"
   exit 1
 fi
@@ -464,6 +508,9 @@ THREE_MACHINE_PROD_GATE_ALLOW_NON_ROOT=1 \
   --skip-control-soak 1 \
   --wg-soak-rounds 1 \
   --wg-soak-pause-sec 0 \
+  --wg-fault-every 4 \
+  --wg-fault-command test-wg-fault \
+  --wg-continue-on-fail 1 \
   --wg-soak-summary-json "$WG_SUMMARY_FILE" \
   --gate-summary-json "$GATE_SUMMARY_FILE" >"$WG_GATE_LOG" 2>&1
 
@@ -475,6 +522,24 @@ if [[ ! -s "$GATE_WG_VALIDATE_CAPTURE" || ! -s "$GATE_WG_SOAK_CAPTURE" ]]; then
 fi
 if ! rg -q -- '--summary-json' "$GATE_WG_SOAK_CAPTURE"; then
   echo "prod gate wiring failed: WG soak call missing --summary-json forwarding"
+  cat "$GATE_WG_SOAK_CAPTURE"
+  cat "$WG_GATE_LOG"
+  exit 1
+fi
+if ! rg -q -- '--fault-every 4' "$GATE_WG_SOAK_CAPTURE"; then
+  echo "prod gate wiring failed: WG soak call missing --fault-every 4"
+  cat "$GATE_WG_SOAK_CAPTURE"
+  cat "$WG_GATE_LOG"
+  exit 1
+fi
+if ! rg -q -- '--fault-command test-wg-fault' "$GATE_WG_SOAK_CAPTURE"; then
+  echo "prod gate wiring failed: WG soak call missing --fault-command test-wg-fault"
+  cat "$GATE_WG_SOAK_CAPTURE"
+  cat "$WG_GATE_LOG"
+  exit 1
+fi
+if ! rg -q -- '--continue-on-fail 1' "$GATE_WG_SOAK_CAPTURE"; then
+  echo "prod gate wiring failed: WG soak call missing --continue-on-fail 1"
   cat "$GATE_WG_SOAK_CAPTURE"
   cat "$WG_GATE_LOG"
   exit 1

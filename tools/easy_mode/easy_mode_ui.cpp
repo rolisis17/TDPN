@@ -1552,9 +1552,12 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       std::string controlTimeout = readLine("Control timeout sec", "50");
       std::string wgClientTimeout = readLine("WG client timeout sec", "120");
       std::string wgSessionSec = readLine("WG session sec", "45");
-      std::string faultEvery = readLine("Inject WG fault every N rounds (0=off)", "0");
-      std::string faultCommand = readLine("WG fault command (optional)", "");
-      bool continueOnFail = parseYesNo(readLine("Continue when WG soak round fails? (y/N)", "n"), false);
+      std::string controlFaultEvery = readLine("Inject CONTROL fault every N rounds (0=off)", "0");
+      std::string controlFaultCommand = readLine("Control fault command (optional)", "");
+      bool controlContinueOnFail = parseYesNo(readLine("Continue when control soak round fails? (y/N)", "n"), false);
+      std::string wgFaultEvery = readLine("Inject WG fault every N rounds (0=off)", "0");
+      std::string wgFaultCommand = readLine("WG fault command (optional)", "");
+      bool wgContinueOnFail = parseYesNo(readLine("Continue when WG soak round fails? (y/N)", "n"), false);
       bool strictDistinct = parseYesNo(readLine("Require distinct entry/exit operators? (Y/n)", "y"), true);
       bool skipControlSoak = parseYesNo(readLine("Skip control-plane soak step? (y/N)", "n"), false);
       bool skipWG = parseYesNo(readLine("Skip real-WG steps (control only)? (y/N)", "n"), false);
@@ -1582,8 +1585,10 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --control-timeout-sec " << shellEscape(controlTimeout)
           << " --wg-client-timeout-sec " << shellEscape(wgClientTimeout)
           << " --wg-session-sec " << shellEscape(wgSessionSec)
-          << " --fault-every " << shellEscape(faultEvery)
-          << " --continue-on-fail " << (continueOnFail ? "1" : "0")
+          << " --control-fault-every " << shellEscape(controlFaultEvery)
+          << " --control-continue-on-fail " << (controlContinueOnFail ? "1" : "0")
+          << " --wg-fault-every " << shellEscape(wgFaultEvery)
+          << " --wg-continue-on-fail " << (wgContinueOnFail ? "1" : "0")
           << " --strict-distinct " << (strictDistinct ? "1" : "0")
           << " --skip-control-soak " << (skipControlSoak ? "1" : "0")
           << " --skip-wg " << (skipWG ? "1" : "0")
@@ -1591,8 +1596,11 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --mtls-ca-file " << shellEscape(mtlsCA)
           << " --mtls-client-cert-file " << shellEscape(mtlsCert)
           << " --mtls-client-key-file " << shellEscape(mtlsKey);
-      if (!faultCommand.empty()) {
-        cmd << " --fault-command " << shellEscape(faultCommand);
+      if (!controlFaultCommand.empty()) {
+        cmd << " --control-fault-command " << shellEscape(controlFaultCommand);
+      }
+      if (!wgFaultCommand.empty()) {
+        cmd << " --wg-fault-command " << shellEscape(wgFaultCommand);
       }
       if (!subject.empty()) {
         cmd << " --subject " << shellEscape(subject);

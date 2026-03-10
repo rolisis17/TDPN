@@ -37,6 +37,12 @@ Usage:
     [--wg-soak-rounds N] \
     [--wg-soak-pause-sec N] \
     [--wg-max-consecutive-failures N] \
+    [--control-fault-every N] \
+    [--control-fault-command CMD] \
+    [--control-continue-on-fail [0|1]] \
+    [--wg-fault-every N] \
+    [--wg-fault-command CMD] \
+    [--wg-continue-on-fail [0|1]] \
     [--wg-soak-summary-json PATH] \
     [--gate-summary-json PATH] \
     [--fault-every N] \
@@ -61,6 +67,7 @@ Purpose:
 Notes:
   - If --skip-wg=0 (default), run with sudo/root on Linux.
   - Endpoint args can be explicit A/B URLs or one bootstrap directory URL.
+  - Legacy --fault-* flags are kept as wg-soak aliases for backward compatibility.
 USAGE
 }
 
@@ -210,6 +217,12 @@ gate_summary_json="${THREE_MACHINE_PROD_GATE_SUMMARY_JSON:-}"
 fault_every="${THREE_MACHINE_PROD_GATE_FAULT_EVERY:-0}"
 fault_command="${THREE_MACHINE_PROD_GATE_FAULT_COMMAND:-}"
 continue_on_fail="${THREE_MACHINE_PROD_GATE_CONTINUE_ON_FAIL:-0}"
+control_fault_every="${THREE_MACHINE_PROD_GATE_CONTROL_FAULT_EVERY:-0}"
+control_fault_command="${THREE_MACHINE_PROD_GATE_CONTROL_FAULT_COMMAND:-}"
+control_continue_on_fail="${THREE_MACHINE_PROD_GATE_CONTROL_CONTINUE_ON_FAIL:-0}"
+wg_fault_every="${THREE_MACHINE_PROD_GATE_WG_FAULT_EVERY:-}"
+wg_fault_command="${THREE_MACHINE_PROD_GATE_WG_FAULT_COMMAND:-}"
+wg_continue_on_fail="${THREE_MACHINE_PROD_GATE_WG_CONTINUE_ON_FAIL:-}"
 strict_distinct="${THREE_MACHINE_DISTINCT_OPERATORS:-1}"
 skip_control_soak="${THREE_MACHINE_PROD_GATE_SKIP_CONTROL_SOAK:-0}"
 skip_wg="${THREE_MACHINE_PROD_GATE_SKIP_WG:-0}"
@@ -313,6 +326,40 @@ while [[ $# -gt 0 ]]; do
       wg_max_consecutive_failures="${2:-}"
       shift 2
       ;;
+    --control-fault-every)
+      control_fault_every="${2:-}"
+      shift 2
+      ;;
+    --control-fault-command)
+      control_fault_command="${2:-}"
+      shift 2
+      ;;
+    --control-continue-on-fail)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+        control_continue_on_fail="${2:-}"
+        shift 2
+      else
+        control_continue_on_fail="1"
+        shift
+      fi
+      ;;
+    --wg-fault-every)
+      wg_fault_every="${2:-}"
+      shift 2
+      ;;
+    --wg-fault-command)
+      wg_fault_command="${2:-}"
+      shift 2
+      ;;
+    --wg-continue-on-fail)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+        wg_continue_on_fail="${2:-}"
+        shift 2
+      else
+        wg_continue_on_fail="1"
+        shift
+      fi
+      ;;
     --wg-soak-summary-json)
       wg_soak_summary_json="${2:-}"
       shift 2
@@ -402,6 +449,17 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Backward compatibility for legacy fault flags.
+if [[ -z "$wg_fault_every" ]]; then
+  wg_fault_every="$fault_every"
+fi
+if [[ -z "$(trim "$wg_fault_command")" ]]; then
+  wg_fault_command="$fault_command"
+fi
+if [[ -z "$wg_continue_on_fail" ]]; then
+  wg_continue_on_fail="$continue_on_fail"
+fi
+
 for script in "$BETA_VALIDATE_SCRIPT" "$BETA_SOAK_SCRIPT" "$PROD_WG_VALIDATE_SCRIPT" "$PROD_WG_SOAK_SCRIPT"; do
   if [[ ! -x "$script" ]]; then
     echo "missing executable helper: $script"
@@ -413,7 +471,7 @@ for cmd in bash date tee; do
   need_cmd "$cmd"
 done
 
-if ! [[ "$min_sources" =~ ^[0-9]+$ && "$min_operators" =~ ^[0-9]+$ && "$federation_timeout_sec" =~ ^[0-9]+$ && "$control_timeout_sec" =~ ^[0-9]+$ && "$control_soak_rounds" =~ ^[0-9]+$ && "$control_soak_pause_sec" =~ ^[0-9]+$ && "$wg_client_timeout_sec" =~ ^[0-9]+$ && "$wg_session_sec" =~ ^[0-9]+$ && "$wg_soak_rounds" =~ ^[0-9]+$ && "$wg_soak_pause_sec" =~ ^[0-9]+$ && "$wg_max_consecutive_failures" =~ ^[0-9]+$ && "$fault_every" =~ ^[0-9]+$ && "$discovery_wait_sec" =~ ^[0-9]+$ ]]; then
+if ! [[ "$min_sources" =~ ^[0-9]+$ && "$min_operators" =~ ^[0-9]+$ && "$federation_timeout_sec" =~ ^[0-9]+$ && "$control_timeout_sec" =~ ^[0-9]+$ && "$control_soak_rounds" =~ ^[0-9]+$ && "$control_soak_pause_sec" =~ ^[0-9]+$ && "$wg_client_timeout_sec" =~ ^[0-9]+$ && "$wg_session_sec" =~ ^[0-9]+$ && "$wg_soak_rounds" =~ ^[0-9]+$ && "$wg_soak_pause_sec" =~ ^[0-9]+$ && "$wg_max_consecutive_failures" =~ ^[0-9]+$ && "$control_fault_every" =~ ^[0-9]+$ && "$wg_fault_every" =~ ^[0-9]+$ && "$discovery_wait_sec" =~ ^[0-9]+$ ]]; then
   echo "numeric args are invalid"
   exit 2
 fi
@@ -426,8 +484,12 @@ if [[ "$strict_distinct" != "0" && "$strict_distinct" != "1" ]]; then
   echo "--strict-distinct must be 0 or 1"
   exit 2
 fi
-if [[ "$continue_on_fail" != "0" && "$continue_on_fail" != "1" ]]; then
-  echo "--continue-on-fail must be 0 or 1"
+if [[ "$control_continue_on_fail" != "0" && "$control_continue_on_fail" != "1" ]]; then
+  echo "--control-continue-on-fail must be 0 or 1"
+  exit 2
+fi
+if [[ "$wg_continue_on_fail" != "0" && "$wg_continue_on_fail" != "1" ]]; then
+  echo "--wg-continue-on-fail must be 0 or 1"
   exit 2
 fi
 for flag in "$skip_control_soak" "$skip_wg" "$skip_wg_soak"; do
@@ -440,8 +502,12 @@ if [[ "$allow_non_root" != "0" && "$allow_non_root" != "1" ]]; then
   echo "THREE_MACHINE_PROD_GATE_ALLOW_NON_ROOT must be 0 or 1"
   exit 2
 fi
-if ((fault_every > 0)) && [[ -z "$(trim "$fault_command")" ]]; then
-  echo "--fault-command is required when --fault-every > 0"
+if ((control_fault_every > 0)) && [[ -z "$(trim "$control_fault_command")" ]]; then
+  echo "--control-fault-command is required when --control-fault-every > 0"
+  exit 2
+fi
+if ((wg_fault_every > 0)) && [[ -z "$(trim "$wg_fault_command")" ]]; then
+  echo "--wg-fault-command is required when --wg-fault-every > 0"
   exit 2
 fi
 
@@ -459,6 +525,7 @@ echo "[prod-gate] started at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "[prod-gate] report: $report_file"
 echo "[prod-gate] step_logs: $step_dir"
 echo "[prod-gate] strict_distinct=$strict_distinct skip_control_soak=$skip_control_soak skip_wg=$skip_wg skip_wg_soak=$skip_wg_soak wg_max_consecutive_failures=$wg_max_consecutive_failures"
+echo "[prod-gate] control_fault_every=$control_fault_every control_continue_on_fail=$control_continue_on_fail wg_fault_every=$wg_fault_every wg_continue_on_fail=$wg_continue_on_fail"
 gate_started_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 if [[ -z "$wg_soak_summary_json" ]]; then
   wg_soak_summary_json="$step_dir/04_prod_wg_soak.summary.json"
@@ -595,24 +662,32 @@ run_step "control_validate" "$step_dir/01_control_validate.log" \
   --prod-profile 1
 
 if [[ "$skip_control_soak" == "0" ]]; then
-  run_step "control_soak" "$step_dir/02_control_soak.log" \
-    "$BETA_SOAK_SCRIPT" \
-    "${common_args[@]}" \
-    --rounds "$control_soak_rounds" \
-    --pause-sec "$control_soak_pause_sec" \
-    --min-sources "$min_sources" \
-    --min-operators "$min_operators" \
-    --federation-timeout-sec "$federation_timeout_sec" \
-    --timeout-sec "$control_timeout_sec" \
-    --client-min-selection-lines 8 \
-    --client-min-entry-operators 2 \
-    --client-min-exit-operators 2 \
-    --client-require-cross-operator-pair 1 \
-    --distinct-operators "$strict_distinct" \
-    --require-issuer-quorum 1 \
-    --beta-profile 1 \
-    --prod-profile 1 \
+  declare -a control_soak_args=(
+    "$BETA_SOAK_SCRIPT"
+    "${common_args[@]}"
+    --rounds "$control_soak_rounds"
+    --pause-sec "$control_soak_pause_sec"
+    --fault-every "$control_fault_every"
+    --continue-on-fail "$control_continue_on_fail"
+    --min-sources "$min_sources"
+    --min-operators "$min_operators"
+    --federation-timeout-sec "$federation_timeout_sec"
+    --timeout-sec "$control_timeout_sec"
+    --client-min-selection-lines 8
+    --client-min-entry-operators 2
+    --client-min-exit-operators 2
+    --client-require-cross-operator-pair 1
+    --distinct-operators "$strict_distinct"
+    --require-issuer-quorum 1
+    --beta-profile 1
+    --prod-profile 1
     --report-file "$step_dir/02_control_soak.log"
+  )
+  if [[ -n "$(trim "$control_fault_command")" ]]; then
+    control_soak_args+=(--fault-command "$control_fault_command")
+  fi
+  run_step "control_soak" "$step_dir/02_control_soak.log" \
+    "${control_soak_args[@]}"
 else
   echo "[prod-gate] step=control_soak skipped (--skip-control-soak=1)"
   set_step_status "control_soak" "skipped"
@@ -647,8 +722,8 @@ if [[ "$skip_wg" == "0" ]]; then
       --pause-sec "$wg_soak_pause_sec"
       --max-consecutive-failures "$wg_max_consecutive_failures"
       --summary-json "$wg_soak_summary_json"
-      --fault-every "$fault_every"
-      --continue-on-fail "$continue_on_fail"
+      --fault-every "$wg_fault_every"
+      --continue-on-fail "$wg_continue_on_fail"
       --report-file "$step_dir/04_prod_wg_soak.log"
       "${common_args[@]}"
       --min-sources "$min_sources"
@@ -663,8 +738,8 @@ if [[ "$skip_wg" == "0" ]]; then
       --mtls-client-cert-file "$mtls_client_cert_file"
       --mtls-client-key-file "$mtls_client_key_file"
     )
-    if [[ -n "$(trim "$fault_command")" ]]; then
-      wg_soak_args+=(--fault-command "$fault_command")
+    if [[ -n "$(trim "$wg_fault_command")" ]]; then
+      wg_soak_args+=(--fault-command "$wg_fault_command")
     fi
     run_step "prod_wg_soak" "$step_dir/04_prod_wg_soak.log" "${wg_soak_args[@]}"
     emit_wg_soak_summary_once 1
