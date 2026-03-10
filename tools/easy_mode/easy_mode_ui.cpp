@@ -854,6 +854,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
     std::cout << "34) Client VPN up (real mode, full manual)\n";
     std::cout << "35) Server preflight (peer/identity/quorum checks)\n";
     std::cout << "36) Closed-beta PROD bundle (quick strict profile)\n";
+    std::cout << "37) Closed-beta PROD bundle (quick smoke profile)\n";
     std::cout << "0) Back\n";
     std::cout << "Selection: ";
 
@@ -2115,6 +2116,97 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       if (!report.empty()) {
         cmd << " --report-file " << shellEscape(report);
       }
+      if (!isRootUser()) {
+        bool useSudo = parseYesNo(readLine("Run with sudo? (Y/n)", "y"), true);
+        if (useSudo) {
+          runCommand("sudo " + cmd.str());
+        } else {
+          runCommand(cmd.str());
+        }
+      } else {
+        runCommand(cmd.str());
+      }
+      continue;
+    }
+    if (choice == "37") {
+      bool autoDiscover = parseYesNo(readLine("Use one bootstrap directory and auto-discover peers? (Y/n)", "y"), true);
+      std::string bootstrapDefault = !hosts.aHost.empty() ? endpointFromHost(hosts.aHost, 8081) : (!hosts.bHost.empty() ? endpointFromHost(hosts.bHost, 8081) : "");
+      std::string bootstrapDir;
+      std::string dirA;
+      std::string dirB;
+      std::string issuer;
+      std::string entry;
+      std::string exitUrl;
+      std::string discoveryWait = "12";
+      if (autoDiscover) {
+        bootstrapDir = normalizeEndpointURL(readLine("Bootstrap directory URL", bootstrapDefault), 8081);
+      } else {
+        configureABHostsInteractive(root, hosts, false);
+        dirA = normalizeEndpointURL(readLine("Directory A URL", endpointFromHost(hosts.aHost, 8081)), 8081);
+        dirB = normalizeEndpointURL(readLine("Directory B URL", endpointFromHost(hosts.bHost, 8081)), 8081);
+        issuer = normalizeEndpointURL(readLine("Issuer URL", endpointFromHost(hosts.aHost, 8082)), 8082);
+        entry = normalizeEndpointURL(readLine("Entry control URL fallback", endpointFromHost(hosts.aHost, 8083)), 8083);
+        exitUrl = normalizeEndpointURL(readLine("Exit control URL fallback", endpointFromHost(hosts.aHost, 8084)), 8084);
+      }
+
+      if (autoDiscover && bootstrapDir.empty()) {
+        std::cout << "bootstrap directory URL is required\n";
+        continue;
+      }
+      if (!autoDiscover && (dirA.empty() || dirB.empty() || issuer.empty() || entry.empty() || exitUrl.empty())) {
+        std::cout << "directory A/B, issuer URL, entry URL and exit URL are required\n";
+        continue;
+      }
+
+      std::string subject = trim(readLine("Client subject key (optional)", ""));
+      std::string bundleDir = trim(readLine("Bundle directory", ".easy-node-logs/prod_gate_bundle_smoke"));
+      std::string report = trim(readLine("Gate report file (optional)", ""));
+
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " three-machine-prod-bundle"
+          << " --discovery-wait-sec " << shellEscape(discoveryWait)
+          << " --min-sources 2"
+          << " --min-operators 2"
+          << " --federation-timeout-sec 60"
+          << " --control-timeout-sec 40"
+          << " --control-soak-rounds 2"
+          << " --control-soak-pause-sec 2"
+          << " --wg-client-timeout-sec 90"
+          << " --wg-session-sec 30"
+          << " --wg-soak-rounds 3"
+          << " --wg-soak-pause-sec 3"
+          << " --wg-slo-profile recommended"
+          << " --wg-max-consecutive-failures 2"
+          << " --strict-distinct 1"
+          << " --skip-control-soak 0"
+          << " --skip-wg 0"
+          << " --skip-wg-soak 0"
+          << " --control-fault-every 0"
+          << " --control-continue-on-fail 0"
+          << " --wg-fault-every 0"
+          << " --wg-continue-on-fail 0"
+          << " --mtls-ca-file " << shellEscape("deploy/tls/ca.crt")
+          << " --mtls-client-cert-file " << shellEscape("deploy/tls/client.crt")
+          << " --mtls-client-key-file " << shellEscape("deploy/tls/client.key");
+      if (!subject.empty()) {
+        cmd << " --subject " << shellEscape(subject);
+      }
+      if (autoDiscover) {
+        cmd << " --bootstrap-directory " << shellEscape(bootstrapDir);
+      } else {
+        cmd << " --directory-a " << shellEscape(dirA)
+            << " --directory-b " << shellEscape(dirB)
+            << " --issuer-url " << shellEscape(issuer)
+            << " --entry-url " << shellEscape(entry)
+            << " --exit-url " << shellEscape(exitUrl);
+      }
+      if (!bundleDir.empty()) {
+        cmd << " --bundle-dir " << shellEscape(bundleDir);
+      }
+      if (!report.empty()) {
+        cmd << " --report-file " << shellEscape(report);
+      }
+      std::cout << "note: smoke profile is fast sanity validation; use option 36 for full strict closed-beta sign-off.\n";
       if (!isRootUser()) {
         bool useSudo = parseYesNo(readLine("Run with sudo? (Y/n)", "y"), true);
         if (useSudo) {

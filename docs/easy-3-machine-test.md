@@ -42,6 +42,7 @@ Menu options:
 - built-in 3-machine checklist
 - built-in 3-machine validation runner
 - built-in closed-beta prod bundle quick profile (strict defaults, minimal prompts)
+- built-in closed-beta prod bundle smoke profile (fast sanity run, not sign-off)
 
 ## 3) Non-interactive mode (script backend)
 

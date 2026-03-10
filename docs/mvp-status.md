@@ -180,6 +180,7 @@
 - Production gate now supports one-flag WG SLO presets (`--wg-slo-profile off|recommended|strict`) so recommended prod thresholds/failure budgets can be applied without manual tuning.
 - Real-WG soak now supports cross-round selection-diversity thresholds (`--min-selection-lines`, `--min-entry-operators`, `--min-exit-operators`, `--min-cross-operator-pairs`), with prod-gate pass-through controls (`--wg-min-selection-lines`, `--wg-min-entry-operators`, `--wg-min-exit-operators`, `--wg-min-cross-operator-pairs`) and strict SLO profile defaults.
 - Easy-mode launcher now includes a one-action closed-beta prod bundle path (advanced menu option 36) that runs strict prod-gate defaults with minimal prompts for machine-C operators.
+- Easy-mode launcher now includes a second one-action closed-beta smoke path (advanced menu option 37) for faster sanity validation before full strict sign-off.
 - Production gate now prints a compact WG soak summary line (status, pass/fail counts, max consecutive failures, top failure class/count) from the summary artifact, including failed WG-soak exits.
 - Production gate now supports an overall machine-readable summary artifact (`--gate-summary-json`) containing per-step status plus failure-step/rc metadata, suitable for CI/pilot ingestion.
 - Easy-mode true 3-machine reminder output (`easy_node.sh three-machine-reminder`) and launcher wiring now provide a reusable production test checklist.
