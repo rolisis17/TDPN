@@ -649,6 +649,8 @@ CI and tests:
 - `./scripts/integration_github_repo_security_baseline.sh` (mocked-`gh` integration coverage for repo baseline script `status`/`apply` behavior)
 - `./scripts/release_prepare.sh --version vX.Y.Z` (build release artifacts + source tar + manifest + sha256 checksums)
 - `./scripts/integration_release_integrity.sh` (release artifact/version/checksum integration guard)
+- `./scripts/release_verify_tag.sh --version vX.Y.Z --require-head-match 1 [--require-signature 0|1]` (annotated-tag verification + optional signed-tag enforcement)
+- `./scripts/integration_release_tag_verify.sh` (tag verification regression guard for missing/lightweight/signed/head-mismatch paths)
 - `./scripts/integration_federation.sh` (multi-directory quorum/vote integration check)
 - `./scripts/integration_operator_quorum.sh` (distinct-directory-operator quorum enforcement check)
 - `./scripts/integration_sync_status_chaos.sh` (directory sync-status failure/recovery observability under peer churn)

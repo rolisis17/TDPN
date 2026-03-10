@@ -6,17 +6,27 @@ on:
       - "v*"
 
 permissions:
+  attestations: write
   contents: write
+  id-token: write
 
 jobs:
   build-release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
       - uses: actions/setup-go@v5
         with:
           go-version: "1.22"
+
+      - name: Verify release tag metadata
+        run: ./scripts/release_verify_tag.sh --version "${GITHUB_REF_NAME}" --require-head-match 1 --require-signature "${RELEASE_REQUIRE_SIGNED_TAG:-0}"
+        env:
+          RELEASE_REQUIRE_SIGNED_TAG: ${{ vars.RELEASE_REQUIRE_SIGNED_TAG }}
 
       - name: Prepare release artifacts
         run: ./scripts/release_prepare.sh --version "${GITHUB_REF_NAME}" --out-dir dist --require-tag-match 1
@@ -36,3 +46,8 @@ jobs:
             dist/${{ github.ref_name }}/manifest.json
             dist/${{ github.ref_name }}/source_${{ github.ref_name }}.tar
             dist/${{ github.ref_name }}/bin/*
+
+      - name: Attest release checksums
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/${{ github.ref_name }}/sha256sums.txt

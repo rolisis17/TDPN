@@ -25,18 +25,26 @@ Outputs:
 Quick verification:
 ```bash
 ./scripts/integration_release_integrity.sh
+./scripts/integration_release_tag_verify.sh
 ```
 
 ## 3) Tag and push
 ```bash
-git tag v0.1.0
+git tag -a v0.1.0 -m "v0.1.0 release"
+# recommended when maintainer signing keys are configured:
+# git tag -s v0.1.0 -m "v0.1.0 release"
 git push origin v0.1.0
 ```
 
 When the tag is pushed, `.github/workflows/release.yml` will:
-1. Rebuild release artifacts with `--require-tag-match 1`
-2. Upload workflow artifacts
-3. Publish files to the GitHub Release
+1. Verify tag metadata (`release_verify_tag.sh`):
+   - annotated tag required
+   - points at workflow `HEAD`
+   - optional signed-tag enforcement via repository variable `RELEASE_REQUIRE_SIGNED_TAG=1`
+2. Rebuild release artifacts with `--require-tag-match 1`
+3. Upload workflow artifacts
+4. Publish files to the GitHub Release
+5. Emit provenance attestation for `sha256sums.txt`
 
 ## 4) Optional tuning
 - Override targets:
@@ -46,4 +54,8 @@ When the tag is pushed, `.github/workflows/release.yml` will:
 - Allow dirty build for local dry-run:
   ```bash
   ./scripts/release_prepare.sh --version v0.1.0-rc1 --allow-dirty 1
+  ```
+- Explicit tag verification:
+  ```bash
+  ./scripts/release_verify_tag.sh --version v0.1.0 --require-head-match 1 --require-signature 0
   ```
