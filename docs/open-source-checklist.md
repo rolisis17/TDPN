@@ -51,6 +51,7 @@ Use this before making the repository public.
    go test ./...
    ./scripts/ci_local.sh
    ./scripts/beta_preflight.sh
+   ./scripts/integration_release_integrity.sh
    ```
 2. Verify launcher + key scripts work from a clean clone.
 3. Confirm docs match real commands.
@@ -62,6 +63,10 @@ Use this before making the repository public.
    - Known limitations
    - Security model
    - Supported environments
+4. Use the release runbook and artifact generator:
+   ```bash
+   ./scripts/release_prepare.sh --version vX.Y.Z
+   ```
 
 ## 7) Post-publication
 1. Triage issues weekly.

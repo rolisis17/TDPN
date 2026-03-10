@@ -1,0 +1,38 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Prepare release artifacts
+        run: ./scripts/release_prepare.sh --version "${GITHUB_REF_NAME}" --out-dir dist --require-tag-match 1
+
+      - name: Upload workflow artifact bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ github.ref_name }}
+          path: dist/${{ github.ref_name }}
+          if-no-files-found: error
+
+      - name: Publish GitHub release artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/${{ github.ref_name }}/sha256sums.txt
+            dist/${{ github.ref_name }}/manifest.json
+            dist/${{ github.ref_name }}/source_${{ github.ref_name }}.tar
+            dist/${{ github.ref_name }}/bin/*
