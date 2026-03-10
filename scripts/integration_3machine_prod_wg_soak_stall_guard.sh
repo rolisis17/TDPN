@@ -524,4 +524,57 @@ if ! rg -q '"strict_ingress_policy": 1' "$SUMMARY_STRICT_INGRESS"; then
   exit 1
 fi
 
+# Case 10: strict-ingress rehearsal flag should force synthetic inner-source on validate call.
+STRICT_REHEARSAL_ARGS_FILE="$TMP_DIR/strict_rehearsal_args.log"
+cat >"$FAKE_VALIDATE" <<'EOF_FAKE_REHEARSAL_WIRING'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >"${STRICT_REHEARSAL_ARGS_FILE:?}"
+report=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --report-file)
+      report="${2:-}"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+if [[ -n "$report" ]]; then
+  echo "strict real-packet mode requires CLIENT_INNER_SOURCE=udp" >>"$report"
+fi
+exit 1
+EOF_FAKE_REHEARSAL_WIRING
+chmod +x "$FAKE_VALIDATE"
+
+OUT_REHEARSAL_WIRING="$TMP_DIR/out_rehearsal_wiring.log"
+SUMMARY_REHEARSAL_WIRING="$TMP_DIR/soak_rehearsal_wiring_summary.json"
+set +e
+STRICT_REHEARSAL_ARGS_FILE="$STRICT_REHEARSAL_ARGS_FILE" THREE_MACHINE_PROD_WG_VALIDATE_SCRIPT="$FAKE_VALIDATE" ./scripts/integration_3machine_prod_wg_soak.sh \
+  --rounds 1 \
+  --pause-sec 0 \
+  --strict-ingress-rehearsal 1 \
+  --summary-json "$SUMMARY_REHEARSAL_WIRING" \
+  --report-file "$TMP_DIR/soak_rehearsal_wiring.log" >"$OUT_REHEARSAL_WIRING" 2>&1
+rc_rehearsal_wiring=$?
+set -e
+if [[ "$rc_rehearsal_wiring" -eq 0 ]]; then
+  echo "expected strict-ingress rehearsal soak run to fail"
+  cat "$OUT_REHEARSAL_WIRING"
+  exit 1
+fi
+if [[ ! -f "$STRICT_REHEARSAL_ARGS_FILE" ]] || ! rg -q -- '--client-inner-source synthetic' "$STRICT_REHEARSAL_ARGS_FILE"; then
+  echo "strict-ingress rehearsal did not forward --client-inner-source synthetic to validate script"
+  [[ -f "$STRICT_REHEARSAL_ARGS_FILE" ]] && cat "$STRICT_REHEARSAL_ARGS_FILE"
+  cat "$OUT_REHEARSAL_WIRING"
+  exit 1
+fi
+if ! rg -q 'class=strict_ingress_policy' "$OUT_REHEARSAL_WIRING"; then
+  echo "strict-ingress rehearsal missing strict_ingress_policy classification"
+  cat "$OUT_REHEARSAL_WIRING"
+  exit 1
+fi
+
 echo "3-machine prod wg soak stall guard integration check ok"

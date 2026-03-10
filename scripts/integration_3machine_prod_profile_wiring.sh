@@ -278,6 +278,7 @@ THREE_MACHINE_PROD_GATE_SCRIPT="$FAKE_GATE" \
   --wg-max-recovery-sec 120 \
   --wg-max-failure-class endpoint_connectivity=2 \
   --wg-disallow-unknown-failure-class 1 \
+  --wg-strict-ingress-rehearsal 1 \
   --wg-min-selection-lines 12 \
   --wg-min-entry-operators 2 \
   --wg-min-exit-operators 2 \
@@ -354,6 +355,11 @@ if ! rg -q -- '--wg-disallow-unknown-failure-class 1' "$GATE_CAPTURE"; then
   cat "$GATE_CAPTURE"
   exit 1
 fi
+if ! rg -q -- '--wg-strict-ingress-rehearsal 1' "$GATE_CAPTURE"; then
+  echo "easy_node prod gate wiring failed: --wg-strict-ingress-rehearsal 1 missing"
+  cat "$GATE_CAPTURE"
+  exit 1
+fi
 if ! rg -q -- '--wg-min-selection-lines 12' "$GATE_CAPTURE"; then
   echo "easy_node prod gate wiring failed: --wg-min-selection-lines 12 missing"
   cat "$GATE_CAPTURE"
@@ -407,6 +413,14 @@ if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh prod-wg-soak --help | rg -q --
   echo "easy_node prod-wg-soak help missing --summary-json"
   exit 1
 fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh prod-wg-validate --help | rg -q -- '--client-inner-source'; then
+  echo "easy_node prod-wg-validate help missing --client-inner-source"
+  exit 1
+fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh prod-wg-soak --help | rg -q -- '--strict-ingress-rehearsal'; then
+  echo "easy_node prod-wg-soak help missing --strict-ingress-rehearsal"
+  exit 1
+fi
 if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh three-machine-prod-gate --help | rg -q -- '--wg-max-round-duration-sec'; then
   echo "easy_node three-machine-prod-gate help missing --wg-max-round-duration-sec"
   exit 1
@@ -415,12 +429,105 @@ if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh three-machine-prod-gate --help
   echo "easy_node three-machine-prod-gate help missing --wg-max-failure-class"
   exit 1
 fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh three-machine-prod-gate --help | rg -q -- '--wg-strict-ingress-rehearsal'; then
+  echo "easy_node three-machine-prod-gate help missing --wg-strict-ingress-rehearsal"
+  exit 1
+fi
 if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh three-machine-prod-gate --help | rg -q -- '--wg-slo-profile'; then
   echo "easy_node three-machine-prod-gate help missing --wg-slo-profile"
   exit 1
 fi
 if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh three-machine-prod-gate --help | rg -q -- '--wg-min-selection-lines'; then
   echo "easy_node three-machine-prod-gate help missing --wg-min-selection-lines"
+  exit 1
+fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh --help | rg -q -- 'prod-wg-strict-ingress-rehearsal'; then
+  echo "easy_node usage missing prod-wg-strict-ingress-rehearsal command"
+  exit 1
+fi
+
+echo "[wiring] easy_node strict-ingress rehearsal preset"
+FAKE_EASY_REHEARSAL_SOAK="$TMP_DIR/fake_easy_rehearsal_soak.sh"
+EASY_REHEARSAL_CAPTURE="$TMP_DIR/easy_rehearsal_soak_args.log"
+cat >"$FAKE_EASY_REHEARSAL_SOAK" <<'EOF_FAKE_EASY_REHEARSAL_SOAK'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >>"${EASY_REHEARSAL_CAPTURE_FILE:?}"
+report_file=""
+summary_json=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --report-file)
+      report_file="${2:-}"
+      shift 2
+      ;;
+    --summary-json)
+      summary_json="${2:-}"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+if [[ -n "$report_file" ]]; then
+  mkdir -p "$(dirname "$report_file")"
+  cat >"$report_file" <<'EOF_REHEARSAL_REPORT'
+[3machine-prod-wg-soak] round=1 result=fail rc=1 class=strict_ingress_policy duration_sec=1
+[3machine-prod-wg-soak] failure_class strict_ingress_policy=1
+EOF_REHEARSAL_REPORT
+fi
+if [[ -n "$summary_json" ]]; then
+  mkdir -p "$(dirname "$summary_json")"
+  cat >"$summary_json" <<'EOF_REHEARSAL_SUMMARY'
+{
+  "status": "fail",
+  "rounds_requested": 1,
+  "rounds_passed": 0,
+  "rounds_failed": 1,
+  "failure_classes": {
+    "strict_ingress_policy": 1
+  }
+}
+EOF_REHEARSAL_SUMMARY
+fi
+exit 1
+EOF_FAKE_EASY_REHEARSAL_SOAK
+chmod +x "$FAKE_EASY_REHEARSAL_SOAK"
+
+EASY_REHEARSAL_LOG="/tmp/integration_3machine_prod_profile_wiring_easy_rehearsal.log"
+set +e
+PATH="$TMP_BIN:$PATH" \
+EASY_REHEARSAL_CAPTURE_FILE="$EASY_REHEARSAL_CAPTURE" \
+THREE_MACHINE_PROD_WG_SOAK_SCRIPT="$FAKE_EASY_REHEARSAL_SOAK" \
+./scripts/easy_node.sh prod-wg-strict-ingress-rehearsal \
+  --directory-a https://dir-a:8081 \
+  --directory-b https://dir-b:8081 \
+  --issuer-url https://issuer-main:8082 \
+  --entry-url https://entry-main:8083 \
+  --exit-url https://exit-main:8084 >"$EASY_REHEARSAL_LOG" 2>&1
+easy_rehearsal_rc=$?
+set -e
+if [[ "$easy_rehearsal_rc" -ne 0 ]]; then
+  echo "easy_node strict-ingress rehearsal preset failed"
+  cat "$EASY_REHEARSAL_LOG"
+  exit 1
+fi
+if ! rg -q -- '--strict-ingress-rehearsal 1' "$EASY_REHEARSAL_CAPTURE"; then
+  echo "easy_node strict-ingress rehearsal preset missing --strict-ingress-rehearsal 1"
+  cat "$EASY_REHEARSAL_CAPTURE"
+  cat "$EASY_REHEARSAL_LOG"
+  exit 1
+fi
+if ! rg -q -- '--max-failure-class strict_ingress_policy=0' "$EASY_REHEARSAL_CAPTURE"; then
+  echo "easy_node strict-ingress rehearsal preset missing strict_ingress_policy budget"
+  cat "$EASY_REHEARSAL_CAPTURE"
+  cat "$EASY_REHEARSAL_LOG"
+  exit 1
+fi
+if ! rg -q 'prod wg strict-ingress rehearsal check ok' "$EASY_REHEARSAL_LOG"; then
+  echo "easy_node strict-ingress rehearsal preset missing success marker"
+  cat "$EASY_REHEARSAL_LOG"
   exit 1
 fi
 
@@ -585,6 +692,7 @@ THREE_MACHINE_PROD_GATE_ALLOW_NON_ROOT=1 \
   --wg-max-recovery-sec 120 \
   --wg-max-failure-class endpoint_connectivity=2 \
   --wg-disallow-unknown-failure-class 1 \
+  --wg-strict-ingress-rehearsal 1 \
   --wg-min-selection-lines 6 \
   --wg-min-entry-operators 2 \
   --wg-min-exit-operators 2 \
@@ -642,6 +750,12 @@ if ! rg -q -- '--max-failure-class endpoint_connectivity=2' "$GATE_WG_SOAK_CAPTU
 fi
 if ! rg -q -- '--disallow-unknown-failure-class 1' "$GATE_WG_SOAK_CAPTURE"; then
   echo "prod gate wiring failed: WG soak call missing --disallow-unknown-failure-class 1"
+  cat "$GATE_WG_SOAK_CAPTURE"
+  cat "$WG_GATE_LOG"
+  exit 1
+fi
+if ! rg -q -- '--strict-ingress-rehearsal 1' "$GATE_WG_SOAK_CAPTURE"; then
+  echo "prod gate wiring failed: WG soak call missing --strict-ingress-rehearsal 1"
   cat "$GATE_WG_SOAK_CAPTURE"
   cat "$WG_GATE_LOG"
   exit 1

@@ -24,6 +24,7 @@ Usage:
     [--max-recovery-sec N] \
     [--max-failure-class CLASS=N] \
     [--disallow-unknown-failure-class [0|1]] \
+    [--strict-ingress-rehearsal [0|1]] \
     [--min-selection-lines N] \
     [--min-entry-operators N] \
     [--min-exit-operators N] \
@@ -60,6 +61,13 @@ Examples:
     --min-entry-operators 2 \
     --min-exit-operators 2 \
     --min-cross-operator-pairs 2
+
+  # strict-ingress rehearsal (expected failure path):
+  sudo ./scripts/integration_3machine_prod_wg_soak.sh \
+    --rounds 1 --pause-sec 0 \
+    --strict-ingress-rehearsal 1 \
+    --max-failure-class strict_ingress_policy=0 \
+    --disallow-unknown-failure-class 1
 USAGE
 }
 
@@ -189,6 +197,7 @@ max_round_duration_sec="${THREE_MACHINE_PROD_WG_SOAK_MAX_ROUND_DURATION_SEC:-0}"
 max_recovery_sec="${THREE_MACHINE_PROD_WG_SOAK_MAX_RECOVERY_SEC:-0}"
 disallow_unknown_failure_class="${THREE_MACHINE_PROD_WG_SOAK_DISALLOW_UNKNOWN_FAILURE_CLASS:-0}"
 max_failure_class_env="${THREE_MACHINE_PROD_WG_SOAK_MAX_FAILURE_CLASS:-}"
+strict_ingress_rehearsal="${THREE_MACHINE_PROD_WG_SOAK_STRICT_INGRESS_REHEARSAL:-0}"
 min_selection_lines="${THREE_MACHINE_PROD_WG_SOAK_MIN_SELECTION_LINES:-0}"
 min_entry_operators="${THREE_MACHINE_PROD_WG_SOAK_MIN_ENTRY_OPERATORS:-0}"
 min_exit_operators="${THREE_MACHINE_PROD_WG_SOAK_MIN_EXIT_OPERATORS:-0}"
@@ -247,6 +256,15 @@ while [[ $# -gt 0 ]]; do
         shift 2
       else
         disallow_unknown_failure_class="1"
+        shift
+      fi
+      ;;
+    --strict-ingress-rehearsal)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+        strict_ingress_rehearsal="${2:-}"
+        shift 2
+      else
+        strict_ingress_rehearsal="1"
         shift
       fi
       ;;
@@ -314,6 +332,10 @@ if [[ "$disallow_unknown_failure_class" != "0" && "$disallow_unknown_failure_cla
   echo "--disallow-unknown-failure-class must be 0 or 1"
   exit 2
 fi
+if [[ "$strict_ingress_rehearsal" != "0" && "$strict_ingress_rehearsal" != "1" ]]; then
+  echo "--strict-ingress-rehearsal must be 0 or 1"
+  exit 2
+fi
 if ((fault_every > 0)) && [[ -z "$(trim "$fault_command")" ]]; then
   echo "--fault-command is required when --fault-every > 0"
   exit 2
@@ -341,6 +363,13 @@ for spec in "${max_failure_class_specs[@]}"; do
   failure_class_limits["$class"]="$limit"
 done
 
+if [[ "$strict_ingress_rehearsal" == "1" ]]; then
+  validate_args+=(--client-inner-source synthetic)
+  if [[ -z "${failure_class_limits[strict_ingress_policy]+x}" ]]; then
+    failure_class_limits["strict_ingress_policy"]=0
+  fi
+fi
+
 need_cmd bash
 need_cmd date
 need_cmd timeout
@@ -363,7 +392,7 @@ exec > >(tee -a "$report_file") 2>&1
 
 echo "[3machine-prod-wg-soak] started at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "[3machine-prod-wg-soak] report: $report_file"
-echo "[3machine-prod-wg-soak] rounds=$rounds pause_sec=$pause_sec fault_every=$fault_every continue_on_fail=$continue_on_fail max_consecutive_failures=$max_consecutive_failures max_round_duration_sec=$max_round_duration_sec max_recovery_sec=$max_recovery_sec disallow_unknown_failure_class=$disallow_unknown_failure_class"
+echo "[3machine-prod-wg-soak] rounds=$rounds pause_sec=$pause_sec fault_every=$fault_every continue_on_fail=$continue_on_fail max_consecutive_failures=$max_consecutive_failures max_round_duration_sec=$max_round_duration_sec max_recovery_sec=$max_recovery_sec disallow_unknown_failure_class=$disallow_unknown_failure_class strict_ingress_rehearsal=$strict_ingress_rehearsal"
 echo "[3machine-prod-wg-soak] diversity_thresholds min_selection_lines=$min_selection_lines min_entry_operators=$min_entry_operators min_exit_operators=$min_exit_operators min_cross_operator_pairs=$min_cross_operator_pairs"
 if ((${#failure_class_limits[@]} > 0)); then
   while IFS= read -r class; do

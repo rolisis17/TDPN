@@ -31,6 +31,7 @@ Usage:
     [--wg-session-sec N] \
     [--client-iface IFACE] \
     [--client-proxy-addr HOST:PORT] \
+    [--client-inner-source udp|synthetic] \
     [--inject-attempts N] \
     [--strict-distinct [0|1]] \
     [--skip-control-plane-check [0|1]] \
@@ -271,6 +272,7 @@ client_timeout_sec="120"
 wg_session_sec="45"
 client_iface="${CLIENT_IFACE:-wgcprod0}"
 client_proxy_addr="${CLIENT_PROXY_ADDR:-127.0.0.1:57990}"
+client_inner_source="${THREE_MACHINE_PROD_WG_CLIENT_INNER_SOURCE:-udp}"
 inject_attempts="8"
 strict_distinct="${CLIENT_REQUIRE_DISTINCT_OPERATORS:-1}"
 skip_control_plane_check="0"
@@ -357,6 +359,10 @@ while [[ $# -gt 0 ]]; do
       client_proxy_addr="${2:-}"
       shift 2
       ;;
+    --client-inner-source)
+      client_inner_source="${2:-}"
+      shift 2
+      ;;
     --inject-attempts)
       inject_attempts="${2:-}"
       shift 2
@@ -415,6 +421,10 @@ if [[ "$strict_distinct" != "0" && "$strict_distinct" != "1" ]]; then
   echo "--strict-distinct must be 0 or 1"
   exit 2
 fi
+if [[ "$client_inner_source" != "udp" && "$client_inner_source" != "synthetic" ]]; then
+  echo "--client-inner-source must be udp or synthetic"
+  exit 2
+fi
 if [[ "$skip_control_plane_check" != "0" && "$skip_control_plane_check" != "1" ]]; then
   echo "--skip-control-plane-check must be 0 or 1"
   exit 2
@@ -465,6 +475,7 @@ exec > >(tee -a "$report_file") 2>&1
 
 echo "[3machine-prod-wg] started at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "[3machine-prod-wg] report: $report_file"
+echo "[3machine-prod-wg] client_inner_source=$client_inner_source"
 
 directory_a="$(trim_url "$directory_a")"
 directory_b="$(trim_url "$directory_b")"
@@ -628,7 +639,7 @@ env \
   CLIENT_WG_INSTALL_ROUTE=0 \
   CLIENT_WG_KERNEL_PROXY=1 \
   CLIENT_WG_PROXY_ADDR="$client_proxy_addr" \
-  CLIENT_INNER_SOURCE=udp \
+  CLIENT_INNER_SOURCE="$client_inner_source" \
   CLIENT_DISABLE_SYNTHETIC_FALLBACK=1 \
   CLIENT_LIVE_WG_MODE=1 \
   CLIENT_OPAQUE_SESSION_SEC="$wg_session_sec" \

@@ -236,6 +236,17 @@ sudo ./scripts/easy_node.sh prod-wg-soak \
   --mtls-client-key-file deploy/tls/client.key
 ```
 
+Strict-ingress negative rehearsal (expected strict-ingress failure class):
+
+```bash
+sudo ./scripts/easy_node.sh prod-wg-strict-ingress-rehearsal \
+  --directory-a https://A_PUBLIC_IP_OR_DNS:8081 \
+  --directory-b https://B_PUBLIC_IP_OR_DNS:8081 \
+  --issuer-url https://A_PUBLIC_IP_OR_DNS:8082 \
+  --entry-url https://A_PUBLIC_IP_OR_DNS:8083 \
+  --exit-url https://A_PUBLIC_IP_OR_DNS:8084
+```
+
 One-command production gate (recommended once A/B are already up):
 
 ```bash

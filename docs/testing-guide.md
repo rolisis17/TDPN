@@ -182,6 +182,17 @@ sudo ./scripts/easy_node.sh three-machine-prod-bundle \
 ./scripts/easy_node.sh three-machine-reminder
 ```
 
+Controlled strict-ingress rehearsal (expected strict-ingress failure class):
+
+```bash
+sudo ./scripts/easy_node.sh prod-wg-strict-ingress-rehearsal \
+  --directory-a https://A_PUBLIC_IP_OR_DNS:8081 \
+  --directory-b https://B_PUBLIC_IP_OR_DNS:8081 \
+  --issuer-url https://A_PUBLIC_IP_OR_DNS:8082 \
+  --entry-url https://A_PUBLIC_IP_OR_DNS:8083 \
+  --exit-url https://A_PUBLIC_IP_OR_DNS:8084
+```
+
 Machine-role quick checks (run on each host before full 3-machine run):
 
 ```bash

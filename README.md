@@ -222,6 +222,8 @@ sudo ./scripts/easy_node.sh three-machine-prod-gate \
 #   --wg-max-round-duration-sec 90 --wg-max-recovery-sec 120
 # optional: class-based failure budget gating
 #   --wg-max-failure-class endpoint_connectivity=2 --wg-max-failure-class timeout=1 --wg-max-failure-class strict_ingress_policy=0 --wg-disallow-unknown-failure-class 1
+# optional: controlled strict-ingress negative rehearsal in WG soak (expected failure class)
+#   --wg-strict-ingress-rehearsal 1
 # optional: inject controlled faults during control-plane soak stage
 #   --control-fault-every 3 --control-fault-command 'ssh user@<B_SERVER_IP> "cd <repo> && ./scripts/easy_node.sh server-down && ./scripts/easy_node.sh server-up --mode provider --public-host <B_SERVER_IP> --prod-profile 1"'
 # optional: inject controlled faults during real WG soak stage
@@ -243,6 +245,14 @@ sudo ./scripts/easy_node.sh three-machine-prod-bundle \
 
 # print true 3-machine reminder checklist
 ./scripts/easy_node.sh three-machine-reminder
+
+# one-command strict-ingress rehearsal (expected fail path, command returns success only when failure class is observed)
+sudo ./scripts/easy_node.sh prod-wg-strict-ingress-rehearsal \
+  --directory-a https://<A_SERVER_IP>:8081 \
+  --directory-b https://<B_SERVER_IP>:8081 \
+  --issuer-url https://<A_SERVER_IP>:8082 \
+  --entry-url https://<A_SERVER_IP>:8083 \
+  --exit-url https://<A_SERVER_IP>:8084
 
 # one-command pilot validation + soak + report bundle (machine C)
 ./scripts/beta_pilot_runbook.sh \

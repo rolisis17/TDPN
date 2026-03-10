@@ -42,6 +42,7 @@ Usage:
     [--wg-max-recovery-sec N] \
     [--wg-max-failure-class CLASS=N] \
     [--wg-disallow-unknown-failure-class [0|1]] \
+    [--wg-strict-ingress-rehearsal [0|1]] \
     [--wg-min-selection-lines N] \
     [--wg-min-entry-operators N] \
     [--wg-min-exit-operators N] \
@@ -231,6 +232,7 @@ wg_max_consecutive_failures="${THREE_MACHINE_PROD_GATE_WG_MAX_CONSECUTIVE_FAILUR
 wg_max_round_duration_sec="${THREE_MACHINE_PROD_GATE_WG_MAX_ROUND_DURATION_SEC:-0}"
 wg_max_recovery_sec="${THREE_MACHINE_PROD_GATE_WG_MAX_RECOVERY_SEC:-0}"
 wg_disallow_unknown_failure_class="${THREE_MACHINE_PROD_GATE_WG_DISALLOW_UNKNOWN_FAILURE_CLASS:-0}"
+wg_strict_ingress_rehearsal="${THREE_MACHINE_PROD_GATE_WG_STRICT_INGRESS_REHEARSAL:-0}"
 wg_min_selection_lines="${THREE_MACHINE_PROD_GATE_WG_MIN_SELECTION_LINES:-0}"
 wg_min_entry_operators="${THREE_MACHINE_PROD_GATE_WG_MIN_ENTRY_OPERATORS:-0}"
 wg_min_exit_operators="${THREE_MACHINE_PROD_GATE_WG_MIN_EXIT_OPERATORS:-0}"
@@ -410,6 +412,15 @@ while [[ $# -gt 0 ]]; do
       else
         wg_disallow_unknown_failure_class="1"
         wg_disallow_unknown_set=1
+        shift
+      fi
+      ;;
+    --wg-strict-ingress-rehearsal)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+        wg_strict_ingress_rehearsal="${2:-}"
+        shift 2
+      else
+        wg_strict_ingress_rehearsal="1"
         shift
       fi
       ;;
@@ -660,6 +671,10 @@ if [[ "$wg_disallow_unknown_failure_class" != "0" && "$wg_disallow_unknown_failu
   echo "--wg-disallow-unknown-failure-class must be 0 or 1"
   exit 2
 fi
+if [[ "$wg_strict_ingress_rehearsal" != "0" && "$wg_strict_ingress_rehearsal" != "1" ]]; then
+  echo "--wg-strict-ingress-rehearsal must be 0 or 1"
+  exit 2
+fi
 for flag in "$skip_control_soak" "$skip_wg" "$skip_wg_soak"; do
   if [[ "$flag" != "0" && "$flag" != "1" ]]; then
     echo "skip flags must be 0 or 1"
@@ -702,7 +717,7 @@ echo "[prod-gate] report: $report_file"
 echo "[prod-gate] step_logs: $step_dir"
 echo "[prod-gate] strict_distinct=$strict_distinct skip_control_soak=$skip_control_soak skip_wg=$skip_wg skip_wg_soak=$skip_wg_soak wg_slo_profile=$wg_slo_profile wg_max_consecutive_failures=$wg_max_consecutive_failures"
 echo "[prod-gate] control_fault_every=$control_fault_every control_continue_on_fail=$control_continue_on_fail wg_fault_every=$wg_fault_every wg_continue_on_fail=$wg_continue_on_fail"
-echo "[prod-gate] wg_max_round_duration_sec=$wg_max_round_duration_sec wg_max_recovery_sec=$wg_max_recovery_sec wg_disallow_unknown_failure_class=$wg_disallow_unknown_failure_class wg_max_failure_class_specs=${#wg_max_failure_class_specs[@]} wg_min_selection_lines=$wg_min_selection_lines wg_min_entry_operators=$wg_min_entry_operators wg_min_exit_operators=$wg_min_exit_operators wg_min_cross_operator_pairs=$wg_min_cross_operator_pairs"
+echo "[prod-gate] wg_max_round_duration_sec=$wg_max_round_duration_sec wg_max_recovery_sec=$wg_max_recovery_sec wg_disallow_unknown_failure_class=$wg_disallow_unknown_failure_class wg_strict_ingress_rehearsal=$wg_strict_ingress_rehearsal wg_max_failure_class_specs=${#wg_max_failure_class_specs[@]} wg_min_selection_lines=$wg_min_selection_lines wg_min_entry_operators=$wg_min_entry_operators wg_min_exit_operators=$wg_min_exit_operators wg_min_cross_operator_pairs=$wg_min_cross_operator_pairs"
 gate_started_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 if [[ -z "$wg_soak_summary_json" ]]; then
   wg_soak_summary_json="$step_dir/04_prod_wg_soak.summary.json"
@@ -901,6 +916,7 @@ if [[ "$skip_wg" == "0" ]]; then
       --max-round-duration-sec "$wg_max_round_duration_sec"
       --max-recovery-sec "$wg_max_recovery_sec"
       --disallow-unknown-failure-class "$wg_disallow_unknown_failure_class"
+      --strict-ingress-rehearsal "$wg_strict_ingress_rehearsal"
       --min-selection-lines "$wg_min_selection_lines"
       --min-entry-operators "$wg_min_entry_operators"
       --min-exit-operators "$wg_min_exit_operators"
