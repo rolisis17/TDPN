@@ -41,6 +41,7 @@ Menu options:
 - server status/logs/down
 - built-in 3-machine checklist
 - built-in 3-machine validation runner
+- built-in closed-beta prod bundle quick profile (strict defaults, minimal prompts)
 
 ## 3) Non-interactive mode (script backend)
 
