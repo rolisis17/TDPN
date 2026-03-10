@@ -855,6 +855,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
     std::cout << "35) Server preflight (peer/identity/quorum checks)\n";
     std::cout << "36) Closed-beta PROD bundle (quick strict profile)\n";
     std::cout << "37) Closed-beta PROD bundle (quick smoke profile)\n";
+    std::cout << "38) Verify PROD gate summary/bundle artifacts\n";
     std::cout << "0) Back\n";
     std::cout << "Selection: ";
 
@@ -2217,6 +2218,31 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       } else {
         runCommand(cmd.str());
       }
+      continue;
+    }
+    if (choice == "38") {
+      std::string bundleDir = trim(readLine("Bundle directory (optional)", ".easy-node-logs/prod_gate_bundle_quick"));
+      std::string gateSummaryJson = trim(readLine("Gate summary JSON path (optional)", ""));
+      bool requireFullSequence = parseYesNo(readLine("Require full sequence (all steps=ok)? (Y/n)", "y"), true);
+      bool requireWGValidate = parseYesNo(readLine("Require WG validate status=ok? (Y/n)", "y"), true);
+      bool requireWGSoak = parseYesNo(readLine("Require WG soak status=ok? (Y/n)", "y"), true);
+      std::string maxWGSoakFailedRounds = readLine("Max WG soak failed rounds", "0");
+      bool showJson = parseYesNo(readLine("Show summary JSON payload? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " prod-gate-check"
+          << " --require-full-sequence " << (requireFullSequence ? "1" : "0")
+          << " --require-wg-validate-ok " << (requireWGValidate ? "1" : "0")
+          << " --require-wg-soak-ok " << (requireWGSoak ? "1" : "0")
+          << " --max-wg-soak-failed-rounds " << shellEscape(maxWGSoakFailedRounds)
+          << " --show-json " << (showJson ? "1" : "0");
+      if (!bundleDir.empty()) {
+        cmd << " --bundle-dir " << shellEscape(bundleDir);
+      }
+      if (!gateSummaryJson.empty()) {
+        cmd << " --gate-summary-json " << shellEscape(gateSummaryJson);
+      }
+      runCommand(cmd.str());
       continue;
     }
 

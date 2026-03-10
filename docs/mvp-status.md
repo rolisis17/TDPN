@@ -188,6 +188,7 @@
 - Production gate wiring regression now includes a strict-ingress failure path, verifying `strict_ingress_policy` surfaces as the top WG soak failure class in both compact log output and gate summary JSON.
 - Production gate now supports an overall machine-readable summary artifact (`--gate-summary-json`) containing per-step status plus failure-step/rc metadata, suitable for CI/pilot ingestion.
 - Real-WG validate now emits a machine-readable summary artifact (`--summary-json`, gate pass-through `--wg-validate-summary-json`) including pass/fail step classification, handshake/traffic counters, and accepted-packet delta telemetry.
+- Production artifact signoff checker (`prod_gate_check.sh`, easy-node `prod-gate-check`) now verifies gate/bundle JSON outputs against strict full-sequence + WG status policy and is covered in CI/preflight (`integration_prod_gate_check.sh`).
 - Easy-node now includes a one-command strict-ingress rehearsal preset (`prod-wg-strict-ingress-rehearsal`) that expects/validates `strict_ingress_policy` failure classification before reporting success.
 - Easy-mode true 3-machine reminder output (`easy_node.sh three-machine-reminder`) and launcher wiring now provide a reusable production test checklist.
 - Secret-hygiene integration guard (`integration_secret_hygiene.sh`) now scans tracked artifacts for forbidden runtime files and high-confidence inline secret patterns, and is wired into both `ci_local.sh` and `beta_preflight.sh`.

@@ -271,6 +271,10 @@ sudo ./scripts/easy_node.sh three-machine-prod-bundle \
   --entry-url https://A_PUBLIC_IP_OR_DNS:8083 \
   --exit-url https://A_PUBLIC_IP_OR_DNS:8084 \
   --strict-distinct 1
+
+# strict artifact signoff check from bundle outputs
+./scripts/easy_node.sh prod-gate-check \
+  --bundle-dir .easy-node-logs/prod_gate_bundle
 ```
 
 It runs this sequence:

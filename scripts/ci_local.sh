@@ -79,6 +79,9 @@ echo "[ci] 3-machine prod-profile wiring integration"
 echo "[ci] 3-machine prod wg soak stall guard integration"
 ./scripts/integration_3machine_prod_wg_soak_stall_guard.sh
 
+echo "[ci] prod gate check integration"
+./scripts/integration_prod_gate_check.sh
+
 echo "[ci] rotate-server-secrets integration"
 ./scripts/integration_rotate_server_secrets.sh
 

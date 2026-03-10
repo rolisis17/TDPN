@@ -179,6 +179,10 @@ sudo ./scripts/easy_node.sh three-machine-prod-bundle \
   --exit-url https://A_PUBLIC_IP_OR_DNS:8084 \
   --strict-distinct 1
 
+# strict artifact signoff check from bundle outputs
+./scripts/easy_node.sh prod-gate-check \
+  --bundle-dir .easy-node-logs/prod_gate_bundle
+
 # quick checklist reminder output
 ./scripts/easy_node.sh three-machine-reminder
 ```

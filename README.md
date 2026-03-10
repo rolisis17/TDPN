@@ -234,6 +234,8 @@ sudo ./scripts/easy_node.sh three-machine-prod-gate \
 #   --wg-validate-summary-json .easy-node-logs/prod_gate_wg_validate_summary.json
 # optional: persist overall prod-gate summary JSON (step statuses + failure step/rc)
 #   --gate-summary-json .easy-node-logs/prod_gate_summary.json
+# optional: strict artifact signoff check after gate/bundle run
+#   ./scripts/easy_node.sh prod-gate-check --bundle-dir .easy-node-logs/prod_gate_bundle
 
 # same sequence + automatic diagnostics bundle (.tar.gz)
 sudo ./scripts/easy_node.sh three-machine-prod-bundle \

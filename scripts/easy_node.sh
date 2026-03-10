@@ -48,7 +48,8 @@ Usage:
   ./scripts/easy_node.sh three-machine-prod-gate [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--control-timeout-sec N] [--control-soak-rounds N] [--control-soak-pause-sec N] [--control-fault-every N] [--control-fault-command CMD] [--control-continue-on-fail [0|1]] [--wg-client-timeout-sec N] [--wg-session-sec N] [--wg-soak-rounds N] [--wg-soak-pause-sec N] [--wg-slo-profile off|recommended|strict] [--wg-max-consecutive-failures N] [--wg-max-round-duration-sec N] [--wg-max-recovery-sec N] [--wg-max-failure-class CLASS=N] [--wg-disallow-unknown-failure-class [0|1]] [--wg-strict-ingress-rehearsal [0|1]] [--wg-min-selection-lines N] [--wg-min-entry-operators N] [--wg-min-exit-operators N] [--wg-min-cross-operator-pairs N] [--wg-fault-every N] [--wg-fault-command CMD] [--wg-continue-on-fail [0|1]] [--wg-validate-summary-json PATH] [--wg-soak-summary-json PATH] [--gate-summary-json PATH] [--fault-every N] [--fault-command CMD] [--continue-on-fail [0|1]] [--strict-distinct [0|1]] [--skip-control-soak [0|1]] [--skip-wg [0|1]] [--skip-wg-soak [0|1]] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH] [--report-file PATH]
   ./scripts/easy_node.sh three-machine-prod-bundle [--bundle-dir PATH] [three-machine-prod-gate args...]
   ./scripts/easy_node.sh three-machine-reminder
-  ./scripts/easy_node.sh prod-wg-validate [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--exit-a-url URL] [--exit-b-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--control-timeout-sec N] [--client-timeout-sec N] [--wg-session-sec N] [--client-iface IFACE] [--client-proxy-addr HOST:PORT] [--client-inner-source udp|synthetic] [--inject-attempts N] [--strict-distinct [0|1]] [--skip-control-plane-check [0|1]] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH] [--report-file PATH]
+  ./scripts/easy_node.sh prod-gate-check [--bundle-dir PATH] [--gate-summary-json PATH] [--require-full-sequence [0|1]] [--require-wg-validate-ok [0|1]] [--require-wg-soak-ok [0|1]] [--max-wg-soak-failed-rounds N] [--show-json [0|1]]
+  ./scripts/easy_node.sh prod-wg-validate [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--exit-a-url URL] [--exit-b-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--control-timeout-sec N] [--client-timeout-sec N] [--wg-session-sec N] [--client-iface IFACE] [--client-proxy-addr HOST:PORT] [--client-inner-source udp|synthetic] [--inject-attempts N] [--strict-distinct [0|1]] [--skip-control-plane-check [0|1]] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH] [--summary-json PATH] [--report-file PATH]
   ./scripts/easy_node.sh prod-wg-soak [--rounds N] [--pause-sec N] [--fault-every N] [--fault-command CMD] [--continue-on-fail [0|1]] [--max-consecutive-failures N] [--strict-ingress-rehearsal [0|1]] [--summary-json PATH] [--report-file PATH] [prod-wg-validate args...]
   ./scripts/easy_node.sh prod-wg-strict-ingress-rehearsal [prod-wg-soak/prod-wg-validate args...]
   ./scripts/easy_node.sh pilot-runbook [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-a-url URL] [--issuer-b-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--rounds N] [--pause-sec N] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--client-min-selection-lines N] [--client-min-entry-operators N] [--client-min-exit-operators N] [--client-require-cross-operator-pair [0|1]] [--distinct-operators [0|1]] [--require-issuer-quorum [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]] [--bundle-dir PATH]
@@ -84,6 +85,7 @@ Notes:
   - three-machine-prod-gate runs production-grade 3-machine sequencing (strict control validate + control soak + real WG validate + WG soak).
   - three-machine-prod-bundle runs the same gate and always produces a shareable diagnostics tarball bundle.
   - three-machine-reminder prints the true 3-machine production test checklist.
+  - prod-gate-check verifies gate/bundle JSON artifacts against signoff policy and fails fast when criteria are not met.
   - prod-wg-validate/prod-wg-soak run real WireGuard dataplane validation from machine C (Linux root) in production strict profile.
   - prod-wg-strict-ingress-rehearsal runs a controlled negative rehearsal that should fail with failure class strict_ingress_policy.
   - bootstrap discovery mode lets you provide one directory URL and auto-discover other server hosts.
@@ -3413,6 +3415,11 @@ three_machine_prod_bundle() {
   "$bundle_script" "$@"
 }
 
+prod_gate_check() {
+  local check_script="${THREE_MACHINE_PROD_GATE_CHECK_SCRIPT:-$ROOT_DIR/scripts/prod_gate_check.sh}"
+  "$check_script" "$@"
+}
+
 three_machine_reminder() {
   cat <<'REMINDER'
 True 3-machine production reminder checklist
@@ -6424,6 +6431,10 @@ main() {
     three-machine-reminder)
       shift
       three_machine_reminder "$@"
+      ;;
+    prod-gate-check)
+      shift
+      prod_gate_check "$@"
       ;;
     prod-wg-validate)
       shift

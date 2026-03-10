@@ -43,6 +43,7 @@ run_step "client-vpn issuer quorum" ./scripts/integration_client_vpn_issuer_quor
 run_step "client-vpn operator floor" ./scripts/integration_client_vpn_operator_floor.sh
 run_step "3-machine prod-profile wiring" ./scripts/integration_3machine_prod_profile_wiring.sh
 run_step "3-machine prod wg soak stall guard" ./scripts/integration_3machine_prod_wg_soak_stall_guard.sh
+run_step "prod gate check integration" ./scripts/integration_prod_gate_check.sh
 run_step "distinct-operator anti-collusion" ./scripts/integration_distinct_operators.sh
 run_step "peer discovery operator cap" ./scripts/integration_peer_discovery_operator_cap.sh
 run_step "anonymous credential dispute" ./scripts/integration_anon_credential_dispute.sh
