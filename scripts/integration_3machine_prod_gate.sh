@@ -587,7 +587,7 @@ if [[ "$wg_slo_profile" != "off" ]]; then
   profile_min_entry=0
   profile_min_exit=0
   profile_min_pair=0
-  declare -a profile_failure_specs=("endpoint_connectivity=2" "timeout=2" "wg_dataplane_stall=1")
+  declare -a profile_failure_specs=("endpoint_connectivity=2" "timeout=2" "wg_dataplane_stall=1" "strict_ingress_policy=0")
   if [[ "$wg_slo_profile" == "strict" ]]; then
     profile_round_duration=120
     profile_recovery=180
@@ -596,7 +596,7 @@ if [[ "$wg_slo_profile" != "off" ]]; then
     profile_min_entry=2
     profile_min_exit=2
     profile_min_pair=2
-    profile_failure_specs=("endpoint_connectivity=1" "timeout=1" "wg_dataplane_stall=0")
+    profile_failure_specs=("endpoint_connectivity=1" "timeout=1" "wg_dataplane_stall=0" "strict_ingress_policy=0")
   fi
   if [[ "$wg_max_round_duration_set" == "0" ]]; then
     wg_max_round_duration_sec="$profile_round_duration"

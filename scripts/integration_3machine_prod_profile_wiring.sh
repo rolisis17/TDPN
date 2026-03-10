@@ -727,6 +727,12 @@ if ! rg -q -- '--max-failure-class wg_dataplane_stall=1' "$GATE_WG_SOAK_CAPTURE"
   cat "$WG_GATE_LOG_PROFILE"
   exit 1
 fi
+if ! rg -q -- '--max-failure-class strict_ingress_policy=0' "$GATE_WG_SOAK_CAPTURE"; then
+  echo "prod gate wiring failed: wg-slo-profile recommended missing strict_ingress_policy budget"
+  cat "$GATE_WG_SOAK_CAPTURE"
+  cat "$WG_GATE_LOG_PROFILE"
+  exit 1
+fi
 if ! rg -q -- '--disallow-unknown-failure-class 1' "$GATE_WG_SOAK_CAPTURE"; then
   echo "prod gate wiring failed: wg-slo-profile recommended missing disallow-unknown flag"
   cat "$GATE_WG_SOAK_CAPTURE"
@@ -804,6 +810,12 @@ if ! rg -q -- '--min-exit-operators 2' "$GATE_WG_SOAK_CAPTURE"; then
 fi
 if ! rg -q -- '--min-cross-operator-pairs 2' "$GATE_WG_SOAK_CAPTURE"; then
   echo "prod gate wiring failed: wg-slo-profile strict missing --min-cross-operator-pairs 2"
+  cat "$GATE_WG_SOAK_CAPTURE"
+  cat "$WG_GATE_LOG_PROFILE_STRICT"
+  exit 1
+fi
+if ! rg -q -- '--max-failure-class strict_ingress_policy=0' "$GATE_WG_SOAK_CAPTURE"; then
+  echo "prod gate wiring failed: wg-slo-profile strict missing strict_ingress_policy budget"
   cat "$GATE_WG_SOAK_CAPTURE"
   cat "$WG_GATE_LOG_PROFILE_STRICT"
   exit 1

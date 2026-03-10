@@ -483,4 +483,45 @@ if ! rg -q '"selection_min_entry_operators": 2' "$SUMMARY_DIVERSITY"; then
   exit 1
 fi
 
+# Case 9: strict ingress policy failures should classify distinctly.
+cat >"$FAKE_VALIDATE" <<'EOF_FAKE_STRICT_INGRESS'
+#!/usr/bin/env bash
+set -euo pipefail
+report=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --report-file)
+      report="${2:-}"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+if [[ -n "$report" ]]; then
+  echo "strict real-packet mode requires CLIENT_INNER_SOURCE=udp" >>"$report"
+fi
+exit 1
+EOF_FAKE_STRICT_INGRESS
+chmod +x "$FAKE_VALIDATE"
+
+OUT_STRICT_INGRESS="$TMP_DIR/out_strict_ingress.log"
+SUMMARY_STRICT_INGRESS="$TMP_DIR/soak_strict_ingress_summary.json"
+run_expect_fail "$OUT_STRICT_INGRESS" \
+  --rounds 1 \
+  --pause-sec 0 \
+  --summary-json "$SUMMARY_STRICT_INGRESS" \
+  --report-file "$TMP_DIR/soak_strict_ingress.log"
+if ! rg -q 'class=strict_ingress_policy' "$OUT_STRICT_INGRESS"; then
+  echo "missing expected strict_ingress_policy failure class"
+  cat "$OUT_STRICT_INGRESS"
+  exit 1
+fi
+if ! rg -q '"strict_ingress_policy": 1' "$SUMMARY_STRICT_INGRESS"; then
+  echo "summary json missing strict_ingress_policy class count"
+  cat "$SUMMARY_STRICT_INGRESS"
+  exit 1
+fi
+
 echo "3-machine prod wg soak stall guard integration check ok"

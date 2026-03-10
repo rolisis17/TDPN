@@ -221,7 +221,7 @@ sudo ./scripts/easy_node.sh three-machine-prod-gate \
 # optional: enforce WG soak SLO guards (round duration + recovery window)
 #   --wg-max-round-duration-sec 90 --wg-max-recovery-sec 120
 # optional: class-based failure budget gating
-#   --wg-max-failure-class endpoint_connectivity=2 --wg-max-failure-class timeout=1 --wg-disallow-unknown-failure-class 1
+#   --wg-max-failure-class endpoint_connectivity=2 --wg-max-failure-class timeout=1 --wg-max-failure-class strict_ingress_policy=0 --wg-disallow-unknown-failure-class 1
 # optional: inject controlled faults during control-plane soak stage
 #   --control-fault-every 3 --control-fault-command 'ssh user@<B_SERVER_IP> "cd <repo> && ./scripts/easy_node.sh server-down && ./scripts/easy_node.sh server-up --mode provider --public-host <B_SERVER_IP> --prod-profile 1"'
 # optional: inject controlled faults during real WG soak stage

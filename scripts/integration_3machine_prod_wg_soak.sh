@@ -54,6 +54,7 @@ Examples:
     --max-recovery-sec 120 \
     --max-failure-class endpoint_connectivity=2 \
     --max-failure-class timeout=1 \
+    --max-failure-class strict_ingress_policy=0 \
     --disallow-unknown-failure-class 1 \
     --min-selection-lines 8 \
     --min-entry-operators 2 \
@@ -98,6 +99,10 @@ classify_round_failure() {
   fi
 
   if [[ -f "$round_log" ]]; then
+    if rg -q 'strict real-packet mode requires CLIENT_INNER_SOURCE=udp|real-packet mode requires CLIENT_INNER_SOURCE=udp|WG_ONLY_MODE requires CLIENT_INNER_SOURCE=udp|BETA_STRICT_MODE requires CLIENT_INNER_SOURCE=udp' "$round_log"; then
+      echo "strict_ingress_policy"
+      return
+    fi
     if rg -q 'issuer quorum check failed|issuer operator floor not met|missing issuer identity|issuer feed missing|require-issuer-quorum' "$round_log"; then
       echo "issuer_quorum"
       return
