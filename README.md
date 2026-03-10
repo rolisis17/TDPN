@@ -230,6 +230,8 @@ sudo ./scripts/easy_node.sh three-machine-prod-gate \
 #   --wg-fault-every 3 --wg-fault-command 'ssh user@<B_SERVER_IP> "cd <repo> && ./scripts/easy_node.sh server-down && ./scripts/easy_node.sh server-up --mode provider --public-host <B_SERVER_IP> --prod-profile 1"'
 # optional: persist machine-readable WG soak summary JSON
 #   --wg-soak-summary-json .easy-node-logs/prod_gate_wg_soak_summary.json
+# optional: persist machine-readable WG validate summary JSON
+#   --wg-validate-summary-json .easy-node-logs/prod_gate_wg_validate_summary.json
 # optional: persist overall prod-gate summary JSON (step statuses + failure step/rc)
 #   --gate-summary-json .easy-node-logs/prod_gate_summary.json
 

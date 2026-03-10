@@ -53,6 +53,7 @@ Usage:
     [--wg-fault-every N] \
     [--wg-fault-command CMD] \
     [--wg-continue-on-fail [0|1]] \
+    [--wg-validate-summary-json PATH] \
     [--wg-soak-summary-json PATH] \
     [--gate-summary-json PATH] \
     [--fault-every N] \
@@ -271,6 +272,7 @@ fi
 if [[ -n "$(trim "$wg_max_failure_class_env")" ]]; then
   wg_max_failure_class_set=1
 fi
+wg_validate_summary_json="${THREE_MACHINE_PROD_GATE_WG_VALIDATE_SUMMARY_JSON:-}"
 wg_soak_summary_json="${THREE_MACHINE_PROD_GATE_WG_SOAK_SUMMARY_JSON:-}"
 gate_summary_json="${THREE_MACHINE_PROD_GATE_SUMMARY_JSON:-}"
 fault_every="${THREE_MACHINE_PROD_GATE_FAULT_EVERY:-0}"
@@ -477,6 +479,10 @@ while [[ $# -gt 0 ]]; do
         wg_continue_on_fail="1"
         shift
       fi
+      ;;
+    --wg-validate-summary-json)
+      wg_validate_summary_json="${2:-}"
+      shift 2
       ;;
     --wg-soak-summary-json)
       wg_soak_summary_json="${2:-}"
@@ -719,6 +725,10 @@ echo "[prod-gate] strict_distinct=$strict_distinct skip_control_soak=$skip_contr
 echo "[prod-gate] control_fault_every=$control_fault_every control_continue_on_fail=$control_continue_on_fail wg_fault_every=$wg_fault_every wg_continue_on_fail=$wg_continue_on_fail"
 echo "[prod-gate] wg_max_round_duration_sec=$wg_max_round_duration_sec wg_max_recovery_sec=$wg_max_recovery_sec wg_disallow_unknown_failure_class=$wg_disallow_unknown_failure_class wg_strict_ingress_rehearsal=$wg_strict_ingress_rehearsal wg_max_failure_class_specs=${#wg_max_failure_class_specs[@]} wg_min_selection_lines=$wg_min_selection_lines wg_min_entry_operators=$wg_min_entry_operators wg_min_exit_operators=$wg_min_exit_operators wg_min_cross_operator_pairs=$wg_min_cross_operator_pairs"
 gate_started_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+if [[ -z "$wg_validate_summary_json" ]]; then
+  wg_validate_summary_json="$step_dir/03_prod_wg_validate.summary.json"
+fi
+echo "[prod-gate] wg_validate_summary_json=$wg_validate_summary_json"
 if [[ -z "$wg_soak_summary_json" ]]; then
   wg_soak_summary_json="$step_dir/04_prod_wg_soak.summary.json"
 fi
@@ -739,6 +749,7 @@ emit_wg_soak_summary_once() {
 
 write_gate_summary_once() {
   local finished_at_utc gate_status
+  local wg_validate_status="" wg_validate_failed_step=""
   local wg_status="" wg_rounds_passed="0" wg_rounds_failed="0" wg_top_class="none" wg_top_count="0"
   local wg_top_pair
 
@@ -762,6 +773,10 @@ write_gate_summary_once() {
     wg_top_class="${wg_top_pair%%|*}"
     wg_top_count="${wg_top_pair##*|}"
   fi
+  if [[ -s "$wg_validate_summary_json" ]]; then
+    wg_validate_status="$(json_string_field "$wg_validate_summary_json" "status")"
+    wg_validate_failed_step="$(json_string_field "$wg_validate_summary_json" "failed_step")"
+  fi
 
   {
     echo "{"
@@ -778,6 +793,9 @@ write_gate_summary_once() {
     echo "    \"prod_wg_validate\": \"$(json_escape "$step_prod_wg_validate")\","
     echo "    \"prod_wg_soak\": \"$(json_escape "$step_prod_wg_soak")\""
     echo "  },"
+    echo "  \"wg_validate_summary_json\": \"$(json_escape "$wg_validate_summary_json")\","
+    echo "  \"wg_validate_status\": \"$(json_escape "$wg_validate_status")\","
+    echo "  \"wg_validate_failed_step\": \"$(json_escape "$wg_validate_failed_step")\","
     echo "  \"wg_soak_summary_json\": \"$(json_escape "$wg_soak_summary_json")\","
     echo "  \"wg_soak_status\": \"$(json_escape "$wg_status")\","
     echo "  \"wg_soak_rounds_passed\": $wg_rounds_passed,"
@@ -904,6 +922,7 @@ if [[ "$skip_wg" == "0" ]]; then
     --mtls-ca-file "$mtls_ca_file" \
     --mtls-client-cert-file "$mtls_client_cert_file" \
     --mtls-client-key-file "$mtls_client_key_file" \
+    --summary-json "$wg_validate_summary_json" \
     --report-file "$step_dir/03_prod_wg_validate.log"
 
   if [[ "$skip_wg_soak" == "0" ]]; then

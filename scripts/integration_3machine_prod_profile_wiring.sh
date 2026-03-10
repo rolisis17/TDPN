@@ -285,6 +285,7 @@ THREE_MACHINE_PROD_GATE_SCRIPT="$FAKE_GATE" \
   --wg-min-cross-operator-pairs 3 \
   --strict-distinct 1 \
   --wg-max-consecutive-failures 3 \
+  --wg-validate-summary-json /tmp/prod_gate_wg_validate_summary.json \
   --wg-soak-summary-json /tmp/prod_gate_wg_soak_summary.json \
   --gate-summary-json /tmp/prod_gate_summary.json \
   --control-soak-rounds 2 \
@@ -307,6 +308,11 @@ if ! rg -q -- '--wg-max-consecutive-failures 3' "$GATE_CAPTURE"; then
 fi
 if ! rg -q -- '--wg-soak-summary-json /tmp/prod_gate_wg_soak_summary.json' "$GATE_CAPTURE"; then
   echo "easy_node prod gate wiring failed: --wg-soak-summary-json missing"
+  cat "$GATE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--wg-validate-summary-json /tmp/prod_gate_wg_validate_summary.json' "$GATE_CAPTURE"; then
+  echo "easy_node prod gate wiring failed: --wg-validate-summary-json missing"
   cat "$GATE_CAPTURE"
   exit 1
 fi
@@ -437,6 +443,10 @@ if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh three-machine-prod-gate --help
   echo "easy_node three-machine-prod-gate help missing --wg-slo-profile"
   exit 1
 fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh three-machine-prod-gate --help | rg -q -- '--wg-validate-summary-json'; then
+  echo "easy_node three-machine-prod-gate help missing --wg-validate-summary-json"
+  exit 1
+fi
 if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh three-machine-prod-gate --help | rg -q -- '--wg-min-selection-lines'; then
   echo "easy_node three-machine-prod-gate help missing --wg-min-selection-lines"
   exit 1
@@ -558,6 +568,27 @@ cat >"$FAKE_GATE_WG_VALIDATE" <<'EOF_FAKE_GATE_WG_VALIDATE'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >>"${GATE_WG_VALIDATE_CAPTURE_FILE:?}"
+summary_json=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --summary-json)
+      summary_json="${2:-}"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+if [[ -n "$summary_json" ]]; then
+  mkdir -p "$(dirname "$summary_json")"
+  cat >"$summary_json" <<'EOF_VALIDATE_SUMMARY'
+{
+  "status": "ok",
+  "failed_step": ""
+}
+EOF_VALIDATE_SUMMARY
+fi
 exit 0
 EOF_FAKE_GATE_WG_VALIDATE
 
@@ -703,6 +734,12 @@ THREE_MACHINE_PROD_GATE_ALLOW_NON_ROOT=1 \
 if [[ ! -s "$GATE_WG_VALIDATE_CAPTURE" || ! -s "$GATE_WG_SOAK_CAPTURE" ]]; then
   echo "prod gate wiring failed: WG scripts should run when --skip-wg 0"
   cat "$GATE_WG_VALIDATE_CAPTURE" "$GATE_WG_SOAK_CAPTURE"
+  cat "$WG_GATE_LOG"
+  exit 1
+fi
+if ! rg -q -- '--summary-json' "$GATE_WG_VALIDATE_CAPTURE"; then
+  echo "prod gate wiring failed: WG validate call missing --summary-json forwarding"
+  cat "$GATE_WG_VALIDATE_CAPTURE"
   cat "$WG_GATE_LOG"
   exit 1
 fi
@@ -956,6 +993,18 @@ if ! rg -q '"wg_soak_status": "fail"' "$GATE_SUMMARY_FILE"; then
   cat "$WG_GATE_LOG"
   exit 1
 fi
+if ! rg -q '"wg_validate_summary_json": "' "$GATE_SUMMARY_FILE"; then
+  echo "prod gate wiring failed: gate summary missing WG validate summary path field"
+  cat "$GATE_SUMMARY_FILE"
+  cat "$WG_GATE_LOG"
+  exit 1
+fi
+if ! rg -q '"wg_validate_status": "ok"' "$GATE_SUMMARY_FILE"; then
+  echo "prod gate wiring failed: gate summary missing WG validate status"
+  cat "$GATE_SUMMARY_FILE"
+  cat "$WG_GATE_LOG"
+  exit 1
+fi
 if ! rg -q '"prod_wg_soak": "ok"' "$GATE_SUMMARY_FILE"; then
   echo "prod gate wiring failed: gate summary missing per-step status for prod_wg_soak"
   cat "$GATE_SUMMARY_FILE"
@@ -1154,12 +1203,17 @@ set -euo pipefail
 printf '%s\n' "$*" >>"${BUNDLE_CAPTURE_FILE:?}"
 
 report_file=""
+wg_validate_summary=""
 wg_summary=""
 gate_summary=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --report-file)
       report_file="${2:-}"
+      shift 2
+      ;;
+    --wg-validate-summary-json)
+      wg_validate_summary="${2:-}"
       shift 2
       ;;
     --wg-soak-summary-json)
@@ -1185,6 +1239,15 @@ if [[ -n "$report_file" ]]; then
     printf '[prod-gate] fake gate running\n'
     printf '[prod-gate] step_logs: %s\n' "${BUNDLE_SOURCE_STEP_LOGS_DIR}"
   } >"$report_file"
+fi
+if [[ -n "$wg_validate_summary" ]]; then
+  mkdir -p "$(dirname "$wg_validate_summary")"
+  cat >"$wg_validate_summary" <<'EOF_WG_VALIDATE_SUMMARY'
+{
+  "status": "ok",
+  "failed_step": ""
+}
+EOF_WG_VALIDATE_SUMMARY
 fi
 if [[ -n "$wg_summary" ]]; then
   mkdir -p "$(dirname "$wg_summary")"
@@ -1242,13 +1305,29 @@ if [[ ! -f "$BUNDLE_DIR_OK/step_logs/marker.log" ]]; then
   cat /tmp/integration_3machine_prod_profile_wiring_bundle_ok.log
   exit 1
 fi
+if [[ ! -f "$BUNDLE_DIR_OK/prod_wg_validate_summary.json" ]]; then
+  echo "prod gate bundle wiring failed: WG validate summary missing in bundle dir"
+  find "$BUNDLE_DIR_OK" -maxdepth 2 -type f -print || true
+  cat /tmp/integration_3machine_prod_profile_wiring_bundle_ok.log
+  exit 1
+fi
 if ! rg -q -- '--strict-distinct 1' "$BUNDLE_CAPTURE"; then
   echo "prod gate bundle wiring failed: forwarded gate args missing"
   cat "$BUNDLE_CAPTURE"
   exit 1
 fi
+if ! rg -q -- '--wg-validate-summary-json' "$BUNDLE_CAPTURE"; then
+  echo "prod gate bundle wiring failed: missing --wg-validate-summary-json forwarding"
+  cat "$BUNDLE_CAPTURE"
+  exit 1
+fi
 if ! rg -q 'gate_rc=0' "$BUNDLE_DIR_OK/metadata.txt"; then
   echo "prod gate bundle wiring failed: metadata missing gate_rc=0"
+  cat "$BUNDLE_DIR_OK/metadata.txt"
+  exit 1
+fi
+if ! rg -q 'wg_validate_summary_json=' "$BUNDLE_DIR_OK/metadata.txt"; then
+  echo "prod gate bundle wiring failed: metadata missing wg_validate_summary_json entry"
   cat "$BUNDLE_DIR_OK/metadata.txt"
   exit 1
 fi

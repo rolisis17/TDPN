@@ -38,6 +38,7 @@ Usage:
     [--mtls-ca-file PATH] \
     [--mtls-client-cert-file PATH] \
     [--mtls-client-key-file PATH] \
+    [--summary-json PATH] \
     [--report-file PATH]
 
 Purpose:
@@ -230,6 +231,16 @@ metric_int_field() {
   echo "$value"
 }
 
+json_escape() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//$'\n'/\\n}"
+  value="${value//$'\r'/\\r}"
+  value="${value//$'\t'/\\t}"
+  printf '%s' "$value"
+}
+
 looks_loopback() {
   local value="$1"
   [[ "$value" == *"127.0.0.1"* || "$value" == *"localhost"* ]]
@@ -279,6 +290,7 @@ skip_control_plane_check="0"
 mtls_ca_file="${MTLS_CA_FILE:-$ROOT_DIR/deploy/tls/ca.crt}"
 mtls_client_cert_file="${MTLS_CLIENT_CERT_FILE:-$ROOT_DIR/deploy/tls/client.crt}"
 mtls_client_key_file="${MTLS_CLIENT_KEY_FILE:-$ROOT_DIR/deploy/tls/client.key}"
+summary_json="${THREE_MACHINE_PROD_WG_VALIDATE_SUMMARY_JSON:-}"
 report_file=""
 
 while [[ $# -gt 0 ]]; do
@@ -401,6 +413,10 @@ while [[ $# -gt 0 ]]; do
       report_file="${2:-}"
       shift 2
       ;;
+    --summary-json)
+      summary_json="${2:-}"
+      shift 2
+      ;;
     -h|--help|help)
       usage
       exit 0
@@ -476,6 +492,131 @@ exec > >(tee -a "$report_file") 2>&1
 echo "[3machine-prod-wg] started at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "[3machine-prod-wg] report: $report_file"
 echo "[3machine-prod-wg] client_inner_source=$client_inner_source"
+if [[ -z "$summary_json" ]]; then
+  summary_json="${report_file%.log}.summary.json"
+fi
+echo "[3machine-prod-wg] summary_json=$summary_json"
+
+validate_started_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+validate_status="fail"
+validate_failed_step=""
+summary_written="0"
+node_pid=""
+client_key_dir=""
+client_log=""
+baseline_accepted_a="0"
+baseline_accepted_b="0"
+latest_accepted_a="0"
+latest_accepted_b="0"
+selection_lines="0"
+client_uplink_summary_observed="0"
+hs="0"
+rx="0"
+tx="0"
+exit_wg_pub=""
+
+fail_step() {
+  local step="$1"
+  shift
+  validate_failed_step="$step"
+  echo "$*"
+  exit 1
+}
+
+cleanup_resources() {
+  if [[ -n "${node_pid:-}" ]]; then
+    kill "$node_pid" >/dev/null 2>&1 || true
+    wait "$node_pid" >/dev/null 2>&1 || true
+  fi
+  ip link delete "$client_iface" >/dev/null 2>&1 || true
+  if [[ -n "${client_key_dir:-}" ]]; then
+    rm -rf "$client_key_dir"
+  fi
+}
+
+write_summary_once() {
+  local finished_at_utc delta_a delta_b delta_total
+  if [[ "$summary_written" == "1" ]]; then
+    return
+  fi
+  mkdir -p "$(dirname "$summary_json")"
+  finished_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  delta_a=$((latest_accepted_a - baseline_accepted_a))
+  delta_b=$((latest_accepted_b - baseline_accepted_b))
+  delta_total=$((delta_a + delta_b))
+  if [[ "$delta_a" -lt 0 ]]; then
+    delta_a=0
+  fi
+  if [[ "$delta_b" -lt 0 ]]; then
+    delta_b=0
+  fi
+  if [[ "$delta_total" -lt 0 ]]; then
+    delta_total=0
+  fi
+
+  {
+    echo "{"
+    echo "  \"status\": \"$(json_escape "$validate_status")\","
+    echo "  \"failed_step\": \"$(json_escape "$validate_failed_step")\","
+    echo "  \"started_at_utc\": \"$(json_escape "$validate_started_at_utc")\","
+    echo "  \"finished_at_utc\": \"$(json_escape "$finished_at_utc")\","
+    echo "  \"report_file\": \"$(json_escape "$report_file")\","
+    echo "  \"summary_json\": \"$(json_escape "$summary_json")\","
+    echo "  \"client_log\": \"$(json_escape "$client_log")\","
+    echo "  \"directory_a\": \"$(json_escape "$directory_a")\","
+    echo "  \"directory_b\": \"$(json_escape "$directory_b")\","
+    echo "  \"issuer_url\": \"$(json_escape "$issuer_url")\","
+    echo "  \"entry_url\": \"$(json_escape "$entry_url")\","
+    echo "  \"exit_url\": \"$(json_escape "$exit_url")\","
+    echo "  \"exit_a_url\": \"$(json_escape "$exit_a_url")\","
+    echo "  \"exit_b_url\": \"$(json_escape "$exit_b_url")\","
+    echo "  \"strict_distinct\": $strict_distinct,"
+    echo "  \"client_inner_source\": \"$(json_escape "$client_inner_source")\","
+    echo "  \"control_plane_check_skipped\": $skip_control_plane_check,"
+    echo "  \"baseline\": {"
+    echo "    \"exit_a_accepted_packets\": $baseline_accepted_a,"
+    echo "    \"exit_b_accepted_packets\": $baseline_accepted_b"
+    echo "  },"
+    echo "  \"latest\": {"
+    echo "    \"exit_a_accepted_packets\": $latest_accepted_a,"
+    echo "    \"exit_b_accepted_packets\": $latest_accepted_b"
+    echo "  },"
+    echo "  \"deltas\": {"
+    echo "    \"exit_a_accepted_packets\": $delta_a,"
+    echo "    \"exit_b_accepted_packets\": $delta_b,"
+    echo "    \"accepted_packets_total\": $delta_total"
+    echo "  },"
+    echo "  \"wireguard\": {"
+    echo "    \"client_iface\": \"$(json_escape "$client_iface")\","
+    echo "    \"client_proxy_addr\": \"$(json_escape "$client_proxy_addr")\","
+    echo "    \"exit_peer_pubkey\": \"$(json_escape "$exit_wg_pub")\","
+    echo "    \"handshake_epoch\": $hs,"
+    echo "    \"rx_bytes\": $rx,"
+    echo "    \"tx_bytes\": $tx"
+    echo "  },"
+    echo "  \"selection_summary_lines\": $selection_lines,"
+    echo "  \"client_uplink_summary_observed\": $client_uplink_summary_observed"
+    echo "}"
+  } >"$summary_json"
+
+  summary_written="1"
+}
+
+on_exit_3machine_prod_wg() {
+  local rc=$?
+  if [[ "$rc" -eq 0 ]]; then
+    validate_status="ok"
+  else
+    validate_status="fail"
+    if [[ -z "$validate_failed_step" ]]; then
+      validate_failed_step="runtime"
+    fi
+  fi
+  write_summary_once
+  cleanup_resources
+  return "$rc"
+}
+trap 'on_exit_3machine_prod_wg' EXIT
 
 directory_a="$(trim_url "$directory_a")"
 directory_b="$(trim_url "$directory_b")"
@@ -511,9 +652,7 @@ if [[ -n "$bootstrap_directory" ]]; then
 fi
 
 if [[ -z "$directory_a" || -z "$directory_b" || -z "$issuer_url" || -z "$entry_url" || -z "$exit_url" ]]; then
-  echo "missing required endpoints"
-  echo "set --directory-a/--directory-b/--issuer-url/--entry-url/--exit-url or use --bootstrap-directory"
-  exit 2
+  fail_step "config_endpoints" "missing required endpoints (set --directory-a/--directory-b/--issuer-url/--entry-url/--exit-url or use --bootstrap-directory)"
 fi
 
 if [[ -z "$exit_a_url" ]]; then
@@ -525,8 +664,7 @@ fi
 
 for f in "$mtls_ca_file" "$mtls_client_cert_file" "$mtls_client_key_file"; do
   if [[ ! -f "$f" ]]; then
-    echo "missing mTLS file: $f"
-    exit 2
+    fail_step "config_mtls" "missing mTLS file: $f"
   fi
 done
 
@@ -537,13 +675,13 @@ for endpoint in "$directory_a" "$directory_b" "$issuer_url" "$entry_url" "$exit_
   fi
 done
 
-wait_http_ok "${directory_a}/v1/relays" "directory A" 20
-wait_http_ok "${directory_b}/v1/relays" "directory B" 20
-wait_http_ok "${issuer_url}/v1/pubkeys" "issuer" 20
-wait_http_ok "${entry_url}/v1/health" "entry" 20
-wait_http_ok "${exit_url}/v1/health" "exit" 20
-wait_http_ok "${exit_a_url}/v1/metrics" "exit A metrics" 20
-wait_http_ok "${exit_b_url}/v1/metrics" "exit B metrics" 20
+wait_http_ok "${directory_a}/v1/relays" "directory A" 20 || fail_step "control_plane_health" "directory A did not become healthy at ${directory_a}/v1/relays"
+wait_http_ok "${directory_b}/v1/relays" "directory B" 20 || fail_step "control_plane_health" "directory B did not become healthy at ${directory_b}/v1/relays"
+wait_http_ok "${issuer_url}/v1/pubkeys" "issuer" 20 || fail_step "control_plane_health" "issuer did not become healthy at ${issuer_url}/v1/pubkeys"
+wait_http_ok "${entry_url}/v1/health" "entry" 20 || fail_step "control_plane_health" "entry did not become healthy at ${entry_url}/v1/health"
+wait_http_ok "${exit_url}/v1/health" "exit" 20 || fail_step "control_plane_health" "exit did not become healthy at ${exit_url}/v1/health"
+wait_http_ok "${exit_a_url}/v1/metrics" "exit A metrics" 20 || fail_step "control_plane_health" "exit A metrics did not become healthy at ${exit_a_url}/v1/metrics"
+wait_http_ok "${exit_b_url}/v1/metrics" "exit B metrics" 20 || fail_step "control_plane_health" "exit B metrics did not become healthy at ${exit_b_url}/v1/metrics"
 
 baseline_metrics_a="$(curl -fsS "${exit_a_url}/v1/metrics" 2>/dev/null || true)"
 baseline_metrics_b="$(curl -fsS "${exit_b_url}/v1/metrics" 2>/dev/null || true)"
@@ -579,32 +717,20 @@ if [[ "$skip_control_plane_check" == "0" ]]; then
   if [[ -n "$client_anon_cred" ]]; then
     validate_cmd+=(--anon-cred "$client_anon_cred")
   fi
-  "${validate_cmd[@]}"
+  if ! "${validate_cmd[@]}"; then
+    fail_step "control_plane_precheck" "control-plane precheck failed"
+  fi
 fi
 
 client_log="$(dirname "$report_file")/privacynode_3machine_prod_wg_client_$(date +%Y%m%d_%H%M%S).log"
 client_key_dir="$(mktemp -d)"
 client_key_file="$client_key_dir/client.key"
 client_pub_file="$client_key_dir/client.pub"
-node_pid=""
-
-cleanup() {
-  if [[ -n "${node_pid:-}" ]]; then
-    kill "$node_pid" >/dev/null 2>&1 || true
-    wait "$node_pid" >/dev/null 2>&1 || true
-  fi
-  ip link delete "$client_iface" >/dev/null 2>&1 || true
-  if [[ -n "${client_key_dir:-}" ]]; then
-    rm -rf "$client_key_dir"
-  fi
-}
-trap cleanup EXIT
 
 assert_port_free_udp "$client_proxy_addr"
 ip link delete "$client_iface" >/dev/null 2>&1 || true
 if ! ip link add dev "$client_iface" type wireguard >/dev/null 2>&1; then
-  echo "failed to create wireguard interface $client_iface"
-  exit 1
+  fail_step "wg_interface_create" "failed to create wireguard interface $client_iface"
 fi
 
 wg genkey >"$client_key_file"
@@ -612,8 +738,7 @@ chmod 600 "$client_key_file"
 wg pubkey <"$client_key_file" >"$client_pub_file"
 client_wg_pub="$(tr -d '\r\n' <"$client_pub_file")"
 if [[ -z "$client_wg_pub" ]]; then
-  echo "failed to derive client WG public key"
-  exit 1
+  fail_step "wg_client_key" "failed to derive client WG public key"
 fi
 
 rm -f "$client_log"
@@ -664,9 +789,8 @@ node_pid=$!
 ready=0
 for _ in $(seq 1 300); do
   if ! kill -0 "$node_pid" >/dev/null 2>&1; then
-    echo "client process exited before session setup"
     cat "$client_log"
-    exit 1
+    fail_step "client_startup" "client process exited before session setup"
   fi
   if rg -q "client received wg-session config:" "$client_log"; then
     ready=1
@@ -675,16 +799,14 @@ for _ in $(seq 1 300); do
   sleep 0.2
 done
 if [[ "$ready" -ne 1 ]]; then
-  echo "client did not reach wg session config stage"
   cat "$client_log"
-  exit 1
+  fail_step "client_session_config" "client did not reach wg session config stage"
 fi
 
 exit_wg_pub="$(rg -o 'exit_pub=[^ ]+' "$client_log" | tail -n 1 | sed -E 's/^exit_pub=//' | tr -d '\r\n')"
 if [[ -z "$exit_wg_pub" ]]; then
-  echo "unable to parse exit wg public key from client log"
   cat "$client_log"
-  exit 1
+  fail_step "wg_peer_parse" "unable to parse exit wg public key from client log"
 fi
 
 peer_ok=0
@@ -696,10 +818,9 @@ for _ in $(seq 1 120); do
   sleep 0.2
 done
 if [[ "$peer_ok" -ne 1 ]]; then
-  echo "client interface missing expected exit peer $exit_wg_pub"
   wg show "$client_iface" || true
   cat "$client_log"
-  exit 1
+  fail_step "wg_peer_check" "client interface missing expected exit peer $exit_wg_pub"
 fi
 
 endpoint_ok=0
@@ -714,10 +835,9 @@ for _ in $(seq 1 120); do
   sleep 0.2
 done
 if [[ "$endpoint_ok" -ne 1 ]]; then
-  echo "client interface endpoint was not set to proxy addr $client_proxy_addr"
   wg show "$client_iface" endpoints || true
   cat "$client_log"
-  exit 1
+  fail_step "wg_endpoint_check" "client interface endpoint was not set to proxy addr $client_proxy_addr"
 fi
 
 for _ in $(seq 1 "$inject_attempts"); do
@@ -742,11 +862,10 @@ for _ in $(seq 1 180); do
   sleep 0.25
 done
 if [[ "$hs_ok" -ne 1 ]]; then
-  echo "wireguard handshake/transfer did not become active on client iface"
   wg show "$client_iface" latest-handshakes || true
   wg show "$client_iface" transfer || true
   cat "$client_log"
-  exit 1
+  fail_step "wg_handshake" "wireguard handshake/transfer did not become active on client iface"
 fi
 
 selected_ok=0
@@ -758,9 +877,8 @@ for _ in $(seq 1 120); do
   sleep 0.25
 done
 if [[ "$selected_ok" -ne 1 ]]; then
-  echo "client did not emit selection summary lines"
   cat "$client_log"
-  exit 1
+  fail_step "selection_summary" "client did not emit selection summary lines"
 fi
 
 if [[ "$strict_distinct" == "1" ]]; then
@@ -779,7 +897,7 @@ if [[ "$strict_distinct" == "1" ]]; then
     '; then
     echo "strict distinct check failed: found same operator for entry and exit"
     rg 'client selected entry=' "$client_log" || true
-    exit 1
+    fail_step "selection_distinct" "strict distinct check failed: found same operator for entry and exit"
   fi
 fi
 
@@ -806,13 +924,20 @@ if [[ "$metrics_ok" -ne 1 ]]; then
   echo "exit A metrics: $latest_metrics_a"
   echo "exit B metrics: $latest_metrics_b"
   cat "$client_log"
-  exit 1
+  fail_step "dataplane_metrics" "exit metrics did not advance accepted_packets on A or B"
 fi
 
 if rg -q "client wg-kernel proxy uplink packets=[1-9][0-9]*" "$client_log"; then
+  client_uplink_summary_observed="1"
   echo "[3machine-prod-wg] client uplink summary observed"
 else
+  client_uplink_summary_observed="0"
   echo "[3machine-prod-wg] note: client uplink summary log not observed before completion (metrics/handshake still verified)"
+fi
+
+selection_lines="$(rg -c 'client selected entry=' "$client_log" || true)"
+if [[ -z "$selection_lines" || ! "$selection_lines" =~ ^[0-9]+$ ]]; then
+  selection_lines="0"
 fi
 
 echo "[3machine-prod-wg] client log: $client_log"
@@ -823,3 +948,5 @@ delta_b=$((latest_accepted_b - baseline_accepted_b))
 delta_total=$((delta_a + delta_b))
 echo "[3machine-prod-wg] dataplane-summary handshake_epoch=${hs:-0} rx_bytes=${rx:-0} tx_bytes=${tx:-0} exit_a_accepted_packets=${latest_accepted_a} exit_b_accepted_packets=${latest_accepted_b} accepted_delta_a=${delta_a} accepted_delta_b=${delta_b} accepted_delta_total=${delta_total}"
 echo "[3machine-prod-wg] success"
+echo "[3machine-prod-wg] summary: $summary_json"
+validate_status="ok"

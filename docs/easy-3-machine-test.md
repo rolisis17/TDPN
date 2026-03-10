@@ -257,6 +257,7 @@ sudo ./scripts/easy_node.sh three-machine-prod-gate \
   --entry-url https://A_PUBLIC_IP_OR_DNS:8083 \
   --exit-url https://A_PUBLIC_IP_OR_DNS:8084 \
   --wg-max-consecutive-failures 2 \
+  --wg-validate-summary-json .easy-node-logs/prod_gate_wg_validate_summary.json \
   --wg-soak-summary-json .easy-node-logs/prod_gate_wg_soak_summary.json \
   --gate-summary-json .easy-node-logs/prod_gate_summary.json \
   --strict-distinct 1

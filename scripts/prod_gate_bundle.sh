@@ -18,6 +18,7 @@ Usage:
 Purpose:
   Run production 3-machine gate and always produce a shareable diagnostics bundle:
   - prod gate report log
+  - WG validate summary JSON
   - WG soak summary JSON
   - gate summary JSON
   - copied gate step logs (when available)
@@ -83,6 +84,7 @@ exec > >(tee -a "$bundle_log") 2>&1
 
 started_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 report_file="$bundle_dir/prod_gate.log"
+wg_validate_summary_json="$bundle_dir/prod_wg_validate_summary.json"
 wg_soak_summary_json="$bundle_dir/prod_wg_soak_summary.json"
 gate_summary_json="$bundle_dir/prod_gate_summary.json"
 
@@ -94,6 +96,7 @@ set +e
 "$GATE_SCRIPT" \
   "${gate_args[@]}" \
   --report-file "$report_file" \
+  --wg-validate-summary-json "$wg_validate_summary_json" \
   --wg-soak-summary-json "$wg_soak_summary_json" \
   --gate-summary-json "$gate_summary_json"
 gate_rc=$?
@@ -125,6 +128,7 @@ bundle_dir=$bundle_dir
 bundle_log=$bundle_log
 report_file=$report_file
 wg_soak_summary_json=$wg_soak_summary_json
+wg_validate_summary_json=$wg_validate_summary_json
 gate_summary_json=$gate_summary_json
 step_logs_dir=$step_logs_dir
 EOF
