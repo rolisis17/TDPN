@@ -40,6 +40,21 @@ func TestAllowSyntheticFallback(t *testing.T) {
 			client: Client{wgBackend: "noop", liveWGMode: false, disableSynthetic: true},
 			want:   false,
 		},
+		{
+			name:   "wg-only-enforced",
+			client: Client{wgBackend: "noop", liveWGMode: false, wgOnlyMode: true},
+			want:   false,
+		},
+		{
+			name:   "beta-strict-enforced",
+			client: Client{wgBackend: "noop", liveWGMode: false, betaStrict: true},
+			want:   false,
+		},
+		{
+			name:   "prod-strict-enforced",
+			client: Client{wgBackend: "noop", liveWGMode: false, prodStrict: true},
+			want:   false,
+		},
 	}
 
 	for _, tc := range cases {
@@ -48,6 +63,20 @@ func TestAllowSyntheticFallback(t *testing.T) {
 				t.Fatalf("allowSyntheticFallback()=%t want=%t", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestSendOpaqueTrafficStrictRealPacketRejectsNonUDPSource(t *testing.T) {
+	c := &Client{
+		wgOnlyMode:  true,
+		innerSource: "synthetic",
+	}
+	err := c.sendOpaqueTraffic(context.Background(), "127.0.0.1:51980", "session-id")
+	if err == nil {
+		t.Fatalf("expected strict real-packet mode validation error")
+	}
+	if !strings.Contains(err.Error(), "strict real-packet mode requires CLIENT_INNER_SOURCE=udp") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

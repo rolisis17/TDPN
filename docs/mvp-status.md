@@ -20,6 +20,7 @@
 - Command-backend startup sync defaults: client now defaults `CLIENT_STARTUP_SYNC_TIMEOUT_SEC=8` and exit defaults `EXIT_STARTUP_SYNC_TIMEOUT_SEC=8` in `*_WG_BACKEND=command` mode (strict mode still enforces stronger defaults), reducing control-plane startup race failures in real-WG profiles.
 - Client startup defaults now auto-select `CLIENT_INNER_SOURCE=udp` when unset in command/backend proxy/live/strict paths, reducing misconfig failures for real-WG-oriented profiles while preserving `synthetic` default in noop mode.
 - Client beta strict-mode runtime now fail-closes when `CLIENT_INNER_SOURCE!=udp`, even when kernel-proxy bridging is enabled, to keep strict profiles aligned with real UDP ingress semantics.
+- Client strict runtime enforcement now fails closed for all strict profiles (`WG_ONLY_MODE`, `BETA_STRICT_MODE`, `PROD_STRICT_MODE`) when opaque ingress is not UDP, preventing synthetic-path fallback even under runtime drift.
 - Directory/issuer readiness endpoints (`GET /v1/health`) for lightweight startup dependency checks.
 - Reputation-weighted exit ordering with exploration floor (when signed score metadata is present).
 - Signed directory selection feed endpoint with client-side signature/expiry verification and optional feed vote thresholding.

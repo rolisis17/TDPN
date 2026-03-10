@@ -1261,6 +1261,9 @@ func (c *Client) runWGKernelProxyTraffic(ctx context.Context, proxy *clientWGKer
 }
 
 func (c *Client) sendOpaqueTraffic(ctx context.Context, entryDataAddr string, sessionID string) error {
+	if c.requiresUDPOpaqueIngress() && c.innerSource != "udp" {
+		return fmt.Errorf("strict real-packet mode requires CLIENT_INNER_SOURCE=udp")
+	}
 	entryUDP, err := net.ResolveUDPAddr("udp", entryDataAddr)
 	if err != nil {
 		return err
@@ -1302,7 +1305,7 @@ func (c *Client) sendOpaqueTraffic(ctx context.Context, entryDataAddr string, se
 			log.Printf("client forwarded opaque udp packets count=%d", count)
 		}
 		if !c.allowSyntheticFallback() && count == 0 {
-			return fmt.Errorf("command/live WG mode received no UDP packets from %s", c.innerUDPAddr)
+			return fmt.Errorf("real-packet mode received no UDP packets from %s", c.innerUDPAddr)
 		}
 	}
 
@@ -1310,7 +1313,7 @@ func (c *Client) sendOpaqueTraffic(ctx context.Context, entryDataAddr string, se
 	if upCount == 0 {
 		if !c.allowSyntheticFallback() {
 			if c.innerSource != "udp" {
-				return fmt.Errorf("command WG mode requires CLIENT_INNER_SOURCE=udp")
+				return fmt.Errorf("real-packet mode requires CLIENT_INNER_SOURCE=udp")
 			}
 			return fmt.Errorf("no opaque UDP packets received from %s", c.innerUDPAddr)
 		}
@@ -1406,7 +1409,7 @@ func (c *Client) runOpaqueSession(ctx context.Context, outerConn *net.UDPConn, s
 		if !c.allowSyntheticFallback() {
 			cancel()
 			workers.Wait()
-			return fmt.Errorf("command WG mode requires CLIENT_INNER_SOURCE=udp")
+			return fmt.Errorf("real-packet mode requires CLIENT_INNER_SOURCE=udp")
 		}
 		wgLike := []byte{1, 0, 0, 0, 10, 11, 12, 13}
 		if err := sendOpaque(wgLike); err != nil {
@@ -1429,11 +1432,11 @@ func (c *Client) runOpaqueSession(ctx context.Context, outerConn *net.UDPConn, s
 		case <-time.After(c.opaqueInitialUplinkTimeout()):
 			cancel()
 			workers.Wait()
-			return fmt.Errorf("command/live WG mode received no UDP packets from %s within %s", c.innerUDPAddr, c.opaqueInitialUplinkTimeout())
+			return fmt.Errorf("real-packet mode received no UDP packets from %s within %s", c.innerUDPAddr, c.opaqueInitialUplinkTimeout())
 		case <-sessionCtx.Done():
 			cancel()
 			workers.Wait()
-			return fmt.Errorf("command/live WG mode received no UDP packets from %s", c.innerUDPAddr)
+			return fmt.Errorf("real-packet mode received no UDP packets from %s", c.innerUDPAddr)
 		}
 	}
 
@@ -1807,7 +1810,14 @@ func (c *Client) tryReuseActiveSession(ctx context.Context, now time.Time) bool 
 }
 
 func (c *Client) allowSyntheticFallback() bool {
+	if c.requiresUDPOpaqueIngress() {
+		return false
+	}
 	return !c.disableSynthetic && !c.liveWGMode && c.wgBackend != "command"
+}
+
+func (c *Client) requiresUDPOpaqueIngress() bool {
+	return c.wgOnlyMode || c.betaStrict || c.prodStrict
 }
 
 func bootstrapDelayForFailures(base time.Duration, maxDelay time.Duration, failures int) time.Duration {

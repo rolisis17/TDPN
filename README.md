@@ -624,6 +624,7 @@ Opaque mode (`DATA_PLANE_MODE=opaque`):
 - if `CLIENT_INNER_SOURCE` is unset, client now auto-defaults to `udp` for command backend, kernel-proxy, live-WG, and strict/WG-only profiles
 - `BETA_STRICT_MODE=1` now explicitly requires `CLIENT_INNER_SOURCE=udp` (fail-closed if misconfigured)
 - if `CLIENT_DISABLE_SYNTHETIC_FALLBACK=1`, client requires `CLIENT_INNER_SOURCE=udp` (or `CLIENT_WG_KERNEL_PROXY=1`) and fails bootstrap instead of generating synthetic opaque payloads
+- strict client profiles (`WG_ONLY_MODE`, `BETA_STRICT_MODE`, `PROD_STRICT_MODE`) now fail-closed at runtime for non-UDP opaque ingress (`CLIENT_INNER_SOURCE!=udp`) even if config validation is bypassed
 - if `EXIT_OPAQUE_SINK_ADDR` is set, exit emits accepted opaque payload bytes to that UDP address
 - if `EXIT_OPAQUE_SOURCE_ADDR` is set, exit accepts raw downlink payload bytes and forwards them into active sessions
 - if `EXIT_WG_KERNEL_PROXY=1`, exit maps accepted opaque WG payloads into local WG UDP (`EXIT_WG_LISTEN_PORT`) and relays WG downlink packets back into session-framed opaque returns
