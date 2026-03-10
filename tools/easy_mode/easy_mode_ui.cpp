@@ -1558,6 +1558,10 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       std::string wgFaultEvery = readLine("Inject WG fault every N rounds (0=off)", "0");
       std::string wgFaultCommand = readLine("WG fault command (optional)", "");
       bool wgContinueOnFail = parseYesNo(readLine("Continue when WG soak round fails? (y/N)", "n"), false);
+      std::string wgMaxRoundDuration = readLine("WG max round duration sec (0=off)", "0");
+      std::string wgMaxRecovery = readLine("WG max recovery sec (0=off)", "0");
+      std::string wgMaxFailureClass = trim(readLine("WG max failure class budget CLASS=N (optional)", ""));
+      bool wgDisallowUnknownClass = parseYesNo(readLine("Disallow unknown WG failure class? (Y/n)", "y"), true);
       bool strictDistinct = parseYesNo(readLine("Require distinct entry/exit operators? (Y/n)", "y"), true);
       bool skipControlSoak = parseYesNo(readLine("Skip control-plane soak step? (y/N)", "n"), false);
       bool skipWG = parseYesNo(readLine("Skip real-WG steps (control only)? (y/N)", "n"), false);
@@ -1582,6 +1586,9 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --wg-soak-rounds " << shellEscape(wgSoakRounds)
           << " --wg-soak-pause-sec " << shellEscape(wgSoakPause)
           << " --wg-max-consecutive-failures " << shellEscape(wgMaxConsecutiveFailures)
+          << " --wg-max-round-duration-sec " << shellEscape(wgMaxRoundDuration)
+          << " --wg-max-recovery-sec " << shellEscape(wgMaxRecovery)
+          << " --wg-disallow-unknown-failure-class " << (wgDisallowUnknownClass ? "1" : "0")
           << " --control-timeout-sec " << shellEscape(controlTimeout)
           << " --wg-client-timeout-sec " << shellEscape(wgClientTimeout)
           << " --wg-session-sec " << shellEscape(wgSessionSec)
@@ -1601,6 +1608,9 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       }
       if (!wgFaultCommand.empty()) {
         cmd << " --wg-fault-command " << shellEscape(wgFaultCommand);
+      }
+      if (!wgMaxFailureClass.empty()) {
+        cmd << " --wg-max-failure-class " << shellEscape(wgMaxFailureClass);
       }
       if (!subject.empty()) {
         cmd << " --subject " << shellEscape(subject);

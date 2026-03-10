@@ -214,6 +214,10 @@ sudo ./scripts/easy_node.sh three-machine-prod-gate \
   --strict-distinct 1
 # optional: tune sustained WG soak failure guard (default 2 consecutive failures)
 #   --wg-max-consecutive-failures 2
+# optional: enforce WG soak SLO guards (round duration + recovery window)
+#   --wg-max-round-duration-sec 90 --wg-max-recovery-sec 120
+# optional: class-based failure budget gating
+#   --wg-max-failure-class endpoint_connectivity=2 --wg-max-failure-class timeout=1 --wg-disallow-unknown-failure-class 1
 # optional: inject controlled faults during control-plane soak stage
 #   --control-fault-every 3 --control-fault-command 'ssh user@<B_SERVER_IP> "cd <repo> && ./scripts/easy_node.sh server-down && ./scripts/easy_node.sh server-up --mode provider --public-host <B_SERVER_IP> --prod-profile 1"'
 # optional: inject controlled faults during real WG soak stage
@@ -697,6 +701,7 @@ CI and tests:
 - `./scripts/integration_adjudication_source_quorum.sh` (directory final adjudication distinct-source quorum suppression check)
 - `./scripts/integration_real_wg_privileged.sh` (manual Linux root-only real `wg`/`ip` command-backend integration check; now includes early required-port occupancy preflight checks; not part of CI)
 - `./scripts/integration_real_wg_privileged_matrix.sh` (manual Linux root-only multi-profile wrapper around privileged real-WG integration, including strict beta-role profile)
+- `./scripts/integration_3machine_prod_wg_soak_stall_guard.sh` (real-WG soak guard coverage for dataplane-summary enforcement, sustained-failure stop policy, latency/recovery SLO limits, and failure-class budget gating)
 - `./scripts/integration_lifecycle_chaos.sh` (adversarial dispute/revocation race and stability check; included in deep suite)
 - `./scripts/integration_lifecycle_chaos_matrix.sh` (multi-profile lifecycle/dispute/revocation chaos wrapper for higher churn coverage)
 - `./scripts/integration_multi_issuer.sh` (exit multi-issuer token/revocation integration check)

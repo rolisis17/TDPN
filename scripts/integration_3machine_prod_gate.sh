@@ -37,6 +37,10 @@ Usage:
     [--wg-soak-rounds N] \
     [--wg-soak-pause-sec N] \
     [--wg-max-consecutive-failures N] \
+    [--wg-max-round-duration-sec N] \
+    [--wg-max-recovery-sec N] \
+    [--wg-max-failure-class CLASS=N] \
+    [--wg-disallow-unknown-failure-class [0|1]] \
     [--control-fault-every N] \
     [--control-fault-command CMD] \
     [--control-continue-on-fail [0|1]] \
@@ -83,6 +87,11 @@ trim() {
   value="${value#"${value%%[![:space:]]*}"}"
   value="${value%"${value##*[![:space:]]}"}"
   printf '%s' "$value"
+}
+
+valid_failure_class_spec() {
+  local spec="$1"
+  [[ "$spec" =~ ^[A-Za-z0-9_.-]+=[0-9]+$ ]]
 }
 
 json_escape() {
@@ -212,6 +221,10 @@ wg_session_sec="${THREE_MACHINE_PROD_GATE_WG_SESSION_SEC:-45}"
 wg_soak_rounds="${THREE_MACHINE_PROD_GATE_WG_SOAK_ROUNDS:-10}"
 wg_soak_pause_sec="${THREE_MACHINE_PROD_GATE_WG_SOAK_PAUSE_SEC:-8}"
 wg_max_consecutive_failures="${THREE_MACHINE_PROD_GATE_WG_MAX_CONSECUTIVE_FAILURES:-2}"
+wg_max_round_duration_sec="${THREE_MACHINE_PROD_GATE_WG_MAX_ROUND_DURATION_SEC:-0}"
+wg_max_recovery_sec="${THREE_MACHINE_PROD_GATE_WG_MAX_RECOVERY_SEC:-0}"
+wg_disallow_unknown_failure_class="${THREE_MACHINE_PROD_GATE_WG_DISALLOW_UNKNOWN_FAILURE_CLASS:-0}"
+declare -a wg_max_failure_class_specs=()
 wg_soak_summary_json="${THREE_MACHINE_PROD_GATE_WG_SOAK_SUMMARY_JSON:-}"
 gate_summary_json="${THREE_MACHINE_PROD_GATE_SUMMARY_JSON:-}"
 fault_every="${THREE_MACHINE_PROD_GATE_FAULT_EVERY:-0}"
@@ -325,6 +338,27 @@ while [[ $# -gt 0 ]]; do
     --wg-max-consecutive-failures)
       wg_max_consecutive_failures="${2:-}"
       shift 2
+      ;;
+    --wg-max-round-duration-sec)
+      wg_max_round_duration_sec="${2:-}"
+      shift 2
+      ;;
+    --wg-max-recovery-sec)
+      wg_max_recovery_sec="${2:-}"
+      shift 2
+      ;;
+    --wg-max-failure-class)
+      wg_max_failure_class_specs+=("${2:-}")
+      shift 2
+      ;;
+    --wg-disallow-unknown-failure-class)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+        wg_disallow_unknown_failure_class="${2:-}"
+        shift 2
+      else
+        wg_disallow_unknown_failure_class="1"
+        shift
+      fi
       ;;
     --control-fault-every)
       control_fault_every="${2:-}"
@@ -471,7 +505,7 @@ for cmd in bash date tee; do
   need_cmd "$cmd"
 done
 
-if ! [[ "$min_sources" =~ ^[0-9]+$ && "$min_operators" =~ ^[0-9]+$ && "$federation_timeout_sec" =~ ^[0-9]+$ && "$control_timeout_sec" =~ ^[0-9]+$ && "$control_soak_rounds" =~ ^[0-9]+$ && "$control_soak_pause_sec" =~ ^[0-9]+$ && "$wg_client_timeout_sec" =~ ^[0-9]+$ && "$wg_session_sec" =~ ^[0-9]+$ && "$wg_soak_rounds" =~ ^[0-9]+$ && "$wg_soak_pause_sec" =~ ^[0-9]+$ && "$wg_max_consecutive_failures" =~ ^[0-9]+$ && "$control_fault_every" =~ ^[0-9]+$ && "$wg_fault_every" =~ ^[0-9]+$ && "$discovery_wait_sec" =~ ^[0-9]+$ ]]; then
+if ! [[ "$min_sources" =~ ^[0-9]+$ && "$min_operators" =~ ^[0-9]+$ && "$federation_timeout_sec" =~ ^[0-9]+$ && "$control_timeout_sec" =~ ^[0-9]+$ && "$control_soak_rounds" =~ ^[0-9]+$ && "$control_soak_pause_sec" =~ ^[0-9]+$ && "$wg_client_timeout_sec" =~ ^[0-9]+$ && "$wg_session_sec" =~ ^[0-9]+$ && "$wg_soak_rounds" =~ ^[0-9]+$ && "$wg_soak_pause_sec" =~ ^[0-9]+$ && "$wg_max_consecutive_failures" =~ ^[0-9]+$ && "$wg_max_round_duration_sec" =~ ^[0-9]+$ && "$wg_max_recovery_sec" =~ ^[0-9]+$ && "$control_fault_every" =~ ^[0-9]+$ && "$wg_fault_every" =~ ^[0-9]+$ && "$discovery_wait_sec" =~ ^[0-9]+$ ]]; then
   echo "numeric args are invalid"
   exit 2
 fi
@@ -492,6 +526,10 @@ if [[ "$wg_continue_on_fail" != "0" && "$wg_continue_on_fail" != "1" ]]; then
   echo "--wg-continue-on-fail must be 0 or 1"
   exit 2
 fi
+if [[ "$wg_disallow_unknown_failure_class" != "0" && "$wg_disallow_unknown_failure_class" != "1" ]]; then
+  echo "--wg-disallow-unknown-failure-class must be 0 or 1"
+  exit 2
+fi
 for flag in "$skip_control_soak" "$skip_wg" "$skip_wg_soak"; do
   if [[ "$flag" != "0" && "$flag" != "1" ]]; then
     echo "skip flags must be 0 or 1"
@@ -510,6 +548,14 @@ if ((wg_fault_every > 0)) && [[ -z "$(trim "$wg_fault_command")" ]]; then
   echo "--wg-fault-command is required when --wg-fault-every > 0"
   exit 2
 fi
+for spec in "${wg_max_failure_class_specs[@]}"; do
+  spec="$(trim "$spec")"
+  [[ -z "$spec" ]] && continue
+  if ! valid_failure_class_spec "$spec"; then
+    echo "--wg-max-failure-class must use CLASS=N format (invalid: $spec)"
+    exit 2
+  fi
+done
 
 if [[ -z "$report_file" ]]; then
   report_file="$(default_log_dir)/privacynode_3machine_prod_gate_$(date +%Y%m%d_%H%M%S).log"
@@ -526,6 +572,7 @@ echo "[prod-gate] report: $report_file"
 echo "[prod-gate] step_logs: $step_dir"
 echo "[prod-gate] strict_distinct=$strict_distinct skip_control_soak=$skip_control_soak skip_wg=$skip_wg skip_wg_soak=$skip_wg_soak wg_max_consecutive_failures=$wg_max_consecutive_failures"
 echo "[prod-gate] control_fault_every=$control_fault_every control_continue_on_fail=$control_continue_on_fail wg_fault_every=$wg_fault_every wg_continue_on_fail=$wg_continue_on_fail"
+echo "[prod-gate] wg_max_round_duration_sec=$wg_max_round_duration_sec wg_max_recovery_sec=$wg_max_recovery_sec wg_disallow_unknown_failure_class=$wg_disallow_unknown_failure_class wg_max_failure_class_specs=${#wg_max_failure_class_specs[@]}"
 gate_started_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 if [[ -z "$wg_soak_summary_json" ]]; then
   wg_soak_summary_json="$step_dir/04_prod_wg_soak.summary.json"
@@ -721,6 +768,9 @@ if [[ "$skip_wg" == "0" ]]; then
       --rounds "$wg_soak_rounds"
       --pause-sec "$wg_soak_pause_sec"
       --max-consecutive-failures "$wg_max_consecutive_failures"
+      --max-round-duration-sec "$wg_max_round_duration_sec"
+      --max-recovery-sec "$wg_max_recovery_sec"
+      --disallow-unknown-failure-class "$wg_disallow_unknown_failure_class"
       --summary-json "$wg_soak_summary_json"
       --fault-every "$wg_fault_every"
       --continue-on-fail "$wg_continue_on_fail"
@@ -741,6 +791,11 @@ if [[ "$skip_wg" == "0" ]]; then
     if [[ -n "$(trim "$wg_fault_command")" ]]; then
       wg_soak_args+=(--fault-command "$wg_fault_command")
     fi
+    for spec in "${wg_max_failure_class_specs[@]}"; do
+      spec="$(trim "$spec")"
+      [[ -z "$spec" ]] && continue
+      wg_soak_args+=(--max-failure-class "$spec")
+    done
     run_step "prod_wg_soak" "$step_dir/04_prod_wg_soak.log" "${wg_soak_args[@]}"
     emit_wg_soak_summary_once 1
   else

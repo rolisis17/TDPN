@@ -20,6 +20,10 @@ Usage:
     [--fault-command CMD] \
     [--continue-on-fail [0|1]] \
     [--max-consecutive-failures N] \
+    [--max-round-duration-sec N] \
+    [--max-recovery-sec N] \
+    [--max-failure-class CLASS=N] \
+    [--disallow-unknown-failure-class [0|1]] \
     [--report-file PATH] \
     [--summary-json PATH] \
     [validate args...]
@@ -39,6 +43,14 @@ Examples:
   sudo ./scripts/integration_3machine_prod_wg_soak.sh \
     --rounds 20 --fault-every 5 \
     --fault-command "ssh user@B 'cd /repo && ./scripts/easy_node.sh server-up --mode provider --prod-profile 1 --beta-profile 1 --public-host B'"
+
+  sudo ./scripts/integration_3machine_prod_wg_soak.sh \
+    --rounds 12 --pause-sec 8 \
+    --max-round-duration-sec 90 \
+    --max-recovery-sec 120 \
+    --max-failure-class endpoint_connectivity=2 \
+    --max-failure-class timeout=1 \
+    --disallow-unknown-failure-class 1
 USAGE
 }
 
@@ -66,6 +78,14 @@ classify_round_failure() {
   fi
   if [[ "$dataplane_reason" == "no_progress" ]]; then
     echo "dataplane_no_progress"
+    return
+  fi
+  if [[ "$dataplane_reason" == "round_duration_slo" ]]; then
+    echo "round_duration_slo"
+    return
+  fi
+  if [[ "$dataplane_reason" == "recovery_slo" ]]; then
+    echo "recovery_slo"
     return
   fi
 
@@ -119,12 +139,22 @@ json_escape() {
   printf '%s' "$value"
 }
 
+valid_failure_class_name() {
+  local class="$1"
+  [[ "$class" =~ ^[A-Za-z0-9_.-]+$ ]]
+}
+
 rounds="${THREE_MACHINE_PROD_WG_SOAK_ROUNDS:-10}"
 pause_sec="${THREE_MACHINE_PROD_WG_SOAK_PAUSE_SEC:-8}"
 fault_every="${THREE_MACHINE_PROD_WG_SOAK_FAULT_EVERY:-0}"
 fault_command="${THREE_MACHINE_PROD_WG_SOAK_FAULT_COMMAND:-}"
 continue_on_fail="${THREE_MACHINE_PROD_WG_SOAK_CONTINUE_ON_FAIL:-0}"
 max_consecutive_failures="${THREE_MACHINE_PROD_WG_SOAK_MAX_CONSECUTIVE_FAILURES:-2}"
+max_round_duration_sec="${THREE_MACHINE_PROD_WG_SOAK_MAX_ROUND_DURATION_SEC:-0}"
+max_recovery_sec="${THREE_MACHINE_PROD_WG_SOAK_MAX_RECOVERY_SEC:-0}"
+disallow_unknown_failure_class="${THREE_MACHINE_PROD_WG_SOAK_DISALLOW_UNKNOWN_FAILURE_CLASS:-0}"
+max_failure_class_env="${THREE_MACHINE_PROD_WG_SOAK_MAX_FAILURE_CLASS:-}"
+declare -a max_failure_class_specs=()
 report_file=""
 summary_json=""
 validate_args=()
@@ -160,6 +190,27 @@ while [[ $# -gt 0 ]]; do
       max_consecutive_failures="${2:-}"
       shift 2
       ;;
+    --max-round-duration-sec)
+      max_round_duration_sec="${2:-}"
+      shift 2
+      ;;
+    --max-recovery-sec)
+      max_recovery_sec="${2:-}"
+      shift 2
+      ;;
+    --max-failure-class)
+      max_failure_class_specs+=("${2:-}")
+      shift 2
+      ;;
+    --disallow-unknown-failure-class)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+        disallow_unknown_failure_class="${2:-}"
+        shift 2
+      else
+        disallow_unknown_failure_class="1"
+        shift
+      fi
+      ;;
     --report-file)
       report_file="${2:-}"
       shift 2
@@ -179,8 +230,17 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if ! [[ "$rounds" =~ ^[0-9]+$ && "$pause_sec" =~ ^[0-9]+$ && "$fault_every" =~ ^[0-9]+$ && "$max_consecutive_failures" =~ ^[0-9]+$ ]]; then
-  echo "--rounds, --pause-sec, --fault-every and --max-consecutive-failures must be integers"
+if [[ -n "$(trim "$max_failure_class_env")" ]]; then
+  IFS=',' read -r -a env_specs <<<"$max_failure_class_env"
+  for spec in "${env_specs[@]}"; do
+    spec="$(trim "$spec")"
+    [[ -z "$spec" ]] && continue
+    max_failure_class_specs+=("$spec")
+  done
+fi
+
+if ! [[ "$rounds" =~ ^[0-9]+$ && "$pause_sec" =~ ^[0-9]+$ && "$fault_every" =~ ^[0-9]+$ && "$max_consecutive_failures" =~ ^[0-9]+$ && "$max_round_duration_sec" =~ ^[0-9]+$ && "$max_recovery_sec" =~ ^[0-9]+$ ]]; then
+  echo "--rounds, --pause-sec, --fault-every, --max-consecutive-failures, --max-round-duration-sec and --max-recovery-sec must be integers"
   exit 2
 fi
 if ((rounds < 1)); then
@@ -195,10 +255,36 @@ if [[ "$continue_on_fail" != "0" && "$continue_on_fail" != "1" ]]; then
   echo "--continue-on-fail must be 0 or 1"
   exit 2
 fi
+if [[ "$disallow_unknown_failure_class" != "0" && "$disallow_unknown_failure_class" != "1" ]]; then
+  echo "--disallow-unknown-failure-class must be 0 or 1"
+  exit 2
+fi
 if ((fault_every > 0)) && [[ -z "$(trim "$fault_command")" ]]; then
   echo "--fault-command is required when --fault-every > 0"
   exit 2
 fi
+
+declare -A failure_class_limits=()
+for spec in "${max_failure_class_specs[@]}"; do
+  spec="$(trim "$spec")"
+  [[ -z "$spec" ]] && continue
+  if [[ ! "$spec" =~ ^[^=]+=[0-9]+$ ]]; then
+    echo "--max-failure-class must use CLASS=N format (invalid: $spec)"
+    exit 2
+  fi
+  class="${spec%%=*}"
+  limit="${spec##*=}"
+  class="$(trim "$class")"
+  if ! valid_failure_class_name "$class"; then
+    echo "invalid failure class name in --max-failure-class: $class"
+    exit 2
+  fi
+  if [[ -z "$limit" || ! "$limit" =~ ^[0-9]+$ ]]; then
+    echo "invalid failure class limit in --max-failure-class: $spec"
+    exit 2
+  fi
+  failure_class_limits["$class"]="$limit"
+done
 
 need_cmd bash
 need_cmd date
@@ -222,17 +308,32 @@ exec > >(tee -a "$report_file") 2>&1
 
 echo "[3machine-prod-wg-soak] started at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "[3machine-prod-wg-soak] report: $report_file"
-echo "[3machine-prod-wg-soak] rounds=$rounds pause_sec=$pause_sec fault_every=$fault_every continue_on_fail=$continue_on_fail max_consecutive_failures=$max_consecutive_failures"
+echo "[3machine-prod-wg-soak] rounds=$rounds pause_sec=$pause_sec fault_every=$fault_every continue_on_fail=$continue_on_fail max_consecutive_failures=$max_consecutive_failures max_round_duration_sec=$max_round_duration_sec max_recovery_sec=$max_recovery_sec disallow_unknown_failure_class=$disallow_unknown_failure_class"
+if ((${#failure_class_limits[@]} > 0)); then
+  while IFS= read -r class; do
+    [[ -z "$class" ]] && continue
+    echo "[3machine-prod-wg-soak] failure_class_limit ${class}=${failure_class_limits[$class]}"
+  done < <(printf '%s\n' "${!failure_class_limits[@]}" | sort)
+fi
 
 passed=0
 failed=0
 consecutive_failures=0
 max_seen_consecutive_failures=0
+round_duration_sec_max=0
+recovery_incident_open=0
+recovery_incident_started_ts=0
+recovery_incidents=0
+recovery_sec_total=0
+recovery_sec_max=0
+recovery_slo_violations=0
 declare -A failure_class_counts=()
+declare -A failure_class_limit_violations=()
 
 for round in $(seq 1 "$rounds"); do
   echo
   echo "[3machine-prod-wg-soak] round=$round/$rounds"
+  round_started_ts="$(date +%s)"
 
   if ((fault_every > 0)) && ((round > 1)) && (((round - 1) % fault_every == 0)); then
     echo "[3machine-prod-wg-soak] injecting fault (round=$round): $fault_command"
@@ -279,10 +380,46 @@ for round in $(seq 1 "$rounds"); do
     fi
   fi
 
+  round_finished_ts="$(date +%s)"
+  round_duration_sec=$((round_finished_ts - round_started_ts))
+  if ((round_duration_sec > round_duration_sec_max)); then
+    round_duration_sec_max=$round_duration_sec
+  fi
+  if ((max_round_duration_sec > 0)) && ((round_duration_sec > max_round_duration_sec)); then
+    echo "[3machine-prod-wg-soak] round=$round exceeded max round duration: observed=${round_duration_sec}s limit=${max_round_duration_sec}s"
+    if [[ "$rc" -eq 0 ]]; then
+      dataplane_fail_reason="round_duration_slo"
+      rc=1
+    fi
+  fi
+
+  if [[ "$rc" -ne 0 ]]; then
+    if [[ "$recovery_incident_open" -eq 0 ]]; then
+      recovery_incident_open=1
+      recovery_incident_started_ts="$round_started_ts"
+    fi
+  else
+    if [[ "$recovery_incident_open" -eq 1 ]]; then
+      recovery_sec=$((round_finished_ts - recovery_incident_started_ts))
+      recovery_incident_open=0
+      recovery_incidents=$((recovery_incidents + 1))
+      recovery_sec_total=$((recovery_sec_total + recovery_sec))
+      if ((recovery_sec > recovery_sec_max)); then
+        recovery_sec_max=$recovery_sec
+      fi
+      if ((max_recovery_sec > 0)) && ((recovery_sec > max_recovery_sec)); then
+        recovery_slo_violations=$((recovery_slo_violations + 1))
+        echo "[3machine-prod-wg-soak] round=$round recovery SLO exceeded: observed=${recovery_sec}s limit=${max_recovery_sec}s"
+        dataplane_fail_reason="recovery_slo"
+        rc=1
+      fi
+    fi
+  fi
+
   if [[ "$rc" -eq 0 ]]; then
     passed=$((passed + 1))
     consecutive_failures=0
-    echo "[3machine-prod-wg-soak] round=$round result=ok accepted_delta_total=$dataplane_delta_total log=$round_log"
+    echo "[3machine-prod-wg-soak] round=$round result=ok accepted_delta_total=$dataplane_delta_total duration_sec=$round_duration_sec log=$round_log"
   else
     failed=$((failed + 1))
     consecutive_failures=$((consecutive_failures + 1))
@@ -293,9 +430,19 @@ for round in $(seq 1 "$rounds"); do
     failure_class_counts["$failure_class"]=$(( ${failure_class_counts[$failure_class]:-0} + 1 ))
     reason_line="$(failure_reason_line "$round_log")"
     if [[ -n "$reason_line" ]]; then
-      echo "[3machine-prod-wg-soak] round=$round result=fail rc=$rc class=$failure_class reason=$(printf '%s' "$reason_line" | sed -E 's/[[:space:]]+/ /g') log=$round_log"
+      echo "[3machine-prod-wg-soak] round=$round result=fail rc=$rc class=$failure_class duration_sec=$round_duration_sec reason=$(printf '%s' "$reason_line" | sed -E 's/[[:space:]]+/ /g') log=$round_log"
     else
-      echo "[3machine-prod-wg-soak] round=$round result=fail rc=$rc class=$failure_class log=$round_log"
+      echo "[3machine-prod-wg-soak] round=$round result=fail rc=$rc class=$failure_class duration_sec=$round_duration_sec log=$round_log"
+    fi
+    if [[ "$disallow_unknown_failure_class" == "1" && "$failure_class" == "unknown" ]]; then
+      echo "[3machine-prod-wg-soak] stopping: disallowed unknown failure class encountered"
+      break
+    fi
+    class_limit="${failure_class_limits[$failure_class]:-}"
+    if [[ -n "$class_limit" ]] && (( failure_class_counts["$failure_class"] > class_limit )); then
+      failure_class_limit_violations["$failure_class"]=$(( ${failure_class_limit_violations[$failure_class]:-0} + 1 ))
+      echo "[3machine-prod-wg-soak] stopping: failure class limit exceeded class=$failure_class observed=${failure_class_counts[$failure_class]} limit=$class_limit"
+      break
     fi
     if [[ "$continue_on_fail" == "0" ]]; then
       echo "[3machine-prod-wg-soak] stopping on first failure"
@@ -312,12 +459,30 @@ for round in $(seq 1 "$rounds"); do
   fi
 done
 
+recovery_sec_avg=0
+if ((recovery_incidents > 0)); then
+  recovery_sec_avg=$((recovery_sec_total / recovery_incidents))
+fi
+class_limit_violation_total=0
+for class in "${!failure_class_limit_violations[@]}"; do
+  class_limit_violation_total=$((class_limit_violation_total + failure_class_limit_violations[$class]))
+done
+
 echo
 echo "[3machine-prod-wg-soak] summary passed=$passed failed=$failed total=$rounds max_consecutive_failures_seen=$max_seen_consecutive_failures"
+echo "[3machine-prod-wg-soak] slo_summary max_round_duration_seen=${round_duration_sec_max}s max_round_duration_limit=${max_round_duration_sec}s recovery_incidents=$recovery_incidents recovery_sec_avg=${recovery_sec_avg}s recovery_sec_max=${recovery_sec_max}s recovery_sec_limit=${max_recovery_sec}s recovery_slo_violations=$recovery_slo_violations recovery_incident_open=$recovery_incident_open"
 if ((failed > 0)); then
   for class in "${!failure_class_counts[@]}"; do
     echo "[3machine-prod-wg-soak] failure_class ${class}=${failure_class_counts[$class]}"
   done | sort
+fi
+if ((${#failure_class_limits[@]} > 0)); then
+  while IFS= read -r class; do
+    [[ -z "$class" ]] && continue
+    observed="${failure_class_counts[$class]:-0}"
+    violations="${failure_class_limit_violations[$class]:-0}"
+    echo "[3machine-prod-wg-soak] failure_class_limit ${class}=${failure_class_limits[$class]} observed=$observed violations=$violations"
+  done < <(printf '%s\n' "${!failure_class_limits[@]}" | sort)
 fi
 if [[ -n "$summary_json" ]]; then
   mkdir -p "$(dirname "$summary_json")"
@@ -333,8 +498,48 @@ if [[ -n "$summary_json" ]]; then
     echo "  \"rounds_failed\": $failed,"
     echo "  \"max_consecutive_failures_seen\": $max_seen_consecutive_failures,"
     echo "  \"max_consecutive_failures_limit\": $max_consecutive_failures,"
+    echo "  \"max_round_duration_seen_sec\": $round_duration_sec_max,"
+    echo "  \"max_round_duration_limit_sec\": $max_round_duration_sec,"
+    echo "  \"max_recovery_limit_sec\": $max_recovery_sec,"
+    echo "  \"recovery_incidents\": $recovery_incidents,"
+    echo "  \"recovery_incident_open\": $recovery_incident_open,"
+    echo "  \"recovery_sec_avg\": $recovery_sec_avg,"
+    echo "  \"recovery_sec_max\": $recovery_sec_max,"
+    echo "  \"recovery_slo_violations\": $recovery_slo_violations,"
+    echo "  \"disallow_unknown_failure_class\": $disallow_unknown_failure_class,"
+    echo "  \"failure_class_limit_violations_total\": $class_limit_violation_total,"
     echo "  \"report_file\": \"$(json_escape "$report_file")\","
     echo "  \"summary_generated_at_utc\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\","
+    echo "  \"failure_class_limits\": {"
+    if ((${#failure_class_limits[@]} > 0)); then
+      mapfile -t sorted_limits < <(printf '%s\n' "${!failure_class_limits[@]}" | sort)
+      for idx in "${!sorted_limits[@]}"; do
+        class="${sorted_limits[$idx]}"
+        [[ -z "$class" ]] && continue
+        count="${failure_class_limits[$class]:-0}"
+        if ((idx + 1 < ${#sorted_limits[@]})); then
+          printf '    "%s": %s,\n' "$(json_escape "$class")" "$count"
+        else
+          printf '    "%s": %s\n' "$(json_escape "$class")" "$count"
+        fi
+      done
+    fi
+    echo "  },"
+    echo "  \"failure_class_limit_violations\": {"
+    if ((class_limit_violation_total > 0)); then
+      mapfile -t sorted_violations < <(printf '%s\n' "${!failure_class_limit_violations[@]}" | sort)
+      for idx in "${!sorted_violations[@]}"; do
+        class="${sorted_violations[$idx]}"
+        [[ -z "$class" ]] && continue
+        count="${failure_class_limit_violations[$class]:-0}"
+        if ((idx + 1 < ${#sorted_violations[@]})); then
+          printf '    "%s": %s,\n' "$(json_escape "$class")" "$count"
+        else
+          printf '    "%s": %s\n' "$(json_escape "$class")" "$count"
+        fi
+      done
+    fi
+    echo "  },"
     echo "  \"failure_classes\": {"
     if ((failed > 0)); then
       mapfile -t sorted_classes < <(printf '%s\n' "${!failure_class_counts[@]}" | sort)

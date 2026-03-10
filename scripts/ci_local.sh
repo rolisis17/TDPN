@@ -76,6 +76,9 @@ echo "[ci] easy-node client profile env integration"
 echo "[ci] 3-machine prod-profile wiring integration"
 ./scripts/integration_3machine_prod_profile_wiring.sh
 
+echo "[ci] 3-machine prod wg soak stall guard integration"
+./scripts/integration_3machine_prod_wg_soak_stall_guard.sh
+
 echo "[ci] rotate-server-secrets integration"
 ./scripts/integration_rotate_server_secrets.sh
 

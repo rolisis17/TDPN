@@ -273,6 +273,10 @@ THREE_MACHINE_PROD_GATE_SCRIPT="$FAKE_GATE" \
   --wg-fault-every 3 \
   --wg-fault-command test-wg-fault \
   --wg-continue-on-fail 1 \
+  --wg-max-round-duration-sec 90 \
+  --wg-max-recovery-sec 120 \
+  --wg-max-failure-class endpoint_connectivity=2 \
+  --wg-disallow-unknown-failure-class 1 \
   --strict-distinct 1 \
   --wg-max-consecutive-failures 3 \
   --wg-soak-summary-json /tmp/prod_gate_wg_soak_summary.json \
@@ -320,6 +324,26 @@ if ! rg -q -- '--wg-fault-command test-wg-fault' "$GATE_CAPTURE"; then
   cat "$GATE_CAPTURE"
   exit 1
 fi
+if ! rg -q -- '--wg-max-round-duration-sec 90' "$GATE_CAPTURE"; then
+  echo "easy_node prod gate wiring failed: --wg-max-round-duration-sec 90 missing"
+  cat "$GATE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--wg-max-recovery-sec 120' "$GATE_CAPTURE"; then
+  echo "easy_node prod gate wiring failed: --wg-max-recovery-sec 120 missing"
+  cat "$GATE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--wg-max-failure-class endpoint_connectivity=2' "$GATE_CAPTURE"; then
+  echo "easy_node prod gate wiring failed: --wg-max-failure-class endpoint_connectivity=2 missing"
+  cat "$GATE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--wg-disallow-unknown-failure-class 1' "$GATE_CAPTURE"; then
+  echo "easy_node prod gate wiring failed: --wg-disallow-unknown-failure-class 1 missing"
+  cat "$GATE_CAPTURE"
+  exit 1
+fi
 if ! rg -q -- '--gate-summary-json /tmp/prod_gate_summary.json' "$GATE_CAPTURE"; then
   echo "easy_node prod gate wiring failed: --gate-summary-json missing"
   cat "$GATE_CAPTURE"
@@ -351,6 +375,14 @@ if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh prod-wg-soak --help | rg -q --
 fi
 if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh prod-wg-soak --help | rg -q -- '--summary-json'; then
   echo "easy_node prod-wg-soak help missing --summary-json"
+  exit 1
+fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh three-machine-prod-gate --help | rg -q -- '--wg-max-round-duration-sec'; then
+  echo "easy_node three-machine-prod-gate help missing --wg-max-round-duration-sec"
+  exit 1
+fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh three-machine-prod-gate --help | rg -q -- '--wg-max-failure-class'; then
+  echo "easy_node three-machine-prod-gate help missing --wg-max-failure-class"
   exit 1
 fi
 
@@ -511,6 +543,10 @@ THREE_MACHINE_PROD_GATE_ALLOW_NON_ROOT=1 \
   --wg-fault-every 4 \
   --wg-fault-command test-wg-fault \
   --wg-continue-on-fail 1 \
+  --wg-max-round-duration-sec 90 \
+  --wg-max-recovery-sec 120 \
+  --wg-max-failure-class endpoint_connectivity=2 \
+  --wg-disallow-unknown-failure-class 1 \
   --wg-soak-summary-json "$WG_SUMMARY_FILE" \
   --gate-summary-json "$GATE_SUMMARY_FILE" >"$WG_GATE_LOG" 2>&1
 
@@ -540,6 +576,30 @@ if ! rg -q -- '--fault-command test-wg-fault' "$GATE_WG_SOAK_CAPTURE"; then
 fi
 if ! rg -q -- '--continue-on-fail 1' "$GATE_WG_SOAK_CAPTURE"; then
   echo "prod gate wiring failed: WG soak call missing --continue-on-fail 1"
+  cat "$GATE_WG_SOAK_CAPTURE"
+  cat "$WG_GATE_LOG"
+  exit 1
+fi
+if ! rg -q -- '--max-round-duration-sec 90' "$GATE_WG_SOAK_CAPTURE"; then
+  echo "prod gate wiring failed: WG soak call missing --max-round-duration-sec 90"
+  cat "$GATE_WG_SOAK_CAPTURE"
+  cat "$WG_GATE_LOG"
+  exit 1
+fi
+if ! rg -q -- '--max-recovery-sec 120' "$GATE_WG_SOAK_CAPTURE"; then
+  echo "prod gate wiring failed: WG soak call missing --max-recovery-sec 120"
+  cat "$GATE_WG_SOAK_CAPTURE"
+  cat "$WG_GATE_LOG"
+  exit 1
+fi
+if ! rg -q -- '--max-failure-class endpoint_connectivity=2' "$GATE_WG_SOAK_CAPTURE"; then
+  echo "prod gate wiring failed: WG soak call missing --max-failure-class endpoint_connectivity=2"
+  cat "$GATE_WG_SOAK_CAPTURE"
+  cat "$WG_GATE_LOG"
+  exit 1
+fi
+if ! rg -q -- '--disallow-unknown-failure-class 1' "$GATE_WG_SOAK_CAPTURE"; then
+  echo "prod gate wiring failed: WG soak call missing --disallow-unknown-failure-class 1"
   cat "$GATE_WG_SOAK_CAPTURE"
   cat "$WG_GATE_LOG"
   exit 1
