@@ -1386,7 +1386,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       std::string mtlsCert = readLine("mTLS client cert file", "deploy/tls/client.crt");
       std::string mtlsKey = readLine("mTLS client key file", "deploy/tls/client.key");
       std::string report = readLine("Report file path (optional)", "");
-      std::string summaryJson = readLine("WG soak summary JSON path (optional)", "");
+      std::string summaryJson = readLine("WG validate summary JSON path (optional)", "");
       if (autoDiscover && bootstrapDir.empty()) {
         std::cout << "bootstrap directory URL is required\n";
         continue;
