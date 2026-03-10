@@ -36,6 +36,7 @@ Usage:
     [--wg-session-sec N] \
     [--wg-soak-rounds N] \
     [--wg-soak-pause-sec N] \
+    [--wg-slo-profile off|recommended|strict] \
     [--wg-max-consecutive-failures N] \
     [--wg-max-round-duration-sec N] \
     [--wg-max-recovery-sec N] \
@@ -71,6 +72,7 @@ Purpose:
 Notes:
   - If --skip-wg=0 (default), run with sudo/root on Linux.
   - Endpoint args can be explicit A/B URLs or one bootstrap directory URL.
+  - `--wg-slo-profile recommended` applies default production soak SLO/failure budgets.
   - Legacy --fault-* flags are kept as wg-soak aliases for backward compatibility.
 USAGE
 }
@@ -220,11 +222,29 @@ wg_client_timeout_sec="${THREE_MACHINE_PROD_GATE_WG_CLIENT_TIMEOUT_SEC:-120}"
 wg_session_sec="${THREE_MACHINE_PROD_GATE_WG_SESSION_SEC:-45}"
 wg_soak_rounds="${THREE_MACHINE_PROD_GATE_WG_SOAK_ROUNDS:-10}"
 wg_soak_pause_sec="${THREE_MACHINE_PROD_GATE_WG_SOAK_PAUSE_SEC:-8}"
+wg_slo_profile="${THREE_MACHINE_PROD_GATE_WG_SLO_PROFILE:-off}"
 wg_max_consecutive_failures="${THREE_MACHINE_PROD_GATE_WG_MAX_CONSECUTIVE_FAILURES:-2}"
 wg_max_round_duration_sec="${THREE_MACHINE_PROD_GATE_WG_MAX_ROUND_DURATION_SEC:-0}"
 wg_max_recovery_sec="${THREE_MACHINE_PROD_GATE_WG_MAX_RECOVERY_SEC:-0}"
 wg_disallow_unknown_failure_class="${THREE_MACHINE_PROD_GATE_WG_DISALLOW_UNKNOWN_FAILURE_CLASS:-0}"
+wg_max_failure_class_env="${THREE_MACHINE_PROD_GATE_WG_MAX_FAILURE_CLASS:-}"
 declare -a wg_max_failure_class_specs=()
+wg_max_round_duration_set=0
+wg_max_recovery_set=0
+wg_max_failure_class_set=0
+wg_disallow_unknown_set=0
+if [[ -n "${THREE_MACHINE_PROD_GATE_WG_MAX_ROUND_DURATION_SEC+x}" ]]; then
+  wg_max_round_duration_set=1
+fi
+if [[ -n "${THREE_MACHINE_PROD_GATE_WG_MAX_RECOVERY_SEC+x}" ]]; then
+  wg_max_recovery_set=1
+fi
+if [[ -n "${THREE_MACHINE_PROD_GATE_WG_DISALLOW_UNKNOWN_FAILURE_CLASS+x}" ]]; then
+  wg_disallow_unknown_set=1
+fi
+if [[ -n "$(trim "$wg_max_failure_class_env")" ]]; then
+  wg_max_failure_class_set=1
+fi
 wg_soak_summary_json="${THREE_MACHINE_PROD_GATE_WG_SOAK_SUMMARY_JSON:-}"
 gate_summary_json="${THREE_MACHINE_PROD_GATE_SUMMARY_JSON:-}"
 fault_every="${THREE_MACHINE_PROD_GATE_FAULT_EVERY:-0}"
@@ -335,28 +355,37 @@ while [[ $# -gt 0 ]]; do
       wg_soak_pause_sec="${2:-}"
       shift 2
       ;;
+    --wg-slo-profile)
+      wg_slo_profile="${2:-}"
+      shift 2
+      ;;
     --wg-max-consecutive-failures)
       wg_max_consecutive_failures="${2:-}"
       shift 2
       ;;
     --wg-max-round-duration-sec)
       wg_max_round_duration_sec="${2:-}"
+      wg_max_round_duration_set=1
       shift 2
       ;;
     --wg-max-recovery-sec)
       wg_max_recovery_sec="${2:-}"
+      wg_max_recovery_set=1
       shift 2
       ;;
     --wg-max-failure-class)
       wg_max_failure_class_specs+=("${2:-}")
+      wg_max_failure_class_set=1
       shift 2
       ;;
     --wg-disallow-unknown-failure-class)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
         wg_disallow_unknown_failure_class="${2:-}"
+        wg_disallow_unknown_set=1
         shift 2
       else
         wg_disallow_unknown_failure_class="1"
+        wg_disallow_unknown_set=1
         shift
       fi
       ;;
@@ -493,6 +522,43 @@ fi
 if [[ -z "$wg_continue_on_fail" ]]; then
   wg_continue_on_fail="$continue_on_fail"
 fi
+if [[ -n "$(trim "$wg_max_failure_class_env")" ]]; then
+  IFS=',' read -r -a wg_env_specs <<<"$wg_max_failure_class_env"
+  for spec in "${wg_env_specs[@]}"; do
+    spec="$(trim "$spec")"
+    [[ -z "$spec" ]] && continue
+    wg_max_failure_class_specs+=("$spec")
+  done
+fi
+
+if [[ "$wg_slo_profile" != "off" && "$wg_slo_profile" != "recommended" && "$wg_slo_profile" != "strict" ]]; then
+  echo "--wg-slo-profile must be one of: off, recommended, strict"
+  exit 2
+fi
+if [[ "$wg_slo_profile" != "off" ]]; then
+  profile_round_duration=180
+  profile_recovery=240
+  profile_disallow_unknown=1
+  declare -a profile_failure_specs=("endpoint_connectivity=2" "timeout=2" "wg_dataplane_stall=1")
+  if [[ "$wg_slo_profile" == "strict" ]]; then
+    profile_round_duration=120
+    profile_recovery=180
+    profile_disallow_unknown=1
+    profile_failure_specs=("endpoint_connectivity=1" "timeout=1" "wg_dataplane_stall=0")
+  fi
+  if [[ "$wg_max_round_duration_set" == "0" ]]; then
+    wg_max_round_duration_sec="$profile_round_duration"
+  fi
+  if [[ "$wg_max_recovery_set" == "0" ]]; then
+    wg_max_recovery_sec="$profile_recovery"
+  fi
+  if [[ "$wg_disallow_unknown_set" == "0" ]]; then
+    wg_disallow_unknown_failure_class="$profile_disallow_unknown"
+  fi
+  if [[ "$wg_max_failure_class_set" == "0" ]]; then
+    wg_max_failure_class_specs=("${profile_failure_specs[@]}")
+  fi
+fi
 
 for script in "$BETA_VALIDATE_SCRIPT" "$BETA_SOAK_SCRIPT" "$PROD_WG_VALIDATE_SCRIPT" "$PROD_WG_SOAK_SCRIPT"; do
   if [[ ! -x "$script" ]]; then
@@ -570,7 +636,7 @@ mkdir -p "$step_dir"
 echo "[prod-gate] started at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "[prod-gate] report: $report_file"
 echo "[prod-gate] step_logs: $step_dir"
-echo "[prod-gate] strict_distinct=$strict_distinct skip_control_soak=$skip_control_soak skip_wg=$skip_wg skip_wg_soak=$skip_wg_soak wg_max_consecutive_failures=$wg_max_consecutive_failures"
+echo "[prod-gate] strict_distinct=$strict_distinct skip_control_soak=$skip_control_soak skip_wg=$skip_wg skip_wg_soak=$skip_wg_soak wg_slo_profile=$wg_slo_profile wg_max_consecutive_failures=$wg_max_consecutive_failures"
 echo "[prod-gate] control_fault_every=$control_fault_every control_continue_on_fail=$control_continue_on_fail wg_fault_every=$wg_fault_every wg_continue_on_fail=$wg_continue_on_fail"
 echo "[prod-gate] wg_max_round_duration_sec=$wg_max_round_duration_sec wg_max_recovery_sec=$wg_max_recovery_sec wg_disallow_unknown_failure_class=$wg_disallow_unknown_failure_class wg_max_failure_class_specs=${#wg_max_failure_class_specs[@]}"
 gate_started_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"

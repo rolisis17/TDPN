@@ -267,6 +267,7 @@ THREE_MACHINE_PROD_GATE_SCRIPT="$FAKE_GATE" \
   --issuer-url https://issuer-main:8082 \
   --entry-url https://entry-main:8083 \
   --exit-url https://exit-main:8084 \
+  --wg-slo-profile strict \
   --control-fault-every 2 \
   --control-fault-command test-control-fault \
   --control-continue-on-fail 1 \
@@ -321,6 +322,11 @@ if ! rg -q -- '--wg-fault-every 3' "$GATE_CAPTURE"; then
 fi
 if ! rg -q -- '--wg-fault-command test-wg-fault' "$GATE_CAPTURE"; then
   echo "easy_node prod gate wiring failed: --wg-fault-command missing"
+  cat "$GATE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--wg-slo-profile strict' "$GATE_CAPTURE"; then
+  echo "easy_node prod gate wiring failed: --wg-slo-profile strict missing"
   cat "$GATE_CAPTURE"
   exit 1
 fi
@@ -383,6 +389,10 @@ if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh three-machine-prod-gate --help
 fi
 if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh three-machine-prod-gate --help | rg -q -- '--wg-max-failure-class'; then
   echo "easy_node three-machine-prod-gate help missing --wg-max-failure-class"
+  exit 1
+fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh three-machine-prod-gate --help | rg -q -- '--wg-slo-profile'; then
+  echo "easy_node three-machine-prod-gate help missing --wg-slo-profile"
   exit 1
 fi
 
@@ -602,6 +612,69 @@ if ! rg -q -- '--disallow-unknown-failure-class 1' "$GATE_WG_SOAK_CAPTURE"; then
   echo "prod gate wiring failed: WG soak call missing --disallow-unknown-failure-class 1"
   cat "$GATE_WG_SOAK_CAPTURE"
   cat "$WG_GATE_LOG"
+  exit 1
+fi
+
+echo "[wiring] prod gate script wg slo profile defaults"
+: >"$GATE_WG_VALIDATE_CAPTURE"
+: >"$GATE_WG_SOAK_CAPTURE"
+WG_GATE_LOG_PROFILE="/tmp/integration_3machine_prod_profile_wiring_prod_gate_wg_profile.log"
+PATH="$TMP_BIN:$PATH" \
+GATE_VALIDATE_CAPTURE_FILE="$GATE_VALIDATE_CAPTURE" \
+GATE_SOAK_CAPTURE_FILE="$GATE_SOAK_CAPTURE" \
+GATE_WG_VALIDATE_CAPTURE_FILE="$GATE_WG_VALIDATE_CAPTURE" \
+GATE_WG_SOAK_CAPTURE_FILE="$GATE_WG_SOAK_CAPTURE" \
+THREE_MACHINE_BETA_VALIDATE_SCRIPT="$FAKE_GATE_VALIDATE" \
+THREE_MACHINE_BETA_SOAK_SCRIPT="$FAKE_GATE_SOAK" \
+THREE_MACHINE_PROD_WG_VALIDATE_SCRIPT="$FAKE_GATE_WG_VALIDATE" \
+THREE_MACHINE_PROD_WG_SOAK_SCRIPT="$FAKE_GATE_WG_SOAK" \
+THREE_MACHINE_PROD_GATE_ALLOW_NON_ROOT=1 \
+./scripts/integration_3machine_prod_gate.sh \
+  --directory-a https://dir-a:8081 \
+  --directory-b https://dir-b:8081 \
+  --issuer-url https://issuer-main:8082 \
+  --entry-url https://entry-main:8083 \
+  --exit-url https://exit-main:8084 \
+  --skip-control-soak 1 \
+  --wg-soak-rounds 1 \
+  --wg-soak-pause-sec 0 \
+  --wg-slo-profile recommended \
+  --wg-soak-summary-json "$WG_SUMMARY_FILE" \
+  --gate-summary-json "$GATE_SUMMARY_FILE" >"$WG_GATE_LOG_PROFILE" 2>&1
+if ! rg -q -- '--max-round-duration-sec 180' "$GATE_WG_SOAK_CAPTURE"; then
+  echo "prod gate wiring failed: wg-slo-profile recommended missing --max-round-duration-sec 180"
+  cat "$GATE_WG_SOAK_CAPTURE"
+  cat "$WG_GATE_LOG_PROFILE"
+  exit 1
+fi
+if ! rg -q -- '--max-recovery-sec 240' "$GATE_WG_SOAK_CAPTURE"; then
+  echo "prod gate wiring failed: wg-slo-profile recommended missing --max-recovery-sec 240"
+  cat "$GATE_WG_SOAK_CAPTURE"
+  cat "$WG_GATE_LOG_PROFILE"
+  exit 1
+fi
+if ! rg -q -- '--max-failure-class endpoint_connectivity=2' "$GATE_WG_SOAK_CAPTURE"; then
+  echo "prod gate wiring failed: wg-slo-profile recommended missing endpoint_connectivity budget"
+  cat "$GATE_WG_SOAK_CAPTURE"
+  cat "$WG_GATE_LOG_PROFILE"
+  exit 1
+fi
+if ! rg -q -- '--max-failure-class timeout=2' "$GATE_WG_SOAK_CAPTURE"; then
+  echo "prod gate wiring failed: wg-slo-profile recommended missing timeout budget"
+  cat "$GATE_WG_SOAK_CAPTURE"
+  cat "$WG_GATE_LOG_PROFILE"
+  exit 1
+fi
+if ! rg -q -- '--max-failure-class wg_dataplane_stall=1' "$GATE_WG_SOAK_CAPTURE"; then
+  echo "prod gate wiring failed: wg-slo-profile recommended missing wg_dataplane_stall budget"
+  cat "$GATE_WG_SOAK_CAPTURE"
+  cat "$WG_GATE_LOG_PROFILE"
+  exit 1
+fi
+if ! rg -q -- '--disallow-unknown-failure-class 1' "$GATE_WG_SOAK_CAPTURE"; then
+  echo "prod gate wiring failed: wg-slo-profile recommended missing disallow-unknown flag"
+  cat "$GATE_WG_SOAK_CAPTURE"
+  cat "$WG_GATE_LOG_PROFILE"
   exit 1
 fi
 if ! rg -q '\[prod-gate\] wg_soak_summary status=fail .* top_failure_class=endpoint_connectivity top_failure_count=2 ' "$WG_GATE_LOG"; then

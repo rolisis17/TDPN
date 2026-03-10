@@ -214,6 +214,8 @@ sudo ./scripts/easy_node.sh three-machine-prod-gate \
   --strict-distinct 1
 # optional: tune sustained WG soak failure guard (default 2 consecutive failures)
 #   --wg-max-consecutive-failures 2
+# optional: one-flag production WG soak SLO preset
+#   --wg-slo-profile recommended
 # optional: enforce WG soak SLO guards (round duration + recovery window)
 #   --wg-max-round-duration-sec 90 --wg-max-recovery-sec 120
 # optional: class-based failure budget gating

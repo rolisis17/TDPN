@@ -1549,6 +1549,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       std::string wgSoakRounds = readLine("WG soak rounds", "10");
       std::string wgSoakPause = readLine("WG soak pause sec", "8");
       std::string wgMaxConsecutiveFailures = readLine("WG max consecutive failures before abort", "2");
+      std::string wgSloProfile = trim(readLine("WG SLO profile (off/recommended/strict)", "recommended"));
       std::string controlTimeout = readLine("Control timeout sec", "50");
       std::string wgClientTimeout = readLine("WG client timeout sec", "120");
       std::string wgSessionSec = readLine("WG session sec", "45");
@@ -1558,10 +1559,12 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       std::string wgFaultEvery = readLine("Inject WG fault every N rounds (0=off)", "0");
       std::string wgFaultCommand = readLine("WG fault command (optional)", "");
       bool wgContinueOnFail = parseYesNo(readLine("Continue when WG soak round fails? (y/N)", "n"), false);
-      std::string wgMaxRoundDuration = readLine("WG max round duration sec (0=off)", "0");
-      std::string wgMaxRecovery = readLine("WG max recovery sec (0=off)", "0");
-      std::string wgMaxFailureClass = trim(readLine("WG max failure class budget CLASS=N (optional)", ""));
-      bool wgDisallowUnknownClass = parseYesNo(readLine("Disallow unknown WG failure class? (Y/n)", "y"), true);
+      std::string wgMaxRoundDuration = trim(readLine("WG max round duration sec override (blank=profile/default)", ""));
+      std::string wgMaxRecovery = trim(readLine("WG max recovery sec override (blank=profile/default)", ""));
+      std::string wgMaxFailureClass = trim(readLine("WG max failure class budget CLASS=N override (blank=profile/default)", ""));
+      std::string wgDisallowUnknownRaw = trim(readLine("Disallow unknown WG failure class override (blank=profile/default, y/n)", ""));
+      bool hasWGDisallowUnknownOverride = !wgDisallowUnknownRaw.empty();
+      bool wgDisallowUnknownClass = parseYesNo(wgDisallowUnknownRaw, true);
       bool strictDistinct = parseYesNo(readLine("Require distinct entry/exit operators? (Y/n)", "y"), true);
       bool skipControlSoak = parseYesNo(readLine("Skip control-plane soak step? (y/N)", "n"), false);
       bool skipWG = parseYesNo(readLine("Skip real-WG steps (control only)? (y/N)", "n"), false);
@@ -1585,10 +1588,8 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --control-soak-pause-sec " << shellEscape(controlSoakPause)
           << " --wg-soak-rounds " << shellEscape(wgSoakRounds)
           << " --wg-soak-pause-sec " << shellEscape(wgSoakPause)
+          << " --wg-slo-profile " << shellEscape(wgSloProfile)
           << " --wg-max-consecutive-failures " << shellEscape(wgMaxConsecutiveFailures)
-          << " --wg-max-round-duration-sec " << shellEscape(wgMaxRoundDuration)
-          << " --wg-max-recovery-sec " << shellEscape(wgMaxRecovery)
-          << " --wg-disallow-unknown-failure-class " << (wgDisallowUnknownClass ? "1" : "0")
           << " --control-timeout-sec " << shellEscape(controlTimeout)
           << " --wg-client-timeout-sec " << shellEscape(wgClientTimeout)
           << " --wg-session-sec " << shellEscape(wgSessionSec)
@@ -1611,6 +1612,15 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       }
       if (!wgMaxFailureClass.empty()) {
         cmd << " --wg-max-failure-class " << shellEscape(wgMaxFailureClass);
+      }
+      if (!wgMaxRoundDuration.empty()) {
+        cmd << " --wg-max-round-duration-sec " << shellEscape(wgMaxRoundDuration);
+      }
+      if (!wgMaxRecovery.empty()) {
+        cmd << " --wg-max-recovery-sec " << shellEscape(wgMaxRecovery);
+      }
+      if (hasWGDisallowUnknownOverride) {
+        cmd << " --wg-disallow-unknown-failure-class " << (wgDisallowUnknownClass ? "1" : "0");
       }
       if (!subject.empty()) {
         cmd << " --subject " << shellEscape(subject);
