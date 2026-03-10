@@ -936,6 +936,100 @@ if ! rg -q '\[prod-gate\] wg_soak_summary status=fail .* top_failure_class=timeo
   exit 1
 fi
 
+echo "[wiring] prod gate script strict-ingress summary path"
+FAKE_GATE_WG_SOAK_STRICT="$TMP_DIR/fake_gate_wg_soak_strict.sh"
+cat >"$FAKE_GATE_WG_SOAK_STRICT" <<'EOF_FAKE_GATE_WG_SOAK_STRICT'
+#!/usr/bin/env bash
+set -euo pipefail
+summary_json=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --summary-json)
+      summary_json="${2:-}"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+if [[ -n "$summary_json" ]]; then
+  mkdir -p "$(dirname "$summary_json")"
+  cat >"$summary_json" <<'EOF_SUMMARY_STRICT'
+{
+  "status": "fail",
+  "rounds_requested": 3,
+  "rounds_passed": 0,
+  "rounds_failed": 3,
+  "max_consecutive_failures_seen": 3,
+  "max_consecutive_failures_limit": 3,
+  "report_file": "/tmp/fake_strict.log",
+  "summary_generated_at_utc": "2026-03-10T00:00:00Z",
+  "failure_classes": {
+    "strict_ingress_policy": 3,
+    "timeout": 1
+  }
+}
+EOF_SUMMARY_STRICT
+fi
+exit 1
+EOF_FAKE_GATE_WG_SOAK_STRICT
+chmod +x "$FAKE_GATE_WG_SOAK_STRICT"
+
+GATE_SUMMARY_STRICT_FILE="$TMP_DIR/prod_gate_summary_strict_ingress.json"
+WG_GATE_STRICT_LOG="/tmp/integration_3machine_prod_profile_wiring_prod_gate_wg_strict_ingress.log"
+set +e
+PATH="$TMP_BIN:$PATH" \
+GATE_VALIDATE_CAPTURE_FILE="$GATE_VALIDATE_CAPTURE" \
+GATE_SOAK_CAPTURE_FILE="$GATE_SOAK_CAPTURE" \
+GATE_WG_VALIDATE_CAPTURE_FILE="$GATE_WG_VALIDATE_CAPTURE" \
+GATE_WG_SOAK_CAPTURE_FILE="$GATE_WG_SOAK_CAPTURE" \
+THREE_MACHINE_BETA_VALIDATE_SCRIPT="$FAKE_GATE_VALIDATE" \
+THREE_MACHINE_BETA_SOAK_SCRIPT="$FAKE_GATE_SOAK" \
+THREE_MACHINE_PROD_WG_VALIDATE_SCRIPT="$FAKE_GATE_WG_VALIDATE" \
+THREE_MACHINE_PROD_WG_SOAK_SCRIPT="$FAKE_GATE_WG_SOAK_STRICT" \
+THREE_MACHINE_PROD_GATE_ALLOW_NON_ROOT=1 \
+./scripts/integration_3machine_prod_gate.sh \
+  --directory-a https://dir-a:8081 \
+  --directory-b https://dir-b:8081 \
+  --issuer-url https://issuer-main:8082 \
+  --entry-url https://entry-main:8083 \
+  --exit-url https://exit-main:8084 \
+  --skip-control-soak 1 \
+  --wg-soak-rounds 1 \
+  --wg-soak-pause-sec 0 \
+  --wg-soak-summary-json "$WG_SUMMARY_FILE" \
+  --gate-summary-json "$GATE_SUMMARY_STRICT_FILE" >"$WG_GATE_STRICT_LOG" 2>&1
+gate_strict_rc=$?
+set -e
+if [[ "$gate_strict_rc" -eq 0 ]]; then
+  echo "prod gate wiring failed: expected non-zero rc on strict-ingress WG soak path"
+  cat "$WG_GATE_STRICT_LOG"
+  exit 1
+fi
+if [[ ! -f "$GATE_SUMMARY_STRICT_FILE" ]]; then
+  echo "prod gate wiring failed: missing gate summary json on strict-ingress path"
+  cat "$WG_GATE_STRICT_LOG"
+  exit 1
+fi
+if ! rg -q '\[prod-gate\] wg_soak_summary status=fail .* top_failure_class=strict_ingress_policy top_failure_count=3 ' "$WG_GATE_STRICT_LOG"; then
+  echo "prod gate wiring failed: strict-ingress compact WG summary missing/incorrect"
+  cat "$WG_GATE_STRICT_LOG"
+  exit 1
+fi
+if ! rg -q '"wg_soak_top_failure_class": "strict_ingress_policy"' "$GATE_SUMMARY_STRICT_FILE"; then
+  echo "prod gate wiring failed: strict-ingress gate summary missing top failure class"
+  cat "$GATE_SUMMARY_STRICT_FILE"
+  cat "$WG_GATE_STRICT_LOG"
+  exit 1
+fi
+if ! rg -q '"wg_soak_top_failure_count": 3' "$GATE_SUMMARY_STRICT_FILE"; then
+  echo "prod gate wiring failed: strict-ingress gate summary missing top failure count"
+  cat "$GATE_SUMMARY_STRICT_FILE"
+  cat "$WG_GATE_STRICT_LOG"
+  exit 1
+fi
+
 FAKE_BUNDLE_GATE="$TMP_DIR/fake_bundle_gate.sh"
 BUNDLE_CAPTURE="$TMP_DIR/prod_bundle_gate_args.log"
 BUNDLE_SOURCE_STEP_LOGS="$TMP_DIR/fake_bundle_step_logs_src"

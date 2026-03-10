@@ -184,6 +184,7 @@
 - Easy-mode launcher now includes a one-action closed-beta prod bundle path (advanced menu option 36) that runs strict prod-gate defaults with minimal prompts for machine-C operators.
 - Easy-mode launcher now includes a second one-action closed-beta smoke path (advanced menu option 37) for faster sanity validation before full strict sign-off.
 - Production gate now prints a compact WG soak summary line (status, pass/fail counts, max consecutive failures, top failure class/count) from the summary artifact, including failed WG-soak exits.
+- Production gate wiring regression now includes a strict-ingress failure path, verifying `strict_ingress_policy` surfaces as the top WG soak failure class in both compact log output and gate summary JSON.
 - Production gate now supports an overall machine-readable summary artifact (`--gate-summary-json`) containing per-step status plus failure-step/rc metadata, suitable for CI/pilot ingestion.
 - Easy-mode true 3-machine reminder output (`easy_node.sh three-machine-reminder`) and launcher wiring now provide a reusable production test checklist.
 - Secret-hygiene integration guard (`integration_secret_hygiene.sh`) now scans tracked artifacts for forbidden runtime files and high-confidence inline secret patterns, and is wired into both `ci_local.sh` and `beta_preflight.sh`.
