@@ -7,7 +7,7 @@ cd "$ROOT_DIR"
 usage() {
   cat <<'USAGE'
 Usage:
-  ./scripts/release_prepare.sh --version vX.Y.Z [--out-dir dist] [--targets csv] [--allow-dirty 0|1] [--require-tag-match 0|1]
+  ./scripts/release_prepare.sh --version vX.Y.Z [--out-dir dist] [--targets csv] [--allow-dirty 0|1] [--require-tag-match 0|1] [--include-sbom 0|1]
 
 Examples:
   ./scripts/release_prepare.sh --version v0.1.0
@@ -21,6 +21,7 @@ Notes:
       targets: linux/amd64,linux/arm64,darwin/amd64,darwin/arm64,windows/amd64
       allow-dirty: 0
       require-tag-match: 0
+      include-sbom: 1
 USAGE
 }
 
@@ -52,6 +53,7 @@ out_dir="$ROOT_DIR/dist"
 targets_csv="linux/amd64,linux/arm64,darwin/amd64,darwin/arm64,windows/amd64"
 allow_dirty=0
 require_tag_match=0
+include_sbom=1
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -73,6 +75,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --require-tag-match)
       require_tag_match="${2:-}"
+      shift 2
+      ;;
+    --include-sbom)
+      include_sbom="${2:-}"
       shift 2
       ;;
     -h|--help)
@@ -102,6 +108,10 @@ if [[ "$allow_dirty" != "0" && "$allow_dirty" != "1" ]]; then
 fi
 if [[ "$require_tag_match" != "0" && "$require_tag_match" != "1" ]]; then
   echo "--require-tag-match must be 0 or 1"
+  exit 1
+fi
+if [[ "$include_sbom" != "0" && "$include_sbom" != "1" ]]; then
+  echo "--include-sbom must be 0 or 1"
   exit 1
 fi
 
@@ -190,6 +200,12 @@ jq -n \
     targets: $targets
   }' >"${release_dir}/manifest.json"
 
+sbom_path=""
+if [[ "$include_sbom" == "1" ]]; then
+  ./scripts/release_generate_sbom.sh --version "$version" --out-dir "$out_dir"
+  sbom_path="${release_dir}/sbom_go_modules_${version}.json"
+fi
+
 checksum_file="${release_dir}/sha256sums.txt"
 {
   sha256_file "$source_tar"
@@ -197,10 +213,16 @@ checksum_file="${release_dir}/sha256sums.txt"
     sha256_file "$file"
   done < <(find "$bin_dir" -type f | sort)
   sha256_file "${release_dir}/manifest.json"
+  if [[ -n "$sbom_path" ]]; then
+    sha256_file "$sbom_path"
+  fi
 } >"$checksum_file"
 
 echo "[release-prepare] wrote:"
 echo "  ${source_tar}"
 echo "  ${release_dir}/manifest.json"
+if [[ -n "$sbom_path" ]]; then
+  echo "  ${sbom_path}"
+fi
 echo "  ${checksum_file}"
 echo "[release-prepare] ok"

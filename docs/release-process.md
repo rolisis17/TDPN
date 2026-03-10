@@ -20,11 +20,13 @@ Outputs:
 - `dist/v0.1.0/bin/node_<os>_<arch>[.exe]`
 - `dist/v0.1.0/source_v0.1.0.tar`
 - `dist/v0.1.0/manifest.json`
+- `dist/v0.1.0/sbom_go_modules_v0.1.0.json`
 - `dist/v0.1.0/sha256sums.txt`
 
 Quick verification:
 ```bash
 ./scripts/integration_release_integrity.sh
+./scripts/integration_release_sbom.sh
 ./scripts/integration_release_tag_verify.sh
 ```
 
@@ -44,7 +46,9 @@ When the tag is pushed, `.github/workflows/release.yml` will:
 2. Rebuild release artifacts with `--require-tag-match 1`
 3. Upload workflow artifacts
 4. Publish files to the GitHub Release
-5. Emit provenance attestation for `sha256sums.txt`
+5. Emit provenance attestations for:
+   - `sha256sums.txt`
+   - `sbom_go_modules_<version>.json`
 
 ## 4) Optional tuning
 - Override targets:
@@ -58,4 +62,8 @@ When the tag is pushed, `.github/workflows/release.yml` will:
 - Explicit tag verification:
   ```bash
   ./scripts/release_verify_tag.sh --version v0.1.0 --require-head-match 1 --require-signature 0
+  ```
+- Generate SBOM only (for diagnostics):
+  ```bash
+  ./scripts/release_generate_sbom.sh --version v0.1.0
   ```

@@ -26,6 +26,7 @@ run_step "secret hygiene" ./scripts/integration_secret_hygiene.sh
 run_step "security baseline" ./scripts/integration_security_baseline.sh
 run_step "github repo security baseline" ./scripts/integration_github_repo_security_baseline.sh
 run_step "release integrity" ./scripts/integration_release_integrity.sh
+run_step "release sbom" ./scripts/integration_release_sbom.sh
 run_step "release tag verify" ./scripts/integration_release_tag_verify.sh
 run_step "rotate server secrets" ./scripts/integration_rotate_server_secrets.sh
 run_step "directory strict governance" ./scripts/integration_directory_beta_strict.sh

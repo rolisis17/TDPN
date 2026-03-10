@@ -43,8 +43,9 @@ bin_path="${release_dir}/bin/node_linux_amd64"
 manifest_path="${release_dir}/manifest.json"
 checksums_path="${release_dir}/sha256sums.txt"
 source_tar="${release_dir}/source_${version}.tar"
+sbom_path="${release_dir}/sbom_go_modules_${version}.json"
 
-for path in "$bin_path" "$manifest_path" "$checksums_path" "$source_tar"; do
+for path in "$bin_path" "$manifest_path" "$checksums_path" "$source_tar" "$sbom_path"; do
   if [[ ! -f "$path" ]]; then
     echo "missing expected release artifact: $path"
     cat /tmp/integration_release_integrity_ok.log
@@ -85,6 +86,11 @@ if ! rg -q "manifest.json" "$checksums_path"; then
 fi
 if ! rg -q "source_${version}.tar" "$checksums_path"; then
   echo "checksum file missing source tar entry"
+  cat "$checksums_path"
+  exit 1
+fi
+if ! rg -q "sbom_go_modules_${version}.json" "$checksums_path"; then
+  echo "checksum file missing sbom entry"
   cat "$checksums_path"
   exit 1
 fi

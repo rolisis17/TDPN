@@ -22,6 +22,9 @@ echo "[ci] github repo security baseline integration"
 echo "[ci] release integrity integration"
 ./scripts/integration_release_integrity.sh
 
+echo "[ci] release sbom integration"
+./scripts/integration_release_sbom.sh
+
 echo "[ci] release tag verify integration"
 ./scripts/integration_release_tag_verify.sh
 

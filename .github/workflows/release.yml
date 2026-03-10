@@ -44,6 +44,7 @@ jobs:
           files: |
             dist/${{ github.ref_name }}/sha256sums.txt
             dist/${{ github.ref_name }}/manifest.json
+            dist/${{ github.ref_name }}/sbom_go_modules_${{ github.ref_name }}.json
             dist/${{ github.ref_name }}/source_${{ github.ref_name }}.tar
             dist/${{ github.ref_name }}/bin/*
 
@@ -51,3 +52,8 @@ jobs:
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: dist/${{ github.ref_name }}/sha256sums.txt
+
+      - name: Attest release SBOM
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/${{ github.ref_name }}/sbom_go_modules_${{ github.ref_name }}.json
