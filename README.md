@@ -645,6 +645,7 @@ CI and tests:
 - `./scripts/integration_secret_hygiene.sh` (tracked-artifact and inline secret scan guard for safe open-source publishing)
 - `./scripts/integration_security_baseline.sh` (open-source security baseline guard for `SECURITY.md`, Dependabot config, and security workflow coverage)
 - `./scripts/github_repo_security_baseline.sh status --repo <owner/repo>` (GitHub branch-protection + repo security baseline check; `apply` mode can enforce the baseline)
+- `./scripts/integration_github_repo_security_baseline.sh` (mocked-`gh` integration coverage for repo baseline script `status`/`apply` behavior)
 - `./scripts/integration_federation.sh` (multi-directory quorum/vote integration check)
 - `./scripts/integration_operator_quorum.sh` (distinct-directory-operator quorum enforcement check)
 - `./scripts/integration_sync_status_chaos.sh` (directory sync-status failure/recovery observability under peer churn)

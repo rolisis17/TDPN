@@ -16,6 +16,9 @@ echo "[ci] secret hygiene integration"
 echo "[ci] security baseline integration"
 ./scripts/integration_security_baseline.sh
 
+echo "[ci] github repo security baseline integration"
+./scripts/integration_github_repo_security_baseline.sh
+
 echo "[ci] internal topology smoke"
 DEMO_DURATION_SEC="${DEMO_DURATION_SEC:-8}" ./scripts/demo_internal_topology.sh >/tmp/ci_demo.log 2>&1 || true
 if ! rg -q "exit accepted opaque packet" /tmp/ci_demo.log; then

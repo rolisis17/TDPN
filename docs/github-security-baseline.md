@@ -10,6 +10,11 @@ This runbook enforces repository-level security settings with one script.
 2. Ensure your account has admin rights on the target repository.
 3. Install `jq`.
 
+Local regression coverage (no GitHub admin access required):
+```bash
+./scripts/integration_github_repo_security_baseline.sh
+```
+
 ## Baseline Status Check
 ```bash
 ./scripts/github_repo_security_baseline.sh status --repo <owner/repo> --branch main
