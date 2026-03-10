@@ -216,6 +216,8 @@ sudo ./scripts/easy_node.sh three-machine-prod-gate \
 #   --wg-max-consecutive-failures 2
 # optional: one-flag production WG soak SLO preset
 #   --wg-slo-profile recommended
+# optional: enforce cross-round real-WG selection diversity
+#   --wg-min-selection-lines 8 --wg-min-entry-operators 2 --wg-min-exit-operators 2 --wg-min-cross-operator-pairs 2
 # optional: enforce WG soak SLO guards (round duration + recovery window)
 #   --wg-max-round-duration-sec 90 --wg-max-recovery-sec 120
 # optional: class-based failure budget gating

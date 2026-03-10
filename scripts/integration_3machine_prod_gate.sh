@@ -42,6 +42,10 @@ Usage:
     [--wg-max-recovery-sec N] \
     [--wg-max-failure-class CLASS=N] \
     [--wg-disallow-unknown-failure-class [0|1]] \
+    [--wg-min-selection-lines N] \
+    [--wg-min-entry-operators N] \
+    [--wg-min-exit-operators N] \
+    [--wg-min-cross-operator-pairs N] \
     [--control-fault-every N] \
     [--control-fault-command CMD] \
     [--control-continue-on-fail [0|1]] \
@@ -227,12 +231,20 @@ wg_max_consecutive_failures="${THREE_MACHINE_PROD_GATE_WG_MAX_CONSECUTIVE_FAILUR
 wg_max_round_duration_sec="${THREE_MACHINE_PROD_GATE_WG_MAX_ROUND_DURATION_SEC:-0}"
 wg_max_recovery_sec="${THREE_MACHINE_PROD_GATE_WG_MAX_RECOVERY_SEC:-0}"
 wg_disallow_unknown_failure_class="${THREE_MACHINE_PROD_GATE_WG_DISALLOW_UNKNOWN_FAILURE_CLASS:-0}"
+wg_min_selection_lines="${THREE_MACHINE_PROD_GATE_WG_MIN_SELECTION_LINES:-0}"
+wg_min_entry_operators="${THREE_MACHINE_PROD_GATE_WG_MIN_ENTRY_OPERATORS:-0}"
+wg_min_exit_operators="${THREE_MACHINE_PROD_GATE_WG_MIN_EXIT_OPERATORS:-0}"
+wg_min_cross_operator_pairs="${THREE_MACHINE_PROD_GATE_WG_MIN_CROSS_OPERATOR_PAIRS:-0}"
 wg_max_failure_class_env="${THREE_MACHINE_PROD_GATE_WG_MAX_FAILURE_CLASS:-}"
 declare -a wg_max_failure_class_specs=()
 wg_max_round_duration_set=0
 wg_max_recovery_set=0
 wg_max_failure_class_set=0
 wg_disallow_unknown_set=0
+wg_min_selection_set=0
+wg_min_entry_set=0
+wg_min_exit_set=0
+wg_min_pair_set=0
 if [[ -n "${THREE_MACHINE_PROD_GATE_WG_MAX_ROUND_DURATION_SEC+x}" ]]; then
   wg_max_round_duration_set=1
 fi
@@ -241,6 +253,18 @@ if [[ -n "${THREE_MACHINE_PROD_GATE_WG_MAX_RECOVERY_SEC+x}" ]]; then
 fi
 if [[ -n "${THREE_MACHINE_PROD_GATE_WG_DISALLOW_UNKNOWN_FAILURE_CLASS+x}" ]]; then
   wg_disallow_unknown_set=1
+fi
+if [[ -n "${THREE_MACHINE_PROD_GATE_WG_MIN_SELECTION_LINES+x}" ]]; then
+  wg_min_selection_set=1
+fi
+if [[ -n "${THREE_MACHINE_PROD_GATE_WG_MIN_ENTRY_OPERATORS+x}" ]]; then
+  wg_min_entry_set=1
+fi
+if [[ -n "${THREE_MACHINE_PROD_GATE_WG_MIN_EXIT_OPERATORS+x}" ]]; then
+  wg_min_exit_set=1
+fi
+if [[ -n "${THREE_MACHINE_PROD_GATE_WG_MIN_CROSS_OPERATOR_PAIRS+x}" ]]; then
+  wg_min_pair_set=1
 fi
 if [[ -n "$(trim "$wg_max_failure_class_env")" ]]; then
   wg_max_failure_class_set=1
@@ -388,6 +412,26 @@ while [[ $# -gt 0 ]]; do
         wg_disallow_unknown_set=1
         shift
       fi
+      ;;
+    --wg-min-selection-lines)
+      wg_min_selection_lines="${2:-}"
+      wg_min_selection_set=1
+      shift 2
+      ;;
+    --wg-min-entry-operators)
+      wg_min_entry_operators="${2:-}"
+      wg_min_entry_set=1
+      shift 2
+      ;;
+    --wg-min-exit-operators)
+      wg_min_exit_operators="${2:-}"
+      wg_min_exit_set=1
+      shift 2
+      ;;
+    --wg-min-cross-operator-pairs)
+      wg_min_cross_operator_pairs="${2:-}"
+      wg_min_pair_set=1
+      shift 2
       ;;
     --control-fault-every)
       control_fault_every="${2:-}"
@@ -539,11 +583,19 @@ if [[ "$wg_slo_profile" != "off" ]]; then
   profile_round_duration=180
   profile_recovery=240
   profile_disallow_unknown=1
+  profile_min_selection=0
+  profile_min_entry=0
+  profile_min_exit=0
+  profile_min_pair=0
   declare -a profile_failure_specs=("endpoint_connectivity=2" "timeout=2" "wg_dataplane_stall=1")
   if [[ "$wg_slo_profile" == "strict" ]]; then
     profile_round_duration=120
     profile_recovery=180
     profile_disallow_unknown=1
+    profile_min_selection=8
+    profile_min_entry=2
+    profile_min_exit=2
+    profile_min_pair=2
     profile_failure_specs=("endpoint_connectivity=1" "timeout=1" "wg_dataplane_stall=0")
   fi
   if [[ "$wg_max_round_duration_set" == "0" ]]; then
@@ -558,6 +610,18 @@ if [[ "$wg_slo_profile" != "off" ]]; then
   if [[ "$wg_max_failure_class_set" == "0" ]]; then
     wg_max_failure_class_specs=("${profile_failure_specs[@]}")
   fi
+  if [[ "$wg_min_selection_set" == "0" ]]; then
+    wg_min_selection_lines="$profile_min_selection"
+  fi
+  if [[ "$wg_min_entry_set" == "0" ]]; then
+    wg_min_entry_operators="$profile_min_entry"
+  fi
+  if [[ "$wg_min_exit_set" == "0" ]]; then
+    wg_min_exit_operators="$profile_min_exit"
+  fi
+  if [[ "$wg_min_pair_set" == "0" ]]; then
+    wg_min_cross_operator_pairs="$profile_min_pair"
+  fi
 fi
 
 for script in "$BETA_VALIDATE_SCRIPT" "$BETA_SOAK_SCRIPT" "$PROD_WG_VALIDATE_SCRIPT" "$PROD_WG_SOAK_SCRIPT"; do
@@ -571,7 +635,7 @@ for cmd in bash date tee; do
   need_cmd "$cmd"
 done
 
-if ! [[ "$min_sources" =~ ^[0-9]+$ && "$min_operators" =~ ^[0-9]+$ && "$federation_timeout_sec" =~ ^[0-9]+$ && "$control_timeout_sec" =~ ^[0-9]+$ && "$control_soak_rounds" =~ ^[0-9]+$ && "$control_soak_pause_sec" =~ ^[0-9]+$ && "$wg_client_timeout_sec" =~ ^[0-9]+$ && "$wg_session_sec" =~ ^[0-9]+$ && "$wg_soak_rounds" =~ ^[0-9]+$ && "$wg_soak_pause_sec" =~ ^[0-9]+$ && "$wg_max_consecutive_failures" =~ ^[0-9]+$ && "$wg_max_round_duration_sec" =~ ^[0-9]+$ && "$wg_max_recovery_sec" =~ ^[0-9]+$ && "$control_fault_every" =~ ^[0-9]+$ && "$wg_fault_every" =~ ^[0-9]+$ && "$discovery_wait_sec" =~ ^[0-9]+$ ]]; then
+if ! [[ "$min_sources" =~ ^[0-9]+$ && "$min_operators" =~ ^[0-9]+$ && "$federation_timeout_sec" =~ ^[0-9]+$ && "$control_timeout_sec" =~ ^[0-9]+$ && "$control_soak_rounds" =~ ^[0-9]+$ && "$control_soak_pause_sec" =~ ^[0-9]+$ && "$wg_client_timeout_sec" =~ ^[0-9]+$ && "$wg_session_sec" =~ ^[0-9]+$ && "$wg_soak_rounds" =~ ^[0-9]+$ && "$wg_soak_pause_sec" =~ ^[0-9]+$ && "$wg_max_consecutive_failures" =~ ^[0-9]+$ && "$wg_max_round_duration_sec" =~ ^[0-9]+$ && "$wg_max_recovery_sec" =~ ^[0-9]+$ && "$wg_min_selection_lines" =~ ^[0-9]+$ && "$wg_min_entry_operators" =~ ^[0-9]+$ && "$wg_min_exit_operators" =~ ^[0-9]+$ && "$wg_min_cross_operator_pairs" =~ ^[0-9]+$ && "$control_fault_every" =~ ^[0-9]+$ && "$wg_fault_every" =~ ^[0-9]+$ && "$discovery_wait_sec" =~ ^[0-9]+$ ]]; then
   echo "numeric args are invalid"
   exit 2
 fi
@@ -638,7 +702,7 @@ echo "[prod-gate] report: $report_file"
 echo "[prod-gate] step_logs: $step_dir"
 echo "[prod-gate] strict_distinct=$strict_distinct skip_control_soak=$skip_control_soak skip_wg=$skip_wg skip_wg_soak=$skip_wg_soak wg_slo_profile=$wg_slo_profile wg_max_consecutive_failures=$wg_max_consecutive_failures"
 echo "[prod-gate] control_fault_every=$control_fault_every control_continue_on_fail=$control_continue_on_fail wg_fault_every=$wg_fault_every wg_continue_on_fail=$wg_continue_on_fail"
-echo "[prod-gate] wg_max_round_duration_sec=$wg_max_round_duration_sec wg_max_recovery_sec=$wg_max_recovery_sec wg_disallow_unknown_failure_class=$wg_disallow_unknown_failure_class wg_max_failure_class_specs=${#wg_max_failure_class_specs[@]}"
+echo "[prod-gate] wg_max_round_duration_sec=$wg_max_round_duration_sec wg_max_recovery_sec=$wg_max_recovery_sec wg_disallow_unknown_failure_class=$wg_disallow_unknown_failure_class wg_max_failure_class_specs=${#wg_max_failure_class_specs[@]} wg_min_selection_lines=$wg_min_selection_lines wg_min_entry_operators=$wg_min_entry_operators wg_min_exit_operators=$wg_min_exit_operators wg_min_cross_operator_pairs=$wg_min_cross_operator_pairs"
 gate_started_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 if [[ -z "$wg_soak_summary_json" ]]; then
   wg_soak_summary_json="$step_dir/04_prod_wg_soak.summary.json"
@@ -837,6 +901,10 @@ if [[ "$skip_wg" == "0" ]]; then
       --max-round-duration-sec "$wg_max_round_duration_sec"
       --max-recovery-sec "$wg_max_recovery_sec"
       --disallow-unknown-failure-class "$wg_disallow_unknown_failure_class"
+      --min-selection-lines "$wg_min_selection_lines"
+      --min-entry-operators "$wg_min_entry_operators"
+      --min-exit-operators "$wg_min_exit_operators"
+      --min-cross-operator-pairs "$wg_min_cross_operator_pairs"
       --summary-json "$wg_soak_summary_json"
       --fault-every "$wg_fault_every"
       --continue-on-fail "$wg_continue_on_fail"

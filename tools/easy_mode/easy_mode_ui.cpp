@@ -1562,6 +1562,10 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       std::string wgMaxRoundDuration = trim(readLine("WG max round duration sec override (blank=profile/default)", ""));
       std::string wgMaxRecovery = trim(readLine("WG max recovery sec override (blank=profile/default)", ""));
       std::string wgMaxFailureClass = trim(readLine("WG max failure class budget CLASS=N override (blank=profile/default)", ""));
+      std::string wgMinSelectionLines = trim(readLine("WG min selection lines override (blank=profile/default)", ""));
+      std::string wgMinEntryOperators = trim(readLine("WG min entry operators override (blank=profile/default)", ""));
+      std::string wgMinExitOperators = trim(readLine("WG min exit operators override (blank=profile/default)", ""));
+      std::string wgMinCrossOperatorPairs = trim(readLine("WG min cross-operator pairs override (blank=profile/default)", ""));
       std::string wgDisallowUnknownRaw = trim(readLine("Disallow unknown WG failure class override (blank=profile/default, y/n)", ""));
       bool hasWGDisallowUnknownOverride = !wgDisallowUnknownRaw.empty();
       bool wgDisallowUnknownClass = parseYesNo(wgDisallowUnknownRaw, true);
@@ -1612,6 +1616,18 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       }
       if (!wgMaxFailureClass.empty()) {
         cmd << " --wg-max-failure-class " << shellEscape(wgMaxFailureClass);
+      }
+      if (!wgMinSelectionLines.empty()) {
+        cmd << " --wg-min-selection-lines " << shellEscape(wgMinSelectionLines);
+      }
+      if (!wgMinEntryOperators.empty()) {
+        cmd << " --wg-min-entry-operators " << shellEscape(wgMinEntryOperators);
+      }
+      if (!wgMinExitOperators.empty()) {
+        cmd << " --wg-min-exit-operators " << shellEscape(wgMinExitOperators);
+      }
+      if (!wgMinCrossOperatorPairs.empty()) {
+        cmd << " --wg-min-cross-operator-pairs " << shellEscape(wgMinCrossOperatorPairs);
       }
       if (!wgMaxRoundDuration.empty()) {
         cmd << " --wg-max-round-duration-sec " << shellEscape(wgMaxRoundDuration);

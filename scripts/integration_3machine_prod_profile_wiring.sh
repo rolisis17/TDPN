@@ -278,6 +278,10 @@ THREE_MACHINE_PROD_GATE_SCRIPT="$FAKE_GATE" \
   --wg-max-recovery-sec 120 \
   --wg-max-failure-class endpoint_connectivity=2 \
   --wg-disallow-unknown-failure-class 1 \
+  --wg-min-selection-lines 12 \
+  --wg-min-entry-operators 2 \
+  --wg-min-exit-operators 2 \
+  --wg-min-cross-operator-pairs 3 \
   --strict-distinct 1 \
   --wg-max-consecutive-failures 3 \
   --wg-soak-summary-json /tmp/prod_gate_wg_soak_summary.json \
@@ -350,6 +354,26 @@ if ! rg -q -- '--wg-disallow-unknown-failure-class 1' "$GATE_CAPTURE"; then
   cat "$GATE_CAPTURE"
   exit 1
 fi
+if ! rg -q -- '--wg-min-selection-lines 12' "$GATE_CAPTURE"; then
+  echo "easy_node prod gate wiring failed: --wg-min-selection-lines 12 missing"
+  cat "$GATE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--wg-min-entry-operators 2' "$GATE_CAPTURE"; then
+  echo "easy_node prod gate wiring failed: --wg-min-entry-operators 2 missing"
+  cat "$GATE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--wg-min-exit-operators 2' "$GATE_CAPTURE"; then
+  echo "easy_node prod gate wiring failed: --wg-min-exit-operators 2 missing"
+  cat "$GATE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--wg-min-cross-operator-pairs 3' "$GATE_CAPTURE"; then
+  echo "easy_node prod gate wiring failed: --wg-min-cross-operator-pairs 3 missing"
+  cat "$GATE_CAPTURE"
+  exit 1
+fi
 if ! rg -q -- '--gate-summary-json /tmp/prod_gate_summary.json' "$GATE_CAPTURE"; then
   echo "easy_node prod gate wiring failed: --gate-summary-json missing"
   cat "$GATE_CAPTURE"
@@ -393,6 +417,10 @@ if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh three-machine-prod-gate --help
 fi
 if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh three-machine-prod-gate --help | rg -q -- '--wg-slo-profile'; then
   echo "easy_node three-machine-prod-gate help missing --wg-slo-profile"
+  exit 1
+fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh three-machine-prod-gate --help | rg -q -- '--wg-min-selection-lines'; then
+  echo "easy_node three-machine-prod-gate help missing --wg-min-selection-lines"
   exit 1
 fi
 
@@ -557,6 +585,10 @@ THREE_MACHINE_PROD_GATE_ALLOW_NON_ROOT=1 \
   --wg-max-recovery-sec 120 \
   --wg-max-failure-class endpoint_connectivity=2 \
   --wg-disallow-unknown-failure-class 1 \
+  --wg-min-selection-lines 6 \
+  --wg-min-entry-operators 2 \
+  --wg-min-exit-operators 2 \
+  --wg-min-cross-operator-pairs 2 \
   --wg-soak-summary-json "$WG_SUMMARY_FILE" \
   --gate-summary-json "$GATE_SUMMARY_FILE" >"$WG_GATE_LOG" 2>&1
 
@@ -610,6 +642,30 @@ if ! rg -q -- '--max-failure-class endpoint_connectivity=2' "$GATE_WG_SOAK_CAPTU
 fi
 if ! rg -q -- '--disallow-unknown-failure-class 1' "$GATE_WG_SOAK_CAPTURE"; then
   echo "prod gate wiring failed: WG soak call missing --disallow-unknown-failure-class 1"
+  cat "$GATE_WG_SOAK_CAPTURE"
+  cat "$WG_GATE_LOG"
+  exit 1
+fi
+if ! rg -q -- '--min-selection-lines 6' "$GATE_WG_SOAK_CAPTURE"; then
+  echo "prod gate wiring failed: WG soak call missing --min-selection-lines 6"
+  cat "$GATE_WG_SOAK_CAPTURE"
+  cat "$WG_GATE_LOG"
+  exit 1
+fi
+if ! rg -q -- '--min-entry-operators 2' "$GATE_WG_SOAK_CAPTURE"; then
+  echo "prod gate wiring failed: WG soak call missing --min-entry-operators 2"
+  cat "$GATE_WG_SOAK_CAPTURE"
+  cat "$WG_GATE_LOG"
+  exit 1
+fi
+if ! rg -q -- '--min-exit-operators 2' "$GATE_WG_SOAK_CAPTURE"; then
+  echo "prod gate wiring failed: WG soak call missing --min-exit-operators 2"
+  cat "$GATE_WG_SOAK_CAPTURE"
+  cat "$WG_GATE_LOG"
+  exit 1
+fi
+if ! rg -q -- '--min-cross-operator-pairs 2' "$GATE_WG_SOAK_CAPTURE"; then
+  echo "prod gate wiring failed: WG soak call missing --min-cross-operator-pairs 2"
   cat "$GATE_WG_SOAK_CAPTURE"
   cat "$WG_GATE_LOG"
   exit 1
@@ -675,6 +731,81 @@ if ! rg -q -- '--disallow-unknown-failure-class 1' "$GATE_WG_SOAK_CAPTURE"; then
   echo "prod gate wiring failed: wg-slo-profile recommended missing disallow-unknown flag"
   cat "$GATE_WG_SOAK_CAPTURE"
   cat "$WG_GATE_LOG_PROFILE"
+  exit 1
+fi
+if ! rg -q -- '--min-selection-lines 0' "$GATE_WG_SOAK_CAPTURE"; then
+  echo "prod gate wiring failed: wg-slo-profile recommended missing --min-selection-lines 0"
+  cat "$GATE_WG_SOAK_CAPTURE"
+  cat "$WG_GATE_LOG_PROFILE"
+  exit 1
+fi
+if ! rg -q -- '--min-entry-operators 0' "$GATE_WG_SOAK_CAPTURE"; then
+  echo "prod gate wiring failed: wg-slo-profile recommended missing --min-entry-operators 0"
+  cat "$GATE_WG_SOAK_CAPTURE"
+  cat "$WG_GATE_LOG_PROFILE"
+  exit 1
+fi
+if ! rg -q -- '--min-exit-operators 0' "$GATE_WG_SOAK_CAPTURE"; then
+  echo "prod gate wiring failed: wg-slo-profile recommended missing --min-exit-operators 0"
+  cat "$GATE_WG_SOAK_CAPTURE"
+  cat "$WG_GATE_LOG_PROFILE"
+  exit 1
+fi
+if ! rg -q -- '--min-cross-operator-pairs 0' "$GATE_WG_SOAK_CAPTURE"; then
+  echo "prod gate wiring failed: wg-slo-profile recommended missing --min-cross-operator-pairs 0"
+  cat "$GATE_WG_SOAK_CAPTURE"
+  cat "$WG_GATE_LOG_PROFILE"
+  exit 1
+fi
+
+echo "[wiring] prod gate script wg slo strict diversity defaults"
+: >"$GATE_WG_VALIDATE_CAPTURE"
+: >"$GATE_WG_SOAK_CAPTURE"
+WG_GATE_LOG_PROFILE_STRICT="/tmp/integration_3machine_prod_profile_wiring_prod_gate_wg_profile_strict.log"
+PATH="$TMP_BIN:$PATH" \
+GATE_VALIDATE_CAPTURE_FILE="$GATE_VALIDATE_CAPTURE" \
+GATE_SOAK_CAPTURE_FILE="$GATE_SOAK_CAPTURE" \
+GATE_WG_VALIDATE_CAPTURE_FILE="$GATE_WG_VALIDATE_CAPTURE" \
+GATE_WG_SOAK_CAPTURE_FILE="$GATE_WG_SOAK_CAPTURE" \
+THREE_MACHINE_BETA_VALIDATE_SCRIPT="$FAKE_GATE_VALIDATE" \
+THREE_MACHINE_BETA_SOAK_SCRIPT="$FAKE_GATE_SOAK" \
+THREE_MACHINE_PROD_WG_VALIDATE_SCRIPT="$FAKE_GATE_WG_VALIDATE" \
+THREE_MACHINE_PROD_WG_SOAK_SCRIPT="$FAKE_GATE_WG_SOAK" \
+THREE_MACHINE_PROD_GATE_ALLOW_NON_ROOT=1 \
+./scripts/integration_3machine_prod_gate.sh \
+  --directory-a https://dir-a:8081 \
+  --directory-b https://dir-b:8081 \
+  --issuer-url https://issuer-main:8082 \
+  --entry-url https://entry-main:8083 \
+  --exit-url https://exit-main:8084 \
+  --skip-control-soak 1 \
+  --wg-soak-rounds 1 \
+  --wg-soak-pause-sec 0 \
+  --wg-slo-profile strict \
+  --wg-soak-summary-json "$WG_SUMMARY_FILE" \
+  --gate-summary-json "$GATE_SUMMARY_FILE" >"$WG_GATE_LOG_PROFILE_STRICT" 2>&1
+if ! rg -q -- '--min-selection-lines 8' "$GATE_WG_SOAK_CAPTURE"; then
+  echo "prod gate wiring failed: wg-slo-profile strict missing --min-selection-lines 8"
+  cat "$GATE_WG_SOAK_CAPTURE"
+  cat "$WG_GATE_LOG_PROFILE_STRICT"
+  exit 1
+fi
+if ! rg -q -- '--min-entry-operators 2' "$GATE_WG_SOAK_CAPTURE"; then
+  echo "prod gate wiring failed: wg-slo-profile strict missing --min-entry-operators 2"
+  cat "$GATE_WG_SOAK_CAPTURE"
+  cat "$WG_GATE_LOG_PROFILE_STRICT"
+  exit 1
+fi
+if ! rg -q -- '--min-exit-operators 2' "$GATE_WG_SOAK_CAPTURE"; then
+  echo "prod gate wiring failed: wg-slo-profile strict missing --min-exit-operators 2"
+  cat "$GATE_WG_SOAK_CAPTURE"
+  cat "$WG_GATE_LOG_PROFILE_STRICT"
+  exit 1
+fi
+if ! rg -q -- '--min-cross-operator-pairs 2' "$GATE_WG_SOAK_CAPTURE"; then
+  echo "prod gate wiring failed: wg-slo-profile strict missing --min-cross-operator-pairs 2"
+  cat "$GATE_WG_SOAK_CAPTURE"
+  cat "$WG_GATE_LOG_PROFILE_STRICT"
   exit 1
 fi
 if ! rg -q '\[prod-gate\] wg_soak_summary status=fail .* top_failure_class=endpoint_connectivity top_failure_count=2 ' "$WG_GATE_LOG"; then

@@ -24,6 +24,10 @@ Usage:
     [--max-recovery-sec N] \
     [--max-failure-class CLASS=N] \
     [--disallow-unknown-failure-class [0|1]] \
+    [--min-selection-lines N] \
+    [--min-entry-operators N] \
+    [--min-exit-operators N] \
+    [--min-cross-operator-pairs N] \
     [--report-file PATH] \
     [--summary-json PATH] \
     [validate args...]
@@ -50,7 +54,11 @@ Examples:
     --max-recovery-sec 120 \
     --max-failure-class endpoint_connectivity=2 \
     --max-failure-class timeout=1 \
-    --disallow-unknown-failure-class 1
+    --disallow-unknown-failure-class 1 \
+    --min-selection-lines 8 \
+    --min-entry-operators 2 \
+    --min-exit-operators 2 \
+    --min-cross-operator-pairs 2
 USAGE
 }
 
@@ -144,6 +152,28 @@ valid_failure_class_name() {
   [[ "$class" =~ ^[A-Za-z0-9_.-]+$ ]]
 }
 
+selection_tuples_from_log() {
+  local round_log="$1"
+  if [[ ! -f "$round_log" ]]; then
+    return
+  fi
+  awk '
+    /client selected entry=/ {
+      entry_op = ""; exit_op = "";
+      for (i = 1; i <= NF; i++) {
+        if ($i ~ /^entry_op=/) {
+          entry_op = substr($i, 10);
+        } else if ($i ~ /^exit_op=/) {
+          exit_op = substr($i, 9);
+        }
+      }
+      if (entry_op != "" && exit_op != "") {
+        print entry_op, exit_op;
+      }
+    }
+  ' "$round_log"
+}
+
 rounds="${THREE_MACHINE_PROD_WG_SOAK_ROUNDS:-10}"
 pause_sec="${THREE_MACHINE_PROD_WG_SOAK_PAUSE_SEC:-8}"
 fault_every="${THREE_MACHINE_PROD_WG_SOAK_FAULT_EVERY:-0}"
@@ -154,6 +184,10 @@ max_round_duration_sec="${THREE_MACHINE_PROD_WG_SOAK_MAX_ROUND_DURATION_SEC:-0}"
 max_recovery_sec="${THREE_MACHINE_PROD_WG_SOAK_MAX_RECOVERY_SEC:-0}"
 disallow_unknown_failure_class="${THREE_MACHINE_PROD_WG_SOAK_DISALLOW_UNKNOWN_FAILURE_CLASS:-0}"
 max_failure_class_env="${THREE_MACHINE_PROD_WG_SOAK_MAX_FAILURE_CLASS:-}"
+min_selection_lines="${THREE_MACHINE_PROD_WG_SOAK_MIN_SELECTION_LINES:-0}"
+min_entry_operators="${THREE_MACHINE_PROD_WG_SOAK_MIN_ENTRY_OPERATORS:-0}"
+min_exit_operators="${THREE_MACHINE_PROD_WG_SOAK_MIN_EXIT_OPERATORS:-0}"
+min_cross_operator_pairs="${THREE_MACHINE_PROD_WG_SOAK_MIN_CROSS_OPERATOR_PAIRS:-0}"
 declare -a max_failure_class_specs=()
 report_file=""
 summary_json=""
@@ -211,6 +245,22 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --min-selection-lines)
+      min_selection_lines="${2:-}"
+      shift 2
+      ;;
+    --min-entry-operators)
+      min_entry_operators="${2:-}"
+      shift 2
+      ;;
+    --min-exit-operators)
+      min_exit_operators="${2:-}"
+      shift 2
+      ;;
+    --min-cross-operator-pairs)
+      min_cross_operator_pairs="${2:-}"
+      shift 2
+      ;;
     --report-file)
       report_file="${2:-}"
       shift 2
@@ -239,8 +289,8 @@ if [[ -n "$(trim "$max_failure_class_env")" ]]; then
   done
 fi
 
-if ! [[ "$rounds" =~ ^[0-9]+$ && "$pause_sec" =~ ^[0-9]+$ && "$fault_every" =~ ^[0-9]+$ && "$max_consecutive_failures" =~ ^[0-9]+$ && "$max_round_duration_sec" =~ ^[0-9]+$ && "$max_recovery_sec" =~ ^[0-9]+$ ]]; then
-  echo "--rounds, --pause-sec, --fault-every, --max-consecutive-failures, --max-round-duration-sec and --max-recovery-sec must be integers"
+if ! [[ "$rounds" =~ ^[0-9]+$ && "$pause_sec" =~ ^[0-9]+$ && "$fault_every" =~ ^[0-9]+$ && "$max_consecutive_failures" =~ ^[0-9]+$ && "$max_round_duration_sec" =~ ^[0-9]+$ && "$max_recovery_sec" =~ ^[0-9]+$ && "$min_selection_lines" =~ ^[0-9]+$ && "$min_entry_operators" =~ ^[0-9]+$ && "$min_exit_operators" =~ ^[0-9]+$ && "$min_cross_operator_pairs" =~ ^[0-9]+$ ]]; then
+  echo "--rounds, --pause-sec, --fault-every, --max-consecutive-failures, --max-round-duration-sec, --max-recovery-sec, and diversity thresholds must be integers"
   exit 2
 fi
 if ((rounds < 1)); then
@@ -309,6 +359,7 @@ exec > >(tee -a "$report_file") 2>&1
 echo "[3machine-prod-wg-soak] started at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "[3machine-prod-wg-soak] report: $report_file"
 echo "[3machine-prod-wg-soak] rounds=$rounds pause_sec=$pause_sec fault_every=$fault_every continue_on_fail=$continue_on_fail max_consecutive_failures=$max_consecutive_failures max_round_duration_sec=$max_round_duration_sec max_recovery_sec=$max_recovery_sec disallow_unknown_failure_class=$disallow_unknown_failure_class"
+echo "[3machine-prod-wg-soak] diversity_thresholds min_selection_lines=$min_selection_lines min_entry_operators=$min_entry_operators min_exit_operators=$min_exit_operators min_cross_operator_pairs=$min_cross_operator_pairs"
 if ((${#failure_class_limits[@]} > 0)); then
   while IFS= read -r class; do
     [[ -z "$class" ]] && continue
@@ -329,6 +380,10 @@ recovery_sec_max=0
 recovery_slo_violations=0
 declare -A failure_class_counts=()
 declare -A failure_class_limit_violations=()
+declare -A seen_entry_operators=()
+declare -A seen_exit_operators=()
+declare -A seen_cross_operator_pairs=()
+selection_lines_total=0
 
 for round in $(seq 1 "$rounds"); do
   echo
@@ -417,9 +472,18 @@ for round in $(seq 1 "$rounds"); do
   fi
 
   if [[ "$rc" -eq 0 ]]; then
+    round_selection_lines=0
+    while read -r entry_op exit_op; do
+      [[ -z "$entry_op" || -z "$exit_op" ]] && continue
+      seen_entry_operators["$entry_op"]=1
+      seen_exit_operators["$exit_op"]=1
+      seen_cross_operator_pairs["${entry_op}|${exit_op}"]=1
+      selection_lines_total=$((selection_lines_total + 1))
+      round_selection_lines=$((round_selection_lines + 1))
+    done < <(selection_tuples_from_log "$round_log")
     passed=$((passed + 1))
     consecutive_failures=0
-    echo "[3machine-prod-wg-soak] round=$round result=ok accepted_delta_total=$dataplane_delta_total duration_sec=$round_duration_sec log=$round_log"
+    echo "[3machine-prod-wg-soak] round=$round result=ok accepted_delta_total=$dataplane_delta_total selection_lines=$round_selection_lines duration_sec=$round_duration_sec log=$round_log"
   else
     failed=$((failed + 1))
     consecutive_failures=$((consecutive_failures + 1))
@@ -468,9 +532,35 @@ for class in "${!failure_class_limit_violations[@]}"; do
   class_limit_violation_total=$((class_limit_violation_total + failure_class_limit_violations[$class]))
 done
 
+entry_operator_count=${#seen_entry_operators[@]}
+exit_operator_count=${#seen_exit_operators[@]}
+cross_operator_pair_count=${#seen_cross_operator_pairs[@]}
+diversity_failed=0
+if ((selection_lines_total < min_selection_lines)); then
+  diversity_failed=1
+  echo "[3machine-prod-wg-soak] diversity threshold not met: selection_lines_total=$selection_lines_total < min_selection_lines=$min_selection_lines"
+fi
+if ((entry_operator_count < min_entry_operators)); then
+  diversity_failed=1
+  echo "[3machine-prod-wg-soak] diversity threshold not met: entry_operator_count=$entry_operator_count < min_entry_operators=$min_entry_operators"
+fi
+if ((exit_operator_count < min_exit_operators)); then
+  diversity_failed=1
+  echo "[3machine-prod-wg-soak] diversity threshold not met: exit_operator_count=$exit_operator_count < min_exit_operators=$min_exit_operators"
+fi
+if ((cross_operator_pair_count < min_cross_operator_pairs)); then
+  diversity_failed=1
+  echo "[3machine-prod-wg-soak] diversity threshold not met: cross_operator_pair_count=$cross_operator_pair_count < min_cross_operator_pairs=$min_cross_operator_pairs"
+fi
+if ((diversity_failed > 0)); then
+  failure_class_counts["diversity_threshold"]=$(( ${failure_class_counts["diversity_threshold"]:-0} + 1 ))
+  failed=$((failed + 1))
+fi
+
 echo
 echo "[3machine-prod-wg-soak] summary passed=$passed failed=$failed total=$rounds max_consecutive_failures_seen=$max_seen_consecutive_failures"
 echo "[3machine-prod-wg-soak] slo_summary max_round_duration_seen=${round_duration_sec_max}s max_round_duration_limit=${max_round_duration_sec}s recovery_incidents=$recovery_incidents recovery_sec_avg=${recovery_sec_avg}s recovery_sec_max=${recovery_sec_max}s recovery_sec_limit=${max_recovery_sec}s recovery_slo_violations=$recovery_slo_violations recovery_incident_open=$recovery_incident_open"
+echo "[3machine-prod-wg-soak] diversity_summary selection_lines_total=$selection_lines_total entry_operator_count=$entry_operator_count exit_operator_count=$exit_operator_count cross_operator_pair_count=$cross_operator_pair_count diversity_failed=$diversity_failed"
 if ((failed > 0)); then
   for class in "${!failure_class_counts[@]}"; do
     echo "[3machine-prod-wg-soak] failure_class ${class}=${failure_class_counts[$class]}"
@@ -506,6 +596,15 @@ if [[ -n "$summary_json" ]]; then
     echo "  \"recovery_sec_avg\": $recovery_sec_avg,"
     echo "  \"recovery_sec_max\": $recovery_sec_max,"
     echo "  \"recovery_slo_violations\": $recovery_slo_violations,"
+    echo "  \"selection_lines_total\": $selection_lines_total,"
+    echo "  \"selection_entry_operators\": $entry_operator_count,"
+    echo "  \"selection_exit_operators\": $exit_operator_count,"
+    echo "  \"selection_cross_operator_pairs\": $cross_operator_pair_count,"
+    echo "  \"selection_min_lines\": $min_selection_lines,"
+    echo "  \"selection_min_entry_operators\": $min_entry_operators,"
+    echo "  \"selection_min_exit_operators\": $min_exit_operators,"
+    echo "  \"selection_min_cross_operator_pairs\": $min_cross_operator_pairs,"
+    echo "  \"selection_diversity_failed\": $diversity_failed,"
     echo "  \"disallow_unknown_failure_class\": $disallow_unknown_failure_class,"
     echo "  \"failure_class_limit_violations_total\": $class_limit_violation_total,"
     echo "  \"report_file\": \"$(json_escape "$report_file")\","

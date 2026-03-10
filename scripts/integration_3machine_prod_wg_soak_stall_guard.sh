@@ -424,4 +424,63 @@ if ! rg -q '"disallow_unknown_failure_class": 1' "$SUMMARY_UNKNOWN"; then
   exit 1
 fi
 
+# Case 8: diversity thresholds should fail when selection spread is too narrow.
+cat >"$FAKE_VALIDATE" <<'EOF_FAKE_DIVERSITY'
+#!/usr/bin/env bash
+set -euo pipefail
+report=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --report-file)
+      report="${2:-}"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+if [[ -n "$report" ]]; then
+  {
+    echo "2026/03/01 client selected entry=entry-op-a (http://a:8083) exit=exit-op-b (http://b:8084) entry_op=op-a exit_op=op-b token_exp=123"
+    echo "[3machine-prod-wg] dataplane-summary handshake_epoch=1 rx_bytes=10 tx_bytes=20 exit_a_accepted_packets=11 exit_b_accepted_packets=12 accepted_delta_a=1 accepted_delta_b=2 accepted_delta_total=3"
+    echo "[3machine-prod-wg] success"
+  } >>"$report"
+fi
+exit 0
+EOF_FAKE_DIVERSITY
+chmod +x "$FAKE_VALIDATE"
+
+OUT_DIVERSITY="$TMP_DIR/out_diversity.log"
+SUMMARY_DIVERSITY="$TMP_DIR/soak_diversity_summary.json"
+run_expect_fail "$OUT_DIVERSITY" \
+  --rounds 2 \
+  --pause-sec 0 \
+  --min-selection-lines 4 \
+  --min-entry-operators 2 \
+  --min-exit-operators 2 \
+  --min-cross-operator-pairs 2 \
+  --summary-json "$SUMMARY_DIVERSITY" \
+  --report-file "$TMP_DIR/soak_diversity.log"
+if ! rg -q 'diversity threshold not met' "$OUT_DIVERSITY"; then
+  echo "missing expected diversity threshold failure signal"
+  cat "$OUT_DIVERSITY"
+  exit 1
+fi
+if ! rg -q 'failure_class diversity_threshold=1' "$OUT_DIVERSITY"; then
+  echo "missing expected diversity_threshold failure class summary"
+  cat "$OUT_DIVERSITY"
+  exit 1
+fi
+if ! rg -q '"selection_diversity_failed": 1' "$SUMMARY_DIVERSITY"; then
+  echo "summary json missing selection_diversity_failed flag"
+  cat "$SUMMARY_DIVERSITY"
+  exit 1
+fi
+if ! rg -q '"selection_min_entry_operators": 2' "$SUMMARY_DIVERSITY"; then
+  echo "summary json missing diversity threshold fields"
+  cat "$SUMMARY_DIVERSITY"
+  exit 1
+fi
+
 echo "3-machine prod wg soak stall guard integration check ok"
