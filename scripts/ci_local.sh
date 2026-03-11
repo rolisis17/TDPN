@@ -43,8 +43,8 @@ if ! rg -q "wgiotap packets=" /tmp/ci_demo.log; then
   cat /tmp/ci_demo.log
   exit 1
 fi
-if ! rg -q "client downlink opaque packets" /tmp/ci_demo.log; then
-  echo "[ci] missing expected client downlink relay log"
+if ! rg -q "(client downlink opaque packets|client forwarded opaque udp packets count=)" /tmp/ci_demo.log; then
+  echo "[ci] missing expected client relay/downlink log"
   cat /tmp/ci_demo.log
   exit 1
 fi
@@ -70,8 +70,20 @@ echo "[ci] easy-node peer identity guard integration"
 echo "[ci] easy-node server preflight integration"
 ./scripts/integration_easy_node_server_preflight.sh
 
+echo "[ci] easy-node prod authority/provider env wiring integration"
+./scripts/integration_easy_node_prod_server_env.sh
+
 echo "[ci] easy-node client profile env integration"
 ./scripts/integration_easy_node_client_profile_env.sh
+
+echo "[ci] easy-mode launcher wiring integration"
+./scripts/integration_easy_mode_launcher_wiring.sh
+
+echo "[ci] easy-mode launcher runtime integration"
+./scripts/integration_easy_mode_launcher_runtime.sh
+
+echo "[ci] incident snapshot integration"
+./scripts/integration_incident_snapshot.sh
 
 echo "[ci] 3-machine prod-profile wiring integration"
 ./scripts/integration_3machine_prod_profile_wiring.sh
@@ -81,6 +93,72 @@ echo "[ci] 3-machine prod wg soak stall guard integration"
 
 echo "[ci] prod gate check integration"
 ./scripts/integration_prod_gate_check.sh
+
+echo "[ci] prod gate slo summary integration"
+./scripts/integration_prod_gate_slo_summary.sh
+
+echo "[ci] prod gate slo trend integration"
+./scripts/integration_prod_gate_slo_trend.sh
+
+echo "[ci] prod gate slo alert integration"
+./scripts/integration_prod_gate_slo_alert.sh
+
+echo "[ci] prod gate slo dashboard integration"
+./scripts/integration_prod_gate_slo_dashboard.sh
+
+echo "[ci] prod gate bundle verify integration"
+./scripts/integration_prod_gate_bundle_verify.sh
+
+echo "[ci] prod bundle incident snapshot integration"
+./scripts/integration_prod_bundle_incident_snapshot.sh
+
+echo "[ci] prod gate signoff integration"
+./scripts/integration_prod_gate_signoff.sh
+
+echo "[ci] prod pilot runbook integration"
+./scripts/integration_prod_pilot_runbook.sh
+
+echo "[ci] prod pilot cohort runbook integration"
+./scripts/integration_prod_pilot_cohort_runbook.sh
+
+echo "[ci] prod pilot cohort quick integration"
+./scripts/integration_prod_pilot_cohort_quick.sh
+
+echo "[ci] prod pilot cohort quick check integration"
+./scripts/integration_prod_pilot_cohort_quick_check.sh
+
+echo "[ci] prod pilot cohort quick trend integration"
+./scripts/integration_prod_pilot_cohort_quick_trend.sh
+
+echo "[ci] prod pilot cohort quick alert integration"
+./scripts/integration_prod_pilot_cohort_quick_alert.sh
+
+echo "[ci] prod pilot cohort quick dashboard integration"
+./scripts/integration_prod_pilot_cohort_quick_dashboard.sh
+
+echo "[ci] prod pilot cohort quick signoff integration"
+./scripts/integration_prod_pilot_cohort_quick_signoff.sh
+
+echo "[ci] prod pilot cohort quick runbook integration"
+./scripts/integration_prod_pilot_cohort_quick_runbook.sh
+
+echo "[ci] prod pilot cohort bundle verify integration"
+./scripts/integration_prod_pilot_cohort_bundle_verify.sh
+
+echo "[ci] prod pilot cohort check integration"
+./scripts/integration_prod_pilot_cohort_check.sh
+
+echo "[ci] prod pilot cohort signoff integration"
+./scripts/integration_prod_pilot_cohort_signoff.sh
+
+echo "[ci] prod key-rotation runbook integration"
+./scripts/integration_prod_key_rotation_runbook.sh
+
+echo "[ci] prod upgrade runbook integration"
+./scripts/integration_prod_upgrade_runbook.sh
+
+echo "[ci] prod operator lifecycle runbook integration"
+./scripts/integration_prod_operator_lifecycle_runbook.sh
 
 echo "[ci] rotate-server-secrets integration"
 ./scripts/integration_rotate_server_secrets.sh

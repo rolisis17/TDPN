@@ -30,79 +30,84 @@ import (
 )
 
 type Client struct {
-	directoryURL          string
-	directoryURLs         []string
-	directoryMinSources   int
-	directoryMinOperators int
-	directoryMinVotes     int
-	issuerURL             string
-	subject               string
-	anonCred              string
-	entryURL              string
-	exitControlURL        string
-	dataMode              string
-	clientWGPub           string
-	trustStrict           bool
-	trustTOFU             bool
-	trustFile             string
-	innerSource           string
-	innerUDPAddr          string
-	innerMaxPkts          int
-	opaqueSinkAddr        string
-	opaqueDrainMS         int
-	opaqueSessionSec      int
-	opaqueInitialUpMS     int
-	wgBackend             string
-	wgInterface           string
-	wgPrivateKey          string
-	wgAllowedIPs          string
-	wgInstallRoute        bool
-	wgKernelProxy         bool
-	wgProxyAddr           string
-	wgManager             wg.ClientManager
-	liveWGMode            bool
-	wgOnlyMode            bool
-	disableSynthetic      bool
-	healthCheckEnabled    bool
-	healthCheckTimeout    time.Duration
-	healthCacheTTL        time.Duration
-	preferredExitCountry  string
-	preferredExitRegion   string
-	minGeoConfidence      float64
-	localityFallbackOrder []string
-	strictExitLocality    bool
-	maxExitsPerOperator   int
-	requireDistinctOps    bool
-	stickyPairSec         int
-	entryRotationSec      int
-	entryRotationSeed     int64
-	lastSelectedEntry     string
-	lastSelectedExit      string
-	lastSelectedAt        time.Time
-	sessionReuse          bool
-	sessionRefreshLeadSec int
-	pathOpenMaxAttempts   int
-	maxPairCandidates     int
-	bootstrapInterval     time.Duration
-	bootstrapBackoffMax   time.Duration
-	bootstrapJitterPct    int
-	bootstrapInitialDelay time.Duration
-	startupSyncTimeout    time.Duration
-	exitExplorationPct    int
-	exitSelectionSeed     int64
-	selectionFeedDisable  bool
-	selectionFeedRequire  bool
-	selectionFeedMinVotes int
-	trustFeedDisable      bool
-	trustFeedRequire      bool
-	trustFeedMinVotes     int
-	activeSession         clientActiveSession
-	activeMu              sync.Mutex
-	healthMu              sync.Mutex
-	healthCache           map[string]healthProbeState
-	httpClient            *http.Client
-	betaStrict            bool
-	prodStrict            bool
+	directoryURL             string
+	directoryURLs            []string
+	directoryMinSources      int
+	directoryMinOperators    int
+	directoryMinVotes        int
+	issuerURL                string
+	subject                  string
+	anonCred                 string
+	entryURL                 string
+	exitControlURL           string
+	dataMode                 string
+	clientWGPub              string
+	trustStrict              bool
+	trustTOFU                bool
+	trustFile                string
+	innerSource              string
+	innerUDPAddr             string
+	innerMaxPkts             int
+	opaqueSinkAddr           string
+	opaqueDrainMS            int
+	opaqueSessionSec         int
+	opaqueInitialUpMS        int
+	wgBackend                string
+	wgInterface              string
+	wgPrivateKey             string
+	wgAllowedIPs             string
+	wgInstallRoute           bool
+	wgKernelProxy            bool
+	wgProxyAddr              string
+	wgManager                wg.ClientManager
+	liveWGMode               bool
+	wgOnlyMode               bool
+	disableSynthetic         bool
+	healthCheckEnabled       bool
+	healthCheckTimeout       time.Duration
+	healthCacheTTL           time.Duration
+	preferredExitCountry     string
+	preferredExitRegion      string
+	minGeoConfidence         float64
+	localityFallbackOrder    []string
+	strictExitLocality       bool
+	localitySoftBias         bool
+	localityCountryBias      float64
+	localityRegionBias       float64
+	localityRegionPrefixBias float64
+	maxExitsPerOperator      int
+	requireDistinctOps       bool
+	requireDistinctCountries bool
+	stickyPairSec            int
+	entryRotationSec         int
+	entryRotationSeed        int64
+	lastSelectedEntry        string
+	lastSelectedExit         string
+	lastSelectedAt           time.Time
+	sessionReuse             bool
+	sessionRefreshLeadSec    int
+	pathOpenMaxAttempts      int
+	maxPairCandidates        int
+	bootstrapInterval        time.Duration
+	bootstrapBackoffMax      time.Duration
+	bootstrapJitterPct       int
+	bootstrapInitialDelay    time.Duration
+	startupSyncTimeout       time.Duration
+	exitExplorationPct       int
+	exitSelectionSeed        int64
+	selectionFeedDisable     bool
+	selectionFeedRequire     bool
+	selectionFeedMinVotes    int
+	trustFeedDisable         bool
+	trustFeedRequire         bool
+	trustFeedMinVotes        int
+	activeSession            clientActiveSession
+	activeMu                 sync.Mutex
+	healthMu                 sync.Mutex
+	healthCache              map[string]healthProbeState
+	httpClient               *http.Client
+	betaStrict               bool
+	prodStrict               bool
 }
 
 type healthProbeState struct {
@@ -259,11 +264,16 @@ func NewClient() *Client {
 	}
 	localityFallbackOrder := parseLocalityFallbackOrder(os.Getenv("CLIENT_EXIT_LOCALITY_FALLBACK_ORDER"))
 	strictExitLocality := os.Getenv("CLIENT_EXIT_STRICT_LOCALITY") == "1"
+	localitySoftBias := os.Getenv("CLIENT_EXIT_LOCALITY_SOFT_BIAS") == "1"
+	localityCountryBias := parseSelectionBiasEnv("CLIENT_EXIT_COUNTRY_BIAS", 1.60)
+	localityRegionBias := parseSelectionBiasEnv("CLIENT_EXIT_REGION_BIAS", 1.25)
+	localityRegionPrefixBias := parseSelectionBiasEnv("CLIENT_EXIT_REGION_PREFIX_BIAS", 1.10)
 	maxExitsPerOperator := 0
 	if v, err := strconv.Atoi(os.Getenv("CLIENT_MAX_EXITS_PER_OPERATOR")); err == nil && v > 0 {
 		maxExitsPerOperator = v
 	}
 	requireDistinctOps := os.Getenv("CLIENT_REQUIRE_DISTINCT_OPERATORS") == "1"
+	requireDistinctCountries := os.Getenv("CLIENT_REQUIRE_DISTINCT_ENTRY_EXIT_COUNTRY") == "1"
 	stickyPairSec := 0
 	if v, err := strconv.Atoi(os.Getenv("CLIENT_STICKY_PAIR_SEC")); err == nil && v > 0 {
 		stickyPairSec = v
@@ -376,73 +386,78 @@ func NewClient() *Client {
 	}
 
 	return &Client{
-		directoryURL:          directoryURL,
-		directoryURLs:         directoryURLs,
-		directoryMinSources:   directoryMinSources,
-		directoryMinOperators: directoryMinOperators,
-		directoryMinVotes:     directoryMinVotes,
-		issuerURL:             issuerURL,
-		subject:               subject,
-		anonCred:              anonCred,
-		entryURL:              entryURL,
-		exitControlURL:        exitControlURL,
-		dataMode:              dataMode,
-		clientWGPub:           clientWGPub,
-		trustStrict:           trustStrict,
-		trustTOFU:             trustTOFU,
-		trustFile:             trustFile,
-		innerSource:           innerSource,
-		innerUDPAddr:          innerUDPAddr,
-		innerMaxPkts:          innerMaxPkts,
-		opaqueSinkAddr:        opaqueSinkAddr,
-		opaqueDrainMS:         opaqueDrainMS,
-		opaqueSessionSec:      opaqueSessionSec,
-		opaqueInitialUpMS:     opaqueInitialUpMS,
-		wgBackend:             wgBackend,
-		wgInterface:           wgInterface,
-		wgPrivateKey:          wgPrivateKey,
-		wgAllowedIPs:          wgAllowedIPs,
-		wgInstallRoute:        wgInstallRoute,
-		wgKernelProxy:         wgKernelProxy,
-		wgProxyAddr:           wgProxyAddr,
-		wgManager:             wgManager,
-		liveWGMode:            liveWGMode,
-		wgOnlyMode:            wgOnlyMode,
-		disableSynthetic:      disableSynthetic,
-		healthCheckEnabled:    healthCheckEnabled,
-		healthCheckTimeout:    time.Duration(healthTimeoutMS) * time.Millisecond,
-		healthCacheTTL:        time.Duration(healthCacheSec) * time.Second,
-		preferredExitCountry:  preferredExitCountry,
-		preferredExitRegion:   preferredExitRegion,
-		minGeoConfidence:      minGeoConfidence,
-		localityFallbackOrder: localityFallbackOrder,
-		strictExitLocality:    strictExitLocality,
-		maxExitsPerOperator:   maxExitsPerOperator,
-		requireDistinctOps:    requireDistinctOps,
-		stickyPairSec:         stickyPairSec,
-		entryRotationSec:      entryRotationSec,
-		entryRotationSeed:     entryRotationSeed,
-		sessionReuse:          sessionReuse,
-		sessionRefreshLeadSec: sessionRefreshLeadSec,
-		pathOpenMaxAttempts:   pathOpenMaxAttempts,
-		maxPairCandidates:     maxPairCandidates,
-		bootstrapInterval:     time.Duration(bootstrapIntervalSec) * time.Second,
-		bootstrapBackoffMax:   time.Duration(bootstrapBackoffMaxSec) * time.Second,
-		bootstrapJitterPct:    bootstrapJitterPct,
-		bootstrapInitialDelay: time.Duration(bootstrapInitialDelaySec) * time.Second,
-		startupSyncTimeout:    time.Duration(startupSyncTimeoutSec) * time.Second,
-		exitExplorationPct:    exitExplorationPct,
-		exitSelectionSeed:     exitSelectionSeed,
-		selectionFeedDisable:  selectionFeedDisable,
-		selectionFeedRequire:  selectionFeedRequire,
-		selectionFeedMinVotes: selectionFeedMinVotes,
-		trustFeedDisable:      trustFeedDisable,
-		trustFeedRequire:      trustFeedRequire,
-		trustFeedMinVotes:     trustFeedMinVotes,
-		healthCache:           make(map[string]healthProbeState),
-		httpClient:            &http.Client{Timeout: 5 * time.Second},
-		betaStrict:            betaStrict,
-		prodStrict:            prodStrict,
+		directoryURL:             directoryURL,
+		directoryURLs:            directoryURLs,
+		directoryMinSources:      directoryMinSources,
+		directoryMinOperators:    directoryMinOperators,
+		directoryMinVotes:        directoryMinVotes,
+		issuerURL:                issuerURL,
+		subject:                  subject,
+		anonCred:                 anonCred,
+		entryURL:                 entryURL,
+		exitControlURL:           exitControlURL,
+		dataMode:                 dataMode,
+		clientWGPub:              clientWGPub,
+		trustStrict:              trustStrict,
+		trustTOFU:                trustTOFU,
+		trustFile:                trustFile,
+		innerSource:              innerSource,
+		innerUDPAddr:             innerUDPAddr,
+		innerMaxPkts:             innerMaxPkts,
+		opaqueSinkAddr:           opaqueSinkAddr,
+		opaqueDrainMS:            opaqueDrainMS,
+		opaqueSessionSec:         opaqueSessionSec,
+		opaqueInitialUpMS:        opaqueInitialUpMS,
+		wgBackend:                wgBackend,
+		wgInterface:              wgInterface,
+		wgPrivateKey:             wgPrivateKey,
+		wgAllowedIPs:             wgAllowedIPs,
+		wgInstallRoute:           wgInstallRoute,
+		wgKernelProxy:            wgKernelProxy,
+		wgProxyAddr:              wgProxyAddr,
+		wgManager:                wgManager,
+		liveWGMode:               liveWGMode,
+		wgOnlyMode:               wgOnlyMode,
+		disableSynthetic:         disableSynthetic,
+		healthCheckEnabled:       healthCheckEnabled,
+		healthCheckTimeout:       time.Duration(healthTimeoutMS) * time.Millisecond,
+		healthCacheTTL:           time.Duration(healthCacheSec) * time.Second,
+		preferredExitCountry:     preferredExitCountry,
+		preferredExitRegion:      preferredExitRegion,
+		minGeoConfidence:         minGeoConfidence,
+		localityFallbackOrder:    localityFallbackOrder,
+		strictExitLocality:       strictExitLocality,
+		localitySoftBias:         localitySoftBias,
+		localityCountryBias:      localityCountryBias,
+		localityRegionBias:       localityRegionBias,
+		localityRegionPrefixBias: localityRegionPrefixBias,
+		maxExitsPerOperator:      maxExitsPerOperator,
+		requireDistinctOps:       requireDistinctOps,
+		requireDistinctCountries: requireDistinctCountries,
+		stickyPairSec:            stickyPairSec,
+		entryRotationSec:         entryRotationSec,
+		entryRotationSeed:        entryRotationSeed,
+		sessionReuse:             sessionReuse,
+		sessionRefreshLeadSec:    sessionRefreshLeadSec,
+		pathOpenMaxAttempts:      pathOpenMaxAttempts,
+		maxPairCandidates:        maxPairCandidates,
+		bootstrapInterval:        time.Duration(bootstrapIntervalSec) * time.Second,
+		bootstrapBackoffMax:      time.Duration(bootstrapBackoffMaxSec) * time.Second,
+		bootstrapJitterPct:       bootstrapJitterPct,
+		bootstrapInitialDelay:    time.Duration(bootstrapInitialDelaySec) * time.Second,
+		startupSyncTimeout:       time.Duration(startupSyncTimeoutSec) * time.Second,
+		exitExplorationPct:       exitExplorationPct,
+		exitSelectionSeed:        exitSelectionSeed,
+		selectionFeedDisable:     selectionFeedDisable,
+		selectionFeedRequire:     selectionFeedRequire,
+		selectionFeedMinVotes:    selectionFeedMinVotes,
+		trustFeedDisable:         trustFeedDisable,
+		trustFeedRequire:         trustFeedRequire,
+		trustFeedMinVotes:        trustFeedMinVotes,
+		healthCache:              make(map[string]healthProbeState),
+		httpClient:               &http.Client{Timeout: 5 * time.Second},
+		betaStrict:               betaStrict,
+		prodStrict:               prodStrict,
 	}
 }
 
@@ -465,8 +480,8 @@ func (c *Client) Run(ctx context.Context) error {
 	if initialDelay < 0 {
 		initialDelay = 0
 	}
-	log.Printf("client role enabled: directories=%d min_sources=%d min_operators=%d min_votes=%d issuer=%s subject=%s anon_cred=%t entry=%s mode=%s source=%s trust_strict=%t wg_backend=%s iface=%s allowed_ips=%s install_route=%t wg_kernel_proxy=%t wg_proxy_addr=%s synthetic_fallback=%t opaque_session_sec=%d opaque_initial_uplink_timeout_ms=%d health_check=%t path_attempts=%d exit_country=%s exit_region=%s min_geo_confidence=%.2f locality_fallback=%s strict_locality=%t max_exits_per_operator=%d distinct_operators=%t sticky_pair_sec=%d entry_rotation_sec=%d entry_rotation_seed_set=%t session_reuse=%t refresh_lead_sec=%d exit_exploration_pct=%d selection_feed_disable=%t selection_feed_require=%t selection_feed_min_votes=%d trust_feed_disable=%t trust_feed_require=%t trust_feed_min_votes=%d bootstrap_interval_sec=%d bootstrap_backoff_max_sec=%d bootstrap_jitter_pct=%d bootstrap_initial_delay_sec=%d startup_sync_timeout_sec=%d wg_only=%t beta_strict=%t",
-		len(c.directoryURLs), c.directoryMinSources, c.directoryMinOperators, c.directoryMinVotes, c.issuerURL, c.subject, c.anonCred != "", c.entryURL, c.dataMode, c.innerSource, c.trustStrict, c.wgBackend, c.wgInterface, c.wgAllowedIPs, c.wgInstallRoute, c.wgKernelProxy, c.wgProxyAddr, c.allowSyntheticFallback(), c.opaqueSessionSec, c.opaqueInitialUpMS, c.healthCheckEnabled, c.pathOpenMaxAttempts, c.preferredExitCountry, c.preferredExitRegion, c.minGeoConfidence, strings.Join(c.localityFallbackOrder, ","), c.strictExitLocality, c.maxExitsPerOperator, c.requireDistinctOps, c.stickyPairSec, c.entryRotationSec, c.entryRotationSeed != 0, c.sessionReuse, c.sessionRefreshLeadSec, c.exitExplorationPct, c.selectionFeedDisable, c.selectionFeedRequire, c.selectionFeedMinVotes, c.trustFeedDisable, c.trustFeedRequire, c.trustFeedMinVotes, int(bootstrapInterval/time.Second), int(bootstrapBackoffMax/time.Second), c.bootstrapJitterPct, int(initialDelay/time.Second), int(c.startupSyncTimeout/time.Second), c.wgOnlyMode, c.betaStrict)
+	log.Printf("client role enabled: directories=%d min_sources=%d min_operators=%d min_votes=%d issuer=%s subject=%s anon_cred=%t entry=%s mode=%s source=%s trust_strict=%t wg_backend=%s iface=%s allowed_ips=%s install_route=%t wg_kernel_proxy=%t wg_proxy_addr=%s synthetic_fallback=%t opaque_session_sec=%d opaque_initial_uplink_timeout_ms=%d health_check=%t path_attempts=%d exit_country=%s exit_region=%s min_geo_confidence=%.2f locality_fallback=%s strict_locality=%t locality_soft_bias=%t country_bias=%.2f region_bias=%.2f region_prefix_bias=%.2f max_exits_per_operator=%d distinct_operators=%t distinct_countries=%t sticky_pair_sec=%d entry_rotation_sec=%d entry_rotation_seed_set=%t session_reuse=%t refresh_lead_sec=%d exit_exploration_pct=%d selection_feed_disable=%t selection_feed_require=%t selection_feed_min_votes=%d trust_feed_disable=%t trust_feed_require=%t trust_feed_min_votes=%d bootstrap_interval_sec=%d bootstrap_backoff_max_sec=%d bootstrap_jitter_pct=%d bootstrap_initial_delay_sec=%d startup_sync_timeout_sec=%d wg_only=%t beta_strict=%t",
+		len(c.directoryURLs), c.directoryMinSources, c.directoryMinOperators, c.directoryMinVotes, c.issuerURL, c.subject, c.anonCred != "", c.entryURL, c.dataMode, c.innerSource, c.trustStrict, c.wgBackend, c.wgInterface, c.wgAllowedIPs, c.wgInstallRoute, c.wgKernelProxy, c.wgProxyAddr, c.allowSyntheticFallback(), c.opaqueSessionSec, c.opaqueInitialUpMS, c.healthCheckEnabled, c.pathOpenMaxAttempts, c.preferredExitCountry, c.preferredExitRegion, c.minGeoConfidence, strings.Join(c.localityFallbackOrder, ","), c.strictExitLocality, c.localitySoftBias, c.localityCountryBias, c.localityRegionBias, c.localityRegionPrefixBias, c.maxExitsPerOperator, c.requireDistinctOps, c.requireDistinctCountries, c.stickyPairSec, c.entryRotationSec, c.entryRotationSeed != 0, c.sessionReuse, c.sessionRefreshLeadSec, c.exitExplorationPct, c.selectionFeedDisable, c.selectionFeedRequire, c.selectionFeedMinVotes, c.trustFeedDisable, c.trustFeedRequire, c.trustFeedMinVotes, int(bootstrapInterval/time.Second), int(bootstrapBackoffMax/time.Second), c.bootstrapJitterPct, int(initialDelay/time.Second), int(c.startupSyncTimeout/time.Second), c.wgOnlyMode, c.betaStrict)
 	if err := c.validateRuntimeConfig(); err != nil {
 		return err
 	}
@@ -2693,6 +2708,8 @@ func (c *Client) rankRelayPairs(ctx context.Context, relays []proto.RelayDescrip
 	seen := make(map[string]struct{})
 	droppedSameOperator := 0
 	droppedMissingOperator := 0
+	droppedSameCountry := 0
+	droppedMissingCountry := 0
 	addPair := func(entry proto.RelayDescriptor, exit proto.RelayDescriptor) {
 		key := entry.RelayID + "|" + exit.RelayID
 		if _, ok := seen[key]; ok {
@@ -2708,6 +2725,18 @@ func (c *Client) rankRelayPairs(ctx context.Context, relays []proto.RelayDescrip
 			}
 			if entryOperator == exitOperator {
 				droppedSameOperator++
+				return
+			}
+		}
+		if c.requireDistinctCountries {
+			entryCountry := normalizeCountryCode(entry.CountryCode)
+			exitCountry := normalizeCountryCode(exit.CountryCode)
+			if entryCountry == "" || exitCountry == "" {
+				droppedMissingCountry++
+				return
+			}
+			if entryCountry == exitCountry {
+				droppedSameCountry++
 				return
 			}
 		}
@@ -2734,6 +2763,10 @@ func (c *Client) rankRelayPairs(ctx context.Context, relays []proto.RelayDescrip
 	if c.requireDistinctOps && (droppedSameOperator > 0 || droppedMissingOperator > 0) {
 		log.Printf("client distinct-operator filter applied: dropped_same_operator=%d dropped_missing_operator=%d",
 			droppedSameOperator, droppedMissingOperator)
+	}
+	if c.requireDistinctCountries && (droppedSameCountry > 0 || droppedMissingCountry > 0) {
+		log.Printf("client distinct-country filter applied: dropped_same_country=%d dropped_missing_country=%d",
+			droppedSameCountry, droppedMissingCountry)
 	}
 	if c.maxPairCandidates > 0 && len(pairs) > c.maxPairCandidates {
 		pairs = pairs[:c.maxPairCandidates]
@@ -2787,6 +2820,13 @@ func (c *Client) selectPreferredExits(exits []proto.RelayDescriptor) ([]proto.Re
 	if len(modes) == 0 {
 		modes = parseLocalityFallbackOrder("")
 	}
+	if c.localitySoftBias && !c.strictExitLocality {
+		mode := c.firstMatchingLocalityMode(exits, country, region, modes)
+		if mode == "" {
+			mode = "fallback-global"
+		}
+		return exits, "soft-" + mode
+	}
 	for _, mode := range modes {
 		switch mode {
 		case "country":
@@ -2834,6 +2874,41 @@ func (c *Client) selectPreferredExits(exits []proto.RelayDescriptor) ([]proto.Re
 		return nil, "strict-locality-no-match"
 	}
 	return exits, "fallback-global"
+}
+
+func (c *Client) firstMatchingLocalityMode(exits []proto.RelayDescriptor, country string, region string, modes []string) string {
+	for _, mode := range modes {
+		switch mode {
+		case "country":
+			if country != "" && len(c.filterExitsByCountry(exits, country)) > 0 {
+				return "country"
+			}
+		case "region":
+			if region != "" && len(c.filterExitsByRegion(exits, region)) > 0 {
+				return "region"
+			}
+		case "region-prefix":
+			if region == "" {
+				continue
+			}
+			prefix := regionPrefix(region)
+			if prefix == "" {
+				continue
+			}
+			for _, x := range exits {
+				if !c.geoConfidenceOK(x) {
+					continue
+				}
+				norm := normalizeRegion(x.Region)
+				if strings.HasPrefix(norm, prefix+"-") || norm == prefix {
+					return "region-prefix"
+				}
+			}
+		case "global":
+			return "fallback-global"
+		}
+	}
+	return ""
 }
 
 func (c *Client) filterExitsByCountry(exits []proto.RelayDescriptor, country string) []proto.RelayDescriptor {
@@ -2921,15 +2996,77 @@ func (c *Client) orderExitsForSelection(exits []proto.RelayDescriptor) ([]proto.
 		return exits, ""
 	}
 	scored, enabled := scoreExits(exits)
+	mode := "weighted-random"
 	if !enabled {
-		return exits, ""
+		if c.localitySoftBias {
+			scored = make([]scoredExit, 0, len(exits))
+			for _, x := range exits {
+				scored = append(scored, scoredExit{desc: x, weight: 1.0})
+			}
+			var biased bool
+			scored, biased = c.applyLocalityBias(scored)
+			if biased && !weightsNearlyEqual(scored) {
+				enabled = true
+				mode = "weighted-random-locality-bias"
+			}
+		}
+		if !enabled {
+			return exits, ""
+		}
+	} else {
+		var biased bool
+		scored, biased = c.applyLocalityBias(scored)
+		if biased {
+			mode = "weighted-random-locality-bias"
+		}
 	}
 	seed := c.exitSelectionSeed
 	if seed == 0 {
 		seed = time.Now().UnixNano()
 	}
 	rng := mrand.New(mrand.NewSource(seed))
-	return weightedExitOrder(scored, c.exitExplorationPct, rng), "weighted-random"
+	return weightedExitOrder(scored, c.exitExplorationPct, rng), mode
+}
+
+func (c *Client) applyLocalityBias(scored []scoredExit) ([]scoredExit, bool) {
+	if !c.localitySoftBias || len(scored) == 0 {
+		return scored, false
+	}
+	country := normalizeCountryCode(c.preferredExitCountry)
+	region := normalizeRegion(c.preferredExitRegion)
+	if country == "" && region == "" {
+		return scored, false
+	}
+	out := append([]scoredExit(nil), scored...)
+	applied := false
+	for i := range out {
+		bias := 1.0
+		if country != "" && c.geoConfidenceOK(out[i].desc) && normalizeCountryCode(out[i].desc.CountryCode) == country {
+			if c.localityCountryBias > bias {
+				bias = c.localityCountryBias
+			}
+		}
+		if region != "" && c.geoConfidenceOK(out[i].desc) {
+			norm := normalizeRegion(out[i].desc.Region)
+			if norm == region {
+				if c.localityRegionBias > bias {
+					bias = c.localityRegionBias
+				}
+			} else {
+				prefix := regionPrefix(region)
+				if prefix != "" && (strings.HasPrefix(norm, prefix+"-") || norm == prefix) {
+					if c.localityRegionPrefixBias > bias {
+						bias = c.localityRegionPrefixBias
+					}
+				}
+			}
+		}
+		if bias > 1.0 {
+			out[i].weight *= bias
+			applied = true
+		}
+	}
+	return out, applied
 }
 
 func scoreExits(exits []proto.RelayDescriptor) ([]scoredExit, bool) {
@@ -3217,6 +3354,21 @@ func normalizeCountryCode(raw string) string {
 
 func normalizeRegion(raw string) string {
 	return strings.ToLower(strings.TrimSpace(raw))
+}
+
+func parseSelectionBiasEnv(name string, def float64) float64 {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return def
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) || v < 1.0 {
+		return def
+	}
+	if v > 10.0 {
+		return 10.0
+	}
+	return v
 }
 
 func (c *Client) entryControlURLFor(entry proto.RelayDescriptor) string {

@@ -19,6 +19,7 @@ import (
 	"privacynode/pkg/policy"
 	"privacynode/pkg/proto"
 	"privacynode/pkg/relay"
+	"privacynode/pkg/wg"
 )
 
 func TestAuthorizePacketReplayDenied(t *testing.T) {
@@ -769,6 +770,30 @@ func TestValidateRuntimeConfigRejectsNegativeCleanupInterval(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "EXIT_SESSION_CLEANUP_SEC") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigRejectsInvalidWGPubKeyInNoopMode(t *testing.T) {
+	s := &Service{
+		dataMode:  "json",
+		wgBackend: "noop",
+		wgPubKey:  "not-a-wg-pubkey",
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected invalid wg pubkey validation error")
+	}
+	if !strings.Contains(err.Error(), "EXIT_WG_PUBKEY") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestNewDefaultWGPubKeyIsValid(t *testing.T) {
+	t.Setenv("EXIT_WG_PUBKEY", "")
+	t.Setenv("WG_BACKEND", "noop")
+	s := New()
+	if !wg.IsValidPublicKey(s.wgPubKey) {
+		t.Fatalf("expected default exit wg pubkey to be valid, got %q", s.wgPubKey)
 	}
 }
 

@@ -87,6 +87,13 @@ Optional on Machine A to federate both ways:
   --beta-profile 1
 ```
 
+Path profile presets (optional, recommended for repeatable tests):
+
+- Fast (latency-first): `--distinct-operators 1 --distinct-countries 0 --locality-soft-bias 1 --country-bias 1.80 --region-bias 1.35 --region-prefix-bias 1.15`
+- Balanced (default): `--distinct-operators 1 --distinct-countries 0 --locality-soft-bias 1 --country-bias 1.50 --region-bias 1.25 --region-prefix-bias 1.10`
+- Privacy (stronger anti-collusion): `--distinct-operators 1 --distinct-countries 1 --locality-soft-bias 0`
+- Shortcut: use `--path-profile fast|balanced|privacy` on `client-test`, `three-machine-validate`, `three-machine-soak`, `pilot-runbook`, and `machine-c-test`.
+
 Real client VPN mode (for external testers on Linux):
 
 ```bash
@@ -265,16 +272,91 @@ sudo ./scripts/easy_node.sh three-machine-prod-gate \
 # same gate with automatic diagnostics bundle (.tar.gz)
 sudo ./scripts/easy_node.sh three-machine-prod-bundle \
   --bundle-dir .easy-node-logs/prod_gate_bundle \
+  --signoff-check 1 \
   --directory-a https://A_PUBLIC_IP_OR_DNS:8081 \
   --directory-b https://B_PUBLIC_IP_OR_DNS:8081 \
   --issuer-url https://A_PUBLIC_IP_OR_DNS:8082 \
   --entry-url https://A_PUBLIC_IP_OR_DNS:8083 \
   --exit-url https://A_PUBLIC_IP_OR_DNS:8084 \
   --strict-distinct 1
+# note: bundle command runs strict machine-C preflight by default (use --preflight-check 0 only for diagnostics)
+# note: bundle integrity verification is fail-close by default (use --bundle-verify-check 0 only for diagnostics)
+# note: run report JSON is emitted by default at <bundle-dir>/prod_bundle_run_report.json
 
 # strict artifact signoff check from bundle outputs
 ./scripts/easy_node.sh prod-gate-check \
+  --run-report-json .easy-node-logs/prod_gate_bundle/prod_bundle_run_report.json
+
+# one-command integrity + signoff policy check
+./scripts/easy_node.sh prod-gate-signoff \
+  --run-report-json .easy-node-logs/prod_gate_bundle/prod_bundle_run_report.json
+
+# integrity verification for bundle artifacts (manifest + tar checksum sidecar)
+./scripts/easy_node.sh prod-gate-bundle-verify \
   --bundle-dir .easy-node-logs/prod_gate_bundle
+
+# strict one-command pilot wrapper (same flow with fail-closed defaults)
+sudo ./scripts/easy_node.sh prod-pilot-runbook \
+  --bootstrap-directory https://A_PUBLIC_IP_OR_DNS:8081 \
+  --subject pilot-client
+
+# sustained pilot cohort (multi-round strict pilots + aggregate policy)
+sudo ./scripts/easy_node.sh prod-pilot-cohort-runbook \
+  --rounds 5 \
+  --pause-sec 60 \
+  --trend-min-go-rate-pct 95 \
+  --max-alert-severity WARN \
+  --bundle-outputs 1 \
+  --bundle-fail-close 1 \
+  -- \
+  --bootstrap-directory https://A_PUBLIC_IP_OR_DNS:8081 \
+  --subject pilot-client
+
+# verify cohort bundle artifacts from generated summary
+./scripts/easy_node.sh prod-pilot-cohort-bundle-verify \
+  --summary-json .easy-node-logs/prod_pilot_cohort/prod_pilot_cohort_summary.json
+
+# fail-closed cohort signoff (integrity + policy)
+./scripts/easy_node.sh prod-pilot-cohort-signoff \
+  --summary-json .easy-node-logs/prod_pilot_cohort/prod_pilot_cohort_summary.json
+
+# minimal one-command sustained pilot flow
+./scripts/easy_node.sh prod-pilot-cohort-quick \
+  --bootstrap-directory https://A_PUBLIC_IP_OR_DNS:8081 \
+  --subject pilot-client
+# default quick run report: <reports_dir>/prod_pilot_cohort_quick_report.json
+
+# quick run-report fail-closed verification
+./scripts/easy_node.sh prod-pilot-cohort-quick-check \
+  --run-report-json <reports_dir>/prod_pilot_cohort_quick_report.json
+
+# quick-mode trend across quick run reports
+./scripts/easy_node.sh prod-pilot-cohort-quick-trend \
+  --reports-dir .easy-node-logs \
+  --since-hours 24 \
+  --summary-json .easy-node-logs/prod_pilot_quick_trend_24h.json
+
+# quick-mode alert severity from trend metrics
+./scripts/easy_node.sh prod-pilot-cohort-quick-alert \
+  --trend-summary-json .easy-node-logs/prod_pilot_quick_trend_24h.json \
+  --summary-json .easy-node-logs/prod_pilot_quick_alert_24h.json
+
+# quick-mode dashboard artifact (trend + alert + markdown)
+./scripts/easy_node.sh prod-pilot-cohort-quick-dashboard \
+  --reports-dir .easy-node-logs \
+  --dashboard-md .easy-node-logs/prod_pilot_quick_dashboard_24h.md
+
+# one-command quick signoff gate (latest check + trend + alert severity policy)
+./scripts/easy_node.sh prod-pilot-cohort-quick-signoff \
+  --run-report-json <reports_dir>/prod_pilot_cohort_quick_report.json \
+  --reports-dir .easy-node-logs \
+  --max-alert-severity WARN
+
+# one-command quick pilot runbook (quick execution + signoff + optional dashboard)
+./scripts/easy_node.sh prod-pilot-cohort-quick-runbook \
+  --bootstrap-directory https://A_PUBLIC_IP_OR_DNS:8081 \
+  --subject pilot-client \
+  --max-alert-severity WARN
 ```
 
 It runs this sequence:

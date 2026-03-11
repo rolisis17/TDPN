@@ -113,6 +113,11 @@ EASY_NODE_SH="$FAKE_EASY_NODE" \
   --client-min-exit-operators 1 \
   --client-require-cross-operator-pair 0 \
   --distinct-operators 1 \
+  --distinct-countries 1 \
+  --locality-soft-bias 0 \
+  --country-bias 1.80 \
+  --region-bias 1.30 \
+  --region-prefix-bias 1.10 \
   --require-issuer-quorum 1 \
   --beta-profile 0 \
   --prod-profile 1 >/tmp/integration_3machine_prod_profile_wiring_validate.log 2>&1
@@ -125,6 +130,85 @@ fi
 if ! rg -q -- '--prod-profile 1' "$VALIDATE_CAPTURE"; then
   echo "validate wiring failed: --prod-profile 1 was not forwarded to easy_node client-test"
   cat "$VALIDATE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--distinct-countries 1' "$VALIDATE_CAPTURE"; then
+  echo "validate wiring failed: --distinct-countries 1 was not forwarded to easy_node client-test"
+  cat "$VALIDATE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--locality-soft-bias 0' "$VALIDATE_CAPTURE"; then
+  echo "validate wiring failed: --locality-soft-bias 0 was not forwarded to easy_node client-test"
+  cat "$VALIDATE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--country-bias 1.80' "$VALIDATE_CAPTURE"; then
+  echo "validate wiring failed: --country-bias 1.80 was not forwarded to easy_node client-test"
+  cat "$VALIDATE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--region-bias 1.30' "$VALIDATE_CAPTURE"; then
+  echo "validate wiring failed: --region-bias 1.30 was not forwarded to easy_node client-test"
+  cat "$VALIDATE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--region-prefix-bias 1.10' "$VALIDATE_CAPTURE"; then
+  echo "validate wiring failed: --region-prefix-bias 1.10 was not forwarded to easy_node client-test"
+  cat "$VALIDATE_CAPTURE"
+  exit 1
+fi
+
+VALIDATE_PATH_PROFILE_CAPTURE="$TMP_DIR/validate_easy_node_path_profile_args.log"
+echo "[wiring] validate -> easy_node path-profile mapping"
+PATH="$TMP_BIN:$PATH" \
+VALIDATE_CAPTURE_FILE="$VALIDATE_PATH_PROFILE_CAPTURE" \
+EASY_NODE_SH="$FAKE_EASY_NODE" \
+./scripts/integration_3machine_beta_validate.sh \
+  --directory-a http://dir-a:8081 \
+  --directory-b http://dir-b:8081 \
+  --issuer-url http://issuer-main:8082 \
+  --entry-url http://entry-main:8083 \
+  --exit-url http://exit-main:8084 \
+  --min-sources 1 \
+  --min-operators 2 \
+  --federation-timeout-sec 3 \
+  --timeout-sec 5 \
+  --client-min-selection-lines 1 \
+  --client-min-entry-operators 1 \
+  --client-min-exit-operators 1 \
+  --client-require-cross-operator-pair 0 \
+  --path-profile privacy \
+  --beta-profile 0 \
+  --prod-profile 0 >/tmp/integration_3machine_prod_profile_wiring_validate_path_profile.log 2>&1
+
+if ! rg -q -- '--distinct-operators 1' "$VALIDATE_PATH_PROFILE_CAPTURE"; then
+  echo "validate path-profile wiring failed: expected --distinct-operators 1 from privacy profile"
+  cat "$VALIDATE_PATH_PROFILE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--distinct-countries 1' "$VALIDATE_PATH_PROFILE_CAPTURE"; then
+  echo "validate path-profile wiring failed: expected --distinct-countries 1 from privacy profile"
+  cat "$VALIDATE_PATH_PROFILE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--locality-soft-bias 0' "$VALIDATE_PATH_PROFILE_CAPTURE"; then
+  echo "validate path-profile wiring failed: expected --locality-soft-bias 0 from privacy profile"
+  cat "$VALIDATE_PATH_PROFILE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--country-bias 1.60' "$VALIDATE_PATH_PROFILE_CAPTURE"; then
+  echo "validate path-profile wiring failed: expected --country-bias 1.60 from privacy profile"
+  cat "$VALIDATE_PATH_PROFILE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--region-bias 1.25' "$VALIDATE_PATH_PROFILE_CAPTURE"; then
+  echo "validate path-profile wiring failed: expected --region-bias 1.25 from privacy profile"
+  cat "$VALIDATE_PATH_PROFILE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--region-prefix-bias 1.10' "$VALIDATE_PATH_PROFILE_CAPTURE"; then
+  echo "validate path-profile wiring failed: expected --region-prefix-bias 1.10 from privacy profile"
+  cat "$VALIDATE_PATH_PROFILE_CAPTURE"
   exit 1
 fi
 
@@ -159,6 +243,11 @@ THREE_MACHINE_VALIDATE_SCRIPT="$FAKE_VALIDATE" \
   --client-min-exit-operators 1 \
   --client-require-cross-operator-pair 0 \
   --distinct-operators 1 \
+  --distinct-countries 1 \
+  --locality-soft-bias 0 \
+  --country-bias 1.80 \
+  --region-bias 1.30 \
+  --region-prefix-bias 1.10 \
   --require-issuer-quorum 1 \
   --beta-profile 0 \
   --prod-profile 1 >/tmp/integration_3machine_prod_profile_wiring_soak.log 2>&1
@@ -166,6 +255,87 @@ THREE_MACHINE_VALIDATE_SCRIPT="$FAKE_VALIDATE" \
 if ! rg -q -- '--prod-profile 1' "$SOAK_CAPTURE"; then
   echo "soak wiring failed: --prod-profile 1 was not forwarded to validate script"
   cat "$SOAK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--distinct-countries 1' "$SOAK_CAPTURE"; then
+  echo "soak wiring failed: --distinct-countries 1 was not forwarded to validate script"
+  cat "$SOAK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--locality-soft-bias 0' "$SOAK_CAPTURE"; then
+  echo "soak wiring failed: --locality-soft-bias 0 was not forwarded to validate script"
+  cat "$SOAK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--country-bias 1.80' "$SOAK_CAPTURE"; then
+  echo "soak wiring failed: --country-bias 1.80 was not forwarded to validate script"
+  cat "$SOAK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--region-bias 1.30' "$SOAK_CAPTURE"; then
+  echo "soak wiring failed: --region-bias 1.30 was not forwarded to validate script"
+  cat "$SOAK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--region-prefix-bias 1.10' "$SOAK_CAPTURE"; then
+  echo "soak wiring failed: --region-prefix-bias 1.10 was not forwarded to validate script"
+  cat "$SOAK_CAPTURE"
+  exit 1
+fi
+
+SOAK_PATH_PROFILE_CAPTURE="$TMP_DIR/soak_validate_path_profile_args.log"
+echo "[wiring] soak -> validate path-profile mapping"
+PATH="$TMP_BIN:$PATH" \
+SOAK_CAPTURE_FILE="$SOAK_PATH_PROFILE_CAPTURE" \
+THREE_MACHINE_VALIDATE_SCRIPT="$FAKE_VALIDATE" \
+./scripts/integration_3machine_beta_soak.sh \
+  --directory-a http://dir-a:8081 \
+  --directory-b http://dir-b:8081 \
+  --issuer-url http://issuer-main:8082 \
+  --entry-url http://entry-main:8083 \
+  --exit-url http://exit-main:8084 \
+  --rounds 1 \
+  --pause-sec 0 \
+  --min-sources 1 \
+  --min-operators 1 \
+  --federation-timeout-sec 1 \
+  --timeout-sec 5 \
+  --client-min-selection-lines 1 \
+  --client-min-entry-operators 1 \
+  --client-min-exit-operators 1 \
+  --client-require-cross-operator-pair 0 \
+  --path-profile fast \
+  --beta-profile 0 \
+  --prod-profile 0 >/tmp/integration_3machine_prod_profile_wiring_soak_path_profile.log 2>&1
+
+if ! rg -q -- '--distinct-operators 1' "$SOAK_PATH_PROFILE_CAPTURE"; then
+  echo "soak path-profile wiring failed: expected --distinct-operators 1 from fast profile"
+  cat "$SOAK_PATH_PROFILE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--distinct-countries 0' "$SOAK_PATH_PROFILE_CAPTURE"; then
+  echo "soak path-profile wiring failed: expected --distinct-countries 0 from fast profile"
+  cat "$SOAK_PATH_PROFILE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--locality-soft-bias 1' "$SOAK_PATH_PROFILE_CAPTURE"; then
+  echo "soak path-profile wiring failed: expected --locality-soft-bias 1 from fast profile"
+  cat "$SOAK_PATH_PROFILE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--country-bias 1.80' "$SOAK_PATH_PROFILE_CAPTURE"; then
+  echo "soak path-profile wiring failed: expected --country-bias 1.80 from fast profile"
+  cat "$SOAK_PATH_PROFILE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--region-bias 1.35' "$SOAK_PATH_PROFILE_CAPTURE"; then
+  echo "soak path-profile wiring failed: expected --region-bias 1.35 from fast profile"
+  cat "$SOAK_PATH_PROFILE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--region-prefix-bias 1.15' "$SOAK_PATH_PROFILE_CAPTURE"; then
+  echo "soak path-profile wiring failed: expected --region-prefix-bias 1.15 from fast profile"
+  cat "$SOAK_PATH_PROFILE_CAPTURE"
   exit 1
 fi
 
@@ -231,6 +401,11 @@ THREE_MACHINE_SOAK_SCRIPT="$FAKE_RUNBOOK_SOAK" \
   --client-min-exit-operators 1 \
   --client-require-cross-operator-pair 0 \
   --distinct-operators 1 \
+  --distinct-countries 1 \
+  --locality-soft-bias 0 \
+  --country-bias 1.80 \
+  --region-bias 1.30 \
+  --region-prefix-bias 1.10 \
   --require-issuer-quorum 1 \
   --beta-profile 0 \
   --prod-profile 1 \
@@ -244,6 +419,62 @@ fi
 if ! rg -q -- '--prod-profile 1' "$RUNBOOK_SOAK_CAPTURE"; then
   echo "runbook wiring failed: --prod-profile 1 missing from soak invocation"
   cat "$RUNBOOK_SOAK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--distinct-countries 1' "$RUNBOOK_VALIDATE_CAPTURE"; then
+  echo "runbook wiring failed: --distinct-countries 1 missing from validate invocation"
+  cat "$RUNBOOK_VALIDATE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--locality-soft-bias 0' "$RUNBOOK_SOAK_CAPTURE"; then
+  echo "runbook wiring failed: --locality-soft-bias 0 missing from soak invocation"
+  cat "$RUNBOOK_SOAK_CAPTURE"
+  exit 1
+fi
+
+RUNBOOK_VALIDATE_PATH_PROFILE_CAPTURE="$TMP_DIR/runbook_validate_path_profile_args.log"
+RUNBOOK_SOAK_PATH_PROFILE_CAPTURE="$TMP_DIR/runbook_soak_path_profile_args.log"
+RUNBOOK_PATH_PROFILE_BUNDLE="$TMP_DIR/pilot_bundle_path_profile"
+echo "[wiring] runbook -> validate/soak path-profile mapping"
+PATH="$TMP_BIN:$PATH" \
+RUNBOOK_VALIDATE_CAPTURE_FILE="$RUNBOOK_VALIDATE_PATH_PROFILE_CAPTURE" \
+RUNBOOK_SOAK_CAPTURE_FILE="$RUNBOOK_SOAK_PATH_PROFILE_CAPTURE" \
+THREE_MACHINE_VALIDATE_SCRIPT="$FAKE_RUNBOOK_VALIDATE" \
+THREE_MACHINE_SOAK_SCRIPT="$FAKE_RUNBOOK_SOAK" \
+./scripts/beta_pilot_runbook.sh \
+  --directory-a http://dir-a:8081 \
+  --directory-b http://dir-b:8081 \
+  --issuer-url http://issuer-main:8082 \
+  --entry-url http://entry-main:8083 \
+  --exit-url http://exit-main:8084 \
+  --rounds 1 \
+  --pause-sec 0 \
+  --min-sources 1 \
+  --min-operators 1 \
+  --federation-timeout-sec 1 \
+  --timeout-sec 5 \
+  --client-min-selection-lines 1 \
+  --client-min-entry-operators 1 \
+  --client-min-exit-operators 1 \
+  --client-require-cross-operator-pair 0 \
+  --path-profile privacy \
+  --beta-profile 0 \
+  --prod-profile 0 \
+  --bundle-dir "$RUNBOOK_PATH_PROFILE_BUNDLE" >/tmp/integration_3machine_prod_profile_wiring_runbook_path_profile.log 2>&1
+
+if ! rg -q -- '--distinct-countries 1' "$RUNBOOK_VALIDATE_PATH_PROFILE_CAPTURE"; then
+  echo "runbook path-profile wiring failed: expected --distinct-countries 1 on validate command"
+  cat "$RUNBOOK_VALIDATE_PATH_PROFILE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--locality-soft-bias 0' "$RUNBOOK_SOAK_PATH_PROFILE_CAPTURE"; then
+  echo "runbook path-profile wiring failed: expected --locality-soft-bias 0 on soak command"
+  cat "$RUNBOOK_SOAK_PATH_PROFILE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--country-bias 1.60' "$RUNBOOK_SOAK_PATH_PROFILE_CAPTURE"; then
+  echo "runbook path-profile wiring failed: expected --country-bias 1.60 on soak command"
+  cat "$RUNBOOK_SOAK_PATH_PROFILE_CAPTURE"
   exit 1
 fi
 
@@ -451,8 +682,382 @@ if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh three-machine-prod-gate --help
   echo "easy_node three-machine-prod-gate help missing --wg-min-selection-lines"
   exit 1
 fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh --help | rg -q -- '--signoff-check'; then
+  echo "easy_node usage missing prod bundle signoff options"
+  exit 1
+fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh --help | rg -q -- '--preflight-check'; then
+  echo "easy_node usage missing prod bundle preflight options"
+  exit 1
+fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh --help | rg -q -- '--bundle-verify-check'; then
+  echo "easy_node usage missing prod bundle verify options"
+  exit 1
+fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh --help | rg -q -- '--run-report-json'; then
+  echo "easy_node usage missing prod bundle run-report options"
+  exit 1
+fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh --help | rg -q -- '--incident-snapshot-on-fail'; then
+  echo "easy_node usage missing prod bundle incident snapshot options"
+  exit 1
+fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh --help | rg -q -- 'prod-gate-bundle-verify'; then
+  echo "easy_node usage missing prod-gate-bundle-verify command"
+  exit 1
+fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh prod-gate-bundle-verify --help | rg -q -- '--bundle-tar'; then
+  echo "easy_node prod-gate-bundle-verify help missing --bundle-tar"
+  exit 1
+fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh prod-gate-bundle-verify --help | rg -q -- '--run-report-json'; then
+  echo "easy_node prod-gate-bundle-verify help missing --run-report-json"
+  exit 1
+fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh prod-gate-check --help | rg -q -- '--run-report-json'; then
+  echo "easy_node prod-gate-check help missing --run-report-json"
+  exit 1
+fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh --help | rg -q -- 'prod-gate-slo-summary'; then
+  echo "easy_node usage missing prod-gate-slo-summary command"
+  exit 1
+fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh prod-gate-slo-summary --help | rg -q -- '--require-signoff-ok'; then
+  echo "easy_node prod-gate-slo-summary help missing --require-signoff-ok"
+  exit 1
+fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh prod-gate-slo-summary --help | rg -q -- '--fail-on-no-go'; then
+  echo "easy_node prod-gate-slo-summary help missing --fail-on-no-go"
+  exit 1
+fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh --help | rg -q -- 'prod-gate-slo-trend'; then
+  echo "easy_node usage missing prod-gate-slo-trend command"
+  exit 1
+fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh prod-gate-slo-trend --help | rg -q -- '--min-go-rate-pct'; then
+  echo "easy_node prod-gate-slo-trend help missing --min-go-rate-pct"
+  exit 1
+fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh prod-gate-slo-trend --help | rg -q -- '--fail-on-any-no-go'; then
+  echo "easy_node prod-gate-slo-trend help missing --fail-on-any-no-go"
+  exit 1
+fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh prod-gate-slo-trend --help | rg -q -- '--since-hours'; then
+  echo "easy_node prod-gate-slo-trend help missing --since-hours"
+  exit 1
+fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh prod-gate-slo-trend --help | rg -q -- '--summary-json'; then
+  echo "easy_node prod-gate-slo-trend help missing --summary-json"
+  exit 1
+fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh prod-gate-slo-trend --help | rg -q -- '--print-summary-json'; then
+  echo "easy_node prod-gate-slo-trend help missing --print-summary-json"
+  exit 1
+fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh --help | rg -q -- 'prod-gate-slo-alert'; then
+  echo "easy_node usage missing prod-gate-slo-alert command"
+  exit 1
+fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh prod-gate-slo-alert --help | rg -q -- '--trend-summary-json'; then
+  echo "easy_node prod-gate-slo-alert help missing --trend-summary-json"
+  exit 1
+fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh prod-gate-slo-alert --help | rg -q -- '--fail-on-critical'; then
+  echo "easy_node prod-gate-slo-alert help missing --fail-on-critical"
+  exit 1
+fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh prod-gate-slo-alert --help | rg -q -- '--summary-json'; then
+  echo "easy_node prod-gate-slo-alert help missing --summary-json"
+  exit 1
+fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh --help | rg -q -- 'prod-gate-slo-dashboard'; then
+  echo "easy_node usage missing prod-gate-slo-dashboard command"
+  exit 1
+fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh prod-gate-slo-dashboard --help | rg -q -- '--dashboard-md'; then
+  echo "easy_node prod-gate-slo-dashboard help missing --dashboard-md"
+  exit 1
+fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh prod-gate-slo-dashboard --help | rg -q -- '--print-dashboard'; then
+  echo "easy_node prod-gate-slo-dashboard help missing --print-dashboard"
+  exit 1
+fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh --help | rg -q -- 'prod-gate-signoff'; then
+  echo "easy_node usage missing prod-gate-signoff command"
+  exit 1
+fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh --help | rg -q -- 'prod-pilot-runbook'; then
+  echo "easy_node usage missing prod-pilot-runbook command"
+  exit 1
+fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh prod-gate-signoff --help | rg -q -- '--show-integrity-details'; then
+  echo "easy_node prod-gate-signoff help missing --show-integrity-details"
+  exit 1
+fi
 if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh --help | rg -q -- 'prod-wg-strict-ingress-rehearsal'; then
   echo "easy_node usage missing prod-wg-strict-ingress-rehearsal command"
+  exit 1
+fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh --help | rg -q -- 'incident-snapshot'; then
+  echo "easy_node usage missing incident-snapshot command"
+  exit 1
+fi
+
+echo "[wiring] easy_node incident-snapshot forwarding"
+FAKE_INCIDENT_SNAPSHOT="$TMP_DIR/fake_incident_snapshot.sh"
+INCIDENT_SNAPSHOT_CAPTURE="$TMP_DIR/incident_snapshot_args.log"
+cat >"$FAKE_INCIDENT_SNAPSHOT" <<'EOF_FAKE_INCIDENT_SNAPSHOT'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >>"${INCIDENT_SNAPSHOT_CAPTURE_FILE:?}"
+exit 0
+EOF_FAKE_INCIDENT_SNAPSHOT
+chmod +x "$FAKE_INCIDENT_SNAPSHOT"
+PATH="$TMP_BIN:$PATH" \
+INCIDENT_SNAPSHOT_CAPTURE_FILE="$INCIDENT_SNAPSHOT_CAPTURE" \
+INCIDENT_SNAPSHOT_SCRIPT="$FAKE_INCIDENT_SNAPSHOT" \
+./scripts/easy_node.sh incident-snapshot \
+  --mode provider \
+  --bundle-dir /tmp/incident_bundle \
+  --timeout-sec 5 \
+  --include-docker-logs 0 >/tmp/integration_3machine_prod_profile_wiring_incident_snapshot.log 2>&1
+
+if ! rg -q -- '--mode provider' "$INCIDENT_SNAPSHOT_CAPTURE"; then
+  echo "easy_node incident-snapshot forwarding failed: --mode provider missing"
+  cat "$INCIDENT_SNAPSHOT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--include-docker-logs 0' "$INCIDENT_SNAPSHOT_CAPTURE"; then
+  echo "easy_node incident-snapshot forwarding failed: --include-docker-logs 0 missing"
+  cat "$INCIDENT_SNAPSHOT_CAPTURE"
+  exit 1
+fi
+
+echo "[wiring] easy_node prod-gate-slo-summary forwarding"
+FAKE_SLO_SUMMARY="$TMP_DIR/fake_prod_gate_slo_summary.sh"
+SLO_SUMMARY_CAPTURE="$TMP_DIR/prod_gate_slo_summary_args.log"
+cat >"$FAKE_SLO_SUMMARY" <<'EOF_FAKE_SLO_SUMMARY'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >>"${SLO_SUMMARY_CAPTURE_FILE:?}"
+exit 0
+EOF_FAKE_SLO_SUMMARY
+chmod +x "$FAKE_SLO_SUMMARY"
+PATH="$TMP_BIN:$PATH" \
+SLO_SUMMARY_CAPTURE_FILE="$SLO_SUMMARY_CAPTURE" \
+PROD_GATE_SLO_SUMMARY_SCRIPT="$FAKE_SLO_SUMMARY" \
+./scripts/easy_node.sh prod-gate-slo-summary \
+  --run-report-json /tmp/prod_bundle/prod_bundle_run_report.json \
+  --require-preflight-ok 1 \
+  --require-signoff-ok 1 \
+  --fail-on-no-go 1 >/tmp/integration_3machine_prod_profile_wiring_prod_gate_slo_summary.log 2>&1
+
+if ! rg -q -- '--run-report-json /tmp/prod_bundle/prod_bundle_run_report.json' "$SLO_SUMMARY_CAPTURE"; then
+  echo "easy_node prod-gate-slo-summary forwarding failed: missing --run-report-json"
+  cat "$SLO_SUMMARY_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-preflight-ok 1' "$SLO_SUMMARY_CAPTURE"; then
+  echo "easy_node prod-gate-slo-summary forwarding failed: missing --require-preflight-ok 1"
+  cat "$SLO_SUMMARY_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-signoff-ok 1' "$SLO_SUMMARY_CAPTURE"; then
+  echo "easy_node prod-gate-slo-summary forwarding failed: missing --require-signoff-ok 1"
+  cat "$SLO_SUMMARY_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--fail-on-no-go 1' "$SLO_SUMMARY_CAPTURE"; then
+  echo "easy_node prod-gate-slo-summary forwarding failed: missing --fail-on-no-go 1"
+  cat "$SLO_SUMMARY_CAPTURE"
+  exit 1
+fi
+
+echo "[wiring] easy_node prod-gate-slo-trend forwarding"
+FAKE_SLO_TREND="$TMP_DIR/fake_prod_gate_slo_trend.sh"
+SLO_TREND_CAPTURE="$TMP_DIR/prod_gate_slo_trend_args.log"
+cat >"$FAKE_SLO_TREND" <<'EOF_FAKE_SLO_TREND'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >>"${SLO_TREND_CAPTURE_FILE:?}"
+exit 0
+EOF_FAKE_SLO_TREND
+chmod +x "$FAKE_SLO_TREND"
+PATH="$TMP_BIN:$PATH" \
+SLO_TREND_CAPTURE_FILE="$SLO_TREND_CAPTURE" \
+PROD_GATE_SLO_TREND_SCRIPT="$FAKE_SLO_TREND" \
+./scripts/easy_node.sh prod-gate-slo-trend \
+  --reports-dir /tmp/prod_reports \
+  --max-reports 10 \
+  --since-hours 24 \
+  --summary-json /tmp/prod_slo_trend.json \
+  --print-summary-json 1 \
+  --min-go-rate-pct 95 \
+  --fail-on-any-no-go 1 >/tmp/integration_3machine_prod_profile_wiring_prod_gate_slo_trend.log 2>&1
+
+if ! rg -q -- '--reports-dir /tmp/prod_reports' "$SLO_TREND_CAPTURE"; then
+  echo "easy_node prod-gate-slo-trend forwarding failed: missing --reports-dir"
+  cat "$SLO_TREND_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--max-reports 10' "$SLO_TREND_CAPTURE"; then
+  echo "easy_node prod-gate-slo-trend forwarding failed: missing --max-reports 10"
+  cat "$SLO_TREND_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-go-rate-pct 95' "$SLO_TREND_CAPTURE"; then
+  echo "easy_node prod-gate-slo-trend forwarding failed: missing --min-go-rate-pct 95"
+  cat "$SLO_TREND_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--since-hours 24' "$SLO_TREND_CAPTURE"; then
+  echo "easy_node prod-gate-slo-trend forwarding failed: missing --since-hours 24"
+  cat "$SLO_TREND_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--summary-json /tmp/prod_slo_trend.json' "$SLO_TREND_CAPTURE"; then
+  echo "easy_node prod-gate-slo-trend forwarding failed: missing --summary-json"
+  cat "$SLO_TREND_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--print-summary-json 1' "$SLO_TREND_CAPTURE"; then
+  echo "easy_node prod-gate-slo-trend forwarding failed: missing --print-summary-json 1"
+  cat "$SLO_TREND_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--fail-on-any-no-go 1' "$SLO_TREND_CAPTURE"; then
+  echo "easy_node prod-gate-slo-trend forwarding failed: missing --fail-on-any-no-go 1"
+  cat "$SLO_TREND_CAPTURE"
+  exit 1
+fi
+
+echo "[wiring] easy_node prod-gate-slo-alert forwarding"
+FAKE_SLO_ALERT="$TMP_DIR/fake_prod_gate_slo_alert.sh"
+SLO_ALERT_CAPTURE="$TMP_DIR/prod_gate_slo_alert_args.log"
+cat >"$FAKE_SLO_ALERT" <<'EOF_FAKE_SLO_ALERT'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >>"${SLO_ALERT_CAPTURE_FILE:?}"
+exit 0
+EOF_FAKE_SLO_ALERT
+chmod +x "$FAKE_SLO_ALERT"
+PATH="$TMP_BIN:$PATH" \
+SLO_ALERT_CAPTURE_FILE="$SLO_ALERT_CAPTURE" \
+PROD_GATE_SLO_ALERT_SCRIPT="$FAKE_SLO_ALERT" \
+./scripts/easy_node.sh prod-gate-slo-alert \
+  --reports-dir /tmp/prod_reports \
+  --since-hours 12 \
+  --warn-go-rate-pct 99 \
+  --critical-go-rate-pct 95 \
+  --fail-on-warn 1 \
+  --fail-on-critical 1 \
+  --summary-json /tmp/prod_slo_alert.json \
+  --print-summary-json 1 >/tmp/integration_3machine_prod_profile_wiring_prod_gate_slo_alert.log 2>&1
+
+if ! rg -q -- '--reports-dir /tmp/prod_reports' "$SLO_ALERT_CAPTURE"; then
+  echo "easy_node prod-gate-slo-alert forwarding failed: missing --reports-dir"
+  cat "$SLO_ALERT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--since-hours 12' "$SLO_ALERT_CAPTURE"; then
+  echo "easy_node prod-gate-slo-alert forwarding failed: missing --since-hours 12"
+  cat "$SLO_ALERT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--warn-go-rate-pct 99' "$SLO_ALERT_CAPTURE"; then
+  echo "easy_node prod-gate-slo-alert forwarding failed: missing --warn-go-rate-pct"
+  cat "$SLO_ALERT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--critical-go-rate-pct 95' "$SLO_ALERT_CAPTURE"; then
+  echo "easy_node prod-gate-slo-alert forwarding failed: missing --critical-go-rate-pct"
+  cat "$SLO_ALERT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--fail-on-warn 1' "$SLO_ALERT_CAPTURE"; then
+  echo "easy_node prod-gate-slo-alert forwarding failed: missing --fail-on-warn 1"
+  cat "$SLO_ALERT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--fail-on-critical 1' "$SLO_ALERT_CAPTURE"; then
+  echo "easy_node prod-gate-slo-alert forwarding failed: missing --fail-on-critical 1"
+  cat "$SLO_ALERT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--summary-json /tmp/prod_slo_alert.json' "$SLO_ALERT_CAPTURE"; then
+  echo "easy_node prod-gate-slo-alert forwarding failed: missing --summary-json"
+  cat "$SLO_ALERT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--print-summary-json 1' "$SLO_ALERT_CAPTURE"; then
+  echo "easy_node prod-gate-slo-alert forwarding failed: missing --print-summary-json 1"
+  cat "$SLO_ALERT_CAPTURE"
+  exit 1
+fi
+
+echo "[wiring] easy_node prod-gate-slo-dashboard forwarding"
+FAKE_SLO_DASHBOARD="$TMP_DIR/fake_prod_gate_slo_dashboard.sh"
+SLO_DASHBOARD_CAPTURE="$TMP_DIR/prod_gate_slo_dashboard_args.log"
+cat >"$FAKE_SLO_DASHBOARD" <<'EOF_FAKE_SLO_DASHBOARD'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >>"${SLO_DASHBOARD_CAPTURE_FILE:?}"
+exit 0
+EOF_FAKE_SLO_DASHBOARD
+chmod +x "$FAKE_SLO_DASHBOARD"
+PATH="$TMP_BIN:$PATH" \
+SLO_DASHBOARD_CAPTURE_FILE="$SLO_DASHBOARD_CAPTURE" \
+PROD_GATE_SLO_DASHBOARD_SCRIPT="$FAKE_SLO_DASHBOARD" \
+./scripts/easy_node.sh prod-gate-slo-dashboard \
+  --reports-dir /tmp/prod_reports \
+  --since-hours 6 \
+  --min-go-rate-pct 97 \
+  --warn-go-rate-pct 99 \
+  --critical-go-rate-pct 95 \
+  --trend-summary-json /tmp/prod_slo_trend.json \
+  --alert-summary-json /tmp/prod_slo_alert.json \
+  --dashboard-md /tmp/prod_slo_dashboard.md \
+  --print-dashboard 1 \
+  --print-summary-json 1 >/tmp/integration_3machine_prod_profile_wiring_prod_gate_slo_dashboard.log 2>&1
+
+if ! rg -q -- '--reports-dir /tmp/prod_reports' "$SLO_DASHBOARD_CAPTURE"; then
+  echo "easy_node prod-gate-slo-dashboard forwarding failed: missing --reports-dir"
+  cat "$SLO_DASHBOARD_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--since-hours 6' "$SLO_DASHBOARD_CAPTURE"; then
+  echo "easy_node prod-gate-slo-dashboard forwarding failed: missing --since-hours 6"
+  cat "$SLO_DASHBOARD_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-go-rate-pct 97' "$SLO_DASHBOARD_CAPTURE"; then
+  echo "easy_node prod-gate-slo-dashboard forwarding failed: missing --min-go-rate-pct 97"
+  cat "$SLO_DASHBOARD_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--warn-go-rate-pct 99' "$SLO_DASHBOARD_CAPTURE"; then
+  echo "easy_node prod-gate-slo-dashboard forwarding failed: missing --warn-go-rate-pct 99"
+  cat "$SLO_DASHBOARD_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--critical-go-rate-pct 95' "$SLO_DASHBOARD_CAPTURE"; then
+  echo "easy_node prod-gate-slo-dashboard forwarding failed: missing --critical-go-rate-pct 95"
+  cat "$SLO_DASHBOARD_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--dashboard-md /tmp/prod_slo_dashboard.md' "$SLO_DASHBOARD_CAPTURE"; then
+  echo "easy_node prod-gate-slo-dashboard forwarding failed: missing --dashboard-md"
+  cat "$SLO_DASHBOARD_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--print-dashboard 1' "$SLO_DASHBOARD_CAPTURE"; then
+  echo "easy_node prod-gate-slo-dashboard forwarding failed: missing --print-dashboard 1"
+  cat "$SLO_DASHBOARD_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--print-summary-json 1' "$SLO_DASHBOARD_CAPTURE"; then
+  echo "easy_node prod-gate-slo-dashboard forwarding failed: missing --print-summary-json 1"
+  cat "$SLO_DASHBOARD_CAPTURE"
   exit 1
 fi
 
@@ -1299,9 +1904,33 @@ if [[ ! -f "${BUNDLE_DIR_OK}.tar.gz" ]]; then
   cat /tmp/integration_3machine_prod_profile_wiring_bundle_ok.log
   exit 1
 fi
+if [[ ! -f "${BUNDLE_DIR_OK}.tar.gz.sha256" ]]; then
+  echo "prod gate bundle wiring failed: bundle tarball sha256 sidecar missing on success"
+  ls -la "$TMP_DIR"
+  cat /tmp/integration_3machine_prod_profile_wiring_bundle_ok.log
+  exit 1
+fi
 if [[ ! -f "$BUNDLE_DIR_OK/step_logs/marker.log" ]]; then
   echo "prod gate bundle wiring failed: copied step logs missing"
   find "$BUNDLE_DIR_OK" -maxdepth 3 -type f -print || true
+  cat /tmp/integration_3machine_prod_profile_wiring_bundle_ok.log
+  exit 1
+fi
+if [[ ! -f "$BUNDLE_DIR_OK/manifest.sha256" ]]; then
+  echo "prod gate bundle wiring failed: manifest.sha256 missing in bundle dir"
+  find "$BUNDLE_DIR_OK" -maxdepth 2 -type f -print || true
+  cat /tmp/integration_3machine_prod_profile_wiring_bundle_ok.log
+  exit 1
+fi
+if ! rg -q '  metadata.txt$' "$BUNDLE_DIR_OK/manifest.sha256"; then
+  echo "prod gate bundle wiring failed: manifest missing metadata.txt entry"
+  cat "$BUNDLE_DIR_OK/manifest.sha256"
+  cat /tmp/integration_3machine_prod_profile_wiring_bundle_ok.log
+  exit 1
+fi
+if ! rg -q "  $(basename "${BUNDLE_DIR_OK}.tar.gz")$" "${BUNDLE_DIR_OK}.tar.gz.sha256"; then
+  echo "prod gate bundle wiring failed: tarball sha256 sidecar missing bundle filename label"
+  cat "${BUNDLE_DIR_OK}.tar.gz.sha256"
   cat /tmp/integration_3machine_prod_profile_wiring_bundle_ok.log
   exit 1
 fi
@@ -1331,6 +1960,16 @@ if ! rg -q 'wg_validate_summary_json=' "$BUNDLE_DIR_OK/metadata.txt"; then
   cat "$BUNDLE_DIR_OK/metadata.txt"
   exit 1
 fi
+if ! rg -q 'manifest_file=' "$BUNDLE_DIR_OK/metadata.txt"; then
+  echo "prod gate bundle wiring failed: metadata missing manifest_file entry"
+  cat "$BUNDLE_DIR_OK/metadata.txt"
+  exit 1
+fi
+if ! rg -q 'bundle_tar_sha256_file=' "$BUNDLE_DIR_OK/metadata.txt"; then
+  echo "prod gate bundle wiring failed: metadata missing bundle_tar_sha256_file entry"
+  cat "$BUNDLE_DIR_OK/metadata.txt"
+  exit 1
+fi
 
 echo "[wiring] prod gate bundle script failure path"
 BUNDLE_DIR_FAIL="$TMP_DIR/prod_gate_bundle_fail"
@@ -1356,22 +1995,166 @@ if [[ ! -f "${BUNDLE_DIR_FAIL}.tar.gz" ]]; then
   cat /tmp/integration_3machine_prod_profile_wiring_bundle_fail.log
   exit 1
 fi
+if [[ ! -f "${BUNDLE_DIR_FAIL}.tar.gz.sha256" ]]; then
+  echo "prod gate bundle wiring failed: bundle tarball sha256 sidecar missing on failure"
+  ls -la "$TMP_DIR"
+  cat /tmp/integration_3machine_prod_profile_wiring_bundle_fail.log
+  exit 1
+fi
+if [[ ! -f "$BUNDLE_DIR_FAIL/manifest.sha256" ]]; then
+  echo "prod gate bundle wiring failed: manifest.sha256 missing on failure"
+  find "$BUNDLE_DIR_FAIL" -maxdepth 2 -type f -print || true
+  cat /tmp/integration_3machine_prod_profile_wiring_bundle_fail.log
+  exit 1
+fi
 if ! rg -q 'gate_rc=17' "$BUNDLE_DIR_FAIL/metadata.txt"; then
   echo "prod gate bundle wiring failed: metadata missing gate_rc=17"
   cat "$BUNDLE_DIR_FAIL/metadata.txt"
   exit 1
 fi
 
-echo "[wiring] easy_node -> prod bundle dispatch"
-EASY_BUNDLE_DIR="$TMP_DIR/easy_node_prod_bundle"
+FAKE_BUNDLE_SIGNOFF="$TMP_DIR/fake_bundle_signoff.sh"
+SIGNOFF_CAPTURE="$TMP_DIR/prod_bundle_signoff_args.log"
+cat >"$FAKE_BUNDLE_SIGNOFF" <<'EOF_FAKE_BUNDLE_SIGNOFF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >>"${SIGNOFF_CAPTURE_FILE:?}"
+exit "${FAKE_BUNDLE_SIGNOFF_RC:-0}"
+EOF_FAKE_BUNDLE_SIGNOFF
+chmod +x "$FAKE_BUNDLE_SIGNOFF"
+
+echo "[wiring] prod gate bundle signoff success path"
+BUNDLE_DIR_SIGNOFF_OK="$TMP_DIR/prod_gate_bundle_signoff_ok"
+: >"$SIGNOFF_CAPTURE"
 set +e
 PATH="$TMP_BIN:$PATH" \
 BUNDLE_CAPTURE_FILE="$BUNDLE_CAPTURE" \
 BUNDLE_SOURCE_STEP_LOGS_DIR="$BUNDLE_SOURCE_STEP_LOGS" \
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+FAKE_BUNDLE_SIGNOFF_RC=0 \
+THREE_MACHINE_PROD_GATE_SCRIPT="$FAKE_BUNDLE_GATE" \
+THREE_MACHINE_PROD_GATE_CHECK_SCRIPT="$FAKE_BUNDLE_SIGNOFF" \
+./scripts/prod_gate_bundle.sh \
+  --bundle-dir "$BUNDLE_DIR_SIGNOFF_OK" \
+  --skip-wg 1 \
+  --signoff-check 1 \
+  --signoff-require-full-sequence 0 \
+  --signoff-require-wg-validate-ok 0 \
+  --signoff-require-wg-soak-ok 1 \
+  --signoff-max-wg-soak-failed-rounds 2 \
+  --signoff-show-json 1 >/tmp/integration_3machine_prod_profile_wiring_bundle_signoff_ok.log 2>&1
+bundle_signoff_ok_rc=$?
+set -e
+if [[ "$bundle_signoff_ok_rc" -ne 0 ]]; then
+  echo "prod gate bundle wiring failed: expected signoff success rc=0"
+  cat /tmp/integration_3machine_prod_profile_wiring_bundle_signoff_ok.log
+  exit 1
+fi
+if ! rg -q -- '--gate-summary-json' "$SIGNOFF_CAPTURE"; then
+  echo "prod gate bundle signoff wiring failed: missing --gate-summary-json"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-full-sequence 0' "$SIGNOFF_CAPTURE"; then
+  echo "prod gate bundle signoff wiring failed: missing --require-full-sequence 0"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-wg-validate-ok 0' "$SIGNOFF_CAPTURE"; then
+  echo "prod gate bundle signoff wiring failed: missing --require-wg-validate-ok 0"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-wg-soak-ok 1' "$SIGNOFF_CAPTURE"; then
+  echo "prod gate bundle signoff wiring failed: missing --require-wg-soak-ok 1"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--max-wg-soak-failed-rounds 2' "$SIGNOFF_CAPTURE"; then
+  echo "prod gate bundle signoff wiring failed: missing --max-wg-soak-failed-rounds 2"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--show-json 1' "$SIGNOFF_CAPTURE"; then
+  echo "prod gate bundle signoff wiring failed: missing --show-json 1"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+if ! rg -q 'signoff_enabled=1' "$BUNDLE_DIR_SIGNOFF_OK/metadata.txt"; then
+  echo "prod gate bundle signoff wiring failed: metadata missing signoff_enabled=1"
+  cat "$BUNDLE_DIR_SIGNOFF_OK/metadata.txt"
+  exit 1
+fi
+if ! rg -q 'signoff_rc=0' "$BUNDLE_DIR_SIGNOFF_OK/metadata.txt"; then
+  echo "prod gate bundle signoff wiring failed: metadata missing signoff_rc=0"
+  cat "$BUNDLE_DIR_SIGNOFF_OK/metadata.txt"
+  exit 1
+fi
+
+echo "[wiring] prod gate bundle signoff fail-close path"
+BUNDLE_DIR_SIGNOFF_FAIL="$TMP_DIR/prod_gate_bundle_signoff_fail"
+: >"$SIGNOFF_CAPTURE"
+set +e
+PATH="$TMP_BIN:$PATH" \
+BUNDLE_CAPTURE_FILE="$BUNDLE_CAPTURE" \
+BUNDLE_SOURCE_STEP_LOGS_DIR="$BUNDLE_SOURCE_STEP_LOGS" \
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+FAKE_BUNDLE_SIGNOFF_RC=19 \
+THREE_MACHINE_PROD_GATE_SCRIPT="$FAKE_BUNDLE_GATE" \
+THREE_MACHINE_PROD_GATE_CHECK_SCRIPT="$FAKE_BUNDLE_SIGNOFF" \
+./scripts/prod_gate_bundle.sh \
+  --bundle-dir "$BUNDLE_DIR_SIGNOFF_FAIL" \
+  --skip-wg 1 \
+  --signoff-check 1 >/tmp/integration_3machine_prod_profile_wiring_bundle_signoff_fail.log 2>&1
+bundle_signoff_fail_rc=$?
+set -e
+if [[ "$bundle_signoff_fail_rc" -ne 19 ]]; then
+  echo "prod gate bundle wiring failed: expected signoff fail-close rc=19 (got $bundle_signoff_fail_rc)"
+  cat /tmp/integration_3machine_prod_profile_wiring_bundle_signoff_fail.log
+  exit 1
+fi
+if [[ ! -f "${BUNDLE_DIR_SIGNOFF_FAIL}.tar.gz" ]]; then
+  echo "prod gate bundle wiring failed: signoff fail-close should still produce bundle tarball"
+  ls -la "$TMP_DIR"
+  cat /tmp/integration_3machine_prod_profile_wiring_bundle_signoff_fail.log
+  exit 1
+fi
+if ! rg -q 'gate_rc=0' "$BUNDLE_DIR_SIGNOFF_FAIL/metadata.txt"; then
+  echo "prod gate bundle signoff wiring failed: metadata missing gate_rc=0 on signoff failure"
+  cat "$BUNDLE_DIR_SIGNOFF_FAIL/metadata.txt"
+  exit 1
+fi
+if ! rg -q 'signoff_rc=19' "$BUNDLE_DIR_SIGNOFF_FAIL/metadata.txt"; then
+  echo "prod gate bundle signoff wiring failed: metadata missing signoff_rc=19"
+  cat "$BUNDLE_DIR_SIGNOFF_FAIL/metadata.txt"
+  exit 1
+fi
+
+FAKE_BUNDLE_VERIFY="$TMP_DIR/fake_bundle_verify.sh"
+BUNDLE_VERIFY_CAPTURE="$TMP_DIR/prod_bundle_verify_args.log"
+cat >"$FAKE_BUNDLE_VERIFY" <<'EOF_FAKE_BUNDLE_VERIFY'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >>"${BUNDLE_VERIFY_CAPTURE_FILE:?}"
+exit "${FAKE_BUNDLE_VERIFY_RC:-0}"
+EOF_FAKE_BUNDLE_VERIFY
+chmod +x "$FAKE_BUNDLE_VERIFY"
+
+echo "[wiring] easy_node -> prod bundle dispatch"
+EASY_BUNDLE_DIR="$TMP_DIR/easy_node_prod_bundle"
+: >"$BUNDLE_VERIFY_CAPTURE"
+set +e
+PATH="$TMP_BIN:$PATH" \
+BUNDLE_CAPTURE_FILE="$BUNDLE_CAPTURE" \
+BUNDLE_SOURCE_STEP_LOGS_DIR="$BUNDLE_SOURCE_STEP_LOGS" \
+THREE_MACHINE_PROD_GATE_BUNDLE_VERIFY_SCRIPT="$FAKE_BUNDLE_VERIFY" \
+BUNDLE_VERIFY_CAPTURE_FILE="$BUNDLE_VERIFY_CAPTURE" \
+FAKE_BUNDLE_VERIFY_RC=0 \
 THREE_MACHINE_PROD_BUNDLE_SCRIPT="./scripts/prod_gate_bundle.sh" \
 THREE_MACHINE_PROD_GATE_SCRIPT="$FAKE_BUNDLE_GATE" \
 ./scripts/easy_node.sh three-machine-prod-bundle \
   --bundle-dir "$EASY_BUNDLE_DIR" \
+  --preflight-check 0 \
   --skip-wg 1 >/tmp/integration_3machine_prod_profile_wiring_easy_bundle.log 2>&1
 easy_bundle_rc=$?
 set -e
@@ -1384,6 +2167,464 @@ if [[ ! -f "${EASY_BUNDLE_DIR}.tar.gz" ]]; then
   echo "easy_node prod bundle wiring failed: expected tarball missing"
   ls -la "$TMP_DIR"
   cat /tmp/integration_3machine_prod_profile_wiring_easy_bundle.log
+  exit 1
+fi
+if [[ ! -f "$EASY_BUNDLE_DIR/prod_bundle_run_report.json" ]]; then
+  echo "easy_node prod bundle wiring failed: missing run report JSON"
+  find "$EASY_BUNDLE_DIR" -maxdepth 2 -type f -print || true
+  cat /tmp/integration_3machine_prod_profile_wiring_easy_bundle.log
+  exit 1
+fi
+if ! rg -F -q "\"bundle_dir\": \"$EASY_BUNDLE_DIR\"" "$EASY_BUNDLE_DIR/prod_bundle_run_report.json"; then
+  echo "easy_node prod bundle wiring failed: run report missing bundle_dir"
+  cat "$EASY_BUNDLE_DIR/prod_bundle_run_report.json"
+  exit 1
+fi
+if ! rg -q '"final_rc":[[:space:]]*0' "$EASY_BUNDLE_DIR/prod_bundle_run_report.json"; then
+  echo "easy_node prod bundle wiring failed: run report missing final_rc=0"
+  cat "$EASY_BUNDLE_DIR/prod_bundle_run_report.json"
+  exit 1
+fi
+if ! rg -q -- '--bundle-dir' "$BUNDLE_VERIFY_CAPTURE"; then
+  echo "easy_node prod bundle wiring failed: verify script missing --bundle-dir forwarding"
+  cat "$BUNDLE_VERIFY_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- "--bundle-tar ${EASY_BUNDLE_DIR}.tar.gz" "$BUNDLE_VERIFY_CAPTURE"; then
+  echo "easy_node prod bundle wiring failed: verify script missing --bundle-tar forwarding"
+  cat "$BUNDLE_VERIFY_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--check-tar-sha256 1' "$BUNDLE_VERIFY_CAPTURE"; then
+  echo "easy_node prod bundle wiring failed: verify script missing --check-tar-sha256 1"
+  cat "$BUNDLE_VERIFY_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--check-manifest 1' "$BUNDLE_VERIFY_CAPTURE"; then
+  echo "easy_node prod bundle wiring failed: verify script missing --check-manifest 1"
+  cat "$BUNDLE_VERIFY_CAPTURE"
+  exit 1
+fi
+
+echo "[wiring] easy_node -> prod bundle verify disabled diagnostics path"
+EASY_BUNDLE_NO_VERIFY_DIR="$TMP_DIR/easy_node_prod_bundle_no_verify"
+: >"$BUNDLE_VERIFY_CAPTURE"
+set +e
+PATH="$TMP_BIN:$PATH" \
+BUNDLE_CAPTURE_FILE="$BUNDLE_CAPTURE" \
+BUNDLE_SOURCE_STEP_LOGS_DIR="$BUNDLE_SOURCE_STEP_LOGS" \
+THREE_MACHINE_PROD_GATE_BUNDLE_VERIFY_SCRIPT="$FAKE_BUNDLE_VERIFY" \
+BUNDLE_VERIFY_CAPTURE_FILE="$BUNDLE_VERIFY_CAPTURE" \
+FAKE_BUNDLE_VERIFY_RC=27 \
+THREE_MACHINE_PROD_BUNDLE_SCRIPT="./scripts/prod_gate_bundle.sh" \
+THREE_MACHINE_PROD_GATE_SCRIPT="$FAKE_BUNDLE_GATE" \
+./scripts/easy_node.sh three-machine-prod-bundle \
+  --bundle-dir "$EASY_BUNDLE_NO_VERIFY_DIR" \
+  --preflight-check 0 \
+  --bundle-verify-check 0 \
+  --skip-wg 1 >/tmp/integration_3machine_prod_profile_wiring_easy_bundle_no_verify.log 2>&1
+easy_bundle_no_verify_rc=$?
+set -e
+if [[ "$easy_bundle_no_verify_rc" -ne 0 ]]; then
+  echo "easy_node prod bundle verify-disable wiring failed: expected rc=0 (got $easy_bundle_no_verify_rc)"
+  cat /tmp/integration_3machine_prod_profile_wiring_easy_bundle_no_verify.log
+  exit 1
+fi
+if [[ -s "$BUNDLE_VERIFY_CAPTURE" ]]; then
+  echo "easy_node prod bundle verify-disable wiring failed: verify script should not run when disabled"
+  cat "$BUNDLE_VERIFY_CAPTURE"
+  exit 1
+fi
+if [[ ! -f "$EASY_BUNDLE_NO_VERIFY_DIR/prod_bundle_run_report.json" ]]; then
+  echo "easy_node prod bundle verify-disable wiring failed: missing run report JSON"
+  find "$EASY_BUNDLE_NO_VERIFY_DIR" -maxdepth 2 -type f -print || true
+  cat /tmp/integration_3machine_prod_profile_wiring_easy_bundle_no_verify.log
+  exit 1
+fi
+
+echo "[wiring] easy_node -> prod bundle verify fail-close path"
+EASY_BUNDLE_VERIFY_FAIL_DIR="$TMP_DIR/easy_node_prod_bundle_verify_fail"
+: >"$BUNDLE_VERIFY_CAPTURE"
+set +e
+PATH="$TMP_BIN:$PATH" \
+BUNDLE_CAPTURE_FILE="$BUNDLE_CAPTURE" \
+BUNDLE_SOURCE_STEP_LOGS_DIR="$BUNDLE_SOURCE_STEP_LOGS" \
+THREE_MACHINE_PROD_GATE_BUNDLE_VERIFY_SCRIPT="$FAKE_BUNDLE_VERIFY" \
+BUNDLE_VERIFY_CAPTURE_FILE="$BUNDLE_VERIFY_CAPTURE" \
+FAKE_BUNDLE_VERIFY_RC=29 \
+THREE_MACHINE_PROD_BUNDLE_SCRIPT="./scripts/prod_gate_bundle.sh" \
+THREE_MACHINE_PROD_GATE_SCRIPT="$FAKE_BUNDLE_GATE" \
+./scripts/easy_node.sh three-machine-prod-bundle \
+  --bundle-dir "$EASY_BUNDLE_VERIFY_FAIL_DIR" \
+  --preflight-check 0 \
+  --bundle-verify-check 1 \
+  --skip-wg 1 >/tmp/integration_3machine_prod_profile_wiring_easy_bundle_verify_fail.log 2>&1
+easy_bundle_verify_fail_rc=$?
+set -e
+if [[ "$easy_bundle_verify_fail_rc" -ne 29 ]]; then
+  echo "easy_node prod bundle verify fail-close wiring failed: expected rc=29 (got $easy_bundle_verify_fail_rc)"
+  cat /tmp/integration_3machine_prod_profile_wiring_easy_bundle_verify_fail.log
+  exit 1
+fi
+if [[ ! -f "${EASY_BUNDLE_VERIFY_FAIL_DIR}.tar.gz" ]]; then
+  echo "easy_node prod bundle verify fail-close wiring failed: expected tarball missing"
+  ls -la "$TMP_DIR"
+  cat /tmp/integration_3machine_prod_profile_wiring_easy_bundle_verify_fail.log
+  exit 1
+fi
+if [[ ! -f "$EASY_BUNDLE_VERIFY_FAIL_DIR/prod_bundle_run_report.json" ]]; then
+  echo "easy_node prod bundle verify fail-close wiring failed: missing run report JSON"
+  find "$EASY_BUNDLE_VERIFY_FAIL_DIR" -maxdepth 2 -type f -print || true
+  cat /tmp/integration_3machine_prod_profile_wiring_easy_bundle_verify_fail.log
+  exit 1
+fi
+if ! rg -q '"final_rc":[[:space:]]*29' "$EASY_BUNDLE_VERIFY_FAIL_DIR/prod_bundle_run_report.json"; then
+  echo "easy_node prod bundle verify fail-close wiring failed: run report missing final_rc=29"
+  cat "$EASY_BUNDLE_VERIFY_FAIL_DIR/prod_bundle_run_report.json"
+  exit 1
+fi
+
+FAKE_BUNDLE_BAD_MANIFEST="$TMP_DIR/fake_bundle_bad_manifest.sh"
+cat >"$FAKE_BUNDLE_BAD_MANIFEST" <<'EOF_FAKE_BUNDLE_BAD_MANIFEST'
+#!/usr/bin/env bash
+set -euo pipefail
+
+manifest_mode="${FAKE_BUNDLE_MANIFEST_MODE:-missing}"
+bundle_dir=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --bundle-dir)
+      bundle_dir="${2:-}"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
+if [[ -z "$bundle_dir" ]]; then
+  echo "fake_bundle_bad_manifest: missing --bundle-dir"
+  exit 2
+fi
+
+mkdir -p "$bundle_dir"
+cat >"$bundle_dir/metadata.txt" <<EOF_BAD_MANIFEST_META
+gate_rc=0
+signoff_enabled=0
+signoff_rc=0
+bundle_dir=$bundle_dir
+EOF_BAD_MANIFEST_META
+cat >"$bundle_dir/prod_gate_summary.json" <<'EOF_BAD_MANIFEST_GATE'
+{"status":"ok"}
+EOF_BAD_MANIFEST_GATE
+cat >"$bundle_dir/prod_wg_validate_summary.json" <<'EOF_BAD_MANIFEST_VALIDATE'
+{"status":"ok"}
+EOF_BAD_MANIFEST_VALIDATE
+cat >"$bundle_dir/prod_wg_soak_summary.json" <<'EOF_BAD_MANIFEST_SOAK'
+{"status":"ok"}
+EOF_BAD_MANIFEST_SOAK
+
+if [[ "$manifest_mode" == "invalid" ]]; then
+  printf 'invalidhash  metadata.txt\n' >"$bundle_dir/manifest.sha256"
+fi
+
+bundle_tar="${bundle_dir}.tar.gz"
+tar -czf "$bundle_tar" -C "$(dirname "$bundle_dir")" "$(basename "$bundle_dir")"
+if command -v sha256sum >/dev/null 2>&1; then
+  line="$(sha256sum "$bundle_tar")"
+else
+  line="$(shasum -a 256 "$bundle_tar")"
+fi
+printf '%s  %s\n' "${line%% *}" "$(basename "$bundle_tar")" >"${bundle_tar}.sha256"
+EOF_FAKE_BUNDLE_BAD_MANIFEST
+chmod +x "$FAKE_BUNDLE_BAD_MANIFEST"
+
+echo "[wiring] easy_node -> prod bundle manifest missing fail-close path"
+EASY_BUNDLE_MANIFEST_MISSING_DIR="$TMP_DIR/easy_node_prod_bundle_manifest_missing"
+set +e
+PATH="$TMP_BIN:$PATH" \
+FAKE_BUNDLE_MANIFEST_MODE=missing \
+THREE_MACHINE_PROD_BUNDLE_SCRIPT="$FAKE_BUNDLE_BAD_MANIFEST" \
+THREE_MACHINE_PROD_GATE_BUNDLE_VERIFY_SCRIPT="./scripts/prod_gate_bundle_verify.sh" \
+./scripts/easy_node.sh three-machine-prod-bundle \
+  --bundle-dir "$EASY_BUNDLE_MANIFEST_MISSING_DIR" \
+  --preflight-check 0 \
+  --bundle-verify-check 1 \
+  --skip-wg 1 >/tmp/integration_3machine_prod_profile_wiring_easy_bundle_manifest_missing.log 2>&1
+easy_bundle_manifest_missing_rc=$?
+set -e
+if [[ "$easy_bundle_manifest_missing_rc" -eq 0 ]]; then
+  echo "easy_node prod bundle manifest-missing wiring failed: expected non-zero rc"
+  cat /tmp/integration_3machine_prod_profile_wiring_easy_bundle_manifest_missing.log
+  exit 1
+fi
+if ! rg -q 'manifest' /tmp/integration_3machine_prod_profile_wiring_easy_bundle_manifest_missing.log; then
+  echo "easy_node prod bundle manifest-missing wiring failed: expected manifest error signal"
+  cat /tmp/integration_3machine_prod_profile_wiring_easy_bundle_manifest_missing.log
+  exit 1
+fi
+if ! rg -q "\"final_rc\":[[:space:]]*$easy_bundle_manifest_missing_rc" "$EASY_BUNDLE_MANIFEST_MISSING_DIR/prod_bundle_run_report.json"; then
+  echo "easy_node prod bundle manifest-missing wiring failed: run report missing fail rc"
+  cat "$EASY_BUNDLE_MANIFEST_MISSING_DIR/prod_bundle_run_report.json"
+  exit 1
+fi
+
+echo "[wiring] easy_node -> prod bundle manifest invalid fail-close path"
+EASY_BUNDLE_MANIFEST_INVALID_DIR="$TMP_DIR/easy_node_prod_bundle_manifest_invalid"
+set +e
+PATH="$TMP_BIN:$PATH" \
+FAKE_BUNDLE_MANIFEST_MODE=invalid \
+THREE_MACHINE_PROD_BUNDLE_SCRIPT="$FAKE_BUNDLE_BAD_MANIFEST" \
+THREE_MACHINE_PROD_GATE_BUNDLE_VERIFY_SCRIPT="./scripts/prod_gate_bundle_verify.sh" \
+./scripts/easy_node.sh three-machine-prod-bundle \
+  --bundle-dir "$EASY_BUNDLE_MANIFEST_INVALID_DIR" \
+  --preflight-check 0 \
+  --bundle-verify-check 1 \
+  --skip-wg 1 >/tmp/integration_3machine_prod_profile_wiring_easy_bundle_manifest_invalid.log 2>&1
+easy_bundle_manifest_invalid_rc=$?
+set -e
+if [[ "$easy_bundle_manifest_invalid_rc" -eq 0 ]]; then
+  echo "easy_node prod bundle manifest-invalid wiring failed: expected non-zero rc"
+  cat /tmp/integration_3machine_prod_profile_wiring_easy_bundle_manifest_invalid.log
+  exit 1
+fi
+if ! rg -q 'manifest' /tmp/integration_3machine_prod_profile_wiring_easy_bundle_manifest_invalid.log; then
+  echo "easy_node prod bundle manifest-invalid wiring failed: expected manifest error signal"
+  cat /tmp/integration_3machine_prod_profile_wiring_easy_bundle_manifest_invalid.log
+  exit 1
+fi
+if ! rg -q "\"final_rc\":[[:space:]]*$easy_bundle_manifest_invalid_rc" "$EASY_BUNDLE_MANIFEST_INVALID_DIR/prod_bundle_run_report.json"; then
+  echo "easy_node prod bundle manifest-invalid wiring failed: run report missing fail rc"
+  cat "$EASY_BUNDLE_MANIFEST_INVALID_DIR/prod_bundle_run_report.json"
+  exit 1
+fi
+
+FAKE_BUNDLE_PREFLIGHT="$TMP_DIR/fake_bundle_preflight.sh"
+PREFLIGHT_CAPTURE="$TMP_DIR/prod_bundle_preflight_args.log"
+cat >"$FAKE_BUNDLE_PREFLIGHT" <<'EOF_FAKE_BUNDLE_PREFLIGHT'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >>"${PREFLIGHT_CAPTURE_FILE:?}"
+exit "${FAKE_BUNDLE_PREFLIGHT_RC:-0}"
+EOF_FAKE_BUNDLE_PREFLIGHT
+chmod +x "$FAKE_BUNDLE_PREFLIGHT"
+
+echo "[wiring] easy_node -> prod bundle preflight forwarding"
+EASY_BUNDLE_PREFLIGHT_DIR="$TMP_DIR/easy_node_prod_bundle_preflight"
+: >"$PREFLIGHT_CAPTURE"
+set +e
+PATH="$TMP_BIN:$PATH" \
+BUNDLE_CAPTURE_FILE="$BUNDLE_CAPTURE" \
+BUNDLE_SOURCE_STEP_LOGS_DIR="$BUNDLE_SOURCE_STEP_LOGS" \
+PREFLIGHT_CAPTURE_FILE="$PREFLIGHT_CAPTURE" \
+FAKE_BUNDLE_PREFLIGHT_RC=0 \
+THREE_MACHINE_PROD_BUNDLE_SCRIPT="./scripts/prod_gate_bundle.sh" \
+THREE_MACHINE_PROD_BUNDLE_PREFLIGHT_SCRIPT="$FAKE_BUNDLE_PREFLIGHT" \
+THREE_MACHINE_PROD_GATE_SCRIPT="$FAKE_BUNDLE_GATE" \
+./scripts/easy_node.sh three-machine-prod-bundle \
+  --bundle-dir "$EASY_BUNDLE_PREFLIGHT_DIR" \
+  --preflight-check 1 \
+  --preflight-timeout-sec 9 \
+  --preflight-require-root 1 \
+  --skip-wg 1 \
+  --directory-a https://dir-a:8081 \
+  --directory-b https://dir-b:8081 \
+  --issuer-url https://issuer-main:8082 \
+  --entry-url https://entry-main:8083 \
+  --exit-url https://exit-main:8084 >/tmp/integration_3machine_prod_profile_wiring_easy_bundle_preflight.log 2>&1
+easy_bundle_preflight_rc=$?
+set -e
+if [[ "$easy_bundle_preflight_rc" -ne 0 ]]; then
+  echo "easy_node prod bundle preflight wiring failed: non-zero rc"
+  cat /tmp/integration_3machine_prod_profile_wiring_easy_bundle_preflight.log
+  exit 1
+fi
+if ! rg -q -- '--prod-profile 1' "$PREFLIGHT_CAPTURE"; then
+  echo "easy_node prod bundle preflight wiring failed: missing --prod-profile 1"
+  cat "$PREFLIGHT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--operator-floor-check 1' "$PREFLIGHT_CAPTURE"; then
+  echo "easy_node prod bundle preflight wiring failed: missing --operator-floor-check 1"
+  cat "$PREFLIGHT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--issuer-quorum-check 1' "$PREFLIGHT_CAPTURE"; then
+  echo "easy_node prod bundle preflight wiring failed: missing --issuer-quorum-check 1"
+  cat "$PREFLIGHT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--timeout-sec 9' "$PREFLIGHT_CAPTURE"; then
+  echo "easy_node prod bundle preflight wiring failed: missing --timeout-sec 9"
+  cat "$PREFLIGHT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-root 0' "$PREFLIGHT_CAPTURE"; then
+  echo "easy_node prod bundle preflight wiring failed: expected --require-root 0 when --skip-wg 1"
+  cat "$PREFLIGHT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--directory-urls https://dir-a:8081,https://dir-b:8081' "$PREFLIGHT_CAPTURE"; then
+  echo "easy_node prod bundle preflight wiring failed: missing directory URL merge forwarding"
+  cat "$PREFLIGHT_CAPTURE"
+  exit 1
+fi
+
+echo "[wiring] easy_node -> prod bundle preflight fail-close path"
+EASY_BUNDLE_PREFLIGHT_FAIL_DIR="$TMP_DIR/easy_node_prod_bundle_preflight_fail"
+: >"$PREFLIGHT_CAPTURE"
+: >"$BUNDLE_CAPTURE"
+set +e
+PATH="$TMP_BIN:$PATH" \
+BUNDLE_CAPTURE_FILE="$BUNDLE_CAPTURE" \
+BUNDLE_SOURCE_STEP_LOGS_DIR="$BUNDLE_SOURCE_STEP_LOGS" \
+PREFLIGHT_CAPTURE_FILE="$PREFLIGHT_CAPTURE" \
+FAKE_BUNDLE_PREFLIGHT_RC=23 \
+THREE_MACHINE_PROD_BUNDLE_SCRIPT="./scripts/prod_gate_bundle.sh" \
+THREE_MACHINE_PROD_BUNDLE_PREFLIGHT_SCRIPT="$FAKE_BUNDLE_PREFLIGHT" \
+THREE_MACHINE_PROD_GATE_SCRIPT="$FAKE_BUNDLE_GATE" \
+./scripts/easy_node.sh three-machine-prod-bundle \
+  --bundle-dir "$EASY_BUNDLE_PREFLIGHT_FAIL_DIR" \
+  --preflight-check 1 \
+  --skip-wg 1 \
+  --bootstrap-directory https://dir-a:8081 >/tmp/integration_3machine_prod_profile_wiring_easy_bundle_preflight_fail.log 2>&1
+easy_bundle_preflight_fail_rc=$?
+set -e
+if [[ "$easy_bundle_preflight_fail_rc" -ne 23 ]]; then
+  echo "easy_node prod bundle preflight wiring failed: expected fail-close rc=23 (got $easy_bundle_preflight_fail_rc)"
+  cat /tmp/integration_3machine_prod_profile_wiring_easy_bundle_preflight_fail.log
+  exit 1
+fi
+if [[ -f "${EASY_BUNDLE_PREFLIGHT_FAIL_DIR}.tar.gz" ]]; then
+  echo "easy_node prod bundle preflight wiring failed: bundle should not run when preflight fails"
+  ls -la "$TMP_DIR"
+  cat /tmp/integration_3machine_prod_profile_wiring_easy_bundle_preflight_fail.log
+  exit 1
+fi
+if [[ -s "$BUNDLE_CAPTURE" ]]; then
+  echo "easy_node prod bundle preflight wiring failed: bundle gate script should not run on preflight failure"
+  cat "$BUNDLE_CAPTURE"
+  cat /tmp/integration_3machine_prod_profile_wiring_easy_bundle_preflight_fail.log
+  exit 1
+fi
+
+echo "[wiring] easy_node -> prod bundle signoff forwarding"
+EASY_BUNDLE_SIGNOFF_DIR="$TMP_DIR/easy_node_prod_bundle_signoff"
+: >"$SIGNOFF_CAPTURE"
+set +e
+PATH="$TMP_BIN:$PATH" \
+BUNDLE_CAPTURE_FILE="$BUNDLE_CAPTURE" \
+BUNDLE_SOURCE_STEP_LOGS_DIR="$BUNDLE_SOURCE_STEP_LOGS" \
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+FAKE_BUNDLE_SIGNOFF_RC=0 \
+THREE_MACHINE_PROD_BUNDLE_SCRIPT="./scripts/prod_gate_bundle.sh" \
+THREE_MACHINE_PROD_GATE_SCRIPT="$FAKE_BUNDLE_GATE" \
+THREE_MACHINE_PROD_GATE_CHECK_SCRIPT="$FAKE_BUNDLE_SIGNOFF" \
+./scripts/easy_node.sh three-machine-prod-bundle \
+  --bundle-dir "$EASY_BUNDLE_SIGNOFF_DIR" \
+  --preflight-check 0 \
+  --skip-wg 1 \
+  --signoff-check 1 \
+  --signoff-max-wg-soak-failed-rounds 5 \
+  --signoff-show-json 1 >/tmp/integration_3machine_prod_profile_wiring_easy_bundle_signoff.log 2>&1
+easy_bundle_signoff_rc=$?
+set -e
+if [[ "$easy_bundle_signoff_rc" -ne 0 ]]; then
+  echo "easy_node prod bundle signoff wiring failed: non-zero rc"
+  cat /tmp/integration_3machine_prod_profile_wiring_easy_bundle_signoff.log
+  exit 1
+fi
+if ! rg -q -- '--max-wg-soak-failed-rounds 5' "$SIGNOFF_CAPTURE"; then
+  echo "easy_node prod bundle signoff wiring failed: missing signoff max failed rounds forwarding"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--show-json 1' "$SIGNOFF_CAPTURE"; then
+  echo "easy_node prod bundle signoff wiring failed: missing signoff show-json forwarding"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+
+echo "[wiring] easy_node help includes prod-key-rotation-runbook"
+if ! ./scripts/easy_node.sh --help | rg -q -- 'prod-key-rotation-runbook'; then
+  echo "easy_node help is missing prod-key-rotation-runbook command"
+  exit 1
+fi
+
+FAKE_ROTATION_RUNBOOK="$TMP_DIR/fake_rotation_runbook.sh"
+ROTATION_CAPTURE="$TMP_DIR/rotation_runbook_capture.log"
+cat >"$FAKE_ROTATION_RUNBOOK" <<'EOF_FAKE_ROTATION_RUNBOOK'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >>"${ROTATION_CAPTURE_FILE:?}"
+exit 0
+EOF_FAKE_ROTATION_RUNBOOK
+chmod +x "$FAKE_ROTATION_RUNBOOK"
+
+echo "[wiring] easy_node -> prod key-rotation runbook forwarding"
+PATH="$TMP_BIN:$PATH" \
+ROTATION_CAPTURE_FILE="$ROTATION_CAPTURE" \
+PROD_KEY_ROTATION_RUNBOOK_SCRIPT="$FAKE_ROTATION_RUNBOOK" \
+./scripts/easy_node.sh prod-key-rotation-runbook \
+  --mode provider \
+  --preflight-check 0 \
+  --key-history 7 >/tmp/integration_3machine_prod_profile_wiring_key_rotation.log 2>&1
+
+if ! rg -q -- '--mode provider' "$ROTATION_CAPTURE"; then
+  echo "easy_node prod key-rotation wiring failed: missing --mode forwarding"
+  cat "$ROTATION_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--preflight-check 0' "$ROTATION_CAPTURE"; then
+  echo "easy_node prod key-rotation wiring failed: missing --preflight-check forwarding"
+  cat "$ROTATION_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--key-history 7' "$ROTATION_CAPTURE"; then
+  echo "easy_node prod key-rotation wiring failed: missing --key-history forwarding"
+  cat "$ROTATION_CAPTURE"
+  exit 1
+fi
+
+echo "[wiring] easy_node help includes prod-upgrade-runbook"
+if ! ./scripts/easy_node.sh --help | rg -q -- 'prod-upgrade-runbook'; then
+  echo "easy_node help is missing prod-upgrade-runbook command"
+  exit 1
+fi
+
+FAKE_UPGRADE_RUNBOOK="$TMP_DIR/fake_upgrade_runbook.sh"
+UPGRADE_CAPTURE="$TMP_DIR/upgrade_runbook_capture.log"
+cat >"$FAKE_UPGRADE_RUNBOOK" <<'EOF_FAKE_UPGRADE_RUNBOOK'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >>"${UPGRADE_CAPTURE_FILE:?}"
+exit 0
+EOF_FAKE_UPGRADE_RUNBOOK
+chmod +x "$FAKE_UPGRADE_RUNBOOK"
+
+echo "[wiring] easy_node -> prod upgrade runbook forwarding"
+PATH="$TMP_BIN:$PATH" \
+UPGRADE_CAPTURE_FILE="$UPGRADE_CAPTURE" \
+PROD_UPGRADE_RUNBOOK_SCRIPT="$FAKE_UPGRADE_RUNBOOK" \
+./scripts/easy_node.sh prod-upgrade-runbook \
+  --mode authority \
+  --compose-pull 0 \
+  --compose-build 1 >/tmp/integration_3machine_prod_profile_wiring_upgrade.log 2>&1
+
+if ! rg -q -- '--mode authority' "$UPGRADE_CAPTURE"; then
+  echo "easy_node prod upgrade wiring failed: missing --mode forwarding"
+  cat "$UPGRADE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--compose-pull 0' "$UPGRADE_CAPTURE"; then
+  echo "easy_node prod upgrade wiring failed: missing --compose-pull forwarding"
+  cat "$UPGRADE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--compose-build 1' "$UPGRADE_CAPTURE"; then
+  echo "easy_node prod upgrade wiring failed: missing --compose-build forwarding"
+  cat "$UPGRADE_CAPTURE"
   exit 1
 fi
 

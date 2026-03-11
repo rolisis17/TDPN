@@ -1,0 +1,312 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
+for cmd in bash jq mktemp rg; do
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    echo "missing required command: $cmd"
+    exit 2
+  fi
+done
+
+TMP_DIR="$(mktemp -d)"
+cleanup() {
+  rm -rf "$TMP_DIR"
+}
+trap cleanup EXIT
+
+PASS_GATE="$TMP_DIR/prod_gate_ok.json"
+PASS_RUN_REPORT="$TMP_DIR/prod_bundle_run_report_ok.json"
+
+cat >"$PASS_GATE" <<'EOF_PASS_GATE'
+{
+  "status": "ok",
+  "failed_step": "",
+  "failed_rc": 0,
+  "steps": {
+    "control_validate": "ok",
+    "control_soak": "ok",
+    "prod_wg_validate": "ok",
+    "prod_wg_soak": "ok"
+  },
+  "wg_validate_status": "ok",
+  "wg_validate_failed_step": "",
+  "wg_soak_status": "ok",
+  "wg_soak_rounds_passed": 12,
+  "wg_soak_rounds_failed": 0,
+  "wg_soak_top_failure_class": "none",
+  "wg_soak_top_failure_count": 0
+}
+EOF_PASS_GATE
+
+cat >"$PASS_RUN_REPORT" <<EOF_PASS_RUN_REPORT
+{
+  "status": "ok",
+  "final_rc": 0,
+  "bundle_dir": "$TMP_DIR/prod_bundle_dir",
+  "gate_summary_json": "$PASS_GATE",
+  "preflight": {
+    "enabled": true,
+    "status": "ok",
+    "rc": 0
+  },
+  "bundle": {
+    "status": "ok",
+    "rc": 0
+  },
+  "integrity_verify": {
+    "enabled": true,
+    "status": "ok",
+    "rc": 0
+  },
+  "signoff": {
+    "enabled": true,
+    "rc": 0
+  },
+  "incident_snapshot": {
+    "enabled_on_fail": true,
+    "status": "skipped",
+    "rc": -1,
+    "bundle_dir": "",
+    "bundle_tar": ""
+  }
+}
+EOF_PASS_RUN_REPORT
+
+echo "[prod-gate-slo-summary] pass baseline"
+./scripts/prod_gate_slo_summary.sh \
+  --run-report-json "$PASS_RUN_REPORT" \
+  --require-preflight-ok 1 \
+  --require-bundle-ok 1 \
+  --require-integrity-ok 1 \
+  --require-signoff-ok 1 \
+  --fail-on-no-go 1 \
+  --show-json 0 >/tmp/integration_prod_gate_slo_summary_pass.log 2>&1
+
+if ! rg -q '\[prod-gate-slo\] decision=GO' /tmp/integration_prod_gate_slo_summary_pass.log; then
+  echo "expected GO decision in pass baseline"
+  cat /tmp/integration_prod_gate_slo_summary_pass.log
+  exit 1
+fi
+
+echo "[prod-gate-slo-summary] no-go decision without fail-close"
+FAIL_GATE_SOAK_BUDGET="$TMP_DIR/prod_gate_fail_soak_budget.json"
+cat >"$FAIL_GATE_SOAK_BUDGET" <<'EOF_FAIL_GATE_SOAK'
+{
+  "status": "ok",
+  "failed_step": "",
+  "failed_rc": 0,
+  "steps": {
+    "control_validate": "ok",
+    "control_soak": "ok",
+    "prod_wg_validate": "ok",
+    "prod_wg_soak": "ok"
+  },
+  "wg_validate_status": "ok",
+  "wg_validate_failed_step": "",
+  "wg_soak_status": "ok",
+  "wg_soak_rounds_passed": 9,
+  "wg_soak_rounds_failed": 2,
+  "wg_soak_top_failure_class": "timeout",
+  "wg_soak_top_failure_count": 2
+}
+EOF_FAIL_GATE_SOAK
+
+./scripts/prod_gate_slo_summary.sh \
+  --gate-summary-json "$FAIL_GATE_SOAK_BUDGET" \
+  --max-wg-soak-failed-rounds 1 \
+  --show-json 0 >/tmp/integration_prod_gate_slo_summary_no_go_relaxed.log 2>&1
+
+if ! rg -q '\[prod-gate-slo\] decision=NO-GO' /tmp/integration_prod_gate_slo_summary_no_go_relaxed.log; then
+  echo "expected NO-GO decision for soak budget failure"
+  cat /tmp/integration_prod_gate_slo_summary_no_go_relaxed.log
+  exit 1
+fi
+if ! rg -q 'wg_soak_rounds_failed exceeds limit' /tmp/integration_prod_gate_slo_summary_no_go_relaxed.log; then
+  echo "expected soak-budget no-go reason not found"
+  cat /tmp/integration_prod_gate_slo_summary_no_go_relaxed.log
+  exit 1
+fi
+
+echo "[prod-gate-slo-summary] no-go fail-close"
+set +e
+./scripts/prod_gate_slo_summary.sh \
+  --gate-summary-json "$FAIL_GATE_SOAK_BUDGET" \
+  --max-wg-soak-failed-rounds 1 \
+  --fail-on-no-go 1 >/tmp/integration_prod_gate_slo_summary_no_go_fail_close.log 2>&1
+no_go_rc=$?
+set -e
+if [[ "$no_go_rc" -eq 0 ]]; then
+  echo "expected non-zero rc when NO-GO and --fail-on-no-go=1"
+  cat /tmp/integration_prod_gate_slo_summary_no_go_fail_close.log
+  exit 1
+fi
+if ! rg -q '\[prod-gate-slo\] decision=NO-GO' /tmp/integration_prod_gate_slo_summary_no_go_fail_close.log; then
+  echo "expected NO-GO decision in fail-close output"
+  cat /tmp/integration_prod_gate_slo_summary_no_go_fail_close.log
+  exit 1
+fi
+
+echo "[prod-gate-slo-summary] run-report preflight policy failure"
+RUN_REPORT_PREFLIGHT_FAIL="$TMP_DIR/prod_bundle_run_report_preflight_fail.json"
+cat >"$RUN_REPORT_PREFLIGHT_FAIL" <<EOF_PREFLIGHT_FAIL
+{
+  "status": "fail",
+  "final_rc": 1,
+  "bundle_dir": "$TMP_DIR/prod_bundle_dir",
+  "gate_summary_json": "$PASS_GATE",
+  "preflight": {
+    "enabled": true,
+    "status": "fail",
+    "rc": 1
+  },
+  "bundle": {
+    "status": "ok",
+    "rc": 0
+  },
+  "integrity_verify": {
+    "enabled": true,
+    "status": "ok",
+    "rc": 0
+  },
+  "signoff": {
+    "enabled": true,
+    "rc": 0
+  }
+}
+EOF_PREFLIGHT_FAIL
+
+set +e
+./scripts/prod_gate_slo_summary.sh \
+  --run-report-json "$RUN_REPORT_PREFLIGHT_FAIL" \
+  --require-preflight-ok 1 \
+  --fail-on-no-go 1 >/tmp/integration_prod_gate_slo_summary_preflight_fail.log 2>&1
+preflight_fail_rc=$?
+set -e
+if [[ "$preflight_fail_rc" -eq 0 ]]; then
+  echo "expected non-zero rc when preflight policy is required and preflight failed"
+  cat /tmp/integration_prod_gate_slo_summary_preflight_fail.log
+  exit 1
+fi
+if ! rg -q 'preflight is not ok' /tmp/integration_prod_gate_slo_summary_preflight_fail.log; then
+  echo "expected preflight-policy no-go reason not found"
+  cat /tmp/integration_prod_gate_slo_summary_preflight_fail.log
+  exit 1
+fi
+
+echo "[prod-gate-slo-summary] run-report incident snapshot policy failure"
+RUN_REPORT_INCIDENT_FAIL="$TMP_DIR/prod_bundle_run_report_incident_fail.json"
+cat >"$RUN_REPORT_INCIDENT_FAIL" <<EOF_INCIDENT_FAIL
+{
+  "status": "fail",
+  "final_rc": 1,
+  "bundle_dir": "$TMP_DIR/prod_bundle_dir",
+  "gate_summary_json": "$PASS_GATE",
+  "preflight": {
+    "enabled": true,
+    "status": "ok",
+    "rc": 0
+  },
+  "bundle": {
+    "status": "ok",
+    "rc": 0
+  },
+  "integrity_verify": {
+    "enabled": true,
+    "status": "ok",
+    "rc": 0
+  },
+  "signoff": {
+    "enabled": true,
+    "rc": 0
+  },
+  "incident_snapshot": {
+    "enabled_on_fail": false,
+    "status": "skipped",
+    "rc": -1,
+    "bundle_dir": "",
+    "bundle_tar": ""
+  }
+}
+EOF_INCIDENT_FAIL
+
+set +e
+./scripts/prod_gate_slo_summary.sh \
+  --run-report-json "$RUN_REPORT_INCIDENT_FAIL" \
+  --require-incident-snapshot-on-fail 1 \
+  --fail-on-no-go 1 >/tmp/integration_prod_gate_slo_summary_incident_fail.log 2>&1
+incident_fail_rc=$?
+set -e
+if [[ "$incident_fail_rc" -eq 0 ]]; then
+  echo "expected non-zero rc when incident snapshot policy is required and incident snapshot did not run"
+  cat /tmp/integration_prod_gate_slo_summary_incident_fail.log
+  exit 1
+fi
+if ! rg -q 'incident snapshot is not enabled on fail' /tmp/integration_prod_gate_slo_summary_incident_fail.log; then
+  echo "expected incident-snapshot policy no-go reason not found"
+  cat /tmp/integration_prod_gate_slo_summary_incident_fail.log
+  exit 1
+fi
+
+echo "[prod-gate-slo-summary] easy_node forwarding"
+FAKE_SLO_SUMMARY="$TMP_DIR/fake_prod_gate_slo_summary.sh"
+CAPTURE="$TMP_DIR/prod_gate_slo_summary_args.log"
+cat >"$FAKE_SLO_SUMMARY" <<'EOF_FAKE_SLO'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >>"${CAPTURE_FILE:?}"
+exit 0
+EOF_FAKE_SLO
+chmod +x "$FAKE_SLO_SUMMARY"
+
+CAPTURE_FILE="$CAPTURE" \
+PROD_GATE_SLO_SUMMARY_SCRIPT="$FAKE_SLO_SUMMARY" \
+./scripts/easy_node.sh prod-gate-slo-summary \
+  --run-report-json /tmp/prod_bundle/prod_bundle_run_report.json \
+  --require-full-sequence 1 \
+  --require-wg-validate-ok 1 \
+  --require-wg-soak-ok 1 \
+  --max-wg-soak-failed-rounds 0 \
+  --require-preflight-ok 1 \
+  --require-bundle-ok 1 \
+  --require-integrity-ok 1 \
+  --require-signoff-ok 1 \
+  --require-incident-snapshot-on-fail 1 \
+  --require-incident-snapshot-artifacts 1 \
+  --fail-on-no-go 1 \
+  --show-json 1 >/tmp/integration_prod_gate_slo_summary_easy_node.log 2>&1
+
+if ! rg -q -- '--run-report-json /tmp/prod_bundle/prod_bundle_run_report.json' "$CAPTURE"; then
+  echo "easy_node prod-gate-slo-summary forwarding failed: missing --run-report-json"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-signoff-ok 1' "$CAPTURE"; then
+  echo "easy_node prod-gate-slo-summary forwarding failed: missing --require-signoff-ok"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-incident-snapshot-on-fail 1' "$CAPTURE"; then
+  echo "easy_node prod-gate-slo-summary forwarding failed: missing --require-incident-snapshot-on-fail"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-incident-snapshot-artifacts 1' "$CAPTURE"; then
+  echo "easy_node prod-gate-slo-summary forwarding failed: missing --require-incident-snapshot-artifacts"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--fail-on-no-go 1' "$CAPTURE"; then
+  echo "easy_node prod-gate-slo-summary forwarding failed: missing --fail-on-no-go"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--show-json 1' "$CAPTURE"; then
+  echo "easy_node prod-gate-slo-summary forwarding failed: missing --show-json"
+  cat "$CAPTURE"
+  exit 1
+fi
+
+echo "prod gate slo summary integration ok"

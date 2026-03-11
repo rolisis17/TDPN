@@ -170,6 +170,41 @@ sudo ./scripts/easy_node.sh stop-all --with-wg-only 1 --force-iface-cleanup 1
 # production upgrade runbook (compose pull/build/restart + rollback on failure)
 ./scripts/easy_node.sh prod-upgrade-runbook --mode auto --preflight-check 1 --compose-pull 1 --compose-build 0 --restart 1 --rollback-on-fail 1
 
+# production operator lifecycle runbook (repeatable onboarding/offboarding)
+./scripts/easy_node.sh prod-operator-lifecycle-runbook --action onboard --mode provider --public-host <PUBLIC_IP_OR_DNS> --authority-directory https://<AUTHORITY_DIR_IP_OR_DNS>:8081 --authority-issuer https://<AUTHORITY_DIR_IP_OR_DNS>:8082 --prod-profile 1
+./scripts/easy_node.sh prod-operator-lifecycle-runbook --action offboard --operator-id <OPERATOR_ID> --directory-url https://<AUTHORITY_DIR_IP_OR_DNS>:8081
+
+# sustained production pilot cohort (multi-round + aggregated trend/alert summary)
+./scripts/easy_node.sh prod-pilot-cohort-runbook --rounds 5 --pause-sec 60 --trend-min-go-rate-pct 95 --max-alert-severity WARN --bundle-outputs 1 --bundle-fail-close 1 -- --bootstrap-directory https://<A_SERVER_IP_OR_DNS>:8081 --subject pilot-client
+
+# verify cohort bundle artifacts (tar checksum + manifest + round structure)
+./scripts/easy_node.sh prod-pilot-cohort-bundle-verify --summary-json .easy-node-logs/prod_pilot_cohort/prod_pilot_cohort_summary.json
+
+# fail-closed cohort signoff (bundle integrity + cohort policy)
+./scripts/easy_node.sh prod-pilot-cohort-signoff --summary-json .easy-node-logs/prod_pilot_cohort/prod_pilot_cohort_summary.json
+
+# one-command minimal sustained pilot flow (runbook + signoff)
+./scripts/easy_node.sh prod-pilot-cohort-quick --bootstrap-directory https://<A_SERVER_IP_OR_DNS>:8081 --subject pilot-client
+# default quick run report: <reports_dir>/prod_pilot_cohort_quick_report.json
+
+# fail-closed quick run-report verification
+./scripts/easy_node.sh prod-pilot-cohort-quick-check --run-report-json <reports_dir>/prod_pilot_cohort_quick_report.json
+
+# quick-mode trend across multiple quick run reports
+./scripts/easy_node.sh prod-pilot-cohort-quick-trend --reports-dir .easy-node-logs --since-hours 24 --summary-json .easy-node-logs/prod_pilot_quick_trend_24h.json
+
+# quick-mode alert severity from trend metrics
+./scripts/easy_node.sh prod-pilot-cohort-quick-alert --trend-summary-json .easy-node-logs/prod_pilot_quick_trend_24h.json --summary-json .easy-node-logs/prod_pilot_quick_alert_24h.json
+
+# one-command quick dashboard (trend + alert + markdown)
+./scripts/easy_node.sh prod-pilot-cohort-quick-dashboard --reports-dir .easy-node-logs --dashboard-md .easy-node-logs/prod_pilot_quick_dashboard_24h.md
+
+# one-command quick signoff gate (latest check + trend + alert severity policy)
+./scripts/easy_node.sh prod-pilot-cohort-quick-signoff --run-report-json <reports_dir>/prod_pilot_cohort_quick_report.json --reports-dir .easy-node-logs --max-alert-severity WARN
+
+# one-command quick pilot runbook (quick execution + quick signoff + optional dashboard)
+./scripts/easy_node.sh prod-pilot-cohort-quick-runbook --bootstrap-directory https://<A_SERVER_IP_OR_DNS>:8081 --subject pilot-client --max-alert-severity WARN
+
 ./scripts/easy_node.sh client-test \
   --directory-urls http://<SERVER_IP>:8081 \
   --issuer-url http://<SERVER_IP>:8082 \
@@ -359,6 +394,20 @@ sudo ./scripts/easy_node.sh prod-wg-strict-ingress-rehearsal \
 - `rotate-server-secrets` rotates `DIRECTORY_ADMIN_TOKEN` + `ENTRY_PUZZLE_SECRET` (and `ISSUER_ADMIN_TOKEN` on authority nodes) with optional restart.
 - `prod-key-rotation-runbook` wraps production rotation in an operator-safe flow (snapshot backup -> optional preflight -> rotations -> optional rollback) and writes a machine-readable summary JSON.
 - `prod-upgrade-runbook` wraps production upgrade maintenance in an operator-safe flow (snapshot backup -> optional preflight -> compose pull/build/restart -> optional rollback) and writes a machine-readable summary JSON.
+- `prod-operator-lifecycle-runbook` wraps operator onboarding/offboarding in a repeatable flow (optional preflight, health checks, and relay publication/absence verification) and writes a machine-readable summary JSON.
+- `prod-pilot-cohort-runbook` wraps sustained pilot operation by running multiple `prod-pilot-runbook` rounds and aggregating cohort SLO trend/alert artifacts plus a final summary JSON, including alert-severity fail-close policy (`--max-alert-severity`, default `WARN`) and optional fail-closed cohort bundle artifacts (tar + checksum + manifest).
+- `prod-pilot-cohort-bundle-verify` validates cohort bundle integrity artifacts (`--summary-json` first-class input) and checks tar checksum + manifest schema + round structure.
+- `prod-pilot-cohort-check` validates cohort summary policy (status/round failures/trend go-rate/alert severity/bundle requirements) for fail-close GO/NO-GO decisions.
+- `prod-pilot-cohort-check` now also supports failed-round incident evidence policy (`--require-incident-snapshot-on-fail`, `--require-incident-snapshot-artifacts`) to fail-close when diagnostics are missing for failed rounds.
+- `prod-pilot-cohort-signoff` runs `prod-pilot-cohort-bundle-verify` + `prod-pilot-cohort-check` in one fail-closed command.
+- `prod-pilot-cohort-quick` runs sustained cohort runbook + fail-closed signoff with minimal flags for operator-friendly pilot execution.
+- `prod-pilot-cohort-quick` also writes a machine-readable quick run report JSON (`--run-report-json`, default `<reports_dir>/prod_pilot_cohort_quick_report.json`).
+- `prod-pilot-cohort-quick-check` validates quick run-report artifacts and enforces fail-close quick signoff policy.
+- `prod-pilot-cohort-quick-trend` aggregates GO/NO-GO trend across quick run-report artifacts with fail-close thresholds and JSON output.
+- `prod-pilot-cohort-quick-alert` maps quick trend metrics to operator severity (`OK`/`WARN`/`CRITICAL`) with optional fail-close exits.
+- `prod-pilot-cohort-quick-dashboard` composes quick trend + alert into one markdown dashboard plus JSON artifacts.
+- `prod-pilot-cohort-quick-signoff` runs quick-check + quick-trend + quick-alert in one fail-closed command and enforces `--max-alert-severity` policy.
+- `prod-pilot-cohort-quick-runbook` orchestrates quick execution + quick signoff + optional quick dashboard generation with one runbook summary artifact.
 - `server-up --prod-profile 1` forces strict fail-closed runtime (`BETA_STRICT_MODE=1`, `PROD_STRICT_MODE=1`), enables mTLS, enables live command-backend WG dataplane defaults, and on authority nodes requires signed issuer-admin auth (`ISSUER_ADMIN_REQUIRE_SIGNED=1`, token admin auth disabled).
 - `server-up --prod-profile 1` now also applies hardened abuse/adjudication defaults (`ENTRY_OPEN_RPS=12`, `ENTRY_BAN_THRESHOLD=3`, `ENTRY_BAN_SEC=90`, `ENTRY_MAX_CONCURRENT_OPENS=96`, peer+final dispute/appeal vote floors, final operator/source quorum floors, `DIRECTORY_FINAL_ADJUDICATION_MIN_RATIO=0.67`, dispute/appeal TTL caps at `259200s`).
 - `server-up --prod-profile 1` requires at least 2 issuer URLs for strict issuer quorum; include at least one peer directory from a distinct authority/issuer operator.
@@ -378,6 +427,8 @@ sudo ./scripts/easy_node.sh prod-wg-strict-ingress-rehearsal \
 - `docs/github-security-baseline.md` (GitHub branch-protection/security baseline runbook + automation command flow)
 - `docs/release-process.md` (tagged release artifact/checksum flow)
 - `docs/license-decision.md` (license rationale; current choice is Apache-2.0)
+- `docs/operator-lifecycle-runbook.md` (repeatable provider/authority onboarding/offboarding flow)
+- `docs/prod-pilot-cohort-runbook.md` (sustained multi-round pilot runbook and cohort pass/fail policy)
 - `docs/product-roadmap.md` (beta -> v1 -> v2 delivery path)
 
 ## License

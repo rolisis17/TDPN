@@ -33,6 +33,9 @@ run_step "rotate server secrets" ./scripts/integration_rotate_server_secrets.sh
 run_step "directory strict governance" ./scripts/integration_directory_beta_strict.sh
 run_step "cross-role strict guardrails" ./scripts/integration_beta_strict_roles.sh
 run_step "easy-node client profile env wiring" ./scripts/integration_easy_node_client_profile_env.sh
+run_step "easy-mode launcher wiring" ./scripts/integration_easy_mode_launcher_wiring.sh
+run_step "easy-mode launcher runtime" ./scripts/integration_easy_mode_launcher_runtime.sh
+run_step "incident snapshot tooling" ./scripts/integration_incident_snapshot.sh
 run_step "easy-node prod authority env wiring" ./scripts/integration_easy_node_prod_server_env.sh
 run_step "easy-node role guard" ./scripts/integration_easy_node_role_guard.sh
 run_step "easy-node invite auth policy" ./scripts/integration_easy_node_invite_auth_policy.sh
@@ -44,6 +47,28 @@ run_step "client-vpn operator floor" ./scripts/integration_client_vpn_operator_f
 run_step "3-machine prod-profile wiring" ./scripts/integration_3machine_prod_profile_wiring.sh
 run_step "3-machine prod wg soak stall guard" ./scripts/integration_3machine_prod_wg_soak_stall_guard.sh
 run_step "prod gate check integration" ./scripts/integration_prod_gate_check.sh
+run_step "prod gate slo summary integration" ./scripts/integration_prod_gate_slo_summary.sh
+run_step "prod gate slo trend integration" ./scripts/integration_prod_gate_slo_trend.sh
+run_step "prod gate slo alert integration" ./scripts/integration_prod_gate_slo_alert.sh
+run_step "prod gate slo dashboard integration" ./scripts/integration_prod_gate_slo_dashboard.sh
+run_step "prod gate bundle verify integration" ./scripts/integration_prod_gate_bundle_verify.sh
+run_step "prod bundle incident snapshot integration" ./scripts/integration_prod_bundle_incident_snapshot.sh
+run_step "prod gate signoff integration" ./scripts/integration_prod_gate_signoff.sh
+run_step "prod pilot runbook integration" ./scripts/integration_prod_pilot_runbook.sh
+run_step "prod pilot cohort runbook integration" ./scripts/integration_prod_pilot_cohort_runbook.sh
+run_step "prod pilot cohort quick integration" ./scripts/integration_prod_pilot_cohort_quick.sh
+run_step "prod pilot cohort quick check integration" ./scripts/integration_prod_pilot_cohort_quick_check.sh
+run_step "prod pilot cohort quick trend integration" ./scripts/integration_prod_pilot_cohort_quick_trend.sh
+run_step "prod pilot cohort quick alert integration" ./scripts/integration_prod_pilot_cohort_quick_alert.sh
+run_step "prod pilot cohort quick dashboard integration" ./scripts/integration_prod_pilot_cohort_quick_dashboard.sh
+run_step "prod pilot cohort quick signoff integration" ./scripts/integration_prod_pilot_cohort_quick_signoff.sh
+run_step "prod pilot cohort quick runbook integration" ./scripts/integration_prod_pilot_cohort_quick_runbook.sh
+run_step "prod pilot cohort bundle verify integration" ./scripts/integration_prod_pilot_cohort_bundle_verify.sh
+run_step "prod pilot cohort check integration" ./scripts/integration_prod_pilot_cohort_check.sh
+run_step "prod pilot cohort signoff integration" ./scripts/integration_prod_pilot_cohort_signoff.sh
+run_step "prod key-rotation runbook integration" ./scripts/integration_prod_key_rotation_runbook.sh
+run_step "prod upgrade runbook integration" ./scripts/integration_prod_upgrade_runbook.sh
+run_step "prod operator lifecycle runbook integration" ./scripts/integration_prod_operator_lifecycle_runbook.sh
 run_step "distinct-operator anti-collusion" ./scripts/integration_distinct_operators.sh
 run_step "peer discovery operator cap" ./scripts/integration_peer_discovery_operator_cap.sh
 run_step "anonymous credential dispute" ./scripts/integration_anon_credential_dispute.sh

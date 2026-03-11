@@ -36,6 +36,12 @@ std::string shellEscape(const std::string &in) {
   return out;
 }
 
+std::string upperCopy(std::string value) {
+  std::transform(value.begin(), value.end(), value.begin(),
+                 [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+  return value;
+}
+
 std::string readLine(const std::string &prompt, const std::string &def = "") {
   std::cout << prompt;
   if (!def.empty()) {
@@ -66,6 +72,7 @@ int runCommand(const std::string &cmd) {
     rc = 128 + WTERMSIG(raw);
   }
 #endif
+  if (rc != 0) {
     std::cout << "command failed with code " << rc << "\n";
   }
   return rc;
@@ -126,6 +133,44 @@ bool parseYesNo(const std::string &v, bool def) {
   }
   char c = static_cast<char>(std::tolower(static_cast<unsigned char>(t[0])));
   return c == 'y' || c == '1' || c == 't';
+}
+
+struct PathProfile {
+  std::string label;
+  bool distinctOperators;
+  bool distinctCountries;
+  bool localitySoftBias;
+  std::string countryBias;
+  std::string regionBias;
+  std::string regionPrefixBias;
+};
+
+PathProfile choosePathProfile(const std::string &prompt = "Path profile (1=Fast, 2=Balanced, 3=Privacy)", const std::string &def = "2") {
+  std::cout << "Path profile presets:\n";
+  std::cout << "  1) Fast      : lower latency, soft-locality bias enabled, distinct operators\n";
+  std::cout << "  2) Balanced  : moderate locality bias, distinct operators\n";
+  std::cout << "  3) Privacy   : enforce distinct countries, locality bias disabled\n";
+  std::string choice = trim(readLine(prompt, def));
+  if (choice != "1" && choice != "2" && choice != "3") {
+    std::cout << "invalid profile choice; using Balanced\n";
+    choice = "2";
+  }
+  if (choice == "1") {
+    return {"fast", true, false, true, "1.80", "1.35", "1.15"};
+  }
+  if (choice == "3") {
+    return {"privacy", true, true, false, "1.60", "1.25", "1.10"};
+  }
+  return {"balanced", true, false, true, "1.50", "1.25", "1.10"};
+}
+
+void appendPathProfileFlags(std::ostringstream &cmd, const PathProfile &profile) {
+  cmd << " --distinct-operators " << (profile.distinctOperators ? "1" : "0")
+      << " --distinct-countries " << (profile.distinctCountries ? "1" : "0")
+      << " --locality-soft-bias " << (profile.localitySoftBias ? "1" : "0")
+      << " --country-bias " << shellEscape(profile.countryBias)
+      << " --region-bias " << shellEscape(profile.regionBias)
+      << " --region-prefix-bias " << shellEscape(profile.regionPrefixBias);
 }
 
 struct TestSuite {
@@ -474,11 +519,13 @@ void runTestsInteractive(const std::string &root, const std::string &script, ABH
       std::string country = readLine("Preferred exit country code (optional)", "");
       std::string region = readLine("Preferred exit region (optional)", "");
       bool betaProfile = parseYesNo(readLine("Enable beta profile defaults? (Y/n)", "y"), true);
-      bool distinct = parseYesNo(readLine("Require distinct entry/exit operators? (Y/n)", betaProfile ? "y" : "n"), betaProfile);
       bool prodProfile = parseYesNo(readLine("Enable PROD profile (mTLS + strict fail-closed)? (y/N)", "n"), false);
+      PathProfile pathProfile = choosePathProfile("Path profile for machine C test (1=Fast, 2=Balanced, 3=Privacy)", "2");
+      bool distinct = pathProfile.distinctOperators;
       if (prodProfile) {
         betaProfile = true;
         distinct = true;
+        pathProfile.distinctOperators = true;
       }
       std::string report = readLine("Report file path (optional)", "");
       if (autoDiscover && bootstrapDir.empty()) {
@@ -498,6 +545,11 @@ void runTestsInteractive(const std::string &root, const std::string &script, ABH
           << " --beta-profile " << (betaProfile ? "1" : "0")
           << " --prod-profile " << (prodProfile ? "1" : "0")
           << " --distinct-operators " << (distinct ? "1" : "0");
+      cmd << " --distinct-countries " << (pathProfile.distinctCountries ? "1" : "0")
+          << " --locality-soft-bias " << (pathProfile.localitySoftBias ? "1" : "0")
+          << " --country-bias " << shellEscape(pathProfile.countryBias)
+          << " --region-bias " << shellEscape(pathProfile.regionBias)
+          << " --region-prefix-bias " << shellEscape(pathProfile.regionPrefixBias);
       if (autoDiscover) {
         cmd << " --bootstrap-directory " << shellEscape(bootstrapDir)
             << " --discovery-wait-sec " << shellEscape(discoveryWait);
@@ -549,11 +601,13 @@ void runTestsInteractive(const std::string &root, const std::string &script, ABH
       std::string faultCommand = readLine("Fault command (optional)", "");
       bool continueOnFail = parseYesNo(readLine("Continue when a round fails? (y/N)", "n"), false);
       bool betaProfile = parseYesNo(readLine("Enable beta profile defaults? (Y/n)", "y"), true);
-      bool distinct = parseYesNo(readLine("Require distinct entry/exit operators? (Y/n)", betaProfile ? "y" : "n"), betaProfile);
       bool prodProfile = parseYesNo(readLine("Enable PROD profile (mTLS + strict fail-closed)? (y/N)", "n"), false);
+      PathProfile pathProfile = choosePathProfile("Path profile for machine C soak (1=Fast, 2=Balanced, 3=Privacy)", "2");
+      bool distinct = pathProfile.distinctOperators;
       if (prodProfile) {
         betaProfile = true;
         distinct = true;
+        pathProfile.distinctOperators = true;
       }
       std::string country = readLine("Preferred exit country code (optional)", "");
       std::string region = readLine("Preferred exit region (optional)", "");
@@ -578,6 +632,11 @@ void runTestsInteractive(const std::string &root, const std::string &script, ABH
           << " --beta-profile " << (betaProfile ? "1" : "0")
           << " --prod-profile " << (prodProfile ? "1" : "0")
           << " --distinct-operators " << (distinct ? "1" : "0");
+      cmd << " --distinct-countries " << (pathProfile.distinctCountries ? "1" : "0")
+          << " --locality-soft-bias " << (pathProfile.localitySoftBias ? "1" : "0")
+          << " --country-bias " << shellEscape(pathProfile.countryBias)
+          << " --region-bias " << shellEscape(pathProfile.regionBias)
+          << " --region-prefix-bias " << shellEscape(pathProfile.regionPrefixBias);
       if (autoDiscover) {
         cmd << " --bootstrap-directory " << shellEscape(bootstrapDir)
             << " --discovery-wait-sec " << shellEscape(discoveryWait);
@@ -625,6 +684,7 @@ void quickClientConnect(const std::string &script, ABHosts &hosts) {
   std::string inviteKey = trim(readLine("Invite key", ""));
   std::string discoveryWait = readLine("Discovery wait sec", "20");
   bool prodProfile = parseYesNo(readLine("Use PROD profile (mTLS + strict fail-closed)? (y/N)", "n"), false);
+  PathProfile pathProfile = choosePathProfile("Client path profile (1=Fast, 2=Balanced, 3=Privacy)", "2");
   bool realVPN = parseYesNo(readLine("Run real VPN mode (host WireGuard interface)? (Y/n)", "y"), true);
   if (bootstrapDir.empty()) {
     std::cout << "server IP/host is required\n";
@@ -674,9 +734,9 @@ void quickClientConnect(const std::string &script, ABHosts &hosts) {
         << " --min-operators 1"
         << " --beta-profile 1"
         << " --prod-profile " << (prodProfile ? "1" : "0")
-        << " --distinct-operators 1"
         << " --interface " << shellEscape(iface)
         << " --ready-timeout-sec " << shellEscape(readyTimeout);
+    appendPathProfileFlags(cmd, pathProfile);
     if (!isRootUser()) {
       bool useSudo = parseYesNo(readLine("Run with sudo? (Y/n)", "y"), true);
       if (useSudo) {
@@ -697,8 +757,8 @@ void quickClientConnect(const std::string &script, ABHosts &hosts) {
         << " --min-sources 1"
         << " --timeout-sec " << shellEscape(timeoutSec)
         << " --beta-profile 1"
-        << " --prod-profile " << (prodProfile ? "1" : "0")
-        << " --distinct-operators 1";
+        << " --prod-profile " << (prodProfile ? "1" : "0");
+    appendPathProfileFlags(cmd, pathProfile);
     runCommand(cmd.str());
   }
 }
@@ -865,9 +925,29 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
     std::cout << "33) Client VPN down (real mode)\n";
     std::cout << "34) Client VPN up (real mode, full manual)\n";
     std::cout << "35) Server preflight (peer/identity/quorum checks)\n";
-    std::cout << "36) Closed-beta PROD bundle (quick strict profile)\n";
-    std::cout << "37) Closed-beta PROD bundle (quick smoke profile)\n";
-    std::cout << "38) Verify PROD gate summary/bundle artifacts\n";
+    std::cout << "36) Closed-beta PROD bundle (strict preflight + integrity verify + signoff + run report + auto incident snapshot on fail)\n";
+    std::cout << "37) Closed-beta PROD bundle (smoke + integrity verify + run report + auto incident snapshot on fail)\n";
+    std::cout << "38) Verify PROD bundle integrity + gate artifacts\n";
+    std::cout << "39) PROD pilot runbook (strict one-command defaults)\n";
+    std::cout << "40) Capture incident snapshot bundle (debug/triage)\n";
+    std::cout << "41) PROD gate SLO decision summary (GO/NO-GO)\n";
+    std::cout << "42) PROD gate SLO trend (multi-run GO/NO-GO rate)\n";
+    std::cout << "43) PROD gate SLO alert severity (OK/WARN/CRITICAL)\n";
+    std::cout << "44) PROD SLO dashboard artifact (trend + alert + markdown)\n";
+    std::cout << "45) PROD key-rotation runbook (backup + preflight + rollback)\n";
+    std::cout << "46) PROD upgrade runbook (pull/build/restart + rollback)\n";
+    std::cout << "47) PROD operator lifecycle runbook (onboard/offboard)\n";
+    std::cout << "48) PROD pilot cohort runbook (multi-round sustained pilot)\n";
+    std::cout << "49) PROD pilot cohort bundle verify\n";
+    std::cout << "50) PROD pilot cohort signoff (integrity + policy)\n";
+    std::cout << "51) PROD pilot cohort full flow (runbook + signoff)\n";
+    std::cout << "52) PROD pilot cohort quick mode (minimal prompts)\n";
+    std::cout << "53) PROD pilot cohort quick-check (verify quick run report)\n";
+    std::cout << "54) PROD pilot cohort quick-trend (multi-run GO/NO-GO)\n";
+    std::cout << "55) PROD pilot cohort quick-alert (OK/WARN/CRITICAL)\n";
+    std::cout << "56) PROD pilot cohort quick-dashboard (trend + alert + markdown)\n";
+    std::cout << "57) PROD pilot cohort quick-signoff (check + trend + alert gate)\n";
+    std::cout << "58) PROD pilot cohort quick-runbook (quick + signoff + dashboard)\n";
     std::cout << "0) Back\n";
     std::cout << "Selection: ";
 
@@ -1017,11 +1097,13 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       std::string timeoutSec = readLine("Client validation timeout sec", "50");
       std::string subject = trim(readLine("Client subject key (optional)", ""));
       bool betaProfile = parseYesNo(readLine("Enable beta profile defaults? (Y/n)", "y"), true);
-      bool distinct = parseYesNo(readLine("Require distinct entry/exit operators? (Y/n)", betaProfile ? "y" : "n"), betaProfile);
       bool prodProfile = parseYesNo(readLine("Enable PROD profile (mTLS + strict fail-closed)? (y/N)", "n"), false);
+      PathProfile pathProfile = choosePathProfile("Path profile (1=Fast, 2=Balanced, 3=Privacy)", "2");
+      bool distinct = pathProfile.distinctOperators;
       if (prodProfile) {
         betaProfile = true;
         distinct = true;
+        pathProfile.distinctOperators = true;
       }
 
       if (autoDiscover && bootstrapDir.empty()) {
@@ -1042,6 +1124,11 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --beta-profile " << (betaProfile ? "1" : "0")
           << " --prod-profile " << (prodProfile ? "1" : "0")
           << " --distinct-operators " << (distinct ? "1" : "0");
+      cmd << " --distinct-countries " << (pathProfile.distinctCountries ? "1" : "0")
+          << " --locality-soft-bias " << (pathProfile.localitySoftBias ? "1" : "0")
+          << " --country-bias " << shellEscape(pathProfile.countryBias)
+          << " --region-bias " << shellEscape(pathProfile.regionBias)
+          << " --region-prefix-bias " << shellEscape(pathProfile.regionPrefixBias);
       if (!subject.empty()) {
         cmd << " --subject " << shellEscape(subject);
       }
@@ -1087,11 +1174,13 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       std::string timeoutSec = readLine("Client validation timeout sec", "50");
       std::string subject = trim(readLine("Client subject key (optional)", ""));
       bool betaProfile = parseYesNo(readLine("Enable beta profile defaults? (Y/n)", "y"), true);
-      bool distinct = parseYesNo(readLine("Require distinct entry/exit operators? (Y/n)", betaProfile ? "y" : "n"), betaProfile);
       bool prodProfile = parseYesNo(readLine("Enable PROD profile (mTLS + strict fail-closed)? (y/N)", "n"), false);
+      PathProfile pathProfile = choosePathProfile("Path profile (1=Fast, 2=Balanced, 3=Privacy)", "2");
+      bool distinct = pathProfile.distinctOperators;
       if (prodProfile) {
         betaProfile = true;
         distinct = true;
+        pathProfile.distinctOperators = true;
       }
       if (autoDiscover && bootstrapDir.empty()) {
         std::cout << "bootstrap directory URL is required\n";
@@ -1112,6 +1201,11 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --beta-profile " << (betaProfile ? "1" : "0")
           << " --prod-profile " << (prodProfile ? "1" : "0")
           << " --distinct-operators " << (distinct ? "1" : "0");
+      cmd << " --distinct-countries " << (pathProfile.distinctCountries ? "1" : "0")
+          << " --locality-soft-bias " << (pathProfile.localitySoftBias ? "1" : "0")
+          << " --country-bias " << shellEscape(pathProfile.countryBias)
+          << " --region-bias " << shellEscape(pathProfile.regionBias)
+          << " --region-prefix-bias " << shellEscape(pathProfile.regionPrefixBias);
       if (!subject.empty()) {
         cmd << " --subject " << shellEscape(subject);
       }
@@ -1153,11 +1247,13 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       std::string pauseSec = readLine("Pause between rounds sec", "5");
       std::string subject = trim(readLine("Client subject key (optional)", ""));
       bool betaProfile = parseYesNo(readLine("Enable beta profile defaults? (Y/n)", "y"), true);
-      bool distinct = parseYesNo(readLine("Require distinct entry/exit operators? (Y/n)", betaProfile ? "y" : "n"), betaProfile);
       bool prodProfile = parseYesNo(readLine("Enable PROD profile (mTLS + strict fail-closed)? (y/N)", "n"), false);
+      PathProfile pathProfile = choosePathProfile("Path profile (1=Fast, 2=Balanced, 3=Privacy)", "2");
+      bool distinct = pathProfile.distinctOperators;
       if (prodProfile) {
         betaProfile = true;
         distinct = true;
+        pathProfile.distinctOperators = true;
       }
       if (autoDiscover && bootstrapDir.empty()) {
         std::cout << "bootstrap directory URL is required\n";
@@ -1174,6 +1270,11 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --beta-profile " << (betaProfile ? "1" : "0")
           << " --prod-profile " << (prodProfile ? "1" : "0")
           << " --distinct-operators " << (distinct ? "1" : "0");
+      cmd << " --distinct-countries " << (pathProfile.distinctCountries ? "1" : "0")
+          << " --locality-soft-bias " << (pathProfile.localitySoftBias ? "1" : "0")
+          << " --country-bias " << shellEscape(pathProfile.countryBias)
+          << " --region-bias " << shellEscape(pathProfile.regionBias)
+          << " --region-prefix-bias " << shellEscape(pathProfile.regionPrefixBias);
       if (!subject.empty()) {
         cmd << " --subject " << shellEscape(subject);
       }
@@ -1656,9 +1757,28 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       if (!subject.empty()) {
         cmd << " --subject " << shellEscape(subject);
       }
+
+      std::ostringstream preflightCmd;
+      preflightCmd << shellEscape(script) << " client-vpn-preflight"
+                   << " --discovery-wait-sec " << shellEscape(discoveryWait)
+                   << " --prod-profile 1"
+                   << " --operator-floor-check 1"
+                   << " --issuer-quorum-check 1"
+                   << " --issuer-min-operators 2"
+                   << " --timeout-sec 12"
+                   << " --require-root 1"
+                   << " --mtls-ca-file " << shellEscape("deploy/tls/ca.crt")
+                   << " --mtls-client-cert-file " << shellEscape("deploy/tls/client.crt")
+                   << " --mtls-client-key-file " << shellEscape("deploy/tls/client.key");
       if (autoDiscover) {
+        preflightCmd << " --bootstrap-directory " << shellEscape(bootstrapDir);
         cmd << " --bootstrap-directory " << shellEscape(bootstrapDir);
       } else {
+        std::string directoryUrls = dirA + "," + dirB;
+        preflightCmd << " --directory-urls " << shellEscape(directoryUrls)
+                     << " --issuer-url " << shellEscape(issuer)
+                     << " --entry-url " << shellEscape(entry)
+                     << " --exit-url " << shellEscape(exitUrl);
         cmd << " --directory-a " << shellEscape(dirA)
             << " --directory-b " << shellEscape(dirB)
             << " --issuer-url " << shellEscape(issuer)
@@ -1814,10 +1934,12 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       std::string minOperators = readLine("Minimum operators", "2");
       bool betaProfile = parseYesNo(readLine("Enable beta profile defaults? (Y/n)", "y"), true);
       bool prodProfile = parseYesNo(readLine("Enable PROD profile (mTLS + strict fail-closed)? (y/N)", "n"), false);
-      bool distinct = parseYesNo(readLine("Require distinct entry/exit operators? (Y/n)", betaProfile ? "y" : "n"), betaProfile);
+      PathProfile pathProfile = choosePathProfile("Path profile (1=Fast, 2=Balanced, 3=Privacy)", "2");
+      bool distinct = pathProfile.distinctOperators;
       if (prodProfile) {
         betaProfile = true;
         distinct = true;
+        pathProfile.distinctOperators = true;
       }
       bool operatorFloorCheck = parseYesNo(
           readLine("Enforce operator floor check (>=2 entry/exit operators)? (Y/n)", prodProfile ? "y" : "n"),
@@ -1931,6 +2053,11 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --ready-timeout-sec " << shellEscape(readyTimeout)
           << " --force-restart " << (forceRestart ? "1" : "0")
           << " --foreground " << (foreground ? "1" : "0");
+      cmd << " --distinct-countries " << (pathProfile.distinctCountries ? "1" : "0")
+          << " --locality-soft-bias " << (pathProfile.localitySoftBias ? "1" : "0")
+          << " --country-bias " << shellEscape(pathProfile.countryBias)
+          << " --region-bias " << shellEscape(pathProfile.regionBias)
+          << " --region-prefix-bias " << shellEscape(pathProfile.regionPrefixBias);
       if (autoDiscover) {
         cmd << " --bootstrap-directory " << shellEscape(bootstrapDir);
       } else {
@@ -2084,26 +2211,48 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       std::string subject = trim(readLine("Client subject key (optional)", ""));
       std::string bundleDir = trim(readLine("Bundle directory", ".easy-node-logs/prod_gate_bundle_quick"));
       std::string report = trim(readLine("Gate report file (optional)", ""));
+      std::string runReportJson = bundleDir.empty() ? "" : (bundleDir + "/prod_bundle_run_report.json");
 
       std::ostringstream cmd;
       cmd << shellEscape(script) << " three-machine-prod-bundle"
+          << " --preflight-check 1"
+          << " --bundle-verify-check 1"
+          << " --bundle-verify-show-details 0"
           << " --discovery-wait-sec " << shellEscape(discoveryWait)
           << " --min-sources 2"
           << " --min-operators 2"
           << " --federation-timeout-sec 90"
           << " --control-timeout-sec 50"
-          << " --control-soak-rounds 10"
-          << " --control-soak-pause-sec 5"
+          << " --control-soak-rounds 12"
+          << " --control-soak-pause-sec 6"
           << " --wg-client-timeout-sec 120"
           << " --wg-session-sec 45"
-          << " --wg-soak-rounds 10"
-          << " --wg-soak-pause-sec 8"
+          << " --wg-soak-rounds 12"
+          << " --wg-soak-pause-sec 10"
           << " --wg-slo-profile strict"
-          << " --wg-max-consecutive-failures 2"
+          << " --wg-max-consecutive-failures 1"
+          << " --wg-max-round-duration-sec 90"
+          << " --wg-max-recovery-sec 120"
+          << " --wg-max-failure-class endpoint_connectivity=1"
+          << " --wg-max-failure-class timeout=1"
+          << " --wg-max-failure-class wg_dataplane_stall=0"
+          << " --wg-max-failure-class strict_ingress_policy=0"
+          << " --wg-max-failure-class diversity_threshold=0"
+          << " --wg-disallow-unknown-failure-class 1"
+          << " --wg-min-selection-lines 12"
+          << " --wg-min-entry-operators 2"
+          << " --wg-min-exit-operators 2"
+          << " --wg-min-cross-operator-pairs 3"
           << " --strict-distinct 1"
           << " --skip-control-soak 0"
           << " --skip-wg 0"
           << " --skip-wg-soak 0"
+          << " --signoff-check 1"
+          << " --signoff-require-full-sequence 1"
+          << " --signoff-require-wg-validate-ok 1"
+          << " --signoff-require-wg-soak-ok 1"
+          << " --signoff-max-wg-soak-failed-rounds 0"
+          << " --signoff-show-json 0"
           << " --control-fault-every 0"
           << " --control-continue-on-fail 0"
           << " --wg-fault-every 0"
@@ -2125,6 +2274,11 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       }
       if (!bundleDir.empty()) {
         cmd << " --bundle-dir " << shellEscape(bundleDir);
+      }
+      if (!runReportJson.empty()) {
+        cmd << " --run-report-json " << shellEscape(runReportJson)
+            << " --run-report-print 1";
+        std::cout << "run report json: " << runReportJson << "\n";
       }
       if (!report.empty()) {
         cmd << " --report-file " << shellEscape(report);
@@ -2174,26 +2328,37 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       std::string subject = trim(readLine("Client subject key (optional)", ""));
       std::string bundleDir = trim(readLine("Bundle directory", ".easy-node-logs/prod_gate_bundle_smoke"));
       std::string report = trim(readLine("Gate report file (optional)", ""));
+      std::string runReportJson = bundleDir.empty() ? "" : (bundleDir + "/prod_bundle_run_report.json");
 
       std::ostringstream cmd;
       cmd << shellEscape(script) << " three-machine-prod-bundle"
+          << " --preflight-check 0"
+          << " --bundle-verify-check 1"
+          << " --bundle-verify-show-details 0"
           << " --discovery-wait-sec " << shellEscape(discoveryWait)
           << " --min-sources 2"
           << " --min-operators 2"
           << " --federation-timeout-sec 60"
           << " --control-timeout-sec 40"
-          << " --control-soak-rounds 2"
-          << " --control-soak-pause-sec 2"
+          << " --control-soak-rounds 3"
+          << " --control-soak-pause-sec 3"
           << " --wg-client-timeout-sec 90"
           << " --wg-session-sec 30"
-          << " --wg-soak-rounds 3"
-          << " --wg-soak-pause-sec 3"
+          << " --wg-soak-rounds 4"
+          << " --wg-soak-pause-sec 4"
           << " --wg-slo-profile recommended"
-          << " --wg-max-consecutive-failures 2"
+          << " --wg-max-consecutive-failures 1"
+          << " --wg-max-failure-class strict_ingress_policy=0"
+          << " --wg-disallow-unknown-failure-class 1"
+          << " --wg-min-selection-lines 8"
+          << " --wg-min-entry-operators 2"
+          << " --wg-min-exit-operators 2"
+          << " --wg-min-cross-operator-pairs 2"
           << " --strict-distinct 1"
           << " --skip-control-soak 0"
           << " --skip-wg 0"
           << " --skip-wg-soak 0"
+          << " --signoff-check 0"
           << " --control-fault-every 0"
           << " --control-continue-on-fail 0"
           << " --wg-fault-every 0"
@@ -2216,6 +2381,11 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       if (!bundleDir.empty()) {
         cmd << " --bundle-dir " << shellEscape(bundleDir);
       }
+      if (!runReportJson.empty()) {
+        cmd << " --run-report-json " << shellEscape(runReportJson)
+            << " --run-report-print 1";
+        std::cout << "run report json: " << runReportJson << "\n";
+      }
       if (!report.empty()) {
         cmd << " --report-file " << shellEscape(report);
       }
@@ -2233,26 +2403,1196 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       continue;
     }
     if (choice == "38") {
-      std::string bundleDir = trim(readLine("Bundle directory (optional)", ".easy-node-logs/prod_gate_bundle_quick"));
+      std::string bundleDir = trim(readLine("Bundle directory override (optional)", ""));
+      std::string bundleTar = trim(readLine("Bundle tar path (optional)", ""));
+      std::string runReportJsonDefault = bundleDir.empty() ? "" : (bundleDir + "/prod_bundle_run_report.json");
+      if (runReportJsonDefault.empty()) {
+        runReportJsonDefault = ".easy-node-logs/prod_gate_bundle_quick/prod_bundle_run_report.json";
+      }
+      std::string runReportJson = trim(readLine("Run report JSON path (recommended)", runReportJsonDefault));
+      bool verifyIntegrity = parseYesNo(readLine("Verify bundle integrity (manifest + tar checksum)? (Y/n)", "y"), true);
+      bool showIntegrityDetails = parseYesNo(readLine("Show per-file integrity details? (y/N)", "n"), false);
       std::string gateSummaryJson = trim(readLine("Gate summary JSON path (optional)", ""));
       bool requireFullSequence = parseYesNo(readLine("Require full sequence (all steps=ok)? (Y/n)", "y"), true);
       bool requireWGValidate = parseYesNo(readLine("Require WG validate status=ok? (Y/n)", "y"), true);
       bool requireWGSoak = parseYesNo(readLine("Require WG soak status=ok? (Y/n)", "y"), true);
       std::string maxWGSoakFailedRounds = readLine("Max WG soak failed rounds", "0");
+      bool requireRunReportStages = parseYesNo(readLine("Require run-report stages (preflight + bundle + integrity + signoff) to be ok? (y/N)", "n"), false);
+      bool requireIncidentSnapshotOnFail = parseYesNo(readLine("Require incident snapshot status=ok when run report is fail? (y/N)", "n"), false);
+      bool requireIncidentSnapshotArtifacts = parseYesNo(readLine("Require incident snapshot artifacts when snapshot evidence is required? (y/N)", "n"), false);
       bool showJson = parseYesNo(readLine("Show summary JSON payload? (y/N)", "n"), false);
+
+      if (verifyIntegrity) {
+        std::ostringstream signoffCmd;
+        signoffCmd << shellEscape(script) << " prod-gate-signoff"
+                   << " --check-tar-sha256 1"
+                   << " --check-manifest 1"
+                   << " --show-integrity-details " << (showIntegrityDetails ? "1" : "0")
+                   << " --require-full-sequence " << (requireFullSequence ? "1" : "0")
+                   << " --require-wg-validate-ok " << (requireWGValidate ? "1" : "0")
+                   << " --require-wg-soak-ok " << (requireWGSoak ? "1" : "0")
+                   << " --require-preflight-ok " << (requireRunReportStages ? "1" : "0")
+                   << " --require-bundle-ok " << (requireRunReportStages ? "1" : "0")
+                   << " --require-integrity-ok " << (requireRunReportStages ? "1" : "0")
+                   << " --require-signoff-ok " << (requireRunReportStages ? "1" : "0")
+                   << " --require-incident-snapshot-on-fail " << (requireIncidentSnapshotOnFail ? "1" : "0")
+                   << " --require-incident-snapshot-artifacts " << (requireIncidentSnapshotArtifacts ? "1" : "0")
+                   << " --max-wg-soak-failed-rounds " << shellEscape(maxWGSoakFailedRounds)
+                   << " --show-json " << (showJson ? "1" : "0");
+        if (!runReportJson.empty()) {
+          signoffCmd << " --run-report-json " << shellEscape(runReportJson);
+        }
+        if (!bundleDir.empty()) {
+          signoffCmd << " --bundle-dir " << shellEscape(bundleDir);
+        }
+        if (!bundleTar.empty()) {
+          signoffCmd << " --bundle-tar " << shellEscape(bundleTar);
+        }
+        if (!gateSummaryJson.empty()) {
+          signoffCmd << " --gate-summary-json " << shellEscape(gateSummaryJson);
+        }
+        runCommand(signoffCmd.str());
+        continue;
+      }
 
       std::ostringstream cmd;
       cmd << shellEscape(script) << " prod-gate-check"
           << " --require-full-sequence " << (requireFullSequence ? "1" : "0")
           << " --require-wg-validate-ok " << (requireWGValidate ? "1" : "0")
           << " --require-wg-soak-ok " << (requireWGSoak ? "1" : "0")
+          << " --require-preflight-ok " << (requireRunReportStages ? "1" : "0")
+          << " --require-bundle-ok " << (requireRunReportStages ? "1" : "0")
+          << " --require-integrity-ok " << (requireRunReportStages ? "1" : "0")
+          << " --require-signoff-ok " << (requireRunReportStages ? "1" : "0")
+          << " --require-incident-snapshot-on-fail " << (requireIncidentSnapshotOnFail ? "1" : "0")
+          << " --require-incident-snapshot-artifacts " << (requireIncidentSnapshotArtifacts ? "1" : "0")
           << " --max-wg-soak-failed-rounds " << shellEscape(maxWGSoakFailedRounds)
           << " --show-json " << (showJson ? "1" : "0");
+      if (!runReportJson.empty()) {
+        cmd << " --run-report-json " << shellEscape(runReportJson);
+      }
       if (!bundleDir.empty()) {
         cmd << " --bundle-dir " << shellEscape(bundleDir);
       }
       if (!gateSummaryJson.empty()) {
         cmd << " --gate-summary-json " << shellEscape(gateSummaryJson);
+      }
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "39") {
+      bool autoDiscover = parseYesNo(readLine("Use one bootstrap directory and auto-discover peers? (Y/n)", "y"), true);
+      std::string bootstrapDefault = !hosts.aHost.empty() ? endpointFromHost(hosts.aHost, 8081) : (!hosts.bHost.empty() ? endpointFromHost(hosts.bHost, 8081) : "");
+      std::string bootstrapDir;
+      std::string dirA;
+      std::string dirB;
+      std::string issuer;
+      std::string entry;
+      std::string exitUrl;
+      if (autoDiscover) {
+        bootstrapDir = normalizeEndpointURL(readLine("Bootstrap directory URL", bootstrapDefault), 8081);
+      } else {
+        configureABHostsInteractive(root, hosts, false);
+        dirA = normalizeEndpointURL(readLine("Directory A URL", endpointFromHost(hosts.aHost, 8081)), 8081);
+        dirB = normalizeEndpointURL(readLine("Directory B URL", endpointFromHost(hosts.bHost, 8081)), 8081);
+        issuer = normalizeEndpointURL(readLine("Issuer URL", endpointFromHost(hosts.aHost, 8082)), 8082);
+        entry = normalizeEndpointURL(readLine("Entry control URL fallback", endpointFromHost(hosts.aHost, 8083)), 8083);
+        exitUrl = normalizeEndpointURL(readLine("Exit control URL fallback", endpointFromHost(hosts.aHost, 8084)), 8084);
+      }
+
+      if (autoDiscover && bootstrapDir.empty()) {
+        std::cout << "bootstrap directory URL is required\n";
+        continue;
+      }
+      if (!autoDiscover && (dirA.empty() || dirB.empty() || issuer.empty() || entry.empty() || exitUrl.empty())) {
+        std::cout << "directory A/B, issuer URL, entry URL and exit URL are required\n";
+        continue;
+      }
+
+      std::string subject = trim(readLine("Client subject key (optional)", ""));
+      std::string bundleDir = trim(readLine("Bundle directory", ".easy-node-logs/prod_pilot_bundle"));
+      std::string runReportJson = bundleDir.empty() ? "" : (bundleDir + "/prod_bundle_run_report.json");
+      std::string report = trim(readLine("Gate report file (optional)", ""));
+
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " prod-pilot-runbook";
+      if (autoDiscover) {
+        cmd << " --bootstrap-directory " << shellEscape(bootstrapDir);
+      } else {
+        cmd << " --directory-a " << shellEscape(dirA)
+            << " --directory-b " << shellEscape(dirB)
+            << " --issuer-url " << shellEscape(issuer)
+            << " --entry-url " << shellEscape(entry)
+            << " --exit-url " << shellEscape(exitUrl);
+      }
+      if (!subject.empty()) {
+        cmd << " --subject " << shellEscape(subject);
+      }
+      if (!bundleDir.empty()) {
+        cmd << " --bundle-dir " << shellEscape(bundleDir);
+      }
+      if (!runReportJson.empty()) {
+        cmd << " --run-report-json " << shellEscape(runReportJson)
+            << " --run-report-print 1";
+        std::cout << "run report json: " << runReportJson << "\n";
+      }
+      if (!report.empty()) {
+        cmd << " --report-file " << shellEscape(report);
+      }
+      std::cout << "note: prod-pilot-runbook uses strict fail-closed defaults and auto-generates SLO dashboard artifacts; pass extra flags in shell for advanced overrides.\n";
+      if (!isRootUser()) {
+        bool useSudo = parseYesNo(readLine("Run with sudo? (Y/n)", "y"), true);
+        if (useSudo) {
+          runCommand("sudo " + cmd.str());
+        } else {
+          runCommand(cmd.str());
+        }
+      } else {
+        runCommand(cmd.str());
+      }
+      continue;
+    }
+    if (choice == "40") {
+      std::string mode = trim(readLine("Snapshot mode (auto/authority/provider/client)", "auto"));
+      if (mode != "auto" && mode != "authority" && mode != "provider" && mode != "client") {
+        std::cout << "invalid mode; using auto\n";
+        mode = "auto";
+      }
+      std::string bundleDir = trim(readLine("Bundle directory", ".easy-node-logs/incident_snapshot"));
+      std::string composeProject = trim(readLine("Compose project name", "deploy"));
+      bool includeDockerLogs = parseYesNo(readLine("Include docker log tails? (Y/n)", "y"), true);
+      std::string dockerLogLines = trim(readLine("Docker log tail lines", "200"));
+      std::string timeoutSec = trim(readLine("HTTP timeout sec", "8"));
+      bool overrideEndpoints = parseYesNo(readLine("Override endpoint URLs manually? (y/N)", "n"), false);
+
+      std::string directoryURL;
+      std::string issuerURL;
+      std::string entryURL;
+      std::string exitURL;
+      if (overrideEndpoints) {
+        directoryURL = normalizeEndpointURL(readLine("Directory URL (optional)", ""), 8081);
+        issuerURL = normalizeEndpointURL(readLine("Issuer URL (optional)", ""), 8082);
+        entryURL = normalizeEndpointURL(readLine("Entry URL (optional)", ""), 8083);
+        exitURL = normalizeEndpointURL(readLine("Exit URL (optional)", ""), 8084);
+      }
+
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " incident-snapshot"
+          << " --mode " << shellEscape(mode)
+          << " --compose-project " << shellEscape(composeProject)
+          << " --include-docker-logs " << (includeDockerLogs ? "1" : "0")
+          << " --docker-log-lines " << shellEscape(dockerLogLines)
+          << " --timeout-sec " << shellEscape(timeoutSec);
+      if (!bundleDir.empty()) {
+        cmd << " --bundle-dir " << shellEscape(bundleDir);
+      }
+      if (!directoryURL.empty()) {
+        cmd << " --directory-url " << shellEscape(directoryURL);
+      }
+      if (!issuerURL.empty()) {
+        cmd << " --issuer-url " << shellEscape(issuerURL);
+      }
+      if (!entryURL.empty()) {
+        cmd << " --entry-url " << shellEscape(entryURL);
+      }
+      if (!exitURL.empty()) {
+        cmd << " --exit-url " << shellEscape(exitURL);
+      }
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "41") {
+      std::string bundleDir = trim(readLine("Bundle directory override (optional)", ""));
+      std::string runReportJsonDefault = bundleDir.empty() ? "" : (bundleDir + "/prod_bundle_run_report.json");
+      if (runReportJsonDefault.empty()) {
+        runReportJsonDefault = ".easy-node-logs/prod_gate_bundle/prod_bundle_run_report.json";
+      }
+      std::string runReportJson = trim(readLine("Run report JSON path (recommended)", runReportJsonDefault));
+      std::string gateSummaryJson = trim(readLine("Gate summary JSON path (optional)", ""));
+      std::string wgValidateSummaryJson = trim(readLine("WG validate summary JSON path (optional)", ""));
+      std::string wgSoakSummaryJson = trim(readLine("WG soak summary JSON path (optional)", ""));
+      bool requireFullSequence = parseYesNo(readLine("Require full gate sequence status=ok? (Y/n)", "y"), true);
+      bool requireWGValidate = parseYesNo(readLine("Require WG validate status=ok? (Y/n)", "y"), true);
+      bool requireWGSoak = parseYesNo(readLine("Require WG soak status=ok? (Y/n)", "y"), true);
+      std::string maxWGSoakFailedRounds = trim(readLine("Max WG soak failed rounds", "0"));
+      bool requireRunReportStages = parseYesNo(readLine("Require run-report stages (preflight + bundle + integrity + signoff) to be ok? (y/N)", "n"), false);
+      bool failOnNoGo = parseYesNo(readLine("Return non-zero when decision is NO-GO? (y/N)", "n"), false);
+      bool showJson = parseYesNo(readLine("Show summary JSON payloads? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " prod-gate-slo-summary"
+          << " --require-full-sequence " << (requireFullSequence ? "1" : "0")
+          << " --require-wg-validate-ok " << (requireWGValidate ? "1" : "0")
+          << " --require-wg-soak-ok " << (requireWGSoak ? "1" : "0")
+          << " --max-wg-soak-failed-rounds " << shellEscape(maxWGSoakFailedRounds)
+          << " --require-preflight-ok " << (requireRunReportStages ? "1" : "0")
+          << " --require-bundle-ok " << (requireRunReportStages ? "1" : "0")
+          << " --require-integrity-ok " << (requireRunReportStages ? "1" : "0")
+          << " --require-signoff-ok " << (requireRunReportStages ? "1" : "0")
+          << " --require-incident-snapshot-on-fail " << (requireRunReportStages ? "1" : "0")
+          << " --require-incident-snapshot-artifacts " << (requireRunReportStages ? "1" : "0")
+          << " --fail-on-no-go " << (failOnNoGo ? "1" : "0")
+          << " --show-json " << (showJson ? "1" : "0");
+      if (!runReportJson.empty()) {
+        cmd << " --run-report-json " << shellEscape(runReportJson);
+      }
+      if (!bundleDir.empty()) {
+        cmd << " --bundle-dir " << shellEscape(bundleDir);
+      }
+      if (!gateSummaryJson.empty()) {
+        cmd << " --gate-summary-json " << shellEscape(gateSummaryJson);
+      }
+      if (!wgValidateSummaryJson.empty()) {
+        cmd << " --wg-validate-summary-json " << shellEscape(wgValidateSummaryJson);
+      }
+      if (!wgSoakSummaryJson.empty()) {
+        cmd << " --wg-soak-summary-json " << shellEscape(wgSoakSummaryJson);
+      }
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "42") {
+      std::string reportsDir = trim(readLine("Reports directory (scan for prod_bundle_run_report.json)", ".easy-node-logs"));
+      std::string maxReports = trim(readLine("Max reports to evaluate", "25"));
+      std::string sinceHours = trim(readLine("Include only reports from last N hours (0=all)", "0"));
+      bool requireFullSequence = parseYesNo(readLine("Require full gate sequence status=ok? (Y/n)", "y"), true);
+      bool requireWGValidate = parseYesNo(readLine("Require WG validate status=ok? (Y/n)", "y"), true);
+      bool requireWGSoak = parseYesNo(readLine("Require WG soak status=ok? (Y/n)", "y"), true);
+      std::string maxWGSoakFailedRounds = trim(readLine("Max WG soak failed rounds", "0"));
+      bool requireRunReportStages = parseYesNo(readLine("Require run-report stages (preflight + bundle + integrity + signoff) to be ok? (y/N)", "n"), false);
+      bool failOnAnyNoGo = parseYesNo(readLine("Fail if any run is NO-GO? (y/N)", "n"), false);
+      std::string minGoRatePct = trim(readLine("Minimum GO rate percent (0-100)", "0"));
+      bool showDetails = parseYesNo(readLine("Show per-run details? (Y/n)", "y"), true);
+      std::string showTopReasons = trim(readLine("Show top no-go reasons (count)", "5"));
+      std::string summaryJson = trim(readLine("Summary JSON output path (optional)", ""));
+      bool printSummaryJson = parseYesNo(readLine("Print summary JSON payload to console? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " prod-gate-slo-trend"
+          << " --max-reports " << shellEscape(maxReports)
+          << " --since-hours " << shellEscape(sinceHours)
+          << " --require-full-sequence " << (requireFullSequence ? "1" : "0")
+          << " --require-wg-validate-ok " << (requireWGValidate ? "1" : "0")
+          << " --require-wg-soak-ok " << (requireWGSoak ? "1" : "0")
+          << " --max-wg-soak-failed-rounds " << shellEscape(maxWGSoakFailedRounds)
+          << " --require-preflight-ok " << (requireRunReportStages ? "1" : "0")
+          << " --require-bundle-ok " << (requireRunReportStages ? "1" : "0")
+          << " --require-integrity-ok " << (requireRunReportStages ? "1" : "0")
+          << " --require-signoff-ok " << (requireRunReportStages ? "1" : "0")
+          << " --require-incident-snapshot-on-fail " << (requireRunReportStages ? "1" : "0")
+          << " --require-incident-snapshot-artifacts " << (requireRunReportStages ? "1" : "0")
+          << " --fail-on-any-no-go " << (failOnAnyNoGo ? "1" : "0")
+          << " --min-go-rate-pct " << shellEscape(minGoRatePct)
+          << " --show-details " << (showDetails ? "1" : "0")
+          << " --show-top-reasons " << shellEscape(showTopReasons)
+          << " --print-summary-json " << (printSummaryJson ? "1" : "0");
+      if (!reportsDir.empty()) {
+        cmd << " --reports-dir " << shellEscape(reportsDir);
+      }
+      if (!summaryJson.empty()) {
+        cmd << " --summary-json " << shellEscape(summaryJson);
+      }
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "43") {
+      bool useTrendSummary = parseYesNo(readLine("Use existing trend summary JSON file? (y/N)", "n"), false);
+      std::string trendSummaryJson;
+      std::string reportsDir;
+      std::string maxReports = "25";
+      std::string sinceHours = "24";
+      if (useTrendSummary) {
+        trendSummaryJson = trim(readLine("Trend summary JSON path", ".easy-node-logs/prod_slo_trend_24h.json"));
+      } else {
+        reportsDir = trim(readLine("Reports directory (scan for prod_bundle_run_report.json)", ".easy-node-logs"));
+        maxReports = trim(readLine("Max reports to evaluate", "25"));
+        sinceHours = trim(readLine("Include only reports from last N hours (0=all)", "24"));
+      }
+
+      std::string warnGoRatePct = trim(readLine("WARN when GO rate below percent", "98"));
+      std::string criticalGoRatePct = trim(readLine("CRITICAL when GO rate below percent", "90"));
+      std::string warnNoGoCount = trim(readLine("WARN when NO-GO count >=", "1"));
+      std::string criticalNoGoCount = trim(readLine("CRITICAL when NO-GO count >=", "2"));
+      std::string warnEvalErrors = trim(readLine("WARN when evaluation errors >=", "1"));
+      std::string criticalEvalErrors = trim(readLine("CRITICAL when evaluation errors >=", "2"));
+      bool failOnWarn = parseYesNo(readLine("Return non-zero on WARN? (y/N)", "n"), false);
+      bool failOnCritical = parseYesNo(readLine("Return non-zero on CRITICAL? (y/N)", "n"), false);
+      std::string showTopReasons = trim(readLine("Top no-go reasons to include", "5"));
+      std::string summaryJson = trim(readLine("Alert summary JSON output path (optional)", ""));
+      bool printSummaryJson = parseYesNo(readLine("Print alert summary JSON payload to console? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " prod-gate-slo-alert"
+          << " --warn-go-rate-pct " << shellEscape(warnGoRatePct)
+          << " --critical-go-rate-pct " << shellEscape(criticalGoRatePct)
+          << " --warn-no-go-count " << shellEscape(warnNoGoCount)
+          << " --critical-no-go-count " << shellEscape(criticalNoGoCount)
+          << " --warn-eval-errors " << shellEscape(warnEvalErrors)
+          << " --critical-eval-errors " << shellEscape(criticalEvalErrors)
+          << " --fail-on-warn " << (failOnWarn ? "1" : "0")
+          << " --fail-on-critical " << (failOnCritical ? "1" : "0")
+          << " --show-top-reasons " << shellEscape(showTopReasons)
+          << " --print-summary-json " << (printSummaryJson ? "1" : "0");
+
+      if (useTrendSummary) {
+        if (!trendSummaryJson.empty()) {
+          cmd << " --trend-summary-json " << shellEscape(trendSummaryJson);
+        }
+      } else {
+        if (!reportsDir.empty()) {
+          cmd << " --reports-dir " << shellEscape(reportsDir);
+        }
+        cmd << " --max-reports " << shellEscape(maxReports)
+            << " --since-hours " << shellEscape(sinceHours);
+      }
+      if (!summaryJson.empty()) {
+        cmd << " --summary-json " << shellEscape(summaryJson);
+      }
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "44") {
+      std::string reportsDir = trim(readLine("Reports directory (scan for prod_bundle_run_report.json)", ".easy-node-logs"));
+      std::string maxReports = trim(readLine("Max reports to evaluate", "25"));
+      std::string sinceHours = trim(readLine("Include only reports from last N hours (0=all)", "24"));
+      bool requireFullSequence = parseYesNo(readLine("Require full gate sequence status=ok? (Y/n)", "y"), true);
+      bool requireWGValidate = parseYesNo(readLine("Require WG validate status=ok? (Y/n)", "y"), true);
+      bool requireWGSoak = parseYesNo(readLine("Require WG soak status=ok? (Y/n)", "y"), true);
+      std::string maxWGSoakFailedRounds = trim(readLine("Max WG soak failed rounds", "0"));
+      bool requireRunReportStages = parseYesNo(readLine("Require run-report stages (preflight + bundle + integrity + signoff) to be ok? (y/N)", "n"), false);
+      bool failOnAnyNoGo = parseYesNo(readLine("Fail if any run is NO-GO? (y/N)", "n"), false);
+      std::string minGoRatePct = trim(readLine("Minimum GO rate percent (0-100)", "95"));
+      std::string showTopReasons = trim(readLine("Top no-go reasons to include", "5"));
+
+      std::string warnGoRatePct = trim(readLine("WARN when GO rate below percent", "98"));
+      std::string criticalGoRatePct = trim(readLine("CRITICAL when GO rate below percent", "90"));
+      std::string warnNoGoCount = trim(readLine("WARN when NO-GO count >=", "1"));
+      std::string criticalNoGoCount = trim(readLine("CRITICAL when NO-GO count >=", "2"));
+      std::string warnEvalErrors = trim(readLine("WARN when evaluation errors >=", "1"));
+      std::string criticalEvalErrors = trim(readLine("CRITICAL when evaluation errors >=", "2"));
+      bool failOnWarn = parseYesNo(readLine("Return non-zero on WARN? (y/N)", "n"), false);
+      bool failOnCritical = parseYesNo(readLine("Return non-zero on CRITICAL? (y/N)", "n"), false);
+
+      std::string trendSummaryJson = trim(readLine("Trend summary JSON output path (optional)", ".easy-node-logs/prod_slo_trend_24h.json"));
+      std::string alertSummaryJson = trim(readLine("Alert summary JSON output path (optional)", ".easy-node-logs/prod_slo_alert_24h.json"));
+      std::string dashboardMd = trim(readLine("Dashboard markdown output path (optional)", ".easy-node-logs/prod_slo_dashboard_24h.md"));
+      bool printDashboard = parseYesNo(readLine("Print dashboard markdown after generation? (Y/n)", "y"), true);
+      bool printSummaryJson = parseYesNo(readLine("Print trend/alert JSON payloads to console? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " prod-gate-slo-dashboard"
+          << " --max-reports " << shellEscape(maxReports)
+          << " --since-hours " << shellEscape(sinceHours)
+          << " --require-full-sequence " << (requireFullSequence ? "1" : "0")
+          << " --require-wg-validate-ok " << (requireWGValidate ? "1" : "0")
+          << " --require-wg-soak-ok " << (requireWGSoak ? "1" : "0")
+          << " --max-wg-soak-failed-rounds " << shellEscape(maxWGSoakFailedRounds)
+          << " --require-preflight-ok " << (requireRunReportStages ? "1" : "0")
+          << " --require-bundle-ok " << (requireRunReportStages ? "1" : "0")
+          << " --require-integrity-ok " << (requireRunReportStages ? "1" : "0")
+          << " --require-signoff-ok " << (requireRunReportStages ? "1" : "0")
+          << " --require-incident-snapshot-on-fail " << (requireRunReportStages ? "1" : "0")
+          << " --require-incident-snapshot-artifacts " << (requireRunReportStages ? "1" : "0")
+          << " --fail-on-any-no-go " << (failOnAnyNoGo ? "1" : "0")
+          << " --min-go-rate-pct " << shellEscape(minGoRatePct)
+          << " --show-top-reasons " << shellEscape(showTopReasons)
+          << " --warn-go-rate-pct " << shellEscape(warnGoRatePct)
+          << " --critical-go-rate-pct " << shellEscape(criticalGoRatePct)
+          << " --warn-no-go-count " << shellEscape(warnNoGoCount)
+          << " --critical-no-go-count " << shellEscape(criticalNoGoCount)
+          << " --warn-eval-errors " << shellEscape(warnEvalErrors)
+          << " --critical-eval-errors " << shellEscape(criticalEvalErrors)
+          << " --fail-on-warn " << (failOnWarn ? "1" : "0")
+          << " --fail-on-critical " << (failOnCritical ? "1" : "0")
+          << " --print-dashboard " << (printDashboard ? "1" : "0")
+          << " --print-summary-json " << (printSummaryJson ? "1" : "0");
+      if (!reportsDir.empty()) {
+        cmd << " --reports-dir " << shellEscape(reportsDir);
+      }
+      if (!trendSummaryJson.empty()) {
+        cmd << " --trend-summary-json " << shellEscape(trendSummaryJson);
+      }
+      if (!alertSummaryJson.empty()) {
+        cmd << " --alert-summary-json " << shellEscape(alertSummaryJson);
+      }
+      if (!dashboardMd.empty()) {
+        cmd << " --dashboard-md " << shellEscape(dashboardMd);
+      }
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "45") {
+      std::string mode = trim(readLine("Mode (auto/authority/provider)", "auto"));
+      if (mode != "auto" && mode != "authority" && mode != "provider") {
+        std::cout << "invalid mode; using auto\n";
+        mode = "auto";
+      }
+      std::string backupDir = trim(readLine("Backup directory", ".easy-node-logs/prod_key_rotation_manual"));
+      std::string summaryJson = trim(readLine("Summary JSON path (optional)", ""));
+      bool preflightCheck = parseYesNo(readLine("Run prod preflight before/after rotation? (Y/n)", "y"), true);
+      bool preflightLive = parseYesNo(readLine("Use live endpoint checks in preflight? (y/N)", "n"), false);
+      std::string preflightTimeout = trim(readLine("Preflight timeout sec", "12"));
+      bool rotateServerSecrets = parseYesNo(readLine("Rotate local server secrets? (Y/n)", "y"), true);
+      bool rotateAdminSigning = parseYesNo(readLine("Rotate admin signing key (authority mode)? (Y/n)", "y"), true);
+      std::string keyHistory = trim(readLine("Admin signing key history", "3"));
+      bool restart = parseYesNo(readLine("Restart services after secret rotation? (Y/n)", "y"), true);
+      bool restartIssuer = parseYesNo(readLine("Restart issuer after signing-key rotation? (Y/n)", "y"), true);
+      bool rollbackOnFail = parseYesNo(readLine("Auto-rollback on failure? (Y/n)", "y"), true);
+      bool restartAfterRollback = parseYesNo(readLine("Restart services after rollback? (Y/n)", "y"), true);
+      bool printSummaryJson = parseYesNo(readLine("Print summary JSON payload? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " prod-key-rotation-runbook"
+          << " --mode " << shellEscape(mode)
+          << " --preflight-check " << (preflightCheck ? "1" : "0")
+          << " --preflight-live " << (preflightLive ? "1" : "0")
+          << " --preflight-timeout-sec " << shellEscape(preflightTimeout)
+          << " --rotate-server-secrets " << (rotateServerSecrets ? "1" : "0")
+          << " --rotate-admin-signing " << (rotateAdminSigning ? "1" : "0")
+          << " --key-history " << shellEscape(keyHistory)
+          << " --restart " << (restart ? "1" : "0")
+          << " --restart-issuer " << (restartIssuer ? "1" : "0")
+          << " --rollback-on-fail " << (rollbackOnFail ? "1" : "0")
+          << " --restart-after-rollback " << (restartAfterRollback ? "1" : "0")
+          << " --print-summary-json " << (printSummaryJson ? "1" : "0");
+      if (!backupDir.empty()) {
+        cmd << " --backup-dir " << shellEscape(backupDir);
+      }
+      if (!summaryJson.empty()) {
+        cmd << " --summary-json " << shellEscape(summaryJson);
+      }
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "46") {
+      std::string mode = trim(readLine("Mode (auto/authority/provider)", "auto"));
+      if (mode != "auto" && mode != "authority" && mode != "provider") {
+        std::cout << "invalid mode; using auto\n";
+        mode = "auto";
+      }
+      std::string backupDir = trim(readLine("Backup directory", ".easy-node-logs/prod_upgrade_manual"));
+      std::string summaryJson = trim(readLine("Summary JSON path (optional)", ""));
+      bool preflightCheck = parseYesNo(readLine("Run prod preflight before/after upgrade? (Y/n)", "y"), true);
+      bool preflightLive = parseYesNo(readLine("Use live endpoint checks in preflight? (y/N)", "n"), false);
+      std::string preflightTimeout = trim(readLine("Preflight timeout sec", "12"));
+      bool composePull = parseYesNo(readLine("Run docker compose pull? (Y/n)", "y"), true);
+      bool composeBuild = parseYesNo(readLine("Run docker compose build? (y/N)", "n"), false);
+      bool restart = parseYesNo(readLine("Restart compose services after upgrade steps? (Y/n)", "y"), true);
+      bool rollbackOnFail = parseYesNo(readLine("Auto-rollback on failure? (Y/n)", "y"), true);
+      bool restartAfterRollback = parseYesNo(readLine("Restart services after rollback? (Y/n)", "y"), true);
+      bool printSummaryJson = parseYesNo(readLine("Print summary JSON payload? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " prod-upgrade-runbook"
+          << " --mode " << shellEscape(mode)
+          << " --preflight-check " << (preflightCheck ? "1" : "0")
+          << " --preflight-live " << (preflightLive ? "1" : "0")
+          << " --preflight-timeout-sec " << shellEscape(preflightTimeout)
+          << " --compose-pull " << (composePull ? "1" : "0")
+          << " --compose-build " << (composeBuild ? "1" : "0")
+          << " --restart " << (restart ? "1" : "0")
+          << " --rollback-on-fail " << (rollbackOnFail ? "1" : "0")
+          << " --restart-after-rollback " << (restartAfterRollback ? "1" : "0")
+          << " --print-summary-json " << (printSummaryJson ? "1" : "0");
+      if (!backupDir.empty()) {
+        cmd << " --backup-dir " << shellEscape(backupDir);
+      }
+      if (!summaryJson.empty()) {
+        cmd << " --summary-json " << shellEscape(summaryJson);
+      }
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "47") {
+      std::string action = trim(readLine("Action (onboard/offboard)", "onboard"));
+      if (action != "onboard" && action != "offboard") {
+        std::cout << "invalid action; using onboard\n";
+        action = "onboard";
+      }
+
+      std::string mode = trim(readLine("Mode (auto/authority/provider)", "auto"));
+      if (mode != "auto" && mode != "authority" && mode != "provider") {
+        std::cout << "invalid mode; using auto\n";
+        mode = "auto";
+      }
+
+      std::string publicHost = trim(readLine("Public host/IP (optional, used for onboard checks)", ""));
+      std::string operatorId = trim(readLine("Operator ID (optional; default from env/mode)", ""));
+      std::string authorityDir = trim(readLine("Authority directory URL (provider onboard)", ""));
+      std::string authorityIssuer = trim(readLine("Authority issuer URL (provider onboard)", ""));
+      std::string peerDirs = trim(readLine("Peer directories CSV (optional)", ""));
+      bool preflightCheck = parseYesNo(readLine("Run preflight in onboard action? (Y/n)", "y"), true);
+      std::string preflightTimeout = trim(readLine("Preflight timeout sec", "30"));
+      bool healthCheck = parseYesNo(readLine("Run health checks in onboard action? (Y/n)", "y"), true);
+      std::string healthTimeout = trim(readLine("Health timeout sec", "60"));
+      std::string directoryUrl = trim(readLine("Directory URL for relay verification", ""));
+      bool verifyRelays = parseYesNo(readLine("Verify relay publication on onboard? (Y/n)", "y"), true);
+      bool verifyAbsent = parseYesNo(readLine("Verify relay absence on offboard? (Y/n)", "y"), true);
+      std::string verifyRelayTimeout = trim(readLine("Relay verify timeout sec", "90"));
+      std::string verifyRelayMinCount = trim(readLine("Relay verify min count (onboard)", "2"));
+      std::string summaryJson = trim(readLine("Summary JSON path (optional)", ""));
+      bool printSummaryJson = parseYesNo(readLine("Print summary JSON payload? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " prod-operator-lifecycle-runbook"
+          << " --action " << shellEscape(action)
+          << " --mode " << shellEscape(mode)
+          << " --preflight-check " << (preflightCheck ? "1" : "0")
+          << " --preflight-timeout-sec " << shellEscape(preflightTimeout)
+          << " --health-check " << (healthCheck ? "1" : "0")
+          << " --health-timeout-sec " << shellEscape(healthTimeout)
+          << " --verify-relays " << (verifyRelays ? "1" : "0")
+          << " --verify-absent " << (verifyAbsent ? "1" : "0")
+          << " --verify-relay-timeout-sec " << shellEscape(verifyRelayTimeout)
+          << " --verify-relay-min-count " << shellEscape(verifyRelayMinCount)
+          << " --print-summary-json " << (printSummaryJson ? "1" : "0");
+      if (!publicHost.empty()) {
+        cmd << " --public-host " << shellEscape(publicHost);
+      }
+      if (!operatorId.empty()) {
+        cmd << " --operator-id " << shellEscape(operatorId);
+      }
+      if (!authorityDir.empty()) {
+        cmd << " --authority-directory " << shellEscape(authorityDir);
+      }
+      if (!authorityIssuer.empty()) {
+        cmd << " --authority-issuer " << shellEscape(authorityIssuer);
+      }
+      if (!peerDirs.empty()) {
+        cmd << " --peer-directories " << shellEscape(peerDirs);
+      }
+      if (!directoryUrl.empty()) {
+        cmd << " --directory-url " << shellEscape(directoryUrl);
+      }
+      if (!summaryJson.empty()) {
+        cmd << " --summary-json " << shellEscape(summaryJson);
+      }
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "48") {
+      std::string rounds = trim(readLine("Cohort rounds", "5"));
+      std::string pauseSec = trim(readLine("Pause between rounds (sec)", "60"));
+      bool continueOnFail = parseYesNo(readLine("Continue running after a failed round? (y/N)", "n"), false);
+      bool requireAllRoundsOk = parseYesNo(readLine("Require all rounds to pass for cohort success? (Y/n)", "y"), true);
+      std::string trendMinGoRate = trim(readLine("Minimum GO rate percent", "95"));
+      std::string maxAlertSeverity = trim(readLine("Max alert severity allowed (OK/WARN/CRITICAL)", "WARN"));
+      std::string maxAlertSeverityUpper = upperCopy(maxAlertSeverity);
+      if (maxAlertSeverityUpper != "OK" && maxAlertSeverityUpper != "WARN" && maxAlertSeverityUpper != "CRITICAL") {
+        std::cout << "invalid max alert severity; using WARN\n";
+        maxAlertSeverityUpper = "WARN";
+      }
+      bool bundleOutputs = parseYesNo(readLine("Generate cohort bundle artifacts (tar + sha256 + manifest)? (Y/n)", "y"), true);
+      bool bundleFailClose = parseYesNo(readLine("Fail cohort if bundle generation fails? (Y/n)", "y"), true);
+      std::string reportsDir = trim(readLine("Reports directory (optional)", ""));
+      std::string summaryJson = trim(readLine("Cohort summary JSON path (optional)", ""));
+      bool printSummaryJson = parseYesNo(readLine("Print cohort summary JSON payload? (y/N)", "n"), false);
+      std::string extraArgs = trim(readLine("Extra prod-pilot-runbook args after '--' (optional)", ""));
+
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " prod-pilot-cohort-runbook"
+          << " --rounds " << shellEscape(rounds)
+          << " --pause-sec " << shellEscape(pauseSec)
+          << " --continue-on-fail " << (continueOnFail ? "1" : "0")
+          << " --require-all-rounds-ok " << (requireAllRoundsOk ? "1" : "0")
+          << " --trend-min-go-rate-pct " << shellEscape(trendMinGoRate)
+          << " --max-alert-severity " << shellEscape(maxAlertSeverityUpper)
+          << " --bundle-outputs " << (bundleOutputs ? "1" : "0")
+          << " --bundle-fail-close " << (bundleFailClose ? "1" : "0")
+          << " --print-summary-json " << (printSummaryJson ? "1" : "0");
+      if (!reportsDir.empty()) {
+        cmd << " --reports-dir " << shellEscape(reportsDir);
+      }
+      if (!summaryJson.empty()) {
+        cmd << " --summary-json " << shellEscape(summaryJson);
+      }
+      if (!extraArgs.empty()) {
+        cmd << " -- " << extraArgs;
+      }
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "49") {
+      std::string summaryJson = trim(readLine("Cohort summary JSON path (recommended)", ".easy-node-logs/prod_pilot_cohort/prod_pilot_cohort_summary.json"));
+      std::string reportsDir = trim(readLine("Cohort reports dir (optional)", ""));
+      std::string bundleTar = trim(readLine("Cohort bundle tar path (optional)", ""));
+      std::string bundleSha = trim(readLine("Cohort bundle sha256 sidecar path (optional)", ""));
+      std::string bundleManifest = trim(readLine("Cohort bundle manifest path (optional)", ""));
+      bool checkTar = parseYesNo(readLine("Check tar checksum sidecar? (Y/n)", "y"), true);
+      bool checkManifest = parseYesNo(readLine("Check manifest + round structure? (Y/n)", "y"), true);
+      bool showDetails = parseYesNo(readLine("Show detailed verification output? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " prod-pilot-cohort-bundle-verify"
+          << " --check-tar-sha256 " << (checkTar ? "1" : "0")
+          << " --check-manifest " << (checkManifest ? "1" : "0")
+          << " --show-details " << (showDetails ? "1" : "0");
+      if (!summaryJson.empty()) {
+        cmd << " --summary-json " << shellEscape(summaryJson);
+      }
+      if (!reportsDir.empty()) {
+        cmd << " --reports-dir " << shellEscape(reportsDir);
+      }
+      if (!bundleTar.empty()) {
+        cmd << " --bundle-tar " << shellEscape(bundleTar);
+      }
+      if (!bundleSha.empty()) {
+        cmd << " --bundle-sha256-file " << shellEscape(bundleSha);
+      }
+      if (!bundleManifest.empty()) {
+        cmd << " --bundle-manifest-json " << shellEscape(bundleManifest);
+      }
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "50") {
+      std::string summaryJson = trim(readLine("Cohort summary JSON path (recommended)", ".easy-node-logs/prod_pilot_cohort/prod_pilot_cohort_summary.json"));
+      std::string reportsDir = trim(readLine("Cohort reports dir (optional)", ""));
+      std::string bundleTar = trim(readLine("Cohort bundle tar path (optional)", ""));
+      std::string bundleSha = trim(readLine("Cohort bundle sha256 sidecar path (optional)", ""));
+      std::string bundleManifest = trim(readLine("Cohort bundle manifest path (optional)", ""));
+      bool checkTar = parseYesNo(readLine("Check tar checksum sidecar? (Y/n)", "y"), true);
+      bool checkManifest = parseYesNo(readLine("Check manifest + round structure? (Y/n)", "y"), true);
+      bool showIntegrityDetails = parseYesNo(readLine("Show integrity verification details? (y/N)", "n"), false);
+      bool requireStatusOk = parseYesNo(readLine("Require cohort status=ok? (Y/n)", "y"), true);
+      bool requireAllRoundsOk = parseYesNo(readLine("Require all rounds to pass? (Y/n)", "y"), true);
+      std::string maxRoundFailures = trim(readLine("Max round failures allowed", "0"));
+      bool requireTrendGo = parseYesNo(readLine("Require trend decision GO? (Y/n)", "y"), true);
+      std::string minGoRate = trim(readLine("Minimum GO rate percent", "95"));
+      std::string maxAlertSeverity = trim(readLine("Max alert severity allowed (OK/WARN/CRITICAL)", "WARN"));
+      std::string maxAlertSeverityUpper = upperCopy(maxAlertSeverity);
+      if (maxAlertSeverityUpper != "OK" && maxAlertSeverityUpper != "WARN" && maxAlertSeverityUpper != "CRITICAL") {
+        std::cout << "invalid max alert severity; using WARN\n";
+        maxAlertSeverityUpper = "WARN";
+      }
+      bool requireBundleCreated = parseYesNo(readLine("Require bundle.created=true? (Y/n)", "y"), true);
+      bool requireBundleManifest = parseYesNo(readLine("Require bundle manifest artifact present? (Y/n)", "y"), true);
+      bool showJson = parseYesNo(readLine("Show policy summary JSON output? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " prod-pilot-cohort-signoff"
+          << " --check-tar-sha256 " << (checkTar ? "1" : "0")
+          << " --check-manifest " << (checkManifest ? "1" : "0")
+          << " --show-integrity-details " << (showIntegrityDetails ? "1" : "0")
+          << " --require-status-ok " << (requireStatusOk ? "1" : "0")
+          << " --require-all-rounds-ok " << (requireAllRoundsOk ? "1" : "0")
+          << " --max-round-failures " << shellEscape(maxRoundFailures)
+          << " --require-trend-go " << (requireTrendGo ? "1" : "0")
+          << " --min-go-rate-pct " << shellEscape(minGoRate)
+          << " --max-alert-severity " << shellEscape(maxAlertSeverityUpper)
+          << " --require-bundle-created " << (requireBundleCreated ? "1" : "0")
+          << " --require-bundle-manifest " << (requireBundleManifest ? "1" : "0")
+          << " --show-json " << (showJson ? "1" : "0");
+      if (!summaryJson.empty()) {
+        cmd << " --summary-json " << shellEscape(summaryJson);
+      }
+      if (!reportsDir.empty()) {
+        cmd << " --reports-dir " << shellEscape(reportsDir);
+      }
+      if (!bundleTar.empty()) {
+        cmd << " --bundle-tar " << shellEscape(bundleTar);
+      }
+      if (!bundleSha.empty()) {
+        cmd << " --bundle-sha256-file " << shellEscape(bundleSha);
+      }
+      if (!bundleManifest.empty()) {
+        cmd << " --bundle-manifest-json " << shellEscape(bundleManifest);
+      }
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "51") {
+      std::string rounds = trim(readLine("Cohort rounds", "5"));
+      std::string pauseSec = trim(readLine("Pause between rounds (sec)", "60"));
+      bool continueOnFail = parseYesNo(readLine("Continue running after a failed round? (y/N)", "n"), false);
+      bool requireAllRoundsOk = parseYesNo(readLine("Require all rounds to pass for cohort success? (Y/n)", "y"), true);
+      std::string trendMinGoRate = trim(readLine("Minimum GO rate percent", "95"));
+      std::string maxAlertSeverity = trim(readLine("Max alert severity allowed (OK/WARN/CRITICAL)", "WARN"));
+      std::string maxAlertSeverityUpper = upperCopy(maxAlertSeverity);
+      if (maxAlertSeverityUpper != "OK" && maxAlertSeverityUpper != "WARN" && maxAlertSeverityUpper != "CRITICAL") {
+        std::cout << "invalid max alert severity; using WARN\n";
+        maxAlertSeverityUpper = "WARN";
+      }
+      bool bundleOutputs = parseYesNo(readLine("Generate cohort bundle artifacts (tar + sha256 + manifest)? (Y/n)", "y"), true);
+      bool bundleFailClose = parseYesNo(readLine("Fail cohort if bundle generation fails? (Y/n)", "y"), true);
+      std::string reportsDir = trim(readLine("Reports directory", ".easy-node-logs/prod_pilot_cohort"));
+      std::string summaryJson = trim(readLine("Cohort summary JSON path", ".easy-node-logs/prod_pilot_cohort/prod_pilot_cohort_summary.json"));
+      bool printRunbookSummary = parseYesNo(readLine("Print runbook summary JSON payload? (y/N)", "n"), false);
+      bool signoffCheckTar = parseYesNo(readLine("Signoff: check tar checksum sidecar? (Y/n)", "y"), true);
+      bool signoffCheckManifest = parseYesNo(readLine("Signoff: check manifest + round structure? (Y/n)", "y"), true);
+      bool signoffShowIntegrity = parseYesNo(readLine("Signoff: show integrity details? (y/N)", "n"), false);
+      bool signoffShowJson = parseYesNo(readLine("Signoff: show policy summary JSON output? (y/N)", "n"), false);
+      std::string extraArgs = trim(readLine("Extra prod-pilot-runbook args after '--' (optional)", ""));
+
+      std::ostringstream runbookCmd;
+      runbookCmd << shellEscape(script) << " prod-pilot-cohort-runbook"
+                 << " --rounds " << shellEscape(rounds)
+                 << " --pause-sec " << shellEscape(pauseSec)
+                 << " --continue-on-fail " << (continueOnFail ? "1" : "0")
+                 << " --require-all-rounds-ok " << (requireAllRoundsOk ? "1" : "0")
+                 << " --trend-min-go-rate-pct " << shellEscape(trendMinGoRate)
+                 << " --max-alert-severity " << shellEscape(maxAlertSeverityUpper)
+                 << " --bundle-outputs " << (bundleOutputs ? "1" : "0")
+                 << " --bundle-fail-close " << (bundleFailClose ? "1" : "0")
+                 << " --reports-dir " << shellEscape(reportsDir)
+                 << " --summary-json " << shellEscape(summaryJson)
+                 << " --print-summary-json " << (printRunbookSummary ? "1" : "0");
+      if (!extraArgs.empty()) {
+        runbookCmd << " -- " << extraArgs;
+      }
+
+      int runbookRc = runCommand(runbookCmd.str());
+      std::filesystem::path summaryPath(summaryJson);
+      if (summaryPath.is_relative()) {
+        summaryPath = std::filesystem::path(root) / summaryPath;
+      }
+      bool summaryExists = std::filesystem::exists(summaryPath);
+      if (runbookRc != 0 && !summaryExists) {
+        std::cout << "runbook failed and summary JSON not found; skipping signoff\n";
+        continue;
+      }
+      if (runbookRc != 0) {
+        std::cout << "runbook failed but summary JSON exists; running signoff for explicit fail-close result\n";
+      }
+
+      std::ostringstream signoffCmd;
+      signoffCmd << shellEscape(script) << " prod-pilot-cohort-signoff"
+                 << " --summary-json " << shellEscape(summaryJson)
+                 << " --reports-dir " << shellEscape(reportsDir)
+                 << " --check-tar-sha256 " << (signoffCheckTar ? "1" : "0")
+                 << " --check-manifest " << (signoffCheckManifest ? "1" : "0")
+                 << " --show-integrity-details " << (signoffShowIntegrity ? "1" : "0")
+                 << " --require-status-ok 1"
+                 << " --require-all-rounds-ok " << (requireAllRoundsOk ? "1" : "0")
+                 << " --max-round-failures 0"
+                 << " --require-trend-go 1"
+                 << " --min-go-rate-pct " << shellEscape(trendMinGoRate)
+                 << " --max-alert-severity " << shellEscape(maxAlertSeverityUpper)
+                 << " --require-bundle-created " << (bundleOutputs ? "1" : "0")
+                 << " --require-bundle-manifest " << (bundleOutputs ? "1" : "0")
+                 << " --show-json " << (signoffShowJson ? "1" : "0");
+      runCommand(signoffCmd.str());
+      continue;
+    }
+    if (choice == "52") {
+      std::string bootstrapDefault = endpointFromHost(hosts.aHost, 8081);
+      std::string bootstrapDir = normalizeEndpointURL(readLine("Bootstrap directory URL", bootstrapDefault), 8081);
+      std::string subject = trim(readLine("Client subject/invite key", "pilot-client"));
+      std::string rounds = trim(readLine("Cohort rounds", "5"));
+      std::string pauseSec = trim(readLine("Pause between rounds (sec)", "60"));
+      std::string trendMinGoRate = trim(readLine("Minimum GO rate percent", "95"));
+      std::string maxAlertSeverity = trim(readLine("Max alert severity allowed (OK/WARN/CRITICAL)", "WARN"));
+      std::string maxAlertSeverityUpper = upperCopy(maxAlertSeverity);
+      if (maxAlertSeverityUpper != "OK" && maxAlertSeverityUpper != "WARN" && maxAlertSeverityUpper != "CRITICAL") {
+        std::cout << "invalid max alert severity; using WARN\n";
+        maxAlertSeverityUpper = "WARN";
+      }
+      bool continueOnFail = parseYesNo(readLine("Continue running after a failed round? (y/N)", "n"), false);
+      bool requireAllRoundsOk = parseYesNo(readLine("Require all rounds to pass? (Y/n)", "y"), true);
+      bool showJson = parseYesNo(readLine("Show runbook/signoff JSON payloads? (y/N)", "n"), false);
+      std::string reportsDir = trim(readLine("Reports directory (optional)", ""));
+      std::string summaryJson = trim(readLine("Summary JSON path (optional)", ""));
+      std::string runReportJson = trim(readLine("Quick run report JSON path (optional)", ""));
+      bool printRunReport = parseYesNo(readLine("Print quick run report JSON payload? (y/N)", "n"), false);
+      std::string extraArgs = trim(readLine("Extra prod-pilot-runbook args after '--' (optional)", ""));
+
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " prod-pilot-cohort-quick"
+          << " --bootstrap-directory " << shellEscape(bootstrapDir)
+          << " --subject " << shellEscape(subject)
+          << " --rounds " << shellEscape(rounds)
+          << " --pause-sec " << shellEscape(pauseSec)
+          << " --continue-on-fail " << (continueOnFail ? "1" : "0")
+          << " --require-all-rounds-ok " << (requireAllRoundsOk ? "1" : "0")
+          << " --trend-min-go-rate-pct " << shellEscape(trendMinGoRate)
+          << " --max-alert-severity " << shellEscape(maxAlertSeverityUpper)
+          << " --print-run-report " << (printRunReport ? "1" : "0")
+          << " --show-json " << (showJson ? "1" : "0");
+      if (!reportsDir.empty()) {
+        cmd << " --reports-dir " << shellEscape(reportsDir);
+      }
+      if (!summaryJson.empty()) {
+        cmd << " --summary-json " << shellEscape(summaryJson);
+      }
+      if (!runReportJson.empty()) {
+        cmd << " --run-report-json " << shellEscape(runReportJson);
+      }
+      if (!extraArgs.empty()) {
+        cmd << " -- " << extraArgs;
+      }
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "53") {
+      std::string runReportJson = trim(readLine("Quick run report JSON path (recommended)", ".easy-node-logs/prod_pilot_cohort/prod_pilot_cohort_quick_report.json"));
+      std::string reportsDir = trim(readLine("Reports directory (optional)", ""));
+      bool requireStatusOk = parseYesNo(readLine("Require quick status=ok? (Y/n)", "y"), true);
+      bool requireRunbookOk = parseYesNo(readLine("Require runbook rc=0? (Y/n)", "y"), true);
+      bool requireSignoffAttempted = parseYesNo(readLine("Require signoff attempted=true? (Y/n)", "y"), true);
+      bool requireSignoffOk = parseYesNo(readLine("Require signoff rc=0? (Y/n)", "y"), true);
+      bool requireSummaryJson = parseYesNo(readLine("Require summary JSON artifact exists? (Y/n)", "y"), true);
+      bool requireSummaryStatusOk = parseYesNo(readLine("Require summary status=ok? (Y/n)", "y"), true);
+      std::string maxDurationSec = trim(readLine("Max duration sec (0=disabled)", "0"));
+      bool showJson = parseYesNo(readLine("Show run report JSON payload? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " prod-pilot-cohort-quick-check"
+          << " --require-status-ok " << (requireStatusOk ? "1" : "0")
+          << " --require-runbook-ok " << (requireRunbookOk ? "1" : "0")
+          << " --require-signoff-attempted " << (requireSignoffAttempted ? "1" : "0")
+          << " --require-signoff-ok " << (requireSignoffOk ? "1" : "0")
+          << " --require-summary-json " << (requireSummaryJson ? "1" : "0")
+          << " --require-summary-status-ok " << (requireSummaryStatusOk ? "1" : "0")
+          << " --max-duration-sec " << shellEscape(maxDurationSec)
+          << " --show-json " << (showJson ? "1" : "0");
+      if (!runReportJson.empty()) {
+        cmd << " --run-report-json " << shellEscape(runReportJson);
+      }
+      if (!reportsDir.empty()) {
+        cmd << " --reports-dir " << shellEscape(reportsDir);
+      }
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "54") {
+      std::string reportsDir = trim(readLine("Reports directory (scan for quick run reports)", ".easy-node-logs"));
+      std::string maxReports = trim(readLine("Max reports to evaluate", "25"));
+      std::string sinceHours = trim(readLine("Include only reports from last N hours (0=all)", "24"));
+      bool requireStatusOk = parseYesNo(readLine("Require quick status=ok? (Y/n)", "y"), true);
+      bool requireRunbookOk = parseYesNo(readLine("Require runbook rc=0? (Y/n)", "y"), true);
+      bool requireSignoffAttempted = parseYesNo(readLine("Require signoff attempted=true? (Y/n)", "y"), true);
+      bool requireSignoffOk = parseYesNo(readLine("Require signoff rc=0? (Y/n)", "y"), true);
+      bool requireSummaryJson = parseYesNo(readLine("Require summary JSON artifact exists? (Y/n)", "y"), true);
+      bool requireSummaryStatusOk = parseYesNo(readLine("Require summary status=ok? (Y/n)", "y"), true);
+      std::string maxDurationSec = trim(readLine("Max duration sec (0=disabled)", "0"));
+      bool failOnAnyNoGo = parseYesNo(readLine("Fail if any run is NO-GO? (y/N)", "n"), false);
+      std::string minGoRatePct = trim(readLine("Minimum GO rate percent (0-100)", "0"));
+      bool showDetails = parseYesNo(readLine("Show per-run details? (Y/n)", "y"), true);
+      std::string showTopReasons = trim(readLine("Show top no-go reasons (count)", "5"));
+      std::string summaryJson = trim(readLine("Summary JSON output path (optional)", ""));
+      bool printSummaryJson = parseYesNo(readLine("Print summary JSON payload to console? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " prod-pilot-cohort-quick-trend"
+          << " --max-reports " << shellEscape(maxReports)
+          << " --since-hours " << shellEscape(sinceHours)
+          << " --require-status-ok " << (requireStatusOk ? "1" : "0")
+          << " --require-runbook-ok " << (requireRunbookOk ? "1" : "0")
+          << " --require-signoff-attempted " << (requireSignoffAttempted ? "1" : "0")
+          << " --require-signoff-ok " << (requireSignoffOk ? "1" : "0")
+          << " --require-summary-json " << (requireSummaryJson ? "1" : "0")
+          << " --require-summary-status-ok " << (requireSummaryStatusOk ? "1" : "0")
+          << " --max-duration-sec " << shellEscape(maxDurationSec)
+          << " --fail-on-any-no-go " << (failOnAnyNoGo ? "1" : "0")
+          << " --min-go-rate-pct " << shellEscape(minGoRatePct)
+          << " --show-details " << (showDetails ? "1" : "0")
+          << " --show-top-reasons " << shellEscape(showTopReasons)
+          << " --print-summary-json " << (printSummaryJson ? "1" : "0");
+      if (!reportsDir.empty()) {
+        cmd << " --reports-dir " << shellEscape(reportsDir);
+      }
+      if (!summaryJson.empty()) {
+        cmd << " --summary-json " << shellEscape(summaryJson);
+      }
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "55") {
+      bool useTrendSummary = parseYesNo(readLine("Use existing quick trend summary JSON file? (y/N)", "n"), false);
+      std::string trendSummaryJson;
+      std::string reportsDir;
+      std::string maxReports = "25";
+      std::string sinceHours = "24";
+      bool requireStatusOk = true;
+      bool requireRunbookOk = true;
+      bool requireSignoffAttempted = true;
+      bool requireSignoffOk = true;
+      bool requireSummaryJson = true;
+      bool requireSummaryStatusOk = true;
+      std::string maxDurationSec = "0";
+
+      if (useTrendSummary) {
+        trendSummaryJson = trim(readLine("Quick trend summary JSON path", ".easy-node-logs/prod_pilot_quick_trend_24h.json"));
+      } else {
+        reportsDir = trim(readLine("Reports directory (scan for quick run reports)", ".easy-node-logs"));
+        maxReports = trim(readLine("Max reports to evaluate", "25"));
+        sinceHours = trim(readLine("Include only reports from last N hours (0=all)", "24"));
+        requireStatusOk = parseYesNo(readLine("Require quick status=ok? (Y/n)", "y"), true);
+        requireRunbookOk = parseYesNo(readLine("Require runbook rc=0? (Y/n)", "y"), true);
+        requireSignoffAttempted = parseYesNo(readLine("Require signoff attempted=true? (Y/n)", "y"), true);
+        requireSignoffOk = parseYesNo(readLine("Require signoff rc=0? (Y/n)", "y"), true);
+        requireSummaryJson = parseYesNo(readLine("Require summary JSON artifact exists? (Y/n)", "y"), true);
+        requireSummaryStatusOk = parseYesNo(readLine("Require summary status=ok? (Y/n)", "y"), true);
+        maxDurationSec = trim(readLine("Max duration sec (0=disabled)", "0"));
+      }
+
+      std::string warnGoRatePct = trim(readLine("WARN when GO rate below percent", "98"));
+      std::string criticalGoRatePct = trim(readLine("CRITICAL when GO rate below percent", "90"));
+      std::string warnNoGoCount = trim(readLine("WARN when NO-GO count >=", "1"));
+      std::string criticalNoGoCount = trim(readLine("CRITICAL when NO-GO count >=", "2"));
+      std::string warnEvalErrors = trim(readLine("WARN when evaluation errors >=", "1"));
+      std::string criticalEvalErrors = trim(readLine("CRITICAL when evaluation errors >=", "2"));
+      bool failOnWarn = parseYesNo(readLine("Return non-zero on WARN? (y/N)", "n"), false);
+      bool failOnCritical = parseYesNo(readLine("Return non-zero on CRITICAL? (y/N)", "n"), false);
+      std::string showTopReasons = trim(readLine("Top no-go reasons to include", "5"));
+      std::string summaryJson = trim(readLine("Alert summary JSON output path (optional)", ""));
+      bool printSummaryJson = parseYesNo(readLine("Print alert summary JSON payload to console? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " prod-pilot-cohort-quick-alert"
+          << " --warn-go-rate-pct " << shellEscape(warnGoRatePct)
+          << " --critical-go-rate-pct " << shellEscape(criticalGoRatePct)
+          << " --warn-no-go-count " << shellEscape(warnNoGoCount)
+          << " --critical-no-go-count " << shellEscape(criticalNoGoCount)
+          << " --warn-eval-errors " << shellEscape(warnEvalErrors)
+          << " --critical-eval-errors " << shellEscape(criticalEvalErrors)
+          << " --fail-on-warn " << (failOnWarn ? "1" : "0")
+          << " --fail-on-critical " << (failOnCritical ? "1" : "0")
+          << " --show-top-reasons " << shellEscape(showTopReasons)
+          << " --print-summary-json " << (printSummaryJson ? "1" : "0");
+
+      if (useTrendSummary) {
+        if (!trendSummaryJson.empty()) {
+          cmd << " --trend-summary-json " << shellEscape(trendSummaryJson);
+        }
+      } else {
+        if (!reportsDir.empty()) {
+          cmd << " --reports-dir " << shellEscape(reportsDir);
+        }
+        cmd << " --max-reports " << shellEscape(maxReports)
+            << " --since-hours " << shellEscape(sinceHours)
+            << " --require-status-ok " << (requireStatusOk ? "1" : "0")
+            << " --require-runbook-ok " << (requireRunbookOk ? "1" : "0")
+            << " --require-signoff-attempted " << (requireSignoffAttempted ? "1" : "0")
+            << " --require-signoff-ok " << (requireSignoffOk ? "1" : "0")
+            << " --require-summary-json " << (requireSummaryJson ? "1" : "0")
+            << " --require-summary-status-ok " << (requireSummaryStatusOk ? "1" : "0")
+            << " --max-duration-sec " << shellEscape(maxDurationSec);
+      }
+      if (!summaryJson.empty()) {
+        cmd << " --summary-json " << shellEscape(summaryJson);
+      }
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "56") {
+      std::string reportsDir = trim(readLine("Reports directory (scan for quick run reports)", ".easy-node-logs"));
+      std::string maxReports = trim(readLine("Max reports to evaluate", "25"));
+      std::string sinceHours = trim(readLine("Include only reports from last N hours (0=all)", "24"));
+      bool requireStatusOk = parseYesNo(readLine("Require quick status=ok? (Y/n)", "y"), true);
+      bool requireRunbookOk = parseYesNo(readLine("Require runbook rc=0? (Y/n)", "y"), true);
+      bool requireSignoffAttempted = parseYesNo(readLine("Require signoff attempted=true? (Y/n)", "y"), true);
+      bool requireSignoffOk = parseYesNo(readLine("Require signoff rc=0? (Y/n)", "y"), true);
+      bool requireSummaryJson = parseYesNo(readLine("Require summary JSON artifact exists? (Y/n)", "y"), true);
+      bool requireSummaryStatusOk = parseYesNo(readLine("Require summary status=ok? (Y/n)", "y"), true);
+      std::string maxDurationSec = trim(readLine("Max duration sec (0=disabled)", "0"));
+      bool failOnAnyNoGo = parseYesNo(readLine("Fail if any run is NO-GO? (y/N)", "n"), false);
+      std::string minGoRatePct = trim(readLine("Minimum GO rate percent (0-100)", "95"));
+      std::string showTopReasons = trim(readLine("Top no-go reasons to include", "5"));
+
+      std::string warnGoRatePct = trim(readLine("WARN when GO rate below percent", "98"));
+      std::string criticalGoRatePct = trim(readLine("CRITICAL when GO rate below percent", "90"));
+      std::string warnNoGoCount = trim(readLine("WARN when NO-GO count >=", "1"));
+      std::string criticalNoGoCount = trim(readLine("CRITICAL when NO-GO count >=", "2"));
+      std::string warnEvalErrors = trim(readLine("WARN when evaluation errors >=", "1"));
+      std::string criticalEvalErrors = trim(readLine("CRITICAL when evaluation errors >=", "2"));
+      bool failOnWarn = parseYesNo(readLine("Return non-zero on WARN? (y/N)", "n"), false);
+      bool failOnCritical = parseYesNo(readLine("Return non-zero on CRITICAL? (y/N)", "n"), false);
+
+      std::string trendSummaryJson = trim(readLine("Quick trend summary JSON output path (optional)", ".easy-node-logs/prod_pilot_quick_trend_24h.json"));
+      std::string alertSummaryJson = trim(readLine("Quick alert summary JSON output path (optional)", ".easy-node-logs/prod_pilot_quick_alert_24h.json"));
+      std::string dashboardMd = trim(readLine("Quick dashboard markdown output path (optional)", ".easy-node-logs/prod_pilot_quick_dashboard_24h.md"));
+      bool printDashboard = parseYesNo(readLine("Print dashboard markdown after generation? (Y/n)", "y"), true);
+      bool printSummaryJson = parseYesNo(readLine("Print trend/alert JSON payloads to console? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " prod-pilot-cohort-quick-dashboard"
+          << " --max-reports " << shellEscape(maxReports)
+          << " --since-hours " << shellEscape(sinceHours)
+          << " --require-status-ok " << (requireStatusOk ? "1" : "0")
+          << " --require-runbook-ok " << (requireRunbookOk ? "1" : "0")
+          << " --require-signoff-attempted " << (requireSignoffAttempted ? "1" : "0")
+          << " --require-signoff-ok " << (requireSignoffOk ? "1" : "0")
+          << " --require-summary-json " << (requireSummaryJson ? "1" : "0")
+          << " --require-summary-status-ok " << (requireSummaryStatusOk ? "1" : "0")
+          << " --max-duration-sec " << shellEscape(maxDurationSec)
+          << " --fail-on-any-no-go " << (failOnAnyNoGo ? "1" : "0")
+          << " --min-go-rate-pct " << shellEscape(minGoRatePct)
+          << " --show-top-reasons " << shellEscape(showTopReasons)
+          << " --warn-go-rate-pct " << shellEscape(warnGoRatePct)
+          << " --critical-go-rate-pct " << shellEscape(criticalGoRatePct)
+          << " --warn-no-go-count " << shellEscape(warnNoGoCount)
+          << " --critical-no-go-count " << shellEscape(criticalNoGoCount)
+          << " --warn-eval-errors " << shellEscape(warnEvalErrors)
+          << " --critical-eval-errors " << shellEscape(criticalEvalErrors)
+          << " --fail-on-warn " << (failOnWarn ? "1" : "0")
+          << " --fail-on-critical " << (failOnCritical ? "1" : "0")
+          << " --print-dashboard " << (printDashboard ? "1" : "0")
+          << " --print-summary-json " << (printSummaryJson ? "1" : "0");
+      if (!reportsDir.empty()) {
+        cmd << " --reports-dir " << shellEscape(reportsDir);
+      }
+      if (!trendSummaryJson.empty()) {
+        cmd << " --trend-summary-json " << shellEscape(trendSummaryJson);
+      }
+      if (!alertSummaryJson.empty()) {
+        cmd << " --alert-summary-json " << shellEscape(alertSummaryJson);
+      }
+      if (!dashboardMd.empty()) {
+        cmd << " --dashboard-md " << shellEscape(dashboardMd);
+      }
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "57") {
+      std::string runReportJson = trim(readLine("Quick run report JSON path (recommended)", ".easy-node-logs/prod_pilot_cohort/prod_pilot_cohort_quick_report.json"));
+      std::string reportsDir = trim(readLine("Reports directory", ".easy-node-logs"));
+      bool checkLatest = parseYesNo(readLine("Run latest quick-check stage? (Y/n)", "y"), true);
+      bool checkTrend = parseYesNo(readLine("Run quick-trend stage? (Y/n)", "y"), true);
+      bool checkAlert = parseYesNo(readLine("Run quick-alert stage? (Y/n)", "y"), true);
+      bool requireStatusOk = parseYesNo(readLine("Require quick status=ok? (Y/n)", "y"), true);
+      bool requireRunbookOk = parseYesNo(readLine("Require runbook rc=0? (Y/n)", "y"), true);
+      bool requireSignoffAttempted = parseYesNo(readLine("Require signoff attempted=true? (Y/n)", "y"), true);
+      bool requireSignoffOk = parseYesNo(readLine("Require signoff rc=0? (Y/n)", "y"), true);
+      bool requireSummaryJson = parseYesNo(readLine("Require summary JSON artifact exists? (Y/n)", "y"), true);
+      bool requireSummaryStatusOk = parseYesNo(readLine("Require summary status=ok? (Y/n)", "y"), true);
+      std::string maxDurationSec = trim(readLine("Max duration sec (0=disabled)", "0"));
+      std::string maxReports = trim(readLine("Max reports to evaluate", "25"));
+      std::string sinceHours = trim(readLine("Include only reports from last N hours (0=all)", "24"));
+      bool failOnAnyNoGo = parseYesNo(readLine("Fail if any run is NO-GO? (y/N)", "n"), false);
+      std::string minGoRatePct = trim(readLine("Minimum GO rate percent (0-100)", "95"));
+      std::string warnGoRatePct = trim(readLine("WARN when GO rate below percent", "98"));
+      std::string criticalGoRatePct = trim(readLine("CRITICAL when GO rate below percent", "90"));
+      std::string warnNoGoCount = trim(readLine("WARN when NO-GO count >=", "1"));
+      std::string criticalNoGoCount = trim(readLine("CRITICAL when NO-GO count >=", "2"));
+      std::string warnEvalErrors = trim(readLine("WARN when evaluation errors >=", "1"));
+      std::string criticalEvalErrors = trim(readLine("CRITICAL when evaluation errors >=", "2"));
+      std::string maxAlertSeverity = trim(readLine("Max alert severity allowed (OK/WARN/CRITICAL)", "WARN"));
+      std::string maxAlertSeverityUpper = upperCopy(maxAlertSeverity);
+      if (maxAlertSeverityUpper != "OK" && maxAlertSeverityUpper != "WARN" && maxAlertSeverityUpper != "CRITICAL") {
+        std::cout << "invalid max alert severity; using WARN\n";
+        maxAlertSeverityUpper = "WARN";
+      }
+      std::string trendSummaryJson = trim(readLine("Trend summary JSON output path (optional)", ".easy-node-logs/prod_pilot_quick_signoff_trend.json"));
+      std::string alertSummaryJson = trim(readLine("Alert summary JSON output path (optional)", ".easy-node-logs/prod_pilot_quick_signoff_alert.json"));
+      std::string signoffJson = trim(readLine("Signoff JSON output path (optional)", ".easy-node-logs/prod_pilot_quick_signoff.json"));
+      bool showJson = parseYesNo(readLine("Show signoff JSON payload? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " prod-pilot-cohort-quick-signoff"
+          << " --check-latest " << (checkLatest ? "1" : "0")
+          << " --check-trend " << (checkTrend ? "1" : "0")
+          << " --check-alert " << (checkAlert ? "1" : "0")
+          << " --require-status-ok " << (requireStatusOk ? "1" : "0")
+          << " --require-runbook-ok " << (requireRunbookOk ? "1" : "0")
+          << " --require-signoff-attempted " << (requireSignoffAttempted ? "1" : "0")
+          << " --require-signoff-ok " << (requireSignoffOk ? "1" : "0")
+          << " --require-summary-json " << (requireSummaryJson ? "1" : "0")
+          << " --require-summary-status-ok " << (requireSummaryStatusOk ? "1" : "0")
+          << " --max-duration-sec " << shellEscape(maxDurationSec)
+          << " --max-reports " << shellEscape(maxReports)
+          << " --since-hours " << shellEscape(sinceHours)
+          << " --fail-on-any-no-go " << (failOnAnyNoGo ? "1" : "0")
+          << " --min-go-rate-pct " << shellEscape(minGoRatePct)
+          << " --warn-go-rate-pct " << shellEscape(warnGoRatePct)
+          << " --critical-go-rate-pct " << shellEscape(criticalGoRatePct)
+          << " --warn-no-go-count " << shellEscape(warnNoGoCount)
+          << " --critical-no-go-count " << shellEscape(criticalNoGoCount)
+          << " --warn-eval-errors " << shellEscape(warnEvalErrors)
+          << " --critical-eval-errors " << shellEscape(criticalEvalErrors)
+          << " --max-alert-severity " << shellEscape(maxAlertSeverityUpper)
+          << " --show-json " << (showJson ? "1" : "0");
+      if (!runReportJson.empty()) {
+        cmd << " --run-report-json " << shellEscape(runReportJson);
+      }
+      if (!reportsDir.empty()) {
+        cmd << " --reports-dir " << shellEscape(reportsDir);
+      }
+      if (!trendSummaryJson.empty()) {
+        cmd << " --trend-summary-json " << shellEscape(trendSummaryJson);
+      }
+      if (!alertSummaryJson.empty()) {
+        cmd << " --alert-summary-json " << shellEscape(alertSummaryJson);
+      }
+      if (!signoffJson.empty()) {
+        cmd << " --signoff-json " << shellEscape(signoffJson);
+      }
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "58") {
+      std::string bootstrapDefault = endpointFromHost(hosts.aHost, 8081);
+      std::string bootstrapDir = normalizeEndpointURL(readLine("Bootstrap directory URL", bootstrapDefault), 8081);
+      std::string subject = trim(readLine("Client subject/invite key", "pilot-client"));
+      std::string rounds = trim(readLine("Cohort rounds", "5"));
+      std::string pauseSec = trim(readLine("Pause between rounds (sec)", "60"));
+      bool continueOnFail = parseYesNo(readLine("Continue running after a failed round? (y/N)", "n"), false);
+      bool requireAllRoundsOk = parseYesNo(readLine("Require all rounds to pass? (Y/n)", "y"), true);
+      std::string trendMinGoRate = trim(readLine("Minimum GO rate percent", "95"));
+      std::string maxAlertSeverity = trim(readLine("Max alert severity allowed (OK/WARN/CRITICAL)", "WARN"));
+      std::string maxAlertSeverityUpper = upperCopy(maxAlertSeverity);
+      if (maxAlertSeverityUpper != "OK" && maxAlertSeverityUpper != "WARN" && maxAlertSeverityUpper != "CRITICAL") {
+        std::cout << "invalid max alert severity; using WARN\n";
+        maxAlertSeverityUpper = "WARN";
+      }
+      std::string reportsDir = trim(readLine("Reports directory", ".easy-node-logs/prod_pilot_cohort_quick_runbook"));
+      std::string summaryJson = trim(readLine("Cohort summary JSON path (optional)", ""));
+      std::string runReportJson = trim(readLine("Quick run report JSON path (optional)", ""));
+      std::string signoffJson = trim(readLine("Quick signoff JSON path (optional)", ""));
+      std::string trendSummaryJson = trim(readLine("Quick trend summary JSON path (optional)", ""));
+      std::string alertSummaryJson = trim(readLine("Quick alert summary JSON path (optional)", ""));
+      std::string dashboardMd = trim(readLine("Quick dashboard markdown path (optional)", ""));
+      std::string signoffMaxReports = trim(readLine("Signoff trend max reports", "25"));
+      std::string signoffSinceHours = trim(readLine("Signoff trend since hours", "24"));
+      bool signoffFailOnAnyNoGo = parseYesNo(readLine("Signoff fail on any NO-GO trend? (y/N)", "n"), false);
+      std::string signoffMinGoRate = trim(readLine("Signoff minimum GO rate percent", "95"));
+      bool dashboardEnable = parseYesNo(readLine("Generate quick dashboard artifacts? (Y/n)", "y"), true);
+      bool dashboardFailClose = parseYesNo(readLine("Fail run if dashboard stage fails? (y/N)", "n"), false);
+      bool dashboardPrint = parseYesNo(readLine("Print dashboard markdown? (Y/n)", "y"), true);
+      bool dashboardPrintSummaryJson = parseYesNo(readLine("Print dashboard trend/alert JSON payloads? (y/N)", "n"), false);
+      bool showJson = parseYesNo(readLine("Show runbook summary JSON payload? (y/N)", "n"), false);
+      std::string extraArgs = trim(readLine("Extra prod-pilot-runbook args after '--' (optional)", ""));
+
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " prod-pilot-cohort-quick-runbook"
+          << " --bootstrap-directory " << shellEscape(bootstrapDir)
+          << " --subject " << shellEscape(subject)
+          << " --rounds " << shellEscape(rounds)
+          << " --pause-sec " << shellEscape(pauseSec)
+          << " --continue-on-fail " << (continueOnFail ? "1" : "0")
+          << " --require-all-rounds-ok " << (requireAllRoundsOk ? "1" : "0")
+          << " --trend-min-go-rate-pct " << shellEscape(trendMinGoRate)
+          << " --max-alert-severity " << shellEscape(maxAlertSeverityUpper)
+          << " --reports-dir " << shellEscape(reportsDir)
+          << " --signoff-max-reports " << shellEscape(signoffMaxReports)
+          << " --signoff-since-hours " << shellEscape(signoffSinceHours)
+          << " --signoff-fail-on-any-no-go " << (signoffFailOnAnyNoGo ? "1" : "0")
+          << " --signoff-min-go-rate-pct " << shellEscape(signoffMinGoRate)
+          << " --dashboard-enable " << (dashboardEnable ? "1" : "0")
+          << " --dashboard-fail-close " << (dashboardFailClose ? "1" : "0")
+          << " --dashboard-print " << (dashboardPrint ? "1" : "0")
+          << " --dashboard-print-summary-json " << (dashboardPrintSummaryJson ? "1" : "0")
+          << " --show-json " << (showJson ? "1" : "0");
+      if (!summaryJson.empty()) {
+        cmd << " --summary-json " << shellEscape(summaryJson);
+      }
+      if (!runReportJson.empty()) {
+        cmd << " --run-report-json " << shellEscape(runReportJson);
+      }
+      if (!signoffJson.empty()) {
+        cmd << " --signoff-json " << shellEscape(signoffJson);
+      }
+      if (!trendSummaryJson.empty()) {
+        cmd << " --trend-summary-json " << shellEscape(trendSummaryJson);
+      }
+      if (!alertSummaryJson.empty()) {
+        cmd << " --alert-summary-json " << shellEscape(alertSummaryJson);
+      }
+      if (!dashboardMd.empty()) {
+        cmd << " --dashboard-md " << shellEscape(dashboardMd);
+      }
+      if (!extraArgs.empty()) {
+        cmd << " -- " << extraArgs;
       }
       runCommand(cmd.str());
       continue;

@@ -163,6 +163,47 @@ sudo ./scripts/easy_node.sh stop-all --with-wg-only 1 --force-iface-cleanup 1
 
 # rotate local server secret material (directory/puzzle, plus issuer token on authority nodes)
 ./scripts/easy_node.sh rotate-server-secrets --restart 1
+
+# production-safe rotation runbook (backup + preflight + rollback)
+./scripts/easy_node.sh prod-key-rotation-runbook --mode auto --preflight-check 1 --rollback-on-fail 1
+
+# production-safe upgrade runbook (compose pull/build/restart + rollback)
+./scripts/easy_node.sh prod-upgrade-runbook --mode auto --preflight-check 1 --compose-pull 1 --compose-build 0 --restart 1 --rollback-on-fail 1
+
+# production-safe operator lifecycle runbook (repeatable onboarding/offboarding)
+./scripts/easy_node.sh prod-operator-lifecycle-runbook --action onboard --mode provider --public-host <PUBLIC_IP_OR_DNS> --authority-directory https://<AUTHORITY_DIR_IP_OR_DNS>:8081 --authority-issuer https://<AUTHORITY_DIR_IP_OR_DNS>:8082 --prod-profile 1
+./scripts/easy_node.sh prod-operator-lifecycle-runbook --action offboard --operator-id <OPERATOR_ID> --directory-url https://<AUTHORITY_DIR_IP_OR_DNS>:8081
+
+# sustained production pilot cohort (multi-round runbook + trend/alert rollup)
+./scripts/easy_node.sh prod-pilot-cohort-runbook --rounds 5 --pause-sec 60 --trend-min-go-rate-pct 95 --max-alert-severity WARN --bundle-outputs 1 --bundle-fail-close 1 -- --bootstrap-directory https://<A_SERVER_IP_OR_DNS>:8081 --subject pilot-client
+
+# verify cohort bundle integrity artifacts
+./scripts/easy_node.sh prod-pilot-cohort-bundle-verify --summary-json .easy-node-logs/prod_pilot_cohort/prod_pilot_cohort_summary.json
+
+# fail-closed cohort signoff (integrity + policy)
+./scripts/easy_node.sh prod-pilot-cohort-signoff --summary-json .easy-node-logs/prod_pilot_cohort/prod_pilot_cohort_summary.json
+
+# minimal one-command sustained cohort flow (runbook + signoff)
+./scripts/easy_node.sh prod-pilot-cohort-quick --bootstrap-directory https://<A_SERVER_IP_OR_DNS>:8081 --subject pilot-client
+# default quick run report: <reports_dir>/prod_pilot_cohort_quick_report.json
+
+# verify quick run-report policy fail-closed
+./scripts/easy_node.sh prod-pilot-cohort-quick-check --run-report-json <reports_dir>/prod_pilot_cohort_quick_report.json
+
+# quick-mode trend across quick run reports
+./scripts/easy_node.sh prod-pilot-cohort-quick-trend --reports-dir .easy-node-logs --since-hours 24 --summary-json .easy-node-logs/prod_pilot_quick_trend_24h.json
+
+# quick-mode alert severity from trend metrics
+./scripts/easy_node.sh prod-pilot-cohort-quick-alert --trend-summary-json .easy-node-logs/prod_pilot_quick_trend_24h.json --summary-json .easy-node-logs/prod_pilot_quick_alert_24h.json
+
+# quick-mode dashboard (trend + alert + markdown)
+./scripts/easy_node.sh prod-pilot-cohort-quick-dashboard --reports-dir .easy-node-logs --dashboard-md .easy-node-logs/prod_pilot_quick_dashboard_24h.md
+
+# one-command quick signoff (latest check + trend + alert severity gate)
+./scripts/easy_node.sh prod-pilot-cohort-quick-signoff --run-report-json <reports_dir>/prod_pilot_cohort_quick_report.json --reports-dir .easy-node-logs --max-alert-severity WARN
+
+# one-command quick pilot runbook (quick execution + signoff + optional dashboard)
+./scripts/easy_node.sh prod-pilot-cohort-quick-runbook --bootstrap-directory https://<A_SERVER_IP_OR_DNS>:8081 --subject pilot-client --max-alert-severity WARN
 ```
 
 Invite-only beta option:
@@ -175,15 +216,32 @@ Invite-only beta option:
 Prod strict additions:
 - bootstrap certs: `./scripts/easy_node.sh bootstrap-mtls --out-dir deploy/tls --public-host <PUBLIC_IP_OR_DNS>`.
 - run `server-up --prod-profile 1` to enforce fail-closed strict defaults (`PROD_STRICT_MODE=1`) on top of beta strict.
+- prod profile now also enforces hardened abuse/adjudication defaults (entry open-rate/ban/inflight bounds, peer+final dispute/appeal floors, final operator/source quorum floors, and stricter ratio/TTL caps) for safer public operation.
 - prod profile requires at least one peer directory from a distinct authority/issuer operator so strict issuer quorum has at least two issuer URLs.
 - when peers are configured, `server-up` now fail-fast verifies local `operator_id`/`issuer_id` uniqueness against peer feeds by default in beta/prod (`--peer-identity-strict auto` -> strict); use `--peer-identity-strict 0` only as a temporary diagnostics bypass.
 - prod profile auto-wires WG command-backend runtime defaults (`WG_BACKEND=command`, live WG filters, exit WG kernel proxy, and issuer quorum URL feeds) and sets entry-exit compose runtime privileges (`ENTRY_EXIT_USER=0:0`, `ENTRY_EXIT_PRIVILEGED=true`).
 - authority invite/admin commands auto-switch to signed auth in prod profile; they also support explicit signed credentials (`--admin-key-file`, `--admin-key-id`).
 - use `./scripts/easy_node.sh admin-signing-status` and `./scripts/easy_node.sh admin-signing-rotate --restart-issuer 1 --key-history 3` for signer maintenance on authority nodes.
-- use `./scripts/easy_node.sh prod-preflight --days-min 14 --check-live 1 --timeout-sec 12` before external beta/production traffic cutover.
+- use `./scripts/easy_node.sh prod-preflight --days-min 14 --check-live 1 --timeout-sec 12` before external beta/production traffic cutover; live mode now verifies both endpoint reachability and live governance policy floors (`/v1/admin/governance-status`).
+- use `./scripts/easy_node.sh prod-key-rotation-runbook ...` for operator-safe maintenance windows (automatic backup + optional pre/post preflight + rollback-on-failure summary JSON).
+- use `./scripts/easy_node.sh prod-upgrade-runbook ...` for operator-safe upgrade windows (automatic backup + optional pre/post preflight + compose pull/build/restart + rollback-on-failure summary JSON).
+- use `./scripts/easy_node.sh prod-operator-lifecycle-runbook ...` for repeatable onboarding/offboarding with optional preflight, health checks, and relay visibility checks (summary JSON output included).
+- use `./scripts/easy_node.sh prod-pilot-cohort-runbook ...` for sustained pilot cohorts (multiple strict pilot rounds + aggregated trend/alert + cohort summary JSON), with alert-severity fail-close policy (`--max-alert-severity`, default `WARN`) and optional fail-closed cohort bundle artifact generation (`--bundle-outputs`, `--bundle-fail-close`).
+- use `./scripts/easy_node.sh prod-pilot-cohort-bundle-verify ...` to fail-close validate cohort artifact integrity (tar checksum + manifest schema + round structure).
+- use `./scripts/easy_node.sh prod-pilot-cohort-check ...` to enforce cohort policy gates from the generated summary JSON (round failure budget, trend GO-rate/decision, alert severity threshold, bundle presence).
+- use `./scripts/easy_node.sh prod-pilot-cohort-signoff ...` for one-command fail-closed cohort signoff (bundle verify + cohort policy check).
+- use `./scripts/easy_node.sh prod-pilot-cohort-quick ...` for minimal-prompt operator flow that runs cohort execution and signoff together.
+- `prod-pilot-cohort-quick` writes a quick run report JSON by default (`<reports_dir>/prod_pilot_cohort_quick_report.json`) and supports `--run-report-json` override.
+- use `./scripts/easy_node.sh prod-pilot-cohort-quick-check ...` to enforce quick run-report policy (status, runbook/signoff RCs, summary presence/status, optional duration threshold).
+- use `./scripts/easy_node.sh prod-pilot-cohort-quick-trend ...` to aggregate quick run-report GO/NO-GO trend with optional fail-close thresholds.
+- use `./scripts/easy_node.sh prod-pilot-cohort-quick-alert ...` to classify trend metrics into severity (`OK/WARN/CRITICAL`) with optional fail-close exits.
+- use `./scripts/easy_node.sh prod-pilot-cohort-quick-dashboard ...` to generate one operator dashboard (trend JSON + alert JSON + markdown).
+- use `./scripts/easy_node.sh prod-pilot-cohort-quick-signoff ...` to run quick-check + trend + alert in one fail-closed decision command.
+- use `./scripts/easy_node.sh prod-pilot-cohort-quick-runbook ...` for one-command quick execution + signoff + optional dashboard with a runbook summary artifact.
 
 For a full 3-machine flow, see `docs/easy-3-machine-test.md`.
 For a frozen closed-beta command set, see `docs/beta-playbook.md`.
+For repeatable operator onboarding/offboarding, see `docs/operator-lifecycle-runbook.md`.
 
 ## 3) Windows 11 + WSL2
 
@@ -284,12 +342,15 @@ Before exposing anything public:
 39. For cross-host validation before beta rollout, run `./scripts/integration_3machine_beta_validate.sh` from a client machine (machine C) with two server directories (machines A/B) and verify both multi-source bootstrap and federation operator-floor checks pass.
 40. Run `./scripts/integration_3machine_beta_soak.sh` from machine C for repeated rounds (and optional injected faults) before inviting external beta testers.
 41. For stricter cross-host anti-collusion and issuer drift checks, keep `--distinct-operators=1` and `--require-issuer-quorum=1` enabled on 3-machine validate/soak runs (default under `--beta-profile=1`), and require minimum client selection diversity (`--client-min-selection-lines`, `--client-min-entry-operators`, `--client-min-exit-operators`, `--client-require-cross-operator-pair`) so the client actually exercises multi-operator paths.
-42. For production-grade cross-machine sign-off, run `sudo ./scripts/easy_node.sh three-machine-prod-gate ...` from machine C (Linux root) to execute strict control validate/soak plus real-WG validate/soak in one sequence (`--wg-max-consecutive-failures` controls sustained WG soak failure threshold, default `2`; `--wg-slo-profile recommended` applies default production soak SLO/failure budgets; `--wg-slo-profile strict` additionally applies cross-round diversity floors by default; `--wg-max-round-duration-sec` and `--wg-max-recovery-sec` enforce WG soak latency/recovery SLOs; `--wg-max-failure-class CLASS=N` plus `--wg-disallow-unknown-failure-class=1` enforce per-failure-class budgets; `--wg-strict-ingress-rehearsal=1` injects a controlled strict-client-ingress failure path for rehearsals; `--wg-min-selection-lines`, `--wg-min-entry-operators`, `--wg-min-exit-operators`, and `--wg-min-cross-operator-pairs` enforce real-WG selection diversity across rounds; `--control-fault-every`/`--control-fault-command` inject controlled disruptions during control-plane soak; `--wg-fault-every`/`--wg-fault-command` inject disruptions during real-WG soak; `--wg-validate-summary-json` writes a machine-readable WG validate result artifact; `--wg-soak-summary-json` writes a machine-readable WG soak result artifact; `--gate-summary-json` writes the overall gate result with per-step statuses/failure metadata). Use `sudo ./scripts/easy_node.sh three-machine-prod-bundle ...` when you also want an always-generated diagnostics bundle tarball for sharing/debug, then run `./scripts/easy_node.sh prod-gate-check --bundle-dir <bundle_dir>` for strict artifact signoff validation.
+42. For production-grade cross-machine sign-off, run `sudo ./scripts/easy_node.sh three-machine-prod-gate ...` from machine C (Linux root) to execute strict control validate/soak plus real-WG validate/soak in one sequence (`--wg-max-consecutive-failures` controls sustained WG soak failure threshold, default `2`; `--wg-slo-profile recommended` applies default production soak SLO/failure budgets; `--wg-slo-profile strict` additionally applies cross-round diversity floors by default; `--wg-max-round-duration-sec` and `--wg-max-recovery-sec` enforce WG soak latency/recovery SLOs; `--wg-max-failure-class CLASS=N` plus `--wg-disallow-unknown-failure-class=1` enforce per-failure-class budgets; `--wg-strict-ingress-rehearsal=1` injects a controlled strict-client-ingress failure path for rehearsals; `--wg-min-selection-lines`, `--wg-min-entry-operators`, `--wg-min-exit-operators`, and `--wg-min-cross-operator-pairs` enforce real-WG selection diversity across rounds; `--control-fault-every`/`--control-fault-command` inject controlled disruptions during control-plane soak; `--wg-fault-every`/`--wg-fault-command` inject disruptions during real-WG soak; `--wg-validate-summary-json` writes a machine-readable WG validate result artifact; `--wg-soak-summary-json` writes a machine-readable WG soak result artifact; `--gate-summary-json` writes the overall gate result with per-step statuses/failure metadata). Use `sudo ./scripts/easy_node.sh three-machine-prod-bundle ... --signoff-check 1` when you also want an always-generated diagnostics bundle tarball and fail-close artifact signoff in the same run; this path now runs strict machine-C preflight by default (disable only for diagnostics with `--preflight-check 0`), fail-close bundle integrity verification by default (disable only for diagnostics with `--bundle-verify-check 0`), auto-captures an incident snapshot on failed runs by default (disable only for diagnostics with `--incident-snapshot-on-fail 0`), and writes a one-command run report JSON by default at `<bundle_dir>/prod_bundle_run_report.json` (override with `--run-report-json`). For the same flow with opinionated strict defaults, use `sudo ./scripts/easy_node.sh prod-pilot-runbook ...` (you can still append explicit overrides); this wrapper now auto-generates trend/alert/dashboard artifacts at the end of each run by default. You can run `./scripts/easy_node.sh prod-gate-check --run-report-json <bundle_dir>/prod_bundle_run_report.json` for signoff policy checks, `./scripts/easy_node.sh prod-gate-bundle-verify --run-report-json <bundle_dir>/prod_bundle_run_report.json` for integrity checks, `./scripts/easy_node.sh prod-gate-signoff --run-report-json <bundle_dir>/prod_bundle_run_report.json` to run both checks fail-closed in one command, `./scripts/easy_node.sh prod-gate-slo-summary --run-report-json <bundle_dir>/prod_bundle_run_report.json --fail-on-no-go 1` for single-run GO/NO-GO summary, `./scripts/easy_node.sh prod-gate-slo-trend --reports-dir .easy-node-logs --max-reports 25 --min-go-rate-pct 95 --fail-on-any-no-go 1 --since-hours 24 --summary-json .easy-node-logs/prod_slo_trend_24h.json` for time-windowed multi-run trend gating, `./scripts/easy_node.sh prod-gate-slo-alert --trend-summary-json .easy-node-logs/prod_slo_trend_24h.json --warn-go-rate-pct 98 --critical-go-rate-pct 90 --summary-json .easy-node-logs/prod_slo_alert_24h.json` to classify operator alert severity (OK/WARN/CRITICAL) with optional fail-close exits, or `./scripts/easy_node.sh prod-gate-slo-dashboard --reports-dir .easy-node-logs --since-hours 24 --dashboard-md .easy-node-logs/prod_slo_dashboard_24h.md` to emit a single operator dashboard artifact (markdown + JSON).
 43. If enforcing anti-collusion (`CLIENT_REQUIRE_DISTINCT_OPERATORS=1` and/or `ENTRY_REQUIRE_DISTINCT_EXIT_OPERATOR=1`), run `./scripts/integration_distinct_operators.sh` and verify same-operator paths are rejected while distinct-operator paths pass.
-44. For strict runtime guardrails across roles, run `./scripts/integration_beta_strict_roles.sh` and verify client/entry/exit/issuer fail closed on weak config and entry/issuer boot when strict prerequisites are met.
-45. Run `./scripts/integration_wg_only_mode.sh` to verify wireguard-only fail-closed guardrails (`WG_ONLY_MODE`) reject scaffold/non-WG dataplane configuration before runtime.
-46. For strict live WireGuard-mode behavior (non-privileged shim path), run `./scripts/integration_live_wg_full_path_strict.sh` and verify strict startup signals plus end-to-end plausible WireGuard packet forwarding/drop behavior.
-47. Run `./scripts/integration_beta_fault_matrix.sh` to validate startup-race and sync-loss recovery paths in one pass before external beta tests.
-48. Run `./scripts/integration_easy_node_role_guard.sh` to verify provider nodes are blocked from invite/admin actions while authority nodes are allowed past the role gate.
-49. Run `./scripts/integration_easy_node_invite_auth_policy.sh` to verify invite/admin commands fail fast when authority token auth is disabled (`ISSUER_ADMIN_ALLOW_TOKEN=0`) and require signed admin credentials.
-50. Run `./scripts/integration_prod_preflight_tools.sh` to verify easy-node strict prod preflight and authority signer rotate/status flows.
+44. If you also want jurisdiction separation during pairing, set `CLIENT_REQUIRE_DISTINCT_ENTRY_EXIT_COUNTRY=1` on clients and ensure relay descriptors publish accurate `country_code`.
+45. If you want locality preference without hard filtering, set `CLIENT_EXIT_LOCALITY_SOFT_BIAS=1` and tune `CLIENT_EXIT_COUNTRY_BIAS`, `CLIENT_EXIT_REGION_BIAS`, and `CLIENT_EXIT_REGION_PREFIX_BIAS`.
+46. For strict runtime guardrails across roles, run `./scripts/integration_beta_strict_roles.sh` and verify client/entry/exit/issuer fail closed on weak config and entry/issuer boot when strict prerequisites are met.
+47. Run `./scripts/integration_wg_only_mode.sh` to verify wireguard-only fail-closed guardrails (`WG_ONLY_MODE`) reject scaffold/non-WG dataplane configuration before runtime.
+48. For strict live WireGuard-mode behavior (non-privileged shim path), run `./scripts/integration_live_wg_full_path_strict.sh` and verify strict startup signals plus end-to-end plausible WireGuard packet forwarding/drop behavior.
+49. Run `./scripts/integration_beta_fault_matrix.sh` to validate startup-race and sync-loss recovery paths in one pass before external beta tests.
+50. Run `./scripts/integration_easy_node_role_guard.sh` to verify provider nodes are blocked from invite/admin actions while authority nodes are allowed past the role gate.
+51. Run `./scripts/integration_easy_node_invite_auth_policy.sh` to verify invite/admin commands fail fast when authority token auth is disabled (`ISSUER_ADMIN_ALLOW_TOKEN=0`) and require signed admin credentials.
+52. Run `./scripts/integration_prod_preflight_tools.sh` to verify easy-node strict prod preflight and authority signer rotate/status flows.
+53. Run `./scripts/easy_node.sh incident-snapshot --mode auto` on each machine after any failed prod-gate/prod-bundle run to capture a shareable incident bundle (endpoint probes + docker/system snapshots) for triage and regression tracking.

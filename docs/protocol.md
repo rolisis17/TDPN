@@ -259,11 +259,13 @@ Directory peer-membership feed shape:
 1. Client queries one or more directories for entry/exit descriptors.
    - Client selection can prefer healthy entry/exit control endpoints and same-region pairs when available.
    - Optional pair hardening can require distinct entry/exit operators (`CLIENT_REQUIRE_DISTINCT_OPERATORS=1`) to reduce single-operator collusion risk.
+   - Optional pair hardening can also require distinct entry/exit country codes (`CLIENT_REQUIRE_DISTINCT_ENTRY_EXIT_COUNTRY=1`) to reduce single-jurisdiction pairing risk.
    - Entry can also enforce distinct entry/exit operators server-side (`ENTRY_REQUIRE_DISTINCT_EXIT_OPERATOR=1`) to prevent client-side bypass.
    - Optional pair continuity can prefer the most recently successful pair for a bounded window (`CLIENT_STICKY_PAIR_SEC`) to reduce churn.
    - Optional session continuity can reuse an active path across bootstrap cycles (`CLIENT_SESSION_REUSE=1`) and refresh near expiry (`CLIENT_SESSION_REFRESH_LEAD_SEC`) via open-new/close-old handoff.
    - Client may retry `path/open` across alternate ranked entry/exit pairs when a candidate is unavailable.
-  - Client can optionally require preferred exit locality (country first, region fallback), minimum `geo_confidence`, and configurable fallback order (`country`, `region`, `region-prefix`, `global`).
+   - Client can optionally require preferred exit locality (country first, region fallback), minimum `geo_confidence`, and configurable fallback order (`country`, `region`, `region-prefix`, `global`).
+   - Optional soft-locality mode (`CLIENT_EXIT_LOCALITY_SOFT_BIAS=1`) keeps the global candidate pool but applies weighted locality boosts (`CLIENT_EXIT_COUNTRY_BIAS`, `CLIENT_EXIT_REGION_BIAS`, `CLIENT_EXIT_REGION_PREFIX_BIAS`) during exit ordering.
    - Client can optionally cap selected exits per operator to reduce concentration.
    - If signed exit score metadata is present (descriptor and/or selection feed), client applies weighted random exit ordering with an exploration floor.
    - If signed trust-attestation metadata is present, client blends bond/stake/reputation signals into ranking using attestation confidence.

@@ -330,6 +330,53 @@ func TestRankRelayPairsDistinctOperatorsRequiresMetadata(t *testing.T) {
 	}
 }
 
+func TestRankRelayPairsDistinctCountries(t *testing.T) {
+	c := &Client{
+		entryURL:                 "http://fallback-entry.local",
+		exitControlURL:           "http://fallback-exit.local",
+		healthCheckEnabled:       false,
+		requireDistinctCountries: true,
+	}
+	relays := []proto.RelayDescriptor{
+		{RelayID: "entry-us", Role: "entry", ControlURL: "entry-us.local", CountryCode: "US"},
+		{RelayID: "entry-de", Role: "entry", ControlURL: "entry-de.local", CountryCode: "DE"},
+		{RelayID: "exit-us", Role: "exit", ControlURL: "exit-us.local", CountryCode: "US"},
+		{RelayID: "exit-fr", Role: "exit", ControlURL: "exit-fr.local", CountryCode: "FR"},
+	}
+	pairs := c.rankRelayPairs(context.Background(), relays)
+	if len(pairs) == 0 {
+		t.Fatalf("expected non-empty pairs with distinct countries available")
+	}
+	for _, pair := range pairs {
+		if normalizeCountryCode(pair.entry.CountryCode) == normalizeCountryCode(pair.exit.CountryCode) {
+			t.Fatalf("expected distinct countries, got pair=%s->%s country=%s",
+				pair.entry.RelayID, pair.exit.RelayID, pair.entry.CountryCode)
+		}
+	}
+	for _, pair := range pairs {
+		if pair.entry.RelayID == "entry-us" && pair.exit.RelayID == "exit-us" {
+			t.Fatalf("same-country pair should be filtered")
+		}
+	}
+}
+
+func TestRankRelayPairsDistinctCountriesRequiresMetadata(t *testing.T) {
+	c := &Client{
+		entryURL:                 "http://fallback-entry.local",
+		exitControlURL:           "http://fallback-exit.local",
+		healthCheckEnabled:       false,
+		requireDistinctCountries: true,
+	}
+	relays := []proto.RelayDescriptor{
+		{RelayID: "entry-a", Role: "entry", ControlURL: "entry-a.local"},
+		{RelayID: "exit-us", Role: "exit", ControlURL: "exit-us.local", CountryCode: "US"},
+	}
+	pairs := c.rankRelayPairs(context.Background(), relays)
+	if len(pairs) != 0 {
+		t.Fatalf("expected no pairs when country metadata missing under distinct-country mode, got %d", len(pairs))
+	}
+}
+
 func TestRankRelayPairsAppliesStickyPairPreference(t *testing.T) {
 	c := &Client{
 		entryURL:           "http://fallback-entry.local",
@@ -544,6 +591,64 @@ func TestSelectPreferredExitsRegionPrefixFallback(t *testing.T) {
 	}
 	if len(selected) != 1 || selected[0].RelayID != "exit-us-east" {
 		t.Fatalf("expected region-prefix fallback exit selected, got %+v", selected)
+	}
+}
+
+func TestSelectPreferredExitsSoftLocalityBiasKeepsGlobalPool(t *testing.T) {
+	c := &Client{
+		preferredExitCountry:  "US",
+		localitySoftBias:      true,
+		localityFallbackOrder: parseLocalityFallbackOrder("country,global"),
+		strictExitLocality:    false,
+	}
+	exits := []proto.RelayDescriptor{
+		{RelayID: "exit-us", Role: "exit", CountryCode: "US", Region: "us-east", GeoConfidence: 0.9},
+		{RelayID: "exit-fr", Role: "exit", CountryCode: "FR", Region: "eu-west", GeoConfidence: 0.9},
+	}
+	selected, mode := c.selectPreferredExits(exits)
+	if mode != "soft-country" {
+		t.Fatalf("expected soft-country mode, got %s", mode)
+	}
+	if len(selected) != len(exits) {
+		t.Fatalf("expected soft locality to keep global exit pool, got=%d want=%d", len(selected), len(exits))
+	}
+}
+
+func TestOrderExitsForSelectionSoftLocalityBiasWithoutScores(t *testing.T) {
+	c := &Client{
+		preferredExitCountry:     "US",
+		localitySoftBias:         true,
+		localityCountryBias:      3.0,
+		localityRegionBias:       1.5,
+		localityRegionPrefixBias: 1.2,
+		exitExplorationPct:       0,
+		exitSelectionSeed:        17,
+	}
+	exits := []proto.RelayDescriptor{
+		{RelayID: "exit-fr", Role: "exit", CountryCode: "FR", Region: "eu-west", GeoConfidence: 0.9},
+		{RelayID: "exit-us", Role: "exit", CountryCode: "US", Region: "us-east", GeoConfidence: 0.9},
+	}
+	ordered, mode := c.orderExitsForSelection(exits)
+	if mode != "weighted-random-locality-bias" {
+		t.Fatalf("expected locality-bias weighting mode, got %s", mode)
+	}
+	if len(ordered) != len(exits) {
+		t.Fatalf("expected same exit count, got=%d want=%d", len(ordered), len(exits))
+	}
+	base := []scoredExit{
+		{desc: exits[0], weight: 1.0},
+		{desc: exits[1], weight: 1.0},
+	}
+	biased, applied := c.applyLocalityBias(base)
+	if !applied {
+		t.Fatalf("expected locality bias to apply")
+	}
+	weights := map[string]float64{}
+	for _, item := range biased {
+		weights[item.desc.RelayID] = item.weight
+	}
+	if weights["exit-us"] <= weights["exit-fr"] {
+		t.Fatalf("expected US locality-biased weight > FR weight, us=%.2f fr=%.2f", weights["exit-us"], weights["exit-fr"])
 	}
 }
 

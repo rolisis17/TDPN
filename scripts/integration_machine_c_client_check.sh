@@ -33,7 +33,13 @@ Usage:
     [--client-require-cross-operator-pair [0|1]] \
     [--exit-country CC] \
     [--exit-region REGION] \
+    [--path-profile fast|balanced|privacy] \
     [--distinct-operators [0|1]] \
+    [--distinct-countries [0|1]] \
+    [--locality-soft-bias [0|1]] \
+    [--country-bias N] \
+    [--region-bias N] \
+    [--region-prefix-bias N] \
     [--require-issuer-quorum [0|1]] \
     [--beta-profile [0|1]] \
     [--prod-profile [0|1]] \

@@ -10,6 +10,7 @@ MODE_FILE="$ROOT_DIR/deploy/data/easy_node_server_mode.conf"
 backup_env=""
 backup_provider=""
 backup_mode=""
+live_curl_mock_dir=""
 
 env_value() {
   local file="$1"
@@ -35,6 +36,9 @@ cleanup() {
     rm -f "$backup_mode"
   else
     rm -f "$MODE_FILE"
+  fi
+  if [[ -n "$live_curl_mock_dir" ]]; then
+    rm -rf "$live_curl_mock_dir"
   fi
 }
 trap cleanup EXIT
@@ -92,6 +96,20 @@ ISSUER_ADMIN_REQUIRE_SIGNED=1
 ISSUER_ADMIN_ALLOW_TOKEN=0
 DIRECTORY_ADMIN_TOKEN=prod-directory-admin-token-1234567890
 ENTRY_PUZZLE_SECRET=prod-entry-puzzle-secret-1234567890
+ENTRY_OPEN_RPS=12
+ENTRY_BAN_THRESHOLD=3
+ENTRY_BAN_SEC=90
+ENTRY_MAX_CONCURRENT_OPENS=96
+DIRECTORY_PEER_DISPUTE_MIN_VOTES=2
+DIRECTORY_PEER_APPEAL_MIN_VOTES=2
+DIRECTORY_ADJUDICATION_META_MIN_VOTES=2
+DIRECTORY_FINAL_DISPUTE_MIN_VOTES=2
+DIRECTORY_FINAL_APPEAL_MIN_VOTES=2
+DIRECTORY_FINAL_ADJUDICATION_MIN_OPERATORS=2
+DIRECTORY_FINAL_ADJUDICATION_MIN_SOURCES=2
+DIRECTORY_FINAL_ADJUDICATION_MIN_RATIO=0.67
+DIRECTORY_DISPUTE_MAX_TTL_SEC=259200
+DIRECTORY_APPEAL_MAX_TTL_SEC=259200
 EOF_ENV
 chmod 600 "$AUTH_ENV" 2>/dev/null || true
 
@@ -102,6 +120,23 @@ EOF_MODE
 ./scripts/easy_node.sh admin-signing-rotate --restart-issuer 0 --key-history 2 >/tmp/integration_prod_preflight_rotate.log 2>&1
 ./scripts/easy_node.sh admin-signing-status >/tmp/integration_prod_preflight_status.log 2>&1
 ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_ok.log 2>&1
+
+if rg -q '^EXIT_WG_PUBKEY=' "$AUTH_ENV"; then
+  sed -i -E 's/^EXIT_WG_PUBKEY=.*/EXIT_WG_PUBKEY=invalid-wg-pubkey/' "$AUTH_ENV"
+else
+  echo "EXIT_WG_PUBKEY=invalid-wg-pubkey" >>"$AUTH_ENV"
+fi
+if ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_wg_pub_fail.log 2>&1; then
+  echo "expected prod-preflight to fail when EXIT_WG_PUBKEY is malformed"
+  cat /tmp/integration_prod_preflight_wg_pub_fail.log
+  exit 1
+fi
+if ! rg -q "EXIT_WG_PUBKEY invalid; must be a valid WireGuard public key or unset for runtime derivation" /tmp/integration_prod_preflight_wg_pub_fail.log; then
+  echo "missing expected EXIT_WG_PUBKEY malformed failure signal in prod-preflight output"
+  cat /tmp/integration_prod_preflight_wg_pub_fail.log
+  exit 1
+fi
+sed -i -E 's/^EXIT_WG_PUBKEY=.*/EXIT_WG_PUBKEY=/' "$AUTH_ENV"
 
 echo "ISSUER_ADMIN_TOKEN=legacy-admin-token-1234567890" >>"$AUTH_ENV"
 if ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_token_fail.log 2>&1; then
@@ -214,6 +249,58 @@ if ! rg -q "ENTRY_PUZZLE_DIFFICULTY must be >0 in prod profile" /tmp/integration
 fi
 sed -i -E 's/^ENTRY_PUZZLE_DIFFICULTY=.*/ENTRY_PUZZLE_DIFFICULTY=1/' "$AUTH_ENV"
 
+sed -i -E 's/^ENTRY_OPEN_RPS=.*/ENTRY_OPEN_RPS=50/' "$AUTH_ENV"
+if ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_entry_rps_fail.log 2>&1; then
+  echo "expected prod-preflight to fail when ENTRY_OPEN_RPS is too high"
+  cat /tmp/integration_prod_preflight_entry_rps_fail.log
+  exit 1
+fi
+if ! rg -q "ENTRY_OPEN_RPS must be set in range 1..12 in prod profile" /tmp/integration_prod_preflight_entry_rps_fail.log; then
+  echo "missing expected entry open rps failure signal in prod-preflight output"
+  cat /tmp/integration_prod_preflight_entry_rps_fail.log
+  exit 1
+fi
+sed -i -E 's/^ENTRY_OPEN_RPS=.*/ENTRY_OPEN_RPS=12/' "$AUTH_ENV"
+
+sed -i -E 's/^DIRECTORY_FINAL_ADJUDICATION_MIN_RATIO=.*/DIRECTORY_FINAL_ADJUDICATION_MIN_RATIO=0.50/' "$AUTH_ENV"
+if ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_ratio_fail.log 2>&1; then
+  echo "expected prod-preflight to fail with weak DIRECTORY_FINAL_ADJUDICATION_MIN_RATIO"
+  cat /tmp/integration_prod_preflight_ratio_fail.log
+  exit 1
+fi
+if ! rg -q "DIRECTORY_FINAL_ADJUDICATION_MIN_RATIO must be >=0.67 in prod profile" /tmp/integration_prod_preflight_ratio_fail.log; then
+  echo "missing expected final adjudication ratio failure signal in prod-preflight output"
+  cat /tmp/integration_prod_preflight_ratio_fail.log
+  exit 1
+fi
+sed -i -E 's/^DIRECTORY_FINAL_ADJUDICATION_MIN_RATIO=.*/DIRECTORY_FINAL_ADJUDICATION_MIN_RATIO=0.67/' "$AUTH_ENV"
+
+sed -i -E 's/^DIRECTORY_FINAL_DISPUTE_MIN_VOTES=.*/DIRECTORY_FINAL_DISPUTE_MIN_VOTES=1/' "$AUTH_ENV"
+if ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_final_dispute_fail.log 2>&1; then
+  echo "expected prod-preflight to fail with weak DIRECTORY_FINAL_DISPUTE_MIN_VOTES"
+  cat /tmp/integration_prod_preflight_final_dispute_fail.log
+  exit 1
+fi
+if ! rg -q "DIRECTORY_FINAL_DISPUTE_MIN_VOTES must be >=2 in prod profile" /tmp/integration_prod_preflight_final_dispute_fail.log; then
+  echo "missing expected final dispute vote floor failure signal in prod-preflight output"
+  cat /tmp/integration_prod_preflight_final_dispute_fail.log
+  exit 1
+fi
+sed -i -E 's/^DIRECTORY_FINAL_DISPUTE_MIN_VOTES=.*/DIRECTORY_FINAL_DISPUTE_MIN_VOTES=2/' "$AUTH_ENV"
+
+sed -i -E 's/^DIRECTORY_DISPUTE_MAX_TTL_SEC=.*/DIRECTORY_DISPUTE_MAX_TTL_SEC=604800/' "$AUTH_ENV"
+if ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_dispute_ttl_fail.log 2>&1; then
+  echo "expected prod-preflight to fail with oversized DIRECTORY_DISPUTE_MAX_TTL_SEC"
+  cat /tmp/integration_prod_preflight_dispute_ttl_fail.log
+  exit 1
+fi
+if ! rg -q "DIRECTORY_DISPUTE_MAX_TTL_SEC must be set in range 1..259200 in prod profile" /tmp/integration_prod_preflight_dispute_ttl_fail.log; then
+  echo "missing expected dispute ttl cap failure signal in prod-preflight output"
+  cat /tmp/integration_prod_preflight_dispute_ttl_fail.log
+  exit 1
+fi
+sed -i -E 's/^DIRECTORY_DISPUTE_MAX_TTL_SEC=.*/DIRECTORY_DISPUTE_MAX_TTL_SEC=259200/' "$AUTH_ENV"
+
 chmod 644 "$tls_dir/tls/client.key" 2>/dev/null || true
 if ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_perm_fail.log 2>&1; then
   echo "expected prod-preflight to fail when private key permissions are too open"
@@ -263,12 +350,93 @@ ENTRY_EXIT_USER=0:0
 ENTRY_EXIT_PRIVILEGED=true
 DIRECTORY_ADMIN_TOKEN=prod-provider-directory-admin-token-1234567890
 ENTRY_PUZZLE_SECRET=prod-provider-entry-puzzle-secret-1234567890
+ENTRY_OPEN_RPS=12
+ENTRY_BAN_THRESHOLD=3
+ENTRY_BAN_SEC=90
+ENTRY_MAX_CONCURRENT_OPENS=96
+DIRECTORY_PEER_DISPUTE_MIN_VOTES=2
+DIRECTORY_PEER_APPEAL_MIN_VOTES=2
+DIRECTORY_ADJUDICATION_META_MIN_VOTES=2
+DIRECTORY_FINAL_DISPUTE_MIN_VOTES=2
+DIRECTORY_FINAL_APPEAL_MIN_VOTES=2
+DIRECTORY_FINAL_ADJUDICATION_MIN_OPERATORS=2
+DIRECTORY_FINAL_ADJUDICATION_MIN_SOURCES=2
+DIRECTORY_FINAL_ADJUDICATION_MIN_RATIO=0.67
+DIRECTORY_DISPUTE_MAX_TTL_SEC=259200
+DIRECTORY_APPEAL_MAX_TTL_SEC=259200
 CORE_ISSUER_URL=$core_issuer
 ISSUER_ADMIN_TOKEN=$admin_token
 ISSUER_ADMIN_SIGNING_KEY_ID=$sign_key_id
 EOF_PROVIDER
   chmod 600 "$PROVIDER_ENV" 2>/dev/null || true
 }
+
+live_curl_mock_dir="$(mktemp -d)"
+cat >"$live_curl_mock_dir/curl" <<'EOF_CURL_MOCK'
+#!/usr/bin/env bash
+set -euo pipefail
+out_file=""
+write_fmt=""
+url=""
+idx=1
+while [[ $idx -le $# ]]; do
+  arg="${!idx}"
+  case "$arg" in
+    -o)
+      idx=$((idx + 1))
+      out_file="${!idx:-}"
+      ;;
+    -w)
+      idx=$((idx + 1))
+      write_fmt="${!idx:-}"
+      ;;
+    http://*|https://*)
+      url="$arg"
+      ;;
+  esac
+  idx=$((idx + 1))
+done
+
+policy_mode="${EASY_NODE_CURL_MOCK_POLICY_MODE:-good}"
+code="200"
+body='{}'
+case "$url" in
+  */v1/relays)
+    body='{"relays":[]}'
+    ;;
+  */v1/health)
+    body='{"ok":true}'
+    ;;
+  */v1/pubkeys)
+    body='{"issuer":"issuer-main","pub_keys":["pk1"]}'
+    ;;
+  */v1/admin/governance-status)
+    if [[ "$policy_mode" == "weak" ]]; then
+      body='{"policy":{"meta_min_votes":1,"final_dispute_min_votes":1,"final_appeal_min_votes":1,"final_adjudication_min_operators":1,"final_adjudication_min_sources":1,"final_adjudication_min_ratio":0.5}}'
+    else
+      body='{"policy":{"meta_min_votes":2,"final_dispute_min_votes":2,"final_appeal_min_votes":2,"final_adjudication_min_operators":2,"final_adjudication_min_sources":2,"final_adjudication_min_ratio":0.67}}'
+    fi
+    ;;
+  */v1/admin/subject/get*)
+    code="401"
+    body='unauthorized'
+    ;;
+esac
+
+if [[ -n "$out_file" ]]; then
+  printf '%s' "$body" >"$out_file"
+else
+  printf '%s' "$body"
+fi
+if [[ -n "$write_fmt" ]]; then
+  printf '%s' "$code"
+fi
+if [[ "$code" -ge 400 && "$*" == *" -f"* ]]; then
+  exit 22
+fi
+exit 0
+EOF_CURL_MOCK
+chmod +x "$live_curl_mock_dir/curl"
 
 cat >"$MODE_FILE" <<'EOF_MODE_PROVIDER'
 EASY_NODE_SERVER_MODE=provider
@@ -322,6 +490,22 @@ fi
 if ! rg -q "provider env must not include issuer admin signing material" /tmp/integration_prod_preflight_provider_signer_fail.log; then
   echo "missing expected provider signer material failure signal"
   cat /tmp/integration_prod_preflight_provider_signer_fail.log
+  exit 1
+fi
+
+write_provider_env_file "https://issuer.example:8082"
+PATH="$live_curl_mock_dir:$PATH" EASY_NODE_CURL_MOCK_POLICY_MODE=good \
+  ./scripts/easy_node.sh prod-preflight --days-min 0 --check-live 1 --timeout-sec 1 >/tmp/integration_prod_preflight_provider_live_governance_ok.log 2>&1
+
+if PATH="$live_curl_mock_dir:$PATH" EASY_NODE_CURL_MOCK_POLICY_MODE=weak \
+  ./scripts/easy_node.sh prod-preflight --days-min 0 --check-live 1 --timeout-sec 1 >/tmp/integration_prod_preflight_provider_live_governance_fail.log 2>&1; then
+  echo "expected provider prod-preflight live governance check to fail with weak policy"
+  cat /tmp/integration_prod_preflight_provider_live_governance_fail.log
+  exit 1
+fi
+if ! rg -q "live governance policy too weak: meta_min_votes must be >=2" /tmp/integration_prod_preflight_provider_live_governance_fail.log; then
+  echo "missing expected live governance policy floor failure signal"
+  cat /tmp/integration_prod_preflight_provider_live_governance_fail.log
   exit 1
 fi
 

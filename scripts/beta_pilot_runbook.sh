@@ -35,7 +35,13 @@ Usage:
     [--client-min-entry-operators N] \
     [--client-min-exit-operators N] \
     [--client-require-cross-operator-pair [0|1]] \
+    [--path-profile fast|balanced|privacy] \
     [--distinct-operators [0|1]] \
+    [--distinct-countries [0|1]] \
+    [--locality-soft-bias [0|1]] \
+    [--country-bias N] \
+    [--region-bias N] \
+    [--region-prefix-bias N] \
     [--require-issuer-quorum [0|1]] \
     [--beta-profile [0|1]] \
     [--prod-profile [0|1]] \
@@ -62,6 +68,42 @@ trim_url() {
     value="${value%/}"
   done
   echo "$value"
+}
+
+normalize_path_profile() {
+  local profile
+  profile="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+  case "$profile" in
+    fast|balanced|privacy)
+      printf '%s\n' "$profile"
+      ;;
+    "")
+      printf '%s\n' ""
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+path_profile_values() {
+  local profile
+  profile="$(normalize_path_profile "${1:-}")" || return 1
+  case "$profile" in
+    fast)
+      # distinct_operators|distinct_countries|locality_soft_bias|country_bias|region_bias|region_prefix_bias
+      printf '%s\n' "1|0|1|1.80|1.35|1.15"
+      ;;
+    privacy)
+      printf '%s\n' "1|1|0|1.60|1.25|1.10"
+      ;;
+    balanced|"")
+      printf '%s\n' "1|0|1|1.50|1.25|1.10"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
 }
 
 url_scheme_from_url() {
@@ -232,11 +274,23 @@ client_min_selection_lines="${THREE_MACHINE_CLIENT_MIN_SELECTION_LINES:-0}"
 client_min_entry_operators="${THREE_MACHINE_CLIENT_MIN_ENTRY_OPERATORS:-0}"
 client_min_exit_operators="${THREE_MACHINE_CLIENT_MIN_EXIT_OPERATORS:-0}"
 client_require_cross_operator_pair="${THREE_MACHINE_CLIENT_REQUIRE_CROSS_OPERATOR_PAIR:-}"
+path_profile="${THREE_MACHINE_PATH_PROFILE:-}"
 beta_profile="${THREE_MACHINE_BETA_PROFILE:-1}"
 prod_profile="${THREE_MACHINE_PROD_PROFILE:-0}"
 distinct_operators="${THREE_MACHINE_DISTINCT_OPERATORS:-}"
+distinct_countries="${THREE_MACHINE_DISTINCT_COUNTRIES:-0}"
+locality_soft_bias="${THREE_MACHINE_LOCALITY_SOFT_BIAS:-0}"
+locality_country_bias="${THREE_MACHINE_COUNTRY_BIAS:-1.60}"
+locality_region_bias="${THREE_MACHINE_REGION_BIAS:-1.25}"
+locality_region_prefix_bias="${THREE_MACHINE_REGION_PREFIX_BIAS:-1.10}"
 require_issuer_quorum="${THREE_MACHINE_REQUIRE_ISSUER_QUORUM:-}"
 bundle_dir=""
+distinct_operators_set=0
+distinct_countries_set=0
+locality_soft_bias_set=0
+locality_country_bias_set=0
+locality_region_bias_set=0
+locality_region_prefix_bias_set=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -329,14 +383,57 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --path-profile)
+      path_profile="${2:-}"
+      shift 2
+      ;;
     --distinct-operators)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
         distinct_operators="${2:-}"
+        distinct_operators_set=1
         shift 2
       else
         distinct_operators="1"
+        distinct_operators_set=1
         shift
       fi
+      ;;
+    --distinct-countries)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+        distinct_countries="${2:-}"
+        distinct_countries_set=1
+        shift 2
+      else
+        distinct_countries="1"
+        distinct_countries_set=1
+        shift
+      fi
+      ;;
+    --locality-soft-bias)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+        locality_soft_bias="${2:-}"
+        locality_soft_bias_set=1
+        shift 2
+      else
+        locality_soft_bias="1"
+        locality_soft_bias_set=1
+        shift
+      fi
+      ;;
+    --country-bias)
+      locality_country_bias="${2:-}"
+      locality_country_bias_set=1
+      shift 2
+      ;;
+    --region-bias)
+      locality_region_bias="${2:-}"
+      locality_region_bias_set=1
+      shift 2
+      ;;
+    --region-prefix-bias)
+      locality_region_prefix_bias="${2:-}"
+      locality_region_prefix_bias_set=1
+      shift 2
       ;;
     --beta-profile)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
@@ -381,6 +478,33 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+normalized_path_profile="$(normalize_path_profile "$path_profile")" || {
+  echo "--path-profile must be one of: fast, balanced, privacy"
+  exit 2
+}
+if [[ -n "$normalized_path_profile" ]]; then
+  profile_values="$(path_profile_values "$normalized_path_profile")"
+  IFS='|' read -r profile_distinct profile_distinct_countries profile_locality_soft profile_country_bias profile_region_bias profile_region_prefix_bias <<<"$profile_values"
+  if [[ "$distinct_operators_set" -eq 0 ]]; then
+    distinct_operators="$profile_distinct"
+  fi
+  if [[ "$distinct_countries_set" -eq 0 ]]; then
+    distinct_countries="$profile_distinct_countries"
+  fi
+  if [[ "$locality_soft_bias_set" -eq 0 ]]; then
+    locality_soft_bias="$profile_locality_soft"
+  fi
+  if [[ "$locality_country_bias_set" -eq 0 ]]; then
+    locality_country_bias="$profile_country_bias"
+  fi
+  if [[ "$locality_region_bias_set" -eq 0 ]]; then
+    locality_region_bias="$profile_region_bias"
+  fi
+  if [[ "$locality_region_prefix_bias_set" -eq 0 ]]; then
+    locality_region_prefix_bias="$profile_region_prefix_bias"
+  fi
+fi
+
 if [[ "$beta_profile" != "0" && "$beta_profile" != "1" ]]; then
   echo "--beta-profile must be 0 or 1"
   exit 2
@@ -393,12 +517,24 @@ if [[ -n "$distinct_operators" && "$distinct_operators" != "0" && "$distinct_ope
   echo "--distinct-operators must be 0 or 1"
   exit 2
 fi
+if [[ "$distinct_countries" != "0" && "$distinct_countries" != "1" ]]; then
+  echo "--distinct-countries must be 0 or 1"
+  exit 2
+fi
+if [[ "$locality_soft_bias" != "0" && "$locality_soft_bias" != "1" ]]; then
+  echo "--locality-soft-bias must be 0 or 1"
+  exit 2
+fi
 if [[ -n "$require_issuer_quorum" && "$require_issuer_quorum" != "0" && "$require_issuer_quorum" != "1" ]]; then
   echo "--require-issuer-quorum must be 0 or 1"
   exit 2
 fi
 if [[ -n "$client_require_cross_operator_pair" && "$client_require_cross_operator_pair" != "0" && "$client_require_cross_operator_pair" != "1" ]]; then
   echo "--client-require-cross-operator-pair must be 0 or 1"
+  exit 2
+fi
+if ! [[ "$locality_country_bias" =~ ^[0-9]+([.][0-9]+)?$ && "$locality_region_bias" =~ ^[0-9]+([.][0-9]+)?$ && "$locality_region_prefix_bias" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+  echo "--country-bias, --region-bias and --region-prefix-bias must be numeric"
   exit 2
 fi
 if [[ -n "$client_subject" && -n "$client_anon_cred" ]]; then
@@ -545,7 +681,7 @@ exec > >(tee -a "$main_log") 2>&1
 
 echo "[pilot-runbook] started at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "[pilot-runbook] bundle_dir=$bundle_dir"
-echo "[pilot-runbook] beta_profile=$beta_profile prod_profile=$prod_profile rounds=$rounds pause_sec=$pause_sec distinct_operators=$distinct_operators require_issuer_quorum=$require_issuer_quorum"
+echo "[pilot-runbook] path_profile=${normalized_path_profile:-<none>} beta_profile=$beta_profile prod_profile=$prod_profile rounds=$rounds pause_sec=$pause_sec distinct_operators=$distinct_operators distinct_countries=$distinct_countries locality_soft_bias=$locality_soft_bias country_bias=$locality_country_bias region_bias=$locality_region_bias region_prefix_bias=$locality_region_prefix_bias require_issuer_quorum=$require_issuer_quorum"
 echo "[pilot-runbook] directory_a=$directory_a directory_b=$directory_b issuer_url=$issuer_url entry_url=$entry_url exit_url=$exit_url"
 if [[ -n "$issuer_a_url" || -n "$issuer_b_url" ]]; then
   echo "[pilot-runbook] issuer_a_url=$issuer_a_url issuer_b_url=$issuer_b_url"
@@ -554,9 +690,15 @@ fi
 cat >"$bundle_dir/metadata.txt" <<EOF
 started_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 bundle_dir=$bundle_dir
+path_profile=${normalized_path_profile}
 beta_profile=$beta_profile
 prod_profile=$prod_profile
 distinct_operators=$distinct_operators
+distinct_countries=$distinct_countries
+locality_soft_bias=$locality_soft_bias
+country_bias=$locality_country_bias
+region_bias=$locality_region_bias
+region_prefix_bias=$locality_region_prefix_bias
 require_issuer_quorum=$require_issuer_quorum
 directory_a=$directory_a
 directory_b=$directory_b
@@ -585,6 +727,11 @@ validate_cmd=(
   --client-min-exit-operators "$client_min_exit_operators"
   --client-require-cross-operator-pair "$client_require_cross_operator_pair"
   --distinct-operators "$distinct_operators"
+  --distinct-countries "$distinct_countries"
+  --locality-soft-bias "$locality_soft_bias"
+  --country-bias "$locality_country_bias"
+  --region-bias "$locality_region_bias"
+  --region-prefix-bias "$locality_region_prefix_bias"
   --require-issuer-quorum "$require_issuer_quorum"
   --beta-profile "$beta_profile"
   --prod-profile "$prod_profile"
@@ -633,6 +780,11 @@ soak_cmd=(
   --client-min-exit-operators "$client_min_exit_operators"
   --client-require-cross-operator-pair "$client_require_cross_operator_pair"
   --distinct-operators "$distinct_operators"
+  --distinct-countries "$distinct_countries"
+  --locality-soft-bias "$locality_soft_bias"
+  --country-bias "$locality_country_bias"
+  --region-bias "$locality_region_bias"
+  --region-prefix-bias "$locality_region_prefix_bias"
   --require-issuer-quorum "$require_issuer_quorum"
   --beta-profile "$beta_profile"
   --prod-profile "$prod_profile"

@@ -808,6 +808,10 @@ if [[ -z "$exit_wg_pub" ]]; then
   cat "$client_log"
   fail_step "wg_peer_parse" "unable to parse exit wg public key from client log"
 fi
+if [[ ! "$exit_wg_pub" =~ ^[A-Za-z0-9+/]{43}=$ ]]; then
+  cat "$client_log"
+  fail_step "wg_peer_parse" "parsed exit wg public key has invalid format: $exit_wg_pub"
+fi
 
 peer_ok=0
 for _ in $(seq 1 120); do

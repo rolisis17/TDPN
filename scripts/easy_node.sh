@@ -38,21 +38,43 @@ Usage:
   ./scripts/easy_node.sh wg-only-stack-status
   ./scripts/easy_node.sh wg-only-stack-down [--force-iface-cleanup [0|1]]
   ./scripts/easy_node.sh wg-only-stack-selftest [--strict-beta [0|1]] [--base-port N] [--timeout-sec N] [--min-selection-lines N] [--force-iface-reset [0|1]] [--cleanup-ifaces [0|1]] [--keep-stack [0|1]]
-  ./scripts/easy_node.sh client-test [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--exit-country CC] [--exit-region REGION] [--timeout-sec N] [--distinct-operators [0|1]] [--min-selection-lines N] [--min-entry-operators N] [--min-exit-operators N] [--require-cross-operator-pair [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]]
+  ./scripts/easy_node.sh client-test [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--exit-country CC] [--exit-region REGION] [--timeout-sec N] [--path-profile fast|balanced|privacy] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--min-selection-lines N] [--min-entry-operators N] [--min-exit-operators N] [--require-cross-operator-pair [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]]
   ./scripts/easy_node.sh client-vpn-preflight [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-urls URL[,URL...]] [--entry-url URL] [--exit-url URL] [--prod-profile [0|1]] [--interface IFACE] [--timeout-sec N] [--require-root [0|1]] [--operator-floor-check [0|1]] [--issuer-quorum-check [0|1]] [--issuer-min-operators N] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH]
-  ./scripts/easy_node.sh client-vpn-up [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-urls URL[,URL...]] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--distinct-operators [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]] [--operator-floor-check [0|1]] [--issuer-quorum-check [0|1]] [--issuer-min-operators N] [--interface IFACE] [--proxy-addr HOST:PORT] [--private-key-file PATH] [--allowed-ips CIDR] [--install-route [0|1]] [--startup-sync-timeout-sec N] [--ready-timeout-sec N] [--force-restart [0|1]] [--foreground [0|1]] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH] [--log-file PATH]
+  ./scripts/easy_node.sh client-vpn-up [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-urls URL[,URL...]] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--path-profile fast|balanced|privacy] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--exit-country CC] [--exit-region REGION] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--beta-profile [0|1]] [--prod-profile [0|1]] [--operator-floor-check [0|1]] [--issuer-quorum-check [0|1]] [--issuer-min-operators N] [--interface IFACE] [--proxy-addr HOST:PORT] [--private-key-file PATH] [--allowed-ips CIDR] [--install-route [0|1]] [--startup-sync-timeout-sec N] [--ready-timeout-sec N] [--force-restart [0|1]] [--foreground [0|1]] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH] [--log-file PATH]
   ./scripts/easy_node.sh client-vpn-status
   ./scripts/easy_node.sh client-vpn-down [--force-iface-cleanup [0|1]] [--iface IFACE] [--keep-key [0|1]]
-  ./scripts/easy_node.sh three-machine-validate [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-a-url URL] [--issuer-b-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--client-min-selection-lines N] [--client-min-entry-operators N] [--client-min-exit-operators N] [--client-require-cross-operator-pair [0|1]] [--exit-country CC] [--exit-region REGION] [--distinct-operators [0|1]] [--require-issuer-quorum [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]]
-  ./scripts/easy_node.sh three-machine-soak [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-a-url URL] [--issuer-b-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--rounds N] [--pause-sec N] [--fault-every N] [--fault-command CMD] [--continue-on-fail [0|1]] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--client-min-selection-lines N] [--client-min-entry-operators N] [--client-min-exit-operators N] [--client-require-cross-operator-pair [0|1]] [--exit-country CC] [--exit-region REGION] [--distinct-operators [0|1]] [--require-issuer-quorum [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]] [--report-file PATH]
+  ./scripts/easy_node.sh three-machine-validate [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-a-url URL] [--issuer-b-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--client-min-selection-lines N] [--client-min-entry-operators N] [--client-min-exit-operators N] [--client-require-cross-operator-pair [0|1]] [--exit-country CC] [--exit-region REGION] [--path-profile fast|balanced|privacy] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--require-issuer-quorum [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]]
+  ./scripts/easy_node.sh three-machine-soak [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-a-url URL] [--issuer-b-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--rounds N] [--pause-sec N] [--fault-every N] [--fault-command CMD] [--continue-on-fail [0|1]] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--client-min-selection-lines N] [--client-min-entry-operators N] [--client-min-exit-operators N] [--client-require-cross-operator-pair [0|1]] [--exit-country CC] [--exit-region REGION] [--path-profile fast|balanced|privacy] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--require-issuer-quorum [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]] [--report-file PATH]
   ./scripts/easy_node.sh three-machine-prod-gate [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--control-timeout-sec N] [--control-soak-rounds N] [--control-soak-pause-sec N] [--control-fault-every N] [--control-fault-command CMD] [--control-continue-on-fail [0|1]] [--wg-client-timeout-sec N] [--wg-session-sec N] [--wg-soak-rounds N] [--wg-soak-pause-sec N] [--wg-slo-profile off|recommended|strict] [--wg-max-consecutive-failures N] [--wg-max-round-duration-sec N] [--wg-max-recovery-sec N] [--wg-max-failure-class CLASS=N] [--wg-disallow-unknown-failure-class [0|1]] [--wg-strict-ingress-rehearsal [0|1]] [--wg-min-selection-lines N] [--wg-min-entry-operators N] [--wg-min-exit-operators N] [--wg-min-cross-operator-pairs N] [--wg-fault-every N] [--wg-fault-command CMD] [--wg-continue-on-fail [0|1]] [--wg-validate-summary-json PATH] [--wg-soak-summary-json PATH] [--gate-summary-json PATH] [--fault-every N] [--fault-command CMD] [--continue-on-fail [0|1]] [--strict-distinct [0|1]] [--skip-control-soak [0|1]] [--skip-wg [0|1]] [--skip-wg-soak [0|1]] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH] [--report-file PATH]
-  ./scripts/easy_node.sh three-machine-prod-bundle [--bundle-dir PATH] [three-machine-prod-gate args...]
+  ./scripts/easy_node.sh three-machine-prod-bundle [--bundle-dir PATH] [--preflight-check [0|1]] [--preflight-timeout-sec N] [--preflight-require-root [0|1]] [--bundle-verify-check [0|1]] [--bundle-verify-show-details [0|1]] [--run-report-json PATH] [--run-report-print [0|1]] [--incident-snapshot-on-fail [0|1]] [--incident-snapshot-include-docker-logs [0|1]] [--incident-snapshot-docker-log-lines N] [--incident-snapshot-timeout-sec N] [--incident-snapshot-compose-project NAME] [--signoff-check [0|1]] [--signoff-require-full-sequence [0|1]] [--signoff-require-wg-validate-ok [0|1]] [--signoff-require-wg-soak-ok [0|1]] [--signoff-max-wg-soak-failed-rounds N] [--signoff-show-json [0|1]] [three-machine-prod-gate args...]
   ./scripts/easy_node.sh three-machine-reminder
-  ./scripts/easy_node.sh prod-gate-check [--bundle-dir PATH] [--gate-summary-json PATH] [--require-full-sequence [0|1]] [--require-wg-validate-ok [0|1]] [--require-wg-soak-ok [0|1]] [--max-wg-soak-failed-rounds N] [--show-json [0|1]]
+  ./scripts/easy_node.sh prod-gate-check [--bundle-dir PATH] [--run-report-json PATH] [--gate-summary-json PATH] [--require-full-sequence [0|1]] [--require-wg-validate-ok [0|1]] [--require-wg-soak-ok [0|1]] [--require-preflight-ok [0|1]] [--require-bundle-ok [0|1]] [--require-integrity-ok [0|1]] [--require-signoff-ok [0|1]] [--require-incident-snapshot-on-fail [0|1]] [--require-incident-snapshot-artifacts [0|1]] [--max-wg-soak-failed-rounds N] [--show-json [0|1]]
+  ./scripts/easy_node.sh prod-gate-slo-summary [--run-report-json PATH] [--bundle-dir PATH] [--gate-summary-json PATH] [--wg-validate-summary-json PATH] [--wg-soak-summary-json PATH] [--require-full-sequence [0|1]] [--require-wg-validate-ok [0|1]] [--require-wg-soak-ok [0|1]] [--max-wg-soak-failed-rounds N] [--require-preflight-ok [0|1]] [--require-bundle-ok [0|1]] [--require-integrity-ok [0|1]] [--require-signoff-ok [0|1]] [--require-incident-snapshot-on-fail [0|1]] [--require-incident-snapshot-artifacts [0|1]] [--fail-on-no-go [0|1]] [--show-json [0|1]]
+  ./scripts/easy_node.sh prod-gate-slo-trend [--run-report-json PATH]... [--run-report-list FILE] [--reports-dir DIR] [--max-reports N] [--since-hours N] [--require-full-sequence [0|1]] [--require-wg-validate-ok [0|1]] [--require-wg-soak-ok [0|1]] [--max-wg-soak-failed-rounds N] [--require-preflight-ok [0|1]] [--require-bundle-ok [0|1]] [--require-integrity-ok [0|1]] [--require-signoff-ok [0|1]] [--require-incident-snapshot-on-fail [0|1]] [--require-incident-snapshot-artifacts [0|1]] [--fail-on-any-no-go [0|1]] [--min-go-rate-pct N] [--show-details [0|1]] [--show-top-reasons N] [--summary-json PATH] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh prod-gate-slo-alert [--trend-summary-json PATH] [--run-report-json PATH]... [--run-report-list FILE] [--reports-dir DIR] [--max-reports N] [--since-hours N] [--require-full-sequence [0|1]] [--require-wg-validate-ok [0|1]] [--require-wg-soak-ok [0|1]] [--max-wg-soak-failed-rounds N] [--require-preflight-ok [0|1]] [--require-bundle-ok [0|1]] [--require-integrity-ok [0|1]] [--require-signoff-ok [0|1]] [--require-incident-snapshot-on-fail [0|1]] [--require-incident-snapshot-artifacts [0|1]] [--warn-go-rate-pct N] [--critical-go-rate-pct N] [--warn-no-go-count N] [--critical-no-go-count N] [--warn-eval-errors N] [--critical-eval-errors N] [--fail-on-warn [0|1]] [--fail-on-critical [0|1]] [--show-top-reasons N] [--summary-json PATH] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh prod-gate-slo-dashboard [--run-report-json PATH]... [--run-report-list FILE] [--reports-dir DIR] [--max-reports N] [--since-hours N] [--require-full-sequence [0|1]] [--require-wg-validate-ok [0|1]] [--require-wg-soak-ok [0|1]] [--max-wg-soak-failed-rounds N] [--require-preflight-ok [0|1]] [--require-bundle-ok [0|1]] [--require-integrity-ok [0|1]] [--require-signoff-ok [0|1]] [--require-incident-snapshot-on-fail [0|1]] [--require-incident-snapshot-artifacts [0|1]] [--fail-on-any-no-go [0|1]] [--min-go-rate-pct N] [--show-top-reasons N] [--warn-go-rate-pct N] [--critical-go-rate-pct N] [--warn-no-go-count N] [--critical-no-go-count N] [--warn-eval-errors N] [--critical-eval-errors N] [--fail-on-warn [0|1]] [--fail-on-critical [0|1]] [--trend-summary-json PATH] [--alert-summary-json PATH] [--dashboard-md PATH] [--print-dashboard [0|1]] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh prod-gate-bundle-verify [--run-report-json PATH] [--bundle-dir PATH] [--bundle-tar PATH] [--bundle-tar-sha256-file PATH] [--check-tar-sha256 [0|1]] [--check-manifest [0|1]] [--show-details [0|1]]
+  ./scripts/easy_node.sh prod-gate-signoff [--run-report-json PATH] [--bundle-dir PATH] [--bundle-tar PATH] [--bundle-tar-sha256-file PATH] [--check-tar-sha256 [0|1]] [--check-manifest [0|1]] [--show-integrity-details [0|1]] [--gate-summary-json PATH] [--require-full-sequence [0|1]] [--require-wg-validate-ok [0|1]] [--require-wg-soak-ok [0|1]] [--require-preflight-ok [0|1]] [--require-bundle-ok [0|1]] [--require-integrity-ok [0|1]] [--require-signoff-ok [0|1]] [--require-incident-snapshot-on-fail [0|1]] [--require-incident-snapshot-artifacts [0|1]] [--max-wg-soak-failed-rounds N] [--show-json [0|1]]
+  ./scripts/easy_node.sh prod-pilot-cohort-bundle-verify [--summary-json PATH] [--reports-dir PATH] [--bundle-tar PATH] [--bundle-sha256-file PATH] [--bundle-manifest-json PATH] [--check-tar-sha256 [0|1]] [--check-manifest [0|1]] [--show-details [0|1]]
+  ./scripts/easy_node.sh prod-pilot-cohort-check [--summary-json PATH] [--reports-dir PATH] [--require-status-ok [0|1]] [--require-all-rounds-ok [0|1]] [--max-round-failures N] [--require-trend-go [0|1]] [--min-go-rate-pct N] [--max-alert-severity OK|WARN|CRITICAL] [--require-bundle-created [0|1]] [--require-bundle-manifest [0|1]] [--require-incident-snapshot-on-fail [0|1]] [--require-incident-snapshot-artifacts [0|1]] [--show-json [0|1]]
+  ./scripts/easy_node.sh prod-pilot-cohort-signoff [--summary-json PATH] [--reports-dir PATH] [--bundle-tar PATH] [--bundle-sha256-file PATH] [--bundle-manifest-json PATH] [--check-tar-sha256 [0|1]] [--check-manifest [0|1]] [--show-integrity-details [0|1]] [--require-status-ok [0|1]] [--require-all-rounds-ok [0|1]] [--max-round-failures N] [--require-trend-go [0|1]] [--min-go-rate-pct N] [--max-alert-severity OK|WARN|CRITICAL] [--require-bundle-created [0|1]] [--require-bundle-manifest [0|1]] [--require-incident-snapshot-on-fail [0|1]] [--require-incident-snapshot-artifacts [0|1]] [--show-json [0|1]]
   ./scripts/easy_node.sh prod-wg-validate [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--exit-a-url URL] [--exit-b-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--control-timeout-sec N] [--client-timeout-sec N] [--wg-session-sec N] [--client-iface IFACE] [--client-proxy-addr HOST:PORT] [--client-inner-source udp|synthetic] [--inject-attempts N] [--strict-distinct [0|1]] [--skip-control-plane-check [0|1]] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH] [--summary-json PATH] [--report-file PATH]
   ./scripts/easy_node.sh prod-wg-soak [--rounds N] [--pause-sec N] [--fault-every N] [--fault-command CMD] [--continue-on-fail [0|1]] [--max-consecutive-failures N] [--strict-ingress-rehearsal [0|1]] [--summary-json PATH] [--report-file PATH] [prod-wg-validate args...]
   ./scripts/easy_node.sh prod-wg-strict-ingress-rehearsal [prod-wg-soak/prod-wg-validate args...]
-  ./scripts/easy_node.sh pilot-runbook [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-a-url URL] [--issuer-b-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--rounds N] [--pause-sec N] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--client-min-selection-lines N] [--client-min-entry-operators N] [--client-min-exit-operators N] [--client-require-cross-operator-pair [0|1]] [--distinct-operators [0|1]] [--require-issuer-quorum [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]] [--bundle-dir PATH]
+  ./scripts/easy_node.sh prod-pilot-runbook [three-machine-prod-bundle args...]
+  ./scripts/easy_node.sh prod-pilot-cohort-runbook [--rounds N] [--pause-sec N] [--continue-on-fail [0|1]] [--require-all-rounds-ok [0|1]] [--reports-dir PATH] [--summary-json PATH] [--trend-summary-json PATH] [--alert-summary-json PATH] [--trend-min-go-rate-pct N] [--trend-fail-on-any-no-go [0|1]] [--trend-max-reports N] [--trend-since-hours N] [--trend-show-top-reasons N] [--warn-go-rate-pct N] [--critical-go-rate-pct N] [--warn-no-go-count N] [--critical-no-go-count N] [--warn-eval-errors N] [--critical-eval-errors N] [--max-alert-severity OK|WARN|CRITICAL] [--bundle-outputs [0|1]] [--bundle-fail-close [0|1]] [--bundle-tar PATH] [--bundle-sha256-file PATH] [--bundle-manifest-json PATH] [--print-summary-json [0|1]] [-- <prod-pilot-runbook args...>]
+  ./scripts/easy_node.sh prod-pilot-cohort-quick-check [--run-report-json PATH] [--reports-dir PATH] [--require-status-ok [0|1]] [--require-runbook-ok [0|1]] [--require-signoff-attempted [0|1]] [--require-signoff-ok [0|1]] [--require-summary-json [0|1]] [--require-summary-status-ok [0|1]] [--max-duration-sec N] [--show-json [0|1]]
+  ./scripts/easy_node.sh prod-pilot-cohort-quick-trend [--run-report-json PATH]... [--run-report-list FILE] [--reports-dir DIR] [--max-reports N] [--since-hours N] [--require-status-ok [0|1]] [--require-runbook-ok [0|1]] [--require-signoff-attempted [0|1]] [--require-signoff-ok [0|1]] [--require-summary-json [0|1]] [--require-summary-status-ok [0|1]] [--max-duration-sec N] [--fail-on-any-no-go [0|1]] [--min-go-rate-pct N] [--show-details [0|1]] [--show-top-reasons N] [--summary-json PATH] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh prod-pilot-cohort-quick-alert [--trend-summary-json PATH] [--run-report-json PATH]... [--run-report-list FILE] [--reports-dir DIR] [--max-reports N] [--since-hours N] [--require-status-ok [0|1]] [--require-runbook-ok [0|1]] [--require-signoff-attempted [0|1]] [--require-signoff-ok [0|1]] [--require-summary-json [0|1]] [--require-summary-status-ok [0|1]] [--max-duration-sec N] [--warn-go-rate-pct N] [--critical-go-rate-pct N] [--warn-no-go-count N] [--critical-no-go-count N] [--warn-eval-errors N] [--critical-eval-errors N] [--fail-on-warn [0|1]] [--fail-on-critical [0|1]] [--show-top-reasons N] [--summary-json PATH] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh prod-pilot-cohort-quick-dashboard [--run-report-json PATH]... [--run-report-list FILE] [--reports-dir DIR] [--max-reports N] [--since-hours N] [--require-status-ok [0|1]] [--require-runbook-ok [0|1]] [--require-signoff-attempted [0|1]] [--require-signoff-ok [0|1]] [--require-summary-json [0|1]] [--require-summary-status-ok [0|1]] [--max-duration-sec N] [--fail-on-any-no-go [0|1]] [--min-go-rate-pct N] [--show-top-reasons N] [--warn-go-rate-pct N] [--critical-go-rate-pct N] [--warn-no-go-count N] [--critical-no-go-count N] [--warn-eval-errors N] [--critical-eval-errors N] [--fail-on-warn [0|1]] [--fail-on-critical [0|1]] [--trend-summary-json PATH] [--alert-summary-json PATH] [--dashboard-md PATH] [--print-dashboard [0|1]] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh prod-pilot-cohort-quick-signoff [--run-report-json PATH] [--reports-dir PATH] [--check-latest [0|1]] [--check-trend [0|1]] [--check-alert [0|1]] [--require-status-ok [0|1]] [--require-runbook-ok [0|1]] [--require-signoff-attempted [0|1]] [--require-signoff-ok [0|1]] [--require-summary-json [0|1]] [--require-summary-status-ok [0|1]] [--max-duration-sec N] [--max-reports N] [--since-hours N] [--fail-on-any-no-go [0|1]] [--min-go-rate-pct N] [--warn-go-rate-pct N] [--critical-go-rate-pct N] [--warn-no-go-count N] [--critical-no-go-count N] [--warn-eval-errors N] [--critical-eval-errors N] [--max-alert-severity OK|WARN|CRITICAL] [--trend-summary-json PATH] [--alert-summary-json PATH] [--signoff-json PATH] [--show-json [0|1]]
+  ./scripts/easy_node.sh prod-pilot-cohort-quick-runbook [--bootstrap-directory URL] [--subject ID] [--rounds N] [--pause-sec N] [--continue-on-fail [0|1]] [--require-all-rounds-ok [0|1]] [--trend-min-go-rate-pct N] [--max-alert-severity OK|WARN|CRITICAL] [--reports-dir PATH] [--summary-json PATH] [--run-report-json PATH] [--signoff-json PATH] [--trend-summary-json PATH] [--alert-summary-json PATH] [--dashboard-md PATH] [--signoff-max-reports N] [--signoff-since-hours N] [--signoff-fail-on-any-no-go [0|1]] [--signoff-min-go-rate-pct N] [--dashboard-enable [0|1]] [--dashboard-fail-close [0|1]] [--dashboard-print [0|1]] [--dashboard-print-summary-json [0|1]] [--show-json [0|1]] [-- <prod-pilot-runbook extra args...>]
+  ./scripts/easy_node.sh prod-pilot-cohort-quick [--bootstrap-directory URL] [--subject ID] [--rounds N] [--pause-sec N] [--continue-on-fail [0|1]] [--require-all-rounds-ok [0|1]] [--trend-min-go-rate-pct N] [--max-alert-severity OK|WARN|CRITICAL] [--reports-dir PATH] [--summary-json PATH] [--run-report-json PATH] [--print-run-report [0|1]] [--show-json [0|1]] [-- <prod-pilot-runbook extra args...>]
+  ./scripts/easy_node.sh prod-key-rotation-runbook [--mode auto|authority|provider] [--backup-dir PATH] [--summary-json PATH] [--preflight-check [0|1]] [--preflight-live [0|1]] [--preflight-timeout-sec N] [--rotate-server-secrets [0|1]] [--rotate-admin-signing [0|1]] [--key-history N] [--restart [0|1]] [--restart-issuer [0|1]] [--show-secrets [0|1]] [--rollback-on-fail [0|1]] [--restart-after-rollback [0|1]] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh prod-upgrade-runbook [--mode auto|authority|provider] [--backup-dir PATH] [--summary-json PATH] [--preflight-check [0|1]] [--preflight-live [0|1]] [--preflight-timeout-sec N] [--compose-pull [0|1]] [--compose-build [0|1]] [--restart [0|1]] [--rollback-on-fail [0|1]] [--restart-after-rollback [0|1]] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh prod-operator-lifecycle-runbook [--action onboard|offboard] [--mode auto|authority|provider] [--public-host HOST] [--operator-id ID] [--issuer-id ID] [--authority-directory URL] [--authority-issuer URL] [--peer-directories URLS] [--bootstrap-directory URL] [--peer-identity-strict 0|1|auto] [--min-peer-operators N] [--client-allowlist [0|1]] [--allow-anon-cred [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]] [--preflight-check [0|1]] [--preflight-timeout-sec N] [--health-check [0|1]] [--health-timeout-sec N] [--directory-url URL] [--verify-relays [0|1]] [--verify-absent [0|1]] [--verify-relay-timeout-sec N] [--verify-relay-min-count N] [--summary-json PATH] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh incident-snapshot [--bundle-dir PATH] [--mode auto|authority|provider|client] [--env-file PATH] [--directory-url URL] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--compose-project NAME] [--include-docker-logs [0|1]] [--docker-log-lines N] [--timeout-sec N]
+  ./scripts/easy_node.sh pilot-runbook [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-a-url URL] [--issuer-b-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--rounds N] [--pause-sec N] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--client-min-selection-lines N] [--client-min-entry-operators N] [--client-min-exit-operators N] [--client-require-cross-operator-pair [0|1]] [--path-profile fast|balanced|privacy] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--require-issuer-quorum [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]] [--bundle-dir PATH]
   ./scripts/easy_node.sh invite-generate [--issuer-url URL] [--admin-token TOKEN] [--admin-key-file FILE] [--admin-key-id ID] [--count N] [--prefix PREFIX] [--tier 1|2|3]
   ./scripts/easy_node.sh invite-check --key KEY [--issuer-url URL] [--admin-token TOKEN] [--admin-key-file FILE] [--admin-key-id ID]
   ./scripts/easy_node.sh invite-disable --key KEY [--issuer-url URL] [--admin-token TOKEN] [--admin-key-file FILE] [--admin-key-id ID]
@@ -62,7 +84,7 @@ Usage:
   ./scripts/easy_node.sh bootstrap-mtls [--out-dir DIR] [--public-host HOST] [--san HOST] [--days N] [--rotate-leaf [0|1]] [--rotate-ca [0|1]]
   ./scripts/easy_node.sh machine-a-test [--public-host HOST] [--report-file PATH]
   ./scripts/easy_node.sh machine-b-test --peer-directory-a URL [--public-host HOST] [--min-operators N] [--federation-timeout-sec N] [--report-file PATH]
-  ./scripts/easy_node.sh machine-c-test [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--exit-country CC] [--exit-region REGION] [--distinct-operators [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]] [--report-file PATH]
+  ./scripts/easy_node.sh machine-c-test [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--exit-country CC] [--exit-region REGION] [--path-profile fast|balanced|privacy] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--beta-profile [0|1]] [--prod-profile [0|1]] [--report-file PATH]
   ./scripts/easy_node.sh discover-hosts --bootstrap-directory URL [--wait-sec N] [--min-hosts N] [--write-config [0|1]]
 
 Notes:
@@ -83,11 +105,33 @@ Notes:
   - client-vpn-preflight checks host prerequisites, endpoint reachability, and optional operator/issuer quorum diversity before starting client-vpn-up.
   - client-vpn-up runs a real local VPN client (host WireGuard interface) for external testers; use client-vpn-down to stop/cleanup.
   - three-machine-prod-gate runs production-grade 3-machine sequencing (strict control validate + control soak + real WG validate + WG soak).
-  - three-machine-prod-bundle runs the same gate and always produces a shareable diagnostics tarball bundle.
+  - three-machine-prod-bundle runs strict machine-C preflight by default, then runs the same gate and always produces a shareable diagnostics tarball bundle; disable preflight only for diagnostics with --preflight-check=0, bundle integrity verification is enabled by default (disable only for diagnostics with --bundle-verify-check=0), emit a one-command run report JSON by default (override with --run-report-json), capture an automatic incident snapshot on failed runs by default (disable with --incident-snapshot-on-fail=0), and enable fail-close artifact signoff inline with --signoff-check=1.
   - three-machine-reminder prints the true 3-machine production test checklist.
-  - prod-gate-check verifies gate/bundle JSON artifacts against signoff policy and fails fast when criteria are not met.
+  - prod-gate-check verifies gate/bundle JSON artifacts against signoff policy and fails fast when criteria are not met (recommended input: --run-report-json from three-machine-prod-bundle).
+  - prod-gate-slo-summary prints an operator SLO decision summary (GO/NO-GO) from prod-gate artifacts and can optionally fail-close with --fail-on-no-go=1.
+  - prod-gate-slo-trend computes GO/NO-GO trend across multiple run reports with optional fail-close thresholds (any NO-GO or minimum GO-rate percent), optional time window filtering, and machine-readable summary JSON output.
+  - prod-gate-slo-alert converts SLO trend metrics into operator alert severity (OK/WARN/CRITICAL) with configurable thresholds and optional fail-close exits.
+  - prod-gate-slo-dashboard runs trend + alert and writes a single markdown operator dashboard plus trend/alert JSON artifacts.
+  - prod-gate-bundle-verify verifies bundle integrity artifacts (manifest + tarball checksum sidecar), recommended input: --run-report-json.
+  - prod-gate-signoff runs prod-gate-bundle-verify + prod-gate-check fail-closed in one command.
+  - prod-pilot-cohort-bundle-verify verifies sustained-pilot cohort bundle artifacts (tar checksum + manifest + round structure), recommended input: --summary-json.
+  - prod-pilot-cohort-check evaluates sustained-pilot cohort summary artifacts against fail-close signoff policy.
+  - prod-pilot-cohort-signoff runs prod-pilot-cohort-bundle-verify + prod-pilot-cohort-check fail-closed in one command.
+  - prod-pilot-cohort-quick-check verifies quick run-report artifacts and enforces fail-close quick signoff policy.
+  - prod-pilot-cohort-quick-trend computes GO/NO-GO trend across quick run reports with fail-close thresholds and JSON output.
+  - prod-pilot-cohort-quick-alert converts quick trend metrics into OK/WARN/CRITICAL severity with configurable fail-close exits.
+  - prod-pilot-cohort-quick-dashboard writes one quick-mode operator dashboard (trend JSON + alert JSON + markdown).
+  - prod-pilot-cohort-quick-signoff runs quick-check + quick-trend + quick-alert in one fail-closed command with max-alert-severity policy.
+  - prod-pilot-cohort-quick-runbook runs quick execution + quick-signoff + optional dashboard in one operator command and writes a runbook summary artifact.
   - prod-wg-validate/prod-wg-soak run real WireGuard dataplane validation from machine C (Linux root) in production strict profile.
   - prod-wg-strict-ingress-rehearsal runs a controlled negative rehearsal that should fail with failure class strict_ingress_policy.
+  - prod-pilot-runbook wraps three-machine-prod-bundle with strict fail-closed production defaults for machine-C pilot runs and auto-generates SLO dashboard artifacts by default; append your own args to override.
+  - prod-pilot-cohort-runbook runs sustained pilot rounds (multiple prod-pilot-runbook executions) and aggregates trend/alert summaries for cohort signoff, including fail-close alert-severity policy and optional tar+sha256+manifest cohort bundle output.
+  - prod-pilot-cohort-quick runs one-command sustained pilot + fail-closed cohort signoff with minimal operator flags and emits a quick run report JSON artifact.
+  - prod-key-rotation-runbook performs production key/secret rotation with backup, preflight checks, and rollback support.
+  - prod-upgrade-runbook performs production compose upgrade flow (pull/build/restart) with backup, preflight checks, and rollback support.
+  - prod-operator-lifecycle-runbook performs repeatable operator onboarding/offboarding with optional preflight, health checks, and relay visibility checks.
+  - incident-snapshot captures a shareable incident bundle (endpoint probes + docker/system snapshots) for operator debugging.
   - bootstrap discovery mode lets you provide one directory URL and auto-discover other server hosts.
   - machine-a-test/machine-b-test/machine-c-test are machine-role-specific automated validations with optional report files.
   - default logs are written to ./.easy-node-logs (override with EASY_NODE_LOG_DIR).
@@ -218,6 +262,42 @@ trim_url() {
     value="${value%/}"
   done
   echo "$value"
+}
+
+normalize_path_profile() {
+  local profile
+  profile="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+  case "$profile" in
+    fast|balanced|privacy)
+      printf '%s\n' "$profile"
+      ;;
+    "")
+      printf '%s\n' ""
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+path_profile_values() {
+  local profile
+  profile="$(normalize_path_profile "${1:-}")" || return 1
+  case "$profile" in
+    fast)
+      # distinct_operators|distinct_countries|locality_soft_bias|country_bias|region_bias|region_prefix_bias
+      printf '%s\n' "1|0|1|1.80|1.35|1.15"
+      ;;
+    privacy)
+      printf '%s\n' "1|1|0|1.60|1.25|1.10"
+      ;;
+    balanced|"")
+      printf '%s\n' "1|0|1|1.50|1.25|1.10"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
 }
 
 hostport_from_url() {
@@ -1228,15 +1308,25 @@ DIRECTORY_ISSUER_MIN_OPERATORS=2
 DIRECTORY_ISSUER_TRUST_MIN_VOTES=2
 DIRECTORY_ISSUER_DISPUTE_MIN_VOTES=2
 DIRECTORY_ISSUER_APPEAL_MIN_VOTES=2
+DIRECTORY_PEER_DISPUTE_MIN_VOTES=2
+DIRECTORY_PEER_APPEAL_MIN_VOTES=2
+DIRECTORY_ADJUDICATION_META_MIN_VOTES=2
 DIRECTORY_FINAL_ADJUDICATION_MIN_OPERATORS=2
 DIRECTORY_FINAL_ADJUDICATION_MIN_SOURCES=2
 DIRECTORY_FINAL_DISPUTE_MIN_VOTES=2
 DIRECTORY_FINAL_APPEAL_MIN_VOTES=2
+DIRECTORY_FINAL_ADJUDICATION_MIN_RATIO=0.67
+DIRECTORY_DISPUTE_MAX_TTL_SEC=259200
+DIRECTORY_APPEAL_MAX_TTL_SEC=259200
 DIRECTORY_KEY_ROTATE_SEC=86400
 ISSUER_URLS=${issuer_urls_csv}
 ENTRY_OPERATOR_ID=${operator_id}
 ENTRY_LIVE_WG_MODE=1
 WG_BACKEND=command
+ENTRY_OPEN_RPS=12
+ENTRY_BAN_THRESHOLD=3
+ENTRY_BAN_SEC=90
+ENTRY_MAX_CONCURRENT_OPENS=96
 EXIT_WG_PRIVATE_KEY_PATH=${exit_wg_private_key_path}
 EXIT_WG_INTERFACE=${exit_wg_interface}
 EXIT_WG_AUTO_CREATE_INTERFACE=1
@@ -1359,15 +1449,25 @@ DIRECTORY_ISSUER_MIN_OPERATORS=2
 DIRECTORY_ISSUER_TRUST_MIN_VOTES=2
 DIRECTORY_ISSUER_DISPUTE_MIN_VOTES=2
 DIRECTORY_ISSUER_APPEAL_MIN_VOTES=2
+DIRECTORY_PEER_DISPUTE_MIN_VOTES=2
+DIRECTORY_PEER_APPEAL_MIN_VOTES=2
+DIRECTORY_ADJUDICATION_META_MIN_VOTES=2
 DIRECTORY_FINAL_ADJUDICATION_MIN_OPERATORS=2
 DIRECTORY_FINAL_ADJUDICATION_MIN_SOURCES=2
 DIRECTORY_FINAL_DISPUTE_MIN_VOTES=2
 DIRECTORY_FINAL_APPEAL_MIN_VOTES=2
+DIRECTORY_FINAL_ADJUDICATION_MIN_RATIO=0.67
+DIRECTORY_DISPUTE_MAX_TTL_SEC=259200
+DIRECTORY_APPEAL_MAX_TTL_SEC=259200
 DIRECTORY_KEY_ROTATE_SEC=86400
 ISSUER_URLS=${issuer_urls_csv}
 ENTRY_OPERATOR_ID=${operator_id}
 ENTRY_LIVE_WG_MODE=1
 WG_BACKEND=command
+ENTRY_OPEN_RPS=12
+ENTRY_BAN_THRESHOLD=3
+ENTRY_BAN_SEC=90
+ENTRY_MAX_CONCURRENT_OPENS=96
 EXIT_WG_PRIVATE_KEY_PATH=${exit_wg_private_key_path}
 EXIT_WG_INTERFACE=${exit_wg_interface}
 EXIT_WG_AUTO_CREATE_INTERFACE=1
@@ -3413,12 +3513,806 @@ three_machine_prod_gate() {
 three_machine_prod_bundle() {
   ensure_deps_or_die
   local bundle_script="${THREE_MACHINE_PROD_BUNDLE_SCRIPT:-$ROOT_DIR/scripts/prod_gate_bundle.sh}"
-  "$bundle_script" "$@"
+  local verify_script="${THREE_MACHINE_PROD_GATE_BUNDLE_VERIFY_SCRIPT:-$ROOT_DIR/scripts/prod_gate_bundle_verify.sh}"
+  local preflight_script="${THREE_MACHINE_PROD_BUNDLE_PREFLIGHT_SCRIPT:-}"
+  local preflight_check="${EASY_NODE_PROD_BUNDLE_PREFLIGHT_CHECK:-1}"
+  local preflight_timeout_sec="${EASY_NODE_PROD_BUNDLE_PREFLIGHT_TIMEOUT_SEC:-12}"
+  local preflight_require_root="${EASY_NODE_PROD_BUNDLE_PREFLIGHT_REQUIRE_ROOT:-1}"
+  local bundle_verify_check="${EASY_NODE_PROD_BUNDLE_VERIFY_CHECK:-1}"
+  local bundle_verify_show_details="${EASY_NODE_PROD_BUNDLE_VERIFY_SHOW_DETAILS:-0}"
+  local run_report_json="${EASY_NODE_PROD_BUNDLE_RUN_REPORT_JSON:-}"
+  local run_report_print="${EASY_NODE_PROD_BUNDLE_RUN_REPORT_PRINT:-1}"
+  local incident_snapshot_on_fail="${EASY_NODE_PROD_BUNDLE_INCIDENT_SNAPSHOT_ON_FAIL:-1}"
+  local incident_snapshot_include_docker_logs="${EASY_NODE_PROD_BUNDLE_INCIDENT_SNAPSHOT_INCLUDE_DOCKER_LOGS:-1}"
+  local incident_snapshot_docker_log_lines="${EASY_NODE_PROD_BUNDLE_INCIDENT_SNAPSHOT_DOCKER_LOG_LINES:-120}"
+  local incident_snapshot_timeout_sec="${EASY_NODE_PROD_BUNDLE_INCIDENT_SNAPSHOT_TIMEOUT_SEC:-8}"
+  local incident_snapshot_compose_project="${EASY_NODE_PROD_BUNDLE_INCIDENT_SNAPSHOT_COMPOSE_PROJECT:-deploy}"
+  local snapshot_script="${INCIDENT_SNAPSHOT_SCRIPT:-$ROOT_DIR/scripts/incident_snapshot.sh}"
+  local skip_wg="0"
+  local discovery_wait_sec="${EASY_NODE_DISCOVERY_WAIT_SEC:-20}"
+  local bootstrap_directory=""
+  local bundle_dir=""
+  local directory_a=""
+  local directory_b=""
+  local issuer_url=""
+  local entry_url=""
+  local exit_url=""
+  local mtls_ca_file="$DEPLOY_DIR/tls/ca.crt"
+  local mtls_client_cert_file="$DEPLOY_DIR/tls/client.crt"
+  local mtls_client_key_file="$DEPLOY_DIR/tls/client.key"
+  local -a bundle_args=()
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --preflight-check)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+          preflight_check="${2:-}"
+          shift 2
+        else
+          preflight_check="1"
+          shift
+        fi
+        ;;
+      --preflight-timeout-sec)
+        preflight_timeout_sec="${2:-}"
+        shift 2
+        ;;
+      --preflight-require-root)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+          preflight_require_root="${2:-}"
+          shift 2
+        else
+          preflight_require_root="1"
+          shift
+        fi
+        ;;
+      --bundle-verify-check)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+          bundle_verify_check="${2:-}"
+          shift 2
+        else
+          bundle_verify_check="1"
+          shift
+        fi
+        ;;
+      --bundle-verify-show-details)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+          bundle_verify_show_details="${2:-}"
+          shift 2
+        else
+          bundle_verify_show_details="1"
+          shift
+        fi
+        ;;
+      --run-report-json)
+        run_report_json="${2:-}"
+        shift 2
+        ;;
+      --run-report-print)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+          run_report_print="${2:-}"
+          shift 2
+        else
+          run_report_print="1"
+          shift
+        fi
+        ;;
+      --incident-snapshot-on-fail)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+          incident_snapshot_on_fail="${2:-}"
+          shift 2
+        else
+          incident_snapshot_on_fail="1"
+          shift
+        fi
+        ;;
+      --incident-snapshot-include-docker-logs)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+          incident_snapshot_include_docker_logs="${2:-}"
+          shift 2
+        else
+          incident_snapshot_include_docker_logs="1"
+          shift
+        fi
+        ;;
+      --incident-snapshot-docker-log-lines)
+        incident_snapshot_docker_log_lines="${2:-}"
+        shift 2
+        ;;
+      --incident-snapshot-timeout-sec)
+        incident_snapshot_timeout_sec="${2:-}"
+        shift 2
+        ;;
+      --incident-snapshot-compose-project)
+        incident_snapshot_compose_project="${2:-}"
+        shift 2
+        ;;
+      --bundle-dir)
+        bundle_dir="${2:-}"
+        shift 2
+        ;;
+      --bootstrap-directory)
+        bootstrap_directory="${2:-}"
+        bundle_args+=("$1" "${2:-}")
+        shift 2
+        ;;
+      --directory-a)
+        directory_a="${2:-}"
+        bundle_args+=("$1" "${2:-}")
+        shift 2
+        ;;
+      --directory-b)
+        directory_b="${2:-}"
+        bundle_args+=("$1" "${2:-}")
+        shift 2
+        ;;
+      --issuer-url)
+        issuer_url="${2:-}"
+        bundle_args+=("$1" "${2:-}")
+        shift 2
+        ;;
+      --entry-url)
+        entry_url="${2:-}"
+        bundle_args+=("$1" "${2:-}")
+        shift 2
+        ;;
+      --exit-url)
+        exit_url="${2:-}"
+        bundle_args+=("$1" "${2:-}")
+        shift 2
+        ;;
+      --discovery-wait-sec)
+        discovery_wait_sec="${2:-}"
+        bundle_args+=("$1" "${2:-}")
+        shift 2
+        ;;
+      --mtls-ca-file)
+        mtls_ca_file="${2:-}"
+        bundle_args+=("$1" "${2:-}")
+        shift 2
+        ;;
+      --mtls-client-cert-file)
+        mtls_client_cert_file="${2:-}"
+        bundle_args+=("$1" "${2:-}")
+        shift 2
+        ;;
+      --mtls-client-key-file)
+        mtls_client_key_file="${2:-}"
+        bundle_args+=("$1" "${2:-}")
+        shift 2
+        ;;
+      --skip-wg)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+          skip_wg="${2:-}"
+          bundle_args+=("$1" "${2:-}")
+          shift 2
+        else
+          skip_wg="1"
+          bundle_args+=("$1" "1")
+          shift
+        fi
+        ;;
+      *)
+        bundle_args+=("$1")
+        shift
+        ;;
+    esac
+  done
+
+  if [[ "$preflight_check" != "0" && "$preflight_check" != "1" ]]; then
+    echo "three-machine-prod-bundle requires --preflight-check 0 or 1"
+    exit 2
+  fi
+  if [[ "$preflight_require_root" != "0" && "$preflight_require_root" != "1" ]]; then
+    echo "three-machine-prod-bundle requires --preflight-require-root 0 or 1"
+    exit 2
+  fi
+  if [[ "$bundle_verify_check" != "0" && "$bundle_verify_check" != "1" ]]; then
+    echo "three-machine-prod-bundle requires --bundle-verify-check 0 or 1"
+    exit 2
+  fi
+  if [[ "$bundle_verify_show_details" != "0" && "$bundle_verify_show_details" != "1" ]]; then
+    echo "three-machine-prod-bundle requires --bundle-verify-show-details 0 or 1"
+    exit 2
+  fi
+  if [[ "$run_report_print" != "0" && "$run_report_print" != "1" ]]; then
+    echo "three-machine-prod-bundle requires --run-report-print 0 or 1"
+    exit 2
+  fi
+  if [[ "$incident_snapshot_on_fail" != "0" && "$incident_snapshot_on_fail" != "1" ]]; then
+    echo "three-machine-prod-bundle requires --incident-snapshot-on-fail 0 or 1"
+    exit 2
+  fi
+  if [[ "$incident_snapshot_include_docker_logs" != "0" && "$incident_snapshot_include_docker_logs" != "1" ]]; then
+    echo "three-machine-prod-bundle requires --incident-snapshot-include-docker-logs 0 or 1"
+    exit 2
+  fi
+  if [[ ! "$preflight_timeout_sec" =~ ^[0-9]+$ ]] || ((preflight_timeout_sec < 1)); then
+    echo "three-machine-prod-bundle requires --preflight-timeout-sec >= 1"
+    exit 2
+  fi
+  if [[ ! "$incident_snapshot_docker_log_lines" =~ ^[0-9]+$ ]] || ((incident_snapshot_docker_log_lines < 1)); then
+    echo "three-machine-prod-bundle requires --incident-snapshot-docker-log-lines >= 1"
+    exit 2
+  fi
+  if [[ ! "$incident_snapshot_timeout_sec" =~ ^[0-9]+$ ]] || ((incident_snapshot_timeout_sec < 1)); then
+    echo "three-machine-prod-bundle requires --incident-snapshot-timeout-sec >= 1"
+    exit 2
+  fi
+  if [[ -z "$bundle_dir" ]]; then
+    bundle_dir="$(prepare_log_dir)/prod_gate_bundle_$(date +%Y%m%d_%H%M%S)"
+  elif [[ "$bundle_dir" != /* ]]; then
+    bundle_dir="$ROOT_DIR/$bundle_dir"
+  fi
+  if [[ -z "$run_report_json" ]]; then
+    run_report_json="$bundle_dir/prod_bundle_run_report.json"
+  elif [[ "$run_report_json" != /* ]]; then
+    run_report_json="$ROOT_DIR/$run_report_json"
+  fi
+  bundle_args+=(--bundle-dir "$bundle_dir")
+
+  local preflight_rc="-1"
+  local preflight_status="skipped"
+  local bundle_rc="-1"
+  local bundle_status="skipped"
+  local bundle_verify_rc="-1"
+  local bundle_verify_status="skipped"
+  local incident_snapshot_rc="-1"
+  local incident_snapshot_status="skipped"
+  local incident_snapshot_bundle_dir=""
+  local incident_snapshot_bundle_tar=""
+  local final_rc=0
+
+  local bundle_tar="${bundle_dir}.tar.gz"
+  local bundle_tar_sha256_file="${bundle_tar}.sha256"
+  local manifest_file="$bundle_dir/manifest.sha256"
+  local metadata_file="$bundle_dir/metadata.txt"
+  local gate_summary_json="$bundle_dir/prod_gate_summary.json"
+  local wg_validate_summary_json="$bundle_dir/prod_wg_validate_summary.json"
+  local wg_soak_summary_json="$bundle_dir/prod_wg_soak_summary.json"
+
+  json_escape_prod_bundle() {
+    local s="${1-}"
+    s="${s//\\/\\\\}"
+    s="${s//\"/\\\"}"
+    s="${s//$'\n'/\\n}"
+    s="${s//$'\r'/\\r}"
+    s="${s//$'\t'/\\t}"
+    printf '%s' "$s"
+  }
+
+  bool_to_json_prod_bundle() {
+    case "${1:-}" in
+      0) printf 'false' ;;
+      1) printf 'true' ;;
+      *) printf 'null' ;;
+    esac
+  }
+
+  num_to_json_prod_bundle() {
+    local v="${1:-}"
+    if [[ "$v" =~ ^-?[0-9]+$ ]]; then
+      printf '%s' "$v"
+    else
+      printf 'null'
+    fi
+  }
+
+  metadata_value_prod_bundle() {
+    local key="$1"
+    local file="$2"
+    if [[ ! -f "$file" ]]; then
+      return 0
+    fi
+    sed -nE "s/^${key}=//p" "$file" | head -n1
+  }
+
+  write_prod_bundle_run_report() {
+    local parent
+    parent="$(dirname "$run_report_json")"
+    mkdir -p "$parent"
+
+    local gate_rc_meta signoff_enabled_meta signoff_rc_meta
+    gate_rc_meta="$(metadata_value_prod_bundle "gate_rc" "$metadata_file")"
+    signoff_enabled_meta="$(metadata_value_prod_bundle "signoff_enabled" "$metadata_file")"
+    signoff_rc_meta="$(metadata_value_prod_bundle "signoff_rc" "$metadata_file")"
+
+    local overall_status="ok"
+    if ((final_rc != 0)); then
+      overall_status="fail"
+    fi
+    local bundle_exists="0"
+    [[ -f "$bundle_tar" ]] && bundle_exists="1"
+    local manifest_exists="0"
+    [[ -f "$manifest_file" ]] && manifest_exists="1"
+
+    local generated_at_utc
+    generated_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+    cat >"$run_report_json" <<EOF
+{
+  "version": 1,
+  "generated_at_utc": "$(json_escape_prod_bundle "$generated_at_utc")",
+  "status": "$(json_escape_prod_bundle "$overall_status")",
+  "final_rc": $(num_to_json_prod_bundle "$final_rc"),
+  "bundle_dir": "$(json_escape_prod_bundle "$bundle_dir")",
+  "bundle_tar": "$(json_escape_prod_bundle "$bundle_tar")",
+  "bundle_tar_sha256_file": "$(json_escape_prod_bundle "$bundle_tar_sha256_file")",
+  "manifest_file": "$(json_escape_prod_bundle "$manifest_file")",
+  "metadata_file": "$(json_escape_prod_bundle "$metadata_file")",
+  "gate_summary_json": "$(json_escape_prod_bundle "$gate_summary_json")",
+  "wg_validate_summary_json": "$(json_escape_prod_bundle "$wg_validate_summary_json")",
+  "wg_soak_summary_json": "$(json_escape_prod_bundle "$wg_soak_summary_json")",
+  "preflight": {
+    "enabled": $(bool_to_json_prod_bundle "$preflight_check"),
+    "status": "$(json_escape_prod_bundle "$preflight_status")",
+    "rc": $(num_to_json_prod_bundle "$preflight_rc")
+  },
+  "bundle": {
+    "status": "$(json_escape_prod_bundle "$bundle_status")",
+    "rc": $(num_to_json_prod_bundle "$bundle_rc"),
+    "tar_exists": $(bool_to_json_prod_bundle "$bundle_exists"),
+    "manifest_exists": $(bool_to_json_prod_bundle "$manifest_exists")
+  },
+  "integrity_verify": {
+    "enabled": $(bool_to_json_prod_bundle "$bundle_verify_check"),
+    "status": "$(json_escape_prod_bundle "$bundle_verify_status")",
+    "rc": $(num_to_json_prod_bundle "$bundle_verify_rc")
+  },
+  "incident_snapshot": {
+    "enabled_on_fail": $(bool_to_json_prod_bundle "$incident_snapshot_on_fail"),
+    "status": "$(json_escape_prod_bundle "$incident_snapshot_status")",
+    "rc": $(num_to_json_prod_bundle "$incident_snapshot_rc"),
+    "bundle_dir": "$(json_escape_prod_bundle "$incident_snapshot_bundle_dir")",
+    "bundle_tar": "$(json_escape_prod_bundle "$incident_snapshot_bundle_tar")"
+  },
+  "gate": {
+    "rc": $(num_to_json_prod_bundle "$gate_rc_meta")
+  },
+  "signoff": {
+    "enabled": $(bool_to_json_prod_bundle "$signoff_enabled_meta"),
+    "rc": $(num_to_json_prod_bundle "$signoff_rc_meta")
+  }
+}
+EOF
+  }
+
+  if [[ "$preflight_check" == "1" ]]; then
+    preflight_status="ok"
+    preflight_rc=0
+    local preflight_require_root_effective="$preflight_require_root"
+    if [[ "$skip_wg" == "1" ]]; then
+      preflight_require_root_effective="0"
+    fi
+
+    local -a preflight_args
+    preflight_args=(
+      --discovery-wait-sec "$discovery_wait_sec"
+      --prod-profile 1
+      --operator-floor-check 1
+      --issuer-quorum-check 1
+      --issuer-min-operators 2
+      --timeout-sec "$preflight_timeout_sec"
+      --require-root "$preflight_require_root_effective"
+      --mtls-ca-file "$mtls_ca_file"
+      --mtls-client-cert-file "$mtls_client_cert_file"
+      --mtls-client-key-file "$mtls_client_key_file"
+    )
+    if [[ -n "$bootstrap_directory" ]]; then
+      preflight_args+=(--bootstrap-directory "$bootstrap_directory")
+    else
+      if [[ -z "$directory_a" || -z "$directory_b" || -z "$issuer_url" || -z "$entry_url" || -z "$exit_url" ]]; then
+        echo "three-machine-prod-bundle preflight requires --bootstrap-directory or explicit --directory-a/--directory-b/--issuer-url/--entry-url/--exit-url"
+        preflight_status="fail"
+        preflight_rc=2
+        final_rc=2
+      else
+        preflight_args+=(
+          --directory-urls "${directory_a},${directory_b}"
+          --issuer-url "$issuer_url"
+          --entry-url "$entry_url"
+          --exit-url "$exit_url"
+        )
+      fi
+    fi
+
+    if ((final_rc == 0)); then
+      echo "three-machine-prod-bundle: running strict preflight (prod profile + operator/issuer quorum)"
+      if [[ -n "$preflight_script" ]]; then
+        if [[ ! -x "$preflight_script" ]]; then
+          echo "three-machine-prod-bundle preflight script is not executable: $preflight_script"
+          preflight_status="fail"
+          preflight_rc=2
+          final_rc=2
+        else
+          set +e
+          "$preflight_script" "${preflight_args[@]}"
+          preflight_rc=$?
+          set -e
+        fi
+      else
+        set +e
+        client_vpn_preflight "${preflight_args[@]}"
+        preflight_rc=$?
+        set -e
+      fi
+      if [[ "$preflight_rc" != "0" ]]; then
+        preflight_status="fail"
+        final_rc="$preflight_rc"
+      fi
+    fi
+  fi
+
+  if ((final_rc == 0)); then
+    bundle_status="ok"
+    bundle_rc=0
+    set +e
+    "$bundle_script" "${bundle_args[@]}"
+    bundle_rc=$?
+    set -e
+    if [[ "$bundle_rc" != "0" ]]; then
+      bundle_status="fail"
+    fi
+    final_rc="$bundle_rc"
+  fi
+
+  if [[ "$bundle_verify_check" == "1" && "$bundle_status" != "skipped" ]]; then
+    bundle_verify_status="ok"
+    bundle_verify_rc=0
+    echo "three-machine-prod-bundle: verifying bundle integrity (manifest + tar checksum)"
+    if [[ ! -x "$verify_script" ]]; then
+      echo "three-machine-prod-bundle bundle verify script is not executable: $verify_script"
+      bundle_verify_rc=2
+      bundle_verify_status="fail"
+    else
+      set +e
+      "$verify_script" \
+        --bundle-dir "$bundle_dir" \
+        --bundle-tar "$bundle_tar" \
+        --check-tar-sha256 1 \
+        --check-manifest 1 \
+        --show-details "$bundle_verify_show_details"
+      bundle_verify_rc=$?
+      set -e
+      echo "three-machine-prod-bundle: bundle_verify_rc=$bundle_verify_rc"
+      if [[ "$bundle_verify_rc" != "0" ]]; then
+        bundle_verify_status="fail"
+      fi
+    fi
+    if [[ "$bundle_rc" == "0" && "$bundle_verify_rc" != "0" && "$final_rc" == "0" ]]; then
+      final_rc="$bundle_verify_rc"
+    fi
+  fi
+
+  if [[ "$incident_snapshot_on_fail" == "1" && "$final_rc" != "0" ]]; then
+    incident_snapshot_status="ok"
+    incident_snapshot_rc=0
+    incident_snapshot_bundle_dir="$bundle_dir/incident_snapshot"
+    incident_snapshot_bundle_tar="${incident_snapshot_bundle_dir}.tar.gz"
+
+    if [[ ! -x "$snapshot_script" ]]; then
+      echo "three-machine-prod-bundle incident snapshot script is not executable: $snapshot_script"
+      incident_snapshot_status="fail"
+      incident_snapshot_rc=2
+    else
+      local -a incident_args
+      incident_args=(
+        --bundle-dir "$incident_snapshot_bundle_dir"
+        --mode auto
+        --compose-project "$incident_snapshot_compose_project"
+        --include-docker-logs "$incident_snapshot_include_docker_logs"
+        --docker-log-lines "$incident_snapshot_docker_log_lines"
+        --timeout-sec "$incident_snapshot_timeout_sec"
+      )
+      if [[ -n "$directory_a" ]]; then
+        incident_args+=(--directory-url "$directory_a")
+      fi
+      if [[ -n "$issuer_url" ]]; then
+        incident_args+=(--issuer-url "$issuer_url")
+      fi
+      if [[ -n "$entry_url" ]]; then
+        incident_args+=(--entry-url "$entry_url")
+      fi
+      if [[ -n "$exit_url" ]]; then
+        incident_args+=(--exit-url "$exit_url")
+      fi
+      set +e
+      "$snapshot_script" "${incident_args[@]}"
+      incident_snapshot_rc=$?
+      set -e
+      echo "three-machine-prod-bundle: incident_snapshot_rc=$incident_snapshot_rc"
+      if [[ "$incident_snapshot_rc" != "0" ]]; then
+        incident_snapshot_status="fail"
+      fi
+    fi
+  fi
+
+  write_prod_bundle_run_report
+  if [[ "$run_report_print" == "1" ]]; then
+    echo "three-machine-prod-bundle: run report json: $run_report_json"
+    echo "three-machine-prod-bundle: bundle dir: $bundle_dir"
+    echo "three-machine-prod-bundle: bundle tar: $bundle_tar"
+  fi
+
+  return "$final_rc"
 }
 
 prod_gate_check() {
   local check_script="${THREE_MACHINE_PROD_GATE_CHECK_SCRIPT:-$ROOT_DIR/scripts/prod_gate_check.sh}"
   "$check_script" "$@"
+}
+
+prod_gate_slo_summary() {
+  local summary_script="${PROD_GATE_SLO_SUMMARY_SCRIPT:-$ROOT_DIR/scripts/prod_gate_slo_summary.sh}"
+  "$summary_script" "$@"
+}
+
+prod_gate_slo_trend() {
+  local trend_script="${PROD_GATE_SLO_TREND_SCRIPT:-$ROOT_DIR/scripts/prod_gate_slo_trend.sh}"
+  "$trend_script" "$@"
+}
+
+prod_gate_slo_alert() {
+  local alert_script="${PROD_GATE_SLO_ALERT_SCRIPT:-$ROOT_DIR/scripts/prod_gate_slo_alert.sh}"
+  "$alert_script" "$@"
+}
+
+prod_gate_slo_dashboard() {
+  local dashboard_script="${PROD_GATE_SLO_DASHBOARD_SCRIPT:-$ROOT_DIR/scripts/prod_gate_slo_dashboard.sh}"
+  "$dashboard_script" "$@"
+}
+
+prod_gate_bundle_verify() {
+  local verify_script="${THREE_MACHINE_PROD_GATE_BUNDLE_VERIFY_SCRIPT:-$ROOT_DIR/scripts/prod_gate_bundle_verify.sh}"
+  "$verify_script" "$@"
+}
+
+prod_gate_signoff() {
+  local run_report_json=""
+  local bundle_dir=""
+  local bundle_tar=""
+  local bundle_tar_sha256_file=""
+  local check_tar_sha256="1"
+  local check_manifest="1"
+  local show_integrity_details="0"
+  local gate_summary_json=""
+  local require_full_sequence="1"
+  local require_wg_validate_ok="1"
+  local require_wg_soak_ok="1"
+  local require_preflight_ok="0"
+  local require_bundle_ok="0"
+  local require_integrity_ok="0"
+  local require_signoff_ok="0"
+  local require_incident_snapshot_on_fail="0"
+  local require_incident_snapshot_artifacts="0"
+  local max_wg_soak_failed_rounds="0"
+  local show_json="0"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --run-report-json)
+        run_report_json="${2:-}"
+        shift 2
+        ;;
+      --bundle-dir)
+        bundle_dir="${2:-}"
+        shift 2
+        ;;
+      --bundle-tar)
+        bundle_tar="${2:-}"
+        shift 2
+        ;;
+      --bundle-tar-sha256-file)
+        bundle_tar_sha256_file="${2:-}"
+        shift 2
+        ;;
+      --check-tar-sha256)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+          check_tar_sha256="${2:-}"
+          shift 2
+        else
+          check_tar_sha256="1"
+          shift
+        fi
+        ;;
+      --check-manifest)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+          check_manifest="${2:-}"
+          shift 2
+        else
+          check_manifest="1"
+          shift
+        fi
+        ;;
+      --show-integrity-details)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+          show_integrity_details="${2:-}"
+          shift 2
+        else
+          show_integrity_details="1"
+          shift
+        fi
+        ;;
+      --gate-summary-json)
+        gate_summary_json="${2:-}"
+        shift 2
+        ;;
+      --require-full-sequence)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+          require_full_sequence="${2:-}"
+          shift 2
+        else
+          require_full_sequence="1"
+          shift
+        fi
+        ;;
+      --require-wg-validate-ok)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+          require_wg_validate_ok="${2:-}"
+          shift 2
+        else
+          require_wg_validate_ok="1"
+          shift
+        fi
+        ;;
+      --require-wg-soak-ok)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+          require_wg_soak_ok="${2:-}"
+          shift 2
+        else
+          require_wg_soak_ok="1"
+          shift
+        fi
+        ;;
+      --require-preflight-ok)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+          require_preflight_ok="${2:-}"
+          shift 2
+        else
+          require_preflight_ok="1"
+          shift
+        fi
+        ;;
+      --require-bundle-ok)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+          require_bundle_ok="${2:-}"
+          shift 2
+        else
+          require_bundle_ok="1"
+          shift
+        fi
+        ;;
+      --require-integrity-ok)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+          require_integrity_ok="${2:-}"
+          shift 2
+        else
+          require_integrity_ok="1"
+          shift
+        fi
+        ;;
+      --require-signoff-ok)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+          require_signoff_ok="${2:-}"
+          shift 2
+        else
+          require_signoff_ok="1"
+          shift
+        fi
+        ;;
+      --require-incident-snapshot-on-fail)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+          require_incident_snapshot_on_fail="${2:-}"
+          shift 2
+        else
+          require_incident_snapshot_on_fail="1"
+          shift
+        fi
+        ;;
+      --require-incident-snapshot-artifacts)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+          require_incident_snapshot_artifacts="${2:-}"
+          shift 2
+        else
+          require_incident_snapshot_artifacts="1"
+          shift
+        fi
+        ;;
+      --max-wg-soak-failed-rounds)
+        max_wg_soak_failed_rounds="${2:-}"
+        shift 2
+        ;;
+      --show-json)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+          show_json="${2:-}"
+          shift 2
+        else
+          show_json="1"
+          shift
+        fi
+        ;;
+      -h|--help|help)
+        cat <<'EOF_PROD_GATE_SIGNOFF_HELP'
+Usage:
+  ./scripts/easy_node.sh prod-gate-signoff \
+    [--run-report-json PATH] \
+    [--bundle-dir PATH] \
+    [--bundle-tar PATH] \
+    [--bundle-tar-sha256-file PATH] \
+    [--check-tar-sha256 [0|1]] \
+    [--check-manifest [0|1]] \
+    [--show-integrity-details [0|1]] \
+    [--gate-summary-json PATH] \
+    [--require-full-sequence [0|1]] \
+    [--require-wg-validate-ok [0|1]] \
+    [--require-wg-soak-ok [0|1]] \
+    [--require-preflight-ok [0|1]] \
+    [--require-bundle-ok [0|1]] \
+    [--require-integrity-ok [0|1]] \
+    [--require-signoff-ok [0|1]] \
+    [--require-incident-snapshot-on-fail [0|1]] \
+    [--require-incident-snapshot-artifacts [0|1]] \
+    [--max-wg-soak-failed-rounds N] \
+    [--show-json [0|1]]
+
+Purpose:
+  Run bundle integrity verification and gate artifact policy signoff in one fail-closed command.
+  Recommended input is --run-report-json from three-machine-prod-bundle.
+EOF_PROD_GATE_SIGNOFF_HELP
+        return 0
+        ;;
+      *)
+        echo "unknown argument: $1"
+        return 2
+        ;;
+    esac
+  done
+
+  local -a verify_args=(
+    --check-tar-sha256 "$check_tar_sha256"
+    --check-manifest "$check_manifest"
+    --show-details "$show_integrity_details"
+  )
+  if [[ -n "$run_report_json" ]]; then
+    verify_args+=(--run-report-json "$run_report_json")
+  fi
+  if [[ -n "$bundle_dir" ]]; then
+    verify_args+=(--bundle-dir "$bundle_dir")
+  fi
+  if [[ -n "$bundle_tar" ]]; then
+    verify_args+=(--bundle-tar "$bundle_tar")
+  fi
+  if [[ -n "$bundle_tar_sha256_file" ]]; then
+    verify_args+=(--bundle-tar-sha256-file "$bundle_tar_sha256_file")
+  fi
+
+  local -a check_args=(
+    --require-full-sequence "$require_full_sequence"
+    --require-wg-validate-ok "$require_wg_validate_ok"
+    --require-wg-soak-ok "$require_wg_soak_ok"
+    --require-preflight-ok "$require_preflight_ok"
+    --require-bundle-ok "$require_bundle_ok"
+    --require-integrity-ok "$require_integrity_ok"
+    --require-signoff-ok "$require_signoff_ok"
+    --require-incident-snapshot-on-fail "$require_incident_snapshot_on_fail"
+    --require-incident-snapshot-artifacts "$require_incident_snapshot_artifacts"
+    --max-wg-soak-failed-rounds "$max_wg_soak_failed_rounds"
+    --show-json "$show_json"
+  )
+  if [[ -n "$run_report_json" ]]; then
+    check_args+=(--run-report-json "$run_report_json")
+  fi
+  if [[ -n "$bundle_dir" ]]; then
+    check_args+=(--bundle-dir "$bundle_dir")
+  fi
+  if [[ -n "$gate_summary_json" ]]; then
+    check_args+=(--gate-summary-json "$gate_summary_json")
+  fi
+
+  echo "prod-gate-signoff: verifying bundle integrity"
+  prod_gate_bundle_verify "${verify_args[@]}"
+  echo "prod-gate-signoff: checking gate signoff policy"
+  prod_gate_check "${check_args[@]}"
 }
 
 three_machine_reminder() {
@@ -3637,6 +4531,101 @@ pilot_runbook() {
   "$ROOT_DIR/scripts/beta_pilot_runbook.sh" "$@"
 }
 
+prod_pilot_runbook() {
+  ensure_deps_or_die
+  local runbook_script="${PROD_PILOT_RUNBOOK_SCRIPT:-$ROOT_DIR/scripts/prod_pilot_runbook.sh}"
+  "$runbook_script" "$@"
+}
+
+prod_pilot_cohort_runbook() {
+  ensure_deps_or_die
+  local runbook_script="${PROD_PILOT_COHORT_RUNBOOK_SCRIPT:-$ROOT_DIR/scripts/prod_pilot_cohort_runbook.sh}"
+  "$runbook_script" "$@"
+}
+
+prod_pilot_cohort_quick() {
+  ensure_deps_or_die
+  local quick_script="${PROD_PILOT_COHORT_QUICK_SCRIPT:-$ROOT_DIR/scripts/prod_pilot_cohort_quick.sh}"
+  "$quick_script" "$@"
+}
+
+prod_pilot_cohort_bundle_verify() {
+  ensure_deps_or_die
+  local verify_script="${PROD_PILOT_COHORT_BUNDLE_VERIFY_SCRIPT:-$ROOT_DIR/scripts/prod_pilot_cohort_bundle_verify.sh}"
+  "$verify_script" "$@"
+}
+
+prod_pilot_cohort_check() {
+  ensure_deps_or_die
+  local check_script="${PROD_PILOT_COHORT_CHECK_SCRIPT:-$ROOT_DIR/scripts/prod_pilot_cohort_check.sh}"
+  "$check_script" "$@"
+}
+
+prod_pilot_cohort_signoff() {
+  ensure_deps_or_die
+  local signoff_script="${PROD_PILOT_COHORT_SIGNOFF_SCRIPT:-$ROOT_DIR/scripts/prod_pilot_cohort_signoff.sh}"
+  "$signoff_script" "$@"
+}
+
+prod_pilot_cohort_quick_check() {
+  ensure_deps_or_die
+  local check_script="${PROD_PILOT_COHORT_QUICK_CHECK_SCRIPT:-$ROOT_DIR/scripts/prod_pilot_cohort_quick_check.sh}"
+  "$check_script" "$@"
+}
+
+prod_pilot_cohort_quick_trend() {
+  ensure_deps_or_die
+  local trend_script="${PROD_PILOT_COHORT_QUICK_TREND_SCRIPT:-$ROOT_DIR/scripts/prod_pilot_cohort_quick_trend.sh}"
+  "$trend_script" "$@"
+}
+
+prod_pilot_cohort_quick_alert() {
+  ensure_deps_or_die
+  local alert_script="${PROD_PILOT_COHORT_QUICK_ALERT_SCRIPT:-$ROOT_DIR/scripts/prod_pilot_cohort_quick_alert.sh}"
+  "$alert_script" "$@"
+}
+
+prod_pilot_cohort_quick_dashboard() {
+  ensure_deps_or_die
+  local dashboard_script="${PROD_PILOT_COHORT_QUICK_DASHBOARD_SCRIPT:-$ROOT_DIR/scripts/prod_pilot_cohort_quick_dashboard.sh}"
+  "$dashboard_script" "$@"
+}
+
+prod_pilot_cohort_quick_signoff() {
+  ensure_deps_or_die
+  local signoff_script="${PROD_PILOT_COHORT_QUICK_SIGNOFF_SCRIPT:-$ROOT_DIR/scripts/prod_pilot_cohort_quick_signoff.sh}"
+  "$signoff_script" "$@"
+}
+
+prod_pilot_cohort_quick_runbook() {
+  ensure_deps_or_die
+  local runbook_script="${PROD_PILOT_COHORT_QUICK_RUNBOOK_SCRIPT:-$ROOT_DIR/scripts/prod_pilot_cohort_quick_runbook.sh}"
+  "$runbook_script" "$@"
+}
+
+prod_key_rotation_runbook() {
+  ensure_deps_or_die
+  local runbook_script="${PROD_KEY_ROTATION_RUNBOOK_SCRIPT:-$ROOT_DIR/scripts/prod_key_rotation_runbook.sh}"
+  "$runbook_script" "$@"
+}
+
+prod_upgrade_runbook() {
+  ensure_deps_or_die
+  local runbook_script="${PROD_UPGRADE_RUNBOOK_SCRIPT:-$ROOT_DIR/scripts/prod_upgrade_runbook.sh}"
+  "$runbook_script" "$@"
+}
+
+prod_operator_lifecycle_runbook() {
+  ensure_deps_or_die
+  local runbook_script="${PROD_OPERATOR_LIFECYCLE_RUNBOOK_SCRIPT:-$ROOT_DIR/scripts/prod_operator_lifecycle_runbook.sh}"
+  "$runbook_script" "$@"
+}
+
+incident_snapshot() {
+  local snapshot_script="${INCIDENT_SNAPSHOT_SCRIPT:-$ROOT_DIR/scripts/incident_snapshot.sh}"
+  "$snapshot_script" "$@"
+}
+
 server_env_value() {
   local key="$1"
   identity_value "$SERVER_ENV_FILE" "$key"
@@ -3685,6 +4674,26 @@ private_file_mode_secure() {
     return 0
   fi
   return 1
+}
+
+is_valid_wg_public_key() {
+  local key="${1:-}"
+  if [[ -z "$key" ]]; then
+    return 1
+  fi
+  if [[ ! "$key" =~ ^[A-Za-z0-9+/]{43}=$ ]]; then
+    return 1
+  fi
+  if command -v openssl >/dev/null 2>&1; then
+    local decoded_len
+    decoded_len="$(
+      (printf '%s' "$key" | openssl base64 -d -A 2>/dev/null | wc -c | tr -d '[:space:]') || true
+    )"
+    if [[ "$decoded_len" != "32" ]]; then
+      return 1
+    fi
+  fi
+  return 0
 }
 
 default_issuer_url_for_invites() {
@@ -4404,9 +5413,14 @@ prod_preflight() {
   fi
 
   local data_mode wg_backend entry_live_wg exit_live_wg exit_wg_kernel_proxy
-  local exit_wg_private_key_path exit_wg_interface exit_wg_auto_create
+  local exit_wg_private_key_path exit_wg_interface exit_wg_auto_create exit_wg_pubkey
   local exit_opaque_sink exit_opaque_source exit_issuer_min_sources exit_issuer_min_operators
   local exit_issuer_require_id issuer_urls_csv issuer_urls_n directory_issuer_urls_csv directory_issuer_urls_n
+  local entry_open_rps entry_ban_threshold entry_ban_sec entry_max_concurrent_opens
+  local dir_peer_dispute_min_votes dir_peer_appeal_min_votes dir_adjudication_meta_min_votes
+  local dir_final_dispute_min_votes dir_final_appeal_min_votes
+  local dir_final_min_operators dir_final_min_sources
+  local dir_final_adjudication_min_ratio dir_dispute_max_ttl_sec dir_appeal_max_ttl_sec
   local entry_exit_user entry_exit_privileged
   data_mode="$(identity_value "$env_file" "DATA_PLANE_MODE")"
   wg_backend="$(identity_value "$env_file" "WG_BACKEND")"
@@ -4416,6 +5430,7 @@ prod_preflight() {
   exit_wg_private_key_path="$(identity_value "$env_file" "EXIT_WG_PRIVATE_KEY_PATH")"
   exit_wg_interface="$(identity_value "$env_file" "EXIT_WG_INTERFACE")"
   exit_wg_auto_create="$(identity_value "$env_file" "EXIT_WG_AUTO_CREATE_INTERFACE")"
+  exit_wg_pubkey="$(identity_value "$env_file" "EXIT_WG_PUBKEY")"
   exit_opaque_sink="$(identity_value "$env_file" "EXIT_OPAQUE_SINK_ADDR")"
   exit_opaque_source="$(identity_value "$env_file" "EXIT_OPAQUE_SOURCE_ADDR")"
   exit_issuer_min_sources="$(identity_value "$env_file" "EXIT_ISSUER_MIN_SOURCES")"
@@ -4425,6 +5440,20 @@ prod_preflight() {
   issuer_urls_n="$(csv_count "$issuer_urls_csv")"
   directory_issuer_urls_csv="$(identity_value "$env_file" "DIRECTORY_ISSUER_TRUST_URLS")"
   directory_issuer_urls_n="$(csv_count "$directory_issuer_urls_csv")"
+  entry_open_rps="$(identity_value "$env_file" "ENTRY_OPEN_RPS")"
+  entry_ban_threshold="$(identity_value "$env_file" "ENTRY_BAN_THRESHOLD")"
+  entry_ban_sec="$(identity_value "$env_file" "ENTRY_BAN_SEC")"
+  entry_max_concurrent_opens="$(identity_value "$env_file" "ENTRY_MAX_CONCURRENT_OPENS")"
+  dir_peer_dispute_min_votes="$(identity_value "$env_file" "DIRECTORY_PEER_DISPUTE_MIN_VOTES")"
+  dir_peer_appeal_min_votes="$(identity_value "$env_file" "DIRECTORY_PEER_APPEAL_MIN_VOTES")"
+  dir_adjudication_meta_min_votes="$(identity_value "$env_file" "DIRECTORY_ADJUDICATION_META_MIN_VOTES")"
+  dir_final_dispute_min_votes="$(identity_value "$env_file" "DIRECTORY_FINAL_DISPUTE_MIN_VOTES")"
+  dir_final_appeal_min_votes="$(identity_value "$env_file" "DIRECTORY_FINAL_APPEAL_MIN_VOTES")"
+  dir_final_min_operators="$(identity_value "$env_file" "DIRECTORY_FINAL_ADJUDICATION_MIN_OPERATORS")"
+  dir_final_min_sources="$(identity_value "$env_file" "DIRECTORY_FINAL_ADJUDICATION_MIN_SOURCES")"
+  dir_final_adjudication_min_ratio="$(identity_value "$env_file" "DIRECTORY_FINAL_ADJUDICATION_MIN_RATIO")"
+  dir_dispute_max_ttl_sec="$(identity_value "$env_file" "DIRECTORY_DISPUTE_MAX_TTL_SEC")"
+  dir_appeal_max_ttl_sec="$(identity_value "$env_file" "DIRECTORY_APPEAL_MAX_TTL_SEC")"
   entry_exit_user="$(identity_value "$env_file" "ENTRY_EXIT_USER")"
   entry_exit_privileged="$(identity_value "$env_file" "ENTRY_EXIT_PRIVILEGED")"
 
@@ -4463,6 +5492,15 @@ prod_preflight() {
   else
     check_fail "EXIT_WG_INTERFACE must be configured"
   fi
+  if [[ -n "$exit_wg_pubkey" ]]; then
+    if is_valid_wg_public_key "$exit_wg_pubkey"; then
+      check_ok "EXIT_WG_PUBKEY valid"
+    else
+      check_fail "EXIT_WG_PUBKEY invalid; must be a valid WireGuard public key or unset for runtime derivation"
+    fi
+  else
+    check_ok "EXIT_WG_PUBKEY unset (runtime derivation expected)"
+  fi
   if [[ -n "$exit_opaque_sink" ]]; then
     check_ok "EXIT_OPAQUE_SINK_ADDR configured"
   else
@@ -4497,6 +5535,77 @@ prod_preflight() {
     check_ok "DIRECTORY_ISSUER_TRUST_URLS count>=2 (${directory_issuer_urls_n})"
   else
     check_fail "DIRECTORY_ISSUER_TRUST_URLS must contain at least 2 URLs in prod profile"
+  fi
+  if [[ "$entry_open_rps" =~ ^[0-9]+$ ]] && ((entry_open_rps >= 1 && entry_open_rps <= 12)); then
+    check_ok "ENTRY_OPEN_RPS abuse guard <=12 (${entry_open_rps})"
+  else
+    check_fail "ENTRY_OPEN_RPS must be set in range 1..12 in prod profile"
+  fi
+  if [[ "$entry_ban_threshold" =~ ^[0-9]+$ ]] && ((entry_ban_threshold >= 2 && entry_ban_threshold <= 3)); then
+    check_ok "ENTRY_BAN_THRESHOLD abuse guard in [2,3] (${entry_ban_threshold})"
+  else
+    check_fail "ENTRY_BAN_THRESHOLD must be set in range 2..3 in prod profile"
+  fi
+  if [[ "$entry_ban_sec" =~ ^[0-9]+$ ]] && ((entry_ban_sec >= 60)); then
+    check_ok "ENTRY_BAN_SEC abuse guard >=60s (${entry_ban_sec})"
+  else
+    check_fail "ENTRY_BAN_SEC must be >=60 in prod profile"
+  fi
+  if [[ "$entry_max_concurrent_opens" =~ ^[0-9]+$ ]] && ((entry_max_concurrent_opens >= 1 && entry_max_concurrent_opens <= 96)); then
+    check_ok "ENTRY_MAX_CONCURRENT_OPENS abuse guard <=96 (${entry_max_concurrent_opens})"
+  else
+    check_fail "ENTRY_MAX_CONCURRENT_OPENS must be set in range 1..96 in prod profile"
+  fi
+  if [[ "$dir_peer_dispute_min_votes" =~ ^[0-9]+$ ]] && ((dir_peer_dispute_min_votes >= 2)); then
+    check_ok "DIRECTORY_PEER_DISPUTE_MIN_VOTES>=2 (${dir_peer_dispute_min_votes})"
+  else
+    check_fail "DIRECTORY_PEER_DISPUTE_MIN_VOTES must be >=2 in prod profile"
+  fi
+  if [[ "$dir_peer_appeal_min_votes" =~ ^[0-9]+$ ]] && ((dir_peer_appeal_min_votes >= 2)); then
+    check_ok "DIRECTORY_PEER_APPEAL_MIN_VOTES>=2 (${dir_peer_appeal_min_votes})"
+  else
+    check_fail "DIRECTORY_PEER_APPEAL_MIN_VOTES must be >=2 in prod profile"
+  fi
+  if [[ "$dir_adjudication_meta_min_votes" =~ ^[0-9]+$ ]] && ((dir_adjudication_meta_min_votes >= 2)); then
+    check_ok "DIRECTORY_ADJUDICATION_META_MIN_VOTES>=2 (${dir_adjudication_meta_min_votes})"
+  else
+    check_fail "DIRECTORY_ADJUDICATION_META_MIN_VOTES must be >=2 in prod profile"
+  fi
+  if [[ "$dir_final_dispute_min_votes" =~ ^[0-9]+$ ]] && ((dir_final_dispute_min_votes >= 2)); then
+    check_ok "DIRECTORY_FINAL_DISPUTE_MIN_VOTES>=2 (${dir_final_dispute_min_votes})"
+  else
+    check_fail "DIRECTORY_FINAL_DISPUTE_MIN_VOTES must be >=2 in prod profile"
+  fi
+  if [[ "$dir_final_appeal_min_votes" =~ ^[0-9]+$ ]] && ((dir_final_appeal_min_votes >= 2)); then
+    check_ok "DIRECTORY_FINAL_APPEAL_MIN_VOTES>=2 (${dir_final_appeal_min_votes})"
+  else
+    check_fail "DIRECTORY_FINAL_APPEAL_MIN_VOTES must be >=2 in prod profile"
+  fi
+  if [[ "$dir_final_min_operators" =~ ^[0-9]+$ ]] && ((dir_final_min_operators >= 2)); then
+    check_ok "DIRECTORY_FINAL_ADJUDICATION_MIN_OPERATORS>=2 (${dir_final_min_operators})"
+  else
+    check_fail "DIRECTORY_FINAL_ADJUDICATION_MIN_OPERATORS must be >=2 in prod profile"
+  fi
+  if [[ "$dir_final_min_sources" =~ ^[0-9]+$ ]] && ((dir_final_min_sources >= 2)); then
+    check_ok "DIRECTORY_FINAL_ADJUDICATION_MIN_SOURCES>=2 (${dir_final_min_sources})"
+  else
+    check_fail "DIRECTORY_FINAL_ADJUDICATION_MIN_SOURCES must be >=2 in prod profile"
+  fi
+  if [[ "$dir_final_adjudication_min_ratio" =~ ^[0-9]+(\.[0-9]+)?$ ]] &&
+    awk "BEGIN {exit !($dir_final_adjudication_min_ratio >= 0.67)}"; then
+    check_ok "DIRECTORY_FINAL_ADJUDICATION_MIN_RATIO>=0.67 (${dir_final_adjudication_min_ratio})"
+  else
+    check_fail "DIRECTORY_FINAL_ADJUDICATION_MIN_RATIO must be >=0.67 in prod profile"
+  fi
+  if [[ "$dir_dispute_max_ttl_sec" =~ ^[0-9]+$ ]] && ((dir_dispute_max_ttl_sec >= 1 && dir_dispute_max_ttl_sec <= 259200)); then
+    check_ok "DIRECTORY_DISPUTE_MAX_TTL_SEC capped <=259200 (${dir_dispute_max_ttl_sec})"
+  else
+    check_fail "DIRECTORY_DISPUTE_MAX_TTL_SEC must be set in range 1..259200 in prod profile"
+  fi
+  if [[ "$dir_appeal_max_ttl_sec" =~ ^[0-9]+$ ]] && ((dir_appeal_max_ttl_sec >= 1 && dir_appeal_max_ttl_sec <= 259200)); then
+    check_ok "DIRECTORY_APPEAL_MAX_TTL_SEC capped <=259200 (${dir_appeal_max_ttl_sec})"
+  else
+    check_fail "DIRECTORY_APPEAL_MAX_TTL_SEC must be set in range 1..259200 in prod profile"
   fi
   if [[ -n "$exit_wg_private_key_path" ]]; then
     local exit_wg_private_key_local
@@ -4733,6 +5842,66 @@ prod_preflight() {
       check_live_endpoint "issuer" "${live_issuer_url%/}/v1/pubkeys"
     fi
 
+    if [[ -n "$directory_public_url" ]]; then
+      local governance_url governance_body governance_code
+      governance_url="${directory_public_url%/}/v1/admin/governance-status"
+      governance_body="$(mktemp)"
+      local -a governance_tls_opts=()
+      mapfile -t governance_tls_opts < <(curl_tls_opts_for_url "$directory_public_url")
+      governance_code="$(
+        curl -sS -o "$governance_body" -w "%{http_code}" \
+          --connect-timeout 3 --max-time "$timeout_sec" \
+          "${governance_tls_opts[@]}" \
+          -H "X-Admin-Token: ${directory_admin_token}" \
+          "$governance_url" || true
+      )"
+      if [[ "$governance_code" != "200" ]]; then
+        check_fail "live governance endpoint unreachable/unauthorized: ${governance_url} (code=${governance_code:-none})"
+      else
+        check_ok "live governance endpoint healthy: ${governance_url}"
+        local policy_meta_votes policy_final_dispute policy_final_appeal
+        local policy_final_ops policy_final_sources policy_final_ratio
+        policy_meta_votes="$(jq -r '(.policy.meta_min_votes // 0)' <"$governance_body" 2>/dev/null || echo "0")"
+        policy_final_dispute="$(jq -r '(.policy.final_dispute_min_votes // 0)' <"$governance_body" 2>/dev/null || echo "0")"
+        policy_final_appeal="$(jq -r '(.policy.final_appeal_min_votes // 0)' <"$governance_body" 2>/dev/null || echo "0")"
+        policy_final_ops="$(jq -r '(.policy.final_adjudication_min_operators // 0)' <"$governance_body" 2>/dev/null || echo "0")"
+        policy_final_sources="$(jq -r '(.policy.final_adjudication_min_sources // 0)' <"$governance_body" 2>/dev/null || echo "0")"
+        policy_final_ratio="$(jq -r '(.policy.final_adjudication_min_ratio // 0)' <"$governance_body" 2>/dev/null || echo "0")"
+        if [[ "$policy_meta_votes" =~ ^[0-9]+$ ]] && ((policy_meta_votes >= 2)); then
+          check_ok "live governance policy meta_min_votes>=2 (${policy_meta_votes})"
+        else
+          check_fail "live governance policy too weak: meta_min_votes must be >=2 (got ${policy_meta_votes})"
+        fi
+        if [[ "$policy_final_dispute" =~ ^[0-9]+$ ]] && ((policy_final_dispute >= 2)); then
+          check_ok "live governance policy final_dispute_min_votes>=2 (${policy_final_dispute})"
+        else
+          check_fail "live governance policy too weak: final_dispute_min_votes must be >=2 (got ${policy_final_dispute})"
+        fi
+        if [[ "$policy_final_appeal" =~ ^[0-9]+$ ]] && ((policy_final_appeal >= 2)); then
+          check_ok "live governance policy final_appeal_min_votes>=2 (${policy_final_appeal})"
+        else
+          check_fail "live governance policy too weak: final_appeal_min_votes must be >=2 (got ${policy_final_appeal})"
+        fi
+        if [[ "$policy_final_ops" =~ ^[0-9]+$ ]] && ((policy_final_ops >= 2)); then
+          check_ok "live governance policy final_adjudication_min_operators>=2 (${policy_final_ops})"
+        else
+          check_fail "live governance policy too weak: final_adjudication_min_operators must be >=2 (got ${policy_final_ops})"
+        fi
+        if [[ "$policy_final_sources" =~ ^[0-9]+$ ]] && ((policy_final_sources >= 2)); then
+          check_ok "live governance policy final_adjudication_min_sources>=2 (${policy_final_sources})"
+        else
+          check_fail "live governance policy too weak: final_adjudication_min_sources must be >=2 (got ${policy_final_sources})"
+        fi
+        if [[ "$policy_final_ratio" =~ ^[0-9]+(\.[0-9]+)?$ ]] &&
+          awk "BEGIN {exit !($policy_final_ratio >= 0.67)}"; then
+          check_ok "live governance policy final_adjudication_min_ratio>=0.67 (${policy_final_ratio})"
+        else
+          check_fail "live governance policy too weak: final_adjudication_min_ratio must be >=0.67 (got ${policy_final_ratio})"
+        fi
+      fi
+      rm -f "$governance_body"
+    fi
+
     if [[ "$mode" == "authority" && -n "$live_issuer_url" ]]; then
       local token_probe_code token_probe_body
       token_probe_body="$(mktemp)"
@@ -4774,7 +5943,13 @@ client_test() {
   local timeout_sec="35"
   local build_timeout_sec="${EASY_NODE_CLIENT_BUILD_TIMEOUT_SEC:-180}"
   local force_build="${EASY_NODE_CLIENT_FORCE_BUILD:-0}"
+  local path_profile="${EASY_NODE_PATH_PROFILE:-}"
   local require_distinct_operators="${CLIENT_REQUIRE_DISTINCT_OPERATORS:-0}"
+  local require_distinct_countries="${CLIENT_REQUIRE_DISTINCT_ENTRY_EXIT_COUNTRY:-0}"
+  local locality_soft_bias="${CLIENT_EXIT_LOCALITY_SOFT_BIAS:-0}"
+  local locality_country_bias="${CLIENT_EXIT_COUNTRY_BIAS:-1.60}"
+  local locality_region_bias="${CLIENT_EXIT_REGION_BIAS:-1.25}"
+  local locality_region_prefix_bias="${CLIENT_EXIT_REGION_PREFIX_BIAS:-1.10}"
   local entry_rotation_sec="${CLIENT_ENTRY_ROTATION_SEC:-0}"
   local entry_rotation_seed="${CLIENT_ENTRY_ROTATION_SEED:-0}"
   local min_selection_lines="${EASY_NODE_CLIENT_MIN_SELECTION_LINES:-1}"
@@ -4787,6 +5962,11 @@ client_test() {
   local discovery_wait_sec="${EASY_NODE_DISCOVERY_WAIT_SEC:-12}"
   local min_sources_set=0
   local distinct_set=0
+  local distinct_countries_set=0
+  local locality_soft_bias_set=0
+  local locality_country_bias_set=0
+  local locality_region_bias_set=0
+  local locality_region_prefix_bias_set=0
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -4839,6 +6019,10 @@ client_test() {
         timeout_sec="${2:-}"
         shift 2
         ;;
+      --path-profile)
+        path_profile="${2:-}"
+        shift 2
+        ;;
       --distinct-operators)
         if [[ "${2:-}" == "0" || "${2:-}" == "1" ]]; then
           require_distinct_operators="${2:-}"
@@ -4849,6 +6033,43 @@ client_test() {
           distinct_set=1
           shift
         fi
+        ;;
+      --distinct-countries)
+        if [[ "${2:-}" == "0" || "${2:-}" == "1" ]]; then
+          require_distinct_countries="${2:-}"
+          distinct_countries_set=1
+          shift 2
+        else
+          require_distinct_countries="1"
+          distinct_countries_set=1
+          shift
+        fi
+        ;;
+      --locality-soft-bias)
+        if [[ "${2:-}" == "0" || "${2:-}" == "1" ]]; then
+          locality_soft_bias="${2:-}"
+          locality_soft_bias_set=1
+          shift 2
+        else
+          locality_soft_bias="1"
+          locality_soft_bias_set=1
+          shift
+        fi
+        ;;
+      --country-bias)
+        locality_country_bias="${2:-}"
+        locality_country_bias_set=1
+        shift 2
+        ;;
+      --region-bias)
+        locality_region_bias="${2:-}"
+        locality_region_bias_set=1
+        shift 2
+        ;;
+      --region-prefix-bias)
+        locality_region_prefix_bias="${2:-}"
+        locality_region_prefix_bias_set=1
+        shift 2
         ;;
       --min-selection-lines)
         min_selection_lines="${2:-}"
@@ -4896,8 +6117,49 @@ client_test() {
     esac
   done
 
+  local normalized_path_profile=""
+  normalized_path_profile="$(normalize_path_profile "$path_profile")" || {
+    echo "client-test requires --path-profile to be one of: fast, balanced, privacy"
+    exit 2
+  }
+  if [[ -n "$normalized_path_profile" ]]; then
+    local profile_values profile_distinct profile_distinct_countries profile_locality_soft profile_country_bias profile_region_bias profile_region_prefix_bias
+    profile_values="$(path_profile_values "$normalized_path_profile")"
+    IFS='|' read -r profile_distinct profile_distinct_countries profile_locality_soft profile_country_bias profile_region_bias profile_region_prefix_bias <<<"$profile_values"
+    if [[ "$distinct_set" -eq 0 ]]; then
+      require_distinct_operators="$profile_distinct"
+    fi
+    if [[ "$distinct_countries_set" -eq 0 ]]; then
+      require_distinct_countries="$profile_distinct_countries"
+    fi
+    if [[ "$locality_soft_bias_set" -eq 0 ]]; then
+      locality_soft_bias="$profile_locality_soft"
+    fi
+    if [[ "$locality_country_bias_set" -eq 0 ]]; then
+      locality_country_bias="$profile_country_bias"
+    fi
+    if [[ "$locality_region_bias_set" -eq 0 ]]; then
+      locality_region_bias="$profile_region_bias"
+    fi
+    if [[ "$locality_region_prefix_bias_set" -eq 0 ]]; then
+      locality_region_prefix_bias="$profile_region_prefix_bias"
+    fi
+  fi
+
   if [[ "$require_distinct_operators" != "0" && "$require_distinct_operators" != "1" ]]; then
     echo "client-test requires CLIENT_REQUIRE_DISTINCT_OPERATORS or --distinct-operators to be 0 or 1"
+    exit 2
+  fi
+  if [[ "$require_distinct_countries" != "0" && "$require_distinct_countries" != "1" ]]; then
+    echo "client-test requires CLIENT_REQUIRE_DISTINCT_ENTRY_EXIT_COUNTRY or --distinct-countries to be 0 or 1"
+    exit 2
+  fi
+  if [[ "$locality_soft_bias" != "0" && "$locality_soft_bias" != "1" ]]; then
+    echo "client-test requires --locality-soft-bias to be 0 or 1"
+    exit 2
+  fi
+  if ! [[ "$locality_country_bias" =~ ^[0-9]+([.][0-9]+)?$ && "$locality_region_bias" =~ ^[0-9]+([.][0-9]+)?$ && "$locality_region_prefix_bias" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+    echo "client-test requires --country-bias, --region-bias and --region-prefix-bias to be numeric"
     exit 2
   fi
   if [[ "$require_cross_operator_pair" != "0" && "$require_cross_operator_pair" != "1" ]]; then
@@ -5067,6 +6329,11 @@ EOF_CLIENT
     -e "EXIT_CONTROL_URL=$exit_url"
     -e "CLIENT_BOOTSTRAP_INTERVAL_SEC=2"
     -e "CLIENT_REQUIRE_DISTINCT_OPERATORS=$require_distinct_operators"
+    -e "CLIENT_REQUIRE_DISTINCT_ENTRY_EXIT_COUNTRY=$require_distinct_countries"
+    -e "CLIENT_EXIT_LOCALITY_SOFT_BIAS=$locality_soft_bias"
+    -e "CLIENT_EXIT_COUNTRY_BIAS=$locality_country_bias"
+    -e "CLIENT_EXIT_REGION_BIAS=$locality_region_bias"
+    -e "CLIENT_EXIT_REGION_PREFIX_BIAS=$locality_region_prefix_bias"
     -e "CLIENT_ENTRY_ROTATION_SEC=$entry_rotation_sec"
     -e "CLIENT_ENTRY_ROTATION_SEED=$entry_rotation_seed"
   )
@@ -5734,7 +7001,15 @@ client_vpn_up() {
   local client_anon_cred="${CLIENT_ANON_CRED:-}"
   local min_sources="1"
   local min_operators="1"
+  local path_profile="${EASY_NODE_PATH_PROFILE:-}"
   local require_distinct_operators="${CLIENT_REQUIRE_DISTINCT_OPERATORS:-1}"
+  local require_distinct_countries="${CLIENT_REQUIRE_DISTINCT_ENTRY_EXIT_COUNTRY:-0}"
+  local exit_country="${CLIENT_EXIT_COUNTRY:-}"
+  local exit_region="${CLIENT_EXIT_REGION:-}"
+  local locality_soft_bias="${CLIENT_EXIT_LOCALITY_SOFT_BIAS:-0}"
+  local locality_country_bias="${CLIENT_EXIT_COUNTRY_BIAS:-1.60}"
+  local locality_region_bias="${CLIENT_EXIT_REGION_BIAS:-1.25}"
+  local locality_region_prefix_bias="${CLIENT_EXIT_REGION_PREFIX_BIAS:-1.10}"
   local beta_profile="${EASY_NODE_BETA_PROFILE:-1}"
   local prod_profile="${EASY_NODE_PROD_PROFILE:-0}"
   local operator_floor_check="${EASY_NODE_CLIENT_VPN_OPERATOR_FLOOR_CHECK:-}"
@@ -5756,6 +7031,11 @@ client_vpn_up() {
   local min_sources_set=0
   local min_operators_set=0
   local distinct_set=0
+  local distinct_countries_set=0
+  local locality_soft_bias_set=0
+  local locality_country_bias_set=0
+  local locality_region_bias_set=0
+  local locality_region_prefix_bias_set=0
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -5805,6 +7085,10 @@ client_vpn_up() {
         min_operators_set=1
         shift 2
         ;;
+      --path-profile)
+        path_profile="${2:-}"
+        shift 2
+        ;;
       --distinct-operators)
         if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
           require_distinct_operators="${2:-}"
@@ -5815,6 +7099,51 @@ client_vpn_up() {
           distinct_set=1
           shift
         fi
+        ;;
+      --distinct-countries)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          require_distinct_countries="${2:-}"
+          distinct_countries_set=1
+          shift 2
+        else
+          require_distinct_countries="1"
+          distinct_countries_set=1
+          shift
+        fi
+        ;;
+      --exit-country)
+        exit_country="${2:-}"
+        shift 2
+        ;;
+      --exit-region)
+        exit_region="${2:-}"
+        shift 2
+        ;;
+      --locality-soft-bias)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          locality_soft_bias="${2:-}"
+          locality_soft_bias_set=1
+          shift 2
+        else
+          locality_soft_bias="1"
+          locality_soft_bias_set=1
+          shift
+        fi
+        ;;
+      --country-bias)
+        locality_country_bias="${2:-}"
+        locality_country_bias_set=1
+        shift 2
+        ;;
+      --region-bias)
+        locality_region_bias="${2:-}"
+        locality_region_bias_set=1
+        shift 2
+        ;;
+      --region-prefix-bias)
+        locality_region_prefix_bias="${2:-}"
+        locality_region_prefix_bias_set=1
+        shift 2
         ;;
       --beta-profile)
         if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
@@ -5934,6 +7263,35 @@ client_vpn_up() {
     esac
   done
 
+  local normalized_path_profile=""
+  normalized_path_profile="$(normalize_path_profile "$path_profile")" || {
+    echo "client-vpn-up requires --path-profile to be one of: fast, balanced, privacy"
+    exit 2
+  }
+  if [[ -n "$normalized_path_profile" ]]; then
+    local profile_values profile_distinct profile_distinct_countries profile_locality_soft profile_country_bias profile_region_bias profile_region_prefix_bias
+    profile_values="$(path_profile_values "$normalized_path_profile")"
+    IFS='|' read -r profile_distinct profile_distinct_countries profile_locality_soft profile_country_bias profile_region_bias profile_region_prefix_bias <<<"$profile_values"
+    if [[ "$distinct_set" -eq 0 ]]; then
+      require_distinct_operators="$profile_distinct"
+    fi
+    if [[ "$distinct_countries_set" -eq 0 ]]; then
+      require_distinct_countries="$profile_distinct_countries"
+    fi
+    if [[ "$locality_soft_bias_set" -eq 0 ]]; then
+      locality_soft_bias="$profile_locality_soft"
+    fi
+    if [[ "$locality_country_bias_set" -eq 0 ]]; then
+      locality_country_bias="$profile_country_bias"
+    fi
+    if [[ "$locality_region_bias_set" -eq 0 ]]; then
+      locality_region_bias="$profile_region_bias"
+    fi
+    if [[ "$locality_region_prefix_bias_set" -eq 0 ]]; then
+      locality_region_prefix_bias="$profile_region_prefix_bias"
+    fi
+  fi
+
   ensure_client_vpn_deps_or_die
 
   if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
@@ -5942,6 +7300,18 @@ client_vpn_up() {
   fi
   if [[ "$require_distinct_operators" != "0" && "$require_distinct_operators" != "1" ]]; then
     echo "client-vpn-up requires --distinct-operators 0 or 1"
+    exit 2
+  fi
+  if [[ "$require_distinct_countries" != "0" && "$require_distinct_countries" != "1" ]]; then
+    echo "client-vpn-up requires --distinct-countries 0 or 1"
+    exit 2
+  fi
+  if [[ "$locality_soft_bias" != "0" && "$locality_soft_bias" != "1" ]]; then
+    echo "client-vpn-up requires --locality-soft-bias 0 or 1"
+    exit 2
+  fi
+  if ! [[ "$locality_country_bias" =~ ^[0-9]+([.][0-9]+)?$ && "$locality_region_bias" =~ ^[0-9]+([.][0-9]+)?$ && "$locality_region_prefix_bias" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+    echo "client-vpn-up requires numeric --country-bias, --region-bias and --region-prefix-bias"
     exit 2
   fi
   if [[ "$beta_profile" != "0" && "$beta_profile" != "1" ]]; then
@@ -6223,6 +7593,11 @@ client_vpn_up() {
     "CLIENT_DISABLE_SYNTHETIC_FALLBACK=1"
     "CLIENT_LIVE_WG_MODE=1"
     "CLIENT_REQUIRE_DISTINCT_OPERATORS=$require_distinct_operators"
+    "CLIENT_REQUIRE_DISTINCT_ENTRY_EXIT_COUNTRY=$require_distinct_countries"
+    "CLIENT_EXIT_LOCALITY_SOFT_BIAS=$locality_soft_bias"
+    "CLIENT_EXIT_COUNTRY_BIAS=$locality_country_bias"
+    "CLIENT_EXIT_REGION_BIAS=$locality_region_bias"
+    "CLIENT_EXIT_REGION_PREFIX_BIAS=$locality_region_prefix_bias"
     "CLIENT_BOOTSTRAP_INTERVAL_SEC=2"
     "CLIENT_BOOTSTRAP_BACKOFF_MAX_SEC=4"
     "CLIENT_BOOTSTRAP_JITTER_PCT=10"
@@ -6235,6 +7610,12 @@ client_vpn_up() {
   fi
   if [[ -n "$client_anon_cred" ]]; then
     env_vars+=("CLIENT_ANON_CRED=$client_anon_cred")
+  fi
+  if [[ -n "$exit_country" ]]; then
+    env_vars+=("CLIENT_EXIT_COUNTRY=$exit_country")
+  fi
+  if [[ -n "$exit_region" ]]; then
+    env_vars+=("CLIENT_EXIT_REGION=$exit_region")
   fi
   if [[ "$prod_profile" == "1" ]]; then
     env_vars+=(
@@ -6298,6 +7679,25 @@ client_vpn_up() {
     exit 1
   fi
 
+  local exit_wg_pub
+  exit_wg_pub="$(rg -o 'exit_pub=[^ ]+' "$log_file" | tail -n 1 | sed -E 's/^exit_pub=//' | tr -d '\r\n')"
+  if [[ -z "$exit_wg_pub" ]]; then
+    echo "client-vpn could not parse exit wg pubkey from session config"
+    tail -n 120 "$log_file" || true
+    kill "$pid" >/dev/null 2>&1 || true
+    wait "$pid" >/dev/null 2>&1 || true
+    ip link delete "$interface_name" >/dev/null 2>&1 || true
+    exit 1
+  fi
+  if ! is_valid_wg_public_key "$exit_wg_pub"; then
+    echo "client-vpn received invalid exit wg pubkey in session config: $exit_wg_pub"
+    tail -n 120 "$log_file" || true
+    kill "$pid" >/dev/null 2>&1 || true
+    wait "$pid" >/dev/null 2>&1 || true
+    ip link delete "$interface_name" >/dev/null 2>&1 || true
+    exit 1
+  fi
+
   if ! ip link show dev "$interface_name" >/dev/null 2>&1; then
     echo "client-vpn missing interface after session config: $interface_name"
     kill "$pid" >/dev/null 2>&1 || true
@@ -6316,6 +7716,7 @@ CLIENT_VPN_ISSUER_URL=$issuer_url
 CLIENT_VPN_ISSUER_URLS=$issuer_urls
 CLIENT_VPN_ENTRY_URL=$entry_url
 CLIENT_VPN_EXIT_URL=$exit_url
+CLIENT_VPN_EXIT_WG_PUBKEY=$exit_wg_pub
 CLIENT_VPN_SUBJECT=$client_subject
 CLIENT_VPN_BETA_PROFILE=$beta_profile
 CLIENT_VPN_PROD_PROFILE=$prod_profile
@@ -6437,6 +7838,30 @@ main() {
       shift
       prod_gate_check "$@"
       ;;
+    prod-gate-slo-summary)
+      shift
+      prod_gate_slo_summary "$@"
+      ;;
+    prod-gate-slo-trend)
+      shift
+      prod_gate_slo_trend "$@"
+      ;;
+    prod-gate-slo-alert)
+      shift
+      prod_gate_slo_alert "$@"
+      ;;
+    prod-gate-slo-dashboard)
+      shift
+      prod_gate_slo_dashboard "$@"
+      ;;
+    prod-gate-bundle-verify)
+      shift
+      prod_gate_bundle_verify "$@"
+      ;;
+    prod-gate-signoff)
+      shift
+      prod_gate_signoff "$@"
+      ;;
     prod-wg-validate)
       shift
       prod_wg_validate "$@"
@@ -6492,6 +7917,70 @@ main() {
     pilot-runbook)
       shift
       pilot_runbook "$@"
+      ;;
+    prod-pilot-runbook)
+      shift
+      prod_pilot_runbook "$@"
+      ;;
+    prod-pilot-cohort-runbook)
+      shift
+      prod_pilot_cohort_runbook "$@"
+      ;;
+    prod-pilot-cohort-quick)
+      shift
+      prod_pilot_cohort_quick "$@"
+      ;;
+    prod-pilot-cohort-bundle-verify)
+      shift
+      prod_pilot_cohort_bundle_verify "$@"
+      ;;
+    prod-pilot-cohort-check)
+      shift
+      prod_pilot_cohort_check "$@"
+      ;;
+    prod-pilot-cohort-signoff)
+      shift
+      prod_pilot_cohort_signoff "$@"
+      ;;
+    prod-pilot-cohort-quick-check)
+      shift
+      prod_pilot_cohort_quick_check "$@"
+      ;;
+    prod-pilot-cohort-quick-trend)
+      shift
+      prod_pilot_cohort_quick_trend "$@"
+      ;;
+    prod-pilot-cohort-quick-alert)
+      shift
+      prod_pilot_cohort_quick_alert "$@"
+      ;;
+    prod-pilot-cohort-quick-dashboard)
+      shift
+      prod_pilot_cohort_quick_dashboard "$@"
+      ;;
+    prod-pilot-cohort-quick-signoff)
+      shift
+      prod_pilot_cohort_quick_signoff "$@"
+      ;;
+    prod-pilot-cohort-quick-runbook)
+      shift
+      prod_pilot_cohort_quick_runbook "$@"
+      ;;
+    prod-key-rotation-runbook)
+      shift
+      prod_key_rotation_runbook "$@"
+      ;;
+    prod-upgrade-runbook)
+      shift
+      prod_upgrade_runbook "$@"
+      ;;
+    prod-operator-lifecycle-runbook)
+      shift
+      prod_operator_lifecycle_runbook "$@"
+      ;;
+    incident-snapshot)
+      shift
+      incident_snapshot "$@"
       ;;
     discover-hosts)
       shift

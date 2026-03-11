@@ -136,6 +136,10 @@ type exitMetrics struct {
 
 var deriveWGPublicKeyFromPrivateFile = wg.DerivePublicKeyFromPrivateFile
 
+// Deterministic valid WireGuard public key used only when EXIT_WG_PUBKEY is unset
+// in non-command scaffolding modes.
+const defaultExitWGPubKey = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+
 func New() *Service {
 	addr := os.Getenv("EXIT_ADDR")
 	if addr == "" {
@@ -192,7 +196,7 @@ func New() *Service {
 	opaqueSourceAddr := os.Getenv("EXIT_OPAQUE_SOURCE_ADDR")
 	wgPubKey := os.Getenv("EXIT_WG_PUBKEY")
 	if wgPubKey == "" {
-		wgPubKey = "exit-wg-pubkey-stub"
+		wgPubKey = defaultExitWGPubKey
 	}
 	wgExitIP := os.Getenv("EXIT_WG_EXIT_IP")
 	if wgExitIP == "" {
@@ -588,6 +592,11 @@ func (s *Service) validateRuntimeConfig() error {
 		}
 		if s.startupSyncTimeout <= 0 {
 			return fmt.Errorf("WG_ONLY_MODE requires EXIT_STARTUP_SYNC_TIMEOUT_SEC>0")
+		}
+	}
+	if s.wgBackend != "command" {
+		if !wg.IsValidPublicKey(strings.TrimSpace(s.wgPubKey)) {
+			return fmt.Errorf("EXIT_WG_PUBKEY must be a valid WireGuard public key")
 		}
 	}
 	if s.betaStrict {

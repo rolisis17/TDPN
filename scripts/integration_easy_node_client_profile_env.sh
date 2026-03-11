@@ -92,6 +92,7 @@ run_client_test_capture() {
   local capture_file="$1"
   local beta_profile="$2"
   local prod_profile="$3"
+  shift 3
   rm -f "$capture_file"
   PATH="$TMP_BIN:$PATH" \
   EASY_NODE_LOG_DIR="$LOG_DIR" \
@@ -108,7 +109,8 @@ run_client_test_capture() {
     --require-cross-operator-pair 1 \
     --timeout-sec 10 \
     --beta-profile "$beta_profile" \
-    --prod-profile "$prod_profile" >/dev/null
+    --prod-profile "$prod_profile" \
+    "$@" >/dev/null
 }
 
 BETA_CAPTURE="$TMP_DIR/beta_capture.log"
@@ -171,6 +173,39 @@ prod_cleanup_count="$(rg -c -- "rm -f demo-run-id" "$PROD_CAPTURE" || echo "0")"
 if [[ -z "$prod_cleanup_count" || "$prod_cleanup_count" -lt 2 ]]; then
   echo "missing expected pre/post client demo cleanup calls in prod profile (rm count=$prod_cleanup_count)"
   cat "$PROD_CAPTURE"
+  exit 1
+fi
+
+PATH_PROFILE_CAPTURE="$TMP_DIR/path_profile_capture.log"
+run_client_test_capture "$PATH_PROFILE_CAPTURE" "0" "0" --path-profile privacy
+if ! rg -q -- "-e CLIENT_REQUIRE_DISTINCT_OPERATORS=1" "$PATH_PROFILE_CAPTURE"; then
+  echo "missing expected path-profile distinct operators env"
+  cat "$PATH_PROFILE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- "-e CLIENT_REQUIRE_DISTINCT_ENTRY_EXIT_COUNTRY=1" "$PATH_PROFILE_CAPTURE"; then
+  echo "missing expected path-profile distinct countries env"
+  cat "$PATH_PROFILE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- "-e CLIENT_EXIT_LOCALITY_SOFT_BIAS=0" "$PATH_PROFILE_CAPTURE"; then
+  echo "missing expected path-profile locality soft-bias env"
+  cat "$PATH_PROFILE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- "-e CLIENT_EXIT_COUNTRY_BIAS=1.60" "$PATH_PROFILE_CAPTURE"; then
+  echo "missing expected path-profile country-bias env"
+  cat "$PATH_PROFILE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- "-e CLIENT_EXIT_REGION_BIAS=1.25" "$PATH_PROFILE_CAPTURE"; then
+  echo "missing expected path-profile region-bias env"
+  cat "$PATH_PROFILE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- "-e CLIENT_EXIT_REGION_PREFIX_BIAS=1.10" "$PATH_PROFILE_CAPTURE"; then
+  echo "missing expected path-profile region-prefix-bias env"
+  cat "$PATH_PROFILE_CAPTURE"
   exit 1
 fi
 

@@ -1916,20 +1916,18 @@ func parseDNSPeerHintRecord(record string) (proto.DirectoryPeerHint, bool) {
 	if record == "" {
 		return proto.DirectoryPeerHint{}, false
 	}
-	if validDNSDiscoveryURL(record) {
-		return proto.DirectoryPeerHint{URL: normalizePeerURL(record)}, true
-	}
-
 	fields := strings.Fields(strings.NewReplacer(";", " ", ",", " ").Replace(record))
 	if len(fields) == 0 {
 		return proto.DirectoryPeerHint{}, false
 	}
 	hint := proto.DirectoryPeerHint{}
+	hasKV := false
 	for _, field := range fields {
 		key, value, ok := strings.Cut(field, "=")
 		if !ok {
 			continue
 		}
+		hasKV = true
 		key = strings.ToLower(strings.TrimSpace(key))
 		value = strings.TrimSpace(value)
 		switch key {
@@ -1946,6 +1944,12 @@ func parseDNSPeerHintRecord(record string) (proto.DirectoryPeerHint, bool) {
 				hint.PubKey = normalizePeerPubKey(value)
 			}
 		}
+	}
+	if !hasKV {
+		if validDNSDiscoveryURL(record) {
+			return proto.DirectoryPeerHint{URL: normalizePeerURL(record)}, true
+		}
+		return proto.DirectoryPeerHint{}, false
 	}
 	if !validDNSDiscoveryURL(hint.URL) {
 		return proto.DirectoryPeerHint{}, false
