@@ -523,7 +523,8 @@ build_admin_header_args() {
     header_args+=(-H "X-Admin-Token: ${admin_token}")
   fi
 
-  eval "$out_var=(\"\${header_args[@]}\")"
+  local -n _header_out="$out_var"
+  _header_out=("${header_args[@]}")
 }
 
 discover_directory_urls() {

@@ -231,7 +231,8 @@ build_header_args() {
     out+=(-H "X-Admin-Nonce: ${h_nonce}")
     out+=(-H "X-Admin-Signature: ${h_sig}")
   fi
-  eval "$out_var=(\"\${out[@]}\")"
+  local -n _header_out="$out_var"
+  _header_out=("${out[@]}")
 }
 
 build_tls_args() {
@@ -245,7 +246,8 @@ build_tls_args() {
       out+=(--cert "$mtls_cert_file" --key "$mtls_key_file")
     fi
   fi
-  eval "$out_var=(\"\${out[@]}\")"
+  local -n _tls_out="$out_var"
+  _tls_out=("${out[@]}")
 }
 
 tmp_body_file="$(mktemp)"

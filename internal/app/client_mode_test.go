@@ -12,47 +12,47 @@ import (
 func TestAllowSyntheticFallback(t *testing.T) {
 	cases := []struct {
 		name   string
-		client Client
+		client *Client
 		want   bool
 	}{
 		{
 			name:   "noop-non-live",
-			client: Client{wgBackend: "noop", liveWGMode: false},
+			client: &Client{wgBackend: "noop", liveWGMode: false},
 			want:   true,
 		},
 		{
 			name:   "live-mode-disabled",
-			client: Client{wgBackend: "noop", liveWGMode: true},
+			client: &Client{wgBackend: "noop", liveWGMode: true},
 			want:   false,
 		},
 		{
 			name:   "command-backend-disabled",
-			client: Client{wgBackend: "command", liveWGMode: false},
+			client: &Client{wgBackend: "command", liveWGMode: false},
 			want:   false,
 		},
 		{
 			name:   "command-live-disabled",
-			client: Client{wgBackend: "command", liveWGMode: true},
+			client: &Client{wgBackend: "command", liveWGMode: true},
 			want:   false,
 		},
 		{
 			name:   "explicit-disable",
-			client: Client{wgBackend: "noop", liveWGMode: false, disableSynthetic: true},
+			client: &Client{wgBackend: "noop", liveWGMode: false, disableSynthetic: true},
 			want:   false,
 		},
 		{
 			name:   "wg-only-enforced",
-			client: Client{wgBackend: "noop", liveWGMode: false, wgOnlyMode: true},
+			client: &Client{wgBackend: "noop", liveWGMode: false, wgOnlyMode: true},
 			want:   false,
 		},
 		{
 			name:   "beta-strict-enforced",
-			client: Client{wgBackend: "noop", liveWGMode: false, betaStrict: true},
+			client: &Client{wgBackend: "noop", liveWGMode: false, betaStrict: true},
 			want:   false,
 		},
 		{
 			name:   "prod-strict-enforced",
-			client: Client{wgBackend: "noop", liveWGMode: false, prodStrict: true},
+			client: &Client{wgBackend: "noop", liveWGMode: false, prodStrict: true},
 			want:   false,
 		},
 	}

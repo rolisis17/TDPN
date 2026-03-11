@@ -10,6 +10,7 @@
 #include <vector>
 
 #include <unistd.h>
+#include <sys/wait.h>
 
 namespace {
 
@@ -52,8 +53,19 @@ std::string readLine(const std::string &prompt, const std::string &def = "") {
 
 int runCommand(const std::string &cmd) {
   std::cout << "\n$ " << cmd << "\n\n" << std::flush;
-  int rc = std::system(cmd.c_str());
-  if (rc != 0) {
+  int raw = std::system(cmd.c_str());
+  if (raw == -1) {
+    std::cout << "command failed to start\n";
+    return 127;
+  }
+  int rc = raw;
+#ifdef WIFEXITED
+  if (WIFEXITED(raw)) {
+    rc = WEXITSTATUS(raw);
+  } else if (WIFSIGNALED(raw)) {
+    rc = 128 + WTERMSIG(raw);
+  }
+#endif
     std::cout << "command failed with code " << rc << "\n";
   }
   return rc;
