@@ -389,7 +389,7 @@ func New() *Service {
 	operatorID := operatorIDWithDefault("DIRECTORY_OPERATOR_ID", "operator-local")
 	privateKeyPath := os.Getenv("DIRECTORY_PRIVATE_KEY_FILE")
 	if privateKeyPath == "" {
-		privateKeyPath = "data/directory_ed25519.key"
+		privateKeyPath = "runtime/directory/directory_ed25519.key"
 	}
 	keyRotateEvery := time.Duration(0)
 	if v, err := strconv.Atoi(os.Getenv("DIRECTORY_KEY_ROTATE_SEC")); err == nil && v > 0 {
@@ -561,6 +561,12 @@ func (s *Service) validateRuntimeConfig() error {
 			return fmt.Errorf("invalid mTLS config: %w", err)
 		}
 	}
+	if !isLoopbackBindAddr(s.addr) && strings.TrimSpace(s.privateKeyPath) == "data/directory_ed25519.key" {
+		return fmt.Errorf("public bind rejects legacy DIRECTORY_PRIVATE_KEY_FILE path data/directory_ed25519.key")
+	}
+	if !isLoopbackBindAddr(s.addr) && isWeakAdminToken(s.adminToken) {
+		return fmt.Errorf("public bind requires strong DIRECTORY_ADMIN_TOKEN (len>=16, non-default)")
+	}
 	if !s.betaStrict {
 		if s.prodStrict {
 			return fmt.Errorf("PROD_STRICT_MODE requires BETA_STRICT_MODE=1")
@@ -637,6 +643,49 @@ func (s *Service) validateRuntimeConfig() error {
 		}
 	}
 	return nil
+}
+
+func isLoopbackBindAddr(addr string) bool {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return true
+	}
+	host := bindAddrHost(addr)
+	if host == "" {
+		return false
+	}
+	host = strings.Trim(host, "[]")
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+func bindAddrHost(addr string) string {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return ""
+	}
+	if strings.HasPrefix(addr, ":") {
+		return ""
+	}
+	host, _, err := net.SplitHostPort(addr)
+	if err == nil {
+		return strings.TrimSpace(host)
+	}
+	return strings.TrimSpace(addr)
+}
+
+func isWeakAdminToken(token string) bool {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return true
+	}
+	if token == "dev-admin-token" || token == "change-me" {
+		return true
+	}
+	return len(token) < 16
 }
 
 func (s *Service) runPeerSync(ctx context.Context) {

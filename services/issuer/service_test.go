@@ -158,6 +158,72 @@ func TestValidateRuntimeConfigBetaStrictRejectsExposedAnonCredentialIDs(t *testi
 	}
 }
 
+func TestValidateRuntimeConfigPublicBindRejectsWeakTokenAdmin(t *testing.T) {
+	s := &Service{
+		addr:            "0.0.0.0:8082",
+		adminToken:      "change-me",
+		adminAllowToken: true,
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected public bind rejection for weak admin token")
+	}
+	if !strings.Contains(err.Error(), "public bind requires strong ISSUER_ADMIN_TOKEN") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigPublicBindRejectsLegacyKeyPath(t *testing.T) {
+	s := &Service{
+		addr:            "0.0.0.0:8082",
+		adminToken:      "super-secret-admin-token",
+		adminAllowToken: true,
+		privateKeyPath:  "data/issuer_ed25519.key",
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected legacy key path rejection on public bind")
+	}
+	if !strings.Contains(err.Error(), "public bind rejects legacy ISSUER_PRIVATE_KEY_FILE path data/issuer_ed25519.key") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRequireAdminSignedModeRejectsTokenFallbackByDefault(t *testing.T) {
+	s := &Service{
+		adminToken:                    "super-secret-admin-token",
+		adminAllowToken:               true,
+		adminAllowTokenSet:            true,
+		adminRequireSigned:            true,
+		adminSignedAllowTokenFallback: false,
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/admin/subject/upsert", strings.NewReader(`{}`))
+	req.Header.Set("X-Admin-Token", "super-secret-admin-token")
+	rr := httptest.NewRecorder()
+	if s.requireAdmin(rr, req) {
+		t.Fatalf("expected signed-admin mode to reject token fallback by default")
+	}
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", rr.Code)
+	}
+}
+
+func TestRequireAdminSignedModeAllowsExplicitTokenFallback(t *testing.T) {
+	s := &Service{
+		adminToken:                    "super-secret-admin-token",
+		adminAllowToken:               true,
+		adminAllowTokenSet:            true,
+		adminRequireSigned:            true,
+		adminSignedAllowTokenFallback: true,
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/admin/subject/upsert", strings.NewReader(`{}`))
+	req.Header.Set("X-Admin-Token", "super-secret-admin-token")
+	rr := httptest.NewRecorder()
+	if !s.requireAdmin(rr, req) {
+		t.Fatalf("expected explicit signed-admin token fallback to authorize request")
+	}
+}
+
 func TestHandleHealth(t *testing.T) {
 	s := &Service{}
 	req := httptest.NewRequest(http.MethodGet, "/v1/health", nil)

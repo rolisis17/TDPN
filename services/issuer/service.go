@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -24,54 +25,55 @@ import (
 )
 
 type Service struct {
-	addr                string
-	issuerID            string
-	pubKey              ed25519.PublicKey
-	privKey             ed25519.PrivateKey
-	privateKeyPath      string
-	previousPubKeysFile string
-	epochStateFile      string
-	keyRotateSec        int
-	keyHistory          int
-	httpSrv             *http.Server
-	tokenTTL            time.Duration
-	revocationFeedTTL   time.Duration
-	trustFeedTTL        time.Duration
-	trustConfidence     float64
-	trustBondMax        float64
-	trustOperatorID     string
-	disputeDefaultTTL   time.Duration
-	adminToken          string
-	adminAllowToken     bool
-	adminAllowTokenSet  bool
-	adminRequireSigned  bool
-	adminSignedWindow   time.Duration
-	adminKeysFile       string
-	adminKeysInline     string
-	adminPubKeys        map[string]ed25519.PublicKey
-	adminSeenNonce      map[string]int64
-	adminAuthMu         sync.Mutex
-	clientAllowlistOnly bool
-	disableAnonCred     bool
-	anonCredExposeID    bool
-	betaStrict          bool
-	prodStrict          bool
-	mu                  sync.RWMutex
-	subjects            map[string]proto.SubjectProfile
-	subjectsFile        string
-	revocations         map[string]int64
-	revocationsFile     string
-	anonRevocations     map[string]int64
-	anonRevocationsFile string
-	anonDisputes        map[string]anonymousCredentialDispute
-	anonDisputesFile    string
-	audit               []proto.AuditEvent
-	auditFile           string
-	auditMax            int
-	auditSeq            int64
-	keyEpoch            int64
-	minTokenEpoch       int64
-	revocationVersion   int64
+	addr                          string
+	issuerID                      string
+	pubKey                        ed25519.PublicKey
+	privKey                       ed25519.PrivateKey
+	privateKeyPath                string
+	previousPubKeysFile           string
+	epochStateFile                string
+	keyRotateSec                  int
+	keyHistory                    int
+	httpSrv                       *http.Server
+	tokenTTL                      time.Duration
+	revocationFeedTTL             time.Duration
+	trustFeedTTL                  time.Duration
+	trustConfidence               float64
+	trustBondMax                  float64
+	trustOperatorID               string
+	disputeDefaultTTL             time.Duration
+	adminToken                    string
+	adminAllowToken               bool
+	adminAllowTokenSet            bool
+	adminRequireSigned            bool
+	adminSignedAllowTokenFallback bool
+	adminSignedWindow             time.Duration
+	adminKeysFile                 string
+	adminKeysInline               string
+	adminPubKeys                  map[string]ed25519.PublicKey
+	adminSeenNonce                map[string]int64
+	adminAuthMu                   sync.Mutex
+	clientAllowlistOnly           bool
+	disableAnonCred               bool
+	anonCredExposeID              bool
+	betaStrict                    bool
+	prodStrict                    bool
+	mu                            sync.RWMutex
+	subjects                      map[string]proto.SubjectProfile
+	subjectsFile                  string
+	revocations                   map[string]int64
+	revocationsFile               string
+	anonRevocations               map[string]int64
+	anonRevocationsFile           string
+	anonDisputes                  map[string]anonymousCredentialDispute
+	anonDisputesFile              string
+	audit                         []proto.AuditEvent
+	auditFile                     string
+	auditMax                      int
+	auditSeq                      int64
+	keyEpoch                      int64
+	minTokenEpoch                 int64
+	revocationVersion             int64
 }
 
 func New() *Service {
@@ -91,6 +93,11 @@ func New() *Service {
 	adminAllowToken := adminAllowTokenRaw != "0"
 	adminAllowTokenSet := adminAllowTokenRaw != ""
 	adminRequireSigned := os.Getenv("ISSUER_ADMIN_REQUIRE_SIGNED") == "1"
+	adminSignedAllowTokenFallback := os.Getenv("ISSUER_ADMIN_SIGNED_ALLOW_TOKEN_FALLBACK") == "1"
+	if adminRequireSigned && !adminAllowTokenSet {
+		// Signed-admin mode is fail-closed by default unless token fallback is explicitly requested.
+		adminAllowToken = false
+	}
 	adminSignedWindow := 90 * time.Second
 	if v := strings.TrimSpace(os.Getenv("ISSUER_ADMIN_SIGNED_WINDOW_SEC")); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -127,7 +134,7 @@ func New() *Service {
 	}
 	privateKeyPath := os.Getenv("ISSUER_PRIVATE_KEY_FILE")
 	if privateKeyPath == "" {
-		privateKeyPath = "data/issuer_ed25519.key"
+		privateKeyPath = "runtime/issuer/issuer_ed25519.key"
 	}
 	previousPubKeysFile := os.Getenv("ISSUER_PREVIOUS_PUBKEYS_FILE")
 	if previousPubKeysFile == "" {
@@ -192,47 +199,48 @@ func New() *Service {
 	betaStrict := os.Getenv("BETA_STRICT_MODE") == "1" || os.Getenv("ISSUER_BETA_STRICT") == "1"
 	prodStrict := os.Getenv("PROD_STRICT_MODE") == "1" || os.Getenv("ISSUER_PROD_STRICT") == "1"
 	return &Service{
-		addr:                addr,
-		issuerID:            issuerID,
-		tokenTTL:            tokenTTL,
-		revocationFeedTTL:   revocationFeedTTL,
-		trustFeedTTL:        trustFeedTTL,
-		trustConfidence:     trustConfidence,
-		trustBondMax:        trustBondMax,
-		trustOperatorID:     trustOperatorID,
-		disputeDefaultTTL:   disputeDefaultTTL,
-		privateKeyPath:      privateKeyPath,
-		previousPubKeysFile: previousPubKeysFile,
-		epochStateFile:      epochStateFile,
-		keyRotateSec:        keyRotateSec,
-		keyHistory:          keyHistory,
-		adminToken:          adminToken,
-		adminAllowToken:     adminAllowToken,
-		adminAllowTokenSet:  adminAllowTokenSet,
-		adminRequireSigned:  adminRequireSigned,
-		adminSignedWindow:   adminSignedWindow,
-		adminKeysFile:       adminKeysFile,
-		adminKeysInline:     adminKeysInline,
-		adminPubKeys:        make(map[string]ed25519.PublicKey),
-		adminSeenNonce:      make(map[string]int64),
-		clientAllowlistOnly: clientAllowlistOnly,
-		disableAnonCred:     disableAnonCred,
-		anonCredExposeID:    anonCredExposeID,
-		betaStrict:          betaStrict,
-		prodStrict:          prodStrict,
-		subjects:            make(map[string]proto.SubjectProfile),
-		subjectsFile:        subjectsFile,
-		revocations:         make(map[string]int64),
-		revocationsFile:     revocationsFile,
-		anonRevocations:     make(map[string]int64),
-		anonRevocationsFile: anonRevocationsFile,
-		anonDisputes:        make(map[string]anonymousCredentialDispute),
-		anonDisputesFile:    anonDisputesFile,
-		audit:               make([]proto.AuditEvent, 0, 128),
-		auditFile:           auditFile,
-		auditMax:            auditMax,
-		keyEpoch:            1,
-		minTokenEpoch:       1,
+		addr:                          addr,
+		issuerID:                      issuerID,
+		tokenTTL:                      tokenTTL,
+		revocationFeedTTL:             revocationFeedTTL,
+		trustFeedTTL:                  trustFeedTTL,
+		trustConfidence:               trustConfidence,
+		trustBondMax:                  trustBondMax,
+		trustOperatorID:               trustOperatorID,
+		disputeDefaultTTL:             disputeDefaultTTL,
+		privateKeyPath:                privateKeyPath,
+		previousPubKeysFile:           previousPubKeysFile,
+		epochStateFile:                epochStateFile,
+		keyRotateSec:                  keyRotateSec,
+		keyHistory:                    keyHistory,
+		adminToken:                    adminToken,
+		adminAllowToken:               adminAllowToken,
+		adminAllowTokenSet:            adminAllowTokenSet,
+		adminRequireSigned:            adminRequireSigned,
+		adminSignedAllowTokenFallback: adminSignedAllowTokenFallback,
+		adminSignedWindow:             adminSignedWindow,
+		adminKeysFile:                 adminKeysFile,
+		adminKeysInline:               adminKeysInline,
+		adminPubKeys:                  make(map[string]ed25519.PublicKey),
+		adminSeenNonce:                make(map[string]int64),
+		clientAllowlistOnly:           clientAllowlistOnly,
+		disableAnonCred:               disableAnonCred,
+		anonCredExposeID:              anonCredExposeID,
+		betaStrict:                    betaStrict,
+		prodStrict:                    prodStrict,
+		subjects:                      make(map[string]proto.SubjectProfile),
+		subjectsFile:                  subjectsFile,
+		revocations:                   make(map[string]int64),
+		revocationsFile:               revocationsFile,
+		anonRevocations:               make(map[string]int64),
+		anonRevocationsFile:           anonRevocationsFile,
+		anonDisputes:                  make(map[string]anonymousCredentialDispute),
+		anonDisputesFile:              anonDisputesFile,
+		audit:                         make([]proto.AuditEvent, 0, 128),
+		auditFile:                     auditFile,
+		auditMax:                      auditMax,
+		keyEpoch:                      1,
+		minTokenEpoch:                 1,
 	}
 }
 
@@ -336,6 +344,12 @@ func (s *Service) validateRuntimeConfig() error {
 		}
 	}
 	adminTokenAuthEnabled := s.isAdminTokenAuthEnabled()
+	if !isLoopbackBindAddr(s.addr) && strings.TrimSpace(s.privateKeyPath) == "data/issuer_ed25519.key" {
+		return fmt.Errorf("public bind rejects legacy ISSUER_PRIVATE_KEY_FILE path data/issuer_ed25519.key")
+	}
+	if !isLoopbackBindAddr(s.addr) && adminTokenAuthEnabled && isWeakAdminToken(s.adminToken) {
+		return fmt.Errorf("public bind requires strong ISSUER_ADMIN_TOKEN when token admin auth is enabled")
+	}
 	if !adminTokenAuthEnabled && !s.adminRequireSigned {
 		return fmt.Errorf("issuer admin auth misconfigured: no admin auth method enabled")
 	}
@@ -1342,7 +1356,7 @@ func (s *Service) requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 		if err := s.verifySignedAdminRequest(r); err == nil {
 			return true
 		}
-		if !adminTokenAuthEnabled {
+		if !s.adminSignedAllowTokenFallback || !adminTokenAuthEnabled {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return false
 		}
@@ -1352,6 +1366,49 @@ func (s *Service) requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 	}
 	http.Error(w, "unauthorized", http.StatusUnauthorized)
 	return false
+}
+
+func isLoopbackBindAddr(addr string) bool {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return true
+	}
+	host := bindAddrHost(addr)
+	if host == "" {
+		return false
+	}
+	host = strings.Trim(host, "[]")
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+func bindAddrHost(addr string) string {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return ""
+	}
+	if strings.HasPrefix(addr, ":") {
+		return ""
+	}
+	host, _, err := net.SplitHostPort(addr)
+	if err == nil {
+		return strings.TrimSpace(host)
+	}
+	return strings.TrimSpace(addr)
+}
+
+func isWeakAdminToken(token string) bool {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return true
+	}
+	if token == "dev-admin-token" || token == "change-me" {
+		return true
+	}
+	return len(token) < 16
 }
 
 func (s *Service) isAdminTokenAuthEnabled() bool {

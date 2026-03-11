@@ -28,7 +28,9 @@ Client and server in one program allowing the user to be part of the network as 
 - [x] User-configurable exit locality preference (country first, region fallback)
 - [x] Exit selection anti-concentration guardrail (per-operator cap, optional)
 - [x] Optional anti-collusion relay pairing guardrail (require distinct entry/exit operators)
+- [x] Optional anti-collusion country-pair guardrail (require distinct entry/exit country codes)
 - [x] Reputation-weighted exit ordering with exploration floor (optional descriptor metadata)
+- [x] Optional soft locality bias mode (weighted preference for requested country/region without hard filtering)
 - [x] Signed directory selection feed (`/v1/selection-feed`) with client verification/consumption
 - [x] Signed directory trust-attestation feed (`/v1/trust-attestations`) with bond/stake signals
 - [x] Cross-directory dispute attestation exchange (`tier_cap`, `dispute_until`) with vote-thresholded trust aggregation
@@ -162,6 +164,12 @@ sudo ./scripts/easy_node.sh stop-all --with-wg-only 1 --force-iface-cleanup 1
 # rotate server secret material in active env file
 ./scripts/easy_node.sh rotate-server-secrets --restart 1
 
+# production rotation runbook (backup + preflight + rollback on failure)
+./scripts/easy_node.sh prod-key-rotation-runbook --mode auto --preflight-check 1 --rollback-on-fail 1
+
+# production upgrade runbook (compose pull/build/restart + rollback on failure)
+./scripts/easy_node.sh prod-upgrade-runbook --mode auto --preflight-check 1 --compose-pull 1 --compose-build 0 --restart 1 --rollback-on-fail 1
+
 ./scripts/easy_node.sh client-test \
   --directory-urls http://<SERVER_IP>:8081 \
   --issuer-url http://<SERVER_IP>:8082 \
@@ -191,7 +199,7 @@ sudo ./scripts/easy_node.sh client-vpn-down
   --min-sources 2 \
   --min-operators 2 \
   --beta-profile 1 \
-  --distinct-operators 1
+  --path-profile balanced
 
 ./scripts/easy_node.sh three-machine-soak \
   --directory-a http://<A_SERVER_IP>:8081 \
@@ -202,7 +210,7 @@ sudo ./scripts/easy_node.sh client-vpn-down
   --rounds 12 \
   --pause-sec 5 \
   --beta-profile 1 \
-  --distinct-operators 1
+  --path-profile balanced
 
 # full production-grade 3-machine sequence (strict control + real WG)
 sudo ./scripts/easy_node.sh three-machine-prod-gate \
@@ -240,6 +248,7 @@ sudo ./scripts/easy_node.sh three-machine-prod-gate \
 # same sequence + automatic diagnostics bundle (.tar.gz)
 sudo ./scripts/easy_node.sh three-machine-prod-bundle \
   --bundle-dir .easy-node-logs/prod_gate_bundle \
+  --signoff-check 1 \
   --directory-a https://<A_SERVER_IP>:8081 \
   --directory-b https://<B_SERVER_IP>:8081 \
   --issuer-url https://<A_SERVER_IP>:8082 \
@@ -247,8 +256,52 @@ sudo ./scripts/easy_node.sh three-machine-prod-bundle \
   --exit-url https://<A_SERVER_IP>:8084 \
   --strict-distinct 1
 
+# note: three-machine-prod-bundle now runs strict machine-C preflight by default
+#       (disable only for diagnostics with --preflight-check 0)
+# note: bundle integrity verification is also fail-close by default
+#       (disable only for diagnostics with --bundle-verify-check 0)
+# note: failed bundle runs now auto-capture incident snapshots by default
+#       (disable only for diagnostics with --incident-snapshot-on-fail 0)
+# note: one-command run report JSON is emitted by default at
+#       <bundle-dir>/prod_bundle_run_report.json (override with --run-report-json)
+
+# bundle outputs now also include:
+#   - manifest.sha256 inside bundle dir (hashes of bundled files)
+#   - .tar.gz.sha256 sidecar next to the archive
+
+# optional: run signoff checker manually against an existing bundle (recommended input: run report JSON)
+#   ./scripts/easy_node.sh prod-gate-check --run-report-json .easy-node-logs/prod_gate_bundle/prod_bundle_run_report.json
+# optional: print compact GO/NO-GO SLO summary from gate artifacts
+#   ./scripts/easy_node.sh prod-gate-slo-summary --run-report-json .easy-node-logs/prod_gate_bundle/prod_bundle_run_report.json
+# optional: fail-close on NO-GO and include run-report stage checks
+#   ./scripts/easy_node.sh prod-gate-slo-summary --run-report-json .easy-node-logs/prod_gate_bundle/prod_bundle_run_report.json --require-preflight-ok 1 --require-bundle-ok 1 --require-integrity-ok 1 --require-signoff-ok 1 --fail-on-no-go 1
+# optional: evaluate SLO trend across many bundle runs (GO/NO-GO rate + top reasons)
+#   ./scripts/easy_node.sh prod-gate-slo-trend --reports-dir .easy-node-logs --max-reports 25 --show-details 1 --show-top-reasons 5
+# optional: time-windowed machine-readable trend output (last 24h)
+#   ./scripts/easy_node.sh prod-gate-slo-trend --reports-dir .easy-node-logs --since-hours 24 --summary-json .easy-node-logs/prod_slo_trend_24h.json --print-summary-json 1
+# optional: fail-close trend gate if any NO-GO or GO-rate drops below threshold
+#   ./scripts/easy_node.sh prod-gate-slo-trend --reports-dir .easy-node-logs --fail-on-any-no-go 1 --min-go-rate-pct 95
+# optional: convert trend into alert severity (OK/WARN/CRITICAL)
+#   ./scripts/easy_node.sh prod-gate-slo-alert --reports-dir .easy-node-logs --since-hours 24 --warn-go-rate-pct 98 --critical-go-rate-pct 90 --summary-json .easy-node-logs/prod_slo_alert_24h.json
+# optional: fail-close on alert severity
+#   ./scripts/easy_node.sh prod-gate-slo-alert --trend-summary-json .easy-node-logs/prod_slo_trend_24h.json --fail-on-warn 1 --fail-on-critical 1
+# optional: generate one operator dashboard artifact (trend + alert + markdown)
+#   ./scripts/easy_node.sh prod-gate-slo-dashboard --reports-dir .easy-node-logs --since-hours 24 --dashboard-md .easy-node-logs/prod_slo_dashboard_24h.md
+# optional: one-command integrity + signoff policy check
+#   ./scripts/easy_node.sh prod-gate-signoff --run-report-json .easy-node-logs/prod_gate_bundle/prod_bundle_run_report.json
+# optional: verify bundle integrity artifacts (manifest + tarball checksum)
+#   ./scripts/easy_node.sh prod-gate-bundle-verify --bundle-dir .easy-node-logs/prod_gate_bundle
+
+# one-command strict production pilot wrapper (fail-closed defaults)
+#   sudo ./scripts/easy_node.sh prod-pilot-runbook --bootstrap-directory https://<A_SERVER_IP>:8081 --subject client-alice
+#   note: this now auto-generates trend/alert/dashboard artifacts after bundle execution
+
 # print true 3-machine reminder checklist
 ./scripts/easy_node.sh three-machine-reminder
+
+# capture an incident/debug bundle from any node (authority/provider/client)
+# (auto-detects local env urls when possible; add explicit URLs to override)
+./scripts/easy_node.sh incident-snapshot --mode auto
 
 # one-command strict-ingress rehearsal (expected fail path, command returns success only when failure class is observed)
 sudo ./scripts/easy_node.sh prod-wg-strict-ingress-rehearsal \
@@ -304,7 +357,10 @@ sudo ./scripts/easy_node.sh prod-wg-strict-ingress-rehearsal \
 - authority admin token is hidden in output by default; use `--show-admin-token 1` only when you explicitly need to view it.
 - easy-mode `server-up` auto-generates and stores non-default `DIRECTORY_ADMIN_TOKEN` and `ENTRY_PUZZLE_SECRET` (both hidden in output unless you inspect env files).
 - `rotate-server-secrets` rotates `DIRECTORY_ADMIN_TOKEN` + `ENTRY_PUZZLE_SECRET` (and `ISSUER_ADMIN_TOKEN` on authority nodes) with optional restart.
+- `prod-key-rotation-runbook` wraps production rotation in an operator-safe flow (snapshot backup -> optional preflight -> rotations -> optional rollback) and writes a machine-readable summary JSON.
+- `prod-upgrade-runbook` wraps production upgrade maintenance in an operator-safe flow (snapshot backup -> optional preflight -> compose pull/build/restart -> optional rollback) and writes a machine-readable summary JSON.
 - `server-up --prod-profile 1` forces strict fail-closed runtime (`BETA_STRICT_MODE=1`, `PROD_STRICT_MODE=1`), enables mTLS, enables live command-backend WG dataplane defaults, and on authority nodes requires signed issuer-admin auth (`ISSUER_ADMIN_REQUIRE_SIGNED=1`, token admin auth disabled).
+- `server-up --prod-profile 1` now also applies hardened abuse/adjudication defaults (`ENTRY_OPEN_RPS=12`, `ENTRY_BAN_THRESHOLD=3`, `ENTRY_BAN_SEC=90`, `ENTRY_MAX_CONCURRENT_OPENS=96`, peer+final dispute/appeal vote floors, final operator/source quorum floors, `DIRECTORY_FINAL_ADJUDICATION_MIN_RATIO=0.67`, dispute/appeal TTL caps at `259200s`).
 - `server-up --prod-profile 1` requires at least 2 issuer URLs for strict issuer quorum; include at least one peer directory from a distinct authority/issuer operator.
 - in strict prod profile on authority nodes, `ISSUER_ADMIN_TOKEN` is cleared (empty) so token admin auth material is not persisted when signed admin auth is enforced.
 - `client-test --prod-profile 1` applies mTLS + trust-hardening client checks in the container demo path; full strict live-WG fail-closed validation is covered by wg-only/strict integration flows.
@@ -312,7 +368,7 @@ sudo ./scripts/easy_node.sh prod-wg-strict-ingress-rehearsal \
 - `invite-generate`, `invite-check`, and `invite-disable` support either token auth (`--admin-token`) or signed auth (`--admin-key-file` + `--admin-key-id`).
 - `admin-signing-status` / `admin-signing-rotate` are authority-only signer maintenance helpers.
 - `admin-signing-rotate --key-history N` preserves recent signer public keys for smoother key transitions.
-- `prod-preflight` validates strict prod wiring (HTTPS URLs, non-private public hosts, mTLS files/cert age, authority signer mapping, secret posture, and effective entry puzzle difficulty) and can optionally check live endpoints (`--check-live 1`).
+- `prod-preflight` validates strict prod wiring (HTTPS URLs, non-private public hosts, mTLS files/cert age, authority signer mapping, secret posture, effective entry puzzle difficulty, and final adjudication policy floors) and can optionally check live endpoints (`--check-live 1`), including live governance policy verification via `GET /v1/admin/governance-status`.
 
 3-machine test guide:
 - `docs/easy-3-machine-test.md`
@@ -322,6 +378,7 @@ sudo ./scripts/easy_node.sh prod-wg-strict-ingress-rehearsal \
 - `docs/github-security-baseline.md` (GitHub branch-protection/security baseline runbook + automation command flow)
 - `docs/release-process.md` (tagged release artifact/checksum flow)
 - `docs/license-decision.md` (license rationale; current choice is Apache-2.0)
+- `docs/product-roadmap.md` (beta -> v1 -> v2 delivery path)
 
 ## License
 
@@ -360,7 +417,7 @@ Optional env vars:
 - `DIRECTORY_MIN_OPERATORS` (default `1`; minimum distinct directory operators required)
 - `DIRECTORY_MIN_RELAY_VOTES` (default `1`; minimum source votes per relay descriptor)
 - `DIRECTORY_PUBLIC_URL` (optional public base URL identity used in push-gossip announcements)
-- `DIRECTORY_PRIVATE_KEY_FILE` (default `data/directory_ed25519.key`, persistent signing key)
+- `DIRECTORY_PRIVATE_KEY_FILE` (default `runtime/directory/directory_ed25519.key`, persistent signing key)
 - `DIRECTORY_PREVIOUS_PUBKEYS_FILE` (default `data/directory_previous_pubkeys.txt`; retained previous directory signing pubkeys exposed at `/v1/pubkeys`)
 - `DIRECTORY_KEY_ROTATE_SEC` (default `0`; when `>0`, auto-rotate directory signing key on interval)
 - `DIRECTORY_KEY_HISTORY` (default `3`; number of previous directory pubkeys retained during rotation)
@@ -380,7 +437,7 @@ Optional env vars:
 - `ENTRY_URL` auto-wires from `ENTRY_ADDR` when `--entry` is combined with `--directory`/`--client` and `ENTRY_URL` is unset
 - `EXIT_CONTROL_URL` auto-wires from `EXIT_ADDR` when `--exit` is combined with `--directory`/`--client` and `EXIT_CONTROL_URL` is unset
 - `ISSUER_URLS` (comma-separated issuer base URLs; exit verifies tokens against all fetched issuer pubkeys)
-- `ISSUER_PRIVATE_KEY_FILE` (default `data/issuer_ed25519.key`, persistent issuer signing key)
+- `ISSUER_PRIVATE_KEY_FILE` (default `runtime/issuer/issuer_ed25519.key`, persistent issuer signing key)
 - `ISSUER_PREVIOUS_PUBKEYS_FILE` (default `data/issuer_previous_pubkeys.txt`; optional previous issuer pubkeys for rollover exposure at `/v1/pubkeys`)
 - `ISSUER_CLIENT_ALLOWLIST_ONLY` (`1` requires `client_access` token requests to use a known `kind=client` subject profile; blocks unknown/empty subjects)
 - `ISSUER_ALLOW_ANON_CRED` (default `1`; set `0` to disable anonymous-credential token issuance)
@@ -471,7 +528,8 @@ Optional env vars:
 - `WGIOINJECT_TARGET_ADDR` (default `127.0.0.1:52000`, injector target)
 - `WGIOINJECT_INTERVAL_MS` (default `200`)
 - `WGIOINJECT_WG_LIKE_PCT` (default `80`, percentage of WG-like packets)
-- `ISSUER_ADMIN_TOKEN` (default `dev-admin-token`; in strict beta mode with token-admin auth enabled, must be non-default and length>=16)
+- `ISSUER_ADMIN_TOKEN` (no default in compose/easy-mode prod; when token-admin auth is enabled it must be non-default and length>=16 for public bind/strict modes)
+- `ISSUER_ADMIN_SIGNED_ALLOW_TOKEN_FALLBACK` (default `0`; when `ISSUER_ADMIN_REQUIRE_SIGNED=1`, token-admin fallback is denied unless explicitly enabled)
 - `ISSUER_SUBJECTS_FILE` (default `data/issuer_subjects.json`)
 - `ISSUER_REVOCATIONS_FILE` (default `data/issuer_revocations.json`)
 - `ENTRY_ENDPOINTS` (comma-separated rotating entry endpoints for directory)
@@ -525,7 +583,7 @@ Optional env vars:
 - `DIRECTORY_PROVIDER_MIN_ENTRY_TIER` (default `1`; minimum `provider_role` token tier required to advertise `entry` relays via `/v1/provider/relay/upsert`)
 - `DIRECTORY_PROVIDER_MIN_EXIT_TIER` (default `1`; minimum `provider_role` token tier required to advertise `exit` relays via `/v1/provider/relay/upsert`)
 - `DIRECTORY_BETA_STRICT` (`1` enables strict beta checks only for directory role)
-- `DIRECTORY_ADMIN_TOKEN` (default `dev-admin-token`; in strict beta/prod modes must be non-default and length>=16)
+- `DIRECTORY_ADMIN_TOKEN` (no default in compose/easy-mode prod; required to be non-default and length>=16 for public bind/strict modes)
 - `DIRECTORY_SELECTION_FEED_TTL_SEC` (default `30`; signed selection feed TTL)
 - `DIRECTORY_SELECTION_FEED_EPOCH_SEC` (default `10`; generated_at stabilization window for selection-feed cacheability)
 - `DIRECTORY_TRUST_FEED_TTL_SEC` (default `30`; signed trust-attestation feed TTL)

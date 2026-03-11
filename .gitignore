@@ -12,6 +12,7 @@ deploy/.env.easy.provider
 
 # Generated runtime data for docker/easy-mode runs
 deploy/data/
+runtime/
 data/easy_mode_hosts.conf
 data/issuer_subjects.json
 data/issuer_revocations.json

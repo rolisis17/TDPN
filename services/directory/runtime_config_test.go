@@ -33,6 +33,45 @@ func TestValidateRuntimeConfigBetaStrict(t *testing.T) {
 	}
 }
 
+func TestValidateRuntimeConfigPublicBindRejectsWeakAdminToken(t *testing.T) {
+	s := &Service{
+		addr:       "0.0.0.0:8081",
+		adminToken: "dev-admin-token",
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected public bind rejection for weak admin token")
+	}
+	if err.Error() != "public bind requires strong DIRECTORY_ADMIN_TOKEN (len>=16, non-default)" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigLoopbackAllowsWeakAdminTokenOutsideStrict(t *testing.T) {
+	s := &Service{
+		addr:       "127.0.0.1:8081",
+		adminToken: "dev-admin-token",
+	}
+	if err := s.validateRuntimeConfig(); err != nil {
+		t.Fatalf("expected loopback dev config valid, got %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigPublicBindRejectsLegacyKeyPath(t *testing.T) {
+	s := &Service{
+		addr:           "0.0.0.0:8081",
+		adminToken:     "directory-admin-012345",
+		privateKeyPath: "data/directory_ed25519.key",
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected legacy key path rejection on public bind")
+	}
+	if err.Error() != "public bind rejects legacy DIRECTORY_PRIVATE_KEY_FILE path data/directory_ed25519.key" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestValidateRuntimeConfigBetaStrictRejectsDefaultAdminToken(t *testing.T) {
 	s := &Service{
 		betaStrict:               true,

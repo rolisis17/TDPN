@@ -40,13 +40,7 @@ check_forbidden_tracked_paths() {
   local deploy_data_path
   while IFS= read -r deploy_data_path; do
     [[ -z "$deploy_data_path" ]] && continue
-    case "$deploy_data_path" in
-      deploy/data/directory/directory_ed25519.key | deploy/data/issuer/issuer_ed25519.key | deploy/data/issuer/issuer_epochs.json)
-        ;;
-      *)
-        record_failure "unexpected tracked deploy/data artifact: $deploy_data_path"
-        ;;
-    esac
+    record_failure "unexpected tracked deploy/data artifact: $deploy_data_path"
   done < <(git ls-files | rg '^deploy/data/' || true)
 }
 
@@ -55,17 +49,7 @@ check_tracked_sensitive_extensions() {
   local file
   while IFS= read -r file; do
     [[ -z "$file" ]] && continue
-    case "$file" in
-      data/*.key)
-        # Existing deterministic fixture keys used by integration tests.
-        ;;
-      deploy/data/directory/directory_ed25519.key | deploy/data/issuer/issuer_ed25519.key)
-        # Existing deterministic fixture keys used by docker stack smoke tests.
-        ;;
-      *)
-        record_failure "tracked sensitive file outside fixture allowlist: $file"
-        ;;
-    esac
+    record_failure "tracked sensitive file: $file"
   done < <(git ls-files '*.key' '*.pem' '*.p12' '*.pfx' '*.pk8' '*.der' '*.jks' '*.keystore' || true)
 }
 
