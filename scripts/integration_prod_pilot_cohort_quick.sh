@@ -66,6 +66,19 @@ FAKE_SIGNOFF_RC=0 \
   --subject pilot-alice \
   --rounds 3 \
   --pause-sec 1 \
+  --max-round-failures 2 \
+  --bundle-outputs 0 \
+  --bundle-fail-close 0 \
+  --signoff-require-trend-artifact-policy-match 0 \
+  --signoff-require-trend-wg-validate-udp-source 0 \
+  --signoff-require-trend-wg-validate-strict-distinct 0 \
+  --signoff-require-trend-wg-soak-diversity-pass 0 \
+  --signoff-min-trend-wg-soak-selection-lines 7 \
+  --signoff-min-trend-wg-soak-entry-operators 1 \
+  --signoff-min-trend-wg-soak-exit-operators 1 \
+  --signoff-min-trend-wg-soak-cross-operator-pairs 1 \
+  --signoff-require-incident-snapshot-on-fail 0 \
+  --signoff-require-incident-snapshot-artifacts 0 \
   --reports-dir "$SUCCESS_REPORTS" \
   --summary-json "$SUCCESS_SUMMARY" \
   --run-report-json "$SUCCESS_RUN_REPORT" \
@@ -83,6 +96,56 @@ if ! rg -q 'cmd prod-pilot-cohort-signoff' "$CAPTURE"; then
   cat "$CAPTURE"
   exit 1
 fi
+if ! rg -q -- '--require-trend-artifact-policy-match 0' "$CAPTURE"; then
+  echo "quick forwarding missing --require-trend-artifact-policy-match 0"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-trend-wg-validate-udp-source 0' "$CAPTURE"; then
+  echo "quick forwarding missing --require-trend-wg-validate-udp-source 0"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-trend-wg-validate-strict-distinct 0' "$CAPTURE"; then
+  echo "quick forwarding missing --require-trend-wg-validate-strict-distinct 0"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-trend-wg-soak-diversity-pass 0' "$CAPTURE"; then
+  echo "quick forwarding missing --require-trend-wg-soak-diversity-pass 0"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-trend-wg-soak-selection-lines 7' "$CAPTURE"; then
+  echo "quick forwarding missing --min-trend-wg-soak-selection-lines 7"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-trend-wg-soak-entry-operators 1' "$CAPTURE"; then
+  echo "quick forwarding missing --min-trend-wg-soak-entry-operators 1"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-trend-wg-soak-exit-operators 1' "$CAPTURE"; then
+  echo "quick forwarding missing --min-trend-wg-soak-exit-operators 1"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-trend-wg-soak-cross-operator-pairs 1' "$CAPTURE"; then
+  echo "quick forwarding missing --min-trend-wg-soak-cross-operator-pairs 1"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-incident-snapshot-on-fail 0' "$CAPTURE"; then
+  echo "quick forwarding missing --require-incident-snapshot-on-fail 0"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-incident-snapshot-artifacts 0' "$CAPTURE"; then
+  echo "quick forwarding missing --require-incident-snapshot-artifacts 0"
+  cat "$CAPTURE"
+  exit 1
+fi
 if ! rg -q -- '--bootstrap-directory https://a.example:8081' "$CAPTURE"; then
   echo "quick forwarding missing bootstrap-directory"
   cat "$CAPTURE"
@@ -93,12 +156,52 @@ if ! rg -q -- '--subject pilot-alice' "$CAPTURE"; then
   cat "$CAPTURE"
   exit 1
 fi
+if ! rg -q -- '--max-round-failures 2' "$CAPTURE"; then
+  echo "quick forwarding missing --max-round-failures 2"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--bundle-outputs 0' "$CAPTURE"; then
+  echo "quick forwarding missing --bundle-outputs 0"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--bundle-fail-close 0' "$CAPTURE"; then
+  echo "quick forwarding missing --bundle-fail-close 0"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-bundle-created 0' "$CAPTURE"; then
+  echo "quick forwarding missing signoff bundle-created policy 0"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-bundle-manifest 0' "$CAPTURE"; then
+  echo "quick forwarding missing signoff bundle-manifest policy 0"
+  cat "$CAPTURE"
+  exit 1
+fi
 if [[ ! -f "$SUCCESS_RUN_REPORT" ]]; then
   echo "expected quick run report not found"
   exit 1
 fi
 if ! jq -e '.status == "ok" and .runbook.rc == 0 and .signoff.rc == 0' "$SUCCESS_RUN_REPORT" >/dev/null; then
   echo "unexpected quick run report payload for success path"
+  cat "$SUCCESS_RUN_REPORT"
+  exit 1
+fi
+if ! jq -e '.config.signoff_require_trend_artifact_policy_match == false and .config.signoff_require_trend_wg_validate_udp_source == false and .config.signoff_require_trend_wg_validate_strict_distinct == false and .config.signoff_require_trend_wg_soak_diversity_pass == false and .config.signoff_min_trend_wg_soak_selection_lines == 7 and .config.signoff_min_trend_wg_soak_entry_operators == 1 and .config.signoff_min_trend_wg_soak_exit_operators == 1 and .config.signoff_min_trend_wg_soak_cross_operator_pairs == 1 and .config.signoff_require_incident_snapshot_on_fail == false and .config.signoff_require_incident_snapshot_artifacts == false' "$SUCCESS_RUN_REPORT" >/dev/null; then
+  echo "unexpected signoff config payload in quick run report"
+  cat "$SUCCESS_RUN_REPORT"
+  exit 1
+fi
+if ! jq -e '.config.max_round_failures == 2' "$SUCCESS_RUN_REPORT" >/dev/null; then
+  echo "unexpected max_round_failures payload in quick run report"
+  cat "$SUCCESS_RUN_REPORT"
+  exit 1
+fi
+if ! jq -e '.config.bundle_outputs == false and .config.bundle_fail_close == false' "$SUCCESS_RUN_REPORT" >/dev/null; then
+  echo "unexpected bundle policy config payload in quick run report"
   cat "$SUCCESS_RUN_REPORT"
   exit 1
 fi
@@ -172,6 +275,41 @@ fi
 if ! jq -e '.status == "fail" and .failure_step == "runbook_summary_missing" and .runbook.rc == 11 and .signoff.attempted == false' "$FAIL_NO_SUMMARY_REPORT" >/dev/null; then
   echo "unexpected run report payload for missing-summary failure path"
   cat "$FAIL_NO_SUMMARY_REPORT"
+  exit 1
+fi
+
+echo "[prod-pilot-cohort-quick] signoff fail path"
+SIGNOFF_FAIL_SUMMARY="$TMP_DIR/signoff_fail/prod_pilot_cohort_summary.json"
+SIGNOFF_FAIL_REPORT="$TMP_DIR/signoff_fail/prod_pilot_cohort_quick_report.json"
+CAPTURE4="$TMP_DIR/capture4.log"
+set +e
+CAPTURE_FILE="$CAPTURE4" \
+PROD_PILOT_COHORT_QUICK_EASY_NODE_SH="$FAKE_EASY_NODE" \
+FAKE_RUNBOOK_RC=0 \
+FAKE_SIGNOFF_RC=7 \
+./scripts/prod_pilot_cohort_quick.sh \
+  --reports-dir "$TMP_DIR/signoff_fail" \
+  --summary-json "$SIGNOFF_FAIL_SUMMARY" \
+  --run-report-json "$SIGNOFF_FAIL_REPORT" >/tmp/integration_prod_pilot_cohort_quick_signoff_fail.log 2>&1
+rc_signoff_fail=$?
+set -e
+if [[ "$rc_signoff_fail" -eq 0 ]]; then
+  echo "expected non-zero rc when signoff fails"
+  cat /tmp/integration_prod_pilot_cohort_quick_signoff_fail.log
+  exit 1
+fi
+if [[ ! -f "$SIGNOFF_FAIL_REPORT" ]]; then
+  echo "expected run report for signoff-fail path not found"
+  exit 1
+fi
+if ! jq -e '.status == "fail" and .failure_step == "signoff" and .runbook.rc == 0 and .signoff.attempted == true and .signoff.rc == 7 and .final_rc == 7' "$SIGNOFF_FAIL_REPORT" >/dev/null; then
+  echo "unexpected run report payload for signoff-fail path"
+  cat "$SIGNOFF_FAIL_REPORT"
+  exit 1
+fi
+if ! rg -q 'cmd prod-pilot-cohort-signoff' "$CAPTURE4"; then
+  echo "expected signoff invocation on signoff-fail path"
+  cat "$CAPTURE4"
   exit 1
 fi
 

@@ -250,6 +250,65 @@ if ! rg -q 'incident snapshot is not enabled on fail' /tmp/integration_prod_gate
   exit 1
 fi
 
+echo "[prod-gate-slo-summary] wg evidence policy checks"
+WG_VALIDATE_SUMMARY="$TMP_DIR/wg_validate_summary.json"
+WG_SOAK_SUMMARY="$TMP_DIR/wg_soak_summary.json"
+cat >"$WG_VALIDATE_SUMMARY" <<'EOF_WG_VALIDATE'
+{
+  "client_inner_source": "udp",
+  "strict_distinct": true
+}
+EOF_WG_VALIDATE
+cat >"$WG_SOAK_SUMMARY" <<'EOF_WG_SOAK'
+{
+  "selection_lines_total": 8,
+  "selection_entry_operators": 2,
+  "selection_exit_operators": 2,
+  "selection_cross_operator_pairs": 1,
+  "selection_diversity_failed": 0
+}
+EOF_WG_SOAK
+
+./scripts/prod_gate_slo_summary.sh \
+  --gate-summary-json "$PASS_GATE" \
+  --wg-validate-summary-json "$WG_VALIDATE_SUMMARY" \
+  --wg-soak-summary-json "$WG_SOAK_SUMMARY" \
+  --require-wg-validate-udp-source 1 \
+  --require-wg-validate-strict-distinct 1 \
+  --require-wg-soak-diversity-pass 1 \
+  --min-wg-soak-selection-lines 8 \
+  --min-wg-soak-entry-operators 2 \
+  --min-wg-soak-exit-operators 2 \
+  --min-wg-soak-cross-operator-pairs 1 \
+  --show-json 0 >/tmp/integration_prod_gate_slo_summary_wg_policy_pass.log 2>&1
+
+if ! rg -q '\[prod-gate-slo\] decision=GO' /tmp/integration_prod_gate_slo_summary_wg_policy_pass.log; then
+  echo "expected GO with WG evidence policy satisfied"
+  cat /tmp/integration_prod_gate_slo_summary_wg_policy_pass.log
+  exit 1
+fi
+
+set +e
+./scripts/prod_gate_slo_summary.sh \
+  --gate-summary-json "$PASS_GATE" \
+  --wg-validate-summary-json "$WG_VALIDATE_SUMMARY" \
+  --wg-soak-summary-json "$WG_SOAK_SUMMARY" \
+  --require-wg-soak-diversity-pass 1 \
+  --min-wg-soak-selection-lines 9 \
+  --fail-on-no-go 1 >/tmp/integration_prod_gate_slo_summary_wg_policy_fail.log 2>&1
+wg_policy_fail_rc=$?
+set -e
+if [[ "$wg_policy_fail_rc" -eq 0 ]]; then
+  echo "expected non-zero rc when WG soak selection floor is not met"
+  cat /tmp/integration_prod_gate_slo_summary_wg_policy_fail.log
+  exit 1
+fi
+if ! rg -q 'selection_lines_total below floor' /tmp/integration_prod_gate_slo_summary_wg_policy_fail.log; then
+  echo "expected WG soak selection floor no-go reason not found"
+  cat /tmp/integration_prod_gate_slo_summary_wg_policy_fail.log
+  exit 1
+fi
+
 echo "[prod-gate-slo-summary] easy_node forwarding"
 FAKE_SLO_SUMMARY="$TMP_DIR/fake_prod_gate_slo_summary.sh"
 CAPTURE="$TMP_DIR/prod_gate_slo_summary_args.log"
@@ -275,6 +334,13 @@ PROD_GATE_SLO_SUMMARY_SCRIPT="$FAKE_SLO_SUMMARY" \
   --require-signoff-ok 1 \
   --require-incident-snapshot-on-fail 1 \
   --require-incident-snapshot-artifacts 1 \
+  --require-wg-validate-udp-source 1 \
+  --require-wg-validate-strict-distinct 1 \
+  --require-wg-soak-diversity-pass 1 \
+  --min-wg-soak-selection-lines 8 \
+  --min-wg-soak-entry-operators 2 \
+  --min-wg-soak-exit-operators 2 \
+  --min-wg-soak-cross-operator-pairs 1 \
   --fail-on-no-go 1 \
   --show-json 1 >/tmp/integration_prod_gate_slo_summary_easy_node.log 2>&1
 
@@ -295,6 +361,41 @@ if ! rg -q -- '--require-incident-snapshot-on-fail 1' "$CAPTURE"; then
 fi
 if ! rg -q -- '--require-incident-snapshot-artifacts 1' "$CAPTURE"; then
   echo "easy_node prod-gate-slo-summary forwarding failed: missing --require-incident-snapshot-artifacts"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-wg-validate-udp-source 1' "$CAPTURE"; then
+  echo "easy_node prod-gate-slo-summary forwarding failed: missing --require-wg-validate-udp-source"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-wg-validate-strict-distinct 1' "$CAPTURE"; then
+  echo "easy_node prod-gate-slo-summary forwarding failed: missing --require-wg-validate-strict-distinct"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-wg-soak-diversity-pass 1' "$CAPTURE"; then
+  echo "easy_node prod-gate-slo-summary forwarding failed: missing --require-wg-soak-diversity-pass"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-wg-soak-selection-lines 8' "$CAPTURE"; then
+  echo "easy_node prod-gate-slo-summary forwarding failed: missing --min-wg-soak-selection-lines"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-wg-soak-entry-operators 2' "$CAPTURE"; then
+  echo "easy_node prod-gate-slo-summary forwarding failed: missing --min-wg-soak-entry-operators"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-wg-soak-exit-operators 2' "$CAPTURE"; then
+  echo "easy_node prod-gate-slo-summary forwarding failed: missing --min-wg-soak-exit-operators"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-wg-soak-cross-operator-pairs 1' "$CAPTURE"; then
+  echo "easy_node prod-gate-slo-summary forwarding failed: missing --min-wg-soak-cross-operator-pairs"
   cat "$CAPTURE"
   exit 1
 fi

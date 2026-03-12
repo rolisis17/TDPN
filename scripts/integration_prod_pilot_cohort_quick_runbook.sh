@@ -122,6 +122,9 @@ PROD_PILOT_COHORT_QUICK_RUNBOOK_EASY_NODE_SH="$FAKE_EASY_NODE" \
 ./scripts/prod_pilot_cohort_quick_runbook.sh \
   --bootstrap-directory https://a.example:8081 \
   --subject demo-client \
+  --max-round-failures 2 \
+  --bundle-outputs 0 \
+  --bundle-fail-close 0 \
   --reports-dir "$SUCCESS_DIR" \
   --show-json 1 >/tmp/integration_prod_pilot_cohort_quick_runbook_success.log 2>&1
 
@@ -140,6 +143,121 @@ if ! rg -q '^prod-pilot-cohort-quick-dashboard ' "$CAPTURE"; then
   cat "$CAPTURE"
   exit 1
 fi
+if ! rg -q -- '^prod-pilot-cohort-quick-signoff .*--require-cohort-signoff-policy 1' "$CAPTURE"; then
+  echo "missing strict cohort-signoff policy forwarding to quick-signoff stage"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '^prod-pilot-cohort-quick-signoff .*--require-trend-artifact-policy-match 1' "$CAPTURE"; then
+  echo "missing strict trend-artifact policy forwarding to quick-signoff stage"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '^prod-pilot-cohort-quick-signoff .*--require-trend-wg-validate-udp-source 1' "$CAPTURE"; then
+  echo "missing strict trend udp-source policy forwarding to quick-signoff stage"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '^prod-pilot-cohort-quick-signoff .*--require-trend-wg-validate-strict-distinct 1' "$CAPTURE"; then
+  echo "missing strict trend distinct policy forwarding to quick-signoff stage"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '^prod-pilot-cohort-quick-signoff .*--require-trend-wg-soak-diversity-pass 1' "$CAPTURE"; then
+  echo "missing strict trend soak-diversity policy forwarding to quick-signoff stage"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '^prod-pilot-cohort-quick-signoff .*--min-trend-wg-soak-selection-lines 12' "$CAPTURE"; then
+  echo "missing strict trend soak selection-lines forwarding to quick-signoff stage"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '^prod-pilot-cohort-quick-signoff .*--min-trend-wg-soak-entry-operators 2' "$CAPTURE"; then
+  echo "missing strict trend soak entry-operators forwarding to quick-signoff stage"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '^prod-pilot-cohort-quick-signoff .*--min-trend-wg-soak-exit-operators 2' "$CAPTURE"; then
+  echo "missing strict trend soak exit-operators forwarding to quick-signoff stage"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '^prod-pilot-cohort-quick-signoff .*--min-trend-wg-soak-cross-operator-pairs 2' "$CAPTURE"; then
+  echo "missing strict trend soak cross-operator-pairs forwarding to quick-signoff stage"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '^prod-pilot-cohort-quick .*--signoff-require-trend-artifact-policy-match 1' "$CAPTURE"; then
+  echo "missing strict trend-artifact policy forwarding to quick stage"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '^prod-pilot-cohort-quick .*--signoff-require-trend-wg-validate-udp-source 1' "$CAPTURE"; then
+  echo "missing strict trend udp-source policy forwarding to quick stage"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '^prod-pilot-cohort-quick .*--signoff-require-trend-wg-validate-strict-distinct 1' "$CAPTURE"; then
+  echo "missing strict trend distinct policy forwarding to quick stage"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '^prod-pilot-cohort-quick .*--signoff-require-trend-wg-soak-diversity-pass 1' "$CAPTURE"; then
+  echo "missing strict trend soak-diversity policy forwarding to quick stage"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '^prod-pilot-cohort-quick .*--signoff-min-trend-wg-soak-selection-lines 12' "$CAPTURE"; then
+  echo "missing strict trend soak selection-lines forwarding to quick stage"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '^prod-pilot-cohort-quick .*--signoff-min-trend-wg-soak-entry-operators 2' "$CAPTURE"; then
+  echo "missing strict trend soak entry-operators forwarding to quick stage"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '^prod-pilot-cohort-quick .*--signoff-min-trend-wg-soak-exit-operators 2' "$CAPTURE"; then
+  echo "missing strict trend soak exit-operators forwarding to quick stage"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '^prod-pilot-cohort-quick .*--signoff-min-trend-wg-soak-cross-operator-pairs 2' "$CAPTURE"; then
+  echo "missing strict trend soak cross-operator-pairs forwarding to quick stage"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '^prod-pilot-cohort-quick .*--max-round-failures 2' "$CAPTURE"; then
+  echo "missing max-round-failures forwarding to quick stage"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '^prod-pilot-cohort-quick .*--bundle-outputs 0' "$CAPTURE"; then
+  echo "missing bundle-outputs forwarding to quick stage"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '^prod-pilot-cohort-quick .*--bundle-fail-close 0' "$CAPTURE"; then
+  echo "missing bundle-fail-close forwarding to quick stage"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '^prod-pilot-cohort-quick-dashboard .*--require-cohort-signoff-policy 0' "$CAPTURE"; then
+  echo "missing bundle-compatible cohort-signoff policy forwarding to quick-dashboard stage"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '^prod-pilot-cohort-quick-signoff .*--require-bundle-created 0' "$CAPTURE"; then
+  echo "missing bundle-created policy forwarding to quick-signoff stage"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '^prod-pilot-cohort-quick-signoff .*--require-bundle-manifest 0' "$CAPTURE"; then
+  echo "missing bundle-manifest policy forwarding to quick-signoff stage"
+  cat "$CAPTURE"
+  exit 1
+fi
 if ! rg -q -- "--run-report-json ${SUCCESS_DIR}/prod_pilot_cohort_quick_report.json" "$CAPTURE"; then
   echo "runbook forwarding missing quick run-report path"
   cat "$CAPTURE"
@@ -150,7 +268,7 @@ if [[ ! -f "${SUCCESS_DIR}/prod_pilot_cohort_quick_runbook_summary.json" ]]; the
   ls -la "$SUCCESS_DIR"
   exit 1
 fi
-if ! jq -e '.status=="ok" and .stages.quick.rc==0 and .stages.quick_signoff.rc==0 and .stages.quick_dashboard.rc==0' "${SUCCESS_DIR}/prod_pilot_cohort_quick_runbook_summary.json" >/dev/null 2>&1; then
+if ! jq -e '.status=="ok" and .stages.quick.rc==0 and .stages.quick_signoff.rc==0 and .stages.quick_dashboard.rc==0 and .config.max_round_failures==2 and .config.bundle_outputs==0 and .config.bundle_fail_close==0 and .config.signoff_require_cohort_signoff_policy==1 and .config.dashboard_require_cohort_signoff_policy==0 and .config.signoff_require_trend_artifact_policy_match==1 and .config.signoff_min_trend_wg_soak_selection_lines==12' "${SUCCESS_DIR}/prod_pilot_cohort_quick_runbook_summary.json" >/dev/null 2>&1; then
   echo "runbook summary missing expected success stage fields"
   cat "${SUCCESS_DIR}/prod_pilot_cohort_quick_runbook_summary.json"
   exit 1
@@ -291,6 +409,11 @@ PROD_PILOT_COHORT_QUICK_RUNBOOK_SCRIPT="$FAKE_RUNBOOK" \
   --bootstrap-directory https://a.example:8081 \
   --subject demo-client \
   --reports-dir /tmp/quick_runbook \
+  --max-round-failures 3 \
+  --bundle-outputs 0 \
+  --bundle-fail-close 0 \
+  --signoff-require-cohort-signoff-policy 0 \
+  --signoff-require-trend-artifact-policy-match 0 \
   --dashboard-fail-close 1 \
   --show-json 1 >/tmp/integration_prod_pilot_cohort_quick_runbook_easy_node.log 2>&1
 
@@ -309,8 +432,33 @@ if ! rg -q -- '--reports-dir /tmp/quick_runbook' "$RUNBOOK_FORWARD_CAPTURE"; the
   cat "$RUNBOOK_FORWARD_CAPTURE"
   exit 1
 fi
+if ! rg -q -- '--max-round-failures 3' "$RUNBOOK_FORWARD_CAPTURE"; then
+  echo "easy_node quick-runbook forwarding failed: missing --max-round-failures"
+  cat "$RUNBOOK_FORWARD_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--bundle-outputs 0' "$RUNBOOK_FORWARD_CAPTURE"; then
+  echo "easy_node quick-runbook forwarding failed: missing --bundle-outputs"
+  cat "$RUNBOOK_FORWARD_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--bundle-fail-close 0' "$RUNBOOK_FORWARD_CAPTURE"; then
+  echo "easy_node quick-runbook forwarding failed: missing --bundle-fail-close"
+  cat "$RUNBOOK_FORWARD_CAPTURE"
+  exit 1
+fi
 if ! rg -q -- '--dashboard-fail-close 1' "$RUNBOOK_FORWARD_CAPTURE"; then
   echo "easy_node quick-runbook forwarding failed: missing --dashboard-fail-close"
+  cat "$RUNBOOK_FORWARD_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--signoff-require-cohort-signoff-policy 0' "$RUNBOOK_FORWARD_CAPTURE"; then
+  echo "easy_node quick-runbook forwarding failed: missing --signoff-require-cohort-signoff-policy"
+  cat "$RUNBOOK_FORWARD_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--signoff-require-trend-artifact-policy-match 0' "$RUNBOOK_FORWARD_CAPTURE"; then
+  echo "easy_node quick-runbook forwarding failed: missing --signoff-require-trend-artifact-policy-match"
   cat "$RUNBOOK_FORWARD_CAPTURE"
   exit 1
 fi

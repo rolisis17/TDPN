@@ -21,8 +21,21 @@ Usage:
     [--require-runbook-ok [0|1]] \
     [--require-signoff-attempted [0|1]] \
     [--require-signoff-ok [0|1]] \
+    [--require-cohort-signoff-policy [0|1]] \
+    [--require-trend-artifact-policy-match [0|1]] \
+    [--require-trend-wg-validate-udp-source [0|1]] \
+    [--require-trend-wg-validate-strict-distinct [0|1]] \
+    [--require-trend-wg-soak-diversity-pass [0|1]] \
+    [--min-trend-wg-soak-selection-lines N] \
+    [--min-trend-wg-soak-entry-operators N] \
+    [--min-trend-wg-soak-exit-operators N] \
+    [--min-trend-wg-soak-cross-operator-pairs N] \
+    [--require-bundle-created [0|1]] \
+    [--require-bundle-manifest [0|1]] \
     [--require-summary-json [0|1]] \
     [--require-summary-status-ok [0|1]] \
+    [--require-incident-snapshot-on-fail [0|1]] \
+    [--require-incident-snapshot-artifacts [0|1]] \
     [--max-duration-sec N] \
     [--max-reports N] \
     [--since-hours N] \
@@ -107,13 +120,26 @@ check_latest="${PROD_PILOT_COHORT_QUICK_SIGNOFF_CHECK_LATEST:-1}"
 check_trend="${PROD_PILOT_COHORT_QUICK_SIGNOFF_CHECK_TREND:-1}"
 check_alert="${PROD_PILOT_COHORT_QUICK_SIGNOFF_CHECK_ALERT:-1}"
 
-require_status_ok="${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_STATUS_OK:-1}"
-require_runbook_ok="${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_RUNBOOK_OK:-1}"
-require_signoff_attempted="${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_SIGNOFF_ATTEMPTED:-1}"
-require_signoff_ok="${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_SIGNOFF_OK:-1}"
-require_summary_json="${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_SUMMARY_JSON:-1}"
-require_summary_status_ok="${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_SUMMARY_STATUS_OK:-1}"
-max_duration_sec="${PROD_PILOT_COHORT_QUICK_CHECK_MAX_DURATION_SEC:-0}"
+require_status_ok="${PROD_PILOT_COHORT_QUICK_SIGNOFF_REQUIRE_STATUS_OK:-${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_STATUS_OK:-1}}"
+require_runbook_ok="${PROD_PILOT_COHORT_QUICK_SIGNOFF_REQUIRE_RUNBOOK_OK:-${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_RUNBOOK_OK:-1}}"
+require_signoff_attempted="${PROD_PILOT_COHORT_QUICK_SIGNOFF_REQUIRE_SIGNOFF_ATTEMPTED:-${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_SIGNOFF_ATTEMPTED:-1}}"
+require_signoff_ok="${PROD_PILOT_COHORT_QUICK_SIGNOFF_REQUIRE_SIGNOFF_OK:-${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_SIGNOFF_OK:-1}}"
+require_cohort_signoff_policy="${PROD_PILOT_COHORT_QUICK_SIGNOFF_REQUIRE_COHORT_SIGNOFF_POLICY:-1}"
+require_trend_artifact_policy_match="${PROD_PILOT_COHORT_QUICK_SIGNOFF_REQUIRE_TREND_ARTIFACT_POLICY_MATCH:-${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_TREND_ARTIFACT_POLICY_MATCH:-1}}"
+require_trend_wg_validate_udp_source="${PROD_PILOT_COHORT_QUICK_SIGNOFF_REQUIRE_TREND_WG_VALIDATE_UDP_SOURCE:-${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_TREND_WG_VALIDATE_UDP_SOURCE:-1}}"
+require_trend_wg_validate_strict_distinct="${PROD_PILOT_COHORT_QUICK_SIGNOFF_REQUIRE_TREND_WG_VALIDATE_STRICT_DISTINCT:-${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_TREND_WG_VALIDATE_STRICT_DISTINCT:-1}}"
+require_trend_wg_soak_diversity_pass="${PROD_PILOT_COHORT_QUICK_SIGNOFF_REQUIRE_TREND_WG_SOAK_DIVERSITY_PASS:-${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_TREND_WG_SOAK_DIVERSITY_PASS:-1}}"
+min_trend_wg_soak_selection_lines="${PROD_PILOT_COHORT_QUICK_SIGNOFF_MIN_TREND_WG_SOAK_SELECTION_LINES:-${PROD_PILOT_COHORT_QUICK_CHECK_MIN_TREND_WG_SOAK_SELECTION_LINES:-12}}"
+min_trend_wg_soak_entry_operators="${PROD_PILOT_COHORT_QUICK_SIGNOFF_MIN_TREND_WG_SOAK_ENTRY_OPERATORS:-${PROD_PILOT_COHORT_QUICK_CHECK_MIN_TREND_WG_SOAK_ENTRY_OPERATORS:-2}}"
+min_trend_wg_soak_exit_operators="${PROD_PILOT_COHORT_QUICK_SIGNOFF_MIN_TREND_WG_SOAK_EXIT_OPERATORS:-${PROD_PILOT_COHORT_QUICK_CHECK_MIN_TREND_WG_SOAK_EXIT_OPERATORS:-2}}"
+min_trend_wg_soak_cross_operator_pairs="${PROD_PILOT_COHORT_QUICK_SIGNOFF_MIN_TREND_WG_SOAK_CROSS_OPERATOR_PAIRS:-${PROD_PILOT_COHORT_QUICK_CHECK_MIN_TREND_WG_SOAK_CROSS_OPERATOR_PAIRS:-2}}"
+require_bundle_created="${PROD_PILOT_COHORT_QUICK_SIGNOFF_REQUIRE_BUNDLE_CREATED:-${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_BUNDLE_CREATED:-1}}"
+require_bundle_manifest="${PROD_PILOT_COHORT_QUICK_SIGNOFF_REQUIRE_BUNDLE_MANIFEST:-${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_BUNDLE_MANIFEST:-1}}"
+require_summary_json="${PROD_PILOT_COHORT_QUICK_SIGNOFF_REQUIRE_SUMMARY_JSON:-${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_SUMMARY_JSON:-1}}"
+require_summary_status_ok="${PROD_PILOT_COHORT_QUICK_SIGNOFF_REQUIRE_SUMMARY_STATUS_OK:-${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_SUMMARY_STATUS_OK:-1}}"
+require_incident_snapshot_on_fail="${PROD_PILOT_COHORT_QUICK_SIGNOFF_REQUIRE_INCIDENT_SNAPSHOT_ON_FAIL:-${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_INCIDENT_SNAPSHOT_ON_FAIL:-1}}"
+require_incident_snapshot_artifacts="${PROD_PILOT_COHORT_QUICK_SIGNOFF_REQUIRE_INCIDENT_SNAPSHOT_ARTIFACTS:-${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_INCIDENT_SNAPSHOT_ARTIFACTS:-1}}"
+max_duration_sec="${PROD_PILOT_COHORT_QUICK_SIGNOFF_MAX_DURATION_SEC:-${PROD_PILOT_COHORT_QUICK_CHECK_MAX_DURATION_SEC:-0}}"
 
 max_reports="${PROD_PILOT_COHORT_QUICK_TREND_MAX_REPORTS:-25}"
 since_hours="${PROD_PILOT_COHORT_QUICK_TREND_SINCE_HOURS:-24}"
@@ -206,6 +232,85 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --require-cohort-signoff-policy)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_cohort_signoff_policy="${2:-}"
+        shift 2
+      else
+        require_cohort_signoff_policy="1"
+        shift
+      fi
+      ;;
+    --require-trend-artifact-policy-match)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_trend_artifact_policy_match="${2:-}"
+        shift 2
+      else
+        require_trend_artifact_policy_match="1"
+        shift
+      fi
+      ;;
+    --require-trend-wg-validate-udp-source)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_trend_wg_validate_udp_source="${2:-}"
+        shift 2
+      else
+        require_trend_wg_validate_udp_source="1"
+        shift
+      fi
+      ;;
+    --require-trend-wg-validate-strict-distinct)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_trend_wg_validate_strict_distinct="${2:-}"
+        shift 2
+      else
+        require_trend_wg_validate_strict_distinct="1"
+        shift
+      fi
+      ;;
+    --require-trend-wg-soak-diversity-pass)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_trend_wg_soak_diversity_pass="${2:-}"
+        shift 2
+      else
+        require_trend_wg_soak_diversity_pass="1"
+        shift
+      fi
+      ;;
+    --min-trend-wg-soak-selection-lines)
+      min_trend_wg_soak_selection_lines="${2:-}"
+      shift 2
+      ;;
+    --min-trend-wg-soak-entry-operators)
+      min_trend_wg_soak_entry_operators="${2:-}"
+      shift 2
+      ;;
+    --min-trend-wg-soak-exit-operators)
+      min_trend_wg_soak_exit_operators="${2:-}"
+      shift 2
+      ;;
+    --min-trend-wg-soak-cross-operator-pairs)
+      min_trend_wg_soak_cross_operator_pairs="${2:-}"
+      shift 2
+      ;;
+    --require-bundle-created)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_bundle_created="${2:-}"
+        shift 2
+      else
+        require_bundle_created="1"
+        shift
+      fi
+      ;;
+    --require-bundle-manifest)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_bundle_manifest="${2:-}"
+        shift 2
+      else
+        require_bundle_manifest="1"
+        shift
+      fi
+      ;;
     --require-summary-json)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         require_summary_json="${2:-}"
@@ -221,6 +326,24 @@ while [[ $# -gt 0 ]]; do
         shift 2
       else
         require_summary_status_ok="1"
+        shift
+      fi
+      ;;
+    --require-incident-snapshot-on-fail)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_incident_snapshot_on_fail="${2:-}"
+        shift 2
+      else
+        require_incident_snapshot_on_fail="1"
+        shift
+      fi
+      ;;
+    --require-incident-snapshot-artifacts)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_incident_snapshot_artifacts="${2:-}"
+        shift 2
+      else
+        require_incident_snapshot_artifacts="1"
         shift
       fi
       ;;
@@ -331,8 +454,17 @@ for pair in \
   "--require-runbook-ok:$require_runbook_ok" \
   "--require-signoff-attempted:$require_signoff_attempted" \
   "--require-signoff-ok:$require_signoff_ok" \
+  "--require-cohort-signoff-policy:$require_cohort_signoff_policy" \
+  "--require-trend-artifact-policy-match:$require_trend_artifact_policy_match" \
+  "--require-trend-wg-validate-udp-source:$require_trend_wg_validate_udp_source" \
+  "--require-trend-wg-validate-strict-distinct:$require_trend_wg_validate_strict_distinct" \
+  "--require-trend-wg-soak-diversity-pass:$require_trend_wg_soak_diversity_pass" \
+  "--require-bundle-created:$require_bundle_created" \
+  "--require-bundle-manifest:$require_bundle_manifest" \
   "--require-summary-json:$require_summary_json" \
   "--require-summary-status-ok:$require_summary_status_ok" \
+  "--require-incident-snapshot-on-fail:$require_incident_snapshot_on_fail" \
+  "--require-incident-snapshot-artifacts:$require_incident_snapshot_artifacts" \
   "--fail-on-any-no-go:$fail_on_any_no_go" \
   "--show-json:$show_json"; do
   key="${pair%%:*}"
@@ -352,6 +484,17 @@ if [[ ! "$since_hours" =~ ^[0-9]+$ ]]; then
   echo "--since-hours must be an integer >= 0"
   exit 2
 fi
+for int_name in \
+  min_trend_wg_soak_selection_lines \
+  min_trend_wg_soak_entry_operators \
+  min_trend_wg_soak_exit_operators \
+  min_trend_wg_soak_cross_operator_pairs; do
+  int_val="${!int_name}"
+  if [[ ! "$int_val" =~ ^[0-9]+$ ]]; then
+    echo "--${int_name//_/-} must be an integer >= 0"
+    exit 2
+  fi
+done
 for int_name in warn_no_go_count critical_no_go_count warn_eval_errors critical_eval_errors; do
   int_val="${!int_name}"
   if [[ ! "$int_val" =~ ^[0-9]+$ ]]; then
@@ -440,8 +583,23 @@ if [[ "$check_latest" == "1" ]]; then
     --require-runbook-ok "$require_runbook_ok" \
     --require-signoff-attempted "$require_signoff_attempted" \
     --require-signoff-ok "$require_signoff_ok" \
+    --require-cohort-signoff-policy "$require_cohort_signoff_policy" \
+    --require-trend-artifact-policy-match "$require_trend_artifact_policy_match" \
+    --require-trend-wg-validate-udp-source "$require_trend_wg_validate_udp_source" \
+    --require-trend-wg-validate-strict-distinct "$require_trend_wg_validate_strict_distinct" \
+    --require-trend-wg-soak-diversity-pass "$require_trend_wg_soak_diversity_pass" \
+    --min-trend-wg-soak-selection-lines "$min_trend_wg_soak_selection_lines" \
+    --min-trend-wg-soak-entry-operators "$min_trend_wg_soak_entry_operators" \
+    --min-trend-wg-soak-exit-operators "$min_trend_wg_soak_exit_operators" \
+    --min-trend-wg-soak-cross-operator-pairs "$min_trend_wg_soak_cross_operator_pairs" \
+    --min-go-rate-pct "$min_go_rate_pct" \
+    --max-alert-severity "$max_alert_severity" \
+    --require-bundle-created "$require_bundle_created" \
+    --require-bundle-manifest "$require_bundle_manifest" \
     --require-summary-json "$require_summary_json" \
     --require-summary-status-ok "$require_summary_status_ok" \
+    --require-incident-snapshot-on-fail "$require_incident_snapshot_on_fail" \
+    --require-incident-snapshot-artifacts "$require_incident_snapshot_artifacts" \
     --max-duration-sec "$max_duration_sec" \
     --show-json 0
   latest_check_rc=$?
@@ -465,8 +623,11 @@ if [[ "$status" == "ok" && "$check_trend" == "1" ]]; then
     --require-runbook-ok "$require_runbook_ok" \
     --require-signoff-attempted "$require_signoff_attempted" \
     --require-signoff-ok "$require_signoff_ok" \
+    --require-cohort-signoff-policy "$require_cohort_signoff_policy" \
     --require-summary-json "$require_summary_json" \
     --require-summary-status-ok "$require_summary_status_ok" \
+    --require-incident-snapshot-on-fail "$require_incident_snapshot_on_fail" \
+    --require-incident-snapshot-artifacts "$require_incident_snapshot_artifacts" \
     --max-duration-sec "$max_duration_sec" \
     --fail-on-any-no-go "$fail_on_any_no_go" \
     --min-go-rate-pct "$min_go_rate_pct" \
@@ -495,8 +656,11 @@ if [[ "$status" == "ok" && "$check_alert" == "1" ]]; then
     --require-runbook-ok "$require_runbook_ok" \
     --require-signoff-attempted "$require_signoff_attempted" \
     --require-signoff-ok "$require_signoff_ok" \
+    --require-cohort-signoff-policy "$require_cohort_signoff_policy" \
     --require-summary-json "$require_summary_json" \
     --require-summary-status-ok "$require_summary_status_ok" \
+    --require-incident-snapshot-on-fail "$require_incident_snapshot_on_fail" \
+    --require-incident-snapshot-artifacts "$require_incident_snapshot_artifacts" \
     --max-duration-sec "$max_duration_sec" \
     --warn-go-rate-pct "$warn_go_rate_pct" \
     --critical-go-rate-pct "$critical_go_rate_pct" \
@@ -542,14 +706,28 @@ jq -nc \
   --arg alert_severity "${alert_severity:-}" \
   --argjson check_latest "$check_latest" \
   --argjson check_trend "$check_trend" \
-  --argjson check_alert "$check_alert" \
-  --argjson latest_check_rc "$latest_check_rc" \
-  --argjson trend_rc "$trend_rc" \
-  --argjson alert_rc "$alert_rc" \
+    --argjson check_alert "$check_alert" \
+    --argjson latest_check_rc "$latest_check_rc" \
+    --argjson trend_rc "$trend_rc" \
+    --argjson alert_rc "$alert_rc" \
   --argjson final_rc "$final_rc" \
   --argjson duration_sec "$duration_sec" \
-  --argjson fail_on_warn "$fail_on_warn" \
-  --argjson fail_on_critical "$fail_on_critical" \
+    --argjson fail_on_warn "$fail_on_warn" \
+    --argjson fail_on_critical "$fail_on_critical" \
+    --argjson require_cohort_signoff_policy "$require_cohort_signoff_policy" \
+    --argjson require_trend_artifact_policy_match "$require_trend_artifact_policy_match" \
+    --argjson require_trend_wg_validate_udp_source "$require_trend_wg_validate_udp_source" \
+    --argjson require_trend_wg_validate_strict_distinct "$require_trend_wg_validate_strict_distinct" \
+    --argjson require_trend_wg_soak_diversity_pass "$require_trend_wg_soak_diversity_pass" \
+    --argjson min_trend_wg_soak_selection_lines "$min_trend_wg_soak_selection_lines" \
+    --argjson min_trend_wg_soak_entry_operators "$min_trend_wg_soak_entry_operators" \
+    --argjson min_trend_wg_soak_exit_operators "$min_trend_wg_soak_exit_operators" \
+    --argjson min_trend_wg_soak_cross_operator_pairs "$min_trend_wg_soak_cross_operator_pairs" \
+    --argjson min_go_rate_pct "$min_go_rate_pct" \
+    --argjson require_bundle_created "$require_bundle_created" \
+    --argjson require_bundle_manifest "$require_bundle_manifest" \
+    --argjson require_incident_snapshot_on_fail "$require_incident_snapshot_on_fail" \
+    --argjson require_incident_snapshot_artifacts "$require_incident_snapshot_artifacts" \
   '{
     version: 1,
     started_at: $started_at,
@@ -566,7 +744,21 @@ jq -nc \
     policy: {
       max_alert_severity: $max_alert_severity,
       fail_on_warn: $fail_on_warn,
-      fail_on_critical: $fail_on_critical
+      fail_on_critical: $fail_on_critical,
+      require_cohort_signoff_policy: $require_cohort_signoff_policy,
+      require_trend_artifact_policy_match: $require_trend_artifact_policy_match,
+      require_trend_wg_validate_udp_source: $require_trend_wg_validate_udp_source,
+      require_trend_wg_validate_strict_distinct: $require_trend_wg_validate_strict_distinct,
+      require_trend_wg_soak_diversity_pass: $require_trend_wg_soak_diversity_pass,
+      min_trend_wg_soak_selection_lines: $min_trend_wg_soak_selection_lines,
+      min_trend_wg_soak_entry_operators: $min_trend_wg_soak_entry_operators,
+      min_trend_wg_soak_exit_operators: $min_trend_wg_soak_exit_operators,
+      min_trend_wg_soak_cross_operator_pairs: $min_trend_wg_soak_cross_operator_pairs,
+      min_go_rate_pct: $min_go_rate_pct,
+      require_bundle_created: $require_bundle_created,
+      require_bundle_manifest: $require_bundle_manifest,
+      require_incident_snapshot_on_fail: $require_incident_snapshot_on_fail,
+      require_incident_snapshot_artifacts: $require_incident_snapshot_artifacts
     },
     observed: {
       alert_severity: ($alert_severity // "")

@@ -168,6 +168,7 @@ PROD_PILOT_COHORT_QUICK_TREND_SCRIPT="$FAKE_TREND" \
   --reports-dir /tmp/quick_reports \
   --max-reports 7 \
   --since-hours 24 \
+  --require-cohort-signoff-policy 1 \
   --require-signoff-ok 1 \
   --show-top-reasons 3 >/tmp/integration_prod_pilot_cohort_quick_alert_generated.log 2>&1
 
@@ -193,6 +194,11 @@ if ! rg -q -- '--summary-json ' "$TREND_CAPTURE"; then
 fi
 if ! rg -q -- '--print-summary-json 0' "$TREND_CAPTURE"; then
   echo "quick-alert generated trend failed: missing print-summary-json forwarding"
+  cat "$TREND_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-cohort-signoff-policy 1' "$TREND_CAPTURE"; then
+  echo "quick-alert generated trend failed: missing --require-cohort-signoff-policy forwarding"
   cat "$TREND_CAPTURE"
   exit 1
 fi
@@ -235,6 +241,7 @@ PROD_PILOT_COHORT_QUICK_ALERT_SCRIPT="$FAKE_ALERT" \
 ./scripts/easy_node.sh prod-pilot-cohort-quick-alert \
   --reports-dir /tmp/quick_reports \
   --since-hours 12 \
+  --require-cohort-signoff-policy 1 \
   --warn-go-rate-pct 99 \
   --critical-go-rate-pct 95 \
   --fail-on-warn 1 \
@@ -258,6 +265,11 @@ if ! rg -q -- '--warn-go-rate-pct 99' "$ALERT_CAPTURE"; then
 fi
 if ! rg -q -- '--critical-go-rate-pct 95' "$ALERT_CAPTURE"; then
   echo "easy_node quick-alert forwarding failed: missing critical-go-rate-pct"
+  cat "$ALERT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-cohort-signoff-policy 1' "$ALERT_CAPTURE"; then
+  echo "easy_node quick-alert forwarding failed: missing --require-cohort-signoff-policy"
   cat "$ALERT_CAPTURE"
   exit 1
 fi

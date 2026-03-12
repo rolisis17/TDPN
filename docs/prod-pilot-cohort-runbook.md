@@ -75,7 +75,7 @@ Quick-mode artifact:
 - run one-command quick signoff gate with:
   - `./scripts/easy_node.sh prod-pilot-cohort-quick-signoff --run-report-json <reports_dir>/prod_pilot_cohort_quick_report.json --reports-dir <reports_dir> --max-alert-severity WARN`
 - run one-command quick pilot runbook (quick + signoff + optional dashboard) with:
-  - `./scripts/easy_node.sh prod-pilot-cohort-quick-runbook --bootstrap-directory https://<A_HOST>:8081 --subject pilot-client --max-alert-severity WARN`
+  - `./scripts/easy_node.sh prod-pilot-cohort-quick-runbook --bootstrap-directory https://<A_HOST>:8081 --subject pilot-client --max-alert-severity WARN --max-round-failures 0 --bundle-outputs 1 --bundle-fail-close 1`
 
 ## Key policy flags
 

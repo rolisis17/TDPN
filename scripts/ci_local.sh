@@ -7,6 +7,44 @@ cd "$ROOT_DIR"
 mkdir -p .gocache
 export GOCACHE="${GOCACHE:-$ROOT_DIR/.gocache}"
 
+# Keep local CI hermetic: some integrations exercise issuer/runtime state paths
+# under tracked files in data/. Snapshot and restore those tracked files so
+# running ci_local.sh does not leave working-tree noise.
+CI_LOCAL_STATE_DIR="$(mktemp -d)"
+declare -a CI_LOCAL_TRACKED_STATE_FILES=()
+if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  while IFS= read -r rel; do
+    [[ -z "$rel" ]] && continue
+    [[ -f "$rel" ]] || continue
+    [[ -w "$rel" ]] || continue
+    CI_LOCAL_TRACKED_STATE_FILES+=("$rel")
+    mkdir -p "$CI_LOCAL_STATE_DIR/orig/$(dirname "$rel")"
+    cp -p "$rel" "$CI_LOCAL_STATE_DIR/orig/$rel"
+  done < <(git ls-files 'data/issuer*.json' 'deploy/data/issuer*.json' 2>/dev/null || true)
+fi
+
+ci_local_restore_tracked_state() {
+  local rel
+  local restore_errors=0
+  set +e
+  if [[ ${#CI_LOCAL_TRACKED_STATE_FILES[@]} -gt 0 ]]; then
+    for rel in "${CI_LOCAL_TRACKED_STATE_FILES[@]}"; do
+      if [[ -f "$CI_LOCAL_STATE_DIR/orig/$rel" ]]; then
+        mkdir -p "$(dirname "$rel")"
+        cp -p "$CI_LOCAL_STATE_DIR/orig/$rel" "$rel" || restore_errors=$((restore_errors + 1))
+      else
+        rm -f "$rel" || restore_errors=$((restore_errors + 1))
+      fi
+    done
+  fi
+  rm -rf "$CI_LOCAL_STATE_DIR"
+  set -e
+  if ((restore_errors > 0)); then
+    echo "[ci] warning: failed to restore ${restore_errors} tracked state file(s)"
+  fi
+}
+trap ci_local_restore_tracked_state EXIT
+
 echo "[ci] unit tests"
 go test ./...
 

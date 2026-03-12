@@ -1,417 +1,5 @@
 [
   {
-    "id": 362,
-    "timestamp": 1771671788,
-    "action": "subject-dispute-apply",
-    "subject": "exit-local-1",
-    "reason": "chaos-cycle",
-    "value": 1771671968,
-    "tier_before": 3,
-    "tier_after": 1
-  },
-  {
-    "id": 363,
-    "timestamp": 1771671788,
-    "action": "subject-dispute-clear",
-    "subject": "exit-local-1",
-    "reason": "chaos-cycle-clear",
-    "tier_before": 1,
-    "tier_after": 3
-  },
-  {
-    "id": 364,
-    "timestamp": 1771671788,
-    "action": "subject-dispute-apply",
-    "subject": "exit-local-1",
-    "reason": "chaos-cycle",
-    "value": 1771671968,
-    "tier_before": 3,
-    "tier_after": 1
-  },
-  {
-    "id": 365,
-    "timestamp": 1771671788,
-    "action": "subject-dispute-clear",
-    "subject": "exit-local-1",
-    "reason": "chaos-cycle-clear",
-    "tier_before": 1,
-    "tier_after": 3
-  },
-  {
-    "id": 366,
-    "timestamp": 1771671788,
-    "action": "subject-dispute-apply",
-    "subject": "exit-local-1",
-    "reason": "chaos-cycle",
-    "value": 1771671968,
-    "tier_before": 3,
-    "tier_after": 1
-  },
-  {
-    "id": 367,
-    "timestamp": 1771671789,
-    "action": "subject-dispute-clear",
-    "subject": "exit-local-1",
-    "reason": "chaos-cycle-clear",
-    "tier_before": 1,
-    "tier_after": 3
-  },
-  {
-    "id": 368,
-    "timestamp": 1771671789,
-    "action": "subject-dispute-apply",
-    "subject": "exit-local-1",
-    "reason": "chaos-cycle",
-    "value": 1771671969,
-    "tier_before": 3,
-    "tier_after": 1
-  },
-  {
-    "id": 369,
-    "timestamp": 1771671789,
-    "action": "subject-dispute-clear",
-    "subject": "exit-local-1",
-    "reason": "chaos-cycle-clear",
-    "tier_before": 1,
-    "tier_after": 3
-  },
-  {
-    "id": 370,
-    "timestamp": 1771671789,
-    "action": "subject-dispute-apply",
-    "subject": "exit-local-1",
-    "reason": "chaos-cycle",
-    "value": 1771671969,
-    "tier_before": 3,
-    "tier_after": 1
-  },
-  {
-    "id": 371,
-    "timestamp": 1771671789,
-    "action": "subject-dispute-clear",
-    "subject": "exit-local-1",
-    "reason": "chaos-cycle-clear",
-    "tier_before": 1,
-    "tier_after": 3
-  },
-  {
-    "id": 372,
-    "timestamp": 1771671789,
-    "action": "subject-dispute-apply",
-    "subject": "exit-local-1",
-    "reason": "chaos-cycle",
-    "value": 1771671969,
-    "tier_before": 3,
-    "tier_after": 1
-  },
-  {
-    "id": 373,
-    "timestamp": 1771671789,
-    "action": "subject-dispute-clear",
-    "subject": "exit-local-1",
-    "reason": "chaos-cycle-clear",
-    "tier_before": 1,
-    "tier_after": 3
-  },
-  {
-    "id": 374,
-    "timestamp": 1771671871,
-    "action": "token-revoke",
-    "subject": "1771671871812687264",
-    "reason": "admin-revocation",
-    "value": 1771671991
-  },
-  {
-    "id": 375,
-    "timestamp": 1771671935,
-    "action": "subject-upsert",
-    "subject": "exit-local-1",
-    "value": 0.9,
-    "tier_before": 3,
-    "tier_after": 1
-  },
-  {
-    "id": 376,
-    "timestamp": 1771671937,
-    "action": "subject-upsert",
-    "subject": "exit-local-1",
-    "value": 0.97,
-    "tier_before": 1,
-    "tier_after": 3
-  },
-  {
-    "id": 377,
-    "timestamp": 1771671937,
-    "action": "subject-dispute-apply",
-    "subject": "exit-local-1",
-    "reason": "integration-test",
-    "value": 1771675537,
-    "tier_before": 3,
-    "tier_after": 1
-  },
-  {
-    "id": 378,
-    "timestamp": 1771671937,
-    "action": "subject-appeal-open",
-    "subject": "exit-local-1",
-    "reason": "integration-appeal",
-    "value": 1771674337,
-    "tier_before": 1,
-    "tier_after": 1
-  },
-  {
-    "id": 379,
-    "timestamp": 1771671937,
-    "action": "subject-appeal-resolve",
-    "subject": "exit-local-1",
-    "reason": "integration-appeal-resolve",
-    "tier_before": 1,
-    "tier_after": 1
-  },
-  {
-    "id": 380,
-    "timestamp": 1771671937,
-    "action": "subject-dispute-clear",
-    "subject": "exit-local-1",
-    "reason": "integration-test-clear",
-    "tier_before": 1,
-    "tier_after": 3
-  },
-  {
-    "id": 381,
-    "timestamp": 1771671940,
-    "action": "token-revoke",
-    "subject": "1771671940679224253",
-    "reason": "admin-revocation",
-    "value": 1771672060
-  },
-  {
-    "id": 382,
-    "timestamp": 1771675072,
-    "action": "subject-upsert",
-    "subject": "exit-local-1",
-    "value": 0.9,
-    "tier_before": 3,
-    "tier_after": 1
-  },
-  {
-    "id": 383,
-    "timestamp": 1771675074,
-    "action": "subject-upsert",
-    "subject": "exit-local-1",
-    "value": 0.97,
-    "tier_before": 1,
-    "tier_after": 3
-  },
-  {
-    "id": 384,
-    "timestamp": 1771675074,
-    "action": "subject-dispute-apply",
-    "subject": "exit-local-1",
-    "reason": "integration-test",
-    "value": 1771678674,
-    "tier_before": 3,
-    "tier_after": 1
-  },
-  {
-    "id": 385,
-    "timestamp": 1771675074,
-    "action": "subject-appeal-open",
-    "subject": "exit-local-1",
-    "reason": "integration-appeal",
-    "value": 1771677474,
-    "tier_before": 1,
-    "tier_after": 1
-  },
-  {
-    "id": 386,
-    "timestamp": 1771675074,
-    "action": "subject-appeal-resolve",
-    "subject": "exit-local-1",
-    "reason": "integration-appeal-resolve",
-    "tier_before": 1,
-    "tier_after": 1
-  },
-  {
-    "id": 387,
-    "timestamp": 1771675074,
-    "action": "subject-dispute-clear",
-    "subject": "exit-local-1",
-    "reason": "integration-test-clear",
-    "tier_before": 1,
-    "tier_after": 3
-  },
-  {
-    "id": 388,
-    "timestamp": 1771675075,
-    "action": "token-revoke",
-    "subject": "1771675074483079469",
-    "reason": "admin-revocation",
-    "value": 1771675255
-  },
-  {
-    "id": 389,
-    "timestamp": 1771675075,
-    "action": "subject-dispute-apply",
-    "subject": "exit-local-1",
-    "reason": "chaos-cycle",
-    "value": 1771675255,
-    "tier_before": 3,
-    "tier_after": 1
-  },
-  {
-    "id": 390,
-    "timestamp": 1771675075,
-    "action": "subject-dispute-clear",
-    "subject": "exit-local-1",
-    "reason": "chaos-cycle-clear",
-    "tier_before": 1,
-    "tier_after": 3
-  },
-  {
-    "id": 391,
-    "timestamp": 1771675075,
-    "action": "subject-dispute-apply",
-    "subject": "exit-local-1",
-    "reason": "chaos-cycle",
-    "value": 1771675255,
-    "tier_before": 3,
-    "tier_after": 1
-  },
-  {
-    "id": 392,
-    "timestamp": 1771675075,
-    "action": "subject-dispute-clear",
-    "subject": "exit-local-1",
-    "reason": "chaos-cycle-clear",
-    "tier_before": 1,
-    "tier_after": 3
-  },
-  {
-    "id": 393,
-    "timestamp": 1771675076,
-    "action": "subject-dispute-apply",
-    "subject": "exit-local-1",
-    "reason": "chaos-cycle",
-    "value": 1771675256,
-    "tier_before": 3,
-    "tier_after": 1
-  },
-  {
-    "id": 394,
-    "timestamp": 1771675076,
-    "action": "subject-dispute-clear",
-    "subject": "exit-local-1",
-    "reason": "chaos-cycle-clear",
-    "tier_before": 1,
-    "tier_after": 3
-  },
-  {
-    "id": 395,
-    "timestamp": 1771675076,
-    "action": "subject-dispute-apply",
-    "subject": "exit-local-1",
-    "reason": "chaos-cycle",
-    "value": 1771675256,
-    "tier_before": 3,
-    "tier_after": 1
-  },
-  {
-    "id": 396,
-    "timestamp": 1771675076,
-    "action": "subject-dispute-clear",
-    "subject": "exit-local-1",
-    "reason": "chaos-cycle-clear",
-    "tier_before": 1,
-    "tier_after": 3
-  },
-  {
-    "id": 397,
-    "timestamp": 1771675076,
-    "action": "subject-dispute-apply",
-    "subject": "exit-local-1",
-    "reason": "chaos-cycle",
-    "value": 1771675256,
-    "tier_before": 3,
-    "tier_after": 1
-  },
-  {
-    "id": 398,
-    "timestamp": 1771675076,
-    "action": "subject-dispute-clear",
-    "subject": "exit-local-1",
-    "reason": "chaos-cycle-clear",
-    "tier_before": 1,
-    "tier_after": 3
-  },
-  {
-    "id": 399,
-    "timestamp": 1771675076,
-    "action": "subject-dispute-apply",
-    "subject": "exit-local-1",
-    "reason": "chaos-cycle",
-    "value": 1771675256,
-    "tier_before": 3,
-    "tier_after": 1
-  },
-  {
-    "id": 400,
-    "timestamp": 1771675076,
-    "action": "subject-dispute-clear",
-    "subject": "exit-local-1",
-    "reason": "chaos-cycle-clear",
-    "tier_before": 1,
-    "tier_after": 3
-  },
-  {
-    "id": 401,
-    "timestamp": 1771675077,
-    "action": "subject-dispute-apply",
-    "subject": "exit-local-1",
-    "reason": "chaos-cycle",
-    "value": 1771675257,
-    "tier_before": 3,
-    "tier_after": 1
-  },
-  {
-    "id": 402,
-    "timestamp": 1771675077,
-    "action": "subject-dispute-clear",
-    "subject": "exit-local-1",
-    "reason": "chaos-cycle-clear",
-    "tier_before": 1,
-    "tier_after": 3
-  },
-  {
-    "id": 403,
-    "timestamp": 1771675077,
-    "action": "subject-dispute-apply",
-    "subject": "exit-local-1",
-    "reason": "chaos-cycle",
-    "value": 1771675257,
-    "tier_before": 3,
-    "tier_after": 1
-  },
-  {
-    "id": 404,
-    "timestamp": 1771675077,
-    "action": "subject-dispute-clear",
-    "subject": "exit-local-1",
-    "reason": "chaos-cycle-clear",
-    "tier_before": 1,
-    "tier_after": 3
-  },
-  {
-    "id": 405,
-    "timestamp": 1771675077,
-    "action": "subject-dispute-apply",
-    "subject": "exit-local-1",
-    "reason": "chaos-cycle",
-    "value": 1771675257,
-    "tier_before": 3,
-    "tier_after": 1
-  },
-  {
     "id": 406,
     "timestamp": 1771675077,
     "action": "subject-dispute-clear",
@@ -47367,5 +46955,421 @@
     "subject": "1773237283993707210",
     "reason": "admin-revocation",
     "value": 1773237404
+  },
+  {
+    "id": 5362,
+    "timestamp": 1773291997,
+    "action": "token-revoke",
+    "subject": "1773291997063713322",
+    "reason": "admin-revocation",
+    "value": 1773292117
+  },
+  {
+    "id": 5363,
+    "timestamp": 1773292329,
+    "action": "subject-upsert",
+    "subject": "exit-local-1",
+    "value": 0.9,
+    "tier_before": 3,
+    "tier_after": 1
+  },
+  {
+    "id": 5364,
+    "timestamp": 1773292331,
+    "action": "subject-upsert",
+    "subject": "exit-local-1",
+    "value": 0.97,
+    "tier_before": 1,
+    "tier_after": 3
+  },
+  {
+    "id": 5365,
+    "timestamp": 1773292331,
+    "action": "subject-dispute-apply",
+    "subject": "exit-local-1",
+    "reason": "integration-test",
+    "case_id": "case-dispute-int-1",
+    "evidence_ref": "evidence://dispute-int-1",
+    "value": 1773295931,
+    "tier_before": 3,
+    "tier_after": 1
+  },
+  {
+    "id": 5366,
+    "timestamp": 1773292331,
+    "action": "subject-appeal-open",
+    "subject": "exit-local-1",
+    "reason": "integration-appeal",
+    "case_id": "case-appeal-int-1",
+    "evidence_ref": "evidence://appeal-int-1",
+    "value": 1773294731,
+    "tier_before": 1,
+    "tier_after": 1
+  },
+  {
+    "id": 5367,
+    "timestamp": 1773292331,
+    "action": "subject-appeal-resolve",
+    "subject": "exit-local-1",
+    "reason": "integration-appeal-resolve",
+    "tier_before": 1,
+    "tier_after": 1
+  },
+  {
+    "id": 5368,
+    "timestamp": 1773292331,
+    "action": "subject-dispute-clear",
+    "subject": "exit-local-1",
+    "reason": "integration-test-clear",
+    "tier_before": 1,
+    "tier_after": 3
+  },
+  {
+    "id": 5369,
+    "timestamp": 1773292333,
+    "action": "anon-credential-issue",
+    "subject": "anon-integration-1",
+    "reason": "integration-test",
+    "value": 1773378733
+  },
+  {
+    "id": 5370,
+    "timestamp": 1773292334,
+    "action": "anon-credential-revoke",
+    "subject": "anon-integration-1",
+    "reason": "integration-test",
+    "value": 1773292454
+  },
+  {
+    "id": 5371,
+    "timestamp": 1773292336,
+    "action": "anon-credential-issue",
+    "subject": "anon-dispute-integration-1",
+    "reason": "integration-test",
+    "value": 1773378736
+  },
+  {
+    "id": 5372,
+    "timestamp": 1773292336,
+    "action": "anon-credential-dispute-apply",
+    "subject": "anon-dispute-integration-1",
+    "reason": "integration-test",
+    "case_id": "case-anon-dispute-1",
+    "evidence_ref": "evidence://anon-dispute-1",
+    "value": 1773292516,
+    "tier_after": 1
+  },
+  {
+    "id": 5373,
+    "timestamp": 1773292336,
+    "action": "anon-credential-dispute-clear",
+    "subject": "anon-dispute-integration-1",
+    "reason": "resolved"
+  },
+  {
+    "id": 5374,
+    "timestamp": 1773292338,
+    "action": "subject-upsert",
+    "subject": "exit-local-1",
+    "value": 0.95,
+    "tier_before": 2,
+    "tier_after": 2
+  },
+  {
+    "id": 5375,
+    "timestamp": 1773292338,
+    "action": "subject-dispute-apply",
+    "subject": "exit-local-1",
+    "case_id": "case-caps-dispute",
+    "evidence_ref": "evidence://caps-dispute",
+    "value": 1773378738,
+    "tier_before": 2,
+    "tier_after": 2
+  },
+  {
+    "id": 5376,
+    "timestamp": 1773292338,
+    "action": "subject-appeal-open",
+    "subject": "exit-local-1",
+    "case_id": "case-caps-appeal",
+    "evidence_ref": "evidence://caps-appeal",
+    "value": 1773364338,
+    "tier_before": 2,
+    "tier_after": 2
+  },
+  {
+    "id": 5377,
+    "timestamp": 1773292339,
+    "action": "subject-upsert",
+    "subject": "exit-local-1",
+    "value": 0.94,
+    "tier_before": 1,
+    "tier_after": 3
+  },
+  {
+    "id": 5378,
+    "timestamp": 1773292339,
+    "action": "subject-dispute-apply",
+    "subject": "exit-local-1",
+    "case_id": "case-quorum-dispute",
+    "evidence_ref": "evidence://quorum-dispute",
+    "value": 1773295939,
+    "tier_before": 3,
+    "tier_after": 1
+  },
+  {
+    "id": 5379,
+    "timestamp": 1773292342,
+    "action": "subject-upsert",
+    "subject": "exit-local-1",
+    "value": 0.95,
+    "tier_before": 1,
+    "tier_after": 3
+  },
+  {
+    "id": 5380,
+    "timestamp": 1773292342,
+    "action": "subject-dispute-apply",
+    "subject": "exit-local-1",
+    "case_id": "case-operator-quorum",
+    "evidence_ref": "evidence://operator-quorum",
+    "value": 1773295942,
+    "tier_before": 3,
+    "tier_after": 1
+  },
+  {
+    "id": 5381,
+    "timestamp": 1773292342,
+    "action": "subject-upsert",
+    "subject": "exit-local-1",
+    "value": 0.95,
+    "tier_after": 3
+  },
+  {
+    "id": 5382,
+    "timestamp": 1773292342,
+    "action": "subject-dispute-apply",
+    "subject": "exit-local-1",
+    "case_id": "case-source-quorum",
+    "evidence_ref": "evidence://source-quorum",
+    "value": 1773295942,
+    "tier_before": 3,
+    "tier_after": 1
+  },
+  {
+    "id": 5383,
+    "timestamp": 1773292346,
+    "action": "token-revoke",
+    "subject": "1773292346591924789",
+    "reason": "admin-revocation",
+    "value": 1773292466
+  },
+  {
+    "id": 5384,
+    "timestamp": 1773307970,
+    "action": "token-revoke",
+    "subject": "1773307970693932969",
+    "reason": "admin-revocation",
+    "value": 1773308090
+  },
+  {
+    "id": 5385,
+    "timestamp": 1773308302,
+    "action": "subject-upsert",
+    "subject": "exit-local-1",
+    "value": 0.9,
+    "tier_before": 3,
+    "tier_after": 1
+  },
+  {
+    "id": 5386,
+    "timestamp": 1773308304,
+    "action": "subject-upsert",
+    "subject": "exit-local-1",
+    "value": 0.97,
+    "tier_before": 1,
+    "tier_after": 3
+  },
+  {
+    "id": 5387,
+    "timestamp": 1773308304,
+    "action": "subject-dispute-apply",
+    "subject": "exit-local-1",
+    "reason": "integration-test",
+    "case_id": "case-dispute-int-1",
+    "evidence_ref": "evidence://dispute-int-1",
+    "value": 1773311904,
+    "tier_before": 3,
+    "tier_after": 1
+  },
+  {
+    "id": 5388,
+    "timestamp": 1773308304,
+    "action": "subject-appeal-open",
+    "subject": "exit-local-1",
+    "reason": "integration-appeal",
+    "case_id": "case-appeal-int-1",
+    "evidence_ref": "evidence://appeal-int-1",
+    "value": 1773310704,
+    "tier_before": 1,
+    "tier_after": 1
+  },
+  {
+    "id": 5389,
+    "timestamp": 1773308304,
+    "action": "subject-appeal-resolve",
+    "subject": "exit-local-1",
+    "reason": "integration-appeal-resolve",
+    "tier_before": 1,
+    "tier_after": 1
+  },
+  {
+    "id": 5390,
+    "timestamp": 1773308304,
+    "action": "subject-dispute-clear",
+    "subject": "exit-local-1",
+    "reason": "integration-test-clear",
+    "tier_before": 1,
+    "tier_after": 3
+  },
+  {
+    "id": 5391,
+    "timestamp": 1773308306,
+    "action": "anon-credential-issue",
+    "subject": "anon-integration-1",
+    "reason": "integration-test",
+    "value": 1773394706
+  },
+  {
+    "id": 5392,
+    "timestamp": 1773308307,
+    "action": "anon-credential-revoke",
+    "subject": "anon-integration-1",
+    "reason": "integration-test",
+    "value": 1773308427
+  },
+  {
+    "id": 5393,
+    "timestamp": 1773308309,
+    "action": "anon-credential-issue",
+    "subject": "anon-dispute-integration-1",
+    "reason": "integration-test",
+    "value": 1773394709
+  },
+  {
+    "id": 5394,
+    "timestamp": 1773308309,
+    "action": "anon-credential-dispute-apply",
+    "subject": "anon-dispute-integration-1",
+    "reason": "integration-test",
+    "case_id": "case-anon-dispute-1",
+    "evidence_ref": "evidence://anon-dispute-1",
+    "value": 1773308489,
+    "tier_after": 1
+  },
+  {
+    "id": 5395,
+    "timestamp": 1773308309,
+    "action": "anon-credential-dispute-clear",
+    "subject": "anon-dispute-integration-1",
+    "reason": "resolved"
+  },
+  {
+    "id": 5396,
+    "timestamp": 1773308311,
+    "action": "subject-upsert",
+    "subject": "exit-local-1",
+    "value": 0.95,
+    "tier_before": 2,
+    "tier_after": 2
+  },
+  {
+    "id": 5397,
+    "timestamp": 1773308311,
+    "action": "subject-dispute-apply",
+    "subject": "exit-local-1",
+    "case_id": "case-caps-dispute",
+    "evidence_ref": "evidence://caps-dispute",
+    "value": 1773394711,
+    "tier_before": 2,
+    "tier_after": 2
+  },
+  {
+    "id": 5398,
+    "timestamp": 1773308311,
+    "action": "subject-appeal-open",
+    "subject": "exit-local-1",
+    "case_id": "case-caps-appeal",
+    "evidence_ref": "evidence://caps-appeal",
+    "value": 1773380311,
+    "tier_before": 2,
+    "tier_after": 2
+  },
+  {
+    "id": 5399,
+    "timestamp": 1773308312,
+    "action": "subject-upsert",
+    "subject": "exit-local-1",
+    "value": 0.94,
+    "tier_before": 1,
+    "tier_after": 3
+  },
+  {
+    "id": 5400,
+    "timestamp": 1773308312,
+    "action": "subject-dispute-apply",
+    "subject": "exit-local-1",
+    "case_id": "case-quorum-dispute",
+    "evidence_ref": "evidence://quorum-dispute",
+    "value": 1773311912,
+    "tier_before": 3,
+    "tier_after": 1
+  },
+  {
+    "id": 5401,
+    "timestamp": 1773308314,
+    "action": "subject-upsert",
+    "subject": "exit-local-1",
+    "value": 0.95,
+    "tier_before": 1,
+    "tier_after": 3
+  },
+  {
+    "id": 5402,
+    "timestamp": 1773308315,
+    "action": "subject-dispute-apply",
+    "subject": "exit-local-1",
+    "case_id": "case-operator-quorum",
+    "evidence_ref": "evidence://operator-quorum",
+    "value": 1773311915,
+    "tier_before": 3,
+    "tier_after": 1
+  },
+  {
+    "id": 5403,
+    "timestamp": 1773308315,
+    "action": "subject-upsert",
+    "subject": "exit-local-1",
+    "value": 0.95,
+    "tier_after": 3
+  },
+  {
+    "id": 5404,
+    "timestamp": 1773308315,
+    "action": "subject-dispute-apply",
+    "subject": "exit-local-1",
+    "case_id": "case-source-quorum",
+    "evidence_ref": "evidence://source-quorum",
+    "value": 1773311915,
+    "tier_before": 3,
+    "tier_after": 1
+  },
+  {
+    "id": 5405,
+    "timestamp": 1773308319,
+    "action": "token-revoke",
+    "subject": "1773308319819648099",
+    "reason": "admin-revocation",
+    "value": 1773308439
   }
 ]

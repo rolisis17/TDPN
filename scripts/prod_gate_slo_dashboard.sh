@@ -30,6 +30,13 @@ Usage:
     [--require-signoff-ok [0|1]] \
     [--require-incident-snapshot-on-fail [0|1]] \
     [--require-incident-snapshot-artifacts [0|1]] \
+    [--require-wg-validate-udp-source [0|1]] \
+    [--require-wg-validate-strict-distinct [0|1]] \
+    [--require-wg-soak-diversity-pass [0|1]] \
+    [--min-wg-soak-selection-lines N] \
+    [--min-wg-soak-entry-operators N] \
+    [--min-wg-soak-exit-operators N] \
+    [--min-wg-soak-cross-operator-pairs N] \
     [--fail-on-any-no-go [0|1]] \
     [--min-go-rate-pct N] \
     [--show-top-reasons N] \
@@ -110,6 +117,13 @@ require_integrity_ok="${PROD_GATE_SLO_REQUIRE_INTEGRITY_OK:-0}"
 require_signoff_ok="${PROD_GATE_SLO_REQUIRE_SIGNOFF_OK:-0}"
 require_incident_snapshot_on_fail="${PROD_GATE_SLO_REQUIRE_INCIDENT_SNAPSHOT_ON_FAIL:-0}"
 require_incident_snapshot_artifacts="${PROD_GATE_SLO_REQUIRE_INCIDENT_SNAPSHOT_ARTIFACTS:-0}"
+require_wg_validate_udp_source="${PROD_GATE_SLO_REQUIRE_WG_VALIDATE_UDP_SOURCE:-0}"
+require_wg_validate_strict_distinct="${PROD_GATE_SLO_REQUIRE_WG_VALIDATE_STRICT_DISTINCT:-0}"
+require_wg_soak_diversity_pass="${PROD_GATE_SLO_REQUIRE_WG_SOAK_DIVERSITY_PASS:-0}"
+min_wg_soak_selection_lines="${PROD_GATE_SLO_MIN_WG_SOAK_SELECTION_LINES:-0}"
+min_wg_soak_entry_operators="${PROD_GATE_SLO_MIN_WG_SOAK_ENTRY_OPERATORS:-0}"
+min_wg_soak_exit_operators="${PROD_GATE_SLO_MIN_WG_SOAK_EXIT_OPERATORS:-0}"
+min_wg_soak_cross_operator_pairs="${PROD_GATE_SLO_MIN_WG_SOAK_CROSS_OPERATOR_PAIRS:-0}"
 fail_on_any_no_go="${PROD_GATE_SLO_TREND_FAIL_ON_ANY_NO_GO:-0}"
 min_go_rate_pct="${PROD_GATE_SLO_TREND_MIN_GO_RATE_PCT:-95}"
 show_top_reasons="${PROD_GATE_SLO_TREND_SHOW_TOP_REASONS:-5}"
@@ -236,6 +250,49 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --require-wg-validate-udp-source)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_wg_validate_udp_source="${2:-}"
+        shift 2
+      else
+        require_wg_validate_udp_source="1"
+        shift
+      fi
+      ;;
+    --require-wg-validate-strict-distinct)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_wg_validate_strict_distinct="${2:-}"
+        shift 2
+      else
+        require_wg_validate_strict_distinct="1"
+        shift
+      fi
+      ;;
+    --require-wg-soak-diversity-pass)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_wg_soak_diversity_pass="${2:-}"
+        shift 2
+      else
+        require_wg_soak_diversity_pass="1"
+        shift
+      fi
+      ;;
+    --min-wg-soak-selection-lines)
+      min_wg_soak_selection_lines="${2:-}"
+      shift 2
+      ;;
+    --min-wg-soak-entry-operators)
+      min_wg_soak_entry_operators="${2:-}"
+      shift 2
+      ;;
+    --min-wg-soak-exit-operators)
+      min_wg_soak_exit_operators="${2:-}"
+      shift 2
+      ;;
+    --min-wg-soak-cross-operator-pairs)
+      min_wg_soak_cross_operator_pairs="${2:-}"
+      shift 2
+      ;;
     --fail-on-any-no-go)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         fail_on_any_no_go="${2:-}"
@@ -358,13 +415,16 @@ bool_arg_or_die "--require-integrity-ok" "$require_integrity_ok"
 bool_arg_or_die "--require-signoff-ok" "$require_signoff_ok"
 bool_arg_or_die "--require-incident-snapshot-on-fail" "$require_incident_snapshot_on_fail"
 bool_arg_or_die "--require-incident-snapshot-artifacts" "$require_incident_snapshot_artifacts"
+bool_arg_or_die "--require-wg-validate-udp-source" "$require_wg_validate_udp_source"
+bool_arg_or_die "--require-wg-validate-strict-distinct" "$require_wg_validate_strict_distinct"
+bool_arg_or_die "--require-wg-soak-diversity-pass" "$require_wg_soak_diversity_pass"
 bool_arg_or_die "--fail-on-any-no-go" "$fail_on_any_no_go"
 bool_arg_or_die "--fail-on-warn" "$fail_on_warn"
 bool_arg_or_die "--fail-on-critical" "$fail_on_critical"
 bool_arg_or_die "--print-dashboard" "$print_dashboard"
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
 
-for int_name in max_reports since_hours max_wg_soak_failed_rounds show_top_reasons warn_no_go_count critical_no_go_count warn_eval_errors critical_eval_errors; do
+for int_name in max_reports since_hours max_wg_soak_failed_rounds min_wg_soak_selection_lines min_wg_soak_entry_operators min_wg_soak_exit_operators min_wg_soak_cross_operator_pairs show_top_reasons warn_no_go_count critical_no_go_count warn_eval_errors critical_eval_errors; do
   value="${!int_name}"
   if [[ ! "$value" =~ ^[0-9]+$ ]]; then
     echo "--${int_name//_/-} must be an integer >= 0"
@@ -441,6 +501,13 @@ trend_args=(
   --require-signoff-ok "$require_signoff_ok"
   --require-incident-snapshot-on-fail "$require_incident_snapshot_on_fail"
   --require-incident-snapshot-artifacts "$require_incident_snapshot_artifacts"
+  --require-wg-validate-udp-source "$require_wg_validate_udp_source"
+  --require-wg-validate-strict-distinct "$require_wg_validate_strict_distinct"
+  --require-wg-soak-diversity-pass "$require_wg_soak_diversity_pass"
+  --min-wg-soak-selection-lines "$min_wg_soak_selection_lines"
+  --min-wg-soak-entry-operators "$min_wg_soak_entry_operators"
+  --min-wg-soak-exit-operators "$min_wg_soak_exit_operators"
+  --min-wg-soak-cross-operator-pairs "$min_wg_soak_cross_operator_pairs"
   --fail-on-any-no-go "$fail_on_any_no_go"
   --min-go-rate-pct "$min_go_rate_pct"
   --show-details 0
@@ -488,6 +555,13 @@ alert_args=(
   --require-signoff-ok "$require_signoff_ok"
   --require-incident-snapshot-on-fail "$require_incident_snapshot_on_fail"
   --require-incident-snapshot-artifacts "$require_incident_snapshot_artifacts"
+  --require-wg-validate-udp-source "$require_wg_validate_udp_source"
+  --require-wg-validate-strict-distinct "$require_wg_validate_strict_distinct"
+  --require-wg-soak-diversity-pass "$require_wg_soak_diversity_pass"
+  --min-wg-soak-selection-lines "$min_wg_soak_selection_lines"
+  --min-wg-soak-entry-operators "$min_wg_soak_entry_operators"
+  --min-wg-soak-exit-operators "$min_wg_soak_exit_operators"
+  --min-wg-soak-cross-operator-pairs "$min_wg_soak_cross_operator_pairs"
   --warn-go-rate-pct "$warn_go_rate_pct"
   --critical-go-rate-pct "$critical_go_rate_pct"
   --warn-no-go-count "$warn_no_go_count"
@@ -551,6 +625,16 @@ esac
   echo "- NO-GO runs: $no_go_count"
   echo "- GO rate (%): $go_rate_pct"
   echo "- Evaluation errors: $evaluation_errors"
+  echo
+  echo "## WG Evidence Policy"
+  echo
+  echo "- require_wg_validate_udp_source: $require_wg_validate_udp_source"
+  echo "- require_wg_validate_strict_distinct: $require_wg_validate_strict_distinct"
+  echo "- require_wg_soak_diversity_pass: $require_wg_soak_diversity_pass"
+  echo "- min_wg_soak_selection_lines: $min_wg_soak_selection_lines"
+  echo "- min_wg_soak_entry_operators: $min_wg_soak_entry_operators"
+  echo "- min_wg_soak_exit_operators: $min_wg_soak_exit_operators"
+  echo "- min_wg_soak_cross_operator_pairs: $min_wg_soak_cross_operator_pairs"
   echo
   echo "## Trigger Reasons"
   echo

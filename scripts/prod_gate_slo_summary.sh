@@ -23,6 +23,13 @@ Usage:
     [--require-signoff-ok [0|1]] \
     [--require-incident-snapshot-on-fail [0|1]] \
     [--require-incident-snapshot-artifacts [0|1]] \
+    [--require-wg-validate-udp-source [0|1]] \
+    [--require-wg-validate-strict-distinct [0|1]] \
+    [--require-wg-soak-diversity-pass [0|1]] \
+    [--min-wg-soak-selection-lines N] \
+    [--min-wg-soak-entry-operators N] \
+    [--min-wg-soak-exit-operators N] \
+    [--min-wg-soak-cross-operator-pairs N] \
     [--fail-on-no-go [0|1]] \
     [--show-json [0|1]]
 
@@ -111,6 +118,13 @@ require_integrity_ok="${PROD_GATE_SLO_REQUIRE_INTEGRITY_OK:-0}"
 require_signoff_ok="${PROD_GATE_SLO_REQUIRE_SIGNOFF_OK:-0}"
 require_incident_snapshot_on_fail="${PROD_GATE_SLO_REQUIRE_INCIDENT_SNAPSHOT_ON_FAIL:-0}"
 require_incident_snapshot_artifacts="${PROD_GATE_SLO_REQUIRE_INCIDENT_SNAPSHOT_ARTIFACTS:-0}"
+require_wg_validate_udp_source="${PROD_GATE_SLO_REQUIRE_WG_VALIDATE_UDP_SOURCE:-0}"
+require_wg_validate_strict_distinct="${PROD_GATE_SLO_REQUIRE_WG_VALIDATE_STRICT_DISTINCT:-0}"
+require_wg_soak_diversity_pass="${PROD_GATE_SLO_REQUIRE_WG_SOAK_DIVERSITY_PASS:-0}"
+min_wg_soak_selection_lines="${PROD_GATE_SLO_MIN_WG_SOAK_SELECTION_LINES:-0}"
+min_wg_soak_entry_operators="${PROD_GATE_SLO_MIN_WG_SOAK_ENTRY_OPERATORS:-0}"
+min_wg_soak_exit_operators="${PROD_GATE_SLO_MIN_WG_SOAK_EXIT_OPERATORS:-0}"
+min_wg_soak_cross_operator_pairs="${PROD_GATE_SLO_MIN_WG_SOAK_CROSS_OPERATOR_PAIRS:-0}"
 fail_on_no_go="${PROD_GATE_SLO_FAIL_ON_NO_GO:-0}"
 show_json="${PROD_GATE_SLO_SHOW_JSON:-0}"
 
@@ -221,6 +235,49 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --require-wg-validate-udp-source)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_wg_validate_udp_source="${2:-}"
+        shift 2
+      else
+        require_wg_validate_udp_source="1"
+        shift
+      fi
+      ;;
+    --require-wg-validate-strict-distinct)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_wg_validate_strict_distinct="${2:-}"
+        shift 2
+      else
+        require_wg_validate_strict_distinct="1"
+        shift
+      fi
+      ;;
+    --require-wg-soak-diversity-pass)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_wg_soak_diversity_pass="${2:-}"
+        shift 2
+      else
+        require_wg_soak_diversity_pass="1"
+        shift
+      fi
+      ;;
+    --min-wg-soak-selection-lines)
+      min_wg_soak_selection_lines="${2:-}"
+      shift 2
+      ;;
+    --min-wg-soak-entry-operators)
+      min_wg_soak_entry_operators="${2:-}"
+      shift 2
+      ;;
+    --min-wg-soak-exit-operators)
+      min_wg_soak_exit_operators="${2:-}"
+      shift 2
+      ;;
+    --min-wg-soak-cross-operator-pairs)
+      min_wg_soak_cross_operator_pairs="${2:-}"
+      shift 2
+      ;;
     --fail-on-no-go)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         fail_on_no_go="${2:-}"
@@ -262,10 +319,29 @@ bool_arg_or_die "--require-integrity-ok" "$require_integrity_ok"
 bool_arg_or_die "--require-signoff-ok" "$require_signoff_ok"
 bool_arg_or_die "--require-incident-snapshot-on-fail" "$require_incident_snapshot_on_fail"
 bool_arg_or_die "--require-incident-snapshot-artifacts" "$require_incident_snapshot_artifacts"
+bool_arg_or_die "--require-wg-validate-udp-source" "$require_wg_validate_udp_source"
+bool_arg_or_die "--require-wg-validate-strict-distinct" "$require_wg_validate_strict_distinct"
+bool_arg_or_die "--require-wg-soak-diversity-pass" "$require_wg_soak_diversity_pass"
 bool_arg_or_die "--fail-on-no-go" "$fail_on_no_go"
 bool_arg_or_die "--show-json" "$show_json"
 if [[ ! "$max_wg_soak_failed_rounds" =~ ^[0-9]+$ ]]; then
   echo "--max-wg-soak-failed-rounds must be an integer >= 0"
+  exit 2
+fi
+if [[ ! "$min_wg_soak_selection_lines" =~ ^[0-9]+$ ]]; then
+  echo "--min-wg-soak-selection-lines must be an integer >= 0"
+  exit 2
+fi
+if [[ ! "$min_wg_soak_entry_operators" =~ ^[0-9]+$ ]]; then
+  echo "--min-wg-soak-entry-operators must be an integer >= 0"
+  exit 2
+fi
+if [[ ! "$min_wg_soak_exit_operators" =~ ^[0-9]+$ ]]; then
+  echo "--min-wg-soak-exit-operators must be an integer >= 0"
+  exit 2
+fi
+if [[ ! "$min_wg_soak_cross_operator_pairs" =~ ^[0-9]+$ ]]; then
+  echo "--min-wg-soak-cross-operator-pairs must be an integer >= 0"
   exit 2
 fi
 
@@ -325,6 +401,13 @@ fi
 if [[ -z "$wg_soak_summary_json" ]]; then
   wg_soak_summary_json="$(json_string "$gate_summary_json" '.wg_soak_summary_json')"
 fi
+wg_validate_client_inner_source="$(json_string "$wg_validate_summary_json" '.client_inner_source')"
+wg_validate_strict_distinct="$(json_bool01 "$wg_validate_summary_json" '.strict_distinct')"
+wg_soak_selection_lines="$(json_int "$wg_soak_summary_json" '.selection_lines_total')"
+wg_soak_selection_entry_operators="$(json_int "$wg_soak_summary_json" '.selection_entry_operators')"
+wg_soak_selection_exit_operators="$(json_int "$wg_soak_summary_json" '.selection_exit_operators')"
+wg_soak_selection_cross_operator_pairs="$(json_int "$wg_soak_summary_json" '.selection_cross_operator_pairs')"
+wg_soak_selection_diversity_failed="$(json_int "$wg_soak_summary_json" '.selection_diversity_failed')"
 
 gate_status="$(json_string "$gate_summary_json" '.status')"
 failed_step="$(json_string "$gate_summary_json" '.failed_step')"
@@ -407,6 +490,45 @@ fi
 if ((wg_soak_rounds_failed > max_wg_soak_failed_rounds)); then
   reasons+=("wg_soak_rounds_failed exceeds limit (${wg_soak_rounds_failed} > ${max_wg_soak_failed_rounds})")
 fi
+if [[ "$require_wg_validate_udp_source" == "1" ]]; then
+  if [[ -z "$wg_validate_summary_json" || ! -f "$wg_validate_summary_json" ]]; then
+    reasons+=("wg_validate summary missing for UDP-source policy (${wg_validate_summary_json:-unset})")
+  elif [[ "$wg_validate_client_inner_source" != "udp" ]]; then
+    reasons+=("wg validate summary does not show UDP inner source (client_inner_source=${wg_validate_client_inner_source:-unset})")
+  fi
+fi
+if [[ "$require_wg_validate_strict_distinct" == "1" ]]; then
+  if [[ -z "$wg_validate_summary_json" || ! -f "$wg_validate_summary_json" ]]; then
+    reasons+=("wg_validate summary missing for strict-distinct policy (${wg_validate_summary_json:-unset})")
+  elif [[ "$wg_validate_strict_distinct" != "1" ]]; then
+    reasons+=("wg validate summary does not show strict distinct mode enabled (strict_distinct=${wg_validate_strict_distinct})")
+  fi
+fi
+if [[ "$require_wg_soak_diversity_pass" == "1" ]]; then
+  if [[ -z "$wg_soak_summary_json" || ! -f "$wg_soak_summary_json" ]]; then
+    reasons+=("wg_soak summary missing for diversity-pass policy (${wg_soak_summary_json:-unset})")
+  elif [[ "$wg_soak_selection_diversity_failed" != "0" ]]; then
+    reasons+=("wg soak diversity summary indicates failure (selection_diversity_failed=${wg_soak_selection_diversity_failed})")
+  fi
+fi
+if ((min_wg_soak_selection_lines > 0 || min_wg_soak_entry_operators > 0 || min_wg_soak_exit_operators > 0 || min_wg_soak_cross_operator_pairs > 0)); then
+  if [[ -z "$wg_soak_summary_json" || ! -f "$wg_soak_summary_json" ]]; then
+    reasons+=("wg_soak summary missing for diversity floor checks (${wg_soak_summary_json:-unset})")
+  else
+    if ((wg_soak_selection_lines < min_wg_soak_selection_lines)); then
+      reasons+=("wg soak selection_lines_total below floor (${wg_soak_selection_lines} < ${min_wg_soak_selection_lines})")
+    fi
+    if ((wg_soak_selection_entry_operators < min_wg_soak_entry_operators)); then
+      reasons+=("wg soak selection_entry_operators below floor (${wg_soak_selection_entry_operators} < ${min_wg_soak_entry_operators})")
+    fi
+    if ((wg_soak_selection_exit_operators < min_wg_soak_exit_operators)); then
+      reasons+=("wg soak selection_exit_operators below floor (${wg_soak_selection_exit_operators} < ${min_wg_soak_exit_operators})")
+    fi
+    if ((wg_soak_selection_cross_operator_pairs < min_wg_soak_cross_operator_pairs)); then
+      reasons+=("wg soak selection_cross_operator_pairs below floor (${wg_soak_selection_cross_operator_pairs} < ${min_wg_soak_cross_operator_pairs})")
+    fi
+  fi
+fi
 
 if [[ "$require_preflight_ok" == "1" ]]; then
   if [[ -z "$run_report_json" ]]; then
@@ -483,6 +605,8 @@ echo "[prod-gate-slo] gate status=${gate_status:-unset} failed_step=${failed_ste
 echo "[prod-gate-slo] steps control_validate=${step_control_validate:-unset} control_soak=${step_control_soak:-unset} prod_wg_validate=${step_prod_wg_validate:-unset} prod_wg_soak=${step_prod_wg_soak:-unset}"
 echo "[prod-gate-slo] wg_validate status=${wg_validate_status:-unset} failed_step=${wg_validate_failed_step:-none} summary=${wg_validate_summary_json:-unset}"
 echo "[prod-gate-slo] wg_soak status=${wg_soak_status:-unset} rounds_passed=${wg_soak_rounds_passed} rounds_failed=${wg_soak_rounds_failed} top_failure_class=${wg_soak_top_failure_class:-none} top_failure_count=${wg_soak_top_failure_count} summary=${wg_soak_summary_json:-unset}"
+echo "[prod-gate-slo] wg_validate_evidence client_inner_source=${wg_validate_client_inner_source:-unset} strict_distinct=${wg_validate_strict_distinct}"
+echo "[prod-gate-slo] wg_soak_diversity selection_lines_total=${wg_soak_selection_lines} selection_entry_operators=${wg_soak_selection_entry_operators} selection_exit_operators=${wg_soak_selection_exit_operators} selection_cross_operator_pairs=${wg_soak_selection_cross_operator_pairs} selection_diversity_failed=${wg_soak_selection_diversity_failed}"
 if [[ -n "$run_report_json" ]]; then
   echo "[prod-gate-slo] run_report preflight=${preflight_status:-unset}/${preflight_rc} bundle=${bundle_status:-unset}/${bundle_rc} integrity=${integrity_status:-unset}/${integrity_rc} signoff_enabled=${signoff_enabled} signoff_rc=${signoff_rc} incident_enabled_on_fail=${incident_enabled_on_fail} incident_snapshot=${incident_status:-unset}/${incident_rc}"
   if [[ -n "$incident_bundle_dir" ]]; then

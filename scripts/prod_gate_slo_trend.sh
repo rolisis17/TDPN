@@ -25,6 +25,13 @@ Usage:
     [--require-signoff-ok [0|1]] \
     [--require-incident-snapshot-on-fail [0|1]] \
     [--require-incident-snapshot-artifacts [0|1]] \
+    [--require-wg-validate-udp-source [0|1]] \
+    [--require-wg-validate-strict-distinct [0|1]] \
+    [--require-wg-soak-diversity-pass [0|1]] \
+    [--min-wg-soak-selection-lines N] \
+    [--min-wg-soak-entry-operators N] \
+    [--min-wg-soak-exit-operators N] \
+    [--min-wg-soak-cross-operator-pairs N] \
     [--fail-on-any-no-go [0|1]] \
     [--min-go-rate-pct N] \
     [--show-details [0|1]] \
@@ -100,6 +107,13 @@ require_integrity_ok="${PROD_GATE_SLO_REQUIRE_INTEGRITY_OK:-0}"
 require_signoff_ok="${PROD_GATE_SLO_REQUIRE_SIGNOFF_OK:-0}"
 require_incident_snapshot_on_fail="${PROD_GATE_SLO_REQUIRE_INCIDENT_SNAPSHOT_ON_FAIL:-0}"
 require_incident_snapshot_artifacts="${PROD_GATE_SLO_REQUIRE_INCIDENT_SNAPSHOT_ARTIFACTS:-0}"
+require_wg_validate_udp_source="${PROD_GATE_SLO_REQUIRE_WG_VALIDATE_UDP_SOURCE:-0}"
+require_wg_validate_strict_distinct="${PROD_GATE_SLO_REQUIRE_WG_VALIDATE_STRICT_DISTINCT:-0}"
+require_wg_soak_diversity_pass="${PROD_GATE_SLO_REQUIRE_WG_SOAK_DIVERSITY_PASS:-0}"
+min_wg_soak_selection_lines="${PROD_GATE_SLO_MIN_WG_SOAK_SELECTION_LINES:-0}"
+min_wg_soak_entry_operators="${PROD_GATE_SLO_MIN_WG_SOAK_ENTRY_OPERATORS:-0}"
+min_wg_soak_exit_operators="${PROD_GATE_SLO_MIN_WG_SOAK_EXIT_OPERATORS:-0}"
+min_wg_soak_cross_operator_pairs="${PROD_GATE_SLO_MIN_WG_SOAK_CROSS_OPERATOR_PAIRS:-0}"
 fail_on_any_no_go="${PROD_GATE_SLO_TREND_FAIL_ON_ANY_NO_GO:-0}"
 min_go_rate_pct="${PROD_GATE_SLO_TREND_MIN_GO_RATE_PCT:-0}"
 max_reports="${PROD_GATE_SLO_TREND_MAX_REPORTS:-25}"
@@ -220,6 +234,49 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --require-wg-validate-udp-source)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_wg_validate_udp_source="${2:-}"
+        shift 2
+      else
+        require_wg_validate_udp_source="1"
+        shift
+      fi
+      ;;
+    --require-wg-validate-strict-distinct)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_wg_validate_strict_distinct="${2:-}"
+        shift 2
+      else
+        require_wg_validate_strict_distinct="1"
+        shift
+      fi
+      ;;
+    --require-wg-soak-diversity-pass)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_wg_soak_diversity_pass="${2:-}"
+        shift 2
+      else
+        require_wg_soak_diversity_pass="1"
+        shift
+      fi
+      ;;
+    --min-wg-soak-selection-lines)
+      min_wg_soak_selection_lines="${2:-}"
+      shift 2
+      ;;
+    --min-wg-soak-entry-operators)
+      min_wg_soak_entry_operators="${2:-}"
+      shift 2
+      ;;
+    --min-wg-soak-exit-operators)
+      min_wg_soak_exit_operators="${2:-}"
+      shift 2
+      ;;
+    --min-wg-soak-cross-operator-pairs)
+      min_wg_soak_cross_operator_pairs="${2:-}"
+      shift 2
+      ;;
     --fail-on-any-no-go)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         fail_on_any_no_go="${2:-}"
@@ -289,6 +346,9 @@ bool_arg_or_die "--require-integrity-ok" "$require_integrity_ok"
 bool_arg_or_die "--require-signoff-ok" "$require_signoff_ok"
 bool_arg_or_die "--require-incident-snapshot-on-fail" "$require_incident_snapshot_on_fail"
 bool_arg_or_die "--require-incident-snapshot-artifacts" "$require_incident_snapshot_artifacts"
+bool_arg_or_die "--require-wg-validate-udp-source" "$require_wg_validate_udp_source"
+bool_arg_or_die "--require-wg-validate-strict-distinct" "$require_wg_validate_strict_distinct"
+bool_arg_or_die "--require-wg-soak-diversity-pass" "$require_wg_soak_diversity_pass"
 bool_arg_or_die "--fail-on-any-no-go" "$fail_on_any_no_go"
 bool_arg_or_die "--show-details" "$show_details"
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
@@ -303,6 +363,22 @@ if [[ ! "$since_hours" =~ ^[0-9]+$ ]]; then
 fi
 if [[ ! "$max_wg_soak_failed_rounds" =~ ^[0-9]+$ ]]; then
   echo "--max-wg-soak-failed-rounds must be an integer >= 0"
+  exit 2
+fi
+if [[ ! "$min_wg_soak_selection_lines" =~ ^[0-9]+$ ]]; then
+  echo "--min-wg-soak-selection-lines must be an integer >= 0"
+  exit 2
+fi
+if [[ ! "$min_wg_soak_entry_operators" =~ ^[0-9]+$ ]]; then
+  echo "--min-wg-soak-entry-operators must be an integer >= 0"
+  exit 2
+fi
+if [[ ! "$min_wg_soak_exit_operators" =~ ^[0-9]+$ ]]; then
+  echo "--min-wg-soak-exit-operators must be an integer >= 0"
+  exit 2
+fi
+if [[ ! "$min_wg_soak_cross_operator_pairs" =~ ^[0-9]+$ ]]; then
+  echo "--min-wg-soak-cross-operator-pairs must be an integer >= 0"
   exit 2
 fi
 if [[ ! "$show_top_reasons" =~ ^[0-9]+$ ]]; then
@@ -439,6 +515,13 @@ while IFS=$'\t' read -r _mtime report_path || [[ -n "${report_path:-}" ]]; do
     --require-signoff-ok "$require_signoff_ok" \
     --require-incident-snapshot-on-fail "$require_incident_snapshot_on_fail" \
     --require-incident-snapshot-artifacts "$require_incident_snapshot_artifacts" \
+    --require-wg-validate-udp-source "$require_wg_validate_udp_source" \
+    --require-wg-validate-strict-distinct "$require_wg_validate_strict_distinct" \
+    --require-wg-soak-diversity-pass "$require_wg_soak_diversity_pass" \
+    --min-wg-soak-selection-lines "$min_wg_soak_selection_lines" \
+    --min-wg-soak-entry-operators "$min_wg_soak_entry_operators" \
+    --min-wg-soak-exit-operators "$min_wg_soak_exit_operators" \
+    --min-wg-soak-cross-operator-pairs "$min_wg_soak_cross_operator_pairs" \
     --fail-on-no-go 0 \
     --show-json 0 >"$out_file" 2>&1
   rc=$?
@@ -477,7 +560,7 @@ go_rate_pct="$(awk -v g="$go_reports" -v t="$total_reports" 'BEGIN { if (t == 0)
 
 echo "[prod-gate-slo-trend] reports_total=$total_reports go=$go_reports no_go=$no_go_reports go_rate_pct=$go_rate_pct"
 echo "[prod-gate-slo-trend] filters max_reports=$max_reports since_hours=$since_hours"
-echo "[prod-gate-slo-trend] policy require_full_sequence=$require_full_sequence require_wg_validate_ok=$require_wg_validate_ok require_wg_soak_ok=$require_wg_soak_ok max_wg_soak_failed_rounds=$max_wg_soak_failed_rounds require_preflight_ok=$require_preflight_ok require_bundle_ok=$require_bundle_ok require_integrity_ok=$require_integrity_ok require_signoff_ok=$require_signoff_ok"
+echo "[prod-gate-slo-trend] policy require_full_sequence=$require_full_sequence require_wg_validate_ok=$require_wg_validate_ok require_wg_soak_ok=$require_wg_soak_ok max_wg_soak_failed_rounds=$max_wg_soak_failed_rounds require_preflight_ok=$require_preflight_ok require_bundle_ok=$require_bundle_ok require_integrity_ok=$require_integrity_ok require_signoff_ok=$require_signoff_ok require_wg_validate_udp_source=$require_wg_validate_udp_source require_wg_validate_strict_distinct=$require_wg_validate_strict_distinct require_wg_soak_diversity_pass=$require_wg_soak_diversity_pass min_wg_soak_selection_lines=$min_wg_soak_selection_lines min_wg_soak_entry_operators=$min_wg_soak_entry_operators min_wg_soak_exit_operators=$min_wg_soak_exit_operators min_wg_soak_cross_operator_pairs=$min_wg_soak_cross_operator_pairs"
 if ((eval_errors > 0)); then
   echo "[prod-gate-slo-trend] evaluation_errors=$eval_errors"
 fi
@@ -554,6 +637,13 @@ summary_payload="$(
     --argjson require_bundle_ok "$require_bundle_ok" \
     --argjson require_integrity_ok "$require_integrity_ok" \
     --argjson require_signoff_ok "$require_signoff_ok" \
+    --argjson require_wg_validate_udp_source "$require_wg_validate_udp_source" \
+    --argjson require_wg_validate_strict_distinct "$require_wg_validate_strict_distinct" \
+    --argjson require_wg_soak_diversity_pass "$require_wg_soak_diversity_pass" \
+    --argjson min_wg_soak_selection_lines "$min_wg_soak_selection_lines" \
+    --argjson min_wg_soak_entry_operators "$min_wg_soak_entry_operators" \
+    --argjson min_wg_soak_exit_operators "$min_wg_soak_exit_operators" \
+    --argjson min_wg_soak_cross_operator_pairs "$min_wg_soak_cross_operator_pairs" \
     --argjson fail_on_any_no_go "$fail_on_any_no_go" \
     --argjson show_top_reasons "$show_top_reasons" \
     --argjson top_no_go_reasons "$top_reasons_json" \
@@ -580,6 +670,13 @@ summary_payload="$(
         require_bundle_ok: $require_bundle_ok,
         require_integrity_ok: $require_integrity_ok,
         require_signoff_ok: $require_signoff_ok,
+        require_wg_validate_udp_source: $require_wg_validate_udp_source,
+        require_wg_validate_strict_distinct: $require_wg_validate_strict_distinct,
+        require_wg_soak_diversity_pass: $require_wg_soak_diversity_pass,
+        min_wg_soak_selection_lines: $min_wg_soak_selection_lines,
+        min_wg_soak_entry_operators: $min_wg_soak_entry_operators,
+        min_wg_soak_exit_operators: $min_wg_soak_exit_operators,
+        min_wg_soak_cross_operator_pairs: $min_wg_soak_cross_operator_pairs,
         fail_on_any_no_go: $fail_on_any_no_go,
         min_go_rate_pct: $min_go_rate_pct
       },

@@ -64,6 +64,25 @@ if ! rg -q 'signoff rc is non-zero' /tmp/integration_prod_pilot_cohort_quick_che
   exit 1
 fi
 
+echo "[prod-pilot-cohort-quick-check] detect numeric signoff attempted=false"
+BAD_SIGNOFF_ATTEMPT="$TMP_DIR/bad_signoff_attempt.json"
+jq '.signoff.attempted=0 | .signoff.rc=0' "$RUN_REPORT_JSON" >"$BAD_SIGNOFF_ATTEMPT"
+set +e
+./scripts/prod_pilot_cohort_quick_check.sh \
+  --run-report-json "$BAD_SIGNOFF_ATTEMPT" >/tmp/integration_prod_pilot_cohort_quick_check_bad_signoff_attempt.log 2>&1
+bad_signoff_attempt_rc=$?
+set -e
+if [[ "$bad_signoff_attempt_rc" -eq 0 ]]; then
+  echo "expected non-zero rc for signoff attempted=false numeric value"
+  cat /tmp/integration_prod_pilot_cohort_quick_check_bad_signoff_attempt.log
+  exit 1
+fi
+if ! rg -q 'signoff was not attempted' /tmp/integration_prod_pilot_cohort_quick_check_bad_signoff_attempt.log; then
+  echo "expected numeric signoff-attempt failure signal not found"
+  cat /tmp/integration_prod_pilot_cohort_quick_check_bad_signoff_attempt.log
+  exit 1
+fi
+
 echo "[prod-pilot-cohort-quick-check] detect summary status failure"
 cat >"$SUMMARY_JSON" <<'EOF_SUMMARY_BAD'
 {"status":"fail"}
@@ -81,6 +100,152 @@ fi
 if ! rg -q 'summary status is not ok' /tmp/integration_prod_pilot_cohort_quick_check_bad_summary_status.log; then
   echo "expected summary status failure signal not found"
   cat /tmp/integration_prod_pilot_cohort_quick_check_bad_summary_status.log
+  exit 1
+fi
+
+echo "[prod-pilot-cohort-quick-check] strict cohort signoff policy hook"
+cat >"$SUMMARY_JSON" <<'EOF_SUMMARY_OK'
+{"status":"ok"}
+EOF_SUMMARY_OK
+COHORT_POLICY_CAPTURE="$TMP_DIR/cohort_policy_capture.log"
+FAKE_COHORT_POLICY="$TMP_DIR/fake_cohort_policy.sh"
+cat >"$FAKE_COHORT_POLICY" <<'EOF_FAKE_COHORT_POLICY'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >>"${COHORT_POLICY_CAPTURE_FILE:?}"
+exit 0
+EOF_FAKE_COHORT_POLICY
+chmod +x "$FAKE_COHORT_POLICY"
+
+COHORT_POLICY_CAPTURE_FILE="$COHORT_POLICY_CAPTURE" \
+PROD_PILOT_COHORT_CHECK_SCRIPT="$FAKE_COHORT_POLICY" \
+./scripts/prod_pilot_cohort_quick_check.sh \
+  --run-report-json "$RUN_REPORT_JSON" \
+  --require-cohort-signoff-policy 1 \
+  --require-trend-artifact-policy-match 0 \
+  --require-trend-wg-validate-udp-source 0 \
+  --require-trend-wg-validate-strict-distinct 0 \
+  --require-trend-wg-soak-diversity-pass 0 \
+  --min-trend-wg-soak-selection-lines 5 \
+  --min-trend-wg-soak-entry-operators 1 \
+  --min-trend-wg-soak-exit-operators 1 \
+  --min-trend-wg-soak-cross-operator-pairs 1 \
+  --min-go-rate-pct 97.5 \
+  --max-alert-severity OK \
+  --require-bundle-created 0 \
+  --require-bundle-manifest 0 \
+  --require-incident-snapshot-on-fail 0 \
+  --require-incident-snapshot-artifacts 0 >/tmp/integration_prod_pilot_cohort_quick_check_cohort_policy.log 2>&1
+
+if ! rg -q -- '--require-trend-artifact-policy-match 0' "$COHORT_POLICY_CAPTURE"; then
+  echo "expected cohort policy hook to forward trend artifact policy override"
+  cat "$COHORT_POLICY_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-trend-wg-validate-udp-source 0' "$COHORT_POLICY_CAPTURE"; then
+  echo "expected cohort policy hook to forward trend udp-source policy override"
+  cat "$COHORT_POLICY_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-trend-wg-validate-strict-distinct 0' "$COHORT_POLICY_CAPTURE"; then
+  echo "expected cohort policy hook to forward trend strict-distinct policy override"
+  cat "$COHORT_POLICY_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-trend-wg-soak-diversity-pass 0' "$COHORT_POLICY_CAPTURE"; then
+  echo "expected cohort policy hook to forward trend soak-diversity policy override"
+  cat "$COHORT_POLICY_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-trend-wg-soak-selection-lines 5' "$COHORT_POLICY_CAPTURE"; then
+  echo "expected cohort policy hook to forward trend soak selection-lines override"
+  cat "$COHORT_POLICY_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-trend-wg-soak-entry-operators 1' "$COHORT_POLICY_CAPTURE"; then
+  echo "expected cohort policy hook to forward trend soak entry-operators override"
+  cat "$COHORT_POLICY_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-trend-wg-soak-exit-operators 1' "$COHORT_POLICY_CAPTURE"; then
+  echo "expected cohort policy hook to forward trend soak exit-operators override"
+  cat "$COHORT_POLICY_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-trend-wg-soak-cross-operator-pairs 1' "$COHORT_POLICY_CAPTURE"; then
+  echo "expected cohort policy hook to forward trend soak cross-operator-pairs override"
+  cat "$COHORT_POLICY_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-go-rate-pct 97.5' "$COHORT_POLICY_CAPTURE"; then
+  echo "expected cohort policy hook to forward min-go-rate override"
+  cat "$COHORT_POLICY_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--max-alert-severity OK' "$COHORT_POLICY_CAPTURE"; then
+  echo "expected cohort policy hook to forward max-alert-severity override"
+  cat "$COHORT_POLICY_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-bundle-created 0' "$COHORT_POLICY_CAPTURE"; then
+  echo "expected cohort policy hook to forward bundle-created override"
+  cat "$COHORT_POLICY_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-bundle-manifest 0' "$COHORT_POLICY_CAPTURE"; then
+  echo "expected cohort policy hook to forward bundle-manifest override"
+  cat "$COHORT_POLICY_CAPTURE"
+  exit 1
+fi
+
+echo "[prod-pilot-cohort-quick-check] incident sub-check disables trend artifact policy coupling"
+INCIDENT_SUMMARY="$TMP_DIR/incident_summary.json"
+INCIDENT_RUN_REPORT="$TMP_DIR/incident_run_report.json"
+COHORT_CAPTURE="$TMP_DIR/cohort_check_capture.log"
+cat >"$INCIDENT_SUMMARY" <<'EOF_INCIDENT_SUMMARY'
+{"status":"fail","rounds":{"failed":1},"run_reports":[]}
+EOF_INCIDENT_SUMMARY
+cat >"$INCIDENT_RUN_REPORT" <<EOF_INCIDENT_RUN_REPORT
+{
+  "status":"fail",
+  "failure_step":"runbook",
+  "final_rc":9,
+  "duration_sec":3,
+  "runbook":{"rc":9},
+  "signoff":{"attempted":0,"rc":0},
+  "artifacts":{"summary_json":"$INCIDENT_SUMMARY"}
+}
+EOF_INCIDENT_RUN_REPORT
+
+FAKE_COHORT_CHECK="$TMP_DIR/fake_cohort_check.sh"
+cat >"$FAKE_COHORT_CHECK" <<'EOF_FAKE_COHORT'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >>"${COHORT_CAPTURE_FILE:?}"
+exit 0
+EOF_FAKE_COHORT
+chmod +x "$FAKE_COHORT_CHECK"
+
+COHORT_CAPTURE_FILE="$COHORT_CAPTURE" \
+PROD_PILOT_COHORT_CHECK_SCRIPT="$FAKE_COHORT_CHECK" \
+./scripts/prod_pilot_cohort_quick_check.sh \
+  --run-report-json "$INCIDENT_RUN_REPORT" \
+  --require-status-ok 0 \
+  --require-runbook-ok 0 \
+  --require-signoff-attempted 0 \
+  --require-signoff-ok 0 \
+  --require-summary-status-ok 0 \
+  --require-incident-snapshot-on-fail 1 \
+  --require-incident-snapshot-artifacts 0 >/tmp/integration_prod_pilot_cohort_quick_check_incident_subcheck.log 2>&1
+
+if ! rg -q -- '--require-trend-artifact-policy-match 0' "$COHORT_CAPTURE"; then
+  echo "expected incident sub-check to disable trend artifact policy coupling"
+  cat "$COHORT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-incident-snapshot-on-fail 1' "$COHORT_CAPTURE"; then
+  echo "expected incident sub-check forwarding missing --require-incident-snapshot-on-fail 1"
+  cat "$COHORT_CAPTURE"
   exit 1
 fi
 

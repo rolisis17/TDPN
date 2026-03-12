@@ -189,6 +189,20 @@ assert_line_has "$line36" '--bundle-verify-check 1' \
   "runtime wiring failed: option 36 missing --bundle-verify-check 1"
 assert_line_has "$line36" '--signoff-check 1' \
   "runtime wiring failed: option 36 missing --signoff-check 1"
+assert_line_has "$line36" '--signoff-require-wg-validate-udp-source 1' \
+  "runtime wiring failed: option 36 missing --signoff-require-wg-validate-udp-source 1"
+assert_line_has "$line36" '--signoff-require-wg-validate-strict-distinct 1' \
+  "runtime wiring failed: option 36 missing --signoff-require-wg-validate-strict-distinct 1"
+assert_line_has "$line36" '--signoff-require-wg-soak-diversity-pass 1' \
+  "runtime wiring failed: option 36 missing --signoff-require-wg-soak-diversity-pass 1"
+assert_line_has "$line36" '--signoff-min-wg-soak-selection-lines 12' \
+  "runtime wiring failed: option 36 missing --signoff-min-wg-soak-selection-lines 12"
+assert_line_has "$line36" '--signoff-min-wg-soak-entry-operators 2' \
+  "runtime wiring failed: option 36 missing --signoff-min-wg-soak-entry-operators 2"
+assert_line_has "$line36" '--signoff-min-wg-soak-exit-operators 2' \
+  "runtime wiring failed: option 36 missing --signoff-min-wg-soak-exit-operators 2"
+assert_line_has "$line36" '--signoff-min-wg-soak-cross-operator-pairs 3' \
+  "runtime wiring failed: option 36 missing --signoff-min-wg-soak-cross-operator-pairs 3"
 assert_line_has "$line36" '--wg-slo-profile strict' \
   "runtime wiring failed: option 36 missing strict wg slo profile"
 assert_line_has "$line36" '--bundle-dir \.easy-node-logs/prod_gate_bundle_quick' \
@@ -291,6 +305,20 @@ assert_line_has "$line38" '--require-incident-snapshot-on-fail 0' \
   "runtime wiring failed: option 38 missing --require-incident-snapshot-on-fail 0 default"
 assert_line_has "$line38" '--require-incident-snapshot-artifacts 0' \
   "runtime wiring failed: option 38 missing --require-incident-snapshot-artifacts 0 default"
+assert_line_has "$line38" '--require-wg-validate-udp-source 1' \
+  "runtime wiring failed: option 38 missing --require-wg-validate-udp-source 1"
+assert_line_has "$line38" '--require-wg-validate-strict-distinct 1' \
+  "runtime wiring failed: option 38 missing --require-wg-validate-strict-distinct 1"
+assert_line_has "$line38" '--require-wg-soak-diversity-pass 1' \
+  "runtime wiring failed: option 38 missing --require-wg-soak-diversity-pass 1"
+assert_line_has "$line38" '--min-wg-soak-selection-lines 12' \
+  "runtime wiring failed: option 38 missing --min-wg-soak-selection-lines 12"
+assert_line_has "$line38" '--min-wg-soak-entry-operators 2' \
+  "runtime wiring failed: option 38 missing --min-wg-soak-entry-operators 2"
+assert_line_has "$line38" '--min-wg-soak-exit-operators 2' \
+  "runtime wiring failed: option 38 missing --min-wg-soak-exit-operators 2"
+assert_line_has "$line38" '--min-wg-soak-cross-operator-pairs 2' \
+  "runtime wiring failed: option 38 missing --min-wg-soak-cross-operator-pairs 2"
 assert_line_has "$line38" '--run-report-json \.easy-node-logs/prod_gate_bundle_quick/prod_bundle_run_report\.json' \
   "runtime wiring failed: option 38 missing default run-report path"
 
@@ -401,6 +429,20 @@ assert_line_has "$line41" '--require-wg-validate-ok 1' \
   "runtime wiring failed: option 41 missing --require-wg-validate-ok 1 default"
 assert_line_has "$line41" '--require-wg-soak-ok 1' \
   "runtime wiring failed: option 41 missing --require-wg-soak-ok 1 default"
+assert_line_has "$line41" '--require-wg-validate-udp-source 1' \
+  "runtime wiring failed: option 41 missing --require-wg-validate-udp-source 1 default"
+assert_line_has "$line41" '--require-wg-validate-strict-distinct 1' \
+  "runtime wiring failed: option 41 missing --require-wg-validate-strict-distinct 1 default"
+assert_line_has "$line41" '--require-wg-soak-diversity-pass 1' \
+  "runtime wiring failed: option 41 missing --require-wg-soak-diversity-pass 1 default"
+assert_line_has "$line41" '--min-wg-soak-selection-lines 8' \
+  "runtime wiring failed: option 41 missing --min-wg-soak-selection-lines 8 default"
+assert_line_has "$line41" '--min-wg-soak-entry-operators 2' \
+  "runtime wiring failed: option 41 missing --min-wg-soak-entry-operators 2 default"
+assert_line_has "$line41" '--min-wg-soak-exit-operators 2' \
+  "runtime wiring failed: option 41 missing --min-wg-soak-exit-operators 2 default"
+assert_line_has "$line41" '--min-wg-soak-cross-operator-pairs 1' \
+  "runtime wiring failed: option 41 missing --min-wg-soak-cross-operator-pairs 1 default"
 assert_line_has "$line41" '--max-wg-soak-failed-rounds 0' \
   "runtime wiring failed: option 41 missing default max-wg-soak-failed-rounds"
 assert_line_has "$line41" '--require-preflight-ok 0' \
@@ -466,6 +508,20 @@ assert_line_has "$line42" '--require-wg-validate-ok 1' \
   "runtime wiring failed: option 42 missing --require-wg-validate-ok 1 default"
 assert_line_has "$line42" '--require-wg-soak-ok 1' \
   "runtime wiring failed: option 42 missing --require-wg-soak-ok 1 default"
+assert_line_has "$line42" '--require-wg-validate-udp-source 1' \
+  "runtime wiring failed: option 42 missing --require-wg-validate-udp-source 1 default"
+assert_line_has "$line42" '--require-wg-validate-strict-distinct 1' \
+  "runtime wiring failed: option 42 missing --require-wg-validate-strict-distinct 1 default"
+assert_line_has "$line42" '--require-wg-soak-diversity-pass 1' \
+  "runtime wiring failed: option 42 missing --require-wg-soak-diversity-pass 1 default"
+assert_line_has "$line42" '--min-wg-soak-selection-lines 8' \
+  "runtime wiring failed: option 42 missing --min-wg-soak-selection-lines 8 default"
+assert_line_has "$line42" '--min-wg-soak-entry-operators 2' \
+  "runtime wiring failed: option 42 missing --min-wg-soak-entry-operators 2 default"
+assert_line_has "$line42" '--min-wg-soak-exit-operators 2' \
+  "runtime wiring failed: option 42 missing --min-wg-soak-exit-operators 2 default"
+assert_line_has "$line42" '--min-wg-soak-cross-operator-pairs 1' \
+  "runtime wiring failed: option 42 missing --min-wg-soak-cross-operator-pairs 1 default"
 assert_line_has "$line42" '--max-wg-soak-failed-rounds 0' \
   "runtime wiring failed: option 42 missing default max-wg-soak-failed-rounds"
 assert_line_has "$line42" '--require-incident-snapshot-on-fail 0' \
@@ -522,6 +578,20 @@ assert_line_has "$line43" '--max-reports 25' \
   "runtime wiring failed: option 43 missing default max-reports"
 assert_line_has "$line43" '--since-hours 24' \
   "runtime wiring failed: option 43 missing default since-hours"
+assert_line_has "$line43" '--require-wg-validate-udp-source 1' \
+  "runtime wiring failed: option 43 missing --require-wg-validate-udp-source 1 default"
+assert_line_has "$line43" '--require-wg-validate-strict-distinct 1' \
+  "runtime wiring failed: option 43 missing --require-wg-validate-strict-distinct 1 default"
+assert_line_has "$line43" '--require-wg-soak-diversity-pass 1' \
+  "runtime wiring failed: option 43 missing --require-wg-soak-diversity-pass 1 default"
+assert_line_has "$line43" '--min-wg-soak-selection-lines 8' \
+  "runtime wiring failed: option 43 missing --min-wg-soak-selection-lines 8 default"
+assert_line_has "$line43" '--min-wg-soak-entry-operators 2' \
+  "runtime wiring failed: option 43 missing --min-wg-soak-entry-operators 2 default"
+assert_line_has "$line43" '--min-wg-soak-exit-operators 2' \
+  "runtime wiring failed: option 43 missing --min-wg-soak-exit-operators 2 default"
+assert_line_has "$line43" '--min-wg-soak-cross-operator-pairs 1' \
+  "runtime wiring failed: option 43 missing --min-wg-soak-cross-operator-pairs 1 default"
 assert_line_has "$line43" '--warn-go-rate-pct 98' \
   "runtime wiring failed: option 43 missing default warn-go-rate-pct"
 assert_line_has "$line43" '--critical-go-rate-pct 90' \
@@ -597,6 +667,20 @@ assert_line_has "$line44" '--require-wg-validate-ok 1' \
   "runtime wiring failed: option 44 missing --require-wg-validate-ok 1 default"
 assert_line_has "$line44" '--require-wg-soak-ok 1' \
   "runtime wiring failed: option 44 missing --require-wg-soak-ok 1 default"
+assert_line_has "$line44" '--require-wg-validate-udp-source 1' \
+  "runtime wiring failed: option 44 missing --require-wg-validate-udp-source 1 default"
+assert_line_has "$line44" '--require-wg-validate-strict-distinct 1' \
+  "runtime wiring failed: option 44 missing --require-wg-validate-strict-distinct 1 default"
+assert_line_has "$line44" '--require-wg-soak-diversity-pass 1' \
+  "runtime wiring failed: option 44 missing --require-wg-soak-diversity-pass 1 default"
+assert_line_has "$line44" '--min-wg-soak-selection-lines 8' \
+  "runtime wiring failed: option 44 missing --min-wg-soak-selection-lines 8 default"
+assert_line_has "$line44" '--min-wg-soak-entry-operators 2' \
+  "runtime wiring failed: option 44 missing --min-wg-soak-entry-operators 2 default"
+assert_line_has "$line44" '--min-wg-soak-exit-operators 2' \
+  "runtime wiring failed: option 44 missing --min-wg-soak-exit-operators 2 default"
+assert_line_has "$line44" '--min-wg-soak-cross-operator-pairs 1' \
+  "runtime wiring failed: option 44 missing --min-wg-soak-cross-operator-pairs 1 default"
 assert_line_has "$line44" '--max-wg-soak-failed-rounds 0' \
   "runtime wiring failed: option 44 missing default max-wg-soak-failed-rounds"
 assert_line_has "$line44" '--require-incident-snapshot-on-fail 0' \
@@ -803,6 +887,20 @@ assert_line_has "$line48" '--require-all-rounds-ok 1' \
   "runtime wiring failed: option 48 missing default --require-all-rounds-ok 1"
 assert_line_has "$line48" '--trend-min-go-rate-pct 95' \
   "runtime wiring failed: option 48 missing default --trend-min-go-rate-pct 95"
+assert_line_has "$line48" '--trend-require-wg-validate-udp-source 1' \
+  "runtime wiring failed: option 48 missing strict trend --trend-require-wg-validate-udp-source 1"
+assert_line_has "$line48" '--trend-require-wg-validate-strict-distinct 1' \
+  "runtime wiring failed: option 48 missing strict trend --trend-require-wg-validate-strict-distinct 1"
+assert_line_has "$line48" '--trend-require-wg-soak-diversity-pass 1' \
+  "runtime wiring failed: option 48 missing strict trend --trend-require-wg-soak-diversity-pass 1"
+assert_line_has "$line48" '--trend-min-wg-soak-selection-lines 12' \
+  "runtime wiring failed: option 48 missing strict trend --trend-min-wg-soak-selection-lines 12"
+assert_line_has "$line48" '--trend-min-wg-soak-entry-operators 2' \
+  "runtime wiring failed: option 48 missing strict trend --trend-min-wg-soak-entry-operators 2"
+assert_line_has "$line48" '--trend-min-wg-soak-exit-operators 2' \
+  "runtime wiring failed: option 48 missing strict trend --trend-min-wg-soak-exit-operators 2"
+assert_line_has "$line48" '--trend-min-wg-soak-cross-operator-pairs 2' \
+  "runtime wiring failed: option 48 missing strict trend --trend-min-wg-soak-cross-operator-pairs 2"
 assert_line_has "$line48" '--max-alert-severity WARN' \
   "runtime wiring failed: option 48 missing default --max-alert-severity WARN"
 assert_line_has "$line48" '--bundle-outputs 1' \
@@ -879,6 +977,22 @@ assert_line_has "$line50" '--max-round-failures 0' \
   "runtime wiring failed: option 50 missing default --max-round-failures 0"
 assert_line_has "$line50" '--require-trend-go 1' \
   "runtime wiring failed: option 50 missing default --require-trend-go 1"
+assert_line_has "$line50" '--require-trend-artifact-policy-match 1' \
+  "runtime wiring failed: option 50 missing strict trend --require-trend-artifact-policy-match 1"
+assert_line_has "$line50" '--require-trend-wg-validate-udp-source 1' \
+  "runtime wiring failed: option 50 missing strict trend --require-trend-wg-validate-udp-source 1"
+assert_line_has "$line50" '--require-trend-wg-validate-strict-distinct 1' \
+  "runtime wiring failed: option 50 missing strict trend --require-trend-wg-validate-strict-distinct 1"
+assert_line_has "$line50" '--require-trend-wg-soak-diversity-pass 1' \
+  "runtime wiring failed: option 50 missing strict trend --require-trend-wg-soak-diversity-pass 1"
+assert_line_has "$line50" '--min-trend-wg-soak-selection-lines 12' \
+  "runtime wiring failed: option 50 missing strict trend --min-trend-wg-soak-selection-lines 12"
+assert_line_has "$line50" '--min-trend-wg-soak-entry-operators 2' \
+  "runtime wiring failed: option 50 missing strict trend --min-trend-wg-soak-entry-operators 2"
+assert_line_has "$line50" '--min-trend-wg-soak-exit-operators 2' \
+  "runtime wiring failed: option 50 missing strict trend --min-trend-wg-soak-exit-operators 2"
+assert_line_has "$line50" '--min-trend-wg-soak-cross-operator-pairs 2' \
+  "runtime wiring failed: option 50 missing strict trend --min-trend-wg-soak-cross-operator-pairs 2"
 assert_line_has "$line50" '--min-go-rate-pct 95' \
   "runtime wiring failed: option 50 missing default --min-go-rate-pct 95"
 assert_line_has "$line50" '--max-alert-severity WARN' \
@@ -921,6 +1035,20 @@ assert_line_has "$line51_runbook" '--require-all-rounds-ok 1' \
   "runtime wiring failed: option 51 runbook missing default --require-all-rounds-ok 1"
 assert_line_has "$line51_runbook" '--trend-min-go-rate-pct 95' \
   "runtime wiring failed: option 51 runbook missing default --trend-min-go-rate-pct 95"
+assert_line_has "$line51_runbook" '--trend-require-wg-validate-udp-source 1' \
+  "runtime wiring failed: option 51 runbook missing strict trend --trend-require-wg-validate-udp-source 1"
+assert_line_has "$line51_runbook" '--trend-require-wg-validate-strict-distinct 1' \
+  "runtime wiring failed: option 51 runbook missing strict trend --trend-require-wg-validate-strict-distinct 1"
+assert_line_has "$line51_runbook" '--trend-require-wg-soak-diversity-pass 1' \
+  "runtime wiring failed: option 51 runbook missing strict trend --trend-require-wg-soak-diversity-pass 1"
+assert_line_has "$line51_runbook" '--trend-min-wg-soak-selection-lines 12' \
+  "runtime wiring failed: option 51 runbook missing strict trend --trend-min-wg-soak-selection-lines 12"
+assert_line_has "$line51_runbook" '--trend-min-wg-soak-entry-operators 2' \
+  "runtime wiring failed: option 51 runbook missing strict trend --trend-min-wg-soak-entry-operators 2"
+assert_line_has "$line51_runbook" '--trend-min-wg-soak-exit-operators 2' \
+  "runtime wiring failed: option 51 runbook missing strict trend --trend-min-wg-soak-exit-operators 2"
+assert_line_has "$line51_runbook" '--trend-min-wg-soak-cross-operator-pairs 2' \
+  "runtime wiring failed: option 51 runbook missing strict trend --trend-min-wg-soak-cross-operator-pairs 2"
 assert_line_has "$line51_runbook" '--max-alert-severity WARN' \
   "runtime wiring failed: option 51 runbook missing default --max-alert-severity WARN"
 assert_line_has "$line51_runbook" '--bundle-outputs 1' \
@@ -958,6 +1086,22 @@ assert_line_has "$line51_signoff" '--max-round-failures 0' \
   "runtime wiring failed: option 51 signoff missing default --max-round-failures 0"
 assert_line_has "$line51_signoff" '--require-trend-go 1' \
   "runtime wiring failed: option 51 signoff missing default --require-trend-go 1"
+assert_line_has "$line51_signoff" '--require-trend-artifact-policy-match 1' \
+  "runtime wiring failed: option 51 signoff missing strict trend --require-trend-artifact-policy-match 1"
+assert_line_has "$line51_signoff" '--require-trend-wg-validate-udp-source 1' \
+  "runtime wiring failed: option 51 signoff missing strict trend --require-trend-wg-validate-udp-source 1"
+assert_line_has "$line51_signoff" '--require-trend-wg-validate-strict-distinct 1' \
+  "runtime wiring failed: option 51 signoff missing strict trend --require-trend-wg-validate-strict-distinct 1"
+assert_line_has "$line51_signoff" '--require-trend-wg-soak-diversity-pass 1' \
+  "runtime wiring failed: option 51 signoff missing strict trend --require-trend-wg-soak-diversity-pass 1"
+assert_line_has "$line51_signoff" '--min-trend-wg-soak-selection-lines 12' \
+  "runtime wiring failed: option 51 signoff missing strict trend --min-trend-wg-soak-selection-lines 12"
+assert_line_has "$line51_signoff" '--min-trend-wg-soak-entry-operators 2' \
+  "runtime wiring failed: option 51 signoff missing strict trend --min-trend-wg-soak-entry-operators 2"
+assert_line_has "$line51_signoff" '--min-trend-wg-soak-exit-operators 2' \
+  "runtime wiring failed: option 51 signoff missing strict trend --min-trend-wg-soak-exit-operators 2"
+assert_line_has "$line51_signoff" '--min-trend-wg-soak-cross-operator-pairs 2' \
+  "runtime wiring failed: option 51 signoff missing strict trend --min-trend-wg-soak-cross-operator-pairs 2"
 assert_line_has "$line51_signoff" '--min-go-rate-pct 95' \
   "runtime wiring failed: option 51 signoff missing default --min-go-rate-pct 95"
 assert_line_has "$line51_signoff" '--max-alert-severity WARN' \
@@ -1002,10 +1146,36 @@ assert_line_has "$line52" '--continue-on-fail 0' \
   "runtime wiring failed: option 52 missing default --continue-on-fail 0"
 assert_line_has "$line52" '--require-all-rounds-ok 1' \
   "runtime wiring failed: option 52 missing default --require-all-rounds-ok 1"
+assert_line_has "$line52" '--max-round-failures 0' \
+  "runtime wiring failed: option 52 missing default --max-round-failures 0"
 assert_line_has "$line52" '--trend-min-go-rate-pct 95' \
   "runtime wiring failed: option 52 missing default --trend-min-go-rate-pct 95"
 assert_line_has "$line52" '--max-alert-severity WARN' \
   "runtime wiring failed: option 52 missing default --max-alert-severity WARN"
+assert_line_has "$line52" '--bundle-outputs 1' \
+  "runtime wiring failed: option 52 missing default --bundle-outputs 1"
+assert_line_has "$line52" '--bundle-fail-close 1' \
+  "runtime wiring failed: option 52 missing default --bundle-fail-close 1"
+assert_line_has "$line52" '--signoff-require-trend-artifact-policy-match 1' \
+  "runtime wiring failed: option 52 missing strict signoff --signoff-require-trend-artifact-policy-match 1"
+assert_line_has "$line52" '--signoff-require-trend-wg-validate-udp-source 1' \
+  "runtime wiring failed: option 52 missing strict signoff --signoff-require-trend-wg-validate-udp-source 1"
+assert_line_has "$line52" '--signoff-require-trend-wg-validate-strict-distinct 1' \
+  "runtime wiring failed: option 52 missing strict signoff --signoff-require-trend-wg-validate-strict-distinct 1"
+assert_line_has "$line52" '--signoff-require-trend-wg-soak-diversity-pass 1' \
+  "runtime wiring failed: option 52 missing strict signoff --signoff-require-trend-wg-soak-diversity-pass 1"
+assert_line_has "$line52" '--signoff-min-trend-wg-soak-selection-lines 12' \
+  "runtime wiring failed: option 52 missing strict signoff --signoff-min-trend-wg-soak-selection-lines 12"
+assert_line_has "$line52" '--signoff-min-trend-wg-soak-entry-operators 2' \
+  "runtime wiring failed: option 52 missing strict signoff --signoff-min-trend-wg-soak-entry-operators 2"
+assert_line_has "$line52" '--signoff-min-trend-wg-soak-exit-operators 2' \
+  "runtime wiring failed: option 52 missing strict signoff --signoff-min-trend-wg-soak-exit-operators 2"
+assert_line_has "$line52" '--signoff-min-trend-wg-soak-cross-operator-pairs 2' \
+  "runtime wiring failed: option 52 missing strict signoff --signoff-min-trend-wg-soak-cross-operator-pairs 2"
+assert_line_has "$line52" '--signoff-require-incident-snapshot-on-fail 1' \
+  "runtime wiring failed: option 52 missing strict signoff --signoff-require-incident-snapshot-on-fail 1"
+assert_line_has "$line52" '--signoff-require-incident-snapshot-artifacts 1' \
+  "runtime wiring failed: option 52 missing strict signoff --signoff-require-incident-snapshot-artifacts 1"
 assert_line_has "$line52" '--print-run-report 0' \
   "runtime wiring failed: option 52 missing default --print-run-report 0"
 assert_line_has "$line52" '--show-json 0' \
@@ -1042,6 +1212,8 @@ assert_line_has "$line53" '--require-signoff-attempted 1' \
   "runtime wiring failed: option 53 missing default --require-signoff-attempted 1"
 assert_line_has "$line53" '--require-signoff-ok 1' \
   "runtime wiring failed: option 53 missing default --require-signoff-ok 1"
+assert_line_has "$line53" '--require-cohort-signoff-policy 1' \
+  "runtime wiring failed: option 53 missing default --require-cohort-signoff-policy 1"
 assert_line_has "$line53" '--require-summary-json 1' \
   "runtime wiring failed: option 53 missing default --require-summary-json 1"
 assert_line_has "$line53" '--require-summary-status-ok 1' \
@@ -1058,7 +1230,7 @@ INPUT54="$TMP_DIR/input54.txt"
 {
   printf '3\n'   # main menu: advanced
   printf '54\n'  # prod pilot cohort quick-trend
-  for _ in $(seq 1 20); do
+  for _ in $(seq 1 21); do
     printf '\n'  # accept defaults
   done
   printf '0\n'   # back from advanced menu
@@ -1086,6 +1258,8 @@ assert_line_has "$line54" '--require-signoff-attempted 1' \
   "runtime wiring failed: option 54 missing default --require-signoff-attempted 1"
 assert_line_has "$line54" '--require-signoff-ok 1' \
   "runtime wiring failed: option 54 missing default --require-signoff-ok 1"
+assert_line_has "$line54" '--require-cohort-signoff-policy 1' \
+  "runtime wiring failed: option 54 missing default --require-cohort-signoff-policy 1"
 assert_line_has "$line54" '--require-summary-json 1' \
   "runtime wiring failed: option 54 missing default --require-summary-json 1"
 assert_line_has "$line54" '--require-summary-status-ok 1' \
@@ -1110,7 +1284,7 @@ INPUT55="$TMP_DIR/input55.txt"
 {
   printf '3\n'   # main menu: advanced
   printf '55\n'  # prod pilot cohort quick-alert
-  for _ in $(seq 1 22); do
+  for _ in $(seq 1 23); do
     printf '\n'  # accept defaults
   done
   printf '0\n'   # back from advanced menu
@@ -1138,6 +1312,8 @@ assert_line_has "$line55" '--require-signoff-attempted 1' \
   "runtime wiring failed: option 55 missing default --require-signoff-attempted 1"
 assert_line_has "$line55" '--require-signoff-ok 1' \
   "runtime wiring failed: option 55 missing default --require-signoff-ok 1"
+assert_line_has "$line55" '--require-cohort-signoff-policy 1' \
+  "runtime wiring failed: option 55 missing default --require-cohort-signoff-policy 1"
 assert_line_has "$line55" '--require-summary-json 1' \
   "runtime wiring failed: option 55 missing default --require-summary-json 1"
 assert_line_has "$line55" '--require-summary-status-ok 1' \
@@ -1172,7 +1348,7 @@ INPUT56="$TMP_DIR/input56.txt"
 {
   printf '3\n'   # main menu: advanced
   printf '56\n'  # prod pilot cohort quick-dashboard
-  for _ in $(seq 1 26); do
+  for _ in $(seq 1 27); do
     printf '\n'  # accept defaults
   done
   printf '0\n'   # back from advanced menu
@@ -1200,6 +1376,8 @@ assert_line_has "$line56" '--require-signoff-attempted 1' \
   "runtime wiring failed: option 56 missing default --require-signoff-attempted 1"
 assert_line_has "$line56" '--require-signoff-ok 1' \
   "runtime wiring failed: option 56 missing default --require-signoff-ok 1"
+assert_line_has "$line56" '--require-cohort-signoff-policy 1' \
+  "runtime wiring failed: option 56 missing default --require-cohort-signoff-policy 1"
 assert_line_has "$line56" '--require-summary-json 1' \
   "runtime wiring failed: option 56 missing default --require-summary-json 1"
 assert_line_has "$line56" '--require-summary-status-ok 1' \
@@ -1264,6 +1442,17 @@ assert_line_has "$line57" '--check-latest 1' "runtime wiring failed: option 57 m
 assert_line_has "$line57" '--check-trend 1' "runtime wiring failed: option 57 missing --check-trend 1"
 assert_line_has "$line57" '--check-alert 1' "runtime wiring failed: option 57 missing --check-alert 1"
 assert_line_has "$line57" '--max-alert-severity WARN' "runtime wiring failed: option 57 missing --max-alert-severity WARN"
+assert_line_has "$line57" '--require-cohort-signoff-policy 1' "runtime wiring failed: option 57 missing --require-cohort-signoff-policy 1"
+assert_line_has "$line57" '--require-trend-artifact-policy-match 1' "runtime wiring failed: option 57 missing strict --require-trend-artifact-policy-match 1"
+assert_line_has "$line57" '--require-trend-wg-validate-udp-source 1' "runtime wiring failed: option 57 missing strict --require-trend-wg-validate-udp-source 1"
+assert_line_has "$line57" '--require-trend-wg-validate-strict-distinct 1' "runtime wiring failed: option 57 missing strict --require-trend-wg-validate-strict-distinct 1"
+assert_line_has "$line57" '--require-trend-wg-soak-diversity-pass 1' "runtime wiring failed: option 57 missing strict --require-trend-wg-soak-diversity-pass 1"
+assert_line_has "$line57" '--min-trend-wg-soak-selection-lines 12' "runtime wiring failed: option 57 missing strict --min-trend-wg-soak-selection-lines 12"
+assert_line_has "$line57" '--min-trend-wg-soak-entry-operators 2' "runtime wiring failed: option 57 missing strict --min-trend-wg-soak-entry-operators 2"
+assert_line_has "$line57" '--min-trend-wg-soak-exit-operators 2' "runtime wiring failed: option 57 missing strict --min-trend-wg-soak-exit-operators 2"
+assert_line_has "$line57" '--min-trend-wg-soak-cross-operator-pairs 2' "runtime wiring failed: option 57 missing strict --min-trend-wg-soak-cross-operator-pairs 2"
+assert_line_has "$line57" '--require-bundle-created 1' "runtime wiring failed: option 57 missing strict --require-bundle-created 1"
+assert_line_has "$line57" '--require-bundle-manifest 1' "runtime wiring failed: option 57 missing strict --require-bundle-manifest 1"
 assert_line_has "$line57" '--run-report-json \.easy-node-logs/prod_pilot_cohort/prod_pilot_cohort_quick_report\.json' \
   "runtime wiring failed: option 57 missing default --run-report-json path"
 assert_line_has "$line57" '--trend-summary-json \.easy-node-logs/prod_pilot_quick_signoff_trend\.json' \
@@ -1299,7 +1488,10 @@ assert_line_has "$line58" '--bootstrap-directory http://198\.51\.100\.10:8081' \
 assert_line_has "$line58" '--subject pilot-client' "runtime wiring failed: option 58 missing default subject"
 assert_line_has "$line58" '--rounds 5' "runtime wiring failed: option 58 missing default rounds"
 assert_line_has "$line58" '--pause-sec 60' "runtime wiring failed: option 58 missing default pause-sec"
+assert_line_has "$line58" '--max-round-failures 0' "runtime wiring failed: option 58 missing default max-round-failures"
 assert_line_has "$line58" '--max-alert-severity WARN' "runtime wiring failed: option 58 missing default max-alert-severity"
+assert_line_has "$line58" '--bundle-outputs 1' "runtime wiring failed: option 58 missing default bundle-outputs"
+assert_line_has "$line58" '--bundle-fail-close 1' "runtime wiring failed: option 58 missing default bundle-fail-close"
 assert_line_has "$line58" '--dashboard-enable 1' "runtime wiring failed: option 58 missing --dashboard-enable 1"
 assert_line_has "$line58" '--dashboard-fail-close 0' "runtime wiring failed: option 58 missing --dashboard-fail-close 0"
 assert_line_has "$line58" '--dashboard-print 1' "runtime wiring failed: option 58 missing --dashboard-print 1"
@@ -1307,5 +1499,16 @@ assert_line_has "$line58" '--dashboard-print-summary-json 0' "runtime wiring fai
 assert_line_has "$line58" '--signoff-max-reports 25' "runtime wiring failed: option 58 missing default signoff max reports"
 assert_line_has "$line58" '--signoff-since-hours 24' "runtime wiring failed: option 58 missing default signoff since-hours"
 assert_line_has "$line58" '--signoff-min-go-rate-pct 95' "runtime wiring failed: option 58 missing default signoff min go rate"
+assert_line_has "$line58" '--signoff-require-cohort-signoff-policy 1' "runtime wiring failed: option 58 missing default signoff cohort policy requirement"
+assert_line_has "$line58" '--signoff-require-trend-artifact-policy-match 1' "runtime wiring failed: option 58 missing strict signoff --signoff-require-trend-artifact-policy-match 1"
+assert_line_has "$line58" '--signoff-require-trend-wg-validate-udp-source 1' "runtime wiring failed: option 58 missing strict signoff --signoff-require-trend-wg-validate-udp-source 1"
+assert_line_has "$line58" '--signoff-require-trend-wg-validate-strict-distinct 1' "runtime wiring failed: option 58 missing strict signoff --signoff-require-trend-wg-validate-strict-distinct 1"
+assert_line_has "$line58" '--signoff-require-trend-wg-soak-diversity-pass 1' "runtime wiring failed: option 58 missing strict signoff --signoff-require-trend-wg-soak-diversity-pass 1"
+assert_line_has "$line58" '--signoff-min-trend-wg-soak-selection-lines 12' "runtime wiring failed: option 58 missing strict signoff --signoff-min-trend-wg-soak-selection-lines 12"
+assert_line_has "$line58" '--signoff-min-trend-wg-soak-entry-operators 2' "runtime wiring failed: option 58 missing strict signoff --signoff-min-trend-wg-soak-entry-operators 2"
+assert_line_has "$line58" '--signoff-min-trend-wg-soak-exit-operators 2' "runtime wiring failed: option 58 missing strict signoff --signoff-min-trend-wg-soak-exit-operators 2"
+assert_line_has "$line58" '--signoff-min-trend-wg-soak-cross-operator-pairs 2' "runtime wiring failed: option 58 missing strict signoff --signoff-min-trend-wg-soak-cross-operator-pairs 2"
+assert_line_has "$line58" '--signoff-require-incident-snapshot-on-fail 1' "runtime wiring failed: option 58 missing strict signoff --signoff-require-incident-snapshot-on-fail 1"
+assert_line_has "$line58" '--signoff-require-incident-snapshot-artifacts 1' "runtime wiring failed: option 58 missing strict signoff --signoff-require-incident-snapshot-artifacts 1"
 
 echo "easy-mode launcher runtime integration check ok"

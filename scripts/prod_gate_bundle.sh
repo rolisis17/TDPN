@@ -14,7 +14,7 @@ default_log_dir() {
 usage() {
   cat <<'USAGE'
 Usage:
-  ./scripts/prod_gate_bundle.sh [--bundle-dir PATH] [--signoff-check [0|1]] [--signoff-require-full-sequence [0|1]] [--signoff-require-wg-validate-ok [0|1]] [--signoff-require-wg-soak-ok [0|1]] [--signoff-max-wg-soak-failed-rounds N] [--signoff-show-json [0|1]] [three-machine-prod-gate args...]
+  ./scripts/prod_gate_bundle.sh [--bundle-dir PATH] [--signoff-check [0|1]] [--signoff-require-full-sequence [0|1]] [--signoff-require-wg-validate-ok [0|1]] [--signoff-require-wg-soak-ok [0|1]] [--signoff-require-wg-validate-udp-source [0|1]] [--signoff-require-wg-validate-strict-distinct [0|1]] [--signoff-require-wg-soak-diversity-pass [0|1]] [--signoff-min-wg-soak-selection-lines N] [--signoff-min-wg-soak-entry-operators N] [--signoff-min-wg-soak-exit-operators N] [--signoff-min-wg-soak-cross-operator-pairs N] [--signoff-max-wg-soak-failed-rounds N] [--signoff-show-json [0|1]] [three-machine-prod-gate args...]
 
 Purpose:
   Run production 3-machine gate and always produce a shareable diagnostics bundle:
@@ -96,6 +96,13 @@ signoff_check="${PROD_GATE_BUNDLE_SIGNOFF_CHECK:-0}"
 signoff_require_full_sequence="${PROD_GATE_BUNDLE_SIGNOFF_REQUIRE_FULL_SEQUENCE:-1}"
 signoff_require_wg_validate_ok="${PROD_GATE_BUNDLE_SIGNOFF_REQUIRE_WG_VALIDATE_OK:-1}"
 signoff_require_wg_soak_ok="${PROD_GATE_BUNDLE_SIGNOFF_REQUIRE_WG_SOAK_OK:-1}"
+signoff_require_wg_validate_udp_source="${PROD_GATE_BUNDLE_SIGNOFF_REQUIRE_WG_VALIDATE_UDP_SOURCE:-0}"
+signoff_require_wg_validate_strict_distinct="${PROD_GATE_BUNDLE_SIGNOFF_REQUIRE_WG_VALIDATE_STRICT_DISTINCT:-0}"
+signoff_require_wg_soak_diversity_pass="${PROD_GATE_BUNDLE_SIGNOFF_REQUIRE_WG_SOAK_DIVERSITY_PASS:-0}"
+signoff_min_wg_soak_selection_lines="${PROD_GATE_BUNDLE_SIGNOFF_MIN_WG_SOAK_SELECTION_LINES:-0}"
+signoff_min_wg_soak_entry_operators="${PROD_GATE_BUNDLE_SIGNOFF_MIN_WG_SOAK_ENTRY_OPERATORS:-0}"
+signoff_min_wg_soak_exit_operators="${PROD_GATE_BUNDLE_SIGNOFF_MIN_WG_SOAK_EXIT_OPERATORS:-0}"
+signoff_min_wg_soak_cross_operator_pairs="${PROD_GATE_BUNDLE_SIGNOFF_MIN_WG_SOAK_CROSS_OPERATOR_PAIRS:-0}"
 signoff_max_wg_soak_failed_rounds="${PROD_GATE_BUNDLE_SIGNOFF_MAX_WG_SOAK_FAILED_ROUNDS:-0}"
 signoff_show_json="${PROD_GATE_BUNDLE_SIGNOFF_SHOW_JSON:-0}"
 declare -a gate_args=()
@@ -142,6 +149,49 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --signoff-require-wg-validate-udp-source)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        signoff_require_wg_validate_udp_source="${2:-}"
+        shift 2
+      else
+        signoff_require_wg_validate_udp_source="1"
+        shift
+      fi
+      ;;
+    --signoff-require-wg-validate-strict-distinct)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        signoff_require_wg_validate_strict_distinct="${2:-}"
+        shift 2
+      else
+        signoff_require_wg_validate_strict_distinct="1"
+        shift
+      fi
+      ;;
+    --signoff-require-wg-soak-diversity-pass)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        signoff_require_wg_soak_diversity_pass="${2:-}"
+        shift 2
+      else
+        signoff_require_wg_soak_diversity_pass="1"
+        shift
+      fi
+      ;;
+    --signoff-min-wg-soak-selection-lines)
+      signoff_min_wg_soak_selection_lines="${2:-}"
+      shift 2
+      ;;
+    --signoff-min-wg-soak-entry-operators)
+      signoff_min_wg_soak_entry_operators="${2:-}"
+      shift 2
+      ;;
+    --signoff-min-wg-soak-exit-operators)
+      signoff_min_wg_soak_exit_operators="${2:-}"
+      shift 2
+      ;;
+    --signoff-min-wg-soak-cross-operator-pairs)
+      signoff_min_wg_soak_cross_operator_pairs="${2:-}"
+      shift 2
+      ;;
     --signoff-max-wg-soak-failed-rounds)
       signoff_max_wg_soak_failed_rounds="${2:-}"
       shift 2
@@ -170,9 +220,28 @@ bool_arg_or_die "--signoff-check" "$signoff_check"
 bool_arg_or_die "--signoff-require-full-sequence" "$signoff_require_full_sequence"
 bool_arg_or_die "--signoff-require-wg-validate-ok" "$signoff_require_wg_validate_ok"
 bool_arg_or_die "--signoff-require-wg-soak-ok" "$signoff_require_wg_soak_ok"
+bool_arg_or_die "--signoff-require-wg-validate-udp-source" "$signoff_require_wg_validate_udp_source"
+bool_arg_or_die "--signoff-require-wg-validate-strict-distinct" "$signoff_require_wg_validate_strict_distinct"
+bool_arg_or_die "--signoff-require-wg-soak-diversity-pass" "$signoff_require_wg_soak_diversity_pass"
 bool_arg_or_die "--signoff-show-json" "$signoff_show_json"
 if [[ ! "$signoff_max_wg_soak_failed_rounds" =~ ^[0-9]+$ ]]; then
   echo "--signoff-max-wg-soak-failed-rounds must be an integer >= 0"
+  exit 2
+fi
+if [[ ! "$signoff_min_wg_soak_selection_lines" =~ ^[0-9]+$ ]]; then
+  echo "--signoff-min-wg-soak-selection-lines must be an integer >= 0"
+  exit 2
+fi
+if [[ ! "$signoff_min_wg_soak_entry_operators" =~ ^[0-9]+$ ]]; then
+  echo "--signoff-min-wg-soak-entry-operators must be an integer >= 0"
+  exit 2
+fi
+if [[ ! "$signoff_min_wg_soak_exit_operators" =~ ^[0-9]+$ ]]; then
+  echo "--signoff-min-wg-soak-exit-operators must be an integer >= 0"
+  exit 2
+fi
+if [[ ! "$signoff_min_wg_soak_cross_operator_pairs" =~ ^[0-9]+$ ]]; then
+  echo "--signoff-min-wg-soak-cross-operator-pairs must be an integer >= 0"
   exit 2
 fi
 
@@ -205,7 +274,7 @@ echo "[prod-gate-bundle] started at $started_at_utc"
 echo "[prod-gate-bundle] bundle_dir=$bundle_dir"
 echo "[prod-gate-bundle] gate_script=$GATE_SCRIPT"
 if [[ "$signoff_check" == "1" ]]; then
-  echo "[prod-gate-bundle] signoff enabled: script=$CHECK_SCRIPT full_sequence=$signoff_require_full_sequence wg_validate_ok=$signoff_require_wg_validate_ok wg_soak_ok=$signoff_require_wg_soak_ok max_wg_soak_failed_rounds=$signoff_max_wg_soak_failed_rounds show_json=$signoff_show_json"
+  echo "[prod-gate-bundle] signoff enabled: script=$CHECK_SCRIPT full_sequence=$signoff_require_full_sequence wg_validate_ok=$signoff_require_wg_validate_ok wg_soak_ok=$signoff_require_wg_soak_ok wg_validate_udp_source=$signoff_require_wg_validate_udp_source wg_validate_strict_distinct=$signoff_require_wg_validate_strict_distinct wg_soak_diversity_pass=$signoff_require_wg_soak_diversity_pass min_selection_lines=$signoff_min_wg_soak_selection_lines min_entry_operators=$signoff_min_wg_soak_entry_operators min_exit_operators=$signoff_min_wg_soak_exit_operators min_cross_operator_pairs=$signoff_min_wg_soak_cross_operator_pairs max_wg_soak_failed_rounds=$signoff_max_wg_soak_failed_rounds show_json=$signoff_show_json"
 else
   echo "[prod-gate-bundle] signoff disabled"
 fi
@@ -253,6 +322,13 @@ if [[ "$signoff_check" == "1" ]]; then
       --require-full-sequence "$signoff_require_full_sequence" \
       --require-wg-validate-ok "$signoff_require_wg_validate_ok" \
       --require-wg-soak-ok "$signoff_require_wg_soak_ok" \
+      --require-wg-validate-udp-source "$signoff_require_wg_validate_udp_source" \
+      --require-wg-validate-strict-distinct "$signoff_require_wg_validate_strict_distinct" \
+      --require-wg-soak-diversity-pass "$signoff_require_wg_soak_diversity_pass" \
+      --min-wg-soak-selection-lines "$signoff_min_wg_soak_selection_lines" \
+      --min-wg-soak-entry-operators "$signoff_min_wg_soak_entry_operators" \
+      --min-wg-soak-exit-operators "$signoff_min_wg_soak_exit_operators" \
+      --min-wg-soak-cross-operator-pairs "$signoff_min_wg_soak_cross_operator_pairs" \
       --max-wg-soak-failed-rounds "$signoff_max_wg_soak_failed_rounds" \
       --show-json "$signoff_show_json"
     signoff_rc=$?
@@ -276,6 +352,13 @@ signoff_rc=$signoff_rc
 signoff_require_full_sequence=$signoff_require_full_sequence
 signoff_require_wg_validate_ok=$signoff_require_wg_validate_ok
 signoff_require_wg_soak_ok=$signoff_require_wg_soak_ok
+signoff_require_wg_validate_udp_source=$signoff_require_wg_validate_udp_source
+signoff_require_wg_validate_strict_distinct=$signoff_require_wg_validate_strict_distinct
+signoff_require_wg_soak_diversity_pass=$signoff_require_wg_soak_diversity_pass
+signoff_min_wg_soak_selection_lines=$signoff_min_wg_soak_selection_lines
+signoff_min_wg_soak_entry_operators=$signoff_min_wg_soak_entry_operators
+signoff_min_wg_soak_exit_operators=$signoff_min_wg_soak_exit_operators
+signoff_min_wg_soak_cross_operator_pairs=$signoff_min_wg_soak_cross_operator_pairs
 signoff_max_wg_soak_failed_rounds=$signoff_max_wg_soak_failed_rounds
 signoff_show_json=$signoff_show_json
 bundle_dir=$bundle_dir

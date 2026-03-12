@@ -2251,6 +2251,13 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --signoff-require-full-sequence 1"
           << " --signoff-require-wg-validate-ok 1"
           << " --signoff-require-wg-soak-ok 1"
+          << " --signoff-require-wg-validate-udp-source 1"
+          << " --signoff-require-wg-validate-strict-distinct 1"
+          << " --signoff-require-wg-soak-diversity-pass 1"
+          << " --signoff-min-wg-soak-selection-lines 12"
+          << " --signoff-min-wg-soak-entry-operators 2"
+          << " --signoff-min-wg-soak-exit-operators 2"
+          << " --signoff-min-wg-soak-cross-operator-pairs 3"
           << " --signoff-max-wg-soak-failed-rounds 0"
           << " --signoff-show-json 0"
           << " --control-fault-every 0"
@@ -2437,6 +2444,13 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
                    << " --require-signoff-ok " << (requireRunReportStages ? "1" : "0")
                    << " --require-incident-snapshot-on-fail " << (requireIncidentSnapshotOnFail ? "1" : "0")
                    << " --require-incident-snapshot-artifacts " << (requireIncidentSnapshotArtifacts ? "1" : "0")
+                   << " --require-wg-validate-udp-source 1"
+                   << " --require-wg-validate-strict-distinct 1"
+                   << " --require-wg-soak-diversity-pass 1"
+                   << " --min-wg-soak-selection-lines 12"
+                   << " --min-wg-soak-entry-operators 2"
+                   << " --min-wg-soak-exit-operators 2"
+                   << " --min-wg-soak-cross-operator-pairs 2"
                    << " --max-wg-soak-failed-rounds " << shellEscape(maxWGSoakFailedRounds)
                    << " --show-json " << (showJson ? "1" : "0");
         if (!runReportJson.empty()) {
@@ -2466,6 +2480,13 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --require-signoff-ok " << (requireRunReportStages ? "1" : "0")
           << " --require-incident-snapshot-on-fail " << (requireIncidentSnapshotOnFail ? "1" : "0")
           << " --require-incident-snapshot-artifacts " << (requireIncidentSnapshotArtifacts ? "1" : "0")
+          << " --require-wg-validate-udp-source 1"
+          << " --require-wg-validate-strict-distinct 1"
+          << " --require-wg-soak-diversity-pass 1"
+          << " --min-wg-soak-selection-lines 12"
+          << " --min-wg-soak-entry-operators 2"
+          << " --min-wg-soak-exit-operators 2"
+          << " --min-wg-soak-cross-operator-pairs 2"
           << " --max-wg-soak-failed-rounds " << shellEscape(maxWGSoakFailedRounds)
           << " --show-json " << (showJson ? "1" : "0");
       if (!runReportJson.empty()) {
@@ -2624,6 +2645,13 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --require-full-sequence " << (requireFullSequence ? "1" : "0")
           << " --require-wg-validate-ok " << (requireWGValidate ? "1" : "0")
           << " --require-wg-soak-ok " << (requireWGSoak ? "1" : "0")
+          << " --require-wg-validate-udp-source 1"
+          << " --require-wg-validate-strict-distinct 1"
+          << " --require-wg-soak-diversity-pass 1"
+          << " --min-wg-soak-selection-lines 8"
+          << " --min-wg-soak-entry-operators 2"
+          << " --min-wg-soak-exit-operators 2"
+          << " --min-wg-soak-cross-operator-pairs 1"
           << " --max-wg-soak-failed-rounds " << shellEscape(maxWGSoakFailedRounds)
           << " --require-preflight-ok " << (requireRunReportStages ? "1" : "0")
           << " --require-bundle-ok " << (requireRunReportStages ? "1" : "0")
@@ -2674,6 +2702,13 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --require-full-sequence " << (requireFullSequence ? "1" : "0")
           << " --require-wg-validate-ok " << (requireWGValidate ? "1" : "0")
           << " --require-wg-soak-ok " << (requireWGSoak ? "1" : "0")
+          << " --require-wg-validate-udp-source 1"
+          << " --require-wg-validate-strict-distinct 1"
+          << " --require-wg-soak-diversity-pass 1"
+          << " --min-wg-soak-selection-lines 8"
+          << " --min-wg-soak-entry-operators 2"
+          << " --min-wg-soak-exit-operators 2"
+          << " --min-wg-soak-cross-operator-pairs 1"
           << " --max-wg-soak-failed-rounds " << shellEscape(maxWGSoakFailedRounds)
           << " --require-preflight-ok " << (requireRunReportStages ? "1" : "0")
           << " --require-bundle-ok " << (requireRunReportStages ? "1" : "0")
@@ -2723,6 +2758,13 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
 
       std::ostringstream cmd;
       cmd << shellEscape(script) << " prod-gate-slo-alert"
+          << " --require-wg-validate-udp-source 1"
+          << " --require-wg-validate-strict-distinct 1"
+          << " --require-wg-soak-diversity-pass 1"
+          << " --min-wg-soak-selection-lines 8"
+          << " --min-wg-soak-entry-operators 2"
+          << " --min-wg-soak-exit-operators 2"
+          << " --min-wg-soak-cross-operator-pairs 1"
           << " --warn-go-rate-pct " << shellEscape(warnGoRatePct)
           << " --critical-go-rate-pct " << shellEscape(criticalGoRatePct)
           << " --warn-no-go-count " << shellEscape(warnNoGoCount)
@@ -2786,6 +2828,13 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --require-full-sequence " << (requireFullSequence ? "1" : "0")
           << " --require-wg-validate-ok " << (requireWGValidate ? "1" : "0")
           << " --require-wg-soak-ok " << (requireWGSoak ? "1" : "0")
+          << " --require-wg-validate-udp-source 1"
+          << " --require-wg-validate-strict-distinct 1"
+          << " --require-wg-soak-diversity-pass 1"
+          << " --min-wg-soak-selection-lines 8"
+          << " --min-wg-soak-entry-operators 2"
+          << " --min-wg-soak-exit-operators 2"
+          << " --min-wg-soak-cross-operator-pairs 1"
           << " --max-wg-soak-failed-rounds " << shellEscape(maxWGSoakFailedRounds)
           << " --require-preflight-ok " << (requireRunReportStages ? "1" : "0")
           << " --require-bundle-ok " << (requireRunReportStages ? "1" : "0")
@@ -2976,6 +3025,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       bool continueOnFail = parseYesNo(readLine("Continue running after a failed round? (y/N)", "n"), false);
       bool requireAllRoundsOk = parseYesNo(readLine("Require all rounds to pass for cohort success? (Y/n)", "y"), true);
       std::string trendMinGoRate = trim(readLine("Minimum GO rate percent", "95"));
+      std::string maxRoundFailures = trim(readLine("Max failed rounds allowed for signoff", "0"));
       std::string maxAlertSeverity = trim(readLine("Max alert severity allowed (OK/WARN/CRITICAL)", "WARN"));
       std::string maxAlertSeverityUpper = upperCopy(maxAlertSeverity);
       if (maxAlertSeverityUpper != "OK" && maxAlertSeverityUpper != "WARN" && maxAlertSeverityUpper != "CRITICAL") {
@@ -2996,6 +3046,13 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --continue-on-fail " << (continueOnFail ? "1" : "0")
           << " --require-all-rounds-ok " << (requireAllRoundsOk ? "1" : "0")
           << " --trend-min-go-rate-pct " << shellEscape(trendMinGoRate)
+          << " --trend-require-wg-validate-udp-source 1"
+          << " --trend-require-wg-validate-strict-distinct 1"
+          << " --trend-require-wg-soak-diversity-pass 1"
+          << " --trend-min-wg-soak-selection-lines 12"
+          << " --trend-min-wg-soak-entry-operators 2"
+          << " --trend-min-wg-soak-exit-operators 2"
+          << " --trend-min-wg-soak-cross-operator-pairs 2"
           << " --max-alert-severity " << shellEscape(maxAlertSeverityUpper)
           << " --bundle-outputs " << (bundleOutputs ? "1" : "0")
           << " --bundle-fail-close " << (bundleFailClose ? "1" : "0")
@@ -3078,6 +3135,14 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --require-all-rounds-ok " << (requireAllRoundsOk ? "1" : "0")
           << " --max-round-failures " << shellEscape(maxRoundFailures)
           << " --require-trend-go " << (requireTrendGo ? "1" : "0")
+          << " --require-trend-artifact-policy-match 1"
+          << " --require-trend-wg-validate-udp-source 1"
+          << " --require-trend-wg-validate-strict-distinct 1"
+          << " --require-trend-wg-soak-diversity-pass 1"
+          << " --min-trend-wg-soak-selection-lines 12"
+          << " --min-trend-wg-soak-entry-operators 2"
+          << " --min-trend-wg-soak-exit-operators 2"
+          << " --min-trend-wg-soak-cross-operator-pairs 2"
           << " --min-go-rate-pct " << shellEscape(minGoRate)
           << " --max-alert-severity " << shellEscape(maxAlertSeverityUpper)
           << " --require-bundle-created " << (requireBundleCreated ? "1" : "0")
@@ -3131,6 +3196,13 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
                  << " --continue-on-fail " << (continueOnFail ? "1" : "0")
                  << " --require-all-rounds-ok " << (requireAllRoundsOk ? "1" : "0")
                  << " --trend-min-go-rate-pct " << shellEscape(trendMinGoRate)
+                 << " --trend-require-wg-validate-udp-source 1"
+                 << " --trend-require-wg-validate-strict-distinct 1"
+                 << " --trend-require-wg-soak-diversity-pass 1"
+                 << " --trend-min-wg-soak-selection-lines 12"
+                 << " --trend-min-wg-soak-entry-operators 2"
+                 << " --trend-min-wg-soak-exit-operators 2"
+                 << " --trend-min-wg-soak-cross-operator-pairs 2"
                  << " --max-alert-severity " << shellEscape(maxAlertSeverityUpper)
                  << " --bundle-outputs " << (bundleOutputs ? "1" : "0")
                  << " --bundle-fail-close " << (bundleFailClose ? "1" : "0")
@@ -3166,6 +3238,14 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
                  << " --require-all-rounds-ok " << (requireAllRoundsOk ? "1" : "0")
                  << " --max-round-failures 0"
                  << " --require-trend-go 1"
+                 << " --require-trend-artifact-policy-match 1"
+                 << " --require-trend-wg-validate-udp-source 1"
+                 << " --require-trend-wg-validate-strict-distinct 1"
+                 << " --require-trend-wg-soak-diversity-pass 1"
+                 << " --min-trend-wg-soak-selection-lines 12"
+                 << " --min-trend-wg-soak-entry-operators 2"
+                 << " --min-trend-wg-soak-exit-operators 2"
+                 << " --min-trend-wg-soak-cross-operator-pairs 2"
                  << " --min-go-rate-pct " << shellEscape(trendMinGoRate)
                  << " --max-alert-severity " << shellEscape(maxAlertSeverityUpper)
                  << " --require-bundle-created " << (bundleOutputs ? "1" : "0")
@@ -3181,6 +3261,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       std::string rounds = trim(readLine("Cohort rounds", "5"));
       std::string pauseSec = trim(readLine("Pause between rounds (sec)", "60"));
       std::string trendMinGoRate = trim(readLine("Minimum GO rate percent", "95"));
+      std::string maxRoundFailures = trim(readLine("Max failed rounds allowed for signoff", "0"));
       std::string maxAlertSeverity = trim(readLine("Max alert severity allowed (OK/WARN/CRITICAL)", "WARN"));
       std::string maxAlertSeverityUpper = upperCopy(maxAlertSeverity);
       if (maxAlertSeverityUpper != "OK" && maxAlertSeverityUpper != "WARN" && maxAlertSeverityUpper != "CRITICAL") {
@@ -3189,6 +3270,8 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       }
       bool continueOnFail = parseYesNo(readLine("Continue running after a failed round? (y/N)", "n"), false);
       bool requireAllRoundsOk = parseYesNo(readLine("Require all rounds to pass? (Y/n)", "y"), true);
+      bool bundleOutputs = parseYesNo(readLine("Require bundle outputs in runbook/signoff? (Y/n)", "y"), true);
+      bool bundleFailClose = parseYesNo(readLine("Fail if bundle generation stage fails? (Y/n)", "y"), true);
       bool showJson = parseYesNo(readLine("Show runbook/signoff JSON payloads? (y/N)", "n"), false);
       std::string reportsDir = trim(readLine("Reports directory (optional)", ""));
       std::string summaryJson = trim(readLine("Summary JSON path (optional)", ""));
@@ -3204,8 +3287,21 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --pause-sec " << shellEscape(pauseSec)
           << " --continue-on-fail " << (continueOnFail ? "1" : "0")
           << " --require-all-rounds-ok " << (requireAllRoundsOk ? "1" : "0")
+          << " --max-round-failures " << shellEscape(maxRoundFailures)
           << " --trend-min-go-rate-pct " << shellEscape(trendMinGoRate)
           << " --max-alert-severity " << shellEscape(maxAlertSeverityUpper)
+          << " --bundle-outputs " << (bundleOutputs ? "1" : "0")
+          << " --bundle-fail-close " << (bundleFailClose ? "1" : "0")
+          << " --signoff-require-trend-artifact-policy-match 1"
+          << " --signoff-require-trend-wg-validate-udp-source 1"
+          << " --signoff-require-trend-wg-validate-strict-distinct 1"
+          << " --signoff-require-trend-wg-soak-diversity-pass 1"
+          << " --signoff-min-trend-wg-soak-selection-lines 12"
+          << " --signoff-min-trend-wg-soak-entry-operators 2"
+          << " --signoff-min-trend-wg-soak-exit-operators 2"
+          << " --signoff-min-trend-wg-soak-cross-operator-pairs 2"
+          << " --signoff-require-incident-snapshot-on-fail 1"
+          << " --signoff-require-incident-snapshot-artifacts 1"
           << " --print-run-report " << (printRunReport ? "1" : "0")
           << " --show-json " << (showJson ? "1" : "0");
       if (!reportsDir.empty()) {
@@ -3230,8 +3326,11 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       bool requireRunbookOk = parseYesNo(readLine("Require runbook rc=0? (Y/n)", "y"), true);
       bool requireSignoffAttempted = parseYesNo(readLine("Require signoff attempted=true? (Y/n)", "y"), true);
       bool requireSignoffOk = parseYesNo(readLine("Require signoff rc=0? (Y/n)", "y"), true);
+      bool requireCohortSignoffPolicy = parseYesNo(readLine("Re-validate strict cohort signoff policy? (Y/n)", "y"), true);
       bool requireSummaryJson = parseYesNo(readLine("Require summary JSON artifact exists? (Y/n)", "y"), true);
       bool requireSummaryStatusOk = parseYesNo(readLine("Require summary status=ok? (Y/n)", "y"), true);
+      bool requireIncidentSnapshotOnFail = true;
+      bool requireIncidentSnapshotArtifacts = true;
       std::string maxDurationSec = trim(readLine("Max duration sec (0=disabled)", "0"));
       bool showJson = parseYesNo(readLine("Show run report JSON payload? (y/N)", "n"), false);
 
@@ -3241,8 +3340,11 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --require-runbook-ok " << (requireRunbookOk ? "1" : "0")
           << " --require-signoff-attempted " << (requireSignoffAttempted ? "1" : "0")
           << " --require-signoff-ok " << (requireSignoffOk ? "1" : "0")
+          << " --require-cohort-signoff-policy " << (requireCohortSignoffPolicy ? "1" : "0")
           << " --require-summary-json " << (requireSummaryJson ? "1" : "0")
           << " --require-summary-status-ok " << (requireSummaryStatusOk ? "1" : "0")
+          << " --require-incident-snapshot-on-fail " << (requireIncidentSnapshotOnFail ? "1" : "0")
+          << " --require-incident-snapshot-artifacts " << (requireIncidentSnapshotArtifacts ? "1" : "0")
           << " --max-duration-sec " << shellEscape(maxDurationSec)
           << " --show-json " << (showJson ? "1" : "0");
       if (!runReportJson.empty()) {
@@ -3262,8 +3364,11 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       bool requireRunbookOk = parseYesNo(readLine("Require runbook rc=0? (Y/n)", "y"), true);
       bool requireSignoffAttempted = parseYesNo(readLine("Require signoff attempted=true? (Y/n)", "y"), true);
       bool requireSignoffOk = parseYesNo(readLine("Require signoff rc=0? (Y/n)", "y"), true);
+      bool requireCohortSignoffPolicy = parseYesNo(readLine("Re-validate strict cohort signoff policy? (Y/n)", "y"), true);
       bool requireSummaryJson = parseYesNo(readLine("Require summary JSON artifact exists? (Y/n)", "y"), true);
       bool requireSummaryStatusOk = parseYesNo(readLine("Require summary status=ok? (Y/n)", "y"), true);
+      bool requireIncidentSnapshotOnFail = true;
+      bool requireIncidentSnapshotArtifacts = true;
       std::string maxDurationSec = trim(readLine("Max duration sec (0=disabled)", "0"));
       bool failOnAnyNoGo = parseYesNo(readLine("Fail if any run is NO-GO? (y/N)", "n"), false);
       std::string minGoRatePct = trim(readLine("Minimum GO rate percent (0-100)", "0"));
@@ -3280,8 +3385,11 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --require-runbook-ok " << (requireRunbookOk ? "1" : "0")
           << " --require-signoff-attempted " << (requireSignoffAttempted ? "1" : "0")
           << " --require-signoff-ok " << (requireSignoffOk ? "1" : "0")
+          << " --require-cohort-signoff-policy " << (requireCohortSignoffPolicy ? "1" : "0")
           << " --require-summary-json " << (requireSummaryJson ? "1" : "0")
           << " --require-summary-status-ok " << (requireSummaryStatusOk ? "1" : "0")
+          << " --require-incident-snapshot-on-fail " << (requireIncidentSnapshotOnFail ? "1" : "0")
+          << " --require-incident-snapshot-artifacts " << (requireIncidentSnapshotArtifacts ? "1" : "0")
           << " --max-duration-sec " << shellEscape(maxDurationSec)
           << " --fail-on-any-no-go " << (failOnAnyNoGo ? "1" : "0")
           << " --min-go-rate-pct " << shellEscape(minGoRatePct)
@@ -3307,8 +3415,11 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       bool requireRunbookOk = true;
       bool requireSignoffAttempted = true;
       bool requireSignoffOk = true;
+      bool requireCohortSignoffPolicy = true;
       bool requireSummaryJson = true;
       bool requireSummaryStatusOk = true;
+      bool requireIncidentSnapshotOnFail = true;
+      bool requireIncidentSnapshotArtifacts = true;
       std::string maxDurationSec = "0";
 
       if (useTrendSummary) {
@@ -3321,6 +3432,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
         requireRunbookOk = parseYesNo(readLine("Require runbook rc=0? (Y/n)", "y"), true);
         requireSignoffAttempted = parseYesNo(readLine("Require signoff attempted=true? (Y/n)", "y"), true);
         requireSignoffOk = parseYesNo(readLine("Require signoff rc=0? (Y/n)", "y"), true);
+        requireCohortSignoffPolicy = parseYesNo(readLine("Re-validate strict cohort signoff policy? (Y/n)", "y"), true);
         requireSummaryJson = parseYesNo(readLine("Require summary JSON artifact exists? (Y/n)", "y"), true);
         requireSummaryStatusOk = parseYesNo(readLine("Require summary status=ok? (Y/n)", "y"), true);
         maxDurationSec = trim(readLine("Max duration sec (0=disabled)", "0"));
@@ -3365,8 +3477,11 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
             << " --require-runbook-ok " << (requireRunbookOk ? "1" : "0")
             << " --require-signoff-attempted " << (requireSignoffAttempted ? "1" : "0")
             << " --require-signoff-ok " << (requireSignoffOk ? "1" : "0")
+            << " --require-cohort-signoff-policy " << (requireCohortSignoffPolicy ? "1" : "0")
             << " --require-summary-json " << (requireSummaryJson ? "1" : "0")
             << " --require-summary-status-ok " << (requireSummaryStatusOk ? "1" : "0")
+            << " --require-incident-snapshot-on-fail " << (requireIncidentSnapshotOnFail ? "1" : "0")
+            << " --require-incident-snapshot-artifacts " << (requireIncidentSnapshotArtifacts ? "1" : "0")
             << " --max-duration-sec " << shellEscape(maxDurationSec);
       }
       if (!summaryJson.empty()) {
@@ -3383,8 +3498,11 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       bool requireRunbookOk = parseYesNo(readLine("Require runbook rc=0? (Y/n)", "y"), true);
       bool requireSignoffAttempted = parseYesNo(readLine("Require signoff attempted=true? (Y/n)", "y"), true);
       bool requireSignoffOk = parseYesNo(readLine("Require signoff rc=0? (Y/n)", "y"), true);
+      bool requireCohortSignoffPolicy = parseYesNo(readLine("Re-validate strict cohort signoff policy? (Y/n)", "y"), true);
       bool requireSummaryJson = parseYesNo(readLine("Require summary JSON artifact exists? (Y/n)", "y"), true);
       bool requireSummaryStatusOk = parseYesNo(readLine("Require summary status=ok? (Y/n)", "y"), true);
+      bool requireIncidentSnapshotOnFail = true;
+      bool requireIncidentSnapshotArtifacts = true;
       std::string maxDurationSec = trim(readLine("Max duration sec (0=disabled)", "0"));
       bool failOnAnyNoGo = parseYesNo(readLine("Fail if any run is NO-GO? (y/N)", "n"), false);
       std::string minGoRatePct = trim(readLine("Minimum GO rate percent (0-100)", "95"));
@@ -3413,8 +3531,11 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --require-runbook-ok " << (requireRunbookOk ? "1" : "0")
           << " --require-signoff-attempted " << (requireSignoffAttempted ? "1" : "0")
           << " --require-signoff-ok " << (requireSignoffOk ? "1" : "0")
+          << " --require-cohort-signoff-policy " << (requireCohortSignoffPolicy ? "1" : "0")
           << " --require-summary-json " << (requireSummaryJson ? "1" : "0")
           << " --require-summary-status-ok " << (requireSummaryStatusOk ? "1" : "0")
+          << " --require-incident-snapshot-on-fail " << (requireIncidentSnapshotOnFail ? "1" : "0")
+          << " --require-incident-snapshot-artifacts " << (requireIncidentSnapshotArtifacts ? "1" : "0")
           << " --max-duration-sec " << shellEscape(maxDurationSec)
           << " --fail-on-any-no-go " << (failOnAnyNoGo ? "1" : "0")
           << " --min-go-rate-pct " << shellEscape(minGoRatePct)
@@ -3454,8 +3575,11 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       bool requireRunbookOk = parseYesNo(readLine("Require runbook rc=0? (Y/n)", "y"), true);
       bool requireSignoffAttempted = parseYesNo(readLine("Require signoff attempted=true? (Y/n)", "y"), true);
       bool requireSignoffOk = parseYesNo(readLine("Require signoff rc=0? (Y/n)", "y"), true);
+      bool requireCohortSignoffPolicy = parseYesNo(readLine("Re-validate strict cohort signoff policy? (Y/n)", "y"), true);
       bool requireSummaryJson = parseYesNo(readLine("Require summary JSON artifact exists? (Y/n)", "y"), true);
       bool requireSummaryStatusOk = parseYesNo(readLine("Require summary status=ok? (Y/n)", "y"), true);
+      bool requireIncidentSnapshotOnFail = true;
+      bool requireIncidentSnapshotArtifacts = true;
       std::string maxDurationSec = trim(readLine("Max duration sec (0=disabled)", "0"));
       std::string maxReports = trim(readLine("Max reports to evaluate", "25"));
       std::string sinceHours = trim(readLine("Include only reports from last N hours (0=all)", "24"));
@@ -3487,8 +3611,21 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --require-runbook-ok " << (requireRunbookOk ? "1" : "0")
           << " --require-signoff-attempted " << (requireSignoffAttempted ? "1" : "0")
           << " --require-signoff-ok " << (requireSignoffOk ? "1" : "0")
+          << " --require-cohort-signoff-policy " << (requireCohortSignoffPolicy ? "1" : "0")
+          << " --require-trend-artifact-policy-match 1"
+          << " --require-trend-wg-validate-udp-source 1"
+          << " --require-trend-wg-validate-strict-distinct 1"
+          << " --require-trend-wg-soak-diversity-pass 1"
+          << " --min-trend-wg-soak-selection-lines 12"
+          << " --min-trend-wg-soak-entry-operators 2"
+          << " --min-trend-wg-soak-exit-operators 2"
+          << " --min-trend-wg-soak-cross-operator-pairs 2"
+          << " --require-bundle-created 1"
+          << " --require-bundle-manifest 1"
           << " --require-summary-json " << (requireSummaryJson ? "1" : "0")
           << " --require-summary-status-ok " << (requireSummaryStatusOk ? "1" : "0")
+          << " --require-incident-snapshot-on-fail " << (requireIncidentSnapshotOnFail ? "1" : "0")
+          << " --require-incident-snapshot-artifacts " << (requireIncidentSnapshotArtifacts ? "1" : "0")
           << " --max-duration-sec " << shellEscape(maxDurationSec)
           << " --max-reports " << shellEscape(maxReports)
           << " --since-hours " << shellEscape(sinceHours)
@@ -3528,6 +3665,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       std::string pauseSec = trim(readLine("Pause between rounds (sec)", "60"));
       bool continueOnFail = parseYesNo(readLine("Continue running after a failed round? (y/N)", "n"), false);
       bool requireAllRoundsOk = parseYesNo(readLine("Require all rounds to pass? (Y/n)", "y"), true);
+      std::string maxRoundFailures = trim(readLine("Max failed rounds allowed for signoff", "0"));
       std::string trendMinGoRate = trim(readLine("Minimum GO rate percent", "95"));
       std::string maxAlertSeverity = trim(readLine("Max alert severity allowed (OK/WARN/CRITICAL)", "WARN"));
       std::string maxAlertSeverityUpper = upperCopy(maxAlertSeverity);
@@ -3535,6 +3673,8 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
         std::cout << "invalid max alert severity; using WARN\n";
         maxAlertSeverityUpper = "WARN";
       }
+      bool bundleOutputs = parseYesNo(readLine("Require bundle outputs in quick run/signoff? (Y/n)", "y"), true);
+      bool bundleFailClose = parseYesNo(readLine("Fail if bundle generation stage fails? (Y/n)", "y"), true);
       std::string reportsDir = trim(readLine("Reports directory", ".easy-node-logs/prod_pilot_cohort_quick_runbook"));
       std::string summaryJson = trim(readLine("Cohort summary JSON path (optional)", ""));
       std::string runReportJson = trim(readLine("Quick run report JSON path (optional)", ""));
@@ -3546,6 +3686,9 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       std::string signoffSinceHours = trim(readLine("Signoff trend since hours", "24"));
       bool signoffFailOnAnyNoGo = parseYesNo(readLine("Signoff fail on any NO-GO trend? (y/N)", "n"), false);
       std::string signoffMinGoRate = trim(readLine("Signoff minimum GO rate percent", "95"));
+      bool signoffRequireCohortSignoffPolicy = parseYesNo(readLine("Signoff re-validates strict cohort policy? (Y/n)", "y"), true);
+      bool signoffRequireIncidentSnapshotOnFail = true;
+      bool signoffRequireIncidentSnapshotArtifacts = true;
       bool dashboardEnable = parseYesNo(readLine("Generate quick dashboard artifacts? (Y/n)", "y"), true);
       bool dashboardFailClose = parseYesNo(readLine("Fail run if dashboard stage fails? (y/N)", "n"), false);
       bool dashboardPrint = parseYesNo(readLine("Print dashboard markdown? (Y/n)", "y"), true);
@@ -3561,13 +3704,27 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --pause-sec " << shellEscape(pauseSec)
           << " --continue-on-fail " << (continueOnFail ? "1" : "0")
           << " --require-all-rounds-ok " << (requireAllRoundsOk ? "1" : "0")
+          << " --max-round-failures " << shellEscape(maxRoundFailures)
           << " --trend-min-go-rate-pct " << shellEscape(trendMinGoRate)
           << " --max-alert-severity " << shellEscape(maxAlertSeverityUpper)
+          << " --bundle-outputs " << (bundleOutputs ? "1" : "0")
+          << " --bundle-fail-close " << (bundleFailClose ? "1" : "0")
           << " --reports-dir " << shellEscape(reportsDir)
           << " --signoff-max-reports " << shellEscape(signoffMaxReports)
           << " --signoff-since-hours " << shellEscape(signoffSinceHours)
           << " --signoff-fail-on-any-no-go " << (signoffFailOnAnyNoGo ? "1" : "0")
           << " --signoff-min-go-rate-pct " << shellEscape(signoffMinGoRate)
+          << " --signoff-require-cohort-signoff-policy " << (signoffRequireCohortSignoffPolicy ? "1" : "0")
+          << " --signoff-require-trend-artifact-policy-match 1"
+          << " --signoff-require-trend-wg-validate-udp-source 1"
+          << " --signoff-require-trend-wg-validate-strict-distinct 1"
+          << " --signoff-require-trend-wg-soak-diversity-pass 1"
+          << " --signoff-min-trend-wg-soak-selection-lines 12"
+          << " --signoff-min-trend-wg-soak-entry-operators 2"
+          << " --signoff-min-trend-wg-soak-exit-operators 2"
+          << " --signoff-min-trend-wg-soak-cross-operator-pairs 2"
+          << " --signoff-require-incident-snapshot-on-fail " << (signoffRequireIncidentSnapshotOnFail ? "1" : "0")
+          << " --signoff-require-incident-snapshot-artifacts " << (signoffRequireIncidentSnapshotArtifacts ? "1" : "0")
           << " --dashboard-enable " << (dashboardEnable ? "1" : "0")
           << " --dashboard-fail-close " << (dashboardFailClose ? "1" : "0")
           << " --dashboard-print " << (dashboardPrint ? "1" : "0")

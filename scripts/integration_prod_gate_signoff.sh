@@ -65,6 +65,13 @@ THREE_MACHINE_PROD_GATE_CHECK_SCRIPT="$FAKE_CHECK" \
   --require-signoff-ok 1 \
   --require-incident-snapshot-on-fail 1 \
   --require-incident-snapshot-artifacts 1 \
+  --require-wg-validate-udp-source 1 \
+  --require-wg-validate-strict-distinct 1 \
+  --require-wg-soak-diversity-pass 1 \
+  --min-wg-soak-selection-lines 12 \
+  --min-wg-soak-entry-operators 2 \
+  --min-wg-soak-exit-operators 2 \
+  --min-wg-soak-cross-operator-pairs 2 \
   --max-wg-soak-failed-rounds 3 \
   --show-json 1 >/tmp/integration_prod_gate_signoff_success.log 2>&1
 
@@ -156,6 +163,41 @@ if ! rg -q -- '--require-incident-snapshot-on-fail 1' "$CHECK_CAPTURE"; then
 fi
 if ! rg -q -- '--require-incident-snapshot-artifacts 1' "$CHECK_CAPTURE"; then
   echo "prod-gate-signoff forwarding failed: check missing --require-incident-snapshot-artifacts"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-wg-validate-udp-source 1' "$CHECK_CAPTURE"; then
+  echo "prod-gate-signoff forwarding failed: check missing --require-wg-validate-udp-source"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-wg-validate-strict-distinct 1' "$CHECK_CAPTURE"; then
+  echo "prod-gate-signoff forwarding failed: check missing --require-wg-validate-strict-distinct"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-wg-soak-diversity-pass 1' "$CHECK_CAPTURE"; then
+  echo "prod-gate-signoff forwarding failed: check missing --require-wg-soak-diversity-pass"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-wg-soak-selection-lines 12' "$CHECK_CAPTURE"; then
+  echo "prod-gate-signoff forwarding failed: check missing --min-wg-soak-selection-lines"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-wg-soak-entry-operators 2' "$CHECK_CAPTURE"; then
+  echo "prod-gate-signoff forwarding failed: check missing --min-wg-soak-entry-operators"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-wg-soak-exit-operators 2' "$CHECK_CAPTURE"; then
+  echo "prod-gate-signoff forwarding failed: check missing --min-wg-soak-exit-operators"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-wg-soak-cross-operator-pairs 2' "$CHECK_CAPTURE"; then
+  echo "prod-gate-signoff forwarding failed: check missing --min-wg-soak-cross-operator-pairs"
   cat "$CHECK_CAPTURE"
   exit 1
 fi

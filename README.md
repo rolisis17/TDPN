@@ -203,7 +203,7 @@ sudo ./scripts/easy_node.sh stop-all --with-wg-only 1 --force-iface-cleanup 1
 ./scripts/easy_node.sh prod-pilot-cohort-quick-signoff --run-report-json <reports_dir>/prod_pilot_cohort_quick_report.json --reports-dir .easy-node-logs --max-alert-severity WARN
 
 # one-command quick pilot runbook (quick execution + quick signoff + optional dashboard)
-./scripts/easy_node.sh prod-pilot-cohort-quick-runbook --bootstrap-directory https://<A_SERVER_IP_OR_DNS>:8081 --subject pilot-client --max-alert-severity WARN
+./scripts/easy_node.sh prod-pilot-cohort-quick-runbook --bootstrap-directory https://<A_SERVER_IP_OR_DNS>:8081 --subject pilot-client --max-alert-severity WARN --max-round-failures 0 --bundle-outputs 1 --bundle-fail-close 1
 
 ./scripts/easy_node.sh client-test \
   --directory-urls http://<SERVER_IP>:8081 \

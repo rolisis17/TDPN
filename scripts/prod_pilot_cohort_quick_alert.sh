@@ -20,8 +20,11 @@ Usage:
     [--require-runbook-ok [0|1]] \
     [--require-signoff-attempted [0|1]] \
     [--require-signoff-ok [0|1]] \
+    [--require-cohort-signoff-policy [0|1]] \
     [--require-summary-json [0|1]] \
     [--require-summary-status-ok [0|1]] \
+    [--require-incident-snapshot-on-fail [0|1]] \
+    [--require-incident-snapshot-artifacts [0|1]] \
     [--max-duration-sec N] \
     [--warn-go-rate-pct N] \
     [--critical-go-rate-pct N] \
@@ -94,8 +97,11 @@ require_status_ok="${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_STATUS_OK:-1}"
 require_runbook_ok="${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_RUNBOOK_OK:-1}"
 require_signoff_attempted="${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_SIGNOFF_ATTEMPTED:-1}"
 require_signoff_ok="${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_SIGNOFF_OK:-1}"
+require_cohort_signoff_policy="${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_COHORT_SIGNOFF_POLICY:-0}"
 require_summary_json="${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_SUMMARY_JSON:-1}"
 require_summary_status_ok="${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_SUMMARY_STATUS_OK:-1}"
+require_incident_snapshot_on_fail="${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_INCIDENT_SNAPSHOT_ON_FAIL:-1}"
+require_incident_snapshot_artifacts="${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_INCIDENT_SNAPSHOT_ARTIFACTS:-1}"
 max_duration_sec="${PROD_PILOT_COHORT_QUICK_CHECK_MAX_DURATION_SEC:-0}"
 
 warn_go_rate_pct="${PROD_PILOT_COHORT_QUICK_ALERT_WARN_GO_RATE_PCT:-98}"
@@ -175,6 +181,15 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --require-cohort-signoff-policy)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_cohort_signoff_policy="${2:-}"
+        shift 2
+      else
+        require_cohort_signoff_policy="1"
+        shift
+      fi
+      ;;
     --require-summary-json)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         require_summary_json="${2:-}"
@@ -190,6 +205,24 @@ while [[ $# -gt 0 ]]; do
         shift 2
       else
         require_summary_status_ok="1"
+        shift
+      fi
+      ;;
+    --require-incident-snapshot-on-fail)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_incident_snapshot_on_fail="${2:-}"
+        shift 2
+      else
+        require_incident_snapshot_on_fail="1"
+        shift
+      fi
+      ;;
+    --require-incident-snapshot-artifacts)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_incident_snapshot_artifacts="${2:-}"
+        shift 2
+      else
+        require_incident_snapshot_artifacts="1"
         shift
       fi
       ;;
@@ -281,8 +314,11 @@ bool_arg_or_die "--require-status-ok" "$require_status_ok"
 bool_arg_or_die "--require-runbook-ok" "$require_runbook_ok"
 bool_arg_or_die "--require-signoff-attempted" "$require_signoff_attempted"
 bool_arg_or_die "--require-signoff-ok" "$require_signoff_ok"
+bool_arg_or_die "--require-cohort-signoff-policy" "$require_cohort_signoff_policy"
 bool_arg_or_die "--require-summary-json" "$require_summary_json"
 bool_arg_or_die "--require-summary-status-ok" "$require_summary_status_ok"
+bool_arg_or_die "--require-incident-snapshot-on-fail" "$require_incident_snapshot_on_fail"
+bool_arg_or_die "--require-incident-snapshot-artifacts" "$require_incident_snapshot_artifacts"
 bool_arg_or_die "--fail-on-warn" "$fail_on_warn"
 bool_arg_or_die "--fail-on-critical" "$fail_on_critical"
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
@@ -363,8 +399,11 @@ if [[ -z "$trend_summary_json" ]]; then
     --require-runbook-ok "$require_runbook_ok"
     --require-signoff-attempted "$require_signoff_attempted"
     --require-signoff-ok "$require_signoff_ok"
+    --require-cohort-signoff-policy "$require_cohort_signoff_policy"
     --require-summary-json "$require_summary_json"
     --require-summary-status-ok "$require_summary_status_ok"
+    --require-incident-snapshot-on-fail "$require_incident_snapshot_on_fail"
+    --require-incident-snapshot-artifacts "$require_incident_snapshot_artifacts"
     --max-duration-sec "$max_duration_sec"
     --fail-on-any-no-go 0
     --min-go-rate-pct 0
@@ -453,6 +492,7 @@ fi
 
 echo "[prod-pilot-cohort-quick-alert] severity=$severity reports_total=$reports_total go_rate_pct=$go_rate_pct no_go=$no_go_count evaluation_errors=$eval_errors"
 echo "[prod-pilot-cohort-quick-alert] thresholds warn_go_rate_pct=$warn_go_rate_pct critical_go_rate_pct=$critical_go_rate_pct warn_no_go_count=$warn_no_go_count critical_no_go_count=$critical_no_go_count warn_eval_errors=$warn_eval_errors critical_eval_errors=$critical_eval_errors"
+echo "[prod-pilot-cohort-quick-alert] policy require_cohort_signoff_policy=$require_cohort_signoff_policy"
 echo "[prod-pilot-cohort-quick-alert] trend_source=$trend_source trend_summary_json=$trend_summary_json"
 
 if ((${#alert_reasons[@]} > 0)); then
@@ -486,6 +526,7 @@ summary_payload="$(
     --argjson critical_no_go_count "$critical_no_go_count" \
     --argjson warn_eval_errors "$warn_eval_errors" \
     --argjson critical_eval_errors "$critical_eval_errors" \
+    --argjson require_cohort_signoff_policy "$require_cohort_signoff_policy" \
     --argjson fail_on_warn "$fail_on_warn" \
     --argjson fail_on_critical "$fail_on_critical" \
     --argjson show_top_reasons "$show_top_reasons" \
@@ -512,6 +553,7 @@ summary_payload="$(
         critical_eval_errors: $critical_eval_errors
       },
       fail_policy: {
+        require_cohort_signoff_policy: $require_cohort_signoff_policy,
         fail_on_warn: $fail_on_warn,
         fail_on_critical: $fail_on_critical
       },

@@ -113,6 +113,13 @@ Usage:
     [--alert-summary-json PATH] \
     [--trend-min-go-rate-pct N] \
     [--trend-fail-on-any-no-go [0|1]] \
+    [--trend-require-wg-validate-udp-source [0|1]] \
+    [--trend-require-wg-validate-strict-distinct [0|1]] \
+    [--trend-require-wg-soak-diversity-pass [0|1]] \
+    [--trend-min-wg-soak-selection-lines N] \
+    [--trend-min-wg-soak-entry-operators N] \
+    [--trend-min-wg-soak-exit-operators N] \
+    [--trend-min-wg-soak-cross-operator-pairs N] \
     [--trend-max-reports N] \
     [--trend-since-hours N] \
     [--trend-show-top-reasons N] \
@@ -177,6 +184,13 @@ trend_summary_json=""
 alert_summary_json=""
 trend_min_go_rate_pct="${PROD_PILOT_COHORT_TREND_MIN_GO_RATE_PCT:-95}"
 trend_fail_on_any_no_go="${PROD_PILOT_COHORT_TREND_FAIL_ON_ANY_NO_GO:-0}"
+trend_require_wg_validate_udp_source="${PROD_PILOT_COHORT_TREND_REQUIRE_WG_VALIDATE_UDP_SOURCE:-1}"
+trend_require_wg_validate_strict_distinct="${PROD_PILOT_COHORT_TREND_REQUIRE_WG_VALIDATE_STRICT_DISTINCT:-1}"
+trend_require_wg_soak_diversity_pass="${PROD_PILOT_COHORT_TREND_REQUIRE_WG_SOAK_DIVERSITY_PASS:-1}"
+trend_min_wg_soak_selection_lines="${PROD_PILOT_COHORT_TREND_MIN_WG_SOAK_SELECTION_LINES:-12}"
+trend_min_wg_soak_entry_operators="${PROD_PILOT_COHORT_TREND_MIN_WG_SOAK_ENTRY_OPERATORS:-2}"
+trend_min_wg_soak_exit_operators="${PROD_PILOT_COHORT_TREND_MIN_WG_SOAK_EXIT_OPERATORS:-2}"
+trend_min_wg_soak_cross_operator_pairs="${PROD_PILOT_COHORT_TREND_MIN_WG_SOAK_CROSS_OPERATOR_PAIRS:-2}"
 trend_max_reports="${PROD_PILOT_COHORT_TREND_MAX_REPORTS:-0}"
 trend_since_hours="${PROD_PILOT_COHORT_TREND_SINCE_HOURS:-0}"
 trend_show_top_reasons="${PROD_PILOT_COHORT_TREND_SHOW_TOP_REASONS:-5}"
@@ -252,6 +266,49 @@ while [[ $# -gt 0 ]]; do
         trend_fail_on_any_no_go="1"
         shift
       fi
+      ;;
+    --trend-require-wg-validate-udp-source)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        trend_require_wg_validate_udp_source="${2:-}"
+        shift 2
+      else
+        trend_require_wg_validate_udp_source="1"
+        shift
+      fi
+      ;;
+    --trend-require-wg-validate-strict-distinct)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        trend_require_wg_validate_strict_distinct="${2:-}"
+        shift 2
+      else
+        trend_require_wg_validate_strict_distinct="1"
+        shift
+      fi
+      ;;
+    --trend-require-wg-soak-diversity-pass)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        trend_require_wg_soak_diversity_pass="${2:-}"
+        shift 2
+      else
+        trend_require_wg_soak_diversity_pass="1"
+        shift
+      fi
+      ;;
+    --trend-min-wg-soak-selection-lines)
+      trend_min_wg_soak_selection_lines="${2:-}"
+      shift 2
+      ;;
+    --trend-min-wg-soak-entry-operators)
+      trend_min_wg_soak_entry_operators="${2:-}"
+      shift 2
+      ;;
+    --trend-min-wg-soak-exit-operators)
+      trend_min_wg_soak_exit_operators="${2:-}"
+      shift 2
+      ;;
+    --trend-min-wg-soak-cross-operator-pairs)
+      trend_min_wg_soak_cross_operator_pairs="${2:-}"
+      shift 2
       ;;
     --trend-max-reports)
       trend_max_reports="${2:-}"
@@ -353,6 +410,9 @@ done
 bool_or_die "--continue-on-fail" "$continue_on_fail"
 bool_or_die "--require-all-rounds-ok" "$require_all_rounds_ok"
 bool_or_die "--trend-fail-on-any-no-go" "$trend_fail_on_any_no_go"
+bool_or_die "--trend-require-wg-validate-udp-source" "$trend_require_wg_validate_udp_source"
+bool_or_die "--trend-require-wg-validate-strict-distinct" "$trend_require_wg_validate_strict_distinct"
+bool_or_die "--trend-require-wg-soak-diversity-pass" "$trend_require_wg_soak_diversity_pass"
 bool_or_die "--bundle-outputs" "$bundle_outputs"
 bool_or_die "--bundle-fail-close" "$bundle_fail_close"
 bool_or_die "--print-summary-json" "$print_summary_json"
@@ -362,6 +422,10 @@ int_or_die "--pause-sec" "$pause_sec"
 int_or_die "--trend-max-reports" "$trend_max_reports"
 int_or_die "--trend-since-hours" "$trend_since_hours"
 int_or_die "--trend-show-top-reasons" "$trend_show_top_reasons"
+int_or_die "--trend-min-wg-soak-selection-lines" "$trend_min_wg_soak_selection_lines"
+int_or_die "--trend-min-wg-soak-entry-operators" "$trend_min_wg_soak_entry_operators"
+int_or_die "--trend-min-wg-soak-exit-operators" "$trend_min_wg_soak_exit_operators"
+int_or_die "--trend-min-wg-soak-cross-operator-pairs" "$trend_min_wg_soak_cross_operator_pairs"
 int_or_die "--warn-no-go-count" "$warn_no_go_count"
 int_or_die "--critical-no-go-count" "$critical_no_go_count"
 int_or_die "--warn-eval-errors" "$warn_eval_errors"
@@ -525,6 +589,13 @@ if [[ -s "$report_list_file" ]]; then
     --show-top-reasons "$trend_show_top_reasons" \
     --fail-on-any-no-go "$trend_fail_on_any_no_go" \
     --min-go-rate-pct "$trend_min_go_rate_pct" \
+    --require-wg-validate-udp-source "$trend_require_wg_validate_udp_source" \
+    --require-wg-validate-strict-distinct "$trend_require_wg_validate_strict_distinct" \
+    --require-wg-soak-diversity-pass "$trend_require_wg_soak_diversity_pass" \
+    --min-wg-soak-selection-lines "$trend_min_wg_soak_selection_lines" \
+    --min-wg-soak-entry-operators "$trend_min_wg_soak_entry_operators" \
+    --min-wg-soak-exit-operators "$trend_min_wg_soak_exit_operators" \
+    --min-wg-soak-cross-operator-pairs "$trend_min_wg_soak_cross_operator_pairs" \
     --summary-json "$trend_summary_json" \
     --print-summary-json 0
   trend_rc=$?
@@ -534,6 +605,13 @@ if [[ -s "$report_list_file" ]]; then
   set +e
   "$SLO_ALERT_SCRIPT" \
     --trend-summary-json "$trend_summary_json" \
+    --require-wg-validate-udp-source "$trend_require_wg_validate_udp_source" \
+    --require-wg-validate-strict-distinct "$trend_require_wg_validate_strict_distinct" \
+    --require-wg-soak-diversity-pass "$trend_require_wg_soak_diversity_pass" \
+    --min-wg-soak-selection-lines "$trend_min_wg_soak_selection_lines" \
+    --min-wg-soak-entry-operators "$trend_min_wg_soak_entry_operators" \
+    --min-wg-soak-exit-operators "$trend_min_wg_soak_exit_operators" \
+    --min-wg-soak-cross-operator-pairs "$trend_min_wg_soak_cross_operator_pairs" \
     --warn-go-rate-pct "$warn_go_rate_pct" \
     --critical-go-rate-pct "$critical_go_rate_pct" \
     --warn-no-go-count "$warn_no_go_count" \
@@ -719,6 +797,18 @@ jq -nc \
   --argjson stopped_early "$(json_bool "$stopped_early")" \
   --argjson continue_on_fail "$(json_bool "$continue_on_fail")" \
   --argjson require_all_rounds_ok "$(json_bool "$require_all_rounds_ok")" \
+  --argjson trend_fail_on_any_no_go "$(json_bool "$trend_fail_on_any_no_go")" \
+  --argjson trend_require_wg_validate_udp_source "$(json_bool "$trend_require_wg_validate_udp_source")" \
+  --argjson trend_require_wg_validate_strict_distinct "$(json_bool "$trend_require_wg_validate_strict_distinct")" \
+  --argjson trend_require_wg_soak_diversity_pass "$(json_bool "$trend_require_wg_soak_diversity_pass")" \
+  --argjson trend_min_wg_soak_selection_lines "$trend_min_wg_soak_selection_lines" \
+  --argjson trend_min_wg_soak_entry_operators "$trend_min_wg_soak_entry_operators" \
+  --argjson trend_min_wg_soak_exit_operators "$trend_min_wg_soak_exit_operators" \
+  --argjson trend_min_wg_soak_cross_operator_pairs "$trend_min_wg_soak_cross_operator_pairs" \
+  --argjson trend_show_top_reasons "$trend_show_top_reasons" \
+  --argjson trend_max_reports "$trend_max_reports" \
+  --argjson trend_since_hours "$trend_since_hours" \
+  --argjson trend_min_go_rate_pct "$trend_min_go_rate_pct" \
   --argjson trend_rc "$trend_rc" \
   --argjson alert_rc "$alert_rc" \
   --arg max_alert_severity "$max_alert_severity" \
@@ -758,6 +848,18 @@ jq -nc \
     policy:{
       continue_on_fail:$continue_on_fail,
       require_all_rounds_ok:$require_all_rounds_ok,
+      trend_fail_on_any_no_go:$trend_fail_on_any_no_go,
+      trend_require_wg_validate_udp_source:$trend_require_wg_validate_udp_source,
+      trend_require_wg_validate_strict_distinct:$trend_require_wg_validate_strict_distinct,
+      trend_require_wg_soak_diversity_pass:$trend_require_wg_soak_diversity_pass,
+      trend_min_wg_soak_selection_lines:$trend_min_wg_soak_selection_lines,
+      trend_min_wg_soak_entry_operators:$trend_min_wg_soak_entry_operators,
+      trend_min_wg_soak_exit_operators:$trend_min_wg_soak_exit_operators,
+      trend_min_wg_soak_cross_operator_pairs:$trend_min_wg_soak_cross_operator_pairs,
+      trend_show_top_reasons:$trend_show_top_reasons,
+      trend_max_reports:$trend_max_reports,
+      trend_since_hours:$trend_since_hours,
+      trend_min_go_rate_pct:$trend_min_go_rate_pct,
       max_alert_severity:$max_alert_severity,
       bundle_outputs:$bundle_outputs,
       bundle_fail_close:$bundle_fail_close

@@ -23,6 +23,14 @@ Usage:
     [--require-all-rounds-ok [0|1]] \
     [--max-round-failures N] \
     [--require-trend-go [0|1]] \
+    [--require-trend-artifact-policy-match [0|1]] \
+    [--require-trend-wg-validate-udp-source [0|1]] \
+    [--require-trend-wg-validate-strict-distinct [0|1]] \
+    [--require-trend-wg-soak-diversity-pass [0|1]] \
+    [--min-trend-wg-soak-selection-lines N] \
+    [--min-trend-wg-soak-entry-operators N] \
+    [--min-trend-wg-soak-exit-operators N] \
+    [--min-trend-wg-soak-cross-operator-pairs N] \
     [--min-go-rate-pct N] \
     [--max-alert-severity OK|WARN|CRITICAL] \
     [--require-bundle-created [0|1]] \
@@ -50,6 +58,14 @@ require_status_ok="${PROD_PILOT_COHORT_SIGNOFF_REQUIRE_STATUS_OK:-1}"
 require_all_rounds_ok="${PROD_PILOT_COHORT_SIGNOFF_REQUIRE_ALL_ROUNDS_OK:-1}"
 max_round_failures="${PROD_PILOT_COHORT_SIGNOFF_MAX_ROUND_FAILURES:-0}"
 require_trend_go="${PROD_PILOT_COHORT_SIGNOFF_REQUIRE_TREND_GO:-1}"
+require_trend_artifact_policy_match="${PROD_PILOT_COHORT_SIGNOFF_REQUIRE_TREND_ARTIFACT_POLICY_MATCH:-1}"
+require_trend_wg_validate_udp_source="${PROD_PILOT_COHORT_SIGNOFF_REQUIRE_TREND_WG_VALIDATE_UDP_SOURCE:-1}"
+require_trend_wg_validate_strict_distinct="${PROD_PILOT_COHORT_SIGNOFF_REQUIRE_TREND_WG_VALIDATE_STRICT_DISTINCT:-1}"
+require_trend_wg_soak_diversity_pass="${PROD_PILOT_COHORT_SIGNOFF_REQUIRE_TREND_WG_SOAK_DIVERSITY_PASS:-1}"
+min_trend_wg_soak_selection_lines="${PROD_PILOT_COHORT_SIGNOFF_MIN_TREND_WG_SOAK_SELECTION_LINES:-12}"
+min_trend_wg_soak_entry_operators="${PROD_PILOT_COHORT_SIGNOFF_MIN_TREND_WG_SOAK_ENTRY_OPERATORS:-2}"
+min_trend_wg_soak_exit_operators="${PROD_PILOT_COHORT_SIGNOFF_MIN_TREND_WG_SOAK_EXIT_OPERATORS:-2}"
+min_trend_wg_soak_cross_operator_pairs="${PROD_PILOT_COHORT_SIGNOFF_MIN_TREND_WG_SOAK_CROSS_OPERATOR_PAIRS:-2}"
 min_go_rate_pct="${PROD_PILOT_COHORT_SIGNOFF_MIN_GO_RATE_PCT:-95}"
 max_alert_severity="${PROD_PILOT_COHORT_SIGNOFF_MAX_ALERT_SEVERITY:-WARN}"
 require_bundle_created="${PROD_PILOT_COHORT_SIGNOFF_REQUIRE_BUNDLE_CREATED:-1}"
@@ -137,6 +153,58 @@ while [[ $# -gt 0 ]]; do
         require_trend_go="1"
         shift
       fi
+      ;;
+    --require-trend-artifact-policy-match)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_trend_artifact_policy_match="${2:-}"
+        shift 2
+      else
+        require_trend_artifact_policy_match="1"
+        shift
+      fi
+      ;;
+    --require-trend-wg-validate-udp-source)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_trend_wg_validate_udp_source="${2:-}"
+        shift 2
+      else
+        require_trend_wg_validate_udp_source="1"
+        shift
+      fi
+      ;;
+    --require-trend-wg-validate-strict-distinct)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_trend_wg_validate_strict_distinct="${2:-}"
+        shift 2
+      else
+        require_trend_wg_validate_strict_distinct="1"
+        shift
+      fi
+      ;;
+    --require-trend-wg-soak-diversity-pass)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_trend_wg_soak_diversity_pass="${2:-}"
+        shift 2
+      else
+        require_trend_wg_soak_diversity_pass="1"
+        shift
+      fi
+      ;;
+    --min-trend-wg-soak-selection-lines)
+      min_trend_wg_soak_selection_lines="${2:-}"
+      shift 2
+      ;;
+    --min-trend-wg-soak-entry-operators)
+      min_trend_wg_soak_entry_operators="${2:-}"
+      shift 2
+      ;;
+    --min-trend-wg-soak-exit-operators)
+      min_trend_wg_soak_exit_operators="${2:-}"
+      shift 2
+      ;;
+    --min-trend-wg-soak-cross-operator-pairs)
+      min_trend_wg_soak_cross_operator_pairs="${2:-}"
+      shift 2
       ;;
     --min-go-rate-pct)
       min_go_rate_pct="${2:-}"
@@ -238,6 +306,14 @@ declare -a check_args=(
   --require-all-rounds-ok "$require_all_rounds_ok"
   --max-round-failures "$max_round_failures"
   --require-trend-go "$require_trend_go"
+  --require-trend-artifact-policy-match "$require_trend_artifact_policy_match"
+  --require-trend-wg-validate-udp-source "$require_trend_wg_validate_udp_source"
+  --require-trend-wg-validate-strict-distinct "$require_trend_wg_validate_strict_distinct"
+  --require-trend-wg-soak-diversity-pass "$require_trend_wg_soak_diversity_pass"
+  --min-trend-wg-soak-selection-lines "$min_trend_wg_soak_selection_lines"
+  --min-trend-wg-soak-entry-operators "$min_trend_wg_soak_entry_operators"
+  --min-trend-wg-soak-exit-operators "$min_trend_wg_soak_exit_operators"
+  --min-trend-wg-soak-cross-operator-pairs "$min_trend_wg_soak_cross_operator_pairs"
   --min-go-rate-pct "$min_go_rate_pct"
   --max-alert-severity "$max_alert_severity"
   --require-bundle-created "$require_bundle_created"

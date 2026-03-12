@@ -166,6 +166,34 @@ if ! rg -q 'go_rate_pct=66.67' /tmp/integration_prod_pilot_cohort_quick_trend_fa
   exit 1
 fi
 
+echo "[prod-pilot-cohort-quick-trend] strict cohort-signoff policy forwarding"
+FAKE_QUICK_CHECK="$TMP_DIR/fake_quick_check_for_trend.sh"
+CHECK_CAPTURE="$TMP_DIR/quick_check_trend_capture.log"
+cat >"$FAKE_QUICK_CHECK" <<'EOF_FAKE_QUICK_CHECK'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >>"${CHECK_CAPTURE_FILE:?}"
+echo "[prod-pilot-cohort-quick-check] run_report_json=${1:-unknown}"
+echo "[prod-pilot-cohort-quick-check] decision=GO status=ok runbook_rc=0 signoff_attempted=true signoff_rc=0 duration_sec=1"
+echo "[prod-pilot-cohort-quick-check] ok"
+exit 0
+EOF_FAKE_QUICK_CHECK
+chmod +x "$FAKE_QUICK_CHECK"
+
+CHECK_CAPTURE_FILE="$CHECK_CAPTURE" \
+PROD_PILOT_COHORT_QUICK_CHECK_SCRIPT="$FAKE_QUICK_CHECK" \
+./scripts/prod_pilot_cohort_quick_trend.sh \
+  --reports-dir "$REPORTS_DIR" \
+  --max-reports 1 \
+  --require-cohort-signoff-policy 1 \
+  --show-details 0 >/tmp/integration_prod_pilot_cohort_quick_trend_cohort_policy.log 2>&1
+
+if ! rg -q -- '--require-cohort-signoff-policy 1' "$CHECK_CAPTURE"; then
+  echo "quick-trend forwarding failed: missing --require-cohort-signoff-policy 1 to quick-check"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+
 cat >"$TMP_BIN/docker" <<'EOF_DOCKER'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -205,6 +233,7 @@ PROD_PILOT_COHORT_QUICK_TREND_SCRIPT="$FAKE_TREND" \
   --reports-dir /tmp/reports \
   --max-reports 10 \
   --since-hours 24 \
+  --require-cohort-signoff-policy 1 \
   --summary-json /tmp/quick_trend.json \
   --print-summary-json 1 \
   --fail-on-any-no-go 1 \
@@ -233,6 +262,11 @@ if ! rg -q -- '--since-hours 24' "$CAPTURE"; then
 fi
 if ! rg -q -- '--summary-json /tmp/quick_trend.json' "$CAPTURE"; then
   echo "easy_node quick-trend forwarding failed: missing --summary-json"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-cohort-signoff-policy 1' "$CAPTURE"; then
+  echo "easy_node quick-trend forwarding failed: missing --require-cohort-signoff-policy"
   cat "$CAPTURE"
   exit 1
 fi

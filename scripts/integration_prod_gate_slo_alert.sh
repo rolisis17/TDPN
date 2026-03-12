@@ -72,6 +72,11 @@ if ! jq -e '.severity == "OK" and .metrics.reports_total == 8' "$TMP_DIR/alert_o
   cat "$TMP_DIR/alert_ok_out.json"
   exit 1
 fi
+if ! jq -e '.wg_evidence_policy.require_wg_validate_udp_source == 0 and .wg_evidence_policy.require_wg_validate_strict_distinct == 0 and .wg_evidence_policy.require_wg_soak_diversity_pass == 0 and .wg_evidence_policy.min_wg_soak_selection_lines == 0 and .wg_evidence_policy.min_wg_soak_entry_operators == 0 and .wg_evidence_policy.min_wg_soak_exit_operators == 0 and .wg_evidence_policy.min_wg_soak_cross_operator_pairs == 0' "$TMP_DIR/alert_ok_out.json" >/dev/null 2>&1; then
+  echo "alert OK summary JSON missing expected WG evidence policy defaults"
+  cat "$TMP_DIR/alert_ok_out.json"
+  exit 1
+fi
 
 echo "[prod-gate-slo-alert] WARN severity baseline"
 ./scripts/prod_gate_slo_alert.sh \
@@ -168,6 +173,13 @@ PROD_GATE_SLO_TREND_SCRIPT="$FAKE_TREND" \
   --require-signoff-ok 1 \
   --require-incident-snapshot-on-fail 1 \
   --require-incident-snapshot-artifacts 1 \
+  --require-wg-validate-udp-source 1 \
+  --require-wg-validate-strict-distinct 1 \
+  --require-wg-soak-diversity-pass 1 \
+  --min-wg-soak-selection-lines 8 \
+  --min-wg-soak-entry-operators 2 \
+  --min-wg-soak-exit-operators 2 \
+  --min-wg-soak-cross-operator-pairs 1 \
   --show-top-reasons 3 >/tmp/integration_prod_gate_slo_alert_generated.log 2>&1
 
 if ! rg -q -- '--reports-dir /tmp/prod_reports' "$TREND_CAPTURE"; then
@@ -200,6 +212,41 @@ if ! rg -q -- '--require-incident-snapshot-artifacts 1' "$TREND_CAPTURE"; then
   cat "$TREND_CAPTURE"
   exit 1
 fi
+if ! rg -q -- '--require-wg-validate-udp-source 1' "$TREND_CAPTURE"; then
+  echo "alert-generated trend failed: missing --require-wg-validate-udp-source forwarding"
+  cat "$TREND_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-wg-validate-strict-distinct 1' "$TREND_CAPTURE"; then
+  echo "alert-generated trend failed: missing --require-wg-validate-strict-distinct forwarding"
+  cat "$TREND_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-wg-soak-diversity-pass 1' "$TREND_CAPTURE"; then
+  echo "alert-generated trend failed: missing --require-wg-soak-diversity-pass forwarding"
+  cat "$TREND_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-wg-soak-selection-lines 8' "$TREND_CAPTURE"; then
+  echo "alert-generated trend failed: missing --min-wg-soak-selection-lines forwarding"
+  cat "$TREND_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-wg-soak-entry-operators 2' "$TREND_CAPTURE"; then
+  echo "alert-generated trend failed: missing --min-wg-soak-entry-operators forwarding"
+  cat "$TREND_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-wg-soak-exit-operators 2' "$TREND_CAPTURE"; then
+  echo "alert-generated trend failed: missing --min-wg-soak-exit-operators forwarding"
+  cat "$TREND_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-wg-soak-cross-operator-pairs 1' "$TREND_CAPTURE"; then
+  echo "alert-generated trend failed: missing --min-wg-soak-cross-operator-pairs forwarding"
+  cat "$TREND_CAPTURE"
+  exit 1
+fi
 if ! rg -q -- '--print-summary-json 0' "$TREND_CAPTURE"; then
   echo "alert-generated trend failed: missing print-summary-json forwarding"
   cat "$TREND_CAPTURE"
@@ -224,6 +271,13 @@ PROD_GATE_SLO_ALERT_SCRIPT="$FAKE_ALERT" \
   --since-hours 12 \
   --require-incident-snapshot-on-fail 1 \
   --require-incident-snapshot-artifacts 1 \
+  --require-wg-validate-udp-source 1 \
+  --require-wg-validate-strict-distinct 1 \
+  --require-wg-soak-diversity-pass 1 \
+  --min-wg-soak-selection-lines 8 \
+  --min-wg-soak-entry-operators 2 \
+  --min-wg-soak-exit-operators 2 \
+  --min-wg-soak-cross-operator-pairs 1 \
   --warn-go-rate-pct 99 \
   --critical-go-rate-pct 95 \
   --fail-on-warn 1 \
@@ -257,6 +311,41 @@ if ! rg -q -- '--require-incident-snapshot-on-fail 1' "$ALERT_CAPTURE"; then
 fi
 if ! rg -q -- '--require-incident-snapshot-artifacts 1' "$ALERT_CAPTURE"; then
   echo "easy_node prod-gate-slo-alert forwarding failed: missing --require-incident-snapshot-artifacts"
+  cat "$ALERT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-wg-validate-udp-source 1' "$ALERT_CAPTURE"; then
+  echo "easy_node prod-gate-slo-alert forwarding failed: missing --require-wg-validate-udp-source"
+  cat "$ALERT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-wg-validate-strict-distinct 1' "$ALERT_CAPTURE"; then
+  echo "easy_node prod-gate-slo-alert forwarding failed: missing --require-wg-validate-strict-distinct"
+  cat "$ALERT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-wg-soak-diversity-pass 1' "$ALERT_CAPTURE"; then
+  echo "easy_node prod-gate-slo-alert forwarding failed: missing --require-wg-soak-diversity-pass"
+  cat "$ALERT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-wg-soak-selection-lines 8' "$ALERT_CAPTURE"; then
+  echo "easy_node prod-gate-slo-alert forwarding failed: missing --min-wg-soak-selection-lines"
+  cat "$ALERT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-wg-soak-entry-operators 2' "$ALERT_CAPTURE"; then
+  echo "easy_node prod-gate-slo-alert forwarding failed: missing --min-wg-soak-entry-operators"
+  cat "$ALERT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-wg-soak-exit-operators 2' "$ALERT_CAPTURE"; then
+  echo "easy_node prod-gate-slo-alert forwarding failed: missing --min-wg-soak-exit-operators"
+  cat "$ALERT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-wg-soak-cross-operator-pairs 1' "$ALERT_CAPTURE"; then
+  echo "easy_node prod-gate-slo-alert forwarding failed: missing --min-wg-soak-cross-operator-pairs"
   cat "$ALERT_CAPTURE"
   exit 1
 fi

@@ -29,7 +29,19 @@ MANIFEST_JSON="$REPORTS_DIR/prod_pilot_cohort_bundle_manifest.json"
 SUMMARY_JSON="$REPORTS_DIR/prod_pilot_cohort_summary.json"
 
 cat >"$TREND_JSON" <<'EOF_TREND'
-{"decision":"GO","go_rate_pct":100}
+{
+  "decision":"GO",
+  "go_rate_pct":100,
+  "policy":{
+    "require_wg_validate_udp_source":1,
+    "require_wg_validate_strict_distinct":1,
+    "require_wg_soak_diversity_pass":1,
+    "min_wg_soak_selection_lines":12,
+    "min_wg_soak_entry_operators":2,
+    "min_wg_soak_exit_operators":2,
+    "min_wg_soak_cross_operator_pairs":2
+  }
+}
 EOF_TREND
 cat >"$ALERT_JSON" <<'EOF_ALERT'
 {"severity":"OK"}
@@ -46,6 +58,15 @@ cat >"$SUMMARY_JSON" <<EOF_SUMMARY
   "trend":{"rc":0,"go_rate_pct":"100.00"},
   "alert":{"rc":0,"severity":"OK","policy_violation":false},
   "bundle":{"created":true,"rc":0,"manifest_created":true},
+  "policy":{
+    "trend_require_wg_validate_udp_source":true,
+    "trend_require_wg_validate_strict_distinct":true,
+    "trend_require_wg_soak_diversity_pass":true,
+    "trend_min_wg_soak_selection_lines":12,
+    "trend_min_wg_soak_entry_operators":2,
+    "trend_min_wg_soak_exit_operators":2,
+    "trend_min_wg_soak_cross_operator_pairs":2
+  },
   "artifacts":{
     "trend_summary_json":"$TREND_JSON",
     "bundle_manifest_json":"$MANIFEST_JSON"
@@ -79,7 +100,19 @@ fi
 
 echo "[prod-pilot-cohort-check] trend decision fail"
 cat >"$TREND_JSON" <<'EOF_TREND_FAIL'
-{"decision":"NO-GO","go_rate_pct":66.67}
+{
+  "decision":"NO-GO",
+  "go_rate_pct":66.67,
+  "policy":{
+    "require_wg_validate_udp_source":1,
+    "require_wg_validate_strict_distinct":1,
+    "require_wg_soak_diversity_pass":1,
+    "min_wg_soak_selection_lines":12,
+    "min_wg_soak_entry_operators":2,
+    "min_wg_soak_exit_operators":2,
+    "min_wg_soak_cross_operator_pairs":2
+  }
+}
 EOF_TREND_FAIL
 set +e
 ./scripts/prod_pilot_cohort_check.sh \
@@ -97,8 +130,71 @@ if ! rg -q 'trend decision is not GO' /tmp/integration_prod_pilot_cohort_check_b
   exit 1
 fi
 
+echo "[prod-pilot-cohort-check] strict trend policy fail"
+STRICT_POLICY_FAIL_SUMMARY="$TMP_DIR/summary_strict_policy_fail.json"
+jq '.policy.trend_require_wg_validate_udp_source=false' "$SUMMARY_JSON" >"$STRICT_POLICY_FAIL_SUMMARY"
+set +e
+./scripts/prod_pilot_cohort_check.sh \
+  --summary-json "$STRICT_POLICY_FAIL_SUMMARY" >/tmp/integration_prod_pilot_cohort_check_strict_policy_fail.log 2>&1
+strict_policy_fail_rc=$?
+set -e
+if [[ "$strict_policy_fail_rc" -eq 0 ]]; then
+  echo "expected non-zero rc for strict trend policy failure"
+  cat /tmp/integration_prod_pilot_cohort_check_strict_policy_fail.log
+  exit 1
+fi
+if ! rg -q 'missing strict wg validate udp-source requirement' /tmp/integration_prod_pilot_cohort_check_strict_policy_fail.log; then
+  echo "expected strict trend policy failure signal not found"
+  cat /tmp/integration_prod_pilot_cohort_check_strict_policy_fail.log
+  exit 1
+fi
+
+echo "[prod-pilot-cohort-check] strict trend artifact policy fail"
+cat >"$TREND_JSON" <<'EOF_TREND_ARTIFACT_FAIL'
+{
+  "decision":"GO",
+  "go_rate_pct":100,
+  "policy":{
+    "require_wg_validate_udp_source":0,
+    "require_wg_validate_strict_distinct":1,
+    "require_wg_soak_diversity_pass":1,
+    "min_wg_soak_selection_lines":12,
+    "min_wg_soak_entry_operators":2,
+    "min_wg_soak_exit_operators":2,
+    "min_wg_soak_cross_operator_pairs":2
+  }
+}
+EOF_TREND_ARTIFACT_FAIL
+set +e
+./scripts/prod_pilot_cohort_check.sh \
+  --summary-json "$SUMMARY_JSON" >/tmp/integration_prod_pilot_cohort_check_strict_artifact_policy_fail.log 2>&1
+strict_artifact_policy_fail_rc=$?
+set -e
+if [[ "$strict_artifact_policy_fail_rc" -eq 0 ]]; then
+  echo "expected non-zero rc for strict trend artifact policy failure"
+  cat /tmp/integration_prod_pilot_cohort_check_strict_artifact_policy_fail.log
+  exit 1
+fi
+if ! rg -q 'trend summary policy missing strict wg validate udp-source requirement' /tmp/integration_prod_pilot_cohort_check_strict_artifact_policy_fail.log; then
+  echo "expected strict trend artifact policy failure signal not found"
+  cat /tmp/integration_prod_pilot_cohort_check_strict_artifact_policy_fail.log
+  exit 1
+fi
+
 cat >"$TREND_JSON" <<'EOF_TREND'
-{"decision":"GO","go_rate_pct":100}
+{
+  "decision":"GO",
+  "go_rate_pct":100,
+  "policy":{
+    "require_wg_validate_udp_source":1,
+    "require_wg_validate_strict_distinct":1,
+    "require_wg_soak_diversity_pass":1,
+    "min_wg_soak_selection_lines":12,
+    "min_wg_soak_entry_operators":2,
+    "min_wg_soak_exit_operators":2,
+    "min_wg_soak_cross_operator_pairs":2
+  }
+}
 EOF_TREND
 
 echo "[prod-pilot-cohort-check] incident snapshot policy fail on failed round"
@@ -218,6 +314,9 @@ PROD_PILOT_COHORT_CHECK_SCRIPT="$FAKE_CHECK" \
 ./scripts/easy_node.sh prod-pilot-cohort-check \
   --summary-json /tmp/cohort/summary.json \
   --max-alert-severity OK \
+  --require-trend-artifact-policy-match 1 \
+  --require-trend-wg-validate-udp-source 1 \
+  --min-trend-wg-soak-selection-lines 12 \
   --require-incident-snapshot-on-fail 0 \
   --require-incident-snapshot-artifacts 0 \
   --show-json 1 >/tmp/integration_prod_pilot_cohort_check_easy_node.log 2>&1
@@ -229,6 +328,21 @@ if ! rg -q -- '--summary-json /tmp/cohort/summary.json' "$CHECK_CAPTURE"; then
 fi
 if ! rg -q -- '--max-alert-severity OK' "$CHECK_CAPTURE"; then
   echo "easy_node cohort check forwarding failed: missing --max-alert-severity"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-trend-wg-validate-udp-source 1' "$CHECK_CAPTURE"; then
+  echo "easy_node cohort check forwarding failed: missing --require-trend-wg-validate-udp-source"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-trend-artifact-policy-match 1' "$CHECK_CAPTURE"; then
+  echo "easy_node cohort check forwarding failed: missing --require-trend-artifact-policy-match"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-trend-wg-soak-selection-lines 12' "$CHECK_CAPTURE"; then
+  echo "easy_node cohort check forwarding failed: missing --min-trend-wg-soak-selection-lines"
   cat "$CHECK_CAPTURE"
   exit 1
 fi

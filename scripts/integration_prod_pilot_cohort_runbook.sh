@@ -223,8 +223,78 @@ if ! rg -q -- '--run-report-list ' "$TREND_CAPTURE"; then
   cat "$TREND_CAPTURE"
   exit 1
 fi
+if ! rg -q -- '--require-wg-validate-udp-source 1' "$TREND_CAPTURE"; then
+  echo "prod-pilot-cohort success path missing trend --require-wg-validate-udp-source 1"
+  cat "$TREND_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-wg-validate-strict-distinct 1' "$TREND_CAPTURE"; then
+  echo "prod-pilot-cohort success path missing trend --require-wg-validate-strict-distinct 1"
+  cat "$TREND_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-wg-soak-diversity-pass 1' "$TREND_CAPTURE"; then
+  echo "prod-pilot-cohort success path missing trend --require-wg-soak-diversity-pass 1"
+  cat "$TREND_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-wg-soak-selection-lines 12' "$TREND_CAPTURE"; then
+  echo "prod-pilot-cohort success path missing trend --min-wg-soak-selection-lines 12"
+  cat "$TREND_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-wg-soak-entry-operators 2' "$TREND_CAPTURE"; then
+  echo "prod-pilot-cohort success path missing trend --min-wg-soak-entry-operators 2"
+  cat "$TREND_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-wg-soak-exit-operators 2' "$TREND_CAPTURE"; then
+  echo "prod-pilot-cohort success path missing trend --min-wg-soak-exit-operators 2"
+  cat "$TREND_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-wg-soak-cross-operator-pairs 2' "$TREND_CAPTURE"; then
+  echo "prod-pilot-cohort success path missing trend --min-wg-soak-cross-operator-pairs 2"
+  cat "$TREND_CAPTURE"
+  exit 1
+fi
 if ! rg -q -- '--trend-summary-json ' "$ALERT_CAPTURE"; then
   echo "prod-pilot-cohort success path missing alert trend-summary-json input"
+  cat "$ALERT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-wg-validate-udp-source 1' "$ALERT_CAPTURE"; then
+  echo "prod-pilot-cohort success path missing alert --require-wg-validate-udp-source 1"
+  cat "$ALERT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-wg-validate-strict-distinct 1' "$ALERT_CAPTURE"; then
+  echo "prod-pilot-cohort success path missing alert --require-wg-validate-strict-distinct 1"
+  cat "$ALERT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-wg-soak-diversity-pass 1' "$ALERT_CAPTURE"; then
+  echo "prod-pilot-cohort success path missing alert --require-wg-soak-diversity-pass 1"
+  cat "$ALERT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-wg-soak-selection-lines 12' "$ALERT_CAPTURE"; then
+  echo "prod-pilot-cohort success path missing alert --min-wg-soak-selection-lines 12"
+  cat "$ALERT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-wg-soak-entry-operators 2' "$ALERT_CAPTURE"; then
+  echo "prod-pilot-cohort success path missing alert --min-wg-soak-entry-operators 2"
+  cat "$ALERT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-wg-soak-exit-operators 2' "$ALERT_CAPTURE"; then
+  echo "prod-pilot-cohort success path missing alert --min-wg-soak-exit-operators 2"
+  cat "$ALERT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-wg-soak-cross-operator-pairs 2' "$ALERT_CAPTURE"; then
+  echo "prod-pilot-cohort success path missing alert --min-wg-soak-cross-operator-pairs 2"
   cat "$ALERT_CAPTURE"
   exit 1
 fi

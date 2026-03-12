@@ -54,6 +54,9 @@ PROD_PILOT_COHORT_CHECK_SCRIPT="$FAKE_CHECK" \
   --summary-json /tmp/cohort/summary.json \
   --check-manifest 0 \
   --max-alert-severity OK \
+  --require-trend-artifact-policy-match 1 \
+  --require-trend-wg-validate-udp-source 1 \
+  --min-trend-wg-soak-selection-lines 12 \
   --require-incident-snapshot-on-fail 0 \
   --require-incident-snapshot-artifacts 0 \
   --show-json 1 >/tmp/integration_prod_pilot_cohort_signoff_pass.log 2>&1
@@ -85,6 +88,21 @@ if ! rg -q -- '--require-incident-snapshot-on-fail 0' "$CHECK_CAPTURE"; then
 fi
 if ! rg -q -- '--require-incident-snapshot-artifacts 0' "$CHECK_CAPTURE"; then
   echo "signoff check forwarding missing --require-incident-snapshot-artifacts"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-trend-wg-validate-udp-source 1' "$CHECK_CAPTURE"; then
+  echo "signoff check forwarding missing --require-trend-wg-validate-udp-source"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-trend-artifact-policy-match 1' "$CHECK_CAPTURE"; then
+  echo "signoff check forwarding missing --require-trend-artifact-policy-match"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-trend-wg-soak-selection-lines 12' "$CHECK_CAPTURE"; then
+  echo "signoff check forwarding missing --min-trend-wg-soak-selection-lines"
   cat "$CHECK_CAPTURE"
   exit 1
 fi
@@ -168,6 +186,9 @@ PROD_PILOT_COHORT_SIGNOFF_SCRIPT="$FAKE_SIGNOFF" \
   --summary-json /tmp/cohort/summary.json \
   --check-manifest 0 \
   --max-alert-severity OK \
+  --require-trend-artifact-policy-match 1 \
+  --require-trend-wg-validate-udp-source 1 \
+  --min-trend-wg-soak-selection-lines 12 \
   --require-incident-snapshot-on-fail 0 \
   --require-incident-snapshot-artifacts 0 \
   --show-json 1 >/tmp/integration_prod_pilot_cohort_signoff_easy_node.log 2>&1
@@ -184,6 +205,21 @@ if ! rg -q -- '--check-manifest 0' "$SIGNOFF_FORWARD_CAPTURE"; then
 fi
 if ! rg -q -- '--max-alert-severity OK' "$SIGNOFF_FORWARD_CAPTURE"; then
   echo "easy_node cohort signoff forwarding failed: missing --max-alert-severity"
+  cat "$SIGNOFF_FORWARD_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-trend-wg-validate-udp-source 1' "$SIGNOFF_FORWARD_CAPTURE"; then
+  echo "easy_node cohort signoff forwarding failed: missing --require-trend-wg-validate-udp-source"
+  cat "$SIGNOFF_FORWARD_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-trend-artifact-policy-match 1' "$SIGNOFF_FORWARD_CAPTURE"; then
+  echo "easy_node cohort signoff forwarding failed: missing --require-trend-artifact-policy-match"
+  cat "$SIGNOFF_FORWARD_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-trend-wg-soak-selection-lines 12' "$SIGNOFF_FORWARD_CAPTURE"; then
+  echo "easy_node cohort signoff forwarding failed: missing --min-trend-wg-soak-selection-lines"
   cat "$SIGNOFF_FORWARD_CAPTURE"
   exit 1
 fi

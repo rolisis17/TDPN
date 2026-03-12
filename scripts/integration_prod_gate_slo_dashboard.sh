@@ -127,6 +127,13 @@ PROD_GATE_SLO_ALERT_SCRIPT="$FAKE_ALERT" \
   --require-signoff-ok 1 \
   --require-incident-snapshot-on-fail 1 \
   --require-incident-snapshot-artifacts 1 \
+  --require-wg-validate-udp-source 1 \
+  --require-wg-validate-strict-distinct 1 \
+  --require-wg-soak-diversity-pass 1 \
+  --min-wg-soak-selection-lines 8 \
+  --min-wg-soak-entry-operators 2 \
+  --min-wg-soak-exit-operators 2 \
+  --min-wg-soak-cross-operator-pairs 1 \
   --min-go-rate-pct 95 \
   --show-top-reasons 3 \
   --warn-go-rate-pct 98 \
@@ -168,6 +175,41 @@ if ! rg -q -- '--require-incident-snapshot-artifacts 1' "$TREND_CAPTURE"; then
   cat "$TREND_CAPTURE"
   exit 1
 fi
+if ! rg -q -- '--require-wg-validate-udp-source 1' "$TREND_CAPTURE"; then
+  echo "dashboard did not forward --require-wg-validate-udp-source to trend script"
+  cat "$TREND_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-wg-validate-strict-distinct 1' "$TREND_CAPTURE"; then
+  echo "dashboard did not forward --require-wg-validate-strict-distinct to trend script"
+  cat "$TREND_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-wg-soak-diversity-pass 1' "$TREND_CAPTURE"; then
+  echo "dashboard did not forward --require-wg-soak-diversity-pass to trend script"
+  cat "$TREND_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-wg-soak-selection-lines 8' "$TREND_CAPTURE"; then
+  echo "dashboard did not forward --min-wg-soak-selection-lines to trend script"
+  cat "$TREND_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-wg-soak-entry-operators 2' "$TREND_CAPTURE"; then
+  echo "dashboard did not forward --min-wg-soak-entry-operators to trend script"
+  cat "$TREND_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-wg-soak-exit-operators 2' "$TREND_CAPTURE"; then
+  echo "dashboard did not forward --min-wg-soak-exit-operators to trend script"
+  cat "$TREND_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-wg-soak-cross-operator-pairs 1' "$TREND_CAPTURE"; then
+  echo "dashboard did not forward --min-wg-soak-cross-operator-pairs to trend script"
+  cat "$TREND_CAPTURE"
+  exit 1
+fi
 if ! rg -q -- "--trend-summary-json $TREND_JSON" "$ALERT_CAPTURE"; then
   echo "dashboard did not forward trend summary path to alert script"
   cat "$ALERT_CAPTURE"
@@ -180,6 +222,41 @@ if ! rg -q -- '--require-incident-snapshot-on-fail 1' "$ALERT_CAPTURE"; then
 fi
 if ! rg -q -- '--require-incident-snapshot-artifacts 1' "$ALERT_CAPTURE"; then
   echo "dashboard did not forward --require-incident-snapshot-artifacts to alert script"
+  cat "$ALERT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-wg-validate-udp-source 1' "$ALERT_CAPTURE"; then
+  echo "dashboard did not forward --require-wg-validate-udp-source to alert script"
+  cat "$ALERT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-wg-validate-strict-distinct 1' "$ALERT_CAPTURE"; then
+  echo "dashboard did not forward --require-wg-validate-strict-distinct to alert script"
+  cat "$ALERT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-wg-soak-diversity-pass 1' "$ALERT_CAPTURE"; then
+  echo "dashboard did not forward --require-wg-soak-diversity-pass to alert script"
+  cat "$ALERT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-wg-soak-selection-lines 8' "$ALERT_CAPTURE"; then
+  echo "dashboard did not forward --min-wg-soak-selection-lines to alert script"
+  cat "$ALERT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-wg-soak-entry-operators 2' "$ALERT_CAPTURE"; then
+  echo "dashboard did not forward --min-wg-soak-entry-operators to alert script"
+  cat "$ALERT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-wg-soak-exit-operators 2' "$ALERT_CAPTURE"; then
+  echo "dashboard did not forward --min-wg-soak-exit-operators to alert script"
+  cat "$ALERT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-wg-soak-cross-operator-pairs 1' "$ALERT_CAPTURE"; then
+  echo "dashboard did not forward --min-wg-soak-cross-operator-pairs to alert script"
   cat "$ALERT_CAPTURE"
   exit 1
 fi
@@ -268,6 +345,13 @@ PROD_GATE_SLO_DASHBOARD_SCRIPT="$FAKE_EASY_NODE_DASHBOARD" \
   --since-hours 12 \
   --require-incident-snapshot-on-fail 1 \
   --require-incident-snapshot-artifacts 1 \
+  --require-wg-validate-udp-source 1 \
+  --require-wg-validate-strict-distinct 1 \
+  --require-wg-soak-diversity-pass 1 \
+  --min-wg-soak-selection-lines 8 \
+  --min-wg-soak-entry-operators 2 \
+  --min-wg-soak-exit-operators 2 \
+  --min-wg-soak-cross-operator-pairs 1 \
   --dashboard-md /tmp/prod_dashboard.md >/tmp/integration_prod_gate_slo_dashboard_easy_node.log 2>&1
 
 if ! rg -q -- '--reports-dir /tmp/prod_reports' "$EASY_NODE_DASHBOARD_CAPTURE"; then
@@ -287,6 +371,41 @@ if ! rg -q -- '--require-incident-snapshot-on-fail 1' "$EASY_NODE_DASHBOARD_CAPT
 fi
 if ! rg -q -- '--require-incident-snapshot-artifacts 1' "$EASY_NODE_DASHBOARD_CAPTURE"; then
   echo "easy-node prod-gate-slo-dashboard forwarding missing --require-incident-snapshot-artifacts"
+  cat "$EASY_NODE_DASHBOARD_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-wg-validate-udp-source 1' "$EASY_NODE_DASHBOARD_CAPTURE"; then
+  echo "easy-node prod-gate-slo-dashboard forwarding missing --require-wg-validate-udp-source"
+  cat "$EASY_NODE_DASHBOARD_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-wg-validate-strict-distinct 1' "$EASY_NODE_DASHBOARD_CAPTURE"; then
+  echo "easy-node prod-gate-slo-dashboard forwarding missing --require-wg-validate-strict-distinct"
+  cat "$EASY_NODE_DASHBOARD_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-wg-soak-diversity-pass 1' "$EASY_NODE_DASHBOARD_CAPTURE"; then
+  echo "easy-node prod-gate-slo-dashboard forwarding missing --require-wg-soak-diversity-pass"
+  cat "$EASY_NODE_DASHBOARD_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-wg-soak-selection-lines 8' "$EASY_NODE_DASHBOARD_CAPTURE"; then
+  echo "easy-node prod-gate-slo-dashboard forwarding missing --min-wg-soak-selection-lines"
+  cat "$EASY_NODE_DASHBOARD_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-wg-soak-entry-operators 2' "$EASY_NODE_DASHBOARD_CAPTURE"; then
+  echo "easy-node prod-gate-slo-dashboard forwarding missing --min-wg-soak-entry-operators"
+  cat "$EASY_NODE_DASHBOARD_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-wg-soak-exit-operators 2' "$EASY_NODE_DASHBOARD_CAPTURE"; then
+  echo "easy-node prod-gate-slo-dashboard forwarding missing --min-wg-soak-exit-operators"
+  cat "$EASY_NODE_DASHBOARD_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-wg-soak-cross-operator-pairs 1' "$EASY_NODE_DASHBOARD_CAPTURE"; then
+  echo "easy-node prod-gate-slo-dashboard forwarding missing --min-wg-soak-cross-operator-pairs"
   cat "$EASY_NODE_DASHBOARD_CAPTURE"
   exit 1
 fi

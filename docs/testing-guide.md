@@ -313,7 +313,10 @@ sudo ./scripts/easy_node.sh prod-pilot-cohort-runbook \
 ./scripts/easy_node.sh prod-pilot-cohort-quick-runbook \
   --bootstrap-directory https://A_PUBLIC_IP_OR_DNS:8081 \
   --subject pilot-client \
-  --max-alert-severity WARN
+  --max-alert-severity WARN \
+  --max-round-failures 0 \
+  --bundle-outputs 1 \
+  --bundle-fail-close 1
 
 # production key/signing rotation maintenance runbook
 ./scripts/easy_node.sh prod-key-rotation-runbook \

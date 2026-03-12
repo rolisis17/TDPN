@@ -127,6 +127,7 @@ check_cpp 'prod-pilot-cohort-quick-check' "launcher wiring failed: option 53 com
 check_cpp 'prod-pilot-cohort-quick-trend' "launcher wiring failed: option 54 command missing"
 check_cpp 'prod-pilot-cohort-quick-alert' "launcher wiring failed: option 55 command missing"
 check_cpp 'prod-pilot-cohort-quick-dashboard' "launcher wiring failed: option 56 command missing"
+check_cpp '--max-round-failures ' "launcher wiring failed: option 50/51/52 max-round-failures forwarding missing"
 check_cpp '--preflight-check 1' "launcher wiring failed: option 36 strict preflight flag missing"
 check_cpp '--preflight-check 0' "launcher wiring failed: option 37 smoke preflight flag missing"
 check_cpp '--signoff-check 1' "launcher wiring failed: option 36 signoff-check flag missing"
@@ -162,6 +163,7 @@ check_cpp '--check-manifest ' "launcher wiring failed: option 49/50/51 signoff m
 check_cpp '--max-alert-severity ' "launcher wiring failed: option 48/50/51/52 max-alert-severity forwarding missing"
 check_cpp '--run-report-json ' "launcher wiring failed: option 52/53/57/58 run-report-json forwarding missing"
 check_cpp '--require-signoff-attempted ' "launcher wiring failed: option 53/54/55/56 signoff-attempted forwarding missing"
+check_cpp '--require-cohort-signoff-policy ' "launcher wiring failed: quick SLO flows require-cohort-signoff-policy forwarding missing"
 check_cpp '--require-summary-status-ok ' "launcher wiring failed: option 53/54/55/56 summary-status forwarding missing"
 check_cpp '--max-duration-sec ' "launcher wiring failed: option 53/54/55/56 max-duration forwarding missing"
 check_cpp '--show-top-reasons ' "launcher wiring failed: option 54/55/56 show-top-reasons forwarding missing"
@@ -170,6 +172,9 @@ echo "[easy-mode-wiring] option 57 command wiring"
 check_cpp 'if \(choice == "57"\)' "launcher wiring failed: option 57 handler missing"
 check_cpp 'prod-pilot-cohort-quick-signoff' "launcher wiring failed: option 57 command missing"
 check_cpp '--max-alert-severity ' "launcher wiring failed: option 57 max-alert-severity forwarding missing"
+check_cpp '--require-trend-artifact-policy-match 1' "launcher wiring failed: option 57 strict trend artifact policy forwarding missing"
+check_cpp '--min-trend-wg-soak-selection-lines 12' "launcher wiring failed: option 57 strict trend soak selection-lines forwarding missing"
+check_cpp '--require-bundle-created 1' "launcher wiring failed: option 57 strict bundle-created policy forwarding missing"
 check_cpp '--trend-summary-json ' "launcher wiring failed: option 57 trend summary forwarding missing"
 check_cpp '--alert-summary-json ' "launcher wiring failed: option 57 alert summary forwarding missing"
 check_cpp '--signoff-json ' "launcher wiring failed: option 57 signoff json forwarding missing"
@@ -183,6 +188,10 @@ check_cpp '--dashboard-print-summary-json ' "launcher wiring failed: option 58 d
 check_cpp '--signoff-max-reports ' "launcher wiring failed: option 58 signoff-max-reports forwarding missing"
 check_cpp '--signoff-since-hours ' "launcher wiring failed: option 58 signoff-since-hours forwarding missing"
 check_cpp '--signoff-min-go-rate-pct ' "launcher wiring failed: option 58 signoff-min-go-rate-pct forwarding missing"
+check_cpp '--signoff-require-cohort-signoff-policy ' "launcher wiring failed: option 58 signoff-require-cohort-signoff-policy forwarding missing"
+check_cpp '--max-round-failures ' "launcher wiring failed: option 58 max-round-failures forwarding missing"
+check_cpp '--bundle-outputs ' "launcher wiring failed: option 58 bundle-outputs forwarding missing"
+check_cpp '--bundle-fail-close ' "launcher wiring failed: option 58 bundle-fail-close forwarding missing"
 
 echo "[easy-mode-wiring] easy_node help exposure"
 if ! "$EASY_NODE" --help | rg -q 'prod-pilot-cohort-quick-signoff'; then
@@ -233,8 +242,32 @@ if ! "$EASY_NODE" prod-pilot-cohort-quick-signoff --help | rg -q -- '--max-alert
   echo "launcher wiring failed: prod-pilot-cohort-quick-signoff help missing --max-alert-severity"
   exit 1
 fi
+if ! "$EASY_NODE" prod-pilot-cohort-quick-signoff --help | rg -q -- '--require-trend-artifact-policy-match'; then
+  echo "launcher wiring failed: prod-pilot-cohort-quick-signoff help missing --require-trend-artifact-policy-match"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-quick-check --help | rg -q -- '--require-bundle-created'; then
+  echo "launcher wiring failed: prod-pilot-cohort-quick-check help missing --require-bundle-created"
+  exit 1
+fi
 if ! "$EASY_NODE" prod-pilot-cohort-quick-runbook --help | rg -q -- '--dashboard-fail-close'; then
   echo "launcher wiring failed: prod-pilot-cohort-quick-runbook help missing --dashboard-fail-close"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-quick-runbook --help | rg -q -- '--signoff-require-cohort-signoff-policy'; then
+  echo "launcher wiring failed: prod-pilot-cohort-quick-runbook help missing --signoff-require-cohort-signoff-policy"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-quick-runbook --help | rg -q -- '--signoff-require-trend-artifact-policy-match'; then
+  echo "launcher wiring failed: prod-pilot-cohort-quick-runbook help missing --signoff-require-trend-artifact-policy-match"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-quick-runbook --help | rg -q -- '--max-round-failures'; then
+  echo "launcher wiring failed: prod-pilot-cohort-quick-runbook help missing --max-round-failures"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-quick-runbook --help | rg -q -- '--bundle-outputs'; then
+  echo "launcher wiring failed: prod-pilot-cohort-quick-runbook help missing --bundle-outputs"
   exit 1
 fi
 if ! "$EASY_NODE" incident-snapshot --help | rg -q -- '--include-docker-logs'; then
@@ -271,6 +304,18 @@ if ! "$EASY_NODE" prod-pilot-cohort-signoff --help | rg -q -- '--max-alert-sever
 fi
 if ! "$EASY_NODE" prod-pilot-cohort-quick --help | rg -q -- '--run-report-json'; then
   echo "launcher wiring failed: prod-pilot-cohort-quick help missing --run-report-json"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-quick --help | rg -q -- '--signoff-require-trend-artifact-policy-match'; then
+  echo "launcher wiring failed: prod-pilot-cohort-quick help missing --signoff-require-trend-artifact-policy-match"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-quick --help | rg -q -- '--max-round-failures'; then
+  echo "launcher wiring failed: prod-pilot-cohort-quick help missing --max-round-failures"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-quick --help | rg -q -- '--signoff-require-incident-snapshot-artifacts'; then
+  echo "launcher wiring failed: prod-pilot-cohort-quick help missing --signoff-require-incident-snapshot-artifacts"
   exit 1
 fi
 if ! "$EASY_NODE" prod-pilot-cohort-quick-check --help | rg -q -- '--require-signoff-attempted'; then

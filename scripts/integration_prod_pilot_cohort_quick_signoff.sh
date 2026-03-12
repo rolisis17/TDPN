@@ -102,8 +102,32 @@ PROD_PILOT_COHORT_QUICK_ALERT_SCRIPT="$FAKE_ALERT" \
 ./scripts/prod_pilot_cohort_quick_signoff.sh \
   --run-report-json /tmp/quick/report.json \
   --reports-dir /tmp/quick/reports \
+  --require-cohort-signoff-policy 1 \
+  --require-trend-artifact-policy-match 0 \
+  --require-trend-wg-validate-udp-source 0 \
+  --require-trend-wg-validate-strict-distinct 0 \
+  --require-trend-wg-soak-diversity-pass 0 \
+  --min-trend-wg-soak-selection-lines 3 \
+  --min-trend-wg-soak-entry-operators 1 \
+  --min-trend-wg-soak-exit-operators 1 \
+  --min-trend-wg-soak-cross-operator-pairs 1 \
+  --require-bundle-created 0 \
+  --require-bundle-manifest 0 \
   --max-alert-severity WARN \
   --show-json 1 >/tmp/integration_prod_pilot_cohort_quick_signoff_pass.log 2>&1
+
+SIGNOFF_JSON="/tmp/quick/reports/prod_pilot_quick_signoff.json"
+if [[ ! -f "$SIGNOFF_JSON" ]]; then
+  echo "expected quick-signoff artifact missing: $SIGNOFF_JSON"
+  ls -la /tmp/quick/reports 2>/dev/null || true
+  cat /tmp/integration_prod_pilot_cohort_quick_signoff_pass.log
+  exit 1
+fi
+if ! jq -e '.status=="ok" and .policy.require_trend_artifact_policy_match==0 and .policy.require_trend_wg_validate_udp_source==0 and .policy.require_trend_wg_validate_strict_distinct==0 and .policy.require_trend_wg_soak_diversity_pass==0 and .policy.min_trend_wg_soak_selection_lines==3 and .policy.min_trend_wg_soak_entry_operators==1 and .policy.min_trend_wg_soak_exit_operators==1 and .policy.min_trend_wg_soak_cross_operator_pairs==1 and .policy.require_bundle_created==0 and .policy.require_bundle_manifest==0 and .policy.max_alert_severity=="WARN"' "$SIGNOFF_JSON" >/dev/null 2>&1; then
+  echo "quick-signoff artifact missing expected strict policy fields"
+  cat "$SIGNOFF_JSON"
+  exit 1
+fi
 
 if ! rg -q -- '^check ' "$SIGNOFF_CAPTURE"; then
   echo "expected quick-check step invocation not observed"
@@ -125,8 +149,68 @@ if ! rg -q -- '--run-report-json /tmp/quick/report.json' "$CHECK_CAPTURE"; then
   cat "$CHECK_CAPTURE"
   exit 1
 fi
+if ! rg -q -- '--require-cohort-signoff-policy 1' "$CHECK_CAPTURE"; then
+  echo "quick-signoff forwarding missing --require-cohort-signoff-policy 1 to quick-check"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-trend-artifact-policy-match 0' "$CHECK_CAPTURE"; then
+  echo "quick-signoff forwarding missing --require-trend-artifact-policy-match 0 to quick-check"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-trend-wg-validate-udp-source 0' "$CHECK_CAPTURE"; then
+  echo "quick-signoff forwarding missing --require-trend-wg-validate-udp-source 0 to quick-check"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-trend-wg-validate-strict-distinct 0' "$CHECK_CAPTURE"; then
+  echo "quick-signoff forwarding missing --require-trend-wg-validate-strict-distinct 0 to quick-check"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-trend-wg-soak-diversity-pass 0' "$CHECK_CAPTURE"; then
+  echo "quick-signoff forwarding missing --require-trend-wg-soak-diversity-pass 0 to quick-check"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-trend-wg-soak-selection-lines 3' "$CHECK_CAPTURE"; then
+  echo "quick-signoff forwarding missing --min-trend-wg-soak-selection-lines 3 to quick-check"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-trend-wg-soak-entry-operators 1' "$CHECK_CAPTURE"; then
+  echo "quick-signoff forwarding missing --min-trend-wg-soak-entry-operators 1 to quick-check"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-trend-wg-soak-exit-operators 1' "$CHECK_CAPTURE"; then
+  echo "quick-signoff forwarding missing --min-trend-wg-soak-exit-operators 1 to quick-check"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-trend-wg-soak-cross-operator-pairs 1' "$CHECK_CAPTURE"; then
+  echo "quick-signoff forwarding missing --min-trend-wg-soak-cross-operator-pairs 1 to quick-check"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-bundle-created 0' "$CHECK_CAPTURE"; then
+  echo "quick-signoff forwarding missing --require-bundle-created 0 to quick-check"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-bundle-manifest 0' "$CHECK_CAPTURE"; then
+  echo "quick-signoff forwarding missing --require-bundle-manifest 0 to quick-check"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
 if ! rg -q -- '--summary-json ' "$TREND_CAPTURE"; then
   echo "quick-signoff forwarding missing --summary-json to quick-trend"
+  cat "$TREND_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-cohort-signoff-policy 1' "$TREND_CAPTURE"; then
+  echo "quick-signoff forwarding missing --require-cohort-signoff-policy 1 to quick-trend"
   cat "$TREND_CAPTURE"
   exit 1
 fi
@@ -135,9 +219,143 @@ if ! rg -q -- '--trend-summary-json ' "$ALERT_CAPTURE"; then
   cat "$ALERT_CAPTURE"
   exit 1
 fi
+if ! rg -q -- '--require-cohort-signoff-policy 1' "$ALERT_CAPTURE"; then
+  echo "quick-signoff forwarding missing --require-cohort-signoff-policy 1 to quick-alert"
+  cat "$ALERT_CAPTURE"
+  exit 1
+fi
 if ! rg -q -- '--fail-on-critical 1' "$ALERT_CAPTURE"; then
   echo "quick-signoff severity policy forwarding missing --fail-on-critical 1 for max-alert-severity=WARN"
   cat "$ALERT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--fail-on-warn 0' "$ALERT_CAPTURE"; then
+  echo "quick-signoff severity policy forwarding missing --fail-on-warn 0 for max-alert-severity=WARN"
+  cat "$ALERT_CAPTURE"
+  exit 1
+fi
+
+echo "[prod-pilot-cohort-quick-signoff] signoff env namespace precedence"
+CHECK_CAPTURE_ENV="$TMP_DIR/check_capture_env.log"
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+CHECK_CAPTURE_FILE="$CHECK_CAPTURE_ENV" \
+TREND_CAPTURE_FILE="$TREND_CAPTURE" \
+ALERT_CAPTURE_FILE="$ALERT_CAPTURE" \
+PROD_PILOT_COHORT_QUICK_SIGNOFF_REQUIRE_STATUS_OK=0 \
+PROD_PILOT_COHORT_QUICK_SIGNOFF_REQUIRE_RUNBOOK_OK=0 \
+PROD_PILOT_COHORT_QUICK_SIGNOFF_REQUIRE_SIGNOFF_ATTEMPTED=0 \
+PROD_PILOT_COHORT_QUICK_SIGNOFF_REQUIRE_SIGNOFF_OK=0 \
+PROD_PILOT_COHORT_QUICK_SIGNOFF_REQUIRE_SUMMARY_JSON=0 \
+PROD_PILOT_COHORT_QUICK_SIGNOFF_REQUIRE_SUMMARY_STATUS_OK=0 \
+PROD_PILOT_COHORT_QUICK_SIGNOFF_REQUIRE_INCIDENT_SNAPSHOT_ON_FAIL=0 \
+PROD_PILOT_COHORT_QUICK_SIGNOFF_REQUIRE_INCIDENT_SNAPSHOT_ARTIFACTS=0 \
+PROD_PILOT_COHORT_QUICK_SIGNOFF_MAX_DURATION_SEC=17 \
+PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_STATUS_OK=1 \
+PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_RUNBOOK_OK=1 \
+PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_SIGNOFF_ATTEMPTED=1 \
+PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_SIGNOFF_OK=1 \
+PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_SUMMARY_JSON=1 \
+PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_SUMMARY_STATUS_OK=1 \
+PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_INCIDENT_SNAPSHOT_ON_FAIL=1 \
+PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_INCIDENT_SNAPSHOT_ARTIFACTS=1 \
+PROD_PILOT_COHORT_QUICK_CHECK_MAX_DURATION_SEC=99 \
+PROD_PILOT_COHORT_QUICK_CHECK_SCRIPT="$FAKE_CHECK" \
+PROD_PILOT_COHORT_QUICK_TREND_SCRIPT="$FAKE_TREND" \
+PROD_PILOT_COHORT_QUICK_ALERT_SCRIPT="$FAKE_ALERT" \
+./scripts/prod_pilot_cohort_quick_signoff.sh \
+  --run-report-json /tmp/quick/report.json \
+  --reports-dir /tmp/quick/reports >/tmp/integration_prod_pilot_cohort_quick_signoff_env_namespace.log 2>&1
+if ! rg -q -- '--require-status-ok 0' "$CHECK_CAPTURE_ENV"; then
+  echo "quick-signoff env precedence failed: missing --require-status-ok 0 from signoff env namespace"
+  cat "$CHECK_CAPTURE_ENV"
+  exit 1
+fi
+if ! rg -q -- '--require-runbook-ok 0' "$CHECK_CAPTURE_ENV"; then
+  echo "quick-signoff env precedence failed: missing --require-runbook-ok 0 from signoff env namespace"
+  cat "$CHECK_CAPTURE_ENV"
+  exit 1
+fi
+if ! rg -q -- '--require-signoff-attempted 0' "$CHECK_CAPTURE_ENV"; then
+  echo "quick-signoff env precedence failed: missing --require-signoff-attempted 0 from signoff env namespace"
+  cat "$CHECK_CAPTURE_ENV"
+  exit 1
+fi
+if ! rg -q -- '--require-signoff-ok 0' "$CHECK_CAPTURE_ENV"; then
+  echo "quick-signoff env precedence failed: missing --require-signoff-ok 0 from signoff env namespace"
+  cat "$CHECK_CAPTURE_ENV"
+  exit 1
+fi
+if ! rg -q -- '--require-summary-json 0' "$CHECK_CAPTURE_ENV"; then
+  echo "quick-signoff env precedence failed: missing --require-summary-json 0 from signoff env namespace"
+  cat "$CHECK_CAPTURE_ENV"
+  exit 1
+fi
+if ! rg -q -- '--require-summary-status-ok 0' "$CHECK_CAPTURE_ENV"; then
+  echo "quick-signoff env precedence failed: missing --require-summary-status-ok 0 from signoff env namespace"
+  cat "$CHECK_CAPTURE_ENV"
+  exit 1
+fi
+if ! rg -q -- '--require-incident-snapshot-on-fail 0' "$CHECK_CAPTURE_ENV"; then
+  echo "quick-signoff env precedence failed: missing --require-incident-snapshot-on-fail 0 from signoff env namespace"
+  cat "$CHECK_CAPTURE_ENV"
+  exit 1
+fi
+if ! rg -q -- '--require-incident-snapshot-artifacts 0' "$CHECK_CAPTURE_ENV"; then
+  echo "quick-signoff env precedence failed: missing --require-incident-snapshot-artifacts 0 from signoff env namespace"
+  cat "$CHECK_CAPTURE_ENV"
+  exit 1
+fi
+if ! rg -q -- '--max-duration-sec 17' "$CHECK_CAPTURE_ENV"; then
+  echo "quick-signoff env precedence failed: missing --max-duration-sec 17 from signoff env namespace"
+  cat "$CHECK_CAPTURE_ENV"
+  exit 1
+fi
+
+echo "[prod-pilot-cohort-quick-signoff] severity matrix: max-alert-severity=OK"
+ALERT_CAPTURE_OK="$TMP_DIR/alert_capture_ok.log"
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+CHECK_CAPTURE_FILE="$CHECK_CAPTURE" \
+TREND_CAPTURE_FILE="$TREND_CAPTURE" \
+ALERT_CAPTURE_FILE="$ALERT_CAPTURE_OK" \
+PROD_PILOT_COHORT_QUICK_CHECK_SCRIPT="$FAKE_CHECK" \
+PROD_PILOT_COHORT_QUICK_TREND_SCRIPT="$FAKE_TREND" \
+PROD_PILOT_COHORT_QUICK_ALERT_SCRIPT="$FAKE_ALERT" \
+./scripts/prod_pilot_cohort_quick_signoff.sh \
+  --run-report-json /tmp/quick/report.json \
+  --reports-dir /tmp/quick/reports \
+  --max-alert-severity OK >/tmp/integration_prod_pilot_cohort_quick_signoff_ok_severity.log 2>&1
+if ! rg -q -- '--fail-on-warn 1' "$ALERT_CAPTURE_OK"; then
+  echo "quick-signoff severity mapping failed for max-alert-severity=OK: missing --fail-on-warn 1"
+  cat "$ALERT_CAPTURE_OK"
+  exit 1
+fi
+if ! rg -q -- '--fail-on-critical 1' "$ALERT_CAPTURE_OK"; then
+  echo "quick-signoff severity mapping failed for max-alert-severity=OK: missing --fail-on-critical 1"
+  cat "$ALERT_CAPTURE_OK"
+  exit 1
+fi
+
+echo "[prod-pilot-cohort-quick-signoff] severity matrix: max-alert-severity=CRITICAL"
+ALERT_CAPTURE_CRITICAL="$TMP_DIR/alert_capture_critical.log"
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+CHECK_CAPTURE_FILE="$CHECK_CAPTURE" \
+TREND_CAPTURE_FILE="$TREND_CAPTURE" \
+ALERT_CAPTURE_FILE="$ALERT_CAPTURE_CRITICAL" \
+PROD_PILOT_COHORT_QUICK_CHECK_SCRIPT="$FAKE_CHECK" \
+PROD_PILOT_COHORT_QUICK_TREND_SCRIPT="$FAKE_TREND" \
+PROD_PILOT_COHORT_QUICK_ALERT_SCRIPT="$FAKE_ALERT" \
+./scripts/prod_pilot_cohort_quick_signoff.sh \
+  --run-report-json /tmp/quick/report.json \
+  --reports-dir /tmp/quick/reports \
+  --max-alert-severity CRITICAL >/tmp/integration_prod_pilot_cohort_quick_signoff_critical_severity.log 2>&1
+if ! rg -q -- '--fail-on-warn 0' "$ALERT_CAPTURE_CRITICAL"; then
+  echo "quick-signoff severity mapping failed for max-alert-severity=CRITICAL: missing --fail-on-warn 0"
+  cat "$ALERT_CAPTURE_CRITICAL"
+  exit 1
+fi
+if ! rg -q -- '--fail-on-critical 0' "$ALERT_CAPTURE_CRITICAL"; then
+  echo "quick-signoff severity mapping failed for max-alert-severity=CRITICAL: missing --fail-on-critical 0"
+  cat "$ALERT_CAPTURE_CRITICAL"
   exit 1
 fi
 
@@ -261,6 +479,8 @@ SIGNOFF_FORWARD_CAPTURE_FILE="$SIGNOFF_FORWARD_CAPTURE" \
 PROD_PILOT_COHORT_QUICK_SIGNOFF_SCRIPT="$FAKE_SIGNOFF" \
 ./scripts/easy_node.sh prod-pilot-cohort-quick-signoff \
   --run-report-json /tmp/quick/report.json \
+  --require-cohort-signoff-policy 0 \
+  --require-trend-artifact-policy-match 0 \
   --max-alert-severity OK \
   --show-json 1 >/tmp/integration_prod_pilot_cohort_quick_signoff_easy_node.log 2>&1
 
@@ -271,6 +491,16 @@ if ! rg -q -- '--run-report-json /tmp/quick/report.json' "$SIGNOFF_FORWARD_CAPTU
 fi
 if ! rg -q -- '--max-alert-severity OK' "$SIGNOFF_FORWARD_CAPTURE"; then
   echo "easy_node quick-signoff forwarding failed: missing --max-alert-severity"
+  cat "$SIGNOFF_FORWARD_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-cohort-signoff-policy 0' "$SIGNOFF_FORWARD_CAPTURE"; then
+  echo "easy_node quick-signoff forwarding failed: missing --require-cohort-signoff-policy"
+  cat "$SIGNOFF_FORWARD_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-trend-artifact-policy-match 0' "$SIGNOFF_FORWARD_CAPTURE"; then
+  echo "easy_node quick-signoff forwarding failed: missing --require-trend-artifact-policy-match"
   cat "$SIGNOFF_FORWARD_CAPTURE"
   exit 1
 fi

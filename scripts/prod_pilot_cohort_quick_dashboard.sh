@@ -24,8 +24,11 @@ Usage:
     [--require-runbook-ok [0|1]] \
     [--require-signoff-attempted [0|1]] \
     [--require-signoff-ok [0|1]] \
+    [--require-cohort-signoff-policy [0|1]] \
     [--require-summary-json [0|1]] \
     [--require-summary-status-ok [0|1]] \
+    [--require-incident-snapshot-on-fail [0|1]] \
+    [--require-incident-snapshot-artifacts [0|1]] \
     [--max-duration-sec N] \
     [--fail-on-any-no-go [0|1]] \
     [--min-go-rate-pct N] \
@@ -101,8 +104,11 @@ require_status_ok="${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_STATUS_OK:-1}"
 require_runbook_ok="${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_RUNBOOK_OK:-1}"
 require_signoff_attempted="${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_SIGNOFF_ATTEMPTED:-1}"
 require_signoff_ok="${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_SIGNOFF_OK:-1}"
+require_cohort_signoff_policy="${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_COHORT_SIGNOFF_POLICY:-0}"
 require_summary_json="${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_SUMMARY_JSON:-1}"
 require_summary_status_ok="${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_SUMMARY_STATUS_OK:-1}"
+require_incident_snapshot_on_fail="${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_INCIDENT_SNAPSHOT_ON_FAIL:-1}"
+require_incident_snapshot_artifacts="${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_INCIDENT_SNAPSHOT_ARTIFACTS:-1}"
 max_duration_sec="${PROD_PILOT_COHORT_QUICK_CHECK_MAX_DURATION_SEC:-0}"
 fail_on_any_no_go="${PROD_PILOT_COHORT_QUICK_TREND_FAIL_ON_ANY_NO_GO:-0}"
 min_go_rate_pct="${PROD_PILOT_COHORT_QUICK_TREND_MIN_GO_RATE_PCT:-95}"
@@ -181,6 +187,15 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --require-cohort-signoff-policy)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_cohort_signoff_policy="${2:-}"
+        shift 2
+      else
+        require_cohort_signoff_policy="1"
+        shift
+      fi
+      ;;
     --require-summary-json)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         require_summary_json="${2:-}"
@@ -196,6 +211,24 @@ while [[ $# -gt 0 ]]; do
         shift 2
       else
         require_summary_status_ok="1"
+        shift
+      fi
+      ;;
+    --require-incident-snapshot-on-fail)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_incident_snapshot_on_fail="${2:-}"
+        shift 2
+      else
+        require_incident_snapshot_on_fail="1"
+        shift
+      fi
+      ;;
+    --require-incident-snapshot-artifacts)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_incident_snapshot_artifacts="${2:-}"
+        shift 2
+      else
+        require_incident_snapshot_artifacts="1"
         shift
       fi
       ;;
@@ -320,8 +353,11 @@ bool_arg_or_die "--require-status-ok" "$require_status_ok"
 bool_arg_or_die "--require-runbook-ok" "$require_runbook_ok"
 bool_arg_or_die "--require-signoff-attempted" "$require_signoff_attempted"
 bool_arg_or_die "--require-signoff-ok" "$require_signoff_ok"
+bool_arg_or_die "--require-cohort-signoff-policy" "$require_cohort_signoff_policy"
 bool_arg_or_die "--require-summary-json" "$require_summary_json"
 bool_arg_or_die "--require-summary-status-ok" "$require_summary_status_ok"
+bool_arg_or_die "--require-incident-snapshot-on-fail" "$require_incident_snapshot_on_fail"
+bool_arg_or_die "--require-incident-snapshot-artifacts" "$require_incident_snapshot_artifacts"
 bool_arg_or_die "--fail-on-any-no-go" "$fail_on_any_no_go"
 bool_arg_or_die "--fail-on-warn" "$fail_on_warn"
 bool_arg_or_die "--fail-on-critical" "$fail_on_critical"
@@ -398,8 +434,11 @@ trend_args=(
   --require-runbook-ok "$require_runbook_ok"
   --require-signoff-attempted "$require_signoff_attempted"
   --require-signoff-ok "$require_signoff_ok"
+  --require-cohort-signoff-policy "$require_cohort_signoff_policy"
   --require-summary-json "$require_summary_json"
   --require-summary-status-ok "$require_summary_status_ok"
+  --require-incident-snapshot-on-fail "$require_incident_snapshot_on_fail"
+  --require-incident-snapshot-artifacts "$require_incident_snapshot_artifacts"
   --max-duration-sec "$max_duration_sec"
   --fail-on-any-no-go "$fail_on_any_no_go"
   --min-go-rate-pct "$min_go_rate_pct"
@@ -448,6 +487,9 @@ alert_args=(
   --show-top-reasons "$show_top_reasons"
   --summary-json "$alert_summary_json"
   --print-summary-json "$print_summary_json"
+  --require-cohort-signoff-policy "$require_cohort_signoff_policy"
+  --require-incident-snapshot-on-fail "$require_incident_snapshot_on_fail"
+  --require-incident-snapshot-artifacts "$require_incident_snapshot_artifacts"
 )
 
 echo "[prod-pilot-cohort-quick-dashboard] running alert classification"

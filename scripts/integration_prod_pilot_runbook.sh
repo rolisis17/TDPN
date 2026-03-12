@@ -75,6 +75,41 @@ if ! printf '%s\n' "$bundle_line" | rg -q -- '--signoff-check 1'; then
   cat "$CAPTURE"
   exit 1
 fi
+if ! printf '%s\n' "$bundle_line" | rg -q -- '--signoff-require-wg-validate-udp-source 1'; then
+  echo "prod-pilot wrapper missing default --signoff-require-wg-validate-udp-source 1"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! printf '%s\n' "$bundle_line" | rg -q -- '--signoff-require-wg-validate-strict-distinct 1'; then
+  echo "prod-pilot wrapper missing default --signoff-require-wg-validate-strict-distinct 1"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! printf '%s\n' "$bundle_line" | rg -q -- '--signoff-require-wg-soak-diversity-pass 1'; then
+  echo "prod-pilot wrapper missing default --signoff-require-wg-soak-diversity-pass 1"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! printf '%s\n' "$bundle_line" | rg -q -- '--signoff-min-wg-soak-selection-lines 12'; then
+  echo "prod-pilot wrapper missing default --signoff-min-wg-soak-selection-lines 12"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! printf '%s\n' "$bundle_line" | rg -q -- '--signoff-min-wg-soak-entry-operators 2'; then
+  echo "prod-pilot wrapper missing default --signoff-min-wg-soak-entry-operators 2"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! printf '%s\n' "$bundle_line" | rg -q -- '--signoff-min-wg-soak-exit-operators 2'; then
+  echo "prod-pilot wrapper missing default --signoff-min-wg-soak-exit-operators 2"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! printf '%s\n' "$bundle_line" | rg -q -- '--signoff-min-wg-soak-cross-operator-pairs 2'; then
+  echo "prod-pilot wrapper missing default --signoff-min-wg-soak-cross-operator-pairs 2"
+  cat "$CAPTURE"
+  exit 1
+fi
 if ! printf '%s\n' "$bundle_line" | rg -q -- '--strict-distinct 1'; then
   echo "prod-pilot wrapper missing default --strict-distinct 1"
   cat "$CAPTURE"
@@ -122,6 +157,21 @@ if ! printf '%s\n' "$dashboard_line" | rg -q -- '--reports-dir '; then
 fi
 if ! printf '%s\n' "$dashboard_line" | rg -q -- '--print-dashboard 1'; then
   echo "prod-pilot wrapper missing default --print-dashboard 1"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! printf '%s\n' "$dashboard_line" | rg -q -- '--require-wg-validate-udp-source 1'; then
+  echo "prod-pilot wrapper missing dashboard --require-wg-validate-udp-source 1"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! printf '%s\n' "$dashboard_line" | rg -q -- '--require-wg-validate-strict-distinct 1'; then
+  echo "prod-pilot wrapper missing dashboard --require-wg-validate-strict-distinct 1"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! printf '%s\n' "$dashboard_line" | rg -q -- '--require-wg-soak-diversity-pass 1'; then
+  echo "prod-pilot wrapper missing dashboard --require-wg-soak-diversity-pass 1"
   cat "$CAPTURE"
   exit 1
 fi

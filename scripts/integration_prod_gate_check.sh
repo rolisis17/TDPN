@@ -28,7 +28,9 @@ PASS_RUN_REPORT="$TMP_DIR/prod_bundle_run_report_ok.json"
 cat >"$PASS_WG_VALIDATE" <<'EOF_WG_VALIDATE_OK'
 {
   "status": "ok",
-  "failed_step": ""
+  "failed_step": "",
+  "client_inner_source": "udp",
+  "strict_distinct": 1
 }
 EOF_WG_VALIDATE_OK
 
@@ -36,7 +38,12 @@ cat >"$PASS_WG_SOAK" <<'EOF_WG_SOAK_OK'
 {
   "status": "ok",
   "rounds_failed": 0,
-  "failure_classes": {}
+  "failure_classes": {},
+  "selection_lines_total": 16,
+  "selection_entry_operators": 2,
+  "selection_exit_operators": 2,
+  "selection_cross_operator_pairs": 3,
+  "selection_diversity_failed": 0
 }
 EOF_WG_SOAK_OK
 
@@ -103,6 +110,179 @@ EOF_RUN_REPORT_OK
 echo "[prod-gate-check] pass baseline"
 ./scripts/prod_gate_check.sh --gate-summary-json "$PASS_GATE" --show-json 0 >/tmp/integration_prod_gate_check_pass.log 2>&1
 ./scripts/prod_gate_check.sh --run-report-json "$PASS_RUN_REPORT" --show-json 0 >/tmp/integration_prod_gate_check_pass_run_report.log 2>&1
+
+echo "[prod-gate-check] wg validate evidence checks"
+BAD_VALIDATE_SOURCE="$TMP_DIR/wg_validate_bad_source.json"
+cat >"$BAD_VALIDATE_SOURCE" <<'EOF_WG_VALIDATE_BAD_SOURCE'
+{
+  "status": "ok",
+  "failed_step": "",
+  "client_inner_source": "synthetic",
+  "strict_distinct": 1
+}
+EOF_WG_VALIDATE_BAD_SOURCE
+BAD_VALIDATE_SOURCE_GATE="$TMP_DIR/prod_gate_bad_validate_source.json"
+cat >"$BAD_VALIDATE_SOURCE_GATE" <<EOF_GATE_BAD_VALIDATE_SOURCE
+{
+  "status": "ok",
+  "failed_step": "",
+  "failed_rc": 0,
+  "steps": {
+    "control_validate": "ok",
+    "control_soak": "ok",
+    "prod_wg_validate": "ok",
+    "prod_wg_soak": "ok"
+  },
+  "wg_validate_summary_json": "$BAD_VALIDATE_SOURCE",
+  "wg_validate_status": "ok",
+  "wg_validate_failed_step": "",
+  "wg_soak_summary_json": "$PASS_WG_SOAK",
+  "wg_soak_status": "ok",
+  "wg_soak_rounds_failed": 0,
+  "wg_soak_top_failure_class": "none",
+  "wg_soak_top_failure_count": 0
+}
+EOF_GATE_BAD_VALIDATE_SOURCE
+set +e
+./scripts/prod_gate_check.sh \
+  --gate-summary-json "$BAD_VALIDATE_SOURCE_GATE" \
+  --require-wg-validate-udp-source 1 \
+  --show-json 0 >/tmp/integration_prod_gate_check_validate_source_fail.log 2>&1
+rc=$?
+set -e
+if [[ "$rc" -eq 0 ]]; then
+  echo "expected non-zero rc for non-udp validate source policy"
+  cat /tmp/integration_prod_gate_check_validate_source_fail.log
+  exit 1
+fi
+if ! rg -q 'does not show UDP inner source' /tmp/integration_prod_gate_check_validate_source_fail.log; then
+  echo "expected non-udp validate source message not found"
+  cat /tmp/integration_prod_gate_check_validate_source_fail.log
+  exit 1
+fi
+
+BAD_VALIDATE_DISTINCT="$TMP_DIR/wg_validate_bad_distinct.json"
+cat >"$BAD_VALIDATE_DISTINCT" <<'EOF_WG_VALIDATE_BAD_DISTINCT'
+{
+  "status": "ok",
+  "failed_step": "",
+  "client_inner_source": "udp",
+  "strict_distinct": 0
+}
+EOF_WG_VALIDATE_BAD_DISTINCT
+BAD_VALIDATE_DISTINCT_GATE="$TMP_DIR/prod_gate_bad_validate_distinct.json"
+cat >"$BAD_VALIDATE_DISTINCT_GATE" <<EOF_GATE_BAD_VALIDATE_DISTINCT
+{
+  "status": "ok",
+  "failed_step": "",
+  "failed_rc": 0,
+  "steps": {
+    "control_validate": "ok",
+    "control_soak": "ok",
+    "prod_wg_validate": "ok",
+    "prod_wg_soak": "ok"
+  },
+  "wg_validate_summary_json": "$BAD_VALIDATE_DISTINCT",
+  "wg_validate_status": "ok",
+  "wg_validate_failed_step": "",
+  "wg_soak_summary_json": "$PASS_WG_SOAK",
+  "wg_soak_status": "ok",
+  "wg_soak_rounds_failed": 0,
+  "wg_soak_top_failure_class": "none",
+  "wg_soak_top_failure_count": 0
+}
+EOF_GATE_BAD_VALIDATE_DISTINCT
+set +e
+./scripts/prod_gate_check.sh \
+  --gate-summary-json "$BAD_VALIDATE_DISTINCT_GATE" \
+  --require-wg-validate-strict-distinct 1 \
+  --show-json 0 >/tmp/integration_prod_gate_check_validate_distinct_fail.log 2>&1
+rc=$?
+set -e
+if [[ "$rc" -eq 0 ]]; then
+  echo "expected non-zero rc for non-strict-distinct validate policy"
+  cat /tmp/integration_prod_gate_check_validate_distinct_fail.log
+  exit 1
+fi
+if ! rg -q 'does not show strict distinct mode enabled' /tmp/integration_prod_gate_check_validate_distinct_fail.log; then
+  echo "expected strict-distinct validate message not found"
+  cat /tmp/integration_prod_gate_check_validate_distinct_fail.log
+  exit 1
+fi
+
+echo "[prod-gate-check] wg soak diversity floor checks"
+BAD_SOAK_DIVERSITY="$TMP_DIR/wg_soak_bad_diversity.json"
+cat >"$BAD_SOAK_DIVERSITY" <<'EOF_WG_SOAK_BAD_DIVERSITY'
+{
+  "status": "ok",
+  "rounds_failed": 0,
+  "failure_classes": {},
+  "selection_lines_total": 5,
+  "selection_entry_operators": 1,
+  "selection_exit_operators": 1,
+  "selection_cross_operator_pairs": 1,
+  "selection_diversity_failed": 1
+}
+EOF_WG_SOAK_BAD_DIVERSITY
+BAD_SOAK_DIVERSITY_GATE="$TMP_DIR/prod_gate_bad_soak_diversity.json"
+cat >"$BAD_SOAK_DIVERSITY_GATE" <<EOF_GATE_BAD_SOAK_DIVERSITY
+{
+  "status": "ok",
+  "failed_step": "",
+  "failed_rc": 0,
+  "steps": {
+    "control_validate": "ok",
+    "control_soak": "ok",
+    "prod_wg_validate": "ok",
+    "prod_wg_soak": "ok"
+  },
+  "wg_validate_summary_json": "$PASS_WG_VALIDATE",
+  "wg_validate_status": "ok",
+  "wg_validate_failed_step": "",
+  "wg_soak_summary_json": "$BAD_SOAK_DIVERSITY",
+  "wg_soak_status": "ok",
+  "wg_soak_rounds_failed": 0,
+  "wg_soak_top_failure_class": "none",
+  "wg_soak_top_failure_count": 0
+}
+EOF_GATE_BAD_SOAK_DIVERSITY
+set +e
+./scripts/prod_gate_check.sh \
+  --gate-summary-json "$BAD_SOAK_DIVERSITY_GATE" \
+  --require-wg-soak-diversity-pass 1 \
+  --min-wg-soak-selection-lines 12 \
+  --min-wg-soak-entry-operators 2 \
+  --min-wg-soak-exit-operators 2 \
+  --min-wg-soak-cross-operator-pairs 2 \
+  --show-json 0 >/tmp/integration_prod_gate_check_soak_diversity_fail.log 2>&1
+rc=$?
+set -e
+if [[ "$rc" -eq 0 ]]; then
+  echo "expected non-zero rc for soak diversity policy"
+  cat /tmp/integration_prod_gate_check_soak_diversity_fail.log
+  exit 1
+fi
+if ! rg -q 'selection_diversity_failed' /tmp/integration_prod_gate_check_soak_diversity_fail.log; then
+  echo "expected soak diversity failure message not found"
+  cat /tmp/integration_prod_gate_check_soak_diversity_fail.log
+  exit 1
+fi
+if ! rg -q 'selection_lines_total below floor' /tmp/integration_prod_gate_check_soak_diversity_fail.log; then
+  echo "expected soak diversity floor message not found"
+  cat /tmp/integration_prod_gate_check_soak_diversity_fail.log
+  exit 1
+fi
+
+./scripts/prod_gate_check.sh \
+  --gate-summary-json "$PASS_GATE" \
+  --require-wg-validate-udp-source 1 \
+  --require-wg-validate-strict-distinct 1 \
+  --require-wg-soak-diversity-pass 1 \
+  --min-wg-soak-selection-lines 12 \
+  --min-wg-soak-entry-operators 2 \
+  --min-wg-soak-exit-operators 2 \
+  --min-wg-soak-cross-operator-pairs 2 \
+  --show-json 0 >/tmp/integration_prod_gate_check_diversity_pass.log 2>&1
 
 echo "[prod-gate-check] run-report stage policy checks"
 ./scripts/prod_gate_check.sh \
@@ -373,6 +553,13 @@ THREE_MACHINE_PROD_GATE_CHECK_SCRIPT="$FAKE_CHECK" \
   --require-signoff-ok 1 \
   --require-incident-snapshot-on-fail 1 \
   --require-incident-snapshot-artifacts 1 \
+  --require-wg-validate-udp-source 1 \
+  --require-wg-validate-strict-distinct 1 \
+  --require-wg-soak-diversity-pass 1 \
+  --min-wg-soak-selection-lines 12 \
+  --min-wg-soak-entry-operators 2 \
+  --min-wg-soak-exit-operators 2 \
+  --min-wg-soak-cross-operator-pairs 2 \
   --max-wg-soak-failed-rounds 1 \
   --show-json 1 >/tmp/integration_prod_gate_check_easy_node.log 2>&1
 
@@ -418,6 +605,41 @@ if ! rg -q -- '--require-incident-snapshot-on-fail 1' "$CAPTURE"; then
 fi
 if ! rg -q -- '--require-incident-snapshot-artifacts 1' "$CAPTURE"; then
   echo "easy_node prod-gate-check forwarding failed: missing --require-incident-snapshot-artifacts"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-wg-validate-udp-source 1' "$CAPTURE"; then
+  echo "easy_node prod-gate-check forwarding failed: missing --require-wg-validate-udp-source"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-wg-validate-strict-distinct 1' "$CAPTURE"; then
+  echo "easy_node prod-gate-check forwarding failed: missing --require-wg-validate-strict-distinct"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-wg-soak-diversity-pass 1' "$CAPTURE"; then
+  echo "easy_node prod-gate-check forwarding failed: missing --require-wg-soak-diversity-pass"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-wg-soak-selection-lines 12' "$CAPTURE"; then
+  echo "easy_node prod-gate-check forwarding failed: missing --min-wg-soak-selection-lines"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-wg-soak-entry-operators 2' "$CAPTURE"; then
+  echo "easy_node prod-gate-check forwarding failed: missing --min-wg-soak-entry-operators"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-wg-soak-exit-operators 2' "$CAPTURE"; then
+  echo "easy_node prod-gate-check forwarding failed: missing --min-wg-soak-exit-operators"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-wg-soak-cross-operator-pairs 2' "$CAPTURE"; then
+  echo "easy_node prod-gate-check forwarding failed: missing --min-wg-soak-cross-operator-pairs"
   cat "$CAPTURE"
   exit 1
 fi
@@ -467,6 +689,13 @@ THREE_MACHINE_PROD_GATE_CHECK_SCRIPT="$FAKE_CHECK" \
   --require-signoff-ok 1 \
   --require-incident-snapshot-on-fail 1 \
   --require-incident-snapshot-artifacts 1 \
+  --require-wg-validate-udp-source 1 \
+  --require-wg-validate-strict-distinct 1 \
+  --require-wg-soak-diversity-pass 1 \
+  --min-wg-soak-selection-lines 12 \
+  --min-wg-soak-entry-operators 2 \
+  --min-wg-soak-exit-operators 2 \
+  --min-wg-soak-cross-operator-pairs 2 \
   --max-wg-soak-failed-rounds 0 \
   --show-json 1 >/tmp/integration_prod_gate_signoff_easy_node.log 2>&1
 
@@ -527,6 +756,41 @@ if ! rg -q -- '--require-incident-snapshot-on-fail 1' "$CHECK_CAPTURE"; then
 fi
 if ! rg -q -- '--require-incident-snapshot-artifacts 1' "$CHECK_CAPTURE"; then
   echo "easy_node prod-gate-signoff forwarding failed: check missing --require-incident-snapshot-artifacts"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-wg-validate-udp-source 1' "$CHECK_CAPTURE"; then
+  echo "easy_node prod-gate-signoff forwarding failed: check missing --require-wg-validate-udp-source"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-wg-validate-strict-distinct 1' "$CHECK_CAPTURE"; then
+  echo "easy_node prod-gate-signoff forwarding failed: check missing --require-wg-validate-strict-distinct"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-wg-soak-diversity-pass 1' "$CHECK_CAPTURE"; then
+  echo "easy_node prod-gate-signoff forwarding failed: check missing --require-wg-soak-diversity-pass"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-wg-soak-selection-lines 12' "$CHECK_CAPTURE"; then
+  echo "easy_node prod-gate-signoff forwarding failed: check missing --min-wg-soak-selection-lines"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-wg-soak-entry-operators 2' "$CHECK_CAPTURE"; then
+  echo "easy_node prod-gate-signoff forwarding failed: check missing --min-wg-soak-entry-operators"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-wg-soak-exit-operators 2' "$CHECK_CAPTURE"; then
+  echo "easy_node prod-gate-signoff forwarding failed: check missing --min-wg-soak-exit-operators"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--min-wg-soak-cross-operator-pairs 2' "$CHECK_CAPTURE"; then
+  echo "easy_node prod-gate-signoff forwarding failed: check missing --min-wg-soak-cross-operator-pairs"
   cat "$CHECK_CAPTURE"
   exit 1
 fi
