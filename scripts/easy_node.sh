@@ -7619,7 +7619,7 @@ client_vpn_up() {
   fi
   mkdir -p "$(dirname "$private_key_file")"
   if [[ ! -f "$private_key_file" ]]; then
-    wg genkey >"$private_key_file"
+    (umask 077 && wg genkey >"$private_key_file")
   fi
   secure_file_permissions "$private_key_file"
 
@@ -7640,6 +7640,10 @@ client_vpn_up() {
   rm -f "$log_file"
 
   ip link delete "$interface_name" >/dev/null 2>&1 || true
+  if ! ip link add dev "$interface_name" type wireguard >/dev/null 2>&1; then
+    echo "client-vpn failed to create wireguard interface: $interface_name"
+    exit 1
+  fi
 
   local trusted_keys_file="${DIRECTORY_TRUSTED_KEYS_FILE:-data/trusted_directory_keys.txt}"
   local trusted_keys_dir
