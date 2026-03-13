@@ -40,6 +40,10 @@ default_client_vpn_key_dir() {
   echo "$dir"
 }
 
+default_client_vpn_trust_file() {
+  echo "$(default_client_vpn_key_dir)/trusted_directory_keys.txt"
+}
+
 usage() {
   cat <<'USAGE'
 Usage:
@@ -6945,11 +6949,12 @@ client_vpn_status() {
     return 0
   fi
 
-  local pid iface log_file key_file proxy_addr directory_urls issuer_url issuer_urls entry_url exit_url subject prod_profile beta_profile
+  local pid iface log_file key_file trust_file proxy_addr directory_urls issuer_url issuer_urls entry_url exit_url subject prod_profile beta_profile
   pid="$(identity_value "$state_file" "CLIENT_VPN_PID")"
   iface="$(identity_value "$state_file" "CLIENT_VPN_IFACE")"
   log_file="$(identity_value "$state_file" "CLIENT_VPN_LOG_FILE")"
   key_file="$(identity_value "$state_file" "CLIENT_VPN_KEY_FILE")"
+  trust_file="$(identity_value "$state_file" "CLIENT_VPN_TRUST_FILE")"
   proxy_addr="$(identity_value "$state_file" "CLIENT_VPN_PROXY_ADDR")"
   directory_urls="$(identity_value "$state_file" "CLIENT_VPN_DIRECTORY_URLS")"
   issuer_url="$(identity_value "$state_file" "CLIENT_VPN_ISSUER_URL")"
@@ -6979,6 +6984,7 @@ client_vpn_status() {
   echo "  entry_url: ${entry_url:-unknown}"
   echo "  exit_url: ${exit_url:-unknown}"
   echo "  key_file: ${key_file:-unknown}"
+  echo "  trust_file: ${trust_file:-unknown}"
   echo "  log_file: ${log_file:-unknown}"
 
   if [[ -n "$iface" ]]; then
@@ -7675,7 +7681,10 @@ client_vpn_up() {
     exit 1
   fi
 
-  local trusted_keys_file="${DIRECTORY_TRUSTED_KEYS_FILE:-data/trusted_directory_keys.txt}"
+  local trusted_keys_file="${DIRECTORY_TRUSTED_KEYS_FILE:-}"
+  if [[ -z "$trusted_keys_file" ]]; then
+    trusted_keys_file="$(default_client_vpn_trust_file)"
+  fi
   local trusted_keys_dir
   if [[ "$trusted_keys_file" == /* ]]; then
     trusted_keys_dir="$(dirname "$trusted_keys_file")"
@@ -7825,6 +7834,7 @@ CLIENT_VPN_PID=$pid
 CLIENT_VPN_IFACE=$interface_name
 CLIENT_VPN_LOG_FILE=$log_file
 CLIENT_VPN_KEY_FILE=$private_key_file
+CLIENT_VPN_TRUST_FILE=$trusted_keys_file
 CLIENT_VPN_PROXY_ADDR=$proxy_addr
 CLIENT_VPN_DIRECTORY_URLS=$directory_urls
 CLIENT_VPN_ISSUER_URL=$issuer_url
@@ -7845,6 +7855,7 @@ EOF_STATE
   echo "  install_route: $install_route"
   echo "  subject: ${client_subject:-none}"
   echo "  directory_urls: $directory_urls"
+  echo "  trusted_keys_file: $trusted_keys_file"
   echo "  operator_floor_check: $operator_floor_check"
   echo "  issuer_quorum_check: $issuer_quorum_check"
   echo "  issuer_urls: $issuer_urls"
