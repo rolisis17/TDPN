@@ -57,6 +57,25 @@ std::string readLine(const std::string &prompt, const std::string &def = "") {
   return line;
 }
 
+std::string readOptionalLine(const std::string &prompt, const std::string &suggested = "") {
+  std::cout << prompt;
+  if (!suggested.empty()) {
+    std::cout << " [" << suggested << "]";
+  }
+  std::cout << " (Enter=none";
+  if (!suggested.empty()) {
+    std::cout << ", .=use shown value";
+  }
+  std::cout << "): ";
+  std::string line;
+  std::getline(std::cin, line);
+  line = trim(line);
+  if (line == "." && !suggested.empty()) {
+    return suggested;
+  }
+  return line;
+}
+
 int runCommand(const std::string &cmd) {
   std::cout << "\n$ " << cmd << "\n\n" << std::flush;
   int raw = std::system(cmd.c_str());
@@ -780,7 +799,7 @@ void quickServerConnect(const std::string &root, const std::string &script, ABHo
   } else if (!host.empty() && host == hosts.bHost && !hosts.aHost.empty()) {
     peerDefault = hosts.aHost;
   }
-  std::string peerHost = normalizePublicHostInput(readLine("Peer server IP/host (optional)", peerDefault));
+  std::string peerHost = normalizePublicHostInput(readOptionalLine("Peer server IP/host (optional)", peerDefault));
   if (host.empty()) {
     std::cout << "public host/IP is required\n";
     return;

@@ -20,6 +20,26 @@ prepare_log_dir() {
   echo "$dir"
 }
 
+default_client_vpn_key_dir() {
+  local dir="${EASY_NODE_CLIENT_VPN_KEY_DIR:-}"
+  if [[ -n "$dir" ]]; then
+    echo "$dir"
+    return
+  fi
+  if [[ "$ROOT_DIR" == /mnt/* ]]; then
+    if [[ -n "${XDG_STATE_HOME:-}" ]]; then
+      dir="$XDG_STATE_HOME/privacynode/client_vpn"
+    elif [[ -n "${HOME:-}" ]]; then
+      dir="$HOME/.local/state/privacynode/client_vpn"
+    else
+      dir="/tmp/privacynode_client_vpn"
+    fi
+  else
+    dir="$DEPLOY_DIR/data/client_vpn"
+  fi
+  echo "$dir"
+}
+
 usage() {
   cat <<'USAGE'
 Usage:
@@ -7615,13 +7635,23 @@ client_vpn_up() {
   fi
 
   if [[ -z "$private_key_file" ]]; then
-    private_key_file="$DEPLOY_DIR/data/client_vpn/${interface_name}.key"
+    private_key_file="$(default_client_vpn_key_dir)/${interface_name}.key"
   fi
   mkdir -p "$(dirname "$private_key_file")"
   if [[ ! -f "$private_key_file" ]]; then
     (umask 077 && wg genkey >"$private_key_file")
   fi
   secure_file_permissions "$private_key_file"
+  local client_wg_pub=""
+  if ! client_wg_pub="$(wg pubkey <"$private_key_file")"; then
+    echo "client-vpn failed to derive client wireguard public key"
+    exit 1
+  fi
+  client_wg_pub="$(printf '%s' "$client_wg_pub" | tr -d '\r\n')"
+  if ! is_valid_wg_public_key "$client_wg_pub"; then
+    echo "client-vpn derived invalid client wireguard public key"
+    exit 1
+  fi
 
   if [[ "$prod_profile" == "1" ]]; then
     for f in "$mtls_ca_file" "$mtls_client_cert_file" "$mtls_client_key_file"; do
@@ -7669,6 +7699,7 @@ client_vpn_up() {
     "CLIENT_WG_BACKEND=command"
     "CLIENT_WG_INTERFACE=$interface_name"
     "CLIENT_WG_PRIVATE_KEY_PATH=$private_key_file"
+    "CLIENT_WG_PUBLIC_KEY=$client_wg_pub"
     "CLIENT_WG_ALLOWED_IPS=$allowed_ips"
     "CLIENT_WG_INSTALL_ROUTE=$install_route"
     "CLIENT_WG_KERNEL_PROXY=1"

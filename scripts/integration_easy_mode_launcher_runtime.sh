@@ -104,7 +104,7 @@ INPUT2="$TMP_DIR/input2.txt"
   printf '2\n'   # main menu: simple server
   printf '\n'    # public host (default hosts.a)
   printf '\n'    # authority mode? default no (provider)
-  printf '\n'    # peer host (default hosts.b)
+  printf '.\n'   # peer host (use shown default hosts.b)
   printf '\n'    # prod profile (default no)
   printf '\n'    # run preflight (default yes)
   printf '\n'    # peer identity strict mode
