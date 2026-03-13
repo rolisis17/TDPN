@@ -124,15 +124,6 @@ if PATH="$TMP_BIN:$PATH" EASY_NODE_VERIFY_PUBLIC=0 ./scripts/easy_node.sh server
   exit 1
 fi
 
-PATH="$TMP_BIN:$PATH" \
-EASY_NODE_VERIFY_PUBLIC=0 \
-./scripts/easy_node.sh server-up \
-  --mode authority \
-  --public-host 203.0.113.10 \
-  --peer-directories https://198.51.100.20:8081 \
-  --beta-profile 1 \
-  --prod-profile 1 >/tmp/integration_easy_node_prod_server_env.log 2>&1
-
 env_value() {
   local file="$1"
   local key="$2"
@@ -159,6 +150,54 @@ require_nonempty() {
     exit 1
   fi
 }
+
+PATH="$TMP_BIN:$PATH" \
+EASY_NODE_VERIFY_PUBLIC=0 \
+./scripts/easy_node.sh server-up \
+  --mode authority \
+  --public-host 203.0.113.10 \
+  --beta-profile 1 \
+  --prod-profile 0 >/tmp/integration_easy_node_prod_server_env_beta.log 2>&1
+
+if [[ ! -f "$AUTH_ENV" ]]; then
+  echo "missing authority env file after beta server-up: $AUTH_ENV"
+  cat /tmp/integration_easy_node_prod_server_env_beta.log
+  exit 1
+fi
+
+require_nonempty "$(env_value "$AUTH_ENV" "DIRECTORY_OPERATOR_ID")" "beta DIRECTORY_OPERATOR_ID"
+require_eq "$(env_value "$AUTH_ENV" "ENTRY_OPERATOR_ID")" "$(env_value "$AUTH_ENV" "DIRECTORY_OPERATOR_ID")" "beta authority ENTRY_OPERATOR_ID"
+require_eq "$(env_value "$AUTH_ENV" "ENTRY_REQUIRE_DISTINCT_EXIT_OPERATOR")" "1" "beta authority ENTRY_REQUIRE_DISTINCT_EXIT_OPERATOR"
+
+PATH="$TMP_BIN:$PATH" \
+EASY_NODE_VERIFY_PUBLIC=0 \
+./scripts/easy_node.sh server-up \
+  --mode provider \
+  --public-host 198.51.100.20 \
+  --authority-directory http://203.0.113.10:8081 \
+  --authority-issuer http://203.0.113.10:8082 \
+  --peer-directories http://203.0.113.10:8081 \
+  --beta-profile 1 \
+  --prod-profile 0 >/tmp/integration_easy_node_prod_server_env_provider_beta.log 2>&1
+
+if [[ ! -f "$PROVIDER_ENV" ]]; then
+  echo "missing provider env file after beta provider server-up: $PROVIDER_ENV"
+  cat /tmp/integration_easy_node_prod_server_env_provider_beta.log
+  exit 1
+fi
+
+require_nonempty "$(env_value "$PROVIDER_ENV" "DIRECTORY_OPERATOR_ID")" "beta provider DIRECTORY_OPERATOR_ID"
+require_eq "$(env_value "$PROVIDER_ENV" "ENTRY_OPERATOR_ID")" "$(env_value "$PROVIDER_ENV" "DIRECTORY_OPERATOR_ID")" "beta provider ENTRY_OPERATOR_ID"
+require_eq "$(env_value "$PROVIDER_ENV" "ENTRY_REQUIRE_DISTINCT_EXIT_OPERATOR")" "1" "beta provider ENTRY_REQUIRE_DISTINCT_EXIT_OPERATOR"
+
+PATH="$TMP_BIN:$PATH" \
+EASY_NODE_VERIFY_PUBLIC=0 \
+./scripts/easy_node.sh server-up \
+  --mode authority \
+  --public-host 203.0.113.10 \
+  --peer-directories https://198.51.100.20:8081 \
+  --beta-profile 1 \
+  --prod-profile 1 >/tmp/integration_easy_node_prod_server_env.log 2>&1
 
 if [[ ! -f "$AUTH_ENV" ]]; then
   echo "missing authority env file after server-up: $AUTH_ENV"
