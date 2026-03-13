@@ -205,6 +205,15 @@ sudo ./scripts/easy_node.sh stop-all --with-wg-only 1 --force-iface-cleanup 1
 # one-command quick pilot runbook (quick execution + quick signoff + optional dashboard)
 ./scripts/easy_node.sh prod-pilot-cohort-quick-runbook --bootstrap-directory https://<A_SERVER_IP_OR_DNS>:8081 --subject pilot-client --max-alert-severity WARN --max-round-failures 0 --bundle-outputs 1 --bundle-fail-close 1
 
+# low-prompt sustained pilot campaign wrapper for real machine-C operator runs
+./scripts/easy_node.sh prod-pilot-cohort-campaign --bootstrap-directory https://<A_SERVER_IP_OR_DNS>:8081 --subject pilot-client
+# default campaign handoff artifacts:
+#   <reports_dir>/prod_pilot_campaign_summary.json
+#   <reports_dir>/prod_pilot_campaign_summary.md
+
+# regenerate one concise operator handoff report from saved campaign artifacts
+./scripts/easy_node.sh prod-pilot-cohort-campaign-summary --reports-dir <reports_dir> --fail-on-no-go 1
+
 ./scripts/easy_node.sh client-test \
   --directory-urls http://<SERVER_IP>:8081 \
   --issuer-url http://<SERVER_IP>:8082 \
@@ -408,6 +417,8 @@ sudo ./scripts/easy_node.sh prod-wg-strict-ingress-rehearsal \
 - `prod-pilot-cohort-quick-dashboard` composes quick trend + alert into one markdown dashboard plus JSON artifacts.
 - `prod-pilot-cohort-quick-signoff` runs quick-check + quick-trend + quick-alert in one fail-closed command and enforces `--max-alert-severity` policy.
 - `prod-pilot-cohort-quick-runbook` orchestrates quick execution + quick signoff + optional quick dashboard generation with one runbook summary artifact.
+- `prod-pilot-cohort-campaign` wraps `prod-pilot-cohort-quick-runbook` with low-prompt sustained campaign defaults, deterministic artifact paths, strict signoff policy, and generated markdown/JSON handoff summaries for real machine-C pilot operations.
+- `prod-pilot-cohort-campaign-summary` regenerates one concise operator handoff report (markdown + JSON) from saved campaign/runbook artifacts and can fail-close on `NO-GO`.
 - `server-up --prod-profile 1` forces strict fail-closed runtime (`BETA_STRICT_MODE=1`, `PROD_STRICT_MODE=1`), enables mTLS, enables live command-backend WG dataplane defaults, and on authority nodes requires signed issuer-admin auth (`ISSUER_ADMIN_REQUIRE_SIGNED=1`, token admin auth disabled).
 - `server-up --prod-profile 1` now also applies hardened abuse/adjudication defaults (`ENTRY_OPEN_RPS=12`, `ENTRY_BAN_THRESHOLD=3`, `ENTRY_BAN_SEC=90`, `ENTRY_MAX_CONCURRENT_OPENS=96`, peer+final dispute/appeal vote floors, final operator/source quorum floors, `DIRECTORY_FINAL_ADJUDICATION_MIN_RATIO=0.67`, dispute/appeal TTL caps at `259200s`).
 - `server-up --prod-profile 1` requires at least 2 issuer URLs for strict issuer quorum; include at least one peer directory from a distinct authority/issuer operator.

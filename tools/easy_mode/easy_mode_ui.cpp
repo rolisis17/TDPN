@@ -948,6 +948,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
     std::cout << "56) PROD pilot cohort quick-dashboard (trend + alert + markdown)\n";
     std::cout << "57) PROD pilot cohort quick-signoff (check + trend + alert gate)\n";
     std::cout << "58) PROD pilot cohort quick-runbook (quick + signoff + dashboard)\n";
+    std::cout << "59) PROD pilot cohort campaign (strict low-prompt preset)\n";
     std::cout << "0) Back\n";
     std::cout << "Selection: ";
 
@@ -3750,6 +3751,28 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       }
       if (!extraArgs.empty()) {
         cmd << " -- " << extraArgs;
+      }
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "59") {
+      std::string bootstrapDefault = endpointFromHost(hosts.aHost, 8081);
+      std::string bootstrapDir = normalizeEndpointURL(readLine("Bootstrap directory URL", bootstrapDefault), 8081);
+      std::string subject = trim(readLine("Client subject/invite key", "pilot-client"));
+      std::string reportsDir = trim(readLine("Reports directory (optional; blank=timestamped default)", ""));
+      bool showJson = parseYesNo(readLine("Show campaign summary JSON payload? (y/N)", "n"), false);
+      std::string extraArgs = trim(readLine("Extra campaign args (optional)", ""));
+
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " prod-pilot-cohort-campaign"
+          << " --bootstrap-directory " << shellEscape(bootstrapDir)
+          << " --subject " << shellEscape(subject)
+          << " --show-json " << (showJson ? "1" : "0");
+      if (!reportsDir.empty()) {
+        cmd << " --reports-dir " << shellEscape(reportsDir);
+      }
+      if (!extraArgs.empty()) {
+        cmd << " " << extraArgs;
       }
       runCommand(cmd.str());
       continue;

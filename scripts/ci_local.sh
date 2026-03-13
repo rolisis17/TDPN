@@ -156,6 +156,12 @@ echo "[ci] prod gate signoff integration"
 echo "[ci] prod pilot runbook integration"
 ./scripts/integration_prod_pilot_runbook.sh
 
+echo "[ci] prod pilot cohort campaign integration"
+./scripts/integration_prod_pilot_cohort_campaign.sh
+
+echo "[ci] prod pilot cohort campaign summary integration"
+./scripts/integration_prod_pilot_cohort_campaign_summary.sh
+
 echo "[ci] prod pilot cohort runbook integration"
 ./scripts/integration_prod_pilot_cohort_runbook.sh
 

@@ -318,6 +318,19 @@ sudo ./scripts/easy_node.sh prod-pilot-cohort-runbook \
   --bundle-outputs 1 \
   --bundle-fail-close 1
 
+# low-prompt sustained pilot campaign wrapper (recommended for real machine-C operator runs)
+./scripts/easy_node.sh prod-pilot-cohort-campaign \
+  --bootstrap-directory https://A_PUBLIC_IP_OR_DNS:8081 \
+  --subject pilot-client
+# default campaign handoff artifacts:
+#   <reports_dir>/prod_pilot_campaign_summary.json
+#   <reports_dir>/prod_pilot_campaign_summary.md
+
+# regenerate one concise campaign handoff report from saved artifacts
+./scripts/easy_node.sh prod-pilot-cohort-campaign-summary \
+  --reports-dir <reports_dir> \
+  --fail-on-no-go 1
+
 # production key/signing rotation maintenance runbook
 ./scripts/easy_node.sh prod-key-rotation-runbook \
   --mode auto \

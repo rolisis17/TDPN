@@ -63,6 +63,8 @@ Usage:
   ./scripts/easy_node.sh prod-wg-strict-ingress-rehearsal [prod-wg-soak/prod-wg-validate args...]
   ./scripts/easy_node.sh prod-pilot-runbook [three-machine-prod-bundle args...]
   ./scripts/easy_node.sh prod-pilot-cohort-runbook [--rounds N] [--pause-sec N] [--continue-on-fail [0|1]] [--require-all-rounds-ok [0|1]] [--reports-dir PATH] [--summary-json PATH] [--trend-summary-json PATH] [--alert-summary-json PATH] [--trend-min-go-rate-pct N] [--trend-fail-on-any-no-go [0|1]] [--trend-require-wg-validate-udp-source [0|1]] [--trend-require-wg-validate-strict-distinct [0|1]] [--trend-require-wg-soak-diversity-pass [0|1]] [--trend-min-wg-soak-selection-lines N] [--trend-min-wg-soak-entry-operators N] [--trend-min-wg-soak-exit-operators N] [--trend-min-wg-soak-cross-operator-pairs N] [--trend-max-reports N] [--trend-since-hours N] [--trend-show-top-reasons N] [--warn-go-rate-pct N] [--critical-go-rate-pct N] [--warn-no-go-count N] [--critical-no-go-count N] [--warn-eval-errors N] [--critical-eval-errors N] [--max-alert-severity OK|WARN|CRITICAL] [--bundle-outputs [0|1]] [--bundle-fail-close [0|1]] [--bundle-tar PATH] [--bundle-sha256-file PATH] [--bundle-manifest-json PATH] [--print-summary-json [0|1]] [-- <prod-pilot-runbook args...>]
+  ./scripts/easy_node.sh prod-pilot-cohort-campaign [--campaign-summary-json PATH] [--campaign-report-md PATH] [--campaign-print-report [0|1]] [--campaign-print-summary-json [0|1]] [--campaign-summary-fail-close [0|1]] [prod-pilot-cohort-quick-runbook args...]
+  ./scripts/easy_node.sh prod-pilot-cohort-campaign-summary [--runbook-summary-json PATH] [--reports-dir PATH] [--summary-json PATH] [--report-md PATH] [--print-report [0|1]] [--print-summary-json [0|1]] [--fail-on-no-go [0|1]]
   ./scripts/easy_node.sh prod-pilot-cohort-quick-check [--run-report-json PATH] [--reports-dir PATH] [--require-status-ok [0|1]] [--require-runbook-ok [0|1]] [--require-signoff-attempted [0|1]] [--require-signoff-ok [0|1]] [--require-cohort-signoff-policy [0|1]] [--require-trend-artifact-policy-match [0|1]] [--require-trend-wg-validate-udp-source [0|1]] [--require-trend-wg-validate-strict-distinct [0|1]] [--require-trend-wg-soak-diversity-pass [0|1]] [--min-trend-wg-soak-selection-lines N] [--min-trend-wg-soak-entry-operators N] [--min-trend-wg-soak-exit-operators N] [--min-trend-wg-soak-cross-operator-pairs N] [--min-go-rate-pct N] [--max-alert-severity OK|WARN|CRITICAL] [--require-bundle-created [0|1]] [--require-bundle-manifest [0|1]] [--require-summary-json [0|1]] [--require-summary-status-ok [0|1]] [--require-incident-snapshot-on-fail [0|1]] [--require-incident-snapshot-artifacts [0|1]] [--max-duration-sec N] [--show-json [0|1]]
   ./scripts/easy_node.sh prod-pilot-cohort-quick-trend [--run-report-json PATH]... [--run-report-list FILE] [--reports-dir DIR] [--max-reports N] [--since-hours N] [--require-status-ok [0|1]] [--require-runbook-ok [0|1]] [--require-signoff-attempted [0|1]] [--require-signoff-ok [0|1]] [--require-cohort-signoff-policy [0|1]] [--require-summary-json [0|1]] [--require-summary-status-ok [0|1]] [--require-incident-snapshot-on-fail [0|1]] [--require-incident-snapshot-artifacts [0|1]] [--max-duration-sec N] [--fail-on-any-no-go [0|1]] [--min-go-rate-pct N] [--show-details [0|1]] [--show-top-reasons N] [--summary-json PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh prod-pilot-cohort-quick-alert [--trend-summary-json PATH] [--run-report-json PATH]... [--run-report-list FILE] [--reports-dir DIR] [--max-reports N] [--since-hours N] [--require-status-ok [0|1]] [--require-runbook-ok [0|1]] [--require-signoff-attempted [0|1]] [--require-signoff-ok [0|1]] [--require-cohort-signoff-policy [0|1]] [--require-summary-json [0|1]] [--require-summary-status-ok [0|1]] [--require-incident-snapshot-on-fail [0|1]] [--require-incident-snapshot-artifacts [0|1]] [--max-duration-sec N] [--warn-go-rate-pct N] [--critical-go-rate-pct N] [--warn-no-go-count N] [--critical-no-go-count N] [--warn-eval-errors N] [--critical-eval-errors N] [--fail-on-warn [0|1]] [--fail-on-critical [0|1]] [--show-top-reasons N] [--summary-json PATH] [--print-summary-json [0|1]]
@@ -127,6 +129,8 @@ Notes:
   - prod-wg-strict-ingress-rehearsal runs a controlled negative rehearsal that should fail with failure class strict_ingress_policy.
   - prod-pilot-runbook wraps three-machine-prod-bundle with strict fail-closed production defaults for machine-C pilot runs and auto-generates SLO dashboard artifacts by default; append your own args to override.
   - prod-pilot-cohort-runbook runs sustained pilot rounds (multiple prod-pilot-runbook executions) and aggregates trend/alert summaries for cohort signoff, including fail-close alert-severity policy and optional tar+sha256+manifest cohort bundle output.
+  - prod-pilot-cohort-campaign wraps prod-pilot-cohort-quick-runbook with low-prompt sustained campaign defaults, deterministic artifact paths, and generated markdown/JSON handoff summaries for real machine-C operator runs.
+  - prod-pilot-cohort-campaign-summary regenerates one concise operator handoff report from saved campaign/runbook artifacts.
   - prod-pilot-cohort-quick runs one-command sustained pilot + fail-closed cohort signoff with minimal operator flags and emits a quick run report JSON artifact.
   - prod-key-rotation-runbook performs production key/secret rotation with backup, preflight checks, and rollback support.
   - prod-upgrade-runbook performs production compose upgrade flow (pull/build/restart) with backup, preflight checks, and rollback support.
@@ -4607,6 +4611,18 @@ prod_pilot_cohort_runbook() {
   "$runbook_script" "$@"
 }
 
+prod_pilot_cohort_campaign() {
+  ensure_deps_or_die
+  local campaign_script="${PROD_PILOT_COHORT_CAMPAIGN_SCRIPT:-$ROOT_DIR/scripts/prod_pilot_cohort_campaign.sh}"
+  "$campaign_script" "$@"
+}
+
+prod_pilot_cohort_campaign_summary() {
+  ensure_deps_or_die
+  local summary_script="${PROD_PILOT_COHORT_CAMPAIGN_SUMMARY_SCRIPT:-$ROOT_DIR/scripts/prod_pilot_cohort_campaign_summary.sh}"
+  "$summary_script" "$@"
+}
+
 prod_pilot_cohort_quick() {
   ensure_deps_or_die
   local quick_script="${PROD_PILOT_COHORT_QUICK_SCRIPT:-$ROOT_DIR/scripts/prod_pilot_cohort_quick.sh}"
@@ -7989,6 +8005,14 @@ main() {
     prod-pilot-cohort-runbook)
       shift
       prod_pilot_cohort_runbook "$@"
+      ;;
+    prod-pilot-cohort-campaign)
+      shift
+      prod_pilot_cohort_campaign "$@"
+      ;;
+    prod-pilot-cohort-campaign-summary)
+      shift
+      prod_pilot_cohort_campaign_summary "$@"
       ;;
     prod-pilot-cohort-quick)
       shift

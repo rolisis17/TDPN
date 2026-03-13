@@ -55,6 +55,8 @@ run_step "prod gate bundle verify integration" ./scripts/integration_prod_gate_b
 run_step "prod bundle incident snapshot integration" ./scripts/integration_prod_bundle_incident_snapshot.sh
 run_step "prod gate signoff integration" ./scripts/integration_prod_gate_signoff.sh
 run_step "prod pilot runbook integration" ./scripts/integration_prod_pilot_runbook.sh
+run_step "prod pilot cohort campaign integration" ./scripts/integration_prod_pilot_cohort_campaign.sh
+run_step "prod pilot cohort campaign summary integration" ./scripts/integration_prod_pilot_cohort_campaign_summary.sh
 run_step "prod pilot cohort runbook integration" ./scripts/integration_prod_pilot_cohort_runbook.sh
 run_step "prod pilot cohort quick integration" ./scripts/integration_prod_pilot_cohort_quick.sh
 run_step "prod pilot cohort quick check integration" ./scripts/integration_prod_pilot_cohort_quick_check.sh

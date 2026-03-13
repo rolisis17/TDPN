@@ -85,6 +85,8 @@ check_cpp '57\) PROD pilot cohort quick-signoff \(check \+ trend \+ alert gate\)
   "launcher wiring failed: option 57 menu label missing"
 check_cpp '58\) PROD pilot cohort quick-runbook \(quick \+ signoff \+ dashboard\)' \
   "launcher wiring failed: option 58 menu label missing"
+check_cpp '59\) PROD pilot cohort campaign \(strict low-prompt preset\)' \
+  "launcher wiring failed: option 59 menu label missing"
 
 echo "[easy-mode-wiring] options 36/37/38/39/40/41/42/43/44/45/46/47/48/49/50/51/52/53/54/55/56 command wiring"
 check_cpp 'if \(choice == "36"\)' "launcher wiring failed: option 36 handler missing"
@@ -193,6 +195,12 @@ check_cpp '--max-round-failures ' "launcher wiring failed: option 58 max-round-f
 check_cpp '--bundle-outputs ' "launcher wiring failed: option 58 bundle-outputs forwarding missing"
 check_cpp '--bundle-fail-close ' "launcher wiring failed: option 58 bundle-fail-close forwarding missing"
 
+echo "[easy-mode-wiring] option 59 command wiring"
+check_cpp 'if \(choice == "59"\)' "launcher wiring failed: option 59 handler missing"
+check_cpp 'prod-pilot-cohort-campaign' "launcher wiring failed: option 59 command missing"
+check_cpp 'Extra campaign args \(optional\)' "launcher wiring failed: option 59 prompt text missing"
+check_cpp '--show-json ' "launcher wiring failed: option 59 show-json forwarding missing"
+
 echo "[easy-mode-wiring] easy_node help exposure"
 if ! "$EASY_NODE" --help | rg -q 'prod-pilot-cohort-quick-signoff'; then
   echo "launcher wiring failed: easy_node help missing prod-pilot-cohort-quick-signoff"
@@ -200,6 +208,10 @@ if ! "$EASY_NODE" --help | rg -q 'prod-pilot-cohort-quick-signoff'; then
 fi
 if ! "$EASY_NODE" --help | rg -q 'prod-pilot-cohort-quick-runbook'; then
   echo "launcher wiring failed: easy_node help missing prod-pilot-cohort-quick-runbook"
+  exit 1
+fi
+if ! "$EASY_NODE" --help | rg -q 'prod-pilot-cohort-campaign'; then
+  echo "launcher wiring failed: easy_node help missing prod-pilot-cohort-campaign"
   exit 1
 fi
 if ! "$EASY_NODE" --help | rg -q 'incident-snapshot'; then
@@ -268,6 +280,10 @@ if ! "$EASY_NODE" prod-pilot-cohort-quick-runbook --help | rg -q -- '--max-round
 fi
 if ! "$EASY_NODE" prod-pilot-cohort-quick-runbook --help | rg -q -- '--bundle-outputs'; then
   echo "launcher wiring failed: prod-pilot-cohort-quick-runbook help missing --bundle-outputs"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-campaign --help | rg -q -- 'prod-pilot-cohort-quick-runbook'; then
+  echo "launcher wiring failed: prod-pilot-cohort-campaign help missing quick-runbook reference"
   exit 1
 fi
 if ! "$EASY_NODE" incident-snapshot --help | rg -q -- '--include-docker-logs'; then

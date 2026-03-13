@@ -1511,4 +1511,32 @@ assert_line_has "$line58" '--signoff-min-trend-wg-soak-cross-operator-pairs 2' "
 assert_line_has "$line58" '--signoff-require-incident-snapshot-on-fail 1' "runtime wiring failed: option 58 missing strict signoff --signoff-require-incident-snapshot-on-fail 1"
 assert_line_has "$line58" '--signoff-require-incident-snapshot-artifacts 1' "runtime wiring failed: option 58 missing strict signoff --signoff-require-incident-snapshot-artifacts 1"
 
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 59 runtime command forwarding"
+INPUT59="$TMP_DIR/input59.txt"
+{
+  printf '3\n'
+  printf '59\n'
+  for _ in $(seq 1 5); do
+    printf '\n'
+  done
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT59"
+run_ui "$INPUT59" "$TMP_DIR/run59.log"
+
+line59="$(rg 'prod-pilot-cohort-campaign' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line59" ]]; then
+  echo "runtime wiring failed: option 59 did not invoke prod-pilot-cohort-campaign"
+  cat "$TMP_DIR/run59.log"
+  exit 1
+fi
+assert_line_has "$line59" '--bootstrap-directory http://198\.51\.100\.10:8081' \
+  "runtime wiring failed: option 59 missing default bootstrap directory"
+assert_line_has "$line59" '--subject pilot-client' \
+  "runtime wiring failed: option 59 missing default subject"
+assert_line_has "$line59" '--show-json 0' \
+  "runtime wiring failed: option 59 missing default --show-json 0"
+
 echo "easy-mode launcher runtime integration check ok"
