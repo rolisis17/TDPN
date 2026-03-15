@@ -226,6 +226,8 @@ INPUT2="$TMP_DIR/input2.txt"
   printf '\n'    # authority directory URL default from peer host
   printf '\n'    # authority issuer URL default from peer host
   printf '\n'    # preflight minimum peer operators default
+  printf 'n\n'   # open dedicated server terminal? no
+  printf 'n\n'   # run server session with sudo? no
   printf '\n'    # save/update hosts (default no)
   printf '0\n'   # exit main menu
 } >"$INPUT2"
@@ -252,26 +254,83 @@ assert_line_has "$line2_preflight" '--min-peer-operators 1' \
 assert_line_has "$line2_preflight" '--prod-profile 0' \
   "runtime wiring failed: option 2 preflight missing --prod-profile 0 default"
 
-line2_serverup="$(rg '^server-up ' "$CAPTURE" | tail -n 1 || true)"
-if [[ -z "$line2_serverup" ]]; then
-  echo "runtime wiring failed: option 2 did not invoke server-up"
+line2_session="$(rg '^server-session ' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line2_session" ]]; then
+  echo "runtime wiring failed: option 2 did not invoke server-session"
   cat "$TMP_DIR/run2.log"
   exit 1
 fi
-assert_line_has "$line2_serverup" '--mode provider' \
-  "runtime wiring failed: option 2 server-up missing --mode provider"
-assert_line_has "$line2_serverup" '--public-host 198\.51\.100\.10' \
-  "runtime wiring failed: option 2 server-up missing default public host"
-assert_line_has "$line2_serverup" '--peer-directories http://203\.0\.113\.20:8081' \
-  "runtime wiring failed: option 2 server-up missing derived peer directories"
-assert_line_has "$line2_serverup" '--authority-directory http://203\.0\.113\.20:8081' \
-  "runtime wiring failed: option 2 server-up missing derived authority directory"
-assert_line_has "$line2_serverup" '--authority-issuer http://203\.0\.113\.20:8082' \
-  "runtime wiring failed: option 2 server-up missing derived authority issuer"
-assert_line_has "$line2_serverup" '--beta-profile 1' \
-  "runtime wiring failed: option 2 server-up missing --beta-profile 1"
-assert_line_has "$line2_serverup" '--prod-profile 0' \
-  "runtime wiring failed: option 2 server-up missing --prod-profile 0 default"
+assert_line_has "$line2_session" '--mode provider' \
+  "runtime wiring failed: option 2 server-session missing --mode provider"
+assert_line_has "$line2_session" '--public-host 198\.51\.100\.10' \
+  "runtime wiring failed: option 2 server-session missing default public host"
+assert_line_has "$line2_session" '--peer-directories http://203\.0\.113\.20:8081' \
+  "runtime wiring failed: option 2 server-session missing derived peer directories"
+assert_line_has "$line2_session" '--authority-directory http://203\.0\.113\.20:8081' \
+  "runtime wiring failed: option 2 server-session missing derived authority directory"
+assert_line_has "$line2_session" '--authority-issuer http://203\.0\.113\.20:8082' \
+  "runtime wiring failed: option 2 server-session missing derived authority issuer"
+assert_line_has "$line2_session" '--beta-profile 1' \
+  "runtime wiring failed: option 2 server-session missing --beta-profile 1"
+assert_line_has "$line2_session" '--prod-profile 0' \
+  "runtime wiring failed: option 2 server-session missing --prod-profile 0 default"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] main menu option 2 (simple server/authority without peer) runtime command forwarding"
+INPUT2A="$TMP_DIR/input2a.txt"
+{
+  printf '2\n'   # main menu: simple server
+  printf '198.51.100.11\n' # explicit public host
+  printf 'y\n'   # authority mode
+  printf 'y\n'   # confirm authority mode
+  printf '\n'    # peer host optional -> none
+  printf '\n'    # prod profile (default no)
+  printf '\n'    # run preflight (default yes)
+  printf '\n'    # peer identity strict mode
+  printf '\n'    # preflight timeout
+  printf '0\n'   # min peer operators
+  printf 'n\n'   # open dedicated server terminal? no
+  printf 'n\n'   # run server session with sudo? no
+  printf '\n'    # save/update hosts (default no)
+  printf 'n\n'   # generate invite now? no
+  printf '0\n'   # exit main menu
+} >"$INPUT2A"
+run_ui "$INPUT2A" "$TMP_DIR/run2a.log"
+
+line2a_preflight="$(rg '^server-preflight ' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line2a_preflight" ]]; then
+  echo "runtime wiring failed: authority option 2 did not invoke server-preflight"
+  cat "$TMP_DIR/run2a.log"
+  exit 1
+fi
+assert_line_has "$line2a_preflight" '--mode authority' \
+  "runtime wiring failed: authority option 2 preflight missing --mode authority"
+assert_line_has "$line2a_preflight" '--public-host 198\.51\.100\.11' \
+  "runtime wiring failed: authority option 2 preflight missing explicit public host"
+assert_line_has "$line2a_preflight" '--min-peer-operators 0' \
+  "runtime wiring failed: authority option 2 preflight missing explicit min-peer-operators 0"
+if printf '%s\n' "$line2a_preflight" | rg -q -- '--peer-directories '; then
+  echo "runtime wiring failed: authority option 2 preflight unexpectedly forwarded peer directories"
+  printf 'line: %s\n' "$line2a_preflight"
+  exit 1
+fi
+
+line2a_session="$(rg '^server-session ' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line2a_session" ]]; then
+  echo "runtime wiring failed: authority option 2 did not invoke server-session"
+  cat "$TMP_DIR/run2a.log"
+  exit 1
+fi
+assert_line_has "$line2a_session" '--mode authority' \
+  "runtime wiring failed: authority option 2 server-session missing --mode authority"
+assert_line_has "$line2a_session" '--public-host 198\.51\.100\.11' \
+  "runtime wiring failed: authority option 2 server-session missing explicit public host"
+if printf '%s\n' "$line2a_session" | rg -q -- '--peer-directories '; then
+  echo "runtime wiring failed: authority option 2 server-session unexpectedly forwarded peer directories"
+  printf 'line: %s\n' "$line2a_session"
+  exit 1
+fi
 
 : >"$CAPTURE"
 

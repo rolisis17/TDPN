@@ -23,6 +23,11 @@ if [[ ! -x "$EASY_NODE" ]]; then
   exit 1
 fi
 
+if grep -Eq 'std::system\(|popen\(' "$CPP_UI"; then
+  echo "launcher portability failed: easy_mode_ui.cpp still depends on std::system/popen and will break on systems without /bin/sh"
+  exit 1
+fi
+
 check_cpp() {
   local pattern="$1"
   local message="$2"

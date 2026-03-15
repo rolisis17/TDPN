@@ -2,6 +2,7 @@
 #include <cctype>
 #include <algorithm>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -79,21 +80,159 @@ std::string readOptionalLine(const std::string &prompt, const std::string &sugge
 
 bool commandExists(const std::string &name);
 
+int normalizeProcessStatus(int rawStatus) {
+  if (rawStatus == -1) {
+    return 127;
+  }
+  int rc = rawStatus;
+#ifdef WIFEXITED
+  if (WIFEXITED(rawStatus)) {
+    rc = WEXITSTATUS(rawStatus);
+  } else if (WIFSIGNALED(rawStatus)) {
+    rc = 128 + WTERMSIG(rawStatus);
+  }
+#endif
+  return rc;
+}
+
+bool isExecutableFile(const std::filesystem::path &path) {
+  std::error_code ec;
+  if (!std::filesystem::exists(path, ec) || ec) {
+    return false;
+  }
+  return ::access(path.c_str(), X_OK) == 0;
+}
+
+std::string findExecutableOnPath(const std::string &name) {
+  if (name.empty()) {
+    return "";
+  }
+  std::filesystem::path candidate(name);
+  if (candidate.is_absolute() || name.find('/') != std::string::npos) {
+    return isExecutableFile(candidate) ? candidate.string() : "";
+  }
+
+  const char *pathEnv = std::getenv("PATH");
+  if (!pathEnv || !*pathEnv) {
+    return "";
+  }
+  std::stringstream pathStream(pathEnv);
+  std::string entry;
+  while (std::getline(pathStream, entry, ':')) {
+    std::filesystem::path dir = entry.empty() ? std::filesystem::current_path() : std::filesystem::path(entry);
+    std::filesystem::path full = dir / name;
+    if (isExecutableFile(full)) {
+      return full.string();
+    }
+  }
+  return "";
+}
+
+std::string preferredShellPath() {
+  static const std::string resolved = []() -> std::string {
+    const char *overrideShell = std::getenv("PRIVACYNODE_LAUNCHER_SHELL");
+    if (overrideShell && *overrideShell) {
+      std::string found = findExecutableOnPath(overrideShell);
+      if (!found.empty()) {
+        return found;
+      }
+    }
+
+    const char *envShell = std::getenv("SHELL");
+    if (envShell && *envShell) {
+      std::string found = findExecutableOnPath(envShell);
+      if (!found.empty()) {
+        return found;
+      }
+    }
+
+    for (const char *name : {"bash", "sh", "zsh"}) {
+      std::string found = findExecutableOnPath(name);
+      if (!found.empty()) {
+        return found;
+      }
+    }
+    return "";
+  }();
+  return resolved;
+}
+
+int executeShellCommand(const std::string &cmd) {
+  const std::string shell = preferredShellPath();
+  if (shell.empty()) {
+    return 127;
+  }
+
+  std::cout.flush();
+  std::cerr.flush();
+
+  pid_t pid = fork();
+  if (pid < 0) {
+    return 127;
+  }
+  if (pid == 0) {
+    execl(shell.c_str(), shell.c_str(), "-lc", cmd.c_str(), static_cast<char *>(nullptr));
+    _exit(127);
+  }
+
+  int status = 0;
+  if (waitpid(pid, &status, 0) < 0) {
+    return 127;
+  }
+  return normalizeProcessStatus(status);
+}
+
+std::string captureShellCommandOutput(const std::string &cmd) {
+  const std::string shell = preferredShellPath();
+  if (shell.empty()) {
+    return "";
+  }
+
+  int pipefd[2];
+  if (pipe(pipefd) != 0) {
+    return "";
+  }
+
+  std::cout.flush();
+  std::cerr.flush();
+
+  pid_t pid = fork();
+  if (pid < 0) {
+    close(pipefd[0]);
+    close(pipefd[1]);
+    return "";
+  }
+  if (pid == 0) {
+    close(pipefd[0]);
+    dup2(pipefd[1], STDOUT_FILENO);
+    close(pipefd[1]);
+    execl(shell.c_str(), shell.c_str(), "-lc", cmd.c_str(), static_cast<char *>(nullptr));
+    _exit(127);
+  }
+
+  close(pipefd[1]);
+  std::string output;
+  char buffer[256];
+  ssize_t n = 0;
+  while ((n = read(pipefd[0], buffer, sizeof(buffer))) > 0) {
+    output.append(buffer, static_cast<size_t>(n));
+  }
+  close(pipefd[0]);
+
+  int status = 0;
+  waitpid(pid, &status, 0);
+  return trim(output);
+}
+
 int runCommand(const std::string &cmd) {
   std::cout << "\n$ " << cmd << "\n\n" << std::flush;
-  int raw = std::system(cmd.c_str());
-  if (raw == -1) {
+  int rc = executeShellCommand(cmd);
+  if (rc == 127 && preferredShellPath().empty()) {
+    std::cout << "no usable shell found in PATH for launcher command execution\n";
+  } else if (rc == -1) {
     std::cout << "command failed to start\n";
     return 127;
   }
-  int rc = raw;
-#ifdef WIFEXITED
-  if (WIFEXITED(raw)) {
-    rc = WEXITSTATUS(raw);
-  } else if (WIFSIGNALED(raw)) {
-    rc = 128 + WTERMSIG(raw);
-  }
-#endif
   if (rc != 0) {
     std::cout << "command failed with code " << rc << "\n";
     if (rc == 127) {
@@ -142,49 +281,48 @@ int launchDetachedTerminalCommand(const std::string &title, const std::string &s
     std::string command;
   };
 
+  const std::string shell = preferredShellPath();
+  if (shell.empty()) {
+    std::cout << "No usable shell found in PATH; running session in current terminal.\n";
+    return runCommand(sessionCommand);
+  }
+
   std::vector<Candidate> candidates;
   if (commandExists("x-terminal-emulator")) {
     candidates.push_back({"x-terminal-emulator",
-                          "x-terminal-emulator -e bash -lc " + shellEscape(sessionCommand)});
+                          "x-terminal-emulator -e " + shellEscape(shell) +
+                              " -lc " + shellEscape(sessionCommand)});
   }
   if (commandExists("gnome-terminal")) {
     candidates.push_back({"gnome-terminal",
                           "gnome-terminal --title=" + shellEscape(title) +
-                          " -- bash -lc " + shellEscape(sessionCommand)});
+                          " -- " + shellEscape(shell) + " -lc " + shellEscape(sessionCommand)});
   }
   if (commandExists("konsole")) {
     candidates.push_back({"konsole",
-                          "konsole --new-window -e bash -lc " + shellEscape(sessionCommand)});
+                          "konsole --new-window -e " + shellEscape(shell) +
+                              " -lc " + shellEscape(sessionCommand)});
   }
   if (commandExists("xfce4-terminal")) {
     candidates.push_back({"xfce4-terminal",
                           "xfce4-terminal --title=" + shellEscape(title) +
-                          " -x bash -lc " + shellEscape(sessionCommand)});
+                          " -x " + shellEscape(shell) + " -lc " + shellEscape(sessionCommand)});
   }
   if (commandExists("xterm")) {
     candidates.push_back({"xterm",
-                          "xterm -T " + shellEscape(title) + " -e bash -lc " + shellEscape(sessionCommand)});
+                          "xterm -T " + shellEscape(title) + " -e " + shellEscape(shell) +
+                              " -lc " + shellEscape(sessionCommand)});
   }
   if (commandExists("alacritty")) {
     candidates.push_back({"alacritty",
-                          "alacritty --title " + shellEscape(title) + " -e bash -lc " + shellEscape(sessionCommand)});
+                          "alacritty --title " + shellEscape(title) + " -e " + shellEscape(shell) +
+                              " -lc " + shellEscape(sessionCommand)});
   }
 
   for (const auto &candidate : candidates) {
     std::string detached = "nohup " + candidate.command + " >/dev/null 2>&1 < /dev/null &";
     std::cout << "\n$ " << detached << "\n\n" << std::flush;
-    int raw = std::system(detached.c_str());
-    int rc = raw;
-    if (raw == -1) {
-      rc = 127;
-    }
-#ifdef WIFEXITED
-    else if (WIFEXITED(raw)) {
-      rc = WEXITSTATUS(raw);
-    } else if (WIFSIGNALED(raw)) {
-      rc = 128 + WTERMSIG(raw);
-    }
-#endif
+    int rc = executeShellCommand(detached);
     if (rc == 0) {
       std::cout << "Launched " << title << " in a new terminal window.\n";
       return 0;
@@ -209,22 +347,11 @@ int launchDetachedTerminalCommandWithOptionalSudo(const std::string &title,
 }
 
 std::string captureCommandOutput(const std::string &cmd) {
-  FILE *pipe = popen(cmd.c_str(), "r");
-  if (!pipe) {
-    return "";
-  }
-  std::string output;
-  char buffer[256];
-  while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-    output += buffer;
-  }
-  pclose(pipe);
-  return trim(output);
+  return captureShellCommandOutput(cmd);
 }
 
 bool commandExists(const std::string &name) {
-  std::string cmd = "command -v " + shellEscape(name) + " >/dev/null 2>&1";
-  return std::system(cmd.c_str()) == 0;
+  return !findExecutableOnPath(name).empty();
 }
 
 std::string readJsonStringField(const std::string &jsonPath, const std::string &expr) {
