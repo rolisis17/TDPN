@@ -271,6 +271,30 @@ secure_file_permissions() {
   fi
 }
 
+resolve_entry_exit_user_non_prod() {
+  local data_dir="$DEPLOY_DIR/data/entry-exit"
+  local uid gid
+
+  # When launched with sudo, prefer the original caller's uid/gid so bind-mount
+  # writes land on the host with expected ownership.
+  if [[ "${EUID:-$(id -u)}" -eq 0 && -n "${SUDO_UID:-}" && -n "${SUDO_GID:-}" ]]; then
+    uid="$SUDO_UID"
+    gid="$SUDO_GID"
+  else
+    uid="$(id -u)"
+    gid="$(id -g)"
+  fi
+
+  mkdir -p "$data_dir" >/dev/null 2>&1 || true
+  if [[ ! -w "$data_dir" ]]; then
+    # Fallback for stale root-owned bind-mount directories from older runs.
+    echo "0:0"
+    return
+  fi
+
+  echo "${uid}:${gid}"
+}
+
 check_dependencies() {
   local ok=1
   need_cmd docker || ok=0
@@ -1432,6 +1456,9 @@ write_authority_env() {
   local public_scheme="http"
   local relay_suffix
   local issuer_suffix
+  local entry_exit_user_non_prod
+  local peer_sources_count=0
+  local peer_gossip_sec="5"
   if [[ "$prod_profile" == "1" ]]; then
     public_scheme="https"
     # In strict prod profile token admin auth is disabled; avoid persisting an unused token.
@@ -1474,19 +1501,32 @@ EOF_ENV
   secure_file_permissions "$AUTHORITY_ENV_FILE"
 
   if [[ -n "$peer_dirs" ]]; then
+    peer_sources_count="$(csv_count "$peer_dirs")"
+    if ((peer_sources_count < 2)); then
+      # With one configured peer, push-gossip often becomes one-way and noisy (403).
+      # Pull sync still runs every cycle, so disable push-gossip for this bootstrap shape.
+      peer_gossip_sec="0"
+    fi
+  fi
+
+  if [[ -n "$peer_dirs" ]]; then
     echo "DIRECTORY_PEERS=${peer_dirs}" >>"$AUTHORITY_ENV_FILE"
     echo "DIRECTORY_SYNC_SEC=5" >>"$AUTHORITY_ENV_FILE"
-    echo "DIRECTORY_GOSSIP_SEC=5" >>"$AUTHORITY_ENV_FILE"
+    echo "DIRECTORY_GOSSIP_SEC=${peer_gossip_sec}" >>"$AUTHORITY_ENV_FILE"
+  fi
+
+  if [[ "$prod_profile" != "1" ]]; then
+    entry_exit_user_non_prod="$(resolve_entry_exit_user_non_prod)"
+    cat >>"$AUTHORITY_ENV_FILE" <<EOF_RUNTIME
+ENTRY_EXIT_USER=${entry_exit_user_non_prod}
+ENTRY_EXIT_PRIVILEGED=false
+EOF_RUNTIME
   fi
 
   local beta_peer_min_operators="2"
   local beta_peer_min_votes="2"
   local beta_peer_discovery_min_votes="2"
   if [[ "$beta_profile" == "1" && "$prod_profile" != "1" ]]; then
-    local peer_sources_count=0
-    if [[ -n "$peer_dirs" ]]; then
-      peer_sources_count="$(csv_count "$peer_dirs")"
-    fi
     # Bootstrap-friendly beta defaults: if only one peer source is configured,
     # avoid permanent quorum churn while still keeping prod strict settings.
     if ((peer_sources_count < 2)); then
@@ -1605,6 +1645,9 @@ write_provider_env() {
   local exit_wg_interface="${11:-}"
   local public_scheme="http"
   local relay_suffix
+  local entry_exit_user_non_prod
+  local peer_sources_count=0
+  local peer_gossip_sec="5"
 
   if [[ "$prod_profile" == "1" ]]; then
     public_scheme="https"
@@ -1633,19 +1676,30 @@ EOF_ENV
   secure_file_permissions "$PROVIDER_ENV_FILE"
 
   if [[ -n "$peer_dirs" ]]; then
+    peer_sources_count="$(csv_count "$peer_dirs")"
+    if ((peer_sources_count < 2)); then
+      peer_gossip_sec="0"
+    fi
+  fi
+
+  if [[ -n "$peer_dirs" ]]; then
     echo "DIRECTORY_PEERS=${peer_dirs}" >>"$PROVIDER_ENV_FILE"
     echo "DIRECTORY_SYNC_SEC=5" >>"$PROVIDER_ENV_FILE"
-    echo "DIRECTORY_GOSSIP_SEC=5" >>"$PROVIDER_ENV_FILE"
+    echo "DIRECTORY_GOSSIP_SEC=${peer_gossip_sec}" >>"$PROVIDER_ENV_FILE"
+  fi
+
+  if [[ "$prod_profile" != "1" ]]; then
+    entry_exit_user_non_prod="$(resolve_entry_exit_user_non_prod)"
+    cat >>"$PROVIDER_ENV_FILE" <<EOF_RUNTIME
+ENTRY_EXIT_USER=${entry_exit_user_non_prod}
+ENTRY_EXIT_PRIVILEGED=false
+EOF_RUNTIME
   fi
 
   local beta_peer_min_operators="2"
   local beta_peer_min_votes="2"
   local beta_peer_discovery_min_votes="2"
   if [[ "$beta_profile" == "1" && "$prod_profile" != "1" ]]; then
-    local peer_sources_count=0
-    if [[ -n "$peer_dirs" ]]; then
-      peer_sources_count="$(csv_count "$peer_dirs")"
-    fi
     if ((peer_sources_count < 2)); then
       beta_peer_min_operators="1"
       beta_peer_min_votes="1"
