@@ -1191,6 +1191,100 @@ ensure_deps_or_die() {
   fi
 }
 
+check_compose_dependencies() {
+  local ok=1
+  need_cmd docker || ok=0
+  if ! docker compose version >/dev/null 2>&1; then
+    echo "missing dependency: docker compose plugin"
+    echo "hint: install docker compose plugin (sudo apt-get update && sudo apt-get install -y docker-compose-plugin)"
+    ok=0
+  fi
+  if [[ $ok -eq 1 ]]; then
+    echo "dependency check: ok"
+    docker --version
+    docker compose version
+    if ! docker info >/dev/null 2>&1; then
+      echo "note: docker daemon is not reachable for this user yet"
+      echo "      fix by adding your user to docker group or use sudo"
+    fi
+    return 0
+  fi
+  return 1
+}
+
+ensure_compose_deps_or_die() {
+  local log_dir
+  local log_file
+  log_dir="$(prepare_log_dir)"
+  log_file="$log_dir/easy_node_depcheck.log"
+  if ! check_compose_dependencies >"$log_file" 2>&1; then
+    cat "$log_file"
+    echo "dependency check log: $log_file"
+    exit 1
+  fi
+}
+
+check_server_up_dependencies() {
+  local mode="${1:-authority}"
+  local prod_profile="${2:-0}"
+  local peer_dirs="${3:-}"
+  local bootstrap_directory="${4:-}"
+  local ok=1
+
+  need_cmd docker || ok=0
+  need_cmd curl || ok=0
+
+  # Peer discovery and cross-peer identity checks parse JSON/URL fields.
+  if [[ -n "$peer_dirs" || -n "$bootstrap_directory" ]]; then
+    need_cmd jq || ok=0
+    need_cmd rg || ok=0
+  fi
+
+  # Production authority mode uses admin signing/key tooling.
+  if [[ "$prod_profile" == "1" ]]; then
+    need_cmd openssl || ok=0
+    if [[ "$mode" == "authority" ]]; then
+      need_cmd go || ok=0
+      need_cmd jq || ok=0
+      need_cmd rg || ok=0
+    fi
+  fi
+
+  if ! docker compose version >/dev/null 2>&1; then
+    echo "missing dependency: docker compose plugin"
+    echo "hint: install docker compose plugin (sudo apt-get update && sudo apt-get install -y docker-compose-plugin)"
+    ok=0
+  fi
+
+  if [[ $ok -eq 1 ]]; then
+    echo "dependency check: ok"
+    docker --version
+    docker compose version
+    if ! docker info >/dev/null 2>&1; then
+      echo "note: docker daemon is not reachable for this user yet"
+      echo "      fix by adding your user to docker group or use sudo"
+    fi
+    return 0
+  fi
+  return 1
+}
+
+ensure_server_up_deps_or_die() {
+  local mode="${1:-authority}"
+  local prod_profile="${2:-0}"
+  local peer_dirs="${3:-}"
+  local bootstrap_directory="${4:-}"
+  local log_dir
+  local log_file
+  log_dir="$(prepare_log_dir)"
+  log_file="$log_dir/easy_node_depcheck.log"
+  if ! check_server_up_dependencies "$mode" "$prod_profile" "$peer_dirs" "$bootstrap_directory" >"$log_file" 2>&1; then
+    cat "$log_file"
+    echo "dependency check log: $log_file"
+    exit 1
+  fi
+}
+
 ensure_client_vpn_deps_or_die() {
   local missing=0
   local cmd
@@ -2321,7 +2415,7 @@ server_up() {
     fi
   fi
 
-  ensure_deps_or_die
+  ensure_server_up_deps_or_die "$mode" "$prod_profile" "$peer_dirs" "$bootstrap_directory"
 
   if [[ -z "$directory_admin_token" ]]; then
     directory_admin_token="$(random_token)"
@@ -2658,7 +2752,7 @@ server_up() {
 }
 
 server_status() {
-  ensure_deps_or_die
+  ensure_compose_deps_or_die
   local env_file
   env_file="$(active_server_env_file)"
   compose_with_env "$env_file" ps
@@ -2705,7 +2799,7 @@ server_logs() {
     exit 2
   fi
 
-  ensure_deps_or_die
+  ensure_compose_deps_or_die
   local env_file mode
   env_file="$(active_server_env_file)"
   mode="$(active_server_mode)"
@@ -2774,7 +2868,7 @@ server_session() {
 }
 
 server_down() {
-  ensure_deps_or_die
+  ensure_compose_deps_or_die
   local env_file
   env_file="$(active_server_env_file)"
   compose_with_env "$env_file" down --remove-orphans
@@ -2868,7 +2962,7 @@ rotate_server_secrets() {
   secure_file_permissions "$env_file"
 
   if [[ "$restart" == "1" ]]; then
-    ensure_deps_or_die
+    ensure_compose_deps_or_die
     if [[ "$mode" == "authority" ]]; then
       compose_with_env "$env_file" up -d directory issuer entry-exit
     else
@@ -2959,7 +3053,7 @@ stop_all() {
     exit 2
   fi
 
-  ensure_deps_or_die
+  ensure_compose_deps_or_die
 
   if [[ "$with_wg_only" == "1" ]]; then
     local state_file
