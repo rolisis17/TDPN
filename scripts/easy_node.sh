@@ -229,8 +229,39 @@ USAGE
 need_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
     echo "missing dependency: $1"
+    dependency_install_hint "$1"
     return 1
   fi
+}
+
+dependency_install_hint() {
+  local cmd="${1:-}"
+  case "$cmd" in
+    wg)
+      echo "hint: install wireguard-tools (sudo apt-get update && sudo apt-get install -y wireguard-tools)"
+      ;;
+    rg)
+      echo "hint: install ripgrep (sudo apt-get update && sudo apt-get install -y ripgrep)"
+      ;;
+    jq)
+      echo "hint: install jq (sudo apt-get update && sudo apt-get install -y jq)"
+      ;;
+    go)
+      echo "hint: install golang-go (sudo apt-get update && sudo apt-get install -y golang-go)"
+      ;;
+    docker)
+      echo "hint: install docker engine + compose plugin, or run: ./scripts/easy_node.sh install-deps-ubuntu"
+      ;;
+    timeout)
+      echo "hint: install coreutils (sudo apt-get update && sudo apt-get install -y coreutils)"
+      ;;
+    curl)
+      echo "hint: install curl (sudo apt-get update && sudo apt-get install -y curl)"
+      ;;
+    openssl)
+      echo "hint: install openssl (sudo apt-get update && sudo apt-get install -y openssl)"
+      ;;
+  esac
 }
 
 secure_file_permissions() {
@@ -1166,6 +1197,7 @@ ensure_client_vpn_deps_or_die() {
   for cmd in go wg ip curl rg timeout jq; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
       echo "missing dependency for client-vpn: $cmd"
+      dependency_install_hint "$cmd"
       missing=1
     fi
   done

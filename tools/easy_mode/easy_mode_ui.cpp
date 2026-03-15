@@ -96,6 +96,10 @@ int runCommand(const std::string &cmd) {
 #endif
   if (rc != 0) {
     std::cout << "command failed with code " << rc << "\n";
+    if (rc == 127) {
+      std::cout << "hint: command not found in this environment. "
+                   "On Ubuntu, run: ./scripts/easy_node.sh install-deps-ubuntu\n";
+    }
   }
   return rc;
 }
