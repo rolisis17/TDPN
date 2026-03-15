@@ -101,6 +101,18 @@ float_gt() {
   awk -v l="$left" -v r="$right" 'BEGIN { exit (l > r) ? 0 : 1 }'
 }
 
+abs_path() {
+  local path="$1"
+  path="$(trim "$path")"
+  if [[ -z "$path" ]]; then
+    printf '%s' ""
+  elif [[ "$path" = /* ]]; then
+    printf '%s' "$path"
+  else
+    printf '%s' "$ROOT_DIR/$path"
+  fi
+}
+
 reports_dir=""
 run_report_list=""
 declare -a run_report_jsons=()
@@ -599,6 +611,16 @@ no_go_count="$(jq -r '.no_go // 0' "$trend_summary_json")"
 go_rate_pct="$(jq -r '.go_rate_pct // 0' "$trend_summary_json")"
 evaluation_errors="$(jq -r '.evaluation_errors // 0' "$trend_summary_json")"
 alert_severity="$(jq -r '.severity // "UNKNOWN"' "$alert_summary_json")"
+incident_source_run_report_json="$(abs_path "$(jq -r '.incident_snapshot.latest_failed_run_report.source_run_report_json.path // .incident_snapshot.latest_failed_run_report.path // ""' "$trend_summary_json" 2>/dev/null || true)")"
+incident_source_summary_json="$(abs_path "$(jq -r '.incident_snapshot.latest_failed_run_report.source_summary_json.path // ""' "$trend_summary_json" 2>/dev/null || true)")"
+incident_summary_json="$(abs_path "$(jq -r '.incident_snapshot.latest_failed_run_report.summary_json.path // ""' "$trend_summary_json" 2>/dev/null || true)")"
+incident_report_md="$(abs_path "$(jq -r '.incident_snapshot.latest_failed_run_report.report_md.path // ""' "$trend_summary_json" 2>/dev/null || true)")"
+incident_bundle_dir="$(abs_path "$(jq -r '.incident_snapshot.latest_failed_run_report.bundle_dir.path // ""' "$trend_summary_json" 2>/dev/null || true)")"
+incident_bundle_tar="$(abs_path "$(jq -r '.incident_snapshot.latest_failed_run_report.bundle_tar.path // ""' "$trend_summary_json" 2>/dev/null || true)")"
+incident_status="$(jq -r '.incident_snapshot.latest_failed_run_report.status // ""' "$trend_summary_json" 2>/dev/null || true)"
+incident_attachment_manifest="$(abs_path "$(jq -r '.incident_snapshot.latest_failed_run_report.attachment_manifest.path // ""' "$trend_summary_json" 2>/dev/null || true)")"
+incident_attachment_skipped="$(abs_path "$(jq -r '.incident_snapshot.latest_failed_run_report.attachment_skipped.path // ""' "$trend_summary_json" 2>/dev/null || true)")"
+incident_attachment_count="$(jq -r '.incident_snapshot.latest_failed_run_report.attachment_count // 0' "$trend_summary_json" 2>/dev/null || echo 0)"
 
 action_line="Continue pilot traffic and keep monitoring."
 case "$alert_severity" in
@@ -662,6 +684,31 @@ esac
   echo "- Trend summary JSON: $trend_summary_json"
   echo "- Alert summary JSON: $alert_summary_json"
   echo "- Dashboard markdown: $dashboard_md"
+  if [[ -n "$incident_summary_json" || -n "$incident_report_md" ]]; then
+    echo "- Incident summary JSON: ${incident_summary_json:-unset}"
+    echo "- Incident report markdown: ${incident_report_md:-unset}"
+  fi
+  if [[ -n "$incident_attachment_manifest" || -n "$incident_attachment_skipped" ]]; then
+    echo "- Incident attachment manifest: ${incident_attachment_manifest:-unset}"
+    echo "- Incident attachment skipped: ${incident_attachment_skipped:-unset}"
+    echo "- Incident attachment count: ${incident_attachment_count:-0}"
+  fi
+  echo
+  if [[ -n "$incident_source_run_report_json" || -n "$incident_summary_json" || -n "$incident_report_md" || -n "$incident_attachment_manifest" || -n "$incident_attachment_skipped" ]]; then
+    echo "## Incident Handoff"
+    echo
+    echo "- Source run report: ${incident_source_run_report_json:-unset}"
+    echo "- Source gate summary JSON: ${incident_source_summary_json:-unset}"
+    echo "- Incident status: ${incident_status:-unset}"
+    echo "- Incident bundle dir: ${incident_bundle_dir:-unset}"
+    echo "- Incident bundle tar: ${incident_bundle_tar:-unset}"
+    echo "- Incident summary JSON: ${incident_summary_json:-unset}"
+    echo "- Incident report markdown: ${incident_report_md:-unset}"
+    echo "- Incident attachment manifest: ${incident_attachment_manifest:-unset}"
+    echo "- Incident attachment skipped: ${incident_attachment_skipped:-unset}"
+    echo "- Incident attachment count: ${incident_attachment_count:-0}"
+    echo
+  fi
   echo
   echo "## Recommended Operator Action"
   echo
@@ -676,6 +723,9 @@ esac
 echo "[prod-gate-slo-dashboard] trend_summary_json=$trend_summary_json"
 echo "[prod-gate-slo-dashboard] alert_summary_json=$alert_summary_json"
 echo "[prod-gate-slo-dashboard] dashboard_md=$dashboard_md"
+if [[ -n "$incident_source_run_report_json" || -n "$incident_summary_json" || -n "$incident_report_md" || -n "$incident_attachment_manifest" || -n "$incident_attachment_skipped" ]]; then
+  echo "[prod-gate-slo-dashboard] incident_handoff source_summary_json=${incident_source_summary_json:-unset} source_run_report=${incident_source_run_report_json:-unset} summary_json=${incident_summary_json:-unset} report_md=${incident_report_md:-unset} attachment_manifest=${incident_attachment_manifest:-unset} attachment_skipped=${incident_attachment_skipped:-unset} attachment_count=${incident_attachment_count}"
+fi
 
 if [[ "$print_dashboard" == "1" ]]; then
   echo "[prod-gate-slo-dashboard] dashboard_preview:"

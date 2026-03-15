@@ -15,6 +15,8 @@ TMP_DIR="$(mktemp -d)"
 GATE_FAIL_SCRIPT="$TMP_DIR/fake_gate_fail.sh"
 SNAPSHOT_SCRIPT="$TMP_DIR/fake_incident_snapshot.sh"
 SNAPSHOT_CAPTURE="$TMP_DIR/incident_snapshot_args.log"
+ATTACH_ONE="$TMP_DIR/runtime_doctor_before.log"
+ATTACH_TWO="$TMP_DIR/runtime_doctor_before.json"
 
 cleanup() {
   rm -rf "$TMP_DIR"
@@ -27,16 +29,23 @@ set -euo pipefail
 exit "${FAKE_GATE_FAIL_RC:-31}"
 EOF_GATE_FAIL
 chmod +x "$GATE_FAIL_SCRIPT"
+printf 'runtime-doctor\n' >"$ATTACH_ONE"
+printf '{"status":"OK"}\n' >"$ATTACH_TWO"
 
 cat >"$SNAPSHOT_SCRIPT" <<'EOF_SNAPSHOT'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >>"${SNAPSHOT_CAPTURE_FILE:?}"
 bundle_dir=""
+declare -a attach_artifacts=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --bundle-dir)
       bundle_dir="${2:-}"
+      shift 2
+      ;;
+    --attach-artifact)
+      attach_artifacts+=("${2:-}")
       shift 2
       ;;
     *)
@@ -47,6 +56,23 @@ done
 if [[ -n "$bundle_dir" ]]; then
   mkdir -p "$bundle_dir"
   printf 'ok\n' >"$bundle_dir/fake_snapshot.txt"
+  cat >"$bundle_dir/incident_summary.json" <<'EOF_SUMMARY'
+{"status":"ok","findings":[]}
+EOF_SUMMARY
+  cat >"$bundle_dir/incident_report.md" <<'EOF_REPORT'
+# Incident Snapshot Summary
+EOF_REPORT
+  if ((${#attach_artifacts[@]} > 0)); then
+    mkdir -p "$bundle_dir/attachments"
+    : >"$bundle_dir/attachments/manifest.tsv"
+    attach_index=0
+    for artifact in "${attach_artifacts[@]}"; do
+      attach_index=$((attach_index + 1))
+      dest_rel="attachments/$(printf '%02d' "$attach_index")_$(basename "$artifact")"
+      cp "$artifact" "$bundle_dir/$dest_rel"
+      printf '%s\tfile\t%s\n' "$dest_rel" "$artifact" >>"$bundle_dir/attachments/manifest.tsv"
+    done
+  fi
   tar -czf "${bundle_dir}.tar.gz" -C "$(dirname "$bundle_dir")" "$(basename "$bundle_dir")"
 fi
 exit 0
@@ -71,6 +97,8 @@ FAKE_GATE_FAIL_RC=31 \
   --incident-snapshot-docker-log-lines 33 \
   --incident-snapshot-timeout-sec 5 \
   --incident-snapshot-compose-project deploy \
+  --incident-snapshot-attach-artifact "$ATTACH_ONE" \
+  --incident-snapshot-attach-artifact "$ATTACH_TWO" \
   --directory-a http://dir-a:8081 \
   --directory-b http://dir-b:8081 \
   --issuer-url http://issuer-main:8082 \
@@ -103,9 +131,24 @@ if ! rg -q -- '--docker-log-lines 33' "$SNAPSHOT_CAPTURE"; then
   cat "$SNAPSHOT_CAPTURE"
   exit 1
 fi
+if ! rg -q -- "--attach-artifact $ATTACH_ONE" "$SNAPSHOT_CAPTURE"; then
+  echo "incident bundle integration failed: first attach artifact not forwarded"
+  cat "$SNAPSHOT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- "--attach-artifact $ATTACH_TWO" "$SNAPSHOT_CAPTURE"; then
+  echo "incident bundle integration failed: second attach artifact not forwarded"
+  cat "$SNAPSHOT_CAPTURE"
+  exit 1
+fi
 if [[ ! -f "$BUNDLE_ENABLE/incident_snapshot/fake_snapshot.txt" ]]; then
   echo "incident bundle integration failed: snapshot bundle output missing"
   find "$BUNDLE_ENABLE" -maxdepth 3 -type f -print || true
+  exit 1
+fi
+if [[ ! -f "$BUNDLE_ENABLE/incident_snapshot/incident_summary.json" || ! -f "$BUNDLE_ENABLE/incident_snapshot/incident_report.md" ]]; then
+  echo "incident bundle integration failed: summary/report outputs missing from snapshot bundle"
+  find "$BUNDLE_ENABLE/incident_snapshot" -maxdepth 2 -type f -print || true
   exit 1
 fi
 if ! rg -q '"enabled_on_fail"[[:space:]]*:[[:space:]]*true' "$BUNDLE_ENABLE/prod_bundle_run_report.json"; then
@@ -113,8 +156,33 @@ if ! rg -q '"enabled_on_fail"[[:space:]]*:[[:space:]]*true' "$BUNDLE_ENABLE/prod
   cat "$BUNDLE_ENABLE/prod_bundle_run_report.json"
   exit 1
 fi
+if ! rg -q '"enabled"[[:space:]]*:[[:space:]]*true' "$BUNDLE_ENABLE/prod_bundle_run_report.json"; then
+  echo "incident bundle integration failed: run report missing enabled=true"
+  cat "$BUNDLE_ENABLE/prod_bundle_run_report.json"
+  exit 1
+fi
 if ! rg -q '"status"[[:space:]]*:[[:space:]]*"ok"' "$BUNDLE_ENABLE/prod_bundle_run_report.json"; then
   echo "incident bundle integration failed: run report missing incident snapshot status=ok"
+  cat "$BUNDLE_ENABLE/prod_bundle_run_report.json"
+  exit 1
+fi
+if ! rg -q '"summary_json"[[:space:]]*:[[:space:]]*".*/incident_snapshot/incident_summary.json"' "$BUNDLE_ENABLE/prod_bundle_run_report.json"; then
+  echo "incident bundle integration failed: run report missing incident snapshot summary_json path"
+  cat "$BUNDLE_ENABLE/prod_bundle_run_report.json"
+  exit 1
+fi
+if ! rg -q '"report_md"[[:space:]]*:[[:space:]]*".*/incident_snapshot/incident_report.md"' "$BUNDLE_ENABLE/prod_bundle_run_report.json"; then
+  echo "incident bundle integration failed: run report missing incident snapshot report_md path"
+  cat "$BUNDLE_ENABLE/prod_bundle_run_report.json"
+  exit 1
+fi
+if ! rg -q '"attachment_manifest"[[:space:]]*:[[:space:]]*".*/incident_snapshot/attachments/manifest.tsv"' "$BUNDLE_ENABLE/prod_bundle_run_report.json"; then
+  echo "incident bundle integration failed: run report missing incident attachment manifest path"
+  cat "$BUNDLE_ENABLE/prod_bundle_run_report.json"
+  exit 1
+fi
+if ! rg -q '"attachment_count"[[:space:]]*:[[:space:]]*2' "$BUNDLE_ENABLE/prod_bundle_run_report.json"; then
+  echo "incident bundle integration failed: run report missing incident attachment count"
   cat "$BUNDLE_ENABLE/prod_bundle_run_report.json"
   exit 1
 fi
@@ -148,6 +216,11 @@ if [[ -s "$SNAPSHOT_CAPTURE" ]]; then
 fi
 if ! rg -q '"enabled_on_fail"[[:space:]]*:[[:space:]]*false' "$BUNDLE_DISABLE/prod_bundle_run_report.json"; then
   echo "incident bundle integration failed: run report missing enabled_on_fail=false"
+  cat "$BUNDLE_DISABLE/prod_bundle_run_report.json"
+  exit 1
+fi
+if ! rg -q '"enabled"[[:space:]]*:[[:space:]]*false' "$BUNDLE_DISABLE/prod_bundle_run_report.json"; then
+  echo "incident bundle integration failed: run report missing enabled=false"
   cat "$BUNDLE_DISABLE/prod_bundle_run_report.json"
   exit 1
 fi

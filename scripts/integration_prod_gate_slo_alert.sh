@@ -37,6 +37,22 @@ cat >"$WARN_SUMMARY" <<'EOF_WARN_SUMMARY'
   "no_go": 1,
   "evaluation_errors": 0,
   "reports_total": 10,
+  "incident_snapshot": {
+    "latest_failed_run_report": {
+      "source_run_report_json": {"path": "/tmp/run_b/prod_bundle_run_report.json", "exists": true},
+      "source_summary_json": {"path": "/tmp/run_b/prod_gate_summary.json", "exists": true, "valid_json": true},
+      "path": "/tmp/run_b/prod_bundle_run_report.json",
+      "enabled": true,
+      "status": "ok",
+      "bundle_dir": {"path": "/tmp/run_b/incident_bundle", "exists": true},
+      "bundle_tar": {"path": "/tmp/run_b/incident_bundle.tar.gz", "exists": true},
+      "summary_json": {"path": "/tmp/run_b/incident_summary.json", "exists": true, "valid_json": true},
+      "report_md": {"path": "/tmp/run_b/incident_report.md", "exists": true},
+      "attachment_manifest": {"path": "/tmp/run_b/incident_attachments_manifest.json", "exists": true},
+      "attachment_skipped": {"path": "/tmp/run_b/incident_attachments_skipped.json", "exists": true},
+      "attachment_count": 1
+    }
+  },
   "top_no_go_reasons": [
     {"count": 1, "reason": "wg_soak_rounds_failed exceeds limit"}
   ]
@@ -93,6 +109,16 @@ if ! rg -q '\[prod-gate-slo-alert\] severity=WARN' /tmp/integration_prod_gate_sl
   cat /tmp/integration_prod_gate_slo_alert_warn.log
   exit 1
 fi
+if ! rg -q '\[prod-gate-slo-alert\] incident_handoff source_summary_json=' /tmp/integration_prod_gate_slo_alert_warn.log; then
+  echo "expected normalized incident handoff output not found"
+  cat /tmp/integration_prod_gate_slo_alert_warn.log
+  exit 1
+fi
+if ! rg -q 'attachment_manifest=/tmp/run_b/incident_attachments_manifest.json' /tmp/integration_prod_gate_slo_alert_warn.log; then
+  echo "expected incident attachment manifest in alert handoff output"
+  cat /tmp/integration_prod_gate_slo_alert_warn.log
+  exit 1
+fi
 
 echo "[prod-gate-slo-alert] WARN fail-close"
 set +e
@@ -108,6 +134,15 @@ set -e
 if [[ "$warn_fail_rc" -ne 1 ]]; then
   echo "expected rc=1 for WARN fail-close (got $warn_fail_rc)"
   cat /tmp/integration_prod_gate_slo_alert_warn_fail.log
+  exit 1
+fi
+WARN_ALERT_JSON="$TMP_DIR/alert_warn_out.json"
+./scripts/prod_gate_slo_alert.sh \
+  --trend-summary-json "$WARN_SUMMARY" \
+  --summary-json "$WARN_ALERT_JSON" >/tmp/integration_prod_gate_slo_alert_warn_json.log 2>&1
+if ! jq -e '.incident_snapshot.latest_failed_run_report.source_run_report_json.path == "/tmp/run_b/prod_bundle_run_report.json" and .incident_snapshot.latest_failed_run_report.source_summary_json.path == "/tmp/run_b/prod_gate_summary.json" and .incident_snapshot.latest_failed_run_report.summary_json.path == "/tmp/run_b/incident_summary.json" and .incident_snapshot.latest_failed_run_report.report_md.path == "/tmp/run_b/incident_report.md" and .incident_snapshot.latest_failed_run_report.attachment_manifest.path == "/tmp/run_b/incident_attachments_manifest.json" and .incident_snapshot.latest_failed_run_report.attachment_skipped.path == "/tmp/run_b/incident_attachments_skipped.json" and .incident_snapshot.latest_failed_run_report.attachment_count == 1' "$WARN_ALERT_JSON" >/dev/null 2>&1; then
+  echo "alert WARN summary JSON missing incident handoff block"
+  cat "$WARN_ALERT_JSON"
   exit 1
 fi
 

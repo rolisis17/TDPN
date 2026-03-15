@@ -284,10 +284,14 @@ sudo ./scripts/easy_node.sh prod-pilot-cohort-runbook \
 # default quick run report: <reports_dir>/prod_pilot_cohort_quick_report.json
 
 # quick run-report fail-closed verification
+# output now also points to incident_summary.json / incident_report.md when
+# failed-round incident artifacts are available in the linked cohort summary
 ./scripts/easy_node.sh prod-pilot-cohort-quick-check \
   --run-report-json <reports_dir>/prod_pilot_cohort_quick_report.json
+# output now also prints the upstream pre_real_host_readiness_summary_json path when present
 
 # quick-mode trend across quick run reports
+# trend summary JSON now also carries latest failed incident handoff paths when available
 ./scripts/easy_node.sh prod-pilot-cohort-quick-trend \
   --reports-dir .easy-node-logs \
   --since-hours 24 \
@@ -299,11 +303,14 @@ sudo ./scripts/easy_node.sh prod-pilot-cohort-runbook \
   --summary-json .easy-node-logs/prod_pilot_quick_alert_24h.json
 
 # quick-mode dashboard artifact (trend + alert + markdown)
+# dashboard markdown now also renders incident handoff paths when present
 ./scripts/easy_node.sh prod-pilot-cohort-quick-dashboard \
   --reports-dir .easy-node-logs \
   --dashboard-md .easy-node-logs/prod_pilot_quick_dashboard_24h.md
 
 # one-command quick signoff gate (latest check + trend + alert severity policy)
+# signoff_json now also carries incident handoff paths and the upstream
+# pre_real_host_readiness_summary_json path when available
 ./scripts/easy_node.sh prod-pilot-cohort-quick-signoff \
   --run-report-json <reports_dir>/prod_pilot_cohort_quick_report.json \
   --reports-dir .easy-node-logs \
@@ -330,6 +337,8 @@ sudo ./scripts/easy_node.sh prod-pilot-cohort-runbook \
 ./scripts/easy_node.sh prod-pilot-cohort-campaign-summary \
   --reports-dir <reports_dir> \
   --fail-on-no-go 1
+# this summary now also points to failed-round incident snapshot summary/report artifacts
+# and preserves the upstream pre_real_host_readiness_summary.json pointer when present
 
 # production key/signing rotation maintenance runbook
 ./scripts/easy_node.sh prod-key-rotation-runbook \

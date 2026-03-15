@@ -1,0 +1,435 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
+for cmd in jq rg; do
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    echo "missing required command: $cmd"
+    exit 1
+  fi
+done
+
+TMP_DIR="$(mktemp -d)"
+trap 'rm -rf "$TMP_DIR"' EXIT
+
+STATE_DIR="$TMP_DIR/state"
+FAKE_DOCTOR="$TMP_DIR/fake_runtime_doctor.sh"
+FAKE_STATUS="$TMP_DIR/fake_manual_validation_status.sh"
+FAKE_RECORD="$TMP_DIR/fake_manual_validation_record.sh"
+CAPTURE="$TMP_DIR/capture.log"
+
+cat >"$FAKE_DOCTOR" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+cat <<'OUT'
+[runtime-doctor] status=WARN findings=2 warnings=2 failures=0
+[runtime-doctor] summary_json_payload:
+{
+  "version": 1,
+  "generated_at_utc": "2026-03-14T15:00:00Z",
+  "status": "WARN",
+  "summary": {
+    "findings_total": 2,
+    "warnings_total": 2,
+    "failures_total": 0
+  },
+  "findings": [
+    {
+      "severity": "WARN",
+      "code": "client_env_file_not_writable",
+      "message": "client env file not writable",
+      "remediation": "sudo chown user:user deploy/.env.easy.client"
+    },
+    {
+      "severity": "WARN",
+      "code": "wg_only_dir_not_writable",
+      "message": "wg-only runtime dir not writable",
+      "remediation": "sudo rm -rf deploy/data/wg_only"
+    }
+  ]
+}
+OUT
+EOF
+chmod +x "$FAKE_DOCTOR"
+
+echo "[manual-validation] baseline status"
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR" \
+RUNTIME_DOCTOR_SCRIPT="$FAKE_DOCTOR" \
+./scripts/manual_validation_status.sh --show-json 1 >/tmp/integration_manual_validation_status_baseline.log
+
+if ! rg -q '\[manual-validation-status\] runtime_hygiene=WARN' /tmp/integration_manual_validation_status_baseline.log; then
+  echo "baseline status missing runtime_hygiene WARN line"
+  cat /tmp/integration_manual_validation_status_baseline.log
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] wg_only_stack_selftest=PENDING' /tmp/integration_manual_validation_status_baseline.log; then
+  echo "baseline status missing pending wg_only_stack_selftest"
+  cat /tmp/integration_manual_validation_status_baseline.log
+  exit 1
+fi
+baseline_json="$(awk '/^\[manual-validation-status\] summary_json_payload:/{flag=1; next} flag{print}' /tmp/integration_manual_validation_status_baseline.log)"
+if [[ -z "$baseline_json" ]]; then
+  echo "baseline status missing JSON payload"
+  cat /tmp/integration_manual_validation_status_baseline.log
+  exit 1
+fi
+if ! printf '%s\n' "$baseline_json" | jq -e '.summary.next_action_check_id == "runtime_hygiene"' >/dev/null; then
+  echo "baseline status JSON missing expected next_action_check_id"
+  printf '%s\n' "$baseline_json"
+  exit 1
+fi
+if ! printf '%s\n' "$baseline_json" | jq -e '.summary.next_action_command == "./scripts/easy_node.sh runtime-doctor --show-json 1"' >/dev/null; then
+  echo "baseline status JSON missing expected next_action_command"
+  printf '%s\n' "$baseline_json"
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] next_action_command=\./scripts/easy_node.sh runtime-doctor --show-json 1' /tmp/integration_manual_validation_status_baseline.log; then
+  echo "baseline status missing next_action_command output line"
+  cat /tmp/integration_manual_validation_status_baseline.log
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] machine_c_smoke_ready=false' /tmp/integration_manual_validation_status_baseline.log; then
+  echo "baseline status missing machine_c_smoke_ready=false line"
+  cat /tmp/integration_manual_validation_status_baseline.log
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] machine_c_smoke_blockers=runtime_hygiene,wg_only_stack_selftest' /tmp/integration_manual_validation_status_baseline.log; then
+  echo "baseline status missing machine_c_smoke_blockers line"
+  cat /tmp/integration_manual_validation_status_baseline.log
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] machine_c_smoke_next_command=sudo \./scripts/easy_node\.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api\.ipify\.org --country-url https://ipinfo\.io/country' /tmp/integration_manual_validation_status_baseline.log; then
+  echo "baseline status missing machine_c_smoke_next_command line"
+  cat /tmp/integration_manual_validation_status_baseline.log
+  exit 1
+fi
+if ! printf '%s\n' "$baseline_json" | jq -e '
+  .summary.pre_machine_c_gate.ready == false
+  and .summary.pre_machine_c_gate.blockers == ["runtime_hygiene","wg_only_stack_selftest"]
+  and .summary.pre_machine_c_gate.next_check_id == "machine_c_vpn_smoke"
+  and .summary.pre_machine_c_gate.next_command == "sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country"
+' >/dev/null; then
+  echo "baseline status JSON missing expected pre_machine_c_gate fields"
+  printf '%s\n' "$baseline_json"
+  exit 1
+fi
+
+echo "[manual-validation] record pass receipt"
+artifact_path="$ROOT_DIR/scripts/easy_node.sh"
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR" \
+./scripts/manual_validation_record.sh \
+  --check-id wg_only_stack_selftest \
+  --status pass \
+  --notes "Linux root host rerun passed" \
+  --artifact "$artifact_path" \
+  --command "sudo ./scripts/integration_wg_only_stack_selftest.sh" \
+  --show-json 1 >/tmp/integration_manual_validation_record.log
+
+if ! rg -q '\[manual-validation-record\] check_id=wg_only_stack_selftest status=pass' /tmp/integration_manual_validation_record.log; then
+  echo "manual-validation-record missing expected summary line"
+  cat /tmp/integration_manual_validation_record.log
+  exit 1
+fi
+receipt_json_path="$(sed -n 's/^\[manual-validation-record\] receipt_json=//p' /tmp/integration_manual_validation_record.log | tail -n 1)"
+if [[ -z "$receipt_json_path" || ! -f "$receipt_json_path" ]]; then
+  echo "manual-validation-record missing receipt artifact"
+  cat /tmp/integration_manual_validation_record.log
+  exit 1
+fi
+if ! jq -e --arg artifact "$artifact_path" '.check_id == "wg_only_stack_selftest" and .status == "pass" and (.artifacts | index($artifact) != null)' "$receipt_json_path" >/dev/null; then
+  echo "manual-validation-record receipt JSON missing expected fields"
+  cat "$receipt_json_path"
+  exit 1
+fi
+
+echo "[manual-validation] updated status"
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR" \
+RUNTIME_DOCTOR_SCRIPT="$FAKE_DOCTOR" \
+./scripts/manual_validation_status.sh --show-json 1 >/tmp/integration_manual_validation_status_recorded.log
+
+if ! rg -q '\[manual-validation-status\] wg_only_stack_selftest=PASS' /tmp/integration_manual_validation_status_recorded.log; then
+  echo "recorded status missing wg_only_stack_selftest PASS line"
+  cat /tmp/integration_manual_validation_status_recorded.log
+  exit 1
+fi
+if ! rg -q "artifacts: ${ROOT_DIR}/scripts/easy_node.sh" /tmp/integration_manual_validation_status_recorded.log; then
+  echo "recorded status missing artifact path"
+  cat /tmp/integration_manual_validation_status_recorded.log
+  exit 1
+fi
+recorded_json="$(awk '/^\[manual-validation-status\] summary_json_payload:/{flag=1; next} flag{print}' /tmp/integration_manual_validation_status_recorded.log)"
+if [[ -z "$recorded_json" ]]; then
+  echo "recorded status missing JSON payload"
+  cat /tmp/integration_manual_validation_status_recorded.log
+  exit 1
+fi
+if ! printf '%s\n' "$recorded_json" | jq -e '
+  .summary.warn_checks == 1
+  and .summary.pass_checks == 1
+  and .summary.next_action_command == "./scripts/easy_node.sh runtime-doctor --show-json 1"
+  and .summary.pre_machine_c_gate.ready == false
+  and .summary.pre_machine_c_gate.blockers == ["runtime_hygiene"]
+  and .summary.pre_machine_c_gate.next_check_id == "machine_c_vpn_smoke"
+  and .summary.pre_machine_c_gate.next_command == "sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country"
+  and (.checks[] | select(.check_id == "machine_c_vpn_smoke") | .command == "sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country")
+  and (.checks[] | select(.check_id == "three_machine_prod_signoff") | .command == "sudo ./scripts/easy_node.sh three-machine-prod-signoff --bundle-dir .easy-node-logs/prod_gate_bundle --directory-a https://A_HOST:8081 --directory-b https://B_HOST:8081 --issuer-url https://A_HOST:8082 --entry-url https://A_HOST:8083 --exit-url https://A_HOST:8084 --pre-real-host-readiness 1 --runtime-fix 1 --print-summary-json 1")
+  and (.checks[] | select(.check_id == "wg_only_stack_selftest") | .status == "pass")
+' >/dev/null; then
+  echo "recorded status JSON missing expected summary counts"
+  printf '%s\n' "$recorded_json"
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] machine_c_smoke_ready=false' /tmp/integration_manual_validation_status_recorded.log; then
+  echo "recorded status missing machine_c_smoke_ready=false line"
+  cat /tmp/integration_manual_validation_status_recorded.log
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] machine_c_smoke_blockers=runtime_hygiene' /tmp/integration_manual_validation_status_recorded.log; then
+  echo "recorded status missing machine_c_smoke_blockers line"
+  cat /tmp/integration_manual_validation_status_recorded.log
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] machine_c_smoke_next_command=sudo \./scripts/easy_node\.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api\.ipify\.org --country-url https://ipinfo\.io/country' /tmp/integration_manual_validation_status_recorded.log; then
+  echo "recorded status missing machine_c_smoke_next_command line"
+  cat /tmp/integration_manual_validation_status_recorded.log
+  exit 1
+fi
+
+echo "[manual-validation] failed smoke incident handoff"
+SMOKE_INCIDENT_DIR="$TMP_DIR/client_vpn_smoke_incident"
+mkdir -p "$SMOKE_INCIDENT_DIR/attachments"
+SMOKE_INCIDENT_SUMMARY_JSON="$SMOKE_INCIDENT_DIR/incident_summary.json"
+SMOKE_INCIDENT_REPORT_MD="$SMOKE_INCIDENT_DIR/incident_report.md"
+SMOKE_INCIDENT_ATTACH_MANIFEST="$SMOKE_INCIDENT_DIR/attachments/manifest.tsv"
+SMOKE_INCIDENT_ATTACH_SKIPPED="$SMOKE_INCIDENT_DIR/attachments/skipped.tsv"
+SMOKE_INCIDENT_LOG="$SMOKE_INCIDENT_DIR/incident_snapshot.log"
+SMOKE_INCIDENT_BUNDLE_TAR="${SMOKE_INCIDENT_DIR}.tar.gz"
+SMOKE_RUN_SUMMARY_JSON="$TMP_DIR/client_vpn_smoke_fail_summary.json"
+SMOKE_READY_SUMMARY_SOURCE="$TMP_DIR/source_manual_validation_readiness_summary.json"
+SMOKE_READY_REPORT_SOURCE="$TMP_DIR/source_manual_validation_readiness_report.md"
+SMOKE_READY_LOG_SOURCE="$TMP_DIR/source_client_vpn_manual_validation_report.log"
+SMOKE_READY_SUMMARY_ATTACHMENT="$SMOKE_INCIDENT_DIR/attachments/02_manual_validation_readiness_summary.json"
+SMOKE_READY_REPORT_ATTACHMENT="$SMOKE_INCIDENT_DIR/attachments/03_manual_validation_readiness_report.md"
+SMOKE_READY_LOG_ATTACHMENT="$SMOKE_INCIDENT_DIR/attachments/04_client_vpn_manual_validation_report.log"
+
+cat <<'EOF_INCIDENT_SUMMARY' >"$SMOKE_INCIDENT_SUMMARY_JSON"
+{"status":"ok"}
+EOF_INCIDENT_SUMMARY
+cat <<'EOF_INCIDENT_REPORT' >"$SMOKE_INCIDENT_REPORT_MD"
+# Client VPN Incident Report
+EOF_INCIDENT_REPORT
+printf '%s\n' '{"readiness_status":"NOT_READY"}' >"$SMOKE_READY_SUMMARY_SOURCE"
+printf '%s\n' '# Readiness Report Attachment' >"$SMOKE_READY_REPORT_SOURCE"
+printf '%s\n' 'manual validation report log' >"$SMOKE_READY_LOG_SOURCE"
+printf '%s\n' '{"readiness_status":"NOT_READY"}' >"$SMOKE_READY_SUMMARY_ATTACHMENT"
+printf '%s\n' '# Readiness Report Attachment' >"$SMOKE_READY_REPORT_ATTACHMENT"
+printf '%s\n' 'manual validation report log' >"$SMOKE_READY_LOG_ATTACHMENT"
+cat >"$SMOKE_INCIDENT_ATTACH_MANIFEST" <<EOF_INCIDENT_MANIFEST
+attachments/01_runtime_doctor_before.json	file	/tmp/runtime_doctor_before.json
+attachments/02_manual_validation_readiness_summary.json	file	$SMOKE_READY_SUMMARY_SOURCE
+attachments/03_manual_validation_readiness_report.md	file	$SMOKE_READY_REPORT_SOURCE
+attachments/04_client_vpn_manual_validation_report.log	file	$SMOKE_READY_LOG_SOURCE
+EOF_INCIDENT_MANIFEST
+: >"$SMOKE_INCIDENT_ATTACH_SKIPPED"
+printf 'incident snapshot log\n' >"$SMOKE_INCIDENT_LOG"
+: >"$SMOKE_INCIDENT_BUNDLE_TAR"
+cat >"$SMOKE_RUN_SUMMARY_JSON" <<EOF_SMOKE_SUMMARY
+{
+  "version": 1,
+  "status": "fail",
+  "stage": "up",
+  "incident_snapshot": {
+    "enabled_on_fail": true,
+    "status": "ok",
+    "bundle_dir": "$SMOKE_INCIDENT_DIR",
+    "bundle_tar": "$SMOKE_INCIDENT_BUNDLE_TAR",
+    "summary_json": "$SMOKE_INCIDENT_SUMMARY_JSON",
+    "report_md": "$SMOKE_INCIDENT_REPORT_MD",
+    "attachment_manifest": "$SMOKE_INCIDENT_ATTACH_MANIFEST",
+    "attachment_skipped": "$SMOKE_INCIDENT_ATTACH_SKIPPED",
+    "attachment_count": 1,
+    "log": "$SMOKE_INCIDENT_LOG"
+  }
+}
+EOF_SMOKE_SUMMARY
+
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR" \
+./scripts/manual_validation_record.sh \
+  --check-id machine_c_vpn_smoke \
+  --status fail \
+  --notes "Machine C smoke failed with captured incident bundle" \
+  --artifact "$SMOKE_RUN_SUMMARY_JSON" \
+  --artifact "$SMOKE_INCIDENT_DIR" \
+  --artifact "$SMOKE_INCIDENT_SUMMARY_JSON" \
+  --artifact "$SMOKE_INCIDENT_REPORT_MD" \
+  --artifact "$SMOKE_INCIDENT_ATTACH_MANIFEST" \
+  --artifact "$SMOKE_INCIDENT_ATTACH_SKIPPED" \
+  --artifact "$SMOKE_INCIDENT_LOG" \
+  --command "sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country" \
+  --show-json 0 >/tmp/integration_manual_validation_record_smoke_fail.log
+
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR" \
+RUNTIME_DOCTOR_SCRIPT="$FAKE_DOCTOR" \
+./scripts/manual_validation_status.sh --show-json 1 >/tmp/integration_manual_validation_status_incident.log
+
+if ! rg -q '\[manual-validation-status\] machine_c_vpn_smoke=FAIL' /tmp/integration_manual_validation_status_incident.log; then
+  echo "incident status missing machine_c_vpn_smoke FAIL line"
+  cat /tmp/integration_manual_validation_status_incident.log
+  exit 1
+fi
+if ! rg -q "incident_handoff source_summary_json=${SMOKE_RUN_SUMMARY_JSON}" /tmp/integration_manual_validation_status_incident.log; then
+  echo "incident status missing incident_handoff source summary path"
+  cat /tmp/integration_manual_validation_status_incident.log
+  exit 1
+fi
+if ! rg -q "readiness_report_summary_attachment=${SMOKE_READY_SUMMARY_ATTACHMENT}" /tmp/integration_manual_validation_status_incident.log; then
+  echo "incident status missing readiness summary attachment path"
+  cat /tmp/integration_manual_validation_status_incident.log
+  exit 1
+fi
+if ! rg -q "readiness_report_md_attachment=${SMOKE_READY_REPORT_ATTACHMENT}" /tmp/integration_manual_validation_status_incident.log; then
+  echo "incident status missing readiness report attachment path"
+  cat /tmp/integration_manual_validation_status_incident.log
+  exit 1
+fi
+if ! rg -q "summary_json=${SMOKE_INCIDENT_SUMMARY_JSON}" /tmp/integration_manual_validation_status_incident.log; then
+  echo "incident status missing incident summary path"
+  cat /tmp/integration_manual_validation_status_incident.log
+  exit 1
+fi
+if ! rg -q "\\[manual-validation-status\\] latest_failed_incident_check_id=machine_c_vpn_smoke" /tmp/integration_manual_validation_status_incident.log; then
+  echo "incident status missing latest failed incident check id"
+  cat /tmp/integration_manual_validation_status_incident.log
+  exit 1
+fi
+if ! rg -q "\\[manual-validation-status\\] latest_failed_incident_summary_json=${SMOKE_INCIDENT_SUMMARY_JSON}" /tmp/integration_manual_validation_status_incident.log; then
+  echo "incident status missing latest failed incident summary path"
+  cat /tmp/integration_manual_validation_status_incident.log
+  exit 1
+fi
+if ! rg -q "\\[manual-validation-status\\] latest_failed_incident_readiness_report_summary_attachment=${SMOKE_READY_SUMMARY_ATTACHMENT}" /tmp/integration_manual_validation_status_incident.log; then
+  echo "incident status missing latest failed readiness summary attachment path"
+  cat /tmp/integration_manual_validation_status_incident.log
+  exit 1
+fi
+if ! rg -q "\\[manual-validation-status\\] latest_failed_incident_readiness_report_md_attachment=${SMOKE_READY_REPORT_ATTACHMENT}" /tmp/integration_manual_validation_status_incident.log; then
+  echo "incident status missing latest failed readiness report attachment path"
+  cat /tmp/integration_manual_validation_status_incident.log
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] machine_c_smoke_ready=false' /tmp/integration_manual_validation_status_incident.log; then
+  echo "incident status missing machine_c_smoke_ready=false line"
+  cat /tmp/integration_manual_validation_status_incident.log
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] machine_c_smoke_blockers=runtime_hygiene' /tmp/integration_manual_validation_status_incident.log; then
+  echo "incident status missing machine_c_smoke_blockers line"
+  cat /tmp/integration_manual_validation_status_incident.log
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] machine_c_smoke_next_command=sudo \./scripts/easy_node\.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api\.ipify\.org --country-url https://ipinfo\.io/country' /tmp/integration_manual_validation_status_incident.log; then
+  echo "incident status missing machine_c_smoke_next_command line"
+  cat /tmp/integration_manual_validation_status_incident.log
+  exit 1
+fi
+incident_json="$(awk '/^\[manual-validation-status\] summary_json_payload:/{flag=1; next} flag{print}' /tmp/integration_manual_validation_status_incident.log)"
+if [[ -z "$incident_json" ]]; then
+  echo "incident status missing JSON payload"
+  cat /tmp/integration_manual_validation_status_incident.log
+  exit 1
+fi
+if ! printf '%s\n' "$incident_json" | jq -e --arg smoke_summary "$SMOKE_RUN_SUMMARY_JSON" --arg incident_summary "$SMOKE_INCIDENT_SUMMARY_JSON" --arg incident_report "$SMOKE_INCIDENT_REPORT_MD" --arg ready_summary_attachment "$SMOKE_READY_SUMMARY_ATTACHMENT" --arg ready_report_attachment "$SMOKE_READY_REPORT_ATTACHMENT" --arg ready_log_attachment "$SMOKE_READY_LOG_ATTACHMENT" '
+  .summary.warn_checks == 1
+  and .summary.pass_checks == 1
+  and .summary.fail_checks == 1
+  and .summary.next_action_check_id == "runtime_hygiene"
+  and .summary.pre_machine_c_gate.ready == false
+  and .summary.pre_machine_c_gate.blockers == ["runtime_hygiene"]
+  and .summary.pre_machine_c_gate.next_check_id == "machine_c_vpn_smoke"
+  and .summary.pre_machine_c_gate.next_command == "sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country"
+  and .summary.latest_failed_incident.check_id == "machine_c_vpn_smoke"
+  and .summary.latest_failed_incident.summary_json.path == $incident_summary
+  and .summary.latest_failed_incident.readiness_report_summary_attachment.bundle_path == $ready_summary_attachment
+  and .summary.latest_failed_incident.readiness_report_md_attachment.bundle_path == $ready_report_attachment
+  and .summary.latest_failed_incident.readiness_report_log_attachment.bundle_path == $ready_log_attachment
+  and ([.checks[]
+    | select(.check_id == "machine_c_vpn_smoke")
+    | (
+        .incident_handoff.available == true
+        and .incident_handoff.source_summary_json.path == $smoke_summary
+        and .incident_handoff.summary_json.path == $incident_summary
+        and .incident_handoff.report_md.path == $incident_report
+        and .incident_handoff.attachment_count == 1
+        and .incident_handoff.readiness_report_summary_attachment.bundle_path == $ready_summary_attachment
+        and .incident_handoff.readiness_report_md_attachment.bundle_path == $ready_report_attachment
+        and .incident_handoff.readiness_report_log_attachment.bundle_path == $ready_log_attachment
+      )
+  ] | any)
+' >/dev/null; then
+  echo "incident status JSON missing expected incident handoff fields"
+  printf '%s\n' "$incident_json"
+  exit 1
+fi
+
+echo "[manual-validation] easy_node forwarding"
+cat >"$FAKE_STATUS" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'manual-validation-status %s\n' "\$*" >>"$CAPTURE"
+EOF
+cat >"$FAKE_RECORD" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'manual-validation-record %s\n' "\$*" >>"$CAPTURE"
+EOF
+chmod +x "$FAKE_STATUS" "$FAKE_RECORD"
+: >"$CAPTURE"
+
+MANUAL_VALIDATION_STATUS_SCRIPT="$FAKE_STATUS" \
+./scripts/easy_node.sh manual-validation-status \
+  --base-port 19400 \
+  --client-iface wgctest0 \
+  --exit-iface wgestest0 \
+  --vpn-iface wgvpntest0 \
+  --show-json 1
+
+line_status="$(rg '^manual-validation-status ' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line_status" ]]; then
+  echo "easy_node manual-validation-status forwarding failed"
+  cat "$CAPTURE"
+  exit 1
+fi
+for expected in '--base-port 19400' '--client-iface wgctest0' '--exit-iface wgestest0' '--vpn-iface wgvpntest0' '--show-json 1'; do
+  if ! grep -F -- "$expected" <<<"$line_status" >/dev/null; then
+    echo "easy_node manual-validation-status forwarding missing $expected"
+    cat "$CAPTURE"
+    exit 1
+  fi
+done
+
+MANUAL_VALIDATION_RECORD_SCRIPT="$FAKE_RECORD" \
+./scripts/easy_node.sh manual-validation-record \
+  --check-id machine_c_vpn_smoke \
+  --status fail \
+  --notes "test note" \
+  --artifact scripts/easy_node.sh \
+  --command "sudo ./scripts/easy_node.sh client-vpn-up" \
+  --show-json 1
+
+line_record="$(rg '^manual-validation-record ' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line_record" ]]; then
+  echo "easy_node manual-validation-record forwarding failed"
+  cat "$CAPTURE"
+  exit 1
+fi
+for expected in '--check-id machine_c_vpn_smoke' '--status fail' '--notes test note' '--artifact scripts/easy_node.sh' '--command sudo ./scripts/easy_node.sh client-vpn-up' '--show-json 1'; do
+  if ! grep -F -- "$expected" <<<"$line_record" >/dev/null; then
+    echo "easy_node manual-validation-record forwarding missing $expected"
+    cat "$CAPTURE"
+    exit 1
+  fi
+done
+
+echo "manual validation status integration ok"

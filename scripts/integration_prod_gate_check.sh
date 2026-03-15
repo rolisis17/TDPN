@@ -334,6 +334,8 @@ if ! rg -q 'incident snapshot status is not ok' /tmp/integration_prod_gate_check
 fi
 
 echo "[prod-gate-check] incident snapshot artifacts policy"
+INCIDENT_ARTIFACTS_SUMMARY_JSON="$TMP_DIR/incident_bundle/incident_summary.json"
+INCIDENT_ARTIFACTS_REPORT_MD="$TMP_DIR/incident_bundle/incident_report.md"
 INCIDENT_ARTIFACTS_RUN_REPORT="$TMP_DIR/prod_bundle_run_report_incident_artifacts.json"
 cat >"$INCIDENT_ARTIFACTS_RUN_REPORT" <<EOF_RUN_REPORT_INCIDENT_ARTIFACTS
 {
@@ -348,7 +350,9 @@ cat >"$INCIDENT_ARTIFACTS_RUN_REPORT" <<EOF_RUN_REPORT_INCIDENT_ARTIFACTS
     "status": "ok",
     "rc": 0,
     "bundle_dir": "$TMP_DIR/missing_incident_bundle_dir",
-    "bundle_tar": "$TMP_DIR/missing_incident_bundle.tar.gz"
+    "bundle_tar": "$TMP_DIR/missing_incident_bundle.tar.gz",
+    "summary_json": "$TMP_DIR/missing_incident_bundle_dir/incident_summary.json",
+    "report_md": "$TMP_DIR/missing_incident_bundle_dir/incident_report.md"
   }
 }
 EOF_RUN_REPORT_INCIDENT_ARTIFACTS
@@ -375,8 +379,20 @@ fi
 
 INCIDENT_ARTIFACTS_DIR="$TMP_DIR/incident_bundle"
 INCIDENT_ARTIFACTS_TAR="$TMP_DIR/incident_bundle.tar.gz"
+INCIDENT_ARTIFACTS_ATTACH_DIR="$INCIDENT_ARTIFACTS_DIR/attachments"
+INCIDENT_ARTIFACTS_ATTACH_MANIFEST="$INCIDENT_ARTIFACTS_ATTACH_DIR/manifest.tsv"
+INCIDENT_ARTIFACTS_ATTACH_SKIPPED="$INCIDENT_ARTIFACTS_ATTACH_DIR/skipped.tsv"
 mkdir -p "$INCIDENT_ARTIFACTS_DIR"
+mkdir -p "$INCIDENT_ARTIFACTS_ATTACH_DIR"
 printf 'incident snapshot tar placeholder\n' >"$INCIDENT_ARTIFACTS_TAR"
+cat >"$INCIDENT_ARTIFACTS_SUMMARY_JSON" <<'EOF_INCIDENT_SUMMARY'
+{"status":"ok","findings":[]}
+EOF_INCIDENT_SUMMARY
+cat >"$INCIDENT_ARTIFACTS_REPORT_MD" <<'EOF_INCIDENT_REPORT'
+# Incident Snapshot Summary
+EOF_INCIDENT_REPORT
+printf 'attachments/01_runtime_doctor_before.json\tfile\t/tmp/runtime_doctor_before.json\n' >"$INCIDENT_ARTIFACTS_ATTACH_MANIFEST"
+printf '/tmp/runtime_fix.json\tmissing\n' >"$INCIDENT_ARTIFACTS_ATTACH_SKIPPED"
 INCIDENT_ARTIFACTS_PASS_RUN_REPORT="$TMP_DIR/prod_bundle_run_report_incident_artifacts_pass.json"
 cat >"$INCIDENT_ARTIFACTS_PASS_RUN_REPORT" <<EOF_RUN_REPORT_INCIDENT_ARTIFACTS_PASS
 {
@@ -391,7 +407,12 @@ cat >"$INCIDENT_ARTIFACTS_PASS_RUN_REPORT" <<EOF_RUN_REPORT_INCIDENT_ARTIFACTS_P
     "status": "ok",
     "rc": 0,
     "bundle_dir": "$INCIDENT_ARTIFACTS_DIR",
-    "bundle_tar": "$INCIDENT_ARTIFACTS_TAR"
+    "bundle_tar": "$INCIDENT_ARTIFACTS_TAR",
+    "summary_json": "$INCIDENT_ARTIFACTS_SUMMARY_JSON",
+    "report_md": "$INCIDENT_ARTIFACTS_REPORT_MD",
+    "attachment_manifest": "$INCIDENT_ARTIFACTS_ATTACH_MANIFEST",
+    "attachment_skipped": "$INCIDENT_ARTIFACTS_ATTACH_SKIPPED",
+    "attachment_count": 1
   }
 }
 EOF_RUN_REPORT_INCIDENT_ARTIFACTS_PASS
@@ -403,6 +424,16 @@ EOF_RUN_REPORT_INCIDENT_ARTIFACTS_PASS
   --require-incident-snapshot-on-fail 1 \
   --require-incident-snapshot-artifacts 1 \
   --show-json 0 >/tmp/integration_prod_gate_check_incident_artifacts_pass.log 2>&1
+if ! rg -q 'incident_handoff source_run_report=' /tmp/integration_prod_gate_check_incident_artifacts_pass.log; then
+  echo "expected incident handoff summary/report line not found in prod-gate-check output"
+  cat /tmp/integration_prod_gate_check_incident_artifacts_pass.log
+  exit 1
+fi
+if ! rg -q "attachment_manifest=${INCIDENT_ARTIFACTS_ATTACH_MANIFEST}" /tmp/integration_prod_gate_check_incident_artifacts_pass.log; then
+  echo "expected incident attachment manifest not surfaced in prod-gate-check output"
+  cat /tmp/integration_prod_gate_check_incident_artifacts_pass.log
+  exit 1
+fi
 
 echo "[prod-gate-check] run-report missing file"
 set +e

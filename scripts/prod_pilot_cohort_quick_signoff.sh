@@ -110,6 +110,52 @@ is_non_negative_decimal() {
   [[ "$value" =~ ^[0-9]+([.][0-9]+)?$ ]]
 }
 
+json_string_signoff() {
+  local file="$1"
+  local expr="$2"
+  if [[ -z "$file" || ! -f "$file" ]]; then
+    printf '%s' ""
+    return
+  fi
+  jq -r "$expr // \"\"" "$file" 2>/dev/null || true
+}
+
+json_bool01_signoff() {
+  local file="$1"
+  local expr="$2"
+  local value
+  value="$(json_string_signoff "$file" "$expr")"
+  case "$value" in
+    true|1) echo "1" ;;
+    false|0|"") echo "0" ;;
+    *) echo "0" ;;
+  esac
+}
+
+path_exists01_signoff() {
+  local path
+  path="$(trim "${1:-}")"
+  if [[ -n "$path" && -e "$path" ]]; then
+    echo "1"
+  else
+    echo "0"
+  fi
+}
+
+json_valid01_signoff() {
+  local path
+  path="$(trim "${1:-}")"
+  if [[ -z "$path" || ! -f "$path" ]]; then
+    echo "0"
+    return
+  fi
+  if jq -e . "$path" >/dev/null 2>&1; then
+    echo "1"
+  else
+    echo "0"
+  fi
+}
+
 for cmd in bash jq date; do
   need_cmd "$cmd"
 done
@@ -544,6 +590,45 @@ fi
 
 mkdir -p "$reports_dir" "$(dirname "$trend_summary_json")" "$(dirname "$alert_summary_json")" "$(dirname "$signoff_json")"
 
+quick_summary_json=""
+pre_real_host_readiness_summary_json=""
+quick_summary_exists="0"
+quick_summary_valid_json="0"
+incident_source_run_report=""
+incident_enabled="0"
+incident_status=""
+incident_bundle_dir=""
+incident_bundle_tar=""
+incident_summary_json=""
+incident_report_md=""
+incident_source_run_report_exists="0"
+incident_bundle_dir_exists="0"
+incident_bundle_tar_exists="0"
+incident_summary_exists="0"
+incident_summary_valid_json="0"
+incident_report_exists="0"
+if [[ -f "$run_report_json" ]] && jq -e . "$run_report_json" >/dev/null 2>&1; then
+  quick_summary_json="$(abs_path "$(json_string_signoff "$run_report_json" '.artifacts.summary_json')")"
+  pre_real_host_readiness_summary_json="$(abs_path "$(json_string_signoff "$run_report_json" '.artifacts.pre_real_host_readiness_summary_json')")"
+fi
+quick_summary_exists="$(path_exists01_signoff "$quick_summary_json")"
+quick_summary_valid_json="$(json_valid01_signoff "$quick_summary_json")"
+if [[ "$quick_summary_valid_json" == "1" ]]; then
+  incident_source_run_report="$(abs_path "$(json_string_signoff "$quick_summary_json" '.incident_snapshot.latest_failed_run_report.path')")"
+  incident_enabled="$(json_bool01_signoff "$quick_summary_json" '.incident_snapshot.latest_failed_run_report.enabled')"
+  incident_status="$(json_string_signoff "$quick_summary_json" '.incident_snapshot.latest_failed_run_report.status')"
+  incident_bundle_dir="$(abs_path "$(json_string_signoff "$quick_summary_json" '.incident_snapshot.latest_failed_run_report.bundle_dir.path')")"
+  incident_bundle_tar="$(abs_path "$(json_string_signoff "$quick_summary_json" '.incident_snapshot.latest_failed_run_report.bundle_tar.path')")"
+  incident_summary_json="$(abs_path "$(json_string_signoff "$quick_summary_json" '.incident_snapshot.latest_failed_run_report.summary_json.path')")"
+  incident_report_md="$(abs_path "$(json_string_signoff "$quick_summary_json" '.incident_snapshot.latest_failed_run_report.report_md.path')")"
+fi
+incident_source_run_report_exists="$(path_exists01_signoff "$incident_source_run_report")"
+incident_bundle_dir_exists="$(path_exists01_signoff "$incident_bundle_dir")"
+incident_bundle_tar_exists="$(path_exists01_signoff "$incident_bundle_tar")"
+incident_summary_exists="$(path_exists01_signoff "$incident_summary_json")"
+incident_summary_valid_json="$(json_valid01_signoff "$incident_summary_json")"
+incident_report_exists="$(path_exists01_signoff "$incident_report_md")"
+
 fail_on_warn="0"
 fail_on_critical="0"
 case "$max_alert_severity" in
@@ -702,8 +787,16 @@ jq -nc \
   --arg trend_summary_json "$trend_summary_json" \
   --arg alert_summary_json "$alert_summary_json" \
   --arg signoff_json "$signoff_json" \
+  --arg quick_summary_json "$quick_summary_json" \
+  --arg pre_real_host_readiness_summary_json "$pre_real_host_readiness_summary_json" \
   --arg max_alert_severity "$max_alert_severity" \
   --arg alert_severity "${alert_severity:-}" \
+  --arg incident_source_run_report "$incident_source_run_report" \
+  --arg incident_status "${incident_status:-}" \
+  --arg incident_bundle_dir "$incident_bundle_dir" \
+  --arg incident_bundle_tar "$incident_bundle_tar" \
+  --arg incident_summary_json "$incident_summary_json" \
+  --arg incident_report_md "$incident_report_md" \
   --argjson check_latest "$check_latest" \
   --argjson check_trend "$check_trend" \
     --argjson check_alert "$check_alert" \
@@ -728,6 +821,15 @@ jq -nc \
     --argjson require_bundle_manifest "$require_bundle_manifest" \
     --argjson require_incident_snapshot_on_fail "$require_incident_snapshot_on_fail" \
     --argjson require_incident_snapshot_artifacts "$require_incident_snapshot_artifacts" \
+    --argjson quick_summary_exists "$quick_summary_exists" \
+    --argjson quick_summary_valid_json "$quick_summary_valid_json" \
+    --argjson incident_enabled "$incident_enabled" \
+    --argjson incident_source_run_report_exists "$incident_source_run_report_exists" \
+    --argjson incident_bundle_dir_exists "$incident_bundle_dir_exists" \
+    --argjson incident_bundle_tar_exists "$incident_bundle_tar_exists" \
+    --argjson incident_summary_exists "$incident_summary_exists" \
+    --argjson incident_summary_valid_json "$incident_summary_valid_json" \
+    --argjson incident_report_exists "$incident_report_exists" \
   '{
     version: 1,
     started_at: $started_at,
@@ -763,9 +865,21 @@ jq -nc \
     observed: {
       alert_severity: ($alert_severity // "")
     },
+    incident_snapshot: {
+      source_summary_json: {path: ($quick_summary_json // ""), exists: $quick_summary_exists, valid_json: $quick_summary_valid_json},
+      source_pre_real_host_readiness_summary_json: {path: ($pre_real_host_readiness_summary_json // "")},
+      source_run_report_json: {path: ($incident_source_run_report // ""), exists: $incident_source_run_report_exists},
+      enabled: $incident_enabled,
+      status: ($incident_status // ""),
+      bundle_dir: {path: ($incident_bundle_dir // ""), exists: $incident_bundle_dir_exists},
+      bundle_tar: {path: ($incident_bundle_tar // ""), exists: $incident_bundle_tar_exists},
+      summary_json: {path: ($incident_summary_json // ""), exists: $incident_summary_exists, valid_json: $incident_summary_valid_json},
+      report_md: {path: ($incident_report_md // ""), exists: $incident_report_exists}
+    },
     artifacts: {
       run_report_json: $run_report_json,
       reports_dir: $reports_dir,
+      pre_real_host_readiness_summary_json: $pre_real_host_readiness_summary_json,
       trend_summary_json: $trend_summary_json,
       alert_summary_json: $alert_summary_json,
       signoff_json: $signoff_json
@@ -773,6 +887,12 @@ jq -nc \
   }' >"$signoff_json"
 
 echo "prod-pilot-cohort-quick-signoff: signoff_json=$signoff_json status=$status"
+if [[ -n "$pre_real_host_readiness_summary_json" ]]; then
+  echo "prod-pilot-cohort-quick-signoff: pre_real_host_readiness_summary_json=$pre_real_host_readiness_summary_json"
+fi
+if [[ -n "$incident_source_run_report" || -n "$incident_summary_json" || -n "$incident_report_md" ]]; then
+  echo "prod-pilot-cohort-quick-signoff: incident_handoff source_pre_real_host_readiness_summary_json=${pre_real_host_readiness_summary_json:-unset} source_run_report=${incident_source_run_report:-unset} summary_json=${incident_summary_json:-unset} report_md=${incident_report_md:-unset}"
+fi
 if [[ "$show_json" == "1" ]]; then
   cat "$signoff_json"
 fi

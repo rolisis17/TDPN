@@ -59,6 +59,22 @@ cat >"$summary_json" <<'EOF_TREND_JSON'
   "no_go": 2,
   "go_rate_pct": 75.00,
   "evaluation_errors": 1,
+  "incident_snapshot": {
+    "latest_failed_run_report": {
+      "source_run_report_json": {"path": "/tmp/run_b/prod_bundle_run_report.json", "exists": true},
+      "source_summary_json": {"path": "/tmp/run_b/prod_gate_summary.json", "exists": true, "valid_json": true},
+      "path": "/tmp/run_b/prod_bundle_run_report.json",
+      "enabled": true,
+      "status": "ok",
+      "bundle_dir": {"path": "/tmp/run_b/incident_bundle", "exists": true},
+      "bundle_tar": {"path": "/tmp/run_b/incident_bundle.tar.gz", "exists": true},
+      "summary_json": {"path": "/tmp/run_b/incident_summary.json", "exists": true, "valid_json": true},
+      "report_md": {"path": "/tmp/run_b/incident_report.md", "exists": true},
+      "attachment_manifest": {"path": "/tmp/run_b/incident_attachments_manifest.json", "exists": true},
+      "attachment_skipped": {"path": "/tmp/run_b/incident_attachments_skipped.json", "exists": true},
+      "attachment_count": 1
+    }
+  },
   "top_no_go_reasons": [
     {"count": 2, "reason": "wg soak failed rounds exceeded policy"},
     {"count": 1, "reason": "preflight status not ok"}
@@ -160,6 +176,31 @@ if ! rg -q 'count=2 reason=wg soak failed rounds exceeded policy' "$DASHBOARD_MD
   cat "$DASHBOARD_MD"
   exit 1
 fi
+if ! rg -q '## Incident Handoff' "$DASHBOARD_MD"; then
+  echo "dashboard missing incident handoff section"
+  cat "$DASHBOARD_MD"
+  exit 1
+fi
+if ! rg -q 'Source gate summary JSON: /tmp/run_b/prod_gate_summary.json' "$DASHBOARD_MD"; then
+  echo "dashboard missing incident source summary pointer"
+  cat "$DASHBOARD_MD"
+  exit 1
+fi
+if ! rg -q 'Incident summary JSON: /tmp/run_b/incident_summary.json' "$DASHBOARD_MD"; then
+  echo "dashboard missing incident summary pointer"
+  cat "$DASHBOARD_MD"
+  exit 1
+fi
+if ! rg -q 'Incident attachment manifest: /tmp/run_b/incident_attachments_manifest.json' "$DASHBOARD_MD"; then
+  echo "dashboard missing incident attachment manifest pointer"
+  cat "$DASHBOARD_MD"
+  exit 1
+fi
+if ! rg -q 'Incident attachment count: 1' "$DASHBOARD_MD"; then
+  echo "dashboard missing incident attachment count"
+  cat "$DASHBOARD_MD"
+  exit 1
+fi
 if ! rg -q -- '--require-preflight-ok 1' "$TREND_CAPTURE"; then
   echo "dashboard did not forward --require-preflight-ok to trend script"
   cat "$TREND_CAPTURE"
@@ -258,6 +299,16 @@ fi
 if ! rg -q -- '--min-wg-soak-cross-operator-pairs 1' "$ALERT_CAPTURE"; then
   echo "dashboard did not forward --min-wg-soak-cross-operator-pairs to alert script"
   cat "$ALERT_CAPTURE"
+  exit 1
+fi
+if ! rg -q '\[prod-gate-slo-dashboard\] incident_handoff source_summary_json=' /tmp/integration_prod_gate_slo_dashboard_success.log; then
+  echo "dashboard missing normalized incident handoff output"
+  cat /tmp/integration_prod_gate_slo_dashboard_success.log
+  exit 1
+fi
+if ! rg -q 'attachment_manifest=/tmp/run_b/incident_attachments_manifest.json' /tmp/integration_prod_gate_slo_dashboard_success.log; then
+  echo "dashboard missing attachment manifest in handoff output"
+  cat /tmp/integration_prod_gate_slo_dashboard_success.log
   exit 1
 fi
 

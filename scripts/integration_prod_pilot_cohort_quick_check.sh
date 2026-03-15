@@ -24,10 +24,15 @@ REPORTS_DIR="$TMP_DIR/reports"
 mkdir -p "$REPORTS_DIR"
 SUMMARY_JSON="$REPORTS_DIR/prod_pilot_cohort_summary.json"
 RUN_REPORT_JSON="$REPORTS_DIR/prod_pilot_cohort_quick_report.json"
+PRE_REAL_HOST_READINESS_SUMMARY_JSON="$REPORTS_DIR/pre_real_host_readiness_summary.json"
 
 cat >"$SUMMARY_JSON" <<'EOF_SUMMARY'
 {"status":"ok"}
 EOF_SUMMARY
+
+cat >"$PRE_REAL_HOST_READINESS_SUMMARY_JSON" <<'EOF_PRE_REAL_HOST'
+{"status":"ok","machine_c_smoke_gate":{"ready":true}}
+EOF_PRE_REAL_HOST
 
 cat >"$RUN_REPORT_JSON" <<EOF_RUN_REPORT
 {
@@ -37,13 +42,21 @@ cat >"$RUN_REPORT_JSON" <<EOF_RUN_REPORT
   "duration_sec":12,
   "runbook":{"rc":0},
   "signoff":{"attempted":true,"rc":0},
-  "artifacts":{"summary_json":"$SUMMARY_JSON"}
+  "artifacts":{
+    "summary_json":"$SUMMARY_JSON",
+    "pre_real_host_readiness_summary_json":"$PRE_REAL_HOST_READINESS_SUMMARY_JSON"
+  }
 }
 EOF_RUN_REPORT
 
 echo "[prod-pilot-cohort-quick-check] baseline pass"
 ./scripts/prod_pilot_cohort_quick_check.sh \
   --run-report-json "$RUN_REPORT_JSON" >/tmp/integration_prod_pilot_cohort_quick_check_pass.log 2>&1
+if ! rg -q -- "\\[prod-pilot-cohort-quick-check] pre_real_host_readiness_summary_json=$PRE_REAL_HOST_READINESS_SUMMARY_JSON" /tmp/integration_prod_pilot_cohort_quick_check_pass.log; then
+  echo "quick-check output missing pre-real-host readiness summary path"
+  cat /tmp/integration_prod_pilot_cohort_quick_check_pass.log
+  exit 1
+fi
 
 echo "[prod-pilot-cohort-quick-check] detect signoff rc failure"
 BAD_SIGNOFF="$TMP_DIR/bad_signoff.json"
@@ -246,6 +259,68 @@ fi
 if ! rg -q -- '--require-incident-snapshot-on-fail 1' "$COHORT_CAPTURE"; then
   echo "expected incident sub-check forwarding missing --require-incident-snapshot-on-fail 1"
   cat "$COHORT_CAPTURE"
+  exit 1
+fi
+
+echo "[prod-pilot-cohort-quick-check] incident handoff output"
+HANDOFF_SUMMARY="$TMP_DIR/handoff_summary.json"
+HANDOFF_REPORT="$TMP_DIR/handoff_report.md"
+HANDOFF_BUNDLE_DIR="$TMP_DIR/handoff_bundle"
+HANDOFF_BUNDLE_TAR="$TMP_DIR/handoff_bundle.tar.gz"
+HANDOFF_RUN_REPORT="$TMP_DIR/handoff_run_report.json"
+mkdir -p "$HANDOFF_BUNDLE_DIR"
+cat >"$HANDOFF_SUMMARY" <<EOF_HANDOFF_SUMMARY
+{
+  "status":"ok",
+  "incident_snapshot":{
+    "latest_failed_run_report":{
+      "path":"$TMP_DIR/source_failed_round.json",
+      "enabled":true,
+      "status":"ok",
+      "bundle_dir":{"path":"$HANDOFF_BUNDLE_DIR","exists":true},
+      "bundle_tar":{"path":"$HANDOFF_BUNDLE_TAR","exists":true},
+      "summary_json":{"path":"$INCIDENT_SUMMARY","exists":true,"valid_json":true},
+      "report_md":{"path":"$HANDOFF_REPORT","exists":true}
+    }
+  }
+}
+EOF_HANDOFF_SUMMARY
+printf 'handoff tar\n' >"$HANDOFF_BUNDLE_TAR"
+cat >"$HANDOFF_REPORT" <<'EOF_HANDOFF_REPORT'
+# Incident Snapshot Summary
+EOF_HANDOFF_REPORT
+cat >"$HANDOFF_RUN_REPORT" <<EOF_HANDOFF_RUN_REPORT
+{
+  "status":"fail",
+  "failure_step":"runbook",
+  "final_rc":9,
+  "duration_sec":3,
+  "runbook":{"rc":0},
+  "signoff":{"attempted":0,"rc":0},
+  "artifacts":{"summary_json":"$HANDOFF_SUMMARY"}
+}
+EOF_HANDOFF_RUN_REPORT
+
+COHORT_CAPTURE_FILE="$COHORT_CAPTURE" \
+PROD_PILOT_COHORT_CHECK_SCRIPT="$FAKE_COHORT_CHECK" \
+./scripts/prod_pilot_cohort_quick_check.sh \
+  --run-report-json "$HANDOFF_RUN_REPORT" \
+  --require-status-ok 0 \
+  --require-runbook-ok 0 \
+  --require-signoff-attempted 0 \
+  --require-signoff-ok 0 \
+  --require-summary-status-ok 0 \
+  --require-incident-snapshot-on-fail 1 \
+  --require-incident-snapshot-artifacts 1 >/tmp/integration_prod_pilot_cohort_quick_check_handoff.log 2>&1
+
+if ! rg -q 'incident_handoff' /tmp/integration_prod_pilot_cohort_quick_check_handoff.log; then
+  echo "expected quick-check incident handoff line not found"
+  cat /tmp/integration_prod_pilot_cohort_quick_check_handoff.log
+  exit 1
+fi
+if ! rg -q -- "$INCIDENT_SUMMARY" /tmp/integration_prod_pilot_cohort_quick_check_handoff.log; then
+  echo "expected quick-check incident summary path not surfaced"
+  cat /tmp/integration_prod_pilot_cohort_quick_check_handoff.log
   exit 1
 fi
 

@@ -24,6 +24,11 @@ SIGNOFF_CAPTURE="$TMP_DIR/signoff_capture.log"
 CHECK_CAPTURE="$TMP_DIR/check_capture.log"
 TREND_CAPTURE="$TMP_DIR/trend_capture.log"
 ALERT_CAPTURE="$TMP_DIR/alert_capture.log"
+PRE_REAL_HOST_READINESS_SUMMARY_JSON="$TMP_DIR/pre_real_host_readiness_summary.json"
+
+cat >"$PRE_REAL_HOST_READINESS_SUMMARY_JSON" <<'EOF_PRE_REAL_HOST'
+{"status":"ok","machine_c_smoke_gate":{"ready":true}}
+EOF_PRE_REAL_HOST
 
 FAKE_CHECK="$TMP_DIR/fake_quick_check.sh"
 cat >"$FAKE_CHECK" <<'EOF_FAKE_CHECK'
@@ -92,6 +97,21 @@ EOF_FAKE_ALERT
 chmod +x "$FAKE_ALERT"
 
 echo "[prod-pilot-cohort-quick-signoff] script orchestration success path"
+mkdir -p /tmp/quick
+cat >/tmp/quick/report.json <<EOF_SUCCESS_RUN_REPORT
+{
+  "status":"ok",
+  "failure_step":"",
+  "final_rc":0,
+  "duration_sec":12,
+  "runbook":{"rc":0},
+  "signoff":{"attempted":true,"rc":0},
+  "artifacts":{
+    "summary_json":"/tmp/quick/reports/prod_pilot_cohort_summary.json",
+    "pre_real_host_readiness_summary_json":"$PRE_REAL_HOST_READINESS_SUMMARY_JSON"
+  }
+}
+EOF_SUCCESS_RUN_REPORT
 SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
 CHECK_CAPTURE_FILE="$CHECK_CAPTURE" \
 TREND_CAPTURE_FILE="$TREND_CAPTURE" \
@@ -126,6 +146,16 @@ fi
 if ! jq -e '.status=="ok" and .policy.require_trend_artifact_policy_match==0 and .policy.require_trend_wg_validate_udp_source==0 and .policy.require_trend_wg_validate_strict_distinct==0 and .policy.require_trend_wg_soak_diversity_pass==0 and .policy.min_trend_wg_soak_selection_lines==3 and .policy.min_trend_wg_soak_entry_operators==1 and .policy.min_trend_wg_soak_exit_operators==1 and .policy.min_trend_wg_soak_cross_operator_pairs==1 and .policy.require_bundle_created==0 and .policy.require_bundle_manifest==0 and .policy.max_alert_severity=="WARN"' "$SIGNOFF_JSON" >/dev/null 2>&1; then
   echo "quick-signoff artifact missing expected strict policy fields"
   cat "$SIGNOFF_JSON"
+  exit 1
+fi
+if [[ "$(jq -r '.artifacts.pre_real_host_readiness_summary_json' "$SIGNOFF_JSON")" != "$PRE_REAL_HOST_READINESS_SUMMARY_JSON" ]]; then
+  echo "quick-signoff artifact missing pre-real-host readiness summary path"
+  cat "$SIGNOFF_JSON"
+  exit 1
+fi
+if ! rg -q -- "prod-pilot-cohort-quick-signoff: pre_real_host_readiness_summary_json=$PRE_REAL_HOST_READINESS_SUMMARY_JSON" /tmp/integration_prod_pilot_cohort_quick_signoff_pass.log; then
+  echo "quick-signoff output missing pre-real-host readiness summary path"
+  cat /tmp/integration_prod_pilot_cohort_quick_signoff_pass.log
   exit 1
 fi
 
@@ -232,6 +262,92 @@ fi
 if ! rg -q -- '--fail-on-warn 0' "$ALERT_CAPTURE"; then
   echo "quick-signoff severity policy forwarding missing --fail-on-warn 0 for max-alert-severity=WARN"
   cat "$ALERT_CAPTURE"
+  exit 1
+fi
+
+echo "[prod-pilot-cohort-quick-signoff] incident handoff propagation"
+HANDOFF_REPORTS_DIR="$TMP_DIR/handoff_reports"
+HANDOFF_SUMMARY_JSON="$HANDOFF_REPORTS_DIR/prod_pilot_cohort_summary.json"
+HANDOFF_RUN_REPORT_JSON="$HANDOFF_REPORTS_DIR/prod_pilot_cohort_quick_report.json"
+HANDOFF_INCIDENT_SUMMARY="$HANDOFF_REPORTS_DIR/incident_summary.json"
+HANDOFF_INCIDENT_REPORT="$HANDOFF_REPORTS_DIR/incident_report.md"
+HANDOFF_INCIDENT_BUNDLE_DIR="$HANDOFF_REPORTS_DIR/incident_bundle"
+HANDOFF_INCIDENT_BUNDLE_TAR="$HANDOFF_REPORTS_DIR/incident_bundle.tar.gz"
+mkdir -p "$HANDOFF_REPORTS_DIR" "$HANDOFF_INCIDENT_BUNDLE_DIR"
+cat >"$HANDOFF_INCIDENT_SUMMARY" <<'EOF_HANDOFF_INCIDENT_SUMMARY'
+{"status":"ok","findings":[]}
+EOF_HANDOFF_INCIDENT_SUMMARY
+cat >"$HANDOFF_INCIDENT_REPORT" <<'EOF_HANDOFF_INCIDENT_REPORT'
+# Incident Snapshot Summary
+EOF_HANDOFF_INCIDENT_REPORT
+printf 'incident tar\n' >"$HANDOFF_INCIDENT_BUNDLE_TAR"
+cat >"$HANDOFF_SUMMARY_JSON" <<EOF_HANDOFF_SUMMARY_JSON
+{
+  "status":"ok",
+  "incident_snapshot":{
+    "latest_failed_run_report":{
+      "path":"$HANDOFF_REPORTS_DIR/source_failed_round.json",
+      "enabled":true,
+      "status":"ok",
+      "bundle_dir":{"path":"$HANDOFF_INCIDENT_BUNDLE_DIR","exists":true},
+      "bundle_tar":{"path":"$HANDOFF_INCIDENT_BUNDLE_TAR","exists":true},
+      "summary_json":{"path":"$HANDOFF_INCIDENT_SUMMARY","exists":true,"valid_json":true},
+      "report_md":{"path":"$HANDOFF_INCIDENT_REPORT","exists":true}
+    }
+  }
+}
+EOF_HANDOFF_SUMMARY_JSON
+cat >"$HANDOFF_RUN_REPORT_JSON" <<EOF_HANDOFF_RUN_REPORT_JSON
+{
+  "status":"ok",
+  "failure_step":"",
+  "final_rc":0,
+  "duration_sec":12,
+  "runbook":{"rc":0},
+  "signoff":{"attempted":true,"rc":0},
+  "artifacts":{
+    "summary_json":"$HANDOFF_SUMMARY_JSON",
+    "pre_real_host_readiness_summary_json":"$PRE_REAL_HOST_READINESS_SUMMARY_JSON"
+  }
+}
+EOF_HANDOFF_RUN_REPORT_JSON
+
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+CHECK_CAPTURE_FILE="$CHECK_CAPTURE" \
+TREND_CAPTURE_FILE="$TREND_CAPTURE" \
+ALERT_CAPTURE_FILE="$ALERT_CAPTURE" \
+PROD_PILOT_COHORT_QUICK_CHECK_SCRIPT="$FAKE_CHECK" \
+PROD_PILOT_COHORT_QUICK_TREND_SCRIPT="$FAKE_TREND" \
+PROD_PILOT_COHORT_QUICK_ALERT_SCRIPT="$FAKE_ALERT" \
+./scripts/prod_pilot_cohort_quick_signoff.sh \
+  --run-report-json "$HANDOFF_RUN_REPORT_JSON" \
+  --reports-dir "$HANDOFF_REPORTS_DIR" \
+  --show-json 1 >/tmp/integration_prod_pilot_cohort_quick_signoff_handoff.log 2>&1
+
+HANDOFF_SIGNOFF_JSON="$HANDOFF_REPORTS_DIR/prod_pilot_quick_signoff.json"
+if [[ "$(jq -r '.incident_snapshot.summary_json.path' "$HANDOFF_SIGNOFF_JSON")" != "$HANDOFF_INCIDENT_SUMMARY" ]]; then
+  echo "quick-signoff incident handoff summary_json path missing from signoff JSON"
+  cat "$HANDOFF_SIGNOFF_JSON"
+  exit 1
+fi
+if [[ "$(jq -r '.incident_snapshot.source_pre_real_host_readiness_summary_json.path' "$HANDOFF_SIGNOFF_JSON")" != "$PRE_REAL_HOST_READINESS_SUMMARY_JSON" ]]; then
+  echo "quick-signoff incident handoff missing pre-real-host readiness source path"
+  cat "$HANDOFF_SIGNOFF_JSON"
+  exit 1
+fi
+if [[ "$(jq -r '.incident_snapshot.report_md.path' "$HANDOFF_SIGNOFF_JSON")" != "$HANDOFF_INCIDENT_REPORT" ]]; then
+  echo "quick-signoff incident handoff report_md path missing from signoff JSON"
+  cat "$HANDOFF_SIGNOFF_JSON"
+  exit 1
+fi
+if ! rg -q 'incident_handoff' /tmp/integration_prod_pilot_cohort_quick_signoff_handoff.log; then
+  echo "expected quick-signoff incident handoff line not found"
+  cat /tmp/integration_prod_pilot_cohort_quick_signoff_handoff.log
+  exit 1
+fi
+if ! rg -q -- "source_pre_real_host_readiness_summary_json=$PRE_REAL_HOST_READINESS_SUMMARY_JSON" /tmp/integration_prod_pilot_cohort_quick_signoff_handoff.log; then
+  echo "quick-signoff incident handoff line missing pre-real-host readiness source path"
+  cat /tmp/integration_prod_pilot_cohort_quick_signoff_handoff.log
   exit 1
 fi
 

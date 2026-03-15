@@ -22,12 +22,53 @@ trap cleanup EXIT
 
 REPORTS_DIR="$TMP_DIR/reports"
 mkdir -p "$REPORTS_DIR/run_a" "$REPORTS_DIR/run_b" "$REPORTS_DIR/run_c"
+mkdir -p "$REPORTS_DIR/run_b/incident_snapshot"
+
+RUN_B_INCIDENT_RUN_REPORT="$REPORTS_DIR/run_b/round_2_run_report.json"
+RUN_B_INCIDENT_BUNDLE_TAR="$REPORTS_DIR/run_b/incident_snapshot.tar.gz"
+RUN_B_INCIDENT_SUMMARY_JSON="$REPORTS_DIR/run_b/incident_snapshot/incident_summary.json"
+RUN_B_INCIDENT_REPORT_MD="$REPORTS_DIR/run_b/incident_snapshot/incident_report.md"
+RUN_B_INCIDENT_ATTACH_MANIFEST="$REPORTS_DIR/run_b/incident_snapshot/attachments_manifest.json"
+RUN_B_INCIDENT_ATTACH_SKIPPED="$REPORTS_DIR/run_b/incident_snapshot/attachments_skipped.json"
+
+cat >"$RUN_B_INCIDENT_RUN_REPORT" <<'EOF_RUN_B_INCIDENT_RR'
+{"status":"fail"}
+EOF_RUN_B_INCIDENT_RR
+printf 'incident tar placeholder\n' >"$RUN_B_INCIDENT_BUNDLE_TAR"
+cat >"$RUN_B_INCIDENT_SUMMARY_JSON" <<'EOF_RUN_B_INCIDENT_SUMMARY'
+{"status":"ok","top_findings":["demo finding"]}
+EOF_RUN_B_INCIDENT_SUMMARY
+cat >"$RUN_B_INCIDENT_REPORT_MD" <<'EOF_RUN_B_INCIDENT_REPORT'
+# Incident Report
+EOF_RUN_B_INCIDENT_REPORT
+cat >"$RUN_B_INCIDENT_ATTACH_MANIFEST" <<'EOF_RUN_B_INCIDENT_ATTACH_MANIFEST'
+[]
+EOF_RUN_B_INCIDENT_ATTACH_MANIFEST
+cat >"$RUN_B_INCIDENT_ATTACH_SKIPPED" <<'EOF_RUN_B_INCIDENT_ATTACH_SKIPPED'
+[]
+EOF_RUN_B_INCIDENT_ATTACH_SKIPPED
 
 cat >"$REPORTS_DIR/run_a/prod_pilot_cohort_summary.json" <<'EOF_SUM_A'
 {"status":"ok"}
 EOF_SUM_A
-cat >"$REPORTS_DIR/run_b/prod_pilot_cohort_summary.json" <<'EOF_SUM_B'
-{"status":"ok"}
+cat >"$REPORTS_DIR/run_b/prod_pilot_cohort_summary.json" <<EOF_SUM_B
+{
+  "status":"ok",
+  "incident_snapshot":{
+    "latest_failed_run_report":{
+      "path":"$RUN_B_INCIDENT_RUN_REPORT",
+      "enabled":true,
+      "status":"ok",
+      "bundle_dir":{"path":"$REPORTS_DIR/run_b/incident_snapshot"},
+      "bundle_tar":{"path":"$RUN_B_INCIDENT_BUNDLE_TAR"},
+      "summary_json":{"path":"$RUN_B_INCIDENT_SUMMARY_JSON"},
+      "report_md":{"path":"$RUN_B_INCIDENT_REPORT_MD"},
+      "attachment_manifest":{"path":"$RUN_B_INCIDENT_ATTACH_MANIFEST"},
+      "attachment_skipped":{"path":"$RUN_B_INCIDENT_ATTACH_SKIPPED"},
+      "attachment_count":1
+    }
+  }
+}
 EOF_SUM_B
 cat >"$REPORTS_DIR/run_c/prod_pilot_cohort_summary.json" <<'EOF_SUM_C'
 {"status":"ok"}
@@ -106,8 +147,28 @@ if ! jq -e '.reports_total == 3 and .go == 2 and .no_go == 1 and .decision == "G
   cat "$SUMMARY_JSON"
   exit 1
 fi
+if ! jq -e --arg source_rr "$REPORTS_DIR/run_b/prod_pilot_cohort_quick_report.json" --arg incident_rr "$RUN_B_INCIDENT_RUN_REPORT" --arg incident_summary "$RUN_B_INCIDENT_SUMMARY_JSON" --arg incident_report "$RUN_B_INCIDENT_REPORT_MD" '.incident_snapshot.latest_failed_run_report.source_quick_run_report.path==$source_rr and .incident_snapshot.latest_failed_run_report.path==$incident_rr and .incident_snapshot.latest_failed_run_report.summary_json.path==$incident_summary and .incident_snapshot.latest_failed_run_report.report_md.path==$incident_report' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "quick trend summary JSON missing incident handoff fields"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if ! jq -e --arg attach_manifest "$RUN_B_INCIDENT_ATTACH_MANIFEST" --arg attach_skipped "$RUN_B_INCIDENT_ATTACH_SKIPPED" '.incident_snapshot.latest_failed_run_report.attachment_manifest.path==$attach_manifest and .incident_snapshot.latest_failed_run_report.attachment_skipped.path==$attach_skipped and .incident_snapshot.latest_failed_run_report.attachment_count==1' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "quick trend summary JSON missing incident attachment fields"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
 if ! rg -q '\[prod-pilot-cohort-quick-trend\] summary_json_payload:' /tmp/integration_prod_pilot_cohort_quick_trend_baseline.log; then
   echo "expected printed summary payload marker not found"
+  cat /tmp/integration_prod_pilot_cohort_quick_trend_baseline.log
+  exit 1
+fi
+if ! rg -q '\[prod-pilot-cohort-quick-trend\] incident_handoff ' /tmp/integration_prod_pilot_cohort_quick_trend_baseline.log; then
+  echo "expected incident_handoff line not found in baseline log"
+  cat /tmp/integration_prod_pilot_cohort_quick_trend_baseline.log
+  exit 1
+fi
+if ! rg -q "attachment_manifest=${RUN_B_INCIDENT_ATTACH_MANIFEST}" /tmp/integration_prod_pilot_cohort_quick_trend_baseline.log; then
+  echo "expected incident attachment manifest in quick trend handoff line"
   cat /tmp/integration_prod_pilot_cohort_quick_trend_baseline.log
   exit 1
 fi

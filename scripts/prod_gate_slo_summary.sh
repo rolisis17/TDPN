@@ -69,6 +69,36 @@ bool_arg_or_die() {
   fi
 }
 
+abs_path() {
+  local path="$1"
+  path="$(trim "$path")"
+  if [[ -z "$path" ]]; then
+    printf '%s' ""
+  elif [[ "$path" = /* ]]; then
+    printf '%s' "$path"
+  else
+    printf '%s' "$ROOT_DIR/$path"
+  fi
+}
+
+path_exists01() {
+  local path="$1"
+  if [[ -n "$path" && -e "$path" ]]; then
+    echo "1"
+  else
+    echo "0"
+  fi
+}
+
+json_valid01() {
+  local path="$1"
+  if [[ -n "$path" && -f "$path" ]] && jq -e . "$path" >/dev/null 2>&1; then
+    echo "1"
+  else
+    echo "0"
+  fi
+}
+
 json_string() {
   local file="$1"
   local expr="$2"
@@ -438,6 +468,14 @@ incident_status=""
 incident_rc="0"
 incident_bundle_dir=""
 incident_bundle_tar=""
+incident_summary_json=""
+incident_report_md=""
+incident_attachment_manifest=""
+incident_attachment_skipped=""
+incident_attachment_count="0"
+incident_summary_exists="0"
+incident_summary_valid_json="0"
+incident_report_exists="0"
 incident_enabled_on_fail="0"
 run_report_status=""
 run_report_final_rc="0"
@@ -458,8 +496,16 @@ if [[ -n "$run_report_json" ]]; then
   incident_enabled_on_fail="$(json_bool01 "$run_report_json" '.incident_snapshot.enabled_on_fail')"
   incident_status="$(json_string "$run_report_json" '.incident_snapshot.status')"
   incident_rc="$(json_int "$run_report_json" '.incident_snapshot.rc')"
-  incident_bundle_dir="$(json_string "$run_report_json" '.incident_snapshot.bundle_dir')"
-  incident_bundle_tar="$(json_string "$run_report_json" '.incident_snapshot.bundle_tar')"
+  incident_bundle_dir="$(abs_path "$(json_string "$run_report_json" '.incident_snapshot.bundle_dir')")"
+  incident_bundle_tar="$(abs_path "$(json_string "$run_report_json" '.incident_snapshot.bundle_tar')")"
+  incident_summary_json="$(abs_path "$(json_string "$run_report_json" '.incident_snapshot.summary_json')")"
+  incident_report_md="$(abs_path "$(json_string "$run_report_json" '.incident_snapshot.report_md')")"
+  incident_attachment_manifest="$(abs_path "$(json_string "$run_report_json" '.incident_snapshot.attachment_manifest')")"
+  incident_attachment_skipped="$(abs_path "$(json_string "$run_report_json" '.incident_snapshot.attachment_skipped')")"
+  incident_attachment_count="$(json_int "$run_report_json" '.incident_snapshot.attachment_count')"
+  incident_summary_exists="$(path_exists01 "$incident_summary_json")"
+  incident_summary_valid_json="$(json_valid01 "$incident_summary_json")"
+  incident_report_exists="$(path_exists01 "$incident_report_md")"
 fi
 
 declare -a reasons=()
@@ -585,6 +631,24 @@ if [[ "$require_incident_snapshot_artifacts" == "1" ]]; then
       if [[ -z "$incident_bundle_tar" || ! -f "$incident_bundle_tar" ]]; then
         reasons+=("incident snapshot bundle_tar missing/unreadable (${incident_bundle_tar:-unset})")
       fi
+      if [[ -z "$incident_summary_json" ]]; then
+        reasons+=("incident snapshot summary_json missing")
+      elif [[ "$incident_summary_exists" != "1" ]]; then
+        reasons+=("incident snapshot summary_json missing/unreadable (${incident_summary_json:-unset})")
+      elif [[ "$incident_summary_valid_json" != "1" ]]; then
+        reasons+=("incident snapshot summary_json is invalid JSON (${incident_summary_json:-unset})")
+      fi
+      if [[ -z "$incident_report_md" ]]; then
+        reasons+=("incident snapshot report_md missing")
+      elif [[ "$incident_report_exists" != "1" ]]; then
+        reasons+=("incident snapshot report_md missing/unreadable (${incident_report_md:-unset})")
+      fi
+      if [[ -n "$incident_attachment_manifest" && ! -f "$incident_attachment_manifest" ]]; then
+        reasons+=("incident snapshot attachment_manifest missing/unreadable (${incident_attachment_manifest:-unset})")
+      fi
+      if [[ -n "$incident_attachment_skipped" && ! -f "$incident_attachment_skipped" ]]; then
+        reasons+=("incident snapshot attachment_skipped missing/unreadable (${incident_attachment_skipped:-unset})")
+      fi
     elif [[ "$run_report_status" == "fail" || "$run_report_final_rc" != "0" ]]; then
       reasons+=("incident snapshot artifacts requested but incident snapshot is not ok (status=${incident_status:-unset})")
     fi
@@ -614,6 +678,15 @@ if [[ -n "$run_report_json" ]]; then
   fi
   if [[ -n "$incident_bundle_tar" ]]; then
     echo "[prod-gate-slo] incident_snapshot_bundle_tar=$incident_bundle_tar"
+  fi
+  if [[ -n "$incident_attachment_manifest" ]]; then
+    echo "[prod-gate-slo] incident_snapshot_attachment_manifest=$incident_attachment_manifest"
+  fi
+  if [[ -n "$incident_attachment_skipped" ]]; then
+    echo "[prod-gate-slo] incident_snapshot_attachment_skipped=$incident_attachment_skipped"
+  fi
+  if [[ -n "$incident_summary_json" || -n "$incident_report_md" || -n "$incident_attachment_manifest" || -n "$incident_attachment_skipped" ]]; then
+    echo "[prod-gate-slo] incident_handoff source_summary_json=${gate_summary_json:-unset} source_run_report=${run_report_json:-unset} summary_json=${incident_summary_json:-unset} report_md=${incident_report_md:-unset} attachment_manifest=${incident_attachment_manifest:-unset} attachment_skipped=${incident_attachment_skipped:-unset} attachment_count=${incident_attachment_count}"
   fi
 fi
 

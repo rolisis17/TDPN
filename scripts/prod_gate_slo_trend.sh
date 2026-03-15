@@ -97,6 +97,36 @@ file_mtime_epoch() {
   echo "0"
 }
 
+abs_path() {
+  local path="$1"
+  path="$(trim "$path")"
+  if [[ -z "$path" ]]; then
+    printf '%s' ""
+  elif [[ "$path" = /* ]]; then
+    printf '%s' "$path"
+  else
+    printf '%s' "$ROOT_DIR/$path"
+  fi
+}
+
+path_exists01() {
+  local path="$1"
+  if [[ -n "$path" && -e "$path" ]]; then
+    echo "1"
+  else
+    echo "0"
+  fi
+}
+
+json_valid01() {
+  local path="$1"
+  if [[ -n "$path" && -f "$path" ]] && jq -e . "$path" >/dev/null 2>&1; then
+    echo "1"
+  else
+    echo "0"
+  fi
+}
+
 require_full_sequence="${PROD_GATE_SLO_REQUIRE_FULL_SEQUENCE:-1}"
 require_wg_validate_ok="${PROD_GATE_SLO_REQUIRE_WG_VALIDATE_OK:-1}"
 require_wg_soak_ok="${PROD_GATE_SLO_REQUIRE_WG_SOAK_OK:-1}"
@@ -487,6 +517,27 @@ total_reports=0
 go_reports=0
 no_go_reports=0
 eval_errors=0
+incident_source_run_report_json=""
+incident_source_run_report_exists="0"
+incident_source_summary_json=""
+incident_source_summary_exists="0"
+incident_source_summary_valid_json="0"
+incident_enabled="0"
+incident_status=""
+incident_bundle_dir=""
+incident_bundle_dir_exists="0"
+incident_bundle_tar=""
+incident_bundle_tar_exists="0"
+incident_summary_json=""
+incident_summary_exists="0"
+incident_summary_valid_json="0"
+incident_report_md=""
+incident_report_exists="0"
+incident_attachment_manifest=""
+incident_attachment_manifest_exists="0"
+incident_attachment_skipped=""
+incident_attachment_skipped_exists="0"
+incident_attachment_count="0"
 
 declare -A reason_counts=()
 details_file="$tmp_dir/details.txt"
@@ -551,6 +602,47 @@ while IFS=$'\t' read -r _mtime report_path || [[ -n "${report_path:-}" ]]; do
       first_reason="unspecified no-go reason"
       reason_counts["$first_reason"]=$(( ${reason_counts["$first_reason"]:-0} + 1 ))
     fi
+    if [[ -z "$incident_source_run_report_json" ]]; then
+      candidate_incident_summary_json="$(abs_path "$(jq -r '.incident_snapshot.summary_json // ""' "$report_path" 2>/dev/null || true)")"
+      candidate_incident_report_md="$(abs_path "$(jq -r '.incident_snapshot.report_md // ""' "$report_path" 2>/dev/null || true)")"
+      candidate_incident_bundle_dir="$(abs_path "$(jq -r '.incident_snapshot.bundle_dir // ""' "$report_path" 2>/dev/null || true)")"
+      candidate_incident_bundle_tar="$(abs_path "$(jq -r '.incident_snapshot.bundle_tar // ""' "$report_path" 2>/dev/null || true)")"
+      candidate_incident_status="$(jq -r '.incident_snapshot.status // ""' "$report_path" 2>/dev/null || true)"
+      candidate_incident_enabled="$(jq -r '(.incident_snapshot.enabled // .incident_snapshot.enabled_on_fail // false) | if . then 1 else 0 end' "$report_path" 2>/dev/null || echo 0)"
+      candidate_incident_attachment_manifest="$(abs_path "$(jq -r '.incident_snapshot.attachment_manifest // ""' "$report_path" 2>/dev/null || true)")"
+      candidate_incident_attachment_skipped="$(abs_path "$(jq -r '.incident_snapshot.attachment_skipped // ""' "$report_path" 2>/dev/null || true)")"
+      candidate_incident_attachment_count="$(jq -r '.incident_snapshot.attachment_count // 0' "$report_path" 2>/dev/null || echo 0)"
+      candidate_source_summary_json="$(abs_path "$(jq -r '.gate_summary_json // ""' "$report_path" 2>/dev/null || true)")"
+      if [[ -z "$candidate_source_summary_json" ]]; then
+        candidate_bundle_dir="$(abs_path "$(jq -r '.bundle_dir // ""' "$report_path" 2>/dev/null || true)")"
+        if [[ -n "$candidate_bundle_dir" ]]; then
+          candidate_source_summary_json="$candidate_bundle_dir/prod_gate_summary.json"
+        fi
+      fi
+      if [[ -n "$candidate_incident_summary_json" || -n "$candidate_incident_report_md" || -n "$candidate_incident_bundle_dir" || -n "$candidate_incident_bundle_tar" || -n "$candidate_incident_attachment_manifest" || -n "$candidate_incident_attachment_skipped" ]]; then
+        incident_source_run_report_json="$report_path"
+        incident_source_run_report_exists="$(path_exists01 "$incident_source_run_report_json")"
+        incident_source_summary_json="$candidate_source_summary_json"
+        incident_source_summary_exists="$(path_exists01 "$incident_source_summary_json")"
+        incident_source_summary_valid_json="$(json_valid01 "$incident_source_summary_json")"
+        incident_enabled="$candidate_incident_enabled"
+        incident_status="$candidate_incident_status"
+        incident_bundle_dir="$candidate_incident_bundle_dir"
+        incident_bundle_dir_exists="$(path_exists01 "$incident_bundle_dir")"
+        incident_bundle_tar="$candidate_incident_bundle_tar"
+        incident_bundle_tar_exists="$(path_exists01 "$incident_bundle_tar")"
+        incident_summary_json="$candidate_incident_summary_json"
+        incident_summary_exists="$(path_exists01 "$incident_summary_json")"
+        incident_summary_valid_json="$(json_valid01 "$incident_summary_json")"
+        incident_report_md="$candidate_incident_report_md"
+        incident_report_exists="$(path_exists01 "$incident_report_md")"
+        incident_attachment_manifest="$candidate_incident_attachment_manifest"
+        incident_attachment_manifest_exists="$(path_exists01 "$incident_attachment_manifest")"
+        incident_attachment_skipped="$candidate_incident_attachment_skipped"
+        incident_attachment_skipped_exists="$(path_exists01 "$incident_attachment_skipped")"
+        incident_attachment_count="$candidate_incident_attachment_count"
+      fi
+    fi
   fi
 
   printf '%s\t%s\t%s\t%s\n' "$generated_at" "$decision" "$report_path" "$first_reason" >>"$details_file"
@@ -596,6 +688,10 @@ if ((no_go_reports > 0 && show_top_reasons > 0)); then
       break
     fi
   done < <(sort -rn "$reasons_ranked")
+fi
+
+if [[ -n "$incident_source_run_report_json" || -n "$incident_summary_json" || -n "$incident_report_md" || -n "$incident_attachment_manifest" || -n "$incident_attachment_skipped" ]]; then
+  echo "[prod-gate-slo-trend] incident_handoff source_summary_json=${incident_source_summary_json:-unset} source_run_report=${incident_source_run_report_json:-unset} summary_json=${incident_summary_json:-unset} report_md=${incident_report_md:-unset} attachment_manifest=${incident_attachment_manifest:-unset} attachment_skipped=${incident_attachment_skipped:-unset} attachment_count=${incident_attachment_count}"
 fi
 
 decision="GO"
@@ -648,6 +744,27 @@ summary_payload="$(
     --argjson show_top_reasons "$show_top_reasons" \
     --argjson top_no_go_reasons "$top_reasons_json" \
     --argjson runs "$details_json" \
+    --arg incident_source_run_report_json "$incident_source_run_report_json" \
+    --arg incident_source_summary_json "$incident_source_summary_json" \
+    --arg incident_status "$incident_status" \
+    --arg incident_bundle_dir "$incident_bundle_dir" \
+    --arg incident_bundle_tar "$incident_bundle_tar" \
+    --arg incident_summary_json "$incident_summary_json" \
+    --arg incident_report_md "$incident_report_md" \
+    --arg incident_attachment_manifest "$incident_attachment_manifest" \
+    --arg incident_attachment_skipped "$incident_attachment_skipped" \
+    --argjson incident_source_run_report_exists "$incident_source_run_report_exists" \
+    --argjson incident_source_summary_exists "$incident_source_summary_exists" \
+    --argjson incident_source_summary_valid_json "$incident_source_summary_valid_json" \
+    --argjson incident_enabled "$incident_enabled" \
+    --argjson incident_bundle_dir_exists "$incident_bundle_dir_exists" \
+    --argjson incident_bundle_tar_exists "$incident_bundle_tar_exists" \
+    --argjson incident_summary_exists "$incident_summary_exists" \
+    --argjson incident_summary_valid_json "$incident_summary_valid_json" \
+    --argjson incident_report_exists "$incident_report_exists" \
+    --argjson incident_attachment_manifest_exists "$incident_attachment_manifest_exists" \
+    --argjson incident_attachment_skipped_exists "$incident_attachment_skipped_exists" \
+    --argjson incident_attachment_count "$incident_attachment_count" \
     '{
       version: 1,
       generated_at_utc: $generated_at_utc,
@@ -679,6 +796,22 @@ summary_payload="$(
         min_wg_soak_cross_operator_pairs: $min_wg_soak_cross_operator_pairs,
         fail_on_any_no_go: $fail_on_any_no_go,
         min_go_rate_pct: $min_go_rate_pct
+      },
+      incident_snapshot: {
+        latest_failed_run_report: {
+          source_run_report_json: {path: ($incident_source_run_report_json // ""), exists: $incident_source_run_report_exists},
+          source_summary_json: {path: ($incident_source_summary_json // ""), exists: $incident_source_summary_exists, valid_json: $incident_source_summary_valid_json},
+          path: ($incident_source_run_report_json // ""),
+          enabled: $incident_enabled,
+          status: ($incident_status // ""),
+          bundle_dir: {path: ($incident_bundle_dir // ""), exists: $incident_bundle_dir_exists},
+          bundle_tar: {path: ($incident_bundle_tar // ""), exists: $incident_bundle_tar_exists},
+          summary_json: {path: ($incident_summary_json // ""), exists: $incident_summary_exists, valid_json: $incident_summary_valid_json},
+          report_md: {path: ($incident_report_md // ""), exists: $incident_report_exists},
+          attachment_manifest: {path: ($incident_attachment_manifest // ""), exists: $incident_attachment_manifest_exists},
+          attachment_skipped: {path: ($incident_attachment_skipped // ""), exists: $incident_attachment_skipped_exists},
+          attachment_count: $incident_attachment_count
+        }
       },
       top_no_go_reasons_limit: $show_top_reasons,
       top_no_go_reasons: $top_no_go_reasons,

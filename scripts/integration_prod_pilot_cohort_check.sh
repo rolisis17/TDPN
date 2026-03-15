@@ -206,9 +206,12 @@ cat >"$FAIL_ROUND_REPORT" <<'EOF_FAIL_ROUND_REPORT'
   "final_rc":7,
   "incident_snapshot":{
     "enabled":false,
+    "enabled_on_fail":false,
     "status":"fail",
     "bundle_dir":"",
-    "bundle_tar":""
+    "bundle_tar":"",
+    "summary_json":"",
+    "report_md":""
   }
 }
 EOF_FAIL_ROUND_REPORT
@@ -218,7 +221,7 @@ jq \
   --arg rr "$FAIL_ROUND_REPORT" \
   '.rounds.failed=1
    | .rounds.passed=2
-   | .run_reports=[$rr]' "$SUMMARY_JSON" >"$INCIDENT_FAIL_SUMMARY"
+   | .artifacts.run_reports=[$rr]' "$SUMMARY_JSON" >"$INCIDENT_FAIL_SUMMARY"
 
 set +e
 ./scripts/prod_pilot_cohort_check.sh \
@@ -243,9 +246,23 @@ fi
 echo "[prod-pilot-cohort-check] incident snapshot policy pass on failed round with artifacts"
 INCIDENT_BUNDLE_DIR="$REPORTS_DIR/round_2/incident_snapshot"
 INCIDENT_BUNDLE_TAR="$REPORTS_DIR/round_2/incident_snapshot.tar.gz"
+INCIDENT_SUMMARY_JSON="$INCIDENT_BUNDLE_DIR/incident_summary.json"
+INCIDENT_REPORT_MD="$INCIDENT_BUNDLE_DIR/incident_report.md"
+INCIDENT_ATTACH_DIR="$INCIDENT_BUNDLE_DIR/attachments"
+INCIDENT_ATTACH_MANIFEST="$INCIDENT_ATTACH_DIR/manifest.tsv"
+INCIDENT_ATTACH_SKIPPED="$INCIDENT_ATTACH_DIR/skipped.tsv"
 mkdir -p "$INCIDENT_BUNDLE_DIR"
+mkdir -p "$INCIDENT_ATTACH_DIR"
 printf 'snapshot bundle\n' >"$INCIDENT_BUNDLE_DIR/manifest.txt"
 printf 'snapshot tar placeholder\n' >"$INCIDENT_BUNDLE_TAR"
+cat >"$INCIDENT_SUMMARY_JSON" <<'EOF_INCIDENT_SUMMARY'
+{"status":"ok","findings":[]}
+EOF_INCIDENT_SUMMARY
+cat >"$INCIDENT_REPORT_MD" <<'EOF_INCIDENT_REPORT'
+# Incident Snapshot Summary
+EOF_INCIDENT_REPORT
+printf 'attachments/01_runtime_doctor_before.json\tfile\t/tmp/runtime_doctor_before.json\n' >"$INCIDENT_ATTACH_MANIFEST"
+printf '/tmp/runtime_fix.json\tmissing\n' >"$INCIDENT_ATTACH_SKIPPED"
 
 PASS_ROUND_REPORT="$REPORTS_DIR/round_2/prod_bundle_run_report.json"
 mkdir -p "$(dirname "$PASS_ROUND_REPORT")"
@@ -255,9 +272,15 @@ cat >"$PASS_ROUND_REPORT" <<EOF_PASS_ROUND_REPORT
   "final_rc":9,
   "incident_snapshot":{
     "enabled":true,
+    "enabled_on_fail":true,
     "status":"ok",
     "bundle_dir":"$INCIDENT_BUNDLE_DIR",
-    "bundle_tar":"$INCIDENT_BUNDLE_TAR"
+    "bundle_tar":"$INCIDENT_BUNDLE_TAR",
+    "summary_json":"$INCIDENT_SUMMARY_JSON",
+    "report_md":"$INCIDENT_REPORT_MD",
+    "attachment_manifest":"$INCIDENT_ATTACH_MANIFEST",
+    "attachment_skipped":"$INCIDENT_ATTACH_SKIPPED",
+    "attachment_count":1
   }
 }
 EOF_PASS_ROUND_REPORT
@@ -267,14 +290,35 @@ jq \
   --arg rr "$PASS_ROUND_REPORT" \
   '.rounds.failed=1
    | .rounds.passed=2
-   | .run_reports=[$rr]' "$SUMMARY_JSON" >"$INCIDENT_PASS_SUMMARY"
+   | .artifacts.run_reports=[$rr]' "$SUMMARY_JSON" >"$INCIDENT_PASS_SUMMARY"
 
 ./scripts/prod_pilot_cohort_check.sh \
   --summary-json "$INCIDENT_PASS_SUMMARY" \
   --require-all-rounds-ok 0 \
   --max-round-failures 1 \
   --require-incident-snapshot-on-fail 1 \
-  --require-incident-snapshot-artifacts 1 >/tmp/integration_prod_pilot_cohort_check_incident_pass.log 2>&1
+  --require-incident-snapshot-artifacts 1 \
+  --show-json 1 >/tmp/integration_prod_pilot_cohort_check_incident_pass.log 2>&1
+if ! rg -q 'incident_snapshot_latest_failed_run_report=' /tmp/integration_prod_pilot_cohort_check_incident_pass.log; then
+  echo "expected latest failed incident snapshot handoff line not found"
+  cat /tmp/integration_prod_pilot_cohort_check_incident_pass.log
+  exit 1
+fi
+if ! rg -q 'incident_handoff source_summary_json=' /tmp/integration_prod_pilot_cohort_check_incident_pass.log; then
+  echo "expected normalized incident_handoff line not found"
+  cat /tmp/integration_prod_pilot_cohort_check_incident_pass.log
+  exit 1
+fi
+if ! rg -q -- "$INCIDENT_SUMMARY_JSON" /tmp/integration_prod_pilot_cohort_check_incident_pass.log; then
+  echo "expected incident summary path not surfaced in cohort check output"
+  cat /tmp/integration_prod_pilot_cohort_check_incident_pass.log
+  exit 1
+fi
+if ! rg -q -- "$INCIDENT_ATTACH_MANIFEST" /tmp/integration_prod_pilot_cohort_check_incident_pass.log; then
+  echo "expected incident attachment manifest not surfaced in cohort check output"
+  cat /tmp/integration_prod_pilot_cohort_check_incident_pass.log
+  exit 1
+fi
 
 cat >"$TMP_BIN/docker" <<'EOF_DOCKER'
 #!/usr/bin/env bash

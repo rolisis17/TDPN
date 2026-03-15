@@ -34,7 +34,10 @@ abs_path() {
 usage() {
   cat <<'USAGE'
 Usage:
-  ./scripts/prod_pilot_runbook.sh [three-machine-prod-bundle args...]
+  ./scripts/prod_pilot_runbook.sh \
+    [--pre-real-host-readiness [0|1]] \
+    [--pre-real-host-readiness-summary-json PATH] \
+    [three-machine-prod-bundle args...]
 
 Purpose:
   One-command production pilot runbook wrapper for machine C.
@@ -60,6 +63,9 @@ Examples:
 
 Notes:
   - Any flags you pass are appended last and can override defaults.
+  - pre-real-host readiness runs by default before the bundle flow so runtime
+    hygiene and the recorded WG-only selftest stay aligned with machine-C
+    operator runbooks. Use --pre-real-host-readiness 0 to skip it.
   - Set EASY_NODE_SH to point at a custom easy_node wrapper if needed.
   - Dashboard generation defaults to non-fail-close. Set
     PROD_PILOT_SLO_DASHBOARD_FAIL_CLOSE=1 to make dashboard failures fail the run
@@ -102,8 +108,12 @@ fi
 timestamp="$(date +%Y%m%d_%H%M%S)"
 
 declare -a user_args=("$@")
+declare -a filtered_user_args=()
 user_run_report_json=""
 user_bundle_dir=""
+user_pre_real_host_readiness_explicit="0"
+user_pre_real_host_readiness_value=""
+user_pre_real_host_readiness_summary_json=""
 idx=0
 while ((idx < ${#user_args[@]})); do
   arg="${user_args[idx]}"
@@ -111,16 +121,35 @@ while ((idx < ${#user_args[@]})); do
     --run-report-json)
       if ((idx + 1 < ${#user_args[@]})); then
         user_run_report_json="${user_args[$((idx + 1))]}"
+        filtered_user_args+=("$arg" "${user_args[$((idx + 1))]}")
       fi
       idx=$((idx + 2))
       ;;
     --bundle-dir)
       if ((idx + 1 < ${#user_args[@]})); then
         user_bundle_dir="${user_args[$((idx + 1))]}"
+        filtered_user_args+=("$arg" "${user_args[$((idx + 1))]}")
+      fi
+      idx=$((idx + 2))
+      ;;
+    --pre-real-host-readiness)
+      user_pre_real_host_readiness_explicit="1"
+      if ((idx + 1 < ${#user_args[@]})) && [[ "${user_args[$((idx + 1))]}" =~ ^[01]$ ]]; then
+        user_pre_real_host_readiness_value="${user_args[$((idx + 1))]}"
+        idx=$((idx + 2))
+      else
+        user_pre_real_host_readiness_value="1"
+        idx=$((idx + 1))
+      fi
+      ;;
+    --pre-real-host-readiness-summary-json)
+      if ((idx + 1 < ${#user_args[@]})); then
+        user_pre_real_host_readiness_summary_json="${user_args[$((idx + 1))]}"
       fi
       idx=$((idx + 2))
       ;;
     *)
+      filtered_user_args+=("$arg")
       idx=$((idx + 1))
       ;;
   esac
@@ -133,6 +162,8 @@ bundle_verify_check="${PROD_PILOT_BUNDLE_VERIFY_CHECK:-1}"
 bundle_verify_show_details="${PROD_PILOT_BUNDLE_VERIFY_SHOW_DETAILS:-0}"
 run_report_print="${PROD_PILOT_RUN_REPORT_PRINT:-1}"
 run_report_json_override="${PROD_PILOT_RUN_REPORT_JSON:-}"
+pre_real_host_readiness_default="${PROD_PILOT_PRE_REAL_HOST_READINESS:-1}"
+pre_real_host_readiness_summary_json_override="${PROD_PILOT_PRE_REAL_HOST_READINESS_SUMMARY_JSON:-}"
 signoff_check="${PROD_PILOT_SIGNOFF_CHECK:-1}"
 signoff_require_full_sequence="${PROD_PILOT_SIGNOFF_REQUIRE_FULL_SEQUENCE:-1}"
 signoff_require_wg_validate_ok="${PROD_PILOT_SIGNOFF_REQUIRE_WG_VALIDATE_OK:-1}"
@@ -200,6 +231,7 @@ bool_or_die "PROD_PILOT_PREFLIGHT_REQUIRE_ROOT" "$preflight_require_root"
 bool_or_die "PROD_PILOT_BUNDLE_VERIFY_CHECK" "$bundle_verify_check"
 bool_or_die "PROD_PILOT_BUNDLE_VERIFY_SHOW_DETAILS" "$bundle_verify_show_details"
 bool_or_die "PROD_PILOT_RUN_REPORT_PRINT" "$run_report_print"
+bool_or_die "PROD_PILOT_PRE_REAL_HOST_READINESS" "$pre_real_host_readiness_default"
 bool_or_die "PROD_PILOT_SIGNOFF_CHECK" "$signoff_check"
 bool_or_die "PROD_PILOT_SIGNOFF_REQUIRE_FULL_SEQUENCE" "$signoff_require_full_sequence"
 bool_or_die "PROD_PILOT_SIGNOFF_REQUIRE_WG_VALIDATE_OK" "$signoff_require_wg_validate_ok"
@@ -273,6 +305,24 @@ else
   run_report_json_path="$(default_log_dir)/prod_pilot_run_report_${timestamp}.json"
 fi
 
+pre_real_host_readiness="$pre_real_host_readiness_default"
+if [[ "$user_pre_real_host_readiness_explicit" == "1" ]]; then
+  pre_real_host_readiness="$user_pre_real_host_readiness_value"
+fi
+
+pre_real_host_readiness_summary_json_path=""
+if [[ -n "$user_pre_real_host_readiness_summary_json" ]]; then
+  pre_real_host_readiness_summary_json_path="$user_pre_real_host_readiness_summary_json"
+elif [[ -n "$pre_real_host_readiness_summary_json_override" ]]; then
+  pre_real_host_readiness_summary_json_path="$pre_real_host_readiness_summary_json_override"
+elif [[ -n "$user_bundle_dir" ]]; then
+  pre_real_host_readiness_summary_json_path="$user_bundle_dir/prod_pilot_pre_real_host_readiness.json"
+else
+  pre_real_host_readiness_summary_json_path="$(default_log_dir)/prod_pilot_pre_real_host_readiness_${timestamp}.json"
+fi
+
+pre_real_host_readiness_log_path="$(dirname "$(abs_path "$pre_real_host_readiness_summary_json_path")")/prod_pilot_pre_real_host_readiness_${timestamp}.log"
+
 cmd=(
   "$EASY_NODE_SH" "three-machine-prod-bundle"
   "--preflight-check" "$preflight_check"
@@ -332,8 +382,29 @@ if [[ -z "$user_run_report_json" && -n "$run_report_json_path" ]]; then
   cmd+=("--run-report-json" "$run_report_json_path")
 fi
 
-if [[ $# -gt 0 ]]; then
-  cmd+=("$@")
+if [[ ${#filtered_user_args[@]} -gt 0 ]]; then
+  cmd+=("${filtered_user_args[@]}")
+fi
+
+if [[ "$pre_real_host_readiness" == "1" ]]; then
+  mkdir -p "$(dirname "$pre_real_host_readiness_log_path")" "$(dirname "$(abs_path "$pre_real_host_readiness_summary_json_path")")"
+  pre_real_host_readiness_cmd=(
+    "$EASY_NODE_SH" "pre-real-host-readiness"
+    "--summary-json" "$pre_real_host_readiness_summary_json_path"
+    "--print-summary-json" "1"
+  )
+
+  echo "[prod-pilot-runbook] running pre-real-host readiness gate"
+  echo "[prod-pilot-runbook] pre_real_host_readiness_summary_json=$pre_real_host_readiness_summary_json_path"
+  echo "[prod-pilot-runbook] pre_real_host_readiness_log=$pre_real_host_readiness_log_path"
+  set +e
+  "${pre_real_host_readiness_cmd[@]}" 2>&1 | tee "$pre_real_host_readiness_log_path"
+  pre_real_host_readiness_rc=${PIPESTATUS[0]}
+  set -e
+  if [[ "$pre_real_host_readiness_rc" -ne 0 ]]; then
+    echo "[prod-pilot-runbook] pre-real-host readiness blocked pilot runbook: rc=$pre_real_host_readiness_rc"
+    exit "$pre_real_host_readiness_rc"
+  fi
 fi
 
 echo "[prod-pilot-runbook] running production bundle flow with strict fail-closed defaults"

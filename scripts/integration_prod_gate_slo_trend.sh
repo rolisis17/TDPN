@@ -19,6 +19,20 @@ trap cleanup EXIT
 
 REPORTS_DIR="$TMP_DIR/reports"
 mkdir -p "$REPORTS_DIR/run_a" "$REPORTS_DIR/run_b" "$REPORTS_DIR/run_c"
+mkdir -p "$REPORTS_DIR/run_b/incident_bundle"
+touch "$REPORTS_DIR/run_b/incident_attachments_manifest.json" "$REPORTS_DIR/run_b/incident_attachments_skipped.json"
+
+cat >"$REPORTS_DIR/run_b/incident_summary.json" <<'EOF_INCIDENT_SUMMARY_B'
+{
+  "status": "ok"
+}
+EOF_INCIDENT_SUMMARY_B
+
+cat >"$REPORTS_DIR/run_b/incident_report.md" <<'EOF_INCIDENT_REPORT_B'
+# Incident Report
+EOF_INCIDENT_REPORT_B
+
+touch "$REPORTS_DIR/run_b/incident_bundle.tar.gz"
 
 cat >"$REPORTS_DIR/run_a/prod_gate_summary.json" <<'EOF_GATE_A'
 {
@@ -103,7 +117,19 @@ cat >"$REPORTS_DIR/run_b/prod_bundle_run_report.json" <<EOF_RR_B
   "preflight": {"enabled": true, "status": "ok", "rc": 0},
   "bundle": {"status": "ok", "rc": 0},
   "integrity_verify": {"enabled": true, "status": "ok", "rc": 0},
-  "signoff": {"enabled": true, "rc": 0}
+  "signoff": {"enabled": true, "rc": 0},
+  "incident_snapshot": {
+    "enabled_on_fail": true,
+    "status": "ok",
+    "rc": 0,
+    "bundle_dir": "$REPORTS_DIR/run_b/incident_bundle",
+    "bundle_tar": "$REPORTS_DIR/run_b/incident_bundle.tar.gz",
+    "summary_json": "$REPORTS_DIR/run_b/incident_summary.json",
+    "report_md": "$REPORTS_DIR/run_b/incident_report.md",
+    "attachment_manifest": "$REPORTS_DIR/run_b/incident_attachments_manifest.json",
+    "attachment_skipped": "$REPORTS_DIR/run_b/incident_attachments_skipped.json",
+    "attachment_count": 1
+  }
 }
 EOF_RR_B
 
@@ -151,6 +177,26 @@ if ! jq -e '.reports_total == 3 and .go == 2 and .no_go == 1 and .decision == "G
   cat "$SUMMARY_JSON"
   exit 1
 fi
+if ! jq -e '.incident_snapshot.latest_failed_run_report.source_run_report_json.path | endswith("/run_b/prod_bundle_run_report.json")' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "summary JSON missing incident source run report handoff"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if ! jq -e '.incident_snapshot.latest_failed_run_report.source_summary_json.path | endswith("/run_b/prod_gate_summary.json")' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "summary JSON missing incident source summary handoff"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if ! jq -e '(.incident_snapshot.latest_failed_run_report.summary_json.path | endswith("/run_b/incident_summary.json")) and (.incident_snapshot.latest_failed_run_report.summary_json.valid_json == 1) and (.incident_snapshot.latest_failed_run_report.report_md.path | endswith("/run_b/incident_report.md"))' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "summary JSON missing incident summary/report handoff"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if ! jq -e '(.incident_snapshot.latest_failed_run_report.attachment_manifest.path | endswith("/run_b/incident_attachments_manifest.json")) and (.incident_snapshot.latest_failed_run_report.attachment_skipped.path | endswith("/run_b/incident_attachments_skipped.json")) and (.incident_snapshot.latest_failed_run_report.attachment_count == 1)' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "summary JSON missing incident attachment handoff"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
 if ! jq -e '.policy.require_wg_validate_udp_source == 0 and .policy.require_wg_validate_strict_distinct == 0 and .policy.require_wg_soak_diversity_pass == 0 and .policy.min_wg_soak_selection_lines == 0 and .policy.min_wg_soak_entry_operators == 0 and .policy.min_wg_soak_exit_operators == 0 and .policy.min_wg_soak_cross_operator_pairs == 0' "$SUMMARY_JSON" >/dev/null 2>&1; then
   echo "summary JSON policy block missing expected WG evidence defaults"
   cat "$SUMMARY_JSON"
@@ -158,6 +204,16 @@ if ! jq -e '.policy.require_wg_validate_udp_source == 0 and .policy.require_wg_v
 fi
 if ! rg -q '\[prod-gate-slo-trend\] summary_json_payload:' /tmp/integration_prod_gate_slo_trend_baseline.log; then
   echo "expected printed summary payload marker not found"
+  cat /tmp/integration_prod_gate_slo_trend_baseline.log
+  exit 1
+fi
+if ! rg -q '\[prod-gate-slo-trend\] incident_handoff source_summary_json=' /tmp/integration_prod_gate_slo_trend_baseline.log; then
+  echo "expected normalized incident handoff line not found"
+  cat /tmp/integration_prod_gate_slo_trend_baseline.log
+  exit 1
+fi
+if ! rg -q 'attachment_manifest=.*incident_attachments_manifest.json' /tmp/integration_prod_gate_slo_trend_baseline.log; then
+  echo "expected incident attachment manifest in trend handoff line"
   cat /tmp/integration_prod_gate_slo_trend_baseline.log
   exit 1
 fi

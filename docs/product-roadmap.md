@@ -68,3 +68,8 @@ Recommended hardening toggles for client tests:
 - `CLIENT_REQUIRE_DISTINCT_OPERATORS=1`
 - `CLIENT_REQUIRE_DISTINCT_ENTRY_EXIT_COUNTRY=1` (if country metadata quality is good)
 - `CLIENT_EXIT_LOCALITY_SOFT_BIAS=1` with tuned locality bias values when you want country preference without hard lock-in.
+
+Deferred manual checks are tracked in:
+- `docs/manual-validation-backlog.md`
+- `./scripts/easy_node.sh manual-validation-backlog`
+- `./scripts/easy_node.sh manual-validation-status --show-json 1`

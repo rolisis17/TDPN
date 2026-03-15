@@ -156,6 +156,16 @@ if ! rg -q -- '--subject pilot-alice' "$CAPTURE"; then
   cat "$CAPTURE"
   exit 1
 fi
+if ! rg -q -- "--pre-real-host-readiness 1" "$CAPTURE"; then
+  echo "quick forwarding missing default --pre-real-host-readiness 1"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- "--pre-real-host-readiness-summary-json $SUCCESS_REPORTS/pre_real_host_readiness_summary.json" "$CAPTURE"; then
+  echo "quick forwarding missing derived pre-real-host readiness summary path"
+  cat "$CAPTURE"
+  exit 1
+fi
 if ! rg -q -- '--max-round-failures 2' "$CAPTURE"; then
   echo "quick forwarding missing --max-round-failures 2"
   cat "$CAPTURE"
@@ -198,6 +208,16 @@ fi
 if ! jq -e '.config.max_round_failures == 2' "$SUCCESS_RUN_REPORT" >/dev/null; then
   echo "unexpected max_round_failures payload in quick run report"
   cat "$SUCCESS_RUN_REPORT"
+  exit 1
+fi
+if ! jq -e --arg pre_summary_json "$SUCCESS_REPORTS/pre_real_host_readiness_summary.json" '.config.pre_real_host_readiness == true and .artifacts.pre_real_host_readiness_summary_json == $pre_summary_json' "$SUCCESS_RUN_REPORT" >/dev/null; then
+  echo "unexpected pre_real_host_readiness payload in quick run report"
+  cat "$SUCCESS_RUN_REPORT"
+  exit 1
+fi
+if ! rg -q -- "\\[prod-pilot-cohort-quick] pre_real_host_readiness_summary_json=$SUCCESS_REPORTS/pre_real_host_readiness_summary.json" /tmp/integration_prod_pilot_cohort_quick_success.log; then
+  echo "quick output missing pre-real-host readiness summary path"
+  cat /tmp/integration_prod_pilot_cohort_quick_success.log
   exit 1
 fi
 if ! jq -e '.config.bundle_outputs == false and .config.bundle_fail_close == false' "$SUCCESS_RUN_REPORT" >/dev/null; then

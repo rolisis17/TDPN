@@ -412,6 +412,11 @@ run_report_incident_status=""
 run_report_incident_rc=0
 run_report_incident_bundle_dir=""
 run_report_incident_bundle_tar=""
+run_report_incident_summary_json=""
+run_report_incident_report_md=""
+run_report_incident_attachment_manifest=""
+run_report_incident_attachment_skipped=""
+run_report_incident_attachment_count=0
 if [[ -n "$run_report_json" ]]; then
   run_report_status="$(json_string "$run_report_json" '.status')"
   run_report_final_rc="$(json_int "$run_report_json" '.final_rc')"
@@ -425,6 +430,29 @@ if [[ -n "$run_report_json" ]]; then
   run_report_incident_rc="$(json_int "$run_report_json" '.incident_snapshot.rc')"
   run_report_incident_bundle_dir="$(json_string "$run_report_json" '.incident_snapshot.bundle_dir')"
   run_report_incident_bundle_tar="$(json_string "$run_report_json" '.incident_snapshot.bundle_tar')"
+  run_report_incident_summary_json="$(json_string "$run_report_json" '.incident_snapshot.summary_json')"
+  run_report_incident_report_md="$(json_string "$run_report_json" '.incident_snapshot.report_md')"
+  run_report_incident_attachment_manifest="$(json_string "$run_report_json" '.incident_snapshot.attachment_manifest')"
+  run_report_incident_attachment_skipped="$(json_string "$run_report_json" '.incident_snapshot.attachment_skipped')"
+  run_report_incident_attachment_count="$(json_int "$run_report_json" '.incident_snapshot.attachment_count')"
+  if [[ -n "$run_report_incident_bundle_dir" && "$run_report_incident_bundle_dir" != /* ]]; then
+    run_report_incident_bundle_dir="$ROOT_DIR/$run_report_incident_bundle_dir"
+  fi
+  if [[ -n "$run_report_incident_bundle_tar" && "$run_report_incident_bundle_tar" != /* ]]; then
+    run_report_incident_bundle_tar="$ROOT_DIR/$run_report_incident_bundle_tar"
+  fi
+  if [[ -n "$run_report_incident_summary_json" && "$run_report_incident_summary_json" != /* ]]; then
+    run_report_incident_summary_json="$ROOT_DIR/$run_report_incident_summary_json"
+  fi
+  if [[ -n "$run_report_incident_report_md" && "$run_report_incident_report_md" != /* ]]; then
+    run_report_incident_report_md="$ROOT_DIR/$run_report_incident_report_md"
+  fi
+  if [[ -n "$run_report_incident_attachment_manifest" && "$run_report_incident_attachment_manifest" != /* ]]; then
+    run_report_incident_attachment_manifest="$ROOT_DIR/$run_report_incident_attachment_manifest"
+  fi
+  if [[ -n "$run_report_incident_attachment_skipped" && "$run_report_incident_attachment_skipped" != /* ]]; then
+    run_report_incident_attachment_skipped="$ROOT_DIR/$run_report_incident_attachment_skipped"
+  fi
 fi
 
 declare -a errors=()
@@ -601,6 +629,24 @@ if [[ "$require_incident_snapshot_artifacts" == "1" ]]; then
       elif [[ ! -f "$run_report_incident_bundle_tar" ]]; then
         errors+=("run report incident snapshot bundle_tar not found: $run_report_incident_bundle_tar")
       fi
+      if [[ -z "$run_report_incident_summary_json" ]]; then
+        errors+=("run report incident snapshot summary_json missing")
+      elif [[ ! -f "$run_report_incident_summary_json" ]]; then
+        errors+=("run report incident snapshot summary_json not found: $run_report_incident_summary_json")
+      elif ! jq -e . "$run_report_incident_summary_json" >/dev/null 2>&1; then
+        errors+=("run report incident snapshot summary_json is not valid JSON: $run_report_incident_summary_json")
+      fi
+      if [[ -z "$run_report_incident_report_md" ]]; then
+        errors+=("run report incident snapshot report_md missing")
+      elif [[ ! -f "$run_report_incident_report_md" ]]; then
+        errors+=("run report incident snapshot report_md not found: $run_report_incident_report_md")
+      fi
+      if [[ -n "$run_report_incident_attachment_manifest" && ! -f "$run_report_incident_attachment_manifest" ]]; then
+        errors+=("run report incident snapshot attachment_manifest not found: $run_report_incident_attachment_manifest")
+      fi
+      if [[ -n "$run_report_incident_attachment_skipped" && ! -f "$run_report_incident_attachment_skipped" ]]; then
+        errors+=("run report incident snapshot attachment_skipped not found: $run_report_incident_attachment_skipped")
+      fi
     elif [[ "$run_report_status" == "fail" || "$run_report_final_rc" != "0" ]]; then
       errors+=("run report incident snapshot artifacts requested but snapshot status is not ok (status=${run_report_incident_status:-unset})")
     fi
@@ -619,6 +665,9 @@ echo "[prod-gate-check] wg_validate_evidence client_inner_source=${wg_validate_c
 echo "[prod-gate-check] wg_soak_diversity selection_lines_total=${wg_soak_selection_lines} selection_entry_operators=${wg_soak_selection_entry_operators} selection_exit_operators=${wg_soak_selection_exit_operators} selection_cross_operator_pairs=${wg_soak_selection_cross_operator_pairs} selection_diversity_failed=${wg_soak_selection_diversity_failed}"
 if [[ -n "$run_report_json" ]]; then
   echo "[prod-gate-check] run_report status=${run_report_status:-unset} final_rc=${run_report_final_rc} preflight=${run_report_preflight_status:-unset} bundle=${run_report_bundle_status:-unset} integrity=${run_report_integrity_status:-unset} signoff_enabled=${run_report_signoff_enabled:-unset} signoff_rc=${run_report_signoff_rc} incident_enabled_on_fail=${run_report_incident_enabled_on_fail:-unset} incident_status=${run_report_incident_status:-unset} incident_rc=${run_report_incident_rc}"
+  if [[ -n "$run_report_incident_summary_json" || -n "$run_report_incident_report_md" || -n "$run_report_incident_attachment_manifest" || -n "$run_report_incident_attachment_skipped" ]]; then
+    echo "[prod-gate-check] incident_handoff source_run_report=${run_report_json:-unset} summary_json=${run_report_incident_summary_json:-unset} report_md=${run_report_incident_report_md:-unset} attachment_manifest=${run_report_incident_attachment_manifest:-unset} attachment_skipped=${run_report_incident_attachment_skipped:-unset} attachment_count=${run_report_incident_attachment_count}"
+  fi
 fi
 
 if ((${#errors[@]} > 0)); then
@@ -626,6 +675,16 @@ if ((${#errors[@]} > 0)); then
   for err in "${errors[@]}"; do
     echo "  - $err"
   done
+  if [[ -n "$run_report_incident_summary_json" || -n "$run_report_incident_report_md" || -n "$run_report_incident_bundle_dir" || -n "$run_report_incident_bundle_tar" || -n "$run_report_incident_attachment_manifest" || -n "$run_report_incident_attachment_skipped" ]]; then
+    echo "[prod-gate-check] incident handoff artifacts:"
+    [[ -n "$run_report_incident_bundle_dir" ]] && echo "  - bundle_dir=$run_report_incident_bundle_dir"
+    [[ -n "$run_report_incident_bundle_tar" ]] && echo "  - bundle_tar=$run_report_incident_bundle_tar"
+    [[ -n "$run_report_incident_summary_json" ]] && echo "  - summary_json=$run_report_incident_summary_json"
+    [[ -n "$run_report_incident_report_md" ]] && echo "  - report_md=$run_report_incident_report_md"
+    [[ -n "$run_report_incident_attachment_manifest" ]] && echo "  - attachment_manifest=$run_report_incident_attachment_manifest"
+    [[ -n "$run_report_incident_attachment_skipped" ]] && echo "  - attachment_skipped=$run_report_incident_attachment_skipped"
+    echo "  - attachment_count=$run_report_incident_attachment_count"
+  fi
   if [[ "$show_json" == "1" ]]; then
     echo "[prod-gate-check] gate summary payload:"
     cat "$gate_summary_json"

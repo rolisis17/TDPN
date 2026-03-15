@@ -7,6 +7,7 @@ cd "$ROOT_DIR"
 PILOT_RUNBOOK_SCRIPT="${PROD_PILOT_RUNBOOK_SCRIPT:-$ROOT_DIR/scripts/prod_pilot_runbook.sh}"
 SLO_TREND_SCRIPT="${PROD_GATE_SLO_TREND_SCRIPT:-$ROOT_DIR/scripts/prod_gate_slo_trend.sh}"
 SLO_ALERT_SCRIPT="${PROD_GATE_SLO_ALERT_SCRIPT:-$ROOT_DIR/scripts/prod_gate_slo_alert.sh}"
+PRE_REAL_HOST_READINESS_SCRIPT="${PRE_REAL_HOST_READINESS_SCRIPT:-$ROOT_DIR/scripts/pre_real_host_readiness.sh}"
 
 default_log_dir() {
   echo "${EASY_NODE_LOG_DIR:-$ROOT_DIR/.easy-node-logs}"
@@ -103,6 +104,8 @@ usage() {
   cat <<'USAGE'
 Usage:
   ./scripts/prod_pilot_cohort_runbook.sh \
+    [--pre-real-host-readiness [0|1]] \
+    [--pre-real-host-readiness-summary-json PATH] \
     [--rounds N] \
     [--pause-sec N] \
     [--continue-on-fail [0|1]] \
@@ -151,6 +154,8 @@ Examples:
 
 Notes:
   - Unknown args are forwarded to prod_pilot_runbook.
+  - pre-real-host readiness runs once before the cohort by default, then inner
+    prod-pilot-runbook rounds are told to skip duplicate readiness sweeps.
   - Summary JSON includes per-round command result + run report paths.
   - If --require-all-rounds-ok=1, any non-zero round exits mark cohort fail.
   - Bundle mode can produce one shareable tar + checksum + manifest for the full cohort.
@@ -173,7 +178,14 @@ if [[ ! -x "$SLO_ALERT_SCRIPT" ]]; then
   echo "missing executable slo alert script: $SLO_ALERT_SCRIPT"
   exit 2
 fi
+if [[ ! -x "$PRE_REAL_HOST_READINESS_SCRIPT" ]]; then
+  echo "missing executable pre-real-host readiness script: $PRE_REAL_HOST_READINESS_SCRIPT"
+  exit 2
+fi
 
+pre_real_host_readiness="${PROD_PILOT_COHORT_PRE_REAL_HOST_READINESS:-1}"
+pre_real_host_readiness_summary_json=""
+pre_real_host_readiness_summary_json_override="${PROD_PILOT_COHORT_PRE_REAL_HOST_READINESS_SUMMARY_JSON:-}"
 rounds="${PROD_PILOT_COHORT_ROUNDS:-5}"
 pause_sec="${PROD_PILOT_COHORT_PAUSE_SEC:-60}"
 continue_on_fail="${PROD_PILOT_COHORT_CONTINUE_ON_FAIL:-0}"
@@ -212,6 +224,19 @@ declare -a pilot_args=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --pre-real-host-readiness)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        pre_real_host_readiness="${2:-}"
+        shift 2
+      else
+        pre_real_host_readiness="1"
+        shift
+      fi
+      ;;
+    --pre-real-host-readiness-summary-json)
+      pre_real_host_readiness_summary_json="${2:-}"
+      shift 2
+      ;;
     --rounds)
       rounds="${2:-}"
       shift 2
@@ -409,6 +434,7 @@ done
 
 bool_or_die "--continue-on-fail" "$continue_on_fail"
 bool_or_die "--require-all-rounds-ok" "$require_all_rounds_ok"
+bool_or_die "--pre-real-host-readiness" "$pre_real_host_readiness"
 bool_or_die "--trend-fail-on-any-no-go" "$trend_fail_on_any_no_go"
 bool_or_die "--trend-require-wg-validate-udp-source" "$trend_require_wg_validate_udp_source"
 bool_or_die "--trend-require-wg-validate-strict-distinct" "$trend_require_wg_validate_strict_distinct"
@@ -472,6 +498,13 @@ fi
 if [[ -z "$summary_json" ]]; then
   summary_json="$reports_dir/prod_pilot_cohort_summary.json"
 fi
+if [[ -z "$pre_real_host_readiness_summary_json" ]]; then
+  if [[ -n "$pre_real_host_readiness_summary_json_override" ]]; then
+    pre_real_host_readiness_summary_json="$pre_real_host_readiness_summary_json_override"
+  else
+    pre_real_host_readiness_summary_json="$reports_dir/pre_real_host_readiness_summary.json"
+  fi
+fi
 if [[ -z "$bundle_manifest_json" ]]; then
   bundle_manifest_json="$reports_dir/prod_pilot_cohort_bundle_manifest.json"
 fi
@@ -484,10 +517,13 @@ fi
 trend_summary_json="$(abs_path "$trend_summary_json")"
 alert_summary_json="$(abs_path "$alert_summary_json")"
 summary_json="$(abs_path "$summary_json")"
+pre_real_host_readiness_summary_json="$(abs_path "$pre_real_host_readiness_summary_json")"
 bundle_manifest_json="$(abs_path "$bundle_manifest_json")"
 bundle_tar="$(abs_path "$bundle_tar")"
 bundle_sha256_file="$(abs_path "$bundle_sha256_file")"
-mkdir -p "$(dirname "$trend_summary_json")" "$(dirname "$alert_summary_json")" "$(dirname "$summary_json")" "$(dirname "$bundle_manifest_json")" "$(dirname "$bundle_tar")" "$(dirname "$bundle_sha256_file")"
+mkdir -p "$(dirname "$trend_summary_json")" "$(dirname "$alert_summary_json")" "$(dirname "$summary_json")" "$(dirname "$pre_real_host_readiness_summary_json")" "$(dirname "$bundle_manifest_json")" "$(dirname "$bundle_tar")" "$(dirname "$bundle_sha256_file")"
+
+pre_real_host_readiness_log="$reports_dir/pre_real_host_readiness.log"
 
 report_list_file="$reports_dir/run_reports.list"
 : >"$report_list_file"
@@ -503,7 +539,52 @@ first_failure_rc=0
 
 round_results_json='[]'
 declare -a run_reports=()
+pre_real_host_readiness_rc=0
+pre_real_host_readiness_status="skipped"
+pre_real_host_readiness_machine_c_ready=""
+pre_real_host_readiness_next_command=""
+pre_real_host_readiness_readiness_status=""
+pre_real_host_readiness_report_summary_json=""
+pre_real_host_readiness_report_md=""
+pre_real_host_readiness_blockers_json='[]'
+pre_real_host_blocked=0
+pilot_pre_real_host_readiness_explicit=0
 
+for arg in "${pilot_args[@]}"; do
+  if [[ "$arg" == "--pre-real-host-readiness" ]]; then
+    pilot_pre_real_host_readiness_explicit=1
+    break
+  fi
+done
+
+if [[ "$pre_real_host_readiness" == "1" ]]; then
+  echo "[prod-pilot-cohort] running pre-real-host readiness gate"
+  echo "[prod-pilot-cohort] pre_real_host_readiness_summary_json=$pre_real_host_readiness_summary_json"
+  echo "[prod-pilot-cohort] pre_real_host_readiness_log=$pre_real_host_readiness_log"
+  set +e
+  "$PRE_REAL_HOST_READINESS_SCRIPT" \
+    --summary-json "$pre_real_host_readiness_summary_json" \
+    --print-summary-json 1 2>&1 | tee "$pre_real_host_readiness_log"
+  pre_real_host_readiness_rc=${PIPESTATUS[0]}
+  set -e
+
+  if [[ -f "$pre_real_host_readiness_summary_json" ]] && jq -e . "$pre_real_host_readiness_summary_json" >/dev/null 2>&1; then
+    pre_real_host_readiness_status="$(jq -r '.status // "fail"' "$pre_real_host_readiness_summary_json" 2>/dev/null || printf 'fail')"
+    pre_real_host_readiness_machine_c_ready="$(jq -r '.machine_c_smoke_gate.ready // false' "$pre_real_host_readiness_summary_json" 2>/dev/null || printf 'false')"
+    pre_real_host_readiness_next_command="$(jq -r '.machine_c_smoke_gate.next_command // ""' "$pre_real_host_readiness_summary_json" 2>/dev/null || true)"
+    pre_real_host_readiness_readiness_status="$(jq -r '.manual_validation_report.readiness_status // ""' "$pre_real_host_readiness_summary_json" 2>/dev/null || true)"
+    pre_real_host_readiness_report_summary_json="$(jq -r '.manual_validation_report.summary_json // ""' "$pre_real_host_readiness_summary_json" 2>/dev/null || true)"
+    pre_real_host_readiness_report_md="$(jq -r '.manual_validation_report.report_md // ""' "$pre_real_host_readiness_summary_json" 2>/dev/null || true)"
+    pre_real_host_readiness_blockers_json="$(jq -c '.machine_c_smoke_gate.blockers // []' "$pre_real_host_readiness_summary_json" 2>/dev/null || printf '[]')"
+  fi
+
+  if [[ "$pre_real_host_readiness_rc" -ne 0 || "$pre_real_host_readiness_machine_c_ready" != "true" ]]; then
+    pre_real_host_blocked=1
+    echo "[prod-pilot-cohort] pre-real-host readiness blocked cohort runbook: rc=$pre_real_host_readiness_rc"
+  fi
+fi
+
+if [[ "$pre_real_host_blocked" != "1" ]]; then
 for ((round = 1; round <= rounds; round++)); do
   rounds_attempted=$((rounds_attempted + 1))
   round_dir="$reports_dir/round_${round}"
@@ -516,6 +597,9 @@ for ((round = 1; round <= rounds; round++)); do
     --bundle-dir "$round_dir"
     --run-report-json "$round_report_json"
   )
+  if [[ "$pilot_pre_real_host_readiness_explicit" != "1" ]]; then
+    cmd+=(--pre-real-host-readiness 0)
+  fi
   cmd+=("${pilot_args[@]}")
 
   echo "[prod-pilot-cohort] round=$round/$rounds start"
@@ -575,6 +659,7 @@ for ((round = 1; round <= rounds; round++)); do
     sleep "$pause_sec"
   fi
 done
+fi
 
 trend_rc=0
 alert_rc=0
@@ -646,7 +731,15 @@ status="ok"
 failure_step=""
 final_rc=0
 
-if [[ "$require_all_rounds_ok" == "1" && "$rounds_failed" -gt 0 ]]; then
+if [[ "$pre_real_host_blocked" == "1" ]]; then
+  status="fail"
+  failure_step="pre_real_host_readiness"
+  final_rc="$pre_real_host_readiness_rc"
+  if [[ "$final_rc" -eq 0 ]]; then
+    final_rc=1
+  fi
+fi
+if [[ "$require_all_rounds_ok" == "1" && "$rounds_failed" -gt 0 && "$status" == "ok" ]]; then
   status="fail"
   failure_step="pilot_rounds"
   final_rc="$first_failure_rc"
@@ -788,6 +881,8 @@ jq -nc \
   --arg trend_summary_json "$trend_summary_json" \
   --arg alert_summary_json "$alert_summary_json" \
   --arg summary_json "$summary_json" \
+  --arg pre_real_host_readiness_summary_json "$pre_real_host_readiness_summary_json" \
+  --arg pre_real_host_readiness_log "$pre_real_host_readiness_log" \
   --arg trend_go_rate_pct "$trend_go_rate_pct" \
   --arg alert_severity "$alert_severity" \
   --argjson rounds_requested "$rounds" \
@@ -797,6 +892,7 @@ jq -nc \
   --argjson stopped_early "$(json_bool "$stopped_early")" \
   --argjson continue_on_fail "$(json_bool "$continue_on_fail")" \
   --argjson require_all_rounds_ok "$(json_bool "$require_all_rounds_ok")" \
+  --argjson pre_real_host_readiness "$(json_bool "$pre_real_host_readiness")" \
   --argjson trend_fail_on_any_no_go "$(json_bool "$trend_fail_on_any_no_go")" \
   --argjson trend_require_wg_validate_udp_source "$(json_bool "$trend_require_wg_validate_udp_source")" \
   --argjson trend_require_wg_validate_strict_distinct "$(json_bool "$trend_require_wg_validate_strict_distinct")" \
@@ -828,6 +924,14 @@ jq -nc \
   --argjson bundle_manifest_rc "$bundle_manifest_rc" \
   --arg bundle_manifest_error "$bundle_manifest_error" \
   --argjson duration_sec "$duration_sec" \
+  --argjson pre_real_host_readiness_rc "$pre_real_host_readiness_rc" \
+  --arg pre_real_host_readiness_status "$pre_real_host_readiness_status" \
+  --arg pre_real_host_readiness_machine_c_ready "$pre_real_host_readiness_machine_c_ready" \
+  --arg pre_real_host_readiness_next_command "$pre_real_host_readiness_next_command" \
+  --arg pre_real_host_readiness_readiness_status "$pre_real_host_readiness_readiness_status" \
+  --arg pre_real_host_readiness_report_summary_json "$pre_real_host_readiness_report_summary_json" \
+  --arg pre_real_host_readiness_report_md "$pre_real_host_readiness_report_md" \
+  --argjson pre_real_host_readiness_blockers "$pre_real_host_readiness_blockers_json" \
   --argjson round_results "$round_results_json" \
   --argjson run_reports "$run_reports_json" \
   --argjson final_rc "$final_rc" \
@@ -848,6 +952,7 @@ jq -nc \
     policy:{
       continue_on_fail:$continue_on_fail,
       require_all_rounds_ok:$require_all_rounds_ok,
+      pre_real_host_readiness:$pre_real_host_readiness,
       trend_fail_on_any_no_go:$trend_fail_on_any_no_go,
       trend_require_wg_validate_udp_source:$trend_require_wg_validate_udp_source,
       trend_require_wg_validate_strict_distinct:$trend_require_wg_validate_strict_distinct,
@@ -868,6 +973,8 @@ jq -nc \
       reports_dir:$reports_dir,
       report_list_file:$report_list_file,
       run_reports:$run_reports,
+      pre_real_host_readiness_summary_json:($pre_real_host_readiness_summary_json // ""),
+      pre_real_host_readiness_log:($pre_real_host_readiness_log // ""),
       trend_summary_json:$trend_summary_json,
       alert_summary_json:$alert_summary_json,
       summary_json:$summary_json,
@@ -878,6 +985,18 @@ jq -nc \
     trend:{
       rc:$trend_rc,
       go_rate_pct:($trend_go_rate_pct // "")
+    },
+    pre_real_host_readiness:{
+      rc:$pre_real_host_readiness_rc,
+      status:($pre_real_host_readiness_status // ""),
+      machine_c_smoke_ready:($pre_real_host_readiness_machine_c_ready == "true"),
+      next_command:($pre_real_host_readiness_next_command // ""),
+      readiness_status:($pre_real_host_readiness_readiness_status // ""),
+      summary_json:($pre_real_host_readiness_summary_json // ""),
+      log_file:($pre_real_host_readiness_log // ""),
+      report_summary_json:($pre_real_host_readiness_report_summary_json // ""),
+      report_md:($pre_real_host_readiness_report_md // ""),
+      blockers:$pre_real_host_readiness_blockers
     },
     alert:{
       rc:$alert_rc,

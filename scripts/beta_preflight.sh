@@ -29,6 +29,15 @@ run_step "release integrity" ./scripts/integration_release_integrity.sh
 run_step "release sbom" ./scripts/integration_release_sbom.sh
 run_step "release tag verify" ./scripts/integration_release_tag_verify.sh
 run_step "release policy gate" ./scripts/integration_release_policy_gate.sh
+run_step "runtime doctor" ./scripts/integration_runtime_doctor.sh
+run_step "manual validation status" ./scripts/integration_manual_validation_status.sh
+run_step "manual validation report" ./scripts/integration_manual_validation_report.sh
+run_step "pre-real-host readiness" ./scripts/integration_pre_real_host_readiness.sh
+run_step "runtime fix" ./scripts/integration_runtime_fix.sh
+run_step "client-vpn smoke" ./scripts/integration_client_vpn_smoke.sh
+run_step "three-machine prod signoff" ./scripts/integration_three_machine_prod_signoff.sh
+run_step "wg-only stack selftest record" ./scripts/integration_wg_only_stack_selftest_record.sh
+run_step "wg-only stack wiring" ./scripts/integration_wg_only_stack_wiring.sh
 run_step "rotate server secrets" ./scripts/integration_rotate_server_secrets.sh
 run_step "directory strict governance" ./scripts/integration_directory_beta_strict.sh
 run_step "cross-role strict guardrails" ./scripts/integration_beta_strict_roles.sh
@@ -36,6 +45,8 @@ run_step "easy-node client profile env wiring" ./scripts/integration_easy_node_c
 run_step "easy-mode launcher wiring" ./scripts/integration_easy_mode_launcher_wiring.sh
 run_step "easy-mode launcher runtime" ./scripts/integration_easy_mode_launcher_runtime.sh
 run_step "incident snapshot tooling" ./scripts/integration_incident_snapshot.sh
+run_step "incident snapshot attachment tooling" ./scripts/integration_incident_snapshot_attach_artifacts.sh
+run_step "incident snapshot summary tooling" ./scripts/integration_incident_snapshot_summary.sh
 run_step "easy-node prod authority env wiring" ./scripts/integration_easy_node_prod_server_env.sh
 run_step "easy-node role guard" ./scripts/integration_easy_node_role_guard.sh
 run_step "easy-node invite auth policy" ./scripts/integration_easy_node_invite_auth_policy.sh

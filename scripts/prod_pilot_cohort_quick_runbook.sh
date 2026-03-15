@@ -12,6 +12,8 @@ Usage:
   ./scripts/prod_pilot_cohort_quick_runbook.sh \
     [--bootstrap-directory URL] \
     [--subject ID] \
+    [--pre-real-host-readiness [0|1]] \
+    [--pre-real-host-readiness-summary-json PATH] \
     [--rounds N] \
     [--pause-sec N] \
     [--continue-on-fail [0|1]] \
@@ -109,6 +111,54 @@ int_or_die() {
   fi
 }
 
+json_string_runbook() {
+  local file="$1"
+  local expr="$2"
+  if [[ -z "$file" || ! -f "$file" ]]; then
+    echo ""
+    return
+  fi
+  jq -er "$expr // empty" "$file" 2>/dev/null || true
+}
+
+json_bool01_runbook() {
+  local file="$1"
+  local expr="$2"
+  if [[ -z "$file" || ! -f "$file" ]]; then
+    echo "0"
+    return
+  fi
+  if jq -er "$expr == true" "$file" >/dev/null 2>&1; then
+    echo "1"
+  else
+    echo "0"
+  fi
+}
+
+path_exists01_runbook() {
+  local path
+  path="$(trim "${1:-}")"
+  if [[ -n "$path" && -e "$path" ]]; then
+    echo "1"
+  else
+    echo "0"
+  fi
+}
+
+json_valid01_runbook() {
+  local path
+  path="$(trim "${1:-}")"
+  if [[ -z "$path" || ! -f "$path" ]]; then
+    echo "0"
+    return
+  fi
+  if jq -e . "$path" >/dev/null 2>&1; then
+    echo "1"
+  else
+    echo "0"
+  fi
+}
+
 if [[ $# -gt 0 ]]; then
   case "${1:-}" in
     -h|--help|help)
@@ -129,6 +179,8 @@ fi
 
 bootstrap_directory="${PROD_PILOT_COHORT_QUICK_BOOTSTRAP_DIRECTORY:-}"
 subject="${PROD_PILOT_COHORT_QUICK_SUBJECT:-pilot-client}"
+pre_real_host_readiness="${PROD_PILOT_COHORT_QUICK_RUNBOOK_PRE_REAL_HOST_READINESS:-1}"
+pre_real_host_readiness_summary_json="${PROD_PILOT_COHORT_QUICK_RUNBOOK_PRE_REAL_HOST_READINESS_SUMMARY_JSON:-}"
 rounds="${PROD_PILOT_COHORT_QUICK_ROUNDS:-5}"
 pause_sec="${PROD_PILOT_COHORT_QUICK_PAUSE_SEC:-60}"
 continue_on_fail="${PROD_PILOT_COHORT_QUICK_CONTINUE_ON_FAIL:-0}"
@@ -178,6 +230,19 @@ while [[ $# -gt 0 ]]; do
       ;;
     --subject)
       subject="${2:-}"
+      shift 2
+      ;;
+    --pre-real-host-readiness)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        pre_real_host_readiness="${2:-}"
+        shift 2
+      else
+        pre_real_host_readiness="1"
+        shift
+      fi
+      ;;
+    --pre-real-host-readiness-summary-json)
+      pre_real_host_readiness_summary_json="${2:-}"
       shift 2
       ;;
     --rounds)
@@ -450,6 +515,7 @@ bool_or_die "--dashboard-fail-close" "$dashboard_fail_close"
 bool_or_die "--dashboard-print" "$dashboard_print"
 bool_or_die "--dashboard-print-summary-json" "$dashboard_print_summary_json"
 bool_or_die "--show-json" "$show_json"
+bool_or_die "--pre-real-host-readiness" "$pre_real_host_readiness"
 
 max_alert_severity="$(printf '%s' "$max_alert_severity" | tr '[:lower:]' '[:upper:]')"
 if [[ "$max_alert_severity" != "OK" && "$max_alert_severity" != "WARN" && "$max_alert_severity" != "CRITICAL" ]]; then
@@ -493,8 +559,13 @@ if [[ -z "$dashboard_md" ]]; then
 else
   dashboard_md="$(abs_path "$dashboard_md")"
 fi
+if [[ -z "$pre_real_host_readiness_summary_json" ]]; then
+  pre_real_host_readiness_summary_json="$reports_dir/pre_real_host_readiness_summary.json"
+else
+  pre_real_host_readiness_summary_json="$(abs_path "$pre_real_host_readiness_summary_json")"
+fi
 
-mkdir -p "$reports_dir" "$(dirname "$summary_json")" "$(dirname "$run_report_json")" "$(dirname "$signoff_json")" "$(dirname "$trend_summary_json")" "$(dirname "$alert_summary_json")" "$(dirname "$dashboard_md")"
+mkdir -p "$reports_dir" "$(dirname "$summary_json")" "$(dirname "$run_report_json")" "$(dirname "$signoff_json")" "$(dirname "$trend_summary_json")" "$(dirname "$alert_summary_json")" "$(dirname "$dashboard_md")" "$(dirname "$pre_real_host_readiness_summary_json")"
 
 started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 started_epoch="$(date -u +%s)"
@@ -508,6 +579,8 @@ dashboard_require_cohort_signoff_policy="$signoff_require_cohort_signoff_policy"
 
 quick_cmd=(
   "$EASY_NODE_SH" "prod-pilot-cohort-quick"
+  --pre-real-host-readiness "$pre_real_host_readiness"
+  --pre-real-host-readiness-summary-json "$pre_real_host_readiness_summary_json"
   --rounds "$rounds"
   --pause-sec "$pause_sec"
   --continue-on-fail "$continue_on_fail"
@@ -646,6 +719,42 @@ if [[ "$duration_sec" -lt 0 ]]; then
   duration_sec=0
 fi
 
+incident_source_summary_json=""
+incident_source_summary_exists=0
+incident_source_summary_valid_json=0
+incident_source_run_report=""
+incident_source_run_report_exists=0
+incident_enabled=0
+incident_status=""
+incident_bundle_dir=""
+incident_bundle_dir_exists=0
+incident_bundle_tar=""
+incident_bundle_tar_exists=0
+incident_summary_handoff_json=""
+incident_summary_exists=0
+incident_summary_valid_json=0
+incident_report_md=""
+incident_report_exists=0
+
+if [[ "$(path_exists01_runbook "$signoff_json")" == "1" && "$(json_valid01_runbook "$signoff_json")" == "1" ]]; then
+  incident_source_summary_json="$(abs_path "$(json_string_runbook "$signoff_json" '.incident_snapshot.source_summary_json.path')")"
+  incident_source_summary_exists="$(path_exists01_runbook "$incident_source_summary_json")"
+  incident_source_summary_valid_json="$(json_valid01_runbook "$incident_source_summary_json")"
+  incident_source_run_report="$(abs_path "$(json_string_runbook "$signoff_json" '.incident_snapshot.source_run_report_json.path')")"
+  incident_source_run_report_exists="$(path_exists01_runbook "$incident_source_run_report")"
+  incident_enabled="$(json_bool01_runbook "$signoff_json" '.incident_snapshot.enabled')"
+  incident_status="$(json_string_runbook "$signoff_json" '.incident_snapshot.status')"
+  incident_bundle_dir="$(abs_path "$(json_string_runbook "$signoff_json" '.incident_snapshot.bundle_dir.path')")"
+  incident_bundle_dir_exists="$(path_exists01_runbook "$incident_bundle_dir")"
+  incident_bundle_tar="$(abs_path "$(json_string_runbook "$signoff_json" '.incident_snapshot.bundle_tar.path')")"
+  incident_bundle_tar_exists="$(path_exists01_runbook "$incident_bundle_tar")"
+  incident_summary_handoff_json="$(abs_path "$(json_string_runbook "$signoff_json" '.incident_snapshot.summary_json.path')")"
+  incident_summary_exists="$(path_exists01_runbook "$incident_summary_handoff_json")"
+  incident_summary_valid_json="$(json_valid01_runbook "$incident_summary_handoff_json")"
+  incident_report_md="$(abs_path "$(json_string_runbook "$signoff_json" '.incident_snapshot.report_md.path')")"
+  incident_report_exists="$(path_exists01_runbook "$incident_report_md")"
+fi
+
 summary_json_path="$reports_dir/prod_pilot_cohort_quick_runbook_summary.json"
 jq -nc \
   --arg started_at "$started_at" \
@@ -659,10 +768,19 @@ jq -nc \
   --arg trend_summary_json "$trend_summary_json" \
   --arg alert_summary_json "$alert_summary_json" \
   --arg dashboard_md "$dashboard_md" \
+  --arg pre_real_host_readiness_summary_json "$pre_real_host_readiness_summary_json" \
   --arg runbook_summary_json "$summary_json_path" \
   --arg max_alert_severity "$max_alert_severity" \
+  --arg incident_source_summary_json "$incident_source_summary_json" \
+  --arg incident_source_run_report "$incident_source_run_report" \
+  --arg incident_status "$incident_status" \
+  --arg incident_bundle_dir "$incident_bundle_dir" \
+  --arg incident_bundle_tar "$incident_bundle_tar" \
+  --arg incident_summary_json "$incident_summary_handoff_json" \
+  --arg incident_report_md "$incident_report_md" \
   --argjson rounds "$rounds" \
   --argjson pause_sec "$pause_sec" \
+  --argjson pre_real_host_readiness "$pre_real_host_readiness" \
   --argjson continue_on_fail "$continue_on_fail" \
   --argjson require_all_rounds_ok "$require_all_rounds_ok" \
   --argjson max_round_failures "$max_round_failures" \
@@ -694,6 +812,15 @@ jq -nc \
   --argjson quick_dashboard_rc "$quick_dashboard_rc" \
   --argjson final_rc "$final_rc" \
   --argjson duration_sec "$duration_sec" \
+  --argjson incident_source_summary_exists "$incident_source_summary_exists" \
+  --argjson incident_source_summary_valid_json "$incident_source_summary_valid_json" \
+  --argjson incident_source_run_report_exists "$incident_source_run_report_exists" \
+  --argjson incident_enabled "$incident_enabled" \
+  --argjson incident_bundle_dir_exists "$incident_bundle_dir_exists" \
+  --argjson incident_bundle_tar_exists "$incident_bundle_tar_exists" \
+  --argjson incident_summary_exists "$incident_summary_exists" \
+  --argjson incident_summary_valid_json "$incident_summary_valid_json" \
+  --argjson incident_report_exists "$incident_report_exists" \
   '{
     version: 1,
     started_at: $started_at,
@@ -710,6 +837,7 @@ jq -nc \
     config: {
       rounds: $rounds,
       pause_sec: $pause_sec,
+      pre_real_host_readiness: $pre_real_host_readiness,
       continue_on_fail: $continue_on_fail,
       require_all_rounds_ok: $require_all_rounds_ok,
       max_round_failures: $max_round_failures,
@@ -738,6 +866,16 @@ jq -nc \
       dashboard_print: $dashboard_print,
       dashboard_print_summary_json: $dashboard_print_summary_json
     },
+    incident_snapshot: {
+      source_summary_json: {path: ($incident_source_summary_json // ""), exists: $incident_source_summary_exists, valid_json: $incident_source_summary_valid_json},
+      source_run_report_json: {path: ($incident_source_run_report // ""), exists: $incident_source_run_report_exists},
+      enabled: $incident_enabled,
+      status: ($incident_status // ""),
+      bundle_dir: {path: ($incident_bundle_dir // ""), exists: $incident_bundle_dir_exists},
+      bundle_tar: {path: ($incident_bundle_tar // ""), exists: $incident_bundle_tar_exists},
+      summary_json: {path: ($incident_summary_json // ""), exists: $incident_summary_exists, valid_json: $incident_summary_valid_json},
+      report_md: {path: ($incident_report_md // ""), exists: $incident_report_exists}
+    },
     artifacts: {
       reports_dir: $reports_dir,
       summary_json: $summary_json,
@@ -746,11 +884,16 @@ jq -nc \
       trend_summary_json: $trend_summary_json,
       alert_summary_json: $alert_summary_json,
       dashboard_md: $dashboard_md,
+      pre_real_host_readiness_summary_json: $pre_real_host_readiness_summary_json,
       runbook_summary_json: $runbook_summary_json
     }
   }' >"$summary_json_path"
 
+echo "[prod-pilot-cohort-quick-runbook] pre_real_host_readiness_summary_json=$pre_real_host_readiness_summary_json"
 echo "[prod-pilot-cohort-quick-runbook] runbook_summary_json=$summary_json_path status=$status"
+if [[ -n "$incident_source_run_report" || -n "$incident_summary_handoff_json" || -n "$incident_report_md" ]]; then
+  echo "[prod-pilot-cohort-quick-runbook] incident_handoff source_run_report=${incident_source_run_report:-unset} summary_json=${incident_summary_handoff_json:-unset} report_md=${incident_report_md:-unset}"
+fi
 if [[ "$show_json" == "1" ]]; then
   cat "$summary_json_path"
 fi

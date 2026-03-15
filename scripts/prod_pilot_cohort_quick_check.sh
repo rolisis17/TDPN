@@ -123,6 +123,20 @@ json_bool_flag() {
   echo "$value"
 }
 
+json_valid01() {
+  local path
+  path="$(trim "${1:-}")"
+  if [[ -z "$path" || ! -f "$path" ]]; then
+    echo "0"
+    return
+  fi
+  if jq -e . "$path" >/dev/null 2>&1; then
+    echo "1"
+  else
+    echo "0"
+  fi
+}
+
 need_cmd jq
 
 run_report_json=""
@@ -420,9 +434,44 @@ summary_json="$(json_string "$run_report_json" '.artifacts.summary_json')"
 if [[ -n "$summary_json" && "$summary_json" != /* ]]; then
   summary_json="$ROOT_DIR/$summary_json"
 fi
+pre_real_host_readiness_summary_json="$(json_string "$run_report_json" '.artifacts.pre_real_host_readiness_summary_json')"
+if [[ -n "$pre_real_host_readiness_summary_json" && "$pre_real_host_readiness_summary_json" != /* ]]; then
+  pre_real_host_readiness_summary_json="$ROOT_DIR/$pre_real_host_readiness_summary_json"
+fi
 summary_status=""
+summary_valid_json="0"
+summary_incident_source_run_report=""
+summary_incident_enabled="0"
+summary_incident_status=""
+summary_incident_bundle_dir=""
+summary_incident_bundle_tar=""
+summary_incident_summary_json=""
+summary_incident_report_md=""
 if [[ -n "$summary_json" && -f "$summary_json" ]]; then
+  summary_valid_json="$(json_valid01 "$summary_json")"
   summary_status="$(json_string "$summary_json" '.status')"
+  summary_incident_source_run_report="$(json_string "$summary_json" '.incident_snapshot.latest_failed_run_report.path')"
+  summary_incident_enabled="$(json_bool_flag "$summary_json" '.incident_snapshot.latest_failed_run_report.enabled')"
+  summary_incident_status="$(json_string "$summary_json" '.incident_snapshot.latest_failed_run_report.status')"
+  summary_incident_bundle_dir="$(json_string "$summary_json" '.incident_snapshot.latest_failed_run_report.bundle_dir.path')"
+  summary_incident_bundle_tar="$(json_string "$summary_json" '.incident_snapshot.latest_failed_run_report.bundle_tar.path')"
+  summary_incident_summary_json="$(json_string "$summary_json" '.incident_snapshot.latest_failed_run_report.summary_json.path')"
+  summary_incident_report_md="$(json_string "$summary_json" '.incident_snapshot.latest_failed_run_report.report_md.path')"
+  if [[ -n "$summary_incident_source_run_report" && "$summary_incident_source_run_report" != /* ]]; then
+    summary_incident_source_run_report="$ROOT_DIR/$summary_incident_source_run_report"
+  fi
+  if [[ -n "$summary_incident_bundle_dir" && "$summary_incident_bundle_dir" != /* ]]; then
+    summary_incident_bundle_dir="$ROOT_DIR/$summary_incident_bundle_dir"
+  fi
+  if [[ -n "$summary_incident_bundle_tar" && "$summary_incident_bundle_tar" != /* ]]; then
+    summary_incident_bundle_tar="$ROOT_DIR/$summary_incident_bundle_tar"
+  fi
+  if [[ -n "$summary_incident_summary_json" && "$summary_incident_summary_json" != /* ]]; then
+    summary_incident_summary_json="$ROOT_DIR/$summary_incident_summary_json"
+  fi
+  if [[ -n "$summary_incident_report_md" && "$summary_incident_report_md" != /* ]]; then
+    summary_incident_report_md="$ROOT_DIR/$summary_incident_report_md"
+  fi
 fi
 
 declare -a errors=()
@@ -540,13 +589,26 @@ if ((${#errors[@]} > 0)); then
 fi
 
 echo "[prod-pilot-cohort-quick-check] run_report_json=$run_report_json"
+if [[ -n "$pre_real_host_readiness_summary_json" ]]; then
+  echo "[prod-pilot-cohort-quick-check] pre_real_host_readiness_summary_json=$pre_real_host_readiness_summary_json"
+fi
 echo "[prod-pilot-cohort-quick-check] decision=$decision status=${status:-unset} runbook_rc=$runbook_rc signoff_attempted=$signoff_attempted signoff_rc=$signoff_rc duration_sec=$duration_sec"
+if [[ -n "$summary_incident_source_run_report" || -n "$summary_incident_summary_json" || -n "$summary_incident_report_md" ]]; then
+  echo "[prod-pilot-cohort-quick-check] incident_handoff source_pre_real_host_readiness_summary_json=${pre_real_host_readiness_summary_json:-unset} source_run_report=${summary_incident_source_run_report:-unset} summary_json=${summary_incident_summary_json:-unset} report_md=${summary_incident_report_md:-unset}"
+fi
 
 if ((${#errors[@]} > 0)); then
   echo "[prod-pilot-cohort-quick-check] failed with ${#errors[@]} issue(s):"
   for err in "${errors[@]}"; do
     echo "  - $err"
   done
+  if [[ -n "$summary_incident_bundle_dir" || -n "$summary_incident_bundle_tar" || -n "$summary_incident_summary_json" || -n "$summary_incident_report_md" ]]; then
+    echo "[prod-pilot-cohort-quick-check] incident handoff artifacts:"
+    [[ -n "$summary_incident_bundle_dir" ]] && echo "  - bundle_dir=$summary_incident_bundle_dir"
+    [[ -n "$summary_incident_bundle_tar" ]] && echo "  - bundle_tar=$summary_incident_bundle_tar"
+    [[ -n "$summary_incident_summary_json" ]] && echo "  - summary_json=$summary_incident_summary_json"
+    [[ -n "$summary_incident_report_md" ]] && echo "  - report_md=$summary_incident_report_md"
+  fi
   if [[ "$show_json" == "1" ]]; then
     echo "[prod-pilot-cohort-quick-check] run report payload:"
     cat "$run_report_json"

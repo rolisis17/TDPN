@@ -7,7 +7,8 @@ AUTHORITY_ENV_FILE="$DEPLOY_DIR/.env.easy.server"
 PROVIDER_ENV_FILE="$DEPLOY_DIR/.env.easy.provider"
 # Backward-compatible alias for older helpers that expect SERVER_ENV_FILE.
 SERVER_ENV_FILE="$AUTHORITY_ENV_FILE"
-CLIENT_ENV_FILE="$DEPLOY_DIR/.env.easy.client"
+CLIENT_ENV_FILE_DEFAULT="$DEPLOY_DIR/.env.easy.client"
+CLIENT_ENV_FILE="${EASY_NODE_CLIENT_ENV_FILE:-$CLIENT_ENV_FILE_DEFAULT}"
 
 default_log_dir() {
   echo "${EASY_NODE_LOG_DIR:-$ROOT_DIR/.easy-node-logs}"
@@ -18,6 +19,38 @@ prepare_log_dir() {
   dir="$(default_log_dir)"
   mkdir -p "$dir"
   echo "$dir"
+}
+
+resolve_client_env_file() {
+  local requested="${EASY_NODE_CLIENT_ENV_FILE:-$CLIENT_ENV_FILE_DEFAULT}"
+  local dir=""
+  local fallback=""
+  if [[ -z "$requested" ]]; then
+    requested="$CLIENT_ENV_FILE_DEFAULT"
+  fi
+  if [[ "$requested" = /* ]]; then
+    :
+  else
+    requested="$ROOT_DIR/$requested"
+  fi
+
+  dir="$(dirname "$requested")"
+  if [[ -e "$requested" ]]; then
+    if [[ -w "$requested" ]]; then
+      printf '%s\n' "$requested"
+      return
+    fi
+  else
+    mkdir -p "$dir" >/dev/null 2>&1 || true
+    if [[ -d "$dir" && -w "$dir" ]]; then
+      printf '%s\n' "$requested"
+      return
+    fi
+  fi
+
+  fallback="$(prepare_log_dir)/.env.easy.client.$(id -u).$$"
+  echo "client test: env file not writable at $requested; using fallback $fallback" >&2
+  printf '%s\n' "$fallback"
 }
 
 default_client_vpn_key_dir() {
@@ -62,16 +95,26 @@ Usage:
   ./scripts/easy_node.sh wg-only-stack-status
   ./scripts/easy_node.sh wg-only-stack-down [--force-iface-cleanup [0|1]]
   ./scripts/easy_node.sh wg-only-stack-selftest [--strict-beta [0|1]] [--base-port N] [--timeout-sec N] [--min-selection-lines N] [--force-iface-reset [0|1]] [--cleanup-ifaces [0|1]] [--keep-stack [0|1]]
+  ./scripts/easy_node.sh wg-only-stack-selftest-record [wg-only-stack-selftest args...] [--record-result [0|1]] [--manual-validation-report [0|1]] [--manual-validation-report-summary-json PATH] [--manual-validation-report-md PATH] [--summary-json PATH] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh pre-real-host-readiness [--base-port N] [--client-iface IFACE] [--exit-iface IFACE] [--vpn-iface IFACE] [--runtime-fix-prune-wg-only-dir [0|1]] [--strict-beta [0|1]] [--timeout-sec N] [--min-selection-lines N] [--force-iface-reset [0|1]] [--cleanup-ifaces [0|1]] [--keep-stack [0|1]] [--manual-validation-report-summary-json PATH] [--manual-validation-report-md PATH] [--summary-json PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh client-test [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--exit-country CC] [--exit-region REGION] [--timeout-sec N] [--path-profile fast|balanced|privacy] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--min-selection-lines N] [--min-entry-operators N] [--min-exit-operators N] [--require-cross-operator-pair [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]]
   ./scripts/easy_node.sh client-vpn-preflight [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-urls URL[,URL...]] [--entry-url URL] [--exit-url URL] [--prod-profile [0|1]] [--interface IFACE] [--timeout-sec N] [--require-root [0|1]] [--operator-floor-check [0|1]] [--issuer-quorum-check [0|1]] [--issuer-min-operators N] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH]
   ./scripts/easy_node.sh client-vpn-up [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-urls URL[,URL...]] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--path-profile fast|balanced|privacy] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--exit-country CC] [--exit-region REGION] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--beta-profile [0|1]] [--prod-profile [0|1]] [--operator-floor-check [0|1]] [--issuer-quorum-check [0|1]] [--issuer-min-operators N] [--interface IFACE] [--proxy-addr HOST:PORT] [--private-key-file PATH] [--allowed-ips CIDR] [--install-route [0|1]] [--startup-sync-timeout-sec N] [--ready-timeout-sec N] [--force-restart [0|1]] [--foreground [0|1]] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH] [--log-file PATH]
+  ./scripts/easy_node.sh client-vpn-smoke [client-vpn-up args...] [--run-preflight [0|1]] [--status-check [0|1]] [--keep-up [0|1]] [--record-result [0|1]] [--pre-real-host-readiness [0|1]] [--pre-real-host-readiness-summary-json PATH] [--runtime-doctor [0|1]] [--runtime-fix [0|1]] [--runtime-fix-prune-wg-only-dir [0|1]] [--runtime-base-port N] [--runtime-client-iface IFACE] [--runtime-exit-iface IFACE] [--runtime-vpn-iface IFACE] [--incident-snapshot-on-fail [0|1]] [--incident-snapshot-timeout-sec N] [--incident-bundle-dir PATH] [--manual-validation-report [0|1]] [--manual-validation-report-summary-json PATH] [--manual-validation-report-md PATH] [--public-ip-url URL] [--country-url URL] [--curl-timeout-sec N] [--summary-json PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh client-vpn-status
   ./scripts/easy_node.sh client-vpn-down [--force-iface-cleanup [0|1]] [--iface IFACE] [--keep-key [0|1]]
   ./scripts/easy_node.sh three-machine-validate [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-a-url URL] [--issuer-b-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--client-min-selection-lines N] [--client-min-entry-operators N] [--client-min-exit-operators N] [--client-require-cross-operator-pair [0|1]] [--exit-country CC] [--exit-region REGION] [--path-profile fast|balanced|privacy] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--require-issuer-quorum [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]]
   ./scripts/easy_node.sh three-machine-soak [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-a-url URL] [--issuer-b-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--rounds N] [--pause-sec N] [--fault-every N] [--fault-command CMD] [--continue-on-fail [0|1]] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--client-min-selection-lines N] [--client-min-entry-operators N] [--client-min-exit-operators N] [--client-require-cross-operator-pair [0|1]] [--exit-country CC] [--exit-region REGION] [--path-profile fast|balanced|privacy] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--require-issuer-quorum [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]] [--report-file PATH]
   ./scripts/easy_node.sh three-machine-prod-gate [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--control-timeout-sec N] [--control-soak-rounds N] [--control-soak-pause-sec N] [--control-fault-every N] [--control-fault-command CMD] [--control-continue-on-fail [0|1]] [--wg-client-timeout-sec N] [--wg-session-sec N] [--wg-soak-rounds N] [--wg-soak-pause-sec N] [--wg-slo-profile off|recommended|strict] [--wg-max-consecutive-failures N] [--wg-max-round-duration-sec N] [--wg-max-recovery-sec N] [--wg-max-failure-class CLASS=N] [--wg-disallow-unknown-failure-class [0|1]] [--wg-strict-ingress-rehearsal [0|1]] [--wg-min-selection-lines N] [--wg-min-entry-operators N] [--wg-min-exit-operators N] [--wg-min-cross-operator-pairs N] [--wg-fault-every N] [--wg-fault-command CMD] [--wg-continue-on-fail [0|1]] [--wg-validate-summary-json PATH] [--wg-soak-summary-json PATH] [--gate-summary-json PATH] [--fault-every N] [--fault-command CMD] [--continue-on-fail [0|1]] [--strict-distinct [0|1]] [--skip-control-soak [0|1]] [--skip-wg [0|1]] [--skip-wg-soak [0|1]] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH] [--report-file PATH]
-  ./scripts/easy_node.sh three-machine-prod-bundle [--bundle-dir PATH] [--preflight-check [0|1]] [--preflight-timeout-sec N] [--preflight-require-root [0|1]] [--bundle-verify-check [0|1]] [--bundle-verify-show-details [0|1]] [--run-report-json PATH] [--run-report-print [0|1]] [--incident-snapshot-on-fail [0|1]] [--incident-snapshot-include-docker-logs [0|1]] [--incident-snapshot-docker-log-lines N] [--incident-snapshot-timeout-sec N] [--incident-snapshot-compose-project NAME] [--signoff-check [0|1]] [--signoff-require-full-sequence [0|1]] [--signoff-require-wg-validate-ok [0|1]] [--signoff-require-wg-soak-ok [0|1]] [--signoff-require-wg-validate-udp-source [0|1]] [--signoff-require-wg-validate-strict-distinct [0|1]] [--signoff-require-wg-soak-diversity-pass [0|1]] [--signoff-min-wg-soak-selection-lines N] [--signoff-min-wg-soak-entry-operators N] [--signoff-min-wg-soak-exit-operators N] [--signoff-min-wg-soak-cross-operator-pairs N] [--signoff-max-wg-soak-failed-rounds N] [--signoff-show-json [0|1]] [three-machine-prod-gate args...]
+  ./scripts/easy_node.sh three-machine-prod-bundle [--bundle-dir PATH] [--preflight-check [0|1]] [--preflight-timeout-sec N] [--preflight-require-root [0|1]] [--bundle-verify-check [0|1]] [--bundle-verify-show-details [0|1]] [--run-report-json PATH] [--run-report-print [0|1]] [--incident-snapshot-on-fail [0|1]] [--incident-snapshot-include-docker-logs [0|1]] [--incident-snapshot-docker-log-lines N] [--incident-snapshot-timeout-sec N] [--incident-snapshot-compose-project NAME] [--incident-snapshot-attach-artifact PATH]... [--signoff-check [0|1]] [--signoff-require-full-sequence [0|1]] [--signoff-require-wg-validate-ok [0|1]] [--signoff-require-wg-soak-ok [0|1]] [--signoff-require-wg-validate-udp-source [0|1]] [--signoff-require-wg-validate-strict-distinct [0|1]] [--signoff-require-wg-soak-diversity-pass [0|1]] [--signoff-min-wg-soak-selection-lines N] [--signoff-min-wg-soak-entry-operators N] [--signoff-min-wg-soak-exit-operators N] [--signoff-min-wg-soak-cross-operator-pairs N] [--signoff-max-wg-soak-failed-rounds N] [--signoff-show-json [0|1]] [three-machine-prod-gate args...]
+  ./scripts/easy_node.sh three-machine-prod-signoff [three-machine-prod-bundle args...] [--bundle-dir PATH] [--run-report-json PATH] [--record-result [0|1]] [--pre-real-host-readiness [0|1]] [--pre-real-host-readiness-summary-json PATH] [--runtime-doctor [0|1]] [--runtime-fix [0|1]] [--runtime-fix-prune-wg-only-dir [0|1]] [--runtime-base-port N] [--runtime-client-iface IFACE] [--runtime-exit-iface IFACE] [--runtime-vpn-iface IFACE] [--manual-validation-report [0|1]] [--manual-validation-report-summary-json PATH] [--manual-validation-report-md PATH] [--summary-json PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh three-machine-reminder
+  ./scripts/easy_node.sh manual-validation-backlog
+  ./scripts/easy_node.sh manual-validation-status [--base-port N] [--client-iface IFACE] [--exit-iface IFACE] [--vpn-iface IFACE] [--show-json [0|1]]
+  ./scripts/easy_node.sh manual-validation-report [--base-port N] [--client-iface IFACE] [--exit-iface IFACE] [--vpn-iface IFACE] [--summary-json PATH] [--report-md PATH] [--print-report [0|1]] [--print-summary-json [0|1]] [--fail-on-not-ready [0|1]]
+  ./scripts/easy_node.sh manual-validation-record --check-id CHECK_ID --status pass|fail|warn|pending|skip [--notes TEXT] [--artifact PATH]... [--command TEXT] [--show-json [0|1]]
+  ./scripts/easy_node.sh runtime-doctor [--base-port N] [--client-iface IFACE] [--exit-iface IFACE] [--vpn-iface IFACE] [--show-json [0|1]]
+  ./scripts/easy_node.sh runtime-fix [--base-port N] [--client-iface IFACE] [--exit-iface IFACE] [--vpn-iface IFACE] [--prune-wg-only-dir [0|1]] [--show-json [0|1]]
   ./scripts/easy_node.sh prod-gate-check [--bundle-dir PATH] [--run-report-json PATH] [--gate-summary-json PATH] [--require-full-sequence [0|1]] [--require-wg-validate-ok [0|1]] [--require-wg-soak-ok [0|1]] [--require-preflight-ok [0|1]] [--require-bundle-ok [0|1]] [--require-integrity-ok [0|1]] [--require-signoff-ok [0|1]] [--require-incident-snapshot-on-fail [0|1]] [--require-incident-snapshot-artifacts [0|1]] [--require-wg-validate-udp-source [0|1]] [--require-wg-validate-strict-distinct [0|1]] [--require-wg-soak-diversity-pass [0|1]] [--min-wg-soak-selection-lines N] [--min-wg-soak-entry-operators N] [--min-wg-soak-exit-operators N] [--min-wg-soak-cross-operator-pairs N] [--max-wg-soak-failed-rounds N] [--show-json [0|1]]
   ./scripts/easy_node.sh prod-gate-slo-summary [--run-report-json PATH] [--bundle-dir PATH] [--gate-summary-json PATH] [--wg-validate-summary-json PATH] [--wg-soak-summary-json PATH] [--require-full-sequence [0|1]] [--require-wg-validate-ok [0|1]] [--require-wg-soak-ok [0|1]] [--max-wg-soak-failed-rounds N] [--require-preflight-ok [0|1]] [--require-bundle-ok [0|1]] [--require-integrity-ok [0|1]] [--require-signoff-ok [0|1]] [--require-incident-snapshot-on-fail [0|1]] [--require-incident-snapshot-artifacts [0|1]] [--require-wg-validate-udp-source [0|1]] [--require-wg-validate-strict-distinct [0|1]] [--require-wg-soak-diversity-pass [0|1]] [--min-wg-soak-selection-lines N] [--min-wg-soak-entry-operators N] [--min-wg-soak-exit-operators N] [--min-wg-soak-cross-operator-pairs N] [--fail-on-no-go [0|1]] [--show-json [0|1]]
   ./scripts/easy_node.sh prod-gate-slo-trend [--run-report-json PATH]... [--run-report-list FILE] [--reports-dir DIR] [--max-reports N] [--since-hours N] [--require-full-sequence [0|1]] [--require-wg-validate-ok [0|1]] [--require-wg-soak-ok [0|1]] [--max-wg-soak-failed-rounds N] [--require-preflight-ok [0|1]] [--require-bundle-ok [0|1]] [--require-integrity-ok [0|1]] [--require-signoff-ok [0|1]] [--require-incident-snapshot-on-fail [0|1]] [--require-incident-snapshot-artifacts [0|1]] [--require-wg-validate-udp-source [0|1]] [--require-wg-validate-strict-distinct [0|1]] [--require-wg-soak-diversity-pass [0|1]] [--min-wg-soak-selection-lines N] [--min-wg-soak-entry-operators N] [--min-wg-soak-exit-operators N] [--min-wg-soak-cross-operator-pairs N] [--fail-on-any-no-go [0|1]] [--min-go-rate-pct N] [--show-details [0|1]] [--show-top-reasons N] [--summary-json PATH] [--print-summary-json [0|1]]
@@ -85,21 +128,22 @@ Usage:
   ./scripts/easy_node.sh prod-wg-validate [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--exit-a-url URL] [--exit-b-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--control-timeout-sec N] [--client-timeout-sec N] [--wg-session-sec N] [--client-iface IFACE] [--client-proxy-addr HOST:PORT] [--client-inner-source udp|synthetic] [--inject-attempts N] [--strict-distinct [0|1]] [--skip-control-plane-check [0|1]] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH] [--summary-json PATH] [--report-file PATH]
   ./scripts/easy_node.sh prod-wg-soak [--rounds N] [--pause-sec N] [--fault-every N] [--fault-command CMD] [--continue-on-fail [0|1]] [--max-consecutive-failures N] [--strict-ingress-rehearsal [0|1]] [--summary-json PATH] [--report-file PATH] [prod-wg-validate args...]
   ./scripts/easy_node.sh prod-wg-strict-ingress-rehearsal [prod-wg-soak/prod-wg-validate args...]
-  ./scripts/easy_node.sh prod-pilot-runbook [three-machine-prod-bundle args...]
-  ./scripts/easy_node.sh prod-pilot-cohort-runbook [--rounds N] [--pause-sec N] [--continue-on-fail [0|1]] [--require-all-rounds-ok [0|1]] [--reports-dir PATH] [--summary-json PATH] [--trend-summary-json PATH] [--alert-summary-json PATH] [--trend-min-go-rate-pct N] [--trend-fail-on-any-no-go [0|1]] [--trend-require-wg-validate-udp-source [0|1]] [--trend-require-wg-validate-strict-distinct [0|1]] [--trend-require-wg-soak-diversity-pass [0|1]] [--trend-min-wg-soak-selection-lines N] [--trend-min-wg-soak-entry-operators N] [--trend-min-wg-soak-exit-operators N] [--trend-min-wg-soak-cross-operator-pairs N] [--trend-max-reports N] [--trend-since-hours N] [--trend-show-top-reasons N] [--warn-go-rate-pct N] [--critical-go-rate-pct N] [--warn-no-go-count N] [--critical-no-go-count N] [--warn-eval-errors N] [--critical-eval-errors N] [--max-alert-severity OK|WARN|CRITICAL] [--bundle-outputs [0|1]] [--bundle-fail-close [0|1]] [--bundle-tar PATH] [--bundle-sha256-file PATH] [--bundle-manifest-json PATH] [--print-summary-json [0|1]] [-- <prod-pilot-runbook args...>]
-  ./scripts/easy_node.sh prod-pilot-cohort-campaign [--campaign-summary-json PATH] [--campaign-report-md PATH] [--campaign-print-report [0|1]] [--campaign-print-summary-json [0|1]] [--campaign-summary-fail-close [0|1]] [prod-pilot-cohort-quick-runbook args...]
+  ./scripts/easy_node.sh prod-pilot-runbook [--pre-real-host-readiness [0|1]] [--pre-real-host-readiness-summary-json PATH] [three-machine-prod-bundle args...]
+  ./scripts/easy_node.sh prod-pilot-cohort-runbook [--pre-real-host-readiness [0|1]] [--pre-real-host-readiness-summary-json PATH] [--rounds N] [--pause-sec N] [--continue-on-fail [0|1]] [--require-all-rounds-ok [0|1]] [--reports-dir PATH] [--summary-json PATH] [--trend-summary-json PATH] [--alert-summary-json PATH] [--trend-min-go-rate-pct N] [--trend-fail-on-any-no-go [0|1]] [--trend-require-wg-validate-udp-source [0|1]] [--trend-require-wg-validate-strict-distinct [0|1]] [--trend-require-wg-soak-diversity-pass [0|1]] [--trend-min-wg-soak-selection-lines N] [--trend-min-wg-soak-entry-operators N] [--trend-min-wg-soak-exit-operators N] [--trend-min-wg-soak-cross-operator-pairs N] [--trend-max-reports N] [--trend-since-hours N] [--trend-show-top-reasons N] [--warn-go-rate-pct N] [--critical-go-rate-pct N] [--warn-no-go-count N] [--critical-no-go-count N] [--warn-eval-errors N] [--critical-eval-errors N] [--max-alert-severity OK|WARN|CRITICAL] [--bundle-outputs [0|1]] [--bundle-fail-close [0|1]] [--bundle-tar PATH] [--bundle-sha256-file PATH] [--bundle-manifest-json PATH] [--print-summary-json [0|1]] [-- <prod-pilot-runbook args...>]
+  ./scripts/easy_node.sh prod-pilot-cohort-campaign [--pre-real-host-readiness [0|1]] [--pre-real-host-readiness-summary-json PATH] [--campaign-summary-json PATH] [--campaign-report-md PATH] [--campaign-print-report [0|1]] [--campaign-print-summary-json [0|1]] [--campaign-summary-fail-close [0|1]] [prod-pilot-cohort-quick-runbook args...]
   ./scripts/easy_node.sh prod-pilot-cohort-campaign-summary [--runbook-summary-json PATH] [--reports-dir PATH] [--summary-json PATH] [--report-md PATH] [--print-report [0|1]] [--print-summary-json [0|1]] [--fail-on-no-go [0|1]]
   ./scripts/easy_node.sh prod-pilot-cohort-quick-check [--run-report-json PATH] [--reports-dir PATH] [--require-status-ok [0|1]] [--require-runbook-ok [0|1]] [--require-signoff-attempted [0|1]] [--require-signoff-ok [0|1]] [--require-cohort-signoff-policy [0|1]] [--require-trend-artifact-policy-match [0|1]] [--require-trend-wg-validate-udp-source [0|1]] [--require-trend-wg-validate-strict-distinct [0|1]] [--require-trend-wg-soak-diversity-pass [0|1]] [--min-trend-wg-soak-selection-lines N] [--min-trend-wg-soak-entry-operators N] [--min-trend-wg-soak-exit-operators N] [--min-trend-wg-soak-cross-operator-pairs N] [--min-go-rate-pct N] [--max-alert-severity OK|WARN|CRITICAL] [--require-bundle-created [0|1]] [--require-bundle-manifest [0|1]] [--require-summary-json [0|1]] [--require-summary-status-ok [0|1]] [--require-incident-snapshot-on-fail [0|1]] [--require-incident-snapshot-artifacts [0|1]] [--max-duration-sec N] [--show-json [0|1]]
   ./scripts/easy_node.sh prod-pilot-cohort-quick-trend [--run-report-json PATH]... [--run-report-list FILE] [--reports-dir DIR] [--max-reports N] [--since-hours N] [--require-status-ok [0|1]] [--require-runbook-ok [0|1]] [--require-signoff-attempted [0|1]] [--require-signoff-ok [0|1]] [--require-cohort-signoff-policy [0|1]] [--require-summary-json [0|1]] [--require-summary-status-ok [0|1]] [--require-incident-snapshot-on-fail [0|1]] [--require-incident-snapshot-artifacts [0|1]] [--max-duration-sec N] [--fail-on-any-no-go [0|1]] [--min-go-rate-pct N] [--show-details [0|1]] [--show-top-reasons N] [--summary-json PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh prod-pilot-cohort-quick-alert [--trend-summary-json PATH] [--run-report-json PATH]... [--run-report-list FILE] [--reports-dir DIR] [--max-reports N] [--since-hours N] [--require-status-ok [0|1]] [--require-runbook-ok [0|1]] [--require-signoff-attempted [0|1]] [--require-signoff-ok [0|1]] [--require-cohort-signoff-policy [0|1]] [--require-summary-json [0|1]] [--require-summary-status-ok [0|1]] [--require-incident-snapshot-on-fail [0|1]] [--require-incident-snapshot-artifacts [0|1]] [--max-duration-sec N] [--warn-go-rate-pct N] [--critical-go-rate-pct N] [--warn-no-go-count N] [--critical-no-go-count N] [--warn-eval-errors N] [--critical-eval-errors N] [--fail-on-warn [0|1]] [--fail-on-critical [0|1]] [--show-top-reasons N] [--summary-json PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh prod-pilot-cohort-quick-dashboard [--run-report-json PATH]... [--run-report-list FILE] [--reports-dir DIR] [--max-reports N] [--since-hours N] [--require-status-ok [0|1]] [--require-runbook-ok [0|1]] [--require-signoff-attempted [0|1]] [--require-signoff-ok [0|1]] [--require-cohort-signoff-policy [0|1]] [--require-summary-json [0|1]] [--require-summary-status-ok [0|1]] [--require-incident-snapshot-on-fail [0|1]] [--require-incident-snapshot-artifacts [0|1]] [--max-duration-sec N] [--fail-on-any-no-go [0|1]] [--min-go-rate-pct N] [--show-top-reasons N] [--warn-go-rate-pct N] [--critical-go-rate-pct N] [--warn-no-go-count N] [--critical-no-go-count N] [--warn-eval-errors N] [--critical-eval-errors N] [--fail-on-warn [0|1]] [--fail-on-critical [0|1]] [--trend-summary-json PATH] [--alert-summary-json PATH] [--dashboard-md PATH] [--print-dashboard [0|1]] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh prod-pilot-cohort-quick-signoff [--run-report-json PATH] [--reports-dir PATH] [--check-latest [0|1]] [--check-trend [0|1]] [--check-alert [0|1]] [--require-status-ok [0|1]] [--require-runbook-ok [0|1]] [--require-signoff-attempted [0|1]] [--require-signoff-ok [0|1]] [--require-cohort-signoff-policy [0|1]] [--require-trend-artifact-policy-match [0|1]] [--require-trend-wg-validate-udp-source [0|1]] [--require-trend-wg-validate-strict-distinct [0|1]] [--require-trend-wg-soak-diversity-pass [0|1]] [--min-trend-wg-soak-selection-lines N] [--min-trend-wg-soak-entry-operators N] [--min-trend-wg-soak-exit-operators N] [--min-trend-wg-soak-cross-operator-pairs N] [--require-bundle-created [0|1]] [--require-bundle-manifest [0|1]] [--require-summary-json [0|1]] [--require-summary-status-ok [0|1]] [--require-incident-snapshot-on-fail [0|1]] [--require-incident-snapshot-artifacts [0|1]] [--max-duration-sec N] [--max-reports N] [--since-hours N] [--fail-on-any-no-go [0|1]] [--min-go-rate-pct N] [--warn-go-rate-pct N] [--critical-go-rate-pct N] [--warn-no-go-count N] [--critical-no-go-count N] [--warn-eval-errors N] [--critical-eval-errors N] [--max-alert-severity OK|WARN|CRITICAL] [--trend-summary-json PATH] [--alert-summary-json PATH] [--signoff-json PATH] [--show-json [0|1]]
-  ./scripts/easy_node.sh prod-pilot-cohort-quick-runbook [--bootstrap-directory URL] [--subject ID] [--rounds N] [--pause-sec N] [--continue-on-fail [0|1]] [--require-all-rounds-ok [0|1]] [--max-round-failures N] [--trend-min-go-rate-pct N] [--max-alert-severity OK|WARN|CRITICAL] [--bundle-outputs [0|1]] [--bundle-fail-close [0|1]] [--reports-dir PATH] [--summary-json PATH] [--run-report-json PATH] [--signoff-json PATH] [--trend-summary-json PATH] [--alert-summary-json PATH] [--dashboard-md PATH] [--signoff-max-reports N] [--signoff-since-hours N] [--signoff-fail-on-any-no-go [0|1]] [--signoff-min-go-rate-pct N] [--signoff-require-cohort-signoff-policy [0|1]] [--signoff-require-trend-artifact-policy-match [0|1]] [--signoff-require-trend-wg-validate-udp-source [0|1]] [--signoff-require-trend-wg-validate-strict-distinct [0|1]] [--signoff-require-trend-wg-soak-diversity-pass [0|1]] [--signoff-min-trend-wg-soak-selection-lines N] [--signoff-min-trend-wg-soak-entry-operators N] [--signoff-min-trend-wg-soak-exit-operators N] [--signoff-min-trend-wg-soak-cross-operator-pairs N] [--signoff-require-incident-snapshot-on-fail [0|1]] [--signoff-require-incident-snapshot-artifacts [0|1]] [--dashboard-enable [0|1]] [--dashboard-fail-close [0|1]] [--dashboard-print [0|1]] [--dashboard-print-summary-json [0|1]] [--show-json [0|1]] [-- <prod-pilot-runbook extra args...>]
-  ./scripts/easy_node.sh prod-pilot-cohort-quick [--bootstrap-directory URL] [--subject ID] [--rounds N] [--pause-sec N] [--continue-on-fail [0|1]] [--require-all-rounds-ok [0|1]] [--max-round-failures N] [--trend-min-go-rate-pct N] [--max-alert-severity OK|WARN|CRITICAL] [--bundle-outputs [0|1]] [--bundle-fail-close [0|1]] [--reports-dir PATH] [--summary-json PATH] [--run-report-json PATH] [--signoff-require-trend-artifact-policy-match [0|1]] [--signoff-require-trend-wg-validate-udp-source [0|1]] [--signoff-require-trend-wg-validate-strict-distinct [0|1]] [--signoff-require-trend-wg-soak-diversity-pass [0|1]] [--signoff-min-trend-wg-soak-selection-lines N] [--signoff-min-trend-wg-soak-entry-operators N] [--signoff-min-trend-wg-soak-exit-operators N] [--signoff-min-trend-wg-soak-cross-operator-pairs N] [--signoff-require-incident-snapshot-on-fail [0|1]] [--signoff-require-incident-snapshot-artifacts [0|1]] [--print-run-report [0|1]] [--show-json [0|1]] [-- <prod-pilot-runbook extra args...>]
+  ./scripts/easy_node.sh prod-pilot-cohort-quick-runbook [--bootstrap-directory URL] [--subject ID] [--pre-real-host-readiness [0|1]] [--pre-real-host-readiness-summary-json PATH] [--rounds N] [--pause-sec N] [--continue-on-fail [0|1]] [--require-all-rounds-ok [0|1]] [--max-round-failures N] [--trend-min-go-rate-pct N] [--max-alert-severity OK|WARN|CRITICAL] [--bundle-outputs [0|1]] [--bundle-fail-close [0|1]] [--reports-dir PATH] [--summary-json PATH] [--run-report-json PATH] [--signoff-json PATH] [--trend-summary-json PATH] [--alert-summary-json PATH] [--dashboard-md PATH] [--signoff-max-reports N] [--signoff-since-hours N] [--signoff-fail-on-any-no-go [0|1]] [--signoff-min-go-rate-pct N] [--signoff-require-cohort-signoff-policy [0|1]] [--signoff-require-trend-artifact-policy-match [0|1]] [--signoff-require-trend-wg-validate-udp-source [0|1]] [--signoff-require-trend-wg-validate-strict-distinct [0|1]] [--signoff-require-trend-wg-soak-diversity-pass [0|1]] [--signoff-min-trend-wg-soak-selection-lines N] [--signoff-min-trend-wg-soak-entry-operators N] [--signoff-min-trend-wg-soak-exit-operators N] [--signoff-min-trend-wg-soak-cross-operator-pairs N] [--signoff-require-incident-snapshot-on-fail [0|1]] [--signoff-require-incident-snapshot-artifacts [0|1]] [--dashboard-enable [0|1]] [--dashboard-fail-close [0|1]] [--dashboard-print [0|1]] [--dashboard-print-summary-json [0|1]] [--show-json [0|1]] [-- <prod-pilot-runbook extra args...>]
+  ./scripts/easy_node.sh prod-pilot-cohort-quick [--bootstrap-directory URL] [--subject ID] [--pre-real-host-readiness [0|1]] [--pre-real-host-readiness-summary-json PATH] [--rounds N] [--pause-sec N] [--continue-on-fail [0|1]] [--require-all-rounds-ok [0|1]] [--max-round-failures N] [--trend-min-go-rate-pct N] [--max-alert-severity OK|WARN|CRITICAL] [--bundle-outputs [0|1]] [--bundle-fail-close [0|1]] [--reports-dir PATH] [--summary-json PATH] [--run-report-json PATH] [--signoff-require-trend-artifact-policy-match [0|1]] [--signoff-require-trend-wg-validate-udp-source [0|1]] [--signoff-require-trend-wg-validate-strict-distinct [0|1]] [--signoff-require-trend-wg-soak-diversity-pass [0|1]] [--signoff-min-trend-wg-soak-selection-lines N] [--signoff-min-trend-wg-soak-entry-operators N] [--signoff-min-trend-wg-soak-exit-operators N] [--signoff-min-trend-wg-soak-cross-operator-pairs N] [--signoff-require-incident-snapshot-on-fail [0|1]] [--signoff-require-incident-snapshot-artifacts [0|1]] [--print-run-report [0|1]] [--show-json [0|1]] [-- <prod-pilot-runbook extra args...>]
   ./scripts/easy_node.sh prod-key-rotation-runbook [--mode auto|authority|provider] [--backup-dir PATH] [--summary-json PATH] [--preflight-check [0|1]] [--preflight-live [0|1]] [--preflight-timeout-sec N] [--rotate-server-secrets [0|1]] [--rotate-admin-signing [0|1]] [--key-history N] [--restart [0|1]] [--restart-issuer [0|1]] [--show-secrets [0|1]] [--rollback-on-fail [0|1]] [--restart-after-rollback [0|1]] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh prod-upgrade-runbook [--mode auto|authority|provider] [--backup-dir PATH] [--summary-json PATH] [--preflight-check [0|1]] [--preflight-live [0|1]] [--preflight-timeout-sec N] [--compose-pull [0|1]] [--compose-build [0|1]] [--restart [0|1]] [--rollback-on-fail [0|1]] [--restart-after-rollback [0|1]] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh prod-operator-lifecycle-runbook [--action onboard|offboard] [--mode auto|authority|provider] [--public-host HOST] [--operator-id ID] [--issuer-id ID] [--authority-directory URL] [--authority-issuer URL] [--peer-directories URLS] [--bootstrap-directory URL] [--peer-identity-strict 0|1|auto] [--min-peer-operators N] [--client-allowlist [0|1]] [--allow-anon-cred [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]] [--preflight-check [0|1]] [--preflight-timeout-sec N] [--health-check [0|1]] [--health-timeout-sec N] [--directory-url URL] [--verify-relays [0|1]] [--verify-absent [0|1]] [--verify-relay-timeout-sec N] [--verify-relay-min-count N] [--summary-json PATH] [--print-summary-json [0|1]]
-  ./scripts/easy_node.sh incident-snapshot [--bundle-dir PATH] [--mode auto|authority|provider|client] [--env-file PATH] [--directory-url URL] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--compose-project NAME] [--include-docker-logs [0|1]] [--docker-log-lines N] [--timeout-sec N]
+  ./scripts/easy_node.sh incident-snapshot [--bundle-dir PATH] [--mode auto|authority|provider|client] [--env-file PATH] [--directory-url URL] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--compose-project NAME] [--include-docker-logs [0|1]] [--docker-log-lines N] [--timeout-sec N] [--attach-artifact PATH]...
+  ./scripts/easy_node.sh incident-snapshot-summary [--bundle-dir PATH] [--bundle-tar PATH] [--summary-json PATH] [--report-md PATH] [--print-report [0|1]] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh pilot-runbook [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-a-url URL] [--issuer-b-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--rounds N] [--pause-sec N] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--client-min-selection-lines N] [--client-min-entry-operators N] [--client-min-exit-operators N] [--client-require-cross-operator-pair [0|1]] [--path-profile fast|balanced|privacy] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--require-issuer-quorum [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]] [--bundle-dir PATH]
   ./scripts/easy_node.sh invite-generate [--issuer-url URL] [--admin-token TOKEN] [--admin-key-file FILE] [--admin-key-id ID] [--count N] [--prefix PREFIX] [--tier 1|2|3]
   ./scripts/easy_node.sh invite-check --key KEY [--issuer-url URL] [--admin-token TOKEN] [--admin-key-file FILE] [--admin-key-id ID]
@@ -125,14 +169,24 @@ Notes:
   - client-test runs client-demo with --no-deps (no local server required on the client machine).
   - wg-only-local-test runs host real-WireGuard integration checks (Linux + root required).
   - wg-only-stack-up/status/down manages a reusable host real-WireGuard demo stack (Linux + root required).
-  - wg-only-stack-selftest runs stack-up + client-test + stack-down as one command (Linux + root required).
+  - wg-only-stack-selftest runs stack-up + live-WG validation + stack-down as one command (Linux + root required).
+  - wg-only-stack-selftest-record wraps that Linux root selftest into one recorded manual-validation step and refreshes the shared readiness report automatically.
+  - pre-real-host-readiness chains runtime-fix + wg-only-stack-selftest-record + manual-validation-report and answers whether machine-C VPN smoke is the next safe real-host step.
   - stop-all can also clean WG-only and client-vpn state/process/interfaces when requested (root needed for interface cleanup).
   - three-machine-validate runs health + federation checks then runs client-test with both directories.
   - client-vpn-preflight checks host prerequisites, endpoint reachability, and optional operator/issuer quorum diversity before starting client-vpn-up.
   - client-vpn-up runs a real local VPN client (host WireGuard interface) for external testers; use client-vpn-down to stop/cleanup.
+  - client-vpn-smoke runs preflight + up + status + optional egress checks + down as one real-host smoke flow, can gate on pre-real-host-readiness and runtime-doctor/runtime-fix first, records machine-C validation automatically, and refreshes the shared manual-validation report by default.
   - three-machine-prod-gate runs production-grade 3-machine sequencing (strict control validate + control soak + real WG validate + WG soak).
-  - three-machine-prod-bundle runs strict machine-C preflight by default, then runs the same gate and always produces a shareable diagnostics tarball bundle; disable preflight only for diagnostics with --preflight-check=0, bundle integrity verification is enabled by default (disable only for diagnostics with --bundle-verify-check=0), emit a one-command run report JSON by default (override with --run-report-json), capture an automatic incident snapshot on failed runs by default (disable with --incident-snapshot-on-fail=0), and enable fail-close artifact signoff inline with --signoff-check=1.
+  - three-machine-prod-bundle runs strict machine-C preflight by default, then runs the same gate and always produces a shareable diagnostics tarball bundle; disable preflight only for diagnostics with --preflight-check=0, bundle integrity verification is enabled by default (disable only for diagnostics with --bundle-verify-check=0), emit a one-command run report JSON by default (override with --run-report-json), capture an automatic incident snapshot on failed runs by default (disable with --incident-snapshot-on-fail=0), optionally attach extra evidence files into that incident bundle with --incident-snapshot-attach-artifact, and enable fail-close artifact signoff inline with --signoff-check=1.
+  - three-machine-prod-signoff wraps three-machine-prod-bundle into one recorded manual-validation step for the final machine-C production signoff rerun, can gate on pre-real-host-readiness and runtime-doctor/runtime-fix first, and refreshes the shared manual-validation report by default.
   - three-machine-reminder prints the true 3-machine production test checklist.
+  - manual-validation-backlog prints the deferred real-host validation list so we can resume manual testing cleanly later.
+  - manual-validation-status combines live runtime-doctor output with recorded manual real-host validation receipts and now points at the latest failed incident handoff when a recorded smoke/signoff run captured one.
+  - manual-validation-report turns that readiness state into one shareable markdown + JSON handoff artifact and can fail-close with --fail-on-not-ready=1.
+  - manual-validation-record stores the result of a manual real-host validation step in local status/receipt files.
+  - runtime-doctor checks for stale state, busy default ports, lingering interfaces, and unwritable runtime files before the next real-host test.
+  - runtime-fix applies safe cleanup actions from runtime-doctor findings (stale wg-only/client-vpn/demo leftovers) and then reruns runtime-doctor.
   - prod-gate-check verifies gate/bundle JSON artifacts against signoff policy and fails fast when criteria are not met (recommended input: --run-report-json from three-machine-prod-bundle).
   - prod-gate-slo-summary prints an operator SLO decision summary (GO/NO-GO) from prod-gate artifacts and can optionally fail-close with --fail-on-no-go=1.
   - prod-gate-slo-trend computes GO/NO-GO trend across multiple run reports with optional fail-close thresholds (any NO-GO or minimum GO-rate percent), optional time window filtering, and machine-readable summary JSON output.
@@ -143,23 +197,24 @@ Notes:
   - prod-pilot-cohort-bundle-verify verifies sustained-pilot cohort bundle artifacts (tar checksum + manifest + round structure), recommended input: --summary-json.
   - prod-pilot-cohort-check evaluates sustained-pilot cohort summary artifacts against fail-close signoff policy.
   - prod-pilot-cohort-signoff runs prod-pilot-cohort-bundle-verify + prod-pilot-cohort-check fail-closed in one command.
-  - prod-pilot-cohort-quick-check verifies quick run-report artifacts and enforces fail-close quick signoff policy.
+  - prod-pilot-cohort-quick-check verifies quick run-report artifacts, enforces fail-close quick signoff policy, and now prints the upstream pre-real-host readiness summary path when the quick run report carries it.
   - prod-pilot-cohort-quick-trend computes GO/NO-GO trend across quick run reports with fail-close thresholds and JSON output.
   - prod-pilot-cohort-quick-alert converts quick trend metrics into OK/WARN/CRITICAL severity with configurable fail-close exits.
   - prod-pilot-cohort-quick-dashboard writes one quick-mode operator dashboard (trend JSON + alert JSON + markdown).
-  - prod-pilot-cohort-quick-signoff runs quick-check + quick-trend + quick-alert in one fail-closed command with max-alert-severity policy.
-  - prod-pilot-cohort-quick-runbook runs quick execution + quick-signoff + optional dashboard in one operator command and writes a runbook summary artifact.
+  - prod-pilot-cohort-quick-signoff runs quick-check + quick-trend + quick-alert in one fail-closed command with max-alert-severity policy, and now preserves the upstream pre-real-host readiness summary path in both signoff JSON and operator output when present.
+  - prod-pilot-cohort-quick-runbook runs quick execution + quick-signoff + optional dashboard in one operator command, exposes the one-time top-level pre-real-host gate used by the underlying cohort runbook, and writes a runbook summary artifact.
   - prod-wg-validate/prod-wg-soak run real WireGuard dataplane validation from machine C (Linux root) in production strict profile.
   - prod-wg-strict-ingress-rehearsal runs a controlled negative rehearsal that should fail with failure class strict_ingress_policy.
-  - prod-pilot-runbook wraps three-machine-prod-bundle with strict fail-closed production defaults for machine-C pilot runs and auto-generates SLO dashboard artifacts by default; append your own args to override.
-  - prod-pilot-cohort-runbook runs sustained pilot rounds (multiple prod-pilot-runbook executions) and aggregates trend/alert summaries for cohort signoff, including fail-close alert-severity policy and optional tar+sha256+manifest cohort bundle output.
-  - prod-pilot-cohort-campaign wraps prod-pilot-cohort-quick-runbook with low-prompt sustained campaign defaults, deterministic artifact paths, and generated markdown/JSON handoff summaries for real machine-C operator runs.
-  - prod-pilot-cohort-campaign-summary regenerates one concise operator handoff report from saved campaign/runbook artifacts.
-  - prod-pilot-cohort-quick runs one-command sustained pilot + fail-closed cohort signoff with minimal operator flags and emits a quick run report JSON artifact.
+  - prod-pilot-runbook wraps three-machine-prod-bundle with strict fail-closed production defaults for machine-C pilot runs, gates on pre-real-host-readiness by default, and auto-generates SLO dashboard artifacts by default; append your own args to override.
+  - prod-pilot-cohort-runbook runs sustained pilot rounds (multiple prod-pilot-runbook executions), runs pre-real-host-readiness once before the cohort by default, and aggregates trend/alert summaries for cohort signoff, including fail-close alert-severity policy and optional tar+sha256+manifest cohort bundle output.
+  - prod-pilot-cohort-campaign wraps prod-pilot-cohort-quick-runbook with low-prompt sustained campaign defaults, deterministic artifact paths, the same top-level pre-real-host gate control, and generated markdown/JSON handoff summaries for real machine-C operator runs.
+  - prod-pilot-cohort-campaign-summary regenerates one concise operator handoff report from saved campaign/runbook artifacts and preserves normalized source pointers, including the upstream pre-real-host readiness summary when present.
+  - prod-pilot-cohort-quick runs one-command sustained pilot + fail-closed cohort signoff with minimal operator flags, exposes the one-time top-level pre-real-host gate used by the underlying cohort runbook, and emits a quick run report JSON artifact.
   - prod-key-rotation-runbook performs production key/secret rotation with backup, preflight checks, and rollback support.
   - prod-upgrade-runbook performs production compose upgrade flow (pull/build/restart) with backup, preflight checks, and rollback support.
   - prod-operator-lifecycle-runbook performs repeatable operator onboarding/offboarding with optional preflight, health checks, and relay visibility checks.
-  - incident-snapshot captures a shareable incident bundle (endpoint probes + docker/system snapshots) for operator debugging.
+  - incident-snapshot captures a shareable incident bundle (endpoint probes + docker/system snapshots), can attach extra evidence files with --attach-artifact, and auto-generates summary JSON + markdown report artifacts for operator debugging.
+  - incident-snapshot-summary rebuilds the concise operator summary from an existing incident bundle directory.
   - bootstrap discovery mode lets you provide one directory URL and auto-discover other server hosts.
   - machine-a-test/machine-b-test/machine-c-test are machine-role-specific automated validations with optional report files.
   - default logs are written to ./.easy-node-logs (override with EASY_NODE_LOG_DIR).
@@ -1530,6 +1585,97 @@ first_csv_item() {
 looks_like_loopback_url() {
   local u="$1"
   [[ "$u" == *"127.0.0.1"* || "$u" == *"localhost"* ]]
+}
+
+rewrite_loopback_url_for_docker() {
+  local raw="$1"
+  local docker_host="${2:-host.docker.internal}"
+  local scheme="http"
+  local hostport host port
+  if [[ "$raw" == https://* ]]; then
+    scheme="https"
+  fi
+  hostport="$(hostport_from_url "$raw")"
+  host="$(host_from_hostport "$hostport")"
+  host="${host#[}"
+  host="${host%]}"
+  if ! host_is_loopback "$host"; then
+    echo "$raw"
+    return
+  fi
+  if [[ "$hostport" == \[*\]:* ]]; then
+    port="${hostport##*]:}"
+  elif [[ "$hostport" == *:* ]]; then
+    port="${hostport##*:}"
+  else
+    echo "$raw"
+    return
+  fi
+  printf '%s://%s:%s' "$scheme" "$docker_host" "$port"
+}
+
+wg_only_port_list() {
+  local base_port="${1:-}"
+  if ! [[ "$base_port" =~ ^[0-9]+$ ]]; then
+    return 1
+  fi
+  printf '%s\n' \
+    "$((base_port + 1))" \
+    "$((base_port + 2))" \
+    "$((base_port + 3))" \
+    "$((base_port + 4))" \
+    "$((base_port + 100))" \
+    "$((base_port + 101))" \
+    "$((base_port + 102))" \
+    "$((base_port + 103))"
+}
+
+wg_only_listener_pids() {
+  local port="${1:-}"
+  local line remainder pid
+  if [[ -z "$port" ]]; then
+    return 0
+  fi
+  while IFS= read -r line; do
+    remainder="$line"
+    while [[ "$remainder" =~ pid=([0-9]+) ]]; do
+      pid="${BASH_REMATCH[1]}"
+      printf '%s\n' "$pid"
+      remainder="${remainder#*pid=${pid}}"
+    done
+  done < <(ss -H -ltnup "( sport = :${port} )" 2>/dev/null || true)
+}
+
+wg_only_kill_stale_ports() {
+  local -a ports=("$@")
+  local -a pids=()
+  local pid i alive
+  if [[ "${EUID:-$(id -u)}" -ne 0 ]] || ((${#ports[@]} == 0)); then
+    return 0
+  fi
+  mapfile -t pids < <(
+    for port in "${ports[@]}"; do
+      wg_only_listener_pids "$port"
+    done | awk 'NF { if (!seen[$0]++) print $0 }'
+  )
+  if ((${#pids[@]} == 0)); then
+    return 0
+  fi
+  kill "${pids[@]}" >/dev/null 2>&1 || true
+  for i in $(seq 1 20); do
+    alive="0"
+    for pid in "${pids[@]}"; do
+      if kill -0 "$pid" >/dev/null 2>&1; then
+        alive="1"
+        break
+      fi
+    done
+    if [[ "$alive" == "0" ]]; then
+      return 0
+    fi
+    sleep 0.2
+  done
+  kill -9 "${pids[@]}" >/dev/null 2>&1 || true
 }
 
 server_preflight() {
@@ -2939,6 +3085,7 @@ wg_only_stack_up() {
   local base_port="${EASY_NODE_WG_ONLY_STACK_BASE_PORT:-19080}"
   local client_iface="${EASY_NODE_WG_ONLY_STACK_CLIENT_IFACE:-wgcstack0}"
   local exit_iface="${EASY_NODE_WG_ONLY_STACK_EXIT_IFACE:-wgestack0}"
+  local control_bind_host="${EASY_NODE_WG_ONLY_STACK_CONTROL_BIND_HOST:-127.0.0.1}"
   local force_iface_reset="${EASY_NODE_WG_ONLY_STACK_FORCE_IFACE_RESET:-0}"
   local cleanup_ifaces="${EASY_NODE_WG_ONLY_STACK_CLEANUP_IFACES:-1}"
   local log_file="${EASY_NODE_WG_ONLY_STACK_LOG_FILE:-}"
@@ -2973,6 +3120,10 @@ wg_only_stack_up() {
         ;;
       --exit-iface)
         exit_iface="${2:-}"
+        shift 2
+        ;;
+      --control-bind-host)
+        control_bind_host="${2:-}"
         shift 2
         ;;
       --force-iface-reset)
@@ -3028,6 +3179,10 @@ wg_only_stack_up() {
     echo "wg-only-stack-up requires non-empty --client-iface and --exit-iface"
     exit 2
   fi
+  if [[ -z "$control_bind_host" ]]; then
+    echo "wg-only-stack-up requires non-empty --control-bind-host"
+    exit 2
+  fi
 
   if ! wg_only_check; then
     exit 1
@@ -3063,6 +3218,9 @@ wg_only_stack_up() {
     exit 2
   fi
 
+  local -a stack_ports
+  mapfile -t stack_ports < <(wg_only_port_list "$base_port")
+
   local directory_url issuer_url entry_url exit_url entry_data_addr exit_data_addr
   directory_url="http://127.0.0.1:${dir_port}"
   issuer_url="http://127.0.0.1:${issuer_port}"
@@ -3074,6 +3232,7 @@ wg_only_stack_up() {
   if [[ "$force_iface_reset" == "1" ]]; then
     ip link delete "$client_iface" >/dev/null 2>&1 || true
     ip link delete "$exit_iface" >/dev/null 2>&1 || true
+    wg_only_kill_stale_ports "${stack_ports[@]}"
   fi
   if ip link show dev "$client_iface" >/dev/null 2>&1; then
     echo "wg-only-stack-up refused: interface '$client_iface' already exists"
@@ -3096,16 +3255,27 @@ wg_only_stack_up() {
     exit 1
   fi
 
-  local key_dir client_key_file exit_key_file client_wg_pub exit_wg_pub
+  local key_dir client_key_file exit_key_file directory_key_file issuer_key_file
+  local wg_only_trust_file entry_directory_trust_file
+  local directory_admin_token issuer_admin_token client_wg_pub exit_wg_pub
   key_dir="$DEPLOY_DIR/data/wg_only"
   mkdir -p "$key_dir"
   client_key_file="$key_dir/client_${client_iface}.key"
   exit_key_file="$key_dir/exit_${exit_iface}.key"
+  directory_key_file="$key_dir/directory_${base_port}_ed25519.key"
+  issuer_key_file="$key_dir/issuer_${base_port}_ed25519.key"
+  wg_only_trust_file="$key_dir/trusted_directory_keys_${base_port}.txt"
+  entry_directory_trust_file="$key_dir/entry_trusted_directory_keys_${base_port}.txt"
+  directory_admin_token="wg-only-directory-admin-token-${base_port}"
+  issuer_admin_token="wg-only-issuer-admin-token-${base_port}"
+  if [[ "$force_iface_reset" == "1" ]]; then
+    rm -f "$wg_only_trust_file" "$entry_directory_trust_file"
+  fi
   if [[ ! -f "$client_key_file" ]]; then
-    wg genkey >"$client_key_file"
+    (umask 077 && wg genkey >"$client_key_file")
   fi
   if [[ ! -f "$exit_key_file" ]]; then
-    wg genkey >"$exit_key_file"
+    (umask 077 && wg genkey >"$exit_key_file")
   fi
   chmod 600 "$client_key_file" "$exit_key_file" 2>/dev/null || true
   if ! client_wg_pub="$(wg pubkey <"$client_key_file")"; then
@@ -3132,10 +3302,14 @@ wg_only_stack_up() {
   env_vars=(
     "WG_ONLY_MODE=1"
     "DATA_PLANE_MODE=opaque"
-    "DIRECTORY_ADDR=127.0.0.1:${dir_port}"
-    "ISSUER_ADDR=127.0.0.1:${issuer_port}"
-    "ENTRY_ADDR=127.0.0.1:${entry_port}"
-    "EXIT_ADDR=127.0.0.1:${exit_port}"
+    "DIRECTORY_ADDR=${control_bind_host}:${dir_port}"
+    "ISSUER_ADDR=${control_bind_host}:${issuer_port}"
+    "ENTRY_ADDR=${control_bind_host}:${entry_port}"
+    "EXIT_ADDR=${control_bind_host}:${exit_port}"
+    "DIRECTORY_PRIVATE_KEY_FILE=${directory_key_file}"
+    "ISSUER_PRIVATE_KEY_FILE=${issuer_key_file}"
+    "DIRECTORY_ADMIN_TOKEN=${directory_admin_token}"
+    "ISSUER_ADMIN_TOKEN=${issuer_admin_token}"
     "DIRECTORY_URL=${directory_url}"
     "ISSUER_URL=${issuer_url}"
     "ENTRY_URL=${entry_url}"
@@ -3159,8 +3333,12 @@ wg_only_stack_up() {
     "CLIENT_DISABLE_SYNTHETIC_FALLBACK=1"
     "CLIENT_LIVE_WG_MODE=1"
     "DIRECTORY_TRUST_STRICT=1"
+    "DIRECTORY_TRUST_TOFU=1"
+    "DIRECTORY_TRUSTED_KEYS_FILE=${wg_only_trust_file}"
     "ENTRY_LIVE_WG_MODE=1"
     "ENTRY_DIRECTORY_TRUST_STRICT=1"
+    "ENTRY_DIRECTORY_TRUST_TOFU=1"
+    "ENTRY_DIRECTORY_TRUSTED_KEYS_FILE=${entry_directory_trust_file}"
     "ENTRY_PUZZLE_DIFFICULTY=1"
     "EXIT_LIVE_WG_MODE=1"
     "EXIT_TOKEN_PROOF_REPLAY_GUARD=1"
@@ -3175,14 +3353,15 @@ wg_only_stack_up() {
 
   if [[ "$strict_beta" == "1" ]]; then
     env_vars+=(
-      "BETA_STRICT_MODE=1"
       "CLIENT_BETA_STRICT=1"
       "ENTRY_BETA_STRICT=1"
       "EXIT_BETA_STRICT=1"
       "CLIENT_REQUIRE_DISTINCT_OPERATORS=1"
       "ENTRY_REQUIRE_DISTINCT_EXIT_OPERATOR=1"
+      "ENTRY_PUZZLE_SECRET=wg-only-entry-secret-0001"
       "ENTRY_OPERATOR_ID=op-entry"
       "EXIT_OPERATOR_ID=op-exit"
+      "EXIT_OPAQUE_ECHO=0"
     )
   fi
 
@@ -3249,11 +3428,15 @@ WG_ONLY_CLIENT_IFACE=$client_iface
 WG_ONLY_EXIT_IFACE=$exit_iface
 WG_ONLY_LOG_FILE=$log_file
 WG_ONLY_STRICT_BETA=$strict_beta
+WG_ONLY_BASE_PORT=$base_port
+WG_ONLY_CONTROL_BIND_HOST=$control_bind_host
 WG_ONLY_CLEANUP_IFACES=$cleanup_ifaces
 WG_ONLY_DIRECTORY_URL=$directory_url
 WG_ONLY_ISSUER_URL=$issuer_url
 WG_ONLY_ENTRY_URL=$entry_url
 WG_ONLY_EXIT_URL=$exit_url
+WG_ONLY_DIRECTORY_TRUST_FILE=$wg_only_trust_file
+WG_ONLY_ENTRY_DIRECTORY_TRUST_FILE=$entry_directory_trust_file
 EOF_STATE
     secure_file_permissions "$state_file"
 
@@ -3287,6 +3470,9 @@ EOF_STATE
 
 wg_only_stack_down() {
   local force_iface_cleanup="0"
+  local base_port=""
+  local client_iface=""
+  local exit_iface=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --force-iface-cleanup)
@@ -3298,6 +3484,18 @@ wg_only_stack_down() {
           shift
         fi
         ;;
+      --base-port)
+        base_port="${2:-}"
+        shift 2
+        ;;
+      --client-iface)
+        client_iface="${2:-}"
+        shift 2
+        ;;
+      --exit-iface)
+        exit_iface="${2:-}"
+        shift 2
+        ;;
       *)
         echo "unknown arg for wg-only-stack-down: $1"
         exit 2
@@ -3308,6 +3506,10 @@ wg_only_stack_down() {
     echo "wg-only-stack-down requires --force-iface-cleanup to be 0 or 1"
     exit 2
   fi
+  if [[ -n "$base_port" ]] && ( ! [[ "$base_port" =~ ^[0-9]+$ ]] || ((base_port < 1024 || base_port > 65400)) ); then
+    echo "wg-only-stack-down requires --base-port in 1024..65400"
+    exit 2
+  fi
   if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
     echo "wg-only-stack-down requires root privileges (run with sudo)"
     exit 1
@@ -3316,14 +3518,42 @@ wg_only_stack_down() {
   local state_file
   state_file="$(wg_only_state_file)"
   if [[ ! -f "$state_file" ]]; then
-    echo "wg-only stack is not running (no state file)"
+    if [[ "$force_iface_cleanup" == "1" ]]; then
+      if [[ -z "$client_iface" ]]; then
+        client_iface="${EASY_NODE_WG_ONLY_STACK_CLIENT_IFACE:-wgcstack0}"
+      fi
+      if [[ -z "$exit_iface" ]]; then
+        exit_iface="${EASY_NODE_WG_ONLY_STACK_EXIT_IFACE:-wgestack0}"
+      fi
+      if [[ -n "$client_iface" ]]; then
+        ip link delete "$client_iface" >/dev/null 2>&1 || true
+      fi
+      if [[ -n "$exit_iface" ]]; then
+        ip link delete "$exit_iface" >/dev/null 2>&1 || true
+      fi
+      if [[ -n "$base_port" ]]; then
+        local -a stack_ports
+        mapfile -t stack_ports < <(wg_only_port_list "$base_port")
+        wg_only_kill_stale_ports "${stack_ports[@]}"
+      fi
+      echo "wg-only stack state missing; forced cleanup applied"
+    else
+      echo "wg-only stack is not running (no state file)"
+    fi
     return 0
   fi
 
-  local pid client_iface exit_iface cleanup_ifaces
+  local pid cleanup_ifaces
   pid="$(identity_value "$state_file" "WG_ONLY_PID")"
-  client_iface="$(identity_value "$state_file" "WG_ONLY_CLIENT_IFACE")"
-  exit_iface="$(identity_value "$state_file" "WG_ONLY_EXIT_IFACE")"
+  if [[ -z "$base_port" ]]; then
+    base_port="$(identity_value "$state_file" "WG_ONLY_BASE_PORT")"
+  fi
+  if [[ -z "$client_iface" ]]; then
+    client_iface="$(identity_value "$state_file" "WG_ONLY_CLIENT_IFACE")"
+  fi
+  if [[ -z "$exit_iface" ]]; then
+    exit_iface="$(identity_value "$state_file" "WG_ONLY_EXIT_IFACE")"
+  fi
   cleanup_ifaces="$(identity_value "$state_file" "WG_ONLY_CLEANUP_IFACES")"
   if [[ "$cleanup_ifaces" != "1" ]]; then
     cleanup_ifaces="0"
@@ -3353,6 +3583,11 @@ wg_only_stack_down() {
     if [[ -n "$exit_iface" ]]; then
       ip link delete "$exit_iface" >/dev/null 2>&1 || true
     fi
+    if [[ -n "$base_port" ]]; then
+      local -a stack_ports
+      mapfile -t stack_ports < <(wg_only_port_list "$base_port")
+      wg_only_kill_stale_ports "${stack_ports[@]}"
+    fi
     echo "wg-only stack interfaces cleaned up"
   else
     echo "wg-only stack interfaces left intact (set --force-iface-cleanup 1 to remove)"
@@ -3371,6 +3606,8 @@ wg_only_stack_selftest() {
   local force_iface_reset="${EASY_NODE_WG_ONLY_SELFTEST_FORCE_IFACE_RESET:-1}"
   local cleanup_ifaces="${EASY_NODE_WG_ONLY_SELFTEST_CLEANUP_IFACES:-1}"
   local keep_stack="${EASY_NODE_WG_ONLY_SELFTEST_KEEP_STACK:-0}"
+  local client_iface="${EASY_NODE_WG_ONLY_STACK_CLIENT_IFACE:-wgcstack0}"
+  local exit_iface="${EASY_NODE_WG_ONLY_STACK_EXIT_IFACE:-wgestack0}"
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -3393,6 +3630,14 @@ wg_only_stack_selftest() {
         ;;
       --min-selection-lines)
         min_selection_lines="${2:-}"
+        shift 2
+        ;;
+      --client-iface)
+        client_iface="${2:-}"
+        shift 2
+        ;;
+      --exit-iface)
+        exit_iface="${2:-}"
         shift 2
         ;;
       --force-iface-reset)
@@ -3457,6 +3702,10 @@ wg_only_stack_selftest() {
     echo "wg-only-stack-selftest requires --min-selection-lines >= 1"
     exit 2
   fi
+  if [[ -z "$client_iface" || -z "$exit_iface" ]]; then
+    echo "wg-only-stack-selftest requires non-empty --client-iface and --exit-iface"
+    exit 2
+  fi
 
   if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
     echo "wg-only-stack-selftest requires root privileges (run with sudo)"
@@ -3466,7 +3715,11 @@ wg_only_stack_selftest() {
   local started="0"
   wg_only_stack_selftest_cleanup() {
     if [[ "$started" == "1" && "$keep_stack" == "0" ]]; then
-      wg_only_stack_down --force-iface-cleanup "$cleanup_ifaces" >/dev/null 2>&1 || true
+      wg_only_stack_down \
+        --force-iface-cleanup "$cleanup_ifaces" \
+        --base-port "$base_port" \
+        --client-iface "$client_iface" \
+        --exit-iface "$exit_iface" >/dev/null 2>&1 || true
     fi
   }
   trap wg_only_stack_selftest_cleanup EXIT INT TERM
@@ -3476,36 +3729,101 @@ wg_only_stack_selftest() {
     --strict-beta "$strict_beta" \
     --detach 1 \
     --base-port "$base_port" \
+    --client-iface "$client_iface" \
+    --exit-iface "$exit_iface" \
+    --control-bind-host "0.0.0.0" \
     --force-iface-reset "$force_iface_reset" \
     --cleanup-ifaces "$cleanup_ifaces"
   started="1"
 
-  local state_file directory_url issuer_url entry_url exit_url
+  local state_file directory_url issuer_url entry_url exit_url log_file
   state_file="$(wg_only_state_file)"
   directory_url="$(identity_value "$state_file" "WG_ONLY_DIRECTORY_URL")"
   issuer_url="$(identity_value "$state_file" "WG_ONLY_ISSUER_URL")"
   entry_url="$(identity_value "$state_file" "WG_ONLY_ENTRY_URL")"
   exit_url="$(identity_value "$state_file" "WG_ONLY_EXIT_URL")"
-  if [[ -z "$directory_url" || -z "$issuer_url" || -z "$entry_url" || -z "$exit_url" ]]; then
+  log_file="$(identity_value "$state_file" "WG_ONLY_LOG_FILE")"
+  if [[ -z "$directory_url" || -z "$issuer_url" || -z "$entry_url" || -z "$exit_url" || -z "$log_file" ]]; then
     echo "wg-only-stack-selftest failed: missing stack endpoint state"
     exit 1
   fi
 
-  echo "wg-only stack selftest: running client validation"
-  if ! client_test \
-    --directory-urls "$directory_url" \
-    --issuer-url "$issuer_url" \
-    --entry-url "$entry_url" \
-    --exit-url "$exit_url" \
-    --timeout-sec "$timeout_sec" \
-    --min-sources 1 \
-    --min-selection-lines "$min_selection_lines" \
-    --min-entry-operators 1 \
-    --min-exit-operators 1 \
-    --require-cross-operator-pair 1 \
-    --distinct-operators "$strict_beta" \
-    --beta-profile "$strict_beta"; then
+  echo "wg-only stack selftest: running live-WG validation"
+  local ready="0"
+  local strict_log_ok="0"
+  local exit_accept_ok="0"
+  local metrics_ok="0"
+  local relay_ok="0"
+  local proxy_addr exit_metrics_url relay_json
+  proxy_addr="127.0.0.1:$((base_port + 103))"
+  exit_metrics_url="${exit_url%/}/v1/metrics"
+
+  for _ in $(seq 1 240); do
+    if rg -q "client received wg-session config:" "$log_file"; then
+      ready="1"
+      break
+    fi
+    sleep 0.2
+  done
+  if [[ "$ready" != "1" ]]; then
+    echo "wg-only stack selftest: client did not receive wg-session config"
+    cat "$log_file"
+    exit 1
+  fi
+
+  relay_json="$(curl -fsS "${directory_url%/}/v1/relays" || true)"
+  if echo "$relay_json" | rg -q '"role":"entry"[^\}]*"operator_id":"op-entry"' &&
+    echo "$relay_json" | rg -q '"role":"exit"[^\}]*"operator_id":"op-exit"'; then
+    relay_ok="1"
+  fi
+
+  for _ in $(seq 1 6); do
+    perl -MIO::Socket::INET -e '
+      my $target = shift @ARGV;
+      my $sock = IO::Socket::INET->new(PeerAddr => $target, Proto => "udp") or exit 1;
+      my $pkt = pack("C4", 4, 0, 0, 0) . ("\0" x 28);
+      print {$sock} $pkt or exit 1;
+    ' "$proxy_addr"
+    sleep 0.12
+  done
+
+  for _ in $(seq 1 140); do
+    if rg -q "client role enabled: .*mode=opaque .*source=udp .*wg_backend=command .*wg_only=true .*beta_strict=true" "$log_file" &&
+      rg -q "entry route discovery: .*live_wg_mode=true .*wg_only=true .*distinct_exit_operator=true operator_id=op-entry" "$log_file" &&
+      rg -q "exit wg backend=command .*wg_only=true .*beta_strict=true" "$log_file"; then
+      strict_log_ok="1"
+    fi
+    if rg -q "exit accepted opaque packet session=.*wg_like=true" "$log_file"; then
+      exit_accept_ok="1"
+    fi
+    local m
+    m="$(curl -fsS "$exit_metrics_url" || true)"
+    if echo "$m" | rg -q '"accepted_packets"[[:space:]]*:[[:space:]]*[1-9][0-9]*' &&
+      echo "$m" | rg -q '"wg_proxy_created"[[:space:]]*:[[:space:]]*[1-9][0-9]*'; then
+      metrics_ok="1"
+    fi
+    if [[ "$strict_log_ok" == "1" && "$relay_ok" == "1" && ( "$exit_accept_ok" == "1" || "$metrics_ok" == "1" ) ]]; then
+      break
+    fi
+    sleep 0.2
+  done
+
+  if [[ "$relay_ok" != "1" ]]; then
+    echo "wg-only stack selftest: relay operator metadata missing"
+    echo "$relay_json"
+    cat "$log_file"
+    exit 1
+  fi
+  if [[ "$strict_log_ok" != "1" ]]; then
+    echo "wg-only stack selftest: missing strict live-WG startup log signals"
+    cat "$log_file"
+    exit 1
+  fi
+  if [[ "$exit_accept_ok" != "1" && "$metrics_ok" != "1" ]]; then
+    echo "wg-only stack selftest: missing live-WG dataplane acceptance signals"
+    echo "latest exit metrics: $(curl -fsS "$exit_metrics_url" || true)"
     echo "wg-only stack selftest: failed"
+    cat "$log_file"
     exit 1
   fi
 
@@ -3515,7 +3833,11 @@ wg_only_stack_selftest() {
     return 0
   fi
 
-  wg_only_stack_down --force-iface-cleanup "$cleanup_ifaces"
+  wg_only_stack_down \
+    --force-iface-cleanup "$cleanup_ifaces" \
+    --base-port "$base_port" \
+    --client-iface "$client_iface" \
+    --exit-iface "$exit_iface"
   started="0"
   trap - EXIT INT TERM
   echo "wg-only stack selftest: ok"
@@ -3556,6 +3878,7 @@ three_machine_prod_bundle() {
   local incident_snapshot_timeout_sec="${EASY_NODE_PROD_BUNDLE_INCIDENT_SNAPSHOT_TIMEOUT_SEC:-8}"
   local incident_snapshot_compose_project="${EASY_NODE_PROD_BUNDLE_INCIDENT_SNAPSHOT_COMPOSE_PROJECT:-deploy}"
   local snapshot_script="${INCIDENT_SNAPSHOT_SCRIPT:-$ROOT_DIR/scripts/incident_snapshot.sh}"
+  local -a incident_snapshot_attach_artifacts=()
   local skip_wg="0"
   local discovery_wait_sec="${EASY_NODE_DISCOVERY_WAIT_SEC:-20}"
   local bootstrap_directory=""
@@ -3653,6 +3976,10 @@ three_machine_prod_bundle() {
         ;;
       --incident-snapshot-compose-project)
         incident_snapshot_compose_project="${2:-}"
+        shift 2
+        ;;
+      --incident-snapshot-attach-artifact)
+        incident_snapshot_attach_artifacts+=("${2:-}")
         shift 2
         ;;
       --bundle-dir)
@@ -3767,6 +4094,13 @@ three_machine_prod_bundle() {
     echo "three-machine-prod-bundle requires --incident-snapshot-timeout-sec >= 1"
     exit 2
   fi
+  local incident_attachment
+  for incident_attachment in "${incident_snapshot_attach_artifacts[@]}"; do
+    if [[ -z "$incident_attachment" ]]; then
+      echo "three-machine-prod-bundle requires non-empty --incident-snapshot-attach-artifact values"
+      exit 2
+    fi
+  done
   if [[ -z "$bundle_dir" ]]; then
     bundle_dir="$(prepare_log_dir)/prod_gate_bundle_$(date +%Y%m%d_%H%M%S)"
   elif [[ "$bundle_dir" != /* ]]; then
@@ -3789,6 +4123,11 @@ three_machine_prod_bundle() {
   local incident_snapshot_status="skipped"
   local incident_snapshot_bundle_dir=""
   local incident_snapshot_bundle_tar=""
+  local incident_snapshot_summary_json=""
+  local incident_snapshot_report_md=""
+  local incident_snapshot_attachment_manifest=""
+  local incident_snapshot_attachment_skipped=""
+  local incident_snapshot_attachment_count="0"
   local final_rc=0
 
   local bundle_tar="${bundle_dir}.tar.gz"
@@ -3826,6 +4165,20 @@ three_machine_prod_bundle() {
     fi
   }
 
+  json_array_strings_prod_bundle() {
+    local first="1"
+    local value
+    printf '['
+    for value in "$@"; do
+      if [[ "$first" == "0" ]]; then
+        printf ','
+      fi
+      first="0"
+      printf '"%s"' "$(json_escape_prod_bundle "$value")"
+    done
+    printf ']'
+  }
+
   metadata_value_prod_bundle() {
     local key="$1"
     local file="$2"
@@ -3856,6 +4209,8 @@ three_machine_prod_bundle() {
 
     local generated_at_utc
     generated_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    local incident_snapshot_requested_attachments_json
+    incident_snapshot_requested_attachments_json="$(json_array_strings_prod_bundle "${incident_snapshot_attach_artifacts[@]}")"
 
     cat >"$run_report_json" <<EOF
 {
@@ -3888,11 +4243,18 @@ three_machine_prod_bundle() {
     "rc": $(num_to_json_prod_bundle "$bundle_verify_rc")
   },
   "incident_snapshot": {
+    "enabled": $(bool_to_json_prod_bundle "$incident_snapshot_on_fail"),
     "enabled_on_fail": $(bool_to_json_prod_bundle "$incident_snapshot_on_fail"),
     "status": "$(json_escape_prod_bundle "$incident_snapshot_status")",
     "rc": $(num_to_json_prod_bundle "$incident_snapshot_rc"),
     "bundle_dir": "$(json_escape_prod_bundle "$incident_snapshot_bundle_dir")",
-    "bundle_tar": "$(json_escape_prod_bundle "$incident_snapshot_bundle_tar")"
+    "bundle_tar": "$(json_escape_prod_bundle "$incident_snapshot_bundle_tar")",
+    "summary_json": "$(json_escape_prod_bundle "$incident_snapshot_summary_json")",
+    "report_md": "$(json_escape_prod_bundle "$incident_snapshot_report_md")",
+    "attachment_manifest": "$(json_escape_prod_bundle "$incident_snapshot_attachment_manifest")",
+    "attachment_skipped": "$(json_escape_prod_bundle "$incident_snapshot_attachment_skipped")",
+    "attachment_count": $(num_to_json_prod_bundle "$incident_snapshot_attachment_count"),
+    "requested_attachment_inputs": $incident_snapshot_requested_attachments_json
   },
   "gate": {
     "rc": $(num_to_json_prod_bundle "$gate_rc_meta")
@@ -4017,6 +4379,8 @@ EOF
     incident_snapshot_rc=0
     incident_snapshot_bundle_dir="$bundle_dir/incident_snapshot"
     incident_snapshot_bundle_tar="${incident_snapshot_bundle_dir}.tar.gz"
+    incident_snapshot_summary_json="$incident_snapshot_bundle_dir/incident_summary.json"
+    incident_snapshot_report_md="$incident_snapshot_bundle_dir/incident_report.md"
 
     if [[ ! -x "$snapshot_script" ]]; then
       echo "three-machine-prod-bundle incident snapshot script is not executable: $snapshot_script"
@@ -4044,6 +4408,9 @@ EOF
       if [[ -n "$exit_url" ]]; then
         incident_args+=(--exit-url "$exit_url")
       fi
+      for incident_attachment in "${incident_snapshot_attach_artifacts[@]}"; do
+        incident_args+=(--attach-artifact "$incident_attachment")
+      done
       set +e
       "$snapshot_script" "${incident_args[@]}"
       incident_snapshot_rc=$?
@@ -4051,6 +4418,13 @@ EOF
       echo "three-machine-prod-bundle: incident_snapshot_rc=$incident_snapshot_rc"
       if [[ "$incident_snapshot_rc" != "0" ]]; then
         incident_snapshot_status="fail"
+      fi
+      if [[ -f "$incident_snapshot_bundle_dir/attachments/manifest.tsv" ]]; then
+        incident_snapshot_attachment_manifest="$incident_snapshot_bundle_dir/attachments/manifest.tsv"
+        incident_snapshot_attachment_count="$(awk 'END {print NR+0}' "$incident_snapshot_attachment_manifest" 2>/dev/null)"
+      fi
+      if [[ -f "$incident_snapshot_bundle_dir/attachments/skipped.tsv" ]]; then
+        incident_snapshot_attachment_skipped="$incident_snapshot_bundle_dir/attachments/skipped.tsv"
       fi
     fi
   fi
@@ -4063,6 +4437,11 @@ EOF
   fi
 
   return "$final_rc"
+}
+
+three_machine_prod_signoff() {
+  local signoff_script="${THREE_MACHINE_PROD_SIGNOFF_SCRIPT:-$ROOT_DIR/scripts/three_machine_prod_signoff.sh}"
+  "$signoff_script" "$@"
 }
 
 prod_gate_check() {
@@ -4441,6 +4820,92 @@ Pass criteria:
 REMINDER
 }
 
+manual_validation_backlog() {
+  cat <<'BACKLOG'
+Deferred manual validation backlog
+
+Purpose:
+  Keep the remaining real-host checks visible while automated hardening continues.
+
+Live status:
+  ./scripts/easy_node.sh manual-validation-status --show-json 1
+  ./scripts/easy_node.sh manual-validation-report --print-report 1 --print-summary-json 1
+
+Current pending reruns:
+  0) Pre-machine-C readiness sweep before the next real-host rerun
+     Goal:
+       - clean stale runtime leftovers
+       - rerun the Linux root WG-only proof
+       - refresh the shared readiness report in one command
+     Command:
+       sudo ./scripts/easy_node.sh pre-real-host-readiness --strict-beta 1 --base-port 19280 --client-iface wgcstack0 --exit-iface wgestack0 --vpn-iface wgvpn0 --print-summary-json 1
+
+  1) Linux root WG-only selftest rerun on a real host
+     Why:
+       - fallback drill if the combined readiness sweep blocks at WG-only validation
+     Command:
+       sudo ./scripts/easy_node.sh wg-only-stack-down --force-iface-cleanup 1 --base-port 19280 --client-iface wgcstack0 --exit-iface wgestack0
+       sudo rm -rf deploy/data/wg_only
+       sudo ./scripts/easy_node.sh wg-only-stack-selftest-record --strict-beta 1 --base-port 19280 --client-iface wgcstack0 --exit-iface wgestack0 --print-summary-json 1
+     If it fails:
+       tail -n 120 .easy-node-logs/wg_only_stack_selftest_record_*.log
+
+  2) Real machine-C VPN smoke test against A/B
+     Goal:
+       - confirm host WireGuard tunnel bring-up from an external client machine
+       - confirm exit IP changes and real session establishment
+     Commands:
+       sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --beta-profile 1 --interface wgvpn0 --distinct-operators 1 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country --print-summary-json 1
+
+  3) True 3-machine production signoff run
+     Goal:
+       - run strict control-plane + real-WG production gate from machine C
+       - produce bundle/signoff artifacts for operator review
+       - record the outcome automatically in manual-validation status
+     Commands:
+       ./scripts/easy_node.sh three-machine-reminder
+       sudo ./scripts/easy_node.sh three-machine-prod-signoff --bundle-dir .easy-node-logs/prod_gate_bundle --directory-a https://A_HOST:8081 --directory-b https://B_HOST:8081 --issuer-url https://A_HOST:8082 --entry-url https://A_HOST:8083 --exit-url https://A_HOST:8084 --pre-real-host-readiness 1 --runtime-fix 1 --print-summary-json 1
+
+Reference:
+  docs/manual-validation-backlog.md
+BACKLOG
+}
+
+manual_validation_status() {
+  local status_script="${MANUAL_VALIDATION_STATUS_SCRIPT:-$ROOT_DIR/scripts/manual_validation_status.sh}"
+  "$status_script" "$@"
+}
+
+manual_validation_report() {
+  local report_script="${MANUAL_VALIDATION_REPORT_SCRIPT:-$ROOT_DIR/scripts/manual_validation_report.sh}"
+  "$report_script" "$@"
+}
+
+pre_real_host_readiness() {
+  local readiness_script="${PRE_REAL_HOST_READINESS_SCRIPT:-$ROOT_DIR/scripts/pre_real_host_readiness.sh}"
+  "$readiness_script" "$@"
+}
+
+manual_validation_record() {
+  local record_script="${MANUAL_VALIDATION_RECORD_SCRIPT:-$ROOT_DIR/scripts/manual_validation_record.sh}"
+  "$record_script" "$@"
+}
+
+wg_only_stack_selftest_record() {
+  local record_script="${WG_ONLY_STACK_SELFTEST_RECORD_SCRIPT:-$ROOT_DIR/scripts/wg_only_stack_selftest_record.sh}"
+  "$record_script" "$@"
+}
+
+runtime_doctor() {
+  local doctor_script="${RUNTIME_DOCTOR_SCRIPT:-$ROOT_DIR/scripts/runtime_doctor.sh}"
+  "$doctor_script" "$@"
+}
+
+runtime_fix() {
+  local fix_script="${RUNTIME_FIX_SCRIPT:-$ROOT_DIR/scripts/runtime_fix.sh}"
+  "$fix_script" "$@"
+}
+
 prod_wg_validate() {
   ensure_deps_or_die
   local validate_script="${THREE_MACHINE_PROD_WG_VALIDATE_SCRIPT:-$ROOT_DIR/scripts/integration_3machine_prod_wg_validate.sh}"
@@ -4728,6 +5193,11 @@ prod_operator_lifecycle_runbook() {
 incident_snapshot() {
   local snapshot_script="${INCIDENT_SNAPSHOT_SCRIPT:-$ROOT_DIR/scripts/incident_snapshot.sh}"
   "$snapshot_script" "$@"
+}
+
+incident_snapshot_summary() {
+  local summary_script="${INCIDENT_SNAPSHOT_SUMMARY_SCRIPT:-$ROOT_DIR/scripts/incident_snapshot_summary.sh}"
+  "$summary_script" "$@"
 }
 
 server_env_value() {
@@ -6047,6 +6517,7 @@ client_test() {
   local timeout_sec="35"
   local build_timeout_sec="${EASY_NODE_CLIENT_BUILD_TIMEOUT_SEC:-180}"
   local force_build="${EASY_NODE_CLIENT_FORCE_BUILD:-0}"
+  local execution_mode="${EASY_NODE_CLIENT_TEST_MODE:-docker}"
   local path_profile="${EASY_NODE_PATH_PROFILE:-}"
   local require_distinct_operators="${CLIENT_REQUIRE_DISTINCT_OPERATORS:-0}"
   local require_distinct_countries="${CLIENT_REQUIRE_DISTINCT_ENTRY_EXIT_COUNTRY:-0}"
@@ -6290,6 +6761,10 @@ client_test() {
     echo "client-test requires --prod-profile (or EASY_NODE_PROD_PROFILE) to be 0 or 1"
     exit 2
   fi
+  if [[ "$execution_mode" != "docker" && "$execution_mode" != "local" ]]; then
+    echo "client-test requires EASY_NODE_CLIENT_TEST_MODE to be docker or local"
+    exit 2
+  fi
   if [[ "$prod_profile" == "1" ]]; then
     beta_profile="1"
   fi
@@ -6310,6 +6785,10 @@ client_test() {
   if [[ "$prod_profile" == "1" ]]; then
     client_url_scheme="https"
   fi
+  local container_directory_urls="${EASY_NODE_CLIENT_TEST_CONTAINER_DIRECTORY_URLS:-}"
+  local container_issuer_url="${EASY_NODE_CLIENT_TEST_CONTAINER_ISSUER_URL:-}"
+  local container_entry_url="${EASY_NODE_CLIENT_TEST_CONTAINER_ENTRY_URL:-}"
+  local container_exit_url="${EASY_NODE_CLIENT_TEST_CONTAINER_EXIT_URL:-}"
 
   if [[ -n "$bootstrap_directory" ]]; then
     bootstrap_directory="$(ensure_url_scheme "$bootstrap_directory" "$client_url_scheme")"
@@ -6348,14 +6827,38 @@ client_test() {
   issuer_url="$(ensure_url_scheme "$issuer_url" "$client_url_scheme")"
   entry_url="$(ensure_url_scheme "$entry_url" "$client_url_scheme")"
   exit_url="$(ensure_url_scheme "$exit_url" "$client_url_scheme")"
+  if [[ -z "$container_directory_urls" ]]; then
+    container_directory_urls="$directory_urls"
+  else
+    container_directory_urls="$(normalize_url_csv_scheme "$container_directory_urls" "$client_url_scheme")"
+  fi
+  if [[ -z "$container_issuer_url" ]]; then
+    container_issuer_url="$issuer_url"
+  else
+    container_issuer_url="$(ensure_url_scheme "$container_issuer_url" "$client_url_scheme")"
+  fi
+  if [[ -z "$container_entry_url" ]]; then
+    container_entry_url="$entry_url"
+  else
+    container_entry_url="$(ensure_url_scheme "$container_entry_url" "$client_url_scheme")"
+  fi
+  if [[ -z "$container_exit_url" ]]; then
+    container_exit_url="$exit_url"
+  else
+    container_exit_url="$(ensure_url_scheme "$container_exit_url" "$client_url_scheme")"
+  fi
 
   ensure_deps_or_die
-  cleanup_client_demo_artifacts
+  if [[ "$execution_mode" == "docker" ]]; then
+    cleanup_client_demo_artifacts
+  fi
 
+  local client_env_file
+  client_env_file="$(resolve_client_env_file)"
   local first_dir
   first_dir="$(first_csv_item "$directory_urls")"
 
-  cat >"$CLIENT_ENV_FILE" <<EOF_CLIENT
+  cat >"$client_env_file" <<EOF_CLIENT
 CLIENT_DIRECTORY_URL=${first_dir}
 CLIENT_ISSUER_URL=${issuer_url}
 CLIENT_ENTRY_URL=${entry_url}
@@ -6387,27 +6890,31 @@ EOF_CLIENT
   wait_http_ok_with_opts "${entry_url%/}/v1/health" "entry" 8 "${entry_opts[@]}" || return 1
   wait_http_ok_with_opts "${exit_url%/}/v1/health" "exit" 8 "${exit_opts[@]}" || return 1
 
-  local do_build=0
-  if [[ "$force_build" == "1" ]]; then
-    do_build=1
-  elif ! docker image inspect deploy-client-demo:latest >/dev/null 2>&1; then
-    do_build=1
-  fi
-
-  if [[ "$do_build" -eq 1 ]]; then
-    echo "client test: building client image (timeout=${build_timeout_sec}s)"
-    if ! (
-      cd "$DEPLOY_DIR"
-      timeout --foreground -k 15s "${build_timeout_sec}s" env COMPOSE_INTERACTIVE_NO_CLI=1 COMPOSE_MENU=0 docker compose --profile demo build client-demo >"$build_log" 2>&1
-    ); then
-      echo "client image build failed or timed out"
-      echo "client build log: $build_log"
-      cat "$build_log"
-      return 1
+  if [[ "$execution_mode" == "docker" ]]; then
+    local do_build=0
+    if [[ "$force_build" == "1" ]]; then
+      do_build=1
+    elif ! docker image inspect deploy-client-demo:latest >/dev/null 2>&1; then
+      do_build=1
     fi
-    echo "client test: build done"
+
+    if [[ "$do_build" -eq 1 ]]; then
+      echo "client test: building client image (timeout=${build_timeout_sec}s)"
+      if ! (
+        cd "$DEPLOY_DIR"
+        timeout --foreground -k 15s "${build_timeout_sec}s" env COMPOSE_INTERACTIVE_NO_CLI=1 COMPOSE_MENU=0 docker compose --profile demo build client-demo >"$build_log" 2>&1
+      ); then
+        echo "client image build failed or timed out"
+        echo "client build log: $build_log"
+        cat "$build_log"
+        return 1
+      fi
+      echo "client test: build done"
+    else
+      echo "client test: using existing deploy-client-demo:latest image (set EASY_NODE_CLIENT_FORCE_BUILD=1 to rebuild)"
+    fi
   else
-    echo "client test: using existing deploy-client-demo:latest image (set EASY_NODE_CLIENT_FORCE_BUILD=1 to rebuild)"
+    echo "client test: local host mode"
   fi
   if [[ "$beta_profile" == "1" ]]; then
     echo "client test: beta profile enabled (distinct operators + multi-source defaults)"
@@ -6417,67 +6924,124 @@ EOF_CLIENT
     echo "note: full fail-closed strict runtime is validated via wg-only/strict integration flows"
   fi
 
-  local -a run_cmd
-  run_cmd=(
-    env
-    COMPOSE_INTERACTIVE_NO_CLI=1
-    COMPOSE_MENU=0
-    docker compose
-    --env-file "$CLIENT_ENV_FILE"
-    --profile demo
-    run -T --no-deps --rm
-    -e "DIRECTORY_URLS=$directory_urls"
-    -e "DIRECTORY_MIN_SOURCES=$min_sources"
-    -e "ISSUER_URL=$issuer_url"
-    -e "ENTRY_URL=$entry_url"
-    -e "EXIT_CONTROL_URL=$exit_url"
-    -e "CLIENT_BOOTSTRAP_INTERVAL_SEC=2"
-    -e "CLIENT_REQUIRE_DISTINCT_OPERATORS=$require_distinct_operators"
-    -e "CLIENT_REQUIRE_DISTINCT_ENTRY_EXIT_COUNTRY=$require_distinct_countries"
-    -e "CLIENT_EXIT_LOCALITY_SOFT_BIAS=$locality_soft_bias"
-    -e "CLIENT_EXIT_COUNTRY_BIAS=$locality_country_bias"
-    -e "CLIENT_EXIT_REGION_BIAS=$locality_region_bias"
-    -e "CLIENT_EXIT_REGION_PREFIX_BIAS=$locality_region_prefix_bias"
-    -e "CLIENT_ENTRY_ROTATION_SEC=$entry_rotation_sec"
-    -e "CLIENT_ENTRY_ROTATION_SEED=$entry_rotation_seed"
-  )
-  if [[ -n "$client_subject" ]]; then
-    run_cmd+=(-e "CLIENT_SUBJECT=$client_subject")
-  fi
-  if [[ -n "$client_anon_cred" ]]; then
-    run_cmd+=(-e "CLIENT_ANON_CRED=$client_anon_cred")
-  fi
-  if [[ "$beta_profile" == "1" ]]; then
-    run_cmd+=(
-      -e "DIRECTORY_MIN_OPERATORS=2"
-      -e "CLIENT_DIRECTORY_MIN_OPERATORS=2"
+  if [[ "$execution_mode" == "docker" ]]; then
+    local -a run_cmd
+    run_cmd=(
+      env
+      COMPOSE_INTERACTIVE_NO_CLI=1
+      COMPOSE_MENU=0
+      docker compose
+      --env-file "$client_env_file"
+      --profile demo
+      run -T --no-deps --rm
+      -e "DIRECTORY_URLS=$container_directory_urls"
+      -e "DIRECTORY_MIN_SOURCES=$min_sources"
+      -e "ISSUER_URL=$container_issuer_url"
+      -e "ENTRY_URL=$container_entry_url"
+      -e "EXIT_CONTROL_URL=$container_exit_url"
+      -e "CLIENT_BOOTSTRAP_INTERVAL_SEC=2"
+      -e "CLIENT_REQUIRE_DISTINCT_OPERATORS=$require_distinct_operators"
+      -e "CLIENT_REQUIRE_DISTINCT_ENTRY_EXIT_COUNTRY=$require_distinct_countries"
+      -e "CLIENT_EXIT_LOCALITY_SOFT_BIAS=$locality_soft_bias"
+      -e "CLIENT_EXIT_COUNTRY_BIAS=$locality_country_bias"
+      -e "CLIENT_EXIT_REGION_BIAS=$locality_region_bias"
+      -e "CLIENT_EXIT_REGION_PREFIX_BIAS=$locality_region_prefix_bias"
+      -e "CLIENT_ENTRY_ROTATION_SEC=$entry_rotation_sec"
+      -e "CLIENT_ENTRY_ROTATION_SEED=$entry_rotation_seed"
     )
-  fi
-  if [[ "$prod_profile" == "1" ]]; then
-    run_cmd+=(
-      -e "MTLS_ENABLE=1"
-      -e "MTLS_CA_FILE=/app/tls/ca.crt"
-      -e "MTLS_CLIENT_CERT_FILE=/app/tls/client.crt"
-      -e "MTLS_CLIENT_KEY_FILE=/app/tls/client.key"
-      -e "MTLS_CERT_FILE=/app/tls/client.crt"
-      -e "MTLS_KEY_FILE=/app/tls/client.key"
-      -e "DIRECTORY_TRUST_STRICT=1"
-      -e "DIRECTORY_TRUST_TOFU=0"
-    )
-  fi
-  if [[ -n "$exit_country" ]]; then
-    run_cmd+=(-e "CLIENT_EXIT_COUNTRY=$exit_country")
-  fi
-  if [[ -n "$exit_region" ]]; then
-    run_cmd+=(-e "CLIENT_EXIT_REGION=$exit_region")
-  fi
-  run_cmd+=(client-demo)
+    if [[ -n "$client_subject" ]]; then
+      run_cmd+=(-e "CLIENT_SUBJECT=$client_subject")
+    fi
+    if [[ -n "$client_anon_cred" ]]; then
+      run_cmd+=(-e "CLIENT_ANON_CRED=$client_anon_cred")
+    fi
+    if [[ "$beta_profile" == "1" && "$container_directory_urls" == *,* ]]; then
+      run_cmd+=(
+        -e "DIRECTORY_MIN_OPERATORS=2"
+        -e "CLIENT_DIRECTORY_MIN_OPERATORS=2"
+      )
+    fi
+    if [[ "$prod_profile" == "1" ]]; then
+      run_cmd+=(
+        -e "MTLS_ENABLE=1"
+        -e "MTLS_CA_FILE=/app/tls/ca.crt"
+        -e "MTLS_CLIENT_CERT_FILE=/app/tls/client.crt"
+        -e "MTLS_CLIENT_KEY_FILE=/app/tls/client.key"
+        -e "MTLS_CERT_FILE=/app/tls/client.crt"
+        -e "MTLS_KEY_FILE=/app/tls/client.key"
+        -e "DIRECTORY_TRUST_STRICT=1"
+        -e "DIRECTORY_TRUST_TOFU=0"
+      )
+    fi
+    if [[ -n "$exit_country" ]]; then
+      run_cmd+=(-e "CLIENT_EXIT_COUNTRY=$exit_country")
+    fi
+    if [[ -n "$exit_region" ]]; then
+      run_cmd+=(-e "CLIENT_EXIT_REGION=$exit_region")
+    fi
+    run_cmd+=(client-demo)
 
-  (
-    cd "$DEPLOY_DIR"
-    timeout --foreground -k 10s "${timeout_sec}s" "${run_cmd[@]}" >"$out" 2>&1
-  ) || true
-  cleanup_client_demo_artifacts
+    (
+      cd "$DEPLOY_DIR"
+      timeout --foreground -k 10s "${timeout_sec}s" "${run_cmd[@]}" >"$out" 2>&1
+    ) || true
+    cleanup_client_demo_artifacts
+  else
+    local -a local_cmd
+    local_cmd=(
+      env
+      "DIRECTORY_URLS=$directory_urls"
+      "DIRECTORY_MIN_SOURCES=$min_sources"
+      "ISSUER_URL=$issuer_url"
+      "ENTRY_URL=$entry_url"
+      "EXIT_CONTROL_URL=$exit_url"
+      "CLIENT_BOOTSTRAP_INTERVAL_SEC=2"
+      "CLIENT_REQUIRE_DISTINCT_OPERATORS=$require_distinct_operators"
+      "CLIENT_REQUIRE_DISTINCT_ENTRY_EXIT_COUNTRY=$require_distinct_countries"
+      "CLIENT_EXIT_LOCALITY_SOFT_BIAS=$locality_soft_bias"
+      "CLIENT_EXIT_COUNTRY_BIAS=$locality_country_bias"
+      "CLIENT_EXIT_REGION_BIAS=$locality_region_bias"
+      "CLIENT_EXIT_REGION_PREFIX_BIAS=$locality_region_prefix_bias"
+      "CLIENT_ENTRY_ROTATION_SEC=$entry_rotation_sec"
+      "CLIENT_ENTRY_ROTATION_SEED=$entry_rotation_seed"
+    )
+    if [[ -n "$client_subject" ]]; then
+      local_cmd+=("CLIENT_SUBJECT=$client_subject")
+    fi
+    if [[ -n "$client_anon_cred" ]]; then
+      local_cmd+=("CLIENT_ANON_CRED=$client_anon_cred")
+    fi
+    if [[ "$beta_profile" == "1" && "$directory_urls" == *,* ]]; then
+      local_cmd+=(
+        "DIRECTORY_MIN_OPERATORS=2"
+        "CLIENT_DIRECTORY_MIN_OPERATORS=2"
+      )
+    fi
+    if [[ "$prod_profile" == "1" ]]; then
+      local_cmd+=(
+        "MTLS_ENABLE=1"
+        "MTLS_CA_FILE=$DEPLOY_DIR/tls/ca.crt"
+        "MTLS_CLIENT_CERT_FILE=$DEPLOY_DIR/tls/client.crt"
+        "MTLS_CLIENT_KEY_FILE=$DEPLOY_DIR/tls/client.key"
+        "MTLS_CERT_FILE=$DEPLOY_DIR/tls/client.crt"
+        "MTLS_KEY_FILE=$DEPLOY_DIR/tls/client.key"
+        "DIRECTORY_TRUST_STRICT=1"
+        "DIRECTORY_TRUST_TOFU=0"
+      )
+    fi
+    if [[ -n "$exit_country" ]]; then
+      local_cmd+=("CLIENT_EXIT_COUNTRY=$exit_country")
+    fi
+    if [[ -n "$exit_region" ]]; then
+      local_cmd+=("CLIENT_EXIT_REGION=$exit_region")
+    fi
+    local_cmd+=(go run ./cmd/node --client)
+
+    (
+      cd "$ROOT_DIR"
+      timeout --foreground -k 10s "${timeout_sec}s" "${local_cmd[@]}" >"$out" 2>&1
+    ) || true
+  fi
 
   if rg -q 'client selected entry=' "$out"; then
     local same_ops missing_ops selection_count entry_op_count exit_op_count cross_pair_count
@@ -6939,6 +7503,11 @@ client_vpn_preflight() {
 
 client_vpn_state_file() {
   echo "$DEPLOY_DIR/data/client_vpn.state"
+}
+
+client_vpn_smoke() {
+  local smoke_script="${CLIENT_VPN_SMOKE_SCRIPT:-$ROOT_DIR/scripts/client_vpn_smoke.sh}"
+  "$smoke_script" "$@"
 }
 
 client_vpn_status() {
@@ -7916,6 +8485,10 @@ main() {
       shift
       wg_only_stack_selftest "$@"
       ;;
+    wg-only-stack-selftest-record)
+      shift
+      wg_only_stack_selftest_record "$@"
+      ;;
     wg-only-local-test)
       shift
       wg_only_local_test "$@"
@@ -7931,6 +8504,10 @@ main() {
     client-vpn-up)
       shift
       client_vpn_up "$@"
+      ;;
+    client-vpn-smoke)
+      shift
+      client_vpn_smoke "$@"
       ;;
     client-vpn-status)
       shift
@@ -7956,9 +8533,41 @@ main() {
       shift
       three_machine_prod_bundle "$@"
       ;;
+    three-machine-prod-signoff)
+      shift
+      three_machine_prod_signoff "$@"
+      ;;
     three-machine-reminder)
       shift
       three_machine_reminder "$@"
+      ;;
+    manual-validation-backlog)
+      shift
+      manual_validation_backlog "$@"
+      ;;
+    manual-validation-status)
+      shift
+      manual_validation_status "$@"
+      ;;
+    manual-validation-report)
+      shift
+      manual_validation_report "$@"
+      ;;
+    pre-real-host-readiness)
+      shift
+      pre_real_host_readiness "$@"
+      ;;
+    manual-validation-record)
+      shift
+      manual_validation_record "$@"
+      ;;
+    runtime-doctor)
+      shift
+      runtime_doctor "$@"
+      ;;
+    runtime-fix)
+      shift
+      runtime_fix "$@"
       ;;
     prod-gate-check)
       shift
@@ -8115,6 +8724,10 @@ main() {
     incident-snapshot)
       shift
       incident_snapshot "$@"
+      ;;
+    incident-snapshot-summary)
+      shift
+      incident_snapshot_summary "$@"
       ;;
     discover-hosts)
       shift

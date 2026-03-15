@@ -125,6 +125,15 @@ json_valid01() {
   fi
 }
 
+json_string_array() {
+  local file="$1"
+  local expr="$2"
+  if [[ -z "$file" || ! -f "$file" ]]; then
+    return 0
+  fi
+  jq -r "$expr // [] | .[]? // empty" "$file" 2>/dev/null || true
+}
+
 md_escape() {
   local value="$1"
   value="${value//|/\\|}"
@@ -259,6 +268,7 @@ signoff_json="$(abs_path "$(json_string "$runbook_summary_json" '.artifacts.sign
 trend_summary_json="$(abs_path "$(json_string "$runbook_summary_json" '.artifacts.trend_summary_json')")"
 alert_summary_json="$(abs_path "$(json_string "$runbook_summary_json" '.artifacts.alert_summary_json')")"
 dashboard_md="$(abs_path "$(json_string "$runbook_summary_json" '.artifacts.dashboard_md')")"
+pre_real_host_readiness_summary_json="$(abs_path "$(json_string "$runbook_summary_json" '.artifacts.pre_real_host_readiness_summary_json')")"
 
 if [[ -z "$quick_run_report_json" ]]; then
   quick_run_report_json="$reports_dir/prod_pilot_cohort_quick_report.json"
@@ -277,6 +287,9 @@ if [[ -z "$alert_summary_json" ]]; then
 fi
 if [[ -z "$dashboard_md" ]]; then
   dashboard_md="$reports_dir/prod_pilot_quick_dashboard.md"
+fi
+if [[ -z "$pre_real_host_readiness_summary_json" ]]; then
+  pre_real_host_readiness_summary_json="$reports_dir/pre_real_host_readiness_summary.json"
 fi
 
 runbook_status="$(json_string "$runbook_summary_json" '.status')"
@@ -326,6 +339,49 @@ if [[ -z "$top_no_go_reason" ]]; then
   top_no_go_reason="$(json_string "$alert_summary_json" '.trigger_reasons[0]')"
 fi
 
+incident_snapshot_source_run_report=""
+incident_snapshot_enabled="0"
+incident_snapshot_status=""
+incident_snapshot_bundle_dir=""
+incident_snapshot_bundle_tar=""
+incident_snapshot_summary_json=""
+incident_snapshot_report_md=""
+incident_snapshot_attachment_manifest=""
+incident_snapshot_attachment_skipped=""
+incident_snapshot_attachment_count="0"
+declare -a cohort_run_report_paths=()
+mapfile -t cohort_run_report_paths < <(json_string_array "$cohort_summary_json" '.run_reports')
+if [[ "${#cohort_run_report_paths[@]}" -eq 0 ]]; then
+  mapfile -t cohort_run_report_paths < <(json_string_array "$cohort_summary_json" '.artifacts.run_reports')
+fi
+for rr in "${cohort_run_report_paths[@]:-}"; do
+  rr="$(abs_path "$rr")"
+  [[ -z "$rr" || ! -f "$rr" ]] && continue
+  if ! jq -e . "$rr" >/dev/null 2>&1; then
+    continue
+  fi
+  rr_status="$(json_string "$rr" '.status')"
+  rr_final_rc="$(json_int "$rr" '.final_rc')"
+  if [[ "$rr_status" == "ok" && "$rr_final_rc" -eq 0 ]]; then
+    continue
+  fi
+  incident_snapshot_source_run_report="$rr"
+  incident_snapshot_enabled="$(json_bool01 "$rr" '.incident_snapshot.enabled // .incident_snapshot.enabled_on_fail')"
+  incident_snapshot_status="$(json_string "$rr" '.incident_snapshot.status')"
+  incident_snapshot_bundle_dir="$(abs_path "$(json_string "$rr" '.incident_snapshot.bundle_dir')")"
+  incident_snapshot_bundle_tar="$(abs_path "$(json_string "$rr" '.incident_snapshot.bundle_tar')")"
+  incident_snapshot_summary_json="$(abs_path "$(json_string "$rr" '.incident_snapshot.summary_json')")"
+  incident_snapshot_report_md="$(abs_path "$(json_string "$rr" '.incident_snapshot.report_md')")"
+  incident_snapshot_attachment_manifest="$(abs_path "$(json_string "$rr" '.incident_snapshot.attachment_manifest')")"
+  incident_snapshot_attachment_skipped="$(abs_path "$(json_string "$rr" '.incident_snapshot.attachment_skipped')")"
+  incident_snapshot_attachment_count="$(json_int "$rr" '.incident_snapshot.attachment_count')"
+done
+
+incident_snapshot_source_runbook_summary_json="$runbook_summary_json"
+incident_snapshot_source_pre_real_host_readiness_summary_json="$pre_real_host_readiness_summary_json"
+incident_snapshot_source_quick_run_report_json="$quick_run_report_json"
+incident_snapshot_source_summary_json="$cohort_summary_json"
+
 runbook_summary_exists="1"
 quick_run_report_exists="$(path_exists01 "$quick_run_report_json")"
 cohort_summary_exists="$(path_exists01 "$cohort_summary_json")"
@@ -333,15 +389,25 @@ signoff_json_exists="$(path_exists01 "$signoff_json")"
 trend_summary_exists="$(path_exists01 "$trend_summary_json")"
 alert_summary_exists="$(path_exists01 "$alert_summary_json")"
 dashboard_md_exists="$(path_exists01 "$dashboard_md")"
+pre_real_host_readiness_summary_exists="$(path_exists01 "$pre_real_host_readiness_summary_json")"
 bundle_tar_exists="$(path_exists01 "$cohort_bundle_tar")"
 bundle_manifest_exists="$(path_exists01 "$cohort_bundle_manifest_json")"
+incident_snapshot_source_run_report_exists="$(path_exists01 "$incident_snapshot_source_run_report")"
+incident_snapshot_bundle_dir_exists="$(path_exists01 "$incident_snapshot_bundle_dir")"
+incident_snapshot_bundle_tar_exists="$(path_exists01 "$incident_snapshot_bundle_tar")"
+incident_snapshot_summary_exists="$(path_exists01 "$incident_snapshot_summary_json")"
+incident_snapshot_report_exists="$(path_exists01 "$incident_snapshot_report_md")"
+incident_snapshot_attachment_manifest_exists="$(path_exists01 "$incident_snapshot_attachment_manifest")"
+incident_snapshot_attachment_skipped_exists="$(path_exists01 "$incident_snapshot_attachment_skipped")"
 runbook_summary_valid_json="1"
 quick_run_report_valid_json="$(json_valid01 "$quick_run_report_json")"
 cohort_summary_valid_json="$(json_valid01 "$cohort_summary_json")"
 signoff_json_valid_json="$(json_valid01 "$signoff_json")"
 trend_summary_valid_json="$(json_valid01 "$trend_summary_json")"
 alert_summary_valid_json="$(json_valid01 "$alert_summary_json")"
+pre_real_host_readiness_summary_valid_json="$(json_valid01 "$pre_real_host_readiness_summary_json")"
 bundle_manifest_valid_json="$(json_valid01 "$cohort_bundle_manifest_json")"
+incident_snapshot_summary_valid_json="$(json_valid01 "$incident_snapshot_summary_json")"
 
 declare -a missing_required_artifacts=()
 if [[ "$quick_run_report_exists" != "1" ]]; then
@@ -442,8 +508,21 @@ jq -nc \
   --arg trend_summary_json "$trend_summary_json" \
   --arg alert_summary_json "$alert_summary_json" \
   --arg dashboard_md "$dashboard_md" \
+  --arg pre_real_host_readiness_summary_json "$pre_real_host_readiness_summary_json" \
   --arg cohort_bundle_tar "$cohort_bundle_tar" \
   --arg cohort_bundle_manifest_json "$cohort_bundle_manifest_json" \
+  --arg incident_snapshot_source_run_report "$incident_snapshot_source_run_report" \
+  --arg incident_snapshot_source_runbook_summary_json "$incident_snapshot_source_runbook_summary_json" \
+  --arg incident_snapshot_source_pre_real_host_readiness_summary_json "$incident_snapshot_source_pre_real_host_readiness_summary_json" \
+  --arg incident_snapshot_source_quick_run_report_json "$incident_snapshot_source_quick_run_report_json" \
+  --arg incident_snapshot_source_summary_json "$incident_snapshot_source_summary_json" \
+  --arg incident_snapshot_status "$incident_snapshot_status" \
+  --arg incident_snapshot_bundle_dir "$incident_snapshot_bundle_dir" \
+  --arg incident_snapshot_bundle_tar "$incident_snapshot_bundle_tar" \
+  --arg incident_snapshot_summary_json "$incident_snapshot_summary_json" \
+  --arg incident_snapshot_report_md "$incident_snapshot_report_md" \
+  --arg incident_snapshot_attachment_manifest "$incident_snapshot_attachment_manifest" \
+  --arg incident_snapshot_attachment_skipped "$incident_snapshot_attachment_skipped" \
   --argjson runbook_final_rc "$runbook_final_rc" \
   --argjson runbook_duration_sec "$runbook_duration_sec" \
   --argjson runbook_quick_rc "$runbook_quick_rc" \
@@ -477,9 +556,21 @@ jq -nc \
   --argjson alert_summary_exists "$alert_summary_exists" \
   --argjson alert_summary_valid_json "$alert_summary_valid_json" \
   --argjson dashboard_md_exists "$dashboard_md_exists" \
+  --argjson pre_real_host_readiness_summary_exists "$pre_real_host_readiness_summary_exists" \
+  --argjson pre_real_host_readiness_summary_valid_json "$pre_real_host_readiness_summary_valid_json" \
   --argjson bundle_tar_exists "$bundle_tar_exists" \
   --argjson bundle_manifest_exists "$bundle_manifest_exists" \
   --argjson bundle_manifest_valid_json "$bundle_manifest_valid_json" \
+  --argjson incident_snapshot_enabled "$incident_snapshot_enabled" \
+  --argjson incident_snapshot_source_run_report_exists "$incident_snapshot_source_run_report_exists" \
+  --argjson incident_snapshot_bundle_dir_exists "$incident_snapshot_bundle_dir_exists" \
+  --argjson incident_snapshot_bundle_tar_exists "$incident_snapshot_bundle_tar_exists" \
+  --argjson incident_snapshot_summary_exists "$incident_snapshot_summary_exists" \
+  --argjson incident_snapshot_summary_valid_json "$incident_snapshot_summary_valid_json" \
+  --argjson incident_snapshot_report_exists "$incident_snapshot_report_exists" \
+  --argjson incident_snapshot_attachment_manifest_exists "$incident_snapshot_attachment_manifest_exists" \
+  --argjson incident_snapshot_attachment_skipped_exists "$incident_snapshot_attachment_skipped_exists" \
+  --argjson incident_snapshot_attachment_count "$incident_snapshot_attachment_count" \
   --argjson missing_required_artifacts "$missing_required_artifacts_json" \
   --argjson invalid_required_artifacts "$invalid_required_artifacts_json" \
   '{
@@ -539,6 +630,22 @@ jq -nc \
       evaluation_errors: $trend_eval_errors,
       top_no_go_reason: ($top_no_go_reason // "")
     },
+    incident_snapshot: {
+      source_runbook_summary_json: {path: $incident_snapshot_source_runbook_summary_json, exists: $runbook_summary_exists, valid_json: $runbook_summary_valid_json},
+      source_pre_real_host_readiness_summary_json: {path: $incident_snapshot_source_pre_real_host_readiness_summary_json, exists: $pre_real_host_readiness_summary_exists, valid_json: $pre_real_host_readiness_summary_valid_json},
+      source_quick_run_report_json: {path: $incident_snapshot_source_quick_run_report_json, exists: $quick_run_report_exists, valid_json: $quick_run_report_valid_json},
+      source_summary_json: {path: $incident_snapshot_source_summary_json, exists: $cohort_summary_exists, valid_json: $cohort_summary_valid_json},
+      source_run_report_json: {path: $incident_snapshot_source_run_report, exists: $incident_snapshot_source_run_report_exists},
+      enabled: $incident_snapshot_enabled,
+      status: ($incident_snapshot_status // ""),
+      bundle_dir: {path: $incident_snapshot_bundle_dir, exists: $incident_snapshot_bundle_dir_exists},
+      bundle_tar: {path: $incident_snapshot_bundle_tar, exists: $incident_snapshot_bundle_tar_exists},
+      summary_json: {path: $incident_snapshot_summary_json, exists: $incident_snapshot_summary_exists, valid_json: $incident_snapshot_summary_valid_json},
+      report_md: {path: $incident_snapshot_report_md, exists: $incident_snapshot_report_exists},
+      attachment_manifest: {path: $incident_snapshot_attachment_manifest, exists: $incident_snapshot_attachment_manifest_exists},
+      attachment_skipped: {path: $incident_snapshot_attachment_skipped, exists: $incident_snapshot_attachment_skipped_exists},
+      attachment_count: $incident_snapshot_attachment_count
+    },
     artifacts: {
       reports_dir: {path: $reports_dir, exists: true},
       runbook_summary_json: {path: $runbook_summary_json, exists: $runbook_summary_exists, valid_json: $runbook_summary_valid_json},
@@ -548,6 +655,7 @@ jq -nc \
       trend_summary_json: {path: $trend_summary_json, exists: $trend_summary_exists, valid_json: $trend_summary_valid_json},
       alert_summary_json: {path: $alert_summary_json, exists: $alert_summary_exists, valid_json: $alert_summary_valid_json},
       dashboard_md: {path: $dashboard_md, exists: $dashboard_md_exists},
+      pre_real_host_readiness_summary_json: {path: $pre_real_host_readiness_summary_json, exists: $pre_real_host_readiness_summary_exists, valid_json: $pre_real_host_readiness_summary_valid_json},
       bundle_tar: {path: $cohort_bundle_tar, exists: $bundle_tar_exists},
       bundle_manifest_json: {path: $cohort_bundle_manifest_json, exists: $bundle_manifest_exists, valid_json: $bundle_manifest_valid_json},
       campaign_summary_json: {path: $summary_json, exists: true},
@@ -575,6 +683,17 @@ jq -nc \
   printf -- '- Top NO-GO reason: %s\n' "$(md_escape "${top_no_go_reason:-n/a}")"
   printf -- '- Bundle created: %s\n' "$cohort_bundle_created"
   printf -- '- Bundle manifest created: %s\n' "$cohort_bundle_manifest_created"
+  printf -- '- Incident snapshot status: %s\n' "${incident_snapshot_status:-not-available}"
+  printf -- '- Incident snapshot attachments: count=%s manifest=`%s` skipped=`%s`\n' "$incident_snapshot_attachment_count" "$(md_escape "${incident_snapshot_attachment_manifest:-}")" "$(md_escape "${incident_snapshot_attachment_skipped:-}")"
+  printf -- '- Incident snapshot source runbook summary: `%s`\n' "$(md_escape "$incident_snapshot_source_runbook_summary_json")"
+  printf -- '- Incident snapshot source pre-real-host readiness summary: `%s`\n' "$(md_escape "$incident_snapshot_source_pre_real_host_readiness_summary_json")"
+  printf -- '- Incident snapshot source quick run report: `%s`\n' "$(md_escape "$incident_snapshot_source_quick_run_report_json")"
+  printf -- '- Incident snapshot source cohort summary: `%s`\n' "$(md_escape "$incident_snapshot_source_summary_json")"
+  if [[ -n "$incident_snapshot_source_run_report" ]]; then
+    printf -- '- Incident snapshot source run report: `%s`\n' "$(md_escape "$incident_snapshot_source_run_report")"
+  else
+    printf -- '- Incident snapshot source run report: none\n'
+  fi
   if ((${#missing_required_artifacts[@]} > 0)); then
     printf -- '- Missing required artifacts: %s\n' "$(md_escape "${missing_required_artifacts[*]}")"
   else
@@ -594,8 +713,20 @@ jq -nc \
   artifact_line "Trend summary JSON" "$trend_summary_json" "$trend_summary_exists"
   artifact_line "Alert summary JSON" "$alert_summary_json" "$alert_summary_exists"
   artifact_line "Dashboard markdown" "$dashboard_md" "$dashboard_md_exists"
+  artifact_line "Pre-real-host readiness summary JSON" "$pre_real_host_readiness_summary_json" "$pre_real_host_readiness_summary_exists"
   artifact_line "Cohort bundle tar" "$cohort_bundle_tar" "$bundle_tar_exists"
   artifact_line "Cohort bundle manifest" "$cohort_bundle_manifest_json" "$bundle_manifest_exists"
+  artifact_line "Incident snapshot source runbook summary" "$incident_snapshot_source_runbook_summary_json" "$runbook_summary_exists"
+  artifact_line "Incident snapshot source pre-real-host readiness summary" "$incident_snapshot_source_pre_real_host_readiness_summary_json" "$pre_real_host_readiness_summary_exists"
+  artifact_line "Incident snapshot source quick run report" "$incident_snapshot_source_quick_run_report_json" "$quick_run_report_exists"
+  artifact_line "Incident snapshot source cohort summary" "$incident_snapshot_source_summary_json" "$cohort_summary_exists"
+  artifact_line "Incident snapshot source run report" "$incident_snapshot_source_run_report" "$incident_snapshot_source_run_report_exists"
+  artifact_line "Incident snapshot bundle dir" "$incident_snapshot_bundle_dir" "$incident_snapshot_bundle_dir_exists"
+  artifact_line "Incident snapshot bundle tar" "$incident_snapshot_bundle_tar" "$incident_snapshot_bundle_tar_exists"
+  artifact_line "Incident snapshot summary JSON" "$incident_snapshot_summary_json" "$incident_snapshot_summary_exists"
+  artifact_line "Incident snapshot report markdown" "$incident_snapshot_report_md" "$incident_snapshot_report_exists"
+  artifact_line "Incident snapshot attachment manifest" "$incident_snapshot_attachment_manifest" "$incident_snapshot_attachment_manifest_exists"
+  artifact_line "Incident snapshot attachment skipped" "$incident_snapshot_attachment_skipped" "$incident_snapshot_attachment_skipped_exists"
   artifact_line "Campaign summary JSON" "$summary_json" "1"
   artifact_line "Campaign report markdown" "$report_md" "1"
 } >"$report_md"
@@ -603,6 +734,9 @@ jq -nc \
 echo "[prod-pilot-cohort-campaign-summary] decision=$decision"
 echo "[prod-pilot-cohort-campaign-summary] summary_json=$summary_json"
 echo "[prod-pilot-cohort-campaign-summary] report_md=$report_md"
+if [[ -n "$incident_snapshot_source_run_report" || -n "$incident_snapshot_summary_json" || -n "$incident_snapshot_report_md" || -n "$incident_snapshot_attachment_manifest" || -n "$incident_snapshot_attachment_skipped" ]]; then
+  echo "[prod-pilot-cohort-campaign-summary] incident_handoff source_runbook_summary_json=${incident_snapshot_source_runbook_summary_json:-unset} source_pre_real_host_readiness_summary_json=${incident_snapshot_source_pre_real_host_readiness_summary_json:-unset} source_quick_run_report=${incident_snapshot_source_quick_run_report_json:-unset} source_summary_json=${incident_snapshot_source_summary_json:-unset} source_run_report=${incident_snapshot_source_run_report:-unset} summary_json=${incident_snapshot_summary_json:-unset} report_md=${incident_snapshot_report_md:-unset} attachment_manifest=${incident_snapshot_attachment_manifest:-unset} attachment_skipped=${incident_snapshot_attachment_skipped:-unset} attachment_count=${incident_snapshot_attachment_count}"
+fi
 
 if [[ "$print_report" == "1" ]]; then
   cat "$report_md"

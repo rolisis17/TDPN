@@ -26,12 +26,20 @@ client_iface="wgcstackstop0"
 exit_iface="wgestackstop0"
 log_file="$(mktemp)"
 cleanup() {
-  ./scripts/easy_node.sh wg-only-stack-down --force-iface-cleanup 1 >/dev/null 2>&1 || true
+  ./scripts/easy_node.sh wg-only-stack-down \
+    --force-iface-cleanup 1 \
+    --base-port 19380 \
+    --client-iface "$client_iface" \
+    --exit-iface "$exit_iface" >/dev/null 2>&1 || true
   rm -f "$log_file"
 }
 trap cleanup EXIT INT TERM
 
-./scripts/easy_node.sh wg-only-stack-down --force-iface-cleanup 1 >/dev/null 2>&1 || true
+./scripts/easy_node.sh wg-only-stack-down \
+  --force-iface-cleanup 1 \
+  --base-port 19380 \
+  --client-iface "$client_iface" \
+  --exit-iface "$exit_iface" >/dev/null 2>&1 || true
 
 ./scripts/easy_node.sh wg-only-stack-up \
   --strict-beta 1 \

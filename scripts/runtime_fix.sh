@@ -1,0 +1,464 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  ./scripts/runtime_fix.sh \
+    [--base-port N] \
+    [--client-iface IFACE] \
+    [--exit-iface IFACE] \
+    [--vpn-iface IFACE] \
+    [--prune-wg-only-dir [0|1]] \
+    [--show-json [0|1]]
+
+Purpose:
+  Apply safe runtime cleanup actions from runtime-doctor findings before manual
+  WG-only/client-VPN/3-machine validation.
+
+What it can clean:
+  - stale wg-only stack state / interfaces / busy default ports
+  - stale client-vpn state / interface
+  - stale deploy-client-demo-run-* containers and deploy_default network
+  - repo/runtime ownership drift for env/state/log paths when running as root
+  - optional wg-only runtime dir prune after stack cleanup
+
+Notes:
+  - Ownership repairs are only attempted when a safe non-root target owner is known.
+  - WG-only, client-VPN, and ownership cleanup requires root; non-root runs report skips.
+USAGE
+}
+
+trim() {
+  local value="$1"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "$value"
+}
+
+bool_arg_or_die() {
+  local name="$1"
+  local value="$2"
+  if [[ "$value" != "0" && "$value" != "1" ]]; then
+    echo "$name must be 0 or 1"
+    exit 2
+  fi
+}
+
+effective_uid() {
+  if [[ -n "${EASY_NODE_RUNTIME_FIX_EUID:-}" ]]; then
+    printf '%s\n' "${EASY_NODE_RUNTIME_FIX_EUID}"
+    return
+  fi
+  if [[ -n "${EUID:-}" ]]; then
+    printf '%s\n' "${EUID}"
+    return
+  fi
+  id -u
+}
+
+preferred_target_user() {
+  if [[ -n "${EASY_NODE_RUNTIME_FIX_TARGET_USER:-}" ]]; then
+    printf '%s\n' "${EASY_NODE_RUNTIME_FIX_TARGET_USER}"
+    return
+  fi
+  if [[ -n "${SUDO_USER:-}" && "${SUDO_USER:-}" != "root" ]]; then
+    printf '%s\n' "${SUDO_USER}"
+    return
+  fi
+  if [[ "$(effective_uid)" != "0" ]]; then
+    id -un
+    return
+  fi
+  printf '%s\n' ""
+}
+
+preferred_target_group() {
+  local user="${1:-}"
+  if [[ -n "${EASY_NODE_RUNTIME_FIX_TARGET_GROUP:-}" ]]; then
+    printf '%s\n' "${EASY_NODE_RUNTIME_FIX_TARGET_GROUP}"
+    return
+  fi
+  if [[ -n "$user" ]] && id -gn "$user" >/dev/null 2>&1; then
+    id -gn "$user"
+    return
+  fi
+  if [[ -n "${SUDO_GID:-}" ]]; then
+    printf '%s\n' "${SUDO_GID}"
+    return
+  fi
+  if [[ "$(effective_uid)" != "0" ]]; then
+    id -gn
+    return
+  fi
+  printf '%s\n' ""
+}
+
+json_escape() {
+  jq -Rn --arg v "$1" '$v'
+}
+
+extract_json_payload() {
+  local log_file="$1"
+  awk '/^\[runtime-doctor\] summary_json_payload:/{flag=1; next} flag{print}' "$log_file"
+}
+
+show_json="0"
+prune_wg_only_dir="0"
+base_port="${EASY_NODE_DOCTOR_WG_ONLY_BASE_PORT:-19280}"
+client_iface="${EASY_NODE_DOCTOR_CLIENT_IFACE:-wgcstack0}"
+exit_iface="${EASY_NODE_DOCTOR_EXIT_IFACE:-wgestack0}"
+vpn_iface="${EASY_NODE_DOCTOR_VPN_IFACE:-wgvpn0}"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --base-port)
+      base_port="${2:-}"
+      shift 2
+      ;;
+    --client-iface)
+      client_iface="${2:-}"
+      shift 2
+      ;;
+    --exit-iface)
+      exit_iface="${2:-}"
+      shift 2
+      ;;
+    --vpn-iface)
+      vpn_iface="${2:-}"
+      shift 2
+      ;;
+    --prune-wg-only-dir)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        prune_wg_only_dir="${2:-}"
+        shift 2
+      else
+        prune_wg_only_dir="1"
+        shift
+      fi
+      ;;
+    --show-json)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        show_json="${2:-}"
+        shift 2
+      else
+        show_json="1"
+        shift
+      fi
+      ;;
+    -h|--help|help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "unknown argument: $1"
+      usage
+      exit 2
+      ;;
+  esac
+done
+
+bool_arg_or_die "--show-json" "$show_json"
+bool_arg_or_die "--prune-wg-only-dir" "$prune_wg_only_dir"
+if ! [[ "$base_port" =~ ^[0-9]+$ ]]; then
+  echo "--base-port must be an integer"
+  exit 2
+fi
+if [[ -z "$client_iface" || -z "$exit_iface" || -z "$vpn_iface" ]]; then
+  echo "--client-iface, --exit-iface, and --vpn-iface must be non-empty"
+  exit 2
+fi
+
+doctor_script="${RUNTIME_DOCTOR_SCRIPT:-$ROOT_DIR/scripts/runtime_doctor.sh}"
+easy_node_script="${EASY_NODE_RUNTIME_FIX_EASY_NODE_SCRIPT:-$ROOT_DIR/scripts/easy_node.sh}"
+if [[ ! -x "$doctor_script" ]]; then
+  echo "missing runtime doctor script: $doctor_script"
+  exit 2
+fi
+if [[ ! -x "$easy_node_script" ]]; then
+  echo "missing easy_node helper script: $easy_node_script"
+  exit 2
+fi
+
+declare -a actions_taken=()
+declare -a actions_skipped=()
+declare -a actions_failed=()
+
+run_doctor() {
+  local log_file
+  log_file="$(mktemp)"
+  local rc=0
+  if "$doctor_script" \
+    --base-port "$base_port" \
+    --client-iface "$client_iface" \
+    --exit-iface "$exit_iface" \
+    --vpn-iface "$vpn_iface" \
+    --show-json 1 >"$log_file" 2>&1; then
+    rc=0
+  else
+    rc=$?
+  fi
+  local json
+  json="$(extract_json_payload "$log_file")"
+  if [[ -z "$json" ]]; then
+    echo "runtime-fix failed: runtime-doctor did not emit JSON summary"
+    cat "$log_file"
+    rm -f "$log_file"
+    exit 1
+  fi
+  rm -f "$log_file"
+  printf '%s' "$json"
+  return "$rc"
+}
+
+json_has_code() {
+  local json="$1"
+  local expr="$2"
+  printf '%s\n' "$json" | jq -e "$expr" >/dev/null 2>&1
+}
+
+repair_ownership_path() {
+  local action_name="$1"
+  local path="$2"
+  local recursive="${3:-0}"
+  local chmod_mode="${4:-}"
+  local create_dir="${5:-0}"
+
+  if [[ "$current_uid" != "$root_required_uid" ]]; then
+    actions_skipped+=("${action_name} (root required)")
+    echo "[runtime-fix] action_skipped=${action_name} (root required)"
+    return
+  fi
+  if [[ -z "$target_owner_spec" ]]; then
+    actions_skipped+=("${action_name} (target owner unavailable)")
+    echo "[runtime-fix] action_skipped=${action_name} (target owner unavailable)"
+    return
+  fi
+  if [[ "$create_dir" == "1" ]]; then
+    mkdir -p "$path" >/dev/null 2>&1 || true
+  fi
+  if [[ ! -e "$path" ]]; then
+    actions_failed+=("$action_name")
+    echo "[runtime-fix] action_failed=${action_name} path=$path reason=missing"
+    return
+  fi
+
+  local rc=0
+  if [[ "$recursive" == "1" ]]; then
+    chown -R "$target_owner_spec" "$path" >/dev/null 2>&1 || rc=$?
+  else
+    chown "$target_owner_spec" "$path" >/dev/null 2>&1 || rc=$?
+  fi
+  if [[ "$rc" -eq 0 && -n "$chmod_mode" ]]; then
+    chmod "$chmod_mode" "$path" >/dev/null 2>&1 || rc=$?
+  fi
+
+  if [[ "$rc" -eq 0 ]]; then
+    actions_taken+=("$action_name")
+    echo "[runtime-fix] action=${action_name} path=$path owner=$target_owner_spec"
+  else
+    actions_failed+=("$action_name")
+    echo "[runtime-fix] action_failed=${action_name} path=$path owner=$target_owner_spec"
+  fi
+}
+
+before_doctor_rc=0
+before_json="$(
+  if run_doctor; then
+    :
+  else
+    before_doctor_rc=$?
+  fi
+)"
+before_status="$(printf '%s\n' "$before_json" | jq -r '.status // "UNKNOWN"')"
+before_findings_total="$(printf '%s\n' "$before_json" | jq -r '.summary.findings_total // 0')"
+client_env_file="$(printf '%s\n' "$before_json" | jq -r '.paths.client_env_file // ""')"
+authority_env_file="$(printf '%s\n' "$before_json" | jq -r '.paths.authority_env_file // ""')"
+provider_env_file="$(printf '%s\n' "$before_json" | jq -r '.paths.provider_env_file // ""')"
+wg_only_dir="$(printf '%s\n' "$before_json" | jq -r '.paths.wg_only_dir // ""')"
+client_vpn_key_dir="$(printf '%s\n' "$before_json" | jq -r '.paths.client_vpn_key_dir // ""')"
+log_dir="$(printf '%s\n' "$before_json" | jq -r '.paths.log_dir // ""')"
+
+echo "[runtime-fix] before_status=$before_status findings=$before_findings_total"
+
+root_required_uid="0"
+current_uid="$(effective_uid)"
+target_owner_user="$(preferred_target_user)"
+target_owner_group="$(preferred_target_group "$target_owner_user")"
+if [[ -n "$target_owner_user" && -n "$target_owner_group" ]]; then
+  target_owner_spec="${target_owner_user}:${target_owner_group}"
+else
+  target_owner_spec=""
+fi
+
+if json_has_code "$before_json" '[.findings[].code | select(. == "wg_only_state_stale" or . == "wg_only_client_iface_present" or . == "wg_only_exit_iface_present" or startswith("wg_only_port_busy_"))] | length > 0'; then
+  if [[ "$current_uid" == "$root_required_uid" ]]; then
+    if "$easy_node_script" wg-only-stack-down --force-iface-cleanup 1 --base-port "$base_port" --client-iface "$client_iface" --exit-iface "$exit_iface" >/dev/null 2>&1; then
+      actions_taken+=("wg-only cleanup")
+      echo "[runtime-fix] action=wg-only cleanup"
+    else
+      actions_failed+=("wg-only cleanup")
+      echo "[runtime-fix] action_failed=wg-only cleanup"
+    fi
+  else
+    actions_skipped+=("wg-only cleanup (root required)")
+    echo "[runtime-fix] action_skipped=wg-only cleanup (root required)"
+  fi
+fi
+
+if json_has_code "$before_json" '[.findings[].code | select(. == "client_vpn_state_stale" or . == "client_vpn_iface_present")] | length > 0'; then
+  if [[ "$current_uid" == "$root_required_uid" ]]; then
+    if "$easy_node_script" client-vpn-down --force-iface-cleanup 1 --iface "$vpn_iface" --keep-key 1 >/dev/null 2>&1; then
+      actions_taken+=("client-vpn cleanup")
+      echo "[runtime-fix] action=client-vpn cleanup"
+    else
+      actions_failed+=("client-vpn cleanup")
+      echo "[runtime-fix] action_failed=client-vpn cleanup"
+    fi
+  else
+    actions_skipped+=("client-vpn cleanup (root required)")
+    echo "[runtime-fix] action_skipped=client-vpn cleanup (root required)"
+  fi
+fi
+
+if json_has_code "$before_json" '[.findings[].code | select(. == "stale_client_demo_containers")] | length > 0'; then
+  stale_demo_ids=""
+  if command -v docker >/dev/null 2>&1; then
+    stale_demo_ids="$(docker ps -aq --filter 'name=^deploy-client-demo-run-' 2>/dev/null | tr '\n' ' ' | xargs 2>/dev/null || true)"
+  fi
+  if [[ -n "$stale_demo_ids" ]]; then
+    if docker rm -f $stale_demo_ids >/dev/null 2>&1; then
+      actions_taken+=("demo container cleanup")
+      echo "[runtime-fix] action=demo container cleanup ids=$stale_demo_ids"
+    else
+      actions_failed+=("demo container cleanup")
+      echo "[runtime-fix] action_failed=demo container cleanup ids=$stale_demo_ids"
+    fi
+  fi
+  if command -v docker >/dev/null 2>&1 && docker network inspect deploy_default >/dev/null 2>&1; then
+    if docker network rm deploy_default >/dev/null 2>&1; then
+      actions_taken+=("demo network cleanup")
+      echo "[runtime-fix] action=demo network cleanup"
+    else
+      actions_failed+=("demo network cleanup")
+      echo "[runtime-fix] action_failed=demo network cleanup"
+    fi
+  fi
+fi
+
+if json_has_code "$before_json" '[.findings[].code | select(. == "client_env_file_not_writable")] | length > 0'; then
+  repair_ownership_path "client env ownership repair" "$client_env_file" 0 "" 0
+fi
+
+if json_has_code "$before_json" '[.findings[].code | select(. == "authority_env_file_not_writable")] | length > 0'; then
+  repair_ownership_path "authority env ownership repair" "$authority_env_file" 0 "" 0
+fi
+
+if json_has_code "$before_json" '[.findings[].code | select(. == "provider_env_file_not_writable")] | length > 0'; then
+  repair_ownership_path "provider env ownership repair" "$provider_env_file" 0 "" 0
+fi
+
+if json_has_code "$before_json" '[.findings[].code | select(. == "client_vpn_key_dir_not_writable")] | length > 0'; then
+  repair_ownership_path "client-vpn key dir ownership repair" "$client_vpn_key_dir" 1 "700" 1
+fi
+
+if json_has_code "$before_json" '[.findings[].code | select(. == "log_dir_not_writable")] | length > 0'; then
+  repair_ownership_path "log dir ownership repair" "$log_dir" 0 "700" 1
+fi
+
+if json_has_code "$before_json" '[.findings[].code | select(. == "wg_only_dir_not_writable")] | length > 0'; then
+  if [[ "$prune_wg_only_dir" == "1" ]]; then
+    if [[ "$current_uid" == "$root_required_uid" ]]; then
+      if [[ -n "$wg_only_dir" ]] && rm -rf "$wg_only_dir"; then
+        actions_taken+=("wg-only runtime dir prune")
+        echo "[runtime-fix] action=wg-only runtime dir prune path=$wg_only_dir"
+      else
+        actions_failed+=("wg-only runtime dir prune")
+        echo "[runtime-fix] action_failed=wg-only runtime dir prune path=$wg_only_dir"
+      fi
+    else
+      actions_skipped+=("wg-only runtime dir prune (root required)")
+      echo "[runtime-fix] action_skipped=wg-only runtime dir prune (root required)"
+    fi
+  else
+    repair_ownership_path "wg-only runtime dir ownership repair" "$wg_only_dir" 1 "" 1
+  fi
+fi
+
+after_doctor_rc=0
+after_json="$(
+  if run_doctor; then
+    :
+  else
+    after_doctor_rc=$?
+  fi
+)"
+after_status="$(printf '%s\n' "$after_json" | jq -r '.status // "UNKNOWN"')"
+after_findings_total="$(printf '%s\n' "$after_json" | jq -r '.summary.findings_total // 0')"
+
+echo "[runtime-fix] after_status=$after_status findings=$after_findings_total actions_taken=${#actions_taken[@]} actions_skipped=${#actions_skipped[@]} actions_failed=${#actions_failed[@]}"
+if ((${#actions_taken[@]} == 0 && ${#actions_skipped[@]} == 0 && ${#actions_failed[@]} == 0)); then
+  echo "[runtime-fix] no cleanup actions were needed"
+fi
+
+if [[ "$show_json" == "1" ]]; then
+  summary_json="$(
+    jq -n \
+      --arg generated_at_utc "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      --argjson before "$before_json" \
+      --argjson after "$after_json" \
+      --argjson base_port "$base_port" \
+      --arg client_iface "$client_iface" \
+      --arg exit_iface "$exit_iface" \
+      --arg vpn_iface "$vpn_iface" \
+      --argjson prune_wg_only_dir "$prune_wg_only_dir" \
+      --argjson root_uid "$current_uid" \
+      --arg target_owner_user "$target_owner_user" \
+      --arg target_owner_group "$target_owner_group" \
+      --arg target_owner_spec "$target_owner_spec" \
+      --argjson before_doctor_rc "$before_doctor_rc" \
+      --argjson after_doctor_rc "$after_doctor_rc" \
+      --argjson actions_taken "$(printf '%s\n' "${actions_taken[@]:-}" | jq -Rn '[inputs | select(length > 0)]')" \
+      --argjson actions_skipped "$(printf '%s\n' "${actions_skipped[@]:-}" | jq -Rn '[inputs | select(length > 0)]')" \
+      --argjson actions_failed "$(printf '%s\n' "${actions_failed[@]:-}" | jq -Rn '[inputs | select(length > 0)]')" \
+      '{
+        version: 1,
+        generated_at_utc: $generated_at_utc,
+        inputs: {
+          base_port: $base_port,
+          client_iface: $client_iface,
+          exit_iface: $exit_iface,
+          vpn_iface: $vpn_iface,
+          prune_wg_only_dir: ($prune_wg_only_dir == 1),
+          effective_uid: $root_uid,
+          target_owner_user: $target_owner_user,
+          target_owner_group: $target_owner_group,
+          target_owner_spec: $target_owner_spec
+        },
+        doctor: {
+          before_rc: $before_doctor_rc,
+          after_rc: $after_doctor_rc,
+          before: $before,
+          after: $after
+        },
+        actions: {
+          taken: $actions_taken,
+          skipped: $actions_skipped,
+          failed: $actions_failed
+        }
+      }'
+  )"
+  echo "[runtime-fix] summary_json_payload:"
+  printf '%s\n' "$summary_json"
+fi
+
+if ((${#actions_failed[@]} > 0)); then
+  exit 1
+fi
+if [[ "$after_status" == "FAIL" ]]; then
+  exit 1
+fi
+exit 0

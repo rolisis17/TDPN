@@ -66,24 +66,31 @@ Quick-mode artifact:
 - run report JSON defaults to `<reports_dir>/prod_pilot_cohort_quick_report.json` (override with `--run-report-json`).
 - validate quick run-report policy with:
   - `./scripts/easy_node.sh prod-pilot-cohort-quick-check --run-report-json <reports_dir>/prod_pilot_cohort_quick_report.json`
+  - output now also prints the upstream `pre_real_host_readiness_summary_json` path when present, plus direct incident handoff paths when failed-round incident artifacts are available
 - aggregate quick trend with:
   - `./scripts/easy_node.sh prod-pilot-cohort-quick-trend --reports-dir <reports_dir> --summary-json <reports_dir>/prod_pilot_quick_trend.json`
+  - trend summary JSON now also carries latest failed incident handoff paths when available
 - classify quick alert severity with:
   - `./scripts/easy_node.sh prod-pilot-cohort-quick-alert --trend-summary-json <reports_dir>/prod_pilot_quick_trend.json --summary-json <reports_dir>/prod_pilot_quick_alert.json`
 - generate quick dashboard artifacts with:
   - `./scripts/easy_node.sh prod-pilot-cohort-quick-dashboard --reports-dir <reports_dir> --dashboard-md <reports_dir>/prod_pilot_quick_dashboard.md`
+  - dashboard markdown now also renders incident handoff paths when present
 - run one-command quick signoff gate with:
   - `./scripts/easy_node.sh prod-pilot-cohort-quick-signoff --run-report-json <reports_dir>/prod_pilot_cohort_quick_report.json --reports-dir <reports_dir> --max-alert-severity WARN`
+  - generated signoff JSON now also carries incident handoff artifact paths and the upstream `pre_real_host_readiness_summary_json` path when present
 - run one-command quick pilot runbook (quick + signoff + optional dashboard) with:
   - `./scripts/easy_node.sh prod-pilot-cohort-quick-runbook --bootstrap-directory https://<A_HOST>:8081 --subject pilot-client --max-alert-severity WARN --max-round-failures 0 --bundle-outputs 1 --bundle-fail-close 1`
+  - generated runbook summary now also preserves incident handoff artifact paths from quick signoff when available
 - run low-prompt sustained campaign wrapper (campaign defaults + handoff summary artifacts) with:
   - `./scripts/easy_node.sh prod-pilot-cohort-campaign --bootstrap-directory https://<A_HOST>:8081 --subject pilot-client`
 - regenerate one concise campaign handoff report later from saved artifacts with:
   - `./scripts/easy_node.sh prod-pilot-cohort-campaign-summary --reports-dir <reports_dir> --fail-on-no-go 1`
+  - this handoff summary now also surfaces failed-round `incident_summary.json` / `incident_report.md` paths when incident bundles were captured, plus the upstream `pre_real_host_readiness_summary.json` pointer from quick-runbook artifacts when available
 
 Campaign wrapper outputs:
 - `<reports_dir>/prod_pilot_campaign_summary.json`
 - `<reports_dir>/prod_pilot_campaign_summary.md`
+- `<reports_dir>/pre_real_host_readiness_summary.json`
 
 ## Key policy flags
 

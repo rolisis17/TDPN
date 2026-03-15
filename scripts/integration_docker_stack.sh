@@ -4,6 +4,11 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEPLOY_DIR="$ROOT_DIR/deploy"
 
+export DIRECTORY_ADMIN_TOKEN="${DIRECTORY_ADMIN_TOKEN:-docker-stack-directory-admin-token-001}"
+export ISSUER_ADMIN_TOKEN="${ISSUER_ADMIN_TOKEN:-docker-stack-issuer-admin-token-001}"
+export ENTRY_PUZZLE_SECRET="${ENTRY_PUZZLE_SECRET:-docker-stack-entry-puzzle-secret-001}"
+export ENTRY_EXIT_USER="${ENTRY_EXIT_USER:-0:0}"
+
 if ! command -v docker >/dev/null 2>&1; then
   echo "docker is not installed; install Docker Engine + Docker Compose plugin first"
   exit 1

@@ -14,24 +14,13 @@ done
 TMP_DIR="$(mktemp -d)"
 TMP_BIN="$TMP_DIR/bin"
 LOG_DIR="$TMP_DIR/logs"
-CLIENT_ENV_FILE="$ROOT_DIR/deploy/.env.easy.client"
-CLIENT_ENV_BACKUP=""
+CLIENT_ENV_FILE="$TMP_DIR/.env.easy.client"
 mkdir -p "$TMP_BIN" "$LOG_DIR"
 
 cleanup() {
-  if [[ -n "$CLIENT_ENV_BACKUP" && -f "$CLIENT_ENV_BACKUP" ]]; then
-    cp "$CLIENT_ENV_BACKUP" "$CLIENT_ENV_FILE"
-  else
-    rm -f "$CLIENT_ENV_FILE"
-  fi
   rm -rf "$TMP_DIR"
 }
 trap cleanup EXIT
-
-if [[ -f "$CLIENT_ENV_FILE" ]]; then
-  CLIENT_ENV_BACKUP="$(mktemp)"
-  cp "$CLIENT_ENV_FILE" "$CLIENT_ENV_BACKUP"
-fi
 
 cat >"$TMP_BIN/curl" <<'EOF_CURL'
 #!/usr/bin/env bash
@@ -96,6 +85,7 @@ run_client_test_capture() {
   rm -f "$capture_file"
   PATH="$TMP_BIN:$PATH" \
   EASY_NODE_LOG_DIR="$LOG_DIR" \
+  EASY_NODE_CLIENT_ENV_FILE="$CLIENT_ENV_FILE" \
   FAKE_DOCKER_CAPTURE_FILE="$capture_file" \
   ./scripts/easy_node.sh client-test \
     --directory-urls "http://dir-a:8081,http://dir-b:8081" \

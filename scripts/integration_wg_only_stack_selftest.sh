@@ -23,19 +23,32 @@ done
 
 log_file="$(mktemp)"
 state_file="$ROOT_DIR/deploy/data/wg_only_stack.state"
+client_iface="wgcstack0"
+exit_iface="wgestack0"
+base_port="19280"
 cleanup() {
-  ./scripts/easy_node.sh wg-only-stack-down --force-iface-cleanup 1 >/dev/null 2>&1 || true
+  ./scripts/easy_node.sh wg-only-stack-down \
+    --force-iface-cleanup 1 \
+    --base-port "$base_port" \
+    --client-iface "$client_iface" \
+    --exit-iface "$exit_iface" >/dev/null 2>&1 || true
   rm -f "$log_file"
 }
 trap cleanup EXIT INT TERM
 
-./scripts/easy_node.sh wg-only-stack-down --force-iface-cleanup 1 >/dev/null 2>&1 || true
+./scripts/easy_node.sh wg-only-stack-down \
+  --force-iface-cleanup 1 \
+  --base-port "$base_port" \
+  --client-iface "$client_iface" \
+  --exit-iface "$exit_iface" >/dev/null 2>&1 || true
 
 if ! ./scripts/easy_node.sh wg-only-stack-selftest \
   --strict-beta 1 \
-  --base-port 19280 \
+  --base-port "$base_port" \
   --timeout-sec 80 \
   --min-selection-lines 8 \
+  --client-iface "$client_iface" \
+  --exit-iface "$exit_iface" \
   --force-iface-reset 1 \
   --cleanup-ifaces 1 >"$log_file" 2>&1; then
   echo "wg-only stack selftest integration failed"

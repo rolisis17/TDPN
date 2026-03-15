@@ -1,6 +1,7 @@
 #include <cstdlib>
 #include <cctype>
 #include <algorithm>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -97,6 +98,90 @@ int runCommand(const std::string &cmd) {
   return rc;
 }
 
+std::string captureCommandOutput(const std::string &cmd) {
+  FILE *pipe = popen(cmd.c_str(), "r");
+  if (!pipe) {
+    return "";
+  }
+  std::string output;
+  char buffer[256];
+  while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+    output += buffer;
+  }
+  pclose(pipe);
+  return trim(output);
+}
+
+bool commandExists(const std::string &name) {
+  std::string cmd = "command -v " + shellEscape(name) + " >/dev/null 2>&1";
+  return std::system(cmd.c_str()) == 0;
+}
+
+std::string readJsonStringField(const std::string &jsonPath, const std::string &expr) {
+  if (jsonPath.empty() || !std::filesystem::exists(jsonPath) || !commandExists("jq")) {
+    return "";
+  }
+  std::string cmd = "jq -r " + shellEscape(expr) + " " + shellEscape(jsonPath) + " 2>/dev/null";
+  return captureCommandOutput(cmd);
+}
+
+void printManualValidationReportSummary(const std::string &summaryJsonPath) {
+  if (summaryJsonPath.empty() || !std::filesystem::exists(summaryJsonPath)) {
+    return;
+  }
+
+  std::string readinessStatus = readJsonStringField(summaryJsonPath, ".report.readiness_status // \"\"");
+  std::string nextActionCommand = readJsonStringField(summaryJsonPath, ".summary.next_action_command // \"\"");
+  std::string machineCSmokeReady = readJsonStringField(summaryJsonPath, "(.summary.pre_machine_c_gate.ready // false) | tostring");
+  std::string machineCSmokeBlockers = readJsonStringField(summaryJsonPath, "(.summary.pre_machine_c_gate.blockers // []) | if length == 0 then \"none\" else join(\",\") end");
+  std::string machineCSmokeNextCommand = readJsonStringField(summaryJsonPath, ".summary.pre_machine_c_gate.next_command // \"\"");
+  std::string latestIncidentSummary = readJsonStringField(summaryJsonPath, ".summary.latest_failed_incident.summary_json.path // \"\"");
+  std::string latestIncidentReport = readJsonStringField(summaryJsonPath, ".summary.latest_failed_incident.report_md.path // \"\"");
+  std::string latestReadinessSummaryAttachment = readJsonStringField(summaryJsonPath, ".summary.latest_failed_incident.readiness_report_summary_attachment.bundle_path // \"\"");
+  std::string latestReadinessReportAttachment = readJsonStringField(summaryJsonPath, ".summary.latest_failed_incident.readiness_report_md_attachment.bundle_path // \"\"");
+
+  if (readinessStatus.empty() && nextActionCommand.empty() &&
+      machineCSmokeReady.empty() && machineCSmokeBlockers.empty() &&
+      machineCSmokeNextCommand.empty() &&
+      latestIncidentSummary.empty() && latestIncidentReport.empty() &&
+      latestReadinessSummaryAttachment.empty() &&
+      latestReadinessReportAttachment.empty()) {
+    return;
+  }
+
+  std::cout << "\nlauncher readiness summary\n";
+  if (!readinessStatus.empty()) {
+    std::cout << "  readiness_status=" << readinessStatus << "\n";
+  }
+  if (!nextActionCommand.empty()) {
+    std::cout << "  next_action_command=" << nextActionCommand << "\n";
+  }
+  if (!machineCSmokeReady.empty()) {
+    std::cout << "  machine_c_smoke_ready=" << machineCSmokeReady << "\n";
+  }
+  if (!machineCSmokeBlockers.empty()) {
+    std::cout << "  machine_c_smoke_blockers=" << machineCSmokeBlockers << "\n";
+  }
+  if (!machineCSmokeNextCommand.empty()) {
+    std::cout << "  machine_c_smoke_next_command=" << machineCSmokeNextCommand << "\n";
+  }
+  if (!latestIncidentSummary.empty()) {
+    std::cout << "  latest_failed_incident_summary_json=" << latestIncidentSummary << "\n";
+  }
+  if (!latestIncidentReport.empty()) {
+    std::cout << "  latest_failed_incident_report_md=" << latestIncidentReport << "\n";
+  }
+  if (!latestReadinessSummaryAttachment.empty()) {
+    std::cout << "  latest_failed_incident_readiness_report_summary_attachment="
+              << latestReadinessSummaryAttachment << "\n";
+  }
+  if (!latestReadinessReportAttachment.empty()) {
+    std::cout << "  latest_failed_incident_readiness_report_md_attachment="
+              << latestReadinessReportAttachment << "\n";
+  }
+  std::cout << std::flush;
+}
+
 std::string executableDir() {
   char path[4096];
   ssize_t n = readlink("/proc/self/exe", path, sizeof(path) - 1);
@@ -128,6 +213,20 @@ std::string detectRepoRoot() {
   }
 
   return "";
+}
+
+std::string resolveRepoPath(const std::string &root, const std::string &path) {
+  if (path.empty()) {
+    return "";
+  }
+  std::filesystem::path p(path);
+  if (p.is_absolute()) {
+    return p.string();
+  }
+  if (root.empty()) {
+    return p.string();
+  }
+  return (std::filesystem::path(root) / p).string();
 }
 
 void showThreeMachineGuide() {
@@ -725,6 +824,9 @@ void quickClientConnect(const std::string &script, ABHosts &hosts) {
                    << " --discovery-wait-sec " << shellEscape(discoveryWait)
                    << " --prod-profile " << (prodProfile ? "1" : "0")
                    << " --interface " << shellEscape(iface);
+      if (pathProfile.distinctOperators) {
+        preflightCmd << " --operator-floor-check 1";
+      }
       if (!isRootUser()) {
         bool useSudoPreflight = parseYesNo(readLine("Run preflight with sudo? (Y/n)", "y"), true);
         if (useSudoPreflight) {
@@ -968,6 +1070,15 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
     std::cout << "57) PROD pilot cohort quick-signoff (check + trend + alert gate)\n";
     std::cout << "58) PROD pilot cohort quick-runbook (quick + signoff + dashboard)\n";
     std::cout << "59) PROD pilot cohort campaign (strict low-prompt preset)\n";
+    std::cout << "60) Runtime doctor (stale ports/interfaces/state preflight)\n";
+    std::cout << "61) Show manual validation backlog reminder\n";
+    std::cout << "62) Runtime fix (safe cleanup from doctor findings)\n";
+    std::cout << "63) Manual validation status (live readiness + recorded receipts)\n";
+    std::cout << "64) Client VPN smoke (preflight + up + status + optional egress check + receipt)\n";
+    std::cout << "65) True 3-machine PROD signoff (bundle + receipt)\n";
+    std::cout << "66) Manual validation report (markdown + JSON readiness handoff)\n";
+    std::cout << "67) WG-only selftest + readiness receipt\n";
+    std::cout << "68) Pre-real-host readiness sweep (runtime fix + WG-only + report)\n";
     std::cout << "0) Back\n";
     std::cout << "Selection: ";
 
@@ -2554,6 +2665,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       std::string bundleDir = trim(readLine("Bundle directory", ".easy-node-logs/prod_pilot_bundle"));
       std::string runReportJson = bundleDir.empty() ? "" : (bundleDir + "/prod_bundle_run_report.json");
       std::string report = trim(readLine("Gate report file (optional)", ""));
+      bool runPreRealHostReadiness = parseYesNo(readLine("Run pre-real-host readiness first? (Y/n)", "y"), true);
 
       std::ostringstream cmd;
       cmd << shellEscape(script) << " prod-pilot-runbook";
@@ -2579,6 +2691,9 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       }
       if (!report.empty()) {
         cmd << " --report-file " << shellEscape(report);
+      }
+      if (runPreRealHostReadiness) {
+        cmd << " --pre-real-host-readiness 1";
       }
       std::cout << "note: prod-pilot-runbook uses strict fail-closed defaults and auto-generates SLO dashboard artifacts; pass extra flags in shell for advanced overrides.\n";
       if (!isRootUser()) {
@@ -3057,6 +3172,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       std::string reportsDir = trim(readLine("Reports directory (optional)", ""));
       std::string summaryJson = trim(readLine("Cohort summary JSON path (optional)", ""));
       bool printSummaryJson = parseYesNo(readLine("Print cohort summary JSON payload? (y/N)", "n"), false);
+      bool runPreRealHostReadiness = parseYesNo(readLine("Run pre-real-host readiness once before the cohort? (Y/n)", "y"), true);
       std::string extraArgs = trim(readLine("Extra prod-pilot-runbook args after '--' (optional)", ""));
 
       std::ostringstream cmd;
@@ -3076,6 +3192,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --max-alert-severity " << shellEscape(maxAlertSeverityUpper)
           << " --bundle-outputs " << (bundleOutputs ? "1" : "0")
           << " --bundle-fail-close " << (bundleFailClose ? "1" : "0")
+          << " --pre-real-host-readiness " << (runPreRealHostReadiness ? "1" : "0")
           << " --print-summary-json " << (printSummaryJson ? "1" : "0");
       if (!reportsDir.empty()) {
         cmd << " --reports-dir " << shellEscape(reportsDir);
@@ -3203,6 +3320,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       std::string reportsDir = trim(readLine("Reports directory", ".easy-node-logs/prod_pilot_cohort"));
       std::string summaryJson = trim(readLine("Cohort summary JSON path", ".easy-node-logs/prod_pilot_cohort/prod_pilot_cohort_summary.json"));
       bool printRunbookSummary = parseYesNo(readLine("Print runbook summary JSON payload? (y/N)", "n"), false);
+      bool runPreRealHostReadiness = parseYesNo(readLine("Run pre-real-host readiness once before the cohort? (Y/n)", "y"), true);
       bool signoffCheckTar = parseYesNo(readLine("Signoff: check tar checksum sidecar? (Y/n)", "y"), true);
       bool signoffCheckManifest = parseYesNo(readLine("Signoff: check manifest + round structure? (Y/n)", "y"), true);
       bool signoffShowIntegrity = parseYesNo(readLine("Signoff: show integrity details? (y/N)", "n"), false);
@@ -3226,6 +3344,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
                  << " --max-alert-severity " << shellEscape(maxAlertSeverityUpper)
                  << " --bundle-outputs " << (bundleOutputs ? "1" : "0")
                  << " --bundle-fail-close " << (bundleFailClose ? "1" : "0")
+                 << " --pre-real-host-readiness " << (runPreRealHostReadiness ? "1" : "0")
                  << " --reports-dir " << shellEscape(reportsDir)
                  << " --summary-json " << shellEscape(summaryJson)
                  << " --print-summary-json " << (printRunbookSummary ? "1" : "0");
@@ -3292,6 +3411,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       bool requireAllRoundsOk = parseYesNo(readLine("Require all rounds to pass? (Y/n)", "y"), true);
       bool bundleOutputs = parseYesNo(readLine("Require bundle outputs in runbook/signoff? (Y/n)", "y"), true);
       bool bundleFailClose = parseYesNo(readLine("Fail if bundle generation stage fails? (Y/n)", "y"), true);
+      bool runPreRealHostReadiness = parseYesNo(readLine("Run pre-real-host readiness once before the cohort? (Y/n)", "y"), true);
       bool showJson = parseYesNo(readLine("Show runbook/signoff JSON payloads? (y/N)", "n"), false);
       std::string reportsDir = trim(readLine("Reports directory (optional)", ""));
       std::string summaryJson = trim(readLine("Summary JSON path (optional)", ""));
@@ -3312,6 +3432,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --max-alert-severity " << shellEscape(maxAlertSeverityUpper)
           << " --bundle-outputs " << (bundleOutputs ? "1" : "0")
           << " --bundle-fail-close " << (bundleFailClose ? "1" : "0")
+          << " --pre-real-host-readiness " << (runPreRealHostReadiness ? "1" : "0")
           << " --signoff-require-trend-artifact-policy-match 1"
           << " --signoff-require-trend-wg-validate-udp-source 1"
           << " --signoff-require-trend-wg-validate-strict-distinct 1"
@@ -3709,6 +3830,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       bool signoffRequireCohortSignoffPolicy = parseYesNo(readLine("Signoff re-validates strict cohort policy? (Y/n)", "y"), true);
       bool signoffRequireIncidentSnapshotOnFail = true;
       bool signoffRequireIncidentSnapshotArtifacts = true;
+      bool runPreRealHostReadiness = parseYesNo(readLine("Run pre-real-host readiness once before the cohort? (Y/n)", "y"), true);
       bool dashboardEnable = parseYesNo(readLine("Generate quick dashboard artifacts? (Y/n)", "y"), true);
       bool dashboardFailClose = parseYesNo(readLine("Fail run if dashboard stage fails? (y/N)", "n"), false);
       bool dashboardPrint = parseYesNo(readLine("Print dashboard markdown? (Y/n)", "y"), true);
@@ -3729,6 +3851,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --max-alert-severity " << shellEscape(maxAlertSeverityUpper)
           << " --bundle-outputs " << (bundleOutputs ? "1" : "0")
           << " --bundle-fail-close " << (bundleFailClose ? "1" : "0")
+          << " --pre-real-host-readiness " << (runPreRealHostReadiness ? "1" : "0")
           << " --reports-dir " << shellEscape(reportsDir)
           << " --signoff-max-reports " << shellEscape(signoffMaxReports)
           << " --signoff-since-hours " << shellEscape(signoffSinceHours)
@@ -3779,6 +3902,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       std::string bootstrapDir = normalizeEndpointURL(readLine("Bootstrap directory URL", bootstrapDefault), 8081);
       std::string subject = trim(readLine("Client subject/invite key", "pilot-client"));
       std::string reportsDir = trim(readLine("Reports directory (optional; blank=timestamped default)", ""));
+      bool runPreRealHostReadiness = parseYesNo(readLine("Run pre-real-host readiness once before the campaign? (Y/n)", "y"), true);
       bool showJson = parseYesNo(readLine("Show campaign summary JSON payload? (y/N)", "n"), false);
       std::string extraArgs = trim(readLine("Extra campaign args (optional)", ""));
 
@@ -3786,6 +3910,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       cmd << shellEscape(script) << " prod-pilot-cohort-campaign"
           << " --bootstrap-directory " << shellEscape(bootstrapDir)
           << " --subject " << shellEscape(subject)
+          << " --pre-real-host-readiness " << (runPreRealHostReadiness ? "1" : "0")
           << " --show-json " << (showJson ? "1" : "0");
       if (!reportsDir.empty()) {
         cmd << " --reports-dir " << shellEscape(reportsDir);
@@ -3794,6 +3919,203 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
         cmd << " " << extraArgs;
       }
       runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "60") {
+      std::string basePort = trim(readLine("WG-only base port", "19280"));
+      std::string clientIface = trim(readLine("WG-only client iface", "wgcstack0"));
+      std::string exitIface = trim(readLine("WG-only exit iface", "wgestack0"));
+      std::string vpnIface = trim(readLine("Client VPN iface", "wgvpn0"));
+      bool showJson = parseYesNo(readLine("Show JSON summary payload? (Y/n)", "y"), true);
+
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " runtime-doctor"
+          << " --base-port " << shellEscape(basePort)
+          << " --client-iface " << shellEscape(clientIface)
+          << " --exit-iface " << shellEscape(exitIface)
+          << " --vpn-iface " << shellEscape(vpnIface)
+          << " --show-json " << (showJson ? "1" : "0");
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "61") {
+      runCommand(shellEscape(script) + " manual-validation-backlog");
+      continue;
+    }
+    if (choice == "62") {
+      std::string basePort = trim(readLine("WG-only base port", "19280"));
+      std::string clientIface = trim(readLine("WG-only client iface", "wgcstack0"));
+      std::string exitIface = trim(readLine("WG-only exit iface", "wgestack0"));
+      std::string vpnIface = trim(readLine("Client VPN iface", "wgvpn0"));
+      bool pruneWgOnlyDir = parseYesNo(readLine("Prune wg-only runtime dir after cleanup? (y/N)", "n"), false);
+      bool showJson = parseYesNo(readLine("Show JSON summary payload? (Y/n)", "y"), true);
+      bool runWithSudo = parseYesNo(readLine("Run with sudo? (Y/n)", "y"), true);
+
+      std::ostringstream cmd;
+      if (runWithSudo) {
+        cmd << "sudo ";
+      }
+      cmd << shellEscape(script) << " runtime-fix"
+          << " --base-port " << shellEscape(basePort)
+          << " --client-iface " << shellEscape(clientIface)
+          << " --exit-iface " << shellEscape(exitIface)
+          << " --vpn-iface " << shellEscape(vpnIface)
+          << " --prune-wg-only-dir " << (pruneWgOnlyDir ? "1" : "0")
+          << " --show-json " << (showJson ? "1" : "0");
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "63") {
+      std::string basePort = trim(readLine("WG-only base port", "19280"));
+      std::string clientIface = trim(readLine("WG-only client iface", "wgcstack0"));
+      std::string exitIface = trim(readLine("WG-only exit iface", "wgestack0"));
+      std::string vpnIface = trim(readLine("Client VPN iface", "wgvpn0"));
+      bool showJson = parseYesNo(readLine("Show JSON summary payload? (Y/n)", "y"), true);
+
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " manual-validation-status"
+          << " --base-port " << shellEscape(basePort)
+          << " --client-iface " << shellEscape(clientIface)
+          << " --exit-iface " << shellEscape(exitIface)
+          << " --vpn-iface " << shellEscape(vpnIface)
+          << " --show-json " << (showJson ? "1" : "0");
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "64") {
+      std::string bootstrapDir = trim(readLine("Bootstrap directory", "http://198.51.100.10:8081"));
+      std::string subject = trim(readLine("Invite key / subject", "pilot-client"));
+      std::string interfaceName = trim(readLine("VPN interface", "wgvpn0"));
+      std::string publicIpUrl = trim(readLine("Public IP check URL", "https://api.ipify.org"));
+      std::string countryUrl = trim(readLine("Country check URL", "https://ipinfo.io/country"));
+      bool runPreRealHostReadiness = parseYesNo(readLine("Run pre-real-host readiness first? (Y/n)", "y"), true);
+      bool runRuntimeDoctor = parseYesNo(readLine("Run runtime doctor first? (Y/n)", "y"), true);
+      bool autoRuntimeFix = parseYesNo(readLine("Auto-apply runtime fix if needed? (y/N)", "n"), false);
+      bool printSummaryJson = parseYesNo(readLine("Print summary JSON? (y/N)", "n"), false);
+      bool runWithSudo = parseYesNo(readLine("Run with sudo? (Y/n)", "y"), true);
+
+      std::ostringstream cmd;
+      if (runWithSudo) {
+        cmd << "sudo ";
+      }
+      cmd << shellEscape(script) << " client-vpn-smoke"
+          << " --bootstrap-directory " << shellEscape(bootstrapDir)
+          << " --subject " << shellEscape(subject)
+          << " --beta-profile 1"
+          << " --path-profile balanced"
+          << " --distinct-operators 1"
+          << " --interface " << shellEscape(interfaceName)
+          << " --pre-real-host-readiness " << (runPreRealHostReadiness ? "1" : "0")
+          << " --runtime-doctor " << (runRuntimeDoctor ? "1" : "0")
+          << " --runtime-fix " << (autoRuntimeFix ? "1" : "0")
+          << " --public-ip-url " << shellEscape(publicIpUrl)
+          << " --country-url " << shellEscape(countryUrl)
+          << " --print-summary-json " << (printSummaryJson ? "1" : "0");
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "65") {
+      std::string directoryA = trim(readLine("Directory A URL", "https://" + hosts.aHost + ":8081"));
+      std::string directoryB = trim(readLine("Directory B URL", "https://" + hosts.bHost + ":8081"));
+      std::string issuerUrl = trim(readLine("Issuer URL", "https://" + hosts.aHost + ":8082"));
+      std::string entryUrl = trim(readLine("Entry URL", "https://" + hosts.aHost + ":8083"));
+      std::string exitUrl = trim(readLine("Exit URL", "https://" + hosts.bHost + ":8084"));
+      std::string bundleDir = trim(readLine("Bundle dir", ".easy-node-logs/prod_gate_bundle"));
+      bool runPreRealHostReadiness = parseYesNo(readLine("Run pre-real-host readiness first? (Y/n)", "y"), true);
+      bool runRuntimeDoctor = parseYesNo(readLine("Run runtime doctor first? (Y/n)", "y"), true);
+      bool autoRuntimeFix = parseYesNo(readLine("Auto-apply runtime fix if needed? (y/N)", "n"), false);
+      bool printSummaryJson = parseYesNo(readLine("Print summary JSON? (y/N)", "n"), false);
+      bool runWithSudo = parseYesNo(readLine("Run with sudo? (Y/n)", "y"), true);
+
+      std::ostringstream cmd;
+      if (runWithSudo) {
+        cmd << "sudo ";
+      }
+      cmd << shellEscape(script) << " three-machine-prod-signoff"
+          << " --directory-a " << shellEscape(directoryA)
+          << " --directory-b " << shellEscape(directoryB)
+          << " --issuer-url " << shellEscape(issuerUrl)
+          << " --entry-url " << shellEscape(entryUrl)
+          << " --exit-url " << shellEscape(exitUrl)
+          << " --bundle-dir " << shellEscape(bundleDir)
+          << " --pre-real-host-readiness " << (runPreRealHostReadiness ? "1" : "0")
+          << " --runtime-doctor " << (runRuntimeDoctor ? "1" : "0")
+          << " --runtime-fix " << (autoRuntimeFix ? "1" : "0")
+          << " --print-summary-json " << (printSummaryJson ? "1" : "0");
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "66") {
+      std::string basePort = trim(readLine("WG-only base port", "19280"));
+      std::string clientIface = trim(readLine("WG-only client iface", "wgcstack0"));
+      std::string exitIface = trim(readLine("WG-only exit iface", "wgestack0"));
+      std::string vpnIface = trim(readLine("Client VPN iface", "wgvpn0"));
+      std::string summaryJson = trim(readLine("Summary JSON path", ".easy-node-logs/manual_validation_readiness_summary.json"));
+      std::string reportMd = trim(readLine("Report markdown path", ".easy-node-logs/manual_validation_readiness_report.md"));
+      bool printReport = parseYesNo(readLine("Print markdown report? (Y/n)", "y"), true);
+      bool printSummaryJson = parseYesNo(readLine("Print summary JSON? (y/N)", "n"), false);
+      bool failOnNotReady = parseYesNo(readLine("Fail if readiness is not complete? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " manual-validation-report"
+          << " --base-port " << shellEscape(basePort)
+          << " --client-iface " << shellEscape(clientIface)
+          << " --exit-iface " << shellEscape(exitIface)
+          << " --vpn-iface " << shellEscape(vpnIface)
+          << " --summary-json " << shellEscape(summaryJson)
+          << " --report-md " << shellEscape(reportMd)
+          << " --print-report " << (printReport ? "1" : "0")
+          << " --print-summary-json " << (printSummaryJson ? "1" : "0")
+          << " --fail-on-not-ready " << (failOnNotReady ? "1" : "0");
+      runCommand(cmd.str());
+      printManualValidationReportSummary(resolveRepoPath(root, summaryJson));
+      continue;
+    }
+    if (choice == "67") {
+      std::string basePort = trim(readLine("WG-only base port", "19280"));
+      std::string clientIface = trim(readLine("WG-only client iface", "wgcstack0"));
+      std::string exitIface = trim(readLine("WG-only exit iface", "wgestack0"));
+      bool strictBeta = parseYesNo(readLine("Use strict beta profile? (Y/n)", "y"), true);
+      bool printSummaryJson = parseYesNo(readLine("Print summary JSON? (y/N)", "n"), false);
+      bool runWithSudo = parseYesNo(readLine("Run with sudo? (Y/n)", "y"), true);
+
+      std::ostringstream cmd;
+      if (runWithSudo) {
+        cmd << "sudo ";
+      }
+      cmd << shellEscape(script) << " wg-only-stack-selftest-record"
+          << " --base-port " << shellEscape(basePort)
+          << " --client-iface " << shellEscape(clientIface)
+          << " --exit-iface " << shellEscape(exitIface)
+          << " --strict-beta " << (strictBeta ? "1" : "0")
+          << " --print-summary-json " << (printSummaryJson ? "1" : "0");
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "68") {
+      std::string basePort = trim(readLine("WG-only base port", "19280"));
+      std::string clientIface = trim(readLine("WG-only client iface", "wgcstack0"));
+      std::string exitIface = trim(readLine("WG-only exit iface", "wgestack0"));
+      std::string vpnIface = trim(readLine("Client VPN iface", "wgvpn0"));
+      bool pruneWgOnlyDir = parseYesNo(readLine("Prune wg-only runtime dir during cleanup? (Y/n)", "y"), true);
+      bool strictBeta = parseYesNo(readLine("Use strict beta profile? (Y/n)", "y"), true);
+      bool printSummaryJson = parseYesNo(readLine("Print summary JSON? (y/N)", "n"), false);
+      bool runWithSudo = parseYesNo(readLine("Run with sudo? (Y/n)", "y"), true);
+
+      std::ostringstream cmd;
+      if (runWithSudo) {
+        cmd << "sudo ";
+      }
+      cmd << shellEscape(script) << " pre-real-host-readiness"
+          << " --base-port " << shellEscape(basePort)
+          << " --client-iface " << shellEscape(clientIface)
+          << " --exit-iface " << shellEscape(exitIface)
+          << " --vpn-iface " << shellEscape(vpnIface)
+          << " --runtime-fix-prune-wg-only-dir " << (pruneWgOnlyDir ? "1" : "0")
+          << " --strict-beta " << (strictBeta ? "1" : "0")
+          << " --print-summary-json " << (printSummaryJson ? "1" : "0");
+      runCommand(cmd.str());
+      printManualValidationReportSummary(resolveRepoPath(root, ".easy-node-logs/manual_validation_readiness_summary.json"));
       continue;
     }
 

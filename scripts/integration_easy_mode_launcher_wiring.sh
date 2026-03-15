@@ -87,6 +87,24 @@ check_cpp '58\) PROD pilot cohort quick-runbook \(quick \+ signoff \+ dashboard\
   "launcher wiring failed: option 58 menu label missing"
 check_cpp '59\) PROD pilot cohort campaign \(strict low-prompt preset\)' \
   "launcher wiring failed: option 59 menu label missing"
+check_cpp '60\) Runtime doctor \(stale ports/interfaces/state preflight\)' \
+  "launcher wiring failed: option 60 menu label missing"
+check_cpp '61\) Show manual validation backlog reminder' \
+  "launcher wiring failed: option 61 menu label missing"
+check_cpp '62\) Runtime fix \(safe cleanup from doctor findings\)' \
+  "launcher wiring failed: option 62 menu label missing"
+check_cpp '63\) Manual validation status \(live readiness \+ recorded receipts\)' \
+  "launcher wiring failed: option 63 menu label missing"
+check_cpp '64\) Client VPN smoke \(preflight \+ up \+ status \+ optional egress check \+ receipt\)' \
+  "launcher wiring failed: option 64 menu label missing"
+check_cpp '65\) True 3-machine PROD signoff \(bundle \+ receipt\)' \
+  "launcher wiring failed: option 65 menu label missing"
+check_cpp '66\) Manual validation report \(markdown \+ JSON readiness handoff\)' \
+  "launcher wiring failed: option 66 menu label missing"
+check_cpp '67\) WG-only selftest \+ readiness receipt' \
+  "launcher wiring failed: option 67 menu label missing"
+check_cpp '68\) Pre-real-host readiness sweep \(runtime fix \+ WG-only \+ report\)' \
+  "launcher wiring failed: option 68 menu label missing"
 
 echo "[easy-mode-wiring] options 36/37/38/39/40/41/42/43/44/45/46/47/48/49/50/51/52/53/54/55/56 command wiring"
 check_cpp 'if \(choice == "36"\)' "launcher wiring failed: option 36 handler missing"
@@ -113,6 +131,7 @@ check_cpp 'if \(choice == "56"\)' "launcher wiring failed: option 56 handler mis
 check_cpp 'three-machine-prod-bundle' "launcher wiring failed: options 36/37 command missing"
 check_cpp 'prod-gate-signoff' "launcher wiring failed: option 38 command missing"
 check_cpp 'prod-pilot-runbook' "launcher wiring failed: option 39 command missing"
+check_cpp 'Run pre-real-host readiness first\?' "launcher wiring failed: option 39 pre-real-host readiness prompt missing"
 check_cpp 'incident-snapshot' "launcher wiring failed: option 40 command missing"
 check_cpp 'prod-gate-slo-summary' "launcher wiring failed: option 41 command missing"
 check_cpp 'prod-gate-slo-trend' "launcher wiring failed: option 42 command missing"
@@ -160,10 +179,13 @@ check_cpp '--verify-absent ' "launcher wiring failed: option 47 verify-absent fo
 check_cpp '--verify-relay-min-count ' "launcher wiring failed: option 47 verify-relay-min-count forwarding missing"
 check_cpp '--bundle-outputs ' "launcher wiring failed: option 48/51 bundle-outputs forwarding missing"
 check_cpp '--bundle-fail-close ' "launcher wiring failed: option 48/51 bundle-fail-close forwarding missing"
+check_cpp 'Run pre-real-host readiness once before the cohort\?' "launcher wiring failed: option 48/51 pre-real-host readiness prompt missing"
+check_cpp '--pre-real-host-readiness ' "launcher wiring failed: option 48/51 pre-real-host readiness forwarding missing"
 check_cpp '--check-tar-sha256 ' "launcher wiring failed: option 49/50/51 signoff integrity forwarding missing"
 check_cpp '--check-manifest ' "launcher wiring failed: option 49/50/51 signoff manifest forwarding missing"
 check_cpp '--max-alert-severity ' "launcher wiring failed: option 48/50/51/52 max-alert-severity forwarding missing"
 check_cpp '--run-report-json ' "launcher wiring failed: option 52/53/57/58 run-report-json forwarding missing"
+check_cpp 'Run pre-real-host readiness once before the cohort\?' "launcher wiring failed: option 52/58 pre-real-host readiness prompt missing"
 check_cpp '--require-signoff-attempted ' "launcher wiring failed: option 53/54/55/56 signoff-attempted forwarding missing"
 check_cpp '--require-cohort-signoff-policy ' "launcher wiring failed: quick SLO flows require-cohort-signoff-policy forwarding missing"
 check_cpp '--require-summary-status-ok ' "launcher wiring failed: option 53/54/55/56 summary-status forwarding missing"
@@ -194,12 +216,71 @@ check_cpp '--signoff-require-cohort-signoff-policy ' "launcher wiring failed: op
 check_cpp '--max-round-failures ' "launcher wiring failed: option 58 max-round-failures forwarding missing"
 check_cpp '--bundle-outputs ' "launcher wiring failed: option 58 bundle-outputs forwarding missing"
 check_cpp '--bundle-fail-close ' "launcher wiring failed: option 58 bundle-fail-close forwarding missing"
+check_cpp '--pre-real-host-readiness ' "launcher wiring failed: option 52/58/59 pre-real-host readiness forwarding missing"
 
 echo "[easy-mode-wiring] option 59 command wiring"
 check_cpp 'if \(choice == "59"\)' "launcher wiring failed: option 59 handler missing"
 check_cpp 'prod-pilot-cohort-campaign' "launcher wiring failed: option 59 command missing"
+check_cpp 'Run pre-real-host readiness once before the campaign\?' "launcher wiring failed: option 59 pre-real-host readiness prompt missing"
 check_cpp 'Extra campaign args \(optional\)' "launcher wiring failed: option 59 prompt text missing"
 check_cpp '--show-json ' "launcher wiring failed: option 59 show-json forwarding missing"
+
+echo "[easy-mode-wiring] options 60/61 command wiring"
+check_cpp 'if \(choice == "60"\)' "launcher wiring failed: option 60 handler missing"
+check_cpp 'runtime-doctor' "launcher wiring failed: option 60 command missing"
+check_cpp 'WG-only base port' "launcher wiring failed: option 60 base port prompt missing"
+check_cpp '--client-iface ' "launcher wiring failed: option 60 client-iface forwarding missing"
+check_cpp '--exit-iface ' "launcher wiring failed: option 60 exit-iface forwarding missing"
+check_cpp '--vpn-iface ' "launcher wiring failed: option 60 vpn-iface forwarding missing"
+check_cpp 'if \(choice == "61"\)' "launcher wiring failed: option 61 handler missing"
+check_cpp 'manual-validation-backlog' "launcher wiring failed: option 61 command missing"
+
+echo "[easy-mode-wiring] option 62 command wiring"
+check_cpp 'if \(choice == "62"\)' "launcher wiring failed: option 62 handler missing"
+check_cpp 'runtime-fix' "launcher wiring failed: option 62 command missing"
+check_cpp 'Prune wg-only runtime dir after cleanup\?' "launcher wiring failed: option 62 prune prompt missing"
+check_cpp '--prune-wg-only-dir ' "launcher wiring failed: option 62 prune flag forwarding missing"
+
+echo "[easy-mode-wiring] option 63 command wiring"
+check_cpp 'if \(choice == "63"\)' "launcher wiring failed: option 63 handler missing"
+check_cpp 'manual-validation-status' "launcher wiring failed: option 63 command missing"
+check_cpp 'Show JSON summary payload\?' "launcher wiring failed: option 63 JSON prompt missing"
+
+echo "[easy-mode-wiring] option 64 command wiring"
+check_cpp 'if \(choice == "64"\)' "launcher wiring failed: option 64 handler missing"
+check_cpp 'client-vpn-smoke' "launcher wiring failed: option 64 command missing"
+check_cpp 'Public IP check URL' "launcher wiring failed: option 64 public IP prompt missing"
+check_cpp 'Country check URL' "launcher wiring failed: option 64 country prompt missing"
+check_cpp 'Run pre-real-host readiness first\?' "launcher wiring failed: option 64 pre-real-host readiness prompt missing"
+check_cpp '--path-profile balanced' "launcher wiring failed: option 64 balanced path default missing"
+check_cpp '--distinct-operators 1' "launcher wiring failed: option 64 distinct-operators default missing"
+
+echo "[easy-mode-wiring] option 65 command wiring"
+check_cpp 'if \(choice == "65"\)' "launcher wiring failed: option 65 handler missing"
+check_cpp 'three-machine-prod-signoff' "launcher wiring failed: option 65 command missing"
+check_cpp 'Directory A URL' "launcher wiring failed: option 65 directory A prompt missing"
+check_cpp 'Directory B URL' "launcher wiring failed: option 65 directory B prompt missing"
+check_cpp 'Bundle dir' "launcher wiring failed: option 65 bundle dir prompt missing"
+check_cpp 'Run pre-real-host readiness first\?' "launcher wiring failed: option 65 pre-real-host readiness prompt missing"
+
+echo "[easy-mode-wiring] option 66 command wiring"
+check_cpp 'if \(choice == "66"\)' "launcher wiring failed: option 66 handler missing"
+check_cpp 'manual-validation-report' "launcher wiring failed: option 66 command missing"
+check_cpp 'Summary JSON path' "launcher wiring failed: option 66 summary JSON prompt missing"
+check_cpp 'Report markdown path' "launcher wiring failed: option 66 report markdown prompt missing"
+check_cpp 'Fail if readiness is not complete\?' "launcher wiring failed: option 66 fail-close prompt missing"
+
+echo "[easy-mode-wiring] option 67 command wiring"
+check_cpp 'if \(choice == "67"\)' "launcher wiring failed: option 67 handler missing"
+check_cpp 'wg-only-stack-selftest-record' "launcher wiring failed: option 67 command missing"
+check_cpp 'Use strict beta profile\?' "launcher wiring failed: option 67 strict beta prompt missing"
+check_cpp 'Run with sudo\? \(Y/n\)' "launcher wiring failed: option 67 sudo prompt missing"
+
+echo "[easy-mode-wiring] option 68 command wiring"
+check_cpp 'if \(choice == "68"\)' "launcher wiring failed: option 68 handler missing"
+check_cpp 'pre-real-host-readiness' "launcher wiring failed: option 68 command missing"
+check_cpp 'Prune wg-only runtime dir during cleanup\?' "launcher wiring failed: option 68 prune prompt missing"
+check_cpp 'Client VPN iface' "launcher wiring failed: option 68 vpn iface prompt missing"
 
 echo "[easy-mode-wiring] easy_node help exposure"
 if ! "$EASY_NODE" --help | rg -q 'prod-pilot-cohort-quick-signoff'; then
@@ -212,6 +293,46 @@ if ! "$EASY_NODE" --help | rg -q 'prod-pilot-cohort-quick-runbook'; then
 fi
 if ! "$EASY_NODE" --help | rg -q 'prod-pilot-cohort-campaign'; then
   echo "launcher wiring failed: easy_node help missing prod-pilot-cohort-campaign"
+  exit 1
+fi
+if ! "$EASY_NODE" --help | rg -q 'runtime-doctor'; then
+  echo "launcher wiring failed: easy_node help missing runtime-doctor"
+  exit 1
+fi
+if ! "$EASY_NODE" --help | rg -q 'manual-validation-backlog'; then
+  echo "launcher wiring failed: easy_node help missing manual-validation-backlog"
+  exit 1
+fi
+if ! "$EASY_NODE" --help | rg -q 'manual-validation-status'; then
+  echo "launcher wiring failed: easy_node help missing manual-validation-status"
+  exit 1
+fi
+if ! "$EASY_NODE" --help | rg -q 'manual-validation-report'; then
+  echo "launcher wiring failed: easy_node help missing manual-validation-report"
+  exit 1
+fi
+if ! "$EASY_NODE" --help | rg -q 'wg-only-stack-selftest-record'; then
+  echo "launcher wiring failed: easy_node help missing wg-only-stack-selftest-record"
+  exit 1
+fi
+if ! "$EASY_NODE" --help | rg -q 'pre-real-host-readiness'; then
+  echo "launcher wiring failed: easy_node help missing pre-real-host-readiness"
+  exit 1
+fi
+if ! "$EASY_NODE" --help | rg -q 'manual-validation-record'; then
+  echo "launcher wiring failed: easy_node help missing manual-validation-record"
+  exit 1
+fi
+if ! "$EASY_NODE" --help | rg -q 'client-vpn-smoke'; then
+  echo "launcher wiring failed: easy_node help missing client-vpn-smoke"
+  exit 1
+fi
+if ! "$EASY_NODE" --help | rg -q 'three-machine-prod-signoff'; then
+  echo "launcher wiring failed: easy_node help missing three-machine-prod-signoff"
+  exit 1
+fi
+if ! "$EASY_NODE" --help | rg -q 'runtime-fix'; then
+  echo "launcher wiring failed: easy_node help missing runtime-fix"
   exit 1
 fi
 if ! "$EASY_NODE" --help | rg -q 'incident-snapshot'; then
@@ -282,8 +403,16 @@ if ! "$EASY_NODE" prod-pilot-cohort-quick-runbook --help | rg -q -- '--bundle-ou
   echo "launcher wiring failed: prod-pilot-cohort-quick-runbook help missing --bundle-outputs"
   exit 1
 fi
+if ! "$EASY_NODE" prod-pilot-cohort-quick-runbook --help | rg -q -- '--pre-real-host-readiness'; then
+  echo "launcher wiring failed: prod-pilot-cohort-quick-runbook help missing --pre-real-host-readiness"
+  exit 1
+fi
 if ! "$EASY_NODE" prod-pilot-cohort-campaign --help | rg -q -- 'prod-pilot-cohort-quick-runbook'; then
   echo "launcher wiring failed: prod-pilot-cohort-campaign help missing quick-runbook reference"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-campaign --help | rg -q -- '--pre-real-host-readiness'; then
+  echo "launcher wiring failed: prod-pilot-cohort-campaign help missing --pre-real-host-readiness"
   exit 1
 fi
 if ! "$EASY_NODE" incident-snapshot --help | rg -q -- '--include-docker-logs'; then
@@ -310,6 +439,10 @@ if ! "$EASY_NODE" prod-pilot-cohort-runbook --help | rg -q -- '--bundle-fail-clo
   echo "launcher wiring failed: prod-pilot-cohort-runbook help missing --bundle-fail-close"
   exit 1
 fi
+if ! "$EASY_NODE" prod-pilot-cohort-runbook --help | rg -q -- '--pre-real-host-readiness'; then
+  echo "launcher wiring failed: prod-pilot-cohort-runbook help missing --pre-real-host-readiness"
+  exit 1
+fi
 if ! "$EASY_NODE" prod-pilot-cohort-bundle-verify --help | rg -q -- '--check-manifest'; then
   echo "launcher wiring failed: prod-pilot-cohort-bundle-verify help missing --check-manifest"
   exit 1
@@ -332,6 +465,10 @@ if ! "$EASY_NODE" prod-pilot-cohort-quick --help | rg -q -- '--max-round-failure
 fi
 if ! "$EASY_NODE" prod-pilot-cohort-quick --help | rg -q -- '--signoff-require-incident-snapshot-artifacts'; then
   echo "launcher wiring failed: prod-pilot-cohort-quick help missing --signoff-require-incident-snapshot-artifacts"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-quick --help | rg -q -- '--pre-real-host-readiness'; then
+  echo "launcher wiring failed: prod-pilot-cohort-quick help missing --pre-real-host-readiness"
   exit 1
 fi
 if ! "$EASY_NODE" prod-pilot-cohort-quick-check --help | rg -q -- '--require-signoff-attempted'; then

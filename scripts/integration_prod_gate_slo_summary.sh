@@ -19,6 +19,27 @@ trap cleanup EXIT
 
 PASS_GATE="$TMP_DIR/prod_gate_ok.json"
 PASS_RUN_REPORT="$TMP_DIR/prod_bundle_run_report_ok.json"
+INCIDENT_BUNDLE_DIR="$TMP_DIR/incident_bundle"
+INCIDENT_BUNDLE_TAR="$TMP_DIR/incident_bundle.tar.gz"
+INCIDENT_SUMMARY_JSON="$TMP_DIR/incident_summary.json"
+INCIDENT_REPORT_MD="$TMP_DIR/incident_report.md"
+INCIDENT_ATTACH_DIR="$INCIDENT_BUNDLE_DIR/attachments"
+INCIDENT_ATTACH_MANIFEST="$INCIDENT_ATTACH_DIR/manifest.tsv"
+INCIDENT_ATTACH_SKIPPED="$INCIDENT_ATTACH_DIR/skipped.tsv"
+
+mkdir -p "$INCIDENT_BUNDLE_DIR"
+mkdir -p "$INCIDENT_ATTACH_DIR"
+touch "$INCIDENT_BUNDLE_TAR"
+cat >"$INCIDENT_SUMMARY_JSON" <<'EOF_INCIDENT_SUMMARY'
+{
+  "status": "ok"
+}
+EOF_INCIDENT_SUMMARY
+cat >"$INCIDENT_REPORT_MD" <<'EOF_INCIDENT_REPORT'
+# Incident Report
+EOF_INCIDENT_REPORT
+printf 'attachments/01_runtime_doctor_before.json\tfile\t/tmp/runtime_doctor_before.json\n' >"$INCIDENT_ATTACH_MANIFEST"
+printf '/tmp/runtime_fix.json\tmissing\n' >"$INCIDENT_ATTACH_SKIPPED"
 
 cat >"$PASS_GATE" <<'EOF_PASS_GATE'
 {
@@ -247,6 +268,102 @@ fi
 if ! rg -q 'incident snapshot is not enabled on fail' /tmp/integration_prod_gate_slo_summary_incident_fail.log; then
   echo "expected incident-snapshot policy no-go reason not found"
   cat /tmp/integration_prod_gate_slo_summary_incident_fail.log
+  exit 1
+fi
+
+echo "[prod-gate-slo-summary] incident snapshot artifact validation"
+RUN_REPORT_INCIDENT_ARTIFACTS="$TMP_DIR/prod_bundle_run_report_incident_artifacts.json"
+cat >"$RUN_REPORT_INCIDENT_ARTIFACTS" <<EOF_INCIDENT_ARTIFACTS
+{
+  "status": "fail",
+  "final_rc": 1,
+  "bundle_dir": "$TMP_DIR/prod_bundle_dir",
+  "gate_summary_json": "$PASS_GATE",
+  "preflight": {
+    "enabled": true,
+    "status": "ok",
+    "rc": 0
+  },
+  "bundle": {
+    "status": "ok",
+    "rc": 0
+  },
+  "integrity_verify": {
+    "enabled": true,
+    "status": "ok",
+    "rc": 0
+  },
+  "signoff": {
+    "enabled": true,
+    "rc": 0
+  },
+  "incident_snapshot": {
+    "enabled_on_fail": true,
+    "status": "ok",
+    "rc": 0,
+    "bundle_dir": "$INCIDENT_BUNDLE_DIR",
+    "bundle_tar": "$INCIDENT_BUNDLE_TAR",
+    "summary_json": "$INCIDENT_SUMMARY_JSON",
+    "report_md": "$INCIDENT_REPORT_MD",
+    "attachment_manifest": "$INCIDENT_ATTACH_MANIFEST",
+    "attachment_skipped": "$INCIDENT_ATTACH_SKIPPED",
+    "attachment_count": 1
+  }
+}
+EOF_INCIDENT_ARTIFACTS
+
+./scripts/prod_gate_slo_summary.sh \
+  --run-report-json "$RUN_REPORT_INCIDENT_ARTIFACTS" \
+  --require-incident-snapshot-artifacts 1 \
+  --fail-on-no-go 1 >/tmp/integration_prod_gate_slo_summary_incident_artifacts_pass.log 2>&1
+
+if ! rg -q '\[prod-gate-slo\] incident_handoff source_summary_json=' /tmp/integration_prod_gate_slo_summary_incident_artifacts_pass.log; then
+  echo "expected normalized incident handoff line not found"
+  cat /tmp/integration_prod_gate_slo_summary_incident_artifacts_pass.log
+  exit 1
+fi
+if ! rg -q "attachment_manifest=${INCIDENT_ATTACH_MANIFEST}" /tmp/integration_prod_gate_slo_summary_incident_artifacts_pass.log; then
+  echo "expected incident attachment manifest not surfaced in prod-gate-slo-summary output"
+  cat /tmp/integration_prod_gate_slo_summary_incident_artifacts_pass.log
+  exit 1
+fi
+
+INVALID_INCIDENT_SUMMARY_JSON="$TMP_DIR/incident_summary_invalid.json"
+printf '%s\n' '{invalid-json' >"$INVALID_INCIDENT_SUMMARY_JSON"
+RUN_REPORT_INCIDENT_ARTIFACTS_INVALID="$TMP_DIR/prod_bundle_run_report_incident_artifacts_invalid.json"
+cat >"$RUN_REPORT_INCIDENT_ARTIFACTS_INVALID" <<EOF_INCIDENT_ARTIFACTS_INVALID
+{
+  "status": "fail",
+  "final_rc": 1,
+  "bundle_dir": "$TMP_DIR/prod_bundle_dir",
+  "gate_summary_json": "$PASS_GATE",
+  "incident_snapshot": {
+    "enabled_on_fail": true,
+    "status": "ok",
+    "rc": 0,
+    "bundle_dir": "$INCIDENT_BUNDLE_DIR",
+    "bundle_tar": "$INCIDENT_BUNDLE_TAR",
+    "summary_json": "$INVALID_INCIDENT_SUMMARY_JSON",
+    "report_md": "$INCIDENT_REPORT_MD"
+  }
+}
+EOF_INCIDENT_ARTIFACTS_INVALID
+
+set +e
+./scripts/prod_gate_slo_summary.sh \
+  --run-report-json "$RUN_REPORT_INCIDENT_ARTIFACTS_INVALID" \
+  --require-incident-snapshot-artifacts 1 \
+  --fail-on-no-go 1 >/tmp/integration_prod_gate_slo_summary_incident_artifacts_fail.log 2>&1
+incident_artifacts_fail_rc=$?
+set -e
+if [[ "$incident_artifacts_fail_rc" -eq 0 ]]; then
+  echo "expected non-zero rc when incident summary JSON is invalid"
+  cat /tmp/integration_prod_gate_slo_summary_incident_artifacts_fail.log
+  exit 1
+fi
+if ! rg -q 'incident snapshot summary_json is invalid JSON' /tmp/integration_prod_gate_slo_summary_incident_artifacts_fail.log; then
+  echo "expected invalid incident summary JSON reason not found"
+  cat /tmp/integration_prod_gate_slo_summary_incident_artifacts_fail.log
   exit 1
 fi
 

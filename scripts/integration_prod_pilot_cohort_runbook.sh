@@ -23,6 +23,7 @@ trap cleanup EXIT
 PILOT_CAPTURE="$TMP_DIR/pilot_capture.log"
 TREND_CAPTURE="$TMP_DIR/trend_capture.log"
 ALERT_CAPTURE="$TMP_DIR/alert_capture.log"
+PRE_READINESS_CAPTURE="$TMP_DIR/pre_readiness_capture.log"
 PILOT_COUNTER="$TMP_DIR/pilot_counter.txt"
 
 FAKE_PILOT="$TMP_DIR/fake_prod_pilot_runbook.sh"
@@ -133,21 +134,67 @@ exit "${FAKE_ALERT_RC:-0}"
 EOF_FAKE_ALERT
 chmod +x "$FAKE_ALERT"
 
+FAKE_PRE_READINESS="$TMP_DIR/fake_pre_real_host_readiness.sh"
+cat >"$FAKE_PRE_READINESS" <<'EOF_FAKE_PRE_READINESS'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >>"${PRE_READINESS_CAPTURE_FILE:?}"
+summary_json=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --summary-json)
+      summary_json="${2:-}"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+if [[ -z "$summary_json" ]]; then
+  echo "missing --summary-json"
+  exit 2
+fi
+mkdir -p "$(dirname "$summary_json")"
+status="${FAKE_PRE_READINESS_STATUS:-pass}"
+ready="${FAKE_PRE_READINESS_READY:-true}"
+cat >"$summary_json" <<EOF_PRE
+{
+  "status": "$status",
+  "machine_c_smoke_gate": {
+    "ready": $ready,
+    "blockers": [],
+    "next_command": "sudo ./scripts/easy_node.sh client-vpn-smoke --pre-real-host-readiness 1"
+  },
+  "manual_validation_report": {
+    "readiness_status": "NOT_READY",
+    "summary_json": "/tmp/fake_manual_validation_readiness_summary.json",
+    "report_md": "/tmp/fake_manual_validation_readiness_report.md"
+  }
+}
+EOF_PRE
+exit "${FAKE_PRE_READINESS_RC:-0}"
+EOF_FAKE_PRE_READINESS
+chmod +x "$FAKE_PRE_READINESS"
+
 echo "[prod-pilot-cohort] success path"
 SUCCESS_SUMMARY="$TMP_DIR/success_summary.json"
 SUCCESS_REPORTS_DIR="$TMP_DIR/success_reports"
 : >"$PILOT_CAPTURE"
 : >"$TREND_CAPTURE"
 : >"$ALERT_CAPTURE"
+: >"$PRE_READINESS_CAPTURE"
 rm -f "$PILOT_COUNTER"
 
 PILOT_CAPTURE_FILE="$PILOT_CAPTURE" \
 TREND_CAPTURE_FILE="$TREND_CAPTURE" \
 ALERT_CAPTURE_FILE="$ALERT_CAPTURE" \
+PRE_READINESS_CAPTURE_FILE="$PRE_READINESS_CAPTURE" \
 PILOT_COUNTER_FILE="$PILOT_COUNTER" \
 PROD_PILOT_RUNBOOK_SCRIPT="$FAKE_PILOT" \
 PROD_GATE_SLO_TREND_SCRIPT="$FAKE_TREND" \
 PROD_GATE_SLO_ALERT_SCRIPT="$FAKE_ALERT" \
+PRE_REAL_HOST_READINESS_SCRIPT="$FAKE_PRE_READINESS" \
 ./scripts/prod_pilot_cohort_runbook.sh \
   --rounds 3 \
   --pause-sec 0 \
@@ -185,6 +232,16 @@ if [[ "$(jq -r '.rounds.failed' "$SUCCESS_SUMMARY")" != "0" ]]; then
   cat "$SUCCESS_SUMMARY"
   exit 1
 fi
+if [[ "$(jq -r '.pre_real_host_readiness.status' "$SUCCESS_SUMMARY")" != "pass" ]]; then
+  echo "prod-pilot-cohort success summary expected pre_real_host_readiness.status=pass"
+  cat "$SUCCESS_SUMMARY"
+  exit 1
+fi
+if [[ "$(jq -r '.pre_real_host_readiness.machine_c_smoke_ready' "$SUCCESS_SUMMARY")" != "true" ]]; then
+  echo "prod-pilot-cohort success summary expected pre_real_host_readiness.machine_c_smoke_ready=true"
+  cat "$SUCCESS_SUMMARY"
+  exit 1
+fi
 if [[ "$(jq -r '.bundle.created' "$SUCCESS_SUMMARY")" != "true" ]]; then
   echo "prod-pilot-cohort success summary expected bundle.created=true"
   cat "$SUCCESS_SUMMARY"
@@ -208,8 +265,18 @@ if [[ ! -f "$bundle_manifest" ]]; then
   ls -la "$SUCCESS_REPORTS_DIR" || true
   exit 1
 fi
+if [[ "$(rg -c '^--summary-json ' "$PRE_READINESS_CAPTURE")" -ne 1 ]]; then
+  echo "prod-pilot-cohort success path expected one pre-real-host readiness invocation"
+  cat "$PRE_READINESS_CAPTURE"
+  exit 1
+fi
 if ! rg -q -- '--bootstrap-directory https://dir-a:8081' "$PILOT_CAPTURE"; then
   echo "prod-pilot-cohort success path did not forward pilot args"
+  cat "$PILOT_CAPTURE"
+  exit 1
+fi
+if [[ "$(rg -c -- '--pre-real-host-readiness 0' "$PILOT_CAPTURE")" -ne 3 ]]; then
+  echo "prod-pilot-cohort success path expected inner pilot rounds to disable duplicate pre-real-host readiness"
   cat "$PILOT_CAPTURE"
   exit 1
 fi
@@ -305,15 +372,18 @@ ALERT_FAIL_REPORTS_DIR="$TMP_DIR/alert_fail_reports"
 : >"$PILOT_CAPTURE"
 : >"$TREND_CAPTURE"
 : >"$ALERT_CAPTURE"
+: >"$PRE_READINESS_CAPTURE"
 rm -f "$PILOT_COUNTER"
 set +e
 PILOT_CAPTURE_FILE="$PILOT_CAPTURE" \
 TREND_CAPTURE_FILE="$TREND_CAPTURE" \
 ALERT_CAPTURE_FILE="$ALERT_CAPTURE" \
+PRE_READINESS_CAPTURE_FILE="$PRE_READINESS_CAPTURE" \
 PILOT_COUNTER_FILE="$PILOT_COUNTER" \
 PROD_PILOT_RUNBOOK_SCRIPT="$FAKE_PILOT" \
 PROD_GATE_SLO_TREND_SCRIPT="$FAKE_TREND" \
 PROD_GATE_SLO_ALERT_SCRIPT="$FAKE_ALERT" \
+PRE_REAL_HOST_READINESS_SCRIPT="$FAKE_PRE_READINESS" \
 FAKE_ALERT_SEVERITY=CRITICAL \
 ./scripts/prod_pilot_cohort_runbook.sh \
   --rounds 2 \
@@ -362,17 +432,20 @@ FAIL_REPORTS_DIR="$TMP_DIR/fail_reports"
 : >"$PILOT_CAPTURE"
 : >"$TREND_CAPTURE"
 : >"$ALERT_CAPTURE"
+: >"$PRE_READINESS_CAPTURE"
 rm -f "$PILOT_COUNTER"
 set +e
 PILOT_CAPTURE_FILE="$PILOT_CAPTURE" \
 TREND_CAPTURE_FILE="$TREND_CAPTURE" \
 ALERT_CAPTURE_FILE="$ALERT_CAPTURE" \
+PRE_READINESS_CAPTURE_FILE="$PRE_READINESS_CAPTURE" \
 PILOT_COUNTER_FILE="$PILOT_COUNTER" \
 PROD_PILOT_RUNBOOK_SCRIPT="$FAKE_PILOT" \
 FAKE_PILOT_FAIL_ON_CALL=2 \
 FAKE_PILOT_FAIL_RC=17 \
 PROD_GATE_SLO_TREND_SCRIPT="$FAKE_TREND" \
 PROD_GATE_SLO_ALERT_SCRIPT="$FAKE_ALERT" \
+PRE_REAL_HOST_READINESS_SCRIPT="$FAKE_PRE_READINESS" \
 ./scripts/prod_pilot_cohort_runbook.sh \
   --rounds 4 \
   --pause-sec 0 \
@@ -405,6 +478,57 @@ fi
 if [[ "$(jq -r '.rounds.stopped_early' "$FAIL_SUMMARY")" != "true" ]]; then
   echo "prod-pilot-cohort fail summary expected stopped_early=true"
   cat "$FAIL_SUMMARY"
+  exit 1
+fi
+
+echo "[prod-pilot-cohort] pre-real-host readiness fail path"
+PRE_FAIL_SUMMARY="$TMP_DIR/pre_fail_summary.json"
+PRE_FAIL_REPORTS_DIR="$TMP_DIR/pre_fail_reports"
+: >"$PILOT_CAPTURE"
+: >"$TREND_CAPTURE"
+: >"$ALERT_CAPTURE"
+: >"$PRE_READINESS_CAPTURE"
+rm -f "$PILOT_COUNTER"
+set +e
+PILOT_CAPTURE_FILE="$PILOT_CAPTURE" \
+TREND_CAPTURE_FILE="$TREND_CAPTURE" \
+ALERT_CAPTURE_FILE="$ALERT_CAPTURE" \
+PRE_READINESS_CAPTURE_FILE="$PRE_READINESS_CAPTURE" \
+PILOT_COUNTER_FILE="$PILOT_COUNTER" \
+PROD_PILOT_RUNBOOK_SCRIPT="$FAKE_PILOT" \
+PROD_GATE_SLO_TREND_SCRIPT="$FAKE_TREND" \
+PROD_GATE_SLO_ALERT_SCRIPT="$FAKE_ALERT" \
+PRE_REAL_HOST_READINESS_SCRIPT="$FAKE_PRE_READINESS" \
+FAKE_PRE_READINESS_STATUS=fail \
+FAKE_PRE_READINESS_READY=false \
+FAKE_PRE_READINESS_RC=31 \
+./scripts/prod_pilot_cohort_runbook.sh \
+  --rounds 4 \
+  --pause-sec 0 \
+  --continue-on-fail 0 \
+  --require-all-rounds-ok 1 \
+  --reports-dir "$PRE_FAIL_REPORTS_DIR" \
+  --summary-json "$PRE_FAIL_SUMMARY" >/tmp/integration_prod_pilot_cohort_runbook_pre_fail.log 2>&1
+pre_fail_rc=$?
+set -e
+if [[ "$pre_fail_rc" -ne 31 ]]; then
+  echo "prod-pilot-cohort pre-real-host readiness fail path returned unexpected rc=$pre_fail_rc (expected 31)"
+  cat /tmp/integration_prod_pilot_cohort_runbook_pre_fail.log
+  exit 1
+fi
+if [[ "$(jq -r '.failure_step' "$PRE_FAIL_SUMMARY")" != "pre_real_host_readiness" ]]; then
+  echo "prod-pilot-cohort pre-real-host readiness fail summary has unexpected failure_step"
+  cat "$PRE_FAIL_SUMMARY"
+  exit 1
+fi
+if [[ "$(jq -r '.rounds.attempted' "$PRE_FAIL_SUMMARY")" != "0" ]]; then
+  echo "prod-pilot-cohort pre-real-host readiness fail summary expected rounds.attempted=0"
+  cat "$PRE_FAIL_SUMMARY"
+  exit 1
+fi
+if [[ -s "$PILOT_CAPTURE" ]]; then
+  echo "prod-pilot-cohort pre-real-host readiness fail path should not run pilot rounds"
+  cat "$PILOT_CAPTURE"
   exit 1
 fi
 

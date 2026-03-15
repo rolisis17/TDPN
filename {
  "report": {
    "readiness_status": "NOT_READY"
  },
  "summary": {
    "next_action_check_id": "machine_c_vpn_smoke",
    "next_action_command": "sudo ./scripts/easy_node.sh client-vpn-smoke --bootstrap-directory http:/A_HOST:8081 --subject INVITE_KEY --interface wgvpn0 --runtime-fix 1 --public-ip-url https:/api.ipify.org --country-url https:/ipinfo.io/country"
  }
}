@@ -1,0 +1,9 @@
+{
+  "report": {
+    "readiness_status": "NOT_READY"
+  },
+  "summary": {
+    "next_action_check_id": "machine_c_vpn_smoke",
+    "next_action_command": "sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --interface wgvpn0 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country"
+  }
+}

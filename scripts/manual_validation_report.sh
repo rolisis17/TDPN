@@ -1,0 +1,408 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  ./scripts/manual_validation_report.sh \
+    [--base-port N] \
+    [--client-iface IFACE] \
+    [--exit-iface IFACE] \
+    [--vpn-iface IFACE] \
+    [--overlay-check-id CHECK_ID] \
+    [--overlay-status pass|fail|warn|pending|skip] \
+    [--overlay-notes TEXT] \
+    [--overlay-command TEXT] \
+    [--overlay-artifact PATH]... \
+    [--summary-json PATH] \
+    [--report-md PATH] \
+    [--print-report [0|1]] \
+    [--print-summary-json [0|1]] \
+    [--fail-on-not-ready [0|1]]
+
+Purpose:
+  Build one shareable readiness report from manual-validation-status.
+
+Outputs:
+  1) machine-readable summary JSON
+  2) concise markdown readiness report
+USAGE
+}
+
+trim() {
+  local value="$1"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "$value"
+}
+
+abs_path() {
+  local path
+  path="$(trim "${1:-}")"
+  if [[ -z "$path" ]]; then
+    printf '%s' ""
+    return
+  fi
+  if [[ "$path" == /* ]]; then
+    printf '%s' "$path"
+  else
+    printf '%s' "$ROOT_DIR/$path"
+  fi
+}
+
+bool_arg_or_die() {
+  local name="$1"
+  local value="$2"
+  if [[ "$value" != "0" && "$value" != "1" ]]; then
+    echo "$name must be 0 or 1"
+    exit 2
+  fi
+}
+
+need_cmd() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "missing required command: $1"
+    exit 2
+  fi
+}
+
+extract_json_payload() {
+  local log_file="$1"
+  awk '/^\[manual-validation-status\] summary_json_payload:/{flag=1; next} flag{print}' "$log_file"
+}
+
+md_escape() {
+  local value="$1"
+  value="${value//|/\\|}"
+  value="${value//$'\n'/ }"
+  printf '%s' "$value"
+}
+
+base_port="${EASY_NODE_DOCTOR_WG_ONLY_BASE_PORT:-19280}"
+client_iface="${EASY_NODE_DOCTOR_CLIENT_IFACE:-wgcstack0}"
+exit_iface="${EASY_NODE_DOCTOR_EXIT_IFACE:-wgestack0}"
+vpn_iface="${EASY_NODE_DOCTOR_VPN_IFACE:-wgvpn0}"
+overlay_check_id=""
+overlay_status=""
+overlay_notes=""
+overlay_command=""
+declare -a overlay_artifacts=()
+summary_json=""
+report_md=""
+print_report="${MANUAL_VALIDATION_REPORT_PRINT_REPORT:-1}"
+print_summary_json="${MANUAL_VALIDATION_REPORT_PRINT_SUMMARY_JSON:-0}"
+fail_on_not_ready="${MANUAL_VALIDATION_REPORT_FAIL_ON_NOT_READY:-0}"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --base-port)
+      base_port="${2:-}"
+      shift 2
+      ;;
+    --client-iface)
+      client_iface="${2:-}"
+      shift 2
+      ;;
+    --exit-iface)
+      exit_iface="${2:-}"
+      shift 2
+      ;;
+    --vpn-iface)
+      vpn_iface="${2:-}"
+      shift 2
+      ;;
+    --overlay-check-id)
+      overlay_check_id="${2:-}"
+      shift 2
+      ;;
+    --overlay-status)
+      overlay_status="${2:-}"
+      shift 2
+      ;;
+    --overlay-notes)
+      overlay_notes="${2:-}"
+      shift 2
+      ;;
+    --overlay-command)
+      overlay_command="${2:-}"
+      shift 2
+      ;;
+    --overlay-artifact)
+      overlay_artifacts+=("$(abs_path "${2:-}")")
+      shift 2
+      ;;
+    --summary-json)
+      summary_json="${2:-}"
+      shift 2
+      ;;
+    --report-md)
+      report_md="${2:-}"
+      shift 2
+      ;;
+    --print-report)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        print_report="${2:-}"
+        shift 2
+      else
+        print_report="1"
+        shift
+      fi
+      ;;
+    --print-summary-json)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        print_summary_json="${2:-}"
+        shift 2
+      else
+        print_summary_json="1"
+        shift
+      fi
+      ;;
+    --fail-on-not-ready)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        fail_on_not_ready="${2:-}"
+        shift 2
+      else
+        fail_on_not_ready="1"
+        shift
+      fi
+      ;;
+    -h|--help|help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "unknown argument: $1"
+      usage
+      exit 2
+      ;;
+  esac
+done
+
+for cmd in jq date awk; do
+  need_cmd "$cmd"
+done
+
+bool_arg_or_die "--print-report" "$print_report"
+bool_arg_or_die "--print-summary-json" "$print_summary_json"
+bool_arg_or_die "--fail-on-not-ready" "$fail_on_not_ready"
+
+if ! [[ "$base_port" =~ ^[0-9]+$ ]]; then
+  echo "--base-port must be an integer"
+  exit 2
+fi
+if [[ -z "$client_iface" || -z "$exit_iface" || -z "$vpn_iface" ]]; then
+  echo "--client-iface, --exit-iface, and --vpn-iface must be non-empty"
+  exit 2
+fi
+
+status_script="${MANUAL_VALIDATION_STATUS_SCRIPT:-$ROOT_DIR/scripts/manual_validation_status.sh}"
+if [[ ! -x "$status_script" ]]; then
+  echo "missing manual validation status script: $status_script"
+  exit 2
+fi
+
+summary_json="$(abs_path "${summary_json:-$ROOT_DIR/.easy-node-logs/manual_validation_readiness_summary.json}")"
+report_md="$(abs_path "${report_md:-$ROOT_DIR/.easy-node-logs/manual_validation_readiness_report.md}")"
+mkdir -p "$(dirname "$summary_json")" "$(dirname "$report_md")"
+
+status_log="$(mktemp)"
+status_rc=0
+declare -a status_cmd=(
+  "$status_script"
+  --base-port "$base_port"
+  --client-iface "$client_iface"
+  --exit-iface "$exit_iface"
+  --vpn-iface "$vpn_iface"
+  --show-json 1
+)
+if [[ -n "$overlay_check_id" ]]; then
+  status_cmd+=(--overlay-check-id "$overlay_check_id" --overlay-status "$overlay_status")
+  if [[ -n "$overlay_notes" ]]; then
+    status_cmd+=(--overlay-notes "$overlay_notes")
+  fi
+  if [[ -n "$overlay_command" ]]; then
+    status_cmd+=(--overlay-command "$overlay_command")
+  fi
+  overlay_artifact=""
+  for overlay_artifact in "${overlay_artifacts[@]}"; do
+    status_cmd+=(--overlay-artifact "$overlay_artifact")
+  done
+fi
+if "${status_cmd[@]}" >"$status_log" 2>&1; then
+  status_rc=0
+else
+  status_rc=$?
+fi
+status_json_payload="$(extract_json_payload "$status_log")"
+if [[ -z "$status_json_payload" ]]; then
+  echo "manual-validation-report failed: manual-validation-status did not emit JSON summary"
+  cat "$status_log"
+  rm -f "$status_log"
+  exit 1
+fi
+rm -f "$status_log"
+
+ready_json="false"
+readiness_status="NOT_READY"
+if printf '%s\n' "$status_json_payload" | jq -e '(.summary.next_action_check_id // "") == ""' >/dev/null 2>&1; then
+  ready_json="true"
+  readiness_status="READY"
+fi
+
+report_json="$(
+  printf '%s\n' "$status_json_payload" | jq \
+    --arg summary_json "$summary_json" \
+    --arg report_md "$report_md" \
+    --arg readiness_status "$readiness_status" \
+    --argjson ready "$ready_json" \
+    --argjson source_status_exit_code "$status_rc" \
+    '.report = {
+      readiness_status: $readiness_status,
+      ready: $ready,
+      summary_json: $summary_json,
+      report_md: $report_md,
+      source_status_exit_code: $source_status_exit_code
+    }'
+)"
+printf '%s\n' "$report_json" >"$summary_json"
+
+summary_total="$(printf '%s\n' "$report_json" | jq -r '.summary.total_checks // 0')"
+summary_pass="$(printf '%s\n' "$report_json" | jq -r '.summary.pass_checks // 0')"
+summary_warn="$(printf '%s\n' "$report_json" | jq -r '.summary.warn_checks // 0')"
+summary_fail="$(printf '%s\n' "$report_json" | jq -r '.summary.fail_checks // 0')"
+summary_pending="$(printf '%s\n' "$report_json" | jq -r '.summary.pending_checks // 0')"
+next_action_check_id="$(printf '%s\n' "$report_json" | jq -r '.summary.next_action_check_id // ""')"
+next_action_label="$(printf '%s\n' "$report_json" | jq -r '.summary.next_action_label // ""')"
+next_action_command="$(printf '%s\n' "$report_json" | jq -r '.summary.next_action_command // ""')"
+machine_c_smoke_ready="$(printf '%s\n' "$report_json" | jq -r '.summary.pre_machine_c_gate.ready // false')"
+machine_c_smoke_blockers="$(printf '%s\n' "$report_json" | jq -r '(.summary.pre_machine_c_gate.blockers // []) | if length == 0 then "none" else join(",") end')"
+machine_c_smoke_next_command="$(printf '%s\n' "$report_json" | jq -r '.summary.pre_machine_c_gate.next_command // ""')"
+latest_failed_incident_check_id="$(printf '%s\n' "$report_json" | jq -r '.summary.latest_failed_incident.check_id // ""')"
+latest_failed_incident_summary_json="$(printf '%s\n' "$report_json" | jq -r '.summary.latest_failed_incident.summary_json.path // ""')"
+latest_failed_incident_report_md="$(printf '%s\n' "$report_json" | jq -r '.summary.latest_failed_incident.report_md.path // ""')"
+latest_failed_incident_bundle_dir="$(printf '%s\n' "$report_json" | jq -r '.summary.latest_failed_incident.bundle_dir.path // ""')"
+latest_failed_incident_attachment_manifest="$(printf '%s\n' "$report_json" | jq -r '.summary.latest_failed_incident.attachment_manifest.path // ""')"
+latest_failed_incident_attachment_count="$(printf '%s\n' "$report_json" | jq -r '.summary.latest_failed_incident.attachment_count // 0')"
+latest_failed_incident_readiness_report_summary_attachment="$(printf '%s\n' "$report_json" | jq -r '.summary.latest_failed_incident.readiness_report_summary_attachment.bundle_path // ""')"
+latest_failed_incident_readiness_report_md_attachment="$(printf '%s\n' "$report_json" | jq -r '.summary.latest_failed_incident.readiness_report_md_attachment.bundle_path // ""')"
+latest_failed_incident_readiness_report_log_attachment="$(printf '%s\n' "$report_json" | jq -r '.summary.latest_failed_incident.readiness_report_log_attachment.bundle_path // ""')"
+
+runtime_findings_md="$(printf '%s\n' "$report_json" | jq -r '
+  if (.runtime_doctor.findings // [] | length) == 0 then
+    "- None"
+  else
+    (.runtime_doctor.findings // [])
+    | map("- [\(.severity // "INFO")] `\(.code // "unknown")`: \(.message // "")" +
+          (if (.remediation // "") | length > 0 then " | remediation: `\(.remediation)`" else "" end))
+    | join("\n")
+  end
+')"
+
+checks_table_md="$(printf '%s\n' "$report_json" | jq -r '
+  ["| Check | Status | Recorded At | Notes |", "|---|---|---|---|"] +
+  [(.checks[]
+    | "| \(.label | gsub("\\|"; "\\\\|")) (`\(.check_id)`) | \(.status | ascii_upcase) | \((.recorded_at_utc // "") | gsub("\\|"; "\\\\|")) | \((.notes // "") | gsub("\\|"; "\\\\|") | gsub("\\n"; " ")) |")]
+  | join("\n")
+')"
+
+incident_checks_md="$(printf '%s\n' "$report_json" | jq -r '
+  [
+    .checks[]
+    | select(.incident_handoff.available == true)
+    | "- `\(.check_id)`: summary=`\(.incident_handoff.summary_json.path // "")` report=`\(.incident_handoff.report_md.path // "")` bundle=`\(.incident_handoff.bundle_dir.path // "")` attachment_manifest=`\(.incident_handoff.attachment_manifest.path // "")` readiness_summary_attachment=`\(.incident_handoff.readiness_report_summary_attachment.bundle_path // "")` readiness_report_attachment=`\(.incident_handoff.readiness_report_md_attachment.bundle_path // "")`"
+  ] | if length == 0 then "- None" else join("\n") end
+')"
+
+{
+  printf '# Manual Validation Readiness Report\n\n'
+  printf -- '- Generated at (UTC): `%s`\n' "$(printf '%s\n' "$report_json" | jq -r '.generated_at_utc // ""')"
+  printf -- '- Readiness: `%s`\n' "$readiness_status"
+  printf -- '- State dir: `%s`\n' "$(printf '%s\n' "$report_json" | jq -r '.state_dir // ""')"
+  printf -- '- Status JSON path: `%s`\n' "$(printf '%s\n' "$report_json" | jq -r '.status_json // ""')"
+  printf -- '- Report JSON path: `%s`\n' "$summary_json"
+  printf -- '- Report markdown path: `%s`\n' "$report_md"
+  printf '\n## Summary\n\n'
+  printf -- '- Total checks: `%s`\n' "$summary_total"
+  printf -- '- Passed: `%s`\n' "$summary_pass"
+  printf -- '- Warnings: `%s`\n' "$summary_warn"
+  printf -- '- Failed: `%s`\n' "$summary_fail"
+  printf -- '- Pending: `%s`\n' "$summary_pending"
+  printf '\n## Pre-Machine-C Gate\n\n'
+  printf -- '- Machine C smoke ready: `%s`\n' "$machine_c_smoke_ready"
+  printf -- '- Blockers: `%s`\n' "$machine_c_smoke_blockers"
+  if [[ -n "$machine_c_smoke_next_command" ]]; then
+    printf -- '- Next machine-C smoke command: `%s`\n' "$machine_c_smoke_next_command"
+  fi
+  printf '\n## Next Action\n\n'
+  if [[ -n "$next_action_check_id" ]]; then
+    printf -- '- Check: `%s` (`%s`)\n' "$next_action_label" "$next_action_check_id"
+    printf -- '- Command: `%s`\n' "$next_action_command"
+  else
+    printf -- '- None. Current readiness is `%s`.\n' "$readiness_status"
+  fi
+  printf '\n## Checks\n\n%s\n' "$checks_table_md"
+  printf '\n## Runtime Findings\n\n%s\n' "$runtime_findings_md"
+  printf '\n## Incident Handoff By Check\n\n%s\n' "$incident_checks_md"
+  printf '\n## Latest Failed Incident\n\n'
+  if [[ -n "$latest_failed_incident_check_id" ]]; then
+    printf -- '- Check: `%s`\n' "$latest_failed_incident_check_id"
+    printf -- '- Summary JSON: `%s`\n' "$latest_failed_incident_summary_json"
+    printf -- '- Report markdown: `%s`\n' "$latest_failed_incident_report_md"
+    printf -- '- Bundle dir: `%s`\n' "$latest_failed_incident_bundle_dir"
+    printf -- '- Attachment manifest: `%s`\n' "$latest_failed_incident_attachment_manifest"
+    printf -- '- Attachment count: `%s`\n' "$latest_failed_incident_attachment_count"
+    if [[ -n "$latest_failed_incident_readiness_report_summary_attachment" ]]; then
+      printf -- '- Readiness summary attachment: `%s`\n' "$latest_failed_incident_readiness_report_summary_attachment"
+    fi
+    if [[ -n "$latest_failed_incident_readiness_report_md_attachment" ]]; then
+      printf -- '- Readiness report attachment: `%s`\n' "$latest_failed_incident_readiness_report_md_attachment"
+    fi
+    if [[ -n "$latest_failed_incident_readiness_report_log_attachment" ]]; then
+      printf -- '- Readiness report log attachment: `%s`\n' "$latest_failed_incident_readiness_report_log_attachment"
+    fi
+  else
+    printf -- '- None recorded.\n'
+  fi
+} >"$report_md"
+
+echo "[manual-validation-report] readiness_status=$readiness_status total=$summary_total pass=$summary_pass warn=$summary_warn fail=$summary_fail pending=$summary_pending"
+echo "[manual-validation-report] summary_json=$summary_json"
+echo "[manual-validation-report] report_md=$report_md"
+echo "[manual-validation-report] machine_c_smoke_ready=$machine_c_smoke_ready"
+echo "[manual-validation-report] machine_c_smoke_blockers=$machine_c_smoke_blockers"
+if [[ -n "$machine_c_smoke_next_command" ]]; then
+  echo "[manual-validation-report] machine_c_smoke_next_command=$machine_c_smoke_next_command"
+fi
+if [[ -n "$next_action_check_id" ]]; then
+  echo "[manual-validation-report] next_action_check_id=$next_action_check_id"
+  echo "[manual-validation-report] next_action_command=$next_action_command"
+fi
+if [[ -n "$latest_failed_incident_check_id" ]]; then
+  echo "[manual-validation-report] latest_failed_incident_check_id=$latest_failed_incident_check_id"
+  echo "[manual-validation-report] latest_failed_incident_summary_json=$latest_failed_incident_summary_json"
+  echo "[manual-validation-report] latest_failed_incident_report_md=$latest_failed_incident_report_md"
+  echo "[manual-validation-report] latest_failed_incident_bundle_dir=$latest_failed_incident_bundle_dir"
+  if [[ -n "$latest_failed_incident_readiness_report_summary_attachment" ]]; then
+    echo "[manual-validation-report] latest_failed_incident_readiness_report_summary_attachment=$latest_failed_incident_readiness_report_summary_attachment"
+  fi
+  if [[ -n "$latest_failed_incident_readiness_report_md_attachment" ]]; then
+    echo "[manual-validation-report] latest_failed_incident_readiness_report_md_attachment=$latest_failed_incident_readiness_report_md_attachment"
+  fi
+fi
+
+if [[ "$print_report" == "1" ]]; then
+  echo "[manual-validation-report] report_markdown:"
+  cat "$report_md"
+fi
+if [[ "$print_summary_json" == "1" ]]; then
+  echo "[manual-validation-report] summary_json_payload:"
+  printf '%s\n' "$report_json"
+fi
+
+if [[ "$fail_on_not_ready" == "1" && "$readiness_status" != "READY" ]]; then
+  echo "manual-validation-report: readiness is NOT_READY"
+  exit 1
+fi

@@ -27,6 +27,29 @@ ALERT_CAPTURE="$TMP_DIR/quick_alert_args.log"
 DASHBOARD_MD="$TMP_DIR/quick_dashboard.md"
 TREND_JSON="$TMP_DIR/quick_trend.json"
 ALERT_JSON="$TMP_DIR/quick_alert.json"
+INCIDENT_DIR="$TMP_DIR/incident_snapshot"
+INCIDENT_SUMMARY_JSON="$INCIDENT_DIR/incident_summary.json"
+INCIDENT_REPORT_MD="$INCIDENT_DIR/incident_report.md"
+INCIDENT_SOURCE_RUN_REPORT="$TMP_DIR/round_2_run_report.json"
+INCIDENT_SOURCE_QUICK_RUN_REPORT="$TMP_DIR/prod_pilot_cohort_quick_report.json"
+INCIDENT_BUNDLE_TAR="$TMP_DIR/incident_snapshot.tar.gz"
+
+mkdir -p "$INCIDENT_DIR"
+cat >"$INCIDENT_SUMMARY_JSON" <<'EOF_INCIDENT_SUMMARY'
+{"status":"ok","top_findings":["demo incident"]}
+EOF_INCIDENT_SUMMARY
+cat >"$INCIDENT_REPORT_MD" <<'EOF_INCIDENT_REPORT'
+# Incident Report
+EOF_INCIDENT_REPORT
+cat >"$INCIDENT_SOURCE_RUN_REPORT" <<'EOF_INCIDENT_SOURCE_RR'
+{"status":"fail"}
+EOF_INCIDENT_SOURCE_RR
+cat >"$INCIDENT_SOURCE_QUICK_RUN_REPORT" <<'EOF_INCIDENT_SOURCE_QUICK_RR'
+{"status":"fail"}
+EOF_INCIDENT_SOURCE_QUICK_RR
+printf 'incident tar placeholder\n' >"$INCIDENT_BUNDLE_TAR"
+printf '[]\n' >"$INCIDENT_DIR/attachments_manifest.json"
+printf '[]\n' >"$INCIDENT_DIR/attachments_skipped.json"
 
 cat >"$FAKE_TREND" <<'EOF_FAKE_TREND'
 #!/usr/bin/env bash
@@ -62,9 +85,32 @@ cat >"$summary_json" <<'EOF_TREND_JSON'
   "top_no_go_reasons": [
     {"count": 2, "reason": "signoff rc is non-zero"},
     {"count": 1, "reason": "summary status is not ok"}
-  ]
+  ],
+  "incident_snapshot": {
+    "latest_failed_run_report": {
+      "source_quick_run_report": {"path": "__INCIDENT_SOURCE_QUICK_RUN_REPORT__"},
+      "path": "__INCIDENT_SOURCE_RUN_REPORT__",
+      "enabled": 1,
+      "status": "ok",
+      "bundle_dir": {"path": "__INCIDENT_DIR__"},
+      "bundle_tar": {"path": "__INCIDENT_BUNDLE_TAR__"},
+      "summary_json": {"path": "__INCIDENT_SUMMARY_JSON__"},
+      "report_md": {"path": "__INCIDENT_REPORT_MD__"},
+      "attachment_manifest": {"path": "__INCIDENT_DIR__/attachments_manifest.json"},
+      "attachment_skipped": {"path": "__INCIDENT_DIR__/attachments_skipped.json"},
+      "attachment_count": 1
+    }
+  }
 }
 EOF_TREND_JSON
+sed -i \
+  -e "s#__INCIDENT_SOURCE_QUICK_RUN_REPORT__#${INCIDENT_SOURCE_QUICK_RUN_REPORT}#g" \
+  -e "s#__INCIDENT_SOURCE_RUN_REPORT__#${INCIDENT_SOURCE_RUN_REPORT}#g" \
+  -e "s#__INCIDENT_DIR__#${INCIDENT_DIR}#g" \
+  -e "s#__INCIDENT_BUNDLE_TAR__#${INCIDENT_BUNDLE_TAR}#g" \
+  -e "s#__INCIDENT_SUMMARY_JSON__#${INCIDENT_SUMMARY_JSON}#g" \
+  -e "s#__INCIDENT_REPORT_MD__#${INCIDENT_REPORT_MD}#g" \
+  "$summary_json"
 exit "${FAKE_TREND_RC:-0}"
 EOF_FAKE_TREND
 chmod +x "$FAKE_TREND"
@@ -117,6 +163,12 @@ chmod +x "$FAKE_ALERT"
 echo "[prod-pilot-cohort-quick-dashboard] success path"
 TREND_CAPTURE_FILE="$TREND_CAPTURE" \
 ALERT_CAPTURE_FILE="$ALERT_CAPTURE" \
+INCIDENT_SOURCE_QUICK_RUN_REPORT="$INCIDENT_SOURCE_QUICK_RUN_REPORT" \
+INCIDENT_SOURCE_RUN_REPORT="$INCIDENT_SOURCE_RUN_REPORT" \
+INCIDENT_DIR="$INCIDENT_DIR" \
+INCIDENT_BUNDLE_TAR="$INCIDENT_BUNDLE_TAR" \
+INCIDENT_SUMMARY_JSON="$INCIDENT_SUMMARY_JSON" \
+INCIDENT_REPORT_MD="$INCIDENT_REPORT_MD" \
 PROD_PILOT_COHORT_QUICK_TREND_SCRIPT="$FAKE_TREND" \
 PROD_PILOT_COHORT_QUICK_ALERT_SCRIPT="$FAKE_ALERT" \
 ./scripts/prod_pilot_cohort_quick_dashboard.sh \
@@ -151,6 +203,41 @@ if ! rg -q 'count=2 reason=signoff rc is non-zero' "$DASHBOARD_MD"; then
   cat "$DASHBOARD_MD"
   exit 1
 fi
+if ! rg -q '## Incident Handoff' "$DASHBOARD_MD"; then
+  echo "quick dashboard missing incident handoff section"
+  cat "$DASHBOARD_MD"
+  exit 1
+fi
+if ! rg -q "$INCIDENT_SUMMARY_JSON" "$DASHBOARD_MD"; then
+  echo "quick dashboard missing incident summary path"
+  cat "$DASHBOARD_MD"
+  exit 1
+fi
+if ! rg -q "$INCIDENT_REPORT_MD" "$DASHBOARD_MD"; then
+  echo "quick dashboard missing incident report path"
+  cat "$DASHBOARD_MD"
+  exit 1
+fi
+if ! rg -q "$INCIDENT_DIR/attachments_manifest.json" "$DASHBOARD_MD"; then
+  echo "quick dashboard missing incident attachment manifest path"
+  cat "$DASHBOARD_MD"
+  exit 1
+fi
+if ! rg -q 'Incident attachment count: 1' "$DASHBOARD_MD"; then
+  echo "quick dashboard missing incident attachment count"
+  cat "$DASHBOARD_MD"
+  exit 1
+fi
+if ! rg -q '\[prod-pilot-cohort-quick-dashboard\] incident_handoff ' /tmp/integration_prod_pilot_cohort_quick_dashboard_success.log; then
+  echo "quick dashboard missing incident_handoff output line"
+  cat /tmp/integration_prod_pilot_cohort_quick_dashboard_success.log
+  exit 1
+fi
+if ! rg -q "attachment_manifest=${INCIDENT_DIR}/attachments_manifest.json" /tmp/integration_prod_pilot_cohort_quick_dashboard_success.log; then
+  echo "quick dashboard missing incident attachment manifest in handoff output"
+  cat /tmp/integration_prod_pilot_cohort_quick_dashboard_success.log
+  exit 1
+fi
 if ! rg -q -- '--require-signoff-ok 1' "$TREND_CAPTURE"; then
   echo "quick dashboard did not forward --require-signoff-ok to trend script"
   cat "$TREND_CAPTURE"
@@ -178,6 +265,12 @@ TREND_CAPTURE_FILE="$TREND_CAPTURE" \
 ALERT_CAPTURE_FILE="$ALERT_CAPTURE" \
 FAKE_TREND_RC=1 \
 FAKE_ALERT_RC=0 \
+INCIDENT_SOURCE_QUICK_RUN_REPORT="$INCIDENT_SOURCE_QUICK_RUN_REPORT" \
+INCIDENT_SOURCE_RUN_REPORT="$INCIDENT_SOURCE_RUN_REPORT" \
+INCIDENT_DIR="$INCIDENT_DIR" \
+INCIDENT_BUNDLE_TAR="$INCIDENT_BUNDLE_TAR" \
+INCIDENT_SUMMARY_JSON="$INCIDENT_SUMMARY_JSON" \
+INCIDENT_REPORT_MD="$INCIDENT_REPORT_MD" \
 PROD_PILOT_COHORT_QUICK_TREND_SCRIPT="$FAKE_TREND" \
 PROD_PILOT_COHORT_QUICK_ALERT_SCRIPT="$FAKE_ALERT" \
 ./scripts/prod_pilot_cohort_quick_dashboard.sh \
@@ -200,6 +293,12 @@ TREND_CAPTURE_FILE="$TREND_CAPTURE" \
 ALERT_CAPTURE_FILE="$ALERT_CAPTURE" \
 FAKE_TREND_RC=1 \
 FAKE_ALERT_RC=2 \
+INCIDENT_SOURCE_QUICK_RUN_REPORT="$INCIDENT_SOURCE_QUICK_RUN_REPORT" \
+INCIDENT_SOURCE_RUN_REPORT="$INCIDENT_SOURCE_RUN_REPORT" \
+INCIDENT_DIR="$INCIDENT_DIR" \
+INCIDENT_BUNDLE_TAR="$INCIDENT_BUNDLE_TAR" \
+INCIDENT_SUMMARY_JSON="$INCIDENT_SUMMARY_JSON" \
+INCIDENT_REPORT_MD="$INCIDENT_REPORT_MD" \
 PROD_PILOT_COHORT_QUICK_TREND_SCRIPT="$FAKE_TREND" \
 PROD_PILOT_COHORT_QUICK_ALERT_SCRIPT="$FAKE_ALERT" \
 ./scripts/prod_pilot_cohort_quick_dashboard.sh \

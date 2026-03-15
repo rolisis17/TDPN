@@ -146,6 +146,36 @@ json_string_array() {
   jq -r "$expr // [] | .[]? // empty" "$file" 2>/dev/null || true
 }
 
+path_exists01() {
+  local path
+  path="$(trim "${1:-}")"
+  if [[ -n "$path" && -e "$path" ]]; then
+    echo "1"
+  else
+    echo "0"
+  fi
+}
+
+json_valid01() {
+  local path
+  path="$(trim "${1:-}")"
+  if [[ -z "$path" || ! -f "$path" ]]; then
+    echo "0"
+    return
+  fi
+  if jq -e . "$path" >/dev/null 2>&1; then
+    echo "1"
+  else
+    echo "0"
+  fi
+}
+
+json_string_array() {
+  local file="$1"
+  local expr="$2"
+  jq -r "$expr // [] | .[]? // empty" "$file" 2>/dev/null || true
+}
+
 for cmd in bash jq awk date; do
   need_cmd "$cmd"
 done
@@ -455,8 +485,21 @@ declare -a errors=()
 incident_failed_reports_checked=0
 incident_failed_reports_ok=0
 incident_failed_reports_policy_errors=0
+incident_latest_run_report=""
+incident_latest_enabled="0"
+incident_latest_status=""
+incident_latest_bundle_dir=""
+incident_latest_bundle_tar=""
+incident_latest_summary_json=""
+incident_latest_report_md=""
+incident_latest_attachment_manifest=""
+incident_latest_attachment_skipped=""
+incident_latest_attachment_count="0"
 if [[ "$rounds_failed" -gt 0 && ( "$require_incident_snapshot_on_fail" == "1" || "$require_incident_snapshot_artifacts" == "1" ) ]]; then
   mapfile -t run_report_paths < <(json_string_array "$summary_json" '.run_reports')
+  if [[ "${#run_report_paths[@]}" -eq 0 ]]; then
+    mapfile -t run_report_paths < <(json_string_array "$summary_json" '.artifacts.run_reports')
+  fi
   if [[ "${#run_report_paths[@]}" -eq 0 ]]; then
     errors+=("incident snapshot policy requires run_reports[] in cohort summary when rounds_failed>0")
   fi
@@ -492,15 +535,44 @@ if [[ "$rounds_failed" -gt 0 && ( "$require_incident_snapshot_on_fail" == "1" ||
     failed_report_paths_found=$((failed_report_paths_found + 1))
     incident_failed_reports_checked=$((incident_failed_reports_checked + 1))
 
-    rr_snapshot_enabled="$(json_bool_flag "$rr" '.incident_snapshot.enabled')"
+    rr_snapshot_enabled="$(json_bool_flag "$rr" '.incident_snapshot.enabled // .incident_snapshot.enabled_on_fail')"
     rr_snapshot_status="$(json_string "$rr" '.incident_snapshot.status')"
     rr_snapshot_bundle_dir="$(json_string "$rr" '.incident_snapshot.bundle_dir')"
     rr_snapshot_bundle_tar="$(json_string "$rr" '.incident_snapshot.bundle_tar')"
+    rr_snapshot_summary_json="$(json_string "$rr" '.incident_snapshot.summary_json')"
+    rr_snapshot_report_md="$(json_string "$rr" '.incident_snapshot.report_md')"
+    rr_snapshot_attachment_manifest="$(json_string "$rr" '.incident_snapshot.attachment_manifest')"
+    rr_snapshot_attachment_skipped="$(json_string "$rr" '.incident_snapshot.attachment_skipped')"
+    rr_snapshot_attachment_count="$(json_int "$rr" '.incident_snapshot.attachment_count')"
     if [[ -n "$rr_snapshot_bundle_dir" && "$rr_snapshot_bundle_dir" != /* ]]; then
       rr_snapshot_bundle_dir="$ROOT_DIR/$rr_snapshot_bundle_dir"
     fi
     if [[ -n "$rr_snapshot_bundle_tar" && "$rr_snapshot_bundle_tar" != /* ]]; then
       rr_snapshot_bundle_tar="$ROOT_DIR/$rr_snapshot_bundle_tar"
+    fi
+    if [[ -n "$rr_snapshot_summary_json" && "$rr_snapshot_summary_json" != /* ]]; then
+      rr_snapshot_summary_json="$ROOT_DIR/$rr_snapshot_summary_json"
+    fi
+    if [[ -n "$rr_snapshot_report_md" && "$rr_snapshot_report_md" != /* ]]; then
+      rr_snapshot_report_md="$ROOT_DIR/$rr_snapshot_report_md"
+    fi
+    if [[ -n "$rr_snapshot_attachment_manifest" && "$rr_snapshot_attachment_manifest" != /* ]]; then
+      rr_snapshot_attachment_manifest="$ROOT_DIR/$rr_snapshot_attachment_manifest"
+    fi
+    if [[ -n "$rr_snapshot_attachment_skipped" && "$rr_snapshot_attachment_skipped" != /* ]]; then
+      rr_snapshot_attachment_skipped="$ROOT_DIR/$rr_snapshot_attachment_skipped"
+    fi
+    if [[ -z "$incident_latest_run_report" || -n "$rr_snapshot_status" || -n "$rr_snapshot_bundle_dir" || -n "$rr_snapshot_bundle_tar" || -n "$rr_snapshot_summary_json" || -n "$rr_snapshot_report_md" || -n "$rr_snapshot_attachment_manifest" || -n "$rr_snapshot_attachment_skipped" ]]; then
+      incident_latest_run_report="$rr"
+      incident_latest_enabled="$rr_snapshot_enabled"
+      incident_latest_status="$rr_snapshot_status"
+      incident_latest_bundle_dir="$rr_snapshot_bundle_dir"
+      incident_latest_bundle_tar="$rr_snapshot_bundle_tar"
+      incident_latest_summary_json="$rr_snapshot_summary_json"
+      incident_latest_report_md="$rr_snapshot_report_md"
+      incident_latest_attachment_manifest="$rr_snapshot_attachment_manifest"
+      incident_latest_attachment_skipped="$rr_snapshot_attachment_skipped"
+      incident_latest_attachment_count="$rr_snapshot_attachment_count"
     fi
 
     rr_has_policy_error=0
@@ -524,6 +596,25 @@ if [[ "$rounds_failed" -gt 0 && ( "$require_incident_snapshot_on_fail" == "1" ||
         errors+=("failed round incident snapshot bundle_tar missing/not-found: $rr (bundle_tar=${rr_snapshot_bundle_tar:-unset})")
         rr_has_policy_error=1
       fi
+      if [[ -z "$rr_snapshot_summary_json" || ! -f "$rr_snapshot_summary_json" ]]; then
+        errors+=("failed round incident snapshot summary_json missing/not-found: $rr (summary_json=${rr_snapshot_summary_json:-unset})")
+        rr_has_policy_error=1
+      elif ! jq -e . "$rr_snapshot_summary_json" >/dev/null 2>&1; then
+        errors+=("failed round incident snapshot summary_json is not valid JSON: $rr (summary_json=${rr_snapshot_summary_json:-unset})")
+        rr_has_policy_error=1
+      fi
+      if [[ -z "$rr_snapshot_report_md" || ! -f "$rr_snapshot_report_md" ]]; then
+        errors+=("failed round incident snapshot report_md missing/not-found: $rr (report_md=${rr_snapshot_report_md:-unset})")
+        rr_has_policy_error=1
+      fi
+      if [[ -n "$rr_snapshot_attachment_manifest" && ! -f "$rr_snapshot_attachment_manifest" ]]; then
+        errors+=("failed round incident snapshot attachment_manifest missing/not-found: $rr (attachment_manifest=${rr_snapshot_attachment_manifest:-unset})")
+        rr_has_policy_error=1
+      fi
+      if [[ -n "$rr_snapshot_attachment_skipped" && ! -f "$rr_snapshot_attachment_skipped" ]]; then
+        errors+=("failed round incident snapshot attachment_skipped missing/not-found: $rr (attachment_skipped=${rr_snapshot_attachment_skipped:-unset})")
+        rr_has_policy_error=1
+      fi
     fi
 
     if [[ "$rr_has_policy_error" == "1" ]]; then
@@ -537,6 +628,17 @@ if [[ "$rounds_failed" -gt 0 && ( "$require_incident_snapshot_on_fail" == "1" ||
     errors+=("incident snapshot policy could not find failed run reports while rounds_failed=$rounds_failed")
   fi
 fi
+
+incident_latest_run_report_exists="$(path_exists01 "$incident_latest_run_report")"
+incident_latest_bundle_dir_exists="$(path_exists01 "$incident_latest_bundle_dir")"
+incident_latest_bundle_tar_exists="$(path_exists01 "$incident_latest_bundle_tar")"
+incident_latest_summary_exists="$(path_exists01 "$incident_latest_summary_json")"
+incident_latest_summary_valid_json="$(json_valid01 "$incident_latest_summary_json")"
+incident_latest_report_exists="$(path_exists01 "$incident_latest_report_md")"
+incident_latest_attachment_manifest_exists="$(path_exists01 "$incident_latest_attachment_manifest")"
+incident_latest_attachment_skipped_exists="$(path_exists01 "$incident_latest_attachment_skipped")"
+incident_source_summary_exists="$(path_exists01 "$summary_json")"
+incident_source_summary_valid_json="$(json_valid01 "$summary_json")"
 
 if [[ "$require_status_ok" == "1" && "$status" != "ok" ]]; then
   errors+=("cohort status is not ok (status=${status:-unset}, failure_step=${failure_step:-none}, final_rc=$final_rc)")
@@ -702,6 +804,15 @@ summary_payload="$(
     --arg bundle_manifest_json "$bundle_manifest_json" \
     --arg summary_json "$summary_json" \
     --arg trend_summary_json "$trend_summary_json" \
+    --arg incident_latest_run_report "$incident_latest_run_report" \
+    --arg incident_latest_status "$incident_latest_status" \
+    --arg incident_latest_bundle_dir "$incident_latest_bundle_dir" \
+    --arg incident_latest_bundle_tar "$incident_latest_bundle_tar" \
+    --arg incident_latest_summary_json "$incident_latest_summary_json" \
+    --arg incident_latest_report_md "$incident_latest_report_md" \
+    --arg incident_latest_attachment_manifest "$incident_latest_attachment_manifest" \
+    --arg incident_latest_attachment_skipped "$incident_latest_attachment_skipped" \
+    --arg incident_source_summary_json "$summary_json" \
     --argjson require_status_ok "$(json_bool "$require_status_ok")" \
     --argjson require_all_rounds_ok "$(json_bool "$require_all_rounds_ok")" \
     --argjson max_round_failures "$max_round_failures" \
@@ -737,6 +848,18 @@ summary_payload="$(
     --argjson incident_failed_reports_checked "$incident_failed_reports_checked" \
     --argjson incident_failed_reports_ok "$incident_failed_reports_ok" \
     --argjson incident_failed_reports_policy_errors "$incident_failed_reports_policy_errors" \
+    --argjson incident_latest_enabled "$incident_latest_enabled" \
+    --argjson incident_latest_run_report_exists "$incident_latest_run_report_exists" \
+    --argjson incident_latest_bundle_dir_exists "$incident_latest_bundle_dir_exists" \
+    --argjson incident_latest_bundle_tar_exists "$incident_latest_bundle_tar_exists" \
+    --argjson incident_latest_summary_exists "$incident_latest_summary_exists" \
+    --argjson incident_latest_summary_valid_json "$incident_latest_summary_valid_json" \
+    --argjson incident_latest_report_exists "$incident_latest_report_exists" \
+    --argjson incident_latest_attachment_manifest_exists "$incident_latest_attachment_manifest_exists" \
+    --argjson incident_latest_attachment_skipped_exists "$incident_latest_attachment_skipped_exists" \
+    --argjson incident_latest_attachment_count "$incident_latest_attachment_count" \
+    --argjson incident_source_summary_exists "$incident_source_summary_exists" \
+    --argjson incident_source_summary_valid_json "$incident_source_summary_valid_json" \
     --argjson errors "$errors_json" \
     '{
       generated_at_utc:$timestamp,
@@ -772,7 +895,21 @@ summary_payload="$(
       incident_snapshot:{
         failed_reports_checked:$incident_failed_reports_checked,
         failed_reports_ok:$incident_failed_reports_ok,
-        failed_reports_policy_errors:$incident_failed_reports_policy_errors
+        failed_reports_policy_errors:$incident_failed_reports_policy_errors,
+        latest_failed_run_report:{
+          source_summary_json:{path:($incident_source_summary_json // ""), exists:$incident_source_summary_exists, valid_json:$incident_source_summary_valid_json},
+          path:($incident_latest_run_report // ""),
+          exists:$incident_latest_run_report_exists,
+          enabled:$incident_latest_enabled,
+          status:($incident_latest_status // ""),
+          bundle_dir:{path:($incident_latest_bundle_dir // ""), exists:$incident_latest_bundle_dir_exists},
+          bundle_tar:{path:($incident_latest_bundle_tar // ""), exists:$incident_latest_bundle_tar_exists},
+          summary_json:{path:($incident_latest_summary_json // ""), exists:$incident_latest_summary_exists, valid_json:$incident_latest_summary_valid_json},
+          report_md:{path:($incident_latest_report_md // ""), exists:$incident_latest_report_exists},
+          attachment_manifest:{path:($incident_latest_attachment_manifest // ""), exists:$incident_latest_attachment_manifest_exists},
+          attachment_skipped:{path:($incident_latest_attachment_skipped // ""), exists:$incident_latest_attachment_skipped_exists},
+          attachment_count:$incident_latest_attachment_count
+        }
       },
       policy:{
         require_status_ok:$require_status_ok,
@@ -820,6 +957,12 @@ summary_payload="$(
 )"
 
 echo "[prod-pilot-cohort-check] decision=$decision status=${status:-unset} rounds_failed=$rounds_failed go_rate_pct=${trend_go_rate_pct:-unset} alert=${alert_severity:-unset} errors=${#errors[@]}"
+if [[ -n "$incident_latest_run_report" ]]; then
+  echo "[prod-pilot-cohort-check] incident_snapshot_latest_failed_run_report=$incident_latest_run_report status=${incident_latest_status:-unset} summary_json=${incident_latest_summary_json:-unset} report_md=${incident_latest_report_md:-unset} attachment_manifest=${incident_latest_attachment_manifest:-unset} attachment_skipped=${incident_latest_attachment_skipped:-unset} attachment_count=${incident_latest_attachment_count}"
+fi
+if [[ -n "$incident_latest_run_report" || -n "$incident_latest_summary_json" || -n "$incident_latest_report_md" || -n "$incident_latest_attachment_manifest" || -n "$incident_latest_attachment_skipped" ]]; then
+  echo "[prod-pilot-cohort-check] incident_handoff source_summary_json=${summary_json:-unset} source_run_report=${incident_latest_run_report:-unset} summary_json=${incident_latest_summary_json:-unset} report_md=${incident_latest_report_md:-unset} attachment_manifest=${incident_latest_attachment_manifest:-unset} attachment_skipped=${incident_latest_attachment_skipped:-unset} attachment_count=${incident_latest_attachment_count}"
+fi
 if [[ "$show_json" == "1" ]]; then
   echo "[prod-pilot-cohort-check] summary_json_payload:"
   printf '%s\n' "$summary_payload"
@@ -831,6 +974,13 @@ if [[ "$decision" == "NO-GO" ]]; then
     echo "[prod-pilot-cohort-check] error[$((idx + 1))]: ${errors[$idx]}"
     idx=$((idx + 1))
   done
+  if [[ -n "$incident_latest_summary_json" || -n "$incident_latest_report_md" || -n "$incident_latest_bundle_dir" || -n "$incident_latest_bundle_tar" ]]; then
+    echo "[prod-pilot-cohort-check] incident handoff artifacts:"
+    [[ -n "$incident_latest_bundle_dir" ]] && echo "  - bundle_dir=$incident_latest_bundle_dir"
+    [[ -n "$incident_latest_bundle_tar" ]] && echo "  - bundle_tar=$incident_latest_bundle_tar"
+    [[ -n "$incident_latest_summary_json" ]] && echo "  - summary_json=$incident_latest_summary_json"
+    [[ -n "$incident_latest_report_md" ]] && echo "  - report_md=$incident_latest_report_md"
+  fi
   exit 1
 fi
 

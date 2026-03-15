@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-for cmd in bash rg tar; do
+for cmd in bash jq rg tar; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "missing required command: $cmd"
     exit 2
@@ -14,6 +14,8 @@ done
 TMP_DIR="$(mktemp -d)"
 TMP_BIN="$TMP_DIR/bin"
 SNAPSHOT_DIR="$TMP_DIR/incident_bundle"
+ATTACH_LOG="$TMP_DIR/runtime_doctor_before.log"
+ATTACH_JSON="$TMP_DIR/runtime_doctor_before.json"
 mkdir -p "$TMP_BIN"
 
 cleanup() {
@@ -86,6 +88,9 @@ EOF_DOCKER
 
 chmod +x "$TMP_BIN/curl" "$TMP_BIN/docker"
 
+printf 'runtime-doctor ok\n' >"$ATTACH_LOG"
+printf '{"status":"OK"}\n' >"$ATTACH_JSON"
+
 PATH="$TMP_BIN:$PATH" ./scripts/incident_snapshot.sh \
   --bundle-dir "$SNAPSHOT_DIR" \
   --mode authority \
@@ -96,7 +101,9 @@ PATH="$TMP_BIN:$PATH" ./scripts/incident_snapshot.sh \
   --compose-project deploy \
   --include-docker-logs 1 \
   --docker-log-lines 15 \
-  --timeout-sec 4 >/dev/null
+  --timeout-sec 4 \
+  --attach-artifact "$ATTACH_LOG" \
+  --attach-artifact "$ATTACH_JSON" >/dev/null
 
 if [[ ! -f "$SNAPSHOT_DIR/metadata.txt" ]]; then
   echo "incident snapshot integration failed: metadata missing"
@@ -133,6 +140,39 @@ if [[ ! -f "$SNAPSHOT_DIR/manifest.sha256" ]]; then
   echo "incident snapshot integration failed: manifest missing"
   exit 1
 fi
+if [[ ! -f "$SNAPSHOT_DIR/incident_summary.json" ]]; then
+  echo "incident snapshot integration failed: summary JSON missing"
+  exit 1
+fi
+if [[ ! -f "$SNAPSHOT_DIR/incident_report.md" ]]; then
+  echo "incident snapshot integration failed: report markdown missing"
+  exit 1
+fi
+if ! jq -e '.status == "ok" and .endpoints.directory_relays.relay_count == 1 and .endpoints.exit_metrics.accepted_packets == 7' "$SNAPSHOT_DIR/incident_summary.json" >/dev/null; then
+  echo "incident snapshot integration failed: summary JSON missing expected fields"
+  cat "$SNAPSHOT_DIR/incident_summary.json"
+  exit 1
+fi
+if ! jq -e '.attachments.count == 2 and .attachments.skipped_count == 0 and (.attachments.items | any(.stored_path | endswith("runtime_doctor_before.log")))' "$SNAPSHOT_DIR/incident_summary.json" >/dev/null; then
+  echo "incident snapshot integration failed: summary JSON missing attached artifact details"
+  cat "$SNAPSHOT_DIR/incident_summary.json"
+  exit 1
+fi
+if ! rg -q 'Incident Snapshot Summary' "$SNAPSHOT_DIR/incident_report.md"; then
+  echo "incident snapshot integration failed: report markdown missing title"
+  cat "$SNAPSHOT_DIR/incident_report.md"
+  exit 1
+fi
+if ! rg -q 'Attached artifacts: `2`' "$SNAPSHOT_DIR/incident_report.md"; then
+  echo "incident snapshot integration failed: report markdown missing attachment summary"
+  cat "$SNAPSHOT_DIR/incident_report.md"
+  exit 1
+fi
+if [[ ! -f "$SNAPSHOT_DIR/attachments/manifest.tsv" ]]; then
+  echo "incident snapshot integration failed: attachment manifest missing"
+  find "$SNAPSHOT_DIR" -maxdepth 2 -type f -print || true
+  exit 1
+fi
 if [[ ! -f "${SNAPSHOT_DIR}.tar.gz" ]]; then
   echo "incident snapshot integration failed: bundle tar missing"
   exit 1
@@ -143,6 +183,16 @@ if [[ ! -f "${SNAPSHOT_DIR}.tar.gz.sha256" ]]; then
 fi
 if ! tar -tzf "${SNAPSHOT_DIR}.tar.gz" | rg -q 'incident_bundle/metadata.txt'; then
   echo "incident snapshot integration failed: tar missing metadata file"
+  tar -tzf "${SNAPSHOT_DIR}.tar.gz"
+  exit 1
+fi
+if ! tar -tzf "${SNAPSHOT_DIR}.tar.gz" | rg -q 'incident_bundle/incident_summary.json'; then
+  echo "incident snapshot integration failed: tar missing incident summary JSON"
+  tar -tzf "${SNAPSHOT_DIR}.tar.gz"
+  exit 1
+fi
+if ! tar -tzf "${SNAPSHOT_DIR}.tar.gz" | rg -q 'incident_bundle/attachments/manifest.tsv'; then
+  echo "incident snapshot integration failed: tar missing attachment manifest"
   tar -tzf "${SNAPSHOT_DIR}.tar.gz"
   exit 1
 fi

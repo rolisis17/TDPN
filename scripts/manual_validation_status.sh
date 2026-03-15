@@ -1,0 +1,735 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  ./scripts/manual_validation_status.sh \
+    [--base-port N] \
+    [--client-iface IFACE] \
+    [--exit-iface IFACE] \
+    [--vpn-iface IFACE] \
+    [--overlay-check-id CHECK_ID] \
+    [--overlay-status pass|fail|warn|pending|skip] \
+    [--overlay-notes TEXT] \
+    [--overlay-command TEXT] \
+    [--overlay-artifact PATH]... \
+    [--show-json [0|1]]
+
+Purpose:
+  Show the current real-host production-readiness checklist status.
+
+What it combines:
+  - live runtime-doctor status
+  - recorded manual validation receipts
+USAGE
+}
+
+trim() {
+  local value="$1"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "$value"
+}
+
+bool_arg_or_die() {
+  local name="$1"
+  local value="$2"
+  if [[ "$value" != "0" && "$value" != "1" ]]; then
+    echo "$name must be 0 or 1"
+    exit 2
+  fi
+}
+
+abs_path() {
+  local path="$1"
+  path="$(trim "$path")"
+  if [[ -z "$path" ]]; then
+    printf '%s' ""
+  elif [[ "$path" == /* ]]; then
+    printf '%s' "$path"
+  else
+    printf '%s' "$ROOT_DIR/$path"
+  fi
+}
+
+manual_validation_state_dir() {
+  if [[ -n "${EASY_NODE_MANUAL_VALIDATION_STATE_DIR:-}" ]]; then
+    printf '%s\n' "${EASY_NODE_MANUAL_VALIDATION_STATE_DIR}"
+    return
+  fi
+
+  local home_dir=""
+  local state_home=""
+  if [[ -n "${SUDO_USER:-}" && "${SUDO_USER:-}" != "root" ]]; then
+    home_dir="$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6 || true)"
+    if [[ -z "$home_dir" ]]; then
+      home_dir="$(eval echo "~$SUDO_USER" 2>/dev/null || true)"
+    fi
+    if [[ -n "$home_dir" && "$home_dir" != "~$SUDO_USER" ]]; then
+      state_home="$home_dir/.local/state"
+    fi
+  fi
+  if [[ -z "$state_home" ]]; then
+    if [[ -n "${XDG_STATE_HOME:-}" ]]; then
+      state_home="${XDG_STATE_HOME}"
+    elif [[ -n "${HOME:-}" ]]; then
+      state_home="${HOME}/.local/state"
+    else
+      state_home="${ROOT_DIR}/.easy-node-logs"
+    fi
+  fi
+  printf '%s\n' "${state_home}/privacynode/manual_validation"
+}
+
+extract_json_payload() {
+  local log_file="$1"
+  awk '/^\[runtime-doctor\] summary_json_payload:/{flag=1; next} flag{print}' "$log_file"
+}
+
+path_exists_01() {
+  local path="$1"
+  if [[ -n "$path" && -e "$path" ]]; then
+    printf '1'
+  else
+    printf '0'
+  fi
+}
+
+json_file_valid_01() {
+  local path="$1"
+  if [[ -n "$path" && -f "$path" ]] && jq -e . "$path" >/dev/null 2>&1; then
+    printf '1'
+  else
+    printf '0'
+  fi
+}
+
+extract_attachment_record() {
+  local manifest_file="$1"
+  local kind="$2"
+  [[ -f "$manifest_file" ]] || return 0
+  awk -F'\t' -v kind="$kind" '
+    function source_matches(kind, source_path, stored_path, source_base) {
+      if (kind == "readiness_report_summary") {
+        return source_base == "manual_validation_readiness_summary.json" || stored_path ~ /manual_validation_readiness_summary\.json$/
+      }
+      if (kind == "readiness_report_md") {
+        return source_base == "manual_validation_readiness_report.md" || stored_path ~ /manual_validation_readiness_report\.md$/
+      }
+      if (kind == "readiness_report_log") {
+        return source_base ~ /manual_validation_report\.log$/ || stored_path ~ /manual_validation_report\.log$/
+      }
+      return 0
+    }
+    {
+      stored_path = $1
+      source_path = (NF >= 3 ? $3 : (NF == 2 ? $2 : ""))
+      if (stored_path == "" || source_path == "") {
+        next
+      }
+      source_base = source_path
+      sub(/^.*\//, "", source_base)
+      if (source_matches(kind, source_path, stored_path, source_base)) {
+        print stored_path "\t" source_path
+        exit
+      }
+    }
+  ' "$manifest_file"
+}
+
+build_attachment_pointer_json() {
+  local manifest_file="$1"
+  local bundle_dir="$2"
+  local kind="$3"
+  local record=""
+  local stored_path=""
+  local source_path=""
+  local bundle_path=""
+  local bundle_exists="0"
+  local source_exists="0"
+  local bundle_valid_json="0"
+
+  record="$(extract_attachment_record "$manifest_file" "$kind")"
+  if [[ -n "$record" ]]; then
+    IFS=$'\t' read -r stored_path source_path <<<"$record"
+    if [[ -n "$bundle_dir" && -n "$stored_path" ]]; then
+      bundle_path="$bundle_dir/$stored_path"
+    fi
+    bundle_exists="$(path_exists_01 "$bundle_path")"
+    source_exists="$(path_exists_01 "$source_path")"
+    bundle_valid_json="$(json_file_valid_01 "$bundle_path")"
+  fi
+
+  jq -n \
+    --arg source_path "$source_path" \
+    --arg stored_path "$stored_path" \
+    --arg bundle_path "$bundle_path" \
+    --argjson source_exists "$source_exists" \
+    --argjson bundle_exists "$bundle_exists" \
+    --argjson bundle_valid_json "$bundle_valid_json" \
+    '{
+      source_path: $source_path,
+      source_exists: ($source_exists == 1),
+      stored_path: $stored_path,
+      bundle_path: $bundle_path,
+      exists: ($bundle_exists == 1),
+      valid_json: ($bundle_valid_json == 1)
+    }'
+}
+
+find_incident_source_summary_json() {
+  local artifacts_json="$1"
+  local artifact=""
+  while IFS= read -r artifact; do
+    artifact="$(trim "$artifact")"
+    if [[ -z "$artifact" || ! -f "$artifact" ]]; then
+      continue
+    fi
+    if jq -e '.incident_snapshot? != null and .status? != null' "$artifact" >/dev/null 2>&1; then
+      printf '%s\n' "$artifact"
+      return 0
+    fi
+  done < <(printf '%s\n' "$artifacts_json" | jq -r '.[]?')
+  printf '%s\n' ""
+}
+
+build_incident_handoff_json() {
+  local source_summary_json="$1"
+  local receipt_json="$2"
+  local enabled="0"
+  local status=""
+  local bundle_dir=""
+  local bundle_tar=""
+  local summary_json=""
+  local report_md=""
+  local attachment_manifest=""
+  local attachment_skipped=""
+  local attachment_count="0"
+  local incident_log=""
+  local readiness_report_summary_attachment_json='{"source_path":"","source_exists":false,"stored_path":"","bundle_path":"","exists":false,"valid_json":false}'
+  local readiness_report_md_attachment_json='{"source_path":"","source_exists":false,"stored_path":"","bundle_path":"","exists":false,"valid_json":false}'
+  local readiness_report_log_attachment_json='{"source_path":"","source_exists":false,"stored_path":"","bundle_path":"","exists":false,"valid_json":false}'
+  local source_exists="0"
+  local source_valid="0"
+  local receipt_exists="0"
+  local receipt_valid="0"
+  local bundle_dir_exists="0"
+  local bundle_tar_exists="0"
+  local summary_exists="0"
+  local summary_valid="0"
+  local report_exists="0"
+  local attachment_manifest_exists="0"
+  local attachment_skipped_exists="0"
+  local incident_log_exists="0"
+
+  source_exists="$(path_exists_01 "$source_summary_json")"
+  source_valid="$(json_file_valid_01 "$source_summary_json")"
+  receipt_exists="$(path_exists_01 "$receipt_json")"
+  receipt_valid="$(json_file_valid_01 "$receipt_json")"
+
+  if [[ "$source_valid" == "1" ]]; then
+    enabled="$(jq -r '(.incident_snapshot.enabled // .incident_snapshot.enabled_on_fail // false) | if . then 1 else 0 end' "$source_summary_json" 2>/dev/null || echo 0)"
+    status="$(jq -r '.incident_snapshot.status // ""' "$source_summary_json" 2>/dev/null || true)"
+    bundle_dir="$(jq -r '.incident_snapshot.bundle_dir // ""' "$source_summary_json" 2>/dev/null || true)"
+    bundle_tar="$(jq -r '.incident_snapshot.bundle_tar // ""' "$source_summary_json" 2>/dev/null || true)"
+    summary_json="$(jq -r '.incident_snapshot.summary_json // ""' "$source_summary_json" 2>/dev/null || true)"
+    report_md="$(jq -r '.incident_snapshot.report_md // ""' "$source_summary_json" 2>/dev/null || true)"
+    attachment_manifest="$(jq -r '.incident_snapshot.attachment_manifest // ""' "$source_summary_json" 2>/dev/null || true)"
+    attachment_skipped="$(jq -r '.incident_snapshot.attachment_skipped // ""' "$source_summary_json" 2>/dev/null || true)"
+    attachment_count="$(jq -r '.incident_snapshot.attachment_count // 0' "$source_summary_json" 2>/dev/null || echo 0)"
+    incident_log="$(jq -r '.incident_snapshot.log // ""' "$source_summary_json" 2>/dev/null || true)"
+  fi
+
+  bundle_dir_exists="$(path_exists_01 "$bundle_dir")"
+  bundle_tar_exists="$(path_exists_01 "$bundle_tar")"
+  summary_exists="$(path_exists_01 "$summary_json")"
+  summary_valid="$(json_file_valid_01 "$summary_json")"
+  report_exists="$(path_exists_01 "$report_md")"
+  attachment_manifest_exists="$(path_exists_01 "$attachment_manifest")"
+  attachment_skipped_exists="$(path_exists_01 "$attachment_skipped")"
+  incident_log_exists="$(path_exists_01 "$incident_log")"
+  if [[ "$attachment_manifest_exists" == "1" ]]; then
+    readiness_report_summary_attachment_json="$(build_attachment_pointer_json "$attachment_manifest" "$bundle_dir" "readiness_report_summary")"
+    readiness_report_md_attachment_json="$(build_attachment_pointer_json "$attachment_manifest" "$bundle_dir" "readiness_report_md")"
+    readiness_report_log_attachment_json="$(build_attachment_pointer_json "$attachment_manifest" "$bundle_dir" "readiness_report_log")"
+  fi
+
+  jq -n \
+    --arg status "$status" \
+    --arg source_summary_json "$source_summary_json" \
+    --arg receipt_json "$receipt_json" \
+    --arg bundle_dir "$bundle_dir" \
+    --arg bundle_tar "$bundle_tar" \
+    --arg summary_json "$summary_json" \
+    --arg report_md "$report_md" \
+    --arg attachment_manifest "$attachment_manifest" \
+    --arg attachment_skipped "$attachment_skipped" \
+    --arg attachment_count "$attachment_count" \
+    --arg incident_log "$incident_log" \
+    --argjson enabled "$enabled" \
+    --argjson source_exists "$source_exists" \
+    --argjson source_valid "$source_valid" \
+    --argjson receipt_exists "$receipt_exists" \
+    --argjson receipt_valid "$receipt_valid" \
+    --argjson bundle_dir_exists "$bundle_dir_exists" \
+    --argjson bundle_tar_exists "$bundle_tar_exists" \
+    --argjson summary_exists "$summary_exists" \
+    --argjson summary_valid "$summary_valid" \
+    --argjson report_exists "$report_exists" \
+    --argjson attachment_manifest_exists "$attachment_manifest_exists" \
+    --argjson attachment_skipped_exists "$attachment_skipped_exists" \
+    --argjson incident_log_exists "$incident_log_exists" \
+    --argjson readiness_report_summary_attachment "$readiness_report_summary_attachment_json" \
+    --argjson readiness_report_md_attachment "$readiness_report_md_attachment_json" \
+    --argjson readiness_report_log_attachment "$readiness_report_log_attachment_json" \
+    '{
+      available: (($status | length) > 0 or ($summary_json | length) > 0 or ($report_md | length) > 0 or ($bundle_dir | length) > 0),
+      enabled: ($enabled == 1),
+      status: $status,
+      source_summary_json: {
+        path: $source_summary_json,
+        exists: ($source_exists == 1),
+        valid_json: ($source_valid == 1)
+      },
+      receipt_json: {
+        path: $receipt_json,
+        exists: ($receipt_exists == 1),
+        valid_json: ($receipt_valid == 1)
+      },
+      bundle_dir: {
+        path: $bundle_dir,
+        exists: ($bundle_dir_exists == 1)
+      },
+      bundle_tar: {
+        path: $bundle_tar,
+        exists: ($bundle_tar_exists == 1)
+      },
+      summary_json: {
+        path: $summary_json,
+        exists: ($summary_exists == 1),
+        valid_json: ($summary_valid == 1)
+      },
+      report_md: {
+        path: $report_md,
+        exists: ($report_exists == 1)
+      },
+      attachment_manifest: {
+        path: $attachment_manifest,
+        exists: ($attachment_manifest_exists == 1)
+      },
+      attachment_skipped: {
+        path: $attachment_skipped,
+        exists: ($attachment_skipped_exists == 1)
+      },
+      attachment_count: ($attachment_count | tonumber),
+      readiness_report_summary_attachment: $readiness_report_summary_attachment,
+      readiness_report_md_attachment: $readiness_report_md_attachment,
+      readiness_report_log_attachment: $readiness_report_log_attachment,
+      log: {
+        path: $incident_log,
+        exists: ($incident_log_exists == 1)
+      }
+    }'
+}
+
+build_recorded_check_json() {
+  local check_id="$1"
+  local check_label="$2"
+  local default_command="$3"
+  local check_json=""
+  local check_status=""
+  local check_notes=""
+  local check_command=""
+  local check_recorded_at=""
+  local check_receipt_json=""
+  local check_artifacts_json=""
+  local source_summary_json=""
+  local incident_handoff_json=""
+
+  check_json="$(printf '%s\n' "$recorded_json" | jq -c --arg id "$check_id" '.checks[$id] // {
+    status: "pending",
+    notes: "",
+    command: "",
+    artifacts: [],
+    recorded_at_utc: "",
+    receipt_json: ""
+  }')"
+  check_status="$(jq -r '.status // "pending"' <<<"$check_json")"
+  check_notes="$(jq -r '.notes // ""' <<<"$check_json")"
+  check_command="$(jq -r '.command // ""' <<<"$check_json")"
+  if [[ -z "$check_command" ]]; then
+    check_command="$default_command"
+  fi
+  check_recorded_at="$(jq -r '.recorded_at_utc // ""' <<<"$check_json")"
+  check_receipt_json="$(jq -r '.receipt_json // ""' <<<"$check_json")"
+  check_artifacts_json="$(jq -c '.artifacts // []' <<<"$check_json")"
+  source_summary_json="$(find_incident_source_summary_json "$check_artifacts_json")"
+  incident_handoff_json="$(build_incident_handoff_json "$source_summary_json" "$check_receipt_json")"
+
+  jq -n \
+    --arg check_id "$check_id" \
+    --arg check_label "$check_label" \
+    --arg status "$check_status" \
+    --arg notes "$check_notes" \
+    --arg command "$check_command" \
+    --arg recorded_at_utc "$check_recorded_at" \
+    --arg receipt_json "$check_receipt_json" \
+    --argjson artifacts "$check_artifacts_json" \
+    --argjson incident_handoff "$incident_handoff_json" \
+    '{
+      "check_id": $check_id,
+      "label": $check_label,
+      "status": $status,
+      "notes": $notes,
+      "command": $command,
+      "artifacts": $artifacts,
+      "recorded_at_utc": $recorded_at_utc,
+      "receipt_json": $receipt_json,
+      "incident_handoff": $incident_handoff
+    }'
+}
+
+show_json="0"
+base_port="${EASY_NODE_DOCTOR_WG_ONLY_BASE_PORT:-19280}"
+client_iface="${EASY_NODE_DOCTOR_CLIENT_IFACE:-wgcstack0}"
+exit_iface="${EASY_NODE_DOCTOR_EXIT_IFACE:-wgestack0}"
+vpn_iface="${EASY_NODE_DOCTOR_VPN_IFACE:-wgvpn0}"
+overlay_check_id=""
+overlay_status=""
+overlay_notes=""
+overlay_command=""
+declare -a overlay_artifacts=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --base-port)
+      base_port="${2:-}"
+      shift 2
+      ;;
+    --client-iface)
+      client_iface="${2:-}"
+      shift 2
+      ;;
+    --exit-iface)
+      exit_iface="${2:-}"
+      shift 2
+      ;;
+    --vpn-iface)
+      vpn_iface="${2:-}"
+      shift 2
+      ;;
+    --overlay-check-id)
+      overlay_check_id="${2:-}"
+      shift 2
+      ;;
+    --overlay-status)
+      overlay_status="${2:-}"
+      shift 2
+      ;;
+    --overlay-notes)
+      overlay_notes="${2:-}"
+      shift 2
+      ;;
+    --overlay-command)
+      overlay_command="${2:-}"
+      shift 2
+      ;;
+    --overlay-artifact)
+      overlay_artifacts+=("$(abs_path "${2:-}")")
+      shift 2
+      ;;
+    --show-json)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        show_json="${2:-}"
+        shift 2
+      else
+        show_json="1"
+        shift
+      fi
+      ;;
+    -h|--help|help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "unknown argument: $1"
+      usage
+      exit 2
+      ;;
+  esac
+done
+
+bool_arg_or_die "--show-json" "$show_json"
+if ! [[ "$base_port" =~ ^[0-9]+$ ]]; then
+  echo "--base-port must be an integer"
+  exit 2
+fi
+if [[ -z "$client_iface" || -z "$exit_iface" || -z "$vpn_iface" ]]; then
+  echo "--client-iface, --exit-iface, and --vpn-iface must be non-empty"
+  exit 2
+fi
+overlay_check_id="$(trim "$overlay_check_id")"
+overlay_status="$(trim "$overlay_status")"
+overlay_notes="$(trim "$overlay_notes")"
+overlay_command="$(trim "$overlay_command")"
+if [[ -n "$overlay_check_id" ]]; then
+  if [[ ! "$overlay_check_id" =~ ^[a-z0-9_]+$ ]]; then
+    echo "--overlay-check-id must match ^[a-z0-9_]+$"
+    exit 2
+  fi
+  case "$overlay_status" in
+    pass|fail|warn|pending|skip)
+      ;;
+    *)
+      echo "--overlay-status must be one of: pass fail warn pending skip"
+      exit 2
+      ;;
+  esac
+fi
+
+runtime_doctor_script="${RUNTIME_DOCTOR_SCRIPT:-$ROOT_DIR/scripts/runtime_doctor.sh}"
+if [[ ! -x "$runtime_doctor_script" ]]; then
+  echo "missing runtime doctor script: $runtime_doctor_script"
+  exit 2
+fi
+
+doctor_log="$(mktemp)"
+runtime_doctor_rc=0
+if "$runtime_doctor_script" \
+  --base-port "$base_port" \
+  --client-iface "$client_iface" \
+  --exit-iface "$exit_iface" \
+  --vpn-iface "$vpn_iface" \
+  --show-json 1 >"$doctor_log" 2>&1; then
+  runtime_doctor_rc=0
+else
+  runtime_doctor_rc=$?
+fi
+runtime_doctor_json="$(extract_json_payload "$doctor_log")"
+if [[ -z "$runtime_doctor_json" ]]; then
+  echo "manual-validation-status failed: runtime-doctor did not emit JSON summary"
+  cat "$doctor_log"
+  rm -f "$doctor_log"
+  exit 1
+fi
+rm -f "$doctor_log"
+
+state_dir="$(manual_validation_state_dir)"
+status_json="${state_dir}/status.json"
+if [[ -f "$status_json" ]]; then
+  recorded_json="$(cat "$status_json")"
+else
+  recorded_json='{"version":1,"checks":{}}'
+fi
+if [[ -n "$overlay_check_id" ]]; then
+  overlay_recorded_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  overlay_artifacts_json="$(printf '%s\n' "${overlay_artifacts[@]:-}" | jq -Rsc 'split("\n") | map(select(length > 0))')"
+  recorded_json="$(
+    printf '%s\n' "$recorded_json" | jq \
+      --arg check_id "$overlay_check_id" \
+      --arg status "$overlay_status" \
+      --arg notes "$overlay_notes" \
+      --arg command "$overlay_command" \
+      --arg recorded_at_utc "$overlay_recorded_at_utc" \
+      --argjson artifacts "$overlay_artifacts_json" \
+      '
+        .version = 1
+        | .checks = (.checks // {})
+        | .checks[$check_id] = {
+            status: $status,
+            notes: $notes,
+            command: $command,
+            artifacts: $artifacts,
+            recorded_at_utc: $recorded_at_utc,
+            receipt_json: ""
+          }
+      '
+  )"
+fi
+
+runtime_status="$(printf '%s\n' "$runtime_doctor_json" | jq -r '.status // "UNKNOWN"')"
+case "$runtime_status" in
+  OK) runtime_check_status="pass" ;;
+  WARN) runtime_check_status="warn" ;;
+  FAIL) runtime_check_status="fail" ;;
+  *) runtime_check_status="pending" ;;
+esac
+runtime_findings_total="$(printf '%s\n' "$runtime_doctor_json" | jq -r '.summary.findings_total // 0')"
+runtime_notes="$(printf '%s\n' "$runtime_doctor_json" | jq -r '[.findings[].code] | join(", ")')"
+wg_only_check_json="$(build_recorded_check_json "wg_only_stack_selftest" "WG-only stack selftest" "sudo ./scripts/easy_node.sh wg-only-stack-selftest-record --strict-beta 1 --base-port 19280 --client-iface wgcstack0 --exit-iface wgestack0 --print-summary-json 1")"
+machine_c_check_json="$(build_recorded_check_json "machine_c_vpn_smoke" "Machine C VPN smoke test" "sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country")"
+three_machine_check_json="$(build_recorded_check_json "three_machine_prod_signoff" "True 3-machine production signoff" "sudo ./scripts/easy_node.sh three-machine-prod-signoff --bundle-dir .easy-node-logs/prod_gate_bundle --directory-a https://A_HOST:8081 --directory-b https://B_HOST:8081 --issuer-url https://A_HOST:8082 --entry-url https://A_HOST:8083 --exit-url https://A_HOST:8084 --pre-real-host-readiness 1 --runtime-fix 1 --print-summary-json 1")"
+
+combined_json="$(
+  jq -n \
+    --arg state_dir "$state_dir" \
+    --arg status_json "$status_json" \
+    --arg runtime_status "$runtime_check_status" \
+    --arg runtime_notes "$runtime_notes" \
+    --arg runtime_summary "runtime-doctor findings=${runtime_findings_total}" \
+    --arg runtime_doctor_json_rc "$runtime_doctor_rc" \
+    --argjson recorded "$recorded_json" \
+    --argjson runtime_doctor "$runtime_doctor_json" \
+    --argjson wg_only_check "$wg_only_check_json" \
+    --argjson machine_c_check "$machine_c_check_json" \
+    --argjson three_machine_check "$three_machine_check_json" \
+    '
+      {
+        version: 1,
+        generated_at_utc: (now | todateiso8601),
+        state_dir: $state_dir,
+        status_json: $status_json,
+        runtime_doctor_exit_code: ($runtime_doctor_json_rc | tonumber),
+        runtime_doctor: $runtime_doctor,
+        checks: [
+          {
+            check_id: "runtime_hygiene",
+            label: "Runtime hygiene doctor",
+            status: $runtime_status,
+            notes: ([$runtime_summary, $runtime_notes] | map(select(length > 0)) | join("; ")),
+            command: "./scripts/easy_node.sh runtime-doctor --show-json 1",
+            artifacts: [],
+            recorded_at_utc: ($runtime_doctor.generated_at_utc // ""),
+            receipt_json: "",
+            incident_handoff: {
+              available: false,
+              enabled: false,
+              status: "",
+              source_summary_json: {path: "", exists: false, valid_json: false},
+              receipt_json: {path: "", exists: false, valid_json: false},
+              bundle_dir: {path: "", exists: false},
+              bundle_tar: {path: "", exists: false},
+              summary_json: {path: "", exists: false, valid_json: false},
+              report_md: {path: "", exists: false},
+              attachment_manifest: {path: "", exists: false},
+              attachment_skipped: {path: "", exists: false},
+              attachment_count: 0,
+              readiness_report_summary_attachment: {source_path: "", source_exists: false, stored_path: "", bundle_path: "", exists: false, valid_json: false},
+              readiness_report_md_attachment: {source_path: "", source_exists: false, stored_path: "", bundle_path: "", exists: false, valid_json: false},
+              readiness_report_log_attachment: {source_path: "", source_exists: false, stored_path: "", bundle_path: "", exists: false, valid_json: false},
+              log: {path: "", exists: false}
+            }
+          },
+          $wg_only_check,
+          $machine_c_check,
+          $three_machine_check
+        ]
+      }
+      | .summary = {
+          total_checks: (.checks | length),
+          pass_checks: ([.checks[] | select(.status == "pass")] | length),
+          warn_checks: ([.checks[] | select(.status == "warn")] | length),
+          fail_checks: ([.checks[] | select(.status == "fail")] | length),
+          pending_checks: ([.checks[] | select(.status == "pending")] | length),
+          next_action_check_id: (([.checks[] | select(.status != "pass" and .status != "skip") | .check_id][0]) // ""),
+          next_action_label: (([.checks[] | select(.status != "pass" and .status != "skip") | .label][0]) // ""),
+          next_action_command: (([.checks[] | select(.status != "pass" and .status != "skip") | .command][0]) // ""),
+          latest_failed_incident: (([
+            .checks[]
+            | select(.status == "fail" and (.incident_handoff.available // false))
+            | {
+                "check_id": .check_id,
+                "label": .label,
+                "recorded_at_utc": .recorded_at_utc,
+                "source_summary_json": .incident_handoff.source_summary_json,
+                "summary_json": .incident_handoff.summary_json,
+                "report_md": .incident_handoff.report_md,
+                "bundle_dir": .incident_handoff.bundle_dir,
+                "bundle_tar": .incident_handoff.bundle_tar,
+                "attachment_manifest": .incident_handoff.attachment_manifest,
+                "attachment_skipped": .incident_handoff.attachment_skipped,
+                "attachment_count": .incident_handoff.attachment_count,
+                "readiness_report_summary_attachment": .incident_handoff.readiness_report_summary_attachment,
+                "readiness_report_md_attachment": .incident_handoff.readiness_report_md_attachment,
+                "readiness_report_log_attachment": .incident_handoff.readiness_report_log_attachment,
+                "log": .incident_handoff.log
+              }
+          ] | sort_by(.recorded_at_utc // "") | reverse | .[0]) // null)
+        }
+      | .summary.pre_machine_c_gate = (
+          {
+            blockers: (
+              [
+                .checks[]
+                | select((.check_id == "runtime_hygiene" or .check_id == "wg_only_stack_selftest") and (.status != "pass" and .status != "skip"))
+                | .check_id
+              ]
+            ),
+            next_check_id: "machine_c_vpn_smoke",
+            next_label: (([.checks[] | select(.check_id == "machine_c_vpn_smoke") | .label][0]) // ""),
+            next_command: (([.checks[] | select(.check_id == "machine_c_vpn_smoke") | .command][0]) // "")
+          }
+          | .ready = ((.blockers | length) == 0)
+        )
+    '
+)"
+
+echo "[manual-validation-status] state_dir=$state_dir"
+printf '%s\n' "$combined_json" | jq -r '
+  .checks[]
+  | "[manual-validation-status] \(.check_id)=\(.status | ascii_upcase) label=\"\(.label)\" recorded_at=\(.recorded_at_utc // "")"
+' 
+printf '%s\n' "$combined_json" | jq -r '
+  .checks[]
+  | select((.notes // "") | length > 0)
+  | "  note: \(.notes)"
+'
+printf '%s\n' "$combined_json" | jq -r '
+  .checks[]
+  | select((.artifacts // []) | length > 0)
+  | "  artifacts: \((.artifacts // []) | join(" "))"
+'
+printf '%s\n' "$combined_json" | jq -r '
+  .checks[]
+  | select((.incident_handoff.available // false) == true)
+  | "  incident_handoff source_summary_json=\(.incident_handoff.source_summary_json.path // "") receipt_json=\(.incident_handoff.receipt_json.path // "") summary_json=\(.incident_handoff.summary_json.path // "") report_md=\(.incident_handoff.report_md.path // "") bundle_dir=\(.incident_handoff.bundle_dir.path // "") bundle_tar=\(.incident_handoff.bundle_tar.path // "") attachment_manifest=\(.incident_handoff.attachment_manifest.path // "") readiness_report_summary_attachment=\(.incident_handoff.readiness_report_summary_attachment.bundle_path // "") readiness_report_md_attachment=\(.incident_handoff.readiness_report_md_attachment.bundle_path // "")"
+'
+next_action_check_id="$(printf '%s\n' "$combined_json" | jq -r '.summary.next_action_check_id // ""')"
+next_action_command="$(printf '%s\n' "$combined_json" | jq -r '.summary.next_action_command // ""')"
+if [[ -n "$next_action_check_id" ]]; then
+  echo "[manual-validation-status] next_action_check_id=$next_action_check_id"
+fi
+if [[ -n "$next_action_command" ]]; then
+  echo "[manual-validation-status] next_action_command=$next_action_command"
+fi
+machine_c_smoke_ready="$(printf '%s\n' "$combined_json" | jq -r '.summary.pre_machine_c_gate.ready // false')"
+machine_c_smoke_blockers="$(printf '%s\n' "$combined_json" | jq -r '(.summary.pre_machine_c_gate.blockers // []) | if length == 0 then "none" else join(",") end')"
+machine_c_smoke_next_command="$(printf '%s\n' "$combined_json" | jq -r '.summary.pre_machine_c_gate.next_command // ""')"
+echo "[manual-validation-status] machine_c_smoke_ready=$machine_c_smoke_ready"
+echo "[manual-validation-status] machine_c_smoke_blockers=$machine_c_smoke_blockers"
+if [[ -n "$machine_c_smoke_next_command" ]]; then
+  echo "[manual-validation-status] machine_c_smoke_next_command=$machine_c_smoke_next_command"
+fi
+latest_failed_incident_check_id="$(printf '%s\n' "$combined_json" | jq -r '.summary.latest_failed_incident.check_id // ""')"
+latest_failed_incident_summary_json="$(printf '%s\n' "$combined_json" | jq -r '.summary.latest_failed_incident.summary_json.path // ""')"
+latest_failed_incident_report_md="$(printf '%s\n' "$combined_json" | jq -r '.summary.latest_failed_incident.report_md.path // ""')"
+latest_failed_incident_bundle_dir="$(printf '%s\n' "$combined_json" | jq -r '.summary.latest_failed_incident.bundle_dir.path // ""')"
+latest_failed_incident_readiness_report_summary_attachment="$(printf '%s\n' "$combined_json" | jq -r '.summary.latest_failed_incident.readiness_report_summary_attachment.bundle_path // ""')"
+latest_failed_incident_readiness_report_md_attachment="$(printf '%s\n' "$combined_json" | jq -r '.summary.latest_failed_incident.readiness_report_md_attachment.bundle_path // ""')"
+if [[ -n "$latest_failed_incident_check_id" ]]; then
+  echo "[manual-validation-status] latest_failed_incident_check_id=$latest_failed_incident_check_id"
+fi
+if [[ -n "$latest_failed_incident_summary_json" ]]; then
+  echo "[manual-validation-status] latest_failed_incident_summary_json=$latest_failed_incident_summary_json"
+fi
+if [[ -n "$latest_failed_incident_report_md" ]]; then
+  echo "[manual-validation-status] latest_failed_incident_report_md=$latest_failed_incident_report_md"
+fi
+if [[ -n "$latest_failed_incident_bundle_dir" ]]; then
+  echo "[manual-validation-status] latest_failed_incident_bundle_dir=$latest_failed_incident_bundle_dir"
+fi
+if [[ -n "$latest_failed_incident_readiness_report_summary_attachment" ]]; then
+  echo "[manual-validation-status] latest_failed_incident_readiness_report_summary_attachment=$latest_failed_incident_readiness_report_summary_attachment"
+fi
+if [[ -n "$latest_failed_incident_readiness_report_md_attachment" ]]; then
+  echo "[manual-validation-status] latest_failed_incident_readiness_report_md_attachment=$latest_failed_incident_readiness_report_md_attachment"
+fi
+
+if [[ "$show_json" == "1" ]]; then
+  echo "[manual-validation-status] summary_json_payload:"
+  printf '%s\n' "$combined_json"
+fi

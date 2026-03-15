@@ -54,6 +54,8 @@ usage() {
   cat <<'USAGE'
 Usage:
   ./scripts/prod_pilot_cohort_campaign.sh \
+    [--pre-real-host-readiness [0|1]] \
+    [--pre-real-host-readiness-summary-json PATH] \
     [--campaign-summary-json PATH] \
     [--campaign-report-md PATH] \
     [--campaign-print-report [0|1]] \
@@ -123,6 +125,8 @@ user_campaign_report_md=""
 user_campaign_print_report=""
 user_campaign_print_summary_json=""
 user_campaign_summary_fail_close=""
+user_pre_real_host_readiness=""
+user_pre_real_host_readiness_summary_json=""
 
 idx=0
 while ((idx < ${#user_args[@]})); do
@@ -173,6 +177,21 @@ while ((idx < ${#user_args[@]})); do
     --campaign-summary-json)
       if ((idx + 1 < ${#user_args[@]})); then
         user_campaign_summary_json="${user_args[$((idx + 1))]}"
+      fi
+      idx=$((idx + 2))
+      ;;
+    --pre-real-host-readiness)
+      if ((idx + 1 < ${#user_args[@]} && ( "${user_args[$((idx + 1))]}" == "0" || "${user_args[$((idx + 1))]}" == "1" ) )); then
+        user_pre_real_host_readiness="${user_args[$((idx + 1))]}"
+        idx=$((idx + 2))
+      else
+        user_pre_real_host_readiness="1"
+        idx=$((idx + 1))
+      fi
+      ;;
+    --pre-real-host-readiness-summary-json)
+      if ((idx + 1 < ${#user_args[@]})); then
+        user_pre_real_host_readiness_summary_json="${user_args[$((idx + 1))]}"
       fi
       idx=$((idx + 2))
       ;;
@@ -244,6 +263,8 @@ dashboard_fail_close="${PROD_PILOT_COHORT_CAMPAIGN_DASHBOARD_FAIL_CLOSE:-0}"
 dashboard_print="${PROD_PILOT_COHORT_CAMPAIGN_DASHBOARD_PRINT:-1}"
 dashboard_print_summary_json="${PROD_PILOT_COHORT_CAMPAIGN_DASHBOARD_PRINT_SUMMARY_JSON:-0}"
 show_json="${PROD_PILOT_COHORT_CAMPAIGN_SHOW_JSON:-0}"
+pre_real_host_readiness="${user_pre_real_host_readiness:-${PROD_PILOT_COHORT_CAMPAIGN_PRE_REAL_HOST_READINESS:-1}}"
+pre_real_host_readiness_summary_json_override="${user_pre_real_host_readiness_summary_json:-${PROD_PILOT_COHORT_CAMPAIGN_PRE_REAL_HOST_READINESS_SUMMARY_JSON:-}}"
 campaign_print_report="${user_campaign_print_report:-${PROD_PILOT_COHORT_CAMPAIGN_PRINT_REPORT:-1}}"
 campaign_print_summary_json="${user_campaign_print_summary_json:-${PROD_PILOT_COHORT_CAMPAIGN_PRINT_SUMMARY_JSON:-0}}"
 campaign_summary_fail_close="${user_campaign_summary_fail_close:-${PROD_PILOT_COHORT_CAMPAIGN_SUMMARY_FAIL_CLOSE:-1}}"
@@ -272,6 +293,7 @@ bool_or_die "PROD_PILOT_COHORT_CAMPAIGN_DASHBOARD_FAIL_CLOSE" "$dashboard_fail_c
 bool_or_die "PROD_PILOT_COHORT_CAMPAIGN_DASHBOARD_PRINT" "$dashboard_print"
 bool_or_die "PROD_PILOT_COHORT_CAMPAIGN_DASHBOARD_PRINT_SUMMARY_JSON" "$dashboard_print_summary_json"
 bool_or_die "PROD_PILOT_COHORT_CAMPAIGN_SHOW_JSON" "$show_json"
+bool_or_die "PROD_PILOT_COHORT_CAMPAIGN_PRE_REAL_HOST_READINESS" "$pre_real_host_readiness"
 bool_or_die "PROD_PILOT_COHORT_CAMPAIGN_PRINT_REPORT" "$campaign_print_report"
 bool_or_die "PROD_PILOT_COHORT_CAMPAIGN_PRINT_SUMMARY_JSON" "$campaign_print_summary_json"
 bool_or_die "PROD_PILOT_COHORT_CAMPAIGN_SUMMARY_FAIL_CLOSE" "$campaign_summary_fail_close"
@@ -292,6 +314,7 @@ alert_summary_json="$(abs_path "${alert_summary_json_override:-${user_alert_summ
 dashboard_md="$(abs_path "${dashboard_md_override:-${user_dashboard_md:-$reports_dir/prod_pilot_quick_dashboard.md}}")"
 campaign_summary_json="$(abs_path "${campaign_summary_json_override:-${user_campaign_summary_json:-$reports_dir/prod_pilot_campaign_summary.json}}")"
 campaign_report_md="$(abs_path "${campaign_report_md_override:-${user_campaign_report_md:-$reports_dir/prod_pilot_campaign_summary.md}}")"
+pre_real_host_readiness_summary_json="$(abs_path "${pre_real_host_readiness_summary_json_override:-$reports_dir/pre_real_host_readiness_summary.json}")"
 runbook_summary_json="$reports_dir/prod_pilot_cohort_quick_runbook_summary.json"
 
 mkdir -p "$reports_dir"
@@ -307,6 +330,8 @@ declare -a cmd=(
   --max-alert-severity "$max_alert_severity"
   --bundle-outputs "$bundle_outputs"
   --bundle-fail-close "$bundle_fail_close"
+  --pre-real-host-readiness "$pre_real_host_readiness"
+  --pre-real-host-readiness-summary-json "$pre_real_host_readiness_summary_json"
   --reports-dir "$reports_dir"
   --summary-json "$summary_json"
   --run-report-json "$run_report_json"
@@ -342,6 +367,7 @@ fi
 
 echo "[prod-pilot-cohort-campaign] running sustained pilot campaign"
 echo "[prod-pilot-cohort-campaign] reports_dir=$reports_dir"
+echo "[prod-pilot-cohort-campaign] pre_real_host_readiness_summary_json=$pre_real_host_readiness_summary_json"
 echo "[prod-pilot-cohort-campaign] summary_json=$summary_json"
 echo "[prod-pilot-cohort-campaign] run_report_json=$run_report_json"
 echo "[prod-pilot-cohort-campaign] campaign_summary_json=$campaign_summary_json"

@@ -166,6 +166,16 @@ if ! printf '%s\n' "$line" | rg -q -- '--bundle-outputs 1'; then
   cat "$CAPTURE"
   exit 1
 fi
+if ! printf '%s\n' "$line" | rg -q -- '--pre-real-host-readiness 1'; then
+  echo "campaign wrapper missing default --pre-real-host-readiness 1"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! printf '%s\n' "$line" | rg -q -- "--pre-real-host-readiness-summary-json ${WRAPPER_REPORTS_DIR}/pre_real_host_readiness_summary.json"; then
+  echo "campaign wrapper missing derived pre-real-host readiness summary path"
+  cat "$CAPTURE"
+  exit 1
+fi
 if ! printf '%s\n' "$line" | rg -q -- '--signoff-require-cohort-signoff-policy 1'; then
   echo "campaign wrapper missing default --signoff-require-cohort-signoff-policy 1"
   cat "$CAPTURE"
@@ -345,10 +355,20 @@ echo "[prod-pilot-cohort-campaign] easy-node command dispatch"
 PATH="$TMP_BIN:$PATH" \
 DISPATCH_CAPTURE_FILE="$DISPATCH_CAPTURE" \
 PROD_PILOT_COHORT_CAMPAIGN_SCRIPT="$FAKE_CAMPAIGN" \
-./scripts/easy_node.sh prod-pilot-cohort-campaign --bootstrap-directory https://dir-b:8081 --campaign-summary-fail-close 0 >/tmp/integration_prod_pilot_cohort_campaign_dispatch.log 2>&1
+./scripts/easy_node.sh prod-pilot-cohort-campaign --bootstrap-directory https://dir-b:8081 --pre-real-host-readiness 0 --pre-real-host-readiness-summary-json /tmp/campaign_pre_real_host.json --campaign-summary-fail-close 0 >/tmp/integration_prod_pilot_cohort_campaign_dispatch.log 2>&1
 
 if ! rg -q -- '--bootstrap-directory https://dir-b:8081' "$DISPATCH_CAPTURE"; then
   echo "easy-node prod-pilot-cohort-campaign did not forward command arguments"
+  cat "$DISPATCH_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--pre-real-host-readiness 0' "$DISPATCH_CAPTURE"; then
+  echo "easy-node prod-pilot-cohort-campaign did not forward --pre-real-host-readiness"
+  cat "$DISPATCH_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--pre-real-host-readiness-summary-json /tmp/campaign_pre_real_host.json' "$DISPATCH_CAPTURE"; then
+  echo "easy-node prod-pilot-cohort-campaign did not forward --pre-real-host-readiness-summary-json"
   cat "$DISPATCH_CAPTURE"
   exit 1
 fi

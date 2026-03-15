@@ -211,6 +211,8 @@ services:
       MTLS_MIN_VERSION: "${MTLS_MIN_VERSION:-1.3}"
     profiles:
       - demo
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./tls:/app/tls:ro
     restart: "no"

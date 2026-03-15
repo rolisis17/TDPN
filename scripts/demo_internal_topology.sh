@@ -31,9 +31,17 @@ mkdir -p .gocache
 export GOCACHE="${GOCACHE:-$ROOT_DIR/.gocache}"
 
 DURATION="${DEMO_DURATION_SEC:-15}"
+DEMO_BIN="$(mktemp "${TMPDIR:-/tmp}/privacynode-demo-internal-topology.XXXXXX")"
+
+cleanup() {
+  rm -f "$DEMO_BIN"
+}
+trap cleanup EXIT
 
 echo "[demo] running internal topology for ${DURATION}s"
 echo "[demo] mode=${DATA_PLANE_MODE} source=${CLIENT_INNER_SOURCE} wg_backend=${WG_BACKEND} client_wg_backend=${CLIENT_WG_BACKEND}"
 
-timeout "${DURATION}s" go run ./cmd/node \
+go build -o "$DEMO_BIN" ./cmd/node
+
+timeout "${DURATION}s" "$DEMO_BIN" \
   --directory --issuer --entry --exit --client --wgio --wgiotap --wgioinject

@@ -22,11 +22,13 @@ Usage:
     [--compose-project NAME] \
     [--include-docker-logs [0|1]] \
     [--docker-log-lines N] \
-    [--timeout-sec N]
+    [--timeout-sec N] \
+    [--attach-artifact PATH]...
 
 Purpose:
   Capture a production incident snapshot bundle with endpoint probes,
-  docker status/log tails, and system metadata for triage/share.
+  docker status/log tails, system metadata, and a concise operator summary
+  for triage/share.
 USAGE
 }
 
@@ -36,6 +38,19 @@ trim_url() {
     value="${value%/}"
   done
   echo "$value"
+}
+
+abs_input_path() {
+  local path="$1"
+  if [[ -z "$path" ]]; then
+    printf '%s' ""
+    return 0
+  fi
+  if [[ "$path" == /* ]]; then
+    printf '%s' "$path"
+  else
+    printf '%s' "$ROOT_DIR/$path"
+  fi
 }
 
 env_value() {
@@ -125,6 +140,18 @@ hash_file_line() {
   return 1
 }
 
+sanitize_attachment_name() {
+  local name="$1"
+  name="${name//[^A-Za-z0-9._-]/_}"
+  while [[ "$name" == .* ]]; do
+    name="_${name#.}"
+  done
+  if [[ -z "$name" ]]; then
+    name="artifact"
+  fi
+  printf '%s' "$name"
+}
+
 directory_url=""
 issuer_url=""
 entry_url=""
@@ -136,6 +163,7 @@ compose_project="deploy"
 include_docker_logs="1"
 docker_log_lines="200"
 timeout_sec="8"
+declare -a attach_artifacts=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -188,6 +216,10 @@ while [[ $# -gt 0 ]]; do
       timeout_sec="${2:-}"
       shift 2
       ;;
+    --attach-artifact)
+      attach_artifacts+=("$(abs_input_path "${2:-}")")
+      shift 2
+      ;;
     -h|--help|help)
       usage
       exit 0
@@ -216,6 +248,12 @@ if ! [[ "$timeout_sec" =~ ^[0-9]+$ ]] || ((timeout_sec < 1)); then
   echo "--timeout-sec must be >= 1"
   exit 2
 fi
+for artifact in "${attach_artifacts[@]}"; do
+  if [[ -z "$artifact" ]]; then
+    echo "--attach-artifact requires a non-empty path"
+    exit 2
+  fi
+done
 
 if [[ -z "$bundle_dir" ]]; then
   bundle_dir="$(default_log_dir)/incident_snapshot_$(date +%Y%m%d_%H%M%S)"
@@ -305,6 +343,37 @@ fi
 
 write_safe_env_summary "$bundle_dir/system/env_summary.txt" "$env_file"
 
+if ((${#attach_artifacts[@]} > 0)); then
+  attachments_dir="$bundle_dir/attachments"
+  attachments_manifest="$attachments_dir/manifest.tsv"
+  attachments_skipped="$attachments_dir/skipped.tsv"
+  mkdir -p "$attachments_dir"
+  attachment_index=0
+  for artifact in "${attach_artifacts[@]}"; do
+    attachment_index=$((attachment_index + 1))
+    artifact_basename="$(basename "$artifact")"
+    artifact_safe_name="$(sanitize_attachment_name "$artifact_basename")"
+    artifact_prefix="$(printf '%02d' "$attachment_index")"
+    artifact_dest_rel="attachments/${artifact_prefix}_${artifact_safe_name}"
+    artifact_dest_path="$bundle_dir/$artifact_dest_rel"
+    artifact_type="file"
+    if [[ ! -e "$artifact" ]]; then
+      printf '%s\t%s\n' "$artifact" "missing" >>"$attachments_skipped"
+      continue
+    fi
+    if [[ -d "$artifact" ]]; then
+      artifact_type="dir"
+    elif [[ -L "$artifact" ]]; then
+      artifact_type="symlink"
+    fi
+    if cp -R "$artifact" "$artifact_dest_path" 2>/dev/null; then
+      printf '%s\t%s\t%s\n' "$artifact_dest_rel" "$artifact_type" "$artifact" >>"$attachments_manifest"
+    else
+      printf '%s\t%s\n' "$artifact" "copy_failed" >>"$attachments_skipped"
+    fi
+  done
+fi
+
 snapshot_url "$bundle_dir/endpoints/directory_relays.json" "${directory_url:+${directory_url}/v1/relays}" "$timeout_sec"
 snapshot_url "$bundle_dir/endpoints/directory_peers.json" "${directory_url:+${directory_url}/v1/peers}" "$timeout_sec"
 snapshot_url "$bundle_dir/endpoints/directory_health.json" "${directory_url:+${directory_url}/v1/health}" "$timeout_sec"
@@ -353,7 +422,49 @@ else
   echo "sha256 tooling missing (sha256sum/shasum)" >"$bundle_tar_sha"
 fi
 
+summary_json="$bundle_dir/incident_summary.json"
+report_md="$bundle_dir/incident_report.md"
+summary_script="${INCIDENT_SNAPSHOT_SUMMARY_SCRIPT:-$ROOT_DIR/scripts/incident_snapshot_summary.sh}"
+if [[ -x "$summary_script" ]]; then
+  set +e
+  "$summary_script" \
+    --bundle-dir "$bundle_dir" \
+    --summary-json "$summary_json" \
+    --report-md "$report_md" \
+    --print-report 0 \
+    --print-summary-json 0 >/dev/null 2>&1
+  summary_rc=$?
+  set -e
+  if [[ "$summary_rc" -ne 0 ]]; then
+    {
+      echo "summary_generation=failed"
+      echo "summary_script=$summary_script"
+      echo "summary_rc=$summary_rc"
+    } >"$bundle_dir/system/incident_summary_generation.txt"
+  fi
+  if hash_file_line "$bundle_dir/metadata.txt" >/dev/null 2>&1; then
+    (
+      cd "$bundle_dir"
+      while IFS= read -r rel_path; do
+        hash_file_line "$rel_path"
+      done < <(find . -type f ! -name 'manifest.sha256' -print | sed 's#^\./##' | sort)
+    ) >"$manifest_file"
+  fi
+  tar -czf "$bundle_tar" -C "$(dirname "$bundle_dir")" "$(basename "$bundle_dir")"
+  if hash_file_line "$bundle_tar" >"$bundle_tar_sha" 2>/dev/null; then
+    :
+  else
+    echo "sha256 tooling missing (sha256sum/shasum)" >"$bundle_tar_sha"
+  fi
+fi
+
 echo "incident snapshot ready"
 echo "bundle_dir: $bundle_dir"
 echo "bundle_tar: $bundle_tar"
 echo "bundle_tar_sha256: $bundle_tar_sha"
+if [[ -f "$summary_json" ]]; then
+  echo "summary_json: $summary_json"
+fi
+if [[ -f "$report_md" ]]; then
+  echo "report_md: $report_md"
+fi

@@ -69,6 +69,33 @@ echo "[ci] release tag verify integration"
 echo "[ci] release policy gate integration"
 ./scripts/integration_release_policy_gate.sh
 
+echo "[ci] runtime doctor integration"
+./scripts/integration_runtime_doctor.sh
+
+echo "[ci] manual validation status integration"
+./scripts/integration_manual_validation_status.sh
+
+echo "[ci] manual validation report integration"
+./scripts/integration_manual_validation_report.sh
+
+echo "[ci] pre-real-host readiness integration"
+./scripts/integration_pre_real_host_readiness.sh
+
+echo "[ci] runtime fix integration"
+./scripts/integration_runtime_fix.sh
+
+echo "[ci] client-vpn smoke integration"
+./scripts/integration_client_vpn_smoke.sh
+
+echo "[ci] three-machine prod signoff integration"
+./scripts/integration_three_machine_prod_signoff.sh
+
+echo "[ci] wg-only stack selftest record integration"
+./scripts/integration_wg_only_stack_selftest_record.sh
+
+echo "[ci] wg-only stack wiring integration"
+./scripts/integration_wg_only_stack_wiring.sh
+
 echo "[ci] internal topology smoke"
 DEMO_DURATION_SEC="${DEMO_DURATION_SEC:-8}" ./scripts/demo_internal_topology.sh >/tmp/ci_demo.log 2>&1 || true
 if ! rg -q "exit accepted opaque packet" /tmp/ci_demo.log; then
@@ -122,6 +149,12 @@ echo "[ci] easy-mode launcher runtime integration"
 
 echo "[ci] incident snapshot integration"
 ./scripts/integration_incident_snapshot.sh
+
+echo "[ci] incident snapshot attach artifacts integration"
+./scripts/integration_incident_snapshot_attach_artifacts.sh
+
+echo "[ci] incident snapshot summary integration"
+./scripts/integration_incident_snapshot_summary.sh
 
 echo "[ci] 3-machine prod-profile wiring integration"
 ./scripts/integration_3machine_prod_profile_wiring.sh

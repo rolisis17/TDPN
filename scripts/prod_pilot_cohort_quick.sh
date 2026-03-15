@@ -12,6 +12,8 @@ Usage:
   ./scripts/prod_pilot_cohort_quick.sh \
     [--bootstrap-directory URL] \
     [--subject ID] \
+    [--pre-real-host-readiness [0|1]] \
+    [--pre-real-host-readiness-summary-json PATH] \
     [--rounds N] \
     [--pause-sec N] \
     [--continue-on-fail [0|1]] \
@@ -120,6 +122,8 @@ fi
 
 bootstrap_directory="${PROD_PILOT_COHORT_QUICK_BOOTSTRAP_DIRECTORY:-}"
 subject="${PROD_PILOT_COHORT_QUICK_SUBJECT:-pilot-client}"
+pre_real_host_readiness="${PROD_PILOT_COHORT_QUICK_PRE_REAL_HOST_READINESS:-1}"
+pre_real_host_readiness_summary_json="${PROD_PILOT_COHORT_QUICK_PRE_REAL_HOST_READINESS_SUMMARY_JSON:-}"
 rounds="${PROD_PILOT_COHORT_QUICK_ROUNDS:-5}"
 pause_sec="${PROD_PILOT_COHORT_QUICK_PAUSE_SEC:-60}"
 continue_on_fail="${PROD_PILOT_COHORT_QUICK_CONTINUE_ON_FAIL:-0}"
@@ -158,6 +162,19 @@ while [[ $# -gt 0 ]]; do
       ;;
     --subject)
       subject="${2:-}"
+      shift 2
+      ;;
+    --pre-real-host-readiness)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        pre_real_host_readiness="${2:-}"
+        shift 2
+      else
+        pre_real_host_readiness="1"
+        shift
+      fi
+      ;;
+    --pre-real-host-readiness-summary-json)
+      pre_real_host_readiness_summary_json="${2:-}"
       shift 2
       ;;
     --rounds)
@@ -338,6 +355,7 @@ done
 int_or_die "--rounds" "$rounds"
 int_or_die "--pause-sec" "$pause_sec"
 int_or_die "--max-round-failures" "$max_round_failures"
+bool_or_die "--pre-real-host-readiness" "$pre_real_host_readiness"
 bool_or_die "--continue-on-fail" "$continue_on_fail"
 bool_or_die "--require-all-rounds-ok" "$require_all_rounds_ok"
 bool_or_die "--print-run-report" "$print_run_report"
@@ -385,8 +403,13 @@ if [[ -z "$run_report_json" ]]; then
 else
   run_report_json="$(abs_path "$run_report_json")"
 fi
+if [[ -z "$pre_real_host_readiness_summary_json" ]]; then
+  pre_real_host_readiness_summary_json="$reports_dir/pre_real_host_readiness_summary.json"
+else
+  pre_real_host_readiness_summary_json="$(abs_path "$pre_real_host_readiness_summary_json")"
+fi
 
-mkdir -p "$reports_dir" "$(dirname "$summary_json")" "$(dirname "$run_report_json")"
+mkdir -p "$reports_dir" "$(dirname "$summary_json")" "$(dirname "$run_report_json")" "$(dirname "$pre_real_host_readiness_summary_json")"
 
 started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 started_epoch="$(date -u +%s)"
@@ -399,6 +422,8 @@ final_rc=0
 
 declare -a runbook_cmd=(
   "$EASY_NODE_SH" "prod-pilot-cohort-runbook"
+  --pre-real-host-readiness "$pre_real_host_readiness"
+  --pre-real-host-readiness-summary-json "$pre_real_host_readiness_summary_json"
   --rounds "$rounds"
   --pause-sec "$pause_sec"
   --continue-on-fail "$continue_on_fail"
@@ -505,6 +530,7 @@ jq -nc \
   --arg reports_dir "$reports_dir" \
   --arg summary_json "$summary_json" \
   --arg run_report_json "$run_report_json" \
+  --arg pre_real_host_readiness_summary_json "$pre_real_host_readiness_summary_json" \
   --arg bootstrap_directory "$bootstrap_directory" \
   --arg subject "$subject" \
   --arg max_alert_severity "$max_alert_severity" \
@@ -521,6 +547,7 @@ jq -nc \
   --argjson signoff_rc "$signoff_rc" \
   --argjson final_rc "$final_rc" \
   --argjson duration_sec "$duration_sec" \
+  --argjson pre_real_host_readiness "$(json_bool "$pre_real_host_readiness")" \
   --argjson signoff_check_tar_sha256 "$(json_bool "$signoff_check_tar_sha256")" \
   --argjson signoff_check_manifest "$(json_bool "$signoff_check_manifest")" \
   --argjson signoff_show_integrity_details "$(json_bool "$signoff_show_integrity_details")" \
@@ -551,6 +578,7 @@ jq -nc \
     config:{
       bootstrap_directory:($bootstrap_directory // ""),
       subject:($subject // ""),
+      pre_real_host_readiness:$pre_real_host_readiness,
       rounds:$rounds,
       pause_sec:$pause_sec,
       continue_on_fail:$continue_on_fail,
@@ -577,11 +605,13 @@ jq -nc \
     artifacts:{
       reports_dir:$reports_dir,
       summary_json:$summary_json,
-      run_report_json:$run_report_json
+      run_report_json:$run_report_json,
+      pre_real_host_readiness_summary_json:$pre_real_host_readiness_summary_json
     }
   }' >"$run_report_json"
 
 echo "[prod-pilot-cohort-quick] run_report_json=$run_report_json"
+echo "[prod-pilot-cohort-quick] pre_real_host_readiness_summary_json=$pre_real_host_readiness_summary_json"
 if [[ "$print_run_report" == "1" ]]; then
   echo "[prod-pilot-cohort-quick] run_report_payload:"
   cat "$run_report_json"

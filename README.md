@@ -153,10 +153,11 @@ Script-only easy mode:
 # host real-WireGuard preflight and local validation (Linux + sudo required)
 ./scripts/easy_node.sh wg-only-check
 sudo ./scripts/easy_node.sh wg-only-local-test --matrix 1
-sudo ./scripts/easy_node.sh wg-only-stack-up --strict-beta 1
+sudo ./scripts/easy_node.sh wg-only-stack-up --strict-beta 1   # strict live-WG client/entry/exit roles
 ./scripts/easy_node.sh wg-only-stack-status
 sudo ./scripts/easy_node.sh wg-only-stack-down --force-iface-cleanup 1
 sudo ./scripts/easy_node.sh wg-only-stack-selftest --strict-beta 1
+sudo ./scripts/easy_node.sh wg-only-stack-selftest-record --strict-beta 1 --print-summary-json 1
 
 # stop all local resources; use sudo to also clean wg-only interfaces/processes
 sudo ./scripts/easy_node.sh stop-all --with-wg-only 1 --force-iface-cleanup 1
@@ -175,6 +176,7 @@ sudo ./scripts/easy_node.sh stop-all --with-wg-only 1 --force-iface-cleanup 1
 ./scripts/easy_node.sh prod-operator-lifecycle-runbook --action offboard --operator-id <OPERATOR_ID> --directory-url https://<AUTHORITY_DIR_IP_OR_DNS>:8081
 
 # sustained production pilot cohort (multi-round + aggregated trend/alert summary)
+# note: this now runs pre-real-host-readiness once before the cohort by default
 ./scripts/easy_node.sh prod-pilot-cohort-runbook --rounds 5 --pause-sec 60 --trend-min-go-rate-pct 95 --max-alert-severity WARN --bundle-outputs 1 --bundle-fail-close 1 -- --bootstrap-directory https://<A_SERVER_IP_OR_DNS>:8081 --subject pilot-client
 
 # verify cohort bundle artifacts (tar checksum + manifest + round structure)
@@ -188,24 +190,33 @@ sudo ./scripts/easy_node.sh stop-all --with-wg-only 1 --force-iface-cleanup 1
 # default quick run report: <reports_dir>/prod_pilot_cohort_quick_report.json
 
 # fail-closed quick run-report verification
+# output now also points directly to incident_summary.json / incident_report.md
+# when failed-round incident artifacts are available in the linked cohort summary
 ./scripts/easy_node.sh prod-pilot-cohort-quick-check --run-report-json <reports_dir>/prod_pilot_cohort_quick_report.json
 
 # quick-mode trend across multiple quick run reports
+# trend summary JSON now also carries latest failed incident handoff paths when available
 ./scripts/easy_node.sh prod-pilot-cohort-quick-trend --reports-dir .easy-node-logs --since-hours 24 --summary-json .easy-node-logs/prod_pilot_quick_trend_24h.json
 
 # quick-mode alert severity from trend metrics
 ./scripts/easy_node.sh prod-pilot-cohort-quick-alert --trend-summary-json .easy-node-logs/prod_pilot_quick_trend_24h.json --summary-json .easy-node-logs/prod_pilot_quick_alert_24h.json
 
 # one-command quick dashboard (trend + alert + markdown)
+# dashboard markdown now also includes incident handoff paths when present
 ./scripts/easy_node.sh prod-pilot-cohort-quick-dashboard --reports-dir .easy-node-logs --dashboard-md .easy-node-logs/prod_pilot_quick_dashboard_24h.md
 
 # one-command quick signoff gate (latest check + trend + alert severity policy)
+# signoff_json now also carries incident handoff paths when available
 ./scripts/easy_node.sh prod-pilot-cohort-quick-signoff --run-report-json <reports_dir>/prod_pilot_cohort_quick_report.json --reports-dir .easy-node-logs --max-alert-severity WARN
 
 # one-command quick pilot runbook (quick execution + quick signoff + optional dashboard)
+# note: this now also exposes the same one-time pre-real-host readiness gate
+#       before the quick wrapper delegates into the sustained cohort flow
 ./scripts/easy_node.sh prod-pilot-cohort-quick-runbook --bootstrap-directory https://<A_SERVER_IP_OR_DNS>:8081 --subject pilot-client --max-alert-severity WARN --max-round-failures 0 --bundle-outputs 1 --bundle-fail-close 1
 
 # low-prompt sustained pilot campaign wrapper for real machine-C operator runs
+# note: this now also exposes the same one-time pre-real-host readiness gate
+#       at the top-level campaign wrapper
 ./scripts/easy_node.sh prod-pilot-cohort-campaign --bootstrap-directory https://<A_SERVER_IP_OR_DNS>:8081 --subject pilot-client
 # default campaign handoff artifacts:
 #   <reports_dir>/prod_pilot_campaign_summary.json
@@ -306,6 +317,8 @@ sudo ./scripts/easy_node.sh three-machine-prod-bundle \
 #       (disable only for diagnostics with --bundle-verify-check 0)
 # note: failed bundle runs now auto-capture incident snapshots by default
 #       (disable only for diagnostics with --incident-snapshot-on-fail 0)
+# note: you can attach extra evidence files into that incident snapshot with
+#       --incident-snapshot-attach-artifact PATH (repeatable)
 # note: one-command run report JSON is emitted by default at
 #       <bundle-dir>/prod_bundle_run_report.json (override with --run-report-json)
 
@@ -331,6 +344,8 @@ sudo ./scripts/easy_node.sh three-machine-prod-bundle \
 #   ./scripts/easy_node.sh prod-gate-slo-alert --trend-summary-json .easy-node-logs/prod_slo_trend_24h.json --fail-on-warn 1 --fail-on-critical 1
 # optional: generate one operator dashboard artifact (trend + alert + markdown)
 #   ./scripts/easy_node.sh prod-gate-slo-dashboard --reports-dir .easy-node-logs --since-hours 24 --dashboard-md .easy-node-logs/prod_slo_dashboard_24h.md
+# note: the SLO summary/trend/alert/dashboard path now also prints normalized incident_handoff pointers
+#       and carries incident_summary.json / incident_report.md plus attachment manifests through JSON + markdown outputs when present
 # optional: one-command integrity + signoff policy check
 #   ./scripts/easy_node.sh prod-gate-signoff --run-report-json .easy-node-logs/prod_gate_bundle/prod_bundle_run_report.json
 # optional: verify bundle integrity artifacts (manifest + tarball checksum)
@@ -338,14 +353,23 @@ sudo ./scripts/easy_node.sh three-machine-prod-bundle \
 
 # one-command strict production pilot wrapper (fail-closed defaults)
 #   sudo ./scripts/easy_node.sh prod-pilot-runbook --bootstrap-directory https://<A_SERVER_IP>:8081 --subject client-alice
-#   note: this now auto-generates trend/alert/dashboard artifacts after bundle execution
+#   note: this now gates on pre-real-host-readiness by default and auto-generates
+#         trend/alert/dashboard artifacts after bundle execution
 
 # print true 3-machine reminder checklist
 ./scripts/easy_node.sh three-machine-reminder
 
 # capture an incident/debug bundle from any node (authority/provider/client)
 # (auto-detects local env urls when possible; add explicit URLs to override)
+# writes:
+#   <bundle_dir>/incident_summary.json
+#   <bundle_dir>/incident_report.md
+# optional:
+#   --attach-artifact PATH (repeatable) to include extra evidence files
 ./scripts/easy_node.sh incident-snapshot --mode auto
+
+# regenerate the summary/report from an existing incident bundle
+./scripts/easy_node.sh incident-snapshot-summary --bundle-dir .easy-node-logs/incident_snapshot_YYYYMMDD_HHMMSS
 
 # one-command strict-ingress rehearsal (expected fail path, command returns success only when failure class is observed)
 sudo ./scripts/easy_node.sh prod-wg-strict-ingress-rehearsal \
@@ -404,21 +428,24 @@ sudo ./scripts/easy_node.sh prod-wg-strict-ingress-rehearsal \
 - `prod-key-rotation-runbook` wraps production rotation in an operator-safe flow (snapshot backup -> optional preflight -> rotations -> optional rollback) and writes a machine-readable summary JSON.
 - `prod-upgrade-runbook` wraps production upgrade maintenance in an operator-safe flow (snapshot backup -> optional preflight -> compose pull/build/restart -> optional rollback) and writes a machine-readable summary JSON.
 - `prod-operator-lifecycle-runbook` wraps operator onboarding/offboarding in a repeatable flow (optional preflight, health checks, and relay publication/absence verification) and writes a machine-readable summary JSON.
-- `prod-pilot-cohort-runbook` wraps sustained pilot operation by running multiple `prod-pilot-runbook` rounds and aggregating cohort SLO trend/alert artifacts plus a final summary JSON, including alert-severity fail-close policy (`--max-alert-severity`, default `WARN`) and optional fail-closed cohort bundle artifacts (tar + checksum + manifest).
+- `prod-pilot-cohort-runbook` wraps sustained pilot operation by running multiple `prod-pilot-runbook` rounds and aggregating cohort SLO trend/alert artifacts plus a final summary JSON, including alert-severity fail-close policy (`--max-alert-severity`, default `WARN`), optional fail-closed cohort bundle artifacts (tar + checksum + manifest), and a one-time top-level `pre-real-host-readiness` gate by default before the cohort starts (`--pre-real-host-readiness 0` disables that wrapper gate for diagnostics-only runs).
 - `prod-pilot-cohort-bundle-verify` validates cohort bundle integrity artifacts (`--summary-json` first-class input) and checks tar checksum + manifest schema + round structure.
 - `prod-pilot-cohort-check` validates cohort summary policy (status/round failures/trend go-rate/alert severity/bundle requirements) for fail-close GO/NO-GO decisions.
 - `prod-pilot-cohort-check` now also supports failed-round incident evidence policy (`--require-incident-snapshot-on-fail`, `--require-incident-snapshot-artifacts`) to fail-close when diagnostics are missing for failed rounds.
+- `incident-snapshot` now auto-generates `incident_summary.json` + `incident_report.md`, supports repeatable `--attach-artifact PATH` inputs for extra evidence files, and `incident-snapshot-summary` now surfaces attached/skipped artifacts in both JSON and markdown.
+- Higher-level operator outputs (`prod-gate-check`, `prod-gate-slo-summary`, `prod-pilot-cohort-check`, and `prod-pilot-cohort-campaign-summary`) now surface incident attachment manifest/skipped pointers too, so failed runs point directly to bundled runtime evidence instead of only the raw incident summary/report.
 - `prod-pilot-cohort-signoff` runs `prod-pilot-cohort-bundle-verify` + `prod-pilot-cohort-check` in one fail-closed command.
-- `prod-pilot-cohort-quick` runs sustained cohort runbook + fail-closed signoff with minimal flags for operator-friendly pilot execution.
+- `prod-pilot-cohort-quick` runs sustained cohort runbook + fail-closed signoff with minimal flags for operator-friendly pilot execution, and now exposes the same one-time top-level `pre-real-host-readiness` gate used by the underlying cohort runbook.
 - `prod-pilot-cohort-quick` also writes a machine-readable quick run report JSON (`--run-report-json`, default `<reports_dir>/prod_pilot_cohort_quick_report.json`).
-- `prod-pilot-cohort-quick-check` validates quick run-report artifacts and enforces fail-close quick signoff policy.
-- `prod-pilot-cohort-quick-trend` aggregates GO/NO-GO trend across quick run-report artifacts with fail-close thresholds and JSON output.
-- `prod-pilot-cohort-quick-alert` maps quick trend metrics to operator severity (`OK`/`WARN`/`CRITICAL`) with optional fail-close exits.
-- `prod-pilot-cohort-quick-dashboard` composes quick trend + alert into one markdown dashboard plus JSON artifacts.
-- `prod-pilot-cohort-quick-signoff` runs quick-check + quick-trend + quick-alert in one fail-closed command and enforces `--max-alert-severity` policy.
-- `prod-pilot-cohort-quick-runbook` orchestrates quick execution + quick signoff + optional quick dashboard generation with one runbook summary artifact.
-- `prod-pilot-cohort-campaign` wraps `prod-pilot-cohort-quick-runbook` with low-prompt sustained campaign defaults, deterministic artifact paths, strict signoff policy, and generated markdown/JSON handoff summaries for real machine-C pilot operations.
-- `prod-pilot-cohort-campaign-summary` regenerates one concise operator handoff report (markdown + JSON) from saved campaign/runbook artifacts and can fail-close on `NO-GO`.
+- `prod-pilot-cohort-quick-check` validates quick run-report artifacts, enforces fail-close quick signoff policy, prints the upstream `pre_real_host_readiness_summary_json` path when the quick run report carries it, and prints direct incident handoff pointers (`incident_summary.json` / `incident_report.md`) when failed-round incident artifacts are present.
+- `prod-pilot-cohort-quick-trend` aggregates GO/NO-GO trend across quick run-report artifacts with fail-close thresholds and JSON output, and now carries latest failed incident handoff paths plus attachment manifest pointers when available.
+- `prod-pilot-cohort-quick-alert` maps quick trend metrics to operator severity (`OK`/`WARN`/`CRITICAL`) with optional fail-close exits, and now preserves the same incident handoff attachment pointers in alert JSON/output.
+- `prod-pilot-cohort-quick-dashboard` composes quick trend + alert into one markdown dashboard plus JSON artifacts, and now renders incident handoff paths and attachment manifest pointers in markdown/operator output when present.
+- `prod-pilot-cohort-quick-signoff` runs quick-check + quick-trend + quick-alert in one fail-closed command, enforces `--max-alert-severity` policy, and carries both incident handoff artifact paths and the upstream `pre_real_host_readiness_summary_json` path into its signoff JSON/output when present.
+- `prod-pilot-cohort-quick-runbook` orchestrates quick execution + quick signoff + optional quick dashboard generation with one runbook summary artifact, preserves incident handoff artifact paths from quick signoff when present, and now exposes the same one-time top-level `pre-real-host-readiness` gate used by the underlying cohort runbook.
+- `prod-pilot-cohort-campaign` wraps `prod-pilot-cohort-quick-runbook` with low-prompt sustained campaign defaults, deterministic artifact paths, strict signoff policy, generated markdown/JSON handoff summaries for real machine-C pilot operations, and the same top-level `pre-real-host-readiness` gate control.
+- `prod-pilot-cohort-campaign-summary` regenerates one concise operator handoff report (markdown + JSON) from saved campaign/runbook artifacts, surfaces failed-round incident snapshot summary/report paths when present, preserves normalized source pointers (`runbook`, `pre-real-host readiness summary`, `quick run report`, `cohort summary`, failed `run report`), and can fail-close on `NO-GO`.
+- `prod-gate-check` and `prod-pilot-cohort-check` now also print normalized `incident_handoff` lines with direct incident pointers (`incident_summary.json` / `incident_report.md`) when failed-run incident artifacts are available, so signoff/debug output is actionable without manually unpacking the bundle first.
 - `server-up --prod-profile 1` forces strict fail-closed runtime (`BETA_STRICT_MODE=1`, `PROD_STRICT_MODE=1`), enables mTLS, enables live command-backend WG dataplane defaults, and on authority nodes requires signed issuer-admin auth (`ISSUER_ADMIN_REQUIRE_SIGNED=1`, token admin auth disabled).
 - `server-up --prod-profile 1` now also applies hardened abuse/adjudication defaults (`ENTRY_OPEN_RPS=12`, `ENTRY_BAN_THRESHOLD=3`, `ENTRY_BAN_SEC=90`, `ENTRY_MAX_CONCURRENT_OPENS=96`, peer+final dispute/appeal vote floors, final operator/source quorum floors, `DIRECTORY_FINAL_ADJUDICATION_MIN_RATIO=0.67`, dispute/appeal TTL caps at `259200s`).
 - `server-up --prod-profile 1` requires at least 2 issuer URLs for strict issuer quorum; include at least one peer directory from a distinct authority/issuer operator.
@@ -440,6 +467,16 @@ sudo ./scripts/easy_node.sh prod-wg-strict-ingress-rehearsal \
 - `docs/license-decision.md` (license rationale; current choice is Apache-2.0)
 - `docs/operator-lifecycle-runbook.md` (repeatable provider/authority onboarding/offboarding flow)
 - `docs/prod-pilot-cohort-runbook.md` (sustained multi-round pilot runbook and cohort pass/fail policy)
+- `docs/manual-validation-backlog.md` (deferred real-host validation queue)
+- `./scripts/easy_node.sh manual-validation-status --show-json 1` (current real-host readiness state: runtime hygiene + recorded manual checks, now including direct pointers to the latest failed incident bundle when a recorded smoke/signoff run captured one)
+- `./scripts/easy_node.sh manual-validation-report --print-report 1 --print-summary-json 1` (generate one shareable markdown + JSON readiness handoff artifact from the current real-host validation state, with latest failed incident pointers when present and direct bundle attachment paths for refreshed readiness-report artifacts when a failed run captured them)
+- `sudo ./scripts/easy_node.sh pre-real-host-readiness --strict-beta 1 --print-summary-json 1` (one-command pre-machine-C readiness sweep: runtime-fix + recorded WG-only selftest + refreshed readiness report, with a focused `machine_c_smoke_ready` answer even while the final 3-machine signoff is still pending)
+- `sudo ./scripts/easy_node.sh wg-only-stack-selftest-record --strict-beta 1 --print-summary-json 1` (rerun the Linux root WG-only selftest, record it automatically, and refresh the shared readiness report)
+- `./scripts/easy_node.sh manual-validation-record --check-id ... --status ...` (store the result of a real-host validation step)
+- `./scripts/easy_node.sh runtime-doctor --show-json 1` (quick runtime hygiene check before real-host reruns)
+- `sudo ./scripts/easy_node.sh runtime-fix --prune-wg-only-dir 1 --show-json 1` (safe cleanup pass before repeating real-host validation; now also repairs safe repo/runtime ownership drift when possible)
+- `sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country` (one-command real machine-C smoke run with automatic receipt recording, optional pre-run hygiene repair, saved runtime doctor/fix artifacts, automatic incident snapshot capture on failed runs, automatic refresh of the shared manual-validation readiness report, refreshed readiness-report artifacts attached back into the failed incident bundle, and final receipt artifacts that include that refreshed readiness report)
+- `sudo ./scripts/easy_node.sh three-machine-prod-signoff --bundle-dir .easy-node-logs/prod_gate_bundle --directory-a https://A_HOST:8081 --directory-b https://B_HOST:8081 --issuer-url https://A_HOST:8082 --entry-url https://A_HOST:8083 --exit-url https://A_HOST:8084 --pre-real-host-readiness 1 --runtime-fix 1 --print-summary-json 1` (one-command true 3-machine production signoff run with automatic receipt recording, optional pre-run hygiene repair, saved runtime doctor/fix artifacts, automatic attachment of those runtime artifacts into failed incident snapshots, automatic refresh of the shared manual-validation readiness report, refreshed readiness-report artifacts attached back into the failed incident bundle, and final receipt artifacts that include that refreshed readiness report)
 - `docs/product-roadmap.md` (beta -> v1 -> v2 delivery path)
 
 ## License

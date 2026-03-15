@@ -26,7 +26,121 @@ mkdir -p "$TMP_ROOT/scripts" "$TMP_ROOT/data"
 cat >"$TMP_ROOT/scripts/easy_node.sh" <<'EOF_FAKE_EASY'
 #!/usr/bin/env bash
 set -euo pipefail
-printf '%s\n' "$*" >>"${EASY_MODE_RUNTIME_CAPTURE_FILE:?}"
+subcommand="${1:-}"
+if [[ $# -gt 0 ]]; then
+  shift
+fi
+printf '%s\n' "${subcommand}${*:+ }$*" >>"${EASY_MODE_RUNTIME_CAPTURE_FILE:?}"
+
+resolve_repo_path() {
+  local path="${1:-}"
+  if [[ -z "$path" ]]; then
+    printf '%s' ""
+    return
+  fi
+  if [[ "$path" == /* ]]; then
+    printf '%s' "$path"
+  else
+    printf '%s' "${PRIVACYNODE_ROOT:?}/$path"
+  fi
+}
+
+if [[ "$subcommand" == "manual-validation-report" ]]; then
+  summary_json=""
+  report_md=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --summary-json)
+        summary_json="$(resolve_repo_path "${2:-}")"
+        shift 2
+        ;;
+      --report-md)
+        report_md="$(resolve_repo_path "${2:-}")"
+        shift 2
+        ;;
+      *)
+        shift
+        ;;
+    esac
+  done
+
+  mkdir -p "$(dirname "$summary_json")" "$(dirname "$report_md")"
+  cat >"$summary_json" <<EOF_SUMMARY
+{
+  "report": {
+    "readiness_status": "NOT_READY",
+    "summary_json": "$summary_json",
+    "report_md": "$report_md"
+  },
+  "summary": {
+    "pre_machine_c_gate": {
+      "ready": false,
+      "blockers": ["runtime_hygiene"],
+      "next_command": "sudo ./scripts/easy_node.sh client-vpn-smoke --runtime-fix 1"
+    },
+    "next_action_command": "sudo ./scripts/easy_node.sh client-vpn-smoke --runtime-fix 1",
+    "latest_failed_incident": {
+      "summary_json": {"path": "/tmp/fake-incident/incident_summary.json"},
+      "report_md": {"path": "/tmp/fake-incident/incident_report.md"},
+      "readiness_report_summary_attachment": {"bundle_path": "attachments/02_manual_validation_readiness_summary.json"},
+      "readiness_report_md_attachment": {"bundle_path": "attachments/03_manual_validation_readiness_report.md"}
+    }
+  }
+}
+EOF_SUMMARY
+  printf '# fake readiness report\n' >"$report_md"
+fi
+if [[ "$subcommand" == "pre-real-host-readiness" ]]; then
+  summary_json=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --summary-json)
+        summary_json="$(resolve_repo_path "${2:-}")"
+        shift 2
+        ;;
+      *)
+        shift
+        ;;
+    esac
+  done
+  if [[ -z "$summary_json" ]]; then
+    summary_json="$(resolve_repo_path ".easy-node-logs/pre_real_host_readiness_summary.json")"
+  fi
+  mkdir -p "$(dirname "$summary_json")" "$(dirname "$(resolve_repo_path ".easy-node-logs/manual_validation_readiness_summary.json")")"
+  cat >"$(resolve_repo_path ".easy-node-logs/manual_validation_readiness_summary.json")" <<EOF_READY
+{
+  "report": {
+    "readiness_status": "NOT_READY",
+    "summary_json": "$(resolve_repo_path ".easy-node-logs/manual_validation_readiness_summary.json")",
+    "report_md": "$(resolve_repo_path ".easy-node-logs/manual_validation_readiness_report.md")"
+  },
+  "summary": {
+    "pre_machine_c_gate": {
+      "ready": true,
+      "blockers": [],
+      "next_command": "sudo ./scripts/easy_node.sh client-vpn-smoke --runtime-fix 1"
+    },
+    "next_action_command": "sudo ./scripts/easy_node.sh client-vpn-smoke --runtime-fix 1",
+    "latest_failed_incident": {
+      "summary_json": {"path": "/tmp/fake-incident/incident_summary.json"},
+      "report_md": {"path": "/tmp/fake-incident/incident_report.md"},
+      "readiness_report_summary_attachment": {"bundle_path": "attachments/02_manual_validation_readiness_summary.json"},
+      "readiness_report_md_attachment": {"bundle_path": "attachments/03_manual_validation_readiness_report.md"}
+    }
+  }
+}
+EOF_READY
+  printf '# fake readiness report\n' >"$(resolve_repo_path ".easy-node-logs/manual_validation_readiness_report.md")"
+  cat >"$summary_json" <<EOF_PRE
+{
+  "status": "pass",
+  "stage": "complete",
+  "machine_c_smoke_gate": {
+    "ready": true
+  }
+}
+EOF_PRE
+fi
 exit 0
 EOF_FAKE_EASY
 chmod +x "$TMP_ROOT/scripts/easy_node.sh"
@@ -334,6 +448,7 @@ INPUT39="$TMP_DIR/input39.txt"
   printf '\n'    # subject optional
   printf '\n'    # bundle dir
   printf '\n'    # report optional
+  printf 'y\n'   # run pre-real-host readiness first? yes
   printf 'n\n'   # run with sudo? no
   printf '0\n'   # back from advanced menu
   printf '0\n'   # exit main menu
@@ -354,6 +469,8 @@ assert_line_has "$line39" '--run-report-json \.easy-node-logs/prod_pilot_bundle/
   "runtime wiring failed: option 39 missing default pilot run-report path"
 assert_line_has "$line39" '--run-report-print 1' \
   "runtime wiring failed: option 39 missing --run-report-print 1"
+assert_line_has "$line39" '--pre-real-host-readiness 1' \
+  "runtime wiring failed: option 39 missing --pre-real-host-readiness 1"
 
 : >"$CAPTURE"
 
@@ -863,7 +980,7 @@ INPUT48="$TMP_DIR/input48.txt"
 {
   printf '3\n'   # main menu: advanced
   printf '48\n'  # prod pilot cohort runbook
-  for _ in $(seq 1 22); do
+  for _ in $(seq 1 23); do
     printf '\n'  # accept defaults
   done
   printf '0\n'   # back from advanced menu
@@ -907,6 +1024,8 @@ assert_line_has "$line48" '--bundle-outputs 1' \
   "runtime wiring failed: option 48 missing default --bundle-outputs 1"
 assert_line_has "$line48" '--bundle-fail-close 1' \
   "runtime wiring failed: option 48 missing default --bundle-fail-close 1"
+assert_line_has "$line48" '--pre-real-host-readiness 1' \
+  "runtime wiring failed: option 48 missing default --pre-real-host-readiness 1"
 assert_line_has "$line48" '--print-summary-json 0' \
   "runtime wiring failed: option 48 missing default --print-summary-json 0"
 
@@ -1011,7 +1130,7 @@ INPUT51="$TMP_DIR/input51.txt"
 {
   printf '3\n'   # main menu: advanced
   printf '51\n'  # prod pilot cohort full flow
-  for _ in $(seq 1 24); do
+  for _ in $(seq 1 25); do
     printf '\n'  # accept defaults
   done
   printf '0\n'   # back from advanced menu
@@ -1055,6 +1174,8 @@ assert_line_has "$line51_runbook" '--bundle-outputs 1' \
   "runtime wiring failed: option 51 runbook missing default --bundle-outputs 1"
 assert_line_has "$line51_runbook" '--bundle-fail-close 1' \
   "runtime wiring failed: option 51 runbook missing default --bundle-fail-close 1"
+assert_line_has "$line51_runbook" '--pre-real-host-readiness 1' \
+  "runtime wiring failed: option 51 runbook missing default --pre-real-host-readiness 1"
 assert_line_has "$line51_runbook" '--reports-dir \.easy-node-logs/prod_pilot_cohort' \
   "runtime wiring failed: option 51 runbook missing default reports-dir"
 assert_line_has "$line51_runbook" '--summary-json \.easy-node-logs/prod_pilot_cohort/prod_pilot_cohort_summary\.json' \
@@ -1120,7 +1241,7 @@ INPUT52="$TMP_DIR/input52.txt"
 {
   printf '3\n'   # main menu: advanced
   printf '52\n'  # prod pilot cohort quick
-  for _ in $(seq 1 20); do
+  for _ in $(seq 1 21); do
     printf '\n'  # accept defaults
   done
   printf '0\n'   # back from advanced menu
@@ -1156,6 +1277,8 @@ assert_line_has "$line52" '--bundle-outputs 1' \
   "runtime wiring failed: option 52 missing default --bundle-outputs 1"
 assert_line_has "$line52" '--bundle-fail-close 1' \
   "runtime wiring failed: option 52 missing default --bundle-fail-close 1"
+assert_line_has "$line52" '--pre-real-host-readiness 1' \
+  "runtime wiring failed: option 52 missing default --pre-real-host-readiness 1"
 assert_line_has "$line52" '--signoff-require-trend-artifact-policy-match 1' \
   "runtime wiring failed: option 52 missing strict signoff --signoff-require-trend-artifact-policy-match 1"
 assert_line_has "$line52" '--signoff-require-trend-wg-validate-udp-source 1' \
@@ -1469,7 +1592,7 @@ INPUT58="$TMP_DIR/input58.txt"
 {
   printf '3\n'
   printf '58\n'
-  for _ in $(seq 1 40); do
+  for _ in $(seq 1 41); do
     printf '\n'
   done
   printf '0\n'
@@ -1492,6 +1615,7 @@ assert_line_has "$line58" '--max-round-failures 0' "runtime wiring failed: optio
 assert_line_has "$line58" '--max-alert-severity WARN' "runtime wiring failed: option 58 missing default max-alert-severity"
 assert_line_has "$line58" '--bundle-outputs 1' "runtime wiring failed: option 58 missing default bundle-outputs"
 assert_line_has "$line58" '--bundle-fail-close 1' "runtime wiring failed: option 58 missing default bundle-fail-close"
+assert_line_has "$line58" '--pre-real-host-readiness 1' "runtime wiring failed: option 58 missing default pre-real-host-readiness"
 assert_line_has "$line58" '--dashboard-enable 1' "runtime wiring failed: option 58 missing --dashboard-enable 1"
 assert_line_has "$line58" '--dashboard-fail-close 0' "runtime wiring failed: option 58 missing --dashboard-fail-close 0"
 assert_line_has "$line58" '--dashboard-print 1' "runtime wiring failed: option 58 missing --dashboard-print 1"
@@ -1518,7 +1642,7 @@ INPUT59="$TMP_DIR/input59.txt"
 {
   printf '3\n'
   printf '59\n'
-  for _ in $(seq 1 5); do
+  for _ in $(seq 1 6); do
     printf '\n'
   done
   printf '0\n'
@@ -1536,7 +1660,400 @@ assert_line_has "$line59" '--bootstrap-directory http://198\.51\.100\.10:8081' \
   "runtime wiring failed: option 59 missing default bootstrap directory"
 assert_line_has "$line59" '--subject pilot-client' \
   "runtime wiring failed: option 59 missing default subject"
+assert_line_has "$line59" '--pre-real-host-readiness 1' \
+  "runtime wiring failed: option 59 missing default --pre-real-host-readiness 1"
 assert_line_has "$line59" '--show-json 0' \
   "runtime wiring failed: option 59 missing default --show-json 0"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 60 runtime command forwarding"
+INPUT60="$TMP_DIR/input60.txt"
+{
+  printf '3\n'
+  printf '60\n'
+  for _ in $(seq 1 5); do
+    printf '\n'
+  done
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT60"
+run_ui "$INPUT60" "$TMP_DIR/run60.log"
+
+line60="$(rg '^runtime-doctor ' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line60" ]]; then
+  echo "runtime wiring failed: option 60 did not invoke runtime-doctor"
+  cat "$TMP_DIR/run60.log"
+  exit 1
+fi
+assert_line_has "$line60" '--base-port 19280' \
+  "runtime wiring failed: option 60 missing default --base-port"
+assert_line_has "$line60" '--client-iface wgcstack0' \
+  "runtime wiring failed: option 60 missing default --client-iface"
+assert_line_has "$line60" '--exit-iface wgestack0' \
+  "runtime wiring failed: option 60 missing default --exit-iface"
+assert_line_has "$line60" '--vpn-iface wgvpn0' \
+  "runtime wiring failed: option 60 missing default --vpn-iface"
+assert_line_has "$line60" '--show-json 1' \
+  "runtime wiring failed: option 60 missing default --show-json 1"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 61 runtime command forwarding"
+INPUT61="$TMP_DIR/input61.txt"
+{
+  printf '3\n'
+  printf '61\n'
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT61"
+run_ui "$INPUT61" "$TMP_DIR/run61.log"
+
+line61="$(rg '^manual-validation-backlog$' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line61" ]]; then
+  echo "runtime wiring failed: option 61 did not invoke manual-validation-backlog"
+  cat "$TMP_DIR/run61.log"
+  exit 1
+fi
+
+echo "[easy-mode-runtime] option 62 runtime command forwarding"
+INPUT62="$TMP_DIR/input62.txt"
+{
+  printf '3\n'
+  printf '62\n'
+  for _ in $(seq 1 6); do
+    printf '\n'
+  done
+  printf 'n\n'
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT62"
+run_ui "$INPUT62" "$TMP_DIR/run62.log"
+
+line62="$(rg '^runtime-fix ' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line62" ]]; then
+  echo "runtime wiring failed: option 62 did not invoke runtime-fix"
+  cat "$TMP_DIR/run62.log"
+  exit 1
+fi
+assert_line_has "$line62" '--base-port 19280' \
+  "runtime wiring failed: option 62 missing default --base-port"
+assert_line_has "$line62" '--client-iface wgcstack0' \
+  "runtime wiring failed: option 62 missing default --client-iface"
+assert_line_has "$line62" '--exit-iface wgestack0' \
+  "runtime wiring failed: option 62 missing default --exit-iface"
+assert_line_has "$line62" '--vpn-iface wgvpn0' \
+  "runtime wiring failed: option 62 missing default --vpn-iface"
+assert_line_has "$line62" '--prune-wg-only-dir 0' \
+  "runtime wiring failed: option 62 missing default --prune-wg-only-dir 0"
+assert_line_has "$line62" '--show-json 1' \
+  "runtime wiring failed: option 62 missing default --show-json 1"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 63 runtime command forwarding"
+INPUT63="$TMP_DIR/input63.txt"
+{
+  printf '3\n'
+  printf '63\n'
+  for _ in $(seq 1 5); do
+    printf '\n'
+  done
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT63"
+run_ui "$INPUT63" "$TMP_DIR/run63.log"
+
+line63="$(rg '^manual-validation-status ' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line63" ]]; then
+  echo "runtime wiring failed: option 63 did not invoke manual-validation-status"
+  cat "$TMP_DIR/run63.log"
+  exit 1
+fi
+assert_line_has "$line63" '--base-port 19280' \
+  "runtime wiring failed: option 63 missing default --base-port"
+assert_line_has "$line63" '--client-iface wgcstack0' \
+  "runtime wiring failed: option 63 missing default --client-iface"
+assert_line_has "$line63" '--exit-iface wgestack0' \
+  "runtime wiring failed: option 63 missing default --exit-iface"
+assert_line_has "$line63" '--vpn-iface wgvpn0' \
+  "runtime wiring failed: option 63 missing default --vpn-iface"
+assert_line_has "$line63" '--show-json 1' \
+  "runtime wiring failed: option 63 missing default --show-json 1"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 64 runtime command forwarding"
+INPUT64="$TMP_DIR/input64.txt"
+{
+  printf '3\n'
+  printf '64\n'
+  printf '\n'    # bootstrap directory default
+  printf 'inv-runtime-smoke\n'
+  printf 'wgvpn7\n'
+  printf 'https://api.ipify.org\n'
+  printf 'https://ipinfo.io/country\n'
+  printf '\n'    # pre-real-host readiness default yes
+  printf '\n'    # runtime doctor default yes
+  printf '\n'    # runtime fix default no
+  printf 'y\n'   # print summary json
+  printf 'n\n'   # no sudo in integration
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT64"
+run_ui "$INPUT64" "$TMP_DIR/run64.log"
+
+line64="$(rg '^client-vpn-smoke ' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line64" ]]; then
+  echo "runtime wiring failed: option 64 did not invoke client-vpn-smoke"
+  cat "$TMP_DIR/run64.log"
+  exit 1
+fi
+assert_line_has "$line64" '--bootstrap-directory http://198\.51\.100\.10:8081' \
+  "runtime wiring failed: option 64 missing default bootstrap directory"
+assert_line_has "$line64" '--subject inv-runtime-smoke' \
+  "runtime wiring failed: option 64 missing subject"
+assert_line_has "$line64" '--beta-profile 1' \
+  "runtime wiring failed: option 64 missing --beta-profile 1"
+assert_line_has "$line64" '--path-profile balanced' \
+  "runtime wiring failed: option 64 missing default path profile"
+assert_line_has "$line64" '--distinct-operators 1' \
+  "runtime wiring failed: option 64 missing distinct-operators default"
+assert_line_has "$line64" '--interface wgvpn7' \
+  "runtime wiring failed: option 64 missing interface override"
+assert_line_has "$line64" '--pre-real-host-readiness 1' \
+  "runtime wiring failed: option 64 missing pre-real-host-readiness default"
+assert_line_has "$line64" '--runtime-doctor 1' \
+  "runtime wiring failed: option 64 missing runtime-doctor default"
+assert_line_has "$line64" '--runtime-fix 0' \
+  "runtime wiring failed: option 64 missing runtime-fix default"
+assert_line_has "$line64" '--public-ip-url https://api\.ipify\.org' \
+  "runtime wiring failed: option 64 missing public IP URL"
+assert_line_has "$line64" '--country-url https://ipinfo\.io/country' \
+  "runtime wiring failed: option 64 missing country URL"
+assert_line_has "$line64" '--print-summary-json 1' \
+  "runtime wiring failed: option 64 missing print-summary-json 1"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 65 runtime command forwarding"
+INPUT65="$TMP_DIR/input65.txt"
+{
+  printf '3\n'
+  printf '65\n'
+  printf '\n'    # directory A default
+  printf '\n'    # directory B default
+  printf '\n'    # issuer URL default
+  printf '\n'    # entry URL default
+  printf '\n'    # exit URL default
+  printf '.easy-node-logs/prod_gate_bundle_test\n'
+  printf '\n'    # pre-real-host readiness default yes
+  printf '\n'    # runtime doctor default yes
+  printf '\n'    # runtime fix default no
+  printf 'y\n'   # print summary json
+  printf 'n\n'   # no sudo in integration
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT65"
+run_ui "$INPUT65" "$TMP_DIR/run65.log"
+
+line65="$(rg '^three-machine-prod-signoff ' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line65" ]]; then
+  echo "runtime wiring failed: option 65 did not invoke three-machine-prod-signoff"
+  cat "$TMP_DIR/run65.log"
+  exit 1
+fi
+assert_line_has "$line65" '--directory-a https://198\.51\.100\.10:8081' \
+  "runtime wiring failed: option 65 missing default directory A"
+assert_line_has "$line65" '--directory-b https://203\.0\.113\.20:8081' \
+  "runtime wiring failed: option 65 missing default directory B"
+assert_line_has "$line65" '--issuer-url https://198\.51\.100\.10:8082' \
+  "runtime wiring failed: option 65 missing default issuer URL"
+assert_line_has "$line65" '--entry-url https://198\.51\.100\.10:8083' \
+  "runtime wiring failed: option 65 missing default entry URL"
+assert_line_has "$line65" '--exit-url https://203\.0\.113\.20:8084' \
+  "runtime wiring failed: option 65 missing default exit URL"
+assert_line_has "$line65" '--bundle-dir \.easy-node-logs/prod_gate_bundle_test' \
+  "runtime wiring failed: option 65 missing bundle dir override"
+assert_line_has "$line65" '--pre-real-host-readiness 1' \
+  "runtime wiring failed: option 65 missing pre-real-host-readiness default"
+assert_line_has "$line65" '--runtime-doctor 1' \
+  "runtime wiring failed: option 65 missing runtime-doctor default"
+assert_line_has "$line65" '--runtime-fix 0' \
+  "runtime wiring failed: option 65 missing runtime-fix default"
+assert_line_has "$line65" '--print-summary-json 1' \
+  "runtime wiring failed: option 65 missing print-summary-json 1"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 66 runtime command forwarding"
+INPUT66="$TMP_DIR/input66.txt"
+{
+  printf '3\n'
+  printf '66\n'
+  printf '\n'    # base port default
+  printf '\n'    # client iface default
+  printf '\n'    # exit iface default
+  printf '\n'    # vpn iface default
+  printf '.easy-node-logs/manual_validation_readiness_summary_test.json\n'
+  printf '.easy-node-logs/manual_validation_readiness_report_test.md\n'
+  printf '\n'    # print report default yes
+  printf 'y\n'   # print summary json
+  printf 'y\n'   # fail on not ready
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT66"
+run_ui "$INPUT66" "$TMP_DIR/run66.log"
+
+line66="$(rg '^manual-validation-report ' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line66" ]]; then
+  echo "runtime wiring failed: option 66 did not invoke manual-validation-report"
+  cat "$TMP_DIR/run66.log"
+  exit 1
+fi
+assert_line_has "$line66" '--base-port 19280' \
+  "runtime wiring failed: option 66 missing default --base-port"
+assert_line_has "$line66" '--client-iface wgcstack0' \
+  "runtime wiring failed: option 66 missing default --client-iface"
+assert_line_has "$line66" '--exit-iface wgestack0' \
+  "runtime wiring failed: option 66 missing default --exit-iface"
+assert_line_has "$line66" '--vpn-iface wgvpn0' \
+  "runtime wiring failed: option 66 missing default --vpn-iface"
+assert_line_has "$line66" '--summary-json \.easy-node-logs/manual_validation_readiness_summary_test\.json' \
+  "runtime wiring failed: option 66 missing summary-json override"
+assert_line_has "$line66" '--report-md \.easy-node-logs/manual_validation_readiness_report_test\.md' \
+  "runtime wiring failed: option 66 missing report-md override"
+assert_line_has "$line66" '--print-report 1' \
+  "runtime wiring failed: option 66 missing default print-report"
+assert_line_has "$line66" '--print-summary-json 1' \
+  "runtime wiring failed: option 66 missing print-summary-json 1"
+assert_line_has "$line66" '--fail-on-not-ready 1' \
+  "runtime wiring failed: option 66 missing fail-on-not-ready 1"
+if ! rg -q '^launcher readiness summary$' "$TMP_DIR/run66.log"; then
+  echo "runtime wiring failed: option 66 missing launcher readiness summary heading"
+  cat "$TMP_DIR/run66.log"
+  exit 1
+fi
+if ! rg -q '^  readiness_status=NOT_READY$' "$TMP_DIR/run66.log"; then
+  echo "runtime wiring failed: option 66 missing launcher readiness status"
+  cat "$TMP_DIR/run66.log"
+  exit 1
+fi
+if ! rg -q '^  machine_c_smoke_ready=false$' "$TMP_DIR/run66.log"; then
+  echo "runtime wiring failed: option 66 missing machine_c_smoke_ready line"
+  cat "$TMP_DIR/run66.log"
+  exit 1
+fi
+if ! rg -q '^  machine_c_smoke_blockers=runtime_hygiene$' "$TMP_DIR/run66.log"; then
+  echo "runtime wiring failed: option 66 missing machine_c_smoke_blockers line"
+  cat "$TMP_DIR/run66.log"
+  exit 1
+fi
+if ! rg -q '^  machine_c_smoke_next_command=sudo ./scripts/easy_node.sh client-vpn-smoke --runtime-fix 1$' "$TMP_DIR/run66.log"; then
+  echo "runtime wiring failed: option 66 missing machine_c_smoke_next_command line"
+  cat "$TMP_DIR/run66.log"
+  exit 1
+fi
+if ! rg -q '^  next_action_command=sudo ./scripts/easy_node.sh client-vpn-smoke --runtime-fix 1$' "$TMP_DIR/run66.log"; then
+  echo "runtime wiring failed: option 66 missing launcher next action command"
+  cat "$TMP_DIR/run66.log"
+  exit 1
+fi
+if ! rg -q '^  latest_failed_incident_summary_json=/tmp/fake-incident/incident_summary.json$' "$TMP_DIR/run66.log"; then
+  echo "runtime wiring failed: option 66 missing latest failed incident summary path"
+  cat "$TMP_DIR/run66.log"
+  exit 1
+fi
+if ! rg -q '^  latest_failed_incident_report_md=/tmp/fake-incident/incident_report.md$' "$TMP_DIR/run66.log"; then
+  echo "runtime wiring failed: option 66 missing latest failed incident report path"
+  cat "$TMP_DIR/run66.log"
+  exit 1
+fi
+if ! rg -q '^  latest_failed_incident_readiness_report_summary_attachment=attachments/02_manual_validation_readiness_summary.json$' "$TMP_DIR/run66.log"; then
+  echo "runtime wiring failed: option 66 missing readiness summary attachment path"
+  cat "$TMP_DIR/run66.log"
+  exit 1
+fi
+if ! rg -q '^  latest_failed_incident_readiness_report_md_attachment=attachments/03_manual_validation_readiness_report.md$' "$TMP_DIR/run66.log"; then
+  echo "runtime wiring failed: option 66 missing readiness report attachment path"
+  cat "$TMP_DIR/run66.log"
+  exit 1
+fi
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 67 runtime command forwarding"
+INPUT67="$TMP_DIR/input67.txt"
+{
+  printf '3\n'
+  printf '67\n'
+  printf '\n'    # base port default
+  printf '\n'    # client iface default
+  printf '\n'    # exit iface default
+  printf 'n\n'   # strict beta disabled
+  printf 'y\n'   # print summary json
+  printf 'n\n'   # no sudo in integration
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT67"
+run_ui "$INPUT67" "$TMP_DIR/run67.log"
+
+line67="$(rg '^wg-only-stack-selftest-record ' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line67" ]]; then
+  echo "runtime wiring failed: option 67 did not invoke wg-only-stack-selftest-record"
+  cat "$TMP_DIR/run67.log"
+  exit 1
+fi
+assert_line_has "$line67" '--base-port 19280' \
+  "runtime wiring failed: option 67 missing default --base-port"
+assert_line_has "$line67" '--client-iface wgcstack0' \
+  "runtime wiring failed: option 67 missing default --client-iface"
+assert_line_has "$line67" '--exit-iface wgestack0' \
+  "runtime wiring failed: option 67 missing default --exit-iface"
+assert_line_has "$line67" '--strict-beta 0' \
+  "runtime wiring failed: option 67 missing strict-beta override"
+assert_line_has "$line67" '--print-summary-json 1' \
+  "runtime wiring failed: option 67 missing print-summary-json 1"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 68 runtime command forwarding"
+INPUT68="$TMP_DIR/input68.txt"
+{
+  printf '3\n'
+  printf '68\n'
+  printf '\n'    # base port default
+  printf 'wgcpre0\n'
+  printf 'wgepre0\n'
+  printf 'wgvpnpre0\n'
+  printf '\n'    # prune default yes
+  printf 'n\n'   # strict beta disabled
+  printf 'y\n'   # print summary json
+  printf 'n\n'   # no sudo in integration
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT68"
+run_ui "$INPUT68" "$TMP_DIR/run68.log"
+
+line68="$(rg '^pre-real-host-readiness ' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line68" ]]; then
+  echo "runtime wiring failed: option 68 did not invoke pre-real-host-readiness"
+  cat "$TMP_DIR/run68.log"
+  exit 1
+fi
+assert_line_has "$line68" '--base-port 19280' \
+  "runtime wiring failed: option 68 missing default --base-port"
+assert_line_has "$line68" '--client-iface wgcpre0' \
+  "runtime wiring failed: option 68 missing client iface override"
+assert_line_has "$line68" '--exit-iface wgepre0' \
+  "runtime wiring failed: option 68 missing exit iface override"
+assert_line_has "$line68" '--vpn-iface wgvpnpre0' \
+  "runtime wiring failed: option 68 missing vpn iface override"
+assert_line_has "$line68" '--runtime-fix-prune-wg-only-dir 1' \
+  "runtime wiring failed: option 68 missing prune flag default"
+assert_line_has "$line68" '--strict-beta 0' \
+  "runtime wiring failed: option 68 missing strict-beta override"
+assert_line_has "$line68" '--print-summary-json 1' \
+  "runtime wiring failed: option 68 missing print-summary-json 1"
 
 echo "easy-mode launcher runtime integration check ok"

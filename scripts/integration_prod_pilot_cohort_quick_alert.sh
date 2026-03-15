@@ -40,6 +40,22 @@ cat >"$WARN_SUMMARY" <<'EOF_WARN_SUMMARY'
   "no_go": 1,
   "evaluation_errors": 0,
   "reports_total": 10,
+  "incident_snapshot": {
+    "latest_failed_run_report": {
+      "source_quick_run_report": {"path": "/tmp/run_b/prod_pilot_cohort_quick_report.json", "exists": true},
+      "source_summary_json": {"path": "/tmp/run_b/prod_pilot_cohort_summary.json", "exists": true, "valid_json": true},
+      "path": "/tmp/run_b/round_2_run_report.json",
+      "enabled": true,
+      "status": "ok",
+      "bundle_dir": {"path": "/tmp/run_b/incident_snapshot", "exists": true},
+      "bundle_tar": {"path": "/tmp/run_b/incident_snapshot.tar.gz", "exists": true},
+      "summary_json": {"path": "/tmp/run_b/incident_summary.json", "exists": true, "valid_json": true},
+      "report_md": {"path": "/tmp/run_b/incident_report.md", "exists": true},
+      "attachment_manifest": {"path": "/tmp/run_b/attachments_manifest.json", "exists": true},
+      "attachment_skipped": {"path": "/tmp/run_b/attachments_skipped.json", "exists": true},
+      "attachment_count": 1
+    }
+  },
   "top_no_go_reasons": [
     {"count": 1, "reason": "signoff rc is non-zero (signoff_rc=3)"}
   ]
@@ -91,6 +107,16 @@ if ! rg -q '\[prod-pilot-cohort-quick-alert\] severity=WARN' /tmp/integration_pr
   cat /tmp/integration_prod_pilot_cohort_quick_alert_warn.log
   exit 1
 fi
+if ! rg -q '\[prod-pilot-cohort-quick-alert\] incident_handoff ' /tmp/integration_prod_pilot_cohort_quick_alert_warn.log; then
+  echo "expected quick alert incident_handoff output not found"
+  cat /tmp/integration_prod_pilot_cohort_quick_alert_warn.log
+  exit 1
+fi
+if ! rg -q 'attachment_manifest=/tmp/run_b/attachments_manifest.json' /tmp/integration_prod_pilot_cohort_quick_alert_warn.log; then
+  echo "expected quick alert attachment manifest in handoff output"
+  cat /tmp/integration_prod_pilot_cohort_quick_alert_warn.log
+  exit 1
+fi
 
 echo "[prod-pilot-cohort-quick-alert] WARN fail-close"
 set +e
@@ -106,6 +132,15 @@ set -e
 if [[ "$warn_fail_rc" -ne 1 ]]; then
   echo "expected rc=1 for WARN fail-close (got $warn_fail_rc)"
   cat /tmp/integration_prod_pilot_cohort_quick_alert_warn_fail.log
+  exit 1
+fi
+WARN_ALERT_JSON="$TMP_DIR/quick_alert_warn_out.json"
+./scripts/prod_pilot_cohort_quick_alert.sh \
+  --trend-summary-json "$WARN_SUMMARY" \
+  --summary-json "$WARN_ALERT_JSON" >/tmp/integration_prod_pilot_cohort_quick_alert_warn_json.log 2>&1
+if ! jq -e '.incident_snapshot.latest_failed_run_report.source_quick_run_report.path == "/tmp/run_b/prod_pilot_cohort_quick_report.json" and .incident_snapshot.latest_failed_run_report.source_summary_json.path == "/tmp/run_b/prod_pilot_cohort_summary.json" and .incident_snapshot.latest_failed_run_report.summary_json.path == "/tmp/run_b/incident_summary.json" and .incident_snapshot.latest_failed_run_report.report_md.path == "/tmp/run_b/incident_report.md" and .incident_snapshot.latest_failed_run_report.attachment_manifest.path == "/tmp/run_b/attachments_manifest.json" and .incident_snapshot.latest_failed_run_report.attachment_skipped.path == "/tmp/run_b/attachments_skipped.json" and .incident_snapshot.latest_failed_run_report.attachment_count == 1' "$WARN_ALERT_JSON" >/dev/null 2>&1; then
+  echo "quick alert WARN summary JSON missing incident handoff block"
+  cat "$WARN_ALERT_JSON"
   exit 1
 fi
 

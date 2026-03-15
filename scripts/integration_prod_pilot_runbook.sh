@@ -40,6 +40,11 @@ EASY_NODE_SH="$FAKE_EASY_NODE" \
   --signoff-check 0 \
   --wg-slo-profile strict >/tmp/integration_prod_pilot_runbook_wrapper.log 2>&1
 
+if ! rg -q -- '^pre-real-host-readiness' "$CAPTURE"; then
+  echo "prod-pilot wrapper did not dispatch pre-real-host-readiness by default"
+  cat "$CAPTURE"
+  exit 1
+fi
 if ! rg -q -- '^three-machine-prod-bundle' "$CAPTURE"; then
   echo "prod-pilot wrapper did not dispatch three-machine-prod-bundle"
   cat "$CAPTURE"
@@ -51,11 +56,28 @@ if ! rg -q -- '^prod-gate-slo-dashboard' "$CAPTURE"; then
   exit 1
 fi
 
-bundle_line="$(sed -n '1p' "$CAPTURE")"
-dashboard_line="$(sed -n '2p' "$CAPTURE")"
+pre_line="$(sed -n '1p' "$CAPTURE")"
+bundle_line="$(sed -n '2p' "$CAPTURE")"
+dashboard_line="$(sed -n '3p' "$CAPTURE")"
 
-if [[ -z "$bundle_line" || -z "$dashboard_line" ]]; then
-  echo "expected two easy-node dispatch lines (bundle + dashboard)"
+if [[ -z "$pre_line" || -z "$bundle_line" || -z "$dashboard_line" ]]; then
+  echo "expected three easy-node dispatch lines (pre-readiness + bundle + dashboard)"
+  cat "$CAPTURE"
+  exit 1
+fi
+
+if ! printf '%s\n' "$pre_line" | rg -q -- '^pre-real-host-readiness '; then
+  echo "prod-pilot wrapper first dispatch should be pre-real-host-readiness"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! printf '%s\n' "$pre_line" | rg -q -- '--summary-json '; then
+  echo "prod-pilot wrapper missing pre-real-host readiness --summary-json"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! printf '%s\n' "$pre_line" | rg -q -- '--print-summary-json 1'; then
+  echo "prod-pilot wrapper missing pre-real-host readiness --print-summary-json 1"
   cat "$CAPTURE"
   exit 1
 fi
@@ -172,6 +194,31 @@ if ! printf '%s\n' "$dashboard_line" | rg -q -- '--require-wg-validate-strict-di
 fi
 if ! printf '%s\n' "$dashboard_line" | rg -q -- '--require-wg-soak-diversity-pass 1'; then
   echo "prod-pilot wrapper missing dashboard --require-wg-soak-diversity-pass 1"
+  cat "$CAPTURE"
+  exit 1
+fi
+
+: >"$CAPTURE"
+
+echo "[prod-pilot] wrapper pre-real-host readiness override"
+CAPTURE_FILE="$CAPTURE" \
+EASY_NODE_SH="$FAKE_EASY_NODE" \
+./scripts/prod_pilot_runbook.sh \
+  --bootstrap-directory https://dir-a:8081 \
+  --pre-real-host-readiness 0 >/tmp/integration_prod_pilot_runbook_pre_override.log 2>&1
+
+if rg -q -- '^pre-real-host-readiness' "$CAPTURE"; then
+  echo "prod-pilot wrapper should not dispatch pre-real-host-readiness when explicitly disabled"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '^three-machine-prod-bundle' "$CAPTURE"; then
+  echo "prod-pilot wrapper override run did not dispatch three-machine-prod-bundle"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '^prod-gate-slo-dashboard' "$CAPTURE"; then
+  echo "prod-pilot wrapper override run did not dispatch prod-gate-slo-dashboard"
   cat "$CAPTURE"
   exit 1
 fi

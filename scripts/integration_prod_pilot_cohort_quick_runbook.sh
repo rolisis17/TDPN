@@ -90,8 +90,8 @@ EOF_ALERT
     fi
     if [[ -n "$signoff_json" ]]; then
       touch_parent "$signoff_json"
-      cat >"$signoff_json" <<'EOF_SIGNOFF'
-{"status":"ok"}
+      cat >"$signoff_json" <<EOF_SIGNOFF
+{"status":"ok","incident_snapshot":{"source_summary_json":{"path":"${FAKE_SIGNOFF_SOURCE_SUMMARY_JSON:-}","exists":false,"valid_json":false},"source_run_report_json":{"path":"${FAKE_SIGNOFF_SOURCE_RUN_REPORT_JSON:-}","exists":false},"enabled":${FAKE_SIGNOFF_INCIDENT_ENABLED:-false},"status":"${FAKE_SIGNOFF_INCIDENT_STATUS:-}","bundle_dir":{"path":"${FAKE_SIGNOFF_INCIDENT_BUNDLE_DIR:-}","exists":false},"bundle_tar":{"path":"${FAKE_SIGNOFF_INCIDENT_BUNDLE_TAR:-}","exists":false},"summary_json":{"path":"${FAKE_SIGNOFF_INCIDENT_SUMMARY_JSON:-}","exists":false,"valid_json":false},"report_md":{"path":"${FAKE_SIGNOFF_INCIDENT_REPORT_MD:-}","exists":false}}}
 EOF_SIGNOFF
     fi
     exit "$signoff_rc"
@@ -243,6 +243,16 @@ if ! rg -q -- '^prod-pilot-cohort-quick .*--bundle-fail-close 0' "$CAPTURE"; the
   cat "$CAPTURE"
   exit 1
 fi
+if ! rg -q -- '^prod-pilot-cohort-quick .*--pre-real-host-readiness 1' "$CAPTURE"; then
+  echo "missing default pre-real-host readiness forwarding to quick stage"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- "^prod-pilot-cohort-quick .*--pre-real-host-readiness-summary-json ${SUCCESS_DIR}/pre_real_host_readiness_summary.json" "$CAPTURE"; then
+  echo "missing derived pre-real-host readiness summary path forwarding to quick stage"
+  cat "$CAPTURE"
+  exit 1
+fi
 if ! rg -q -- '^prod-pilot-cohort-quick-dashboard .*--require-cohort-signoff-policy 0' "$CAPTURE"; then
   echo "missing bundle-compatible cohort-signoff policy forwarding to quick-dashboard stage"
   cat "$CAPTURE"
@@ -268,9 +278,67 @@ if [[ ! -f "${SUCCESS_DIR}/prod_pilot_cohort_quick_runbook_summary.json" ]]; the
   ls -la "$SUCCESS_DIR"
   exit 1
 fi
-if ! jq -e '.status=="ok" and .stages.quick.rc==0 and .stages.quick_signoff.rc==0 and .stages.quick_dashboard.rc==0 and .config.max_round_failures==2 and .config.bundle_outputs==0 and .config.bundle_fail_close==0 and .config.signoff_require_cohort_signoff_policy==1 and .config.dashboard_require_cohort_signoff_policy==0 and .config.signoff_require_trend_artifact_policy_match==1 and .config.signoff_min_trend_wg_soak_selection_lines==12' "${SUCCESS_DIR}/prod_pilot_cohort_quick_runbook_summary.json" >/dev/null 2>&1; then
+if ! jq -e --arg pre_summary_json "${SUCCESS_DIR}/pre_real_host_readiness_summary.json" '.status=="ok" and .stages.quick.rc==0 and .stages.quick_signoff.rc==0 and .stages.quick_dashboard.rc==0 and .config.max_round_failures==2 and .config.bundle_outputs==0 and .config.bundle_fail_close==0 and .config.pre_real_host_readiness==1 and .config.signoff_require_cohort_signoff_policy==1 and .config.dashboard_require_cohort_signoff_policy==0 and .config.signoff_require_trend_artifact_policy_match==1 and .config.signoff_min_trend_wg_soak_selection_lines==12 and .artifacts.pre_real_host_readiness_summary_json==$pre_summary_json' "${SUCCESS_DIR}/prod_pilot_cohort_quick_runbook_summary.json" >/dev/null 2>&1; then
   echo "runbook summary missing expected success stage fields"
   cat "${SUCCESS_DIR}/prod_pilot_cohort_quick_runbook_summary.json"
+  exit 1
+fi
+if ! rg -q -- "\\[prod-pilot-cohort-quick-runbook] pre_real_host_readiness_summary_json=${SUCCESS_DIR}/pre_real_host_readiness_summary.json" /tmp/integration_prod_pilot_cohort_quick_runbook_success.log; then
+  echo "runbook output missing pre-real-host readiness summary path"
+  cat /tmp/integration_prod_pilot_cohort_quick_runbook_success.log
+  exit 1
+fi
+
+echo "[prod-pilot-cohort-quick-runbook] incident handoff propagation"
+HANDOFF_DIR="$TMP_DIR/handoff"
+HANDOFF_SOURCE_SUMMARY="$HANDOFF_DIR/prod_pilot_cohort_summary.json"
+HANDOFF_SOURCE_RUN_REPORT="$HANDOFF_DIR/prod_pilot_cohort_quick_report.json"
+HANDOFF_INCIDENT_DIR="$HANDOFF_DIR/incident_bundle"
+HANDOFF_INCIDENT_TAR="$HANDOFF_DIR/incident_bundle.tar.gz"
+HANDOFF_INCIDENT_SUMMARY="$HANDOFF_DIR/incident_summary.json"
+HANDOFF_INCIDENT_REPORT="$HANDOFF_DIR/incident_report.md"
+mkdir -p "$HANDOFF_INCIDENT_DIR"
+cat >"$HANDOFF_SOURCE_SUMMARY" <<'EOF_HANDOFF_SOURCE_SUMMARY'
+{"rounds_failed":1}
+EOF_HANDOFF_SOURCE_SUMMARY
+cat >"$HANDOFF_SOURCE_RUN_REPORT" <<EOF_HANDOFF_SOURCE_RUN_REPORT
+{"artifacts":{"summary_json":"$HANDOFF_SOURCE_SUMMARY"}}
+EOF_HANDOFF_SOURCE_RUN_REPORT
+printf 'incident bundle tar placeholder\n' >"$HANDOFF_INCIDENT_TAR"
+cat >"$HANDOFF_INCIDENT_SUMMARY" <<'EOF_HANDOFF_INCIDENT_SUMMARY'
+{"status":"ok","top_findings":["demo incident"]}
+EOF_HANDOFF_INCIDENT_SUMMARY
+cat >"$HANDOFF_INCIDENT_REPORT" <<'EOF_HANDOFF_INCIDENT_REPORT'
+# Incident Report
+EOF_HANDOFF_INCIDENT_REPORT
+
+CAPTURE_FILE="$CAPTURE" \
+FAKE_SIGNOFF_INCIDENT_ENABLED=true \
+FAKE_SIGNOFF_INCIDENT_STATUS=ok \
+FAKE_SIGNOFF_SOURCE_SUMMARY_JSON="$HANDOFF_SOURCE_SUMMARY" \
+FAKE_SIGNOFF_SOURCE_RUN_REPORT_JSON="$HANDOFF_SOURCE_RUN_REPORT" \
+FAKE_SIGNOFF_INCIDENT_BUNDLE_DIR="$HANDOFF_INCIDENT_DIR" \
+FAKE_SIGNOFF_INCIDENT_BUNDLE_TAR="$HANDOFF_INCIDENT_TAR" \
+FAKE_SIGNOFF_INCIDENT_SUMMARY_JSON="$HANDOFF_INCIDENT_SUMMARY" \
+FAKE_SIGNOFF_INCIDENT_REPORT_MD="$HANDOFF_INCIDENT_REPORT" \
+PROD_PILOT_COHORT_QUICK_RUNBOOK_EASY_NODE_SH="$FAKE_EASY_NODE" \
+./scripts/prod_pilot_cohort_quick_runbook.sh \
+  --reports-dir "$HANDOFF_DIR" \
+  --show-json 1 >/tmp/integration_prod_pilot_cohort_quick_runbook_handoff.log 2>&1
+
+if ! jq -e --arg summary "$HANDOFF_INCIDENT_SUMMARY" --arg report "$HANDOFF_INCIDENT_REPORT" '.incident_snapshot.enabled==1 and .incident_snapshot.status=="ok" and .incident_snapshot.summary_json.path==$summary and .incident_snapshot.report_md.path==$report' "${HANDOFF_DIR}/prod_pilot_cohort_quick_runbook_summary.json" >/dev/null 2>&1; then
+  echo "runbook summary missing incident handoff propagation"
+  cat "${HANDOFF_DIR}/prod_pilot_cohort_quick_runbook_summary.json"
+  exit 1
+fi
+if ! rg -q 'incident_handoff' /tmp/integration_prod_pilot_cohort_quick_runbook_handoff.log; then
+  echo "expected incident_handoff line in runbook output"
+  cat /tmp/integration_prod_pilot_cohort_quick_runbook_handoff.log
+  exit 1
+fi
+if ! rg -q -- "\\[prod-pilot-cohort-quick-runbook] pre_real_host_readiness_summary_json=${HANDOFF_DIR}/pre_real_host_readiness_summary.json" /tmp/integration_prod_pilot_cohort_quick_runbook_handoff.log; then
+  echo "handoff output missing pre-real-host readiness summary path"
+  cat /tmp/integration_prod_pilot_cohort_quick_runbook_handoff.log
   exit 1
 fi
 
@@ -408,6 +476,8 @@ PROD_PILOT_COHORT_QUICK_RUNBOOK_SCRIPT="$FAKE_RUNBOOK" \
 ./scripts/easy_node.sh prod-pilot-cohort-quick-runbook \
   --bootstrap-directory https://a.example:8081 \
   --subject demo-client \
+  --pre-real-host-readiness 0 \
+  --pre-real-host-readiness-summary-json /tmp/quick_pre_real_host.json \
   --reports-dir /tmp/quick_runbook \
   --max-round-failures 3 \
   --bundle-outputs 0 \
@@ -424,6 +494,16 @@ if ! rg -q -- '--bootstrap-directory https://a.example:8081' "$RUNBOOK_FORWARD_C
 fi
 if ! rg -q -- '--subject demo-client' "$RUNBOOK_FORWARD_CAPTURE"; then
   echo "easy_node quick-runbook forwarding failed: missing --subject"
+  cat "$RUNBOOK_FORWARD_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--pre-real-host-readiness 0' "$RUNBOOK_FORWARD_CAPTURE"; then
+  echo "easy_node quick-runbook forwarding failed: missing --pre-real-host-readiness"
+  cat "$RUNBOOK_FORWARD_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--pre-real-host-readiness-summary-json /tmp/quick_pre_real_host.json' "$RUNBOOK_FORWARD_CAPTURE"; then
+  echo "easy_node quick-runbook forwarding failed: missing --pre-real-host-readiness-summary-json"
   cat "$RUNBOOK_FORWARD_CAPTURE"
   exit 1
 fi
