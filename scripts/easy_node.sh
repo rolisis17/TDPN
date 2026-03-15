@@ -1479,16 +1479,33 @@ EOF_ENV
     echo "DIRECTORY_GOSSIP_SEC=5" >>"$AUTHORITY_ENV_FILE"
   fi
 
+  local beta_peer_min_operators="2"
+  local beta_peer_min_votes="2"
+  local beta_peer_discovery_min_votes="2"
+  if [[ "$beta_profile" == "1" && "$prod_profile" != "1" ]]; then
+    local peer_sources_count=0
+    if [[ -n "$peer_dirs" ]]; then
+      peer_sources_count="$(csv_count "$peer_dirs")"
+    fi
+    # Bootstrap-friendly beta defaults: if only one peer source is configured,
+    # avoid permanent quorum churn while still keeping prod strict settings.
+    if ((peer_sources_count < 2)); then
+      beta_peer_min_operators="1"
+      beta_peer_min_votes="1"
+      beta_peer_discovery_min_votes="1"
+    fi
+  fi
+
   if [[ "$beta_profile" == "1" ]]; then
-    cat >>"$AUTHORITY_ENV_FILE" <<'EOF_BETA'
+    cat >>"$AUTHORITY_ENV_FILE" <<EOF_BETA
 DIRECTORY_MIN_OPERATORS=2
 DIRECTORY_MIN_RELAY_VOTES=2
 ENTRY_DIRECTORY_MIN_OPERATORS=2
 ENTRY_DIRECTORY_MIN_RELAY_VOTES=2
 ENTRY_REQUIRE_DISTINCT_EXIT_OPERATOR=1
-DIRECTORY_PEER_MIN_OPERATORS=2
-DIRECTORY_PEER_MIN_VOTES=2
-DIRECTORY_PEER_DISCOVERY_MIN_VOTES=2
+DIRECTORY_PEER_MIN_OPERATORS=${beta_peer_min_operators}
+DIRECTORY_PEER_MIN_VOTES=${beta_peer_min_votes}
+DIRECTORY_PEER_DISCOVERY_MIN_VOTES=${beta_peer_discovery_min_votes}
 DIRECTORY_PEER_DISCOVERY_MAX_PER_SOURCE=8
 DIRECTORY_PEER_DISCOVERY_MAX_PER_OPERATOR=4
 DIRECTORY_PROVIDER_MAX_RELAYS_PER_OPERATOR=32
@@ -1621,16 +1638,31 @@ EOF_ENV
     echo "DIRECTORY_GOSSIP_SEC=5" >>"$PROVIDER_ENV_FILE"
   fi
 
+  local beta_peer_min_operators="2"
+  local beta_peer_min_votes="2"
+  local beta_peer_discovery_min_votes="2"
+  if [[ "$beta_profile" == "1" && "$prod_profile" != "1" ]]; then
+    local peer_sources_count=0
+    if [[ -n "$peer_dirs" ]]; then
+      peer_sources_count="$(csv_count "$peer_dirs")"
+    fi
+    if ((peer_sources_count < 2)); then
+      beta_peer_min_operators="1"
+      beta_peer_min_votes="1"
+      beta_peer_discovery_min_votes="1"
+    fi
+  fi
+
   if [[ "$beta_profile" == "1" ]]; then
-    cat >>"$PROVIDER_ENV_FILE" <<'EOF_BETA'
+    cat >>"$PROVIDER_ENV_FILE" <<EOF_BETA
 DIRECTORY_MIN_OPERATORS=2
 DIRECTORY_MIN_RELAY_VOTES=2
 ENTRY_DIRECTORY_MIN_OPERATORS=2
 ENTRY_DIRECTORY_MIN_RELAY_VOTES=2
 ENTRY_REQUIRE_DISTINCT_EXIT_OPERATOR=1
-DIRECTORY_PEER_MIN_OPERATORS=2
-DIRECTORY_PEER_MIN_VOTES=2
-DIRECTORY_PEER_DISCOVERY_MIN_VOTES=2
+DIRECTORY_PEER_MIN_OPERATORS=${beta_peer_min_operators}
+DIRECTORY_PEER_MIN_VOTES=${beta_peer_min_votes}
+DIRECTORY_PEER_DISCOVERY_MIN_VOTES=${beta_peer_discovery_min_votes}
 DIRECTORY_PEER_DISCOVERY_MAX_PER_SOURCE=8
 DIRECTORY_PEER_DISCOVERY_MAX_PER_OPERATOR=4
 DIRECTORY_PROVIDER_MAX_RELAYS_PER_OPERATOR=32
