@@ -23,6 +23,15 @@ cleanup() {
 }
 trap cleanup EXIT
 
+git_tag_annotated() {
+  local tag_name="$1"
+  local tag_message="$2"
+  local tag_target="${3:-HEAD}"
+  # Keep integration hermetic: do not depend on user git config.
+  git -c user.name='integration-bot' -c user.email='integration-bot@example.invalid' \
+    tag -a "$tag_name" -m "$tag_message" "$tag_target" >/dev/null
+}
+
 ./scripts/release_prepare.sh --version "$version" --targets linux/amd64 --out-dir "$release_root" --allow-dirty 1 \
   >/tmp/integration_release_policy_gate_prepare.log 2>&1
 
@@ -72,7 +81,7 @@ fi
 ./scripts/release_prepare.sh --version "$version" --targets linux/amd64 --out-dir "$release_root" --allow-dirty 1 \
   >/tmp/integration_release_policy_gate_prepare3.log 2>&1
 
-git tag -a "$version" -m "release ${version}" HEAD >/dev/null
+git_tag_annotated "$version" "release ${version}" HEAD
 
 set +e
 ./scripts/release_policy_gate.sh --version "$version" --release-dir "$release_dir" --require-tag-exists 1 --require-tag-notes 1 \
@@ -91,14 +100,14 @@ if ! rg -q "tag annotation missing required release note sections" /tmp/integrat
 fi
 
 git tag -d "$version" >/dev/null
-git tag -a "$version" -m "Known limitations
+git_tag_annotated "$version" "Known limitations
 - integration test
 
 Security model
 - integration test
 
 Supported environments
-- integration test" HEAD >/dev/null
+- integration test" HEAD
 
 ./scripts/release_policy_gate.sh --version "$version" --release-dir "$release_dir" --require-tag-exists 1 --require-tag-notes 1 \
   >/tmp/integration_release_policy_gate_notes_ok.log 2>&1

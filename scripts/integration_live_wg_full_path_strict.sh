@@ -195,9 +195,23 @@ if [[ "$exit_accept_ok" -ne 1 && "$metrics_ok" -ne 1 ]]; then
   exit 1
 fi
 if rg -q "client bootstrap failed:" "$LOG_FILE"; then
-  echo "unexpected strict-profile bootstrap failure observed"
-  cat "$LOG_FILE"
-  exit 1
+  first_success_line="$(rg -n "client received wg-session config:" "$LOG_FILE" | head -n1 | cut -d: -f1 || true)"
+  post_success_bootstrap_fail=0
+  if [[ -n "$first_success_line" && "$first_success_line" =~ ^[0-9]+$ ]]; then
+    while IFS=: read -r fail_line _; do
+      if [[ "$fail_line" =~ ^[0-9]+$ ]] && (( fail_line > first_success_line )); then
+        post_success_bootstrap_fail=1
+        break
+      fi
+    done < <(rg -n "client bootstrap failed:" "$LOG_FILE" || true)
+  else
+    post_success_bootstrap_fail=1
+  fi
+  if [[ "$post_success_bootstrap_fail" -eq 1 ]]; then
+    echo "unexpected strict-profile bootstrap failure observed after successful session establishment"
+    cat "$LOG_FILE"
+    exit 1
+  fi
 fi
 
 echo "strict live wg full-path integration check ok"

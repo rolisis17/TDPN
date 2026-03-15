@@ -77,6 +77,8 @@ std::string readOptionalLine(const std::string &prompt, const std::string &sugge
   return line;
 }
 
+bool commandExists(const std::string &name);
+
 int runCommand(const std::string &cmd) {
   std::cout << "\n$ " << cmd << "\n\n" << std::flush;
   int raw = std::system(cmd.c_str());
@@ -96,6 +98,76 @@ int runCommand(const std::string &cmd) {
     std::cout << "command failed with code " << rc << "\n";
   }
   return rc;
+}
+
+int launchDetachedTerminalCommand(const std::string &title, const std::string &sessionCommand) {
+  bool hasDisplay = false;
+  const char *display = std::getenv("DISPLAY");
+  const char *waylandDisplay = std::getenv("WAYLAND_DISPLAY");
+  if ((display && *display) || (waylandDisplay && *waylandDisplay)) {
+    hasDisplay = true;
+  }
+  if (!hasDisplay) {
+    std::cout << "No GUI display detected; running session in current terminal.\n";
+    return runCommand(sessionCommand);
+  }
+
+  struct Candidate {
+    std::string binary;
+    std::string command;
+  };
+
+  std::vector<Candidate> candidates;
+  if (commandExists("x-terminal-emulator")) {
+    candidates.push_back({"x-terminal-emulator",
+                          "x-terminal-emulator -e bash -lc " + shellEscape(sessionCommand)});
+  }
+  if (commandExists("gnome-terminal")) {
+    candidates.push_back({"gnome-terminal",
+                          "gnome-terminal --title=" + shellEscape(title) +
+                          " -- bash -lc " + shellEscape(sessionCommand)});
+  }
+  if (commandExists("konsole")) {
+    candidates.push_back({"konsole",
+                          "konsole --new-window -e bash -lc " + shellEscape(sessionCommand)});
+  }
+  if (commandExists("xfce4-terminal")) {
+    candidates.push_back({"xfce4-terminal",
+                          "xfce4-terminal --title=" + shellEscape(title) +
+                          " -x bash -lc " + shellEscape(sessionCommand)});
+  }
+  if (commandExists("xterm")) {
+    candidates.push_back({"xterm",
+                          "xterm -T " + shellEscape(title) + " -e bash -lc " + shellEscape(sessionCommand)});
+  }
+  if (commandExists("alacritty")) {
+    candidates.push_back({"alacritty",
+                          "alacritty --title " + shellEscape(title) + " -e bash -lc " + shellEscape(sessionCommand)});
+  }
+
+  for (const auto &candidate : candidates) {
+    std::string detached = "nohup " + candidate.command + " >/dev/null 2>&1 < /dev/null &";
+    std::cout << "\n$ " << detached << "\n\n" << std::flush;
+    int raw = std::system(detached.c_str());
+    int rc = raw;
+    if (raw == -1) {
+      rc = 127;
+    }
+#ifdef WIFEXITED
+    else if (WIFEXITED(raw)) {
+      rc = WEXITSTATUS(raw);
+    } else if (WIFSIGNALED(raw)) {
+      rc = 128 + WTERMSIG(raw);
+    }
+#endif
+    if (rc == 0) {
+      std::cout << "Launched " << title << " in a new terminal window.\n";
+      return 0;
+    }
+  }
+
+  std::cout << "Could not launch a terminal emulator; running session in current terminal.\n";
+  return runCommand(sessionCommand);
 }
 
 std::string captureCommandOutput(const std::string &cmd) {
@@ -847,7 +919,9 @@ void quickClientConnect(const std::string &script, ABHosts &hosts) {
         }
       }
     }
-    cmd << shellEscape(script) << " client-vpn-up"
+    bool openTerminal = parseYesNo(
+        readLine("Open dedicated CLIENT terminal with live logs + auto cleanup on close? (Y/n)", "y"), true);
+    cmd << shellEscape(script) << " client-vpn-session"
         << " --bootstrap-directory " << shellEscape(bootstrapDir)
         << " --discovery-wait-sec " << shellEscape(discoveryWait)
         << " --subject " << shellEscape(inviteKey)
@@ -856,17 +930,30 @@ void quickClientConnect(const std::string &script, ABHosts &hosts) {
         << " --beta-profile 1"
         << " --prod-profile " << (prodProfile ? "1" : "0")
         << " --interface " << shellEscape(iface)
-        << " --ready-timeout-sec " << shellEscape(readyTimeout);
+        << " --ready-timeout-sec " << shellEscape(readyTimeout)
+        << " --cleanup-all 1";
     appendPathProfileFlags(cmd, pathProfile);
     if (!isRootUser()) {
       bool useSudo = parseYesNo(readLine("Run with sudo? (Y/n)", "y"), true);
       if (useSudo) {
-        runCommand("sudo " + cmd.str());
+        if (openTerminal) {
+          launchDetachedTerminalCommand("Privacynode CLIENT session", "sudo " + cmd.str());
+        } else {
+          runCommand("sudo " + cmd.str());
+        }
+      } else {
+        if (openTerminal) {
+          launchDetachedTerminalCommand("Privacynode CLIENT session", cmd.str());
+        } else {
+          runCommand(cmd.str());
+        }
+      }
+    } else {
+      if (openTerminal) {
+        launchDetachedTerminalCommand("Privacynode CLIENT session", cmd.str());
       } else {
         runCommand(cmd.str());
       }
-    } else {
-      runCommand(cmd.str());
     }
     std::cout << "Use Other options -> 32 (status) and 33 (down); option 31 reruns preflight.\n";
   } else {
@@ -921,12 +1008,13 @@ void quickServerConnect(const std::string &root, const std::string &script, ABHo
   std::string authorityIssuer = "";
 
   std::ostringstream cmd;
-  cmd << shellEscape(script) << " server-up"
+  cmd << shellEscape(script) << " server-session"
       << " --mode " << modeValue
       << " --public-host " << shellEscape(host)
       << " --beta-profile 1"
       << " --prod-profile " << (prodProfile ? "1" : "0")
-      << " --peer-identity-strict " << shellEscape(peerIdentityStrict);
+      << " --peer-identity-strict " << shellEscape(peerIdentityStrict)
+      << " --cleanup-all 1";
   if (authorityMode) {
     cmd << " --client-allowlist 1"
         << " --allow-anon-cred 0";
@@ -983,14 +1071,37 @@ void quickServerConnect(const std::string &root, const std::string &script, ABHo
     }
   }
 
-  int rc = runCommand(cmd.str());
+  bool openTerminal = parseYesNo(
+      readLine("Open dedicated SERVER terminal with live logs + auto cleanup on close? (Y/n)", "y"), true);
+  bool useSudo = false;
+  if (!isRootUser()) {
+    useSudo = parseYesNo(readLine("Run server session with sudo? (y/N)", "n"), false);
+  }
+
+  int rc = 0;
+  bool launchedSession = false;
+  if (openTerminal) {
+    std::string launchCmd = useSudo ? "sudo " + cmd.str() : cmd.str();
+    rc = launchDetachedTerminalCommand("Privacynode SERVER session", launchCmd);
+    launchedSession = (rc == 0);
+  } else {
+    if (useSudo) {
+      rc = runCommand("sudo " + cmd.str());
+    } else {
+      rc = runCommand(cmd.str());
+    }
+  }
 
   bool saveHosts = parseYesNo(readLine("Save/update Machine A/B host config? (y/N)", "n"), false);
   if (saveHosts) {
     configureABHostsInteractive(root, hosts, true);
   }
 
-  if (rc == 0 && authorityMode) {
+  if (launchedSession && authorityMode) {
+    std::cout << "server session launched. Generate invite keys after startup from Other options -> 7.\n";
+  } else if (launchedSession) {
+    std::cout << "provider session launched (no local admin/invite controls).\n";
+  } else if (rc == 0 && authorityMode) {
     bool genInvite = parseYesNo(readLine("Generate invite key now? (Y/n)", "y"), true);
     if (genInvite) {
       std::string count = readLine("How many invite keys", "1");

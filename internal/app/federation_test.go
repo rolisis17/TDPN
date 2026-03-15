@@ -641,6 +641,122 @@ func TestFetchRelaysFederatedAppealMitigatesDisputePenalty(t *testing.T) {
 	}
 }
 
+func TestBootstrapDirectExitFallbackOnEntryUnknownExit(t *testing.T) {
+	directoryURL := "http://d1.local"
+	issuerURL := "http://issuer.local"
+	entryURL := "http://entry.local"
+	exitURL := "http://exit.local"
+
+	pub, priv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	entry := signedDescFrom(t, proto.RelayDescriptor{
+		RelayID:    "entry-a",
+		Role:       "entry",
+		ControlURL: entryURL,
+		OperatorID: "op-a",
+		Endpoint:   "127.0.0.1:51820",
+		ValidUntil: time.Now().Add(time.Minute),
+	}, priv)
+	exit := signedDescFrom(t, proto.RelayDescriptor{
+		RelayID:    "exit-b",
+		Role:       "exit",
+		ControlURL: exitURL,
+		OperatorID: "op-b",
+		Endpoint:   "127.0.0.1:9",
+		ValidUntil: time.Now().Add(time.Minute),
+	}, priv)
+
+	entryOpenCalls := 0
+	exitOpenCalls := 0
+	exitCloseCalls := 0
+	seenSessionID := ""
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		directoryURL + "/v1/pubkey": jsonResp(map[string]string{"pub_key": base64.RawURLEncoding.EncodeToString(pub)}),
+		directoryURL + "/v1/relays": jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{entry, exit}}),
+		issuerURL + "/v1/token": func(req *http.Request) (*http.Response, error) {
+			var in proto.IssueTokenRequest
+			if err := json.NewDecoder(req.Body).Decode(&in); err != nil {
+				t.Fatalf("decode token request: %v", err)
+			}
+			if len(in.ExitScope) != 1 || in.ExitScope[0] != "exit-b" {
+				t.Fatalf("unexpected token exit scope: %+v", in.ExitScope)
+			}
+			return jsonResp(proto.IssueTokenResponse{
+				Token:   "tok-direct-fallback",
+				Expires: time.Now().Add(time.Minute).Unix(),
+			})(req)
+		},
+		entryURL + "/v1/path/open": func(req *http.Request) (*http.Response, error) {
+			entryOpenCalls++
+			return jsonResp(proto.PathOpenResponse{Accepted: false, Reason: "unknown-exit"})(req)
+		},
+		exitURL + "/v1/path/open": func(req *http.Request) (*http.Response, error) {
+			exitOpenCalls++
+			var in proto.PathOpenRequest
+			if err := json.NewDecoder(req.Body).Decode(&in); err != nil {
+				t.Fatalf("decode direct fallback path open request: %v", err)
+			}
+			if strings.TrimSpace(in.SessionID) == "" {
+				t.Fatalf("expected direct fallback path open to set session id")
+			}
+			if in.ExitID != "exit-b" {
+				t.Fatalf("unexpected direct fallback exit id: %q", in.ExitID)
+			}
+			seenSessionID = in.SessionID
+			return jsonResp(proto.PathOpenResponse{
+				Accepted:   true,
+				SessionExp: time.Now().Add(time.Minute).Unix(),
+				Transport:  "policy-json",
+			})(req)
+		},
+		exitURL + "/v1/path/close": func(req *http.Request) (*http.Response, error) {
+			exitCloseCalls++
+			var in proto.PathCloseRequest
+			if err := json.NewDecoder(req.Body).Decode(&in); err != nil {
+				t.Fatalf("decode direct fallback path close request: %v", err)
+			}
+			if strings.TrimSpace(in.SessionID) == "" || in.SessionID != seenSessionID {
+				t.Fatalf("unexpected direct fallback path close session id: %q (want %q)", in.SessionID, seenSessionID)
+			}
+			return jsonResp(proto.PathCloseResponse{Closed: true})(req)
+		},
+	}
+
+	c := &Client{
+		directoryURLs:            []string{directoryURL},
+		directoryMinSources:      1,
+		directoryMinOperators:    1,
+		directoryMinVotes:        1,
+		issuerURL:                issuerURL,
+		subject:                  "inv-test",
+		entryURL:                 entryURL,
+		exitControlURL:           exitURL,
+		dataMode:                 "json",
+		clientWGPub:              randomWGPublicKeyLike(),
+		pathOpenMaxAttempts:      1,
+		maxPairCandidates:        1,
+		healthCheckEnabled:       false,
+		allowDirectExitFallback:  true,
+		allowUnknownExitFallback: false,
+		httpClient:               &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+	}
+
+	if err := c.bootstrap(context.Background()); err != nil {
+		t.Fatalf("bootstrap failed: %v", err)
+	}
+	if entryOpenCalls == 0 {
+		t.Fatalf("expected entry path open attempt before direct fallback")
+	}
+	if exitOpenCalls == 0 {
+		t.Fatalf("expected direct fallback path open on exit")
+	}
+	if exitCloseCalls == 0 {
+		t.Fatalf("expected direct fallback session close on exit")
+	}
+}
+
 func signedDesc(t *testing.T, relayID, role string, priv ed25519.PrivateKey) proto.RelayDescriptor {
 	t.Helper()
 	d := proto.RelayDescriptor{RelayID: relayID, Role: role, Endpoint: "127.0.0.1:1", ValidUntil: time.Now().Add(time.Minute)}

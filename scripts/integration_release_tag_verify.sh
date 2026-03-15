@@ -24,7 +24,16 @@ cleanup() {
 }
 trap cleanup EXIT
 
-git tag -a "$annotated_tag" -m "integration annotated tag" HEAD >/dev/null
+git_tag_annotated() {
+  local tag_name="$1"
+  local tag_message="$2"
+  local tag_target="$3"
+  # Keep integration hermetic: do not depend on global/local git identity.
+  git -c user.name='integration-bot' -c user.email='integration-bot@example.invalid' \
+    tag -a "$tag_name" -m "$tag_message" "$tag_target" >/dev/null
+}
+
+git_tag_annotated "$annotated_tag" "integration annotated tag" HEAD
 git tag "$lightweight_tag" HEAD
 
 set +e
@@ -80,7 +89,7 @@ if ! rg -q "signature verification failed|No signature|not a signed tag|error" /
 fi
 
 if git rev-parse -q --verify HEAD~1 >/dev/null 2>&1; then
-  git tag -a "$old_head_tag" -m "integration old-head tag" HEAD~1 >/dev/null
+  git_tag_annotated "$old_head_tag" "integration old-head tag" HEAD~1
   set +e
   ./scripts/release_verify_tag.sh --version "$old_head_tag" --require-head-match 1 >/tmp/integration_release_tag_verify_head_mismatch.log 2>&1
   head_mismatch_rc=$?

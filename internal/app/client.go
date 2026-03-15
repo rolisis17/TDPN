@@ -101,6 +101,8 @@ type Client struct {
 	trustFeedDisable         bool
 	trustFeedRequire         bool
 	trustFeedMinVotes        int
+	allowUnknownExitFallback bool
+	allowDirectExitFallback  bool
 	activeSession            clientActiveSession
 	activeMu                 sync.Mutex
 	healthMu                 sync.Mutex
@@ -330,6 +332,8 @@ func NewClient() *Client {
 	if v, err := strconv.Atoi(os.Getenv("CLIENT_TRUST_FEED_MIN_VOTES")); err == nil && v > 0 {
 		trustFeedMinVotes = v
 	}
+	allowUnknownExitFallback := os.Getenv("CLIENT_ALLOW_UNKNOWN_EXIT_FALLBACK") == "1"
+	allowDirectExitFallback := os.Getenv("CLIENT_ALLOW_DIRECT_EXIT_FALLBACK") == "1"
 	bootstrapIntervalSec := 5
 	if v, err := strconv.Atoi(os.Getenv("CLIENT_BOOTSTRAP_INTERVAL_SEC")); err == nil && v > 0 {
 		bootstrapIntervalSec = v
@@ -454,6 +458,8 @@ func NewClient() *Client {
 		trustFeedDisable:         trustFeedDisable,
 		trustFeedRequire:         trustFeedRequire,
 		trustFeedMinVotes:        trustFeedMinVotes,
+		allowUnknownExitFallback: allowUnknownExitFallback,
+		allowDirectExitFallback:  allowDirectExitFallback,
 		healthCache:              make(map[string]healthProbeState),
 		httpClient:               &http.Client{Timeout: 5 * time.Second},
 		betaStrict:               betaStrict,
@@ -480,8 +486,8 @@ func (c *Client) Run(ctx context.Context) error {
 	if initialDelay < 0 {
 		initialDelay = 0
 	}
-	log.Printf("client role enabled: directories=%d min_sources=%d min_operators=%d min_votes=%d issuer=%s subject=%s anon_cred=%t entry=%s mode=%s source=%s trust_strict=%t wg_backend=%s iface=%s allowed_ips=%s install_route=%t wg_kernel_proxy=%t wg_proxy_addr=%s synthetic_fallback=%t opaque_session_sec=%d opaque_initial_uplink_timeout_ms=%d health_check=%t path_attempts=%d exit_country=%s exit_region=%s min_geo_confidence=%.2f locality_fallback=%s strict_locality=%t locality_soft_bias=%t country_bias=%.2f region_bias=%.2f region_prefix_bias=%.2f max_exits_per_operator=%d distinct_operators=%t distinct_countries=%t sticky_pair_sec=%d entry_rotation_sec=%d entry_rotation_seed_set=%t session_reuse=%t refresh_lead_sec=%d exit_exploration_pct=%d selection_feed_disable=%t selection_feed_require=%t selection_feed_min_votes=%d trust_feed_disable=%t trust_feed_require=%t trust_feed_min_votes=%d bootstrap_interval_sec=%d bootstrap_backoff_max_sec=%d bootstrap_jitter_pct=%d bootstrap_initial_delay_sec=%d startup_sync_timeout_sec=%d wg_only=%t beta_strict=%t",
-		len(c.directoryURLs), c.directoryMinSources, c.directoryMinOperators, c.directoryMinVotes, c.issuerURL, c.subject, c.anonCred != "", c.entryURL, c.dataMode, c.innerSource, c.trustStrict, c.wgBackend, c.wgInterface, c.wgAllowedIPs, c.wgInstallRoute, c.wgKernelProxy, c.wgProxyAddr, c.allowSyntheticFallback(), c.opaqueSessionSec, c.opaqueInitialUpMS, c.healthCheckEnabled, c.pathOpenMaxAttempts, c.preferredExitCountry, c.preferredExitRegion, c.minGeoConfidence, strings.Join(c.localityFallbackOrder, ","), c.strictExitLocality, c.localitySoftBias, c.localityCountryBias, c.localityRegionBias, c.localityRegionPrefixBias, c.maxExitsPerOperator, c.requireDistinctOps, c.requireDistinctCountries, c.stickyPairSec, c.entryRotationSec, c.entryRotationSeed != 0, c.sessionReuse, c.sessionRefreshLeadSec, c.exitExplorationPct, c.selectionFeedDisable, c.selectionFeedRequire, c.selectionFeedMinVotes, c.trustFeedDisable, c.trustFeedRequire, c.trustFeedMinVotes, int(bootstrapInterval/time.Second), int(bootstrapBackoffMax/time.Second), c.bootstrapJitterPct, int(initialDelay/time.Second), int(c.startupSyncTimeout/time.Second), c.wgOnlyMode, c.betaStrict)
+	log.Printf("client role enabled: directories=%d min_sources=%d min_operators=%d min_votes=%d issuer=%s subject=%s anon_cred=%t entry=%s mode=%s source=%s trust_strict=%t wg_backend=%s iface=%s allowed_ips=%s install_route=%t wg_kernel_proxy=%t wg_proxy_addr=%s synthetic_fallback=%t opaque_session_sec=%d opaque_initial_uplink_timeout_ms=%d health_check=%t path_attempts=%d exit_country=%s exit_region=%s min_geo_confidence=%.2f locality_fallback=%s strict_locality=%t locality_soft_bias=%t country_bias=%.2f region_bias=%.2f region_prefix_bias=%.2f max_exits_per_operator=%d distinct_operators=%t distinct_countries=%t sticky_pair_sec=%d entry_rotation_sec=%d entry_rotation_seed_set=%t session_reuse=%t refresh_lead_sec=%d exit_exploration_pct=%d selection_feed_disable=%t selection_feed_require=%t selection_feed_min_votes=%d trust_feed_disable=%t trust_feed_require=%t trust_feed_min_votes=%d unknown_exit_fallback=%t direct_exit_fallback=%t bootstrap_interval_sec=%d bootstrap_backoff_max_sec=%d bootstrap_jitter_pct=%d bootstrap_initial_delay_sec=%d startup_sync_timeout_sec=%d wg_only=%t beta_strict=%t",
+		len(c.directoryURLs), c.directoryMinSources, c.directoryMinOperators, c.directoryMinVotes, c.issuerURL, c.subject, c.anonCred != "", c.entryURL, c.dataMode, c.innerSource, c.trustStrict, c.wgBackend, c.wgInterface, c.wgAllowedIPs, c.wgInstallRoute, c.wgKernelProxy, c.wgProxyAddr, c.allowSyntheticFallback(), c.opaqueSessionSec, c.opaqueInitialUpMS, c.healthCheckEnabled, c.pathOpenMaxAttempts, c.preferredExitCountry, c.preferredExitRegion, c.minGeoConfidence, strings.Join(c.localityFallbackOrder, ","), c.strictExitLocality, c.localitySoftBias, c.localityCountryBias, c.localityRegionBias, c.localityRegionPrefixBias, c.maxExitsPerOperator, c.requireDistinctOps, c.requireDistinctCountries, c.stickyPairSec, c.entryRotationSec, c.entryRotationSeed != 0, c.sessionReuse, c.sessionRefreshLeadSec, c.exitExplorationPct, c.selectionFeedDisable, c.selectionFeedRequire, c.selectionFeedMinVotes, c.trustFeedDisable, c.trustFeedRequire, c.trustFeedMinVotes, c.allowUnknownExitFallback, c.allowDirectExitFallback, int(bootstrapInterval/time.Second), int(bootstrapBackoffMax/time.Second), c.bootstrapJitterPct, int(initialDelay/time.Second), int(c.startupSyncTimeout/time.Second), c.wgOnlyMode, c.betaStrict)
 	if err := c.validateRuntimeConfig(); err != nil {
 		return err
 	}
@@ -681,6 +687,14 @@ func (c *Client) validateRuntimeConfig() error {
 			return fmt.Errorf("PROD_STRICT_MODE requires DIRECTORY_TRUST_TOFU=0")
 		}
 	}
+	if c.allowDirectExitFallback {
+		if c.wgOnlyMode || c.betaStrict || c.prodStrict {
+			return fmt.Errorf("CLIENT_ALLOW_DIRECT_EXIT_FALLBACK is not allowed in strict modes")
+		}
+		if c.requireDistinctOps {
+			return fmt.Errorf("CLIENT_ALLOW_DIRECT_EXIT_FALLBACK requires CLIENT_REQUIRE_DISTINCT_OPERATORS=0")
+		}
+	}
 	return nil
 }
 
@@ -834,10 +848,13 @@ func (c *Client) bootstrap(ctx context.Context) error {
 		pathResp        proto.PathOpenResponse
 		entryControlURL string
 		exitControlURL  string
+		pathControlURL  string
 	)
 	_, err = attemptPairs(pairs, c.pathOpenMaxAttempts, func(pair relayPair) error {
 		entryControlURL = c.entryControlURLFor(pair.entry)
 		exitControlURL = c.exitControlURLFor(pair.exit)
+		pathControlURL = entryControlURL
+
 		popPub, popPriv, err := crypto.GenerateEd25519Keypair()
 		if err != nil {
 			return fmt.Errorf("generate token proof key: %w", err)
@@ -847,17 +864,19 @@ func (c *Client) bootstrap(ctx context.Context) error {
 			return fmt.Errorf("encode token proof key failed")
 		}
 
-		tok, err := c.issueToken(ctx, proto.IssueTokenRequest{
+		tokenReq := proto.IssueTokenRequest{
 			Tier:      1,
 			Subject:   c.subject,
 			TokenType: crypto.TokenTypeClientAccess,
 			PopPubKey: popPubB64,
 			ExitScope: []string{pair.exit.RelayID},
 			AnonCred:  c.anonCred,
-		})
+		}
+		tok, err := c.issueToken(ctx, tokenReq)
 		if err != nil {
 			return fmt.Errorf("issue token for exit=%s: %w", pair.exit.RelayID, err)
 		}
+
 		openReq := proto.PathOpenRequest{
 			ExitID:          pair.exit.RelayID,
 			Token:           tok.Token,
@@ -880,10 +899,75 @@ func (c *Client) bootstrap(ctx context.Context) error {
 			return fmt.Errorf("sign token proof for exit=%s: %w", pair.exit.RelayID, err)
 		}
 		openReq.TokenProof = tokenProof
+
 		resp, err := c.openPathWithChallenge(ctx, entryControlURL, openReq)
+		if err != nil && c.shouldRetryUnknownExitFallback(err) {
+			// Compatibility retry for mixed/federated topologies where entry cannot
+			// currently resolve requested exit id but can still service local exit.
+			fallbackTokenReq := tokenReq
+			fallbackTokenReq.ExitScope = nil
+			fallbackTok, fallbackTokErr := c.issueToken(ctx, fallbackTokenReq)
+			if fallbackTokErr != nil {
+				return fmt.Errorf("issue fallback token after unknown-exit for exit=%s: %w", pair.exit.RelayID, fallbackTokErr)
+			}
+			fallbackReq := openReq
+			fallbackReq.ExitID = ""
+			fallbackReq.Token = fallbackTok.Token
+			fallbackReq.TokenProofNonce = randomProofNonce()
+			fallbackReq.RequestedRegion = ""
+			fallbackProof, fallbackProofErr := crypto.SignPathOpenProof(popPriv, crypto.PathOpenProofInput{
+				Token:           fallbackReq.Token,
+				ExitID:          fallbackReq.ExitID,
+				TokenProofNonce: fallbackReq.TokenProofNonce,
+				ClientInnerPub:  fallbackReq.ClientInnerPub,
+				Transport:       fallbackReq.Transport,
+				RequestedMTU:    fallbackReq.RequestedMTU,
+				RequestedRegion: fallbackReq.RequestedRegion,
+			})
+			if fallbackProofErr != nil {
+				return fmt.Errorf("sign fallback token proof after unknown-exit for exit=%s: %w", pair.exit.RelayID, fallbackProofErr)
+			}
+			fallbackReq.TokenProof = fallbackProof
+			resp, err = c.openPathWithChallenge(ctx, entryControlURL, fallbackReq)
+			if err == nil {
+				log.Printf("client unknown-exit fallback engaged entry=%s requested_exit=%s", pair.entry.RelayID, pair.exit.RelayID)
+				tok = fallbackTok
+			}
+		}
+		if err != nil && c.shouldRetryDirectExitFallback(err) {
+			exitDataAddr := strings.TrimSpace(pair.exit.Endpoint)
+			if exitDataAddr == "" {
+				return fmt.Errorf("direct-exit fallback missing endpoint for exit=%s", pair.exit.RelayID)
+			}
+			directReq := openReq
+			sessionID, sidErr := randomSessionIDHex(16)
+			if sidErr != nil {
+				return fmt.Errorf("generate direct-exit fallback session id for exit=%s: %w", pair.exit.RelayID, sidErr)
+			}
+			directReq.SessionID = sessionID
+			directResp, directErr := c.openPathWithChallenge(ctx, exitControlURL, directReq)
+			if directErr == nil {
+				if strings.TrimSpace(directResp.SessionID) == "" {
+					directResp.SessionID = sessionID
+				}
+				if strings.TrimSpace(directResp.EntryDataAddr) == "" {
+					directResp.EntryDataAddr = exitDataAddr
+				}
+				if strings.TrimSpace(directResp.Transport) == "" {
+					directResp.Transport = directReq.Transport
+				}
+				resp = directResp
+				err = nil
+				pathControlURL = exitControlURL
+				log.Printf("client direct-exit fallback engaged entry=%s exit=%s", pair.entry.RelayID, pair.exit.RelayID)
+			} else {
+				err = directErr
+			}
+		}
 		if err != nil {
 			return err
 		}
+
 		selectedPair = pair
 		tokenResp = tok
 		pathResp = resp
@@ -953,13 +1037,14 @@ func (c *Client) bootstrap(ctx context.Context) error {
 		}
 	}
 
-	log.Printf("client selected entry=%s (%s) entry_op=%s exit=%s (%s) exit_op=%s token_exp=%d",
+	log.Printf("client selected entry=%s (%s) entry_op=%s exit=%s (%s) exit_op=%s path_control=%s token_exp=%d",
 		selectedPair.entry.RelayID,
 		entryControlURL,
 		strings.TrimSpace(selectedPair.entry.OperatorID),
 		selectedPair.exit.RelayID,
 		exitControlURL,
 		strings.TrimSpace(selectedPair.exit.OperatorID),
+		pathControlURL,
 		tokenResp.Expires,
 	)
 	session := clientActiveSession{
@@ -967,7 +1052,7 @@ func (c *Client) bootstrap(ctx context.Context) error {
 		sessionExp:      pathResp.SessionExp,
 		transport:       transport,
 		entryDataAddr:   pathResp.EntryDataAddr,
-		entryControlURL: entryControlURL,
+		entryControlURL: pathControlURL,
 		sessionKeyID:    pathResp.SessionKeyID,
 		exitInnerPub:    pathResp.ExitInnerPub,
 		entryRelayID:    selectedPair.entry.RelayID,
@@ -994,6 +1079,22 @@ func (c *Client) bootstrap(ctx context.Context) error {
 		c.clearActiveSession()
 	}
 	return nil
+}
+
+func (c *Client) shouldRetryUnknownExitFallback(err error) bool {
+	if err == nil || !c.allowUnknownExitFallback {
+		return false
+	}
+	return strings.Contains(err.Error(), "path open denied: unknown-exit")
+}
+
+func (c *Client) shouldRetryDirectExitFallback(err error) bool {
+	if err == nil || !c.allowDirectExitFallback {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "path open denied: unknown-exit") ||
+		strings.Contains(msg, "path open denied: entry-exit-operator-collision")
 }
 
 func requestedTransport(mode string) string {
@@ -1962,6 +2063,17 @@ func randomProofNonce() string {
 		return fmt.Sprintf("%d", time.Now().UnixNano())
 	}
 	return hex.EncodeToString(buf)
+}
+
+func randomSessionIDHex(size int) (string, error) {
+	if size <= 0 {
+		size = 16
+	}
+	buf := make([]byte, size)
+	if _, err := io.ReadFull(crand.Reader, buf); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buf), nil
 }
 
 func randomWGPublicKeyLike() string {

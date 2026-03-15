@@ -18,6 +18,36 @@ env_value() {
   awk -F= -v k="$key" '$1==k{print substr($0,index($0,"=")+1); exit}' "$file"
 }
 
+assert_mode_600_or_skip() {
+  local file="$1"
+  local label="$2"
+  local mode=""
+  local probe_dir=""
+  local probe_file=""
+  local probe_mode=""
+  mode="$(stat -c '%a' "$file" 2>/dev/null || true)"
+  if [[ -z "$mode" ]]; then
+    return
+  fi
+  if [[ "$mode" == "600" ]]; then
+    return
+  fi
+  probe_dir="$(dirname "$file")"
+  mkdir -p "$probe_dir" >/dev/null 2>&1 || true
+  probe_file="$(mktemp "$probe_dir/.perm_probe.XXXXXX" 2>/dev/null || true)"
+  if [[ -n "$probe_file" ]]; then
+    chmod 600 "$probe_file" 2>/dev/null || true
+    probe_mode="$(stat -c '%a' "$probe_file" 2>/dev/null || true)"
+    rm -f "$probe_file"
+  fi
+  if [[ "$probe_mode" != "600" ]]; then
+    echo "[rotate-server-secrets] note: skipping ${label} mode check on filesystem without POSIX chmod enforcement (mode=${mode})"
+    return
+  fi
+  echo "${label} permissions not hardened after rotate (expected 600, got ${mode})"
+  exit 1
+}
+
 restore_files() {
   if [[ -n "$backup_auth" && -f "$backup_auth" ]]; then
     cp "$backup_auth" "$AUTH_ENV"
@@ -113,11 +143,7 @@ if [[ -n "$new_issuer_token_signed_only" ]]; then
   exit 1
 fi
 
-auth_mode="$(stat -c '%a' "$AUTH_ENV" 2>/dev/null || true)"
-if [[ -n "$auth_mode" && "$auth_mode" != "600" ]]; then
-  echo "authority env permissions not hardened after rotate (expected 600, got ${auth_mode})"
-  exit 1
-fi
+assert_mode_600_or_skip "$AUTH_ENV" "authority env"
 
 cat >"$PROVIDER_ENV" <<'EOF_PROVIDER'
 DIRECTORY_ADMIN_TOKEN=provider-old-directory-token
@@ -149,10 +175,6 @@ if [[ -n "$provider_issuer_token" ]]; then
   exit 1
 fi
 
-provider_mode="$(stat -c '%a' "$PROVIDER_ENV" 2>/dev/null || true)"
-if [[ -n "$provider_mode" && "$provider_mode" != "600" ]]; then
-  echo "provider env permissions not hardened after rotate (expected 600, got ${provider_mode})"
-  exit 1
-fi
+assert_mode_600_or_skip "$PROVIDER_ENV" "provider env"
 
 echo "rotate server secrets integration check ok"

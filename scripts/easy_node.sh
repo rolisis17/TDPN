@@ -84,7 +84,8 @@ Usage:
   ./scripts/easy_node.sh server-preflight [--mode authority|provider] [--public-host HOST] [--operator-id ID] [--issuer-id ID] [--authority-directory URL] [--authority-issuer URL] [--peer-directories URLS] [--bootstrap-directory URL] [--peer-identity-strict 0|1|auto] [--min-peer-operators N] [--timeout-sec N] [--beta-profile [0|1]] [--prod-profile [0|1]]
   ./scripts/easy_node.sh server-up [--mode authority|provider] [--public-host HOST] [--operator-id ID] [--issuer-id ID] [--issuer-admin-token TOKEN] [--directory-admin-token TOKEN] [--entry-puzzle-secret SECRET] [--authority-directory URL] [--authority-issuer URL] [--peer-directories URLS] [--bootstrap-directory URL] [--peer-identity-strict 0|1|auto] [--client-allowlist [0|1]] [--allow-anon-cred [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]] [--show-admin-token [0|1]]
   ./scripts/easy_node.sh server-status
-  ./scripts/easy_node.sh server-logs
+  ./scripts/easy_node.sh server-logs [--follow [0|1]] [--tail N]
+  ./scripts/easy_node.sh server-session [server-up args...] [--cleanup-all [0|1]]
   ./scripts/easy_node.sh server-down
   ./scripts/easy_node.sh rotate-server-secrets [--restart [0|1]] [--rotate-issuer-admin [0|1]] [--show-secrets [0|1]]
   ./scripts/easy_node.sh stop-all [--with-wg-only [0|1]] [--force-iface-cleanup [0|1]]
@@ -102,6 +103,8 @@ Usage:
   ./scripts/easy_node.sh client-vpn-up [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-urls URL[,URL...]] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--path-profile fast|balanced|privacy] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--exit-country CC] [--exit-region REGION] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--beta-profile [0|1]] [--prod-profile [0|1]] [--operator-floor-check [0|1]] [--issuer-quorum-check [0|1]] [--issuer-min-operators N] [--interface IFACE] [--proxy-addr HOST:PORT] [--private-key-file PATH] [--allowed-ips CIDR] [--install-route [0|1]] [--startup-sync-timeout-sec N] [--ready-timeout-sec N] [--force-restart [0|1]] [--foreground [0|1]] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH] [--log-file PATH]
   ./scripts/easy_node.sh client-vpn-smoke [client-vpn-up args...] [--run-preflight [0|1]] [--status-check [0|1]] [--keep-up [0|1]] [--record-result [0|1]] [--pre-real-host-readiness [0|1]] [--pre-real-host-readiness-summary-json PATH] [--runtime-doctor [0|1]] [--runtime-fix [0|1]] [--runtime-fix-prune-wg-only-dir [0|1]] [--runtime-base-port N] [--runtime-client-iface IFACE] [--runtime-exit-iface IFACE] [--runtime-vpn-iface IFACE] [--incident-snapshot-on-fail [0|1]] [--incident-snapshot-timeout-sec N] [--incident-bundle-dir PATH] [--manual-validation-report [0|1]] [--manual-validation-report-summary-json PATH] [--manual-validation-report-md PATH] [--public-ip-url URL] [--country-url URL] [--curl-timeout-sec N] [--summary-json PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh client-vpn-status
+  ./scripts/easy_node.sh client-vpn-logs [--follow [0|1]] [--tail N]
+  ./scripts/easy_node.sh client-vpn-session [client-vpn-up args...] [--cleanup-all [0|1]]
   ./scripts/easy_node.sh client-vpn-down [--force-iface-cleanup [0|1]] [--iface IFACE] [--keep-key [0|1]]
   ./scripts/easy_node.sh three-machine-validate [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-a-url URL] [--issuer-b-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--client-min-selection-lines N] [--client-min-entry-operators N] [--client-min-exit-operators N] [--client-require-cross-operator-pair [0|1]] [--exit-country CC] [--exit-region REGION] [--path-profile fast|balanced|privacy] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--require-issuer-quorum [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]]
   ./scripts/easy_node.sh three-machine-soak [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-a-url URL] [--issuer-b-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--rounds N] [--pause-sec N] [--fault-every N] [--fault-command CMD] [--continue-on-fail [0|1]] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--client-min-selection-lines N] [--client-min-entry-operators N] [--client-min-exit-operators N] [--client-require-cross-operator-pair [0|1]] [--exit-country CC] [--exit-region REGION] [--path-profile fast|balanced|privacy] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--require-issuer-quorum [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]] [--report-file PATH]
@@ -176,6 +179,7 @@ Notes:
   - three-machine-validate runs health + federation checks then runs client-test with both directories.
   - client-vpn-preflight checks host prerequisites, endpoint reachability, and optional operator/issuer quorum diversity before starting client-vpn-up.
   - client-vpn-up runs a real local VPN client (host WireGuard interface) for external testers; use client-vpn-down to stop/cleanup.
+  - server-session and client-vpn-session keep a live log terminal open and run cleanup automatically when that terminal exits.
   - client-vpn-smoke runs preflight + up + status + optional egress checks + down as one real-host smoke flow, can gate on pre-real-host-readiness and runtime-doctor/runtime-fix first, records machine-C validation automatically, and refreshes the shared manual-validation report by default.
   - three-machine-prod-gate runs production-grade 3-machine sequencing (strict control validate + control soak + real WG validate + WG soak).
   - three-machine-prod-bundle runs strict machine-C preflight by default, then runs the same gate and always produces a shareable diagnostics tarball bundle; disable preflight only for diagnostics with --preflight-check=0, bundle integrity verification is enabled by default (disable only for diagnostics with --bundle-verify-check=0), emit a one-command run report JSON by default (override with --run-report-json), capture an automatic incident snapshot on failed runs by default (disable with --incident-snapshot-on-fail=0), optionally attach extra evidence files into that incident bundle with --incident-snapshot-attach-artifact, and enable fail-close artifact signoff inline with --signoff-check=1.
@@ -2629,15 +2633,112 @@ server_status() {
 }
 
 server_logs() {
+  local follow="0"
+  local tail_lines="150"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --follow)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          follow="${2:-}"
+          shift 2
+        else
+          follow="1"
+          shift
+        fi
+        ;;
+      --tail)
+        if [[ $# -lt 2 ]]; then
+          echo "server-logs requires --tail N"
+          exit 2
+        fi
+        tail_lines="${2:-}"
+        shift 2
+        ;;
+      -h|--help|help)
+        usage
+        return 0
+        ;;
+      *)
+        echo "unknown arg for server-logs: $1"
+        exit 2
+        ;;
+    esac
+  done
+  if [[ "$follow" != "0" && "$follow" != "1" ]]; then
+    echo "server-logs requires --follow to be 0 or 1"
+    exit 2
+  fi
+  if ! [[ "$tail_lines" =~ ^[0-9]+$ ]] || ((tail_lines < 1)); then
+    echo "server-logs requires --tail to be >= 1"
+    exit 2
+  fi
+
   ensure_deps_or_die
   local env_file mode
   env_file="$(active_server_env_file)"
   mode="$(active_server_mode)"
-  if [[ "$mode" == "provider" ]]; then
-    compose_with_env "$env_file" logs --tail=150 directory entry-exit
-  else
-    compose_with_env "$env_file" logs --tail=150 directory issuer entry-exit
+  local -a log_args
+  log_args=(--tail "$tail_lines")
+  if [[ "$follow" == "1" ]]; then
+    log_args+=(--follow)
   fi
+  if [[ "$mode" == "provider" ]]; then
+    compose_with_env "$env_file" logs "${log_args[@]}" directory entry-exit
+  else
+    compose_with_env "$env_file" logs "${log_args[@]}" directory issuer entry-exit
+  fi
+}
+
+server_session() {
+  local cleanup_all="1"
+  local -a forward_args=()
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help|help)
+        usage
+        return 0
+        ;;
+      --cleanup-all)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          cleanup_all="${2:-}"
+          shift 2
+        else
+          cleanup_all="1"
+          shift
+        fi
+        ;;
+      *)
+        forward_args+=("$1")
+        shift
+        ;;
+    esac
+  done
+
+  if [[ "$cleanup_all" != "0" && "$cleanup_all" != "1" ]]; then
+    echo "server-session requires --cleanup-all to be 0 or 1"
+    exit 2
+  fi
+
+  local cleanup_ran="0"
+  cleanup_server_session() {
+    if [[ "$cleanup_ran" == "1" ]]; then
+      return
+    fi
+    cleanup_ran="1"
+    if [[ "$cleanup_all" == "1" ]]; then
+      echo "server-session cleanup: stop-all"
+      stop_all --with-wg-only 1 --force-iface-cleanup 1 || true
+    else
+      echo "server-session cleanup: server-down"
+      server_down || true
+    fi
+  }
+  trap cleanup_server_session EXIT INT TERM
+
+  server_up "${forward_args[@]}"
+  echo "server-session: streaming live logs (Ctrl+C or close terminal to cleanup)"
+  server_logs --follow 1 --tail 200
 }
 
 server_down() {
@@ -5236,9 +5337,32 @@ file_mode_octal() {
   echo "$mode"
 }
 
+filesystem_supports_secure_mode_bits() {
+  local file="$1"
+  local dir probe mode
+  if [[ "$file" == /mnt/* ]]; then
+    return 1
+  fi
+  dir="$(dirname "$file")"
+  if [[ ! -d "$dir" || ! -w "$dir" ]]; then
+    return 0
+  fi
+  probe="$(mktemp "$dir/.perm_probe.XXXXXX" 2>/dev/null || true)"
+  if [[ -z "$probe" ]]; then
+    return 0
+  fi
+  chmod 600 "$probe" 2>/dev/null || true
+  mode="$(file_mode_octal "$probe" || true)"
+  rm -f "$probe"
+  [[ "$mode" == "600" ]]
+}
+
 private_file_mode_secure() {
   local file="$1"
   local mode oct
+  if ! filesystem_supports_secure_mode_bits "$file"; then
+    return 3
+  fi
   mode="$(file_mode_octal "$file" || true)"
   if [[ -z "$mode" ]]; then
     return 2
@@ -6194,7 +6318,12 @@ prod_preflight() {
       if private_file_mode_secure "$exit_wg_private_key_local"; then
         check_ok "exit wg private key permissions secure: $exit_wg_private_key_local mode=${exit_key_mode:-unknown}"
       else
-        check_fail "exit wg private key permissions too open: $exit_wg_private_key_local mode=${exit_key_mode:-unknown}"
+        local exit_key_mode_rc="$?"
+        if [[ "$exit_key_mode_rc" -eq 3 ]]; then
+          check_ok "exit wg private key permission check skipped (filesystem lacks POSIX mode-bit enforcement): $exit_wg_private_key_local mode=${exit_key_mode:-unknown}"
+        else
+          check_fail "exit wg private key permissions too open: $exit_wg_private_key_local mode=${exit_key_mode:-unknown}"
+        fi
       fi
     else
       check_fail "missing exit wg private key file: $exit_wg_private_key_local"
@@ -6226,7 +6355,10 @@ prod_preflight() {
     if private_file_mode_secure "$pf"; then
       check_ok "private file permissions secure (no group/other access): $pf mode=${pf_mode:-unknown}"
     else
-      if [[ -n "$pf_mode" ]]; then
+      local pf_mode_rc="$?"
+      if [[ "$pf_mode_rc" -eq 3 ]]; then
+        check_ok "private file permission check skipped (filesystem lacks POSIX mode-bit enforcement): $pf mode=${pf_mode:-unknown}"
+      elif [[ -n "$pf_mode" ]]; then
         check_fail "private file permissions too open: $pf mode=${pf_mode} (expected group/other=0)"
       else
         check_fail "unable to read file permissions: $pf"
@@ -6297,7 +6429,10 @@ prod_preflight() {
         if private_file_mode_secure "$key_path"; then
           check_ok "admin signing private key permissions secure (no group/other access): $key_path mode=${key_mode:-unknown}"
         else
-          if [[ -n "$key_mode" ]]; then
+          local key_mode_rc="$?"
+          if [[ "$key_mode_rc" -eq 3 ]]; then
+            check_ok "admin signing private key permission check skipped (filesystem lacks POSIX mode-bit enforcement): $key_path mode=${key_mode:-unknown}"
+          elif [[ -n "$key_mode" ]]; then
             check_fail "admin signing private key permissions too open: $key_path mode=${key_mode} (expected group/other=0)"
           else
             check_fail "unable to read admin signing private key permissions: $key_path"
@@ -6531,6 +6666,7 @@ client_test() {
   local min_entry_operators="${EASY_NODE_CLIENT_MIN_ENTRY_OPERATORS:-1}"
   local min_exit_operators="${EASY_NODE_CLIENT_MIN_EXIT_OPERATORS:-1}"
   local require_cross_operator_pair="${EASY_NODE_CLIENT_REQUIRE_CROSS_OPERATOR_PAIR:-0}"
+  local allow_direct_exit_fallback="${CLIENT_ALLOW_DIRECT_EXIT_FALLBACK:-}"
   local beta_profile="${EASY_NODE_BETA_PROFILE:-0}"
   local prod_profile="${EASY_NODE_PROD_PROFILE:-0}"
   local bootstrap_directory=""
@@ -6768,6 +6904,21 @@ client_test() {
   if [[ "$prod_profile" == "1" ]]; then
     beta_profile="1"
   fi
+  if [[ -z "$allow_direct_exit_fallback" ]]; then
+    if [[ "$beta_profile" == "1" || "$prod_profile" == "1" ]]; then
+      allow_direct_exit_fallback="0"
+    else
+      allow_direct_exit_fallback="1"
+    fi
+  fi
+  if [[ "$allow_direct_exit_fallback" != "0" && "$allow_direct_exit_fallback" != "1" ]]; then
+    echo "client-test requires CLIENT_ALLOW_DIRECT_EXIT_FALLBACK to be 0 or 1"
+    exit 2
+  fi
+  if [[ "$allow_direct_exit_fallback" == "1" && "$beta_profile" == "1" ]]; then
+    echo "client-test does not allow CLIENT_ALLOW_DIRECT_EXIT_FALLBACK=1 with beta/prod profile"
+    exit 2
+  fi
   if [[ "$beta_profile" == "1" ]]; then
     if [[ "$distinct_set" -eq 0 ]]; then
       require_distinct_operators="1"
@@ -6948,6 +7099,7 @@ EOF_CLIENT
       -e "CLIENT_EXIT_REGION_PREFIX_BIAS=$locality_region_prefix_bias"
       -e "CLIENT_ENTRY_ROTATION_SEC=$entry_rotation_sec"
       -e "CLIENT_ENTRY_ROTATION_SEED=$entry_rotation_seed"
+      -e "CLIENT_ALLOW_DIRECT_EXIT_FALLBACK=$allow_direct_exit_fallback"
     )
     if [[ -n "$client_subject" ]]; then
       run_cmd+=(-e "CLIENT_SUBJECT=$client_subject")
@@ -7004,6 +7156,7 @@ EOF_CLIENT
       "CLIENT_EXIT_REGION_PREFIX_BIAS=$locality_region_prefix_bias"
       "CLIENT_ENTRY_ROTATION_SEC=$entry_rotation_sec"
       "CLIENT_ENTRY_ROTATION_SEED=$entry_rotation_seed"
+      "CLIENT_ALLOW_DIRECT_EXIT_FALLBACK=$allow_direct_exit_fallback"
     )
     if [[ -n "$client_subject" ]]; then
       local_cmd+=("CLIENT_SUBJECT=$client_subject")
@@ -7572,6 +7725,70 @@ client_vpn_status() {
   fi
 }
 
+client_vpn_logs() {
+  local follow="0"
+  local tail_lines="120"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --follow)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          follow="${2:-}"
+          shift 2
+        else
+          follow="1"
+          shift
+        fi
+        ;;
+      --tail)
+        if [[ $# -lt 2 ]]; then
+          echo "client-vpn-logs requires --tail N"
+          exit 2
+        fi
+        tail_lines="${2:-}"
+        shift 2
+        ;;
+      -h|--help|help)
+        usage
+        return 0
+        ;;
+      *)
+        echo "unknown arg for client-vpn-logs: $1"
+        exit 2
+        ;;
+    esac
+  done
+  if [[ "$follow" != "0" && "$follow" != "1" ]]; then
+    echo "client-vpn-logs requires --follow to be 0 or 1"
+    exit 2
+  fi
+  if ! [[ "$tail_lines" =~ ^[0-9]+$ ]] || ((tail_lines < 1)); then
+    echo "client-vpn-logs requires --tail to be >= 1"
+    exit 2
+  fi
+
+  local state_file log_file
+  state_file="$(client_vpn_state_file)"
+  if [[ ! -f "$state_file" ]]; then
+    echo "client-vpn-logs: no active state file: $state_file"
+    exit 1
+  fi
+  log_file="$(identity_value "$state_file" "CLIENT_VPN_LOG_FILE")"
+  if [[ -z "$log_file" ]]; then
+    echo "client-vpn-logs: missing CLIENT_VPN_LOG_FILE in state file"
+    exit 1
+  fi
+  if [[ ! -f "$log_file" ]]; then
+    echo "client-vpn-logs: log file does not exist: $log_file"
+    exit 1
+  fi
+
+  if [[ "$follow" == "1" ]]; then
+    tail -n "$tail_lines" -F "$log_file"
+  else
+    tail -n "$tail_lines" "$log_file"
+  fi
+}
+
 client_vpn_down() {
   local force_iface_cleanup="1"
   local iface_override=""
@@ -7662,6 +7879,65 @@ client_vpn_down() {
     rm -f "$key_file"
   fi
   echo "client-vpn state cleared"
+}
+
+client_vpn_session() {
+  local cleanup_all="1"
+  local -a forward_args=()
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help|help)
+        usage
+        return 0
+        ;;
+      --cleanup-all)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          cleanup_all="${2:-}"
+          shift 2
+        else
+          cleanup_all="1"
+          shift
+        fi
+        ;;
+      --foreground)
+        # Session mode enforces background client plus log follow in this terminal.
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          shift 2
+        else
+          shift
+        fi
+        ;;
+      *)
+        forward_args+=("$1")
+        shift
+        ;;
+    esac
+  done
+
+  if [[ "$cleanup_all" != "0" && "$cleanup_all" != "1" ]]; then
+    echo "client-vpn-session requires --cleanup-all to be 0 or 1"
+    exit 2
+  fi
+
+  local cleanup_ran="0"
+  cleanup_client_vpn_session() {
+    if [[ "$cleanup_ran" == "1" ]]; then
+      return
+    fi
+    cleanup_ran="1"
+    echo "client-vpn-session cleanup: client-vpn-down"
+    client_vpn_down --force-iface-cleanup 1 --keep-key 1 || true
+    if [[ "$cleanup_all" == "1" ]]; then
+      echo "client-vpn-session cleanup: stop-all"
+      stop_all --with-wg-only 1 --force-iface-cleanup 1 || true
+    fi
+  }
+  trap cleanup_client_vpn_session EXIT INT TERM
+
+  client_vpn_up "${forward_args[@]}" --foreground 0
+  echo "client-vpn-session: streaming live logs (Ctrl+C or close terminal to cleanup)"
+  client_vpn_logs --follow 1 --tail 120
 }
 
 client_vpn_up() {
@@ -8451,7 +8727,12 @@ main() {
       server_status
       ;;
     server-logs)
-      server_logs
+      shift
+      server_logs "$@"
+      ;;
+    server-session)
+      shift
+      server_session "$@"
       ;;
     server-down)
       server_down
@@ -8512,6 +8793,14 @@ main() {
     client-vpn-status)
       shift
       client_vpn_status "$@"
+      ;;
+    client-vpn-logs)
+      shift
+      client_vpn_logs "$@"
+      ;;
+    client-vpn-session)
+      shift
+      client_vpn_session "$@"
       ;;
     client-vpn-down)
       shift
