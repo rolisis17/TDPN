@@ -352,6 +352,7 @@ type DirectoryPeerStatus struct {
 	LastFailureAt       int64  `json:"last_failure_at,omitempty"`
 	ConsecutiveFailures int    `json:"consecutive_failures,omitempty"`
 	CooldownUntil       int64  `json:"cooldown_until,omitempty"`
+	RetryAfterSec       int64  `json:"retry_after_sec,omitempty"`
 	LastError           string `json:"last_error,omitempty"`
 }
 

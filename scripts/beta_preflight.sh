@@ -48,6 +48,9 @@ run_step "incident snapshot tooling" ./scripts/integration_incident_snapshot.sh
 run_step "incident snapshot attachment tooling" ./scripts/integration_incident_snapshot_attach_artifacts.sh
 run_step "incident snapshot summary tooling" ./scripts/integration_incident_snapshot_summary.sh
 run_step "easy-node prod authority env wiring" ./scripts/integration_easy_node_prod_server_env.sh
+run_step "easy-node server-up auto invite" ./scripts/integration_easy_node_server_up_auto_invite.sh
+run_step "easy-node server federation status" ./scripts/integration_easy_node_server_federation_status.sh
+run_step "easy-node server federation wait" ./scripts/integration_easy_node_server_federation_wait.sh
 run_step "easy-node role guard" ./scripts/integration_easy_node_role_guard.sh
 run_step "easy-node invite auth policy" ./scripts/integration_easy_node_invite_auth_policy.sh
 run_step "easy-node peer identity guard" ./scripts/integration_easy_node_peer_identity_guard.sh

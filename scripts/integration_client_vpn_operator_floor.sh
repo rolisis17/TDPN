@@ -117,12 +117,49 @@ if ! rg -q 'operator floor not met|entry operator floor not met|exit operator fl
   cat "$OUT_FAIL"
   exit 1
 fi
+if ! rg -q 'observed operators: all=op-a entry=op-a exit=op-a' "$OUT_FAIL"; then
+  echo "missing observed-operators diagnostics in operator-floor failure output"
+  cat "$OUT_FAIL"
+  exit 1
+fi
 
 OUT_OVERRIDE="$TMP_DIR/preflight_override.log"
 PATH="$TMP_BIN:$PATH" FAKE_RELAY_PROFILE="single" ./scripts/easy_node.sh client-vpn-preflight "${COMMON_ARGS[@]}" --operator-floor-check 0 >"$OUT_OVERRIDE" 2>&1
 if ! rg -q 'client-vpn preflight: OK' "$OUT_OVERRIDE"; then
   echo "expected preflight success when operator-floor-check is disabled"
   cat "$OUT_OVERRIDE"
+  exit 1
+fi
+
+OUT_MIN1="$TMP_DIR/preflight_min1.log"
+PATH="$TMP_BIN:$PATH" FAKE_RELAY_PROFILE="single" ./scripts/easy_node.sh client-vpn-preflight "${COMMON_ARGS[@]}" \
+  --operator-floor-check 1 \
+  --operator-min-operators 1 \
+  --operator-min-entry-operators 1 \
+  --operator-min-exit-operators 1 >"$OUT_MIN1" 2>&1
+if ! rg -q 'client-vpn preflight: OK' "$OUT_MIN1"; then
+  echo "expected preflight success when operator-floor check is enabled with min floors set to 1"
+  cat "$OUT_MIN1"
+  exit 1
+fi
+
+OUT_ENTRY_FAIL="$TMP_DIR/preflight_entry_floor_fail.log"
+set +e
+PATH="$TMP_BIN:$PATH" FAKE_RELAY_PROFILE="single" ./scripts/easy_node.sh client-vpn-preflight "${COMMON_ARGS[@]}" \
+  --operator-floor-check 1 \
+  --operator-min-operators 1 \
+  --operator-min-entry-operators 2 \
+  --operator-min-exit-operators 1 >"$OUT_ENTRY_FAIL" 2>&1
+rc_entry_fail=$?
+set -e
+if [[ "$rc_entry_fail" -eq 0 ]]; then
+  echo "expected preflight failure when entry floor threshold exceeds observed entry operator count"
+  cat "$OUT_ENTRY_FAIL"
+  exit 1
+fi
+if ! rg -q 'entry operator floor not met \(need >=2, observed=1\)' "$OUT_ENTRY_FAIL"; then
+  echo "missing expected entry-floor failure signal for custom threshold"
+  cat "$OUT_ENTRY_FAIL"
   exit 1
 fi
 

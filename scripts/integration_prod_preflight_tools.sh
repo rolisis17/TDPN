@@ -398,6 +398,8 @@ while [[ $idx -le $# ]]; do
 done
 
 policy_mode="${EASY_NODE_CURL_MOCK_POLICY_MODE:-good}"
+federation_mode="${EASY_NODE_CURL_MOCK_FEDERATION_MODE:-healthy}"
+sync_mode="${EASY_NODE_CURL_MOCK_SYNC_MODE:-fresh}"
 code="200"
 body='{}'
 case "$url" in
@@ -415,6 +417,20 @@ case "$url" in
       body='{"policy":{"meta_min_votes":1,"final_dispute_min_votes":1,"final_appeal_min_votes":1,"final_adjudication_min_operators":1,"final_adjudication_min_sources":1,"final_adjudication_min_ratio":0.5}}'
     else
       body='{"policy":{"meta_min_votes":2,"final_dispute_min_votes":2,"final_appeal_min_votes":2,"final_adjudication_min_operators":2,"final_adjudication_min_sources":2,"final_adjudication_min_ratio":0.67}}'
+    fi
+    ;;
+  */v1/admin/sync-status)
+    if [[ "$sync_mode" == "stale" ]]; then
+      body='{"generated_at":1731000001,"peer":{"success":true,"quorum_met":true,"success_sources":1,"source_operators":["op-sync-peer"],"last_run_at":1730999800},"issuer":{"success":true,"quorum_met":true,"success_sources":1,"source_operators":["op-sync-issuer"],"last_run_at":1730999700}}'
+    else
+      body='{"generated_at":1731000001,"peer":{"success":true,"quorum_met":true,"success_sources":1,"source_operators":["op-sync-peer"],"last_run_at":1731000000},"issuer":{"success":true,"quorum_met":true,"success_sources":1,"source_operators":["op-sync-issuer"],"last_run_at":1731000000}}'
+    fi
+    ;;
+  */v1/admin/peer-status)
+    if [[ "$federation_mode" == "degraded" ]]; then
+      body='{"peers":[{"url":"https://seed-a.example:8081","configured":true,"discovered":false,"eligible":true,"cooling_down":false,"consecutive_failures":3},{"url":"https://seed-b.example:8081","configured":false,"discovered":true,"eligible":true,"cooling_down":false,"consecutive_failures":0},{"url":"https://seed-c.example:8081","configured":false,"discovered":true,"eligible":false,"cooling_down":true,"consecutive_failures":4,"retry_after_sec":75}]}'
+    else
+      body='{"peers":[{"url":"https://seed-a.example:8081","configured":true,"discovered":false,"eligible":true,"cooling_down":false,"consecutive_failures":0},{"url":"https://seed-b.example:8081","configured":false,"discovered":true,"eligible":true,"cooling_down":false,"consecutive_failures":0}]}'
     fi
     ;;
   */v1/admin/subject/get*)
@@ -506,6 +522,102 @@ fi
 if ! rg -q "live governance policy too weak: meta_min_votes must be >=2" /tmp/integration_prod_preflight_provider_live_governance_fail.log; then
   echo "missing expected live governance policy floor failure signal"
   cat /tmp/integration_prod_preflight_provider_live_governance_fail.log
+  exit 1
+fi
+
+if PATH="$live_curl_mock_dir:$PATH" EASY_NODE_CURL_MOCK_POLICY_MODE=good EASY_NODE_CURL_MOCK_FEDERATION_MODE=degraded \
+  ./scripts/easy_node.sh prod-preflight --days-min 0 --check-live 1 --timeout-sec 1 --live-require-configured-healthy 1 >/tmp/integration_prod_preflight_provider_live_configured_strict_fail.log 2>&1; then
+  echo "expected provider prod-preflight strict configured peer gate to fail with degraded configured peer health"
+  cat /tmp/integration_prod_preflight_provider_live_configured_strict_fail.log
+  exit 1
+fi
+if ! rg -q "live configured peer health degraded: all configured peers must be healthy when --live-require-configured-healthy=1" /tmp/integration_prod_preflight_provider_live_configured_strict_fail.log; then
+  echo "missing expected strict configured peer health failure signal"
+  cat /tmp/integration_prod_preflight_provider_live_configured_strict_fail.log
+  exit 1
+fi
+
+if PATH="$live_curl_mock_dir:$PATH" EASY_NODE_CURL_MOCK_POLICY_MODE=good EASY_NODE_CURL_MOCK_FEDERATION_MODE=degraded \
+  ./scripts/easy_node.sh prod-preflight --days-min 0 --check-live 1 --timeout-sec 1 --live-max-cooling-retry-sec 60 >/tmp/integration_prod_preflight_provider_live_cooling_retry_fail.log 2>&1; then
+  echo "expected provider prod-preflight cooling retry threshold gate to fail when retry_after is too high"
+  cat /tmp/integration_prod_preflight_provider_live_cooling_retry_fail.log
+  exit 1
+fi
+if ! rg -q "live cooling retry window too high: observed 75s exceeds threshold 60s" /tmp/integration_prod_preflight_provider_live_cooling_retry_fail.log; then
+  echo "missing expected cooling retry threshold failure signal"
+  cat /tmp/integration_prod_preflight_provider_live_cooling_retry_fail.log
+  exit 1
+fi
+
+if PATH="$live_curl_mock_dir:$PATH" EASY_NODE_CURL_MOCK_POLICY_MODE=good EASY_NODE_CURL_MOCK_FEDERATION_MODE=healthy EASY_NODE_CURL_MOCK_SYNC_MODE=stale \
+  ./scripts/easy_node.sh prod-preflight --days-min 0 --check-live 1 --timeout-sec 1 --live-max-peer-sync-age-sec 120 >/tmp/integration_prod_preflight_provider_live_peer_sync_age_fail.log 2>&1; then
+  echo "expected provider prod-preflight peer-sync freshness gate to fail on stale sync age"
+  cat /tmp/integration_prod_preflight_provider_live_peer_sync_age_fail.log
+  exit 1
+fi
+if ! rg -q "live peer-sync freshness too old: age=201s threshold=120s" /tmp/integration_prod_preflight_provider_live_peer_sync_age_fail.log; then
+  echo "missing expected peer-sync freshness failure signal"
+  cat /tmp/integration_prod_preflight_provider_live_peer_sync_age_fail.log
+  exit 1
+fi
+
+if PATH="$live_curl_mock_dir:$PATH" EASY_NODE_CURL_MOCK_POLICY_MODE=good EASY_NODE_CURL_MOCK_FEDERATION_MODE=healthy EASY_NODE_CURL_MOCK_SYNC_MODE=stale \
+  ./scripts/easy_node.sh prod-preflight --days-min 0 --check-live 1 --timeout-sec 1 --live-max-issuer-sync-age-sec 120 >/tmp/integration_prod_preflight_provider_live_issuer_sync_age_fail.log 2>&1; then
+  echo "expected provider prod-preflight issuer-sync freshness gate to fail on stale sync age"
+  cat /tmp/integration_prod_preflight_provider_live_issuer_sync_age_fail.log
+  exit 1
+fi
+if ! rg -q "live issuer-sync freshness too old: age=301s threshold=120s" /tmp/integration_prod_preflight_provider_live_issuer_sync_age_fail.log; then
+  echo "missing expected issuer-sync freshness failure signal"
+  cat /tmp/integration_prod_preflight_provider_live_issuer_sync_age_fail.log
+  exit 1
+fi
+
+if PATH="$live_curl_mock_dir:$PATH" EASY_NODE_CURL_MOCK_POLICY_MODE=good EASY_NODE_CURL_MOCK_FEDERATION_MODE=healthy EASY_NODE_CURL_MOCK_SYNC_MODE=fresh \
+  ./scripts/easy_node.sh prod-preflight --days-min 0 --check-live 1 --timeout-sec 1 --live-min-peer-success-sources 2 >/tmp/integration_prod_preflight_provider_live_peer_sources_fail.log 2>&1; then
+  echo "expected provider prod-preflight peer success-sources floor to fail when observed sources are below threshold"
+  cat /tmp/integration_prod_preflight_provider_live_peer_sources_fail.log
+  exit 1
+fi
+if ! rg -q "live peer-sync success_sources too low: observed 1 required 2" /tmp/integration_prod_preflight_provider_live_peer_sources_fail.log; then
+  echo "missing expected peer success-sources floor failure signal"
+  cat /tmp/integration_prod_preflight_provider_live_peer_sources_fail.log
+  exit 1
+fi
+
+if PATH="$live_curl_mock_dir:$PATH" EASY_NODE_CURL_MOCK_POLICY_MODE=good EASY_NODE_CURL_MOCK_FEDERATION_MODE=healthy EASY_NODE_CURL_MOCK_SYNC_MODE=fresh \
+  ./scripts/easy_node.sh prod-preflight --days-min 0 --check-live 1 --timeout-sec 1 --live-min-issuer-success-sources 2 >/tmp/integration_prod_preflight_provider_live_issuer_sources_fail.log 2>&1; then
+  echo "expected provider prod-preflight issuer success-sources floor to fail when observed sources are below threshold"
+  cat /tmp/integration_prod_preflight_provider_live_issuer_sources_fail.log
+  exit 1
+fi
+if ! rg -q "live issuer-sync success_sources too low: observed 1 required 2" /tmp/integration_prod_preflight_provider_live_issuer_sources_fail.log; then
+  echo "missing expected issuer success-sources floor failure signal"
+  cat /tmp/integration_prod_preflight_provider_live_issuer_sources_fail.log
+  exit 1
+fi
+
+if PATH="$live_curl_mock_dir:$PATH" EASY_NODE_CURL_MOCK_POLICY_MODE=good EASY_NODE_CURL_MOCK_FEDERATION_MODE=healthy EASY_NODE_CURL_MOCK_SYNC_MODE=fresh \
+  ./scripts/easy_node.sh prod-preflight --days-min 0 --check-live 1 --timeout-sec 1 --live-min-peer-source-operators 2 >/tmp/integration_prod_preflight_provider_live_peer_source_operators_fail.log 2>&1; then
+  echo "expected provider prod-preflight peer source-operators floor to fail when observed operators are below threshold"
+  cat /tmp/integration_prod_preflight_provider_live_peer_source_operators_fail.log
+  exit 1
+fi
+if ! rg -q "live peer-sync source_operators too low: observed 1 required 2" /tmp/integration_prod_preflight_provider_live_peer_source_operators_fail.log; then
+  echo "missing expected peer source-operators floor failure signal"
+  cat /tmp/integration_prod_preflight_provider_live_peer_source_operators_fail.log
+  exit 1
+fi
+
+if PATH="$live_curl_mock_dir:$PATH" EASY_NODE_CURL_MOCK_POLICY_MODE=good EASY_NODE_CURL_MOCK_FEDERATION_MODE=healthy EASY_NODE_CURL_MOCK_SYNC_MODE=fresh \
+  ./scripts/easy_node.sh prod-preflight --days-min 0 --check-live 1 --timeout-sec 1 --live-min-issuer-source-operators 2 >/tmp/integration_prod_preflight_provider_live_issuer_source_operators_fail.log 2>&1; then
+  echo "expected provider prod-preflight issuer source-operators floor to fail when observed operators are below threshold"
+  cat /tmp/integration_prod_preflight_provider_live_issuer_source_operators_fail.log
+  exit 1
+fi
+if ! rg -q "live issuer-sync source_operators too low: observed 1 required 2" /tmp/integration_prod_preflight_provider_live_issuer_source_operators_fail.log; then
+  echo "missing expected issuer source-operators floor failure signal"
+  cat /tmp/integration_prod_preflight_provider_live_issuer_source_operators_fail.log
   exit 1
 fi
 

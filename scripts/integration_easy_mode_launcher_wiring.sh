@@ -43,6 +43,14 @@ check_cpp '1\) Connect as CLIENT \(simple\)' "launcher wiring failed: simple CLI
 check_cpp '2\) Connect as SERVER \(simple, provider default\)' "launcher wiring failed: simple SERVER entry missing"
 check_cpp '3\) Other options \(tests/config\)' "launcher wiring failed: advanced options entry missing"
 
+echo "[easy-mode-wiring] simple server auto-invite wiring"
+check_cpp 'Auto-generate invite key\(s\) when server starts\?' "launcher wiring failed: simple server auto-invite prompt missing"
+check_cpp '--auto-invite ' "launcher wiring failed: simple server auto-invite forwarding missing"
+check_cpp '--auto-invite-count ' "launcher wiring failed: simple server auto-invite-count forwarding missing"
+check_cpp '--auto-invite-tier ' "launcher wiring failed: simple server auto-invite-tier forwarding missing"
+check_cpp '--auto-invite-wait-sec ' "launcher wiring failed: simple server auto-invite-wait-sec forwarding missing"
+check_cpp '--auto-invite-fail-open ' "launcher wiring failed: simple server auto-invite-fail-open forwarding missing"
+
 echo "[easy-mode-wiring] advanced options presence"
 check_cpp '36\) Closed-beta PROD bundle \(strict preflight \+ integrity verify \+ signoff \+ run report \+ auto incident snapshot on fail\)' \
   "launcher wiring failed: option 36 menu label missing"
@@ -182,6 +190,36 @@ check_cpp '--compose-build ' "launcher wiring failed: option 46 compose-build fo
 check_cpp '--verify-relays ' "launcher wiring failed: option 47 verify-relays forwarding missing"
 check_cpp '--verify-absent ' "launcher wiring failed: option 47 verify-absent forwarding missing"
 check_cpp '--verify-relay-min-count ' "launcher wiring failed: option 47 verify-relay-min-count forwarding missing"
+check_cpp '--federation-check ' "launcher wiring failed: option 47 federation-check forwarding missing"
+check_cpp '--federation-ready-timeout-sec ' "launcher wiring failed: option 47 federation-ready-timeout-sec forwarding missing"
+check_cpp '--federation-poll-sec ' "launcher wiring failed: option 47 federation-poll-sec forwarding missing"
+check_cpp '--federation-timeout-sec ' "launcher wiring failed: option 47 federation-timeout-sec forwarding missing"
+check_cpp '--federation-status-file ' "launcher wiring failed: option 47 federation-status-file forwarding missing"
+check_cpp 'Enable onboard invite bootstrap \(authority only\)\?' "launcher wiring failed: option 47 onboard invite prompt missing"
+check_cpp '--onboard-invite ' "launcher wiring failed: option 47 onboard-invite forwarding missing"
+check_cpp '--onboard-invite-count ' "launcher wiring failed: option 47 onboard-invite-count forwarding missing"
+check_cpp '--onboard-invite-tier ' "launcher wiring failed: option 47 onboard-invite-tier forwarding missing"
+check_cpp '--onboard-invite-wait-sec ' "launcher wiring failed: option 47 onboard-invite-wait-sec forwarding missing"
+check_cpp '--onboard-invite-fail-open ' "launcher wiring failed: option 47 onboard-invite-fail-open forwarding missing"
+check_cpp '--onboard-invite-file ' "launcher wiring failed: option 47 onboard-invite-file forwarding missing"
+check_cpp 'Auto-rollback onboard runs if they fail after startup\?' "launcher wiring failed: option 47 rollback-on-fail prompt missing"
+check_cpp '--rollback-on-fail ' "launcher wiring failed: option 47 rollback-on-fail forwarding missing"
+check_cpp '--rollback-verify-absent ' "launcher wiring failed: option 47 rollback-verify-absent forwarding missing"
+check_cpp '--rollback-verify-timeout-sec ' "launcher wiring failed: option 47 rollback-verify-timeout-sec forwarding missing"
+check_cpp 'Capture incident snapshot automatically on lifecycle failure\?' "launcher wiring failed: option 47 incident-snapshot prompt missing"
+check_cpp '--incident-snapshot-on-fail ' "launcher wiring failed: option 47 incident-snapshot-on-fail forwarding missing"
+check_cpp '--incident-bundle-dir ' "launcher wiring failed: option 47 incident-bundle-dir forwarding missing"
+check_cpp '--incident-timeout-sec ' "launcher wiring failed: option 47 incident-timeout-sec forwarding missing"
+check_cpp '--incident-include-docker-logs ' "launcher wiring failed: option 47 incident-include-docker-logs forwarding missing"
+check_cpp '--incident-docker-log-lines ' "launcher wiring failed: option 47 incident-docker-log-lines forwarding missing"
+check_cpp 'Capture runtime-doctor diagnostics on lifecycle failure\?' "launcher wiring failed: option 47 runtime-doctor prompt missing"
+check_cpp '--runtime-doctor-on-fail ' "launcher wiring failed: option 47 runtime-doctor-on-fail forwarding missing"
+check_cpp '--runtime-doctor-base-port ' "launcher wiring failed: option 47 runtime-doctor-base-port forwarding missing"
+check_cpp '--runtime-doctor-client-iface ' "launcher wiring failed: option 47 runtime-doctor-client-iface forwarding missing"
+check_cpp '--runtime-doctor-exit-iface ' "launcher wiring failed: option 47 runtime-doctor-exit-iface forwarding missing"
+check_cpp '--runtime-doctor-vpn-iface ' "launcher wiring failed: option 47 runtime-doctor-vpn-iface forwarding missing"
+check_cpp 'Lifecycle report markdown path \(optional\)' "launcher wiring failed: option 47 report markdown prompt missing"
+check_cpp '--report-md ' "launcher wiring failed: option 47 report markdown forwarding missing"
 check_cpp '--bundle-outputs ' "launcher wiring failed: option 48/51 bundle-outputs forwarding missing"
 check_cpp '--bundle-fail-close ' "launcher wiring failed: option 48/51 bundle-fail-close forwarding missing"
 check_cpp 'Run pre-real-host readiness once before the cohort\?' "launcher wiring failed: option 48/51 pre-real-host readiness prompt missing"
@@ -438,6 +476,62 @@ if ! "$EASY_NODE" prod-upgrade-runbook --help | rg -q -- '--compose-pull'; then
 fi
 if ! "$EASY_NODE" prod-operator-lifecycle-runbook --help | rg -q -- '--verify-relays'; then
   echo "launcher wiring failed: prod-operator-lifecycle-runbook help missing --verify-relays"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-operator-lifecycle-runbook --help | rg -q -- '--federation-check'; then
+  echo "launcher wiring failed: prod-operator-lifecycle-runbook help missing --federation-check"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-operator-lifecycle-runbook --help | rg -q -- '--federation-status-file'; then
+  echo "launcher wiring failed: prod-operator-lifecycle-runbook help missing --federation-status-file"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-operator-lifecycle-runbook --help | rg -q -- '--onboard-invite'; then
+  echo "launcher wiring failed: prod-operator-lifecycle-runbook help missing --onboard-invite"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-operator-lifecycle-runbook --help | rg -q -- '--onboard-invite-file'; then
+  echo "launcher wiring failed: prod-operator-lifecycle-runbook help missing --onboard-invite-file"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-operator-lifecycle-runbook --help | rg -q -- '--rollback-on-fail'; then
+  echo "launcher wiring failed: prod-operator-lifecycle-runbook help missing --rollback-on-fail"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-operator-lifecycle-runbook --help | rg -q -- '--rollback-verify-timeout-sec'; then
+  echo "launcher wiring failed: prod-operator-lifecycle-runbook help missing --rollback-verify-timeout-sec"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-operator-lifecycle-runbook --help | rg -q -- '--incident-snapshot-on-fail'; then
+  echo "launcher wiring failed: prod-operator-lifecycle-runbook help missing --incident-snapshot-on-fail"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-operator-lifecycle-runbook --help | rg -q -- '--incident-docker-log-lines'; then
+  echo "launcher wiring failed: prod-operator-lifecycle-runbook help missing --incident-docker-log-lines"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-operator-lifecycle-runbook --help | rg -q -- '--runtime-doctor-on-fail'; then
+  echo "launcher wiring failed: prod-operator-lifecycle-runbook help missing --runtime-doctor-on-fail"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-operator-lifecycle-runbook --help | rg -q -- '--runtime-doctor-base-port'; then
+  echo "launcher wiring failed: prod-operator-lifecycle-runbook help missing --runtime-doctor-base-port"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-operator-lifecycle-runbook --help | rg -q -- '--runtime-doctor-client-iface'; then
+  echo "launcher wiring failed: prod-operator-lifecycle-runbook help missing --runtime-doctor-client-iface"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-operator-lifecycle-runbook --help | rg -q -- '--runtime-doctor-exit-iface'; then
+  echo "launcher wiring failed: prod-operator-lifecycle-runbook help missing --runtime-doctor-exit-iface"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-operator-lifecycle-runbook --help | rg -q -- '--runtime-doctor-vpn-iface'; then
+  echo "launcher wiring failed: prod-operator-lifecycle-runbook help missing --runtime-doctor-vpn-iface"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-operator-lifecycle-runbook --help | rg -q -- '--report-md'; then
+  echo "launcher wiring failed: prod-operator-lifecycle-runbook help missing --report-md"
   exit 1
 fi
 if ! "$EASY_NODE" prod-pilot-cohort-runbook --help | rg -q -- '--bundle-fail-close'; then

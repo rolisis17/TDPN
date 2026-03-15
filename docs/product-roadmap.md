@@ -12,11 +12,13 @@ Scope:
 - invite lifecycle + authority/provider role separation
 - anti-collusion pair controls (distinct operators, optional distinct countries)
 - locality-aware selection (hard locality + optional soft locality bias)
+- federation observability + startup gating (`server-federation-status`, `server-federation-wait`, `server-up --federation-wait 1`)
 
 Exit criteria:
 - repeated 3-machine prod-gate runs pass under normal and fault-injected conditions
 - clear operator runbook and incident/debug flow
 - no high-severity known regressions in CI/beta preflight suite
+- peer churn/restarts no longer require manual guesswork: operators can verify and wait for federation readiness with explicit pass/fail outputs
 
 ## Phase 2: VPN v1 Production
 

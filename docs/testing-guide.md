@@ -133,11 +133,81 @@ sudo ./scripts/easy_node.sh client-vpn-up \
 
 ./scripts/easy_node.sh client-vpn-status
 sudo ./scripts/easy_node.sh client-vpn-down
-# prod profile enables operator-floor checks by default (>=2 entry and >=2 exit operators).
-# for single-operator lab tests only, append: --operator-floor-check 0
+# prod profile enables operator-floor checks by default (>=2 global/entry/exit operators).
+# for staged or single-operator labs, you can keep checks enabled with:
+#   --operator-min-operators 1 --operator-min-entry-operators 1 --operator-min-exit-operators 1
+# disable only for diagnostics with: --operator-floor-check 0
 # prod profile also enables issuer-quorum checks by default (>=2 distinct issuer IDs with keys).
 # for single-issuer lab tests only, append: --issuer-quorum-check 0
 ```
+
+Server federation readiness checks (machine A/B host):
+
+```bash
+# one-shot federation health snapshot (peer failures + sync quorum)
+./scripts/easy_node.sh server-federation-status
+
+# optional: one-shot strict policy check (no polling loop) + summary artifact
+./scripts/easy_node.sh server-federation-status \
+  --require-configured-healthy 1 \
+  --max-cooling-retry-sec 120 \
+  --max-peer-sync-age-sec 120 \
+  --max-issuer-sync-age-sec 120 \
+  --min-peer-success-sources 2 \
+  --min-issuer-success-sources 2 \
+  --min-peer-source-operators 2 \
+  --min-issuer-source-operators 2 \
+  --fail-on-not-ready 1 \
+  --summary-json .easy-node-logs/federation_status_summary.json \
+  --print-summary-json 1
+
+# block until local directory is federation-ready (or fail on timeout)
+./scripts/easy_node.sh server-federation-wait \
+  --ready-timeout-sec 90 \
+  --poll-sec 5
+
+# optional strict gates:
+# - require every configured peer to be healthy (no fallback to discovered peers)
+# - fail fast if cooling peers have long retry windows
+./scripts/easy_node.sh server-federation-wait \
+  --ready-timeout-sec 90 \
+  --poll-sec 5 \
+  --require-configured-healthy 1 \
+  --max-cooling-retry-sec 120 \
+  --max-peer-sync-age-sec 120 \
+  --max-issuer-sync-age-sec 120 \
+  --min-peer-success-sources 2 \
+  --min-issuer-success-sources 2 \
+  --min-peer-source-operators 2 \
+  --min-issuer-source-operators 2
+
+# optional: gate server startup directly
+./scripts/easy_node.sh server-up \
+  --bootstrap-directory http://A_PUBLIC_IP_OR_DNS:8081 \
+  --federation-wait 1 \
+  --federation-require-configured-healthy 1 \
+  --federation-max-cooling-retry-sec 120 \
+  --federation-max-peer-sync-age-sec 120 \
+  --federation-max-issuer-sync-age-sec 120 \
+  --federation-min-peer-success-sources 2 \
+  --federation-min-issuer-success-sources 2 \
+  --federation-min-peer-source-operators 2 \
+  --federation-min-issuer-source-operators 2
+```
+
+Notes:
+- `server-federation-wait` is useful after restarting one operator in a multi-peer setup; it waits for peer-sync and issuer-sync quorum plus healthy/eligible peer availability.
+- `server-federation-status` now surfaces per-peer cooldown retry windows (`retry_after_sec`) and sync-source operator details so operators can see both retry timing and current source diversity.
+- `server-federation-status` can also enforce the same strict policy thresholds in one shot (`--fail-on-not-ready 1`) and produce a machine-readable summary artifact (`--summary-json`).
+- `server-federation-wait` now also supports explicit fail-close outage policy (`--require-configured-healthy`, `--max-cooling-retry-sec`, `--max-peer-sync-age-sec`, `--max-issuer-sync-age-sec`, `--min-peer-success-sources`, `--min-issuer-success-sources`, `--min-peer-source-operators`, `--min-issuer-source-operators`) for stricter production readiness gates.
+- if a peer is permanently offline, remove it from `DIRECTORY_PEERS` (or keep discovery enabled with eligible peers) to avoid repeated degraded-status loops.
+- `prod-operator-lifecycle-runbook` enables federation readiness gating by default during onboard (`--federation-check 1`) and captures diagnostics via `--federation-status-file`.
+- authority `server-up` can now auto-generate invite keys during startup (`--auto-invite 1` with optional count/tier/wait tuning) to reduce manual onboarding steps.
+- authority `prod-operator-lifecycle-runbook` can also bootstrap invite keys after onboarding (`--onboard-invite 1`), with artifact/metadata reported in `invite_bootstrap.*` summary fields.
+- `prod-operator-lifecycle-runbook` can now auto-rollback failed onboard runs (`--rollback-on-fail 1`) and optionally verify relay disappearance after rollback (`--rollback-verify-absent 1`), with rollback diagnostics in `rollback.*` summary fields.
+- failed lifecycle runs can now auto-capture runtime-doctor diagnostics (`--runtime-doctor-on-fail 1`) with captured artifact metadata in `runtime_doctor.*` summary fields.
+- failed lifecycle runs can now auto-capture incident bundles (`--incident-snapshot-on-fail 1`) with optional docker-log controls and attached lifecycle artifacts; lifecycle summary now also surfaces normalized incident handoff pointers (`incident_summary.json`, `incident_report.md`, bundle tar/sha, and attachment manifest paths) via `incident_snapshot.*`.
+- lifecycle runs now also emit a human-readable markdown handoff by default (override with `--report-md`), with the artifact path recorded in summary JSON as `report_md`.
 
 3-machine soak/fault validation (machine C runner):
 

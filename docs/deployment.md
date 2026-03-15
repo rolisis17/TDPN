@@ -71,7 +71,8 @@ Quick non-interactive examples:
   --beta-profile 1
 
 # authority/admin node (runs directory + issuer + entry + exit)
-./scripts/easy_node.sh server-up --mode authority --public-host <PUBLIC_IP_OR_DNS> --beta-profile
+# auto-generate one invite key on startup for immediate client onboarding
+./scripts/easy_node.sh server-up --mode authority --public-host <PUBLIC_IP_OR_DNS> --beta-profile --auto-invite 1
 
 # authority/admin node with strict production profile (mTLS + signed admin auth)
 ./scripts/easy_node.sh server-up --mode authority --public-host <PUBLIC_IP_OR_DNS> --peer-directories https://<PEER_DIRECTORY_IP_OR_DNS>:8081 --prod-profile 1
@@ -101,8 +102,10 @@ sudo ./scripts/easy_node.sh client-vpn-up \
   --distinct-operators 1
 ./scripts/easy_node.sh client-vpn-status
 sudo ./scripts/easy_node.sh client-vpn-down
-# prod profile enables operator-floor checks by default (>=2 entry and >=2 exit operators).
-# for single-operator lab tests only, append: --operator-floor-check 0
+# prod profile enables operator-floor checks by default (>=2 global/entry/exit operators).
+# for staged or single-operator labs, you can keep checks enabled with:
+#   --operator-min-operators 1 --operator-min-entry-operators 1 --operator-min-exit-operators 1
+# disable only for diagnostics with: --operator-floor-check 0
 # prod profile also enables issuer-quorum checks by default (>=2 distinct issuer IDs with keys).
 # for single-issuer lab tests only, append: --issuer-quorum-check 0
 
@@ -196,7 +199,8 @@ If `client-vpn-smoke` fails, it now also auto-captures a client incident bundle,
 ./scripts/easy_node.sh prod-upgrade-runbook --mode auto --preflight-check 1 --compose-pull 1 --compose-build 0 --restart 1 --rollback-on-fail 1
 
 # production-safe operator lifecycle runbook (repeatable onboarding/offboarding)
-./scripts/easy_node.sh prod-operator-lifecycle-runbook --action onboard --mode provider --public-host <PUBLIC_IP_OR_DNS> --authority-directory https://<AUTHORITY_DIR_IP_OR_DNS>:8081 --authority-issuer https://<AUTHORITY_DIR_IP_OR_DNS>:8082 --prod-profile 1
+./scripts/easy_node.sh prod-operator-lifecycle-runbook --action onboard --mode provider --public-host <PUBLIC_IP_OR_DNS> --authority-directory https://<AUTHORITY_DIR_IP_OR_DNS>:8081 --authority-issuer https://<AUTHORITY_DIR_IP_OR_DNS>:8082 --prod-profile 1 --rollback-on-fail 1 --rollback-verify-absent 1 --runtime-doctor-on-fail 1 --incident-snapshot-on-fail 1 --federation-require-configured-healthy 1 --federation-max-cooling-retry-sec 120 --federation-max-peer-sync-age-sec 120 --federation-max-issuer-sync-age-sec 120 --federation-min-peer-success-sources 2 --federation-min-issuer-success-sources 2 --federation-min-peer-source-operators 2 --federation-min-issuer-source-operators 2
+./scripts/easy_node.sh prod-operator-lifecycle-runbook --action onboard --mode authority --public-host <AUTHORITY_PUBLIC_IP_OR_DNS> --prod-profile 1 --onboard-invite 1 --onboard-invite-count 1 --onboard-invite-tier 1 --rollback-on-fail 1 --rollback-verify-absent 1 --runtime-doctor-on-fail 1 --incident-snapshot-on-fail 1
 ./scripts/easy_node.sh prod-operator-lifecycle-runbook --action offboard --operator-id <OPERATOR_ID> --directory-url https://<AUTHORITY_DIR_IP_OR_DNS>:8081
 
 # sustained production pilot cohort (multi-round runbook + trend/alert rollup)
@@ -252,13 +256,16 @@ Prod strict additions:
 - prod profile now also enforces hardened abuse/adjudication defaults (entry open-rate/ban/inflight bounds, peer+final dispute/appeal floors, final operator/source quorum floors, and stricter ratio/TTL caps) for safer public operation.
 - prod profile requires at least one peer directory from a distinct authority/issuer operator so strict issuer quorum has at least two issuer URLs.
 - when peers are configured, `server-up` now fail-fast verifies local `operator_id`/`issuer_id` uniqueness against peer feeds by default in beta/prod (`--peer-identity-strict auto` -> strict); use `--peer-identity-strict 0` only as a temporary diagnostics bypass.
+- `server-federation-status` now includes per-peer cooldown retry windows (`retry_after_sec`), a `cooling_retry_max_sec` summary, and sync-source operator details (`source_operator_count`, `peer_sync_source_operators`, `issuer_sync_source_operators`) to make intermittent peer outage behavior and diversity posture easier to reason about during operations; it can also enforce strict one-shot policy checks via `--fail-on-not-ready 1` and emit a machine-readable summary via `--summary-json`.
+- `server-federation-wait` can now enforce strict federation readiness policy (`--require-configured-healthy`, `--max-cooling-retry-sec`, `--max-peer-sync-age-sec`, `--max-issuer-sync-age-sec`, `--min-peer-success-sources`, `--min-issuer-success-sources`, `--min-peer-source-operators`, `--min-issuer-source-operators`) and `server-up --federation-wait 1` can pass the same policy gates via `--federation-require-configured-healthy`, `--federation-max-cooling-retry-sec`, `--federation-max-peer-sync-age-sec`, `--federation-max-issuer-sync-age-sec`, `--federation-min-peer-success-sources`, `--federation-min-issuer-success-sources`, `--federation-min-peer-source-operators`, and `--federation-min-issuer-source-operators`.
+- authority mode can auto-generate invite keys at startup (`--auto-invite 1`, optional `--auto-invite-count`, `--auto-invite-tier`, `--auto-invite-wait-sec`); `--auto-invite-fail-open 1` keeps startup non-blocking if invite generation fails.
 - prod profile auto-wires WG command-backend runtime defaults (`WG_BACKEND=command`, live WG filters, exit WG kernel proxy, and issuer quorum URL feeds) and sets entry-exit compose runtime privileges (`ENTRY_EXIT_USER=0:0`, `ENTRY_EXIT_PRIVILEGED=true`).
 - authority invite/admin commands auto-switch to signed auth in prod profile; they also support explicit signed credentials (`--admin-key-file`, `--admin-key-id`).
 - use `./scripts/easy_node.sh admin-signing-status` and `./scripts/easy_node.sh admin-signing-rotate --restart-issuer 1 --key-history 3` for signer maintenance on authority nodes.
-- use `./scripts/easy_node.sh prod-preflight --days-min 14 --check-live 1 --timeout-sec 12` before external beta/production traffic cutover; live mode now verifies both endpoint reachability and live governance policy floors (`/v1/admin/governance-status`).
+- use `./scripts/easy_node.sh prod-preflight --days-min 14 --check-live 1 --timeout-sec 12` before external beta/production traffic cutover; live mode now verifies endpoint reachability, governance policy floors (`/v1/admin/governance-status`), peer-status payload validity, optional strict federation health thresholds (`--live-require-configured-healthy`, `--live-max-cooling-retry-sec`), optional sync freshness thresholds (`--live-max-peer-sync-age-sec`, `--live-max-issuer-sync-age-sec`), and optional sync source-diversity floors (`--live-min-peer-success-sources`, `--live-min-issuer-success-sources`, `--live-min-peer-source-operators`, `--live-min-issuer-source-operators`).
 - use `./scripts/easy_node.sh prod-key-rotation-runbook ...` for operator-safe maintenance windows (automatic backup + optional pre/post preflight + rollback-on-failure summary JSON).
 - use `./scripts/easy_node.sh prod-upgrade-runbook ...` for operator-safe upgrade windows (automatic backup + optional pre/post preflight + compose pull/build/restart + rollback-on-failure summary JSON).
-- use `./scripts/easy_node.sh prod-operator-lifecycle-runbook ...` for repeatable onboarding/offboarding with optional preflight, health checks, and relay visibility checks (summary JSON output included).
+- use `./scripts/easy_node.sh prod-operator-lifecycle-runbook ...` for repeatable onboarding/offboarding with optional preflight, health checks, federation readiness gating, relay visibility checks, optional authority onboarding invite bootstrap (`--onboard-invite`), optional fail-close onboard rollback (`--rollback-on-fail`, `--rollback-verify-absent`), optional failed-run runtime-doctor capture (`--runtime-doctor-on-fail`), and optional failed-run incident capture (`--incident-snapshot-on-fail`), with both machine-readable summary JSON and a human-readable lifecycle report markdown artifact (`--report-md`), plus normalized runtime + incident handoff pointers in lifecycle summary JSON (`runtime_doctor.*`, `incident_snapshot.*`). For stricter multi-peer federation policy during onboard readiness, tune `--federation-require-configured-healthy`, `--federation-max-cooling-retry-sec`, `--federation-max-peer-sync-age-sec`, `--federation-max-issuer-sync-age-sec`, `--federation-min-peer-success-sources`, `--federation-min-issuer-success-sources`, `--federation-min-peer-source-operators`, and `--federation-min-issuer-source-operators`; set `--federation-status-fail-on-not-ready 1` if post-start federation status capture should fail-close on the same strict policy.
 - use `./scripts/easy_node.sh prod-pilot-cohort-runbook ...` for sustained pilot cohorts (multiple strict pilot rounds + aggregated trend/alert + cohort summary JSON), with alert-severity fail-close policy (`--max-alert-severity`, default `WARN`), optional fail-closed cohort bundle artifact generation (`--bundle-outputs`, `--bundle-fail-close`), and a one-time top-level `pre-real-host-readiness` gate before the cohort starts by default (`--pre-real-host-readiness 0` disables that wrapper gate for diagnostics-only runs).
 - use `./scripts/easy_node.sh prod-pilot-cohort-bundle-verify ...` to fail-close validate cohort artifact integrity (tar checksum + manifest schema + round structure).
 - use `./scripts/easy_node.sh prod-pilot-cohort-check ...` to enforce cohort policy gates from the generated summary JSON (round failure budget, trend GO-rate/decision, alert severity threshold, bundle presence).

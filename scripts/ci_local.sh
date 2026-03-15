@@ -138,6 +138,15 @@ echo "[ci] easy-node server preflight integration"
 echo "[ci] easy-node prod authority/provider env wiring integration"
 ./scripts/integration_easy_node_prod_server_env.sh
 
+echo "[ci] easy-node server-up auto-invite integration"
+./scripts/integration_easy_node_server_up_auto_invite.sh
+
+echo "[ci] easy-node server federation status integration"
+./scripts/integration_easy_node_server_federation_status.sh
+
+echo "[ci] easy-node server federation wait integration"
+./scripts/integration_easy_node_server_federation_wait.sh
+
 echo "[ci] easy-node client profile env integration"
 ./scripts/integration_easy_node_client_profile_env.sh
 

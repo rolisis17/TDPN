@@ -289,11 +289,14 @@ INPUT2A="$TMP_DIR/input2a.txt"
   printf '\n'    # run preflight (default yes)
   printf '\n'    # peer identity strict mode
   printf '\n'    # preflight timeout
+  printf '\n'    # auto-generate invite keys (default yes)
+  printf '\n'    # auto invite key count
+  printf '\n'    # auto invite tier
+  printf '\n'    # auto invite wait sec
   printf '0\n'   # min peer operators
   printf 'n\n'   # open dedicated server terminal? no
   printf 'n\n'   # run server session with sudo? no
   printf '\n'    # save/update hosts (default no)
-  printf 'n\n'   # generate invite now? no
   printf '0\n'   # exit main menu
 } >"$INPUT2A"
 run_ui "$INPUT2A" "$TMP_DIR/run2a.log"
@@ -326,6 +329,16 @@ assert_line_has "$line2a_session" '--mode authority' \
   "runtime wiring failed: authority option 2 server-session missing --mode authority"
 assert_line_has "$line2a_session" '--public-host 198\.51\.100\.11' \
   "runtime wiring failed: authority option 2 server-session missing explicit public host"
+assert_line_has "$line2a_session" '--auto-invite 1' \
+  "runtime wiring failed: authority option 2 server-session missing default --auto-invite 1"
+assert_line_has "$line2a_session" '--auto-invite-count 1' \
+  "runtime wiring failed: authority option 2 server-session missing default --auto-invite-count 1"
+assert_line_has "$line2a_session" '--auto-invite-tier 1' \
+  "runtime wiring failed: authority option 2 server-session missing default --auto-invite-tier 1"
+assert_line_has "$line2a_session" '--auto-invite-wait-sec 10' \
+  "runtime wiring failed: authority option 2 server-session missing default --auto-invite-wait-sec 10"
+assert_line_has "$line2a_session" '--auto-invite-fail-open 1' \
+  "runtime wiring failed: authority option 2 server-session missing default --auto-invite-fail-open 1"
 if printf '%s\n' "$line2a_session" | rg -q -- '--peer-directories '; then
   echo "runtime wiring failed: authority option 2 server-session unexpectedly forwarded peer directories"
   printf 'line: %s\n' "$line2a_session"
@@ -995,7 +1008,7 @@ INPUT47="$TMP_DIR/input47.txt"
 {
   printf '3\n'   # main menu: advanced
   printf '47\n'  # prod operator lifecycle runbook
-  for _ in $(seq 1 26); do
+  for _ in $(seq 1 38); do
     printf '\n'  # accept defaults
   done
   printf '0\n'   # back from advanced menu
@@ -1029,8 +1042,82 @@ assert_line_has "$line47" '--verify-relay-timeout-sec 90' \
   "runtime wiring failed: option 47 missing default --verify-relay-timeout-sec 90"
 assert_line_has "$line47" '--verify-relay-min-count 2' \
   "runtime wiring failed: option 47 missing default --verify-relay-min-count 2"
+assert_line_has "$line47" '--federation-check 1' \
+  "runtime wiring failed: option 47 missing default --federation-check 1"
+assert_line_has "$line47" '--federation-ready-timeout-sec 90' \
+  "runtime wiring failed: option 47 missing default --federation-ready-timeout-sec 90"
+assert_line_has "$line47" '--federation-poll-sec 5' \
+  "runtime wiring failed: option 47 missing default --federation-poll-sec 5"
+assert_line_has "$line47" '--federation-timeout-sec 8' \
+  "runtime wiring failed: option 47 missing default --federation-timeout-sec 8"
+assert_line_has "$line47" '--onboard-invite 0' \
+  "runtime wiring failed: option 47 missing default --onboard-invite 0"
+assert_line_has "$line47" '--rollback-on-fail 1' \
+  "runtime wiring failed: option 47 missing default --rollback-on-fail 1"
+assert_line_has "$line47" '--rollback-verify-absent 1' \
+  "runtime wiring failed: option 47 missing default --rollback-verify-absent 1"
+assert_line_has "$line47" '--rollback-verify-timeout-sec 90' \
+  "runtime wiring failed: option 47 missing default --rollback-verify-timeout-sec 90"
+assert_line_has "$line47" '--incident-snapshot-on-fail 1' \
+  "runtime wiring failed: option 47 missing default --incident-snapshot-on-fail 1"
+assert_line_has "$line47" '--incident-timeout-sec 20' \
+  "runtime wiring failed: option 47 missing default --incident-timeout-sec 20"
+assert_line_has "$line47" '--incident-include-docker-logs 1' \
+  "runtime wiring failed: option 47 missing default --incident-include-docker-logs 1"
+assert_line_has "$line47" '--incident-docker-log-lines 120' \
+  "runtime wiring failed: option 47 missing default --incident-docker-log-lines 120"
+assert_line_has "$line47" '--runtime-doctor-on-fail 1' \
+  "runtime wiring failed: option 47 missing default --runtime-doctor-on-fail 1"
+assert_line_has "$line47" '--runtime-doctor-base-port 19280' \
+  "runtime wiring failed: option 47 missing default --runtime-doctor-base-port 19280"
+assert_line_has "$line47" '--runtime-doctor-client-iface wgcstack0' \
+  "runtime wiring failed: option 47 missing default --runtime-doctor-client-iface wgcstack0"
+assert_line_has "$line47" '--runtime-doctor-exit-iface wgestack0' \
+  "runtime wiring failed: option 47 missing default --runtime-doctor-exit-iface wgestack0"
+assert_line_has "$line47" '--runtime-doctor-vpn-iface wgvpn0' \
+  "runtime wiring failed: option 47 missing default --runtime-doctor-vpn-iface wgvpn0"
 assert_line_has "$line47" '--print-summary-json 0' \
   "runtime wiring failed: option 47 missing default --print-summary-json 0"
+if printf '%s\n' "$line47" | rg -q -- '--federation-status-file '; then
+  echo "runtime wiring failed: option 47 unexpectedly forwarded --federation-status-file by default"
+  printf 'line: %s\n' "$line47"
+  exit 1
+fi
+if printf '%s\n' "$line47" | rg -q -- '--onboard-invite-count '; then
+  echo "runtime wiring failed: option 47 unexpectedly forwarded --onboard-invite-count by default"
+  printf 'line: %s\n' "$line47"
+  exit 1
+fi
+if printf '%s\n' "$line47" | rg -q -- '--onboard-invite-tier '; then
+  echo "runtime wiring failed: option 47 unexpectedly forwarded --onboard-invite-tier by default"
+  printf 'line: %s\n' "$line47"
+  exit 1
+fi
+if printf '%s\n' "$line47" | rg -q -- '--onboard-invite-wait-sec '; then
+  echo "runtime wiring failed: option 47 unexpectedly forwarded --onboard-invite-wait-sec by default"
+  printf 'line: %s\n' "$line47"
+  exit 1
+fi
+if printf '%s\n' "$line47" | rg -q -- '--onboard-invite-file '; then
+  echo "runtime wiring failed: option 47 unexpectedly forwarded --onboard-invite-file by default"
+  printf 'line: %s\n' "$line47"
+  exit 1
+fi
+if printf '%s\n' "$line47" | rg -q -- '--incident-bundle-dir '; then
+  echo "runtime wiring failed: option 47 unexpectedly forwarded --incident-bundle-dir by default"
+  printf 'line: %s\n' "$line47"
+  exit 1
+fi
+if printf '%s\n' "$line47" | rg -q -- '--runtime-doctor-file '; then
+  echo "runtime wiring failed: option 47 unexpectedly forwarded --runtime-doctor-file by default"
+  printf 'line: %s\n' "$line47"
+  exit 1
+fi
+if printf '%s\n' "$line47" | rg -q -- '--report-md '; then
+  echo "runtime wiring failed: option 47 unexpectedly forwarded --report-md by default"
+  printf 'line: %s\n' "$line47"
+  exit 1
+fi
 
 : >"$CAPTURE"
 

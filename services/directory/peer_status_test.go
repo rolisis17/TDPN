@@ -114,6 +114,44 @@ func TestRecordPeerSyncFailureAndSuccessManageCooldown(t *testing.T) {
 	}
 }
 
+func TestRecordPeerSyncFailureTracksConfiguredPeerHealth(t *testing.T) {
+	now := time.Now().UTC()
+	configuredURL := "http://seed-configured.local"
+	s := &Service{
+		peerURLs:             []string{configuredURL},
+		discoveredPeerHealth: make(map[string]discoveredPeerHealth),
+	}
+
+	s.recordPeerSyncFailure(configuredURL, now, errors.New("connect refused"))
+	health, ok := s.discoveredPeerHealth[configuredURL]
+	if !ok {
+		t.Fatalf("expected configured peer failure health to be tracked")
+	}
+	if health.consecutiveFailures != 1 {
+		t.Fatalf("expected one configured-peer failure, got %d", health.consecutiveFailures)
+	}
+	if !health.cooldownUntil.IsZero() {
+		t.Fatalf("expected configured peer to remain out of discovered-peer cooldown logic")
+	}
+	if health.lastError == "" {
+		t.Fatalf("expected configured peer last error to be set")
+	}
+
+	s.recordPeerSyncSuccess(configuredURL, now.Add(2*time.Second))
+	health = s.discoveredPeerHealth[configuredURL]
+	if health.consecutiveFailures != 0 {
+		t.Fatalf("expected configured peer failure counter reset")
+	}
+	if health.lastError != "" {
+		t.Fatalf("expected configured peer last error cleared on success")
+	}
+
+	s.recordPeerSyncFailure("http://unknown-peer.local", now, errors.New("ignored"))
+	if _, exists := s.discoveredPeerHealth["http://unknown-peer.local"]; exists {
+		t.Fatalf("expected unknown peer health to remain untracked")
+	}
+}
+
 func TestSyncPeerRelaysAppliesBackoffToFailingDiscoveredPeer(t *testing.T) {
 	urlSeed := "http://seed-a.local"
 	urlDiscovered := "http://peer-unreachable.local"
@@ -291,5 +329,11 @@ func TestHandlePeerStatusReturnsConfiguredAndDiscoveredState(t *testing.T) {
 	}
 	if discovered.CooldownUntil == 0 {
 		t.Fatalf("expected cooldown timestamp")
+	}
+	if discovered.RetryAfterSec <= 0 {
+		t.Fatalf("expected positive retry_after_sec for cooling peer, got %d", discovered.RetryAfterSec)
+	}
+	if discovered.RetryAfterSec > 90 {
+		t.Fatalf("expected retry_after_sec bounded by cooldown window, got %d", discovered.RetryAfterSec)
 	}
 }

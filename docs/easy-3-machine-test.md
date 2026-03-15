@@ -108,8 +108,10 @@ sudo ./scripts/easy_node.sh client-vpn-up \
 
 ./scripts/easy_node.sh client-vpn-status
 sudo ./scripts/easy_node.sh client-vpn-down
-# prod profile enables operator-floor checks by default (>=2 entry and >=2 exit operators).
-# for single-operator lab tests only, append: --operator-floor-check 0
+# prod profile enables operator-floor checks by default (>=2 global/entry/exit operators).
+# for staged or single-operator labs, you can keep checks enabled with:
+#   --operator-min-operators 1 --operator-min-entry-operators 1 --operator-min-exit-operators 1
+# disable only for diagnostics with: --operator-floor-check 0
 # prod profile also enables issuer-quorum checks by default (>=2 distinct issuer IDs with keys).
 # for single-issuer lab tests only, append: --issuer-quorum-check 0
 ```

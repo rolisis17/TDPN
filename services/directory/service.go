@@ -689,11 +689,58 @@ func isWeakAdminToken(token string) bool {
 }
 
 func (s *Service) runPeerSync(ctx context.Context) {
+	peerErrLogEvery := 60 * time.Second
+	if s.peerSyncSec > 0 {
+		candidate := time.Duration(maxInt(1, s.peerSyncSec*6)) * time.Second
+		if candidate > peerErrLogEvery {
+			peerErrLogEvery = candidate
+		}
+	}
+	lastPeerErr := ""
+	lastPeerErrLogAt := time.Time{}
+	peerErrStreak := 0
+	recordPeerSyncFailure := func(label string, err error) {
+		if err == nil {
+			return
+		}
+		peerErrStreak++
+		now := time.Now().UTC()
+		msg := strings.TrimSpace(err.Error())
+		if msg == "" {
+			msg = "unknown error"
+		}
+		if peerErrStreak == 1 || msg != lastPeerErr {
+			if label == "" {
+				log.Printf("directory peer sync failed: %v", err)
+			} else {
+				log.Printf("directory peer sync %s failed: %v", label, err)
+			}
+			lastPeerErr = msg
+			lastPeerErrLogAt = now
+			return
+		}
+		if lastPeerErrLogAt.IsZero() || now.Sub(lastPeerErrLogAt) >= peerErrLogEvery {
+			log.Printf("directory peer sync still failing: consecutive=%d error=%s", peerErrStreak, msg)
+			lastPeerErrLogAt = now
+		}
+	}
+	recordPeerSyncRecovery := func() {
+		if peerErrStreak <= 0 {
+			return
+		}
+		log.Printf("directory peer sync recovered after %d consecutive failures", peerErrStreak)
+		peerErrStreak = 0
+		lastPeerErr = ""
+		lastPeerErrLogAt = time.Time{}
+	}
+
 	if err := s.syncDNSDiscoveredPeers(ctx, time.Now()); err != nil && len(s.peerDiscoveryDNSSeeds) > 0 {
 		log.Printf("directory dns peer discovery initial failed: %v", err)
 	}
 	if err := s.syncPeerRelays(ctx); err != nil && len(s.peerURLs) > 0 {
-		log.Printf("directory peer sync initial failed: %v", err)
+		recordPeerSyncFailure("initial", err)
+	} else {
+		recordPeerSyncRecovery()
 	}
 	if err := s.syncIssuerTrust(ctx); err != nil && len(s.issuerTrustURLs) > 0 {
 		log.Printf("directory issuer trust sync initial failed: %v", err)
@@ -718,7 +765,9 @@ func (s *Service) runPeerSync(ctx context.Context) {
 			return
 		case <-peerTicker.C:
 			if err := s.syncPeerRelays(ctx); err != nil {
-				log.Printf("directory peer sync failed: %v", err)
+				recordPeerSyncFailure("", err)
+			} else {
+				recordPeerSyncRecovery()
 			}
 		case <-issuerTicker.C:
 			if err := s.syncIssuerTrust(ctx); err != nil {
@@ -2124,10 +2173,16 @@ func (s *Service) isDiscoveredPeer(peerURL string) bool {
 
 func (s *Service) recordPeerSyncSuccess(peerURL string, now time.Time) {
 	peerURL = normalizePeerURL(peerURL)
-	if peerURL == "" || !s.isDiscoveredPeer(peerURL) {
+	if peerURL == "" {
 		return
 	}
 	s.peerMu.Lock()
+	isConfigured := s.isConfiguredPeerLocked(peerURL)
+	_, isDiscovered := s.discoveredPeers[peerURL]
+	if !isConfigured && !isDiscovered {
+		s.peerMu.Unlock()
+		return
+	}
 	if s.discoveredPeerHealth == nil {
 		s.discoveredPeerHealth = make(map[string]discoveredPeerHealth)
 	}
@@ -2142,10 +2197,16 @@ func (s *Service) recordPeerSyncSuccess(peerURL string, now time.Time) {
 
 func (s *Service) recordPeerSyncFailure(peerURL string, now time.Time, err error) {
 	peerURL = normalizePeerURL(peerURL)
-	if peerURL == "" || !s.isDiscoveredPeer(peerURL) {
+	if peerURL == "" {
 		return
 	}
 	s.peerMu.Lock()
+	isConfigured := s.isConfiguredPeerLocked(peerURL)
+	_, isDiscovered := s.discoveredPeers[peerURL]
+	if !isConfigured && !isDiscovered {
+		s.peerMu.Unlock()
+		return
+	}
 	if s.discoveredPeerHealth == nil {
 		s.discoveredPeerHealth = make(map[string]discoveredPeerHealth)
 	}
@@ -2159,34 +2220,36 @@ func (s *Service) recordPeerSyncFailure(peerURL string, now time.Time, err error
 		}
 		health.lastError = msg
 	}
-	failThreshold := maxInt(1, s.peerDiscoveryFailN)
-	if health.consecutiveFailures >= failThreshold {
-		base := s.peerDiscoveryBackoff
-		if base <= 0 {
-			base = 60 * time.Second
-		}
-		maxBackoff := s.peerDiscoveryBackoffMax
-		if maxBackoff < base {
-			maxBackoff = base
-		}
-		step := health.consecutiveFailures - failThreshold
-		if step < 0 {
-			step = 0
-		}
-		backoff := base
-		for i := 0; i < step; i++ {
-			if backoff >= maxBackoff {
-				backoff = maxBackoff
-				break
+	if isDiscovered {
+		failThreshold := maxInt(1, s.peerDiscoveryFailN)
+		if health.consecutiveFailures >= failThreshold {
+			base := s.peerDiscoveryBackoff
+			if base <= 0 {
+				base = 60 * time.Second
 			}
-			next := backoff * 2
-			if next <= 0 || next > maxBackoff {
-				backoff = maxBackoff
-				break
+			maxBackoff := s.peerDiscoveryBackoffMax
+			if maxBackoff < base {
+				maxBackoff = base
 			}
-			backoff = next
+			step := health.consecutiveFailures - failThreshold
+			if step < 0 {
+				step = 0
+			}
+			backoff := base
+			for i := 0; i < step; i++ {
+				if backoff >= maxBackoff {
+					backoff = maxBackoff
+					break
+				}
+				next := backoff * 2
+				if next <= 0 || next > maxBackoff {
+					backoff = maxBackoff
+					break
+				}
+				backoff = next
+			}
+			health.cooldownUntil = now.Add(backoff)
 		}
-		health.cooldownUntil = now.Add(backoff)
 	}
 	s.discoveredPeerHealth[peerURL] = health
 	s.peerMu.Unlock()
@@ -4461,6 +4524,10 @@ func (s *Service) snapshotPeerStatus(now time.Time) []proto.DirectoryPeerStatus 
 		}
 		if !health.cooldownUntil.IsZero() {
 			status.CooldownUntil = health.cooldownUntil.Unix()
+			retryAfterSec := health.cooldownUntil.Unix() - now.Unix()
+			if retryAfterSec > 0 {
+				status.RetryAfterSec = retryAfterSec
+			}
 		}
 		status.ConsecutiveFailures = health.consecutiveFailures
 		status.LastError = strings.TrimSpace(health.lastError)

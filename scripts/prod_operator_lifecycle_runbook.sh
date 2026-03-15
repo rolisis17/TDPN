@@ -61,6 +61,27 @@ int_or_die() {
   fi
 }
 
+csv_count() {
+  local value
+  value="$(trim "${1:-}")"
+  if [[ -z "$value" ]]; then
+    echo "0"
+    return
+  fi
+  awk -F',' '
+    {
+      count = 0
+      for (i = 1; i <= NF; i++) {
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", $i)
+        if ($i != "") {
+          count++
+        }
+      }
+      print count
+    }
+  ' <<<"$value"
+}
+
 json_bool() {
   if [[ "${1:-0}" == "1" ]]; then
     echo "true"
@@ -166,6 +187,42 @@ Usage:
     [--verify-absent [0|1]] \
     [--verify-relay-timeout-sec N] \
     [--verify-relay-min-count N] \
+    [--federation-check [0|1]] \
+    [--federation-ready-timeout-sec N] \
+    [--federation-poll-sec N] \
+    [--federation-timeout-sec N] \
+    [--federation-require-configured-healthy [0|1]] \
+    [--federation-max-cooling-retry-sec N] \
+    [--federation-max-peer-sync-age-sec N] \
+    [--federation-max-issuer-sync-age-sec N] \
+    [--federation-min-peer-success-sources N] \
+    [--federation-min-issuer-success-sources N] \
+    [--federation-min-peer-source-operators N] \
+    [--federation-min-issuer-source-operators N] \
+    [--federation-status-fail-on-not-ready [0|1]] \
+    [--federation-status-file PATH] \
+    [--onboard-invite [0|1]] \
+    [--onboard-invite-count N] \
+    [--onboard-invite-tier 1|2|3] \
+    [--onboard-invite-wait-sec N] \
+    [--onboard-invite-fail-open [0|1]] \
+    [--onboard-invite-file PATH] \
+    [--rollback-on-fail [0|1]] \
+    [--rollback-verify-absent [0|1]] \
+    [--rollback-verify-timeout-sec N] \
+    [--runtime-doctor-on-fail [0|1]] \
+    [--runtime-doctor-base-port N] \
+    [--runtime-doctor-client-iface IFACE] \
+    [--runtime-doctor-exit-iface IFACE] \
+    [--runtime-doctor-vpn-iface IFACE] \
+    [--runtime-doctor-file PATH] \
+    [--incident-snapshot-on-fail [0|1]] \
+    [--incident-bundle-dir PATH] \
+    [--incident-timeout-sec N] \
+    [--incident-include-docker-logs [0|1]] \
+    [--incident-docker-log-lines N] \
+    [--incident-attach-artifact PATH]... \
+    [--report-md PATH] \
     [--summary-json PATH] \
     [--print-summary-json [0|1]]
 
@@ -174,7 +231,11 @@ Purpose:
 
 Actions:
   - onboard (default): optional preflight -> server-up -> optional health checks ->
-    optional relay publication verification on directory feed.
+    optional federation readiness gate -> optional relay publication verification on directory feed.
+    authority mode can optionally auto-generate onboarding invite keys after successful startup/verification.
+    when onboarding fails after startup, optional rollback can stop the stack and verify relay disappearance.
+    failed runs can optionally capture runtime-doctor diagnostics before incident handoff.
+    failed runs can optionally auto-capture an incident snapshot bundle for operator handoff.
   - offboard: server-down -> optional relay disappearance verification.
 USAGE
 }
@@ -215,6 +276,42 @@ verify_relays="${PROD_OPERATOR_LIFECYCLE_VERIFY_RELAYS:-1}"
 verify_absent="${PROD_OPERATOR_LIFECYCLE_VERIFY_ABSENT:-1}"
 verify_relay_timeout_sec="${PROD_OPERATOR_LIFECYCLE_VERIFY_RELAY_TIMEOUT_SEC:-90}"
 verify_relay_min_count="${PROD_OPERATOR_LIFECYCLE_VERIFY_RELAY_MIN_COUNT:-2}"
+federation_check="${PROD_OPERATOR_LIFECYCLE_FEDERATION_CHECK:-1}"
+federation_ready_timeout_sec="${PROD_OPERATOR_LIFECYCLE_FEDERATION_READY_TIMEOUT_SEC:-90}"
+federation_poll_sec="${PROD_OPERATOR_LIFECYCLE_FEDERATION_POLL_SEC:-5}"
+federation_timeout_sec="${PROD_OPERATOR_LIFECYCLE_FEDERATION_TIMEOUT_SEC:-8}"
+federation_require_configured_healthy="${PROD_OPERATOR_LIFECYCLE_FEDERATION_REQUIRE_CONFIGURED_HEALTHY:-0}"
+federation_max_cooling_retry_sec="${PROD_OPERATOR_LIFECYCLE_FEDERATION_MAX_COOLING_RETRY_SEC:-0}"
+federation_max_peer_sync_age_sec="${PROD_OPERATOR_LIFECYCLE_FEDERATION_MAX_PEER_SYNC_AGE_SEC:-0}"
+federation_max_issuer_sync_age_sec="${PROD_OPERATOR_LIFECYCLE_FEDERATION_MAX_ISSUER_SYNC_AGE_SEC:-0}"
+federation_min_peer_success_sources="${PROD_OPERATOR_LIFECYCLE_FEDERATION_MIN_PEER_SUCCESS_SOURCES:-0}"
+federation_min_issuer_success_sources="${PROD_OPERATOR_LIFECYCLE_FEDERATION_MIN_ISSUER_SUCCESS_SOURCES:-0}"
+federation_min_peer_source_operators="${PROD_OPERATOR_LIFECYCLE_FEDERATION_MIN_PEER_SOURCE_OPERATORS:-0}"
+federation_min_issuer_source_operators="${PROD_OPERATOR_LIFECYCLE_FEDERATION_MIN_ISSUER_SOURCE_OPERATORS:-0}"
+federation_status_fail_on_not_ready="${PROD_OPERATOR_LIFECYCLE_FEDERATION_STATUS_FAIL_ON_NOT_READY:-0}"
+federation_status_file=""
+onboard_invite="${PROD_OPERATOR_LIFECYCLE_ONBOARD_INVITE:-0}"
+onboard_invite_count="${PROD_OPERATOR_LIFECYCLE_ONBOARD_INVITE_COUNT:-1}"
+onboard_invite_tier="${PROD_OPERATOR_LIFECYCLE_ONBOARD_INVITE_TIER:-1}"
+onboard_invite_wait_sec="${PROD_OPERATOR_LIFECYCLE_ONBOARD_INVITE_WAIT_SEC:-10}"
+onboard_invite_fail_open="${PROD_OPERATOR_LIFECYCLE_ONBOARD_INVITE_FAIL_OPEN:-1}"
+onboard_invite_file=""
+rollback_on_fail="${PROD_OPERATOR_LIFECYCLE_ROLLBACK_ON_FAIL:-1}"
+rollback_verify_absent="${PROD_OPERATOR_LIFECYCLE_ROLLBACK_VERIFY_ABSENT:-1}"
+rollback_verify_timeout_sec="${PROD_OPERATOR_LIFECYCLE_ROLLBACK_VERIFY_TIMEOUT_SEC:-90}"
+runtime_doctor_on_fail="${PROD_OPERATOR_LIFECYCLE_RUNTIME_DOCTOR_ON_FAIL:-1}"
+runtime_doctor_base_port="${PROD_OPERATOR_LIFECYCLE_RUNTIME_DOCTOR_BASE_PORT:-19280}"
+runtime_doctor_client_iface="${PROD_OPERATOR_LIFECYCLE_RUNTIME_DOCTOR_CLIENT_IFACE:-wgcstack0}"
+runtime_doctor_exit_iface="${PROD_OPERATOR_LIFECYCLE_RUNTIME_DOCTOR_EXIT_IFACE:-wgestack0}"
+runtime_doctor_vpn_iface="${PROD_OPERATOR_LIFECYCLE_RUNTIME_DOCTOR_VPN_IFACE:-wgvpn0}"
+runtime_doctor_file=""
+incident_snapshot_on_fail="${PROD_OPERATOR_LIFECYCLE_INCIDENT_SNAPSHOT_ON_FAIL:-1}"
+incident_bundle_dir=""
+incident_timeout_sec="${PROD_OPERATOR_LIFECYCLE_INCIDENT_TIMEOUT_SEC:-20}"
+incident_include_docker_logs="${PROD_OPERATOR_LIFECYCLE_INCIDENT_INCLUDE_DOCKER_LOGS:-1}"
+incident_docker_log_lines="${PROD_OPERATOR_LIFECYCLE_INCIDENT_DOCKER_LOG_LINES:-120}"
+declare -a incident_attach_artifacts_cli=()
+report_md=""
 summary_json=""
 print_summary_json="${PROD_OPERATOR_LIFECYCLE_PRINT_SUMMARY_JSON:-0}"
 
@@ -377,6 +474,200 @@ while [[ $# -gt 0 ]]; do
       verify_relay_min_count="${2:-}"
       shift 2
       ;;
+    --federation-check)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        federation_check="${2:-}"
+        shift 2
+      else
+        federation_check="1"
+        shift
+      fi
+      ;;
+    --federation-ready-timeout-sec)
+      federation_ready_timeout_sec="${2:-}"
+      shift 2
+      ;;
+    --federation-poll-sec)
+      federation_poll_sec="${2:-}"
+      shift 2
+      ;;
+    --federation-timeout-sec)
+      federation_timeout_sec="${2:-}"
+      shift 2
+      ;;
+    --federation-require-configured-healthy)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        federation_require_configured_healthy="${2:-}"
+        shift 2
+      else
+        federation_require_configured_healthy="1"
+        shift
+      fi
+      ;;
+    --federation-max-cooling-retry-sec)
+      federation_max_cooling_retry_sec="${2:-}"
+      shift 2
+      ;;
+    --federation-max-peer-sync-age-sec)
+      federation_max_peer_sync_age_sec="${2:-}"
+      shift 2
+      ;;
+    --federation-max-issuer-sync-age-sec)
+      federation_max_issuer_sync_age_sec="${2:-}"
+      shift 2
+      ;;
+    --federation-min-peer-success-sources)
+      federation_min_peer_success_sources="${2:-}"
+      shift 2
+      ;;
+    --federation-min-issuer-success-sources)
+      federation_min_issuer_success_sources="${2:-}"
+      shift 2
+      ;;
+    --federation-min-peer-source-operators)
+      federation_min_peer_source_operators="${2:-}"
+      shift 2
+      ;;
+    --federation-min-issuer-source-operators)
+      federation_min_issuer_source_operators="${2:-}"
+      shift 2
+      ;;
+    --federation-status-fail-on-not-ready)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        federation_status_fail_on_not_ready="${2:-}"
+        shift 2
+      else
+        federation_status_fail_on_not_ready="1"
+        shift
+      fi
+      ;;
+    --federation-status-file)
+      federation_status_file="${2:-}"
+      shift 2
+      ;;
+    --onboard-invite)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        onboard_invite="${2:-}"
+        shift 2
+      else
+        onboard_invite="1"
+        shift
+      fi
+      ;;
+    --onboard-invite-count)
+      onboard_invite_count="${2:-}"
+      shift 2
+      ;;
+    --onboard-invite-tier)
+      onboard_invite_tier="${2:-}"
+      shift 2
+      ;;
+    --onboard-invite-wait-sec)
+      onboard_invite_wait_sec="${2:-}"
+      shift 2
+      ;;
+    --onboard-invite-fail-open)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        onboard_invite_fail_open="${2:-}"
+        shift 2
+      else
+        onboard_invite_fail_open="1"
+        shift
+      fi
+      ;;
+    --onboard-invite-file)
+      onboard_invite_file="${2:-}"
+      shift 2
+      ;;
+    --rollback-on-fail)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        rollback_on_fail="${2:-}"
+        shift 2
+      else
+        rollback_on_fail="1"
+        shift
+      fi
+      ;;
+    --rollback-verify-absent)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        rollback_verify_absent="${2:-}"
+        shift 2
+      else
+        rollback_verify_absent="1"
+        shift
+      fi
+      ;;
+    --rollback-verify-timeout-sec)
+      rollback_verify_timeout_sec="${2:-}"
+      shift 2
+      ;;
+    --runtime-doctor-on-fail)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        runtime_doctor_on_fail="${2:-}"
+        shift 2
+      else
+        runtime_doctor_on_fail="1"
+        shift
+      fi
+      ;;
+    --runtime-doctor-base-port)
+      runtime_doctor_base_port="${2:-}"
+      shift 2
+      ;;
+    --runtime-doctor-client-iface)
+      runtime_doctor_client_iface="${2:-}"
+      shift 2
+      ;;
+    --runtime-doctor-exit-iface)
+      runtime_doctor_exit_iface="${2:-}"
+      shift 2
+      ;;
+    --runtime-doctor-vpn-iface)
+      runtime_doctor_vpn_iface="${2:-}"
+      shift 2
+      ;;
+    --runtime-doctor-file)
+      runtime_doctor_file="${2:-}"
+      shift 2
+      ;;
+    --incident-snapshot-on-fail)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        incident_snapshot_on_fail="${2:-}"
+        shift 2
+      else
+        incident_snapshot_on_fail="1"
+        shift
+      fi
+      ;;
+    --incident-bundle-dir)
+      incident_bundle_dir="${2:-}"
+      shift 2
+      ;;
+    --incident-timeout-sec)
+      incident_timeout_sec="${2:-}"
+      shift 2
+      ;;
+    --incident-include-docker-logs)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        incident_include_docker_logs="${2:-}"
+        shift 2
+      else
+        incident_include_docker_logs="1"
+        shift
+      fi
+      ;;
+    --incident-docker-log-lines)
+      incident_docker_log_lines="${2:-}"
+      shift 2
+      ;;
+    --incident-attach-artifact)
+      incident_attach_artifacts_cli+=("${2:-}")
+      shift 2
+      ;;
+    --report-md)
+      report_md="${2:-}"
+      shift 2
+      ;;
     --summary-json)
       summary_json="${2:-}"
       shift 2
@@ -433,11 +724,73 @@ bool_or_die "--preflight-check" "$preflight_check"
 bool_or_die "--health-check" "$health_check"
 bool_or_die "--verify-relays" "$verify_relays"
 bool_or_die "--verify-absent" "$verify_absent"
+bool_or_die "--federation-check" "$federation_check"
+bool_or_die "--federation-require-configured-healthy" "$federation_require_configured_healthy"
+bool_or_die "--federation-status-fail-on-not-ready" "$federation_status_fail_on_not_ready"
+bool_or_die "--onboard-invite" "$onboard_invite"
+bool_or_die "--onboard-invite-fail-open" "$onboard_invite_fail_open"
+bool_or_die "--rollback-on-fail" "$rollback_on_fail"
+bool_or_die "--rollback-verify-absent" "$rollback_verify_absent"
+bool_or_die "--runtime-doctor-on-fail" "$runtime_doctor_on_fail"
+bool_or_die "--incident-snapshot-on-fail" "$incident_snapshot_on_fail"
+bool_or_die "--incident-include-docker-logs" "$incident_include_docker_logs"
 bool_or_die "--print-summary-json" "$print_summary_json"
 int_or_die "--preflight-timeout-sec" "$preflight_timeout_sec"
 int_or_die "--health-timeout-sec" "$health_timeout_sec"
 int_or_die "--verify-relay-timeout-sec" "$verify_relay_timeout_sec"
 int_or_die "--verify-relay-min-count" "$verify_relay_min_count"
+int_or_die "--federation-ready-timeout-sec" "$federation_ready_timeout_sec"
+int_or_die "--federation-poll-sec" "$federation_poll_sec"
+int_or_die "--federation-timeout-sec" "$federation_timeout_sec"
+int_or_die "--federation-max-cooling-retry-sec" "$federation_max_cooling_retry_sec"
+int_or_die "--federation-max-peer-sync-age-sec" "$federation_max_peer_sync_age_sec"
+int_or_die "--federation-max-issuer-sync-age-sec" "$federation_max_issuer_sync_age_sec"
+int_or_die "--federation-min-peer-success-sources" "$federation_min_peer_success_sources"
+int_or_die "--federation-min-issuer-success-sources" "$federation_min_issuer_success_sources"
+int_or_die "--federation-min-peer-source-operators" "$federation_min_peer_source_operators"
+int_or_die "--federation-min-issuer-source-operators" "$federation_min_issuer_source_operators"
+int_or_die "--onboard-invite-count" "$onboard_invite_count"
+int_or_die "--onboard-invite-wait-sec" "$onboard_invite_wait_sec"
+int_or_die "--rollback-verify-timeout-sec" "$rollback_verify_timeout_sec"
+int_or_die "--runtime-doctor-base-port" "$runtime_doctor_base_port"
+int_or_die "--incident-timeout-sec" "$incident_timeout_sec"
+int_or_die "--incident-docker-log-lines" "$incident_docker_log_lines"
+if ((federation_ready_timeout_sec < 1)); then
+  echo "--federation-ready-timeout-sec must be >= 1"
+  exit 2
+fi
+if ((federation_poll_sec < 1)); then
+  echo "--federation-poll-sec must be >= 1"
+  exit 2
+fi
+if ((federation_timeout_sec < 1)); then
+  echo "--federation-timeout-sec must be >= 1"
+  exit 2
+fi
+if ((onboard_invite_count < 1)); then
+  echo "--onboard-invite-count must be >= 1"
+  exit 2
+fi
+if [[ "$onboard_invite_tier" != "1" && "$onboard_invite_tier" != "2" && "$onboard_invite_tier" != "3" ]]; then
+  echo "--onboard-invite-tier must be 1, 2, or 3"
+  exit 2
+fi
+if ((rollback_verify_timeout_sec < 1)); then
+  echo "--rollback-verify-timeout-sec must be >= 1"
+  exit 2
+fi
+if ((runtime_doctor_base_port < 1)); then
+  echo "--runtime-doctor-base-port must be >= 1"
+  exit 2
+fi
+if ((incident_timeout_sec < 1)); then
+  echo "--incident-timeout-sec must be >= 1"
+  exit 2
+fi
+if ((incident_docker_log_lines < 1)); then
+  echo "--incident-docker-log-lines must be >= 1"
+  exit 2
+fi
 if [[ -n "$min_peer_operators" ]]; then
   int_or_die "--min-peer-operators" "$min_peer_operators"
 fi
@@ -454,6 +807,31 @@ if [[ -z "$summary_json" ]]; then
 fi
 summary_json="$(abs_path "$summary_json")"
 mkdir -p "$(dirname "$summary_json")"
+if [[ -z "$report_md" ]]; then
+  report_md="${summary_json%.json}.report.md"
+fi
+report_md="$(abs_path "$report_md")"
+mkdir -p "$(dirname "$report_md")"
+if [[ -z "$federation_status_file" ]]; then
+  federation_status_file="${summary_json%.json}.federation_status.log"
+fi
+federation_status_file="$(abs_path "$federation_status_file")"
+mkdir -p "$(dirname "$federation_status_file")"
+if [[ -z "$onboard_invite_file" ]]; then
+  onboard_invite_file="${summary_json%.json}.invite_keys.txt"
+fi
+onboard_invite_file="$(abs_path "$onboard_invite_file")"
+mkdir -p "$(dirname "$onboard_invite_file")"
+if [[ -z "$incident_bundle_dir" ]]; then
+  incident_bundle_dir="${summary_json%.json}.incident_bundle"
+fi
+incident_bundle_dir="$(abs_path "$incident_bundle_dir")"
+mkdir -p "$(dirname "$incident_bundle_dir")"
+if [[ -z "$runtime_doctor_file" ]]; then
+  runtime_doctor_file="${summary_json%.json}.runtime_doctor.log"
+fi
+runtime_doctor_file="$(abs_path "$runtime_doctor_file")"
+mkdir -p "$(dirname "$runtime_doctor_file")"
 
 resolved_directory_base="$(normalized_directory_base "$directory_url")"
 if [[ -z "$resolved_directory_base" ]]; then
@@ -474,6 +852,72 @@ failure_step=""
 failure_rc=0
 completed_steps_json='[]'
 relay_observed_count=-1
+server_started=0
+federation_wait_state="disabled"
+if [[ "$federation_check" == "1" ]]; then
+  federation_wait_state="not_run"
+fi
+effective_peer_directories=""
+effective_peer_count=0
+federation_status_capture_rc=0
+onboard_invite_state="disabled"
+if [[ "$onboard_invite" == "1" ]]; then
+  onboard_invite_state="not_run"
+  if [[ "$action" != "onboard" ]]; then
+    onboard_invite_state="skipped_offboard_action"
+  fi
+fi
+onboard_invite_generated_count=0
+onboard_invite_rc=0
+rollback_state="not_applicable"
+rollback_performed=0
+rollback_trigger_step=""
+rollback_trigger_rc=0
+rollback_server_down_rc=0
+rollback_absent_verify_state="not_applicable"
+rollback_absent_observed_count=-1
+rollback_enabled_effective=0
+rollback_verify_absent_effective=0
+runtime_doctor_state="disabled"
+runtime_doctor_rc=0
+runtime_doctor_file_effective=""
+runtime_doctor_on_fail_effective=0
+incident_snapshot_state="disabled"
+incident_snapshot_rc=0
+incident_attach_count=0
+incident_attach_list=""
+incident_bundle_effective=""
+incident_summary_json_effective=""
+incident_report_md_effective=""
+incident_bundle_tar_effective=""
+incident_bundle_tar_sha_effective=""
+incident_attachment_manifest_effective=""
+incident_attachment_skipped_effective=""
+incident_attachment_manifest_count=0
+incident_attachment_skipped_count=0
+incident_artifact_state="not_applicable"
+if [[ "$runtime_doctor_on_fail" == "1" ]]; then
+  runtime_doctor_state="not_run"
+  runtime_doctor_on_fail_effective=1
+fi
+if [[ "$incident_snapshot_on_fail" == "1" ]]; then
+  incident_snapshot_state="not_run"
+fi
+if [[ "$action" == "onboard" ]]; then
+  rollback_enabled_effective="$rollback_on_fail"
+  if [[ "$rollback_on_fail" == "1" ]]; then
+    rollback_state="not_triggered"
+    if [[ "$rollback_verify_absent" == "1" ]]; then
+      rollback_absent_verify_state="not_run"
+      rollback_verify_absent_effective=1
+    else
+      rollback_absent_verify_state="disabled"
+    fi
+  else
+    rollback_state="disabled"
+    rollback_absent_verify_state="disabled"
+  fi
+fi
 
 step_ok() {
   local name="$1"
@@ -595,6 +1039,7 @@ if [[ "$action" == "onboard" ]]; then
       set_failure "server_up" "$rc"
     else
       step_ok "server_up"
+      server_started=1
       if [[ -z "$resolved_operator_id" ]]; then
         env_file="$(mode_env_file "$resolved_mode")"
         resolved_operator_id="$(identity_value "$env_file" "DIRECTORY_OPERATOR_ID")"
@@ -628,6 +1073,71 @@ if [[ "$action" == "onboard" ]]; then
     fi
   fi
 
+  if [[ "$status" == "ok" && "$federation_check" == "1" ]]; then
+    env_file="$(mode_env_file "$resolved_mode")"
+    effective_peer_directories="$(trim "$peer_directories")"
+    if [[ -z "$effective_peer_directories" ]]; then
+      effective_peer_directories="$(identity_value "$env_file" "DIRECTORY_PEERS")"
+    fi
+    if [[ -z "$effective_peer_directories" && -n "$bootstrap_directory" ]]; then
+      effective_peer_directories="$(trim "$bootstrap_directory")"
+    fi
+    effective_peer_count="$(csv_count "$effective_peer_directories")"
+    if [[ "$effective_peer_count" =~ ^[0-9]+$ ]] && ((effective_peer_count > 0)); then
+      set +e
+      "$EASY_NODE_SH" server-federation-wait \
+        --directory-url "$resolved_directory_base" \
+        --ready-timeout-sec "$federation_ready_timeout_sec" \
+        --poll-sec "$federation_poll_sec" \
+        --require-configured-healthy "$federation_require_configured_healthy" \
+        --max-cooling-retry-sec "$federation_max_cooling_retry_sec" \
+        --max-peer-sync-age-sec "$federation_max_peer_sync_age_sec" \
+        --max-issuer-sync-age-sec "$federation_max_issuer_sync_age_sec" \
+        --min-peer-success-sources "$federation_min_peer_success_sources" \
+        --min-issuer-success-sources "$federation_min_issuer_success_sources" \
+        --min-peer-source-operators "$federation_min_peer_source_operators" \
+        --min-issuer-source-operators "$federation_min_issuer_source_operators" \
+        --timeout-sec "$federation_timeout_sec"
+      rc=$?
+      set -e
+      if [[ "$rc" -ne 0 ]]; then
+        federation_wait_state="failed"
+        set_failure "federation_wait" "$rc"
+      else
+        federation_wait_state="ready"
+        step_ok "federation_wait"
+      fi
+    else
+      federation_wait_state="skipped_no_peers"
+      step_ok "federation_wait_skipped_no_peers"
+    fi
+  fi
+
+  if [[ "$federation_check" == "1" && "$server_started" == "1" ]]; then
+    set +e
+    "$EASY_NODE_SH" server-federation-status \
+      --directory-url "$resolved_directory_base" \
+      --timeout-sec "$federation_timeout_sec" \
+      --require-configured-healthy "$federation_require_configured_healthy" \
+      --max-cooling-retry-sec "$federation_max_cooling_retry_sec" \
+      --max-peer-sync-age-sec "$federation_max_peer_sync_age_sec" \
+      --max-issuer-sync-age-sec "$federation_max_issuer_sync_age_sec" \
+      --min-peer-success-sources "$federation_min_peer_success_sources" \
+      --min-issuer-success-sources "$federation_min_issuer_success_sources" \
+      --min-peer-source-operators "$federation_min_peer_source_operators" \
+      --min-issuer-source-operators "$federation_min_issuer_source_operators" \
+      --fail-on-not-ready "$federation_status_fail_on_not_ready" \
+      --show-json 1 >"$federation_status_file" 2>&1
+    rc=$?
+    set -e
+    federation_status_capture_rc="$rc"
+    if [[ "$rc" -eq 0 ]]; then
+      step_ok "federation_status"
+    elif [[ "$status" == "ok" ]]; then
+      set_failure "federation_status" "$rc"
+    fi
+  fi
+
   if [[ "$status" == "ok" && "$verify_relays" == "1" ]]; then
     need_cmd "$CURL_BIN"
     if [[ -z "$resolved_operator_id" ]]; then
@@ -655,6 +1165,54 @@ if [[ "$action" == "onboard" ]]; then
       else
         step_ok "relay_verify"
       fi
+    fi
+  fi
+
+  if [[ "$status" == "ok" && "$onboard_invite" == "1" ]]; then
+    if [[ "$resolved_mode" != "authority" ]]; then
+      onboard_invite_state="skipped_non_authority"
+      step_ok "onboard_invite_skipped_non_authority"
+    elif [[ "$server_started" != "1" ]]; then
+      onboard_invite_state="skipped_server_not_started"
+      step_ok "onboard_invite_skipped_server_not_started"
+    else
+      invite_tmp_out="$(mktemp)"
+      set +e
+      "$EASY_NODE_SH" invite-generate \
+        --count "$onboard_invite_count" \
+        --tier "$onboard_invite_tier" \
+        --wait-sec "$onboard_invite_wait_sec" >"$invite_tmp_out" 2>&1
+      rc=$?
+      set -e
+      onboard_invite_rc="$rc"
+      if [[ "$rc" -eq 0 ]]; then
+        awk '/^[[:alnum:]][[:alnum:]_-]*$/ {print $0}' "$invite_tmp_out" >"$onboard_invite_file"
+        onboard_invite_generated_count="$(awk 'NF>0 { count++ } END { print count+0 }' "$onboard_invite_file")"
+        if ((onboard_invite_generated_count > 0)); then
+          onboard_invite_state="generated"
+          step_ok "onboard_invite"
+        else
+          onboard_invite_state="failed"
+          onboard_invite_rc=9
+          cp "$invite_tmp_out" "$onboard_invite_file"
+          if [[ "$onboard_invite_fail_open" == "1" ]]; then
+            step_ok "onboard_invite_failed_open"
+            echo "onboard invite warning: invite output did not include usable keys; continuing (fail-open). output=$onboard_invite_file"
+          else
+            set_failure "onboard_invite" "$onboard_invite_rc"
+          fi
+        fi
+      else
+        onboard_invite_state="failed"
+        cp "$invite_tmp_out" "$onboard_invite_file"
+        if [[ "$onboard_invite_fail_open" == "1" ]]; then
+          step_ok "onboard_invite_failed_open"
+          echo "onboard invite warning: invite generation failed rc=$rc; continuing (fail-open). output=$onboard_invite_file"
+        else
+          set_failure "onboard_invite" "$rc"
+        fi
+      fi
+      rm -f "$invite_tmp_out"
     fi
   fi
 else
@@ -700,6 +1258,208 @@ else
   fi
 fi
 
+if [[ "$action" == "onboard" && "$status" == "fail" && "$rollback_on_fail" == "1" ]]; then
+  rollback_trigger_step="$failure_step"
+  rollback_trigger_rc="$failure_rc"
+  if [[ "$server_started" != "1" ]]; then
+    rollback_state="skipped_server_not_started"
+  else
+    rollback_performed=1
+    set +e
+    "$EASY_NODE_SH" server-down
+    rc=$?
+    set -e
+    rollback_server_down_rc="$rc"
+    if [[ "$rc" -ne 0 ]]; then
+      rollback_state="server_down_failed"
+      echo "rollback warning: server-down failed rc=$rc"
+    else
+      step_ok "rollback_server_down"
+      if [[ "$rollback_verify_absent" == "1" ]]; then
+        if [[ -z "$resolved_operator_id" ]]; then
+          rollback_absent_verify_state="skipped_operator_id_missing"
+          rollback_state="completed"
+          echo "rollback relay-absence verify skipped: operator id unavailable"
+        else
+          need_cmd "$CURL_BIN"
+          absent_ok=0
+          for ((i = 1; i <= rollback_verify_timeout_sec; i++)); do
+            set +e
+            observed="$(operator_relay_count "$resolved_directory_base" "$resolved_operator_id" 2>/dev/null)"
+            rc=$?
+            set -e
+            if [[ "$rc" -eq 0 && "$observed" =~ ^[0-9]+$ ]]; then
+              rollback_absent_observed_count="$observed"
+              if (( observed == 0 )); then
+                absent_ok=1
+                break
+              fi
+            fi
+            sleep 1
+          done
+          if [[ "$absent_ok" -eq 1 ]]; then
+            rollback_absent_verify_state="ok"
+            rollback_state="completed"
+            step_ok "rollback_relay_absent_verify"
+          else
+            rollback_absent_verify_state="failed"
+            rollback_state="verify_absent_failed"
+            echo "rollback relay-absence verify failed: operator=$resolved_operator_id observed_count=$rollback_absent_observed_count expected=0 directory=$resolved_directory_base"
+          fi
+        fi
+      else
+        rollback_state="completed"
+      fi
+    fi
+  fi
+fi
+
+if [[ "$runtime_doctor_on_fail" == "1" ]]; then
+  if [[ "$status" == "fail" ]]; then
+    runtime_doctor_file_effective="$runtime_doctor_file"
+    runtime_doctor_cmd=(
+      "$EASY_NODE_SH" "runtime-doctor"
+      "--base-port" "$runtime_doctor_base_port"
+      "--client-iface" "$runtime_doctor_client_iface"
+      "--exit-iface" "$runtime_doctor_exit_iface"
+      "--vpn-iface" "$runtime_doctor_vpn_iface"
+      "--show-json" "1"
+    )
+    set +e
+    "${runtime_doctor_cmd[@]}" >"$runtime_doctor_file" 2>&1
+    rc=$?
+    set -e
+    runtime_doctor_rc="$rc"
+    if [[ -f "$runtime_doctor_file" ]]; then
+      runtime_doctor_state="captured"
+      step_ok "runtime_doctor"
+    else
+      runtime_doctor_state="failed"
+      echo "runtime doctor warning: output capture failed rc=$rc"
+    fi
+  else
+    runtime_doctor_state="skipped_status_ok"
+  fi
+fi
+
+if [[ "$incident_snapshot_on_fail" == "1" ]]; then
+  if [[ "$status" == "fail" ]]; then
+    incident_snapshot_state="attempted"
+    incident_bundle_effective="$incident_bundle_dir"
+    incident_host="${public_host:-127.0.0.1}"
+    incident_issuer_url=""
+    if [[ "$resolved_mode" == "authority" ]]; then
+      incident_issuer_url="http://${incident_host}:8082"
+    elif [[ -n "$authority_issuer" ]]; then
+      incident_issuer_url="$(trim "$authority_issuer")"
+    fi
+    incident_entry_url="http://${incident_host}:8083"
+    incident_exit_url="http://${incident_host}:8084"
+
+    incident_cmd=(
+      "$EASY_NODE_SH" "incident-snapshot"
+      "--mode" "$resolved_mode"
+      "--bundle-dir" "$incident_bundle_dir"
+      "--timeout-sec" "$incident_timeout_sec"
+      "--include-docker-logs" "$incident_include_docker_logs"
+      "--docker-log-lines" "$incident_docker_log_lines"
+      "--directory-url" "$resolved_directory_base"
+      "--entry-url" "$incident_entry_url"
+      "--exit-url" "$incident_exit_url"
+    )
+    if [[ -n "$incident_issuer_url" ]]; then
+      incident_cmd+=("--issuer-url" "$incident_issuer_url")
+    fi
+
+    declare -a incident_attach_effective=()
+    if [[ -f "$federation_status_file" ]]; then
+      incident_attach_effective+=("$federation_status_file")
+    fi
+    if [[ -f "$onboard_invite_file" ]]; then
+      incident_attach_effective+=("$onboard_invite_file")
+    fi
+    if [[ -f "$runtime_doctor_file" ]]; then
+      incident_attach_effective+=("$runtime_doctor_file")
+    fi
+    if ((${#incident_attach_artifacts_cli[@]} > 0)); then
+      for artifact in "${incident_attach_artifacts_cli[@]}"; do
+        artifact_path="$(abs_path "$artifact")"
+        if [[ -z "$artifact_path" ]]; then
+          continue
+        fi
+        if [[ -e "$artifact_path" ]]; then
+          incident_attach_effective+=("$artifact_path")
+        else
+          echo "incident snapshot warning: attach artifact missing: $artifact_path"
+        fi
+      done
+    fi
+    incident_attach_count="${#incident_attach_effective[@]}"
+    if ((incident_attach_count > 0)); then
+      incident_attach_list="$(printf '%s\n' "${incident_attach_effective[@]}" | paste -sd ',' -)"
+      for artifact in "${incident_attach_effective[@]}"; do
+        incident_cmd+=("--attach-artifact" "$artifact")
+      done
+    fi
+
+    set +e
+    "${incident_cmd[@]}"
+    rc=$?
+    set -e
+    incident_snapshot_rc="$rc"
+    if [[ "$rc" -eq 0 ]]; then
+      incident_snapshot_state="captured"
+      step_ok "incident_snapshot"
+    else
+      incident_snapshot_state="failed"
+      echo "incident snapshot warning: capture failed rc=$rc"
+    fi
+
+    incident_summary_candidate="$incident_bundle_dir/incident_summary.json"
+    incident_report_candidate="$incident_bundle_dir/incident_report.md"
+    incident_bundle_tar_candidate="${incident_bundle_dir}.tar.gz"
+    incident_bundle_tar_sha_candidate="${incident_bundle_tar_candidate}.sha256"
+    incident_manifest_candidate="$incident_bundle_dir/attachments/manifest.tsv"
+    incident_skipped_candidate="$incident_bundle_dir/attachments/skipped.tsv"
+
+    if [[ -f "$incident_summary_candidate" ]]; then
+      incident_summary_json_effective="$incident_summary_candidate"
+    fi
+    if [[ -f "$incident_report_candidate" ]]; then
+      incident_report_md_effective="$incident_report_candidate"
+    fi
+    if [[ -f "$incident_bundle_tar_candidate" ]]; then
+      incident_bundle_tar_effective="$incident_bundle_tar_candidate"
+    fi
+    if [[ -f "$incident_bundle_tar_sha_candidate" ]]; then
+      incident_bundle_tar_sha_effective="$incident_bundle_tar_sha_candidate"
+    fi
+    if [[ -f "$incident_manifest_candidate" ]]; then
+      incident_attachment_manifest_effective="$incident_manifest_candidate"
+      incident_attachment_manifest_count="$(awk 'NF>0 {c++} END {print c+0}' "$incident_manifest_candidate")"
+    fi
+    if [[ -f "$incident_skipped_candidate" ]]; then
+      incident_attachment_skipped_effective="$incident_skipped_candidate"
+      incident_attachment_skipped_count="$(awk 'NF>0 {c++} END {print c+0}' "$incident_skipped_candidate")"
+    fi
+
+    if [[ "$incident_snapshot_state" == "captured" ]]; then
+      if [[ -n "$incident_summary_json_effective" && -n "$incident_report_md_effective" && -n "$incident_bundle_tar_effective" && -n "$incident_bundle_tar_sha_effective" ]]; then
+        incident_artifact_state="complete"
+      elif [[ -n "$incident_summary_json_effective" || -n "$incident_report_md_effective" || -n "$incident_bundle_tar_effective" || -n "$incident_bundle_tar_sha_effective" ]]; then
+        incident_artifact_state="partial"
+      else
+        incident_artifact_state="missing"
+      fi
+    else
+      incident_artifact_state="unknown"
+    fi
+  else
+    incident_snapshot_state="skipped_status_ok"
+    incident_artifact_state="skipped_status_ok"
+  fi
+fi
+
 finished_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 finished_epoch="$(date -u +%s)"
 duration_sec=$((finished_epoch - started_epoch))
@@ -723,6 +1483,70 @@ jq -nc \
   --argjson health_check "$(json_bool "$health_check")" \
   --argjson verify_relays "$(json_bool "$verify_relays")" \
   --argjson verify_absent "$(json_bool "$verify_absent")" \
+  --argjson federation_check "$(json_bool "$federation_check")" \
+  --argjson federation_ready_timeout_sec "$federation_ready_timeout_sec" \
+  --argjson federation_poll_sec "$federation_poll_sec" \
+  --argjson federation_timeout_sec "$federation_timeout_sec" \
+  --argjson federation_require_configured_healthy "$(json_bool "$federation_require_configured_healthy")" \
+  --argjson federation_max_cooling_retry_sec "$federation_max_cooling_retry_sec" \
+  --argjson federation_max_peer_sync_age_sec "$federation_max_peer_sync_age_sec" \
+  --argjson federation_max_issuer_sync_age_sec "$federation_max_issuer_sync_age_sec" \
+  --argjson federation_min_peer_success_sources "$federation_min_peer_success_sources" \
+  --argjson federation_min_issuer_success_sources "$federation_min_issuer_success_sources" \
+  --argjson federation_min_peer_source_operators "$federation_min_peer_source_operators" \
+  --argjson federation_min_issuer_source_operators "$federation_min_issuer_source_operators" \
+  --argjson federation_status_fail_on_not_ready "$(json_bool "$federation_status_fail_on_not_ready")" \
+  --arg federation_wait_state "$federation_wait_state" \
+  --arg federation_peer_directories "$effective_peer_directories" \
+  --argjson federation_peer_count "$effective_peer_count" \
+  --arg federation_status_file "$federation_status_file" \
+  --argjson federation_status_capture_rc "$federation_status_capture_rc" \
+  --argjson onboard_invite "$(json_bool "$onboard_invite")" \
+  --argjson onboard_invite_count "$onboard_invite_count" \
+  --argjson onboard_invite_tier "$onboard_invite_tier" \
+  --argjson onboard_invite_wait_sec "$onboard_invite_wait_sec" \
+  --argjson onboard_invite_fail_open "$(json_bool "$onboard_invite_fail_open")" \
+  --arg onboard_invite_state "$onboard_invite_state" \
+  --arg onboard_invite_file "$onboard_invite_file" \
+  --argjson onboard_invite_generated_count "$onboard_invite_generated_count" \
+  --argjson onboard_invite_rc "$onboard_invite_rc" \
+  --argjson rollback_on_fail "$(json_bool "$rollback_enabled_effective")" \
+  --argjson rollback_verify_absent "$(json_bool "$rollback_verify_absent_effective")" \
+  --argjson rollback_verify_timeout_sec "$rollback_verify_timeout_sec" \
+  --arg rollback_state "$rollback_state" \
+  --argjson rollback_performed "$(json_bool "$rollback_performed")" \
+  --arg rollback_trigger_step "$rollback_trigger_step" \
+  --argjson rollback_trigger_rc "$rollback_trigger_rc" \
+  --argjson rollback_server_down_rc "$rollback_server_down_rc" \
+  --arg rollback_absent_verify_state "$rollback_absent_verify_state" \
+  --argjson rollback_absent_observed_count "$rollback_absent_observed_count" \
+  --argjson runtime_doctor_on_fail "$(json_bool "$runtime_doctor_on_fail_effective")" \
+  --arg runtime_doctor_state "$runtime_doctor_state" \
+  --argjson runtime_doctor_rc "$runtime_doctor_rc" \
+  --arg runtime_doctor_file "$runtime_doctor_file_effective" \
+  --argjson runtime_doctor_base_port "$runtime_doctor_base_port" \
+  --arg runtime_doctor_client_iface "$runtime_doctor_client_iface" \
+  --arg runtime_doctor_exit_iface "$runtime_doctor_exit_iface" \
+  --arg runtime_doctor_vpn_iface "$runtime_doctor_vpn_iface" \
+  --argjson incident_snapshot_on_fail "$(json_bool "$incident_snapshot_on_fail")" \
+  --arg incident_bundle_dir "$incident_bundle_dir" \
+  --arg incident_bundle_effective "$incident_bundle_effective" \
+  --argjson incident_timeout_sec "$incident_timeout_sec" \
+  --argjson incident_include_docker_logs "$(json_bool "$incident_include_docker_logs")" \
+  --argjson incident_docker_log_lines "$incident_docker_log_lines" \
+  --arg incident_snapshot_state "$incident_snapshot_state" \
+  --argjson incident_snapshot_rc "$incident_snapshot_rc" \
+  --argjson incident_attach_count "$incident_attach_count" \
+  --arg incident_attach_list "$incident_attach_list" \
+  --arg incident_summary_json "$incident_summary_json_effective" \
+  --arg incident_report_md "$incident_report_md_effective" \
+  --arg incident_bundle_tar "$incident_bundle_tar_effective" \
+  --arg incident_bundle_tar_sha "$incident_bundle_tar_sha_effective" \
+  --arg incident_attachment_manifest "$incident_attachment_manifest_effective" \
+  --arg incident_attachment_skipped "$incident_attachment_skipped_effective" \
+  --argjson incident_attachment_manifest_count "$incident_attachment_manifest_count" \
+  --argjson incident_attachment_skipped_count "$incident_attachment_skipped_count" \
+  --arg incident_artifact_state "$incident_artifact_state" \
   --argjson verify_relay_min_count "$verify_relay_min_count" \
   --argjson verify_relay_timeout_sec "$verify_relay_timeout_sec" \
   --argjson relay_observed_count "$relay_observed_count" \
@@ -732,6 +1556,7 @@ jq -nc \
   --arg allow_anon_cred "$allow_anon_cred" \
   --arg beta_profile "$beta_profile" \
   --arg prod_profile "$prod_profile" \
+  --arg report_md "$report_md" \
   --arg summary_json "$summary_json" \
   '{
     action:$action,
@@ -748,8 +1573,82 @@ jq -nc \
     checks:{
       preflight_enabled:$preflight_check,
       health_enabled:$health_check,
+      federation_enabled:$federation_check,
+      onboard_invite_enabled:$onboard_invite,
+      runtime_doctor_on_fail_enabled:$runtime_doctor_on_fail,
+      incident_snapshot_on_fail_enabled:$incident_snapshot_on_fail,
       relay_verify_enabled:$verify_relays,
       relay_absent_verify_enabled:$verify_absent
+    },
+    federation:{
+      wait_state:($federation_wait_state // ""),
+      ready_timeout_sec:$federation_ready_timeout_sec,
+      poll_sec:$federation_poll_sec,
+      request_timeout_sec:$federation_timeout_sec,
+      require_configured_healthy:$federation_require_configured_healthy,
+      max_cooling_retry_sec:$federation_max_cooling_retry_sec,
+      max_peer_sync_age_sec:$federation_max_peer_sync_age_sec,
+      max_issuer_sync_age_sec:$federation_max_issuer_sync_age_sec,
+      min_peer_success_sources:$federation_min_peer_success_sources,
+      min_issuer_success_sources:$federation_min_issuer_success_sources,
+      min_peer_source_operators:$federation_min_peer_source_operators,
+      min_issuer_source_operators:$federation_min_issuer_source_operators,
+      status_fail_on_not_ready:$federation_status_fail_on_not_ready,
+      peer_count:$federation_peer_count,
+      peer_directories_csv:($federation_peer_directories // ""),
+      status_file:$federation_status_file,
+      status_capture_rc:$federation_status_capture_rc
+    },
+    invite_bootstrap:{
+      state:($onboard_invite_state // ""),
+      requested_count:$onboard_invite_count,
+      requested_tier:$onboard_invite_tier,
+      wait_sec:$onboard_invite_wait_sec,
+      fail_open:$onboard_invite_fail_open,
+      generated_count:$onboard_invite_generated_count,
+      rc:$onboard_invite_rc,
+      file:$onboard_invite_file
+    },
+    rollback:{
+      enabled:$rollback_on_fail,
+      verify_absent_enabled:$rollback_verify_absent,
+      verify_absent_timeout_sec:$rollback_verify_timeout_sec,
+      state:($rollback_state // ""),
+      performed:$rollback_performed,
+      trigger_step:($rollback_trigger_step // ""),
+      trigger_rc:$rollback_trigger_rc,
+      server_down_rc:$rollback_server_down_rc,
+      absent_verify_state:($rollback_absent_verify_state // ""),
+      absent_observed_count:$rollback_absent_observed_count
+    },
+    runtime_doctor:{
+      state:($runtime_doctor_state // ""),
+      rc:$runtime_doctor_rc,
+      file:($runtime_doctor_file // ""),
+      base_port:$runtime_doctor_base_port,
+      client_iface:($runtime_doctor_client_iface // ""),
+      exit_iface:($runtime_doctor_exit_iface // ""),
+      vpn_iface:($runtime_doctor_vpn_iface // "")
+    },
+    incident_snapshot:{
+      state:($incident_snapshot_state // ""),
+      rc:$incident_snapshot_rc,
+      bundle_dir:($incident_bundle_effective // ""),
+      configured_bundle_dir:$incident_bundle_dir,
+      timeout_sec:$incident_timeout_sec,
+      include_docker_logs:$incident_include_docker_logs,
+      docker_log_lines:$incident_docker_log_lines,
+      attach_count:$incident_attach_count,
+      attach_artifacts_csv:($incident_attach_list // ""),
+      summary_json:($incident_summary_json // ""),
+      report_md:($incident_report_md // ""),
+      bundle_tar:($incident_bundle_tar // ""),
+      bundle_tar_sha256_file:($incident_bundle_tar_sha // ""),
+      attachment_manifest:($incident_attachment_manifest // ""),
+      attachment_skipped:($incident_attachment_skipped // ""),
+      attachment_manifest_count:$incident_attachment_manifest_count,
+      attachment_skipped_count:$incident_attachment_skipped_count,
+      artifact_state:($incident_artifact_state // "")
     },
     relay_policy:{
       verify_min_count:$verify_relay_min_count,
@@ -764,11 +1663,100 @@ jq -nc \
       beta_profile:($beta_profile // ""),
       prod_profile:($prod_profile // "")
     },
+    report_md:$report_md,
     summary_json:$summary_json
   }' >"$summary_json"
 
+completed_steps_md="$(jq -r '.[]?' <<<"$completed_steps_json" 2>/dev/null | sed 's/^/- /')"
+if [[ -z "$completed_steps_md" ]]; then
+  completed_steps_md="- (none)"
+fi
+failure_line="none"
+if [[ "$status" != "ok" ]]; then
+  failure_line="${failure_step:-unknown} (rc=${failure_rc})"
+fi
+cat >"$report_md" <<EOF_REPORT
+# Prod Operator Lifecycle Runbook Report
+
+- action: ${action}
+- mode: ${resolved_mode}
+- status: ${status}
+- started_at: ${started_at}
+- finished_at: ${finished_at}
+- duration_sec: ${duration_sec}
+- failure: ${failure_line}
+- summary_json: ${summary_json}
+
+## Completed Steps
+${completed_steps_md}
+
+## Federation
+- wait_state: ${federation_wait_state}
+- require_configured_healthy: ${federation_require_configured_healthy}
+- max_cooling_retry_sec: ${federation_max_cooling_retry_sec}
+- max_peer_sync_age_sec: ${federation_max_peer_sync_age_sec}
+- max_issuer_sync_age_sec: ${federation_max_issuer_sync_age_sec}
+- min_peer_success_sources: ${federation_min_peer_success_sources}
+- min_issuer_success_sources: ${federation_min_issuer_success_sources}
+- min_peer_source_operators: ${federation_min_peer_source_operators}
+- min_issuer_source_operators: ${federation_min_issuer_source_operators}
+- status_fail_on_not_ready: ${federation_status_fail_on_not_ready}
+- peer_count: ${effective_peer_count}
+- status_capture_rc: ${federation_status_capture_rc}
+- status_file: ${federation_status_file}
+
+## Invite Bootstrap
+- state: ${onboard_invite_state}
+- generated_count: ${onboard_invite_generated_count}
+- rc: ${onboard_invite_rc}
+- file: ${onboard_invite_file}
+
+## Rollback
+- state: ${rollback_state}
+- performed: ${rollback_performed}
+- trigger_step: ${rollback_trigger_step}
+- trigger_rc: ${rollback_trigger_rc}
+- server_down_rc: ${rollback_server_down_rc}
+- absent_verify_state: ${rollback_absent_verify_state}
+- absent_observed_count: ${rollback_absent_observed_count}
+
+## Runtime Doctor
+- state: ${runtime_doctor_state}
+- rc: ${runtime_doctor_rc}
+- file: ${runtime_doctor_file_effective}
+
+## Incident Snapshot
+- state: ${incident_snapshot_state}
+- rc: ${incident_snapshot_rc}
+- bundle_dir: ${incident_bundle_effective}
+- artifact_state: ${incident_artifact_state}
+- attach_count: ${incident_attach_count}
+- attach_artifacts_csv: ${incident_attach_list}
+- summary_json: ${incident_summary_json_effective}
+- report_md: ${incident_report_md_effective}
+- bundle_tar: ${incident_bundle_tar_effective}
+- bundle_tar_sha256_file: ${incident_bundle_tar_sha_effective}
+- attachment_manifest: ${incident_attachment_manifest_effective}
+- attachment_skipped: ${incident_attachment_skipped_effective}
+EOF_REPORT
+
 echo "[prod-operator-lifecycle-runbook] action=$action mode=$resolved_mode status=$status"
 echo "[prod-operator-lifecycle-runbook] summary_json=$summary_json"
+echo "[prod-operator-lifecycle-runbook] report_md=$report_md"
+if [[ "$runtime_doctor_state" == "captured" && -n "$runtime_doctor_file_effective" ]]; then
+  echo "[prod-operator-lifecycle-runbook] runtime_doctor_file=$runtime_doctor_file_effective"
+fi
+if [[ "$incident_snapshot_state" == "captured" ]]; then
+  if [[ -n "$incident_summary_json_effective" ]]; then
+    echo "[prod-operator-lifecycle-runbook] incident_summary_json=$incident_summary_json_effective"
+  fi
+  if [[ -n "$incident_report_md_effective" ]]; then
+    echo "[prod-operator-lifecycle-runbook] incident_report_md=$incident_report_md_effective"
+  fi
+  if [[ -n "$incident_bundle_tar_effective" ]]; then
+    echo "[prod-operator-lifecycle-runbook] incident_bundle_tar=$incident_bundle_tar_effective"
+  fi
+fi
 if [[ "$print_summary_json" == "1" ]]; then
   echo "[prod-operator-lifecycle-runbook] summary_json_payload:"
   cat "$summary_json"

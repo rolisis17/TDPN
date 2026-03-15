@@ -82,8 +82,10 @@ usage() {
 Usage:
   ./scripts/easy_node.sh check
   ./scripts/easy_node.sh server-preflight [--mode authority|provider] [--public-host HOST] [--operator-id ID] [--issuer-id ID] [--authority-directory URL] [--authority-issuer URL] [--peer-directories URLS] [--bootstrap-directory URL] [--peer-identity-strict 0|1|auto] [--min-peer-operators N] [--timeout-sec N] [--beta-profile [0|1]] [--prod-profile [0|1]]
-  ./scripts/easy_node.sh server-up [--mode authority|provider] [--public-host HOST] [--operator-id ID] [--issuer-id ID] [--issuer-admin-token TOKEN] [--directory-admin-token TOKEN] [--entry-puzzle-secret SECRET] [--authority-directory URL] [--authority-issuer URL] [--peer-directories URLS] [--bootstrap-directory URL] [--peer-identity-strict 0|1|auto] [--client-allowlist [0|1]] [--allow-anon-cred [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]] [--show-admin-token [0|1]]
+  ./scripts/easy_node.sh server-up [--mode authority|provider] [--public-host HOST] [--operator-id ID] [--issuer-id ID] [--issuer-admin-token TOKEN] [--directory-admin-token TOKEN] [--entry-puzzle-secret SECRET] [--authority-directory URL] [--authority-issuer URL] [--peer-directories URLS] [--bootstrap-directory URL] [--peer-identity-strict 0|1|auto] [--client-allowlist [0|1]] [--allow-anon-cred [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]] [--show-admin-token [0|1]] [--federation-wait [0|1]] [--federation-ready-timeout-sec N] [--federation-poll-sec N] [--federation-require-configured-healthy [0|1]] [--federation-max-cooling-retry-sec N] [--federation-max-peer-sync-age-sec N] [--federation-max-issuer-sync-age-sec N] [--federation-min-peer-success-sources N] [--federation-min-issuer-success-sources N] [--federation-min-peer-source-operators N] [--federation-min-issuer-source-operators N] [--auto-invite [0|1]] [--auto-invite-count N] [--auto-invite-tier 1|2|3] [--auto-invite-wait-sec N] [--auto-invite-fail-open [0|1]]
   ./scripts/easy_node.sh server-status
+  ./scripts/easy_node.sh server-federation-status [--directory-url URL] [--admin-token TOKEN] [--timeout-sec N] [--show-json [0|1]] [--require-configured-healthy [0|1]] [--max-cooling-retry-sec N] [--max-peer-sync-age-sec N] [--max-issuer-sync-age-sec N] [--min-peer-success-sources N] [--min-issuer-success-sources N] [--min-peer-source-operators N] [--min-issuer-source-operators N] [--fail-on-not-ready [0|1]] [--summary-json PATH] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh server-federation-wait [--directory-url URL] [--admin-token TOKEN] [--ready-timeout-sec N] [--poll-sec N] [--timeout-sec N] [--require-configured-healthy [0|1]] [--max-cooling-retry-sec N] [--max-peer-sync-age-sec N] [--max-issuer-sync-age-sec N] [--min-peer-success-sources N] [--min-issuer-success-sources N] [--min-peer-source-operators N] [--min-issuer-source-operators N] [--show-json [0|1]]
   ./scripts/easy_node.sh server-logs [--follow [0|1]] [--tail N]
   ./scripts/easy_node.sh server-session [server-up args...] [--cleanup-all [0|1]]
   ./scripts/easy_node.sh server-down
@@ -99,8 +101,8 @@ Usage:
   ./scripts/easy_node.sh wg-only-stack-selftest-record [wg-only-stack-selftest args...] [--record-result [0|1]] [--manual-validation-report [0|1]] [--manual-validation-report-summary-json PATH] [--manual-validation-report-md PATH] [--summary-json PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh pre-real-host-readiness [--base-port N] [--client-iface IFACE] [--exit-iface IFACE] [--vpn-iface IFACE] [--runtime-fix-prune-wg-only-dir [0|1]] [--strict-beta [0|1]] [--timeout-sec N] [--min-selection-lines N] [--force-iface-reset [0|1]] [--cleanup-ifaces [0|1]] [--keep-stack [0|1]] [--manual-validation-report-summary-json PATH] [--manual-validation-report-md PATH] [--summary-json PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh client-test [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--exit-country CC] [--exit-region REGION] [--timeout-sec N] [--path-profile fast|balanced|privacy] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--min-selection-lines N] [--min-entry-operators N] [--min-exit-operators N] [--require-cross-operator-pair [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]]
-  ./scripts/easy_node.sh client-vpn-preflight [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-urls URL[,URL...]] [--entry-url URL] [--exit-url URL] [--prod-profile [0|1]] [--interface IFACE] [--timeout-sec N] [--require-root [0|1]] [--operator-floor-check [0|1]] [--issuer-quorum-check [0|1]] [--issuer-min-operators N] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH]
-  ./scripts/easy_node.sh client-vpn-up [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-urls URL[,URL...]] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--path-profile fast|balanced|privacy] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--exit-country CC] [--exit-region REGION] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--beta-profile [0|1]] [--prod-profile [0|1]] [--operator-floor-check [0|1]] [--issuer-quorum-check [0|1]] [--issuer-min-operators N] [--interface IFACE] [--proxy-addr HOST:PORT] [--private-key-file PATH] [--allowed-ips CIDR] [--install-route [0|1]] [--startup-sync-timeout-sec N] [--ready-timeout-sec N] [--force-restart [0|1]] [--foreground [0|1]] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH] [--log-file PATH]
+  ./scripts/easy_node.sh client-vpn-preflight [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-urls URL[,URL...]] [--entry-url URL] [--exit-url URL] [--prod-profile [0|1]] [--interface IFACE] [--timeout-sec N] [--require-root [0|1]] [--operator-floor-check [0|1]] [--operator-min-operators N] [--operator-min-entry-operators N] [--operator-min-exit-operators N] [--issuer-quorum-check [0|1]] [--issuer-min-operators N] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH]
+  ./scripts/easy_node.sh client-vpn-up [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-urls URL[,URL...]] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--path-profile fast|balanced|privacy] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--exit-country CC] [--exit-region REGION] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--beta-profile [0|1]] [--prod-profile [0|1]] [--operator-floor-check [0|1]] [--operator-min-operators N] [--operator-min-entry-operators N] [--operator-min-exit-operators N] [--issuer-quorum-check [0|1]] [--issuer-min-operators N] [--interface IFACE] [--proxy-addr HOST:PORT] [--private-key-file PATH] [--allowed-ips CIDR] [--install-route [0|1]] [--startup-sync-timeout-sec N] [--ready-timeout-sec N] [--force-restart [0|1]] [--foreground [0|1]] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH] [--log-file PATH]
   ./scripts/easy_node.sh client-vpn-smoke [client-vpn-up args...] [--run-preflight [0|1]] [--status-check [0|1]] [--keep-up [0|1]] [--record-result [0|1]] [--pre-real-host-readiness [0|1]] [--pre-real-host-readiness-summary-json PATH] [--runtime-doctor [0|1]] [--runtime-fix [0|1]] [--runtime-fix-prune-wg-only-dir [0|1]] [--runtime-base-port N] [--runtime-client-iface IFACE] [--runtime-exit-iface IFACE] [--runtime-vpn-iface IFACE] [--incident-snapshot-on-fail [0|1]] [--incident-snapshot-timeout-sec N] [--incident-bundle-dir PATH] [--manual-validation-report [0|1]] [--manual-validation-report-summary-json PATH] [--manual-validation-report-md PATH] [--public-ip-url URL] [--country-url URL] [--curl-timeout-sec N] [--summary-json PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh client-vpn-status
   ./scripts/easy_node.sh client-vpn-logs [--follow [0|1]] [--tail N]
@@ -144,16 +146,16 @@ Usage:
   ./scripts/easy_node.sh prod-pilot-cohort-quick [--bootstrap-directory URL] [--subject ID] [--pre-real-host-readiness [0|1]] [--pre-real-host-readiness-summary-json PATH] [--rounds N] [--pause-sec N] [--continue-on-fail [0|1]] [--require-all-rounds-ok [0|1]] [--max-round-failures N] [--trend-min-go-rate-pct N] [--max-alert-severity OK|WARN|CRITICAL] [--bundle-outputs [0|1]] [--bundle-fail-close [0|1]] [--reports-dir PATH] [--summary-json PATH] [--run-report-json PATH] [--signoff-require-trend-artifact-policy-match [0|1]] [--signoff-require-trend-wg-validate-udp-source [0|1]] [--signoff-require-trend-wg-validate-strict-distinct [0|1]] [--signoff-require-trend-wg-soak-diversity-pass [0|1]] [--signoff-min-trend-wg-soak-selection-lines N] [--signoff-min-trend-wg-soak-entry-operators N] [--signoff-min-trend-wg-soak-exit-operators N] [--signoff-min-trend-wg-soak-cross-operator-pairs N] [--signoff-require-incident-snapshot-on-fail [0|1]] [--signoff-require-incident-snapshot-artifacts [0|1]] [--print-run-report [0|1]] [--show-json [0|1]] [-- <prod-pilot-runbook extra args...>]
   ./scripts/easy_node.sh prod-key-rotation-runbook [--mode auto|authority|provider] [--backup-dir PATH] [--summary-json PATH] [--preflight-check [0|1]] [--preflight-live [0|1]] [--preflight-timeout-sec N] [--rotate-server-secrets [0|1]] [--rotate-admin-signing [0|1]] [--key-history N] [--restart [0|1]] [--restart-issuer [0|1]] [--show-secrets [0|1]] [--rollback-on-fail [0|1]] [--restart-after-rollback [0|1]] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh prod-upgrade-runbook [--mode auto|authority|provider] [--backup-dir PATH] [--summary-json PATH] [--preflight-check [0|1]] [--preflight-live [0|1]] [--preflight-timeout-sec N] [--compose-pull [0|1]] [--compose-build [0|1]] [--restart [0|1]] [--rollback-on-fail [0|1]] [--restart-after-rollback [0|1]] [--print-summary-json [0|1]]
-  ./scripts/easy_node.sh prod-operator-lifecycle-runbook [--action onboard|offboard] [--mode auto|authority|provider] [--public-host HOST] [--operator-id ID] [--issuer-id ID] [--authority-directory URL] [--authority-issuer URL] [--peer-directories URLS] [--bootstrap-directory URL] [--peer-identity-strict 0|1|auto] [--min-peer-operators N] [--client-allowlist [0|1]] [--allow-anon-cred [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]] [--preflight-check [0|1]] [--preflight-timeout-sec N] [--health-check [0|1]] [--health-timeout-sec N] [--directory-url URL] [--verify-relays [0|1]] [--verify-absent [0|1]] [--verify-relay-timeout-sec N] [--verify-relay-min-count N] [--summary-json PATH] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh prod-operator-lifecycle-runbook [--action onboard|offboard] [--mode auto|authority|provider] [--public-host HOST] [--operator-id ID] [--issuer-id ID] [--authority-directory URL] [--authority-issuer URL] [--peer-directories URLS] [--bootstrap-directory URL] [--peer-identity-strict 0|1|auto] [--min-peer-operators N] [--client-allowlist [0|1]] [--allow-anon-cred [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]] [--preflight-check [0|1]] [--preflight-timeout-sec N] [--health-check [0|1]] [--health-timeout-sec N] [--directory-url URL] [--verify-relays [0|1]] [--verify-absent [0|1]] [--verify-relay-timeout-sec N] [--verify-relay-min-count N] [--federation-check [0|1]] [--federation-ready-timeout-sec N] [--federation-poll-sec N] [--federation-timeout-sec N] [--federation-require-configured-healthy [0|1]] [--federation-max-cooling-retry-sec N] [--federation-max-peer-sync-age-sec N] [--federation-max-issuer-sync-age-sec N] [--federation-min-peer-success-sources N] [--federation-min-issuer-success-sources N] [--federation-min-peer-source-operators N] [--federation-min-issuer-source-operators N] [--federation-status-fail-on-not-ready [0|1]] [--federation-status-file PATH] [--onboard-invite [0|1]] [--onboard-invite-count N] [--onboard-invite-tier 1|2|3] [--onboard-invite-wait-sec N] [--onboard-invite-fail-open [0|1]] [--onboard-invite-file PATH] [--rollback-on-fail [0|1]] [--rollback-verify-absent [0|1]] [--rollback-verify-timeout-sec N] [--runtime-doctor-on-fail [0|1]] [--runtime-doctor-base-port N] [--runtime-doctor-client-iface IFACE] [--runtime-doctor-exit-iface IFACE] [--runtime-doctor-vpn-iface IFACE] [--runtime-doctor-file PATH] [--incident-snapshot-on-fail [0|1]] [--incident-bundle-dir PATH] [--incident-timeout-sec N] [--incident-include-docker-logs [0|1]] [--incident-docker-log-lines N] [--incident-attach-artifact PATH]... [--report-md PATH] [--summary-json PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh incident-snapshot [--bundle-dir PATH] [--mode auto|authority|provider|client] [--env-file PATH] [--directory-url URL] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--compose-project NAME] [--include-docker-logs [0|1]] [--docker-log-lines N] [--timeout-sec N] [--attach-artifact PATH]...
   ./scripts/easy_node.sh incident-snapshot-summary [--bundle-dir PATH] [--bundle-tar PATH] [--summary-json PATH] [--report-md PATH] [--print-report [0|1]] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh pilot-runbook [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-a-url URL] [--issuer-b-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--rounds N] [--pause-sec N] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--client-min-selection-lines N] [--client-min-entry-operators N] [--client-min-exit-operators N] [--client-require-cross-operator-pair [0|1]] [--path-profile fast|balanced|privacy] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--require-issuer-quorum [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]] [--bundle-dir PATH]
-  ./scripts/easy_node.sh invite-generate [--issuer-url URL] [--admin-token TOKEN] [--admin-key-file FILE] [--admin-key-id ID] [--count N] [--prefix PREFIX] [--tier 1|2|3]
+  ./scripts/easy_node.sh invite-generate [--issuer-url URL] [--admin-token TOKEN] [--admin-key-file FILE] [--admin-key-id ID] [--count N] [--prefix PREFIX] [--tier 1|2|3] [--wait-sec N]
   ./scripts/easy_node.sh invite-check --key KEY [--issuer-url URL] [--admin-token TOKEN] [--admin-key-file FILE] [--admin-key-id ID]
   ./scripts/easy_node.sh invite-disable --key KEY [--issuer-url URL] [--admin-token TOKEN] [--admin-key-file FILE] [--admin-key-id ID]
   ./scripts/easy_node.sh admin-signing-status
   ./scripts/easy_node.sh admin-signing-rotate [--restart-issuer [0|1]] [--key-history N]
-  ./scripts/easy_node.sh prod-preflight [--days-min N] [--check-live [0|1]] [--timeout-sec N]
+  ./scripts/easy_node.sh prod-preflight [--days-min N] [--check-live [0|1]] [--timeout-sec N] [--live-require-configured-healthy [0|1]] [--live-max-cooling-retry-sec N] [--live-max-peer-sync-age-sec N] [--live-max-issuer-sync-age-sec N] [--live-min-peer-success-sources N] [--live-min-issuer-success-sources N] [--live-min-peer-source-operators N] [--live-min-issuer-source-operators N]
   ./scripts/easy_node.sh bootstrap-mtls [--out-dir DIR] [--public-host HOST] [--san HOST] [--days N] [--rotate-leaf [0|1]] [--rotate-ca [0|1]]
   ./scripts/easy_node.sh machine-a-test [--public-host HOST] [--report-file PATH]
   ./scripts/easy_node.sh machine-b-test --peer-directory-a URL [--public-host HOST] [--min-operators N] [--federation-timeout-sec N] [--report-file PATH]
@@ -164,11 +166,14 @@ Notes:
   - server-preflight validates peer/issuer reachability plus identity/quorum readiness before server-up.
   - server-up --mode authority runs directory + issuer + entry-exit.
   - server-up --mode provider runs directory + entry-exit only (no local issuer/admin token).
+  - server-up authority mode can auto-generate invite keys with --auto-invite (useful for quick onboarding).
   - server-up peer identity checks default to strict in beta/prod when peers are configured; use --peer-identity-strict 0 only for temporary bypass during diagnostics.
   - rotate-server-secrets rotates local server secret material in env files; use --restart 1 to apply immediately.
   - server-up --prod-profile enables fail-closed production strict mode (requires mTLS + signed issuer-admin auth).
   - admin-signing-status/admin-signing-rotate are authority-only issuer admin signer maintenance tools.
   - prod-preflight validates strict prod profile wiring (mTLS material, HTTPS URLs, and authority signer config).
+  - server-federation-status prints directory peer+sync health (including configured/discovered peer failure streaks), can evaluate strict policy thresholds in one shot, and can emit machine-readable summary JSON for automation/handoff.
+  - server-federation-wait blocks until directory peer-sync + issuer-sync quorum and peer-health readiness are met (or timeout), and can optionally fail-close on configured-peer degradation, excessive cooldown windows, or stale sync age.
   - client-test runs client-demo with --no-deps (no local server required on the client machine).
   - wg-only-local-test runs host real-WireGuard integration checks (Linux + root required).
   - wg-only-stack-up/status/down manages a reusable host real-WireGuard demo stack (Linux + root required).
@@ -177,7 +182,7 @@ Notes:
   - pre-real-host-readiness chains runtime-fix + wg-only-stack-selftest-record + manual-validation-report and answers whether machine-C VPN smoke is the next safe real-host step.
   - stop-all can also clean WG-only and client-vpn state/process/interfaces when requested (root needed for interface cleanup).
   - three-machine-validate runs health + federation checks then runs client-test with both directories.
-  - client-vpn-preflight checks host prerequisites, endpoint reachability, and optional operator/issuer quorum diversity before starting client-vpn-up.
+  - client-vpn-preflight checks host prerequisites, endpoint reachability, and optional operator/issuer quorum diversity before starting client-vpn-up (operator floors are tunable with --operator-min-* flags).
   - client-vpn-up runs a real local VPN client (host WireGuard interface) for external testers; use client-vpn-down to stop/cleanup.
   - server-session and client-vpn-session keep a live log terminal open and run cleanup automatically when that terminal exits.
   - client-vpn-smoke runs preflight + up + status + optional egress checks + down as one real-host smoke flow, can gate on pre-real-host-readiness and runtime-doctor/runtime-fix first, records machine-C validation automatically, and refreshes the shared manual-validation report by default.
@@ -216,7 +221,7 @@ Notes:
   - prod-pilot-cohort-quick runs one-command sustained pilot + fail-closed cohort signoff with minimal operator flags, exposes the one-time top-level pre-real-host gate used by the underlying cohort runbook, and emits a quick run report JSON artifact.
   - prod-key-rotation-runbook performs production key/secret rotation with backup, preflight checks, and rollback support.
   - prod-upgrade-runbook performs production compose upgrade flow (pull/build/restart) with backup, preflight checks, and rollback support.
-  - prod-operator-lifecycle-runbook performs repeatable operator onboarding/offboarding with optional preflight, health checks, and relay visibility checks.
+  - prod-operator-lifecycle-runbook performs repeatable operator onboarding/offboarding with optional preflight, health checks, federation readiness gating, relay visibility checks, optional authority invite bootstrap, optional onboard rollback-on-failure, optional failed-run runtime-doctor diagnostics, and optional failed-run incident snapshot capture.
   - incident-snapshot captures a shareable incident bundle (endpoint probes + docker/system snapshots), can attach extra evidence files with --attach-artifact, and auto-generates summary JSON + markdown report artifacts for operator debugging.
   - incident-snapshot-summary rebuilds the concise operator summary from an existing incident bundle directory.
   - bootstrap discovery mode lets you provide one directory URL and auto-discover other server hosts.
@@ -1325,6 +1330,14 @@ ensure_client_vpn_deps_or_die() {
   fi
 }
 
+sorted_csv() {
+  if (($# == 0)); then
+    echo ""
+    return
+  fi
+  printf '%s\n' "$@" | LC_ALL=C sort -u | paste -sd, -
+}
+
 client_vpn_operator_floor_summary() {
   local directory_urls="$1"
   local timeout_sec="${2:-8}"
@@ -1373,7 +1386,11 @@ client_vpn_operator_floor_summary() {
     fi
   done < <(split_csv_lines "$directory_urls")
 
-  echo "${#all_ops[@]}|${#entry_ops[@]}|${#exit_ops[@]}|$missing_operator|$fetch_fail|$parse_fail"
+  local all_ops_csv entry_ops_csv exit_ops_csv
+  all_ops_csv="$(sorted_csv "${!all_ops[@]}")"
+  entry_ops_csv="$(sorted_csv "${!entry_ops[@]}")"
+  exit_ops_csv="$(sorted_csv "${!exit_ops[@]}")"
+  echo "${#all_ops[@]}|${#entry_ops[@]}|${#exit_ops[@]}|$missing_operator|$fetch_fail|$parse_fail|$all_ops_csv|$entry_ops_csv|$exit_ops_csv"
 }
 
 client_vpn_issuer_quorum_summary() {
@@ -2278,6 +2295,22 @@ server_up() {
   local beta_profile="${EASY_NODE_BETA_PROFILE:-0}"
   local prod_profile="${EASY_NODE_PROD_PROFILE:-0}"
   local show_admin_token="${EASY_NODE_SHOW_ADMIN_TOKEN:-0}"
+  local federation_wait="${EASY_NODE_FEDERATION_WAIT:-0}"
+  local federation_ready_timeout_sec="${EASY_NODE_FEDERATION_READY_TIMEOUT_SEC:-90}"
+  local federation_poll_sec="${EASY_NODE_FEDERATION_POLL_SEC:-5}"
+  local federation_require_configured_healthy="${EASY_NODE_FEDERATION_REQUIRE_CONFIGURED_HEALTHY:-0}"
+  local federation_max_cooling_retry_sec="${EASY_NODE_FEDERATION_MAX_COOLING_RETRY_SEC:-0}"
+  local federation_max_peer_sync_age_sec="${EASY_NODE_FEDERATION_MAX_PEER_SYNC_AGE_SEC:-0}"
+  local federation_max_issuer_sync_age_sec="${EASY_NODE_FEDERATION_MAX_ISSUER_SYNC_AGE_SEC:-0}"
+  local federation_min_peer_success_sources="${EASY_NODE_FEDERATION_MIN_PEER_SUCCESS_SOURCES:-0}"
+  local federation_min_issuer_success_sources="${EASY_NODE_FEDERATION_MIN_ISSUER_SUCCESS_SOURCES:-0}"
+  local federation_min_peer_source_operators="${EASY_NODE_FEDERATION_MIN_PEER_SOURCE_OPERATORS:-0}"
+  local federation_min_issuer_source_operators="${EASY_NODE_FEDERATION_MIN_ISSUER_SOURCE_OPERATORS:-0}"
+  local auto_invite="${EASY_NODE_AUTO_INVITE:-0}"
+  local auto_invite_count="${EASY_NODE_AUTO_INVITE_COUNT:-1}"
+  local auto_invite_tier="${EASY_NODE_AUTO_INVITE_TIER:-1}"
+  local auto_invite_wait_sec="${EASY_NODE_AUTO_INVITE_WAIT_SEC:-10}"
+  local auto_invite_fail_open="${EASY_NODE_AUTO_INVITE_FAIL_OPEN:-1}"
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -2381,6 +2414,90 @@ server_up() {
           shift
         fi
         ;;
+      --federation-wait)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          federation_wait="${2:-}"
+          shift 2
+        else
+          federation_wait="1"
+          shift
+        fi
+        ;;
+      --federation-ready-timeout-sec)
+        federation_ready_timeout_sec="${2:-}"
+        shift 2
+        ;;
+      --federation-poll-sec)
+        federation_poll_sec="${2:-}"
+        shift 2
+        ;;
+      --federation-require-configured-healthy)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          federation_require_configured_healthy="${2:-}"
+          shift 2
+        else
+          federation_require_configured_healthy="1"
+          shift
+        fi
+        ;;
+      --federation-max-cooling-retry-sec)
+        federation_max_cooling_retry_sec="${2:-}"
+        shift 2
+        ;;
+      --federation-max-peer-sync-age-sec)
+        federation_max_peer_sync_age_sec="${2:-}"
+        shift 2
+        ;;
+      --federation-max-issuer-sync-age-sec)
+        federation_max_issuer_sync_age_sec="${2:-}"
+        shift 2
+        ;;
+      --federation-min-peer-success-sources)
+        federation_min_peer_success_sources="${2:-}"
+        shift 2
+        ;;
+      --federation-min-issuer-success-sources)
+        federation_min_issuer_success_sources="${2:-}"
+        shift 2
+        ;;
+      --federation-min-peer-source-operators)
+        federation_min_peer_source_operators="${2:-}"
+        shift 2
+        ;;
+      --federation-min-issuer-source-operators)
+        federation_min_issuer_source_operators="${2:-}"
+        shift 2
+        ;;
+      --auto-invite)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          auto_invite="${2:-}"
+          shift 2
+        else
+          auto_invite="1"
+          shift
+        fi
+        ;;
+      --auto-invite-count)
+        auto_invite_count="${2:-}"
+        shift 2
+        ;;
+      --auto-invite-tier)
+        auto_invite_tier="${2:-}"
+        shift 2
+        ;;
+      --auto-invite-wait-sec)
+        auto_invite_wait_sec="${2:-}"
+        shift 2
+        ;;
+      --auto-invite-fail-open)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          auto_invite_fail_open="${2:-}"
+          shift 2
+        else
+          auto_invite_fail_open="1"
+          shift
+        fi
+        ;;
       *)
         echo "unknown arg for server-up: $1"
         exit 2
@@ -2405,6 +2522,70 @@ server_up() {
   fi
   if [[ "$show_admin_token" != "0" && "$show_admin_token" != "1" ]]; then
     echo "server-up requires --show-admin-token (or EASY_NODE_SHOW_ADMIN_TOKEN) to be 0 or 1"
+    exit 2
+  fi
+  if [[ "$federation_wait" != "0" && "$federation_wait" != "1" ]]; then
+    echo "server-up requires --federation-wait (or EASY_NODE_FEDERATION_WAIT) to be 0 or 1"
+    exit 2
+  fi
+  if [[ "$auto_invite" != "0" && "$auto_invite" != "1" ]]; then
+    echo "server-up requires --auto-invite (or EASY_NODE_AUTO_INVITE) to be 0 or 1"
+    exit 2
+  fi
+  if [[ "$auto_invite_fail_open" != "0" && "$auto_invite_fail_open" != "1" ]]; then
+    echo "server-up requires --auto-invite-fail-open (or EASY_NODE_AUTO_INVITE_FAIL_OPEN) to be 0 or 1"
+    exit 2
+  fi
+  if ! [[ "$auto_invite_count" =~ ^[0-9]+$ ]] || ((auto_invite_count < 1)); then
+    echo "server-up requires --auto-invite-count (or EASY_NODE_AUTO_INVITE_COUNT) to be >= 1"
+    exit 2
+  fi
+  if [[ "$auto_invite_tier" != "1" && "$auto_invite_tier" != "2" && "$auto_invite_tier" != "3" ]]; then
+    echo "server-up requires --auto-invite-tier (or EASY_NODE_AUTO_INVITE_TIER) to be 1, 2, or 3"
+    exit 2
+  fi
+  if ! [[ "$auto_invite_wait_sec" =~ ^[0-9]+$ ]]; then
+    echo "server-up requires --auto-invite-wait-sec (or EASY_NODE_AUTO_INVITE_WAIT_SEC) to be >= 0"
+    exit 2
+  fi
+  if ! [[ "$federation_ready_timeout_sec" =~ ^[0-9]+$ ]] || ((federation_ready_timeout_sec < 1)); then
+    echo "server-up requires --federation-ready-timeout-sec (or EASY_NODE_FEDERATION_READY_TIMEOUT_SEC) to be >= 1"
+    exit 2
+  fi
+  if ! [[ "$federation_poll_sec" =~ ^[0-9]+$ ]] || ((federation_poll_sec < 1)); then
+    echo "server-up requires --federation-poll-sec (or EASY_NODE_FEDERATION_POLL_SEC) to be >= 1"
+    exit 2
+  fi
+  if [[ "$federation_require_configured_healthy" != "0" && "$federation_require_configured_healthy" != "1" ]]; then
+    echo "server-up requires --federation-require-configured-healthy (or EASY_NODE_FEDERATION_REQUIRE_CONFIGURED_HEALTHY) to be 0 or 1"
+    exit 2
+  fi
+  if ! [[ "$federation_max_cooling_retry_sec" =~ ^[0-9]+$ ]]; then
+    echo "server-up requires --federation-max-cooling-retry-sec (or EASY_NODE_FEDERATION_MAX_COOLING_RETRY_SEC) to be >= 0"
+    exit 2
+  fi
+  if ! [[ "$federation_max_peer_sync_age_sec" =~ ^[0-9]+$ ]]; then
+    echo "server-up requires --federation-max-peer-sync-age-sec (or EASY_NODE_FEDERATION_MAX_PEER_SYNC_AGE_SEC) to be >= 0"
+    exit 2
+  fi
+  if ! [[ "$federation_max_issuer_sync_age_sec" =~ ^[0-9]+$ ]]; then
+    echo "server-up requires --federation-max-issuer-sync-age-sec (or EASY_NODE_FEDERATION_MAX_ISSUER_SYNC_AGE_SEC) to be >= 0"
+    exit 2
+  fi
+  if ! [[ "$federation_min_peer_success_sources" =~ ^[0-9]+$ ]]; then
+    echo "server-up requires --federation-min-peer-success-sources (or EASY_NODE_FEDERATION_MIN_PEER_SUCCESS_SOURCES) to be >= 0"
+    exit 2
+  fi
+  if ! [[ "$federation_min_issuer_success_sources" =~ ^[0-9]+$ ]]; then
+    echo "server-up requires --federation-min-issuer-success-sources (or EASY_NODE_FEDERATION_MIN_ISSUER_SUCCESS_SOURCES) to be >= 0"
+    exit 2
+  fi
+  if ! [[ "$federation_min_peer_source_operators" =~ ^[0-9]+$ ]]; then
+    echo "server-up requires --federation-min-peer-source-operators (or EASY_NODE_FEDERATION_MIN_PEER_SOURCE_OPERATORS) to be >= 0"
+    exit 2
+  fi
+  if ! [[ "$federation_min_issuer_source_operators" =~ ^[0-9]+$ ]]; then
+    echo "server-up requires --federation-min-issuer-source-operators (or EASY_NODE_FEDERATION_MIN_ISSUER_SOURCE_OPERATORS) to be >= 0"
     exit 2
   fi
   if [[ "$client_allowlist" != "0" && "$client_allowlist" != "1" ]]; then
@@ -2481,6 +2662,10 @@ server_up() {
     fi
     if [[ "$client_allowlist_explicit" == "1" || "$allow_anon_cred_explicit" == "1" ]]; then
       echo "note: --client-allowlist/--allow-anon-cred are issuer settings and are ignored in provider mode."
+    fi
+    if [[ "$auto_invite" == "1" ]]; then
+      echo "note: --auto-invite is authority-only and is ignored in provider mode."
+      auto_invite="0"
     fi
   fi
 
@@ -2765,6 +2950,28 @@ server_up() {
       echo "  curl ${url_scheme}://${public_host}:8083/v1/health"
       echo "  curl ${url_scheme}://${public_host}:8084/v1/health"
     fi
+    if [[ "$auto_invite" == "1" ]]; then
+      local auto_invite_issuer_url
+      auto_invite_issuer_url="$(ensure_url_scheme "127.0.0.1:8082" "$url_scheme")"
+      echo "auto invite: generating ${auto_invite_count} key(s) tier=${auto_invite_tier} wait=${auto_invite_wait_sec}s"
+      local auto_invite_rc=0
+      set +e
+      "$ROOT_DIR/scripts/easy_node.sh" invite-generate \
+        --issuer-url "$auto_invite_issuer_url" \
+        --count "$auto_invite_count" \
+        --tier "$auto_invite_tier" \
+        --wait-sec "$auto_invite_wait_sec"
+      auto_invite_rc=$?
+      set -e
+      if [[ "$auto_invite_rc" -ne 0 ]]; then
+        if [[ "$auto_invite_fail_open" == "1" ]]; then
+          echo "auto invite: warning: invite generation failed (rc=$auto_invite_rc); continuing because --auto-invite-fail-open=1"
+        else
+          echo "auto invite: invite generation failed (rc=$auto_invite_rc); failing because --auto-invite-fail-open=0"
+          exit "$auto_invite_rc"
+        fi
+      fi
+    fi
   else
     write_provider_env "$public_host" "$operator_id" "$directory_admin_token" "$entry_puzzle_secret" "$peer_dirs" "$beta_profile" "$authority_issuer" "$prod_profile" "$issuer_urls_csv" "$exit_wg_private_key_container" "$exit_wg_interface"
     compose_with_env "$PROVIDER_ENV_FILE" up -d --build --no-deps directory entry-exit
@@ -2835,6 +3042,34 @@ server_up() {
       echo "updated host config: $(hosts_config_file)"
     fi
   fi
+
+  if [[ "$federation_wait" == "1" ]]; then
+    if [[ -z "$peer_dirs" ]]; then
+      echo "server-up federation wait skipped: no peer directories configured."
+    else
+      local federation_directory_url
+      federation_directory_url="$(ensure_url_scheme "127.0.0.1:8081" "$url_scheme")"
+      echo "server-up federation wait: checking local directory federation readiness..."
+      if ! server_federation_wait \
+        --directory-url "$federation_directory_url" \
+        --admin-token "$directory_admin_token" \
+        --ready-timeout-sec "$federation_ready_timeout_sec" \
+        --poll-sec "$federation_poll_sec" \
+        --require-configured-healthy "$federation_require_configured_healthy" \
+        --max-cooling-retry-sec "$federation_max_cooling_retry_sec" \
+        --max-peer-sync-age-sec "$federation_max_peer_sync_age_sec" \
+        --max-issuer-sync-age-sec "$federation_max_issuer_sync_age_sec" \
+        --min-peer-success-sources "$federation_min_peer_success_sources" \
+        --min-issuer-success-sources "$federation_min_issuer_success_sources" \
+        --min-peer-source-operators "$federation_min_peer_source_operators" \
+        --min-issuer-source-operators "$federation_min_issuer_source_operators" \
+        --timeout-sec 8; then
+        echo "server-up federation wait failed; stack is running but federation is not ready."
+        echo "hint: run './scripts/easy_node.sh server-federation-status --directory-url ${federation_directory_url}' for diagnostics."
+        exit 1
+      fi
+    fi
+  fi
 }
 
 server_status() {
@@ -2842,6 +3077,1038 @@ server_status() {
   local env_file
   env_file="$(active_server_env_file)"
   compose_with_env "$env_file" ps
+}
+
+server_federation_status() {
+  local directory_url=""
+  local admin_token=""
+  local timeout_sec="8"
+  local require_configured_healthy="${EASY_NODE_FEDERATION_REQUIRE_CONFIGURED_HEALTHY:-0}"
+  local max_cooling_retry_sec="${EASY_NODE_FEDERATION_MAX_COOLING_RETRY_SEC:-0}"
+  local max_peer_sync_age_sec="${EASY_NODE_FEDERATION_MAX_PEER_SYNC_AGE_SEC:-0}"
+  local max_issuer_sync_age_sec="${EASY_NODE_FEDERATION_MAX_ISSUER_SYNC_AGE_SEC:-0}"
+  local min_peer_success_sources="${EASY_NODE_FEDERATION_MIN_PEER_SUCCESS_SOURCES:-0}"
+  local min_issuer_success_sources="${EASY_NODE_FEDERATION_MIN_ISSUER_SUCCESS_SOURCES:-0}"
+  local min_peer_source_operators="${EASY_NODE_FEDERATION_MIN_PEER_SOURCE_OPERATORS:-0}"
+  local min_issuer_source_operators="${EASY_NODE_FEDERATION_MIN_ISSUER_SOURCE_OPERATORS:-0}"
+  local fail_on_not_ready="${EASY_NODE_FEDERATION_STATUS_FAIL_ON_NOT_READY:-0}"
+  local summary_json=""
+  local print_summary_json="${EASY_NODE_FEDERATION_STATUS_PRINT_SUMMARY_JSON:-0}"
+  local show_json="0"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --directory-url)
+        directory_url="${2:-}"
+        shift 2
+        ;;
+      --admin-token)
+        admin_token="${2:-}"
+        shift 2
+        ;;
+      --timeout-sec)
+        timeout_sec="${2:-}"
+        shift 2
+        ;;
+      --require-configured-healthy)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          require_configured_healthy="${2:-}"
+          shift 2
+        else
+          require_configured_healthy="1"
+          shift
+        fi
+        ;;
+      --max-cooling-retry-sec)
+        max_cooling_retry_sec="${2:-}"
+        shift 2
+        ;;
+      --max-peer-sync-age-sec)
+        max_peer_sync_age_sec="${2:-}"
+        shift 2
+        ;;
+      --max-issuer-sync-age-sec)
+        max_issuer_sync_age_sec="${2:-}"
+        shift 2
+        ;;
+      --min-peer-success-sources)
+        min_peer_success_sources="${2:-}"
+        shift 2
+        ;;
+      --min-issuer-success-sources)
+        min_issuer_success_sources="${2:-}"
+        shift 2
+        ;;
+      --min-peer-source-operators)
+        min_peer_source_operators="${2:-}"
+        shift 2
+        ;;
+      --min-issuer-source-operators)
+        min_issuer_source_operators="${2:-}"
+        shift 2
+        ;;
+      --fail-on-not-ready)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          fail_on_not_ready="${2:-}"
+          shift 2
+        else
+          fail_on_not_ready="1"
+          shift
+        fi
+        ;;
+      --summary-json)
+        summary_json="${2:-}"
+        shift 2
+        ;;
+      --print-summary-json)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          print_summary_json="${2:-}"
+          shift 2
+        else
+          print_summary_json="1"
+          shift
+        fi
+        ;;
+      --show-json)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          show_json="${2:-}"
+          shift 2
+        else
+          show_json="1"
+          shift
+        fi
+        ;;
+      -h|--help|help)
+        usage
+        return 0
+        ;;
+      *)
+        echo "unknown arg for server-federation-status: $1"
+        exit 2
+        ;;
+    esac
+  done
+
+  if [[ "$show_json" != "0" && "$show_json" != "1" ]]; then
+    echo "server-federation-status requires --show-json to be 0 or 1"
+    exit 2
+  fi
+  if ! [[ "$timeout_sec" =~ ^[0-9]+$ ]] || ((timeout_sec < 1)); then
+    echo "server-federation-status requires --timeout-sec >= 1"
+    exit 2
+  fi
+  if [[ "$require_configured_healthy" != "0" && "$require_configured_healthy" != "1" ]]; then
+    echo "server-federation-status requires --require-configured-healthy to be 0 or 1"
+    exit 2
+  fi
+  if ! [[ "$max_cooling_retry_sec" =~ ^[0-9]+$ ]]; then
+    echo "server-federation-status requires --max-cooling-retry-sec to be >= 0"
+    exit 2
+  fi
+  if ! [[ "$max_peer_sync_age_sec" =~ ^[0-9]+$ ]]; then
+    echo "server-federation-status requires --max-peer-sync-age-sec to be >= 0"
+    exit 2
+  fi
+  if ! [[ "$max_issuer_sync_age_sec" =~ ^[0-9]+$ ]]; then
+    echo "server-federation-status requires --max-issuer-sync-age-sec to be >= 0"
+    exit 2
+  fi
+  if ! [[ "$min_peer_success_sources" =~ ^[0-9]+$ ]]; then
+    echo "server-federation-status requires --min-peer-success-sources to be >= 0"
+    exit 2
+  fi
+  if ! [[ "$min_issuer_success_sources" =~ ^[0-9]+$ ]]; then
+    echo "server-federation-status requires --min-issuer-success-sources to be >= 0"
+    exit 2
+  fi
+  if ! [[ "$min_peer_source_operators" =~ ^[0-9]+$ ]]; then
+    echo "server-federation-status requires --min-peer-source-operators to be >= 0"
+    exit 2
+  fi
+  if ! [[ "$min_issuer_source_operators" =~ ^[0-9]+$ ]]; then
+    echo "server-federation-status requires --min-issuer-source-operators to be >= 0"
+    exit 2
+  fi
+  if [[ "$fail_on_not_ready" != "0" && "$fail_on_not_ready" != "1" ]]; then
+    echo "server-federation-status requires --fail-on-not-ready to be 0 or 1"
+    exit 2
+  fi
+  if [[ "$print_summary_json" != "0" && "$print_summary_json" != "1" ]]; then
+    echo "server-federation-status requires --print-summary-json to be 0 or 1"
+    exit 2
+  fi
+
+  local env_file
+  env_file="$(active_server_env_file)"
+  if [[ ! -f "$env_file" ]]; then
+    echo "server-federation-status requires an existing server env file: $env_file"
+    exit 2
+  fi
+
+  local prod_strict
+  prod_strict="$(identity_value "$env_file" "PROD_STRICT_MODE")"
+  local url_scheme="http"
+  if [[ "$prod_strict" == "1" ]]; then
+    url_scheme="https"
+  fi
+
+  if [[ -z "$directory_url" ]]; then
+    directory_url="$(identity_value "$env_file" "DIRECTORY_PUBLIC_URL")"
+  fi
+  if [[ -z "$directory_url" ]]; then
+    directory_url="${url_scheme}://127.0.0.1:8081"
+  else
+    directory_url="$(trim_url "$directory_url")"
+    if [[ "$directory_url" != http://* && "$directory_url" != https://* ]]; then
+      directory_url="$(ensure_url_scheme "$directory_url" "$url_scheme")"
+    fi
+  fi
+
+  if [[ -z "$admin_token" ]]; then
+    admin_token="$(identity_value "$env_file" "DIRECTORY_ADMIN_TOKEN")"
+  fi
+  admin_token="$(printf '%s' "$admin_token" | tr -d '\r')"
+  if [[ -z "$admin_token" ]]; then
+    echo "server-federation-status requires directory admin token (set in env file or pass --admin-token)"
+    exit 2
+  fi
+
+  local peer_status_url sync_status_url
+  peer_status_url="${directory_url%/}/v1/admin/peer-status"
+  sync_status_url="${directory_url%/}/v1/admin/sync-status"
+  local peer_status_body sync_status_body
+  peer_status_body="$(mktemp)"
+  sync_status_body="$(mktemp)"
+  local -a tls_opts=()
+  mapfile -t tls_opts < <(curl_tls_opts_for_url "$directory_url")
+
+  local peer_status_code
+  peer_status_code="$(
+    curl -sS -o "$peer_status_body" -w "%{http_code}" \
+      --connect-timeout 3 --max-time "$timeout_sec" \
+      "${tls_opts[@]}" \
+      -H "X-Admin-Token: ${admin_token}" \
+      "$peer_status_url" || true
+  )"
+  if [[ "$peer_status_code" != "200" ]]; then
+    echo "server-federation-status failed: peer-status endpoint returned code=${peer_status_code:-none}"
+    rm -f "$peer_status_body" "$sync_status_body"
+    exit 1
+  fi
+  if ! jq -e '.peers | arrays' <"$peer_status_body" >/dev/null 2>&1; then
+    echo "server-federation-status failed: invalid peer-status payload from $peer_status_url"
+    rm -f "$peer_status_body" "$sync_status_body"
+    exit 1
+  fi
+
+  local sync_status_code
+  sync_status_code="$(
+    curl -sS -o "$sync_status_body" -w "%{http_code}" \
+      --connect-timeout 3 --max-time "$timeout_sec" \
+      "${tls_opts[@]}" \
+      -H "X-Admin-Token: ${admin_token}" \
+      "$sync_status_url" || true
+  )"
+  if [[ "$sync_status_code" != "200" ]]; then
+    echo "server-federation-status failed: sync-status endpoint returned code=${sync_status_code:-none}"
+    rm -f "$peer_status_body" "$sync_status_body"
+    exit 1
+  fi
+  if ! jq -e '.peer and .issuer' <"$sync_status_body" >/dev/null 2>&1; then
+    echo "server-federation-status failed: invalid sync-status payload from $sync_status_url"
+    rm -f "$peer_status_body" "$sync_status_body"
+    exit 1
+  fi
+
+  local total configured discovered eligible cooling failing configured_healthy configured_failing discovered_eligible cooling_retry_max_sec
+  total="$(jq -r '(.peers | length) // 0' <"$peer_status_body" 2>/dev/null || echo "0")"
+  configured="$(jq -r '([.peers[] | select(.configured == true)] | length) // 0' <"$peer_status_body" 2>/dev/null || echo "0")"
+  discovered="$(jq -r '([.peers[] | select(.discovered == true)] | length) // 0' <"$peer_status_body" 2>/dev/null || echo "0")"
+  eligible="$(jq -r '([.peers[] | select(.eligible == true)] | length) // 0' <"$peer_status_body" 2>/dev/null || echo "0")"
+  cooling="$(jq -r '([.peers[] | select(.cooling_down == true)] | length) // 0' <"$peer_status_body" 2>/dev/null || echo "0")"
+  failing="$(jq -r '([.peers[] | select((.consecutive_failures // 0) > 0)] | length) // 0' <"$peer_status_body" 2>/dev/null || echo "0")"
+  configured_healthy="$(jq -r '([.peers[] | select(.configured == true and ((.consecutive_failures // 0) == 0))] | length) // 0' <"$peer_status_body" 2>/dev/null || echo "0")"
+  configured_failing="$(jq -r '([.peers[] | select(.configured == true and ((.consecutive_failures // 0) > 0))] | length) // 0' <"$peer_status_body" 2>/dev/null || echo "0")"
+  discovered_eligible="$(jq -r '([.peers[] | select(.discovered == true and .eligible == true)] | length) // 0' <"$peer_status_body" 2>/dev/null || echo "0")"
+  cooling_retry_max_sec="$(jq -r '([.peers[] | select(.cooling_down == true) | (.retry_after_sec // 0)] | max // 0)' <"$peer_status_body" 2>/dev/null || echo "0")"
+
+  local peer_quorum peer_success peer_sources peer_source_operator_count peer_source_operators peer_required peer_error peer_last_run
+  local issuer_quorum issuer_success issuer_sources issuer_source_operator_count issuer_source_operators issuer_required issuer_error issuer_last_run
+  local sync_generated_at sync_ref_epoch status_now_epoch peer_sync_age_sec issuer_sync_age_sec
+  local peer_sync_age_display issuer_sync_age_display
+  local peer_sync_ready issuer_sync_ready peer_health_ready cooling_retry_exceeded federation_ready
+  peer_quorum="$(jq -r '.peer.quorum_met // false' <"$sync_status_body" 2>/dev/null || echo "false")"
+  peer_success="$(jq -r '.peer.success // false' <"$sync_status_body" 2>/dev/null || echo "false")"
+  peer_sources="$(jq -r '.peer.success_sources // 0' <"$sync_status_body" 2>/dev/null || echo "0")"
+  peer_source_operator_count="$(jq -r '((.peer.source_operators // []) | length) // 0' <"$sync_status_body" 2>/dev/null || echo "0")"
+  peer_source_operators="$(jq -r '((.peer.source_operators // []) | map(tostring) | unique | join(",")) // ""' <"$sync_status_body" 2>/dev/null || true)"
+  peer_required="$(jq -r '.peer.required_operators // 0' <"$sync_status_body" 2>/dev/null || echo "0")"
+  peer_last_run="$(jq -r '.peer.last_run_at // 0' <"$sync_status_body" 2>/dev/null || echo "0")"
+  peer_error="$(jq -r '.peer.error // ""' <"$sync_status_body" 2>/dev/null || true)"
+  issuer_quorum="$(jq -r '.issuer.quorum_met // false' <"$sync_status_body" 2>/dev/null || echo "false")"
+  issuer_success="$(jq -r '.issuer.success // false' <"$sync_status_body" 2>/dev/null || echo "false")"
+  issuer_sources="$(jq -r '.issuer.success_sources // 0' <"$sync_status_body" 2>/dev/null || echo "0")"
+  issuer_source_operator_count="$(jq -r '((.issuer.source_operators // []) | length) // 0' <"$sync_status_body" 2>/dev/null || echo "0")"
+  issuer_source_operators="$(jq -r '((.issuer.source_operators // []) | map(tostring) | unique | join(",")) // ""' <"$sync_status_body" 2>/dev/null || true)"
+  issuer_required="$(jq -r '.issuer.required_operators // 0' <"$sync_status_body" 2>/dev/null || echo "0")"
+  issuer_last_run="$(jq -r '.issuer.last_run_at // 0' <"$sync_status_body" 2>/dev/null || echo "0")"
+  issuer_error="$(jq -r '.issuer.error // ""' <"$sync_status_body" 2>/dev/null || true)"
+  sync_generated_at="$(jq -r '.generated_at // 0' <"$sync_status_body" 2>/dev/null || echo "0")"
+  status_now_epoch="$(date +%s)"
+  sync_ref_epoch="$status_now_epoch"
+  if [[ "$sync_generated_at" =~ ^[0-9]+$ ]] && ((sync_generated_at > 0)); then
+    sync_ref_epoch="$sync_generated_at"
+  fi
+  peer_sync_age_sec="-1"
+  if [[ "$peer_last_run" =~ ^[0-9]+$ ]] && ((peer_last_run > 0)); then
+    peer_sync_age_sec=$((sync_ref_epoch - peer_last_run))
+    if ((peer_sync_age_sec < 0)); then
+      peer_sync_age_sec=0
+    fi
+  fi
+  issuer_sync_age_sec="-1"
+  if [[ "$issuer_last_run" =~ ^[0-9]+$ ]] && ((issuer_last_run > 0)); then
+    issuer_sync_age_sec=$((sync_ref_epoch - issuer_last_run))
+    if ((issuer_sync_age_sec < 0)); then
+      issuer_sync_age_sec=0
+    fi
+  fi
+  peer_sync_age_display="n/a"
+  if ((peer_sync_age_sec >= 0)); then
+    peer_sync_age_display="$peer_sync_age_sec"
+  fi
+  issuer_sync_age_display="n/a"
+  if ((issuer_sync_age_sec >= 0)); then
+    issuer_sync_age_display="$issuer_sync_age_sec"
+  fi
+
+  peer_sync_ready="0"
+  issuer_sync_ready="0"
+  peer_health_ready="0"
+  cooling_retry_exceeded="0"
+  federation_ready="0"
+
+  if [[ "$peer_last_run" =~ ^[0-9]+$ ]] && ((peer_last_run > 0)) &&
+    [[ "$peer_success" == "true" && "$peer_quorum" == "true" ]]; then
+    peer_sync_ready="1"
+  fi
+  if [[ "$max_peer_sync_age_sec" =~ ^[0-9]+$ ]] && ((max_peer_sync_age_sec > 0)); then
+    if ! [[ "$peer_sync_age_sec" =~ ^[0-9]+$ ]] || ((peer_sync_age_sec > max_peer_sync_age_sec)); then
+      peer_sync_ready="0"
+    fi
+  fi
+  if [[ "$min_peer_success_sources" =~ ^[0-9]+$ ]] && ((min_peer_success_sources > 0)); then
+    if ! [[ "$peer_sources" =~ ^[0-9]+$ ]] || ((peer_sources < min_peer_success_sources)); then
+      peer_sync_ready="0"
+    fi
+  fi
+  if [[ "$min_peer_source_operators" =~ ^[0-9]+$ ]] && ((min_peer_source_operators > 0)); then
+    if ! [[ "$peer_source_operator_count" =~ ^[0-9]+$ ]] || ((peer_source_operator_count < min_peer_source_operators)); then
+      peer_sync_ready="0"
+    fi
+  fi
+
+  if [[ "$issuer_success" == "true" && "$issuer_quorum" == "true" ]]; then
+    issuer_sync_ready="1"
+  fi
+  if [[ "$max_issuer_sync_age_sec" =~ ^[0-9]+$ ]] && ((max_issuer_sync_age_sec > 0)); then
+    if ! [[ "$issuer_sync_age_sec" =~ ^[0-9]+$ ]] || ((issuer_sync_age_sec > max_issuer_sync_age_sec)); then
+      issuer_sync_ready="0"
+    fi
+  fi
+  if [[ "$min_issuer_success_sources" =~ ^[0-9]+$ ]] && ((min_issuer_success_sources > 0)); then
+    if ! [[ "$issuer_sources" =~ ^[0-9]+$ ]] || ((issuer_sources < min_issuer_success_sources)); then
+      issuer_sync_ready="0"
+    fi
+  fi
+  if [[ "$min_issuer_source_operators" =~ ^[0-9]+$ ]] && ((min_issuer_source_operators > 0)); then
+    if ! [[ "$issuer_source_operator_count" =~ ^[0-9]+$ ]] || ((issuer_source_operator_count < min_issuer_source_operators)); then
+      issuer_sync_ready="0"
+    fi
+  fi
+
+  if [[ "$configured" =~ ^[0-9]+$ ]] && ((configured > 0)); then
+    if [[ "$require_configured_healthy" == "1" ]]; then
+      if [[ "$configured_healthy" =~ ^[0-9]+$ ]] && ((configured_healthy >= configured)); then
+        peer_health_ready="1"
+      fi
+    elif [[ "$configured_healthy" =~ ^[0-9]+$ ]] && ((configured_healthy > 0)); then
+      peer_health_ready="1"
+    elif [[ "$discovered_eligible" =~ ^[0-9]+$ ]] && ((discovered_eligible > 0)); then
+      peer_health_ready="1"
+    fi
+  elif [[ "$discovered_eligible" =~ ^[0-9]+$ ]] && ((discovered_eligible > 0)); then
+    peer_health_ready="1"
+  fi
+
+  if [[ "$max_cooling_retry_sec" =~ ^[0-9]+$ ]] && ((max_cooling_retry_sec > 0)) &&
+    [[ "$cooling_retry_max_sec" =~ ^[0-9]+$ ]] && ((cooling_retry_max_sec > max_cooling_retry_sec)); then
+    cooling_retry_exceeded="1"
+  fi
+  if [[ "$peer_sync_ready" == "1" && "$issuer_sync_ready" == "1" && "$peer_health_ready" == "1" && "$cooling_retry_exceeded" == "0" ]]; then
+    federation_ready="1"
+  fi
+
+  echo "server federation status:"
+  echo "  directory_url: $directory_url"
+  echo "  policy: require_configured_healthy=$require_configured_healthy max_cooling_retry_sec=$max_cooling_retry_sec max_peer_sync_age_sec=$max_peer_sync_age_sec max_issuer_sync_age_sec=$max_issuer_sync_age_sec min_peer_success_sources=$min_peer_success_sources min_issuer_success_sources=$min_issuer_success_sources min_peer_source_operators=$min_peer_source_operators min_issuer_source_operators=$min_issuer_source_operators"
+  echo "  peer_summary: total=$total configured=$configured discovered=$discovered eligible=$eligible cooling_down=$cooling failing=$failing cooling_retry_max_sec=$cooling_retry_max_sec"
+  echo "  peer_health: configured_healthy=$configured_healthy configured_failing=$configured_failing discovered_eligible=$discovered_eligible"
+  echo "  peer_sync: success=$peer_success quorum_met=$peer_quorum success_sources=$peer_sources source_operator_count=$peer_source_operator_count required_operators=$peer_required last_run_at=$peer_last_run age_sec=$peer_sync_age_display"
+  if [[ -n "$peer_source_operators" ]]; then
+    echo "  peer_sync_source_operators: $peer_source_operators"
+  fi
+  if [[ -n "$peer_error" ]]; then
+    echo "  peer_sync_error: $peer_error"
+  fi
+  echo "  issuer_sync: success=$issuer_success quorum_met=$issuer_quorum success_sources=$issuer_sources source_operator_count=$issuer_source_operator_count required_operators=$issuer_required last_run_at=$issuer_last_run age_sec=$issuer_sync_age_display"
+  if [[ -n "$issuer_source_operators" ]]; then
+    echo "  issuer_sync_source_operators: $issuer_source_operators"
+  fi
+  if [[ -n "$issuer_error" ]]; then
+    echo "  issuer_sync_error: $issuer_error"
+  fi
+  echo "  readiness: federation_ready=$federation_ready peer_sync_ready=$peer_sync_ready issuer_sync_ready=$issuer_sync_ready peer_health_ready=$peer_health_ready cooling_retry_exceeded=$cooling_retry_exceeded"
+  echo "  peers:"
+  jq -r '
+    .peers[]
+    | "- \(.url) configured=\(if .configured then 1 else 0 end) discovered=\(if .discovered then 1 else 0 end) eligible=\(if .eligible then 1 else 0 end) cooling=\(if .cooling_down then 1 else 0 end) failures=\(.consecutive_failures // 0)"
+      + (if (.vote_operators // 0) > 0 then " votes=\(.vote_operators)" else "" end)
+      + (if (.hint_operator // "") != "" then " hint_op=\(.hint_operator)" else "" end)
+      + (if (.retry_after_sec // 0) > 0 then " retry_in_sec=\(.retry_after_sec)" else "" end)
+      + (if (.last_error // "") != "" then (" last_error=" + ((.last_error | gsub("\\s+"; " ") | if length > 120 then .[:120] + "..." else . end))) else "" end)
+  ' <"$peer_status_body" | sed 's/^/    /'
+
+  local status_summary_json
+  status_summary_json="$(
+    jq -nc \
+      --arg directory_url "$directory_url" \
+      --argjson require_configured_healthy "$(if [[ "$require_configured_healthy" == "1" ]]; then echo "true"; else echo "false"; fi)" \
+      --argjson max_cooling_retry_sec "$max_cooling_retry_sec" \
+      --argjson max_peer_sync_age_sec "$max_peer_sync_age_sec" \
+      --argjson max_issuer_sync_age_sec "$max_issuer_sync_age_sec" \
+      --argjson min_peer_success_sources "$min_peer_success_sources" \
+      --argjson min_issuer_success_sources "$min_issuer_success_sources" \
+      --argjson min_peer_source_operators "$min_peer_source_operators" \
+      --argjson min_issuer_source_operators "$min_issuer_source_operators" \
+      --argjson fail_on_not_ready "$(if [[ "$fail_on_not_ready" == "1" ]]; then echo "true"; else echo "false"; fi)" \
+      --argjson federation_ready "$(if [[ "$federation_ready" == "1" ]]; then echo "true"; else echo "false"; fi)" \
+      --argjson peer_sync_ready "$(if [[ "$peer_sync_ready" == "1" ]]; then echo "true"; else echo "false"; fi)" \
+      --argjson issuer_sync_ready "$(if [[ "$issuer_sync_ready" == "1" ]]; then echo "true"; else echo "false"; fi)" \
+      --argjson peer_health_ready "$(if [[ "$peer_health_ready" == "1" ]]; then echo "true"; else echo "false"; fi)" \
+      --argjson cooling_retry_exceeded "$(if [[ "$cooling_retry_exceeded" == "1" ]]; then echo "true"; else echo "false"; fi)" \
+      --argjson total "$total" \
+      --argjson configured "$configured" \
+      --argjson discovered "$discovered" \
+      --argjson eligible "$eligible" \
+      --argjson cooling "$cooling" \
+      --argjson failing "$failing" \
+      --argjson configured_healthy "$configured_healthy" \
+      --argjson configured_failing "$configured_failing" \
+      --argjson discovered_eligible "$discovered_eligible" \
+      --argjson cooling_retry_max_sec "$cooling_retry_max_sec" \
+      --argjson peer_quorum "$peer_quorum" \
+      --argjson peer_success "$peer_success" \
+      --argjson peer_sources "$peer_sources" \
+      --argjson peer_source_operator_count "$peer_source_operator_count" \
+      --arg peer_source_operators "$peer_source_operators" \
+      --argjson peer_required "$peer_required" \
+      --argjson peer_last_run "$peer_last_run" \
+      --argjson peer_sync_age_sec "$peer_sync_age_sec" \
+      --arg peer_sync_age_display "$peer_sync_age_display" \
+      --arg peer_error "$peer_error" \
+      --argjson issuer_quorum "$issuer_quorum" \
+      --argjson issuer_success "$issuer_success" \
+      --argjson issuer_sources "$issuer_sources" \
+      --argjson issuer_source_operator_count "$issuer_source_operator_count" \
+      --arg issuer_source_operators "$issuer_source_operators" \
+      --argjson issuer_required "$issuer_required" \
+      --argjson issuer_last_run "$issuer_last_run" \
+      --argjson issuer_sync_age_sec "$issuer_sync_age_sec" \
+      --arg issuer_sync_age_display "$issuer_sync_age_display" \
+      --arg issuer_error "$issuer_error" \
+      --slurpfile peer "$peer_status_body" \
+      --slurpfile sync "$sync_status_body" \
+      '{
+        directory_url:$directory_url,
+        policy:{
+          require_configured_healthy:$require_configured_healthy,
+          max_cooling_retry_sec:$max_cooling_retry_sec,
+          max_peer_sync_age_sec:$max_peer_sync_age_sec,
+          max_issuer_sync_age_sec:$max_issuer_sync_age_sec,
+          min_peer_success_sources:$min_peer_success_sources,
+          min_issuer_success_sources:$min_issuer_success_sources,
+          min_peer_source_operators:$min_peer_source_operators,
+          min_issuer_source_operators:$min_issuer_source_operators,
+          fail_on_not_ready:$fail_on_not_ready
+        },
+        readiness:{
+          federation_ready:$federation_ready,
+          peer_sync_ready:$peer_sync_ready,
+          issuer_sync_ready:$issuer_sync_ready,
+          peer_health_ready:$peer_health_ready,
+          cooling_retry_exceeded:$cooling_retry_exceeded
+        },
+        observed:{
+          peer_summary:{
+            total:$total,
+            configured:$configured,
+            discovered:$discovered,
+            eligible:$eligible,
+            cooling:$cooling,
+            failing:$failing,
+            cooling_retry_max_sec:$cooling_retry_max_sec
+          },
+          peer_health:{
+            configured_healthy:$configured_healthy,
+            configured_failing:$configured_failing,
+            discovered_eligible:$discovered_eligible
+          },
+          peer_sync:{
+            success:$peer_success,
+            quorum_met:$peer_quorum,
+            success_sources:$peer_sources,
+            source_operator_count:$peer_source_operator_count,
+            source_operators:($peer_source_operators | if length == 0 then [] else split(",") end),
+            required_operators:$peer_required,
+            last_run_at:$peer_last_run,
+            age_sec:$peer_sync_age_sec,
+            age_sec_display:$peer_sync_age_display,
+            error:$peer_error
+          },
+          issuer_sync:{
+            success:$issuer_success,
+            quorum_met:$issuer_quorum,
+            success_sources:$issuer_sources,
+            source_operator_count:$issuer_source_operator_count,
+            source_operators:($issuer_source_operators | if length == 0 then [] else split(",") end),
+            required_operators:$issuer_required,
+            last_run_at:$issuer_last_run,
+            age_sec:$issuer_sync_age_sec,
+            age_sec_display:$issuer_sync_age_display,
+            error:$issuer_error
+          }
+        },
+        peer_status:$peer[0],
+        sync_status:$sync[0]
+      }'
+  )"
+
+  if [[ -n "$summary_json" ]]; then
+    mkdir -p "$(dirname "$summary_json")"
+    printf '%s\n' "$status_summary_json" >"$summary_json"
+    echo "  summary_json: $summary_json"
+  fi
+
+  if [[ "$print_summary_json" == "1" ]]; then
+    echo "summary_json:"
+    printf '%s\n' "$status_summary_json"
+  fi
+
+  if [[ "$show_json" == "1" ]]; then
+    echo "json:"
+    jq -n --slurpfile peer "$peer_status_body" --slurpfile sync "$sync_status_body" \
+      '{peer_status: $peer[0], sync_status: $sync[0]}'
+  fi
+
+  if [[ "$fail_on_not_ready" == "1" ]]; then
+    if [[ "$federation_ready" == "1" ]]; then
+      echo "server-federation-status policy check: PASS"
+    else
+      echo "server-federation-status policy check: FAIL"
+      echo "hints:"
+      echo "  - run './scripts/easy_node.sh server-federation-wait --directory-url ${directory_url} --ready-timeout-sec 90 --poll-sec 5' to wait for convergence"
+      echo "  - verify DIRECTORY_PEERS references healthy peers and tune policy thresholds only when justified"
+      rm -f "$peer_status_body" "$sync_status_body"
+      exit 1
+    fi
+  fi
+
+  rm -f "$peer_status_body" "$sync_status_body"
+}
+
+server_federation_wait() {
+  local directory_url=""
+  local admin_token=""
+  local ready_timeout_sec="${EASY_NODE_FEDERATION_READY_TIMEOUT_SEC:-90}"
+  local poll_sec="${EASY_NODE_FEDERATION_POLL_SEC:-5}"
+  local timeout_sec="8"
+  local require_configured_healthy="${EASY_NODE_FEDERATION_REQUIRE_CONFIGURED_HEALTHY:-0}"
+  local max_cooling_retry_sec="${EASY_NODE_FEDERATION_MAX_COOLING_RETRY_SEC:-0}"
+  local max_peer_sync_age_sec="${EASY_NODE_FEDERATION_MAX_PEER_SYNC_AGE_SEC:-0}"
+  local max_issuer_sync_age_sec="${EASY_NODE_FEDERATION_MAX_ISSUER_SYNC_AGE_SEC:-0}"
+  local min_peer_success_sources="${EASY_NODE_FEDERATION_MIN_PEER_SUCCESS_SOURCES:-0}"
+  local min_issuer_success_sources="${EASY_NODE_FEDERATION_MIN_ISSUER_SUCCESS_SOURCES:-0}"
+  local min_peer_source_operators="${EASY_NODE_FEDERATION_MIN_PEER_SOURCE_OPERATORS:-0}"
+  local min_issuer_source_operators="${EASY_NODE_FEDERATION_MIN_ISSUER_SOURCE_OPERATORS:-0}"
+  local show_json="0"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --directory-url)
+        directory_url="${2:-}"
+        shift 2
+        ;;
+      --admin-token)
+        admin_token="${2:-}"
+        shift 2
+        ;;
+      --ready-timeout-sec)
+        ready_timeout_sec="${2:-}"
+        shift 2
+        ;;
+      --poll-sec)
+        poll_sec="${2:-}"
+        shift 2
+        ;;
+      --timeout-sec)
+        timeout_sec="${2:-}"
+        shift 2
+        ;;
+      --require-configured-healthy)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          require_configured_healthy="${2:-}"
+          shift 2
+        else
+          require_configured_healthy="1"
+          shift
+        fi
+        ;;
+      --max-cooling-retry-sec)
+        max_cooling_retry_sec="${2:-}"
+        shift 2
+        ;;
+      --max-peer-sync-age-sec)
+        max_peer_sync_age_sec="${2:-}"
+        shift 2
+        ;;
+      --max-issuer-sync-age-sec)
+        max_issuer_sync_age_sec="${2:-}"
+        shift 2
+        ;;
+      --min-peer-success-sources)
+        min_peer_success_sources="${2:-}"
+        shift 2
+        ;;
+      --min-issuer-success-sources)
+        min_issuer_success_sources="${2:-}"
+        shift 2
+        ;;
+      --min-peer-source-operators)
+        min_peer_source_operators="${2:-}"
+        shift 2
+        ;;
+      --min-issuer-source-operators)
+        min_issuer_source_operators="${2:-}"
+        shift 2
+        ;;
+      --show-json)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          show_json="${2:-}"
+          shift 2
+        else
+          show_json="1"
+          shift
+        fi
+        ;;
+      -h|--help|help)
+        usage
+        return 0
+        ;;
+      *)
+        echo "unknown arg for server-federation-wait: $1"
+        exit 2
+        ;;
+    esac
+  done
+
+  if ! [[ "$ready_timeout_sec" =~ ^[0-9]+$ ]] || ((ready_timeout_sec < 1)); then
+    echo "server-federation-wait requires --ready-timeout-sec >= 1"
+    exit 2
+  fi
+  if ! [[ "$poll_sec" =~ ^[0-9]+$ ]] || ((poll_sec < 1)); then
+    echo "server-federation-wait requires --poll-sec >= 1"
+    exit 2
+  fi
+  if ! [[ "$timeout_sec" =~ ^[0-9]+$ ]] || ((timeout_sec < 1)); then
+    echo "server-federation-wait requires --timeout-sec >= 1"
+    exit 2
+  fi
+  if [[ "$require_configured_healthy" != "0" && "$require_configured_healthy" != "1" ]]; then
+    echo "server-federation-wait requires --require-configured-healthy to be 0 or 1"
+    exit 2
+  fi
+  if ! [[ "$max_cooling_retry_sec" =~ ^[0-9]+$ ]]; then
+    echo "server-federation-wait requires --max-cooling-retry-sec to be >= 0"
+    exit 2
+  fi
+  if ! [[ "$max_peer_sync_age_sec" =~ ^[0-9]+$ ]]; then
+    echo "server-federation-wait requires --max-peer-sync-age-sec to be >= 0"
+    exit 2
+  fi
+  if ! [[ "$max_issuer_sync_age_sec" =~ ^[0-9]+$ ]]; then
+    echo "server-federation-wait requires --max-issuer-sync-age-sec to be >= 0"
+    exit 2
+  fi
+  if ! [[ "$min_peer_success_sources" =~ ^[0-9]+$ ]]; then
+    echo "server-federation-wait requires --min-peer-success-sources to be >= 0"
+    exit 2
+  fi
+  if ! [[ "$min_issuer_success_sources" =~ ^[0-9]+$ ]]; then
+    echo "server-federation-wait requires --min-issuer-success-sources to be >= 0"
+    exit 2
+  fi
+  if ! [[ "$min_peer_source_operators" =~ ^[0-9]+$ ]]; then
+    echo "server-federation-wait requires --min-peer-source-operators to be >= 0"
+    exit 2
+  fi
+  if ! [[ "$min_issuer_source_operators" =~ ^[0-9]+$ ]]; then
+    echo "server-federation-wait requires --min-issuer-source-operators to be >= 0"
+    exit 2
+  fi
+  if [[ "$show_json" != "0" && "$show_json" != "1" ]]; then
+    echo "server-federation-wait requires --show-json to be 0 or 1"
+    exit 2
+  fi
+
+  local env_file
+  env_file="$(active_server_env_file)"
+  if [[ ! -f "$env_file" ]]; then
+    echo "server-federation-wait requires an existing server env file: $env_file"
+    exit 2
+  fi
+
+  local prod_strict
+  prod_strict="$(identity_value "$env_file" "PROD_STRICT_MODE")"
+  local url_scheme="http"
+  if [[ "$prod_strict" == "1" ]]; then
+    url_scheme="https"
+  fi
+
+  if [[ -z "$directory_url" ]]; then
+    directory_url="$(identity_value "$env_file" "DIRECTORY_PUBLIC_URL")"
+  fi
+  if [[ -z "$directory_url" ]]; then
+    directory_url="${url_scheme}://127.0.0.1:8081"
+  else
+    directory_url="$(trim_url "$directory_url")"
+    if [[ "$directory_url" != http://* && "$directory_url" != https://* ]]; then
+      directory_url="$(ensure_url_scheme "$directory_url" "$url_scheme")"
+    fi
+  fi
+
+  if [[ -z "$admin_token" ]]; then
+    admin_token="$(identity_value "$env_file" "DIRECTORY_ADMIN_TOKEN")"
+  fi
+  admin_token="$(printf '%s' "$admin_token" | tr -d '\r')"
+  if [[ -z "$admin_token" ]]; then
+    echo "server-federation-wait requires directory admin token (set in env file or pass --admin-token)"
+    exit 2
+  fi
+
+  local sync_status_url peer_status_url
+  sync_status_url="${directory_url%/}/v1/admin/sync-status"
+  peer_status_url="${directory_url%/}/v1/admin/peer-status"
+
+  local start_epoch deadline_epoch now_epoch elapsed_sec remaining_sec attempt
+  local last_sync_json last_peer_json
+  start_epoch="$(date +%s)"
+  deadline_epoch=$((start_epoch + ready_timeout_sec))
+  attempt=0
+  last_sync_json=""
+  last_peer_json=""
+
+  local last_peer_sync_ready="0"
+  local last_issuer_sync_ready="0"
+  local last_peer_health_ready="0"
+  local last_configured_peers="0"
+  local last_configured_healthy="0"
+  local last_discovered_eligible="0"
+  local last_peer_success="false"
+  local last_peer_quorum="false"
+  local last_peer_last_run="0"
+  local last_issuer_success="false"
+  local last_issuer_quorum="false"
+  local last_issuer_last_run="0"
+  local last_peer_sync_age_sec="-1"
+  local last_issuer_sync_age_sec="-1"
+  local last_peer_sources="0"
+  local last_issuer_sources="0"
+  local last_peer_source_operators_count="0"
+  local last_issuer_source_operators_count="0"
+  local last_peer_source_operators=""
+  local last_issuer_source_operators=""
+  local last_configured_failing="0"
+  local last_cooling_retry_max_sec="0"
+
+  echo "server-federation-wait:"
+  echo "  directory_url: $directory_url"
+  echo "  ready_timeout_sec: $ready_timeout_sec"
+  echo "  poll_sec: $poll_sec"
+  echo "  require_configured_healthy: $require_configured_healthy"
+  echo "  max_cooling_retry_sec: $max_cooling_retry_sec"
+  echo "  max_peer_sync_age_sec: $max_peer_sync_age_sec"
+  echo "  max_issuer_sync_age_sec: $max_issuer_sync_age_sec"
+  echo "  min_peer_success_sources: $min_peer_success_sources"
+  echo "  min_issuer_success_sources: $min_issuer_success_sources"
+  echo "  min_peer_source_operators: $min_peer_source_operators"
+  echo "  min_issuer_source_operators: $min_issuer_source_operators"
+
+  while true; do
+    attempt=$((attempt + 1))
+    now_epoch="$(date +%s)"
+    elapsed_sec=$((now_epoch - start_epoch))
+    remaining_sec=$((deadline_epoch - now_epoch))
+    if ((remaining_sec < 0)); then
+      remaining_sec=0
+    fi
+
+    local sync_body peer_status_body
+    sync_body="$(mktemp)"
+    peer_status_body="$(mktemp)"
+    local -a tls_opts=()
+    mapfile -t tls_opts < <(curl_tls_opts_for_url "$directory_url")
+
+    local sync_code peer_status_code
+    sync_code="$(
+      curl -sS -o "$sync_body" -w "%{http_code}" \
+        --connect-timeout 3 --max-time "$timeout_sec" \
+        "${tls_opts[@]}" \
+        -H "X-Admin-Token: ${admin_token}" \
+        "$sync_status_url" || true
+    )"
+    peer_status_code="$(
+      curl -sS -o "$peer_status_body" -w "%{http_code}" \
+        --connect-timeout 3 --max-time "$timeout_sec" \
+        "${tls_opts[@]}" \
+        -H "X-Admin-Token: ${admin_token}" \
+        "$peer_status_url" || true
+    )"
+
+    if [[ "$sync_code" == "401" || "$sync_code" == "403" || "$peer_status_code" == "401" || "$peer_status_code" == "403" ]]; then
+      rm -f "$sync_body" "$peer_status_body"
+      echo "server-federation-wait failed: admin token unauthorized for directory admin endpoints"
+      return 1
+    fi
+
+    if [[ "$sync_code" == "200" && "$peer_status_code" == "200" ]] &&
+      jq -e '.peer and .issuer' <"$sync_body" >/dev/null 2>&1 &&
+      jq -e '.peers | arrays' <"$peer_status_body" >/dev/null 2>&1; then
+      last_sync_json="$(cat "$sync_body")"
+      last_peer_json="$(cat "$peer_status_body")"
+
+      local peer_success peer_quorum peer_sources peer_source_operators_count peer_source_operators peer_last_run peer_sync_age_sec peer_sync_age_display
+      local issuer_success issuer_quorum issuer_sources issuer_source_operators_count issuer_source_operators issuer_last_run issuer_sync_age_sec issuer_sync_age_display
+      local sync_generated_at sync_ref_epoch
+      local configured_peers configured_healthy discovered_eligible configured_failing cooling_retry_max_sec
+      peer_success="$(jq -r '.peer.success // false' <"$sync_body" 2>/dev/null || echo "false")"
+      peer_quorum="$(jq -r '.peer.quorum_met // false' <"$sync_body" 2>/dev/null || echo "false")"
+      peer_sources="$(jq -r '.peer.success_sources // 0' <"$sync_body" 2>/dev/null || echo "0")"
+      peer_source_operators_count="$(jq -r '((.peer.source_operators // []) | length) // 0' <"$sync_body" 2>/dev/null || echo "0")"
+      peer_source_operators="$(jq -r '((.peer.source_operators // []) | map(tostring) | unique | join(",")) // ""' <"$sync_body" 2>/dev/null || true)"
+      peer_last_run="$(jq -r '.peer.last_run_at // 0' <"$sync_body" 2>/dev/null || echo "0")"
+      issuer_success="$(jq -r '.issuer.success // false' <"$sync_body" 2>/dev/null || echo "false")"
+      issuer_quorum="$(jq -r '.issuer.quorum_met // false' <"$sync_body" 2>/dev/null || echo "false")"
+      issuer_sources="$(jq -r '.issuer.success_sources // 0' <"$sync_body" 2>/dev/null || echo "0")"
+      issuer_source_operators_count="$(jq -r '((.issuer.source_operators // []) | length) // 0' <"$sync_body" 2>/dev/null || echo "0")"
+      issuer_source_operators="$(jq -r '((.issuer.source_operators // []) | map(tostring) | unique | join(",")) // ""' <"$sync_body" 2>/dev/null || true)"
+      issuer_last_run="$(jq -r '.issuer.last_run_at // 0' <"$sync_body" 2>/dev/null || echo "0")"
+      sync_generated_at="$(jq -r '.generated_at // 0' <"$sync_body" 2>/dev/null || echo "0")"
+      configured_peers="$(jq -r '([.peers[] | select(.configured == true)] | length) // 0' <"$peer_status_body" 2>/dev/null || echo "0")"
+      configured_healthy="$(jq -r '([.peers[] | select(.configured == true and ((.consecutive_failures // 0) == 0))] | length) // 0' <"$peer_status_body" 2>/dev/null || echo "0")"
+      discovered_eligible="$(jq -r '([.peers[] | select(.discovered == true and .eligible == true)] | length) // 0' <"$peer_status_body" 2>/dev/null || echo "0")"
+      configured_failing="$(jq -r '([.peers[] | select(.configured == true and ((.consecutive_failures // 0) > 0))] | length) // 0' <"$peer_status_body" 2>/dev/null || echo "0")"
+      cooling_retry_max_sec="$(jq -r '([.peers[] | select(.cooling_down == true) | (.retry_after_sec // 0)] | max // 0)' <"$peer_status_body" 2>/dev/null || echo "0")"
+      sync_ref_epoch="$now_epoch"
+      if [[ "$sync_generated_at" =~ ^[0-9]+$ ]] && ((sync_generated_at > 0)); then
+        sync_ref_epoch="$sync_generated_at"
+      fi
+      peer_sync_age_sec="-1"
+      if [[ "$peer_last_run" =~ ^[0-9]+$ ]] && ((peer_last_run > 0)); then
+        peer_sync_age_sec=$((sync_ref_epoch - peer_last_run))
+        if ((peer_sync_age_sec < 0)); then
+          peer_sync_age_sec=0
+        fi
+      fi
+      issuer_sync_age_sec="-1"
+      if [[ "$issuer_last_run" =~ ^[0-9]+$ ]] && ((issuer_last_run > 0)); then
+        issuer_sync_age_sec=$((sync_ref_epoch - issuer_last_run))
+        if ((issuer_sync_age_sec < 0)); then
+          issuer_sync_age_sec=0
+        fi
+      fi
+      peer_sync_age_display="n/a"
+      if ((peer_sync_age_sec >= 0)); then
+        peer_sync_age_display="$peer_sync_age_sec"
+      fi
+      issuer_sync_age_display="n/a"
+      if ((issuer_sync_age_sec >= 0)); then
+        issuer_sync_age_display="$issuer_sync_age_sec"
+      fi
+
+      local peer_sync_ready="0"
+      local issuer_sync_ready="0"
+      local peer_health_ready="0"
+      if [[ "$peer_last_run" =~ ^[0-9]+$ ]] && ((peer_last_run > 0)) &&
+        [[ "$peer_success" == "true" && "$peer_quorum" == "true" ]]; then
+        peer_sync_ready="1"
+      fi
+      if [[ "$max_peer_sync_age_sec" =~ ^[0-9]+$ ]] && ((max_peer_sync_age_sec > 0)); then
+        if ! [[ "$peer_sync_age_sec" =~ ^[0-9]+$ ]] || ((peer_sync_age_sec > max_peer_sync_age_sec)); then
+          peer_sync_ready="0"
+        fi
+      fi
+      if [[ "$min_peer_success_sources" =~ ^[0-9]+$ ]] && ((min_peer_success_sources > 0)); then
+        if ! [[ "$peer_sources" =~ ^[0-9]+$ ]] || ((peer_sources < min_peer_success_sources)); then
+          peer_sync_ready="0"
+        fi
+      fi
+      if [[ "$min_peer_source_operators" =~ ^[0-9]+$ ]] && ((min_peer_source_operators > 0)); then
+        if ! [[ "$peer_source_operators_count" =~ ^[0-9]+$ ]] || ((peer_source_operators_count < min_peer_source_operators)); then
+          peer_sync_ready="0"
+        fi
+      fi
+      if [[ "$issuer_success" == "true" && "$issuer_quorum" == "true" ]]; then
+        issuer_sync_ready="1"
+      fi
+      if [[ "$max_issuer_sync_age_sec" =~ ^[0-9]+$ ]] && ((max_issuer_sync_age_sec > 0)); then
+        if ! [[ "$issuer_sync_age_sec" =~ ^[0-9]+$ ]] || ((issuer_sync_age_sec > max_issuer_sync_age_sec)); then
+          issuer_sync_ready="0"
+        fi
+      fi
+      if [[ "$min_issuer_success_sources" =~ ^[0-9]+$ ]] && ((min_issuer_success_sources > 0)); then
+        if ! [[ "$issuer_sources" =~ ^[0-9]+$ ]] || ((issuer_sources < min_issuer_success_sources)); then
+          issuer_sync_ready="0"
+        fi
+      fi
+      if [[ "$min_issuer_source_operators" =~ ^[0-9]+$ ]] && ((min_issuer_source_operators > 0)); then
+        if ! [[ "$issuer_source_operators_count" =~ ^[0-9]+$ ]] || ((issuer_source_operators_count < min_issuer_source_operators)); then
+          issuer_sync_ready="0"
+        fi
+      fi
+      if [[ "$configured_peers" =~ ^[0-9]+$ ]] && ((configured_peers > 0)); then
+        if [[ "$require_configured_healthy" == "1" ]]; then
+          if [[ "$configured_healthy" =~ ^[0-9]+$ ]] && ((configured_healthy >= configured_peers)); then
+            peer_health_ready="1"
+          fi
+        elif [[ "$configured_healthy" =~ ^[0-9]+$ ]] && ((configured_healthy > 0)); then
+          peer_health_ready="1"
+        elif [[ "$discovered_eligible" =~ ^[0-9]+$ ]] && ((discovered_eligible > 0)); then
+          peer_health_ready="1"
+        fi
+      elif [[ "$discovered_eligible" =~ ^[0-9]+$ ]] && ((discovered_eligible > 0)); then
+        peer_health_ready="1"
+      fi
+
+      if [[ "$max_cooling_retry_sec" =~ ^[0-9]+$ ]] && ((max_cooling_retry_sec > 0)) &&
+        [[ "$cooling_retry_max_sec" =~ ^[0-9]+$ ]] && ((cooling_retry_max_sec > max_cooling_retry_sec)); then
+        echo "server-federation-wait: FAIL cooling retry window exceeds threshold (observed=${cooling_retry_max_sec}s threshold=${max_cooling_retry_sec}s)"
+        echo "  peer_sync: success=$peer_success quorum_met=$peer_quorum success_sources=$peer_sources source_operator_count=$peer_source_operators_count last_run_at=$peer_last_run age_sec=$peer_sync_age_display"
+        if [[ -n "$peer_source_operators" ]]; then
+          echo "  peer_sync_source_operators: $peer_source_operators"
+        fi
+        echo "  issuer_sync: success=$issuer_success quorum_met=$issuer_quorum success_sources=$issuer_sources source_operator_count=$issuer_source_operators_count last_run_at=$issuer_last_run age_sec=$issuer_sync_age_display"
+        if [[ -n "$issuer_source_operators" ]]; then
+          echo "  issuer_sync_source_operators: $issuer_source_operators"
+        fi
+        echo "  peer_health: configured_failing=${configured_failing}/${configured_peers} discovered_eligible=$discovered_eligible cooling_retry_max_sec=$cooling_retry_max_sec"
+        if [[ "$show_json" == "1" ]]; then
+          echo "json:"
+          jq -n --argjson sync "$last_sync_json" --argjson peer "$last_peer_json" \
+            '{sync_status: $sync, peer_status: $peer}'
+        fi
+        rm -f "$sync_body" "$peer_status_body"
+        return 1
+      fi
+
+      last_peer_sync_ready="$peer_sync_ready"
+      last_issuer_sync_ready="$issuer_sync_ready"
+      last_peer_health_ready="$peer_health_ready"
+      last_configured_peers="$configured_peers"
+      last_configured_healthy="$configured_healthy"
+      last_discovered_eligible="$discovered_eligible"
+      last_peer_success="$peer_success"
+      last_peer_quorum="$peer_quorum"
+      last_peer_last_run="$peer_last_run"
+      last_issuer_success="$issuer_success"
+      last_issuer_quorum="$issuer_quorum"
+      last_issuer_last_run="$issuer_last_run"
+      last_peer_sync_age_sec="$peer_sync_age_sec"
+      last_issuer_sync_age_sec="$issuer_sync_age_sec"
+      last_peer_sources="$peer_sources"
+      last_issuer_sources="$issuer_sources"
+      last_peer_source_operators_count="$peer_source_operators_count"
+      last_issuer_source_operators_count="$issuer_source_operators_count"
+      last_peer_source_operators="$peer_source_operators"
+      last_issuer_source_operators="$issuer_source_operators"
+      last_configured_failing="$configured_failing"
+      last_cooling_retry_max_sec="$cooling_retry_max_sec"
+
+      if [[ "$peer_sync_ready" == "1" && "$issuer_sync_ready" == "1" && "$peer_health_ready" == "1" ]]; then
+        echo "server-federation-wait: READY (attempts=$attempt elapsed_sec=$elapsed_sec)"
+        echo "  peer_sync: success=$peer_success quorum_met=$peer_quorum success_sources=$peer_sources source_operator_count=$peer_source_operators_count last_run_at=$peer_last_run age_sec=$peer_sync_age_display"
+        if [[ -n "$peer_source_operators" ]]; then
+          echo "  peer_sync_source_operators: $peer_source_operators"
+        fi
+        echo "  issuer_sync: success=$issuer_success quorum_met=$issuer_quorum success_sources=$issuer_sources source_operator_count=$issuer_source_operators_count last_run_at=$issuer_last_run age_sec=$issuer_sync_age_display"
+        if [[ -n "$issuer_source_operators" ]]; then
+          echo "  issuer_sync_source_operators: $issuer_source_operators"
+        fi
+        echo "  peer_health: configured_healthy=${configured_healthy}/${configured_peers} configured_failing=$configured_failing discovered_eligible=$discovered_eligible cooling_retry_max_sec=$cooling_retry_max_sec"
+        if [[ "$show_json" == "1" ]]; then
+          echo "json:"
+          jq -n --argjson sync "$last_sync_json" --argjson peer "$last_peer_json" \
+            '{sync_status: $sync, peer_status: $peer}'
+        fi
+        rm -f "$sync_body" "$peer_status_body"
+        return 0
+      fi
+
+      echo "server-federation-wait poll: attempt=$attempt remaining_sec=$remaining_sec peer_sync_ready=$peer_sync_ready issuer_sync_ready=$issuer_sync_ready peer_health_ready=$peer_health_ready peer_success_sources=$peer_sources issuer_success_sources=$issuer_sources peer_source_operators=$peer_source_operators_count issuer_source_operators=$issuer_source_operators_count peer_sync_age_sec=$peer_sync_age_display issuer_sync_age_sec=$issuer_sync_age_display configured_healthy=${configured_healthy}/${configured_peers} configured_failing=$configured_failing discovered_eligible=$discovered_eligible cooling_retry_max_sec=$cooling_retry_max_sec"
+    else
+      echo "server-federation-wait poll: attempt=$attempt remaining_sec=$remaining_sec sync_code=${sync_code:-none} peer_status_code=${peer_status_code:-none} (waiting for admin endpoints)"
+    fi
+
+    rm -f "$sync_body" "$peer_status_body"
+
+    if ((remaining_sec <= 0)); then
+      break
+    fi
+    local sleep_sec="$poll_sec"
+    if ((sleep_sec > remaining_sec)); then
+      sleep_sec="$remaining_sec"
+    fi
+    sleep "$sleep_sec"
+  done
+
+  echo "server-federation-wait: TIMEOUT after ${ready_timeout_sec}s"
+  local last_peer_sync_age_display last_issuer_sync_age_display
+  last_peer_sync_age_display="n/a"
+  if [[ "$last_peer_sync_age_sec" =~ ^[0-9]+$ ]] && ((last_peer_sync_age_sec >= 0)); then
+    last_peer_sync_age_display="$last_peer_sync_age_sec"
+  fi
+  last_issuer_sync_age_display="n/a"
+  if [[ "$last_issuer_sync_age_sec" =~ ^[0-9]+$ ]] && ((last_issuer_sync_age_sec >= 0)); then
+    last_issuer_sync_age_display="$last_issuer_sync_age_sec"
+  fi
+  echo "  peer_sync_ready=$last_peer_sync_ready (success=$last_peer_success quorum_met=$last_peer_quorum success_sources=$last_peer_sources source_operator_count=$last_peer_source_operators_count last_run_at=$last_peer_last_run age_sec=$last_peer_sync_age_display)"
+  if [[ -n "$last_peer_source_operators" ]]; then
+    echo "  peer_sync_source_operators=$last_peer_source_operators"
+  fi
+  echo "  issuer_sync_ready=$last_issuer_sync_ready (success=$last_issuer_success quorum_met=$last_issuer_quorum success_sources=$last_issuer_sources source_operator_count=$last_issuer_source_operators_count last_run_at=$last_issuer_last_run age_sec=$last_issuer_sync_age_display)"
+  if [[ -n "$last_issuer_source_operators" ]]; then
+    echo "  issuer_sync_source_operators=$last_issuer_source_operators"
+  fi
+  echo "  peer_health_ready=$last_peer_health_ready (configured_healthy=${last_configured_healthy}/${last_configured_peers} configured_failing=$last_configured_failing discovered_eligible=$last_discovered_eligible cooling_retry_max_sec=$last_cooling_retry_max_sec)"
+  echo "hints:"
+  echo "  - run './scripts/easy_node.sh server-federation-status --directory-url ${directory_url}' for full per-peer diagnostics"
+  echo "  - verify DIRECTORY_PEERS points at reachable peer directories and at least one healthy peer is available"
+  echo "  - if a peer was decommissioned, remove it from DIRECTORY_PEERS or rely on discovered eligible peers"
+
+  if [[ "$show_json" == "1" && -n "$last_sync_json" && -n "$last_peer_json" ]]; then
+    echo "json:"
+    jq -n --argjson sync "$last_sync_json" --argjson peer "$last_peer_json" \
+      '{sync_status: $sync, peer_status: $peer}'
+  fi
+  return 1
 }
 
 server_logs() {
@@ -5669,6 +6936,7 @@ invite_generate() {
   local count="1"
   local prefix="inv"
   local tier="1"
+  local wait_sec="0"
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -5700,6 +6968,10 @@ invite_generate() {
         tier="${2:-}"
         shift 2
         ;;
+      --wait-sec)
+        wait_sec="${2:-}"
+        shift 2
+        ;;
       -h|--help|help)
         usage
         return 0
@@ -5718,11 +6990,23 @@ invite_generate() {
   if [[ "$issuer_url" != http://* && "$issuer_url" != https://* ]]; then
     issuer_url="$(ensure_url_scheme "$issuer_url" "http")"
   fi
+  if ! [[ "$wait_sec" =~ ^[0-9]+$ ]]; then
+    echo "invite-generate requires --wait-sec >= 0"
+    exit 2
+  fi
   if [[ -n "$admin_key_file" || -n "$admin_key_id" ]]; then
     if [[ -z "$admin_key_file" || -z "$admin_key_id" ]]; then
       echo "invite-generate requires --admin-key-file and --admin-key-id together"
       exit 2
     fi
+  fi
+  if ((wait_sec > 0)); then
+    local -a issuer_opts
+    mapfile -t issuer_opts < <(curl_tls_opts_for_url "$issuer_url")
+    wait_http_ok_with_opts "${issuer_url%/}/v1/pubkeys" "issuer for invite-generate" "$wait_sec" "${issuer_opts[@]}" || {
+      echo "invite-generate failed: issuer not ready at ${issuer_url%/}/v1/pubkeys within ${wait_sec}s"
+      exit 1
+    }
   fi
 
   local auth_details auth_mode
@@ -6156,6 +7440,14 @@ prod_preflight() {
   local days_min="14"
   local check_live="${EASY_NODE_PROD_PREFLIGHT_CHECK_LIVE:-0}"
   local timeout_sec="${EASY_NODE_PROD_PREFLIGHT_TIMEOUT_SEC:-12}"
+  local live_require_configured_healthy="${EASY_NODE_PROD_PREFLIGHT_LIVE_REQUIRE_CONFIGURED_HEALTHY:-0}"
+  local live_max_cooling_retry_sec="${EASY_NODE_PROD_PREFLIGHT_LIVE_MAX_COOLING_RETRY_SEC:-0}"
+  local live_max_peer_sync_age_sec="${EASY_NODE_PROD_PREFLIGHT_LIVE_MAX_PEER_SYNC_AGE_SEC:-0}"
+  local live_max_issuer_sync_age_sec="${EASY_NODE_PROD_PREFLIGHT_LIVE_MAX_ISSUER_SYNC_AGE_SEC:-0}"
+  local live_min_peer_success_sources="${EASY_NODE_PROD_PREFLIGHT_LIVE_MIN_PEER_SUCCESS_SOURCES:-0}"
+  local live_min_issuer_success_sources="${EASY_NODE_PROD_PREFLIGHT_LIVE_MIN_ISSUER_SUCCESS_SOURCES:-0}"
+  local live_min_peer_source_operators="${EASY_NODE_PROD_PREFLIGHT_LIVE_MIN_PEER_SOURCE_OPERATORS:-0}"
+  local live_min_issuer_source_operators="${EASY_NODE_PROD_PREFLIGHT_LIVE_MIN_ISSUER_SOURCE_OPERATORS:-0}"
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --days-min)
@@ -6173,6 +7465,43 @@ prod_preflight() {
         ;;
       --timeout-sec)
         timeout_sec="${2:-}"
+        shift 2
+        ;;
+      --live-require-configured-healthy)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          live_require_configured_healthy="${2:-}"
+          shift 2
+        else
+          live_require_configured_healthy="1"
+          shift
+        fi
+        ;;
+      --live-max-cooling-retry-sec)
+        live_max_cooling_retry_sec="${2:-}"
+        shift 2
+        ;;
+      --live-max-peer-sync-age-sec)
+        live_max_peer_sync_age_sec="${2:-}"
+        shift 2
+        ;;
+      --live-max-issuer-sync-age-sec)
+        live_max_issuer_sync_age_sec="${2:-}"
+        shift 2
+        ;;
+      --live-min-peer-success-sources)
+        live_min_peer_success_sources="${2:-}"
+        shift 2
+        ;;
+      --live-min-issuer-success-sources)
+        live_min_issuer_success_sources="${2:-}"
+        shift 2
+        ;;
+      --live-min-peer-source-operators)
+        live_min_peer_source_operators="${2:-}"
+        shift 2
+        ;;
+      --live-min-issuer-source-operators)
+        live_min_issuer_source_operators="${2:-}"
         shift 2
         ;;
       -h|--help|help)
@@ -6195,6 +7524,38 @@ prod_preflight() {
   fi
   if ! [[ "$timeout_sec" =~ ^[0-9]+$ ]] || ((timeout_sec < 1)); then
     echo "prod-preflight requires --timeout-sec >= 1"
+    exit 2
+  fi
+  if [[ "$live_require_configured_healthy" != "0" && "$live_require_configured_healthy" != "1" ]]; then
+    echo "prod-preflight requires --live-require-configured-healthy to be 0 or 1"
+    exit 2
+  fi
+  if ! [[ "$live_max_cooling_retry_sec" =~ ^[0-9]+$ ]]; then
+    echo "prod-preflight requires --live-max-cooling-retry-sec to be >= 0"
+    exit 2
+  fi
+  if ! [[ "$live_max_peer_sync_age_sec" =~ ^[0-9]+$ ]]; then
+    echo "prod-preflight requires --live-max-peer-sync-age-sec to be >= 0"
+    exit 2
+  fi
+  if ! [[ "$live_max_issuer_sync_age_sec" =~ ^[0-9]+$ ]]; then
+    echo "prod-preflight requires --live-max-issuer-sync-age-sec to be >= 0"
+    exit 2
+  fi
+  if ! [[ "$live_min_peer_success_sources" =~ ^[0-9]+$ ]]; then
+    echo "prod-preflight requires --live-min-peer-success-sources to be >= 0"
+    exit 2
+  fi
+  if ! [[ "$live_min_issuer_success_sources" =~ ^[0-9]+$ ]]; then
+    echo "prod-preflight requires --live-min-issuer-success-sources to be >= 0"
+    exit 2
+  fi
+  if ! [[ "$live_min_peer_source_operators" =~ ^[0-9]+$ ]]; then
+    echo "prod-preflight requires --live-min-peer-source-operators to be >= 0"
+    exit 2
+  fi
+  if ! [[ "$live_min_issuer_source_operators" =~ ^[0-9]+$ ]]; then
+    echo "prod-preflight requires --live-min-issuer-source-operators to be >= 0"
     exit 2
   fi
 
@@ -6821,6 +8182,173 @@ prod_preflight() {
         fi
       fi
       rm -f "$governance_body"
+
+      local sync_url sync_body sync_code
+      sync_url="${directory_public_url%/}/v1/admin/sync-status"
+      sync_body="$(mktemp)"
+      sync_code="$(
+        curl -sS -o "$sync_body" -w "%{http_code}" \
+          --connect-timeout 3 --max-time "$timeout_sec" \
+          "${governance_tls_opts[@]}" \
+          -H "X-Admin-Token: ${directory_admin_token}" \
+          "$sync_url" || true
+      )"
+      if [[ "$sync_code" != "200" ]]; then
+        check_fail "live sync-status endpoint unreachable/unauthorized: ${sync_url} (code=${sync_code:-none})"
+      else
+        check_ok "live sync-status endpoint healthy: ${sync_url}"
+        if ! jq -e '.peer and .issuer' <"$sync_body" >/dev/null 2>&1; then
+          check_fail "live sync-status payload invalid: expected peer+issuer fields"
+        else
+          local live_peer_quorum live_peer_success live_peer_sources live_peer_source_operators
+          local live_issuer_quorum live_issuer_success live_issuer_sources live_issuer_source_operators
+          local live_peer_last_run live_issuer_last_run live_sync_generated_at live_sync_ref_epoch
+          local live_peer_sync_age_sec live_issuer_sync_age_sec
+          live_peer_quorum="$(jq -r '.peer.quorum_met // false' <"$sync_body" 2>/dev/null || echo "false")"
+          live_peer_success="$(jq -r '.peer.success // false' <"$sync_body" 2>/dev/null || echo "false")"
+          live_peer_sources="$(jq -r '.peer.success_sources // 0' <"$sync_body" 2>/dev/null || echo "0")"
+          live_peer_source_operators="$(jq -r '((.peer.source_operators // []) | length) // 0' <"$sync_body" 2>/dev/null || echo "0")"
+          live_issuer_quorum="$(jq -r '.issuer.quorum_met // false' <"$sync_body" 2>/dev/null || echo "false")"
+          live_issuer_success="$(jq -r '.issuer.success // false' <"$sync_body" 2>/dev/null || echo "false")"
+          live_issuer_sources="$(jq -r '.issuer.success_sources // 0' <"$sync_body" 2>/dev/null || echo "0")"
+          live_issuer_source_operators="$(jq -r '((.issuer.source_operators // []) | length) // 0' <"$sync_body" 2>/dev/null || echo "0")"
+          live_peer_last_run="$(jq -r '.peer.last_run_at // 0' <"$sync_body" 2>/dev/null || echo "0")"
+          live_issuer_last_run="$(jq -r '.issuer.last_run_at // 0' <"$sync_body" 2>/dev/null || echo "0")"
+          live_sync_generated_at="$(jq -r '.generated_at // 0' <"$sync_body" 2>/dev/null || echo "0")"
+          live_sync_ref_epoch="$(date +%s)"
+          if [[ "$live_sync_generated_at" =~ ^[0-9]+$ ]] && ((live_sync_generated_at > 0)); then
+            live_sync_ref_epoch="$live_sync_generated_at"
+          fi
+          live_peer_sync_age_sec="-1"
+          if [[ "$live_peer_last_run" =~ ^[0-9]+$ ]] && ((live_peer_last_run > 0)); then
+            live_peer_sync_age_sec=$((live_sync_ref_epoch - live_peer_last_run))
+            if ((live_peer_sync_age_sec < 0)); then
+              live_peer_sync_age_sec=0
+            fi
+          fi
+          live_issuer_sync_age_sec="-1"
+          if [[ "$live_issuer_last_run" =~ ^[0-9]+$ ]] && ((live_issuer_last_run > 0)); then
+            live_issuer_sync_age_sec=$((live_sync_ref_epoch - live_issuer_last_run))
+            if ((live_issuer_sync_age_sec < 0)); then
+              live_issuer_sync_age_sec=0
+            fi
+          fi
+
+          if [[ "$live_peer_last_run" =~ ^[0-9]+$ ]] && ((live_peer_last_run > 0)); then
+            if [[ "$live_peer_quorum" == "true" && "$live_peer_success" == "true" ]]; then
+              check_ok "live peer-sync quorum met"
+            else
+              check_fail "live peer-sync quorum not met (success=${live_peer_success} quorum=${live_peer_quorum})"
+            fi
+          else
+            check_ok "live peer-sync not started yet (no last_run_at); skipping quorum gate"
+          fi
+          if [[ "$live_issuer_quorum" == "true" && "$live_issuer_success" == "true" ]]; then
+            check_ok "live issuer-sync quorum met"
+          else
+            check_fail "live issuer-sync quorum not met (success=${live_issuer_success} quorum=${live_issuer_quorum})"
+          fi
+          if [[ "$live_max_peer_sync_age_sec" =~ ^[0-9]+$ ]] && ((live_max_peer_sync_age_sec > 0)); then
+            if [[ "$live_peer_sync_age_sec" =~ ^[0-9]+$ ]] && ((live_peer_sync_age_sec <= live_max_peer_sync_age_sec)); then
+              check_ok "live peer-sync freshness within threshold (${live_peer_sync_age_sec}s <= ${live_max_peer_sync_age_sec}s)"
+            else
+              check_fail "live peer-sync freshness too old: age=${live_peer_sync_age_sec}s threshold=${live_max_peer_sync_age_sec}s"
+            fi
+          fi
+          if [[ "$live_min_peer_success_sources" =~ ^[0-9]+$ ]] && ((live_min_peer_success_sources > 0)); then
+            if [[ "$live_peer_sources" =~ ^[0-9]+$ ]] && ((live_peer_sources >= live_min_peer_success_sources)); then
+              check_ok "live peer-sync success_sources floor met (${live_peer_sources} >= ${live_min_peer_success_sources})"
+            else
+              check_fail "live peer-sync success_sources too low: observed ${live_peer_sources} required ${live_min_peer_success_sources}"
+            fi
+          fi
+          if [[ "$live_min_peer_source_operators" =~ ^[0-9]+$ ]] && ((live_min_peer_source_operators > 0)); then
+            if [[ "$live_peer_source_operators" =~ ^[0-9]+$ ]] && ((live_peer_source_operators >= live_min_peer_source_operators)); then
+              check_ok "live peer-sync source_operators floor met (${live_peer_source_operators} >= ${live_min_peer_source_operators})"
+            else
+              check_fail "live peer-sync source_operators too low: observed ${live_peer_source_operators} required ${live_min_peer_source_operators}"
+            fi
+          fi
+          if [[ "$live_max_issuer_sync_age_sec" =~ ^[0-9]+$ ]] && ((live_max_issuer_sync_age_sec > 0)); then
+            if [[ "$live_issuer_sync_age_sec" =~ ^[0-9]+$ ]] && ((live_issuer_sync_age_sec <= live_max_issuer_sync_age_sec)); then
+              check_ok "live issuer-sync freshness within threshold (${live_issuer_sync_age_sec}s <= ${live_max_issuer_sync_age_sec}s)"
+            else
+              check_fail "live issuer-sync freshness too old: age=${live_issuer_sync_age_sec}s threshold=${live_max_issuer_sync_age_sec}s"
+            fi
+          fi
+          if [[ "$live_min_issuer_success_sources" =~ ^[0-9]+$ ]] && ((live_min_issuer_success_sources > 0)); then
+            if [[ "$live_issuer_sources" =~ ^[0-9]+$ ]] && ((live_issuer_sources >= live_min_issuer_success_sources)); then
+              check_ok "live issuer-sync success_sources floor met (${live_issuer_sources} >= ${live_min_issuer_success_sources})"
+            else
+              check_fail "live issuer-sync success_sources too low: observed ${live_issuer_sources} required ${live_min_issuer_success_sources}"
+            fi
+          fi
+          if [[ "$live_min_issuer_source_operators" =~ ^[0-9]+$ ]] && ((live_min_issuer_source_operators > 0)); then
+            if [[ "$live_issuer_source_operators" =~ ^[0-9]+$ ]] && ((live_issuer_source_operators >= live_min_issuer_source_operators)); then
+              check_ok "live issuer-sync source_operators floor met (${live_issuer_source_operators} >= ${live_min_issuer_source_operators})"
+            else
+              check_fail "live issuer-sync source_operators too low: observed ${live_issuer_source_operators} required ${live_min_issuer_source_operators}"
+            fi
+          fi
+        fi
+      fi
+      rm -f "$sync_body"
+
+      local peer_status_url peer_status_body peer_status_code
+      peer_status_url="${directory_public_url%/}/v1/admin/peer-status"
+      peer_status_body="$(mktemp)"
+      peer_status_code="$(
+        curl -sS -o "$peer_status_body" -w "%{http_code}" \
+          --connect-timeout 3 --max-time "$timeout_sec" \
+          "${governance_tls_opts[@]}" \
+          -H "X-Admin-Token: ${directory_admin_token}" \
+          "$peer_status_url" || true
+      )"
+      if [[ "$peer_status_code" != "200" ]]; then
+        check_fail "live peer-status endpoint unreachable/unauthorized: ${peer_status_url} (code=${peer_status_code:-none})"
+      else
+        check_ok "live peer-status endpoint healthy: ${peer_status_url}"
+        if ! jq -e '.peers | arrays' <"$peer_status_body" >/dev/null 2>&1; then
+          check_fail "live peer-status payload invalid: expected peers[] array"
+        else
+          local configured_peers configured_healthy discovered_eligible configured_failing cooling_retry_max_sec
+          configured_peers="$(jq -r '([.peers[] | select(.configured == true)] | length) // 0' <"$peer_status_body" 2>/dev/null || echo "0")"
+          configured_healthy="$(jq -r '([.peers[] | select(.configured == true and ((.consecutive_failures // 0) == 0))] | length) // 0' <"$peer_status_body" 2>/dev/null || echo "0")"
+          discovered_eligible="$(jq -r '([.peers[] | select(.discovered == true and .eligible == true)] | length) // 0' <"$peer_status_body" 2>/dev/null || echo "0")"
+          configured_failing="$(jq -r '([.peers[] | select(.configured == true and ((.consecutive_failures // 0) > 0))] | length) // 0' <"$peer_status_body" 2>/dev/null || echo "0")"
+          cooling_retry_max_sec="$(jq -r '([.peers[] | select(.cooling_down == true) | (.retry_after_sec // 0)] | max // 0)' <"$peer_status_body" 2>/dev/null || echo "0")"
+          if [[ "$configured_peers" =~ ^[0-9]+$ ]] && ((configured_peers > 0)); then
+            if [[ "$live_require_configured_healthy" == "1" ]]; then
+              if [[ "$configured_healthy" =~ ^[0-9]+$ ]] && ((configured_healthy >= configured_peers)); then
+                check_ok "live configured peers all healthy (${configured_healthy}/${configured_peers})"
+              else
+                check_fail "live configured peer health degraded: all configured peers must be healthy when --live-require-configured-healthy=1 (healthy=${configured_healthy}/${configured_peers})"
+              fi
+            elif [[ "$configured_healthy" =~ ^[0-9]+$ ]] && ((configured_healthy > 0)); then
+              check_ok "live configured peer health looks good (${configured_healthy}/${configured_peers} configured peers with zero failure streak)"
+            elif [[ "$discovered_eligible" =~ ^[0-9]+$ ]] && ((discovered_eligible > 0)); then
+              check_ok "live configured peers currently unhealthy but discovered eligible peers are available (${discovered_eligible})"
+            else
+              check_fail "live peer health degraded: no healthy configured peers and no discovered eligible peers"
+            fi
+          else
+            check_ok "live peer-status has no configured peer list; skipping configured peer health gate"
+          fi
+          if [[ "$live_max_cooling_retry_sec" =~ ^[0-9]+$ ]] && ((live_max_cooling_retry_sec > 0)); then
+            if [[ "$cooling_retry_max_sec" =~ ^[0-9]+$ ]] && ((cooling_retry_max_sec <= live_max_cooling_retry_sec)); then
+              check_ok "live cooling retry window within threshold (${cooling_retry_max_sec}s <= ${live_max_cooling_retry_sec}s)"
+            else
+              check_fail "live cooling retry window too high: observed ${cooling_retry_max_sec}s exceeds threshold ${live_max_cooling_retry_sec}s"
+            fi
+          fi
+          if [[ "$configured_failing" =~ ^[0-9]+$ ]] && ((configured_failing > 0)); then
+            check_ok "live configured failing peers observed=${configured_failing} (review with server-federation-status)"
+          else
+            check_ok "live configured failing peers observed=0"
+          fi
+        fi
+      fi
+      rm -f "$peer_status_body"
     fi
 
     if [[ "$mode" == "authority" && -n "$live_issuer_url" ]]; then
@@ -6846,6 +8374,15 @@ prod_preflight() {
 
   echo "prod preflight summary: checks=$check_total failures=$fail mode=$mode env=$env_file check_live=$check_live"
   if ((fail > 0)); then
+    if [[ "$check_live" == "1" ]]; then
+      local federation_dir_hint=""
+      if [[ -n "$directory_public_url" ]]; then
+        federation_dir_hint=" --directory-url ${directory_public_url}"
+      fi
+      echo "prod preflight remediation hints:"
+      echo "  ./scripts/easy_node.sh server-federation-status${federation_dir_hint} --timeout-sec ${timeout_sec}"
+      echo "  ./scripts/easy_node.sh server-federation-wait${federation_dir_hint} --ready-timeout-sec 90 --poll-sec 5 --timeout-sec ${timeout_sec}"
+    fi
     return 1
   fi
   return 0
@@ -7521,6 +9058,9 @@ client_vpn_preflight() {
   local timeout_sec="${EASY_NODE_CLIENT_VPN_PREFLIGHT_TIMEOUT_SEC:-12}"
   local require_root="1"
   local operator_floor_check="${EASY_NODE_CLIENT_VPN_OPERATOR_FLOOR_CHECK:-}"
+  local operator_min_operators="${EASY_NODE_CLIENT_VPN_OPERATOR_MIN_OPERATORS:-2}"
+  local operator_min_entry_operators="${EASY_NODE_CLIENT_VPN_OPERATOR_MIN_ENTRY_OPERATORS:-}"
+  local operator_min_exit_operators="${EASY_NODE_CLIENT_VPN_OPERATOR_MIN_EXIT_OPERATORS:-}"
   local issuer_quorum_check="${EASY_NODE_CLIENT_VPN_ISSUER_QUORUM_CHECK:-}"
   local issuer_min_operators="${EASY_NODE_CLIENT_VPN_ISSUER_MIN_OPERATORS:-2}"
   local mtls_ca_file="$DEPLOY_DIR/tls/ca.crt"
@@ -7592,6 +9132,18 @@ client_vpn_preflight() {
           shift
         fi
         ;;
+      --operator-min-operators)
+        operator_min_operators="${2:-}"
+        shift 2
+        ;;
+      --operator-min-entry-operators)
+        operator_min_entry_operators="${2:-}"
+        shift 2
+        ;;
+      --operator-min-exit-operators)
+        operator_min_exit_operators="${2:-}"
+        shift 2
+        ;;
       --issuer-quorum-check)
         if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
           issuer_quorum_check="${2:-}"
@@ -7647,6 +9199,24 @@ client_vpn_preflight() {
   fi
   if [[ "$operator_floor_check" != "0" && "$operator_floor_check" != "1" ]]; then
     echo "client-vpn-preflight requires --operator-floor-check 0 or 1"
+    exit 2
+  fi
+  if [[ -z "$operator_min_entry_operators" ]]; then
+    operator_min_entry_operators="$operator_min_operators"
+  fi
+  if [[ -z "$operator_min_exit_operators" ]]; then
+    operator_min_exit_operators="$operator_min_operators"
+  fi
+  if ! [[ "$operator_min_operators" =~ ^[0-9]+$ ]] || ((operator_min_operators < 1)); then
+    echo "client-vpn-preflight requires --operator-min-operators >= 1"
+    exit 2
+  fi
+  if ! [[ "$operator_min_entry_operators" =~ ^[0-9]+$ ]] || ((operator_min_entry_operators < 1)); then
+    echo "client-vpn-preflight requires --operator-min-entry-operators >= 1"
+    exit 2
+  fi
+  if ! [[ "$operator_min_exit_operators" =~ ^[0-9]+$ ]] || ((operator_min_exit_operators < 1)); then
+    echo "client-vpn-preflight requires --operator-min-exit-operators >= 1"
     exit 2
   fi
   if [[ -z "$issuer_quorum_check" ]]; then
@@ -7735,6 +9305,9 @@ client_vpn_preflight() {
   echo "  interface: $interface_name"
   echo "  prod_profile: $prod_profile"
   echo "  operator_floor_check: $operator_floor_check"
+  echo "  operator_min_operators: $operator_min_operators"
+  echo "  operator_min_entry_operators: $operator_min_entry_operators"
+  echo "  operator_min_exit_operators: $operator_min_exit_operators"
   echo "  issuer_quorum_check: $issuer_quorum_check"
   echo "  issuer_urls: $issuer_urls"
 
@@ -7771,31 +9344,43 @@ client_vpn_preflight() {
 
   if [[ "$operator_floor_check" == "1" ]]; then
     local all_ops entry_ops exit_ops missing_ops fetch_fail parse_fail
-    IFS='|' read -r all_ops entry_ops exit_ops missing_ops fetch_fail parse_fail < <(client_vpn_operator_floor_summary "$directory_urls" "$timeout_sec")
+    local all_ops_list entry_ops_list exit_ops_list
+    local operator_floor_failed=0
+    IFS='|' read -r all_ops entry_ops exit_ops missing_ops fetch_fail parse_fail all_ops_list entry_ops_list exit_ops_list < <(client_vpn_operator_floor_summary "$directory_urls" "$timeout_sec")
     echo "  operator diversity: all_ops=$all_ops entry_ops=$entry_ops exit_ops=$exit_ops missing_operator_fields=$missing_ops fetch_failures=$fetch_fail parse_failures=$parse_fail"
     if ((fetch_fail > 0)); then
       echo "  [fail] could not fetch relay set from all configured directories"
       fail=$((fail + 1))
+      operator_floor_failed=1
     fi
     if ((parse_fail > 0)); then
       echo "  [fail] failed to parse one or more directory relay payloads"
       fail=$((fail + 1))
+      operator_floor_failed=1
     fi
     if ((missing_ops > 0)); then
       echo "  [fail] relay descriptors missing operator metadata"
       fail=$((fail + 1))
+      operator_floor_failed=1
     fi
-    if ((all_ops < 2)); then
-      echo "  [fail] operator floor not met (need >=2 distinct operators, observed=$all_ops)"
+    if ((all_ops < operator_min_operators)); then
+      echo "  [fail] operator floor not met (need >=$operator_min_operators distinct operators, observed=$all_ops)"
       fail=$((fail + 1))
+      operator_floor_failed=1
     fi
-    if ((entry_ops < 2)); then
-      echo "  [fail] entry operator floor not met (need >=2, observed=$entry_ops)"
+    if ((entry_ops < operator_min_entry_operators)); then
+      echo "  [fail] entry operator floor not met (need >=$operator_min_entry_operators, observed=$entry_ops)"
       fail=$((fail + 1))
+      operator_floor_failed=1
     fi
-    if ((exit_ops < 2)); then
-      echo "  [fail] exit operator floor not met (need >=2, observed=$exit_ops)"
+    if ((exit_ops < operator_min_exit_operators)); then
+      echo "  [fail] exit operator floor not met (need >=$operator_min_exit_operators, observed=$exit_ops)"
       fail=$((fail + 1))
+      operator_floor_failed=1
+    fi
+    if ((operator_floor_failed > 0)); then
+      echo "  observed operators: all=${all_ops_list:-none} entry=${entry_ops_list:-none} exit=${exit_ops_list:-none}"
+      echo "  hint: staged/single-operator labs can keep checks enabled with --operator-min-operators 1 --operator-min-entry-operators 1 --operator-min-exit-operators 1"
     fi
   fi
 
@@ -8176,6 +9761,9 @@ client_vpn_up() {
   local beta_profile="${EASY_NODE_BETA_PROFILE:-1}"
   local prod_profile="${EASY_NODE_PROD_PROFILE:-0}"
   local operator_floor_check="${EASY_NODE_CLIENT_VPN_OPERATOR_FLOOR_CHECK:-}"
+  local operator_min_operators="${EASY_NODE_CLIENT_VPN_OPERATOR_MIN_OPERATORS:-2}"
+  local operator_min_entry_operators="${EASY_NODE_CLIENT_VPN_OPERATOR_MIN_ENTRY_OPERATORS:-}"
+  local operator_min_exit_operators="${EASY_NODE_CLIENT_VPN_OPERATOR_MIN_EXIT_OPERATORS:-}"
   local issuer_quorum_check="${EASY_NODE_CLIENT_VPN_ISSUER_QUORUM_CHECK:-}"
   local issuer_min_operators="${EASY_NODE_CLIENT_VPN_ISSUER_MIN_OPERATORS:-2}"
   local interface_name="${CLIENT_WG_INTERFACE:-wgvpn0}"
@@ -8334,6 +9922,18 @@ client_vpn_up() {
           operator_floor_check="1"
           shift
         fi
+        ;;
+      --operator-min-operators)
+        operator_min_operators="${2:-}"
+        shift 2
+        ;;
+      --operator-min-entry-operators)
+        operator_min_entry_operators="${2:-}"
+        shift 2
+        ;;
+      --operator-min-exit-operators)
+        operator_min_exit_operators="${2:-}"
+        shift 2
         ;;
       --issuer-quorum-check)
         if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
@@ -8496,6 +10096,24 @@ client_vpn_up() {
     echo "client-vpn-up requires --operator-floor-check 0 or 1"
     exit 2
   fi
+  if [[ -z "$operator_min_entry_operators" ]]; then
+    operator_min_entry_operators="$operator_min_operators"
+  fi
+  if [[ -z "$operator_min_exit_operators" ]]; then
+    operator_min_exit_operators="$operator_min_operators"
+  fi
+  if ! [[ "$operator_min_operators" =~ ^[0-9]+$ ]] || ((operator_min_operators < 1)); then
+    echo "client-vpn-up requires --operator-min-operators >= 1"
+    exit 2
+  fi
+  if ! [[ "$operator_min_entry_operators" =~ ^[0-9]+$ ]] || ((operator_min_entry_operators < 1)); then
+    echo "client-vpn-up requires --operator-min-entry-operators >= 1"
+    exit 2
+  fi
+  if ! [[ "$operator_min_exit_operators" =~ ^[0-9]+$ ]] || ((operator_min_exit_operators < 1)); then
+    echo "client-vpn-up requires --operator-min-exit-operators >= 1"
+    exit 2
+  fi
   if [[ -z "$issuer_quorum_check" ]]; then
     if [[ "$prod_profile" == "1" ]]; then
       issuer_quorum_check="1"
@@ -8626,7 +10244,8 @@ client_vpn_up() {
 
   if [[ "$operator_floor_check" == "1" ]]; then
     local all_ops entry_ops exit_ops missing_ops fetch_fail parse_fail
-    IFS='|' read -r all_ops entry_ops exit_ops missing_ops fetch_fail parse_fail < <(client_vpn_operator_floor_summary "$directory_urls" 8)
+    local all_ops_list entry_ops_list exit_ops_list
+    IFS='|' read -r all_ops entry_ops exit_ops missing_ops fetch_fail parse_fail all_ops_list entry_ops_list exit_ops_list < <(client_vpn_operator_floor_summary "$directory_urls" 8)
     if ((fetch_fail > 0)); then
       echo "client-vpn-up operator-floor check failed: could not fetch relays from all configured directories (failures=$fetch_fail)"
       exit 1
@@ -8639,16 +10258,19 @@ client_vpn_up() {
       echo "client-vpn-up operator-floor check failed: relay descriptors missing operator metadata (count=$missing_ops)"
       exit 1
     fi
-    if ((all_ops < 2)); then
-      echo "client-vpn-up operator-floor check failed: need >=2 distinct operators (observed=$all_ops)"
+    if ((all_ops < operator_min_operators)); then
+      echo "client-vpn-up operator-floor check failed: need >=$operator_min_operators distinct operators (observed=$all_ops)"
+      echo "observed operators: all=${all_ops_list:-none} entry=${entry_ops_list:-none} exit=${exit_ops_list:-none}"
       exit 1
     fi
-    if ((entry_ops < 2)); then
-      echo "client-vpn-up operator-floor check failed: need >=2 entry operators (observed=$entry_ops)"
+    if ((entry_ops < operator_min_entry_operators)); then
+      echo "client-vpn-up operator-floor check failed: need >=$operator_min_entry_operators entry operators (observed=$entry_ops)"
+      echo "observed operators: all=${all_ops_list:-none} entry=${entry_ops_list:-none} exit=${exit_ops_list:-none}"
       exit 1
     fi
-    if ((exit_ops < 2)); then
-      echo "client-vpn-up operator-floor check failed: need >=2 exit operators (observed=$exit_ops)"
+    if ((exit_ops < operator_min_exit_operators)); then
+      echo "client-vpn-up operator-floor check failed: need >=$operator_min_exit_operators exit operators (observed=$exit_ops)"
+      echo "observed operators: all=${all_ops_list:-none} entry=${entry_ops_list:-none} exit=${exit_ops_list:-none}"
       exit 1
     fi
   fi
@@ -8937,6 +10559,14 @@ main() {
       ;;
     server-status)
       server_status
+      ;;
+    server-federation-status)
+      shift
+      server_federation_status "$@"
+      ;;
+    server-federation-wait)
+      shift
+      server_federation_wait "$@"
       ;;
     server-logs)
       shift

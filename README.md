@@ -244,6 +244,10 @@ sudo ./scripts/easy_node.sh client-vpn-up \
   --distinct-operators 1
 ./scripts/easy_node.sh client-vpn-status
 sudo ./scripts/easy_node.sh client-vpn-down
+# prod profile enables operator-floor checks by default (>=2 global/entry/exit operators).
+# staged/single-operator labs can keep checks enabled with:
+#   --operator-min-operators 1 --operator-min-entry-operators 1 --operator-min-exit-operators 1
+# disable only for diagnostics with: --operator-floor-check 0
 
 ./scripts/easy_node.sh three-machine-validate \
   --directory-a http://<A_SERVER_IP>:8081 \

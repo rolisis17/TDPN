@@ -1056,14 +1056,13 @@ void quickClientConnect(const std::string &script, ABHosts &hosts) {
     bool runPreflight = parseYesNo(readLine("Run VPN preflight first? (Y/n)", "y"), true);
     if (runPreflight) {
       std::ostringstream preflightCmd;
+      const bool enforceOperatorFloor = prodProfile && pathProfile.distinctOperators;
       preflightCmd << shellEscape(script) << " client-vpn-preflight"
                    << " --bootstrap-directory " << shellEscape(bootstrapDir)
                    << " --discovery-wait-sec " << shellEscape(discoveryWait)
                    << " --prod-profile " << (prodProfile ? "1" : "0")
-                   << " --interface " << shellEscape(iface);
-      if (pathProfile.distinctOperators) {
-        preflightCmd << " --operator-floor-check 1";
-      }
+                   << " --interface " << shellEscape(iface)
+                   << " --operator-floor-check " << (enforceOperatorFloor ? "1" : "0");
       if (!isRootUser()) {
         bool useSudoPreflight = parseYesNo(readLine("Run preflight with sudo? (Y/n)", "y"), true);
         if (runCommandWithOptionalSudo(preflightCmd.str(), useSudoPreflight, "client preflight") != 0) {
@@ -1154,6 +1153,34 @@ void quickServerConnect(const std::string &root, const std::string &script, ABHo
     peerIdentityStrict = "auto";
   }
   std::string preflightTimeout = readLine("Preflight timeout sec", "8");
+  bool autoInvite = false;
+  std::string autoInviteCount = "1";
+  std::string autoInviteTier = "1";
+  std::string autoInviteWaitSec = "10";
+  if (authorityMode) {
+    autoInvite = parseYesNo(readLine("Auto-generate invite key(s) when server starts? (Y/n)", "y"), true);
+    if (autoInvite) {
+      autoInviteCount = trim(readLine("Auto invite key count", "1"));
+      bool countDigits = !autoInviteCount.empty() &&
+                         std::all_of(autoInviteCount.begin(), autoInviteCount.end(), [](unsigned char c) { return std::isdigit(c) != 0; });
+      if (!countDigits || autoInviteCount == "0") {
+        std::cout << "invalid auto invite count; using 1\n";
+        autoInviteCount = "1";
+      }
+      autoInviteTier = trim(readLine("Auto invite tier (1/2/3)", "1"));
+      if (autoInviteTier != "1" && autoInviteTier != "2" && autoInviteTier != "3") {
+        std::cout << "invalid auto invite tier; using 1\n";
+        autoInviteTier = "1";
+      }
+      autoInviteWaitSec = trim(readLine("Auto invite issuer-ready wait sec", "10"));
+      bool waitDigits = !autoInviteWaitSec.empty() &&
+                        std::all_of(autoInviteWaitSec.begin(), autoInviteWaitSec.end(), [](unsigned char c) { return std::isdigit(c) != 0; });
+      if (!waitDigits) {
+        std::cout << "invalid auto invite wait; using 10\n";
+        autoInviteWaitSec = "10";
+      }
+    }
+  }
 
   std::string modeValue = authorityMode ? "authority" : "provider";
   std::string peerDirectoriesArg = "";
@@ -1170,7 +1197,12 @@ void quickServerConnect(const std::string &root, const std::string &script, ABHo
       << " --cleanup-all 1";
   if (authorityMode) {
     cmd << " --client-allowlist 1"
-        << " --allow-anon-cred 0";
+        << " --allow-anon-cred 0"
+        << " --auto-invite " << (autoInvite ? "1" : "0")
+        << " --auto-invite-count " << shellEscape(autoInviteCount)
+        << " --auto-invite-tier " << shellEscape(autoInviteTier)
+        << " --auto-invite-wait-sec " << shellEscape(autoInviteWaitSec)
+        << " --auto-invite-fail-open 1";
     if (!peerHost.empty()) {
       peerDirectoriesArg = endpointFromHost(peerHost, 8081);
       cmd << " --peer-directories " << shellEscape(peerDirectoriesArg);
@@ -1249,19 +1281,10 @@ void quickServerConnect(const std::string &root, const std::string &script, ABHo
   }
 
   if (launchedSession && authorityMode) {
-    std::cout << "server session launched. Generate invite keys after startup from Other options -> 7.\n";
+    std::cout << "server session launched.\n";
   } else if (launchedSession) {
     std::cout << "provider session launched (no local admin/invite controls).\n";
-  } else if (rc == 0 && authorityMode) {
-    bool genInvite = parseYesNo(readLine("Generate invite key now? (Y/n)", "y"), true);
-    if (genInvite) {
-      std::string count = readLine("How many invite keys", "1");
-      std::ostringstream inviteCmd;
-      inviteCmd << shellEscape(script) << " invite-generate"
-                << " --count " << shellEscape(count);
-      runCommand(inviteCmd.str());
-    }
-  } else if (rc == 0) {
+  } else if (rc == 0 && !authorityMode) {
     std::cout << "provider mode started (no local admin/invite controls)\n";
   }
 }
@@ -1341,6 +1364,8 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
     std::cout << "66) Manual validation report (markdown + JSON readiness handoff)\n";
     std::cout << "67) WG-only selftest + readiness receipt\n";
     std::cout << "68) Pre-real-host readiness sweep (runtime fix + WG-only + report)\n";
+    std::cout << "69) Server federation status (peer + sync health)\n";
+    std::cout << "70) Server federation wait gate (block until ready)\n";
     std::cout << "0) Back\n";
     std::cout << "Selection: ";
 
@@ -3376,6 +3401,54 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       bool verifyAbsent = parseYesNo(readLine("Verify relay absence on offboard? (Y/n)", "y"), true);
       std::string verifyRelayTimeout = trim(readLine("Relay verify timeout sec", "90"));
       std::string verifyRelayMinCount = trim(readLine("Relay verify min count (onboard)", "2"));
+      bool federationCheck = parseYesNo(readLine("Run federation readiness gate on onboard? (Y/n)", "y"), true);
+      std::string federationReadyTimeout = trim(readLine("Federation ready timeout sec", "90"));
+      std::string federationPollSec = trim(readLine("Federation poll interval sec", "5"));
+      std::string federationTimeoutSec = trim(readLine("Federation request timeout sec", "8"));
+      std::string federationStatusFile = trim(readLine("Federation status artifact path (optional)", ""));
+      bool onboardInvite = parseYesNo(readLine("Enable onboard invite bootstrap (authority only)? (y/N)", "n"), false);
+      std::string onboardInviteCount = "1";
+      std::string onboardInviteTier = "1";
+      std::string onboardInviteWaitSec = "10";
+      bool onboardInviteFailOpen = true;
+      std::string onboardInviteFile = "";
+      if (onboardInvite) {
+        onboardInviteCount = trim(readLine("Onboard invite count", "1"));
+        onboardInviteTier = trim(readLine("Onboard invite tier (1/2/3)", "1"));
+        onboardInviteWaitSec = trim(readLine("Onboard invite wait sec", "10"));
+        onboardInviteFailOpen = parseYesNo(readLine("Continue if onboard invite bootstrap fails? (Y/n)", "y"), true);
+        onboardInviteFile = trim(readLine("Onboard invite artifact path (optional)", ""));
+      }
+      bool rollbackOnFail = parseYesNo(readLine("Auto-rollback onboard runs if they fail after startup? (Y/n)", "y"), true);
+      bool rollbackVerifyAbsent = true;
+      std::string rollbackVerifyTimeout = "90";
+      if (rollbackOnFail) {
+        rollbackVerifyAbsent = parseYesNo(readLine("After rollback, verify operator relays are absent? (Y/n)", "y"), true);
+        rollbackVerifyTimeout = trim(readLine("Rollback relay-absence verify timeout sec", "90"));
+      }
+      bool incidentSnapshotOnFail = parseYesNo(readLine("Capture incident snapshot automatically on lifecycle failure? (Y/n)", "y"), true);
+      std::string incidentBundleDir = "";
+      std::string incidentTimeoutSec = "20";
+      bool incidentIncludeDockerLogs = true;
+      std::string incidentDockerLogLines = "120";
+      if (incidentSnapshotOnFail) {
+        incidentBundleDir = trim(readLine("Incident bundle dir (optional)", ""));
+        incidentTimeoutSec = trim(readLine("Incident snapshot timeout sec", "20"));
+        incidentIncludeDockerLogs = parseYesNo(readLine("Include docker logs in incident snapshot? (Y/n)", "y"), true);
+        incidentDockerLogLines = trim(readLine("Incident snapshot docker log lines", "120"));
+      }
+      bool runtimeDoctorOnFail = parseYesNo(readLine("Capture runtime-doctor diagnostics on lifecycle failure? (Y/n)", "y"), true);
+      std::string runtimeDoctorBasePort = "19280";
+      std::string runtimeDoctorClientIface = "wgcstack0";
+      std::string runtimeDoctorExitIface = "wgestack0";
+      std::string runtimeDoctorVpnIface = "wgvpn0";
+      if (runtimeDoctorOnFail) {
+        runtimeDoctorBasePort = trim(readLine("Runtime-doctor base port", "19280"));
+        runtimeDoctorClientIface = trim(readLine("Runtime-doctor client iface", "wgcstack0"));
+        runtimeDoctorExitIface = trim(readLine("Runtime-doctor exit iface", "wgestack0"));
+        runtimeDoctorVpnIface = trim(readLine("Runtime-doctor vpn iface", "wgvpn0"));
+      }
+      std::string reportMd = trim(readLine("Lifecycle report markdown path (optional)", ""));
       std::string summaryJson = trim(readLine("Summary JSON path (optional)", ""));
       bool printSummaryJson = parseYesNo(readLine("Print summary JSON payload? (y/N)", "n"), false);
 
@@ -3391,6 +3464,14 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --verify-absent " << (verifyAbsent ? "1" : "0")
           << " --verify-relay-timeout-sec " << shellEscape(verifyRelayTimeout)
           << " --verify-relay-min-count " << shellEscape(verifyRelayMinCount)
+          << " --federation-check " << (federationCheck ? "1" : "0")
+          << " --federation-ready-timeout-sec " << shellEscape(federationReadyTimeout)
+          << " --federation-poll-sec " << shellEscape(federationPollSec)
+          << " --federation-timeout-sec " << shellEscape(federationTimeoutSec)
+          << " --onboard-invite " << (onboardInvite ? "1" : "0")
+          << " --rollback-on-fail " << (rollbackOnFail ? "1" : "0")
+          << " --incident-snapshot-on-fail " << (incidentSnapshotOnFail ? "1" : "0")
+          << " --runtime-doctor-on-fail " << (runtimeDoctorOnFail ? "1" : "0")
           << " --print-summary-json " << (printSummaryJson ? "1" : "0");
       if (!publicHost.empty()) {
         cmd << " --public-host " << shellEscape(publicHost);
@@ -3409,6 +3490,39 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       }
       if (!directoryUrl.empty()) {
         cmd << " --directory-url " << shellEscape(directoryUrl);
+      }
+      if (!federationStatusFile.empty()) {
+        cmd << " --federation-status-file " << shellEscape(federationStatusFile);
+      }
+      if (onboardInvite) {
+        cmd << " --onboard-invite-count " << shellEscape(onboardInviteCount)
+            << " --onboard-invite-tier " << shellEscape(onboardInviteTier)
+            << " --onboard-invite-wait-sec " << shellEscape(onboardInviteWaitSec)
+            << " --onboard-invite-fail-open " << (onboardInviteFailOpen ? "1" : "0");
+        if (!onboardInviteFile.empty()) {
+          cmd << " --onboard-invite-file " << shellEscape(onboardInviteFile);
+        }
+      }
+      if (rollbackOnFail) {
+        cmd << " --rollback-verify-absent " << (rollbackVerifyAbsent ? "1" : "0")
+            << " --rollback-verify-timeout-sec " << shellEscape(rollbackVerifyTimeout);
+      }
+      if (incidentSnapshotOnFail) {
+        cmd << " --incident-timeout-sec " << shellEscape(incidentTimeoutSec)
+            << " --incident-include-docker-logs " << (incidentIncludeDockerLogs ? "1" : "0")
+            << " --incident-docker-log-lines " << shellEscape(incidentDockerLogLines);
+        if (!incidentBundleDir.empty()) {
+          cmd << " --incident-bundle-dir " << shellEscape(incidentBundleDir);
+        }
+      }
+      if (runtimeDoctorOnFail) {
+        cmd << " --runtime-doctor-base-port " << shellEscape(runtimeDoctorBasePort)
+            << " --runtime-doctor-client-iface " << shellEscape(runtimeDoctorClientIface)
+            << " --runtime-doctor-exit-iface " << shellEscape(runtimeDoctorExitIface)
+            << " --runtime-doctor-vpn-iface " << shellEscape(runtimeDoctorVpnIface);
+      }
+      if (!reportMd.empty()) {
+        cmd << " --report-md " << shellEscape(reportMd);
       }
       if (!summaryJson.empty()) {
         cmd << " --summary-json " << shellEscape(summaryJson);
@@ -4378,6 +4492,38 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --print-summary-json " << (printSummaryJson ? "1" : "0");
       runCommand(cmd.str());
       printManualValidationReportSummary(resolveRepoPath(root, ".easy-node-logs/manual_validation_readiness_summary.json"));
+      continue;
+    }
+    if (choice == "69") {
+      std::string directoryUrl = trim(readLine("Directory URL override (optional)", ""));
+      std::string timeoutSec = trim(readLine("Request timeout sec", "8"));
+      bool showJson = parseYesNo(readLine("Show raw JSON payload? (y/N)", "n"), false);
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " server-federation-status"
+          << " --timeout-sec " << shellEscape(timeoutSec)
+          << " --show-json " << (showJson ? "1" : "0");
+      if (!directoryUrl.empty()) {
+        cmd << " --directory-url " << shellEscape(directoryUrl);
+      }
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "70") {
+      std::string directoryUrl = trim(readLine("Directory URL override (optional)", ""));
+      std::string readyTimeoutSec = trim(readLine("Ready timeout sec", "90"));
+      std::string pollSec = trim(readLine("Poll interval sec", "5"));
+      std::string timeoutSec = trim(readLine("Request timeout sec", "8"));
+      bool showJson = parseYesNo(readLine("Show raw JSON payload? (y/N)", "n"), false);
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " server-federation-wait"
+          << " --ready-timeout-sec " << shellEscape(readyTimeoutSec)
+          << " --poll-sec " << shellEscape(pollSec)
+          << " --timeout-sec " << shellEscape(timeoutSec)
+          << " --show-json " << (showJson ? "1" : "0");
+      if (!directoryUrl.empty()) {
+        cmd << " --directory-url " << shellEscape(directoryUrl);
+      }
+      runCommand(cmd.str());
       continue;
     }
 
