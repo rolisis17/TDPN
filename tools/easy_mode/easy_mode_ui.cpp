@@ -100,6 +100,27 @@ int runCommand(const std::string &cmd) {
   return rc;
 }
 
+bool ensureSudoAvailable(const std::string &context) {
+  if (commandExists("sudo")) {
+    return true;
+  }
+  std::cout << "sudo is not available for " << context
+            << ". Run as root or install sudo.\n";
+  return false;
+}
+
+int runCommandWithOptionalSudo(const std::string &cmd,
+                               bool useSudo,
+                               const std::string &context) {
+  if (!useSudo) {
+    return runCommand(cmd);
+  }
+  if (!ensureSudoAvailable(context)) {
+    return 127;
+  }
+  return runCommand("sudo " + cmd);
+}
+
 int launchDetachedTerminalCommand(const std::string &title, const std::string &sessionCommand) {
   bool hasDisplay = false;
   const char *display = std::getenv("DISPLAY");
@@ -168,6 +189,19 @@ int launchDetachedTerminalCommand(const std::string &title, const std::string &s
 
   std::cout << "Could not launch a terminal emulator; running session in current terminal.\n";
   return runCommand(sessionCommand);
+}
+
+int launchDetachedTerminalCommandWithOptionalSudo(const std::string &title,
+                                                  const std::string &sessionCommand,
+                                                  bool useSudo,
+                                                  const std::string &context) {
+  if (!useSudo) {
+    return launchDetachedTerminalCommand(title, sessionCommand);
+  }
+  if (!ensureSudoAvailable(context)) {
+    return 127;
+  }
+  return launchDetachedTerminalCommand(title, "sudo " + sessionCommand);
 }
 
 std::string captureCommandOutput(const std::string &cmd) {
@@ -901,16 +935,9 @@ void quickClientConnect(const std::string &script, ABHosts &hosts) {
       }
       if (!isRootUser()) {
         bool useSudoPreflight = parseYesNo(readLine("Run preflight with sudo? (Y/n)", "y"), true);
-        if (useSudoPreflight) {
-          if (runCommand("sudo " + preflightCmd.str()) != 0) {
-            std::cout << "preflight failed; stopping client connect flow\n";
-            return;
-          }
-        } else {
-          if (runCommand(preflightCmd.str()) != 0) {
-            std::cout << "preflight failed; stopping client connect flow\n";
-            return;
-          }
+        if (runCommandWithOptionalSudo(preflightCmd.str(), useSudoPreflight, "client preflight") != 0) {
+          std::cout << "preflight failed; stopping client connect flow\n";
+          return;
         }
       } else {
         if (runCommand(preflightCmd.str()) != 0) {
@@ -935,18 +962,13 @@ void quickClientConnect(const std::string &script, ABHosts &hosts) {
     appendPathProfileFlags(cmd, pathProfile);
     if (!isRootUser()) {
       bool useSudo = parseYesNo(readLine("Run with sudo? (Y/n)", "y"), true);
-      if (useSudo) {
-        if (openTerminal) {
-          launchDetachedTerminalCommand("Privacynode CLIENT session", "sudo " + cmd.str());
-        } else {
-          runCommand("sudo " + cmd.str());
-        }
+      if (openTerminal) {
+        launchDetachedTerminalCommandWithOptionalSudo("Privacynode CLIENT session",
+                                                     cmd.str(),
+                                                     useSudo,
+                                                     "client session");
       } else {
-        if (openTerminal) {
-          launchDetachedTerminalCommand("Privacynode CLIENT session", cmd.str());
-        } else {
-          runCommand(cmd.str());
-        }
+        runCommandWithOptionalSudo(cmd.str(), useSudo, "client session");
       }
     } else {
       if (openTerminal) {
@@ -1081,15 +1103,13 @@ void quickServerConnect(const std::string &root, const std::string &script, ABHo
   int rc = 0;
   bool launchedSession = false;
   if (openTerminal) {
-    std::string launchCmd = useSudo ? "sudo " + cmd.str() : cmd.str();
-    rc = launchDetachedTerminalCommand("Privacynode SERVER session", launchCmd);
+    rc = launchDetachedTerminalCommandWithOptionalSudo("Privacynode SERVER session",
+                                                       cmd.str(),
+                                                       useSudo,
+                                                       "server session");
     launchedSession = (rc == 0);
   } else {
-    if (useSudo) {
-      rc = runCommand("sudo " + cmd.str());
-    } else {
-      rc = runCommand(cmd.str());
-    }
+    rc = runCommandWithOptionalSudo(cmd.str(), useSudo, "server session");
   }
 
   bool saveHosts = parseYesNo(readLine("Save/update Machine A/B host config? (y/N)", "n"), false);
