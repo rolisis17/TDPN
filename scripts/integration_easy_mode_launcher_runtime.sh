@@ -1445,6 +1445,10 @@ assert_line_has "$line52" '--signoff-require-incident-snapshot-on-fail 1' \
   "runtime wiring failed: option 52 missing strict signoff --signoff-require-incident-snapshot-on-fail 1"
 assert_line_has "$line52" '--signoff-require-incident-snapshot-artifacts 1' \
   "runtime wiring failed: option 52 missing strict signoff --signoff-require-incident-snapshot-artifacts 1"
+assert_line_has "$line52" '--signoff-incident-snapshot-min-attachment-count 1' \
+  "runtime wiring failed: option 52 missing strict signoff --signoff-incident-snapshot-min-attachment-count 1"
+assert_line_has "$line52" '--signoff-incident-snapshot-max-skipped-count 0' \
+  "runtime wiring failed: option 52 missing strict signoff --signoff-incident-snapshot-max-skipped-count 0"
 assert_line_has "$line52" '--print-run-report 0' \
   "runtime wiring failed: option 52 missing default --print-run-report 0"
 assert_line_has "$line52" '--show-json 0' \
@@ -1651,6 +1655,10 @@ assert_line_has "$line56" '--require-summary-json 1' \
   "runtime wiring failed: option 56 missing default --require-summary-json 1"
 assert_line_has "$line56" '--require-summary-status-ok 1' \
   "runtime wiring failed: option 56 missing default --require-summary-status-ok 1"
+assert_line_has "$line56" '--incident-snapshot-min-attachment-count 1' \
+  "runtime wiring failed: option 56 missing strict --incident-snapshot-min-attachment-count 1"
+assert_line_has "$line56" '--incident-snapshot-max-skipped-count 0' \
+  "runtime wiring failed: option 56 missing strict --incident-snapshot-max-skipped-count 0"
 assert_line_has "$line56" '--max-duration-sec 0' \
   "runtime wiring failed: option 56 missing default --max-duration-sec 0"
 assert_line_has "$line56" '--fail-on-any-no-go 0' \
@@ -1722,6 +1730,8 @@ assert_line_has "$line57" '--min-trend-wg-soak-exit-operators 2' "runtime wiring
 assert_line_has "$line57" '--min-trend-wg-soak-cross-operator-pairs 2' "runtime wiring failed: option 57 missing strict --min-trend-wg-soak-cross-operator-pairs 2"
 assert_line_has "$line57" '--require-bundle-created 1' "runtime wiring failed: option 57 missing strict --require-bundle-created 1"
 assert_line_has "$line57" '--require-bundle-manifest 1' "runtime wiring failed: option 57 missing strict --require-bundle-manifest 1"
+assert_line_has "$line57" '--incident-snapshot-min-attachment-count 1' "runtime wiring failed: option 57 missing strict --incident-snapshot-min-attachment-count 1"
+assert_line_has "$line57" '--incident-snapshot-max-skipped-count 0' "runtime wiring failed: option 57 missing strict --incident-snapshot-max-skipped-count 0"
 assert_line_has "$line57" '--run-report-json \.easy-node-logs/prod_pilot_cohort/prod_pilot_cohort_quick_report\.json' \
   "runtime wiring failed: option 57 missing default --run-report-json path"
 assert_line_has "$line57" '--trend-summary-json \.easy-node-logs/prod_pilot_quick_signoff_trend\.json' \
@@ -1780,6 +1790,8 @@ assert_line_has "$line58" '--signoff-min-trend-wg-soak-exit-operators 2' "runtim
 assert_line_has "$line58" '--signoff-min-trend-wg-soak-cross-operator-pairs 2' "runtime wiring failed: option 58 missing strict signoff --signoff-min-trend-wg-soak-cross-operator-pairs 2"
 assert_line_has "$line58" '--signoff-require-incident-snapshot-on-fail 1' "runtime wiring failed: option 58 missing strict signoff --signoff-require-incident-snapshot-on-fail 1"
 assert_line_has "$line58" '--signoff-require-incident-snapshot-artifacts 1' "runtime wiring failed: option 58 missing strict signoff --signoff-require-incident-snapshot-artifacts 1"
+assert_line_has "$line58" '--signoff-incident-snapshot-min-attachment-count 1' "runtime wiring failed: option 58 missing strict signoff --signoff-incident-snapshot-min-attachment-count 1"
+assert_line_has "$line58" '--signoff-incident-snapshot-max-skipped-count 0' "runtime wiring failed: option 58 missing strict signoff --signoff-incident-snapshot-max-skipped-count 0"
 
 : >"$CAPTURE"
 
@@ -1788,7 +1800,7 @@ INPUT59="$TMP_DIR/input59.txt"
 {
   printf '3\n'
   printf '59\n'
-  for _ in $(seq 1 6); do
+  for _ in $(seq 1 12); do
     printf '\n'
   done
   printf '0\n'
@@ -1808,8 +1820,23 @@ assert_line_has "$line59" '--subject pilot-client' \
   "runtime wiring failed: option 59 missing default subject"
 assert_line_has "$line59" '--pre-real-host-readiness 1' \
   "runtime wiring failed: option 59 missing default --pre-real-host-readiness 1"
+assert_line_has "$line59" '--campaign-signoff-check 1' \
+  "runtime wiring failed: option 59 missing default --campaign-signoff-check 1"
+assert_line_has "$line59" '--campaign-signoff-required 1' \
+  "runtime wiring failed: option 59 missing default --campaign-signoff-required 1"
+assert_line_has "$line59" '--campaign-signoff-refresh-summary 0' \
+  "runtime wiring failed: option 59 missing default --campaign-signoff-refresh-summary 0"
+assert_line_has "$line59" '--campaign-signoff-summary-fail-on-no-go 1' \
+  "runtime wiring failed: option 59 missing default --campaign-signoff-summary-fail-on-no-go 1"
+assert_line_has "$line59" '--campaign-signoff-print-summary-json 0' \
+  "runtime wiring failed: option 59 missing default --campaign-signoff-print-summary-json 0"
 assert_line_has "$line59" '--show-json 0' \
   "runtime wiring failed: option 59 missing default --show-json 0"
+if printf '%s\n' "$line59" | rg -q -- '--campaign-signoff-summary-json '; then
+  echo "runtime wiring failed: option 59 unexpectedly forwarded --campaign-signoff-summary-json by default"
+  printf 'line: %s\n' "$line59"
+  exit 1
+fi
 
 : >"$CAPTURE"
 
@@ -2201,5 +2228,297 @@ assert_line_has "$line68" '--strict-beta 0' \
   "runtime wiring failed: option 68 missing strict-beta override"
 assert_line_has "$line68" '--print-summary-json 1' \
   "runtime wiring failed: option 68 missing print-summary-json 1"
+
+echo "[easy-mode-runtime] option 69 runtime command forwarding"
+INPUT69="$TMP_DIR/input69.txt"
+{
+  printf '3\n'
+  printf '69\n'
+  printf '\n'    # directory url optional (none)
+  printf '\n'    # request timeout default
+  printf '\n'    # strict federation preset default yes
+  printf '\n'    # summary json default path
+  printf '\n'    # print summary json default no
+  printf '\n'    # show json default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT69"
+run_ui "$INPUT69" "$TMP_DIR/run69.log"
+
+line69="$(rg '^server-federation-status ' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line69" ]]; then
+  echo "runtime wiring failed: option 69 did not invoke server-federation-status"
+  cat "$TMP_DIR/run69.log"
+  exit 1
+fi
+assert_line_has "$line69" '--timeout-sec 8' \
+  "runtime wiring failed: option 69 missing default --timeout-sec 8"
+assert_line_has "$line69" '--require-configured-healthy 1' \
+  "runtime wiring failed: option 69 missing strict default --require-configured-healthy 1"
+assert_line_has "$line69" '--max-cooling-retry-sec 120' \
+  "runtime wiring failed: option 69 missing strict default --max-cooling-retry-sec 120"
+assert_line_has "$line69" '--max-peer-sync-age-sec 120' \
+  "runtime wiring failed: option 69 missing strict default --max-peer-sync-age-sec 120"
+assert_line_has "$line69" '--max-issuer-sync-age-sec 120' \
+  "runtime wiring failed: option 69 missing strict default --max-issuer-sync-age-sec 120"
+assert_line_has "$line69" '--min-peer-success-sources 2' \
+  "runtime wiring failed: option 69 missing strict default --min-peer-success-sources 2"
+assert_line_has "$line69" '--min-issuer-success-sources 2' \
+  "runtime wiring failed: option 69 missing strict default --min-issuer-success-sources 2"
+assert_line_has "$line69" '--min-peer-source-operators 2' \
+  "runtime wiring failed: option 69 missing strict default --min-peer-source-operators 2"
+assert_line_has "$line69" '--min-issuer-source-operators 2' \
+  "runtime wiring failed: option 69 missing strict default --min-issuer-source-operators 2"
+assert_line_has "$line69" '--fail-on-not-ready 1' \
+  "runtime wiring failed: option 69 missing strict default --fail-on-not-ready 1"
+assert_line_has "$line69" '--summary-json \.easy-node-logs/server_federation_status_summary\.json' \
+  "runtime wiring failed: option 69 missing default --summary-json path"
+assert_line_has "$line69" '--print-summary-json 0' \
+  "runtime wiring failed: option 69 missing default --print-summary-json 0"
+assert_line_has "$line69" '--show-json 0' \
+  "runtime wiring failed: option 69 missing default --show-json 0"
+if printf '%s\n' "$line69" | rg -q -- '--directory-url '; then
+  echo "runtime wiring failed: option 69 unexpectedly forwarded --directory-url by default"
+  printf 'line: %s\n' "$line69"
+  exit 1
+fi
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 70 runtime command forwarding"
+INPUT70="$TMP_DIR/input70.txt"
+{
+  printf '3\n'
+  printf '70\n'
+  printf '\n'    # directory url optional (none)
+  printf '\n'    # ready timeout default
+  printf '\n'    # poll sec default
+  printf '\n'    # request timeout default
+  printf '\n'    # strict federation preset default yes
+  printf '\n'    # summary json default path
+  printf '\n'    # print summary json default no
+  printf '\n'    # show json default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT70"
+run_ui "$INPUT70" "$TMP_DIR/run70.log"
+
+line70="$(rg '^server-federation-wait ' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line70" ]]; then
+  echo "runtime wiring failed: option 70 did not invoke server-federation-wait"
+  cat "$TMP_DIR/run70.log"
+  exit 1
+fi
+assert_line_has "$line70" '--ready-timeout-sec 90' \
+  "runtime wiring failed: option 70 missing default --ready-timeout-sec 90"
+assert_line_has "$line70" '--poll-sec 5' \
+  "runtime wiring failed: option 70 missing default --poll-sec 5"
+assert_line_has "$line70" '--timeout-sec 8' \
+  "runtime wiring failed: option 70 missing default --timeout-sec 8"
+assert_line_has "$line70" '--require-configured-healthy 1' \
+  "runtime wiring failed: option 70 missing strict default --require-configured-healthy 1"
+assert_line_has "$line70" '--max-cooling-retry-sec 120' \
+  "runtime wiring failed: option 70 missing strict default --max-cooling-retry-sec 120"
+assert_line_has "$line70" '--max-peer-sync-age-sec 120' \
+  "runtime wiring failed: option 70 missing strict default --max-peer-sync-age-sec 120"
+assert_line_has "$line70" '--max-issuer-sync-age-sec 120' \
+  "runtime wiring failed: option 70 missing strict default --max-issuer-sync-age-sec 120"
+assert_line_has "$line70" '--min-peer-success-sources 2' \
+  "runtime wiring failed: option 70 missing strict default --min-peer-success-sources 2"
+assert_line_has "$line70" '--min-issuer-success-sources 2' \
+  "runtime wiring failed: option 70 missing strict default --min-issuer-success-sources 2"
+assert_line_has "$line70" '--min-peer-source-operators 2' \
+  "runtime wiring failed: option 70 missing strict default --min-peer-source-operators 2"
+assert_line_has "$line70" '--min-issuer-source-operators 2' \
+  "runtime wiring failed: option 70 missing strict default --min-issuer-source-operators 2"
+assert_line_has "$line70" '--summary-json \.easy-node-logs/server_federation_wait_summary\.json' \
+  "runtime wiring failed: option 70 missing default --summary-json path"
+assert_line_has "$line70" '--print-summary-json 0' \
+  "runtime wiring failed: option 70 missing default --print-summary-json 0"
+assert_line_has "$line70" '--show-json 0' \
+  "runtime wiring failed: option 70 missing default --show-json 0"
+if printf '%s\n' "$line70" | rg -q -- '--directory-url '; then
+  echo "runtime wiring failed: option 70 unexpectedly forwarded --directory-url by default"
+  printf 'line: %s\n' "$line70"
+  exit 1
+fi
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 71 runtime command forwarding"
+INPUT71="$TMP_DIR/input71.txt"
+{
+  printf '3\n'
+  printf '71\n'
+  printf '\n'    # reports dir default
+  printf '\n'    # runbook summary override optional none
+  printf '\n'    # campaign summary json default
+  printf '\n'    # campaign report md default
+  printf '\n'    # fail-on-no-go default yes
+  printf '\n'    # print report default yes
+  printf '\n'    # print summary json default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT71"
+run_ui "$INPUT71" "$TMP_DIR/run71.log"
+
+line71="$(rg '^prod-pilot-cohort-campaign-summary ' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line71" ]]; then
+  echo "runtime wiring failed: option 71 did not invoke prod-pilot-cohort-campaign-summary"
+  cat "$TMP_DIR/run71.log"
+  exit 1
+fi
+assert_line_has "$line71" '--reports-dir \.easy-node-logs/prod_pilot_campaign' \
+  "runtime wiring failed: option 71 missing default reports-dir"
+assert_line_has "$line71" '--summary-json \.easy-node-logs/prod_pilot_campaign/prod_pilot_campaign_summary\.json' \
+  "runtime wiring failed: option 71 missing default summary-json path"
+assert_line_has "$line71" '--report-md \.easy-node-logs/prod_pilot_campaign/prod_pilot_campaign_summary\.md' \
+  "runtime wiring failed: option 71 missing default report-md path"
+assert_line_has "$line71" '--fail-on-no-go 1' \
+  "runtime wiring failed: option 71 missing default --fail-on-no-go 1"
+assert_line_has "$line71" '--print-report 1' \
+  "runtime wiring failed: option 71 missing default --print-report 1"
+assert_line_has "$line71" '--print-summary-json 0' \
+  "runtime wiring failed: option 71 missing default --print-summary-json 0"
+if printf '%s\n' "$line71" | rg -q -- '--runbook-summary-json '; then
+  echo "runtime wiring failed: option 71 unexpectedly forwarded --runbook-summary-json by default"
+  printf 'line: %s\n' "$line71"
+  exit 1
+fi
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 72 runtime command forwarding"
+INPUT72="$TMP_DIR/input72.txt"
+{
+  printf '3\n'
+  printf '72\n'
+  printf '\n'    # reports dir default
+  printf '\n'    # require status ok default yes
+  printf '\n'    # require runbook summary json default yes
+  printf '\n'    # require quick run report json default yes
+  printf '\n'    # require summary go default yes
+  printf '\n'    # require summary policy default yes
+  printf '\n'    # require incident policy clean default yes
+  printf '\n'    # require campaign signoff stage+summary evidence default yes
+  printf '\n'    # check summary json path default
+  printf '\n'    # print check summary json default no
+  printf '\n'    # show json default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT72"
+run_ui "$INPUT72" "$TMP_DIR/run72.log"
+
+line72="$(rg '^prod-pilot-cohort-campaign-check ' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line72" ]]; then
+  echo "runtime wiring failed: option 72 did not invoke prod-pilot-cohort-campaign-check"
+  cat "$TMP_DIR/run72.log"
+  exit 1
+fi
+assert_line_has "$line72" '--reports-dir \.easy-node-logs/prod_pilot_campaign' \
+  "runtime wiring failed: option 72 missing default reports-dir"
+assert_line_has "$line72" '--require-status-ok 1' \
+  "runtime wiring failed: option 72 missing default --require-status-ok 1"
+assert_line_has "$line72" '--require-runbook-summary-json 1' \
+  "runtime wiring failed: option 72 missing default --require-runbook-summary-json 1"
+assert_line_has "$line72" '--require-quick-run-report-json 1' \
+  "runtime wiring failed: option 72 missing default --require-quick-run-report-json 1"
+assert_line_has "$line72" '--require-campaign-summary-go 1' \
+  "runtime wiring failed: option 72 missing default --require-campaign-summary-go 1"
+assert_line_has "$line72" '--require-summary-policy-match 1' \
+  "runtime wiring failed: option 72 missing default --require-summary-policy-match 1"
+assert_line_has "$line72" '--require-incident-policy-clean 1' \
+  "runtime wiring failed: option 72 missing default --require-incident-policy-clean 1"
+assert_line_has "$line72" '--require-campaign-signoff-enabled 1' \
+  "runtime wiring failed: option 72 missing default --require-campaign-signoff-enabled 1"
+assert_line_has "$line72" '--require-campaign-signoff-required 1' \
+  "runtime wiring failed: option 72 missing default --require-campaign-signoff-required 1"
+assert_line_has "$line72" '--require-campaign-signoff-attempted 1' \
+  "runtime wiring failed: option 72 missing default --require-campaign-signoff-attempted 1"
+assert_line_has "$line72" '--require-campaign-signoff-ok 1' \
+  "runtime wiring failed: option 72 missing default --require-campaign-signoff-ok 1"
+assert_line_has "$line72" '--require-campaign-signoff-summary-json 1' \
+  "runtime wiring failed: option 72 missing default --require-campaign-signoff-summary-json 1"
+assert_line_has "$line72" '--require-campaign-signoff-summary-json-valid 1' \
+  "runtime wiring failed: option 72 missing default --require-campaign-signoff-summary-json-valid 1"
+assert_line_has "$line72" '--require-campaign-signoff-summary-status-ok 1' \
+  "runtime wiring failed: option 72 missing default --require-campaign-signoff-summary-status-ok 1"
+assert_line_has "$line72" '--require-campaign-signoff-summary-final-rc-zero 1' \
+  "runtime wiring failed: option 72 missing default --require-campaign-signoff-summary-final-rc-zero 1"
+assert_line_has "$line72" '--summary-json \.easy-node-logs/prod_pilot_campaign/prod_pilot_campaign_check_summary\.json' \
+  "runtime wiring failed: option 72 missing default --summary-json path"
+assert_line_has "$line72" '--print-summary-json 0' \
+  "runtime wiring failed: option 72 missing default --print-summary-json 0"
+assert_line_has "$line72" '--show-json 0' \
+  "runtime wiring failed: option 72 missing default --show-json 0"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 73 runtime command forwarding"
+INPUT73="$TMP_DIR/input73.txt"
+{
+  printf '3\n'
+  printf '73\n'
+  printf '\n'    # reports dir default
+  printf '\n'    # refresh summary default yes
+  printf '\n'    # summary fail-on-no-go default yes
+  printf '\n'    # require runbook summary json default yes
+  printf '\n'    # require quick run report json default yes
+  printf '\n'    # require summary policy default yes
+  printf '\n'    # require incident policy clean default yes
+  printf '\n'    # campaign signoff stage summary path default
+  printf '\n'    # require existing campaign signoff stage+summary evidence default no
+  printf '\n'    # signoff summary json path default
+  printf '\n'    # print signoff summary json default no
+  printf '\n'    # show json default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT73"
+run_ui "$INPUT73" "$TMP_DIR/run73.log"
+
+line73="$(rg '^prod-pilot-cohort-campaign-signoff ' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line73" ]]; then
+  echo "runtime wiring failed: option 73 did not invoke prod-pilot-cohort-campaign-signoff"
+  cat "$TMP_DIR/run73.log"
+  exit 1
+fi
+assert_line_has "$line73" '--reports-dir \.easy-node-logs/prod_pilot_campaign' \
+  "runtime wiring failed: option 73 missing default reports-dir"
+assert_line_has "$line73" '--refresh-summary 1' \
+  "runtime wiring failed: option 73 missing default --refresh-summary 1"
+assert_line_has "$line73" '--summary-fail-on-no-go 1' \
+  "runtime wiring failed: option 73 missing default --summary-fail-on-no-go 1"
+assert_line_has "$line73" '--require-runbook-summary-json 1' \
+  "runtime wiring failed: option 73 missing default --require-runbook-summary-json 1"
+assert_line_has "$line73" '--require-quick-run-report-json 1' \
+  "runtime wiring failed: option 73 missing default --require-quick-run-report-json 1"
+assert_line_has "$line73" '--require-summary-policy-match 1' \
+  "runtime wiring failed: option 73 missing default --require-summary-policy-match 1"
+assert_line_has "$line73" '--require-incident-policy-clean 1' \
+  "runtime wiring failed: option 73 missing default --require-incident-policy-clean 1"
+assert_line_has "$line73" '--campaign-signoff-summary-json \.easy-node-logs/prod_pilot_campaign/prod_pilot_campaign_signoff_summary\.json' \
+  "runtime wiring failed: option 73 missing default --campaign-signoff-summary-json path"
+assert_line_has "$line73" '--require-campaign-signoff-enabled 0' \
+  "runtime wiring failed: option 73 missing default --require-campaign-signoff-enabled 0"
+assert_line_has "$line73" '--require-campaign-signoff-required 0' \
+  "runtime wiring failed: option 73 missing default --require-campaign-signoff-required 0"
+assert_line_has "$line73" '--require-campaign-signoff-attempted 0' \
+  "runtime wiring failed: option 73 missing default --require-campaign-signoff-attempted 0"
+assert_line_has "$line73" '--require-campaign-signoff-ok 0' \
+  "runtime wiring failed: option 73 missing default --require-campaign-signoff-ok 0"
+assert_line_has "$line73" '--require-campaign-signoff-summary-json 0' \
+  "runtime wiring failed: option 73 missing default --require-campaign-signoff-summary-json 0"
+assert_line_has "$line73" '--require-campaign-signoff-summary-json-valid 0' \
+  "runtime wiring failed: option 73 missing default --require-campaign-signoff-summary-json-valid 0"
+assert_line_has "$line73" '--require-campaign-signoff-summary-status-ok 0' \
+  "runtime wiring failed: option 73 missing default --require-campaign-signoff-summary-status-ok 0"
+assert_line_has "$line73" '--require-campaign-signoff-summary-final-rc-zero 0' \
+  "runtime wiring failed: option 73 missing default --require-campaign-signoff-summary-final-rc-zero 0"
+assert_line_has "$line73" '--summary-json \.easy-node-logs/prod_pilot_campaign/prod_pilot_campaign_signoff_check_summary\.json' \
+  "runtime wiring failed: option 73 missing default --summary-json path"
+assert_line_has "$line73" '--print-summary-json 0' \
+  "runtime wiring failed: option 73 missing default --print-summary-json 0"
+assert_line_has "$line73" '--show-json 0' \
+  "runtime wiring failed: option 73 missing default --show-json 0"
 
 echo "easy-mode launcher runtime integration check ok"

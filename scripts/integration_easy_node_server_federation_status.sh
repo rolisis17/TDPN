@@ -211,6 +211,11 @@ if ! jq -e '.policy.min_peer_source_operators == 2 and .policy.min_issuer_source
   cat "$STRICT_OK_SUMMARY"
   exit 1
 fi
+if ! jq -e '.readiness.failure_reasons == [] and .readiness.failure_count == 0' "$STRICT_OK_SUMMARY" >/dev/null; then
+  echo "strict status summary expected empty readiness failure reasons"
+  cat "$STRICT_OK_SUMMARY"
+  exit 1
+fi
 
 echo "[server-federation-status] strict one-shot policy fail-close"
 STRICT_FAIL_LOG="$TMP_DIR/federation_status_strict_fail.log"
@@ -235,6 +240,11 @@ if ! rg -q 'readiness: federation_ready=0' "$STRICT_FAIL_LOG"; then
   cat "$STRICT_FAIL_LOG"
   exit 1
 fi
+if ! rg -q '^  readiness_failure_reasons: peer_source_operators_below_floor$' "$STRICT_FAIL_LOG"; then
+  echo "expected readiness_failure_reasons marker in strict status failure output"
+  cat "$STRICT_FAIL_LOG"
+  exit 1
+fi
 if [[ ! -f "$STRICT_FAIL_SUMMARY" ]]; then
   echo "expected strict-fail status summary artifact file"
   cat "$STRICT_FAIL_LOG"
@@ -242,6 +252,11 @@ if [[ ! -f "$STRICT_FAIL_SUMMARY" ]]; then
 fi
 if ! jq -e '.readiness.federation_ready == false and .policy.min_peer_source_operators == 3 and .readiness.peer_sync_ready == false' "$STRICT_FAIL_SUMMARY" >/dev/null; then
   echo "strict-fail status summary expected readiness/policy failure metadata"
+  cat "$STRICT_FAIL_SUMMARY"
+  exit 1
+fi
+if ! jq -e '.readiness.failure_reasons == ["peer_source_operators_below_floor"] and .readiness.failure_count == 1' "$STRICT_FAIL_SUMMARY" >/dev/null; then
+  echo "strict-fail status summary expected explicit readiness failure reasons"
   cat "$STRICT_FAIL_SUMMARY"
   exit 1
 fi

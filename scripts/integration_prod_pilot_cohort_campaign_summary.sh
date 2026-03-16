@@ -286,6 +286,46 @@ if [[ "$(jq -r '.incident_snapshot.attachment_count' "$SUMMARY_JSON")" != "1" ]]
   cat "$SUMMARY_JSON"
   exit 1
 fi
+if [[ "$(jq -r '.incident_snapshot.attachment_manifest_count' "$SUMMARY_JSON")" != "1" ]]; then
+  echo "campaign summary JSON missing incident snapshot attachment manifest count"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if [[ "$(jq -r '.incident_snapshot.attachment_skipped_count' "$SUMMARY_JSON")" != "1" ]]; then
+  echo "campaign summary JSON missing incident snapshot attachment skipped count"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if [[ "$(jq -r '.incident_snapshot.effective_attachment_count' "$SUMMARY_JSON")" != "1" ]]; then
+  echo "campaign summary JSON missing incident snapshot effective attachment count"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if [[ "$(jq -r '.fail_policy.require_incident_snapshot_on_fail' "$SUMMARY_JSON")" != "1" ]]; then
+  echo "campaign summary JSON missing fail policy require_incident_snapshot_on_fail default"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if [[ "$(jq -r '.fail_policy.require_incident_snapshot_artifacts' "$SUMMARY_JSON")" != "1" ]]; then
+  echo "campaign summary JSON missing fail policy require_incident_snapshot_artifacts default"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if [[ "$(jq -r '.fail_policy.incident_snapshot_min_attachment_count' "$SUMMARY_JSON")" != "0" ]]; then
+  echo "campaign summary JSON missing fail policy minimum attachment default"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if [[ "$(jq -r '.fail_policy.incident_snapshot_max_skipped_count' "$SUMMARY_JSON")" != "-1" ]]; then
+  echo "campaign summary JSON missing fail policy max skipped default"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if [[ "$(jq -r '.incident_policy_errors | length' "$SUMMARY_JSON")" != "0" ]]; then
+  echo "campaign summary JSON should not report incident policy errors in baseline GO case"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
 if [[ "$(jq -r '.incident_snapshot.summary_json.valid_json' "$SUMMARY_JSON")" != "1" ]]; then
   echo "campaign summary JSON should mark incident snapshot summary as valid JSON"
   cat "$SUMMARY_JSON"
@@ -344,6 +384,68 @@ fi
 if ! rg -q "source_pre_real_host_readiness_summary_json=${PRE_REAL_HOST_READINESS_SUMMARY_JSON}" /tmp/integration_prod_pilot_cohort_campaign_summary_go.log; then
   echo "campaign summary output missing pre-real-host readiness source pointer"
   cat /tmp/integration_prod_pilot_cohort_campaign_summary_go.log
+  exit 1
+fi
+
+POLICY_FAIL_RUNBOOK_SUMMARY_JSON="$REPORTS_DIR/prod_pilot_cohort_quick_runbook_summary_policy_fail.json"
+POLICY_FAIL_SUMMARY_JSON="$REPORTS_DIR/prod_pilot_campaign_summary_policy_fail.json"
+POLICY_FAIL_REPORT_MD="$REPORTS_DIR/prod_pilot_campaign_summary_policy_fail.md"
+cat >"$POLICY_FAIL_RUNBOOK_SUMMARY_JSON" <<EOF_POLICY_FAIL_RUNBOOK
+{
+  "status": "fail",
+  "failure_step": "quick_signoff",
+  "final_rc": 9,
+  "duration_sec": 321,
+  "stages": {
+    "quick": {"rc": 0},
+    "quick_signoff": {"rc": 9},
+    "quick_dashboard": {"rc": 0}
+  },
+  "config": {
+    "rounds": 6,
+    "pause_sec": 45,
+    "max_alert_severity": "WARN"
+  },
+  "artifacts": {
+    "reports_dir": "$REPORTS_DIR",
+    "summary_json": "$COHORT_SUMMARY_JSON",
+    "run_report_json": "$QUICK_REPORT_JSON",
+    "signoff_json": "$SIGNOFF_JSON",
+    "trend_summary_json": "$TREND_JSON",
+    "alert_summary_json": "$ALERT_JSON",
+    "dashboard_md": "$DASHBOARD_MD",
+    "pre_real_host_readiness_summary_json": "$PRE_REAL_HOST_READINESS_SUMMARY_JSON"
+  }
+}
+EOF_POLICY_FAIL_RUNBOOK
+echo "[prod-pilot-cohort-campaign-summary] incident policy fail-close (max skipped)"
+./scripts/prod_pilot_cohort_campaign_summary.sh \
+  --runbook-summary-json "$POLICY_FAIL_RUNBOOK_SUMMARY_JSON" \
+  --summary-json "$POLICY_FAIL_SUMMARY_JSON" \
+  --report-md "$POLICY_FAIL_REPORT_MD" \
+  --incident-snapshot-min-attachment-count 1 \
+  --incident-snapshot-max-skipped-count 0 \
+  --print-report 0 \
+  --print-summary-json 0 >/tmp/integration_prod_pilot_cohort_campaign_summary_policy.log 2>&1
+
+if [[ "$(jq -r '.decision' "$POLICY_FAIL_SUMMARY_JSON")" != "NO-GO" ]]; then
+  echo "campaign summary should be NO-GO when skipped attachments exceed policy cap"
+  cat "$POLICY_FAIL_SUMMARY_JSON"
+  exit 1
+fi
+if [[ "$(jq -r '.incident_policy_errors[0]' "$POLICY_FAIL_SUMMARY_JSON")" != "incident_snapshot_attachment_skipped_count_above_max" ]]; then
+  echo "campaign summary should report skipped attachment policy violation"
+  cat "$POLICY_FAIL_SUMMARY_JSON"
+  exit 1
+fi
+if [[ "$(jq -r '.fail_policy.incident_snapshot_max_skipped_count' "$POLICY_FAIL_SUMMARY_JSON")" != "0" ]]; then
+  echo "campaign summary should preserve max skipped policy threshold"
+  cat "$POLICY_FAIL_SUMMARY_JSON"
+  exit 1
+fi
+if ! rg -q -- 'Incident fail policy errors: incident_snapshot_attachment_skipped_count_above_max' "$POLICY_FAIL_REPORT_MD"; then
+  echo "campaign markdown missing incident fail policy violation line"
+  cat "$POLICY_FAIL_REPORT_MD"
   exit 1
 fi
 
@@ -478,7 +580,7 @@ chmod +x "$FAKE_SUMMARY_SCRIPT"
 echo "[prod-pilot-cohort-campaign-summary] easy-node command dispatch"
 PROD_PILOT_COHORT_CAMPAIGN_SUMMARY_SCRIPT="$FAKE_SUMMARY_SCRIPT" \
 DISPATCH_CAPTURE_FILE="$DISPATCH_CAPTURE" \
-./scripts/easy_node.sh prod-pilot-cohort-campaign-summary --runbook-summary-json /tmp/runbook.json --fail-on-no-go 1 >/tmp/integration_prod_pilot_cohort_campaign_summary_dispatch.log 2>&1
+./scripts/easy_node.sh prod-pilot-cohort-campaign-summary --runbook-summary-json /tmp/runbook.json --fail-on-no-go 1 --require-incident-snapshot-on-fail 0 --require-incident-snapshot-artifacts 0 --incident-snapshot-min-attachment-count 2 --incident-snapshot-max-skipped-count 3 >/tmp/integration_prod_pilot_cohort_campaign_summary_dispatch.log 2>&1
 
 if ! rg -q -- '--runbook-summary-json /tmp/runbook.json' "$DISPATCH_CAPTURE"; then
   echo "easy-node prod-pilot-cohort-campaign-summary did not forward runbook summary path"
@@ -487,6 +589,26 @@ if ! rg -q -- '--runbook-summary-json /tmp/runbook.json' "$DISPATCH_CAPTURE"; th
 fi
 if ! rg -q -- '--fail-on-no-go 1' "$DISPATCH_CAPTURE"; then
   echo "easy-node prod-pilot-cohort-campaign-summary did not forward fail-on-no-go"
+  cat "$DISPATCH_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-incident-snapshot-on-fail 0' "$DISPATCH_CAPTURE"; then
+  echo "easy-node prod-pilot-cohort-campaign-summary did not forward --require-incident-snapshot-on-fail"
+  cat "$DISPATCH_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-incident-snapshot-artifacts 0' "$DISPATCH_CAPTURE"; then
+  echo "easy-node prod-pilot-cohort-campaign-summary did not forward --require-incident-snapshot-artifacts"
+  cat "$DISPATCH_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--incident-snapshot-min-attachment-count 2' "$DISPATCH_CAPTURE"; then
+  echo "easy-node prod-pilot-cohort-campaign-summary did not forward --incident-snapshot-min-attachment-count"
+  cat "$DISPATCH_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--incident-snapshot-max-skipped-count 3' "$DISPATCH_CAPTURE"; then
+  echo "easy-node prod-pilot-cohort-campaign-summary did not forward --incident-snapshot-max-skipped-count"
   cat "$DISPATCH_CAPTURE"
   exit 1
 fi

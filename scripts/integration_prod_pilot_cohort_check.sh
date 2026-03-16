@@ -320,6 +320,53 @@ if ! rg -q -- "$INCIDENT_ATTACH_MANIFEST" /tmp/integration_prod_pilot_cohort_che
   exit 1
 fi
 
+echo "[prod-pilot-cohort-check] incident attachment-count floor policy"
+set +e
+./scripts/prod_pilot_cohort_check.sh \
+  --summary-json "$INCIDENT_PASS_SUMMARY" \
+  --require-all-rounds-ok 0 \
+  --max-round-failures 1 \
+  --incident-snapshot-min-attachment-count 2 >/tmp/integration_prod_pilot_cohort_check_incident_attachment_floor_fail.log 2>&1
+incident_attach_floor_rc=$?
+set -e
+if [[ "$incident_attach_floor_rc" -eq 0 ]]; then
+  echo "expected non-zero rc when incident attachment count is below floor"
+  cat /tmp/integration_prod_pilot_cohort_check_incident_attachment_floor_fail.log
+  exit 1
+fi
+if ! rg -q 'attachment_count below floor' /tmp/integration_prod_pilot_cohort_check_incident_attachment_floor_fail.log; then
+  echo "expected attachment floor policy failure message not found"
+  cat /tmp/integration_prod_pilot_cohort_check_incident_attachment_floor_fail.log
+  exit 1
+fi
+
+echo "[prod-pilot-cohort-check] incident skipped-attachment budget policy"
+set +e
+./scripts/prod_pilot_cohort_check.sh \
+  --summary-json "$INCIDENT_PASS_SUMMARY" \
+  --require-all-rounds-ok 0 \
+  --max-round-failures 1 \
+  --incident-snapshot-max-skipped-count 0 >/tmp/integration_prod_pilot_cohort_check_incident_skipped_budget_fail.log 2>&1
+incident_skipped_budget_rc=$?
+set -e
+if [[ "$incident_skipped_budget_rc" -eq 0 ]]; then
+  echo "expected non-zero rc when incident skipped-attachment count exceeds budget"
+  cat /tmp/integration_prod_pilot_cohort_check_incident_skipped_budget_fail.log
+  exit 1
+fi
+if ! rg -q 'skipped attachment count exceeds policy' /tmp/integration_prod_pilot_cohort_check_incident_skipped_budget_fail.log; then
+  echo "expected skipped-attachment budget policy failure message not found"
+  cat /tmp/integration_prod_pilot_cohort_check_incident_skipped_budget_fail.log
+  exit 1
+fi
+
+./scripts/prod_pilot_cohort_check.sh \
+  --summary-json "$INCIDENT_PASS_SUMMARY" \
+  --require-all-rounds-ok 0 \
+  --max-round-failures 1 \
+  --incident-snapshot-min-attachment-count 1 \
+  --incident-snapshot-max-skipped-count 1 >/tmp/integration_prod_pilot_cohort_check_incident_attachment_policy_pass.log 2>&1
+
 cat >"$TMP_BIN/docker" <<'EOF_DOCKER'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -363,6 +410,8 @@ PROD_PILOT_COHORT_CHECK_SCRIPT="$FAKE_CHECK" \
   --min-trend-wg-soak-selection-lines 12 \
   --require-incident-snapshot-on-fail 0 \
   --require-incident-snapshot-artifacts 0 \
+  --incident-snapshot-min-attachment-count 2 \
+  --incident-snapshot-max-skipped-count 0 \
   --show-json 1 >/tmp/integration_prod_pilot_cohort_check_easy_node.log 2>&1
 
 if ! rg -q -- '--summary-json /tmp/cohort/summary.json' "$CHECK_CAPTURE"; then
@@ -397,6 +446,16 @@ if ! rg -q -- '--require-incident-snapshot-on-fail 0' "$CHECK_CAPTURE"; then
 fi
 if ! rg -q -- '--require-incident-snapshot-artifacts 0' "$CHECK_CAPTURE"; then
   echo "easy_node cohort check forwarding failed: missing --require-incident-snapshot-artifacts"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--incident-snapshot-min-attachment-count 2' "$CHECK_CAPTURE"; then
+  echo "easy_node cohort check forwarding failed: missing --incident-snapshot-min-attachment-count"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--incident-snapshot-max-skipped-count 0' "$CHECK_CAPTURE"; then
+  echo "easy_node cohort check forwarding failed: missing --incident-snapshot-max-skipped-count"
   cat "$CHECK_CAPTURE"
   exit 1
 fi

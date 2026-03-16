@@ -25,6 +25,8 @@ Usage:
     [--require-summary-status-ok [0|1]] \
     [--require-incident-snapshot-on-fail [0|1]] \
     [--require-incident-snapshot-artifacts [0|1]] \
+    [--incident-snapshot-min-attachment-count N] \
+    [--incident-snapshot-max-skipped-count N|-1] \
     [--max-duration-sec N] \
     [--warn-go-rate-pct N] \
     [--critical-go-rate-pct N] \
@@ -140,6 +142,8 @@ require_summary_json="${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_SUMMARY_JSON:-1}"
 require_summary_status_ok="${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_SUMMARY_STATUS_OK:-1}"
 require_incident_snapshot_on_fail="${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_INCIDENT_SNAPSHOT_ON_FAIL:-1}"
 require_incident_snapshot_artifacts="${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_INCIDENT_SNAPSHOT_ARTIFACTS:-1}"
+incident_snapshot_min_attachment_count="${PROD_PILOT_COHORT_QUICK_CHECK_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT:-0}"
+incident_snapshot_max_skipped_count="${PROD_PILOT_COHORT_QUICK_CHECK_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT:--1}"
 max_duration_sec="${PROD_PILOT_COHORT_QUICK_CHECK_MAX_DURATION_SEC:-0}"
 
 warn_go_rate_pct="${PROD_PILOT_COHORT_QUICK_ALERT_WARN_GO_RATE_PCT:-98}"
@@ -264,6 +268,14 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --incident-snapshot-min-attachment-count)
+      incident_snapshot_min_attachment_count="${2:-}"
+      shift 2
+      ;;
+    --incident-snapshot-max-skipped-count)
+      incident_snapshot_max_skipped_count="${2:-}"
+      shift 2
+      ;;
     --max-duration-sec)
       max_duration_sec="${2:-}"
       shift 2
@@ -373,6 +385,14 @@ if [[ ! "$max_duration_sec" =~ ^[0-9]+$ ]]; then
   echo "--max-duration-sec must be an integer >= 0"
   exit 2
 fi
+if [[ ! "$incident_snapshot_min_attachment_count" =~ ^[0-9]+$ ]]; then
+  echo "--incident-snapshot-min-attachment-count must be an integer >= 0"
+  exit 2
+fi
+if [[ ! "$incident_snapshot_max_skipped_count" =~ ^-?[0-9]+$ ]] || ((incident_snapshot_max_skipped_count < -1)); then
+  echo "--incident-snapshot-max-skipped-count must be an integer >= -1"
+  exit 2
+fi
 if [[ ! "$show_top_reasons" =~ ^[0-9]+$ ]]; then
   echo "--show-top-reasons must be an integer >= 0"
   exit 2
@@ -442,6 +462,8 @@ if [[ -z "$trend_summary_json" ]]; then
     --require-summary-status-ok "$require_summary_status_ok"
     --require-incident-snapshot-on-fail "$require_incident_snapshot_on_fail"
     --require-incident-snapshot-artifacts "$require_incident_snapshot_artifacts"
+    --incident-snapshot-min-attachment-count "$incident_snapshot_min_attachment_count"
+    --incident-snapshot-max-skipped-count "$incident_snapshot_max_skipped_count"
     --max-duration-sec "$max_duration_sec"
     --fail-on-any-no-go 0
     --min-go-rate-pct 0
@@ -554,7 +576,7 @@ incident_attachment_count="$(jq -r '.incident_snapshot.latest_failed_run_report.
 
 echo "[prod-pilot-cohort-quick-alert] severity=$severity reports_total=$reports_total go_rate_pct=$go_rate_pct no_go=$no_go_count evaluation_errors=$eval_errors"
 echo "[prod-pilot-cohort-quick-alert] thresholds warn_go_rate_pct=$warn_go_rate_pct critical_go_rate_pct=$critical_go_rate_pct warn_no_go_count=$warn_no_go_count critical_no_go_count=$critical_no_go_count warn_eval_errors=$warn_eval_errors critical_eval_errors=$critical_eval_errors"
-echo "[prod-pilot-cohort-quick-alert] policy require_cohort_signoff_policy=$require_cohort_signoff_policy"
+echo "[prod-pilot-cohort-quick-alert] policy require_cohort_signoff_policy=$require_cohort_signoff_policy incident_snapshot_min_attachment_count=$incident_snapshot_min_attachment_count incident_snapshot_max_skipped_count=$incident_snapshot_max_skipped_count"
 echo "[prod-pilot-cohort-quick-alert] trend_source=$trend_source trend_summary_json=$trend_summary_json"
 if [[ -n "$incident_source_run_report" || -n "$incident_summary_json" || -n "$incident_report_md" || -n "$incident_attachment_manifest" || -n "$incident_attachment_skipped" ]]; then
   echo "[prod-pilot-cohort-quick-alert] incident_handoff source_quick_run_report=${incident_source_quick_run_report:-unset} source_summary_json=${incident_source_summary_json:-unset} source_run_report=${incident_source_run_report:-unset} summary_json=${incident_summary_json:-unset} report_md=${incident_report_md:-unset} attachment_manifest=${incident_attachment_manifest:-unset} attachment_skipped=${incident_attachment_skipped:-unset} attachment_count=${incident_attachment_count}"
@@ -592,6 +614,8 @@ summary_payload="$(
     --argjson warn_eval_errors "$warn_eval_errors" \
     --argjson critical_eval_errors "$critical_eval_errors" \
     --argjson require_cohort_signoff_policy "$require_cohort_signoff_policy" \
+    --argjson incident_snapshot_min_attachment_count "$incident_snapshot_min_attachment_count" \
+    --argjson incident_snapshot_max_skipped_count "$incident_snapshot_max_skipped_count" \
     --argjson fail_on_warn "$fail_on_warn" \
     --argjson fail_on_critical "$fail_on_critical" \
     --argjson show_top_reasons "$show_top_reasons" \
@@ -642,6 +666,8 @@ summary_payload="$(
       },
       fail_policy: {
         require_cohort_signoff_policy: $require_cohort_signoff_policy,
+        incident_snapshot_min_attachment_count: $incident_snapshot_min_attachment_count,
+        incident_snapshot_max_skipped_count: $incident_snapshot_max_skipped_count,
         fail_on_warn: $fail_on_warn,
         fail_on_critical: $fail_on_critical
       },

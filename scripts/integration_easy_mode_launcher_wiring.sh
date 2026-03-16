@@ -118,6 +118,16 @@ check_cpp '67\) WG-only selftest \+ readiness receipt' \
   "launcher wiring failed: option 67 menu label missing"
 check_cpp '68\) Pre-real-host readiness sweep \(runtime fix \+ WG-only \+ report\)' \
   "launcher wiring failed: option 68 menu label missing"
+check_cpp '69\) Server federation status \(peer \+ sync health\)' \
+  "launcher wiring failed: option 69 menu label missing"
+check_cpp '70\) Server federation wait gate \(block until ready\)' \
+  "launcher wiring failed: option 70 menu label missing"
+check_cpp '71\) PROD campaign summary regenerate \(saved artifacts -> handoff report\)' \
+  "launcher wiring failed: option 71 menu label missing"
+check_cpp '72\) PROD campaign check \(fail-closed artifact/policy gate\)' \
+  "launcher wiring failed: option 72 menu label missing"
+check_cpp '73\) PROD campaign signoff \(optional summary refresh \+ check\)' \
+  "launcher wiring failed: option 73 menu label missing"
 
 echo "[easy-mode-wiring] options 36/37/38/39/40/41/42/43/44/45/46/47/48/49/50/51/52/53/54/55/56 command wiring"
 check_cpp 'if \(choice == "36"\)' "launcher wiring failed: option 36 handler missing"
@@ -229,6 +239,10 @@ check_cpp '--check-manifest ' "launcher wiring failed: option 49/50/51 signoff m
 check_cpp '--max-alert-severity ' "launcher wiring failed: option 48/50/51/52 max-alert-severity forwarding missing"
 check_cpp '--run-report-json ' "launcher wiring failed: option 52/53/57/58 run-report-json forwarding missing"
 check_cpp 'Run pre-real-host readiness once before the cohort\?' "launcher wiring failed: option 52/58 pre-real-host readiness prompt missing"
+check_cpp '--signoff-incident-snapshot-min-attachment-count 1' "launcher wiring failed: option 52/58 strict signoff incident attachment minimum forwarding missing"
+check_cpp '--signoff-incident-snapshot-max-skipped-count 0' "launcher wiring failed: option 52/58 strict signoff incident skipped-attachment cap forwarding missing"
+check_cpp '--incident-snapshot-min-attachment-count 1' "launcher wiring failed: option 56/57 strict incident attachment minimum forwarding missing"
+check_cpp '--incident-snapshot-max-skipped-count 0' "launcher wiring failed: option 56/57 strict incident skipped-attachment cap forwarding missing"
 check_cpp '--require-signoff-attempted ' "launcher wiring failed: option 53/54/55/56 signoff-attempted forwarding missing"
 check_cpp '--require-cohort-signoff-policy ' "launcher wiring failed: quick SLO flows require-cohort-signoff-policy forwarding missing"
 check_cpp '--require-summary-status-ok ' "launcher wiring failed: option 53/54/55/56 summary-status forwarding missing"
@@ -242,6 +256,8 @@ check_cpp '--max-alert-severity ' "launcher wiring failed: option 57 max-alert-s
 check_cpp '--require-trend-artifact-policy-match 1' "launcher wiring failed: option 57 strict trend artifact policy forwarding missing"
 check_cpp '--min-trend-wg-soak-selection-lines 12' "launcher wiring failed: option 57 strict trend soak selection-lines forwarding missing"
 check_cpp '--require-bundle-created 1' "launcher wiring failed: option 57 strict bundle-created policy forwarding missing"
+check_cpp '--incident-snapshot-min-attachment-count 1' "launcher wiring failed: option 57 strict incident attachment minimum forwarding missing"
+check_cpp '--incident-snapshot-max-skipped-count 0' "launcher wiring failed: option 57 strict incident skipped-attachment cap forwarding missing"
 check_cpp '--trend-summary-json ' "launcher wiring failed: option 57 trend summary forwarding missing"
 check_cpp '--alert-summary-json ' "launcher wiring failed: option 57 alert summary forwarding missing"
 check_cpp '--signoff-json ' "launcher wiring failed: option 57 signoff json forwarding missing"
@@ -256,6 +272,8 @@ check_cpp '--signoff-max-reports ' "launcher wiring failed: option 58 signoff-ma
 check_cpp '--signoff-since-hours ' "launcher wiring failed: option 58 signoff-since-hours forwarding missing"
 check_cpp '--signoff-min-go-rate-pct ' "launcher wiring failed: option 58 signoff-min-go-rate-pct forwarding missing"
 check_cpp '--signoff-require-cohort-signoff-policy ' "launcher wiring failed: option 58 signoff-require-cohort-signoff-policy forwarding missing"
+check_cpp '--signoff-incident-snapshot-min-attachment-count 1' "launcher wiring failed: option 58 strict incident attachment minimum forwarding missing"
+check_cpp '--signoff-incident-snapshot-max-skipped-count 0' "launcher wiring failed: option 58 strict incident skipped-attachment cap forwarding missing"
 check_cpp '--max-round-failures ' "launcher wiring failed: option 58 max-round-failures forwarding missing"
 check_cpp '--bundle-outputs ' "launcher wiring failed: option 58 bundle-outputs forwarding missing"
 check_cpp '--bundle-fail-close ' "launcher wiring failed: option 58 bundle-fail-close forwarding missing"
@@ -265,7 +283,19 @@ echo "[easy-mode-wiring] option 59 command wiring"
 check_cpp 'if \(choice == "59"\)' "launcher wiring failed: option 59 handler missing"
 check_cpp 'prod-pilot-cohort-campaign' "launcher wiring failed: option 59 command missing"
 check_cpp 'Run pre-real-host readiness once before the campaign\?' "launcher wiring failed: option 59 pre-real-host readiness prompt missing"
+check_cpp 'Run inline campaign-signoff policy gate\? \(Y/n\)' "launcher wiring failed: option 59 campaign-signoff-check prompt missing"
+check_cpp 'Fail campaign when inline campaign-signoff fails\? \(Y/n\)' "launcher wiring failed: option 59 campaign-signoff-required prompt missing"
+check_cpp 'Refresh campaign summary during inline campaign-signoff\? \(y/N\)' "launcher wiring failed: option 59 campaign-signoff-refresh-summary prompt missing"
+check_cpp 'Inline campaign-signoff summary stage: fail on NO-GO\? \(Y/n\)' "launcher wiring failed: option 59 campaign-signoff-summary-fail-on-no-go prompt missing"
+check_cpp 'Campaign signoff summary JSON path \(optional\)' "launcher wiring failed: option 59 campaign-signoff-summary-json prompt missing"
+check_cpp 'Print inline campaign-signoff summary JSON payload\? \(y/N\)' "launcher wiring failed: option 59 campaign-signoff-print-summary-json prompt missing"
 check_cpp 'Extra campaign args \(optional\)' "launcher wiring failed: option 59 prompt text missing"
+check_cpp '--campaign-signoff-check ' "launcher wiring failed: option 59 campaign-signoff-check forwarding missing"
+check_cpp '--campaign-signoff-required ' "launcher wiring failed: option 59 campaign-signoff-required forwarding missing"
+check_cpp '--campaign-signoff-refresh-summary ' "launcher wiring failed: option 59 campaign-signoff-refresh-summary forwarding missing"
+check_cpp '--campaign-signoff-summary-fail-on-no-go ' "launcher wiring failed: option 59 campaign-signoff-summary-fail-on-no-go forwarding missing"
+check_cpp '--campaign-signoff-print-summary-json ' "launcher wiring failed: option 59 campaign-signoff-print-summary-json forwarding missing"
+check_cpp '--campaign-signoff-summary-json ' "launcher wiring failed: option 59 campaign-signoff-summary-json forwarding missing"
 check_cpp '--show-json ' "launcher wiring failed: option 59 show-json forwarding missing"
 
 echo "[easy-mode-wiring] options 60/61 command wiring"
@@ -325,6 +355,80 @@ check_cpp 'pre-real-host-readiness' "launcher wiring failed: option 68 command m
 check_cpp 'Prune wg-only runtime dir during cleanup\?' "launcher wiring failed: option 68 prune prompt missing"
 check_cpp 'Client VPN iface' "launcher wiring failed: option 68 vpn iface prompt missing"
 
+echo "[easy-mode-wiring] options 69/70 command wiring"
+check_cpp 'if \(choice == "69"\)' "launcher wiring failed: option 69 handler missing"
+check_cpp 'server-federation-status' "launcher wiring failed: option 69 command missing"
+check_cpp 'Directory URL override \(optional\)' "launcher wiring failed: option 69 directory URL prompt missing"
+check_cpp 'Request timeout sec' "launcher wiring failed: option 69 timeout prompt missing"
+check_cpp 'Use strict federation policy preset\?' "launcher wiring failed: option 69/70 strict federation preset prompt missing"
+check_cpp 'Summary JSON path \(optional\)' "launcher wiring failed: option 69/70 summary JSON prompt missing"
+check_cpp '--require-configured-healthy ' "launcher wiring failed: option 69/70 require-configured-healthy forwarding missing"
+check_cpp '--max-cooling-retry-sec ' "launcher wiring failed: option 69/70 max-cooling-retry-sec forwarding missing"
+check_cpp '--max-peer-sync-age-sec ' "launcher wiring failed: option 69/70 max-peer-sync-age-sec forwarding missing"
+check_cpp '--max-issuer-sync-age-sec ' "launcher wiring failed: option 69/70 max-issuer-sync-age-sec forwarding missing"
+check_cpp '--min-peer-success-sources ' "launcher wiring failed: option 69/70 min-peer-success-sources forwarding missing"
+check_cpp '--min-issuer-success-sources ' "launcher wiring failed: option 69/70 min-issuer-success-sources forwarding missing"
+check_cpp '--min-peer-source-operators ' "launcher wiring failed: option 69/70 min-peer-source-operators forwarding missing"
+check_cpp '--min-issuer-source-operators ' "launcher wiring failed: option 69/70 min-issuer-source-operators forwarding missing"
+check_cpp '--summary-json ' "launcher wiring failed: option 69/70 summary-json forwarding missing"
+check_cpp '--print-summary-json ' "launcher wiring failed: option 69/70 print-summary-json forwarding missing"
+check_cpp '--fail-on-not-ready ' "launcher wiring failed: option 69 fail-on-not-ready forwarding missing"
+check_cpp 'if \(choice == "70"\)' "launcher wiring failed: option 70 handler missing"
+check_cpp 'server-federation-wait' "launcher wiring failed: option 70 command missing"
+check_cpp 'Ready timeout sec' "launcher wiring failed: option 70 ready timeout prompt missing"
+check_cpp 'Poll interval sec' "launcher wiring failed: option 70 poll interval prompt missing"
+
+echo "[easy-mode-wiring] options 71/72/73 command wiring"
+check_cpp 'if \(choice == "71"\)' "launcher wiring failed: option 71 handler missing"
+check_cpp 'prod-pilot-cohort-campaign-summary' "launcher wiring failed: option 71 command missing"
+check_cpp 'Campaign summary JSON path' "launcher wiring failed: option 71 summary JSON prompt missing"
+check_cpp 'Fail when campaign decision is NO-GO\?' "launcher wiring failed: option 71 fail-on-no-go prompt missing"
+check_cpp 'if \(choice == "72"\)' "launcher wiring failed: option 72 handler missing"
+check_cpp 'prod-pilot-cohort-campaign-check' "launcher wiring failed: option 72 command missing"
+check_cpp 'Require runbook summary JSON artifact present/valid\?' "launcher wiring failed: option 72 runbook summary prompt missing"
+check_cpp 'Require quick run-report JSON artifact present/valid\?' "launcher wiring failed: option 72 quick run-report prompt missing"
+check_cpp 'Require campaign summary decision=GO\?' "launcher wiring failed: option 72 GO policy prompt missing"
+check_cpp 'Require campaign signoff stage\+summary evidence \(strict\)\?' "launcher wiring failed: option 72 campaign signoff evidence prompt missing"
+check_cpp 'Check summary JSON path \(optional\)' "launcher wiring failed: option 72 summary-json prompt missing"
+check_cpp 'Print check summary JSON payload\?' "launcher wiring failed: option 72 print-summary-json prompt missing"
+check_cpp '--require-runbook-summary-json ' "launcher wiring failed: option 72 runbook summary forwarding missing"
+check_cpp '--require-quick-run-report-json ' "launcher wiring failed: option 72 quick run-report forwarding missing"
+check_cpp '--require-summary-policy-match ' "launcher wiring failed: option 72 summary policy forwarding missing"
+check_cpp '--require-incident-policy-clean ' "launcher wiring failed: option 72 incident policy forwarding missing"
+check_cpp '--require-campaign-signoff-enabled ' "launcher wiring failed: option 72 campaign signoff enabled forwarding missing"
+check_cpp '--require-campaign-signoff-required ' "launcher wiring failed: option 72 campaign signoff required forwarding missing"
+check_cpp '--require-campaign-signoff-attempted ' "launcher wiring failed: option 72 campaign signoff attempted forwarding missing"
+check_cpp '--require-campaign-signoff-ok ' "launcher wiring failed: option 72 campaign signoff rc forwarding missing"
+check_cpp '--require-campaign-signoff-summary-json ' "launcher wiring failed: option 72 campaign signoff summary forwarding missing"
+check_cpp '--require-campaign-signoff-summary-json-valid ' "launcher wiring failed: option 72 campaign signoff summary valid forwarding missing"
+check_cpp '--require-campaign-signoff-summary-status-ok ' "launcher wiring failed: option 72 campaign signoff summary status forwarding missing"
+check_cpp '--require-campaign-signoff-summary-final-rc-zero ' "launcher wiring failed: option 72 campaign signoff summary final_rc forwarding missing"
+check_cpp '--summary-json ' "launcher wiring failed: option 72 summary-json forwarding missing"
+check_cpp '--print-summary-json ' "launcher wiring failed: option 72 print-summary-json forwarding missing"
+check_cpp 'if \(choice == "73"\)' "launcher wiring failed: option 73 handler missing"
+check_cpp 'prod-pilot-cohort-campaign-signoff' "launcher wiring failed: option 73 command missing"
+check_cpp 'Refresh campaign summary before check\?' "launcher wiring failed: option 73 refresh prompt missing"
+check_cpp 'Campaign signoff stage summary JSON path \(optional\)' "launcher wiring failed: option 73 campaign signoff stage summary prompt missing"
+check_cpp 'Require existing campaign signoff stage\+summary evidence\?' "launcher wiring failed: option 73 campaign signoff evidence prompt missing"
+check_cpp 'Signoff summary JSON path \(optional\)' "launcher wiring failed: option 73 summary-json prompt missing"
+check_cpp 'Print signoff summary JSON payload\?' "launcher wiring failed: option 73 print-summary-json prompt missing"
+check_cpp '--summary-fail-on-no-go ' "launcher wiring failed: option 73 summary fail-on-no-go forwarding missing"
+check_cpp '--require-runbook-summary-json ' "launcher wiring failed: option 73 runbook summary forwarding missing"
+check_cpp '--require-quick-run-report-json ' "launcher wiring failed: option 73 quick run-report forwarding missing"
+check_cpp '--require-summary-policy-match ' "launcher wiring failed: option 73 summary policy forwarding missing"
+check_cpp '--require-incident-policy-clean ' "launcher wiring failed: option 73 incident policy forwarding missing"
+check_cpp '--campaign-signoff-summary-json ' "launcher wiring failed: option 73 campaign signoff stage summary forwarding missing"
+check_cpp '--require-campaign-signoff-enabled ' "launcher wiring failed: option 73 campaign signoff enabled forwarding missing"
+check_cpp '--require-campaign-signoff-required ' "launcher wiring failed: option 73 campaign signoff required forwarding missing"
+check_cpp '--require-campaign-signoff-attempted ' "launcher wiring failed: option 73 campaign signoff attempted forwarding missing"
+check_cpp '--require-campaign-signoff-ok ' "launcher wiring failed: option 73 campaign signoff rc forwarding missing"
+check_cpp '--require-campaign-signoff-summary-json ' "launcher wiring failed: option 73 campaign signoff summary forwarding missing"
+check_cpp '--require-campaign-signoff-summary-json-valid ' "launcher wiring failed: option 73 campaign signoff summary valid forwarding missing"
+check_cpp '--require-campaign-signoff-summary-status-ok ' "launcher wiring failed: option 73 campaign signoff summary status forwarding missing"
+check_cpp '--require-campaign-signoff-summary-final-rc-zero ' "launcher wiring failed: option 73 campaign signoff summary final_rc forwarding missing"
+check_cpp '--summary-json ' "launcher wiring failed: option 73 summary-json forwarding missing"
+check_cpp '--print-summary-json ' "launcher wiring failed: option 73 print-summary-json forwarding missing"
+
 echo "[easy-mode-wiring] easy_node help exposure"
 if ! "$EASY_NODE" --help | rg -q 'prod-pilot-cohort-quick-signoff'; then
   echo "launcher wiring failed: easy_node help missing prod-pilot-cohort-quick-signoff"
@@ -336,6 +440,14 @@ if ! "$EASY_NODE" --help | rg -q 'prod-pilot-cohort-quick-runbook'; then
 fi
 if ! "$EASY_NODE" --help | rg -q 'prod-pilot-cohort-campaign'; then
   echo "launcher wiring failed: easy_node help missing prod-pilot-cohort-campaign"
+  exit 1
+fi
+if ! "$EASY_NODE" --help | rg -q 'prod-pilot-cohort-campaign-check'; then
+  echo "launcher wiring failed: easy_node help missing prod-pilot-cohort-campaign-check"
+  exit 1
+fi
+if ! "$EASY_NODE" --help | rg -q 'prod-pilot-cohort-campaign-signoff'; then
+  echo "launcher wiring failed: easy_node help missing prod-pilot-cohort-campaign-signoff"
   exit 1
 fi
 if ! "$EASY_NODE" --help | rg -q 'runtime-doctor'; then
@@ -360,6 +472,14 @@ if ! "$EASY_NODE" --help | rg -q 'wg-only-stack-selftest-record'; then
 fi
 if ! "$EASY_NODE" --help | rg -q 'pre-real-host-readiness'; then
   echo "launcher wiring failed: easy_node help missing pre-real-host-readiness"
+  exit 1
+fi
+if ! "$EASY_NODE" --help | rg -q 'server-federation-status'; then
+  echo "launcher wiring failed: easy_node help missing server-federation-status"
+  exit 1
+fi
+if ! "$EASY_NODE" --help | rg -q 'server-federation-wait'; then
+  echo "launcher wiring failed: easy_node help missing server-federation-wait"
   exit 1
 fi
 if ! "$EASY_NODE" --help | rg -q 'manual-validation-record'; then
@@ -438,6 +558,14 @@ if ! "$EASY_NODE" prod-pilot-cohort-quick-runbook --help | rg -q -- '--signoff-r
   echo "launcher wiring failed: prod-pilot-cohort-quick-runbook help missing --signoff-require-trend-artifact-policy-match"
   exit 1
 fi
+if ! "$EASY_NODE" prod-pilot-cohort-quick-runbook --help | rg -q -- '--signoff-incident-snapshot-min-attachment-count'; then
+  echo "launcher wiring failed: prod-pilot-cohort-quick-runbook help missing --signoff-incident-snapshot-min-attachment-count"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-quick-runbook --help | rg -q -- '--signoff-incident-snapshot-max-skipped-count'; then
+  echo "launcher wiring failed: prod-pilot-cohort-quick-runbook help missing --signoff-incident-snapshot-max-skipped-count"
+  exit 1
+fi
 if ! "$EASY_NODE" prod-pilot-cohort-quick-runbook --help | rg -q -- '--max-round-failures'; then
   echo "launcher wiring failed: prod-pilot-cohort-quick-runbook help missing --max-round-failures"
   exit 1
@@ -456,6 +584,166 @@ if ! "$EASY_NODE" prod-pilot-cohort-campaign --help | rg -q -- 'prod-pilot-cohor
 fi
 if ! "$EASY_NODE" prod-pilot-cohort-campaign --help | rg -q -- '--pre-real-host-readiness'; then
   echo "launcher wiring failed: prod-pilot-cohort-campaign help missing --pre-real-host-readiness"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-campaign --help | rg -q -- '--campaign-require-incident-snapshot-on-fail'; then
+  echo "launcher wiring failed: prod-pilot-cohort-campaign help missing --campaign-require-incident-snapshot-on-fail"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-campaign --help | rg -q -- '--campaign-incident-snapshot-max-skipped-count'; then
+  echo "launcher wiring failed: prod-pilot-cohort-campaign help missing --campaign-incident-snapshot-max-skipped-count"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-campaign --help | rg -q -- '--campaign-run-report-json'; then
+  echo "launcher wiring failed: prod-pilot-cohort-campaign help missing --campaign-run-report-json"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-campaign --help | rg -q -- '--campaign-run-report-required'; then
+  echo "launcher wiring failed: prod-pilot-cohort-campaign help missing --campaign-run-report-required"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-campaign --help | rg -q -- '--campaign-run-report-json-required'; then
+  echo "launcher wiring failed: prod-pilot-cohort-campaign help missing --campaign-run-report-json-required"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-campaign --help | rg -q -- '--campaign-signoff-check'; then
+  echo "launcher wiring failed: prod-pilot-cohort-campaign help missing --campaign-signoff-check"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-campaign --help | rg -q -- '--campaign-signoff-required'; then
+  echo "launcher wiring failed: prod-pilot-cohort-campaign help missing --campaign-signoff-required"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-campaign --help | rg -q -- '--campaign-signoff-summary-json'; then
+  echo "launcher wiring failed: prod-pilot-cohort-campaign help missing --campaign-signoff-summary-json"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-campaign --help | rg -q -- '--campaign-signoff-summary-fail-on-no-go'; then
+  echo "launcher wiring failed: prod-pilot-cohort-campaign help missing --campaign-signoff-summary-fail-on-no-go"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-campaign-summary --help | rg -q -- '--require-incident-snapshot-on-fail'; then
+  echo "launcher wiring failed: prod-pilot-cohort-campaign-summary help missing --require-incident-snapshot-on-fail"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-campaign-summary --help | rg -q -- '--incident-snapshot-max-skipped-count'; then
+  echo "launcher wiring failed: prod-pilot-cohort-campaign-summary help missing --incident-snapshot-max-skipped-count"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-campaign-summary --help | rg -q -- '--fail-on-no-go'; then
+  echo "launcher wiring failed: prod-pilot-cohort-campaign-summary help missing --fail-on-no-go"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-campaign-check --help | rg -q -- '--campaign-run-report-json'; then
+  echo "launcher wiring failed: prod-pilot-cohort-campaign-check help missing --campaign-run-report-json"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-campaign-check --help | rg -q -- '--campaign-signoff-summary-json'; then
+  echo "launcher wiring failed: prod-pilot-cohort-campaign-check help missing --campaign-signoff-summary-json"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-campaign-check --help | rg -q -- '--require-summary-policy-match'; then
+  echo "launcher wiring failed: prod-pilot-cohort-campaign-check help missing --require-summary-policy-match"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-campaign-check --help | rg -q -- '--require-campaign-signoff-attempted'; then
+  echo "launcher wiring failed: prod-pilot-cohort-campaign-check help missing --require-campaign-signoff-attempted"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-campaign-check --help | rg -q -- '--require-campaign-signoff-enabled'; then
+  echo "launcher wiring failed: prod-pilot-cohort-campaign-check help missing --require-campaign-signoff-enabled"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-campaign-check --help | rg -q -- '--require-campaign-signoff-required'; then
+  echo "launcher wiring failed: prod-pilot-cohort-campaign-check help missing --require-campaign-signoff-required"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-campaign-check --help | rg -q -- '--require-campaign-signoff-summary-json-valid'; then
+  echo "launcher wiring failed: prod-pilot-cohort-campaign-check help missing --require-campaign-signoff-summary-json-valid"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-campaign-check --help | rg -q -- '--require-campaign-signoff-summary-status-ok'; then
+  echo "launcher wiring failed: prod-pilot-cohort-campaign-check help missing --require-campaign-signoff-summary-status-ok"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-campaign-check --help | rg -q -- '--require-campaign-signoff-summary-final-rc-zero'; then
+  echo "launcher wiring failed: prod-pilot-cohort-campaign-check help missing --require-campaign-signoff-summary-final-rc-zero"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-campaign-check --help | rg -q -- '--require-campaign-summary-fail-close'; then
+  echo "launcher wiring failed: prod-pilot-cohort-campaign-check help missing --require-campaign-summary-fail-close"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-campaign-check --help | rg -q -- '--require-campaign-signoff-check'; then
+  echo "launcher wiring failed: prod-pilot-cohort-campaign-check help missing --require-campaign-signoff-check"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-campaign-check --help | rg -q -- '--require-campaign-run-report-required'; then
+  echo "launcher wiring failed: prod-pilot-cohort-campaign-check help missing --require-campaign-run-report-required"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-campaign-check --help | rg -q -- '--require-campaign-run-report-json-required'; then
+  echo "launcher wiring failed: prod-pilot-cohort-campaign-check help missing --require-campaign-run-report-json-required"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-campaign-check --help | rg -q -- '--require-artifact-path-match'; then
+  echo "launcher wiring failed: prod-pilot-cohort-campaign-check help missing --require-artifact-path-match"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-campaign-signoff --help | rg -q -- '--refresh-summary'; then
+  echo "launcher wiring failed: prod-pilot-cohort-campaign-signoff help missing --refresh-summary"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-campaign-signoff --help | rg -q -- '--summary-fail-on-no-go'; then
+  echo "launcher wiring failed: prod-pilot-cohort-campaign-signoff help missing --summary-fail-on-no-go"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-campaign-signoff --help | rg -q -- '--campaign-signoff-summary-json'; then
+  echo "launcher wiring failed: prod-pilot-cohort-campaign-signoff help missing --campaign-signoff-summary-json"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-campaign-signoff --help | rg -q -- '--require-campaign-signoff-attempted'; then
+  echo "launcher wiring failed: prod-pilot-cohort-campaign-signoff help missing --require-campaign-signoff-attempted"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-campaign-signoff --help | rg -q -- '--require-campaign-signoff-enabled'; then
+  echo "launcher wiring failed: prod-pilot-cohort-campaign-signoff help missing --require-campaign-signoff-enabled"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-campaign-signoff --help | rg -q -- '--require-campaign-signoff-required'; then
+  echo "launcher wiring failed: prod-pilot-cohort-campaign-signoff help missing --require-campaign-signoff-required"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-campaign-signoff --help | rg -q -- '--require-campaign-signoff-summary-json-valid'; then
+  echo "launcher wiring failed: prod-pilot-cohort-campaign-signoff help missing --require-campaign-signoff-summary-json-valid"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-campaign-signoff --help | rg -q -- '--require-campaign-signoff-summary-status-ok'; then
+  echo "launcher wiring failed: prod-pilot-cohort-campaign-signoff help missing --require-campaign-signoff-summary-status-ok"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-campaign-signoff --help | rg -q -- '--require-campaign-signoff-summary-final-rc-zero'; then
+  echo "launcher wiring failed: prod-pilot-cohort-campaign-signoff help missing --require-campaign-signoff-summary-final-rc-zero"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-campaign-signoff --help | rg -q -- '--require-campaign-summary-fail-close'; then
+  echo "launcher wiring failed: prod-pilot-cohort-campaign-signoff help missing --require-campaign-summary-fail-close"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-campaign-signoff --help | rg -q -- '--require-campaign-signoff-check'; then
+  echo "launcher wiring failed: prod-pilot-cohort-campaign-signoff help missing --require-campaign-signoff-check"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-campaign-signoff --help | rg -q -- '--require-campaign-run-report-required'; then
+  echo "launcher wiring failed: prod-pilot-cohort-campaign-signoff help missing --require-campaign-run-report-required"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-campaign-signoff --help | rg -q -- '--require-campaign-run-report-json-required'; then
+  echo "launcher wiring failed: prod-pilot-cohort-campaign-signoff help missing --require-campaign-run-report-json-required"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-campaign-signoff --help | rg -q -- '--require-artifact-path-match'; then
+  echo "launcher wiring failed: prod-pilot-cohort-campaign-signoff help missing --require-artifact-path-match"
   exit 1
 fi
 if ! "$EASY_NODE" incident-snapshot --help | rg -q -- '--include-docker-logs'; then
@@ -486,6 +774,10 @@ if ! "$EASY_NODE" prod-operator-lifecycle-runbook --help | rg -q -- '--federatio
   echo "launcher wiring failed: prod-operator-lifecycle-runbook help missing --federation-status-file"
   exit 1
 fi
+if ! "$EASY_NODE" prod-operator-lifecycle-runbook --help | rg -q -- '--federation-status-summary-json'; then
+  echo "launcher wiring failed: prod-operator-lifecycle-runbook help missing --federation-status-summary-json"
+  exit 1
+fi
 if ! "$EASY_NODE" prod-operator-lifecycle-runbook --help | rg -q -- '--onboard-invite'; then
   echo "launcher wiring failed: prod-operator-lifecycle-runbook help missing --onboard-invite"
   exit 1
@@ -508,6 +800,14 @@ if ! "$EASY_NODE" prod-operator-lifecycle-runbook --help | rg -q -- '--incident-
 fi
 if ! "$EASY_NODE" prod-operator-lifecycle-runbook --help | rg -q -- '--incident-docker-log-lines'; then
   echo "launcher wiring failed: prod-operator-lifecycle-runbook help missing --incident-docker-log-lines"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-operator-lifecycle-runbook --help | rg -q -- '--incident-attach-min-count'; then
+  echo "launcher wiring failed: prod-operator-lifecycle-runbook help missing --incident-attach-min-count"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-operator-lifecycle-runbook --help | rg -q -- '--incident-attachment-manifest-min-count'; then
+  echo "launcher wiring failed: prod-operator-lifecycle-runbook help missing --incident-attachment-manifest-min-count"
   exit 1
 fi
 if ! "$EASY_NODE" prod-operator-lifecycle-runbook --help | rg -q -- '--runtime-doctor-on-fail'; then
@@ -566,6 +866,14 @@ if ! "$EASY_NODE" prod-pilot-cohort-quick --help | rg -q -- '--signoff-require-i
   echo "launcher wiring failed: prod-pilot-cohort-quick help missing --signoff-require-incident-snapshot-artifacts"
   exit 1
 fi
+if ! "$EASY_NODE" prod-pilot-cohort-quick --help | rg -q -- '--signoff-incident-snapshot-min-attachment-count'; then
+  echo "launcher wiring failed: prod-pilot-cohort-quick help missing --signoff-incident-snapshot-min-attachment-count"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-quick --help | rg -q -- '--signoff-incident-snapshot-max-skipped-count'; then
+  echo "launcher wiring failed: prod-pilot-cohort-quick help missing --signoff-incident-snapshot-max-skipped-count"
+  exit 1
+fi
 if ! "$EASY_NODE" prod-pilot-cohort-quick --help | rg -q -- '--pre-real-host-readiness'; then
   echo "launcher wiring failed: prod-pilot-cohort-quick help missing --pre-real-host-readiness"
   exit 1
@@ -584,6 +892,14 @@ if ! "$EASY_NODE" prod-pilot-cohort-quick-alert --help | rg -q -- '--warn-go-rat
 fi
 if ! "$EASY_NODE" prod-pilot-cohort-quick-dashboard --help | rg -q -- '--dashboard-md'; then
   echo "launcher wiring failed: prod-pilot-cohort-quick-dashboard help missing --dashboard-md"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-quick-dashboard --help | rg -q -- '--incident-snapshot-min-attachment-count'; then
+  echo "launcher wiring failed: prod-pilot-cohort-quick-dashboard help missing --incident-snapshot-min-attachment-count"
+  exit 1
+fi
+if ! "$EASY_NODE" prod-pilot-cohort-quick-dashboard --help | rg -q -- '--incident-snapshot-max-skipped-count'; then
+  echo "launcher wiring failed: prod-pilot-cohort-quick-dashboard help missing --incident-snapshot-max-skipped-count"
   exit 1
 fi
 

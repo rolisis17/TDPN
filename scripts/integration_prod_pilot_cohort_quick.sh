@@ -79,6 +79,8 @@ FAKE_SIGNOFF_RC=0 \
   --signoff-min-trend-wg-soak-cross-operator-pairs 1 \
   --signoff-require-incident-snapshot-on-fail 0 \
   --signoff-require-incident-snapshot-artifacts 0 \
+  --signoff-incident-snapshot-min-attachment-count 2 \
+  --signoff-incident-snapshot-max-skipped-count 0 \
   --reports-dir "$SUCCESS_REPORTS" \
   --summary-json "$SUCCESS_SUMMARY" \
   --run-report-json "$SUCCESS_RUN_REPORT" \
@@ -146,6 +148,16 @@ if ! rg -q -- '--require-incident-snapshot-artifacts 0' "$CAPTURE"; then
   cat "$CAPTURE"
   exit 1
 fi
+if ! rg -q -- '--incident-snapshot-min-attachment-count 2' "$CAPTURE"; then
+  echo "quick forwarding missing --incident-snapshot-min-attachment-count 2"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--incident-snapshot-max-skipped-count 0' "$CAPTURE"; then
+  echo "quick forwarding missing --incident-snapshot-max-skipped-count 0"
+  cat "$CAPTURE"
+  exit 1
+fi
 if ! rg -q -- '--bootstrap-directory https://a.example:8081' "$CAPTURE"; then
   echo "quick forwarding missing bootstrap-directory"
   cat "$CAPTURE"
@@ -200,7 +212,7 @@ if ! jq -e '.status == "ok" and .runbook.rc == 0 and .signoff.rc == 0' "$SUCCESS
   cat "$SUCCESS_RUN_REPORT"
   exit 1
 fi
-if ! jq -e '.config.signoff_require_trend_artifact_policy_match == false and .config.signoff_require_trend_wg_validate_udp_source == false and .config.signoff_require_trend_wg_validate_strict_distinct == false and .config.signoff_require_trend_wg_soak_diversity_pass == false and .config.signoff_min_trend_wg_soak_selection_lines == 7 and .config.signoff_min_trend_wg_soak_entry_operators == 1 and .config.signoff_min_trend_wg_soak_exit_operators == 1 and .config.signoff_min_trend_wg_soak_cross_operator_pairs == 1 and .config.signoff_require_incident_snapshot_on_fail == false and .config.signoff_require_incident_snapshot_artifacts == false' "$SUCCESS_RUN_REPORT" >/dev/null; then
+if ! jq -e '.config.signoff_require_trend_artifact_policy_match == false and .config.signoff_require_trend_wg_validate_udp_source == false and .config.signoff_require_trend_wg_validate_strict_distinct == false and .config.signoff_require_trend_wg_soak_diversity_pass == false and .config.signoff_min_trend_wg_soak_selection_lines == 7 and .config.signoff_min_trend_wg_soak_entry_operators == 1 and .config.signoff_min_trend_wg_soak_exit_operators == 1 and .config.signoff_min_trend_wg_soak_cross_operator_pairs == 1 and .config.signoff_require_incident_snapshot_on_fail == false and .config.signoff_require_incident_snapshot_artifacts == false and .config.signoff_incident_snapshot_min_attachment_count == 2 and .config.signoff_incident_snapshot_max_skipped_count == 0' "$SUCCESS_RUN_REPORT" >/dev/null; then
   echo "unexpected signoff config payload in quick run report"
   cat "$SUCCESS_RUN_REPORT"
   exit 1

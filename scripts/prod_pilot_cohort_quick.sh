@@ -36,6 +36,8 @@ Usage:
     [--signoff-min-trend-wg-soak-cross-operator-pairs N] \
     [--signoff-require-incident-snapshot-on-fail [0|1]] \
     [--signoff-require-incident-snapshot-artifacts [0|1]] \
+    [--signoff-incident-snapshot-min-attachment-count N] \
+    [--signoff-incident-snapshot-max-skipped-count N|-1] \
     [--print-run-report [0|1]] \
     [--show-json [0|1]] \
     [-- <prod-pilot-runbook extra args...>]
@@ -150,6 +152,8 @@ signoff_min_trend_wg_soak_exit_operators="${PROD_PILOT_COHORT_QUICK_SIGNOFF_MIN_
 signoff_min_trend_wg_soak_cross_operator_pairs="${PROD_PILOT_COHORT_QUICK_SIGNOFF_MIN_TREND_WG_SOAK_CROSS_OPERATOR_PAIRS:-2}"
 signoff_require_incident_snapshot_on_fail="${PROD_PILOT_COHORT_QUICK_SIGNOFF_REQUIRE_INCIDENT_SNAPSHOT_ON_FAIL:-1}"
 signoff_require_incident_snapshot_artifacts="${PROD_PILOT_COHORT_QUICK_SIGNOFF_REQUIRE_INCIDENT_SNAPSHOT_ARTIFACTS:-1}"
+signoff_incident_snapshot_min_attachment_count="${PROD_PILOT_COHORT_QUICK_SIGNOFF_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT:-${PROD_PILOT_COHORT_QUICK_CHECK_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT:-0}}"
+signoff_incident_snapshot_max_skipped_count="${PROD_PILOT_COHORT_QUICK_SIGNOFF_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT:-${PROD_PILOT_COHORT_QUICK_CHECK_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT:--1}}"
 max_round_failures="${PROD_PILOT_COHORT_QUICK_MAX_ROUND_FAILURES:-0}"
 
 declare -a runbook_extra_args=()
@@ -315,6 +319,14 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --signoff-incident-snapshot-min-attachment-count)
+      signoff_incident_snapshot_min_attachment_count="${2:-}"
+      shift 2
+      ;;
+    --signoff-incident-snapshot-max-skipped-count)
+      signoff_incident_snapshot_max_skipped_count="${2:-}"
+      shift 2
+      ;;
     --print-run-report)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         print_run_report="${2:-}"
@@ -373,6 +385,14 @@ int_or_die "--signoff-min-trend-wg-soak-selection-lines" "$signoff_min_trend_wg_
 int_or_die "--signoff-min-trend-wg-soak-entry-operators" "$signoff_min_trend_wg_soak_entry_operators"
 int_or_die "--signoff-min-trend-wg-soak-exit-operators" "$signoff_min_trend_wg_soak_exit_operators"
 int_or_die "--signoff-min-trend-wg-soak-cross-operator-pairs" "$signoff_min_trend_wg_soak_cross_operator_pairs"
+if [[ ! "$signoff_incident_snapshot_min_attachment_count" =~ ^[0-9]+$ ]]; then
+  echo "--signoff-incident-snapshot-min-attachment-count must be an integer >= 0"
+  exit 2
+fi
+if [[ ! "$signoff_incident_snapshot_max_skipped_count" =~ ^-?[0-9]+$ ]] || ((signoff_incident_snapshot_max_skipped_count < -1)); then
+  echo "--signoff-incident-snapshot-max-skipped-count must be an integer >= -1"
+  exit 2
+fi
 bool_or_die "--bundle-outputs" "$bundle_outputs"
 bool_or_die "--bundle-fail-close" "$bundle_fail_close"
 
@@ -494,6 +514,8 @@ if [[ "$failure_step" != "runbook_summary_missing" ]]; then
     --require-bundle-manifest "$bundle_outputs"
     --require-incident-snapshot-on-fail "$signoff_require_incident_snapshot_on_fail"
     --require-incident-snapshot-artifacts "$signoff_require_incident_snapshot_artifacts"
+    --incident-snapshot-min-attachment-count "$signoff_incident_snapshot_min_attachment_count"
+    --incident-snapshot-max-skipped-count "$signoff_incident_snapshot_max_skipped_count"
     --show-json "$show_json"
   )
 
@@ -561,6 +583,8 @@ jq -nc \
   --argjson signoff_min_trend_wg_soak_cross_operator_pairs "$signoff_min_trend_wg_soak_cross_operator_pairs" \
   --argjson signoff_require_incident_snapshot_on_fail "$(json_bool "$signoff_require_incident_snapshot_on_fail")" \
   --argjson signoff_require_incident_snapshot_artifacts "$(json_bool "$signoff_require_incident_snapshot_artifacts")" \
+  --argjson signoff_incident_snapshot_min_attachment_count "$signoff_incident_snapshot_min_attachment_count" \
+  --argjson signoff_incident_snapshot_max_skipped_count "$signoff_incident_snapshot_max_skipped_count" \
   '{
     started_at:$started_at,
     finished_at:$finished_at,
@@ -600,7 +624,9 @@ jq -nc \
       signoff_min_trend_wg_soak_exit_operators:$signoff_min_trend_wg_soak_exit_operators,
       signoff_min_trend_wg_soak_cross_operator_pairs:$signoff_min_trend_wg_soak_cross_operator_pairs,
       signoff_require_incident_snapshot_on_fail:$signoff_require_incident_snapshot_on_fail,
-      signoff_require_incident_snapshot_artifacts:$signoff_require_incident_snapshot_artifacts
+      signoff_require_incident_snapshot_artifacts:$signoff_require_incident_snapshot_artifacts,
+      signoff_incident_snapshot_min_attachment_count:$signoff_incident_snapshot_min_attachment_count,
+      signoff_incident_snapshot_max_skipped_count:$signoff_incident_snapshot_max_skipped_count
     },
     artifacts:{
       reports_dir:$reports_dir,

@@ -29,6 +29,8 @@ Usage:
     [--require-summary-status-ok [0|1]] \
     [--require-incident-snapshot-on-fail [0|1]] \
     [--require-incident-snapshot-artifacts [0|1]] \
+    [--incident-snapshot-min-attachment-count N] \
+    [--incident-snapshot-max-skipped-count N|-1] \
     [--max-duration-sec N] \
     [--fail-on-any-no-go [0|1]] \
     [--min-go-rate-pct N] \
@@ -133,6 +135,8 @@ require_summary_json="${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_SUMMARY_JSON:-1}"
 require_summary_status_ok="${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_SUMMARY_STATUS_OK:-1}"
 require_incident_snapshot_on_fail="${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_INCIDENT_SNAPSHOT_ON_FAIL:-1}"
 require_incident_snapshot_artifacts="${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_INCIDENT_SNAPSHOT_ARTIFACTS:-1}"
+incident_snapshot_min_attachment_count="${PROD_PILOT_COHORT_QUICK_CHECK_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT:-0}"
+incident_snapshot_max_skipped_count="${PROD_PILOT_COHORT_QUICK_CHECK_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT:--1}"
 max_duration_sec="${PROD_PILOT_COHORT_QUICK_CHECK_MAX_DURATION_SEC:-0}"
 fail_on_any_no_go="${PROD_PILOT_COHORT_QUICK_TREND_FAIL_ON_ANY_NO_GO:-0}"
 min_go_rate_pct="${PROD_PILOT_COHORT_QUICK_TREND_MIN_GO_RATE_PCT:-95}"
@@ -255,6 +259,14 @@ while [[ $# -gt 0 ]]; do
         require_incident_snapshot_artifacts="1"
         shift
       fi
+      ;;
+    --incident-snapshot-min-attachment-count)
+      incident_snapshot_min_attachment_count="${2:-}"
+      shift 2
+      ;;
+    --incident-snapshot-max-skipped-count)
+      incident_snapshot_max_skipped_count="${2:-}"
+      shift 2
       ;;
     --max-duration-sec)
       max_duration_sec="${2:-}"
@@ -395,6 +407,14 @@ for int_name in max_reports since_hours max_duration_sec show_top_reasons warn_n
     exit 2
   fi
 done
+if [[ ! "$incident_snapshot_min_attachment_count" =~ ^[0-9]+$ ]]; then
+  echo "--incident-snapshot-min-attachment-count must be an integer >= 0"
+  exit 2
+fi
+if [[ ! "$incident_snapshot_max_skipped_count" =~ ^-?[0-9]+$ ]] || ((incident_snapshot_max_skipped_count < -1)); then
+  echo "--incident-snapshot-max-skipped-count must be an integer >= -1"
+  exit 2
+fi
 
 for decimal_name in min_go_rate_pct warn_go_rate_pct critical_go_rate_pct; do
   value="${!decimal_name}"
@@ -463,6 +483,8 @@ trend_args=(
   --require-summary-status-ok "$require_summary_status_ok"
   --require-incident-snapshot-on-fail "$require_incident_snapshot_on_fail"
   --require-incident-snapshot-artifacts "$require_incident_snapshot_artifacts"
+  --incident-snapshot-min-attachment-count "$incident_snapshot_min_attachment_count"
+  --incident-snapshot-max-skipped-count "$incident_snapshot_max_skipped_count"
   --max-duration-sec "$max_duration_sec"
   --fail-on-any-no-go "$fail_on_any_no_go"
   --min-go-rate-pct "$min_go_rate_pct"
@@ -514,6 +536,8 @@ alert_args=(
   --require-cohort-signoff-policy "$require_cohort_signoff_policy"
   --require-incident-snapshot-on-fail "$require_incident_snapshot_on_fail"
   --require-incident-snapshot-artifacts "$require_incident_snapshot_artifacts"
+  --incident-snapshot-min-attachment-count "$incident_snapshot_min_attachment_count"
+  --incident-snapshot-max-skipped-count "$incident_snapshot_max_skipped_count"
 )
 
 echo "[prod-pilot-cohort-quick-dashboard] running alert classification"

@@ -33,6 +33,8 @@ Usage:
     [--require-summary-status-ok [0|1]] \
     [--require-incident-snapshot-on-fail [0|1]] \
     [--require-incident-snapshot-artifacts [0|1]] \
+    [--incident-snapshot-min-attachment-count N] \
+    [--incident-snapshot-max-skipped-count N|-1] \
     [--max-duration-sec N] \
     [--show-json [0|1]]
 
@@ -162,6 +164,8 @@ require_summary_json="${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_SUMMARY_JSON:-1}"
 require_summary_status_ok="${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_SUMMARY_STATUS_OK:-1}"
 require_incident_snapshot_on_fail="${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_INCIDENT_SNAPSHOT_ON_FAIL:-1}"
 require_incident_snapshot_artifacts="${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_INCIDENT_SNAPSHOT_ARTIFACTS:-1}"
+incident_snapshot_min_attachment_count="${PROD_PILOT_COHORT_QUICK_CHECK_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT:-0}"
+incident_snapshot_max_skipped_count="${PROD_PILOT_COHORT_QUICK_CHECK_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT:--1}"
 max_duration_sec="${PROD_PILOT_COHORT_QUICK_CHECK_MAX_DURATION_SEC:-0}"
 show_json="${PROD_PILOT_COHORT_QUICK_CHECK_SHOW_JSON:-0}"
 
@@ -334,6 +338,14 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --incident-snapshot-min-attachment-count)
+      incident_snapshot_min_attachment_count="${2:-}"
+      shift 2
+      ;;
+    --incident-snapshot-max-skipped-count)
+      incident_snapshot_max_skipped_count="${2:-}"
+      shift 2
+      ;;
     --max-duration-sec)
       max_duration_sec="${2:-}"
       shift 2
@@ -375,6 +387,14 @@ bool_arg_or_die "--require-summary-status-ok" "$require_summary_status_ok"
 bool_arg_or_die "--require-incident-snapshot-on-fail" "$require_incident_snapshot_on_fail"
 bool_arg_or_die "--require-incident-snapshot-artifacts" "$require_incident_snapshot_artifacts"
 bool_arg_or_die "--show-json" "$show_json"
+if [[ ! "$incident_snapshot_min_attachment_count" =~ ^[0-9]+$ ]]; then
+  echo "--incident-snapshot-min-attachment-count must be an integer >= 0"
+  exit 2
+fi
+if [[ ! "$incident_snapshot_max_skipped_count" =~ ^-?[0-9]+$ ]] || ((incident_snapshot_max_skipped_count < -1)); then
+  echo "--incident-snapshot-max-skipped-count must be an integer >= -1"
+  exit 2
+fi
 if [[ ! "$max_duration_sec" =~ ^[0-9]+$ ]]; then
   echo "--max-duration-sec must be an integer >= 0"
   exit 2
@@ -534,6 +554,8 @@ if [[ "$require_cohort_signoff_policy" == "1" ]]; then
         --require-bundle-manifest "$require_bundle_manifest" \
         --require-incident-snapshot-on-fail "$require_incident_snapshot_on_fail" \
         --require-incident-snapshot-artifacts "$require_incident_snapshot_artifacts" \
+        --incident-snapshot-min-attachment-count "$incident_snapshot_min_attachment_count" \
+        --incident-snapshot-max-skipped-count "$incident_snapshot_max_skipped_count" \
         --show-json 0 2>&1
     )"
     cohort_policy_rc=$?
@@ -572,6 +594,8 @@ if [[ "$require_incident_snapshot_on_fail" == "1" || "$require_incident_snapshot
         --require-bundle-manifest 0 \
         --require-incident-snapshot-on-fail "$require_incident_snapshot_on_fail" \
         --require-incident-snapshot-artifacts "$require_incident_snapshot_artifacts" \
+        --incident-snapshot-min-attachment-count "$incident_snapshot_min_attachment_count" \
+        --incident-snapshot-max-skipped-count "$incident_snapshot_max_skipped_count" \
         --show-json 0 2>&1
     )"
     cohort_incident_rc=$?

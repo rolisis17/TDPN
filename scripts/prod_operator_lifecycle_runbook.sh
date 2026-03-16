@@ -199,8 +199,16 @@ Usage:
     [--federation-min-issuer-success-sources N] \
     [--federation-min-peer-source-operators N] \
     [--federation-min-issuer-source-operators N] \
+    [--federation-wait-file PATH] \
+    [--federation-wait-file-required [0|1]] \
+    [--federation-wait-summary-json PATH] \
+    [--federation-wait-print-summary-json [0|1]] \
+    [--federation-wait-summary-required [0|1]] \
     [--federation-status-fail-on-not-ready [0|1]] \
     [--federation-status-file PATH] \
+    [--federation-status-file-required [0|1]] \
+    [--federation-status-summary-json PATH] \
+    [--federation-status-summary-required [0|1]] \
     [--onboard-invite [0|1]] \
     [--onboard-invite-count N] \
     [--onboard-invite-tier 1|2|3] \
@@ -216,11 +224,18 @@ Usage:
     [--runtime-doctor-exit-iface IFACE] \
     [--runtime-doctor-vpn-iface IFACE] \
     [--runtime-doctor-file PATH] \
+    [--runtime-doctor-file-required [0|1]] \
     [--incident-snapshot-on-fail [0|1]] \
     [--incident-bundle-dir PATH] \
     [--incident-timeout-sec N] \
     [--incident-include-docker-logs [0|1]] \
     [--incident-docker-log-lines N] \
+    [--incident-summary-required [0|1]] \
+    [--incident-bundle-required [0|1]] \
+    [--incident-attachment-manifest-required [0|1]] \
+    [--incident-attachment-no-skips-required [0|1]] \
+    [--incident-attach-min-count N] \
+    [--incident-attachment-manifest-min-count N] \
     [--incident-attach-artifact PATH]... \
     [--report-md PATH] \
     [--summary-json PATH] \
@@ -288,8 +303,16 @@ federation_min_peer_success_sources="${PROD_OPERATOR_LIFECYCLE_FEDERATION_MIN_PE
 federation_min_issuer_success_sources="${PROD_OPERATOR_LIFECYCLE_FEDERATION_MIN_ISSUER_SUCCESS_SOURCES:-0}"
 federation_min_peer_source_operators="${PROD_OPERATOR_LIFECYCLE_FEDERATION_MIN_PEER_SOURCE_OPERATORS:-0}"
 federation_min_issuer_source_operators="${PROD_OPERATOR_LIFECYCLE_FEDERATION_MIN_ISSUER_SOURCE_OPERATORS:-0}"
+federation_wait_file=""
+federation_wait_file_required="${PROD_OPERATOR_LIFECYCLE_FEDERATION_WAIT_FILE_REQUIRED:-0}"
+federation_wait_summary_json=""
+federation_wait_print_summary_json="${PROD_OPERATOR_LIFECYCLE_FEDERATION_WAIT_PRINT_SUMMARY_JSON:-0}"
+federation_wait_summary_required="${PROD_OPERATOR_LIFECYCLE_FEDERATION_WAIT_SUMMARY_REQUIRED:-0}"
 federation_status_fail_on_not_ready="${PROD_OPERATOR_LIFECYCLE_FEDERATION_STATUS_FAIL_ON_NOT_READY:-0}"
 federation_status_file=""
+federation_status_file_required="${PROD_OPERATOR_LIFECYCLE_FEDERATION_STATUS_FILE_REQUIRED:-0}"
+federation_status_summary_json=""
+federation_status_summary_required="${PROD_OPERATOR_LIFECYCLE_FEDERATION_STATUS_SUMMARY_REQUIRED:-0}"
 onboard_invite="${PROD_OPERATOR_LIFECYCLE_ONBOARD_INVITE:-0}"
 onboard_invite_count="${PROD_OPERATOR_LIFECYCLE_ONBOARD_INVITE_COUNT:-1}"
 onboard_invite_tier="${PROD_OPERATOR_LIFECYCLE_ONBOARD_INVITE_TIER:-1}"
@@ -305,11 +328,18 @@ runtime_doctor_client_iface="${PROD_OPERATOR_LIFECYCLE_RUNTIME_DOCTOR_CLIENT_IFA
 runtime_doctor_exit_iface="${PROD_OPERATOR_LIFECYCLE_RUNTIME_DOCTOR_EXIT_IFACE:-wgestack0}"
 runtime_doctor_vpn_iface="${PROD_OPERATOR_LIFECYCLE_RUNTIME_DOCTOR_VPN_IFACE:-wgvpn0}"
 runtime_doctor_file=""
+runtime_doctor_file_required="${PROD_OPERATOR_LIFECYCLE_RUNTIME_DOCTOR_FILE_REQUIRED:-0}"
 incident_snapshot_on_fail="${PROD_OPERATOR_LIFECYCLE_INCIDENT_SNAPSHOT_ON_FAIL:-1}"
 incident_bundle_dir=""
 incident_timeout_sec="${PROD_OPERATOR_LIFECYCLE_INCIDENT_TIMEOUT_SEC:-20}"
 incident_include_docker_logs="${PROD_OPERATOR_LIFECYCLE_INCIDENT_INCLUDE_DOCKER_LOGS:-1}"
 incident_docker_log_lines="${PROD_OPERATOR_LIFECYCLE_INCIDENT_DOCKER_LOG_LINES:-120}"
+incident_summary_required="${PROD_OPERATOR_LIFECYCLE_INCIDENT_SUMMARY_REQUIRED:-0}"
+incident_bundle_required="${PROD_OPERATOR_LIFECYCLE_INCIDENT_BUNDLE_REQUIRED:-0}"
+incident_attachment_manifest_required="${PROD_OPERATOR_LIFECYCLE_INCIDENT_ATTACHMENT_MANIFEST_REQUIRED:-0}"
+incident_attachment_no_skips_required="${PROD_OPERATOR_LIFECYCLE_INCIDENT_ATTACHMENT_NO_SKIPS_REQUIRED:-0}"
+incident_attach_min_count="${PROD_OPERATOR_LIFECYCLE_INCIDENT_ATTACH_MIN_COUNT:-0}"
+incident_attachment_manifest_min_count="${PROD_OPERATOR_LIFECYCLE_INCIDENT_ATTACHMENT_MANIFEST_MIN_COUNT:-0}"
 declare -a incident_attach_artifacts_cli=()
 report_md=""
 summary_json=""
@@ -532,6 +562,41 @@ while [[ $# -gt 0 ]]; do
       federation_min_issuer_source_operators="${2:-}"
       shift 2
       ;;
+    --federation-wait-file)
+      federation_wait_file="${2:-}"
+      shift 2
+      ;;
+    --federation-wait-file-required)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        federation_wait_file_required="${2:-}"
+        shift 2
+      else
+        federation_wait_file_required="1"
+        shift
+      fi
+      ;;
+    --federation-wait-summary-json)
+      federation_wait_summary_json="${2:-}"
+      shift 2
+      ;;
+    --federation-wait-print-summary-json)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        federation_wait_print_summary_json="${2:-}"
+        shift 2
+      else
+        federation_wait_print_summary_json="1"
+        shift
+      fi
+      ;;
+    --federation-wait-summary-required)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        federation_wait_summary_required="${2:-}"
+        shift 2
+      else
+        federation_wait_summary_required="1"
+        shift
+      fi
+      ;;
     --federation-status-fail-on-not-ready)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         federation_status_fail_on_not_ready="${2:-}"
@@ -544,6 +609,28 @@ while [[ $# -gt 0 ]]; do
     --federation-status-file)
       federation_status_file="${2:-}"
       shift 2
+      ;;
+    --federation-status-file-required)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        federation_status_file_required="${2:-}"
+        shift 2
+      else
+        federation_status_file_required="1"
+        shift
+      fi
+      ;;
+    --federation-status-summary-json)
+      federation_status_summary_json="${2:-}"
+      shift 2
+      ;;
+    --federation-status-summary-required)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        federation_status_summary_required="${2:-}"
+        shift 2
+      else
+        federation_status_summary_required="1"
+        shift
+      fi
       ;;
     --onboard-invite)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
@@ -630,6 +717,15 @@ while [[ $# -gt 0 ]]; do
       runtime_doctor_file="${2:-}"
       shift 2
       ;;
+    --runtime-doctor-file-required)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        runtime_doctor_file_required="${2:-}"
+        shift 2
+      else
+        runtime_doctor_file_required="1"
+        shift
+      fi
+      ;;
     --incident-snapshot-on-fail)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         incident_snapshot_on_fail="${2:-}"
@@ -658,6 +754,50 @@ while [[ $# -gt 0 ]]; do
       ;;
     --incident-docker-log-lines)
       incident_docker_log_lines="${2:-}"
+      shift 2
+      ;;
+    --incident-summary-required)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        incident_summary_required="${2:-}"
+        shift 2
+      else
+        incident_summary_required="1"
+        shift
+      fi
+      ;;
+    --incident-bundle-required)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        incident_bundle_required="${2:-}"
+        shift 2
+      else
+        incident_bundle_required="1"
+        shift
+      fi
+      ;;
+    --incident-attachment-manifest-required)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        incident_attachment_manifest_required="${2:-}"
+        shift 2
+      else
+        incident_attachment_manifest_required="1"
+        shift
+      fi
+      ;;
+    --incident-attachment-no-skips-required)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        incident_attachment_no_skips_required="${2:-}"
+        shift 2
+      else
+        incident_attachment_no_skips_required="1"
+        shift
+      fi
+      ;;
+    --incident-attach-min-count)
+      incident_attach_min_count="${2:-}"
+      shift 2
+      ;;
+    --incident-attachment-manifest-min-count)
+      incident_attachment_manifest_min_count="${2:-}"
       shift 2
       ;;
     --incident-attach-artifact)
@@ -726,14 +866,24 @@ bool_or_die "--verify-relays" "$verify_relays"
 bool_or_die "--verify-absent" "$verify_absent"
 bool_or_die "--federation-check" "$federation_check"
 bool_or_die "--federation-require-configured-healthy" "$federation_require_configured_healthy"
+bool_or_die "--federation-wait-file-required" "$federation_wait_file_required"
+bool_or_die "--federation-wait-print-summary-json" "$federation_wait_print_summary_json"
+bool_or_die "--federation-wait-summary-required" "$federation_wait_summary_required"
 bool_or_die "--federation-status-fail-on-not-ready" "$federation_status_fail_on_not_ready"
+bool_or_die "--federation-status-file-required" "$federation_status_file_required"
+bool_or_die "--federation-status-summary-required" "$federation_status_summary_required"
 bool_or_die "--onboard-invite" "$onboard_invite"
 bool_or_die "--onboard-invite-fail-open" "$onboard_invite_fail_open"
 bool_or_die "--rollback-on-fail" "$rollback_on_fail"
 bool_or_die "--rollback-verify-absent" "$rollback_verify_absent"
 bool_or_die "--runtime-doctor-on-fail" "$runtime_doctor_on_fail"
+bool_or_die "--runtime-doctor-file-required" "$runtime_doctor_file_required"
 bool_or_die "--incident-snapshot-on-fail" "$incident_snapshot_on_fail"
 bool_or_die "--incident-include-docker-logs" "$incident_include_docker_logs"
+bool_or_die "--incident-summary-required" "$incident_summary_required"
+bool_or_die "--incident-bundle-required" "$incident_bundle_required"
+bool_or_die "--incident-attachment-manifest-required" "$incident_attachment_manifest_required"
+bool_or_die "--incident-attachment-no-skips-required" "$incident_attachment_no_skips_required"
 bool_or_die "--print-summary-json" "$print_summary_json"
 int_or_die "--preflight-timeout-sec" "$preflight_timeout_sec"
 int_or_die "--health-timeout-sec" "$health_timeout_sec"
@@ -755,6 +905,8 @@ int_or_die "--rollback-verify-timeout-sec" "$rollback_verify_timeout_sec"
 int_or_die "--runtime-doctor-base-port" "$runtime_doctor_base_port"
 int_or_die "--incident-timeout-sec" "$incident_timeout_sec"
 int_or_die "--incident-docker-log-lines" "$incident_docker_log_lines"
+int_or_die "--incident-attach-min-count" "$incident_attach_min_count"
+int_or_die "--incident-attachment-manifest-min-count" "$incident_attachment_manifest_min_count"
 if ((federation_ready_timeout_sec < 1)); then
   echo "--federation-ready-timeout-sec must be >= 1"
   exit 2
@@ -817,6 +969,21 @@ if [[ -z "$federation_status_file" ]]; then
 fi
 federation_status_file="$(abs_path "$federation_status_file")"
 mkdir -p "$(dirname "$federation_status_file")"
+if [[ -z "$federation_wait_file" ]]; then
+  federation_wait_file="${summary_json%.json}.federation_wait.log"
+fi
+federation_wait_file="$(abs_path "$federation_wait_file")"
+mkdir -p "$(dirname "$federation_wait_file")"
+if [[ -z "$federation_wait_summary_json" ]]; then
+  federation_wait_summary_json="${summary_json%.json}.federation_wait.summary.json"
+fi
+federation_wait_summary_json="$(abs_path "$federation_wait_summary_json")"
+mkdir -p "$(dirname "$federation_wait_summary_json")"
+if [[ -z "$federation_status_summary_json" ]]; then
+  federation_status_summary_json="${summary_json%.json}.federation_status.summary.json"
+fi
+federation_status_summary_json="$(abs_path "$federation_status_summary_json")"
+mkdir -p "$(dirname "$federation_status_summary_json")"
 if [[ -z "$onboard_invite_file" ]]; then
   onboard_invite_file="${summary_json%.json}.invite_keys.txt"
 fi
@@ -857,9 +1024,57 @@ federation_wait_state="disabled"
 if [[ "$federation_check" == "1" ]]; then
   federation_wait_state="not_run"
 fi
+federation_wait_capture_rc=0
+federation_wait_file_required_met=true
+federation_wait_summary_capture_rc=0
+federation_wait_summary_state="disabled"
+federation_wait_summary_status="disabled"
+federation_wait_summary_final_state=""
+federation_wait_summary_required_met=true
+federation_wait_peer_sync_ready=false
+federation_wait_issuer_sync_ready=false
+federation_wait_peer_health_ready=false
+federation_wait_cooling_retry_exceeded=false
+federation_wait_failure_reasons_json='[]'
+federation_wait_failure_reasons_csv=""
+federation_wait_peer_sync_age_sec=-1
+federation_wait_issuer_sync_age_sec=-1
+federation_wait_peer_source_operator_count=0
+federation_wait_issuer_source_operator_count=0
+federation_wait_configured_failing=0
+federation_wait_discovered_eligible=0
+federation_wait_cooling_retry_max_sec=0
+federation_wait_attempts=0
+federation_wait_elapsed_sec=0
+federation_wait_remaining_sec=0
+if [[ "$federation_check" == "1" ]]; then
+  federation_wait_summary_state="not_run"
+  federation_wait_summary_status="not_run"
+fi
 effective_peer_directories=""
 effective_peer_count=0
 federation_status_capture_rc=0
+federation_status_file_required_met=true
+federation_status_summary_capture_rc=0
+federation_status_summary_state="disabled"
+federation_status_summary_required_met=true
+federation_status_ready=false
+federation_status_peer_sync_ready=false
+federation_status_issuer_sync_ready=false
+federation_status_peer_health_ready=false
+federation_status_cooling_retry_exceeded=false
+federation_status_failure_reasons_json='[]'
+federation_status_failure_reasons_csv=""
+federation_status_peer_sync_age_sec=-1
+federation_status_issuer_sync_age_sec=-1
+federation_status_peer_source_operator_count=0
+federation_status_issuer_source_operator_count=0
+federation_status_configured_failing=0
+federation_status_discovered_eligible=0
+federation_status_cooling_retry_max_sec=0
+if [[ "$federation_check" == "1" ]]; then
+  federation_status_summary_state="not_run"
+fi
 onboard_invite_state="disabled"
 if [[ "$onboard_invite" == "1" ]]; then
   onboard_invite_state="not_run"
@@ -882,6 +1097,7 @@ runtime_doctor_state="disabled"
 runtime_doctor_rc=0
 runtime_doctor_file_effective=""
 runtime_doctor_on_fail_effective=0
+runtime_doctor_file_required_met=true
 incident_snapshot_state="disabled"
 incident_snapshot_rc=0
 incident_attach_count=0
@@ -896,6 +1112,16 @@ incident_attachment_skipped_effective=""
 incident_attachment_manifest_count=0
 incident_attachment_skipped_count=0
 incident_artifact_state="not_applicable"
+incident_summary_required_met=true
+incident_bundle_required_met=true
+incident_required_artifacts_met=true
+incident_attachment_manifest_required_met=true
+incident_attachment_no_skips_required_met=true
+incident_attach_min_count_required_met=true
+incident_attachment_manifest_min_count_met=true
+incident_required_attachment_policy_met=true
+incident_attachment_policy_failure_count=0
+incident_required_policies_met=true
 if [[ "$runtime_doctor_on_fail" == "1" ]]; then
   runtime_doctor_state="not_run"
   runtime_doctor_on_fail_effective=1
@@ -1084,6 +1310,8 @@ if [[ "$action" == "onboard" ]]; then
     fi
     effective_peer_count="$(csv_count "$effective_peer_directories")"
     if [[ "$effective_peer_count" =~ ^[0-9]+$ ]] && ((effective_peer_count > 0)); then
+      rm -f "$federation_wait_file" >/dev/null 2>&1 || true
+      rm -f "$federation_wait_summary_json" >/dev/null 2>&1 || true
       set +e
       "$EASY_NODE_SH" server-federation-wait \
         --directory-url "$resolved_directory_base" \
@@ -1097,10 +1325,63 @@ if [[ "$action" == "onboard" ]]; then
         --min-issuer-success-sources "$federation_min_issuer_success_sources" \
         --min-peer-source-operators "$federation_min_peer_source_operators" \
         --min-issuer-source-operators "$federation_min_issuer_source_operators" \
-        --timeout-sec "$federation_timeout_sec"
+        --summary-json "$federation_wait_summary_json" \
+        --print-summary-json "$federation_wait_print_summary_json" \
+        --timeout-sec "$federation_timeout_sec" >"$federation_wait_file" 2>&1
       rc=$?
       set -e
-      if [[ "$rc" -ne 0 ]]; then
+      federation_wait_capture_rc="$rc"
+      federation_wait_file_required_met=false
+      if [[ -s "$federation_wait_file" ]]; then
+        federation_wait_file_required_met=true
+      fi
+      if [[ -f "$federation_wait_file" ]]; then
+        cat "$federation_wait_file"
+      fi
+      federation_wait_summary_required_met=false
+      federation_wait_summary_capture_rc="$rc"
+      federation_wait_summary_state="missing_or_invalid"
+      if [[ -s "$federation_wait_summary_json" ]] && jq -e '.status != null and .readiness.federation_ready != null' "$federation_wait_summary_json" >/dev/null 2>&1; then
+        federation_wait_summary_state="captured"
+        federation_wait_summary_required_met=true
+        federation_wait_summary_status="$(jq -r '.status // "unknown"' "$federation_wait_summary_json" 2>/dev/null || echo "unknown")"
+        federation_wait_summary_final_state="$(jq -r '.state // ""' "$federation_wait_summary_json" 2>/dev/null || true)"
+        federation_wait_peer_sync_ready="$(jq -r '.readiness.peer_sync_ready // false' "$federation_wait_summary_json" 2>/dev/null || echo "false")"
+        federation_wait_issuer_sync_ready="$(jq -r '.readiness.issuer_sync_ready // false' "$federation_wait_summary_json" 2>/dev/null || echo "false")"
+        federation_wait_peer_health_ready="$(jq -r '.readiness.peer_health_ready // false' "$federation_wait_summary_json" 2>/dev/null || echo "false")"
+        federation_wait_cooling_retry_exceeded="$(jq -r '.readiness.cooling_retry_exceeded // false' "$federation_wait_summary_json" 2>/dev/null || echo "false")"
+        federation_wait_failure_reasons_json="$(jq -c '(.readiness.failure_reasons // []) | if type == "array" then . else [] end' "$federation_wait_summary_json" 2>/dev/null || echo '[]')"
+        federation_wait_peer_sync_age_sec="$(jq -r '.observed.peer_sync.age_sec // -1' "$federation_wait_summary_json" 2>/dev/null || echo "-1")"
+        federation_wait_issuer_sync_age_sec="$(jq -r '.observed.issuer_sync.age_sec // -1' "$federation_wait_summary_json" 2>/dev/null || echo "-1")"
+        federation_wait_peer_source_operator_count="$(jq -r '.observed.peer_sync.source_operator_count // 0' "$federation_wait_summary_json" 2>/dev/null || echo "0")"
+        federation_wait_issuer_source_operator_count="$(jq -r '.observed.issuer_sync.source_operator_count // 0' "$federation_wait_summary_json" 2>/dev/null || echo "0")"
+        federation_wait_configured_failing="$(jq -r '.observed.peer_health.configured_failing // 0' "$federation_wait_summary_json" 2>/dev/null || echo "0")"
+        federation_wait_discovered_eligible="$(jq -r '.observed.peer_health.discovered_eligible // 0' "$federation_wait_summary_json" 2>/dev/null || echo "0")"
+        federation_wait_cooling_retry_max_sec="$(jq -r '.observed.peer_summary.cooling_retry_max_sec // 0' "$federation_wait_summary_json" 2>/dev/null || echo "0")"
+        federation_wait_attempts="$(jq -r '.timing.attempts // 0' "$federation_wait_summary_json" 2>/dev/null || echo "0")"
+        federation_wait_elapsed_sec="$(jq -r '.timing.elapsed_sec // 0' "$federation_wait_summary_json" 2>/dev/null || echo "0")"
+        federation_wait_remaining_sec="$(jq -r '.timing.remaining_sec // 0' "$federation_wait_summary_json" 2>/dev/null || echo "0")"
+        step_ok "federation_wait_summary"
+      else
+        federation_wait_summary_status="unknown"
+        federation_wait_peer_sync_ready="false"
+        federation_wait_issuer_sync_ready="false"
+        federation_wait_peer_health_ready="false"
+        federation_wait_cooling_retry_exceeded="false"
+        federation_wait_failure_reasons_json='["wait_summary_missing_or_invalid"]'
+        federation_wait_failure_reasons_csv="wait_summary_missing_or_invalid"
+        echo "federation wait warning: summary JSON missing or invalid: $federation_wait_summary_json"
+      fi
+      if [[ -z "$federation_wait_failure_reasons_csv" ]]; then
+        federation_wait_failure_reasons_csv="$(jq -r 'if length == 0 then "" else join(",") end' <<<"$federation_wait_failure_reasons_json" 2>/dev/null || true)"
+      fi
+      if [[ "$rc" -eq 0 && "$federation_wait_file_required" == "1" && "$federation_wait_file_required_met" != "true" ]]; then
+        federation_wait_state="failed_wait_file_required"
+        set_failure "federation_wait_file" 12
+      elif [[ "$rc" -eq 0 && "$federation_wait_summary_required" == "1" && "$federation_wait_summary_required_met" != "true" ]]; then
+        federation_wait_state="failed_summary_required"
+        set_failure "federation_wait_summary" 10
+      elif [[ "$rc" -ne 0 ]]; then
         federation_wait_state="failed"
         set_failure "federation_wait" "$rc"
       else
@@ -1109,11 +1390,17 @@ if [[ "$action" == "onboard" ]]; then
       fi
     else
       federation_wait_state="skipped_no_peers"
+      federation_wait_file_required_met=true
+      federation_wait_summary_required_met=true
+      federation_wait_summary_state="skipped_no_peers"
+      federation_wait_summary_status="skipped"
+      federation_wait_summary_final_state="skipped_no_peers"
       step_ok "federation_wait_skipped_no_peers"
     fi
   fi
 
   if [[ "$federation_check" == "1" && "$server_started" == "1" ]]; then
+    rm -f "$federation_status_summary_json" >/dev/null 2>&1 || true
     set +e
     "$EASY_NODE_SH" server-federation-status \
       --directory-url "$resolved_directory_base" \
@@ -1127,14 +1414,68 @@ if [[ "$action" == "onboard" ]]; then
       --min-peer-source-operators "$federation_min_peer_source_operators" \
       --min-issuer-source-operators "$federation_min_issuer_source_operators" \
       --fail-on-not-ready "$federation_status_fail_on_not_ready" \
+      --summary-json "$federation_status_summary_json" \
       --show-json 1 >"$federation_status_file" 2>&1
     rc=$?
     set -e
     federation_status_capture_rc="$rc"
+    federation_status_file_required_met=false
+    if [[ -s "$federation_status_file" ]]; then
+      federation_status_file_required_met=true
+    fi
+    federation_status_summary_capture_rc="$rc"
+    federation_status_summary_required_met=false
     if [[ "$rc" -eq 0 ]]; then
-      step_ok "federation_status"
-    elif [[ "$status" == "ok" ]]; then
-      set_failure "federation_status" "$rc"
+      federation_status_summary_state="missing_or_invalid"
+      if [[ -s "$federation_status_summary_json" ]] && jq -e '.readiness.federation_ready != null' "$federation_status_summary_json" >/dev/null 2>&1; then
+        federation_status_summary_state="captured"
+        federation_status_summary_required_met=true
+        federation_status_ready="$(jq -r '.readiness.federation_ready // false' "$federation_status_summary_json" 2>/dev/null || echo "false")"
+        federation_status_peer_sync_ready="$(jq -r '.readiness.peer_sync_ready // false' "$federation_status_summary_json" 2>/dev/null || echo "false")"
+        federation_status_issuer_sync_ready="$(jq -r '.readiness.issuer_sync_ready // false' "$federation_status_summary_json" 2>/dev/null || echo "false")"
+        federation_status_peer_health_ready="$(jq -r '.readiness.peer_health_ready // false' "$federation_status_summary_json" 2>/dev/null || echo "false")"
+        federation_status_cooling_retry_exceeded="$(jq -r '.readiness.cooling_retry_exceeded // false' "$federation_status_summary_json" 2>/dev/null || echo "false")"
+        federation_status_failure_reasons_json="$(jq -c '(.readiness.failure_reasons // []) | if type == "array" then . else [] end' "$federation_status_summary_json" 2>/dev/null || echo '[]')"
+        federation_status_peer_sync_age_sec="$(jq -r '.observed.peer_sync.age_sec // -1' "$federation_status_summary_json" 2>/dev/null || echo "-1")"
+        federation_status_issuer_sync_age_sec="$(jq -r '.observed.issuer_sync.age_sec // -1' "$federation_status_summary_json" 2>/dev/null || echo "-1")"
+        federation_status_peer_source_operator_count="$(jq -r '.observed.peer_sync.source_operator_count // 0' "$federation_status_summary_json" 2>/dev/null || echo "0")"
+        federation_status_issuer_source_operator_count="$(jq -r '.observed.issuer_sync.source_operator_count // 0' "$federation_status_summary_json" 2>/dev/null || echo "0")"
+        federation_status_configured_failing="$(jq -r '.observed.peer_health.configured_failing // 0' "$federation_status_summary_json" 2>/dev/null || echo "0")"
+        federation_status_discovered_eligible="$(jq -r '.observed.peer_health.discovered_eligible // 0' "$federation_status_summary_json" 2>/dev/null || echo "0")"
+        federation_status_cooling_retry_max_sec="$(jq -r '.observed.peer_summary.cooling_retry_max_sec // 0' "$federation_status_summary_json" 2>/dev/null || echo "0")"
+        step_ok "federation_status_summary"
+      else
+        federation_status_ready="false"
+        federation_status_peer_sync_ready="false"
+        federation_status_issuer_sync_ready="false"
+        federation_status_peer_health_ready="false"
+        federation_status_cooling_retry_exceeded="false"
+        federation_status_failure_reasons_json='["status_summary_missing_or_invalid"]'
+        federation_status_failure_reasons_csv="status_summary_missing_or_invalid"
+        echo "federation status warning: summary JSON missing or invalid: $federation_status_summary_json"
+      fi
+      if [[ -z "$federation_status_failure_reasons_csv" ]]; then
+        federation_status_failure_reasons_csv="$(jq -r 'if length == 0 then "" else join(",") end' <<<"$federation_status_failure_reasons_json" 2>/dev/null || true)"
+      fi
+      if [[ "$federation_status_file_required" == "1" && "$federation_status_file_required_met" != "true" ]]; then
+        if [[ "$status" == "ok" ]]; then
+          set_failure "federation_status_file" 13
+        fi
+      elif [[ "$federation_status_summary_required" == "1" && "$federation_status_summary_required_met" != "true" ]]; then
+        if [[ "$status" == "ok" ]]; then
+          set_failure "federation_status_summary" 11
+        fi
+      else
+        step_ok "federation_status"
+      fi
+    else
+      federation_status_summary_state="failed"
+      federation_status_failure_reasons_json='["status_capture_failed"]'
+      federation_status_failure_reasons_csv="status_capture_failed"
+      federation_status_summary_required_met=false
+      if [[ "$status" == "ok" ]]; then
+        set_failure "federation_status" "$rc"
+      fi
     fi
   fi
 
@@ -1330,12 +1671,29 @@ if [[ "$runtime_doctor_on_fail" == "1" ]]; then
     rc=$?
     set -e
     runtime_doctor_rc="$rc"
-    if [[ -f "$runtime_doctor_file" ]]; then
-      runtime_doctor_state="captured"
-      step_ok "runtime_doctor"
+    runtime_doctor_file_required_met=false
+    if [[ -s "$runtime_doctor_file" ]]; then
+      runtime_doctor_file_required_met=true
+    fi
+    if [[ "$rc" -eq 0 ]]; then
+      if [[ "$runtime_doctor_file_required" == "1" && "$runtime_doctor_file_required_met" != "true" ]]; then
+        runtime_doctor_state="failed_file_required"
+        echo "runtime doctor warning: required output artifact missing/empty: $runtime_doctor_file"
+      elif [[ "$runtime_doctor_file_required_met" == "true" ]]; then
+        runtime_doctor_state="captured"
+        step_ok "runtime_doctor"
+      else
+        runtime_doctor_state="captured_empty"
+        step_ok "runtime_doctor"
+        echo "runtime doctor warning: output artifact is empty: $runtime_doctor_file"
+      fi
     else
-      runtime_doctor_state="failed"
-      echo "runtime doctor warning: output capture failed rc=$rc"
+      if [[ "$runtime_doctor_file_required_met" == "true" ]]; then
+        runtime_doctor_state="failed_command"
+      else
+        runtime_doctor_state="failed"
+      fi
+      echo "runtime doctor warning: command failed rc=$rc output=$runtime_doctor_file"
     fi
   else
     runtime_doctor_state="skipped_status_ok"
@@ -1374,6 +1732,15 @@ if [[ "$incident_snapshot_on_fail" == "1" ]]; then
     declare -a incident_attach_effective=()
     if [[ -f "$federation_status_file" ]]; then
       incident_attach_effective+=("$federation_status_file")
+    fi
+    if [[ -f "$federation_status_summary_json" ]]; then
+      incident_attach_effective+=("$federation_status_summary_json")
+    fi
+    if [[ -f "$federation_wait_summary_json" ]]; then
+      incident_attach_effective+=("$federation_wait_summary_json")
+    fi
+    if [[ -f "$federation_wait_file" ]]; then
+      incident_attach_effective+=("$federation_wait_file")
     fi
     if [[ -f "$onboard_invite_file" ]]; then
       incident_attach_effective+=("$onboard_invite_file")
@@ -1451,12 +1818,141 @@ if [[ "$incident_snapshot_on_fail" == "1" ]]; then
       else
         incident_artifact_state="missing"
       fi
+      if [[ "$incident_summary_required" == "1" ]]; then
+        incident_summary_required_met=false
+        if [[ -s "$incident_summary_json_effective" && -s "$incident_report_md_effective" ]]; then
+          incident_summary_required_met=true
+        fi
+      else
+        incident_summary_required_met=true
+      fi
+      if [[ "$incident_bundle_required" == "1" ]]; then
+        incident_bundle_required_met=false
+        if [[ -s "$incident_bundle_tar_effective" && -s "$incident_bundle_tar_sha_effective" ]]; then
+          incident_bundle_required_met=true
+        fi
+      else
+        incident_bundle_required_met=true
+      fi
+      incident_required_artifacts_met=true
+      if [[ "$incident_summary_required_met" != "true" || "$incident_bundle_required_met" != "true" ]]; then
+        incident_required_artifacts_met=false
+      fi
+      if [[ "$incident_attachment_manifest_required" == "1" && "$incident_attach_count" =~ ^[0-9]+$ ]] && ((incident_attach_count > 0)); then
+        incident_attachment_manifest_required_met=false
+        if [[ -s "$incident_attachment_manifest_effective" && "$incident_attachment_manifest_count" =~ ^[0-9]+$ ]] && ((incident_attachment_manifest_count > 0)); then
+          incident_attachment_manifest_required_met=true
+        fi
+      else
+        incident_attachment_manifest_required_met=true
+      fi
+      if [[ "$incident_attachment_no_skips_required" == "1" ]]; then
+        incident_attachment_no_skips_required_met=false
+        if [[ "$incident_attachment_skipped_count" =~ ^[0-9]+$ ]] && ((incident_attachment_skipped_count == 0)); then
+          incident_attachment_no_skips_required_met=true
+        fi
+      else
+        incident_attachment_no_skips_required_met=true
+      fi
+      if ((incident_attach_min_count > 0)); then
+        incident_attach_min_count_required_met=false
+        if [[ "$incident_attach_count" =~ ^[0-9]+$ ]] && ((incident_attach_count >= incident_attach_min_count)); then
+          incident_attach_min_count_required_met=true
+        fi
+      else
+        incident_attach_min_count_required_met=true
+      fi
+      if ((incident_attachment_manifest_min_count > 0)); then
+        incident_attachment_manifest_min_count_met=false
+        if [[ "$incident_attachment_manifest_count" =~ ^[0-9]+$ ]] && ((incident_attachment_manifest_count >= incident_attachment_manifest_min_count)); then
+          incident_attachment_manifest_min_count_met=true
+        fi
+      else
+        incident_attachment_manifest_min_count_met=true
+      fi
+      incident_attachment_policy_failure_count=0
+      if [[ "$incident_attachment_manifest_required_met" != "true" ]]; then
+        incident_attachment_policy_failure_count=$((incident_attachment_policy_failure_count + 1))
+      fi
+      if [[ "$incident_attachment_no_skips_required_met" != "true" ]]; then
+        incident_attachment_policy_failure_count=$((incident_attachment_policy_failure_count + 1))
+      fi
+      if [[ "$incident_attach_min_count_required_met" != "true" ]]; then
+        incident_attachment_policy_failure_count=$((incident_attachment_policy_failure_count + 1))
+      fi
+      if [[ "$incident_attachment_manifest_min_count_met" != "true" ]]; then
+        incident_attachment_policy_failure_count=$((incident_attachment_policy_failure_count + 1))
+      fi
+      incident_required_attachment_policy_met=true
+      if ((incident_attachment_policy_failure_count > 0)); then
+        incident_required_attachment_policy_met=false
+      fi
+      incident_required_policies_met=true
+      if [[ "$incident_required_artifacts_met" != "true" || "$incident_required_attachment_policy_met" != "true" ]]; then
+        incident_required_policies_met=false
+      fi
+
+      if [[ "$incident_required_artifacts_met" != "true" && "$incident_required_attachment_policy_met" != "true" ]]; then
+        incident_snapshot_state="captured_missing_required_artifacts_and_attachments"
+        echo "incident snapshot warning: required summary/bundle and attachment policies failed"
+      elif [[ "$incident_required_artifacts_met" != "true" ]]; then
+        if [[ "$incident_summary_required_met" != "true" && "$incident_bundle_required_met" != "true" ]]; then
+          incident_snapshot_state="captured_missing_required_artifacts"
+          echo "incident snapshot warning: required summary and bundle artifacts missing/incomplete"
+        elif [[ "$incident_summary_required_met" != "true" ]]; then
+          incident_snapshot_state="captured_missing_summary_required"
+          echo "incident snapshot warning: required summary artifacts missing/incomplete"
+        elif [[ "$incident_bundle_required_met" != "true" ]]; then
+          incident_snapshot_state="captured_missing_bundle_required"
+          echo "incident snapshot warning: required bundle artifacts missing/incomplete"
+        fi
+      elif [[ "$incident_required_attachment_policy_met" != "true" ]]; then
+        if ((incident_attachment_policy_failure_count > 1)); then
+          incident_snapshot_state="captured_attachment_policy_required"
+          echo "incident snapshot warning: required attachment policies failed (failed_checks=$incident_attachment_policy_failure_count)"
+        elif [[ "$incident_attachment_manifest_required_met" != "true" ]]; then
+          incident_snapshot_state="captured_missing_attachment_manifest_required"
+          echo "incident snapshot warning: required attachment manifest missing/incomplete"
+        elif [[ "$incident_attachment_no_skips_required_met" != "true" ]]; then
+          incident_snapshot_state="captured_attachment_skips_required"
+          echo "incident snapshot warning: required no-skipped-attachments policy failed"
+        elif [[ "$incident_attach_min_count_required_met" != "true" ]]; then
+          incident_snapshot_state="captured_attachment_min_count_required"
+          echo "incident snapshot warning: required attachment count floor not met (need >=$incident_attach_min_count observed=$incident_attach_count)"
+        elif [[ "$incident_attachment_manifest_min_count_met" != "true" ]]; then
+          incident_snapshot_state="captured_attachment_manifest_min_count_required"
+          echo "incident snapshot warning: required attachment manifest entry floor not met (need >=$incident_attachment_manifest_min_count observed=$incident_attachment_manifest_count)"
+        else
+          incident_snapshot_state="captured_attachment_policy_required"
+          echo "incident snapshot warning: required attachment policy failed"
+        fi
+      fi
     else
       incident_artifact_state="unknown"
+      incident_summary_required_met=true
+      incident_bundle_required_met=true
+      incident_required_artifacts_met=true
+      incident_attachment_manifest_required_met=true
+      incident_attachment_no_skips_required_met=true
+      incident_attach_min_count_required_met=true
+      incident_attachment_manifest_min_count_met=true
+      incident_required_attachment_policy_met=true
+      incident_attachment_policy_failure_count=0
+      incident_required_policies_met=true
     fi
   else
     incident_snapshot_state="skipped_status_ok"
     incident_artifact_state="skipped_status_ok"
+    incident_summary_required_met=true
+    incident_bundle_required_met=true
+    incident_required_artifacts_met=true
+    incident_attachment_manifest_required_met=true
+    incident_attachment_no_skips_required_met=true
+    incident_attach_min_count_required_met=true
+    incident_attachment_manifest_min_count_met=true
+    incident_required_attachment_policy_met=true
+    incident_attachment_policy_failure_count=0
+    incident_required_policies_met=true
   fi
 fi
 
@@ -1495,12 +1991,61 @@ jq -nc \
   --argjson federation_min_issuer_success_sources "$federation_min_issuer_success_sources" \
   --argjson federation_min_peer_source_operators "$federation_min_peer_source_operators" \
   --argjson federation_min_issuer_source_operators "$federation_min_issuer_source_operators" \
+  --arg federation_wait_file "$federation_wait_file" \
+  --argjson federation_wait_file_required "$(json_bool "$federation_wait_file_required")" \
+  --argjson federation_wait_file_required_met "$federation_wait_file_required_met" \
+  --argjson federation_wait_capture_rc "$federation_wait_capture_rc" \
+  --arg federation_wait_summary_json "$federation_wait_summary_json" \
+  --argjson federation_wait_print_summary_json "$(json_bool "$federation_wait_print_summary_json")" \
+  --argjson federation_wait_summary_required "$(json_bool "$federation_wait_summary_required")" \
+  --argjson federation_wait_summary_required_met "$federation_wait_summary_required_met" \
+  --argjson federation_wait_summary_capture_rc "$federation_wait_summary_capture_rc" \
+  --arg federation_wait_summary_state "$federation_wait_summary_state" \
+  --arg federation_wait_summary_status "$federation_wait_summary_status" \
+  --arg federation_wait_summary_final_state "$federation_wait_summary_final_state" \
+  --argjson federation_wait_peer_sync_ready "$federation_wait_peer_sync_ready" \
+  --argjson federation_wait_issuer_sync_ready "$federation_wait_issuer_sync_ready" \
+  --argjson federation_wait_peer_health_ready "$federation_wait_peer_health_ready" \
+  --argjson federation_wait_cooling_retry_exceeded "$federation_wait_cooling_retry_exceeded" \
+  --argjson federation_wait_failure_reasons "$federation_wait_failure_reasons_json" \
+  --arg federation_wait_failure_reasons_csv "$federation_wait_failure_reasons_csv" \
+  --argjson federation_wait_peer_sync_age_sec "$federation_wait_peer_sync_age_sec" \
+  --argjson federation_wait_issuer_sync_age_sec "$federation_wait_issuer_sync_age_sec" \
+  --argjson federation_wait_peer_source_operator_count "$federation_wait_peer_source_operator_count" \
+  --argjson federation_wait_issuer_source_operator_count "$federation_wait_issuer_source_operator_count" \
+  --argjson federation_wait_configured_failing "$federation_wait_configured_failing" \
+  --argjson federation_wait_discovered_eligible "$federation_wait_discovered_eligible" \
+  --argjson federation_wait_cooling_retry_max_sec "$federation_wait_cooling_retry_max_sec" \
+  --argjson federation_wait_attempts "$federation_wait_attempts" \
+  --argjson federation_wait_elapsed_sec "$federation_wait_elapsed_sec" \
+  --argjson federation_wait_remaining_sec "$federation_wait_remaining_sec" \
   --argjson federation_status_fail_on_not_ready "$(json_bool "$federation_status_fail_on_not_ready")" \
   --arg federation_wait_state "$federation_wait_state" \
   --arg federation_peer_directories "$effective_peer_directories" \
   --argjson federation_peer_count "$effective_peer_count" \
   --arg federation_status_file "$federation_status_file" \
+  --argjson federation_status_file_required "$(json_bool "$federation_status_file_required")" \
+  --argjson federation_status_file_required_met "$federation_status_file_required_met" \
   --argjson federation_status_capture_rc "$federation_status_capture_rc" \
+  --arg federation_status_summary_json "$federation_status_summary_json" \
+  --argjson federation_status_summary_capture_rc "$federation_status_summary_capture_rc" \
+  --arg federation_status_summary_state "$federation_status_summary_state" \
+  --argjson federation_status_summary_required "$(json_bool "$federation_status_summary_required")" \
+  --argjson federation_status_summary_required_met "$federation_status_summary_required_met" \
+  --argjson federation_status_ready "$federation_status_ready" \
+  --argjson federation_status_peer_sync_ready "$federation_status_peer_sync_ready" \
+  --argjson federation_status_issuer_sync_ready "$federation_status_issuer_sync_ready" \
+  --argjson federation_status_peer_health_ready "$federation_status_peer_health_ready" \
+  --argjson federation_status_cooling_retry_exceeded "$federation_status_cooling_retry_exceeded" \
+  --argjson federation_status_failure_reasons "$federation_status_failure_reasons_json" \
+  --arg federation_status_failure_reasons_csv "$federation_status_failure_reasons_csv" \
+  --argjson federation_status_peer_sync_age_sec "$federation_status_peer_sync_age_sec" \
+  --argjson federation_status_issuer_sync_age_sec "$federation_status_issuer_sync_age_sec" \
+  --argjson federation_status_peer_source_operator_count "$federation_status_peer_source_operator_count" \
+  --argjson federation_status_issuer_source_operator_count "$federation_status_issuer_source_operator_count" \
+  --argjson federation_status_configured_failing "$federation_status_configured_failing" \
+  --argjson federation_status_discovered_eligible "$federation_status_discovered_eligible" \
+  --argjson federation_status_cooling_retry_max_sec "$federation_status_cooling_retry_max_sec" \
   --argjson onboard_invite "$(json_bool "$onboard_invite")" \
   --argjson onboard_invite_count "$onboard_invite_count" \
   --argjson onboard_invite_tier "$onboard_invite_tier" \
@@ -1524,6 +2069,8 @@ jq -nc \
   --arg runtime_doctor_state "$runtime_doctor_state" \
   --argjson runtime_doctor_rc "$runtime_doctor_rc" \
   --arg runtime_doctor_file "$runtime_doctor_file_effective" \
+  --argjson runtime_doctor_file_required "$(json_bool "$runtime_doctor_file_required")" \
+  --argjson runtime_doctor_file_required_met "$runtime_doctor_file_required_met" \
   --argjson runtime_doctor_base_port "$runtime_doctor_base_port" \
   --arg runtime_doctor_client_iface "$runtime_doctor_client_iface" \
   --arg runtime_doctor_exit_iface "$runtime_doctor_exit_iface" \
@@ -1547,6 +2094,22 @@ jq -nc \
   --argjson incident_attachment_manifest_count "$incident_attachment_manifest_count" \
   --argjson incident_attachment_skipped_count "$incident_attachment_skipped_count" \
   --arg incident_artifact_state "$incident_artifact_state" \
+  --argjson incident_summary_required "$(json_bool "$incident_summary_required")" \
+  --argjson incident_summary_required_met "$incident_summary_required_met" \
+  --argjson incident_bundle_required "$(json_bool "$incident_bundle_required")" \
+  --argjson incident_bundle_required_met "$incident_bundle_required_met" \
+  --argjson incident_required_artifacts_met "$incident_required_artifacts_met" \
+  --argjson incident_attachment_manifest_required "$(json_bool "$incident_attachment_manifest_required")" \
+  --argjson incident_attachment_manifest_required_met "$incident_attachment_manifest_required_met" \
+  --argjson incident_attachment_no_skips_required "$(json_bool "$incident_attachment_no_skips_required")" \
+  --argjson incident_attachment_no_skips_required_met "$incident_attachment_no_skips_required_met" \
+  --argjson incident_attach_min_count "$incident_attach_min_count" \
+  --argjson incident_attach_min_count_required_met "$incident_attach_min_count_required_met" \
+  --argjson incident_attachment_manifest_min_count "$incident_attachment_manifest_min_count" \
+  --argjson incident_attachment_manifest_min_count_met "$incident_attachment_manifest_min_count_met" \
+  --argjson incident_attachment_policy_failure_count "$incident_attachment_policy_failure_count" \
+  --argjson incident_required_attachment_policy_met "$incident_required_attachment_policy_met" \
+  --argjson incident_required_policies_met "$incident_required_policies_met" \
   --argjson verify_relay_min_count "$verify_relay_min_count" \
   --argjson verify_relay_timeout_sec "$verify_relay_timeout_sec" \
   --argjson relay_observed_count "$relay_observed_count" \
@@ -1593,11 +2156,70 @@ jq -nc \
       min_issuer_success_sources:$federation_min_issuer_success_sources,
       min_peer_source_operators:$federation_min_peer_source_operators,
       min_issuer_source_operators:$federation_min_issuer_source_operators,
+      wait_file:($federation_wait_file // ""),
+      wait_file_required:$federation_wait_file_required,
+      wait_file_required_met:$federation_wait_file_required_met,
+      wait_capture_rc:$federation_wait_capture_rc,
+      wait_summary_file:($federation_wait_summary_json // ""),
+      wait_summary_printed:$federation_wait_print_summary_json,
+      wait_summary_required:$federation_wait_summary_required,
+      wait_summary_required_met:$federation_wait_summary_required_met,
+      wait_summary_capture_rc:$federation_wait_summary_capture_rc,
+      wait_summary_state:($federation_wait_summary_state // ""),
+      wait_summary_status:($federation_wait_summary_status // ""),
+      wait_summary_final_state:($federation_wait_summary_final_state // ""),
+      wait_ready_failure_reasons:$federation_wait_failure_reasons,
+      wait_ready_failure_reasons_csv:($federation_wait_failure_reasons_csv // ""),
+      wait_readiness:{
+        peer_sync_ready:$federation_wait_peer_sync_ready,
+        issuer_sync_ready:$federation_wait_issuer_sync_ready,
+        peer_health_ready:$federation_wait_peer_health_ready,
+        cooling_retry_exceeded:$federation_wait_cooling_retry_exceeded
+      },
+      wait_observed:{
+        peer_sync_age_sec:$federation_wait_peer_sync_age_sec,
+        issuer_sync_age_sec:$federation_wait_issuer_sync_age_sec,
+        peer_source_operator_count:$federation_wait_peer_source_operator_count,
+        issuer_source_operator_count:$federation_wait_issuer_source_operator_count,
+        configured_failing:$federation_wait_configured_failing,
+        discovered_eligible:$federation_wait_discovered_eligible,
+        cooling_retry_max_sec:$federation_wait_cooling_retry_max_sec
+      },
+      wait_timing:{
+        attempts:$federation_wait_attempts,
+        elapsed_sec:$federation_wait_elapsed_sec,
+        remaining_sec:$federation_wait_remaining_sec
+      },
       status_fail_on_not_ready:$federation_status_fail_on_not_ready,
       peer_count:$federation_peer_count,
       peer_directories_csv:($federation_peer_directories // ""),
       status_file:$federation_status_file,
-      status_capture_rc:$federation_status_capture_rc
+      status_file_required:$federation_status_file_required,
+      status_file_required_met:$federation_status_file_required_met,
+      status_capture_rc:$federation_status_capture_rc,
+      status_summary_file:($federation_status_summary_json // ""),
+      status_summary_capture_rc:$federation_status_summary_capture_rc,
+      status_summary_state:($federation_status_summary_state // ""),
+      status_summary_required:$federation_status_summary_required,
+      status_summary_required_met:$federation_status_summary_required_met,
+      status_ready:$federation_status_ready,
+      status_ready_failure_reasons:$federation_status_failure_reasons,
+      status_ready_failure_reasons_csv:($federation_status_failure_reasons_csv // ""),
+      status_readiness:{
+        peer_sync_ready:$federation_status_peer_sync_ready,
+        issuer_sync_ready:$federation_status_issuer_sync_ready,
+        peer_health_ready:$federation_status_peer_health_ready,
+        cooling_retry_exceeded:$federation_status_cooling_retry_exceeded
+      },
+      status_observed:{
+        peer_sync_age_sec:$federation_status_peer_sync_age_sec,
+        issuer_sync_age_sec:$federation_status_issuer_sync_age_sec,
+        peer_source_operator_count:$federation_status_peer_source_operator_count,
+        issuer_source_operator_count:$federation_status_issuer_source_operator_count,
+        configured_failing:$federation_status_configured_failing,
+        discovered_eligible:$federation_status_discovered_eligible,
+        cooling_retry_max_sec:$federation_status_cooling_retry_max_sec
+      }
     },
     invite_bootstrap:{
       state:($onboard_invite_state // ""),
@@ -1625,6 +2247,8 @@ jq -nc \
       state:($runtime_doctor_state // ""),
       rc:$runtime_doctor_rc,
       file:($runtime_doctor_file // ""),
+      file_required:$runtime_doctor_file_required,
+      file_required_met:$runtime_doctor_file_required_met,
       base_port:$runtime_doctor_base_port,
       client_iface:($runtime_doctor_client_iface // ""),
       exit_iface:($runtime_doctor_exit_iface // ""),
@@ -1648,7 +2272,23 @@ jq -nc \
       attachment_skipped:($incident_attachment_skipped // ""),
       attachment_manifest_count:$incident_attachment_manifest_count,
       attachment_skipped_count:$incident_attachment_skipped_count,
-      artifact_state:($incident_artifact_state // "")
+      artifact_state:($incident_artifact_state // ""),
+      summary_required:$incident_summary_required,
+      summary_required_met:$incident_summary_required_met,
+      bundle_required:$incident_bundle_required,
+      bundle_required_met:$incident_bundle_required_met,
+      required_artifacts_met:$incident_required_artifacts_met,
+      attachment_manifest_required:$incident_attachment_manifest_required,
+      attachment_manifest_required_met:$incident_attachment_manifest_required_met,
+      attachment_no_skips_required:$incident_attachment_no_skips_required,
+      attachment_no_skips_required_met:$incident_attachment_no_skips_required_met,
+      attach_min_count_required:$incident_attach_min_count,
+      attach_min_count_required_met:$incident_attach_min_count_required_met,
+      attachment_manifest_min_count_required:$incident_attachment_manifest_min_count,
+      attachment_manifest_min_count_required_met:$incident_attachment_manifest_min_count_met,
+      attachment_policy_failure_count:$incident_attachment_policy_failure_count,
+      required_attachment_policy_met:$incident_required_attachment_policy_met,
+      required_policies_met:$incident_required_policies_met
     },
     relay_policy:{
       verify_min_count:$verify_relay_min_count,
@@ -1700,10 +2340,49 @@ ${completed_steps_md}
 - min_issuer_success_sources: ${federation_min_issuer_success_sources}
 - min_peer_source_operators: ${federation_min_peer_source_operators}
 - min_issuer_source_operators: ${federation_min_issuer_source_operators}
+- wait_file: ${federation_wait_file}
+- wait_file_required: ${federation_wait_file_required}
+- wait_file_required_met: ${federation_wait_file_required_met}
+- wait_capture_rc: ${federation_wait_capture_rc}
+- wait_summary_state: ${federation_wait_summary_state}
+- wait_summary_status: ${federation_wait_summary_status}
+- wait_summary_final_state: ${federation_wait_summary_final_state}
+- wait_summary_required: ${federation_wait_summary_required}
+- wait_summary_required_met: ${federation_wait_summary_required_met}
+- wait_summary_capture_rc: ${federation_wait_summary_capture_rc}
+- wait_summary_file: ${federation_wait_summary_json}
+- wait_ready_failure_reasons: ${federation_wait_failure_reasons_csv}
+- wait_readiness_peer_sync_ready: ${federation_wait_peer_sync_ready}
+- wait_readiness_issuer_sync_ready: ${federation_wait_issuer_sync_ready}
+- wait_readiness_peer_health_ready: ${federation_wait_peer_health_ready}
+- wait_readiness_cooling_retry_exceeded: ${federation_wait_cooling_retry_exceeded}
+- wait_timing_attempts: ${federation_wait_attempts}
+- wait_timing_elapsed_sec: ${federation_wait_elapsed_sec}
+- wait_timing_remaining_sec: ${federation_wait_remaining_sec}
 - status_fail_on_not_ready: ${federation_status_fail_on_not_ready}
 - peer_count: ${effective_peer_count}
 - status_capture_rc: ${federation_status_capture_rc}
 - status_file: ${federation_status_file}
+- status_file_required: ${federation_status_file_required}
+- status_file_required_met: ${federation_status_file_required_met}
+- status_summary_state: ${federation_status_summary_state}
+- status_summary_capture_rc: ${federation_status_summary_capture_rc}
+- status_summary_file: ${federation_status_summary_json}
+- status_summary_required: ${federation_status_summary_required}
+- status_summary_required_met: ${federation_status_summary_required_met}
+- status_ready: ${federation_status_ready}
+- status_ready_failure_reasons: ${federation_status_failure_reasons_csv}
+- status_readiness_peer_sync_ready: ${federation_status_peer_sync_ready}
+- status_readiness_issuer_sync_ready: ${federation_status_issuer_sync_ready}
+- status_readiness_peer_health_ready: ${federation_status_peer_health_ready}
+- status_readiness_cooling_retry_exceeded: ${federation_status_cooling_retry_exceeded}
+- status_observed_peer_sync_age_sec: ${federation_status_peer_sync_age_sec}
+- status_observed_issuer_sync_age_sec: ${federation_status_issuer_sync_age_sec}
+- status_observed_peer_source_operator_count: ${federation_status_peer_source_operator_count}
+- status_observed_issuer_source_operator_count: ${federation_status_issuer_source_operator_count}
+- status_observed_configured_failing: ${federation_status_configured_failing}
+- status_observed_discovered_eligible: ${federation_status_discovered_eligible}
+- status_observed_cooling_retry_max_sec: ${federation_status_cooling_retry_max_sec}
 
 ## Invite Bootstrap
 - state: ${onboard_invite_state}
@@ -1724,6 +2403,8 @@ ${completed_steps_md}
 - state: ${runtime_doctor_state}
 - rc: ${runtime_doctor_rc}
 - file: ${runtime_doctor_file_effective}
+- file_required: ${runtime_doctor_file_required}
+- file_required_met: ${runtime_doctor_file_required_met}
 
 ## Incident Snapshot
 - state: ${incident_snapshot_state}
@@ -1738,15 +2419,40 @@ ${completed_steps_md}
 - bundle_tar_sha256_file: ${incident_bundle_tar_sha_effective}
 - attachment_manifest: ${incident_attachment_manifest_effective}
 - attachment_skipped: ${incident_attachment_skipped_effective}
+- summary_required: ${incident_summary_required}
+- summary_required_met: ${incident_summary_required_met}
+- bundle_required: ${incident_bundle_required}
+- bundle_required_met: ${incident_bundle_required_met}
+- required_artifacts_met: ${incident_required_artifacts_met}
+- attachment_manifest_required: ${incident_attachment_manifest_required}
+- attachment_manifest_required_met: ${incident_attachment_manifest_required_met}
+- attachment_no_skips_required: ${incident_attachment_no_skips_required}
+- attachment_no_skips_required_met: ${incident_attachment_no_skips_required_met}
+- attach_min_count_required: ${incident_attach_min_count}
+- attach_min_count_required_met: ${incident_attach_min_count_required_met}
+- attachment_manifest_min_count_required: ${incident_attachment_manifest_min_count}
+- attachment_manifest_min_count_required_met: ${incident_attachment_manifest_min_count_met}
+- attachment_policy_failure_count: ${incident_attachment_policy_failure_count}
+- required_attachment_policy_met: ${incident_required_attachment_policy_met}
+- required_policies_met: ${incident_required_policies_met}
 EOF_REPORT
 
 echo "[prod-operator-lifecycle-runbook] action=$action mode=$resolved_mode status=$status"
 echo "[prod-operator-lifecycle-runbook] summary_json=$summary_json"
 echo "[prod-operator-lifecycle-runbook] report_md=$report_md"
-if [[ "$runtime_doctor_state" == "captured" && -n "$runtime_doctor_file_effective" ]]; then
+if [[ "$federation_wait_summary_state" == "captured" ]]; then
+  echo "[prod-operator-lifecycle-runbook] federation_wait_summary_json=$federation_wait_summary_json"
+fi
+if [[ -f "$federation_wait_file" ]]; then
+  echo "[prod-operator-lifecycle-runbook] federation_wait_file=$federation_wait_file"
+fi
+if [[ "$federation_status_summary_state" == "captured" ]]; then
+  echo "[prod-operator-lifecycle-runbook] federation_status_summary_json=$federation_status_summary_json"
+fi
+if [[ -n "$runtime_doctor_file_effective" && -f "$runtime_doctor_file_effective" ]]; then
   echo "[prod-operator-lifecycle-runbook] runtime_doctor_file=$runtime_doctor_file_effective"
 fi
-if [[ "$incident_snapshot_state" == "captured" ]]; then
+if [[ "$incident_snapshot_state" == captured* ]]; then
   if [[ -n "$incident_summary_json_effective" ]]; then
     echo "[prod-operator-lifecycle-runbook] incident_summary_json=$incident_summary_json_effective"
   fi

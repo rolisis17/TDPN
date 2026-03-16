@@ -22,6 +22,8 @@ trap cleanup EXIT
 
 FAKE_EASY_NODE="$TMP_DIR/fake_easy_node.sh"
 CAPTURE="$TMP_DIR/prod_pilot_cohort_campaign_args.log"
+FAKE_CAMPAIGN_SIGNOFF="$TMP_DIR/fake_prod_pilot_campaign_signoff.sh"
+SIGNOFF_CAPTURE="$TMP_DIR/prod_pilot_cohort_campaign_signoff_args.log"
 
 cat >"$FAKE_EASY_NODE" <<'EOF_FAKE_EASY_NODE'
 #!/usr/bin/env bash
@@ -113,10 +115,43 @@ exit 0
 EOF_FAKE_EASY_NODE
 chmod +x "$FAKE_EASY_NODE"
 
+cat >"$FAKE_CAMPAIGN_SIGNOFF" <<'EOF_FAKE_CAMPAIGN_SIGNOFF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >>"${SIGNOFF_CAPTURE_FILE:?}"
+summary_json=""
+args=("$@")
+idx=0
+while ((idx < ${#args[@]})); do
+  arg="${args[idx]}"
+  case "$arg" in
+    --summary-json)
+      idx=$((idx + 1))
+      summary_json="${args[idx]}"
+      ;;
+  esac
+  idx=$((idx + 1))
+done
+if [[ -n "$summary_json" ]]; then
+  mkdir -p "$(dirname "$summary_json")"
+  cat >"$summary_json" <<'EOF_SIGNOFF_SUMMARY'
+{"status":"ok","failure_stage":"","final_rc":0}
+EOF_SIGNOFF_SUMMARY
+fi
+if [[ "${FAKE_CAMPAIGN_SIGNOFF_FAIL:-0}" == "1" ]]; then
+  exit "${FAKE_CAMPAIGN_SIGNOFF_FAIL_RC:-23}"
+fi
+exit 0
+EOF_FAKE_CAMPAIGN_SIGNOFF
+chmod +x "$FAKE_CAMPAIGN_SIGNOFF"
+
 echo "[prod-pilot-cohort-campaign] wrapper defaults + forwarding"
 WRAPPER_REPORTS_DIR="$TMP_DIR/wrapper_reports"
+: >"$SIGNOFF_CAPTURE"
 CAPTURE_FILE="$CAPTURE" \
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
 EASY_NODE_SH="$FAKE_EASY_NODE" \
+PROD_PILOT_COHORT_CAMPAIGN_SIGNOFF_SCRIPT="$FAKE_CAMPAIGN_SIGNOFF" \
 ./scripts/prod_pilot_cohort_campaign.sh \
   --bootstrap-directory https://dir-a:8081 \
   --subject pilot-client \
@@ -221,6 +256,16 @@ if ! printf '%s\n' "$line" | rg -q -- '--signoff-min-trend-wg-soak-cross-operato
   cat "$CAPTURE"
   exit 1
 fi
+if ! printf '%s\n' "$line" | rg -q -- '--signoff-incident-snapshot-min-attachment-count 1'; then
+  echo "campaign wrapper missing default incident attachment minimum"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! printf '%s\n' "$line" | rg -q -- '--signoff-incident-snapshot-max-skipped-count 0'; then
+  echo "campaign wrapper missing default incident skipped-attachment cap"
+  cat "$CAPTURE"
+  exit 1
+fi
 if ! printf '%s\n' "$line" | rg -q -- '--dashboard-enable 1'; then
   echo "campaign wrapper missing default --dashboard-enable 1"
   cat "$CAPTURE"
@@ -269,6 +314,8 @@ fi
 
 report_path="$(sed -nE 's/^\[prod-pilot-cohort-campaign\] campaign_report_md=(.*)$/\1/p' /tmp/integration_prod_pilot_cohort_campaign_wrapper.log | tail -n 1 || true)"
 summary_path="$(sed -nE 's/^\[prod-pilot-cohort-campaign\] campaign_summary_json=(.*)$/\1/p' /tmp/integration_prod_pilot_cohort_campaign_wrapper.log | tail -n 1 || true)"
+run_report_path="$(sed -nE 's/^\[prod-pilot-cohort-campaign\] campaign_run_report_json=(.*)$/\1/p' /tmp/integration_prod_pilot_cohort_campaign_wrapper.log | tail -n 1 || true)"
+campaign_signoff_summary_path="$(sed -nE 's/^\[prod-pilot-cohort-campaign\] campaign_signoff_summary_json=(.*)$/\1/p' /tmp/integration_prod_pilot_cohort_campaign_wrapper.log | tail -n 1 || true)"
 if [[ -z "$summary_path" || ! -f "$summary_path" ]]; then
   echo "campaign wrapper missing campaign_summary_json artifact"
   cat /tmp/integration_prod_pilot_cohort_campaign_wrapper.log
@@ -279,8 +326,144 @@ if [[ -z "$report_path" || ! -f "$report_path" ]]; then
   cat /tmp/integration_prod_pilot_cohort_campaign_wrapper.log
   exit 1
 fi
+if [[ -z "$run_report_path" || ! -f "$run_report_path" ]]; then
+  echo "campaign wrapper missing campaign_run_report_json artifact"
+  cat /tmp/integration_prod_pilot_cohort_campaign_wrapper.log
+  exit 1
+fi
+if [[ -z "$campaign_signoff_summary_path" || ! -f "$campaign_signoff_summary_path" ]]; then
+  echo "campaign wrapper missing campaign_signoff_summary_json artifact"
+  cat /tmp/integration_prod_pilot_cohort_campaign_wrapper.log
+  exit 1
+fi
+line_signoff="$(tail -n 1 "$SIGNOFF_CAPTURE" || true)"
+if [[ -z "$line_signoff" ]]; then
+  echo "campaign wrapper did not run campaign-signoff stage"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+if ! printf '%s\n' "$line_signoff" | rg -q -- "--campaign-run-report-json ${run_report_path}"; then
+  echo "campaign wrapper signoff stage missing --campaign-run-report-json forwarding"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+if ! printf '%s\n' "$line_signoff" | rg -q -- "--summary-json ${campaign_signoff_summary_path}"; then
+  echo "campaign wrapper signoff stage missing --summary-json forwarding"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+if ! printf '%s\n' "$line_signoff" | rg -q -- '--require-campaign-summary-fail-close 1'; then
+  echo "campaign wrapper signoff stage missing --require-campaign-summary-fail-close forwarding"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+if ! printf '%s\n' "$line_signoff" | rg -q -- '--require-campaign-signoff-check 1'; then
+  echo "campaign wrapper signoff stage missing --require-campaign-signoff-check forwarding"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+if ! printf '%s\n' "$line_signoff" | rg -q -- '--require-campaign-signoff-enabled 1'; then
+  echo "campaign wrapper signoff stage missing --require-campaign-signoff-enabled forwarding"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+if ! printf '%s\n' "$line_signoff" | rg -q -- '--require-campaign-signoff-required 1'; then
+  echo "campaign wrapper signoff stage missing --require-campaign-signoff-required forwarding"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+if ! printf '%s\n' "$line_signoff" | rg -q -- '--require-campaign-run-report-required 1'; then
+  echo "campaign wrapper signoff stage missing --require-campaign-run-report-required forwarding"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+if ! printf '%s\n' "$line_signoff" | rg -q -- '--require-campaign-run-report-json-required 1'; then
+  echo "campaign wrapper signoff stage missing --require-campaign-run-report-json-required forwarding"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+if ! printf '%s\n' "$line_signoff" | rg -q -- '--require-artifact-path-match 1'; then
+  echo "campaign wrapper signoff stage missing --require-artifact-path-match forwarding"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
 if [[ "$(jq -r '.decision' "$summary_path")" != "GO" ]]; then
   echo "campaign wrapper generated unexpected campaign decision"
+  cat "$summary_path"
+  exit 1
+fi
+if [[ "$(jq -r '.status' "$run_report_path")" != "ok" ]]; then
+  echo "campaign wrapper run report should classify success as ok"
+  cat "$run_report_path"
+  exit 1
+fi
+if [[ "$(jq -r '.stages.quick_runbook.rc' "$run_report_path")" != "0" ]]; then
+  echo "campaign wrapper run report missing quick stage rc"
+  cat "$run_report_path"
+  exit 1
+fi
+if [[ "$(jq -r '.stages.campaign_summary.rc' "$run_report_path")" != "0" ]]; then
+  echo "campaign wrapper run report missing campaign-summary stage rc"
+  cat "$run_report_path"
+  exit 1
+fi
+if [[ "$(jq -r '.stages.campaign_signoff.attempted' "$run_report_path")" != "1" ]]; then
+  echo "campaign wrapper run report missing campaign-signoff attempted marker"
+  cat "$run_report_path"
+  exit 1
+fi
+if [[ "$(jq -r '.stages.campaign_signoff.rc' "$run_report_path")" != "0" ]]; then
+  echo "campaign wrapper run report missing campaign-signoff stage rc"
+  cat "$run_report_path"
+  exit 1
+fi
+if [[ "$(jq -r '.config.campaign_run_report_required' "$run_report_path")" != "1" ]]; then
+  echo "campaign wrapper run report missing default required policy"
+  cat "$run_report_path"
+  exit 1
+fi
+if [[ "$(jq -r '.config.campaign_run_report_json_required' "$run_report_path")" != "1" ]]; then
+  echo "campaign wrapper run report missing default JSON-required policy"
+  cat "$run_report_path"
+  exit 1
+fi
+if [[ "$(jq -r '.config.campaign_signoff_check' "$run_report_path")" != "1" ]]; then
+  echo "campaign wrapper run report missing default campaign_signoff_check policy"
+  cat "$run_report_path"
+  exit 1
+fi
+if [[ "$(jq -r '.config.campaign_signoff_required' "$run_report_path")" != "1" ]]; then
+  echo "campaign wrapper run report missing default campaign_signoff_required policy"
+  cat "$run_report_path"
+  exit 1
+fi
+if [[ "$(jq -r '.artifacts.campaign_signoff_summary_json.exists' "$run_report_path")" != "1" ]]; then
+  echo "campaign wrapper run report missing campaign-signoff summary existence metadata"
+  cat "$run_report_path"
+  exit 1
+fi
+if [[ "$(jq -r '.artifacts.campaign_signoff_summary_json.valid_json' "$run_report_path")" != "1" ]]; then
+  echo "campaign wrapper run report missing campaign-signoff summary valid_json metadata"
+  cat "$run_report_path"
+  exit 1
+fi
+if [[ "$(jq -r '.fail_policy.require_incident_snapshot_on_fail' "$summary_path")" != "1" ]]; then
+  echo "campaign wrapper missing default forwarded campaign incident require_on_fail policy"
+  cat "$summary_path"
+  exit 1
+fi
+if [[ "$(jq -r '.fail_policy.require_incident_snapshot_artifacts' "$summary_path")" != "1" ]]; then
+  echo "campaign wrapper missing default forwarded campaign incident require_artifacts policy"
+  cat "$summary_path"
+  exit 1
+fi
+if [[ "$(jq -r '.fail_policy.incident_snapshot_min_attachment_count' "$summary_path")" != "1" ]]; then
+  echo "campaign wrapper missing default forwarded campaign incident min attachment policy"
+  cat "$summary_path"
+  exit 1
+fi
+if [[ "$(jq -r '.fail_policy.incident_snapshot_max_skipped_count' "$summary_path")" != "0" ]]; then
+  echo "campaign wrapper missing default forwarded campaign incident max skipped policy"
   cat "$summary_path"
   exit 1
 fi
@@ -290,11 +473,108 @@ if ! rg -q -- '- Decision: GO' "$report_path"; then
   exit 1
 fi
 
+echo "[prod-pilot-cohort-campaign] wrapper campaign incident policy overrides"
+OVERRIDE_REPORTS_DIR="$TMP_DIR/wrapper_reports_override"
+: >"$SIGNOFF_CAPTURE"
+CAPTURE_FILE="$CAPTURE" \
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+EASY_NODE_SH="$FAKE_EASY_NODE" \
+PROD_PILOT_COHORT_CAMPAIGN_SIGNOFF_SCRIPT="$FAKE_CAMPAIGN_SIGNOFF" \
+./scripts/prod_pilot_cohort_campaign.sh \
+  --bootstrap-directory https://dir-a:8081 \
+  --subject pilot-client \
+  --reports-dir "$OVERRIDE_REPORTS_DIR" \
+  --campaign-run-report-json "$OVERRIDE_REPORTS_DIR/custom_campaign_run_report.json" \
+  --campaign-print-run-report 0 \
+  --campaign-run-report-required 0 \
+  --campaign-run-report-json-required 0 \
+  --campaign-signoff-required 0 \
+  --campaign-signoff-summary-json "$OVERRIDE_REPORTS_DIR/custom_campaign_signoff_summary.json" \
+  --campaign-require-incident-snapshot-on-fail 0 \
+  --campaign-require-incident-snapshot-artifacts 0 \
+  --campaign-incident-snapshot-min-attachment-count 2 \
+  --campaign-incident-snapshot-max-skipped-count 3 \
+  --campaign-print-report 0 >/tmp/integration_prod_pilot_cohort_campaign_override.log 2>&1
+
+if [[ ! -f "$OVERRIDE_REPORTS_DIR/prod_pilot_campaign_summary.json" ]]; then
+  echo "campaign wrapper override run missing campaign summary artifact"
+  cat /tmp/integration_prod_pilot_cohort_campaign_override.log
+  exit 1
+fi
+if [[ "$(jq -r '.fail_policy.require_incident_snapshot_on_fail' "$OVERRIDE_REPORTS_DIR/prod_pilot_campaign_summary.json")" != "0" ]]; then
+  echo "campaign wrapper did not forward --campaign-require-incident-snapshot-on-fail override"
+  cat "$OVERRIDE_REPORTS_DIR/prod_pilot_campaign_summary.json"
+  exit 1
+fi
+if [[ "$(jq -r '.fail_policy.require_incident_snapshot_artifacts' "$OVERRIDE_REPORTS_DIR/prod_pilot_campaign_summary.json")" != "0" ]]; then
+  echo "campaign wrapper did not forward --campaign-require-incident-snapshot-artifacts override"
+  cat "$OVERRIDE_REPORTS_DIR/prod_pilot_campaign_summary.json"
+  exit 1
+fi
+if [[ "$(jq -r '.fail_policy.incident_snapshot_min_attachment_count' "$OVERRIDE_REPORTS_DIR/prod_pilot_campaign_summary.json")" != "2" ]]; then
+  echo "campaign wrapper did not forward --campaign-incident-snapshot-min-attachment-count override"
+  cat "$OVERRIDE_REPORTS_DIR/prod_pilot_campaign_summary.json"
+  exit 1
+fi
+if [[ "$(jq -r '.fail_policy.incident_snapshot_max_skipped_count' "$OVERRIDE_REPORTS_DIR/prod_pilot_campaign_summary.json")" != "3" ]]; then
+  echo "campaign wrapper did not forward --campaign-incident-snapshot-max-skipped-count override"
+  cat "$OVERRIDE_REPORTS_DIR/prod_pilot_campaign_summary.json"
+  exit 1
+fi
+if [[ ! -f "$OVERRIDE_REPORTS_DIR/custom_campaign_run_report.json" ]]; then
+  echo "campaign wrapper override run missing custom campaign run report artifact"
+  cat /tmp/integration_prod_pilot_cohort_campaign_override.log
+  exit 1
+fi
+if [[ "$(jq -r '.config.campaign_run_report_required' "$OVERRIDE_REPORTS_DIR/custom_campaign_run_report.json")" != "0" ]]; then
+  echo "campaign wrapper did not forward --campaign-run-report-required override"
+  cat "$OVERRIDE_REPORTS_DIR/custom_campaign_run_report.json"
+  exit 1
+fi
+if [[ "$(jq -r '.config.campaign_run_report_json_required' "$OVERRIDE_REPORTS_DIR/custom_campaign_run_report.json")" != "0" ]]; then
+  echo "campaign wrapper did not forward --campaign-run-report-json-required override"
+  cat "$OVERRIDE_REPORTS_DIR/custom_campaign_run_report.json"
+  exit 1
+fi
+if [[ "$(jq -r '.config.campaign_signoff_required' "$OVERRIDE_REPORTS_DIR/custom_campaign_run_report.json")" != "0" ]]; then
+  echo "campaign wrapper did not forward --campaign-signoff-required override"
+  cat "$OVERRIDE_REPORTS_DIR/custom_campaign_run_report.json"
+  exit 1
+fi
+if [[ ! -f "$OVERRIDE_REPORTS_DIR/custom_campaign_signoff_summary.json" ]]; then
+  echo "campaign wrapper override run missing custom campaign signoff summary artifact"
+  cat /tmp/integration_prod_pilot_cohort_campaign_override.log
+  exit 1
+fi
+override_signoff_line="$(tail -n 1 "$SIGNOFF_CAPTURE" || true)"
+if [[ -z "$override_signoff_line" ]]; then
+  echo "campaign wrapper override run did not execute campaign-signoff stage"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+if ! printf '%s\n' "$override_signoff_line" | rg -q -- '--require-campaign-signoff-required 0'; then
+  echo "campaign wrapper override signoff stage missing --require-campaign-signoff-required 0"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+if ! printf '%s\n' "$override_signoff_line" | rg -q -- '--require-campaign-run-report-required 0'; then
+  echo "campaign wrapper override signoff stage missing --require-campaign-run-report-required 0"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+if ! printf '%s\n' "$override_signoff_line" | rg -q -- '--require-campaign-run-report-json-required 0'; then
+  echo "campaign wrapper override signoff stage missing --require-campaign-run-report-json-required 0"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+
 echo "[prod-pilot-cohort-campaign] summary fail-close"
 NOGO_REPORTS_DIR="$TMP_DIR/wrapper_reports_nogo"
 set +e
 CAPTURE_FILE="$CAPTURE" \
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
 EASY_NODE_SH="$FAKE_EASY_NODE" \
+PROD_PILOT_COHORT_CAMPAIGN_SIGNOFF_SCRIPT="$FAKE_CAMPAIGN_SIGNOFF" \
 FAKE_NO_GO=1 \
 ./scripts/prod_pilot_cohort_campaign.sh \
   --bootstrap-directory https://dir-a:8081 \
@@ -317,6 +597,59 @@ fi
 if [[ "$(jq -r '.decision' "$NOGO_REPORTS_DIR/prod_pilot_campaign_summary.json")" != "NO-GO" ]]; then
   echo "campaign wrapper should emit NO-GO summary artifact when failing closed"
   cat "$NOGO_REPORTS_DIR/prod_pilot_campaign_summary.json"
+  exit 1
+fi
+if [[ ! -f "$NOGO_REPORTS_DIR/prod_pilot_campaign_run_report.json" ]]; then
+  echo "campaign wrapper missing NO-GO run report artifact"
+  cat /tmp/integration_prod_pilot_cohort_campaign_nogo.log
+  exit 1
+fi
+if [[ "$(jq -r '.status' "$NOGO_REPORTS_DIR/prod_pilot_campaign_run_report.json")" != "fail" ]]; then
+  echo "campaign wrapper run report should classify NO-GO as fail"
+  cat "$NOGO_REPORTS_DIR/prod_pilot_campaign_run_report.json"
+  exit 1
+fi
+if [[ "$(jq -r '.failure_step' "$NOGO_REPORTS_DIR/prod_pilot_campaign_run_report.json")" != "campaign_summary" ]]; then
+  echo "campaign wrapper run report should classify NO-GO fail-close step as campaign_summary"
+  cat "$NOGO_REPORTS_DIR/prod_pilot_campaign_run_report.json"
+  exit 1
+fi
+
+echo "[prod-pilot-cohort-campaign] signoff fail-close"
+SIGNOFF_FAIL_REPORTS_DIR="$TMP_DIR/wrapper_reports_signoff_fail"
+set +e
+CAPTURE_FILE="$CAPTURE" \
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+EASY_NODE_SH="$FAKE_EASY_NODE" \
+PROD_PILOT_COHORT_CAMPAIGN_SIGNOFF_SCRIPT="$FAKE_CAMPAIGN_SIGNOFF" \
+FAKE_CAMPAIGN_SIGNOFF_FAIL=1 \
+FAKE_CAMPAIGN_SIGNOFF_FAIL_RC=27 \
+./scripts/prod_pilot_cohort_campaign.sh \
+  --bootstrap-directory https://dir-a:8081 \
+  --subject pilot-client \
+  --reports-dir "$SIGNOFF_FAIL_REPORTS_DIR" \
+  --campaign-print-report 0 \
+  --campaign-summary-fail-close 0 >/tmp/integration_prod_pilot_cohort_campaign_signoff_fail.log 2>&1
+rc=$?
+set -e
+if [[ "$rc" -ne 27 ]]; then
+  echo "campaign wrapper should return signoff rc when campaign-signoff fails (expected=27 observed=$rc)"
+  cat /tmp/integration_prod_pilot_cohort_campaign_signoff_fail.log
+  exit 1
+fi
+if [[ ! -f "$SIGNOFF_FAIL_REPORTS_DIR/prod_pilot_campaign_run_report.json" ]]; then
+  echo "campaign wrapper missing signoff-fail run report artifact"
+  cat /tmp/integration_prod_pilot_cohort_campaign_signoff_fail.log
+  exit 1
+fi
+if [[ "$(jq -r '.failure_step' "$SIGNOFF_FAIL_REPORTS_DIR/prod_pilot_campaign_run_report.json")" != "campaign_signoff" ]]; then
+  echo "campaign wrapper run report should classify signoff failure step as campaign_signoff"
+  cat "$SIGNOFF_FAIL_REPORTS_DIR/prod_pilot_campaign_run_report.json"
+  exit 1
+fi
+if [[ "$(jq -r '.stages.campaign_signoff.rc' "$SIGNOFF_FAIL_REPORTS_DIR/prod_pilot_campaign_run_report.json")" != "27" ]]; then
+  echo "campaign wrapper run report should persist campaign-signoff rc on fail path"
+  cat "$SIGNOFF_FAIL_REPORTS_DIR/prod_pilot_campaign_run_report.json"
   exit 1
 fi
 
@@ -355,7 +688,7 @@ echo "[prod-pilot-cohort-campaign] easy-node command dispatch"
 PATH="$TMP_BIN:$PATH" \
 DISPATCH_CAPTURE_FILE="$DISPATCH_CAPTURE" \
 PROD_PILOT_COHORT_CAMPAIGN_SCRIPT="$FAKE_CAMPAIGN" \
-./scripts/easy_node.sh prod-pilot-cohort-campaign --bootstrap-directory https://dir-b:8081 --pre-real-host-readiness 0 --pre-real-host-readiness-summary-json /tmp/campaign_pre_real_host.json --campaign-summary-fail-close 0 >/tmp/integration_prod_pilot_cohort_campaign_dispatch.log 2>&1
+./scripts/easy_node.sh prod-pilot-cohort-campaign --bootstrap-directory https://dir-b:8081 --pre-real-host-readiness 0 --pre-real-host-readiness-summary-json /tmp/campaign_pre_real_host.json --campaign-summary-fail-close 0 --campaign-run-report-json /tmp/campaign_run_report.json --campaign-signoff-check 0 --campaign-signoff-required 0 --campaign-signoff-summary-json /tmp/campaign_signoff_summary.json --campaign-signoff-print-summary-json 1 --campaign-signoff-refresh-summary 1 --campaign-signoff-summary-fail-on-no-go 0 --campaign-print-run-report 1 --campaign-run-report-required 0 --campaign-run-report-json-required 0 --campaign-require-incident-snapshot-on-fail 0 --campaign-require-incident-snapshot-artifacts 0 --campaign-incident-snapshot-min-attachment-count 2 --campaign-incident-snapshot-max-skipped-count 3 >/tmp/integration_prod_pilot_cohort_campaign_dispatch.log 2>&1
 
 if ! rg -q -- '--bootstrap-directory https://dir-b:8081' "$DISPATCH_CAPTURE"; then
   echo "easy-node prod-pilot-cohort-campaign did not forward command arguments"
@@ -375,6 +708,76 @@ fi
 if ! rg -q -- '--campaign-summary-fail-close 0' /tmp/integration_prod_pilot_cohort_campaign_dispatch.log && ! rg -q -- '--campaign-summary-fail-close 0' "$DISPATCH_CAPTURE"; then
   echo "easy-node prod-pilot-cohort-campaign lost wrapper-only command arguments"
   cat /tmp/integration_prod_pilot_cohort_campaign_dispatch.log
+  cat "$DISPATCH_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--campaign-run-report-json /tmp/campaign_run_report.json' "$DISPATCH_CAPTURE"; then
+  echo "easy-node prod-pilot-cohort-campaign did not forward --campaign-run-report-json"
+  cat "$DISPATCH_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--campaign-print-run-report 1' "$DISPATCH_CAPTURE"; then
+  echo "easy-node prod-pilot-cohort-campaign did not forward --campaign-print-run-report"
+  cat "$DISPATCH_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--campaign-run-report-required 0' "$DISPATCH_CAPTURE"; then
+  echo "easy-node prod-pilot-cohort-campaign did not forward --campaign-run-report-required"
+  cat "$DISPATCH_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--campaign-run-report-json-required 0' "$DISPATCH_CAPTURE"; then
+  echo "easy-node prod-pilot-cohort-campaign did not forward --campaign-run-report-json-required"
+  cat "$DISPATCH_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--campaign-signoff-check 0' "$DISPATCH_CAPTURE"; then
+  echo "easy-node prod-pilot-cohort-campaign did not forward --campaign-signoff-check"
+  cat "$DISPATCH_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--campaign-signoff-required 0' "$DISPATCH_CAPTURE"; then
+  echo "easy-node prod-pilot-cohort-campaign did not forward --campaign-signoff-required"
+  cat "$DISPATCH_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--campaign-signoff-summary-json /tmp/campaign_signoff_summary.json' "$DISPATCH_CAPTURE"; then
+  echo "easy-node prod-pilot-cohort-campaign did not forward --campaign-signoff-summary-json"
+  cat "$DISPATCH_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--campaign-signoff-print-summary-json 1' "$DISPATCH_CAPTURE"; then
+  echo "easy-node prod-pilot-cohort-campaign did not forward --campaign-signoff-print-summary-json"
+  cat "$DISPATCH_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--campaign-signoff-refresh-summary 1' "$DISPATCH_CAPTURE"; then
+  echo "easy-node prod-pilot-cohort-campaign did not forward --campaign-signoff-refresh-summary"
+  cat "$DISPATCH_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--campaign-signoff-summary-fail-on-no-go 0' "$DISPATCH_CAPTURE"; then
+  echo "easy-node prod-pilot-cohort-campaign did not forward --campaign-signoff-summary-fail-on-no-go"
+  cat "$DISPATCH_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--campaign-require-incident-snapshot-on-fail 0' "$DISPATCH_CAPTURE"; then
+  echo "easy-node prod-pilot-cohort-campaign did not forward --campaign-require-incident-snapshot-on-fail"
+  cat "$DISPATCH_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--campaign-require-incident-snapshot-artifacts 0' "$DISPATCH_CAPTURE"; then
+  echo "easy-node prod-pilot-cohort-campaign did not forward --campaign-require-incident-snapshot-artifacts"
+  cat "$DISPATCH_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--campaign-incident-snapshot-min-attachment-count 2' "$DISPATCH_CAPTURE"; then
+  echo "easy-node prod-pilot-cohort-campaign did not forward --campaign-incident-snapshot-min-attachment-count"
+  cat "$DISPATCH_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--campaign-incident-snapshot-max-skipped-count 3' "$DISPATCH_CAPTURE"; then
+  echo "easy-node prod-pilot-cohort-campaign did not forward --campaign-incident-snapshot-max-skipped-count"
   cat "$DISPATCH_CAPTURE"
   exit 1
 fi

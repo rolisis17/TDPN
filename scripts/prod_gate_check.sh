@@ -20,6 +20,8 @@ Usage:
     [--require-signoff-ok [0|1]] \
     [--require-incident-snapshot-on-fail [0|1]] \
     [--require-incident-snapshot-artifacts [0|1]] \
+    [--incident-snapshot-min-attachment-count N] \
+    [--incident-snapshot-max-skipped-count N|-1] \
     [--require-wg-validate-udp-source [0|1]] \
     [--require-wg-validate-strict-distinct [0|1]] \
     [--require-wg-soak-diversity-pass [0|1]] \
@@ -79,6 +81,8 @@ require_integrity_ok="${PROD_GATE_CHECK_REQUIRE_INTEGRITY_OK:-0}"
 require_signoff_ok="${PROD_GATE_CHECK_REQUIRE_SIGNOFF_OK:-0}"
 require_incident_snapshot_on_fail="${PROD_GATE_CHECK_REQUIRE_INCIDENT_SNAPSHOT_ON_FAIL:-0}"
 require_incident_snapshot_artifacts="${PROD_GATE_CHECK_REQUIRE_INCIDENT_SNAPSHOT_ARTIFACTS:-0}"
+incident_snapshot_min_attachment_count="${PROD_GATE_CHECK_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT:-0}"
+incident_snapshot_max_skipped_count="${PROD_GATE_CHECK_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT:--1}"
 require_wg_validate_udp_source="${PROD_GATE_CHECK_REQUIRE_WG_VALIDATE_UDP_SOURCE:-0}"
 require_wg_validate_strict_distinct="${PROD_GATE_CHECK_REQUIRE_WG_VALIDATE_STRICT_DISTINCT:-0}"
 require_wg_soak_diversity_pass="${PROD_GATE_CHECK_REQUIRE_WG_SOAK_DIVERSITY_PASS:-0}"
@@ -184,6 +188,14 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --incident-snapshot-min-attachment-count)
+      incident_snapshot_min_attachment_count="${2:-}"
+      shift 2
+      ;;
+    --incident-snapshot-max-skipped-count)
+      incident_snapshot_max_skipped_count="${2:-}"
+      shift 2
+      ;;
     --require-wg-validate-udp-source)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         require_wg_validate_udp_source="${2:-}"
@@ -267,6 +279,14 @@ bool_arg_or_die "--require-wg-validate-udp-source" "$require_wg_validate_udp_sou
 bool_arg_or_die "--require-wg-validate-strict-distinct" "$require_wg_validate_strict_distinct"
 bool_arg_or_die "--require-wg-soak-diversity-pass" "$require_wg_soak_diversity_pass"
 bool_arg_or_die "--show-json" "$show_json"
+if [[ ! "$incident_snapshot_min_attachment_count" =~ ^[0-9]+$ ]]; then
+  echo "--incident-snapshot-min-attachment-count must be an integer >= 0"
+  exit 2
+fi
+if [[ ! "$incident_snapshot_max_skipped_count" =~ ^-?[0-9]+$ ]] || ((incident_snapshot_max_skipped_count < -1)); then
+  echo "--incident-snapshot-max-skipped-count must be an integer >= -1"
+  exit 2
+fi
 if [[ ! "$max_wg_soak_failed_rounds" =~ ^[0-9]+$ ]]; then
   echo "--max-wg-soak-failed-rounds must be an integer >= 0"
   exit 2
@@ -417,6 +437,7 @@ run_report_incident_report_md=""
 run_report_incident_attachment_manifest=""
 run_report_incident_attachment_skipped=""
 run_report_incident_attachment_count=0
+run_report_incident_attachment_skipped_count=0
 if [[ -n "$run_report_json" ]]; then
   run_report_status="$(json_string "$run_report_json" '.status')"
   run_report_final_rc="$(json_int "$run_report_json" '.final_rc')"
@@ -452,6 +473,12 @@ if [[ -n "$run_report_json" ]]; then
   fi
   if [[ -n "$run_report_incident_attachment_skipped" && "$run_report_incident_attachment_skipped" != /* ]]; then
     run_report_incident_attachment_skipped="$ROOT_DIR/$run_report_incident_attachment_skipped"
+  fi
+  if [[ -n "$run_report_incident_attachment_skipped" && -f "$run_report_incident_attachment_skipped" ]]; then
+    run_report_incident_attachment_skipped_count="$(awk 'NF>0 {c++} END {print c+0}' "$run_report_incident_attachment_skipped" 2>/dev/null || echo "0")"
+    if [[ -z "$run_report_incident_attachment_skipped_count" || ! "$run_report_incident_attachment_skipped_count" =~ ^[0-9]+$ ]]; then
+      run_report_incident_attachment_skipped_count=0
+    fi
   fi
 fi
 
@@ -653,6 +680,23 @@ if [[ "$require_incident_snapshot_artifacts" == "1" ]]; then
   fi
 fi
 
+if ((incident_snapshot_min_attachment_count > 0 || incident_snapshot_max_skipped_count >= 0)); then
+  if [[ -z "$run_report_json" ]]; then
+    errors+=("incident snapshot attachment policy requested but run report JSON was not provided")
+  elif [[ "$run_report_status" == "fail" || "$run_report_final_rc" != "0" ]]; then
+    if [[ "$run_report_incident_status" != "ok" ]]; then
+      errors+=("incident snapshot attachment policy requested but snapshot status is not ok (status=${run_report_incident_status:-unset})")
+    else
+      if ((incident_snapshot_min_attachment_count > 0 && run_report_incident_attachment_count < incident_snapshot_min_attachment_count)); then
+        errors+=("incident snapshot attachment_count below floor (${run_report_incident_attachment_count} < ${incident_snapshot_min_attachment_count})")
+      fi
+      if ((incident_snapshot_max_skipped_count >= 0 && run_report_incident_attachment_skipped_count > incident_snapshot_max_skipped_count)); then
+        errors+=("incident snapshot skipped attachment count exceeds policy (${run_report_incident_attachment_skipped_count} > ${incident_snapshot_max_skipped_count})")
+      fi
+    fi
+  fi
+fi
+
 if [[ -n "$run_report_json" ]]; then
   echo "[prod-gate-check] run_report_json=$run_report_json"
 fi
@@ -666,7 +710,7 @@ echo "[prod-gate-check] wg_soak_diversity selection_lines_total=${wg_soak_select
 if [[ -n "$run_report_json" ]]; then
   echo "[prod-gate-check] run_report status=${run_report_status:-unset} final_rc=${run_report_final_rc} preflight=${run_report_preflight_status:-unset} bundle=${run_report_bundle_status:-unset} integrity=${run_report_integrity_status:-unset} signoff_enabled=${run_report_signoff_enabled:-unset} signoff_rc=${run_report_signoff_rc} incident_enabled_on_fail=${run_report_incident_enabled_on_fail:-unset} incident_status=${run_report_incident_status:-unset} incident_rc=${run_report_incident_rc}"
   if [[ -n "$run_report_incident_summary_json" || -n "$run_report_incident_report_md" || -n "$run_report_incident_attachment_manifest" || -n "$run_report_incident_attachment_skipped" ]]; then
-    echo "[prod-gate-check] incident_handoff source_run_report=${run_report_json:-unset} summary_json=${run_report_incident_summary_json:-unset} report_md=${run_report_incident_report_md:-unset} attachment_manifest=${run_report_incident_attachment_manifest:-unset} attachment_skipped=${run_report_incident_attachment_skipped:-unset} attachment_count=${run_report_incident_attachment_count}"
+    echo "[prod-gate-check] incident_handoff source_run_report=${run_report_json:-unset} summary_json=${run_report_incident_summary_json:-unset} report_md=${run_report_incident_report_md:-unset} attachment_manifest=${run_report_incident_attachment_manifest:-unset} attachment_skipped=${run_report_incident_attachment_skipped:-unset} attachment_count=${run_report_incident_attachment_count} attachment_skipped_count=${run_report_incident_attachment_skipped_count}"
   fi
 fi
 
@@ -684,6 +728,7 @@ if ((${#errors[@]} > 0)); then
     [[ -n "$run_report_incident_attachment_manifest" ]] && echo "  - attachment_manifest=$run_report_incident_attachment_manifest"
     [[ -n "$run_report_incident_attachment_skipped" ]] && echo "  - attachment_skipped=$run_report_incident_attachment_skipped"
     echo "  - attachment_count=$run_report_incident_attachment_count"
+    echo "  - attachment_skipped_count=$run_report_incident_attachment_skipped_count"
   fi
   if [[ "$show_json" == "1" ]]; then
     echo "[prod-gate-check] gate summary payload:"

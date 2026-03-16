@@ -45,6 +45,8 @@ Usage:
     [--signoff-min-trend-wg-soak-cross-operator-pairs N] \
     [--signoff-require-incident-snapshot-on-fail [0|1]] \
     [--signoff-require-incident-snapshot-artifacts [0|1]] \
+    [--signoff-incident-snapshot-min-attachment-count N] \
+    [--signoff-incident-snapshot-max-skipped-count N|-1] \
     [--dashboard-enable [0|1]] \
     [--dashboard-fail-close [0|1]] \
     [--dashboard-print [0|1]] \
@@ -213,6 +215,8 @@ signoff_min_trend_wg_soak_exit_operators="${PROD_PILOT_COHORT_QUICK_SIGNOFF_MIN_
 signoff_min_trend_wg_soak_cross_operator_pairs="${PROD_PILOT_COHORT_QUICK_SIGNOFF_MIN_TREND_WG_SOAK_CROSS_OPERATOR_PAIRS:-2}"
 signoff_require_incident_snapshot_on_fail="${PROD_PILOT_COHORT_QUICK_SIGNOFF_REQUIRE_INCIDENT_SNAPSHOT_ON_FAIL:-1}"
 signoff_require_incident_snapshot_artifacts="${PROD_PILOT_COHORT_QUICK_SIGNOFF_REQUIRE_INCIDENT_SNAPSHOT_ARTIFACTS:-1}"
+signoff_incident_snapshot_min_attachment_count="${PROD_PILOT_COHORT_QUICK_SIGNOFF_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT:-${PROD_PILOT_COHORT_QUICK_CHECK_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT:-0}}"
+signoff_incident_snapshot_max_skipped_count="${PROD_PILOT_COHORT_QUICK_SIGNOFF_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT:-${PROD_PILOT_COHORT_QUICK_CHECK_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT:--1}}"
 
 dashboard_enable="${PROD_PILOT_COHORT_QUICK_RUNBOOK_DASHBOARD_ENABLE:-1}"
 dashboard_fail_close="${PROD_PILOT_COHORT_QUICK_RUNBOOK_DASHBOARD_FAIL_CLOSE:-0}"
@@ -429,6 +433,14 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --signoff-incident-snapshot-min-attachment-count)
+      signoff_incident_snapshot_min_attachment_count="${2:-}"
+      shift 2
+      ;;
+    --signoff-incident-snapshot-max-skipped-count)
+      signoff_incident_snapshot_max_skipped_count="${2:-}"
+      shift 2
+      ;;
     --dashboard-enable)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         dashboard_enable="${2:-}"
@@ -510,6 +522,14 @@ bool_or_die "--signoff-require-trend-wg-validate-strict-distinct" "$signoff_requ
 bool_or_die "--signoff-require-trend-wg-soak-diversity-pass" "$signoff_require_trend_wg_soak_diversity_pass"
 bool_or_die "--signoff-require-incident-snapshot-on-fail" "$signoff_require_incident_snapshot_on_fail"
 bool_or_die "--signoff-require-incident-snapshot-artifacts" "$signoff_require_incident_snapshot_artifacts"
+if [[ ! "$signoff_incident_snapshot_min_attachment_count" =~ ^[0-9]+$ ]]; then
+  echo "--signoff-incident-snapshot-min-attachment-count must be an integer >= 0"
+  exit 2
+fi
+if [[ ! "$signoff_incident_snapshot_max_skipped_count" =~ ^-?[0-9]+$ ]] || ((signoff_incident_snapshot_max_skipped_count < -1)); then
+  echo "--signoff-incident-snapshot-max-skipped-count must be an integer >= -1"
+  exit 2
+fi
 bool_or_die "--dashboard-enable" "$dashboard_enable"
 bool_or_die "--dashboard-fail-close" "$dashboard_fail_close"
 bool_or_die "--dashboard-print" "$dashboard_print"
@@ -603,6 +623,8 @@ quick_cmd=(
   --signoff-min-trend-wg-soak-cross-operator-pairs "$signoff_min_trend_wg_soak_cross_operator_pairs"
   --signoff-require-incident-snapshot-on-fail "$signoff_require_incident_snapshot_on_fail"
   --signoff-require-incident-snapshot-artifacts "$signoff_require_incident_snapshot_artifacts"
+  --signoff-incident-snapshot-min-attachment-count "$signoff_incident_snapshot_min_attachment_count"
+  --signoff-incident-snapshot-max-skipped-count "$signoff_incident_snapshot_max_skipped_count"
   --print-run-report "$show_json"
   --show-json "$show_json"
 )
@@ -650,6 +672,8 @@ if [[ "$status" == "ok" || -f "$run_report_json" ]]; then
     --require-bundle-manifest "$bundle_outputs"
     --require-incident-snapshot-on-fail "$signoff_require_incident_snapshot_on_fail"
     --require-incident-snapshot-artifacts "$signoff_require_incident_snapshot_artifacts"
+    --incident-snapshot-min-attachment-count "$signoff_incident_snapshot_min_attachment_count"
+    --incident-snapshot-max-skipped-count "$signoff_incident_snapshot_max_skipped_count"
     --max-alert-severity "$max_alert_severity"
     --trend-summary-json "$trend_summary_json"
     --alert-summary-json "$alert_summary_json"
@@ -688,6 +712,8 @@ if [[ "$dashboard_enable" == "1" ]]; then
     --require-cohort-signoff-policy "$dashboard_require_cohort_signoff_policy"
     --require-incident-snapshot-on-fail "$signoff_require_incident_snapshot_on_fail"
     --require-incident-snapshot-artifacts "$signoff_require_incident_snapshot_artifacts"
+    --incident-snapshot-min-attachment-count "$signoff_incident_snapshot_min_attachment_count"
+    --incident-snapshot-max-skipped-count "$signoff_incident_snapshot_max_skipped_count"
     --warn-go-rate-pct 98
     --critical-go-rate-pct 90
     --warn-no-go-count 1
@@ -801,6 +827,8 @@ jq -nc \
   --argjson signoff_min_trend_wg_soak_cross_operator_pairs "$signoff_min_trend_wg_soak_cross_operator_pairs" \
   --argjson signoff_require_incident_snapshot_on_fail "$signoff_require_incident_snapshot_on_fail" \
   --argjson signoff_require_incident_snapshot_artifacts "$signoff_require_incident_snapshot_artifacts" \
+  --argjson signoff_incident_snapshot_min_attachment_count "$signoff_incident_snapshot_min_attachment_count" \
+  --argjson signoff_incident_snapshot_max_skipped_count "$signoff_incident_snapshot_max_skipped_count" \
   --argjson bundle_outputs "$bundle_outputs" \
   --argjson bundle_fail_close "$bundle_fail_close" \
   --argjson dashboard_enable "$dashboard_enable" \
@@ -861,6 +889,8 @@ jq -nc \
       signoff_min_trend_wg_soak_cross_operator_pairs: $signoff_min_trend_wg_soak_cross_operator_pairs,
       signoff_require_incident_snapshot_on_fail: $signoff_require_incident_snapshot_on_fail,
       signoff_require_incident_snapshot_artifacts: $signoff_require_incident_snapshot_artifacts,
+      signoff_incident_snapshot_min_attachment_count: $signoff_incident_snapshot_min_attachment_count,
+      signoff_incident_snapshot_max_skipped_count: $signoff_incident_snapshot_max_skipped_count,
       dashboard_enable: $dashboard_enable,
       dashboard_fail_close: $dashboard_fail_close,
       dashboard_print: $dashboard_print,

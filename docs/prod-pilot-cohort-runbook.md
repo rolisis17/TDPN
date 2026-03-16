@@ -90,7 +90,14 @@ Quick-mode artifact:
 Campaign wrapper outputs:
 - `<reports_dir>/prod_pilot_campaign_summary.json`
 - `<reports_dir>/prod_pilot_campaign_summary.md`
+- `<reports_dir>/prod_pilot_campaign_run_report.json`
+- `<reports_dir>/prod_pilot_campaign_signoff_summary.json`
 - `<reports_dir>/pre_real_host_readiness_summary.json`
+
+By default, campaign now also runs inline campaign signoff (`campaign-signoff-check=1`) after summary generation.
+- keep strict fail-close behavior: default `--campaign-signoff-required 1`
+- disable only for diagnostics: `--campaign-signoff-check 0`
+- post-run artifact gate can enforce signoff completeness with `prod-pilot-cohort-campaign-check --require-campaign-signoff-attempted 1 --require-campaign-signoff-ok 1 --require-campaign-signoff-summary-json-valid 1`
 
 ## Key policy flags
 

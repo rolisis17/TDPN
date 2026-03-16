@@ -166,6 +166,13 @@ Server federation readiness checks (machine A/B host):
   --ready-timeout-sec 90 \
   --poll-sec 5
 
+# optional: capture machine-readable wait summary artifact
+./scripts/easy_node.sh server-federation-wait \
+  --ready-timeout-sec 90 \
+  --poll-sec 5 \
+  --summary-json .easy-node-logs/federation_wait_summary.json \
+  --print-summary-json 1
+
 # optional strict gates:
 # - require every configured peer to be healthy (no fallback to discovered peers)
 # - fail fast if cooling peers have long retry windows
@@ -198,15 +205,21 @@ Server federation readiness checks (machine A/B host):
 Notes:
 - `server-federation-wait` is useful after restarting one operator in a multi-peer setup; it waits for peer-sync and issuer-sync quorum plus healthy/eligible peer availability.
 - `server-federation-status` now surfaces per-peer cooldown retry windows (`retry_after_sec`) and sync-source operator details so operators can see both retry timing and current source diversity.
-- `server-federation-status` can also enforce the same strict policy thresholds in one shot (`--fail-on-not-ready 1`) and produce a machine-readable summary artifact (`--summary-json`).
+- `server-federation-status` can also enforce the same strict policy thresholds in one shot (`--fail-on-not-ready 1`) and produce a machine-readable summary artifact (`--summary-json`) that now includes explicit readiness failure reasons (`readiness.failure_reasons`).
 - `server-federation-wait` now also supports explicit fail-close outage policy (`--require-configured-healthy`, `--max-cooling-retry-sec`, `--max-peer-sync-age-sec`, `--max-issuer-sync-age-sec`, `--min-peer-success-sources`, `--min-issuer-success-sources`, `--min-peer-source-operators`, `--min-issuer-source-operators`) for stricter production readiness gates.
+- `server-federation-wait` can now emit machine-readable readiness artifacts (`--summary-json`) including explicit failure reasons (`readiness.failure_reasons`) and final state (`ready|timeout|cooling_retry_exceeded|...`).
 - if a peer is permanently offline, remove it from `DIRECTORY_PEERS` (or keep discovery enabled with eligible peers) to avoid repeated degraded-status loops.
-- `prod-operator-lifecycle-runbook` enables federation readiness gating by default during onboard (`--federation-check 1`) and captures diagnostics via `--federation-status-file`.
+- `prod-operator-lifecycle-runbook` enables federation readiness gating by default during onboard (`--federation-check 1`) and now captures federation wait log + wait/status summary artifacts (`--federation-wait-file`, `--federation-wait-summary-json`, `--federation-status-file`, `--federation-status-summary-json`) with normalized readiness fields in lifecycle summary/report handoffs (`federation.wait_*`, `federation.status_ready*`).
+- lifecycle onboarding can now fail-close when wait summary capture is missing/invalid (`--federation-wait-summary-required 1`), producing failure step `federation_wait_summary`.
+- lifecycle onboarding can now also fail-close when status summary capture is missing/invalid (`--federation-status-summary-required 1`), producing failure step `federation_status_summary`.
+- lifecycle onboarding can now also fail-close when federation wait/status output artifacts are missing/empty (`--federation-wait-file-required 1`, `--federation-status-file-required 1`), producing failure steps `federation_wait_file` and `federation_status_file`.
+- `server-up --federation-wait 1` can now pass through federation-wait summary artifact controls (`--federation-wait-summary-json`, `--federation-wait-print-summary-json`) for startup-gate automation/handoff.
 - authority `server-up` can now auto-generate invite keys during startup (`--auto-invite 1` with optional count/tier/wait tuning) to reduce manual onboarding steps.
 - authority `prod-operator-lifecycle-runbook` can also bootstrap invite keys after onboarding (`--onboard-invite 1`), with artifact/metadata reported in `invite_bootstrap.*` summary fields.
 - `prod-operator-lifecycle-runbook` can now auto-rollback failed onboard runs (`--rollback-on-fail 1`) and optionally verify relay disappearance after rollback (`--rollback-verify-absent 1`), with rollback diagnostics in `rollback.*` summary fields.
 - failed lifecycle runs can now auto-capture runtime-doctor diagnostics (`--runtime-doctor-on-fail 1`) with captured artifact metadata in `runtime_doctor.*` summary fields.
 - failed lifecycle runs can now auto-capture incident bundles (`--incident-snapshot-on-fail 1`) with optional docker-log controls and attached lifecycle artifacts; lifecycle summary now also surfaces normalized incident handoff pointers (`incident_summary.json`, `incident_report.md`, bundle tar/sha, and attachment manifest paths) via `incident_snapshot.*`.
+- lifecycle failed-run diagnostics now also support strict output-artifact completeness policies: runtime-doctor output can require non-empty capture (`--runtime-doctor-file-required 1`), incident handoff can require non-empty summary/report and tar+sha artifacts (`--incident-summary-required 1`, `--incident-bundle-required 1`), and attachment evidence can enforce manifest/no-skips/floor-count policy (`--incident-attachment-manifest-required 1`, `--incident-attachment-no-skips-required 1`, `--incident-attach-min-count N`, `--incident-attachment-manifest-min-count N`) with explicit lifecycle state reporting when requirements are unmet.
 - lifecycle runs now also emit a human-readable markdown handoff by default (override with `--report-md`), with the artifact path recorded in summary JSON as `report_md`.
 
 3-machine soak/fault validation (machine C runner):
@@ -402,6 +415,14 @@ sudo ./scripts/easy_node.sh prod-pilot-cohort-runbook \
 # default campaign handoff artifacts:
 #   <reports_dir>/prod_pilot_campaign_summary.json
 #   <reports_dir>/prod_pilot_campaign_summary.md
+#   <reports_dir>/prod_pilot_campaign_run_report.json
+#   <reports_dir>/prod_pilot_campaign_signoff_summary.json
+# inline campaign signoff is enabled by default:
+#   --campaign-signoff-check 1
+#   --campaign-signoff-required 1
+# optional strict wrapper-artifact policy controls:
+#   --campaign-run-report-required [0|1]
+#   --campaign-run-report-json-required [0|1]
 
 # regenerate one concise campaign handoff report from saved artifacts
 ./scripts/easy_node.sh prod-pilot-cohort-campaign-summary \
@@ -409,6 +430,51 @@ sudo ./scripts/easy_node.sh prod-pilot-cohort-runbook \
   --fail-on-no-go 1
 # this summary now also points to failed-round incident snapshot summary/report artifacts
 # and preserves the upstream pre_real_host_readiness_summary.json pointer when present
+
+# fail-closed campaign artifact + policy validation gate
+./scripts/easy_node.sh prod-pilot-cohort-campaign-check \
+  --reports-dir <reports_dir> \
+  --require-status-ok 1 \
+  --require-runbook-summary-json 1 \
+  --require-quick-run-report-json 1 \
+  --require-campaign-summary-go 1 \
+  --require-campaign-signoff-enabled 1 \
+  --require-campaign-signoff-required 1 \
+  --require-campaign-signoff-attempted 1 \
+  --require-campaign-signoff-ok 1 \
+  --require-campaign-signoff-summary-json-valid 1 \
+  --require-campaign-signoff-summary-status-ok 1 \
+  --require-campaign-signoff-summary-final-rc-zero 1 \
+  --require-campaign-summary-fail-close 1 \
+  --require-campaign-signoff-check 1 \
+  --require-campaign-run-report-required 1 \
+  --require-campaign-run-report-json-required 1 \
+  --require-artifact-path-match 1 \
+  --summary-json <reports_dir>/prod_pilot_campaign_check_summary.json
+# optional: --print-summary-json 1
+
+# one-command campaign signoff gate (optional summary refresh + fail-closed check)
+./scripts/easy_node.sh prod-pilot-cohort-campaign-signoff \
+  --reports-dir <reports_dir> \
+  --refresh-summary 1 \
+  --summary-fail-on-no-go 1 \
+  --campaign-signoff-summary-json <reports_dir>/prod_pilot_campaign_signoff_summary.json \
+  --require-runbook-summary-json 1 \
+  --require-quick-run-report-json 1 \
+  --require-campaign-signoff-enabled 1 \
+  --require-campaign-signoff-required 1 \
+  --require-campaign-signoff-attempted 1 \
+  --require-campaign-signoff-ok 1 \
+  --require-campaign-signoff-summary-json-valid 1 \
+  --require-campaign-signoff-summary-status-ok 1 \
+  --require-campaign-signoff-summary-final-rc-zero 1 \
+  --require-campaign-summary-fail-close 1 \
+  --require-campaign-signoff-check 1 \
+  --require-campaign-run-report-required 1 \
+  --require-campaign-run-report-json-required 1 \
+  --require-artifact-path-match 1 \
+  --summary-json <reports_dir>/prod_pilot_campaign_signoff_check_summary.json
+# optional: --print-summary-json 1
 
 # production key/signing rotation maintenance runbook
 ./scripts/easy_node.sh prod-key-rotation-runbook \

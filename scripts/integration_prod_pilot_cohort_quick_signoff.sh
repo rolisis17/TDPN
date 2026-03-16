@@ -133,6 +133,8 @@ PROD_PILOT_COHORT_QUICK_ALERT_SCRIPT="$FAKE_ALERT" \
   --min-trend-wg-soak-cross-operator-pairs 1 \
   --require-bundle-created 0 \
   --require-bundle-manifest 0 \
+  --incident-snapshot-min-attachment-count 2 \
+  --incident-snapshot-max-skipped-count 0 \
   --max-alert-severity WARN \
   --show-json 1 >/tmp/integration_prod_pilot_cohort_quick_signoff_pass.log 2>&1
 
@@ -143,7 +145,7 @@ if [[ ! -f "$SIGNOFF_JSON" ]]; then
   cat /tmp/integration_prod_pilot_cohort_quick_signoff_pass.log
   exit 1
 fi
-if ! jq -e '.status=="ok" and .policy.require_trend_artifact_policy_match==0 and .policy.require_trend_wg_validate_udp_source==0 and .policy.require_trend_wg_validate_strict_distinct==0 and .policy.require_trend_wg_soak_diversity_pass==0 and .policy.min_trend_wg_soak_selection_lines==3 and .policy.min_trend_wg_soak_entry_operators==1 and .policy.min_trend_wg_soak_exit_operators==1 and .policy.min_trend_wg_soak_cross_operator_pairs==1 and .policy.require_bundle_created==0 and .policy.require_bundle_manifest==0 and .policy.max_alert_severity=="WARN"' "$SIGNOFF_JSON" >/dev/null 2>&1; then
+if ! jq -e '.status=="ok" and .policy.require_trend_artifact_policy_match==0 and .policy.require_trend_wg_validate_udp_source==0 and .policy.require_trend_wg_validate_strict_distinct==0 and .policy.require_trend_wg_soak_diversity_pass==0 and .policy.min_trend_wg_soak_selection_lines==3 and .policy.min_trend_wg_soak_entry_operators==1 and .policy.min_trend_wg_soak_exit_operators==1 and .policy.min_trend_wg_soak_cross_operator_pairs==1 and .policy.require_bundle_created==0 and .policy.require_bundle_manifest==0 and .policy.incident_snapshot_min_attachment_count==2 and .policy.incident_snapshot_max_skipped_count==0 and .policy.max_alert_severity=="WARN"' "$SIGNOFF_JSON" >/dev/null 2>&1; then
   echo "quick-signoff artifact missing expected strict policy fields"
   cat "$SIGNOFF_JSON"
   exit 1
@@ -234,6 +236,16 @@ if ! rg -q -- '--require-bundle-manifest 0' "$CHECK_CAPTURE"; then
   cat "$CHECK_CAPTURE"
   exit 1
 fi
+if ! rg -q -- '--incident-snapshot-min-attachment-count 2' "$CHECK_CAPTURE"; then
+  echo "quick-signoff forwarding missing --incident-snapshot-min-attachment-count 2 to quick-check"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--incident-snapshot-max-skipped-count 0' "$CHECK_CAPTURE"; then
+  echo "quick-signoff forwarding missing --incident-snapshot-max-skipped-count 0 to quick-check"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
 if ! rg -q -- '--summary-json ' "$TREND_CAPTURE"; then
   echo "quick-signoff forwarding missing --summary-json to quick-trend"
   cat "$TREND_CAPTURE"
@@ -244,6 +256,16 @@ if ! rg -q -- '--require-cohort-signoff-policy 1' "$TREND_CAPTURE"; then
   cat "$TREND_CAPTURE"
   exit 1
 fi
+if ! rg -q -- '--incident-snapshot-min-attachment-count 2' "$TREND_CAPTURE"; then
+  echo "quick-signoff forwarding missing --incident-snapshot-min-attachment-count 2 to quick-trend"
+  cat "$TREND_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--incident-snapshot-max-skipped-count 0' "$TREND_CAPTURE"; then
+  echo "quick-signoff forwarding missing --incident-snapshot-max-skipped-count 0 to quick-trend"
+  cat "$TREND_CAPTURE"
+  exit 1
+fi
 if ! rg -q -- '--trend-summary-json ' "$ALERT_CAPTURE"; then
   echo "quick-signoff forwarding missing --trend-summary-json to quick-alert"
   cat "$ALERT_CAPTURE"
@@ -251,6 +273,16 @@ if ! rg -q -- '--trend-summary-json ' "$ALERT_CAPTURE"; then
 fi
 if ! rg -q -- '--require-cohort-signoff-policy 1' "$ALERT_CAPTURE"; then
   echo "quick-signoff forwarding missing --require-cohort-signoff-policy 1 to quick-alert"
+  cat "$ALERT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--incident-snapshot-min-attachment-count 2' "$ALERT_CAPTURE"; then
+  echo "quick-signoff forwarding missing --incident-snapshot-min-attachment-count 2 to quick-alert"
+  cat "$ALERT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--incident-snapshot-max-skipped-count 0' "$ALERT_CAPTURE"; then
+  echo "quick-signoff forwarding missing --incident-snapshot-max-skipped-count 0 to quick-alert"
   cat "$ALERT_CAPTURE"
   exit 1
 fi
@@ -365,6 +397,8 @@ PROD_PILOT_COHORT_QUICK_SIGNOFF_REQUIRE_SUMMARY_JSON=0 \
 PROD_PILOT_COHORT_QUICK_SIGNOFF_REQUIRE_SUMMARY_STATUS_OK=0 \
 PROD_PILOT_COHORT_QUICK_SIGNOFF_REQUIRE_INCIDENT_SNAPSHOT_ON_FAIL=0 \
 PROD_PILOT_COHORT_QUICK_SIGNOFF_REQUIRE_INCIDENT_SNAPSHOT_ARTIFACTS=0 \
+PROD_PILOT_COHORT_QUICK_SIGNOFF_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT=2 \
+PROD_PILOT_COHORT_QUICK_SIGNOFF_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT=0 \
 PROD_PILOT_COHORT_QUICK_SIGNOFF_MAX_DURATION_SEC=17 \
 PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_STATUS_OK=1 \
 PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_RUNBOOK_OK=1 \
@@ -374,6 +408,8 @@ PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_SUMMARY_JSON=1 \
 PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_SUMMARY_STATUS_OK=1 \
 PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_INCIDENT_SNAPSHOT_ON_FAIL=1 \
 PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_INCIDENT_SNAPSHOT_ARTIFACTS=1 \
+PROD_PILOT_COHORT_QUICK_CHECK_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT=9 \
+PROD_PILOT_COHORT_QUICK_CHECK_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT=4 \
 PROD_PILOT_COHORT_QUICK_CHECK_MAX_DURATION_SEC=99 \
 PROD_PILOT_COHORT_QUICK_CHECK_SCRIPT="$FAKE_CHECK" \
 PROD_PILOT_COHORT_QUICK_TREND_SCRIPT="$FAKE_TREND" \
@@ -418,6 +454,16 @@ if ! rg -q -- '--require-incident-snapshot-on-fail 0' "$CHECK_CAPTURE_ENV"; then
 fi
 if ! rg -q -- '--require-incident-snapshot-artifacts 0' "$CHECK_CAPTURE_ENV"; then
   echo "quick-signoff env precedence failed: missing --require-incident-snapshot-artifacts 0 from signoff env namespace"
+  cat "$CHECK_CAPTURE_ENV"
+  exit 1
+fi
+if ! rg -q -- '--incident-snapshot-min-attachment-count 2' "$CHECK_CAPTURE_ENV"; then
+  echo "quick-signoff env precedence failed: missing --incident-snapshot-min-attachment-count 2 from signoff env namespace"
+  cat "$CHECK_CAPTURE_ENV"
+  exit 1
+fi
+if ! rg -q -- '--incident-snapshot-max-skipped-count 0' "$CHECK_CAPTURE_ENV"; then
+  echo "quick-signoff env precedence failed: missing --incident-snapshot-max-skipped-count 0 from signoff env namespace"
   cat "$CHECK_CAPTURE_ENV"
   exit 1
 fi
@@ -597,6 +643,8 @@ PROD_PILOT_COHORT_QUICK_SIGNOFF_SCRIPT="$FAKE_SIGNOFF" \
   --run-report-json /tmp/quick/report.json \
   --require-cohort-signoff-policy 0 \
   --require-trend-artifact-policy-match 0 \
+  --incident-snapshot-min-attachment-count 2 \
+  --incident-snapshot-max-skipped-count 0 \
   --max-alert-severity OK \
   --show-json 1 >/tmp/integration_prod_pilot_cohort_quick_signoff_easy_node.log 2>&1
 
@@ -617,6 +665,16 @@ if ! rg -q -- '--require-cohort-signoff-policy 0' "$SIGNOFF_FORWARD_CAPTURE"; th
 fi
 if ! rg -q -- '--require-trend-artifact-policy-match 0' "$SIGNOFF_FORWARD_CAPTURE"; then
   echo "easy_node quick-signoff forwarding failed: missing --require-trend-artifact-policy-match"
+  cat "$SIGNOFF_FORWARD_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--incident-snapshot-min-attachment-count 2' "$SIGNOFF_FORWARD_CAPTURE"; then
+  echo "easy_node quick-signoff forwarding failed: missing --incident-snapshot-min-attachment-count"
+  cat "$SIGNOFF_FORWARD_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--incident-snapshot-max-skipped-count 0' "$SIGNOFF_FORWARD_CAPTURE"; then
+  echo "easy_node quick-signoff forwarding failed: missing --incident-snapshot-max-skipped-count"
   cat "$SIGNOFF_FORWARD_CAPTURE"
   exit 1
 fi

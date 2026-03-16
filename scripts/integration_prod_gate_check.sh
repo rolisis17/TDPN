@@ -435,6 +435,59 @@ if ! rg -q "attachment_manifest=${INCIDENT_ARTIFACTS_ATTACH_MANIFEST}" /tmp/inte
   exit 1
 fi
 
+echo "[prod-gate-check] incident attachment-count floor policy"
+set +e
+./scripts/prod_gate_check.sh \
+  --run-report-json "$INCIDENT_ARTIFACTS_PASS_RUN_REPORT" \
+  --require-full-sequence 0 \
+  --require-wg-validate-ok 0 \
+  --require-wg-soak-ok 0 \
+  --incident-snapshot-min-attachment-count 2 \
+  --show-json 0 >/tmp/integration_prod_gate_check_incident_attachment_floor_fail.log 2>&1
+rc=$?
+set -e
+if [[ "$rc" -eq 0 ]]; then
+  echo "expected non-zero rc when incident attachment count is below floor"
+  cat /tmp/integration_prod_gate_check_incident_attachment_floor_fail.log
+  exit 1
+fi
+if ! rg -q 'attachment_count below floor' /tmp/integration_prod_gate_check_incident_attachment_floor_fail.log; then
+  echo "expected attachment floor failure signal not found"
+  cat /tmp/integration_prod_gate_check_incident_attachment_floor_fail.log
+  exit 1
+fi
+
+echo "[prod-gate-check] incident skipped-attachment budget policy"
+set +e
+./scripts/prod_gate_check.sh \
+  --run-report-json "$INCIDENT_ARTIFACTS_PASS_RUN_REPORT" \
+  --require-full-sequence 0 \
+  --require-wg-validate-ok 0 \
+  --require-wg-soak-ok 0 \
+  --incident-snapshot-max-skipped-count 0 \
+  --show-json 0 >/tmp/integration_prod_gate_check_incident_skipped_budget_fail.log 2>&1
+rc=$?
+set -e
+if [[ "$rc" -eq 0 ]]; then
+  echo "expected non-zero rc when incident skipped-attachment count exceeds budget"
+  cat /tmp/integration_prod_gate_check_incident_skipped_budget_fail.log
+  exit 1
+fi
+if ! rg -q 'skipped attachment count exceeds policy' /tmp/integration_prod_gate_check_incident_skipped_budget_fail.log; then
+  echo "expected skipped-attachment budget failure signal not found"
+  cat /tmp/integration_prod_gate_check_incident_skipped_budget_fail.log
+  exit 1
+fi
+
+./scripts/prod_gate_check.sh \
+  --run-report-json "$INCIDENT_ARTIFACTS_PASS_RUN_REPORT" \
+  --require-full-sequence 0 \
+  --require-wg-validate-ok 0 \
+  --require-wg-soak-ok 0 \
+  --incident-snapshot-min-attachment-count 1 \
+  --incident-snapshot-max-skipped-count 1 \
+  --show-json 0 >/tmp/integration_prod_gate_check_incident_attachment_policy_pass.log 2>&1
+
 echo "[prod-gate-check] run-report missing file"
 set +e
 ./scripts/prod_gate_check.sh --run-report-json "$TMP_DIR/does_not_exist.json" >/tmp/integration_prod_gate_check_missing_run_report.log 2>&1
@@ -584,6 +637,8 @@ THREE_MACHINE_PROD_GATE_CHECK_SCRIPT="$FAKE_CHECK" \
   --require-signoff-ok 1 \
   --require-incident-snapshot-on-fail 1 \
   --require-incident-snapshot-artifacts 1 \
+  --incident-snapshot-min-attachment-count 2 \
+  --incident-snapshot-max-skipped-count 0 \
   --require-wg-validate-udp-source 1 \
   --require-wg-validate-strict-distinct 1 \
   --require-wg-soak-diversity-pass 1 \
@@ -636,6 +691,16 @@ if ! rg -q -- '--require-incident-snapshot-on-fail 1' "$CAPTURE"; then
 fi
 if ! rg -q -- '--require-incident-snapshot-artifacts 1' "$CAPTURE"; then
   echo "easy_node prod-gate-check forwarding failed: missing --require-incident-snapshot-artifacts"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--incident-snapshot-min-attachment-count 2' "$CAPTURE"; then
+  echo "easy_node prod-gate-check forwarding failed: missing --incident-snapshot-min-attachment-count"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--incident-snapshot-max-skipped-count 0' "$CAPTURE"; then
+  echo "easy_node prod-gate-check forwarding failed: missing --incident-snapshot-max-skipped-count"
   cat "$CAPTURE"
   exit 1
 fi
@@ -720,6 +785,8 @@ THREE_MACHINE_PROD_GATE_CHECK_SCRIPT="$FAKE_CHECK" \
   --require-signoff-ok 1 \
   --require-incident-snapshot-on-fail 1 \
   --require-incident-snapshot-artifacts 1 \
+  --incident-snapshot-min-attachment-count 2 \
+  --incident-snapshot-max-skipped-count 0 \
   --require-wg-validate-udp-source 1 \
   --require-wg-validate-strict-distinct 1 \
   --require-wg-soak-diversity-pass 1 \
@@ -787,6 +854,16 @@ if ! rg -q -- '--require-incident-snapshot-on-fail 1' "$CHECK_CAPTURE"; then
 fi
 if ! rg -q -- '--require-incident-snapshot-artifacts 1' "$CHECK_CAPTURE"; then
   echo "easy_node prod-gate-signoff forwarding failed: check missing --require-incident-snapshot-artifacts"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--incident-snapshot-min-attachment-count 2' "$CHECK_CAPTURE"; then
+  echo "easy_node prod-gate-signoff forwarding failed: check missing --incident-snapshot-min-attachment-count"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--incident-snapshot-max-skipped-count 0' "$CHECK_CAPTURE"; then
+  echo "easy_node prod-gate-signoff forwarding failed: check missing --incident-snapshot-max-skipped-count"
   cat "$CHECK_CAPTURE"
   exit 1
 fi

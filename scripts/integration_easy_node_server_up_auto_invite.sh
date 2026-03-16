@@ -77,27 +77,59 @@ EOF_DOCKER
 cat >"$TMP_BIN/curl" <<'EOF_CURL'
 #!/usr/bin/env bash
 set -euo pipefail
+output_file=""
+write_fmt=""
 url=""
-for arg in "$@"; do
-  if [[ "$arg" == http://* || "$arg" == https://* ]]; then
-    url="$arg"
-  fi
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -o)
+      output_file="${2:-}"
+      shift 2
+      ;;
+    -w)
+      write_fmt="${2:-}"
+      shift 2
+      ;;
+    http://*|https://*)
+      url="$1"
+      shift
+      ;;
+    *)
+      shift
+      ;;
+  esac
 done
 if [[ "${FAKE_UPSERT_FAIL:-0}" == "1" && "$url" == *"/v1/admin/subject/upsert" ]]; then
   echo "upsert failed" >&2
   exit 22
 fi
+payload='{}'
+code="200"
 case "$url" in
   */v1/pubkeys)
-    printf '{"issuer":"issuer-test","pub_keys":["k1"],"key_epoch":1,"min_token_epoch":1}\n'
+    payload='{"issuer":"issuer-test","pub_keys":["k1"],"key_epoch":1,"min_token_epoch":1}'
+    ;;
+  */v1/admin/sync-status)
+    payload='{"generated_at":1731000001,"peer":{"success":true,"success_sources":1,"source_operators":["op-sync-peer"],"required_operators":1,"quorum_met":true,"last_run_at":1731000000},"issuer":{"success":true,"success_sources":1,"source_operators":["op-sync-issuer"],"required_operators":1,"quorum_met":true,"last_run_at":1731000000}}'
+    ;;
+  */v1/admin/peer-status)
+    payload='{"generated_at":1731000000,"peers":[{"url":"http://seed.local","configured":true,"discovered":false,"eligible":true,"cooling_down":false,"consecutive_failures":0}]}'
     ;;
   */v1/admin/subject/get*)
-    printf '{"subject":"ok","kind":"client","tier":1}\n'
+    payload='{"subject":"ok","kind":"client","tier":1}'
     ;;
   *)
-    printf '{}\n'
+    payload='{}'
     ;;
 esac
+if [[ -n "$output_file" ]]; then
+  printf '%s\n' "$payload" >"$output_file"
+else
+  printf '%s\n' "$payload"
+fi
+if [[ -n "$write_fmt" ]]; then
+  printf '%s' "$code"
+fi
 EOF_CURL
 
 cat >"$TMP_BIN/wg" <<'EOF_WG'
@@ -140,6 +172,59 @@ fi
 if ! rg -q 'invite keys generated: 1 \(issuer=http://127.0.0.1:8082\)' "$AUTH_OK_LOG"; then
   echo "expected authority auto-invite summary output"
   cat "$AUTH_OK_LOG"
+  exit 1
+fi
+
+echo "[server-up-auto-invite] authority federation-wait summary forwarding"
+AUTH_FED_WAIT_LOG="$TMP_DIR/authority_federation_wait.log"
+AUTH_FED_WAIT_SUMMARY="$TMP_DIR/authority_federation_wait_summary.json"
+set +e
+PATH="$TMP_BIN:$PATH" \
+EASY_NODE_VERIFY_PUBLIC=0 \
+./scripts/easy_node.sh server-up \
+  --mode authority \
+  --public-host 203.0.113.10 \
+  --peer-directories http://198.51.100.20:8081 \
+  --peer-identity-strict 0 \
+  --beta-profile 1 \
+  --prod-profile 0 \
+  --auto-invite 0 \
+  --federation-wait 1 \
+  --federation-ready-timeout-sec 3 \
+  --federation-poll-sec 1 \
+  --federation-wait-summary-json "$AUTH_FED_WAIT_SUMMARY" \
+  --federation-wait-print-summary-json 1 >"$AUTH_FED_WAIT_LOG" 2>&1
+auth_fed_wait_rc=$?
+set -e
+if [[ "$auth_fed_wait_rc" -ne 0 ]]; then
+  echo "expected authority server-up federation wait summary forwarding scenario to succeed"
+  cat "$AUTH_FED_WAIT_LOG"
+  exit 1
+fi
+
+if ! rg -q 'server-up federation wait: checking local directory federation readiness' "$AUTH_FED_WAIT_LOG"; then
+  echo "expected server-up federation wait banner"
+  cat "$AUTH_FED_WAIT_LOG"
+  exit 1
+fi
+if ! rg -q '^server-federation-wait: READY' "$AUTH_FED_WAIT_LOG"; then
+  echo "expected READY output from server-federation-wait during server-up"
+  cat "$AUTH_FED_WAIT_LOG"
+  exit 1
+fi
+if ! rg -q "^  summary_json: $AUTH_FED_WAIT_SUMMARY\$" "$AUTH_FED_WAIT_LOG"; then
+  echo "expected federation wait summary artifact path in server-up output"
+  cat "$AUTH_FED_WAIT_LOG"
+  exit 1
+fi
+if [[ ! -f "$AUTH_FED_WAIT_SUMMARY" ]]; then
+  echo "expected federation wait summary artifact from server-up forwarding"
+  cat "$AUTH_FED_WAIT_LOG"
+  exit 1
+fi
+if ! jq -e '.status == "ready" and .state == "ready"' "$AUTH_FED_WAIT_SUMMARY" >/dev/null; then
+  echo "expected federation wait summary artifact to report ready state"
+  cat "$AUTH_FED_WAIT_SUMMARY"
   exit 1
 fi
 

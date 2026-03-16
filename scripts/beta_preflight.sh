@@ -71,6 +71,8 @@ run_step "prod gate signoff integration" ./scripts/integration_prod_gate_signoff
 run_step "prod pilot runbook integration" ./scripts/integration_prod_pilot_runbook.sh
 run_step "prod pilot cohort campaign integration" ./scripts/integration_prod_pilot_cohort_campaign.sh
 run_step "prod pilot cohort campaign summary integration" ./scripts/integration_prod_pilot_cohort_campaign_summary.sh
+run_step "prod pilot cohort campaign check integration" ./scripts/integration_prod_pilot_cohort_campaign_check.sh
+run_step "prod pilot cohort campaign signoff integration" ./scripts/integration_prod_pilot_cohort_campaign_signoff.sh
 run_step "prod pilot cohort runbook integration" ./scripts/integration_prod_pilot_cohort_runbook.sh
 run_step "prod pilot cohort quick integration" ./scripts/integration_prod_pilot_cohort_quick.sh
 run_step "prod pilot cohort quick check integration" ./scripts/integration_prod_pilot_cohort_quick_check.sh

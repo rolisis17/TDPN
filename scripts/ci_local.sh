@@ -204,6 +204,12 @@ echo "[ci] prod pilot cohort campaign integration"
 echo "[ci] prod pilot cohort campaign summary integration"
 ./scripts/integration_prod_pilot_cohort_campaign_summary.sh
 
+echo "[ci] prod pilot cohort campaign check integration"
+./scripts/integration_prod_pilot_cohort_campaign_check.sh
+
+echo "[ci] prod pilot cohort campaign signoff integration"
+./scripts/integration_prod_pilot_cohort_campaign_signoff.sh
+
 echo "[ci] prod pilot cohort runbook integration"
 ./scripts/integration_prod_pilot_cohort_runbook.sh
 

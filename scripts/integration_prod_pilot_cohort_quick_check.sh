@@ -148,7 +148,9 @@ PROD_PILOT_COHORT_CHECK_SCRIPT="$FAKE_COHORT_POLICY" \
   --require-bundle-created 0 \
   --require-bundle-manifest 0 \
   --require-incident-snapshot-on-fail 0 \
-  --require-incident-snapshot-artifacts 0 >/tmp/integration_prod_pilot_cohort_quick_check_cohort_policy.log 2>&1
+  --require-incident-snapshot-artifacts 0 \
+  --incident-snapshot-min-attachment-count 2 \
+  --incident-snapshot-max-skipped-count 0 >/tmp/integration_prod_pilot_cohort_quick_check_cohort_policy.log 2>&1
 
 if ! rg -q -- '--require-trend-artifact-policy-match 0' "$COHORT_POLICY_CAPTURE"; then
   echo "expected cohort policy hook to forward trend artifact policy override"
@@ -210,6 +212,16 @@ if ! rg -q -- '--require-bundle-manifest 0' "$COHORT_POLICY_CAPTURE"; then
   cat "$COHORT_POLICY_CAPTURE"
   exit 1
 fi
+if ! rg -q -- '--incident-snapshot-min-attachment-count 2' "$COHORT_POLICY_CAPTURE"; then
+  echo "expected cohort policy hook to forward incident attachment floor override"
+  cat "$COHORT_POLICY_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--incident-snapshot-max-skipped-count 0' "$COHORT_POLICY_CAPTURE"; then
+  echo "expected cohort policy hook to forward incident skipped-count budget override"
+  cat "$COHORT_POLICY_CAPTURE"
+  exit 1
+fi
 
 echo "[prod-pilot-cohort-quick-check] incident sub-check disables trend artifact policy coupling"
 INCIDENT_SUMMARY="$TMP_DIR/incident_summary.json"
@@ -249,7 +261,9 @@ PROD_PILOT_COHORT_CHECK_SCRIPT="$FAKE_COHORT_CHECK" \
   --require-signoff-ok 0 \
   --require-summary-status-ok 0 \
   --require-incident-snapshot-on-fail 1 \
-  --require-incident-snapshot-artifacts 0 >/tmp/integration_prod_pilot_cohort_quick_check_incident_subcheck.log 2>&1
+  --require-incident-snapshot-artifacts 0 \
+  --incident-snapshot-min-attachment-count 2 \
+  --incident-snapshot-max-skipped-count 0 >/tmp/integration_prod_pilot_cohort_quick_check_incident_subcheck.log 2>&1
 
 if ! rg -q -- '--require-trend-artifact-policy-match 0' "$COHORT_CAPTURE"; then
   echo "expected incident sub-check to disable trend artifact policy coupling"
@@ -258,6 +272,16 @@ if ! rg -q -- '--require-trend-artifact-policy-match 0' "$COHORT_CAPTURE"; then
 fi
 if ! rg -q -- '--require-incident-snapshot-on-fail 1' "$COHORT_CAPTURE"; then
   echo "expected incident sub-check forwarding missing --require-incident-snapshot-on-fail 1"
+  cat "$COHORT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--incident-snapshot-min-attachment-count 2' "$COHORT_CAPTURE"; then
+  echo "expected incident sub-check forwarding missing --incident-snapshot-min-attachment-count 2"
+  cat "$COHORT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--incident-snapshot-max-skipped-count 0' "$COHORT_CAPTURE"; then
+  echo "expected incident sub-check forwarding missing --incident-snapshot-max-skipped-count 0"
   cat "$COHORT_CAPTURE"
   exit 1
 fi
@@ -362,6 +386,8 @@ PROD_PILOT_COHORT_QUICK_CHECK_SCRIPT="$FAKE_CHECK" \
 ./scripts/easy_node.sh prod-pilot-cohort-quick-check \
   --run-report-json /tmp/quick/report.json \
   --require-signoff-ok 1 \
+  --incident-snapshot-min-attachment-count 2 \
+  --incident-snapshot-max-skipped-count 0 \
   --show-json 1 >/tmp/integration_prod_pilot_cohort_quick_check_easy_node.log 2>&1
 
 if ! rg -q -- '--run-report-json /tmp/quick/report.json' "$CHECK_CAPTURE"; then
@@ -371,6 +397,16 @@ if ! rg -q -- '--run-report-json /tmp/quick/report.json' "$CHECK_CAPTURE"; then
 fi
 if ! rg -q -- '--require-signoff-ok 1' "$CHECK_CAPTURE"; then
   echo "easy_node quick-check forwarding failed: missing --require-signoff-ok"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--incident-snapshot-min-attachment-count 2' "$CHECK_CAPTURE"; then
+  echo "easy_node quick-check forwarding failed: missing --incident-snapshot-min-attachment-count"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--incident-snapshot-max-skipped-count 0' "$CHECK_CAPTURE"; then
+  echo "easy_node quick-check forwarding failed: missing --incident-snapshot-max-skipped-count"
   cat "$CHECK_CAPTURE"
   exit 1
 fi

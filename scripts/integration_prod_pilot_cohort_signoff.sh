@@ -59,6 +59,8 @@ PROD_PILOT_COHORT_CHECK_SCRIPT="$FAKE_CHECK" \
   --min-trend-wg-soak-selection-lines 12 \
   --require-incident-snapshot-on-fail 0 \
   --require-incident-snapshot-artifacts 0 \
+  --incident-snapshot-min-attachment-count 2 \
+  --incident-snapshot-max-skipped-count 0 \
   --show-json 1 >/tmp/integration_prod_pilot_cohort_signoff_pass.log 2>&1
 
 if ! rg -q -- '^verify ' "$SIGNOFF_CAPTURE"; then
@@ -88,6 +90,16 @@ if ! rg -q -- '--require-incident-snapshot-on-fail 0' "$CHECK_CAPTURE"; then
 fi
 if ! rg -q -- '--require-incident-snapshot-artifacts 0' "$CHECK_CAPTURE"; then
   echo "signoff check forwarding missing --require-incident-snapshot-artifacts"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--incident-snapshot-min-attachment-count 2' "$CHECK_CAPTURE"; then
+  echo "signoff check forwarding missing --incident-snapshot-min-attachment-count"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--incident-snapshot-max-skipped-count 0' "$CHECK_CAPTURE"; then
+  echo "signoff check forwarding missing --incident-snapshot-max-skipped-count"
   cat "$CHECK_CAPTURE"
   exit 1
 fi
@@ -191,6 +203,8 @@ PROD_PILOT_COHORT_SIGNOFF_SCRIPT="$FAKE_SIGNOFF" \
   --min-trend-wg-soak-selection-lines 12 \
   --require-incident-snapshot-on-fail 0 \
   --require-incident-snapshot-artifacts 0 \
+  --incident-snapshot-min-attachment-count 2 \
+  --incident-snapshot-max-skipped-count 0 \
   --show-json 1 >/tmp/integration_prod_pilot_cohort_signoff_easy_node.log 2>&1
 
 if ! rg -q -- '--summary-json /tmp/cohort/summary.json' "$SIGNOFF_FORWARD_CAPTURE"; then
@@ -230,6 +244,16 @@ if ! rg -q -- '--require-incident-snapshot-on-fail 0' "$SIGNOFF_FORWARD_CAPTURE"
 fi
 if ! rg -q -- '--require-incident-snapshot-artifacts 0' "$SIGNOFF_FORWARD_CAPTURE"; then
   echo "easy_node cohort signoff forwarding failed: missing --require-incident-snapshot-artifacts"
+  cat "$SIGNOFF_FORWARD_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--incident-snapshot-min-attachment-count 2' "$SIGNOFF_FORWARD_CAPTURE"; then
+  echo "easy_node cohort signoff forwarding failed: missing --incident-snapshot-min-attachment-count"
+  cat "$SIGNOFF_FORWARD_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--incident-snapshot-max-skipped-count 0' "$SIGNOFF_FORWARD_CAPTURE"; then
+  echo "easy_node cohort signoff forwarding failed: missing --incident-snapshot-max-skipped-count"
   cat "$SIGNOFF_FORWARD_CAPTURE"
   exit 1
 fi

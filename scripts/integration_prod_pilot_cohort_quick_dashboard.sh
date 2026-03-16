@@ -177,6 +177,8 @@ PROD_PILOT_COHORT_QUICK_ALERT_SCRIPT="$FAKE_ALERT" \
   --since-hours 24 \
   --require-signoff-ok 1 \
   --require-cohort-signoff-policy 1 \
+  --incident-snapshot-min-attachment-count 2 \
+  --incident-snapshot-max-skipped-count 0 \
   --min-go-rate-pct 95 \
   --show-top-reasons 3 \
   --warn-go-rate-pct 98 \
@@ -248,6 +250,16 @@ if ! rg -q -- '--require-cohort-signoff-policy 1' "$TREND_CAPTURE"; then
   cat "$TREND_CAPTURE"
   exit 1
 fi
+if ! rg -q -- '--incident-snapshot-min-attachment-count 2' "$TREND_CAPTURE"; then
+  echo "quick dashboard did not forward --incident-snapshot-min-attachment-count to trend script"
+  cat "$TREND_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--incident-snapshot-max-skipped-count 0' "$TREND_CAPTURE"; then
+  echo "quick dashboard did not forward --incident-snapshot-max-skipped-count to trend script"
+  cat "$TREND_CAPTURE"
+  exit 1
+fi
 if ! rg -q -- "--trend-summary-json $TREND_JSON" "$ALERT_CAPTURE"; then
   echo "quick dashboard did not forward trend summary path to alert script"
   cat "$ALERT_CAPTURE"
@@ -255,6 +267,16 @@ if ! rg -q -- "--trend-summary-json $TREND_JSON" "$ALERT_CAPTURE"; then
 fi
 if ! rg -q -- '--require-cohort-signoff-policy 1' "$ALERT_CAPTURE"; then
   echo "quick dashboard did not forward --require-cohort-signoff-policy to alert script"
+  cat "$ALERT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--incident-snapshot-min-attachment-count 2' "$ALERT_CAPTURE"; then
+  echo "quick dashboard did not forward --incident-snapshot-min-attachment-count to alert script"
+  cat "$ALERT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--incident-snapshot-max-skipped-count 0' "$ALERT_CAPTURE"; then
+  echo "quick dashboard did not forward --incident-snapshot-max-skipped-count to alert script"
   cat "$ALERT_CAPTURE"
   exit 1
 fi
@@ -354,6 +376,8 @@ PROD_PILOT_COHORT_QUICK_DASHBOARD_SCRIPT="$FAKE_EASY_NODE_DASHBOARD" \
   --reports-dir /tmp/quick_reports \
   --since-hours 12 \
   --require-cohort-signoff-policy 1 \
+  --incident-snapshot-min-attachment-count 3 \
+  --incident-snapshot-max-skipped-count 1 \
   --dashboard-md /tmp/quick_dashboard.md >/tmp/integration_prod_pilot_cohort_quick_dashboard_easy_node.log 2>&1
 
 if ! rg -q -- '--reports-dir /tmp/quick_reports' "$EASY_NODE_DASHBOARD_CAPTURE"; then
@@ -373,6 +397,16 @@ if ! rg -q -- '--dashboard-md /tmp/quick_dashboard.md' "$EASY_NODE_DASHBOARD_CAP
 fi
 if ! rg -q -- '--require-cohort-signoff-policy 1' "$EASY_NODE_DASHBOARD_CAPTURE"; then
   echo "easy-node quick-dashboard forwarding missing --require-cohort-signoff-policy"
+  cat "$EASY_NODE_DASHBOARD_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--incident-snapshot-min-attachment-count 3' "$EASY_NODE_DASHBOARD_CAPTURE"; then
+  echo "easy-node quick-dashboard forwarding missing --incident-snapshot-min-attachment-count"
+  cat "$EASY_NODE_DASHBOARD_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--incident-snapshot-max-skipped-count 1' "$EASY_NODE_DASHBOARD_CAPTURE"; then
+  echo "easy-node quick-dashboard forwarding missing --incident-snapshot-max-skipped-count"
   cat "$EASY_NODE_DASHBOARD_CAPTURE"
   exit 1
 fi

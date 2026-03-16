@@ -37,6 +37,8 @@ Usage:
     [--require-bundle-manifest [0|1]] \
     [--require-incident-snapshot-on-fail [0|1]] \
     [--require-incident-snapshot-artifacts [0|1]] \
+    [--incident-snapshot-min-attachment-count N] \
+    [--incident-snapshot-max-skipped-count N|-1] \
     [--show-json [0|1]]
 
 Purpose:
@@ -72,6 +74,8 @@ require_bundle_created="${PROD_PILOT_COHORT_SIGNOFF_REQUIRE_BUNDLE_CREATED:-1}"
 require_bundle_manifest="${PROD_PILOT_COHORT_SIGNOFF_REQUIRE_BUNDLE_MANIFEST:-1}"
 require_incident_snapshot_on_fail="${PROD_PILOT_COHORT_SIGNOFF_REQUIRE_INCIDENT_SNAPSHOT_ON_FAIL:-1}"
 require_incident_snapshot_artifacts="${PROD_PILOT_COHORT_SIGNOFF_REQUIRE_INCIDENT_SNAPSHOT_ARTIFACTS:-1}"
+incident_snapshot_min_attachment_count="${PROD_PILOT_COHORT_SIGNOFF_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT:-0}"
+incident_snapshot_max_skipped_count="${PROD_PILOT_COHORT_SIGNOFF_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT:--1}"
 show_json="${PROD_PILOT_COHORT_SIGNOFF_SHOW_JSON:-0}"
 
 while [[ $# -gt 0 ]]; do
@@ -250,6 +254,14 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --incident-snapshot-min-attachment-count)
+      incident_snapshot_min_attachment_count="${2:-}"
+      shift 2
+      ;;
+    --incident-snapshot-max-skipped-count)
+      incident_snapshot_max_skipped_count="${2:-}"
+      shift 2
+      ;;
     --show-json)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         show_json="${2:-}"
@@ -320,6 +332,8 @@ declare -a check_args=(
   --require-bundle-manifest "$require_bundle_manifest"
   --require-incident-snapshot-on-fail "$require_incident_snapshot_on_fail"
   --require-incident-snapshot-artifacts "$require_incident_snapshot_artifacts"
+  --incident-snapshot-min-attachment-count "$incident_snapshot_min_attachment_count"
+  --incident-snapshot-max-skipped-count "$incident_snapshot_max_skipped_count"
   --show-json "$show_json"
 )
 if [[ -n "$summary_json" ]]; then

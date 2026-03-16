@@ -126,11 +126,14 @@ chmod +x "$TMP_BIN/curl"
 
 echo "[server-federation-wait] default readiness allows discovered fallback"
 READY_LOG="$TMP_DIR/federation_wait_ready.log"
+READY_SUMMARY="$TMP_DIR/federation_wait_ready_summary.json"
 if ! PATH="$TMP_BIN:$PATH" EASY_NODE_CURL_MOCK_MODE=degraded \
   ./scripts/easy_node.sh server-federation-wait \
     --ready-timeout-sec 3 \
     --poll-sec 1 \
-    --timeout-sec 3 >"$READY_LOG" 2>&1; then
+    --timeout-sec 3 \
+    --summary-json "$READY_SUMMARY" \
+    --print-summary-json 1 >"$READY_LOG" 2>&1; then
   echo "expected default server-federation-wait to succeed with discovered fallback"
   cat "$READY_LOG"
   exit 1
@@ -145,15 +148,32 @@ if ! rg -q 'configured_failing=1' "$READY_LOG"; then
   cat "$READY_LOG"
   exit 1
 fi
+if ! rg -q '^summary_json:$' "$READY_LOG"; then
+  echo "expected printed summary_json marker in READY output"
+  cat "$READY_LOG"
+  exit 1
+fi
+if [[ ! -f "$READY_SUMMARY" ]]; then
+  echo "expected READY summary artifact from server-federation-wait"
+  cat "$READY_LOG"
+  exit 1
+fi
+if ! jq -e '.status == "ready" and .state == "ready" and .readiness.failure_reasons == [] and .readiness.peer_health_ready == true' "$READY_SUMMARY" >/dev/null; then
+  echo "expected READY summary artifact to include ready state + empty failure reasons"
+  cat "$READY_SUMMARY"
+  exit 1
+fi
 
 echo "[server-federation-wait] strict configured-healthy gate fails closed"
 STRICT_LOG="$TMP_DIR/federation_wait_strict.log"
+STRICT_SUMMARY="$TMP_DIR/federation_wait_strict_summary.json"
 if PATH="$TMP_BIN:$PATH" EASY_NODE_CURL_MOCK_MODE=degraded \
   ./scripts/easy_node.sh server-federation-wait \
     --require-configured-healthy 1 \
     --ready-timeout-sec 2 \
     --poll-sec 1 \
-    --timeout-sec 3 >"$STRICT_LOG" 2>&1; then
+    --timeout-sec 3 \
+    --summary-json "$STRICT_SUMMARY" >"$STRICT_LOG" 2>&1; then
   echo "expected strict configured-healthy federation wait to fail"
   cat "$STRICT_LOG"
   exit 1
@@ -168,15 +188,27 @@ if ! rg -q 'peer_health_ready=0' "$STRICT_LOG"; then
   cat "$STRICT_LOG"
   exit 1
 fi
+if [[ ! -f "$STRICT_SUMMARY" ]]; then
+  echo "expected strict configured-healthy summary artifact from server-federation-wait"
+  cat "$STRICT_LOG"
+  exit 1
+fi
+if ! jq -e '.status == "timeout" and .state == "timeout" and (.readiness.failure_reasons | index("configured_peers_not_all_healthy") != null)' "$STRICT_SUMMARY" >/dev/null; then
+  echo "expected strict configured-healthy summary artifact to include timeout + configured peer failure reason"
+  cat "$STRICT_SUMMARY"
+  exit 1
+fi
 
 echo "[server-federation-wait] cooling retry threshold fail-close"
 COOLING_LOG="$TMP_DIR/federation_wait_cooling.log"
+COOLING_SUMMARY="$TMP_DIR/federation_wait_cooling_summary.json"
 if PATH="$TMP_BIN:$PATH" EASY_NODE_CURL_MOCK_MODE=degraded \
   ./scripts/easy_node.sh server-federation-wait \
     --max-cooling-retry-sec 60 \
     --ready-timeout-sec 10 \
     --poll-sec 1 \
     --timeout-sec 3 \
+    --summary-json "$COOLING_SUMMARY" \
     --show-json 1 >"$COOLING_LOG" 2>&1; then
   echo "expected cooling retry threshold federation wait to fail"
   cat "$COOLING_LOG"
@@ -195,6 +227,16 @@ fi
 if ! rg -q '"retry_after_sec": 75' "$COOLING_LOG"; then
   echo "expected retry_after_sec detail in cooling threshold JSON payload"
   cat "$COOLING_LOG"
+  exit 1
+fi
+if [[ ! -f "$COOLING_SUMMARY" ]]; then
+  echo "expected cooling threshold summary artifact from server-federation-wait"
+  cat "$COOLING_LOG"
+  exit 1
+fi
+if ! jq -e '.status == "fail" and .state == "cooling_retry_exceeded" and (.readiness.failure_reasons | index("cooling_retry_above_threshold") != null)' "$COOLING_SUMMARY" >/dev/null; then
+  echo "expected cooling threshold summary artifact to include fail state + cooling reason"
+  cat "$COOLING_SUMMARY"
   exit 1
 fi
 

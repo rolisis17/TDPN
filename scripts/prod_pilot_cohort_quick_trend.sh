@@ -24,6 +24,8 @@ Usage:
     [--require-summary-status-ok [0|1]] \
     [--require-incident-snapshot-on-fail [0|1]] \
     [--require-incident-snapshot-artifacts [0|1]] \
+    [--incident-snapshot-min-attachment-count N] \
+    [--incident-snapshot-max-skipped-count N|-1] \
     [--max-duration-sec N] \
     [--fail-on-any-no-go [0|1]] \
     [--min-go-rate-pct N] \
@@ -161,6 +163,8 @@ require_summary_json="${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_SUMMARY_JSON:-1}"
 require_summary_status_ok="${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_SUMMARY_STATUS_OK:-1}"
 require_incident_snapshot_on_fail="${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_INCIDENT_SNAPSHOT_ON_FAIL:-1}"
 require_incident_snapshot_artifacts="${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_INCIDENT_SNAPSHOT_ARTIFACTS:-1}"
+incident_snapshot_min_attachment_count="${PROD_PILOT_COHORT_QUICK_CHECK_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT:-0}"
+incident_snapshot_max_skipped_count="${PROD_PILOT_COHORT_QUICK_CHECK_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT:--1}"
 max_duration_sec="${PROD_PILOT_COHORT_QUICK_CHECK_MAX_DURATION_SEC:-0}"
 
 fail_on_any_no_go="${PROD_PILOT_COHORT_QUICK_TREND_FAIL_ON_ANY_NO_GO:-0}"
@@ -279,6 +283,14 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --incident-snapshot-min-attachment-count)
+      incident_snapshot_min_attachment_count="${2:-}"
+      shift 2
+      ;;
+    --incident-snapshot-max-skipped-count)
+      incident_snapshot_max_skipped_count="${2:-}"
+      shift 2
+      ;;
     --max-duration-sec)
       max_duration_sec="${2:-}"
       shift 2
@@ -358,6 +370,14 @@ bool_arg_or_die "--print-summary-json" "$print_summary_json"
 
 if [[ ! "$max_duration_sec" =~ ^[0-9]+$ ]]; then
   echo "--max-duration-sec must be an integer >= 0"
+  exit 2
+fi
+if [[ ! "$incident_snapshot_min_attachment_count" =~ ^[0-9]+$ ]]; then
+  echo "--incident-snapshot-min-attachment-count must be an integer >= 0"
+  exit 2
+fi
+if [[ ! "$incident_snapshot_max_skipped_count" =~ ^-?[0-9]+$ ]] || ((incident_snapshot_max_skipped_count < -1)); then
+  echo "--incident-snapshot-max-skipped-count must be an integer >= -1"
   exit 2
 fi
 if [[ ! "$max_reports" =~ ^[0-9]+$ ]] || ((max_reports < 1)); then
@@ -567,6 +587,8 @@ while IFS=$'\t' read -r _mtime report_path || [[ -n "${report_path:-}" ]]; do
     --require-summary-status-ok "$require_summary_status_ok" \
     --require-incident-snapshot-on-fail "$require_incident_snapshot_on_fail" \
     --require-incident-snapshot-artifacts "$require_incident_snapshot_artifacts" \
+    --incident-snapshot-min-attachment-count "$incident_snapshot_min_attachment_count" \
+    --incident-snapshot-max-skipped-count "$incident_snapshot_max_skipped_count" \
     --max-duration-sec "$max_duration_sec" \
     --show-json 0 >"$out_file" 2>&1
   rc=$?
@@ -609,7 +631,7 @@ go_rate_pct="$(awk -v g="$go_reports" -v t="$total_reports" 'BEGIN { if (t == 0)
 
 echo "[prod-pilot-cohort-quick-trend] reports_total=$total_reports go=$go_reports no_go=$no_go_reports go_rate_pct=$go_rate_pct"
 echo "[prod-pilot-cohort-quick-trend] filters max_reports=$max_reports since_hours=$since_hours"
-echo "[prod-pilot-cohort-quick-trend] policy require_status_ok=$require_status_ok require_runbook_ok=$require_runbook_ok require_signoff_attempted=$require_signoff_attempted require_signoff_ok=$require_signoff_ok require_cohort_signoff_policy=$require_cohort_signoff_policy require_summary_json=$require_summary_json require_summary_status_ok=$require_summary_status_ok max_duration_sec=$max_duration_sec"
+echo "[prod-pilot-cohort-quick-trend] policy require_status_ok=$require_status_ok require_runbook_ok=$require_runbook_ok require_signoff_attempted=$require_signoff_attempted require_signoff_ok=$require_signoff_ok require_cohort_signoff_policy=$require_cohort_signoff_policy require_summary_json=$require_summary_json require_summary_status_ok=$require_summary_status_ok max_duration_sec=$max_duration_sec incident_snapshot_min_attachment_count=$incident_snapshot_min_attachment_count incident_snapshot_max_skipped_count=$incident_snapshot_max_skipped_count"
 if ((eval_errors > 0)); then
   echo "[prod-pilot-cohort-quick-trend] evaluation_errors=$eval_errors"
 fi
@@ -689,6 +711,8 @@ summary_payload="$(
     --argjson require_summary_json "$require_summary_json" \
     --argjson require_summary_status_ok "$require_summary_status_ok" \
     --argjson max_duration_sec "$max_duration_sec" \
+    --argjson incident_snapshot_min_attachment_count "$incident_snapshot_min_attachment_count" \
+    --argjson incident_snapshot_max_skipped_count "$incident_snapshot_max_skipped_count" \
     --argjson fail_on_any_no_go "$fail_on_any_no_go" \
     --argjson min_go_rate_pct "$min_go_rate_pct" \
     --argjson show_top_reasons "$show_top_reasons" \
@@ -738,6 +762,8 @@ summary_payload="$(
         require_summary_json: $require_summary_json,
         require_summary_status_ok: $require_summary_status_ok,
         max_duration_sec: $max_duration_sec,
+        incident_snapshot_min_attachment_count: $incident_snapshot_min_attachment_count,
+        incident_snapshot_max_skipped_count: $incident_snapshot_max_skipped_count,
         fail_on_any_no_go: $fail_on_any_no_go,
         min_go_rate_pct: $min_go_rate_pct
       },

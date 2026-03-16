@@ -1366,6 +1366,9 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
     std::cout << "68) Pre-real-host readiness sweep (runtime fix + WG-only + report)\n";
     std::cout << "69) Server federation status (peer + sync health)\n";
     std::cout << "70) Server federation wait gate (block until ready)\n";
+    std::cout << "71) PROD campaign summary regenerate (saved artifacts -> handoff report)\n";
+    std::cout << "72) PROD campaign check (fail-closed artifact/policy gate)\n";
+    std::cout << "73) PROD campaign signoff (optional summary refresh + check)\n";
     std::cout << "0) Back\n";
     std::cout << "Selection: ";
 
@@ -3819,6 +3822,8 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --signoff-min-trend-wg-soak-cross-operator-pairs 2"
           << " --signoff-require-incident-snapshot-on-fail 1"
           << " --signoff-require-incident-snapshot-artifacts 1"
+          << " --signoff-incident-snapshot-min-attachment-count 1"
+          << " --signoff-incident-snapshot-max-skipped-count 0"
           << " --print-run-report " << (printRunReport ? "1" : "0")
           << " --show-json " << (showJson ? "1" : "0");
       if (!reportsDir.empty()) {
@@ -3907,6 +3912,8 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --require-summary-status-ok " << (requireSummaryStatusOk ? "1" : "0")
           << " --require-incident-snapshot-on-fail " << (requireIncidentSnapshotOnFail ? "1" : "0")
           << " --require-incident-snapshot-artifacts " << (requireIncidentSnapshotArtifacts ? "1" : "0")
+          << " --incident-snapshot-min-attachment-count 1"
+          << " --incident-snapshot-max-skipped-count 0"
           << " --max-duration-sec " << shellEscape(maxDurationSec)
           << " --fail-on-any-no-go " << (failOnAnyNoGo ? "1" : "0")
           << " --min-go-rate-pct " << shellEscape(minGoRatePct)
@@ -4053,6 +4060,8 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --require-summary-status-ok " << (requireSummaryStatusOk ? "1" : "0")
           << " --require-incident-snapshot-on-fail " << (requireIncidentSnapshotOnFail ? "1" : "0")
           << " --require-incident-snapshot-artifacts " << (requireIncidentSnapshotArtifacts ? "1" : "0")
+          << " --incident-snapshot-min-attachment-count 1"
+          << " --incident-snapshot-max-skipped-count 0"
           << " --max-duration-sec " << shellEscape(maxDurationSec)
           << " --fail-on-any-no-go " << (failOnAnyNoGo ? "1" : "0")
           << " --min-go-rate-pct " << shellEscape(minGoRatePct)
@@ -4143,6 +4152,8 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --require-summary-status-ok " << (requireSummaryStatusOk ? "1" : "0")
           << " --require-incident-snapshot-on-fail " << (requireIncidentSnapshotOnFail ? "1" : "0")
           << " --require-incident-snapshot-artifacts " << (requireIncidentSnapshotArtifacts ? "1" : "0")
+          << " --incident-snapshot-min-attachment-count 1"
+          << " --incident-snapshot-max-skipped-count 0"
           << " --max-duration-sec " << shellEscape(maxDurationSec)
           << " --max-reports " << shellEscape(maxReports)
           << " --since-hours " << shellEscape(sinceHours)
@@ -4244,6 +4255,8 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --signoff-min-trend-wg-soak-cross-operator-pairs 2"
           << " --signoff-require-incident-snapshot-on-fail " << (signoffRequireIncidentSnapshotOnFail ? "1" : "0")
           << " --signoff-require-incident-snapshot-artifacts " << (signoffRequireIncidentSnapshotArtifacts ? "1" : "0")
+          << " --signoff-incident-snapshot-min-attachment-count 1"
+          << " --signoff-incident-snapshot-max-skipped-count 0"
           << " --dashboard-enable " << (dashboardEnable ? "1" : "0")
           << " --dashboard-fail-close " << (dashboardFailClose ? "1" : "0")
           << " --dashboard-print " << (dashboardPrint ? "1" : "0")
@@ -4279,6 +4292,13 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       std::string subject = trim(readLine("Client subject/invite key", "pilot-client"));
       std::string reportsDir = trim(readLine("Reports directory (optional; blank=timestamped default)", ""));
       bool runPreRealHostReadiness = parseYesNo(readLine("Run pre-real-host readiness once before the campaign? (Y/n)", "y"), true);
+      bool campaignSignoffCheck = parseYesNo(readLine("Run inline campaign-signoff policy gate? (Y/n)", "y"), true);
+      bool campaignSignoffRequired = parseYesNo(readLine("Fail campaign when inline campaign-signoff fails? (Y/n)", "y"), true);
+      bool campaignSignoffRefreshSummary = parseYesNo(readLine("Refresh campaign summary during inline campaign-signoff? (y/N)", "n"), false);
+      bool campaignSignoffSummaryFailOnNoGo = parseYesNo(readLine("Inline campaign-signoff summary stage: fail on NO-GO? (Y/n)", "y"), true);
+      std::string campaignSignoffSummaryJsonDefault = reportsDir.empty() ? "" : (reportsDir + "/prod_pilot_campaign_signoff_summary.json");
+      std::string campaignSignoffSummaryJson = trim(readLine("Campaign signoff summary JSON path (optional)", campaignSignoffSummaryJsonDefault));
+      bool campaignSignoffPrintSummaryJson = parseYesNo(readLine("Print inline campaign-signoff summary JSON payload? (y/N)", "n"), false);
       bool showJson = parseYesNo(readLine("Show campaign summary JSON payload? (y/N)", "n"), false);
       std::string extraArgs = trim(readLine("Extra campaign args (optional)", ""));
 
@@ -4287,9 +4307,17 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --bootstrap-directory " << shellEscape(bootstrapDir)
           << " --subject " << shellEscape(subject)
           << " --pre-real-host-readiness " << (runPreRealHostReadiness ? "1" : "0")
+          << " --campaign-signoff-check " << (campaignSignoffCheck ? "1" : "0")
+          << " --campaign-signoff-required " << (campaignSignoffRequired ? "1" : "0")
+          << " --campaign-signoff-refresh-summary " << (campaignSignoffRefreshSummary ? "1" : "0")
+          << " --campaign-signoff-summary-fail-on-no-go " << (campaignSignoffSummaryFailOnNoGo ? "1" : "0")
+          << " --campaign-signoff-print-summary-json " << (campaignSignoffPrintSummaryJson ? "1" : "0")
           << " --show-json " << (showJson ? "1" : "0");
       if (!reportsDir.empty()) {
         cmd << " --reports-dir " << shellEscape(reportsDir);
+      }
+      if (!campaignSignoffSummaryJson.empty()) {
+        cmd << " --campaign-signoff-summary-json " << shellEscape(campaignSignoffSummaryJson);
       }
       if (!extraArgs.empty()) {
         cmd << " " << extraArgs;
@@ -4497,13 +4525,29 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
     if (choice == "69") {
       std::string directoryUrl = trim(readLine("Directory URL override (optional)", ""));
       std::string timeoutSec = trim(readLine("Request timeout sec", "8"));
+      bool strictPreset = parseYesNo(readLine("Use strict federation policy preset? (Y/n)", "y"), true);
+      std::string summaryJson = trim(readLine("Summary JSON path (optional)", ".easy-node-logs/server_federation_status_summary.json"));
+      bool printSummaryJson = parseYesNo(readLine("Print summary JSON payload? (y/N)", "n"), false);
       bool showJson = parseYesNo(readLine("Show raw JSON payload? (y/N)", "n"), false);
       std::ostringstream cmd;
       cmd << shellEscape(script) << " server-federation-status"
           << " --timeout-sec " << shellEscape(timeoutSec)
+          << " --require-configured-healthy " << (strictPreset ? "1" : "0")
+          << " --max-cooling-retry-sec " << (strictPreset ? "120" : "0")
+          << " --max-peer-sync-age-sec " << (strictPreset ? "120" : "0")
+          << " --max-issuer-sync-age-sec " << (strictPreset ? "120" : "0")
+          << " --min-peer-success-sources " << (strictPreset ? "2" : "0")
+          << " --min-issuer-success-sources " << (strictPreset ? "2" : "0")
+          << " --min-peer-source-operators " << (strictPreset ? "2" : "0")
+          << " --min-issuer-source-operators " << (strictPreset ? "2" : "0")
+          << " --fail-on-not-ready " << (strictPreset ? "1" : "0")
+          << " --print-summary-json " << (printSummaryJson ? "1" : "0")
           << " --show-json " << (showJson ? "1" : "0");
       if (!directoryUrl.empty()) {
         cmd << " --directory-url " << shellEscape(directoryUrl);
+      }
+      if (!summaryJson.empty()) {
+        cmd << " --summary-json " << shellEscape(summaryJson);
       }
       runCommand(cmd.str());
       continue;
@@ -4513,15 +4557,137 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       std::string readyTimeoutSec = trim(readLine("Ready timeout sec", "90"));
       std::string pollSec = trim(readLine("Poll interval sec", "5"));
       std::string timeoutSec = trim(readLine("Request timeout sec", "8"));
+      bool strictPreset = parseYesNo(readLine("Use strict federation policy preset? (Y/n)", "y"), true);
+      std::string summaryJson = trim(readLine("Summary JSON path (optional)", ".easy-node-logs/server_federation_wait_summary.json"));
+      bool printSummaryJson = parseYesNo(readLine("Print summary JSON payload? (y/N)", "n"), false);
       bool showJson = parseYesNo(readLine("Show raw JSON payload? (y/N)", "n"), false);
       std::ostringstream cmd;
       cmd << shellEscape(script) << " server-federation-wait"
           << " --ready-timeout-sec " << shellEscape(readyTimeoutSec)
           << " --poll-sec " << shellEscape(pollSec)
           << " --timeout-sec " << shellEscape(timeoutSec)
+          << " --require-configured-healthy " << (strictPreset ? "1" : "0")
+          << " --max-cooling-retry-sec " << (strictPreset ? "120" : "0")
+          << " --max-peer-sync-age-sec " << (strictPreset ? "120" : "0")
+          << " --max-issuer-sync-age-sec " << (strictPreset ? "120" : "0")
+          << " --min-peer-success-sources " << (strictPreset ? "2" : "0")
+          << " --min-issuer-success-sources " << (strictPreset ? "2" : "0")
+          << " --min-peer-source-operators " << (strictPreset ? "2" : "0")
+          << " --min-issuer-source-operators " << (strictPreset ? "2" : "0")
+          << " --print-summary-json " << (printSummaryJson ? "1" : "0")
           << " --show-json " << (showJson ? "1" : "0");
       if (!directoryUrl.empty()) {
         cmd << " --directory-url " << shellEscape(directoryUrl);
+      }
+      if (!summaryJson.empty()) {
+        cmd << " --summary-json " << shellEscape(summaryJson);
+      }
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "71") {
+      std::string reportsDir = trim(readLine("Reports dir", ".easy-node-logs/prod_pilot_campaign"));
+      std::string runbookSummaryJson = trim(readLine("Runbook summary JSON override (optional)", ""));
+      std::string summaryJson = trim(readLine("Campaign summary JSON path", reportsDir + "/prod_pilot_campaign_summary.json"));
+      std::string reportMd = trim(readLine("Campaign report markdown path", reportsDir + "/prod_pilot_campaign_summary.md"));
+      bool failOnNoGo = parseYesNo(readLine("Fail when campaign decision is NO-GO? (Y/n)", "y"), true);
+      bool printReport = parseYesNo(readLine("Print markdown report? (Y/n)", "y"), true);
+      bool printSummaryJson = parseYesNo(readLine("Print summary JSON payload? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " prod-pilot-cohort-campaign-summary"
+          << " --reports-dir " << shellEscape(reportsDir)
+          << " --summary-json " << shellEscape(summaryJson)
+          << " --report-md " << shellEscape(reportMd)
+          << " --fail-on-no-go " << (failOnNoGo ? "1" : "0")
+          << " --print-report " << (printReport ? "1" : "0")
+          << " --print-summary-json " << (printSummaryJson ? "1" : "0");
+      if (!runbookSummaryJson.empty()) {
+        cmd << " --runbook-summary-json " << shellEscape(runbookSummaryJson);
+      }
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "72") {
+      std::string reportsDir = trim(readLine("Reports dir", ".easy-node-logs/prod_pilot_campaign"));
+      bool requireStatusOk = parseYesNo(readLine("Require wrapper status=ok? (Y/n)", "y"), true);
+      bool requireRunbookSummaryJson = parseYesNo(readLine("Require runbook summary JSON artifact present/valid? (Y/n)", "y"), true);
+      bool requireQuickRunReportJson = parseYesNo(readLine("Require quick run-report JSON artifact present/valid? (Y/n)", "y"), true);
+      bool requireCampaignSummaryGo = parseYesNo(readLine("Require campaign summary decision=GO? (Y/n)", "y"), true);
+      bool requireSummaryPolicyMatch = parseYesNo(readLine("Require summary fail-policy matches expected policy? (Y/n)", "y"), true);
+      bool requireIncidentPolicyClean = parseYesNo(readLine("Require summary incident_policy_errors empty? (Y/n)", "y"), true);
+      bool requireDistinctArtifactPaths = parseYesNo(readLine("Require distinct artifact paths? (Y/n)", "y"), true);
+      bool requireCampaignSignoffPass = parseYesNo(readLine("Require campaign signoff stage+summary evidence (strict)? (Y/n)", "y"), true);
+      std::string summaryJson = trim(readLine("Check summary JSON path (optional)", reportsDir + "/prod_pilot_campaign_check_summary.json"));
+      bool printSummaryJson = parseYesNo(readLine("Print check summary JSON payload? (y/N)", "n"), false);
+      bool showJson = parseYesNo(readLine("Show check JSON payload? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " prod-pilot-cohort-campaign-check"
+          << " --reports-dir " << shellEscape(reportsDir)
+          << " --require-status-ok " << (requireStatusOk ? "1" : "0")
+          << " --require-runbook-summary-json " << (requireRunbookSummaryJson ? "1" : "0")
+          << " --require-quick-run-report-json " << (requireQuickRunReportJson ? "1" : "0")
+          << " --require-campaign-summary-go " << (requireCampaignSummaryGo ? "1" : "0")
+          << " --require-summary-policy-match " << (requireSummaryPolicyMatch ? "1" : "0")
+          << " --require-incident-policy-clean " << (requireIncidentPolicyClean ? "1" : "0")
+          << " --require-distinct-artifact-paths " << (requireDistinctArtifactPaths ? "1" : "0")
+          << " --require-campaign-signoff-enabled " << (requireCampaignSignoffPass ? "1" : "0")
+          << " --require-campaign-signoff-required " << (requireCampaignSignoffPass ? "1" : "0")
+          << " --require-campaign-signoff-attempted " << (requireCampaignSignoffPass ? "1" : "0")
+          << " --require-campaign-signoff-ok " << (requireCampaignSignoffPass ? "1" : "0")
+          << " --require-campaign-signoff-summary-json " << (requireCampaignSignoffPass ? "1" : "0")
+          << " --require-campaign-signoff-summary-json-valid " << (requireCampaignSignoffPass ? "1" : "0")
+          << " --require-campaign-signoff-summary-status-ok " << (requireCampaignSignoffPass ? "1" : "0")
+          << " --require-campaign-signoff-summary-final-rc-zero " << (requireCampaignSignoffPass ? "1" : "0")
+          << " --print-summary-json " << (printSummaryJson ? "1" : "0")
+          << " --show-json " << (showJson ? "1" : "0");
+      if (!summaryJson.empty()) {
+        cmd << " --summary-json " << shellEscape(summaryJson);
+      }
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "73") {
+      std::string reportsDir = trim(readLine("Reports dir", ".easy-node-logs/prod_pilot_campaign"));
+      bool refreshSummary = parseYesNo(readLine("Refresh campaign summary before check? (Y/n)", "y"), true);
+      bool summaryFailOnNoGo = parseYesNo(readLine("Fail summary stage when decision is NO-GO? (Y/n)", "y"), true);
+      bool requireRunbookSummaryJson = parseYesNo(readLine("Require runbook summary JSON artifact present/valid? (Y/n)", "y"), true);
+      bool requireQuickRunReportJson = parseYesNo(readLine("Require quick run-report JSON artifact present/valid? (Y/n)", "y"), true);
+      bool requireSummaryPolicyMatch = parseYesNo(readLine("Require summary fail-policy matches expected policy? (Y/n)", "y"), true);
+      bool requireIncidentPolicyClean = parseYesNo(readLine("Require summary incident_policy_errors empty? (Y/n)", "y"), true);
+      bool requireDistinctArtifactPaths = parseYesNo(readLine("Require distinct artifact paths? (Y/n)", "y"), true);
+      std::string campaignSignoffSummaryJson = trim(readLine("Campaign signoff stage summary JSON path (optional)", reportsDir + "/prod_pilot_campaign_signoff_summary.json"));
+      bool requireCampaignSignoffPass = parseYesNo(readLine("Require existing campaign signoff stage+summary evidence? (y/N)", "n"), false);
+      std::string summaryJson = trim(readLine("Signoff summary JSON path (optional)", reportsDir + "/prod_pilot_campaign_signoff_check_summary.json"));
+      bool printSummaryJson = parseYesNo(readLine("Print signoff summary JSON payload? (y/N)", "n"), false);
+      bool showJson = parseYesNo(readLine("Show signoff check JSON payload? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      cmd << shellEscape(script) << " prod-pilot-cohort-campaign-signoff"
+          << " --reports-dir " << shellEscape(reportsDir)
+          << " --refresh-summary " << (refreshSummary ? "1" : "0")
+          << " --summary-fail-on-no-go " << (summaryFailOnNoGo ? "1" : "0")
+          << " --require-runbook-summary-json " << (requireRunbookSummaryJson ? "1" : "0")
+          << " --require-quick-run-report-json " << (requireQuickRunReportJson ? "1" : "0")
+          << " --require-summary-policy-match " << (requireSummaryPolicyMatch ? "1" : "0")
+          << " --require-incident-policy-clean " << (requireIncidentPolicyClean ? "1" : "0")
+          << " --require-distinct-artifact-paths " << (requireDistinctArtifactPaths ? "1" : "0")
+          << " --require-campaign-signoff-enabled " << (requireCampaignSignoffPass ? "1" : "0")
+          << " --require-campaign-signoff-required " << (requireCampaignSignoffPass ? "1" : "0")
+          << " --require-campaign-signoff-attempted " << (requireCampaignSignoffPass ? "1" : "0")
+          << " --require-campaign-signoff-ok " << (requireCampaignSignoffPass ? "1" : "0")
+          << " --require-campaign-signoff-summary-json " << (requireCampaignSignoffPass ? "1" : "0")
+          << " --require-campaign-signoff-summary-json-valid " << (requireCampaignSignoffPass ? "1" : "0")
+          << " --require-campaign-signoff-summary-status-ok " << (requireCampaignSignoffPass ? "1" : "0")
+          << " --require-campaign-signoff-summary-final-rc-zero " << (requireCampaignSignoffPass ? "1" : "0")
+          << " --print-summary-json " << (printSummaryJson ? "1" : "0")
+          << " --show-json " << (showJson ? "1" : "0");
+      if (!campaignSignoffSummaryJson.empty()) {
+        cmd << " --campaign-signoff-summary-json " << shellEscape(campaignSignoffSummaryJson);
+      }
+      if (!summaryJson.empty()) {
+        cmd << " --summary-json " << shellEscape(summaryJson);
       }
       runCommand(cmd.str());
       continue;

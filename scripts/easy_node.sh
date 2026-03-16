@@ -82,10 +82,10 @@ usage() {
 Usage:
   ./scripts/easy_node.sh check
   ./scripts/easy_node.sh server-preflight [--mode authority|provider] [--public-host HOST] [--operator-id ID] [--issuer-id ID] [--authority-directory URL] [--authority-issuer URL] [--peer-directories URLS] [--bootstrap-directory URL] [--peer-identity-strict 0|1|auto] [--min-peer-operators N] [--timeout-sec N] [--beta-profile [0|1]] [--prod-profile [0|1]]
-  ./scripts/easy_node.sh server-up [--mode authority|provider] [--public-host HOST] [--operator-id ID] [--issuer-id ID] [--issuer-admin-token TOKEN] [--directory-admin-token TOKEN] [--entry-puzzle-secret SECRET] [--authority-directory URL] [--authority-issuer URL] [--peer-directories URLS] [--bootstrap-directory URL] [--peer-identity-strict 0|1|auto] [--client-allowlist [0|1]] [--allow-anon-cred [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]] [--show-admin-token [0|1]] [--federation-wait [0|1]] [--federation-ready-timeout-sec N] [--federation-poll-sec N] [--federation-require-configured-healthy [0|1]] [--federation-max-cooling-retry-sec N] [--federation-max-peer-sync-age-sec N] [--federation-max-issuer-sync-age-sec N] [--federation-min-peer-success-sources N] [--federation-min-issuer-success-sources N] [--federation-min-peer-source-operators N] [--federation-min-issuer-source-operators N] [--auto-invite [0|1]] [--auto-invite-count N] [--auto-invite-tier 1|2|3] [--auto-invite-wait-sec N] [--auto-invite-fail-open [0|1]]
+  ./scripts/easy_node.sh server-up [--mode authority|provider] [--public-host HOST] [--operator-id ID] [--issuer-id ID] [--issuer-admin-token TOKEN] [--directory-admin-token TOKEN] [--entry-puzzle-secret SECRET] [--authority-directory URL] [--authority-issuer URL] [--peer-directories URLS] [--bootstrap-directory URL] [--peer-identity-strict 0|1|auto] [--client-allowlist [0|1]] [--allow-anon-cred [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]] [--show-admin-token [0|1]] [--federation-wait [0|1]] [--federation-ready-timeout-sec N] [--federation-poll-sec N] [--federation-require-configured-healthy [0|1]] [--federation-max-cooling-retry-sec N] [--federation-max-peer-sync-age-sec N] [--federation-max-issuer-sync-age-sec N] [--federation-min-peer-success-sources N] [--federation-min-issuer-success-sources N] [--federation-min-peer-source-operators N] [--federation-min-issuer-source-operators N] [--federation-wait-summary-json PATH] [--federation-wait-print-summary-json [0|1]] [--auto-invite [0|1]] [--auto-invite-count N] [--auto-invite-tier 1|2|3] [--auto-invite-wait-sec N] [--auto-invite-fail-open [0|1]]
   ./scripts/easy_node.sh server-status
   ./scripts/easy_node.sh server-federation-status [--directory-url URL] [--admin-token TOKEN] [--timeout-sec N] [--show-json [0|1]] [--require-configured-healthy [0|1]] [--max-cooling-retry-sec N] [--max-peer-sync-age-sec N] [--max-issuer-sync-age-sec N] [--min-peer-success-sources N] [--min-issuer-success-sources N] [--min-peer-source-operators N] [--min-issuer-source-operators N] [--fail-on-not-ready [0|1]] [--summary-json PATH] [--print-summary-json [0|1]]
-  ./scripts/easy_node.sh server-federation-wait [--directory-url URL] [--admin-token TOKEN] [--ready-timeout-sec N] [--poll-sec N] [--timeout-sec N] [--require-configured-healthy [0|1]] [--max-cooling-retry-sec N] [--max-peer-sync-age-sec N] [--max-issuer-sync-age-sec N] [--min-peer-success-sources N] [--min-issuer-success-sources N] [--min-peer-source-operators N] [--min-issuer-source-operators N] [--show-json [0|1]]
+  ./scripts/easy_node.sh server-federation-wait [--directory-url URL] [--admin-token TOKEN] [--ready-timeout-sec N] [--poll-sec N] [--timeout-sec N] [--require-configured-healthy [0|1]] [--max-cooling-retry-sec N] [--max-peer-sync-age-sec N] [--max-issuer-sync-age-sec N] [--min-peer-success-sources N] [--min-issuer-success-sources N] [--min-peer-source-operators N] [--min-issuer-source-operators N] [--summary-json PATH] [--print-summary-json [0|1]] [--show-json [0|1]]
   ./scripts/easy_node.sh server-logs [--follow [0|1]] [--tail N]
   ./scripts/easy_node.sh server-session [server-up args...] [--cleanup-all [0|1]]
   ./scripts/easy_node.sh server-down
@@ -120,33 +120,35 @@ Usage:
   ./scripts/easy_node.sh manual-validation-record --check-id CHECK_ID --status pass|fail|warn|pending|skip [--notes TEXT] [--artifact PATH]... [--command TEXT] [--show-json [0|1]]
   ./scripts/easy_node.sh runtime-doctor [--base-port N] [--client-iface IFACE] [--exit-iface IFACE] [--vpn-iface IFACE] [--show-json [0|1]]
   ./scripts/easy_node.sh runtime-fix [--base-port N] [--client-iface IFACE] [--exit-iface IFACE] [--vpn-iface IFACE] [--prune-wg-only-dir [0|1]] [--show-json [0|1]]
-  ./scripts/easy_node.sh prod-gate-check [--bundle-dir PATH] [--run-report-json PATH] [--gate-summary-json PATH] [--require-full-sequence [0|1]] [--require-wg-validate-ok [0|1]] [--require-wg-soak-ok [0|1]] [--require-preflight-ok [0|1]] [--require-bundle-ok [0|1]] [--require-integrity-ok [0|1]] [--require-signoff-ok [0|1]] [--require-incident-snapshot-on-fail [0|1]] [--require-incident-snapshot-artifacts [0|1]] [--require-wg-validate-udp-source [0|1]] [--require-wg-validate-strict-distinct [0|1]] [--require-wg-soak-diversity-pass [0|1]] [--min-wg-soak-selection-lines N] [--min-wg-soak-entry-operators N] [--min-wg-soak-exit-operators N] [--min-wg-soak-cross-operator-pairs N] [--max-wg-soak-failed-rounds N] [--show-json [0|1]]
+  ./scripts/easy_node.sh prod-gate-check [--bundle-dir PATH] [--run-report-json PATH] [--gate-summary-json PATH] [--require-full-sequence [0|1]] [--require-wg-validate-ok [0|1]] [--require-wg-soak-ok [0|1]] [--require-preflight-ok [0|1]] [--require-bundle-ok [0|1]] [--require-integrity-ok [0|1]] [--require-signoff-ok [0|1]] [--require-incident-snapshot-on-fail [0|1]] [--require-incident-snapshot-artifacts [0|1]] [--incident-snapshot-min-attachment-count N] [--incident-snapshot-max-skipped-count N|-1] [--require-wg-validate-udp-source [0|1]] [--require-wg-validate-strict-distinct [0|1]] [--require-wg-soak-diversity-pass [0|1]] [--min-wg-soak-selection-lines N] [--min-wg-soak-entry-operators N] [--min-wg-soak-exit-operators N] [--min-wg-soak-cross-operator-pairs N] [--max-wg-soak-failed-rounds N] [--show-json [0|1]]
   ./scripts/easy_node.sh prod-gate-slo-summary [--run-report-json PATH] [--bundle-dir PATH] [--gate-summary-json PATH] [--wg-validate-summary-json PATH] [--wg-soak-summary-json PATH] [--require-full-sequence [0|1]] [--require-wg-validate-ok [0|1]] [--require-wg-soak-ok [0|1]] [--max-wg-soak-failed-rounds N] [--require-preflight-ok [0|1]] [--require-bundle-ok [0|1]] [--require-integrity-ok [0|1]] [--require-signoff-ok [0|1]] [--require-incident-snapshot-on-fail [0|1]] [--require-incident-snapshot-artifacts [0|1]] [--require-wg-validate-udp-source [0|1]] [--require-wg-validate-strict-distinct [0|1]] [--require-wg-soak-diversity-pass [0|1]] [--min-wg-soak-selection-lines N] [--min-wg-soak-entry-operators N] [--min-wg-soak-exit-operators N] [--min-wg-soak-cross-operator-pairs N] [--fail-on-no-go [0|1]] [--show-json [0|1]]
   ./scripts/easy_node.sh prod-gate-slo-trend [--run-report-json PATH]... [--run-report-list FILE] [--reports-dir DIR] [--max-reports N] [--since-hours N] [--require-full-sequence [0|1]] [--require-wg-validate-ok [0|1]] [--require-wg-soak-ok [0|1]] [--max-wg-soak-failed-rounds N] [--require-preflight-ok [0|1]] [--require-bundle-ok [0|1]] [--require-integrity-ok [0|1]] [--require-signoff-ok [0|1]] [--require-incident-snapshot-on-fail [0|1]] [--require-incident-snapshot-artifacts [0|1]] [--require-wg-validate-udp-source [0|1]] [--require-wg-validate-strict-distinct [0|1]] [--require-wg-soak-diversity-pass [0|1]] [--min-wg-soak-selection-lines N] [--min-wg-soak-entry-operators N] [--min-wg-soak-exit-operators N] [--min-wg-soak-cross-operator-pairs N] [--fail-on-any-no-go [0|1]] [--min-go-rate-pct N] [--show-details [0|1]] [--show-top-reasons N] [--summary-json PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh prod-gate-slo-alert [--trend-summary-json PATH] [--run-report-json PATH]... [--run-report-list FILE] [--reports-dir DIR] [--max-reports N] [--since-hours N] [--require-full-sequence [0|1]] [--require-wg-validate-ok [0|1]] [--require-wg-soak-ok [0|1]] [--max-wg-soak-failed-rounds N] [--require-preflight-ok [0|1]] [--require-bundle-ok [0|1]] [--require-integrity-ok [0|1]] [--require-signoff-ok [0|1]] [--require-incident-snapshot-on-fail [0|1]] [--require-incident-snapshot-artifacts [0|1]] [--require-wg-validate-udp-source [0|1]] [--require-wg-validate-strict-distinct [0|1]] [--require-wg-soak-diversity-pass [0|1]] [--min-wg-soak-selection-lines N] [--min-wg-soak-entry-operators N] [--min-wg-soak-exit-operators N] [--min-wg-soak-cross-operator-pairs N] [--warn-go-rate-pct N] [--critical-go-rate-pct N] [--warn-no-go-count N] [--critical-no-go-count N] [--warn-eval-errors N] [--critical-eval-errors N] [--fail-on-warn [0|1]] [--fail-on-critical [0|1]] [--show-top-reasons N] [--summary-json PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh prod-gate-slo-dashboard [--run-report-json PATH]... [--run-report-list FILE] [--reports-dir DIR] [--max-reports N] [--since-hours N] [--require-full-sequence [0|1]] [--require-wg-validate-ok [0|1]] [--require-wg-soak-ok [0|1]] [--max-wg-soak-failed-rounds N] [--require-preflight-ok [0|1]] [--require-bundle-ok [0|1]] [--require-integrity-ok [0|1]] [--require-signoff-ok [0|1]] [--require-incident-snapshot-on-fail [0|1]] [--require-incident-snapshot-artifacts [0|1]] [--require-wg-validate-udp-source [0|1]] [--require-wg-validate-strict-distinct [0|1]] [--require-wg-soak-diversity-pass [0|1]] [--min-wg-soak-selection-lines N] [--min-wg-soak-entry-operators N] [--min-wg-soak-exit-operators N] [--min-wg-soak-cross-operator-pairs N] [--fail-on-any-no-go [0|1]] [--min-go-rate-pct N] [--show-top-reasons N] [--warn-go-rate-pct N] [--critical-go-rate-pct N] [--warn-no-go-count N] [--critical-no-go-count N] [--warn-eval-errors N] [--critical-eval-errors N] [--fail-on-warn [0|1]] [--fail-on-critical [0|1]] [--trend-summary-json PATH] [--alert-summary-json PATH] [--dashboard-md PATH] [--print-dashboard [0|1]] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh prod-gate-bundle-verify [--run-report-json PATH] [--bundle-dir PATH] [--bundle-tar PATH] [--bundle-tar-sha256-file PATH] [--check-tar-sha256 [0|1]] [--check-manifest [0|1]] [--show-details [0|1]]
-  ./scripts/easy_node.sh prod-gate-signoff [--run-report-json PATH] [--bundle-dir PATH] [--bundle-tar PATH] [--bundle-tar-sha256-file PATH] [--check-tar-sha256 [0|1]] [--check-manifest [0|1]] [--show-integrity-details [0|1]] [--gate-summary-json PATH] [--require-full-sequence [0|1]] [--require-wg-validate-ok [0|1]] [--require-wg-soak-ok [0|1]] [--require-preflight-ok [0|1]] [--require-bundle-ok [0|1]] [--require-integrity-ok [0|1]] [--require-signoff-ok [0|1]] [--require-incident-snapshot-on-fail [0|1]] [--require-incident-snapshot-artifacts [0|1]] [--require-wg-validate-udp-source [0|1]] [--require-wg-validate-strict-distinct [0|1]] [--require-wg-soak-diversity-pass [0|1]] [--min-wg-soak-selection-lines N] [--min-wg-soak-entry-operators N] [--min-wg-soak-exit-operators N] [--min-wg-soak-cross-operator-pairs N] [--max-wg-soak-failed-rounds N] [--show-json [0|1]]
+  ./scripts/easy_node.sh prod-gate-signoff [--run-report-json PATH] [--bundle-dir PATH] [--bundle-tar PATH] [--bundle-tar-sha256-file PATH] [--check-tar-sha256 [0|1]] [--check-manifest [0|1]] [--show-integrity-details [0|1]] [--gate-summary-json PATH] [--require-full-sequence [0|1]] [--require-wg-validate-ok [0|1]] [--require-wg-soak-ok [0|1]] [--require-preflight-ok [0|1]] [--require-bundle-ok [0|1]] [--require-integrity-ok [0|1]] [--require-signoff-ok [0|1]] [--require-incident-snapshot-on-fail [0|1]] [--require-incident-snapshot-artifacts [0|1]] [--incident-snapshot-min-attachment-count N] [--incident-snapshot-max-skipped-count N|-1] [--require-wg-validate-udp-source [0|1]] [--require-wg-validate-strict-distinct [0|1]] [--require-wg-soak-diversity-pass [0|1]] [--min-wg-soak-selection-lines N] [--min-wg-soak-entry-operators N] [--min-wg-soak-exit-operators N] [--min-wg-soak-cross-operator-pairs N] [--max-wg-soak-failed-rounds N] [--show-json [0|1]]
   ./scripts/easy_node.sh prod-pilot-cohort-bundle-verify [--summary-json PATH] [--reports-dir PATH] [--bundle-tar PATH] [--bundle-sha256-file PATH] [--bundle-manifest-json PATH] [--check-tar-sha256 [0|1]] [--check-manifest [0|1]] [--show-details [0|1]]
-  ./scripts/easy_node.sh prod-pilot-cohort-check [--summary-json PATH] [--reports-dir PATH] [--require-status-ok [0|1]] [--require-all-rounds-ok [0|1]] [--max-round-failures N] [--require-trend-go [0|1]] [--require-trend-artifact-policy-match [0|1]] [--require-trend-wg-validate-udp-source [0|1]] [--require-trend-wg-validate-strict-distinct [0|1]] [--require-trend-wg-soak-diversity-pass [0|1]] [--min-trend-wg-soak-selection-lines N] [--min-trend-wg-soak-entry-operators N] [--min-trend-wg-soak-exit-operators N] [--min-trend-wg-soak-cross-operator-pairs N] [--min-go-rate-pct N] [--max-alert-severity OK|WARN|CRITICAL] [--require-bundle-created [0|1]] [--require-bundle-manifest [0|1]] [--require-incident-snapshot-on-fail [0|1]] [--require-incident-snapshot-artifacts [0|1]] [--show-json [0|1]]
-  ./scripts/easy_node.sh prod-pilot-cohort-signoff [--summary-json PATH] [--reports-dir PATH] [--bundle-tar PATH] [--bundle-sha256-file PATH] [--bundle-manifest-json PATH] [--check-tar-sha256 [0|1]] [--check-manifest [0|1]] [--show-integrity-details [0|1]] [--require-status-ok [0|1]] [--require-all-rounds-ok [0|1]] [--max-round-failures N] [--require-trend-go [0|1]] [--require-trend-artifact-policy-match [0|1]] [--require-trend-wg-validate-udp-source [0|1]] [--require-trend-wg-validate-strict-distinct [0|1]] [--require-trend-wg-soak-diversity-pass [0|1]] [--min-trend-wg-soak-selection-lines N] [--min-trend-wg-soak-entry-operators N] [--min-trend-wg-soak-exit-operators N] [--min-trend-wg-soak-cross-operator-pairs N] [--min-go-rate-pct N] [--max-alert-severity OK|WARN|CRITICAL] [--require-bundle-created [0|1]] [--require-bundle-manifest [0|1]] [--require-incident-snapshot-on-fail [0|1]] [--require-incident-snapshot-artifacts [0|1]] [--show-json [0|1]]
+  ./scripts/easy_node.sh prod-pilot-cohort-check [--summary-json PATH] [--reports-dir PATH] [--require-status-ok [0|1]] [--require-all-rounds-ok [0|1]] [--max-round-failures N] [--require-trend-go [0|1]] [--require-trend-artifact-policy-match [0|1]] [--require-trend-wg-validate-udp-source [0|1]] [--require-trend-wg-validate-strict-distinct [0|1]] [--require-trend-wg-soak-diversity-pass [0|1]] [--min-trend-wg-soak-selection-lines N] [--min-trend-wg-soak-entry-operators N] [--min-trend-wg-soak-exit-operators N] [--min-trend-wg-soak-cross-operator-pairs N] [--min-go-rate-pct N] [--max-alert-severity OK|WARN|CRITICAL] [--require-bundle-created [0|1]] [--require-bundle-manifest [0|1]] [--require-incident-snapshot-on-fail [0|1]] [--require-incident-snapshot-artifacts [0|1]] [--incident-snapshot-min-attachment-count N] [--incident-snapshot-max-skipped-count N|-1] [--show-json [0|1]]
+  ./scripts/easy_node.sh prod-pilot-cohort-signoff [--summary-json PATH] [--reports-dir PATH] [--bundle-tar PATH] [--bundle-sha256-file PATH] [--bundle-manifest-json PATH] [--check-tar-sha256 [0|1]] [--check-manifest [0|1]] [--show-integrity-details [0|1]] [--require-status-ok [0|1]] [--require-all-rounds-ok [0|1]] [--max-round-failures N] [--require-trend-go [0|1]] [--require-trend-artifact-policy-match [0|1]] [--require-trend-wg-validate-udp-source [0|1]] [--require-trend-wg-validate-strict-distinct [0|1]] [--require-trend-wg-soak-diversity-pass [0|1]] [--min-trend-wg-soak-selection-lines N] [--min-trend-wg-soak-entry-operators N] [--min-trend-wg-soak-exit-operators N] [--min-trend-wg-soak-cross-operator-pairs N] [--min-go-rate-pct N] [--max-alert-severity OK|WARN|CRITICAL] [--require-bundle-created [0|1]] [--require-bundle-manifest [0|1]] [--require-incident-snapshot-on-fail [0|1]] [--require-incident-snapshot-artifacts [0|1]] [--incident-snapshot-min-attachment-count N] [--incident-snapshot-max-skipped-count N|-1] [--show-json [0|1]]
   ./scripts/easy_node.sh prod-wg-validate [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--exit-a-url URL] [--exit-b-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--control-timeout-sec N] [--client-timeout-sec N] [--wg-session-sec N] [--client-iface IFACE] [--client-proxy-addr HOST:PORT] [--client-inner-source udp|synthetic] [--inject-attempts N] [--strict-distinct [0|1]] [--skip-control-plane-check [0|1]] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH] [--summary-json PATH] [--report-file PATH]
   ./scripts/easy_node.sh prod-wg-soak [--rounds N] [--pause-sec N] [--fault-every N] [--fault-command CMD] [--continue-on-fail [0|1]] [--max-consecutive-failures N] [--strict-ingress-rehearsal [0|1]] [--summary-json PATH] [--report-file PATH] [prod-wg-validate args...]
   ./scripts/easy_node.sh prod-wg-strict-ingress-rehearsal [prod-wg-soak/prod-wg-validate args...]
   ./scripts/easy_node.sh prod-pilot-runbook [--pre-real-host-readiness [0|1]] [--pre-real-host-readiness-summary-json PATH] [three-machine-prod-bundle args...]
   ./scripts/easy_node.sh prod-pilot-cohort-runbook [--pre-real-host-readiness [0|1]] [--pre-real-host-readiness-summary-json PATH] [--rounds N] [--pause-sec N] [--continue-on-fail [0|1]] [--require-all-rounds-ok [0|1]] [--reports-dir PATH] [--summary-json PATH] [--trend-summary-json PATH] [--alert-summary-json PATH] [--trend-min-go-rate-pct N] [--trend-fail-on-any-no-go [0|1]] [--trend-require-wg-validate-udp-source [0|1]] [--trend-require-wg-validate-strict-distinct [0|1]] [--trend-require-wg-soak-diversity-pass [0|1]] [--trend-min-wg-soak-selection-lines N] [--trend-min-wg-soak-entry-operators N] [--trend-min-wg-soak-exit-operators N] [--trend-min-wg-soak-cross-operator-pairs N] [--trend-max-reports N] [--trend-since-hours N] [--trend-show-top-reasons N] [--warn-go-rate-pct N] [--critical-go-rate-pct N] [--warn-no-go-count N] [--critical-no-go-count N] [--warn-eval-errors N] [--critical-eval-errors N] [--max-alert-severity OK|WARN|CRITICAL] [--bundle-outputs [0|1]] [--bundle-fail-close [0|1]] [--bundle-tar PATH] [--bundle-sha256-file PATH] [--bundle-manifest-json PATH] [--print-summary-json [0|1]] [-- <prod-pilot-runbook args...>]
-  ./scripts/easy_node.sh prod-pilot-cohort-campaign [--pre-real-host-readiness [0|1]] [--pre-real-host-readiness-summary-json PATH] [--campaign-summary-json PATH] [--campaign-report-md PATH] [--campaign-print-report [0|1]] [--campaign-print-summary-json [0|1]] [--campaign-summary-fail-close [0|1]] [prod-pilot-cohort-quick-runbook args...]
-  ./scripts/easy_node.sh prod-pilot-cohort-campaign-summary [--runbook-summary-json PATH] [--reports-dir PATH] [--summary-json PATH] [--report-md PATH] [--print-report [0|1]] [--print-summary-json [0|1]] [--fail-on-no-go [0|1]]
-  ./scripts/easy_node.sh prod-pilot-cohort-quick-check [--run-report-json PATH] [--reports-dir PATH] [--require-status-ok [0|1]] [--require-runbook-ok [0|1]] [--require-signoff-attempted [0|1]] [--require-signoff-ok [0|1]] [--require-cohort-signoff-policy [0|1]] [--require-trend-artifact-policy-match [0|1]] [--require-trend-wg-validate-udp-source [0|1]] [--require-trend-wg-validate-strict-distinct [0|1]] [--require-trend-wg-soak-diversity-pass [0|1]] [--min-trend-wg-soak-selection-lines N] [--min-trend-wg-soak-entry-operators N] [--min-trend-wg-soak-exit-operators N] [--min-trend-wg-soak-cross-operator-pairs N] [--min-go-rate-pct N] [--max-alert-severity OK|WARN|CRITICAL] [--require-bundle-created [0|1]] [--require-bundle-manifest [0|1]] [--require-summary-json [0|1]] [--require-summary-status-ok [0|1]] [--require-incident-snapshot-on-fail [0|1]] [--require-incident-snapshot-artifacts [0|1]] [--max-duration-sec N] [--show-json [0|1]]
-  ./scripts/easy_node.sh prod-pilot-cohort-quick-trend [--run-report-json PATH]... [--run-report-list FILE] [--reports-dir DIR] [--max-reports N] [--since-hours N] [--require-status-ok [0|1]] [--require-runbook-ok [0|1]] [--require-signoff-attempted [0|1]] [--require-signoff-ok [0|1]] [--require-cohort-signoff-policy [0|1]] [--require-summary-json [0|1]] [--require-summary-status-ok [0|1]] [--require-incident-snapshot-on-fail [0|1]] [--require-incident-snapshot-artifacts [0|1]] [--max-duration-sec N] [--fail-on-any-no-go [0|1]] [--min-go-rate-pct N] [--show-details [0|1]] [--show-top-reasons N] [--summary-json PATH] [--print-summary-json [0|1]]
-  ./scripts/easy_node.sh prod-pilot-cohort-quick-alert [--trend-summary-json PATH] [--run-report-json PATH]... [--run-report-list FILE] [--reports-dir DIR] [--max-reports N] [--since-hours N] [--require-status-ok [0|1]] [--require-runbook-ok [0|1]] [--require-signoff-attempted [0|1]] [--require-signoff-ok [0|1]] [--require-cohort-signoff-policy [0|1]] [--require-summary-json [0|1]] [--require-summary-status-ok [0|1]] [--require-incident-snapshot-on-fail [0|1]] [--require-incident-snapshot-artifacts [0|1]] [--max-duration-sec N] [--warn-go-rate-pct N] [--critical-go-rate-pct N] [--warn-no-go-count N] [--critical-no-go-count N] [--warn-eval-errors N] [--critical-eval-errors N] [--fail-on-warn [0|1]] [--fail-on-critical [0|1]] [--show-top-reasons N] [--summary-json PATH] [--print-summary-json [0|1]]
-  ./scripts/easy_node.sh prod-pilot-cohort-quick-dashboard [--run-report-json PATH]... [--run-report-list FILE] [--reports-dir DIR] [--max-reports N] [--since-hours N] [--require-status-ok [0|1]] [--require-runbook-ok [0|1]] [--require-signoff-attempted [0|1]] [--require-signoff-ok [0|1]] [--require-cohort-signoff-policy [0|1]] [--require-summary-json [0|1]] [--require-summary-status-ok [0|1]] [--require-incident-snapshot-on-fail [0|1]] [--require-incident-snapshot-artifacts [0|1]] [--max-duration-sec N] [--fail-on-any-no-go [0|1]] [--min-go-rate-pct N] [--show-top-reasons N] [--warn-go-rate-pct N] [--critical-go-rate-pct N] [--warn-no-go-count N] [--critical-no-go-count N] [--warn-eval-errors N] [--critical-eval-errors N] [--fail-on-warn [0|1]] [--fail-on-critical [0|1]] [--trend-summary-json PATH] [--alert-summary-json PATH] [--dashboard-md PATH] [--print-dashboard [0|1]] [--print-summary-json [0|1]]
-  ./scripts/easy_node.sh prod-pilot-cohort-quick-signoff [--run-report-json PATH] [--reports-dir PATH] [--check-latest [0|1]] [--check-trend [0|1]] [--check-alert [0|1]] [--require-status-ok [0|1]] [--require-runbook-ok [0|1]] [--require-signoff-attempted [0|1]] [--require-signoff-ok [0|1]] [--require-cohort-signoff-policy [0|1]] [--require-trend-artifact-policy-match [0|1]] [--require-trend-wg-validate-udp-source [0|1]] [--require-trend-wg-validate-strict-distinct [0|1]] [--require-trend-wg-soak-diversity-pass [0|1]] [--min-trend-wg-soak-selection-lines N] [--min-trend-wg-soak-entry-operators N] [--min-trend-wg-soak-exit-operators N] [--min-trend-wg-soak-cross-operator-pairs N] [--require-bundle-created [0|1]] [--require-bundle-manifest [0|1]] [--require-summary-json [0|1]] [--require-summary-status-ok [0|1]] [--require-incident-snapshot-on-fail [0|1]] [--require-incident-snapshot-artifacts [0|1]] [--max-duration-sec N] [--max-reports N] [--since-hours N] [--fail-on-any-no-go [0|1]] [--min-go-rate-pct N] [--warn-go-rate-pct N] [--critical-go-rate-pct N] [--warn-no-go-count N] [--critical-no-go-count N] [--warn-eval-errors N] [--critical-eval-errors N] [--max-alert-severity OK|WARN|CRITICAL] [--trend-summary-json PATH] [--alert-summary-json PATH] [--signoff-json PATH] [--show-json [0|1]]
-  ./scripts/easy_node.sh prod-pilot-cohort-quick-runbook [--bootstrap-directory URL] [--subject ID] [--pre-real-host-readiness [0|1]] [--pre-real-host-readiness-summary-json PATH] [--rounds N] [--pause-sec N] [--continue-on-fail [0|1]] [--require-all-rounds-ok [0|1]] [--max-round-failures N] [--trend-min-go-rate-pct N] [--max-alert-severity OK|WARN|CRITICAL] [--bundle-outputs [0|1]] [--bundle-fail-close [0|1]] [--reports-dir PATH] [--summary-json PATH] [--run-report-json PATH] [--signoff-json PATH] [--trend-summary-json PATH] [--alert-summary-json PATH] [--dashboard-md PATH] [--signoff-max-reports N] [--signoff-since-hours N] [--signoff-fail-on-any-no-go [0|1]] [--signoff-min-go-rate-pct N] [--signoff-require-cohort-signoff-policy [0|1]] [--signoff-require-trend-artifact-policy-match [0|1]] [--signoff-require-trend-wg-validate-udp-source [0|1]] [--signoff-require-trend-wg-validate-strict-distinct [0|1]] [--signoff-require-trend-wg-soak-diversity-pass [0|1]] [--signoff-min-trend-wg-soak-selection-lines N] [--signoff-min-trend-wg-soak-entry-operators N] [--signoff-min-trend-wg-soak-exit-operators N] [--signoff-min-trend-wg-soak-cross-operator-pairs N] [--signoff-require-incident-snapshot-on-fail [0|1]] [--signoff-require-incident-snapshot-artifacts [0|1]] [--dashboard-enable [0|1]] [--dashboard-fail-close [0|1]] [--dashboard-print [0|1]] [--dashboard-print-summary-json [0|1]] [--show-json [0|1]] [-- <prod-pilot-runbook extra args...>]
-  ./scripts/easy_node.sh prod-pilot-cohort-quick [--bootstrap-directory URL] [--subject ID] [--pre-real-host-readiness [0|1]] [--pre-real-host-readiness-summary-json PATH] [--rounds N] [--pause-sec N] [--continue-on-fail [0|1]] [--require-all-rounds-ok [0|1]] [--max-round-failures N] [--trend-min-go-rate-pct N] [--max-alert-severity OK|WARN|CRITICAL] [--bundle-outputs [0|1]] [--bundle-fail-close [0|1]] [--reports-dir PATH] [--summary-json PATH] [--run-report-json PATH] [--signoff-require-trend-artifact-policy-match [0|1]] [--signoff-require-trend-wg-validate-udp-source [0|1]] [--signoff-require-trend-wg-validate-strict-distinct [0|1]] [--signoff-require-trend-wg-soak-diversity-pass [0|1]] [--signoff-min-trend-wg-soak-selection-lines N] [--signoff-min-trend-wg-soak-entry-operators N] [--signoff-min-trend-wg-soak-exit-operators N] [--signoff-min-trend-wg-soak-cross-operator-pairs N] [--signoff-require-incident-snapshot-on-fail [0|1]] [--signoff-require-incident-snapshot-artifacts [0|1]] [--print-run-report [0|1]] [--show-json [0|1]] [-- <prod-pilot-runbook extra args...>]
+  ./scripts/easy_node.sh prod-pilot-cohort-campaign [--pre-real-host-readiness [0|1]] [--pre-real-host-readiness-summary-json PATH] [--campaign-summary-json PATH] [--campaign-report-md PATH] [--campaign-run-report-json PATH] [--campaign-signoff-check [0|1]] [--campaign-signoff-required [0|1]] [--campaign-signoff-summary-json PATH] [--campaign-signoff-print-summary-json [0|1]] [--campaign-signoff-refresh-summary [0|1]] [--campaign-signoff-summary-fail-on-no-go [0|1]] [--campaign-print-report [0|1]] [--campaign-print-run-report [0|1]] [--campaign-print-summary-json [0|1]] [--campaign-summary-fail-close [0|1]] [--campaign-run-report-required [0|1]] [--campaign-run-report-json-required [0|1]] [--campaign-require-incident-snapshot-on-fail [0|1]] [--campaign-require-incident-snapshot-artifacts [0|1]] [--campaign-incident-snapshot-min-attachment-count N] [--campaign-incident-snapshot-max-skipped-count N|-1] [prod-pilot-cohort-quick-runbook args...]
+  ./scripts/easy_node.sh prod-pilot-cohort-campaign-summary [--runbook-summary-json PATH] [--reports-dir PATH] [--summary-json PATH] [--report-md PATH] [--require-incident-snapshot-on-fail [0|1]] [--require-incident-snapshot-artifacts [0|1]] [--incident-snapshot-min-attachment-count N] [--incident-snapshot-max-skipped-count N|-1] [--print-report [0|1]] [--print-summary-json [0|1]] [--fail-on-no-go [0|1]]
+  ./scripts/easy_node.sh prod-pilot-cohort-campaign-check [--campaign-run-report-json PATH] [--campaign-summary-json PATH] [--campaign-report-md PATH] [--campaign-signoff-summary-json PATH] [--reports-dir PATH] [--require-status-ok [0|1]] [--require-quick-runbook-ok [0|1]] [--require-runbook-summary-json [0|1]] [--require-quick-run-report-json [0|1]] [--require-campaign-summary-attempted [0|1]] [--require-campaign-summary-ok [0|1]] [--require-campaign-summary-json [0|1]] [--require-campaign-summary-go [0|1]] [--require-campaign-report-md [0|1]] [--require-campaign-signoff-enabled [0|1]] [--require-campaign-signoff-required [0|1]] [--require-campaign-signoff-attempted [0|1]] [--require-campaign-signoff-ok [0|1]] [--require-campaign-signoff-summary-json [0|1]] [--require-campaign-signoff-summary-json-valid [0|1]] [--require-campaign-signoff-summary-status-ok [0|1]] [--require-campaign-signoff-summary-final-rc-zero [0|1]] [--require-campaign-summary-fail-close [0|1]] [--require-campaign-signoff-check [0|1]] [--require-campaign-run-report-required [0|1]] [--require-campaign-run-report-json-required [0|1]] [--require-artifact-path-match [0|1]] [--require-distinct-artifact-paths [0|1]] [--require-summary-policy-match [0|1]] [--require-incident-policy-clean [0|1]] [--require-incident-snapshot-on-fail [0|1]] [--require-incident-snapshot-artifacts [0|1]] [--incident-snapshot-min-attachment-count N] [--incident-snapshot-max-skipped-count N|-1] [--summary-json PATH] [--print-summary-json [0|1]] [--show-json [0|1]]
+  ./scripts/easy_node.sh prod-pilot-cohort-campaign-signoff [--runbook-summary-json PATH] [--campaign-run-report-json PATH] [--campaign-summary-json PATH] [--campaign-report-md PATH] [--campaign-signoff-summary-json PATH] [--reports-dir PATH] [--refresh-summary [0|1]] [--summary-fail-on-no-go [0|1]] [--require-campaign-signoff-enabled [0|1]] [--require-campaign-signoff-required [0|1]] [--require-campaign-signoff-attempted [0|1]] [--require-campaign-signoff-ok [0|1]] [--require-campaign-signoff-summary-json [0|1]] [--require-campaign-signoff-summary-json-valid [0|1]] [--require-campaign-signoff-summary-status-ok [0|1]] [--require-campaign-signoff-summary-final-rc-zero [0|1]] [--require-campaign-summary-fail-close [0|1]] [--require-campaign-signoff-check [0|1]] [--require-campaign-run-report-required [0|1]] [--require-campaign-run-report-json-required [0|1]] [--require-artifact-path-match [0|1]] [--require-distinct-artifact-paths [0|1]] [--allow-summary-overwrite [0|1]] [--summary-json PATH] [--print-summary-json [0|1]] [prod-pilot-cohort-campaign-check args...]
+  ./scripts/easy_node.sh prod-pilot-cohort-quick-check [--run-report-json PATH] [--reports-dir PATH] [--require-status-ok [0|1]] [--require-runbook-ok [0|1]] [--require-signoff-attempted [0|1]] [--require-signoff-ok [0|1]] [--require-cohort-signoff-policy [0|1]] [--require-trend-artifact-policy-match [0|1]] [--require-trend-wg-validate-udp-source [0|1]] [--require-trend-wg-validate-strict-distinct [0|1]] [--require-trend-wg-soak-diversity-pass [0|1]] [--min-trend-wg-soak-selection-lines N] [--min-trend-wg-soak-entry-operators N] [--min-trend-wg-soak-exit-operators N] [--min-trend-wg-soak-cross-operator-pairs N] [--min-go-rate-pct N] [--max-alert-severity OK|WARN|CRITICAL] [--require-bundle-created [0|1]] [--require-bundle-manifest [0|1]] [--require-summary-json [0|1]] [--require-summary-status-ok [0|1]] [--require-incident-snapshot-on-fail [0|1]] [--require-incident-snapshot-artifacts [0|1]] [--incident-snapshot-min-attachment-count N] [--incident-snapshot-max-skipped-count N|-1] [--max-duration-sec N] [--show-json [0|1]]
+  ./scripts/easy_node.sh prod-pilot-cohort-quick-trend [--run-report-json PATH]... [--run-report-list FILE] [--reports-dir DIR] [--max-reports N] [--since-hours N] [--require-status-ok [0|1]] [--require-runbook-ok [0|1]] [--require-signoff-attempted [0|1]] [--require-signoff-ok [0|1]] [--require-cohort-signoff-policy [0|1]] [--require-summary-json [0|1]] [--require-summary-status-ok [0|1]] [--require-incident-snapshot-on-fail [0|1]] [--require-incident-snapshot-artifacts [0|1]] [--incident-snapshot-min-attachment-count N] [--incident-snapshot-max-skipped-count N|-1] [--max-duration-sec N] [--fail-on-any-no-go [0|1]] [--min-go-rate-pct N] [--show-details [0|1]] [--show-top-reasons N] [--summary-json PATH] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh prod-pilot-cohort-quick-alert [--trend-summary-json PATH] [--run-report-json PATH]... [--run-report-list FILE] [--reports-dir DIR] [--max-reports N] [--since-hours N] [--require-status-ok [0|1]] [--require-runbook-ok [0|1]] [--require-signoff-attempted [0|1]] [--require-signoff-ok [0|1]] [--require-cohort-signoff-policy [0|1]] [--require-summary-json [0|1]] [--require-summary-status-ok [0|1]] [--require-incident-snapshot-on-fail [0|1]] [--require-incident-snapshot-artifacts [0|1]] [--incident-snapshot-min-attachment-count N] [--incident-snapshot-max-skipped-count N|-1] [--max-duration-sec N] [--warn-go-rate-pct N] [--critical-go-rate-pct N] [--warn-no-go-count N] [--critical-no-go-count N] [--warn-eval-errors N] [--critical-eval-errors N] [--fail-on-warn [0|1]] [--fail-on-critical [0|1]] [--show-top-reasons N] [--summary-json PATH] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh prod-pilot-cohort-quick-dashboard [--run-report-json PATH]... [--run-report-list FILE] [--reports-dir DIR] [--max-reports N] [--since-hours N] [--require-status-ok [0|1]] [--require-runbook-ok [0|1]] [--require-signoff-attempted [0|1]] [--require-signoff-ok [0|1]] [--require-cohort-signoff-policy [0|1]] [--require-summary-json [0|1]] [--require-summary-status-ok [0|1]] [--require-incident-snapshot-on-fail [0|1]] [--require-incident-snapshot-artifacts [0|1]] [--incident-snapshot-min-attachment-count N] [--incident-snapshot-max-skipped-count N|-1] [--max-duration-sec N] [--fail-on-any-no-go [0|1]] [--min-go-rate-pct N] [--show-top-reasons N] [--warn-go-rate-pct N] [--critical-go-rate-pct N] [--warn-no-go-count N] [--critical-no-go-count N] [--warn-eval-errors N] [--critical-eval-errors N] [--fail-on-warn [0|1]] [--fail-on-critical [0|1]] [--trend-summary-json PATH] [--alert-summary-json PATH] [--dashboard-md PATH] [--print-dashboard [0|1]] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh prod-pilot-cohort-quick-signoff [--run-report-json PATH] [--reports-dir PATH] [--check-latest [0|1]] [--check-trend [0|1]] [--check-alert [0|1]] [--require-status-ok [0|1]] [--require-runbook-ok [0|1]] [--require-signoff-attempted [0|1]] [--require-signoff-ok [0|1]] [--require-cohort-signoff-policy [0|1]] [--require-trend-artifact-policy-match [0|1]] [--require-trend-wg-validate-udp-source [0|1]] [--require-trend-wg-validate-strict-distinct [0|1]] [--require-trend-wg-soak-diversity-pass [0|1]] [--min-trend-wg-soak-selection-lines N] [--min-trend-wg-soak-entry-operators N] [--min-trend-wg-soak-exit-operators N] [--min-trend-wg-soak-cross-operator-pairs N] [--require-bundle-created [0|1]] [--require-bundle-manifest [0|1]] [--require-summary-json [0|1]] [--require-summary-status-ok [0|1]] [--require-incident-snapshot-on-fail [0|1]] [--require-incident-snapshot-artifacts [0|1]] [--incident-snapshot-min-attachment-count N] [--incident-snapshot-max-skipped-count N|-1] [--max-duration-sec N] [--max-reports N] [--since-hours N] [--fail-on-any-no-go [0|1]] [--min-go-rate-pct N] [--warn-go-rate-pct N] [--critical-go-rate-pct N] [--warn-no-go-count N] [--critical-no-go-count N] [--warn-eval-errors N] [--critical-eval-errors N] [--max-alert-severity OK|WARN|CRITICAL] [--trend-summary-json PATH] [--alert-summary-json PATH] [--signoff-json PATH] [--show-json [0|1]]
+  ./scripts/easy_node.sh prod-pilot-cohort-quick-runbook [--bootstrap-directory URL] [--subject ID] [--pre-real-host-readiness [0|1]] [--pre-real-host-readiness-summary-json PATH] [--rounds N] [--pause-sec N] [--continue-on-fail [0|1]] [--require-all-rounds-ok [0|1]] [--max-round-failures N] [--trend-min-go-rate-pct N] [--max-alert-severity OK|WARN|CRITICAL] [--bundle-outputs [0|1]] [--bundle-fail-close [0|1]] [--reports-dir PATH] [--summary-json PATH] [--run-report-json PATH] [--signoff-json PATH] [--trend-summary-json PATH] [--alert-summary-json PATH] [--dashboard-md PATH] [--signoff-max-reports N] [--signoff-since-hours N] [--signoff-fail-on-any-no-go [0|1]] [--signoff-min-go-rate-pct N] [--signoff-require-cohort-signoff-policy [0|1]] [--signoff-require-trend-artifact-policy-match [0|1]] [--signoff-require-trend-wg-validate-udp-source [0|1]] [--signoff-require-trend-wg-validate-strict-distinct [0|1]] [--signoff-require-trend-wg-soak-diversity-pass [0|1]] [--signoff-min-trend-wg-soak-selection-lines N] [--signoff-min-trend-wg-soak-entry-operators N] [--signoff-min-trend-wg-soak-exit-operators N] [--signoff-min-trend-wg-soak-cross-operator-pairs N] [--signoff-require-incident-snapshot-on-fail [0|1]] [--signoff-require-incident-snapshot-artifacts [0|1]] [--signoff-incident-snapshot-min-attachment-count N] [--signoff-incident-snapshot-max-skipped-count N|-1] [--dashboard-enable [0|1]] [--dashboard-fail-close [0|1]] [--dashboard-print [0|1]] [--dashboard-print-summary-json [0|1]] [--show-json [0|1]] [-- <prod-pilot-runbook extra args...>]
+  ./scripts/easy_node.sh prod-pilot-cohort-quick [--bootstrap-directory URL] [--subject ID] [--pre-real-host-readiness [0|1]] [--pre-real-host-readiness-summary-json PATH] [--rounds N] [--pause-sec N] [--continue-on-fail [0|1]] [--require-all-rounds-ok [0|1]] [--max-round-failures N] [--trend-min-go-rate-pct N] [--max-alert-severity OK|WARN|CRITICAL] [--bundle-outputs [0|1]] [--bundle-fail-close [0|1]] [--reports-dir PATH] [--summary-json PATH] [--run-report-json PATH] [--signoff-require-trend-artifact-policy-match [0|1]] [--signoff-require-trend-wg-validate-udp-source [0|1]] [--signoff-require-trend-wg-validate-strict-distinct [0|1]] [--signoff-require-trend-wg-soak-diversity-pass [0|1]] [--signoff-min-trend-wg-soak-selection-lines N] [--signoff-min-trend-wg-soak-entry-operators N] [--signoff-min-trend-wg-soak-exit-operators N] [--signoff-min-trend-wg-soak-cross-operator-pairs N] [--signoff-require-incident-snapshot-on-fail [0|1]] [--signoff-require-incident-snapshot-artifacts [0|1]] [--signoff-incident-snapshot-min-attachment-count N] [--signoff-incident-snapshot-max-skipped-count N|-1] [--print-run-report [0|1]] [--show-json [0|1]] [-- <prod-pilot-runbook extra args...>]
   ./scripts/easy_node.sh prod-key-rotation-runbook [--mode auto|authority|provider] [--backup-dir PATH] [--summary-json PATH] [--preflight-check [0|1]] [--preflight-live [0|1]] [--preflight-timeout-sec N] [--rotate-server-secrets [0|1]] [--rotate-admin-signing [0|1]] [--key-history N] [--restart [0|1]] [--restart-issuer [0|1]] [--show-secrets [0|1]] [--rollback-on-fail [0|1]] [--restart-after-rollback [0|1]] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh prod-upgrade-runbook [--mode auto|authority|provider] [--backup-dir PATH] [--summary-json PATH] [--preflight-check [0|1]] [--preflight-live [0|1]] [--preflight-timeout-sec N] [--compose-pull [0|1]] [--compose-build [0|1]] [--restart [0|1]] [--rollback-on-fail [0|1]] [--restart-after-rollback [0|1]] [--print-summary-json [0|1]]
-  ./scripts/easy_node.sh prod-operator-lifecycle-runbook [--action onboard|offboard] [--mode auto|authority|provider] [--public-host HOST] [--operator-id ID] [--issuer-id ID] [--authority-directory URL] [--authority-issuer URL] [--peer-directories URLS] [--bootstrap-directory URL] [--peer-identity-strict 0|1|auto] [--min-peer-operators N] [--client-allowlist [0|1]] [--allow-anon-cred [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]] [--preflight-check [0|1]] [--preflight-timeout-sec N] [--health-check [0|1]] [--health-timeout-sec N] [--directory-url URL] [--verify-relays [0|1]] [--verify-absent [0|1]] [--verify-relay-timeout-sec N] [--verify-relay-min-count N] [--federation-check [0|1]] [--federation-ready-timeout-sec N] [--federation-poll-sec N] [--federation-timeout-sec N] [--federation-require-configured-healthy [0|1]] [--federation-max-cooling-retry-sec N] [--federation-max-peer-sync-age-sec N] [--federation-max-issuer-sync-age-sec N] [--federation-min-peer-success-sources N] [--federation-min-issuer-success-sources N] [--federation-min-peer-source-operators N] [--federation-min-issuer-source-operators N] [--federation-status-fail-on-not-ready [0|1]] [--federation-status-file PATH] [--onboard-invite [0|1]] [--onboard-invite-count N] [--onboard-invite-tier 1|2|3] [--onboard-invite-wait-sec N] [--onboard-invite-fail-open [0|1]] [--onboard-invite-file PATH] [--rollback-on-fail [0|1]] [--rollback-verify-absent [0|1]] [--rollback-verify-timeout-sec N] [--runtime-doctor-on-fail [0|1]] [--runtime-doctor-base-port N] [--runtime-doctor-client-iface IFACE] [--runtime-doctor-exit-iface IFACE] [--runtime-doctor-vpn-iface IFACE] [--runtime-doctor-file PATH] [--incident-snapshot-on-fail [0|1]] [--incident-bundle-dir PATH] [--incident-timeout-sec N] [--incident-include-docker-logs [0|1]] [--incident-docker-log-lines N] [--incident-attach-artifact PATH]... [--report-md PATH] [--summary-json PATH] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh prod-operator-lifecycle-runbook [--action onboard|offboard] [--mode auto|authority|provider] [--public-host HOST] [--operator-id ID] [--issuer-id ID] [--authority-directory URL] [--authority-issuer URL] [--peer-directories URLS] [--bootstrap-directory URL] [--peer-identity-strict 0|1|auto] [--min-peer-operators N] [--client-allowlist [0|1]] [--allow-anon-cred [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]] [--preflight-check [0|1]] [--preflight-timeout-sec N] [--health-check [0|1]] [--health-timeout-sec N] [--directory-url URL] [--verify-relays [0|1]] [--verify-absent [0|1]] [--verify-relay-timeout-sec N] [--verify-relay-min-count N] [--federation-check [0|1]] [--federation-ready-timeout-sec N] [--federation-poll-sec N] [--federation-timeout-sec N] [--federation-require-configured-healthy [0|1]] [--federation-max-cooling-retry-sec N] [--federation-max-peer-sync-age-sec N] [--federation-max-issuer-sync-age-sec N] [--federation-min-peer-success-sources N] [--federation-min-issuer-success-sources N] [--federation-min-peer-source-operators N] [--federation-min-issuer-source-operators N] [--federation-wait-file PATH] [--federation-wait-file-required [0|1]] [--federation-wait-summary-json PATH] [--federation-wait-print-summary-json [0|1]] [--federation-wait-summary-required [0|1]] [--federation-status-fail-on-not-ready [0|1]] [--federation-status-file PATH] [--federation-status-file-required [0|1]] [--federation-status-summary-json PATH] [--federation-status-summary-required [0|1]] [--onboard-invite [0|1]] [--onboard-invite-count N] [--onboard-invite-tier 1|2|3] [--onboard-invite-wait-sec N] [--onboard-invite-fail-open [0|1]] [--onboard-invite-file PATH] [--rollback-on-fail [0|1]] [--rollback-verify-absent [0|1]] [--rollback-verify-timeout-sec N] [--runtime-doctor-on-fail [0|1]] [--runtime-doctor-base-port N] [--runtime-doctor-client-iface IFACE] [--runtime-doctor-exit-iface IFACE] [--runtime-doctor-vpn-iface IFACE] [--runtime-doctor-file PATH] [--runtime-doctor-file-required [0|1]] [--incident-snapshot-on-fail [0|1]] [--incident-bundle-dir PATH] [--incident-timeout-sec N] [--incident-include-docker-logs [0|1]] [--incident-docker-log-lines N] [--incident-summary-required [0|1]] [--incident-bundle-required [0|1]] [--incident-attachment-manifest-required [0|1]] [--incident-attachment-no-skips-required [0|1]] [--incident-attach-min-count N] [--incident-attachment-manifest-min-count N] [--incident-attach-artifact PATH]... [--report-md PATH] [--summary-json PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh incident-snapshot [--bundle-dir PATH] [--mode auto|authority|provider|client] [--env-file PATH] [--directory-url URL] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--compose-project NAME] [--include-docker-logs [0|1]] [--docker-log-lines N] [--timeout-sec N] [--attach-artifact PATH]...
   ./scripts/easy_node.sh incident-snapshot-summary [--bundle-dir PATH] [--bundle-tar PATH] [--summary-json PATH] [--report-md PATH] [--print-report [0|1]] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh pilot-runbook [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-a-url URL] [--issuer-b-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--rounds N] [--pause-sec N] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--client-min-selection-lines N] [--client-min-entry-operators N] [--client-min-exit-operators N] [--client-require-cross-operator-pair [0|1]] [--path-profile fast|balanced|privacy] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--require-issuer-quorum [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]] [--bundle-dir PATH]
@@ -173,7 +175,7 @@ Notes:
   - admin-signing-status/admin-signing-rotate are authority-only issuer admin signer maintenance tools.
   - prod-preflight validates strict prod profile wiring (mTLS material, HTTPS URLs, and authority signer config).
   - server-federation-status prints directory peer+sync health (including configured/discovered peer failure streaks), can evaluate strict policy thresholds in one shot, and can emit machine-readable summary JSON for automation/handoff.
-  - server-federation-wait blocks until directory peer-sync + issuer-sync quorum and peer-health readiness are met (or timeout), and can optionally fail-close on configured-peer degradation, excessive cooldown windows, or stale sync age.
+  - server-federation-wait blocks until directory peer-sync + issuer-sync quorum and peer-health readiness are met (or timeout), can optionally fail-close on configured-peer degradation/excessive cooldown/stale sync age, and can emit machine-readable summary JSON for automation.
   - client-test runs client-demo with --no-deps (no local server required on the client machine).
   - wg-only-local-test runs host real-WireGuard integration checks (Linux + root required).
   - wg-only-stack-up/status/down manages a reusable host real-WireGuard demo stack (Linux + root required).
@@ -216,8 +218,10 @@ Notes:
   - prod-wg-strict-ingress-rehearsal runs a controlled negative rehearsal that should fail with failure class strict_ingress_policy.
   - prod-pilot-runbook wraps three-machine-prod-bundle with strict fail-closed production defaults for machine-C pilot runs, gates on pre-real-host-readiness by default, and auto-generates SLO dashboard artifacts by default; append your own args to override.
   - prod-pilot-cohort-runbook runs sustained pilot rounds (multiple prod-pilot-runbook executions), runs pre-real-host-readiness once before the cohort by default, and aggregates trend/alert summaries for cohort signoff, including fail-close alert-severity policy and optional tar+sha256+manifest cohort bundle output.
-  - prod-pilot-cohort-campaign wraps prod-pilot-cohort-quick-runbook with low-prompt sustained campaign defaults, deterministic artifact paths, the same top-level pre-real-host gate control, and generated markdown/JSON handoff summaries for real machine-C operator runs.
-  - prod-pilot-cohort-campaign-summary regenerates one concise operator handoff report from saved campaign/runbook artifacts and preserves normalized source pointers, including the upstream pre-real-host readiness summary when present.
+  - prod-pilot-cohort-campaign wraps prod-pilot-cohort-quick-runbook with low-prompt sustained campaign defaults, deterministic artifact paths, the same top-level pre-real-host gate control, generated markdown/JSON handoff summaries, a machine-readable campaign run-report artifact, fail-close incident snapshot policy controls for failed campaigns, and optional inline campaign-signoff gating with its own summary artifact.
+  - prod-pilot-cohort-campaign-summary regenerates one concise operator handoff report from saved campaign/runbook artifacts, preserves normalized source pointers (including upstream pre-real-host readiness summary when present), and can enforce fail-close incident snapshot attachment policy on failed runs.
+  - prod-pilot-cohort-campaign-check fail-closed validates campaign run-report + summary artifacts, upstream runbook/quick artifact completeness metadata, campaign-signoff stage config/RC requirements, campaign-signoff summary status/final_rc integrity, campaign fail-close config floors, cross-artifact path consistency, and optional distinct artifact-path collision checks before operator signoff; it can emit a machine-readable summary with --summary-json.
+  - prod-pilot-cohort-campaign-signoff runs optional campaign-summary refresh + campaign-check fail-closed in one operator command, including upstream runbook/quick artifact policy checks, campaign fail-close config floor checks, cross-artifact path consistency checks, and fail-fast output-path collision guards (override only for diagnostics with --allow-summary-overwrite 1); it can emit a machine-readable summary with --summary-json.
   - prod-pilot-cohort-quick runs one-command sustained pilot + fail-closed cohort signoff with minimal operator flags, exposes the one-time top-level pre-real-host gate used by the underlying cohort runbook, and emits a quick run report JSON artifact.
   - prod-key-rotation-runbook performs production key/secret rotation with backup, preflight checks, and rollback support.
   - prod-upgrade-runbook performs production compose upgrade flow (pull/build/restart) with backup, preflight checks, and rollback support.
@@ -2306,6 +2310,8 @@ server_up() {
   local federation_min_issuer_success_sources="${EASY_NODE_FEDERATION_MIN_ISSUER_SUCCESS_SOURCES:-0}"
   local federation_min_peer_source_operators="${EASY_NODE_FEDERATION_MIN_PEER_SOURCE_OPERATORS:-0}"
   local federation_min_issuer_source_operators="${EASY_NODE_FEDERATION_MIN_ISSUER_SOURCE_OPERATORS:-0}"
+  local federation_wait_summary_json=""
+  local federation_wait_print_summary_json="${EASY_NODE_FEDERATION_WAIT_PRINT_SUMMARY_JSON:-0}"
   local auto_invite="${EASY_NODE_AUTO_INVITE:-0}"
   local auto_invite_count="${EASY_NODE_AUTO_INVITE_COUNT:-1}"
   local auto_invite_tier="${EASY_NODE_AUTO_INVITE_TIER:-1}"
@@ -2468,6 +2474,19 @@ server_up() {
         federation_min_issuer_source_operators="${2:-}"
         shift 2
         ;;
+      --federation-wait-summary-json)
+        federation_wait_summary_json="${2:-}"
+        shift 2
+        ;;
+      --federation-wait-print-summary-json)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          federation_wait_print_summary_json="${2:-}"
+          shift 2
+        else
+          federation_wait_print_summary_json="1"
+          shift
+        fi
+        ;;
       --auto-invite)
         if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
           auto_invite="${2:-}"
@@ -2526,6 +2545,10 @@ server_up() {
   fi
   if [[ "$federation_wait" != "0" && "$federation_wait" != "1" ]]; then
     echo "server-up requires --federation-wait (or EASY_NODE_FEDERATION_WAIT) to be 0 or 1"
+    exit 2
+  fi
+  if [[ "$federation_wait_print_summary_json" != "0" && "$federation_wait_print_summary_json" != "1" ]]; then
+    echo "server-up requires --federation-wait-print-summary-json (or EASY_NODE_FEDERATION_WAIT_PRINT_SUMMARY_JSON) to be 0 or 1"
     exit 2
   fi
   if [[ "$auto_invite" != "0" && "$auto_invite" != "1" ]]; then
@@ -3063,6 +3086,8 @@ server_up() {
         --min-issuer-success-sources "$federation_min_issuer_success_sources" \
         --min-peer-source-operators "$federation_min_peer_source_operators" \
         --min-issuer-source-operators "$federation_min_issuer_source_operators" \
+        --summary-json "$federation_wait_summary_json" \
+        --print-summary-json "$federation_wait_print_summary_json" \
         --timeout-sec 8; then
         echo "server-up federation wait failed; stack is running but federation is not ready."
         echo "hint: run './scripts/easy_node.sh server-federation-status --directory-url ${federation_directory_url}' for diagnostics."
@@ -3336,6 +3361,7 @@ server_federation_status() {
   local sync_generated_at sync_ref_epoch status_now_epoch peer_sync_age_sec issuer_sync_age_sec
   local peer_sync_age_display issuer_sync_age_display
   local peer_sync_ready issuer_sync_ready peer_health_ready cooling_retry_exceeded federation_ready
+  local readiness_failure_reasons_json readiness_failure_reasons_csv
   peer_quorum="$(jq -r '.peer.quorum_met // false' <"$sync_status_body" 2>/dev/null || echo "false")"
   peer_success="$(jq -r '.peer.success // false' <"$sync_status_body" 2>/dev/null || echo "false")"
   peer_sources="$(jq -r '.peer.success_sources // 0' <"$sync_status_body" 2>/dev/null || echo "0")"
@@ -3448,6 +3474,58 @@ server_federation_status() {
     federation_ready="1"
   fi
 
+  readiness_failure_reasons_json="$(
+    jq -nc \
+      --argjson peer_last_run "$peer_last_run" \
+      --argjson peer_success "$(if [[ "$peer_success" == "true" ]]; then echo "true"; else echo "false"; fi)" \
+      --argjson peer_quorum "$(if [[ "$peer_quorum" == "true" ]]; then echo "true"; else echo "false"; fi)" \
+      --argjson max_peer_sync_age_sec "$max_peer_sync_age_sec" \
+      --argjson peer_sync_age_sec "$peer_sync_age_sec" \
+      --argjson min_peer_success_sources "$min_peer_success_sources" \
+      --argjson peer_sources "$peer_sources" \
+      --argjson min_peer_source_operators "$min_peer_source_operators" \
+      --argjson peer_source_operator_count "$peer_source_operator_count" \
+      --argjson issuer_success "$(if [[ "$issuer_success" == "true" ]]; then echo "true"; else echo "false"; fi)" \
+      --argjson issuer_quorum "$(if [[ "$issuer_quorum" == "true" ]]; then echo "true"; else echo "false"; fi)" \
+      --argjson max_issuer_sync_age_sec "$max_issuer_sync_age_sec" \
+      --argjson issuer_sync_age_sec "$issuer_sync_age_sec" \
+      --argjson min_issuer_success_sources "$min_issuer_success_sources" \
+      --argjson issuer_sources "$issuer_sources" \
+      --argjson min_issuer_source_operators "$min_issuer_source_operators" \
+      --argjson issuer_source_operator_count "$issuer_source_operator_count" \
+      --argjson require_configured_healthy "$(if [[ "$require_configured_healthy" == "1" ]]; then echo "true"; else echo "false"; fi)" \
+      --argjson configured "$configured" \
+      --argjson configured_healthy "$configured_healthy" \
+      --argjson discovered_eligible "$discovered_eligible" \
+      --argjson max_cooling_retry_sec "$max_cooling_retry_sec" \
+      --argjson cooling_retry_max_sec "$cooling_retry_max_sec" \
+      --argjson federation_ready "$(if [[ "$federation_ready" == "1" ]]; then echo "true"; else echo "false"; fi)" \
+      '
+      if $federation_ready then
+        []
+      else
+        [
+          (if $peer_last_run <= 0 then "peer_sync_not_started" else empty end),
+          (if ($peer_success | not) then "peer_sync_not_success" else empty end),
+          (if ($peer_quorum | not) then "peer_sync_quorum_not_met" else empty end),
+          (if $max_peer_sync_age_sec > 0 and ($peer_sync_age_sec < 0 or $peer_sync_age_sec > $max_peer_sync_age_sec) then "peer_sync_age_stale" else empty end),
+          (if $min_peer_success_sources > 0 and $peer_sources < $min_peer_success_sources then "peer_success_sources_below_floor" else empty end),
+          (if $min_peer_source_operators > 0 and $peer_source_operator_count < $min_peer_source_operators then "peer_source_operators_below_floor" else empty end),
+          (if ($issuer_success | not) then "issuer_sync_not_success" else empty end),
+          (if ($issuer_quorum | not) then "issuer_sync_quorum_not_met" else empty end),
+          (if $max_issuer_sync_age_sec > 0 and ($issuer_sync_age_sec < 0 or $issuer_sync_age_sec > $max_issuer_sync_age_sec) then "issuer_sync_age_stale" else empty end),
+          (if $min_issuer_success_sources > 0 and $issuer_sources < $min_issuer_success_sources then "issuer_success_sources_below_floor" else empty end),
+          (if $min_issuer_source_operators > 0 and $issuer_source_operator_count < $min_issuer_source_operators then "issuer_source_operators_below_floor" else empty end),
+          (if $require_configured_healthy and $configured > 0 and $configured_healthy < $configured then "configured_peers_not_all_healthy" else empty end),
+          (if ($configured > 0 and ($require_configured_healthy | not) and $configured_healthy <= 0 and $discovered_eligible <= 0) then "no_healthy_or_discovered_eligible_peer" else empty end),
+          (if ($configured <= 0 and $discovered_eligible <= 0) then "no_discovered_eligible_peer" else empty end),
+          (if $max_cooling_retry_sec > 0 and $cooling_retry_max_sec > $max_cooling_retry_sec then "cooling_retry_above_threshold" else empty end)
+        ] | unique
+      end
+      '
+  )"
+  readiness_failure_reasons_csv="$(jq -r 'if length == 0 then "none" else join(",") end' <<<"$readiness_failure_reasons_json")"
+
   echo "server federation status:"
   echo "  directory_url: $directory_url"
   echo "  policy: require_configured_healthy=$require_configured_healthy max_cooling_retry_sec=$max_cooling_retry_sec max_peer_sync_age_sec=$max_peer_sync_age_sec max_issuer_sync_age_sec=$max_issuer_sync_age_sec min_peer_success_sources=$min_peer_success_sources min_issuer_success_sources=$min_issuer_success_sources min_peer_source_operators=$min_peer_source_operators min_issuer_source_operators=$min_issuer_source_operators"
@@ -3468,6 +3546,7 @@ server_federation_status() {
     echo "  issuer_sync_error: $issuer_error"
   fi
   echo "  readiness: federation_ready=$federation_ready peer_sync_ready=$peer_sync_ready issuer_sync_ready=$issuer_sync_ready peer_health_ready=$peer_health_ready cooling_retry_exceeded=$cooling_retry_exceeded"
+  echo "  readiness_failure_reasons: $readiness_failure_reasons_csv"
   echo "  peers:"
   jq -r '
     .peers[]
@@ -3496,6 +3575,7 @@ server_federation_status() {
       --argjson issuer_sync_ready "$(if [[ "$issuer_sync_ready" == "1" ]]; then echo "true"; else echo "false"; fi)" \
       --argjson peer_health_ready "$(if [[ "$peer_health_ready" == "1" ]]; then echo "true"; else echo "false"; fi)" \
       --argjson cooling_retry_exceeded "$(if [[ "$cooling_retry_exceeded" == "1" ]]; then echo "true"; else echo "false"; fi)" \
+      --argjson readiness_failure_reasons "$readiness_failure_reasons_json" \
       --argjson total "$total" \
       --argjson configured "$configured" \
       --argjson discovered "$discovered" \
@@ -3546,7 +3626,9 @@ server_federation_status() {
           peer_sync_ready:$peer_sync_ready,
           issuer_sync_ready:$issuer_sync_ready,
           peer_health_ready:$peer_health_ready,
-          cooling_retry_exceeded:$cooling_retry_exceeded
+          cooling_retry_exceeded:$cooling_retry_exceeded,
+          failure_reasons:$readiness_failure_reasons,
+          failure_count:($readiness_failure_reasons | length)
         },
         observed:{
           peer_summary:{
@@ -3640,6 +3722,8 @@ server_federation_wait() {
   local min_issuer_success_sources="${EASY_NODE_FEDERATION_MIN_ISSUER_SUCCESS_SOURCES:-0}"
   local min_peer_source_operators="${EASY_NODE_FEDERATION_MIN_PEER_SOURCE_OPERATORS:-0}"
   local min_issuer_source_operators="${EASY_NODE_FEDERATION_MIN_ISSUER_SOURCE_OPERATORS:-0}"
+  local summary_json=""
+  local print_summary_json="${EASY_NODE_FEDERATION_WAIT_PRINT_SUMMARY_JSON:-0}"
   local show_json="0"
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -3699,6 +3783,19 @@ server_federation_wait() {
       --min-issuer-source-operators)
         min_issuer_source_operators="${2:-}"
         shift 2
+        ;;
+      --summary-json)
+        summary_json="${2:-}"
+        shift 2
+        ;;
+      --print-summary-json)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          print_summary_json="${2:-}"
+          shift 2
+        else
+          print_summary_json="1"
+          shift
+        fi
         ;;
       --show-json)
         if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
@@ -3766,6 +3863,10 @@ server_federation_wait() {
   fi
   if [[ "$show_json" != "0" && "$show_json" != "1" ]]; then
     echo "server-federation-wait requires --show-json to be 0 or 1"
+    exit 2
+  fi
+  if [[ "$print_summary_json" != "0" && "$print_summary_json" != "1" ]]; then
+    echo "server-federation-wait requires --print-summary-json to be 0 or 1"
     exit 2
   fi
 
@@ -3838,6 +3939,138 @@ server_federation_wait() {
   local last_issuer_source_operators=""
   local last_configured_failing="0"
   local last_cooling_retry_max_sec="0"
+  local last_failure_reasons_json="[]"
+  local last_failure_state="not_started"
+  local last_elapsed_sec="0"
+  local last_remaining_sec="$ready_timeout_sec"
+
+  emit_federation_wait_summary() {
+    local status="$1"
+    local state="$2"
+    local failure_reasons_json="$3"
+    local sync_json_input="$4"
+    local peer_json_input="$5"
+    local summary_payload
+
+    if ! jq -e 'type == "array"' <<<"$failure_reasons_json" >/dev/null 2>&1; then
+      failure_reasons_json='[]'
+    fi
+
+    summary_payload="$(
+      jq -nc \
+        --arg status "$status" \
+        --arg state "$state" \
+        --arg directory_url "$directory_url" \
+        --argjson attempts "$attempt" \
+        --argjson elapsed_sec "$last_elapsed_sec" \
+        --argjson remaining_sec "$last_remaining_sec" \
+        --argjson ready_timeout_sec "$ready_timeout_sec" \
+        --argjson poll_sec "$poll_sec" \
+        --argjson request_timeout_sec "$timeout_sec" \
+        --argjson require_configured_healthy "$(if [[ "$require_configured_healthy" == "1" ]]; then echo "true"; else echo "false"; fi)" \
+        --argjson max_cooling_retry_sec "$max_cooling_retry_sec" \
+        --argjson max_peer_sync_age_sec "$max_peer_sync_age_sec" \
+        --argjson max_issuer_sync_age_sec "$max_issuer_sync_age_sec" \
+        --argjson min_peer_success_sources "$min_peer_success_sources" \
+        --argjson min_issuer_success_sources "$min_issuer_success_sources" \
+        --argjson min_peer_source_operators "$min_peer_source_operators" \
+        --argjson min_issuer_source_operators "$min_issuer_source_operators" \
+        --argjson peer_sync_ready "$(if [[ "$last_peer_sync_ready" == "1" ]]; then echo "true"; else echo "false"; fi)" \
+        --argjson issuer_sync_ready "$(if [[ "$last_issuer_sync_ready" == "1" ]]; then echo "true"; else echo "false"; fi)" \
+        --argjson peer_health_ready "$(if [[ "$last_peer_health_ready" == "1" ]]; then echo "true"; else echo "false"; fi)" \
+        --argjson configured_peers "$last_configured_peers" \
+        --argjson configured_healthy "$last_configured_healthy" \
+        --argjson configured_failing "$last_configured_failing" \
+        --argjson discovered_eligible "$last_discovered_eligible" \
+        --argjson cooling_retry_max_sec "$last_cooling_retry_max_sec" \
+        --arg peer_success "$last_peer_success" \
+        --arg peer_quorum "$last_peer_quorum" \
+        --argjson peer_last_run "$last_peer_last_run" \
+        --argjson peer_sync_age_sec "$last_peer_sync_age_sec" \
+        --argjson peer_success_sources "$last_peer_sources" \
+        --argjson peer_source_operator_count "$last_peer_source_operators_count" \
+        --arg peer_source_operators "$last_peer_source_operators" \
+        --arg issuer_success "$last_issuer_success" \
+        --arg issuer_quorum "$last_issuer_quorum" \
+        --argjson issuer_last_run "$last_issuer_last_run" \
+        --argjson issuer_sync_age_sec "$last_issuer_sync_age_sec" \
+        --argjson issuer_success_sources "$last_issuer_sources" \
+        --argjson issuer_source_operator_count "$last_issuer_source_operators_count" \
+        --arg issuer_source_operators "$last_issuer_source_operators" \
+        --argjson failure_reasons "$failure_reasons_json" \
+        --arg sync_json "$sync_json_input" \
+        --arg peer_json "$peer_json_input" \
+        '{
+          status:$status,
+          state:$state,
+          directory_url:$directory_url,
+          timing:{
+            attempts:$attempts,
+            elapsed_sec:$elapsed_sec,
+            remaining_sec:$remaining_sec,
+            ready_timeout_sec:$ready_timeout_sec,
+            poll_sec:$poll_sec,
+            request_timeout_sec:$request_timeout_sec
+          },
+          policy:{
+            require_configured_healthy:$require_configured_healthy,
+            max_cooling_retry_sec:$max_cooling_retry_sec,
+            max_peer_sync_age_sec:$max_peer_sync_age_sec,
+            max_issuer_sync_age_sec:$max_issuer_sync_age_sec,
+            min_peer_success_sources:$min_peer_success_sources,
+            min_issuer_success_sources:$min_issuer_success_sources,
+            min_peer_source_operators:$min_peer_source_operators,
+            min_issuer_source_operators:$min_issuer_source_operators
+          },
+          readiness:{
+            peer_sync_ready:$peer_sync_ready,
+            issuer_sync_ready:$issuer_sync_ready,
+            peer_health_ready:$peer_health_ready,
+            failure_reasons:$failure_reasons,
+            failure_count:($failure_reasons | length)
+          },
+          observed:{
+            peer_health:{
+              configured:$configured_peers,
+              configured_healthy:$configured_healthy,
+              configured_failing:$configured_failing,
+              discovered_eligible:$discovered_eligible,
+              cooling_retry_max_sec:$cooling_retry_max_sec
+            },
+            peer_sync:{
+              success:($peer_success == "true"),
+              quorum_met:($peer_quorum == "true"),
+              success_sources:$peer_success_sources,
+              source_operator_count:$peer_source_operator_count,
+              source_operators:($peer_source_operators | if length == 0 then [] else split(",") end),
+              last_run_at:$peer_last_run,
+              age_sec:$peer_sync_age_sec
+            },
+            issuer_sync:{
+              success:($issuer_success == "true"),
+              quorum_met:($issuer_quorum == "true"),
+              success_sources:$issuer_success_sources,
+              source_operator_count:$issuer_source_operator_count,
+              source_operators:($issuer_source_operators | if length == 0 then [] else split(",") end),
+              last_run_at:$issuer_last_run,
+              age_sec:$issuer_sync_age_sec
+            }
+          },
+          sync_status:(if ($sync_json | length) > 0 then (try ($sync_json | fromjson) catch null) else null end),
+          peer_status:(if ($peer_json | length) > 0 then (try ($peer_json | fromjson) catch null) else null end)
+        }'
+    )"
+
+    if [[ -n "$summary_json" ]]; then
+      mkdir -p "$(dirname "$summary_json")"
+      printf '%s\n' "$summary_payload" >"$summary_json"
+      echo "  summary_json: $summary_json"
+    fi
+    if [[ "$print_summary_json" == "1" ]]; then
+      echo "summary_json:"
+      printf '%s\n' "$summary_payload"
+    fi
+  }
 
   echo "server-federation-wait:"
   echo "  directory_url: $directory_url"
@@ -3860,6 +4093,8 @@ server_federation_wait() {
     if ((remaining_sec < 0)); then
       remaining_sec=0
     fi
+    last_elapsed_sec="$elapsed_sec"
+    last_remaining_sec="$remaining_sec"
 
     local sync_body peer_status_body
     sync_body="$(mktemp)"
@@ -3886,6 +4121,9 @@ server_federation_wait() {
     if [[ "$sync_code" == "401" || "$sync_code" == "403" || "$peer_status_code" == "401" || "$peer_status_code" == "403" ]]; then
       rm -f "$sync_body" "$peer_status_body"
       echo "server-federation-wait failed: admin token unauthorized for directory admin endpoints"
+      last_failure_state="admin_token_unauthorized"
+      last_failure_reasons_json='["admin_token_unauthorized"]'
+      emit_federation_wait_summary "fail" "$last_failure_state" "$last_failure_reasons_json" "$last_sync_json" "$last_peer_json"
       return 1
     fi
 
@@ -3998,8 +4236,73 @@ server_federation_wait() {
         peer_health_ready="1"
       fi
 
+      local current_failure_reasons_json
+      current_failure_reasons_json="$(
+        jq -nc \
+          --argjson peer_last_run "$peer_last_run" \
+          --argjson peer_success "$(if [[ "$peer_success" == "true" ]]; then echo "true"; else echo "false"; fi)" \
+          --argjson peer_quorum "$(if [[ "$peer_quorum" == "true" ]]; then echo "true"; else echo "false"; fi)" \
+          --argjson max_peer_sync_age_sec "$max_peer_sync_age_sec" \
+          --argjson peer_sync_age_sec "$peer_sync_age_sec" \
+          --argjson min_peer_success_sources "$min_peer_success_sources" \
+          --argjson peer_sources "$peer_sources" \
+          --argjson min_peer_source_operators "$min_peer_source_operators" \
+          --argjson peer_source_operators_count "$peer_source_operators_count" \
+          --argjson issuer_success "$(if [[ "$issuer_success" == "true" ]]; then echo "true"; else echo "false"; fi)" \
+          --argjson issuer_quorum "$(if [[ "$issuer_quorum" == "true" ]]; then echo "true"; else echo "false"; fi)" \
+          --argjson max_issuer_sync_age_sec "$max_issuer_sync_age_sec" \
+          --argjson issuer_sync_age_sec "$issuer_sync_age_sec" \
+          --argjson min_issuer_success_sources "$min_issuer_success_sources" \
+          --argjson issuer_sources "$issuer_sources" \
+          --argjson min_issuer_source_operators "$min_issuer_source_operators" \
+          --argjson issuer_source_operators_count "$issuer_source_operators_count" \
+          --argjson require_configured_healthy "$(if [[ "$require_configured_healthy" == "1" ]]; then echo "true"; else echo "false"; fi)" \
+          --argjson configured_peers "$configured_peers" \
+          --argjson configured_healthy "$configured_healthy" \
+          --argjson discovered_eligible "$discovered_eligible" \
+          --argjson max_cooling_retry_sec "$max_cooling_retry_sec" \
+          --argjson cooling_retry_max_sec "$cooling_retry_max_sec" \
+          --argjson peer_sync_ready "$(if [[ "$peer_sync_ready" == "1" ]]; then echo "true"; else echo "false"; fi)" \
+          --argjson issuer_sync_ready "$(if [[ "$issuer_sync_ready" == "1" ]]; then echo "true"; else echo "false"; fi)" \
+          --argjson peer_health_ready "$(if [[ "$peer_health_ready" == "1" ]]; then echo "true"; else echo "false"; fi)" \
+          '
+          [
+            (if $peer_last_run <= 0 then "peer_sync_not_started" else empty end),
+            (if ($peer_success | not) then "peer_sync_not_success" else empty end),
+            (if ($peer_quorum | not) then "peer_sync_quorum_not_met" else empty end),
+            (if $max_peer_sync_age_sec > 0 and ($peer_sync_age_sec < 0 or $peer_sync_age_sec > $max_peer_sync_age_sec) then "peer_sync_age_stale" else empty end),
+            (if $min_peer_success_sources > 0 and $peer_sources < $min_peer_success_sources then "peer_success_sources_below_floor" else empty end),
+            (if $min_peer_source_operators > 0 and $peer_source_operators_count < $min_peer_source_operators then "peer_source_operators_below_floor" else empty end),
+            (if ($issuer_success | not) then "issuer_sync_not_success" else empty end),
+            (if ($issuer_quorum | not) then "issuer_sync_quorum_not_met" else empty end),
+            (if $max_issuer_sync_age_sec > 0 and ($issuer_sync_age_sec < 0 or $issuer_sync_age_sec > $max_issuer_sync_age_sec) then "issuer_sync_age_stale" else empty end),
+            (if $min_issuer_success_sources > 0 and $issuer_sources < $min_issuer_success_sources then "issuer_success_sources_below_floor" else empty end),
+            (if $min_issuer_source_operators > 0 and $issuer_source_operators_count < $min_issuer_source_operators then "issuer_source_operators_below_floor" else empty end),
+            (if $require_configured_healthy and $configured_peers > 0 and $configured_healthy < $configured_peers then "configured_peers_not_all_healthy" else empty end),
+            (if ($configured_peers > 0 and ($require_configured_healthy | not) and $configured_healthy <= 0 and $discovered_eligible <= 0) then "no_healthy_or_discovered_eligible_peer" else empty end),
+            (if ($configured_peers <= 0 and $discovered_eligible <= 0) then "no_discovered_eligible_peer" else empty end),
+            (if $max_cooling_retry_sec > 0 and $cooling_retry_max_sec > $max_cooling_retry_sec then "cooling_retry_above_threshold" else empty end)
+          ] | map(select(. != null)) | unique
+          '
+      )"
+      if [[ "$peer_sync_ready" == "1" && "$issuer_sync_ready" == "1" && "$peer_health_ready" == "1" ]]; then
+        current_failure_reasons_json='[]'
+      fi
+      last_failure_reasons_json="$current_failure_reasons_json"
+      if [[ "$peer_sync_ready" == "1" && "$issuer_sync_ready" == "1" && "$peer_health_ready" == "1" ]]; then
+        last_failure_state="ready"
+      else
+        last_failure_state="not_ready"
+      fi
+
       if [[ "$max_cooling_retry_sec" =~ ^[0-9]+$ ]] && ((max_cooling_retry_sec > 0)) &&
         [[ "$cooling_retry_max_sec" =~ ^[0-9]+$ ]] && ((cooling_retry_max_sec > max_cooling_retry_sec)); then
+        last_failure_state="cooling_retry_exceeded"
+        if ! jq -e 'index("cooling_retry_above_threshold") != null' <<<"$last_failure_reasons_json" >/dev/null 2>&1; then
+          last_failure_reasons_json="$(
+            jq -nc --argjson base "$last_failure_reasons_json" '$base + ["cooling_retry_above_threshold"] | unique'
+          )"
+        fi
         echo "server-federation-wait: FAIL cooling retry window exceeds threshold (observed=${cooling_retry_max_sec}s threshold=${max_cooling_retry_sec}s)"
         echo "  peer_sync: success=$peer_success quorum_met=$peer_quorum success_sources=$peer_sources source_operator_count=$peer_source_operators_count last_run_at=$peer_last_run age_sec=$peer_sync_age_display"
         if [[ -n "$peer_source_operators" ]]; then
@@ -4015,6 +4318,7 @@ server_federation_wait() {
           jq -n --argjson sync "$last_sync_json" --argjson peer "$last_peer_json" \
             '{sync_status: $sync, peer_status: $peer}'
         fi
+        emit_federation_wait_summary "fail" "$last_failure_state" "$last_failure_reasons_json" "$last_sync_json" "$last_peer_json"
         rm -f "$sync_body" "$peer_status_body"
         return 1
       fi
@@ -4058,12 +4362,17 @@ server_federation_wait() {
           jq -n --argjson sync "$last_sync_json" --argjson peer "$last_peer_json" \
             '{sync_status: $sync, peer_status: $peer}'
         fi
+        emit_federation_wait_summary "ready" "ready" "$last_failure_reasons_json" "$last_sync_json" "$last_peer_json"
         rm -f "$sync_body" "$peer_status_body"
         return 0
       fi
 
       echo "server-federation-wait poll: attempt=$attempt remaining_sec=$remaining_sec peer_sync_ready=$peer_sync_ready issuer_sync_ready=$issuer_sync_ready peer_health_ready=$peer_health_ready peer_success_sources=$peer_sources issuer_success_sources=$issuer_sources peer_source_operators=$peer_source_operators_count issuer_source_operators=$issuer_source_operators_count peer_sync_age_sec=$peer_sync_age_display issuer_sync_age_sec=$issuer_sync_age_display configured_healthy=${configured_healthy}/${configured_peers} configured_failing=$configured_failing discovered_eligible=$discovered_eligible cooling_retry_max_sec=$cooling_retry_max_sec"
     else
+      last_failure_state="admin_endpoints_unreachable"
+      if [[ -z "$last_sync_json" || -z "$last_peer_json" ]]; then
+        last_failure_reasons_json='["admin_endpoints_unreachable"]'
+      fi
       echo "server-federation-wait poll: attempt=$attempt remaining_sec=$remaining_sec sync_code=${sync_code:-none} peer_status_code=${peer_status_code:-none} (waiting for admin endpoints)"
     fi
 
@@ -4108,6 +4417,19 @@ server_federation_wait() {
     jq -n --argjson sync "$last_sync_json" --argjson peer "$last_peer_json" \
       '{sync_status: $sync, peer_status: $peer}'
   fi
+  local timeout_failure_reasons_json
+  timeout_failure_reasons_json="$last_failure_reasons_json"
+  if ! jq -e 'type == "array"' <<<"$timeout_failure_reasons_json" >/dev/null 2>&1; then
+    timeout_failure_reasons_json='[]'
+  fi
+  if jq -e 'length == 0' <<<"$timeout_failure_reasons_json" >/dev/null 2>&1; then
+    if [[ "$last_failure_state" == "admin_endpoints_unreachable" ]]; then
+      timeout_failure_reasons_json='["admin_endpoints_unreachable"]'
+    elif [[ "$last_peer_sync_ready" != "1" || "$last_issuer_sync_ready" != "1" || "$last_peer_health_ready" != "1" ]]; then
+      timeout_failure_reasons_json='["federation_not_ready"]'
+    fi
+  fi
+  emit_federation_wait_summary "timeout" "timeout" "$timeout_failure_reasons_json" "$last_sync_json" "$last_peer_json"
   return 1
 }
 
@@ -6072,6 +6394,8 @@ prod_gate_signoff() {
   local require_signoff_ok="0"
   local require_incident_snapshot_on_fail="0"
   local require_incident_snapshot_artifacts="0"
+  local incident_snapshot_min_attachment_count="0"
+  local incident_snapshot_max_skipped_count="-1"
   local require_wg_validate_udp_source="0"
   local require_wg_validate_strict_distinct="0"
   local require_wg_soak_diversity_pass="0"
@@ -6212,6 +6536,14 @@ prod_gate_signoff() {
           shift
         fi
         ;;
+      --incident-snapshot-min-attachment-count)
+        incident_snapshot_min_attachment_count="${2:-}"
+        shift 2
+        ;;
+      --incident-snapshot-max-skipped-count)
+        incident_snapshot_max_skipped_count="${2:-}"
+        shift 2
+        ;;
       --require-wg-validate-udp-source)
         if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
           require_wg_validate_udp_source="${2:-}"
@@ -6289,6 +6621,8 @@ Usage:
     [--require-signoff-ok [0|1]] \
     [--require-incident-snapshot-on-fail [0|1]] \
     [--require-incident-snapshot-artifacts [0|1]] \
+    [--incident-snapshot-min-attachment-count N] \
+    [--incident-snapshot-max-skipped-count N|-1] \
     [--require-wg-validate-udp-source [0|1]] \
     [--require-wg-validate-strict-distinct [0|1]] \
     [--require-wg-soak-diversity-pass [0|1]] \
@@ -6340,6 +6674,8 @@ EOF_PROD_GATE_SIGNOFF_HELP
     --require-signoff-ok "$require_signoff_ok"
     --require-incident-snapshot-on-fail "$require_incident_snapshot_on_fail"
     --require-incident-snapshot-artifacts "$require_incident_snapshot_artifacts"
+    --incident-snapshot-min-attachment-count "$incident_snapshot_min_attachment_count"
+    --incident-snapshot-max-skipped-count "$incident_snapshot_max_skipped_count"
     --require-wg-validate-udp-source "$require_wg_validate_udp_source"
     --require-wg-validate-strict-distinct "$require_wg_validate_strict_distinct"
     --require-wg-soak-diversity-pass "$require_wg_soak_diversity_pass"
@@ -6690,6 +7026,18 @@ prod_pilot_cohort_campaign_summary() {
   ensure_deps_or_die
   local summary_script="${PROD_PILOT_COHORT_CAMPAIGN_SUMMARY_SCRIPT:-$ROOT_DIR/scripts/prod_pilot_cohort_campaign_summary.sh}"
   "$summary_script" "$@"
+}
+
+prod_pilot_cohort_campaign_check() {
+  ensure_deps_or_die
+  local check_script="${PROD_PILOT_COHORT_CAMPAIGN_CHECK_SCRIPT:-$ROOT_DIR/scripts/prod_pilot_cohort_campaign_check.sh}"
+  "$check_script" "$@"
+}
+
+prod_pilot_cohort_campaign_signoff() {
+  ensure_deps_or_die
+  local signoff_script="${PROD_PILOT_COHORT_CAMPAIGN_SIGNOFF_SCRIPT:-$ROOT_DIR/scripts/prod_pilot_cohort_campaign_signoff.sh}"
+  "$signoff_script" "$@"
 }
 
 prod_pilot_cohort_quick() {
@@ -10799,6 +11147,14 @@ main() {
     prod-pilot-cohort-campaign-summary)
       shift
       prod_pilot_cohort_campaign_summary "$@"
+      ;;
+    prod-pilot-cohort-campaign-check)
+      shift
+      prod_pilot_cohort_campaign_check "$@"
+      ;;
+    prod-pilot-cohort-campaign-signoff)
+      shift
+      prod_pilot_cohort_campaign_signoff "$@"
       ;;
     prod-pilot-cohort-quick)
       shift

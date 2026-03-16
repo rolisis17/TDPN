@@ -28,6 +28,8 @@ Usage:
     [--require-bundle-manifest [0|1]] \
     [--require-incident-snapshot-on-fail [0|1]] \
     [--require-incident-snapshot-artifacts [0|1]] \
+    [--incident-snapshot-min-attachment-count N] \
+    [--incident-snapshot-max-skipped-count N|-1] \
     [--show-json [0|1]]
 
 Purpose:
@@ -200,6 +202,8 @@ require_bundle_created="${PROD_PILOT_COHORT_CHECK_REQUIRE_BUNDLE_CREATED:-1}"
 require_bundle_manifest="${PROD_PILOT_COHORT_CHECK_REQUIRE_BUNDLE_MANIFEST:-1}"
 require_incident_snapshot_on_fail="${PROD_PILOT_COHORT_CHECK_REQUIRE_INCIDENT_SNAPSHOT_ON_FAIL:-1}"
 require_incident_snapshot_artifacts="${PROD_PILOT_COHORT_CHECK_REQUIRE_INCIDENT_SNAPSHOT_ARTIFACTS:-1}"
+incident_snapshot_min_attachment_count="${PROD_PILOT_COHORT_CHECK_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT:-0}"
+incident_snapshot_max_skipped_count="${PROD_PILOT_COHORT_CHECK_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT:--1}"
 show_json="${PROD_PILOT_COHORT_CHECK_SHOW_JSON:-0}"
 
 while [[ $# -gt 0 ]]; do
@@ -339,6 +343,14 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --incident-snapshot-min-attachment-count)
+      incident_snapshot_min_attachment_count="${2:-}"
+      shift 2
+      ;;
+    --incident-snapshot-max-skipped-count)
+      incident_snapshot_max_skipped_count="${2:-}"
+      shift 2
+      ;;
     --show-json)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         show_json="${2:-}"
@@ -372,6 +384,14 @@ bool_arg_or_die "--require-bundle-manifest" "$require_bundle_manifest"
 bool_arg_or_die "--require-incident-snapshot-on-fail" "$require_incident_snapshot_on_fail"
 bool_arg_or_die "--require-incident-snapshot-artifacts" "$require_incident_snapshot_artifacts"
 bool_arg_or_die "--show-json" "$show_json"
+if [[ ! "$incident_snapshot_min_attachment_count" =~ ^[0-9]+$ ]]; then
+  echo "--incident-snapshot-min-attachment-count must be an integer >= 0"
+  exit 2
+fi
+if [[ ! "$incident_snapshot_max_skipped_count" =~ ^-?[0-9]+$ ]] || ((incident_snapshot_max_skipped_count < -1)); then
+  echo "--incident-snapshot-max-skipped-count must be an integer >= -1"
+  exit 2
+fi
 
 if [[ ! "$max_round_failures" =~ ^[0-9]+$ ]]; then
   echo "--max-round-failures must be an integer >= 0"
@@ -495,7 +515,8 @@ incident_latest_report_md=""
 incident_latest_attachment_manifest=""
 incident_latest_attachment_skipped=""
 incident_latest_attachment_count="0"
-if [[ "$rounds_failed" -gt 0 && ( "$require_incident_snapshot_on_fail" == "1" || "$require_incident_snapshot_artifacts" == "1" ) ]]; then
+incident_latest_attachment_skipped_count="0"
+if [[ "$rounds_failed" -gt 0 && ( "$require_incident_snapshot_on_fail" == "1" || "$require_incident_snapshot_artifacts" == "1" || "$incident_snapshot_min_attachment_count" -gt 0 || "$incident_snapshot_max_skipped_count" -ge 0 ) ]]; then
   mapfile -t run_report_paths < <(json_string_array "$summary_json" '.run_reports')
   if [[ "${#run_report_paths[@]}" -eq 0 ]]; then
     mapfile -t run_report_paths < <(json_string_array "$summary_json" '.artifacts.run_reports')
@@ -544,6 +565,7 @@ if [[ "$rounds_failed" -gt 0 && ( "$require_incident_snapshot_on_fail" == "1" ||
     rr_snapshot_attachment_manifest="$(json_string "$rr" '.incident_snapshot.attachment_manifest')"
     rr_snapshot_attachment_skipped="$(json_string "$rr" '.incident_snapshot.attachment_skipped')"
     rr_snapshot_attachment_count="$(json_int "$rr" '.incident_snapshot.attachment_count')"
+    rr_snapshot_attachment_skipped_count="0"
     if [[ -n "$rr_snapshot_bundle_dir" && "$rr_snapshot_bundle_dir" != /* ]]; then
       rr_snapshot_bundle_dir="$ROOT_DIR/$rr_snapshot_bundle_dir"
     fi
@@ -562,6 +584,12 @@ if [[ "$rounds_failed" -gt 0 && ( "$require_incident_snapshot_on_fail" == "1" ||
     if [[ -n "$rr_snapshot_attachment_skipped" && "$rr_snapshot_attachment_skipped" != /* ]]; then
       rr_snapshot_attachment_skipped="$ROOT_DIR/$rr_snapshot_attachment_skipped"
     fi
+    if [[ -n "$rr_snapshot_attachment_skipped" && -f "$rr_snapshot_attachment_skipped" ]]; then
+      rr_snapshot_attachment_skipped_count="$(awk 'NF>0 {c++} END {print c+0}' "$rr_snapshot_attachment_skipped" 2>/dev/null || echo "0")"
+      if [[ -z "$rr_snapshot_attachment_skipped_count" || ! "$rr_snapshot_attachment_skipped_count" =~ ^[0-9]+$ ]]; then
+        rr_snapshot_attachment_skipped_count="0"
+      fi
+    fi
     if [[ -z "$incident_latest_run_report" || -n "$rr_snapshot_status" || -n "$rr_snapshot_bundle_dir" || -n "$rr_snapshot_bundle_tar" || -n "$rr_snapshot_summary_json" || -n "$rr_snapshot_report_md" || -n "$rr_snapshot_attachment_manifest" || -n "$rr_snapshot_attachment_skipped" ]]; then
       incident_latest_run_report="$rr"
       incident_latest_enabled="$rr_snapshot_enabled"
@@ -573,6 +601,7 @@ if [[ "$rounds_failed" -gt 0 && ( "$require_incident_snapshot_on_fail" == "1" ||
       incident_latest_attachment_manifest="$rr_snapshot_attachment_manifest"
       incident_latest_attachment_skipped="$rr_snapshot_attachment_skipped"
       incident_latest_attachment_count="$rr_snapshot_attachment_count"
+      incident_latest_attachment_skipped_count="$rr_snapshot_attachment_skipped_count"
     fi
 
     rr_has_policy_error=0
@@ -613,6 +642,25 @@ if [[ "$rounds_failed" -gt 0 && ( "$require_incident_snapshot_on_fail" == "1" ||
       fi
       if [[ -n "$rr_snapshot_attachment_skipped" && ! -f "$rr_snapshot_attachment_skipped" ]]; then
         errors+=("failed round incident snapshot attachment_skipped missing/not-found: $rr (attachment_skipped=${rr_snapshot_attachment_skipped:-unset})")
+        rr_has_policy_error=1
+      fi
+    fi
+
+    if ((incident_snapshot_min_attachment_count > 0)); then
+      if [[ "$rr_snapshot_status" != "ok" ]]; then
+        errors+=("failed round incident snapshot attachment policy requires snapshot status=ok: $rr (status=${rr_snapshot_status:-unset})")
+        rr_has_policy_error=1
+      elif ((rr_snapshot_attachment_count < incident_snapshot_min_attachment_count)); then
+        errors+=("failed round incident snapshot attachment_count below floor: $rr (${rr_snapshot_attachment_count} < ${incident_snapshot_min_attachment_count})")
+        rr_has_policy_error=1
+      fi
+    fi
+    if ((incident_snapshot_max_skipped_count >= 0)); then
+      if [[ "$rr_snapshot_status" != "ok" ]]; then
+        errors+=("failed round incident snapshot skipped-count policy requires snapshot status=ok: $rr (status=${rr_snapshot_status:-unset})")
+        rr_has_policy_error=1
+      elif ((rr_snapshot_attachment_skipped_count > incident_snapshot_max_skipped_count)); then
+        errors+=("failed round incident snapshot skipped attachment count exceeds policy: $rr (${rr_snapshot_attachment_skipped_count} > ${incident_snapshot_max_skipped_count})")
         rr_has_policy_error=1
       fi
     fi
@@ -845,6 +893,8 @@ summary_payload="$(
     --argjson require_bundle_manifest "$(json_bool "$require_bundle_manifest")" \
     --argjson require_incident_snapshot_on_fail "$(json_bool "$require_incident_snapshot_on_fail")" \
     --argjson require_incident_snapshot_artifacts "$(json_bool "$require_incident_snapshot_artifacts")" \
+    --argjson incident_snapshot_min_attachment_count "$incident_snapshot_min_attachment_count" \
+    --argjson incident_snapshot_max_skipped_count "$incident_snapshot_max_skipped_count" \
     --argjson incident_failed_reports_checked "$incident_failed_reports_checked" \
     --argjson incident_failed_reports_ok "$incident_failed_reports_ok" \
     --argjson incident_failed_reports_policy_errors "$incident_failed_reports_policy_errors" \
@@ -858,6 +908,7 @@ summary_payload="$(
     --argjson incident_latest_attachment_manifest_exists "$incident_latest_attachment_manifest_exists" \
     --argjson incident_latest_attachment_skipped_exists "$incident_latest_attachment_skipped_exists" \
     --argjson incident_latest_attachment_count "$incident_latest_attachment_count" \
+    --argjson incident_latest_attachment_skipped_count "$incident_latest_attachment_skipped_count" \
     --argjson incident_source_summary_exists "$incident_source_summary_exists" \
     --argjson incident_source_summary_valid_json "$incident_source_summary_valid_json" \
     --argjson errors "$errors_json" \
@@ -908,7 +959,8 @@ summary_payload="$(
           report_md:{path:($incident_latest_report_md // ""), exists:$incident_latest_report_exists},
           attachment_manifest:{path:($incident_latest_attachment_manifest // ""), exists:$incident_latest_attachment_manifest_exists},
           attachment_skipped:{path:($incident_latest_attachment_skipped // ""), exists:$incident_latest_attachment_skipped_exists},
-          attachment_count:$incident_latest_attachment_count
+          attachment_count:$incident_latest_attachment_count,
+          attachment_skipped_count:$incident_latest_attachment_skipped_count
         }
       },
       policy:{
@@ -929,7 +981,9 @@ summary_payload="$(
         require_bundle_created:$require_bundle_created,
         require_bundle_manifest:$require_bundle_manifest,
         require_incident_snapshot_on_fail:$require_incident_snapshot_on_fail,
-        require_incident_snapshot_artifacts:$require_incident_snapshot_artifacts
+        require_incident_snapshot_artifacts:$require_incident_snapshot_artifacts,
+        incident_snapshot_min_attachment_count:$incident_snapshot_min_attachment_count,
+        incident_snapshot_max_skipped_count:$incident_snapshot_max_skipped_count
       },
       observed_trend_policy:{
         require_wg_validate_udp_source:$trend_policy_require_wg_validate_udp_source,
@@ -958,10 +1012,10 @@ summary_payload="$(
 
 echo "[prod-pilot-cohort-check] decision=$decision status=${status:-unset} rounds_failed=$rounds_failed go_rate_pct=${trend_go_rate_pct:-unset} alert=${alert_severity:-unset} errors=${#errors[@]}"
 if [[ -n "$incident_latest_run_report" ]]; then
-  echo "[prod-pilot-cohort-check] incident_snapshot_latest_failed_run_report=$incident_latest_run_report status=${incident_latest_status:-unset} summary_json=${incident_latest_summary_json:-unset} report_md=${incident_latest_report_md:-unset} attachment_manifest=${incident_latest_attachment_manifest:-unset} attachment_skipped=${incident_latest_attachment_skipped:-unset} attachment_count=${incident_latest_attachment_count}"
+  echo "[prod-pilot-cohort-check] incident_snapshot_latest_failed_run_report=$incident_latest_run_report status=${incident_latest_status:-unset} summary_json=${incident_latest_summary_json:-unset} report_md=${incident_latest_report_md:-unset} attachment_manifest=${incident_latest_attachment_manifest:-unset} attachment_skipped=${incident_latest_attachment_skipped:-unset} attachment_count=${incident_latest_attachment_count} attachment_skipped_count=${incident_latest_attachment_skipped_count}"
 fi
 if [[ -n "$incident_latest_run_report" || -n "$incident_latest_summary_json" || -n "$incident_latest_report_md" || -n "$incident_latest_attachment_manifest" || -n "$incident_latest_attachment_skipped" ]]; then
-  echo "[prod-pilot-cohort-check] incident_handoff source_summary_json=${summary_json:-unset} source_run_report=${incident_latest_run_report:-unset} summary_json=${incident_latest_summary_json:-unset} report_md=${incident_latest_report_md:-unset} attachment_manifest=${incident_latest_attachment_manifest:-unset} attachment_skipped=${incident_latest_attachment_skipped:-unset} attachment_count=${incident_latest_attachment_count}"
+  echo "[prod-pilot-cohort-check] incident_handoff source_summary_json=${summary_json:-unset} source_run_report=${incident_latest_run_report:-unset} summary_json=${incident_latest_summary_json:-unset} report_md=${incident_latest_report_md:-unset} attachment_manifest=${incident_latest_attachment_manifest:-unset} attachment_skipped=${incident_latest_attachment_skipped:-unset} attachment_count=${incident_latest_attachment_count} attachment_skipped_count=${incident_latest_attachment_skipped_count}"
 fi
 if [[ "$show_json" == "1" ]]; then
   echo "[prod-pilot-cohort-check] summary_json_payload:"

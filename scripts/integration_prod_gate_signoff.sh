@@ -65,6 +65,8 @@ THREE_MACHINE_PROD_GATE_CHECK_SCRIPT="$FAKE_CHECK" \
   --require-signoff-ok 1 \
   --require-incident-snapshot-on-fail 1 \
   --require-incident-snapshot-artifacts 1 \
+  --incident-snapshot-min-attachment-count 2 \
+  --incident-snapshot-max-skipped-count 0 \
   --require-wg-validate-udp-source 1 \
   --require-wg-validate-strict-distinct 1 \
   --require-wg-soak-diversity-pass 1 \
@@ -163,6 +165,16 @@ if ! rg -q -- '--require-incident-snapshot-on-fail 1' "$CHECK_CAPTURE"; then
 fi
 if ! rg -q -- '--require-incident-snapshot-artifacts 1' "$CHECK_CAPTURE"; then
   echo "prod-gate-signoff forwarding failed: check missing --require-incident-snapshot-artifacts"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--incident-snapshot-min-attachment-count 2' "$CHECK_CAPTURE"; then
+  echo "prod-gate-signoff forwarding failed: check missing --incident-snapshot-min-attachment-count"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--incident-snapshot-max-skipped-count 0' "$CHECK_CAPTURE"; then
+  echo "prod-gate-signoff forwarding failed: check missing --incident-snapshot-max-skipped-count"
   cat "$CHECK_CAPTURE"
   exit 1
 fi
