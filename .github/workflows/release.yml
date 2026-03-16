@@ -54,11 +54,11 @@ jobs:
             dist/${{ github.ref_name }}/bin/*
 
       - name: Attest release checksums
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: dist/${{ github.ref_name }}/sha256sums.txt
 
       - name: Attest release SBOM
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: dist/${{ github.ref_name }}/sbom_go_modules_${{ github.ref_name }}.json
