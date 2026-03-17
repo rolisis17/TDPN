@@ -42,6 +42,14 @@ Notes:
 
 ## 2) Easy installer + launcher (for simple testing)
 
+Current direction (March 17, 2026):
+- use profile-first operation (`Speed`, `Balanced`, `Private`) as the primary UX
+- keep advanced flags for expert diagnostics and CI policy enforcement
+- keep `Balanced` as the default recommendation for most operators
+- keep default path architecture at 2-hop
+- introduce true 1-hop only as an explicit experimental lower-privacy option
+- keep quick launcher flows low-prompt by default, with one explicit "customize advanced options" branch when needed
+
 Files:
 - `scripts/install_easy_mode.sh`
 - `scripts/easy_node.sh`
@@ -51,6 +59,23 @@ Install launcher:
 
 ```bash
 ./scripts/install_easy_mode.sh
+```
+
+Optional: auto-update from GitHub before server/client start (friend-machine friendly):
+
+```bash
+# one-time setup in shell profile (example: ~/.bashrc)
+export EASY_NODE_AUTO_UPDATE=1
+export EASY_NODE_AUTO_UPDATE_REMOTE=origin
+export EASY_NODE_AUTO_UPDATE_BRANCH=main
+# safe default: skip auto-update when tracked local changes exist
+export EASY_NODE_AUTO_UPDATE_ALLOW_DIRTY=0
+```
+
+Manual one-shot update is also available:
+
+```bash
+./scripts/easy_node.sh self-update
 ```
 
 Run interactive menu:

@@ -81,6 +81,7 @@ usage() {
   cat <<'USAGE'
 Usage:
   ./scripts/easy_node.sh check
+  ./scripts/easy_node.sh self-update [--remote NAME] [--branch NAME] [--allow-dirty [0|1]] [--show-status [0|1]]
   ./scripts/easy_node.sh server-preflight [--mode authority|provider] [--public-host HOST] [--operator-id ID] [--issuer-id ID] [--authority-directory URL] [--authority-issuer URL] [--peer-directories URLS] [--bootstrap-directory URL] [--peer-identity-strict 0|1|auto] [--min-peer-operators N] [--timeout-sec N] [--beta-profile [0|1]] [--prod-profile [0|1]]
   ./scripts/easy_node.sh server-up [--mode authority|provider] [--public-host HOST] [--operator-id ID] [--issuer-id ID] [--issuer-admin-token TOKEN] [--directory-admin-token TOKEN] [--entry-puzzle-secret SECRET] [--authority-directory URL] [--authority-issuer URL] [--peer-directories URLS] [--bootstrap-directory URL] [--peer-identity-strict 0|1|auto] [--client-allowlist [0|1]] [--allow-anon-cred [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]] [--show-admin-token [0|1]] [--federation-wait [0|1]] [--federation-ready-timeout-sec N] [--federation-poll-sec N] [--federation-require-configured-healthy [0|1]] [--federation-max-cooling-retry-sec N] [--federation-max-peer-sync-age-sec N] [--federation-max-issuer-sync-age-sec N] [--federation-min-peer-success-sources N] [--federation-min-issuer-success-sources N] [--federation-min-peer-source-operators N] [--federation-min-issuer-source-operators N] [--federation-wait-summary-json PATH] [--federation-wait-print-summary-json [0|1]] [--auto-invite [0|1]] [--auto-invite-count N] [--auto-invite-tier 1|2|3] [--auto-invite-wait-sec N] [--auto-invite-fail-open [0|1]]
   ./scripts/easy_node.sh server-status
@@ -165,6 +166,8 @@ Usage:
   ./scripts/easy_node.sh discover-hosts --bootstrap-directory URL [--wait-sec N] [--min-hosts N] [--write-config [0|1]]
 
 Notes:
+  - self-update fast-forwards this repo from git remote/branch (safe default: skip dirty or non-fast-forward local state).
+  - set EASY_NODE_AUTO_UPDATE=1 to auto-run self-update before selected commands (defaults: server-up/server-session/client-test/client-vpn-up/client-vpn-session).
   - server-preflight validates peer/issuer reachability plus identity/quorum readiness before server-up.
   - server-up --mode authority runs directory + issuer + entry-exit.
   - server-up --mode provider runs directory + entry-exit only (no local issuer/admin token).
@@ -330,6 +333,170 @@ check_dependencies() {
     return 0
   fi
   return 1
+}
+
+EASY_NODE_SELF_UPDATE_APPLIED=0
+
+self_update_repo() {
+  local remote="${EASY_NODE_AUTO_UPDATE_REMOTE:-origin}"
+  local branch="${EASY_NODE_AUTO_UPDATE_BRANCH:-}"
+  local allow_dirty="${EASY_NODE_AUTO_UPDATE_ALLOW_DIRTY:-0}"
+  local show_status="${EASY_NODE_AUTO_UPDATE_SHOW_STATUS:-1}"
+  local local_sha remote_sha base_sha new_sha
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --remote)
+        remote="${2:-}"
+        shift 2
+        ;;
+      --branch)
+        branch="${2:-}"
+        shift 2
+        ;;
+      --allow-dirty)
+        allow_dirty="${2:-}"
+        shift 2
+        ;;
+      --show-status)
+        show_status="${2:-}"
+        shift 2
+        ;;
+      *)
+        echo "unknown arg for self-update: $1"
+        return 2
+        ;;
+    esac
+  done
+
+  if [[ -z "$remote" ]]; then
+    echo "self-update requires --remote (or EASY_NODE_AUTO_UPDATE_REMOTE)"
+    return 1
+  fi
+  if [[ "$allow_dirty" != "0" && "$allow_dirty" != "1" ]]; then
+    echo "self-update requires --allow-dirty (or EASY_NODE_AUTO_UPDATE_ALLOW_DIRTY) to be 0 or 1"
+    return 1
+  fi
+  if [[ "$show_status" != "0" && "$show_status" != "1" ]]; then
+    echo "self-update requires --show-status (or EASY_NODE_AUTO_UPDATE_SHOW_STATUS) to be 0 or 1"
+    return 1
+  fi
+
+  EASY_NODE_SELF_UPDATE_APPLIED=0
+
+  if ! command -v git >/dev/null 2>&1; then
+    echo "self-update skipped: git is not installed"
+    return 0
+  fi
+  if ! git -C "$ROOT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "self-update skipped: $ROOT_DIR is not a git working tree"
+    return 0
+  fi
+  if ! git -C "$ROOT_DIR" remote get-url "$remote" >/dev/null 2>&1; then
+    echo "self-update skipped: git remote '$remote' is not configured"
+    return 0
+  fi
+
+  if [[ -z "$branch" ]]; then
+    branch="$(git -C "$ROOT_DIR" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+  fi
+  if [[ -z "$branch" ]]; then
+    echo "self-update skipped: detached HEAD (set --branch or EASY_NODE_AUTO_UPDATE_BRANCH)"
+    return 0
+  fi
+
+  if [[ "$allow_dirty" != "1" ]]; then
+    if [[ -n "$(git -C "$ROOT_DIR" status --porcelain --untracked-files=no 2>/dev/null || true)" ]]; then
+      echo "self-update skipped: working tree has local tracked changes"
+      return 0
+    fi
+  fi
+
+  if ! git -C "$ROOT_DIR" fetch --quiet "$remote" "$branch"; then
+    echo "self-update failed: fetch error for ${remote}/${branch}"
+    return 1
+  fi
+
+  local_sha="$(git -C "$ROOT_DIR" rev-parse HEAD 2>/dev/null || true)"
+  remote_sha="$(git -C "$ROOT_DIR" rev-parse "${remote}/${branch}" 2>/dev/null || true)"
+  if [[ -z "$local_sha" || -z "$remote_sha" ]]; then
+    echo "self-update failed: unable to resolve local/remote revision"
+    return 1
+  fi
+
+  if [[ "$local_sha" == "$remote_sha" ]]; then
+    if [[ "$show_status" == "1" ]]; then
+      echo "self-update: already up to date (${remote}/${branch})"
+    fi
+    return 0
+  fi
+
+  base_sha="$(git -C "$ROOT_DIR" merge-base "$local_sha" "$remote_sha" 2>/dev/null || true)"
+  if [[ -z "$base_sha" ]]; then
+    echo "self-update failed: unable to compute merge-base"
+    return 1
+  fi
+  if [[ "$base_sha" != "$local_sha" ]]; then
+    echo "self-update skipped: local branch has non-fast-forward changes (manual merge/rebase required)"
+    return 0
+  fi
+
+  if ! git -C "$ROOT_DIR" merge --ff-only "${remote}/${branch}" >/dev/null 2>&1; then
+    echo "self-update failed: fast-forward merge failed for ${remote}/${branch}"
+    return 1
+  fi
+
+  new_sha="$(git -C "$ROOT_DIR" rev-parse HEAD 2>/dev/null || true)"
+  EASY_NODE_SELF_UPDATE_APPLIED=1
+  if [[ "$show_status" == "1" ]]; then
+    echo "self-update: updated ${local_sha:0:12} -> ${new_sha:0:12} (${remote}/${branch})"
+  fi
+  return 0
+}
+
+auto_update_command_enabled() {
+  local cmd
+  cmd="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+  local commands_csv="${EASY_NODE_AUTO_UPDATE_COMMANDS:-server-up,server-session,client-test,client-vpn-up,client-vpn-session}"
+  local normalized_csv
+  normalized_csv="$(printf '%s' "$commands_csv" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+  case ",${normalized_csv}," in
+    *,"$cmd",*)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+maybe_auto_update_and_reexec() {
+  local cmd="${1:-}"
+  if [[ $# -gt 0 ]]; then
+    shift
+  fi
+
+  if [[ "${EASY_NODE_AUTO_UPDATE:-0}" != "1" ]]; then
+    return 0
+  fi
+  if [[ "$cmd" == "self-update" || "$cmd" == "-h" || "$cmd" == "--help" || "$cmd" == "help" || -z "$cmd" ]]; then
+    return 0
+  fi
+  if ! auto_update_command_enabled "$cmd"; then
+    return 0
+  fi
+  if [[ "${EASY_NODE_AUTO_UPDATE_REEXECED:-0}" == "1" ]]; then
+    return 0
+  fi
+
+  if ! self_update_repo; then
+    echo "auto-update warning: continuing with current local code"
+    return 0
+  fi
+
+  if [[ "${EASY_NODE_SELF_UPDATE_APPLIED:-0}" == "1" ]]; then
+    echo "auto-update: reloading command with updated code"
+    export EASY_NODE_AUTO_UPDATE_REEXECED=1
+    exec "$0" "$cmd" "$@"
+  fi
 }
 
 wait_http_ok() {
@@ -10893,9 +11060,14 @@ EOF_STATE
 
 main() {
   local cmd="${1:-}"
+  maybe_auto_update_and_reexec "$@"
   case "$cmd" in
     check)
       check_dependencies
+      ;;
+    self-update)
+      shift
+      self_update_repo "$@"
       ;;
     server-preflight)
       shift

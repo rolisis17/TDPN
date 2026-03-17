@@ -147,6 +147,9 @@ echo "[ci] easy-node server federation status integration"
 echo "[ci] easy-node server federation wait integration"
 ./scripts/integration_easy_node_server_federation_wait.sh
 
+echo "[ci] easy-node self-update integration"
+./scripts/integration_easy_node_self_update.sh
+
 echo "[ci] easy-node client profile env integration"
 ./scripts/integration_easy_node_client_profile_env.sh
 

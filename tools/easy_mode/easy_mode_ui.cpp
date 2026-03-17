@@ -1037,10 +1037,15 @@ void quickClientConnect(const std::string &script, ABHosts &hosts) {
                                  (!hosts.bHost.empty() ? endpointFromHost(hosts.bHost, 8081) : "");
   std::string bootstrapDir = normalizeEndpointURL(readLine("Server IP/host or bootstrap URL", defaultBootstrap), 8081);
   std::string inviteKey = trim(readLine("Invite key", ""));
-  std::string discoveryWait = readLine("Discovery wait sec", "20");
-  bool prodProfile = parseYesNo(readLine("Use PROD profile (mTLS + strict fail-closed)? (y/N)", "n"), false);
-  PathProfile pathProfile = choosePathProfile("Client path profile (1=Fast, 2=Balanced, 3=Privacy)", "2");
-  bool realVPN = parseYesNo(readLine("Run real VPN mode (host WireGuard interface)? (Y/n)", "y"), true);
+  PathProfile pathProfile = choosePathProfile("Connection profile (1=Speed, 2=Balanced, 3=Private)", "2");
+  bool realVPN = parseYesNo(readLine("Use real VPN mode (host WireGuard interface)? (Y/n)", "y"), true);
+  bool customize = parseYesNo(readLine("Customize advanced client options? (y/N)", "n"), false);
+  std::string discoveryWait = "20";
+  bool prodProfile = false;
+  if (customize) {
+    discoveryWait = readLine("Discovery wait sec", discoveryWait);
+    prodProfile = parseYesNo(readLine("Use PROD profile (mTLS + strict fail-closed)? (y/N)", "n"), false);
+  }
   if (bootstrapDir.empty()) {
     std::cout << "server IP/host is required\n";
     return;
@@ -1051,9 +1056,17 @@ void quickClientConnect(const std::string &script, ABHosts &hosts) {
   }
   std::ostringstream cmd;
   if (realVPN) {
-    std::string iface = trim(readLine("VPN interface name", "wgvpn0"));
-    std::string readyTimeout = readLine("VPN ready timeout sec", "35");
-    bool runPreflight = parseYesNo(readLine("Run VPN preflight first? (Y/n)", "y"), true);
+    std::string iface = "wgvpn0";
+    std::string readyTimeout = "35";
+    bool runPreflight = true;
+    bool openTerminal = false;
+    if (customize) {
+      iface = trim(readLine("VPN interface name", iface));
+      readyTimeout = readLine("VPN ready timeout sec", readyTimeout);
+      runPreflight = parseYesNo(readLine("Run VPN preflight first? (Y/n)", "y"), true);
+      openTerminal = parseYesNo(
+          readLine("Open dedicated CLIENT terminal with live logs + auto cleanup on close? (Y/n)", "y"), true);
+    }
     if (runPreflight) {
       std::ostringstream preflightCmd;
       const bool enforceOperatorFloor = prodProfile && pathProfile.distinctOperators;
@@ -1064,7 +1077,10 @@ void quickClientConnect(const std::string &script, ABHosts &hosts) {
                    << " --interface " << shellEscape(iface)
                    << " --operator-floor-check " << (enforceOperatorFloor ? "1" : "0");
       if (!isRootUser()) {
-        bool useSudoPreflight = parseYesNo(readLine("Run preflight with sudo? (Y/n)", "y"), true);
+        bool useSudoPreflight = true;
+        if (customize) {
+          useSudoPreflight = parseYesNo(readLine("Run preflight with sudo? (Y/n)", "y"), true);
+        }
         if (runCommandWithOptionalSudo(preflightCmd.str(), useSudoPreflight, "client preflight") != 0) {
           std::cout << "preflight failed; stopping client connect flow\n";
           return;
@@ -1076,8 +1092,6 @@ void quickClientConnect(const std::string &script, ABHosts &hosts) {
         }
       }
     }
-    bool openTerminal = parseYesNo(
-        readLine("Open dedicated CLIENT terminal with live logs + auto cleanup on close? (Y/n)", "y"), true);
     cmd << shellEscape(script) << " client-vpn-session"
         << " --bootstrap-directory " << shellEscape(bootstrapDir)
         << " --discovery-wait-sec " << shellEscape(discoveryWait)
@@ -1091,7 +1105,10 @@ void quickClientConnect(const std::string &script, ABHosts &hosts) {
         << " --cleanup-all 1";
     appendPathProfileFlags(cmd, pathProfile);
     if (!isRootUser()) {
-      bool useSudo = parseYesNo(readLine("Run with sudo? (Y/n)", "y"), true);
+      bool useSudo = true;
+      if (customize) {
+        useSudo = parseYesNo(readLine("Run with sudo? (Y/n)", "y"), true);
+      }
       if (openTerminal) {
         launchDetachedTerminalCommandWithOptionalSudo("Privacynode CLIENT session",
                                                      cmd.str(),
@@ -1109,7 +1126,10 @@ void quickClientConnect(const std::string &script, ABHosts &hosts) {
     }
     std::cout << "Use Other options -> 32 (status) and 33 (down); option 31 reruns preflight.\n";
   } else {
-    std::string timeoutSec = readLine("Connection timeout sec", "45");
+    std::string timeoutSec = "45";
+    if (customize) {
+      timeoutSec = readLine("Connection timeout sec", timeoutSec);
+    }
     cmd << shellEscape(script) << " client-test"
         << " --bootstrap-directory " << shellEscape(bootstrapDir)
         << " --discovery-wait-sec " << shellEscape(discoveryWait)
@@ -1127,37 +1147,40 @@ void quickServerConnect(const std::string &root, const std::string &script, ABHo
   std::string hostDefault = !hosts.aHost.empty() ? hosts.aHost : (!hosts.bHost.empty() ? hosts.bHost : "");
   std::string host = normalizePublicHostInput(readLine("Public host/IP for this server", hostDefault));
   bool authorityMode = parseYesNo(readLine("Is this your AUTHORITY admin machine? (y/N)", "n"), false);
-  if (authorityMode) {
-    bool confirmAuthority = parseYesNo(readLine("Authority mode can create/disable invite keys. Continue? (y/N)", "n"), false);
-    if (!confirmAuthority) {
-      authorityMode = false;
-      std::cout << "using provider mode\n";
-    }
-  }
+  bool customize = parseYesNo(readLine("Customize advanced server options? (y/N)", "n"), false);
   std::string peerDefault = "";
   if (!host.empty() && host == hosts.aHost && !hosts.bHost.empty()) {
     peerDefault = hosts.bHost;
   } else if (!host.empty() && host == hosts.bHost && !hosts.aHost.empty()) {
     peerDefault = hosts.aHost;
   }
-  std::string peerHost = normalizePublicHostInput(readOptionalLine("Peer server IP/host (optional)", peerDefault));
+  std::string peerHost = peerDefault;
+  if (authorityMode && customize) {
+    peerHost = normalizePublicHostInput(readOptionalLine("Peer server IP/host (optional)", peerDefault));
+  }
   if (host.empty()) {
     std::cout << "public host/IP is required\n";
     return;
   }
-  bool prodProfile = parseYesNo(readLine("Enable PROD profile (mTLS + strict fail-closed)? (y/N)", "n"), false);
-  bool runPreflight = parseYesNo(readLine("Run server preflight before startup? (Y/n)", "y"), true);
-  std::string peerIdentityStrict = trim(readLine("Peer identity strict mode (auto/1/0)", "auto"));
-  if (peerIdentityStrict != "auto" && peerIdentityStrict != "1" && peerIdentityStrict != "0") {
-    std::cout << "invalid peer identity strict mode; using auto\n";
-    peerIdentityStrict = "auto";
+  bool prodProfile = false;
+  bool runPreflight = true;
+  std::string peerIdentityStrict = "auto";
+  std::string preflightTimeout = "8";
+  if (customize) {
+    prodProfile = parseYesNo(readLine("Enable PROD profile (mTLS + strict fail-closed)? (y/N)", "n"), false);
+    runPreflight = parseYesNo(readLine("Run server preflight before startup? (Y/n)", "y"), true);
+    peerIdentityStrict = trim(readLine("Peer identity strict mode (auto/1/0)", peerIdentityStrict));
+    if (peerIdentityStrict != "auto" && peerIdentityStrict != "1" && peerIdentityStrict != "0") {
+      std::cout << "invalid peer identity strict mode; using auto\n";
+      peerIdentityStrict = "auto";
+    }
+    preflightTimeout = readLine("Preflight timeout sec", preflightTimeout);
   }
-  std::string preflightTimeout = readLine("Preflight timeout sec", "8");
-  bool autoInvite = false;
+  bool autoInvite = authorityMode;
   std::string autoInviteCount = "1";
   std::string autoInviteTier = "1";
   std::string autoInviteWaitSec = "10";
-  if (authorityMode) {
+  if (authorityMode && customize) {
     autoInvite = parseYesNo(readLine("Auto-generate invite key(s) when server starts? (Y/n)", "y"), true);
     if (autoInvite) {
       autoInviteCount = trim(readLine("Auto invite key count", "1"));
@@ -1231,7 +1254,10 @@ void quickServerConnect(const std::string &root, const std::string &script, ABHo
 
   if (runPreflight) {
     std::string minPeerOpsDefault = peerDirectoriesArg.empty() ? "0" : "1";
-    std::string minPeerOps = readLine("Preflight minimum distinct peer operators", minPeerOpsDefault);
+    std::string minPeerOps = minPeerOpsDefault;
+    if (customize) {
+      minPeerOps = readLine("Preflight minimum distinct peer operators", minPeerOpsDefault);
+    }
     std::ostringstream preflightCmd;
     preflightCmd << shellEscape(script) << " server-preflight"
                  << " --mode " << shellEscape(modeValue)
@@ -1256,10 +1282,13 @@ void quickServerConnect(const std::string &root, const std::string &script, ABHo
     }
   }
 
-  bool openTerminal = parseYesNo(
-      readLine("Open dedicated SERVER terminal with live logs + auto cleanup on close? (Y/n)", "y"), true);
+  bool openTerminal = false;
+  if (customize) {
+    openTerminal = parseYesNo(
+        readLine("Open dedicated SERVER terminal with live logs + auto cleanup on close? (Y/n)", "y"), true);
+  }
   bool useSudo = false;
-  if (!isRootUser()) {
+  if (!isRootUser() && customize) {
     useSudo = parseYesNo(readLine("Run server session with sudo? (y/N)", "n"), false);
   }
 
@@ -1275,7 +1304,10 @@ void quickServerConnect(const std::string &root, const std::string &script, ABHo
     rc = runCommandWithOptionalSudo(cmd.str(), useSudo, "server session");
   }
 
-  bool saveHosts = parseYesNo(readLine("Save/update Machine A/B host config? (y/N)", "n"), false);
+  bool saveHosts = false;
+  if (customize) {
+    saveHosts = parseYesNo(readLine("Save/update Machine A/B host config? (y/N)", "n"), false);
+  }
   if (saveHosts) {
     configureABHostsInteractive(root, hosts, true);
   }
@@ -4717,12 +4749,13 @@ int main() {
 
   std::cout << "Privacynode Easy Launcher\n";
   std::cout << "repo: " << root << "\n";
+  std::cout << "tip: set EASY_NODE_AUTO_UPDATE=1 for automatic git fast-forward updates before server/client startup commands.\n";
 
   for (;;) {
     std::cout << "\nMain menu:\n";
     std::cout << "1) Connect as CLIENT (simple)\n";
     std::cout << "2) Connect as SERVER (simple, provider default)\n";
-    std::cout << "3) Other options (tests/config)\n";
+    std::cout << "3) Other options (expert/tests)\n";
     std::cout << "0) Exit\n";
     std::cout << "Selection: ";
 

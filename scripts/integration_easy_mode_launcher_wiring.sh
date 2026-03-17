@@ -41,7 +41,7 @@ echo "[easy-mode-wiring] main menu simplicity contract"
 check_cpp 'Main menu:' "launcher wiring failed: main menu heading missing"
 check_cpp '1\) Connect as CLIENT \(simple\)' "launcher wiring failed: simple CLIENT entry missing"
 check_cpp '2\) Connect as SERVER \(simple, provider default\)' "launcher wiring failed: simple SERVER entry missing"
-check_cpp '3\) Other options \(tests/config\)' "launcher wiring failed: advanced options entry missing"
+check_cpp '3\) Other options \(expert/tests\)' "launcher wiring failed: advanced options entry missing"
 
 echo "[easy-mode-wiring] simple server auto-invite wiring"
 check_cpp 'Auto-generate invite key\(s\) when server starts\?' "launcher wiring failed: simple server auto-invite prompt missing"

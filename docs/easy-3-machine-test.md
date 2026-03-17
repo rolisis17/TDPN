@@ -2,6 +2,16 @@
 
 This path is for fast manual testing with minimal setup.
 
+## Current Direction (March 17, 2026)
+
+To keep operations simpler without losing safety:
+- favor profile-first usage (`Speed`, `Balanced`, `Private`) in launcher and docs
+- keep advanced flags for expert/diagnostics use, not as the primary path
+- keep `Balanced` as default
+- keep 2-hop as the default privacy baseline
+- evaluate true 1-hop as an explicit experimental lower-privacy mode after `Speed` (2-hop) benchmarking
+- in quick launcher mode, ask only essential inputs and keep advanced prompts behind an explicit customize step
+
 Identity defaults:
 - `server-up` auto-generates unique `operator_id` and `issuer_id` when not provided.
 - With peer directories configured, `server-up` now fail-fast checks ID uniqueness against peers by default in beta/prod (`--peer-identity-strict auto`); temporary bypass for diagnostics: `--peer-identity-strict 0`.

@@ -2,6 +2,29 @@
 
 This roadmap keeps the focus on a production-grade decentralized VPN before adding staking/payment/blockchain layers.
 
+## Decision Log (March 17, 2026)
+
+We agreed to simplify the operator and user experience while keeping strong test coverage:
+- move from "many user-facing flags" to a profile-first interface (`Speed`, `Balanced`, `Private`)
+- keep advanced flags available behind an explicit expert/diagnostics path, not in the default flow
+- keep `Balanced` as default for public guidance
+- keep 2-hop as the default architecture for privacy baseline
+- add a latency-tuned `Speed` profile first on top of the current 2-hop path
+- treat true 1-hop mode as an explicit lower-privacy option and ship it as experimental before any default consideration
+- choose long-term defaults based on measured latency/reliability/privacy tradeoff data, not assumptions
+
+Next 5 roadmap execution steps:
+1. Freeze a minimal public CLI/UI contract around profiles.
+2. Route advanced policy switches into internal defaults and expert mode.
+3. Ship and benchmark `Speed` (2-hop latency-tuned).
+4. Implement experimental `speed-1hop` with clear safety/privacy labeling.
+5. Run comparative pilot metrics and decide default behavior from results.
+
+Strictly necessary vs optional (current project posture):
+- strictly necessary for daily operation: start server, connect client, preflight checks, status/down, invite generation on authority, and one repeatable automated signoff path
+- optional/expert (keep but do not make default): deep chaos/fault matrices, policy override flags, manual artifact-level campaign checks, and one-off diagnostics toggles
+- policy for UI and scripts: if a setting is rarely changed in healthy operation, it should be auto-defaulted and moved behind expert/custom mode
+
 ## Phase 1: Stable Linux Beta (Current Priority)
 
 Goal: reliable real-user beta on Linux servers + Linux clients.

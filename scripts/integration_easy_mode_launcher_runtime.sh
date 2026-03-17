@@ -178,11 +178,9 @@ INPUT1="$TMP_DIR/input1.txt"
   printf '1\n'   # main menu: simple client
   printf '\n'    # bootstrap URL (default from hosts)
   printf 'inv-runtime-smoke\n'
-  printf '\n'    # discovery wait
-  printf '\n'    # prod profile (default no)
   printf '\n'    # path profile (default balanced)
   printf 'n\n'   # real VPN mode? no -> client-test path
-  printf '\n'    # timeout sec
+  printf 'n\n'   # customize advanced client options? no
   printf '0\n'   # exit main menu
 } >"$INPUT1"
 run_ui "$INPUT1" "$TMP_DIR/run1.log"
@@ -218,17 +216,9 @@ INPUT2="$TMP_DIR/input2.txt"
   printf '2\n'   # main menu: simple server
   printf '\n'    # public host (default hosts.a)
   printf '\n'    # authority mode? default no (provider)
-  printf '.\n'   # peer host (use shown default hosts.b)
-  printf '\n'    # prod profile (default no)
-  printf '\n'    # run preflight (default yes)
-  printf '\n'    # peer identity strict mode
-  printf '\n'    # preflight timeout
+  printf 'n\n'   # customize advanced server options? no
   printf '\n'    # authority directory URL default from peer host
   printf '\n'    # authority issuer URL default from peer host
-  printf '\n'    # preflight minimum peer operators default
-  printf 'n\n'   # open dedicated server terminal? no
-  printf 'n\n'   # run server session with sudo? no
-  printf '\n'    # save/update hosts (default no)
   printf '0\n'   # exit main menu
 } >"$INPUT2"
 run_ui "$INPUT2" "$TMP_DIR/run2.log"
@@ -283,20 +273,7 @@ INPUT2A="$TMP_DIR/input2a.txt"
   printf '2\n'   # main menu: simple server
   printf '198.51.100.11\n' # explicit public host
   printf 'y\n'   # authority mode
-  printf 'y\n'   # confirm authority mode
-  printf '\n'    # peer host optional -> none
-  printf '\n'    # prod profile (default no)
-  printf '\n'    # run preflight (default yes)
-  printf '\n'    # peer identity strict mode
-  printf '\n'    # preflight timeout
-  printf '\n'    # auto-generate invite keys (default yes)
-  printf '\n'    # auto invite key count
-  printf '\n'    # auto invite tier
-  printf '\n'    # auto invite wait sec
-  printf '0\n'   # min peer operators
-  printf 'n\n'   # open dedicated server terminal? no
-  printf 'n\n'   # run server session with sudo? no
-  printf '\n'    # save/update hosts (default no)
+  printf 'n\n'   # customize advanced server options? no
   printf '0\n'   # exit main menu
 } >"$INPUT2A"
 run_ui "$INPUT2A" "$TMP_DIR/run2a.log"
@@ -2400,6 +2377,7 @@ INPUT72="$TMP_DIR/input72.txt"
   printf '\n'    # require summary go default yes
   printf '\n'    # require summary policy default yes
   printf '\n'    # require incident policy clean default yes
+  printf '\n'    # require distinct artifact paths default yes
   printf '\n'    # require campaign signoff stage+summary evidence default yes
   printf '\n'    # check summary json path default
   printf '\n'    # print check summary json default no
@@ -2429,6 +2407,8 @@ assert_line_has "$line72" '--require-summary-policy-match 1' \
   "runtime wiring failed: option 72 missing default --require-summary-policy-match 1"
 assert_line_has "$line72" '--require-incident-policy-clean 1' \
   "runtime wiring failed: option 72 missing default --require-incident-policy-clean 1"
+assert_line_has "$line72" '--require-distinct-artifact-paths 1' \
+  "runtime wiring failed: option 72 missing default --require-distinct-artifact-paths 1"
 assert_line_has "$line72" '--require-campaign-signoff-enabled 1' \
   "runtime wiring failed: option 72 missing default --require-campaign-signoff-enabled 1"
 assert_line_has "$line72" '--require-campaign-signoff-required 1' \
@@ -2466,6 +2446,7 @@ INPUT73="$TMP_DIR/input73.txt"
   printf '\n'    # require quick run report json default yes
   printf '\n'    # require summary policy default yes
   printf '\n'    # require incident policy clean default yes
+  printf '\n'    # require distinct artifact paths default yes
   printf '\n'    # campaign signoff stage summary path default
   printf '\n'    # require existing campaign signoff stage+summary evidence default no
   printf '\n'    # signoff summary json path default
@@ -2496,6 +2477,8 @@ assert_line_has "$line73" '--require-summary-policy-match 1' \
   "runtime wiring failed: option 73 missing default --require-summary-policy-match 1"
 assert_line_has "$line73" '--require-incident-policy-clean 1' \
   "runtime wiring failed: option 73 missing default --require-incident-policy-clean 1"
+assert_line_has "$line73" '--require-distinct-artifact-paths 1' \
+  "runtime wiring failed: option 73 missing default --require-distinct-artifact-paths 1"
 assert_line_has "$line73" '--campaign-signoff-summary-json \.easy-node-logs/prod_pilot_campaign/prod_pilot_campaign_signoff_summary\.json' \
   "runtime wiring failed: option 73 missing default --campaign-signoff-summary-json path"
 assert_line_has "$line73" '--require-campaign-signoff-enabled 0' \
