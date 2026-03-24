@@ -500,21 +500,21 @@ struct PathProfile {
   std::string regionPrefixBias;
 };
 
-PathProfile choosePathProfile(const std::string &prompt = "Path profile (1=Fast, 2=Balanced, 3=Privacy)", const std::string &def = "2") {
+PathProfile choosePathProfile(const std::string &prompt = "Path profile (1=Speed, 2=Balanced, 3=Private)", const std::string &def = "2") {
   std::cout << "Path profile presets:\n";
-  std::cout << "  1) Fast      : lower latency, soft-locality bias enabled, distinct operators\n";
+  std::cout << "  1) Speed     : lower latency, soft-locality bias enabled, distinct operators\n";
   std::cout << "  2) Balanced  : moderate locality bias, distinct operators\n";
-  std::cout << "  3) Privacy   : enforce distinct countries, locality bias disabled\n";
+  std::cout << "  3) Private   : enforce distinct countries, locality bias disabled\n";
   std::string choice = trim(readLine(prompt, def));
   if (choice != "1" && choice != "2" && choice != "3") {
     std::cout << "invalid profile choice; using Balanced\n";
     choice = "2";
   }
   if (choice == "1") {
-    return {"fast", true, false, true, "1.80", "1.35", "1.15"};
+    return {"speed", true, false, true, "1.80", "1.35", "1.15"};
   }
   if (choice == "3") {
-    return {"privacy", true, true, false, "1.60", "1.25", "1.10"};
+    return {"private", true, true, false, "1.60", "1.25", "1.10"};
   }
   return {"balanced", true, false, true, "1.50", "1.25", "1.10"};
 }
@@ -526,6 +526,10 @@ void appendPathProfileFlags(std::ostringstream &cmd, const PathProfile &profile)
       << " --country-bias " << shellEscape(profile.countryBias)
       << " --region-bias " << shellEscape(profile.regionBias)
       << " --region-prefix-bias " << shellEscape(profile.regionPrefixBias);
+}
+
+void appendPathProfilePreset(std::ostringstream &cmd, const PathProfile &profile) {
+  cmd << " --path-profile " << shellEscape(profile.label);
 }
 
 struct TestSuite {
@@ -875,12 +879,9 @@ void runTestsInteractive(const std::string &root, const std::string &script, ABH
       std::string region = readLine("Preferred exit region (optional)", "");
       bool betaProfile = parseYesNo(readLine("Enable beta profile defaults? (Y/n)", "y"), true);
       bool prodProfile = parseYesNo(readLine("Enable PROD profile (mTLS + strict fail-closed)? (y/N)", "n"), false);
-      PathProfile pathProfile = choosePathProfile("Path profile for machine C test (1=Fast, 2=Balanced, 3=Privacy)", "2");
-      bool distinct = pathProfile.distinctOperators;
+      PathProfile pathProfile = choosePathProfile("Path profile for machine C test (1=Speed, 2=Balanced, 3=Private)", "2");
       if (prodProfile) {
         betaProfile = true;
-        distinct = true;
-        pathProfile.distinctOperators = true;
       }
       std::string report = readLine("Report file path (optional)", "");
       if (autoDiscover && bootstrapDir.empty()) {
@@ -898,13 +899,8 @@ void runTestsInteractive(const std::string &root, const std::string &script, ABH
           << " --federation-timeout-sec " << shellEscape(federationTimeout)
           << " --timeout-sec " << shellEscape(timeoutSec)
           << " --beta-profile " << (betaProfile ? "1" : "0")
-          << " --prod-profile " << (prodProfile ? "1" : "0")
-          << " --distinct-operators " << (distinct ? "1" : "0");
-      cmd << " --distinct-countries " << (pathProfile.distinctCountries ? "1" : "0")
-          << " --locality-soft-bias " << (pathProfile.localitySoftBias ? "1" : "0")
-          << " --country-bias " << shellEscape(pathProfile.countryBias)
-          << " --region-bias " << shellEscape(pathProfile.regionBias)
-          << " --region-prefix-bias " << shellEscape(pathProfile.regionPrefixBias);
+          << " --prod-profile " << (prodProfile ? "1" : "0");
+      appendPathProfilePreset(cmd, pathProfile);
       if (autoDiscover) {
         cmd << " --bootstrap-directory " << shellEscape(bootstrapDir)
             << " --discovery-wait-sec " << shellEscape(discoveryWait);
@@ -957,12 +953,9 @@ void runTestsInteractive(const std::string &root, const std::string &script, ABH
       bool continueOnFail = parseYesNo(readLine("Continue when a round fails? (y/N)", "n"), false);
       bool betaProfile = parseYesNo(readLine("Enable beta profile defaults? (Y/n)", "y"), true);
       bool prodProfile = parseYesNo(readLine("Enable PROD profile (mTLS + strict fail-closed)? (y/N)", "n"), false);
-      PathProfile pathProfile = choosePathProfile("Path profile for machine C soak (1=Fast, 2=Balanced, 3=Privacy)", "2");
-      bool distinct = pathProfile.distinctOperators;
+      PathProfile pathProfile = choosePathProfile("Path profile for machine C soak (1=Speed, 2=Balanced, 3=Private)", "2");
       if (prodProfile) {
         betaProfile = true;
-        distinct = true;
-        pathProfile.distinctOperators = true;
       }
       std::string country = readLine("Preferred exit country code (optional)", "");
       std::string region = readLine("Preferred exit region (optional)", "");
@@ -985,13 +978,8 @@ void runTestsInteractive(const std::string &root, const std::string &script, ABH
           << " --timeout-sec " << shellEscape(timeoutSec)
           << " --continue-on-fail " << (continueOnFail ? "1" : "0")
           << " --beta-profile " << (betaProfile ? "1" : "0")
-          << " --prod-profile " << (prodProfile ? "1" : "0")
-          << " --distinct-operators " << (distinct ? "1" : "0");
-      cmd << " --distinct-countries " << (pathProfile.distinctCountries ? "1" : "0")
-          << " --locality-soft-bias " << (pathProfile.localitySoftBias ? "1" : "0")
-          << " --country-bias " << shellEscape(pathProfile.countryBias)
-          << " --region-bias " << shellEscape(pathProfile.regionBias)
-          << " --region-prefix-bias " << shellEscape(pathProfile.regionPrefixBias);
+          << " --prod-profile " << (prodProfile ? "1" : "0");
+      appendPathProfilePreset(cmd, pathProfile);
       if (autoDiscover) {
         cmd << " --bootstrap-directory " << shellEscape(bootstrapDir)
             << " --discovery-wait-sec " << shellEscape(discoveryWait);
@@ -1103,7 +1091,7 @@ void quickClientConnect(const std::string &script, ABHosts &hosts) {
         << " --interface " << shellEscape(iface)
         << " --ready-timeout-sec " << shellEscape(readyTimeout)
         << " --cleanup-all 1";
-    appendPathProfileFlags(cmd, pathProfile);
+    appendPathProfilePreset(cmd, pathProfile);
     if (!isRootUser()) {
       bool useSudo = true;
       if (customize) {
@@ -1124,7 +1112,7 @@ void quickClientConnect(const std::string &script, ABHosts &hosts) {
         runCommand(cmd.str());
       }
     }
-    std::cout << "Use Other options -> 32 (status) and 33 (down); option 31 reruns preflight.\n";
+    std::cout << "Use Other options -> 31 (preflight), 32 (status), 33 (down), 34 (expert/manual up).\n";
   } else {
     std::string timeoutSec = "45";
     if (customize) {
@@ -1138,7 +1126,7 @@ void quickClientConnect(const std::string &script, ABHosts &hosts) {
         << " --timeout-sec " << shellEscape(timeoutSec)
         << " --beta-profile 1"
         << " --prod-profile " << (prodProfile ? "1" : "0");
-    appendPathProfileFlags(cmd, pathProfile);
+    appendPathProfilePreset(cmd, pathProfile);
     runCommand(cmd.str());
   }
 }
@@ -1361,7 +1349,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
     std::cout << "31) Client VPN preflight (real mode)\n";
     std::cout << "32) Client VPN status (real mode)\n";
     std::cout << "33) Client VPN down (real mode)\n";
-    std::cout << "34) Client VPN up (real mode, full manual)\n";
+    std::cout << "34) Client VPN up (real mode, expert/manual)\n";
     std::cout << "35) Server preflight (peer/identity/quorum checks)\n";
     std::cout << "36) Closed-beta PROD bundle (strict preflight + integrity verify + signoff + run report + auto incident snapshot on fail)\n";
     std::cout << "37) Closed-beta PROD bundle (smoke + integrity verify + run report + auto incident snapshot on fail)\n";
@@ -1401,6 +1389,8 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
     std::cout << "71) PROD campaign summary regenerate (saved artifacts -> handoff report)\n";
     std::cout << "72) PROD campaign check (fail-closed artifact/policy gate)\n";
     std::cout << "73) PROD campaign signoff (optional summary refresh + check)\n";
+    std::cout << "74) Runtime fix + readiness receipt (recorded cleanup)\n";
+    std::cout << "75) Single-machine PROD readiness sweep (all local gates + next action)\n";
     std::cout << "0) Back\n";
     std::cout << "Selection: ";
 
@@ -1551,12 +1541,9 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       std::string subject = trim(readLine("Client subject key (optional)", ""));
       bool betaProfile = parseYesNo(readLine("Enable beta profile defaults? (Y/n)", "y"), true);
       bool prodProfile = parseYesNo(readLine("Enable PROD profile (mTLS + strict fail-closed)? (y/N)", "n"), false);
-      PathProfile pathProfile = choosePathProfile("Path profile (1=Fast, 2=Balanced, 3=Privacy)", "2");
-      bool distinct = pathProfile.distinctOperators;
+      PathProfile pathProfile = choosePathProfile("Path profile (1=Speed, 2=Balanced, 3=Private)", "2");
       if (prodProfile) {
         betaProfile = true;
-        distinct = true;
-        pathProfile.distinctOperators = true;
       }
 
       if (autoDiscover && bootstrapDir.empty()) {
@@ -1575,13 +1562,8 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --federation-timeout-sec " << shellEscape(federationTimeout)
           << " --timeout-sec " << shellEscape(timeoutSec)
           << " --beta-profile " << (betaProfile ? "1" : "0")
-          << " --prod-profile " << (prodProfile ? "1" : "0")
-          << " --distinct-operators " << (distinct ? "1" : "0");
-      cmd << " --distinct-countries " << (pathProfile.distinctCountries ? "1" : "0")
-          << " --locality-soft-bias " << (pathProfile.localitySoftBias ? "1" : "0")
-          << " --country-bias " << shellEscape(pathProfile.countryBias)
-          << " --region-bias " << shellEscape(pathProfile.regionBias)
-          << " --region-prefix-bias " << shellEscape(pathProfile.regionPrefixBias);
+          << " --prod-profile " << (prodProfile ? "1" : "0");
+      appendPathProfilePreset(cmd, pathProfile);
       if (!subject.empty()) {
         cmd << " --subject " << shellEscape(subject);
       }
@@ -1628,12 +1610,9 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       std::string subject = trim(readLine("Client subject key (optional)", ""));
       bool betaProfile = parseYesNo(readLine("Enable beta profile defaults? (Y/n)", "y"), true);
       bool prodProfile = parseYesNo(readLine("Enable PROD profile (mTLS + strict fail-closed)? (y/N)", "n"), false);
-      PathProfile pathProfile = choosePathProfile("Path profile (1=Fast, 2=Balanced, 3=Privacy)", "2");
-      bool distinct = pathProfile.distinctOperators;
+      PathProfile pathProfile = choosePathProfile("Path profile (1=Speed, 2=Balanced, 3=Private)", "2");
       if (prodProfile) {
         betaProfile = true;
-        distinct = true;
-        pathProfile.distinctOperators = true;
       }
       if (autoDiscover && bootstrapDir.empty()) {
         std::cout << "bootstrap directory URL is required\n";
@@ -1652,13 +1631,8 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --federation-timeout-sec " << shellEscape(federationTimeout)
           << " --timeout-sec " << shellEscape(timeoutSec)
           << " --beta-profile " << (betaProfile ? "1" : "0")
-          << " --prod-profile " << (prodProfile ? "1" : "0")
-          << " --distinct-operators " << (distinct ? "1" : "0");
-      cmd << " --distinct-countries " << (pathProfile.distinctCountries ? "1" : "0")
-          << " --locality-soft-bias " << (pathProfile.localitySoftBias ? "1" : "0")
-          << " --country-bias " << shellEscape(pathProfile.countryBias)
-          << " --region-bias " << shellEscape(pathProfile.regionBias)
-          << " --region-prefix-bias " << shellEscape(pathProfile.regionPrefixBias);
+          << " --prod-profile " << (prodProfile ? "1" : "0");
+      appendPathProfilePreset(cmd, pathProfile);
       if (!subject.empty()) {
         cmd << " --subject " << shellEscape(subject);
       }
@@ -1701,12 +1675,9 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       std::string subject = trim(readLine("Client subject key (optional)", ""));
       bool betaProfile = parseYesNo(readLine("Enable beta profile defaults? (Y/n)", "y"), true);
       bool prodProfile = parseYesNo(readLine("Enable PROD profile (mTLS + strict fail-closed)? (y/N)", "n"), false);
-      PathProfile pathProfile = choosePathProfile("Path profile (1=Fast, 2=Balanced, 3=Privacy)", "2");
-      bool distinct = pathProfile.distinctOperators;
+      PathProfile pathProfile = choosePathProfile("Path profile (1=Speed, 2=Balanced, 3=Private)", "2");
       if (prodProfile) {
         betaProfile = true;
-        distinct = true;
-        pathProfile.distinctOperators = true;
       }
       if (autoDiscover && bootstrapDir.empty()) {
         std::cout << "bootstrap directory URL is required\n";
@@ -1721,13 +1692,8 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --rounds " << shellEscape(rounds)
           << " --pause-sec " << shellEscape(pauseSec)
           << " --beta-profile " << (betaProfile ? "1" : "0")
-          << " --prod-profile " << (prodProfile ? "1" : "0")
-          << " --distinct-operators " << (distinct ? "1" : "0");
-      cmd << " --distinct-countries " << (pathProfile.distinctCountries ? "1" : "0")
-          << " --locality-soft-bias " << (pathProfile.localitySoftBias ? "1" : "0")
-          << " --country-bias " << shellEscape(pathProfile.countryBias)
-          << " --region-bias " << shellEscape(pathProfile.regionBias)
-          << " --region-prefix-bias " << shellEscape(pathProfile.regionPrefixBias);
+          << " --prod-profile " << (prodProfile ? "1" : "0");
+      appendPathProfilePreset(cmd, pathProfile);
       if (!subject.empty()) {
         cmd << " --subject " << shellEscape(subject);
       }
@@ -2387,7 +2353,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       std::string minOperators = readLine("Minimum operators", "2");
       bool betaProfile = parseYesNo(readLine("Enable beta profile defaults? (Y/n)", "y"), true);
       bool prodProfile = parseYesNo(readLine("Enable PROD profile (mTLS + strict fail-closed)? (y/N)", "n"), false);
-      PathProfile pathProfile = choosePathProfile("Path profile (1=Fast, 2=Balanced, 3=Privacy)", "2");
+      PathProfile pathProfile = choosePathProfile("Path profile (1=Speed, 2=Balanced, 3=Private)", "2");
       bool distinct = pathProfile.distinctOperators;
       if (prodProfile) {
         betaProfile = true;
@@ -4406,6 +4372,9 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       std::string clientIface = trim(readLine("WG-only client iface", "wgcstack0"));
       std::string exitIface = trim(readLine("WG-only exit iface", "wgestack0"));
       std::string vpnIface = trim(readLine("Client VPN iface", "wgvpn0"));
+      std::string profileSignoffSummaryJson = trim(readLine(
+          "Profile default signoff summary JSON (optional)",
+          ".easy-node-logs/profile_compare_campaign_signoff_summary.json"));
       bool showJson = parseYesNo(readLine("Show JSON summary payload? (Y/n)", "y"), true);
 
       std::ostringstream cmd;
@@ -4413,8 +4382,11 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --base-port " << shellEscape(basePort)
           << " --client-iface " << shellEscape(clientIface)
           << " --exit-iface " << shellEscape(exitIface)
-          << " --vpn-iface " << shellEscape(vpnIface)
-          << " --show-json " << (showJson ? "1" : "0");
+          << " --vpn-iface " << shellEscape(vpnIface);
+      if (!profileSignoffSummaryJson.empty()) {
+        cmd << " --profile-compare-signoff-summary-json " << shellEscape(profileSignoffSummaryJson);
+      }
+      cmd << " --show-json " << (showJson ? "1" : "0");
       runCommand(cmd.str());
       continue;
     }
@@ -4437,9 +4409,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       cmd << shellEscape(script) << " client-vpn-smoke"
           << " --bootstrap-directory " << shellEscape(bootstrapDir)
           << " --subject " << shellEscape(subject)
-          << " --beta-profile 1"
           << " --path-profile balanced"
-          << " --distinct-operators 1"
           << " --interface " << shellEscape(interfaceName)
           << " --pre-real-host-readiness " << (runPreRealHostReadiness ? "1" : "0")
           << " --runtime-doctor " << (runRuntimeDoctor ? "1" : "0")
@@ -4486,6 +4456,9 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       std::string clientIface = trim(readLine("WG-only client iface", "wgcstack0"));
       std::string exitIface = trim(readLine("WG-only exit iface", "wgestack0"));
       std::string vpnIface = trim(readLine("Client VPN iface", "wgvpn0"));
+      std::string profileSignoffSummaryJson = trim(readLine(
+          "Profile default signoff summary JSON (optional)",
+          ".easy-node-logs/profile_compare_campaign_signoff_summary.json"));
       std::string summaryJson = trim(readLine("Summary JSON path", ".easy-node-logs/manual_validation_readiness_summary.json"));
       std::string reportMd = trim(readLine("Report markdown path", ".easy-node-logs/manual_validation_readiness_report.md"));
       bool printReport = parseYesNo(readLine("Print markdown report? (Y/n)", "y"), true);
@@ -4497,8 +4470,11 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --base-port " << shellEscape(basePort)
           << " --client-iface " << shellEscape(clientIface)
           << " --exit-iface " << shellEscape(exitIface)
-          << " --vpn-iface " << shellEscape(vpnIface)
-          << " --summary-json " << shellEscape(summaryJson)
+          << " --vpn-iface " << shellEscape(vpnIface);
+      if (!profileSignoffSummaryJson.empty()) {
+        cmd << " --profile-compare-signoff-summary-json " << shellEscape(profileSignoffSummaryJson);
+      }
+      cmd << " --summary-json " << shellEscape(summaryJson)
           << " --report-md " << shellEscape(reportMd)
           << " --print-report " << (printReport ? "1" : "0")
           << " --print-summary-json " << (printSummaryJson ? "1" : "0")
@@ -4721,6 +4697,53 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       if (!summaryJson.empty()) {
         cmd << " --summary-json " << shellEscape(summaryJson);
       }
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "74") {
+      std::string basePort = trim(readLine("WG-only base port", "19280"));
+      std::string clientIface = trim(readLine("WG-only client iface", "wgcstack0"));
+      std::string exitIface = trim(readLine("WG-only exit iface", "wgestack0"));
+      std::string vpnIface = trim(readLine("Client VPN iface", "wgvpn0"));
+      bool pruneWgOnlyDir = parseYesNo(readLine("Prune wg-only runtime dir after cleanup? (Y/n)", "y"), true);
+      bool printSummaryJson = parseYesNo(readLine("Print summary JSON? (y/N)", "n"), false);
+      bool runWithSudo = parseYesNo(readLine("Run with sudo? (Y/n)", "y"), true);
+
+      std::ostringstream cmd;
+      if (runWithSudo) {
+        cmd << "sudo ";
+      }
+      cmd << shellEscape(script) << " runtime-fix-record"
+          << " --base-port " << shellEscape(basePort)
+          << " --client-iface " << shellEscape(clientIface)
+          << " --exit-iface " << shellEscape(exitIface)
+          << " --vpn-iface " << shellEscape(vpnIface)
+          << " --prune-wg-only-dir " << (pruneWgOnlyDir ? "1" : "0")
+          << " --print-summary-json " << (printSummaryJson ? "1" : "0");
+      runCommand(cmd.str());
+      printManualValidationReportSummary(resolveRepoPath(root, ".easy-node-logs/manual_validation_readiness_summary.json"));
+      continue;
+    }
+    if (choice == "75") {
+      std::string profileSignoffModeInput = trim(readLine("Profile campaign signoff mode (auto/1/0)", "auto"));
+      std::transform(profileSignoffModeInput.begin(), profileSignoffModeInput.end(), profileSignoffModeInput.begin(),
+                     [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+      if (profileSignoffModeInput != "auto" && profileSignoffModeInput != "1" && profileSignoffModeInput != "0") {
+        std::cout << "invalid profile campaign signoff mode; using auto\n";
+        profileSignoffModeInput = "auto";
+      }
+      bool profileSignoffRefreshCampaign = parseYesNo(readLine("Force profile campaign refresh if signoff runs? (y/N)", "n"), false);
+      bool printSummaryJson = parseYesNo(readLine("Print summary JSON? (y/N)", "n"), false);
+      bool runWithSudo = parseYesNo(readLine("Run with sudo? (Y/n)", "y"), true);
+
+      std::ostringstream cmd;
+      if (runWithSudo) {
+        cmd << "sudo ";
+      }
+      cmd << shellEscape(script) << " single-machine-prod-readiness"
+          << " --run-profile-compare-campaign-signoff " << shellEscape(profileSignoffModeInput)
+          << " --profile-compare-campaign-signoff-refresh-campaign " << (profileSignoffRefreshCampaign ? "1" : "0")
+          << " --print-summary-json " << (printSummaryJson ? "1" : "0");
       runCommand(cmd.str());
       continue;
     }

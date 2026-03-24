@@ -70,11 +70,33 @@ EOF_FIX
     exit 0
     ;;
   client-vpn-up)
+    if [[ "${FAKE_VPN_SMOKE_KEY_MISMATCH_ONCE:-0}" == "1" ]]; then
+      up_count_file="${FAKE_VPN_SMOKE_UP_COUNT_FILE:-}"
+      up_call_index=1
+      if [[ -n "$up_count_file" ]]; then
+        if [[ -f "$up_count_file" ]]; then
+          up_call_index="$(cat "$up_count_file")"
+        fi
+        printf '%s\n' $((up_call_index + 1)) >"$up_count_file"
+      fi
+      if [[ "$up_call_index" == "1" ]]; then
+        echo "client bootstrap failed: directory quorum not met: success=0 required=1: directory key is not trusted"
+        exit 1
+      fi
+    fi
     if [[ "${FAKE_VPN_SMOKE_FAIL_UP:-0}" == "1" ]]; then
       echo "client-vpn up failed"
       exit 1
     fi
     echo "client-vpn started"
+    exit 0
+    ;;
+  client-vpn-trust-reset)
+    if [[ "${FAKE_VPN_SMOKE_FAIL_TRUST_RESET:-0}" == "1" ]]; then
+      echo "client-vpn trust reset failed"
+      exit 1
+    fi
+    echo "client-vpn trust reset: removed=1 missing=0"
     exit 0
     ;;
   client-vpn-status)
@@ -280,7 +302,6 @@ CLIENT_VPN_SMOKE_CURL_BIN="$TMP_BIN/curl" \
   --bootstrap-directory http://198.51.100.10:8081 \
   --subject inv-test \
   --interface wgvpn9 \
-  --beta-profile 1 \
   --pre-real-host-readiness 1 \
   --public-ip-url https://ip.example \
   --country-url https://country.example \
@@ -308,6 +329,11 @@ if ! rg -q '^runtime-doctor ' "$CAPTURE"; then
 fi
 if ! rg -q '^client-vpn-up ' "$CAPTURE"; then
   echo "expected up call missing"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q '^client-vpn-up .*--path-profile balanced' "$CAPTURE"; then
+  echo "expected client-vpn-up call to default to --path-profile balanced"
   cat "$CAPTURE"
   exit 1
 fi
@@ -479,6 +505,126 @@ if ! rg -q 'incident_snapshot' "$CAPTURE"; then
   exit 1
 fi
 
+echo "[client-vpn-smoke] trust-reset retry path"
+: >"$CAPTURE"
+printf '1\n' >"$runtime_doctor_count"
+up_call_count="$TMP_DIR/up_call_count.txt"
+printf '1\n' >"$up_call_count"
+FAKE_EASY_CAPTURE_FILE="$CAPTURE" \
+FAKE_CURL_CAPTURE_FILE="$CURL_CAPTURE" \
+FAKE_RUNTIME_DOCTOR_COUNT_FILE="$runtime_doctor_count" \
+FAKE_VPN_SMOKE_KEY_MISMATCH_ONCE=1 \
+FAKE_VPN_SMOKE_UP_COUNT_FILE="$up_call_count" \
+CLIENT_VPN_SMOKE_EASY_NODE_SCRIPT="$FAKE_EASY_NODE" \
+CLIENT_VPN_SMOKE_CURL_BIN="$TMP_BIN/curl" \
+./scripts/client_vpn_smoke.sh \
+  --bootstrap-directory http://198.51.100.10:8081 \
+  --subject inv-retry \
+  --interface wgvpn13 \
+  --trust-reset-on-key-mismatch 1 \
+  --trust-reset-scope scoped >/tmp/integration_client_vpn_smoke_trust_retry.log 2>&1
+
+if ! rg -q 'client-vpn-smoke: status=pass' /tmp/integration_client_vpn_smoke_trust_retry.log; then
+  echo "expected pass status for trust-reset retry path"
+  cat /tmp/integration_client_vpn_smoke_trust_retry.log
+  exit 1
+fi
+if [[ "$(rg -c '^client-vpn-up ' "$CAPTURE")" -lt 2 ]]; then
+  echo "expected client-vpn-up to be retried after trust reset"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q '^client-vpn-trust-reset ' "$CAPTURE"; then
+  echo "expected client-vpn-trust-reset call missing in retry path"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q '^client-vpn-trust-reset .*--trust-scope scoped' "$CAPTURE"; then
+  echo "expected trust-reset scope forwarding in retry path"
+  cat "$CAPTURE"
+  exit 1
+fi
+retry_summary_json="$(sed -n 's/^summary_json: //p' /tmp/integration_client_vpn_smoke_trust_retry.log | tail -n 1)"
+if [[ -z "$retry_summary_json" || ! -f "$retry_summary_json" ]]; then
+  echo "expected trust-reset retry summary json file missing"
+  cat /tmp/integration_client_vpn_smoke_trust_retry.log
+  exit 1
+fi
+if ! jq -e '.status == "pass" and .trust_reset.enabled_on_key_mismatch == true and .trust_reset.attempted == true and .trust_reset.status == "ok" and .trust_reset.reason == "directory key is not trusted" and .trust_reset.retry_attempted == true and .trust_reset.retry_succeeded == true' "$retry_summary_json" >/dev/null 2>&1; then
+  echo "trust-reset retry summary json missing expected trust-reset metadata"
+  cat "$retry_summary_json"
+  exit 1
+fi
+retry_trust_reset_log="$(jq -r '.trust_reset.artifacts.trust_reset_log // ""' "$retry_summary_json")"
+if [[ -z "$retry_trust_reset_log" || ! -f "$retry_trust_reset_log" ]]; then
+  echo "expected trust-reset retry artifact log missing"
+  cat "$retry_summary_json"
+  exit 1
+fi
+retry_up_log="$(jq -r '.trust_reset.artifacts.up_retry_log // ""' "$retry_summary_json")"
+if [[ -z "$retry_up_log" || ! -f "$retry_up_log" ]]; then
+  echo "expected trust-reset retry up log missing"
+  cat "$retry_summary_json"
+  exit 1
+fi
+
+echo "[client-vpn-smoke] trust-reset failure path"
+: >"$CAPTURE"
+printf '1\n' >"$runtime_doctor_count"
+up_call_count_fail="$TMP_DIR/up_call_count_fail.txt"
+printf '1\n' >"$up_call_count_fail"
+if FAKE_EASY_CAPTURE_FILE="$CAPTURE" \
+  FAKE_CURL_CAPTURE_FILE="$CURL_CAPTURE" \
+  FAKE_RUNTIME_DOCTOR_COUNT_FILE="$runtime_doctor_count" \
+  FAKE_VPN_SMOKE_KEY_MISMATCH_ONCE=1 \
+  FAKE_VPN_SMOKE_FAIL_TRUST_RESET=1 \
+  FAKE_VPN_SMOKE_UP_COUNT_FILE="$up_call_count_fail" \
+  CLIENT_VPN_SMOKE_EASY_NODE_SCRIPT="$FAKE_EASY_NODE" \
+  CLIENT_VPN_SMOKE_CURL_BIN="$TMP_BIN/curl" \
+  ./scripts/client_vpn_smoke.sh \
+    --bootstrap-directory http://198.51.100.10:8081 \
+    --subject inv-retry-fail \
+    --interface wgvpn14 \
+    --trust-reset-on-key-mismatch 1 \
+    --trust-reset-scope scoped >/tmp/integration_client_vpn_smoke_trust_retry_fail.log 2>&1; then
+  echo "expected trust-reset failure path to fail"
+  cat /tmp/integration_client_vpn_smoke_trust_retry_fail.log
+  exit 1
+fi
+
+if ! rg -q 'client-vpn-smoke: status=fail' /tmp/integration_client_vpn_smoke_trust_retry_fail.log; then
+  echo "expected fail status for trust-reset failure path"
+  cat /tmp/integration_client_vpn_smoke_trust_retry_fail.log
+  exit 1
+fi
+if [[ "$(rg -c '^client-vpn-up ' "$CAPTURE")" -ne 1 ]]; then
+  echo "trust-reset failure path should not retry client-vpn-up after failed trust reset"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q '^client-vpn-trust-reset ' "$CAPTURE"; then
+  echo "expected client-vpn-trust-reset call missing in trust-reset failure path"
+  cat "$CAPTURE"
+  exit 1
+fi
+retry_fail_summary_json="$(sed -n 's/^summary_json: //p' /tmp/integration_client_vpn_smoke_trust_retry_fail.log | tail -n 1)"
+if [[ -z "$retry_fail_summary_json" || ! -f "$retry_fail_summary_json" ]]; then
+  echo "expected trust-reset failure summary json file missing"
+  cat /tmp/integration_client_vpn_smoke_trust_retry_fail.log
+  exit 1
+fi
+if ! jq -e '.status == "fail" and .trust_reset.enabled_on_key_mismatch == true and .trust_reset.attempted == true and .trust_reset.status == "fail" and .trust_reset.reason == "directory key is not trusted" and .trust_reset.retry_attempted == false and .trust_reset.retry_succeeded == false' "$retry_fail_summary_json" >/dev/null 2>&1; then
+  echo "trust-reset failure summary json missing expected trust-reset failure metadata"
+  cat "$retry_fail_summary_json"
+  exit 1
+fi
+retry_fail_trust_reset_log="$(jq -r '.trust_reset.artifacts.trust_reset_log // ""' "$retry_fail_summary_json")"
+if [[ -z "$retry_fail_trust_reset_log" || ! -f "$retry_fail_trust_reset_log" ]]; then
+  echo "expected trust-reset failure artifact log missing"
+  cat "$retry_fail_summary_json"
+  exit 1
+fi
+
 echo "[client-vpn-smoke] runtime fix recovery path"
 : >"$CAPTURE"
 printf '1\n' >"$runtime_doctor_count"
@@ -553,6 +699,8 @@ CLIENT_VPN_SMOKE_SCRIPT="$FAKE_SMOKE" \
   --subject inv-wrapper \
   --interface wgvpn11 \
   --pre-real-host-readiness 1 \
+  --trust-reset-on-key-mismatch 1 \
+  --trust-reset-scope global \
   --public-ip-url https://ip.example \
   --country-url https://country.example \
   --print-summary-json 1 >/tmp/integration_client_vpn_smoke_wrapper.log 2>&1
@@ -574,6 +722,16 @@ if ! rg -q -- '--interface wgvpn11' "$TMP_DIR/smoke_wrapper_calls.log"; then
 fi
 if ! rg -q -- '--pre-real-host-readiness 1' "$TMP_DIR/smoke_wrapper_calls.log"; then
   echo "easy_node client-vpn-smoke forwarding missing pre-real-host-readiness"
+  cat "$TMP_DIR/smoke_wrapper_calls.log"
+  exit 1
+fi
+if ! rg -q -- '--trust-reset-on-key-mismatch 1' "$TMP_DIR/smoke_wrapper_calls.log"; then
+  echo "easy_node client-vpn-smoke forwarding missing trust-reset-on-key-mismatch"
+  cat "$TMP_DIR/smoke_wrapper_calls.log"
+  exit 1
+fi
+if ! rg -q -- '--trust-reset-scope global' "$TMP_DIR/smoke_wrapper_calls.log"; then
+  echo "easy_node client-vpn-smoke forwarding missing trust-reset-scope"
   cat "$TMP_DIR/smoke_wrapper_calls.log"
   exit 1
 fi

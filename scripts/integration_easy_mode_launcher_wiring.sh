@@ -128,6 +128,22 @@ check_cpp '72\) PROD campaign check \(fail-closed artifact/policy gate\)' \
   "launcher wiring failed: option 72 menu label missing"
 check_cpp '73\) PROD campaign signoff \(optional summary refresh \+ check\)' \
   "launcher wiring failed: option 73 menu label missing"
+check_cpp '74\) Runtime fix \+ readiness receipt \(recorded cleanup\)' \
+  "launcher wiring failed: option 74 menu label missing"
+check_cpp '75\) Single-machine PROD readiness sweep \(all local gates \+ next action\)' \
+  "launcher wiring failed: option 75 menu label missing"
+check_cpp '34\) Client VPN up \(real mode, expert/manual\)' \
+  "launcher wiring failed: option 34 expert/manual label missing"
+
+echo "[easy-mode-wiring] option 34 command wiring"
+check_cpp 'if \(choice == "34"\)' "launcher wiring failed: option 34 handler missing"
+check_cpp 'Use anonymous credential token instead of invite subject\?' \
+  "launcher wiring failed: option 34 anon credential prompt missing"
+check_cpp 'Run client-vpn-preflight first\?' \
+  "launcher wiring failed: option 34 preflight prompt missing"
+check_cpp 'Run client-vpn-up with sudo\?' \
+  "launcher wiring failed: option 34 sudo prompt missing"
+check_cpp 'client-vpn-up' "launcher wiring failed: option 34 command missing"
 
 echo "[easy-mode-wiring] options 36/37/38/39/40/41/42/43/44/45/46/47/48/49/50/51/52/53/54/55/56 command wiring"
 check_cpp 'if \(choice == "36"\)' "launcher wiring failed: option 36 handler missing"
@@ -155,6 +171,12 @@ check_cpp 'three-machine-prod-bundle' "launcher wiring failed: options 36/37 com
 check_cpp 'prod-gate-signoff' "launcher wiring failed: option 38 command missing"
 check_cpp 'prod-pilot-runbook' "launcher wiring failed: option 39 command missing"
 check_cpp 'Run pre-real-host readiness first\?' "launcher wiring failed: option 39 pre-real-host readiness prompt missing"
+check_cpp 'Path profile for machine C test \(1=Speed, 2=Balanced, 3=Private\)' \
+  "launcher wiring failed: machine C test path profile prompt missing"
+check_cpp 'Path profile for machine C soak \(1=Speed, 2=Balanced, 3=Private\)' \
+  "launcher wiring failed: machine C soak path profile prompt missing"
+check_cpp 'appendPathProfilePreset\(cmd, pathProfile\);' \
+  "launcher wiring failed: profile-first forwarding helper is not used in launcher command builders"
 check_cpp 'incident-snapshot' "launcher wiring failed: option 40 command missing"
 check_cpp 'prod-gate-slo-summary' "launcher wiring failed: option 41 command missing"
 check_cpp 'prod-gate-slo-trend' "launcher wiring failed: option 42 command missing"
@@ -317,6 +339,8 @@ check_cpp '--prune-wg-only-dir ' "launcher wiring failed: option 62 prune flag f
 echo "[easy-mode-wiring] option 63 command wiring"
 check_cpp 'if \(choice == "63"\)' "launcher wiring failed: option 63 handler missing"
 check_cpp 'manual-validation-status' "launcher wiring failed: option 63 command missing"
+check_cpp 'Profile default signoff summary JSON \(optional\)' "launcher wiring failed: option 63 profile signoff summary prompt missing"
+check_cpp '--profile-compare-signoff-summary-json ' "launcher wiring failed: option 63 profile signoff summary forwarding missing"
 check_cpp 'Show JSON summary payload\?' "launcher wiring failed: option 63 JSON prompt missing"
 
 echo "[easy-mode-wiring] option 64 command wiring"
@@ -326,7 +350,6 @@ check_cpp 'Public IP check URL' "launcher wiring failed: option 64 public IP pro
 check_cpp 'Country check URL' "launcher wiring failed: option 64 country prompt missing"
 check_cpp 'Run pre-real-host readiness first\?' "launcher wiring failed: option 64 pre-real-host readiness prompt missing"
 check_cpp '--path-profile balanced' "launcher wiring failed: option 64 balanced path default missing"
-check_cpp '--distinct-operators 1' "launcher wiring failed: option 64 distinct-operators default missing"
 
 echo "[easy-mode-wiring] option 65 command wiring"
 check_cpp 'if \(choice == "65"\)' "launcher wiring failed: option 65 handler missing"
@@ -339,6 +362,8 @@ check_cpp 'Run pre-real-host readiness first\?' "launcher wiring failed: option 
 echo "[easy-mode-wiring] option 66 command wiring"
 check_cpp 'if \(choice == "66"\)' "launcher wiring failed: option 66 handler missing"
 check_cpp 'manual-validation-report' "launcher wiring failed: option 66 command missing"
+check_cpp 'Profile default signoff summary JSON \(optional\)' "launcher wiring failed: option 66 profile signoff summary prompt missing"
+check_cpp '--profile-compare-signoff-summary-json ' "launcher wiring failed: option 66 profile signoff summary forwarding missing"
 check_cpp 'Summary JSON path' "launcher wiring failed: option 66 summary JSON prompt missing"
 check_cpp 'Report markdown path' "launcher wiring failed: option 66 report markdown prompt missing"
 check_cpp 'Fail if readiness is not complete\?' "launcher wiring failed: option 66 fail-close prompt missing"
@@ -368,6 +393,22 @@ check_cpp '--max-peer-sync-age-sec ' "launcher wiring failed: option 69/70 max-p
 check_cpp '--max-issuer-sync-age-sec ' "launcher wiring failed: option 69/70 max-issuer-sync-age-sec forwarding missing"
 check_cpp '--min-peer-success-sources ' "launcher wiring failed: option 69/70 min-peer-success-sources forwarding missing"
 check_cpp '--min-issuer-success-sources ' "launcher wiring failed: option 69/70 min-issuer-success-sources forwarding missing"
+
+echo "[easy-mode-wiring] option 74 command wiring"
+check_cpp 'if \(choice == "74"\)' "launcher wiring failed: option 74 handler missing"
+check_cpp 'runtime-fix-record' "launcher wiring failed: option 74 command missing"
+check_cpp 'Prune wg-only runtime dir after cleanup\?' "launcher wiring failed: option 74 prune prompt missing"
+check_cpp 'Run with sudo\? \(Y/n\)' "launcher wiring failed: option 74 sudo prompt missing"
+
+echo "[easy-mode-wiring] option 75 command wiring"
+check_cpp 'if \(choice == "75"\)' "launcher wiring failed: option 75 handler missing"
+check_cpp 'single-machine-prod-readiness' "launcher wiring failed: option 75 command missing"
+check_cpp 'Profile campaign signoff mode \(auto/1/0\)' "launcher wiring failed: option 75 profile-signoff mode prompt missing"
+check_cpp 'Force profile campaign refresh if signoff runs\?' "launcher wiring failed: option 75 refresh prompt missing"
+check_cpp '--run-profile-compare-campaign-signoff ' "launcher wiring failed: option 75 signoff mode forwarding missing"
+check_cpp '--profile-compare-campaign-signoff-refresh-campaign ' "launcher wiring failed: option 75 refresh forwarding missing"
+check_cpp '--print-summary-json ' "launcher wiring failed: option 75 print-summary-json forwarding missing"
+check_cpp 'Run with sudo\? \(Y/n\)' "launcher wiring failed: option 75 sudo prompt missing"
 check_cpp '--min-peer-source-operators ' "launcher wiring failed: option 69/70 min-peer-source-operators forwarding missing"
 check_cpp '--min-issuer-source-operators ' "launcher wiring failed: option 69/70 min-issuer-source-operators forwarding missing"
 check_cpp '--summary-json ' "launcher wiring failed: option 69/70 summary-json forwarding missing"
@@ -462,8 +503,24 @@ if ! "$EASY_NODE" --help | rg -q 'manual-validation-status'; then
   echo "launcher wiring failed: easy_node help missing manual-validation-status"
   exit 1
 fi
+if ! "$EASY_NODE" --help | rg -q -- 'manual-validation-status .*--profile-compare-signoff-summary-json'; then
+  echo "launcher wiring failed: easy_node help missing manual-validation-status --profile-compare-signoff-summary-json"
+  exit 1
+fi
+if ! "$EASY_NODE" --help | rg -q -- 'manual-validation-status .*--overlay-check-id'; then
+  echo "launcher wiring failed: easy_node help missing manual-validation-status --overlay-check-id"
+  exit 1
+fi
 if ! "$EASY_NODE" --help | rg -q 'manual-validation-report'; then
   echo "launcher wiring failed: easy_node help missing manual-validation-report"
+  exit 1
+fi
+if ! "$EASY_NODE" --help | rg -q -- 'manual-validation-report .*--profile-compare-signoff-summary-json'; then
+  echo "launcher wiring failed: easy_node help missing manual-validation-report --profile-compare-signoff-summary-json"
+  exit 1
+fi
+if ! "$EASY_NODE" --help | rg -q -- 'manual-validation-report .*--overlay-check-id'; then
+  echo "launcher wiring failed: easy_node help missing manual-validation-report --overlay-check-id"
   exit 1
 fi
 if ! "$EASY_NODE" --help | rg -q 'wg-only-stack-selftest-record'; then

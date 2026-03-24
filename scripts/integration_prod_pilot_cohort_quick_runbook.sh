@@ -128,7 +128,7 @@ PROD_PILOT_COHORT_QUICK_RUNBOOK_EASY_NODE_SH="$FAKE_EASY_NODE" \
   --signoff-incident-snapshot-min-attachment-count 3 \
   --signoff-incident-snapshot-max-skipped-count 0 \
   --reports-dir "$SUCCESS_DIR" \
-  --show-json 1 >/tmp/integration_prod_pilot_cohort_quick_runbook_success.log 2>&1
+  --show-json 1 >${TMP_DIR}/integration_prod_pilot_cohort_quick_runbook_success.log 2>&1
 
 if ! rg -q '^prod-pilot-cohort-quick ' "$CAPTURE"; then
   echo "missing quick stage invocation"
@@ -315,9 +315,9 @@ if ! jq -e --arg pre_summary_json "${SUCCESS_DIR}/pre_real_host_readiness_summar
   cat "${SUCCESS_DIR}/prod_pilot_cohort_quick_runbook_summary.json"
   exit 1
 fi
-if ! rg -q -- "\\[prod-pilot-cohort-quick-runbook] pre_real_host_readiness_summary_json=${SUCCESS_DIR}/pre_real_host_readiness_summary.json" /tmp/integration_prod_pilot_cohort_quick_runbook_success.log; then
+if ! rg -q -- "\\[prod-pilot-cohort-quick-runbook] pre_real_host_readiness_summary_json=${SUCCESS_DIR}/pre_real_host_readiness_summary.json" ${TMP_DIR}/integration_prod_pilot_cohort_quick_runbook_success.log; then
   echo "runbook output missing pre-real-host readiness summary path"
-  cat /tmp/integration_prod_pilot_cohort_quick_runbook_success.log
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_runbook_success.log
   exit 1
 fi
 
@@ -356,21 +356,21 @@ FAKE_SIGNOFF_INCIDENT_REPORT_MD="$HANDOFF_INCIDENT_REPORT" \
 PROD_PILOT_COHORT_QUICK_RUNBOOK_EASY_NODE_SH="$FAKE_EASY_NODE" \
 ./scripts/prod_pilot_cohort_quick_runbook.sh \
   --reports-dir "$HANDOFF_DIR" \
-  --show-json 1 >/tmp/integration_prod_pilot_cohort_quick_runbook_handoff.log 2>&1
+  --show-json 1 >${TMP_DIR}/integration_prod_pilot_cohort_quick_runbook_handoff.log 2>&1
 
 if ! jq -e --arg summary "$HANDOFF_INCIDENT_SUMMARY" --arg report "$HANDOFF_INCIDENT_REPORT" '.incident_snapshot.enabled==1 and .incident_snapshot.status=="ok" and .incident_snapshot.summary_json.path==$summary and .incident_snapshot.report_md.path==$report' "${HANDOFF_DIR}/prod_pilot_cohort_quick_runbook_summary.json" >/dev/null 2>&1; then
   echo "runbook summary missing incident handoff propagation"
   cat "${HANDOFF_DIR}/prod_pilot_cohort_quick_runbook_summary.json"
   exit 1
 fi
-if ! rg -q 'incident_handoff' /tmp/integration_prod_pilot_cohort_quick_runbook_handoff.log; then
+if ! rg -q 'incident_handoff' ${TMP_DIR}/integration_prod_pilot_cohort_quick_runbook_handoff.log; then
   echo "expected incident_handoff line in runbook output"
-  cat /tmp/integration_prod_pilot_cohort_quick_runbook_handoff.log
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_runbook_handoff.log
   exit 1
 fi
-if ! rg -q -- "\\[prod-pilot-cohort-quick-runbook] pre_real_host_readiness_summary_json=${HANDOFF_DIR}/pre_real_host_readiness_summary.json" /tmp/integration_prod_pilot_cohort_quick_runbook_handoff.log; then
+if ! rg -q -- "\\[prod-pilot-cohort-quick-runbook] pre_real_host_readiness_summary_json=${HANDOFF_DIR}/pre_real_host_readiness_summary.json" ${TMP_DIR}/integration_prod_pilot_cohort_quick_runbook_handoff.log; then
   echo "handoff output missing pre-real-host readiness summary path"
-  cat /tmp/integration_prod_pilot_cohort_quick_runbook_handoff.log
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_runbook_handoff.log
   exit 1
 fi
 
@@ -382,12 +382,12 @@ FAKE_QUICK_RC=1 \
 FAKE_QUICK_WRITE_REPORT=1 \
 PROD_PILOT_COHORT_QUICK_RUNBOOK_EASY_NODE_SH="$FAKE_EASY_NODE" \
 ./scripts/prod_pilot_cohort_quick_runbook.sh \
-  --reports-dir "$FAIL_WITH_REPORT_DIR" >/tmp/integration_prod_pilot_cohort_quick_runbook_quick_fail_with_report.log 2>&1
+  --reports-dir "$FAIL_WITH_REPORT_DIR" >${TMP_DIR}/integration_prod_pilot_cohort_quick_runbook_quick_fail_with_report.log 2>&1
 rc=$?
 set -e
 if [[ "$rc" -eq 0 ]]; then
   echo "expected non-zero rc when quick stage fails"
-  cat /tmp/integration_prod_pilot_cohort_quick_runbook_quick_fail_with_report.log
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_runbook_quick_fail_with_report.log
   exit 1
 fi
 if ! rg -q -- "--reports-dir ${FAIL_WITH_REPORT_DIR}" "$CAPTURE"; then
@@ -414,12 +414,12 @@ FAKE_QUICK_RC=1 \
 FAKE_QUICK_WRITE_REPORT=0 \
 PROD_PILOT_COHORT_QUICK_RUNBOOK_EASY_NODE_SH="$FAKE_EASY_NODE" \
 ./scripts/prod_pilot_cohort_quick_runbook.sh \
-  --reports-dir "$FAIL_NO_REPORT_DIR" >/tmp/integration_prod_pilot_cohort_quick_runbook_quick_fail_no_report.log 2>&1
+  --reports-dir "$FAIL_NO_REPORT_DIR" >${TMP_DIR}/integration_prod_pilot_cohort_quick_runbook_quick_fail_no_report.log 2>&1
 rc=$?
 set -e
 if [[ "$rc" -eq 0 ]]; then
   echo "expected non-zero rc when quick fails without report artifact"
-  cat /tmp/integration_prod_pilot_cohort_quick_runbook_quick_fail_no_report.log
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_runbook_quick_fail_no_report.log
   exit 1
 fi
 if [[ ! -f "${FAIL_NO_REPORT_DIR}/prod_pilot_cohort_quick_runbook_summary.json" ]]; then
@@ -440,7 +440,7 @@ FAKE_DASHBOARD_RC=2 \
 PROD_PILOT_COHORT_QUICK_RUNBOOK_EASY_NODE_SH="$FAKE_EASY_NODE" \
 ./scripts/prod_pilot_cohort_quick_runbook.sh \
   --reports-dir "$DASH_NON_FAIL_DIR" \
-  --dashboard-fail-close 0 >/tmp/integration_prod_pilot_cohort_quick_runbook_dashboard_non_fail.log 2>&1
+  --dashboard-fail-close 0 >${TMP_DIR}/integration_prod_pilot_cohort_quick_runbook_dashboard_non_fail.log 2>&1
 
 if ! jq -e '.status=="ok" and .stages.quick_dashboard.rc==2' "${DASH_NON_FAIL_DIR}/prod_pilot_cohort_quick_runbook_summary.json" >/dev/null 2>&1; then
   echo "dashboard non-fail-close behavior not reflected in summary"
@@ -456,12 +456,12 @@ FAKE_DASHBOARD_RC=2 \
 PROD_PILOT_COHORT_QUICK_RUNBOOK_EASY_NODE_SH="$FAKE_EASY_NODE" \
 ./scripts/prod_pilot_cohort_quick_runbook.sh \
   --reports-dir "$DASH_FAIL_CLOSE_DIR" \
-  --dashboard-fail-close 1 >/tmp/integration_prod_pilot_cohort_quick_runbook_dashboard_fail_close.log 2>&1
+  --dashboard-fail-close 1 >${TMP_DIR}/integration_prod_pilot_cohort_quick_runbook_dashboard_fail_close.log 2>&1
 rc=$?
 set -e
 if [[ "$rc" -eq 0 ]]; then
   echo "expected non-zero rc when dashboard fails with fail-close enabled"
-  cat /tmp/integration_prod_pilot_cohort_quick_runbook_dashboard_fail_close.log
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_runbook_dashboard_fail_close.log
   exit 1
 fi
 if ! jq -e '.status=="fail" and .failure_step=="quick_dashboard"' "${DASH_FAIL_CLOSE_DIR}/prod_pilot_cohort_quick_runbook_summary.json" >/dev/null 2>&1; then
@@ -509,8 +509,8 @@ PROD_PILOT_COHORT_QUICK_RUNBOOK_SCRIPT="$FAKE_RUNBOOK" \
   --bootstrap-directory https://a.example:8081 \
   --subject demo-client \
   --pre-real-host-readiness 0 \
-  --pre-real-host-readiness-summary-json /tmp/quick_pre_real_host.json \
-  --reports-dir /tmp/quick_runbook \
+  --pre-real-host-readiness-summary-json ${TMP_DIR}/quick_pre_real_host.json \
+  --reports-dir ${TMP_DIR}/quick_runbook \
   --max-round-failures 3 \
   --bundle-outputs 0 \
   --bundle-fail-close 0 \
@@ -519,7 +519,7 @@ PROD_PILOT_COHORT_QUICK_RUNBOOK_SCRIPT="$FAKE_RUNBOOK" \
   --signoff-require-cohort-signoff-policy 0 \
   --signoff-require-trend-artifact-policy-match 0 \
   --dashboard-fail-close 1 \
-  --show-json 1 >/tmp/integration_prod_pilot_cohort_quick_runbook_easy_node.log 2>&1
+  --show-json 1 >${TMP_DIR}/integration_prod_pilot_cohort_quick_runbook_easy_node.log 2>&1
 
 if ! rg -q -- '--bootstrap-directory https://a.example:8081' "$RUNBOOK_FORWARD_CAPTURE"; then
   echo "easy_node quick-runbook forwarding failed: missing --bootstrap-directory"
@@ -536,12 +536,12 @@ if ! rg -q -- '--pre-real-host-readiness 0' "$RUNBOOK_FORWARD_CAPTURE"; then
   cat "$RUNBOOK_FORWARD_CAPTURE"
   exit 1
 fi
-if ! rg -q -- '--pre-real-host-readiness-summary-json /tmp/quick_pre_real_host.json' "$RUNBOOK_FORWARD_CAPTURE"; then
+if ! rg -F -q -- "--pre-real-host-readiness-summary-json ${TMP_DIR}/quick_pre_real_host.json" "$RUNBOOK_FORWARD_CAPTURE"; then
   echo "easy_node quick-runbook forwarding failed: missing --pre-real-host-readiness-summary-json"
   cat "$RUNBOOK_FORWARD_CAPTURE"
   exit 1
 fi
-if ! rg -q -- '--reports-dir /tmp/quick_runbook' "$RUNBOOK_FORWARD_CAPTURE"; then
+if ! rg -F -q -- "--reports-dir ${TMP_DIR}/quick_runbook" "$RUNBOOK_FORWARD_CAPTURE"; then
   echo "easy_node quick-runbook forwarding failed: missing --reports-dir"
   cat "$RUNBOOK_FORWARD_CAPTURE"
   exit 1

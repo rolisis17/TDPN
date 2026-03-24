@@ -365,6 +365,7 @@ done
 
 if [[ "$strict_ingress_rehearsal" == "1" ]]; then
   validate_args+=(--client-inner-source synthetic)
+  validate_args+=(--allow-synthetic-ingress 1)
   if [[ -z "${failure_class_limits[strict_ingress_policy]+x}" ]]; then
     failure_class_limits["strict_ingress_policy"]=0
   fi

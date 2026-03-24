@@ -97,8 +97,8 @@ EOF_FAKE_ALERT
 chmod +x "$FAKE_ALERT"
 
 echo "[prod-pilot-cohort-quick-signoff] script orchestration success path"
-mkdir -p /tmp/quick
-cat >/tmp/quick/report.json <<EOF_SUCCESS_RUN_REPORT
+mkdir -p "${TMP_DIR}/quick"
+cat >${TMP_DIR}/quick/report.json <<EOF_SUCCESS_RUN_REPORT
 {
   "status":"ok",
   "failure_step":"",
@@ -107,7 +107,7 @@ cat >/tmp/quick/report.json <<EOF_SUCCESS_RUN_REPORT
   "runbook":{"rc":0},
   "signoff":{"attempted":true,"rc":0},
   "artifacts":{
-    "summary_json":"/tmp/quick/reports/prod_pilot_cohort_summary.json",
+    "summary_json":"${TMP_DIR}/quick/reports/prod_pilot_cohort_summary.json",
     "pre_real_host_readiness_summary_json":"$PRE_REAL_HOST_READINESS_SUMMARY_JSON"
   }
 }
@@ -120,8 +120,8 @@ PROD_PILOT_COHORT_QUICK_CHECK_SCRIPT="$FAKE_CHECK" \
 PROD_PILOT_COHORT_QUICK_TREND_SCRIPT="$FAKE_TREND" \
 PROD_PILOT_COHORT_QUICK_ALERT_SCRIPT="$FAKE_ALERT" \
 ./scripts/prod_pilot_cohort_quick_signoff.sh \
-  --run-report-json /tmp/quick/report.json \
-  --reports-dir /tmp/quick/reports \
+  --run-report-json ${TMP_DIR}/quick/report.json \
+  --reports-dir ${TMP_DIR}/quick/reports \
   --require-cohort-signoff-policy 1 \
   --require-trend-artifact-policy-match 0 \
   --require-trend-wg-validate-udp-source 0 \
@@ -136,13 +136,13 @@ PROD_PILOT_COHORT_QUICK_ALERT_SCRIPT="$FAKE_ALERT" \
   --incident-snapshot-min-attachment-count 2 \
   --incident-snapshot-max-skipped-count 0 \
   --max-alert-severity WARN \
-  --show-json 1 >/tmp/integration_prod_pilot_cohort_quick_signoff_pass.log 2>&1
+  --show-json 1 >${TMP_DIR}/integration_prod_pilot_cohort_quick_signoff_pass.log 2>&1
 
-SIGNOFF_JSON="/tmp/quick/reports/prod_pilot_quick_signoff.json"
+SIGNOFF_JSON="${TMP_DIR}/quick/reports/prod_pilot_quick_signoff.json"
 if [[ ! -f "$SIGNOFF_JSON" ]]; then
   echo "expected quick-signoff artifact missing: $SIGNOFF_JSON"
-  ls -la /tmp/quick/reports 2>/dev/null || true
-  cat /tmp/integration_prod_pilot_cohort_quick_signoff_pass.log
+  ls -la ${TMP_DIR}/quick/reports 2>/dev/null || true
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_signoff_pass.log
   exit 1
 fi
 if ! jq -e '.status=="ok" and .policy.require_trend_artifact_policy_match==0 and .policy.require_trend_wg_validate_udp_source==0 and .policy.require_trend_wg_validate_strict_distinct==0 and .policy.require_trend_wg_soak_diversity_pass==0 and .policy.min_trend_wg_soak_selection_lines==3 and .policy.min_trend_wg_soak_entry_operators==1 and .policy.min_trend_wg_soak_exit_operators==1 and .policy.min_trend_wg_soak_cross_operator_pairs==1 and .policy.require_bundle_created==0 and .policy.require_bundle_manifest==0 and .policy.incident_snapshot_min_attachment_count==2 and .policy.incident_snapshot_max_skipped_count==0 and .policy.max_alert_severity=="WARN"' "$SIGNOFF_JSON" >/dev/null 2>&1; then
@@ -155,9 +155,9 @@ if [[ "$(jq -r '.artifacts.pre_real_host_readiness_summary_json' "$SIGNOFF_JSON"
   cat "$SIGNOFF_JSON"
   exit 1
 fi
-if ! rg -q -- "prod-pilot-cohort-quick-signoff: pre_real_host_readiness_summary_json=$PRE_REAL_HOST_READINESS_SUMMARY_JSON" /tmp/integration_prod_pilot_cohort_quick_signoff_pass.log; then
+if ! rg -q -- "prod-pilot-cohort-quick-signoff: pre_real_host_readiness_summary_json=$PRE_REAL_HOST_READINESS_SUMMARY_JSON" ${TMP_DIR}/integration_prod_pilot_cohort_quick_signoff_pass.log; then
   echo "quick-signoff output missing pre-real-host readiness summary path"
-  cat /tmp/integration_prod_pilot_cohort_quick_signoff_pass.log
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_signoff_pass.log
   exit 1
 fi
 
@@ -176,7 +176,7 @@ if ! rg -q -- '^alert ' "$SIGNOFF_CAPTURE"; then
   cat "$SIGNOFF_CAPTURE"
   exit 1
 fi
-if ! rg -q -- '--run-report-json /tmp/quick/report.json' "$CHECK_CAPTURE"; then
+if ! rg -F -q -- "--run-report-json ${TMP_DIR}/quick/report.json" "$CHECK_CAPTURE"; then
   echo "quick-signoff forwarding missing --run-report-json to quick-check"
   cat "$CHECK_CAPTURE"
   exit 1
@@ -354,7 +354,7 @@ PROD_PILOT_COHORT_QUICK_ALERT_SCRIPT="$FAKE_ALERT" \
 ./scripts/prod_pilot_cohort_quick_signoff.sh \
   --run-report-json "$HANDOFF_RUN_REPORT_JSON" \
   --reports-dir "$HANDOFF_REPORTS_DIR" \
-  --show-json 1 >/tmp/integration_prod_pilot_cohort_quick_signoff_handoff.log 2>&1
+  --show-json 1 >${TMP_DIR}/integration_prod_pilot_cohort_quick_signoff_handoff.log 2>&1
 
 HANDOFF_SIGNOFF_JSON="$HANDOFF_REPORTS_DIR/prod_pilot_quick_signoff.json"
 if [[ "$(jq -r '.incident_snapshot.summary_json.path' "$HANDOFF_SIGNOFF_JSON")" != "$HANDOFF_INCIDENT_SUMMARY" ]]; then
@@ -372,14 +372,14 @@ if [[ "$(jq -r '.incident_snapshot.report_md.path' "$HANDOFF_SIGNOFF_JSON")" != 
   cat "$HANDOFF_SIGNOFF_JSON"
   exit 1
 fi
-if ! rg -q 'incident_handoff' /tmp/integration_prod_pilot_cohort_quick_signoff_handoff.log; then
+if ! rg -q 'incident_handoff' ${TMP_DIR}/integration_prod_pilot_cohort_quick_signoff_handoff.log; then
   echo "expected quick-signoff incident handoff line not found"
-  cat /tmp/integration_prod_pilot_cohort_quick_signoff_handoff.log
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_signoff_handoff.log
   exit 1
 fi
-if ! rg -q -- "source_pre_real_host_readiness_summary_json=$PRE_REAL_HOST_READINESS_SUMMARY_JSON" /tmp/integration_prod_pilot_cohort_quick_signoff_handoff.log; then
+if ! rg -q -- "source_pre_real_host_readiness_summary_json=$PRE_REAL_HOST_READINESS_SUMMARY_JSON" ${TMP_DIR}/integration_prod_pilot_cohort_quick_signoff_handoff.log; then
   echo "quick-signoff incident handoff line missing pre-real-host readiness source path"
-  cat /tmp/integration_prod_pilot_cohort_quick_signoff_handoff.log
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_signoff_handoff.log
   exit 1
 fi
 
@@ -415,8 +415,8 @@ PROD_PILOT_COHORT_QUICK_CHECK_SCRIPT="$FAKE_CHECK" \
 PROD_PILOT_COHORT_QUICK_TREND_SCRIPT="$FAKE_TREND" \
 PROD_PILOT_COHORT_QUICK_ALERT_SCRIPT="$FAKE_ALERT" \
 ./scripts/prod_pilot_cohort_quick_signoff.sh \
-  --run-report-json /tmp/quick/report.json \
-  --reports-dir /tmp/quick/reports >/tmp/integration_prod_pilot_cohort_quick_signoff_env_namespace.log 2>&1
+  --run-report-json ${TMP_DIR}/quick/report.json \
+  --reports-dir ${TMP_DIR}/quick/reports >${TMP_DIR}/integration_prod_pilot_cohort_quick_signoff_env_namespace.log 2>&1
 if ! rg -q -- '--require-status-ok 0' "$CHECK_CAPTURE_ENV"; then
   echo "quick-signoff env precedence failed: missing --require-status-ok 0 from signoff env namespace"
   cat "$CHECK_CAPTURE_ENV"
@@ -483,9 +483,9 @@ PROD_PILOT_COHORT_QUICK_CHECK_SCRIPT="$FAKE_CHECK" \
 PROD_PILOT_COHORT_QUICK_TREND_SCRIPT="$FAKE_TREND" \
 PROD_PILOT_COHORT_QUICK_ALERT_SCRIPT="$FAKE_ALERT" \
 ./scripts/prod_pilot_cohort_quick_signoff.sh \
-  --run-report-json /tmp/quick/report.json \
-  --reports-dir /tmp/quick/reports \
-  --max-alert-severity OK >/tmp/integration_prod_pilot_cohort_quick_signoff_ok_severity.log 2>&1
+  --run-report-json ${TMP_DIR}/quick/report.json \
+  --reports-dir ${TMP_DIR}/quick/reports \
+  --max-alert-severity OK >${TMP_DIR}/integration_prod_pilot_cohort_quick_signoff_ok_severity.log 2>&1
 if ! rg -q -- '--fail-on-warn 1' "$ALERT_CAPTURE_OK"; then
   echo "quick-signoff severity mapping failed for max-alert-severity=OK: missing --fail-on-warn 1"
   cat "$ALERT_CAPTURE_OK"
@@ -507,9 +507,9 @@ PROD_PILOT_COHORT_QUICK_CHECK_SCRIPT="$FAKE_CHECK" \
 PROD_PILOT_COHORT_QUICK_TREND_SCRIPT="$FAKE_TREND" \
 PROD_PILOT_COHORT_QUICK_ALERT_SCRIPT="$FAKE_ALERT" \
 ./scripts/prod_pilot_cohort_quick_signoff.sh \
-  --run-report-json /tmp/quick/report.json \
-  --reports-dir /tmp/quick/reports \
-  --max-alert-severity CRITICAL >/tmp/integration_prod_pilot_cohort_quick_signoff_critical_severity.log 2>&1
+  --run-report-json ${TMP_DIR}/quick/report.json \
+  --reports-dir ${TMP_DIR}/quick/reports \
+  --max-alert-severity CRITICAL >${TMP_DIR}/integration_prod_pilot_cohort_quick_signoff_critical_severity.log 2>&1
 if ! rg -q -- '--fail-on-warn 0' "$ALERT_CAPTURE_CRITICAL"; then
   echo "quick-signoff severity mapping failed for max-alert-severity=CRITICAL: missing --fail-on-warn 0"
   cat "$ALERT_CAPTURE_CRITICAL"
@@ -552,12 +552,12 @@ PROD_PILOT_COHORT_QUICK_CHECK_SCRIPT="$FAKE_CHECK" \
 PROD_PILOT_COHORT_QUICK_TREND_SCRIPT="$FAKE_TREND_MARK" \
 PROD_PILOT_COHORT_QUICK_ALERT_SCRIPT="$FAKE_ALERT_MARK" \
 ./scripts/prod_pilot_cohort_quick_signoff.sh \
-  --run-report-json /tmp/quick/report.json >/tmp/integration_prod_pilot_cohort_quick_signoff_check_fail.log 2>&1
+  --run-report-json ${TMP_DIR}/quick/report.json >${TMP_DIR}/integration_prod_pilot_cohort_quick_signoff_check_fail.log 2>&1
 check_fail_rc=$?
 set -e
 if [[ "$check_fail_rc" -eq 0 ]]; then
   echo "expected non-zero rc when quick-check step fails"
-  cat /tmp/integration_prod_pilot_cohort_quick_signoff_check_fail.log
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_signoff_check_fail.log
   exit 1
 fi
 if [[ -f "$TREND_SHOULD_NOT_RUN" ]]; then
@@ -590,12 +590,12 @@ PROD_PILOT_COHORT_QUICK_CHECK_SCRIPT="$FAKE_CHECK" \
 PROD_PILOT_COHORT_QUICK_TREND_SCRIPT="$FAKE_TREND" \
 PROD_PILOT_COHORT_QUICK_ALERT_SCRIPT="$FAKE_ALERT_MARK2" \
 ./scripts/prod_pilot_cohort_quick_signoff.sh \
-  --run-report-json /tmp/quick/report.json >/tmp/integration_prod_pilot_cohort_quick_signoff_trend_fail.log 2>&1
+  --run-report-json ${TMP_DIR}/quick/report.json >${TMP_DIR}/integration_prod_pilot_cohort_quick_signoff_trend_fail.log 2>&1
 trend_fail_rc=$?
 set -e
 if [[ "$trend_fail_rc" -eq 0 ]]; then
   echo "expected non-zero rc when quick-trend step fails"
-  cat /tmp/integration_prod_pilot_cohort_quick_signoff_trend_fail.log
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_signoff_trend_fail.log
   exit 1
 fi
 if [[ -f "$ALERT_SHOULD_NOT_RUN_2" ]]; then
@@ -640,15 +640,15 @@ PATH="$TMP_BIN:$PATH" \
 SIGNOFF_FORWARD_CAPTURE_FILE="$SIGNOFF_FORWARD_CAPTURE" \
 PROD_PILOT_COHORT_QUICK_SIGNOFF_SCRIPT="$FAKE_SIGNOFF" \
 ./scripts/easy_node.sh prod-pilot-cohort-quick-signoff \
-  --run-report-json /tmp/quick/report.json \
+  --run-report-json ${TMP_DIR}/quick/report.json \
   --require-cohort-signoff-policy 0 \
   --require-trend-artifact-policy-match 0 \
   --incident-snapshot-min-attachment-count 2 \
   --incident-snapshot-max-skipped-count 0 \
   --max-alert-severity OK \
-  --show-json 1 >/tmp/integration_prod_pilot_cohort_quick_signoff_easy_node.log 2>&1
+  --show-json 1 >${TMP_DIR}/integration_prod_pilot_cohort_quick_signoff_easy_node.log 2>&1
 
-if ! rg -q -- '--run-report-json /tmp/quick/report.json' "$SIGNOFF_FORWARD_CAPTURE"; then
+if ! rg -F -q -- "--run-report-json ${TMP_DIR}/quick/report.json" "$SIGNOFF_FORWARD_CAPTURE"; then
   echo "easy_node quick-signoff forwarding failed: missing --run-report-json"
   cat "$SIGNOFF_FORWARD_CAPTURE"
   exit 1

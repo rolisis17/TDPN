@@ -114,8 +114,62 @@ Quick non-interactive examples:
   --issuer-url http://<SERVER_IP>:8082 \
   --entry-url http://<SERVER_IP>:8083 \
   --exit-url http://<SERVER_IP>:8084 \
-  --beta-profile 1 \
-  --distinct-operators 1
+  --path-profile balanced
+
+# local profile comparison (single-machine decision support)
+./scripts/easy_node.sh profile-compare-local \
+  --profiles balanced,speed,private,speed-1hop \
+  --rounds 3 \
+  --start-local-stack auto \
+  --summary-json .easy-node-logs/profile_compare_local.json \
+  --report-md .easy-node-logs/profile_compare_local.md \
+  --print-summary-json 1
+
+# aggregate trend recommendation from multiple profile-compare-local runs
+./scripts/easy_node.sh profile-compare-trend \
+  --reports-dir .easy-node-logs \
+  --max-reports 20 \
+  --min-profile-runs 3 \
+  --min-profile-pass-rate-pct 95 \
+  --balanced-latency-margin-pct 15 \
+  --summary-json .easy-node-logs/profile_compare_trend.json \
+  --report-md .easy-node-logs/profile_compare_trend.md \
+  --print-summary-json 1
+
+# repeatable campaign run (multiple local comparisons + trend aggregation)
+./scripts/easy_node.sh profile-compare-campaign \
+  --campaign-runs 5 \
+  --profiles balanced,speed,private,speed-1hop \
+  --rounds 3 \
+  --start-local-stack auto \
+  --trend-min-profile-runs 3 \
+  --trend-min-profile-pass-rate-pct 95 \
+  --trend-balanced-latency-margin-pct 15 \
+  --summary-json .easy-node-logs/profile_compare_campaign_summary.json \
+  --report-md .easy-node-logs/profile_compare_campaign_report.md \
+  --print-summary-json 1
+
+# fail-closed decision check for campaign recommendation readiness
+./scripts/easy_node.sh profile-compare-campaign-check \
+  --campaign-summary-json .easy-node-logs/profile_compare_campaign_summary.json \
+  --require-min-runs-total 5 \
+  --require-max-runs-fail 0 \
+  --require-max-runs-warn 0 \
+  --require-recommendation-support-rate-pct 70 \
+  --allow-recommended-profiles balanced,speed,private \
+  --disallow-experimental-default 1 \
+  --show-json 1
+
+# one-command campaign signoff (optional campaign refresh + fail-closed gate)
+./scripts/easy_node.sh profile-compare-campaign-signoff \
+  --reports-dir .easy-node-logs \
+  --refresh-campaign 1 \
+  --fail-on-no-go 1 \
+  --require-min-runs-total 5 \
+  --allow-recommended-profiles balanced,speed,private \
+  --disallow-experimental-default 1 \
+  --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json \
+  --print-summary-json 1
 
 # real client VPN session (Linux + sudo)
 sudo ./scripts/easy_node.sh client-vpn-preflight \
@@ -123,8 +177,7 @@ sudo ./scripts/easy_node.sh client-vpn-preflight \
 sudo ./scripts/easy_node.sh client-vpn-up \
   --bootstrap-directory http://<SERVER_IP>:8081 \
   --subject <INVITE_KEY> \
-  --beta-profile 1 \
-  --distinct-operators 1
+  --path-profile balanced
 ./scripts/easy_node.sh client-vpn-status
 sudo ./scripts/easy_node.sh client-vpn-down
 # prod profile enables operator-floor checks by default (>=2 global/entry/exit operators).
@@ -142,8 +195,7 @@ sudo ./scripts/easy_node.sh client-vpn-down
   --exit-url http://<A_SERVER_IP>:8084 \
   --min-sources 2 \
   --min-operators 2 \
-  --beta-profile 1 \
-  --distinct-operators 1
+  --path-profile balanced
 
 ./scripts/easy_node.sh three-machine-soak \
   --directory-a http://<A_SERVER_IP>:8081 \
@@ -153,8 +205,7 @@ sudo ./scripts/easy_node.sh client-vpn-down
   --exit-url http://<A_SERVER_IP>:8084 \
   --rounds 12 \
   --pause-sec 5 \
-  --beta-profile 1 \
-  --distinct-operators 1
+  --path-profile balanced
 
 ./scripts/easy_node.sh discover-hosts \
   --bootstrap-directory http://<KNOWN_SERVER_IP>:8081 \
@@ -164,8 +215,7 @@ sudo ./scripts/easy_node.sh client-vpn-down
 ./scripts/easy_node.sh machine-c-test \
   --bootstrap-directory http://<KNOWN_SERVER_IP>:8081 \
   --discovery-wait-sec 20 \
-  --beta-profile 1 \
-  --distinct-operators 1
+  --path-profile balanced
 
 ./scripts/easy_node.sh machine-a-test --public-host <A_SERVER_IP_OR_DNS>
 ./scripts/easy_node.sh machine-b-test --peer-directory-a http://<A_SERVER_IP_OR_DNS>:8081 --public-host <B_SERVER_IP_OR_DNS>
@@ -175,8 +225,7 @@ sudo ./scripts/easy_node.sh client-vpn-down
   --issuer-url http://<A_SERVER_IP_OR_DNS>:8082 \
   --entry-url http://<A_SERVER_IP_OR_DNS>:8083 \
   --exit-url http://<A_SERVER_IP_OR_DNS>:8084 \
-  --beta-profile 1 \
-  --distinct-operators 1
+  --path-profile balanced
 
 # host real-WireGuard preflight and local validation (Linux + sudo required)
 ./scripts/easy_node.sh wg-only-check
@@ -195,9 +244,9 @@ sudo ./scripts/easy_node.sh stop-all --with-wg-only 1 --force-iface-cleanup 1
 ./scripts/easy_node.sh manual-validation-status --show-json 1
 ./scripts/easy_node.sh manual-validation-report --print-report 1 --print-summary-json 1
 ./scripts/easy_node.sh runtime-doctor --show-json 1
-sudo ./scripts/easy_node.sh runtime-fix --prune-wg-only-dir 1 --show-json 1
+sudo ./scripts/easy_node.sh runtime-fix-record --prune-wg-only-dir 1 --print-summary-json 1
 sudo ./scripts/easy_node.sh pre-real-host-readiness --strict-beta 1 --print-summary-json 1
-sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country
+sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --path-profile balanced --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country
 sudo ./scripts/easy_node.sh three-machine-prod-signoff --bundle-dir .easy-node-logs/prod_gate_bundle --directory-a https://A_HOST:8081 --directory-b https://B_HOST:8081 --issuer-url https://A_HOST:8082 --entry-url https://A_HOST:8083 --exit-url https://A_HOST:8084 --pre-real-host-readiness 1 --runtime-fix 1 --print-summary-json 1
 
 Both wrappers now persist runtime hygiene evidence alongside the summary output:
@@ -212,7 +261,7 @@ They also now refresh the shared manual-validation readiness handoff automatical
 
 That refresh now happens before the final manual-validation receipt is written, so the saved receipt artifacts can point at the updated readiness handoff too.
 
-If `client-vpn-smoke` fails, it now also auto-captures a client incident bundle, attaches the saved runtime-doctor/runtime-fix evidence into that bundle, refreshes the shared manual-validation readiness report, and attaches those refreshed readiness-report artifacts back into the same failed incident bundle for faster triage. `manual-validation-report` now surfaces those refreshed readiness-report attachment paths directly, so the latest failed handoff points at the actual bundled files instead of only the attachment manifest. The Linux root WG-only rerun now also has a recorded wrapper via `wg-only-stack-selftest-record`, and `pre-real-host-readiness` now packages the runtime-fix + WG-only + readiness-refresh sequence into one operator command before the real machine-C smoke step.
+If `client-vpn-smoke` fails, it now also auto-captures a client incident bundle, attaches the saved runtime-doctor/runtime-fix evidence into that bundle, refreshes the shared manual-validation readiness report, and attaches those refreshed readiness-report artifacts back into the same failed incident bundle for faster triage. `manual-validation-report` now surfaces those refreshed readiness-report attachment paths directly, so the latest failed handoff points at the actual bundled files instead of only the attachment manifest. The Linux root WG-only rerun now also has a recorded wrapper via `wg-only-stack-selftest-record`, `runtime-fix` now refreshes the shared readiness report on its own by default, `runtime-fix-record` packages that cleanup into one recorded runtime-hygiene receipt, and `pre-real-host-readiness` now chains `runtime-fix-record` + `wg-only-stack-selftest-record` + readiness refresh into one operator command before the real machine-C smoke step.
 
 # rotate local server secret material (directory/puzzle, plus issuer token on authority nodes)
 ./scripts/easy_node.sh rotate-server-secrets --restart 1
@@ -298,9 +347,9 @@ Prod strict additions:
 - use `./scripts/easy_node.sh prod-pilot-cohort-quick ...` for minimal-prompt operator flow that runs cohort execution and signoff together, now with the same one-time top-level `pre-real-host-readiness` gate exposed directly on the quick wrapper.
 - `prod-pilot-cohort-quick` writes a quick run report JSON by default (`<reports_dir>/prod_pilot_cohort_quick_report.json`) and supports `--run-report-json` override.
 - use `./scripts/easy_node.sh prod-pilot-cohort-quick-check ...` to enforce quick run-report policy (status, runbook/signoff RCs, summary presence/status, optional duration threshold); it now also prints the upstream `pre_real_host_readiness_summary_json` path when present in the quick run report.
-- use `./scripts/easy_node.sh prod-pilot-cohort-quick-trend ...` to aggregate quick run-report GO/NO-GO trend with optional fail-close thresholds, including latest failed incident attachment pointers when available.
-- use `./scripts/easy_node.sh prod-pilot-cohort-quick-alert ...` to classify trend metrics into severity (`OK/WARN/CRITICAL`) with optional fail-close exits, while preserving incident handoff attachment pointers in alert JSON/output.
-- use `./scripts/easy_node.sh prod-pilot-cohort-quick-dashboard ...` to generate one operator dashboard (trend JSON + alert JSON + markdown), including incident handoff paths and attachment manifests when present in the linked quick trend summary.
+- use `./scripts/easy_node.sh prod-pilot-cohort-quick-trend ...` to aggregate quick run-report GO/NO-GO trend with optional fail-close thresholds, including latest failed incident attachment pointers plus the upstream `pre_real_host_readiness_summary_json` pointer when available.
+- use `./scripts/easy_node.sh prod-pilot-cohort-quick-alert ...` to classify trend metrics into severity (`OK/WARN/CRITICAL`) with optional fail-close exits, while preserving incident handoff attachment pointers and the upstream `pre_real_host_readiness_summary_json` pointer in alert JSON/output.
+- use `./scripts/easy_node.sh prod-pilot-cohort-quick-dashboard ...` to generate one operator dashboard (trend JSON + alert JSON + markdown), including incident handoff paths, attachment manifests, and the upstream `pre_real_host_readiness_summary_json` pointer when present in the linked quick trend summary.
 - use `./scripts/easy_node.sh prod-pilot-cohort-quick-signoff ...` to run quick-check + trend + alert in one fail-closed decision command; it now also preserves the upstream `pre_real_host_readiness_summary_json` path in signoff JSON/output when present.
 - use `./scripts/easy_node.sh prod-pilot-cohort-quick-runbook ...` for one-command quick execution + signoff + optional dashboard with a runbook summary artifact, and the same one-time top-level `pre-real-host-readiness` gate exposed directly on the quick runbook wrapper.
 - use `./scripts/easy_node.sh prod-pilot-cohort-campaign ...` for low-prompt sustained operator campaigns with the same top-level `pre-real-host-readiness` gate exposed directly on the campaign wrapper; it now writes both a machine-readable campaign run report (`<reports_dir>/prod_pilot_campaign_run_report.json`) and an inline campaign-signoff summary (`<reports_dir>/prod_pilot_campaign_signoff_summary.json`) by default, supports fail-close report completeness policy controls (`--campaign-run-report-required`, `--campaign-run-report-json-required`), and can disable inline signoff only for diagnostics (`--campaign-signoff-check 0`).

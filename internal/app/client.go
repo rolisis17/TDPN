@@ -103,6 +103,7 @@ type Client struct {
 	trustFeedMinVotes        int
 	allowUnknownExitFallback bool
 	allowDirectExitFallback  bool
+	forceDirectExit          bool
 	activeSession            clientActiveSession
 	activeMu                 sync.Mutex
 	healthMu                 sync.Mutex
@@ -334,6 +335,7 @@ func NewClient() *Client {
 	}
 	allowUnknownExitFallback := os.Getenv("CLIENT_ALLOW_UNKNOWN_EXIT_FALLBACK") == "1"
 	allowDirectExitFallback := os.Getenv("CLIENT_ALLOW_DIRECT_EXIT_FALLBACK") == "1"
+	forceDirectExit := os.Getenv("CLIENT_FORCE_DIRECT_EXIT") == "1"
 	bootstrapIntervalSec := 5
 	if v, err := strconv.Atoi(os.Getenv("CLIENT_BOOTSTRAP_INTERVAL_SEC")); err == nil && v > 0 {
 		bootstrapIntervalSec = v
@@ -460,6 +462,7 @@ func NewClient() *Client {
 		trustFeedMinVotes:        trustFeedMinVotes,
 		allowUnknownExitFallback: allowUnknownExitFallback,
 		allowDirectExitFallback:  allowDirectExitFallback,
+		forceDirectExit:          forceDirectExit,
 		healthCache:              make(map[string]healthProbeState),
 		httpClient:               &http.Client{Timeout: 5 * time.Second},
 		betaStrict:               betaStrict,
@@ -486,8 +489,8 @@ func (c *Client) Run(ctx context.Context) error {
 	if initialDelay < 0 {
 		initialDelay = 0
 	}
-	log.Printf("client role enabled: directories=%d min_sources=%d min_operators=%d min_votes=%d issuer=%s subject=%s anon_cred=%t entry=%s mode=%s source=%s trust_strict=%t wg_backend=%s iface=%s allowed_ips=%s install_route=%t wg_kernel_proxy=%t wg_proxy_addr=%s synthetic_fallback=%t opaque_session_sec=%d opaque_initial_uplink_timeout_ms=%d health_check=%t path_attempts=%d exit_country=%s exit_region=%s min_geo_confidence=%.2f locality_fallback=%s strict_locality=%t locality_soft_bias=%t country_bias=%.2f region_bias=%.2f region_prefix_bias=%.2f max_exits_per_operator=%d distinct_operators=%t distinct_countries=%t sticky_pair_sec=%d entry_rotation_sec=%d entry_rotation_seed_set=%t session_reuse=%t refresh_lead_sec=%d exit_exploration_pct=%d selection_feed_disable=%t selection_feed_require=%t selection_feed_min_votes=%d trust_feed_disable=%t trust_feed_require=%t trust_feed_min_votes=%d unknown_exit_fallback=%t direct_exit_fallback=%t bootstrap_interval_sec=%d bootstrap_backoff_max_sec=%d bootstrap_jitter_pct=%d bootstrap_initial_delay_sec=%d startup_sync_timeout_sec=%d wg_only=%t beta_strict=%t",
-		len(c.directoryURLs), c.directoryMinSources, c.directoryMinOperators, c.directoryMinVotes, c.issuerURL, c.subject, c.anonCred != "", c.entryURL, c.dataMode, c.innerSource, c.trustStrict, c.wgBackend, c.wgInterface, c.wgAllowedIPs, c.wgInstallRoute, c.wgKernelProxy, c.wgProxyAddr, c.allowSyntheticFallback(), c.opaqueSessionSec, c.opaqueInitialUpMS, c.healthCheckEnabled, c.pathOpenMaxAttempts, c.preferredExitCountry, c.preferredExitRegion, c.minGeoConfidence, strings.Join(c.localityFallbackOrder, ","), c.strictExitLocality, c.localitySoftBias, c.localityCountryBias, c.localityRegionBias, c.localityRegionPrefixBias, c.maxExitsPerOperator, c.requireDistinctOps, c.requireDistinctCountries, c.stickyPairSec, c.entryRotationSec, c.entryRotationSeed != 0, c.sessionReuse, c.sessionRefreshLeadSec, c.exitExplorationPct, c.selectionFeedDisable, c.selectionFeedRequire, c.selectionFeedMinVotes, c.trustFeedDisable, c.trustFeedRequire, c.trustFeedMinVotes, c.allowUnknownExitFallback, c.allowDirectExitFallback, int(bootstrapInterval/time.Second), int(bootstrapBackoffMax/time.Second), c.bootstrapJitterPct, int(initialDelay/time.Second), int(c.startupSyncTimeout/time.Second), c.wgOnlyMode, c.betaStrict)
+	log.Printf("client role enabled: directories=%d min_sources=%d min_operators=%d min_votes=%d issuer=%s subject=%s anon_cred=%t entry=%s mode=%s source=%s trust_strict=%t wg_backend=%s iface=%s allowed_ips=%s install_route=%t wg_kernel_proxy=%t wg_proxy_addr=%s synthetic_fallback=%t opaque_session_sec=%d opaque_initial_uplink_timeout_ms=%d health_check=%t path_attempts=%d exit_country=%s exit_region=%s min_geo_confidence=%.2f locality_fallback=%s strict_locality=%t locality_soft_bias=%t country_bias=%.2f region_bias=%.2f region_prefix_bias=%.2f max_exits_per_operator=%d distinct_operators=%t distinct_countries=%t sticky_pair_sec=%d entry_rotation_sec=%d entry_rotation_seed_set=%t session_reuse=%t refresh_lead_sec=%d exit_exploration_pct=%d selection_feed_disable=%t selection_feed_require=%t selection_feed_min_votes=%d trust_feed_disable=%t trust_feed_require=%t trust_feed_min_votes=%d unknown_exit_fallback=%t direct_exit_fallback=%t direct_exit_forced=%t bootstrap_interval_sec=%d bootstrap_backoff_max_sec=%d bootstrap_jitter_pct=%d bootstrap_initial_delay_sec=%d startup_sync_timeout_sec=%d wg_only=%t beta_strict=%t",
+		len(c.directoryURLs), c.directoryMinSources, c.directoryMinOperators, c.directoryMinVotes, c.issuerURL, c.subject, c.anonCred != "", c.entryURL, c.dataMode, c.innerSource, c.trustStrict, c.wgBackend, c.wgInterface, c.wgAllowedIPs, c.wgInstallRoute, c.wgKernelProxy, c.wgProxyAddr, c.allowSyntheticFallback(), c.opaqueSessionSec, c.opaqueInitialUpMS, c.healthCheckEnabled, c.pathOpenMaxAttempts, c.preferredExitCountry, c.preferredExitRegion, c.minGeoConfidence, strings.Join(c.localityFallbackOrder, ","), c.strictExitLocality, c.localitySoftBias, c.localityCountryBias, c.localityRegionBias, c.localityRegionPrefixBias, c.maxExitsPerOperator, c.requireDistinctOps, c.requireDistinctCountries, c.stickyPairSec, c.entryRotationSec, c.entryRotationSeed != 0, c.sessionReuse, c.sessionRefreshLeadSec, c.exitExplorationPct, c.selectionFeedDisable, c.selectionFeedRequire, c.selectionFeedMinVotes, c.trustFeedDisable, c.trustFeedRequire, c.trustFeedMinVotes, c.allowUnknownExitFallback, c.allowDirectExitFallback, c.forceDirectExit, int(bootstrapInterval/time.Second), int(bootstrapBackoffMax/time.Second), c.bootstrapJitterPct, int(initialDelay/time.Second), int(c.startupSyncTimeout/time.Second), c.wgOnlyMode, c.betaStrict)
 	if err := c.validateRuntimeConfig(); err != nil {
 		return err
 	}
@@ -685,6 +688,17 @@ func (c *Client) validateRuntimeConfig() error {
 		}
 		if c.trustTOFU {
 			return fmt.Errorf("PROD_STRICT_MODE requires DIRECTORY_TRUST_TOFU=0")
+		}
+	}
+	if c.forceDirectExit {
+		if c.wgOnlyMode || c.betaStrict || c.prodStrict {
+			return fmt.Errorf("CLIENT_FORCE_DIRECT_EXIT is not allowed in strict modes")
+		}
+		if !c.allowDirectExitFallback {
+			return fmt.Errorf("CLIENT_FORCE_DIRECT_EXIT requires CLIENT_ALLOW_DIRECT_EXIT_FALLBACK=1")
+		}
+		if c.requireDistinctOps {
+			return fmt.Errorf("CLIENT_FORCE_DIRECT_EXIT requires CLIENT_REQUIRE_DISTINCT_OPERATORS=0")
 		}
 	}
 	if c.allowDirectExitFallback {
@@ -900,72 +914,103 @@ func (c *Client) bootstrap(ctx context.Context) error {
 		}
 		openReq.TokenProof = tokenProof
 
-		resp, err := c.openPathWithChallenge(ctx, entryControlURL, openReq)
-		if err != nil && c.shouldRetryUnknownExitFallback(err) {
-			// Compatibility retry for mixed/federated topologies where entry cannot
-			// currently resolve requested exit id but can still service local exit.
-			fallbackTokenReq := tokenReq
-			fallbackTokenReq.ExitScope = nil
-			fallbackTok, fallbackTokErr := c.issueToken(ctx, fallbackTokenReq)
-			if fallbackTokErr != nil {
-				return fmt.Errorf("issue fallback token after unknown-exit for exit=%s: %w", pair.exit.RelayID, fallbackTokErr)
-			}
-			fallbackReq := openReq
-			fallbackReq.ExitID = ""
-			fallbackReq.Token = fallbackTok.Token
-			fallbackReq.TokenProofNonce = randomProofNonce()
-			fallbackReq.RequestedRegion = ""
-			fallbackProof, fallbackProofErr := crypto.SignPathOpenProof(popPriv, crypto.PathOpenProofInput{
-				Token:           fallbackReq.Token,
-				ExitID:          fallbackReq.ExitID,
-				TokenProofNonce: fallbackReq.TokenProofNonce,
-				ClientInnerPub:  fallbackReq.ClientInnerPub,
-				Transport:       fallbackReq.Transport,
-				RequestedMTU:    fallbackReq.RequestedMTU,
-				RequestedRegion: fallbackReq.RequestedRegion,
-			})
-			if fallbackProofErr != nil {
-				return fmt.Errorf("sign fallback token proof after unknown-exit for exit=%s: %w", pair.exit.RelayID, fallbackProofErr)
-			}
-			fallbackReq.TokenProof = fallbackProof
-			resp, err = c.openPathWithChallenge(ctx, entryControlURL, fallbackReq)
-			if err == nil {
-				log.Printf("client unknown-exit fallback engaged entry=%s requested_exit=%s", pair.entry.RelayID, pair.exit.RelayID)
-				tok = fallbackTok
-			}
-		}
-		if err != nil && c.shouldRetryDirectExitFallback(err) {
+		var resp proto.PathOpenResponse
+		var openErr error
+		if c.forceDirectExit {
 			exitDataAddr := strings.TrimSpace(pair.exit.Endpoint)
 			if exitDataAddr == "" {
-				return fmt.Errorf("direct-exit fallback missing endpoint for exit=%s", pair.exit.RelayID)
+				return fmt.Errorf("direct-exit mode missing endpoint for exit=%s", pair.exit.RelayID)
 			}
 			directReq := openReq
 			sessionID, sidErr := randomSessionIDHex(16)
 			if sidErr != nil {
-				return fmt.Errorf("generate direct-exit fallback session id for exit=%s: %w", pair.exit.RelayID, sidErr)
+				return fmt.Errorf("generate direct-exit mode session id for exit=%s: %w", pair.exit.RelayID, sidErr)
 			}
 			directReq.SessionID = sessionID
 			directResp, directErr := c.openPathWithChallenge(ctx, exitControlURL, directReq)
-			if directErr == nil {
-				if strings.TrimSpace(directResp.SessionID) == "" {
-					directResp.SessionID = sessionID
+			if directErr != nil {
+				return directErr
+			}
+			if strings.TrimSpace(directResp.SessionID) == "" {
+				directResp.SessionID = sessionID
+			}
+			if strings.TrimSpace(directResp.EntryDataAddr) == "" {
+				directResp.EntryDataAddr = exitDataAddr
+			}
+			if strings.TrimSpace(directResp.Transport) == "" {
+				directResp.Transport = directReq.Transport
+			}
+			resp = directResp
+			pathControlURL = exitControlURL
+			log.Printf("client direct-exit mode engaged entry=%s exit=%s", pair.entry.RelayID, pair.exit.RelayID)
+		} else {
+			resp, openErr = c.openPathWithChallenge(ctx, entryControlURL, openReq)
+			if openErr != nil && c.shouldRetryUnknownExitFallback(openErr) {
+				// Compatibility retry for mixed/federated topologies where entry cannot
+				// currently resolve requested exit id but can still service local exit.
+				fallbackTokenReq := tokenReq
+				fallbackTokenReq.ExitScope = nil
+				fallbackTok, fallbackTokErr := c.issueToken(ctx, fallbackTokenReq)
+				if fallbackTokErr != nil {
+					return fmt.Errorf("issue fallback token after unknown-exit for exit=%s: %w", pair.exit.RelayID, fallbackTokErr)
 				}
-				if strings.TrimSpace(directResp.EntryDataAddr) == "" {
-					directResp.EntryDataAddr = exitDataAddr
+				fallbackReq := openReq
+				fallbackReq.ExitID = ""
+				fallbackReq.Token = fallbackTok.Token
+				fallbackReq.TokenProofNonce = randomProofNonce()
+				fallbackReq.RequestedRegion = ""
+				fallbackProof, fallbackProofErr := crypto.SignPathOpenProof(popPriv, crypto.PathOpenProofInput{
+					Token:           fallbackReq.Token,
+					ExitID:          fallbackReq.ExitID,
+					TokenProofNonce: fallbackReq.TokenProofNonce,
+					ClientInnerPub:  fallbackReq.ClientInnerPub,
+					Transport:       fallbackReq.Transport,
+					RequestedMTU:    fallbackReq.RequestedMTU,
+					RequestedRegion: fallbackReq.RequestedRegion,
+				})
+				if fallbackProofErr != nil {
+					return fmt.Errorf("sign fallback token proof after unknown-exit for exit=%s: %w", pair.exit.RelayID, fallbackProofErr)
 				}
-				if strings.TrimSpace(directResp.Transport) == "" {
-					directResp.Transport = directReq.Transport
+				fallbackReq.TokenProof = fallbackProof
+				resp, openErr = c.openPathWithChallenge(ctx, entryControlURL, fallbackReq)
+				if openErr == nil {
+					log.Printf("client unknown-exit fallback engaged entry=%s requested_exit=%s", pair.entry.RelayID, pair.exit.RelayID)
+					tok = fallbackTok
 				}
-				resp = directResp
-				err = nil
-				pathControlURL = exitControlURL
-				log.Printf("client direct-exit fallback engaged entry=%s exit=%s", pair.entry.RelayID, pair.exit.RelayID)
-			} else {
-				err = directErr
+			}
+			if openErr != nil && c.shouldRetryDirectExitFallback(openErr) {
+				exitDataAddr := strings.TrimSpace(pair.exit.Endpoint)
+				if exitDataAddr == "" {
+					return fmt.Errorf("direct-exit fallback missing endpoint for exit=%s", pair.exit.RelayID)
+				}
+				directReq := openReq
+				sessionID, sidErr := randomSessionIDHex(16)
+				if sidErr != nil {
+					return fmt.Errorf("generate direct-exit fallback session id for exit=%s: %w", pair.exit.RelayID, sidErr)
+				}
+				directReq.SessionID = sessionID
+				directResp, directErr := c.openPathWithChallenge(ctx, exitControlURL, directReq)
+				if directErr == nil {
+					if strings.TrimSpace(directResp.SessionID) == "" {
+						directResp.SessionID = sessionID
+					}
+					if strings.TrimSpace(directResp.EntryDataAddr) == "" {
+						directResp.EntryDataAddr = exitDataAddr
+					}
+					if strings.TrimSpace(directResp.Transport) == "" {
+						directResp.Transport = directReq.Transport
+					}
+					resp = directResp
+					openErr = nil
+					pathControlURL = exitControlURL
+					log.Printf("client direct-exit fallback engaged entry=%s exit=%s", pair.entry.RelayID, pair.exit.RelayID)
+				} else {
+					openErr = directErr
+				}
 			}
 		}
-		if err != nil {
-			return err
+		if openErr != nil {
+			return openErr
 		}
 
 		selectedPair = pair

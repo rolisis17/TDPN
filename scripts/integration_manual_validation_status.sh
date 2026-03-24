@@ -15,10 +15,17 @@ TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 STATE_DIR="$TMP_DIR/state"
+PROFILE_SIGNOFF_SUMMARY_JSON="$TMP_DIR/profile_compare_campaign_signoff_summary.json"
 FAKE_DOCTOR="$TMP_DIR/fake_runtime_doctor.sh"
 FAKE_STATUS="$TMP_DIR/fake_manual_validation_status.sh"
 FAKE_RECORD="$TMP_DIR/fake_manual_validation_record.sh"
 CAPTURE="$TMP_DIR/capture.log"
+BASELINE_LOG="$TMP_DIR/integration_manual_validation_status_baseline.log"
+RECORD_LOG="$TMP_DIR/integration_manual_validation_record.log"
+RECORDED_LOG="$TMP_DIR/integration_manual_validation_status_recorded.log"
+INCIDENT_RECORD_LOG="$TMP_DIR/integration_manual_validation_record_smoke_fail.log"
+INCIDENT_LOG="$TMP_DIR/integration_manual_validation_status_incident.log"
+PROFILE_BLOCKED_LOG="$TMP_DIR/integration_manual_validation_status_profile_blocked.log"
 
 cat >"$FAKE_DOCTOR" <<'EOF'
 #!/usr/bin/env bash
@@ -56,23 +63,24 @@ chmod +x "$FAKE_DOCTOR"
 
 echo "[manual-validation] baseline status"
 EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR" \
+MANUAL_VALIDATION_PROFILE_COMPARE_SIGNOFF_SUMMARY_JSON="$PROFILE_SIGNOFF_SUMMARY_JSON" \
 RUNTIME_DOCTOR_SCRIPT="$FAKE_DOCTOR" \
-./scripts/manual_validation_status.sh --show-json 1 >/tmp/integration_manual_validation_status_baseline.log
+./scripts/manual_validation_status.sh --show-json 1 >$BASELINE_LOG
 
-if ! rg -q '\[manual-validation-status\] runtime_hygiene=WARN' /tmp/integration_manual_validation_status_baseline.log; then
+if ! rg -q '\[manual-validation-status\] runtime_hygiene=WARN' $BASELINE_LOG; then
   echo "baseline status missing runtime_hygiene WARN line"
-  cat /tmp/integration_manual_validation_status_baseline.log
+  cat $BASELINE_LOG
   exit 1
 fi
-if ! rg -q '\[manual-validation-status\] wg_only_stack_selftest=PENDING' /tmp/integration_manual_validation_status_baseline.log; then
+if ! rg -q '\[manual-validation-status\] wg_only_stack_selftest=PENDING' $BASELINE_LOG; then
   echo "baseline status missing pending wg_only_stack_selftest"
-  cat /tmp/integration_manual_validation_status_baseline.log
+  cat $BASELINE_LOG
   exit 1
 fi
-baseline_json="$(awk '/^\[manual-validation-status\] summary_json_payload:/{flag=1; next} flag{print}' /tmp/integration_manual_validation_status_baseline.log)"
+baseline_json="$(awk '/^\[manual-validation-status\] summary_json_payload:/{flag=1; next} flag{print}' $BASELINE_LOG)"
 if [[ -z "$baseline_json" ]]; then
   echo "baseline status missing JSON payload"
-  cat /tmp/integration_manual_validation_status_baseline.log
+  cat $BASELINE_LOG
   exit 1
 fi
 if ! printf '%s\n' "$baseline_json" | jq -e '.summary.next_action_check_id == "runtime_hygiene"' >/dev/null; then
@@ -80,36 +88,121 @@ if ! printf '%s\n' "$baseline_json" | jq -e '.summary.next_action_check_id == "r
   printf '%s\n' "$baseline_json"
   exit 1
 fi
-if ! printf '%s\n' "$baseline_json" | jq -e '.summary.next_action_command == "./scripts/easy_node.sh runtime-doctor --show-json 1"' >/dev/null; then
+if ! printf '%s\n' "$baseline_json" | jq -e '.summary.next_action_command == "sudo ./scripts/easy_node.sh runtime-fix-record --prune-wg-only-dir 1 --print-summary-json 1"' >/dev/null; then
   echo "baseline status JSON missing expected next_action_command"
   printf '%s\n' "$baseline_json"
   exit 1
 fi
-if ! rg -q '\[manual-validation-status\] next_action_command=\./scripts/easy_node.sh runtime-doctor --show-json 1' /tmp/integration_manual_validation_status_baseline.log; then
+if ! rg -q '\[manual-validation-status\] next_action_command=sudo \./scripts/easy_node\.sh runtime-fix-record --prune-wg-only-dir 1 --print-summary-json 1' $BASELINE_LOG; then
   echo "baseline status missing next_action_command output line"
-  cat /tmp/integration_manual_validation_status_baseline.log
+  cat $BASELINE_LOG
   exit 1
 fi
-if ! rg -q '\[manual-validation-status\] machine_c_smoke_ready=false' /tmp/integration_manual_validation_status_baseline.log; then
+if ! rg -q '\[manual-validation-status\] next_action_remediation=sudo chown user:user deploy/\.env\.easy\.client' $BASELINE_LOG; then
+  echo "baseline status missing next_action_remediation client env line"
+  cat $BASELINE_LOG
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] next_action_remediation=sudo rm -rf deploy/data/wg_only' $BASELINE_LOG; then
+  echo "baseline status missing next_action_remediation wg-only line"
+  cat $BASELINE_LOG
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] machine_c_smoke_ready=false' $BASELINE_LOG; then
   echo "baseline status missing machine_c_smoke_ready=false line"
-  cat /tmp/integration_manual_validation_status_baseline.log
+  cat $BASELINE_LOG
   exit 1
 fi
-if ! rg -q '\[manual-validation-status\] machine_c_smoke_blockers=runtime_hygiene,wg_only_stack_selftest' /tmp/integration_manual_validation_status_baseline.log; then
+if ! rg -q '\[manual-validation-status\] machine_c_smoke_blockers=runtime_hygiene,wg_only_stack_selftest' $BASELINE_LOG; then
   echo "baseline status missing machine_c_smoke_blockers line"
-  cat /tmp/integration_manual_validation_status_baseline.log
+  cat $BASELINE_LOG
   exit 1
 fi
-if ! rg -q '\[manual-validation-status\] machine_c_smoke_next_command=sudo \./scripts/easy_node\.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api\.ipify\.org --country-url https://ipinfo\.io/country' /tmp/integration_manual_validation_status_baseline.log; then
+if ! rg -q '\[manual-validation-status\] machine_c_smoke_next_command=sudo \./scripts/easy_node\.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --path-profile balanced --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api\.ipify\.org --country-url https://ipinfo\.io/country' $BASELINE_LOG; then
   echo "baseline status missing machine_c_smoke_next_command line"
-  cat /tmp/integration_manual_validation_status_baseline.log
+  cat $BASELINE_LOG
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] single_machine_ready=false' $BASELINE_LOG; then
+  echo "baseline status missing single_machine_ready=false line"
+  cat $BASELINE_LOG
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] roadmap_stage=BLOCKED_LOCAL' $BASELINE_LOG; then
+  echo "baseline status missing roadmap_stage=BLOCKED_LOCAL line"
+  cat $BASELINE_LOG
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] real_host_gate_ready=false' $BASELINE_LOG; then
+  echo "baseline status missing real_host_gate_ready=false line"
+  cat $BASELINE_LOG
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] real_host_gate_blockers=machine_c_vpn_smoke,three_machine_prod_signoff' $BASELINE_LOG; then
+  echo "baseline status missing real_host_gate_blockers line"
+  cat $BASELINE_LOG
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] real_host_gate_next_command=sudo \./scripts/easy_node\.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --path-profile balanced --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api\.ipify\.org --country-url https://ipinfo\.io/country' $BASELINE_LOG; then
+  echo "baseline status missing real_host_gate_next_command line"
+  cat $BASELINE_LOG
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] profile_default_gate_status=pending' $BASELINE_LOG; then
+  echo "baseline status missing profile_default_gate_status=pending line"
+  cat $BASELINE_LOG
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] profile_default_gate_available=false' $BASELINE_LOG; then
+  echo "baseline status missing profile_default_gate_available=false line"
+  cat $BASELINE_LOG
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] docker_rehearsal_status=pending' $BASELINE_LOG; then
+  echo "baseline status missing docker_rehearsal_status=pending line"
+  cat $BASELINE_LOG
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] docker_rehearsal_ready=false' $BASELINE_LOG; then
+  echo "baseline status missing docker_rehearsal_ready=false line"
+  cat $BASELINE_LOG
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] real_wg_privileged_status=pending' $BASELINE_LOG; then
+  echo "baseline status missing real_wg_privileged_status=pending line"
+  cat $BASELINE_LOG
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] real_wg_privileged_ready=false' $BASELINE_LOG; then
+  echo "baseline status missing real_wg_privileged_ready=false line"
+  cat $BASELINE_LOG
   exit 1
 fi
 if ! printf '%s\n' "$baseline_json" | jq -e '
   .summary.pre_machine_c_gate.ready == false
   and .summary.pre_machine_c_gate.blockers == ["runtime_hygiene","wg_only_stack_selftest"]
   and .summary.pre_machine_c_gate.next_check_id == "machine_c_vpn_smoke"
-  and .summary.pre_machine_c_gate.next_command == "sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country"
+  and .summary.pre_machine_c_gate.next_command == "sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --path-profile balanced --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country"
+  and .summary.local_gate.ready == false
+  and .summary.local_gate.blockers == ["runtime_hygiene","wg_only_stack_selftest"]
+  and .summary.local_gate.next_check_id == "runtime_hygiene"
+  and .summary.real_host_gate.ready == false
+  and .summary.real_host_gate.blockers == ["machine_c_vpn_smoke","three_machine_prod_signoff"]
+  and .summary.real_host_gate.next_check_id == "machine_c_vpn_smoke"
+  and .summary.real_host_gate.next_command == "sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --path-profile balanced --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country"
+  and .summary.profile_default_gate.status == "pending"
+  and .summary.profile_default_gate.available == false
+  and .summary.profile_default_gate.valid_json == false
+  and .summary.profile_default_gate.summary_json == "'"$PROFILE_SIGNOFF_SUMMARY_JSON"'"
+  and .summary.docker_rehearsal_gate.status == "pending"
+  and .summary.docker_rehearsal_gate.ready == false
+  and .summary.docker_rehearsal_gate.check_id == "three_machine_docker_readiness"
+  and .summary.real_wg_privileged_gate.status == "pending"
+  and .summary.real_wg_privileged_gate.ready == false
+  and .summary.real_wg_privileged_gate.check_id == "real_wg_privileged_matrix"
+  and .summary.single_machine_ready == false
+  and .summary.roadmap_stage == "BLOCKED_LOCAL"
+  and .summary.next_action_remediations == ["sudo chown user:user deploy/.env.easy.client","sudo rm -rf deploy/data/wg_only"]
 ' >/dev/null; then
   echo "baseline status JSON missing expected pre_machine_c_gate fields"
   printf '%s\n' "$baseline_json"
@@ -125,17 +218,17 @@ EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR" \
   --notes "Linux root host rerun passed" \
   --artifact "$artifact_path" \
   --command "sudo ./scripts/integration_wg_only_stack_selftest.sh" \
-  --show-json 1 >/tmp/integration_manual_validation_record.log
+  --show-json 1 >$RECORD_LOG
 
-if ! rg -q '\[manual-validation-record\] check_id=wg_only_stack_selftest status=pass' /tmp/integration_manual_validation_record.log; then
+if ! rg -q '\[manual-validation-record\] check_id=wg_only_stack_selftest status=pass' $RECORD_LOG; then
   echo "manual-validation-record missing expected summary line"
-  cat /tmp/integration_manual_validation_record.log
+  cat $RECORD_LOG
   exit 1
 fi
-receipt_json_path="$(sed -n 's/^\[manual-validation-record\] receipt_json=//p' /tmp/integration_manual_validation_record.log | tail -n 1)"
+receipt_json_path="$(sed -n 's/^\[manual-validation-record\] receipt_json=//p' $RECORD_LOG | tail -n 1)"
 if [[ -z "$receipt_json_path" || ! -f "$receipt_json_path" ]]; then
   echo "manual-validation-record missing receipt artifact"
-  cat /tmp/integration_manual_validation_record.log
+  cat $RECORD_LOG
   exit 1
 fi
 if ! jq -e --arg artifact "$artifact_path" '.check_id == "wg_only_stack_selftest" and .status == "pass" and (.artifacts | index($artifact) != null)' "$receipt_json_path" >/dev/null; then
@@ -146,34 +239,50 @@ fi
 
 echo "[manual-validation] updated status"
 EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR" \
+MANUAL_VALIDATION_PROFILE_COMPARE_SIGNOFF_SUMMARY_JSON="$PROFILE_SIGNOFF_SUMMARY_JSON" \
 RUNTIME_DOCTOR_SCRIPT="$FAKE_DOCTOR" \
-./scripts/manual_validation_status.sh --show-json 1 >/tmp/integration_manual_validation_status_recorded.log
+./scripts/manual_validation_status.sh --show-json 1 >$RECORDED_LOG
 
-if ! rg -q '\[manual-validation-status\] wg_only_stack_selftest=PASS' /tmp/integration_manual_validation_status_recorded.log; then
+if ! rg -q '\[manual-validation-status\] wg_only_stack_selftest=PASS' $RECORDED_LOG; then
   echo "recorded status missing wg_only_stack_selftest PASS line"
-  cat /tmp/integration_manual_validation_status_recorded.log
+  cat $RECORDED_LOG
   exit 1
 fi
-if ! rg -q "artifacts: ${ROOT_DIR}/scripts/easy_node.sh" /tmp/integration_manual_validation_status_recorded.log; then
+if ! rg -q "artifacts: ${ROOT_DIR}/scripts/easy_node.sh" $RECORDED_LOG; then
   echo "recorded status missing artifact path"
-  cat /tmp/integration_manual_validation_status_recorded.log
+  cat $RECORDED_LOG
   exit 1
 fi
-recorded_json="$(awk '/^\[manual-validation-status\] summary_json_payload:/{flag=1; next} flag{print}' /tmp/integration_manual_validation_status_recorded.log)"
+recorded_json="$(awk '/^\[manual-validation-status\] summary_json_payload:/{flag=1; next} flag{print}' $RECORDED_LOG)"
 if [[ -z "$recorded_json" ]]; then
   echo "recorded status missing JSON payload"
-  cat /tmp/integration_manual_validation_status_recorded.log
+  cat $RECORDED_LOG
   exit 1
 fi
 if ! printf '%s\n' "$recorded_json" | jq -e '
   .summary.warn_checks == 1
   and .summary.pass_checks == 1
-  and .summary.next_action_command == "./scripts/easy_node.sh runtime-doctor --show-json 1"
+  and .summary.next_action_command == "sudo ./scripts/easy_node.sh runtime-fix-record --prune-wg-only-dir 1 --print-summary-json 1"
+  and .summary.next_action_remediations == ["sudo chown user:user deploy/.env.easy.client","sudo rm -rf deploy/data/wg_only"]
   and .summary.pre_machine_c_gate.ready == false
   and .summary.pre_machine_c_gate.blockers == ["runtime_hygiene"]
   and .summary.pre_machine_c_gate.next_check_id == "machine_c_vpn_smoke"
-  and .summary.pre_machine_c_gate.next_command == "sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country"
-  and (.checks[] | select(.check_id == "machine_c_vpn_smoke") | .command == "sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country")
+  and .summary.pre_machine_c_gate.next_command == "sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --path-profile balanced --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country"
+  and .summary.local_gate.ready == false
+  and .summary.local_gate.blockers == ["runtime_hygiene"]
+  and .summary.local_gate.next_check_id == "runtime_hygiene"
+  and .summary.real_host_gate.ready == false
+  and .summary.real_host_gate.blockers == ["machine_c_vpn_smoke","three_machine_prod_signoff"]
+  and .summary.real_host_gate.next_check_id == "machine_c_vpn_smoke"
+  and .summary.real_host_gate.next_command == "sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --path-profile balanced --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country"
+  and .summary.docker_rehearsal_gate.status == "pending"
+  and .summary.docker_rehearsal_gate.ready == false
+  and .summary.real_wg_privileged_gate.status == "pending"
+  and .summary.real_wg_privileged_gate.ready == false
+  and .summary.real_wg_privileged_gate.check_id == "real_wg_privileged_matrix"
+  and .summary.single_machine_ready == false
+  and .summary.roadmap_stage == "BLOCKED_LOCAL"
+  and (.checks[] | select(.check_id == "machine_c_vpn_smoke") | .command == "sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --path-profile balanced --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country")
   and (.checks[] | select(.check_id == "three_machine_prod_signoff") | .command == "sudo ./scripts/easy_node.sh three-machine-prod-signoff --bundle-dir .easy-node-logs/prod_gate_bundle --directory-a https://A_HOST:8081 --directory-b https://B_HOST:8081 --issuer-url https://A_HOST:8082 --entry-url https://A_HOST:8083 --exit-url https://A_HOST:8084 --pre-real-host-readiness 1 --runtime-fix 1 --print-summary-json 1")
   and (.checks[] | select(.check_id == "wg_only_stack_selftest") | .status == "pass")
 ' >/dev/null; then
@@ -181,19 +290,64 @@ if ! printf '%s\n' "$recorded_json" | jq -e '
   printf '%s\n' "$recorded_json"
   exit 1
 fi
-if ! rg -q '\[manual-validation-status\] machine_c_smoke_ready=false' /tmp/integration_manual_validation_status_recorded.log; then
+if ! rg -q '\[manual-validation-status\] machine_c_smoke_ready=false' $RECORDED_LOG; then
   echo "recorded status missing machine_c_smoke_ready=false line"
-  cat /tmp/integration_manual_validation_status_recorded.log
+  cat $RECORDED_LOG
   exit 1
 fi
-if ! rg -q '\[manual-validation-status\] machine_c_smoke_blockers=runtime_hygiene' /tmp/integration_manual_validation_status_recorded.log; then
+if ! rg -q '\[manual-validation-status\] machine_c_smoke_blockers=runtime_hygiene' $RECORDED_LOG; then
   echo "recorded status missing machine_c_smoke_blockers line"
-  cat /tmp/integration_manual_validation_status_recorded.log
+  cat $RECORDED_LOG
   exit 1
 fi
-if ! rg -q '\[manual-validation-status\] machine_c_smoke_next_command=sudo \./scripts/easy_node\.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api\.ipify\.org --country-url https://ipinfo\.io/country' /tmp/integration_manual_validation_status_recorded.log; then
+if ! rg -q '\[manual-validation-status\] machine_c_smoke_next_command=sudo \./scripts/easy_node\.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --path-profile balanced --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api\.ipify\.org --country-url https://ipinfo\.io/country' $RECORDED_LOG; then
   echo "recorded status missing machine_c_smoke_next_command line"
-  cat /tmp/integration_manual_validation_status_recorded.log
+  cat $RECORDED_LOG
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] single_machine_ready=false' $RECORDED_LOG; then
+  echo "recorded status missing single_machine_ready=false line"
+  cat $RECORDED_LOG
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] roadmap_stage=BLOCKED_LOCAL' $RECORDED_LOG; then
+  echo "recorded status missing roadmap_stage=BLOCKED_LOCAL line"
+  cat $RECORDED_LOG
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] real_host_gate_ready=false' $RECORDED_LOG; then
+  echo "recorded status missing real_host_gate_ready=false line"
+  cat $RECORDED_LOG
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] real_host_gate_blockers=machine_c_vpn_smoke,three_machine_prod_signoff' $RECORDED_LOG; then
+  echo "recorded status missing real_host_gate_blockers line"
+  cat $RECORDED_LOG
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] profile_default_gate_status=pending' $RECORDED_LOG; then
+  echo "recorded status missing profile_default_gate_status=pending line"
+  cat $RECORDED_LOG
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] docker_rehearsal_status=pending' $RECORDED_LOG; then
+  echo "recorded status missing docker_rehearsal_status=pending line"
+  cat $RECORDED_LOG
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] docker_rehearsal_ready=false' $RECORDED_LOG; then
+  echo "recorded status missing docker_rehearsal_ready=false line"
+  cat $RECORDED_LOG
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] real_wg_privileged_status=pending' $RECORDED_LOG; then
+  echo "recorded status missing real_wg_privileged_status=pending line"
+  cat $RECORDED_LOG
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] real_wg_privileged_ready=false' $RECORDED_LOG; then
+  echo "recorded status missing real_wg_privileged_ready=false line"
+  cat $RECORDED_LOG
   exit 1
 fi
 
@@ -267,77 +421,123 @@ EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR" \
   --artifact "$SMOKE_INCIDENT_ATTACH_MANIFEST" \
   --artifact "$SMOKE_INCIDENT_ATTACH_SKIPPED" \
   --artifact "$SMOKE_INCIDENT_LOG" \
-  --command "sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country" \
-  --show-json 0 >/tmp/integration_manual_validation_record_smoke_fail.log
+  --command "sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --path-profile balanced --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country" \
+  --show-json 0 >$INCIDENT_RECORD_LOG
 
 EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR" \
+MANUAL_VALIDATION_PROFILE_COMPARE_SIGNOFF_SUMMARY_JSON="$PROFILE_SIGNOFF_SUMMARY_JSON" \
 RUNTIME_DOCTOR_SCRIPT="$FAKE_DOCTOR" \
-./scripts/manual_validation_status.sh --show-json 1 >/tmp/integration_manual_validation_status_incident.log
+./scripts/manual_validation_status.sh --show-json 1 >$INCIDENT_LOG
 
-if ! rg -q '\[manual-validation-status\] machine_c_vpn_smoke=FAIL' /tmp/integration_manual_validation_status_incident.log; then
+if ! rg -q '\[manual-validation-status\] machine_c_vpn_smoke=FAIL' $INCIDENT_LOG; then
   echo "incident status missing machine_c_vpn_smoke FAIL line"
-  cat /tmp/integration_manual_validation_status_incident.log
+  cat $INCIDENT_LOG
   exit 1
 fi
-if ! rg -q "incident_handoff source_summary_json=${SMOKE_RUN_SUMMARY_JSON}" /tmp/integration_manual_validation_status_incident.log; then
+if ! rg -q "incident_handoff source_summary_json=${SMOKE_RUN_SUMMARY_JSON}" $INCIDENT_LOG; then
   echo "incident status missing incident_handoff source summary path"
-  cat /tmp/integration_manual_validation_status_incident.log
+  cat $INCIDENT_LOG
   exit 1
 fi
-if ! rg -q "readiness_report_summary_attachment=${SMOKE_READY_SUMMARY_ATTACHMENT}" /tmp/integration_manual_validation_status_incident.log; then
+if ! rg -q "readiness_report_summary_attachment=${SMOKE_READY_SUMMARY_ATTACHMENT}" $INCIDENT_LOG; then
   echo "incident status missing readiness summary attachment path"
-  cat /tmp/integration_manual_validation_status_incident.log
+  cat $INCIDENT_LOG
   exit 1
 fi
-if ! rg -q "readiness_report_md_attachment=${SMOKE_READY_REPORT_ATTACHMENT}" /tmp/integration_manual_validation_status_incident.log; then
+if ! rg -q "readiness_report_md_attachment=${SMOKE_READY_REPORT_ATTACHMENT}" $INCIDENT_LOG; then
   echo "incident status missing readiness report attachment path"
-  cat /tmp/integration_manual_validation_status_incident.log
+  cat $INCIDENT_LOG
   exit 1
 fi
-if ! rg -q "summary_json=${SMOKE_INCIDENT_SUMMARY_JSON}" /tmp/integration_manual_validation_status_incident.log; then
+if ! rg -q "summary_json=${SMOKE_INCIDENT_SUMMARY_JSON}" $INCIDENT_LOG; then
   echo "incident status missing incident summary path"
-  cat /tmp/integration_manual_validation_status_incident.log
+  cat $INCIDENT_LOG
   exit 1
 fi
-if ! rg -q "\\[manual-validation-status\\] latest_failed_incident_check_id=machine_c_vpn_smoke" /tmp/integration_manual_validation_status_incident.log; then
+if ! rg -q "\\[manual-validation-status\\] latest_failed_incident_check_id=machine_c_vpn_smoke" $INCIDENT_LOG; then
   echo "incident status missing latest failed incident check id"
-  cat /tmp/integration_manual_validation_status_incident.log
+  cat $INCIDENT_LOG
   exit 1
 fi
-if ! rg -q "\\[manual-validation-status\\] latest_failed_incident_summary_json=${SMOKE_INCIDENT_SUMMARY_JSON}" /tmp/integration_manual_validation_status_incident.log; then
+if ! rg -q "\\[manual-validation-status\\] latest_failed_incident_summary_json=${SMOKE_INCIDENT_SUMMARY_JSON}" $INCIDENT_LOG; then
   echo "incident status missing latest failed incident summary path"
-  cat /tmp/integration_manual_validation_status_incident.log
+  cat $INCIDENT_LOG
   exit 1
 fi
-if ! rg -q "\\[manual-validation-status\\] latest_failed_incident_readiness_report_summary_attachment=${SMOKE_READY_SUMMARY_ATTACHMENT}" /tmp/integration_manual_validation_status_incident.log; then
+if ! rg -q "\\[manual-validation-status\\] latest_failed_incident_readiness_report_summary_attachment=${SMOKE_READY_SUMMARY_ATTACHMENT}" $INCIDENT_LOG; then
   echo "incident status missing latest failed readiness summary attachment path"
-  cat /tmp/integration_manual_validation_status_incident.log
+  cat $INCIDENT_LOG
   exit 1
 fi
-if ! rg -q "\\[manual-validation-status\\] latest_failed_incident_readiness_report_md_attachment=${SMOKE_READY_REPORT_ATTACHMENT}" /tmp/integration_manual_validation_status_incident.log; then
+if ! rg -q "\\[manual-validation-status\\] latest_failed_incident_readiness_report_md_attachment=${SMOKE_READY_REPORT_ATTACHMENT}" $INCIDENT_LOG; then
   echo "incident status missing latest failed readiness report attachment path"
-  cat /tmp/integration_manual_validation_status_incident.log
+  cat $INCIDENT_LOG
   exit 1
 fi
-if ! rg -q '\[manual-validation-status\] machine_c_smoke_ready=false' /tmp/integration_manual_validation_status_incident.log; then
+if ! rg -q '\[manual-validation-status\] machine_c_smoke_ready=false' $INCIDENT_LOG; then
   echo "incident status missing machine_c_smoke_ready=false line"
-  cat /tmp/integration_manual_validation_status_incident.log
+  cat $INCIDENT_LOG
   exit 1
 fi
-if ! rg -q '\[manual-validation-status\] machine_c_smoke_blockers=runtime_hygiene' /tmp/integration_manual_validation_status_incident.log; then
+if ! rg -q '\[manual-validation-status\] machine_c_smoke_blockers=runtime_hygiene' $INCIDENT_LOG; then
   echo "incident status missing machine_c_smoke_blockers line"
-  cat /tmp/integration_manual_validation_status_incident.log
+  cat $INCIDENT_LOG
   exit 1
 fi
-if ! rg -q '\[manual-validation-status\] machine_c_smoke_next_command=sudo \./scripts/easy_node\.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api\.ipify\.org --country-url https://ipinfo\.io/country' /tmp/integration_manual_validation_status_incident.log; then
+if ! rg -q '\[manual-validation-status\] machine_c_smoke_next_command=sudo \./scripts/easy_node\.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --path-profile balanced --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api\.ipify\.org --country-url https://ipinfo\.io/country' $INCIDENT_LOG; then
   echo "incident status missing machine_c_smoke_next_command line"
-  cat /tmp/integration_manual_validation_status_incident.log
+  cat $INCIDENT_LOG
   exit 1
 fi
-incident_json="$(awk '/^\[manual-validation-status\] summary_json_payload:/{flag=1; next} flag{print}' /tmp/integration_manual_validation_status_incident.log)"
+if ! rg -q '\[manual-validation-status\] single_machine_ready=false' $INCIDENT_LOG; then
+  echo "incident status missing single_machine_ready=false line"
+  cat $INCIDENT_LOG
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] roadmap_stage=BLOCKED_LOCAL' $INCIDENT_LOG; then
+  echo "incident status missing roadmap_stage=BLOCKED_LOCAL line"
+  cat $INCIDENT_LOG
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] real_host_gate_ready=false' $INCIDENT_LOG; then
+  echo "incident status missing real_host_gate_ready=false line"
+  cat $INCIDENT_LOG
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] real_host_gate_blockers=machine_c_vpn_smoke,three_machine_prod_signoff' $INCIDENT_LOG; then
+  echo "incident status missing real_host_gate_blockers line"
+  cat $INCIDENT_LOG
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] profile_default_gate_status=pending' $INCIDENT_LOG; then
+  echo "incident status missing profile_default_gate_status=pending line"
+  cat $INCIDENT_LOG
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] docker_rehearsal_status=pending' $INCIDENT_LOG; then
+  echo "incident status missing docker_rehearsal_status=pending line"
+  cat $INCIDENT_LOG
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] docker_rehearsal_ready=false' $INCIDENT_LOG; then
+  echo "incident status missing docker_rehearsal_ready=false line"
+  cat $INCIDENT_LOG
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] real_wg_privileged_status=pending' $INCIDENT_LOG; then
+  echo "incident status missing real_wg_privileged_status=pending line"
+  cat $INCIDENT_LOG
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] real_wg_privileged_ready=false' $INCIDENT_LOG; then
+  echo "incident status missing real_wg_privileged_ready=false line"
+  cat $INCIDENT_LOG
+  exit 1
+fi
+incident_json="$(awk '/^\[manual-validation-status\] summary_json_payload:/{flag=1; next} flag{print}' $INCIDENT_LOG)"
 if [[ -z "$incident_json" ]]; then
   echo "incident status missing JSON payload"
-  cat /tmp/integration_manual_validation_status_incident.log
+  cat $INCIDENT_LOG
   exit 1
 fi
 if ! printf '%s\n' "$incident_json" | jq -e --arg smoke_summary "$SMOKE_RUN_SUMMARY_JSON" --arg incident_summary "$SMOKE_INCIDENT_SUMMARY_JSON" --arg incident_report "$SMOKE_INCIDENT_REPORT_MD" --arg ready_summary_attachment "$SMOKE_READY_SUMMARY_ATTACHMENT" --arg ready_report_attachment "$SMOKE_READY_REPORT_ATTACHMENT" --arg ready_log_attachment "$SMOKE_READY_LOG_ATTACHMENT" '
@@ -345,10 +545,26 @@ if ! printf '%s\n' "$incident_json" | jq -e --arg smoke_summary "$SMOKE_RUN_SUMM
   and .summary.pass_checks == 1
   and .summary.fail_checks == 1
   and .summary.next_action_check_id == "runtime_hygiene"
+  and .summary.next_action_command == "sudo ./scripts/easy_node.sh runtime-fix-record --prune-wg-only-dir 1 --print-summary-json 1"
+  and .summary.next_action_remediations == ["sudo chown user:user deploy/.env.easy.client","sudo rm -rf deploy/data/wg_only"]
   and .summary.pre_machine_c_gate.ready == false
   and .summary.pre_machine_c_gate.blockers == ["runtime_hygiene"]
   and .summary.pre_machine_c_gate.next_check_id == "machine_c_vpn_smoke"
-  and .summary.pre_machine_c_gate.next_command == "sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country"
+  and .summary.pre_machine_c_gate.next_command == "sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --path-profile balanced --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country"
+  and .summary.local_gate.ready == false
+  and .summary.local_gate.blockers == ["runtime_hygiene"]
+  and .summary.local_gate.next_check_id == "runtime_hygiene"
+  and .summary.real_host_gate.ready == false
+  and .summary.real_host_gate.blockers == ["machine_c_vpn_smoke","three_machine_prod_signoff"]
+  and .summary.real_host_gate.next_check_id == "machine_c_vpn_smoke"
+  and .summary.real_host_gate.next_command == "sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --path-profile balanced --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country"
+  and .summary.docker_rehearsal_gate.status == "pending"
+  and .summary.docker_rehearsal_gate.ready == false
+  and .summary.real_wg_privileged_gate.status == "pending"
+  and .summary.real_wg_privileged_gate.ready == false
+  and .summary.real_wg_privileged_gate.check_id == "real_wg_privileged_matrix"
+  and .summary.single_machine_ready == false
+  and .summary.roadmap_stage == "BLOCKED_LOCAL"
   and .summary.latest_failed_incident.check_id == "machine_c_vpn_smoke"
   and .summary.latest_failed_incident.summary_json.path == $incident_summary
   and .summary.latest_failed_incident.readiness_report_summary_attachment.bundle_path == $ready_summary_attachment
@@ -373,6 +589,76 @@ if ! printf '%s\n' "$incident_json" | jq -e --arg smoke_summary "$SMOKE_RUN_SUMM
   exit 1
 fi
 
+echo "[manual-validation] profile-default gate non-root refresh block"
+PROFILE_SIGNOFF_CAMPAIGN_LOG="$TMP_DIR/profile_compare_campaign_signoff_campaign.log"
+PROFILE_SIGNOFF_RUN_LOG="$TMP_DIR/profile_compare_local_run_01.log"
+cat >"$PROFILE_SIGNOFF_RUN_LOG" <<'EOF_PROFILE_SIGNOFF_RUN'
+--start-local-stack=1 requires root (run with sudo)
+EOF_PROFILE_SIGNOFF_RUN
+cat >"$PROFILE_SIGNOFF_CAMPAIGN_LOG" <<EOF_PROFILE_SIGNOFF_CAMPAIGN
+[profile-compare-campaign] run=01 status=fail rc=2 duration_sec=0 summary_json=$TMP_DIR/profile_compare_local_run_01.json log=$PROFILE_SIGNOFF_RUN_LOG
+profile-compare-campaign: no valid compare summaries were produced
+EOF_PROFILE_SIGNOFF_CAMPAIGN
+cat >"$PROFILE_SIGNOFF_SUMMARY_JSON" <<EOF_PROFILE_SIGNOFF_SUMMARY
+{
+  "version": 1,
+  "status": "fail",
+  "final_rc": 1,
+  "failure_stage": "campaign",
+  "inputs": {
+    "refresh_campaign": true
+  },
+  "stages": {
+    "campaign": {
+      "status": "fail",
+      "log": "$PROFILE_SIGNOFF_CAMPAIGN_LOG"
+    }
+  },
+  "decision": {
+    "decision": "unknown"
+  }
+}
+EOF_PROFILE_SIGNOFF_SUMMARY
+
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR" \
+MANUAL_VALIDATION_PROFILE_COMPARE_SIGNOFF_SUMMARY_JSON="$PROFILE_SIGNOFF_SUMMARY_JSON" \
+RUNTIME_DOCTOR_SCRIPT="$FAKE_DOCTOR" \
+./scripts/manual_validation_status.sh --show-json 1 >$PROFILE_BLOCKED_LOG
+
+if ! rg -q '\[manual-validation-status\] profile_default_gate_status=pending' $PROFILE_BLOCKED_LOG; then
+  echo "profile-blocked status missing profile_default_gate_status=pending line"
+  cat $PROFILE_BLOCKED_LOG
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] profile_default_gate_available=true' $PROFILE_BLOCKED_LOG; then
+  echo "profile-blocked status missing profile_default_gate_available=true line"
+  cat $PROFILE_BLOCKED_LOG
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] profile_default_gate_next_command=sudo \./scripts/easy_node\.sh profile-compare-campaign-signoff' $PROFILE_BLOCKED_LOG; then
+  echo "profile-blocked status missing sudo profile-default gate next command"
+  cat $PROFILE_BLOCKED_LOG
+  exit 1
+fi
+profile_blocked_json="$(awk '/^\[manual-validation-status\] summary_json_payload:/{flag=1; next} flag{print}' $PROFILE_BLOCKED_LOG)"
+if [[ -z "$profile_blocked_json" ]]; then
+  echo "profile-blocked status missing JSON payload"
+  cat $PROFILE_BLOCKED_LOG
+  exit 1
+fi
+if ! printf '%s\n' "$profile_blocked_json" | jq -e '
+  .summary.profile_default_gate.status == "pending"
+  and .summary.profile_default_gate.available == true
+  and .summary.profile_default_gate.valid_json == true
+  and .summary.profile_default_gate.failure_stage == "campaign"
+  and .summary.profile_default_gate.non_root_refresh_blocked == true
+  and (.summary.profile_default_gate.next_command | startswith("sudo ./scripts/easy_node.sh profile-compare-campaign-signoff"))
+' >/dev/null; then
+  echo "profile-blocked status JSON missing expected profile_default_gate fields"
+  printf '%s\n' "$profile_blocked_json"
+  exit 1
+fi
+
 echo "[manual-validation] easy_node forwarding"
 cat >"$FAKE_STATUS" <<EOF
 #!/usr/bin/env bash
@@ -393,6 +679,7 @@ MANUAL_VALIDATION_STATUS_SCRIPT="$FAKE_STATUS" \
   --client-iface wgctest0 \
   --exit-iface wgestest0 \
   --vpn-iface wgvpntest0 \
+  --profile-compare-signoff-summary-json /tmp/profile_signoff_override.json \
   --show-json 1
 
 line_status="$(rg '^manual-validation-status ' "$CAPTURE" | tail -n 1 || true)"
@@ -401,7 +688,7 @@ if [[ -z "$line_status" ]]; then
   cat "$CAPTURE"
   exit 1
 fi
-for expected in '--base-port 19400' '--client-iface wgctest0' '--exit-iface wgestest0' '--vpn-iface wgvpntest0' '--show-json 1'; do
+for expected in '--base-port 19400' '--client-iface wgctest0' '--exit-iface wgestest0' '--vpn-iface wgvpntest0' '--profile-compare-signoff-summary-json /tmp/profile_signoff_override.json' '--show-json 1'; do
   if ! grep -F -- "$expected" <<<"$line_status" >/dev/null; then
     echo "easy_node manual-validation-status forwarding missing $expected"
     cat "$CAPTURE"

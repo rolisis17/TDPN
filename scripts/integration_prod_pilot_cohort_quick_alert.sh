@@ -42,6 +42,7 @@ cat >"$WARN_SUMMARY" <<'EOF_WARN_SUMMARY'
   "reports_total": 10,
   "incident_snapshot": {
     "latest_failed_run_report": {
+      "source_pre_real_host_readiness_summary_json": {"path": "/tmp/run_b/pre_real_host_readiness_summary.json", "exists": true, "valid_json": true},
       "source_quick_run_report": {"path": "/tmp/run_b/prod_pilot_cohort_quick_report.json", "exists": true},
       "source_summary_json": {"path": "/tmp/run_b/prod_pilot_cohort_summary.json", "exists": true, "valid_json": true},
       "path": "/tmp/run_b/round_2_run_report.json",
@@ -79,11 +80,11 @@ echo "[prod-pilot-cohort-quick-alert] OK severity baseline"
 ./scripts/prod_pilot_cohort_quick_alert.sh \
   --trend-summary-json "$OK_SUMMARY" \
   --summary-json "$TMP_DIR/quick_alert_ok_out.json" \
-  --print-summary-json 1 >/tmp/integration_prod_pilot_cohort_quick_alert_ok.log 2>&1
+  --print-summary-json 1 >${TMP_DIR}/integration_prod_pilot_cohort_quick_alert_ok.log 2>&1
 
-if ! rg -q '\[prod-pilot-cohort-quick-alert\] severity=OK' /tmp/integration_prod_pilot_cohort_quick_alert_ok.log; then
+if ! rg -q '\[prod-pilot-cohort-quick-alert\] severity=OK' ${TMP_DIR}/integration_prod_pilot_cohort_quick_alert_ok.log; then
   echo "expected OK severity baseline not found"
-  cat /tmp/integration_prod_pilot_cohort_quick_alert_ok.log
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_alert_ok.log
   exit 1
 fi
 if ! jq -e '.severity == "OK" and .metrics.reports_total == 8' "$TMP_DIR/quick_alert_ok_out.json" >/dev/null 2>&1; then
@@ -100,21 +101,26 @@ echo "[prod-pilot-cohort-quick-alert] WARN severity baseline"
   --warn-no-go-count 1 \
   --critical-no-go-count 2 \
   --warn-eval-errors 1 \
-  --critical-eval-errors 2 >/tmp/integration_prod_pilot_cohort_quick_alert_warn.log 2>&1
+  --critical-eval-errors 2 >${TMP_DIR}/integration_prod_pilot_cohort_quick_alert_warn.log 2>&1
 
-if ! rg -q '\[prod-pilot-cohort-quick-alert\] severity=WARN' /tmp/integration_prod_pilot_cohort_quick_alert_warn.log; then
+if ! rg -q '\[prod-pilot-cohort-quick-alert\] severity=WARN' ${TMP_DIR}/integration_prod_pilot_cohort_quick_alert_warn.log; then
   echo "expected WARN severity baseline not found"
-  cat /tmp/integration_prod_pilot_cohort_quick_alert_warn.log
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_alert_warn.log
   exit 1
 fi
-if ! rg -q '\[prod-pilot-cohort-quick-alert\] incident_handoff ' /tmp/integration_prod_pilot_cohort_quick_alert_warn.log; then
+if ! rg -q '\[prod-pilot-cohort-quick-alert\] incident_handoff ' ${TMP_DIR}/integration_prod_pilot_cohort_quick_alert_warn.log; then
   echo "expected quick alert incident_handoff output not found"
-  cat /tmp/integration_prod_pilot_cohort_quick_alert_warn.log
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_alert_warn.log
   exit 1
 fi
-if ! rg -q 'attachment_manifest=/tmp/run_b/attachments_manifest.json' /tmp/integration_prod_pilot_cohort_quick_alert_warn.log; then
+if ! rg -q 'source_pre_real_host_readiness_summary_json=/tmp/run_b/pre_real_host_readiness_summary.json' ${TMP_DIR}/integration_prod_pilot_cohort_quick_alert_warn.log; then
+  echo "expected quick alert readiness summary pointer in handoff output"
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_alert_warn.log
+  exit 1
+fi
+if ! rg -q 'attachment_manifest=/tmp/run_b/attachments_manifest.json' ${TMP_DIR}/integration_prod_pilot_cohort_quick_alert_warn.log; then
   echo "expected quick alert attachment manifest in handoff output"
-  cat /tmp/integration_prod_pilot_cohort_quick_alert_warn.log
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_alert_warn.log
   exit 1
 fi
 
@@ -126,19 +132,19 @@ set +e
   --critical-go-rate-pct 90 \
   --warn-no-go-count 1 \
   --critical-no-go-count 2 \
-  --fail-on-warn 1 >/tmp/integration_prod_pilot_cohort_quick_alert_warn_fail.log 2>&1
+  --fail-on-warn 1 >${TMP_DIR}/integration_prod_pilot_cohort_quick_alert_warn_fail.log 2>&1
 warn_fail_rc=$?
 set -e
 if [[ "$warn_fail_rc" -ne 1 ]]; then
   echo "expected rc=1 for WARN fail-close (got $warn_fail_rc)"
-  cat /tmp/integration_prod_pilot_cohort_quick_alert_warn_fail.log
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_alert_warn_fail.log
   exit 1
 fi
 WARN_ALERT_JSON="$TMP_DIR/quick_alert_warn_out.json"
 ./scripts/prod_pilot_cohort_quick_alert.sh \
   --trend-summary-json "$WARN_SUMMARY" \
-  --summary-json "$WARN_ALERT_JSON" >/tmp/integration_prod_pilot_cohort_quick_alert_warn_json.log 2>&1
-if ! jq -e '.incident_snapshot.latest_failed_run_report.source_quick_run_report.path == "/tmp/run_b/prod_pilot_cohort_quick_report.json" and .incident_snapshot.latest_failed_run_report.source_summary_json.path == "/tmp/run_b/prod_pilot_cohort_summary.json" and .incident_snapshot.latest_failed_run_report.summary_json.path == "/tmp/run_b/incident_summary.json" and .incident_snapshot.latest_failed_run_report.report_md.path == "/tmp/run_b/incident_report.md" and .incident_snapshot.latest_failed_run_report.attachment_manifest.path == "/tmp/run_b/attachments_manifest.json" and .incident_snapshot.latest_failed_run_report.attachment_skipped.path == "/tmp/run_b/attachments_skipped.json" and .incident_snapshot.latest_failed_run_report.attachment_count == 1' "$WARN_ALERT_JSON" >/dev/null 2>&1; then
+  --summary-json "$WARN_ALERT_JSON" >${TMP_DIR}/integration_prod_pilot_cohort_quick_alert_warn_json.log 2>&1
+if ! jq -e '.incident_snapshot.latest_failed_run_report.source_pre_real_host_readiness_summary_json.path == "/tmp/run_b/pre_real_host_readiness_summary.json" and .incident_snapshot.latest_failed_run_report.source_quick_run_report.path == "/tmp/run_b/prod_pilot_cohort_quick_report.json" and .incident_snapshot.latest_failed_run_report.source_summary_json.path == "/tmp/run_b/prod_pilot_cohort_summary.json" and .incident_snapshot.latest_failed_run_report.summary_json.path == "/tmp/run_b/incident_summary.json" and .incident_snapshot.latest_failed_run_report.report_md.path == "/tmp/run_b/incident_report.md" and .incident_snapshot.latest_failed_run_report.attachment_manifest.path == "/tmp/run_b/attachments_manifest.json" and .incident_snapshot.latest_failed_run_report.attachment_skipped.path == "/tmp/run_b/attachments_skipped.json" and .incident_snapshot.latest_failed_run_report.attachment_count == 1' "$WARN_ALERT_JSON" >/dev/null 2>&1; then
   echo "quick alert WARN summary JSON missing incident handoff block"
   cat "$WARN_ALERT_JSON"
   exit 1
@@ -148,17 +154,17 @@ echo "[prod-pilot-cohort-quick-alert] CRITICAL fail-close"
 set +e
 ./scripts/prod_pilot_cohort_quick_alert.sh \
   --trend-summary-json "$CRIT_SUMMARY" \
-  --fail-on-critical 1 >/tmp/integration_prod_pilot_cohort_quick_alert_critical_fail.log 2>&1
+  --fail-on-critical 1 >${TMP_DIR}/integration_prod_pilot_cohort_quick_alert_critical_fail.log 2>&1
 crit_fail_rc=$?
 set -e
 if [[ "$crit_fail_rc" -ne 2 ]]; then
   echo "expected rc=2 for CRITICAL fail-close (got $crit_fail_rc)"
-  cat /tmp/integration_prod_pilot_cohort_quick_alert_critical_fail.log
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_alert_critical_fail.log
   exit 1
 fi
-if ! rg -q '\[prod-pilot-cohort-quick-alert\] severity=CRITICAL' /tmp/integration_prod_pilot_cohort_quick_alert_critical_fail.log; then
+if ! rg -q '\[prod-pilot-cohort-quick-alert\] severity=CRITICAL' ${TMP_DIR}/integration_prod_pilot_cohort_quick_alert_critical_fail.log; then
   echo "expected CRITICAL severity marker not found"
-  cat /tmp/integration_prod_pilot_cohort_quick_alert_critical_fail.log
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_alert_critical_fail.log
   exit 1
 fi
 
@@ -200,14 +206,14 @@ chmod +x "$FAKE_TREND"
 TREND_CAPTURE_FILE="$TREND_CAPTURE" \
 PROD_PILOT_COHORT_QUICK_TREND_SCRIPT="$FAKE_TREND" \
 ./scripts/prod_pilot_cohort_quick_alert.sh \
-  --reports-dir /tmp/quick_reports \
+  --reports-dir ${TMP_DIR}/quick_reports \
   --max-reports 7 \
   --since-hours 24 \
   --require-cohort-signoff-policy 1 \
   --require-signoff-ok 1 \
-  --show-top-reasons 3 >/tmp/integration_prod_pilot_cohort_quick_alert_generated.log 2>&1
+  --show-top-reasons 3 >${TMP_DIR}/integration_prod_pilot_cohort_quick_alert_generated.log 2>&1
 
-if ! rg -q -- '--reports-dir /tmp/quick_reports' "$TREND_CAPTURE"; then
+if ! rg -F -q -- "--reports-dir ${TMP_DIR}/quick_reports" "$TREND_CAPTURE"; then
   echo "quick-alert generated trend failed: missing reports-dir forwarding"
   cat "$TREND_CAPTURE"
   exit 1
@@ -274,16 +280,16 @@ PATH="$TMP_BIN:$PATH" \
 ALERT_CAPTURE_FILE="$ALERT_CAPTURE" \
 PROD_PILOT_COHORT_QUICK_ALERT_SCRIPT="$FAKE_ALERT" \
 ./scripts/easy_node.sh prod-pilot-cohort-quick-alert \
-  --reports-dir /tmp/quick_reports \
+  --reports-dir ${TMP_DIR}/quick_reports \
   --since-hours 12 \
   --require-cohort-signoff-policy 1 \
   --warn-go-rate-pct 99 \
   --critical-go-rate-pct 95 \
   --fail-on-warn 1 \
   --summary-json /tmp/quick_alert.json \
-  --print-summary-json 1 >/tmp/integration_prod_pilot_cohort_quick_alert_easy_node.log 2>&1
+  --print-summary-json 1 >${TMP_DIR}/integration_prod_pilot_cohort_quick_alert_easy_node.log 2>&1
 
-if ! rg -q -- '--reports-dir /tmp/quick_reports' "$ALERT_CAPTURE"; then
+if ! rg -F -q -- "--reports-dir ${TMP_DIR}/quick_reports" "$ALERT_CAPTURE"; then
   echo "easy_node quick-alert forwarding failed: missing reports-dir"
   cat "$ALERT_CAPTURE"
   exit 1

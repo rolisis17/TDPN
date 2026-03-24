@@ -30,7 +30,7 @@ Usage:
     [--client-require-cross-operator-pair [0|1]] \
     [--exit-country CC] \
     [--exit-region REGION] \
-    [--path-profile fast|balanced|privacy] \
+    [--path-profile speed|balanced|private] \
     [--distinct-operators [0|1]] \
     [--distinct-countries [0|1]] \
     [--locality-soft-bias [0|1]] \
@@ -68,8 +68,14 @@ normalize_path_profile() {
   local profile
   profile="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
   case "$profile" in
-    fast|balanced|privacy)
-      printf '%s\n' "$profile"
+    speed|fast)
+      printf '%s\n' "fast"
+      ;;
+    balanced)
+      printf '%s\n' "balanced"
+      ;;
+    private|privacy)
+      printf '%s\n' "privacy"
       ;;
     "")
       printf '%s\n' ""
@@ -239,6 +245,60 @@ looks_loopback() {
   [[ "$value" == *"127.0.0.1"* || "$value" == *"localhost"* ]]
 }
 
+host_is_loopback() {
+  local host="${1:-}"
+  host="${host#[}"
+  host="${host%]}"
+  case "$host" in
+    127.0.0.1|localhost|::1)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+rewrite_loopback_url_for_docker() {
+  local raw="$1"
+  local docker_host="${2:-host.docker.internal}"
+  local scheme hostport host port
+
+  scheme="$(url_scheme_from_url "$raw")"
+  hostport="$(hostport_from_url "$raw")"
+  host="$(host_from_hostport "$hostport")"
+  if ! host_is_loopback "$host"; then
+    printf '%s\n' "$raw"
+    return 0
+  fi
+
+  if [[ "$hostport" == \[*\]:* ]]; then
+    port="${hostport##*]:}"
+  elif [[ "$hostport" == *:* ]]; then
+    port="${hostport##*:}"
+  else
+    printf '%s\n' "$raw"
+    return 0
+  fi
+
+  printf '%s://%s:%s\n' "$scheme" "$docker_host" "$port"
+}
+
+rewrite_url_csv_for_docker() {
+  local csv="$1"
+  local docker_host="${2:-host.docker.internal}"
+  local item rewritten joined=""
+  IFS=',' read -r -a items <<<"$csv"
+  for item in "${items[@]}"; do
+    item="${item//[[:space:]]/}"
+    [[ -z "$item" ]] && continue
+    rewritten="$(rewrite_loopback_url_for_docker "$item" "$docker_host")"
+    if [[ -n "$joined" ]]; then
+      joined+=","
+    fi
+    joined+="$rewritten"
+  done
+  printf '%s\n' "$joined"
+}
+
 wait_http_ok() {
   local url="$1"
   local name="$2"
@@ -383,12 +443,35 @@ locality_country_bias="${THREE_MACHINE_COUNTRY_BIAS:-1.60}"
 locality_region_bias="${THREE_MACHINE_REGION_BIAS:-1.25}"
 locality_region_prefix_bias="${THREE_MACHINE_REGION_PREFIX_BIAS:-1.10}"
 require_issuer_quorum="${THREE_MACHINE_REQUIRE_ISSUER_QUORUM:-}"
+path_profile_set=0
 distinct_operators_set=0
 distinct_countries_set=0
 locality_soft_bias_set=0
 locality_country_bias_set=0
 locality_region_bias_set=0
 locality_region_prefix_bias_set=0
+
+if [[ -n "${THREE_MACHINE_PATH_PROFILE+x}" ]]; then
+  path_profile_set=1
+fi
+if [[ -n "${THREE_MACHINE_DISTINCT_OPERATORS+x}" ]]; then
+  distinct_operators_set=1
+fi
+if [[ -n "${THREE_MACHINE_DISTINCT_COUNTRIES+x}" ]]; then
+  distinct_countries_set=1
+fi
+if [[ -n "${THREE_MACHINE_LOCALITY_SOFT_BIAS+x}" ]]; then
+  locality_soft_bias_set=1
+fi
+if [[ -n "${THREE_MACHINE_COUNTRY_BIAS+x}" ]]; then
+  locality_country_bias_set=1
+fi
+if [[ -n "${THREE_MACHINE_REGION_BIAS+x}" ]]; then
+  locality_region_bias_set=1
+fi
+if [[ -n "${THREE_MACHINE_REGION_PREFIX_BIAS+x}" ]]; then
+  locality_region_prefix_bias_set=1
+fi
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -483,6 +566,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --path-profile)
       path_profile="${2:-}"
+      path_profile_set=1
       shift 2
       ;;
     --distinct-operators)
@@ -573,9 +657,20 @@ while [[ $# -gt 0 ]]; do
 done
 
 normalized_path_profile="$(normalize_path_profile "$path_profile")" || {
-  echo "--path-profile must be one of: fast, balanced, privacy"
+  echo "--path-profile must be one of: speed, balanced, private (legacy aliases: fast, privacy)"
   exit 2
 }
+if [[ -z "$normalized_path_profile" && "$beta_profile" == "1" \
+      && "$path_profile_set" -eq 0 \
+      && "$distinct_operators_set" -eq 0 \
+      && "$distinct_countries_set" -eq 0 \
+      && "$locality_soft_bias_set" -eq 0 \
+      && "$locality_country_bias_set" -eq 0 \
+      && "$locality_region_bias_set" -eq 0 \
+      && "$locality_region_prefix_bias_set" -eq 0 ]]; then
+  normalized_path_profile="balanced"
+  path_profile="balanced"
+fi
 if [[ -n "$normalized_path_profile" ]]; then
   profile_values="$(path_profile_values "$normalized_path_profile")"
   IFS='|' read -r profile_distinct profile_distinct_countries profile_locality_soft profile_country_bias profile_region_bias profile_region_prefix_bias <<<"$profile_values"
@@ -926,6 +1021,36 @@ if [[ -n "$exit_region" ]]; then
   client_cmd+=(--exit-region "$exit_region")
 fi
 
-"${client_cmd[@]}"
+docker_host_alias="${THREE_MACHINE_DOCKER_HOST_ALIAS:-host.docker.internal}"
+rewrite_loopback_for_docker="${THREE_MACHINE_VALIDATE_REWRITE_LOOPBACK_FOR_DOCKER:-1}"
+if [[ "$rewrite_loopback_for_docker" != "0" && "$rewrite_loopback_for_docker" != "1" ]]; then
+  echo "THREE_MACHINE_VALIDATE_REWRITE_LOOPBACK_FOR_DOCKER must be 0 or 1"
+  exit 2
+fi
+
+client_directory_urls="${directory_a},${directory_b}"
+container_directory_urls="$client_directory_urls"
+container_issuer_url="$issuer_url"
+container_entry_url="$entry_url"
+container_exit_url="$exit_url"
+if [[ "$rewrite_loopback_for_docker" == "1" ]]; then
+  container_directory_urls="$(rewrite_url_csv_for_docker "$client_directory_urls" "$docker_host_alias")"
+  container_issuer_url="$(rewrite_loopback_url_for_docker "$issuer_url" "$docker_host_alias")"
+  container_entry_url="$(rewrite_loopback_url_for_docker "$entry_url" "$docker_host_alias")"
+  container_exit_url="$(rewrite_loopback_url_for_docker "$exit_url" "$docker_host_alias")"
+fi
+
+if [[ "$container_directory_urls" != "$client_directory_urls" || "$container_issuer_url" != "$issuer_url" || "$container_entry_url" != "$entry_url" || "$container_exit_url" != "$exit_url" ]]; then
+  echo "[client-test] docker endpoint rewrite enabled host_alias=$docker_host_alias"
+  echo "[client-test] host_urls directory_urls=$client_directory_urls issuer=$issuer_url entry=$entry_url exit=$exit_url"
+  echo "[client-test] container_urls directory_urls=$container_directory_urls issuer=$container_issuer_url entry=$container_entry_url exit=$container_exit_url"
+fi
+
+env \
+  "EASY_NODE_CLIENT_TEST_CONTAINER_DIRECTORY_URLS=$container_directory_urls" \
+  "EASY_NODE_CLIENT_TEST_CONTAINER_ISSUER_URL=$container_issuer_url" \
+  "EASY_NODE_CLIENT_TEST_CONTAINER_ENTRY_URL=$container_entry_url" \
+  "EASY_NODE_CLIENT_TEST_CONTAINER_EXIT_URL=$container_exit_url" \
+  "${client_cmd[@]}"
 
 echo "3-machine beta validation check ok"

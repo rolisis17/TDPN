@@ -51,10 +51,10 @@ EOF_RUN_REPORT
 
 echo "[prod-pilot-cohort-quick-check] baseline pass"
 ./scripts/prod_pilot_cohort_quick_check.sh \
-  --run-report-json "$RUN_REPORT_JSON" >/tmp/integration_prod_pilot_cohort_quick_check_pass.log 2>&1
-if ! rg -q -- "\\[prod-pilot-cohort-quick-check] pre_real_host_readiness_summary_json=$PRE_REAL_HOST_READINESS_SUMMARY_JSON" /tmp/integration_prod_pilot_cohort_quick_check_pass.log; then
+  --run-report-json "$RUN_REPORT_JSON" >${TMP_DIR}/integration_prod_pilot_cohort_quick_check_pass.log 2>&1
+if ! rg -q -- "\\[prod-pilot-cohort-quick-check] pre_real_host_readiness_summary_json=$PRE_REAL_HOST_READINESS_SUMMARY_JSON" ${TMP_DIR}/integration_prod_pilot_cohort_quick_check_pass.log; then
   echo "quick-check output missing pre-real-host readiness summary path"
-  cat /tmp/integration_prod_pilot_cohort_quick_check_pass.log
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_check_pass.log
   exit 1
 fi
 
@@ -63,17 +63,17 @@ BAD_SIGNOFF="$TMP_DIR/bad_signoff.json"
 jq '.signoff.rc=3' "$RUN_REPORT_JSON" >"$BAD_SIGNOFF"
 set +e
 ./scripts/prod_pilot_cohort_quick_check.sh \
-  --run-report-json "$BAD_SIGNOFF" >/tmp/integration_prod_pilot_cohort_quick_check_bad_signoff.log 2>&1
+  --run-report-json "$BAD_SIGNOFF" >${TMP_DIR}/integration_prod_pilot_cohort_quick_check_bad_signoff.log 2>&1
 bad_signoff_rc=$?
 set -e
 if [[ "$bad_signoff_rc" -eq 0 ]]; then
   echo "expected non-zero rc for signoff rc failure"
-  cat /tmp/integration_prod_pilot_cohort_quick_check_bad_signoff.log
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_check_bad_signoff.log
   exit 1
 fi
-if ! rg -q 'signoff rc is non-zero' /tmp/integration_prod_pilot_cohort_quick_check_bad_signoff.log; then
+if ! rg -q 'signoff rc is non-zero' ${TMP_DIR}/integration_prod_pilot_cohort_quick_check_bad_signoff.log; then
   echo "expected signoff rc failure signal not found"
-  cat /tmp/integration_prod_pilot_cohort_quick_check_bad_signoff.log
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_check_bad_signoff.log
   exit 1
 fi
 
@@ -82,17 +82,17 @@ BAD_SIGNOFF_ATTEMPT="$TMP_DIR/bad_signoff_attempt.json"
 jq '.signoff.attempted=0 | .signoff.rc=0' "$RUN_REPORT_JSON" >"$BAD_SIGNOFF_ATTEMPT"
 set +e
 ./scripts/prod_pilot_cohort_quick_check.sh \
-  --run-report-json "$BAD_SIGNOFF_ATTEMPT" >/tmp/integration_prod_pilot_cohort_quick_check_bad_signoff_attempt.log 2>&1
+  --run-report-json "$BAD_SIGNOFF_ATTEMPT" >${TMP_DIR}/integration_prod_pilot_cohort_quick_check_bad_signoff_attempt.log 2>&1
 bad_signoff_attempt_rc=$?
 set -e
 if [[ "$bad_signoff_attempt_rc" -eq 0 ]]; then
   echo "expected non-zero rc for signoff attempted=false numeric value"
-  cat /tmp/integration_prod_pilot_cohort_quick_check_bad_signoff_attempt.log
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_check_bad_signoff_attempt.log
   exit 1
 fi
-if ! rg -q 'signoff was not attempted' /tmp/integration_prod_pilot_cohort_quick_check_bad_signoff_attempt.log; then
+if ! rg -q 'signoff was not attempted' ${TMP_DIR}/integration_prod_pilot_cohort_quick_check_bad_signoff_attempt.log; then
   echo "expected numeric signoff-attempt failure signal not found"
-  cat /tmp/integration_prod_pilot_cohort_quick_check_bad_signoff_attempt.log
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_check_bad_signoff_attempt.log
   exit 1
 fi
 
@@ -102,17 +102,17 @@ cat >"$SUMMARY_JSON" <<'EOF_SUMMARY_BAD'
 EOF_SUMMARY_BAD
 set +e
 ./scripts/prod_pilot_cohort_quick_check.sh \
-  --run-report-json "$RUN_REPORT_JSON" >/tmp/integration_prod_pilot_cohort_quick_check_bad_summary_status.log 2>&1
+  --run-report-json "$RUN_REPORT_JSON" >${TMP_DIR}/integration_prod_pilot_cohort_quick_check_bad_summary_status.log 2>&1
 bad_summary_rc=$?
 set -e
 if [[ "$bad_summary_rc" -eq 0 ]]; then
   echo "expected non-zero rc for summary status failure"
-  cat /tmp/integration_prod_pilot_cohort_quick_check_bad_summary_status.log
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_check_bad_summary_status.log
   exit 1
 fi
-if ! rg -q 'summary status is not ok' /tmp/integration_prod_pilot_cohort_quick_check_bad_summary_status.log; then
+if ! rg -q 'summary status is not ok' ${TMP_DIR}/integration_prod_pilot_cohort_quick_check_bad_summary_status.log; then
   echo "expected summary status failure signal not found"
-  cat /tmp/integration_prod_pilot_cohort_quick_check_bad_summary_status.log
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_check_bad_summary_status.log
   exit 1
 fi
 
@@ -150,7 +150,7 @@ PROD_PILOT_COHORT_CHECK_SCRIPT="$FAKE_COHORT_POLICY" \
   --require-incident-snapshot-on-fail 0 \
   --require-incident-snapshot-artifacts 0 \
   --incident-snapshot-min-attachment-count 2 \
-  --incident-snapshot-max-skipped-count 0 >/tmp/integration_prod_pilot_cohort_quick_check_cohort_policy.log 2>&1
+  --incident-snapshot-max-skipped-count 0 >${TMP_DIR}/integration_prod_pilot_cohort_quick_check_cohort_policy.log 2>&1
 
 if ! rg -q -- '--require-trend-artifact-policy-match 0' "$COHORT_POLICY_CAPTURE"; then
   echo "expected cohort policy hook to forward trend artifact policy override"
@@ -263,7 +263,7 @@ PROD_PILOT_COHORT_CHECK_SCRIPT="$FAKE_COHORT_CHECK" \
   --require-incident-snapshot-on-fail 1 \
   --require-incident-snapshot-artifacts 0 \
   --incident-snapshot-min-attachment-count 2 \
-  --incident-snapshot-max-skipped-count 0 >/tmp/integration_prod_pilot_cohort_quick_check_incident_subcheck.log 2>&1
+  --incident-snapshot-max-skipped-count 0 >${TMP_DIR}/integration_prod_pilot_cohort_quick_check_incident_subcheck.log 2>&1
 
 if ! rg -q -- '--require-trend-artifact-policy-match 0' "$COHORT_CAPTURE"; then
   echo "expected incident sub-check to disable trend artifact policy coupling"
@@ -335,16 +335,16 @@ PROD_PILOT_COHORT_CHECK_SCRIPT="$FAKE_COHORT_CHECK" \
   --require-signoff-ok 0 \
   --require-summary-status-ok 0 \
   --require-incident-snapshot-on-fail 1 \
-  --require-incident-snapshot-artifacts 1 >/tmp/integration_prod_pilot_cohort_quick_check_handoff.log 2>&1
+  --require-incident-snapshot-artifacts 1 >${TMP_DIR}/integration_prod_pilot_cohort_quick_check_handoff.log 2>&1
 
-if ! rg -q 'incident_handoff' /tmp/integration_prod_pilot_cohort_quick_check_handoff.log; then
+if ! rg -q 'incident_handoff' ${TMP_DIR}/integration_prod_pilot_cohort_quick_check_handoff.log; then
   echo "expected quick-check incident handoff line not found"
-  cat /tmp/integration_prod_pilot_cohort_quick_check_handoff.log
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_check_handoff.log
   exit 1
 fi
-if ! rg -q -- "$INCIDENT_SUMMARY" /tmp/integration_prod_pilot_cohort_quick_check_handoff.log; then
+if ! rg -q -- "$INCIDENT_SUMMARY" ${TMP_DIR}/integration_prod_pilot_cohort_quick_check_handoff.log; then
   echo "expected quick-check incident summary path not surfaced"
-  cat /tmp/integration_prod_pilot_cohort_quick_check_handoff.log
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_check_handoff.log
   exit 1
 fi
 
@@ -384,13 +384,13 @@ PATH="$TMP_BIN:$PATH" \
 CHECK_CAPTURE_FILE="$CHECK_CAPTURE" \
 PROD_PILOT_COHORT_QUICK_CHECK_SCRIPT="$FAKE_CHECK" \
 ./scripts/easy_node.sh prod-pilot-cohort-quick-check \
-  --run-report-json /tmp/quick/report.json \
+  --run-report-json ${TMP_DIR}/quick/report.json \
   --require-signoff-ok 1 \
   --incident-snapshot-min-attachment-count 2 \
   --incident-snapshot-max-skipped-count 0 \
-  --show-json 1 >/tmp/integration_prod_pilot_cohort_quick_check_easy_node.log 2>&1
+  --show-json 1 >${TMP_DIR}/integration_prod_pilot_cohort_quick_check_easy_node.log 2>&1
 
-if ! rg -q -- '--run-report-json /tmp/quick/report.json' "$CHECK_CAPTURE"; then
+if ! rg -F -q -- "--run-report-json ${TMP_DIR}/quick/report.json" "$CHECK_CAPTURE"; then
   echo "easy_node quick-check forwarding failed: missing --run-report-json"
   cat "$CHECK_CAPTURE"
   exit 1

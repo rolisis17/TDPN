@@ -84,11 +84,35 @@ echo "[ci] pre-real-host readiness integration"
 echo "[ci] runtime fix integration"
 ./scripts/integration_runtime_fix.sh
 
+echo "[ci] runtime fix record integration"
+./scripts/integration_runtime_fix_record.sh
+
+echo "[ci] single-machine prod readiness integration"
+./scripts/integration_single_machine_prod_readiness.sh
+
 echo "[ci] client-vpn smoke integration"
 ./scripts/integration_client_vpn_smoke.sh
 
+echo "[ci] client-vpn trust-scope wiring integration"
+./scripts/integration_client_vpn_trust_scope_wiring.sh
+
+echo "[ci] client-vpn trust-reset integration"
+./scripts/integration_client_vpn_trust_reset.sh
+
 echo "[ci] three-machine prod signoff integration"
 ./scripts/integration_three_machine_prod_signoff.sh
+
+echo "[ci] three-machine docker readiness integration"
+./scripts/integration_three_machine_docker_readiness.sh
+
+echo "[ci] three-machine docker readiness record integration"
+./scripts/integration_three_machine_docker_readiness_record.sh
+
+echo "[ci] real-wg privileged matrix record integration"
+./scripts/integration_real_wg_privileged_matrix_record.sh
+
+echo "[ci] 3-machine validate loopback rewrite integration"
+./scripts/integration_3machine_beta_validate_loopback_rewrite.sh
 
 echo "[ci] wg-only stack selftest record integration"
 ./scripts/integration_wg_only_stack_selftest_record.sh
@@ -153,6 +177,24 @@ echo "[ci] easy-node self-update integration"
 echo "[ci] easy-node client profile env integration"
 ./scripts/integration_easy_node_client_profile_env.sh
 
+echo "[ci] path profile contract integration"
+./scripts/integration_path_profile_contract.sh
+
+echo "[ci] profile compare local integration"
+./scripts/integration_profile_compare_local.sh
+
+echo "[ci] profile compare trend integration"
+./scripts/integration_profile_compare_trend.sh
+
+echo "[ci] profile compare campaign integration"
+./scripts/integration_profile_compare_campaign.sh
+
+echo "[ci] profile compare campaign check integration"
+./scripts/integration_profile_compare_campaign_check.sh
+
+echo "[ci] profile compare campaign signoff integration"
+./scripts/integration_profile_compare_campaign_signoff.sh
+
 echo "[ci] easy-mode launcher wiring integration"
 ./scripts/integration_easy_mode_launcher_wiring.sh
 
@@ -173,6 +215,9 @@ echo "[ci] 3-machine prod-profile wiring integration"
 
 echo "[ci] 3-machine prod wg soak stall guard integration"
 ./scripts/integration_3machine_prod_wg_soak_stall_guard.sh
+
+echo "[ci] 3-machine prod wg validate ingress guard integration"
+./scripts/integration_3machine_prod_wg_validate_ingress_guard.sh
 
 echo "[ci] prod gate check integration"
 ./scripts/integration_prod_gate_check.sh

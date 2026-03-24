@@ -657,6 +657,81 @@ func TestNewClientProdStrictEnablesWGOnly(t *testing.T) {
 	}
 }
 
+func TestValidateRuntimeConfigForceDirectExitRejectsStrictModes(t *testing.T) {
+	c := &Client{
+		betaStrict:         true,
+		trustStrict:        true,
+		dataMode:           "opaque",
+		innerSource:        "udp",
+		wgBackend:          "command",
+		wgPrivateKey:       "/tmp/wg.key",
+		wgKernelProxy:      true,
+		wgProxyAddr:        "127.0.0.1:0",
+		liveWGMode:         true,
+		disableSynthetic:   true,
+		startupSyncTimeout: time.Second,
+		requireDistinctOps: true,
+		forceDirectExit:    true,
+	}
+	err := c.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected strict-mode rejection for CLIENT_FORCE_DIRECT_EXIT")
+	}
+	if !strings.Contains(err.Error(), "CLIENT_FORCE_DIRECT_EXIT is not allowed in strict modes") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigForceDirectExitRequiresFallbackEnabled(t *testing.T) {
+	c := &Client{
+		dataMode:                "json",
+		innerSource:             "synthetic",
+		wgBackend:               "noop",
+		requireDistinctOps:      false,
+		allowDirectExitFallback: false,
+		forceDirectExit:         true,
+	}
+	err := c.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected fallback-enable validation failure")
+	}
+	if !strings.Contains(err.Error(), "CLIENT_FORCE_DIRECT_EXIT requires CLIENT_ALLOW_DIRECT_EXIT_FALLBACK=1") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigForceDirectExitRequiresDistinctOperatorsDisabled(t *testing.T) {
+	c := &Client{
+		dataMode:                "json",
+		innerSource:             "synthetic",
+		wgBackend:               "noop",
+		requireDistinctOps:      true,
+		allowDirectExitFallback: true,
+		forceDirectExit:         true,
+	}
+	err := c.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected distinct-operator validation failure")
+	}
+	if !strings.Contains(err.Error(), "CLIENT_FORCE_DIRECT_EXIT requires CLIENT_REQUIRE_DISTINCT_OPERATORS=0") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigForceDirectExitAcceptsNonStrictConfig(t *testing.T) {
+	c := &Client{
+		dataMode:                "json",
+		innerSource:             "synthetic",
+		wgBackend:               "noop",
+		requireDistinctOps:      false,
+		allowDirectExitFallback: true,
+		forceDirectExit:         true,
+	}
+	if err := c.validateRuntimeConfig(); err != nil {
+		t.Fatalf("expected non-strict force-direct config to validate, got %v", err)
+	}
+}
+
 func TestBootstrapDelayForFailures(t *testing.T) {
 	base := 2 * time.Second
 	maxDelay := 9 * time.Second

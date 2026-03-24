@@ -103,6 +103,39 @@ run_client_test_capture() {
     "$@" >/dev/null
 }
 
+run_client_test_expect_fail() {
+  local output_file="$1"
+  local beta_profile="$2"
+  local prod_profile="$3"
+  shift 3
+  set +e
+  PATH="$TMP_BIN:$PATH" \
+  EASY_NODE_LOG_DIR="$LOG_DIR" \
+  EASY_NODE_CLIENT_ENV_FILE="$CLIENT_ENV_FILE" \
+  FAKE_DOCKER_CAPTURE_FILE="$TMP_DIR/fail_capture.log" \
+  ./scripts/easy_node.sh client-test \
+    --directory-urls "http://dir-a:8081,http://dir-b:8081" \
+    --issuer-url "http://issuer-a:8082" \
+    --entry-url "http://entry-a:8083" \
+    --exit-url "http://exit-a:8084" \
+    --subject "integration-client" \
+    --min-selection-lines 1 \
+    --min-entry-operators 1 \
+    --min-exit-operators 1 \
+    --require-cross-operator-pair 1 \
+    --timeout-sec 10 \
+    --beta-profile "$beta_profile" \
+    --prod-profile "$prod_profile" \
+    "$@" >"$output_file" 2>&1
+  local rc=$?
+  set -e
+  if [[ "$rc" -eq 0 ]]; then
+    echo "expected client-test failure but command succeeded"
+    cat "$output_file"
+    exit 1
+  fi
+}
+
 BETA_CAPTURE="$TMP_DIR/beta_capture.log"
 run_client_test_capture "$BETA_CAPTURE" "1" "0"
 if ! rg -q -- "-e DIRECTORY_MIN_OPERATORS=2" "$BETA_CAPTURE"; then
@@ -167,7 +200,7 @@ if [[ -z "$prod_cleanup_count" || "$prod_cleanup_count" -lt 2 ]]; then
 fi
 
 PATH_PROFILE_CAPTURE="$TMP_DIR/path_profile_capture.log"
-run_client_test_capture "$PATH_PROFILE_CAPTURE" "0" "0" --path-profile privacy
+run_client_test_capture "$PATH_PROFILE_CAPTURE" "0" "0" --path-profile private
 if ! rg -q -- "-e CLIENT_REQUIRE_DISTINCT_OPERATORS=1" "$PATH_PROFILE_CAPTURE"; then
   echo "missing expected path-profile distinct operators env"
   cat "$PATH_PROFILE_CAPTURE"
@@ -196,6 +229,55 @@ fi
 if ! rg -q -- "-e CLIENT_EXIT_REGION_PREFIX_BIAS=1.10" "$PATH_PROFILE_CAPTURE"; then
   echo "missing expected path-profile region-prefix-bias env"
   cat "$PATH_PROFILE_CAPTURE"
+  exit 1
+fi
+
+PATH_PROFILE_SPEED_CAPTURE="$TMP_DIR/path_profile_speed_capture.log"
+run_client_test_capture "$PATH_PROFILE_SPEED_CAPTURE" "0" "0" --path-profile speed
+if ! rg -q -- "-e CLIENT_EXIT_COUNTRY_BIAS=1.80" "$PATH_PROFILE_SPEED_CAPTURE"; then
+  echo "missing expected speed-profile country-bias env"
+  cat "$PATH_PROFILE_SPEED_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- "-e CLIENT_EXIT_REGION_BIAS=1.35" "$PATH_PROFILE_SPEED_CAPTURE"; then
+  echo "missing expected speed-profile region-bias env"
+  cat "$PATH_PROFILE_SPEED_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- "-e CLIENT_EXIT_REGION_PREFIX_BIAS=1.15" "$PATH_PROFILE_SPEED_CAPTURE"; then
+  echo "missing expected speed-profile region-prefix-bias env"
+  cat "$PATH_PROFILE_SPEED_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- "-e CLIENT_REQUIRE_DISTINCT_ENTRY_EXIT_COUNTRY=0" "$PATH_PROFILE_SPEED_CAPTURE"; then
+  echo "missing expected speed-profile distinct-country env"
+  cat "$PATH_PROFILE_SPEED_CAPTURE"
+  exit 1
+fi
+
+PATH_PROFILE_SPEED_1HOP_CAPTURE="$TMP_DIR/path_profile_speed_1hop_capture.log"
+run_client_test_capture "$PATH_PROFILE_SPEED_1HOP_CAPTURE" "0" "0" --path-profile speed-1hop
+if ! rg -q -- "-e CLIENT_REQUIRE_DISTINCT_OPERATORS=0" "$PATH_PROFILE_SPEED_1HOP_CAPTURE"; then
+  echo "missing expected speed-1hop distinct-operators env"
+  cat "$PATH_PROFILE_SPEED_1HOP_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- "-e CLIENT_ALLOW_DIRECT_EXIT_FALLBACK=1" "$PATH_PROFILE_SPEED_1HOP_CAPTURE"; then
+  echo "missing expected speed-1hop direct-exit fallback env"
+  cat "$PATH_PROFILE_SPEED_1HOP_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- "-e CLIENT_FORCE_DIRECT_EXIT=1" "$PATH_PROFILE_SPEED_1HOP_CAPTURE"; then
+  echo "missing expected speed-1hop force-direct env"
+  cat "$PATH_PROFILE_SPEED_1HOP_CAPTURE"
+  exit 1
+fi
+
+SPEED_1HOP_BETA_FAIL_LOG="$TMP_DIR/speed_1hop_beta_fail.log"
+run_client_test_expect_fail "$SPEED_1HOP_BETA_FAIL_LOG" "1" "0" --path-profile speed-1hop
+if ! rg -q -- "client-test --path-profile speed-1hop requires --beta-profile 0 and --prod-profile 0" "$SPEED_1HOP_BETA_FAIL_LOG"; then
+  echo "missing expected speed-1hop strict-profile guardrail message"
+  cat "$SPEED_1HOP_BETA_FAIL_LOG"
   exit 1
 fi
 

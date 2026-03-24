@@ -143,8 +143,8 @@ if [[ ! -x "$CAMPAIGN_SUMMARY_SCRIPT" ]]; then
   echo "missing executable campaign summary script: $CAMPAIGN_SUMMARY_SCRIPT"
   exit 2
 fi
-if [[ ! -x "$CAMPAIGN_SIGNOFF_SCRIPT" ]]; then
-  echo "missing executable campaign signoff script: $CAMPAIGN_SIGNOFF_SCRIPT"
+if [[ ! -r "$CAMPAIGN_SIGNOFF_SCRIPT" ]]; then
+  echo "missing readable campaign signoff script: $CAMPAIGN_SIGNOFF_SCRIPT"
   exit 2
 fi
 
@@ -896,7 +896,7 @@ if [[ "$campaign_signoff_check" == "1" ]]; then
   fi
 
   signoff_cmd=(
-    "$CAMPAIGN_SIGNOFF_SCRIPT"
+    bash "$CAMPAIGN_SIGNOFF_SCRIPT"
     --runbook-summary-json "$runbook_summary_json"
     --campaign-run-report-json "$campaign_run_report_json"
     --campaign-summary-json "$campaign_summary_json"

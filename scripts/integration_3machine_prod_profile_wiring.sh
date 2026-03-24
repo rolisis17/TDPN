@@ -177,38 +177,77 @@ EASY_NODE_SH="$FAKE_EASY_NODE" \
   --client-min-entry-operators 1 \
   --client-min-exit-operators 1 \
   --client-require-cross-operator-pair 0 \
-  --path-profile privacy \
+  --path-profile private \
   --beta-profile 0 \
   --prod-profile 0 >/tmp/integration_3machine_prod_profile_wiring_validate_path_profile.log 2>&1
 
 if ! rg -q -- '--distinct-operators 1' "$VALIDATE_PATH_PROFILE_CAPTURE"; then
-  echo "validate path-profile wiring failed: expected --distinct-operators 1 from privacy profile"
+  echo "validate path-profile wiring failed: expected --distinct-operators 1 from private profile"
   cat "$VALIDATE_PATH_PROFILE_CAPTURE"
   exit 1
 fi
 if ! rg -q -- '--distinct-countries 1' "$VALIDATE_PATH_PROFILE_CAPTURE"; then
-  echo "validate path-profile wiring failed: expected --distinct-countries 1 from privacy profile"
+  echo "validate path-profile wiring failed: expected --distinct-countries 1 from private profile"
   cat "$VALIDATE_PATH_PROFILE_CAPTURE"
   exit 1
 fi
 if ! rg -q -- '--locality-soft-bias 0' "$VALIDATE_PATH_PROFILE_CAPTURE"; then
-  echo "validate path-profile wiring failed: expected --locality-soft-bias 0 from privacy profile"
+  echo "validate path-profile wiring failed: expected --locality-soft-bias 0 from private profile"
   cat "$VALIDATE_PATH_PROFILE_CAPTURE"
   exit 1
 fi
 if ! rg -q -- '--country-bias 1.60' "$VALIDATE_PATH_PROFILE_CAPTURE"; then
-  echo "validate path-profile wiring failed: expected --country-bias 1.60 from privacy profile"
+  echo "validate path-profile wiring failed: expected --country-bias 1.60 from private profile"
   cat "$VALIDATE_PATH_PROFILE_CAPTURE"
   exit 1
 fi
 if ! rg -q -- '--region-bias 1.25' "$VALIDATE_PATH_PROFILE_CAPTURE"; then
-  echo "validate path-profile wiring failed: expected --region-bias 1.25 from privacy profile"
+  echo "validate path-profile wiring failed: expected --region-bias 1.25 from private profile"
   cat "$VALIDATE_PATH_PROFILE_CAPTURE"
   exit 1
 fi
 if ! rg -q -- '--region-prefix-bias 1.10' "$VALIDATE_PATH_PROFILE_CAPTURE"; then
-  echo "validate path-profile wiring failed: expected --region-prefix-bias 1.10 from privacy profile"
+  echo "validate path-profile wiring failed: expected --region-prefix-bias 1.10 from private profile"
   cat "$VALIDATE_PATH_PROFILE_CAPTURE"
+  exit 1
+fi
+
+VALIDATE_DEFAULT_PROFILE_CAPTURE="$TMP_DIR/validate_easy_node_default_profile_args.log"
+echo "[wiring] validate default balanced profile mapping"
+PATH="$TMP_BIN:$PATH" \
+VALIDATE_CAPTURE_FILE="$VALIDATE_DEFAULT_PROFILE_CAPTURE" \
+EASY_NODE_SH="$FAKE_EASY_NODE" \
+./scripts/integration_3machine_beta_validate.sh \
+  --directory-a http://dir-a:8081 \
+  --directory-b http://dir-b:8081 \
+  --issuer-url http://issuer-main:8082 \
+  --entry-url http://entry-main:8083 \
+  --exit-url http://exit-main:8084 \
+  --min-sources 1 \
+  --min-operators 2 \
+  --federation-timeout-sec 3 \
+  --timeout-sec 5 \
+  --client-min-selection-lines 1 \
+  --client-min-entry-operators 1 \
+  --client-min-exit-operators 1 \
+  --client-require-cross-operator-pair 0 \
+  --require-issuer-quorum 0 \
+  --beta-profile 1 \
+  --prod-profile 0 >/tmp/integration_3machine_prod_profile_wiring_validate_default_profile.log 2>&1
+
+if ! rg -q -- '--distinct-operators 1' "$VALIDATE_DEFAULT_PROFILE_CAPTURE"; then
+  echo "validate default profile wiring failed: expected balanced distinct-operators 1"
+  cat "$VALIDATE_DEFAULT_PROFILE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--locality-soft-bias 1' "$VALIDATE_DEFAULT_PROFILE_CAPTURE"; then
+  echo "validate default profile wiring failed: expected balanced locality-soft-bias 1"
+  cat "$VALIDATE_DEFAULT_PROFILE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--country-bias 1.50' "$VALIDATE_DEFAULT_PROFILE_CAPTURE"; then
+  echo "validate default profile wiring failed: expected balanced country-bias 1.50"
+  cat "$VALIDATE_DEFAULT_PROFILE_CAPTURE"
   exit 1
 fi
 
@@ -304,38 +343,79 @@ THREE_MACHINE_VALIDATE_SCRIPT="$FAKE_VALIDATE" \
   --client-min-entry-operators 1 \
   --client-min-exit-operators 1 \
   --client-require-cross-operator-pair 0 \
-  --path-profile fast \
+  --path-profile speed \
   --beta-profile 0 \
   --prod-profile 0 >/tmp/integration_3machine_prod_profile_wiring_soak_path_profile.log 2>&1
 
 if ! rg -q -- '--distinct-operators 1' "$SOAK_PATH_PROFILE_CAPTURE"; then
-  echo "soak path-profile wiring failed: expected --distinct-operators 1 from fast profile"
+  echo "soak path-profile wiring failed: expected --distinct-operators 1 from speed profile"
   cat "$SOAK_PATH_PROFILE_CAPTURE"
   exit 1
 fi
 if ! rg -q -- '--distinct-countries 0' "$SOAK_PATH_PROFILE_CAPTURE"; then
-  echo "soak path-profile wiring failed: expected --distinct-countries 0 from fast profile"
+  echo "soak path-profile wiring failed: expected --distinct-countries 0 from speed profile"
   cat "$SOAK_PATH_PROFILE_CAPTURE"
   exit 1
 fi
 if ! rg -q -- '--locality-soft-bias 1' "$SOAK_PATH_PROFILE_CAPTURE"; then
-  echo "soak path-profile wiring failed: expected --locality-soft-bias 1 from fast profile"
+  echo "soak path-profile wiring failed: expected --locality-soft-bias 1 from speed profile"
   cat "$SOAK_PATH_PROFILE_CAPTURE"
   exit 1
 fi
 if ! rg -q -- '--country-bias 1.80' "$SOAK_PATH_PROFILE_CAPTURE"; then
-  echo "soak path-profile wiring failed: expected --country-bias 1.80 from fast profile"
+  echo "soak path-profile wiring failed: expected --country-bias 1.80 from speed profile"
   cat "$SOAK_PATH_PROFILE_CAPTURE"
   exit 1
 fi
 if ! rg -q -- '--region-bias 1.35' "$SOAK_PATH_PROFILE_CAPTURE"; then
-  echo "soak path-profile wiring failed: expected --region-bias 1.35 from fast profile"
+  echo "soak path-profile wiring failed: expected --region-bias 1.35 from speed profile"
   cat "$SOAK_PATH_PROFILE_CAPTURE"
   exit 1
 fi
 if ! rg -q -- '--region-prefix-bias 1.15' "$SOAK_PATH_PROFILE_CAPTURE"; then
-  echo "soak path-profile wiring failed: expected --region-prefix-bias 1.15 from fast profile"
+  echo "soak path-profile wiring failed: expected --region-prefix-bias 1.15 from speed profile"
   cat "$SOAK_PATH_PROFILE_CAPTURE"
+  exit 1
+fi
+
+SOAK_DEFAULT_PROFILE_CAPTURE="$TMP_DIR/soak_validate_default_profile_args.log"
+echo "[wiring] soak default balanced profile mapping"
+PATH="$TMP_BIN:$PATH" \
+SOAK_CAPTURE_FILE="$SOAK_DEFAULT_PROFILE_CAPTURE" \
+THREE_MACHINE_VALIDATE_SCRIPT="$FAKE_VALIDATE" \
+./scripts/integration_3machine_beta_soak.sh \
+  --directory-a http://dir-a:8081 \
+  --directory-b http://dir-b:8081 \
+  --issuer-url http://issuer-main:8082 \
+  --entry-url http://entry-main:8083 \
+  --exit-url http://exit-main:8084 \
+  --rounds 1 \
+  --pause-sec 0 \
+  --min-sources 1 \
+  --min-operators 1 \
+  --federation-timeout-sec 1 \
+  --timeout-sec 5 \
+  --client-min-selection-lines 1 \
+  --client-min-entry-operators 1 \
+  --client-min-exit-operators 1 \
+  --client-require-cross-operator-pair 0 \
+  --require-issuer-quorum 0 \
+  --beta-profile 1 \
+  --prod-profile 0 >/tmp/integration_3machine_prod_profile_wiring_soak_default_profile.log 2>&1
+
+if ! rg -q -- '--distinct-operators 1' "$SOAK_DEFAULT_PROFILE_CAPTURE"; then
+  echo "soak default profile wiring failed: expected balanced distinct-operators 1"
+  cat "$SOAK_DEFAULT_PROFILE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--locality-soft-bias 1' "$SOAK_DEFAULT_PROFILE_CAPTURE"; then
+  echo "soak default profile wiring failed: expected balanced locality-soft-bias 1"
+  cat "$SOAK_DEFAULT_PROFILE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--country-bias 1.50' "$SOAK_DEFAULT_PROFILE_CAPTURE"; then
+  echo "soak default profile wiring failed: expected balanced country-bias 1.50"
+  cat "$SOAK_DEFAULT_PROFILE_CAPTURE"
   exit 1
 fi
 
@@ -457,7 +537,7 @@ THREE_MACHINE_SOAK_SCRIPT="$FAKE_RUNBOOK_SOAK" \
   --client-min-entry-operators 1 \
   --client-min-exit-operators 1 \
   --client-require-cross-operator-pair 0 \
-  --path-profile privacy \
+  --path-profile private \
   --beta-profile 0 \
   --prod-profile 0 \
   --bundle-dir "$RUNBOOK_PATH_PROFILE_BUNDLE" >/tmp/integration_3machine_prod_profile_wiring_runbook_path_profile.log 2>&1
@@ -470,6 +550,49 @@ fi
 if ! rg -q -- '--locality-soft-bias 0' "$RUNBOOK_SOAK_PATH_PROFILE_CAPTURE"; then
   echo "runbook path-profile wiring failed: expected --locality-soft-bias 0 on soak command"
   cat "$RUNBOOK_SOAK_PATH_PROFILE_CAPTURE"
+  exit 1
+fi
+
+RUNBOOK_VALIDATE_DEFAULT_PROFILE_CAPTURE="$TMP_DIR/runbook_validate_default_profile_args.log"
+RUNBOOK_SOAK_DEFAULT_PROFILE_CAPTURE="$TMP_DIR/runbook_soak_default_profile_args.log"
+RUNBOOK_DEFAULT_PROFILE_BUNDLE="$TMP_DIR/pilot_bundle_default_profile"
+echo "[wiring] runbook default balanced profile mapping"
+PATH="$TMP_BIN:$PATH" \
+RUNBOOK_VALIDATE_CAPTURE_FILE="$RUNBOOK_VALIDATE_DEFAULT_PROFILE_CAPTURE" \
+RUNBOOK_SOAK_CAPTURE_FILE="$RUNBOOK_SOAK_DEFAULT_PROFILE_CAPTURE" \
+THREE_MACHINE_VALIDATE_SCRIPT="$FAKE_RUNBOOK_VALIDATE" \
+THREE_MACHINE_SOAK_SCRIPT="$FAKE_RUNBOOK_SOAK" \
+./scripts/beta_pilot_runbook.sh \
+  --directory-a http://dir-a:8081 \
+  --directory-b http://dir-b:8081 \
+  --issuer-url http://issuer-main:8082 \
+  --entry-url http://entry-main:8083 \
+  --exit-url http://exit-main:8084 \
+  --rounds 1 \
+  --pause-sec 0 \
+  --min-sources 1 \
+  --min-operators 1 \
+  --federation-timeout-sec 1 \
+  --timeout-sec 5 \
+  --client-min-selection-lines 1 \
+  --client-min-entry-operators 1 \
+  --client-min-exit-operators 1 \
+  --client-require-cross-operator-pair 0 \
+  --bundle-dir "$RUNBOOK_DEFAULT_PROFILE_BUNDLE" >/tmp/integration_3machine_prod_profile_wiring_runbook_default_profile.log 2>&1
+
+if ! rg -q -- '--distinct-operators 1' "$RUNBOOK_VALIDATE_DEFAULT_PROFILE_CAPTURE"; then
+  echo "runbook default profile wiring failed: expected balanced distinct-operators 1 on validate command"
+  cat "$RUNBOOK_VALIDATE_DEFAULT_PROFILE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--locality-soft-bias 1' "$RUNBOOK_SOAK_DEFAULT_PROFILE_CAPTURE"; then
+  echo "runbook default profile wiring failed: expected balanced locality-soft-bias 1 on soak command"
+  cat "$RUNBOOK_SOAK_DEFAULT_PROFILE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--country-bias 1.50' "$RUNBOOK_VALIDATE_DEFAULT_PROFILE_CAPTURE"; then
+  echo "runbook default profile wiring failed: expected balanced country-bias 1.50 on validate command"
+  cat "$RUNBOOK_VALIDATE_DEFAULT_PROFILE_CAPTURE"
   exit 1
 fi
 if ! rg -q -- '--country-bias 1.60' "$RUNBOOK_SOAK_PATH_PROFILE_CAPTURE"; then

@@ -13,6 +13,9 @@ Usage:
     [--exit-iface IFACE] \
     [--vpn-iface IFACE] \
     [--prune-wg-only-dir [0|1]] \
+    [--manual-validation-report [0|1]] \
+    [--manual-validation-report-summary-json PATH] \
+    [--manual-validation-report-md PATH] \
     [--show-json [0|1]]
 
 Purpose:
@@ -29,6 +32,8 @@ What it can clean:
 Notes:
   - Ownership repairs are only attempted when a safe non-root target owner is known.
   - WG-only, client-VPN, and ownership cleanup requires root; non-root runs report skips.
+  - Under sudo, runtime-doctor checks are evaluated as SUDO_USER when possible so
+    user-level writability drift is still detected before remediation.
 USAGE
 }
 
@@ -108,6 +113,9 @@ extract_json_payload() {
 
 show_json="0"
 prune_wg_only_dir="0"
+manual_validation_report_enabled="${RUNTIME_FIX_MANUAL_VALIDATION_REPORT:-1}"
+manual_validation_report_summary_json=""
+manual_validation_report_md=""
 base_port="${EASY_NODE_DOCTOR_WG_ONLY_BASE_PORT:-19280}"
 client_iface="${EASY_NODE_DOCTOR_CLIENT_IFACE:-wgcstack0}"
 exit_iface="${EASY_NODE_DOCTOR_EXIT_IFACE:-wgestack0}"
@@ -140,6 +148,23 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --manual-validation-report)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        manual_validation_report_enabled="${2:-}"
+        shift 2
+      else
+        manual_validation_report_enabled="1"
+        shift
+      fi
+      ;;
+    --manual-validation-report-summary-json)
+      manual_validation_report_summary_json="${2:-}"
+      shift 2
+      ;;
+    --manual-validation-report-md)
+      manual_validation_report_md="${2:-}"
+      shift 2
+      ;;
     --show-json)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         show_json="${2:-}"
@@ -163,6 +188,7 @@ done
 
 bool_arg_or_die "--show-json" "$show_json"
 bool_arg_or_die "--prune-wg-only-dir" "$prune_wg_only_dir"
+bool_arg_or_die "--manual-validation-report" "$manual_validation_report_enabled"
 if ! [[ "$base_port" =~ ^[0-9]+$ ]]; then
   echo "--base-port must be an integer"
   exit 2
@@ -174,6 +200,7 @@ fi
 
 doctor_script="${RUNTIME_DOCTOR_SCRIPT:-$ROOT_DIR/scripts/runtime_doctor.sh}"
 easy_node_script="${EASY_NODE_RUNTIME_FIX_EASY_NODE_SCRIPT:-$ROOT_DIR/scripts/easy_node.sh}"
+manual_validation_report_script="${MANUAL_VALIDATION_REPORT_SCRIPT:-$ROOT_DIR/scripts/manual_validation_report.sh}"
 if [[ ! -x "$doctor_script" ]]; then
   echo "missing runtime doctor script: $doctor_script"
   exit 2
@@ -182,24 +209,64 @@ if [[ ! -x "$easy_node_script" ]]; then
   echo "missing easy_node helper script: $easy_node_script"
   exit 2
 fi
+if [[ "$manual_validation_report_enabled" == "1" && ! -x "$manual_validation_report_script" ]]; then
+  echo "missing manual validation report script: $manual_validation_report_script"
+  exit 2
+fi
+
+if [[ "$manual_validation_report_enabled" == "1" && -z "$manual_validation_report_summary_json" ]]; then
+  manual_validation_report_summary_json="$ROOT_DIR/.easy-node-logs/manual_validation_readiness_summary.json"
+fi
+if [[ "$manual_validation_report_enabled" == "1" && -z "$manual_validation_report_md" ]]; then
+  manual_validation_report_md="$ROOT_DIR/.easy-node-logs/manual_validation_readiness_report.md"
+fi
 
 declare -a actions_taken=()
 declare -a actions_skipped=()
 declare -a actions_failed=()
 
+manual_validation_report_status="skipped"
+manual_validation_report_log=""
+manual_validation_report_json=""
+
 run_doctor() {
   local log_file
   log_file="$(mktemp)"
   local rc=0
-  if "$doctor_script" \
-    --base-port "$base_port" \
-    --client-iface "$client_iface" \
-    --exit-iface "$exit_iface" \
-    --vpn-iface "$vpn_iface" \
-    --show-json 1 >"$log_file" 2>&1; then
-    rc=0
+  local -a doctor_cmd=(
+    "$doctor_script"
+    --base-port "$base_port"
+    --client-iface "$client_iface"
+    --exit-iface "$exit_iface"
+    --vpn-iface "$vpn_iface"
+    --show-json 1
+  )
+  if [[ "$(effective_uid)" == "0" && -n "${SUDO_USER:-}" && "${SUDO_USER:-}" != "root" ]]; then
+    if command -v runuser >/dev/null 2>&1; then
+      if runuser -u "$SUDO_USER" -- "${doctor_cmd[@]}" >"$log_file" 2>&1; then
+        rc=0
+      else
+        rc=$?
+      fi
+    elif command -v sudo >/dev/null 2>&1; then
+      if sudo -u "$SUDO_USER" "${doctor_cmd[@]}" >"$log_file" 2>&1; then
+        rc=0
+      else
+        rc=$?
+      fi
+    else
+      if "${doctor_cmd[@]}" >"$log_file" 2>&1; then
+        rc=0
+      else
+        rc=$?
+      fi
+    fi
   else
-    rc=$?
+    if "${doctor_cmd[@]}" >"$log_file" 2>&1; then
+      rc=0
+    else
+      rc=$?
+    fi
   fi
   local json
   json="$(extract_json_payload "$log_file")"
@@ -375,6 +442,9 @@ if json_has_code "$before_json" '[.findings[].code | select(. == "wg_only_dir_no
       if [[ -n "$wg_only_dir" ]] && rm -rf "$wg_only_dir"; then
         actions_taken+=("wg-only runtime dir prune")
         echo "[runtime-fix] action=wg-only runtime dir prune path=$wg_only_dir"
+        if [[ -n "$target_owner_spec" ]]; then
+          repair_ownership_path "wg-only runtime dir ownership repair" "$wg_only_dir" 1 "700" 1
+        fi
       else
         actions_failed+=("wg-only runtime dir prune")
         echo "[runtime-fix] action_failed=wg-only runtime dir prune path=$wg_only_dir"
@@ -404,6 +474,28 @@ if ((${#actions_taken[@]} == 0 && ${#actions_skipped[@]} == 0 && ${#actions_fail
   echo "[runtime-fix] no cleanup actions were needed"
 fi
 
+if [[ "$manual_validation_report_enabled" == "1" ]]; then
+  manual_validation_report_log="$(mktemp)"
+  if "$manual_validation_report_script" \
+    --base-port "$base_port" \
+    --client-iface "$client_iface" \
+    --exit-iface "$exit_iface" \
+    --vpn-iface "$vpn_iface" \
+    --summary-json "$manual_validation_report_summary_json" \
+    --report-md "$manual_validation_report_md" \
+    --print-report 0 \
+    --print-summary-json 1 >"$manual_validation_report_log" 2>&1; then
+    manual_validation_report_status="ok"
+  else
+    manual_validation_report_status="failed"
+  fi
+  manual_validation_report_json="$(awk '/^\[manual-validation-report\] summary_json_payload:/{flag=1; next} flag{print}' "$manual_validation_report_log")"
+  echo "[runtime-fix] manual_validation_report_status=$manual_validation_report_status"
+  echo "[runtime-fix] manual_validation_report_summary_json=$manual_validation_report_summary_json"
+  echo "[runtime-fix] manual_validation_report_md=$manual_validation_report_md"
+  echo "[runtime-fix] manual_validation_report_log=$manual_validation_report_log"
+fi
+
 if [[ "$show_json" == "1" ]]; then
   summary_json="$(
     jq -n \
@@ -419,6 +511,11 @@ if [[ "$show_json" == "1" ]]; then
       --arg target_owner_user "$target_owner_user" \
       --arg target_owner_group "$target_owner_group" \
       --arg target_owner_spec "$target_owner_spec" \
+      --arg manual_validation_report_status "$manual_validation_report_status" \
+      --arg manual_validation_report_summary_json "$manual_validation_report_summary_json" \
+      --arg manual_validation_report_md "$manual_validation_report_md" \
+      --arg manual_validation_report_log "$manual_validation_report_log" \
+      --argjson manual_validation_report_json "${manual_validation_report_json:-null}" \
       --argjson before_doctor_rc "$before_doctor_rc" \
       --argjson after_doctor_rc "$after_doctor_rc" \
       --argjson actions_taken "$(printf '%s\n' "${actions_taken[@]:-}" | jq -Rn '[inputs | select(length > 0)]')" \
@@ -443,6 +540,14 @@ if [[ "$show_json" == "1" ]]; then
           after_rc: $after_doctor_rc,
           before: $before,
           after: $after
+        },
+        manual_validation_report: {
+          enabled: ($manual_validation_report_status != "skipped"),
+          status: $manual_validation_report_status,
+          summary_json: $manual_validation_report_summary_json,
+          report_md: $manual_validation_report_md,
+          log: $manual_validation_report_log,
+          summary: (if ($manual_validation_report_json | type) == "object" then $manual_validation_report_json else null end)
         },
         actions: {
           taken: $actions_taken,

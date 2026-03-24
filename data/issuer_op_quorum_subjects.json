@@ -6,7 +6,7 @@
     "reputation": 0.95,
     "bond": 550,
     "tier_cap": 1,
-    "dispute_until": 1773409986,
+    "dispute_until": 1774336568,
     "dispute_case_id": "case-operator-quorum",
     "dispute_evidence_ref": "evidence://operator-quorum"
   }

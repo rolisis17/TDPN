@@ -500,6 +500,9 @@ incident_source_quick_run_report_exists=0
 incident_source_summary_json=""
 incident_source_summary_exists=0
 incident_source_summary_valid_json=0
+incident_source_pre_real_host_readiness_summary_json=""
+incident_source_pre_real_host_readiness_summary_exists=0
+incident_source_pre_real_host_readiness_summary_valid_json=0
 incident_latest_run_report=""
 incident_enabled=0
 incident_status=""
@@ -534,6 +537,9 @@ while IFS=$'\t' read -r _mtime report_path || [[ -n "${report_path:-}" ]]; do
   quick_summary_json="$(abs_path "$(json_string_file "$report_path" '.artifacts.summary_json')")"
   quick_summary_exists="$(path_exists01 "$quick_summary_json")"
   quick_summary_valid_json="$(json_valid01 "$quick_summary_json")"
+  quick_pre_real_host_readiness_summary_json="$(abs_path "$(json_string_file "$report_path" '.artifacts.pre_real_host_readiness_summary_json')")"
+  quick_pre_real_host_readiness_summary_exists="$(path_exists01 "$quick_pre_real_host_readiness_summary_json")"
+  quick_pre_real_host_readiness_summary_valid_json="$(json_valid01 "$quick_pre_real_host_readiness_summary_json")"
   if [[ -z "$incident_latest_run_report" && "$quick_summary_valid_json" == "1" ]]; then
     candidate_incident_run_report="$(abs_path "$(json_string_file "$quick_summary_json" '.incident_snapshot.latest_failed_run_report.path')")"
     candidate_incident_enabled="$(json_bool_flag_file "$quick_summary_json" '.incident_snapshot.latest_failed_run_report.enabled')"
@@ -554,6 +560,9 @@ while IFS=$'\t' read -r _mtime report_path || [[ -n "${report_path:-}" ]]; do
       incident_source_summary_json="$quick_summary_json"
       incident_source_summary_exists="$quick_summary_exists"
       incident_source_summary_valid_json="$quick_summary_valid_json"
+      incident_source_pre_real_host_readiness_summary_json="$quick_pre_real_host_readiness_summary_json"
+      incident_source_pre_real_host_readiness_summary_exists="$quick_pre_real_host_readiness_summary_exists"
+      incident_source_pre_real_host_readiness_summary_valid_json="$quick_pre_real_host_readiness_summary_valid_json"
       incident_latest_run_report="$candidate_incident_run_report"
       incident_enabled="$candidate_incident_enabled"
       incident_status="$candidate_incident_status"
@@ -669,8 +678,8 @@ if ((no_go_reports > 0 && show_top_reasons > 0)); then
   done < <(sort -rn "$reasons_ranked")
 fi
 
-if [[ -n "$incident_latest_run_report" || -n "$incident_summary_json" || -n "$incident_report_md" || -n "$incident_attachment_manifest" || -n "$incident_attachment_skipped" ]]; then
-  echo "[prod-pilot-cohort-quick-trend] incident_handoff source_quick_run_report=${incident_source_quick_run_report:-unset} source_run_report=${incident_latest_run_report:-unset} summary_json=${incident_summary_json:-unset} report_md=${incident_report_md:-unset} attachment_manifest=${incident_attachment_manifest:-unset} attachment_skipped=${incident_attachment_skipped:-unset} attachment_count=${incident_attachment_count}"
+if [[ -n "$incident_source_pre_real_host_readiness_summary_json" || -n "$incident_latest_run_report" || -n "$incident_summary_json" || -n "$incident_report_md" || -n "$incident_attachment_manifest" || -n "$incident_attachment_skipped" ]]; then
+  echo "[prod-pilot-cohort-quick-trend] incident_handoff source_pre_real_host_readiness_summary_json=${incident_source_pre_real_host_readiness_summary_json:-unset} source_quick_run_report=${incident_source_quick_run_report:-unset} source_run_report=${incident_latest_run_report:-unset} summary_json=${incident_summary_json:-unset} report_md=${incident_report_md:-unset} attachment_manifest=${incident_attachment_manifest:-unset} attachment_skipped=${incident_attachment_skipped:-unset} attachment_count=${incident_attachment_count}"
 fi
 
 decision="GO"
@@ -720,6 +729,7 @@ summary_payload="$(
     --argjson runs "$details_json" \
     --arg incident_source_quick_run_report "$incident_source_quick_run_report" \
     --arg incident_source_summary_json "$incident_source_summary_json" \
+    --arg incident_source_pre_real_host_readiness_summary_json "$incident_source_pre_real_host_readiness_summary_json" \
     --arg incident_latest_run_report "$incident_latest_run_report" \
     --arg incident_status "$incident_status" \
     --arg incident_bundle_dir "$incident_bundle_dir" \
@@ -731,6 +741,8 @@ summary_payload="$(
     --argjson incident_source_quick_run_report_exists "$incident_source_quick_run_report_exists" \
     --argjson incident_source_summary_exists "$incident_source_summary_exists" \
     --argjson incident_source_summary_valid_json "$incident_source_summary_valid_json" \
+    --argjson incident_source_pre_real_host_readiness_summary_exists "$incident_source_pre_real_host_readiness_summary_exists" \
+    --argjson incident_source_pre_real_host_readiness_summary_valid_json "$incident_source_pre_real_host_readiness_summary_valid_json" \
     --argjson incident_enabled "$incident_enabled" \
     --argjson incident_bundle_dir_exists "$incident_bundle_dir_exists" \
     --argjson incident_bundle_tar_exists "$incident_bundle_tar_exists" \
@@ -769,6 +781,7 @@ summary_payload="$(
       },
       incident_snapshot: {
         latest_failed_run_report: {
+          source_pre_real_host_readiness_summary_json: {path: ($incident_source_pre_real_host_readiness_summary_json // ""), exists: $incident_source_pre_real_host_readiness_summary_exists, valid_json: $incident_source_pre_real_host_readiness_summary_valid_json},
           source_quick_run_report: {path: ($incident_source_quick_run_report // ""), exists: $incident_source_quick_run_report_exists},
           source_summary_json: {path: ($incident_source_summary_json // ""), exists: $incident_source_summary_exists, valid_json: $incident_source_summary_valid_json},
           path: ($incident_latest_run_report // ""),

@@ -141,6 +141,57 @@ EOF_READY
 }
 EOF_PRE
 fi
+if [[ "$subcommand" == "runtime-fix-record" ]]; then
+  summary_json=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --summary-json)
+        summary_json="$(resolve_repo_path "${2:-}")"
+        shift 2
+        ;;
+      *)
+        shift
+        ;;
+    esac
+  done
+  if [[ -n "$summary_json" ]]; then
+    mkdir -p "$(dirname "$summary_json")"
+    cat >"$summary_json" <<EOF_FIX
+{
+  "status": "pass",
+  "rc": 0,
+  "runtime_fix": {
+    "after_status": "OK"
+  }
+}
+EOF_FIX
+  fi
+  mkdir -p "$(dirname "$(resolve_repo_path ".easy-node-logs/manual_validation_readiness_summary.json")")"
+  cat >"$(resolve_repo_path ".easy-node-logs/manual_validation_readiness_summary.json")" <<EOF_FIX_READY
+{
+  "report": {
+    "readiness_status": "NOT_READY",
+    "summary_json": "$(resolve_repo_path ".easy-node-logs/manual_validation_readiness_summary.json")",
+    "report_md": "$(resolve_repo_path ".easy-node-logs/manual_validation_readiness_report.md")"
+  },
+  "summary": {
+    "pre_machine_c_gate": {
+      "ready": false,
+      "blockers": ["wg_only_stack_selftest"],
+      "next_command": "sudo ./scripts/easy_node.sh client-vpn-smoke --runtime-fix 1"
+    },
+    "next_action_command": "sudo ./scripts/easy_node.sh wg-only-stack-selftest-record --strict-beta 1 --print-summary-json 1",
+    "latest_failed_incident": {
+      "summary_json": {"path": "/tmp/fake-incident/incident_summary.json"},
+      "report_md": {"path": "/tmp/fake-incident/incident_report.md"},
+      "readiness_report_summary_attachment": {"bundle_path": "attachments/02_manual_validation_readiness_summary.json"},
+      "readiness_report_md_attachment": {"bundle_path": "attachments/03_manual_validation_readiness_report.md"}
+    }
+  }
+}
+EOF_FIX_READY
+  printf '# fake readiness report\n' >"$(resolve_repo_path ".easy-node-logs/manual_validation_readiness_report.md")"
+fi
 exit 0
 EOF_FAKE_EASY
 chmod +x "$TMP_ROOT/scripts/easy_node.sh"
@@ -201,12 +252,13 @@ assert_line_has "$line1" '--beta-profile 1' \
   "runtime wiring failed: option 1 missing --beta-profile 1"
 assert_line_has "$line1" '--prod-profile 0' \
   "runtime wiring failed: option 1 missing --prod-profile 0 default"
-assert_line_has "$line1" '--distinct-operators 1' \
-  "runtime wiring failed: option 1 missing balanced path distinct-operators flag"
-assert_line_has "$line1" '--locality-soft-bias 1' \
-  "runtime wiring failed: option 1 missing balanced path locality-soft-bias flag"
-assert_line_has "$line1" '--country-bias 1\.50' \
-  "runtime wiring failed: option 1 missing balanced path country-bias default"
+assert_line_has "$line1" '--path-profile balanced' \
+  "runtime wiring failed: option 1 missing --path-profile balanced"
+if printf '%s\n' "$line1" | rg -q -- '--distinct-operators |--distinct-countries |--locality-soft-bias |--country-bias |--region-bias |--region-prefix-bias '; then
+  echo "runtime wiring failed: option 1 unexpectedly forwarded derived path-policy flags"
+  printf 'line: %s\n' "$line1"
+  exit 1
+fi
 
 : >"$CAPTURE"
 
@@ -319,6 +371,268 @@ assert_line_has "$line2a_session" '--auto-invite-fail-open 1' \
 if printf '%s\n' "$line2a_session" | rg -q -- '--peer-directories '; then
   echo "runtime wiring failed: authority option 2 server-session unexpectedly forwarded peer directories"
   printf 'line: %s\n' "$line2a_session"
+  exit 1
+fi
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] test menu option 10 runtime command forwarding"
+INPUTT10="$TMP_DIR/inputt10.txt"
+{
+  printf '3\n'
+  printf '13\n'
+  printf '10\n'
+  printf '\n'    # auto-discover default yes
+  printf '\n'    # bootstrap directory default
+  printf '\n'    # discovery wait default
+  printf '\n'    # min sources default
+  printf '\n'    # min operators default
+  printf '\n'    # federation timeout default
+  printf '\n'    # client timeout default
+  printf '\n'    # exit country optional
+  printf '\n'    # exit region optional
+  printf '\n'    # beta profile default yes
+  printf '\n'    # prod profile default no
+  printf '\n'    # path profile default balanced
+  printf '\n'    # report file optional
+  printf '0\n'
+  printf '0\n'
+  printf '0\n'
+} >"$INPUTT10"
+run_ui "$INPUTT10" "$TMP_DIR/runt10.log"
+
+line_t10="$(rg '^machine-c-test ' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line_t10" ]]; then
+  echo "runtime wiring failed: test menu option 10 did not invoke machine-c-test"
+  cat "$TMP_DIR/runt10.log"
+  exit 1
+fi
+assert_line_has "$line_t10" '--path-profile balanced' \
+  "runtime wiring failed: test menu option 10 missing --path-profile balanced"
+assert_line_has "$line_t10" '--beta-profile 1' \
+  "runtime wiring failed: test menu option 10 missing --beta-profile 1"
+assert_line_has "$line_t10" '--prod-profile 0' \
+  "runtime wiring failed: test menu option 10 missing --prod-profile 0"
+if printf '%s\n' "$line_t10" | rg -q -- '--distinct-operators |--distinct-countries |--locality-soft-bias |--country-bias |--region-bias |--region-prefix-bias '; then
+  echo "runtime wiring failed: test menu option 10 unexpectedly forwarded derived path-policy flags"
+  printf 'line: %s\n' "$line_t10"
+  exit 1
+fi
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] advanced option 10 runtime command forwarding"
+INPUTA10="$TMP_DIR/inputa10.txt"
+{
+  printf '3\n'
+  printf '10\n'
+  printf '\n'    # auto-discover default yes
+  printf '\n'    # bootstrap directory default
+  printf '\n'    # discovery wait default
+  printf '\n'    # min sources default
+  printf '\n'    # min operators default
+  printf '\n'    # federation timeout default
+  printf '\n'    # client timeout default
+  printf '\n'    # subject optional
+  printf '\n'    # beta profile default yes
+  printf '\n'    # prod profile default no
+  printf '\n'    # path profile default balanced
+  printf '0\n'
+  printf '0\n'
+} >"$INPUTA10"
+run_ui "$INPUTA10" "$TMP_DIR/runa10.log"
+
+line_a10="$(rg '^three-machine-validate ' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line_a10" ]]; then
+  echo "runtime wiring failed: advanced option 10 did not invoke three-machine-validate"
+  cat "$TMP_DIR/runa10.log"
+  exit 1
+fi
+assert_line_has "$line_a10" '--path-profile balanced' \
+  "runtime wiring failed: advanced option 10 missing --path-profile balanced"
+assert_line_has "$line_a10" '--beta-profile 1' \
+  "runtime wiring failed: advanced option 10 missing --beta-profile 1"
+assert_line_has "$line_a10" '--prod-profile 0' \
+  "runtime wiring failed: advanced option 10 missing --prod-profile 0"
+if printf '%s\n' "$line_a10" | rg -q -- '--distinct-operators |--distinct-countries |--locality-soft-bias |--country-bias |--region-bias |--region-prefix-bias '; then
+  echo "runtime wiring failed: advanced option 10 unexpectedly forwarded derived path-policy flags"
+  printf 'line: %s\n' "$line_a10"
+  exit 1
+fi
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] advanced option 11 runtime command forwarding"
+INPUT11="$TMP_DIR/input11.txt"
+{
+  printf '3\n'
+  printf '11\n'
+  printf '\n'    # auto-discover default yes
+  printf '\n'    # bootstrap directory default
+  printf '\n'    # discovery wait default
+  printf '\n'    # rounds default
+  printf '\n'    # pause sec default
+  printf '\n'    # min sources default
+  printf '\n'    # min operators default
+  printf '\n'    # federation timeout default
+  printf '\n'    # client timeout default
+  printf '\n'    # subject optional
+  printf '\n'    # beta profile default yes
+  printf '\n'    # prod profile default no
+  printf '\n'    # path profile default balanced
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT11"
+run_ui "$INPUT11" "$TMP_DIR/run11.log"
+
+line11="$(rg '^three-machine-soak ' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line11" ]]; then
+  echo "runtime wiring failed: advanced option 11 did not invoke three-machine-soak"
+  cat "$TMP_DIR/run11.log"
+  exit 1
+fi
+assert_line_has "$line11" '--path-profile balanced' \
+  "runtime wiring failed: advanced option 11 missing --path-profile balanced"
+assert_line_has "$line11" '--beta-profile 1' \
+  "runtime wiring failed: advanced option 11 missing --beta-profile 1"
+assert_line_has "$line11" '--prod-profile 0' \
+  "runtime wiring failed: advanced option 11 missing --prod-profile 0"
+if printf '%s\n' "$line11" | rg -q -- '--distinct-operators |--distinct-countries |--locality-soft-bias |--country-bias |--region-bias |--region-prefix-bias '; then
+  echo "runtime wiring failed: advanced option 11 unexpectedly forwarded derived path-policy flags"
+  printf 'line: %s\n' "$line11"
+  exit 1
+fi
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] advanced option 12 runtime command forwarding"
+INPUT12="$TMP_DIR/input12.txt"
+{
+  printf '3\n'
+  printf '12\n'
+  printf '\n'    # auto-discover default yes
+  printf '\n'    # bootstrap directory default
+  printf '\n'    # discovery wait default
+  printf '\n'    # rounds default
+  printf '\n'    # pause sec default
+  printf '\n'    # subject optional
+  printf '\n'    # beta profile default yes
+  printf '\n'    # prod profile default no
+  printf '\n'    # path profile default balanced
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT12"
+run_ui "$INPUT12" "$TMP_DIR/run12.log"
+
+line12="$(rg '^pilot-runbook ' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line12" ]]; then
+  echo "runtime wiring failed: advanced option 12 did not invoke pilot-runbook"
+  cat "$TMP_DIR/run12.log"
+  exit 1
+fi
+assert_line_has "$line12" '--path-profile balanced' \
+  "runtime wiring failed: advanced option 12 missing --path-profile balanced"
+assert_line_has "$line12" '--beta-profile 1' \
+  "runtime wiring failed: advanced option 12 missing --beta-profile 1"
+assert_line_has "$line12" '--prod-profile 0' \
+  "runtime wiring failed: advanced option 12 missing --prod-profile 0"
+if printf '%s\n' "$line12" | rg -q -- '--distinct-operators |--distinct-countries |--locality-soft-bias |--country-bias |--region-bias |--region-prefix-bias '; then
+  echo "runtime wiring failed: advanced option 12 unexpectedly forwarded derived path-policy flags"
+  printf 'line: %s\n' "$line12"
+  exit 1
+fi
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] advanced option 34 (client-vpn-up expert/manual) runtime command forwarding"
+INPUT34="$TMP_DIR/input34.txt"
+{
+  printf '3\n'   # main menu: advanced
+  printf '34\n'  # client-vpn-up manual
+  printf '\n'    # auto-discover default yes
+  printf '\n'    # bootstrap directory URL (default hosts.a)
+  printf '\n'    # discovery wait default
+  printf 'n\n'   # anon credential mode? no
+  printf 'inv-manual\n' # invite subject
+  printf '3\n'   # min sources
+  printf '2\n'   # min operators
+  printf '\n'    # beta profile default yes
+  printf 'n\n'   # prod profile default no
+  printf '1\n'   # path profile speed
+  printf 'y\n'   # operator floor check
+  printf 'y\n'   # issuer quorum check
+  printf '3\n'   # issuer min operators
+  printf '\n'    # extra issuer URLs csv
+  printf 'wgvpn9\n' # interface
+  printf '127.0.0.1:59000\n' # wg proxy addr
+  printf '\n'    # private key file optional
+  printf '0.0.0.0/0\n' # allowed IPs
+  printf 'y\n'   # install route
+  printf '30\n'  # startup sync timeout
+  printf '40\n'  # ready timeout
+  printf '\n'    # force restart default yes
+  printf 'y\n'   # foreground
+  printf '\n'    # mtls ca optional
+  printf '\n'    # mtls cert optional
+  printf '\n'    # mtls key optional
+  printf 'manual-up.log\n' # log file optional
+  printf 'n\n'   # run preflight first? no
+  printf '\n'    # preflight timeout sec default
+  printf 'n\n'   # run with sudo? no
+  printf '0\n'   # back from advanced menu
+  printf '0\n'   # exit main menu
+} >"$INPUT34"
+run_ui "$INPUT34" "$TMP_DIR/run34.log"
+
+line34="$(rg '^client-vpn-up ' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line34" ]]; then
+  echo "runtime wiring failed: advanced option 34 did not invoke client-vpn-up"
+  cat "$TMP_DIR/run34.log"
+  exit 1
+fi
+assert_line_has "$line34" '--bootstrap-directory http://198\.51\.100\.10:8081' \
+  "runtime wiring failed: option 34 missing default bootstrap directory"
+assert_line_has "$line34" '--subject inv-manual' \
+  "runtime wiring failed: option 34 missing invite subject"
+assert_line_has "$line34" '--min-sources 3' \
+  "runtime wiring failed: option 34 missing min-sources override"
+assert_line_has "$line34" '--min-operators 2' \
+  "runtime wiring failed: option 34 missing min-operators override"
+assert_line_has "$line34" '--distinct-operators 1' \
+  "runtime wiring failed: option 34 missing --distinct-operators 1"
+assert_line_has "$line34" '--distinct-countries 0' \
+  "runtime wiring failed: option 34 missing --distinct-countries 0"
+assert_line_has "$line34" '--locality-soft-bias 1' \
+  "runtime wiring failed: option 34 missing --locality-soft-bias 1"
+assert_line_has "$line34" '--country-bias 1\.80' \
+  "runtime wiring failed: option 34 missing speed country bias"
+assert_line_has "$line34" '--region-bias 1\.35' \
+  "runtime wiring failed: option 34 missing speed region bias"
+assert_line_has "$line34" '--region-prefix-bias 1\.15' \
+  "runtime wiring failed: option 34 missing speed region-prefix bias"
+assert_line_has "$line34" '--operator-floor-check 1' \
+  "runtime wiring failed: option 34 missing --operator-floor-check 1"
+assert_line_has "$line34" '--issuer-quorum-check 1' \
+  "runtime wiring failed: option 34 missing --issuer-quorum-check 1"
+assert_line_has "$line34" '--issuer-min-operators 3' \
+  "runtime wiring failed: option 34 missing issuer-min-operators override"
+assert_line_has "$line34" '--interface wgvpn9' \
+  "runtime wiring failed: option 34 missing interface override"
+assert_line_has "$line34" '--proxy-addr 127\.0\.0\.1:59000' \
+  "runtime wiring failed: option 34 missing proxy override"
+assert_line_has "$line34" '--install-route 1' \
+  "runtime wiring failed: option 34 missing install-route override"
+assert_line_has "$line34" '--startup-sync-timeout-sec 30' \
+  "runtime wiring failed: option 34 missing startup-sync-timeout override"
+assert_line_has "$line34" '--ready-timeout-sec 40' \
+  "runtime wiring failed: option 34 missing ready-timeout override"
+assert_line_has "$line34" '--foreground 1' \
+  "runtime wiring failed: option 34 missing foreground override"
+assert_line_has "$line34" '--log-file manual-up\.log' \
+  "runtime wiring failed: option 34 missing log-file override"
+if printf '%s\n' "$line34" | rg -q -- '--path-profile '; then
+  echo "runtime wiring failed: option 34 should expose explicit policy flags, not --path-profile preset forwarding"
+  printf 'line: %s\n' "$line34"
   exit 1
 fi
 
@@ -1906,7 +2220,7 @@ INPUT63="$TMP_DIR/input63.txt"
 {
   printf '3\n'
   printf '63\n'
-  for _ in $(seq 1 5); do
+  for _ in $(seq 1 6); do
     printf '\n'
   done
   printf '0\n'
@@ -1928,6 +2242,8 @@ assert_line_has "$line63" '--exit-iface wgestack0' \
   "runtime wiring failed: option 63 missing default --exit-iface"
 assert_line_has "$line63" '--vpn-iface wgvpn0' \
   "runtime wiring failed: option 63 missing default --vpn-iface"
+assert_line_has "$line63" '--profile-compare-signoff-summary-json \.easy-node-logs/profile_compare_campaign_signoff_summary\.json' \
+  "runtime wiring failed: option 63 missing default profile signoff summary override"
 assert_line_has "$line63" '--show-json 1' \
   "runtime wiring failed: option 63 missing default --show-json 1"
 
@@ -1963,12 +2279,8 @@ assert_line_has "$line64" '--bootstrap-directory http://198\.51\.100\.10:8081' \
   "runtime wiring failed: option 64 missing default bootstrap directory"
 assert_line_has "$line64" '--subject inv-runtime-smoke' \
   "runtime wiring failed: option 64 missing subject"
-assert_line_has "$line64" '--beta-profile 1' \
-  "runtime wiring failed: option 64 missing --beta-profile 1"
 assert_line_has "$line64" '--path-profile balanced' \
   "runtime wiring failed: option 64 missing default path profile"
-assert_line_has "$line64" '--distinct-operators 1' \
-  "runtime wiring failed: option 64 missing distinct-operators default"
 assert_line_has "$line64" '--interface wgvpn7' \
   "runtime wiring failed: option 64 missing interface override"
 assert_line_has "$line64" '--pre-real-host-readiness 1' \
@@ -2045,6 +2357,7 @@ INPUT66="$TMP_DIR/input66.txt"
   printf '\n'    # client iface default
   printf '\n'    # exit iface default
   printf '\n'    # vpn iface default
+  printf '.easy-node-logs/profile_compare_campaign_signoff_summary_test.json\n'
   printf '.easy-node-logs/manual_validation_readiness_summary_test.json\n'
   printf '.easy-node-logs/manual_validation_readiness_report_test.md\n'
   printf '\n'    # print report default yes
@@ -2069,6 +2382,8 @@ assert_line_has "$line66" '--exit-iface wgestack0' \
   "runtime wiring failed: option 66 missing default --exit-iface"
 assert_line_has "$line66" '--vpn-iface wgvpn0' \
   "runtime wiring failed: option 66 missing default --vpn-iface"
+assert_line_has "$line66" '--profile-compare-signoff-summary-json \.easy-node-logs/profile_compare_campaign_signoff_summary_test\.json' \
+  "runtime wiring failed: option 66 missing profile signoff summary override"
 assert_line_has "$line66" '--summary-json \.easy-node-logs/manual_validation_readiness_summary_test\.json' \
   "runtime wiring failed: option 66 missing summary-json override"
 assert_line_has "$line66" '--report-md \.easy-node-logs/manual_validation_readiness_report_test\.md' \
@@ -2205,6 +2520,85 @@ assert_line_has "$line68" '--strict-beta 0' \
   "runtime wiring failed: option 68 missing strict-beta override"
 assert_line_has "$line68" '--print-summary-json 1' \
   "runtime wiring failed: option 68 missing print-summary-json 1"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 74 runtime command forwarding"
+INPUT74="$TMP_DIR/input74.txt"
+{
+  printf '3\n'
+  printf '74\n'
+  printf '\n'    # base port default
+  printf 'wgcfixrec0\n'
+  printf 'wgefixrec0\n'
+  printf 'wgvpnfixrec0\n'
+  printf '\n'    # prune default yes
+  printf 'y\n'   # print summary json
+  printf 'n\n'   # no sudo in integration
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT74"
+run_ui "$INPUT74" "$TMP_DIR/run74.log"
+
+line74="$(rg '^runtime-fix-record ' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line74" ]]; then
+  echo "runtime wiring failed: option 74 did not invoke runtime-fix-record"
+  cat "$TMP_DIR/run74.log"
+  exit 1
+fi
+assert_line_has "$line74" '--base-port 19280' \
+  "runtime wiring failed: option 74 missing default --base-port"
+assert_line_has "$line74" '--client-iface wgcfixrec0' \
+  "runtime wiring failed: option 74 missing client iface override"
+assert_line_has "$line74" '--exit-iface wgefixrec0' \
+  "runtime wiring failed: option 74 missing exit iface override"
+assert_line_has "$line74" '--vpn-iface wgvpnfixrec0' \
+  "runtime wiring failed: option 74 missing vpn iface override"
+assert_line_has "$line74" '--prune-wg-only-dir 1' \
+  "runtime wiring failed: option 74 missing prune flag default"
+assert_line_has "$line74" '--print-summary-json 1' \
+  "runtime wiring failed: option 74 missing print-summary-json 1"
+if ! rg -q '^launcher readiness summary$' "$TMP_DIR/run74.log"; then
+  echo "runtime wiring failed: option 74 missing launcher readiness summary heading"
+  cat "$TMP_DIR/run74.log"
+  exit 1
+fi
+if ! rg -q '^  next_action_command=sudo ./scripts/easy_node.sh wg-only-stack-selftest-record --strict-beta 1 --print-summary-json 1$' "$TMP_DIR/run74.log"; then
+  echo "runtime wiring failed: option 74 missing refreshed readiness next action command"
+  cat "$TMP_DIR/run74.log"
+  exit 1
+fi
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 75 runtime command forwarding"
+INPUT75="$TMP_DIR/input75.txt"
+{
+  printf '3\n'
+  printf '75\n'
+  printf '1\n'   # profile signoff mode
+  printf 'y\n'   # force profile campaign refresh
+  printf 'y\n'   # print summary json
+  printf 'n\n'   # no sudo in integration
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT75"
+run_ui "$INPUT75" "$TMP_DIR/run75.log"
+
+line75="$(rg '^single-machine-prod-readiness ' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line75" ]]; then
+  echo "runtime wiring failed: option 75 did not invoke single-machine-prod-readiness"
+  cat "$TMP_DIR/run75.log"
+  exit 1
+fi
+assert_line_has "$line75" '--run-profile-compare-campaign-signoff 1' \
+  "runtime wiring failed: option 75 missing --run-profile-compare-campaign-signoff 1"
+assert_line_has "$line75" '--profile-compare-campaign-signoff-refresh-campaign 1' \
+  "runtime wiring failed: option 75 missing --profile-compare-campaign-signoff-refresh-campaign 1"
+assert_line_has "$line75" '--print-summary-json 1' \
+  "runtime wiring failed: option 75 missing --print-summary-json 1"
+
+: >"$CAPTURE"
 
 echo "[easy-mode-runtime] option 69 runtime command forwarding"
 INPUT69="$TMP_DIR/input69.txt"

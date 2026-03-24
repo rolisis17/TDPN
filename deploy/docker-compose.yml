@@ -68,7 +68,7 @@ services:
       - ./data/directory:/app/data
       - ./tls:/app/tls:ro
     ports:
-      - "8081:8081"
+      - "${DIRECTORY_PUBLISHED_PORT:-8081}:8081"
     restart: unless-stopped
 
   issuer:
@@ -110,7 +110,7 @@ services:
       - ./data/issuer:/app/data
       - ./tls:/app/tls:ro
     ports:
-      - "8082:8082"
+      - "${ISSUER_PUBLISHED_PORT:-8082}:8082"
     restart: unless-stopped
 
   entry-exit:
@@ -183,10 +183,10 @@ services:
     user: "${ENTRY_EXIT_USER:-nodeuser}"
     privileged: ${ENTRY_EXIT_PRIVILEGED:-false}
     ports:
-      - "8083:8083"
-      - "8084:8084"
-      - "51820:51820/udp"
-      - "51821:51821/udp"
+      - "${ENTRY_PUBLISHED_PORT:-8083}:8083"
+      - "${EXIT_PUBLISHED_PORT:-8084}:8084"
+      - "${ENTRY_UDP_PUBLISHED_PORT:-51820}:51820/udp"
+      - "${EXIT_UDP_PUBLISHED_PORT:-51821}:51821/udp"
     restart: unless-stopped
 
   client-demo:

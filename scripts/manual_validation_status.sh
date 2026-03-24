@@ -12,6 +12,7 @@ Usage:
     [--client-iface IFACE] \
     [--exit-iface IFACE] \
     [--vpn-iface IFACE] \
+    [--profile-compare-signoff-summary-json PATH] \
     [--overlay-check-id CHECK_ID] \
     [--overlay-status pass|fail|warn|pending|skip] \
     [--overlay-notes TEXT] \
@@ -393,11 +394,234 @@ build_recorded_check_json() {
     }'
 }
 
+build_runtime_hygiene_check_json() {
+  local runtime_check_json=""
+  local runtime_recorded_json=""
+  local runtime_recorded_notes=""
+  local runtime_recorded_command=""
+  local runtime_recorded_at=""
+  local runtime_receipt_json=""
+  local runtime_artifacts_json=""
+  local runtime_incident_source_summary_json=""
+  local runtime_incident_handoff_json=""
+  local runtime_combined_notes=""
+  local runtime_recorded_note_suffix=""
+
+  runtime_recorded_json="$(printf '%s\n' "$recorded_json" | jq -c '.checks["runtime_hygiene"] // {
+    notes: "",
+    command: "",
+    artifacts: [],
+    recorded_at_utc: "",
+    receipt_json: ""
+  }')"
+  runtime_recorded_notes="$(jq -r '.notes // ""' <<<"$runtime_recorded_json")"
+  runtime_recorded_command="$(jq -r '.command // ""' <<<"$runtime_recorded_json")"
+  runtime_recorded_at="$(jq -r '.recorded_at_utc // ""' <<<"$runtime_recorded_json")"
+  runtime_receipt_json="$(jq -r '.receipt_json // ""' <<<"$runtime_recorded_json")"
+  runtime_artifacts_json="$(jq -c '.artifacts // []' <<<"$runtime_recorded_json")"
+  runtime_incident_source_summary_json="$(find_incident_source_summary_json "$runtime_artifacts_json")"
+  runtime_incident_handoff_json="$(build_incident_handoff_json "$runtime_incident_source_summary_json" "$runtime_receipt_json")"
+
+  if [[ -z "$runtime_recorded_at" ]]; then
+    runtime_recorded_at="$(printf '%s\n' "$runtime_doctor_json" | jq -r '.generated_at_utc // ""')"
+  fi
+  if [[ -n "$runtime_recorded_notes" ]]; then
+    runtime_recorded_note_suffix="last recorded: $runtime_recorded_notes"
+  fi
+  runtime_combined_notes="$(
+    jq -rn \
+      --arg runtime_summary "$runtime_summary" \
+      --arg runtime_notes "$runtime_notes" \
+      --arg recorded_notes "$runtime_recorded_note_suffix" \
+      '[ $runtime_summary, $runtime_notes, $recorded_notes ] | map(select(length > 0)) | join("; ")'
+  )"
+  if [[ -z "$runtime_recorded_command" ]]; then
+    runtime_recorded_command="./scripts/easy_node.sh runtime-doctor --show-json 1"
+  fi
+
+  runtime_check_json="$(
+    jq -n \
+      --arg runtime_status "$runtime_check_status" \
+      --arg runtime_notes "$runtime_combined_notes" \
+      --arg runtime_command "$runtime_recorded_command" \
+      --arg runtime_remediation_command "$runtime_fix_record_command" \
+      --arg runtime_recorded_at "$runtime_recorded_at" \
+      --arg runtime_receipt_json "$runtime_receipt_json" \
+      --argjson runtime_artifacts "$runtime_artifacts_json" \
+      --argjson runtime_remediations "$runtime_remediations_json" \
+      --argjson runtime_incident_handoff "$runtime_incident_handoff_json" \
+      '{
+        check_id: "runtime_hygiene",
+        label: "Runtime hygiene doctor",
+        status: $runtime_status,
+        notes: $runtime_notes,
+        command: $runtime_command,
+        remediation_command: (if $runtime_status == "pass" then "" else $runtime_remediation_command end),
+        remediations: $runtime_remediations,
+        artifacts: $runtime_artifacts,
+        recorded_at_utc: $runtime_recorded_at,
+        receipt_json: $runtime_receipt_json,
+        incident_handoff: $runtime_incident_handoff
+      }'
+  )"
+
+  printf '%s\n' "$runtime_check_json"
+}
+
+profile_signoff_non_root_refresh_blocked_01() {
+  local signoff_summary_json="$1"
+  local failure_stage=""
+  local refresh_campaign="0"
+  local campaign_log=""
+  local root_required_msg="--start-local-stack=1 requires root"
+  local campaign_line=""
+  local run_log=""
+
+  if [[ ! -f "$signoff_summary_json" ]] || ! jq -e . "$signoff_summary_json" >/dev/null 2>&1; then
+    printf '0'
+    return
+  fi
+
+  failure_stage="$(jq -r '.failure_stage // ""' "$signoff_summary_json" 2>/dev/null || true)"
+  refresh_campaign="$(jq -r '(.inputs.refresh_campaign // false) | if . then "1" else "0" end' "$signoff_summary_json" 2>/dev/null || echo 0)"
+  campaign_log="$(jq -r '.stages.campaign.log // ""' "$signoff_summary_json" 2>/dev/null || true)"
+  if [[ "$failure_stage" != "campaign" || "$refresh_campaign" != "1" || -z "$campaign_log" || ! -f "$campaign_log" ]]; then
+    printf '0'
+    return
+  fi
+
+  if grep -F -- "$root_required_msg" "$campaign_log" >/dev/null 2>&1; then
+    printf '1'
+    return
+  fi
+
+  while IFS= read -r campaign_line; do
+    run_log="${campaign_line##* log=}"
+    if [[ "$run_log" == "$campaign_line" ]]; then
+      continue
+    fi
+    if [[ -n "$run_log" && -f "$run_log" ]] && grep -F -- "$root_required_msg" "$run_log" >/dev/null 2>&1; then
+      printf '1'
+      return
+    fi
+  done <"$campaign_log"
+
+  printf '0'
+}
+
+build_profile_default_gate_json() {
+  local signoff_summary_json="$1"
+  local next_command="./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 1 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1"
+  local available="0"
+  local valid_json="0"
+  local status="pending"
+  local notes="profile compare campaign signoff has not been recorded yet"
+  local decision=""
+  local recommended_profile=""
+  local trend_source=""
+  local final_rc="0"
+  local campaign_summary_json=""
+  local campaign_report_md=""
+  local campaign_check_summary_json=""
+  local failure_stage=""
+  local non_root_refresh_blocked="0"
+  local signoff_status=""
+
+  if [[ -f "$signoff_summary_json" ]]; then
+    available="1"
+  fi
+  if [[ "$available" == "1" ]] && jq -e . "$signoff_summary_json" >/dev/null 2>&1; then
+    valid_json="1"
+  fi
+
+  if [[ "$valid_json" == "1" ]]; then
+    signoff_status="$(jq -r '.status // ""' "$signoff_summary_json")"
+    decision="$(jq -r '.decision.decision // ""' "$signoff_summary_json")"
+    recommended_profile="$(jq -r '.decision.recommended_profile // ""' "$signoff_summary_json")"
+    trend_source="$(jq -r '.decision.trend_source // ""' "$signoff_summary_json")"
+    final_rc="$(jq -r '.final_rc // 0' "$signoff_summary_json")"
+    campaign_summary_json="$(jq -r '.artifacts.campaign_summary_json // ""' "$signoff_summary_json")"
+    campaign_report_md="$(jq -r '.artifacts.campaign_report_md // ""' "$signoff_summary_json")"
+    campaign_check_summary_json="$(jq -r '.artifacts.campaign_check_summary_json // ""' "$signoff_summary_json")"
+    failure_stage="$(jq -r '.failure_stage // ""' "$signoff_summary_json")"
+    non_root_refresh_blocked="$(profile_signoff_non_root_refresh_blocked_01 "$signoff_summary_json")"
+    if ! [[ "$final_rc" =~ ^-?[0-9]+$ ]]; then
+      final_rc="0"
+    fi
+    case "$signoff_status" in
+      ok)
+        if [[ "$decision" == "GO" ]]; then
+          status="pass"
+          notes="profile compare campaign signoff decision is GO"
+        elif [[ "$decision" == "NO-GO" || "$decision" == "NO_GO" || "$decision" == "NOGO" ]]; then
+          status="warn"
+          notes="profile compare campaign signoff decision is NO-GO"
+        else
+          status="warn"
+          notes="profile compare campaign signoff status is ok but decision is ${decision:-unknown}"
+        fi
+        ;;
+      fail)
+        if [[ "$non_root_refresh_blocked" == "1" ]]; then
+          status="pending"
+          notes="profile compare campaign signoff refresh needs root for local stack (non-root host)"
+          next_command="sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 1 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1"
+        else
+          status="fail"
+          notes="profile compare campaign signoff failed (final_rc=${final_rc})"
+        fi
+        ;;
+      *)
+        status="warn"
+        notes="profile compare campaign signoff status is ${signoff_status:-unknown}"
+        ;;
+    esac
+  fi
+
+  jq -n \
+    --arg summary_json "$signoff_summary_json" \
+    --arg next_command "$next_command" \
+    --arg status "$status" \
+    --arg notes "$notes" \
+    --arg decision "$decision" \
+    --arg recommended_profile "$recommended_profile" \
+    --arg trend_source "$trend_source" \
+    --arg final_rc "$final_rc" \
+    --arg failure_stage "$failure_stage" \
+    --arg non_root_refresh_blocked "$non_root_refresh_blocked" \
+    --arg campaign_summary_json "$campaign_summary_json" \
+    --arg campaign_report_md "$campaign_report_md" \
+    --arg campaign_check_summary_json "$campaign_check_summary_json" \
+    --argjson available "$available" \
+    --argjson valid_json "$valid_json" \
+    '{
+      enabled: true,
+      summary_json: $summary_json,
+      available: ($available == 1),
+      valid_json: ($valid_json == 1),
+      status: $status,
+      notes: $notes,
+      decision: $decision,
+      recommended_profile: $recommended_profile,
+      trend_source: $trend_source,
+      final_rc: ($final_rc | tonumber),
+      failure_stage: $failure_stage,
+      non_root_refresh_blocked: ($non_root_refresh_blocked == "1"),
+      next_command: $next_command,
+      artifacts: {
+        campaign_summary_json: $campaign_summary_json,
+        campaign_report_md: $campaign_report_md,
+        campaign_check_summary_json: $campaign_check_summary_json
+      }
+    }'
+}
+
 show_json="0"
 base_port="${EASY_NODE_DOCTOR_WG_ONLY_BASE_PORT:-19280}"
 client_iface="${EASY_NODE_DOCTOR_CLIENT_IFACE:-wgcstack0}"
 exit_iface="${EASY_NODE_DOCTOR_EXIT_IFACE:-wgestack0}"
 vpn_iface="${EASY_NODE_DOCTOR_VPN_IFACE:-wgvpn0}"
+profile_compare_signoff_summary_json="${MANUAL_VALIDATION_PROFILE_COMPARE_SIGNOFF_SUMMARY_JSON:-$ROOT_DIR/.easy-node-logs/profile_compare_campaign_signoff_summary.json}"
 overlay_check_id=""
 overlay_status=""
 overlay_notes=""
@@ -420,6 +644,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --vpn-iface)
       vpn_iface="${2:-}"
+      shift 2
+      ;;
+    --profile-compare-signoff-summary-json)
+      profile_compare_signoff_summary_json="${2:-}"
       shift 2
       ;;
     --overlay-check-id)
@@ -470,6 +698,11 @@ if ! [[ "$base_port" =~ ^[0-9]+$ ]]; then
 fi
 if [[ -z "$client_iface" || -z "$exit_iface" || -z "$vpn_iface" ]]; then
   echo "--client-iface, --exit-iface, and --vpn-iface must be non-empty"
+  exit 2
+fi
+profile_compare_signoff_summary_json="$(abs_path "$profile_compare_signoff_summary_json")"
+if [[ -z "$profile_compare_signoff_summary_json" ]]; then
+  echo "--profile-compare-signoff-summary-json must be non-empty"
   exit 2
 fi
 overlay_check_id="$(trim "$overlay_check_id")"
@@ -560,23 +793,31 @@ case "$runtime_status" in
 esac
 runtime_findings_total="$(printf '%s\n' "$runtime_doctor_json" | jq -r '.summary.findings_total // 0')"
 runtime_notes="$(printf '%s\n' "$runtime_doctor_json" | jq -r '[.findings[].code] | join(", ")')"
+runtime_remediations_json="$(printf '%s\n' "$runtime_doctor_json" | jq -c '[.findings[]?.remediation | select(type == "string" and length > 0)] | unique')"
+runtime_summary="runtime-doctor findings=${runtime_findings_total}"
+runtime_fix_record_command="sudo ./scripts/easy_node.sh runtime-fix-record --prune-wg-only-dir 1 --print-summary-json 1"
+runtime_hygiene_check_json="$(build_runtime_hygiene_check_json)"
 wg_only_check_json="$(build_recorded_check_json "wg_only_stack_selftest" "WG-only stack selftest" "sudo ./scripts/easy_node.sh wg-only-stack-selftest-record --strict-beta 1 --base-port 19280 --client-iface wgcstack0 --exit-iface wgestack0 --print-summary-json 1")"
-machine_c_check_json="$(build_recorded_check_json "machine_c_vpn_smoke" "Machine C VPN smoke test" "sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country")"
+docker_rehearsal_check_json="$(build_recorded_check_json "three_machine_docker_readiness" "One-host docker 3-machine rehearsal" "./scripts/easy_node.sh three-machine-docker-readiness-record --path-profile balanced --soak-rounds 6 --soak-pause-sec 3 --print-summary-json 1")"
+real_wg_privileged_check_json="$(build_recorded_check_json "real_wg_privileged_matrix" "Linux root real-WG privileged matrix" "sudo ./scripts/easy_node.sh real-wg-privileged-matrix-record --print-summary-json 1")"
+machine_c_check_json="$(build_recorded_check_json "machine_c_vpn_smoke" "Machine C VPN smoke test" "sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --path-profile balanced --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country")"
 three_machine_check_json="$(build_recorded_check_json "three_machine_prod_signoff" "True 3-machine production signoff" "sudo ./scripts/easy_node.sh three-machine-prod-signoff --bundle-dir .easy-node-logs/prod_gate_bundle --directory-a https://A_HOST:8081 --directory-b https://B_HOST:8081 --issuer-url https://A_HOST:8082 --entry-url https://A_HOST:8083 --exit-url https://A_HOST:8084 --pre-real-host-readiness 1 --runtime-fix 1 --print-summary-json 1")"
+profile_default_gate_json="$(build_profile_default_gate_json "$profile_compare_signoff_summary_json")"
 
 combined_json="$(
   jq -n \
     --arg state_dir "$state_dir" \
     --arg status_json "$status_json" \
-    --arg runtime_status "$runtime_check_status" \
-    --arg runtime_notes "$runtime_notes" \
-    --arg runtime_summary "runtime-doctor findings=${runtime_findings_total}" \
     --arg runtime_doctor_json_rc "$runtime_doctor_rc" \
     --argjson recorded "$recorded_json" \
     --argjson runtime_doctor "$runtime_doctor_json" \
+    --argjson runtime_hygiene_check "$runtime_hygiene_check_json" \
     --argjson wg_only_check "$wg_only_check_json" \
+    --argjson docker_rehearsal_check "$docker_rehearsal_check_json" \
+    --argjson real_wg_privileged_check "$real_wg_privileged_check_json" \
     --argjson machine_c_check "$machine_c_check_json" \
     --argjson three_machine_check "$three_machine_check_json" \
+    --argjson profile_default_gate "$profile_default_gate_json" \
     '
       {
         version: 1,
@@ -586,35 +827,10 @@ combined_json="$(
         runtime_doctor_exit_code: ($runtime_doctor_json_rc | tonumber),
         runtime_doctor: $runtime_doctor,
         checks: [
-          {
-            check_id: "runtime_hygiene",
-            label: "Runtime hygiene doctor",
-            status: $runtime_status,
-            notes: ([$runtime_summary, $runtime_notes] | map(select(length > 0)) | join("; ")),
-            command: "./scripts/easy_node.sh runtime-doctor --show-json 1",
-            artifacts: [],
-            recorded_at_utc: ($runtime_doctor.generated_at_utc // ""),
-            receipt_json: "",
-            incident_handoff: {
-              available: false,
-              enabled: false,
-              status: "",
-              source_summary_json: {path: "", exists: false, valid_json: false},
-              receipt_json: {path: "", exists: false, valid_json: false},
-              bundle_dir: {path: "", exists: false},
-              bundle_tar: {path: "", exists: false},
-              summary_json: {path: "", exists: false, valid_json: false},
-              report_md: {path: "", exists: false},
-              attachment_manifest: {path: "", exists: false},
-              attachment_skipped: {path: "", exists: false},
-              attachment_count: 0,
-              readiness_report_summary_attachment: {source_path: "", source_exists: false, stored_path: "", bundle_path: "", exists: false, valid_json: false},
-              readiness_report_md_attachment: {source_path: "", source_exists: false, stored_path: "", bundle_path: "", exists: false, valid_json: false},
-              readiness_report_log_attachment: {source_path: "", source_exists: false, stored_path: "", bundle_path: "", exists: false, valid_json: false},
-              log: {path: "", exists: false}
-            }
-          },
+          $runtime_hygiene_check,
           $wg_only_check,
+          $docker_rehearsal_check,
+          $real_wg_privileged_check,
           $machine_c_check,
           $three_machine_check
         ]
@@ -625,9 +841,21 @@ combined_json="$(
           warn_checks: ([.checks[] | select(.status == "warn")] | length),
           fail_checks: ([.checks[] | select(.status == "fail")] | length),
           pending_checks: ([.checks[] | select(.status == "pending")] | length),
-          next_action_check_id: (([.checks[] | select(.status != "pass" and .status != "skip") | .check_id][0]) // ""),
-          next_action_label: (([.checks[] | select(.status != "pass" and .status != "skip") | .label][0]) // ""),
-          next_action_command: (([.checks[] | select(.status != "pass" and .status != "skip") | .command][0]) // ""),
+          optional_check_ids: ["three_machine_docker_readiness", "real_wg_privileged_matrix"],
+          blocking_check_ids: ["runtime_hygiene", "wg_only_stack_selftest", "machine_c_vpn_smoke", "three_machine_prod_signoff"],
+          next_action_check_id: (([.checks[] | select(.check_id != "three_machine_docker_readiness" and .check_id != "real_wg_privileged_matrix" and .status != "pass" and .status != "skip") | .check_id][0]) // ""),
+          next_action_label: (([.checks[] | select(.check_id != "three_machine_docker_readiness" and .check_id != "real_wg_privileged_matrix" and .status != "pass" and .status != "skip") | .label][0]) // ""),
+          next_action_command: (([
+            .checks[]
+            | select(.check_id != "three_machine_docker_readiness" and .check_id != "real_wg_privileged_matrix" and .status != "pass" and .status != "skip")
+            | (.remediation_command // .command // "")
+            | select(length > 0)
+          ][0]) // ""),
+          next_action_remediations: (([
+            .checks[]
+            | select(.check_id != "three_machine_docker_readiness" and .check_id != "real_wg_privileged_matrix" and .status != "pass" and .status != "skip")
+            | (.remediations // [])
+          ][0]) // []),
           latest_failed_incident: (([
             .checks[]
             | select(.status == "fail" and (.incident_handoff.available // false))
@@ -665,6 +893,88 @@ combined_json="$(
           }
           | .ready = ((.blockers | length) == 0)
         )
+      | .summary.local_gate = (
+          {
+            check_ids: ["runtime_hygiene", "wg_only_stack_selftest"],
+            blockers: (.summary.pre_machine_c_gate.blockers // []),
+            next_check_id: (
+              if ((.summary.pre_machine_c_gate.blockers // []) | length) > 0 then
+                (((.summary.pre_machine_c_gate.blockers // [])[0]) // "")
+              else
+                ""
+              end
+            )
+          }
+          | .ready = ((.blockers | length) == 0)
+        )
+      | .summary.real_host_gate = (
+          {
+            check_ids: ["machine_c_vpn_smoke", "three_machine_prod_signoff"],
+            blockers: (
+              [
+                .checks[]
+                | select((.check_id == "machine_c_vpn_smoke" or .check_id == "three_machine_prod_signoff") and (.status != "pass" and .status != "skip"))
+                | .check_id
+              ]
+            ),
+            next_check_id: (
+              ([
+                .checks[]
+                | select((.check_id == "machine_c_vpn_smoke" or .check_id == "three_machine_prod_signoff") and (.status != "pass" and .status != "skip"))
+                | .check_id
+              ][0]) // ""
+            ),
+            next_label: (
+              ([
+                .checks[]
+                | select((.check_id == "machine_c_vpn_smoke" or .check_id == "three_machine_prod_signoff") and (.status != "pass" and .status != "skip"))
+                | .label
+              ][0]) // ""
+            ),
+            next_command: (
+              ([
+                .checks[]
+                | select((.check_id == "machine_c_vpn_smoke" or .check_id == "three_machine_prod_signoff") and (.status != "pass" and .status != "skip"))
+                | .command
+              ][0]) // ""
+            )
+          }
+          | .ready = ((.blockers | length) == 0)
+        )
+      | .summary.profile_default_gate = $profile_default_gate
+      | .summary.profile_default_ready = ((.summary.profile_default_gate.status // "") == "pass")
+      | .summary.docker_rehearsal_gate = (
+          {
+            check_id: "three_machine_docker_readiness",
+            status: (([.checks[] | select(.check_id == "three_machine_docker_readiness") | .status][0]) // "pending"),
+            notes: (([.checks[] | select(.check_id == "three_machine_docker_readiness") | .notes][0]) // ""),
+            command: (([.checks[] | select(.check_id == "three_machine_docker_readiness") | .command][0]) // "")
+          }
+          | .ready = (.status == "pass" or .status == "skip")
+        )
+      | .summary.real_wg_privileged_gate = (
+          {
+            check_id: "real_wg_privileged_matrix",
+            status: (([.checks[] | select(.check_id == "real_wg_privileged_matrix") | .status][0]) // "pending"),
+            notes: (([.checks[] | select(.check_id == "real_wg_privileged_matrix") | .notes][0]) // ""),
+            command: (([.checks[] | select(.check_id == "real_wg_privileged_matrix") | .command][0]) // "")
+          }
+          | .ready = (.status == "pass" or .status == "skip")
+        )
+      | .summary.single_machine_ready = (.summary.local_gate.ready // false)
+      | .summary.roadmap_stage = (
+          if (.summary.local_gate.ready // false) | not then
+            "BLOCKED_LOCAL"
+          elif (.summary.real_host_gate.ready // false) then
+            "PRODUCTION_SIGNOFF_COMPLETE"
+          elif ((.summary.real_host_gate.blockers // []) | index("machine_c_vpn_smoke")) != null then
+            "READY_FOR_MACHINE_C_SMOKE"
+          elif ((.summary.real_host_gate.blockers // []) | index("three_machine_prod_signoff")) != null then
+            "READY_FOR_3_MACHINE_PROD_SIGNOFF"
+          else
+            "IN_PROGRESS"
+          end
+        )
     '
 )"
 
@@ -690,19 +1000,77 @@ printf '%s\n' "$combined_json" | jq -r '
 '
 next_action_check_id="$(printf '%s\n' "$combined_json" | jq -r '.summary.next_action_check_id // ""')"
 next_action_command="$(printf '%s\n' "$combined_json" | jq -r '.summary.next_action_command // ""')"
+next_action_remediations_json="$(printf '%s\n' "$combined_json" | jq -c '.summary.next_action_remediations // []')"
 if [[ -n "$next_action_check_id" ]]; then
   echo "[manual-validation-status] next_action_check_id=$next_action_check_id"
 fi
 if [[ -n "$next_action_command" ]]; then
   echo "[manual-validation-status] next_action_command=$next_action_command"
 fi
+printf '%s\n' "$next_action_remediations_json" | jq -r '.[]? | "[manual-validation-status] next_action_remediation=\(.)"'
 machine_c_smoke_ready="$(printf '%s\n' "$combined_json" | jq -r '.summary.pre_machine_c_gate.ready // false')"
 machine_c_smoke_blockers="$(printf '%s\n' "$combined_json" | jq -r '(.summary.pre_machine_c_gate.blockers // []) | if length == 0 then "none" else join(",") end')"
 machine_c_smoke_next_command="$(printf '%s\n' "$combined_json" | jq -r '.summary.pre_machine_c_gate.next_command // ""')"
+single_machine_ready="$(printf '%s\n' "$combined_json" | jq -r '.summary.single_machine_ready // false')"
+roadmap_stage="$(printf '%s\n' "$combined_json" | jq -r '.summary.roadmap_stage // ""')"
+real_host_gate_ready="$(printf '%s\n' "$combined_json" | jq -r '.summary.real_host_gate.ready // false')"
+real_host_gate_blockers="$(printf '%s\n' "$combined_json" | jq -r '(.summary.real_host_gate.blockers // []) | if length == 0 then "none" else join(",") end')"
+real_host_gate_next_command="$(printf '%s\n' "$combined_json" | jq -r '.summary.real_host_gate.next_command // ""')"
+profile_default_gate_status="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.status // ""')"
+profile_default_gate_available="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.available // false')"
+profile_default_gate_decision="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.decision // ""')"
+profile_default_gate_recommended_profile="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.recommended_profile // ""')"
+profile_default_gate_summary_json="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.summary_json // ""')"
+profile_default_gate_next_command="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.next_command // ""')"
+docker_rehearsal_status="$(printf '%s\n' "$combined_json" | jq -r '.summary.docker_rehearsal_gate.status // ""')"
+docker_rehearsal_ready="$(printf '%s\n' "$combined_json" | jq -r '.summary.docker_rehearsal_gate.ready // false')"
+docker_rehearsal_command="$(printf '%s\n' "$combined_json" | jq -r '.summary.docker_rehearsal_gate.command // ""')"
+real_wg_privileged_status="$(printf '%s\n' "$combined_json" | jq -r '.summary.real_wg_privileged_gate.status // ""')"
+real_wg_privileged_ready="$(printf '%s\n' "$combined_json" | jq -r '.summary.real_wg_privileged_gate.ready // false')"
+real_wg_privileged_command="$(printf '%s\n' "$combined_json" | jq -r '.summary.real_wg_privileged_gate.command // ""')"
 echo "[manual-validation-status] machine_c_smoke_ready=$machine_c_smoke_ready"
 echo "[manual-validation-status] machine_c_smoke_blockers=$machine_c_smoke_blockers"
 if [[ -n "$machine_c_smoke_next_command" ]]; then
   echo "[manual-validation-status] machine_c_smoke_next_command=$machine_c_smoke_next_command"
+fi
+echo "[manual-validation-status] single_machine_ready=$single_machine_ready"
+if [[ -n "$roadmap_stage" ]]; then
+  echo "[manual-validation-status] roadmap_stage=$roadmap_stage"
+fi
+echo "[manual-validation-status] real_host_gate_ready=$real_host_gate_ready"
+echo "[manual-validation-status] real_host_gate_blockers=$real_host_gate_blockers"
+if [[ -n "$real_host_gate_next_command" ]]; then
+  echo "[manual-validation-status] real_host_gate_next_command=$real_host_gate_next_command"
+fi
+if [[ -n "$profile_default_gate_status" ]]; then
+  echo "[manual-validation-status] profile_default_gate_status=$profile_default_gate_status"
+fi
+echo "[manual-validation-status] profile_default_gate_available=$profile_default_gate_available"
+if [[ -n "$profile_default_gate_decision" ]]; then
+  echo "[manual-validation-status] profile_default_gate_decision=$profile_default_gate_decision"
+fi
+if [[ -n "$profile_default_gate_recommended_profile" ]]; then
+  echo "[manual-validation-status] profile_default_gate_recommended_profile=$profile_default_gate_recommended_profile"
+fi
+if [[ -n "$profile_default_gate_summary_json" ]]; then
+  echo "[manual-validation-status] profile_default_gate_summary_json=$profile_default_gate_summary_json"
+fi
+if [[ -n "$profile_default_gate_next_command" ]]; then
+  echo "[manual-validation-status] profile_default_gate_next_command=$profile_default_gate_next_command"
+fi
+if [[ -n "$docker_rehearsal_status" ]]; then
+  echo "[manual-validation-status] docker_rehearsal_status=$docker_rehearsal_status"
+fi
+echo "[manual-validation-status] docker_rehearsal_ready=$docker_rehearsal_ready"
+if [[ -n "$docker_rehearsal_command" ]]; then
+  echo "[manual-validation-status] docker_rehearsal_command=$docker_rehearsal_command"
+fi
+if [[ -n "$real_wg_privileged_status" ]]; then
+  echo "[manual-validation-status] real_wg_privileged_status=$real_wg_privileged_status"
+fi
+echo "[manual-validation-status] real_wg_privileged_ready=$real_wg_privileged_ready"
+if [[ -n "$real_wg_privileged_command" ]]; then
+  echo "[manual-validation-status] real_wg_privileged_command=$real_wg_privileged_command"
 fi
 latest_failed_incident_check_id="$(printf '%s\n' "$combined_json" | jq -r '.summary.latest_failed_incident.check_id // ""')"
 latest_failed_incident_summary_json="$(printf '%s\n' "$combined_json" | jq -r '.summary.latest_failed_incident.summary_json.path // ""')"

@@ -25,7 +25,7 @@ Usage:
     [--subject ID | --anon-cred TOKEN] \
     [--min-sources N] \
     [--min-operators N] \
-    [--path-profile fast|balanced|privacy] \
+    [--path-profile speed|balanced|private] \
     [--distinct-operators [0|1]] \
     [--distinct-countries [0|1]] \
     [--exit-country CC] \
@@ -58,6 +58,8 @@ Usage:
     [--runtime-doctor [0|1]] \
     [--runtime-fix [0|1]] \
     [--runtime-fix-prune-wg-only-dir [0|1]] \
+    [--trust-reset-on-key-mismatch [0|1]] \
+    [--trust-reset-scope scoped|global] \
     [--runtime-base-port N] \
     [--runtime-client-iface IFACE] \
     [--runtime-exit-iface IFACE] \
@@ -77,6 +79,10 @@ Usage:
 Purpose:
   Run a real host client-VPN smoke flow end-to-end and record the result into
   manual-validation status automatically.
+
+Default behavior:
+  If you do not supply a path profile or expert path-selection overrides, this
+  wrapper defaults to the public `balanced` path profile.
 USAGE
 }
 
@@ -185,6 +191,8 @@ pre_real_host_readiness_summary_json=""
 runtime_doctor_enabled="1"
 runtime_fix_on_non_ok="0"
 runtime_fix_prune_wg_only_dir="1"
+trust_reset_on_key_mismatch="0"
+trust_reset_scope=""
 runtime_base_port="${EASY_NODE_DOCTOR_WG_ONLY_BASE_PORT:-19280}"
 runtime_client_iface="${EASY_NODE_DOCTOR_CLIENT_IFACE:-wgcstack0}"
 runtime_exit_iface="${EASY_NODE_DOCTOR_EXIT_IFACE:-wgestack0}"
@@ -312,6 +320,16 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --trust-reset-on-key-mismatch)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        trust_reset_on_key_mismatch="${2:-}"
+        shift 2
+      else
+        trust_reset_on_key_mismatch="1"
+        shift
+      fi
+      ;;
+    --trust-reset-scope) trust_reset_scope="${2:-}"; shift 2 ;;
     --runtime-base-port) runtime_base_port="${2:-}"; shift 2 ;;
     --runtime-client-iface) runtime_client_iface="${2:-}"; shift 2 ;;
     --runtime-exit-iface) runtime_exit_iface="${2:-}"; shift 2 ;;
@@ -375,6 +393,7 @@ bool_arg_or_die "--pre-real-host-readiness" "$pre_real_host_readiness_enabled"
 bool_arg_or_die "--runtime-doctor" "$runtime_doctor_enabled"
 bool_arg_or_die "--runtime-fix" "$runtime_fix_on_non_ok"
 bool_arg_or_die "--runtime-fix-prune-wg-only-dir" "$runtime_fix_prune_wg_only_dir"
+bool_arg_or_die "--trust-reset-on-key-mismatch" "$trust_reset_on_key_mismatch"
 bool_arg_or_die "--incident-snapshot-on-fail" "$incident_snapshot_on_fail"
 bool_arg_or_die "--manual-validation-report" "$manual_validation_report_enabled"
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
@@ -398,8 +417,18 @@ if [[ "$runtime_vpn_iface_explicit" == "1" && -z "$runtime_vpn_iface" ]]; then
   echo "--runtime-vpn-iface must be non-empty"
   exit 2
 fi
+if [[ -n "$trust_reset_scope" ]]; then
+  trust_reset_scope="$(trim "$trust_reset_scope" | tr '[:upper:]' '[:lower:]')"
+  if [[ "$trust_reset_scope" != "scoped" && "$trust_reset_scope" != "global" ]]; then
+    echo "--trust-reset-scope must be one of: scoped, global"
+    exit 2
+  fi
+fi
 if [[ "$runtime_vpn_iface_explicit" != "1" && -n "$interface_name" ]]; then
   runtime_vpn_iface="$interface_name"
+fi
+if [[ -z "$path_profile" && -z "$distinct_operators" && -z "$distinct_countries" && -z "$locality_soft_bias" && -z "$country_bias" && -z "$region_bias" && -z "$region_prefix_bias" ]]; then
+  path_profile="balanced"
 fi
 
 log_dir="$(prepare_log_dir)"
@@ -428,6 +457,8 @@ runtime_fix_log="$log_dir/client_vpn_smoke_${timestamp}_runtime_fix.log"
 runtime_fix_json="$log_dir/client_vpn_smoke_${timestamp}_runtime_fix.json"
 runtime_doctor_after_log="$log_dir/client_vpn_smoke_${timestamp}_runtime_doctor_after.log"
 runtime_doctor_after_json="$log_dir/client_vpn_smoke_${timestamp}_runtime_doctor_after.json"
+trust_reset_log="$log_dir/client_vpn_smoke_${timestamp}_trust_reset.log"
+up_retry_log="$log_dir/client_vpn_smoke_${timestamp}_up_retry.log"
 incident_snapshot_log="$log_dir/client_vpn_smoke_${timestamp}_incident_snapshot.log"
 incident_snapshot_refresh_log="$log_dir/client_vpn_smoke_${timestamp}_incident_snapshot_refresh.log"
 manual_validation_report_log="$log_dir/client_vpn_smoke_${timestamp}_manual_validation_report.log"
@@ -542,6 +573,12 @@ runtime_fix_attempted="0"
 runtime_fix_after_status=""
 runtime_fix_actions_taken="0"
 runtime_fix_actions_failed="0"
+trust_reset_attempted="0"
+trust_reset_status="skipped"
+trust_reset_reason=""
+up_retry_attempted="0"
+up_retry_succeeded="0"
+trust_reset_failure_note=""
 smoke_status="fail"
 notes=""
 record_notes=""
@@ -621,6 +658,63 @@ run_and_capture() {
     rm -f "$tmp"
     return "$rc"
   fi
+}
+
+attempt_up_retry_with_trust_reset() {
+  local failed_up_output="$1"
+  local trust_reset_output=""
+  local retry_up_output=""
+  local -a trust_reset_cmd=()
+
+  trust_reset_attempted="0"
+  trust_reset_status="skipped"
+  trust_reset_reason=""
+  up_retry_attempted="0"
+  up_retry_succeeded="0"
+  trust_reset_failure_note=""
+  rm -f "$trust_reset_log" "$up_retry_log" 2>/dev/null || true
+
+  if [[ "$trust_reset_on_key_mismatch" != "1" ]]; then
+    return 1
+  fi
+  if ! printf '%s\n' "$failed_up_output" | rg -q 'directory key is not trusted'; then
+    return 1
+  fi
+
+  trust_reset_attempted="1"
+  trust_reset_reason="directory key is not trusted"
+  trust_reset_cmd=("$easy_node_script" "client-vpn-trust-reset")
+  append_opt trust_reset_cmd "--directory-urls" "$directory_urls"
+  append_opt trust_reset_cmd "--bootstrap-directory" "$bootstrap_directory"
+  append_opt trust_reset_cmd "--discovery-wait-sec" "$discovery_wait_sec"
+  append_opt trust_reset_cmd "--trust-scope" "$trust_reset_scope"
+
+  stage="trust-reset"
+  if run_and_capture trust_reset_output "${trust_reset_cmd[@]}"; then
+    trust_reset_status="ok"
+  else
+    trust_reset_status="fail"
+    trust_reset_failure_note="client-vpn up failed and trust reset did not complete"
+  fi
+  persist_artifact_text "$trust_reset_log" "$trust_reset_output"
+  if [[ "$trust_reset_status" != "ok" ]]; then
+    return 1
+  fi
+
+  stage="up-retry"
+  up_retry_attempted="1"
+  if run_and_capture retry_up_output "${up_cmd[@]}"; then
+    up_retry_succeeded="1"
+    up_succeeded="1"
+  else
+    up_retry_succeeded="0"
+    trust_reset_failure_note="client-vpn up failed after trust reset retry"
+  fi
+  persist_artifact_text "$up_retry_log" "$retry_up_output"
+  if [[ "$up_retry_succeeded" != "1" ]]; then
+    return 1
+  fi
+  return 0
 }
 
 cleanup_down() {
@@ -812,6 +906,8 @@ run_incident_snapshot_on_fail() {
     "$runtime_fix_json"
     "$runtime_doctor_after_log"
     "$runtime_doctor_after_json"
+    "$trust_reset_log"
+    "$up_retry_log"
   )
   for artifact_path in "${incident_snapshot_attach_candidates[@]}"; do
     if [[ -f "$artifact_path" ]]; then
@@ -906,6 +1002,8 @@ refresh_manual_validation_report() {
     "$runtime_fix_json" \
     "$runtime_doctor_after_log" \
     "$runtime_doctor_after_json" \
+    "$trust_reset_log" \
+    "$up_retry_log" \
     "$incident_snapshot_log" \
     "$incident_snapshot_bundle_dir" \
     "$incident_snapshot_bundle_tar" \
@@ -1055,6 +1153,11 @@ write_summary_json() {
     --arg runtime_fix_after_status "$runtime_fix_after_status" \
     --arg runtime_fix_actions_taken "$runtime_fix_actions_taken" \
     --arg runtime_fix_actions_failed "$runtime_fix_actions_failed" \
+    --arg trust_reset_status "$trust_reset_status" \
+    --arg trust_reset_reason "$trust_reset_reason" \
+    --arg trust_reset_scope "$trust_reset_scope" \
+    --arg trust_reset_log "$trust_reset_log" \
+    --arg up_retry_log "$up_retry_log" \
     --arg runtime_doctor_before_log "$runtime_doctor_before_log" \
     --arg runtime_doctor_before_json "$runtime_doctor_before_json" \
     --arg runtime_fix_log "$runtime_fix_log" \
@@ -1087,6 +1190,10 @@ write_summary_json() {
     --argjson runtime_fix_on_non_ok "$runtime_fix_on_non_ok" \
     --argjson runtime_fix_attempted "$runtime_fix_attempted" \
     --argjson runtime_fix_prune_wg_only_dir "$runtime_fix_prune_wg_only_dir" \
+    --argjson trust_reset_on_key_mismatch "$trust_reset_on_key_mismatch" \
+    --argjson trust_reset_attempted "$trust_reset_attempted" \
+    --argjson up_retry_attempted "$up_retry_attempted" \
+    --argjson up_retry_succeeded "$up_retry_succeeded" \
     --argjson incident_snapshot_on_fail "$incident_snapshot_on_fail" \
     --argjson manual_validation_report_enabled "$manual_validation_report_enabled" \
     '{
@@ -1127,6 +1234,19 @@ write_summary_json() {
           fix_json: (if ($runtime_fix_json | length) > 0 then $runtime_fix_json else "" end),
           doctor_after_log: (if ($runtime_doctor_after_log | length) > 0 then $runtime_doctor_after_log else "" end),
           doctor_after_json: (if ($runtime_doctor_after_json | length) > 0 then $runtime_doctor_after_json else "" end)
+        }
+      },
+      trust_reset: {
+        enabled_on_key_mismatch: ($trust_reset_on_key_mismatch == 1),
+        scope: (if ($trust_reset_scope | length) > 0 then $trust_reset_scope else "" end),
+        attempted: ($trust_reset_attempted == 1),
+        status: $trust_reset_status,
+        reason: $trust_reset_reason,
+        retry_attempted: ($up_retry_attempted == 1),
+        retry_succeeded: ($up_retry_succeeded == 1),
+        artifacts: {
+          trust_reset_log: (if ($trust_reset_log | length) > 0 then $trust_reset_log else "" end),
+          up_retry_log: (if ($up_retry_log | length) > 0 then $up_retry_log else "" end)
         }
       },
       outputs: {
@@ -1204,6 +1324,8 @@ finish_and_record() {
       "$runtime_fix_json" \
       "$runtime_doctor_after_log" \
       "$runtime_doctor_after_json" \
+      "$trust_reset_log" \
+      "$up_retry_log" \
       "$incident_snapshot_log" \
       "$incident_snapshot_bundle_dir" \
       "$incident_snapshot_bundle_tar" \
@@ -1255,9 +1377,11 @@ fi
 stage="up"
 up_output=""
 if ! run_and_capture up_output "${up_cmd[@]}"; then
-  result_stage="$stage"
-  finish_and_record "fail" "client-vpn up failed"
-  exit 1
+  if ! attempt_up_retry_with_trust_reset "$up_output"; then
+    result_stage="$stage"
+    finish_and_record "fail" "${trust_reset_failure_note:-client-vpn up failed}"
+    exit 1
+  fi
 fi
 up_succeeded="1"
 

@@ -470,12 +470,12 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ ! -x "$CAMPAIGN_SUMMARY_SCRIPT" ]]; then
-  echo "missing executable campaign summary script: $CAMPAIGN_SUMMARY_SCRIPT"
+if [[ ! -r "$CAMPAIGN_SUMMARY_SCRIPT" ]]; then
+  echo "missing readable campaign summary script: $CAMPAIGN_SUMMARY_SCRIPT"
   exit 2
 fi
-if [[ ! -x "$CAMPAIGN_CHECK_SCRIPT" ]]; then
-  echo "missing executable campaign check script: $CAMPAIGN_CHECK_SCRIPT"
+if [[ ! -r "$CAMPAIGN_CHECK_SCRIPT" ]]; then
+  echo "missing readable campaign check script: $CAMPAIGN_CHECK_SCRIPT"
   exit 2
 fi
 
@@ -625,7 +625,7 @@ if [[ "$refresh_summary" == "1" ]]; then
   summary_stage_attempted=1
   echo "prod-pilot-cohort-campaign-signoff: stage=campaign-summary"
   set +e
-  "$CAMPAIGN_SUMMARY_SCRIPT" "${summary_args[@]}"
+  bash "$CAMPAIGN_SUMMARY_SCRIPT" "${summary_args[@]}"
   summary_stage_rc=$?
   set -e
   if [[ "$summary_stage_rc" -ne 0 ]]; then
@@ -639,7 +639,7 @@ if [[ "$status" == "ok" ]]; then
   check_stage_attempted=1
   echo "prod-pilot-cohort-campaign-signoff: stage=campaign-check"
   set +e
-  "$CAMPAIGN_CHECK_SCRIPT" "${check_args[@]}"
+  bash "$CAMPAIGN_CHECK_SCRIPT" "${check_args[@]}"
   check_stage_rc=$?
   set -e
   if [[ "$check_stage_rc" -ne 0 ]]; then

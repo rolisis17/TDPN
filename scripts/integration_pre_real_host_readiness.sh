@@ -48,42 +48,48 @@ write_file_if_requested() {
 }
 
 case "$cmd" in
-  runtime-fix)
+  runtime-fix-record)
+    summary_payload='{
+  "version": 1,
+  "status": "pass",
+  "rc": 0,
+  "notes": "Runtime hygiene clean after runtime-fix",
+  "runtime_fix": {
+    "after_status": "OK",
+    "actions_taken_count": 1,
+    "actions_failed_count": 0
+  },
+  "manual_validation_report": {
+    "status": "ok",
+    "readiness_status": "NOT_READY",
+    "next_action_check_id": "machine_c_vpn_smoke"
+  }
+}'
     if [[ "$MODE" == "runtime-fail" ]]; then
-      cat <<'OUT'
-[runtime-fix] after_status=WARN findings=1 actions_taken=1 actions_skipped=0 actions_failed=0
-[runtime-fix] summary_json_payload:
-{
+      summary_payload='{
   "version": 1,
-  "doctor": {
-    "after": {
-      "status": "WARN"
-    }
+  "status": "warn",
+  "rc": 0,
+  "notes": "Runtime hygiene still has warnings after runtime-fix",
+  "runtime_fix": {
+    "after_status": "WARN",
+    "actions_taken_count": 1,
+    "actions_failed_count": 0
   },
-  "actions": {
-    "taken": ["wg-only cleanup"],
-    "failed": []
+  "manual_validation_report": {
+    "status": "ok",
+    "readiness_status": "NOT_READY",
+    "next_action_check_id": "machine_c_vpn_smoke"
   }
-}
-OUT
-      exit 1
+}'
     fi
-    cat <<'OUT'
-[runtime-fix] after_status=OK findings=0 actions_taken=1 actions_skipped=0 actions_failed=0
-[runtime-fix] summary_json_payload:
-{
-  "version": 1,
-  "doctor": {
-    "after": {
-      "status": "OK"
-    }
-  },
-  "actions": {
-    "taken": ["wg-only cleanup"],
-    "failed": []
-  }
-}
-OUT
+    write_file_if_requested "--summary-json" "$summary_payload" "$@"
+    echo "runtime-fix-record: status=$(printf '%s\n' "$summary_payload" | jq -r '.status')"
+    echo "summary_log: /tmp/fake-runtime-fix-record.log"
+    echo "summary_json: $(printf '%s\n' "$@" | awk 'prev == \"--summary-json\" {print; exit} {prev=$0}')"
+    if printf '%s\n' "$*" | rg -q -- '--print-summary-json( |$)'; then
+      printf '%s\n' "$summary_payload"
+    fi
     ;;
   wg-only-stack-selftest-record)
     summary_payload='{
@@ -128,7 +134,7 @@ OUT
   },
   "summary": {
     "next_action_check_id": "machine_c_vpn_smoke",
-    "next_action_command": "sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country"
+    "next_action_command": "sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --path-profile balanced --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country"
   }
 }'
     write_file_if_requested "--summary-json" "$summary_payload" "$@"
@@ -189,8 +195,8 @@ if ! jq -e --arg report_json "$SUCCESS_REPORT_JSON" --arg report_md "$SUCCESS_RE
   cat "$SUCCESS_SUMMARY_JSON"
   exit 1
 fi
-if ! rg -q '^runtime-fix .*--base-port 19290 .*--prune-wg-only-dir 1 .*--show-json 1' "$CAPTURE"; then
-  echo "pre-real-host readiness success run missing runtime-fix forwarding"
+if ! rg -q '^runtime-fix-record .*--base-port 19290 .*--prune-wg-only-dir 1 .*--record-result 1 .*--summary-json .*/pre_real_host_readiness_.*_runtime_fix\.json .*--print-summary-json 1' "$CAPTURE"; then
+  echo "pre-real-host readiness success run missing runtime-fix-record forwarding"
   cat "$CAPTURE"
   exit 1
 fi

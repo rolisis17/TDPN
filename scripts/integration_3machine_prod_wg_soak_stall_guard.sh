@@ -571,6 +571,12 @@ if [[ ! -f "$STRICT_REHEARSAL_ARGS_FILE" ]] || ! rg -q -- '--client-inner-source
   cat "$OUT_REHEARSAL_WIRING"
   exit 1
 fi
+if [[ ! -f "$STRICT_REHEARSAL_ARGS_FILE" ]] || ! rg -q -- '--allow-synthetic-ingress 1' "$STRICT_REHEARSAL_ARGS_FILE"; then
+  echo "strict-ingress rehearsal did not forward --allow-synthetic-ingress 1 to validate script"
+  [[ -f "$STRICT_REHEARSAL_ARGS_FILE" ]] && cat "$STRICT_REHEARSAL_ARGS_FILE"
+  cat "$OUT_REHEARSAL_WIRING"
+  exit 1
+fi
 if ! rg -q 'class=strict_ingress_policy' "$OUT_REHEARSAL_WIRING"; then
   echo "strict-ingress rehearsal missing strict_ingress_policy classification"
   cat "$OUT_REHEARSAL_WIRING"

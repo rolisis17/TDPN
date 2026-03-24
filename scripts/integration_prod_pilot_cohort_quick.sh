@@ -86,7 +86,7 @@ FAKE_SIGNOFF_RC=0 \
   --run-report-json "$SUCCESS_RUN_REPORT" \
   --print-run-report 1 \
   --max-alert-severity WARN \
-  --show-json 1 >/tmp/integration_prod_pilot_cohort_quick_success.log 2>&1
+  --show-json 1 >${TMP_DIR}/integration_prod_pilot_cohort_quick_success.log 2>&1
 
 if ! rg -q 'cmd prod-pilot-cohort-runbook' "$CAPTURE"; then
   echo "expected runbook invocation not observed"
@@ -227,9 +227,9 @@ if ! jq -e --arg pre_summary_json "$SUCCESS_REPORTS/pre_real_host_readiness_summ
   cat "$SUCCESS_RUN_REPORT"
   exit 1
 fi
-if ! rg -q -- "\\[prod-pilot-cohort-quick] pre_real_host_readiness_summary_json=$SUCCESS_REPORTS/pre_real_host_readiness_summary.json" /tmp/integration_prod_pilot_cohort_quick_success.log; then
+if ! rg -q -- "\\[prod-pilot-cohort-quick] pre_real_host_readiness_summary_json=$SUCCESS_REPORTS/pre_real_host_readiness_summary.json" ${TMP_DIR}/integration_prod_pilot_cohort_quick_success.log; then
   echo "quick output missing pre-real-host readiness summary path"
-  cat /tmp/integration_prod_pilot_cohort_quick_success.log
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_success.log
   exit 1
 fi
 if ! jq -e '.config.bundle_outputs == false and .config.bundle_fail_close == false' "$SUCCESS_RUN_REPORT" >/dev/null; then
@@ -250,12 +250,12 @@ FAKE_SIGNOFF_RC=0 \
 ./scripts/prod_pilot_cohort_quick.sh \
   --reports-dir "$TMP_DIR/fail_with_summary" \
   --summary-json "$FAIL_SUMMARY" \
-  --run-report-json "$FAIL_RUN_REPORT" >/tmp/integration_prod_pilot_cohort_quick_fail_with_summary.log 2>&1
+  --run-report-json "$FAIL_RUN_REPORT" >${TMP_DIR}/integration_prod_pilot_cohort_quick_fail_with_summary.log 2>&1
 rc_with_summary=$?
 set -e
 if [[ "$rc_with_summary" -eq 0 ]]; then
   echo "expected non-zero rc when runbook fails with summary"
-  cat /tmp/integration_prod_pilot_cohort_quick_fail_with_summary.log
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_fail_with_summary.log
   exit 1
 fi
 
@@ -287,12 +287,12 @@ FAKE_SKIP_SUMMARY_CREATE=1 \
 ./scripts/prod_pilot_cohort_quick.sh \
   --reports-dir "$TMP_DIR/fail_no_summary" \
   --summary-json "$FAIL_NO_SUMMARY" \
-  --run-report-json "$FAIL_NO_SUMMARY_REPORT" >/tmp/integration_prod_pilot_cohort_quick_fail_no_summary.log 2>&1
+  --run-report-json "$FAIL_NO_SUMMARY_REPORT" >${TMP_DIR}/integration_prod_pilot_cohort_quick_fail_no_summary.log 2>&1
 rc_no_summary=$?
 set -e
 if [[ "$rc_no_summary" -eq 0 ]]; then
   echo "expected non-zero rc when runbook fails without summary"
-  cat /tmp/integration_prod_pilot_cohort_quick_fail_no_summary.log
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_fail_no_summary.log
   exit 1
 fi
 if rg -q 'cmd prod-pilot-cohort-signoff' "$CAPTURE3"; then
@@ -322,12 +322,12 @@ FAKE_SIGNOFF_RC=7 \
 ./scripts/prod_pilot_cohort_quick.sh \
   --reports-dir "$TMP_DIR/signoff_fail" \
   --summary-json "$SIGNOFF_FAIL_SUMMARY" \
-  --run-report-json "$SIGNOFF_FAIL_REPORT" >/tmp/integration_prod_pilot_cohort_quick_signoff_fail.log 2>&1
+  --run-report-json "$SIGNOFF_FAIL_REPORT" >${TMP_DIR}/integration_prod_pilot_cohort_quick_signoff_fail.log 2>&1
 rc_signoff_fail=$?
 set -e
 if [[ "$rc_signoff_fail" -eq 0 ]]; then
   echo "expected non-zero rc when signoff fails"
-  cat /tmp/integration_prod_pilot_cohort_quick_signoff_fail.log
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_signoff_fail.log
   exit 1
 fi
 if [[ ! -f "$SIGNOFF_FAIL_REPORT" ]]; then

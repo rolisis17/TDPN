@@ -12,6 +12,7 @@ Usage:
     [--client-iface IFACE] \
     [--exit-iface IFACE] \
     [--vpn-iface IFACE] \
+    [--profile-compare-signoff-summary-json PATH] \
     [--overlay-check-id CHECK_ID] \
     [--overlay-status pass|fail|warn|pending|skip] \
     [--overlay-notes TEXT] \
@@ -85,6 +86,7 @@ base_port="${EASY_NODE_DOCTOR_WG_ONLY_BASE_PORT:-19280}"
 client_iface="${EASY_NODE_DOCTOR_CLIENT_IFACE:-wgcstack0}"
 exit_iface="${EASY_NODE_DOCTOR_EXIT_IFACE:-wgestack0}"
 vpn_iface="${EASY_NODE_DOCTOR_VPN_IFACE:-wgvpn0}"
+profile_compare_signoff_summary_json="${MANUAL_VALIDATION_PROFILE_COMPARE_SIGNOFF_SUMMARY_JSON:-}"
 overlay_check_id=""
 overlay_status=""
 overlay_notes=""
@@ -112,6 +114,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --vpn-iface)
       vpn_iface="${2:-}"
+      shift 2
+      ;;
+    --profile-compare-signoff-summary-json)
+      profile_compare_signoff_summary_json="${2:-}"
       shift 2
       ;;
     --overlay-check-id)
@@ -197,6 +203,9 @@ if [[ -z "$client_iface" || -z "$exit_iface" || -z "$vpn_iface" ]]; then
   echo "--client-iface, --exit-iface, and --vpn-iface must be non-empty"
   exit 2
 fi
+if [[ -n "$profile_compare_signoff_summary_json" ]]; then
+  profile_compare_signoff_summary_json="$(abs_path "$profile_compare_signoff_summary_json")"
+fi
 
 status_script="${MANUAL_VALIDATION_STATUS_SCRIPT:-$ROOT_DIR/scripts/manual_validation_status.sh}"
 if [[ ! -x "$status_script" ]]; then
@@ -218,6 +227,9 @@ declare -a status_cmd=(
   --vpn-iface "$vpn_iface"
   --show-json 1
 )
+if [[ -n "$profile_compare_signoff_summary_json" ]]; then
+  status_cmd+=(--profile-compare-signoff-summary-json "$profile_compare_signoff_summary_json")
+fi
 if [[ -n "$overlay_check_id" ]]; then
   status_cmd+=(--overlay-check-id "$overlay_check_id" --overlay-status "$overlay_status")
   if [[ -n "$overlay_notes" ]]; then
@@ -277,9 +289,31 @@ summary_pending="$(printf '%s\n' "$report_json" | jq -r '.summary.pending_checks
 next_action_check_id="$(printf '%s\n' "$report_json" | jq -r '.summary.next_action_check_id // ""')"
 next_action_label="$(printf '%s\n' "$report_json" | jq -r '.summary.next_action_label // ""')"
 next_action_command="$(printf '%s\n' "$report_json" | jq -r '.summary.next_action_command // ""')"
+next_action_remediations_json="$(printf '%s\n' "$report_json" | jq -c '.summary.next_action_remediations // []')"
+next_action_remediations_csv="$(printf '%s\n' "$next_action_remediations_json" | jq -r 'if length == 0 then "" else join(" || ") end')"
 machine_c_smoke_ready="$(printf '%s\n' "$report_json" | jq -r '.summary.pre_machine_c_gate.ready // false')"
 machine_c_smoke_blockers="$(printf '%s\n' "$report_json" | jq -r '(.summary.pre_machine_c_gate.blockers // []) | if length == 0 then "none" else join(",") end')"
 machine_c_smoke_next_command="$(printf '%s\n' "$report_json" | jq -r '.summary.pre_machine_c_gate.next_command // ""')"
+single_machine_ready="$(printf '%s\n' "$report_json" | jq -r '.summary.single_machine_ready // false')"
+roadmap_stage="$(printf '%s\n' "$report_json" | jq -r '.summary.roadmap_stage // ""')"
+real_host_gate_ready="$(printf '%s\n' "$report_json" | jq -r '.summary.real_host_gate.ready // false')"
+real_host_gate_blockers="$(printf '%s\n' "$report_json" | jq -r '(.summary.real_host_gate.blockers // []) | if length == 0 then "none" else join(",") end')"
+real_host_gate_next_command="$(printf '%s\n' "$report_json" | jq -r '.summary.real_host_gate.next_command // ""')"
+profile_default_gate_status="$(printf '%s\n' "$report_json" | jq -r '.summary.profile_default_gate.status // ""')"
+profile_default_gate_available="$(printf '%s\n' "$report_json" | jq -r '.summary.profile_default_gate.available // false')"
+profile_default_gate_decision="$(printf '%s\n' "$report_json" | jq -r '.summary.profile_default_gate.decision // ""')"
+profile_default_gate_recommended_profile="$(printf '%s\n' "$report_json" | jq -r '.summary.profile_default_gate.recommended_profile // ""')"
+profile_default_gate_summary_json="$(printf '%s\n' "$report_json" | jq -r '.summary.profile_default_gate.summary_json // ""')"
+profile_default_gate_next_command="$(printf '%s\n' "$report_json" | jq -r '.summary.profile_default_gate.next_command // ""')"
+profile_default_gate_notes="$(printf '%s\n' "$report_json" | jq -r '.summary.profile_default_gate.notes // ""')"
+docker_rehearsal_status="$(printf '%s\n' "$report_json" | jq -r '.summary.docker_rehearsal_gate.status // ""')"
+docker_rehearsal_ready="$(printf '%s\n' "$report_json" | jq -r '.summary.docker_rehearsal_gate.ready // false')"
+docker_rehearsal_command="$(printf '%s\n' "$report_json" | jq -r '.summary.docker_rehearsal_gate.command // ""')"
+docker_rehearsal_notes="$(printf '%s\n' "$report_json" | jq -r '.summary.docker_rehearsal_gate.notes // ""')"
+real_wg_privileged_status="$(printf '%s\n' "$report_json" | jq -r '.summary.real_wg_privileged_gate.status // ""')"
+real_wg_privileged_ready="$(printf '%s\n' "$report_json" | jq -r '.summary.real_wg_privileged_gate.ready // false')"
+real_wg_privileged_command="$(printf '%s\n' "$report_json" | jq -r '.summary.real_wg_privileged_gate.command // ""')"
+real_wg_privileged_notes="$(printf '%s\n' "$report_json" | jq -r '.summary.real_wg_privileged_gate.notes // ""')"
 latest_failed_incident_check_id="$(printf '%s\n' "$report_json" | jq -r '.summary.latest_failed_incident.check_id // ""')"
 latest_failed_incident_summary_json="$(printf '%s\n' "$report_json" | jq -r '.summary.latest_failed_incident.summary_json.path // ""')"
 latest_failed_incident_report_md="$(printf '%s\n' "$report_json" | jq -r '.summary.latest_failed_incident.report_md.path // ""')"
@@ -330,16 +364,69 @@ incident_checks_md="$(printf '%s\n' "$report_json" | jq -r '
   printf -- '- Warnings: `%s`\n' "$summary_warn"
   printf -- '- Failed: `%s`\n' "$summary_fail"
   printf -- '- Pending: `%s`\n' "$summary_pending"
+  printf '\n## Roadmap Stage\n\n'
+  if [[ -n "$roadmap_stage" ]]; then
+    printf -- '- Stage: `%s`\n' "$roadmap_stage"
+  fi
+  printf -- '- Single-machine gate ready: `%s`\n' "$single_machine_ready"
+  printf -- '- Real-host gate ready: `%s`\n' "$real_host_gate_ready"
+  printf -- '- Real-host blockers: `%s`\n' "$real_host_gate_blockers"
+  if [[ -n "$real_host_gate_next_command" ]]; then
+    printf -- '- Next real-host command: `%s`\n' "$real_host_gate_next_command"
+  fi
   printf '\n## Pre-Machine-C Gate\n\n'
   printf -- '- Machine C smoke ready: `%s`\n' "$machine_c_smoke_ready"
   printf -- '- Blockers: `%s`\n' "$machine_c_smoke_blockers"
   if [[ -n "$machine_c_smoke_next_command" ]]; then
     printf -- '- Next machine-C smoke command: `%s`\n' "$machine_c_smoke_next_command"
   fi
+  printf '\n## Profile Default Gate\n\n'
+  if [[ -n "$profile_default_gate_status" ]]; then
+    printf -- '- Status: `%s`\n' "$profile_default_gate_status"
+  fi
+  printf -- '- Summary available: `%s`\n' "$profile_default_gate_available"
+  if [[ -n "$profile_default_gate_decision" ]]; then
+    printf -- '- Decision: `%s`\n' "$profile_default_gate_decision"
+  fi
+  if [[ -n "$profile_default_gate_recommended_profile" ]]; then
+    printf -- '- Recommended profile: `%s`\n' "$profile_default_gate_recommended_profile"
+  fi
+  if [[ -n "$profile_default_gate_notes" ]]; then
+    printf -- '- Notes: `%s`\n' "$profile_default_gate_notes"
+  fi
+  if [[ -n "$profile_default_gate_summary_json" ]]; then
+    printf -- '- Summary JSON: `%s`\n' "$profile_default_gate_summary_json"
+  fi
+  if [[ -n "$profile_default_gate_next_command" ]]; then
+    printf -- '- Next profile signoff command: `%s`\n' "$profile_default_gate_next_command"
+  fi
+  printf '\n## Docker Rehearsal (Optional)\n\n'
+  if [[ -n "$docker_rehearsal_status" ]]; then
+    printf -- '- Status: `%s`\n' "$docker_rehearsal_status"
+  fi
+  printf -- '- Ready: `%s`\n' "$docker_rehearsal_ready"
+  if [[ -n "$docker_rehearsal_notes" ]]; then
+    printf -- '- Notes: `%s`\n' "$docker_rehearsal_notes"
+  fi
+  if [[ -n "$docker_rehearsal_command" ]]; then
+    printf -- '- Command: `%s`\n' "$docker_rehearsal_command"
+  fi
+  printf '\n## Real-WG Matrix (Optional)\n\n'
+  if [[ -n "$real_wg_privileged_status" ]]; then
+    printf -- '- Status: `%s`\n' "$real_wg_privileged_status"
+  fi
+  printf -- '- Ready: `%s`\n' "$real_wg_privileged_ready"
+  if [[ -n "$real_wg_privileged_notes" ]]; then
+    printf -- '- Notes: `%s`\n' "$real_wg_privileged_notes"
+  fi
+  if [[ -n "$real_wg_privileged_command" ]]; then
+    printf -- '- Command: `%s`\n' "$real_wg_privileged_command"
+  fi
   printf '\n## Next Action\n\n'
   if [[ -n "$next_action_check_id" ]]; then
     printf -- '- Check: `%s` (`%s`)\n' "$next_action_label" "$next_action_check_id"
     printf -- '- Command: `%s`\n' "$next_action_command"
+    printf '%s\n' "$next_action_remediations_json" | jq -r '.[]? | "- Remediation: `\(.)`"'
   else
     printf -- '- None. Current readiness is `%s`.\n' "$readiness_status"
   fi
@@ -376,9 +463,51 @@ echo "[manual-validation-report] machine_c_smoke_blockers=$machine_c_smoke_block
 if [[ -n "$machine_c_smoke_next_command" ]]; then
   echo "[manual-validation-report] machine_c_smoke_next_command=$machine_c_smoke_next_command"
 fi
+echo "[manual-validation-report] single_machine_ready=$single_machine_ready"
+if [[ -n "$roadmap_stage" ]]; then
+  echo "[manual-validation-report] roadmap_stage=$roadmap_stage"
+fi
+echo "[manual-validation-report] real_host_gate_ready=$real_host_gate_ready"
+echo "[manual-validation-report] real_host_gate_blockers=$real_host_gate_blockers"
+if [[ -n "$real_host_gate_next_command" ]]; then
+  echo "[manual-validation-report] real_host_gate_next_command=$real_host_gate_next_command"
+fi
+if [[ -n "$profile_default_gate_status" ]]; then
+  echo "[manual-validation-report] profile_default_gate_status=$profile_default_gate_status"
+fi
+echo "[manual-validation-report] profile_default_gate_available=$profile_default_gate_available"
+if [[ -n "$profile_default_gate_decision" ]]; then
+  echo "[manual-validation-report] profile_default_gate_decision=$profile_default_gate_decision"
+fi
+if [[ -n "$profile_default_gate_recommended_profile" ]]; then
+  echo "[manual-validation-report] profile_default_gate_recommended_profile=$profile_default_gate_recommended_profile"
+fi
+if [[ -n "$profile_default_gate_summary_json" ]]; then
+  echo "[manual-validation-report] profile_default_gate_summary_json=$profile_default_gate_summary_json"
+fi
+if [[ -n "$profile_default_gate_next_command" ]]; then
+  echo "[manual-validation-report] profile_default_gate_next_command=$profile_default_gate_next_command"
+fi
+if [[ -n "$docker_rehearsal_status" ]]; then
+  echo "[manual-validation-report] docker_rehearsal_status=$docker_rehearsal_status"
+fi
+echo "[manual-validation-report] docker_rehearsal_ready=$docker_rehearsal_ready"
+if [[ -n "$docker_rehearsal_command" ]]; then
+  echo "[manual-validation-report] docker_rehearsal_command=$docker_rehearsal_command"
+fi
+if [[ -n "$real_wg_privileged_status" ]]; then
+  echo "[manual-validation-report] real_wg_privileged_status=$real_wg_privileged_status"
+fi
+echo "[manual-validation-report] real_wg_privileged_ready=$real_wg_privileged_ready"
+if [[ -n "$real_wg_privileged_command" ]]; then
+  echo "[manual-validation-report] real_wg_privileged_command=$real_wg_privileged_command"
+fi
 if [[ -n "$next_action_check_id" ]]; then
   echo "[manual-validation-report] next_action_check_id=$next_action_check_id"
   echo "[manual-validation-report] next_action_command=$next_action_command"
+fi
+if [[ -n "$next_action_remediations_csv" ]]; then
+  echo "[manual-validation-report] next_action_remediations=$next_action_remediations_csv"
 fi
 if [[ -n "$latest_failed_incident_check_id" ]]; then
   echo "[manual-validation-report] latest_failed_incident_check_id=$latest_failed_incident_check_id"

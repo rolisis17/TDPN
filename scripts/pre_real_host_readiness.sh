@@ -33,7 +33,7 @@ Usage:
 
 Purpose:
   Run the pre-machine-C readiness sweep in one command:
-    1) runtime-fix
+    1) runtime-fix-record
     2) wg-only-stack-selftest-record
     3) manual-validation-report refresh
 
@@ -146,7 +146,7 @@ append_existing_artifact() {
 
 default_machine_c_command() {
   local vpn_iface="$1"
-  printf 'sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --interface %s --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country' "$vpn_iface"
+  printf 'sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --path-profile balanced --interface %s --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country' "$vpn_iface"
 }
 
 easy_node_script="${PRE_REAL_HOST_READINESS_EASY_NODE_SCRIPT:-$ROOT_DIR/scripts/easy_node.sh}"
@@ -323,7 +323,7 @@ wg_only_log="$log_dir/pre_real_host_readiness_${timestamp}_wg_only_stack_selftes
 wg_only_summary_json="$log_dir/pre_real_host_readiness_${timestamp}_wg_only_stack_selftest_record.json"
 manual_validation_report_log="$log_dir/pre_real_host_readiness_${timestamp}_manual_validation_report.log"
 
-stage="runtime-fix"
+stage="runtime-fix-record"
 status="fail"
 result_stage="runtime_fix"
 notes=""
@@ -342,13 +342,17 @@ wg_only_notes=""
 
 runtime_fix_output=""
 runtime_fix_cmd=(
-  "$easy_node_script" runtime-fix
+  "$easy_node_script" runtime-fix-record
   --base-port "$base_port"
   --client-iface "$client_iface"
   --exit-iface "$exit_iface"
   --vpn-iface "$vpn_iface"
   --prune-wg-only-dir "$runtime_fix_prune_wg_only_dir"
-  --show-json 1
+  --record-result 1
+  --manual-validation-report-summary-json "$manual_validation_report_summary_json"
+  --manual-validation-report-md "$manual_validation_report_md"
+  --summary-json "$runtime_fix_json"
+  --print-summary-json 1
 )
 
 wg_only_cmd=(
@@ -395,13 +399,15 @@ if run_and_capture runtime_fix_output "${runtime_fix_cmd[@]}"; then
 else
   runtime_fix_rc=$?
 fi
-runtime_fix_json_payload="$(extract_json_payload "runtime-fix" "$runtime_fix_output")"
 persist_artifact_text "$runtime_fix_log" "$runtime_fix_output"
-persist_artifact_text "$runtime_fix_json" "$runtime_fix_json_payload"
+runtime_fix_json_payload=""
+if [[ -f "$runtime_fix_json" ]] && jq -e . "$runtime_fix_json" >/dev/null 2>&1; then
+  runtime_fix_json_payload="$(cat "$runtime_fix_json")"
+fi
 if [[ -n "$runtime_fix_json_payload" ]]; then
-  runtime_fix_after_status="$(printf '%s\n' "$runtime_fix_json_payload" | jq -r '.doctor.after.status // ""' 2>/dev/null || true)"
-  runtime_fix_actions_taken="$(printf '%s\n' "$runtime_fix_json_payload" | jq -r '(.actions.taken // []) | length' 2>/dev/null || printf '0')"
-  runtime_fix_actions_failed="$(printf '%s\n' "$runtime_fix_json_payload" | jq -r '(.actions.failed // []) | length' 2>/dev/null || printf '0')"
+  runtime_fix_after_status="$(printf '%s\n' "$runtime_fix_json_payload" | jq -r '.runtime_fix.after_status // ""' 2>/dev/null || true)"
+  runtime_fix_actions_taken="$(printf '%s\n' "$runtime_fix_json_payload" | jq -r '.runtime_fix.actions_taken_count // 0' 2>/dev/null || printf '0')"
+  runtime_fix_actions_failed="$(printf '%s\n' "$runtime_fix_json_payload" | jq -r '.runtime_fix.actions_failed_count // 0' 2>/dev/null || printf '0')"
 fi
 
 wg_only_output=""
@@ -474,7 +480,7 @@ elif [[ "$machine_c_smoke_ready" == "1" ]]; then
 elif [[ "$runtime_fix_rc" -ne 0 || "$runtime_fix_after_status" != "OK" ]]; then
   status="fail"
   result_stage="runtime_fix"
-  notes="runtime-fix did not clear runtime hygiene; machine-C smoke should stay blocked"
+  notes="runtime-fix-record did not clear runtime hygiene; machine-C smoke should stay blocked"
 else
   status="fail"
   result_stage="wg_only_stack_selftest"

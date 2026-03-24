@@ -69,12 +69,13 @@ Quick-mode artifact:
   - output now also prints the upstream `pre_real_host_readiness_summary_json` path when present, plus direct incident handoff paths when failed-round incident artifacts are available
 - aggregate quick trend with:
   - `./scripts/easy_node.sh prod-pilot-cohort-quick-trend --reports-dir <reports_dir> --summary-json <reports_dir>/prod_pilot_quick_trend.json`
-  - trend summary JSON now also carries latest failed incident handoff paths when available
+  - trend summary JSON now also carries latest failed incident handoff paths plus the upstream `pre_real_host_readiness_summary_json` pointer when available
 - classify quick alert severity with:
   - `./scripts/easy_node.sh prod-pilot-cohort-quick-alert --trend-summary-json <reports_dir>/prod_pilot_quick_trend.json --summary-json <reports_dir>/prod_pilot_quick_alert.json`
+  - alert JSON/output now also carries that same readiness pointer when the latest failed incident handoff exists
 - generate quick dashboard artifacts with:
   - `./scripts/easy_node.sh prod-pilot-cohort-quick-dashboard --reports-dir <reports_dir> --dashboard-md <reports_dir>/prod_pilot_quick_dashboard.md`
-  - dashboard markdown now also renders incident handoff paths when present
+  - dashboard markdown now also renders incident handoff paths plus the same readiness pointer when present
 - run one-command quick signoff gate with:
   - `./scripts/easy_node.sh prod-pilot-cohort-quick-signoff --run-report-json <reports_dir>/prod_pilot_cohort_quick_report.json --reports-dir <reports_dir> --max-alert-severity WARN`
   - generated signoff JSON now also carries incident handoff artifact paths and the upstream `pre_real_host_readiness_summary_json` path when present

@@ -16,11 +16,18 @@ annotated_tag="v0.0.0-int-ann-${uniq_suffix}"
 lightweight_tag="v0.0.0-int-lw-${uniq_suffix}"
 missing_tag="v0.0.0-int-missing-${uniq_suffix}"
 old_head_tag="v0.0.0-int-old-${uniq_suffix}"
+tmp_dir="$(mktemp -d)"
+missing_log="${tmp_dir}/missing.log"
+lightweight_log="${tmp_dir}/lightweight.log"
+annotated_log="${tmp_dir}/annotated.log"
+signature_log="${tmp_dir}/signature.log"
+head_mismatch_log="${tmp_dir}/head_mismatch.log"
 
 cleanup() {
   git tag -d "$annotated_tag" >/dev/null 2>&1 || true
   git tag -d "$lightweight_tag" >/dev/null 2>&1 || true
   git tag -d "$old_head_tag" >/dev/null 2>&1 || true
+  rm -rf "$tmp_dir"
 }
 trap cleanup EXIT
 
@@ -37,71 +44,71 @@ git_tag_annotated "$annotated_tag" "integration annotated tag" HEAD
 git tag "$lightweight_tag" HEAD
 
 set +e
-./scripts/release_verify_tag.sh --version "$missing_tag" >/tmp/integration_release_tag_verify_missing.log 2>&1
+./scripts/release_verify_tag.sh --version "$missing_tag" >"$missing_log" 2>&1
 missing_rc=$?
 set -e
 if [[ "$missing_rc" -eq 0 ]]; then
   echo "expected missing tag verification to fail"
-  cat /tmp/integration_release_tag_verify_missing.log
+  cat "$missing_log"
   exit 1
 fi
-if ! rg -q "tag not found" /tmp/integration_release_tag_verify_missing.log; then
+if ! rg -q "tag not found" "$missing_log"; then
   echo "missing expected missing-tag failure signal"
-  cat /tmp/integration_release_tag_verify_missing.log
+  cat "$missing_log"
   exit 1
 fi
 
 set +e
-./scripts/release_verify_tag.sh --version "$lightweight_tag" >/tmp/integration_release_tag_verify_lightweight.log 2>&1
+./scripts/release_verify_tag.sh --version "$lightweight_tag" >"$lightweight_log" 2>&1
 lw_rc=$?
 set -e
 if [[ "$lw_rc" -eq 0 ]]; then
   echo "expected lightweight tag verification to fail"
-  cat /tmp/integration_release_tag_verify_lightweight.log
+  cat "$lightweight_log"
   exit 1
 fi
-if ! rg -q "must be an annotated tag" /tmp/integration_release_tag_verify_lightweight.log; then
+if ! rg -q "must be an annotated tag" "$lightweight_log"; then
   echo "missing expected lightweight-tag failure signal"
-  cat /tmp/integration_release_tag_verify_lightweight.log
+  cat "$lightweight_log"
   exit 1
 fi
 
-./scripts/release_verify_tag.sh --version "$annotated_tag" --require-head-match 1 >/tmp/integration_release_tag_verify_annotated.log 2>&1
-if ! rg -q "ok" /tmp/integration_release_tag_verify_annotated.log; then
+./scripts/release_verify_tag.sh --version "$annotated_tag" --require-head-match 1 >"$annotated_log" 2>&1
+if ! rg -q "ok" "$annotated_log"; then
   echo "expected annotated tag verification to pass"
-  cat /tmp/integration_release_tag_verify_annotated.log
+  cat "$annotated_log"
   exit 1
 fi
 
 set +e
-./scripts/release_verify_tag.sh --version "$annotated_tag" --require-signature 1 >/tmp/integration_release_tag_verify_signature.log 2>&1
+./scripts/release_verify_tag.sh --version "$annotated_tag" --require-signature 1 >"$signature_log" 2>&1
 sig_rc=$?
 set -e
 if [[ "$sig_rc" -eq 0 ]]; then
   echo "expected signature verification to fail for unsigned annotated tag"
-  cat /tmp/integration_release_tag_verify_signature.log
+  cat "$signature_log"
   exit 1
 fi
-if ! rg -q "signature verification failed|No signature|not a signed tag|error" /tmp/integration_release_tag_verify_signature.log; then
+if ! rg -q "signature verification failed|No signature|not a signed tag|error" "$signature_log"; then
   echo "missing expected signed-tag failure signal"
-  cat /tmp/integration_release_tag_verify_signature.log
+  cat "$signature_log"
   exit 1
 fi
 
 if git rev-parse -q --verify HEAD~1 >/dev/null 2>&1; then
   git_tag_annotated "$old_head_tag" "integration old-head tag" HEAD~1
   set +e
-  ./scripts/release_verify_tag.sh --version "$old_head_tag" --require-head-match 1 >/tmp/integration_release_tag_verify_head_mismatch.log 2>&1
+  ./scripts/release_verify_tag.sh --version "$old_head_tag" --require-head-match 1 >"$head_mismatch_log" 2>&1
   head_mismatch_rc=$?
   set -e
   if [[ "$head_mismatch_rc" -eq 0 ]]; then
     echo "expected head-match enforcement to fail for tag on non-HEAD commit"
-    cat /tmp/integration_release_tag_verify_head_mismatch.log
+    cat "$head_mismatch_log"
     exit 1
   fi
-  if ! rg -q "current HEAD" /tmp/integration_release_tag_verify_head_mismatch.log; then
+  if ! rg -q "current HEAD" "$head_mismatch_log"; then
     echo "missing expected head-mismatch failure signal"
-    cat /tmp/integration_release_tag_verify_head_mismatch.log
+    cat "$head_mismatch_log"
     exit 1
   fi
 fi

@@ -30,6 +30,7 @@ RUN_B_INCIDENT_SUMMARY_JSON="$REPORTS_DIR/run_b/incident_snapshot/incident_summa
 RUN_B_INCIDENT_REPORT_MD="$REPORTS_DIR/run_b/incident_snapshot/incident_report.md"
 RUN_B_INCIDENT_ATTACH_MANIFEST="$REPORTS_DIR/run_b/incident_snapshot/attachments_manifest.json"
 RUN_B_INCIDENT_ATTACH_SKIPPED="$REPORTS_DIR/run_b/incident_snapshot/attachments_skipped.json"
+RUN_B_PRE_REAL_HOST_READINESS_SUMMARY_JSON="$REPORTS_DIR/run_b/pre_real_host_readiness_summary.json"
 
 cat >"$RUN_B_INCIDENT_RUN_REPORT" <<'EOF_RUN_B_INCIDENT_RR'
 {"status":"fail"}
@@ -47,6 +48,9 @@ EOF_RUN_B_INCIDENT_ATTACH_MANIFEST
 cat >"$RUN_B_INCIDENT_ATTACH_SKIPPED" <<'EOF_RUN_B_INCIDENT_ATTACH_SKIPPED'
 []
 EOF_RUN_B_INCIDENT_ATTACH_SKIPPED
+cat >"$RUN_B_PRE_REAL_HOST_READINESS_SUMMARY_JSON" <<'EOF_RUN_B_PRE_REAL_HOST_READINESS_SUMMARY_JSON'
+{"status":"ok","machine_c_smoke_gate":{"ready":true}}
+EOF_RUN_B_PRE_REAL_HOST_READINESS_SUMMARY_JSON
 
 cat >"$REPORTS_DIR/run_a/prod_pilot_cohort_summary.json" <<'EOF_SUM_A'
 {"status":"ok"}
@@ -98,7 +102,10 @@ cat >"$REPORTS_DIR/run_b/prod_pilot_cohort_quick_report.json" <<EOF_RUN_B
   "final_rc": 3,
   "runbook": {"rc": 0},
   "signoff": {"attempted": true, "rc": 3},
-  "artifacts": {"summary_json": "$REPORTS_DIR/run_b/prod_pilot_cohort_summary.json"}
+  "artifacts": {
+    "summary_json": "$REPORTS_DIR/run_b/prod_pilot_cohort_summary.json",
+    "pre_real_host_readiness_summary_json": "$RUN_B_PRE_REAL_HOST_READINESS_SUMMARY_JSON"
+  }
 }
 EOF_RUN_B
 
@@ -124,22 +131,22 @@ SUMMARY_JSON="$TMP_DIR/quick_trend_summary.json"
   --summary-json "$SUMMARY_JSON" \
   --print-summary-json 1 \
   --show-details 0 \
-  --show-top-reasons 3 >/tmp/integration_prod_pilot_cohort_quick_trend_baseline.log 2>&1
+  --show-top-reasons 3 >${TMP_DIR}/integration_prod_pilot_cohort_quick_trend_baseline.log 2>&1
 
-if ! rg -q '\[prod-pilot-cohort-quick-trend\] reports_total=3 go=2 no_go=1 go_rate_pct=66.67' /tmp/integration_prod_pilot_cohort_quick_trend_baseline.log; then
+if ! rg -q '\[prod-pilot-cohort-quick-trend\] reports_total=3 go=2 no_go=1 go_rate_pct=66.67' ${TMP_DIR}/integration_prod_pilot_cohort_quick_trend_baseline.log; then
   echo "expected baseline quick trend summary not found"
-  cat /tmp/integration_prod_pilot_cohort_quick_trend_baseline.log
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_trend_baseline.log
   exit 1
 fi
-if ! rg -q 'reason=signoff rc is non-zero' /tmp/integration_prod_pilot_cohort_quick_trend_baseline.log; then
+if ! rg -q 'reason=signoff rc is non-zero' ${TMP_DIR}/integration_prod_pilot_cohort_quick_trend_baseline.log; then
   echo "expected top no-go reason not found"
-  cat /tmp/integration_prod_pilot_cohort_quick_trend_baseline.log
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_trend_baseline.log
   exit 1
 fi
 if [[ ! -f "$SUMMARY_JSON" ]]; then
   echo "expected quick trend summary JSON output file not found"
   ls -la "$TMP_DIR"
-  cat /tmp/integration_prod_pilot_cohort_quick_trend_baseline.log
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_trend_baseline.log
   exit 1
 fi
 if ! jq -e '.reports_total == 3 and .go == 2 and .no_go == 1 and .decision == "GO"' "$SUMMARY_JSON" >/dev/null 2>&1; then
@@ -147,7 +154,7 @@ if ! jq -e '.reports_total == 3 and .go == 2 and .no_go == 1 and .decision == "G
   cat "$SUMMARY_JSON"
   exit 1
 fi
-if ! jq -e --arg source_rr "$REPORTS_DIR/run_b/prod_pilot_cohort_quick_report.json" --arg incident_rr "$RUN_B_INCIDENT_RUN_REPORT" --arg incident_summary "$RUN_B_INCIDENT_SUMMARY_JSON" --arg incident_report "$RUN_B_INCIDENT_REPORT_MD" '.incident_snapshot.latest_failed_run_report.source_quick_run_report.path==$source_rr and .incident_snapshot.latest_failed_run_report.path==$incident_rr and .incident_snapshot.latest_failed_run_report.summary_json.path==$incident_summary and .incident_snapshot.latest_failed_run_report.report_md.path==$incident_report' "$SUMMARY_JSON" >/dev/null 2>&1; then
+if ! jq -e --arg readiness_summary "$RUN_B_PRE_REAL_HOST_READINESS_SUMMARY_JSON" --arg source_rr "$REPORTS_DIR/run_b/prod_pilot_cohort_quick_report.json" --arg incident_rr "$RUN_B_INCIDENT_RUN_REPORT" --arg incident_summary "$RUN_B_INCIDENT_SUMMARY_JSON" --arg incident_report "$RUN_B_INCIDENT_REPORT_MD" '.incident_snapshot.latest_failed_run_report.source_pre_real_host_readiness_summary_json.path==$readiness_summary and .incident_snapshot.latest_failed_run_report.source_quick_run_report.path==$source_rr and .incident_snapshot.latest_failed_run_report.path==$incident_rr and .incident_snapshot.latest_failed_run_report.summary_json.path==$incident_summary and .incident_snapshot.latest_failed_run_report.report_md.path==$incident_report' "$SUMMARY_JSON" >/dev/null 2>&1; then
   echo "quick trend summary JSON missing incident handoff fields"
   cat "$SUMMARY_JSON"
   exit 1
@@ -157,19 +164,24 @@ if ! jq -e --arg attach_manifest "$RUN_B_INCIDENT_ATTACH_MANIFEST" --arg attach_
   cat "$SUMMARY_JSON"
   exit 1
 fi
-if ! rg -q '\[prod-pilot-cohort-quick-trend\] summary_json_payload:' /tmp/integration_prod_pilot_cohort_quick_trend_baseline.log; then
+if ! rg -q '\[prod-pilot-cohort-quick-trend\] summary_json_payload:' ${TMP_DIR}/integration_prod_pilot_cohort_quick_trend_baseline.log; then
   echo "expected printed summary payload marker not found"
-  cat /tmp/integration_prod_pilot_cohort_quick_trend_baseline.log
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_trend_baseline.log
   exit 1
 fi
-if ! rg -q '\[prod-pilot-cohort-quick-trend\] incident_handoff ' /tmp/integration_prod_pilot_cohort_quick_trend_baseline.log; then
+if ! rg -q '\[prod-pilot-cohort-quick-trend\] incident_handoff ' ${TMP_DIR}/integration_prod_pilot_cohort_quick_trend_baseline.log; then
   echo "expected incident_handoff line not found in baseline log"
-  cat /tmp/integration_prod_pilot_cohort_quick_trend_baseline.log
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_trend_baseline.log
   exit 1
 fi
-if ! rg -q "attachment_manifest=${RUN_B_INCIDENT_ATTACH_MANIFEST}" /tmp/integration_prod_pilot_cohort_quick_trend_baseline.log; then
+if ! rg -q "source_pre_real_host_readiness_summary_json=${RUN_B_PRE_REAL_HOST_READINESS_SUMMARY_JSON}" ${TMP_DIR}/integration_prod_pilot_cohort_quick_trend_baseline.log; then
+  echo "expected readiness summary pointer in quick trend handoff line"
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_trend_baseline.log
+  exit 1
+fi
+if ! rg -q "attachment_manifest=${RUN_B_INCIDENT_ATTACH_MANIFEST}" ${TMP_DIR}/integration_prod_pilot_cohort_quick_trend_baseline.log; then
   echo "expected incident attachment manifest in quick trend handoff line"
-  cat /tmp/integration_prod_pilot_cohort_quick_trend_baseline.log
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_trend_baseline.log
   exit 1
 fi
 
@@ -179,11 +191,11 @@ touch -t 202001010101 "$REPORTS_DIR/run_a/prod_pilot_cohort_quick_report.json" "
   --reports-dir "$REPORTS_DIR" \
   --max-reports 10 \
   --since-hours 1 \
-  --show-details 0 >/tmp/integration_prod_pilot_cohort_quick_trend_since_hours.log 2>&1
+  --show-details 0 >${TMP_DIR}/integration_prod_pilot_cohort_quick_trend_since_hours.log 2>&1
 
-if ! rg -q '\[prod-pilot-cohort-quick-trend\] reports_total=1 go=1 no_go=0' /tmp/integration_prod_pilot_cohort_quick_trend_since_hours.log; then
+if ! rg -q '\[prod-pilot-cohort-quick-trend\] reports_total=1 go=1 no_go=0' ${TMP_DIR}/integration_prod_pilot_cohort_quick_trend_since_hours.log; then
   echo "expected since-hours filtered aggregate not found"
-  cat /tmp/integration_prod_pilot_cohort_quick_trend_since_hours.log
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_trend_since_hours.log
   exit 1
 fi
 
@@ -193,17 +205,17 @@ set +e
   --reports-dir "$REPORTS_DIR" \
   --max-reports 3 \
   --fail-on-any-no-go 1 \
-  --show-details 0 >/tmp/integration_prod_pilot_cohort_quick_trend_fail_any.log 2>&1
+  --show-details 0 >${TMP_DIR}/integration_prod_pilot_cohort_quick_trend_fail_any.log 2>&1
 fail_any_rc=$?
 set -e
 if [[ "$fail_any_rc" -eq 0 ]]; then
   echo "expected non-zero rc when --fail-on-any-no-go=1 and a NO-GO exists"
-  cat /tmp/integration_prod_pilot_cohort_quick_trend_fail_any.log
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_trend_fail_any.log
   exit 1
 fi
-if ! rg -q '\[prod-pilot-cohort-quick-trend\] trend_decision=NO-GO' /tmp/integration_prod_pilot_cohort_quick_trend_fail_any.log; then
+if ! rg -q '\[prod-pilot-cohort-quick-trend\] trend_decision=NO-GO' ${TMP_DIR}/integration_prod_pilot_cohort_quick_trend_fail_any.log; then
   echo "expected NO-GO trend decision in fail-on-any output"
-  cat /tmp/integration_prod_pilot_cohort_quick_trend_fail_any.log
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_trend_fail_any.log
   exit 1
 fi
 
@@ -213,17 +225,17 @@ set +e
   --reports-dir "$REPORTS_DIR" \
   --max-reports 3 \
   --min-go-rate-pct 70 \
-  --show-details 0 >/tmp/integration_prod_pilot_cohort_quick_trend_fail_rate.log 2>&1
+  --show-details 0 >${TMP_DIR}/integration_prod_pilot_cohort_quick_trend_fail_rate.log 2>&1
 fail_rate_rc=$?
 set -e
 if [[ "$fail_rate_rc" -eq 0 ]]; then
   echo "expected non-zero rc when GO rate is below --min-go-rate-pct"
-  cat /tmp/integration_prod_pilot_cohort_quick_trend_fail_rate.log
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_trend_fail_rate.log
   exit 1
 fi
-if ! rg -q 'go_rate_pct=66.67' /tmp/integration_prod_pilot_cohort_quick_trend_fail_rate.log; then
+if ! rg -q 'go_rate_pct=66.67' ${TMP_DIR}/integration_prod_pilot_cohort_quick_trend_fail_rate.log; then
   echo "expected GO rate output not found"
-  cat /tmp/integration_prod_pilot_cohort_quick_trend_fail_rate.log
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_trend_fail_rate.log
   exit 1
 fi
 
@@ -247,7 +259,7 @@ PROD_PILOT_COHORT_QUICK_CHECK_SCRIPT="$FAKE_QUICK_CHECK" \
   --reports-dir "$REPORTS_DIR" \
   --max-reports 1 \
   --require-cohort-signoff-policy 1 \
-  --show-details 0 >/tmp/integration_prod_pilot_cohort_quick_trend_cohort_policy.log 2>&1
+  --show-details 0 >${TMP_DIR}/integration_prod_pilot_cohort_quick_trend_cohort_policy.log 2>&1
 
 if ! rg -q -- '--require-cohort-signoff-policy 1' "$CHECK_CAPTURE"; then
   echo "quick-trend forwarding failed: missing --require-cohort-signoff-policy 1 to quick-check"
@@ -299,7 +311,7 @@ PROD_PILOT_COHORT_QUICK_TREND_SCRIPT="$FAKE_TREND" \
   --print-summary-json 1 \
   --fail-on-any-no-go 1 \
   --min-go-rate-pct 95 \
-  --show-top-reasons 7 >/tmp/integration_prod_pilot_cohort_quick_trend_easy_node.log 2>&1
+  --show-top-reasons 7 >${TMP_DIR}/integration_prod_pilot_cohort_quick_trend_easy_node.log 2>&1
 
 if ! rg -q -- '--reports-dir /tmp/reports' "$CAPTURE"; then
   echo "easy_node quick-trend forwarding failed: missing --reports-dir"

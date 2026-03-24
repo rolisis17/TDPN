@@ -33,6 +33,7 @@ INCIDENT_REPORT_MD="$INCIDENT_DIR/incident_report.md"
 INCIDENT_SOURCE_RUN_REPORT="$TMP_DIR/round_2_run_report.json"
 INCIDENT_SOURCE_QUICK_RUN_REPORT="$TMP_DIR/prod_pilot_cohort_quick_report.json"
 INCIDENT_BUNDLE_TAR="$TMP_DIR/incident_snapshot.tar.gz"
+PRE_REAL_HOST_READINESS_SUMMARY_JSON="$TMP_DIR/pre_real_host_readiness_summary.json"
 
 mkdir -p "$INCIDENT_DIR"
 cat >"$INCIDENT_SUMMARY_JSON" <<'EOF_INCIDENT_SUMMARY'
@@ -50,6 +51,9 @@ EOF_INCIDENT_SOURCE_QUICK_RR
 printf 'incident tar placeholder\n' >"$INCIDENT_BUNDLE_TAR"
 printf '[]\n' >"$INCIDENT_DIR/attachments_manifest.json"
 printf '[]\n' >"$INCIDENT_DIR/attachments_skipped.json"
+cat >"$PRE_REAL_HOST_READINESS_SUMMARY_JSON" <<'EOF_PRE_REAL_HOST_READINESS'
+{"status":"ok","machine_c_smoke_gate":{"ready":true}}
+EOF_PRE_REAL_HOST_READINESS
 
 cat >"$FAKE_TREND" <<'EOF_FAKE_TREND'
 #!/usr/bin/env bash
@@ -88,6 +92,7 @@ cat >"$summary_json" <<'EOF_TREND_JSON'
   ],
   "incident_snapshot": {
     "latest_failed_run_report": {
+      "source_pre_real_host_readiness_summary_json": {"path": "__PRE_REAL_HOST_READINESS_SUMMARY_JSON__"},
       "source_quick_run_report": {"path": "__INCIDENT_SOURCE_QUICK_RUN_REPORT__"},
       "path": "__INCIDENT_SOURCE_RUN_REPORT__",
       "enabled": 1,
@@ -104,6 +109,7 @@ cat >"$summary_json" <<'EOF_TREND_JSON'
 }
 EOF_TREND_JSON
 sed -i \
+  -e "s#__PRE_REAL_HOST_READINESS_SUMMARY_JSON__#${PRE_REAL_HOST_READINESS_SUMMARY_JSON}#g" \
   -e "s#__INCIDENT_SOURCE_QUICK_RUN_REPORT__#${INCIDENT_SOURCE_QUICK_RUN_REPORT}#g" \
   -e "s#__INCIDENT_SOURCE_RUN_REPORT__#${INCIDENT_SOURCE_RUN_REPORT}#g" \
   -e "s#__INCIDENT_DIR__#${INCIDENT_DIR}#g" \
@@ -163,6 +169,7 @@ chmod +x "$FAKE_ALERT"
 echo "[prod-pilot-cohort-quick-dashboard] success path"
 TREND_CAPTURE_FILE="$TREND_CAPTURE" \
 ALERT_CAPTURE_FILE="$ALERT_CAPTURE" \
+PRE_REAL_HOST_READINESS_SUMMARY_JSON="$PRE_REAL_HOST_READINESS_SUMMARY_JSON" \
 INCIDENT_SOURCE_QUICK_RUN_REPORT="$INCIDENT_SOURCE_QUICK_RUN_REPORT" \
 INCIDENT_SOURCE_RUN_REPORT="$INCIDENT_SOURCE_RUN_REPORT" \
 INCIDENT_DIR="$INCIDENT_DIR" \
@@ -172,7 +179,7 @@ INCIDENT_REPORT_MD="$INCIDENT_REPORT_MD" \
 PROD_PILOT_COHORT_QUICK_TREND_SCRIPT="$FAKE_TREND" \
 PROD_PILOT_COHORT_QUICK_ALERT_SCRIPT="$FAKE_ALERT" \
 ./scripts/prod_pilot_cohort_quick_dashboard.sh \
-  --reports-dir /tmp/quick_reports \
+  --reports-dir ${TMP_DIR}/quick_reports \
   --max-reports 10 \
   --since-hours 24 \
   --require-signoff-ok 1 \
@@ -189,7 +196,7 @@ PROD_PILOT_COHORT_QUICK_ALERT_SCRIPT="$FAKE_ALERT" \
   --alert-summary-json "$ALERT_JSON" \
   --dashboard-md "$DASHBOARD_MD" \
   --print-dashboard 0 \
-  --print-summary-json 1 >/tmp/integration_prod_pilot_cohort_quick_dashboard_success.log 2>&1
+  --print-summary-json 1 >${TMP_DIR}/integration_prod_pilot_cohort_quick_dashboard_success.log 2>&1
 
 if [[ ! -s "$DASHBOARD_MD" ]]; then
   echo "quick dashboard markdown not generated"
@@ -207,6 +214,11 @@ if ! rg -q 'count=2 reason=signoff rc is non-zero' "$DASHBOARD_MD"; then
 fi
 if ! rg -q '## Incident Handoff' "$DASHBOARD_MD"; then
   echo "quick dashboard missing incident handoff section"
+  cat "$DASHBOARD_MD"
+  exit 1
+fi
+if ! rg -q "$PRE_REAL_HOST_READINESS_SUMMARY_JSON" "$DASHBOARD_MD"; then
+  echo "quick dashboard missing readiness summary path"
   cat "$DASHBOARD_MD"
   exit 1
 fi
@@ -230,14 +242,19 @@ if ! rg -q 'Incident attachment count: 1' "$DASHBOARD_MD"; then
   cat "$DASHBOARD_MD"
   exit 1
 fi
-if ! rg -q '\[prod-pilot-cohort-quick-dashboard\] incident_handoff ' /tmp/integration_prod_pilot_cohort_quick_dashboard_success.log; then
+if ! rg -q '\[prod-pilot-cohort-quick-dashboard\] incident_handoff ' ${TMP_DIR}/integration_prod_pilot_cohort_quick_dashboard_success.log; then
   echo "quick dashboard missing incident_handoff output line"
-  cat /tmp/integration_prod_pilot_cohort_quick_dashboard_success.log
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_dashboard_success.log
   exit 1
 fi
-if ! rg -q "attachment_manifest=${INCIDENT_DIR}/attachments_manifest.json" /tmp/integration_prod_pilot_cohort_quick_dashboard_success.log; then
+if ! rg -q "source_pre_real_host_readiness_summary_json=${PRE_REAL_HOST_READINESS_SUMMARY_JSON}" ${TMP_DIR}/integration_prod_pilot_cohort_quick_dashboard_success.log; then
+  echo "quick dashboard missing readiness summary pointer in handoff output"
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_dashboard_success.log
+  exit 1
+fi
+if ! rg -q "attachment_manifest=${INCIDENT_DIR}/attachments_manifest.json" ${TMP_DIR}/integration_prod_pilot_cohort_quick_dashboard_success.log; then
   echo "quick dashboard missing incident attachment manifest in handoff output"
-  cat /tmp/integration_prod_pilot_cohort_quick_dashboard_success.log
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_dashboard_success.log
   exit 1
 fi
 if ! rg -q -- '--require-signoff-ok 1' "$TREND_CAPTURE"; then
@@ -287,6 +304,7 @@ TREND_CAPTURE_FILE="$TREND_CAPTURE" \
 ALERT_CAPTURE_FILE="$ALERT_CAPTURE" \
 FAKE_TREND_RC=1 \
 FAKE_ALERT_RC=0 \
+PRE_REAL_HOST_READINESS_SUMMARY_JSON="$PRE_REAL_HOST_READINESS_SUMMARY_JSON" \
 INCIDENT_SOURCE_QUICK_RUN_REPORT="$INCIDENT_SOURCE_QUICK_RUN_REPORT" \
 INCIDENT_SOURCE_RUN_REPORT="$INCIDENT_SOURCE_RUN_REPORT" \
 INCIDENT_DIR="$INCIDENT_DIR" \
@@ -296,16 +314,16 @@ INCIDENT_REPORT_MD="$INCIDENT_REPORT_MD" \
 PROD_PILOT_COHORT_QUICK_TREND_SCRIPT="$FAKE_TREND" \
 PROD_PILOT_COHORT_QUICK_ALERT_SCRIPT="$FAKE_ALERT" \
 ./scripts/prod_pilot_cohort_quick_dashboard.sh \
-  --reports-dir /tmp/quick_reports \
+  --reports-dir ${TMP_DIR}/quick_reports \
   --trend-summary-json "$TREND_JSON" \
   --alert-summary-json "$ALERT_JSON" \
   --dashboard-md "$DASHBOARD_MD" \
-  --print-dashboard 0 >/tmp/integration_prod_pilot_cohort_quick_dashboard_trend_fail.log 2>&1
+  --print-dashboard 0 >${TMP_DIR}/integration_prod_pilot_cohort_quick_dashboard_trend_fail.log 2>&1
 rc=$?
 set -e
 if [[ "$rc" -ne 1 ]]; then
   echo "expected rc=1 when trend fails and alert succeeds; got rc=$rc"
-  cat /tmp/integration_prod_pilot_cohort_quick_dashboard_trend_fail.log
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_dashboard_trend_fail.log
   exit 1
 fi
 
@@ -315,6 +333,7 @@ TREND_CAPTURE_FILE="$TREND_CAPTURE" \
 ALERT_CAPTURE_FILE="$ALERT_CAPTURE" \
 FAKE_TREND_RC=1 \
 FAKE_ALERT_RC=2 \
+PRE_REAL_HOST_READINESS_SUMMARY_JSON="$PRE_REAL_HOST_READINESS_SUMMARY_JSON" \
 INCIDENT_SOURCE_QUICK_RUN_REPORT="$INCIDENT_SOURCE_QUICK_RUN_REPORT" \
 INCIDENT_SOURCE_RUN_REPORT="$INCIDENT_SOURCE_RUN_REPORT" \
 INCIDENT_DIR="$INCIDENT_DIR" \
@@ -324,16 +343,16 @@ INCIDENT_REPORT_MD="$INCIDENT_REPORT_MD" \
 PROD_PILOT_COHORT_QUICK_TREND_SCRIPT="$FAKE_TREND" \
 PROD_PILOT_COHORT_QUICK_ALERT_SCRIPT="$FAKE_ALERT" \
 ./scripts/prod_pilot_cohort_quick_dashboard.sh \
-  --reports-dir /tmp/quick_reports \
+  --reports-dir ${TMP_DIR}/quick_reports \
   --trend-summary-json "$TREND_JSON" \
   --alert-summary-json "$ALERT_JSON" \
   --dashboard-md "$DASHBOARD_MD" \
-  --print-dashboard 0 >/tmp/integration_prod_pilot_cohort_quick_dashboard_alert_fail.log 2>&1
+  --print-dashboard 0 >${TMP_DIR}/integration_prod_pilot_cohort_quick_dashboard_alert_fail.log 2>&1
 rc=$?
 set -e
 if [[ "$rc" -ne 2 ]]; then
   echo "expected rc=2 when alert fails; got rc=$rc"
-  cat /tmp/integration_prod_pilot_cohort_quick_dashboard_alert_fail.log
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_dashboard_alert_fail.log
   exit 1
 fi
 
@@ -373,14 +392,14 @@ PATH="$TMP_BIN:$PATH" \
 EASY_NODE_DASHBOARD_CAPTURE_FILE="$EASY_NODE_DASHBOARD_CAPTURE" \
 PROD_PILOT_COHORT_QUICK_DASHBOARD_SCRIPT="$FAKE_EASY_NODE_DASHBOARD" \
 ./scripts/easy_node.sh prod-pilot-cohort-quick-dashboard \
-  --reports-dir /tmp/quick_reports \
+  --reports-dir ${TMP_DIR}/quick_reports \
   --since-hours 12 \
   --require-cohort-signoff-policy 1 \
   --incident-snapshot-min-attachment-count 3 \
   --incident-snapshot-max-skipped-count 1 \
-  --dashboard-md /tmp/quick_dashboard.md >/tmp/integration_prod_pilot_cohort_quick_dashboard_easy_node.log 2>&1
+  --dashboard-md ${TMP_DIR}/quick_dashboard.md >${TMP_DIR}/integration_prod_pilot_cohort_quick_dashboard_easy_node.log 2>&1
 
-if ! rg -q -- '--reports-dir /tmp/quick_reports' "$EASY_NODE_DASHBOARD_CAPTURE"; then
+if ! rg -F -q -- "--reports-dir ${TMP_DIR}/quick_reports" "$EASY_NODE_DASHBOARD_CAPTURE"; then
   echo "easy-node quick-dashboard forwarding missing --reports-dir"
   cat "$EASY_NODE_DASHBOARD_CAPTURE"
   exit 1
@@ -390,7 +409,7 @@ if ! rg -q -- '--since-hours 12' "$EASY_NODE_DASHBOARD_CAPTURE"; then
   cat "$EASY_NODE_DASHBOARD_CAPTURE"
   exit 1
 fi
-if ! rg -q -- '--dashboard-md /tmp/quick_dashboard.md' "$EASY_NODE_DASHBOARD_CAPTURE"; then
+if ! rg -F -q -- "--dashboard-md ${TMP_DIR}/quick_dashboard.md" "$EASY_NODE_DASHBOARD_CAPTURE"; then
   echo "easy-node quick-dashboard forwarding missing --dashboard-md"
   cat "$EASY_NODE_DASHBOARD_CAPTURE"
   exit 1

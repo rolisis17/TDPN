@@ -564,6 +564,7 @@ no_go_count="$(jq -r '.no_go // 0' "$trend_summary_json")"
 go_rate_pct="$(jq -r '.go_rate_pct // 0' "$trend_summary_json")"
 evaluation_errors="$(jq -r '.evaluation_errors // 0' "$trend_summary_json")"
 alert_severity="$(jq -r '.severity // "UNKNOWN"' "$alert_summary_json")"
+incident_source_pre_real_host_readiness_summary_json="$(abs_path "$(json_string_file "$trend_summary_json" '.incident_snapshot.latest_failed_run_report.source_pre_real_host_readiness_summary_json.path')")"
 incident_source_quick_run_report="$(abs_path "$(json_string_file "$trend_summary_json" '.incident_snapshot.latest_failed_run_report.source_quick_run_report.path')")"
 incident_source_run_report="$(abs_path "$(json_string_file "$trend_summary_json" '.incident_snapshot.latest_failed_run_report.path')")"
 incident_summary_json="$(abs_path "$(json_string_file "$trend_summary_json" '.incident_snapshot.latest_failed_run_report.summary_json.path')")"
@@ -640,9 +641,10 @@ esac
     echo "- Incident attachment count: ${incident_attachment_count:-0}"
   fi
   echo
-  if [[ -n "$incident_source_run_report" || -n "$incident_summary_json" || -n "$incident_report_md" || -n "$incident_attachment_manifest" || -n "$incident_attachment_skipped" ]]; then
+  if [[ -n "$incident_source_pre_real_host_readiness_summary_json" || -n "$incident_source_run_report" || -n "$incident_summary_json" || -n "$incident_report_md" || -n "$incident_attachment_manifest" || -n "$incident_attachment_skipped" ]]; then
     echo "## Incident Handoff"
     echo
+    echo "- Source pre-real-host readiness summary: ${incident_source_pre_real_host_readiness_summary_json:-unset}"
     echo "- Source quick run report: ${incident_source_quick_run_report:-unset}"
     echo "- Source failed run report: ${incident_source_run_report:-unset}"
     echo "- Incident snapshot status: ${incident_status:-unset}"
@@ -668,8 +670,8 @@ esac
 echo "[prod-pilot-cohort-quick-dashboard] trend_summary_json=$trend_summary_json"
 echo "[prod-pilot-cohort-quick-dashboard] alert_summary_json=$alert_summary_json"
 echo "[prod-pilot-cohort-quick-dashboard] dashboard_md=$dashboard_md"
-if [[ -n "$incident_source_run_report" || -n "$incident_summary_json" || -n "$incident_report_md" || -n "$incident_attachment_manifest" || -n "$incident_attachment_skipped" ]]; then
-  echo "[prod-pilot-cohort-quick-dashboard] incident_handoff source_quick_run_report=${incident_source_quick_run_report:-unset} source_run_report=${incident_source_run_report:-unset} summary_json=${incident_summary_json:-unset} report_md=${incident_report_md:-unset} attachment_manifest=${incident_attachment_manifest:-unset} attachment_skipped=${incident_attachment_skipped:-unset} attachment_count=${incident_attachment_count}"
+if [[ -n "$incident_source_pre_real_host_readiness_summary_json" || -n "$incident_source_run_report" || -n "$incident_summary_json" || -n "$incident_report_md" || -n "$incident_attachment_manifest" || -n "$incident_attachment_skipped" ]]; then
+  echo "[prod-pilot-cohort-quick-dashboard] incident_handoff source_pre_real_host_readiness_summary_json=${incident_source_pre_real_host_readiness_summary_json:-unset} source_quick_run_report=${incident_source_quick_run_report:-unset} source_run_report=${incident_source_run_report:-unset} summary_json=${incident_summary_json:-unset} report_md=${incident_report_md:-unset} attachment_manifest=${incident_attachment_manifest:-unset} attachment_skipped=${incident_attachment_skipped:-unset} attachment_count=${incident_attachment_count}"
 fi
 
 if [[ "$print_dashboard" == "1" ]]; then

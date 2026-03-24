@@ -32,6 +32,7 @@ Usage:
     [--client-iface IFACE] \
     [--client-proxy-addr HOST:PORT] \
     [--client-inner-source udp|synthetic] \
+    [--allow-synthetic-ingress [0|1]] \
     [--inject-attempts N] \
     [--strict-distinct [0|1]] \
     [--skip-control-plane-check [0|1]] \
@@ -284,6 +285,7 @@ wg_session_sec="45"
 client_iface="${CLIENT_IFACE:-wgcprod0}"
 client_proxy_addr="${CLIENT_PROXY_ADDR:-127.0.0.1:57990}"
 client_inner_source="${THREE_MACHINE_PROD_WG_CLIENT_INNER_SOURCE:-udp}"
+allow_synthetic_ingress="${THREE_MACHINE_PROD_WG_VALIDATE_ALLOW_SYNTHETIC_INGRESS:-0}"
 inject_attempts="8"
 strict_distinct="${CLIENT_REQUIRE_DISTINCT_OPERATORS:-1}"
 skip_control_plane_check="0"
@@ -375,6 +377,15 @@ while [[ $# -gt 0 ]]; do
       client_inner_source="${2:-}"
       shift 2
       ;;
+    --allow-synthetic-ingress)
+      if [[ $# -ge 2 && "${2:-}" != --* ]]; then
+        allow_synthetic_ingress="${2:-}"
+        shift 2
+      else
+        allow_synthetic_ingress="1"
+        shift
+      fi
+      ;;
     --inject-attempts)
       inject_attempts="${2:-}"
       shift 2
@@ -441,6 +452,15 @@ if [[ "$client_inner_source" != "udp" && "$client_inner_source" != "synthetic" ]
   echo "--client-inner-source must be udp or synthetic"
   exit 2
 fi
+if [[ "$allow_synthetic_ingress" != "0" && "$allow_synthetic_ingress" != "1" ]]; then
+  echo "--allow-synthetic-ingress must be 0 or 1"
+  exit 2
+fi
+if [[ "$client_inner_source" == "synthetic" && "$allow_synthetic_ingress" != "1" ]]; then
+  echo "--client-inner-source synthetic is blocked in production real-WG validation"
+  echo "use --allow-synthetic-ingress 1 only for controlled strict-ingress rehearsal diagnostics"
+  exit 2
+fi
 if [[ "$skip_control_plane_check" != "0" && "$skip_control_plane_check" != "1" ]]; then
   echo "--skip-control-plane-check must be 0 or 1"
   exit 2
@@ -492,6 +512,7 @@ exec > >(tee -a "$report_file") 2>&1
 echo "[3machine-prod-wg] started at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "[3machine-prod-wg] report: $report_file"
 echo "[3machine-prod-wg] client_inner_source=$client_inner_source"
+echo "[3machine-prod-wg] allow_synthetic_ingress=$allow_synthetic_ingress"
 if [[ -z "$summary_json" ]]; then
   summary_json="${report_file%.log}.summary.json"
 fi
@@ -572,6 +593,7 @@ write_summary_once() {
     echo "  \"exit_b_url\": \"$(json_escape "$exit_b_url")\","
     echo "  \"strict_distinct\": $strict_distinct,"
     echo "  \"client_inner_source\": \"$(json_escape "$client_inner_source")\","
+    echo "  \"allow_synthetic_ingress\": $allow_synthetic_ingress,"
     echo "  \"control_plane_check_skipped\": $skip_control_plane_check,"
     echo "  \"baseline\": {"
     echo "    \"exit_a_accepted_packets\": $baseline_accepted_a,"

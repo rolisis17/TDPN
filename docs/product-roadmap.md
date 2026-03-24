@@ -20,6 +20,31 @@ Next 5 roadmap execution steps:
 4. Implement experimental `speed-1hop` with clear safety/privacy labeling.
 5. Run comparative pilot metrics and decide default behavior from results.
 
+Status update (March 24, 2026):
+- `speed-1hop` is now available in `client-test` as an explicit non-strict experimental mode (`--path-profile speed-1hop`), with guardrails that fail closed in strict/beta/prod flows.
+- `profile-compare-local` is now available (`./scripts/easy_node.sh profile-compare-local ...`) to run repeatable single-machine profile comparisons with JSON/markdown artifacts and a policy-based default recommendation (never auto-defaulting `speed-1hop`).
+- `profile-compare-trend` is now available (`./scripts/easy_node.sh profile-compare-trend ...`) to aggregate multiple local comparison summaries into one reliability/latency trend recommendation (still keeping `speed-1hop` non-default).
+- `profile-compare-campaign` is now available (`./scripts/easy_node.sh profile-compare-campaign ...`) to run repeatable multi-run local comparison campaigns and auto-produce a campaign-level trend recommendation bundle.
+- `profile-compare-campaign-check` is now available (`./scripts/easy_node.sh profile-compare-campaign-check ...`) to enforce fail-closed policy thresholds on campaign artifacts and output a GO/NO-GO default-profile decision.
+- `profile-compare-campaign-signoff` is now available (`./scripts/easy_node.sh profile-compare-campaign-signoff ...`) to run optional campaign refresh + fail-closed check in one command and emit one signoff summary artifact for default-profile handoff decisions.
+- `single-machine-prod-readiness` now optionally includes that campaign signoff gate (`--run-profile-compare-campaign-signoff auto|0|1`) so one-host operators can track local default-profile decision readiness alongside runtime/manual-validation gates.
+- in `single-machine-prod-readiness`, profile signoff `auto` mode now forces a one-time campaign refresh when campaign artifacts are missing, so local roadmap progress does not stall on absent seed artifacts.
+- in `single-machine-prod-readiness`, profile signoff `auto` mode now prefers docker rehearsal endpoints (when available) to run that missing-artifact refresh without root; if docker rehearsal endpoints are unavailable, non-root mode still skips instead of failing the whole sweep.
+- manual-validation status/report now also surface a non-blocking profile-default gate snapshot (`profile-compare-campaign-signoff` summary status/decision) so default-profile decision readiness is visible in the same operator handoff.
+- manual-validation status/report now classify a `profile-compare-campaign-signoff` campaign-refresh failure as `pending` (not hard-fail) when the refresh is blocked only because local stack bootstrap needs root (`--start-local-stack=1 requires root`), and they emit a sudo-ready next command for that rerun path.
+- `single-machine-prod-readiness` now forwards the manual-validation profile-default gate snapshot (`summary.profile_default_gate`, `summary.profile_default_ready`) so one-host sweeps and manual-validation reports show the same default-profile readiness signal.
+- `single-machine-prod-readiness` now also forwards its effective `--profile-compare-campaign-signoff-summary-json` path into `manual-validation-report`, so profile-default gate evaluation stays consistent even when operators use non-default artifact paths.
+- `single-machine-prod-readiness` now prints `next_action_check_id` and `next_action_command` in stdout, so machine-C/3-machine next steps are explicit without opening JSON artifacts.
+- `single-machine-prod-readiness` now optionally runs the dockerized one-host 3-machine rehearsal gate (`--run-three-machine-docker-readiness auto|0|1`) and includes that rehearsal result in its summary JSON/output.
+- `single-machine-prod-readiness` now optionally runs Linux root real-WG matrix recording (`--run-real-wg-privileged-matrix auto|0|1`) and classifies that step as an optional non-blocking confidence gate in one-host readiness output.
+- easy-node help/forwarding for `manual-validation-status` and `manual-validation-report` now explicitly includes `--profile-compare-signoff-summary-json` and overlay options, with wiring/integration checks to keep that operator contract stable.
+- easy launcher advanced menu now includes a dedicated `single-machine-prod-readiness` path (option 75), so one-host production sweeps are available without manual command assembly.
+- profile contract guard is now wired in local gates (`integration_path_profile_contract.sh` in `ci_local` / `beta_preflight`) to keep public profile UX/API naming fixed at `speed|balanced|private` (`speed-1hop` experimental on `client-test` only), while retaining `fast|privacy` as compatibility aliases.
+- launcher profile/expert split is now enforced as a contract: simple client flows stay preset-driven, while explicit policy overrides are isolated to advanced option 34 (`Client VPN up (real mode, expert/manual)`), with wiring/runtime coverage to prevent regressions.
+- `three-machine-docker-readiness` is now available (`./scripts/easy_node.sh three-machine-docker-readiness ...`) to spin up two independent dockerized operator stacks on one host and run machine-C style validate/soak control-plane rehearsal checks while real multi-host signoff stays pending.
+- `three-machine-docker-readiness-record` is now available (`./scripts/easy_node.sh three-machine-docker-readiness-record ...`) to wrap that rehearsal in one recorded manual-validation receipt and keep a durable summary/log artifact.
+- `real-wg-privileged-matrix-record` is now available (`sudo ./scripts/easy_node.sh real-wg-privileged-matrix-record ...`) to wrap Linux root real-WG matrix validation into one recorded manual-validation receipt, surfaced as a non-blocking optional gate in the readiness handoff.
+
 Strictly necessary vs optional (current project posture):
 - strictly necessary for daily operation: start server, connect client, preflight checks, status/down, invite generation on authority, and one repeatable automated signoff path
 - optional/expert (keep but do not make default): deep chaos/fault matrices, policy override flags, manual artifact-level campaign checks, and one-off diagnostics toggles

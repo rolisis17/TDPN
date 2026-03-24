@@ -34,7 +34,11 @@ run_step "manual validation status" ./scripts/integration_manual_validation_stat
 run_step "manual validation report" ./scripts/integration_manual_validation_report.sh
 run_step "pre-real-host readiness" ./scripts/integration_pre_real_host_readiness.sh
 run_step "runtime fix" ./scripts/integration_runtime_fix.sh
+run_step "runtime fix record" ./scripts/integration_runtime_fix_record.sh
+run_step "single-machine prod readiness" ./scripts/integration_single_machine_prod_readiness.sh
 run_step "client-vpn smoke" ./scripts/integration_client_vpn_smoke.sh
+run_step "client-vpn trust-scope wiring" ./scripts/integration_client_vpn_trust_scope_wiring.sh
+run_step "client-vpn trust-reset" ./scripts/integration_client_vpn_trust_reset.sh
 run_step "three-machine prod signoff" ./scripts/integration_three_machine_prod_signoff.sh
 run_step "wg-only stack selftest record" ./scripts/integration_wg_only_stack_selftest_record.sh
 run_step "wg-only stack wiring" ./scripts/integration_wg_only_stack_wiring.sh
@@ -42,6 +46,12 @@ run_step "rotate server secrets" ./scripts/integration_rotate_server_secrets.sh
 run_step "directory strict governance" ./scripts/integration_directory_beta_strict.sh
 run_step "cross-role strict guardrails" ./scripts/integration_beta_strict_roles.sh
 run_step "easy-node client profile env wiring" ./scripts/integration_easy_node_client_profile_env.sh
+run_step "path profile contract integration" ./scripts/integration_path_profile_contract.sh
+run_step "profile compare local integration" ./scripts/integration_profile_compare_local.sh
+run_step "profile compare trend integration" ./scripts/integration_profile_compare_trend.sh
+run_step "profile compare campaign integration" ./scripts/integration_profile_compare_campaign.sh
+run_step "profile compare campaign check integration" ./scripts/integration_profile_compare_campaign_check.sh
+run_step "profile compare campaign signoff integration" ./scripts/integration_profile_compare_campaign_signoff.sh
 run_step "easy-mode launcher wiring" ./scripts/integration_easy_mode_launcher_wiring.sh
 run_step "easy-mode launcher runtime" ./scripts/integration_easy_mode_launcher_runtime.sh
 run_step "incident snapshot tooling" ./scripts/integration_incident_snapshot.sh
@@ -61,6 +71,7 @@ run_step "client-vpn issuer quorum" ./scripts/integration_client_vpn_issuer_quor
 run_step "client-vpn operator floor" ./scripts/integration_client_vpn_operator_floor.sh
 run_step "3-machine prod-profile wiring" ./scripts/integration_3machine_prod_profile_wiring.sh
 run_step "3-machine prod wg soak stall guard" ./scripts/integration_3machine_prod_wg_soak_stall_guard.sh
+run_step "3-machine prod wg validate ingress guard" ./scripts/integration_3machine_prod_wg_validate_ingress_guard.sh
 run_step "prod gate check integration" ./scripts/integration_prod_gate_check.sh
 run_step "prod gate slo summary integration" ./scripts/integration_prod_gate_slo_summary.sh
 run_step "prod gate slo trend integration" ./scripts/integration_prod_gate_slo_trend.sh

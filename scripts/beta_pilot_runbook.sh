@@ -35,7 +35,7 @@ Usage:
     [--client-min-entry-operators N] \
     [--client-min-exit-operators N] \
     [--client-require-cross-operator-pair [0|1]] \
-    [--path-profile fast|balanced|privacy] \
+    [--path-profile speed|balanced|private] \
     [--distinct-operators [0|1]] \
     [--distinct-countries [0|1]] \
     [--locality-soft-bias [0|1]] \
@@ -74,8 +74,14 @@ normalize_path_profile() {
   local profile
   profile="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
   case "$profile" in
-    fast|balanced|privacy)
-      printf '%s\n' "$profile"
+    speed|fast)
+      printf '%s\n' "fast"
+      ;;
+    balanced)
+      printf '%s\n' "balanced"
+      ;;
+    private|privacy)
+      printf '%s\n' "privacy"
       ;;
     "")
       printf '%s\n' ""
@@ -285,12 +291,35 @@ locality_region_bias="${THREE_MACHINE_REGION_BIAS:-1.25}"
 locality_region_prefix_bias="${THREE_MACHINE_REGION_PREFIX_BIAS:-1.10}"
 require_issuer_quorum="${THREE_MACHINE_REQUIRE_ISSUER_QUORUM:-}"
 bundle_dir=""
+path_profile_set=0
 distinct_operators_set=0
 distinct_countries_set=0
 locality_soft_bias_set=0
 locality_country_bias_set=0
 locality_region_bias_set=0
 locality_region_prefix_bias_set=0
+
+if [[ -n "${THREE_MACHINE_PATH_PROFILE+x}" ]]; then
+  path_profile_set=1
+fi
+if [[ -n "${THREE_MACHINE_DISTINCT_OPERATORS+x}" ]]; then
+  distinct_operators_set=1
+fi
+if [[ -n "${THREE_MACHINE_DISTINCT_COUNTRIES+x}" ]]; then
+  distinct_countries_set=1
+fi
+if [[ -n "${THREE_MACHINE_LOCALITY_SOFT_BIAS+x}" ]]; then
+  locality_soft_bias_set=1
+fi
+if [[ -n "${THREE_MACHINE_COUNTRY_BIAS+x}" ]]; then
+  locality_country_bias_set=1
+fi
+if [[ -n "${THREE_MACHINE_REGION_BIAS+x}" ]]; then
+  locality_region_bias_set=1
+fi
+if [[ -n "${THREE_MACHINE_REGION_PREFIX_BIAS+x}" ]]; then
+  locality_region_prefix_bias_set=1
+fi
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -385,6 +414,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --path-profile)
       path_profile="${2:-}"
+      path_profile_set=1
       shift 2
       ;;
     --distinct-operators)
@@ -479,9 +509,20 @@ while [[ $# -gt 0 ]]; do
 done
 
 normalized_path_profile="$(normalize_path_profile "$path_profile")" || {
-  echo "--path-profile must be one of: fast, balanced, privacy"
+  echo "--path-profile must be one of: speed, balanced, private (legacy aliases: fast, privacy)"
   exit 2
 }
+if [[ -z "$normalized_path_profile" && "$beta_profile" == "1" \
+      && "$path_profile_set" -eq 0 \
+      && "$distinct_operators_set" -eq 0 \
+      && "$distinct_countries_set" -eq 0 \
+      && "$locality_soft_bias_set" -eq 0 \
+      && "$locality_country_bias_set" -eq 0 \
+      && "$locality_region_bias_set" -eq 0 \
+      && "$locality_region_prefix_bias_set" -eq 0 ]]; then
+  normalized_path_profile="balanced"
+  path_profile="balanced"
+fi
 if [[ -n "$normalized_path_profile" ]]; then
   profile_values="$(path_profile_values "$normalized_path_profile")"
   IFS='|' read -r profile_distinct profile_distinct_countries profile_locality_soft profile_country_bias profile_region_bias profile_region_prefix_bias <<<"$profile_values"

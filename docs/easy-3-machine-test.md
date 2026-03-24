@@ -99,10 +99,11 @@ Optional on Machine A to federate both ways:
 
 Path profile presets (optional, recommended for repeatable tests):
 
-- Fast (latency-first): `--distinct-operators 1 --distinct-countries 0 --locality-soft-bias 1 --country-bias 1.80 --region-bias 1.35 --region-prefix-bias 1.15`
+- Speed (latency-first): `--distinct-operators 1 --distinct-countries 0 --locality-soft-bias 1 --country-bias 1.80 --region-bias 1.35 --region-prefix-bias 1.15`
 - Balanced (default): `--distinct-operators 1 --distinct-countries 0 --locality-soft-bias 1 --country-bias 1.50 --region-bias 1.25 --region-prefix-bias 1.10`
-- Privacy (stronger anti-collusion): `--distinct-operators 1 --distinct-countries 1 --locality-soft-bias 0`
-- Shortcut: use `--path-profile fast|balanced|privacy` on `client-test`, `three-machine-validate`, `three-machine-soak`, `pilot-runbook`, and `machine-c-test`.
+- Private (stronger anti-collusion): `--distinct-operators 1 --distinct-countries 1 --locality-soft-bias 0`
+- Shortcut: use `--path-profile speed|balanced|private` (legacy aliases `fast|privacy` still work) on `client-test`, `three-machine-validate`, `three-machine-soak`, `pilot-runbook`, and `machine-c-test`.
+- Experimental 1-hop benchmark mode (non-strict `client-test` only): `--path-profile speed-1hop` (requires `--beta-profile 0 --prod-profile 0`).
 
 Real client VPN mode (for external testers on Linux):
 

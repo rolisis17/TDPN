@@ -108,16 +108,102 @@ This is the simplest full path test.
   --exit-url http://A_PUBLIC_IP_OR_DNS:8084 \
   --min-sources 2 \
   --min-operators 2 \
-  --beta-profile 1 \
-  --distinct-operators 1
+  --path-profile balanced
 ```
+
+Single-host docker 3-machine rehearsal (A/B stacks + machine-C style runner):
+
+```bash
+./scripts/easy_node.sh three-machine-docker-readiness \
+  --path-profile balanced \
+  --soak-rounds 6 \
+  --soak-pause-sec 3 \
+  --print-summary-json 1
+```
+
+Notes:
+- This runs the machine-C control-plane validate/soak flow against two local
+  dockerized operator stacks (`A` + `B`) for fast iteration.
+- It is not a replacement for final true multi-host production signoff.
 
 Path profile presets for client routing tests:
 
-- Fast: `--distinct-operators 1 --distinct-countries 0 --locality-soft-bias 1 --country-bias 1.80 --region-bias 1.35 --region-prefix-bias 1.15`
+- Speed: `--distinct-operators 1 --distinct-countries 0 --locality-soft-bias 1 --country-bias 1.80 --region-bias 1.35 --region-prefix-bias 1.15`
 - Balanced: `--distinct-operators 1 --distinct-countries 0 --locality-soft-bias 1 --country-bias 1.50 --region-bias 1.25 --region-prefix-bias 1.10`
-- Privacy: `--distinct-operators 1 --distinct-countries 1 --locality-soft-bias 0`
-- Shortcut: use `--path-profile fast|balanced|privacy` on validate/soak/runbook wrappers; explicit flags still override preset values.
+- Private: `--distinct-operators 1 --distinct-countries 1 --locality-soft-bias 0`
+- Shortcut: use `--path-profile speed|balanced|private` (legacy aliases `fast|privacy` still work) on validate/soak/runbook wrappers; explicit flags still override preset values.
+- Experimental 1-hop benchmark mode (client-test only): `--path-profile speed-1hop` enables direct-exit mode in non-strict runs (`--beta-profile 0 --prod-profile 0`) and is intentionally blocked in strict/prod flows.
+
+Single-machine profile comparison (decision support for default profile):
+
+```bash
+./scripts/easy_node.sh profile-compare-local \
+  --profiles balanced,speed,private,speed-1hop \
+  --rounds 3 \
+  --start-local-stack auto \
+  --summary-json .easy-node-logs/profile_compare_local.json \
+  --report-md .easy-node-logs/profile_compare_local.md \
+  --print-summary-json 1
+```
+
+Aggregate profile decision trend across multiple local comparison runs:
+
+```bash
+./scripts/easy_node.sh profile-compare-trend \
+  --reports-dir .easy-node-logs \
+  --max-reports 20 \
+  --min-profile-runs 3 \
+  --min-profile-pass-rate-pct 95 \
+  --balanced-latency-margin-pct 15 \
+  --summary-json .easy-node-logs/profile_compare_trend.json \
+  --report-md .easy-node-logs/profile_compare_trend.md \
+  --print-summary-json 1
+```
+
+Run a repeatable campaign (multiple local comparisons + auto trend aggregation):
+
+```bash
+./scripts/easy_node.sh profile-compare-campaign \
+  --campaign-runs 5 \
+  --campaign-pause-sec 1 \
+  --profiles balanced,speed,private,speed-1hop \
+  --rounds 3 \
+  --start-local-stack auto \
+  --trend-min-profile-runs 3 \
+  --trend-min-profile-pass-rate-pct 95 \
+  --trend-balanced-latency-margin-pct 15 \
+  --summary-json .easy-node-logs/profile_compare_campaign_summary.json \
+  --report-md .easy-node-logs/profile_compare_campaign_report.md \
+  --print-summary-json 1
+```
+
+Fail-closed campaign decision gate (GO/NO-GO for default-profile readiness):
+
+```bash
+./scripts/easy_node.sh profile-compare-campaign-check \
+  --campaign-summary-json .easy-node-logs/profile_compare_campaign_summary.json \
+  --require-min-runs-total 5 \
+  --require-max-runs-fail 0 \
+  --require-max-runs-warn 0 \
+  --require-recommendation-support-rate-pct 70 \
+  --allow-recommended-profiles balanced,speed,private \
+  --disallow-experimental-default 1 \
+  --show-json 1
+```
+
+One-command campaign signoff (optional refresh + fail-closed check artifact):
+
+```bash
+./scripts/easy_node.sh profile-compare-campaign-signoff \
+  --reports-dir .easy-node-logs \
+  --refresh-campaign 1 \
+  --fail-on-no-go 1 \
+  --require-min-runs-total 5 \
+  --allow-recommended-profiles balanced,speed,private \
+  --disallow-experimental-default 1 \
+  --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json \
+  --print-summary-json 1
+```
 
 Real client VPN smoke test (machine C / tester host, Linux root):
 
@@ -128,8 +214,7 @@ sudo ./scripts/easy_node.sh client-vpn-preflight \
 sudo ./scripts/easy_node.sh client-vpn-up \
   --bootstrap-directory http://A_PUBLIC_IP_OR_DNS:8081 \
   --subject <INVITE_KEY> \
-  --beta-profile 1 \
-  --distinct-operators 1
+  --path-profile balanced
 
 ./scripts/easy_node.sh client-vpn-status
 sudo ./scripts/easy_node.sh client-vpn-down
@@ -233,15 +318,13 @@ Notes:
   --exit-url http://A_PUBLIC_IP_OR_DNS:8084 \
   --rounds 12 \
   --pause-sec 5 \
-  --beta-profile 1 \
-  --distinct-operators 1
+  --path-profile balanced
 
 # one-bootstrap mode (auto-discovery)
 ./scripts/integration_machine_c_client_check.sh \
   --bootstrap-directory http://KNOWN_SERVER_IP:8081 \
   --discovery-wait-sec 20 \
-  --beta-profile 1 \
-  --distinct-operators 1
+  --path-profile balanced
 ```
 
 Production-grade 3-machine gate (strict control + real WG from machine C, Linux root):
@@ -374,19 +457,22 @@ sudo ./scripts/easy_node.sh prod-pilot-cohort-runbook \
 # output now also prints the upstream pre_real_host_readiness_summary_json path when present
 
 # quick-mode trend across quick run reports
-# trend summary JSON now also carries latest failed incident handoff paths when available
+# trend summary JSON now also carries latest failed incident handoff paths plus
+# the upstream pre_real_host_readiness_summary_json pointer when available
 ./scripts/easy_node.sh prod-pilot-cohort-quick-trend \
   --reports-dir .easy-node-logs \
   --since-hours 24 \
   --summary-json .easy-node-logs/prod_pilot_quick_trend_24h.json
 
 # quick-mode alert severity from trend metrics
+# alert JSON/output now also preserves that same readiness pointer when present
 ./scripts/easy_node.sh prod-pilot-cohort-quick-alert \
   --trend-summary-json .easy-node-logs/prod_pilot_quick_trend_24h.json \
   --summary-json .easy-node-logs/prod_pilot_quick_alert_24h.json
 
 # quick-mode dashboard artifact (trend + alert + markdown)
-# dashboard markdown now also renders incident handoff paths when present
+# dashboard markdown now also renders incident handoff paths plus the same
+# readiness pointer when present
 ./scripts/easy_node.sh prod-pilot-cohort-quick-dashboard \
   --reports-dir .easy-node-logs \
   --dashboard-md .easy-node-logs/prod_pilot_quick_dashboard_24h.md

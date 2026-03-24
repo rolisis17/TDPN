@@ -156,7 +156,7 @@ sudo ./scripts/easy_node.sh wg-only-local-test --matrix 1
 sudo ./scripts/easy_node.sh wg-only-stack-up --strict-beta 1   # strict live-WG client/entry/exit roles
 ./scripts/easy_node.sh wg-only-stack-status
 sudo ./scripts/easy_node.sh wg-only-stack-down --force-iface-cleanup 1
-sudo ./scripts/easy_node.sh wg-only-stack-selftest --strict-beta 1
+sudo ./scripts/easy_node.sh wg-only-stack-selftest --strict-beta 1   # auto-resets scoped client trust once if local directory keys rotated
 sudo ./scripts/easy_node.sh wg-only-stack-selftest-record --strict-beta 1 --print-summary-json 1
 
 # stop all local resources; use sudo to also clean wg-only interfaces/processes
@@ -195,14 +195,16 @@ sudo ./scripts/easy_node.sh stop-all --with-wg-only 1 --force-iface-cleanup 1
 ./scripts/easy_node.sh prod-pilot-cohort-quick-check --run-report-json <reports_dir>/prod_pilot_cohort_quick_report.json
 
 # quick-mode trend across multiple quick run reports
-# trend summary JSON now also carries latest failed incident handoff paths when available
+# trend summary JSON now also carries latest failed incident handoff paths plus
+# the upstream pre_real_host_readiness_summary_json pointer when available
 ./scripts/easy_node.sh prod-pilot-cohort-quick-trend --reports-dir .easy-node-logs --since-hours 24 --summary-json .easy-node-logs/prod_pilot_quick_trend_24h.json
 
 # quick-mode alert severity from trend metrics
 ./scripts/easy_node.sh prod-pilot-cohort-quick-alert --trend-summary-json .easy-node-logs/prod_pilot_quick_trend_24h.json --summary-json .easy-node-logs/prod_pilot_quick_alert_24h.json
 
 # one-command quick dashboard (trend + alert + markdown)
-# dashboard markdown now also includes incident handoff paths when present
+# dashboard markdown now also includes incident handoff paths plus the upstream
+# pre_real_host_readiness_summary_json pointer when present
 ./scripts/easy_node.sh prod-pilot-cohort-quick-dashboard --reports-dir .easy-node-logs --dashboard-md .easy-node-logs/prod_pilot_quick_dashboard_24h.md
 
 # one-command quick signoff gate (latest check + trend + alert severity policy)
@@ -230,8 +232,7 @@ sudo ./scripts/easy_node.sh stop-all --with-wg-only 1 --force-iface-cleanup 1
   --issuer-url http://<SERVER_IP>:8082 \
   --entry-url http://<SERVER_IP>:8083 \
   --exit-url http://<SERVER_IP>:8084 \
-  --beta-profile 1 \
-  --distinct-operators 1
+  --path-profile balanced
 
 # real client VPN mode (host WireGuard interface, Linux + sudo)
 sudo ./scripts/easy_node.sh client-vpn-preflight \
@@ -240,10 +241,15 @@ sudo ./scripts/easy_node.sh client-vpn-preflight \
 sudo ./scripts/easy_node.sh client-vpn-up \
   --bootstrap-directory http://<SERVER_IP>:8081 \
   --subject <INVITE_KEY> \
-  --beta-profile 1 \
-  --distinct-operators 1
+  --path-profile balanced
 ./scripts/easy_node.sh client-vpn-status
 sudo ./scripts/easy_node.sh client-vpn-down
+# trust pinning defaults to scoped files per discovered directory set:
+#   EASY_NODE_CLIENT_VPN_TRUST_SCOPE=scoped   # default
+# set EASY_NODE_CLIENT_VPN_TRUST_SCOPE=global to reuse one shared trust file.
+# clear pinned trust after expected lab/staging directory key rotations:
+#   ./scripts/easy_node.sh client-vpn-trust-reset --directory-urls http://<SERVER_IP>:8081 --trust-scope scoped
+#   ./scripts/easy_node.sh client-vpn-trust-reset --all-scoped 1
 # prod profile enables operator-floor checks by default (>=2 global/entry/exit operators).
 # staged/single-operator labs can keep checks enabled with:
 #   --operator-min-operators 1 --operator-min-entry-operators 1 --operator-min-exit-operators 1
@@ -257,7 +263,6 @@ sudo ./scripts/easy_node.sh client-vpn-down
   --exit-url http://<A_SERVER_IP>:8084 \
   --min-sources 2 \
   --min-operators 2 \
-  --beta-profile 1 \
   --path-profile balanced
 
 ./scripts/easy_node.sh three-machine-soak \
@@ -268,7 +273,6 @@ sudo ./scripts/easy_node.sh client-vpn-down
   --exit-url http://<A_SERVER_IP>:8084 \
   --rounds 12 \
   --pause-sec 5 \
-  --beta-profile 1 \
   --path-profile balanced
 
 # full production-grade 3-machine sequence (strict control + real WG)
@@ -393,7 +397,9 @@ sudo ./scripts/easy_node.sh prod-wg-strict-ingress-rehearsal \
   --subject client-alice \
   --rounds 10 \
   --pause-sec 5 \
-  --beta-profile 1
+  --path-profile balanced
+
+# public default stays balanced if you omit path-policy expert overrides
 
 # one-bootstrap mode (auto-discover other server hosts/URLs)
 ./scripts/easy_node.sh discover-hosts \
@@ -403,8 +409,7 @@ sudo ./scripts/easy_node.sh prod-wg-strict-ingress-rehearsal \
 ./scripts/easy_node.sh machine-c-test \
   --bootstrap-directory http://<KNOWN_SERVER_IP>:8081 \
   --discovery-wait-sec 20 \
-  --beta-profile 1 \
-  --distinct-operators 1
+  --path-profile balanced
 
 # machine-specific automated validation (use on each host)
 ./scripts/easy_node.sh machine-a-test --public-host <A_SERVER_IP_OR_DNS>
@@ -415,8 +420,7 @@ sudo ./scripts/easy_node.sh prod-wg-strict-ingress-rehearsal \
   --issuer-url http://<A_SERVER_IP_OR_DNS>:8082 \
   --entry-url http://<A_SERVER_IP_OR_DNS>:8083 \
   --exit-url http://<A_SERVER_IP_OR_DNS>:8084 \
-  --beta-profile 1 \
-  --distinct-operators 1
+  --path-profile balanced
 ```
 
 `server-up` note:
@@ -442,14 +446,15 @@ sudo ./scripts/easy_node.sh prod-wg-strict-ingress-rehearsal \
 - `prod-pilot-cohort-quick` runs sustained cohort runbook + fail-closed signoff with minimal flags for operator-friendly pilot execution, and now exposes the same one-time top-level `pre-real-host-readiness` gate used by the underlying cohort runbook.
 - `prod-pilot-cohort-quick` also writes a machine-readable quick run report JSON (`--run-report-json`, default `<reports_dir>/prod_pilot_cohort_quick_report.json`).
 - `prod-pilot-cohort-quick-check` validates quick run-report artifacts, enforces fail-close quick signoff policy, prints the upstream `pre_real_host_readiness_summary_json` path when the quick run report carries it, and prints direct incident handoff pointers (`incident_summary.json` / `incident_report.md`) when failed-round incident artifacts are present.
-- `prod-pilot-cohort-quick-trend` aggregates GO/NO-GO trend across quick run-report artifacts with fail-close thresholds and JSON output, and now carries latest failed incident handoff paths plus attachment manifest pointers when available.
-- `prod-pilot-cohort-quick-alert` maps quick trend metrics to operator severity (`OK`/`WARN`/`CRITICAL`) with optional fail-close exits, and now preserves the same incident handoff attachment pointers in alert JSON/output.
-- `prod-pilot-cohort-quick-dashboard` composes quick trend + alert into one markdown dashboard plus JSON artifacts, and now renders incident handoff paths and attachment manifest pointers in markdown/operator output when present.
+- `prod-pilot-cohort-quick-trend` aggregates GO/NO-GO trend across quick run-report artifacts with fail-close thresholds and JSON output, and now carries latest failed incident handoff paths, attachment manifest pointers, and the upstream `pre_real_host_readiness_summary_json` pointer when available.
+- `prod-pilot-cohort-quick-alert` maps quick trend metrics to operator severity (`OK`/`WARN`/`CRITICAL`) with optional fail-close exits, and now preserves the same incident handoff attachment pointers plus the upstream `pre_real_host_readiness_summary_json` pointer in alert JSON/output.
+- `prod-pilot-cohort-quick-dashboard` composes quick trend + alert into one markdown dashboard plus JSON artifacts, and now renders incident handoff paths, attachment manifest pointers, and the upstream `pre_real_host_readiness_summary_json` pointer in markdown/operator output when present.
 - `prod-pilot-cohort-quick-signoff` runs quick-check + quick-trend + quick-alert in one fail-closed command, enforces `--max-alert-severity` policy, and carries both incident handoff artifact paths and the upstream `pre_real_host_readiness_summary_json` path into its signoff JSON/output when present.
 - `prod-pilot-cohort-quick-runbook` orchestrates quick execution + quick signoff + optional quick dashboard generation with one runbook summary artifact, preserves incident handoff artifact paths from quick signoff when present, and now exposes the same one-time top-level `pre-real-host-readiness` gate used by the underlying cohort runbook.
 - `prod-pilot-cohort-campaign` wraps `prod-pilot-cohort-quick-runbook` with low-prompt sustained campaign defaults, deterministic artifact paths, strict signoff policy, generated markdown/JSON handoff summaries for real machine-C pilot operations, and the same top-level `pre-real-host-readiness` gate control.
 - `prod-pilot-cohort-campaign-summary` regenerates one concise operator handoff report (markdown + JSON) from saved campaign/runbook artifacts, surfaces failed-round incident snapshot summary/report paths when present, preserves normalized source pointers (`runbook`, `pre-real-host readiness summary`, `quick run report`, `cohort summary`, failed `run report`), and can fail-close on `NO-GO`.
 - `prod-gate-check` and `prod-pilot-cohort-check` now also print normalized `incident_handoff` lines with direct incident pointers (`incident_summary.json` / `incident_report.md`) when failed-run incident artifacts are available, so signoff/debug output is actionable without manually unpacking the bundle first.
+- `prod-wg-validate` now blocks synthetic client ingress by default in real production WG validation (`--client-inner-source synthetic` fails fast unless `--allow-synthetic-ingress 1` is set), while `prod-wg-soak --strict-ingress-rehearsal=1` automatically forwards that explicit override for controlled strict-ingress negative tests.
 - `server-up --prod-profile 1` forces strict fail-closed runtime (`BETA_STRICT_MODE=1`, `PROD_STRICT_MODE=1`), enables mTLS, enables live command-backend WG dataplane defaults, and on authority nodes requires signed issuer-admin auth (`ISSUER_ADMIN_REQUIRE_SIGNED=1`, token admin auth disabled).
 - `server-up --prod-profile 1` now also applies hardened abuse/adjudication defaults (`ENTRY_OPEN_RPS=12`, `ENTRY_BAN_THRESHOLD=3`, `ENTRY_BAN_SEC=90`, `ENTRY_MAX_CONCURRENT_OPENS=96`, peer+final dispute/appeal vote floors, final operator/source quorum floors, `DIRECTORY_FINAL_ADJUDICATION_MIN_RATIO=0.67`, dispute/appeal TTL caps at `259200s`).
 - `server-up --prod-profile 1` requires at least 2 issuer URLs for strict issuer quorum; include at least one peer directory from a distinct authority/issuer operator.
@@ -474,12 +479,13 @@ sudo ./scripts/easy_node.sh prod-wg-strict-ingress-rehearsal \
 - `docs/manual-validation-backlog.md` (deferred real-host validation queue)
 - `./scripts/easy_node.sh manual-validation-status --show-json 1` (current real-host readiness state: runtime hygiene + recorded manual checks, now including direct pointers to the latest failed incident bundle when a recorded smoke/signoff run captured one)
 - `./scripts/easy_node.sh manual-validation-report --print-report 1 --print-summary-json 1` (generate one shareable markdown + JSON readiness handoff artifact from the current real-host validation state, with latest failed incident pointers when present and direct bundle attachment paths for refreshed readiness-report artifacts when a failed run captured them)
-- `sudo ./scripts/easy_node.sh pre-real-host-readiness --strict-beta 1 --print-summary-json 1` (one-command pre-machine-C readiness sweep: runtime-fix + recorded WG-only selftest + refreshed readiness report, with a focused `machine_c_smoke_ready` answer even while the final 3-machine signoff is still pending)
+- `sudo ./scripts/easy_node.sh pre-real-host-readiness --strict-beta 1 --print-summary-json 1` (one-command pre-machine-C readiness sweep: `runtime-fix-record` + recorded WG-only selftest + refreshed readiness report, with a focused `machine_c_smoke_ready` answer even while the final 3-machine signoff is still pending)
 - `sudo ./scripts/easy_node.sh wg-only-stack-selftest-record --strict-beta 1 --print-summary-json 1` (rerun the Linux root WG-only selftest, record it automatically, and refresh the shared readiness report)
 - `./scripts/easy_node.sh manual-validation-record --check-id ... --status ...` (store the result of a real-host validation step)
-- `./scripts/easy_node.sh runtime-doctor --show-json 1` (quick runtime hygiene check before real-host reruns)
-- `sudo ./scripts/easy_node.sh runtime-fix --prune-wg-only-dir 1 --show-json 1` (safe cleanup pass before repeating real-host validation; now also repairs safe repo/runtime ownership drift when possible)
-- `sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country` (one-command real machine-C smoke run with automatic receipt recording, optional pre-run hygiene repair, saved runtime doctor/fix artifacts, automatic incident snapshot capture on failed runs, automatic refresh of the shared manual-validation readiness report, refreshed readiness-report artifacts attached back into the failed incident bundle, and final receipt artifacts that include that refreshed readiness report)
+- `./scripts/easy_node.sh runtime-doctor --show-json 1` (quick runtime hygiene check before real-host reruns; if the reported blocker is remediable, the readiness wrappers now point at `sudo ./scripts/easy_node.sh runtime-fix-record --prune-wg-only-dir 1 --print-summary-json 1` as the immediate next action)
+- `sudo ./scripts/easy_node.sh runtime-fix-record --prune-wg-only-dir 1 --print-summary-json 1` (safe recorded cleanup pass before repeating real-host validation; wraps `runtime-fix`, keeps a durable summary/log artifact, records the runtime-hygiene result, and refreshes the shared manual-validation readiness report through the underlying fix flow)
+- `./scripts/easy_node.sh three-machine-docker-readiness-record --path-profile balanced --soak-rounds 6 --soak-pause-sec 3 --print-summary-json 1` (one-command recorded dockerized 3-machine rehearsal for one-host control-plane confidence before real machine-C reruns)
+- `sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --path-profile balanced --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country` (one-command real machine-C smoke run with automatic receipt recording, public `balanced` profile defaults, optional pre-run hygiene repair, saved runtime doctor/fix artifacts, automatic incident snapshot capture on failed runs, automatic refresh of the shared manual-validation readiness report, refreshed readiness-report artifacts attached back into the failed incident bundle, and final receipt artifacts that include that refreshed readiness report)
 - `sudo ./scripts/easy_node.sh three-machine-prod-signoff --bundle-dir .easy-node-logs/prod_gate_bundle --directory-a https://A_HOST:8081 --directory-b https://B_HOST:8081 --issuer-url https://A_HOST:8082 --entry-url https://A_HOST:8083 --exit-url https://A_HOST:8084 --pre-real-host-readiness 1 --runtime-fix 1 --print-summary-json 1` (one-command true 3-machine production signoff run with automatic receipt recording, optional pre-run hygiene repair, saved runtime doctor/fix artifacts, automatic attachment of those runtime artifacts into failed incident snapshots, automatic refresh of the shared manual-validation readiness report, refreshed readiness-report artifacts attached back into the failed incident bundle, and final receipt artifacts that include that refreshed readiness report)
 - `docs/product-roadmap.md` (beta -> v1 -> v2 delivery path)
 
