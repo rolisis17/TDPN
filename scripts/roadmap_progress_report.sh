@@ -69,7 +69,9 @@ need_cmd() {
 refresh_manual_validation="1"
 refresh_single_machine_readiness="0"
 manual_refresh_timeout_sec="${ROADMAP_PROGRESS_MANUAL_REFRESH_TIMEOUT_SEC:-900}"
-single_machine_refresh_timeout_sec="${ROADMAP_PROGRESS_SINGLE_MACHINE_REFRESH_TIMEOUT_SEC:-1800}"
+# Full single-machine refresh can include ci_local + beta_preflight + deep_test_suite.
+# Keep default high enough to avoid false fail-close timeouts on healthy hosts.
+single_machine_refresh_timeout_sec="${ROADMAP_PROGRESS_SINGLE_MACHINE_REFRESH_TIMEOUT_SEC:-7200}"
 print_report="1"
 print_summary_json="1"
 
