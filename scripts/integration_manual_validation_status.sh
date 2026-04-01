@@ -26,6 +26,7 @@ RECORDED_LOG="$TMP_DIR/integration_manual_validation_status_recorded.log"
 INCIDENT_RECORD_LOG="$TMP_DIR/integration_manual_validation_record_smoke_fail.log"
 INCIDENT_LOG="$TMP_DIR/integration_manual_validation_status_incident.log"
 PROFILE_BLOCKED_LOG="$TMP_DIR/integration_manual_validation_status_profile_blocked.log"
+PROFILE_STALE_LOG="$TMP_DIR/integration_manual_validation_status_profile_stale.log"
 INVALID_STATUS_LOG="$TMP_DIR/integration_manual_validation_status_invalid_status_json.log"
 LOCK_RECOVER_LOG="$TMP_DIR/integration_manual_validation_record_lock_recover.log"
 LOCK_TIMEOUT_LOG="$TMP_DIR/integration_manual_validation_record_lock_timeout.log"
@@ -779,6 +780,54 @@ if ! printf '%s\n' "$profile_blocked_json" | jq -e '
 ' >/dev/null; then
   echo "profile-blocked status JSON missing expected profile_default_gate fields"
   printf '%s\n' "$profile_blocked_json"
+  exit 1
+fi
+
+echo "[manual-validation] profile-default stale non-refreshed summary"
+cat >"$PROFILE_SIGNOFF_SUMMARY_JSON" <<'EOF_PROFILE_SIGNOFF_STALE'
+{
+  "version": 1,
+  "status": "fail",
+  "final_rc": 1,
+  "failure_stage": "campaign_check",
+  "inputs": {
+    "refresh_campaign": false
+  },
+  "decision": {
+    "decision": "NO-GO",
+    "recommended_profile": "balanced"
+  }
+}
+EOF_PROFILE_SIGNOFF_STALE
+
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR" \
+MANUAL_VALIDATION_PROFILE_COMPARE_SIGNOFF_SUMMARY_JSON="$PROFILE_SIGNOFF_SUMMARY_JSON" \
+RUNTIME_DOCTOR_SCRIPT="$FAKE_DOCTOR" \
+./scripts/manual_validation_status.sh --show-json 1 >$PROFILE_STALE_LOG
+
+if ! rg -q '\[manual-validation-status\] profile_default_gate_status=pending' $PROFILE_STALE_LOG; then
+  echo "profile-stale status missing profile_default_gate_status=pending line"
+  cat $PROFILE_STALE_LOG
+  exit 1
+fi
+profile_stale_json="$(awk '/^\[manual-validation-status\] summary_json_payload:/{flag=1; next} flag{print}' $PROFILE_STALE_LOG)"
+if [[ -z "$profile_stale_json" ]]; then
+  echo "profile-stale status missing JSON payload"
+  cat $PROFILE_STALE_LOG
+  exit 1
+fi
+if ! printf '%s\n' "$profile_stale_json" | jq -e '
+  .summary.profile_default_gate.status == "pending"
+  and .summary.profile_default_gate.available == true
+  and .summary.profile_default_gate.valid_json == true
+  and .summary.profile_default_gate.failure_stage == "campaign_check"
+  and .summary.profile_default_gate.non_root_refresh_blocked == false
+  and .summary.profile_default_gate.stale_non_refreshed == true
+  and .summary.profile_default_gate.refresh_campaign == false
+  and (.summary.profile_default_gate.next_command | startswith("sudo ./scripts/easy_node.sh profile-compare-campaign-signoff"))
+' >/dev/null; then
+  echo "profile-stale status JSON missing expected stale profile_default_gate fields"
+  printf '%s\n' "$profile_stale_json"
   exit 1
 fi
 

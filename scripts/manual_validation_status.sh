@@ -532,6 +532,8 @@ build_profile_default_gate_json() {
   local campaign_check_summary_json=""
   local failure_stage=""
   local non_root_refresh_blocked="0"
+  local stale_non_refreshed="0"
+  local refresh_campaign="0"
   local signoff_status=""
 
   if [[ -f "$signoff_summary_json" ]]; then
@@ -547,6 +549,7 @@ build_profile_default_gate_json() {
     recommended_profile="$(jq -r '.decision.recommended_profile // ""' "$signoff_summary_json")"
     trend_source="$(jq -r '.decision.trend_source // ""' "$signoff_summary_json")"
     final_rc="$(jq -r '.final_rc // 0' "$signoff_summary_json")"
+    refresh_campaign="$(jq -r '(.inputs.refresh_campaign // false) | if . then "1" else "0" end' "$signoff_summary_json")"
     campaign_summary_json="$(jq -r '.artifacts.campaign_summary_json // ""' "$signoff_summary_json")"
     campaign_report_md="$(jq -r '.artifacts.campaign_report_md // ""' "$signoff_summary_json")"
     campaign_check_summary_json="$(jq -r '.artifacts.campaign_check_summary_json // ""' "$signoff_summary_json")"
@@ -569,7 +572,12 @@ build_profile_default_gate_json() {
         fi
         ;;
       fail)
-        if [[ "$non_root_refresh_blocked" == "1" ]]; then
+        if [[ "$refresh_campaign" != "1" ]]; then
+          status="pending"
+          stale_non_refreshed="1"
+          notes="profile compare campaign signoff summary is stale (refresh-campaign=0); rerun with refresh-campaign=1"
+          next_command="sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 1 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1"
+        elif [[ "$non_root_refresh_blocked" == "1" ]]; then
           status="pending"
           notes="profile compare campaign signoff refresh needs root for local stack (non-root host)"
           next_command="sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 1 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1"
@@ -596,6 +604,8 @@ build_profile_default_gate_json() {
     --arg final_rc "$final_rc" \
     --arg failure_stage "$failure_stage" \
     --arg non_root_refresh_blocked "$non_root_refresh_blocked" \
+    --arg stale_non_refreshed "$stale_non_refreshed" \
+    --arg refresh_campaign "$refresh_campaign" \
     --arg campaign_summary_json "$campaign_summary_json" \
     --arg campaign_report_md "$campaign_report_md" \
     --arg campaign_check_summary_json "$campaign_check_summary_json" \
@@ -614,6 +624,8 @@ build_profile_default_gate_json() {
       final_rc: ($final_rc | tonumber),
       failure_stage: $failure_stage,
       non_root_refresh_blocked: ($non_root_refresh_blocked == "1"),
+      stale_non_refreshed: ($stale_non_refreshed == "1"),
+      refresh_campaign: ($refresh_campaign == "1"),
       next_command: $next_command,
       artifacts: {
         campaign_summary_json: $campaign_summary_json,
