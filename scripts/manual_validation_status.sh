@@ -57,6 +57,13 @@ abs_path() {
   fi
 }
 
+need_cmd() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "missing required command: $1"
+    exit 2
+  fi
+}
+
 manual_validation_state_dir() {
   if [[ -n "${EASY_NODE_MANUAL_VALIDATION_STATE_DIR:-}" ]]; then
     printf '%s\n' "${EASY_NODE_MANUAL_VALIDATION_STATE_DIR}"
@@ -692,6 +699,9 @@ while [[ $# -gt 0 ]]; do
 done
 
 bool_arg_or_die "--show-json" "$show_json"
+for cmd in jq awk date mktemp; do
+  need_cmd "$cmd"
+done
 if ! [[ "$base_port" =~ ^[0-9]+$ ]]; then
   echo "--base-port must be an integer"
   exit 2
@@ -749,12 +759,29 @@ if [[ -z "$runtime_doctor_json" ]]; then
   rm -f "$doctor_log"
   exit 1
 fi
+if ! printf '%s\n' "$runtime_doctor_json" | jq -e . >/dev/null 2>&1; then
+  echo "manual-validation-status failed: runtime-doctor emitted invalid JSON summary"
+  cat "$doctor_log"
+  rm -f "$doctor_log"
+  exit 1
+fi
 rm -f "$doctor_log"
 
 state_dir="$(manual_validation_state_dir)"
 status_json="${state_dir}/status.json"
+recorded_status_file_present="0"
+recorded_status_json_valid="1"
+recorded_status_json_warning=""
 if [[ -f "$status_json" ]]; then
-  recorded_json="$(cat "$status_json")"
+  recorded_status_file_present="1"
+  if jq -e . "$status_json" >/dev/null 2>&1; then
+    recorded_json="$(cat "$status_json")"
+  else
+    recorded_status_json_valid="0"
+    recorded_status_json_warning="manual-validation status file is invalid JSON; falling back to empty checks: $status_json"
+    recorded_json='{"version":1,"checks":{}}'
+    echo "[manual-validation-status] warn=$recorded_status_json_warning"
+  fi
 else
   recorded_json='{"version":1,"checks":{}}'
 fi
@@ -808,6 +835,9 @@ combined_json="$(
   jq -n \
     --arg state_dir "$state_dir" \
     --arg status_json "$status_json" \
+    --arg recorded_status_json_warning "$recorded_status_json_warning" \
+    --argjson recorded_status_file_present "$recorded_status_file_present" \
+    --argjson recorded_status_json_valid "$recorded_status_json_valid" \
     --arg runtime_doctor_json_rc "$runtime_doctor_rc" \
     --argjson recorded "$recorded_json" \
     --argjson runtime_doctor "$runtime_doctor_json" \
@@ -824,6 +854,12 @@ combined_json="$(
         generated_at_utc: (now | todateiso8601),
         state_dir: $state_dir,
         status_json: $status_json,
+        recorded_status: {
+          file_exists: ($recorded_status_file_present == 1),
+          valid_json: ($recorded_status_json_valid == 1),
+          fallback_used: ($recorded_status_file_present == 1 and ($recorded_status_json_valid != 1)),
+          warning: $recorded_status_json_warning
+        },
         runtime_doctor_exit_code: ($runtime_doctor_json_rc | tonumber),
         runtime_doctor: $runtime_doctor,
         checks: [

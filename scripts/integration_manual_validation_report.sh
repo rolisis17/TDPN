@@ -24,8 +24,10 @@ RECORD_FAIL_LOG="$TMP_DIR/integration_manual_validation_report_record_fail.log"
 REPORT_LOG="$TMP_DIR/integration_manual_validation_report.log"
 FAIL_CLOSE_LOG="$TMP_DIR/integration_manual_validation_report_fail_close.log"
 PROFILE_BLOCKED_REPORT_LOG="$TMP_DIR/integration_manual_validation_report_profile_blocked.log"
+INVALID_STATUS_PAYLOAD_LOG="$TMP_DIR/integration_manual_validation_report_invalid_status_payload.log"
 CAPTURE="$TMP_DIR/capture.log"
 FAKE_REPORT="$TMP_DIR/fake_manual_validation_report.sh"
+FAKE_STATUS_INVALID="$TMP_DIR/fake_manual_validation_status_invalid_json.sh"
 
 cat >"$FAKE_DOCTOR" <<'EOF_DOCTOR'
 #!/usr/bin/env bash
@@ -524,6 +526,39 @@ fi
 if ! rg -q 'manual-validation-report: readiness is NOT_READY' $FAIL_CLOSE_LOG; then
   echo "manual validation report fail-close missing expected message"
   cat $FAIL_CLOSE_LOG
+  exit 1
+fi
+
+cat >"$FAKE_STATUS_INVALID" <<'EOF_STATUS_INVALID'
+#!/usr/bin/env bash
+set -euo pipefail
+cat <<'OUT'
+[manual-validation-status] summary_json_payload:
+{"version":1,"checks":
+OUT
+EOF_STATUS_INVALID
+chmod +x "$FAKE_STATUS_INVALID"
+
+set +e
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR" \
+MANUAL_VALIDATION_PROFILE_COMPARE_SIGNOFF_SUMMARY_JSON="$PROFILE_SIGNOFF_SUMMARY_JSON" \
+RUNTIME_DOCTOR_SCRIPT="$FAKE_DOCTOR" \
+MANUAL_VALIDATION_STATUS_SCRIPT="$FAKE_STATUS_INVALID" \
+./scripts/manual_validation_report.sh \
+  --summary-json "$TMP_DIR/invalid_status_summary.json" \
+  --report-md "$TMP_DIR/invalid_status_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >$INVALID_STATUS_PAYLOAD_LOG 2>&1
+rc=$?
+set -e
+if [[ $rc -eq 0 ]]; then
+  echo "manual validation report should fail when status payload is invalid JSON"
+  cat $INVALID_STATUS_PAYLOAD_LOG
+  exit 1
+fi
+if ! rg -q 'manual-validation-report failed: manual-validation-status emitted invalid JSON summary' $INVALID_STATUS_PAYLOAD_LOG; then
+  echo "manual validation report missing invalid-status-payload error"
+  cat $INVALID_STATUS_PAYLOAD_LOG
   exit 1
 fi
 

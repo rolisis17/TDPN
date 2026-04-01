@@ -187,7 +187,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-for cmd in jq date awk; do
+for cmd in jq date awk mktemp; do
   need_cmd "$cmd"
 done
 
@@ -255,6 +255,12 @@ if [[ -z "$status_json_payload" ]]; then
   rm -f "$status_log"
   exit 1
 fi
+if ! printf '%s\n' "$status_json_payload" | jq -e . >/dev/null 2>&1; then
+  echo "manual-validation-report failed: manual-validation-status emitted invalid JSON summary"
+  cat "$status_log"
+  rm -f "$status_log"
+  exit 1
+fi
 rm -f "$status_log"
 
 ready_json="false"
@@ -279,7 +285,9 @@ report_json="$(
       source_status_exit_code: $source_status_exit_code
     }'
 )"
-printf '%s\n' "$report_json" >"$summary_json"
+summary_tmp="$(mktemp "${summary_json}.tmp.XXXXXX")"
+printf '%s\n' "$report_json" >"$summary_tmp"
+mv -f "$summary_tmp" "$summary_json"
 
 summary_total="$(printf '%s\n' "$report_json" | jq -r '.summary.total_checks // 0')"
 summary_pass="$(printf '%s\n' "$report_json" | jq -r '.summary.pass_checks // 0')"
@@ -350,6 +358,7 @@ incident_checks_md="$(printf '%s\n' "$report_json" | jq -r '
   ] | if length == 0 then "- None" else join("\n") end
 ')"
 
+report_md_tmp="$(mktemp "${report_md}.tmp.XXXXXX")"
 {
   printf '# Manual Validation Readiness Report\n\n'
   printf -- '- Generated at (UTC): `%s`\n' "$(printf '%s\n' "$report_json" | jq -r '.generated_at_utc // ""')"
@@ -453,7 +462,9 @@ incident_checks_md="$(printf '%s\n' "$report_json" | jq -r '
   else
     printf -- '- None recorded.\n'
   fi
-} >"$report_md"
+} >"$report_md_tmp"
+
+mv -f "$report_md_tmp" "$report_md"
 
 echo "[manual-validation-report] readiness_status=$readiness_status total=$summary_total pass=$summary_pass warn=$summary_warn fail=$summary_fail pending=$summary_pending"
 echo "[manual-validation-report] summary_json=$summary_json"

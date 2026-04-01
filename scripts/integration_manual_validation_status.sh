@@ -26,6 +26,10 @@ RECORDED_LOG="$TMP_DIR/integration_manual_validation_status_recorded.log"
 INCIDENT_RECORD_LOG="$TMP_DIR/integration_manual_validation_record_smoke_fail.log"
 INCIDENT_LOG="$TMP_DIR/integration_manual_validation_status_incident.log"
 PROFILE_BLOCKED_LOG="$TMP_DIR/integration_manual_validation_status_profile_blocked.log"
+INVALID_STATUS_LOG="$TMP_DIR/integration_manual_validation_status_invalid_status_json.log"
+LOCK_RECOVER_LOG="$TMP_DIR/integration_manual_validation_record_lock_recover.log"
+LOCK_TIMEOUT_LOG="$TMP_DIR/integration_manual_validation_record_lock_timeout.log"
+INVALID_DOCTOR_JSON_LOG="$TMP_DIR/integration_manual_validation_status_invalid_runtime_doctor_json.log"
 
 cat >"$FAKE_DOCTOR" <<'EOF'
 #!/usr/bin/env bash
@@ -60,6 +64,18 @@ cat <<'OUT'
 OUT
 EOF
 chmod +x "$FAKE_DOCTOR"
+
+FAKE_DOCTOR_INVALID="$TMP_DIR/fake_runtime_doctor_invalid_json.sh"
+cat >"$FAKE_DOCTOR_INVALID" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+cat <<'OUT'
+[runtime-doctor] status=WARN findings=1 warnings=1 failures=0
+[runtime-doctor] summary_json_payload:
+{"version":1,"status":"WARN",
+OUT
+EOF
+chmod +x "$FAKE_DOCTOR_INVALID"
 
 echo "[manual-validation] baseline status"
 EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR" \
@@ -209,6 +225,103 @@ if ! printf '%s\n' "$baseline_json" | jq -e '
   exit 1
 fi
 
+echo "[manual-validation] invalid runtime-doctor JSON"
+set +e
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR" \
+MANUAL_VALIDATION_PROFILE_COMPARE_SIGNOFF_SUMMARY_JSON="$PROFILE_SIGNOFF_SUMMARY_JSON" \
+RUNTIME_DOCTOR_SCRIPT="$FAKE_DOCTOR_INVALID" \
+./scripts/manual_validation_status.sh --show-json 0 >$INVALID_DOCTOR_JSON_LOG 2>&1
+rc=$?
+set -e
+if [[ $rc -eq 0 ]]; then
+  echo "invalid runtime-doctor JSON path should have failed"
+  cat $INVALID_DOCTOR_JSON_LOG
+  exit 1
+fi
+if ! rg -q 'manual-validation-status failed: runtime-doctor emitted invalid JSON summary' $INVALID_DOCTOR_JSON_LOG; then
+  echo "invalid runtime-doctor JSON path missing expected message"
+  cat $INVALID_DOCTOR_JSON_LOG
+  exit 1
+fi
+
+echo "[manual-validation] invalid status.json fallback"
+mkdir -p "$STATE_DIR"
+printf '%s\n' '{"version":1,"checks":' >"$STATE_DIR/status.json"
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR" \
+MANUAL_VALIDATION_PROFILE_COMPARE_SIGNOFF_SUMMARY_JSON="$PROFILE_SIGNOFF_SUMMARY_JSON" \
+RUNTIME_DOCTOR_SCRIPT="$FAKE_DOCTOR" \
+./scripts/manual_validation_status.sh --show-json 1 >$INVALID_STATUS_LOG
+
+if ! rg -q '\[manual-validation-status\] warn=manual-validation status file is invalid JSON; falling back to empty checks:' $INVALID_STATUS_LOG; then
+  echo "invalid status fallback missing warning line"
+  cat $INVALID_STATUS_LOG
+  exit 1
+fi
+invalid_status_json="$(awk '/^\[manual-validation-status\] summary_json_payload:/{flag=1; next} flag{print}' $INVALID_STATUS_LOG)"
+if [[ -z "$invalid_status_json" ]]; then
+  echo "invalid status fallback missing JSON payload"
+  cat $INVALID_STATUS_LOG
+  exit 1
+fi
+if ! printf '%s\n' "$invalid_status_json" | jq -e '
+  .recorded_status.file_exists == true
+  and .recorded_status.valid_json == false
+  and .recorded_status.fallback_used == true
+  and ((.recorded_status.warning // "") | length > 0)
+  and .summary.next_action_check_id == "runtime_hygiene"
+' >/dev/null; then
+  echo "invalid status fallback JSON missing recorded_status fields"
+  printf '%s\n' "$invalid_status_json"
+  exit 1
+fi
+
+echo "[manual-validation] stale status lock recovery"
+LOCK_STATE_DIR="$TMP_DIR/lock_state"
+mkdir -p "$LOCK_STATE_DIR/status.lock"
+printf '%s\n' "999999" >"$LOCK_STATE_DIR/status.lock/pid"
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$LOCK_STATE_DIR" \
+./scripts/manual_validation_record.sh \
+  --check-id runtime_hygiene \
+  --status pass \
+  --notes "lock recovery path" \
+  --show-json 0 >"$LOCK_RECOVER_LOG"
+
+if ! rg -q '\[manual-validation-record\] check_id=runtime_hygiene status=pass' $LOCK_RECOVER_LOG; then
+  echo "manual-validation-record lock recovery path missing success line"
+  cat $LOCK_RECOVER_LOG
+  exit 1
+fi
+if [[ -d "$LOCK_STATE_DIR/status.lock" ]]; then
+  echo "manual-validation-record lock recovery path left stale lock directory"
+  ls -la "$LOCK_STATE_DIR/status.lock"
+  exit 1
+fi
+if ! jq -e '.checks.runtime_hygiene.status == "pass"' "$LOCK_STATE_DIR/status.json" >/dev/null; then
+  echo "manual-validation-record lock recovery path did not update status ledger"
+  cat "$LOCK_STATE_DIR/status.json"
+  exit 1
+fi
+
+echo "[manual-validation] status lock timeout"
+mkdir -p "$LOCK_STATE_DIR/status.lock"
+printf '%s\n' "$$" >"$LOCK_STATE_DIR/status.lock/pid"
+if EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$LOCK_STATE_DIR" \
+  MANUAL_VALIDATION_RECORD_LOCK_TIMEOUT_SEC=0 \
+  ./scripts/manual_validation_record.sh \
+    --check-id machine_c_vpn_smoke \
+    --status pending \
+    --show-json 0 >"$LOCK_TIMEOUT_LOG" 2>&1; then
+  echo "manual-validation-record should fail fast when lock is held"
+  cat "$LOCK_TIMEOUT_LOG"
+  exit 1
+fi
+if ! rg -q '^timed out acquiring manual-validation state lock:' $LOCK_TIMEOUT_LOG; then
+  echo "manual-validation-record lock timeout path missing expected error"
+  cat "$LOCK_TIMEOUT_LOG"
+  exit 1
+fi
+rm -rf "$LOCK_STATE_DIR/status.lock"
+
 echo "[manual-validation] record pass receipt"
 artifact_path="$ROOT_DIR/scripts/easy_node.sh"
 EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR" \
@@ -225,6 +338,11 @@ if ! rg -q '\[manual-validation-record\] check_id=wg_only_stack_selftest status=
   cat $RECORD_LOG
   exit 1
 fi
+if ! rg -q '\[manual-validation-record\] warn=existing status JSON invalid; resetting status ledger before recording new check' $RECORD_LOG; then
+  echo "manual-validation-record missing invalid status fallback warning"
+  cat $RECORD_LOG
+  exit 1
+fi
 receipt_json_path="$(sed -n 's/^\[manual-validation-record\] receipt_json=//p' $RECORD_LOG | tail -n 1)"
 if [[ -z "$receipt_json_path" || ! -f "$receipt_json_path" ]]; then
   echo "manual-validation-record missing receipt artifact"
@@ -234,6 +352,11 @@ fi
 if ! jq -e --arg artifact "$artifact_path" '.check_id == "wg_only_stack_selftest" and .status == "pass" and (.artifacts | index($artifact) != null)' "$receipt_json_path" >/dev/null; then
   echo "manual-validation-record receipt JSON missing expected fields"
   cat "$receipt_json_path"
+  exit 1
+fi
+if ! jq -e '.checks.wg_only_stack_selftest.status == "pass"' "$STATE_DIR/status.json" >/dev/null; then
+  echo "manual-validation-record did not recover invalid status.json into valid ledger"
+  cat "$STATE_DIR/status.json"
   exit 1
 fi
 
