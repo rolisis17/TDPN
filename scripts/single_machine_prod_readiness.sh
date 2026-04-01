@@ -8,6 +8,7 @@ usage() {
   cat <<'USAGE'
 Usage:
   ./scripts/single_machine_prod_readiness.sh \
+    [--step-timeout-sec N] \
     [--run-ci-local 0|1] \
     [--run-beta-preflight 0|1] \
     [--run-deep-suite 0|1] \
@@ -102,6 +103,7 @@ run_ci_local="1"
 run_beta_preflight="1"
 run_deep_suite="1"
 run_runtime_fix_record="1"
+step_timeout_sec="${SINGLE_MACHINE_STEP_TIMEOUT_SEC:-5400}"
 run_three_machine_docker_readiness="auto"
 three_machine_docker_readiness_run_validate="1"
 three_machine_docker_readiness_run_soak="1"
@@ -147,6 +149,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --run-runtime-fix-record)
       run_runtime_fix_record="${2:-}"
+      shift 2
+      ;;
+    --step-timeout-sec)
+      step_timeout_sec="${2:-}"
       shift 2
       ;;
     --run-three-machine-docker-readiness)
@@ -286,6 +292,10 @@ bool_arg_or_die "--run-ci-local" "$run_ci_local"
 bool_arg_or_die "--run-beta-preflight" "$run_beta_preflight"
 bool_arg_or_die "--run-deep-suite" "$run_deep_suite"
 bool_arg_or_die "--run-runtime-fix-record" "$run_runtime_fix_record"
+if ! [[ "$step_timeout_sec" =~ ^[0-9]+$ ]]; then
+  echo "--step-timeout-sec must be an integer >= 0"
+  exit 2
+fi
 tri_state_or_die "--run-three-machine-docker-readiness" "$run_three_machine_docker_readiness"
 bool_arg_or_die "--three-machine-docker-readiness-run-validate" "$three_machine_docker_readiness_run_validate"
 bool_arg_or_die "--three-machine-docker-readiness-run-soak" "$three_machine_docker_readiness_run_soak"
@@ -333,6 +343,7 @@ deep_test_suite_script="${SINGLE_MACHINE_DEEP_TEST_SUITE_SCRIPT:-$ROOT_DIR/scrip
 runtime_fix_record_script="${SINGLE_MACHINE_RUNTIME_FIX_RECORD_SCRIPT:-$ROOT_DIR/scripts/runtime_fix_record.sh}"
 three_machine_docker_readiness_script="${SINGLE_MACHINE_THREE_MACHINE_DOCKER_READINESS_SCRIPT:-$ROOT_DIR/scripts/three_machine_docker_readiness.sh}"
 profile_compare_campaign_signoff_script="${SINGLE_MACHINE_PROFILE_COMPARE_CAMPAIGN_SIGNOFF_SCRIPT:-$ROOT_DIR/scripts/profile_compare_campaign_signoff.sh}"
+default_profile_compare_campaign_signoff_script="$ROOT_DIR/scripts/profile_compare_campaign_signoff.sh"
 pre_real_host_readiness_script="${SINGLE_MACHINE_PRE_REAL_HOST_READINESS_SCRIPT:-$ROOT_DIR/scripts/pre_real_host_readiness.sh}"
 real_wg_privileged_matrix_record_script="${SINGLE_MACHINE_REAL_WG_PRIVILEGED_MATRIX_RECORD_SCRIPT:-$ROOT_DIR/scripts/real_wg_privileged_matrix_record.sh}"
 manual_validation_report_script="${SINGLE_MACHINE_MANUAL_VALIDATION_REPORT_SCRIPT:-$ROOT_DIR/scripts/manual_validation_report.sh}"
@@ -357,6 +368,8 @@ mkdir -p "$log_dir"
 
 summary_json="$(abs_path "${summary_json:-$log_dir/single_machine_prod_readiness_${run_stamp}.json}")"
 mkdir -p "$(dirname "$summary_json")"
+summary_latest_json="$(abs_path "${SINGLE_MACHINE_SUMMARY_JSON_LATEST:-$log_dir/single_machine_prod_readiness_latest.json}")"
+mkdir -p "$(dirname "$summary_latest_json")"
 
 three_machine_docker_readiness_summary_json="$(abs_path "${three_machine_docker_readiness_summary_json:-$log_dir/single_machine_prod_readiness_${run_stamp}_three_machine_docker_readiness.json}")"
 mkdir -p "$(dirname "$three_machine_docker_readiness_summary_json")"
@@ -367,29 +380,56 @@ profile_compare_campaign_signoff_summary_json="$(abs_path "${profile_compare_cam
 mkdir -p "$(dirname "$profile_compare_campaign_signoff_summary_json")"
 profile_compare_campaign_summary_json="$profile_compare_campaign_signoff_reports_dir/profile_compare_campaign_summary.json"
 
-manual_validation_report_summary_json="$(abs_path "${manual_validation_report_summary_json:-$log_dir/manual_validation_readiness_summary.json}")"
-manual_validation_report_md="$(abs_path "${manual_validation_report_md:-$log_dir/manual_validation_readiness_report.md}")"
+manual_validation_report_summary_json="$(abs_path "${manual_validation_report_summary_json:-${SINGLE_MACHINE_MANUAL_VALIDATION_REPORT_SUMMARY_JSON:-$log_dir/manual_validation_readiness_summary.json}}")"
+manual_validation_report_md="$(abs_path "${manual_validation_report_md:-${SINGLE_MACHINE_MANUAL_VALIDATION_REPORT_MD:-$log_dir/manual_validation_readiness_report.md}}")"
 mkdir -p "$(dirname "$manual_validation_report_summary_json")" "$(dirname "$manual_validation_report_md")"
 
 steps_file="$(mktemp)"
 trap 'rm -f "$steps_file"' EXIT
 
 steps_failed="0"
+step_timeout_warning_emitted="0"
+
+run_with_optional_timeout() {
+  local timeout_sec="$1"
+  shift
+  if [[ "$timeout_sec" -gt 0 ]]; then
+    if command -v timeout >/dev/null 2>&1; then
+      timeout "${timeout_sec}s" "$@"
+    else
+      if [[ "$step_timeout_warning_emitted" == "0" ]]; then
+        echo "[single-machine-prod-readiness] warn=timeout command not found; step timeout guard disabled"
+        step_timeout_warning_emitted="1"
+      fi
+      "$@"
+    fi
+  else
+    "$@"
+  fi
+}
 
 run_step() {
   local step_id="$1"
   local label="$2"
   local command="$3"
   local note="${4:-}"
-  local start_sec end_sec duration_sec rc status
+  local start_sec end_sec duration_sec rc status timed_out
   local step_log="$log_dir/single_machine_prod_readiness_${run_stamp}_${step_id}.log"
 
+  echo "[single-machine-prod-readiness] step=${step_id} status=running timeout_sec=${step_timeout_sec} log=${step_log}"
   start_sec="$(date +%s)"
-  if bash -lc "cd $(printf '%q' "$ROOT_DIR") && $command" >"$step_log" 2>&1; then
+  set +e
+  run_with_optional_timeout "$step_timeout_sec" bash -lc "cd $(printf '%q' "$ROOT_DIR") && $command" >"$step_log" 2>&1
+  rc=$?
+  set -e
+  timed_out="false"
+  if [[ "$rc" -eq 0 ]]; then
     rc=0
     status="pass"
   else
-    rc=$?
+    if [[ "$rc" -eq 124 ]]; then
+      timed_out="true"
+    fi
     status="fail"
     steps_failed=$((steps_failed + 1))
   fi
@@ -403,6 +443,8 @@ run_step() {
     --arg command "$command" \
     --arg note "$note" \
     --arg log "$step_log" \
+    --argjson timed_out "$timed_out" \
+    --argjson timeout_sec "$step_timeout_sec" \
     --argjson rc "$rc" \
     --argjson duration_sec "$duration_sec" \
     '{
@@ -411,12 +453,14 @@ run_step() {
       "status": $status,
       "command": $command,
       "rc": $rc,
+      "timed_out": $timed_out,
+      "timeout_sec": $timeout_sec,
       "duration_sec": $duration_sec,
       "note": $note,
       "log": $log
     }' >>"$steps_file"
 
-  echo "[single-machine-prod-readiness] step=${step_id} status=${status} rc=${rc} log=${step_log}"
+  echo "[single-machine-prod-readiness] step=${step_id} status=${status} rc=${rc} timed_out=${timed_out} duration_sec=${duration_sec} log=${step_log}"
 }
 
 skip_step() {
@@ -436,6 +480,8 @@ skip_step() {
       "status": "skip",
       "command": $command,
       "rc": 0,
+      "timed_out": false,
+      "timeout_sec": 0,
       "duration_sec": 0,
       "note": $note,
       "log": ""
@@ -516,6 +562,7 @@ case "$run_three_machine_docker_readiness" in
 esac
 
 three_machine_docker_endpoints_available="0"
+three_machine_docker_endpoints_reachable="0"
 three_machine_docker_directory_a_url=""
 three_machine_docker_directory_b_url=""
 three_machine_docker_issuer_a_url=""
@@ -534,10 +581,28 @@ if [[ -f "$three_machine_docker_readiness_summary_json" ]] && jq -e . "$three_ma
   fi
 fi
 
+# Auto-refresh in docker mode should only assume host endpoints are reusable when
+# they are reachable from this host context. For non-default test stubs we treat
+# endpoints as reachable to keep integration fakes deterministic.
+if [[ "$three_machine_docker_endpoints_available" == "1" ]]; then
+  if [[ "$profile_compare_campaign_signoff_script" != "$default_profile_compare_campaign_signoff_script" ]]; then
+    three_machine_docker_endpoints_reachable="1"
+  elif command -v curl >/dev/null 2>&1; then
+    if curl --silent --show-error --fail --max-time 3 "${three_machine_docker_directory_a_url%/}/v1/pubkeys" >/dev/null 2>&1 \
+      && curl --silent --show-error --fail --max-time 3 "${three_machine_docker_directory_b_url%/}/v1/pubkeys" >/dev/null 2>&1 \
+      && curl --silent --show-error --fail --max-time 3 "${three_machine_docker_issuer_a_url%/}/v1/pubkeys" >/dev/null 2>&1 \
+      && curl --silent --show-error --fail --max-time 3 "${three_machine_docker_entry_url%/}/v1/health" >/dev/null 2>&1 \
+      && curl --silent --show-error --fail --max-time 3 "${three_machine_docker_exit_url%/}/v1/health" >/dev/null 2>&1; then
+      three_machine_docker_endpoints_reachable="1"
+    fi
+  fi
+fi
+
 profile_compare_campaign_signoff_refresh_effective="$profile_compare_campaign_signoff_refresh_campaign"
 profile_compare_campaign_signoff_auto_refreshed="0"
 profile_compare_campaign_signoff_auto_refreshed_via_docker="0"
 profile_compare_campaign_signoff_auto_skipped_non_root="0"
+profile_compare_campaign_signoff_auto_refresh_reason=""
 profile_compare_campaign_signoff_cmd=""
 profile_compare_campaign_signoff_campaign_execution_mode_effective=""
 if [[ "$profile_compare_campaign_signoff_campaign_execution_mode" != "auto" ]]; then
@@ -550,6 +615,46 @@ profile_compare_campaign_signoff_campaign_issuer_url_effective="$profile_compare
 profile_compare_campaign_signoff_campaign_entry_url_effective="$profile_compare_campaign_signoff_campaign_entry_url"
 profile_compare_campaign_signoff_campaign_exit_url_effective="$profile_compare_campaign_signoff_campaign_exit_url"
 profile_compare_campaign_signoff_campaign_start_local_stack_effective="$profile_compare_campaign_signoff_campaign_start_local_stack"
+
+profile_compare_campaign_summary_available="0"
+if [[ -f "$profile_compare_campaign_summary_json" ]] && jq -e . "$profile_compare_campaign_summary_json" >/dev/null 2>&1; then
+  profile_compare_campaign_summary_available="1"
+fi
+
+profile_compare_campaign_signoff_existing_summary_available="0"
+profile_compare_campaign_signoff_existing_summary_valid="0"
+profile_compare_campaign_signoff_existing_summary_status=""
+profile_compare_campaign_signoff_existing_summary_decision=""
+profile_compare_campaign_signoff_existing_summary_refresh_campaign="0"
+profile_compare_campaign_signoff_existing_summary_final_rc="0"
+profile_compare_campaign_signoff_existing_summary_failure_stage=""
+profile_compare_campaign_signoff_existing_summary_requires_refresh="0"
+profile_compare_campaign_signoff_existing_summary_refresh_reason=""
+if [[ -f "$profile_compare_campaign_signoff_summary_json" ]]; then
+  profile_compare_campaign_signoff_existing_summary_available="1"
+  if jq -e . "$profile_compare_campaign_signoff_summary_json" >/dev/null 2>&1; then
+    profile_compare_campaign_signoff_existing_summary_valid="1"
+    profile_compare_campaign_signoff_existing_summary_status="$(jq -r '.status // ""' "$profile_compare_campaign_signoff_summary_json")"
+    profile_compare_campaign_signoff_existing_summary_decision="$(jq -r '.decision.decision // ""' "$profile_compare_campaign_signoff_summary_json")"
+    profile_compare_campaign_signoff_existing_summary_refresh_campaign="$(jq -r '(.inputs.refresh_campaign // false) | if . then "1" else "0" end' "$profile_compare_campaign_signoff_summary_json")"
+    profile_compare_campaign_signoff_existing_summary_final_rc="$(jq -r '.final_rc // 0' "$profile_compare_campaign_signoff_summary_json")"
+    if ! [[ "$profile_compare_campaign_signoff_existing_summary_final_rc" =~ ^-?[0-9]+$ ]]; then
+      profile_compare_campaign_signoff_existing_summary_final_rc="0"
+    fi
+    profile_compare_campaign_signoff_existing_summary_failure_stage="$(jq -r '.failure_stage // ""' "$profile_compare_campaign_signoff_summary_json")"
+    if [[ "$profile_compare_campaign_signoff_existing_summary_status" == "ok" && "$profile_compare_campaign_signoff_existing_summary_decision" == "GO" ]]; then
+      profile_compare_campaign_signoff_existing_summary_requires_refresh="0"
+    elif [[ "$profile_compare_campaign_signoff_existing_summary_refresh_campaign" == "1" ]]; then
+      profile_compare_campaign_signoff_existing_summary_requires_refresh="0"
+    else
+      profile_compare_campaign_signoff_existing_summary_requires_refresh="1"
+      profile_compare_campaign_signoff_existing_summary_refresh_reason="stale non-refreshed signoff summary (status=${profile_compare_campaign_signoff_existing_summary_status:-unknown} decision=${profile_compare_campaign_signoff_existing_summary_decision:-unknown})"
+    fi
+  else
+    profile_compare_campaign_signoff_existing_summary_requires_refresh="1"
+    profile_compare_campaign_signoff_existing_summary_refresh_reason="invalid signoff summary JSON"
+  fi
+fi
 
 build_profile_compare_campaign_signoff_cmd() {
   local refresh_value="$1"
@@ -591,57 +696,80 @@ build_profile_compare_campaign_signoff_cmd() {
   printf '\n'
 }
 
-default_profile_compare_campaign_signoff_script="$ROOT_DIR/scripts/profile_compare_campaign_signoff.sh"
+set_profile_compare_auto_refresh_mode() {
+  local refresh_reason="$1"
+  profile_compare_campaign_signoff_auto_refresh_reason="$refresh_reason"
+  if [[ "$three_machine_docker_endpoints_available" == "1" && "$three_machine_docker_endpoints_reachable" == "1" ]]; then
+    profile_compare_campaign_signoff_refresh_effective="1"
+    profile_compare_campaign_signoff_auto_refreshed="1"
+    profile_compare_campaign_signoff_auto_refreshed_via_docker="1"
+    if [[ -z "$profile_compare_campaign_signoff_campaign_execution_mode_effective" ]]; then
+      profile_compare_campaign_signoff_campaign_execution_mode_effective="docker"
+    fi
+    if [[ -z "$profile_compare_campaign_signoff_campaign_directory_urls_effective" ]]; then
+      profile_compare_campaign_signoff_campaign_directory_urls_effective="${three_machine_docker_directory_a_url},${three_machine_docker_directory_b_url}"
+    fi
+    if [[ -z "$profile_compare_campaign_signoff_campaign_bootstrap_directory_effective" ]]; then
+      profile_compare_campaign_signoff_campaign_bootstrap_directory_effective="$three_machine_docker_directory_a_url"
+    fi
+    if [[ -z "$profile_compare_campaign_signoff_campaign_issuer_url_effective" ]]; then
+      profile_compare_campaign_signoff_campaign_issuer_url_effective="$three_machine_docker_issuer_a_url"
+    fi
+    if [[ -z "$profile_compare_campaign_signoff_campaign_entry_url_effective" ]]; then
+      profile_compare_campaign_signoff_campaign_entry_url_effective="$three_machine_docker_entry_url"
+    fi
+    if [[ -z "$profile_compare_campaign_signoff_campaign_exit_url_effective" ]]; then
+      profile_compare_campaign_signoff_campaign_exit_url_effective="$three_machine_docker_exit_url"
+    fi
+    if [[ -z "$profile_compare_campaign_signoff_campaign_start_local_stack_effective" ]]; then
+      profile_compare_campaign_signoff_campaign_start_local_stack_effective="0"
+    fi
+  elif [[ "${EUID:-$(id -u)}" -ne 0 && "$profile_compare_campaign_signoff_script" == "$default_profile_compare_campaign_signoff_script" ]]; then
+    profile_compare_campaign_signoff_refresh_effective="0"
+    profile_compare_campaign_signoff_auto_skipped_non_root="1"
+    if [[ "$three_machine_docker_endpoints_available" == "1" && "$three_machine_docker_endpoints_reachable" != "1" ]]; then
+      if [[ -n "$profile_compare_campaign_signoff_auto_refresh_reason" ]]; then
+        profile_compare_campaign_signoff_auto_refresh_reason="${profile_compare_campaign_signoff_auto_refresh_reason}; docker rehearsal endpoints are no longer reachable (rerun with --three-machine-docker-readiness-keep-stacks 1)"
+      else
+        profile_compare_campaign_signoff_auto_refresh_reason="docker rehearsal endpoints are no longer reachable (rerun with --three-machine-docker-readiness-keep-stacks 1)"
+      fi
+    fi
+  else
+    profile_compare_campaign_signoff_refresh_effective="1"
+    profile_compare_campaign_signoff_auto_refreshed="1"
+  fi
+}
+
 case "$run_profile_compare_campaign_signoff" in
   auto)
     if [[ "$profile_compare_campaign_signoff_refresh_campaign" == "1" ]]; then
       profile_compare_campaign_signoff_refresh_effective="1"
-    elif [[ -f "$profile_compare_campaign_summary_json" ]]; then
+      profile_compare_campaign_signoff_auto_refresh_reason="explicit refresh-campaign=1"
+    elif [[ "$profile_compare_campaign_signoff_existing_summary_available" == "1" ]]; then
+      if [[ "$profile_compare_campaign_signoff_existing_summary_requires_refresh" == "1" ]]; then
+        set_profile_compare_auto_refresh_mode "$profile_compare_campaign_signoff_existing_summary_refresh_reason"
+      else
+        profile_compare_campaign_signoff_refresh_effective="0"
+      fi
+    elif [[ "$profile_compare_campaign_summary_available" == "1" ]]; then
       profile_compare_campaign_signoff_refresh_effective="0"
     else
       # Auto mode should keep roadmap momentum by generating missing campaign artifacts.
       # On non-root hosts (default script path), local campaign refresh requires root
       # for stack bootstrap, so skip instead of failing the whole readiness sweep.
-      if [[ "$three_machine_docker_endpoints_available" == "1" ]]; then
-        profile_compare_campaign_signoff_refresh_effective="1"
-        profile_compare_campaign_signoff_auto_refreshed="1"
-        profile_compare_campaign_signoff_auto_refreshed_via_docker="1"
-        if [[ -z "$profile_compare_campaign_signoff_campaign_execution_mode_effective" ]]; then
-          profile_compare_campaign_signoff_campaign_execution_mode_effective="docker"
-        fi
-        if [[ -z "$profile_compare_campaign_signoff_campaign_directory_urls_effective" ]]; then
-          profile_compare_campaign_signoff_campaign_directory_urls_effective="${three_machine_docker_directory_a_url},${three_machine_docker_directory_b_url}"
-        fi
-        if [[ -z "$profile_compare_campaign_signoff_campaign_bootstrap_directory_effective" ]]; then
-          profile_compare_campaign_signoff_campaign_bootstrap_directory_effective="$three_machine_docker_directory_a_url"
-        fi
-        if [[ -z "$profile_compare_campaign_signoff_campaign_issuer_url_effective" ]]; then
-          profile_compare_campaign_signoff_campaign_issuer_url_effective="$three_machine_docker_issuer_a_url"
-        fi
-        if [[ -z "$profile_compare_campaign_signoff_campaign_entry_url_effective" ]]; then
-          profile_compare_campaign_signoff_campaign_entry_url_effective="$three_machine_docker_entry_url"
-        fi
-        if [[ -z "$profile_compare_campaign_signoff_campaign_exit_url_effective" ]]; then
-          profile_compare_campaign_signoff_campaign_exit_url_effective="$three_machine_docker_exit_url"
-        fi
-        if [[ -z "$profile_compare_campaign_signoff_campaign_start_local_stack_effective" ]]; then
-          profile_compare_campaign_signoff_campaign_start_local_stack_effective="0"
-        fi
-      elif [[ "${EUID:-$(id -u)}" -ne 0 && "$profile_compare_campaign_signoff_script" == "$default_profile_compare_campaign_signoff_script" ]]; then
-        profile_compare_campaign_signoff_refresh_effective="0"
-        profile_compare_campaign_signoff_auto_skipped_non_root="1"
-      else
-        profile_compare_campaign_signoff_refresh_effective="1"
-        profile_compare_campaign_signoff_auto_refreshed="1"
-      fi
+      set_profile_compare_auto_refresh_mode "campaign summary missing"
     fi
     profile_compare_campaign_signoff_cmd="$(build_profile_compare_campaign_signoff_cmd "$profile_compare_campaign_signoff_refresh_effective")"
+    profile_compare_campaign_signoff_auto_refresh_reason_note=""
+    if [[ -n "$profile_compare_campaign_signoff_auto_refresh_reason" ]]; then
+      profile_compare_campaign_signoff_auto_refresh_reason_note=" (${profile_compare_campaign_signoff_auto_refresh_reason})"
+    fi
     if [[ "$profile_compare_campaign_signoff_auto_skipped_non_root" == "1" ]]; then
-      skip_step "profile_compare_campaign_signoff" "Profile compare campaign signoff" "$profile_compare_campaign_signoff_cmd" "auto mode: campaign summary missing and local campaign refresh requires root; skipped on non-root host"
+      skip_step "profile_compare_campaign_signoff" "Profile compare campaign signoff" "$profile_compare_campaign_signoff_cmd" "auto mode: local campaign refresh requires root; skipped on non-root host${profile_compare_campaign_signoff_auto_refresh_reason_note}"
     elif [[ "$profile_compare_campaign_signoff_auto_refreshed_via_docker" == "1" ]]; then
-      run_step "profile_compare_campaign_signoff" "Profile compare campaign signoff" "$profile_compare_campaign_signoff_cmd" "auto mode: campaign summary missing, using docker rehearsal endpoints for refresh-campaign=1"
+      run_step "profile_compare_campaign_signoff" "Profile compare campaign signoff" "$profile_compare_campaign_signoff_cmd" "auto mode: using docker rehearsal endpoints for refresh-campaign=1${profile_compare_campaign_signoff_auto_refresh_reason_note}"
     elif [[ "$profile_compare_campaign_signoff_auto_refreshed" == "1" ]]; then
-      run_step "profile_compare_campaign_signoff" "Profile compare campaign signoff" "$profile_compare_campaign_signoff_cmd" "auto mode: campaign summary missing, forcing refresh-campaign=1"
+      run_step "profile_compare_campaign_signoff" "Profile compare campaign signoff" "$profile_compare_campaign_signoff_cmd" "auto mode: forcing refresh-campaign=1${profile_compare_campaign_signoff_auto_refresh_reason_note}"
     else
       run_step "profile_compare_campaign_signoff" "Profile compare campaign signoff" "$profile_compare_campaign_signoff_cmd"
     fi
@@ -712,8 +840,10 @@ run_step "manual_validation_report" "Manual validation readiness report" "$manua
 steps_json="$(jq -s '.' "$steps_file")"
 critical_failed_steps_json="$(printf '%s\n' "$steps_json" | jq -c '[.[] | select(.status == "fail" and .step_id != "profile_compare_campaign_signoff" and .step_id != "real_wg_privileged_matrix")]')"
 non_blocking_failed_steps_json="$(printf '%s\n' "$steps_json" | jq -c '[.[] | select(.status == "fail" and (.step_id == "profile_compare_campaign_signoff" or .step_id == "real_wg_privileged_matrix"))]')"
+timed_out_steps_json="$(printf '%s\n' "$steps_json" | jq -c '[.[] | select((.timed_out // false) == true)]')"
 critical_steps_failed_count="$(printf '%s\n' "$critical_failed_steps_json" | jq -r 'length')"
 non_blocking_steps_failed_count="$(printf '%s\n' "$non_blocking_failed_steps_json" | jq -r 'length')"
+timed_out_steps_count="$(printf '%s\n' "$timed_out_steps_json" | jq -r 'length')"
 three_machine_docker_readiness_step_status="$(printf '%s\n' "$steps_json" | jq -r '[.[] | select(.step_id == "three_machine_docker_readiness") | .status][0] // "skip"')"
 three_machine_docker_readiness_available="0"
 three_machine_docker_readiness_status=""
@@ -796,7 +926,11 @@ notes="All single-machine checks passed; no remaining blockers."
 if ((critical_steps_failed_count > 0)); then
   overall_status="fail"
   overall_rc=1
-  notes="One or more executed local checks failed; inspect failed step logs."
+  if ((timed_out_steps_count > 0)); then
+    notes="One or more executed local checks timed out or failed; inspect failed step logs."
+  else
+    notes="One or more executed local checks failed; inspect failed step logs."
+  fi
 elif [[ "$manual_report_available" != "1" ]]; then
   overall_status="fail"
   overall_rc=1
@@ -822,6 +956,7 @@ summary_payload="$({
     --arg notes "$notes" \
     --arg root_dir "$ROOT_DIR" \
     --arg summary_json "$summary_json" \
+    --arg summary_latest_json "$summary_latest_json" \
     --arg manual_validation_report_summary_json "$manual_validation_report_summary_json" \
     --arg manual_validation_report_md "$manual_validation_report_md" \
     --arg manual_readiness_status "$manual_readiness_status" \
@@ -835,6 +970,7 @@ summary_payload="$({
     --arg run_beta_preflight "$run_beta_preflight" \
     --arg run_deep_suite "$run_deep_suite" \
     --arg run_runtime_fix_record "$run_runtime_fix_record" \
+    --arg step_timeout_sec "$step_timeout_sec" \
     --arg run_three_machine_docker_readiness "$run_three_machine_docker_readiness" \
     --arg three_machine_docker_readiness_run_validate "$three_machine_docker_readiness_run_validate" \
     --arg three_machine_docker_readiness_run_soak "$three_machine_docker_readiness_run_soak" \
@@ -848,7 +984,18 @@ summary_payload="$({
     --arg run_profile_compare_campaign_signoff "$run_profile_compare_campaign_signoff" \
     --arg profile_compare_campaign_signoff_refresh_campaign "$profile_compare_campaign_signoff_refresh_campaign" \
     --arg profile_compare_campaign_signoff_refresh_effective "$profile_compare_campaign_signoff_refresh_effective" \
+    --arg profile_compare_campaign_signoff_auto_refresh_reason "$profile_compare_campaign_signoff_auto_refresh_reason" \
     --arg profile_compare_campaign_signoff_fail_on_no_go "$profile_compare_campaign_signoff_fail_on_no_go" \
+    --arg profile_compare_campaign_summary_available "$profile_compare_campaign_summary_available" \
+    --arg profile_compare_campaign_signoff_existing_summary_available "$profile_compare_campaign_signoff_existing_summary_available" \
+    --arg profile_compare_campaign_signoff_existing_summary_valid "$profile_compare_campaign_signoff_existing_summary_valid" \
+    --arg profile_compare_campaign_signoff_existing_summary_status "$profile_compare_campaign_signoff_existing_summary_status" \
+    --arg profile_compare_campaign_signoff_existing_summary_decision "$profile_compare_campaign_signoff_existing_summary_decision" \
+    --arg profile_compare_campaign_signoff_existing_summary_refresh_campaign "$profile_compare_campaign_signoff_existing_summary_refresh_campaign" \
+    --arg profile_compare_campaign_signoff_existing_summary_final_rc "$profile_compare_campaign_signoff_existing_summary_final_rc" \
+    --arg profile_compare_campaign_signoff_existing_summary_failure_stage "$profile_compare_campaign_signoff_existing_summary_failure_stage" \
+    --arg profile_compare_campaign_signoff_existing_summary_requires_refresh "$profile_compare_campaign_signoff_existing_summary_requires_refresh" \
+    --arg profile_compare_campaign_signoff_existing_summary_refresh_reason "$profile_compare_campaign_signoff_existing_summary_refresh_reason" \
     --arg profile_compare_campaign_signoff_campaign_execution_mode "$profile_compare_campaign_signoff_campaign_execution_mode" \
     --arg profile_compare_campaign_signoff_campaign_directory_urls "$profile_compare_campaign_signoff_campaign_directory_urls" \
     --arg profile_compare_campaign_signoff_campaign_bootstrap_directory "$profile_compare_campaign_signoff_campaign_bootstrap_directory" \
@@ -880,6 +1027,7 @@ summary_payload="$({
     --argjson steps_failed "$steps_failed" \
     --argjson critical_steps_failed_count "$critical_steps_failed_count" \
     --argjson non_blocking_steps_failed_count "$non_blocking_steps_failed_count" \
+    --argjson timed_out_steps_count "$timed_out_steps_count" \
     --argjson manual_report_available "$manual_report_available" \
     --argjson three_machine_docker_readiness_available "$three_machine_docker_readiness_available" \
     --argjson profile_compare_campaign_signoff_available "$profile_compare_campaign_signoff_available" \
@@ -890,6 +1038,7 @@ summary_payload="$({
     --argjson steps "$steps_json" \
     --argjson critical_failed_steps "$critical_failed_steps_json" \
     --argjson non_blocking_failed_steps "$non_blocking_failed_steps_json" \
+    --argjson timed_out_steps "$timed_out_steps_json" \
     --argjson pending_checks "$pending_checks_json" \
     --argjson pending_multi_machine "$pending_multi_machine_json" \
     --argjson pending_local "$pending_local_json" \
@@ -907,6 +1056,7 @@ summary_payload="$({
         run_beta_preflight: ($run_beta_preflight == "1"),
         run_deep_suite: ($run_deep_suite == "1"),
         run_runtime_fix_record: ($run_runtime_fix_record == "1"),
+        step_timeout_sec: ($step_timeout_sec | tonumber),
         run_three_machine_docker_readiness: $run_three_machine_docker_readiness,
         three_machine_docker_readiness_run_validate: ($three_machine_docker_readiness_run_validate == "1"),
         three_machine_docker_readiness_run_soak: ($three_machine_docker_readiness_run_soak == "1"),
@@ -917,10 +1067,23 @@ summary_payload="$({
         run_profile_compare_campaign_signoff: $run_profile_compare_campaign_signoff,
         profile_compare_campaign_signoff_refresh_campaign: ($profile_compare_campaign_signoff_refresh_campaign == "1"),
         profile_compare_campaign_signoff_refresh_effective: ($profile_compare_campaign_signoff_refresh_effective == "1"),
+        profile_compare_campaign_signoff_auto_refresh_reason: (if $profile_compare_campaign_signoff_auto_refresh_reason == "" then null else $profile_compare_campaign_signoff_auto_refresh_reason end),
         profile_compare_campaign_signoff_auto_refreshed: ($profile_compare_campaign_signoff_auto_refreshed == 1),
         profile_compare_campaign_signoff_auto_refreshed_via_docker: ($profile_compare_campaign_signoff_auto_refreshed_via_docker == 1),
         profile_compare_campaign_signoff_auto_skipped_non_root: ($profile_compare_campaign_signoff_auto_skipped_non_root == 1),
         profile_compare_campaign_signoff_fail_on_no_go: ($profile_compare_campaign_signoff_fail_on_no_go == "1"),
+        profile_compare_campaign_summary_available: ($profile_compare_campaign_summary_available == "1"),
+        profile_compare_campaign_signoff_existing_summary: {
+          available: ($profile_compare_campaign_signoff_existing_summary_available == "1"),
+          valid_json: ($profile_compare_campaign_signoff_existing_summary_valid == "1"),
+          status: $profile_compare_campaign_signoff_existing_summary_status,
+          decision: $profile_compare_campaign_signoff_existing_summary_decision,
+          refresh_campaign: ($profile_compare_campaign_signoff_existing_summary_refresh_campaign == "1"),
+          final_rc: ($profile_compare_campaign_signoff_existing_summary_final_rc | tonumber),
+          failure_stage: $profile_compare_campaign_signoff_existing_summary_failure_stage,
+          requires_refresh: ($profile_compare_campaign_signoff_existing_summary_requires_refresh == "1"),
+          refresh_reason: (if $profile_compare_campaign_signoff_existing_summary_refresh_reason == "" then null else $profile_compare_campaign_signoff_existing_summary_refresh_reason end)
+        },
         profile_compare_campaign_signoff_campaign_refresh_overrides_requested: {
           execution_mode: (if $profile_compare_campaign_signoff_campaign_execution_mode == "auto" then null else $profile_compare_campaign_signoff_campaign_execution_mode end),
           directory_urls: (if $profile_compare_campaign_signoff_campaign_directory_urls == "" then null else $profile_compare_campaign_signoff_campaign_directory_urls end),
@@ -949,6 +1112,7 @@ summary_payload="$({
       paths: {
         root_dir: $root_dir,
         summary_json: $summary_json,
+        summary_latest_json: $summary_latest_json,
         three_machine_docker_readiness_summary_json: $three_machine_docker_readiness_summary_json,
         profile_compare_campaign_signoff_reports_dir: $profile_compare_campaign_signoff_reports_dir,
         profile_compare_campaign_summary_json: $profile_compare_campaign_summary_json,
@@ -964,6 +1128,8 @@ summary_payload="$({
         skip_steps: ([ $steps[] | select(.status == "skip") ] | length),
         critical_fail_steps: $critical_steps_failed_count,
         non_blocking_fail_steps: $non_blocking_steps_failed_count,
+        timed_out_steps: $timed_out_steps_count,
+        timed_out_step_details: $timed_out_steps,
         critical_failed_steps: $critical_failed_steps,
         non_blocking_failed_steps: $non_blocking_failed_steps,
         manual_report_available: ($manual_report_available == 1),
@@ -1003,10 +1169,18 @@ summary_payload="$({
     }'
 } )"
 
-printf '%s\n' "$summary_payload" >"$summary_json"
+summary_tmp="$(mktemp "${summary_json}.tmp.XXXXXX")"
+printf '%s\n' "$summary_payload" >"$summary_tmp"
+mv -f "$summary_tmp" "$summary_json"
+if [[ "$summary_latest_json" != "$summary_json" ]]; then
+  summary_latest_tmp="$(mktemp "${summary_latest_json}.tmp.XXXXXX")"
+  printf '%s\n' "$summary_payload" >"$summary_latest_tmp"
+  mv -f "$summary_latest_tmp" "$summary_latest_json"
+fi
 
 echo "[single-machine-prod-readiness] status=$overall_status rc=$overall_rc"
 echo "[single-machine-prod-readiness] summary_json=$summary_json"
+echo "[single-machine-prod-readiness] summary_latest_json=$summary_latest_json"
 if [[ -n "$roadmap_stage" ]]; then
   echo "[single-machine-prod-readiness] roadmap_stage=$roadmap_stage"
 fi

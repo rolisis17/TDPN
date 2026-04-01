@@ -20,6 +20,8 @@ LOCAL_FAIL_SUMMARY="$TMP_DIR/local_fail_summary.json"
 LOCAL_FAIL_LOG="$TMP_DIR/local_fail.log"
 STEP_FAIL_SUMMARY="$TMP_DIR/step_fail_summary.json"
 STEP_FAIL_LOG="$TMP_DIR/step_fail.log"
+STEP_TIMEOUT_SUMMARY="$TMP_DIR/step_timeout_summary.json"
+STEP_TIMEOUT_LOG="$TMP_DIR/step_timeout.log"
 PROFILE_SIGNOFF_SUMMARY="$TMP_DIR/profile_signoff_summary.json"
 PROFILE_SIGNOFF_LOG="$TMP_DIR/profile_signoff.log"
 PROFILE_SIGNOFF_NON_BLOCKING_SUMMARY="$TMP_DIR/profile_signoff_non_blocking_summary.json"
@@ -28,6 +30,8 @@ AUTO_REFRESH_SUMMARY="$TMP_DIR/auto_refresh_summary.json"
 AUTO_REFRESH_LOG="$TMP_DIR/auto_refresh.log"
 AUTO_REFRESH_DOCKER_SUMMARY="$TMP_DIR/auto_refresh_docker_summary.json"
 AUTO_REFRESH_DOCKER_LOG="$TMP_DIR/auto_refresh_docker.log"
+AUTO_REFRESH_STALE_SIGNOFF_SUMMARY="$TMP_DIR/auto_refresh_stale_signoff_summary.json"
+AUTO_REFRESH_STALE_SIGNOFF_LOG="$TMP_DIR/auto_refresh_stale_signoff.log"
 AUTO_REFRESH_NON_ROOT_SKIP_SUMMARY="$TMP_DIR/auto_refresh_non_root_skip_summary.json"
 AUTO_REFRESH_NON_ROOT_SKIP_LOG="$TMP_DIR/auto_refresh_non_root_skip.log"
 DOCKER_REHEARSAL_SUMMARY="$TMP_DIR/docker_rehearsal_summary.json"
@@ -37,10 +41,17 @@ PROFILE_SIGNOFF_ARGS_LOG="$TMP_DIR/profile_signoff_args.log"
 MANUAL_REPORT_ARGS_LOG="$TMP_DIR/manual_report_args.log"
 CAPTURE="$TMP_DIR/capture.log"
 
+# Keep fake manual-validation report artifacts isolated to the test tmp dir so
+# this integration cannot clobber shared operator handoff pointers in .easy-node-logs.
+export SINGLE_MACHINE_MANUAL_VALIDATION_REPORT_SUMMARY_JSON="$TMP_DIR/manual_validation_readiness_summary.json"
+export SINGLE_MACHINE_MANUAL_VALIDATION_REPORT_MD="$TMP_DIR/manual_validation_readiness_report.md"
+export SINGLE_MACHINE_SUMMARY_JSON_LATEST="$TMP_DIR/single_machine_prod_readiness_latest.json"
+
 FAKE_CI="$TMP_DIR/fake_ci_local.sh"
 FAKE_BETA="$TMP_DIR/fake_beta_preflight.sh"
 FAKE_DEEP_OK="$TMP_DIR/fake_deep_ok.sh"
 FAKE_DEEP_FAIL="$TMP_DIR/fake_deep_fail.sh"
+FAKE_DEEP_SLEEP="$TMP_DIR/fake_deep_sleep.sh"
 FAKE_RUNTIME_FIX_RECORD="$TMP_DIR/fake_runtime_fix_record.sh"
 FAKE_THREE_MACHINE_DOCKER_READINESS="$TMP_DIR/fake_three_machine_docker_readiness.sh"
 FAKE_PROFILE_SIGNOFF="$TMP_DIR/fake_profile_compare_campaign_signoff.sh"
@@ -73,6 +84,13 @@ set -euo pipefail
 printf 'fake deep suite fail\n'
 exit 1
 EOF_FAIL
+
+cat >"$FAKE_DEEP_SLEEP" <<'EOF_SLEEP'
+#!/usr/bin/env bash
+set -euo pipefail
+sleep "${FAKE_DEEP_SLEEP_SEC:-3}"
+printf 'fake deep suite sleep done\n'
+EOF_SLEEP
 
 cat >"$FAKE_RUNTIME_FIX_RECORD" <<'EOF_OK'
 #!/usr/bin/env bash
@@ -307,6 +325,7 @@ chmod +x \
   "$FAKE_BETA" \
   "$FAKE_DEEP_OK" \
   "$FAKE_DEEP_FAIL" \
+  "$FAKE_DEEP_SLEEP" \
   "$FAKE_RUNTIME_FIX_RECORD" \
   "$FAKE_THREE_MACHINE_DOCKER_READINESS" \
   "$FAKE_PROFILE_SIGNOFF" \
@@ -379,6 +398,21 @@ if ! jq -e '
 ' "$WARN_SUMMARY" >/dev/null; then
   echo "warn summary JSON missing expected fields"
   cat "$WARN_SUMMARY"
+  exit 1
+fi
+if ! jq -e --arg latest "$SINGLE_MACHINE_SUMMARY_JSON_LATEST" '.paths.summary_latest_json == $latest' "$WARN_SUMMARY" >/dev/null; then
+  echo "warn summary JSON missing summary_latest_json path"
+  cat "$WARN_SUMMARY"
+  exit 1
+fi
+if [[ ! -f "$SINGLE_MACHINE_SUMMARY_JSON_LATEST" ]]; then
+  echo "single-machine latest summary pointer file was not written"
+  ls -l "$TMP_DIR"
+  exit 1
+fi
+if ! jq -e '.status == "warn"' "$SINGLE_MACHINE_SUMMARY_JSON_LATEST" >/dev/null; then
+  echo "single-machine latest summary pointer JSON missing expected status"
+  cat "$SINGLE_MACHINE_SUMMARY_JSON_LATEST"
   exit 1
 fi
 
@@ -460,6 +494,63 @@ if ! jq -e '
   echo "step failure summary JSON missing deep_test_suite fail"
   cat "$STEP_FAIL_SUMMARY"
   exit 1
+fi
+
+if command -v timeout >/dev/null 2>&1; then
+  echo "[single-machine-prod-readiness] step timeout path"
+  set +e
+  FAKE_MANUAL_REPORT_MODE=all_pass \
+  FAKE_DEEP_SLEEP_SEC=3 \
+  SINGLE_MACHINE_CI_LOCAL_SCRIPT="$FAKE_CI" \
+  SINGLE_MACHINE_BETA_PREFLIGHT_SCRIPT="$FAKE_BETA" \
+  SINGLE_MACHINE_DEEP_TEST_SUITE_SCRIPT="$FAKE_DEEP_SLEEP" \
+  SINGLE_MACHINE_RUNTIME_FIX_RECORD_SCRIPT="$FAKE_RUNTIME_FIX_RECORD" \
+  SINGLE_MACHINE_THREE_MACHINE_DOCKER_READINESS_SCRIPT="$FAKE_THREE_MACHINE_DOCKER_READINESS" \
+  SINGLE_MACHINE_PROFILE_COMPARE_CAMPAIGN_SIGNOFF_SCRIPT="$FAKE_PROFILE_SIGNOFF" \
+  SINGLE_MACHINE_PRE_REAL_HOST_READINESS_SCRIPT="$FAKE_PRE_REAL" \
+  SINGLE_MACHINE_MANUAL_VALIDATION_REPORT_SCRIPT="$FAKE_MANUAL_REPORT" \
+  ./scripts/single_machine_prod_readiness.sh \
+    --run-ci-local 0 \
+    --run-beta-preflight 0 \
+    --run-runtime-fix-record 0 \
+    --run-three-machine-docker-readiness 0 \
+    --run-profile-compare-campaign-signoff 0 \
+    --run-pre-real-host-readiness 0 \
+    --run-real-wg-privileged-matrix 0 \
+    --step-timeout-sec 1 \
+    --summary-json "$STEP_TIMEOUT_SUMMARY" \
+    --print-summary-json 0 >"$STEP_TIMEOUT_LOG" 2>&1
+  rc_step_timeout=$?
+  set -e
+  if [[ $rc_step_timeout -eq 0 ]]; then
+    echo "step timeout path should fail"
+    cat "$STEP_TIMEOUT_LOG"
+    cat "$STEP_TIMEOUT_SUMMARY"
+    exit 1
+  fi
+  if ! rg -q '\[single-machine-prod-readiness\] step=deep_test_suite status=running timeout_sec=1 ' "$STEP_TIMEOUT_LOG"; then
+    echo "step timeout path missing running heartbeat line"
+    cat "$STEP_TIMEOUT_LOG"
+    exit 1
+  fi
+  if ! rg -q '\[single-machine-prod-readiness\] step=deep_test_suite status=fail rc=124 timed_out=true' "$STEP_TIMEOUT_LOG"; then
+    echo "step timeout path missing timeout completion line"
+    cat "$STEP_TIMEOUT_LOG"
+    exit 1
+  fi
+  if ! jq -e '
+    .status == "fail"
+    and .rc == 1
+    and .inputs.step_timeout_sec == 1
+    and .summary.timed_out_steps >= 1
+    and ((.summary.timed_out_step_details // []) | any(.step_id == "deep_test_suite" and .status == "fail" and .timed_out == true and .rc == 124))
+    and (.steps[] | select(.step_id == "deep_test_suite") | .status == "fail" and .timed_out == true and .timeout_sec == 1 and .rc == 124)
+  ' "$STEP_TIMEOUT_SUMMARY" >/dev/null; then
+    echo "step timeout summary JSON missing expected timeout fields"
+    cat "$STEP_TIMEOUT_LOG"
+    cat "$STEP_TIMEOUT_SUMMARY"
+    exit 1
+  fi
 fi
 
 echo "[single-machine-prod-readiness] docker rehearsal step"
@@ -743,6 +834,82 @@ for expected in \
     exit 1
   fi
 done
+
+echo "[single-machine-prod-readiness] auto refresh stale signoff summary via docker rehearsal endpoints"
+rm -rf "$TMP_DIR/auto_refresh_stale_signoff_reports"
+mkdir -p "$TMP_DIR/auto_refresh_stale_signoff_reports"
+cat >"$TMP_DIR/auto_refresh_stale_signoff_reports/profile_compare_campaign_signoff_summary.json" <<'EOF_STALE_SIGNOFF'
+{
+  "version": 1,
+  "status": "fail",
+  "final_rc": 1,
+  "failure_stage": "campaign_check",
+  "inputs": {
+    "refresh_campaign": false
+  },
+  "decision": {
+    "decision": "NO-GO",
+    "recommended_profile": "balanced"
+  }
+}
+EOF_STALE_SIGNOFF
+: >"$PROFILE_SIGNOFF_ARGS_LOG"
+FAKE_MANUAL_REPORT_MODE=pending_multi \
+SINGLE_MACHINE_CI_LOCAL_SCRIPT="$FAKE_CI" \
+SINGLE_MACHINE_BETA_PREFLIGHT_SCRIPT="$FAKE_BETA" \
+SINGLE_MACHINE_DEEP_TEST_SUITE_SCRIPT="$FAKE_DEEP_OK" \
+SINGLE_MACHINE_RUNTIME_FIX_RECORD_SCRIPT="$FAKE_RUNTIME_FIX_RECORD" \
+SINGLE_MACHINE_THREE_MACHINE_DOCKER_READINESS_SCRIPT="$FAKE_THREE_MACHINE_DOCKER_READINESS" \
+SINGLE_MACHINE_PROFILE_COMPARE_CAMPAIGN_SIGNOFF_SCRIPT="$FAKE_PROFILE_SIGNOFF" \
+SINGLE_MACHINE_PRE_REAL_HOST_READINESS_SCRIPT="$FAKE_PRE_REAL" \
+SINGLE_MACHINE_MANUAL_VALIDATION_REPORT_SCRIPT="$FAKE_MANUAL_REPORT" \
+THREE_MACHINE_DOCKER_DOCKER_BIN="bash" \
+FAKE_THREE_MACHINE_DOCKER_READINESS_STATUS="pass" \
+FAKE_THREE_MACHINE_DOCKER_READINESS_RC=0 \
+FAKE_THREE_MACHINE_DOCKER_READINESS_EXIT_RC=0 \
+FAKE_PROFILE_SIGNOFF_RC=0 \
+FAKE_PROFILE_SIGNOFF_ARGS_LOG="$PROFILE_SIGNOFF_ARGS_LOG" \
+./scripts/single_machine_prod_readiness.sh \
+  --run-ci-local 0 \
+  --run-beta-preflight 0 \
+  --run-deep-suite 0 \
+  --run-runtime-fix-record 0 \
+  --run-three-machine-docker-readiness 1 \
+  --run-profile-compare-campaign-signoff auto \
+  --profile-compare-campaign-signoff-refresh-campaign 0 \
+  --profile-compare-campaign-signoff-reports-dir "$TMP_DIR/auto_refresh_stale_signoff_reports" \
+  --profile-compare-campaign-signoff-summary-json "$TMP_DIR/auto_refresh_stale_signoff_reports/profile_compare_campaign_signoff_summary.json" \
+  --run-pre-real-host-readiness 0 \
+  --run-real-wg-privileged-matrix 0 \
+  --summary-json "$AUTO_REFRESH_STALE_SIGNOFF_SUMMARY" \
+  --print-summary-json 0 >"$AUTO_REFRESH_STALE_SIGNOFF_LOG"
+
+if ! jq -e '
+  .status == "warn"
+  and .rc == 0
+  and .inputs.profile_compare_campaign_signoff_refresh_campaign == false
+  and .inputs.profile_compare_campaign_signoff_refresh_effective == true
+  and .inputs.profile_compare_campaign_signoff_auto_refreshed == true
+  and .inputs.profile_compare_campaign_signoff_auto_refreshed_via_docker == true
+  and .inputs.profile_compare_campaign_signoff_auto_refresh_reason == "stale non-refreshed signoff summary (status=fail decision=NO-GO)"
+  and .inputs.profile_compare_campaign_signoff_existing_summary.available == true
+  and .inputs.profile_compare_campaign_signoff_existing_summary.valid_json == true
+  and .inputs.profile_compare_campaign_signoff_existing_summary.status == "fail"
+  and .inputs.profile_compare_campaign_signoff_existing_summary.decision == "NO-GO"
+  and .inputs.profile_compare_campaign_signoff_existing_summary.refresh_campaign == false
+  and .inputs.profile_compare_campaign_signoff_existing_summary.requires_refresh == true
+  and (.steps[] | select(.step_id == "profile_compare_campaign_signoff") | .status == "pass")
+' "$AUTO_REFRESH_STALE_SIGNOFF_SUMMARY" >/dev/null; then
+  echo "auto refresh stale signoff summary JSON missing expected fields"
+  cat "$AUTO_REFRESH_STALE_SIGNOFF_LOG"
+  cat "$AUTO_REFRESH_STALE_SIGNOFF_SUMMARY"
+  exit 1
+fi
+if ! rg -q -- '--refresh-campaign 1' "$PROFILE_SIGNOFF_ARGS_LOG"; then
+  echo "stale signoff auto-refresh path did not force --refresh-campaign 1"
+  cat "$PROFILE_SIGNOFF_ARGS_LOG"
+  exit 1
+fi
 
 echo "[single-machine-prod-readiness] auto refresh non-root skip path (default signoff script)"
 rm -rf "$TMP_DIR/auto_refresh_non_root_reports"
