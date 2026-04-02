@@ -12,6 +12,7 @@ Usage:
     [--client-iface IFACE] \
     [--exit-iface IFACE] \
     [--vpn-iface IFACE] \
+    [--status-timeout-sec N] \
     [--profile-compare-signoff-summary-json PATH] \
     [--overlay-check-id CHECK_ID] \
     [--overlay-status pass|fail|warn|pending|skip] \
@@ -70,6 +71,16 @@ need_cmd() {
   fi
 }
 
+run_with_optional_timeout() {
+  local timeout_sec="$1"
+  shift
+  if [[ "$timeout_sec" -gt 0 ]] && command -v timeout >/dev/null 2>&1; then
+    timeout "${timeout_sec}s" "$@"
+  else
+    "$@"
+  fi
+}
+
 extract_json_payload() {
   local log_file="$1"
   awk '/^\[manual-validation-status\] summary_json_payload:/{flag=1; next} flag{print}' "$log_file"
@@ -86,6 +97,7 @@ base_port="${EASY_NODE_DOCTOR_WG_ONLY_BASE_PORT:-19280}"
 client_iface="${EASY_NODE_DOCTOR_CLIENT_IFACE:-wgcstack0}"
 exit_iface="${EASY_NODE_DOCTOR_EXIT_IFACE:-wgestack0}"
 vpn_iface="${EASY_NODE_DOCTOR_VPN_IFACE:-wgvpn0}"
+status_timeout_sec="${MANUAL_VALIDATION_REPORT_STATUS_TIMEOUT_SEC:-180}"
 profile_compare_signoff_summary_json="${MANUAL_VALIDATION_PROFILE_COMPARE_SIGNOFF_SUMMARY_JSON:-}"
 overlay_check_id=""
 overlay_status=""
@@ -114,6 +126,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --vpn-iface)
       vpn_iface="${2:-}"
+      shift 2
+      ;;
+    --status-timeout-sec)
+      status_timeout_sec="${2:-}"
       shift 2
       ;;
     --profile-compare-signoff-summary-json)
@@ -194,6 +210,10 @@ done
 bool_arg_or_die "--print-report" "$print_report"
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
 bool_arg_or_die "--fail-on-not-ready" "$fail_on_not_ready"
+if ! [[ "$status_timeout_sec" =~ ^[0-9]+$ ]]; then
+  echo "--status-timeout-sec must be an integer >= 0"
+  exit 2
+fi
 
 if ! [[ "$base_port" =~ ^[0-9]+$ ]]; then
   echo "--base-port must be an integer"
@@ -219,6 +239,15 @@ mkdir -p "$(dirname "$summary_json")" "$(dirname "$report_md")"
 
 status_log="$(mktemp)"
 status_rc=0
+status_timed_out="false"
+status_timeout_guard_available="false"
+status_payload_synthesized="false"
+if command -v timeout >/dev/null 2>&1; then
+  status_timeout_guard_available="true"
+fi
+if [[ "$status_timeout_sec" -gt 0 && "$status_timeout_guard_available" != "true" ]]; then
+  echo "[manual-validation-report] warn=timeout command not found; running manual-validation-status without timeout guard"
+fi
 declare -a status_cmd=(
   "$status_script"
   --base-port "$base_port"
@@ -243,23 +272,179 @@ if [[ -n "$overlay_check_id" ]]; then
     status_cmd+=(--overlay-artifact "$overlay_artifact")
   done
 fi
-if "${status_cmd[@]}" >"$status_log" 2>&1; then
+if run_with_optional_timeout "$status_timeout_sec" "${status_cmd[@]}" >"$status_log" 2>&1; then
   status_rc=0
 else
   status_rc=$?
 fi
+if [[ "$status_rc" -eq 124 ]]; then
+  status_timed_out="true"
+fi
 status_json_payload="$(extract_json_payload "$status_log")"
 if [[ -z "$status_json_payload" ]]; then
-  echo "manual-validation-report failed: manual-validation-status did not emit JSON summary"
-  cat "$status_log"
-  rm -f "$status_log"
-  exit 1
+  if [[ "$status_timed_out" == "true" ]]; then
+    status_json_payload="$(
+      jq -n \
+        --arg generated_at_utc "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        --argjson timeout_sec "$status_timeout_sec" \
+        --arg profile_summary_json "${profile_compare_signoff_summary_json:-$ROOT_DIR/.easy-node-logs/profile_compare_campaign_signoff_summary.json}" \
+        '{
+          version: 1,
+          generated_at_utc: $generated_at_utc,
+          state_dir: "",
+          status_json: "",
+          runtime_doctor_exit_code: 1,
+          runtime_doctor: {
+            version: 1,
+            generated_at_utc: $generated_at_utc,
+            status: "FAIL",
+            summary: { findings_total: 1, warnings_total: 0, failures_total: 1 },
+            findings: [
+              {
+                severity: "FAIL",
+                code: "manual_validation_status_timeout",
+                message: ("manual-validation-status timed out after " + ($timeout_sec | tostring) + "s"),
+                remediation: "rerun ./scripts/manual_validation_report.sh after resolving host load/lock contention"
+              }
+            ]
+          },
+          checks: [],
+          summary: {
+            total_checks: 0,
+            pass_checks: 0,
+            warn_checks: 0,
+            fail_checks: 1,
+            pending_checks: 0,
+            next_action_check_id: "manual_validation_status_timeout",
+            next_action_label: "Manual validation status timeout",
+            next_action_command: "sudo ./scripts/easy_node.sh manual-validation-status --show-json 1",
+            next_action_remediations: ["rerun ./scripts/manual_validation_report.sh after resolving host load/lock contention"],
+            pre_machine_c_gate: {
+              ready: false,
+              blockers: ["manual_validation_status_timeout"],
+              next_check_id: "machine_c_vpn_smoke",
+              next_label: "Machine C VPN smoke test",
+              next_command: "sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --path-profile balanced --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country"
+            },
+            local_gate: {
+              ready: false,
+              check_ids: [],
+              blockers: ["manual_validation_status_timeout"],
+              next_check_id: "manual_validation_status_timeout"
+            },
+            real_host_gate: {
+              ready: false,
+              check_ids: ["machine_c_vpn_smoke", "three_machine_prod_signoff"],
+              blockers: ["machine_c_vpn_smoke", "three_machine_prod_signoff"],
+              next_check_id: "machine_c_vpn_smoke",
+              next_label: "Machine C VPN smoke test",
+              next_command: "sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --path-profile balanced --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country"
+            },
+            profile_default_gate: {
+              enabled: true,
+              summary_json: $profile_summary_json,
+              available: false,
+              valid_json: false,
+              status: "pending",
+              notes: "profile compare campaign signoff status unavailable due manual-validation-status timeout",
+              decision: "",
+              recommended_profile: "",
+              trend_source: "",
+              final_rc: 0,
+              failure_stage: "",
+              non_root_refresh_blocked: false,
+              stale_non_refreshed: false,
+              refresh_campaign: false,
+              next_command: "sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 1 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1",
+              artifacts: {
+                campaign_summary_json: "",
+                campaign_report_md: "",
+                campaign_check_summary_json: ""
+              }
+            },
+            profile_default_ready: false,
+            docker_rehearsal_gate: {
+              check_id: "three_machine_docker_readiness",
+              status: "pending",
+              notes: "status unavailable due manual-validation-status timeout",
+              command: "./scripts/easy_node.sh three-machine-docker-readiness-record --path-profile balanced --soak-rounds 6 --soak-pause-sec 3 --print-summary-json 1",
+              next_command: "./scripts/easy_node.sh three-machine-docker-readiness-record --path-profile balanced --soak-rounds 6 --soak-pause-sec 3 --print-summary-json 1",
+              ready: false
+            },
+            real_wg_privileged_gate: {
+              check_id: "real_wg_privileged_matrix",
+              status: "pending",
+              notes: "status unavailable due manual-validation-status timeout",
+              command: "sudo ./scripts/easy_node.sh real-wg-privileged-matrix-record --print-summary-json 1",
+              next_command: "sudo ./scripts/easy_node.sh real-wg-privileged-matrix-record --print-summary-json 1",
+              ready: false
+            },
+            single_machine_ready: false,
+            roadmap_stage: "BLOCKED_LOCAL",
+            latest_failed_incident: null
+          }
+        }'
+    )"
+    status_payload_synthesized="true"
+  else
+    echo "manual-validation-report failed: manual-validation-status did not emit JSON summary"
+    cat "$status_log"
+    rm -f "$status_log"
+    exit 1
+  fi
 fi
 if ! printf '%s\n' "$status_json_payload" | jq -e . >/dev/null 2>&1; then
-  echo "manual-validation-report failed: manual-validation-status emitted invalid JSON summary"
-  cat "$status_log"
-  rm -f "$status_log"
-  exit 1
+  if [[ "$status_timed_out" == "true" ]]; then
+    status_json_payload="$(
+      jq -n \
+        --arg generated_at_utc "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        --argjson timeout_sec "$status_timeout_sec" \
+        '{
+          version: 1,
+          generated_at_utc: $generated_at_utc,
+          runtime_doctor: {
+            status: "FAIL",
+            summary: { findings_total: 1, warnings_total: 0, failures_total: 1 },
+            findings: [
+              {
+                severity: "FAIL",
+                code: "manual_validation_status_timeout_invalid_json",
+                message: ("manual-validation-status timed out after " + ($timeout_sec | tostring) + "s and emitted invalid JSON payload"),
+                remediation: "rerun ./scripts/manual_validation_report.sh after resolving host load/lock contention"
+              }
+            ]
+          },
+          checks: [],
+          summary: {
+            total_checks: 0,
+            pass_checks: 0,
+            warn_checks: 0,
+            fail_checks: 1,
+            pending_checks: 0,
+            next_action_check_id: "manual_validation_status_timeout_invalid_json",
+            next_action_label: "Manual validation status timeout (invalid payload)",
+            next_action_command: "sudo ./scripts/easy_node.sh manual-validation-status --show-json 1",
+            next_action_remediations: ["rerun ./scripts/manual_validation_report.sh after resolving host load/lock contention"],
+            pre_machine_c_gate: { ready: false, blockers: ["manual_validation_status_timeout_invalid_json"], next_check_id: "machine_c_vpn_smoke", next_label: "Machine C VPN smoke test", next_command: "sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --path-profile balanced --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country" },
+            local_gate: { ready: false, check_ids: [], blockers: ["manual_validation_status_timeout_invalid_json"], next_check_id: "manual_validation_status_timeout_invalid_json" },
+            real_host_gate: { ready: false, check_ids: ["machine_c_vpn_smoke", "three_machine_prod_signoff"], blockers: ["machine_c_vpn_smoke", "three_machine_prod_signoff"], next_check_id: "machine_c_vpn_smoke", next_label: "Machine C VPN smoke test", next_command: "sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --path-profile balanced --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country" },
+            profile_default_gate: { enabled: true, available: false, valid_json: false, status: "pending", notes: "profile compare campaign signoff status unavailable due manual-validation-status timeout", next_command: "sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 1 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1" },
+            profile_default_ready: false,
+            docker_rehearsal_gate: { check_id: "three_machine_docker_readiness", status: "pending", notes: "status unavailable due manual-validation-status timeout", command: "./scripts/easy_node.sh three-machine-docker-readiness-record --path-profile balanced --soak-rounds 6 --soak-pause-sec 3 --print-summary-json 1", next_command: "./scripts/easy_node.sh three-machine-docker-readiness-record --path-profile balanced --soak-rounds 6 --soak-pause-sec 3 --print-summary-json 1", ready: false },
+            real_wg_privileged_gate: { check_id: "real_wg_privileged_matrix", status: "pending", notes: "status unavailable due manual-validation-status timeout", command: "sudo ./scripts/easy_node.sh real-wg-privileged-matrix-record --print-summary-json 1", next_command: "sudo ./scripts/easy_node.sh real-wg-privileged-matrix-record --print-summary-json 1", ready: false },
+            single_machine_ready: false,
+            roadmap_stage: "BLOCKED_LOCAL",
+            latest_failed_incident: null
+          }
+        }'
+    )"
+    status_payload_synthesized="true"
+  else
+    echo "manual-validation-report failed: manual-validation-status emitted invalid JSON summary"
+    cat "$status_log"
+    rm -f "$status_log"
+    exit 1
+  fi
 fi
 rm -f "$status_log"
 
@@ -277,12 +462,20 @@ report_json="$(
     --arg readiness_status "$readiness_status" \
     --argjson ready "$ready_json" \
     --argjson source_status_exit_code "$status_rc" \
+    --argjson source_status_timed_out "$status_timed_out" \
+    --argjson source_status_timeout_sec "$status_timeout_sec" \
+    --argjson source_status_timeout_guard_available "$status_timeout_guard_available" \
+    --argjson source_status_payload_synthesized "$status_payload_synthesized" \
     '.report = {
       readiness_status: $readiness_status,
       ready: $ready,
       summary_json: $summary_json,
       report_md: $report_md,
-      source_status_exit_code: $source_status_exit_code
+      source_status_exit_code: $source_status_exit_code,
+      source_status_timed_out: $source_status_timed_out,
+      source_status_timeout_sec: $source_status_timeout_sec,
+      source_status_timeout_guard_available: $source_status_timeout_guard_available,
+      source_status_payload_synthesized: $source_status_payload_synthesized
     }'
 )"
 summary_tmp="$(mktemp "${summary_json}.tmp.XXXXXX")"
@@ -469,6 +662,11 @@ mv -f "$report_md_tmp" "$report_md"
 echo "[manual-validation-report] readiness_status=$readiness_status total=$summary_total pass=$summary_pass warn=$summary_warn fail=$summary_fail pending=$summary_pending"
 echo "[manual-validation-report] summary_json=$summary_json"
 echo "[manual-validation-report] report_md=$report_md"
+echo "[manual-validation-report] source_status_exit_code=$status_rc"
+echo "[manual-validation-report] source_status_timed_out=$status_timed_out"
+echo "[manual-validation-report] source_status_timeout_sec=$status_timeout_sec"
+echo "[manual-validation-report] source_status_timeout_guard_available=$status_timeout_guard_available"
+echo "[manual-validation-report] source_status_payload_synthesized=$status_payload_synthesized"
 echo "[manual-validation-report] machine_c_smoke_ready=$machine_c_smoke_ready"
 echo "[manual-validation-report] machine_c_smoke_blockers=$machine_c_smoke_blockers"
 if [[ -n "$machine_c_smoke_next_command" ]]; then
@@ -540,6 +738,11 @@ fi
 if [[ "$print_summary_json" == "1" ]]; then
   echo "[manual-validation-report] summary_json_payload:"
   printf '%s\n' "$report_json"
+fi
+
+if [[ "$status_timed_out" == "true" ]]; then
+  echo "manual-validation-report: manual-validation-status timed out after ${status_timeout_sec}s"
+  exit 1
 fi
 
 if [[ "$fail_on_not_ready" == "1" && "$readiness_status" != "READY" ]]; then

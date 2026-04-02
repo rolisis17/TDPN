@@ -27,9 +27,11 @@ PROFILE_BLOCKED_REPORT_LOG="$TMP_DIR/integration_manual_validation_report_profil
 PROFILE_STALE_REPORT_LOG="$TMP_DIR/integration_manual_validation_report_profile_stale.log"
 PROFILE_INVALID_SUMMARY_REPORT_LOG="$TMP_DIR/integration_manual_validation_report_profile_invalid_summary.log"
 INVALID_STATUS_PAYLOAD_LOG="$TMP_DIR/integration_manual_validation_report_invalid_status_payload.log"
+TIMEOUT_STATUS_PAYLOAD_LOG="$TMP_DIR/integration_manual_validation_report_timeout_status.log"
 CAPTURE="$TMP_DIR/capture.log"
 FAKE_REPORT="$TMP_DIR/fake_manual_validation_report.sh"
 FAKE_STATUS_INVALID="$TMP_DIR/fake_manual_validation_status_invalid_json.sh"
+FAKE_STATUS_TIMEOUT="$TMP_DIR/fake_manual_validation_status_timeout.sh"
 
 cat >"$FAKE_DOCTOR" <<'EOF_DOCTOR'
 #!/usr/bin/env bash
@@ -655,6 +657,68 @@ if ! rg -q 'manual-validation-report failed: manual-validation-status emitted in
   exit 1
 fi
 
+if command -v timeout >/dev/null 2>&1; then
+  cat >"$FAKE_STATUS_TIMEOUT" <<'EOF_STATUS_TIMEOUT'
+#!/usr/bin/env bash
+set -euo pipefail
+sleep 30
+EOF_STATUS_TIMEOUT
+  chmod +x "$FAKE_STATUS_TIMEOUT"
+
+  set +e
+  EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR" \
+  MANUAL_VALIDATION_PROFILE_COMPARE_SIGNOFF_SUMMARY_JSON="$PROFILE_SIGNOFF_SUMMARY_JSON" \
+  RUNTIME_DOCTOR_SCRIPT="$FAKE_DOCTOR" \
+  MANUAL_VALIDATION_STATUS_SCRIPT="$FAKE_STATUS_TIMEOUT" \
+  ./scripts/manual_validation_report.sh \
+    --status-timeout-sec 1 \
+    --summary-json "$TMP_DIR/timeout_status_summary.json" \
+    --report-md "$TMP_DIR/timeout_status_report.md" \
+    --print-report 0 \
+    --print-summary-json 1 >$TIMEOUT_STATUS_PAYLOAD_LOG 2>&1
+  rc=$?
+  set -e
+  if [[ $rc -eq 0 ]]; then
+    echo "manual validation report should fail-closed when status script times out"
+    cat $TIMEOUT_STATUS_PAYLOAD_LOG
+    exit 1
+  fi
+  if ! rg -q '\[manual-validation-report\] source_status_timed_out=true' $TIMEOUT_STATUS_PAYLOAD_LOG; then
+    echo "manual validation report timeout run missing source_status_timed_out=true line"
+    cat $TIMEOUT_STATUS_PAYLOAD_LOG
+    exit 1
+  fi
+  if ! rg -q '\[manual-validation-report\] source_status_payload_synthesized=true' $TIMEOUT_STATUS_PAYLOAD_LOG; then
+    echo "manual validation report timeout run missing source_status_payload_synthesized=true line"
+    cat $TIMEOUT_STATUS_PAYLOAD_LOG
+    exit 1
+  fi
+  if ! rg -q 'manual-validation-report: manual-validation-status timed out after 1s' $TIMEOUT_STATUS_PAYLOAD_LOG; then
+    echo "manual validation report timeout run missing fail-closed timeout message"
+    cat $TIMEOUT_STATUS_PAYLOAD_LOG
+    exit 1
+  fi
+  if [[ ! -f "$TMP_DIR/timeout_status_summary.json" ]]; then
+    echo "manual validation report timeout run did not create timeout summary JSON"
+    cat $TIMEOUT_STATUS_PAYLOAD_LOG
+    exit 1
+  fi
+  if ! jq -e '
+    .report.source_status_timed_out == true
+    and .report.source_status_timeout_sec == 1
+    and .report.source_status_timeout_guard_available == true
+    and .report.source_status_payload_synthesized == true
+    and .summary.next_action_check_id == "manual_validation_status_timeout"
+    and .summary.local_gate.next_check_id == "manual_validation_status_timeout"
+    and .summary.roadmap_stage == "BLOCKED_LOCAL"
+    and ((.runtime_doctor.findings[0].code // "") == "manual_validation_status_timeout")
+  ' "$TMP_DIR/timeout_status_summary.json" >/dev/null; then
+    echo "manual validation report timeout run JSON missing expected timeout fallback fields"
+    cat "$TMP_DIR/timeout_status_summary.json"
+    exit 1
+  fi
+fi
+
 echo "[manual-validation-report] easy_node forwarding"
 cat >"$FAKE_REPORT" <<'EOF_FORWARD'
 #!/usr/bin/env bash
@@ -671,6 +735,7 @@ MANUAL_VALIDATION_REPORT_SCRIPT="$FAKE_REPORT" \
   --client-iface wgctest0 \
   --exit-iface wgestest0 \
   --vpn-iface wgvpntest0 \
+  --status-timeout-sec 99 \
   --profile-compare-signoff-summary-json /tmp/profile_signoff_override.json \
   --summary-json /tmp/manual_validation_readiness_summary.json \
   --report-md /tmp/manual_validation_readiness_report.md \
@@ -689,6 +754,7 @@ for expected in \
   '--client-iface wgctest0' \
   '--exit-iface wgestest0' \
   '--vpn-iface wgvpntest0' \
+  '--status-timeout-sec 99' \
   '--profile-compare-signoff-summary-json /tmp/profile_signoff_override.json' \
   '--summary-json /tmp/manual_validation_readiness_summary.json' \
   '--report-md /tmp/manual_validation_readiness_report.md' \
