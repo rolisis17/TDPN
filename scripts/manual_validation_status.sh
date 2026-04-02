@@ -519,7 +519,12 @@ profile_signoff_non_root_refresh_blocked_01() {
 
 build_profile_default_gate_json() {
   local signoff_summary_json="$1"
-  local next_command="./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 1 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1"
+  local default_signoff_summary_json="$ROOT_DIR/.easy-node-logs/profile_compare_campaign_signoff_summary.json"
+  local reports_dir=""
+  local reports_dir_arg=""
+  local summary_json_arg=""
+  local next_command=""
+  local next_command_sudo=""
   local available="0"
   local valid_json="0"
   local status="pending"
@@ -537,11 +542,27 @@ build_profile_default_gate_json() {
   local refresh_campaign="0"
   local signoff_status=""
 
+  reports_dir="$(dirname "$signoff_summary_json")"
+  if [[ "$signoff_summary_json" == "$default_signoff_summary_json" ]]; then
+    reports_dir_arg=".easy-node-logs"
+    summary_json_arg=".easy-node-logs/profile_compare_campaign_signoff_summary.json"
+  else
+    printf -v reports_dir_arg '%q' "$reports_dir"
+    printf -v summary_json_arg '%q' "$signoff_summary_json"
+  fi
+  next_command="./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir $reports_dir_arg --refresh-campaign 1 --fail-on-no-go 1 --summary-json $summary_json_arg --print-summary-json 1"
+  next_command_sudo="sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir $reports_dir_arg --refresh-campaign 1 --fail-on-no-go 1 --summary-json $summary_json_arg --print-summary-json 1"
+
   if [[ -f "$signoff_summary_json" ]]; then
     available="1"
   fi
   if [[ "$available" == "1" ]] && jq -e . "$signoff_summary_json" >/dev/null 2>&1; then
     valid_json="1"
+  fi
+  if [[ "$available" == "1" && "$valid_json" != "1" ]]; then
+    status="pending"
+    notes="profile compare campaign signoff summary JSON is invalid; rerun with refresh-campaign=1"
+    next_command="$next_command_sudo"
   fi
 
   if [[ "$valid_json" == "1" ]]; then
@@ -577,11 +598,11 @@ build_profile_default_gate_json() {
           status="pending"
           stale_non_refreshed="1"
           notes="profile compare campaign signoff summary is stale (refresh-campaign=0); rerun with refresh-campaign=1"
-          next_command="sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 1 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1"
+          next_command="$next_command_sudo"
         elif [[ "$non_root_refresh_blocked" == "1" ]]; then
           status="pending"
           notes="profile compare campaign signoff refresh needs root for local stack (non-root host)"
-          next_command="sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 1 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1"
+          next_command="$next_command_sudo"
         else
           status="fail"
           notes="profile compare campaign signoff failed (final_rc=${final_rc})"

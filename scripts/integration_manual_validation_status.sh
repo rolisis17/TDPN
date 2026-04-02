@@ -27,6 +27,7 @@ INCIDENT_RECORD_LOG="$TMP_DIR/integration_manual_validation_record_smoke_fail.lo
 INCIDENT_LOG="$TMP_DIR/integration_manual_validation_status_incident.log"
 PROFILE_BLOCKED_LOG="$TMP_DIR/integration_manual_validation_status_profile_blocked.log"
 PROFILE_STALE_LOG="$TMP_DIR/integration_manual_validation_status_profile_stale.log"
+PROFILE_INVALID_SUMMARY_LOG="$TMP_DIR/integration_manual_validation_status_profile_invalid_summary.log"
 INVALID_STATUS_LOG="$TMP_DIR/integration_manual_validation_status_invalid_status_json.log"
 LOCK_RECOVER_LOG="$TMP_DIR/integration_manual_validation_record_lock_recover.log"
 LOCK_TIMEOUT_LOG="$TMP_DIR/integration_manual_validation_record_lock_timeout.log"
@@ -827,6 +828,7 @@ if ! printf '%s\n' "$profile_blocked_json" | jq -e '
   and .summary.profile_default_gate.failure_stage == "campaign"
   and .summary.profile_default_gate.non_root_refresh_blocked == true
   and (.summary.profile_default_gate.next_command | startswith("sudo ./scripts/easy_node.sh profile-compare-campaign-signoff"))
+  and (.summary.profile_default_gate.next_command | contains("--summary-json '"$PROFILE_SIGNOFF_SUMMARY_JSON"'"))
 ' >/dev/null; then
   echo "profile-blocked status JSON missing expected profile_default_gate fields"
   printf '%s\n' "$profile_blocked_json"
@@ -875,9 +877,42 @@ if ! printf '%s\n' "$profile_stale_json" | jq -e '
   and .summary.profile_default_gate.stale_non_refreshed == true
   and .summary.profile_default_gate.refresh_campaign == false
   and (.summary.profile_default_gate.next_command | startswith("sudo ./scripts/easy_node.sh profile-compare-campaign-signoff"))
+  and (.summary.profile_default_gate.next_command | contains("--summary-json '"$PROFILE_SIGNOFF_SUMMARY_JSON"'"))
 ' >/dev/null; then
   echo "profile-stale status JSON missing expected stale profile_default_gate fields"
   printf '%s\n' "$profile_stale_json"
+  exit 1
+fi
+
+echo "[manual-validation] profile-default invalid signoff summary json"
+printf '{"version":1,"status":"fail",' >"$PROFILE_SIGNOFF_SUMMARY_JSON"
+
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR" \
+MANUAL_VALIDATION_PROFILE_COMPARE_SIGNOFF_SUMMARY_JSON="$PROFILE_SIGNOFF_SUMMARY_JSON" \
+RUNTIME_DOCTOR_SCRIPT="$FAKE_DOCTOR" \
+./scripts/manual_validation_status.sh --show-json 1 >$PROFILE_INVALID_SUMMARY_LOG
+
+if ! rg -q '\[manual-validation-status\] profile_default_gate_status=pending' $PROFILE_INVALID_SUMMARY_LOG; then
+  echo "profile-invalid-summary status missing profile_default_gate_status=pending line"
+  cat $PROFILE_INVALID_SUMMARY_LOG
+  exit 1
+fi
+profile_invalid_summary_json="$(awk '/^\[manual-validation-status\] summary_json_payload:/{flag=1; next} flag{print}' $PROFILE_INVALID_SUMMARY_LOG)"
+if [[ -z "$profile_invalid_summary_json" ]]; then
+  echo "profile-invalid-summary status missing JSON payload"
+  cat $PROFILE_INVALID_SUMMARY_LOG
+  exit 1
+fi
+if ! printf '%s\n' "$profile_invalid_summary_json" | jq -e '
+  .summary.profile_default_gate.status == "pending"
+  and .summary.profile_default_gate.available == true
+  and .summary.profile_default_gate.valid_json == false
+  and (.summary.profile_default_gate.notes | contains("summary JSON is invalid"))
+  and (.summary.profile_default_gate.next_command | startswith("sudo ./scripts/easy_node.sh profile-compare-campaign-signoff"))
+  and (.summary.profile_default_gate.next_command | contains("--summary-json '"$PROFILE_SIGNOFF_SUMMARY_JSON"'"))
+' >/dev/null; then
+  echo "profile-invalid-summary status JSON missing expected profile_default_gate fields"
+  printf '%s\n' "$profile_invalid_summary_json"
   exit 1
 fi
 
