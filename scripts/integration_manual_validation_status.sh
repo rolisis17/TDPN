@@ -395,6 +395,19 @@ if ! rg -q '\[manual-validation-record\] warn=existing status JSON invalid; rese
   cat $RECORD_LOG
   exit 1
 fi
+backup_path="$(sed -n 's/^\[manual-validation-record\] invalid_status_backup_path=//p' $RECORD_LOG | tail -n 1)"
+if [[ -z "$backup_path" || ! -f "$backup_path" ]]; then
+  echo "manual-validation-record missing invalid status backup artifact"
+  cat $RECORD_LOG
+  exit 1
+fi
+if ! jq -e . "$backup_path" >/dev/null 2>&1; then
+  :
+else
+  echo "manual-validation-record invalid status backup unexpectedly contains valid JSON"
+  cat "$backup_path"
+  exit 1
+fi
 receipt_json_path="$(sed -n 's/^\[manual-validation-record\] receipt_json=//p' $RECORD_LOG | tail -n 1)"
 if [[ -z "$receipt_json_path" || ! -f "$receipt_json_path" ]]; then
   echo "manual-validation-record missing receipt artifact"

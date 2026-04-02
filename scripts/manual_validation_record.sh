@@ -140,6 +140,29 @@ acquire_state_lock() {
   done
 }
 
+backup_invalid_status_json() {
+  local source_json="$1"
+  local backup_dir="$2"
+  local backup_stamp=""
+  local backup_path=""
+  local backup_tmp=""
+
+  if [[ ! -f "$source_json" ]]; then
+    return 1
+  fi
+
+  backup_stamp="$(date -u +"%Y%m%d_%H%M%S")"
+  mkdir -p "$backup_dir"
+  backup_path="${backup_dir}/status_invalid_${backup_stamp}_pid$$.json"
+  backup_tmp="$(mktemp "${backup_path}.tmp.XXXXXX")"
+  if ! cat "$source_json" >"$backup_tmp"; then
+    rm -f "$backup_tmp"
+    return 1
+  fi
+  mv -f "$backup_tmp" "$backup_path"
+  printf '%s\n' "$backup_path"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --check-id)
@@ -223,6 +246,7 @@ recorded_by="$(id -un 2>/dev/null || printf '%s' "${USER:-unknown}")"
 artifact_list_json="$(printf '%s\n' "${artifacts[@]:-}" | jq -Rsc 'split("\n") | map(select(length > 0))')"
 invalid_status_fallback_used="0"
 invalid_status_warning=""
+invalid_status_backup_path=""
 
 receipt_payload="$(
   jq -n \
@@ -257,6 +281,7 @@ if [[ -f "$status_json" ]]; then
     existing_status_json='{"version":1,"checks":{}}'
     invalid_status_fallback_used="1"
     invalid_status_warning="existing status JSON invalid; resetting status ledger before recording new check"
+    invalid_status_backup_path="$(backup_invalid_status_json "$status_json" "${state_dir}/invalid_status_backups" || true)"
   fi
 else
   existing_status_json='{"version":1,"checks":{}}'
@@ -292,6 +317,11 @@ echo "[manual-validation-record] check_id=$check_id status=$status state_dir=$st
 echo "[manual-validation-record] receipt_json=$receipt_json"
 if [[ "$invalid_status_fallback_used" == "1" ]]; then
   echo "[manual-validation-record] warn=$invalid_status_warning"
+  if [[ -n "$invalid_status_backup_path" ]]; then
+    echo "[manual-validation-record] invalid_status_backup_path=$invalid_status_backup_path"
+  else
+    echo "[manual-validation-record] warn=failed to preserve invalid status backup"
+  fi
 fi
 if [[ -n "$notes" ]]; then
   echo "[manual-validation-record] notes=$notes"
