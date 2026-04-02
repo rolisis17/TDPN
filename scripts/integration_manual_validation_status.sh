@@ -78,6 +78,18 @@ OUT
 EOF
 chmod +x "$FAKE_DOCTOR_INVALID"
 
+FAKE_DOCTOR_TIMEOUT="$TMP_DIR/fake_runtime_doctor_timeout.sh"
+cat >"$FAKE_DOCTOR_TIMEOUT" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+sleep "${FAKE_RUNTIME_DOCTOR_SLEEP_SEC:-3}"
+cat <<'OUT'
+[runtime-doctor] summary_json_payload:
+{"version":1,"status":"OK","summary":{"findings_total":0,"warnings_total":0,"failures_total":0},"findings":[]}
+OUT
+EOF
+chmod +x "$FAKE_DOCTOR_TIMEOUT"
+
 echo "[manual-validation] baseline status"
 EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR" \
 MANUAL_VALIDATION_PROFILE_COMPARE_SIGNOFF_SUMMARY_JSON="$PROFILE_SIGNOFF_SUMMARY_JSON" \
@@ -243,6 +255,40 @@ if ! rg -q 'manual-validation-status failed: runtime-doctor emitted invalid JSON
   echo "invalid runtime-doctor JSON path missing expected message"
   cat $INVALID_DOCTOR_JSON_LOG
   exit 1
+fi
+
+if command -v timeout >/dev/null 2>&1; then
+  echo "[manual-validation] runtime-doctor timeout fallback"
+  TIMEOUT_DOCTOR_LOG="$TMP_DIR/integration_manual_validation_status_runtime_doctor_timeout.log"
+  EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR" \
+  MANUAL_VALIDATION_PROFILE_COMPARE_SIGNOFF_SUMMARY_JSON="$PROFILE_SIGNOFF_SUMMARY_JSON" \
+  RUNTIME_DOCTOR_SCRIPT="$FAKE_DOCTOR_TIMEOUT" \
+  FAKE_RUNTIME_DOCTOR_SLEEP_SEC=3 \
+  ./scripts/manual_validation_status.sh --runtime-doctor-timeout-sec 1 --show-json 1 >"$TIMEOUT_DOCTOR_LOG"
+  if ! rg -q '\[manual-validation-status\] runtime_hygiene=FAIL' "$TIMEOUT_DOCTOR_LOG"; then
+    echo "runtime-doctor timeout path missing runtime_hygiene=FAIL line"
+    cat "$TIMEOUT_DOCTOR_LOG"
+    exit 1
+  fi
+  timeout_doctor_json="$(awk '/^\[manual-validation-status\] summary_json_payload:/{flag=1; next} flag{print}' "$TIMEOUT_DOCTOR_LOG")"
+  if [[ -z "$timeout_doctor_json" ]]; then
+    echo "runtime-doctor timeout path missing JSON payload"
+    cat "$TIMEOUT_DOCTOR_LOG"
+    exit 1
+  fi
+  if ! printf '%s\n' "$timeout_doctor_json" | jq -e '
+    .runtime_doctor_exit_code == 124
+    and .runtime_doctor_invocation.timeout_sec == 1
+    and .runtime_doctor_invocation.timed_out == true
+    and .runtime_doctor.status == "FAIL"
+    and ((.runtime_doctor.findings // []) | any(.code == "runtime_doctor_timeout"))
+    and (.checks[] | select(.check_id == "runtime_hygiene") | .status == "fail")
+    and .summary.next_action_check_id == "runtime_hygiene"
+  ' >/dev/null; then
+    echo "runtime-doctor timeout path JSON missing expected timeout fallback fields"
+    printf '%s\n' "$timeout_doctor_json"
+    exit 1
+  fi
 fi
 
 echo "[manual-validation] invalid status.json fallback"

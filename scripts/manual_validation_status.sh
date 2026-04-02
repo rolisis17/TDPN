@@ -12,6 +12,7 @@ Usage:
     [--client-iface IFACE] \
     [--exit-iface IFACE] \
     [--vpn-iface IFACE] \
+    [--runtime-doctor-timeout-sec N] \
     [--profile-compare-signoff-summary-json PATH] \
     [--overlay-check-id CHECK_ID] \
     [--overlay-status pass|fail|warn|pending|skip] \
@@ -640,6 +641,7 @@ base_port="${EASY_NODE_DOCTOR_WG_ONLY_BASE_PORT:-19280}"
 client_iface="${EASY_NODE_DOCTOR_CLIENT_IFACE:-wgcstack0}"
 exit_iface="${EASY_NODE_DOCTOR_EXIT_IFACE:-wgestack0}"
 vpn_iface="${EASY_NODE_DOCTOR_VPN_IFACE:-wgvpn0}"
+runtime_doctor_timeout_sec="${MANUAL_VALIDATION_RUNTIME_DOCTOR_TIMEOUT_SEC:-120}"
 profile_compare_signoff_summary_json="${MANUAL_VALIDATION_PROFILE_COMPARE_SIGNOFF_SUMMARY_JSON:-$ROOT_DIR/.easy-node-logs/profile_compare_campaign_signoff_summary.json}"
 overlay_check_id=""
 overlay_status=""
@@ -663,6 +665,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --vpn-iface)
       vpn_iface="${2:-}"
+      shift 2
+      ;;
+    --runtime-doctor-timeout-sec)
+      runtime_doctor_timeout_sec="${2:-}"
       shift 2
       ;;
     --profile-compare-signoff-summary-json)
@@ -722,6 +728,10 @@ if [[ -z "$client_iface" || -z "$exit_iface" || -z "$vpn_iface" ]]; then
   echo "--client-iface, --exit-iface, and --vpn-iface must be non-empty"
   exit 2
 fi
+if ! [[ "$runtime_doctor_timeout_sec" =~ ^[0-9]+$ ]]; then
+  echo "--runtime-doctor-timeout-sec must be an integer >= 0"
+  exit 2
+fi
 profile_compare_signoff_summary_json="$(abs_path "$profile_compare_signoff_summary_json")"
 if [[ -z "$profile_compare_signoff_summary_json" ]]; then
   echo "--profile-compare-signoff-summary-json must be non-empty"
@@ -752,9 +762,27 @@ if [[ ! -x "$runtime_doctor_script" ]]; then
   exit 2
 fi
 
+run_with_optional_timeout() {
+  local timeout_sec="$1"
+  shift
+  if [[ "$timeout_sec" -gt 0 ]] && command -v timeout >/dev/null 2>&1; then
+    timeout "${timeout_sec}s" "$@"
+  else
+    "$@"
+  fi
+}
+
 doctor_log="$(mktemp)"
 runtime_doctor_rc=0
-if "$runtime_doctor_script" \
+runtime_doctor_timed_out="0"
+runtime_doctor_timeout_guard_available="0"
+if command -v timeout >/dev/null 2>&1; then
+  runtime_doctor_timeout_guard_available="1"
+fi
+if [[ "$runtime_doctor_timeout_sec" -gt 0 && "$runtime_doctor_timeout_guard_available" != "1" ]]; then
+  echo "[manual-validation-status] warn=timeout command not found; running runtime-doctor without timeout guard"
+fi
+if run_with_optional_timeout "$runtime_doctor_timeout_sec" "$runtime_doctor_script" \
   --base-port "$base_port" \
   --client-iface "$client_iface" \
   --exit-iface "$exit_iface" \
@@ -764,18 +792,73 @@ if "$runtime_doctor_script" \
 else
   runtime_doctor_rc=$?
 fi
+if [[ "$runtime_doctor_rc" -eq 124 ]]; then
+  runtime_doctor_timed_out="1"
+fi
 runtime_doctor_json="$(extract_json_payload "$doctor_log")"
 if [[ -z "$runtime_doctor_json" ]]; then
-  echo "manual-validation-status failed: runtime-doctor did not emit JSON summary"
-  cat "$doctor_log"
-  rm -f "$doctor_log"
-  exit 1
+  if [[ "$runtime_doctor_timed_out" == "1" ]]; then
+    runtime_doctor_json="$(
+      jq -n \
+        --arg generated_at_utc "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        --argjson timeout_sec "$runtime_doctor_timeout_sec" \
+        '{
+          version: 1,
+          generated_at_utc: $generated_at_utc,
+          status: "FAIL",
+          summary: {
+            findings_total: 1,
+            warnings_total: 0,
+            failures_total: 1
+          },
+          findings: [
+            {
+              severity: "FAIL",
+              code: "runtime_doctor_timeout",
+              message: ("runtime-doctor timed out after " + ($timeout_sec | tostring) + " seconds"),
+              remediation: "rerun runtime-fix-record and runtime-doctor after checking host load"
+            }
+          ]
+        }'
+    )"
+  else
+    echo "manual-validation-status failed: runtime-doctor did not emit JSON summary"
+    cat "$doctor_log"
+    rm -f "$doctor_log"
+    exit 1
+  fi
 fi
 if ! printf '%s\n' "$runtime_doctor_json" | jq -e . >/dev/null 2>&1; then
-  echo "manual-validation-status failed: runtime-doctor emitted invalid JSON summary"
-  cat "$doctor_log"
-  rm -f "$doctor_log"
-  exit 1
+  if [[ "$runtime_doctor_timed_out" == "1" ]]; then
+    runtime_doctor_json="$(
+      jq -n \
+        --arg generated_at_utc "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        --argjson timeout_sec "$runtime_doctor_timeout_sec" \
+        '{
+          version: 1,
+          generated_at_utc: $generated_at_utc,
+          status: "FAIL",
+          summary: {
+            findings_total: 1,
+            warnings_total: 0,
+            failures_total: 1
+          },
+          findings: [
+            {
+              severity: "FAIL",
+              code: "runtime_doctor_timeout_invalid_json",
+              message: ("runtime-doctor timed out after " + ($timeout_sec | tostring) + " seconds and emitted invalid/partial JSON"),
+              remediation: "rerun runtime-fix-record and runtime-doctor after checking host load"
+            }
+          ]
+        }'
+    )"
+  else
+    echo "manual-validation-status failed: runtime-doctor emitted invalid JSON summary"
+    cat "$doctor_log"
+    rm -f "$doctor_log"
+    exit 1
+  fi
 fi
 rm -f "$doctor_log"
 
@@ -834,6 +917,9 @@ runtime_findings_total="$(printf '%s\n' "$runtime_doctor_json" | jq -r '.summary
 runtime_notes="$(printf '%s\n' "$runtime_doctor_json" | jq -r '[.findings[].code] | join(", ")')"
 runtime_remediations_json="$(printf '%s\n' "$runtime_doctor_json" | jq -c '[.findings[]?.remediation | select(type == "string" and length > 0)] | unique')"
 runtime_summary="runtime-doctor findings=${runtime_findings_total}"
+if [[ "$runtime_doctor_timed_out" == "1" ]]; then
+  runtime_summary="${runtime_summary}; runtime-doctor timeout=${runtime_doctor_timeout_sec}s"
+fi
 runtime_fix_record_command="sudo ./scripts/easy_node.sh runtime-fix-record --prune-wg-only-dir 1 --print-summary-json 1"
 runtime_hygiene_check_json="$(build_runtime_hygiene_check_json)"
 wg_only_check_json="$(build_recorded_check_json "wg_only_stack_selftest" "WG-only stack selftest" "sudo ./scripts/easy_node.sh wg-only-stack-selftest-record --strict-beta 1 --base-port 19280 --client-iface wgcstack0 --exit-iface wgestack0 --print-summary-json 1")"
@@ -850,6 +936,9 @@ combined_json="$(
     --arg recorded_status_json_warning "$recorded_status_json_warning" \
     --argjson recorded_status_file_present "$recorded_status_file_present" \
     --argjson recorded_status_json_valid "$recorded_status_json_valid" \
+    --argjson runtime_doctor_timeout_sec "$runtime_doctor_timeout_sec" \
+    --arg runtime_doctor_timed_out "$runtime_doctor_timed_out" \
+    --arg runtime_doctor_timeout_guard_available "$runtime_doctor_timeout_guard_available" \
     --arg runtime_doctor_json_rc "$runtime_doctor_rc" \
     --argjson recorded "$recorded_json" \
     --argjson runtime_doctor "$runtime_doctor_json" \
@@ -871,6 +960,11 @@ combined_json="$(
           valid_json: ($recorded_status_json_valid == 1),
           fallback_used: ($recorded_status_file_present == 1 and ($recorded_status_json_valid != 1)),
           warning: $recorded_status_json_warning
+        },
+        runtime_doctor_invocation: {
+          timeout_sec: $runtime_doctor_timeout_sec,
+          timed_out: ($runtime_doctor_timed_out == "1"),
+          timeout_guard_available: ($runtime_doctor_timeout_guard_available == "1")
         },
         runtime_doctor_exit_code: ($runtime_doctor_json_rc | tonumber),
         runtime_doctor: $runtime_doctor,
