@@ -25,6 +25,9 @@ cmd="${1:-}"
 shift || true
 case "$cmd" in
   real-wg-privileged-matrix)
+    if [[ "${FAKE_REAL_WG_MATRIX_SLEEP_SEC:-0}" =~ ^[0-9]+$ ]] && [[ "${FAKE_REAL_WG_MATRIX_SLEEP_SEC:-0}" -gt 0 ]]; then
+      sleep "${FAKE_REAL_WG_MATRIX_SLEEP_SEC}"
+    fi
     if [[ "${FAKE_REAL_WG_MATRIX_FAIL:-0}" == "1" ]]; then
       echo "real wg privileged matrix integration failed"
       exit 1
@@ -112,6 +115,8 @@ if ! jq -e '
   and .rc == 0
   and .matrix.status == "pass"
   and .matrix.rc == 0
+  and .matrix.timed_out == false
+  and .matrix.timeout_sec == 900
   and .manual_validation_report.status == "ok"
   and .manual_validation_report.readiness_status == "NOT_READY"
   and .manual_validation_report.next_action_check_id == "machine_c_vpn_smoke"
@@ -161,11 +166,59 @@ if ! jq -e '
   and .rc == 1
   and .matrix.status == "fail"
   and .matrix.rc == 1
+  and .matrix.timed_out == false
   and .manual_validation_report.status == "ok"
 ' "$fail_summary_json_path" >/dev/null; then
   echo "failure summary JSON missing expected fields"
   cat "$fail_summary_json_path"
   exit 1
+fi
+
+if command -v timeout >/dev/null 2>&1; then
+  : >"$CAPTURE"
+  echo "[real-wg-privileged-matrix-record] timeout path"
+  if env \
+    FAKE_EASY_CAPTURE_FILE="$CAPTURE" \
+    FAKE_REAL_WG_MATRIX_SLEEP_SEC="2" \
+    REAL_WG_PRIVILEGED_MATRIX_RECORD_EASY_NODE_SCRIPT="$FAKE_EASY_NODE" \
+    ./scripts/real_wg_privileged_matrix_record.sh \
+      --matrix-timeout-sec 1 >/tmp/integration_real_wg_privileged_matrix_record_timeout.log 2>&1; then
+    echo "expected timeout path to return non-zero"
+    cat /tmp/integration_real_wg_privileged_matrix_record_timeout.log
+    exit 1
+  fi
+
+  if ! rg -q 'real-wg-privileged-matrix-record: status=fail' /tmp/integration_real_wg_privileged_matrix_record_timeout.log; then
+    echo "expected fail status for timeout path"
+    cat /tmp/integration_real_wg_privileged_matrix_record_timeout.log
+    exit 1
+  fi
+  if ! rg -q '^manual-validation-record --check-id real_wg_privileged_matrix --status fail ' "$CAPTURE"; then
+    echo "expected manual-validation-record fail call missing for timeout path"
+    cat "$CAPTURE"
+    exit 1
+  fi
+
+  timeout_summary_json_path="$(sed -n 's/^summary_json: //p' /tmp/integration_real_wg_privileged_matrix_record_timeout.log | tail -n 1)"
+  if [[ -z "$timeout_summary_json_path" || ! -f "$timeout_summary_json_path" ]]; then
+    echo "expected timeout summary JSON missing"
+    cat /tmp/integration_real_wg_privileged_matrix_record_timeout.log
+    exit 1
+  fi
+  if ! jq -e '
+    .status == "fail"
+    and .rc == 124
+    and .notes == "Linux root real-WG privileged matrix timed out after 1s"
+    and .matrix.status == "fail"
+    and .matrix.rc == 124
+    and .matrix.timed_out == true
+    and .matrix.timeout_sec == 1
+    and .manual_validation_report.status == "ok"
+  ' "$timeout_summary_json_path" >/dev/null; then
+    echo "timeout summary JSON missing expected fields"
+    cat "$timeout_summary_json_path"
+    exit 1
+  fi
 fi
 
 echo "real wg privileged matrix record integration ok"

@@ -320,6 +320,67 @@ if ! jq -e '
   exit 1
 fi
 
+echo "[roadmap-progress-report] optional gate command fallback path"
+OPTIONAL_FALLBACK_MANUAL_SUMMARY_JSON="$TMP_DIR/manual_validation_optional_gate_fallback_summary.json"
+cat >"$OPTIONAL_FALLBACK_MANUAL_SUMMARY_JSON" <<'EOF_OPTIONAL_FALLBACK_SUMMARY'
+{
+  "version": 1,
+  "checks": [
+    {
+      "check_id": "runtime_hygiene",
+      "label": "Runtime hygiene doctor",
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh runtime-doctor --show-json 1"
+    },
+    {
+      "check_id": "wg_only_stack_selftest",
+      "label": "WG-only stack selftest",
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh wg-only-stack-selftest-record --strict-beta 1 --print-summary-json 1"
+    }
+  ],
+  "summary": {
+    "next_action_check_id": "",
+    "next_action_command": "",
+    "roadmap_stage": "READY_FOR_MACHINE_C_SMOKE",
+    "single_machine_ready": true,
+    "blocking_check_ids": [],
+    "optional_check_ids": ["three_machine_docker_readiness", "real_wg_privileged_matrix"],
+    "docker_rehearsal_gate": {
+      "status": "pending",
+      "command": "./scripts/easy_node.sh three-machine-docker-readiness-record --path-profile balanced --soak-rounds 6 --soak-pause-sec 3 --print-summary-json 1"
+    },
+    "real_wg_privileged_gate": {
+      "status": "pending",
+      "command": "sudo ./scripts/easy_node.sh real-wg-privileged-matrix-record --print-summary-json 1"
+    }
+  },
+  "report": {
+    "readiness_status": "NOT_READY"
+  }
+}
+EOF_OPTIONAL_FALLBACK_SUMMARY
+if ! ./scripts/roadmap_progress_report.sh \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$OPTIONAL_FALLBACK_MANUAL_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_optional_fallback_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_optional_fallback_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >/tmp/integration_roadmap_progress_report_optional_fallback.log 2>&1; then
+  echo "expected success when optional gate next commands are inferred from command fields"
+  cat /tmp/integration_roadmap_progress_report_optional_fallback.log
+  exit 1
+fi
+if ! jq -e '
+  ((.next_actions // []) | any(.id == "three_machine_docker_readiness" and .command == "./scripts/easy_node.sh three-machine-docker-readiness-record --path-profile balanced --soak-rounds 6 --soak-pause-sec 3 --print-summary-json 1"))
+  and ((.next_actions // []) | any(.id == "real_wg_privileged_matrix" and .command == "sudo ./scripts/easy_node.sh real-wg-privileged-matrix-record --print-summary-json 1"))
+' "$TMP_DIR/roadmap_progress_optional_fallback_summary.json" >/dev/null; then
+  echo "optional gate command fallback summary JSON missing expected commands"
+  cat "$TMP_DIR/roadmap_progress_optional_fallback_summary.json"
+  exit 1
+fi
+
 : >"$CAPTURE"
 
 echo "[roadmap-progress-report] single-machine refresh failure path"

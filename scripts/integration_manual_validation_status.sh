@@ -226,9 +226,13 @@ if ! printf '%s\n' "$baseline_json" | jq -e '
   and .summary.docker_rehearsal_gate.status == "pending"
   and .summary.docker_rehearsal_gate.ready == false
   and .summary.docker_rehearsal_gate.check_id == "three_machine_docker_readiness"
+  and .summary.docker_rehearsal_gate.next_command == "./scripts/easy_node.sh three-machine-docker-readiness-record --path-profile balanced --soak-rounds 6 --soak-pause-sec 3 --print-summary-json 1"
   and .summary.real_wg_privileged_gate.status == "pending"
   and .summary.real_wg_privileged_gate.ready == false
   and .summary.real_wg_privileged_gate.check_id == "real_wg_privileged_matrix"
+  and .summary.real_wg_privileged_gate.next_command == "sudo ./scripts/easy_node.sh real-wg-privileged-matrix-record --print-summary-json 1"
+  and (.summary.real_wg_privileged_gate.host.eligible | type == "boolean")
+  and ((.summary.real_wg_privileged_gate.host.hint // "") | length > 0)
   and .summary.single_machine_ready == false
   and .summary.roadmap_stage == "BLOCKED_LOCAL"
   and .summary.next_action_remediations == ["sudo chown user:user deploy/.env.easy.client","sudo rm -rf deploy/data/wg_only"]

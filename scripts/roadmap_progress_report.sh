@@ -375,22 +375,22 @@ next_actions_json="$(jq -c --arg next_action_check_id "$next_action_check_id" --
       command: $next_action_command,
       reason: "primary roadmap gate"
     } else empty end),
-    (if ((.summary.profile_default_gate.status // "pending") != "pass" and (.summary.profile_default_gate.next_command // "") != "") then {
+    (if ((.summary.profile_default_gate.status // "pending") != "pass" and ((.summary.profile_default_gate.next_command // .summary.profile_default_gate.command // "") != "")) then {
       id: "profile_default_gate",
       label: "Profile default decision gate",
-      command: .summary.profile_default_gate.next_command,
+      command: (.summary.profile_default_gate.next_command // .summary.profile_default_gate.command // ""),
       reason: "non-blocking profile default decision"
     } else empty end),
-    (if ((.summary.docker_rehearsal_gate.status // "pending") != "pass" and (.summary.docker_rehearsal_gate.next_command // "") != "") then {
+    (if ((.summary.docker_rehearsal_gate.status // "pending") != "pass" and ((.summary.docker_rehearsal_gate.next_command // .summary.docker_rehearsal_gate.command // "") != "")) then {
       id: "three_machine_docker_readiness",
       label: "One-host docker 3-machine rehearsal",
-      command: .summary.docker_rehearsal_gate.next_command,
+      command: (.summary.docker_rehearsal_gate.next_command // .summary.docker_rehearsal_gate.command // ""),
       reason: "one-host confidence gate"
     } else empty end),
-    (if ((.summary.real_wg_privileged_gate.status // "pending") != "pass" and (.summary.real_wg_privileged_gate.next_command // "") != "") then {
+    (if ((.summary.real_wg_privileged_gate.status // "pending") != "pass" and ((.summary.real_wg_privileged_gate.next_command // .summary.real_wg_privileged_gate.command // "") != "")) then {
       id: "real_wg_privileged_matrix",
       label: "Linux root real-WG privileged matrix",
-      command: .summary.real_wg_privileged_gate.next_command,
+      command: (.summary.real_wg_privileged_gate.next_command // .summary.real_wg_privileged_gate.command // ""),
       reason: "one-host dataplane confidence gate"
     } else empty end)
   ]

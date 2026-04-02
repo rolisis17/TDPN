@@ -928,6 +928,34 @@ real_wg_privileged_check_json="$(build_recorded_check_json "real_wg_privileged_m
 machine_c_check_json="$(build_recorded_check_json "machine_c_vpn_smoke" "Machine C VPN smoke test" "sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --path-profile balanced --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country")"
 three_machine_check_json="$(build_recorded_check_json "three_machine_prod_signoff" "True 3-machine production signoff" "sudo ./scripts/easy_node.sh three-machine-prod-signoff --bundle-dir .easy-node-logs/prod_gate_bundle --directory-a https://A_HOST:8081 --directory-b https://B_HOST:8081 --issuer-url https://A_HOST:8082 --entry-url https://A_HOST:8083 --exit-url https://A_HOST:8084 --pre-real-host-readiness 1 --runtime-fix 1 --print-summary-json 1")"
 profile_default_gate_json="$(build_profile_default_gate_json "$profile_compare_signoff_summary_json")"
+real_wg_host_linux="0"
+real_wg_host_root="0"
+real_wg_host_has_wg="0"
+real_wg_host_has_ip="0"
+real_wg_host_eligible="0"
+real_wg_host_hint="requires Linux root host with wg/ip tools"
+if [[ "$(uname -s)" == "Linux" ]]; then
+  real_wg_host_linux="1"
+fi
+if [[ "$(id -u)" -eq 0 ]]; then
+  real_wg_host_root="1"
+fi
+if command -v wg >/dev/null 2>&1; then
+  real_wg_host_has_wg="1"
+fi
+if command -v ip >/dev/null 2>&1; then
+  real_wg_host_has_ip="1"
+fi
+if [[ "$real_wg_host_linux" == "1" && "$real_wg_host_root" == "1" && "$real_wg_host_has_wg" == "1" && "$real_wg_host_has_ip" == "1" ]]; then
+  real_wg_host_eligible="1"
+  real_wg_host_hint="host eligible"
+elif [[ "$real_wg_host_linux" != "1" ]]; then
+  real_wg_host_hint="requires Linux host"
+elif [[ "$real_wg_host_root" != "1" ]]; then
+  real_wg_host_hint="requires root (run with sudo)"
+elif [[ "$real_wg_host_has_wg" != "1" || "$real_wg_host_has_ip" != "1" ]]; then
+  real_wg_host_hint="requires wg and ip commands on host"
+fi
 
 combined_json="$(
   jq -n \
@@ -949,6 +977,12 @@ combined_json="$(
     --argjson machine_c_check "$machine_c_check_json" \
     --argjson three_machine_check "$three_machine_check_json" \
     --argjson profile_default_gate "$profile_default_gate_json" \
+    --arg real_wg_host_linux "$real_wg_host_linux" \
+    --arg real_wg_host_root "$real_wg_host_root" \
+    --arg real_wg_host_has_wg "$real_wg_host_has_wg" \
+    --arg real_wg_host_has_ip "$real_wg_host_has_ip" \
+    --arg real_wg_host_eligible "$real_wg_host_eligible" \
+    --arg real_wg_host_hint "$real_wg_host_hint" \
     '
       {
         version: 1,
@@ -1092,6 +1126,7 @@ combined_json="$(
             notes: (([.checks[] | select(.check_id == "three_machine_docker_readiness") | .notes][0]) // ""),
             command: (([.checks[] | select(.check_id == "three_machine_docker_readiness") | .command][0]) // "")
           }
+          | .next_command = (if .status == "pass" or .status == "skip" then "" else .command end)
           | .ready = (.status == "pass" or .status == "skip")
         )
       | .summary.real_wg_privileged_gate = (
@@ -1099,8 +1134,26 @@ combined_json="$(
             check_id: "real_wg_privileged_matrix",
             status: (([.checks[] | select(.check_id == "real_wg_privileged_matrix") | .status][0]) // "pending"),
             notes: (([.checks[] | select(.check_id == "real_wg_privileged_matrix") | .notes][0]) // ""),
-            command: (([.checks[] | select(.check_id == "real_wg_privileged_matrix") | .command][0]) // "")
+            command: (([.checks[] | select(.check_id == "real_wg_privileged_matrix") | .command][0]) // ""),
+            host: {
+              linux: ($real_wg_host_linux == "1"),
+              root: ($real_wg_host_root == "1"),
+              has_wg: ($real_wg_host_has_wg == "1"),
+              has_ip: ($real_wg_host_has_ip == "1"),
+              eligible: ($real_wg_host_eligible == "1"),
+              hint: $real_wg_host_hint
+            }
           }
+          | .next_command = (if .status == "pass" or .status == "skip" then "" else .command end)
+          | .notes = (
+              if (.notes | length) > 0 then
+                .notes
+              elif .status == "pending" and (.host.eligible | not) then
+                .host.hint
+              else
+                .notes
+              end
+            )
           | .ready = (.status == "pass" or .status == "skip")
         )
       | .summary.single_machine_ready = (.summary.local_gate.ready // false)

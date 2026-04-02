@@ -16,6 +16,7 @@ usage() {
 Usage:
   ./scripts/real_wg_privileged_matrix_record.sh \
     [real-wg-privileged-matrix args...] \
+    [--matrix-timeout-sec N] \
     [--record-result [0|1]] \
     [--manual-validation-report [0|1]] \
     [--manual-validation-report-summary-json PATH] \
@@ -42,6 +43,15 @@ bool_arg_or_die() {
   local value="$2"
   if [[ "$value" != "0" && "$value" != "1" ]]; then
     echo "$name must be 0 or 1"
+    exit 2
+  fi
+}
+
+non_negative_integer_or_die() {
+  local name="$1"
+  local value="$2"
+  if [[ ! "$value" =~ ^[0-9]+$ ]]; then
+    echo "$name must be a non-negative integer"
     exit 2
   fi
 }
@@ -119,6 +129,16 @@ run_and_capture() {
   fi
 }
 
+run_with_optional_timeout() {
+  local timeout_sec="$1"
+  shift
+  if [[ "$timeout_sec" -gt 0 ]] && command -v timeout >/dev/null 2>&1; then
+    timeout "${timeout_sec}s" "$@"
+  else
+    "$@"
+  fi
+}
+
 easy_node_script="${REAL_WG_PRIVILEGED_MATRIX_RECORD_EASY_NODE_SCRIPT:-$ROOT_DIR/scripts/easy_node.sh}"
 if [[ ! -x "$easy_node_script" ]]; then
   echo "missing easy_node helper script: $easy_node_script"
@@ -133,10 +153,15 @@ manual_validation_report_md=""
 matrix_summary_json=""
 summary_json=""
 print_summary_json="0"
+matrix_timeout_sec="${REAL_WG_PRIVILEGED_MATRIX_RECORD_TIMEOUT_SEC:-900}"
 declare -a matrix_args=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --matrix-timeout-sec)
+      matrix_timeout_sec="${2:-}"
+      shift 2
+      ;;
     --record-result)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         record_result="${2:-}"
@@ -194,6 +219,7 @@ done
 bool_arg_or_die "--record-result" "$record_result"
 bool_arg_or_die "--manual-validation-report" "$manual_validation_report_enabled"
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
+non_negative_integer_or_die "--matrix-timeout-sec" "$matrix_timeout_sec"
 
 log_dir="$(prepare_log_dir)"
 timestamp="$(date +%Y%m%d_%H%M%S)"
@@ -231,6 +257,11 @@ notes=""
 manual_validation_report_status="skipped"
 manual_validation_report_readiness_status=""
 manual_validation_report_next_action_check_id=""
+matrix_timed_out="0"
+matrix_timeout_guard_available="0"
+if command -v timeout >/dev/null 2>&1; then
+  matrix_timeout_guard_available="1"
+fi
 
 write_matrix_summary_json() {
   jq -n \
@@ -240,6 +271,9 @@ write_matrix_summary_json() {
     --arg command "$(print_cmd "$easy_node_script" real-wg-privileged-matrix "${matrix_args[@]}")" \
     --arg summary_log "$matrix_log" \
     --arg summary_json "$matrix_summary_json" \
+    --argjson matrix_timeout_sec "$matrix_timeout_sec" \
+    --arg matrix_timed_out "$matrix_timed_out" \
+    --arg matrix_timeout_guard_available "$matrix_timeout_guard_available" \
     --argjson rc "$matrix_rc" \
     '{
       version: 1,
@@ -248,6 +282,11 @@ write_matrix_summary_json() {
       rc: $rc,
       notes: $notes,
       command: $command,
+      invocation: {
+        timeout_sec: $matrix_timeout_sec,
+        timed_out: ($matrix_timed_out == "1"),
+        timeout_guard_available: ($matrix_timeout_guard_available == "1")
+      },
       artifacts: {
         summary_log: $summary_log,
         summary_json: $summary_json
@@ -265,6 +304,9 @@ write_summary_json() {
     --arg summary_json "$summary_json" \
     --arg matrix_summary_json "$matrix_summary_json" \
     --arg matrix_log "$matrix_log" \
+    --argjson matrix_timeout_sec "$matrix_timeout_sec" \
+    --arg matrix_timed_out "$matrix_timed_out" \
+    --arg matrix_timeout_guard_available "$matrix_timeout_guard_available" \
     --argjson matrix_rc "$matrix_rc" \
     --arg manual_validation_report_summary_json "$manual_validation_report_summary_json" \
     --arg manual_validation_report_md "$manual_validation_report_md" \
@@ -283,6 +325,9 @@ write_summary_json() {
       matrix: {
         status: $status,
         rc: $matrix_rc,
+        timeout_sec: $matrix_timeout_sec,
+        timed_out: ($matrix_timed_out == "1"),
+        timeout_guard_available: ($matrix_timeout_guard_available == "1"),
         summary_json: $matrix_summary_json,
         summary_log: $matrix_log
       },
@@ -372,16 +417,23 @@ matrix_cmd=(
 )
 
 matrix_output=""
-if run_and_capture matrix_output "${matrix_cmd[@]}"; then
+if run_and_capture matrix_output run_with_optional_timeout "$matrix_timeout_sec" "${matrix_cmd[@]}"; then
   matrix_rc=0
 else
   matrix_rc=$?
 fi
 persist_artifact_text "$matrix_log" "$matrix_output"
 
+if [[ "$matrix_rc" -eq 124 ]]; then
+  matrix_timed_out="1"
+fi
+
 if [[ "$matrix_rc" -eq 0 ]]; then
   matrix_status="pass"
   notes="Linux root real-WG privileged matrix passed"
+elif [[ "$matrix_rc" -eq 124 && "$matrix_timeout_sec" -gt 0 && "$matrix_timeout_guard_available" == "1" ]]; then
+  matrix_status="fail"
+  notes="Linux root real-WG privileged matrix timed out after ${matrix_timeout_sec}s"
 else
   matrix_status="fail"
   notes="Linux root real-WG privileged matrix failed"
