@@ -168,6 +168,43 @@ exit 1
 EOF_FAKE_MANUAL_INVALID
 chmod +x "$FAKE_MANUAL_INVALID"
 
+FAKE_MANUAL_PARTIAL="$TMP_DIR/fake_manual_validation_report_partial.sh"
+cat >"$FAKE_MANUAL_PARTIAL" <<'EOF_FAKE_MANUAL_PARTIAL'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'manual-validation-report-partial %s\n' "$*" >>"${FAKE_ROADMAP_CAPTURE_FILE:?}"
+summary_json=""
+report_md=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --summary-json)
+      summary_json="${2:-}"
+      shift 2
+      ;;
+    --report-md)
+      report_md="${2:-}"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
+if [[ -z "$summary_json" || -z "$report_md" ]]; then
+  echo "missing summary/report args" >&2
+  exit 1
+fi
+mkdir -p "$(dirname "$summary_json")" "$(dirname "$report_md")"
+
+cat >"$summary_json" <<'EOF_SUMMARY_PARTIAL'
+{"version":1,"summary":{"next_action_check_id":"machine_c_vpn_smoke"}}
+EOF_SUMMARY_PARTIAL
+printf '# fake partial manual validation report\n' >"$report_md"
+exit 1
+EOF_FAKE_MANUAL_PARTIAL
+chmod +x "$FAKE_MANUAL_PARTIAL"
+
 FAKE_SINGLE="$TMP_DIR/fake_single_machine_prod_readiness.sh"
 cat >"$FAKE_SINGLE" <<'EOF_FAKE_SINGLE'
 #!/usr/bin/env bash
@@ -523,7 +560,62 @@ fi
 
 : >"$CAPTURE"
 
+echo "[roadmap-progress-report] manual refresh partial summary restore path"
+if env \
+  FAKE_ROADMAP_CAPTURE_FILE="$CAPTURE" \
+  ROADMAP_PROGRESS_MANUAL_VALIDATION_REPORT_SCRIPT="$FAKE_MANUAL_PARTIAL" \
+  ROADMAP_PROGRESS_SINGLE_MACHINE_SCRIPT="$FAKE_SINGLE" \
+  ./scripts/roadmap_progress_report.sh \
+    --refresh-manual-validation 1 \
+    --refresh-single-machine-readiness 0 \
+    --manual-validation-summary-json "$RESTORE_MANUAL_SUMMARY_JSON" \
+    --manual-validation-report-md "$RESTORE_MANUAL_REPORT_MD" \
+    --single-machine-summary-json "$SINGLE_MACHINE_SUMMARY_JSON" \
+    --summary-json "$TMP_DIR/roadmap_progress_manual_partial_restore_summary.json" \
+    --report-md "$TMP_DIR/roadmap_progress_manual_partial_restore_report.md" \
+    --print-report 0 \
+    --print-summary-json 0 >/tmp/integration_roadmap_progress_report_manual_partial_restore.log 2>&1; then
+  echo "expected failure when manual refresh emits partial summary schema"
+  cat /tmp/integration_roadmap_progress_report_manual_partial_restore.log
+  exit 1
+fi
+if ! rg -q '\[roadmap-progress-report\] status=fail rc=1' /tmp/integration_roadmap_progress_report_manual_partial_restore.log; then
+  echo "manual partial restore path missing fail status line"
+  cat /tmp/integration_roadmap_progress_report_manual_partial_restore.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .refresh.manual_validation_report.status == "fail"
+  and .refresh.manual_validation_report.summary_valid_after_run == true
+  and .refresh.manual_validation_report.summary_restored_from_snapshot == true
+  and .vpn_track.next_action.check_id == "machine_c_vpn_smoke"
+' "$TMP_DIR/roadmap_progress_manual_partial_restore_summary.json" >/dev/null; then
+  echo "manual partial restore summary missing expected restored snapshot fields"
+  cat "$TMP_DIR/roadmap_progress_manual_partial_restore_summary.json"
+  exit 1
+fi
+if ! jq -e '
+  .summary.next_action_check_id == "machine_c_vpn_smoke"
+  and .report.readiness_status == "NOT_READY"
+' "$RESTORE_MANUAL_SUMMARY_JSON" >/dev/null; then
+  echo "manual partial restore path did not keep manual validation summary JSON usable"
+  cat "$RESTORE_MANUAL_SUMMARY_JSON"
+  exit 1
+fi
+
+: >"$CAPTURE"
+
 echo "[roadmap-progress-report] single-machine refresh failure path"
+cat >"$SINGLE_MACHINE_SUMMARY_JSON" <<'EOF_SINGLE_MACHINE_SNAPSHOT'
+{
+  "status": "ok",
+  "summary": {
+    "single_machine_ready": true
+  }
+}
+EOF_SINGLE_MACHINE_SNAPSHOT
 if env \
   FAKE_ROADMAP_CAPTURE_FILE="$CAPTURE" \
   FAKE_SINGLE_FAIL=1 \
@@ -552,9 +644,16 @@ if ! jq -e '
   and .refresh.single_machine_prod_readiness.status == "fail"
   and .refresh.single_machine_prod_readiness.rc == 1
   and .refresh.single_machine_prod_readiness.timed_out == false
+  and .refresh.single_machine_prod_readiness.summary_valid_after_run == true
+  and .refresh.single_machine_prod_readiness.summary_restored_from_snapshot == true
 ' "$TMP_DIR/roadmap_progress_fail_summary.json" >/dev/null; then
   echo "failure summary JSON missing expected fields"
   cat "$TMP_DIR/roadmap_progress_fail_summary.json"
+  exit 1
+fi
+if ! jq -e '.summary.single_machine_ready == true' "$SINGLE_MACHINE_SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "single-machine refresh failure path did not restore latest summary snapshot"
+  cat "$SINGLE_MACHINE_SUMMARY_JSON"
   exit 1
 fi
 

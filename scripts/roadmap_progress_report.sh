@@ -75,6 +75,39 @@ json_file_valid_01() {
   fi
 }
 
+manual_validation_summary_usable_01() {
+  local path="$1"
+  if [[ ! -f "$path" ]]; then
+    printf '0'
+    return
+  fi
+  if jq -e '
+    (.summary | type == "object")
+    and (.report | type == "object")
+    and ((.report.readiness_status // "") | type == "string")
+  ' "$path" >/dev/null 2>&1; then
+    printf '1'
+  else
+    printf '0'
+  fi
+}
+
+single_machine_summary_usable_01() {
+  local path="$1"
+  if [[ ! -f "$path" ]]; then
+    printf '0'
+    return
+  fi
+  if jq -e '
+    ((.status // "") | type == "string")
+    and (.summary | type == "object")
+  ' "$path" >/dev/null 2>&1; then
+    printf '1'
+  else
+    printf '0'
+  fi
+}
+
 restore_json_snapshot() {
   local snapshot_path="$1"
   local target_path="$2"
@@ -254,12 +287,12 @@ single_machine_summary_snapshot_valid="false"
 single_machine_summary_restored="false"
 single_machine_summary_valid_after_run="false"
 
-if [[ "$(json_file_valid_01 "$manual_validation_summary_json")" == "1" ]]; then
+if [[ "$(manual_validation_summary_usable_01 "$manual_validation_summary_json")" == "1" ]]; then
   manual_summary_snapshot="$(mktemp "$log_dir/roadmap_progress_manual_validation_snapshot_${ts}_XXXXXX.json")"
   cp "$manual_validation_summary_json" "$manual_summary_snapshot"
   manual_summary_snapshot_valid="true"
 fi
-if [[ "$(json_file_valid_01 "$single_machine_summary_json")" == "1" ]]; then
+if [[ "$(single_machine_summary_usable_01 "$single_machine_summary_json")" == "1" ]]; then
   single_machine_summary_snapshot="$(mktemp "$log_dir/roadmap_progress_single_machine_snapshot_${ts}_XXXXXX.json")"
   cp "$single_machine_summary_json" "$single_machine_summary_snapshot"
   single_machine_summary_snapshot_valid="true"
@@ -289,7 +322,7 @@ if [[ "$refresh_single_machine_readiness" == "1" ]]; then
     single_machine_refresh_status="pass"
   fi
   single_machine_summary_valid_after_run="false"
-  if [[ "$(json_file_valid_01 "$single_machine_summary_json")" == "1" ]]; then
+  if [[ "$(single_machine_summary_usable_01 "$single_machine_summary_json")" == "1" ]]; then
     single_machine_summary_valid_after_run="true"
   fi
   if [[ "$single_machine_refresh_status" == "pass" && "$single_machine_summary_valid_after_run" != "true" ]]; then
@@ -307,7 +340,7 @@ if [[ "$refresh_single_machine_readiness" == "1" ]]; then
   echo "[roadmap-progress-report] refresh_step=single_machine_prod_readiness status=$single_machine_refresh_status rc=$single_machine_refresh_rc timed_out=$single_machine_refresh_timed_out duration_sec=$single_machine_refresh_duration_sec log=$single_machine_refresh_log"
 fi
 if [[ "$refresh_single_machine_readiness" != "1" ]]; then
-  if [[ "$(json_file_valid_01 "$single_machine_summary_json")" == "1" ]]; then
+  if [[ "$(single_machine_summary_usable_01 "$single_machine_summary_json")" == "1" ]]; then
     single_machine_summary_valid_after_run="true"
   fi
 fi
@@ -337,7 +370,7 @@ if [[ "$refresh_manual_validation" == "1" ]]; then
     manual_refresh_status="pass"
   fi
   manual_summary_valid_after_run="false"
-  if [[ "$(json_file_valid_01 "$manual_validation_summary_json")" == "1" ]]; then
+  if [[ "$(manual_validation_summary_usable_01 "$manual_validation_summary_json")" == "1" ]]; then
     manual_summary_valid_after_run="true"
   fi
   if [[ "$manual_refresh_status" == "pass" && "$manual_summary_valid_after_run" != "true" ]]; then
@@ -355,7 +388,7 @@ if [[ "$refresh_manual_validation" == "1" ]]; then
   echo "[roadmap-progress-report] refresh_step=manual_validation_report status=$manual_refresh_status rc=$manual_refresh_rc timed_out=$manual_refresh_timed_out duration_sec=$manual_refresh_duration_sec log=$manual_refresh_log"
 fi
 if [[ "$refresh_manual_validation" != "1" ]]; then
-  if [[ "$(json_file_valid_01 "$manual_validation_summary_json")" == "1" ]]; then
+  if [[ "$(manual_validation_summary_usable_01 "$manual_validation_summary_json")" == "1" ]]; then
     manual_summary_valid_after_run="true"
   fi
 fi
