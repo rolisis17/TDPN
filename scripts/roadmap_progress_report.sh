@@ -130,6 +130,50 @@ single_machine_summary_usable_01() {
   fi
 }
 
+single_machine_refresh_transient_non_blocking_01() {
+  local refresh_log="$1"
+  local summary_path="$2"
+
+  if [[ ! -f "$refresh_log" ]]; then
+    printf '0'
+    return
+  fi
+  if ! rg -qi \
+    'server misbehaving|temporary failure in name resolution|tls handshake timeout|i/o timeout|context deadline exceeded|connection reset by peer|failed to do request|request canceled while waiting for connection' \
+    "$refresh_log"; then
+    printf '0'
+    return
+  fi
+  if [[ "$(single_machine_summary_usable_01 "$summary_path")" != "1" ]]; then
+    printf '0'
+    return
+  fi
+
+  if jq -e '
+    def arr_or_empty(v): if (v | type) == "array" then v else [] end;
+    (
+      (arr_or_empty(.summary.critical_failed_steps) | length) > 0
+      and (
+        (arr_or_empty(.summary.critical_failed_steps)
+          | map((.step_id // "") | tostring)
+          | unique
+        ) == ["three_machine_docker_readiness"]
+      )
+      and ((arr_or_empty(.summary.pending_local_checks) | length) == 0)
+    )
+    or
+    (
+      ((.status // "") | tostring) == "fail"
+      and (((.summary.three_machine_docker_readiness.status // "") | tostring) == "fail")
+      and ((arr_or_empty(.summary.pending_local_checks) | length) == 0)
+    )
+  ' "$summary_path" >/dev/null 2>&1; then
+    printf '1'
+  else
+    printf '0'
+  fi
+}
+
 restore_json_snapshot() {
   local snapshot_path="$1"
   local target_path="$2"
@@ -248,7 +292,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-for cmd in jq date mktemp; do
+for cmd in jq date mktemp rg; do
   need_cmd "$cmd"
 done
 
@@ -299,6 +343,8 @@ single_machine_refresh_status="skip"
 single_machine_refresh_rc=0
 single_machine_refresh_timed_out="false"
 single_machine_refresh_duration_sec=0
+single_machine_refresh_non_blocking_transient="false"
+single_machine_refresh_non_blocking_reason=""
 
 manual_summary_snapshot=""
 manual_summary_snapshot_valid="false"
@@ -357,6 +403,13 @@ if [[ "$refresh_single_machine_readiness" == "1" ]]; then
     if restore_json_snapshot "$single_machine_summary_snapshot" "$single_machine_summary_json"; then
       single_machine_summary_restored="true"
       single_machine_summary_valid_after_run="true"
+    fi
+  fi
+  if [[ "$single_machine_refresh_status" == "fail" && "$single_machine_refresh_timed_out" != "true" ]]; then
+    if [[ "$(single_machine_refresh_transient_non_blocking_01 "$single_machine_refresh_log" "$single_machine_summary_json")" == "1" ]]; then
+      single_machine_refresh_status="warn"
+      single_machine_refresh_non_blocking_transient="true"
+      single_machine_refresh_non_blocking_reason="Transient docker registry/network failure during single-machine docker rehearsal; latest usable summary retained."
     fi
   fi
   echo "[roadmap-progress-report] refresh_step=single_machine_prod_readiness status=$single_machine_refresh_status rc=$single_machine_refresh_rc timed_out=$single_machine_refresh_timed_out duration_sec=$single_machine_refresh_duration_sec log=$single_machine_refresh_log"
@@ -561,6 +614,9 @@ elif [[ "$manual_refresh_status" == "fail" || "$single_machine_refresh_status" =
   final_status="fail"
   final_rc=1
   notes="One or more requested refresh steps failed; inspect refresh logs."
+elif [[ "$manual_refresh_status" == "warn" || "$single_machine_refresh_status" == "warn" ]]; then
+  final_status="warn"
+  notes="One or more requested refresh steps reported non-blocking transient warnings; latest usable summaries were retained."
 elif [[ "$readiness_status" != "READY" ]]; then
   final_status="warn"
   notes="VPN production signoff is still pending external real-host gates."
@@ -610,6 +666,8 @@ summary_payload="$(jq -n \
   --arg refresh_single_machine_log "$single_machine_refresh_log" \
   --argjson refresh_single_machine_summary_valid_after_run "$single_machine_summary_valid_after_run" \
   --argjson refresh_single_machine_summary_restored_from_snapshot "$single_machine_summary_restored" \
+  --argjson refresh_single_machine_non_blocking_transient "$single_machine_refresh_non_blocking_transient" \
+  --arg refresh_single_machine_non_blocking_reason "$single_machine_refresh_non_blocking_reason" \
   --arg manual_validation_summary_json "$manual_validation_summary_json" \
   --arg manual_validation_report_md "$manual_validation_report_md" \
   --arg single_machine_summary_json "$single_machine_summary_json" \
@@ -675,7 +733,9 @@ summary_payload="$(jq -n \
         duration_sec: $refresh_single_machine_duration_sec,
         log: $refresh_single_machine_log,
         summary_valid_after_run: $refresh_single_machine_summary_valid_after_run,
-        summary_restored_from_snapshot: $refresh_single_machine_summary_restored_from_snapshot
+        summary_restored_from_snapshot: $refresh_single_machine_summary_restored_from_snapshot,
+        non_blocking_transient: $refresh_single_machine_non_blocking_transient,
+        non_blocking_reason: $refresh_single_machine_non_blocking_reason
       }
     },
     next_actions: $next_actions,
@@ -745,6 +805,8 @@ $next_actions_md
 - Manual validation refresh timeout: $(jq -r '.refresh.manual_validation_report.timed_out' "$summary_json") (limit=$(jq -r '.refresh.manual_validation_report.timeout_sec' "$summary_json")s, duration=$(jq -r '.refresh.manual_validation_report.duration_sec' "$summary_json")s)
 - Single-machine refresh: $(jq -r '.refresh.single_machine_prod_readiness.status' "$summary_json") (rc=$(jq -r '.refresh.single_machine_prod_readiness.rc' "$summary_json"))
 - Single-machine refresh timeout: $(jq -r '.refresh.single_machine_prod_readiness.timed_out' "$summary_json") (limit=$(jq -r '.refresh.single_machine_prod_readiness.timeout_sec' "$summary_json")s, duration=$(jq -r '.refresh.single_machine_prod_readiness.duration_sec' "$summary_json")s)
+- Single-machine refresh non-blocking transient: $(jq -r '.refresh.single_machine_prod_readiness.non_blocking_transient' "$summary_json")
+- Single-machine refresh warning reason: $(jq -r '.refresh.single_machine_prod_readiness.non_blocking_reason // ""' "$summary_json")
 
 ## Artifacts
 
@@ -763,6 +825,7 @@ echo "[roadmap-progress-report] next_action_check_id=${next_action_check_id:-}"
 echo "[roadmap-progress-report] next_action_command=${next_action_command:-}"
 echo "[roadmap-progress-report] manual_validation_refresh_status=$manual_refresh_status rc=$manual_refresh_rc"
 echo "[roadmap-progress-report] single_machine_refresh_status=$single_machine_refresh_status rc=$single_machine_refresh_rc"
+echo "[roadmap-progress-report] single_machine_refresh_non_blocking_transient=$single_machine_refresh_non_blocking_transient reason=$single_machine_refresh_non_blocking_reason"
 echo "[roadmap-progress-report] manual_validation_summary_valid_after_run=$manual_summary_valid_after_run restored_from_snapshot=$manual_summary_restored"
 echo "[roadmap-progress-report] single_machine_summary_valid_after_run=$single_machine_summary_valid_after_run restored_from_snapshot=$single_machine_summary_restored"
 echo "[roadmap-progress-report] summary_json=$summary_json"

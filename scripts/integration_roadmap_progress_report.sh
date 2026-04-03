@@ -224,7 +224,14 @@ while [[ $# -gt 0 ]]; do
 done
 if [[ -n "$summary_json" ]]; then
   mkdir -p "$(dirname "$summary_json")"
-  printf '{"status":"warn"}\n' >"$summary_json"
+  if [[ -n "${FAKE_SINGLE_SUMMARY_PAYLOAD:-}" ]]; then
+    printf '%s\n' "${FAKE_SINGLE_SUMMARY_PAYLOAD}" >"$summary_json"
+  else
+    printf '{"status":"warn"}\n' >"$summary_json"
+  fi
+fi
+if [[ "${FAKE_SINGLE_TRANSIENT_LOG:-0}" == "1" ]]; then
+  echo 'failed to do request: Head "https://registry-1.docker.io/v2/library/alpine/manifests/3.20": dial tcp: lookup registry-1.docker.io on 127.0.0.53:53: server misbehaving' >&2
 fi
 if [[ "${FAKE_SINGLE_SLEEP_SEC:-0}" =~ ^[0-9]+$ ]] && [[ "${FAKE_SINGLE_SLEEP_SEC:-0}" -gt 0 ]]; then
   sleep "${FAKE_SINGLE_SLEEP_SEC}"
@@ -690,6 +697,53 @@ fi
 if ! jq -e '.summary.single_machine_ready == true' "$SINGLE_MACHINE_SUMMARY_JSON" >/dev/null 2>&1; then
   echo "single-machine refresh failure path did not restore latest summary snapshot"
   cat "$SINGLE_MACHINE_SUMMARY_JSON"
+  exit 1
+fi
+
+: >"$CAPTURE"
+
+echo "[roadmap-progress-report] single-machine refresh transient non-blocking warning path"
+if ! env \
+  FAKE_ROADMAP_CAPTURE_FILE="$CAPTURE" \
+  FAKE_SINGLE_FAIL=1 \
+  FAKE_SINGLE_TRANSIENT_LOG=1 \
+  FAKE_SINGLE_SUMMARY_PAYLOAD='{"status":"fail","summary":{"critical_failed_steps":[{"step_id":"three_machine_docker_readiness"}],"pending_local_checks":[],"three_machine_docker_readiness":{"status":"fail"}}}' \
+  ROADMAP_PROGRESS_MANUAL_VALIDATION_REPORT_SCRIPT="$FAKE_MANUAL" \
+  ROADMAP_PROGRESS_SINGLE_MACHINE_SCRIPT="$FAKE_SINGLE" \
+  ./scripts/roadmap_progress_report.sh \
+    --refresh-manual-validation 1 \
+    --refresh-single-machine-readiness 1 \
+    --single-machine-summary-json "$SINGLE_MACHINE_SUMMARY_JSON" \
+    --summary-json "$TMP_DIR/roadmap_progress_transient_warn_summary.json" \
+    --report-md "$TMP_DIR/roadmap_progress_transient_warn_report.md" \
+    --print-report 0 \
+    --print-summary-json 0 >/tmp/integration_roadmap_progress_report_transient_warn.log 2>&1; then
+  echo "expected success with warn status when single-machine refresh hits transient docker registry failure"
+  cat /tmp/integration_roadmap_progress_report_transient_warn.log
+  exit 1
+fi
+if ! rg -q '\[roadmap-progress-report\] status=warn rc=0' /tmp/integration_roadmap_progress_report_transient_warn.log; then
+  echo "transient warning path missing warn status line"
+  cat /tmp/integration_roadmap_progress_report_transient_warn.log
+  exit 1
+fi
+if ! rg -q '\[roadmap-progress-report\] refresh_step=single_machine_prod_readiness status=warn rc=1 timed_out=false' /tmp/integration_roadmap_progress_report_transient_warn.log; then
+  echo "transient warning path missing single-machine warn heartbeat line"
+  cat /tmp/integration_roadmap_progress_report_transient_warn.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "warn"
+  and .rc == 0
+  and .notes == "One or more requested refresh steps reported non-blocking transient warnings; latest usable summaries were retained."
+  and .refresh.single_machine_prod_readiness.status == "warn"
+  and .refresh.single_machine_prod_readiness.rc == 1
+  and .refresh.single_machine_prod_readiness.timed_out == false
+  and .refresh.single_machine_prod_readiness.non_blocking_transient == true
+  and (.refresh.single_machine_prod_readiness.non_blocking_reason | contains("Transient docker registry/network failure"))
+' "$TMP_DIR/roadmap_progress_transient_warn_summary.json" >/dev/null; then
+  echo "transient warning summary JSON missing expected fields"
+  cat "$TMP_DIR/roadmap_progress_transient_warn_summary.json"
   exit 1
 fi
 
