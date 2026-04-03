@@ -410,9 +410,12 @@ compose_file="${THREE_MACHINE_DOCKER_COMPOSE_FILE:-$deploy_dir/docker-compose.ym
 project_a="${THREE_MACHINE_DOCKER_PROJECT_A:-pn3a}"
 project_b="${THREE_MACHINE_DOCKER_PROJECT_B:-pn3b}"
 data_root="$(abs_path "${THREE_MACHINE_DOCKER_DATA_ROOT:-$ROOT_DIR/deploy/data/docker_three_machine}")"
+compose_up_max_attempts="${THREE_MACHINE_DOCKER_COMPOSE_UP_MAX_ATTEMPTS:-3}"
+compose_up_initial_backoff_sec="${THREE_MACHINE_DOCKER_COMPOSE_UP_INITIAL_BACKOFF_SEC:-2}"
 
 need_cmd_path_or_die "$docker_bin"
 need_cmd_path_or_die "$curl_bin"
+need_cmd_path_or_die rg
 need_cmd_path_or_die jq
 need_cmd_path_or_die date
 if [[ ! -x "$validate_script" ]]; then
@@ -429,6 +432,12 @@ if [[ ! -f "$compose_file" ]]; then
 fi
 if [[ ! -d "$deploy_dir" ]]; then
   echo "deploy directory not found: $deploy_dir"
+  exit 2
+fi
+int_arg_or_die "THREE_MACHINE_DOCKER_COMPOSE_UP_MAX_ATTEMPTS" "$compose_up_max_attempts"
+int_arg_or_die "THREE_MACHINE_DOCKER_COMPOSE_UP_INITIAL_BACKOFF_SEC" "$compose_up_initial_backoff_sec"
+if ((compose_up_max_attempts < 1)); then
+  echo "THREE_MACHINE_DOCKER_COMPOSE_UP_MAX_ATTEMPTS must be >= 1"
   exit 2
 fi
 
@@ -500,6 +509,61 @@ compose_down_stack() {
   compose_cmd "$project" "$override_file" "$env_file" down --remove-orphans
 }
 
+compose_up_retryable_failure() {
+  local output_file="$1"
+  rg -qi \
+    'server misbehaving|temporary failure in name resolution|tls handshake timeout|i/o timeout|context deadline exceeded|connection reset by peer|failed to do request|request canceled while waiting for connection' \
+    "$output_file"
+}
+
+compose_up_stack_with_retry() {
+  local step_id="$1"
+  local project="$2"
+  local override_file="$3"
+  local env_file="$4"
+  local compose_cmd_print="$5"
+  local attempt=1
+  local backoff_sec="$compose_up_initial_backoff_sec"
+  local output_file=""
+  local rc=1
+
+  while ((attempt <= compose_up_max_attempts)); do
+    output_file="$(mktemp)"
+    if compose_up_stack "$project" "$override_file" "$env_file" >"$output_file" 2>&1; then
+      cat "$output_file"
+      rm -f "$output_file"
+      if ((attempt > 1)); then
+        record_step "$step_id" "pass" 0 "docker compose up recovered after retry attempt=${attempt}/${compose_up_max_attempts}" "$compose_cmd_print"
+      else
+        record_step "$step_id" "pass" 0 "" "$compose_cmd_print"
+      fi
+      return 0
+    else
+      rc=$?
+    fi
+    cat "$output_file"
+    if ((attempt < compose_up_max_attempts)) && compose_up_retryable_failure "$output_file"; then
+      echo "[docker-retry] step=$step_id attempt=${attempt}/${compose_up_max_attempts} rc=$rc transient_failure=true next_backoff_sec=$backoff_sec"
+      rm -f "$output_file"
+      if ((backoff_sec > 0)); then
+        sleep "$backoff_sec"
+      fi
+      backoff_sec=$((backoff_sec * 2))
+      attempt=$((attempt + 1))
+      continue
+    fi
+    if compose_up_retryable_failure "$output_file"; then
+      record_step "$step_id" "fail" "$rc" "docker compose up failed after retryable errors attempts=${attempt}/${compose_up_max_attempts}" "$compose_cmd_print"
+    else
+      record_step "$step_id" "fail" "$rc" "docker compose up failed" "$compose_cmd_print"
+    fi
+    rm -f "$output_file"
+    return "$rc"
+  done
+
+  return "$rc"
+}
+
 stack_a_dir_port="$((stack_a_base_port + 1))"
 stack_a_issuer_port="$((stack_a_base_port + 2))"
 stack_a_entry_port="$((stack_a_base_port + 3))"
@@ -562,28 +626,24 @@ stack_a_up=0
 stack_b_up=0
 
 up_a_cmd_print="$(print_cmd "$docker_bin" compose --env-file "$env_a" -p "$project_a" -f "$compose_file" -f "$override_a" up -d --build directory issuer entry-exit)"
-if compose_up_stack "$project_a" "$override_a" "$env_a"; then
+if compose_up_stack_with_retry "stack_a_up" "$project_a" "$override_a" "$env_a" "$up_a_cmd_print"; then
   stack_a_up=1
-  record_step "stack_a_up" "pass" 0 "" "$up_a_cmd_print"
 else
   rc=$?
   status="fail"
   final_rc=$rc
   failed_step="stack_a_up"
-  record_step "stack_a_up" "fail" "$rc" "docker compose up failed" "$up_a_cmd_print"
 fi
 
 if [[ "$status" == "pass" ]]; then
   up_b_cmd_print="$(print_cmd "$docker_bin" compose --env-file "$env_b" -p "$project_b" -f "$compose_file" -f "$override_b" up -d --build directory issuer entry-exit)"
-  if compose_up_stack "$project_b" "$override_b" "$env_b"; then
+  if compose_up_stack_with_retry "stack_b_up" "$project_b" "$override_b" "$env_b" "$up_b_cmd_print"; then
     stack_b_up=1
-    record_step "stack_b_up" "pass" 0 "" "$up_b_cmd_print"
   else
     rc=$?
     status="fail"
     final_rc=$rc
     failed_step="stack_b_up"
-    record_step "stack_b_up" "fail" "$rc" "docker compose up failed" "$up_b_cmd_print"
   fi
 fi
 
@@ -767,6 +827,8 @@ jq -n \
   --arg project_b "$project_b" \
   --arg docker_host_alias "$docker_host_alias" \
   --arg path_profile "$path_profile" \
+  --argjson compose_up_max_attempts "$compose_up_max_attempts" \
+  --argjson compose_up_initial_backoff_sec "$compose_up_initial_backoff_sec" \
   --argjson rc "$final_rc" \
   --argjson run_validate "$run_validate" \
   --argjson run_soak "$run_soak" \
@@ -807,6 +869,8 @@ jq -n \
       "federation_timeout_sec": $federation_timeout_sec,
       "timeout_sec": $timeout_sec,
       "path_profile": $path_profile,
+      "compose_up_max_attempts": $compose_up_max_attempts,
+      "compose_up_initial_backoff_sec": $compose_up_initial_backoff_sec,
       "distinct_operators": ($distinct_operators == 1),
       "require_issuer_quorum": ($require_issuer_quorum == 1),
       "beta_profile": ($beta_profile == 1),
