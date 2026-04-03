@@ -1047,6 +1047,11 @@ summary_payload="$({
     --argjson profile_default_gate "$profile_default_gate_json" \
     '{
       version: 1,
+      schema: {
+        id: "single_machine_prod_readiness_summary",
+        major: 1,
+        minor: 0
+      },
       generated_at_utc: $generated_at_utc,
       status: $status,
       rc: $rc,

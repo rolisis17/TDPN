@@ -466,7 +466,12 @@ report_json="$(
     --argjson source_status_timeout_sec "$status_timeout_sec" \
     --argjson source_status_timeout_guard_available "$status_timeout_guard_available" \
     --argjson source_status_payload_synthesized "$status_payload_synthesized" \
-    '.report = {
+    '.schema = {
+      id: "manual_validation_readiness_summary",
+      major: 1,
+      minor: 0
+    }
+    | .report = {
       readiness_status: $readiness_status,
       ready: $ready,
       summary_json: $summary_json,

@@ -85,6 +85,17 @@ manual_validation_summary_usable_01() {
     (.summary | type == "object")
     and (.report | type == "object")
     and ((.report.readiness_status // "") | type == "string")
+    and (
+      .schema == null
+      or (
+        (.schema | type == "object")
+        and ((.schema.id // "") == "manual_validation_readiness_summary")
+        and ((.schema.major // 0) | type == "number")
+        and ((.schema.major // 0) >= 1)
+        and ((.schema.major // 0) <= 1)
+        and (((.schema.major // 0) | floor) == (.schema.major // 0))
+      )
+    )
   ' "$path" >/dev/null 2>&1; then
     printf '1'
   else
@@ -101,6 +112,17 @@ single_machine_summary_usable_01() {
   if jq -e '
     ((.status // "") | type == "string")
     and (.summary | type == "object")
+    and (
+      .schema == null
+      or (
+        (.schema | type == "object")
+        and ((.schema.id // "") == "single_machine_prod_readiness_summary")
+        and ((.schema.major // 0) | type == "number")
+        and ((.schema.major // 0) >= 1)
+        and ((.schema.major // 0) <= 1)
+        and (((.schema.major // 0) | floor) == (.schema.major // 0))
+      )
+    )
   ' "$path" >/dev/null 2>&1; then
     printf '1'
   else
@@ -397,8 +419,8 @@ if [[ ! -f "$manual_validation_summary_json" ]]; then
   echo "manual-validation summary JSON not found: $manual_validation_summary_json"
   exit 1
 fi
-if ! jq -e . "$manual_validation_summary_json" >/dev/null 2>&1; then
-  echo "manual-validation summary JSON is invalid: $manual_validation_summary_json"
+if [[ "$(manual_validation_summary_usable_01 "$manual_validation_summary_json")" != "1" ]]; then
+  echo "manual-validation summary JSON is missing required fields or uses an incompatible schema: $manual_validation_summary_json"
   exit 1
 fi
 

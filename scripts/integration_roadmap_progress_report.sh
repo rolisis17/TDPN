@@ -347,6 +347,42 @@ if ! jq -e '
   exit 1
 fi
 
+echo "[roadmap-progress-report] incompatible manual summary schema path"
+INCOMPATIBLE_MANUAL_SUMMARY_JSON="$TMP_DIR/manual_validation_incompatible_schema_summary.json"
+cat >"$INCOMPATIBLE_MANUAL_SUMMARY_JSON" <<'EOF_INCOMPATIBLE_SUMMARY'
+{
+  "version": 1,
+  "schema": {
+    "id": "unexpected_schema",
+    "major": 1,
+    "minor": 0
+  },
+  "summary": {
+    "next_action_check_id": "machine_c_vpn_smoke"
+  },
+  "report": {
+    "readiness_status": "NOT_READY"
+  }
+}
+EOF_INCOMPATIBLE_SUMMARY
+if ./scripts/roadmap_progress_report.sh \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$INCOMPATIBLE_MANUAL_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_incompatible_schema_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_incompatible_schema_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >/tmp/integration_roadmap_progress_report_incompatible_schema.log 2>&1; then
+  echo "expected failure when manual-validation summary schema is incompatible"
+  cat /tmp/integration_roadmap_progress_report_incompatible_schema.log
+  exit 1
+fi
+if ! rg -q 'manual-validation summary JSON is missing required fields or uses an incompatible schema' /tmp/integration_roadmap_progress_report_incompatible_schema.log; then
+  echo "incompatible schema path missing expected fail-close message"
+  cat /tmp/integration_roadmap_progress_report_incompatible_schema.log
+  exit 1
+fi
+
 echo "[roadmap-progress-report] next action fallback from checks path"
 FALLBACK_MANUAL_SUMMARY_JSON="$TMP_DIR/manual_validation_fallback_summary.json"
 cat >"$FALLBACK_MANUAL_SUMMARY_JSON" <<'EOF_FALLBACK_SUMMARY'

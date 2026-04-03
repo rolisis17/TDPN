@@ -383,6 +383,10 @@ if ! rg -q '\[single-machine-prod-readiness\] profile_default_gate_next_command=
   exit 1
 fi
 if ! jq -e '
+  .schema.id == "single_machine_prod_readiness_summary"
+  and .schema.major == 1
+  and .schema.minor == 0
+  and
   .status == "warn"
   and .rc == 0
   and .summary.roadmap_stage == "READY_FOR_MACHINE_C_SMOKE"
@@ -412,6 +416,11 @@ if [[ ! -f "$SINGLE_MACHINE_SUMMARY_JSON_LATEST" ]]; then
 fi
 if ! jq -e '.status == "warn"' "$SINGLE_MACHINE_SUMMARY_JSON_LATEST" >/dev/null; then
   echo "single-machine latest summary pointer JSON missing expected status"
+  cat "$SINGLE_MACHINE_SUMMARY_JSON_LATEST"
+  exit 1
+fi
+if ! jq -e '.schema.id == "single_machine_prod_readiness_summary" and .schema.major == 1 and .schema.minor == 0' "$SINGLE_MACHINE_SUMMARY_JSON_LATEST" >/dev/null; then
+  echo "single-machine latest summary pointer JSON missing expected schema metadata"
   cat "$SINGLE_MACHINE_SUMMARY_JSON_LATEST"
   exit 1
 fi

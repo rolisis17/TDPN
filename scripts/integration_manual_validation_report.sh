@@ -264,6 +264,10 @@ if ! jq -e . "$SUMMARY_JSON" >/dev/null 2>&1; then
   exit 1
 fi
 if ! printf '%s\n' "$report_json_payload" | jq -e --arg summary_json "$SUMMARY_JSON" --arg report_md "$REPORT_MD" --arg incident_summary "$SMOKE_INCIDENT_SUMMARY_JSON" --arg incident_report "$SMOKE_INCIDENT_REPORT_MD" --arg ready_summary_attachment "$SMOKE_READY_SUMMARY_ATTACHMENT" --arg ready_report_attachment "$SMOKE_READY_REPORT_ATTACHMENT" --arg ready_log_attachment "$SMOKE_READY_LOG_ATTACHMENT" '
+  .schema.id == "manual_validation_readiness_summary"
+  and .schema.major == 1
+  and .schema.minor == 0
+  and
   .report.readiness_status == "NOT_READY"
   and .report.ready == false
   and .report.summary_json == $summary_json
