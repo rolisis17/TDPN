@@ -441,6 +441,68 @@ if ! jq -e '
   exit 1
 fi
 
+echo "[roadmap-progress-report] real-host + docker gate fallback from summary path"
+SUMMARY_GATE_FALLBACK_MANUAL_SUMMARY_JSON="$TMP_DIR/manual_validation_summary_gate_fallback.json"
+cat >"$SUMMARY_GATE_FALLBACK_MANUAL_SUMMARY_JSON" <<'EOF_SUMMARY_GATE_FALLBACK'
+{
+  "version": 1,
+  "summary": {
+    "next_action_check_id": "machine_c_vpn_smoke",
+    "next_action_label": "Machine C VPN smoke test",
+    "next_action_command": "sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --path-profile balanced --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country",
+    "roadmap_stage": "READY_FOR_MACHINE_C_SMOKE",
+    "single_machine_ready": true,
+    "blocking_check_ids": ["machine_c_vpn_smoke", "three_machine_prod_signoff"],
+    "optional_check_ids": ["three_machine_docker_readiness", "real_wg_privileged_matrix"],
+    "real_host_gate": {
+      "ready": false,
+      "blockers": ["machine_c_vpn_smoke", "three_machine_prod_signoff"],
+      "next_check_id": "machine_c_vpn_smoke",
+      "next_label": "Machine C VPN smoke test",
+      "next_command": "sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --path-profile balanced --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country"
+    },
+    "docker_rehearsal_gate": {
+      "status": "pass"
+    },
+    "profile_default_gate": {
+      "status": "pending",
+      "next_command": "sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1"
+    },
+    "real_wg_privileged_gate": {
+      "status": "skip"
+    }
+  },
+  "report": {
+    "readiness_status": "NOT_READY"
+  }
+}
+EOF_SUMMARY_GATE_FALLBACK
+if ! ./scripts/roadmap_progress_report.sh \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$SUMMARY_GATE_FALLBACK_MANUAL_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_summary_gate_fallback_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_summary_gate_fallback_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >/tmp/integration_roadmap_progress_report_summary_gate_fallback.log 2>&1; then
+  echo "expected success when real-host/docker gates are inferred from summary fields"
+  cat /tmp/integration_roadmap_progress_report_summary_gate_fallback.log
+  exit 1
+fi
+if ! jq -e '
+  .vpn_track.vpn_rc_done_for_phase == true
+  and (.vpn_track.pending_real_host_checks | length) == 2
+  and ((.vpn_track.pending_real_host_checks | map(.check_id) | sort) == ["machine_c_vpn_smoke","three_machine_prod_signoff"])
+  and (.vpn_track.next_action.check_id == "machine_c_vpn_smoke")
+  and ((.next_actions // []) | any(.id == "machine_c_vpn_smoke"))
+  and (((.next_actions // []) | any(.id == "three_machine_docker_readiness")) | not)
+  and (((.next_actions // []) | any(.id == "real_wg_privileged_matrix")) | not)
+' "$TMP_DIR/roadmap_progress_summary_gate_fallback_summary.json" >/dev/null; then
+  echo "summary-gate fallback JSON missing expected inferred readiness fields"
+  cat "$TMP_DIR/roadmap_progress_summary_gate_fallback_summary.json"
+  exit 1
+fi
+
 echo "[roadmap-progress-report] optional gate command fallback path"
 OPTIONAL_FALLBACK_MANUAL_SUMMARY_JSON="$TMP_DIR/manual_validation_optional_gate_fallback_summary.json"
 cat >"$OPTIONAL_FALLBACK_MANUAL_SUMMARY_JSON" <<'EOF_OPTIONAL_FALLBACK_SUMMARY'

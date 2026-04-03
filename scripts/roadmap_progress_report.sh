@@ -537,21 +537,53 @@ blocking_check_ids_json="$(jq -c '
 ' "$manual_validation_summary_json")"
 optional_check_ids_json="$(jq -c '(.summary.optional_check_ids // []) | if type == "array" then . else [] end' "$manual_validation_summary_json")"
 pending_real_host_checks_json="$(jq -c '
-  [
-    .checks[]?
-    | select((.check_id == "machine_c_vpn_smoke" or .check_id == "three_machine_prod_signoff") and (.status != "pass" and .status != "skip"))
-    | {
-        check_id: .check_id,
-        label: .label,
-        status: .status,
-        command: .command,
-        notes: .notes
-      }
-  ]
+  . as $root
+  | ((.checks // []) | if type == "array" then . else [] end) as $checks
+  | (
+      [
+        $checks[]
+        | select((.check_id == "machine_c_vpn_smoke" or .check_id == "three_machine_prod_signoff") and (.status != "pass" and .status != "skip"))
+        | {
+            check_id: .check_id,
+            label: .label,
+            status: .status,
+            command: .command,
+            notes: .notes
+          }
+      ]
+    ) as $from_checks
+  | if ($from_checks | length) > 0 then
+      $from_checks
+    else
+      ((.summary.real_host_gate.blockers // []) | if type == "array" then . else [] end) as $blockers
+      | [
+          $blockers[]
+          | select(. == "machine_c_vpn_smoke" or . == "three_machine_prod_signoff")
+          | {
+              check_id: .,
+              label: (if . == "machine_c_vpn_smoke" then "Machine C VPN smoke test" else "True 3-machine production signoff" end),
+              status: "pending",
+              command: (
+                if . == "machine_c_vpn_smoke" then
+                  ($root.summary.real_host_gate.next_command // $root.summary.next_action_command // "")
+                else
+                  (
+                    [ $checks[] | select(.check_id == "three_machine_prod_signoff") | .command ][0]
+                    // ""
+                  )
+                end
+              ),
+              notes: ""
+            }
+        ]
+    end
 ' "$manual_validation_summary_json")"
 pending_real_host_check_count="$(printf '%s\n' "$pending_real_host_checks_json" | jq -r 'length')"
 docker_rehearsal_ready_json="$(
-  jq -r '([.checks[]? | select(.check_id == "three_machine_docker_readiness") | (.status // "pending")][0] // "pending") as $status | ($status == "pass" or $status == "skip")' "$manual_validation_summary_json"
+  jq -r '
+    (([.checks[]? | select(.check_id == "three_machine_docker_readiness") | (.status // "pending")][0]) // (.summary.docker_rehearsal_gate.status // "pending")) as $status
+    | ($status == "pass" or $status == "skip")
+  ' "$manual_validation_summary_json"
 )"
 vpn_rc_done_for_phase="false"
 if [[ "$single_machine_ready_json" == "true" && "$docker_rehearsal_ready_json" == "true" && "$pending_real_host_check_count" -gt 0 ]]; then
