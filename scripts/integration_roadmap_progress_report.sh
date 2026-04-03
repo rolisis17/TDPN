@@ -279,6 +279,8 @@ if ! jq -e '
   and .vpn_track.pending_real_host_checks[1].check_id == "three_machine_prod_signoff"
   and .blockchain_track.status == "deferred"
   and (.next_actions | length) >= 1
+  and (.next_actions[0].id // "") == "machine_c_vpn_smoke"
+  and (.next_actions[1].id // "") == "profile_default_gate"
   and .refresh.manual_validation_report.status == "pass"
   and .refresh.manual_validation_report.timed_out == false
   and .refresh.manual_validation_report.summary_valid_after_run == true

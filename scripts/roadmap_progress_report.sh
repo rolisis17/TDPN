@@ -567,6 +567,17 @@ counts_fail="$(jq -r '.summary.fail_checks // 0' "$manual_validation_summary_jso
 counts_pending="$(jq -r '.summary.pending_checks // 0' "$manual_validation_summary_json")"
 
 next_actions_json="$(jq -c --arg next_action_check_id "$next_action_check_id" --arg next_action_label "$next_action_label" --arg next_action_command "$next_action_command" '
+  def unique_commands_preserve_order:
+    reduce .[] as $item (
+      [];
+      if ($item.command // "") == "" then
+        .
+      elif any(.[]; (.command // "") == ($item.command // "")) then
+        .
+      else
+        . + [$item]
+      end
+    );
   [
     (if ($next_action_command // "") != "" then {
       id: (if ($next_action_check_id // "") != "" then $next_action_check_id else "next_action" end),
@@ -593,7 +604,7 @@ next_actions_json="$(jq -c --arg next_action_check_id "$next_action_check_id" --
       reason: "one-host dataplane confidence gate"
     } else empty end)
   ]
-  | unique_by(.command)
+  | unique_commands_preserve_order
 ' "$manual_validation_summary_json")"
 
 blockchain_track_status="deferred"
