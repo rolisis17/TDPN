@@ -99,6 +99,41 @@ need_cmd() {
   fi
 }
 
+validate_manual_validation_report_summary_payload() {
+  local payload="$1"
+  local schema_id=""
+  local schema_major=""
+
+  if [[ -z "$payload" ]]; then
+    return 1
+  fi
+  if ! jq -e . >/dev/null 2>&1 <<<"$payload"; then
+    return 1
+  fi
+
+  schema_id="$(printf '%s\n' "$payload" | jq -r '.schema.id // ""' 2>/dev/null || true)"
+  if [[ -n "$schema_id" && "$schema_id" != "manual_validation_readiness_summary" ]]; then
+    return 1
+  fi
+  schema_major="$(printf '%s\n' "$payload" | jq -r '.schema.major // ""' 2>/dev/null || true)"
+  if [[ -n "$schema_major" ]]; then
+    if [[ ! "$schema_major" =~ ^[0-9]+$ ]] || (( schema_major > 1 )); then
+      return 1
+    fi
+  fi
+
+  if ! printf '%s\n' "$payload" | jq -e '
+      (.summary | type) == "object"
+      and (.report.readiness_status | type) == "string"
+      and ((.report.readiness_status | length) > 0)
+      and ((.checks | type) == "array")
+    ' >/dev/null 2>&1; then
+    return 1
+  fi
+
+  return 0
+}
+
 run_ci_local="1"
 run_beta_preflight="1"
 run_deep_suite="1"
@@ -858,9 +893,19 @@ real_wg_privileged_matrix_step_status="$(printf '%s\n' "$steps_json" | jq -r '[.
 
 manual_report_available="0"
 manual_report_json='{}'
-if [[ -f "$manual_validation_report_summary_json" ]] && jq -e . "$manual_validation_report_summary_json" >/dev/null 2>&1; then
-  manual_report_available="1"
-  manual_report_json="$(cat "$manual_validation_report_summary_json")"
+manual_report_validation_error=""
+if [[ -f "$manual_validation_report_summary_json" ]]; then
+  if jq -e . "$manual_validation_report_summary_json" >/dev/null 2>&1; then
+    manual_report_json_candidate="$(cat "$manual_validation_report_summary_json")"
+    if validate_manual_validation_report_summary_payload "$manual_report_json_candidate"; then
+      manual_report_available="1"
+      manual_report_json="$manual_report_json_candidate"
+    else
+      manual_report_validation_error="manual validation readiness summary payload is malformed, partial, or schema-incompatible"
+    fi
+  else
+    manual_report_validation_error="manual validation readiness summary JSON is invalid"
+  fi
 fi
 
 profile_compare_campaign_signoff_available="0"
@@ -896,7 +941,11 @@ next_action_check_id=""
 next_action_command=""
 
 if [[ "$manual_report_available" == "1" ]]; then
-  pending_checks_json="$(printf '%s\n' "$manual_report_json" | jq -c '[.checks[] | select((.status // "pending") != "pass" and (.status // "pending") != "skip") | {"check_id": .check_id, "label": .label, "status": .status, "command": .command, "notes": .notes}]')"
+  pending_checks_json="$(printf '%s\n' "$manual_report_json" | jq -c '[
+      ((.checks // []) | if type == "array" then . else [] end)[] |
+      select((.status // "pending") != "pass" and (.status // "pending") != "skip") |
+      {"check_id": (.check_id // ""), "label": (.label // ""), "status": (.status // "pending"), "command": (.command // ""), "notes": (.notes // "")}
+    ]')"
   pending_multi_machine_json="$(printf '%s\n' "$pending_checks_json" | jq -c '[.[] | select(.check_id == "machine_c_vpn_smoke" or .check_id == "three_machine_prod_signoff")]')"
   pending_local_json="$(printf '%s\n' "$pending_checks_json" | jq -c '[.[] | select(.check_id != "machine_c_vpn_smoke" and .check_id != "three_machine_prod_signoff" and .check_id != "three_machine_docker_readiness" and .check_id != "real_wg_privileged_matrix")]')"
   roadmap_stage="$(printf '%s\n' "$manual_report_json" | jq -r '.summary.roadmap_stage // ""')"
@@ -960,6 +1009,7 @@ summary_payload="$({
     --arg manual_validation_report_summary_json "$manual_validation_report_summary_json" \
     --arg manual_validation_report_md "$manual_validation_report_md" \
     --arg manual_readiness_status "$manual_readiness_status" \
+    --arg manual_report_validation_error "$manual_report_validation_error" \
     --arg roadmap_stage "$roadmap_stage" \
     --arg single_machine_ready "$single_machine_ready" \
     --arg machine_c_smoke_ready "$machine_c_smoke_ready" \
@@ -1138,6 +1188,7 @@ summary_payload="$({
         critical_failed_steps: $critical_failed_steps,
         non_blocking_failed_steps: $non_blocking_failed_steps,
         manual_report_available: ($manual_report_available == 1),
+        manual_report_validation_error: (if $manual_report_validation_error == "" then null else $manual_report_validation_error end),
         manual_readiness_status: $manual_readiness_status,
         roadmap_stage: $roadmap_stage,
         single_machine_ready: ($single_machine_ready == "true"),
@@ -1199,6 +1250,9 @@ if [[ -n "$roadmap_stage" ]]; then
 fi
 echo "[single-machine-prod-readiness] pending_local_count=$pending_local_count"
 echo "[single-machine-prod-readiness] pending_multi_machine_count=$pending_multi_count"
+if [[ -n "$manual_report_validation_error" ]]; then
+  echo "[single-machine-prod-readiness] manual_validation_report_validation_error=$manual_report_validation_error"
+fi
 if [[ -n "$next_action_check_id" ]]; then
   echo "[single-machine-prod-readiness] next_action_check_id=$next_action_check_id"
 fi

@@ -303,6 +303,22 @@ EOF_JSON
 }
 EOF_JSON
     ;;
+  invalid_payload)
+    cat >"$summary_json" <<'EOF_JSON'
+{
+  "summary": {
+    "roadmap_stage": "READY_FOR_MACHINE_C_SMOKE",
+    "single_machine_ready": true
+  },
+  "report": {
+    "readiness_status": 123
+  },
+  "checks": {
+    "runtime_hygiene": "pass"
+  }
+}
+EOF_JSON
+    ;;
   *)
     echo "unknown FAKE_MANUAL_REPORT_MODE=$mode"
     exit 2
@@ -427,6 +443,54 @@ fi
 if ! jq -e '.schema.id == "single_machine_prod_readiness_summary" and .schema.major == 1 and .schema.minor == 0' "$SINGLE_MACHINE_SUMMARY_JSON_LATEST" >/dev/null; then
   echo "single-machine latest summary pointer JSON missing expected schema metadata"
   cat "$SINGLE_MACHINE_SUMMARY_JSON_LATEST"
+  exit 1
+fi
+
+echo "[single-machine-prod-readiness] manual report invalid payload fail-close path"
+set +e
+FAKE_MANUAL_REPORT_MODE=invalid_payload \
+SINGLE_MACHINE_CI_LOCAL_SCRIPT="$FAKE_CI" \
+SINGLE_MACHINE_BETA_PREFLIGHT_SCRIPT="$FAKE_BETA" \
+SINGLE_MACHINE_DEEP_TEST_SUITE_SCRIPT="$FAKE_DEEP_OK" \
+SINGLE_MACHINE_RUNTIME_FIX_RECORD_SCRIPT="$FAKE_RUNTIME_FIX_RECORD" \
+SINGLE_MACHINE_THREE_MACHINE_DOCKER_READINESS_SCRIPT="$FAKE_THREE_MACHINE_DOCKER_READINESS" \
+SINGLE_MACHINE_PROFILE_COMPARE_CAMPAIGN_SIGNOFF_SCRIPT="$FAKE_PROFILE_SIGNOFF" \
+SINGLE_MACHINE_PRE_REAL_HOST_READINESS_SCRIPT="$FAKE_PRE_REAL" \
+SINGLE_MACHINE_MANUAL_VALIDATION_REPORT_SCRIPT="$FAKE_MANUAL_REPORT" \
+./scripts/single_machine_prod_readiness.sh \
+  --run-ci-local 0 \
+  --run-beta-preflight 0 \
+  --run-deep-suite 0 \
+  --run-runtime-fix-record 0 \
+  --run-three-machine-docker-readiness 0 \
+  --run-profile-compare-campaign-signoff 0 \
+  --run-pre-real-host-readiness 0 \
+  --run-real-wg-privileged-matrix 0 \
+  --summary-json "$TMP_DIR/manual_invalid_payload_summary.json" \
+  --print-summary-json 0 >"$TMP_DIR/manual_invalid_payload.log" 2>&1
+rc_manual_invalid=$?
+set -e
+if [[ "$rc_manual_invalid" -eq 0 ]]; then
+  echo "invalid manual report payload path should fail closed"
+  cat "$TMP_DIR/manual_invalid_payload.log"
+  cat "$TMP_DIR/manual_invalid_payload_summary.json"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .summary.manual_report_available == false
+  and .summary.manual_report_validation_error != null
+  and (.summary.manual_report_validation_error | contains("malformed"))
+' "$TMP_DIR/manual_invalid_payload_summary.json" >/dev/null; then
+  echo "invalid manual report payload summary missing fail-closed fields"
+  cat "$TMP_DIR/manual_invalid_payload.log"
+  cat "$TMP_DIR/manual_invalid_payload_summary.json"
+  exit 1
+fi
+if ! rg -q '\[single-machine-prod-readiness\] manual_validation_report_validation_error=' "$TMP_DIR/manual_invalid_payload.log"; then
+  echo "invalid manual report payload path missing validation error line"
+  cat "$TMP_DIR/manual_invalid_payload.log"
   exit 1
 fi
 
