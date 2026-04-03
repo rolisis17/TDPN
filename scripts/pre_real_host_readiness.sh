@@ -92,6 +92,46 @@ extract_json_payload() {
   printf '%s\n' "$text" | awk -v p="$prefix" '$0 == "[" p "] summary_json_payload:" {flag=1; next} flag {print}'
 }
 
+validate_wg_only_summary_payload() {
+  local payload="$1"
+  local status_value=""
+  local schema_id=""
+  local schema_major=""
+  local expected_schema_id="wg_only_stack_selftest_record_summary"
+
+  if [[ -z "$payload" ]]; then
+    return 1
+  fi
+  if ! jq -e . >/dev/null 2>&1 <<<"$payload"; then
+    return 1
+  fi
+
+  status_value="$(printf '%s\n' "$payload" | jq -r 'if (.status | type) == "string" then .status else "" end' 2>/dev/null || true)"
+  if [[ -z "$status_value" ]]; then
+    return 1
+  fi
+
+  schema_id="$(printf '%s\n' "$payload" | jq -r '.schema.id // ""' 2>/dev/null || true)"
+  if [[ -z "$schema_id" ]]; then
+    # Backward-compatible path for legacy payloads that predate schema metadata.
+    return 0
+  fi
+
+  if [[ "$schema_id" != "$expected_schema_id" ]]; then
+    return 1
+  fi
+
+  schema_major="$(printf '%s\n' "$payload" | jq -r '.schema.major // ""' 2>/dev/null || true)"
+  if [[ ! "$schema_major" =~ ^[0-9]+$ ]]; then
+    return 1
+  fi
+  if (( schema_major > 1 )); then
+    return 1
+  fi
+
+  return 0
+}
+
 persist_artifact_text() {
   local path="$1"
   local content="$2"
@@ -424,10 +464,14 @@ if [[ -n "$runtime_fix_json_payload" && "$runtime_fix_rc" -eq 0 && "$runtime_fix
     wg_only_json_payload="$(cat "$wg_only_summary_json")"
   fi
   persist_artifact_text "$wg_only_log" "$wg_only_output"
-  if [[ -n "$wg_only_json_payload" ]]; then
+  if validate_wg_only_summary_payload "$wg_only_json_payload"; then
     wg_only_status="$(printf '%s\n' "$wg_only_json_payload" | jq -r '.status // ""' 2>/dev/null || true)"
     wg_only_recorded_at="$(printf '%s\n' "$wg_only_json_payload" | jq -r '.recorded_at_utc // ""' 2>/dev/null || true)"
     wg_only_notes="$(printf '%s\n' "$wg_only_json_payload" | jq -r '.notes // ""' 2>/dev/null || true)"
+  else
+    wg_only_status="fail"
+    wg_only_notes="wg-only-stack-selftest-record produced an incompatible or malformed summary payload"
+    printf '%s\n' "[$stage] summary_payload_invalid_or_incompatible schema check failed" >>"$summary_log"
   fi
 else
   wg_only_status="skipped"

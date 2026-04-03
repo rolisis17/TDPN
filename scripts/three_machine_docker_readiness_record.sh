@@ -90,11 +90,15 @@ extract_json_payload() {
 persist_artifact_text() {
   local path="$1"
   local content="$2"
+  local tmp=""
   [[ -z "$path" ]] && return 0
   if [[ -z "$content" ]]; then
     rm -f "$path" 2>/dev/null || true
   else
-    printf '%s\n' "$content" >"$path"
+    mkdir -p "$(dirname "$path")"
+    tmp="$(mktemp "${path}.tmp.XXXXXX")"
+    printf '%s\n' "$content" >"$tmp"
+    mv -f "$tmp" "$path"
   fi
 }
 
@@ -234,6 +238,8 @@ manual_validation_report_readiness_status=""
 manual_validation_report_next_action_check_id=""
 
 write_summary_json() {
+  local summary_tmp=""
+  summary_tmp="$(mktemp "${summary_json}.tmp.XXXXXX")"
   jq -n \
     --arg generated_at_utc "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     --arg status "$rehearsal_status" \
@@ -254,6 +260,11 @@ write_summary_json() {
     --argjson manual_validation_report_enabled "$manual_validation_report_enabled" \
     '{
       version: 1,
+      schema: {
+        id: "three_machine_docker_readiness_record_summary",
+        major: 1,
+        minor: 0
+      },
       generated_at_utc: $generated_at_utc,
       status: $status,
       rc: $rehearsal_rc,
@@ -280,7 +291,8 @@ write_summary_json() {
         summary_json: $summary_json,
         rehearsal_summary_json: $rehearsal_summary_json
       }
-    }' >"$summary_json"
+    }' >"$summary_tmp"
+  mv -f "$summary_tmp" "$summary_json"
 }
 
 refresh_manual_validation_report() {

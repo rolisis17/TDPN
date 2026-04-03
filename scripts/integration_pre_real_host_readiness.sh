@@ -94,6 +94,11 @@ case "$cmd" in
   wg-only-stack-selftest-record)
     summary_payload='{
   "version": 1,
+  "schema": {
+    "id": "wg_only_stack_selftest_record_summary",
+    "major": 1,
+    "minor": 0
+  },
   "status": "pass",
   "rc": 0,
   "recorded_at_utc": "2026-03-15T12:00:00Z",
@@ -106,9 +111,34 @@ case "$cmd" in
   }
 }'
     rc=0
+    if [[ "$MODE" == "wg-schema-incompatible" ]]; then
+      summary_payload='{
+  "version": 1,
+  "schema": {
+    "id": "wg_only_stack_selftest_record_summary",
+    "major": 2,
+    "minor": 0
+  },
+  "status": "pass",
+  "rc": 0,
+  "recorded_at_utc": "2026-03-15T12:00:00Z",
+  "notes": "WG-only validation passed with unsupported schema major",
+  "selftest": {
+    "strict_beta": false,
+    "base_port": 19290,
+    "client_iface": "wgctest0",
+    "exit_iface": "wgestest0"
+  }
+}'
+    fi
     if [[ "$MODE" == "wg-fail" ]]; then
       summary_payload='{
   "version": 1,
+  "schema": {
+    "id": "wg_only_stack_selftest_record_summary",
+    "major": 1,
+    "minor": 0
+  },
   "status": "fail",
   "rc": 1,
   "recorded_at_utc": "2026-03-15T12:00:00Z",
@@ -256,6 +286,55 @@ if rg -q '^wg-only-stack-selftest-record ' "$CAPTURE"; then
 fi
 if ! rg -q '^manual-validation-report ' "$CAPTURE"; then
   echo "pre-real-host readiness runtime-fail run should still refresh manual-validation-report"
+  cat "$CAPTURE"
+  exit 1
+fi
+
+: >"$CAPTURE"
+WG_SCHEMA_FAIL_SUMMARY_JSON="$TMP_DIR/pre_real_host_readiness_wg_schema_fail.json"
+WG_SCHEMA_FAIL_REPORT_JSON="$TMP_DIR/manual_validation_readiness_wg_schema_fail_summary.json"
+WG_SCHEMA_FAIL_REPORT_MD="$TMP_DIR/manual_validation_readiness_wg_schema_fail_report.md"
+
+set +e
+FAKE_CAPTURE_FILE="$CAPTURE" \
+FAKE_MODE="wg-schema-incompatible" \
+PRE_REAL_HOST_READINESS_EASY_NODE_SCRIPT="$FAKE_EASY_NODE" \
+./scripts/pre_real_host_readiness.sh \
+  --base-port 19292 \
+  --client-iface wgcschema0 \
+  --exit-iface wgeschema0 \
+  --vpn-iface wgvpnschema0 \
+  --summary-json "$WG_SCHEMA_FAIL_SUMMARY_JSON" \
+  --manual-validation-report-summary-json "$WG_SCHEMA_FAIL_REPORT_JSON" \
+  --manual-validation-report-md "$WG_SCHEMA_FAIL_REPORT_MD" \
+  --print-summary-json 0 >/tmp/integration_pre_real_host_readiness_wg_schema_fail.log 2>&1
+rc=$?
+set -e
+if [[ $rc -eq 0 ]]; then
+  echo "pre-real-host readiness should fail when wg-only summary schema is incompatible"
+  cat /tmp/integration_pre_real_host_readiness_wg_schema_fail.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .stage == "wg_only_stack_selftest"
+  and .machine_c_smoke_gate.ready == false
+  and (.machine_c_smoke_gate.blockers | index("wg_only_stack_selftest") != null)
+  and .wg_only_stack_selftest.status == "fail"
+  and (.wg_only_stack_selftest.notes | contains("incompatible or malformed"))
+  and .manual_validation_report.status == "ok"
+' "$WG_SCHEMA_FAIL_SUMMARY_JSON" >/dev/null; then
+  echo "pre-real-host readiness schema-fail summary missing expected fields"
+  cat "$WG_SCHEMA_FAIL_SUMMARY_JSON"
+  exit 1
+fi
+if ! rg -q '^wg-only-stack-selftest-record .*--client-iface wgcschema0 .*--exit-iface wgeschema0 ' "$CAPTURE"; then
+  echo "pre-real-host readiness schema-fail run missing wg-only forwarding"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q '^manual-validation-report ' "$CAPTURE"; then
+  echo "pre-real-host readiness schema-fail run should still refresh manual-validation-report"
   cat "$CAPTURE"
   exit 1
 fi

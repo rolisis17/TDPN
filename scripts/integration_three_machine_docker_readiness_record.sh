@@ -136,6 +136,9 @@ if [[ -z "$summary_json_path" || ! -f "$summary_json_path" ]]; then
 fi
 if ! jq -e '
   .status == "pass"
+  and .schema.id == "three_machine_docker_readiness_record_summary"
+  and .schema.major == 1
+  and .schema.minor == 0
   and .rc == 0
   and .rehearsal.status == "pass"
   and .rehearsal.rc == 0
@@ -189,6 +192,9 @@ if [[ -z "$fail_summary_json_path" || ! -f "$fail_summary_json_path" ]]; then
 fi
 if ! jq -e '
   .status == "fail"
+  and .schema.id == "three_machine_docker_readiness_record_summary"
+  and .schema.major == 1
+  and .schema.minor == 0
   and .rc == 1
   and .rehearsal.status == "fail"
   and .rehearsal.rc == 1

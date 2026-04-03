@@ -112,6 +112,9 @@ if [[ -z "$summary_json_path" || ! -f "$summary_json_path" ]]; then
 fi
 if ! jq -e '
   .status == "pass"
+  and .schema.id == "wg_only_stack_selftest_record_summary"
+  and .schema.major == 1
+  and .schema.minor == 0
   and .rc == 0
   and .selftest.strict_beta == true
   and .selftest.base_port == 19290
@@ -162,6 +165,9 @@ if [[ -z "$fail_summary_json_path" || ! -f "$fail_summary_json_path" ]]; then
 fi
 if ! jq -e '
   .status == "fail"
+  and .schema.id == "wg_only_stack_selftest_record_summary"
+  and .schema.major == 1
+  and .schema.minor == 0
   and .rc == 1
   and .selftest.strict_beta == false
   and .selftest.base_port == 19291
