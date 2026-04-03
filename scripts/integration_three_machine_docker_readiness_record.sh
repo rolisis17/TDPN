@@ -76,9 +76,11 @@ EOF_REHEARSAL
       esac
     done
     mkdir -p "$(dirname "$summary_json")" "$(dirname "$report_md")"
-    cat >"$summary_json" <<'EOF_REPORT_JSON'
-{"report":{"readiness_status":"NOT_READY"},"summary":{"next_action_check_id":"machine_c_vpn_smoke"}}
-EOF_REPORT_JSON
+    report_payload='{"report":{"readiness_status":"NOT_READY"},"summary":{"next_action_check_id":"machine_c_vpn_smoke"}}'
+    if [[ "${FAKE_MANUAL_REPORT_INVALID_SCHEMA:-0}" == "1" ]]; then
+      report_payload='{"schema":{"id":"manual_validation_readiness_summary","major":2,"minor":0},"report":{"readiness_status":"NOT_READY"},"summary":{"next_action_check_id":"machine_c_vpn_smoke"}}'
+    fi
+    printf '%s\n' "$report_payload" >"$summary_json"
     printf '# Manual Validation Readiness Report\n' >"$report_md"
     echo "[manual-validation-report] readiness_status=NOT_READY total=4 pass=2 warn=0 fail=0 pending=2"
     echo "[manual-validation-report] summary_json=$summary_json"
@@ -148,6 +150,45 @@ if ! jq -e '
 ' "$summary_json_path" >/dev/null; then
   echo "success summary JSON missing expected fields"
   cat "$summary_json_path"
+  exit 1
+fi
+
+: >"$CAPTURE"
+
+echo "[three-machine-docker-readiness-record] manual validation malformed payload path"
+FAKE_EASY_CAPTURE_FILE="$CAPTURE" \
+FAKE_MANUAL_REPORT_INVALID_SCHEMA="1" \
+THREE_MACHINE_DOCKER_READINESS_RECORD_EASY_NODE_SCRIPT="$FAKE_EASY_NODE" \
+./scripts/three_machine_docker_readiness_record.sh \
+  --path-profile balanced \
+  --soak-rounds 2 \
+  --soak-pause-sec 1 \
+  --print-summary-json 1 >/tmp/integration_three_machine_docker_readiness_record_manual_invalid.log 2>&1
+
+if ! rg -q 'three-machine-docker-readiness-record: status=pass' /tmp/integration_three_machine_docker_readiness_record_manual_invalid.log; then
+  echo "expected pass status in manual-validation malformed payload path"
+  cat /tmp/integration_three_machine_docker_readiness_record_manual_invalid.log
+  exit 1
+fi
+manual_invalid_summary_json_path="$(sed -n 's/^summary_json: //p' /tmp/integration_three_machine_docker_readiness_record_manual_invalid.log | tail -n 1)"
+if [[ -z "$manual_invalid_summary_json_path" || ! -f "$manual_invalid_summary_json_path" ]]; then
+  echo "expected malformed-payload summary JSON missing"
+  cat /tmp/integration_three_machine_docker_readiness_record_manual_invalid.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "pass"
+  and .manual_validation_report.status == "fail"
+  and .manual_validation_report.readiness_status == ""
+  and .manual_validation_report.next_action_check_id == ""
+' "$manual_invalid_summary_json_path" >/dev/null; then
+  echo "malformed manual-validation payload path did not fail-close manual report status"
+  cat "$manual_invalid_summary_json_path"
+  exit 1
+fi
+if ! rg -q '^manual-validation-report --overlay-check-id three_machine_docker_readiness --overlay-status pass ' "$CAPTURE"; then
+  echo "expected manual-validation-report call missing in malformed payload path"
+  cat "$CAPTURE"
   exit 1
 fi
 
