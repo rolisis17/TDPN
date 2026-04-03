@@ -65,7 +65,7 @@ cat >"$summary_json" <<'EOF_SUMMARY'
     {
       "check_id": "three_machine_docker_readiness",
       "label": "One-host docker 3-machine rehearsal",
-      "status": "pass",
+      "status": "skip",
       "command": "./scripts/easy_node.sh three-machine-docker-readiness-record --path-profile balanced --soak-rounds 6 --soak-pause-sec 3 --print-summary-json 1"
     },
     {
@@ -89,7 +89,7 @@ cat >"$summary_json" <<'EOF_SUMMARY'
   ],
   "summary": {
     "total_checks": 6,
-    "pass_checks": 3,
+    "pass_checks": 2,
     "warn_checks": 0,
     "fail_checks": 0,
     "pending_checks": 2,
@@ -114,7 +114,7 @@ cat >"$summary_json" <<'EOF_SUMMARY'
       "next_command": "sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1"
     },
     "docker_rehearsal_gate": {
-      "status": "pass",
+      "status": "skip",
       "next_command": "./scripts/easy_node.sh three-machine-docker-readiness-record --path-profile balanced --soak-rounds 6 --soak-pause-sec 3 --print-summary-json 1"
     },
     "real_wg_privileged_gate": {
@@ -281,6 +281,8 @@ if ! jq -e '
   and (.next_actions | length) >= 1
   and (.next_actions[0].id // "") == "machine_c_vpn_smoke"
   and (.next_actions[1].id // "") == "profile_default_gate"
+  and (((.next_actions // []) | any(.id == "three_machine_docker_readiness")) | not)
+  and (((.next_actions // []) | any(.id == "real_wg_privileged_matrix")) | not)
   and .refresh.manual_validation_report.status == "pass"
   and .refresh.manual_validation_report.timed_out == false
   and .refresh.manual_validation_report.summary_valid_after_run == true

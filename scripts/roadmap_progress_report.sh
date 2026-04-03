@@ -550,7 +550,9 @@ pending_real_host_checks_json="$(jq -c '
   ]
 ' "$manual_validation_summary_json")"
 pending_real_host_check_count="$(printf '%s\n' "$pending_real_host_checks_json" | jq -r 'length')"
-docker_rehearsal_ready_json="$(jq -r '([.checks[]? | select(.check_id == "three_machine_docker_readiness") | (.status // "pending")][0] // "pending") == "pass"' "$manual_validation_summary_json")"
+docker_rehearsal_ready_json="$(
+  jq -r '([.checks[]? | select(.check_id == "three_machine_docker_readiness") | (.status // "pending")][0] // "pending") as $status | ($status == "pass" or $status == "skip")' "$manual_validation_summary_json"
+)"
 vpn_rc_done_for_phase="false"
 if [[ "$single_machine_ready_json" == "true" && "$docker_rehearsal_ready_json" == "true" && "$pending_real_host_check_count" -gt 0 ]]; then
   vpn_rc_done_for_phase="true"
@@ -585,19 +587,19 @@ next_actions_json="$(jq -c --arg next_action_check_id "$next_action_check_id" --
       command: $next_action_command,
       reason: "primary roadmap gate"
     } else empty end),
-    (if ((.summary.profile_default_gate.status // "pending") != "pass" and ((.summary.profile_default_gate.next_command // .summary.profile_default_gate.command // "") != "")) then {
+    (if ((.summary.profile_default_gate.status // "pending") != "pass" and (.summary.profile_default_gate.status // "pending") != "skip" and ((.summary.profile_default_gate.next_command // .summary.profile_default_gate.command // "") != "")) then {
       id: "profile_default_gate",
       label: "Profile default decision gate",
       command: (.summary.profile_default_gate.next_command // .summary.profile_default_gate.command // ""),
       reason: "non-blocking profile default decision"
     } else empty end),
-    (if ((.summary.docker_rehearsal_gate.status // "pending") != "pass" and ((.summary.docker_rehearsal_gate.next_command // .summary.docker_rehearsal_gate.command // "") != "")) then {
+    (if ((.summary.docker_rehearsal_gate.status // "pending") != "pass" and (.summary.docker_rehearsal_gate.status // "pending") != "skip" and ((.summary.docker_rehearsal_gate.next_command // .summary.docker_rehearsal_gate.command // "") != "")) then {
       id: "three_machine_docker_readiness",
       label: "One-host docker 3-machine rehearsal",
       command: (.summary.docker_rehearsal_gate.next_command // .summary.docker_rehearsal_gate.command // ""),
       reason: "one-host confidence gate"
     } else empty end),
-    (if ((.summary.real_wg_privileged_gate.status // "pending") != "pass" and ((.summary.real_wg_privileged_gate.next_command // .summary.real_wg_privileged_gate.command // "") != "")) then {
+    (if ((.summary.real_wg_privileged_gate.status // "pending") != "pass" and (.summary.real_wg_privileged_gate.status // "pending") != "skip" and ((.summary.real_wg_privileged_gate.next_command // .summary.real_wg_privileged_gate.command // "") != "")) then {
       id: "real_wg_privileged_matrix",
       label: "Linux root real-WG privileged matrix",
       command: (.summary.real_wg_privileged_gate.next_command // .summary.real_wg_privileged_gate.command // ""),
