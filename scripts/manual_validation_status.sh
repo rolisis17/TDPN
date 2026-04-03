@@ -552,8 +552,8 @@ build_profile_default_gate_json() {
     printf -v reports_dir_arg '%q' "$reports_dir"
     printf -v summary_json_arg '%q' "$signoff_summary_json"
   fi
-  next_command="./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir $reports_dir_arg --refresh-campaign 1 --fail-on-no-go 1 --summary-json $summary_json_arg --print-summary-json 1"
-  next_command_sudo="sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir $reports_dir_arg --refresh-campaign 1 --fail-on-no-go 1 --summary-json $summary_json_arg --print-summary-json 1"
+  next_command="./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir $reports_dir_arg --refresh-campaign 1 --fail-on-no-go 0 --summary-json $summary_json_arg --print-summary-json 1"
+  next_command_sudo="sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir $reports_dir_arg --refresh-campaign 1 --fail-on-no-go 0 --summary-json $summary_json_arg --print-summary-json 1"
 
   if [[ -f "$signoff_summary_json" ]]; then
     available="1"

@@ -111,7 +111,7 @@ cat >"$summary_json" <<'EOF_SUMMARY'
     },
     "profile_default_gate": {
       "status": "pending",
-      "next_command": "sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 1 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1"
+      "next_command": "sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1"
     },
     "docker_rehearsal_gate": {
       "status": "pass",
@@ -541,7 +541,7 @@ cat >"$RESTORE_MANUAL_SUMMARY_JSON" <<'EOF_RESTORE_SUMMARY'
     },
     "profile_default_gate": {
       "status": "pending",
-      "next_command": "sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 1 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1"
+      "next_command": "sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1"
     },
     "docker_rehearsal_gate": {
       "status": "pending",

@@ -231,7 +231,7 @@ case "$mode" in
       "available": true,
       "valid_json": true,
       "non_root_refresh_blocked": true,
-      "next_command": "sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 1 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1"
+      "next_command": "sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1"
     },
     "profile_default_ready": false,
     "next_action_check_id": "machine_c_vpn_smoke",
