@@ -846,11 +846,11 @@ non_blocking_steps_failed_count="$(printf '%s\n' "$non_blocking_failed_steps_jso
 timed_out_steps_count="$(printf '%s\n' "$timed_out_steps_json" | jq -r 'length')"
 three_machine_docker_readiness_step_status="$(printf '%s\n' "$steps_json" | jq -r '[.[] | select(.step_id == "three_machine_docker_readiness") | .status][0] // "skip"')"
 three_machine_docker_readiness_available="0"
-three_machine_docker_readiness_status=""
+three_machine_docker_readiness_status="$three_machine_docker_readiness_step_status"
 three_machine_docker_readiness_final_rc="0"
 if [[ "$three_machine_docker_readiness_step_status" != "skip" && -f "$three_machine_docker_readiness_summary_json" ]] && jq -e . "$three_machine_docker_readiness_summary_json" >/dev/null 2>&1; then
   three_machine_docker_readiness_available="1"
-  three_machine_docker_readiness_status="$(jq -r '.status // ""' "$three_machine_docker_readiness_summary_json")"
+  three_machine_docker_readiness_status="$(jq -r '.status // "'"$three_machine_docker_readiness_step_status"'"' "$three_machine_docker_readiness_summary_json")"
   three_machine_docker_readiness_final_rc="$(jq -r '.rc // 0' "$three_machine_docker_readiness_summary_json")"
 fi
 profile_compare_campaign_signoff_step_status="$(printf '%s\n' "$steps_json" | jq -r '[.[] | select(.step_id == "profile_compare_campaign_signoff") | .status][0] // "skip"')"
@@ -1151,7 +1151,15 @@ summary_payload="$({
           available: ($three_machine_docker_readiness_available == 1),
           status: $three_machine_docker_readiness_status,
           final_rc: ($three_machine_docker_readiness_final_rc | tonumber),
-          ready: ($three_machine_docker_readiness_status == "pass")
+          ready: (
+            if $three_machine_docker_readiness_status == "skip" then
+              true
+            elif $three_machine_docker_readiness_status == "pass" then
+              ($three_machine_docker_readiness_available == 1)
+            else
+              false
+            end
+          )
         },
         profile_compare_campaign_signoff: {
           available: ($profile_compare_campaign_signoff_available == 1),
@@ -1163,7 +1171,7 @@ summary_payload="$({
         },
         real_wg_privileged_matrix: {
           status: $real_wg_privileged_matrix_step_status,
-          ready: ($real_wg_privileged_matrix_step_status == "pass"),
+          ready: ($real_wg_privileged_matrix_step_status == "pass" or $real_wg_privileged_matrix_step_status == "skip"),
           non_blocking: true
         },
         profile_default_gate: $profile_default_gate,

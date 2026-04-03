@@ -394,6 +394,11 @@ if ! jq -e '
   and .summary.profile_default_gate.available == true
   and .summary.profile_default_gate.non_root_refresh_blocked == true
   and .summary.profile_default_ready == false
+  and .summary.three_machine_docker_readiness.available == false
+  and .summary.three_machine_docker_readiness.status == "skip"
+  and .summary.three_machine_docker_readiness.ready == true
+  and .summary.real_wg_privileged_matrix.status == "skip"
+  and .summary.real_wg_privileged_matrix.ready == true
   and .summary.pending_local_checks == []
   and (.summary.pending_multi_machine_checks | length) == 2
   and .inputs.run_real_wg_privileged_matrix == "0"
