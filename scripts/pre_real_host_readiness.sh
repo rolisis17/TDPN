@@ -132,6 +132,25 @@ validate_wg_only_summary_payload() {
   return 0
 }
 
+validate_manual_validation_summary_payload() {
+  local payload="$1"
+  local readiness_status=""
+
+  if [[ -z "$payload" ]]; then
+    return 1
+  fi
+  if ! jq -e . >/dev/null 2>&1 <<<"$payload"; then
+    return 1
+  fi
+
+  readiness_status="$(printf '%s\n' "$payload" | jq -r 'if (.report.readiness_status | type) == "string" then .report.readiness_status else "" end' 2>/dev/null || true)"
+  if [[ -z "$readiness_status" ]]; then
+    return 1
+  fi
+
+  return 0
+}
+
 persist_artifact_text() {
   local path="$1"
   local content="$2"
@@ -490,10 +509,16 @@ report_json_payload="$(extract_json_payload "manual-validation-report" "$report_
 if [[ -z "$report_json_payload" && -f "$manual_validation_report_summary_json" ]] && jq -e . "$manual_validation_report_summary_json" >/dev/null 2>&1; then
   report_json_payload="$(cat "$manual_validation_report_summary_json")"
 fi
-if [[ -n "$report_json_payload" ]]; then
+if validate_manual_validation_summary_payload "$report_json_payload"; then
   manual_validation_report_readiness_status="$(printf '%s\n' "$report_json_payload" | jq -r '.report.readiness_status // ""' 2>/dev/null || true)"
   manual_validation_report_next_action_check_id="$(printf '%s\n' "$report_json_payload" | jq -r '.summary.next_action_check_id // ""' 2>/dev/null || true)"
   manual_validation_report_next_action_command="$(printf '%s\n' "$report_json_payload" | jq -r '.summary.pre_machine_c_gate.next_command // .summary.next_action_command // ""' 2>/dev/null || true)"
+else
+  manual_validation_report_status="fail"
+  manual_validation_report_readiness_status=""
+  manual_validation_report_next_action_check_id=""
+  manual_validation_report_next_action_command=""
+  printf '%s\n' "[$stage] summary_payload_invalid_or_incompatible schema check failed" >>"$summary_log"
 fi
 
 blockers=()
@@ -502,6 +527,9 @@ if [[ "$runtime_fix_rc" -ne 0 || "$runtime_fix_after_status" != "OK" ]]; then
 fi
 if [[ "$wg_only_status" != "pass" ]]; then
   blockers+=("wg_only_stack_selftest")
+fi
+if [[ "$manual_validation_report_status" != "ok" ]]; then
+  blockers+=("manual_validation_report")
 fi
 
 machine_c_smoke_ready="0"

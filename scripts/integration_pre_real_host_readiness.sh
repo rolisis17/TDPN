@@ -167,6 +167,16 @@ case "$cmd" in
     "next_action_command": "sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --path-profile balanced --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country"
   }
 }'
+    if [[ "$MODE" == "manual-report-invalid" ]]; then
+      summary_payload='{
+  "report": {
+    "readiness_status": 123
+  },
+  "summary": {
+    "next_action_check_id": "machine_c_vpn_smoke"
+  }
+}'
+    fi
     write_file_if_requested "--summary-json" "$summary_payload" "$@"
     write_file_if_requested "--report-md" "# Manual Validation Report" "$@"
     echo "[manual-validation-report] summary_json_payload:"
@@ -335,6 +345,51 @@ if ! rg -q '^wg-only-stack-selftest-record .*--client-iface wgcschema0 .*--exit-
 fi
 if ! rg -q '^manual-validation-report ' "$CAPTURE"; then
   echo "pre-real-host readiness schema-fail run should still refresh manual-validation-report"
+  cat "$CAPTURE"
+  exit 1
+fi
+
+: >"$CAPTURE"
+MANUAL_SCHEMA_FAIL_SUMMARY_JSON="$TMP_DIR/pre_real_host_readiness_manual_schema_fail.json"
+MANUAL_SCHEMA_FAIL_REPORT_JSON="$TMP_DIR/manual_validation_readiness_manual_schema_fail_summary.json"
+MANUAL_SCHEMA_FAIL_REPORT_MD="$TMP_DIR/manual_validation_readiness_manual_schema_fail_report.md"
+
+set +e
+FAKE_CAPTURE_FILE="$CAPTURE" \
+FAKE_MODE="manual-report-invalid" \
+PRE_REAL_HOST_READINESS_EASY_NODE_SCRIPT="$FAKE_EASY_NODE" \
+./scripts/pre_real_host_readiness.sh \
+  --base-port 19293 \
+  --client-iface wgcmanual0 \
+  --exit-iface wgemanual0 \
+  --vpn-iface wgvpnmanual0 \
+  --summary-json "$MANUAL_SCHEMA_FAIL_SUMMARY_JSON" \
+  --manual-validation-report-summary-json "$MANUAL_SCHEMA_FAIL_REPORT_JSON" \
+  --manual-validation-report-md "$MANUAL_SCHEMA_FAIL_REPORT_MD" \
+  --print-summary-json 0 >/tmp/integration_pre_real_host_readiness_manual_schema_fail.log 2>&1
+rc=$?
+set -e
+if [[ $rc -eq 0 ]]; then
+  echo "pre-real-host readiness should fail when manual-validation-report summary payload is incompatible"
+  cat /tmp/integration_pre_real_host_readiness_manual_schema_fail.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .stage == "manual_validation_report"
+  and .machine_c_smoke_gate.ready == false
+  and (.machine_c_smoke_gate.blockers | index("manual_validation_report") != null)
+  and .runtime_fix.status == "ok"
+  and .wg_only_stack_selftest.status == "pass"
+  and .manual_validation_report.status == "fail"
+  and .manual_validation_report.readiness_status == ""
+' "$MANUAL_SCHEMA_FAIL_SUMMARY_JSON" >/dev/null; then
+  echo "pre-real-host readiness manual-validation schema-fail summary missing expected fields"
+  cat "$MANUAL_SCHEMA_FAIL_SUMMARY_JSON"
+  exit 1
+fi
+if ! rg -q '^manual-validation-report ' "$CAPTURE"; then
+  echo "pre-real-host readiness manual-validation schema-fail run missing manual-validation-report call"
   cat "$CAPTURE"
   exit 1
 fi
