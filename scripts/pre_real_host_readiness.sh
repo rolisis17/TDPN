@@ -134,6 +134,8 @@ validate_wg_only_summary_payload() {
 
 validate_manual_validation_summary_payload() {
   local payload="$1"
+  local schema_id=""
+  local schema_major=""
   local readiness_status=""
 
   if [[ -z "$payload" ]]; then
@@ -143,8 +145,22 @@ validate_manual_validation_summary_payload() {
     return 1
   fi
 
+  schema_id="$(printf '%s\n' "$payload" | jq -r '.schema.id // ""' 2>/dev/null || true)"
+  if [[ -n "$schema_id" && "$schema_id" != "manual_validation_readiness_summary" ]]; then
+    return 1
+  fi
+  schema_major="$(printf '%s\n' "$payload" | jq -r '.schema.major // ""' 2>/dev/null || true)"
+  if [[ -n "$schema_major" ]]; then
+    if [[ ! "$schema_major" =~ ^[0-9]+$ ]] || (( schema_major > 1 )); then
+      return 1
+    fi
+  fi
+
   readiness_status="$(printf '%s\n' "$payload" | jq -r 'if (.report.readiness_status | type) == "string" then .report.readiness_status else "" end' 2>/dev/null || true)"
   if [[ -z "$readiness_status" ]]; then
+    return 1
+  fi
+  if ! printf '%s\n' "$payload" | jq -e '(.summary | type) == "object"' >/dev/null 2>&1; then
     return 1
   fi
 
