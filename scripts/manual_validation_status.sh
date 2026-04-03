@@ -541,6 +541,8 @@ build_profile_default_gate_json() {
   local stale_non_refreshed="0"
   local refresh_campaign="0"
   local signoff_status=""
+  local decision_normalized=""
+  local decision_is_no_go="0"
 
   reports_dir="$(dirname "$signoff_summary_json")"
   if [[ "$signoff_summary_json" == "$default_signoff_summary_json" ]]; then
@@ -568,6 +570,10 @@ build_profile_default_gate_json() {
   if [[ "$valid_json" == "1" ]]; then
     signoff_status="$(jq -r '.status // ""' "$signoff_summary_json")"
     decision="$(jq -r '.decision.decision // ""' "$signoff_summary_json")"
+    decision_normalized="$(printf '%s' "$decision" | tr '[:lower:]' '[:upper:]' | tr -d '[:space:]_-')"
+    if [[ "$decision_normalized" == "NOGO" ]]; then
+      decision_is_no_go="1"
+    fi
     recommended_profile="$(jq -r '.decision.recommended_profile // ""' "$signoff_summary_json")"
     trend_source="$(jq -r '.decision.trend_source // ""' "$signoff_summary_json")"
     final_rc="$(jq -r '.final_rc // 0' "$signoff_summary_json")"
@@ -603,6 +609,9 @@ build_profile_default_gate_json() {
           status="pending"
           notes="profile compare campaign signoff refresh needs root for local stack (non-root host)"
           next_command="$next_command_sudo"
+        elif [[ "$decision_is_no_go" == "1" ]]; then
+          status="warn"
+          notes="profile compare campaign signoff decision is NO-GO"
         else
           status="fail"
           notes="profile compare campaign signoff failed (final_rc=${final_rc})"
