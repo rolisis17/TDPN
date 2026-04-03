@@ -111,6 +111,41 @@ extract_json_payload() {
   awk '/^\[runtime-doctor\] summary_json_payload:/{flag=1; next} flag{print}' "$log_file"
 }
 
+validate_manual_validation_summary_payload() {
+  local payload="$1"
+  local schema_id=""
+  local schema_major=""
+  local readiness_status=""
+
+  if [[ -z "$payload" ]]; then
+    return 1
+  fi
+  if ! jq -e . >/dev/null 2>&1 <<<"$payload"; then
+    return 1
+  fi
+
+  schema_id="$(printf '%s\n' "$payload" | jq -r '.schema.id // ""' 2>/dev/null || true)"
+  if [[ -n "$schema_id" && "$schema_id" != "manual_validation_readiness_summary" ]]; then
+    return 1
+  fi
+  schema_major="$(printf '%s\n' "$payload" | jq -r '.schema.major // ""' 2>/dev/null || true)"
+  if [[ -n "$schema_major" ]]; then
+    if [[ ! "$schema_major" =~ ^[0-9]+$ ]] || (( schema_major > 1 )); then
+      return 1
+    fi
+  fi
+
+  readiness_status="$(printf '%s\n' "$payload" | jq -r 'if (.report.readiness_status | type) == "string" then .report.readiness_status else "" end' 2>/dev/null || true)"
+  if [[ -z "$readiness_status" ]]; then
+    return 1
+  fi
+  if ! printf '%s\n' "$payload" | jq -e '(.summary | type) == "object"' >/dev/null 2>&1; then
+    return 1
+  fi
+
+  return 0
+}
+
 show_json="0"
 prune_wg_only_dir="0"
 manual_validation_report_enabled="${RUNTIME_FIX_MANUAL_VALIDATION_REPORT:-1}"
@@ -228,6 +263,7 @@ declare -a actions_failed=()
 manual_validation_report_status="skipped"
 manual_validation_report_log=""
 manual_validation_report_json=""
+manual_validation_report_validation_error=""
 
 run_doctor() {
   local log_file
@@ -490,7 +526,16 @@ if [[ "$manual_validation_report_enabled" == "1" ]]; then
     manual_validation_report_status="failed"
   fi
   manual_validation_report_json="$(awk '/^\[manual-validation-report\] summary_json_payload:/{flag=1; next} flag{print}' "$manual_validation_report_log")"
+  if [[ -z "$manual_validation_report_json" && -f "$manual_validation_report_summary_json" ]] && jq -e . "$manual_validation_report_summary_json" >/dev/null 2>&1; then
+    manual_validation_report_json="$(cat "$manual_validation_report_summary_json")"
+  fi
+  if ! validate_manual_validation_summary_payload "$manual_validation_report_json"; then
+    manual_validation_report_status="failed"
+    manual_validation_report_json=""
+    manual_validation_report_validation_error="summary_payload_invalid_or_incompatible"
+  fi
   echo "[runtime-fix] manual_validation_report_status=$manual_validation_report_status"
+  echo "[runtime-fix] manual_validation_report_validation_error=$manual_validation_report_validation_error"
   echo "[runtime-fix] manual_validation_report_summary_json=$manual_validation_report_summary_json"
   echo "[runtime-fix] manual_validation_report_md=$manual_validation_report_md"
   echo "[runtime-fix] manual_validation_report_log=$manual_validation_report_log"
@@ -512,6 +557,7 @@ if [[ "$show_json" == "1" ]]; then
       --arg target_owner_group "$target_owner_group" \
       --arg target_owner_spec "$target_owner_spec" \
       --arg manual_validation_report_status "$manual_validation_report_status" \
+      --arg manual_validation_report_validation_error "$manual_validation_report_validation_error" \
       --arg manual_validation_report_summary_json "$manual_validation_report_summary_json" \
       --arg manual_validation_report_md "$manual_validation_report_md" \
       --arg manual_validation_report_log "$manual_validation_report_log" \
@@ -544,6 +590,7 @@ if [[ "$show_json" == "1" ]]; then
         manual_validation_report: {
           enabled: ($manual_validation_report_status != "skipped"),
           status: $manual_validation_report_status,
+          validation_error: $manual_validation_report_validation_error,
           summary_json: $manual_validation_report_summary_json,
           report_md: $manual_validation_report_md,
           log: $manual_validation_report_log,

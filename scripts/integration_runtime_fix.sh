@@ -99,10 +99,14 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+summary_payload='{"report":{"readiness_status":"NOT_READY","summary_json":"'"$summary_json"'","report_md":"'"$report_md"'"},"summary":{"next_action_check_id":"runtime_hygiene","next_action_command":"sudo ./scripts/easy_node.sh runtime-fix-record --prune-wg-only-dir 1 --print-summary-json 1"}}'
 if [[ -n "$summary_json" ]]; then
   mkdir -p "$(dirname "$summary_json")"
+  if [[ "${FAKE_MANUAL_VALIDATION_REPORT_INVALID_SCHEMA:-0}" == "1" ]]; then
+    summary_payload='{"schema":{"id":"manual_validation_readiness_summary","major":2,"minor":0},"report":{"readiness_status":"NOT_READY","summary_json":"'"$summary_json"'","report_md":"'"$report_md"'"},"summary":{"next_action_check_id":"runtime_hygiene","next_action_command":"sudo ./scripts/easy_node.sh runtime-fix-record --prune-wg-only-dir 1 --print-summary-json 1"}}'
+  fi
   cat >"$summary_json" <<EOF_SUMMARY
-{"report":{"readiness_status":"NOT_READY","summary_json":"$summary_json","report_md":"$report_md"},"summary":{"next_action_check_id":"runtime_hygiene","next_action_command":"sudo ./scripts/easy_node.sh runtime-fix-record --prune-wg-only-dir 1 --print-summary-json 1"}}
+$summary_payload
 EOF_SUMMARY
 fi
 if [[ -n "$report_md" ]]; then
@@ -114,7 +118,7 @@ cat <<EOF_OUT
 [manual-validation-report] summary_json=${summary_json}
 [manual-validation-report] report_md=${report_md}
 [manual-validation-report] summary_json_payload:
-{"report":{"readiness_status":"NOT_READY","summary_json":"${summary_json}","report_md":"${report_md}"},"summary":{"next_action_check_id":"runtime_hygiene","next_action_command":"sudo ./scripts/easy_node.sh runtime-fix-record --prune-wg-only-dir 1 --print-summary-json 1"}}
+$summary_payload
 EOF_OUT
 exit 0
 EOF_FAKE_REPORT
@@ -162,6 +166,29 @@ fi
 if ! extract_json_payload /tmp/integration_runtime_fix_ok.log | jq -e '.manual_validation_report.status == "ok" and .manual_validation_report.summary.report.readiness_status == "NOT_READY"' >/dev/null 2>&1; then
   echo "runtime-fix OK JSON payload missing manual validation report metadata"
   cat /tmp/integration_runtime_fix_ok.log
+  exit 1
+fi
+
+echo "[runtime-fix] manual report invalid schema fail-close path"
+FAKE_MANUAL_VALIDATION_REPORT_CAPTURE_FILE="$REPORT_CAPTURE" \
+FAKE_MANUAL_VALIDATION_REPORT_INVALID_SCHEMA="1" \
+MANUAL_VALIDATION_REPORT_SCRIPT="$FAKE_REPORT" \
+RUNTIME_DOCTOR_SCRIPT="$BASE_DOCTOR" \
+./scripts/runtime_fix.sh --show-json 1 >/tmp/integration_runtime_fix_manual_report_invalid.log 2>&1
+
+if ! rg -q '\[runtime-fix\] manual_validation_report_status=failed' /tmp/integration_runtime_fix_manual_report_invalid.log; then
+  echo "expected runtime-fix invalid schema path to fail-close manual validation report status"
+  cat /tmp/integration_runtime_fix_manual_report_invalid.log
+  exit 1
+fi
+if ! rg -q '\[runtime-fix\] manual_validation_report_validation_error=summary_payload_invalid_or_incompatible' /tmp/integration_runtime_fix_manual_report_invalid.log; then
+  echo "expected runtime-fix invalid schema path to emit validation error"
+  cat /tmp/integration_runtime_fix_manual_report_invalid.log
+  exit 1
+fi
+if ! extract_json_payload /tmp/integration_runtime_fix_manual_report_invalid.log | jq -e '.manual_validation_report.status == "failed" and .manual_validation_report.validation_error == "summary_payload_invalid_or_incompatible" and .manual_validation_report.summary == null' >/dev/null 2>&1; then
+  echo "runtime-fix invalid schema JSON payload missing fail-closed manual validation fields"
+  cat /tmp/integration_runtime_fix_manual_report_invalid.log
   exit 1
 fi
 
