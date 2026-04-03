@@ -216,13 +216,13 @@ if ! rg -q '\[manual-validation-report\] docker_rehearsal_ready=false' $REPORT_L
   cat $REPORT_LOG
   exit 1
 fi
-if ! rg -q '\[manual-validation-report\] real_wg_privileged_status=pending' $REPORT_LOG; then
-  echo "manual validation report missing real_wg_privileged_status=pending line"
+if ! rg -q '\[manual-validation-report\] real_wg_privileged_status=(pending|skip)' $REPORT_LOG; then
+  echo "manual validation report missing real_wg_privileged_status=(pending|skip) line"
   cat $REPORT_LOG
   exit 1
 fi
-if ! rg -q '\[manual-validation-report\] real_wg_privileged_ready=false' $REPORT_LOG; then
-  echo "manual validation report missing real_wg_privileged_ready=false line"
+if ! rg -q '\[manual-validation-report\] real_wg_privileged_ready=(false|true)' $REPORT_LOG; then
+  echo "manual validation report missing real_wg_privileged_ready=(false|true) line"
   cat $REPORT_LOG
   exit 1
 fi
@@ -294,10 +294,18 @@ if ! printf '%s\n' "$report_json_payload" | jq -e --arg summary_json "$SUMMARY_J
   and .summary.docker_rehearsal_gate.ready == false
   and .summary.docker_rehearsal_gate.check_id == "three_machine_docker_readiness"
   and .summary.docker_rehearsal_gate.next_command == "./scripts/easy_node.sh three-machine-docker-readiness-record --path-profile balanced --soak-rounds 6 --soak-pause-sec 3 --print-summary-json 1"
-  and .summary.real_wg_privileged_gate.status == "pending"
-  and .summary.real_wg_privileged_gate.ready == false
+  and (
+    if .summary.real_wg_privileged_gate.host.eligible then
+      .summary.real_wg_privileged_gate.status == "pending"
+      and .summary.real_wg_privileged_gate.ready == false
+      and .summary.real_wg_privileged_gate.next_command == "sudo ./scripts/easy_node.sh real-wg-privileged-matrix-record --print-summary-json 1"
+    else
+      .summary.real_wg_privileged_gate.status == "skip"
+      and .summary.real_wg_privileged_gate.ready == true
+      and .summary.real_wg_privileged_gate.next_command == ""
+    end
+  )
   and .summary.real_wg_privileged_gate.check_id == "real_wg_privileged_matrix"
-  and .summary.real_wg_privileged_gate.next_command == "sudo ./scripts/easy_node.sh real-wg-privileged-matrix-record --print-summary-json 1"
   and (.summary.real_wg_privileged_gate.host.eligible | type == "boolean")
   and ((.summary.real_wg_privileged_gate.host.hint // "") | length > 0)
   and .summary.single_machine_ready == false

@@ -986,6 +986,24 @@ elif [[ "$real_wg_host_root" != "1" ]]; then
 elif [[ "$real_wg_host_has_wg" != "1" || "$real_wg_host_has_ip" != "1" ]]; then
   real_wg_host_hint="requires wg and ip commands on host"
 fi
+if [[ "$real_wg_host_eligible" != "1" ]]; then
+  real_wg_privileged_check_json="$(
+    printf '%s\n' "$real_wg_privileged_check_json" | jq -c --arg host_hint "$real_wg_host_hint" '
+      if (.status // "pending") == "pending" then
+        .status = "skip"
+        | .notes = (
+            if (.notes // "" | length) > 0 then
+              .notes
+            else
+              $host_hint
+            end
+          )
+      else
+        .
+      end
+    '
+  )"
+fi
 
 combined_json="$(
   jq -n \
@@ -1178,7 +1196,7 @@ combined_json="$(
           | .notes = (
               if (.notes | length) > 0 then
                 .notes
-              elif .status == "pending" and (.host.eligible | not) then
+              elif (.status == "pending" or .status == "skip") and (.host.eligible | not) then
                 .host.hint
               else
                 .notes

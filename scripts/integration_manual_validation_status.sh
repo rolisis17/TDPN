@@ -199,13 +199,13 @@ if ! rg -q '\[manual-validation-status\] docker_rehearsal_ready=false' $BASELINE
   cat $BASELINE_LOG
   exit 1
 fi
-if ! rg -q '\[manual-validation-status\] real_wg_privileged_status=pending' $BASELINE_LOG; then
-  echo "baseline status missing real_wg_privileged_status=pending line"
+if ! rg -q '\[manual-validation-status\] real_wg_privileged_status=(pending|skip)' $BASELINE_LOG; then
+  echo "baseline status missing real_wg_privileged_status=(pending|skip) line"
   cat $BASELINE_LOG
   exit 1
 fi
-if ! rg -q '\[manual-validation-status\] real_wg_privileged_ready=false' $BASELINE_LOG; then
-  echo "baseline status missing real_wg_privileged_ready=false line"
+if ! rg -q '\[manual-validation-status\] real_wg_privileged_ready=(false|true)' $BASELINE_LOG; then
+  echo "baseline status missing real_wg_privileged_ready=(false|true) line"
   cat $BASELINE_LOG
   exit 1
 fi
@@ -229,10 +229,18 @@ if ! printf '%s\n' "$baseline_json" | jq -e '
   and .summary.docker_rehearsal_gate.ready == false
   and .summary.docker_rehearsal_gate.check_id == "three_machine_docker_readiness"
   and .summary.docker_rehearsal_gate.next_command == "./scripts/easy_node.sh three-machine-docker-readiness-record --path-profile balanced --soak-rounds 6 --soak-pause-sec 3 --print-summary-json 1"
-  and .summary.real_wg_privileged_gate.status == "pending"
-  and .summary.real_wg_privileged_gate.ready == false
+  and (
+    if .summary.real_wg_privileged_gate.host.eligible then
+      .summary.real_wg_privileged_gate.status == "pending"
+      and .summary.real_wg_privileged_gate.ready == false
+      and .summary.real_wg_privileged_gate.next_command == "sudo ./scripts/easy_node.sh real-wg-privileged-matrix-record --print-summary-json 1"
+    else
+      .summary.real_wg_privileged_gate.status == "skip"
+      and .summary.real_wg_privileged_gate.ready == true
+      and .summary.real_wg_privileged_gate.next_command == ""
+    end
+  )
   and .summary.real_wg_privileged_gate.check_id == "real_wg_privileged_matrix"
-  and .summary.real_wg_privileged_gate.next_command == "sudo ./scripts/easy_node.sh real-wg-privileged-matrix-record --print-summary-json 1"
   and (.summary.real_wg_privileged_gate.host.eligible | type == "boolean")
   and ((.summary.real_wg_privileged_gate.host.hint // "") | length > 0)
   and .summary.single_machine_ready == false
@@ -466,8 +474,15 @@ if ! printf '%s\n' "$recorded_json" | jq -e '
   and .summary.real_host_gate.next_command == "sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --path-profile balanced --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country"
   and .summary.docker_rehearsal_gate.status == "pending"
   and .summary.docker_rehearsal_gate.ready == false
-  and .summary.real_wg_privileged_gate.status == "pending"
-  and .summary.real_wg_privileged_gate.ready == false
+  and (
+    if .summary.real_wg_privileged_gate.host.eligible then
+      .summary.real_wg_privileged_gate.status == "pending"
+      and .summary.real_wg_privileged_gate.ready == false
+    else
+      .summary.real_wg_privileged_gate.status == "skip"
+      and .summary.real_wg_privileged_gate.ready == true
+    end
+  )
   and .summary.real_wg_privileged_gate.check_id == "real_wg_privileged_matrix"
   and .summary.single_machine_ready == false
   and .summary.roadmap_stage == "BLOCKED_LOCAL"
@@ -529,13 +544,13 @@ if ! rg -q '\[manual-validation-status\] docker_rehearsal_ready=false' $RECORDED
   cat $RECORDED_LOG
   exit 1
 fi
-if ! rg -q '\[manual-validation-status\] real_wg_privileged_status=pending' $RECORDED_LOG; then
-  echo "recorded status missing real_wg_privileged_status=pending line"
+if ! rg -q '\[manual-validation-status\] real_wg_privileged_status=(pending|skip)' $RECORDED_LOG; then
+  echo "recorded status missing real_wg_privileged_status=(pending|skip) line"
   cat $RECORDED_LOG
   exit 1
 fi
-if ! rg -q '\[manual-validation-status\] real_wg_privileged_ready=false' $RECORDED_LOG; then
-  echo "recorded status missing real_wg_privileged_ready=false line"
+if ! rg -q '\[manual-validation-status\] real_wg_privileged_ready=(false|true)' $RECORDED_LOG; then
+  echo "recorded status missing real_wg_privileged_ready=(false|true) line"
   cat $RECORDED_LOG
   exit 1
 fi
@@ -713,13 +728,13 @@ if ! rg -q '\[manual-validation-status\] docker_rehearsal_ready=false' $INCIDENT
   cat $INCIDENT_LOG
   exit 1
 fi
-if ! rg -q '\[manual-validation-status\] real_wg_privileged_status=pending' $INCIDENT_LOG; then
-  echo "incident status missing real_wg_privileged_status=pending line"
+if ! rg -q '\[manual-validation-status\] real_wg_privileged_status=(pending|skip)' $INCIDENT_LOG; then
+  echo "incident status missing real_wg_privileged_status=(pending|skip) line"
   cat $INCIDENT_LOG
   exit 1
 fi
-if ! rg -q '\[manual-validation-status\] real_wg_privileged_ready=false' $INCIDENT_LOG; then
-  echo "incident status missing real_wg_privileged_ready=false line"
+if ! rg -q '\[manual-validation-status\] real_wg_privileged_ready=(false|true)' $INCIDENT_LOG; then
+  echo "incident status missing real_wg_privileged_ready=(false|true) line"
   cat $INCIDENT_LOG
   exit 1
 fi
@@ -749,8 +764,15 @@ if ! printf '%s\n' "$incident_json" | jq -e --arg smoke_summary "$SMOKE_RUN_SUMM
   and .summary.real_host_gate.next_command == "sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --path-profile balanced --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country"
   and .summary.docker_rehearsal_gate.status == "pending"
   and .summary.docker_rehearsal_gate.ready == false
-  and .summary.real_wg_privileged_gate.status == "pending"
-  and .summary.real_wg_privileged_gate.ready == false
+  and (
+    if .summary.real_wg_privileged_gate.host.eligible then
+      .summary.real_wg_privileged_gate.status == "pending"
+      and .summary.real_wg_privileged_gate.ready == false
+    else
+      .summary.real_wg_privileged_gate.status == "skip"
+      and .summary.real_wg_privileged_gate.ready == true
+    end
+  )
   and .summary.real_wg_privileged_gate.check_id == "real_wg_privileged_matrix"
   and .summary.single_machine_ready == false
   and .summary.roadmap_stage == "BLOCKED_LOCAL"
