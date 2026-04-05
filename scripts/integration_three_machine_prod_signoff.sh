@@ -294,9 +294,15 @@ EOF_OK
       exit 1
     fi
     mkdir -p "$(dirname "$summary_json")" "$(dirname "$report_md")"
-    cat >"$summary_json" <<'EOF_REPORT_JSON'
+    if [[ "${FAKE_MANUAL_REPORT_INVALID:-0}" == "1" ]]; then
+      cat >"$summary_json" <<'EOF_REPORT_JSON_INVALID'
+{"version":1,"summary":{"next_action_check_id":"machine_c_vpn_smoke"},"report":{"readiness_status":123}}
+EOF_REPORT_JSON_INVALID
+    else
+      cat >"$summary_json" <<'EOF_REPORT_JSON'
 {"version":1,"summary":{"next_action_check_id":"machine_c_vpn_smoke"},"report":{"readiness_status":"NOT_READY"}}
 EOF_REPORT_JSON
+    fi
     cat >"$report_md" <<'EOF_REPORT_MD'
 # Manual Validation Readiness Report
 EOF_REPORT_MD
@@ -409,6 +415,43 @@ if ! rg -q 'manual_validation_readiness_report\.md' "$CAPTURE"; then
 fi
 if ! rg -q 'pre_real_host_readiness' "$CAPTURE"; then
   echo "expected success receipt artifacts to include pre-real-host readiness evidence"
+  cat "$CAPTURE"
+  exit 1
+fi
+
+echo "[three-machine-prod-signoff] manual validation malformed payload path"
+: >"$CAPTURE"
+printf '1\n' >"$runtime_doctor_count"
+FAKE_EASY_CAPTURE_FILE="$CAPTURE" \
+FAKE_RUNTIME_DOCTOR_COUNT_FILE="$runtime_doctor_count" \
+THREE_MACHINE_PROD_SIGNOFF_EASY_NODE_SCRIPT="$FAKE_EASY_NODE" \
+FAKE_MANUAL_REPORT_INVALID=1 \
+./scripts/three_machine_prod_signoff.sh \
+  --directory-a https://198.51.100.10:8081 \
+  --directory-b https://203.0.113.20:8081 \
+  --issuer-url https://198.51.100.10:8082 \
+  --entry-url https://198.51.100.10:8083 \
+  --exit-url https://203.0.113.20:8084 \
+  --pre-real-host-readiness 1 >/tmp/integration_three_machine_prod_signoff_manual_invalid.log 2>&1
+
+if ! rg -q 'three-machine-prod-signoff: status=pass stage=bundle' /tmp/integration_three_machine_prod_signoff_manual_invalid.log; then
+  echo "expected pass status when manual-validation payload is malformed"
+  cat /tmp/integration_three_machine_prod_signoff_manual_invalid.log
+  exit 1
+fi
+manual_invalid_summary_json="$(sed -n 's/^summary_json: //p' /tmp/integration_three_machine_prod_signoff_manual_invalid.log | tail -n 1)"
+if [[ -z "$manual_invalid_summary_json" || ! -f "$manual_invalid_summary_json" ]]; then
+  echo "expected manual-invalid summary json file missing"
+  cat /tmp/integration_three_machine_prod_signoff_manual_invalid.log
+  exit 1
+fi
+if ! jq -e '.status == "pass" and .manual_validation_report.status == "fail" and .manual_validation_report.readiness_status == "" and .manual_validation_report.next_action_check_id == ""' "$manual_invalid_summary_json" >/dev/null 2>&1; then
+  echo "manual-invalid summary JSON missing fail-closed manual-validation status"
+  cat "$manual_invalid_summary_json"
+  exit 1
+fi
+if ! rg -q '^manual-validation-report ' "$CAPTURE"; then
+  echo "expected manual-validation-report call missing in malformed payload path"
   cat "$CAPTURE"
   exit 1
 fi

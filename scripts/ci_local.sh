@@ -78,6 +78,9 @@ echo "[ci] manual validation status integration"
 echo "[ci] manual validation report integration"
 ./scripts/integration_manual_validation_report.sh
 
+echo "[ci] roadmap progress report integration"
+./scripts/integration_roadmap_progress_report.sh
+
 echo "[ci] pre-real-host readiness integration"
 ./scripts/integration_pre_real_host_readiness.sh
 

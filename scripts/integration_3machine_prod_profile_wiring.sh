@@ -805,27 +805,27 @@ if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh three-machine-prod-gate --help
   echo "easy_node three-machine-prod-gate help missing --wg-min-selection-lines"
   exit 1
 fi
-if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh --help | rg -q -- '--signoff-check'; then
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh --help --expert | rg -q -- '--signoff-check'; then
   echo "easy_node usage missing prod bundle signoff options"
   exit 1
 fi
-if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh --help | rg -q -- '--preflight-check'; then
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh --help --expert | rg -q -- '--preflight-check'; then
   echo "easy_node usage missing prod bundle preflight options"
   exit 1
 fi
-if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh --help | rg -q -- '--bundle-verify-check'; then
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh --help --expert | rg -q -- '--bundle-verify-check'; then
   echo "easy_node usage missing prod bundle verify options"
   exit 1
 fi
-if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh --help | rg -q -- '--run-report-json'; then
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh --help --expert | rg -q -- '--run-report-json'; then
   echo "easy_node usage missing prod bundle run-report options"
   exit 1
 fi
-if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh --help | rg -q -- '--incident-snapshot-on-fail'; then
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh --help --expert | rg -q -- '--incident-snapshot-on-fail'; then
   echo "easy_node usage missing prod bundle incident snapshot options"
   exit 1
 fi
-if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh --help | rg -q -- 'prod-gate-bundle-verify'; then
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh --help --expert | rg -q -- 'prod-gate-bundle-verify'; then
   echo "easy_node usage missing prod-gate-bundle-verify command"
   exit 1
 fi
@@ -841,7 +841,7 @@ if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh prod-gate-check --help | rg -q
   echo "easy_node prod-gate-check help missing --run-report-json"
   exit 1
 fi
-if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh --help | rg -q -- 'prod-gate-slo-summary'; then
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh --help --expert | rg -q -- 'prod-gate-slo-summary'; then
   echo "easy_node usage missing prod-gate-slo-summary command"
   exit 1
 fi
@@ -853,7 +853,7 @@ if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh prod-gate-slo-summary --help |
   echo "easy_node prod-gate-slo-summary help missing --fail-on-no-go"
   exit 1
 fi
-if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh --help | rg -q -- 'prod-gate-slo-trend'; then
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh --help --expert | rg -q -- 'prod-gate-slo-trend'; then
   echo "easy_node usage missing prod-gate-slo-trend command"
   exit 1
 fi
@@ -877,7 +877,7 @@ if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh prod-gate-slo-trend --help | r
   echo "easy_node prod-gate-slo-trend help missing --print-summary-json"
   exit 1
 fi
-if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh --help | rg -q -- 'prod-gate-slo-alert'; then
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh --help --expert | rg -q -- 'prod-gate-slo-alert'; then
   echo "easy_node usage missing prod-gate-slo-alert command"
   exit 1
 fi
@@ -893,7 +893,7 @@ if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh prod-gate-slo-alert --help | r
   echo "easy_node prod-gate-slo-alert help missing --summary-json"
   exit 1
 fi
-if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh --help | rg -q -- 'prod-gate-slo-dashboard'; then
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh --help --expert | rg -q -- 'prod-gate-slo-dashboard'; then
   echo "easy_node usage missing prod-gate-slo-dashboard command"
   exit 1
 fi
@@ -905,11 +905,11 @@ if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh prod-gate-slo-dashboard --help
   echo "easy_node prod-gate-slo-dashboard help missing --print-dashboard"
   exit 1
 fi
-if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh --help | rg -q -- 'prod-gate-signoff'; then
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh --help --expert | rg -q -- 'prod-gate-signoff'; then
   echo "easy_node usage missing prod-gate-signoff command"
   exit 1
 fi
-if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh --help | rg -q -- 'prod-pilot-runbook'; then
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh --help --expert | rg -q -- 'prod-pilot-runbook'; then
   echo "easy_node usage missing prod-pilot-runbook command"
   exit 1
 fi
@@ -917,11 +917,11 @@ if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh prod-gate-signoff --help | rg 
   echo "easy_node prod-gate-signoff help missing --show-integrity-details"
   exit 1
 fi
-if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh --help | rg -q -- 'prod-wg-strict-ingress-rehearsal'; then
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh --help --expert | rg -q -- 'prod-wg-strict-ingress-rehearsal'; then
   echo "easy_node usage missing prod-wg-strict-ingress-rehearsal command"
   exit 1
 fi
-if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh --help | rg -q -- 'incident-snapshot'; then
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh --help --expert | rg -q -- 'incident-snapshot'; then
   echo "easy_node usage missing incident-snapshot command"
   exit 1
 fi
@@ -2670,7 +2670,7 @@ if ! rg -q -- '--show-json 1' "$SIGNOFF_CAPTURE"; then
 fi
 
 echo "[wiring] easy_node help includes prod-key-rotation-runbook"
-if ! ./scripts/easy_node.sh --help | rg -q -- 'prod-key-rotation-runbook'; then
+if ! ./scripts/easy_node.sh --help --expert | rg -q -- 'prod-key-rotation-runbook'; then
   echo "easy_node help is missing prod-key-rotation-runbook command"
   exit 1
 fi
@@ -2711,7 +2711,7 @@ if ! rg -q -- '--key-history 7' "$ROTATION_CAPTURE"; then
 fi
 
 echo "[wiring] easy_node help includes prod-upgrade-runbook"
-if ! ./scripts/easy_node.sh --help | rg -q -- 'prod-upgrade-runbook'; then
+if ! ./scripts/easy_node.sh --help --expert | rg -q -- 'prod-upgrade-runbook'; then
   echo "easy_node help is missing prod-upgrade-runbook command"
   exit 1
 fi

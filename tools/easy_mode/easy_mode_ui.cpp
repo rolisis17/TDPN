@@ -1029,10 +1029,13 @@ void quickClientConnect(const std::string &script, ABHosts &hosts) {
   bool realVPN = parseYesNo(readLine("Use real VPN mode (host WireGuard interface)? (Y/n)", "y"), true);
   bool customize = parseYesNo(readLine("Customize advanced client options? (y/N)", "n"), false);
   std::string discoveryWait = "20";
-  bool prodProfile = false;
+  bool prodProfile = realVPN;
   if (customize) {
     discoveryWait = readLine("Discovery wait sec", discoveryWait);
-    prodProfile = parseYesNo(readLine("Use PROD profile (mTLS + strict fail-closed)? (y/N)", "n"), false);
+    prodProfile = parseYesNo(
+        readLine("Use PROD profile (mTLS + strict fail-closed)? (" + std::string(prodProfile ? "Y/n" : "y/N") + ")",
+                 prodProfile ? "y" : "n"),
+        prodProfile);
   }
   if (bootstrapDir.empty()) {
     std::cout << "server IP/host is required\n";
@@ -1057,13 +1060,15 @@ void quickClientConnect(const std::string &script, ABHosts &hosts) {
     }
     if (runPreflight) {
       std::ostringstream preflightCmd;
-      const bool enforceOperatorFloor = prodProfile && pathProfile.distinctOperators;
       preflightCmd << shellEscape(script) << " client-vpn-preflight"
                    << " --bootstrap-directory " << shellEscape(bootstrapDir)
                    << " --discovery-wait-sec " << shellEscape(discoveryWait)
                    << " --prod-profile " << (prodProfile ? "1" : "0")
                    << " --interface " << shellEscape(iface)
-                   << " --operator-floor-check " << (enforceOperatorFloor ? "1" : "0");
+                   << " --operator-floor-check 1"
+                   << " --operator-min-operators 2"
+                   << " --issuer-quorum-check 1"
+                   << " --issuer-min-operators 2";
       if (!isRootUser()) {
         bool useSudoPreflight = true;
         if (customize) {
@@ -1085,9 +1090,13 @@ void quickClientConnect(const std::string &script, ABHosts &hosts) {
         << " --discovery-wait-sec " << shellEscape(discoveryWait)
         << " --subject " << shellEscape(inviteKey)
         << " --min-sources 1"
-        << " --min-operators 1"
+        << " --min-operators 2"
+        << " --operator-floor-check 1"
+        << " --operator-min-operators 2"
         << " --beta-profile 1"
         << " --prod-profile " << (prodProfile ? "1" : "0")
+        << " --issuer-quorum-check 1"
+        << " --issuer-min-operators 2"
         << " --interface " << shellEscape(iface)
         << " --ready-timeout-sec " << shellEscape(readyTimeout)
         << " --cleanup-all 1";
@@ -1143,19 +1152,19 @@ void quickServerConnect(const std::string &root, const std::string &script, ABHo
     peerDefault = hosts.aHost;
   }
   std::string peerHost = peerDefault;
-  if (authorityMode && customize) {
+  if (authorityMode) {
     peerHost = normalizePublicHostInput(readOptionalLine("Peer server IP/host (optional)", peerDefault));
   }
   if (host.empty()) {
     std::cout << "public host/IP is required\n";
     return;
   }
-  bool prodProfile = false;
+  bool prodProfile = true;
   bool runPreflight = true;
   std::string peerIdentityStrict = "auto";
   std::string preflightTimeout = "8";
   if (customize) {
-    prodProfile = parseYesNo(readLine("Enable PROD profile (mTLS + strict fail-closed)? (y/N)", "n"), false);
+    prodProfile = parseYesNo(readLine("Enable PROD profile (mTLS + strict fail-closed)? (Y/n)", "y"), true);
     runPreflight = parseYesNo(readLine("Run server preflight before startup? (Y/n)", "y"), true);
     peerIdentityStrict = trim(readLine("Peer identity strict mode (auto/1/0)", peerIdentityStrict));
     if (peerIdentityStrict != "auto" && peerIdentityStrict != "1" && peerIdentityStrict != "0") {
@@ -1213,7 +1222,7 @@ void quickServerConnect(const std::string &root, const std::string &script, ABHo
         << " --auto-invite-count " << shellEscape(autoInviteCount)
         << " --auto-invite-tier " << shellEscape(autoInviteTier)
         << " --auto-invite-wait-sec " << shellEscape(autoInviteWaitSec)
-        << " --auto-invite-fail-open 1";
+        << " --auto-invite-fail-open 0";
     if (!peerHost.empty()) {
       peerDirectoriesArg = endpointFromHost(peerHost, 8081);
       cmd << " --peer-directories " << shellEscape(peerDirectoriesArg);

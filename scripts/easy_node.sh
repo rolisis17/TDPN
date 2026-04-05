@@ -164,6 +164,48 @@ print_client_vpn_trust_mismatch_hint() {
   fi
 }
 
+root_help_is_expert() {
+  local mode="${EASY_NODE_HELP_MODE:-}"
+  mode="$(printf '%s' "$mode" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+  if [[ "$mode" == "expert" ]]; then
+    return 0
+  fi
+
+  local arg
+  for arg in "$@"; do
+    if [[ "$arg" == "--expert" ]]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+usage_concise() {
+  cat <<'USAGE'
+Usage:
+  ./scripts/easy_node.sh check
+  ./scripts/easy_node.sh server-status
+  ./scripts/easy_node.sh server-logs [--follow [0|1]] [--tail N]
+  ./scripts/easy_node.sh server-down
+  ./scripts/easy_node.sh stop-all [--with-wg-only [0|1]] [--force-iface-cleanup [0|1]]
+  ./scripts/easy_node.sh client-vpn-status
+  ./scripts/easy_node.sh client-vpn-logs [--follow [0|1]] [--tail N]
+  ./scripts/easy_node.sh client-vpn-down [--force-iface-cleanup [0|1]]
+  ./scripts/easy_node.sh three-machine-reminder
+  ./scripts/easy_node.sh manual-validation-backlog
+  ./scripts/easy_node.sh manual-validation-status
+  ./scripts/easy_node.sh manual-validation-report
+  ./scripts/easy_node.sh incident-snapshot [--bundle-dir PATH]
+
+Operator-safe commands are listed above. Full command and flag reference is available in expert help.
+Expert help:
+  ./scripts/easy_node.sh --help --expert
+  ./scripts/easy_node.sh help --expert
+  EASY_NODE_HELP_MODE=expert ./scripts/easy_node.sh --help
+USAGE
+}
+
 usage() {
   cat <<'USAGE'
 Usage:
@@ -216,6 +258,7 @@ Usage:
   ./scripts/easy_node.sh single-machine-prod-readiness [--run-ci-local 0|1] [--run-beta-preflight 0|1] [--run-deep-suite 0|1] [--run-runtime-fix-record 0|1] [--run-three-machine-docker-readiness auto|0|1] [--three-machine-docker-readiness-run-validate 0|1] [--three-machine-docker-readiness-run-soak 0|1] [--three-machine-docker-readiness-soak-rounds N] [--three-machine-docker-readiness-soak-pause-sec N] [--three-machine-docker-readiness-path-profile speed|balanced|private] [--three-machine-docker-readiness-keep-stacks 0|1] [--three-machine-docker-readiness-summary-json PATH] [--run-profile-compare-campaign-signoff auto|0|1] [--profile-compare-campaign-signoff-refresh-campaign 0|1] [--profile-compare-campaign-signoff-fail-on-no-go 0|1] [--profile-compare-campaign-signoff-reports-dir PATH] [--profile-compare-campaign-signoff-summary-json PATH] [--profile-compare-campaign-signoff-campaign-execution-mode auto|docker|local] [--profile-compare-campaign-signoff-campaign-directory-urls URL[,URL...]] [--profile-compare-campaign-signoff-campaign-bootstrap-directory URL] [--profile-compare-campaign-signoff-campaign-discovery-wait-sec N] [--profile-compare-campaign-signoff-campaign-issuer-url URL] [--profile-compare-campaign-signoff-campaign-entry-url URL] [--profile-compare-campaign-signoff-campaign-exit-url URL] [--profile-compare-campaign-signoff-campaign-start-local-stack auto|0|1] [--run-pre-real-host-readiness auto|0|1] [--run-real-wg-privileged-matrix auto|0|1] [--beta-preflight-privileged auto|0|1] [--summary-json PATH] [--manual-validation-report-summary-json PATH] [--manual-validation-report-md PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh manual-validation-status [--base-port N] [--client-iface IFACE] [--exit-iface IFACE] [--vpn-iface IFACE] [--profile-compare-signoff-summary-json PATH] [--overlay-check-id CHECK_ID] [--overlay-status pass|fail|warn|pending|skip] [--overlay-notes TEXT] [--overlay-command TEXT] [--overlay-artifact PATH]... [--show-json [0|1]]
   ./scripts/easy_node.sh manual-validation-report [--base-port N] [--client-iface IFACE] [--exit-iface IFACE] [--vpn-iface IFACE] [--profile-compare-signoff-summary-json PATH] [--overlay-check-id CHECK_ID] [--overlay-status pass|fail|warn|pending|skip] [--overlay-notes TEXT] [--overlay-command TEXT] [--overlay-artifact PATH]... [--summary-json PATH] [--report-md PATH] [--print-report [0|1]] [--print-summary-json [0|1]] [--fail-on-not-ready [0|1]]
+  ./scripts/easy_node.sh roadmap-progress-report [--refresh-manual-validation [0|1]] [--refresh-single-machine-readiness [0|1]] [--manual-validation-summary-json PATH] [--manual-validation-report-md PATH] [--profile-compare-signoff-summary-json PATH] [--single-machine-summary-json PATH] [--summary-json PATH] [--report-md PATH] [--print-report [0|1]] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh manual-validation-record --check-id CHECK_ID --status pass|fail|warn|pending|skip [--notes TEXT] [--artifact PATH]... [--command TEXT] [--show-json [0|1]]
   ./scripts/easy_node.sh runtime-doctor [--base-port N] [--client-iface IFACE] [--exit-iface IFACE] [--vpn-iface IFACE] [--show-json [0|1]]
   ./scripts/easy_node.sh runtime-fix [--base-port N] [--client-iface IFACE] [--exit-iface IFACE] [--vpn-iface IFACE] [--prune-wg-only-dir [0|1]] [--manual-validation-report [0|1]] [--manual-validation-report-summary-json PATH] [--manual-validation-report-md PATH] [--show-json [0|1]]
@@ -271,7 +314,7 @@ Notes:
   - server-up --mode authority runs directory + issuer + entry-exit.
   - server-up --mode provider runs directory + entry-exit only (no local issuer/admin token).
   - server-up authority mode can auto-generate invite keys with --auto-invite (useful for quick onboarding).
-  - server-up peer identity checks default to strict in beta/prod when peers are configured; use --peer-identity-strict 0 only for temporary bypass during diagnostics.
+  - server-up peer identity checks default to strict in beta/prod when peers are configured; in non-prod authority->provider peering, issuer-id strictness auto-relaxes when peer issuers are not reachable. use --peer-identity-strict 0 only for temporary bypass during diagnostics.
   - rotate-server-secrets rotates local server secret material in env files; use --restart 1 to apply immediately.
   - server-up --prod-profile enables fail-closed production strict mode (requires mTLS + signed issuer-admin auth).
   - admin-signing-status/admin-signing-rotate are authority-only issuer admin signer maintenance tools.
@@ -309,6 +352,7 @@ Notes:
   - single-machine-prod-readiness runs all production-grade checks feasible on one host (ci_local, beta_preflight, deep_test_suite, runtime-fix-record, optional dockerized 3-machine rehearsal, optional profile-compare campaign signoff, optional pre-real-host-readiness, optional Linux root real-WG matrix receipt refresh), then reports exactly which remaining blockers require machine-C/3-machine execution; in auto mode it bootstraps missing profile-compare campaign artifacts, preferring docker rehearsal endpoints when available.
   - manual-validation-status combines live runtime-doctor output with recorded manual real-host validation receipts, points at the latest failed incident handoff when a recorded smoke/signoff run captured one, and now exposes staged roadmap progress (`BLOCKED_LOCAL`, `READY_FOR_MACHINE_C_SMOKE`, `READY_FOR_3_MACHINE_PROD_SIGNOFF`, `PRODUCTION_SIGNOFF_COMPLETE`).
   - manual-validation-report turns that readiness state into one shareable markdown + JSON handoff artifact, includes the same staged roadmap signal for single-machine operators, and can fail-close with --fail-on-not-ready=1.
+  - roadmap-progress-report generates one concise execution report (JSON + markdown) from manual-validation readiness, optionally refreshing single-machine readiness first, and always includes VPN gate status plus the deferred blockchain-track policy note.
   - manual-validation-record stores the result of a manual real-host validation step in local status/receipt files.
   - runtime-doctor checks for stale state, busy default ports, lingering interfaces, and unwritable runtime files before the next real-host test.
   - runtime-fix applies safe cleanup actions from runtime-doctor findings (stale wg-only/client-vpn/demo leftovers), reruns runtime-doctor, and now refreshes the shared manual-validation readiness report by default.
@@ -1506,6 +1550,26 @@ issuer_id_conflicts_with_peers() {
   return 1
 }
 
+peer_dirs_have_reachable_issuer() {
+  local peer_dirs="$1"
+  local peer
+  local peer_host
+  local peer_issuer_url
+  local peer_issuer_id
+  while IFS= read -r peer; do
+    [[ -z "$peer" ]] && continue
+    peer_host="$(host_from_url "$peer")"
+    [[ -z "$peer_host" ]] && continue
+    peer_issuer_url="$(url_from_host_port "$peer_host" 8082)"
+    if peer_issuer_id="$(issuer_id_from_url_checked "$peer_issuer_url" 2>/dev/null)"; then
+      if [[ -n "$peer_issuer_id" ]]; then
+        return 0
+      fi
+    fi
+  done < <(split_csv_lines "$peer_dirs")
+  return 1
+}
+
 ensure_deps_or_die() {
   local log_dir
   local log_file
@@ -2390,6 +2454,13 @@ server_preflight() {
       peer_identity_strict_effective="0"
     fi
   fi
+  local issuer_identity_strict_effective="$peer_identity_strict_effective"
+  if [[ "$mode" == "authority" && "$peer_identity_strict" == "auto" && "$peer_identity_strict_effective" == "1" && "$prod_profile" != "1" && -n "$peer_dirs" ]]; then
+    if ! peer_dirs_have_reachable_issuer "$peer_dirs"; then
+      issuer_identity_strict_effective="0"
+      echo "note: peer issuer identity strict checks auto-relaxed (non-prod authority peering appears provider-only)"
+    fi
+  fi
 
   for cmd in curl jq rg; do
     need_cmd "$cmd" || exit 2
@@ -2549,7 +2620,7 @@ server_preflight() {
       echo "[identity] fail: issuer_id collision with peers: $candidate_issuer_id"
       failures=$((failures + 1))
     elif [[ "$issuer_rc" == "2" ]]; then
-      if [[ "$peer_identity_strict_effective" == "1" ]]; then
+      if [[ "$issuer_identity_strict_effective" == "1" ]]; then
         echo "[identity] fail: could not verify issuer_id collision status against peers"
         failures=$((failures + 1))
       else
@@ -3002,6 +3073,13 @@ server_up() {
       peer_identity_strict_effective="0"
     fi
   fi
+  local issuer_identity_strict_effective="$peer_identity_strict_effective"
+  if [[ "$mode" == "authority" && "$peer_identity_strict" == "auto" && "$peer_identity_strict_effective" == "1" && "$prod_profile" != "1" && -n "$peer_dirs" ]]; then
+    if ! peer_dirs_have_reachable_issuer "$peer_dirs"; then
+      issuer_identity_strict_effective="0"
+      echo "note: peer issuer identity strict checks auto-relaxed (non-prod authority peering appears provider-only)"
+    fi
+  fi
 
   ensure_server_up_deps_or_die "$mode" "$prod_profile" "$peer_dirs" "$bootstrap_directory"
 
@@ -3154,7 +3232,7 @@ server_up() {
         continue
       fi
       if [[ "$issuer_check_rc" == "2" ]]; then
-        if [[ "$peer_identity_strict_effective" == "1" ]]; then
+        if [[ "$issuer_identity_strict_effective" == "1" ]]; then
           echo "server-up refused: could not verify issuer-id uniqueness against peer directories."
           echo "check peer issuer reachability and mTLS trust/certs, then retry."
           echo "temporary bypass (diagnostics only): --peer-identity-strict 0"
@@ -7178,6 +7256,11 @@ profile_compare_campaign_signoff() {
 
 manual_validation_report() {
   local report_script="${MANUAL_VALIDATION_REPORT_SCRIPT:-$ROOT_DIR/scripts/manual_validation_report.sh}"
+  "$report_script" "$@"
+}
+
+roadmap_progress_report() {
+  local report_script="${ROADMAP_PROGRESS_REPORT_SCRIPT:-$ROOT_DIR/scripts/roadmap_progress_report.sh}"
   "$report_script" "$@"
 }
 
@@ -11739,6 +11822,10 @@ main() {
       shift
       manual_validation_report "$@"
       ;;
+    roadmap-progress-report)
+      shift
+      roadmap_progress_report "$@"
+      ;;
     pre-real-host-readiness)
       shift
       pre_real_host_readiness "$@"
@@ -11932,7 +12019,11 @@ main() {
       discover_hosts "$@"
       ;;
     -h|--help|help|"")
-      usage || true
+      if root_help_is_expert "$@"; then
+        usage || true
+      else
+        usage_concise || true
+      fi
       ;;
     *)
       echo "unknown command: $cmd"

@@ -264,6 +264,8 @@ manual_validation_report_readiness_status=""
 manual_validation_report_next_action_check_id=""
 
 write_summary_json() {
+  local summary_tmp=""
+  summary_tmp="$(mktemp "${summary_json}.tmp.XXXXXX")"
   jq -n \
     --arg generated_at_utc "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     --arg status "$runtime_fix_status" \
@@ -327,7 +329,8 @@ write_summary_json() {
         summary_log: $summary_log,
         summary_json: $summary_json
       }
-    }' >"$summary_json"
+    }' >"$summary_tmp"
+  mv -f "$summary_tmp" "$summary_json"
 }
 
 record_receipt() {

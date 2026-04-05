@@ -7,6 +7,7 @@ Live status:
 ```bash
 ./scripts/easy_node.sh manual-validation-status --show-json 1
 ./scripts/easy_node.sh manual-validation-report --print-report 1 --print-summary-json 1
+./scripts/easy_node.sh roadmap-progress-report --refresh-manual-validation 1 --print-report 1 --print-summary-json 1
 ./scripts/easy_node.sh single-machine-prod-readiness --print-summary-json 1
 # optional: include local profile-default decision signoff in that one-host sweep
 ./scripts/easy_node.sh single-machine-prod-readiness \
@@ -24,6 +25,7 @@ When `single-machine-prod-readiness` runs with `--run-profile-compare-campaign-s
 - `roadmap_stage=READY_FOR_MACHINE_C_SMOKE`: local gates are clean; next external step is machine-C smoke.
 - `roadmap_stage=READY_FOR_3_MACHINE_PROD_SIGNOFF`: machine-C smoke is done; next external step is true 3-machine signoff.
 - `roadmap_stage=PRODUCTION_SIGNOFF_COMPLETE`: all tracked manual checks passed.
+`roadmap-progress-report` now adds a VPN RC-done phase signal plus the explicit list of pending real-host checks so the remaining external-only tail is visible at a glance.
 
 They also surface an optional one-host docker rehearsal snapshot (`docker_rehearsal_status`, `docker_rehearsal_ready`, `docker_rehearsal_command`) so we can track that confidence pass without changing real-host signoff requirements.
 They now also surface an optional Linux root real-WG privileged matrix snapshot (`real_wg_privileged_status`, `real_wg_privileged_ready`, `real_wg_privileged_command`) so one-host dataplane confidence can be tracked alongside the docker rehearsal gate without changing machine-C / true 3-machine blockers.

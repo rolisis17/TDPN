@@ -105,6 +105,19 @@ When to start:
 - abuse/reputation governance is operating as expected
 - protocol interfaces needed by settlement layer are clear and stable
 
+Bootstrap policy (when this track starts):
+- use a small-network manual governance phase first (allow/deny validator candidacy, emergency ban, manual adjudication with audit trail)
+- keep validator role server-side only; clients remain non-validating participants
+- keep VPN dataplane independent from blockchain liveness (grace mode + deferred settlement path)
+- transition to automated validator selection only after operator/diversity/safety thresholds are met
+
+Planned design guide:
+- `docs/blockchain-bootstrap-validator-plan.md` (manual bootstrap model, validator eligibility formula skeleton, epoch selection policy, and graduation criteria)
+
+L1 decision gate:
+- only start own-L1 build when the explicit 12-week go/no-go metrics gate in `docs/blockchain-bootstrap-validator-plan.md` is fully green
+- until then, keep blockchain functions in chain-assisted mode and keep VPN dataplane independent
+
 ## True 3-Machine Validation Reminder (Before Wider Beta)
 
 Run from machine C (client host), with A and B as independent operators:

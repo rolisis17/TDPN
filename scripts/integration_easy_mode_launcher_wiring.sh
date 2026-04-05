@@ -471,123 +471,123 @@ check_cpp '--summary-json ' "launcher wiring failed: option 73 summary-json forw
 check_cpp '--print-summary-json ' "launcher wiring failed: option 73 print-summary-json forwarding missing"
 
 echo "[easy-mode-wiring] easy_node help exposure"
-if ! "$EASY_NODE" --help | rg -q 'prod-pilot-cohort-quick-signoff'; then
+if ! "$EASY_NODE" --help --expert | rg -q 'prod-pilot-cohort-quick-signoff'; then
   echo "launcher wiring failed: easy_node help missing prod-pilot-cohort-quick-signoff"
   exit 1
 fi
-if ! "$EASY_NODE" --help | rg -q 'prod-pilot-cohort-quick-runbook'; then
+if ! "$EASY_NODE" --help --expert | rg -q 'prod-pilot-cohort-quick-runbook'; then
   echo "launcher wiring failed: easy_node help missing prod-pilot-cohort-quick-runbook"
   exit 1
 fi
-if ! "$EASY_NODE" --help | rg -q 'prod-pilot-cohort-campaign'; then
+if ! "$EASY_NODE" --help --expert | rg -q 'prod-pilot-cohort-campaign'; then
   echo "launcher wiring failed: easy_node help missing prod-pilot-cohort-campaign"
   exit 1
 fi
-if ! "$EASY_NODE" --help | rg -q 'prod-pilot-cohort-campaign-check'; then
+if ! "$EASY_NODE" --help --expert | rg -q 'prod-pilot-cohort-campaign-check'; then
   echo "launcher wiring failed: easy_node help missing prod-pilot-cohort-campaign-check"
   exit 1
 fi
-if ! "$EASY_NODE" --help | rg -q 'prod-pilot-cohort-campaign-signoff'; then
+if ! "$EASY_NODE" --help --expert | rg -q 'prod-pilot-cohort-campaign-signoff'; then
   echo "launcher wiring failed: easy_node help missing prod-pilot-cohort-campaign-signoff"
   exit 1
 fi
-if ! "$EASY_NODE" --help | rg -q 'runtime-doctor'; then
+if ! "$EASY_NODE" --help --expert | rg -q 'runtime-doctor'; then
   echo "launcher wiring failed: easy_node help missing runtime-doctor"
   exit 1
 fi
-if ! "$EASY_NODE" --help | rg -q 'manual-validation-backlog'; then
+if ! "$EASY_NODE" --help --expert | rg -q 'manual-validation-backlog'; then
   echo "launcher wiring failed: easy_node help missing manual-validation-backlog"
   exit 1
 fi
-if ! "$EASY_NODE" --help | rg -q 'manual-validation-status'; then
+if ! "$EASY_NODE" --help --expert | rg -q 'manual-validation-status'; then
   echo "launcher wiring failed: easy_node help missing manual-validation-status"
   exit 1
 fi
-if ! "$EASY_NODE" --help | rg -q -- 'manual-validation-status .*--profile-compare-signoff-summary-json'; then
+if ! "$EASY_NODE" --help --expert | rg -q -- 'manual-validation-status .*--profile-compare-signoff-summary-json'; then
   echo "launcher wiring failed: easy_node help missing manual-validation-status --profile-compare-signoff-summary-json"
   exit 1
 fi
-if ! "$EASY_NODE" --help | rg -q -- 'manual-validation-status .*--overlay-check-id'; then
+if ! "$EASY_NODE" --help --expert | rg -q -- 'manual-validation-status .*--overlay-check-id'; then
   echo "launcher wiring failed: easy_node help missing manual-validation-status --overlay-check-id"
   exit 1
 fi
-if ! "$EASY_NODE" --help | rg -q 'manual-validation-report'; then
+if ! "$EASY_NODE" --help --expert | rg -q 'manual-validation-report'; then
   echo "launcher wiring failed: easy_node help missing manual-validation-report"
   exit 1
 fi
-if ! "$EASY_NODE" --help | rg -q -- 'manual-validation-report .*--profile-compare-signoff-summary-json'; then
+if ! "$EASY_NODE" --help --expert | rg -q -- 'manual-validation-report .*--profile-compare-signoff-summary-json'; then
   echo "launcher wiring failed: easy_node help missing manual-validation-report --profile-compare-signoff-summary-json"
   exit 1
 fi
-if ! "$EASY_NODE" --help | rg -q -- 'manual-validation-report .*--overlay-check-id'; then
+if ! "$EASY_NODE" --help --expert | rg -q -- 'manual-validation-report .*--overlay-check-id'; then
   echo "launcher wiring failed: easy_node help missing manual-validation-report --overlay-check-id"
   exit 1
 fi
-if ! "$EASY_NODE" --help | rg -q 'wg-only-stack-selftest-record'; then
+if ! "$EASY_NODE" --help --expert | rg -q 'wg-only-stack-selftest-record'; then
   echo "launcher wiring failed: easy_node help missing wg-only-stack-selftest-record"
   exit 1
 fi
-if ! "$EASY_NODE" --help | rg -q 'pre-real-host-readiness'; then
+if ! "$EASY_NODE" --help --expert | rg -q 'pre-real-host-readiness'; then
   echo "launcher wiring failed: easy_node help missing pre-real-host-readiness"
   exit 1
 fi
-if ! "$EASY_NODE" --help | rg -q 'server-federation-status'; then
+if ! "$EASY_NODE" --help --expert | rg -q 'server-federation-status'; then
   echo "launcher wiring failed: easy_node help missing server-federation-status"
   exit 1
 fi
-if ! "$EASY_NODE" --help | rg -q 'server-federation-wait'; then
+if ! "$EASY_NODE" --help --expert | rg -q 'server-federation-wait'; then
   echo "launcher wiring failed: easy_node help missing server-federation-wait"
   exit 1
 fi
-if ! "$EASY_NODE" --help | rg -q 'manual-validation-record'; then
+if ! "$EASY_NODE" --help --expert | rg -q 'manual-validation-record'; then
   echo "launcher wiring failed: easy_node help missing manual-validation-record"
   exit 1
 fi
-if ! "$EASY_NODE" --help | rg -q 'client-vpn-smoke'; then
+if ! "$EASY_NODE" --help --expert | rg -q 'client-vpn-smoke'; then
   echo "launcher wiring failed: easy_node help missing client-vpn-smoke"
   exit 1
 fi
-if ! "$EASY_NODE" --help | rg -q 'three-machine-prod-signoff'; then
+if ! "$EASY_NODE" --help --expert | rg -q 'three-machine-prod-signoff'; then
   echo "launcher wiring failed: easy_node help missing three-machine-prod-signoff"
   exit 1
 fi
-if ! "$EASY_NODE" --help | rg -q 'runtime-fix'; then
+if ! "$EASY_NODE" --help --expert | rg -q 'runtime-fix'; then
   echo "launcher wiring failed: easy_node help missing runtime-fix"
   exit 1
 fi
-if ! "$EASY_NODE" --help | rg -q 'incident-snapshot'; then
+if ! "$EASY_NODE" --help --expert | rg -q 'incident-snapshot'; then
   echo "launcher wiring failed: easy_node help missing incident-snapshot"
   exit 1
 fi
-if ! "$EASY_NODE" --help | rg -q 'prod-gate-slo-dashboard'; then
+if ! "$EASY_NODE" --help --expert | rg -q 'prod-gate-slo-dashboard'; then
   echo "launcher wiring failed: easy_node help missing prod-gate-slo-dashboard"
   exit 1
 fi
-if ! "$EASY_NODE" --help | rg -q 'prod-key-rotation-runbook'; then
+if ! "$EASY_NODE" --help --expert | rg -q 'prod-key-rotation-runbook'; then
   echo "launcher wiring failed: easy_node help missing prod-key-rotation-runbook"
   exit 1
 fi
-if ! "$EASY_NODE" --help | rg -q 'prod-upgrade-runbook'; then
+if ! "$EASY_NODE" --help --expert | rg -q 'prod-upgrade-runbook'; then
   echo "launcher wiring failed: easy_node help missing prod-upgrade-runbook"
   exit 1
 fi
-if ! "$EASY_NODE" --help | rg -q 'prod-operator-lifecycle-runbook'; then
+if ! "$EASY_NODE" --help --expert | rg -q 'prod-operator-lifecycle-runbook'; then
   echo "launcher wiring failed: easy_node help missing prod-operator-lifecycle-runbook"
   exit 1
 fi
-if ! "$EASY_NODE" --help | rg -q 'prod-pilot-cohort-runbook'; then
+if ! "$EASY_NODE" --help --expert | rg -q 'prod-pilot-cohort-runbook'; then
   echo "launcher wiring failed: easy_node help missing prod-pilot-cohort-runbook"
   exit 1
 fi
-if ! "$EASY_NODE" --help | rg -q 'prod-pilot-cohort-bundle-verify'; then
+if ! "$EASY_NODE" --help --expert | rg -q 'prod-pilot-cohort-bundle-verify'; then
   echo "launcher wiring failed: easy_node help missing prod-pilot-cohort-bundle-verify"
   exit 1
 fi
-if ! "$EASY_NODE" --help | rg -q 'prod-pilot-cohort-signoff'; then
+if ! "$EASY_NODE" --help --expert | rg -q 'prod-pilot-cohort-signoff'; then
   echo "launcher wiring failed: easy_node help missing prod-pilot-cohort-signoff"
   exit 1
 fi
-if ! "$EASY_NODE" --help | rg -q 'prod-pilot-cohort-quick-dashboard'; then
+if ! "$EASY_NODE" --help --expert | rg -q 'prod-pilot-cohort-quick-dashboard'; then
   echo "launcher wiring failed: easy_node help missing prod-pilot-cohort-quick-dashboard"
   exit 1
 fi

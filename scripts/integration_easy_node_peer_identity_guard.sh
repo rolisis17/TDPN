@@ -229,4 +229,31 @@ if ! rg -q -- "--issuer-id 'issuer-peer' already exists on peer directories" /tm
   exit 1
 fi
 
+reset_local_state
+
+PATH="$TMP_BIN:$PATH" \
+EASY_NODE_VERIFY_PUBLIC=0 \
+FAKE_CURL_FAIL_PEER_ISSUER=1 \
+./scripts/easy_node.sh server-up \
+  --mode authority \
+  --public-host 198.51.100.20 \
+  --peer-directories http://203.0.113.10:8081 \
+  --beta-profile 1 >/tmp/integration_easy_node_peer_identity_guard_authority_provider_auto.log 2>&1
+
+if ! rg -q "peer issuer identity strict checks auto-relaxed" /tmp/integration_easy_node_peer_identity_guard_authority_provider_auto.log; then
+  echo "expected authority auto-relax note when peer issuer is unreachable in non-prod auto strict mode"
+  cat /tmp/integration_easy_node_peer_identity_guard_authority_provider_auto.log
+  exit 1
+fi
+if ! rg -q "warning: issuer-id uniqueness check skipped" /tmp/integration_easy_node_peer_identity_guard_authority_provider_auto.log; then
+  echo "expected issuer-id warning after authority auto-relax path"
+  cat /tmp/integration_easy_node_peer_identity_guard_authority_provider_auto.log
+  exit 1
+fi
+if ! rg -q "server stack started" /tmp/integration_easy_node_peer_identity_guard_authority_provider_auto.log; then
+  echo "expected authority stack startup for provider-only peer in auto strict mode"
+  cat /tmp/integration_easy_node_peer_identity_guard_authority_provider_auto.log
+  exit 1
+fi
+
 echo "easy-node peer identity guard integration check ok"

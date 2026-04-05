@@ -101,6 +101,74 @@ tri_state_or_die() {
   esac
 }
 
+host_is_loopback_local() {
+  local host="${1:-}"
+  host="${host#[}"
+  host="${host%]}"
+  case "$host" in
+    127.0.0.1|localhost|::1)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+rewrite_loopback_url_for_docker_local() {
+  local raw="$1"
+  local docker_host="${2:-host.docker.internal}"
+  local scheme rest hostport host port path
+
+  scheme="${raw%%://*}"
+  if [[ "$scheme" == "$raw" ]]; then
+    printf '%s\n' "$raw"
+    return 0
+  fi
+  rest="${raw#*://}"
+  hostport="${rest%%/*}"
+  if [[ "$rest" == */* ]]; then
+    path="/${rest#*/}"
+  else
+    path=""
+  fi
+
+  host="$hostport"
+  if [[ "$hostport" == \[*\]:* ]]; then
+    host="${hostport%%]:*}]"
+    host="${host#[}"
+    port="${hostport##*]:}"
+  elif [[ "$hostport" == *:* ]]; then
+    host="${hostport%%:*}"
+    port="${hostport##*:}"
+  else
+    printf '%s\n' "$raw"
+    return 0
+  fi
+
+  if ! host_is_loopback_local "$host"; then
+    printf '%s\n' "$raw"
+    return 0
+  fi
+
+  printf '%s://%s:%s%s\n' "$scheme" "$docker_host" "$port" "$path"
+}
+
+rewrite_url_csv_for_docker_local() {
+  local csv="$1"
+  local docker_host="${2:-host.docker.internal}"
+  local item rewritten joined=""
+  IFS=',' read -r -a items <<<"$csv"
+  for item in "${items[@]}"; do
+    item="${item//[[:space:]]/}"
+    [[ -z "$item" ]] && continue
+    rewritten="$(rewrite_loopback_url_for_docker_local "$item" "$docker_host")"
+    if [[ -n "$joined" ]]; then
+      joined+=","
+    fi
+    joined+="$rewritten"
+  done
+  printf '%s\n' "$joined"
+}
+
 normalize_path_profile_local() {
   local profile
   profile="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
@@ -152,6 +220,7 @@ profiles_csv="balanced,speed,private,speed-1hop"
 rounds="3"
 timeout_sec="35"
 execution_mode="${PROFILE_COMPARE_LOCAL_CLIENT_TEST_MODE:-local}"
+docker_host_alias="${PROFILE_COMPARE_LOCAL_DOCKER_HOST_ALIAS:-host.docker.internal}"
 directory_urls=""
 bootstrap_directory=""
 discovery_wait_sec="20"
@@ -375,6 +444,10 @@ if [[ "$execution_mode" != "docker" && "$execution_mode" != "local" ]]; then
   echo "--execution-mode must be docker or local"
   exit 2
 fi
+if [[ -z "$docker_host_alias" ]]; then
+  echo "PROFILE_COMPARE_LOCAL_DOCKER_HOST_ALIAS must be non-empty when execution mode is docker"
+  exit 2
+fi
 if [[ -n "$subject" && -n "$anon_cred" ]]; then
   echo "provide only one of --subject or --anon-cred"
   exit 2
@@ -585,9 +658,24 @@ for profile in "${profiles[@]}"; do
       continue
     fi
 
+    container_directory_urls="$directory_urls"
+    container_issuer_url="$issuer_url"
+    container_entry_url="$entry_url"
+    container_exit_url="$exit_url"
+    if [[ "$execution_mode" == "docker" ]]; then
+      container_directory_urls="$(rewrite_url_csv_for_docker_local "$directory_urls" "$docker_host_alias")"
+      container_issuer_url="$(rewrite_loopback_url_for_docker_local "$issuer_url" "$docker_host_alias")"
+      container_entry_url="$(rewrite_loopback_url_for_docker_local "$entry_url" "$docker_host_alias")"
+      container_exit_url="$(rewrite_loopback_url_for_docker_local "$exit_url" "$docker_host_alias")"
+    fi
+
     run_cmd=(
       env
       "EASY_NODE_CLIENT_TEST_MODE=$execution_mode"
+      "EASY_NODE_CLIENT_TEST_CONTAINER_DIRECTORY_URLS=$container_directory_urls"
+      "EASY_NODE_CLIENT_TEST_CONTAINER_ISSUER_URL=$container_issuer_url"
+      "EASY_NODE_CLIENT_TEST_CONTAINER_ENTRY_URL=$container_entry_url"
+      "EASY_NODE_CLIENT_TEST_CONTAINER_EXIT_URL=$container_exit_url"
       "$easy_node_script"
       client-test
     )
@@ -786,6 +874,7 @@ jq -n \
   --argjson rounds "$rounds" \
   --argjson timeout_sec "$timeout_sec" \
   --arg execution_mode "$execution_mode" \
+  --arg docker_host_alias "$docker_host_alias" \
   --arg directory_urls "$directory_urls" \
   --arg bootstrap_directory "$bootstrap_directory" \
   --arg issuer_url "$issuer_url" \
@@ -828,6 +917,7 @@ jq -n \
       rounds: $rounds,
       timeout_sec: $timeout_sec,
       execution_mode: $execution_mode,
+      docker_host_alias: $docker_host_alias,
       directory_urls: $directory_urls,
       bootstrap_directory: $bootstrap_directory,
       issuer_url: $issuer_url,

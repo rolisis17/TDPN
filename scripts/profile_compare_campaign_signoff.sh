@@ -112,6 +112,7 @@ quote_cmd() {
 
 need_cmd jq
 need_cmd date
+need_cmd mktemp
 
 reports_dir="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REPORTS_DIR:-$ROOT_DIR/.easy-node-logs}"
 campaign_summary_json="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_SUMMARY_JSON:-}"
@@ -540,6 +541,7 @@ if ! is_non_negative_decimal "$support_rate_pct"; then
 fi
 
 generated_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+summary_tmp="$(mktemp "${summary_json}.tmp.XXXXXX")"
 
 jq -n \
   --arg generated_at_utc "$generated_at_utc" \
@@ -652,7 +654,9 @@ jq -n \
       campaign_report_md: $campaign_report_md,
       campaign_check_summary_json: $campaign_check_summary_json
     }
-  }' >"$summary_json"
+  }' >"$summary_tmp"
+
+mv -f "$summary_tmp" "$summary_json"
 
 echo "[profile-compare-campaign-signoff] status=$status final_rc=$final_rc decision=$decision recommended_profile=${recommended_profile:-unset} summary_json=$summary_json"
 if [[ "$status" != "ok" ]]; then

@@ -91,6 +91,41 @@ append_existing_artifact() {
   fi
 }
 
+validate_manual_validation_summary_payload() {
+  local payload="$1"
+  local schema_id=""
+  local schema_major=""
+  local readiness_status=""
+
+  if [[ -z "$payload" ]]; then
+    return 1
+  fi
+  if ! jq -e . >/dev/null 2>&1 <<<"$payload"; then
+    return 1
+  fi
+
+  schema_id="$(printf '%s\n' "$payload" | jq -r '.schema.id // ""' 2>/dev/null || true)"
+  if [[ -n "$schema_id" && "$schema_id" != "manual_validation_readiness_summary" ]]; then
+    return 1
+  fi
+  schema_major="$(printf '%s\n' "$payload" | jq -r '.schema.major // ""' 2>/dev/null || true)"
+  if [[ -n "$schema_major" ]]; then
+    if [[ ! "$schema_major" =~ ^[0-9]+$ ]] || (( schema_major > 1 )); then
+      return 1
+    fi
+  fi
+
+  readiness_status="$(printf '%s\n' "$payload" | jq -r 'if (.report.readiness_status | type) == "string" then .report.readiness_status else "" end' 2>/dev/null || true)"
+  if [[ -z "$readiness_status" ]]; then
+    return 1
+  fi
+  if ! printf '%s\n' "$payload" | jq -e '(.summary | type) == "object"' >/dev/null 2>&1; then
+    return 1
+  fi
+
+  return 0
+}
+
 easy_node_script="${THREE_MACHINE_PROD_SIGNOFF_EASY_NODE_SCRIPT:-$ROOT_DIR/scripts/easy_node.sh}"
 incident_snapshot_attach_script="${THREE_MACHINE_PROD_SIGNOFF_INCIDENT_ATTACH_SCRIPT:-$ROOT_DIR/scripts/incident_snapshot_attach_artifacts.sh}"
 if [[ ! -x "$easy_node_script" ]]; then
@@ -637,9 +672,14 @@ refresh_manual_validation_report() {
   if [[ -z "$report_json" && -f "$manual_validation_report_summary_json" ]] && jq -e . "$manual_validation_report_summary_json" >/dev/null 2>&1; then
     report_json="$(cat "$manual_validation_report_summary_json")"
   fi
-  if [[ -n "$report_json" ]]; then
+  if validate_manual_validation_summary_payload "$report_json"; then
     manual_validation_report_readiness_status="$(printf '%s\n' "$report_json" | jq -r '.report.readiness_status // ""' 2>/dev/null || true)"
     manual_validation_report_next_action_check_id="$(printf '%s\n' "$report_json" | jq -r '.summary.next_action_check_id // ""' 2>/dev/null || true)"
+  else
+    manual_validation_report_status="fail"
+    manual_validation_report_readiness_status=""
+    manual_validation_report_next_action_check_id=""
+    printf '%s\n' "[$stage] summary_payload_invalid_or_incompatible schema check failed" >>"$summary_log"
   fi
   stage="$previous_stage"
 }

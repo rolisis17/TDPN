@@ -50,3 +50,11 @@ Deliver a working 2-hop decentralized privacy path with tiered token policy usin
   - entry packet forwarder
   - exit accounting/filtering hooks
 - Preserve Go control plane for development speed.
+
+## Deferred Phase 6: Blockchain Bootstrap (After VPN RC)
+- Start with manual governance bootstrap for validator admission/sanctions while network is small.
+- Keep validator role server-side only and resource-isolated from VPN dataplane.
+- Introduce scored validator eligibility + fixed-epoch set selection once operator diversity is sufficient.
+- Keep VPN operation independent from blockchain liveness (grace mode + deferred settlement path).
+- Reference design guide: `docs/blockchain-bootstrap-validator-plan.md`.
+- Gate own-L1 kickoff on the explicit 12-week go/no-go metrics table in `docs/blockchain-bootstrap-validator-plan.md`.

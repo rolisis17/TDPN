@@ -32,6 +32,7 @@ run_step "release policy gate" ./scripts/integration_release_policy_gate.sh
 run_step "runtime doctor" ./scripts/integration_runtime_doctor.sh
 run_step "manual validation status" ./scripts/integration_manual_validation_status.sh
 run_step "manual validation report" ./scripts/integration_manual_validation_report.sh
+run_step "roadmap progress report" ./scripts/integration_roadmap_progress_report.sh
 run_step "pre-real-host readiness" ./scripts/integration_pre_real_host_readiness.sh
 run_step "runtime fix" ./scripts/integration_runtime_fix.sh
 run_step "runtime fix record" ./scripts/integration_runtime_fix_record.sh

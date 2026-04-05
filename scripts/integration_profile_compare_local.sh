@@ -25,6 +25,11 @@ cat >"$FAKE_EASY" <<'EOF_FAKE'
 set -euo pipefail
 
 printf '%s\n' "$*" >>"${FAKE_CAPTURE_FILE:?}"
+printf 'env container_directory_urls=%s container_issuer_url=%s container_entry_url=%s container_exit_url=%s\n' \
+  "${EASY_NODE_CLIENT_TEST_CONTAINER_DIRECTORY_URLS:-}" \
+  "${EASY_NODE_CLIENT_TEST_CONTAINER_ISSUER_URL:-}" \
+  "${EASY_NODE_CLIENT_TEST_CONTAINER_ENTRY_URL:-}" \
+  "${EASY_NODE_CLIENT_TEST_CONTAINER_EXIT_URL:-}" >>"${FAKE_CAPTURE_FILE:?}"
 cmd="${1:-}"
 shift || true
 
@@ -147,6 +152,58 @@ if rg -q '^wg-only-stack-up' "$CAPTURE"; then
   cat "$CAPTURE"
   exit 1
 fi
+
+DOCKER_SUMMARY_JSON="$TMP_DIR/profile_compare_docker_summary.json"
+DOCKER_REPORT_MD="$TMP_DIR/profile_compare_docker_report.md"
+DOCKER_RUN_LOG="$TMP_DIR/profile_compare_docker_run.log"
+: >"$CAPTURE"
+
+echo "[profile-compare-local] docker loopback endpoint rewrite"
+FAKE_CAPTURE_FILE="$CAPTURE" \
+FAKE_COUNTER_DIR="$FAKE_COUNTER_DIR" \
+FAKE_LOG_DIR="$FAKE_LOG_DIR" \
+PROFILE_COMPARE_LOCAL_EASY_NODE_SCRIPT="$FAKE_EASY" \
+./scripts/profile_compare_local.sh \
+  --profiles balanced \
+  --rounds 1 \
+  --execution-mode docker \
+  --directory-urls http://127.0.0.1:18081,http://localhost:28081 \
+  --issuer-url http://127.0.0.1:18082 \
+  --entry-url http://localhost:18083 \
+  --exit-url http://127.0.0.1:18084 \
+  --summary-json "$DOCKER_SUMMARY_JSON" \
+  --report-md "$DOCKER_REPORT_MD" \
+  --print-summary-json 0 >"$DOCKER_RUN_LOG"
+
+if ! jq -e '
+  .status == "pass"
+  and .inputs.execution_mode == "docker"
+  and .inputs.docker_host_alias == "host.docker.internal"
+' "$DOCKER_SUMMARY_JSON" >/dev/null; then
+  echo "docker rewrite run summary missing expected fields"
+  cat "$DOCKER_RUN_LOG"
+  cat "$DOCKER_SUMMARY_JSON"
+  exit 1
+fi
+
+docker_env_line="$(rg '^env container_directory_urls=' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$docker_env_line" ]]; then
+  echo "missing docker env rewrite capture line"
+  cat "$CAPTURE"
+  exit 1
+fi
+for expected in \
+  'container_directory_urls=http://host.docker.internal:18081,http://host.docker.internal:28081' \
+  'container_issuer_url=http://host.docker.internal:18082' \
+  'container_entry_url=http://host.docker.internal:18083' \
+  'container_exit_url=http://host.docker.internal:18084'
+do
+  if ! grep -F -- "$expected" <<<"$docker_env_line" >/dev/null; then
+    echo "docker env rewrite capture missing $expected"
+    cat "$CAPTURE"
+    exit 1
+  fi
+done
 
 FORWARD_CAPTURE="$TMP_DIR/forward_capture.log"
 FAKE_FORWARD="$TMP_DIR/fake_profile_compare_forward.sh"

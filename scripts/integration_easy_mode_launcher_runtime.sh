@@ -262,6 +262,71 @@ fi
 
 : >"$CAPTURE"
 
+echo "[easy-mode-runtime] main menu option 1 (simple client real VPN) runtime command forwarding"
+INPUT1R="$TMP_DIR/input1r.txt"
+{
+  printf '1\n'   # main menu: simple client
+  printf '\n'    # bootstrap URL (default from hosts)
+  printf 'inv-runtime-vpn\n'
+  printf '\n'    # path profile (default balanced)
+  printf 'y\n'   # real VPN mode? yes
+  printf 'y\n'   # customize advanced client options? yes
+  printf '\n'    # discovery wait default
+  printf '\n'    # prod profile default yes
+  printf '\n'    # VPN interface name default
+  printf '\n'    # VPN ready timeout sec default
+  printf '\n'    # run VPN preflight first? yes
+  printf 'n\n'   # open dedicated terminal? no
+  printf 'n\n'   # run preflight with sudo? no
+  printf 'n\n'   # run with sudo? no
+  printf '0\n'   # exit main menu
+} >"$INPUT1R"
+run_ui "$INPUT1R" "$TMP_DIR/run1r.log"
+
+line1r_preflight="$(rg '^client-vpn-preflight ' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line1r_preflight" ]]; then
+  echo "runtime wiring failed: option 1 real VPN did not invoke client-vpn-preflight"
+  cat "$TMP_DIR/run1r.log"
+  exit 1
+fi
+assert_line_has "$line1r_preflight" '--bootstrap-directory http://198\.51\.100\.10:8081' \
+  "runtime wiring failed: option 1 real VPN preflight missing default bootstrap directory"
+assert_line_has "$line1r_preflight" '--prod-profile 1' \
+  "runtime wiring failed: option 1 real VPN preflight missing --prod-profile 1 default"
+assert_line_has "$line1r_preflight" '--operator-floor-check 1' \
+  "runtime wiring failed: option 1 real VPN preflight missing --operator-floor-check 1"
+assert_line_has "$line1r_preflight" '--operator-min-operators 2' \
+  "runtime wiring failed: option 1 real VPN preflight missing --operator-min-operators 2"
+assert_line_has "$line1r_preflight" '--issuer-quorum-check 1' \
+  "runtime wiring failed: option 1 real VPN preflight missing --issuer-quorum-check 1"
+assert_line_has "$line1r_preflight" '--issuer-min-operators 2' \
+  "runtime wiring failed: option 1 real VPN preflight missing --issuer-min-operators 2"
+
+line1r_session="$(rg '^client-vpn-session ' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line1r_session" ]]; then
+  echo "runtime wiring failed: option 1 real VPN did not invoke client-vpn-session"
+  cat "$TMP_DIR/run1r.log"
+  exit 1
+fi
+assert_line_has "$line1r_session" '--bootstrap-directory http://198\.51\.100\.10:8081' \
+  "runtime wiring failed: option 1 real VPN session missing default bootstrap directory"
+assert_line_has "$line1r_session" '--subject inv-runtime-vpn' \
+  "runtime wiring failed: option 1 real VPN session missing invite subject"
+assert_line_has "$line1r_session" '--min-operators 2' \
+  "runtime wiring failed: option 1 real VPN session missing --min-operators 2"
+assert_line_has "$line1r_session" '--operator-floor-check 1' \
+  "runtime wiring failed: option 1 real VPN session missing --operator-floor-check 1"
+assert_line_has "$line1r_session" '--operator-min-operators 2' \
+  "runtime wiring failed: option 1 real VPN session missing --operator-min-operators 2"
+assert_line_has "$line1r_session" '--prod-profile 1' \
+  "runtime wiring failed: option 1 real VPN session missing --prod-profile 1 default"
+assert_line_has "$line1r_session" '--issuer-quorum-check 1' \
+  "runtime wiring failed: option 1 real VPN session missing --issuer-quorum-check 1"
+assert_line_has "$line1r_session" '--issuer-min-operators 2' \
+  "runtime wiring failed: option 1 real VPN session missing --issuer-min-operators 2"
+
+: >"$CAPTURE"
+
 echo "[easy-mode-runtime] main menu option 2 (simple server/provider) runtime command forwarding"
 INPUT2="$TMP_DIR/input2.txt"
 {
@@ -293,8 +358,8 @@ assert_line_has "$line2_preflight" '--authority-issuer http://203\.0\.113\.20:80
   "runtime wiring failed: option 2 preflight missing derived authority issuer"
 assert_line_has "$line2_preflight" '--min-peer-operators 1' \
   "runtime wiring failed: option 2 preflight missing default min-peer-operators"
-assert_line_has "$line2_preflight" '--prod-profile 0' \
-  "runtime wiring failed: option 2 preflight missing --prod-profile 0 default"
+assert_line_has "$line2_preflight" '--prod-profile 1' \
+  "runtime wiring failed: option 2 preflight missing --prod-profile 1 default"
 
 line2_session="$(rg '^server-session ' "$CAPTURE" | tail -n 1 || true)"
 if [[ -z "$line2_session" ]]; then
@@ -314,8 +379,8 @@ assert_line_has "$line2_session" '--authority-issuer http://203\.0\.113\.20:8082
   "runtime wiring failed: option 2 server-session missing derived authority issuer"
 assert_line_has "$line2_session" '--beta-profile 1' \
   "runtime wiring failed: option 2 server-session missing --beta-profile 1"
-assert_line_has "$line2_session" '--prod-profile 0' \
-  "runtime wiring failed: option 2 server-session missing --prod-profile 0 default"
+assert_line_has "$line2_session" '--prod-profile 1' \
+  "runtime wiring failed: option 2 server-session missing --prod-profile 1 default"
 
 : >"$CAPTURE"
 
@@ -326,6 +391,7 @@ INPUT2A="$TMP_DIR/input2a.txt"
   printf '198.51.100.11\n' # explicit public host
   printf 'y\n'   # authority mode
   printf 'n\n'   # customize advanced server options? no
+  printf '\n'    # peer server optional (leave empty)
   printf '0\n'   # exit main menu
 } >"$INPUT2A"
 run_ui "$INPUT2A" "$TMP_DIR/run2a.log"
@@ -366,8 +432,8 @@ assert_line_has "$line2a_session" '--auto-invite-tier 1' \
   "runtime wiring failed: authority option 2 server-session missing default --auto-invite-tier 1"
 assert_line_has "$line2a_session" '--auto-invite-wait-sec 10' \
   "runtime wiring failed: authority option 2 server-session missing default --auto-invite-wait-sec 10"
-assert_line_has "$line2a_session" '--auto-invite-fail-open 1' \
-  "runtime wiring failed: authority option 2 server-session missing default --auto-invite-fail-open 1"
+assert_line_has "$line2a_session" '--auto-invite-fail-open 0' \
+  "runtime wiring failed: authority option 2 server-session missing default --auto-invite-fail-open 0"
 if printf '%s\n' "$line2a_session" | rg -q -- '--peer-directories '; then
   echo "runtime wiring failed: authority option 2 server-session unexpectedly forwarded peer directories"
   printf 'line: %s\n' "$line2a_session"
