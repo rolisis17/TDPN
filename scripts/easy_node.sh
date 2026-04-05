@@ -1838,6 +1838,7 @@ write_authority_env() {
   local entry_exit_user_non_prod
   local peer_sources_count=0
   local peer_gossip_sec="5"
+  local entry_directory_urls=""
   if [[ "$prod_profile" == "1" ]]; then
     public_scheme="https"
     # In strict prod profile token admin auth is disabled; avoid persisting an unused token.
@@ -1848,6 +1849,7 @@ write_authority_env() {
     issuer_id="issuer-$(random_id_suffix)"
   fi
   issuer_suffix="$(sanitize_id_component "$issuer_id")"
+  entry_directory_urls="${public_scheme}://directory:8081"
 
   cat >"$AUTHORITY_ENV_FILE" <<EOF_ENV
 EASY_NODE_SERVER_MODE=authority
@@ -1892,7 +1894,9 @@ EOF_ENV
     echo "DIRECTORY_PEERS=${peer_dirs}" >>"$AUTHORITY_ENV_FILE"
     echo "DIRECTORY_SYNC_SEC=5" >>"$AUTHORITY_ENV_FILE"
     echo "DIRECTORY_GOSSIP_SEC=${peer_gossip_sec}" >>"$AUTHORITY_ENV_FILE"
+    entry_directory_urls="$(merge_url_csv "$entry_directory_urls" "$peer_dirs")"
   fi
+  echo "DIRECTORY_URLS=${entry_directory_urls}" >>"$AUTHORITY_ENV_FILE"
 
   if [[ "$prod_profile" != "1" ]]; then
     entry_exit_user_non_prod="$(resolve_entry_exit_user_non_prod)"
@@ -1905,6 +1909,8 @@ EOF_RUNTIME
   local beta_peer_min_operators="2"
   local beta_peer_min_votes="2"
   local beta_peer_discovery_min_votes="2"
+  local beta_entry_min_operators="2"
+  local beta_entry_min_votes="2"
   if [[ "$beta_profile" == "1" && "$prod_profile" != "1" ]]; then
     # Bootstrap-friendly beta defaults: if only one peer source is configured,
     # avoid permanent quorum churn while still keeping prod strict settings.
@@ -1913,14 +1919,18 @@ EOF_RUNTIME
       beta_peer_min_votes="1"
       beta_peer_discovery_min_votes="1"
     fi
+    if ((peer_sources_count < 1)); then
+      beta_entry_min_operators="1"
+      beta_entry_min_votes="1"
+    fi
   fi
 
   if [[ "$beta_profile" == "1" ]]; then
     cat >>"$AUTHORITY_ENV_FILE" <<EOF_BETA
 DIRECTORY_MIN_OPERATORS=2
 DIRECTORY_MIN_RELAY_VOTES=2
-ENTRY_DIRECTORY_MIN_OPERATORS=2
-ENTRY_DIRECTORY_MIN_RELAY_VOTES=2
+ENTRY_DIRECTORY_MIN_OPERATORS=${beta_entry_min_operators}
+ENTRY_DIRECTORY_MIN_RELAY_VOTES=${beta_entry_min_votes}
 ENTRY_REQUIRE_DISTINCT_EXIT_OPERATOR=1
 DIRECTORY_PEER_MIN_OPERATORS=${beta_peer_min_operators}
 DIRECTORY_PEER_MIN_VOTES=${beta_peer_min_votes}
@@ -2027,12 +2037,14 @@ write_provider_env() {
   local entry_exit_user_non_prod
   local peer_sources_count=0
   local peer_gossip_sec="5"
+  local entry_directory_urls=""
 
   if [[ "$prod_profile" == "1" ]]; then
     public_scheme="https"
   fi
   relay_suffix="$(sanitize_id_component "$operator_id")"
   authority_issuer="$(trim_url "$authority_issuer")"
+  entry_directory_urls="${public_scheme}://directory:8081"
 
   cat >"$PROVIDER_ENV_FILE" <<EOF_ENV
 EASY_NODE_SERVER_MODE=provider
@@ -2065,7 +2077,9 @@ EOF_ENV
     echo "DIRECTORY_PEERS=${peer_dirs}" >>"$PROVIDER_ENV_FILE"
     echo "DIRECTORY_SYNC_SEC=5" >>"$PROVIDER_ENV_FILE"
     echo "DIRECTORY_GOSSIP_SEC=${peer_gossip_sec}" >>"$PROVIDER_ENV_FILE"
+    entry_directory_urls="$(merge_url_csv "$entry_directory_urls" "$peer_dirs")"
   fi
+  echo "DIRECTORY_URLS=${entry_directory_urls}" >>"$PROVIDER_ENV_FILE"
 
   if [[ "$prod_profile" != "1" ]]; then
     entry_exit_user_non_prod="$(resolve_entry_exit_user_non_prod)"
@@ -2078,11 +2092,17 @@ EOF_RUNTIME
   local beta_peer_min_operators="2"
   local beta_peer_min_votes="2"
   local beta_peer_discovery_min_votes="2"
+  local beta_entry_min_operators="2"
+  local beta_entry_min_votes="2"
   if [[ "$beta_profile" == "1" && "$prod_profile" != "1" ]]; then
     if ((peer_sources_count < 2)); then
       beta_peer_min_operators="1"
       beta_peer_min_votes="1"
       beta_peer_discovery_min_votes="1"
+    fi
+    if ((peer_sources_count < 1)); then
+      beta_entry_min_operators="1"
+      beta_entry_min_votes="1"
     fi
   fi
 
@@ -2090,8 +2110,8 @@ EOF_RUNTIME
     cat >>"$PROVIDER_ENV_FILE" <<EOF_BETA
 DIRECTORY_MIN_OPERATORS=2
 DIRECTORY_MIN_RELAY_VOTES=2
-ENTRY_DIRECTORY_MIN_OPERATORS=2
-ENTRY_DIRECTORY_MIN_RELAY_VOTES=2
+ENTRY_DIRECTORY_MIN_OPERATORS=${beta_entry_min_operators}
+ENTRY_DIRECTORY_MIN_RELAY_VOTES=${beta_entry_min_votes}
 ENTRY_REQUIRE_DISTINCT_EXIT_OPERATOR=1
 DIRECTORY_PEER_MIN_OPERATORS=${beta_peer_min_operators}
 DIRECTORY_PEER_MIN_VOTES=${beta_peer_min_votes}
