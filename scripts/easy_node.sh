@@ -164,6 +164,40 @@ print_client_vpn_trust_mismatch_hint() {
   fi
 }
 
+seed_client_vpn_trust_file_if_empty() {
+  local trusted_keys_file="$1"
+  local directory_urls="$2"
+
+  if [[ -z "$trusted_keys_file" || -z "$directory_urls" ]]; then
+    return 0
+  fi
+  if [[ -s "$trusted_keys_file" ]]; then
+    return 0
+  fi
+
+  local keys_tmp durl payload parsed
+  local -a tls_opts
+  keys_tmp="$(mktemp)"
+  : >"$keys_tmp"
+
+  while IFS= read -r durl; do
+    [[ -z "$durl" ]] && continue
+    mapfile -t tls_opts < <(curl_tls_opts_for_url "$durl")
+    payload="$(curl -fsS --connect-timeout 2 --max-time 6 "${tls_opts[@]}" "${durl%/}/v1/pubkeys" 2>/dev/null || true)"
+    [[ -z "$payload" ]] && continue
+    parsed="$(printf '%s\n' "$payload" | jq -r '.pub_keys[]? | tostring' 2>/dev/null || true)"
+    [[ -z "$parsed" ]] && continue
+    printf '%s\n' "$parsed" >>"$keys_tmp"
+  done < <(split_csv_lines "$directory_urls")
+
+  if [[ -s "$keys_tmp" ]]; then
+    awk 'NF > 0' "$keys_tmp" | LC_ALL=C sort -u >"$trusted_keys_file"
+    secure_file_permissions "$trusted_keys_file"
+  fi
+
+  rm -f "$keys_tmp"
+}
+
 root_help_is_expert() {
   local mode="${EASY_NODE_HELP_MODE:-}"
   mode="$(printf '%s' "$mode" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
@@ -11514,6 +11548,7 @@ client_vpn_up() {
     trusted_keys_dir="$ROOT_DIR/$(dirname "$trusted_keys_file")"
   fi
   mkdir -p "$trusted_keys_dir" >/dev/null 2>&1 || true
+  seed_client_vpn_trust_file_if_empty "$trusted_keys_file" "$directory_urls"
 
   local -a env_vars
   env_vars=(
