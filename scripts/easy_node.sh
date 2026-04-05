@@ -1457,6 +1457,7 @@ require_authority_mode() {
 directory_has_operator_id() {
   local directory_url="$1"
   local operator_id="$2"
+  local local_host="${3:-}"
   local payload
   local -a tls_opts
   mapfile -t tls_opts < <(curl_tls_opts_for_url "$directory_url")
@@ -1468,6 +1469,42 @@ directory_has_operator_id() {
   local ids
   if ! ids="$(printf '%s\n' "$payload" | jq -r '.relays[]? | ((.operator_id // .operator // .origin_operator // "") | tostring)' 2>/dev/null)"; then
     return 2
+  fi
+  if [[ -n "$local_host" ]]; then
+    local conflict_count
+    if ! conflict_count="$(
+      printf '%s\n' "$payload" | jq -r --arg target "$operator_id" --arg local_host "$local_host" '
+        [
+          .relays[]?
+          | select(((.operator_id // .operator // .origin_operator // "") | tostring) == $target)
+          | (
+              (.control_url // "") | tostring
+            ) as $control_url
+          | (
+            if ($control_url | length) == 0 then
+              true
+            else
+              (
+                $control_url
+                | sub("^[A-Za-z][A-Za-z0-9+.-]*://"; "")
+                | split("/")[0]
+                | split("@")[-1]
+                | split(":")[0]
+                | ascii_downcase
+              ) as $relay_host
+              | ($relay_host != ($local_host | ascii_downcase))
+            end
+          ) as $is_conflict
+          | select($is_conflict)
+        ] | length
+      ' 2>/dev/null
+    )"; then
+      return 2
+    fi
+    if [[ "$conflict_count" =~ ^[0-9]+$ ]] && ((conflict_count > 0)); then
+      return 0
+    fi
+    return 1
   fi
   if printf '%s\n' "$ids" | awk -v target="$operator_id" '$0 == target {found=1} END {exit(found ? 0 : 1)}'; then
     return 0
@@ -1498,11 +1535,12 @@ issuer_id_from_url_checked() {
 operator_id_conflicts_with_peers() {
   local operator_id="$1"
   local peer_dirs="$2"
+  local local_host="${3:-}"
   local peer
   local unknown=0
   while IFS= read -r peer; do
     [[ -z "$peer" ]] && continue
-    if directory_has_operator_id "$peer" "$operator_id"; then
+    if directory_has_operator_id "$peer" "$operator_id" "$local_host"; then
       return 0
     else
       local rc=$?
@@ -2606,7 +2644,7 @@ server_preflight() {
 
   if [[ -n "$peer_dirs" && -n "$candidate_operator_id" ]]; then
     local op_rc=0
-    if operator_id_conflicts_with_peers "$candidate_operator_id" "$peer_dirs"; then
+    if operator_id_conflicts_with_peers "$candidate_operator_id" "$peer_dirs" "$local_host"; then
       op_rc=0
     else
       op_rc=$?
@@ -3196,7 +3234,7 @@ server_up() {
     local operator_attempts=0
     while true; do
       local op_check_rc=0
-      if operator_id_conflicts_with_peers "$operator_id" "$peer_dirs"; then
+      if operator_id_conflicts_with_peers "$operator_id" "$peer_dirs" "$local_host"; then
         op_check_rc=0
       else
         op_check_rc=$?

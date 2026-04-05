@@ -92,13 +92,14 @@ url="${@: -1}"
 
 peer_operator="${FAKE_CURL_PEER_OPERATOR_ID:-op-peer}"
 peer_issuer="${FAKE_CURL_PEER_ISSUER_ID:-issuer-peer}"
+peer_control_host="${FAKE_CURL_PEER_CONTROL_HOST:-203.0.113.10}"
 
 case "$url" in
   *"203.0.113.10:8081/v1/relays")
     if [[ "${FAKE_CURL_FAIL_PEER_RELAYS:-0}" == "1" ]]; then
       exit 7
     fi
-    printf '{"relays":[{"relay_id":"entry-peer","role":"entry","operator_id":"%s"},{"relay_id":"exit-peer","role":"exit","operator_id":"%s"}]}\n' "$peer_operator" "$peer_operator"
+    printf '{"relays":[{"relay_id":"entry-peer","role":"entry","operator_id":"%s","control_url":"http://%s:8083"},{"relay_id":"exit-peer","role":"exit","operator_id":"%s","control_url":"http://%s:8084"}]}\n' "$peer_operator" "$peer_control_host" "$peer_operator" "$peer_control_host"
     ;;
   *"127.0.0.1:8081/v1/relays")
     printf '{"relays":[{"relay_id":"entry-local","role":"entry","operator_id":"op-local"},{"relay_id":"exit-local","role":"exit","operator_id":"op-local"}]}\n'
@@ -201,6 +202,32 @@ fi
 if ! rg -q -- "--operator-id 'op-peer' already exists on peer directories" /tmp/integration_easy_node_peer_identity_guard_operator_collision.log; then
   echo "missing expected operator-id collision failure message"
   cat /tmp/integration_easy_node_peer_identity_guard_operator_collision.log
+  exit 1
+fi
+
+reset_local_state
+
+PATH="$TMP_BIN:$PATH" \
+EASY_NODE_VERIFY_PUBLIC=0 \
+FAKE_CURL_PEER_OPERATOR_ID=op-self \
+FAKE_CURL_PEER_CONTROL_HOST=198.51.100.20 \
+./scripts/easy_node.sh server-up \
+  --mode provider \
+  --public-host 198.51.100.20 \
+  --authority-directory http://203.0.113.10:8081 \
+  --authority-issuer http://203.0.113.10:8082 \
+  --peer-directories http://203.0.113.10:8081 \
+  --operator-id op-self \
+  --beta-profile 1 >/tmp/integration_easy_node_peer_identity_guard_self_echo.log 2>&1
+
+if ! rg -q "server stack started" /tmp/integration_easy_node_peer_identity_guard_self_echo.log; then
+  echo "expected server-up to allow self-echoed operator-id from peer relay cache"
+  cat /tmp/integration_easy_node_peer_identity_guard_self_echo.log
+  exit 1
+fi
+if rg -q -- "--operator-id 'op-self' already exists on peer directories" /tmp/integration_easy_node_peer_identity_guard_self_echo.log; then
+  echo "self-echo operator-id should not be treated as collision"
+  cat /tmp/integration_easy_node_peer_identity_guard_self_echo.log
   exit 1
 fi
 
