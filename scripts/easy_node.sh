@@ -1883,10 +1883,29 @@ client_vpn_issuer_quorum_summary() {
 compose_with_env() {
   local env_file="$1"
   shift
+  local -a clear_env_args
+  local clear_var
+  # Prevent ambient shell exports from overriding generated easy-node env files.
+  # This is especially important for WG key material during server-up.
+  for clear_var in \
+    DATA_PLANE_MODE \
+    WG_BACKEND \
+    EXIT_WG_PRIVATE_KEY_PATH \
+    EXIT_WG_PUBKEY \
+    EXIT_WG_INTERFACE \
+    EXIT_WG_AUTO_CREATE_INTERFACE \
+    EXIT_WG_KERNEL_PROXY \
+    EXIT_LIVE_WG_MODE \
+    EXIT_OPAQUE_ECHO \
+    EXIT_OPAQUE_SINK_ADDR \
+    EXIT_OPAQUE_SOURCE_ADDR \
+    ENTRY_LIVE_WG_MODE; do
+    clear_env_args+=("-u" "$clear_var")
+  done
   if [[ -f "$env_file" ]]; then
-    (cd "$DEPLOY_DIR" && docker compose --env-file "$env_file" "$@")
+    (cd "$DEPLOY_DIR" && env "${clear_env_args[@]}" docker compose --env-file "$env_file" "$@")
   else
-    (cd "$DEPLOY_DIR" && docker compose "$@")
+    (cd "$DEPLOY_DIR" && env "${clear_env_args[@]}" docker compose "$@")
   fi
 }
 
