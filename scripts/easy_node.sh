@@ -1645,6 +1645,25 @@ peer_dirs_have_reachable_issuer() {
   return 1
 }
 
+peer_dirs_have_reachable_relays() {
+  local peer_dirs="$1"
+  local peer
+  local payload
+  local -a tls_opts
+  while IFS= read -r peer; do
+    [[ -z "$peer" ]] && continue
+    mapfile -t tls_opts < <(curl_tls_opts_for_url "$peer")
+    payload="$(curl -fsS --connect-timeout 2 --max-time 4 "${tls_opts[@]}" "$(trim_url "$peer")/v1/relays" 2>/dev/null || true)"
+    if [[ -z "$payload" ]]; then
+      continue
+    fi
+    if printf '%s\n' "$payload" | jq -e '.relays' >/dev/null 2>&1; then
+      return 0
+    fi
+  done < <(split_csv_lines "$peer_dirs")
+  return 1
+}
+
 ensure_deps_or_die() {
   local log_dir
   local log_file
@@ -1906,6 +1925,37 @@ compose_with_env() {
     (cd "$DEPLOY_DIR" && env "${clear_env_args[@]}" docker compose --env-file "$env_file" "$@")
   else
     (cd "$DEPLOY_DIR" && env "${clear_env_args[@]}" docker compose "$@")
+  fi
+}
+
+clear_runtime_override_env_vars() {
+  # Clears known runtime override vars in this process so cleanup/start flows
+  # are deterministic even if the caller shell exported stale values.
+  local -a runtime_vars
+  runtime_vars=(
+    DATA_PLANE_MODE
+    WG_BACKEND
+    EXIT_WG_PRIVATE_KEY_PATH
+    EXIT_WG_PUBKEY
+    EXIT_WG_INTERFACE
+    EXIT_WG_AUTO_CREATE_INTERFACE
+    EXIT_WG_KERNEL_PROXY
+    EXIT_LIVE_WG_MODE
+    EXIT_OPAQUE_ECHO
+    EXIT_OPAQUE_SINK_ADDR
+    EXIT_OPAQUE_SOURCE_ADDR
+    ENTRY_LIVE_WG_MODE
+  )
+  local v
+  local cleared=0
+  for v in "${runtime_vars[@]}"; do
+    if [[ -n "${!v+x}" ]]; then
+      unset "$v"
+      cleared=$((cleared + 1))
+    fi
+  done
+  if ((cleared > 0)); then
+    echo "runtime override cleanup: cleared $cleared process env override(s)"
   fi
 }
 
@@ -2635,6 +2685,13 @@ server_preflight() {
     fi
   fi
   local issuer_identity_strict_effective="$peer_identity_strict_effective"
+  if [[ "$peer_identity_strict" == "auto" && "$peer_identity_strict_effective" == "1" && "$prod_profile" != "1" && -n "$peer_dirs" ]]; then
+    if ! peer_dirs_have_reachable_relays "$peer_dirs"; then
+      peer_identity_strict_effective="0"
+      issuer_identity_strict_effective="0"
+      echo "note: peer operator/issuer identity strict checks auto-relaxed (non-prod bootstrap; peer directories currently unreachable)"
+    fi
+  fi
   if [[ "$mode" == "authority" && "$peer_identity_strict" == "auto" && "$peer_identity_strict_effective" == "1" && "$prod_profile" != "1" && -n "$peer_dirs" ]]; then
     if ! peer_dirs_have_reachable_issuer "$peer_dirs"; then
       issuer_identity_strict_effective="0"
@@ -3169,6 +3226,8 @@ server_up() {
     exit 2
   fi
 
+  clear_runtime_override_env_vars
+
   local url_scheme="http"
   if [[ "$prod_profile" == "1" ]]; then
     url_scheme="https"
@@ -3254,6 +3313,13 @@ server_up() {
     fi
   fi
   local issuer_identity_strict_effective="$peer_identity_strict_effective"
+  if [[ "$peer_identity_strict" == "auto" && "$peer_identity_strict_effective" == "1" && "$prod_profile" != "1" && -n "$peer_dirs" ]]; then
+    if ! peer_dirs_have_reachable_relays "$peer_dirs"; then
+      peer_identity_strict_effective="0"
+      issuer_identity_strict_effective="0"
+      echo "note: peer operator/issuer identity strict checks auto-relaxed (non-prod bootstrap; peer directories currently unreachable)"
+    fi
+  fi
   if [[ "$mode" == "authority" && "$peer_identity_strict" == "auto" && "$peer_identity_strict_effective" == "1" && "$prod_profile" != "1" && -n "$peer_dirs" ]]; then
     if ! peer_dirs_have_reachable_issuer "$peer_dirs"; then
       issuer_identity_strict_effective="0"
@@ -5128,6 +5194,7 @@ server_session() {
 }
 
 server_down() {
+  clear_runtime_override_env_vars
   ensure_compose_deps_or_die
   local env_file
   env_file="$(active_server_env_file)"
@@ -5313,6 +5380,7 @@ stop_all() {
     exit 2
   fi
 
+  clear_runtime_override_env_vars
   ensure_compose_deps_or_die
 
   if [[ "$with_wg_only" == "1" ]]; then

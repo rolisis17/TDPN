@@ -71,7 +71,6 @@ esac
 EOF_CURL
 chmod +x "$TMP_BIN/curl"
 
-set +e
 PATH="$TMP_BIN:$PATH" \
 FAKE_CURL_FAIL_PEER_RELAYS=1 \
 ./scripts/easy_node.sh server-preflight \
@@ -80,11 +79,34 @@ FAKE_CURL_FAIL_PEER_RELAYS=1 \
   --authority-issuer http://203.0.113.10:8082 \
   --peer-directories http://203.0.113.10:8081 \
   --beta-profile 1 \
+  --min-peer-operators 0 >/tmp/integration_easy_node_server_preflight_auto_relax.log 2>&1
+
+if ! rg -q "auto-relaxed" /tmp/integration_easy_node_server_preflight_auto_relax.log; then
+  echo "missing expected auto-relax signal in non-prod auto peer identity mode"
+  cat /tmp/integration_easy_node_server_preflight_auto_relax.log
+  exit 1
+fi
+if ! rg -q "server preflight: ok" /tmp/integration_easy_node_server_preflight_auto_relax.log; then
+  echo "expected server-preflight auto mode to pass after non-prod auto-relax"
+  cat /tmp/integration_easy_node_server_preflight_auto_relax.log
+  exit 1
+fi
+
+set +e
+PATH="$TMP_BIN:$PATH" \
+FAKE_CURL_FAIL_PEER_RELAYS=1 \
+./scripts/easy_node.sh server-preflight \
+  --mode provider \
+  --authority-directory http://203.0.113.10:8081 \
+  --authority-issuer http://203.0.113.10:8082 \
+  --peer-directories http://203.0.113.10:8081 \
+  --peer-identity-strict 1 \
+  --beta-profile 1 \
   --min-peer-operators 0 >/tmp/integration_easy_node_server_preflight_strict.log 2>&1
 strict_rc=$?
 set -e
 if [[ "$strict_rc" -eq 0 ]]; then
-  echo "expected server-preflight strict mode to fail when peer relays are unreachable"
+  echo "expected server-preflight explicit strict mode to fail when peer relays are unreachable"
   cat /tmp/integration_easy_node_server_preflight_strict.log
   exit 1
 fi
