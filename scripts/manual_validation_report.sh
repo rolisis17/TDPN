@@ -93,6 +93,39 @@ md_escape() {
   printf '%s' "$value"
 }
 
+resolve_target_owner_spec() {
+  local owner_user=""
+  local owner_group=""
+  if [[ -n "${SUDO_USER:-}" && "${SUDO_USER:-}" != "root" ]]; then
+    owner_user="${SUDO_USER}"
+    owner_group="$(id -gn "$SUDO_USER" 2>/dev/null || true)"
+  else
+    owner_user="$(id -un 2>/dev/null || printf '%s' "${USER:-}")"
+    owner_group="$(id -gn 2>/dev/null || true)"
+  fi
+  owner_user="$(trim "$owner_user")"
+  owner_group="$(trim "$owner_group")"
+  if [[ -z "$owner_group" ]]; then
+    owner_group="$owner_user"
+  fi
+  if [[ -n "$owner_user" && -n "$owner_group" ]]; then
+    printf '%s:%s\n' "$owner_user" "$owner_group"
+  else
+    printf '%s\n' ""
+  fi
+}
+
+repair_path_permissions() {
+  local path="$1"
+  local mode="$2"
+  local owner_spec="$3"
+  [[ -e "$path" ]] || return 0
+  chmod "$mode" "$path" 2>/dev/null || true
+  if [[ -n "$owner_spec" && "$(id -u)" -eq 0 ]]; then
+    chown "$owner_spec" "$path" 2>/dev/null || true
+  fi
+}
+
 base_port="${EASY_NODE_DOCTOR_WG_ONLY_BASE_PORT:-19280}"
 client_iface="${EASY_NODE_DOCTOR_CLIENT_IFACE:-wgcstack0}"
 exit_iface="${EASY_NODE_DOCTOR_EXIT_IFACE:-wgestack0}"
@@ -235,7 +268,10 @@ fi
 
 summary_json="$(abs_path "${summary_json:-$ROOT_DIR/.easy-node-logs/manual_validation_readiness_summary.json}")"
 report_md="$(abs_path "${report_md:-$ROOT_DIR/.easy-node-logs/manual_validation_readiness_report.md}")"
+target_owner_spec="$(resolve_target_owner_spec)"
 mkdir -p "$(dirname "$summary_json")" "$(dirname "$report_md")"
+repair_path_permissions "$(dirname "$summary_json")" 0755 "$target_owner_spec"
+repair_path_permissions "$(dirname "$report_md")" 0755 "$target_owner_spec"
 
 status_log="$(mktemp)"
 status_rc=0
@@ -486,6 +522,7 @@ report_json="$(
 summary_tmp="$(mktemp "${summary_json}.tmp.XXXXXX")"
 printf '%s\n' "$report_json" >"$summary_tmp"
 mv -f "$summary_tmp" "$summary_json"
+repair_path_permissions "$summary_json" 0644 "$target_owner_spec"
 
 summary_total="$(printf '%s\n' "$report_json" | jq -r '.summary.total_checks // 0')"
 summary_pass="$(printf '%s\n' "$report_json" | jq -r '.summary.pass_checks // 0')"
@@ -663,6 +700,7 @@ report_md_tmp="$(mktemp "${report_md}.tmp.XXXXXX")"
 } >"$report_md_tmp"
 
 mv -f "$report_md_tmp" "$report_md"
+repair_path_permissions "$report_md" 0644 "$target_owner_spec"
 
 echo "[manual-validation-report] readiness_status=$readiness_status total=$summary_total pass=$summary_pass warn=$summary_warn fail=$summary_fail pending=$summary_pending"
 echo "[manual-validation-report] summary_json=$summary_json"

@@ -899,7 +899,12 @@ recorded_status_json_valid="1"
 recorded_status_json_warning=""
 if [[ -f "$status_json" ]]; then
   recorded_status_file_present="1"
-  if jq -e . "$status_json" >/dev/null 2>&1; then
+  if [[ ! -r "$status_json" ]]; then
+    recorded_status_json_valid="0"
+    recorded_status_json_warning="manual-validation status file is not readable; falling back to empty checks: $status_json"
+    recorded_json='{"version":1,"checks":{}}'
+    echo "[manual-validation-status] warn=$recorded_status_json_warning"
+  elif jq -e . "$status_json" >/dev/null 2>&1; then
     recorded_json="$(cat "$status_json")"
   else
     recorded_status_json_valid="0"

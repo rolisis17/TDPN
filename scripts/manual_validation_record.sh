@@ -92,6 +92,39 @@ manual_validation_state_dir() {
   printf '%s\n' "${state_home}/privacynode/manual_validation"
 }
 
+resolve_target_owner_spec() {
+  local owner_user=""
+  local owner_group=""
+  if [[ -n "${SUDO_USER:-}" && "${SUDO_USER:-}" != "root" ]]; then
+    owner_user="${SUDO_USER}"
+    owner_group="$(id -gn "$SUDO_USER" 2>/dev/null || true)"
+  else
+    owner_user="$(id -un 2>/dev/null || printf '%s' "${USER:-}")"
+    owner_group="$(id -gn 2>/dev/null || true)"
+  fi
+  owner_user="$(trim "$owner_user")"
+  owner_group="$(trim "$owner_group")"
+  if [[ -z "$owner_group" ]]; then
+    owner_group="$owner_user"
+  fi
+  if [[ -n "$owner_user" && -n "$owner_group" ]]; then
+    printf '%s:%s\n' "$owner_user" "$owner_group"
+  else
+    printf '%s\n' ""
+  fi
+}
+
+repair_path_permissions() {
+  local path="$1"
+  local mode="$2"
+  local owner_spec="$3"
+  [[ -e "$path" ]] || return 0
+  chmod "$mode" "$path" 2>/dev/null || true
+  if [[ -n "$owner_spec" && "$(id -u)" -eq 0 ]]; then
+    chown "$owner_spec" "$path" 2>/dev/null || true
+  fi
+}
+
 show_json="0"
 check_id=""
 status=""
@@ -232,12 +265,17 @@ fi
 state_dir="$(manual_validation_state_dir)"
 receipts_dir="${state_dir}/receipts"
 status_json="${state_dir}/status.json"
+target_owner_spec="$(resolve_target_owner_spec)"
 mkdir -p "$receipts_dir"
+repair_path_permissions "$state_dir" 0700 "$target_owner_spec"
+repair_path_permissions "$receipts_dir" 0700 "$target_owner_spec"
 state_lock_path="${state_dir}/status.lock"
 trap 'release_state_lock' EXIT
 if ! acquire_state_lock "$state_lock_path" "$state_lock_timeout_sec"; then
   exit 1
 fi
+repair_path_permissions "$state_lock_path" 0700 "$target_owner_spec"
+repair_path_permissions "${state_lock_path}/pid" 0600 "$target_owner_spec"
 
 recorded_at_utc="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 receipt_stamp="$(date -u +"%Y%m%d_%H%M%S")"
@@ -273,6 +311,7 @@ receipt_payload="$(
 receipt_tmp="$(mktemp "${receipt_json}.tmp.XXXXXX")"
 printf '%s\n' "$receipt_payload" >"$receipt_tmp"
 mv -f "$receipt_tmp" "$receipt_json"
+repair_path_permissions "$receipt_json" 0600 "$target_owner_spec"
 
 if [[ -f "$status_json" ]]; then
   if jq -e . "$status_json" >/dev/null 2>&1; then
@@ -282,6 +321,10 @@ if [[ -f "$status_json" ]]; then
     invalid_status_fallback_used="1"
     invalid_status_warning="existing status JSON invalid; resetting status ledger before recording new check"
     invalid_status_backup_path="$(backup_invalid_status_json "$status_json" "${state_dir}/invalid_status_backups" || true)"
+    if [[ -n "$invalid_status_backup_path" ]]; then
+      repair_path_permissions "${state_dir}/invalid_status_backups" 0700 "$target_owner_spec"
+      repair_path_permissions "$invalid_status_backup_path" 0600 "$target_owner_spec"
+    fi
   fi
 else
   existing_status_json='{"version":1,"checks":{}}'
@@ -312,6 +355,7 @@ updated_status_json="$(
 status_tmp="$(mktemp "${status_json}.tmp.XXXXXX")"
 printf '%s\n' "$updated_status_json" >"$status_tmp"
 mv -f "$status_tmp" "$status_json"
+repair_path_permissions "$status_json" 0600 "$target_owner_spec"
 
 echo "[manual-validation-record] check_id=$check_id status=$status state_dir=$state_dir"
 echo "[manual-validation-record] receipt_json=$receipt_json"

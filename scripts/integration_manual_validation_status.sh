@@ -30,6 +30,7 @@ PROFILE_STALE_LOG="$TMP_DIR/integration_manual_validation_status_profile_stale.l
 PROFILE_NO_GO_LOG="$TMP_DIR/integration_manual_validation_status_profile_no_go.log"
 PROFILE_INVALID_SUMMARY_LOG="$TMP_DIR/integration_manual_validation_status_profile_invalid_summary.log"
 INVALID_STATUS_LOG="$TMP_DIR/integration_manual_validation_status_invalid_status_json.log"
+UNREADABLE_STATUS_LOG="$TMP_DIR/integration_manual_validation_status_unreadable_status_json.log"
 LOCK_RECOVER_LOG="$TMP_DIR/integration_manual_validation_record_lock_recover.log"
 LOCK_TIMEOUT_LOG="$TMP_DIR/integration_manual_validation_record_lock_timeout.log"
 INVALID_DOCTOR_JSON_LOG="$TMP_DIR/integration_manual_validation_status_invalid_runtime_doctor_json.log"
@@ -333,6 +334,38 @@ if ! printf '%s\n' "$invalid_status_json" | jq -e '
 ' >/dev/null; then
   echo "invalid status fallback JSON missing recorded_status fields"
   printf '%s\n' "$invalid_status_json"
+  exit 1
+fi
+
+echo "[manual-validation] unreadable status.json fallback"
+UNREADABLE_STATE_DIR="$TMP_DIR/unreadable_state"
+mkdir -p "$UNREADABLE_STATE_DIR"
+printf '%s\n' '{"version":1,"checks":{"wg_only_stack_selftest":{"status":"pass"}}}' >"$UNREADABLE_STATE_DIR/status.json"
+chmod 000 "$UNREADABLE_STATE_DIR/status.json"
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$UNREADABLE_STATE_DIR" \
+MANUAL_VALIDATION_PROFILE_COMPARE_SIGNOFF_SUMMARY_JSON="$PROFILE_SIGNOFF_SUMMARY_JSON" \
+RUNTIME_DOCTOR_SCRIPT="$FAKE_DOCTOR" \
+./scripts/manual_validation_status.sh --show-json 1 >"$UNREADABLE_STATUS_LOG"
+chmod 600 "$UNREADABLE_STATE_DIR/status.json"
+if ! rg -q '\[manual-validation-status\] warn=manual-validation status file is not readable; falling back to empty checks:' "$UNREADABLE_STATUS_LOG"; then
+  echo "unreadable status fallback missing warning line"
+  cat "$UNREADABLE_STATUS_LOG"
+  exit 1
+fi
+unreadable_status_json="$(awk '/^\[manual-validation-status\] summary_json_payload:/{flag=1; next} flag{print}' "$UNREADABLE_STATUS_LOG")"
+if [[ -z "$unreadable_status_json" ]]; then
+  echo "unreadable status fallback missing JSON payload"
+  cat "$UNREADABLE_STATUS_LOG"
+  exit 1
+fi
+if ! printf '%s\n' "$unreadable_status_json" | jq -e '
+  .recorded_status.file_exists == true
+  and .recorded_status.valid_json == false
+  and .recorded_status.fallback_used == true
+  and ((.recorded_status.warning // "") | contains("not readable"))
+' >/dev/null; then
+  echo "unreadable status fallback JSON missing recorded_status fields"
+  printf '%s\n' "$unreadable_status_json"
   exit 1
 fi
 
