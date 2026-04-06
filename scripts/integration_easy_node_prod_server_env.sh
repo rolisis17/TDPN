@@ -168,6 +168,15 @@ fi
 require_nonempty "$(env_value "$AUTH_ENV" "DIRECTORY_OPERATOR_ID")" "beta DIRECTORY_OPERATOR_ID"
 require_eq "$(env_value "$AUTH_ENV" "ENTRY_OPERATOR_ID")" "$(env_value "$AUTH_ENV" "DIRECTORY_OPERATOR_ID")" "beta authority ENTRY_OPERATOR_ID"
 require_eq "$(env_value "$AUTH_ENV" "ENTRY_REQUIRE_DISTINCT_EXIT_OPERATOR")" "1" "beta authority ENTRY_REQUIRE_DISTINCT_EXIT_OPERATOR"
+require_eq "$(env_value "$AUTH_ENV" "DATA_PLANE_MODE")" "opaque" "beta authority DATA_PLANE_MODE"
+require_eq "$(env_value "$AUTH_ENV" "WG_BACKEND")" "command" "beta authority WG_BACKEND"
+require_eq "$(env_value "$AUTH_ENV" "ENTRY_LIVE_WG_MODE")" "1" "beta authority ENTRY_LIVE_WG_MODE"
+require_eq "$(env_value "$AUTH_ENV" "EXIT_LIVE_WG_MODE")" "1" "beta authority EXIT_LIVE_WG_MODE"
+require_eq "$(env_value "$AUTH_ENV" "EXIT_WG_KERNEL_PROXY")" "1" "beta authority EXIT_WG_KERNEL_PROXY"
+require_nonempty "$(env_value "$AUTH_ENV" "EXIT_WG_PRIVATE_KEY_PATH")" "beta authority EXIT_WG_PRIVATE_KEY_PATH"
+require_nonempty "$(env_value "$AUTH_ENV" "EXIT_WG_INTERFACE")" "beta authority EXIT_WG_INTERFACE"
+require_eq "$(env_value "$AUTH_ENV" "ENTRY_EXIT_USER")" "0:0" "beta authority ENTRY_EXIT_USER"
+require_eq "$(env_value "$AUTH_ENV" "ENTRY_EXIT_PRIVILEGED")" "true" "beta authority ENTRY_EXIT_PRIVILEGED"
 
 PATH="$TMP_BIN:$PATH" \
 EASY_NODE_VERIFY_PUBLIC=0 \
@@ -189,6 +198,15 @@ fi
 require_nonempty "$(env_value "$PROVIDER_ENV" "DIRECTORY_OPERATOR_ID")" "beta provider DIRECTORY_OPERATOR_ID"
 require_eq "$(env_value "$PROVIDER_ENV" "ENTRY_OPERATOR_ID")" "$(env_value "$PROVIDER_ENV" "DIRECTORY_OPERATOR_ID")" "beta provider ENTRY_OPERATOR_ID"
 require_eq "$(env_value "$PROVIDER_ENV" "ENTRY_REQUIRE_DISTINCT_EXIT_OPERATOR")" "1" "beta provider ENTRY_REQUIRE_DISTINCT_EXIT_OPERATOR"
+require_eq "$(env_value "$PROVIDER_ENV" "DATA_PLANE_MODE")" "opaque" "beta provider DATA_PLANE_MODE"
+require_eq "$(env_value "$PROVIDER_ENV" "WG_BACKEND")" "command" "beta provider WG_BACKEND"
+require_eq "$(env_value "$PROVIDER_ENV" "ENTRY_LIVE_WG_MODE")" "1" "beta provider ENTRY_LIVE_WG_MODE"
+require_eq "$(env_value "$PROVIDER_ENV" "EXIT_LIVE_WG_MODE")" "1" "beta provider EXIT_LIVE_WG_MODE"
+require_eq "$(env_value "$PROVIDER_ENV" "EXIT_WG_KERNEL_PROXY")" "1" "beta provider EXIT_WG_KERNEL_PROXY"
+require_nonempty "$(env_value "$PROVIDER_ENV" "EXIT_WG_PRIVATE_KEY_PATH")" "beta provider EXIT_WG_PRIVATE_KEY_PATH"
+require_nonempty "$(env_value "$PROVIDER_ENV" "EXIT_WG_INTERFACE")" "beta provider EXIT_WG_INTERFACE"
+require_eq "$(env_value "$PROVIDER_ENV" "ENTRY_EXIT_USER")" "0:0" "beta provider ENTRY_EXIT_USER"
+require_eq "$(env_value "$PROVIDER_ENV" "ENTRY_EXIT_PRIVILEGED")" "true" "beta provider ENTRY_EXIT_PRIVILEGED"
 
 PATH="$TMP_BIN:$PATH" \
 EASY_NODE_VERIFY_PUBLIC=0 \

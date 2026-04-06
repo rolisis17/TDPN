@@ -1974,11 +1974,38 @@ EOF_ENV
   echo "DIRECTORY_URLS=${entry_directory_urls}" >>"$AUTHORITY_ENV_FILE"
 
   if [[ "$prod_profile" != "1" ]]; then
-    entry_exit_user_non_prod="$(resolve_entry_exit_user_non_prod)"
-    cat >>"$AUTHORITY_ENV_FILE" <<EOF_RUNTIME
+    if [[ "$beta_profile" == "1" ]]; then
+      # Keep beta non-prod server-up transport-compatible with client-vpn-up/smoke
+      # (opaque wireguard transport) without requiring prod mTLS.
+      cat >>"$AUTHORITY_ENV_FILE" <<EOF_RUNTIME
+DATA_PLANE_MODE=opaque
+WG_BACKEND=command
+ENTRY_LIVE_WG_MODE=1
+ENTRY_OPEN_RPS=12
+ENTRY_BAN_THRESHOLD=3
+ENTRY_BAN_SEC=90
+ENTRY_MAX_CONCURRENT_OPENS=96
+EXIT_WG_PRIVATE_KEY_PATH=${exit_wg_private_key_path}
+EXIT_WG_INTERFACE=${exit_wg_interface}
+EXIT_WG_AUTO_CREATE_INTERFACE=1
+EXIT_WG_KERNEL_PROXY=1
+EXIT_LIVE_WG_MODE=1
+EXIT_OPAQUE_ECHO=0
+EXIT_OPAQUE_SINK_ADDR=127.0.0.1:51982
+EXIT_OPAQUE_SOURCE_ADDR=127.0.0.1:51983
+EXIT_TOKEN_PROOF_REPLAY_GUARD=1
+EXIT_PEER_REBIND_SEC=0
+EXIT_STARTUP_SYNC_TIMEOUT_SEC=30
+ENTRY_EXIT_USER=0:0
+ENTRY_EXIT_PRIVILEGED=true
+EOF_RUNTIME
+    else
+      entry_exit_user_non_prod="$(resolve_entry_exit_user_non_prod)"
+      cat >>"$AUTHORITY_ENV_FILE" <<EOF_RUNTIME
 ENTRY_EXIT_USER=${entry_exit_user_non_prod}
 ENTRY_EXIT_PRIVILEGED=false
 EOF_RUNTIME
+    fi
   fi
 
   local beta_peer_min_operators="2"
@@ -2157,11 +2184,38 @@ EOF_ENV
   echo "DIRECTORY_URLS=${entry_directory_urls}" >>"$PROVIDER_ENV_FILE"
 
   if [[ "$prod_profile" != "1" ]]; then
-    entry_exit_user_non_prod="$(resolve_entry_exit_user_non_prod)"
-    cat >>"$PROVIDER_ENV_FILE" <<EOF_RUNTIME
+    if [[ "$beta_profile" == "1" ]]; then
+      # Keep beta non-prod server-up transport-compatible with client-vpn-up/smoke
+      # (opaque wireguard transport) without requiring prod mTLS.
+      cat >>"$PROVIDER_ENV_FILE" <<EOF_RUNTIME
+DATA_PLANE_MODE=opaque
+WG_BACKEND=command
+ENTRY_LIVE_WG_MODE=1
+ENTRY_OPEN_RPS=12
+ENTRY_BAN_THRESHOLD=3
+ENTRY_BAN_SEC=90
+ENTRY_MAX_CONCURRENT_OPENS=96
+EXIT_WG_PRIVATE_KEY_PATH=${exit_wg_private_key_path}
+EXIT_WG_INTERFACE=${exit_wg_interface}
+EXIT_WG_AUTO_CREATE_INTERFACE=1
+EXIT_WG_KERNEL_PROXY=1
+EXIT_LIVE_WG_MODE=1
+EXIT_OPAQUE_ECHO=0
+EXIT_OPAQUE_SINK_ADDR=127.0.0.1:51982
+EXIT_OPAQUE_SOURCE_ADDR=127.0.0.1:51983
+EXIT_TOKEN_PROOF_REPLAY_GUARD=1
+EXIT_PEER_REBIND_SEC=0
+EXIT_STARTUP_SYNC_TIMEOUT_SEC=30
+ENTRY_EXIT_USER=0:0
+ENTRY_EXIT_PRIVILEGED=true
+EOF_RUNTIME
+    else
+      entry_exit_user_non_prod="$(resolve_entry_exit_user_non_prod)"
+      cat >>"$PROVIDER_ENV_FILE" <<EOF_RUNTIME
 ENTRY_EXIT_USER=${entry_exit_user_non_prod}
 ENTRY_EXIT_PRIVILEGED=false
 EOF_RUNTIME
+    fi
   fi
 
   local beta_peer_min_operators="2"
@@ -3344,6 +3398,10 @@ server_up() {
   local exit_wg_interface=""
   local exit_wg_private_key_local=""
   local exit_wg_private_key_container=""
+  local need_beta_or_prod_wg_defaults="0"
+  if [[ "$beta_profile" == "1" || "$prod_profile" == "1" ]]; then
+    need_beta_or_prod_wg_defaults="1"
+  fi
   if [[ "$prod_profile" == "1" ]]; then
     local base_issuer_url
     if [[ "$mode" == "authority" ]]; then
@@ -3359,6 +3417,8 @@ server_up() {
       echo "add at least one peer directory from a distinct authority/issuer operator."
       exit 2
     fi
+  fi
+  if [[ "$need_beta_or_prod_wg_defaults" == "1" ]]; then
     local relay_suffix_for_wg
     relay_suffix_for_wg="$(sanitize_id_component "$operator_id")"
     exit_wg_interface="$(safe_wg_iface_name "$relay_suffix_for_wg")"
