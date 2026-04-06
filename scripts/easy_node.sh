@@ -1695,6 +1695,7 @@ check_server_up_dependencies() {
   local prod_profile="${2:-0}"
   local peer_dirs="${3:-}"
   local bootstrap_directory="${4:-}"
+  local beta_profile="${5:-0}"
   local ok=1
 
   need_cmd docker || ok=0
@@ -1714,6 +1715,10 @@ check_server_up_dependencies() {
       need_cmd jq || ok=0
       need_cmd rg || ok=0
     fi
+  fi
+  if [[ "$prod_profile" == "1" || "$beta_profile" == "1" ]]; then
+    # server-up writes/derives exit wireguard key material for beta/prod defaults.
+    need_cmd wg || ok=0
   fi
 
   if ! docker compose version >/dev/null 2>&1; then
@@ -1740,11 +1745,12 @@ ensure_server_up_deps_or_die() {
   local prod_profile="${2:-0}"
   local peer_dirs="${3:-}"
   local bootstrap_directory="${4:-}"
+  local beta_profile="${5:-0}"
   local log_dir
   local log_file
   log_dir="$(prepare_log_dir)"
   log_file="$log_dir/easy_node_depcheck.log"
-  if ! check_server_up_dependencies "$mode" "$prod_profile" "$peer_dirs" "$bootstrap_directory" >"$log_file" 2>&1; then
+  if ! check_server_up_dependencies "$mode" "$prod_profile" "$peer_dirs" "$bootstrap_directory" "$beta_profile" >"$log_file" 2>&1; then
     cat "$log_file"
     echo "dependency check log: $log_file"
     exit 1
@@ -1906,6 +1912,7 @@ write_authority_env() {
   local issuer_urls_csv="${15:-}"
   local exit_wg_private_key_path="${16:-}"
   local exit_wg_interface="${17:-}"
+  local exit_wg_pubkey="${18:-}"
   local issuer_admin_token_effective="$issuer_admin_token"
   local public_scheme="http"
   local relay_suffix
@@ -1986,6 +1993,7 @@ ENTRY_BAN_THRESHOLD=3
 ENTRY_BAN_SEC=90
 ENTRY_MAX_CONCURRENT_OPENS=96
 EXIT_WG_PRIVATE_KEY_PATH=${exit_wg_private_key_path}
+EXIT_WG_PUBKEY=${exit_wg_pubkey}
 EXIT_WG_INTERFACE=${exit_wg_interface}
 EXIT_WG_AUTO_CREATE_INTERFACE=1
 EXIT_WG_KERNEL_PROXY=1
@@ -2089,6 +2097,7 @@ ENTRY_BAN_THRESHOLD=3
 ENTRY_BAN_SEC=90
 ENTRY_MAX_CONCURRENT_OPENS=96
 EXIT_WG_PRIVATE_KEY_PATH=${exit_wg_private_key_path}
+EXIT_WG_PUBKEY=${exit_wg_pubkey}
 EXIT_WG_INTERFACE=${exit_wg_interface}
 EXIT_WG_AUTO_CREATE_INTERFACE=1
 EXIT_WG_KERNEL_PROXY=1
@@ -2134,6 +2143,7 @@ write_provider_env() {
   local issuer_urls_csv="$9"
   local exit_wg_private_key_path="${10:-}"
   local exit_wg_interface="${11:-}"
+  local exit_wg_pubkey="${12:-}"
   local public_scheme="http"
   local relay_suffix
   local entry_exit_user_non_prod
@@ -2196,6 +2206,7 @@ ENTRY_BAN_THRESHOLD=3
 ENTRY_BAN_SEC=90
 ENTRY_MAX_CONCURRENT_OPENS=96
 EXIT_WG_PRIVATE_KEY_PATH=${exit_wg_private_key_path}
+EXIT_WG_PUBKEY=${exit_wg_pubkey}
 EXIT_WG_INTERFACE=${exit_wg_interface}
 EXIT_WG_AUTO_CREATE_INTERFACE=1
 EXIT_WG_KERNEL_PROXY=1
@@ -2296,6 +2307,7 @@ ENTRY_BAN_THRESHOLD=3
 ENTRY_BAN_SEC=90
 ENTRY_MAX_CONCURRENT_OPENS=96
 EXIT_WG_PRIVATE_KEY_PATH=${exit_wg_private_key_path}
+EXIT_WG_PUBKEY=${exit_wg_pubkey}
 EXIT_WG_INTERFACE=${exit_wg_interface}
 EXIT_WG_AUTO_CREATE_INTERFACE=1
 EXIT_WG_KERNEL_PROXY=1
@@ -3230,7 +3242,7 @@ server_up() {
     fi
   fi
 
-  ensure_server_up_deps_or_die "$mode" "$prod_profile" "$peer_dirs" "$bootstrap_directory"
+  ensure_server_up_deps_or_die "$mode" "$prod_profile" "$peer_dirs" "$bootstrap_directory" "$beta_profile"
 
   if [[ -z "$directory_admin_token" ]]; then
     directory_admin_token="$(random_token)"
@@ -3398,6 +3410,7 @@ server_up() {
   local exit_wg_interface=""
   local exit_wg_private_key_local=""
   local exit_wg_private_key_container=""
+  local exit_wg_pubkey=""
   local need_beta_or_prod_wg_defaults="0"
   if [[ "$beta_profile" == "1" || "$prod_profile" == "1" ]]; then
     need_beta_or_prod_wg_defaults="1"
@@ -3420,16 +3433,42 @@ server_up() {
   fi
   if [[ "$need_beta_or_prod_wg_defaults" == "1" ]]; then
     local relay_suffix_for_wg
+    local exit_wg_key_prepared="0"
     relay_suffix_for_wg="$(sanitize_id_component "$operator_id")"
     exit_wg_interface="$(safe_wg_iface_name "$relay_suffix_for_wg")"
     exit_wg_private_key_local="$DEPLOY_DIR/data/entry-exit/exit_${relay_suffix_for_wg}_wg.key"
     exit_wg_private_key_container="/app/data/$(basename "$exit_wg_private_key_local")"
+    mkdir -p "$(dirname "$exit_wg_private_key_local")"
+    if [[ -f "$exit_wg_private_key_local" ]]; then
+      exit_wg_key_prepared="1"
+    elif [[ -w "$(dirname "$exit_wg_private_key_local")" ]]; then
+      (umask 077 && wg genkey >"$exit_wg_private_key_local")
+      exit_wg_key_prepared="1"
+    else
+      # Some local test environments may have stale root-owned bind-mount dirs.
+      # Defer key init to runtime instead of failing server-up preflight.
+      echo "note: exit wg private-key path not writable before compose; deferring key initialization to runtime ($exit_wg_private_key_local)"
+    fi
+    if [[ "$exit_wg_key_prepared" == "1" ]]; then
+      secure_file_permissions "$exit_wg_private_key_local"
+      if ! exit_wg_pubkey="$(wg pubkey <"$exit_wg_private_key_local")"; then
+        echo "server-up failed to derive EXIT_WG_PUBKEY from $exit_wg_private_key_local"
+        exit 1
+      fi
+      exit_wg_pubkey="$(printf '%s' "$exit_wg_pubkey" | tr -d '\r\n')"
+      if [[ -z "$exit_wg_pubkey" ]]; then
+        echo "server-up failed to derive non-empty EXIT_WG_PUBKEY from $exit_wg_private_key_local"
+        exit 1
+      fi
+    else
+      exit_wg_pubkey="derive"
+    fi
   fi
 
   write_identity_config "$operator_id" "$issuer_id"
 
   if [[ "$mode" == "authority" ]]; then
-    write_authority_env "$public_host" "$operator_id" "$issuer_id" "$issuer_admin_token" "$directory_admin_token" "$entry_puzzle_secret" "$peer_dirs" "$beta_profile" "$client_allowlist" "$allow_anon_cred" "$prod_profile" "$admin_signers_file_container" "$admin_sign_key_id" "$admin_sign_key_file_local" "$issuer_urls_csv" "$exit_wg_private_key_container" "$exit_wg_interface"
+    write_authority_env "$public_host" "$operator_id" "$issuer_id" "$issuer_admin_token" "$directory_admin_token" "$entry_puzzle_secret" "$peer_dirs" "$beta_profile" "$client_allowlist" "$allow_anon_cred" "$prod_profile" "$admin_signers_file_container" "$admin_sign_key_id" "$admin_sign_key_file_local" "$issuer_urls_csv" "$exit_wg_private_key_container" "$exit_wg_interface" "$exit_wg_pubkey"
     compose_with_env "$AUTHORITY_ENV_FILE" up -d --build directory issuer entry-exit
 
     local -a local_opts
@@ -3523,7 +3562,7 @@ server_up() {
       fi
     fi
   else
-    write_provider_env "$public_host" "$operator_id" "$directory_admin_token" "$entry_puzzle_secret" "$peer_dirs" "$beta_profile" "$authority_issuer" "$prod_profile" "$issuer_urls_csv" "$exit_wg_private_key_container" "$exit_wg_interface"
+    write_provider_env "$public_host" "$operator_id" "$directory_admin_token" "$entry_puzzle_secret" "$peer_dirs" "$beta_profile" "$authority_issuer" "$prod_profile" "$issuer_urls_csv" "$exit_wg_private_key_container" "$exit_wg_interface" "$exit_wg_pubkey"
     compose_with_env "$PROVIDER_ENV_FILE" up -d --build --no-deps directory entry-exit
 
     local -a local_opts
