@@ -132,6 +132,8 @@ check_cpp '74\) Runtime fix \+ readiness receipt \(recorded cleanup\)' \
   "launcher wiring failed: option 74 menu label missing"
 check_cpp '75\) Single-machine PROD readiness sweep \(all local gates \+ next action\)' \
   "launcher wiring failed: option 75 menu label missing"
+check_cpp '76\) VPN RC standard path \(single-machine sweep \+ roadmap report\)' \
+  "launcher wiring failed: option 76 menu label missing"
 check_cpp '34\) Client VPN up \(real mode, expert/manual\)' \
   "launcher wiring failed: option 34 expert/manual label missing"
 
@@ -409,6 +411,16 @@ check_cpp '--run-profile-compare-campaign-signoff ' "launcher wiring failed: opt
 check_cpp '--profile-compare-campaign-signoff-refresh-campaign ' "launcher wiring failed: option 75 refresh forwarding missing"
 check_cpp '--print-summary-json ' "launcher wiring failed: option 75 print-summary-json forwarding missing"
 check_cpp 'Run with sudo\? \(Y/n\)' "launcher wiring failed: option 75 sudo prompt missing"
+echo "[easy-mode-wiring] option 76 command wiring"
+check_cpp 'if \(choice == "76"\)' "launcher wiring failed: option 76 handler missing"
+check_cpp 'vpn-rc-standard-path' "launcher wiring failed: option 76 command missing"
+check_cpp 'Force profile campaign refresh if signoff runs\?' "launcher wiring failed: option 76 refresh prompt missing"
+check_cpp 'Print roadmap markdown report in terminal\?' "launcher wiring failed: option 76 print-report prompt missing"
+check_cpp '--run-profile-compare-campaign-signoff auto' "launcher wiring failed: option 76 signoff mode forwarding missing"
+check_cpp '--profile-compare-campaign-signoff-refresh-campaign ' "launcher wiring failed: option 76 refresh forwarding missing"
+check_cpp '--print-report ' "launcher wiring failed: option 76 print-report forwarding missing"
+check_cpp '--print-summary-json ' "launcher wiring failed: option 76 print-summary-json forwarding missing"
+check_cpp 'Run with sudo\? \(Y/n\)' "launcher wiring failed: option 76 sudo prompt missing"
 check_cpp '--min-peer-source-operators ' "launcher wiring failed: option 69/70 min-peer-source-operators forwarding missing"
 check_cpp '--min-issuer-source-operators ' "launcher wiring failed: option 69/70 min-issuer-source-operators forwarding missing"
 check_cpp '--summary-json ' "launcher wiring failed: option 69/70 summary-json forwarding missing"
@@ -589,6 +601,10 @@ if ! "$EASY_NODE" --help --expert | rg -q 'prod-pilot-cohort-signoff'; then
 fi
 if ! "$EASY_NODE" --help --expert | rg -q 'prod-pilot-cohort-quick-dashboard'; then
   echo "launcher wiring failed: easy_node help missing prod-pilot-cohort-quick-dashboard"
+  exit 1
+fi
+if ! "$EASY_NODE" --help --expert | rg -q 'vpn-rc-standard-path'; then
+  echo "launcher wiring failed: easy_node help missing vpn-rc-standard-path"
   exit 1
 fi
 if ! "$EASY_NODE" prod-pilot-cohort-quick-signoff --help | rg -q -- '--max-alert-severity'; then

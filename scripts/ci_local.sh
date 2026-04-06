@@ -93,6 +93,9 @@ echo "[ci] runtime fix record integration"
 echo "[ci] single-machine prod readiness integration"
 ./scripts/integration_single_machine_prod_readiness.sh
 
+echo "[ci] vpn-rc standard path integration"
+./scripts/integration_vpn_rc_standard_path.sh
+
 echo "[ci] client-vpn smoke integration"
 ./scripts/integration_client_vpn_smoke.sh
 

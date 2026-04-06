@@ -1027,7 +1027,7 @@ void quickClientConnect(const std::string &script, ABHosts &hosts) {
   std::string inviteKey = trim(readLine("Invite key", ""));
   PathProfile pathProfile = choosePathProfile("Connection profile (1=Speed, 2=Balanced, 3=Private)", "2");
   bool realVPN = parseYesNo(readLine("Use real VPN mode (host WireGuard interface)? (Y/n)", "y"), true);
-  bool customize = parseYesNo(readLine("Customize advanced client options? (y/N)", "n"), false);
+  bool customize = parseYesNo(readLine("Need expert client overrides now? (y/N)", "n"), false);
   std::string discoveryWait = "20";
   bool prodProfile = realVPN;
   if (customize) {
@@ -1144,7 +1144,7 @@ void quickServerConnect(const std::string &root, const std::string &script, ABHo
   std::string hostDefault = !hosts.aHost.empty() ? hosts.aHost : (!hosts.bHost.empty() ? hosts.bHost : "");
   std::string host = normalizePublicHostInput(readLine("Public host/IP for this server", hostDefault));
   bool authorityMode = parseYesNo(readLine("Is this your AUTHORITY admin machine? (y/N)", "n"), false);
-  bool customize = parseYesNo(readLine("Customize advanced server options? (y/N)", "n"), false);
+  bool customize = parseYesNo(readLine("Need expert server overrides now? (y/N)", "n"), false);
   std::string peerDefault = "";
   if (!host.empty() && host == hosts.aHost && !hosts.bHost.empty()) {
     peerDefault = hosts.bHost;
@@ -1400,6 +1400,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
     std::cout << "73) PROD campaign signoff (optional summary refresh + check)\n";
     std::cout << "74) Runtime fix + readiness receipt (recorded cleanup)\n";
     std::cout << "75) Single-machine PROD readiness sweep (all local gates + next action)\n";
+    std::cout << "76) VPN RC standard path (single-machine sweep + roadmap report)\n";
     std::cout << "0) Back\n";
     std::cout << "Selection: ";
 
@@ -4752,6 +4753,24 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       cmd << shellEscape(script) << " single-machine-prod-readiness"
           << " --run-profile-compare-campaign-signoff " << shellEscape(profileSignoffModeInput)
           << " --profile-compare-campaign-signoff-refresh-campaign " << (profileSignoffRefreshCampaign ? "1" : "0")
+          << " --print-summary-json " << (printSummaryJson ? "1" : "0");
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "76") {
+      bool profileSignoffRefreshCampaign = parseYesNo(readLine("Force profile campaign refresh if signoff runs? (y/N)", "n"), false);
+      bool printReport = parseYesNo(readLine("Print roadmap markdown report in terminal? (Y/n)", "y"), true);
+      bool printSummaryJson = parseYesNo(readLine("Print summary JSON? (y/N)", "n"), false);
+      bool runWithSudo = parseYesNo(readLine("Run with sudo? (Y/n)", "y"), true);
+
+      std::ostringstream cmd;
+      if (runWithSudo) {
+        cmd << "sudo ";
+      }
+      cmd << shellEscape(script) << " vpn-rc-standard-path"
+          << " --run-profile-compare-campaign-signoff auto"
+          << " --profile-compare-campaign-signoff-refresh-campaign " << (profileSignoffRefreshCampaign ? "1" : "0")
+          << " --print-report " << (printReport ? "1" : "0")
           << " --print-summary-json " << (printSummaryJson ? "1" : "0");
       runCommand(cmd.str());
       continue;

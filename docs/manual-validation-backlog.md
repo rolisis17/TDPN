@@ -9,6 +9,7 @@ Live status:
 ./scripts/easy_node.sh manual-validation-report --print-report 1 --print-summary-json 1
 ./scripts/easy_node.sh roadmap-progress-report --refresh-manual-validation 1 --print-report 1 --print-summary-json 1
 ./scripts/easy_node.sh single-machine-prod-readiness --print-summary-json 1
+./scripts/easy_node.sh vpn-rc-standard-path --print-report 1 --print-summary-json 1
 # optional: include local profile-default decision signoff in that one-host sweep
 ./scripts/easy_node.sh single-machine-prod-readiness \
   --run-profile-compare-campaign-signoff 1 \
@@ -40,6 +41,7 @@ It can now also include an optional Linux root real-WG matrix receipt refresh in
 When `single-machine-prod-readiness` is pointed at a custom profile signoff summary path (`--profile-compare-campaign-signoff-summary-json`), it now forwards that exact path into `manual-validation-report` too, preventing mismatched profile-default gate reads across the two commands.
 `easy_node.sh --help` now exposes that same profile-signoff summary override plus overlay controls for both `manual-validation-status` and `manual-validation-report`, and forwarding coverage verifies those flags pass through unchanged.
 The easy launcher now exposes a dedicated advanced option for `single-machine-prod-readiness` (option 75), so this one-host production sweep can be run from the menu without rebuilding the command by hand.
+The easy launcher also exposes `vpn-rc-standard-path` (option 76) for the locked one-command RC path (single-machine sweep + roadmap report handoff).
 
 When the next blocker is a remediable runtime hygiene warning, `manual-validation-status` / `manual-validation-report` now point at `sudo ./scripts/easy_node.sh runtime-fix-record --prune-wg-only-dir 1 --print-summary-json 1` as the immediate next action instead of sending you back through another doctor-only pass first. That recorded cleanup run wraps `runtime-fix`, refreshes the shared readiness report, and leaves behind a durable runtime-hygiene receipt in one step.
 

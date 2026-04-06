@@ -2666,6 +2666,37 @@ assert_line_has "$line75" '--print-summary-json 1' \
 
 : >"$CAPTURE"
 
+echo "[easy-mode-runtime] option 76 runtime command forwarding"
+INPUT76="$TMP_DIR/input76.txt"
+{
+  printf '3\n'
+  printf '76\n'
+  printf 'y\n'   # force profile campaign refresh
+  printf 'n\n'   # print report disabled
+  printf 'y\n'   # print summary json enabled
+  printf 'n\n'   # no sudo in integration
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT76"
+run_ui "$INPUT76" "$TMP_DIR/run76.log"
+
+line76="$(rg '^vpn-rc-standard-path ' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line76" ]]; then
+  echo "runtime wiring failed: option 76 did not invoke vpn-rc-standard-path"
+  cat "$TMP_DIR/run76.log"
+  exit 1
+fi
+assert_line_has "$line76" '--run-profile-compare-campaign-signoff auto' \
+  "runtime wiring failed: option 76 missing --run-profile-compare-campaign-signoff auto"
+assert_line_has "$line76" '--profile-compare-campaign-signoff-refresh-campaign 1' \
+  "runtime wiring failed: option 76 missing --profile-compare-campaign-signoff-refresh-campaign 1"
+assert_line_has "$line76" '--print-report 0' \
+  "runtime wiring failed: option 76 missing --print-report 0"
+assert_line_has "$line76" '--print-summary-json 1' \
+  "runtime wiring failed: option 76 missing --print-summary-json 1"
+
+: >"$CAPTURE"
+
 echo "[easy-mode-runtime] option 69 runtime command forwarding"
 INPUT69="$TMP_DIR/input69.txt"
 {

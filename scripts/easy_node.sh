@@ -228,6 +228,7 @@ Usage:
   ./scripts/easy_node.sh client-vpn-down [--force-iface-cleanup [0|1]]
   ./scripts/easy_node.sh three-machine-reminder
   ./scripts/easy_node.sh manual-validation-backlog
+  ./scripts/easy_node.sh vpn-rc-standard-path [--print-report [0|1]] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh manual-validation-status
   ./scripts/easy_node.sh manual-validation-report
   ./scripts/easy_node.sh incident-snapshot [--bundle-dir PATH]
@@ -290,6 +291,7 @@ Usage:
   ./scripts/easy_node.sh three-machine-docker-readiness-record [three-machine-docker-readiness args...] [--record-result [0|1]] [--manual-validation-report [0|1]] [--manual-validation-report-summary-json PATH] [--manual-validation-report-md PATH] [--rehearsal-summary-json PATH] [--summary-json PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh manual-validation-backlog
   ./scripts/easy_node.sh single-machine-prod-readiness [--run-ci-local 0|1] [--run-beta-preflight 0|1] [--run-deep-suite 0|1] [--run-runtime-fix-record 0|1] [--run-three-machine-docker-readiness auto|0|1] [--three-machine-docker-readiness-run-validate 0|1] [--three-machine-docker-readiness-run-soak 0|1] [--three-machine-docker-readiness-soak-rounds N] [--three-machine-docker-readiness-soak-pause-sec N] [--three-machine-docker-readiness-path-profile speed|balanced|private] [--three-machine-docker-readiness-keep-stacks 0|1] [--three-machine-docker-readiness-summary-json PATH] [--run-profile-compare-campaign-signoff auto|0|1] [--profile-compare-campaign-signoff-refresh-campaign 0|1] [--profile-compare-campaign-signoff-fail-on-no-go 0|1] [--profile-compare-campaign-signoff-reports-dir PATH] [--profile-compare-campaign-signoff-summary-json PATH] [--profile-compare-campaign-signoff-campaign-execution-mode auto|docker|local] [--profile-compare-campaign-signoff-campaign-directory-urls URL[,URL...]] [--profile-compare-campaign-signoff-campaign-bootstrap-directory URL] [--profile-compare-campaign-signoff-campaign-discovery-wait-sec N] [--profile-compare-campaign-signoff-campaign-issuer-url URL] [--profile-compare-campaign-signoff-campaign-entry-url URL] [--profile-compare-campaign-signoff-campaign-exit-url URL] [--profile-compare-campaign-signoff-campaign-start-local-stack auto|0|1] [--run-pre-real-host-readiness auto|0|1] [--run-real-wg-privileged-matrix auto|0|1] [--beta-preflight-privileged auto|0|1] [--summary-json PATH] [--manual-validation-report-summary-json PATH] [--manual-validation-report-md PATH] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh vpn-rc-standard-path [--run-profile-compare-campaign-signoff auto|0|1] [--profile-compare-campaign-signoff-refresh-campaign 0|1] [--single-machine-summary-json PATH] [--roadmap-summary-json PATH] [--roadmap-report-md PATH] [--print-report [0|1]] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh manual-validation-status [--base-port N] [--client-iface IFACE] [--exit-iface IFACE] [--vpn-iface IFACE] [--profile-compare-signoff-summary-json PATH] [--overlay-check-id CHECK_ID] [--overlay-status pass|fail|warn|pending|skip] [--overlay-notes TEXT] [--overlay-command TEXT] [--overlay-artifact PATH]... [--show-json [0|1]]
   ./scripts/easy_node.sh manual-validation-report [--base-port N] [--client-iface IFACE] [--exit-iface IFACE] [--vpn-iface IFACE] [--profile-compare-signoff-summary-json PATH] [--overlay-check-id CHECK_ID] [--overlay-status pass|fail|warn|pending|skip] [--overlay-notes TEXT] [--overlay-command TEXT] [--overlay-artifact PATH]... [--summary-json PATH] [--report-md PATH] [--print-report [0|1]] [--print-summary-json [0|1]] [--fail-on-not-ready [0|1]]
   ./scripts/easy_node.sh roadmap-progress-report [--refresh-manual-validation [0|1]] [--refresh-single-machine-readiness [0|1]] [--manual-validation-summary-json PATH] [--manual-validation-report-md PATH] [--profile-compare-signoff-summary-json PATH] [--single-machine-summary-json PATH] [--summary-json PATH] [--report-md PATH] [--print-report [0|1]] [--print-summary-json [0|1]]
@@ -382,6 +384,7 @@ Notes:
   - three-machine-reminder prints the true 3-machine production test checklist.
   - three-machine-docker-readiness provisions two independent dockerized operator stacks on one host and runs machine-C style control-plane validate/soak checks (real multi-host WG signoff remains a separate final gate).
   - three-machine-docker-readiness-record wraps that docker rehearsal into one recorded manual-validation receipt and refreshes the shared readiness report automatically.
+  - vpn-rc-standard-path runs the locked VPN RC one-host execution path in one command (single-machine production readiness sweep with docker rehearsal defaults, then roadmap-progress-report refresh) and prints a final handoff summary.
   - manual-validation-backlog prints the deferred real-host validation list so we can resume manual testing cleanly later.
   - single-machine-prod-readiness runs all production-grade checks feasible on one host (ci_local, beta_preflight, deep_test_suite, runtime-fix-record, optional dockerized 3-machine rehearsal, optional profile-compare campaign signoff, optional pre-real-host-readiness, optional Linux root real-WG matrix receipt refresh), then reports exactly which remaining blockers require machine-C/3-machine execution; in auto mode it bootstraps missing profile-compare campaign artifacts, preferring docker rehearsal endpoints when available.
   - manual-validation-status combines live runtime-doctor output with recorded manual real-host validation receipts, points at the latest failed incident handoff when a recorded smoke/signoff run captured one, and now exposes staged roadmap progress (`BLOCKED_LOCAL`, `READY_FOR_MACHINE_C_SMOKE`, `READY_FOR_3_MACHINE_PROD_SIGNOFF`, `PRODUCTION_SIGNOFF_COMPLETE`).
@@ -7321,6 +7324,11 @@ single_machine_prod_readiness() {
   "$readiness_script" "$@"
 }
 
+vpn_rc_standard_path() {
+  local rc_script="${VPN_RC_STANDARD_PATH_SCRIPT:-$ROOT_DIR/scripts/vpn_rc_standard_path.sh}"
+  "$rc_script" "$@"
+}
+
 profile_compare_local() {
   local compare_script="${PROFILE_COMPARE_LOCAL_SCRIPT:-$ROOT_DIR/scripts/profile_compare_local.sh}"
   "$compare_script" "$@"
@@ -11906,6 +11914,10 @@ main() {
     single-machine-prod-readiness)
       shift
       single_machine_prod_readiness "$@"
+      ;;
+    vpn-rc-standard-path)
+      shift
+      vpn_rc_standard_path "$@"
       ;;
     manual-validation-status)
       shift

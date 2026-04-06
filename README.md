@@ -110,7 +110,7 @@ Simple installer + menu launcher (for easier testing):
 Launcher start screen now has 3 primary options:
 - `Connect as CLIENT (simple)` -> asks for server IP/bootstrap URL + invite key.
 - `Connect as SERVER (simple, provider default)` -> asks for server IP and optional peer IP; starts provider mode by default and asks for explicit confirmation before enabling authority/admin mode. Supports optional `PROD` profile (mTLS + strict fail-closed settings).
-- `Other options (tests/config)` -> machine tests, soak/pilot runbook, host config, invite key management, and mTLS bootstrap/rotation.
+- `Other options (expert/tests)` -> machine tests, soak/pilot runbook, host config, invite key management, and mTLS bootstrap/rotation.
 
 Windows 11 + WSL2 bootstrap:
 
@@ -481,6 +481,7 @@ sudo ./scripts/easy_node.sh prod-wg-strict-ingress-rehearsal \
 - `./scripts/easy_node.sh manual-validation-status --show-json 1` (current real-host readiness state: runtime hygiene + recorded manual checks, now including direct pointers to the latest failed incident bundle when a recorded smoke/signoff run captured one)
 - `./scripts/easy_node.sh manual-validation-report --print-report 1 --print-summary-json 1` (generate one shareable markdown + JSON readiness handoff artifact from the current real-host validation state, with latest failed incident pointers when present and direct bundle attachment paths for refreshed readiness-report artifacts when a failed run captured them)
 - `./scripts/easy_node.sh roadmap-progress-report --refresh-manual-validation 1 --print-report 1 --print-summary-json 1` (one-command roadmap execution snapshot for regular team handoffs, including the VPN RC-done phase signal, explicit pending real-host checks, current VPN gate stage, and deferred blockchain-track policy note)
+- `./scripts/easy_node.sh vpn-rc-standard-path --print-report 1 --print-summary-json 1` (locked one-command VPN RC path: runs `single-machine-prod-readiness` with strict local+docker defaults, then refreshes `roadmap-progress-report` for handoff)
 - `sudo ./scripts/easy_node.sh pre-real-host-readiness --strict-beta 1 --print-summary-json 1` (one-command pre-machine-C readiness sweep: `runtime-fix-record` + recorded WG-only selftest + refreshed readiness report, with a focused `machine_c_smoke_ready` answer even while the final 3-machine signoff is still pending)
 - `sudo ./scripts/easy_node.sh wg-only-stack-selftest-record --strict-beta 1 --print-summary-json 1` (rerun the Linux root WG-only selftest, record it automatically, and refresh the shared readiness report)
 - `./scripts/easy_node.sh manual-validation-record --check-id ... --status ...` (store the result of a real-host validation step)
