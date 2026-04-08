@@ -1664,6 +1664,47 @@ peer_dirs_have_reachable_relays() {
   return 1
 }
 
+issuer_sync_optional_no_sources() {
+  local issuer_success="$1"
+  local issuer_quorum="$2"
+  local issuer_sources="$3"
+  local issuer_source_operator_count="$4"
+  local issuer_required="$5"
+  local issuer_error="${6:-}"
+  local max_issuer_sync_age_sec="$7"
+  local min_issuer_success_sources="$8"
+  local min_issuer_source_operators="$9"
+
+  # When issuer trust sources are not configured, directory reports:
+  #   success=true, quorum_met=false, success_sources=0, source_operators=0, error=""
+  # Treat issuer sync as optional in this baseline shape unless explicit issuer floors/age policy were requested.
+  if [[ "$issuer_success" != "true" || "$issuer_quorum" == "true" ]]; then
+    return 1
+  fi
+  if ! [[ "$issuer_sources" =~ ^[0-9]+$ ]] || ((issuer_sources != 0)); then
+    return 1
+  fi
+  if ! [[ "$issuer_source_operator_count" =~ ^[0-9]+$ ]] || ((issuer_source_operator_count != 0)); then
+    return 1
+  fi
+  if ! [[ "$issuer_required" =~ ^[0-9]+$ ]] || ((issuer_required <= 0)); then
+    return 1
+  fi
+  if [[ -n "$issuer_error" ]]; then
+    return 1
+  fi
+  if ! [[ "$max_issuer_sync_age_sec" =~ ^[0-9]+$ ]] || ((max_issuer_sync_age_sec != 0)); then
+    return 1
+  fi
+  if ! [[ "$min_issuer_success_sources" =~ ^[0-9]+$ ]] || ((min_issuer_success_sources != 0)); then
+    return 1
+  fi
+  if ! [[ "$min_issuer_source_operators" =~ ^[0-9]+$ ]] || ((min_issuer_source_operators != 0)); then
+    return 1
+  fi
+  return 0
+}
+
 ensure_deps_or_die() {
   local log_dir
   local log_file
@@ -4011,7 +4052,7 @@ server_federation_status() {
   local issuer_quorum issuer_success issuer_sources issuer_source_operator_count issuer_source_operators issuer_required issuer_error issuer_last_run
   local sync_generated_at sync_ref_epoch status_now_epoch peer_sync_age_sec issuer_sync_age_sec
   local peer_sync_age_display issuer_sync_age_display
-  local peer_sync_ready issuer_sync_ready peer_health_ready cooling_retry_exceeded federation_ready
+  local peer_sync_ready issuer_sync_ready issuer_sync_required peer_health_ready cooling_retry_exceeded federation_ready
   local readiness_failure_reasons_json readiness_failure_reasons_csv
   peer_quorum="$(jq -r '.peer.quorum_met // false' <"$sync_status_body" 2>/dev/null || echo "false")"
   peer_success="$(jq -r '.peer.success // false' <"$sync_status_body" 2>/dev/null || echo "false")"
@@ -4102,6 +4143,20 @@ server_federation_status() {
       issuer_sync_ready="0"
     fi
   fi
+  issuer_sync_required="1"
+  if issuer_sync_optional_no_sources \
+    "$issuer_success" \
+    "$issuer_quorum" \
+    "$issuer_sources" \
+    "$issuer_source_operator_count" \
+    "$issuer_required" \
+    "$issuer_error" \
+    "$max_issuer_sync_age_sec" \
+    "$min_issuer_success_sources" \
+    "$min_issuer_source_operators"; then
+    issuer_sync_required="0"
+    issuer_sync_ready="1"
+  fi
 
   if [[ "$configured" =~ ^[0-9]+$ ]] && ((configured > 0)); then
     if [[ "$require_configured_healthy" == "1" ]]; then
@@ -4144,6 +4199,7 @@ server_federation_status() {
       --argjson issuer_sources "$issuer_sources" \
       --argjson min_issuer_source_operators "$min_issuer_source_operators" \
       --argjson issuer_source_operator_count "$issuer_source_operator_count" \
+      --argjson issuer_sync_required "$(if [[ "$issuer_sync_required" == "1" ]]; then echo "true"; else echo "false"; fi)" \
       --argjson require_configured_healthy "$(if [[ "$require_configured_healthy" == "1" ]]; then echo "true"; else echo "false"; fi)" \
       --argjson configured "$configured" \
       --argjson configured_healthy "$configured_healthy" \
@@ -4162,11 +4218,11 @@ server_federation_status() {
           (if $max_peer_sync_age_sec > 0 and ($peer_sync_age_sec < 0 or $peer_sync_age_sec > $max_peer_sync_age_sec) then "peer_sync_age_stale" else empty end),
           (if $min_peer_success_sources > 0 and $peer_sources < $min_peer_success_sources then "peer_success_sources_below_floor" else empty end),
           (if $min_peer_source_operators > 0 and $peer_source_operator_count < $min_peer_source_operators then "peer_source_operators_below_floor" else empty end),
-          (if ($issuer_success | not) then "issuer_sync_not_success" else empty end),
-          (if ($issuer_quorum | not) then "issuer_sync_quorum_not_met" else empty end),
-          (if $max_issuer_sync_age_sec > 0 and ($issuer_sync_age_sec < 0 or $issuer_sync_age_sec > $max_issuer_sync_age_sec) then "issuer_sync_age_stale" else empty end),
-          (if $min_issuer_success_sources > 0 and $issuer_sources < $min_issuer_success_sources then "issuer_success_sources_below_floor" else empty end),
-          (if $min_issuer_source_operators > 0 and $issuer_source_operator_count < $min_issuer_source_operators then "issuer_source_operators_below_floor" else empty end),
+          (if $issuer_sync_required and ($issuer_success | not) then "issuer_sync_not_success" else empty end),
+          (if $issuer_sync_required and ($issuer_quorum | not) then "issuer_sync_quorum_not_met" else empty end),
+          (if $issuer_sync_required and $max_issuer_sync_age_sec > 0 and ($issuer_sync_age_sec < 0 or $issuer_sync_age_sec > $max_issuer_sync_age_sec) then "issuer_sync_age_stale" else empty end),
+          (if $issuer_sync_required and $min_issuer_success_sources > 0 and $issuer_sources < $min_issuer_success_sources then "issuer_success_sources_below_floor" else empty end),
+          (if $issuer_sync_required and $min_issuer_source_operators > 0 and $issuer_source_operator_count < $min_issuer_source_operators then "issuer_source_operators_below_floor" else empty end),
           (if $require_configured_healthy and $configured > 0 and $configured_healthy < $configured then "configured_peers_not_all_healthy" else empty end),
           (if ($configured > 0 and ($require_configured_healthy | not) and $configured_healthy <= 0 and $discovered_eligible <= 0) then "no_healthy_or_discovered_eligible_peer" else empty end),
           (if ($configured <= 0 and $discovered_eligible <= 0) then "no_discovered_eligible_peer" else empty end),
@@ -4190,6 +4246,9 @@ server_federation_status() {
     echo "  peer_sync_error: $peer_error"
   fi
   echo "  issuer_sync: success=$issuer_success quorum_met=$issuer_quorum success_sources=$issuer_sources source_operator_count=$issuer_source_operator_count required_operators=$issuer_required last_run_at=$issuer_last_run age_sec=$issuer_sync_age_display"
+  if [[ "$issuer_sync_required" != "1" ]]; then
+    echo "  issuer_sync_note: optional (no issuer trust sources configured)"
+  fi
   if [[ -n "$issuer_source_operators" ]]; then
     echo "  issuer_sync_source_operators: $issuer_source_operators"
   fi
@@ -4785,7 +4844,7 @@ server_federation_wait() {
       last_peer_json="$(cat "$peer_status_body")"
 
       local peer_success peer_quorum peer_sources peer_source_operators_count peer_source_operators peer_last_run peer_sync_age_sec peer_sync_age_display
-      local issuer_success issuer_quorum issuer_sources issuer_source_operators_count issuer_source_operators issuer_last_run issuer_sync_age_sec issuer_sync_age_display
+      local issuer_success issuer_quorum issuer_sources issuer_source_operators_count issuer_source_operators issuer_required issuer_error issuer_last_run issuer_sync_age_sec issuer_sync_age_display
       local sync_generated_at sync_ref_epoch
       local configured_peers configured_healthy discovered_eligible configured_failing cooling_retry_max_sec
       peer_success="$(jq -r '.peer.success // false' <"$sync_body" 2>/dev/null || echo "false")"
@@ -4799,6 +4858,8 @@ server_federation_wait() {
       issuer_sources="$(jq -r '.issuer.success_sources // 0' <"$sync_body" 2>/dev/null || echo "0")"
       issuer_source_operators_count="$(jq -r '((.issuer.source_operators // []) | length) // 0' <"$sync_body" 2>/dev/null || echo "0")"
       issuer_source_operators="$(jq -r '((.issuer.source_operators // []) | map(tostring) | unique | join(",")) // ""' <"$sync_body" 2>/dev/null || true)"
+      issuer_required="$(jq -r '.issuer.required_operators // 0' <"$sync_body" 2>/dev/null || echo "0")"
+      issuer_error="$(jq -r '.issuer.error // ""' <"$sync_body" 2>/dev/null || true)"
       issuer_last_run="$(jq -r '.issuer.last_run_at // 0' <"$sync_body" 2>/dev/null || echo "0")"
       sync_generated_at="$(jq -r '.generated_at // 0' <"$sync_body" 2>/dev/null || echo "0")"
       configured_peers="$(jq -r '([.peers[] | select(.configured == true)] | length) // 0' <"$peer_status_body" 2>/dev/null || echo "0")"
@@ -4835,6 +4896,7 @@ server_federation_wait() {
 
       local peer_sync_ready="0"
       local issuer_sync_ready="0"
+      local issuer_sync_required="1"
       local peer_health_ready="0"
       if [[ "$peer_last_run" =~ ^[0-9]+$ ]] && ((peer_last_run > 0)) &&
         [[ "$peer_success" == "true" && "$peer_quorum" == "true" ]]; then
@@ -4873,6 +4935,19 @@ server_federation_wait() {
           issuer_sync_ready="0"
         fi
       fi
+      if issuer_sync_optional_no_sources \
+        "$issuer_success" \
+        "$issuer_quorum" \
+        "$issuer_sources" \
+        "$issuer_source_operators_count" \
+        "$issuer_required" \
+        "$issuer_error" \
+        "$max_issuer_sync_age_sec" \
+        "$min_issuer_success_sources" \
+        "$min_issuer_source_operators"; then
+        issuer_sync_required="0"
+        issuer_sync_ready="1"
+      fi
       if [[ "$configured_peers" =~ ^[0-9]+$ ]] && ((configured_peers > 0)); then
         if [[ "$require_configured_healthy" == "1" ]]; then
           if [[ "$configured_healthy" =~ ^[0-9]+$ ]] && ((configured_healthy >= configured_peers)); then
@@ -4907,6 +4982,7 @@ server_federation_wait() {
           --argjson issuer_sources "$issuer_sources" \
           --argjson min_issuer_source_operators "$min_issuer_source_operators" \
           --argjson issuer_source_operators_count "$issuer_source_operators_count" \
+          --argjson issuer_sync_required "$(if [[ "$issuer_sync_required" == "1" ]]; then echo "true"; else echo "false"; fi)" \
           --argjson require_configured_healthy "$(if [[ "$require_configured_healthy" == "1" ]]; then echo "true"; else echo "false"; fi)" \
           --argjson configured_peers "$configured_peers" \
           --argjson configured_healthy "$configured_healthy" \
@@ -4924,11 +5000,11 @@ server_federation_wait() {
             (if $max_peer_sync_age_sec > 0 and ($peer_sync_age_sec < 0 or $peer_sync_age_sec > $max_peer_sync_age_sec) then "peer_sync_age_stale" else empty end),
             (if $min_peer_success_sources > 0 and $peer_sources < $min_peer_success_sources then "peer_success_sources_below_floor" else empty end),
             (if $min_peer_source_operators > 0 and $peer_source_operators_count < $min_peer_source_operators then "peer_source_operators_below_floor" else empty end),
-            (if ($issuer_success | not) then "issuer_sync_not_success" else empty end),
-            (if ($issuer_quorum | not) then "issuer_sync_quorum_not_met" else empty end),
-            (if $max_issuer_sync_age_sec > 0 and ($issuer_sync_age_sec < 0 or $issuer_sync_age_sec > $max_issuer_sync_age_sec) then "issuer_sync_age_stale" else empty end),
-            (if $min_issuer_success_sources > 0 and $issuer_sources < $min_issuer_success_sources then "issuer_success_sources_below_floor" else empty end),
-            (if $min_issuer_source_operators > 0 and $issuer_source_operators_count < $min_issuer_source_operators then "issuer_source_operators_below_floor" else empty end),
+            (if $issuer_sync_required and ($issuer_success | not) then "issuer_sync_not_success" else empty end),
+            (if $issuer_sync_required and ($issuer_quorum | not) then "issuer_sync_quorum_not_met" else empty end),
+            (if $issuer_sync_required and $max_issuer_sync_age_sec > 0 and ($issuer_sync_age_sec < 0 or $issuer_sync_age_sec > $max_issuer_sync_age_sec) then "issuer_sync_age_stale" else empty end),
+            (if $issuer_sync_required and $min_issuer_success_sources > 0 and $issuer_sources < $min_issuer_success_sources then "issuer_success_sources_below_floor" else empty end),
+            (if $issuer_sync_required and $min_issuer_source_operators > 0 and $issuer_source_operators_count < $min_issuer_source_operators then "issuer_source_operators_below_floor" else empty end),
             (if $require_configured_healthy and $configured_peers > 0 and $configured_healthy < $configured_peers then "configured_peers_not_all_healthy" else empty end),
             (if ($configured_peers > 0 and ($require_configured_healthy | not) and $configured_healthy <= 0 and $discovered_eligible <= 0) then "no_healthy_or_discovered_eligible_peer" else empty end),
             (if ($configured_peers <= 0 and $discovered_eligible <= 0) then "no_discovered_eligible_peer" else empty end),

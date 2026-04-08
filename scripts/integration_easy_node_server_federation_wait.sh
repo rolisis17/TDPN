@@ -94,6 +94,8 @@ case "$url" in
   */v1/admin/sync-status)
     if [[ "$sync_mode" == "stale" ]]; then
       payload='{"generated_at":1731000001,"peer":{"success":true,"success_sources":1,"source_operators":["op-sync-peer"],"required_operators":1,"quorum_met":true,"last_run_at":1730999800},"issuer":{"success":true,"success_sources":1,"source_operators":["op-sync-issuer"],"required_operators":1,"quorum_met":true,"last_run_at":1730999700}}'
+    elif [[ "$sync_mode" == "issuer_optional" ]]; then
+      payload='{"generated_at":1731000001,"peer":{"success":true,"success_sources":1,"source_operators":["op-sync-peer"],"required_operators":1,"quorum_met":true,"last_run_at":1731000000},"issuer":{"success":true,"success_sources":0,"source_operators":[],"required_operators":1,"quorum_met":false,"last_run_at":1731000000,"error":""}}'
     else
       payload='{"generated_at":1731000001,"peer":{"success":true,"success_sources":1,"source_operators":["op-sync-peer"],"required_operators":1,"quorum_met":true,"last_run_at":1731000000},"issuer":{"success":true,"success_sources":1,"source_operators":["op-sync-issuer"],"required_operators":1,"quorum_met":true,"last_run_at":1731000000}}'
     fi
@@ -161,6 +163,35 @@ fi
 if ! jq -e '.status == "ready" and .state == "ready" and .readiness.failure_reasons == [] and .readiness.peer_health_ready == true' "$READY_SUMMARY" >/dev/null; then
   echo "expected READY summary artifact to include ready state + empty failure reasons"
   cat "$READY_SUMMARY"
+  exit 1
+fi
+
+echo "[server-federation-wait] issuer-sync optional when no issuer trust sources are configured"
+ISSUER_OPTIONAL_LOG="$TMP_DIR/federation_wait_issuer_optional.log"
+ISSUER_OPTIONAL_SUMMARY="$TMP_DIR/federation_wait_issuer_optional_summary.json"
+if ! PATH="$TMP_BIN:$PATH" EASY_NODE_CURL_MOCK_MODE=healthy EASY_NODE_CURL_MOCK_SYNC_MODE=issuer_optional \
+  ./scripts/easy_node.sh server-federation-wait \
+    --ready-timeout-sec 3 \
+    --poll-sec 1 \
+    --timeout-sec 3 \
+    --summary-json "$ISSUER_OPTIONAL_SUMMARY" >"$ISSUER_OPTIONAL_LOG" 2>&1; then
+  echo "expected issuer-optional server-federation-wait to succeed"
+  cat "$ISSUER_OPTIONAL_LOG"
+  exit 1
+fi
+if ! rg -q '^server-federation-wait: READY' "$ISSUER_OPTIONAL_LOG"; then
+  echo "expected READY output in issuer-optional federation wait"
+  cat "$ISSUER_OPTIONAL_LOG"
+  exit 1
+fi
+if [[ ! -f "$ISSUER_OPTIONAL_SUMMARY" ]]; then
+  echo "expected issuer-optional summary artifact from server-federation-wait"
+  cat "$ISSUER_OPTIONAL_LOG"
+  exit 1
+fi
+if ! jq -e '.status == "ready" and .readiness.issuer_sync_ready == true and ((.readiness.failure_reasons | index("issuer_sync_quorum_not_met")) == null)' "$ISSUER_OPTIONAL_SUMMARY" >/dev/null; then
+  echo "expected issuer-optional summary artifact to mark issuer sync ready without quorum failure reason"
+  cat "$ISSUER_OPTIONAL_SUMMARY"
   exit 1
 fi
 

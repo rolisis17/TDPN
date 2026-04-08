@@ -88,12 +88,17 @@ done
 
 payload='{}'
 code="200"
+sync_mode="${EASY_NODE_CURL_MOCK_SYNC_MODE:-fresh}"
 case "$url" in
   */v1/admin/peer-status)
     payload='{"generated_at":1731000000,"peers":[{"url":"http://seed.local","configured":true,"discovered":false,"eligible":true,"cooling_down":false,"consecutive_failures":0},{"url":"http://peer-down.local","configured":false,"discovered":true,"eligible":false,"cooling_down":true,"consecutive_failures":4,"cooldown_until":1731000099,"retry_after_sec":75,"last_error":"dial timeout"}]}'
     ;;
   */v1/admin/sync-status)
-    payload='{"generated_at":1731000001,"peer":{"success":true,"success_sources":2,"source_operators":["op-peer-a","op-peer-b"],"required_operators":2,"quorum_met":true,"last_run_at":1731000000},"issuer":{"success":true,"success_sources":2,"source_operators":["op-issuer-a","op-issuer-b"],"required_operators":2,"quorum_met":true,"last_run_at":1730999999}}'
+    if [[ "$sync_mode" == "issuer_optional" ]]; then
+      payload='{"generated_at":1731000001,"peer":{"success":true,"success_sources":2,"source_operators":["op-peer-a","op-peer-b"],"required_operators":2,"quorum_met":true,"last_run_at":1731000000},"issuer":{"success":true,"success_sources":0,"source_operators":[],"required_operators":1,"quorum_met":false,"last_run_at":1730999999,"error":""}}'
+    else
+      payload='{"generated_at":1731000001,"peer":{"success":true,"success_sources":2,"source_operators":["op-peer-a","op-peer-b"],"required_operators":2,"quorum_met":true,"last_run_at":1731000000},"issuer":{"success":true,"success_sources":2,"source_operators":["op-issuer-a","op-issuer-b"],"required_operators":2,"quorum_met":true,"last_run_at":1730999999}}'
+    fi
     ;;
   *)
     payload='{"error":"not found"}'
@@ -162,6 +167,27 @@ fi
 if ! rg -q '^  issuer_sync_source_operators: op-issuer-a,op-issuer-b$' "$HUMAN_LOG"; then
   echo "expected issuer source_operators list in status output"
   cat "$HUMAN_LOG"
+  exit 1
+fi
+
+echo "[server-federation-status] issuer-sync optional baseline stays ready"
+OPTIONAL_LOG="$TMP_DIR/federation_status_issuer_optional.log"
+if ! PATH="$TMP_BIN:$PATH" EASY_NODE_CURL_MOCK_SYNC_MODE=issuer_optional \
+  ./scripts/easy_node.sh server-federation-status \
+    --timeout-sec 3 \
+    --fail-on-not-ready 1 >"$OPTIONAL_LOG" 2>&1; then
+  echo "expected issuer-optional server-federation-status to pass fail-on-not-ready policy"
+  cat "$OPTIONAL_LOG"
+  exit 1
+fi
+if ! rg -q 'readiness: federation_ready=1' "$OPTIONAL_LOG"; then
+  echo "expected federation_ready=1 in issuer-optional status output"
+  cat "$OPTIONAL_LOG"
+  exit 1
+fi
+if rg -q 'issuer_sync_quorum_not_met' "$OPTIONAL_LOG"; then
+  echo "did not expect issuer_sync_quorum_not_met when issuer sync is optional"
+  cat "$OPTIONAL_LOG"
   exit 1
 fi
 
