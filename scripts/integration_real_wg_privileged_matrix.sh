@@ -13,11 +13,35 @@ fi
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+extract_directory_addr() {
+  local arg
+  for arg in "$@"; do
+    if [[ "$arg" == DIRECTORY_ADDR=* ]]; then
+      printf '%s' "${arg#DIRECTORY_ADDR=}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+reset_profile_trust_pin() {
+  local directory_addr="$1"
+  [[ -z "$directory_addr" ]] && return 0
+  local directory_url="http://${directory_addr}"
+  ./scripts/easy_node.sh client-vpn-trust-reset \
+    --directory-urls "$directory_url" \
+    --trust-scope scoped \
+    --dry-run 0 >/dev/null 2>&1 || true
+}
+
 run_profile() {
   local name="$1"
   shift
   local out="/tmp/integration_real_wg_matrix_${name}.log"
   rm -f "$out"
+  local directory_addr=""
+  directory_addr="$(extract_directory_addr "$@" || true)"
+  reset_profile_trust_pin "$directory_addr"
   echo "[real-wg-matrix] running profile=${name}"
   if ! env "$@" ./scripts/integration_real_wg_privileged.sh >"$out" 2>&1; then
     echo "[real-wg-matrix] profile=${name} failed"

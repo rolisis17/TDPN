@@ -140,17 +140,47 @@ FAKE_CURL_FAIL_PEER_RELAYS=1 \
   --authority-directory http://203.0.113.10:8081 \
   --authority-issuer http://203.0.113.10:8082 \
   --peer-directories http://203.0.113.10:8081 \
+  --peer-identity-strict 1 \
   --beta-profile 1 >/tmp/integration_easy_node_peer_identity_guard_strict.log 2>&1
 strict_rc=$?
 set -e
 if [[ "$strict_rc" -eq 0 ]]; then
-  echo "expected server-up to fail when strict peer identity check cannot verify peer directory"
+  echo "expected server-up to fail in explicit strict mode when peer identity check cannot verify peer directory"
   cat /tmp/integration_easy_node_peer_identity_guard_strict.log
   exit 1
 fi
 if ! rg -q "could not verify operator-id uniqueness against peer directories" /tmp/integration_easy_node_peer_identity_guard_strict.log; then
   echo "missing expected strict peer-identity failure message"
   cat /tmp/integration_easy_node_peer_identity_guard_strict.log
+  exit 1
+fi
+
+reset_local_state
+
+PATH="$TMP_BIN:$PATH" \
+EASY_NODE_VERIFY_PUBLIC=0 \
+FAKE_CURL_FAIL_PEER_RELAYS=1 \
+./scripts/easy_node.sh server-up \
+  --mode provider \
+  --public-host 198.51.100.20 \
+  --authority-directory http://203.0.113.10:8081 \
+  --authority-issuer http://203.0.113.10:8082 \
+  --peer-directories http://203.0.113.10:8081 \
+  --beta-profile 1 >/tmp/integration_easy_node_peer_identity_guard_auto_relax.log 2>&1
+
+if ! rg -q "peer operator/issuer identity strict checks auto-relaxed" /tmp/integration_easy_node_peer_identity_guard_auto_relax.log; then
+  echo "expected provider auto-relax note when peer relays are unreachable in non-prod auto strict mode"
+  cat /tmp/integration_easy_node_peer_identity_guard_auto_relax.log
+  exit 1
+fi
+if ! rg -q "warning: operator-id uniqueness check skipped" /tmp/integration_easy_node_peer_identity_guard_auto_relax.log; then
+  echo "expected operator-id warning after provider auto-relax path"
+  cat /tmp/integration_easy_node_peer_identity_guard_auto_relax.log
+  exit 1
+fi
+if ! rg -q "server stack started" /tmp/integration_easy_node_peer_identity_guard_auto_relax.log; then
+  echo "expected provider stack startup in non-prod auto strict mode with unreachable peers"
+  cat /tmp/integration_easy_node_peer_identity_guard_auto_relax.log
   exit 1
 fi
 
