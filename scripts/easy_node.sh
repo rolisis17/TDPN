@@ -1041,17 +1041,21 @@ enforce_invite_auth_mode_or_die() {
 
 resolve_local_mtls_material() {
   local ca cert key
+  local fallback_ca fallback_cert fallback_key
+  fallback_ca="$DEPLOY_DIR/tls/ca.crt"
+  fallback_cert="$DEPLOY_DIR/tls/client.crt"
+  fallback_key="$DEPLOY_DIR/tls/client.key"
   ca="$(server_env_value "EASY_NODE_MTLS_CA_FILE_LOCAL" | tr -d '\r')"
   cert="$(server_env_value "EASY_NODE_MTLS_CLIENT_CERT_FILE_LOCAL" | tr -d '\r')"
   key="$(server_env_value "EASY_NODE_MTLS_CLIENT_KEY_FILE_LOCAL" | tr -d '\r')"
-  if [[ -z "$ca" ]]; then
-    ca="$DEPLOY_DIR/tls/ca.crt"
+  if [[ -z "$ca" || ! -r "$ca" ]]; then
+    ca="$fallback_ca"
   fi
-  if [[ -z "$cert" ]]; then
-    cert="$DEPLOY_DIR/tls/client.crt"
+  if [[ -z "$cert" || ! -r "$cert" ]]; then
+    cert="$fallback_cert"
   fi
-  if [[ -z "$key" ]]; then
-    key="$DEPLOY_DIR/tls/client.key"
+  if [[ -z "$key" || ! -r "$key" ]]; then
+    key="$fallback_key"
   fi
   echo "$ca|$cert|$key"
 }
