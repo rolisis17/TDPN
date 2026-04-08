@@ -194,10 +194,7 @@ func New() *Service {
 	}
 	opaqueSinkAddr := os.Getenv("EXIT_OPAQUE_SINK_ADDR")
 	opaqueSourceAddr := os.Getenv("EXIT_OPAQUE_SOURCE_ADDR")
-	wgPubKey := os.Getenv("EXIT_WG_PUBKEY")
-	if wgPubKey == "" {
-		wgPubKey = defaultExitWGPubKey
-	}
+	wgPubKey := strings.TrimSpace(os.Getenv("EXIT_WG_PUBKEY"))
 	wgExitIP := os.Getenv("EXIT_WG_EXIT_IP")
 	if wgExitIP == "" {
 		wgExitIP = "10.90.0.1/32"
@@ -216,6 +213,9 @@ func New() *Service {
 	wgBackend := os.Getenv("WG_BACKEND")
 	if wgBackend == "" {
 		wgBackend = "noop"
+	}
+	if wgPubKey == "" && wgBackend != "command" {
+		wgPubKey = defaultExitWGPubKey
 	}
 	wgKernelProxy := os.Getenv("EXIT_WG_KERNEL_PROXY") == "1"
 	wgKernelProxyMax := 2048

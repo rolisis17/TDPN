@@ -22,6 +22,11 @@ TMP_DIR="$(mktemp -d)"
 TMP_BIN="$TMP_DIR/bin"
 mkdir -p "$TMP_BIN"
 
+if ! rg -q 'EXIT_WG_PUBKEY: "\$\{EXIT_WG_PUBKEY:-\}"' "$ROOT_DIR/deploy/docker-compose.yml"; then
+  echo "docker-compose entry-exit environment must forward EXIT_WG_PUBKEY"
+  exit 1
+fi
+
 backup_file() {
   local src="$1"
   local name="$2"

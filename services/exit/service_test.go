@@ -797,6 +797,15 @@ func TestNewDefaultWGPubKeyIsValid(t *testing.T) {
 	}
 }
 
+func TestNewCommandBackendKeepsUnsetWGPubKeyForDerivation(t *testing.T) {
+	t.Setenv("EXIT_WG_PUBKEY", "")
+	t.Setenv("WG_BACKEND", "command")
+	s := New()
+	if strings.TrimSpace(s.wgPubKey) != "" {
+		t.Fatalf("expected empty EXIT_WG_PUBKEY in command mode for runtime derivation, got %q", s.wgPubKey)
+	}
+}
+
 func TestValidateRuntimeConfigRejectsNegativeStartupSyncTimeout(t *testing.T) {
 	s := &Service{
 		startupSyncTimeout: -1 * time.Second,
