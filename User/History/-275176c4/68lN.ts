@@ -1,0 +1,71 @@
+import {
+  Connection,
+  PublicKey,
+  Keypair,
+  Transaction,
+  clusterApiUrl,
+} from "@solana/web3.js";
+import {
+  createUpdateMetadataAccountV2Instruction,
+  PROGRAM_ID as TOKEN_METADATA_PROGRAM_ID,
+} from "@metaplex-foundation/mpl-token-metadata";
+import { getKeypairFromEnvironment } from "@solana-developers/helpers";
+import { sendAndConfirmTransaction } from "@solana/web3.js";
+
+(async () => {
+  // Connect to the Solana cluster
+  const connection = new Connection(clusterApiUrl("devnet"), "confirmed");
+
+  // Replace with your mint public key
+  const mintPublicKey = new PublicKey("FimqimMtXLFef1B6Vw6d3LKhcduwDBMNqcPwkbG4kBwQ");
+
+  // Replace with the keypair of the update authority
+  const updateAuthority = getKeypairFromEnvironment("SECRET_KEY"); // Replace with your real keypair
+
+  // Derive the metadata account PDA
+  const [metadataAccount] = await PublicKey.findProgramAddress(
+    [
+      Buffer.from("metadata"),
+      TOKEN_METADATA_PROGRAM_ID.toBuffer(),
+      mintPublicKey.toBuffer(),
+    ],
+    TOKEN_METADATA_PROGRAM_ID
+  );
+
+  console.log("Metadata Account Address:", metadataAccount.toBase58());
+
+  // Define new metadata
+  const newMetadata = {
+    name: "ShakeThat",
+    symbol: "SHAKE",
+    uri: "https://arweave.net/Qmeg7XTHf7eucVb449zedcWwX516WqbQD71HUf3Bv3siv6",
+    sellerFeeBasisPoints: 500, // Royalties in basis points (5%)
+    creators: null, // Optional: Define creators if needed
+    collection: null, // Optional: Link to a collection if applicable
+    uses: null, // Optional: Usage info
+  };
+
+  // Create the update instruction
+  const updateInstruction = createUpdateMetadataAccountV2Instruction(
+    {
+      metadata: metadataAccount,
+      updateAuthority: updateAuthority.publicKey,
+    },
+    {
+      data: newMetadata, // New metadata
+      updateAuthority: updateAuthority.publicKey,
+      primarySaleHappened: true, // Indicate if the primary sale has occurred
+      isMutable: true, // Keep metadata mutable
+    }
+  );
+
+  // Send the transaction
+  const transaction = new Transaction().add(updateInstruction);
+  const transactionSignature = await sendAndConfirmTransaction(
+    connection,
+    transaction,
+    [updateAuthority]
+);signature
+
+  console.log("Transaction Signature:", transactionSignature);
+})();

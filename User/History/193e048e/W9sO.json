@@ -1,0 +1,16 @@
+{
+    "name": "ShakeThat",
+    "symbol": "SHAKE",
+    "description": "Description of your token.",
+    "image": "QmZzT2G7TuEfsvnRHyGvYR6wi9SE3ogV7kfCfpczGZZaro",
+    "attributes": [],
+    "properties": {
+      "files": [
+        {
+          "uri": "QmZzT2G7TuEfsvnRHyGvYR6wi9SE3ogV7kfCfpczGZZaro",
+          "type": "image/png"
+        }
+      ]
+    }
+  }
+  

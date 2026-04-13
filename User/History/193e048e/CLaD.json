@@ -1,0 +1,17 @@
+{
+    "name": "Token Name",
+    "symbol": "TKN",
+    "description": "Description of your token.",
+    "image": "QmZzT2G7TuEfsvnRHyGvYR6wi9SE3ogV7kfCfpczGZZaro",
+    "external_url": "https://your-website.com",
+    "attributes": [],
+    "properties": {
+      "files": [
+        {
+          "uri": "QmZzT2G7TuEfsvnRHyGvYR6wi9SE3ogV7kfCfpczGZZaro",
+          "type": "image/png"
+        }
+      ]
+    }
+  }
+  

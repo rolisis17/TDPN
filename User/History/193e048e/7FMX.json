@@ -1,0 +1,8 @@
+{
+    "name": "Your Token Name",
+    "symbol": "TOKEN",
+    "uri": "https://arweave.net/your-image-url",  // Image URL from Arweave or IPFS
+    "seller_fee_basis_points": 0,                // Set to 0 if you don’t want royalties
+    "creators": null
+  }
+  

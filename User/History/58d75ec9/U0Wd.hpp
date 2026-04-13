@@ -1,0 +1,11 @@
+#include <string.h>
+#include <iostream>
+#include <linux/netlink.h>
+#include <linux/rtnetlink.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#include <cstring>
+#include <iostream>
+#include <net/if.h>
+
+int getSocket(void);

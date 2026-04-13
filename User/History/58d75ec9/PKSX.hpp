@@ -1,0 +1,16 @@
+#include <string.h>
+#include <iostream>
+#include <linux/netlink.h>
+#include <linux/rtnetlink.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#include <cstring>
+#include <iostream>
+#include <net/if.h>
+#include <cstring>
+#include <stdexcept>
+
+int getSocket(void);
+int StartInterface(void);
+void set_link_up(int sock, int if_index);
+static void addAttr(nlmsghdr* nlh, size_t maxlen, int type, const void* data, size_t data_len);

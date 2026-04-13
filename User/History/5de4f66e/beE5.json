@@ -1,0 +1,12 @@
+{
+  "name": "myfirstproject",
+  "version": "1.0.0",
+  "description": "",
+  "main": "generate-Key-pair.ts.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "type": "module"
+}

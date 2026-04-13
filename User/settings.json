@@ -1,0 +1,6 @@
+{
+    "files.autoSave": "afterDelay",
+    "explorer.confirmDragAndDrop": false,
+    "chatgpt.openOnStartup": true,
+    "chatgpt.runCodexInWindowsSubsystemForLinux": true
+}

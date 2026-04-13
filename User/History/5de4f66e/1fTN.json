@@ -1,0 +1,24 @@
+{
+  "name": "myfirstproject",
+  "version": "1.0.0",
+  "main": "generate-Key-pair.ts.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "keywords": [],
+  "description": "",
+  "dependencies": {
+    "@metaplex-foundation/mpl-token-metadata": "^2.13.0",
+    "@solana-developers/helpers": "github:solana-developers/helpers",
+    "esrun": "^3.2.26"
+  }
+  esbuild.build({
+    entryPoints: ['create_token.ts'],
+    bundle: true,
+    external: ['@solana-developers/helpers'],
+    outfile: 'output.js'
+}
+}
