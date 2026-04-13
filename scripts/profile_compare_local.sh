@@ -175,9 +175,9 @@ normalize_path_profile_local() {
   case "$profile" in
     "") printf '%s\n' "" ;;
     speed) printf '%s\n' "speed" ;;
-    speed-1hop|speed1hop|fast-1hop|fast1hop|onehop|1hop) printf '%s\n' "speed-1hop" ;;
-    balanced) printf '%s\n' "balanced" ;;
-    private|privacy) printf '%s\n' "private" ;;
+    speed-1hop|speed1hop|fast-1hop|fast1hop|onehop|1hop|1-hop|hop1|hop-1) printf '%s\n' "speed-1hop" ;;
+    balanced|2hop|2-hop|hop2|hop-2|twohop) printf '%s\n' "balanced" ;;
+    private|privacy|3hop|3-hop|hop3|hop-3|threehop) printf '%s\n' "private" ;;
     fast) printf '%s\n' "speed" ;;
     *) return 1 ;;
   esac
@@ -462,7 +462,7 @@ for raw_profile in "${raw_profiles[@]}"; do
   normalized="$(normalize_path_profile_local "$candidate" || true)"
   if [[ -z "$normalized" ]]; then
     echo "invalid profile in --profiles: $candidate"
-    echo "allowed: speed, balanced, private, speed-1hop (aliases: fast, privacy, onehop)"
+    echo "allowed: 1hop, 2hop, 3hop, speed, balanced, private, speed-1hop (aliases: fast, privacy, onehop)"
     exit 2
   fi
   if [[ -n "${seen_profiles[$normalized]:-}" ]]; then

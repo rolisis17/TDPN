@@ -1,0 +1,22 @@
+[req]
+default_bits = 2048
+prompt = no
+default_md = sha256
+distinguished_name = dn
+req_extensions = req_ext
+
+[dn]
+CN = privacynode-node
+
+[req_ext]
+subjectAltName = @alt_names
+extendedKeyUsage = serverAuth,clientAuth
+
+[alt_names]
+IP.1 = 100.111.133.33
+IP.2 = 100.113.245.61
+DNS.1 = localhost
+IP.3 = 127.0.0.1
+DNS.2 = directory
+DNS.3 = issuer
+DNS.4 = entry-exit

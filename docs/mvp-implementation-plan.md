@@ -45,6 +45,16 @@ Deliver a working 2-hop decentralized privacy path with tiered token policy usin
 - Invariant tests (token expiry, deny ports, tier-1 SMTP block)
 - Load test entry under handshake flood conditions
 
+## Parallel Track: Global Privacy Mesh (Planning -> Incremental Build)
+- Keep current production path stable (`2-hop`) while designing optional `1-hop/2-hop/3-hop` modes.
+- Introduce resource-capped `micro-relay` role for broader participation without forcing all nodes to run exit.
+- Keep validator/settlement work out of packet forwarding critical path.
+- Reference design and safety docs:
+  - `docs/global-privacy-mesh-track.md`
+  - `docs/exit-node-safety-baseline-v1.md`
+  - `docs/exit-node-safety-guide.md`
+  - `docs/client-safety-guide.md`
+
 ## C/C++ Acceleration Later
 - Keep service boundaries stable and move hot paths first:
   - entry packet forwarder

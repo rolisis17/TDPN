@@ -44,17 +44,19 @@ check_absent_regex() {
 }
 
 echo "[path-profile-contract] easy_node usage exposes canonical public profiles"
-check_fixed "$EASY_NODE" "[--path-profile speed|speed-1hop|balanced|private]" \
+check_fixed "$EASY_NODE" "[--path-profile 1hop|2hop|3hop|speed|speed-1hop|balanced|private]" \
   "path-profile contract failed: easy_node client-test usage is not canonical"
-check_fixed "$EASY_NODE" "[--path-profile speed|balanced|private]" \
+check_fixed "$EASY_NODE" "[--path-profile 1hop|2hop|3hop|speed|balanced|private]" \
   "path-profile contract failed: easy_node usage missing canonical non-experimental path-profile contract"
 check_absent_regex '\[--path-profile [^]]*fast\|privacy' \
   "path-profile contract failed: easy_node usage still exposes legacy aliases in public profile list" \
   "$EASY_NODE"
+check_fixed "$EASY_NODE" "public path-profile contract is \`1hop|2hop|3hop\`" \
+  "path-profile contract failed: easy_node notes do not expose hop-profile contract"
 
 echo "[path-profile-contract] wrapper usages expose canonical public profiles"
 for wrapper in "${USAGE_WRAPPERS[@]}"; do
-  check_fixed "$wrapper" "[--path-profile speed|balanced|private]" \
+  check_fixed "$wrapper" "[--path-profile 1hop|2hop|3hop|speed|balanced|private]" \
     "path-profile contract failed: ${wrapper} usage is not canonical"
 done
 check_absent_regex '\[--path-profile [^]]*fast\|privacy' \
@@ -74,7 +76,7 @@ check_fixed "$EASY_MODE_UI" "  3) Private   :" \
 echo "[path-profile-contract] legacy aliases remain compatibility-only internals"
 check_fixed "$EASY_NODE" "speed|fast)" \
   "path-profile contract failed: easy_node no longer accepts legacy alias fast"
-check_fixed "$EASY_NODE" "private|privacy)" \
+check_fixed "$EASY_NODE" "private|privacy|3hop" \
   "path-profile contract failed: easy_node no longer accepts legacy alias privacy"
 check_fixed "$EASY_NODE" "legacy aliases: fast, privacy" \
   "path-profile contract failed: easy_node no longer documents legacy alias compatibility in validation errors"

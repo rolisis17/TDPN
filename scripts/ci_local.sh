@@ -99,8 +99,14 @@ echo "[ci] vpn-rc standard path integration"
 echo "[ci] client-vpn smoke integration"
 ./scripts/integration_client_vpn_smoke.sh
 
+echo "[ci] client-vpn profile compare integration"
+./scripts/integration_client_vpn_profile_compare.sh
+
 echo "[ci] client-vpn trust-scope wiring integration"
 ./scripts/integration_client_vpn_trust_scope_wiring.sh
+
+echo "[ci] client-vpn path-profile wiring integration"
+./scripts/integration_client_vpn_path_profile_wiring.sh
 
 echo "[ci] client-vpn trust-reset integration"
 ./scripts/integration_client_vpn_trust_reset.sh

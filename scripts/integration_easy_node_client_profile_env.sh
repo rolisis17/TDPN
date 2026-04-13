@@ -275,7 +275,7 @@ fi
 
 SPEED_1HOP_BETA_FAIL_LOG="$TMP_DIR/speed_1hop_beta_fail.log"
 run_client_test_expect_fail "$SPEED_1HOP_BETA_FAIL_LOG" "1" "0" --path-profile speed-1hop
-if ! rg -q -- "client-test --path-profile speed-1hop requires --beta-profile 0 and --prod-profile 0" "$SPEED_1HOP_BETA_FAIL_LOG"; then
+if ! rg -q -- "client-test --path-profile 1hop/speed-1hop requires --beta-profile 0 and --prod-profile 0" "$SPEED_1HOP_BETA_FAIL_LOG"; then
   echo "missing expected speed-1hop strict-profile guardrail message"
   cat "$SPEED_1HOP_BETA_FAIL_LOG"
   exit 1

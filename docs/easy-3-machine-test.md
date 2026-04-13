@@ -102,8 +102,8 @@ Path profile presets (optional, recommended for repeatable tests):
 - Speed (latency-first): `--distinct-operators 1 --distinct-countries 0 --locality-soft-bias 1 --country-bias 1.80 --region-bias 1.35 --region-prefix-bias 1.15`
 - Balanced (default): `--distinct-operators 1 --distinct-countries 0 --locality-soft-bias 1 --country-bias 1.50 --region-bias 1.25 --region-prefix-bias 1.10`
 - Private (stronger anti-collusion): `--distinct-operators 1 --distinct-countries 1 --locality-soft-bias 0`
-- Shortcut: use `--path-profile speed|balanced|private` (legacy aliases `fast|privacy` still work) on `client-test`, `three-machine-validate`, `three-machine-soak`, `pilot-runbook`, and `machine-c-test`.
-- Experimental 1-hop benchmark mode (non-strict `client-test` only): `--path-profile speed-1hop` (requires `--beta-profile 0 --prod-profile 0`).
+- Shortcut: use `--path-profile 1hop|2hop|3hop` (compatibility aliases `speed|balanced|private`, legacy aliases `fast|privacy`) on `client-test`, `three-machine-validate`, `three-machine-soak`, `pilot-runbook`, and `machine-c-test`.
+- Experimental 1-hop benchmark mode (non-strict only): `--path-profile 1hop` (or `speed-1hop`) requires `--beta-profile 0 --prod-profile 0` and is available on `client-test` and `client-vpn-up`.
 
 Real client VPN mode (for external testers on Linux):
 

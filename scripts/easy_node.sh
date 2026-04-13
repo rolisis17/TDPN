@@ -267,27 +267,28 @@ Usage:
   ./scripts/easy_node.sh wg-only-stack-selftest [--strict-beta [0|1]] [--base-port N] [--timeout-sec N] [--min-selection-lines N] [--force-iface-reset [0|1]] [--cleanup-ifaces [0|1]] [--keep-stack [0|1]]
   ./scripts/easy_node.sh wg-only-stack-selftest-record [wg-only-stack-selftest args...] [--record-result [0|1]] [--manual-validation-report [0|1]] [--manual-validation-report-summary-json PATH] [--manual-validation-report-md PATH] [--summary-json PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh pre-real-host-readiness [--base-port N] [--client-iface IFACE] [--exit-iface IFACE] [--vpn-iface IFACE] [--runtime-fix-prune-wg-only-dir [0|1]] [--strict-beta [0|1]] [--timeout-sec N] [--min-selection-lines N] [--force-iface-reset [0|1]] [--cleanup-ifaces [0|1]] [--keep-stack [0|1]] [--manual-validation-report-summary-json PATH] [--manual-validation-report-md PATH] [--summary-json PATH] [--print-summary-json [0|1]]
-  ./scripts/easy_node.sh client-test [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--exit-country CC] [--exit-region REGION] [--timeout-sec N] [--path-profile speed|speed-1hop|balanced|private] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--force-direct-exit [0|1]] [--min-selection-lines N] [--min-entry-operators N] [--min-exit-operators N] [--require-cross-operator-pair [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]]
+  ./scripts/easy_node.sh client-test [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--exit-country CC] [--exit-region REGION] [--timeout-sec N] [--path-profile 1hop|2hop|3hop|speed|speed-1hop|balanced|private] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--force-direct-exit [0|1]] [--min-selection-lines N] [--min-entry-operators N] [--min-exit-operators N] [--require-cross-operator-pair [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]]
   ./scripts/easy_node.sh profile-compare-local [--profiles CSV] [--rounds N] [--timeout-sec N] [--execution-mode docker|local] [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--subject ID|--anon-cred TOKEN] [--min-sources N] [--beta-profile [0|1]] [--prod-profile [0|1]] [--start-local-stack auto|0|1] [--force-stack-reset [0|1]] [--stack-strict-beta [0|1]] [--base-port N] [--client-iface IFACE] [--exit-iface IFACE] [--cleanup-ifaces [0|1]] [--keep-stack [0|1]] [--summary-json PATH] [--report-md PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh profile-compare-trend [--compare-summary-json PATH]... [--compare-summary-list FILE] [--reports-dir DIR] [--max-reports N] [--since-hours N] [--min-profile-runs N] [--min-profile-pass-rate-pct N] [--balanced-latency-margin-pct N] [--fail-on-any-fail [0|1]] [--min-decision-rate-pct N] [--summary-json PATH] [--report-md PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh profile-compare-campaign [--campaign-runs N] [--campaign-pause-sec N] [--reports-dir DIR] [--profiles CSV] [--rounds N] [--timeout-sec N] [--execution-mode docker|local] [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--subject ID|--anon-cred TOKEN] [--min-sources N] [--beta-profile [0|1]] [--prod-profile [0|1]] [--start-local-stack auto|0|1] [--force-stack-reset [0|1]] [--stack-strict-beta [0|1]] [--base-port N] [--client-iface IFACE] [--exit-iface IFACE] [--cleanup-ifaces [0|1]] [--keep-stack [0|1]] [--trend-max-reports N] [--trend-since-hours N] [--trend-min-profile-runs N] [--trend-min-profile-pass-rate-pct N] [--trend-balanced-latency-margin-pct N] [--trend-fail-on-any-fail [0|1]] [--trend-min-decision-rate-pct N] [--summary-json PATH] [--report-md PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh profile-compare-campaign-check [--campaign-summary-json PATH] [--trend-summary-json PATH] [--reports-dir DIR] [--require-status-pass [0|1]] [--require-trend-status-pass [0|1]] [--require-min-runs-total N] [--require-max-runs-fail N] [--require-max-runs-warn N] [--require-min-runs-with-summary N] [--require-recommendation-support-rate-pct N] [--require-recommended-profile PROFILE] [--allow-recommended-profiles CSV] [--disallow-experimental-default [0|1]] [--require-trend-source CSV] [--fail-on-no-go [0|1]] [--summary-json PATH] [--show-json [0|1]] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh profile-compare-campaign-signoff [--reports-dir DIR] [--campaign-summary-json PATH] [--campaign-report-md PATH] [--campaign-check-summary-json PATH] [--refresh-campaign [0|1]] [--fail-on-no-go [0|1]] [--allow-summary-overwrite [0|1]] [--require-status-pass [0|1]] [--require-trend-status-pass [0|1]] [--require-min-runs-total N] [--require-max-runs-fail N] [--require-max-runs-warn N] [--require-min-runs-with-summary N] [--require-recommendation-support-rate-pct N] [--require-recommended-profile PROFILE] [--allow-recommended-profiles CSV] [--disallow-experimental-default [0|1]] [--require-trend-source CSV] [--campaign-execution-mode docker|local] [--campaign-directory-urls URL[,URL...]] [--campaign-bootstrap-directory URL] [--campaign-discovery-wait-sec N] [--campaign-issuer-url URL] [--campaign-entry-url URL] [--campaign-exit-url URL] [--campaign-start-local-stack auto|0|1] [--summary-json PATH] [--show-json [0|1]] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh client-vpn-preflight [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-urls URL[,URL...]] [--entry-url URL] [--exit-url URL] [--prod-profile [0|1]] [--interface IFACE] [--timeout-sec N] [--require-root [0|1]] [--operator-floor-check [0|1]] [--operator-min-operators N] [--operator-min-entry-operators N] [--operator-min-exit-operators N] [--issuer-quorum-check [0|1]] [--issuer-min-operators N] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH]
-  ./scripts/easy_node.sh client-vpn-up [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-urls URL[,URL...]] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--path-profile speed|balanced|private] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--exit-country CC] [--exit-region REGION] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--beta-profile [0|1]] [--prod-profile [0|1]] [--operator-floor-check [0|1]] [--operator-min-operators N] [--operator-min-entry-operators N] [--operator-min-exit-operators N] [--issuer-quorum-check [0|1]] [--issuer-min-operators N] [--interface IFACE] [--proxy-addr HOST:PORT] [--private-key-file PATH] [--allowed-ips CIDR] [--install-route [0|1]] [--startup-sync-timeout-sec N] [--ready-timeout-sec N] [--force-restart [0|1]] [--foreground [0|1]] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH] [--log-file PATH]
+  ./scripts/easy_node.sh client-vpn-up [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-urls URL[,URL...]] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--exit-country CC] [--exit-region REGION] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--beta-profile [0|1]] [--prod-profile [0|1]] [--operator-floor-check [0|1]] [--operator-min-operators N] [--operator-min-entry-operators N] [--operator-min-exit-operators N] [--issuer-quorum-check [0|1]] [--issuer-min-operators N] [--interface IFACE] [--proxy-addr HOST:PORT] [--private-key-file PATH] [--allowed-ips CIDR] [--install-route [0|1]] [--startup-sync-timeout-sec N] [--ready-timeout-sec N] [--force-restart [0|1]] [--foreground [0|1]] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH] [--log-file PATH]
   ./scripts/easy_node.sh client-vpn-smoke [client-vpn-up args...] [--run-preflight [0|1]] [--status-check [0|1]] [--keep-up [0|1]] [--record-result [0|1]] [--pre-real-host-readiness [0|1]] [--pre-real-host-readiness-summary-json PATH] [--runtime-doctor [0|1]] [--runtime-fix [0|1]] [--runtime-fix-prune-wg-only-dir [0|1]] [--trust-reset-on-key-mismatch [0|1]] [--trust-reset-scope scoped|global] [--runtime-base-port N] [--runtime-client-iface IFACE] [--runtime-exit-iface IFACE] [--runtime-vpn-iface IFACE] [--incident-snapshot-on-fail [0|1]] [--incident-snapshot-timeout-sec N] [--incident-bundle-dir PATH] [--manual-validation-report [0|1]] [--manual-validation-report-summary-json PATH] [--manual-validation-report-md PATH] [--public-ip-url URL] [--country-url URL] [--curl-timeout-sec N] [--summary-json PATH] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh client-vpn-profile-compare [--profiles CSV] [--rounds N] [--pause-sec N] [--min-pass-rate-pct N] [--fail-on-any-fail [0|1]] [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--issuer-url URL] [--issuer-urls URL[,URL...]] [--entry-url URL] [--exit-url URL] [--subject ID|--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--beta-profile [0|1]] [--prod-profile [0|1]] [--operator-floor-check [0|1]] [--issuer-quorum-check [0|1]] [--issuer-min-operators N] [--interface IFACE] [--proxy-addr HOST:PORT] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH] [--run-preflight [0|1]] [--status-check [0|1]] [--runtime-doctor [0|1]] [--runtime-fix [0|1]] [--trust-reset-on-key-mismatch [0|1]] [--trust-reset-scope scoped|global] [--public-ip-url URL] [--country-url URL] [--summary-json PATH] [--report-md PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh client-vpn-status
   ./scripts/easy_node.sh client-vpn-logs [--follow [0|1]] [--tail N]
   ./scripts/easy_node.sh client-vpn-session [client-vpn-up args...] [--cleanup-all [0|1]]
   ./scripts/easy_node.sh client-vpn-down [--force-iface-cleanup [0|1]] [--iface IFACE] [--keep-key [0|1]]
   ./scripts/easy_node.sh client-vpn-trust-reset [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--trust-scope scoped|global] [--all-scoped [0|1]] [--dry-run [0|1]] [--trust-file PATH]
-  ./scripts/easy_node.sh three-machine-validate [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-a-url URL] [--issuer-b-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--client-min-selection-lines N] [--client-min-entry-operators N] [--client-min-exit-operators N] [--client-require-cross-operator-pair [0|1]] [--exit-country CC] [--exit-region REGION] [--path-profile speed|balanced|private] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--require-issuer-quorum [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]]
-  ./scripts/easy_node.sh three-machine-soak [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-a-url URL] [--issuer-b-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--rounds N] [--pause-sec N] [--fault-every N] [--fault-command CMD] [--continue-on-fail [0|1]] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--client-min-selection-lines N] [--client-min-entry-operators N] [--client-min-exit-operators N] [--client-require-cross-operator-pair [0|1]] [--exit-country CC] [--exit-region REGION] [--path-profile speed|balanced|private] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--require-issuer-quorum [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]] [--report-file PATH]
+  ./scripts/easy_node.sh three-machine-validate [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-a-url URL] [--issuer-b-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--client-min-selection-lines N] [--client-min-entry-operators N] [--client-min-exit-operators N] [--client-require-cross-operator-pair [0|1]] [--exit-country CC] [--exit-region REGION] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--require-issuer-quorum [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]]
+  ./scripts/easy_node.sh three-machine-soak [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-a-url URL] [--issuer-b-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--rounds N] [--pause-sec N] [--fault-every N] [--fault-command CMD] [--continue-on-fail [0|1]] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--client-min-selection-lines N] [--client-min-entry-operators N] [--client-min-exit-operators N] [--client-require-cross-operator-pair [0|1]] [--exit-country CC] [--exit-region REGION] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--require-issuer-quorum [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]] [--report-file PATH]
   ./scripts/easy_node.sh three-machine-prod-gate [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--control-timeout-sec N] [--control-soak-rounds N] [--control-soak-pause-sec N] [--control-fault-every N] [--control-fault-command CMD] [--control-continue-on-fail [0|1]] [--wg-client-timeout-sec N] [--wg-session-sec N] [--wg-soak-rounds N] [--wg-soak-pause-sec N] [--wg-slo-profile off|recommended|strict] [--wg-max-consecutive-failures N] [--wg-max-round-duration-sec N] [--wg-max-recovery-sec N] [--wg-max-failure-class CLASS=N] [--wg-disallow-unknown-failure-class [0|1]] [--wg-strict-ingress-rehearsal [0|1]] [--wg-min-selection-lines N] [--wg-min-entry-operators N] [--wg-min-exit-operators N] [--wg-min-cross-operator-pairs N] [--wg-fault-every N] [--wg-fault-command CMD] [--wg-continue-on-fail [0|1]] [--wg-validate-summary-json PATH] [--wg-soak-summary-json PATH] [--gate-summary-json PATH] [--fault-every N] [--fault-command CMD] [--continue-on-fail [0|1]] [--strict-distinct [0|1]] [--skip-control-soak [0|1]] [--skip-wg [0|1]] [--skip-wg-soak [0|1]] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH] [--report-file PATH]
   ./scripts/easy_node.sh three-machine-prod-bundle [--bundle-dir PATH] [--preflight-check [0|1]] [--preflight-timeout-sec N] [--preflight-require-root [0|1]] [--bundle-verify-check [0|1]] [--bundle-verify-show-details [0|1]] [--run-report-json PATH] [--run-report-print [0|1]] [--incident-snapshot-on-fail [0|1]] [--incident-snapshot-include-docker-logs [0|1]] [--incident-snapshot-docker-log-lines N] [--incident-snapshot-timeout-sec N] [--incident-snapshot-compose-project NAME] [--incident-snapshot-attach-artifact PATH]... [--signoff-check [0|1]] [--signoff-require-full-sequence [0|1]] [--signoff-require-wg-validate-ok [0|1]] [--signoff-require-wg-soak-ok [0|1]] [--signoff-require-wg-validate-udp-source [0|1]] [--signoff-require-wg-validate-strict-distinct [0|1]] [--signoff-require-wg-soak-diversity-pass [0|1]] [--signoff-min-wg-soak-selection-lines N] [--signoff-min-wg-soak-entry-operators N] [--signoff-min-wg-soak-exit-operators N] [--signoff-min-wg-soak-cross-operator-pairs N] [--signoff-max-wg-soak-failed-rounds N] [--signoff-show-json [0|1]] [three-machine-prod-gate args...]
   ./scripts/easy_node.sh three-machine-prod-signoff [three-machine-prod-bundle args...] [--bundle-dir PATH] [--run-report-json PATH] [--record-result [0|1]] [--pre-real-host-readiness [0|1]] [--pre-real-host-readiness-summary-json PATH] [--runtime-doctor [0|1]] [--runtime-fix [0|1]] [--runtime-fix-prune-wg-only-dir [0|1]] [--runtime-base-port N] [--runtime-client-iface IFACE] [--runtime-exit-iface IFACE] [--runtime-vpn-iface IFACE] [--manual-validation-report [0|1]] [--manual-validation-report-summary-json PATH] [--manual-validation-report-md PATH] [--summary-json PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh three-machine-reminder
-  ./scripts/easy_node.sh three-machine-docker-readiness [--run-validate [0|1]] [--run-soak [0|1]] [--soak-rounds N] [--soak-pause-sec N] [--keep-stacks [0|1]] [--reset-data [0|1]] [--stack-a-base-port N] [--stack-b-base-port N] [--docker-host-alias HOST] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--path-profile speed|balanced|private] [--distinct-operators [0|1]] [--require-issuer-quorum [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]] [--summary-json PATH] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh three-machine-docker-readiness [--run-validate [0|1]] [--run-soak [0|1]] [--soak-rounds N] [--soak-pause-sec N] [--keep-stacks [0|1]] [--reset-data [0|1]] [--stack-a-base-port N] [--stack-b-base-port N] [--docker-host-alias HOST] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--distinct-operators [0|1]] [--require-issuer-quorum [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]] [--summary-json PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh three-machine-docker-readiness-record [three-machine-docker-readiness args...] [--record-result [0|1]] [--manual-validation-report [0|1]] [--manual-validation-report-summary-json PATH] [--manual-validation-report-md PATH] [--rehearsal-summary-json PATH] [--summary-json PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh manual-validation-backlog
   ./scripts/easy_node.sh single-machine-prod-readiness [--run-ci-local 0|1] [--run-beta-preflight 0|1] [--run-deep-suite 0|1] [--run-runtime-fix-record 0|1] [--run-three-machine-docker-readiness auto|0|1] [--three-machine-docker-readiness-run-validate 0|1] [--three-machine-docker-readiness-run-soak 0|1] [--three-machine-docker-readiness-soak-rounds N] [--three-machine-docker-readiness-soak-pause-sec N] [--three-machine-docker-readiness-path-profile speed|balanced|private] [--three-machine-docker-readiness-keep-stacks 0|1] [--three-machine-docker-readiness-summary-json PATH] [--run-profile-compare-campaign-signoff auto|0|1] [--profile-compare-campaign-signoff-refresh-campaign 0|1] [--profile-compare-campaign-signoff-fail-on-no-go 0|1] [--profile-compare-campaign-signoff-reports-dir PATH] [--profile-compare-campaign-signoff-summary-json PATH] [--profile-compare-campaign-signoff-campaign-execution-mode auto|docker|local] [--profile-compare-campaign-signoff-campaign-directory-urls URL[,URL...]] [--profile-compare-campaign-signoff-campaign-bootstrap-directory URL] [--profile-compare-campaign-signoff-campaign-discovery-wait-sec N] [--profile-compare-campaign-signoff-campaign-issuer-url URL] [--profile-compare-campaign-signoff-campaign-entry-url URL] [--profile-compare-campaign-signoff-campaign-exit-url URL] [--profile-compare-campaign-signoff-campaign-start-local-stack auto|0|1] [--run-pre-real-host-readiness auto|0|1] [--run-real-wg-privileged-matrix auto|0|1] [--beta-preflight-privileged auto|0|1] [--summary-json PATH] [--manual-validation-report-summary-json PATH] [--manual-validation-report-md PATH] [--print-summary-json [0|1]]
@@ -330,7 +331,7 @@ Usage:
   ./scripts/easy_node.sh prod-operator-lifecycle-runbook [--action onboard|offboard] [--mode auto|authority|provider] [--public-host HOST] [--operator-id ID] [--issuer-id ID] [--authority-directory URL] [--authority-issuer URL] [--peer-directories URLS] [--bootstrap-directory URL] [--peer-identity-strict 0|1|auto] [--min-peer-operators N] [--client-allowlist [0|1]] [--allow-anon-cred [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]] [--preflight-check [0|1]] [--preflight-timeout-sec N] [--health-check [0|1]] [--health-timeout-sec N] [--directory-url URL] [--verify-relays [0|1]] [--verify-absent [0|1]] [--verify-relay-timeout-sec N] [--verify-relay-min-count N] [--federation-check [0|1]] [--federation-ready-timeout-sec N] [--federation-poll-sec N] [--federation-timeout-sec N] [--federation-require-configured-healthy [0|1]] [--federation-max-cooling-retry-sec N] [--federation-max-peer-sync-age-sec N] [--federation-max-issuer-sync-age-sec N] [--federation-min-peer-success-sources N] [--federation-min-issuer-success-sources N] [--federation-min-peer-source-operators N] [--federation-min-issuer-source-operators N] [--federation-wait-file PATH] [--federation-wait-file-required [0|1]] [--federation-wait-summary-json PATH] [--federation-wait-print-summary-json [0|1]] [--federation-wait-summary-required [0|1]] [--federation-status-fail-on-not-ready [0|1]] [--federation-status-file PATH] [--federation-status-file-required [0|1]] [--federation-status-summary-json PATH] [--federation-status-summary-required [0|1]] [--onboard-invite [0|1]] [--onboard-invite-count N] [--onboard-invite-tier 1|2|3] [--onboard-invite-wait-sec N] [--onboard-invite-fail-open [0|1]] [--onboard-invite-file PATH] [--rollback-on-fail [0|1]] [--rollback-verify-absent [0|1]] [--rollback-verify-timeout-sec N] [--runtime-doctor-on-fail [0|1]] [--runtime-doctor-base-port N] [--runtime-doctor-client-iface IFACE] [--runtime-doctor-exit-iface IFACE] [--runtime-doctor-vpn-iface IFACE] [--runtime-doctor-file PATH] [--runtime-doctor-file-required [0|1]] [--incident-snapshot-on-fail [0|1]] [--incident-bundle-dir PATH] [--incident-timeout-sec N] [--incident-include-docker-logs [0|1]] [--incident-docker-log-lines N] [--incident-summary-required [0|1]] [--incident-bundle-required [0|1]] [--incident-attachment-manifest-required [0|1]] [--incident-attachment-no-skips-required [0|1]] [--incident-attach-min-count N] [--incident-attachment-manifest-min-count N] [--incident-attach-artifact PATH]... [--report-md PATH] [--summary-json PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh incident-snapshot [--bundle-dir PATH] [--mode auto|authority|provider|client] [--env-file PATH] [--directory-url URL] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--compose-project NAME] [--include-docker-logs [0|1]] [--docker-log-lines N] [--timeout-sec N] [--attach-artifact PATH]...
   ./scripts/easy_node.sh incident-snapshot-summary [--bundle-dir PATH] [--bundle-tar PATH] [--summary-json PATH] [--report-md PATH] [--print-report [0|1]] [--print-summary-json [0|1]]
-  ./scripts/easy_node.sh pilot-runbook [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-a-url URL] [--issuer-b-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--rounds N] [--pause-sec N] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--client-min-selection-lines N] [--client-min-entry-operators N] [--client-min-exit-operators N] [--client-require-cross-operator-pair [0|1]] [--path-profile speed|balanced|private] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--require-issuer-quorum [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]] [--bundle-dir PATH]
+  ./scripts/easy_node.sh pilot-runbook [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-a-url URL] [--issuer-b-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--rounds N] [--pause-sec N] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--client-min-selection-lines N] [--client-min-entry-operators N] [--client-min-exit-operators N] [--client-require-cross-operator-pair [0|1]] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--require-issuer-quorum [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]] [--bundle-dir PATH]
   ./scripts/easy_node.sh invite-generate [--issuer-url URL] [--admin-token TOKEN] [--admin-key-file FILE] [--admin-key-id ID] [--count N] [--prefix PREFIX] [--tier 1|2|3] [--wait-sec N]
   ./scripts/easy_node.sh invite-check --key KEY [--issuer-url URL] [--admin-token TOKEN] [--admin-key-file FILE] [--admin-key-id ID]
   ./scripts/easy_node.sh invite-disable --key KEY [--issuer-url URL] [--admin-token TOKEN] [--admin-key-file FILE] [--admin-key-id ID]
@@ -340,7 +341,7 @@ Usage:
   ./scripts/easy_node.sh bootstrap-mtls [--out-dir DIR] [--public-host HOST] [--san HOST] [--days N] [--rotate-leaf [0|1]] [--rotate-ca [0|1]]
   ./scripts/easy_node.sh machine-a-test [--public-host HOST] [--report-file PATH]
   ./scripts/easy_node.sh machine-b-test --peer-directory-a URL [--public-host HOST] [--min-operators N] [--federation-timeout-sec N] [--report-file PATH]
-  ./scripts/easy_node.sh machine-c-test [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--exit-country CC] [--exit-region REGION] [--path-profile speed|balanced|private] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--beta-profile [0|1]] [--prod-profile [0|1]] [--report-file PATH]
+  ./scripts/easy_node.sh machine-c-test [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--exit-country CC] [--exit-region REGION] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--beta-profile [0|1]] [--prod-profile [0|1]] [--report-file PATH]
   ./scripts/easy_node.sh discover-hosts --bootstrap-directory URL [--wait-sec N] [--min-hosts N] [--write-config [0|1]]
 
 Notes:
@@ -360,10 +361,11 @@ Notes:
   - client-test runs client-demo with --no-deps (no local server required on the client machine).
   - profile-compare-local runs repeated client-test rounds across profiles (`speed`, `balanced`, `private`, `speed-1hop`), emits JSON/markdown comparison artifacts, and recommends a default while keeping `speed-1hop` experimental/non-default.
   - profile-compare-trend aggregates multiple profile-compare-local summaries into one recommendation trend report, applies reliability/latency policy thresholds, and keeps `speed-1hop` non-default.
+  - client-vpn-profile-compare runs repeatable real client-vpn-smoke rounds across `1hop|2hop|3hop`, emits JSON/markdown comparison artifacts, and recommends default/latency/privacy profiles while keeping `1hop` experimental/non-default.
   - profile-compare-campaign runs repeat local profile comparisons and auto-aggregates them into one campaign-level recommendation/report bundle.
   - profile-compare-campaign-check applies fail-closed policy gates to campaign artifacts and emits one GO/NO-GO decision for default-profile readiness.
   - profile-compare-campaign-signoff runs optional campaign refresh + campaign-check fail-closed in one command and emits one signoff summary JSON for handoff.
-  - public path-profile contract is `speed|balanced|private` (plus experimental `speed-1hop` on `client-test` only). Legacy aliases `fast|privacy` are still accepted for compatibility but are deprecated.
+  - public path-profile contract is `1hop|2hop|3hop` with compatibility aliases `speed|balanced|private` (plus explicit experimental `speed-1hop` alias on non-strict `client-test`/`client-vpn-up` only). Legacy aliases `fast|privacy` are still accepted for compatibility but are deprecated.
   - wg-only-local-test runs host real-WireGuard integration checks (Linux + root required).
   - real-wg-privileged-matrix runs the host Linux root real-WG privileged matrix directly.
   - real-wg-privileged-matrix-record wraps that matrix into one recorded manual-validation step and refreshes the shared readiness report automatically.
@@ -783,13 +785,13 @@ normalize_path_profile() {
     speed|fast)
       printf '%s\n' "fast"
       ;;
-    speed-1hop|speed1hop|fast-1hop|fast1hop|onehop|1hop)
+    speed-1hop|speed1hop|fast-1hop|fast1hop|onehop|1hop|1-hop|hop1|hop-1)
       printf '%s\n' "speed-1hop"
       ;;
-    balanced)
+    balanced|2hop|2-hop|hop2|hop-2|twohop)
       printf '%s\n' "balanced"
       ;;
-    private|privacy)
+    private|privacy|3hop|3-hop|hop3|hop-3|threehop)
       printf '%s\n' "privacy"
       ;;
     "")
@@ -7611,6 +7613,11 @@ profile_compare_trend() {
   "$trend_script" "$@"
 }
 
+client_vpn_profile_compare() {
+  local compare_script="${CLIENT_VPN_PROFILE_COMPARE_SCRIPT:-$ROOT_DIR/scripts/client_vpn_profile_compare.sh}"
+  "$compare_script" "$@"
+}
+
 profile_compare_campaign() {
   local campaign_script="${PROFILE_COMPARE_CAMPAIGN_SCRIPT:-$ROOT_DIR/scripts/profile_compare_campaign.sh}"
   "$campaign_script" "$@"
@@ -9620,6 +9627,7 @@ client_test() {
   local locality_country_bias_set=0
   local locality_region_bias_set=0
   local locality_region_prefix_bias_set=0
+  local speed_onehop_profile=0
   local force_direct_exit_set=0
 
   while [[ $# -gt 0 ]]; do
@@ -9784,7 +9792,7 @@ client_test() {
 
   local normalized_path_profile=""
   normalized_path_profile="$(normalize_path_profile "$path_profile")" || {
-    echo "client-test requires --path-profile to be one of: speed, speed-1hop, balanced, private (legacy aliases: fast, privacy)"
+    echo "client-test requires --path-profile to be one of: 1hop, 2hop, 3hop, speed, speed-1hop, balanced, private (legacy aliases: fast, privacy)"
     exit 2
   }
   local speed_onehop_profile=0
@@ -9874,7 +9882,7 @@ client_test() {
     beta_profile="1"
   fi
   if [[ "$speed_onehop_profile" == "1" && ( "$beta_profile" == "1" || "$prod_profile" == "1" ) ]]; then
-    echo "client-test --path-profile speed-1hop requires --beta-profile 0 and --prod-profile 0"
+    echo "client-test --path-profile 1hop/speed-1hop requires --beta-profile 0 and --prod-profile 0"
     exit 2
   fi
   if [[ -z "$allow_direct_exit_fallback" ]]; then
@@ -10713,7 +10721,7 @@ client_vpn_status() {
     return 0
   fi
 
-  local pid iface log_file key_file trust_file trust_scope proxy_addr directory_urls issuer_url issuer_urls entry_url exit_url subject prod_profile beta_profile
+  local pid iface log_file key_file trust_file trust_scope proxy_addr directory_urls issuer_url issuer_urls entry_url exit_url subject path_profile prod_profile beta_profile
   pid="$(identity_value "$state_file" "CLIENT_VPN_PID")"
   iface="$(identity_value "$state_file" "CLIENT_VPN_IFACE")"
   log_file="$(identity_value "$state_file" "CLIENT_VPN_LOG_FILE")"
@@ -10727,6 +10735,7 @@ client_vpn_status() {
   entry_url="$(identity_value "$state_file" "CLIENT_VPN_ENTRY_URL")"
   exit_url="$(identity_value "$state_file" "CLIENT_VPN_EXIT_URL")"
   subject="$(identity_value "$state_file" "CLIENT_VPN_SUBJECT")"
+  path_profile="$(identity_value "$state_file" "CLIENT_VPN_PATH_PROFILE")"
   prod_profile="$(identity_value "$state_file" "CLIENT_VPN_PROD_PROFILE")"
   beta_profile="$(identity_value "$state_file" "CLIENT_VPN_BETA_PROFILE")"
 
@@ -10741,6 +10750,7 @@ client_vpn_status() {
   echo "  interface: ${iface:-unknown}"
   echo "  proxy_addr: ${proxy_addr:-unknown}"
   echo "  subject: ${subject:-none}"
+  echo "  path_profile: ${path_profile:-default}"
   echo "  beta_profile: ${beta_profile:-0}"
   echo "  prod_profile: ${prod_profile:-0}"
   echo "  directory_urls: ${directory_urls:-unknown}"
@@ -11476,12 +11486,11 @@ client_vpn_up() {
 
   local normalized_path_profile=""
   normalized_path_profile="$(normalize_path_profile "$path_profile")" || {
-    echo "client-vpn-up requires --path-profile to be one of: speed, balanced, private (legacy aliases: fast, privacy)"
+    echo "client-vpn-up requires --path-profile to be one of: 1hop, 2hop, 3hop, speed, balanced, private (legacy aliases: fast, privacy)"
     exit 2
   }
   if [[ "$normalized_path_profile" == "speed-1hop" ]]; then
-    echo "client-vpn-up does not support --path-profile speed-1hop (experimental client-test mode only)"
-    exit 2
+    speed_onehop_profile=1
   fi
   if [[ -n "$normalized_path_profile" ]]; then
     local profile_values profile_distinct profile_distinct_countries profile_locality_soft profile_country_bias profile_region_bias profile_region_prefix_bias
@@ -11505,6 +11514,9 @@ client_vpn_up() {
     if [[ "$locality_region_prefix_bias_set" -eq 0 ]]; then
       locality_region_prefix_bias="$profile_region_prefix_bias"
     fi
+  fi
+  if [[ "$speed_onehop_profile" == "1" && "$distinct_set" -eq 0 ]]; then
+    require_distinct_operators="0"
   fi
 
   ensure_client_vpn_deps_or_die
@@ -11630,6 +11642,14 @@ client_vpn_up() {
     if [[ "$min_operators_set" -eq 0 ]] && [[ "$directory_urls" == *,* ]]; then
       min_operators="2"
     fi
+  fi
+  if [[ "$speed_onehop_profile" == "1" && ( "$beta_profile" == "1" || "$prod_profile" == "1" ) ]]; then
+    echo "client-vpn-up --path-profile 1hop/speed-1hop requires --beta-profile 0 and --prod-profile 0"
+    exit 2
+  fi
+  if [[ "$speed_onehop_profile" == "1" && "$require_distinct_operators" == "1" ]]; then
+    echo "client-vpn-up --path-profile 1hop/speed-1hop requires --distinct-operators 0 (one-hop direct-exit mode)"
+    exit 2
   fi
 
   if [[ -n "$bootstrap_directory" ]]; then
@@ -11866,6 +11886,12 @@ client_vpn_up() {
     "BETA_STRICT_MODE=$beta_profile"
     "PROD_STRICT_MODE=$prod_profile"
   )
+  if [[ "$speed_onehop_profile" == "1" ]]; then
+    env_vars+=(
+      "CLIENT_ALLOW_DIRECT_EXIT_FALLBACK=1"
+      "CLIENT_FORCE_DIRECT_EXIT=1"
+    )
+  fi
   if [[ -n "$client_subject" ]]; then
     env_vars+=("CLIENT_SUBJECT=$client_subject")
   fi
@@ -11983,6 +12009,7 @@ CLIENT_VPN_ENTRY_URL=$entry_url
 CLIENT_VPN_EXIT_URL=$exit_url
 CLIENT_VPN_EXIT_WG_PUBKEY=$exit_wg_pub
 CLIENT_VPN_SUBJECT=$client_subject
+CLIENT_VPN_PATH_PROFILE=$normalized_path_profile
 CLIENT_VPN_BETA_PROFILE=$beta_profile
 CLIENT_VPN_PROD_PROFILE=$prod_profile
 EOF_STATE
@@ -11994,6 +12021,7 @@ EOF_STATE
   echo "  allowed_ips: $allowed_ips"
   echo "  install_route: $install_route"
   echo "  subject: ${client_subject:-none}"
+  echo "  path_profile: ${normalized_path_profile:-default}"
   echo "  directory_urls: $directory_urls"
   echo "  trusted_keys_file: $trusted_keys_file"
   echo "  trust_scope: $trust_scope_mode"
@@ -12126,6 +12154,10 @@ main() {
     client-vpn-smoke)
       shift
       client_vpn_smoke "$@"
+      ;;
+    client-vpn-profile-compare)
+      shift
+      client_vpn_profile_compare "$@"
       ;;
     client-vpn-status)
       shift

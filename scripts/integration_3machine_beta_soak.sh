@@ -39,7 +39,7 @@ Usage:
     [--client-require-cross-operator-pair [0|1]] \
     [--exit-country CC] \
     [--exit-region REGION] \
-    [--path-profile speed|balanced|private] \
+    [--path-profile 1hop|2hop|3hop|speed|balanced|private] \
     [--distinct-operators [0|1]] \
     [--distinct-countries [0|1]] \
     [--locality-soft-bias [0|1]] \
@@ -80,10 +80,13 @@ normalize_path_profile() {
     speed|fast)
       printf '%s\n' "fast"
       ;;
-    balanced)
+    speed-1hop|speed1hop|fast-1hop|fast1hop|onehop|1hop|1-hop|hop1|hop-1)
+      printf '%s\n' "speed-1hop"
+      ;;
+    balanced|2hop|2-hop|hop2|hop-2|twohop)
       printf '%s\n' "balanced"
       ;;
-    private|privacy)
+    private|privacy|3hop|3-hop|hop3|hop-3|threehop)
       printf '%s\n' "privacy"
       ;;
     "")
@@ -101,6 +104,10 @@ path_profile_values() {
   case "$profile" in
     fast)
       # distinct_operators|distinct_countries|locality_soft_bias|country_bias|region_bias|region_prefix_bias
+      printf '%s\n' "1|0|1|1.80|1.35|1.15"
+      ;;
+    speed-1hop)
+      # speed-1hop uses speed locality defaults; easy_node applies direct-exit policy.
       printf '%s\n' "1|0|1|1.80|1.35|1.15"
       ;;
     privacy)
@@ -395,7 +402,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 normalized_path_profile="$(normalize_path_profile "$path_profile")" || {
-  echo "--path-profile must be one of: speed, balanced, private (legacy aliases: fast, privacy)"
+  echo "--path-profile must be one of: 1hop, 2hop, 3hop, speed, balanced, private (legacy aliases: fast, privacy)"
   exit 2
 }
 if [[ -z "$normalized_path_profile" && "$beta_profile" == "1" \

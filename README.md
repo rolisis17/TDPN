@@ -478,6 +478,10 @@ sudo ./scripts/easy_node.sh prod-wg-strict-ingress-rehearsal \
 - `docs/prod-pilot-cohort-runbook.md` (sustained multi-round pilot runbook and cohort pass/fail policy)
 - `docs/manual-validation-backlog.md` (deferred real-host validation queue)
 - `docs/blockchain-bootstrap-validator-plan.md` (deferred blockchain bootstrap: manual governance phase, validator eligibility formula skeleton, epoch selection policy, and graduation criteria)
+- `docs/global-privacy-mesh-track.md` (micro-relay + 1-hop/2-hop/3-hop planning track, with incremental implementation milestones)
+- `docs/exit-node-safety-baseline-v1.md` (minimum safety controls for hardened exit operators)
+- `docs/exit-node-safety-guide.md` (operator-facing practical exit safety workflow)
+- `docs/client-safety-guide.md` (client-side safety defaults and profile tradeoff guidance)
 - `./scripts/easy_node.sh manual-validation-status --show-json 1` (current real-host readiness state: runtime hygiene + recorded manual checks, now including direct pointers to the latest failed incident bundle when a recorded smoke/signoff run captured one)
 - `./scripts/easy_node.sh manual-validation-report --print-report 1 --print-summary-json 1` (generate one shareable markdown + JSON readiness handoff artifact from the current real-host validation state, with latest failed incident pointers when present and direct bundle attachment paths for refreshed readiness-report artifacts when a failed run captured them)
 - `./scripts/easy_node.sh roadmap-progress-report --refresh-manual-validation 1 --print-report 1 --print-summary-json 1` (one-command roadmap execution snapshot for regular team handoffs, including the VPN RC-done phase signal, explicit pending real-host checks, current VPN gate stage, and deferred blockchain-track policy note)
@@ -931,3 +935,6 @@ Project status detail:
 - `docs/mvp-status.md`
 - `docs/exit-selection-plan.md` (planned country-aware + reputation-weighted exit selection)
 - `docs/testing-guide.md` (how to test end-to-end)
+- `docs/global-privacy-mesh-track.md` (planned micro-relay mesh track and hop-mode expansion)
+- `docs/exit-node-safety-baseline-v1.md` and `docs/exit-node-safety-guide.md` (exit operator safety policy + runbook)
+- `docs/client-safety-guide.md` (safe client operation guidance)

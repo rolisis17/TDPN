@@ -131,8 +131,9 @@ Path profile presets for client routing tests:
 - Speed: `--distinct-operators 1 --distinct-countries 0 --locality-soft-bias 1 --country-bias 1.80 --region-bias 1.35 --region-prefix-bias 1.15`
 - Balanced: `--distinct-operators 1 --distinct-countries 0 --locality-soft-bias 1 --country-bias 1.50 --region-bias 1.25 --region-prefix-bias 1.10`
 - Private: `--distinct-operators 1 --distinct-countries 1 --locality-soft-bias 0`
-- Shortcut: use `--path-profile speed|balanced|private` (legacy aliases `fast|privacy` still work) on validate/soak/runbook wrappers; explicit flags still override preset values.
-- Experimental 1-hop benchmark mode (client-test only): `--path-profile speed-1hop` enables direct-exit mode in non-strict runs (`--beta-profile 0 --prod-profile 0`) and is intentionally blocked in strict/prod flows.
+- Shortcut: use `--path-profile 1hop|2hop|3hop` (compatibility aliases `speed|balanced|private`, legacy `fast|privacy` still work) on validate/soak/runbook wrappers; explicit flags still override preset values.
+- Experimental 1-hop benchmark mode (non-strict only): `--path-profile 1hop` (or `speed-1hop`) enables direct-exit mode in `client-test` and `client-vpn-up` when `--beta-profile 0 --prod-profile 0`, and is intentionally blocked in strict/prod flows.
+- Planned future track: optional micro-relay-based 3-hop mode is tracked in `docs/global-privacy-mesh-track.md` and is not part of the current production validation baseline yet.
 
 Single-machine profile comparison (decision support for default profile):
 
@@ -159,6 +160,33 @@ Aggregate profile decision trend across multiple local comparison runs:
   --report-md .easy-node-logs/profile_compare_trend.md \
   --print-summary-json 1
 ```
+
+Real VPN profile comparison (host WireGuard mode, route-profile decision support):
+
+```bash
+sudo ./scripts/easy_node.sh client-vpn-profile-compare \
+  --profiles 1hop,2hop,3hop \
+  --rounds 3 \
+  --pause-sec 1 \
+  --min-pass-rate-pct 95 \
+  --directory-urls https://A_HOST:8081,https://B_HOST:8081 \
+  --issuer-url https://A_HOST:8082 \
+  --entry-url https://A_HOST:8083 \
+  --exit-url https://A_HOST:8084 \
+  --subject INVITE_KEY \
+  --interface wgvpn0 \
+  --beta-profile 0 \
+  --prod-profile 0 \
+  --public-ip-url https://api.ipify.org \
+  --country-url https://ipinfo.io/country \
+  --summary-json .easy-node-logs/client_vpn_profile_compare.json \
+  --report-md .easy-node-logs/client_vpn_profile_compare.md \
+  --print-summary-json 1
+```
+
+Notes:
+- `1hop` is experimental and non-default by policy; strict/prod runs skip or fail-close for `1hop` as designed.
+- This runner forces smoke runs to be non-recording (`--record-result 0 --manual-validation-report 0`) so benchmark loops do not overwrite manual-validation state.
 
 Run a repeatable campaign (multiple local comparisons + auto trend aggregation):
 

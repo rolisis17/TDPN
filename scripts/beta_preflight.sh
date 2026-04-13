@@ -38,7 +38,9 @@ run_step "runtime fix" ./scripts/integration_runtime_fix.sh
 run_step "runtime fix record" ./scripts/integration_runtime_fix_record.sh
 run_step "single-machine prod readiness" ./scripts/integration_single_machine_prod_readiness.sh
 run_step "client-vpn smoke" ./scripts/integration_client_vpn_smoke.sh
+run_step "client-vpn profile compare" ./scripts/integration_client_vpn_profile_compare.sh
 run_step "client-vpn trust-scope wiring" ./scripts/integration_client_vpn_trust_scope_wiring.sh
+run_step "client-vpn path-profile wiring" ./scripts/integration_client_vpn_path_profile_wiring.sh
 run_step "client-vpn trust-reset" ./scripts/integration_client_vpn_trust_reset.sh
 run_step "three-machine prod signoff" ./scripts/integration_three_machine_prod_signoff.sh
 run_step "wg-only stack selftest record" ./scripts/integration_wg_only_stack_selftest_record.sh

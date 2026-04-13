@@ -99,9 +99,11 @@ normalize_profile() {
   profile="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
   case "$profile" in
     speed|balanced|private|speed-1hop) printf '%s\n' "$profile" ;;
+    2hop|2-hop|hop2|hop-2|twohop) printf '%s\n' "balanced" ;;
+    3hop|3-hop|hop3|hop-3|threehop) printf '%s\n' "private" ;;
     fast) printf '%s\n' "speed" ;;
     privacy) printf '%s\n' "private" ;;
-    speed1hop|onehop|1hop|fast-1hop|fast1hop) printf '%s\n' "speed-1hop" ;;
+    speed1hop|onehop|1hop|1-hop|hop1|hop-1|fast-1hop|fast1hop) printf '%s\n' "speed-1hop" ;;
     *) printf '%s\n' "$profile" ;;
   esac
 }

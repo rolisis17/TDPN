@@ -21,9 +21,10 @@ Next 5 roadmap execution steps:
 5. Run comparative pilot metrics and decide default behavior from results.
 
 Status update (March 24, 2026):
-- `speed-1hop` is now available in `client-test` as an explicit non-strict experimental mode (`--path-profile speed-1hop`), with guardrails that fail closed in strict/beta/prod flows.
+- `speed-1hop` is now available in `client-test` and `client-vpn-up` as an explicit non-strict experimental mode (`--path-profile speed-1hop`), with guardrails that fail closed in strict/beta/prod flows.
 - `profile-compare-local` is now available (`./scripts/easy_node.sh profile-compare-local ...`) to run repeatable single-machine profile comparisons with JSON/markdown artifacts and a policy-based default recommendation (never auto-defaulting `speed-1hop`).
 - `profile-compare-trend` is now available (`./scripts/easy_node.sh profile-compare-trend ...`) to aggregate multiple local comparison summaries into one reliability/latency trend recommendation (still keeping `speed-1hop` non-default).
+- `client-vpn-profile-compare` is now available (`./scripts/easy_node.sh client-vpn-profile-compare ...`) to run repeatable real host `client-vpn-smoke` rounds across `1hop/2hop/3hop` and emit one default/latency/privacy recommendation bundle while keeping `1hop` experimental non-default.
 - `profile-compare-campaign` is now available (`./scripts/easy_node.sh profile-compare-campaign ...`) to run repeatable multi-run local comparison campaigns and auto-produce a campaign-level trend recommendation bundle.
 - `profile-compare-campaign-check` is now available (`./scripts/easy_node.sh profile-compare-campaign-check ...`) to enforce fail-closed policy thresholds on campaign artifacts and output a GO/NO-GO default-profile decision.
 - `profile-compare-campaign-signoff` is now available (`./scripts/easy_node.sh profile-compare-campaign-signoff ...`) to run optional campaign refresh + fail-closed check in one command and emit one signoff summary artifact for default-profile handoff decisions.
@@ -40,11 +41,17 @@ Status update (March 24, 2026):
 - easy-node help/forwarding for `manual-validation-status` and `manual-validation-report` now explicitly includes `--profile-compare-signoff-summary-json` and overlay options, with wiring/integration checks to keep that operator contract stable.
 - easy launcher advanced menu now includes a dedicated `single-machine-prod-readiness` path (option 75), so one-host production sweeps are available without manual command assembly.
 - `vpn-rc-standard-path` is now available as one locked VPN RC operator path (`single-machine-prod-readiness` strict defaults + `roadmap-progress-report` refresh), and easy launcher advanced menu now includes that same flow as option 76.
-- profile contract guard is now wired in local gates (`integration_path_profile_contract.sh` in `ci_local` / `beta_preflight`) to keep public profile UX/API naming fixed at `speed|balanced|private` (`speed-1hop` experimental on `client-test` only), while retaining `fast|privacy` as compatibility aliases.
+- profile contract guard is now wired in local gates (`integration_path_profile_contract.sh` in `ci_local` / `beta_preflight`) to keep public profile UX/API naming fixed at `1hop|2hop|3hop` with compatibility aliases `speed|balanced|private` (`speed-1hop` explicit experimental alias on non-strict `client-test`/`client-vpn-up`), while retaining `fast|privacy` as legacy compatibility aliases.
 - launcher profile/expert split is now enforced as a contract: simple client flows stay preset-driven, while explicit policy overrides are isolated to advanced option 34 (`Client VPN up (real mode, expert/manual)`), with wiring/runtime coverage to prevent regressions.
 - `three-machine-docker-readiness` is now available (`./scripts/easy_node.sh three-machine-docker-readiness ...`) to spin up two independent dockerized operator stacks on one host and run machine-C style validate/soak control-plane rehearsal checks while real multi-host signoff stays pending.
 - `three-machine-docker-readiness-record` is now available (`./scripts/easy_node.sh three-machine-docker-readiness-record ...`) to wrap that rehearsal in one recorded manual-validation receipt and keep a durable summary/log artifact.
 - `real-wg-privileged-matrix-record` is now available (`sudo ./scripts/easy_node.sh real-wg-privileged-matrix-record ...`) to wrap Linux root real-WG matrix validation into one recorded manual-validation receipt, surfaced as a non-blocking optional gate in the readiness handoff.
+- planning track docs for a future "Global Privacy Mesh" architecture are now added:
+  - `docs/global-privacy-mesh-track.md`
+  - `docs/exit-node-safety-baseline-v1.md`
+  - `docs/exit-node-safety-guide.md`
+  - `docs/client-safety-guide.md`
+  These establish micro-relay and 1-hop/2-hop/3-hop direction, while keeping current production work on the stable 2-hop path.
 
 Strictly necessary vs optional (current project posture):
 - strictly necessary for daily operation: start server, connect client, preflight checks, status/down, invite generation on authority, and one repeatable automated signoff path
@@ -83,6 +90,33 @@ Exit criteria:
 - production pilot cohort runs for sustained period without critical incidents
 - failure classes and recovery SLOs are measured and enforced
 - operator onboarding/offboarding process is documented and repeatable
+
+## Parallel Architecture Track: Global Privacy Mesh (Planning + Incremental Build)
+
+Goal: evolve from fixed 2-hop topology toward an optional micro-relay mesh model,
+without regressing current production-grade VPN stability work.
+
+Scope (current):
+- define role model for `client`, `micro-relay`, `exit`, and `validator`
+- define explicit user-facing hop modes (`1-hop`, `2-hop`, `3-hop`) with clear tradeoff labeling
+- define safe rotation policy for relay/exit selection (bounded stickiness + jitter)
+- define operator and client safety baselines for broader participation
+
+Guardrails:
+- keep blockchain/validator logic out of packet forwarding critical path
+- keep 2-hop balanced mode as stable default until comparative metrics justify changes
+- keep exit role hardened and specialized; micro-relay rollout should not imply default exit participation
+
+Track docs:
+- `docs/global-privacy-mesh-track.md`
+- `docs/exit-node-safety-baseline-v1.md`
+- `docs/exit-node-safety-guide.md`
+- `docs/client-safety-guide.md`
+
+Exit criteria for this track to affect default behavior:
+- multi-run comparative evidence for latency/reliability/privacy across hop profiles
+- abuse handling quality unchanged or improved under micro-relay participation
+- no regression in production-grade VPN RC checks
 
 ## Phase 3: Cross-Platform Clients (After Linux Beta Stability)
 
