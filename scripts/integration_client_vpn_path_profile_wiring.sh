@@ -51,6 +51,10 @@ check_pattern '"CLIENT_ALLOW_DIRECT_EXIT_FALLBACK=1"' \
   "client-vpn-up missing direct-exit fallback wiring for 1hop/speed-1hop"
 check_pattern '"CLIENT_FORCE_DIRECT_EXIT=1"' \
   "client-vpn-up missing force-direct-exit wiring for 1hop/speed-1hop"
+check_pattern '"CLIENT_SESSION_REUSE=1"' \
+  "client-vpn-up missing session reuse wiring for 1hop/speed-1hop"
+check_pattern '"CLIENT_STICKY_PAIR_SEC=300"' \
+  "client-vpn-up missing sticky-pair wiring for 1hop/speed-1hop"
 
 echo "[client-vpn-path-profile] status/state visibility"
 check_pattern 'CLIENT_VPN_PATH_PROFILE=\$normalized_path_profile' \

@@ -11890,6 +11890,8 @@ client_vpn_up() {
     env_vars+=(
       "CLIENT_ALLOW_DIRECT_EXIT_FALLBACK=1"
       "CLIENT_FORCE_DIRECT_EXIT=1"
+      "CLIENT_SESSION_REUSE=1"
+      "CLIENT_STICKY_PAIR_SEC=300"
     )
   fi
   if [[ -n "$client_subject" ]]; then
