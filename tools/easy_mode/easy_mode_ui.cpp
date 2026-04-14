@@ -1123,6 +1123,12 @@ void quickClientConnect(const std::string &script, ABHosts &hosts) {
         << " --interface " << shellEscape(iface)
         << " --ready-timeout-sec " << shellEscape(readyTimeout)
         << " --cleanup-all 1";
+    if (oneHopProfile) {
+      // Avoid default-route hijack loops in experimental direct-exit quick mode.
+      cmd << " --install-route 0";
+      std::cout << "1-hop quick mode: forcing --install-route 0 for stable control-plane connectivity.\n";
+      std::cout << "Use expert option 34 if you want to override route behavior manually.\n";
+    }
     appendPathProfilePreset(cmd, pathProfile);
     if (!isRootUser()) {
       bool useSudo = true;
