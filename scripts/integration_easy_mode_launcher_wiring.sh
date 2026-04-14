@@ -173,9 +173,9 @@ check_cpp 'three-machine-prod-bundle' "launcher wiring failed: options 36/37 com
 check_cpp 'prod-gate-signoff' "launcher wiring failed: option 38 command missing"
 check_cpp 'prod-pilot-runbook' "launcher wiring failed: option 39 command missing"
 check_cpp 'Run pre-real-host readiness first\?' "launcher wiring failed: option 39 pre-real-host readiness prompt missing"
-check_cpp 'Path profile for machine C test \(1=Speed, 2=Balanced, 3=Private\)' \
+check_cpp 'Path profile for machine C test \(1=1-hop Speed, 2=2-hop Balanced, 3=3-hop Private\)' \
   "launcher wiring failed: machine C test path profile prompt missing"
-check_cpp 'Path profile for machine C soak \(1=Speed, 2=Balanced, 3=Private\)' \
+check_cpp 'Path profile for machine C soak \(1=1-hop Speed, 2=2-hop Balanced, 3=3-hop Private\)' \
   "launcher wiring failed: machine C soak path profile prompt missing"
 check_cpp 'appendPathProfilePreset\(cmd, pathProfile\);' \
   "launcher wiring failed: profile-first forwarding helper is not used in launcher command builders"

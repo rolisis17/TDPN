@@ -500,23 +500,23 @@ struct PathProfile {
   std::string regionPrefixBias;
 };
 
-PathProfile choosePathProfile(const std::string &prompt = "Path profile (1=Speed, 2=Balanced, 3=Private)", const std::string &def = "2") {
+PathProfile choosePathProfile(const std::string &prompt = "Path profile (1=1-hop Speed, 2=2-hop Balanced, 3=3-hop Private)", const std::string &def = "2") {
   std::cout << "Path profile presets:\n";
-  std::cout << "  1) Speed     : lower latency, soft-locality bias enabled, distinct operators\n";
-  std::cout << "  2) Balanced  : moderate locality bias, distinct operators\n";
-  std::cout << "  3) Private   : enforce distinct countries, locality bias disabled\n";
+  std::cout << "  1) 1-hop Speed    : experimental direct-exit, lowest latency, lowest privacy\n";
+  std::cout << "  2) 2-hop Balanced : moderate locality bias, distinct operators (default)\n";
+  std::cout << "  3) 3-hop Private  : enforce distinct countries, locality bias disabled\n";
   std::string choice = trim(readLine(prompt, def));
   if (choice != "1" && choice != "2" && choice != "3") {
-    std::cout << "invalid profile choice; using Balanced\n";
+    std::cout << "invalid profile choice; using 2-hop Balanced\n";
     choice = "2";
   }
   if (choice == "1") {
-    return {"speed", true, false, true, "1.80", "1.35", "1.15"};
+    return {"1hop", false, false, true, "1.80", "1.35", "1.15"};
   }
   if (choice == "3") {
-    return {"private", true, true, false, "1.60", "1.25", "1.10"};
+    return {"3hop", true, true, false, "1.60", "1.25", "1.10"};
   }
-  return {"balanced", true, false, true, "1.50", "1.25", "1.10"};
+  return {"2hop", true, false, true, "1.50", "1.25", "1.10"};
 }
 
 void appendPathProfileFlags(std::ostringstream &cmd, const PathProfile &profile) {
@@ -530,6 +530,21 @@ void appendPathProfileFlags(std::ostringstream &cmd, const PathProfile &profile)
 
 void appendPathProfilePreset(std::ostringstream &cmd, const PathProfile &profile) {
   cmd << " --path-profile " << shellEscape(profile.label);
+}
+
+bool isOneHopPathProfile(const PathProfile &profile) {
+  return profile.label == "1hop" || profile.label == "speed-1hop";
+}
+
+void enforceOneHopNonStrict(PathProfile &profile, bool &betaProfile, bool &prodProfile, const std::string &flowLabel) {
+  if (!isOneHopPathProfile(profile)) {
+    return;
+  }
+  if (betaProfile || prodProfile) {
+    std::cout << "1-hop profile is experimental and non-strict only; forcing beta/prod off for " << flowLabel << ".\n";
+  }
+  betaProfile = false;
+  prodProfile = false;
 }
 
 struct TestSuite {
@@ -879,10 +894,11 @@ void runTestsInteractive(const std::string &root, const std::string &script, ABH
       std::string region = readLine("Preferred exit region (optional)", "");
       bool betaProfile = parseYesNo(readLine("Enable beta profile defaults? (Y/n)", "y"), true);
       bool prodProfile = parseYesNo(readLine("Enable PROD profile (mTLS + strict fail-closed)? (y/N)", "n"), false);
-      PathProfile pathProfile = choosePathProfile("Path profile for machine C test (1=Speed, 2=Balanced, 3=Private)", "2");
+      PathProfile pathProfile = choosePathProfile("Path profile for machine C test (1=1-hop Speed, 2=2-hop Balanced, 3=3-hop Private)", "2");
       if (prodProfile) {
         betaProfile = true;
       }
+      enforceOneHopNonStrict(pathProfile, betaProfile, prodProfile, "machine C test");
       std::string report = readLine("Report file path (optional)", "");
       if (autoDiscover && bootstrapDir.empty()) {
         std::cout << "bootstrap directory URL is required\n";
@@ -953,10 +969,11 @@ void runTestsInteractive(const std::string &root, const std::string &script, ABH
       bool continueOnFail = parseYesNo(readLine("Continue when a round fails? (y/N)", "n"), false);
       bool betaProfile = parseYesNo(readLine("Enable beta profile defaults? (Y/n)", "y"), true);
       bool prodProfile = parseYesNo(readLine("Enable PROD profile (mTLS + strict fail-closed)? (y/N)", "n"), false);
-      PathProfile pathProfile = choosePathProfile("Path profile for machine C soak (1=Speed, 2=Balanced, 3=Private)", "2");
+      PathProfile pathProfile = choosePathProfile("Path profile for machine C soak (1=1-hop Speed, 2=2-hop Balanced, 3=3-hop Private)", "2");
       if (prodProfile) {
         betaProfile = true;
       }
+      enforceOneHopNonStrict(pathProfile, betaProfile, prodProfile, "machine C soak");
       std::string country = readLine("Preferred exit country code (optional)", "");
       std::string region = readLine("Preferred exit region (optional)", "");
       std::string report = readLine("Report file path (optional)", "");
@@ -1025,18 +1042,24 @@ void quickClientConnect(const std::string &script, ABHosts &hosts) {
                                  (!hosts.bHost.empty() ? endpointFromHost(hosts.bHost, 8081) : "");
   std::string bootstrapDir = normalizeEndpointURL(readLine("Server IP/host or bootstrap URL", defaultBootstrap), 8081);
   std::string inviteKey = trim(readLine("Invite key", ""));
-  PathProfile pathProfile = choosePathProfile("Connection profile (1=Speed, 2=Balanced, 3=Private)", "2");
+  PathProfile pathProfile = choosePathProfile("Connection profile (1=1-hop Speed, 2=2-hop Balanced, 3=3-hop Private)", "2");
   bool realVPN = parseYesNo(readLine("Use real VPN mode (host WireGuard interface)? (Y/n)", "y"), true);
   bool customize = parseYesNo(readLine("Need expert client overrides now? (y/N)", "n"), false);
   std::string discoveryWait = "20";
   bool prodProfile = realVPN;
+  bool betaProfile = true;
   if (customize) {
     discoveryWait = readLine("Discovery wait sec", discoveryWait);
     prodProfile = parseYesNo(
         readLine("Use PROD profile (mTLS + strict fail-closed)? (" + std::string(prodProfile ? "Y/n" : "y/N") + ")",
                  prodProfile ? "y" : "n"),
         prodProfile);
+    if (prodProfile) {
+      betaProfile = true;
+    }
   }
+  enforceOneHopNonStrict(pathProfile, betaProfile, prodProfile, "quick client connect");
+  const bool oneHopProfile = isOneHopPathProfile(pathProfile);
   if (bootstrapDir.empty()) {
     std::cout << "server IP/host is required\n";
     return;
@@ -1065,10 +1088,10 @@ void quickClientConnect(const std::string &script, ABHosts &hosts) {
                    << " --discovery-wait-sec " << shellEscape(discoveryWait)
                    << " --prod-profile " << (prodProfile ? "1" : "0")
                    << " --interface " << shellEscape(iface)
-                   << " --operator-floor-check 1"
-                   << " --operator-min-operators 2"
-                   << " --issuer-quorum-check 1"
-                   << " --issuer-min-operators 2";
+                   << " --operator-floor-check " << (oneHopProfile ? "0" : "1")
+                   << " --operator-min-operators " << (oneHopProfile ? "1" : "2")
+                   << " --issuer-quorum-check " << (oneHopProfile ? "0" : "1")
+                   << " --issuer-min-operators " << (oneHopProfile ? "1" : "2");
       if (!isRootUser()) {
         bool useSudoPreflight = true;
         if (customize) {
@@ -1090,13 +1113,13 @@ void quickClientConnect(const std::string &script, ABHosts &hosts) {
         << " --discovery-wait-sec " << shellEscape(discoveryWait)
         << " --subject " << shellEscape(inviteKey)
         << " --min-sources 1"
-        << " --min-operators 2"
-        << " --operator-floor-check 1"
-        << " --operator-min-operators 2"
-        << " --beta-profile 1"
+        << " --min-operators " << (oneHopProfile ? "1" : "2")
+        << " --operator-floor-check " << (oneHopProfile ? "0" : "1")
+        << " --operator-min-operators " << (oneHopProfile ? "1" : "2")
+        << " --beta-profile " << (betaProfile ? "1" : "0")
         << " --prod-profile " << (prodProfile ? "1" : "0")
-        << " --issuer-quorum-check 1"
-        << " --issuer-min-operators 2"
+        << " --issuer-quorum-check " << (oneHopProfile ? "0" : "1")
+        << " --issuer-min-operators " << (oneHopProfile ? "1" : "2")
         << " --interface " << shellEscape(iface)
         << " --ready-timeout-sec " << shellEscape(readyTimeout)
         << " --cleanup-all 1";
@@ -1133,7 +1156,7 @@ void quickClientConnect(const std::string &script, ABHosts &hosts) {
         << " --subject " << shellEscape(inviteKey)
         << " --min-sources 1"
         << " --timeout-sec " << shellEscape(timeoutSec)
-        << " --beta-profile 1"
+        << " --beta-profile " << (betaProfile ? "1" : "0")
         << " --prod-profile " << (prodProfile ? "1" : "0");
     appendPathProfilePreset(cmd, pathProfile);
     runCommand(cmd.str());
@@ -1163,6 +1186,11 @@ void quickServerConnect(const std::string &root, const std::string &script, ABHo
   bool runPreflight = true;
   std::string peerIdentityStrict = "auto";
   std::string preflightTimeout = "8";
+  if (!customize && authorityMode && peerHost.empty()) {
+    prodProfile = false;
+    std::cout << "simple authority mode without peer defaults to non-PROD.\n";
+    std::cout << "add a peer authority host (or use customize) for strict PROD quorum.\n";
+  }
   if (customize) {
     prodProfile = parseYesNo(readLine("Enable PROD profile (mTLS + strict fail-closed)? (Y/n)", "y"), true);
     runPreflight = parseYesNo(readLine("Run server preflight before startup? (Y/n)", "y"), true);
@@ -1172,6 +1200,11 @@ void quickServerConnect(const std::string &root, const std::string &script, ABHo
       peerIdentityStrict = "auto";
     }
     preflightTimeout = readLine("Preflight timeout sec", preflightTimeout);
+  }
+  if (authorityMode && prodProfile && peerHost.empty()) {
+    std::cout << "PROD authority mode requires at least one peer authority host for issuer quorum.\n";
+    std::cout << "set peer host in simple mode, or switch PROD off.\n";
+    return;
   }
   bool autoInvite = authorityMode;
   std::string autoInviteCount = "1";
@@ -1551,10 +1584,11 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       std::string subject = trim(readLine("Client subject key (optional)", ""));
       bool betaProfile = parseYesNo(readLine("Enable beta profile defaults? (Y/n)", "y"), true);
       bool prodProfile = parseYesNo(readLine("Enable PROD profile (mTLS + strict fail-closed)? (y/N)", "n"), false);
-      PathProfile pathProfile = choosePathProfile("Path profile (1=Speed, 2=Balanced, 3=Private)", "2");
+      PathProfile pathProfile = choosePathProfile("Path profile (1=1-hop Speed, 2=2-hop Balanced, 3=3-hop Private)", "2");
       if (prodProfile) {
         betaProfile = true;
       }
+      enforceOneHopNonStrict(pathProfile, betaProfile, prodProfile, "three-machine-validate");
 
       if (autoDiscover && bootstrapDir.empty()) {
         std::cout << "bootstrap directory URL is required\n";
@@ -1620,10 +1654,11 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       std::string subject = trim(readLine("Client subject key (optional)", ""));
       bool betaProfile = parseYesNo(readLine("Enable beta profile defaults? (Y/n)", "y"), true);
       bool prodProfile = parseYesNo(readLine("Enable PROD profile (mTLS + strict fail-closed)? (y/N)", "n"), false);
-      PathProfile pathProfile = choosePathProfile("Path profile (1=Speed, 2=Balanced, 3=Private)", "2");
+      PathProfile pathProfile = choosePathProfile("Path profile (1=1-hop Speed, 2=2-hop Balanced, 3=3-hop Private)", "2");
       if (prodProfile) {
         betaProfile = true;
       }
+      enforceOneHopNonStrict(pathProfile, betaProfile, prodProfile, "three-machine-soak");
       if (autoDiscover && bootstrapDir.empty()) {
         std::cout << "bootstrap directory URL is required\n";
         continue;
@@ -1685,10 +1720,11 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       std::string subject = trim(readLine("Client subject key (optional)", ""));
       bool betaProfile = parseYesNo(readLine("Enable beta profile defaults? (Y/n)", "y"), true);
       bool prodProfile = parseYesNo(readLine("Enable PROD profile (mTLS + strict fail-closed)? (y/N)", "n"), false);
-      PathProfile pathProfile = choosePathProfile("Path profile (1=Speed, 2=Balanced, 3=Private)", "2");
+      PathProfile pathProfile = choosePathProfile("Path profile (1=1-hop Speed, 2=2-hop Balanced, 3=3-hop Private)", "2");
       if (prodProfile) {
         betaProfile = true;
       }
+      enforceOneHopNonStrict(pathProfile, betaProfile, prodProfile, "pilot-runbook");
       if (autoDiscover && bootstrapDir.empty()) {
         std::cout << "bootstrap directory URL is required\n";
         continue;
@@ -2363,7 +2399,8 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       std::string minOperators = readLine("Minimum operators", "2");
       bool betaProfile = parseYesNo(readLine("Enable beta profile defaults? (Y/n)", "y"), true);
       bool prodProfile = parseYesNo(readLine("Enable PROD profile (mTLS + strict fail-closed)? (y/N)", "n"), false);
-      PathProfile pathProfile = choosePathProfile("Path profile (1=Speed, 2=Balanced, 3=Private)", "2");
+      PathProfile pathProfile = choosePathProfile("Path profile (1=1-hop Speed, 2=2-hop Balanced, 3=3-hop Private)", "2");
+      enforceOneHopNonStrict(pathProfile, betaProfile, prodProfile, "client-vpn-up");
       bool distinct = pathProfile.distinctOperators;
       if (prodProfile) {
         betaProfile = true;

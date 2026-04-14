@@ -252,13 +252,41 @@ assert_line_has "$line1" '--beta-profile 1' \
   "runtime wiring failed: option 1 missing --beta-profile 1"
 assert_line_has "$line1" '--prod-profile 0' \
   "runtime wiring failed: option 1 missing --prod-profile 0 default"
-assert_line_has "$line1" '--path-profile balanced' \
-  "runtime wiring failed: option 1 missing --path-profile balanced"
+assert_line_has "$line1" '--path-profile 2hop' \
+  "runtime wiring failed: option 1 missing --path-profile 2hop"
 if printf '%s\n' "$line1" | rg -q -- '--distinct-operators |--distinct-countries |--locality-soft-bias |--country-bias |--region-bias |--region-prefix-bias '; then
   echo "runtime wiring failed: option 1 unexpectedly forwarded derived path-policy flags"
   printf 'line: %s\n' "$line1"
   exit 1
 fi
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] main menu option 1 (simple client 1-hop dry-run) route-profile wiring"
+INPUT1H="$TMP_DIR/input1h.txt"
+{
+  printf '1\n'   # main menu: simple client
+  printf '\n'    # bootstrap URL (default from hosts)
+  printf 'inv-runtime-1hop\n'
+  printf '1\n'   # path profile: 1-hop
+  printf 'n\n'   # real VPN mode? no -> client-test path
+  printf 'n\n'   # customize advanced client options? no
+  printf '0\n'   # exit main menu
+} >"$INPUT1H"
+run_ui "$INPUT1H" "$TMP_DIR/run1h.log"
+
+line1h="$(rg '^client-test ' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line1h" ]]; then
+  echo "runtime wiring failed: option 1 1-hop dry-run did not invoke client-test"
+  cat "$TMP_DIR/run1h.log"
+  exit 1
+fi
+assert_line_has "$line1h" '--path-profile 1hop' \
+  "runtime wiring failed: option 1 1-hop dry-run missing --path-profile 1hop"
+assert_line_has "$line1h" '--beta-profile 0' \
+  "runtime wiring failed: option 1 1-hop dry-run should force --beta-profile 0"
+assert_line_has "$line1h" '--prod-profile 0' \
+  "runtime wiring failed: option 1 1-hop dry-run should force --prod-profile 0"
 
 : >"$CAPTURE"
 
@@ -473,8 +501,8 @@ if [[ -z "$line_t10" ]]; then
   cat "$TMP_DIR/runt10.log"
   exit 1
 fi
-assert_line_has "$line_t10" '--path-profile balanced' \
-  "runtime wiring failed: test menu option 10 missing --path-profile balanced"
+assert_line_has "$line_t10" '--path-profile 2hop' \
+  "runtime wiring failed: test menu option 10 missing --path-profile 2hop"
 assert_line_has "$line_t10" '--beta-profile 1' \
   "runtime wiring failed: test menu option 10 missing --beta-profile 1"
 assert_line_has "$line_t10" '--prod-profile 0' \
@@ -514,8 +542,8 @@ if [[ -z "$line_a10" ]]; then
   cat "$TMP_DIR/runa10.log"
   exit 1
 fi
-assert_line_has "$line_a10" '--path-profile balanced' \
-  "runtime wiring failed: advanced option 10 missing --path-profile balanced"
+assert_line_has "$line_a10" '--path-profile 2hop' \
+  "runtime wiring failed: advanced option 10 missing --path-profile 2hop"
 assert_line_has "$line_a10" '--beta-profile 1' \
   "runtime wiring failed: advanced option 10 missing --beta-profile 1"
 assert_line_has "$line_a10" '--prod-profile 0' \
@@ -557,8 +585,8 @@ if [[ -z "$line11" ]]; then
   cat "$TMP_DIR/run11.log"
   exit 1
 fi
-assert_line_has "$line11" '--path-profile balanced' \
-  "runtime wiring failed: advanced option 11 missing --path-profile balanced"
+assert_line_has "$line11" '--path-profile 2hop' \
+  "runtime wiring failed: advanced option 11 missing --path-profile 2hop"
 assert_line_has "$line11" '--beta-profile 1' \
   "runtime wiring failed: advanced option 11 missing --beta-profile 1"
 assert_line_has "$line11" '--prod-profile 0' \
@@ -596,8 +624,8 @@ if [[ -z "$line12" ]]; then
   cat "$TMP_DIR/run12.log"
   exit 1
 fi
-assert_line_has "$line12" '--path-profile balanced' \
-  "runtime wiring failed: advanced option 12 missing --path-profile balanced"
+assert_line_has "$line12" '--path-profile 2hop' \
+  "runtime wiring failed: advanced option 12 missing --path-profile 2hop"
 assert_line_has "$line12" '--beta-profile 1' \
   "runtime wiring failed: advanced option 12 missing --beta-profile 1"
 assert_line_has "$line12" '--prod-profile 0' \
@@ -624,7 +652,7 @@ INPUT34="$TMP_DIR/input34.txt"
   printf '2\n'   # min operators
   printf '\n'    # beta profile default yes
   printf 'n\n'   # prod profile default no
-  printf '1\n'   # path profile speed
+  printf '2\n'   # path profile balanced
   printf 'y\n'   # operator floor check
   printf 'y\n'   # issuer quorum check
   printf '3\n'   # issuer min operators
@@ -670,12 +698,12 @@ assert_line_has "$line34" '--distinct-countries 0' \
   "runtime wiring failed: option 34 missing --distinct-countries 0"
 assert_line_has "$line34" '--locality-soft-bias 1' \
   "runtime wiring failed: option 34 missing --locality-soft-bias 1"
-assert_line_has "$line34" '--country-bias 1\.80' \
-  "runtime wiring failed: option 34 missing speed country bias"
-assert_line_has "$line34" '--region-bias 1\.35' \
-  "runtime wiring failed: option 34 missing speed region bias"
-assert_line_has "$line34" '--region-prefix-bias 1\.15' \
-  "runtime wiring failed: option 34 missing speed region-prefix bias"
+assert_line_has "$line34" '--country-bias 1\.50' \
+  "runtime wiring failed: option 34 missing balanced country bias"
+assert_line_has "$line34" '--region-bias 1\.25' \
+  "runtime wiring failed: option 34 missing balanced region bias"
+assert_line_has "$line34" '--region-prefix-bias 1\.10' \
+  "runtime wiring failed: option 34 missing balanced region-prefix bias"
 assert_line_has "$line34" '--operator-floor-check 1' \
   "runtime wiring failed: option 34 missing --operator-floor-check 1"
 assert_line_has "$line34" '--issuer-quorum-check 1' \

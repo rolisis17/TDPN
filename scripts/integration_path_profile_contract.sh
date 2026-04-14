@@ -63,15 +63,15 @@ check_absent_regex '\[--path-profile [^]]*fast\|privacy' \
   "path-profile contract failed: one or more wrapper usage blocks still expose legacy aliases in public profile list" \
   "${USAGE_WRAPPERS[@]}"
 
-echo "[path-profile-contract] launcher prompts use Speed/Balanced/Private contract"
-check_fixed "$EASY_MODE_UI" "Path profile (1=Speed, 2=Balanced, 3=Private)" \
+echo "[path-profile-contract] launcher prompts use hop-profile contract"
+check_fixed "$EASY_MODE_UI" "Path profile (1=1-hop Speed, 2=2-hop Balanced, 3=3-hop Private)" \
   "path-profile contract failed: easy-mode launcher prompt is not canonical"
-check_fixed "$EASY_MODE_UI" "  1) Speed     :" \
-  "path-profile contract failed: easy-mode launcher speed preset label missing"
-check_fixed "$EASY_MODE_UI" "  2) Balanced  :" \
-  "path-profile contract failed: easy-mode launcher balanced preset label missing"
-check_fixed "$EASY_MODE_UI" "  3) Private   :" \
-  "path-profile contract failed: easy-mode launcher private preset label missing"
+check_fixed "$EASY_MODE_UI" "  1) 1-hop Speed    :" \
+  "path-profile contract failed: easy-mode launcher 1-hop preset label missing"
+check_fixed "$EASY_MODE_UI" "  2) 2-hop Balanced :" \
+  "path-profile contract failed: easy-mode launcher 2-hop preset label missing"
+check_fixed "$EASY_MODE_UI" "  3) 3-hop Private  :" \
+  "path-profile contract failed: easy-mode launcher 3-hop preset label missing"
 
 echo "[path-profile-contract] legacy aliases remain compatibility-only internals"
 check_fixed "$EASY_NODE" "speed|fast)" \
