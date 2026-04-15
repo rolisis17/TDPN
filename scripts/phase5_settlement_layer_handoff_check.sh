@@ -8,7 +8,7 @@ usage() {
   cat <<'USAGE'
 Usage:
   ./scripts/phase5_settlement_layer_handoff_check.sh \
-    [--phase4-run-summary-json PATH] \
+    [--phase5-run-summary-json PATH] \
     [--roadmap-summary-json PATH] \
     [--require-run-pipeline-ok [0|1]] \
     [--require-windows-server-packaging-ok [0|1]] \
@@ -29,6 +29,8 @@ Notes:
     run artifacts.
   - run_pipeline_ok is true only when the run summary contract is valid and
     both run steps pass with valid contracts.
+  - Legacy compatibility: --phase4-run-summary-json is accepted as an alias
+    for --phase5-run-summary-json.
 USAGE
 }
 
@@ -173,22 +175,22 @@ resolve_run_pipeline() {
   if [[ "$contract_valid" != "1" ]]; then
     value="false"
     status="invalid"
-    source="phase4_run_summary.contract"
+    source="phase5_run_summary.contract"
     resolved="1"
   elif [[ "$ci_status" != "pass" || "$ci_contract_valid" != "1" ]]; then
     value="false"
     status="fail"
-    source="phase4_run_summary.steps.ci_phase5_settlement_layer"
+    source="phase5_run_summary.steps.ci_phase5_settlement_layer"
     resolved="1"
   elif [[ "$check_status" != "pass" || "$check_contract_valid" != "1" ]]; then
     value="false"
     status="fail"
-    source="phase4_run_summary.steps.phase5_settlement_layer_check"
+    source="phase5_run_summary.steps.phase5_settlement_layer_check"
     resolved="1"
   else
     value="true"
     status="pass"
-    source="phase4_run_summary"
+    source="phase5_run_summary"
     resolved="1"
   fi
 
@@ -247,7 +249,7 @@ emit_summary_json() {
   local generated_at_utc="$2"
   local status="$3"
   local rc="$4"
-  local phase4_run_summary_json="$5"
+  local phase5_run_summary_json="$5"
   local roadmap_summary_json="$6"
   local run_summary_usable="$7"
   local roadmap_summary_usable="$8"
@@ -287,7 +289,7 @@ emit_summary_json() {
     --arg status "$status" \
     --argjson rc "$rc" \
     --arg summary_json "$summary_json" \
-    --arg phase4_run_summary_json "$phase4_run_summary_json" \
+    --arg phase5_run_summary_json "$phase5_run_summary_json" \
     --arg roadmap_summary_json "$roadmap_summary_json" \
     --argjson run_summary_usable "$run_summary_usable" \
     --argjson roadmap_summary_usable "$roadmap_summary_usable" \
@@ -335,7 +337,8 @@ emit_summary_json() {
         script: "phase5_settlement_layer_handoff_check.sh"
       },
       inputs: {
-        phase4_run_summary_json: (if $phase4_run_summary_json == "" then null else $phase4_run_summary_json end),
+        phase5_run_summary_json: (if $phase5_run_summary_json == "" then null else $phase5_run_summary_json end),
+        phase4_run_summary_json: (if $phase5_run_summary_json == "" then null else $phase5_run_summary_json end),
         roadmap_summary_json: (if $roadmap_summary_json == "" then null else $roadmap_summary_json end),
         show_json: ($show_json == "1"),
         requirements: {
@@ -346,6 +349,7 @@ emit_summary_json() {
           settlement_state_persistence_ok: ($require_settlement_state_persistence_ok == 1)
         },
         usable: {
+          phase5_run_summary_json: ($run_summary_usable == 1),
           phase4_run_summary_json: ($run_summary_usable == 1),
           roadmap_summary_json: ($roadmap_summary_usable == 1)
         }
@@ -391,7 +395,7 @@ need_cmd jq
 need_cmd date
 need_cmd mktemp
 
-phase4_run_summary_json="${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_PHASE4_RUN_SUMMARY_JSON:-}"
+phase5_run_summary_json="${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_PHASE5_RUN_SUMMARY_JSON:-${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_PHASE4_RUN_SUMMARY_JSON:-}}"
 roadmap_summary_json="${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_ROADMAP_SUMMARY_JSON:-}"
 summary_json="${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_SUMMARY_JSON:-$ROOT_DIR/.easy-node-logs/phase5_settlement_layer_handoff_check_summary.json}"
 show_json="${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_SHOW_JSON:-0}"
@@ -403,8 +407,12 @@ require_settlement_state_persistence_ok="${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --phase5-run-summary-json)
+      phase5_run_summary_json="${2:-}"
+      shift 2
+      ;;
     --phase4-run-summary-json)
-      phase4_run_summary_json="${2:-}"
+      phase5_run_summary_json="${2:-}"
       shift 2
       ;;
     --roadmap-summary-json)
@@ -488,7 +496,7 @@ bool_arg_or_die "--require-cross-platform-interop-ok" "$require_settlement_bridg
 bool_arg_or_die "--require-role-combination-validation-ok" "$require_settlement_state_persistence_ok"
 bool_arg_or_die "--show-json" "$show_json"
 
-phase4_run_summary_json="$(abs_path "$phase4_run_summary_json")"
+phase5_run_summary_json="$(abs_path "$phase5_run_summary_json")"
 roadmap_summary_json="$(abs_path "$roadmap_summary_json")"
 summary_json="$(abs_path "$summary_json")"
 
@@ -498,7 +506,7 @@ generated_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 declare -a reasons=()
 
-phase4_run_summary_usable="0"
+phase5_run_summary_usable="0"
 roadmap_summary_usable="0"
 run_pipeline_contract_valid="0"
 run_pipeline_value="null"
@@ -506,11 +514,11 @@ run_pipeline_status="missing"
 run_pipeline_resolved="0"
 run_pipeline_source="unresolved"
 
-if [[ -n "$phase4_run_summary_json" ]]; then
-  if [[ "$(json_file_valid_01 "$phase4_run_summary_json")" == "1" ]]; then
-    phase4_run_summary_usable="1"
+if [[ -n "$phase5_run_summary_json" ]]; then
+  if [[ "$(json_file_valid_01 "$phase5_run_summary_json")" == "1" ]]; then
+    phase5_run_summary_usable="1"
   else
-    reasons+=("phase5 run summary file not found or invalid JSON: $phase4_run_summary_json")
+    reasons+=("phase5 run summary file not found or invalid JSON: $phase5_run_summary_json")
   fi
 fi
 
@@ -522,8 +530,8 @@ if [[ -n "$roadmap_summary_json" ]]; then
   fi
 fi
 
-if [[ "$phase4_run_summary_usable" == "1" ]]; then
-  run_pipeline_pair="$(resolve_run_pipeline "$phase4_run_summary_json" "$phase4_run_summary_usable")"
+if [[ "$phase5_run_summary_usable" == "1" ]]; then
+  run_pipeline_pair="$(resolve_run_pipeline "$phase5_run_summary_json" "$phase5_run_summary_usable")"
   run_pipeline_value="${run_pipeline_pair%%|*}"
   run_pipeline_pair="${run_pipeline_pair#*|}"
   run_pipeline_status="${run_pipeline_pair%%|*}"
@@ -541,10 +549,10 @@ else
   reasons+=("phase5 run summary is unavailable")
 fi
 
-settlement_failsoft_pair="$(resolve_handoff_bool "settlement_failsoft_ok" "$roadmap_summary_json" "$roadmap_summary_usable" "$phase4_run_summary_json" "$phase4_run_summary_usable")"
-settlement_acceptance_pair="$(resolve_handoff_bool "settlement_acceptance_ok" "$roadmap_summary_json" "$roadmap_summary_usable" "$phase4_run_summary_json" "$phase4_run_summary_usable")"
-settlement_bridge_smoke_pair="$(resolve_handoff_bool "settlement_bridge_smoke_ok" "$roadmap_summary_json" "$roadmap_summary_usable" "$phase4_run_summary_json" "$phase4_run_summary_usable")"
-settlement_state_persistence_pair="$(resolve_handoff_bool "settlement_state_persistence_ok" "$roadmap_summary_json" "$roadmap_summary_usable" "$phase4_run_summary_json" "$phase4_run_summary_usable")"
+settlement_failsoft_pair="$(resolve_handoff_bool "settlement_failsoft_ok" "$roadmap_summary_json" "$roadmap_summary_usable" "$phase5_run_summary_json" "$phase5_run_summary_usable")"
+settlement_acceptance_pair="$(resolve_handoff_bool "settlement_acceptance_ok" "$roadmap_summary_json" "$roadmap_summary_usable" "$phase5_run_summary_json" "$phase5_run_summary_usable")"
+settlement_bridge_smoke_pair="$(resolve_handoff_bool "settlement_bridge_smoke_ok" "$roadmap_summary_json" "$roadmap_summary_usable" "$phase5_run_summary_json" "$phase5_run_summary_usable")"
+settlement_state_persistence_pair="$(resolve_handoff_bool "settlement_state_persistence_ok" "$roadmap_summary_json" "$roadmap_summary_usable" "$phase5_run_summary_json" "$phase5_run_summary_usable")"
 
 settlement_failsoft_ok="${settlement_failsoft_pair%%|*}"
 settlement_failsoft_pair="${settlement_failsoft_pair#*|}"
@@ -628,9 +636,9 @@ emit_summary_json \
   "$generated_at_utc" \
   "$status" \
   "$rc" \
-  "$phase4_run_summary_json" \
+  "$phase5_run_summary_json" \
   "$roadmap_summary_json" \
-  "$phase4_run_summary_usable" \
+  "$phase5_run_summary_usable" \
   "$roadmap_summary_usable" \
   "$show_json" \
   "$require_run_pipeline_ok" \
@@ -669,4 +677,3 @@ if [[ "$status" == "pass" ]]; then
   exit 0
 fi
 exit 1
-

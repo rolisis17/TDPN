@@ -25,6 +25,8 @@ PASS_ROADMAP="$TMP_DIR/roadmap_pass.json"
 PASS_CHECK="$TMP_DIR/check_pass.json"
 PASS_OUTPUT="$TMP_DIR/pass_output.json"
 PASS_LOG="$TMP_DIR/pass.log"
+LEGACY_ALIAS_OUTPUT="$TMP_DIR/legacy_alias_output.json"
+LEGACY_ALIAS_LOG="$TMP_DIR/legacy_alias.log"
 
 FALLBACK_RUN="$TMP_DIR/run_fallback.json"
 FALLBACK_CHECK="$TMP_DIR/check_fallback.json"
@@ -115,7 +117,7 @@ EOF_PASS_RUN
 
 echo "[phase5-settlement-layer-handoff-check] primary roadmap pass path"
 "$SCRIPT_UNDER_TEST" \
-  --phase4-run-summary-json "$PASS_RUN" \
+  --phase5-run-summary-json "$PASS_RUN" \
   --roadmap-summary-json "$PASS_ROADMAP" \
   --summary-json "$PASS_OUTPUT" \
   --show-json 0 >"$PASS_LOG" 2>&1
@@ -126,7 +128,7 @@ if ! jq -e '
   and .status == "pass"
   and .rc == 0
   and .fail_closed == true
-  and .inputs.usable.phase4_run_summary_json == true
+  and .inputs.usable.phase5_run_summary_json == true
   and .inputs.usable.roadmap_summary_json == true
   and .handoff.run_pipeline_ok == true
   and .handoff.settlement_failsoft_ok == true
@@ -138,6 +140,25 @@ if ! jq -e '
   echo "primary pass-path summary mismatch"
   cat "$PASS_OUTPUT"
   cat "$PASS_LOG"
+  exit 1
+fi
+
+echo "[phase5-settlement-layer-handoff-check] legacy run summary flag alias remains supported"
+"$SCRIPT_UNDER_TEST" \
+  --phase4-run-summary-json "$PASS_RUN" \
+  --roadmap-summary-json "$PASS_ROADMAP" \
+  --summary-json "$LEGACY_ALIAS_OUTPUT" \
+  --show-json 0 >"$LEGACY_ALIAS_LOG" 2>&1
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.phase5_run_summary_json != null
+  and .inputs.phase4_run_summary_json != null
+' "$LEGACY_ALIAS_OUTPUT" >/dev/null; then
+  echo "legacy alias summary mismatch"
+  cat "$LEGACY_ALIAS_OUTPUT"
+  cat "$LEGACY_ALIAS_LOG"
   exit 1
 fi
 
@@ -208,7 +229,7 @@ EOF_FALLBACK_ROADMAP
 
 echo "[phase5-settlement-layer-handoff-check] nested check fallback path"
 "$SCRIPT_UNDER_TEST" \
-  --phase4-run-summary-json "$FALLBACK_RUN" \
+  --phase5-run-summary-json "$FALLBACK_RUN" \
   --roadmap-summary-json "$FALLBACK_ROADMAP" \
   --summary-json "$FALLBACK_OUTPUT" \
   --show-json 0 >"$FALLBACK_LOG" 2>&1
@@ -276,7 +297,7 @@ EOF_UNRESOLVED_ROADMAP
 
 echo "[phase5-settlement-layer-handoff-check] unresolved booleans with relaxed requirements"
 "$SCRIPT_UNDER_TEST" \
-  --phase4-run-summary-json "$UNRESOLVED_RUN" \
+  --phase5-run-summary-json "$UNRESOLVED_RUN" \
   --roadmap-summary-json "$UNRESOLVED_ROADMAP" \
   --summary-json "$UNRESOLVED_OUTPUT" \
   --require-run-pipeline-ok 0 \
@@ -350,7 +371,7 @@ EOF_FAIL_ROADMAP
 echo "[phase5-settlement-layer-handoff-check] run pipeline failure is fail-closed"
 set +e
 "$SCRIPT_UNDER_TEST" \
-  --phase4-run-summary-json "$FAIL_RUN" \
+  --phase5-run-summary-json "$FAIL_RUN" \
   --roadmap-summary-json "$FAIL_ROADMAP" \
   --summary-json "$FAIL_OUTPUT" \
   --show-json 0 >"$FAIL_LOG" 2>&1
@@ -376,7 +397,7 @@ fi
 echo "[phase5-settlement-layer-handoff-check] missing run summary contract fail-close"
 set +e
 "$SCRIPT_UNDER_TEST" \
-  --phase4-run-summary-json "$TMP_DIR/missing_run.json" \
+  --phase5-run-summary-json "$TMP_DIR/missing_run.json" \
   --roadmap-summary-json "$PASS_ROADMAP" \
   --summary-json "$MISSING_OUTPUT" \
   --show-json 1 >"$MISSING_LOG" 2>&1
@@ -390,7 +411,7 @@ fi
 if ! jq -e '
   .status == "fail"
   and .rc == 1
-  and .inputs.usable.phase4_run_summary_json == false
+  and .inputs.usable.phase5_run_summary_json == false
   and ((.decision.reasons // []) | any(test("phase5 run summary file not found or invalid JSON")))
 ' "$MISSING_OUTPUT" >/dev/null; then
   echo "missing-run summary mismatch"
@@ -404,5 +425,4 @@ if ! grep -q '"schema"' "$MISSING_LOG"; then
   exit 1
 fi
 
-echo "phase4 windows full parity handoff check integration ok"
-
+echo "phase5 settlement layer handoff check integration ok"

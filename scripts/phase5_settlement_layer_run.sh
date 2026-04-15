@@ -26,7 +26,7 @@ Notes:
   - Wrapper-owned flags are reserved; stage pass-through uses prefixes:
       --ci-...     -> forwarded to ci_phase5_settlement_layer.sh
       --check-...  -> forwarded to phase5_settlement_layer_check.sh
-  - Dry-run forwards --dry-run 1 to ci_phase4 only.
+  - Dry-run forwards --dry-run 1 to ci_phase5 only.
     The checker still runs against the generated CI summary.
   - Dry-run relaxes checker requirements to 0 unless explicitly supplied.
   - The checker receives --show-json 0 by default unless explicitly supplied
@@ -271,7 +271,7 @@ fi
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
-ci_log="$TMP_DIR/ci_phase4.log"
+ci_log="$TMP_DIR/ci_phase5.log"
 check_log="$TMP_DIR/check.log"
 generated_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
@@ -298,7 +298,7 @@ if ((${#ci_passthrough_args[@]} > 0)); then
 fi
 ci_command="$(print_cmd "${ci_command_args[@]}")"
 set +e
-run_step_capture "ci_phase4" "$ci_log" "${ci_command_args[@]}"
+run_step_capture "ci_phase5" "$ci_log" "${ci_command_args[@]}"
 ci_command_rc=$?
 set -e
 if ci_summary_contract_valid "$ci_summary_json"; then
@@ -311,7 +311,7 @@ if ci_summary_contract_valid "$ci_summary_json"; then
   fi
 else
   ci_contract_valid=0
-  ci_contract_error="missing or invalid ci_phase4 summary contract"
+  ci_contract_error="missing or invalid ci_phase5 summary contract"
   ci_status="fail"
   if [[ "$ci_command_rc" -ne 0 ]]; then
     ci_rc="$ci_command_rc"
@@ -356,7 +356,7 @@ if check_summary_contract_valid "$check_summary_json"; then
   fi
 else
   check_contract_valid=0
-  check_contract_error="missing or invalid phase4 Windows full-parity check summary contract"
+  check_contract_error="missing or invalid phase5 settlement layer check summary contract"
   check_status="fail"
   if [[ "$check_command_rc" -ne 0 ]]; then
     check_rc="$check_command_rc"
@@ -478,4 +478,3 @@ if [[ "$print_summary_json" == "1" ]]; then
 fi
 
 exit "$final_rc"
-

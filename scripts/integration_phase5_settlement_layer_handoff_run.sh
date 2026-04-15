@@ -32,7 +32,11 @@ cat >"$FAKE_RUN" <<'EOF_FAKE_RUN'
 #!/usr/bin/env bash
 set -euo pipefail
 
-capture="${PHASE4_HANDOFF_RUN_CAPTURE_FILE:?}"
+capture="${PHASE5_HANDOFF_RUN_CAPTURE_FILE:-${PHASE4_HANDOFF_RUN_CAPTURE_FILE:-}}"
+if [[ -z "$capture" ]]; then
+  echo "missing capture file env: PHASE5_HANDOFF_RUN_CAPTURE_FILE"
+  exit 2
+fi
 printf 'run\t%s\n' "$*" >>"$capture"
 
 reports_dir=""
@@ -154,7 +158,11 @@ cat >"$FAKE_HANDOFF" <<'EOF_FAKE_HANDOFF'
 #!/usr/bin/env bash
 set -euo pipefail
 
-capture="${PHASE4_HANDOFF_RUN_CAPTURE_FILE:?}"
+capture="${PHASE5_HANDOFF_RUN_CAPTURE_FILE:-${PHASE4_HANDOFF_RUN_CAPTURE_FILE:-}}"
+if [[ -z "$capture" ]]; then
+  echo "missing capture file env: PHASE5_HANDOFF_RUN_CAPTURE_FILE"
+  exit 2
+fi
 printf 'handoff\t%s\n' "$*" >>"$capture"
 
 summary_json=""
@@ -216,7 +224,7 @@ chmod +x "$FAKE_HANDOFF"
 echo "[phase5-settlement-layer-handoff-run] pass path"
 : >"$CAPTURE"
 PASS_WRAPPER_SUMMARY="$TMP_DIR/pass_wrapper.json"
-PHASE4_HANDOFF_RUN_CAPTURE_FILE="$CAPTURE" \
+PHASE5_HANDOFF_RUN_CAPTURE_FILE="$CAPTURE" \
 PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_RUN_SCRIPT="$FAKE_RUN" \
 PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_HANDOFF_CHECK_SCRIPT="$FAKE_HANDOFF" \
 bash "$RUNNER" \
@@ -240,7 +248,7 @@ if [[ "$run_line" != *"--gamma 7"* ]]; then
   echo "$run_line"
   exit 1
 fi
-if [[ "$handoff_line" != *"--phase4-run-summary-json $TMP_DIR/pass_run_summary.json"* || "$handoff_line" != *"--roadmap-summary-json $TMP_DIR/reports_pass/roadmap_progress_summary.json"* ]]; then
+if [[ "$handoff_line" != *"--phase5-run-summary-json $TMP_DIR/pass_run_summary.json"* || "$handoff_line" != *"--roadmap-summary-json $TMP_DIR/reports_pass/roadmap_progress_summary.json"* ]]; then
   echo "handoff forwarding mismatch"
   echo "$handoff_line"
   exit 1
@@ -276,7 +284,7 @@ fi
 echo "[phase5-settlement-layer-handoff-run] dry-run forwarding and relax behavior"
 : >"$CAPTURE"
 DRY_WRAPPER_SUMMARY="$TMP_DIR/dry_wrapper.json"
-PHASE4_HANDOFF_RUN_CAPTURE_FILE="$CAPTURE" \
+PHASE5_HANDOFF_RUN_CAPTURE_FILE="$CAPTURE" \
 PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_RUN_SCRIPT="$FAKE_RUN" \
 PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_HANDOFF_CHECK_SCRIPT="$FAKE_HANDOFF" \
 bash "$RUNNER" \
@@ -323,7 +331,7 @@ echo "[phase5-settlement-layer-handoff-run] run failure still runs handoff check
 : >"$CAPTURE"
 FAIL_WRAPPER_SUMMARY="$TMP_DIR/fail_wrapper.json"
 set +e
-PHASE4_HANDOFF_RUN_CAPTURE_FILE="$CAPTURE" \
+PHASE5_HANDOFF_RUN_CAPTURE_FILE="$CAPTURE" \
 PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_RUN_SCRIPT="$FAKE_RUN" \
 PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_HANDOFF_CHECK_SCRIPT="$FAKE_HANDOFF" \
 FAKE_RUN_FAIL=1 \
@@ -370,7 +378,7 @@ echo "[phase5-settlement-layer-handoff-run] run contract fail-close"
 : >"$CAPTURE"
 RUN_CONTRACT_FAIL_SUMMARY="$TMP_DIR/run_contract_fail.json"
 set +e
-PHASE4_HANDOFF_RUN_CAPTURE_FILE="$CAPTURE" \
+PHASE5_HANDOFF_RUN_CAPTURE_FILE="$CAPTURE" \
 PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_RUN_SCRIPT="$FAKE_RUN" \
 PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_HANDOFF_CHECK_SCRIPT="$FAKE_HANDOFF" \
 FAKE_RUN_OMIT_SUMMARY=1 \
@@ -404,7 +412,7 @@ echo "[phase5-settlement-layer-handoff-run] handoff contract fail-close"
 : >"$CAPTURE"
 HANDOFF_CONTRACT_FAIL_SUMMARY="$TMP_DIR/handoff_contract_fail.json"
 set +e
-PHASE4_HANDOFF_RUN_CAPTURE_FILE="$CAPTURE" \
+PHASE5_HANDOFF_RUN_CAPTURE_FILE="$CAPTURE" \
 PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_RUN_SCRIPT="$FAKE_RUN" \
 PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_HANDOFF_CHECK_SCRIPT="$FAKE_HANDOFF" \
 FAKE_HANDOFF_OMIT_SUMMARY=1 \
@@ -435,5 +443,4 @@ if ! jq -e '
   exit 1
 fi
 
-echo "phase4 windows full parity handoff run integration ok"
-
+echo "phase5 settlement layer handoff run integration ok"

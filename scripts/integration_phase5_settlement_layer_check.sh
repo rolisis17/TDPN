@@ -20,10 +20,10 @@ fi
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
-PASS_SUMMARY="$TMP_DIR/ci_phase4_pass.json"
-FAIL_SUMMARY="$TMP_DIR/ci_phase4_fail.json"
-RELAXED_SUMMARY="$TMP_DIR/ci_phase4_relaxed.json"
-MISSING_SUMMARY="$TMP_DIR/ci_phase4_missing.json"
+PASS_SUMMARY="$TMP_DIR/ci_phase5_pass.json"
+FAIL_SUMMARY="$TMP_DIR/ci_phase5_fail.json"
+RELAXED_SUMMARY="$TMP_DIR/ci_phase5_relaxed.json"
+MISSING_SUMMARY="$TMP_DIR/ci_phase5_missing.json"
 
 PASS_OUTPUT="$TMP_DIR/pass_output.json"
 FAIL_OUTPUT="$TMP_DIR/fail_output.json"
@@ -127,7 +127,7 @@ if ! jq -e '
   and .schema.id == "phase5_settlement_layer_check_summary"
   and .status == "pass"
   and .rc == 0
-  and .inputs.usable.ci_phase4_summary_json == true
+  and .inputs.usable.ci_phase5_summary_json == true
   and .policy.require_settlement_failsoft_ok == true
   and .policy.require_settlement_acceptance_ok == true
   and .policy.require_settlement_bridge_smoke_ok == true
@@ -205,7 +205,7 @@ fi
 if ! jq -e '
   .status == "fail"
   and .rc == 1
-  and .inputs.usable.ci_phase4_summary_json == false
+  and .inputs.usable.ci_phase5_summary_json == false
   and ((.decision.reasons // []) | any(test("summary file not found or invalid JSON")))
 ' "$MISSING_OUTPUT" >/dev/null; then
   echo "missing-summary contract mismatch"
@@ -219,5 +219,4 @@ if ! grep -q '"schema"' "$MISSING_LOG"; then
   exit 1
 fi
 
-echo "phase4 windows full parity check integration ok"
-
+echo "phase5 settlement layer check integration ok"

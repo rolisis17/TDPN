@@ -416,7 +416,7 @@ fi
 
 declare -a handoff_cmd=(
   "$handoff_check_script"
-  --phase4-run-summary-json "$run_summary_json"
+  --phase5-run-summary-json "$run_summary_json"
   --summary-json "$handoff_summary_json"
 )
 if [[ -n "$run_roadmap_summary_json" ]] && ! array_has_arg "--roadmap-summary-json" "${handoff_passthrough_args[@]}"; then
@@ -615,4 +615,3 @@ if [[ "$print_summary_json" == "1" ]]; then
 fi
 
 exit "$final_rc"
-

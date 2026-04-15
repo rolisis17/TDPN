@@ -25,7 +25,7 @@ DRY_RUN_LOG="$TMP_DIR/dry_run.log"
 CI_FAIL_LOG="$TMP_DIR/ci_fail.log"
 CONTRACT_FAIL_LOG="$TMP_DIR/contract_fail.log"
 
-FAKE_CI="$TMP_DIR/fake_ci_phase4.sh"
+FAKE_CI="$TMP_DIR/fake_ci_phase5.sh"
 cat >"$FAKE_CI" <<'EOF_FAKE_CI'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -366,5 +366,4 @@ if ! jq -e '
   exit 1
 fi
 
-echo "phase4 windows full parity run integration ok"
-
+echo "phase5 settlement layer run integration ok"

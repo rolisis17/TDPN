@@ -18,14 +18,15 @@ Usage:
 
 Purpose:
   Fail-closed checker for the Phase-5 settlement layer readiness contract.
-  Evaluates required readiness booleans derived from the CI Phase-4 summary:
+  Evaluates required readiness booleans derived from the CI Phase-5 summary:
     - settlement_failsoft_ok
     - settlement_acceptance_ok
     - settlement_bridge_smoke_ok
     - settlement_state_persistence_ok
 
 Notes:
-  - Provide the CI summary with --ci-phase5-summary-json.
+  - Provide the CI summary with --ci-phase5-summary-json (canonical).
+  - Legacy alias --ci-phase4-summary-json is accepted for compatibility.
   - The checker treats unresolved or false readiness signals as failures.
   - Use --show-json 1 to print the emitted summary JSON after it is written.
 USAGE
@@ -177,8 +178,8 @@ emit_summary_json() {
   local generated_at_utc="$2"
   local status="$3"
   local rc="$4"
-  local ci_phase4_summary_json="$5"
-  local ci_phase4_summary_usable="$6"
+  local ci_phase5_summary_json="$5"
+  local ci_phase5_summary_usable="$6"
   local show_json="$7"
   local require_settlement_failsoft_ok="$8"
   local require_settlement_acceptance_ok="$9"
@@ -205,8 +206,8 @@ emit_summary_json() {
     --arg status "$status" \
     --argjson rc "$rc" \
     --arg summary_json "$summary_json" \
-    --arg ci_phase4_summary_json "$ci_phase4_summary_json" \
-    --argjson ci_phase4_summary_usable "$ci_phase4_summary_usable" \
+    --arg ci_phase5_summary_json "$ci_phase5_summary_json" \
+    --argjson ci_phase5_summary_usable "$ci_phase5_summary_usable" \
     --arg show_json "$show_json" \
     --argjson require_settlement_failsoft_ok "$require_settlement_failsoft_ok" \
     --argjson require_settlement_acceptance_ok "$require_settlement_acceptance_ok" \
@@ -240,11 +241,11 @@ emit_summary_json() {
         script: "phase5_settlement_layer_check.sh"
       },
       inputs: {
-        ci_phase4_summary_json: $ci_phase4_summary_json,
+        ci_phase5_summary_json: $ci_phase5_summary_json,
         summary_json: $summary_json,
         show_json: ($show_json == "1"),
         usable: {
-          ci_phase4_summary_json: ($ci_phase4_summary_usable == 1)
+          ci_phase5_summary_json: ($ci_phase5_summary_usable == 1)
         }
       },
       policy: {
@@ -297,7 +298,7 @@ need_cmd jq
 need_cmd date
 need_cmd mktemp
 
-ci_phase4_summary_json="${PHASE5_SETTLEMENT_LAYER_CHECK_CI_PHASE4_SUMMARY_JSON:-$ROOT_DIR/.easy-node-logs/phase5_settlement_layer_ci_summary.json}"
+ci_phase5_summary_json="${PHASE5_SETTLEMENT_LAYER_CHECK_CI_PHASE5_SUMMARY_JSON:-${PHASE5_SETTLEMENT_LAYER_CHECK_CI_PHASE4_SUMMARY_JSON:-$ROOT_DIR/.easy-node-logs/phase5_settlement_layer_ci_summary.json}}"
 summary_json="${PHASE5_SETTLEMENT_LAYER_CHECK_SUMMARY_JSON:-$ROOT_DIR/.easy-node-logs/phase5_settlement_layer_check_summary.json}"
 show_json="${PHASE5_SETTLEMENT_LAYER_CHECK_SHOW_JSON:-0}"
 require_settlement_failsoft_ok="${PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_WINDOWS_SERVER_PACKAGING_OK:-1}"
@@ -308,7 +309,11 @@ require_settlement_state_persistence_ok="${PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --ci-phase5-summary-json)
-      ci_phase4_summary_json="${2:-}"
+      ci_phase5_summary_json="${2:-}"
+      shift 2
+      ;;
+    --ci-phase4-summary-json)
+      ci_phase5_summary_json="${2:-}"
       shift 2
       ;;
     --require-windows-server-packaging-ok)
@@ -378,13 +383,13 @@ bool_arg_or_die "--require-cross-platform-interop-ok" "$require_settlement_bridg
 bool_arg_or_die "--require-role-combination-validation-ok" "$require_settlement_state_persistence_ok"
 bool_arg_or_die "--show-json" "$show_json"
 
-ci_phase4_summary_json="$(abs_path "$ci_phase4_summary_json")"
+ci_phase5_summary_json="$(abs_path "$ci_phase5_summary_json")"
 summary_json="$(abs_path "$summary_json")"
 
 mkdir -p "$(dirname "$summary_json")"
 
 generated_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-ci_phase4_summary_usable="$(json_file_valid_01 "$ci_phase4_summary_json")"
+ci_phase5_summary_usable="$(json_file_valid_01 "$ci_phase5_summary_json")"
 
 declare -a reasons=()
 
@@ -393,13 +398,13 @@ settlement_acceptance_raw=""
 settlement_bridge_smoke_raw=""
 settlement_state_persistence_raw=""
 
-if [[ "$ci_phase4_summary_usable" == "1" ]]; then
-  settlement_failsoft_raw="$(resolve_signal_raw_or_empty "$ci_phase4_summary_json" "settlement_failsoft_ok")"
-  settlement_acceptance_raw="$(resolve_signal_raw_or_empty "$ci_phase4_summary_json" "settlement_acceptance_ok")"
-  settlement_bridge_smoke_raw="$(resolve_signal_raw_or_empty "$ci_phase4_summary_json" "settlement_bridge_smoke_ok")"
-  settlement_state_persistence_raw="$(resolve_signal_raw_or_empty "$ci_phase4_summary_json" "settlement_state_persistence_ok")"
+if [[ "$ci_phase5_summary_usable" == "1" ]]; then
+  settlement_failsoft_raw="$(resolve_signal_raw_or_empty "$ci_phase5_summary_json" "settlement_failsoft_ok")"
+  settlement_acceptance_raw="$(resolve_signal_raw_or_empty "$ci_phase5_summary_json" "settlement_acceptance_ok")"
+  settlement_bridge_smoke_raw="$(resolve_signal_raw_or_empty "$ci_phase5_summary_json" "settlement_bridge_smoke_ok")"
+  settlement_state_persistence_raw="$(resolve_signal_raw_or_empty "$ci_phase5_summary_json" "settlement_state_persistence_ok")"
 else
-  reasons+=("ci phase5 summary file not found or invalid JSON: $ci_phase4_summary_json")
+  reasons+=("ci phase5 summary file not found or invalid JSON: $ci_phase5_summary_json")
 fi
 
 settlement_failsoft_ok="$(normalize_boolish_or_empty "$settlement_failsoft_raw")"
@@ -432,22 +437,22 @@ settlement_state_persistence_status="$(stage_status_from_raw "$settlement_state_
 
 if [[ -n "$(trim "$settlement_failsoft_raw")" ]]; then
   settlement_failsoft_resolved="1"
-elif [[ "$ci_phase4_summary_usable" == "1" ]]; then
+elif [[ "$ci_phase5_summary_usable" == "1" ]]; then
   reasons+=("settlement_failsoft_ok could not be resolved from ci phase5 summary")
 fi
 if [[ -n "$(trim "$settlement_acceptance_raw")" ]]; then
   settlement_acceptance_resolved="1"
-elif [[ "$ci_phase4_summary_usable" == "1" ]]; then
+elif [[ "$ci_phase5_summary_usable" == "1" ]]; then
   reasons+=("settlement_acceptance_ok could not be resolved from ci phase5 summary")
 fi
 if [[ -n "$(trim "$settlement_bridge_smoke_raw")" ]]; then
   settlement_bridge_smoke_resolved="1"
-elif [[ "$ci_phase4_summary_usable" == "1" ]]; then
+elif [[ "$ci_phase5_summary_usable" == "1" ]]; then
   reasons+=("settlement_bridge_smoke_ok could not be resolved from ci phase5 summary")
 fi
 if [[ -n "$(trim "$settlement_state_persistence_raw")" ]]; then
   settlement_state_persistence_resolved="1"
-elif [[ "$ci_phase4_summary_usable" == "1" ]]; then
+elif [[ "$ci_phase5_summary_usable" == "1" ]]; then
   reasons+=("settlement_state_persistence_ok could not be resolved from ci phase5 summary")
 fi
 
@@ -482,8 +487,8 @@ emit_summary_json \
   "$generated_at_utc" \
   "$status" \
   "$rc" \
-  "$ci_phase4_summary_json" \
-  "$ci_phase4_summary_usable" \
+  "$ci_phase5_summary_json" \
+  "$ci_phase5_summary_usable" \
   "$show_json" \
   "$require_settlement_failsoft_ok" \
   "$require_settlement_acceptance_ok" \
@@ -511,4 +516,3 @@ if [[ "$status" == "pass" ]]; then
   exit 0
 fi
 exit 1
-
