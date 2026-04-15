@@ -19,7 +19,11 @@ fi
 LOG_FILE="$(mktemp -t tdpnd-grpc-auth-live-smoke.XXXXXX.log)"
 TDPND_PID=""
 AUTH_TOKEN="${TDPND_GRPC_AUTH_LIVE_SMOKE_TOKEN:-tdpn-live-smoke-token}"
-MODULE_RPC="tdpn.vpnbilling.v1.Query/ListCreditReservations"
+MODULE_QUERY_CHECKS=(
+  "tdpn.vpnbilling.v1.Query/ListCreditReservations|reservations"
+  "tdpn.vpnvalidator.v1.Query/ListValidatorEligibilities|eligibilities"
+  "tdpn.vpngovernance.v1.Query/ListGovernancePolicies|policies"
+)
 
 signal_runtime() {
   local sig="$1"
@@ -115,47 +119,50 @@ if ! grep -q 'SERVING' <<<"${HEALTH_OUTPUT}"; then
   exit 1
 fi
 
-# 2) A module RPC must fail without auth token with an unauthenticated signal.
-set +e
-UNAUTH_OUTPUT="$(grpcurl -plaintext -max-time 2 -d '{}' "127.0.0.1:${PORT}" "${MODULE_RPC}" 2>&1)"
-UNAUTH_RC=$?
-set -e
-if (( UNAUTH_RC == 0 )); then
-  echo "expected module RPC ${MODULE_RPC} to fail without token, but it succeeded"
-  echo "module output:"
-  echo "${UNAUTH_OUTPUT}"
-  cat "${LOG_FILE}"
-  exit 1
-fi
-if ! grep -Eq 'Unauthenticated|missing or invalid bearer token' <<<"${UNAUTH_OUTPUT}"; then
-  echo "expected unauthenticated signal for module RPC ${MODULE_RPC} without token"
-  echo "module unauth output:"
-  echo "${UNAUTH_OUTPUT}"
-  cat "${LOG_FILE}"
-  exit 1
-fi
+# 2) Query RPCs must fail without auth token and succeed with token.
+for module_spec in "${MODULE_QUERY_CHECKS[@]}"; do
+  IFS='|' read -r module_rpc expected_field <<<"${module_spec}"
 
-# 3) The same module RPC must succeed with bearer token and valid response shape.
-set +e
-AUTH_OUTPUT="$(grpcurl -plaintext -max-time 2 -H "authorization: Bearer ${AUTH_TOKEN}" -d '{}' "127.0.0.1:${PORT}" "${MODULE_RPC}" 2>&1)"
-AUTH_RC=$?
-set -e
-if (( AUTH_RC != 0 )); then
-  echo "expected module RPC ${MODULE_RPC} to succeed with bearer token (rc=${AUTH_RC})"
-  echo "module auth output:"
-  echo "${AUTH_OUTPUT}"
-  cat "${LOG_FILE}"
-  exit 1
-fi
-if ! grep -q '"reservations"' <<<"${AUTH_OUTPUT}"; then
-  echo "expected authorized module RPC response to include reservations field"
-  echo "module auth output:"
-  echo "${AUTH_OUTPUT}"
-  cat "${LOG_FILE}"
-  exit 1
-fi
+  set +e
+  unauth_output="$(grpcurl -plaintext -max-time 2 -d '{}' "127.0.0.1:${PORT}" "${module_rpc}" 2>&1)"
+  unauth_rc=$?
+  set -e
+  if (( unauth_rc == 0 )); then
+    echo "expected module RPC ${module_rpc} to fail without token, but it succeeded"
+    echo "module output:"
+    echo "${unauth_output}"
+    cat "${LOG_FILE}"
+    exit 1
+  fi
+  if ! grep -Eq 'Unauthenticated|missing or invalid bearer token' <<<"${unauth_output}"; then
+    echo "expected unauthenticated signal for module RPC ${module_rpc} without token"
+    echo "module unauth output:"
+    echo "${unauth_output}"
+    cat "${LOG_FILE}"
+    exit 1
+  fi
 
-# 4) Reflection must be disabled in auth-token mode.
+  set +e
+  auth_output="$(grpcurl -plaintext -max-time 2 -H "authorization: Bearer ${AUTH_TOKEN}" -d '{}' "127.0.0.1:${PORT}" "${module_rpc}" 2>&1)"
+  auth_rc=$?
+  set -e
+  if (( auth_rc != 0 )); then
+    echo "expected module RPC ${module_rpc} to succeed with bearer token (rc=${auth_rc})"
+    echo "module auth output:"
+    echo "${auth_output}"
+    cat "${LOG_FILE}"
+    exit 1
+  fi
+  if ! grep -Eq "\"${expected_field}\"[[:space:]]*:" <<<"${auth_output}"; then
+    echo "expected authorized module RPC ${module_rpc} response to include ${expected_field} field"
+    echo "module auth output:"
+    echo "${auth_output}"
+    cat "${LOG_FILE}"
+    exit 1
+  fi
+done
+
+# 3) Reflection must be disabled in auth-token mode.
 set +e
 REFLECTION_OUTPUT="$(grpcurl -plaintext -max-time 2 "127.0.0.1:${PORT}" list 2>&1)"
 REFLECTION_RC=$?
