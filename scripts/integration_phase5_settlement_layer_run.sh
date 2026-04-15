@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-for cmd in bash jq mktemp chmod grep cat; do
+for cmd in bash jq mktemp chmod grep cat cmp; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "missing required command: $cmd"
     exit 2
@@ -206,12 +206,17 @@ DRY_RUN_RUN_SUMMARY="$TMP_DIR/run_dry.json"
 ENV_DRY_RUN_RUN_SUMMARY="$TMP_DIR/run_env_dry.json"
 CI_FAIL_RUN_SUMMARY="$TMP_DIR/run_ci_fail.json"
 CONTRACT_FAIL_RUN_SUMMARY="$TMP_DIR/run_contract_fail.json"
+DRY_RUN_CANONICAL_SUMMARY="$TMP_DIR/run_dry_canonical.json"
+ENV_DRY_RUN_CANONICAL_SUMMARY="$TMP_DIR/run_env_dry_canonical.json"
+CI_FAIL_CANONICAL_SUMMARY="$TMP_DIR/run_ci_fail_canonical.json"
+CONTRACT_FAIL_CANONICAL_SUMMARY="$TMP_DIR/run_contract_fail_canonical.json"
 
 echo "[phase5-settlement-layer-run] dry-run forwarding contract"
 : >"$CAPTURE"
 PHASE5_SETTLEMENT_LAYER_RUN_CAPTURE_FILE="$CAPTURE" \
 PHASE5_SETTLEMENT_LAYER_RUN_CI_SCRIPT="$FAKE_CI" \
 PHASE5_SETTLEMENT_LAYER_RUN_CHECK_SCRIPT="$FAKE_CHECK" \
+PHASE5_SETTLEMENT_LAYER_RUN_CANONICAL_SUMMARY_JSON="$DRY_RUN_CANONICAL_SUMMARY" \
 bash "$RUNNER" \
   --reports-dir "$TMP_DIR/reports_dry" \
   --ci-summary-json "$TMP_DIR/ci_dry_summary.json" \
@@ -277,17 +282,34 @@ if [[ "$check_line" == *"--require-windows-server-packaging-ok"* || "$check_line
   echo "$check_line"
   exit 1
 fi
+if [[ ! -f "$DRY_RUN_CANONICAL_SUMMARY" ]]; then
+  echo "missing dry-run canonical summary JSON: $DRY_RUN_CANONICAL_SUMMARY"
+  cat "$DRY_RUN_LOG"
+  exit 1
+fi
+if ! cmp -s "$DRY_RUN_RUN_SUMMARY" "$DRY_RUN_CANONICAL_SUMMARY"; then
+  echo "dry-run canonical summary content mismatch"
+  cat "$DRY_RUN_RUN_SUMMARY"
+  cat "$DRY_RUN_CANONICAL_SUMMARY"
+  exit 1
+fi
+if ! grep -Fq -- "[phase5-settlement-layer-run] canonical_summary_json=$DRY_RUN_CANONICAL_SUMMARY" "$DRY_RUN_LOG"; then
+  echo "dry-run log missing canonical summary line"
+  cat "$DRY_RUN_LOG"
+  exit 1
+fi
 
 if [[ ! -f "$DRY_RUN_RUN_SUMMARY" ]]; then
   echo "missing dry-run combined summary JSON: $DRY_RUN_RUN_SUMMARY"
   cat "$DRY_RUN_LOG"
   exit 1
 fi
-if ! jq -e '
+if ! jq -e --arg canonical "$DRY_RUN_CANONICAL_SUMMARY" '
   .version == 1
   and .schema.id == "phase5_settlement_layer_run_summary"
   and .status == "pass"
   and .rc == 0
+  and .artifacts.canonical_summary_json == $canonical
   and .inputs.dry_run == true
   and .steps.ci_phase5_settlement_layer.status == "pass"
   and .steps.ci_phase5_settlement_layer.rc == 0
@@ -311,6 +333,7 @@ PHASE5_SETTLEMENT_LAYER_RUN_CAPTURE_FILE="$CAPTURE" \
 PHASE5_SETTLEMENT_LAYER_RUN_CI_SCRIPT="$FAKE_CI" \
 PHASE5_SETTLEMENT_LAYER_RUN_CHECK_SCRIPT="$FAKE_CHECK" \
 PHASE5_SETTLEMENT_LAYER_RUN_DRY_RUN=1 \
+PHASE5_SETTLEMENT_LAYER_RUN_CANONICAL_SUMMARY_JSON="$ENV_DRY_RUN_CANONICAL_SUMMARY" \
 FAKE_CHECK_HELP_MODE=legacy \
 bash "$RUNNER" \
   --reports-dir "$TMP_DIR/reports_env_dry" \
@@ -362,6 +385,7 @@ set +e
 PHASE5_SETTLEMENT_LAYER_RUN_CAPTURE_FILE="$CAPTURE" \
 PHASE5_SETTLEMENT_LAYER_RUN_CI_SCRIPT="$FAKE_CI" \
 PHASE5_SETTLEMENT_LAYER_RUN_CHECK_SCRIPT="$FAKE_CHECK" \
+PHASE5_SETTLEMENT_LAYER_RUN_CANONICAL_SUMMARY_JSON="$CI_FAIL_CANONICAL_SUMMARY" \
 FAKE_CI_FAIL=1 \
 FAKE_CI_FAIL_RC=27 \
 bash "$RUNNER" \
@@ -395,9 +419,26 @@ if [[ ! -f "$CI_FAIL_RUN_SUMMARY" ]]; then
   cat "$CI_FAIL_LOG"
   exit 1
 fi
-if ! jq -e '
+if [[ ! -f "$CI_FAIL_CANONICAL_SUMMARY" ]]; then
+  echo "missing ci-fail canonical summary JSON: $CI_FAIL_CANONICAL_SUMMARY"
+  cat "$CI_FAIL_LOG"
+  exit 1
+fi
+if ! cmp -s "$CI_FAIL_RUN_SUMMARY" "$CI_FAIL_CANONICAL_SUMMARY"; then
+  echo "ci-fail canonical summary content mismatch"
+  cat "$CI_FAIL_RUN_SUMMARY"
+  cat "$CI_FAIL_CANONICAL_SUMMARY"
+  exit 1
+fi
+if ! grep -Fq -- "[phase5-settlement-layer-run] canonical_summary_json=$CI_FAIL_CANONICAL_SUMMARY" "$CI_FAIL_LOG"; then
+  echo "ci-fail log missing canonical summary line"
+  cat "$CI_FAIL_LOG"
+  exit 1
+fi
+if ! jq -e --arg canonical "$CI_FAIL_CANONICAL_SUMMARY" '
   .status == "fail"
   and .rc == 27
+  and .artifacts.canonical_summary_json == $canonical
   and .steps.ci_phase5_settlement_layer.status == "fail"
   and .steps.ci_phase5_settlement_layer.rc == 27
   and .steps.ci_phase5_settlement_layer.command_rc == 27
@@ -418,6 +459,7 @@ set +e
 PHASE5_SETTLEMENT_LAYER_RUN_CAPTURE_FILE="$CAPTURE" \
 PHASE5_SETTLEMENT_LAYER_RUN_CI_SCRIPT="$FAKE_CI" \
 PHASE5_SETTLEMENT_LAYER_RUN_CHECK_SCRIPT="$FAKE_CHECK" \
+PHASE5_SETTLEMENT_LAYER_RUN_CANONICAL_SUMMARY_JSON="$CONTRACT_FAIL_CANONICAL_SUMMARY" \
 FAKE_CHECK_OMIT_SUMMARY=1 \
 bash "$RUNNER" \
   --reports-dir "$TMP_DIR/reports_contract_fail" \

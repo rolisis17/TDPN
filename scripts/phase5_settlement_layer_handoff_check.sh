@@ -294,6 +294,7 @@ emit_summary_json() {
     --arg status "$status" \
     --argjson rc "$rc" \
     --arg summary_json "$summary_json" \
+    --arg canonical_summary_json "$canonical_summary_json" \
     --arg phase5_run_summary_json "$phase5_run_summary_json" \
     --arg roadmap_summary_json "$roadmap_summary_json" \
     --argjson run_summary_usable "$run_summary_usable" \
@@ -390,10 +391,14 @@ emit_summary_json() {
         warnings: []
       },
       artifacts: {
-        summary_json: $summary_json
+        summary_json: $summary_json,
+        canonical_summary_json: $canonical_summary_json
       }
     }' >"$summary_tmp"
   mv -f "$summary_tmp" "$summary_json"
+  if [[ "$summary_json" != "$canonical_summary_json" ]]; then
+    cp -f "$summary_json" "$canonical_summary_json"
+  fi
 }
 
 need_cmd jq
@@ -403,6 +408,7 @@ need_cmd mktemp
 phase5_run_summary_json="${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_PHASE5_RUN_SUMMARY_JSON:-${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_PHASE4_RUN_SUMMARY_JSON:-}}"
 roadmap_summary_json="${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_ROADMAP_SUMMARY_JSON:-}"
 summary_json="${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_SUMMARY_JSON:-$ROOT_DIR/.easy-node-logs/phase5_settlement_layer_handoff_check_summary.json}"
+canonical_summary_json="${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_CANONICAL_SUMMARY_JSON:-$ROOT_DIR/.easy-node-logs/phase5_settlement_layer_handoff_check_summary.json}"
 show_json="${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_SHOW_JSON:-0}"
 require_run_pipeline_ok="${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_REQUIRE_RUN_PIPELINE_OK:-1}"
 require_settlement_failsoft_ok="${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_REQUIRE_SETTLEMENT_FAILSOFT_OK:-${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_REQUIRE_WINDOWS_SERVER_PACKAGING_OK:-1}}"
@@ -504,8 +510,10 @@ bool_arg_or_die "--show-json" "$show_json"
 phase5_run_summary_json="$(abs_path "$phase5_run_summary_json")"
 roadmap_summary_json="$(abs_path "$roadmap_summary_json")"
 summary_json="$(abs_path "$summary_json")"
+canonical_summary_json="$(abs_path "$canonical_summary_json")"
 
 mkdir -p "$(dirname "$summary_json")"
+mkdir -p "$(dirname "$canonical_summary_json")"
 
 generated_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 

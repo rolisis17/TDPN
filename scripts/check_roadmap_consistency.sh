@@ -15,6 +15,14 @@ blockchain_sponsor_quickstart_doc="docs/blockchain-app-sponsorship-quickstart.md
 protocol_doc="docs/protocol.md"
 phase5_ci_script="scripts/ci_phase5_settlement_layer.sh"
 phase5_integration_script="scripts/integration_ci_phase5_settlement_layer.sh"
+phase5_check_script="scripts/phase5_settlement_layer_check.sh"
+phase5_run_script="scripts/phase5_settlement_layer_run.sh"
+phase5_handoff_check_script="scripts/phase5_settlement_layer_handoff_check.sh"
+phase5_handoff_run_script="scripts/phase5_settlement_layer_handoff_run.sh"
+phase5_check_integration_script="scripts/integration_phase5_settlement_layer_check.sh"
+phase5_run_integration_script="scripts/integration_phase5_settlement_layer_run.sh"
+phase5_handoff_check_integration_script="scripts/integration_phase5_settlement_layer_handoff_check.sh"
+phase5_handoff_run_integration_script="scripts/integration_phase5_settlement_layer_handoff_run.sh"
 phase6_ci_script="scripts/ci_phase6_cosmos_l1_build_testnet.sh"
 phase6_integration_script="scripts/integration_ci_phase6_cosmos_l1_build_testnet.sh"
 phase6_contracts_ci_script="scripts/ci_phase6_cosmos_l1_contracts.sh"
@@ -83,7 +91,7 @@ check_confirmation_interface_wording() {
   fi
 }
 
-for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$chain_readme" "$settlement_mapping_doc" "$blockchain_sponsor_quickstart_doc" "$phase5_ci_script" "$phase5_integration_script" "$phase6_ci_script" "$phase6_integration_script" "$phase6_contracts_ci_script" "$phase6_contracts_integration_script" "$phase6_contracts_live_smoke_script" "$phase6_module_coverage_floor_script" "$phase6_keeper_coverage_floor_script" "$phase6_check_script" "$phase6_run_script" "$phase6_check_integration_script" "$phase6_run_integration_script" "$phase6_suite_script" "$phase6_suite_integration_script" "$phase6_handoff_check_script" "$phase6_handoff_run_script" "$phase6_handoff_check_integration_script" "$phase6_handoff_run_integration_script" "$phase6_summary_report_script" "$phase6_summary_report_integration_script"; do
+for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$chain_readme" "$settlement_mapping_doc" "$blockchain_sponsor_quickstart_doc" "$phase5_ci_script" "$phase5_integration_script" "$phase5_check_script" "$phase5_run_script" "$phase5_handoff_check_script" "$phase5_handoff_run_script" "$phase5_check_integration_script" "$phase5_run_integration_script" "$phase5_handoff_check_integration_script" "$phase5_handoff_run_integration_script" "$phase6_ci_script" "$phase6_integration_script" "$phase6_contracts_ci_script" "$phase6_contracts_integration_script" "$phase6_contracts_live_smoke_script" "$phase6_module_coverage_floor_script" "$phase6_keeper_coverage_floor_script" "$phase6_check_script" "$phase6_run_script" "$phase6_check_integration_script" "$phase6_run_integration_script" "$phase6_suite_script" "$phase6_suite_integration_script" "$phase6_handoff_check_script" "$phase6_handoff_run_script" "$phase6_handoff_check_integration_script" "$phase6_handoff_run_integration_script" "$phase6_summary_report_script" "$phase6_summary_report_integration_script"; do
   if [[ ! -f "$f" ]]; then
     echo "missing required file: $f"
     exit 1
@@ -1063,6 +1071,122 @@ if ! rg -Fq "settlement_shadow_status_surface" "$phase5_integration_script"; the
   echo "phase5 ci integration script must validate settlement_shadow_status_surface stage"
   exit 1
 fi
+if ! rg -Fq "CI_PHASE5_SETTLEMENT_LAYER_CANONICAL_SUMMARY_JSON" "$phase5_ci_script"; then
+  echo "phase5 ci script must expose canonical summary artifact override env"
+  exit 1
+fi
+if ! rg -Fq "canonical_summary_json" "$phase5_ci_script"; then
+  echo "phase5 ci script must emit canonical summary artifact metadata/logging"
+  exit 1
+fi
+if ! rg -Fq "canonical_summary_json" "$phase5_integration_script"; then
+  echo "phase5 ci integration script must validate canonical summary artifact wiring"
+  exit 1
+fi
+if ! rg -Fq "cmp -s" "$phase5_integration_script"; then
+  echo "phase5 ci integration script must validate canonical and run summary content parity"
+  exit 1
+fi
+if ! rg -Fq "ci_phase5_settlement_layer.sh" "$phase5_run_script"; then
+  echo "phase5 run wrapper must invoke ci_phase5_settlement_layer.sh"
+  exit 1
+fi
+if ! rg -Fq "phase5_settlement_layer_check.sh" "$phase5_run_script"; then
+  echo "phase5 run wrapper must invoke phase5_settlement_layer_check.sh"
+  exit 1
+fi
+if ! rg -Fq "PHASE5_SETTLEMENT_LAYER_RUN_CANONICAL_SUMMARY_JSON" "$phase5_run_script"; then
+  echo "phase5 run wrapper must expose canonical summary artifact override env"
+  exit 1
+fi
+if ! rg -Fq "canonical_summary_json" "$phase5_run_script"; then
+  echo "phase5 run wrapper must emit canonical summary artifact metadata/logging"
+  exit 1
+fi
+if ! rg -Fq "canonical_summary_json" "$phase5_run_integration_script"; then
+  echo "phase5 run integration must validate canonical summary artifact wiring"
+  exit 1
+fi
+if ! rg -Fq "cmp -s" "$phase5_run_integration_script"; then
+  echo "phase5 run integration must validate canonical and run summary content parity"
+  exit 1
+fi
+if ! rg -Fq "PHASE5_SETTLEMENT_LAYER_CHECK_CANONICAL_SUMMARY_JSON" "$phase5_check_script"; then
+  echo "phase5 check wrapper must expose canonical summary artifact override env"
+  exit 1
+fi
+if ! rg -Fq "canonical_summary_json" "$phase5_check_script"; then
+  echo "phase5 check wrapper must emit canonical summary artifact metadata"
+  exit 1
+fi
+if ! rg -Fq "canonical_summary_json" "$phase5_check_integration_script"; then
+  echo "phase5 check integration must validate canonical summary artifact wiring"
+  exit 1
+fi
+if ! rg -Fq "cmp -s" "$phase5_check_integration_script"; then
+  echo "phase5 check integration must validate canonical and run summary content parity"
+  exit 1
+fi
+if ! rg -Fq "phase5_settlement_layer_run.sh" "$phase5_handoff_run_script"; then
+  echo "phase5 handoff-run wrapper must invoke phase5_settlement_layer_run.sh"
+  exit 1
+fi
+if ! rg -Fq "phase5_settlement_layer_handoff_check.sh" "$phase5_handoff_run_script"; then
+  echo "phase5 handoff-run wrapper must invoke phase5_settlement_layer_handoff_check.sh"
+  exit 1
+fi
+if ! rg -Fq "PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_CANONICAL_SUMMARY_JSON" "$phase5_handoff_run_script"; then
+  echo "phase5 handoff-run wrapper must expose canonical summary artifact override env"
+  exit 1
+fi
+if ! rg -Fq "canonical_summary_json" "$phase5_handoff_run_script"; then
+  echo "phase5 handoff-run wrapper must emit canonical summary artifact metadata/logging"
+  exit 1
+fi
+if ! rg -Fq "canonical_summary_json" "$phase5_handoff_run_integration_script"; then
+  echo "phase5 handoff-run integration must validate canonical summary artifact wiring"
+  exit 1
+fi
+if ! rg -Fq "cmp -s" "$phase5_handoff_run_integration_script"; then
+  echo "phase5 handoff-run integration must validate canonical and run summary content parity"
+  exit 1
+fi
+if ! rg -Fq "PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_CANONICAL_SUMMARY_JSON" "$phase5_handoff_check_script"; then
+  echo "phase5 handoff-check wrapper must expose canonical summary artifact override env"
+  exit 1
+fi
+if ! rg -Fq "canonical_summary_json" "$phase5_handoff_check_script"; then
+  echo "phase5 handoff-check wrapper must emit canonical summary artifact metadata"
+  exit 1
+fi
+if ! rg -Fq "canonical_summary_json" "$phase5_handoff_check_integration_script"; then
+  echo "phase5 handoff-check integration must validate canonical summary artifact wiring"
+  exit 1
+fi
+if ! rg -Fq "cmp -s" "$phase5_handoff_check_integration_script"; then
+  echo "phase5 handoff-check integration must validate canonical and run summary content parity"
+  exit 1
+fi
+for phase5_canonical_summary in \
+  "phase5_settlement_layer_ci_summary.json" \
+  "phase5_settlement_layer_check_summary.json" \
+  "phase5_settlement_layer_run_summary.json" \
+  "phase5_settlement_layer_handoff_check_summary.json" \
+  "phase5_settlement_layer_handoff_run_summary.json"
+do
+  if ! rg -Fq "$phase5_canonical_summary" "$full_plan"; then
+    echo "full execution plan must document phase5 canonical summary artifact: $phase5_canonical_summary"
+    exit 1
+  fi
+  if ! rg -Fq "$phase5_canonical_summary" "$product_roadmap"; then
+    echo "product roadmap must document phase5 canonical summary artifact: $phase5_canonical_summary"
+    exit 1
+  fi
+  if ! rg -Fq "$phase5_canonical_summary" "$chain_readme"; then
+    echo "chain README must document phase5 canonical summary artifact: $phase5_canonical_summary"
+    exit 1
+  fi
+done
 phase5_blockchain_gate_specs=(
   "settlement_adapter_roundtrip|scripts/integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh"
   "settlement_adapter_signed_tx_roundtrip|scripts/integration_cosmos_adapter_tdpnd_signed_tx_roundtrip.sh"

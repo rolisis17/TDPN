@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-for cmd in bash jq mktemp chmod grep cat; do
+for cmd in bash jq mktemp chmod grep cat cmp; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "missing required command: $cmd"
     exit 2
@@ -25,6 +25,7 @@ PASS_ROADMAP="$TMP_DIR/roadmap_pass.json"
 PASS_CHECK="$TMP_DIR/check_pass.json"
 PASS_OUTPUT="$TMP_DIR/pass_output.json"
 PASS_LOG="$TMP_DIR/pass.log"
+PASS_CANONICAL="$TMP_DIR/pass_canonical_summary.json"
 ENV_ROADMAP="$TMP_DIR/roadmap_env_relaxed.json"
 ENV_CANONICAL_OUTPUT="$TMP_DIR/env_canonical_output.json"
 ENV_CANONICAL_LOG="$TMP_DIR/env_canonical.log"
@@ -43,11 +44,13 @@ UNRESOLVED_RUN="$TMP_DIR/run_unresolved.json"
 UNRESOLVED_ROADMAP="$TMP_DIR/roadmap_unresolved.json"
 UNRESOLVED_OUTPUT="$TMP_DIR/unresolved_output.json"
 UNRESOLVED_LOG="$TMP_DIR/unresolved.log"
+UNRESOLVED_CANONICAL="$TMP_DIR/unresolved_canonical_summary.json"
 
 FAIL_RUN="$TMP_DIR/run_fail.json"
 FAIL_ROADMAP="$TMP_DIR/roadmap_fail.json"
 FAIL_OUTPUT="$TMP_DIR/fail_output.json"
 FAIL_LOG="$TMP_DIR/fail.log"
+FAIL_CANONICAL="$TMP_DIR/fail_canonical_summary.json"
 
 MISSING_OUTPUT="$TMP_DIR/missing_output.json"
 MISSING_LOG="$TMP_DIR/missing.log"
@@ -121,17 +124,24 @@ cat >"$PASS_RUN" <<EOF_PASS_RUN
 EOF_PASS_RUN
 
 echo "[phase5-settlement-layer-handoff-check] primary roadmap pass path"
+PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_CANONICAL_SUMMARY_JSON="$PASS_CANONICAL" \
 "$SCRIPT_UNDER_TEST" \
   --phase5-run-summary-json "$PASS_RUN" \
   --roadmap-summary-json "$PASS_ROADMAP" \
   --summary-json "$PASS_OUTPUT" \
   --show-json 0 >"$PASS_LOG" 2>&1
 
+if [[ ! -f "$PASS_CANONICAL" ]]; then
+  echo "missing canonical summary on pass path: $PASS_CANONICAL"
+  cat "$PASS_LOG"
+  exit 1
+fi
 if ! jq -e '
   .version == 1
   and .schema.id == "phase5_settlement_layer_handoff_check_summary"
   and .status == "pass"
   and .rc == 0
+  and .artifacts.canonical_summary_json == $expected_canonical
   and .fail_closed == true
   and .inputs.usable.phase5_run_summary_json == true
   and .inputs.usable.roadmap_summary_json == true
@@ -141,10 +151,16 @@ if ! jq -e '
   and .handoff.settlement_bridge_smoke_ok == true
   and .handoff.settlement_state_persistence_ok == true
   and .handoff.sources.settlement_failsoft_ok == "roadmap_progress_summary.vpn_track.phase5_settlement_layer_handoff.settlement_failsoft_ok"
-' "$PASS_OUTPUT" >/dev/null; then
+' --arg expected_canonical "$PASS_CANONICAL" "$PASS_OUTPUT" >/dev/null; then
   echo "primary pass-path summary mismatch"
   cat "$PASS_OUTPUT"
   cat "$PASS_LOG"
+  exit 1
+fi
+if ! cmp -s "$PASS_OUTPUT" "$PASS_CANONICAL"; then
+  echo "pass-path canonical summary diverges from run summary"
+  cat "$PASS_OUTPUT"
+  cat "$PASS_CANONICAL"
   exit 1
 fi
 
@@ -360,6 +376,7 @@ cat >"$UNRESOLVED_ROADMAP" <<'EOF_UNRESOLVED_ROADMAP'
 EOF_UNRESOLVED_ROADMAP
 
 echo "[phase5-settlement-layer-handoff-check] unresolved booleans with relaxed requirements (canonical flags + one legacy requirement alias)"
+PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_CANONICAL_SUMMARY_JSON="$UNRESOLVED_CANONICAL" \
 "$SCRIPT_UNDER_TEST" \
   --phase5-run-summary-json "$UNRESOLVED_RUN" \
   --roadmap-summary-json "$UNRESOLVED_ROADMAP" \
@@ -371,18 +388,30 @@ echo "[phase5-settlement-layer-handoff-check] unresolved booleans with relaxed r
   --require-settlement-state-persistence-ok 0 \
   --show-json 0 >"$UNRESOLVED_LOG" 2>&1
 
+if [[ ! -f "$UNRESOLVED_CANONICAL" ]]; then
+  echo "missing canonical summary on unresolved-relaxed path: $UNRESOLVED_CANONICAL"
+  cat "$UNRESOLVED_LOG"
+  exit 1
+fi
 if ! jq -e '
   .status == "pass"
   and .rc == 0
+  and .artifacts.canonical_summary_json == $expected_canonical
   and .handoff.run_pipeline_ok == true
   and .handoff.settlement_failsoft_ok == null
   and .handoff.settlement_acceptance_ok == null
   and .handoff.settlement_bridge_smoke_ok == null
   and .handoff.settlement_state_persistence_ok == null
-' "$UNRESOLVED_OUTPUT" >/dev/null; then
+' --arg expected_canonical "$UNRESOLVED_CANONICAL" "$UNRESOLVED_OUTPUT" >/dev/null; then
   echo "unresolved relaxed summary mismatch"
   cat "$UNRESOLVED_OUTPUT"
   cat "$UNRESOLVED_LOG"
+  exit 1
+fi
+if ! cmp -s "$UNRESOLVED_OUTPUT" "$UNRESOLVED_CANONICAL"; then
+  echo "unresolved-relaxed canonical summary diverges from run summary"
+  cat "$UNRESOLVED_OUTPUT"
+  cat "$UNRESOLVED_CANONICAL"
   exit 1
 fi
 
@@ -434,6 +463,7 @@ EOF_FAIL_ROADMAP
 
 echo "[phase5-settlement-layer-handoff-check] run pipeline failure is fail-closed"
 set +e
+PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_CANONICAL_SUMMARY_JSON="$FAIL_CANONICAL" \
 "$SCRIPT_UNDER_TEST" \
   --phase5-run-summary-json "$FAIL_RUN" \
   --roadmap-summary-json "$FAIL_ROADMAP" \
@@ -446,15 +476,27 @@ if [[ "$fail_rc" -ne 1 ]]; then
   cat "$FAIL_LOG"
   exit 1
 fi
+if [[ ! -f "$FAIL_CANONICAL" ]]; then
+  echo "missing canonical summary on fail path: $FAIL_CANONICAL"
+  cat "$FAIL_LOG"
+  exit 1
+fi
 if ! jq -e '
   .status == "fail"
   and .rc == 1
+  and .artifacts.canonical_summary_json == $expected_canonical
   and .handoff.run_pipeline_ok == false
   and ((.decision.reasons // []) | any(test("run_pipeline_ok is false|run_pipeline_ok unresolved")))
-' "$FAIL_OUTPUT" >/dev/null; then
+' --arg expected_canonical "$FAIL_CANONICAL" "$FAIL_OUTPUT" >/dev/null; then
   echo "run pipeline failure summary mismatch"
   cat "$FAIL_OUTPUT"
   cat "$FAIL_LOG"
+  exit 1
+fi
+if ! cmp -s "$FAIL_OUTPUT" "$FAIL_CANONICAL"; then
+  echo "fail-path canonical summary diverges from run summary"
+  cat "$FAIL_OUTPUT"
+  cat "$FAIL_CANONICAL"
   exit 1
 fi
 

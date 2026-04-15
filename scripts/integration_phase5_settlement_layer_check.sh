@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-for cmd in bash jq mktemp chmod grep cat; do
+for cmd in bash jq mktemp chmod grep cat cmp; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "missing required command: $cmd"
     exit 2
@@ -28,6 +28,9 @@ MISSING_SUMMARY="$TMP_DIR/ci_phase5_missing.json"
 PASS_OUTPUT="$TMP_DIR/pass_output.json"
 FAIL_OUTPUT="$TMP_DIR/fail_output.json"
 RELAXED_OUTPUT="$TMP_DIR/relaxed_output.json"
+PASS_CANONICAL="$TMP_DIR/pass_canonical_summary.json"
+FAIL_CANONICAL="$TMP_DIR/fail_canonical_summary.json"
+RELAXED_CANONICAL="$TMP_DIR/relaxed_canonical_summary.json"
 ENV_CANONICAL_OUTPUT="$TMP_DIR/env_canonical_output.json"
 ENV_LEGACY_OUTPUT="$TMP_DIR/env_legacy_output.json"
 LEGACY_ALIAS_OUTPUT="$TMP_DIR/legacy_alias_output.json"
@@ -123,16 +126,23 @@ cat >"$RELAXED_SUMMARY" <<'EOF_RELAXED'
 EOF_RELAXED
 
 echo "[phase5-settlement-layer-check] stage-derived pass path"
+PHASE5_SETTLEMENT_LAYER_CHECK_CANONICAL_SUMMARY_JSON="$PASS_CANONICAL" \
 "$SCRIPT_UNDER_TEST" \
   --ci-phase5-summary-json "$PASS_SUMMARY" \
   --summary-json "$PASS_OUTPUT" \
   --show-json 0 >"$PASS_LOG" 2>&1
 
+if [[ ! -f "$PASS_CANONICAL" ]]; then
+  echo "missing canonical summary on pass path: $PASS_CANONICAL"
+  cat "$PASS_LOG"
+  exit 1
+fi
 if ! jq -e '
   .version == 1
   and .schema.id == "phase5_settlement_layer_check_summary"
   and .status == "pass"
   and .rc == 0
+  and .artifacts.canonical_summary_json == $expected_canonical
   and .inputs.usable.ci_phase5_summary_json == true
   and .policy.require_settlement_failsoft_ok == true
   and .policy.require_settlement_acceptance_ok == true
@@ -142,15 +152,22 @@ if ! jq -e '
   and .signals.settlement_acceptance_ok == true
   and .signals.settlement_bridge_smoke_ok == true
   and .signals.settlement_state_persistence_ok == true
-' "$PASS_OUTPUT" >/dev/null; then
+' --arg expected_canonical "$PASS_CANONICAL" "$PASS_OUTPUT" >/dev/null; then
   echo "pass-path summary contract mismatch"
   cat "$PASS_OUTPUT"
   cat "$PASS_LOG"
   exit 1
 fi
+if ! cmp -s "$PASS_OUTPUT" "$PASS_CANONICAL"; then
+  echo "pass-path canonical summary diverges from run summary"
+  cat "$PASS_OUTPUT"
+  cat "$PASS_CANONICAL"
+  exit 1
+fi
 
 echo "[phase5-settlement-layer-check] fail-closed path on stage failure"
 set +e
+PHASE5_SETTLEMENT_LAYER_CHECK_CANONICAL_SUMMARY_JSON="$FAIL_CANONICAL" \
 "$SCRIPT_UNDER_TEST" \
   --ci-phase5-summary-json "$FAIL_SUMMARY" \
   --summary-json "$FAIL_OUTPUT" \
@@ -162,36 +179,61 @@ if [[ "$fail_rc" -ne 1 ]]; then
   cat "$FAIL_LOG"
   exit 1
 fi
+if [[ ! -f "$FAIL_CANONICAL" ]]; then
+  echo "missing canonical summary on fail path: $FAIL_CANONICAL"
+  cat "$FAIL_LOG"
+  exit 1
+fi
 if ! jq -e '
   .status == "fail"
   and .rc == 1
+  and .artifacts.canonical_summary_json == $expected_canonical
   and .signals.settlement_acceptance_ok == false
   and .stages.settlement_acceptance.status == "fail"
   and ((.decision.reasons // []) | any(test("settlement_acceptance_ok is false")))
-' "$FAIL_OUTPUT" >/dev/null; then
+' --arg expected_canonical "$FAIL_CANONICAL" "$FAIL_OUTPUT" >/dev/null; then
   echo "fail-path summary contract mismatch"
   cat "$FAIL_OUTPUT"
   cat "$FAIL_LOG"
   exit 1
 fi
+if ! cmp -s "$FAIL_OUTPUT" "$FAIL_CANONICAL"; then
+  echo "fail-path canonical summary diverges from run summary"
+  cat "$FAIL_OUTPUT"
+  cat "$FAIL_CANONICAL"
+  exit 1
+fi
 
 echo "[phase5-settlement-layer-check] canonical relaxed policy toggle path"
+PHASE5_SETTLEMENT_LAYER_CHECK_CANONICAL_SUMMARY_JSON="$RELAXED_CANONICAL" \
 "$SCRIPT_UNDER_TEST" \
   --ci-phase5-summary-json "$RELAXED_SUMMARY" \
   --summary-json "$RELAXED_OUTPUT" \
   --require-settlement-acceptance-ok 0 \
   --show-json 0 >"$RELAXED_LOG" 2>&1
 
+if [[ ! -f "$RELAXED_CANONICAL" ]]; then
+  echo "missing canonical summary on relaxed path: $RELAXED_CANONICAL"
+  cat "$RELAXED_LOG"
+  exit 1
+fi
 if ! jq -e '
   .status == "pass"
   and .rc == 0
+  and .artifacts.canonical_summary_json == $expected_canonical
   and .policy.require_settlement_acceptance_ok == false
   and .signals.settlement_acceptance_ok == false
   and .stages.settlement_acceptance.status == "fail"
-' "$RELAXED_OUTPUT" >/dev/null; then
+' --arg expected_canonical "$RELAXED_CANONICAL" "$RELAXED_OUTPUT" >/dev/null; then
   echo "relaxed-policy summary mismatch"
   cat "$RELAXED_OUTPUT"
   cat "$RELAXED_LOG"
+  exit 1
+fi
+if ! cmp -s "$RELAXED_OUTPUT" "$RELAXED_CANONICAL"; then
+  echo "relaxed-path canonical summary diverges from run summary"
+  cat "$RELAXED_OUTPUT"
+  cat "$RELAXED_CANONICAL"
   exit 1
 fi
 

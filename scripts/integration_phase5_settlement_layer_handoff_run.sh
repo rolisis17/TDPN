@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-for cmd in bash jq mktemp chmod grep cat; do
+for cmd in bash jq mktemp chmod grep cat cmp; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "missing required command: $cmd"
     exit 2
@@ -27,6 +27,12 @@ ENV_DRY_STDOUT="$TMP_DIR/env_dry.stdout"
 FAIL_STDOUT="$TMP_DIR/fail.stdout"
 RUN_CONTRACT_FAIL_STDOUT="$TMP_DIR/run_contract_fail.stdout"
 HANDOFF_CONTRACT_FAIL_STDOUT="$TMP_DIR/handoff_contract_fail.stdout"
+PASS_CANONICAL_SUMMARY="$TMP_DIR/pass_wrapper_canonical.json"
+DRY_CANONICAL_SUMMARY="$TMP_DIR/dry_wrapper_canonical.json"
+ENV_DRY_CANONICAL_SUMMARY="$TMP_DIR/env_dry_wrapper_canonical.json"
+FAIL_CANONICAL_SUMMARY="$TMP_DIR/fail_wrapper_canonical.json"
+RUN_CONTRACT_FAIL_CANONICAL_SUMMARY="$TMP_DIR/run_contract_fail_canonical.json"
+HANDOFF_CONTRACT_FAIL_CANONICAL_SUMMARY="$TMP_DIR/handoff_contract_fail_canonical.json"
 
 FAKE_RUN="$TMP_DIR/fake_phase5_settlement_layer_run.sh"
 cat >"$FAKE_RUN" <<'EOF_FAKE_RUN'
@@ -258,6 +264,7 @@ PASS_WRAPPER_SUMMARY="$TMP_DIR/pass_wrapper.json"
 PHASE5_HANDOFF_RUN_CAPTURE_FILE="$CAPTURE" \
 PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_RUN_SCRIPT="$FAKE_RUN" \
 PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_HANDOFF_CHECK_SCRIPT="$FAKE_HANDOFF" \
+PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_CANONICAL_SUMMARY_JSON="$PASS_CANONICAL_SUMMARY" \
 bash "$RUNNER" \
   --reports-dir "$TMP_DIR/reports_pass" \
   --run-summary-json "$TMP_DIR/pass_run_summary.json" \
@@ -289,12 +296,28 @@ if [[ "$handoff_line" != *"--require-run-pipeline-ok 1"* || "$handoff_line" != *
   echo "$handoff_line"
   exit 1
 fi
+if [[ ! -f "$PASS_CANONICAL_SUMMARY" ]]; then
+  echo "missing pass-path canonical summary file: $PASS_CANONICAL_SUMMARY"
+  exit 1
+fi
+if ! cmp -s "$PASS_WRAPPER_SUMMARY" "$PASS_CANONICAL_SUMMARY"; then
+  echo "pass-path canonical summary content mismatch"
+  cat "$PASS_WRAPPER_SUMMARY"
+  cat "$PASS_CANONICAL_SUMMARY"
+  exit 1
+fi
+if ! grep -Fq -- "[phase5-settlement-layer-handoff-run] canonical_summary_json=$PASS_CANONICAL_SUMMARY" "$PASS_STDOUT"; then
+  echo "pass-path log missing canonical summary line"
+  cat "$PASS_STDOUT"
+  exit 1
+fi
 
-if ! jq -e --arg run_summary "$TMP_DIR/pass_run_summary.json" --arg handoff_summary "$TMP_DIR/pass_handoff_summary.json" '
+if ! jq -e --arg run_summary "$TMP_DIR/pass_run_summary.json" --arg handoff_summary "$TMP_DIR/pass_handoff_summary.json" --arg canonical "$PASS_CANONICAL_SUMMARY" '
   .version == 1
   and .schema.id == "phase5_settlement_layer_handoff_run_summary"
   and .status == "pass"
   and .rc == 0
+  and .artifacts.canonical_summary_json == $canonical
   and .inputs.dry_run == false
   and .steps.phase5_settlement_layer_run.status == "pass"
   and .steps.phase5_settlement_layer_run.rc == 0
@@ -318,6 +341,7 @@ DRY_WRAPPER_SUMMARY="$TMP_DIR/dry_wrapper.json"
 PHASE5_HANDOFF_RUN_CAPTURE_FILE="$CAPTURE" \
 PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_RUN_SCRIPT="$FAKE_RUN" \
 PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_HANDOFF_CHECK_SCRIPT="$FAKE_HANDOFF" \
+PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_CANONICAL_SUMMARY_JSON="$DRY_CANONICAL_SUMMARY" \
 bash "$RUNNER" \
   --reports-dir "$TMP_DIR/reports_dry" \
   --run-summary-json "$TMP_DIR/dry_run_summary.json" \
@@ -364,6 +388,7 @@ PHASE5_HANDOFF_RUN_CAPTURE_FILE="$CAPTURE" \
 PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_RUN_SCRIPT="$FAKE_RUN" \
 PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_HANDOFF_CHECK_SCRIPT="$FAKE_HANDOFF" \
 PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_DRY_RUN=1 \
+PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_CANONICAL_SUMMARY_JSON="$ENV_DRY_CANONICAL_SUMMARY" \
 FAKE_HANDOFF_HELP_MODE=legacy \
 bash "$RUNNER" \
   --reports-dir "$TMP_DIR/reports_env_dry" \
@@ -409,6 +434,7 @@ LEGACY_WRAPPER_SUMMARY="$TMP_DIR/legacy_wrapper.json"
 PHASE5_HANDOFF_RUN_CAPTURE_FILE="$CAPTURE" \
 PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_RUN_SCRIPT="$FAKE_RUN" \
 PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_HANDOFF_CHECK_SCRIPT="$FAKE_HANDOFF" \
+PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_CANONICAL_SUMMARY_JSON="$FAIL_CANONICAL_SUMMARY" \
 bash "$RUNNER" \
   --reports-dir "$TMP_DIR/reports_legacy" \
   --run-summary-json "$TMP_DIR/legacy_run_summary.json" \
@@ -432,6 +458,7 @@ set +e
 PHASE5_HANDOFF_RUN_CAPTURE_FILE="$CAPTURE" \
 PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_RUN_SCRIPT="$FAKE_RUN" \
 PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_HANDOFF_CHECK_SCRIPT="$FAKE_HANDOFF" \
+PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_CANONICAL_SUMMARY_JSON="$FAIL_CANONICAL_SUMMARY" \
 FAKE_RUN_FAIL=1 \
 FAKE_RUN_FAIL_RC=27 \
 bash "$RUNNER" \
@@ -455,9 +482,25 @@ if [[ -z "$run_line" || -z "$handoff_line" ]]; then
   cat "$FAIL_STDOUT"
   exit 1
 fi
-if ! jq -e '
+if [[ ! -f "$FAIL_CANONICAL_SUMMARY" ]]; then
+  echo "missing fail-path canonical summary file: $FAIL_CANONICAL_SUMMARY"
+  exit 1
+fi
+if ! cmp -s "$FAIL_WRAPPER_SUMMARY" "$FAIL_CANONICAL_SUMMARY"; then
+  echo "fail-path canonical summary content mismatch"
+  cat "$FAIL_WRAPPER_SUMMARY"
+  cat "$FAIL_CANONICAL_SUMMARY"
+  exit 1
+fi
+if ! grep -Fq -- "[phase5-settlement-layer-handoff-run] canonical_summary_json=$FAIL_CANONICAL_SUMMARY" "$FAIL_STDOUT"; then
+  echo "fail-path log missing canonical summary line"
+  cat "$FAIL_STDOUT"
+  exit 1
+fi
+if ! jq -e --arg canonical "$FAIL_CANONICAL_SUMMARY" '
   .status == "fail"
   and .rc == 27
+  and .artifacts.canonical_summary_json == $canonical
   and .steps.phase5_settlement_layer_run.status == "fail"
   and .steps.phase5_settlement_layer_run.rc == 27
   and .steps.phase5_settlement_layer_run.command_rc == 27
@@ -479,6 +522,7 @@ set +e
 PHASE5_HANDOFF_RUN_CAPTURE_FILE="$CAPTURE" \
 PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_RUN_SCRIPT="$FAKE_RUN" \
 PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_HANDOFF_CHECK_SCRIPT="$FAKE_HANDOFF" \
+PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_CANONICAL_SUMMARY_JSON="$RUN_CONTRACT_FAIL_CANONICAL_SUMMARY" \
 FAKE_RUN_OMIT_SUMMARY=1 \
 bash "$RUNNER" \
   --reports-dir "$TMP_DIR/reports_run_contract_fail" \
@@ -513,6 +557,7 @@ set +e
 PHASE5_HANDOFF_RUN_CAPTURE_FILE="$CAPTURE" \
 PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_RUN_SCRIPT="$FAKE_RUN" \
 PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_HANDOFF_CHECK_SCRIPT="$FAKE_HANDOFF" \
+PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_CANONICAL_SUMMARY_JSON="$HANDOFF_CONTRACT_FAIL_CANONICAL_SUMMARY" \
 FAKE_HANDOFF_OMIT_SUMMARY=1 \
 bash "$RUNNER" \
   --reports-dir "$TMP_DIR/reports_handoff_contract_fail" \
