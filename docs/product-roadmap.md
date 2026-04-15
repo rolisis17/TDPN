@@ -190,6 +190,7 @@ Current implementation posture:
   - `settlement_adapter_signed_tx_roundtrip` -> `scripts/integration_cosmos_adapter_tdpnd_signed_tx_roundtrip.sh`
   - `settlement_shadow_env` -> `scripts/integration_cosmos_settlement_shadow_env.sh`
   - `settlement_shadow_status_surface` -> `scripts/integration_cosmos_settlement_shadow_status_surface.sh`
+  - `issuer_sponsor_api_live_smoke` -> `scripts/integration_issuer_sponsor_api_live_smoke.sh` (validates sponsor `quote -> reserve -> token -> status` happy path with no end-user wallet signing)
 - phase5 settlement CI/check/run/handoff wrappers now emit canonical summary artifacts under `.easy-node-logs`; these are the helper input contracts for `scripts/phase5_settlement_layer_summary_report.sh`:
   - `phase5_settlement_layer_ci_summary.json`
   - `phase5_settlement_layer_check_summary.json`

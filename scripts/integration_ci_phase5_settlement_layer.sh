@@ -52,6 +52,7 @@ STAGE_ENV_NAMES=(
   "CI_PHASE5_SETTLEMENT_LAYER_SETTLEMENT_ADAPTER_SIGNED_TX_ROUNDTRIP_SCRIPT"
   "CI_PHASE5_SETTLEMENT_LAYER_SETTLEMENT_SHADOW_ENV_SCRIPT"
   "CI_PHASE5_SETTLEMENT_LAYER_SETTLEMENT_SHADOW_STATUS_SURFACE_SCRIPT"
+  "CI_PHASE5_SETTLEMENT_LAYER_ISSUER_SPONSOR_API_LIVE_SMOKE_SCRIPT"
   "CI_PHASE5_SETTLEMENT_LAYER_PHASE5_SETTLEMENT_LAYER_CHECK_SCRIPT"
   "CI_PHASE5_SETTLEMENT_LAYER_PHASE5_SETTLEMENT_LAYER_RUN_SCRIPT"
   "CI_PHASE5_SETTLEMENT_LAYER_PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_SCRIPT"
@@ -67,6 +68,7 @@ STAGE_IDS=(
   "settlement_adapter_signed_tx_roundtrip"
   "settlement_shadow_env"
   "settlement_shadow_status_surface"
+  "issuer_sponsor_api_live_smoke"
   "phase5_settlement_layer_check"
   "phase5_settlement_layer_run"
   "phase5_settlement_layer_handoff_check"
@@ -230,6 +232,7 @@ if ! jq -e '
   and .inputs.run_settlement_adapter_signed_tx_roundtrip == true
   and .inputs.run_settlement_shadow_env == true
   and .inputs.run_settlement_shadow_status_surface == true
+  and .inputs.run_issuer_sponsor_api_live_smoke == true
   and .inputs.run_phase5_settlement_layer_check == true
   and .inputs.run_phase5_settlement_layer_run == true
   and .inputs.run_phase5_settlement_layer_handoff_check == true
@@ -243,6 +246,8 @@ if ! jq -e '
   and .steps.settlement_shadow_env.rc == 0
   and .steps.settlement_shadow_status_surface.status == "pass"
   and .steps.settlement_shadow_status_surface.rc == 0
+  and .steps.issuer_sponsor_api_live_smoke.status == "pass"
+  and .steps.issuer_sponsor_api_live_smoke.rc == 0
   and .steps.phase5_settlement_layer_check.status == "pass"
   and .steps.phase5_settlement_layer_check.rc == 0
   and .steps.phase5_settlement_layer_run.status == "pass"
@@ -322,6 +327,8 @@ if ! jq -e '
   and .steps.settlement_shadow_env.reason == "dry-run"
   and .steps.settlement_shadow_status_surface.status == "skip"
   and .steps.settlement_shadow_status_surface.reason == "dry-run"
+  and .steps.issuer_sponsor_api_live_smoke.status == "skip"
+  and .steps.issuer_sponsor_api_live_smoke.reason == "dry-run"
   and .steps.phase5_settlement_layer_check.status == "skip"
   and .steps.phase5_settlement_layer_check.reason == "dry-run"
   and .steps.phase5_settlement_layer_run.status == "skip"
@@ -362,6 +369,7 @@ CI_PHASE5_SETTLEMENT_LAYER_CANONICAL_SUMMARY_JSON="$TOGGLE_CANONICAL_SUMMARY_JSO
   --run-settlement-adapter-signed-tx-roundtrip 0 \
   --run-settlement-shadow-env 0 \
   --run-settlement-shadow-status-surface 0 \
+  --run-issuer-sponsor-api-live-smoke 0 \
   --run-phase5-settlement-layer-check 0 \
   --run-phase5-settlement-layer-run 0 \
   --run-phase5-settlement-layer-handoff-check 0 \
@@ -397,6 +405,10 @@ if ! jq -e '
   and .steps.settlement_shadow_status_surface.enabled == false
   and .steps.settlement_shadow_status_surface.status == "skip"
   and .steps.settlement_shadow_status_surface.reason == "disabled"
+  and .inputs.run_issuer_sponsor_api_live_smoke == false
+  and .steps.issuer_sponsor_api_live_smoke.enabled == false
+  and .steps.issuer_sponsor_api_live_smoke.status == "skip"
+  and .steps.issuer_sponsor_api_live_smoke.reason == "disabled"
   and .steps.settlement_bridge_smoke.enabled == true
   and .steps.settlement_bridge_smoke.status == "pass"
   and .inputs.run_phase5_settlement_layer_check == false
@@ -426,7 +438,7 @@ echo "[ci-phase5-settlement-layer] first-failure rc propagation"
 : >"$CAPTURE"
 set +e
 CI_PHASE5_CAPTURE_FILE="$CAPTURE" \
-CI_PHASE5_FAIL_MATRIX="settlement_acceptance=23,settlement_bridge_smoke=41,settlement_adapter_roundtrip=43,settlement_adapter_signed_tx_roundtrip=45,settlement_shadow_env=49,settlement_shadow_status_surface=51,phase5_settlement_layer_check=47,phase5_settlement_layer_run=53,phase5_settlement_layer_handoff_check=55,phase5_settlement_layer_handoff_run=59" \
+CI_PHASE5_FAIL_MATRIX="settlement_acceptance=23,settlement_bridge_smoke=41,settlement_adapter_roundtrip=43,settlement_adapter_signed_tx_roundtrip=45,settlement_shadow_env=49,settlement_shadow_status_surface=51,issuer_sponsor_api_live_smoke=57,phase5_settlement_layer_check=47,phase5_settlement_layer_run=53,phase5_settlement_layer_handoff_check=55,phase5_settlement_layer_handoff_run=59" \
 CI_PHASE5_SETTLEMENT_LAYER_CANONICAL_SUMMARY_JSON="$FAIL_CANONICAL_SUMMARY_JSON" \
 "$GATE_SCRIPT" \
   --reports-dir "$FAIL_REPORTS_DIR" \
@@ -464,6 +476,8 @@ if ! jq -e '
   and .steps.settlement_shadow_env.rc == 49
   and .steps.settlement_shadow_status_surface.status == "fail"
   and .steps.settlement_shadow_status_surface.rc == 51
+  and .steps.issuer_sponsor_api_live_smoke.status == "fail"
+  and .steps.issuer_sponsor_api_live_smoke.rc == 57
   and .steps.phase5_settlement_layer_check.status == "fail"
   and .steps.phase5_settlement_layer_check.rc == 47
   and .steps.phase5_settlement_layer_run.status == "fail"

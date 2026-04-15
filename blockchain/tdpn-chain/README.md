@@ -22,7 +22,7 @@ This workspace defines the initial module boundaries for TDPN's VPN-compatible b
 
 ## Integration notes
 - Current app-side bridge is `pkg/settlement` with optional Cosmos adapter.
-- Issuer sponsor API endpoints map to `quote -> reserve -> token issue -> status` flow.
+- Issuer sponsor API endpoints map to `/v1/sponsor/quote -> /v1/sponsor/reserve -> /v1/sponsor/token -> /v1/sponsor/status` flow (no-wallet-signing happy path for end users).
 - dApp sponsorship quickstart (issuer sponsor API happy path): `../../docs/blockchain-app-sponsorship-quickstart.md`.
 - Reconciliation lifecycle uses canonical statuses `pending -> submitted -> confirmed`; explicit `failed` is retained for replay/reconciliation, and settlement/reward/sponsor/slash records move `submitted -> confirmed` when adapter query surfaces observe by-id bridge records.
 - Query-by-id confirmation capability is exposed through optional settlement adapter interface `ChainConfirmationQuerier` (`pkg/settlement/types.go`).
@@ -31,6 +31,7 @@ This workspace defines the initial module boundaries for TDPN's VPN-compatible b
 - Local multi-node smoke integration: `scripts/integration_cosmos_local_testnet_smoke.sh`.
 - Local acceptance gate for settlement control-plane behavior: `scripts/integration_cosmos_settlement_acceptance_paths.sh`.
 - Phase5 CI includes `settlement_adapter_roundtrip` as a first-class stage running `scripts/integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh`.
+- Phase5 CI includes sponsor API live-smoke stage `issuer_sponsor_api_live_smoke` running `scripts/integration_issuer_sponsor_api_live_smoke.sh` for `/v1/sponsor/quote|reserve|token|status` no-wallet-signing happy-path coverage.
 - Phase5 CI/check/run/handoff wrappers emit canonical summary artifacts in `.easy-node-logs` (`phase5_settlement_layer_ci_summary.json`, `phase5_settlement_layer_check_summary.json`, `phase5_settlement_layer_run_summary.json`, `phase5_settlement_layer_handoff_check_summary.json`, `phase5_settlement_layer_handoff_run_summary.json`) in addition to per-run reports; these are consumed by `scripts/phase5_settlement_layer_summary_report.sh`.
 - Phase5 summary helper/report: `scripts/phase5_settlement_layer_summary_report.sh` (integration contract: `scripts/integration_phase5_settlement_layer_summary_report.sh`) aggregates CI/check/run/handoff summaries into compact operator output plus normalized JSON.
 - Phase6 summary helper/report: `scripts/phase6_cosmos_l1_summary_report.sh` (integration contract: `scripts/integration_phase6_cosmos_l1_summary_report.sh`).

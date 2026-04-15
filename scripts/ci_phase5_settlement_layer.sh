@@ -20,6 +20,7 @@ Usage:
     [--run-settlement-adapter-signed-tx-roundtrip [0|1]] \
     [--run-settlement-shadow-env [0|1]] \
     [--run-settlement-shadow-status-surface [0|1]] \
+    [--run-issuer-sponsor-api-live-smoke [0|1]] \
     [--run-phase5-settlement-layer-check [0|1]] \
     [--run-phase5-settlement-layer-run [0|1]] \
     [--run-phase5-settlement-layer-handoff-check [0|1]] \
@@ -36,10 +37,11 @@ Purpose:
     6) integration_cosmos_adapter_tdpnd_signed_tx_roundtrip.sh
     7) integration_cosmos_settlement_shadow_env.sh
     8) integration_cosmos_settlement_shadow_status_surface.sh
-    9) integration_phase5_settlement_layer_check.sh
-    10) integration_phase5_settlement_layer_run.sh
-    11) integration_phase5_settlement_layer_handoff_check.sh
-    12) integration_phase5_settlement_layer_handoff_run.sh
+    9) integration_issuer_sponsor_api_live_smoke.sh
+    10) integration_phase5_settlement_layer_check.sh
+    11) integration_phase5_settlement_layer_run.sh
+    12) integration_phase5_settlement_layer_handoff_check.sh
+    13) integration_phase5_settlement_layer_handoff_run.sh
 
 Dry-run mode:
   --dry-run 1 skips stage execution, records deterministic skip accounting,
@@ -126,6 +128,7 @@ run_settlement_adapter_roundtrip="${CI_PHASE5_SETTLEMENT_LAYER_RUN_SETTLEMENT_AD
 run_settlement_adapter_signed_tx_roundtrip="${CI_PHASE5_SETTLEMENT_LAYER_RUN_SETTLEMENT_ADAPTER_SIGNED_TX_ROUNDTRIP:-1}"
 run_settlement_shadow_env="${CI_PHASE5_SETTLEMENT_LAYER_RUN_SETTLEMENT_SHADOW_ENV:-1}"
 run_settlement_shadow_status_surface="${CI_PHASE5_SETTLEMENT_LAYER_RUN_SETTLEMENT_SHADOW_STATUS_SURFACE:-1}"
+run_issuer_sponsor_api_live_smoke="${CI_PHASE5_SETTLEMENT_LAYER_RUN_ISSUER_SPONSOR_API_LIVE_SMOKE:-1}"
 run_phase5_settlement_layer_check="${CI_PHASE5_SETTLEMENT_LAYER_RUN_PHASE5_SETTLEMENT_LAYER_CHECK:-1}"
 run_phase5_settlement_layer_run="${CI_PHASE5_SETTLEMENT_LAYER_RUN_PHASE5_SETTLEMENT_LAYER_RUN:-1}"
 run_phase5_settlement_layer_handoff_check="${CI_PHASE5_SETTLEMENT_LAYER_RUN_PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK:-1}"
@@ -231,6 +234,15 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --run-issuer-sponsor-api-live-smoke)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        run_issuer_sponsor_api_live_smoke="${2:-}"
+        shift 2
+      else
+        run_issuer_sponsor_api_live_smoke="1"
+        shift
+      fi
+      ;;
     --run-phase5-settlement-layer-check)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         run_phase5_settlement_layer_check="${2:-}"
@@ -289,6 +301,7 @@ bool_arg_or_die "--run-settlement-adapter-roundtrip" "$run_settlement_adapter_ro
 bool_arg_or_die "--run-settlement-adapter-signed-tx-roundtrip" "$run_settlement_adapter_signed_tx_roundtrip"
 bool_arg_or_die "--run-settlement-shadow-env" "$run_settlement_shadow_env"
 bool_arg_or_die "--run-settlement-shadow-status-surface" "$run_settlement_shadow_status_surface"
+bool_arg_or_die "--run-issuer-sponsor-api-live-smoke" "$run_issuer_sponsor_api_live_smoke"
 bool_arg_or_die "--run-phase5-settlement-layer-check" "$run_phase5_settlement_layer_check"
 bool_arg_or_die "--run-phase5-settlement-layer-run" "$run_phase5_settlement_layer_run"
 bool_arg_or_die "--run-phase5-settlement-layer-handoff-check" "$run_phase5_settlement_layer_handoff_check"
@@ -302,6 +315,7 @@ settlement_adapter_roundtrip_script="${CI_PHASE5_SETTLEMENT_LAYER_SETTLEMENT_ADA
 settlement_adapter_signed_tx_roundtrip_script="${CI_PHASE5_SETTLEMENT_LAYER_SETTLEMENT_ADAPTER_SIGNED_TX_ROUNDTRIP_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_adapter_tdpnd_signed_tx_roundtrip.sh}"
 settlement_shadow_env_script="${CI_PHASE5_SETTLEMENT_LAYER_SETTLEMENT_SHADOW_ENV_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_settlement_shadow_env.sh}"
 settlement_shadow_status_surface_script="${CI_PHASE5_SETTLEMENT_LAYER_SETTLEMENT_SHADOW_STATUS_SURFACE_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_settlement_shadow_status_surface.sh}"
+issuer_sponsor_api_live_smoke_script="${CI_PHASE5_SETTLEMENT_LAYER_ISSUER_SPONSOR_API_LIVE_SMOKE_SCRIPT:-$ROOT_DIR/scripts/integration_issuer_sponsor_api_live_smoke.sh}"
 phase5_settlement_layer_check_script="${CI_PHASE5_SETTLEMENT_LAYER_PHASE5_SETTLEMENT_LAYER_CHECK_SCRIPT:-$ROOT_DIR/scripts/integration_phase5_settlement_layer_check.sh}"
 phase5_settlement_layer_run_script="${CI_PHASE5_SETTLEMENT_LAYER_PHASE5_SETTLEMENT_LAYER_RUN_SCRIPT:-$ROOT_DIR/scripts/integration_phase5_settlement_layer_run.sh}"
 phase5_settlement_layer_handoff_check_script="${CI_PHASE5_SETTLEMENT_LAYER_PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_SCRIPT:-$ROOT_DIR/scripts/integration_phase5_settlement_layer_handoff_check.sh}"
@@ -316,6 +330,7 @@ stage_ids=(
   "settlement_adapter_signed_tx_roundtrip"
   "settlement_shadow_env"
   "settlement_shadow_status_surface"
+  "issuer_sponsor_api_live_smoke"
   "phase5_settlement_layer_check"
   "phase5_settlement_layer_run"
   "phase5_settlement_layer_handoff_check"
@@ -331,6 +346,7 @@ declare -A stage_script=(
   ["settlement_adapter_signed_tx_roundtrip"]="$settlement_adapter_signed_tx_roundtrip_script"
   ["settlement_shadow_env"]="$settlement_shadow_env_script"
   ["settlement_shadow_status_surface"]="$settlement_shadow_status_surface_script"
+  ["issuer_sponsor_api_live_smoke"]="$issuer_sponsor_api_live_smoke_script"
   ["phase5_settlement_layer_check"]="$phase5_settlement_layer_check_script"
   ["phase5_settlement_layer_run"]="$phase5_settlement_layer_run_script"
   ["phase5_settlement_layer_handoff_check"]="$phase5_settlement_layer_handoff_check_script"
@@ -346,6 +362,7 @@ declare -A stage_enabled=(
   ["settlement_adapter_signed_tx_roundtrip"]="$run_settlement_adapter_signed_tx_roundtrip"
   ["settlement_shadow_env"]="$run_settlement_shadow_env"
   ["settlement_shadow_status_surface"]="$run_settlement_shadow_status_surface"
+  ["issuer_sponsor_api_live_smoke"]="$run_issuer_sponsor_api_live_smoke"
   ["phase5_settlement_layer_check"]="$run_phase5_settlement_layer_check"
   ["phase5_settlement_layer_run"]="$run_phase5_settlement_layer_run"
   ["phase5_settlement_layer_handoff_check"]="$run_phase5_settlement_layer_handoff_check"
@@ -464,6 +481,7 @@ jq -n \
   --arg run_settlement_adapter_signed_tx_roundtrip "$run_settlement_adapter_signed_tx_roundtrip" \
   --arg run_settlement_shadow_env "$run_settlement_shadow_env" \
   --arg run_settlement_shadow_status_surface "$run_settlement_shadow_status_surface" \
+  --arg run_issuer_sponsor_api_live_smoke "$run_issuer_sponsor_api_live_smoke" \
   --arg run_phase5_settlement_layer_check "$run_phase5_settlement_layer_check" \
   --arg run_phase5_settlement_layer_run "$run_phase5_settlement_layer_run" \
   --arg run_phase5_settlement_layer_handoff_check "$run_phase5_settlement_layer_handoff_check" \
@@ -490,6 +508,7 @@ jq -n \
       run_settlement_adapter_signed_tx_roundtrip: ($run_settlement_adapter_signed_tx_roundtrip == "1"),
       run_settlement_shadow_env: ($run_settlement_shadow_env == "1"),
       run_settlement_shadow_status_surface: ($run_settlement_shadow_status_surface == "1"),
+      run_issuer_sponsor_api_live_smoke: ($run_issuer_sponsor_api_live_smoke == "1"),
       run_phase5_settlement_layer_check: ($run_phase5_settlement_layer_check == "1"),
       run_phase5_settlement_layer_run: ($run_phase5_settlement_layer_run == "1"),
       run_phase5_settlement_layer_handoff_check: ($run_phase5_settlement_layer_handoff_check == "1"),

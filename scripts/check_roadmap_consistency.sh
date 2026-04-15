@@ -150,6 +150,14 @@ if ! rg -Fq "integration_cosmos_adapter_tdpnd_signed_tx_roundtrip.sh" "$full_pla
   echo "full execution plan must document signed-tx adapter roundtrip integration script"
   exit 1
 fi
+if ! rg -Fq "issuer_sponsor_api_live_smoke" "$full_plan"; then
+  echo "full execution plan must document issuer_sponsor_api_live_smoke gate posture"
+  exit 1
+fi
+if ! rg -Fq "integration_issuer_sponsor_api_live_smoke.sh" "$full_plan"; then
+  echo "full execution plan must document issuer_sponsor_api_live_smoke integration script"
+  exit 1
+fi
 if ! rg -Fq "ci_phase6_cosmos_l1_build_testnet.sh" "$full_plan"; then
   echo "full execution plan must document phase6 cosmos l1 ci scaffold script"
   exit 1
@@ -983,6 +991,14 @@ if ! rg -Fq "integration_cosmos_settlement_shadow_status_surface.sh" "$cosmos_ru
   echo "cosmos settlement runtime guide must document settlement_shadow_status_surface integration script"
   exit 1
 fi
+if ! rg -Fq "issuer_sponsor_api_live_smoke" "$cosmos_runtime_doc"; then
+  echo "cosmos settlement runtime guide must document issuer_sponsor_api_live_smoke phase5 stage"
+  exit 1
+fi
+if ! rg -Fq "integration_issuer_sponsor_api_live_smoke.sh" "$cosmos_runtime_doc"; then
+  echo "cosmos settlement runtime guide must document issuer_sponsor_api_live_smoke integration script"
+  exit 1
+fi
 if ! rg -Fq "blockchain-app-sponsorship-quickstart.md" "$cosmos_runtime_doc"; then
   echo "cosmos settlement runtime guide must link blockchain sponsor quickstart"
   exit 1
@@ -1058,6 +1074,14 @@ if ! rg -Fq "integration_easy_node_blockchain_summary_reports.sh" "$chain_readme
 fi
 if ! rg -Fq "blockchain-app-sponsorship-quickstart.md" "$chain_readme"; then
   echo "chain README must link blockchain sponsor quickstart"
+  exit 1
+fi
+if ! rg -Fq "issuer_sponsor_api_live_smoke" "$chain_readme"; then
+  echo "chain README must document issuer_sponsor_api_live_smoke phase5 stage"
+  exit 1
+fi
+if ! rg -Fq "integration_issuer_sponsor_api_live_smoke.sh" "$chain_readme"; then
+  echo "chain README must document issuer_sponsor_api_live_smoke integration script"
   exit 1
 fi
 if rg -Fq "Storage remains an in-memory placeholder; Cosmos SDK KV store integration is still pending." "$chain_readme"; then
@@ -1168,12 +1192,24 @@ if ! rg -Fq "integration_cosmos_settlement_shadow_status_surface.sh" "$phase5_ci
   echo "phase5 ci script must wire integration_cosmos_settlement_shadow_status_surface.sh"
   exit 1
 fi
+if ! rg -Fq "issuer_sponsor_api_live_smoke" "$phase5_ci_script"; then
+  echo "phase5 ci script must include issuer_sponsor_api_live_smoke stage"
+  exit 1
+fi
+if ! rg -Fq "integration_issuer_sponsor_api_live_smoke.sh" "$phase5_ci_script"; then
+  echo "phase5 ci script must wire integration_issuer_sponsor_api_live_smoke.sh"
+  exit 1
+fi
 if [[ ! -f "$ROOT_DIR/scripts/integration_cosmos_settlement_shadow_env.sh" ]]; then
   echo "missing required script: scripts/integration_cosmos_settlement_shadow_env.sh"
   exit 1
 fi
 if [[ ! -f "$ROOT_DIR/scripts/integration_cosmos_settlement_shadow_status_surface.sh" ]]; then
   echo "missing required script: scripts/integration_cosmos_settlement_shadow_status_surface.sh"
+  exit 1
+fi
+if [[ ! -f "$ROOT_DIR/scripts/integration_issuer_sponsor_api_live_smoke.sh" ]]; then
+  echo "missing required script: scripts/integration_issuer_sponsor_api_live_smoke.sh"
   exit 1
 fi
 if ! rg -Fq "settlement_adapter_roundtrip" "$phase5_integration_script"; then
@@ -1190,6 +1226,22 @@ if ! rg -Fq "settlement_shadow_env" "$phase5_integration_script"; then
 fi
 if ! rg -Fq "settlement_shadow_status_surface" "$phase5_integration_script"; then
   echo "phase5 ci integration script must validate settlement_shadow_status_surface stage"
+  exit 1
+fi
+if ! rg -Fq "issuer_sponsor_api_live_smoke" "$phase5_integration_script"; then
+  echo "phase5 ci integration script must validate issuer_sponsor_api_live_smoke stage"
+  exit 1
+fi
+if ! rg -Fq "issuer_sponsor_api_live_smoke.status == \"pass\"" "$phase5_integration_script"; then
+  echo "phase5 ci integration script must validate issuer_sponsor_api_live_smoke pass accounting"
+  exit 1
+fi
+if ! rg -Fq "issuer_sponsor_api_live_smoke.status == \"skip\"" "$phase5_integration_script"; then
+  echo "phase5 ci integration script must validate issuer_sponsor_api_live_smoke skip accounting"
+  exit 1
+fi
+if ! rg -Fq "issuer_sponsor_api_live_smoke.status == \"fail\"" "$phase5_integration_script"; then
+  echo "phase5 ci integration script must validate issuer_sponsor_api_live_smoke fail accounting"
   exit 1
 fi
 if ! rg -Fq "CI_PHASE5_SETTLEMENT_LAYER_CANONICAL_SUMMARY_JSON" "$phase5_ci_script"; then
@@ -1409,10 +1461,19 @@ phase5_blockchain_gate_specs=(
   "settlement_adapter_signed_tx_roundtrip|scripts/integration_cosmos_adapter_tdpnd_signed_tx_roundtrip.sh"
   "settlement_shadow_env|scripts/integration_cosmos_settlement_shadow_env.sh"
   "settlement_shadow_status_surface|scripts/integration_cosmos_settlement_shadow_status_surface.sh"
+  "issuer_sponsor_api_live_smoke|scripts/integration_issuer_sponsor_api_live_smoke.sh"
 )
 for gate_spec in "${phase5_blockchain_gate_specs[@]}"; do
   gate_stage="${gate_spec%%|*}"
   gate_script="${gate_spec#*|}"
+  if ! rg -Fq "$gate_stage" "$full_plan"; then
+    echo "full execution plan must document ${gate_stage} phase5 stage"
+    exit 1
+  fi
+  if ! rg -Fq "$gate_script" "$full_plan"; then
+    echo "full execution plan must document ${gate_script} phase5 integration script"
+    exit 1
+  fi
   if ! rg -Fq "$gate_stage" "$product_roadmap"; then
     echo "product roadmap must document ${gate_stage} phase5 stage"
     exit 1

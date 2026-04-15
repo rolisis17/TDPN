@@ -150,6 +150,7 @@ Exit settlement status endpoint:
 - Phase5 CI treats settlement adapter roundtrip as a first-class stage: `settlement_adapter_roundtrip` runs `scripts/integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh`.
 - Phase5 CI includes shadow env stage `settlement_shadow_env`: `scripts/integration_cosmos_settlement_shadow_env.sh` validates shadow adapter HTTP wiring, signed-tx shadow wiring, and fail-open behavior.
 - Phase5 CI includes shadow status stage `settlement_shadow_status_surface`: `scripts/integration_cosmos_settlement_shadow_status_surface.sh` validates issuer/exit settlement status shadow telemetry surfacing.
+- Phase5 CI includes sponsor live-smoke stage `issuer_sponsor_api_live_smoke`: `scripts/integration_issuer_sponsor_api_live_smoke.sh` validates sponsor API happy path (`quote -> reserve -> token -> status`) with no end-user wallet signing in the happy path.
 
 ## Chain gRPC Contract
 

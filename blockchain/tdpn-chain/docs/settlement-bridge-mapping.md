@@ -53,3 +53,4 @@ This mapping reflects phase-1 stateful module wiring while keeping chain respons
   - `tdpnd --state-dir <path>` enables file-backed module stores rooted at one runtime state directory.
   - integration gate: `scripts/integration_cosmos_tdpnd_state_dir_persistence.sh`.
 - Phase5 CI includes `settlement_adapter_roundtrip` as a first-class stage running `scripts/integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh`.
+- Phase5 CI includes sponsor API live-smoke stage `issuer_sponsor_api_live_smoke` running `scripts/integration_issuer_sponsor_api_live_smoke.sh` for `/v1/sponsor/quote|reserve|token|status` no-wallet-signing happy-path coverage.
