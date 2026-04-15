@@ -26,6 +26,8 @@ PASS_SUITE="$TMP_DIR/suite_pass.json"
 PASS_REPORT_JSON="$TMP_DIR/report_pass.json"
 PASS_CANONICAL_REPORT_JSON="$TMP_DIR/report_pass_canonical.json"
 PASS_LOG="$TMP_DIR/pass.log"
+PASS_SAME_PATH_REPORT_JSON="$TMP_DIR/report_pass_same_path.json"
+PASS_SAME_PATH_LOG="$TMP_DIR/pass_same_path.log"
 
 FAIL_CI="$TMP_DIR/ci_fail_case.json"
 FAIL_CONTRACTS="$TMP_DIR/contracts_fail_case.json"
@@ -139,6 +141,36 @@ fi
 if ! grep -Fq -- "[phase6-summary] canonical_summary_json=$PASS_CANONICAL_REPORT_JSON" "$PASS_LOG"; then
   echo "pass log missing canonical summary line"
   cat "$PASS_LOG"
+  exit 1
+fi
+
+echo "[phase6-cosmos-l1-summary-report] canonical-same-path pass path"
+PHASE6_COSMOS_L1_SUMMARY_REPORT_CANONICAL_SUMMARY_JSON="$PASS_SAME_PATH_REPORT_JSON" \
+"$SCRIPT_UNDER_TEST" \
+  --ci-summary-json "$PASS_CI" \
+  --contracts-summary-json "$PASS_CONTRACTS" \
+  --suite-summary-json "$PASS_SUITE" \
+  --summary-json "$PASS_SAME_PATH_REPORT_JSON" \
+  --print-report 1 \
+  --show-json 0 >"$PASS_SAME_PATH_LOG" 2>&1
+
+if ! jq -e \
+  --arg expected_same_path "$PASS_SAME_PATH_REPORT_JSON" \
+  '
+  .status == "pass"
+  and .rc == 0
+  and .artifacts.summary_json == $expected_same_path
+  and .artifacts.canonical_summary_json == $expected_same_path
+  and .artifacts.summary_json == .artifacts.canonical_summary_json
+' "$PASS_SAME_PATH_REPORT_JSON" >/dev/null; then
+  echo "phase6 summary report canonical-same-path contract mismatch"
+  cat "$PASS_SAME_PATH_REPORT_JSON"
+  cat "$PASS_SAME_PATH_LOG"
+  exit 1
+fi
+if ! grep -Fq -- "[phase6-summary] canonical_summary_json=$PASS_SAME_PATH_REPORT_JSON" "$PASS_SAME_PATH_LOG"; then
+  echo "canonical-same-path log missing canonical summary line"
+  cat "$PASS_SAME_PATH_LOG"
   exit 1
 fi
 

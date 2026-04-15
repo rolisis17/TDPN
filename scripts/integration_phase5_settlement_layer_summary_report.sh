@@ -28,6 +28,8 @@ PASS_HANDOFF_RUN="$TMP_DIR/handoff_run_pass.json"
 PASS_REPORT_JSON="$TMP_DIR/report_pass.json"
 PASS_CANONICAL_REPORT_JSON="$TMP_DIR/report_pass_canonical.json"
 PASS_LOG="$TMP_DIR/pass.log"
+PASS_SAME_PATH_REPORT_JSON="$TMP_DIR/report_pass_same_path.json"
+PASS_SAME_PATH_LOG="$TMP_DIR/pass_same_path.log"
 
 FAIL_CI="$TMP_DIR/ci_fail_case.json"
 FAIL_CHECK="$TMP_DIR/check_fail_case.json"
@@ -164,6 +166,33 @@ if ! cmp -s "$PASS_REPORT_JSON" "$PASS_CANONICAL_REPORT_JSON"; then
   cat "$PASS_REPORT_JSON"
   cat "$PASS_CANONICAL_REPORT_JSON"
   cat "$PASS_LOG"
+  exit 1
+fi
+
+echo "[phase5-settlement-summary-report] pass path (canonical equals summary path)"
+PHASE5_SETTLEMENT_LAYER_SUMMARY_REPORT_CANONICAL_SUMMARY_JSON="$PASS_SAME_PATH_REPORT_JSON" "$SCRIPT_UNDER_TEST" \
+  --ci-summary-json "$PASS_CI" \
+  --check-summary-json "$PASS_CHECK" \
+  --run-summary-json "$PASS_RUN" \
+  --handoff-check-summary-json "$PASS_HANDOFF_CHECK" \
+  --handoff-run-summary-json "$PASS_HANDOFF_RUN" \
+  --summary-json "$PASS_SAME_PATH_REPORT_JSON" \
+  --print-summary-json 0 >"$PASS_SAME_PATH_LOG" 2>&1
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .artifacts.summary_json == .artifacts.canonical_summary_json
+' "$PASS_SAME_PATH_REPORT_JSON" >/dev/null; then
+  echo "phase5 summary report same-path canonical contract mismatch"
+  cat "$PASS_SAME_PATH_REPORT_JSON"
+  cat "$PASS_SAME_PATH_LOG"
+  exit 1
+fi
+
+if ! grep -Fq "[phase5-summary] canonical_summary_json=$PASS_SAME_PATH_REPORT_JSON" "$PASS_SAME_PATH_LOG"; then
+  echo "expected canonical summary log output for same-path canonical summary"
+  cat "$PASS_SAME_PATH_LOG"
   exit 1
 fi
 

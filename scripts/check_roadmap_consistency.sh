@@ -500,6 +500,10 @@ if ! rg -Fq "cmp -s" "$phase6_contracts_integration_script"; then
   echo "phase6 contracts ci integration script must validate canonical and run summary content parity"
   exit 1
 fi
+if ! rg -Fq "[ci-phase6-cosmos-l1-contracts] canonical summary same-path" "$phase6_contracts_integration_script"; then
+  echo "phase6 contracts ci integration script must include same-path canonical contract coverage marker"
+  exit 1
+fi
 if ! rg -Fq "CI_PHASE6_COSMOS_L1_BUILD_TESTNET_CANONICAL_SUMMARY_JSON" "$phase6_ci_script"; then
   echo "phase6 ci script must expose canonical summary artifact override env"
   exit 1
@@ -514,6 +518,10 @@ if ! rg -Fq "canonical_summary_json" "$phase6_integration_script"; then
 fi
 if ! rg -Fq "cmp -s" "$phase6_integration_script"; then
   echo "phase6 ci integration script must validate canonical and run summary content parity"
+  exit 1
+fi
+if ! rg -Fq "[ci-phase6-cosmos-l1] same-path canonical summary path" "$phase6_integration_script"; then
+  echo "phase6 ci integration script must include same-path canonical contract coverage marker"
   exit 1
 fi
 if ! rg -Fq "ci_phase6_cosmos_l1_build_testnet.sh" "$phase6_run_script"; then
@@ -756,6 +764,10 @@ if ! rg -Fq "missing-input path" "$phase6_summary_report_integration_script"; th
 fi
 if ! rg -Fq "expected_suite_path" "$phase6_summary_report_integration_script"; then
   echo "phase6 summary report integration script must validate suite fallback discovery path"
+  exit 1
+fi
+if ! rg -Fq "[phase6-cosmos-l1-summary-report] canonical-same-path pass path" "$phase6_summary_report_integration_script"; then
+  echo "phase6 summary report integration script must include same-path canonical contract coverage marker"
   exit 1
 fi
 
@@ -1161,6 +1173,10 @@ if ! rg -Fq "cmp -s" "$phase5_integration_script"; then
   echo "phase5 ci integration script must validate canonical and run summary content parity"
   exit 1
 fi
+if ! rg -Fq "[ci-phase5-settlement-layer] canonical summary same-path behavior" "$phase5_integration_script"; then
+  echo "phase5 ci integration script must include same-path canonical contract coverage marker"
+  exit 1
+fi
 if ! rg -Fq "ci_phase5_settlement_layer.sh" "$phase5_run_script"; then
   echo "phase5 run wrapper must invoke ci_phase5_settlement_layer.sh"
   exit 1
@@ -1299,6 +1315,10 @@ if ! rg -Fq "missing-input path" "$phase5_summary_report_integration_script"; th
 fi
 if ! rg -Fq "fallback discovery path" "$phase5_summary_report_integration_script"; then
   echo "phase5 summary report integration script must validate fallback path"
+  exit 1
+fi
+if ! rg -Fq "[phase5-settlement-summary-report] pass path (canonical equals summary path)" "$phase5_summary_report_integration_script"; then
+  echo "phase5 summary report integration script must include same-path canonical contract coverage marker"
   exit 1
 fi
 for phase5_canonical_summary in \
