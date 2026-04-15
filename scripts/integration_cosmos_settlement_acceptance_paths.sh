@@ -10,6 +10,7 @@ export GOCACHE="${GOCACHE:-$ROOT_DIR/.gocache}"
 # Sponsor happy-path coverage: reserve -> authorize -> issue token.
 timeout 30s go test ./pkg/settlement -count=1 -run '^(TestMemoryServiceSponsorFlowAuthorizeIdempotent)$'
 timeout 30s go test ./services/issuer -count=1 -run '^(TestSponsorReserveAndIssueTokenFlow|TestHandleIssueTokenRequiresPaymentProofWhenEnabled)$'
+timeout 90s ./scripts/integration_issuer_sponsor_api_live_smoke.sh
 
 # Chain-outage fail-soft coverage: defer on adapter failure, replay to submitted, then confirm lifecycle advancement.
 timeout 30s go test ./pkg/settlement -count=1 -run '^(TestMemoryServiceAdapterDeferredOnFailure|TestMemoryServiceReconcileReplaySuccessClearsBacklog|TestMemoryServiceReconcileReplayPromotesToConfirmedWhenQuerierAvailable)$'

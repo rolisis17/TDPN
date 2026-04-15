@@ -114,6 +114,7 @@ Exit settlement status endpoint:
 - When adapter query surfaces observe by-id bridge records, reconcile promotes settlement/reward/sponsor/slash operations from `submitted` to `confirmed`.
 - This confirmation capability is exposed as optional settlement adapter interface `ChainConfirmationQuerier` (`pkg/settlement/types.go`).
 - `failed` remains an explicit reconciliation state for operator visibility, with replay/remediation driven by later reconcile cycles.
+- Phase-6 scaffold supports optional shadow adapter mirroring on submission (best-effort only): shadow failures are visible in reconcile metadata and never block primary/session flow.
 - Cosmos adapter retry policy:
   - retryable: transport/network errors, HTTP `408`, `425`, `429`, and `5xx`.
   - non-retryable: other HTTP `4xx` validation/auth-style failures (no retry loop).

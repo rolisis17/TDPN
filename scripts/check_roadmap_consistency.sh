@@ -90,6 +90,14 @@ if ! rg -Fq "settlement_adapter_roundtrip" "$full_plan"; then
   echo "full execution plan must document settlement_adapter_roundtrip gate posture"
   exit 1
 fi
+if ! rg -Fq "settlement_adapter_signed_tx_roundtrip" "$full_plan"; then
+  echo "full execution plan must document settlement_adapter_signed_tx_roundtrip gate posture"
+  exit 1
+fi
+if ! rg -Fq "integration_cosmos_adapter_tdpnd_signed_tx_roundtrip.sh" "$full_plan"; then
+  echo "full execution plan must document signed-tx adapter roundtrip integration script"
+  exit 1
+fi
 if ! rg -qi "confirmation lifecycle" "$full_plan"; then
   echo "full execution plan must document settlement confirmation lifecycle posture"
   exit 1
@@ -353,8 +361,20 @@ if ! rg -Fq "integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh" "$phase5_ci_s
   echo "phase5 ci script must wire integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh"
   exit 1
 fi
+if ! rg -Fq "settlement_adapter_signed_tx_roundtrip" "$phase5_ci_script"; then
+  echo "phase5 ci script must include settlement_adapter_signed_tx_roundtrip stage"
+  exit 1
+fi
+if ! rg -Fq "integration_cosmos_adapter_tdpnd_signed_tx_roundtrip.sh" "$phase5_ci_script"; then
+  echo "phase5 ci script must wire integration_cosmos_adapter_tdpnd_signed_tx_roundtrip.sh"
+  exit 1
+fi
 if ! rg -Fq "settlement_adapter_roundtrip" "$phase5_integration_script"; then
   echo "phase5 ci integration script must validate settlement_adapter_roundtrip stage"
+  exit 1
+fi
+if ! rg -Fq "settlement_adapter_signed_tx_roundtrip" "$phase5_integration_script"; then
+  echo "phase5 ci integration script must validate settlement_adapter_signed_tx_roundtrip stage"
   exit 1
 fi
 if ! rg -Fq "settlement_adapter_roundtrip" "$product_roadmap"; then

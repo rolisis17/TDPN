@@ -62,6 +62,7 @@ Exit gate:
 ### Phase 6: Cosmos SDK + CometBFT L1 Build/Testnet
 - validator eligibility/governance/reward modules
 - dual-write reconciliation before cutover
+- settlement dual-write scaffold uses optional shadow adapter mirroring (best-effort, non-blocking) while primary fail-soft semantics remain canonical.
 
 ### Phase 7: Mainnet Cutover
 - progressive migration with rollback path to chain-assisted mode
@@ -72,6 +73,7 @@ Exit gate:
 - Settlement bridge now includes read/query `GET` endpoints (list + by-id) across billing/rewards/sponsor/slashing modules in addition to `POST` write paths.
 - CI/local integration now includes `scripts/integration_cosmos_tdpnd_state_dir_persistence.sh` for state-dir wiring and reopen-persistence verification.
 - Phase 5 CI now includes the `settlement_adapter_roundtrip` gate to verify end-to-end adapter -> `tdpnd` bridge submissions before promotion.
+- Phase 5 CI also includes `settlement_adapter_signed_tx_roundtrip` backed by `scripts/integration_cosmos_adapter_tdpnd_signed_tx_roundtrip.sh` to validate signed-tx adapter relay into `tdpnd` bridge writes before promotion.
 - Settlement confirmation lifecycle posture is canonicalized as `pending` -> `submitted` -> `confirmed` with explicit `failed` records retained for replay/reconciliation.
 
 ## Non-Negotiables

@@ -301,6 +301,34 @@ func setupDeferredSettlement(t *testing.T, s *MemoryService, sessionID string) {
 	}
 }
 
+func setupSettledSessionForShadowTests(t *testing.T, s *MemoryService, sessionID string) SessionSettlement {
+	t.Helper()
+	ctx := context.Background()
+	_, err := s.ReserveFunds(ctx, FundReservation{
+		SessionID:    sessionID,
+		SubjectID:    "client-" + sessionID,
+		AmountMicros: 2_000_000,
+		Currency:     "TDPNC",
+	})
+	if err != nil {
+		t.Fatalf("ReserveFunds: %v", err)
+	}
+	err = s.RecordUsage(ctx, UsageRecord{
+		SessionID:    sessionID,
+		SubjectID:    "client-" + sessionID,
+		BytesIngress: 1024 * 1024,
+		RecordedAt:   time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("RecordUsage: %v", err)
+	}
+	settlement, err := s.SettleSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("SettleSession: %v", err)
+	}
+	return settlement
+}
+
 func TestMemoryServiceSettleIdempotent(t *testing.T) {
 	s := NewMemoryService(WithPricePerMiBMicros(1024 * 1024))
 	ctx := context.Background()
@@ -413,6 +441,141 @@ func TestMemoryServiceAdapterDeferredOnFailure(t *testing.T) {
 	}
 	if len(s.deferredAdapterOps) != 4 {
 		t.Fatalf("expected deferred backlog entries 4, got %d", len(s.deferredAdapterOps))
+	}
+}
+
+func TestMemoryServiceShadowAdapterSuccessRecordsOutcome(t *testing.T) {
+	s := NewMemoryService(
+		WithPricePerMiBMicros(1024*1024),
+		WithChainAdapter(fakeAdapter{}),
+		WithShadowChainAdapter(fakeAdapter{}),
+	)
+	settlement := setupSettledSessionForShadowTests(t, s, "sess-shadow-success-1")
+	if settlement.Status != OperationStatusSubmitted {
+		t.Fatalf("expected primary settlement status submitted, got %s", settlement.Status)
+	}
+	if !settlement.ShadowAdapterSubmitted {
+		t.Fatalf("expected shadow adapter submission marker")
+	}
+	if settlement.ShadowAdapterStatus != OperationStatusSubmitted {
+		t.Fatalf("expected shadow adapter status submitted, got %s", settlement.ShadowAdapterStatus)
+	}
+	if settlement.ShadowAdapterLastAttemptAt.IsZero() {
+		t.Fatalf("expected shadow adapter attempt timestamp")
+	}
+	if settlement.ShadowAdapterReferenceID == "" {
+		t.Fatalf("expected shadow adapter reference id")
+	}
+	if settlement.ShadowAdapterLastError != "" {
+		t.Fatalf("expected empty shadow adapter error, got %q", settlement.ShadowAdapterLastError)
+	}
+	report, err := s.Reconcile(context.Background())
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if !report.ShadowAdapterConfigured {
+		t.Fatalf("expected shadow adapter configured marker")
+	}
+	if report.ShadowAttemptedOperations != 1 || report.ShadowSubmittedOperations != 1 || report.ShadowFailedOperations != 0 {
+		t.Fatalf("unexpected shadow report counts attempted=%d submitted=%d failed=%d",
+			report.ShadowAttemptedOperations, report.ShadowSubmittedOperations, report.ShadowFailedOperations)
+	}
+}
+
+func TestMemoryServiceShadowAdapterFailureDoesNotAffectPrimaryPath(t *testing.T) {
+	s := NewMemoryService(
+		WithPricePerMiBMicros(1024*1024),
+		WithChainAdapter(fakeAdapter{}),
+		WithShadowChainAdapter(fakeAdapter{fail: true}),
+	)
+	settlement := setupSettledSessionForShadowTests(t, s, "sess-shadow-fail-1")
+	if settlement.Status != OperationStatusSubmitted {
+		t.Fatalf("expected primary settlement status submitted, got %s", settlement.Status)
+	}
+	if settlement.AdapterDeferred {
+		t.Fatalf("expected primary adapter not deferred when primary succeeds")
+	}
+	if settlement.ShadowAdapterSubmitted {
+		t.Fatalf("expected shadow adapter submission to be marked failed")
+	}
+	if settlement.ShadowAdapterStatus != OperationStatusFailed {
+		t.Fatalf("expected shadow adapter status failed, got %s", settlement.ShadowAdapterStatus)
+	}
+	if settlement.ShadowAdapterLastAttemptAt.IsZero() {
+		t.Fatalf("expected shadow adapter attempt timestamp")
+	}
+	if settlement.ShadowAdapterLastError == "" {
+		t.Fatalf("expected shadow adapter error")
+	}
+	report, err := s.Reconcile(context.Background())
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if report.PendingAdapterOperations != 0 {
+		t.Fatalf("expected no primary deferred backlog, got %d", report.PendingAdapterOperations)
+	}
+	if report.ShadowAttemptedOperations != 1 || report.ShadowSubmittedOperations != 0 || report.ShadowFailedOperations != 1 {
+		t.Fatalf("unexpected shadow report counts attempted=%d submitted=%d failed=%d",
+			report.ShadowAttemptedOperations, report.ShadowSubmittedOperations, report.ShadowFailedOperations)
+	}
+}
+
+func TestMemoryServiceShadowAdapterNotConfiguredLeavesShadowMetadataEmpty(t *testing.T) {
+	s := NewMemoryService(
+		WithPricePerMiBMicros(1024*1024),
+		WithChainAdapter(fakeAdapter{}),
+	)
+	settlement := setupSettledSessionForShadowTests(t, s, "sess-shadow-none-1")
+	if settlement.ShadowAdapterSubmitted {
+		t.Fatalf("expected no shadow submission marker when shadow adapter is not configured")
+	}
+	if !settlement.ShadowAdapterLastAttemptAt.IsZero() {
+		t.Fatalf("expected zero shadow adapter attempt timestamp")
+	}
+	if settlement.ShadowAdapterReferenceID != "" {
+		t.Fatalf("expected empty shadow adapter reference id when unconfigured")
+	}
+	if settlement.ShadowAdapterStatus != "" {
+		t.Fatalf("expected empty shadow adapter status when unconfigured, got %s", settlement.ShadowAdapterStatus)
+	}
+	if settlement.ShadowAdapterLastError != "" {
+		t.Fatalf("expected empty shadow adapter error when unconfigured")
+	}
+	report, err := s.Reconcile(context.Background())
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if report.ShadowAdapterConfigured {
+		t.Fatalf("expected shadow adapter configured marker false")
+	}
+	if report.ShadowAttemptedOperations != 0 || report.ShadowSubmittedOperations != 0 || report.ShadowFailedOperations != 0 {
+		t.Fatalf("expected empty shadow report counts attempted=%d submitted=%d failed=%d",
+			report.ShadowAttemptedOperations, report.ShadowSubmittedOperations, report.ShadowFailedOperations)
+	}
+}
+
+func TestMemoryServicePrimaryFailureStillDefersWhenShadowSucceeds(t *testing.T) {
+	s := NewMemoryService(
+		WithPricePerMiBMicros(1024*1024),
+		WithChainAdapter(fakeAdapter{fail: true}),
+		WithShadowChainAdapter(fakeAdapter{}),
+	)
+	settlement := setupSettledSessionForShadowTests(t, s, "sess-shadow-primary-fail-1")
+	if settlement.Status != OperationStatusPending {
+		t.Fatalf("expected primary settlement pending when primary adapter fails, got %s", settlement.Status)
+	}
+	if !settlement.AdapterDeferred || settlement.AdapterSubmitted {
+		t.Fatalf("expected primary deferred marker when primary adapter fails")
+	}
+	if !settlement.ShadowAdapterSubmitted || settlement.ShadowAdapterStatus != OperationStatusSubmitted {
+		t.Fatalf("expected successful shadow submission despite primary failure")
+	}
+	report, err := s.Reconcile(context.Background())
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if report.PendingAdapterOperations != 1 {
+		t.Fatalf("expected primary deferred backlog to remain 1, got %d", report.PendingAdapterOperations)
 	}
 }
 

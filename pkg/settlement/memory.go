@@ -48,6 +48,15 @@ type deferredAdapterOperation struct {
 	LastError      string
 }
 
+type shadowSubmissionResult struct {
+	Attempted   bool
+	Submitted   bool
+	Status      OperationStatus
+	ReferenceID string
+	LastError   string
+	AttemptedAt time.Time
+}
+
 type MemoryService struct {
 	mu sync.Mutex
 
@@ -64,6 +73,7 @@ type MemoryService struct {
 	currency          string
 	currencyRates     map[string]currencyRate
 	adapter           ChainAdapter
+	shadowAdapter     ChainAdapter
 
 	pendingAdapterOps int
 }
@@ -73,6 +83,14 @@ type MemoryOption func(*MemoryService)
 func WithChainAdapter(adapter ChainAdapter) MemoryOption {
 	return func(s *MemoryService) {
 		s.adapter = adapter
+	}
+}
+
+// WithShadowChainAdapter enables best-effort shadow submissions that mirror
+// primary adapter writes without changing primary fail-soft semantics.
+func WithShadowChainAdapter(adapter ChainAdapter) MemoryOption {
+	return func(s *MemoryService) {
+		s.shadowAdapter = adapter
 	}
 }
 
@@ -498,6 +516,7 @@ func (s *MemoryService) Reconcile(ctx context.Context) (ReconcileReport, error) 
 		SponsorAuthorizations:    len(s.paymentAuthByReservationID),
 		SubmittedSlashEvidence:   len(s.slashEvidenceByID),
 		PendingAdapterOperations: len(s.deferredAdapterOps),
+		ShadowAdapterConfigured:  s.shadowAdapter != nil,
 	}
 
 	countStatus := func(status OperationStatus) {
@@ -512,17 +531,32 @@ func (s *MemoryService) Reconcile(ctx context.Context) (ReconcileReport, error) 
 			report.FailedOperations++
 		}
 	}
+	countShadowStatus := func(status OperationStatus, attemptedAt time.Time) {
+		if attemptedAt.IsZero() {
+			return
+		}
+		report.ShadowAttemptedOperations++
+		switch status {
+		case OperationStatusSubmitted, OperationStatusConfirmed:
+			report.ShadowSubmittedOperations++
+		case OperationStatusFailed:
+			report.ShadowFailedOperations++
+		}
+	}
 
 	for _, settlement := range s.settledBySession {
 		report.TotalChargedMicros += settlement.ChargedMicros
 		countStatus(settlement.Status)
+		countShadowStatus(settlement.ShadowAdapterStatus, settlement.ShadowAdapterLastAttemptAt)
 	}
 	for _, reward := range s.rewardsByID {
 		report.TotalRewardedMicros += reward.RewardMicros
 		countStatus(reward.Status)
+		countShadowStatus(reward.ShadowAdapterStatus, reward.ShadowAdapterLastAttemptAt)
 	}
 	for _, reservation := range s.sponsorReservationsByID {
 		countStatus(reservation.Status)
+		countShadowStatus(reservation.ShadowAdapterStatus, reservation.ShadowAdapterLastAttemptAt)
 	}
 	for _, auth := range s.paymentAuthByReservationID {
 		report.TotalSponsoredMicros += auth.AuthorizedMicros
@@ -531,6 +565,7 @@ func (s *MemoryService) Reconcile(ctx context.Context) (ReconcileReport, error) 
 	for _, evidence := range s.slashEvidenceByID {
 		report.TotalSlashedMicros += evidence.SlashMicros
 		countStatus(evidence.Status)
+		countShadowStatus(evidence.ShadowAdapterStatus, evidence.ShadowAdapterLastAttemptAt)
 	}
 
 	return report, nil
@@ -542,6 +577,9 @@ func (s *MemoryService) submitSettlementAdapter(ctx context.Context, settlement 
 		return
 	}
 	idempotencyKey := cosmosID("settlement", settlement.SettlementID, settlement.SessionID)
+	shadowSubmit := func(ctx context.Context, adapter ChainAdapter) (string, error) {
+		return adapter.SubmitSessionSettlement(ctx, *settlement)
+	}
 	op := deferredAdapterOperation{
 		Type:           deferredOperationSettlement,
 		RecordKey:      settlement.SessionID,
@@ -549,11 +587,13 @@ func (s *MemoryService) submitSettlementAdapter(ctx context.Context, settlement 
 	}
 
 	ref, err := adapter.SubmitSessionSettlement(ctx, *settlement)
+	shadowResult := s.submitShadowSubmission(ctx, idempotencyKey, shadowSubmit)
 	if err != nil {
 		settlement.AdapterDeferred = true
 		settlement.AdapterSubmitted = false
 		settlement.AdapterReferenceID = idempotencyKey
 		settlement.Status = OperationStatusPending
+		applyShadowResultToSettlement(settlement, shadowResult)
 		s.mu.Lock()
 		s.upsertDeferredOperationLocked(op, err)
 		s.mu.Unlock()
@@ -566,6 +606,7 @@ func (s *MemoryService) submitSettlementAdapter(ctx context.Context, settlement 
 	settlement.AdapterDeferred = false
 	settlement.AdapterReferenceID = ref
 	settlement.Status = OperationStatusSubmitted
+	applyShadowResultToSettlement(settlement, shadowResult)
 
 	s.mu.Lock()
 	s.clearDeferredOperationLocked(idempotencyKey)
@@ -578,17 +619,22 @@ func (s *MemoryService) submitRewardAdapter(ctx context.Context, reward *RewardI
 		return
 	}
 	idempotencyKey := cosmosID("reward", reward.RewardID, reward.SessionID)
+	shadowSubmit := func(ctx context.Context, adapter ChainAdapter) (string, error) {
+		return adapter.SubmitRewardIssue(ctx, *reward)
+	}
 	op := deferredAdapterOperation{
 		Type:           deferredOperationReward,
 		RecordKey:      reward.RewardID,
 		IdempotencyKey: idempotencyKey,
 	}
 	ref, err := adapter.SubmitRewardIssue(ctx, *reward)
+	shadowResult := s.submitShadowSubmission(ctx, idempotencyKey, shadowSubmit)
 	if err != nil {
 		reward.AdapterDeferred = true
 		reward.AdapterSubmitted = false
 		reward.AdapterReferenceID = idempotencyKey
 		reward.Status = OperationStatusPending
+		applyShadowResultToReward(reward, shadowResult)
 		s.mu.Lock()
 		s.upsertDeferredOperationLocked(op, err)
 		s.mu.Unlock()
@@ -601,6 +647,7 @@ func (s *MemoryService) submitRewardAdapter(ctx context.Context, reward *RewardI
 	reward.AdapterDeferred = false
 	reward.AdapterReferenceID = ref
 	reward.Status = OperationStatusSubmitted
+	applyShadowResultToReward(reward, shadowResult)
 
 	s.mu.Lock()
 	s.clearDeferredOperationLocked(idempotencyKey)
@@ -613,17 +660,22 @@ func (s *MemoryService) submitSponsorReservationAdapter(ctx context.Context, res
 		return
 	}
 	idempotencyKey := cosmosID("sponsor-reservation", reservation.ReservationID, reservation.SessionID)
+	shadowSubmit := func(ctx context.Context, adapter ChainAdapter) (string, error) {
+		return adapter.SubmitSponsorReservation(ctx, *reservation)
+	}
 	op := deferredAdapterOperation{
 		Type:           deferredOperationSponsorReservation,
 		RecordKey:      reservation.ReservationID,
 		IdempotencyKey: idempotencyKey,
 	}
 	ref, err := adapter.SubmitSponsorReservation(ctx, *reservation)
+	shadowResult := s.submitShadowSubmission(ctx, idempotencyKey, shadowSubmit)
 	if err != nil {
 		reservation.AdapterDeferred = true
 		reservation.AdapterSubmitted = false
 		reservation.AdapterReferenceID = idempotencyKey
 		reservation.Status = OperationStatusPending
+		applyShadowResultToSponsorReservation(reservation, shadowResult)
 		s.mu.Lock()
 		s.upsertDeferredOperationLocked(op, err)
 		s.mu.Unlock()
@@ -636,6 +688,7 @@ func (s *MemoryService) submitSponsorReservationAdapter(ctx context.Context, res
 	reservation.AdapterDeferred = false
 	reservation.AdapterReferenceID = ref
 	reservation.Status = OperationStatusSubmitted
+	applyShadowResultToSponsorReservation(reservation, shadowResult)
 
 	s.mu.Lock()
 	s.clearDeferredOperationLocked(idempotencyKey)
@@ -648,17 +701,22 @@ func (s *MemoryService) submitSlashEvidenceAdapter(ctx context.Context, evidence
 		return
 	}
 	idempotencyKey := cosmosID("slash", evidence.EvidenceID, evidence.SubjectID)
+	shadowSubmit := func(ctx context.Context, adapter ChainAdapter) (string, error) {
+		return adapter.SubmitSlashEvidence(ctx, *evidence)
+	}
 	op := deferredAdapterOperation{
 		Type:           deferredOperationSlashEvidence,
 		RecordKey:      evidence.EvidenceID,
 		IdempotencyKey: idempotencyKey,
 	}
 	ref, err := adapter.SubmitSlashEvidence(ctx, *evidence)
+	shadowResult := s.submitShadowSubmission(ctx, idempotencyKey, shadowSubmit)
 	if err != nil {
 		evidence.AdapterDeferred = true
 		evidence.AdapterSubmitted = false
 		evidence.AdapterReferenceID = idempotencyKey
 		evidence.Status = OperationStatusPending
+		applyShadowResultToSlashEvidence(evidence, shadowResult)
 		s.mu.Lock()
 		s.upsertDeferredOperationLocked(op, err)
 		s.mu.Unlock()
@@ -671,6 +729,7 @@ func (s *MemoryService) submitSlashEvidenceAdapter(ctx context.Context, evidence
 	evidence.AdapterDeferred = false
 	evidence.AdapterReferenceID = ref
 	evidence.Status = OperationStatusSubmitted
+	applyShadowResultToSlashEvidence(evidence, shadowResult)
 
 	s.mu.Lock()
 	s.clearDeferredOperationLocked(idempotencyKey)
@@ -681,6 +740,98 @@ func (s *MemoryService) currentAdapter() ChainAdapter {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.adapter
+}
+
+func (s *MemoryService) currentShadowAdapter() ChainAdapter {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.shadowAdapter
+}
+
+func (s *MemoryService) submitShadowSubmission(
+	ctx context.Context,
+	idempotencyKey string,
+	submitFn func(context.Context, ChainAdapter) (string, error),
+) shadowSubmissionResult {
+	shadowAdapter := s.currentShadowAdapter()
+	if shadowAdapter == nil || submitFn == nil {
+		return shadowSubmissionResult{}
+	}
+	return submitShadowWithAdapter(ctx, shadowAdapter, idempotencyKey, submitFn)
+}
+
+func submitShadowWithAdapter(
+	ctx context.Context,
+	adapter ChainAdapter,
+	idempotencyKey string,
+	submitFn func(context.Context, ChainAdapter) (string, error),
+) shadowSubmissionResult {
+	attemptedAt := time.Now().UTC()
+	ref, err := submitFn(ctx, adapter)
+	if err != nil {
+		return shadowSubmissionResult{
+			Attempted:   true,
+			Submitted:   false,
+			Status:      OperationStatusFailed,
+			ReferenceID: idempotencyKey,
+			LastError:   err.Error(),
+			AttemptedAt: attemptedAt,
+		}
+	}
+	if strings.TrimSpace(ref) == "" {
+		ref = idempotencyKey
+	}
+	return shadowSubmissionResult{
+		Attempted:   true,
+		Submitted:   true,
+		Status:      OperationStatusSubmitted,
+		ReferenceID: ref,
+		AttemptedAt: attemptedAt,
+	}
+}
+
+func applyShadowResultToSettlement(settlement *SessionSettlement, shadow shadowSubmissionResult) {
+	if settlement == nil || !shadow.Attempted {
+		return
+	}
+	settlement.ShadowAdapterSubmitted = shadow.Submitted
+	settlement.ShadowAdapterReferenceID = shadow.ReferenceID
+	settlement.ShadowAdapterLastError = shadow.LastError
+	settlement.ShadowAdapterLastAttemptAt = shadow.AttemptedAt
+	settlement.ShadowAdapterStatus = shadow.Status
+}
+
+func applyShadowResultToReward(reward *RewardIssue, shadow shadowSubmissionResult) {
+	if reward == nil || !shadow.Attempted {
+		return
+	}
+	reward.ShadowAdapterSubmitted = shadow.Submitted
+	reward.ShadowAdapterReferenceID = shadow.ReferenceID
+	reward.ShadowAdapterLastError = shadow.LastError
+	reward.ShadowAdapterLastAttemptAt = shadow.AttemptedAt
+	reward.ShadowAdapterStatus = shadow.Status
+}
+
+func applyShadowResultToSponsorReservation(reservation *SponsorCreditReservation, shadow shadowSubmissionResult) {
+	if reservation == nil || !shadow.Attempted {
+		return
+	}
+	reservation.ShadowAdapterSubmitted = shadow.Submitted
+	reservation.ShadowAdapterReferenceID = shadow.ReferenceID
+	reservation.ShadowAdapterLastError = shadow.LastError
+	reservation.ShadowAdapterLastAttemptAt = shadow.AttemptedAt
+	reservation.ShadowAdapterStatus = shadow.Status
+}
+
+func applyShadowResultToSlashEvidence(evidence *SlashEvidence, shadow shadowSubmissionResult) {
+	if evidence == nil || !shadow.Attempted {
+		return
+	}
+	evidence.ShadowAdapterSubmitted = shadow.Submitted
+	evidence.ShadowAdapterReferenceID = shadow.ReferenceID
+	evidence.ShadowAdapterLastError = shadow.LastError
+	evidence.ShadowAdapterLastAttemptAt = shadow.AttemptedAt
+	evidence.ShadowAdapterStatus = shadow.Status
 }
 
 func (s *MemoryService) upsertDeferredOperationLocked(op deferredAdapterOperation, submitErr error) {
@@ -700,6 +851,42 @@ func (s *MemoryService) upsertDeferredOperationLocked(op deferredAdapterOperatio
 	}
 	s.deferredAdapterOps[op.IdempotencyKey] = op
 	s.pendingAdapterOps = len(s.deferredAdapterOps)
+}
+
+func (s *MemoryService) applyShadowDeferredOperationLocked(op deferredAdapterOperation, shadow shadowSubmissionResult) {
+	if !shadow.Attempted {
+		return
+	}
+	switch op.Type {
+	case deferredOperationSettlement:
+		settlement, ok := s.settledBySession[op.RecordKey]
+		if !ok {
+			return
+		}
+		applyShadowResultToSettlement(&settlement, shadow)
+		s.settledBySession[op.RecordKey] = settlement
+	case deferredOperationReward:
+		reward, ok := s.rewardsByID[op.RecordKey]
+		if !ok {
+			return
+		}
+		applyShadowResultToReward(&reward, shadow)
+		s.rewardsByID[op.RecordKey] = reward
+	case deferredOperationSponsorReservation:
+		reservation, ok := s.sponsorReservationsByID[op.RecordKey]
+		if !ok {
+			return
+		}
+		applyShadowResultToSponsorReservation(&reservation, shadow)
+		s.sponsorReservationsByID[op.RecordKey] = reservation
+	case deferredOperationSlashEvidence:
+		evidence, ok := s.slashEvidenceByID[op.RecordKey]
+		if !ok {
+			return
+		}
+		applyShadowResultToSlashEvidence(&evidence, shadow)
+		s.slashEvidenceByID[op.RecordKey] = evidence
+	}
 }
 
 func (s *MemoryService) clearDeferredOperationLocked(idempotencyKey string) {
@@ -722,6 +909,7 @@ func (s *MemoryService) replayDeferredAdapterOperations(ctx context.Context) {
 	if adapter == nil {
 		return
 	}
+	shadowAdapter := s.currentShadowAdapter()
 	ops := s.snapshotDeferredOperations()
 	if len(ops) == 0 {
 		return
@@ -733,14 +921,16 @@ func (s *MemoryService) replayDeferredAdapterOperations(ctx context.Context) {
 		return ops[i].DeferredAt.Before(ops[j].DeferredAt)
 	})
 	for _, op := range ops {
-		s.replayDeferredAdapterOperation(ctx, adapter, op)
+		s.replayDeferredAdapterOperation(ctx, adapter, shadowAdapter, op)
 	}
 }
 
-func (s *MemoryService) replayDeferredAdapterOperation(ctx context.Context, adapter ChainAdapter, op deferredAdapterOperation) {
+func (s *MemoryService) replayDeferredAdapterOperation(ctx context.Context, adapter ChainAdapter, shadowAdapter ChainAdapter, op deferredAdapterOperation) {
 	var (
-		ref string
-		err error
+		ref         string
+		err         error
+		shadowFn    func(context.Context, ChainAdapter) (string, error)
+		shadowState shadowSubmissionResult
 	)
 
 	switch op.Type {
@@ -751,6 +941,9 @@ func (s *MemoryService) replayDeferredAdapterOperation(ctx context.Context, adap
 		if !ok {
 			return
 		}
+		shadowFn = func(ctx context.Context, adapter ChainAdapter) (string, error) {
+			return adapter.SubmitSessionSettlement(ctx, settlement)
+		}
 		ref, err = adapter.SubmitSessionSettlement(ctx, settlement)
 	case deferredOperationReward:
 		s.mu.Lock()
@@ -758,6 +951,9 @@ func (s *MemoryService) replayDeferredAdapterOperation(ctx context.Context, adap
 		s.mu.Unlock()
 		if !ok {
 			return
+		}
+		shadowFn = func(ctx context.Context, adapter ChainAdapter) (string, error) {
+			return adapter.SubmitRewardIssue(ctx, reward)
 		}
 		ref, err = adapter.SubmitRewardIssue(ctx, reward)
 	case deferredOperationSponsorReservation:
@@ -767,6 +963,9 @@ func (s *MemoryService) replayDeferredAdapterOperation(ctx context.Context, adap
 		if !ok {
 			return
 		}
+		shadowFn = func(ctx context.Context, adapter ChainAdapter) (string, error) {
+			return adapter.SubmitSponsorReservation(ctx, reservation)
+		}
 		ref, err = adapter.SubmitSponsorReservation(ctx, reservation)
 	case deferredOperationSlashEvidence:
 		s.mu.Lock()
@@ -775,13 +974,20 @@ func (s *MemoryService) replayDeferredAdapterOperation(ctx context.Context, adap
 		if !ok {
 			return
 		}
+		shadowFn = func(ctx context.Context, adapter ChainAdapter) (string, error) {
+			return adapter.SubmitSlashEvidence(ctx, evidence)
+		}
 		ref, err = adapter.SubmitSlashEvidence(ctx, evidence)
 	default:
 		return
 	}
+	if shadowAdapter != nil && shadowFn != nil {
+		shadowState = submitShadowWithAdapter(ctx, shadowAdapter, op.IdempotencyKey, shadowFn)
+	}
 
 	if err != nil {
 		s.mu.Lock()
+		s.applyShadowDeferredOperationLocked(op, shadowState)
 		s.applyDeferredOperationStatusLocked(op, OperationStatusFailed, "")
 		s.upsertDeferredOperationLocked(op, err)
 		s.mu.Unlock()
@@ -791,6 +997,7 @@ func (s *MemoryService) replayDeferredAdapterOperation(ctx context.Context, adap
 		ref = op.IdempotencyKey
 	}
 	s.mu.Lock()
+	s.applyShadowDeferredOperationLocked(op, shadowState)
 	s.applyDeferredOperationStatusLocked(op, OperationStatusSubmitted, ref)
 	s.clearDeferredOperationLocked(op.IdempotencyKey)
 	s.mu.Unlock()

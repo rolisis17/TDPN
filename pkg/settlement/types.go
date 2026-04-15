@@ -42,48 +42,63 @@ type FundReservation struct {
 }
 
 type SessionSettlement struct {
-	SettlementID       string
-	SessionID          string
-	SubjectID          string
-	ChargedMicros      int64
-	Currency           string
-	SettledAt          time.Time
-	IdempotentReplay   bool
-	AdapterSubmitted   bool
-	AdapterReferenceID string
-	AdapterDeferred    bool
-	Status             OperationStatus
+	SettlementID               string
+	SessionID                  string
+	SubjectID                  string
+	ChargedMicros              int64
+	Currency                   string
+	SettledAt                  time.Time
+	IdempotentReplay           bool
+	AdapterSubmitted           bool
+	AdapterReferenceID         string
+	AdapterDeferred            bool
+	ShadowAdapterSubmitted     bool
+	ShadowAdapterReferenceID   string
+	ShadowAdapterLastError     string
+	ShadowAdapterLastAttemptAt time.Time
+	ShadowAdapterStatus        OperationStatus
+	Status                     OperationStatus
 }
 
 type RewardIssue struct {
-	RewardID           string
-	ProviderSubjectID  string
-	SessionID          string
-	RewardMicros       int64
-	Currency           string
-	IssuedAt           time.Time
-	IdempotentReplay   bool
-	AdapterSubmitted   bool
-	AdapterReferenceID string
-	AdapterDeferred    bool
-	Status             OperationStatus
+	RewardID                   string
+	ProviderSubjectID          string
+	SessionID                  string
+	RewardMicros               int64
+	Currency                   string
+	IssuedAt                   time.Time
+	IdempotentReplay           bool
+	AdapterSubmitted           bool
+	AdapterReferenceID         string
+	AdapterDeferred            bool
+	ShadowAdapterSubmitted     bool
+	ShadowAdapterReferenceID   string
+	ShadowAdapterLastError     string
+	ShadowAdapterLastAttemptAt time.Time
+	ShadowAdapterStatus        OperationStatus
+	Status                     OperationStatus
 }
 
 type SponsorCreditReservation struct {
-	ReservationID      string
-	SponsorID          string
-	SubjectID          string
-	SessionID          string
-	AmountMicros       int64
-	Currency           string
-	CreatedAt          time.Time
-	ExpiresAt          time.Time
-	ConsumedAt         time.Time
-	IdempotentReplay   bool
-	AdapterSubmitted   bool
-	AdapterReferenceID string
-	AdapterDeferred    bool
-	Status             OperationStatus
+	ReservationID              string
+	SponsorID                  string
+	SubjectID                  string
+	SessionID                  string
+	AmountMicros               int64
+	Currency                   string
+	CreatedAt                  time.Time
+	ExpiresAt                  time.Time
+	ConsumedAt                 time.Time
+	IdempotentReplay           bool
+	AdapterSubmitted           bool
+	AdapterReferenceID         string
+	AdapterDeferred            bool
+	ShadowAdapterSubmitted     bool
+	ShadowAdapterReferenceID   string
+	ShadowAdapterLastError     string
+	ShadowAdapterLastAttemptAt time.Time
+	ShadowAdapterStatus        OperationStatus
+	Status                     OperationStatus
 }
 
 type PaymentProof struct {
@@ -106,39 +121,48 @@ type PaymentAuthorization struct {
 }
 
 type SlashEvidence struct {
-	EvidenceID         string
-	SubjectID          string
-	SessionID          string
-	ViolationType      string
-	EvidenceRef        string
-	SlashMicros        int64
-	Currency           string
-	ObservedAt         time.Time
-	IdempotentReplay   bool
-	AdapterSubmitted   bool
-	AdapterReferenceID string
-	AdapterDeferred    bool
-	Status             OperationStatus
+	EvidenceID                 string
+	SubjectID                  string
+	SessionID                  string
+	ViolationType              string
+	EvidenceRef                string
+	SlashMicros                int64
+	Currency                   string
+	ObservedAt                 time.Time
+	IdempotentReplay           bool
+	AdapterSubmitted           bool
+	AdapterReferenceID         string
+	AdapterDeferred            bool
+	ShadowAdapterSubmitted     bool
+	ShadowAdapterReferenceID   string
+	ShadowAdapterLastError     string
+	ShadowAdapterLastAttemptAt time.Time
+	ShadowAdapterStatus        OperationStatus
+	Status                     OperationStatus
 }
 
 type ReconcileReport struct {
-	GeneratedAt              time.Time
-	OpenReservations         int
-	UsageSessions            int
-	SettledSessions          int
-	IssuedRewards            int
-	SponsorReservations      int
-	SponsorAuthorizations    int
-	SubmittedSlashEvidence   int
-	TotalChargedMicros       int64
-	TotalRewardedMicros      int64
-	TotalSponsoredMicros     int64
-	TotalSlashedMicros       int64
-	PendingAdapterOperations int
-	PendingOperations        int
-	SubmittedOperations      int
-	ConfirmedOperations      int
-	FailedOperations         int
+	GeneratedAt               time.Time
+	OpenReservations          int
+	UsageSessions             int
+	SettledSessions           int
+	IssuedRewards             int
+	SponsorReservations       int
+	SponsorAuthorizations     int
+	SubmittedSlashEvidence    int
+	TotalChargedMicros        int64
+	TotalRewardedMicros       int64
+	TotalSponsoredMicros      int64
+	TotalSlashedMicros        int64
+	PendingAdapterOperations  int
+	ShadowAdapterConfigured   bool
+	ShadowAttemptedOperations int
+	ShadowSubmittedOperations int
+	ShadowFailedOperations    int
+	PendingOperations         int
+	SubmittedOperations       int
+	ConfirmedOperations       int
+	FailedOperations          int
 }
 
 type Service interface {
