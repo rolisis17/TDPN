@@ -194,6 +194,7 @@ Exit settlement status endpoint:
 
 - Run registration/compile guard:
   - `./scripts/integration_cosmos_proto_grpc_surface.sh`
+  - `./scripts/integration_cosmos_grpc_app_roundtrip.sh` (app-level gRPC roundtrip for billing/sponsor plus validator/governance Msg+Query contracts)
   - `./scripts/integration_cosmos_tdpnd_grpc_runtime_smoke.sh`
   - `./scripts/integration_cosmos_tdpnd_settlement_bridge_smoke.sh`
   - `./scripts/integration_cosmos_tdpnd_state_dir_persistence.sh`
@@ -202,6 +203,7 @@ Exit settlement status endpoint:
   - `./scripts/integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh`
   - `./scripts/integration_cosmos_tdpnd_grpc_live_smoke.sh`
 - CI/runtime smoke suite split:
+  - `integration_cosmos_grpc_app_roundtrip.sh`: targeted `./app` gRPC roundtrip tests for billing/sponsor plus validator/governance `Msg`/`Query` contracts.
   - `integration_cosmos_tdpnd_grpc_runtime_smoke.sh`: targeted `cmd/tdpnd` runtime tests, including auth/TLS behavior.
   - `integration_cosmos_tdpnd_settlement_bridge_smoke.sh`: targeted settlement HTTP bridge runtime tests (`/health`, module POST writes, module GET query/list paths, auth checks, and combined gRPC/HTTP serve mode).
   - `integration_cosmos_tdpnd_state_dir_persistence.sh`: targeted state-dir persistence tests (`app` scaffold reopen + `cmd/tdpnd` state-dir runtime wiring/error propagation).
