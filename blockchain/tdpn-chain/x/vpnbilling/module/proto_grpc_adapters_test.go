@@ -118,6 +118,29 @@ func TestProtoMsgServerAdapterReserveCreditsConflict(t *testing.T) {
 	}
 }
 
+func TestProtoMsgServerAdapterNilRequestsMapToValidationErrors(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	adapter := NewProtoMsgServerAdapter(&k)
+
+	reserveResp, reserveErr := adapter.ReserveCredits(context.Background(), nil)
+	if !errors.Is(reserveErr, ErrInvalidReservation) {
+		t.Fatalf("expected ErrInvalidReservation for nil reserve request, got %v", reserveErr)
+	}
+	if reserveResp.GetConflict() {
+		t.Fatal("expected conflict=false for invalid nil reserve request")
+	}
+
+	finalizeResp, finalizeErr := adapter.FinalizeUsage(context.Background(), nil)
+	if !errors.Is(finalizeErr, ErrInvalidSettlement) {
+		t.Fatalf("expected ErrInvalidSettlement for nil finalize request, got %v", finalizeErr)
+	}
+	if finalizeResp.GetConflict() {
+		t.Fatal("expected conflict=false for invalid nil finalize request")
+	}
+}
+
 func TestProtoQueryServerAdapterGetNotFoundReturnsFoundFalse(t *testing.T) {
 	t.Parallel()
 
