@@ -240,6 +240,20 @@ if ! rg -Fq "integration_phase5_settlement_layer_summary_report.sh" "$full_plan"
   echo "full execution plan must document phase5 summary report integration contract script"
   exit 1
 fi
+if ! rg -iq "phase[[:space:]]*5 summary helper fallback discovery" "$full_plan" \
+  || ! rg -iq "timestamped[[:space:]]+ci" "$full_plan" \
+  || ! rg -iq "handoff-run" "$full_plan"; then
+  echo "full execution plan must document phase5 summary helper fallback discovery for timestamped CI/handoff-run summaries"
+  exit 1
+fi
+if ! rg -Fq "phase5-settlement-layer-summary-report" "$full_plan"; then
+  echo "full execution plan must document easy-node phase5 summary wrapper command"
+  exit 1
+fi
+if ! rg -Fq "phase6-cosmos-l1-summary-report" "$full_plan"; then
+  echo "full execution plan must document easy-node phase6 summary wrapper command"
+  exit 1
+fi
 if ! rg -Fq "tdpnd_grpc_auth_live_smoke_ok" "$full_plan"; then
   echo "full execution plan must document phase6 readiness/handoff tdpnd_grpc_auth_live_smoke_ok signal"
   exit 1
@@ -349,6 +363,20 @@ if ! rg -Fq "phase5_settlement_layer_summary_report.sh" "$product_roadmap"; then
 fi
 if ! rg -Fq "integration_phase5_settlement_layer_summary_report.sh" "$product_roadmap"; then
   echo "product roadmap must document phase5 summary report integration contract script"
+  exit 1
+fi
+if ! rg -iq "phase[[:space:]]*5 summary helper fallback discovery" "$product_roadmap" \
+  || ! rg -iq "timestamped[[:space:]]+ci" "$product_roadmap" \
+  || ! rg -iq "handoff-run" "$product_roadmap"; then
+  echo "product roadmap must document phase5 summary helper fallback discovery for timestamped CI/handoff-run summaries"
+  exit 1
+fi
+if ! rg -Fq "phase5-settlement-layer-summary-report" "$product_roadmap"; then
+  echo "product roadmap must document easy-node phase5 summary wrapper command"
+  exit 1
+fi
+if ! rg -Fq "phase6-cosmos-l1-summary-report" "$product_roadmap"; then
+  echo "product roadmap must document easy-node phase6 summary wrapper command"
   exit 1
 fi
 if ! rg -Fq "tdpnd_grpc_auth_live_smoke_ok" "$product_roadmap"; then
@@ -959,6 +987,10 @@ if ! rg -Fq "phase5_settlement_layer_summary_report.sh" "$chain_readme"; then
 fi
 if ! rg -Fq "integration_phase5_settlement_layer_summary_report.sh" "$chain_readme"; then
   echo "chain README must document phase5 summary report integration contract script"
+  exit 1
+fi
+if ! rg -Fq "integration_easy_node_blockchain_summary_reports.sh" "$chain_readme"; then
+  echo "chain README must document easy-node blockchain summary-wrapper integration coverage script"
   exit 1
 fi
 if ! rg -Fq "blockchain-app-sponsorship-quickstart.md" "$chain_readme"; then

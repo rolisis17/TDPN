@@ -149,6 +149,7 @@ run_summary_json=""
 handoff_check_summary_json=""
 handoff_run_summary_json=""
 summary_json="${PHASE5_SETTLEMENT_LAYER_SUMMARY_REPORT_SUMMARY_JSON:-}"
+canonical_summary_json="${PHASE5_SETTLEMENT_LAYER_SUMMARY_REPORT_CANONICAL_SUMMARY_JSON:-$ROOT_DIR/.easy-node-logs/phase5_settlement_layer_summary_report.json}"
 print_summary_json="${PHASE5_SETTLEMENT_LAYER_SUMMARY_REPORT_PRINT_SUMMARY_JSON:-1}"
 
 declare -A stage_configured=(
@@ -321,7 +322,9 @@ if [[ -z "$summary_json" ]]; then
   summary_json="$reports_dir/phase5_settlement_layer_summary_report.json"
 fi
 summary_json="$(abs_path "$summary_json")"
+canonical_summary_json="$(abs_path "$canonical_summary_json")"
 mkdir -p "$(dirname "$summary_json")"
+mkdir -p "$(dirname "$canonical_summary_json")"
 
 declare -A stage_status
 declare -A stage_schema_id
@@ -481,6 +484,7 @@ jq -n \
   --argjson rc "$overall_rc" \
   --arg reports_dir "$reports_dir" \
   --arg summary_json "$summary_json" \
+  --arg canonical_summary_json "$canonical_summary_json" \
   --arg print_summary_json "$print_summary_json" \
   --argjson reasons "$reasons_json" \
   --argjson warnings "$warnings_json" \
@@ -529,10 +533,17 @@ jq -n \
       warnings: $warnings
     },
     artifacts: {
-      summary_json: $summary_json
+      summary_json: $summary_json,
+      canonical_summary_json: $canonical_summary_json
     }
   }' >"$summary_tmp"
 mv -f "$summary_tmp" "$summary_json"
+
+if [[ "$summary_json" != "$canonical_summary_json" ]]; then
+  canonical_tmp="$(mktemp "${canonical_summary_json}.tmp.XXXXXX")"
+  cat "$summary_json" >"$canonical_tmp"
+  mv -f "$canonical_tmp" "$canonical_summary_json"
+fi
 
 for stage_id in \
   ci_phase5_settlement_layer \
@@ -553,6 +564,7 @@ for stage_id in \
 done
 echo "[phase5-summary] overall: status=${overall_status} pass=${pass_count} fail=${fail_count} missing=${missing_count} invalid=${invalid_count}"
 echo "[phase5-summary] summary_json=${summary_json}"
+echo "[phase5-summary] canonical_summary_json=${canonical_summary_json}"
 
 if [[ "$print_summary_json" == "1" ]]; then
   cat "$summary_json"

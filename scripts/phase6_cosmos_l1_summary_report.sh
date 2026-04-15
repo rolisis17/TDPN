@@ -141,6 +141,7 @@ ci_summary_json=""
 contracts_summary_json=""
 suite_summary_json=""
 summary_json="${PHASE6_COSMOS_L1_SUMMARY_REPORT_SUMMARY_JSON:-}"
+canonical_summary_json="${PHASE6_COSMOS_L1_SUMMARY_REPORT_CANONICAL_SUMMARY_JSON:-$ROOT_DIR/.easy-node-logs/phase6_cosmos_l1_summary_report.json}"
 print_report="${PHASE6_COSMOS_L1_SUMMARY_REPORT_PRINT_REPORT:-1}"
 show_json="${PHASE6_COSMOS_L1_SUMMARY_REPORT_SHOW_JSON:-0}"
 
@@ -273,7 +274,8 @@ if [[ -z "$summary_json" ]]; then
   summary_json="$reports_dir/phase6_cosmos_l1_summary_report.json"
 fi
 summary_json="$(abs_path "$summary_json")"
-mkdir -p "$(dirname "$summary_json")"
+canonical_summary_json="$(abs_path "$canonical_summary_json")"
+mkdir -p "$(dirname "$summary_json")" "$(dirname "$canonical_summary_json")"
 
 declare -A stage_status
 declare -A stage_schema_id
@@ -422,6 +424,7 @@ jq -n \
   --argjson rc "$overall_rc" \
   --arg reports_dir "$reports_dir" \
   --arg summary_json "$summary_json" \
+  --arg canonical_summary_json "$canonical_summary_json" \
   --arg show_json "$show_json" \
   --arg print_report "$print_report" \
   --argjson reasons "$reasons_json" \
@@ -468,10 +471,17 @@ jq -n \
       warnings: $warnings
     },
     artifacts: {
-      summary_json: $summary_json
+      summary_json: $summary_json,
+      canonical_summary_json: $canonical_summary_json
     }
   }' >"$summary_tmp"
 mv -f "$summary_tmp" "$summary_json"
+
+if [[ "$summary_json" != "$canonical_summary_json" ]]; then
+  canonical_tmp="$(mktemp "${canonical_summary_json}.tmp.XXXXXX")"
+  cp "$summary_json" "$canonical_tmp"
+  mv -f "$canonical_tmp" "$canonical_summary_json"
+fi
 
 if [[ "$print_report" == "1" ]]; then
   for stage_id in build_testnet_ci contracts_ci build_testnet_suite; do
@@ -488,6 +498,7 @@ if [[ "$print_report" == "1" ]]; then
   done
   echo "[phase6-summary] overall: status=${overall_status} pass=${pass_count} fail=${fail_count} missing=${missing_count} invalid=${invalid_count}"
   echo "[phase6-summary] summary_json=${summary_json}"
+  echo "[phase6-summary] canonical_summary_json=${canonical_summary_json}"
 fi
 
 if [[ "$show_json" == "1" ]]; then

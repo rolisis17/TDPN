@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-for cmd in bash jq mktemp chmod grep cat; do
+for cmd in bash jq mktemp chmod grep cat cmp; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "missing required command: $cmd"
     exit 2
@@ -26,6 +26,7 @@ PASS_RUN="$TMP_DIR/run_pass.json"
 PASS_HANDOFF_CHECK="$TMP_DIR/handoff_check_pass.json"
 PASS_HANDOFF_RUN="$TMP_DIR/handoff_run_pass.json"
 PASS_REPORT_JSON="$TMP_DIR/report_pass.json"
+PASS_CANONICAL_REPORT_JSON="$TMP_DIR/report_pass_canonical.json"
 PASS_LOG="$TMP_DIR/pass.log"
 
 FAIL_CI="$TMP_DIR/ci_fail_case.json"
@@ -115,7 +116,7 @@ cat >"$PASS_HANDOFF_RUN" <<'EOF_PASS_HANDOFF_RUN'
 EOF_PASS_HANDOFF_RUN
 
 echo "[phase5-settlement-summary-report] pass path"
-"$SCRIPT_UNDER_TEST" \
+PHASE5_SETTLEMENT_LAYER_SUMMARY_REPORT_CANONICAL_SUMMARY_JSON="$PASS_CANONICAL_REPORT_JSON" "$SCRIPT_UNDER_TEST" \
   --ci-summary-json "$PASS_CI" \
   --check-summary-json "$PASS_CHECK" \
   --run-summary-json "$PASS_RUN" \
@@ -124,7 +125,7 @@ echo "[phase5-settlement-summary-report] pass path"
   --summary-json "$PASS_REPORT_JSON" \
   --print-summary-json 0 >"$PASS_LOG" 2>&1
 
-if ! jq -e '
+if ! jq -e --arg expected_canonical_summary_json "$PASS_CANONICAL_REPORT_JSON" '
   .version == 1
   and .schema.id == "phase5_settlement_layer_summary_report"
   and .status == "pass"
@@ -144,9 +145,24 @@ if ! jq -e '
   and .summaries.phase5_settlement_layer_run_summary.schema_id == "phase5_settlement_layer_run_summary"
   and .summaries.phase5_settlement_layer_handoff_check_summary.schema_id == "phase5_settlement_layer_handoff_check_summary"
   and .summaries.phase5_settlement_layer_handoff_run_summary.schema_id == "phase5_settlement_layer_handoff_run_summary"
+  and .artifacts.canonical_summary_json == $expected_canonical_summary_json
 ' "$PASS_REPORT_JSON" >/dev/null; then
   echo "phase5 summary report pass-path contract mismatch"
   cat "$PASS_REPORT_JSON"
+  cat "$PASS_LOG"
+  exit 1
+fi
+
+if [[ ! -f "$PASS_CANONICAL_REPORT_JSON" ]]; then
+  echo "expected canonical summary artifact to exist: $PASS_CANONICAL_REPORT_JSON"
+  cat "$PASS_LOG"
+  exit 1
+fi
+
+if ! cmp -s "$PASS_REPORT_JSON" "$PASS_CANONICAL_REPORT_JSON"; then
+  echo "expected canonical summary artifact parity with run summary"
+  cat "$PASS_REPORT_JSON"
+  cat "$PASS_CANONICAL_REPORT_JSON"
   cat "$PASS_LOG"
   exit 1
 fi

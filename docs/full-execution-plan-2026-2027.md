@@ -83,6 +83,10 @@ Exit gate:
   - `phase5_settlement_layer_handoff_check_summary.json`
   - `phase5_settlement_layer_handoff_run_summary.json`
 - Phase 5 operator summary helper `scripts/phase5_settlement_layer_summary_report.sh` aggregates CI/check/run/handoff summaries into compact operator output plus normalized JSON, with contract coverage from `scripts/integration_phase5_settlement_layer_summary_report.sh`.
+- Phase 5 summary helper fallback discovery now includes timestamped CI and handoff-run summary directories when canonical/default summary files are absent.
+- Easy-node exposes blockchain summary wrappers:
+  - `./scripts/easy_node.sh phase5-settlement-layer-summary-report`
+  - `./scripts/easy_node.sh phase6-cosmos-l1-summary-report`
 - Phase 6 CI now includes `scripts/ci_phase6_cosmos_l1_build_testnet.sh` with contract coverage from `scripts/integration_ci_phase6_cosmos_l1_build_testnet.sh` for chain scaffold/proto/query/gRPC runtime gate ordering and dry-run/first-failure accounting.
 - Phase 6 build/testnet CI includes `local_testnet_smoke` wired to `scripts/integration_cosmos_local_testnet_smoke.sh` for deterministic local multi-node `tdpnd` lifecycle coverage (`init -> start -> status -> stop -> status`).
 - Phase 6 build/testnet CI now includes `tdpnd_grpc_auth_live_smoke` wired to `scripts/integration_cosmos_tdpnd_grpc_auth_live_smoke.sh` for auth-token gRPC live-smoke coverage.
