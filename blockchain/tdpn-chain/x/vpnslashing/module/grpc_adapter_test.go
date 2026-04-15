@@ -48,6 +48,23 @@ func TestGRPCMsgAdapterSubmitEvidenceAndRecordPenalty(t *testing.T) {
 	}
 }
 
+func TestGRPCMsgAdapterNilRequestsMapToValidationClassification(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	adapter := NewGRPCMsgAdapter(NewMsgServer(&k))
+
+	_, evidenceErr := adapter.SubmitEvidence(context.Background(), nil)
+	if !errors.Is(evidenceErr, ErrInvalidEvidence) {
+		t.Fatalf("expected ErrInvalidEvidence for nil evidence request, got %v", evidenceErr)
+	}
+
+	_, penaltyErr := adapter.RecordPenalty(context.Background(), nil)
+	if !errors.Is(penaltyErr, ErrInvalidPenalty) {
+		t.Fatalf("expected ErrInvalidPenalty for nil penalty request, got %v", penaltyErr)
+	}
+}
+
 func TestGRPCQueryAdapterNotFoundMapsToFoundFalse(t *testing.T) {
 	t.Parallel()
 

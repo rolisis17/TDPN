@@ -17,6 +17,10 @@ phase5_ci_script="scripts/ci_phase5_settlement_layer.sh"
 phase5_integration_script="scripts/integration_ci_phase5_settlement_layer.sh"
 phase6_ci_script="scripts/ci_phase6_cosmos_l1_build_testnet.sh"
 phase6_integration_script="scripts/integration_ci_phase6_cosmos_l1_build_testnet.sh"
+phase6_check_script="scripts/phase6_cosmos_l1_build_testnet_check.sh"
+phase6_run_script="scripts/phase6_cosmos_l1_build_testnet_run.sh"
+phase6_check_integration_script="scripts/integration_phase6_cosmos_l1_build_testnet_check.sh"
+phase6_run_integration_script="scripts/integration_phase6_cosmos_l1_build_testnet_run.sh"
 
 check_confirmation_lifecycle_wording() {
   local file_path="$1"
@@ -66,7 +70,7 @@ check_confirmation_interface_wording() {
   fi
 }
 
-for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$chain_readme" "$settlement_mapping_doc" "$blockchain_sponsor_quickstart_doc" "$phase5_ci_script" "$phase5_integration_script" "$phase6_ci_script" "$phase6_integration_script"; do
+for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$chain_readme" "$settlement_mapping_doc" "$blockchain_sponsor_quickstart_doc" "$phase5_ci_script" "$phase5_integration_script" "$phase6_ci_script" "$phase6_integration_script" "$phase6_check_script" "$phase6_run_script" "$phase6_check_integration_script" "$phase6_run_integration_script"; do
   if [[ ! -f "$f" ]]; then
     echo "missing required file: $f"
     exit 1
@@ -129,6 +133,14 @@ if ! rg -Fq "integration_ci_phase6_cosmos_l1_build_testnet.sh" "$full_plan"; the
   echo "full execution plan must document phase6 cosmos l1 ci integration contract script"
   exit 1
 fi
+if ! rg -Fq "phase6_cosmos_l1_build_testnet_check.sh" "$full_plan"; then
+  echo "full execution plan must document phase6 check wrapper script"
+  exit 1
+fi
+if ! rg -Fq "phase6_cosmos_l1_build_testnet_run.sh" "$full_plan"; then
+  echo "full execution plan must document phase6 run wrapper script"
+  exit 1
+fi
 if ! rg -qi "confirmation lifecycle" "$full_plan"; then
   echo "full execution plan must document settlement confirmation lifecycle posture"
   exit 1
@@ -145,6 +157,14 @@ if ! rg -Fq "ci_phase6_cosmos_l1_build_testnet.sh" "$product_roadmap"; then
 fi
 if ! rg -Fq "integration_ci_phase6_cosmos_l1_build_testnet.sh" "$product_roadmap"; then
   echo "product roadmap must document phase6 cosmos l1 ci integration contract script"
+  exit 1
+fi
+if ! rg -Fq "phase6_cosmos_l1_build_testnet_check.sh" "$product_roadmap"; then
+  echo "product roadmap must document phase6 check wrapper script"
+  exit 1
+fi
+if ! rg -Fq "phase6_cosmos_l1_build_testnet_run.sh" "$product_roadmap"; then
+  echo "product roadmap must document phase6 run wrapper script"
   exit 1
 fi
 
@@ -173,6 +193,30 @@ for stage_spec in "${phase6_stage_specs[@]}"; do
     exit 1
   fi
 done
+if ! rg -Fq "ci_phase6_cosmos_l1_build_testnet.sh" "$phase6_run_script"; then
+  echo "phase6 run wrapper must invoke ci_phase6_cosmos_l1_build_testnet.sh"
+  exit 1
+fi
+if ! rg -Fq "phase6_cosmos_l1_build_testnet_check.sh" "$phase6_run_script"; then
+  echo "phase6 run wrapper must invoke phase6_cosmos_l1_build_testnet_check.sh"
+  exit 1
+fi
+if ! rg -Fq "phase6_cosmos_l1_build_testnet_check_summary" "$phase6_check_script"; then
+  echo "phase6 check wrapper must emit phase6 check summary schema id"
+  exit 1
+fi
+if ! rg -Fq "phase6_cosmos_l1_build_testnet_check_summary" "$phase6_run_script"; then
+  echo "phase6 run wrapper must validate phase6 check summary schema id"
+  exit 1
+fi
+if ! rg -Fq "ci-failure propagation" "$phase6_run_integration_script"; then
+  echo "phase6 run integration must validate ci-failure propagation behavior"
+  exit 1
+fi
+if ! rg -Fq "fail-closed path" "$phase6_check_integration_script"; then
+  echo "phase6 check integration must validate fail-closed behavior"
+  exit 1
+fi
 
 if ! rg -q "Canonical source of truth" "$product_roadmap"; then
   echo "product roadmap must declare canonical source alignment"

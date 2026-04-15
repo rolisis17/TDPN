@@ -191,6 +191,7 @@ Current implementation posture:
   - `settlement_shadow_env` -> `scripts/integration_cosmos_settlement_shadow_env.sh`
   - `settlement_shadow_status_surface` -> `scripts/integration_cosmos_settlement_shadow_status_surface.sh`
 - phase6 Cosmos L1 build/testnet CI scaffold now runs via `scripts/ci_phase6_cosmos_l1_build_testnet.sh` with contract checks in `scripts/integration_ci_phase6_cosmos_l1_build_testnet.sh`.
+- phase6 readiness wrappers are available as `scripts/phase6_cosmos_l1_build_testnet_check.sh` and `scripts/phase6_cosmos_l1_build_testnet_run.sh` (integration-covered).
 
 Governance posture (hybrid bootstrap):
 - objective machine-verifiable events can be enforced on-chain.
