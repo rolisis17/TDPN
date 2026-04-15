@@ -168,6 +168,33 @@ func TestProtoQueryServerAdapterGetNotFoundReturnsFoundFalse(t *testing.T) {
 	}
 }
 
+func TestProtoQueryServerAdapterNilKeeperErrorsAreNotMappedToFoundFalse(t *testing.T) {
+	t.Parallel()
+
+	var k *keeper.Keeper
+	adapter := NewProtoQueryServerAdapter(k)
+
+	reservationResp, reservationErr := adapter.CreditReservation(context.Background(), &pb.QueryCreditReservationRequest{
+		ReservationId: "res-nil-keeper",
+	})
+	if !errors.Is(reservationErr, ErrNilKeeper) {
+		t.Fatalf("expected ErrNilKeeper for reservation query, got %v", reservationErr)
+	}
+	if reservationResp != nil {
+		t.Fatalf("expected nil reservation response on ErrNilKeeper, got %+v", reservationResp)
+	}
+
+	settlementResp, settlementErr := adapter.SettlementRecord(context.Background(), &pb.QuerySettlementRecordRequest{
+		SettlementId: "set-nil-keeper",
+	})
+	if !errors.Is(settlementErr, ErrNilKeeper) {
+		t.Fatalf("expected ErrNilKeeper for settlement query, got %v", settlementErr)
+	}
+	if settlementResp != nil {
+		t.Fatalf("expected nil settlement response on ErrNilKeeper, got %+v", settlementResp)
+	}
+}
+
 func TestProtoQueryServerAdapterGetAndList(t *testing.T) {
 	t.Parallel()
 
