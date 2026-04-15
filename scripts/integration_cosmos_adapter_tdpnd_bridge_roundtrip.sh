@@ -214,15 +214,27 @@ func main() {
 	assert(slashEvidence.AdapterSubmitted, "expected slash evidence adapter submission")
 	assert(!slashEvidence.AdapterDeferred, "expected slash evidence not deferred")
 
+	checkVisible := func() bool {
+		settlementVisible, err := adapter.HasSessionSettlement(ctx, settlementRecord.SettlementID)
+		must(err)
+		rewardVisible, err := adapter.HasRewardIssue(ctx, reward.RewardID)
+		must(err)
+		sponsorVisible, err := adapter.HasSponsorReservation(ctx, sponsorReservation.ReservationID)
+		must(err)
+		slashVisible, err := adapter.HasSlashEvidence(ctx, slashEvidence.EvidenceID)
+		must(err)
+		return settlementVisible && rewardVisible && sponsorVisible && slashVisible
+	}
+
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		report, err := svc.Reconcile(ctx)
 		must(err)
-		if report.PendingAdapterOperations == 0 {
+		if report.PendingAdapterOperations == 0 && report.ConfirmedOperations >= 4 && checkVisible() {
 			break
 		}
 		if time.Now().After(deadline) {
-			panic(fmt.Sprintf("pending adapter operations did not clear: %d", report.PendingAdapterOperations))
+			panic(fmt.Sprintf("roundtrip did not reach confirmed visibility (pending=%d confirmed=%d)", report.PendingAdapterOperations, report.ConfirmedOperations))
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
