@@ -297,3 +297,91 @@ func TestGRPCAdaptersNilRequestsAreFailSafe(t *testing.T) {
 		t.Fatal("expected nil delegation when found=false")
 	}
 }
+
+func TestStatusMappingFromAndToProtoCoversExplicitAndDefaultBranches(t *testing.T) {
+	t.Parallel()
+
+	fromProtoCases := []struct {
+		name string
+		in   sponsorpb.ReconciliationStatus
+		want chaintypes.ReconciliationStatus
+	}{
+		{
+			name: "pending",
+			in:   sponsorpb.ReconciliationStatus_RECONCILIATION_STATUS_PENDING,
+			want: chaintypes.ReconciliationPending,
+		},
+		{
+			name: "submitted",
+			in:   sponsorpb.ReconciliationStatus_RECONCILIATION_STATUS_SUBMITTED,
+			want: chaintypes.ReconciliationSubmitted,
+		},
+		{
+			name: "confirmed",
+			in:   sponsorpb.ReconciliationStatus_RECONCILIATION_STATUS_CONFIRMED,
+			want: chaintypes.ReconciliationConfirmed,
+		},
+		{
+			name: "failed",
+			in:   sponsorpb.ReconciliationStatus_RECONCILIATION_STATUS_FAILED,
+			want: chaintypes.ReconciliationFailed,
+		},
+		{
+			name: "default-unspecified",
+			in:   sponsorpb.ReconciliationStatus_RECONCILIATION_STATUS_UNSPECIFIED,
+			want: "",
+		},
+	}
+	for _, tc := range fromProtoCases {
+		tc := tc
+		t.Run("fromProto/"+tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := statusFromProto(tc.in)
+			if got != tc.want {
+				t.Fatalf("statusFromProto(%v): expected %q, got %q", tc.in, tc.want, got)
+			}
+		})
+	}
+
+	toProtoCases := []struct {
+		name string
+		in   chaintypes.ReconciliationStatus
+		want sponsorpb.ReconciliationStatus
+	}{
+		{
+			name: "pending",
+			in:   chaintypes.ReconciliationPending,
+			want: sponsorpb.ReconciliationStatus_RECONCILIATION_STATUS_PENDING,
+		},
+		{
+			name: "submitted",
+			in:   chaintypes.ReconciliationSubmitted,
+			want: sponsorpb.ReconciliationStatus_RECONCILIATION_STATUS_SUBMITTED,
+		},
+		{
+			name: "confirmed",
+			in:   chaintypes.ReconciliationConfirmed,
+			want: sponsorpb.ReconciliationStatus_RECONCILIATION_STATUS_CONFIRMED,
+		},
+		{
+			name: "failed",
+			in:   chaintypes.ReconciliationFailed,
+			want: sponsorpb.ReconciliationStatus_RECONCILIATION_STATUS_FAILED,
+		},
+		{
+			name: "default-empty",
+			in:   "",
+			want: sponsorpb.ReconciliationStatus_RECONCILIATION_STATUS_UNSPECIFIED,
+		},
+	}
+	for _, tc := range toProtoCases {
+		tc := tc
+		t.Run("toProto/"+tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := statusToProto(tc.in)
+			if got != tc.want {
+				t.Fatalf("statusToProto(%q): expected %v, got %v", tc.in, tc.want, got)
+			}
+		})
+	}
+}

@@ -19,6 +19,7 @@ phase6_ci_script="scripts/ci_phase6_cosmos_l1_build_testnet.sh"
 phase6_integration_script="scripts/integration_ci_phase6_cosmos_l1_build_testnet.sh"
 phase6_contracts_ci_script="scripts/ci_phase6_cosmos_l1_contracts.sh"
 phase6_contracts_integration_script="scripts/integration_ci_phase6_cosmos_l1_contracts.sh"
+phase6_contracts_live_smoke_script="scripts/integration_phase6_cosmos_l1_contracts_live_smoke.sh"
 phase6_check_script="scripts/phase6_cosmos_l1_build_testnet_check.sh"
 phase6_run_script="scripts/phase6_cosmos_l1_build_testnet_run.sh"
 phase6_check_integration_script="scripts/integration_phase6_cosmos_l1_build_testnet_check.sh"
@@ -78,7 +79,7 @@ check_confirmation_interface_wording() {
   fi
 }
 
-for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$chain_readme" "$settlement_mapping_doc" "$blockchain_sponsor_quickstart_doc" "$phase5_ci_script" "$phase5_integration_script" "$phase6_ci_script" "$phase6_integration_script" "$phase6_contracts_ci_script" "$phase6_contracts_integration_script" "$phase6_check_script" "$phase6_run_script" "$phase6_check_integration_script" "$phase6_run_integration_script" "$phase6_suite_script" "$phase6_suite_integration_script" "$phase6_handoff_check_script" "$phase6_handoff_run_script" "$phase6_handoff_check_integration_script" "$phase6_handoff_run_integration_script"; do
+for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$chain_readme" "$settlement_mapping_doc" "$blockchain_sponsor_quickstart_doc" "$phase5_ci_script" "$phase5_integration_script" "$phase6_ci_script" "$phase6_integration_script" "$phase6_contracts_ci_script" "$phase6_contracts_integration_script" "$phase6_contracts_live_smoke_script" "$phase6_check_script" "$phase6_run_script" "$phase6_check_integration_script" "$phase6_run_integration_script" "$phase6_suite_script" "$phase6_suite_integration_script" "$phase6_handoff_check_script" "$phase6_handoff_run_script" "$phase6_handoff_check_integration_script" "$phase6_handoff_run_integration_script"; do
   if [[ ! -f "$f" ]]; then
     echo "missing required file: $f"
     exit 1
@@ -149,6 +150,10 @@ if ! rg -Fq "integration_ci_phase6_cosmos_l1_contracts.sh" "$full_plan"; then
   echo "full execution plan must document phase6 cosmos l1 contracts ci integration contract script"
   exit 1
 fi
+if ! rg -Fq "integration_phase6_cosmos_l1_contracts_live_smoke.sh" "$full_plan"; then
+  echo "full execution plan must document phase6 contracts live-smoke integration script"
+  exit 1
+fi
 if ! rg -Fq "phase6_cosmos_l1_build_testnet_check.sh" "$full_plan"; then
   echo "full execution plan must document phase6 check wrapper script"
   exit 1
@@ -197,6 +202,10 @@ if ! rg -Fq "ci_phase6_cosmos_l1_contracts.sh" "$product_roadmap"; then
 fi
 if ! rg -Fq "integration_ci_phase6_cosmos_l1_contracts.sh" "$product_roadmap"; then
   echo "product roadmap must document phase6 cosmos l1 contracts ci integration contract script"
+  exit 1
+fi
+if ! rg -Fq "integration_phase6_cosmos_l1_contracts_live_smoke.sh" "$product_roadmap"; then
+  echo "product roadmap must document phase6 contracts live-smoke integration script"
   exit 1
 fi
 if ! rg -Fq "phase6_cosmos_l1_build_testnet_check.sh" "$product_roadmap"; then
@@ -268,6 +277,14 @@ for gate_spec in "${phase6_contract_gate_specs[@]}"; do
     exit 1
   fi
 done
+if ! rg -Fq "ci_phase6_cosmos_l1_contracts.sh" "$phase6_contracts_live_smoke_script"; then
+  echo "phase6 contracts live-smoke script must execute ci_phase6_cosmos_l1_contracts.sh"
+  exit 1
+fi
+if ! rg -Fq "ci_phase6_cosmos_l1_contracts_summary" "$phase6_contracts_live_smoke_script"; then
+  echo "phase6 contracts live-smoke script must validate phase6 contracts summary schema id"
+  exit 1
+fi
 if ! rg -Fq "ci_phase6_cosmos_l1_contracts_summary" "$phase6_contracts_ci_script"; then
   echo "phase6 contracts ci script must emit phase6 contracts summary schema id"
   exit 1
