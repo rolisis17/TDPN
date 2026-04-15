@@ -31,6 +31,11 @@ This mapping reflects phase-1 stateful module wiring while keeping chain respons
     - `GET /x/vpnsponsor/delegations[/{reservation_id}]`
     - `GET /x/vpnslashing/evidence[/{evidence_id}]`
     - `GET /x/vpnslashing/penalties[/{penalty_id}]`
+    - `GET /x/vpnvalidator/eligibilities[/{validator_id}]`
+    - `GET /x/vpnvalidator/status-records[/{status_id}]`
+    - `GET /x/vpngovernance/policies[/{policy_id}]`
+    - `GET /x/vpngovernance/decisions[/{decision_id}]`
+    - `GET /x/vpngovernance/audit-actions[/{action_id}]`
   - bridge auth policy: bearer token (when configured) applies to `POST` writes only; `GET` query routes and `GET /health` remain open.
 
 ## Reconciliation contract

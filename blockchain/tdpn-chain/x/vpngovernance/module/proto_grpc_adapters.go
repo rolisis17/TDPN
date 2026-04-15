@@ -114,7 +114,7 @@ func (a *ProtoQueryServerAdapter) GovernanceDecision(_ context.Context, req *pb.
 
 	resp, err := a.query.GetDecision(GetDecisionRequest{DecisionID: decisionID})
 	if err != nil {
-		if errors.Is(err, errDecisionNotFound) {
+		if errors.Is(err, ErrDecisionNotFound) {
 			return &pb.QueryGovernanceDecisionResponse{Found: false}, nil
 		}
 		return nil, err
@@ -131,7 +131,7 @@ func (a *ProtoQueryServerAdapter) GovernanceAuditAction(_ context.Context, req *
 
 	resp, err := a.query.GetAuditAction(GetAuditActionRequest{ActionID: actionID})
 	if err != nil {
-		if errors.Is(err, errAuditActionNotFound) {
+		if errors.Is(err, ErrAuditActionNotFound) {
 			return &pb.QueryGovernanceAuditActionResponse{Found: false}, nil
 		}
 		return nil, err

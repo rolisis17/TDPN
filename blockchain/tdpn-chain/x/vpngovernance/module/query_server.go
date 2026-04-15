@@ -8,8 +8,8 @@ import (
 )
 
 var (
-	errDecisionNotFound    = errors.New("vpngovernance: decision not found")
-	errAuditActionNotFound = errors.New("vpngovernance: audit action not found")
+	ErrDecisionNotFound    = errors.New("vpngovernance: decision not found")
+	ErrAuditActionNotFound = errors.New("vpngovernance: audit action not found")
 )
 
 // GetPolicyRequest requests governance policy by policy ID.
@@ -94,7 +94,7 @@ func (s QueryServer) GetDecision(req GetDecisionRequest) (GetDecisionResponse, e
 
 	record, ok := s.keeper.GetDecision(req.DecisionID)
 	if !ok {
-		return GetDecisionResponse{}, errDecisionNotFound
+		return GetDecisionResponse{}, ErrDecisionNotFound
 	}
 	return GetDecisionResponse{Decision: record}, nil
 }
@@ -106,7 +106,7 @@ func (s QueryServer) GetAuditAction(req GetAuditActionRequest) (GetAuditActionRe
 
 	record, ok := s.keeper.GetAuditAction(req.ActionID)
 	if !ok {
-		return GetAuditActionResponse{}, errAuditActionNotFound
+		return GetAuditActionResponse{}, ErrAuditActionNotFound
 	}
 	return GetAuditActionResponse{Action: record}, nil
 }

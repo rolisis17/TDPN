@@ -77,6 +77,11 @@ This workspace defines the initial module boundaries for TDPN's VPN-compatible b
       - `GET /x/vpnsponsor/delegations` and `GET /x/vpnsponsor/delegations/{reservation_id}`
       - `GET /x/vpnslashing/evidence` and `GET /x/vpnslashing/evidence/{evidence_id}`
       - `GET /x/vpnslashing/penalties` and `GET /x/vpnslashing/penalties/{penalty_id}`
+      - `GET /x/vpnvalidator/eligibilities` and `GET /x/vpnvalidator/eligibilities/{validator_id}`
+      - `GET /x/vpnvalidator/status-records` and `GET /x/vpnvalidator/status-records/{status_id}`
+      - `GET /x/vpngovernance/policies` and `GET /x/vpngovernance/policies/{policy_id}`
+      - `GET /x/vpngovernance/decisions` and `GET /x/vpngovernance/decisions/{decision_id}`
+      - `GET /x/vpngovernance/audit-actions` and `GET /x/vpngovernance/audit-actions/{action_id}`
     - bearer auth is required on `POST` endpoints only when `--settlement-http-auth-token` is set; `GET` query routes and `GET /health` remain open.
   - issuer/exit services can point `COSMOS_SETTLEMENT_ENDPOINT` to this bridge.
   - this bridge is control-plane only and does not couple VPN dataplane forwarding to chain/bridge liveness.

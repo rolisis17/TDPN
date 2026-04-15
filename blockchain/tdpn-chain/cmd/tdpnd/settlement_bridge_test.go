@@ -13,7 +13,11 @@ import (
 	"time"
 
 	"github.com/tdpn/tdpn-chain/app"
+	governancemodule "github.com/tdpn/tdpn-chain/x/vpngovernance/module"
+	governancetypes "github.com/tdpn/tdpn-chain/x/vpngovernance/types"
 	slashingtypes "github.com/tdpn/tdpn-chain/x/vpnslashing/types"
+	validatormodule "github.com/tdpn/tdpn-chain/x/vpnvalidator/module"
+	validatortypes "github.com/tdpn/tdpn-chain/x/vpnvalidator/types"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
@@ -225,6 +229,11 @@ func TestRunTDPNDSettlementHTTPAuthContractGETOpenPOSTBearerRequired(t *testing.
 		"/x/vpnsponsor/delegations",
 		"/x/vpnslashing/evidence",
 		"/x/vpnslashing/penalties",
+		"/x/vpnvalidator/eligibilities",
+		"/x/vpnvalidator/status-records",
+		"/x/vpngovernance/policies",
+		"/x/vpngovernance/decisions",
+		"/x/vpngovernance/audit-actions",
 	}
 	for _, path := range openGetPaths {
 		status, payload := doJSONRequest(t, http.MethodGet, baseURL+path, "", nil)
@@ -754,6 +763,67 @@ func TestRunTDPNDSettlementHTTPQueryHappyPathAndLists(t *testing.T) {
 		t.Fatalf("apply penalty seed: %v", err)
 	}
 
+	validatorMsg := validatormodule.NewMsgServer(&scaffold.ValidatorModule.Keeper)
+	if _, err := validatorMsg.SetValidatorEligibility(validatormodule.SetValidatorEligibilityRequest{
+		Eligibility: validatortypes.ValidatorEligibility{
+			ValidatorID:     "val-query-1",
+			OperatorAddress: "op-query-1",
+			Eligible:        true,
+			PolicyReason:    "bootstrap policy",
+		},
+	}); err != nil {
+		t.Fatalf("set validator eligibility seed: %v", err)
+	}
+	if _, err := validatorMsg.RecordValidatorStatus(validatormodule.RecordValidatorStatusRequest{
+		Record: validatortypes.ValidatorStatusRecord{
+			StatusID:        "status-query-1",
+			ValidatorID:     "val-query-1",
+			LifecycleStatus: validatortypes.ValidatorLifecycleActive,
+			EvidenceHeight:  99,
+			EvidenceRef:     "sha256:status-query-1",
+		},
+	}); err != nil {
+		t.Fatalf("record validator status seed: %v", err)
+	}
+
+	governanceMsg := governancemodule.NewMsgServer(&scaffold.GovernanceModule.Keeper)
+	if _, err := governanceMsg.CreatePolicy(governancemodule.CreatePolicyRequest{
+		Policy: governancetypes.GovernancePolicy{
+			PolicyID:        "policy-query-1",
+			Title:           "bootstrap-policy",
+			Description:     "phase 6 governance seed",
+			Version:         1,
+			ActivatedAtUnix: 1735689600,
+		},
+	}); err != nil {
+		t.Fatalf("create governance policy seed: %v", err)
+	}
+	if _, err := governanceMsg.RecordDecision(governancemodule.RecordDecisionRequest{
+		Decision: governancetypes.GovernanceDecision{
+			DecisionID:    "decision-query-1",
+			PolicyID:      "policy-query-1",
+			ProposalID:    "proposal-query-1",
+			Outcome:       governancetypes.DecisionOutcomeApprove,
+			Decider:       "bootstrap-multisig",
+			Reason:        "objective thresholds met",
+			DecidedAtUnix: 1735689601,
+		},
+	}); err != nil {
+		t.Fatalf("record governance decision seed: %v", err)
+	}
+	if _, err := governanceMsg.RecordAuditAction(governancemodule.RecordAuditActionRequest{
+		Action: governancetypes.GovernanceAuditAction{
+			ActionID:        "action-query-1",
+			Action:          "policy.bootstrap",
+			Actor:           "bootstrap-multisig",
+			Reason:          "initialization",
+			EvidencePointer: "obj://audit/action-query-1",
+			TimestampUnix:   1735689602,
+		},
+	}); err != nil {
+		t.Fatalf("record governance audit action seed: %v", err)
+	}
+
 	getByIDChecks := []struct {
 		path      string
 		objectKey string
@@ -768,6 +838,11 @@ func TestRunTDPNDSettlementHTTPQueryHappyPathAndLists(t *testing.T) {
 		{path: "/x/vpnsponsor/delegations/sponsor-res-query-1", objectKey: "delegation", idField: "ReservationID", idValue: "sponsor-res-query-1"},
 		{path: "/x/vpnslashing/evidence/ev-query-1", objectKey: "evidence", idField: "EvidenceID", idValue: "ev-query-1"},
 		{path: "/x/vpnslashing/penalties/pen-query-1", objectKey: "penalty", idField: "PenaltyID", idValue: "pen-query-1"},
+		{path: "/x/vpnvalidator/eligibilities/val-query-1", objectKey: "eligibility", idField: "ValidatorID", idValue: "val-query-1"},
+		{path: "/x/vpnvalidator/status-records/status-query-1", objectKey: "status", idField: "StatusID", idValue: "status-query-1"},
+		{path: "/x/vpngovernance/policies/policy-query-1", objectKey: "policy", idField: "PolicyID", idValue: "policy-query-1"},
+		{path: "/x/vpngovernance/decisions/decision-query-1", objectKey: "decision", idField: "DecisionID", idValue: "decision-query-1"},
+		{path: "/x/vpngovernance/audit-actions/action-query-1", objectKey: "action", idField: "ActionID", idValue: "action-query-1"},
 	}
 
 	for _, tc := range getByIDChecks {
@@ -790,6 +865,11 @@ func TestRunTDPNDSettlementHTTPQueryHappyPathAndLists(t *testing.T) {
 		{path: "/x/vpnsponsor/delegations", listKey: "delegations"},
 		{path: "/x/vpnslashing/evidence", listKey: "evidence"},
 		{path: "/x/vpnslashing/penalties", listKey: "penalties"},
+		{path: "/x/vpnvalidator/eligibilities", listKey: "eligibilities"},
+		{path: "/x/vpnvalidator/status-records", listKey: "records"},
+		{path: "/x/vpngovernance/policies", listKey: "policies"},
+		{path: "/x/vpngovernance/decisions", listKey: "decisions"},
+		{path: "/x/vpngovernance/audit-actions", listKey: "actions"},
 	}
 	for _, tc := range listChecks {
 		status, payload := doJSONRequest(t, http.MethodGet, baseURL+tc.path, "", nil)
@@ -856,6 +936,11 @@ func TestRunTDPNDSettlementHTTPQueryNotFoundByID(t *testing.T) {
 		"/x/vpnsponsor/delegations/missing-delegation",
 		"/x/vpnslashing/evidence/missing-evidence",
 		"/x/vpnslashing/penalties/missing-penalty",
+		"/x/vpnvalidator/eligibilities/missing-validator",
+		"/x/vpnvalidator/status-records/missing-status",
+		"/x/vpngovernance/policies/missing-policy",
+		"/x/vpngovernance/decisions/missing-decision",
+		"/x/vpngovernance/audit-actions/missing-action",
 	}
 	for _, path := range missingPaths {
 		status, payload := doJSONRequest(t, http.MethodGet, baseURL+path, "", nil)
@@ -974,6 +1059,67 @@ func TestRunTDPNDSettlementHTTPGETQueriesRemainOpenWithAuth(t *testing.T) {
 		t.Fatalf("apply penalty seed in auth mode: %v", err)
 	}
 
+	validatorMsg := validatormodule.NewMsgServer(&scaffold.ValidatorModule.Keeper)
+	if _, err := validatorMsg.SetValidatorEligibility(validatormodule.SetValidatorEligibilityRequest{
+		Eligibility: validatortypes.ValidatorEligibility{
+			ValidatorID:     "val-auth-open-1",
+			OperatorAddress: "op-auth-open-1",
+			Eligible:        true,
+			PolicyReason:    "bootstrap policy",
+		},
+	}); err != nil {
+		t.Fatalf("set validator eligibility seed in auth mode: %v", err)
+	}
+	if _, err := validatorMsg.RecordValidatorStatus(validatormodule.RecordValidatorStatusRequest{
+		Record: validatortypes.ValidatorStatusRecord{
+			StatusID:        "status-auth-open-1",
+			ValidatorID:     "val-auth-open-1",
+			LifecycleStatus: validatortypes.ValidatorLifecycleActive,
+			EvidenceHeight:  99,
+			EvidenceRef:     "sha256:status-auth-open-1",
+		},
+	}); err != nil {
+		t.Fatalf("record validator status seed in auth mode: %v", err)
+	}
+
+	governanceMsg := governancemodule.NewMsgServer(&scaffold.GovernanceModule.Keeper)
+	if _, err := governanceMsg.CreatePolicy(governancemodule.CreatePolicyRequest{
+		Policy: governancetypes.GovernancePolicy{
+			PolicyID:        "policy-auth-open-1",
+			Title:           "auth-open-policy",
+			Description:     "auth open read query",
+			Version:         1,
+			ActivatedAtUnix: 1735689600,
+		},
+	}); err != nil {
+		t.Fatalf("create governance policy seed in auth mode: %v", err)
+	}
+	if _, err := governanceMsg.RecordDecision(governancemodule.RecordDecisionRequest{
+		Decision: governancetypes.GovernanceDecision{
+			DecisionID:    "decision-auth-open-1",
+			PolicyID:      "policy-auth-open-1",
+			ProposalID:    "proposal-auth-open-1",
+			Outcome:       governancetypes.DecisionOutcomeApprove,
+			Decider:       "bootstrap-multisig",
+			Reason:        "contract auth-open coverage",
+			DecidedAtUnix: 1735689601,
+		},
+	}); err != nil {
+		t.Fatalf("record governance decision seed in auth mode: %v", err)
+	}
+	if _, err := governanceMsg.RecordAuditAction(governancemodule.RecordAuditActionRequest{
+		Action: governancetypes.GovernanceAuditAction{
+			ActionID:        "action-auth-open-1",
+			Action:          "policy.bootstrap",
+			Actor:           "bootstrap-multisig",
+			Reason:          "auth-open query coverage",
+			EvidencePointer: "obj://audit/action-auth-open-1",
+			TimestampUnix:   1735689602,
+		},
+	}); err != nil {
+		t.Fatalf("record governance audit action seed in auth mode: %v", err)
+	}
+
 	openGETChecks := []string{
 		"/x/vpnbilling/reservations/res-auth-open-1",
 		"/x/vpnbilling/settlements/set-auth-open-1",
@@ -983,6 +1129,11 @@ func TestRunTDPNDSettlementHTTPGETQueriesRemainOpenWithAuth(t *testing.T) {
 		"/x/vpnsponsor/delegations/sponsor-res-auth-open-1",
 		"/x/vpnslashing/evidence/ev-auth-open-1",
 		"/x/vpnslashing/penalties/pen-auth-open-1",
+		"/x/vpnvalidator/eligibilities/val-auth-open-1",
+		"/x/vpnvalidator/status-records/status-auth-open-1",
+		"/x/vpngovernance/policies/policy-auth-open-1",
+		"/x/vpngovernance/decisions/decision-auth-open-1",
+		"/x/vpngovernance/audit-actions/action-auth-open-1",
 	}
 
 	for _, path := range openGETChecks {

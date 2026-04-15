@@ -75,6 +75,11 @@ Shadow dual-write note:
     - `GET /x/vpnsponsor/delegations` and `GET /x/vpnsponsor/delegations/{reservation_id}`
     - `GET /x/vpnslashing/evidence` and `GET /x/vpnslashing/evidence/{evidence_id}`
     - `GET /x/vpnslashing/penalties` and `GET /x/vpnslashing/penalties/{penalty_id}`
+    - `GET /x/vpnvalidator/eligibilities` and `GET /x/vpnvalidator/eligibilities/{validator_id}`
+    - `GET /x/vpnvalidator/status-records` and `GET /x/vpnvalidator/status-records/{status_id}`
+    - `GET /x/vpngovernance/policies` and `GET /x/vpngovernance/policies/{policy_id}`
+    - `GET /x/vpngovernance/decisions` and `GET /x/vpngovernance/decisions/{decision_id}`
+    - `GET /x/vpngovernance/audit-actions` and `GET /x/vpngovernance/audit-actions/{action_id}`
   - when `--settlement-http-auth-token` is set, bearer auth is required on `POST` endpoints only; `GET` query paths and `GET /health` remain open.
 - VPN services can target this bridge with `COSMOS_SETTLEMENT_ENDPOINT=http://127.0.0.1:8080`.
 - Bridge responsibilities remain control-plane only; VPN dataplane forwarding does not couple to bridge liveness.

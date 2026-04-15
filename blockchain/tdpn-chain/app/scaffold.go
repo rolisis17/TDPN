@@ -210,6 +210,22 @@ func (s *ChainScaffold) SponsorQueryServer() SponsorQueryServer {
 	return sponsorQueryServer{queryServer: sponsormodule.NewQueryServer(&s.SponsorModule.Keeper)}
 }
 
+// ValidatorQueryServer returns vpnvalidator query operations wired to scaffold state.
+func (s *ChainScaffold) ValidatorQueryServer() ValidatorQueryServer {
+	if s == nil {
+		return validatorQueryServer{queryServer: validatormodule.NewQueryServer(nil)}
+	}
+	return validatorQueryServer{queryServer: validatormodule.NewQueryServer(&s.ValidatorModule.Keeper)}
+}
+
+// GovernanceQueryServer returns vpngovernance query operations wired to scaffold state.
+func (s *ChainScaffold) GovernanceQueryServer() GovernanceQueryServer {
+	if s == nil {
+		return governanceQueryServer{queryServer: governancemodule.NewQueryServer(nil)}
+	}
+	return governanceQueryServer{queryServer: governancemodule.NewQueryServer(&s.GovernanceModule.Keeper)}
+}
+
 func moduleNameOrDefault(value, fallback string) string {
 	name := strings.TrimSpace(value)
 	if name == "" {

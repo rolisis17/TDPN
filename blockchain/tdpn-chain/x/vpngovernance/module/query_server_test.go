@@ -57,13 +57,13 @@ func TestQueryServerNotFound(t *testing.T) {
 	}
 
 	_, decisionErr := server.GetDecision(GetDecisionRequest{DecisionID: "decision-missing"})
-	if !errors.Is(decisionErr, errDecisionNotFound) {
-		t.Fatalf("expected errDecisionNotFound, got %v", decisionErr)
+	if !errors.Is(decisionErr, ErrDecisionNotFound) {
+		t.Fatalf("expected ErrDecisionNotFound, got %v", decisionErr)
 	}
 
 	_, auditErr := server.GetAuditAction(GetAuditActionRequest{ActionID: "audit-missing"})
-	if !errors.Is(auditErr, errAuditActionNotFound) {
-		t.Fatalf("expected errAuditActionNotFound, got %v", auditErr)
+	if !errors.Is(auditErr, ErrAuditActionNotFound) {
+		t.Fatalf("expected ErrAuditActionNotFound, got %v", auditErr)
 	}
 }
 

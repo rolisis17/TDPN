@@ -12,6 +12,7 @@ cosmos_runtime_doc="docs/cosmos-settlement-runtime.md"
 chain_readme="blockchain/tdpn-chain/README.md"
 chain_scaffold_file="blockchain/tdpn-chain/app/scaffold.go"
 chain_grpc_registry_file="blockchain/tdpn-chain/app/grpc_registry.go"
+chain_settlement_bridge_file="blockchain/tdpn-chain/cmd/tdpnd/settlement_bridge.go"
 settlement_mapping_doc="blockchain/tdpn-chain/docs/settlement-bridge-mapping.md"
 blockchain_sponsor_quickstart_doc="docs/blockchain-app-sponsorship-quickstart.md"
 protocol_doc="docs/protocol.md"
@@ -98,7 +99,7 @@ check_confirmation_interface_wording() {
   fi
 }
 
-for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$chain_readme" "$chain_scaffold_file" "$chain_grpc_registry_file" "$settlement_mapping_doc" "$blockchain_sponsor_quickstart_doc" "$phase5_ci_script" "$phase5_integration_script" "$phase5_check_script" "$phase5_run_script" "$phase5_handoff_check_script" "$phase5_handoff_run_script" "$phase5_check_integration_script" "$phase5_run_integration_script" "$phase5_handoff_check_integration_script" "$phase5_handoff_run_integration_script" "$phase5_summary_report_script" "$phase5_summary_report_integration_script" "$ci_local_script" "$easy_node_blockchain_summary_reports_integration_script" "$phase6_ci_script" "$phase6_integration_script" "$phase6_contracts_ci_script" "$phase6_contracts_integration_script" "$phase6_contracts_live_smoke_script" "$phase6_module_coverage_floor_script" "$phase6_keeper_coverage_floor_script" "$phase6_dual_write_parity_script" "$phase6_check_script" "$phase6_run_script" "$phase6_check_integration_script" "$phase6_run_integration_script" "$phase6_suite_script" "$phase6_suite_integration_script" "$phase6_handoff_check_script" "$phase6_handoff_run_script" "$phase6_handoff_check_integration_script" "$phase6_handoff_run_integration_script" "$phase6_summary_report_script" "$phase6_summary_report_integration_script"; do
+for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$chain_readme" "$chain_scaffold_file" "$chain_grpc_registry_file" "$chain_settlement_bridge_file" "$settlement_mapping_doc" "$blockchain_sponsor_quickstart_doc" "$phase5_ci_script" "$phase5_integration_script" "$phase5_check_script" "$phase5_run_script" "$phase5_handoff_check_script" "$phase5_handoff_run_script" "$phase5_check_integration_script" "$phase5_run_integration_script" "$phase5_handoff_check_integration_script" "$phase5_handoff_run_integration_script" "$phase5_summary_report_script" "$phase5_summary_report_integration_script" "$ci_local_script" "$easy_node_blockchain_summary_reports_integration_script" "$phase6_ci_script" "$phase6_integration_script" "$phase6_contracts_ci_script" "$phase6_contracts_integration_script" "$phase6_contracts_live_smoke_script" "$phase6_module_coverage_floor_script" "$phase6_keeper_coverage_floor_script" "$phase6_dual_write_parity_script" "$phase6_check_script" "$phase6_run_script" "$phase6_check_integration_script" "$phase6_run_integration_script" "$phase6_suite_script" "$phase6_suite_integration_script" "$phase6_handoff_check_script" "$phase6_handoff_run_script" "$phase6_handoff_check_integration_script" "$phase6_handoff_run_integration_script" "$phase6_summary_report_script" "$phase6_summary_report_integration_script"; do
   if [[ ! -f "$f" ]]; then
     echo "missing required file: $f"
     exit 1
@@ -1264,6 +1265,38 @@ if ! rg -Fq "GET /x/vpnbilling/reservations[/{reservation_id}]" "$settlement_map
   echo "settlement bridge mapping must document list/by-id GET query mapping"
   exit 1
 fi
+for new_bridge_get_path in \
+  "GET /x/vpnvalidator/eligibilities[/{validator_id}]" \
+  "GET /x/vpnvalidator/status-records[/{status_id}]" \
+  "GET /x/vpngovernance/policies[/{policy_id}]" \
+  "GET /x/vpngovernance/decisions[/{decision_id}]" \
+  "GET /x/vpngovernance/audit-actions[/{action_id}]"
+do
+  if ! rg -Fq "$new_bridge_get_path" "$settlement_mapping_doc"; then
+    echo "settlement bridge mapping must document validator/governance GET contract path: $new_bridge_get_path"
+    exit 1
+  fi
+done
+for bridge_route in \
+  "/x/vpnvalidator/eligibilities" \
+  "/x/vpnvalidator/status-records" \
+  "/x/vpngovernance/policies" \
+  "/x/vpngovernance/decisions" \
+  "/x/vpngovernance/audit-actions"
+do
+  if ! rg -Fq "$bridge_route" "$chain_settlement_bridge_file"; then
+    echo "settlement bridge runtime must wire validator/governance route: $bridge_route"
+    exit 1
+  fi
+  if ! rg -Fq "$bridge_route" "$cosmos_runtime_doc"; then
+    echo "cosmos runtime guide must document validator/governance route: $bridge_route"
+    exit 1
+  fi
+  if ! rg -Fq "$bridge_route" "$chain_readme"; then
+    echo "chain README must document validator/governance route: $bridge_route"
+    exit 1
+  fi
+done
 if ! rg -Fq -- "--state-dir <path>" "$settlement_mapping_doc"; then
   echo "settlement bridge mapping must document --state-dir runtime persistence option"
   exit 1
