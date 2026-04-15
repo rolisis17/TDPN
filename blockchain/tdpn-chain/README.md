@@ -154,7 +154,7 @@ This workspace defines the initial module boundaries for TDPN's VPN-compatible b
   - `integration_cosmos_tdpnd_settlement_bridge_live_smoke.sh`: live `tdpnd --settlement-http-listen` process smoke (startup, auth enforcement, module POST acceptance, validator/governance GET by-id/list query coverage, graceful shutdown).
   - `integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh`: live adapter roundtrip from `pkg/settlement` through bridge submission paths.
   - `integration_cosmos_tdpnd_grpc_live_smoke.sh`: live `tdpnd --grpc-listen` process smoke (startup, health/reflection availability, reflected module-service parity, validator/governance query dispatch, graceful shutdown).
-  - `integration_cosmos_tdpnd_grpc_auth_live_smoke.sh`: live auth-token gRPC smoke (`tdpnd --grpc-auth-token`) validating token gating for billing/validator/governance query RPCs.
+  - `integration_cosmos_tdpnd_grpc_auth_live_smoke.sh`: live auth-token gRPC smoke (`tdpnd --grpc-auth-token`) validating token gating for billing/sponsor/validator/governance query RPCs.
 - Phase-6 build/testnet CI stage wiring includes `tdpnd_grpc_auth_live_smoke` -> `scripts/integration_cosmos_tdpnd_grpc_auth_live_smoke.sh`.
 - Optional live smoke:
   - start `tdpnd` with `--grpc-listen` (plus optional TLS/auth flags)

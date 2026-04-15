@@ -526,6 +526,7 @@ if ! rg -Fq "TestRunTDPNDGRPCModeRealScaffoldValidatorAndGovernanceRoundTrip" "$
   exit 1
 fi
 for runtime_grpc_contract in \
+  "ListSponsorAuthorizations" \
   "ListValidatorEligibilities" \
   "ListGovernancePolicies" \
   "PreviewEpochSelection"
@@ -786,6 +787,7 @@ do
 done
 for grpc_auth_rpc_contract in \
   "tdpn.vpnbilling.v1.Query/ListCreditReservations" \
+  "tdpn.vpnsponsor.v1.Query/ListSponsorAuthorizations" \
   "tdpn.vpnvalidator.v1.Query/ListValidatorEligibilities" \
   "tdpn.vpngovernance.v1.Query/ListGovernancePolicies"
 do

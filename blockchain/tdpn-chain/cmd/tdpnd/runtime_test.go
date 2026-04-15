@@ -618,6 +618,7 @@ func TestRunTDPNDGRPCModeAuthEnforcementAndHealth(t *testing.T) {
 
 	billingMsg := vpnbillingpb.NewMsgClient(conn)
 	billingQuery := vpnbillingpb.NewQueryClient(conn)
+	sponsorQuery := vpnsponsorpb.NewQueryClient(conn)
 	validatorQuery := vpnvalidatorpb.NewQueryClient(conn)
 	governanceQuery := vpngovernancepb.NewQueryClient(conn)
 
@@ -673,6 +674,10 @@ func TestRunTDPNDGRPCModeAuthEnforcementAndHealth(t *testing.T) {
 
 	assertQueryAuthParity("vpnbilling/ListCreditReservations", func(callCtx context.Context) error {
 		_, callErr := billingQuery.ListCreditReservations(callCtx, &vpnbillingpb.QueryListCreditReservationsRequest{})
+		return callErr
+	})
+	assertQueryAuthParity("vpnsponsor/ListSponsorAuthorizations", func(callCtx context.Context) error {
+		_, callErr := sponsorQuery.ListSponsorAuthorizations(callCtx, &vpnsponsorpb.QueryListSponsorAuthorizationsRequest{})
 		return callErr
 	})
 	assertQueryAuthParity("vpnvalidator/ListValidatorEligibilities", func(callCtx context.Context) error {

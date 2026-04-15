@@ -21,6 +21,7 @@ TDPND_PID=""
 AUTH_TOKEN="${TDPND_GRPC_AUTH_LIVE_SMOKE_TOKEN:-tdpn-live-smoke-token}"
 MODULE_QUERY_CHECKS=(
   "tdpn.vpnbilling.v1.Query/ListCreditReservations|reservations"
+  "tdpn.vpnsponsor.v1.Query/ListSponsorAuthorizations|authorizations"
   "tdpn.vpnvalidator.v1.Query/ListValidatorEligibilities|eligibilities"
   "tdpn.vpngovernance.v1.Query/ListGovernancePolicies|policies"
 )

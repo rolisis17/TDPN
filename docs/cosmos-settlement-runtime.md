@@ -211,7 +211,7 @@ Exit settlement status endpoint:
   - `integration_cosmos_tdpnd_settlement_bridge_live_smoke.sh`: live `tdpnd --settlement-http-listen` process smoke (startup, auth enforcement, module POST acceptance, validator/governance GET by-id/list query coverage, graceful shutdown).
   - `integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh`: live adapter roundtrip from `pkg/settlement` into `tdpnd` bridge endpoints (settlement/reward/sponsor/slash submission paths).
   - `integration_cosmos_tdpnd_grpc_live_smoke.sh`: live `tdpnd --grpc-listen` process smoke (startup, health/reflection availability, reflected module-service parity, validator/governance query dispatch, graceful shutdown).
-  - `integration_cosmos_tdpnd_grpc_auth_live_smoke.sh`: live `tdpnd --grpc-auth-token` process smoke (health-open posture plus bearer-token gating for billing/validator/governance query RPCs).
+  - `integration_cosmos_tdpnd_grpc_auth_live_smoke.sh`: live `tdpnd --grpc-auth-token` process smoke (health-open posture plus bearer-token gating for billing/sponsor/validator/governance query RPCs).
 - Live local smoke:
   - run `tdpnd` with `--grpc-listen` (plus optional TLS/auth flags).
   - health check (`grpcurl`): `grpcurl -d '{"service":""}' 127.0.0.1:9090 grpc.health.v1.Health/Check`.
