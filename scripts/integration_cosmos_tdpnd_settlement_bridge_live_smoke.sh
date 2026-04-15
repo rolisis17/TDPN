@@ -123,6 +123,9 @@ wait_for_health_ready "${BASE_URL}/health"
 
 post_expect_status "${BASE_URL}/x/vpnslashing/evidence" '{"EvidenceID":"ev-unauth-1","SubjectID":"provider-1","SessionID":"sess-1","ViolationType":"double-sign","EvidenceRef":"sha256:abc","ObservedAt":"2026-01-01T00:00:00Z"}' "401"
 
+post_expect_status "${BASE_URL}/x/vpnslashing/evidence" '{"EvidenceID":"ev-invalid-ref-1","SubjectID":"provider-1","SessionID":"sess-1","ViolationType":"double-sign","EvidenceRef":"proof-invalid-ref-1","ObservedAt":"2026-01-01T00:00:00Z"}' "400" "${TOKEN}"
+grep -q 'objective format' "${RESP_FILE}"
+
 post_expect_status "${BASE_URL}/x/vpnbilling/settlements" '{"SettlementID":"set-live-1","SessionID":"sess-live-1","SubjectID":"subject-live-1","ChargedMicros":250,"Currency":"TDPNC","SettledAt":"2026-01-01T00:00:00Z"}' "200" "${TOKEN}"
 grep -q '"ok"[[:space:]]*:[[:space:]]*true' "${RESP_FILE}"
 

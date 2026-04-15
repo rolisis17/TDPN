@@ -76,7 +76,7 @@ func TestNewKeeperWithStoreNilFallsBackToInMemory(t *testing.T) {
 	record := types.SlashEvidence{
 		EvidenceID: "evidence-fallback",
 		Kind:       types.EvidenceKindObjective,
-		ProofHash:  "proof-fallback",
+		ProofHash:  "sha256:proof-fallback",
 	}
 	k.UpsertEvidence(record)
 
@@ -98,7 +98,7 @@ func TestKeeperDelegatesUpsertAndGetToCustomStore(t *testing.T) {
 	evidence := types.SlashEvidence{
 		EvidenceID: "evidence-1",
 		Kind:       types.EvidenceKindObjective,
-		ProofHash:  "proof-1",
+		ProofHash:  "sha256:proof-1",
 	}
 	k.UpsertEvidence(evidence)
 
@@ -149,7 +149,7 @@ func TestKeeperSubmitAndApplyUseCustomStoreWithEvidenceProgression(t *testing.T)
 	evidence, err := k.SubmitEvidence(types.SlashEvidence{
 		EvidenceID: "evidence-2",
 		Kind:       types.EvidenceKindObjective,
-		ProofHash:  "proof-2",
+		ProofHash:  "sha256:proof-2",
 		Status:     chaintypes.ReconciliationPending,
 	})
 	if err != nil {
@@ -197,7 +197,7 @@ func TestFileStorePersistsAcrossReopen(t *testing.T) {
 		SessionID:       "session-file-1",
 		ProviderID:      "provider-file-1",
 		Kind:            types.EvidenceKindObjective,
-		ProofHash:       "proof-file-1",
+		ProofHash:       "sha256:proof-file-1",
 		SubmittedAtUnix: 1700000000,
 		Status:          chaintypes.ReconciliationSubmitted,
 	}

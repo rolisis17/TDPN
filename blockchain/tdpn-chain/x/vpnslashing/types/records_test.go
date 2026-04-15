@@ -8,7 +8,7 @@ func TestSlashEvidenceValidateBasic(t *testing.T) {
 	base := SlashEvidence{
 		EvidenceID: "evidence-1",
 		Kind:       EvidenceKindObjective,
-		ProofHash:  "proof-hash",
+		ProofHash:  "sha256:proof-hash",
 	}
 
 	tests := []struct {
@@ -16,7 +16,11 @@ func TestSlashEvidenceValidateBasic(t *testing.T) {
 		record  SlashEvidence
 		wantErr string
 	}{
-		{name: "valid", record: base},
+		{name: "valid sha256", record: base},
+		{
+			name:   "valid object uri",
+			record: SlashEvidence{EvidenceID: base.EvidenceID, Kind: base.Kind, ProofHash: "obj://bucket/key"},
+		},
 		{
 			name:    "missing evidence id",
 			record:  SlashEvidence{Kind: base.Kind, ProofHash: base.ProofHash},
@@ -31,6 +35,21 @@ func TestSlashEvidenceValidateBasic(t *testing.T) {
 			name:    "missing proof hash",
 			record:  SlashEvidence{EvidenceID: base.EvidenceID, Kind: base.Kind},
 			wantErr: "proof hash is required",
+		},
+		{
+			name:    "invalid proof hash format",
+			record:  SlashEvidence{EvidenceID: base.EvidenceID, Kind: base.Kind, ProofHash: "legacy-proof-format"},
+			wantErr: "proof hash must use objective format (sha256:<value> or obj://<value>)",
+		},
+		{
+			name:    "invalid sha256 empty suffix",
+			record:  SlashEvidence{EvidenceID: base.EvidenceID, Kind: base.Kind, ProofHash: "sha256:"},
+			wantErr: "proof hash must use objective format (sha256:<value> or obj://<value>)",
+		},
+		{
+			name:    "invalid object uri empty suffix",
+			record:  SlashEvidence{EvidenceID: base.EvidenceID, Kind: base.Kind, ProofHash: "obj://"},
+			wantErr: "proof hash must use objective format (sha256:<value> or obj://<value>)",
 		},
 	}
 

@@ -20,7 +20,7 @@ func TestKeeperEvidenceUpsertAndGet(t *testing.T) {
 	initial := types.SlashEvidence{
 		EvidenceID: "evidence-1",
 		Kind:       types.EvidenceKindObjective,
-		ProofHash:  "proof-1",
+		ProofHash:  "sha256:proof-1",
 	}
 	k.UpsertEvidence(initial)
 
@@ -33,7 +33,7 @@ func TestKeeperEvidenceUpsertAndGet(t *testing.T) {
 	}
 
 	updated := initial
-	updated.ProofHash = "proof-2"
+	updated.ProofHash = "sha256:proof-2"
 	k.UpsertEvidence(updated)
 
 	got, ok = k.GetEvidence(initial.EvidenceID)
@@ -89,17 +89,17 @@ func TestKeeperListEvidenceDeterministicOrderByID(t *testing.T) {
 	k.UpsertEvidence(types.SlashEvidence{
 		EvidenceID: "evidence-c",
 		Kind:       types.EvidenceKindObjective,
-		ProofHash:  "proof-c",
+		ProofHash:  "sha256:proof-c",
 	})
 	k.UpsertEvidence(types.SlashEvidence{
 		EvidenceID: "evidence-a",
 		Kind:       types.EvidenceKindObjective,
-		ProofHash:  "proof-a",
+		ProofHash:  "sha256:proof-a",
 	})
 	k.UpsertEvidence(types.SlashEvidence{
 		EvidenceID: "evidence-b",
 		Kind:       types.EvidenceKindObjective,
-		ProofHash:  "proof-b",
+		ProofHash:  "sha256:proof-b",
 	})
 
 	list := k.ListEvidence()
@@ -150,7 +150,7 @@ func TestSubmitEvidenceDefaultsAndGet(t *testing.T) {
 	record, err := k.SubmitEvidence(types.SlashEvidence{
 		EvidenceID: "evidence-submit-1",
 		Kind:       types.EvidenceKindObjective,
-		ProofHash:  "proof-submit-1",
+		ProofHash:  "sha256:proof-submit-1",
 	})
 	if err != nil {
 		t.Fatalf("expected submit evidence to succeed, got %v", err)
@@ -175,7 +175,7 @@ func TestSubmitEvidenceIdempotentReplay(t *testing.T) {
 	base := types.SlashEvidence{
 		EvidenceID: "evidence-submit-2",
 		Kind:       types.EvidenceKindObjective,
-		ProofHash:  "proof-submit-2",
+		ProofHash:  "sha256:proof-submit-2",
 	}
 
 	first, err := k.SubmitEvidence(base)
@@ -198,14 +198,14 @@ func TestSubmitEvidenceConflict(t *testing.T) {
 	base := types.SlashEvidence{
 		EvidenceID: "evidence-submit-3",
 		Kind:       types.EvidenceKindObjective,
-		ProofHash:  "proof-a",
+		ProofHash:  "sha256:proof-a",
 	}
 	if _, err := k.SubmitEvidence(base); err != nil {
 		t.Fatalf("seed evidence failed: %v", err)
 	}
 
 	conflict := base
-	conflict.ProofHash = "proof-b"
+	conflict.ProofHash = "sha256:proof-b"
 	_, err := k.SubmitEvidence(conflict)
 	if err == nil {
 		t.Fatal("expected conflicting submit to fail")
@@ -221,7 +221,21 @@ func TestSubmitEvidenceInvalid(t *testing.T) {
 	k := NewKeeper()
 	_, err := k.SubmitEvidence(types.SlashEvidence{
 		Kind:      types.EvidenceKindObjective,
-		ProofHash: "proof-invalid",
+		ProofHash: "sha256:proof-invalid",
+	})
+	if err == nil {
+		t.Fatal("expected invalid evidence to fail")
+	}
+}
+
+func TestSubmitEvidenceInvalidProofFormat(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	_, err := k.SubmitEvidence(types.SlashEvidence{
+		EvidenceID: "evidence-invalid-proof-format",
+		Kind:       types.EvidenceKindObjective,
+		ProofHash:  "legacy-proof-format",
 	})
 	if err == nil {
 		t.Fatal("expected invalid evidence to fail")
@@ -235,7 +249,7 @@ func TestApplyPenaltyDefaultsAndEvidenceAdvance(t *testing.T) {
 	seed, err := k.SubmitEvidence(types.SlashEvidence{
 		EvidenceID: "evidence-penalty-1",
 		Kind:       types.EvidenceKindObjective,
-		ProofHash:  "proof-penalty-1",
+		ProofHash:  "sha256:proof-penalty-1",
 		Status:     chaintypes.ReconciliationPending,
 	})
 	if err != nil {
@@ -273,7 +287,7 @@ func TestApplyPenaltyIdempotentReplay(t *testing.T) {
 	evidence, err := k.SubmitEvidence(types.SlashEvidence{
 		EvidenceID: "evidence-penalty-2",
 		Kind:       types.EvidenceKindObjective,
-		ProofHash:  "proof-penalty-2",
+		ProofHash:  "sha256:proof-penalty-2",
 	})
 	if err != nil {
 		t.Fatalf("seed evidence failed: %v", err)
@@ -305,7 +319,7 @@ func TestApplyPenaltyConflict(t *testing.T) {
 	evidence, err := k.SubmitEvidence(types.SlashEvidence{
 		EvidenceID: "evidence-penalty-3",
 		Kind:       types.EvidenceKindObjective,
-		ProofHash:  "proof-penalty-3",
+		ProofHash:  "sha256:proof-penalty-3",
 	})
 	if err != nil {
 		t.Fatalf("seed evidence failed: %v", err)

@@ -137,7 +137,7 @@ func TestRunTDPNDSettlementHTTPAuthRequiredOnPOST(t *testing.T) {
 		t.Fatalf("expected health status 200 with auth enabled, got %d", healthResp.StatusCode)
 	}
 
-	payload := []byte(`{"EvidenceID":"ev-auth-1","SubjectID":"provider-auth-1","SessionID":"sess-auth-1","EvidenceRef":"proof-auth-1","ObservedAt":"2026-01-01T00:00:00Z"}`)
+	payload := []byte(`{"EvidenceID":"ev-auth-1","SubjectID":"provider-auth-1","SessionID":"sess-auth-1","EvidenceRef":"sha256:proof-auth-1","ObservedAt":"2026-01-01T00:00:00Z"}`)
 	unauthResp, err := http.Post(baseURL+"/x/vpnslashing/evidence", "application/json", bytes.NewReader(payload))
 	if err != nil {
 		t.Fatalf("unauth post failed: %v", err)
@@ -160,6 +160,70 @@ func TestRunTDPNDSettlementHTTPAuthRequiredOnPOST(t *testing.T) {
 	_ = authResp.Body.Close()
 	if authResp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 for authenticated POST, got %d", authResp.StatusCode)
+	}
+
+	cancel()
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("expected clean shutdown, got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for runtime shutdown")
+	}
+}
+
+func TestRunTDPNDSettlementHTTPSlashEvidenceRejectsInvalidObjectiveRef(t *testing.T) {
+	httpListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen http: %v", err)
+	}
+	defer httpListener.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runDone := make(chan error, 1)
+	go func() {
+		runDone <- runTDPND(
+			ctx,
+			[]string{"--settlement-http-listen", "settlement-invalid-evidence-test"},
+			nil,
+			func() chainScaffold { return app.NewChainScaffold() },
+			runtimeDeps{
+				Listen: func(_, _ string) (net.Listener, error) {
+					return nil, errors.New("grpc listener should not be used")
+				},
+				ListenHTTP: func(_, address string) (net.Listener, error) {
+					if address != "settlement-invalid-evidence-test" {
+						return nil, errors.New("unexpected settlement listen address")
+					}
+					return httpListener, nil
+				},
+				NewGRPCServer: func(opts ...grpc.ServerOption) grpcRuntimeServer {
+					return grpc.NewServer(opts...)
+				},
+			},
+		)
+	}()
+
+	baseURL := "http://" + httpListener.Addr().String()
+	waitForHTTPReady(t, baseURL+"/health")
+
+	status, payload := doJSONRequest(
+		t,
+		http.MethodPost,
+		baseURL+"/x/vpnslashing/evidence",
+		`{"EvidenceID":"ev-invalid-ref-1","SubjectID":"provider-invalid-ref-1","SessionID":"sess-invalid-ref-1","ViolationType":"double-sign","EvidenceRef":"proof-invalid-ref-1","ObservedAt":"2026-01-01T00:00:00Z"}`,
+		nil,
+	)
+	if status != http.StatusBadRequest {
+		t.Fatalf("expected invalid evidence_ref to return 400, got %d payload=%v", status, payload)
+	}
+
+	errorText, _ := payload["error"].(string)
+	if !strings.Contains(errorText, "proof hash must use objective format") {
+		t.Fatalf("expected invalid format error, got payload=%v", payload)
 	}
 
 	cancel()
@@ -228,7 +292,7 @@ func TestRunTDPNDSettlementHTTPHappyPathPerEndpoint(t *testing.T) {
 		},
 		{
 			path: "/x/vpnslashing/evidence",
-			body: `{"EvidenceID":"ev-http-1","SubjectID":"provider-http-1","SessionID":"sess-http-1","ViolationType":"objective","EvidenceRef":"proof-http-1","ObservedAt":"2026-01-01T00:00:00Z"}`,
+			body: `{"EvidenceID":"ev-http-1","SubjectID":"provider-http-1","SessionID":"sess-http-1","ViolationType":"objective","EvidenceRef":"sha256:proof-http-1","ObservedAt":"2026-01-01T00:00:00Z"}`,
 		},
 	}
 
@@ -311,7 +375,7 @@ func TestRunTDPNDSettlementHTTPQueryHappyPathAndLists(t *testing.T) {
 		},
 		{
 			path: "/x/vpnslashing/evidence",
-			body: `{"EvidenceID":"ev-query-1","SubjectID":"provider-query-1","SessionID":"sess-query-1","ViolationType":"objective","EvidenceRef":"proof-query-1","ObservedAt":"2026-01-01T00:00:00Z"}`,
+			body: `{"EvidenceID":"ev-query-1","SubjectID":"provider-query-1","SessionID":"sess-query-1","ViolationType":"objective","EvidenceRef":"sha256:proof-query-1","ObservedAt":"2026-01-01T00:00:00Z"}`,
 		},
 	}
 
@@ -531,7 +595,7 @@ func TestRunTDPNDSettlementHTTPGETQueriesRemainOpenWithAuth(t *testing.T) {
 		},
 		{
 			path: "/x/vpnslashing/evidence",
-			body: `{"EvidenceID":"ev-auth-open-1","SubjectID":"provider-auth-open-1","SessionID":"sess-auth-open-1","ViolationType":"objective","EvidenceRef":"proof-auth-open-1","ObservedAt":"2026-01-01T00:00:00Z"}`,
+			body: `{"EvidenceID":"ev-auth-open-1","SubjectID":"provider-auth-open-1","SessionID":"sess-auth-open-1","ViolationType":"objective","EvidenceRef":"sha256:proof-auth-open-1","ObservedAt":"2026-01-01T00:00:00Z"}`,
 		},
 	}
 

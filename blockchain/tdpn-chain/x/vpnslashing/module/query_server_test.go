@@ -59,7 +59,7 @@ func TestQueryServerFound(t *testing.T) {
 	expectedEvidence := types.SlashEvidence{
 		EvidenceID: "evidence-1",
 		Kind:       types.EvidenceKindObjective,
-		ProofHash:  "proof-1",
+		ProofHash:  "sha256:proof-1",
 	}
 	expectedPenalty := types.PenaltyDecision{
 		PenaltyID:       "penalty-1",
@@ -95,12 +95,12 @@ func TestQueryServerListNonEmpty(t *testing.T) {
 	k.UpsertEvidence(types.SlashEvidence{
 		EvidenceID: "evidence-b",
 		Kind:       types.EvidenceKindObjective,
-		ProofHash:  "proof-b",
+		ProofHash:  "sha256:proof-b",
 	})
 	k.UpsertEvidence(types.SlashEvidence{
 		EvidenceID: "evidence-a",
 		Kind:       types.EvidenceKindObjective,
-		ProofHash:  "proof-a",
+		ProofHash:  "sha256:proof-a",
 	})
 	k.UpsertPenalty(types.PenaltyDecision{
 		PenaltyID:       "penalty-b",

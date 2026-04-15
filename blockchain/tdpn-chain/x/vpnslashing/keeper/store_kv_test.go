@@ -18,7 +18,7 @@ func TestKVStoreUpsertGetList(t *testing.T) {
 		SessionID:  "sess-1",
 		ProviderID: "provider-1",
 		Kind:       types.EvidenceKindObjective,
-		ProofHash:  "proof-1",
+		ProofHash:  "sha256:proof-1",
 		Status:     chaintypes.ReconciliationPending,
 	}
 	store.UpsertEvidence(evidence)

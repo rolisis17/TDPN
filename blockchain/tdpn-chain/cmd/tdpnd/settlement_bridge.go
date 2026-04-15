@@ -647,18 +647,13 @@ func (h *settlementBridgeHandler) handleSlashEvidence(w http.ResponseWriter, r *
 		return
 	}
 
-	proofHash := strings.TrimSpace(payload.EvidenceRef)
-	if proofHash == "" {
-		proofHash = strings.TrimSpace(payload.ViolationType)
-	}
-
 	resp, err := h.scaffold.SlashingMsgServer().SubmitEvidence(r.Context(), app.SlashingSubmitEvidenceRequest{
 		Record: slashingtypes.SlashEvidence{
 			EvidenceID:      payload.EvidenceID,
 			SessionID:       payload.SessionID,
 			ProviderID:      payload.SubjectID,
 			Kind:            slashingtypes.EvidenceKindObjective,
-			ProofHash:       proofHash,
+			ProofHash:       strings.TrimSpace(payload.EvidenceRef),
 			SubmittedAtUnix: unixOrZero(payload.ObservedAt),
 			Status:          mapReconciliationStatus(payload.Status, chaintypes.ReconciliationSubmitted),
 		},

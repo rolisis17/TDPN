@@ -2,6 +2,7 @@ package types
 
 import (
 	"errors"
+	"strings"
 
 	chaintypes "github.com/tdpn/tdpn-chain/types"
 )
@@ -42,6 +43,9 @@ func (e SlashEvidence) ValidateBasic() error {
 	if e.ProofHash == "" {
 		return errors.New("proof hash is required")
 	}
+	if !isObjectiveProofFormat(e.ProofHash) {
+		return errors.New("proof hash must use objective format (sha256:<value> or obj://<value>)")
+	}
 	return nil
 }
 
@@ -56,4 +60,19 @@ func (d PenaltyDecision) ValidateBasic() error {
 		return errors.New("slash basis points cannot exceed 10000")
 	}
 	return nil
+}
+
+func isObjectiveProofFormat(proof string) bool {
+	const (
+		sha256Prefix = "sha256:"
+		objectPrefix = "obj://"
+	)
+
+	if strings.HasPrefix(proof, sha256Prefix) {
+		return strings.TrimSpace(strings.TrimPrefix(proof, sha256Prefix)) != ""
+	}
+	if strings.HasPrefix(proof, objectPrefix) {
+		return strings.TrimSpace(strings.TrimPrefix(proof, objectPrefix)) != ""
+	}
+	return false
 }
