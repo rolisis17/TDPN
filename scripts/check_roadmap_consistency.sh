@@ -25,6 +25,8 @@ phase5_handoff_check_integration_script="scripts/integration_phase5_settlement_l
 phase5_handoff_run_integration_script="scripts/integration_phase5_settlement_layer_handoff_run.sh"
 phase5_summary_report_script="scripts/phase5_settlement_layer_summary_report.sh"
 phase5_summary_report_integration_script="scripts/integration_phase5_settlement_layer_summary_report.sh"
+ci_local_script="scripts/ci_local.sh"
+easy_node_blockchain_summary_reports_integration_script="scripts/integration_easy_node_blockchain_summary_reports.sh"
 phase6_ci_script="scripts/ci_phase6_cosmos_l1_build_testnet.sh"
 phase6_integration_script="scripts/integration_ci_phase6_cosmos_l1_build_testnet.sh"
 phase6_contracts_ci_script="scripts/ci_phase6_cosmos_l1_contracts.sh"
@@ -93,7 +95,7 @@ check_confirmation_interface_wording() {
   fi
 }
 
-for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$chain_readme" "$settlement_mapping_doc" "$blockchain_sponsor_quickstart_doc" "$phase5_ci_script" "$phase5_integration_script" "$phase5_check_script" "$phase5_run_script" "$phase5_handoff_check_script" "$phase5_handoff_run_script" "$phase5_check_integration_script" "$phase5_run_integration_script" "$phase5_handoff_check_integration_script" "$phase5_handoff_run_integration_script" "$phase5_summary_report_script" "$phase5_summary_report_integration_script" "$phase6_ci_script" "$phase6_integration_script" "$phase6_contracts_ci_script" "$phase6_contracts_integration_script" "$phase6_contracts_live_smoke_script" "$phase6_module_coverage_floor_script" "$phase6_keeper_coverage_floor_script" "$phase6_check_script" "$phase6_run_script" "$phase6_check_integration_script" "$phase6_run_integration_script" "$phase6_suite_script" "$phase6_suite_integration_script" "$phase6_handoff_check_script" "$phase6_handoff_run_script" "$phase6_handoff_check_integration_script" "$phase6_handoff_run_integration_script" "$phase6_summary_report_script" "$phase6_summary_report_integration_script"; do
+for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$chain_readme" "$settlement_mapping_doc" "$blockchain_sponsor_quickstart_doc" "$phase5_ci_script" "$phase5_integration_script" "$phase5_check_script" "$phase5_run_script" "$phase5_handoff_check_script" "$phase5_handoff_run_script" "$phase5_check_integration_script" "$phase5_run_integration_script" "$phase5_handoff_check_integration_script" "$phase5_handoff_run_integration_script" "$phase5_summary_report_script" "$phase5_summary_report_integration_script" "$ci_local_script" "$easy_node_blockchain_summary_reports_integration_script" "$phase6_ci_script" "$phase6_integration_script" "$phase6_contracts_ci_script" "$phase6_contracts_integration_script" "$phase6_contracts_live_smoke_script" "$phase6_module_coverage_floor_script" "$phase6_keeper_coverage_floor_script" "$phase6_check_script" "$phase6_run_script" "$phase6_check_integration_script" "$phase6_run_integration_script" "$phase6_suite_script" "$phase6_suite_integration_script" "$phase6_handoff_check_script" "$phase6_handoff_run_script" "$phase6_handoff_check_integration_script" "$phase6_handoff_run_integration_script" "$phase6_summary_report_script" "$phase6_summary_report_integration_script"; do
   if [[ ! -f "$f" ]]; then
     echo "missing required file: $f"
     exit 1
@@ -1319,6 +1321,34 @@ if ! rg -Fq "fallback discovery path" "$phase5_summary_report_integration_script
 fi
 if ! rg -Fq "[phase5-settlement-summary-report] pass path (canonical equals summary path)" "$phase5_summary_report_integration_script"; then
   echo "phase5 summary report integration script must include same-path canonical contract coverage marker"
+  exit 1
+fi
+if ! rg -Fq "scripts/integration_phase5_settlement_layer_summary_report.sh" "$ci_local_script"; then
+  echo "ci_local.sh must run scripts/integration_phase5_settlement_layer_summary_report.sh"
+  exit 1
+fi
+if ! rg -Fq "scripts/integration_phase6_cosmos_l1_summary_report.sh" "$ci_local_script"; then
+  echo "ci_local.sh must run scripts/integration_phase6_cosmos_l1_summary_report.sh"
+  exit 1
+fi
+if ! rg -Fq "scripts/integration_easy_node_blockchain_summary_reports.sh" "$ci_local_script"; then
+  echo "ci_local.sh must run scripts/integration_easy_node_blockchain_summary_reports.sh"
+  exit 1
+fi
+if ! rg -Fq "phase5-settlement-layer-summary-report" "$easy_node_blockchain_summary_reports_integration_script"; then
+  echo "easy-node summary-report integration must validate phase5 wrapper command wiring"
+  exit 1
+fi
+if ! rg -Fq "phase6-cosmos-l1-summary-report" "$easy_node_blockchain_summary_reports_integration_script"; then
+  echo "easy-node summary-report integration must validate phase6 wrapper command wiring"
+  exit 1
+fi
+if ! rg -Fq -- "--summary-json" "$easy_node_blockchain_summary_reports_integration_script"; then
+  echo "easy-node summary-report integration must validate summary-json forwarding"
+  exit 1
+fi
+if ! rg -Fq -- "--print-summary-json" "$easy_node_blockchain_summary_reports_integration_script"; then
+  echo "easy-node summary-report integration must validate print-summary-json forwarding"
   exit 1
 fi
 for phase5_canonical_summary in \

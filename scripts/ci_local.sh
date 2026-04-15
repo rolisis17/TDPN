@@ -267,6 +267,15 @@ echo "[ci] easy-node self-update integration"
 echo "[ci] phase-0 gate"
 ./scripts/ci_phase0.sh
 
+echo "[ci] phase5 settlement summary report integration"
+./scripts/integration_phase5_settlement_layer_summary_report.sh
+
+echo "[ci] phase6 cosmos l1 summary report integration"
+./scripts/integration_phase6_cosmos_l1_summary_report.sh
+
+echo "[ci] easy-node blockchain summary-report wrapper integration"
+./scripts/integration_easy_node_blockchain_summary_reports.sh
+
 echo "[ci] local API config-v1 defaults integration"
 ./scripts/integration_local_api_config_defaults.sh
 
