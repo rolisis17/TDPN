@@ -136,5 +136,10 @@ After successful token issuance, `consumed_at` should be set:
 
 - `401 unauthorized sponsor`: missing/invalid `X-Sponsor-Token`.
 - `400` validation errors: malformed request fields (`subject`, `reservation_id`, `amount_micros`, etc.).
-- `402 payment required` on token issuance: missing/invalid/expired/insufficient sponsor payment proof.
+- `402 payment required` on `POST /v1/sponsor/token`:
+  - missing `payment_proof`,
+  - unknown `reservation_id`,
+  - `payment_proof` mismatch (`sponsor_id`, `subject`, or `session_id` does not match the reserved record),
+  - expired reservation.
+- Duplicate-proof replay is idempotent in the current runtime semantics: reusing the same valid proof returns `200` (token issuance succeeds again) instead of failing.
 - `404` on status: unknown reservation id.

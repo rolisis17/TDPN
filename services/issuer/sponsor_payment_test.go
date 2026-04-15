@@ -40,6 +40,140 @@ func TestHandleIssueTokenRequiresPaymentProofWhenEnabled(t *testing.T) {
 	}
 }
 
+func TestIssueEndpointsValidateProvidedPaymentProofWhenGloballyOptional(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		call func(*Service, *httptest.ResponseRecorder, *http.Request)
+	}{
+		{
+			name: "client token endpoint",
+			path: "/v1/token",
+			call: func(s *Service, rr *httptest.ResponseRecorder, req *http.Request) {
+				s.handleIssueToken(rr, req)
+			},
+		},
+		{
+			name: "sponsor token endpoint",
+			path: "/v1/sponsor/token",
+			call: func(s *Service, rr *httptest.ResponseRecorder, req *http.Request) {
+				s.handleSponsorIssueToken(rr, req)
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newSponsorTestService(t)
+			s.requirePaymentProof = false
+			reqBody, _ := json.Marshal(proto.IssueTokenRequest{
+				Tier:      1,
+				Subject:   "client-1",
+				TokenType: crypto.TokenTypeClientAccess,
+				PopPubKey: sponsorTestPopPubKey(t),
+				PaymentProof: &proto.SponsorPaymentProof{
+					ReservationID: "unknown-" + strings.ReplaceAll(tc.path, "/", "-"),
+					SponsorID:     "sponsor-1",
+					Subject:       "client-1",
+					SessionID:     "sess-1",
+				},
+			})
+			req := httptest.NewRequest(http.MethodPost, tc.path, bytes.NewReader(reqBody))
+			if tc.path == "/v1/sponsor/token" {
+				req.Header.Set("X-Sponsor-Token", "sponsor-secret-token")
+			}
+			rr := httptest.NewRecorder()
+			tc.call(s, rr, req)
+
+			if rr.Code != http.StatusPaymentRequired {
+				t.Fatalf("expected status %d, got %d body=%s", http.StatusPaymentRequired, rr.Code, rr.Body.String())
+			}
+			if !strings.Contains(rr.Body.String(), "payment proof invalid") {
+				t.Fatalf("expected payment proof invalid error, body=%s", rr.Body.String())
+			}
+		})
+	}
+}
+
+func TestIssueEndpointsPaymentProofEmptySubjectFallsBackToRequestSubject(t *testing.T) {
+	tests := []struct {
+		name          string
+		path          string
+		reservationID string
+		sessionID     string
+		call          func(*Service, *httptest.ResponseRecorder, *http.Request)
+	}{
+		{
+			name:          "client token endpoint",
+			path:          "/v1/token",
+			reservationID: "sres-empty-subject-token",
+			sessionID:     "sess-empty-subject-token",
+			call: func(s *Service, rr *httptest.ResponseRecorder, req *http.Request) {
+				s.handleIssueToken(rr, req)
+			},
+		},
+		{
+			name:          "sponsor token endpoint",
+			path:          "/v1/sponsor/token",
+			reservationID: "sres-empty-subject-sponsor",
+			sessionID:     "sess-empty-subject-sponsor",
+			call: func(s *Service, rr *httptest.ResponseRecorder, req *http.Request) {
+				s.handleSponsorIssueToken(rr, req)
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newSponsorTestService(t)
+			s.requirePaymentProof = false
+
+			const subjectID = "client-1"
+			_, err := s.settlementService().ReserveSponsorCredits(context.Background(), settlement.SponsorCreditReservation{
+				ReservationID: tc.reservationID,
+				SponsorID:     "sponsor-1",
+				SubjectID:     subjectID,
+				SessionID:     tc.sessionID,
+				AmountMicros:  1000,
+				ExpiresAt:     time.Now().UTC().Add(2 * time.Minute),
+			})
+			if err != nil {
+				t.Fatalf("ReserveSponsorCredits: %v", err)
+			}
+
+			reqBody, _ := json.Marshal(proto.IssueTokenRequest{
+				Tier:      1,
+				Subject:   subjectID,
+				TokenType: crypto.TokenTypeClientAccess,
+				PopPubKey: sponsorTestPopPubKey(t),
+				PaymentProof: &proto.SponsorPaymentProof{
+					ReservationID: tc.reservationID,
+					SponsorID:     "sponsor-1",
+					Subject:       "",
+					SessionID:     tc.sessionID,
+				},
+			})
+			req := httptest.NewRequest(http.MethodPost, tc.path, bytes.NewReader(reqBody))
+			if tc.path == "/v1/sponsor/token" {
+				req.Header.Set("X-Sponsor-Token", "sponsor-secret-token")
+			}
+			rr := httptest.NewRecorder()
+			tc.call(s, rr, req)
+
+			if rr.Code != http.StatusOK {
+				t.Fatalf("expected status %d, got %d body=%s", http.StatusOK, rr.Code, rr.Body.String())
+			}
+			var resp proto.IssueTokenResponse
+			if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("decode token response: %v", err)
+			}
+			if resp.Token == "" || resp.JTI == "" {
+				t.Fatalf("unexpected empty token response: %+v", resp)
+			}
+		})
+	}
+}
+
 func TestSponsorReserveAndIssueTokenFlow(t *testing.T) {
 	s := newSponsorTestService(t)
 

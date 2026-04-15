@@ -267,6 +267,18 @@ post_expect_status "${BASE_URL}/v1/sponsor/token" "${token_mismatched_proof_payl
 assert_response_contains "reservation sponsor mismatch" "mismatched sponsor token payment_proof"
 echo "[issuer-sponsor-live-smoke] payment-proof negative path invalid proof (mismatched sponsor)"
 
+unknown_reservation_id="sres-live-missing-${RANDOM}-$(date +%s)"
+token_unknown_reservation_payload="$(jq -n \
+  --arg subject "${SUBJECT_ID}" \
+  --arg pop_pub_key "${pop_pub_key}" \
+  --arg reservation_id "${unknown_reservation_id}" \
+  --arg sponsor_id "${SPONSOR_ID}" \
+  --arg session_id "${SESSION_ID}" \
+  '{tier:1,subject:$subject,token_type:"client_access",pop_pub_key:$pop_pub_key,payment_proof:{reservation_id:$reservation_id,sponsor_id:$sponsor_id,subject:$subject,session_id:$session_id}}')"
+post_expect_status "${BASE_URL}/v1/sponsor/token" "${token_unknown_reservation_payload}" "402" "${SPONSOR_TOKEN}"
+assert_response_contains "payment proof invalid: reservation not found:" "unknown reservation token payment_proof"
+echo "[issuer-sponsor-live-smoke] payment-proof negative path invalid proof (unknown reservation)"
+
 token_payload="$(jq -n \
   --arg subject "${SUBJECT_ID}" \
   --arg pop_pub_key "${pop_pub_key}" \
