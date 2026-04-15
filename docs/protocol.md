@@ -147,6 +147,14 @@ Serialization for MVP:
 - `GET /v1/revocations`
 - `GET /v1/metrics` (exit counters)
 
+Settlement lifecycle semantics (Cosmos control-plane):
+- Settlement/reward/sponsor/slash operation statuses use `pending|submitted|confirmed|failed`.
+- Initial control-plane writes are tracked as `pending`; fail-soft adapter errors keep operations deferred for reconcile replay.
+- Reconcile submission advances `pending -> submitted` when bridge/chain write acceptance is observed.
+- Reconcile query-by-id promotes `submitted -> confirmed` once corresponding records are observed on bridge/chain surfaces.
+- `failed` remains an explicit reconciliation state for operator visibility and controlled replay/remediation flows.
+- Phase5 settlement CI includes first-class `settlement_adapter_roundtrip` coverage (`scripts/integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh`).
+
 Revocation feed shape:
 ```json
 {

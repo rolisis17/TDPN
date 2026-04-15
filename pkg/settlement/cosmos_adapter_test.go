@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -298,6 +299,111 @@ func TestCosmosAdapterConfirmationQueriesReturnFalseOnNotFound(t *testing.T) {
 	}
 	if ok {
 		t.Fatalf("expected HasSessionSettlement=false for 404 query")
+	}
+}
+
+func TestCosmosAdapterConfirmationQueriesRejectEmptyIDs(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	adapter, err := NewCosmosAdapter(CosmosAdapterConfig{
+		Endpoint:    srv.URL,
+		QueueSize:   8,
+		MaxRetries:  1,
+		BaseBackoff: 5 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("NewCosmosAdapter: %v", err)
+	}
+	defer adapter.Close()
+
+	testCases := []struct {
+		name string
+		call func(context.Context, string) (bool, error)
+	}{
+		{name: "session_settlement", call: adapter.HasSessionSettlement},
+		{name: "reward_issue", call: adapter.HasRewardIssue},
+		{name: "sponsor_reservation", call: adapter.HasSponsorReservation},
+		{name: "slash_evidence", call: adapter.HasSlashEvidence},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ok, err := tc.call(context.Background(), " \t\n")
+			if err == nil {
+				t.Fatalf("expected validation error for empty id")
+			}
+			if ok {
+				t.Fatalf("expected false when validation fails")
+			}
+			if !strings.Contains(err.Error(), "required") {
+				t.Fatalf("expected required-id validation error, got %v", err)
+			}
+		})
+	}
+}
+
+func TestCosmosAdapterConfirmationQueriesReturnErrorOnNon404Status(t *testing.T) {
+	for _, statusCode := range []int{http.StatusBadRequest, http.StatusInternalServerError} {
+		t.Run(http.StatusText(statusCode), func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(statusCode)
+			}))
+			defer srv.Close()
+
+			adapter, err := NewCosmosAdapter(CosmosAdapterConfig{
+				Endpoint:    srv.URL,
+				QueueSize:   8,
+				MaxRetries:  1,
+				BaseBackoff: 5 * time.Millisecond,
+			})
+			if err != nil {
+				t.Fatalf("NewCosmosAdapter: %v", err)
+			}
+			defer adapter.Close()
+
+			testCases := []struct {
+				name string
+				call func(context.Context) (bool, error)
+			}{
+				{
+					name: "session_settlement",
+					call: func(ctx context.Context) (bool, error) {
+						return adapter.HasSessionSettlement(ctx, "set-1")
+					},
+				},
+				{
+					name: "reward_issue",
+					call: func(ctx context.Context) (bool, error) {
+						return adapter.HasRewardIssue(ctx, "rew-1")
+					},
+				},
+				{
+					name: "sponsor_reservation",
+					call: func(ctx context.Context) (bool, error) {
+						return adapter.HasSponsorReservation(ctx, "sres-1")
+					},
+				},
+				{
+					name: "slash_evidence",
+					call: func(ctx context.Context) (bool, error) {
+						return adapter.HasSlashEvidence(ctx, "ev-1")
+					},
+				},
+			}
+			for _, tc := range testCases {
+				t.Run(tc.name, func(t *testing.T) {
+					ok, err := tc.call(context.Background())
+					if err == nil {
+						t.Fatalf("expected error for non-404 status %d", statusCode)
+					}
+					if ok {
+						t.Fatalf("expected false when query fails")
+					}
+				})
+			}
+		})
 	}
 }
 

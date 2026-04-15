@@ -14,6 +14,40 @@ settlement_mapping_doc="blockchain/tdpn-chain/docs/settlement-bridge-mapping.md"
 phase5_ci_script="scripts/ci_phase5_settlement_layer.sh"
 phase5_integration_script="scripts/integration_ci_phase5_settlement_layer.sh"
 
+check_confirmation_lifecycle_wording() {
+  local file_path="$1"
+  local label="$2"
+
+  if rg -iq "submitted.*(->|to).*confirmed|confirmed.*(from|<-).*submitted" "$file_path"; then
+    return 0
+  fi
+
+  # Fallback semantic guard for wording variations split across lines/sentences.
+  if rg -iq "submitted" "$file_path" \
+    && rg -iq "confirmed" "$file_path" \
+    && rg -iq "confirmation lifecycle|reconcil|promot" "$file_path"
+  then
+    return 0
+  fi
+
+  echo "$label must document submitted->confirmed confirmation lifecycle progression"
+  exit 1
+}
+
+check_adapter_roundtrip_wording() {
+  local file_path="$1"
+  local label="$2"
+
+  if ! rg -Fq "settlement_adapter_roundtrip" "$file_path"; then
+    echo "$label must document settlement_adapter_roundtrip phase5 stage"
+    exit 1
+  fi
+  if ! rg -Fq "integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh" "$file_path"; then
+    echo "$label must document adapter roundtrip integration script"
+    exit 1
+  fi
+}
+
 for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$chain_readme" "$settlement_mapping_doc" "$phase5_ci_script" "$phase5_integration_script"; do
   if [[ ! -f "$f" ]]; then
     echo "missing required file: $f"
@@ -227,6 +261,8 @@ if ! rg -Fq "keeper KV-adapter seam for Cosmos SDK KV integration" "$chain_readm
   echo "chain README must document keeper KV-adapter seam posture"
   exit 1
 fi
+check_confirmation_lifecycle_wording "$chain_readme" "chain README"
+check_adapter_roundtrip_wording "$chain_readme" "chain README"
 
 if ! rg -Fq "GET /x/vpnbilling/reservations[/{reservation_id}]" "$settlement_mapping_doc"; then
   echo "settlement bridge mapping must document list/by-id GET query mapping"
@@ -256,6 +292,8 @@ if ! rg -Fq "KV-adapter seam for Cosmos SDK integration" "$settlement_mapping_do
   echo "settlement bridge mapping must document keeper KV-adapter seam posture"
   exit 1
 fi
+check_confirmation_lifecycle_wording "$settlement_mapping_doc" "settlement bridge mapping"
+check_adapter_roundtrip_wording "$settlement_mapping_doc" "settlement bridge mapping"
 
 for phase5_script in "$phase5_ci_script" "$phase5_integration_script"; do
   if rg -qi "phase4 windows full parity" "$phase5_script"; then

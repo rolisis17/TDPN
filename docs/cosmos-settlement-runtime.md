@@ -106,11 +106,12 @@ Exit settlement status endpoint:
 
 ## Reconciliation Behavior
 
+- Settlement/reward/sponsor/slash operation statuses use `pending|submitted|confirmed|failed`.
 - Deferred adapter operations are tracked per idempotency key (`pending` lifecycle).
 - Periodic reconcile loops in issuer/exit call settlement `Reconcile(...)`.
 - Successful replay marks settlement/reward/sponsor/slash operations `submitted` and clears deferred backlog.
 - When adapter query surfaces observe by-id bridge records, reconcile promotes settlement/reward/sponsor/slash operations from `submitted` to `confirmed`.
-- Failures remain deferred and are retried in future cycles.
+- `failed` remains an explicit reconciliation state for operator visibility, with replay/remediation driven by later reconcile cycles.
 - Cosmos adapter retry policy:
   - retryable: transport/network errors, HTTP `408`, `425`, `429`, and `5xx`.
   - non-retryable: other HTTP `4xx` validation/auth-style failures (no retry loop).
