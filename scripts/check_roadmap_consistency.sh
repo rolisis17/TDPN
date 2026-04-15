@@ -784,17 +784,45 @@ do
     exit 1
   fi
 done
+for live_smoke_unauth_post_route in \
+  "/x/vpnbilling/settlements" \
+  "/x/vpnrewards/issues" \
+  "/x/vpnsponsor/reservations" \
+  "/x/vpnslashing/evidence" \
+  "/x/vpnvalidator/eligibilities" \
+  "/x/vpnvalidator/status-records" \
+  "/x/vpngovernance/policies" \
+  "/x/vpngovernance/decisions" \
+  "/x/vpngovernance/audit-actions"
+do
+  if ! rg -F "post_expect_status \"\${BASE_URL}${live_smoke_unauth_post_route}\"" "$phase6_settlement_bridge_live_smoke_script" | rg -Fq '"401"'; then
+    echo "settlement bridge live-smoke script must explicitly validate unauth POST auth-block coverage marker: $live_smoke_unauth_post_route"
+    exit 1
+  fi
+done
 if ! rg -Fq "post_expect_status \"\${BASE_URL}/x/vpnvalidator/eligibilities\"" "$phase6_settlement_bridge_live_smoke_script" \
   || ! rg -Fq "post_expect_status \"\${BASE_URL}/x/vpngovernance/policies\"" "$phase6_settlement_bridge_live_smoke_script"; then
   echo "settlement bridge live-smoke script must explicitly validate validator and governance POST auth contract"
   exit 1
 fi
 for live_smoke_query_marker in \
+  "/x/vpnbilling/reservations/bill-res-live-1" \
+  "/x/vpnrewards/accruals/reward-live-1" \
+  "/x/vpnrewards/distributions/dist:reward-live-1" \
+  "/x/vpnsponsor/authorizations/auth:res-live-1" \
+  "/x/vpnsponsor/delegations/res-live-1" \
+  "/x/vpnslashing/evidence/ev-live-1" \
   "/x/vpnvalidator/eligibilities/val-live-1" \
   "/x/vpnvalidator/status-records/status-live-1" \
   "/x/vpngovernance/policies/policy-live-1" \
   "/x/vpngovernance/decisions/decision-live-1" \
   "/x/vpngovernance/audit-actions/action-live-1" \
+  "/x/vpnbilling/reservations\" \"200\"" \
+  "/x/vpnrewards/accruals\" \"200\"" \
+  "/x/vpnrewards/distributions\" \"200\"" \
+  "/x/vpnsponsor/authorizations\" \"200\"" \
+  "/x/vpnsponsor/delegations\" \"200\"" \
+  "/x/vpnslashing/evidence\" \"200\"" \
   "/x/vpnvalidator/eligibilities\" \"200\"" \
   "/x/vpnvalidator/status-records\" \"200\"" \
   "/x/vpngovernance/policies\" \"200\"" \
@@ -802,7 +830,7 @@ for live_smoke_query_marker in \
   "/x/vpngovernance/audit-actions\" \"200\""
 do
   if ! rg -Fq "$live_smoke_query_marker" "$phase6_settlement_bridge_live_smoke_script"; then
-    echo "settlement bridge live-smoke script must explicitly validate validator/governance GET query/list contract marker: $live_smoke_query_marker"
+    echo "settlement bridge live-smoke script must explicitly validate GET query/list contract marker: $live_smoke_query_marker"
     exit 1
   fi
 done

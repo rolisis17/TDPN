@@ -224,7 +224,7 @@ Current implementation posture:
 - phase6 operator summary helper `scripts/phase6_cosmos_l1_summary_report.sh` aggregates CI/contracts/suite summary artifacts into compact operator lines plus normalized JSON output, with integration coverage from `scripts/integration_phase6_cosmos_l1_summary_report.sh`.
 - phase6 build/testnet/contracts/check/run/handoff/suite wrappers now emit canonical summary artifacts under `.easy-node-logs/phase6_cosmos_l1_*_summary.json` in addition to per-run reports.
 - phase6 summary helper fallback discovery now includes CI/contracts/suite timestamped summary directories when canonical/default summary files are absent.
-- settlement bridge live process smoke now validates auth enforcement, write acceptance, and validator/governance GET by-id plus list query behavior in auth-enabled runtime mode.
+- settlement bridge live process smoke now validates auth enforcement, write acceptance, and billing/rewards/sponsor/slashing/validator/governance GET by-id plus list query behavior in auth-enabled runtime mode.
 - easy-node exposes blockchain summary wrappers:
   - `./scripts/easy_node.sh phase5-settlement-layer-summary-report`
   - `./scripts/easy_node.sh phase6-cosmos-l1-summary-report`

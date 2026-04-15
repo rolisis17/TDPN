@@ -114,7 +114,7 @@ Exit gate:
 - Phase 6 build/testnet/contracts/check/run/handoff/suite wrappers now emit canonical summary artifacts under `.easy-node-logs/phase6_cosmos_l1_*_summary.json` in addition to per-run reports.
 - Phase 6 summary helper fallback discovery now includes CI/contracts/suite timestamped summary directories when canonical/default summary files are absent.
 - Settlement confirmation lifecycle posture is canonicalized as `pending` -> `submitted` -> `confirmed` with explicit `failed` records retained for replay/reconciliation.
-- Settlement bridge live process smoke now validates auth enforcement, write acceptance, and validator/governance GET by-id plus list query behavior in auth-enabled runtime mode.
+- Settlement bridge live process smoke now validates auth enforcement, write acceptance, and billing/rewards/sponsor/slashing/validator/governance GET by-id plus list query behavior in auth-enabled runtime mode.
 
 ## Non-Negotiables
 

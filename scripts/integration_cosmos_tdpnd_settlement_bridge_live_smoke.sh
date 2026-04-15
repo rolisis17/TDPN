@@ -142,14 +142,20 @@ TDPND_PID=$!
 BASE_URL="http://127.0.0.1:${PORT}"
 wait_for_health_ready "${BASE_URL}/health"
 
+post_expect_status "${BASE_URL}/x/vpnbilling/settlements" '{"SettlementID":"set-unauth-1","ReservationID":"bill-res-unauth-1","SessionID":"sess-unauth-1","SubjectID":"subject-unauth-1","ChargedMicros":250,"Currency":"TDPNC","SettledAt":"2026-01-01T00:00:00Z"}' "401"
+post_expect_status "${BASE_URL}/x/vpnrewards/issues" '{"RewardID":"reward-unauth-1","ProviderSubjectID":"provider-unauth-1","SessionID":"sess-unauth-1","RewardMicros":100,"Currency":"TDPNC","IssuedAt":"2026-01-01T00:00:00Z"}' "401"
+post_expect_status "${BASE_URL}/x/vpnsponsor/reservations" '{"ReservationID":"res-unauth-1","SponsorID":"sponsor-unauth-1","SubjectID":"app-unauth-1","SessionID":"sess-unauth-1","AmountMicros":500,"Currency":"TDPNC","CreatedAt":"2026-01-01T00:00:00Z","ExpiresAt":"2026-12-31T00:00:00Z"}' "401"
 post_expect_status "${BASE_URL}/x/vpnslashing/evidence" '{"EvidenceID":"ev-unauth-1","SubjectID":"provider-1","SessionID":"sess-1","ViolationType":"double-sign","EvidenceRef":"sha256:abc","ObservedAt":"2026-01-01T00:00:00Z"}' "401"
 post_expect_status "${BASE_URL}/x/vpnvalidator/eligibilities" '{"ValidatorID":"val-unauth-1","OperatorAddress":"op-unauth-1","Eligible":true,"PolicyReason":"auth smoke","UpdatedAt":"2026-01-01T00:00:00Z","Status":"submitted"}' "401"
+post_expect_status "${BASE_URL}/x/vpnvalidator/status-records" '{"StatusID":"status-unauth-1","ValidatorID":"val-unauth-1","ConsensusAddress":"cons-unauth-1","LifecycleStatus":"active","EvidenceHeight":5,"EvidenceRef":"sha256:status-unauth-1","RecordedAt":"2026-01-01T00:00:00Z","Status":"submitted"}' "401"
 post_expect_status "${BASE_URL}/x/vpngovernance/policies" '{"PolicyID":"policy-unauth-1","Title":"unauth-policy","Description":"auth smoke policy","Version":1,"ActivatedAt":"2026-01-01T00:00:00Z","Status":"submitted"}' "401"
+post_expect_status "${BASE_URL}/x/vpngovernance/decisions" '{"DecisionID":"decision-unauth-1","PolicyID":"policy-unauth-1","ProposalID":"proposal-unauth-1","Outcome":"approve","Decider":"bootstrap-multisig","Reason":"auth smoke decision","DecidedAt":"2026-01-01T00:00:00Z","Status":"submitted"}' "401"
+post_expect_status "${BASE_URL}/x/vpngovernance/audit-actions" '{"ActionID":"action-unauth-1","Action":"policy.unauth","Actor":"bootstrap-multisig","Reason":"auth smoke audit","EvidencePointer":"obj://audit/action-unauth-1","Timestamp":"2026-01-01T00:00:00Z"}' "401"
 
 post_expect_status "${BASE_URL}/x/vpnslashing/evidence" '{"EvidenceID":"ev-invalid-ref-1","SubjectID":"provider-1","SessionID":"sess-1","ViolationType":"double-sign","EvidenceRef":"proof-invalid-ref-1","ObservedAt":"2026-01-01T00:00:00Z"}' "400" "${TOKEN}"
 grep -q 'objective format' "${RESP_FILE}"
 
-post_expect_status "${BASE_URL}/x/vpnbilling/settlements" '{"SettlementID":"set-live-1","SessionID":"sess-live-1","SubjectID":"subject-live-1","ChargedMicros":250,"Currency":"TDPNC","SettledAt":"2026-01-01T00:00:00Z"}' "200" "${TOKEN}"
+post_expect_status "${BASE_URL}/x/vpnbilling/settlements" '{"SettlementID":"set-live-1","ReservationID":"bill-res-live-1","SessionID":"sess-live-1","SubjectID":"subject-live-1","ChargedMicros":250,"Currency":"TDPNC","SettledAt":"2026-01-01T00:00:00Z"}' "200" "${TOKEN}"
 grep -q '"ok"[[:space:]]*:[[:space:]]*true' "${RESP_FILE}"
 
 post_expect_status "${BASE_URL}/x/vpnrewards/issues" '{"RewardID":"reward-live-1","ProviderSubjectID":"provider-live-1","SessionID":"sess-live-1","RewardMicros":100,"Currency":"TDPNC","IssuedAt":"2026-01-01T00:00:00Z"}' "200" "${TOKEN}"
@@ -176,10 +182,34 @@ grep -q '"ok"[[:space:]]*:[[:space:]]*true' "${RESP_FILE}"
 post_expect_status "${BASE_URL}/x/vpngovernance/audit-actions" '{"ActionID":"action-live-1","Action":"policy.bootstrap","Actor":"bootstrap-multisig","Reason":"smoke audit","EvidencePointer":"obj://audit/action-live-1","Timestamp":"2026-01-01T00:00:03Z"}' "200" "${TOKEN}"
 grep -q '"ok"[[:space:]]*:[[:space:]]*true' "${RESP_FILE}"
 
-# Query-by-id coverage for validator/governance plus an existing module path.
+# Query-by-id coverage for billing/rewards/sponsor/slashing/validator/governance.
 get_expect_status "${BASE_URL}/x/vpnbilling/settlements/set-live-1" "200"
 grep -q '"settlement"' "${RESP_FILE}"
 grep -q '"SettlementID"[[:space:]]*:[[:space:]]*"set-live-1"' "${RESP_FILE}"
+
+get_expect_status "${BASE_URL}/x/vpnbilling/reservations/bill-res-live-1" "200"
+grep -q '"reservation"' "${RESP_FILE}"
+grep -q '"ReservationID"[[:space:]]*:[[:space:]]*"bill-res-live-1"' "${RESP_FILE}"
+
+get_expect_status "${BASE_URL}/x/vpnrewards/accruals/reward-live-1" "200"
+grep -q '"accrual"' "${RESP_FILE}"
+grep -q '"AccrualID"[[:space:]]*:[[:space:]]*"reward-live-1"' "${RESP_FILE}"
+
+get_expect_status "${BASE_URL}/x/vpnrewards/distributions/dist:reward-live-1" "200"
+grep -q '"distribution"' "${RESP_FILE}"
+grep -q '"DistributionID"[[:space:]]*:[[:space:]]*"dist:reward-live-1"' "${RESP_FILE}"
+
+get_expect_status "${BASE_URL}/x/vpnsponsor/authorizations/auth:res-live-1" "200"
+grep -q '"authorization"' "${RESP_FILE}"
+grep -q '"AuthorizationID"[[:space:]]*:[[:space:]]*"auth:res-live-1"' "${RESP_FILE}"
+
+get_expect_status "${BASE_URL}/x/vpnsponsor/delegations/res-live-1" "200"
+grep -q '"delegation"' "${RESP_FILE}"
+grep -q '"ReservationID"[[:space:]]*:[[:space:]]*"res-live-1"' "${RESP_FILE}"
+
+get_expect_status "${BASE_URL}/x/vpnslashing/evidence/ev-live-1" "200"
+grep -q '"evidence"' "${RESP_FILE}"
+grep -q '"EvidenceID"[[:space:]]*:[[:space:]]*"ev-live-1"' "${RESP_FILE}"
 
 get_expect_status "${BASE_URL}/x/vpnvalidator/eligibilities/val-live-1" "200"
 grep -q '"eligibility"' "${RESP_FILE}"
@@ -201,10 +231,34 @@ get_expect_status "${BASE_URL}/x/vpngovernance/audit-actions/action-live-1" "200
 grep -q '"action"' "${RESP_FILE}"
 grep -q '"ActionID"[[:space:]]*:[[:space:]]*"action-live-1"' "${RESP_FILE}"
 
-# List coverage for validator/governance plus an existing module path.
+# List coverage for billing/rewards/sponsor/slashing/validator/governance.
 get_expect_status "${BASE_URL}/x/vpnbilling/settlements" "200"
 grep -q '"settlements"' "${RESP_FILE}"
 grep -q '"SettlementID"[[:space:]]*:[[:space:]]*"set-live-1"' "${RESP_FILE}"
+
+get_expect_status "${BASE_URL}/x/vpnbilling/reservations" "200"
+grep -q '"reservations"' "${RESP_FILE}"
+grep -q '"ReservationID"[[:space:]]*:[[:space:]]*"bill-res-live-1"' "${RESP_FILE}"
+
+get_expect_status "${BASE_URL}/x/vpnrewards/accruals" "200"
+grep -q '"accruals"' "${RESP_FILE}"
+grep -q '"AccrualID"[[:space:]]*:[[:space:]]*"reward-live-1"' "${RESP_FILE}"
+
+get_expect_status "${BASE_URL}/x/vpnrewards/distributions" "200"
+grep -q '"distributions"' "${RESP_FILE}"
+grep -q '"DistributionID"[[:space:]]*:[[:space:]]*"dist:reward-live-1"' "${RESP_FILE}"
+
+get_expect_status "${BASE_URL}/x/vpnsponsor/authorizations" "200"
+grep -q '"authorizations"' "${RESP_FILE}"
+grep -q '"AuthorizationID"[[:space:]]*:[[:space:]]*"auth:res-live-1"' "${RESP_FILE}"
+
+get_expect_status "${BASE_URL}/x/vpnsponsor/delegations" "200"
+grep -q '"delegations"' "${RESP_FILE}"
+grep -q '"ReservationID"[[:space:]]*:[[:space:]]*"res-live-1"' "${RESP_FILE}"
+
+get_expect_status "${BASE_URL}/x/vpnslashing/evidence" "200"
+grep -q '"evidence"' "${RESP_FILE}"
+grep -q '"EvidenceID"[[:space:]]*:[[:space:]]*"ev-live-1"' "${RESP_FILE}"
 
 get_expect_status "${BASE_URL}/x/vpnvalidator/eligibilities" "200"
 grep -q '"eligibilities"' "${RESP_FILE}"
