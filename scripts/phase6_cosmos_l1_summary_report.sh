@@ -88,6 +88,51 @@ display_stage_name() {
   esac
 }
 
+discover_latest_stage_summary() {
+  local base_dir="$1"
+  local dir_prefix="$2"
+  local summary_filename="$3"
+  local dir_name_re
+  local dir
+
+  dir_name_re="^${dir_prefix}[0-9]{8}_[0-9]{6}$"
+
+  # Prefer deterministic timestamp-name ordering when matching directories exist.
+  local -a timestamp_candidates=()
+  shopt -s nullglob
+  for dir in "$base_dir"/"${dir_prefix}"*; do
+    [[ -d "$dir" ]] || continue
+    if [[ "$(basename "$dir")" =~ $dir_name_re && -f "$dir/$summary_filename" ]]; then
+      timestamp_candidates+=("$(basename "$dir")|$dir/$summary_filename")
+    fi
+  done
+  shopt -u nullglob
+
+  if ((${#timestamp_candidates[@]} > 0)); then
+    printf '%s\n' "${timestamp_candidates[@]}" | LC_ALL=C sort | tail -n 1 | cut -d'|' -f2-
+    return 0
+  fi
+
+  # Fallback: choose latest by mtime, tie-broken by path for determinism.
+  local -a mtime_candidates=()
+  local summary_path
+  while IFS= read -r summary_path; do
+    [[ -n "$summary_path" ]] || continue
+    local mtime
+    mtime="$(stat -c %Y "$summary_path" 2>/dev/null || stat -f %m "$summary_path" 2>/dev/null || true)"
+    if [[ "$mtime" =~ ^[0-9]+$ ]]; then
+      mtime_candidates+=("${mtime}|${summary_path}")
+    fi
+  done < <(find "$base_dir" -maxdepth 2 -type f -name "$summary_filename" -path "$base_dir/${dir_prefix}*/$summary_filename" 2>/dev/null | LC_ALL=C sort)
+
+  if ((${#mtime_candidates[@]} > 0)); then
+    printf '%s\n' "${mtime_candidates[@]}" | LC_ALL=C sort -t'|' -k1,1n -k2,2 | tail -n 1 | cut -d'|' -f2-
+    return 0
+  fi
+
+  return 1
+}
+
 need_cmd jq
 need_cmd date
 
@@ -196,6 +241,19 @@ if (( configured_count == 0 )); then
   stage_path["build_testnet_ci"]="$reports_dir/phase6_cosmos_l1_build_testnet_ci_summary.json"
   stage_path["contracts_ci"]="$reports_dir/phase6_cosmos_l1_contracts_summary.json"
   stage_path["build_testnet_suite"]="$reports_dir/phase6_cosmos_l1_build_testnet_suite_summary.json"
+
+  if [[ ! -f "${stage_path[build_testnet_ci]}" ]]; then
+    discovered_build_testnet_ci=""
+    if discovered_build_testnet_ci="$(discover_latest_stage_summary "$reports_dir" "ci_phase6_cosmos_l1_build_testnet_" "ci_phase6_cosmos_l1_build_testnet_summary.json")"; then
+      stage_path["build_testnet_ci"]="$discovered_build_testnet_ci"
+    fi
+  fi
+  if [[ ! -f "${stage_path[contracts_ci]}" ]]; then
+    discovered_contracts_ci=""
+    if discovered_contracts_ci="$(discover_latest_stage_summary "$reports_dir" "ci_phase6_cosmos_l1_contracts_" "ci_phase6_cosmos_l1_contracts_summary.json")"; then
+      stage_path["contracts_ci"]="$discovered_contracts_ci"
+    fi
+  fi
 fi
 
 for stage_id in build_testnet_ci contracts_ci build_testnet_suite; do

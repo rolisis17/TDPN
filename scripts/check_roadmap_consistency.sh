@@ -787,12 +787,24 @@ if ! rg -Fq "integration_cosmos_tdpnd_state_dir_persistence.sh" "$chain_readme";
   echo "chain README must document state-dir persistence integration coverage"
   exit 1
 fi
+if ! rg -Fq "integration_cosmos_local_testnet_smoke.sh" "$chain_readme"; then
+  echo "chain README must document local multi-node smoke integration script"
+  exit 1
+fi
 if ! rg -Fq "tdpnd_grpc_auth_live_smoke" "$chain_readme"; then
   echo "chain README must document phase6 tdpnd_grpc_auth_live_smoke stage"
   exit 1
 fi
 if ! rg -Fq "integration_cosmos_tdpnd_grpc_auth_live_smoke.sh" "$chain_readme"; then
   echo "chain README must document tdpnd gRPC auth live-smoke script"
+  exit 1
+fi
+if ! rg -Fq "phase6_cosmos_l1_summary_report.sh" "$chain_readme"; then
+  echo "chain README must document phase6 summary report helper script"
+  exit 1
+fi
+if ! rg -Fq "integration_phase6_cosmos_l1_summary_report.sh" "$chain_readme"; then
+  echo "chain README must document phase6 summary report integration contract script"
   exit 1
 fi
 if ! rg -Fq "blockchain-app-sponsorship-quickstart.md" "$chain_readme"; then

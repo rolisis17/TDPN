@@ -36,6 +36,15 @@ MISSING_REPORT_JSON="$TMP_DIR/report_missing.json"
 MISSING_LOG="$TMP_DIR/missing.log"
 MISSING_PATH="$TMP_DIR/does_not_exist.json"
 
+FALLBACK_REPORTS_DIR="$TMP_DIR/fallback_reports"
+FALLBACK_REPORT_JSON="$TMP_DIR/report_fallback.json"
+FALLBACK_LOG="$TMP_DIR/fallback.log"
+
+FALLBACK_CI_OLD_DIR="$FALLBACK_REPORTS_DIR/ci_phase6_cosmos_l1_build_testnet_20260415_165959"
+FALLBACK_CI_NEW_DIR="$FALLBACK_REPORTS_DIR/ci_phase6_cosmos_l1_build_testnet_20260415_170000"
+FALLBACK_CONTRACTS_OLD_DIR="$FALLBACK_REPORTS_DIR/ci_phase6_cosmos_l1_contracts_20260415_170500"
+FALLBACK_CONTRACTS_NEW_DIR="$FALLBACK_REPORTS_DIR/ci_phase6_cosmos_l1_contracts_20260415_170700"
+
 cat >"$PASS_CI" <<'EOF_PASS_CI'
 {
   "version": 1,
@@ -202,6 +211,104 @@ if ! jq -e '
   echo "phase6 summary report missing-input contract mismatch"
   cat "$MISSING_REPORT_JSON"
   cat "$MISSING_LOG"
+  exit 1
+fi
+
+mkdir -p "$FALLBACK_REPORTS_DIR"
+mkdir -p "$FALLBACK_CI_OLD_DIR" "$FALLBACK_CI_NEW_DIR" "$FALLBACK_CONTRACTS_OLD_DIR" "$FALLBACK_CONTRACTS_NEW_DIR"
+
+cat >"$FALLBACK_CI_OLD_DIR/ci_phase6_cosmos_l1_build_testnet_summary.json" <<'EOF_FALLBACK_CI_OLD'
+{
+  "version": 1,
+  "schema": {
+    "id": "ci_phase6_cosmos_l1_build_testnet_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "pass",
+  "rc": 0
+}
+EOF_FALLBACK_CI_OLD
+
+cat >"$FALLBACK_CI_NEW_DIR/ci_phase6_cosmos_l1_build_testnet_summary.json" <<'EOF_FALLBACK_CI_NEW'
+{
+  "version": 1,
+  "schema": {
+    "id": "ci_phase6_cosmos_l1_build_testnet_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "pass",
+  "rc": 0
+}
+EOF_FALLBACK_CI_NEW
+
+cat >"$FALLBACK_CONTRACTS_OLD_DIR/ci_phase6_cosmos_l1_contracts_summary.json" <<'EOF_FALLBACK_CONTRACTS_OLD'
+{
+  "version": 1,
+  "schema": {
+    "id": "ci_phase6_cosmos_l1_contracts_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "pass",
+  "rc": 0
+}
+EOF_FALLBACK_CONTRACTS_OLD
+
+cat >"$FALLBACK_CONTRACTS_NEW_DIR/ci_phase6_cosmos_l1_contracts_summary.json" <<'EOF_FALLBACK_CONTRACTS_NEW'
+{
+  "version": 1,
+  "schema": {
+    "id": "ci_phase6_cosmos_l1_contracts_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "pass",
+  "rc": 0
+}
+EOF_FALLBACK_CONTRACTS_NEW
+
+cat >"$FALLBACK_REPORTS_DIR/phase6_cosmos_l1_build_testnet_suite_summary.json" <<'EOF_FALLBACK_SUITE'
+{
+  "version": 1,
+  "schema": {
+    "id": "phase6_cosmos_l1_build_testnet_suite_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "pass",
+  "rc": 0
+}
+EOF_FALLBACK_SUITE
+
+echo "[phase6-cosmos-l1-summary-report] fallback discovery path"
+"$SCRIPT_UNDER_TEST" \
+  --reports-dir "$FALLBACK_REPORTS_DIR" \
+  --summary-json "$FALLBACK_REPORT_JSON" \
+  --print-report 0 \
+  --show-json 0 >"$FALLBACK_LOG" 2>&1
+
+if ! jq -e \
+  --arg expected_ci_path "$FALLBACK_CI_NEW_DIR/ci_phase6_cosmos_l1_build_testnet_summary.json" \
+  --arg expected_contracts_path "$FALLBACK_CONTRACTS_NEW_DIR/ci_phase6_cosmos_l1_contracts_summary.json" \
+  '
+  .status == "pass"
+  and .rc == 0
+  and .counts.configured == 3
+  and .counts.pass == 3
+  and .counts.fail == 0
+  and .counts.missing == 0
+  and .counts.invalid == 0
+  and .summaries.build_testnet_ci.status == "pass"
+  and .summaries.contracts_ci.status == "pass"
+  and .summaries.build_testnet_suite.status == "pass"
+  and .summaries.build_testnet_ci.path == $expected_ci_path
+  and .summaries.contracts_ci.path == $expected_contracts_path
+' "$FALLBACK_REPORT_JSON" >/dev/null; then
+  echo "phase6 summary report fallback-discovery contract mismatch"
+  cat "$FALLBACK_REPORT_JSON"
+  cat "$FALLBACK_LOG"
   exit 1
 fi
 

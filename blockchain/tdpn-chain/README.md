@@ -28,8 +28,10 @@ This workspace defines the initial module boundaries for TDPN's VPN-compatible b
 - Query-by-id confirmation capability is exposed through optional settlement adapter interface `ChainConfirmationQuerier` (`pkg/settlement/types.go`).
 - Runtime env/operator wiring reference: `docs/cosmos-settlement-runtime.md`.
 - Local multi-node operator bootstrap: `docs/local-testnet.md`.
+- Local multi-node smoke integration: `scripts/integration_cosmos_local_testnet_smoke.sh`.
 - Local acceptance gate for settlement control-plane behavior: `scripts/integration_cosmos_settlement_acceptance_paths.sh`.
 - Phase5 CI includes `settlement_adapter_roundtrip` as a first-class stage running `scripts/integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh`.
+- Phase6 summary helper/report: `scripts/phase6_cosmos_l1_summary_report.sh` (integration contract: `scripts/integration_phase6_cosmos_l1_summary_report.sh`).
 
 ## Scaffold status
 - Go scaffold entrypoint: `cmd/tdpnd`.
