@@ -16,6 +16,9 @@ timeout 90s ./scripts/integration_issuer_sponsor_api_live_smoke.sh
 timeout 30s go test ./pkg/settlement -count=1 -run '^(TestMemoryServiceAdapterDeferredOnFailure|TestMemoryServiceReconcileReplaySuccessClearsBacklog|TestMemoryServiceReconcileReplayPromotesToConfirmedWhenQuerierAvailable)$'
 timeout 30s go test ./services/exit -count=1 -run '^(TestSettlementReserveAndFinalizeWarningsDoNotBlockSessionClose|TestHandlePathCloseDeferredChainAdapterDoesNotBlockSessionClose|TestHandleSettlementStatusReconcileErrorIsFailSoft)$'
 
+# Shadow env wiring coverage: issuer/exit mirror and fail-open shadow adapter behavior.
+timeout 60s bash ./scripts/integration_cosmos_settlement_shadow_env.sh
+
 # Dual-asset pricing coverage: stable-denominated baseline plus native-token conversion/equivalence.
 timeout 30s go test ./pkg/settlement -count=1 -run '^(TestMemoryServiceQuotePriceCurrencyConversion|TestMemoryServiceSettleSessionCurrencyConversion|TestMemoryServiceDualAssetSessionEntitlementEquivalence)$'
 timeout 30s go test ./services/issuer -count=1 -run '^(TestNewSettlementServiceFromEnvCurrencyBaseFromEnv|TestNewSettlementServiceFromEnvDualNativeCurrencyConversion)$'

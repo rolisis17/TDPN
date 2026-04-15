@@ -95,6 +95,14 @@ if ! rg -Fq "settlement_adapter_roundtrip" "$full_plan"; then
   echo "full execution plan must document settlement_adapter_roundtrip gate posture"
   exit 1
 fi
+if ! rg -Fq "settlement_shadow_env" "$full_plan"; then
+  echo "full execution plan must document settlement_shadow_env gate posture"
+  exit 1
+fi
+if ! rg -Fq "integration_cosmos_settlement_shadow_env.sh" "$full_plan"; then
+  echo "full execution plan must document settlement_shadow_env integration script"
+  exit 1
+fi
 if ! rg -Fq "settlement_adapter_signed_tx_roundtrip" "$full_plan"; then
   echo "full execution plan must document settlement_adapter_signed_tx_roundtrip gate posture"
   exit 1
@@ -275,6 +283,14 @@ if ! rg -Fq "integration_cosmos_tdpnd_state_dir_persistence.sh" "$cosmos_runtime
   echo "cosmos settlement runtime guide must document state-dir persistence integration script"
   exit 1
 fi
+if ! rg -Fq "settlement_shadow_env" "$cosmos_runtime_doc"; then
+  echo "cosmos settlement runtime guide must document settlement_shadow_env phase5 stage"
+  exit 1
+fi
+if ! rg -Fq "integration_cosmos_settlement_shadow_env.sh" "$cosmos_runtime_doc"; then
+  echo "cosmos settlement runtime guide must document settlement_shadow_env integration script"
+  exit 1
+fi
 if ! rg -Fq "blockchain-app-sponsorship-quickstart.md" "$cosmos_runtime_doc"; then
   echo "cosmos settlement runtime guide must link blockchain sponsor quickstart"
   exit 1
@@ -410,6 +426,10 @@ if ! rg -Fq "settlement_adapter_signed_tx_roundtrip" "$phase5_ci_script"; then
 fi
 if ! rg -Fq "integration_cosmos_adapter_tdpnd_signed_tx_roundtrip.sh" "$phase5_ci_script"; then
   echo "phase5 ci script must wire integration_cosmos_adapter_tdpnd_signed_tx_roundtrip.sh"
+  exit 1
+fi
+if [[ ! -f "$ROOT_DIR/scripts/integration_cosmos_settlement_shadow_env.sh" ]]; then
+  echo "missing required script: scripts/integration_cosmos_settlement_shadow_env.sh"
   exit 1
 fi
 if ! rg -Fq "settlement_adapter_roundtrip" "$phase5_integration_script"; then
