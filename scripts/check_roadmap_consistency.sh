@@ -21,6 +21,8 @@ phase6_check_script="scripts/phase6_cosmos_l1_build_testnet_check.sh"
 phase6_run_script="scripts/phase6_cosmos_l1_build_testnet_run.sh"
 phase6_check_integration_script="scripts/integration_phase6_cosmos_l1_build_testnet_check.sh"
 phase6_run_integration_script="scripts/integration_phase6_cosmos_l1_build_testnet_run.sh"
+phase6_suite_script="scripts/phase6_cosmos_l1_build_testnet_suite.sh"
+phase6_suite_integration_script="scripts/integration_phase6_cosmos_l1_build_testnet_suite.sh"
 phase6_handoff_check_script="scripts/phase6_cosmos_l1_build_testnet_handoff_check.sh"
 phase6_handoff_run_script="scripts/phase6_cosmos_l1_build_testnet_handoff_run.sh"
 phase6_handoff_check_integration_script="scripts/integration_phase6_cosmos_l1_build_testnet_handoff_check.sh"
@@ -74,7 +76,7 @@ check_confirmation_interface_wording() {
   fi
 }
 
-for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$chain_readme" "$settlement_mapping_doc" "$blockchain_sponsor_quickstart_doc" "$phase5_ci_script" "$phase5_integration_script" "$phase6_ci_script" "$phase6_integration_script" "$phase6_check_script" "$phase6_run_script" "$phase6_check_integration_script" "$phase6_run_integration_script" "$phase6_handoff_check_script" "$phase6_handoff_run_script" "$phase6_handoff_check_integration_script" "$phase6_handoff_run_integration_script"; do
+for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$chain_readme" "$settlement_mapping_doc" "$blockchain_sponsor_quickstart_doc" "$phase5_ci_script" "$phase5_integration_script" "$phase6_ci_script" "$phase6_integration_script" "$phase6_check_script" "$phase6_run_script" "$phase6_check_integration_script" "$phase6_run_integration_script" "$phase6_suite_script" "$phase6_suite_integration_script" "$phase6_handoff_check_script" "$phase6_handoff_run_script" "$phase6_handoff_check_integration_script" "$phase6_handoff_run_integration_script"; do
   if [[ ! -f "$f" ]]; then
     echo "missing required file: $f"
     exit 1
@@ -145,6 +147,14 @@ if ! rg -Fq "phase6_cosmos_l1_build_testnet_run.sh" "$full_plan"; then
   echo "full execution plan must document phase6 run wrapper script"
   exit 1
 fi
+if ! rg -Fq "phase6_cosmos_l1_build_testnet_suite.sh" "$full_plan"; then
+  echo "full execution plan must document phase6 top-level suite wrapper script"
+  exit 1
+fi
+if ! rg -Fq "integration_phase6_cosmos_l1_build_testnet_suite.sh" "$full_plan"; then
+  echo "full execution plan must document phase6 top-level suite integration contract script"
+  exit 1
+fi
 if ! rg -Fq "phase6_cosmos_l1_build_testnet_handoff_check.sh" "$full_plan"; then
   echo "full execution plan must document phase6 handoff-check wrapper script"
   exit 1
@@ -177,6 +187,14 @@ if ! rg -Fq "phase6_cosmos_l1_build_testnet_check.sh" "$product_roadmap"; then
 fi
 if ! rg -Fq "phase6_cosmos_l1_build_testnet_run.sh" "$product_roadmap"; then
   echo "product roadmap must document phase6 run wrapper script"
+  exit 1
+fi
+if ! rg -Fq "phase6_cosmos_l1_build_testnet_suite.sh" "$product_roadmap"; then
+  echo "product roadmap must document phase6 top-level suite wrapper script"
+  exit 1
+fi
+if ! rg -Fq "integration_phase6_cosmos_l1_build_testnet_suite.sh" "$product_roadmap"; then
+  echo "product roadmap must document phase6 top-level suite integration contract script"
   exit 1
 fi
 if ! rg -Fq "phase6_cosmos_l1_build_testnet_handoff_check.sh" "$product_roadmap"; then
@@ -229,6 +247,22 @@ if ! rg -Fq "phase6_cosmos_l1_build_testnet_check_summary" "$phase6_run_script";
   echo "phase6 run wrapper must validate phase6 check summary schema id"
   exit 1
 fi
+if ! rg -Fq "ci_phase6_cosmos_l1_build_testnet.sh" "$phase6_suite_script"; then
+  echo "phase6 suite wrapper must invoke ci_phase6_cosmos_l1_build_testnet.sh"
+  exit 1
+fi
+if ! rg -Fq "phase6_cosmos_l1_build_testnet_run.sh" "$phase6_suite_script"; then
+  echo "phase6 suite wrapper must invoke phase6 run wrapper"
+  exit 1
+fi
+if ! rg -Fq "phase6_cosmos_l1_build_testnet_handoff_run.sh" "$phase6_suite_script"; then
+  echo "phase6 suite wrapper must invoke phase6 handoff-run wrapper"
+  exit 1
+fi
+if ! rg -Fq "phase6_cosmos_l1_build_testnet_suite_summary" "$phase6_suite_script"; then
+  echo "phase6 suite wrapper must emit phase6 suite summary schema id"
+  exit 1
+fi
 if ! rg -Fq "phase6_cosmos_l1_build_testnet_run.sh" "$phase6_handoff_run_script"; then
   echo "phase6 handoff-run wrapper must invoke phase6 run wrapper"
   exit 1
@@ -251,6 +285,14 @@ if ! rg -Fq "ci-failure propagation" "$phase6_run_integration_script"; then
 fi
 if ! rg -Fq "fail-closed path" "$phase6_check_integration_script"; then
   echo "phase6 check integration must validate fail-closed behavior"
+  exit 1
+fi
+if ! rg -Fq "stage-failure propagation path" "$phase6_suite_integration_script"; then
+  echo "phase6 suite integration must validate stage-failure propagation behavior"
+  exit 1
+fi
+if ! rg -Fq "fail-closed child summary contract path" "$phase6_suite_integration_script"; then
+  echo "phase6 suite integration must validate fail-closed child contract behavior"
   exit 1
 fi
 if ! rg -Fq "run failure still runs handoff check" "$phase6_handoff_run_integration_script"; then

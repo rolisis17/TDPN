@@ -55,6 +55,30 @@ func TestGRPCMsgAdapterRecordFlow(t *testing.T) {
 	}
 }
 
+func TestGRPCMsgAdapterRecordDistributionMissingAccrualClassification(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	adapter := NewGRPCMsgAdapter(NewMsgServer(&k))
+
+	resp, err := adapter.RecordDistribution(context.Background(), &pb.MsgRecordDistributionRequest{
+		Distribution: &pb.DistributionRecord{
+			DistributionId: "dist-grpc-missing-accrual",
+			AccrualId:      "acc-grpc-missing",
+			PayoutRef:      "payout-grpc-missing-accrual",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected missing accrual error")
+	}
+	if !errors.Is(err, ErrAccrualNotFound) {
+		t.Fatalf("expected ErrAccrualNotFound, got %v", err)
+	}
+	if resp != nil {
+		t.Fatalf("expected nil response on error, got %+v", resp)
+	}
+}
+
 func TestGRPCQueryAdapterNotFoundReturnsFoundFalse(t *testing.T) {
 	t.Parallel()
 
