@@ -51,6 +51,7 @@ FALLBACK_CI_OLD_DIR="$FALLBACK_REPORTS_DIR/ci_phase5_settlement_layer_20260416_1
 FALLBACK_CI_NEW_DIR="$FALLBACK_REPORTS_DIR/ci_phase5_settlement_layer_20260416_170000"
 FALLBACK_HANDOFF_RUN_OLD_DIR="$FALLBACK_REPORTS_DIR/phase5_settlement_layer_handoff_run_20260416_170500"
 FALLBACK_HANDOFF_RUN_NEW_DIR="$FALLBACK_REPORTS_DIR/phase5_settlement_layer_handoff_run_20260416_170700"
+FALLBACK_HANDOFF_CHECK_FROM_HANDOFF_RUN="$FALLBACK_HANDOFF_RUN_NEW_DIR/phase5_settlement_layer_handoff_check_fallback.json"
 
 cat >"$PASS_CI" <<'EOF_PASS_CI'
 {
@@ -61,7 +62,12 @@ cat >"$PASS_CI" <<'EOF_PASS_CI'
     "minor": 0
   },
   "status": "pass",
-  "rc": 0
+  "rc": 0,
+  "steps": {
+    "issuer_sponsor_api_live_smoke": {
+      "status": "fail"
+    }
+  }
 }
 EOF_PASS_CI
 
@@ -74,7 +80,10 @@ cat >"$PASS_CHECK" <<'EOF_PASS_CHECK'
     "minor": 0
   },
   "status": "pass",
-  "rc": 0
+  "rc": 0,
+  "signals": {
+    "issuer_sponsor_api_live_smoke_ok": false
+  }
 }
 EOF_PASS_CHECK
 
@@ -100,7 +109,10 @@ cat >"$PASS_HANDOFF_CHECK" <<'EOF_PASS_HANDOFF_CHECK'
     "minor": 0
   },
   "status": "pass",
-  "rc": 0
+  "rc": 0,
+  "handoff": {
+    "issuer_sponsor_api_live_smoke_ok": true
+  }
 }
 EOF_PASS_HANDOFF_CHECK
 
@@ -127,7 +139,10 @@ PHASE5_SETTLEMENT_LAYER_SUMMARY_REPORT_CANONICAL_SUMMARY_JSON="$PASS_CANONICAL_R
   --summary-json "$PASS_REPORT_JSON" \
   --print-summary-json 0 >"$PASS_LOG" 2>&1
 
-if ! jq -e --arg expected_canonical_summary_json "$PASS_CANONICAL_REPORT_JSON" '
+if ! jq -e \
+  --arg expected_canonical_summary_json "$PASS_CANONICAL_REPORT_JSON" \
+  --arg expected_signal_path "$PASS_HANDOFF_CHECK" \
+  '
   .version == 1
   and .schema.id == "phase5_settlement_layer_summary_report"
   and .status == "pass"
@@ -147,6 +162,15 @@ if ! jq -e --arg expected_canonical_summary_json "$PASS_CANONICAL_REPORT_JSON" '
   and .summaries.phase5_settlement_layer_run_summary.schema_id == "phase5_settlement_layer_run_summary"
   and .summaries.phase5_settlement_layer_handoff_check_summary.schema_id == "phase5_settlement_layer_handoff_check_summary"
   and .summaries.phase5_settlement_layer_handoff_run_summary.schema_id == "phase5_settlement_layer_handoff_run_summary"
+  and .signals.issuer_sponsor_api_live_smoke.status == "pass"
+  and .signals.issuer_sponsor_api_live_smoke.ok == true
+  and .signals.issuer_sponsor_api_live_smoke.resolved == true
+  and .signals.issuer_sponsor_api_live_smoke.source == "phase5_settlement_layer_handoff_check_summary"
+  and .signals.issuer_sponsor_api_live_smoke.source_field == "handoff.issuer_sponsor_api_live_smoke_ok"
+  and .signals.issuer_sponsor_api_live_smoke.source_path == $expected_signal_path
+  and .signals.issuer_sponsor_api_live_smoke.fallback == false
+  and .signals.issuer_sponsor_api_live_smoke.source_priority_index == 1
+  and (.signals.issuer_sponsor_api_live_smoke.source_priority | length) == 5
   and .artifacts.canonical_summary_json == $expected_canonical_summary_json
 ' "$PASS_REPORT_JSON" >/dev/null; then
   echo "phase5 summary report pass-path contract mismatch"
@@ -320,6 +344,14 @@ if ! jq -e '
   and .summaries.phase5_settlement_layer_run_summary.status == "skipped"
   and .summaries.phase5_settlement_layer_handoff_check_summary.status == "skipped"
   and .summaries.phase5_settlement_layer_handoff_run_summary.status == "skipped"
+  and .signals.issuer_sponsor_api_live_smoke.status == "missing"
+  and .signals.issuer_sponsor_api_live_smoke.ok == null
+  and .signals.issuer_sponsor_api_live_smoke.resolved == false
+  and .signals.issuer_sponsor_api_live_smoke.source == "unresolved"
+  and .signals.issuer_sponsor_api_live_smoke.source_field == null
+  and .signals.issuer_sponsor_api_live_smoke.source_path == null
+  and .signals.issuer_sponsor_api_live_smoke.fallback == false
+  and .signals.issuer_sponsor_api_live_smoke.source_priority_index == null
 ' "$MISSING_REPORT_JSON" >/dev/null; then
   echo "phase5 summary report missing-input contract mismatch"
   cat "$MISSING_REPORT_JSON"
@@ -378,9 +410,32 @@ cat >"$FALLBACK_HANDOFF_RUN_NEW_DIR/phase5_settlement_layer_handoff_run_summary.
     "minor": 0
   },
   "status": "pass",
-  "rc": 0
+  "rc": 0,
+  "steps": {
+    "phase5_settlement_layer_handoff_check": {
+      "artifacts": {
+        "summary_json": "phase5_settlement_layer_handoff_check_fallback.json"
+      }
+    }
+  }
 }
 EOF_FALLBACK_HANDOFF_RUN_NEW
+
+cat >"$FALLBACK_HANDOFF_CHECK_FROM_HANDOFF_RUN" <<'EOF_FALLBACK_HANDOFF_CHECK_FROM_HANDOFF_RUN'
+{
+  "version": 1,
+  "schema": {
+    "id": "phase5_settlement_layer_handoff_check_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "pass",
+  "rc": 0,
+  "handoff": {
+    "issuer_sponsor_api_live_smoke_ok": true
+  }
+}
+EOF_FALLBACK_HANDOFF_CHECK_FROM_HANDOFF_RUN
 
 cat >"$FALLBACK_REPORTS_DIR/phase5_settlement_layer_check_summary.json" <<'EOF_FALLBACK_CHECK'
 {
@@ -391,7 +446,10 @@ cat >"$FALLBACK_REPORTS_DIR/phase5_settlement_layer_check_summary.json" <<'EOF_F
     "minor": 0
   },
   "status": "pass",
-  "rc": 0
+  "rc": 0,
+  "signals": {
+    "issuer_sponsor_api_live_smoke_ok": false
+  }
 }
 EOF_FALLBACK_CHECK
 
@@ -433,6 +491,7 @@ if ! jq -e \
   --arg expected_check_path "$FALLBACK_REPORTS_DIR/phase5_settlement_layer_check_summary.json" \
   --arg expected_run_path "$FALLBACK_REPORTS_DIR/phase5_settlement_layer_run_summary.json" \
   --arg expected_handoff_check_path "$FALLBACK_REPORTS_DIR/phase5_settlement_layer_handoff_check_summary.json" \
+  --arg expected_signal_path "$FALLBACK_HANDOFF_CHECK_FROM_HANDOFF_RUN" \
   '
   .status == "pass"
   and .rc == 0
@@ -448,6 +507,14 @@ if ! jq -e \
   and .summaries.phase5_settlement_layer_check_summary.path == $expected_check_path
   and .summaries.phase5_settlement_layer_run_summary.path == $expected_run_path
   and .summaries.phase5_settlement_layer_handoff_check_summary.path == $expected_handoff_check_path
+  and .signals.issuer_sponsor_api_live_smoke.status == "pass"
+  and .signals.issuer_sponsor_api_live_smoke.ok == true
+  and .signals.issuer_sponsor_api_live_smoke.resolved == true
+  and .signals.issuer_sponsor_api_live_smoke.source == "phase5_settlement_layer_handoff_run_summary.artifacts.handoff_summary_json"
+  and .signals.issuer_sponsor_api_live_smoke.source_field == "handoff.issuer_sponsor_api_live_smoke_ok"
+  and .signals.issuer_sponsor_api_live_smoke.source_path == $expected_signal_path
+  and .signals.issuer_sponsor_api_live_smoke.fallback == true
+  and .signals.issuer_sponsor_api_live_smoke.source_priority_index == 2
 ' "$FALLBACK_REPORT_JSON" >/dev/null; then
   echo "phase5 summary report fallback-discovery contract mismatch"
   cat "$FALLBACK_REPORT_JSON"

@@ -139,6 +139,282 @@ discover_latest_stage_summary() {
   return 1
 }
 
+resolve_path_with_base() {
+  local candidate="${1:-}"
+  local base_file="${2:-}"
+  local base_dir=""
+  if [[ -z "$candidate" ]]; then
+    printf '%s' ""
+    return
+  fi
+  if [[ "$candidate" == /* ]]; then
+    printf '%s' "$candidate"
+    return
+  fi
+  if [[ -n "$base_file" ]]; then
+    base_dir="$(cd "$(dirname "$base_file")" && pwd)"
+    if [[ -f "$base_dir/$candidate" ]]; then
+      printf '%s' "$base_dir/$candidate"
+      return
+    fi
+  fi
+  printf '%s' "$ROOT_DIR/$candidate"
+}
+
+json_file_valid_01() {
+  local path="${1:-}"
+  if [[ -f "$path" ]] && jq -e . "$path" >/dev/null 2>&1; then
+    printf '%s' "1"
+  else
+    printf '%s' "0"
+  fi
+}
+
+json_text_or_empty() {
+  local path="${1:-}"
+  local expr="${2:-}"
+  if [[ "$(json_file_valid_01 "$path")" != "1" ]]; then
+    printf '%s' ""
+    return
+  fi
+  jq -r "($expr) | if . == null then empty else . end" "$path" 2>/dev/null || true
+}
+
+json_bool_or_empty() {
+  local path="${1:-}"
+  local expr="${2:-}"
+  local value=""
+  value="$(json_text_or_empty "$path" "$expr")"
+  case "$value" in
+    true|false)
+      printf '%s' "$value"
+      ;;
+    *)
+      printf '%s' ""
+      ;;
+  esac
+}
+
+resolve_sponsor_from_handoff_or_check_summary() {
+  local summary_path="${1:-}"
+  if [[ "$(json_file_valid_01 "$summary_path")" != "1" ]]; then
+    return 1
+  fi
+
+  local value=""
+  local status=""
+  local source_field=""
+  local status_text=""
+
+  value="$(json_bool_or_empty "$summary_path" '
+    if (.handoff.issuer_sponsor_api_live_smoke_ok | type) == "boolean" then .handoff.issuer_sponsor_api_live_smoke_ok
+    elif (.signals.issuer_sponsor_api_live_smoke_ok | type) == "boolean" then .signals.issuer_sponsor_api_live_smoke_ok
+    elif (.stages.issuer_sponsor_api_live_smoke.ok | type) == "boolean" then .stages.issuer_sponsor_api_live_smoke.ok
+    elif (.phase5_settlement_layer_handoff.issuer_sponsor_api_live_smoke_ok | type) == "boolean" then .phase5_settlement_layer_handoff.issuer_sponsor_api_live_smoke_ok
+    elif (.vpn_track.phase5_settlement_layer_handoff.issuer_sponsor_api_live_smoke_ok | type) == "boolean" then .vpn_track.phase5_settlement_layer_handoff.issuer_sponsor_api_live_smoke_ok
+    else empty
+    end
+  ')"
+  if [[ -n "$value" ]]; then
+    source_field="$(json_text_or_empty "$summary_path" '
+      if (.handoff.issuer_sponsor_api_live_smoke_ok | type) == "boolean" then "handoff.issuer_sponsor_api_live_smoke_ok"
+      elif (.signals.issuer_sponsor_api_live_smoke_ok | type) == "boolean" then "signals.issuer_sponsor_api_live_smoke_ok"
+      elif (.stages.issuer_sponsor_api_live_smoke.ok | type) == "boolean" then "stages.issuer_sponsor_api_live_smoke.ok"
+      elif (.phase5_settlement_layer_handoff.issuer_sponsor_api_live_smoke_ok | type) == "boolean" then "phase5_settlement_layer_handoff.issuer_sponsor_api_live_smoke_ok"
+      elif (.vpn_track.phase5_settlement_layer_handoff.issuer_sponsor_api_live_smoke_ok | type) == "boolean" then "vpn_track.phase5_settlement_layer_handoff.issuer_sponsor_api_live_smoke_ok"
+      else empty
+      end
+    ')"
+    if [[ "$value" == "true" ]]; then
+      status="pass"
+    else
+      status="fail"
+    fi
+    printf '%s|%s|%s\n' "$value" "$status" "$source_field"
+    return 0
+  fi
+
+  status_text="$(json_text_or_empty "$summary_path" '
+    if (.handoff.issuer_sponsor_api_live_smoke_status | type) == "string" then .handoff.issuer_sponsor_api_live_smoke_status
+    elif (.stages.issuer_sponsor_api_live_smoke.status | type) == "string" then .stages.issuer_sponsor_api_live_smoke.status
+    elif (.steps.issuer_sponsor_api_live_smoke.status | type) == "string" then .steps.issuer_sponsor_api_live_smoke.status
+    else empty
+    end
+  ')"
+  case "${status_text,,}" in
+    pass)
+      value="true"
+      status="pass"
+      ;;
+    fail)
+      value="false"
+      status="fail"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  source_field="$(json_text_or_empty "$summary_path" '
+    if (.handoff.issuer_sponsor_api_live_smoke_status | type) == "string" then "handoff.issuer_sponsor_api_live_smoke_status"
+    elif (.stages.issuer_sponsor_api_live_smoke.status | type) == "string" then "stages.issuer_sponsor_api_live_smoke.status"
+    elif (.steps.issuer_sponsor_api_live_smoke.status | type) == "string" then "steps.issuer_sponsor_api_live_smoke.status"
+    else empty
+    end
+  ')"
+
+  printf '%s|%s|%s\n' "$value" "$status" "$source_field"
+  return 0
+}
+
+resolve_sponsor_from_ci_summary() {
+  local summary_path="${1:-}"
+  if [[ "$(json_file_valid_01 "$summary_path")" != "1" ]]; then
+    return 1
+  fi
+
+  local value=""
+  local status=""
+  local source_field=""
+  local status_text=""
+
+  value="$(json_bool_or_empty "$summary_path" '
+    if (.signals.issuer_sponsor_api_live_smoke_ok | type) == "boolean" then .signals.issuer_sponsor_api_live_smoke_ok
+    elif (.steps.issuer_sponsor_api_live_smoke.ok | type) == "boolean" then .steps.issuer_sponsor_api_live_smoke.ok
+    else empty
+    end
+  ')"
+  if [[ -n "$value" ]]; then
+    source_field="$(json_text_or_empty "$summary_path" '
+      if (.signals.issuer_sponsor_api_live_smoke_ok | type) == "boolean" then "signals.issuer_sponsor_api_live_smoke_ok"
+      elif (.steps.issuer_sponsor_api_live_smoke.ok | type) == "boolean" then "steps.issuer_sponsor_api_live_smoke.ok"
+      else empty
+      end
+    ')"
+    if [[ "$value" == "true" ]]; then
+      status="pass"
+    else
+      status="fail"
+    fi
+    printf '%s|%s|%s\n' "$value" "$status" "$source_field"
+    return 0
+  fi
+
+  status_text="$(json_text_or_empty "$summary_path" '
+    if (.steps.issuer_sponsor_api_live_smoke.status | type) == "string" then .steps.issuer_sponsor_api_live_smoke.status
+    elif (.stages.issuer_sponsor_api_live_smoke.status | type) == "string" then .stages.issuer_sponsor_api_live_smoke.status
+    else empty
+    end
+  ')"
+  case "${status_text,,}" in
+    pass)
+      value="true"
+      status="pass"
+      ;;
+    fail)
+      value="false"
+      status="fail"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  source_field="$(json_text_or_empty "$summary_path" '
+    if (.steps.issuer_sponsor_api_live_smoke.status | type) == "string" then "steps.issuer_sponsor_api_live_smoke.status"
+    elif (.stages.issuer_sponsor_api_live_smoke.status | type) == "string" then "stages.issuer_sponsor_api_live_smoke.status"
+    else empty
+    end
+  ')"
+
+  printf '%s|%s|%s\n' "$value" "$status" "$source_field"
+  return 0
+}
+
+resolve_artifact_summary_path() {
+  local summary_path="${1:-}"
+  local expr="${2:-}"
+  local nested_path=""
+  if [[ "$(json_file_valid_01 "$summary_path")" != "1" ]]; then
+    printf '%s' ""
+    return
+  fi
+  nested_path="$(json_text_or_empty "$summary_path" "$expr")"
+  if [[ -z "$nested_path" ]]; then
+    printf '%s' ""
+    return
+  fi
+  printf '%s' "$(resolve_path_with_base "$nested_path" "$summary_path")"
+}
+
+resolve_sponsor_live_smoke_signal() {
+  local handoff_check_summary_path="${1:-}"
+  local handoff_run_summary_path="${2:-}"
+  local check_summary_path="${3:-}"
+  local run_summary_path="${4:-}"
+  local ci_summary_path="${5:-}"
+
+  local parsed=""
+  local value=""
+  local status=""
+  local source_field=""
+  local fallback_path=""
+
+  parsed="$(resolve_sponsor_from_handoff_or_check_summary "$handoff_check_summary_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|phase5_settlement_layer_handoff_check_summary|%s|%s|0|1\n' "$value" "$status" "$source_field" "$handoff_check_summary_path"
+    return
+  fi
+
+  fallback_path="$(resolve_artifact_summary_path "$handoff_run_summary_path" '.steps.phase5_settlement_layer_handoff_check.artifacts.summary_json // .artifacts.handoff_summary_json // empty')"
+  parsed="$(resolve_sponsor_from_handoff_or_check_summary "$fallback_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|phase5_settlement_layer_handoff_run_summary.artifacts.handoff_summary_json|%s|%s|1|2\n' "$value" "$status" "$source_field" "$fallback_path"
+    return
+  fi
+
+  parsed="$(resolve_sponsor_from_handoff_or_check_summary "$check_summary_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|phase5_settlement_layer_check_summary|%s|%s|0|3\n' "$value" "$status" "$source_field" "$check_summary_path"
+    return
+  fi
+
+  fallback_path="$(resolve_artifact_summary_path "$run_summary_path" '.steps.phase5_settlement_layer_check.artifacts.summary_json // .artifacts.check_summary_json // empty')"
+  parsed="$(resolve_sponsor_from_handoff_or_check_summary "$fallback_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|phase5_settlement_layer_run_summary.artifacts.check_summary_json|%s|%s|1|4\n' "$value" "$status" "$source_field" "$fallback_path"
+    return
+  fi
+
+  parsed="$(resolve_sponsor_from_ci_summary "$ci_summary_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|ci_phase5_settlement_layer_summary|%s|%s|0|5\n' "$value" "$status" "$source_field" "$ci_summary_path"
+    return
+  fi
+
+  printf '%s|%s|0|unresolved|||0|null\n' "null" "missing"
+}
+
 need_cmd jq
 need_cmd date
 
@@ -336,6 +612,14 @@ fail_count=0
 missing_count=0
 invalid_count=0
 considered_count=0
+sponsor_signal_ok="null"
+sponsor_signal_status="missing"
+sponsor_signal_resolved="0"
+sponsor_signal_source="unresolved"
+sponsor_signal_source_field=""
+sponsor_signal_source_path=""
+sponsor_signal_source_fallback="0"
+sponsor_signal_source_priority_index="null"
 
 declare -a reasons=()
 declare -a warnings=()
@@ -461,6 +745,28 @@ for stage_id in \
   )"
 done
 
+sponsor_signal_pair="$(resolve_sponsor_live_smoke_signal \
+  "${stage_path[phase5_settlement_layer_handoff_check]}" \
+  "${stage_path[phase5_settlement_layer_handoff_run]}" \
+  "${stage_path[phase5_settlement_layer_check]}" \
+  "${stage_path[phase5_settlement_layer_run]}" \
+  "${stage_path[ci_phase5_settlement_layer]}" \
+)"
+sponsor_signal_ok="${sponsor_signal_pair%%|*}"
+sponsor_signal_pair="${sponsor_signal_pair#*|}"
+sponsor_signal_status="${sponsor_signal_pair%%|*}"
+sponsor_signal_pair="${sponsor_signal_pair#*|}"
+sponsor_signal_resolved="${sponsor_signal_pair%%|*}"
+sponsor_signal_pair="${sponsor_signal_pair#*|}"
+sponsor_signal_source="${sponsor_signal_pair%%|*}"
+sponsor_signal_pair="${sponsor_signal_pair#*|}"
+sponsor_signal_source_field="${sponsor_signal_pair%%|*}"
+sponsor_signal_pair="${sponsor_signal_pair#*|}"
+sponsor_signal_source_path="${sponsor_signal_pair%%|*}"
+sponsor_signal_pair="${sponsor_signal_pair#*|}"
+sponsor_signal_source_fallback="${sponsor_signal_pair%%|*}"
+sponsor_signal_source_priority_index="${sponsor_signal_pair##*|}"
+
 overall_status="missing"
 overall_rc=1
 if (( fail_count > 0 || invalid_count > 0 )); then
@@ -498,6 +804,14 @@ jq -n \
   --argjson fail_count "$fail_count" \
   --argjson missing_count "$missing_count" \
   --argjson invalid_count "$invalid_count" \
+  --arg sponsor_signal_ok "$sponsor_signal_ok" \
+  --arg sponsor_signal_status "$sponsor_signal_status" \
+  --arg sponsor_signal_resolved "$sponsor_signal_resolved" \
+  --arg sponsor_signal_source "$sponsor_signal_source" \
+  --arg sponsor_signal_source_field "$sponsor_signal_source_field" \
+  --arg sponsor_signal_source_path "$sponsor_signal_source_path" \
+  --arg sponsor_signal_source_fallback "$sponsor_signal_source_fallback" \
+  --arg sponsor_signal_source_priority_index "$sponsor_signal_source_priority_index" \
   '{
     version: 1,
     schema: {
@@ -526,6 +840,34 @@ jq -n \
       fail: $fail_count,
       missing: $missing_count,
       invalid: $invalid_count
+    },
+    signals: {
+      issuer_sponsor_api_live_smoke: {
+        ok: (
+          if $sponsor_signal_ok == "true" then true
+          elif $sponsor_signal_ok == "false" then false
+          else null
+          end
+        ),
+        status: $sponsor_signal_status,
+        resolved: ($sponsor_signal_resolved == "1"),
+        source: $sponsor_signal_source,
+        source_field: (if $sponsor_signal_source_field == "" then null else $sponsor_signal_source_field end),
+        source_path: (if $sponsor_signal_source_path == "" then null else $sponsor_signal_source_path end),
+        fallback: ($sponsor_signal_source_fallback == "1"),
+        source_priority_index: (
+          if ($sponsor_signal_source_priority_index | test("^[0-9]+$")) then ($sponsor_signal_source_priority_index | tonumber)
+          else null
+          end
+        ),
+        source_priority: [
+          "phase5_settlement_layer_handoff_check_summary",
+          "phase5_settlement_layer_handoff_run_summary.artifacts.handoff_summary_json",
+          "phase5_settlement_layer_check_summary",
+          "phase5_settlement_layer_run_summary.artifacts.check_summary_json",
+          "ci_phase5_settlement_layer_summary"
+        ]
+      }
     },
     decision: {
       pass: ($status == "pass"),
@@ -563,6 +905,7 @@ for stage_id in \
   echo "[phase5-summary] $(display_stage_name "$stage_id"): status=${status} rc=${rc_display} schema=${schema_display} path=${stage_path[$stage_id]}"
 done
 echo "[phase5-summary] overall: status=${overall_status} pass=${pass_count} fail=${fail_count} missing=${missing_count} invalid=${invalid_count}"
+echo "[phase5-summary] issuer_sponsor_api_live_smoke: status=${sponsor_signal_status} ok=${sponsor_signal_ok} source=${sponsor_signal_source} fallback=${sponsor_signal_source_fallback} path=${sponsor_signal_source_path:-n/a}"
 echo "[phase5-summary] summary_json=${summary_json}"
 echo "[phase5-summary] canonical_summary_json=${canonical_summary_json}"
 

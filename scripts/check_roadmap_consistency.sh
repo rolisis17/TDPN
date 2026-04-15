@@ -1280,12 +1280,28 @@ if ! rg -Fq "canonical_summary_json" "$phase5_run_script"; then
   echo "phase5 run wrapper must emit canonical summary artifact metadata/logging"
   exit 1
 fi
+if ! rg -Fq "require-issuer-sponsor-api-live-smoke-ok" "$phase5_run_script"; then
+  echo "phase5 run wrapper must forward issuer sponsor live-smoke requirement toggle to checker stage"
+  exit 1
+fi
+if ! rg -Fq "issuer_sponsor_api_live_smoke_ok" "$phase5_run_script"; then
+  echo "phase5 run wrapper must surface issuer_sponsor_api_live_smoke_ok contract field"
+  exit 1
+fi
 if ! rg -Fq "canonical_summary_json" "$phase5_run_integration_script"; then
   echo "phase5 run integration must validate canonical summary artifact wiring"
   exit 1
 fi
 if ! rg -Fq "cmp -s" "$phase5_run_integration_script"; then
   echo "phase5 run integration must validate canonical and run summary content parity"
+  exit 1
+fi
+if ! rg -Fq "require-issuer-sponsor-api-live-smoke-ok 0" "$phase5_run_integration_script"; then
+  echo "phase5 run integration must validate sponsor live-smoke dry-run policy toggle forwarding"
+  exit 1
+fi
+if ! rg -Fq "issuer_sponsor_api_live_smoke_ok" "$phase5_run_integration_script"; then
+  echo "phase5 run integration must validate issuer_sponsor_api_live_smoke_ok contract field coverage"
   exit 1
 fi
 if ! rg -Fq "PHASE5_SETTLEMENT_LAYER_CHECK_CANONICAL_SUMMARY_JSON" "$phase5_check_script"; then
@@ -1336,12 +1352,28 @@ if ! rg -Fq "canonical_summary_json" "$phase5_handoff_run_script"; then
   echo "phase5 handoff-run wrapper must emit canonical summary artifact metadata/logging"
   exit 1
 fi
+if ! rg -Fq "require-issuer-sponsor-api-live-smoke-ok" "$phase5_handoff_run_script"; then
+  echo "phase5 handoff-run wrapper must forward issuer sponsor live-smoke requirement toggle to handoff checker"
+  exit 1
+fi
+if ! rg -Fq "issuer_sponsor_api_live_smoke_ok" "$phase5_handoff_run_script"; then
+  echo "phase5 handoff-run wrapper must surface issuer_sponsor_api_live_smoke_ok contract field"
+  exit 1
+fi
 if ! rg -Fq "canonical_summary_json" "$phase5_handoff_run_integration_script"; then
   echo "phase5 handoff-run integration must validate canonical summary artifact wiring"
   exit 1
 fi
 if ! rg -Fq "cmp -s" "$phase5_handoff_run_integration_script"; then
   echo "phase5 handoff-run integration must validate canonical and run summary content parity"
+  exit 1
+fi
+if ! rg -Fq "require-issuer-sponsor-api-live-smoke-ok 0" "$phase5_handoff_run_integration_script"; then
+  echo "phase5 handoff-run integration must validate sponsor live-smoke dry-run policy toggle forwarding"
+  exit 1
+fi
+if ! rg -Fq "issuer_sponsor_api_live_smoke_ok" "$phase5_handoff_run_integration_script"; then
+  echo "phase5 handoff-run integration must validate issuer_sponsor_api_live_smoke_ok contract field coverage"
   exit 1
 fi
 if ! rg -Fq "PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_CANONICAL_SUMMARY_JSON" "$phase5_handoff_check_script"; then
@@ -1388,6 +1420,10 @@ if ! rg -Fq "canonical_summary_json" "$phase5_summary_report_script"; then
   echo "phase5 summary report helper must emit canonical summary artifact metadata/logging"
   exit 1
 fi
+if ! rg -Fq "issuer_sponsor_api_live_smoke_ok" "$phase5_summary_report_script"; then
+  echo "phase5 summary report helper must surface issuer_sponsor_api_live_smoke_ok contract field"
+  exit 1
+fi
 for phase5_helper_artifact in \
   "phase5_settlement_layer_ci_summary.json" \
   "phase5_settlement_layer_check_summary.json" \
@@ -1418,6 +1454,10 @@ if ! rg -Fq "canonical_summary_json" "$phase5_summary_report_integration_script"
 fi
 if ! rg -Fq "cmp -s" "$phase5_summary_report_integration_script"; then
   echo "phase5 summary report integration script must validate canonical and run summary content parity"
+  exit 1
+fi
+if ! rg -Fq "issuer_sponsor_api_live_smoke_ok" "$phase5_summary_report_integration_script"; then
+  echo "phase5 summary report integration script must validate issuer_sponsor_api_live_smoke_ok contract field coverage"
   exit 1
 fi
 if ! rg -Fq "pass path" "$phase5_summary_report_integration_script"; then

@@ -72,7 +72,7 @@ Exit gate:
 - `tdpnd` runtime now supports `--state-dir` to enable file-backed module stores without coupling VPN dataplane behavior to chain liveness.
 - Settlement bridge now includes read/query `GET` endpoints (list + by-id) across billing/rewards/sponsor/slashing modules in addition to `POST` write paths.
 - CI/local integration now includes `scripts/integration_cosmos_tdpnd_state_dir_persistence.sh` for state-dir wiring and reopen-persistence verification.
-- Phase 5 CI now includes the `settlement_adapter_roundtrip` gate to verify end-to-end adapter -> `tdpnd` bridge submissions before promotion.
+- Phase 5 CI now includes the `settlement_adapter_roundtrip` gate backed by `scripts/integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh` to verify end-to-end adapter -> `tdpnd` bridge submissions before promotion.
 - Phase 5 CI includes `settlement_shadow_env` running `scripts/integration_cosmos_settlement_shadow_env.sh` to validate shadow adapter env wiring and fail-open behavior.
 - Phase 5 CI includes `settlement_shadow_status_surface` running `scripts/integration_cosmos_settlement_shadow_status_surface.sh` to validate shadow telemetry/status surfacing in settlement status endpoints.
 - Phase 5 CI also includes `settlement_adapter_signed_tx_roundtrip` backed by `scripts/integration_cosmos_adapter_tdpnd_signed_tx_roundtrip.sh` to validate signed-tx adapter relay into `tdpnd` bridge writes before promotion.

@@ -116,6 +116,7 @@ Usage:
     [--require-settlement-acceptance-ok [0|1]]
     [--require-settlement-bridge-smoke-ok [0|1]]
     [--require-settlement-state-persistence-ok [0|1]]
+    [--require-issuer-sponsor-api-live-smoke-ok [0|1]]
 EOF_HELP
   fi
   exit 0
@@ -145,6 +146,22 @@ if [[ "${FAKE_CHECK_FAIL:-0}" == "1" ]]; then
   rc="$fail_rc"
 fi
 
+issuer_sponsor_api_live_smoke_mode="${FAKE_CHECK_ISSUER_SPONSOR_API_LIVE_SMOKE_MODE:-present}"
+issuer_sponsor_api_live_smoke_status="$status"
+issuer_sponsor_api_live_smoke_signal_json="true"
+issuer_sponsor_api_live_smoke_stage_ok_json="true"
+issuer_sponsor_api_live_smoke_stage_resolved_json="true"
+if [[ "$status" != "pass" ]]; then
+  issuer_sponsor_api_live_smoke_signal_json="false"
+  issuer_sponsor_api_live_smoke_stage_ok_json="false"
+fi
+if [[ "$issuer_sponsor_api_live_smoke_mode" == "legacy_missing" ]]; then
+  issuer_sponsor_api_live_smoke_status=""
+  issuer_sponsor_api_live_smoke_signal_json="null"
+  issuer_sponsor_api_live_smoke_stage_ok_json="null"
+  issuer_sponsor_api_live_smoke_stage_resolved_json="false"
+fi
+
 if [[ -n "$summary_json" && "${FAKE_CHECK_OMIT_SUMMARY:-0}" != "1" ]]; then
   mkdir -p "$(dirname "$summary_json")"
   cat >"$summary_json" <<EOF_CHECK_SUMMARY
@@ -161,13 +178,15 @@ if [[ -n "$summary_json" && "${FAKE_CHECK_OMIT_SUMMARY:-0}" != "1" ]]; then
     "require_settlement_failsoft_ok": true,
     "require_settlement_acceptance_ok": true,
     "require_settlement_bridge_smoke_ok": true,
-    "require_settlement_state_persistence_ok": true
+    "require_settlement_state_persistence_ok": true,
+    "require_issuer_sponsor_api_live_smoke_ok": true
   },
   "signals": {
     "settlement_failsoft_ok": true,
     "settlement_acceptance_ok": true,
     "settlement_bridge_smoke_ok": true,
-    "settlement_state_persistence_ok": true
+    "settlement_state_persistence_ok": true,
+    "issuer_sponsor_api_live_smoke_ok": $issuer_sponsor_api_live_smoke_signal_json
   },
   "stages": {
     "settlement_failsoft": {
@@ -189,6 +208,11 @@ if [[ -n "$summary_json" && "${FAKE_CHECK_OMIT_SUMMARY:-0}" != "1" ]]; then
       "status": "$status",
       "resolved": true,
       "ok": true
+    },
+    "issuer_sponsor_api_live_smoke": {
+      "status": "$issuer_sponsor_api_live_smoke_status",
+      "resolved": $issuer_sponsor_api_live_smoke_stage_resolved_json,
+      "ok": $issuer_sponsor_api_live_smoke_stage_ok_json
     }
   }
 }
@@ -262,7 +286,7 @@ if [[ "$check_line" != *"--require-settlement-failsoft-ok 1"* || "$check_line" !
   echo "$check_line"
   exit 1
 fi
-if [[ "$check_line" != *"--require-settlement-acceptance-ok 0"* || "$check_line" != *"--require-settlement-state-persistence-ok 0"* ]]; then
+if [[ "$check_line" != *"--require-settlement-acceptance-ok 0"* || "$check_line" != *"--require-settlement-state-persistence-ok 0"* || "$check_line" != *"--require-issuer-sponsor-api-live-smoke-ok 0"* ]]; then
   echo "dry-run default requirement relax canonicalization mismatch"
   echo "$check_line"
   exit 1
@@ -321,6 +345,10 @@ if ! jq -e --arg canonical "$DRY_RUN_CANONICAL_SUMMARY" '
   and .steps.phase5_settlement_layer_check.command_rc == 0
   and .steps.phase5_settlement_layer_check.contract_valid == true
   and .steps.phase5_settlement_layer_check.artifacts.summary_exists == true
+  and .signals.issuer_sponsor_api_live_smoke_ok == true
+  and .signals.issuer_sponsor_api_live_smoke_status == "pass"
+  and .signals.issuer_sponsor_api_live_smoke_resolved == true
+  and .signals.sources.issuer_sponsor_api_live_smoke_ok == "phase5_settlement_layer_check_summary.signals.issuer_sponsor_api_live_smoke_ok"
 ' "$DRY_RUN_RUN_SUMMARY" >/dev/null; then
   echo "dry-run combined summary contract mismatch"
   cat "$DRY_RUN_RUN_SUMMARY"
@@ -335,6 +363,7 @@ PHASE5_SETTLEMENT_LAYER_RUN_CHECK_SCRIPT="$FAKE_CHECK" \
 PHASE5_SETTLEMENT_LAYER_RUN_DRY_RUN=1 \
 PHASE5_SETTLEMENT_LAYER_RUN_CANONICAL_SUMMARY_JSON="$ENV_DRY_RUN_CANONICAL_SUMMARY" \
 FAKE_CHECK_HELP_MODE=legacy \
+FAKE_CHECK_ISSUER_SPONSOR_API_LIVE_SMOKE_MODE=legacy_missing \
 bash "$RUNNER" \
   --reports-dir "$TMP_DIR/reports_env_dry" \
   --ci-summary-json "$TMP_DIR/ci_env_dry_summary.json" \
@@ -367,12 +396,21 @@ if [[ "$check_line" == *"--require-settlement-failsoft-ok"* || "$check_line" == 
   echo "$check_line"
   exit 1
 fi
+if [[ "$check_line" == *"--require-issuer-sponsor-api-live-smoke-ok"* ]]; then
+  echo "issuer sponsor requirement flag leaked for legacy checker help mode"
+  echo "$check_line"
+  exit 1
+fi
 if ! jq -e '
   .status == "pass"
   and .rc == 0
   and .inputs.dry_run == true
   and .steps.ci_phase5_settlement_layer.contract_valid == true
   and .steps.phase5_settlement_layer_check.contract_valid == true
+  and .signals.issuer_sponsor_api_live_smoke_ok == null
+  and .signals.issuer_sponsor_api_live_smoke_status == "missing"
+  and .signals.issuer_sponsor_api_live_smoke_resolved == false
+  and .signals.sources.issuer_sponsor_api_live_smoke_ok == "phase5_settlement_layer_check_summary.stages.issuer_sponsor_api_live_smoke.resolved"
 ' "$ENV_DRY_RUN_RUN_SUMMARY" >/dev/null; then
   echo "env dry-run combined summary contract mismatch"
   cat "$ENV_DRY_RUN_RUN_SUMMARY"
@@ -447,6 +485,10 @@ if ! jq -e --arg canonical "$CI_FAIL_CANONICAL_SUMMARY" '
   and .steps.phase5_settlement_layer_check.rc == 0
   and .steps.phase5_settlement_layer_check.command_rc == 0
   and .steps.phase5_settlement_layer_check.contract_valid == true
+  and .signals.issuer_sponsor_api_live_smoke_ok == true
+  and .signals.issuer_sponsor_api_live_smoke_status == "pass"
+  and .signals.issuer_sponsor_api_live_smoke_resolved == true
+  and .signals.sources.issuer_sponsor_api_live_smoke_ok == "phase5_settlement_layer_check_summary.signals.issuer_sponsor_api_live_smoke_ok"
 ' "$CI_FAIL_RUN_SUMMARY" >/dev/null; then
   echo "ci-failure combined summary contract mismatch"
   cat "$CI_FAIL_RUN_SUMMARY"
@@ -489,6 +531,10 @@ if ! jq -e '
   and .steps.phase5_settlement_layer_check.command_rc == 0
   and .steps.phase5_settlement_layer_check.contract_valid == false
   and .steps.phase5_settlement_layer_check.contract_error != null
+  and .signals.issuer_sponsor_api_live_smoke_ok == null
+  and .signals.issuer_sponsor_api_live_smoke_status == "missing"
+  and .signals.issuer_sponsor_api_live_smoke_resolved == false
+  and .signals.sources.issuer_sponsor_api_live_smoke_ok == "unresolved"
 ' "$CONTRACT_FAIL_RUN_SUMMARY" >/dev/null; then
   echo "checker-contract-fail combined summary mismatch"
   cat "$CONTRACT_FAIL_RUN_SUMMARY"

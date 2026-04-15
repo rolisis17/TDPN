@@ -83,6 +83,82 @@ json_file_valid() {
   [[ -f "$path" ]] && jq -e . "$path" >/dev/null 2>&1
 }
 
+resolve_issuer_sponsor_api_live_smoke_signal() {
+  local check_summary_json="$1"
+  local resolved_tuple=""
+  if ! json_file_valid "$check_summary_json"; then
+    printf '%s\n' "null|missing|unresolved|0"
+    return
+  fi
+
+  resolved_tuple="$(
+    jq -r '
+      if (.signals.issuer_sponsor_api_live_smoke_ok? | type) == "boolean" then
+        [
+          (.signals.issuer_sponsor_api_live_smoke_ok | tostring),
+          (if .signals.issuer_sponsor_api_live_smoke_ok then "pass" else "fail" end),
+          "phase5_settlement_layer_check_summary.signals.issuer_sponsor_api_live_smoke_ok",
+          "1"
+        ]
+      elif (.stages.issuer_sponsor_api_live_smoke.ok? | type) == "boolean" then
+        [
+          (.stages.issuer_sponsor_api_live_smoke.ok | tostring),
+          (
+            if (.stages.issuer_sponsor_api_live_smoke.status? | type) == "string"
+              and (.stages.issuer_sponsor_api_live_smoke.status | length) > 0
+            then .stages.issuer_sponsor_api_live_smoke.status
+            else (if .stages.issuer_sponsor_api_live_smoke.ok then "pass" else "fail" end)
+            end
+          ),
+          "phase5_settlement_layer_check_summary.stages.issuer_sponsor_api_live_smoke.ok",
+          (
+            if (.stages.issuer_sponsor_api_live_smoke.resolved? | type) == "boolean"
+            then (if .stages.issuer_sponsor_api_live_smoke.resolved then "1" else "0" end)
+            else "1"
+            end
+          )
+        ]
+      elif (.stages.issuer_sponsor_api_live_smoke.status? | type) == "string"
+        and (.stages.issuer_sponsor_api_live_smoke.status | length) > 0 then
+        [
+          (
+            (.stages.issuer_sponsor_api_live_smoke.status | ascii_downcase) as $s
+            | if ($s == "pass" or $s == "ok" or $s == "true" or $s == "passed" or $s == "success" or $s == "succeeded")
+              then "true"
+              elif ($s == "fail" or $s == "false" or $s == "error" or $s == "failed" or $s == "blocked" or $s == "warn" or $s == "warning" or $s == "skip" or $s == "skipped" or $s == "invalid" or $s == "missing" or $s == "unresolved")
+              then "false"
+              else "null"
+              end
+          ),
+          .stages.issuer_sponsor_api_live_smoke.status,
+          "phase5_settlement_layer_check_summary.stages.issuer_sponsor_api_live_smoke.status",
+          (
+            if (.stages.issuer_sponsor_api_live_smoke.resolved? | type) == "boolean"
+            then (if .stages.issuer_sponsor_api_live_smoke.resolved then "1" else "0" end)
+            else "1"
+            end
+          )
+        ]
+      elif (.stages.issuer_sponsor_api_live_smoke.resolved? | type) == "boolean" then
+        [
+          "null",
+          "missing",
+          "phase5_settlement_layer_check_summary.stages.issuer_sponsor_api_live_smoke.resolved",
+          (if .stages.issuer_sponsor_api_live_smoke.resolved then "1" else "0" end)
+        ]
+      else
+        ["null", "missing", "unresolved", "0"]
+      end | join("|")
+    ' "$check_summary_json" 2>/dev/null || true
+  )"
+
+  if [[ -z "$resolved_tuple" ]]; then
+    printf '%s\n' "null|missing|unresolved|0"
+  else
+    printf '%s\n' "$resolved_tuple"
+  fi
+}
+
 ci_summary_contract_valid() {
   local path="$1"
   if ! json_file_valid "$path"; then
@@ -211,6 +287,19 @@ detect_checker_canonical_flags() {
   help_output="$("$script_path" --help 2>&1)"
   set -e
   if [[ "$help_output" == *"--require-settlement-failsoft-ok"* ]] || [[ "$help_output" == *"--require-settlement-acceptance-ok"* ]] || [[ "$help_output" == *"--require-settlement-bridge-smoke-ok"* ]] || [[ "$help_output" == *"--require-settlement-state-persistence-ok"* ]]; then
+    printf '%s' "1"
+  else
+    printf '%s' "0"
+  fi
+}
+
+detect_checker_issuer_sponsor_requirement_flag() {
+  local script_path="$1"
+  local help_output
+  set +e
+  help_output="$("$script_path" --help 2>&1)"
+  set -e
+  if [[ "$help_output" == *"--require-issuer-sponsor-api-live-smoke-ok"* ]]; then
     printf '%s' "1"
   else
     printf '%s' "0"
@@ -361,6 +450,7 @@ if [[ ! -x "$check_script" ]]; then
 fi
 
 check_script_supports_canonical_flags="$(detect_checker_canonical_flags "$check_script")"
+check_script_supports_issuer_sponsor_requirement_flag="$(detect_checker_issuer_sponsor_requirement_flag "$check_script")"
 
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
@@ -381,6 +471,10 @@ declare ci_contract_error=""
 declare check_contract_error=""
 declare ci_command=""
 declare check_command=""
+declare issuer_sponsor_api_live_smoke_ok="null"
+declare issuer_sponsor_api_live_smoke_status="missing"
+declare issuer_sponsor_api_live_smoke_source="unresolved"
+declare issuer_sponsor_api_live_smoke_resolved="0"
 
 ci_command_args=("$ci_script")
 if [[ "$dry_run" == "1" ]]; then
@@ -465,6 +559,10 @@ if [[ "$dry_run" == "1" ]]; then
       check_command_args+=(--require-role-combination-validation-ok 0)
     fi
   fi
+  if [[ "$check_script_supports_issuer_sponsor_requirement_flag" == "1" ]] \
+    && ! array_has_checker_flag "--require-issuer-sponsor-api-live-smoke-ok" "${check_command_args[@]:1}"; then
+    check_command_args+=(--require-issuer-sponsor-api-live-smoke-ok 0)
+  fi
 fi
 check_command="$(print_cmd "${check_command_args[@]}")"
 set +e
@@ -488,6 +586,15 @@ else
   else
     check_rc=3
   fi
+fi
+if json_file_valid "$check_summary_json"; then
+  issuer_sponsor_api_live_smoke_pair="$(resolve_issuer_sponsor_api_live_smoke_signal "$check_summary_json")"
+  issuer_sponsor_api_live_smoke_ok="${issuer_sponsor_api_live_smoke_pair%%|*}"
+  issuer_sponsor_api_live_smoke_pair="${issuer_sponsor_api_live_smoke_pair#*|}"
+  issuer_sponsor_api_live_smoke_status="${issuer_sponsor_api_live_smoke_pair%%|*}"
+  issuer_sponsor_api_live_smoke_pair="${issuer_sponsor_api_live_smoke_pair#*|}"
+  issuer_sponsor_api_live_smoke_source="${issuer_sponsor_api_live_smoke_pair%%|*}"
+  issuer_sponsor_api_live_smoke_resolved="${issuer_sponsor_api_live_smoke_pair##*|}"
 fi
 
 final_status="pass"
@@ -539,6 +646,10 @@ jq -n \
   --arg check_contract_error "$check_contract_error" \
   --argjson ci_summary_exists "$ci_summary_exists" \
   --argjson check_summary_exists "$check_summary_exists" \
+  --argjson issuer_sponsor_api_live_smoke_ok "$issuer_sponsor_api_live_smoke_ok" \
+  --arg issuer_sponsor_api_live_smoke_status "$issuer_sponsor_api_live_smoke_status" \
+  --arg issuer_sponsor_api_live_smoke_source "$issuer_sponsor_api_live_smoke_source" \
+  --argjson issuer_sponsor_api_live_smoke_resolved "$issuer_sponsor_api_live_smoke_resolved" \
   '{
     version: 1,
     schema: {
@@ -558,6 +669,14 @@ jq -n \
       summary_json: $summary_json,
       dry_run: ($dry_run == "1"),
       print_summary_json: ($print_summary_json == "1")
+    },
+    signals: {
+      issuer_sponsor_api_live_smoke_ok: $issuer_sponsor_api_live_smoke_ok,
+      issuer_sponsor_api_live_smoke_status: $issuer_sponsor_api_live_smoke_status,
+      issuer_sponsor_api_live_smoke_resolved: ($issuer_sponsor_api_live_smoke_resolved == 1),
+      sources: {
+        issuer_sponsor_api_live_smoke_ok: $issuer_sponsor_api_live_smoke_source
+      }
     },
     steps: {
       ci_phase5_settlement_layer: {

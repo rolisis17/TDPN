@@ -94,7 +94,8 @@ cat >"$check_summary" <<'EOF_CHECK'
     "settlement_failsoft_ok": true,
     "settlement_acceptance_ok": true,
     "settlement_bridge_smoke_ok": true,
-    "settlement_state_persistence_ok": true
+    "settlement_state_persistence_ok": true,
+    "issuer_sponsor_api_live_smoke_ok": true
   }
 }
 EOF_CHECK
@@ -109,7 +110,8 @@ cat >"$roadmap_summary" <<'EOF_ROADMAP'
       "settlement_failsoft_ok": true,
       "settlement_acceptance_ok": true,
       "settlement_bridge_smoke_ok": true,
-      "settlement_state_persistence_ok": true
+      "settlement_state_persistence_ok": true,
+      "issuer_sponsor_api_live_smoke_ok": true
     }
   }
 }
@@ -190,6 +192,7 @@ Flags:
   --require-settlement-acceptance-ok [0|1]
   --require-settlement-bridge-smoke-ok [0|1]
   --require-settlement-state-persistence-ok [0|1]
+  --require-issuer-sponsor-api-live-smoke-ok [0|1]
 EOF_HELP
   fi
   exit 0
@@ -203,11 +206,21 @@ fi
 printf 'handoff\t%s\n' "$*" >>"$capture"
 
 summary_json=""
+require_issuer_sponsor_api_live_smoke_ok="1"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --summary-json)
       summary_json="${2:-}"
       shift 2
+      ;;
+    --require-issuer-sponsor-api-live-smoke-ok)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_issuer_sponsor_api_live_smoke_ok="${2:-}"
+        shift 2
+      else
+        require_issuer_sponsor_api_live_smoke_ok="1"
+        shift
+      fi
       ;;
     *)
       shift
@@ -222,6 +235,30 @@ if [[ "${FAKE_HANDOFF_FAIL:-0}" == "1" ]]; then
   rc="${FAKE_HANDOFF_FAIL_RC:-19}"
 fi
 
+sponsor_mode="${FAKE_HANDOFF_SPONSOR_SIGNAL_MODE:-pass}"
+sponsor_ok_json="true"
+sponsor_status="pass"
+sponsor_resolved_json="true"
+sponsor_source="phase5_settlement_layer_handoff_check.signals.issuer_sponsor_api_live_smoke_ok"
+case "$sponsor_mode" in
+  unresolved)
+    sponsor_ok_json="null"
+    sponsor_status="missing"
+    sponsor_resolved_json="false"
+    sponsor_source="unresolved"
+    ;;
+  fail)
+    sponsor_ok_json="false"
+    sponsor_status="fail"
+    sponsor_resolved_json="true"
+    ;;
+  *)
+    sponsor_ok_json="true"
+    sponsor_status="pass"
+    sponsor_resolved_json="true"
+    ;;
+esac
+
 if [[ -n "$summary_json" && "${FAKE_HANDOFF_OMIT_SUMMARY:-0}" != "1" ]]; then
   mkdir -p "$(dirname "$summary_json")"
   cat >"$summary_json" <<EOF_SUMMARY
@@ -235,12 +272,23 @@ if [[ -n "$summary_json" && "${FAKE_HANDOFF_OMIT_SUMMARY:-0}" != "1" ]]; then
   "status": "$status",
   "rc": $rc,
   "fail_closed": true,
+  "inputs": {
+    "requirements": {
+      "issuer_sponsor_api_live_smoke_ok": $( [[ "$require_issuer_sponsor_api_live_smoke_ok" == "1" ]] && printf '%s' "true" || printf '%s' "false" )
+    }
+  },
   "handoff": {
     "run_pipeline_ok": true,
     "settlement_failsoft_ok": true,
     "settlement_acceptance_ok": true,
     "settlement_bridge_smoke_ok": true,
-    "settlement_state_persistence_ok": true
+    "settlement_state_persistence_ok": true,
+    "issuer_sponsor_api_live_smoke_ok": $sponsor_ok_json,
+    "issuer_sponsor_api_live_smoke_status": "$sponsor_status",
+    "issuer_sponsor_api_live_smoke_resolved": $sponsor_resolved_json,
+    "sources": {
+      "issuer_sponsor_api_live_smoke_ok": "$sponsor_source"
+    }
   },
   "decision": {
     "pass": true,
@@ -329,6 +377,11 @@ if ! jq -e --arg run_summary "$TMP_DIR/pass_run_summary.json" --arg handoff_summ
   and .steps.phase5_settlement_layer_handoff_check.command_rc == 0
   and .steps.phase5_settlement_layer_handoff_check.contract_valid == true
   and .steps.phase5_settlement_layer_handoff_check.artifacts.summary_json == $handoff_summary
+  and .handoff.issuer_sponsor_api_live_smoke_ok == true
+  and .handoff.issuer_sponsor_api_live_smoke_status == "pass"
+  and .handoff.issuer_sponsor_api_live_smoke_required == true
+  and .handoff.issuer_sponsor_api_live_smoke_resolved == true
+  and .handoff.sources.issuer_sponsor_api_live_smoke_ok == "phase5_settlement_layer_handoff_check.signals.issuer_sponsor_api_live_smoke_ok"
 ' "$PASS_WRAPPER_SUMMARY" >/dev/null; then
   echo "pass-path combined summary mismatch"
   cat "$PASS_WRAPPER_SUMMARY"
@@ -342,6 +395,7 @@ PHASE5_HANDOFF_RUN_CAPTURE_FILE="$CAPTURE" \
 PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_RUN_SCRIPT="$FAKE_RUN" \
 PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_HANDOFF_CHECK_SCRIPT="$FAKE_HANDOFF" \
 PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_CANONICAL_SUMMARY_JSON="$DRY_CANONICAL_SUMMARY" \
+FAKE_HANDOFF_SPONSOR_SIGNAL_MODE=unresolved \
 bash "$RUNNER" \
   --reports-dir "$TMP_DIR/reports_dry" \
   --run-summary-json "$TMP_DIR/dry_run_summary.json" \
@@ -359,7 +413,7 @@ if [[ "$run_line" != *"--dry-run 1"* || "$run_line" != *"--theta 9"* ]]; then
   echo "$run_line"
   exit 1
 fi
-if [[ "$handoff_line" != *"--require-run-pipeline-ok 0"* || "$handoff_line" != *"--require-settlement-failsoft-ok 0"* || "$handoff_line" != *"--require-windows-role-runbooks-ok 1"* || "$handoff_line" != *"--require-settlement-bridge-smoke-ok 0"* || "$handoff_line" != *"--require-settlement-state-persistence-ok 0"* ]]; then
+if [[ "$handoff_line" != *"--require-run-pipeline-ok 0"* || "$handoff_line" != *"--require-settlement-failsoft-ok 0"* || "$handoff_line" != *"--require-windows-role-runbooks-ok 1"* || "$handoff_line" != *"--require-settlement-bridge-smoke-ok 0"* || "$handoff_line" != *"--require-settlement-state-persistence-ok 0"* || "$handoff_line" != *"--require-issuer-sponsor-api-live-smoke-ok 0"* ]]; then
   echo "dry-run handoff relax/override mismatch"
   echo "$handoff_line"
   exit 1
@@ -375,6 +429,11 @@ if ! jq -e '
   and .inputs.dry_run == true
   and .steps.phase5_settlement_layer_run.contract_valid == true
   and .steps.phase5_settlement_layer_handoff_check.contract_valid == true
+  and .handoff.issuer_sponsor_api_live_smoke_ok == null
+  and .handoff.issuer_sponsor_api_live_smoke_status == "missing"
+  and .handoff.issuer_sponsor_api_live_smoke_required == false
+  and .handoff.issuer_sponsor_api_live_smoke_resolved == false
+  and .handoff.sources.issuer_sponsor_api_live_smoke_ok == "unresolved"
 ' "$DRY_WRAPPER_SUMMARY" >/dev/null; then
   echo "dry-run wrapper summary mismatch"
   cat "$DRY_WRAPPER_SUMMARY"
@@ -413,6 +472,11 @@ if [[ "$handoff_line" != *"--require-run-pipeline-ok 0"* || "$handoff_line" != *
 fi
 if [[ "$handoff_line" == *"--require-settlement-failsoft-ok"* || "$handoff_line" == *"--require-settlement-acceptance-ok"* || "$handoff_line" == *"--require-settlement-bridge-smoke-ok"* || "$handoff_line" == *"--require-settlement-state-persistence-ok"* ]]; then
   echo "canonical handoff requirement flags leaked for legacy checker help mode"
+  echo "$handoff_line"
+  exit 1
+fi
+if [[ "$handoff_line" == *"--require-issuer-sponsor-api-live-smoke-ok"* ]]; then
+  echo "sponsor live-smoke requirement should not be auto-injected for legacy checker help mode"
   echo "$handoff_line"
   exit 1
 fi
