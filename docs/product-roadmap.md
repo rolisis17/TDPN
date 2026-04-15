@@ -183,6 +183,9 @@ Current implementation posture:
 - chain adapter mode is optional and fail-soft (`memory` default, `cosmos` optional).
 - sponsor flow is staged through issuer sponsor APIs (`/v1/sponsor/quote|reserve|token|status`) plus payment-proof token issuance.
 - `tdpnd` runtime now supports `--state-dir` to switch chain module keepers from in-memory defaults to file-backed stores rooted at one state directory.
+- chain scaffold/module ordering now includes `vpnbilling`, `vpnrewards`, `vpnslashing`, `vpnsponsor`, `vpnvalidator`, and `vpngovernance`.
+- state-dir persistence now materializes validator/governance module state files (`vpnvalidator.json`, `vpngovernance.json`) alongside existing module stores.
+- gRPC runtime registration now includes validator/governance service namespaces (`tdpn.vpnvalidator.v1.{Msg,Query}` and `tdpn.vpngovernance.v1.{Msg,Query}`).
 - settlement bridge now exposes module query `GET` endpoints (list + by-id) alongside existing `POST` write endpoints.
 - Cosmos CI/local block now includes `scripts/integration_cosmos_tdpnd_state_dir_persistence.sh` to verify state-dir wiring and persistence across reopen.
 - phase5 settlement CI now includes these blockchain gate stages and scripts:

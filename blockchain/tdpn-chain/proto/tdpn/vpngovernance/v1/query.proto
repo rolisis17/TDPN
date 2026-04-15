@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package tdpn.vpngovernance.v1;
+
+option go_package = "github.com/tdpn/tdpn-chain/x/vpngovernance/types";
+
+import "tdpn/vpngovernance/v1/types.proto";
+
+service Query {
+  rpc GovernancePolicy(QueryGovernancePolicyRequest) returns (QueryGovernancePolicyResponse);
+  rpc GovernanceDecision(QueryGovernanceDecisionRequest) returns (QueryGovernanceDecisionResponse);
+  rpc ListGovernancePolicies(QueryListGovernancePoliciesRequest) returns (QueryListGovernancePoliciesResponse);
+  rpc ListGovernanceDecisions(QueryListGovernanceDecisionsRequest) returns (QueryListGovernanceDecisionsResponse);
+}
+
+message QueryGovernancePolicyRequest {
+  string policy_id = 1;
+}
+
+message QueryGovernancePolicyResponse {
+  GovernancePolicy policy = 1;
+  bool found = 2;
+}
+
+message QueryGovernanceDecisionRequest {
+  string decision_id = 1;
+}
+
+message QueryGovernanceDecisionResponse {
+  GovernanceDecision decision = 1;
+  bool found = 2;
+}
+
+message QueryListGovernancePoliciesRequest {}
+
+message QueryListGovernancePoliciesResponse {
+  repeated GovernancePolicy policies = 1;
+}
+
+message QueryListGovernanceDecisionsRequest {}
+
+message QueryListGovernanceDecisionsResponse {
+  repeated GovernanceDecision decisions = 1;
+}

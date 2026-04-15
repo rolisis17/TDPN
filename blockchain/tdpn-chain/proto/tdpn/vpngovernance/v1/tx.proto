@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package tdpn.vpngovernance.v1;
+
+option go_package = "github.com/tdpn/tdpn-chain/x/vpngovernance/types";
+
+import "tdpn/vpngovernance/v1/types.proto";
+
+service Msg {
+  rpc CreatePolicy(MsgCreatePolicyRequest) returns (MsgCreatePolicyResponse);
+  rpc RecordDecision(MsgRecordDecisionRequest) returns (MsgRecordDecisionResponse);
+}
+
+message MsgCreatePolicyRequest {
+  GovernancePolicy policy = 1;
+}
+
+message MsgCreatePolicyResponse {
+  GovernancePolicy policy = 1;
+  bool idempotent_replay = 2;
+  bool conflict = 3;
+}
+
+message MsgRecordDecisionRequest {
+  GovernanceDecision decision = 1;
+}
+
+message MsgRecordDecisionResponse {
+  GovernanceDecision decision = 1;
+  bool idempotent_replay = 2;
+  bool conflict = 3;
+}

@@ -14,6 +14,8 @@ This workspace defines the initial module boundaries for TDPN's VPN-compatible b
 - `x/vpnrewards`: provider reward accrual/distribution events.
 - `x/vpnslashing`: objective slash evidence ingestion and deterministic penalty execution.
 - `x/vpnsponsor`: sponsor account controls and credit delegation to end-user sessions.
+- `x/vpnvalidator`: validator eligibility and policy-scored validator metadata (scaffolded runtime module presence).
+- `x/vpngovernance`: governance/policy control-plane module namespace (scaffolded runtime module presence).
 
 ## Governance posture (hybrid v1)
 - Objective machine-verifiable events can be enforced on-chain.
@@ -92,6 +94,8 @@ This workspace defines the initial module boundaries for TDPN's VPN-compatible b
   - `ChainScaffold.RewardsMsgServer()` (`CreateAccrual`, `RecordDistribution`)
   - `ChainScaffold.SlashingMsgServer()` (`SubmitEvidence`, `ApplyPenalty`)
   - `ChainScaffold.SponsorMsgServer()` (`CreateAuthorization`, `DelegateCredit`)
+- Runtime scaffold/module ordering now also includes `vpnvalidator` and `vpngovernance`, with state-dir files `vpnvalidator.json` and `vpngovernance.json`.
+- gRPC runtime registration now includes module namespaces `tdpn.vpnvalidator.v1.{Msg,Query}` and `tdpn.vpngovernance.v1.{Msg,Query}`.
 - Module stubs: `x/*/{types,keeper,module}`.
 - Module query servers are available for get-by-id and list read-model queries under `x/*/module/query_server.go`.
 - Protobuf contracts and generated Go/grpc surfaces are available under:
@@ -103,6 +107,7 @@ This workspace defines the initial module boundaries for TDPN's VPN-compatible b
 - gRPC registration/runtime contract for each module is the generated pair:
   - `RegisterMsgServer(...)` from `tx_grpc.pb.go`
   - `RegisterQueryServer(...)` from `query_grpc.pb.go`
+- Billing/rewards/slashing/sponsor/validator/governance all register generated `Msg`/`Query` gRPC surfaces in runtime.
 - Proto toolchain:
   - `./scripts/gen_proto.sh --lint-only` (contract validation only)
   - `./scripts/gen_proto.sh` (lint + generate when Buf toolchain is installed)
@@ -110,7 +115,7 @@ This workspace defines the initial module boundaries for TDPN's VPN-compatible b
 - Bridge mapping details: `docs/settlement-bridge-mapping.md`.
 
 ## gRPC smoke
-- Registration expectation: each module exposes generated `Msg` + `Query` services (8 total registrations across billing/rewards/slashing/sponsor).
+- Registration expectation: runtime exposes `Msg` + `Query` services for six module namespaces (12 total registrations across billing/rewards/slashing/sponsor/validator/governance).
 - Runtime behavior with `tdpnd --grpc-listen`: gRPC health (`grpc.health.v1.Health`) and server reflection are also exposed.
 - In `--grpc-auth-token` mode:
   - module RPCs require `authorization: Bearer <token>`,

@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package tdpn.vpnvalidator.v1;
+
+option go_package = "github.com/tdpn/tdpn-chain/x/vpnvalidator/types";
+
+enum ReconciliationStatus {
+  RECONCILIATION_STATUS_UNSPECIFIED = 0;
+  RECONCILIATION_STATUS_PENDING = 1;
+  RECONCILIATION_STATUS_SUBMITTED = 2;
+  RECONCILIATION_STATUS_CONFIRMED = 3;
+  RECONCILIATION_STATUS_FAILED = 4;
+}
+
+// ValidatorEligibility tracks whether a validator is eligible to serve VPN sessions.
+message ValidatorEligibility {
+  string validator_id = 1;
+  string operator_address = 2;
+  bool eligible = 3;
+  string policy_reason = 4;
+  int64 updated_at_unix = 5;
+  ReconciliationStatus status = 6;
+}
+
+// ValidatorStatusRecord tracks validator lifecycle changes captured by objective evidence.
+message ValidatorStatusRecord {
+  string status_id = 1;
+  string validator_id = 2;
+  string consensus_address = 3;
+  string lifecycle_status = 4;
+  int64 evidence_height = 5;
+  string evidence_ref = 6;
+  int64 recorded_at_unix = 7;
+  ReconciliationStatus status = 8;
+}

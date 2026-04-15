@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	billingtypes "github.com/tdpn/tdpn-chain/x/vpnbilling/types"
@@ -14,15 +16,17 @@ func TestNewChainScaffold_ModuleNamesIncludeExpectedModules(t *testing.T) {
 	}
 
 	moduleNames := scaffold.ModuleNames()
-	if len(moduleNames) != 4 {
-		t.Fatalf("expected 4 module names, got %d", len(moduleNames))
+	if len(moduleNames) != 6 {
+		t.Fatalf("expected 6 module names, got %d", len(moduleNames))
 	}
 
 	expected := map[string]struct{}{
-		"vpnbilling":  {},
-		"vpnrewards":  {},
-		"vpnslashing": {},
-		"vpnsponsor":  {},
+		"vpnbilling":    {},
+		"vpnrewards":    {},
+		"vpnslashing":   {},
+		"vpnsponsor":    {},
+		"vpnvalidator":  {},
+		"vpngovernance": {},
 	}
 	seen := make(map[string]struct{}, len(moduleNames))
 	for _, name := range moduleNames {
@@ -79,6 +83,11 @@ func TestNewChainScaffoldWithStateDirPersistsAcrossReopen(t *testing.T) {
 	scaffoldB, err := NewChainScaffoldWithStateDir(stateDir)
 	if err != nil {
 		t.Fatalf("NewChainScaffoldWithStateDir reopen: %v", err)
+	}
+	for _, fileName := range []string{"vpnvalidator.json", "vpngovernance.json"} {
+		if _, err := os.Stat(filepath.Join(stateDir, fileName)); err != nil {
+			t.Fatalf("expected %s scaffold state file to exist: %v", fileName, err)
+		}
 	}
 	reservationResp, err := scaffoldB.BillingQueryServer().GetReservation(context.Background(), BillingGetReservationRequest{
 		ReservationID: reservationID,

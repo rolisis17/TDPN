@@ -141,7 +141,7 @@ func TestRunTDPNDDefaultModePrintsModulesAndExits(t *testing.T) {
 	t.Parallel()
 
 	scaffold := &fakeScaffold{
-		modules: []string{"vpnbilling", "vpnrewards", "vpnslashing", "vpnsponsor"},
+		modules: []string{"vpnbilling", "vpnrewards", "vpnslashing", "vpnsponsor", "vpnvalidator", "vpngovernance"},
 	}
 	var out bytes.Buffer
 
@@ -156,7 +156,7 @@ func TestRunTDPNDDefaultModePrintsModulesAndExits(t *testing.T) {
 		t.Fatalf("expected no error, got %v", err)
 	}
 
-	expected := "tdpn-chain scaffold ready: vpnbilling, vpnrewards, vpnslashing, vpnsponsor\n"
+	expected := "tdpn-chain scaffold ready: vpnbilling, vpnrewards, vpnslashing, vpnsponsor, vpnvalidator, vpngovernance\n"
 	if out.String() != expected {
 		t.Fatalf("unexpected output %q", out.String())
 	}

@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package tdpn.vpnvalidator.v1;
+
+option go_package = "github.com/tdpn/tdpn-chain/x/vpnvalidator/types";
+
+import "tdpn/vpnvalidator/v1/types.proto";
+
+service Msg {
+  rpc SetValidatorEligibility(MsgSetValidatorEligibilityRequest) returns (MsgSetValidatorEligibilityResponse);
+  rpc RecordValidatorStatus(MsgRecordValidatorStatusRequest) returns (MsgRecordValidatorStatusResponse);
+}
+
+message MsgSetValidatorEligibilityRequest {
+  ValidatorEligibility eligibility = 1;
+}
+
+message MsgSetValidatorEligibilityResponse {
+  ValidatorEligibility eligibility = 1;
+}
+
+message MsgRecordValidatorStatusRequest {
+  ValidatorStatusRecord record = 1;
+}
+
+message MsgRecordValidatorStatusResponse {
+  ValidatorStatusRecord record = 1;
+}

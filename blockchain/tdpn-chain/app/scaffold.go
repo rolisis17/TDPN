@@ -3,25 +3,48 @@ package app
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
 	billingkeeper "github.com/tdpn/tdpn-chain/x/vpnbilling/keeper"
 	billingmodule "github.com/tdpn/tdpn-chain/x/vpnbilling/module"
+	governancekeeper "github.com/tdpn/tdpn-chain/x/vpngovernance/keeper"
+	governancemodule "github.com/tdpn/tdpn-chain/x/vpngovernance/module"
 	rewardskeeper "github.com/tdpn/tdpn-chain/x/vpnrewards/keeper"
 	rewardsmodule "github.com/tdpn/tdpn-chain/x/vpnrewards/module"
 	slashingkeeper "github.com/tdpn/tdpn-chain/x/vpnslashing/keeper"
 	slashingmodule "github.com/tdpn/tdpn-chain/x/vpnslashing/module"
 	sponsorkeeper "github.com/tdpn/tdpn-chain/x/vpnsponsor/keeper"
 	sponsormodule "github.com/tdpn/tdpn-chain/x/vpnsponsor/module"
+	validatorkeeper "github.com/tdpn/tdpn-chain/x/vpnvalidator/keeper"
+	validatormodule "github.com/tdpn/tdpn-chain/x/vpnvalidator/module"
+)
+
+const (
+	moduleNameBilling    = "vpnbilling"
+	moduleNameRewards    = "vpnrewards"
+	moduleNameSlashing   = "vpnslashing"
+	moduleNameSponsor    = "vpnsponsor"
+	moduleNameValidator  = "vpnvalidator"
+	moduleNameGovernance = "vpngovernance"
+
+	stateFileBilling    = "vpnbilling.json"
+	stateFileRewards    = "vpnrewards.json"
+	stateFileSlashing   = "vpnslashing.json"
+	stateFileSponsor    = "vpnsponsor.json"
+	stateFileValidator  = "vpnvalidator.json"
+	stateFileGovernance = "vpngovernance.json"
 )
 
 // ChainScaffold wires the phase-6 module set for local runtime/testnet gates.
 type ChainScaffold struct {
-	BillingModule  billingmodule.AppModule
-	RewardsModule  rewardsmodule.AppModule
-	SlashingModule slashingmodule.AppModule
-	SponsorModule  sponsormodule.AppModule
+	BillingModule    billingmodule.AppModule
+	RewardsModule    rewardsmodule.AppModule
+	SlashingModule   slashingmodule.AppModule
+	SponsorModule    sponsormodule.AppModule
+	ValidatorModule  validatormodule.AppModule
+	GovernanceModule governancemodule.AppModule
 }
 
 // NewChainScaffold creates in-memory keepers and module descriptors.
@@ -43,12 +66,16 @@ func newInMemoryChainScaffold() *ChainScaffold {
 	rewardsKeeper := rewardskeeper.NewKeeper()
 	slashingKeeper := slashingkeeper.NewKeeper()
 	sponsorKeeper := sponsorkeeper.NewKeeper()
+	validatorKeeper := validatorkeeper.NewKeeper()
+	governanceKeeper := governancekeeper.NewKeeper()
 
 	return &ChainScaffold{
-		BillingModule:  billingmodule.NewAppModule(billingKeeper),
-		RewardsModule:  rewardsmodule.NewAppModule(rewardsKeeper),
-		SlashingModule: slashingmodule.NewAppModule(slashingKeeper),
-		SponsorModule:  sponsormodule.NewAppModule(sponsorKeeper),
+		BillingModule:    billingmodule.NewAppModule(billingKeeper),
+		RewardsModule:    rewardsmodule.NewAppModule(rewardsKeeper),
+		SlashingModule:   slashingmodule.NewAppModule(slashingKeeper),
+		SponsorModule:    sponsormodule.NewAppModule(sponsorKeeper),
+		ValidatorModule:  validatormodule.NewAppModule(validatorKeeper),
+		GovernanceModule: governancemodule.NewAppModule(governanceKeeper),
 	}
 }
 
@@ -62,37 +89,60 @@ func (s *ChainScaffold) ConfigureStateDir(stateDir string) error {
 		return errors.New("state dir is required")
 	}
 
-	billingStore, err := billingkeeper.NewFileStore(filepath.Join(stateDir, "vpnbilling.json"))
+	billingStore, err := billingkeeper.NewFileStore(filepath.Join(stateDir, stateFileBilling))
 	if err != nil {
 		return fmt.Errorf("vpnbilling file store: %w", err)
 	}
-	rewardsStore, err := rewardskeeper.NewFileStore(filepath.Join(stateDir, "vpnrewards.json"))
+	rewardsStore, err := rewardskeeper.NewFileStore(filepath.Join(stateDir, stateFileRewards))
 	if err != nil {
 		return fmt.Errorf("vpnrewards file store: %w", err)
 	}
-	slashingStore, err := slashingkeeper.NewFileStore(filepath.Join(stateDir, "vpnslashing.json"))
+	slashingStore, err := slashingkeeper.NewFileStore(filepath.Join(stateDir, stateFileSlashing))
 	if err != nil {
 		return fmt.Errorf("vpnslashing file store: %w", err)
 	}
-	sponsorStore, err := sponsorkeeper.NewFileStore(filepath.Join(stateDir, "vpnsponsor.json"))
+	sponsorStore, err := sponsorkeeper.NewFileStore(filepath.Join(stateDir, stateFileSponsor))
 	if err != nil {
 		return fmt.Errorf("vpnsponsor file store: %w", err)
+	}
+	validatorStatePath := filepath.Join(stateDir, stateFileValidator)
+	if err := ensureScaffoldStateFile(validatorStatePath); err != nil {
+		return fmt.Errorf("vpnvalidator file store: %w", err)
+	}
+	governanceStatePath := filepath.Join(stateDir, stateFileGovernance)
+	if err := ensureScaffoldStateFile(governanceStatePath); err != nil {
+		return fmt.Errorf("vpngovernance file store: %w", err)
+	}
+	validatorStore, err := validatorkeeper.NewFileStore(validatorStatePath)
+	if err != nil {
+		return fmt.Errorf("vpnvalidator file store: %w", err)
+	}
+	governanceStore, err := governancekeeper.NewFileStore(governanceStatePath)
+	if err != nil {
+		return fmt.Errorf("vpngovernance file store: %w", err)
 	}
 
 	s.BillingModule = billingmodule.NewAppModule(billingkeeper.NewKeeperWithStore(billingStore))
 	s.RewardsModule = rewardsmodule.NewAppModule(rewardskeeper.NewKeeperWithStore(rewardsStore))
 	s.SlashingModule = slashingmodule.NewAppModule(slashingkeeper.NewKeeperWithStore(slashingStore))
 	s.SponsorModule = sponsormodule.NewAppModule(sponsorkeeper.NewKeeperWithStore(sponsorStore))
+	s.ValidatorModule = validatormodule.NewAppModule(validatorkeeper.NewKeeperWithStore(validatorStore))
+	s.GovernanceModule = governancemodule.NewAppModule(governancekeeper.NewKeeperWithStore(governanceStore))
 	return nil
 }
 
 // ModuleNames returns the module identifiers expected by future app wiring.
 func (s *ChainScaffold) ModuleNames() []string {
+	if s == nil {
+		return nil
+	}
 	return []string{
-		s.BillingModule.Name(),
-		s.RewardsModule.Name(),
-		s.SlashingModule.Name(),
-		s.SponsorModule.Name(),
+		moduleNameOrDefault(s.BillingModule.Name(), moduleNameBilling),
+		moduleNameOrDefault(s.RewardsModule.Name(), moduleNameRewards),
+		moduleNameOrDefault(s.SlashingModule.Name(), moduleNameSlashing),
+		moduleNameOrDefault(s.SponsorModule.Name(), moduleNameSponsor),
+		moduleNameOrDefault(s.ValidatorModule.Name(), moduleNameValidator),
+		moduleNameOrDefault(s.GovernanceModule.Name(), moduleNameGovernance),
 	}
 }
 
@@ -158,4 +208,26 @@ func (s *ChainScaffold) SponsorQueryServer() SponsorQueryServer {
 		return sponsorQueryServer{queryServer: sponsormodule.NewQueryServer(nil)}
 	}
 	return sponsorQueryServer{queryServer: sponsormodule.NewQueryServer(&s.SponsorModule.Keeper)}
+}
+
+func moduleNameOrDefault(value, fallback string) string {
+	name := strings.TrimSpace(value)
+	if name == "" {
+		return fallback
+	}
+	return name
+}
+
+func ensureScaffoldStateFile(path string) error {
+	info, err := os.Stat(path)
+	if err == nil {
+		if info.IsDir() {
+			return fmt.Errorf("%s resolves to a directory", path)
+		}
+		return nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return os.WriteFile(path, []byte("{}\n"), 0o600)
 }

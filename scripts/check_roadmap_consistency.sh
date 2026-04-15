@@ -10,6 +10,8 @@ roadmap_script="scripts/roadmap_progress_report.sh"
 bootstrap_validator_doc="docs/blockchain-bootstrap-validator-plan.md"
 cosmos_runtime_doc="docs/cosmos-settlement-runtime.md"
 chain_readme="blockchain/tdpn-chain/README.md"
+chain_scaffold_file="blockchain/tdpn-chain/app/scaffold.go"
+chain_grpc_registry_file="blockchain/tdpn-chain/app/grpc_registry.go"
 settlement_mapping_doc="blockchain/tdpn-chain/docs/settlement-bridge-mapping.md"
 blockchain_sponsor_quickstart_doc="docs/blockchain-app-sponsorship-quickstart.md"
 protocol_doc="docs/protocol.md"
@@ -96,7 +98,7 @@ check_confirmation_interface_wording() {
   fi
 }
 
-for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$chain_readme" "$settlement_mapping_doc" "$blockchain_sponsor_quickstart_doc" "$phase5_ci_script" "$phase5_integration_script" "$phase5_check_script" "$phase5_run_script" "$phase5_handoff_check_script" "$phase5_handoff_run_script" "$phase5_check_integration_script" "$phase5_run_integration_script" "$phase5_handoff_check_integration_script" "$phase5_handoff_run_integration_script" "$phase5_summary_report_script" "$phase5_summary_report_integration_script" "$ci_local_script" "$easy_node_blockchain_summary_reports_integration_script" "$phase6_ci_script" "$phase6_integration_script" "$phase6_contracts_ci_script" "$phase6_contracts_integration_script" "$phase6_contracts_live_smoke_script" "$phase6_module_coverage_floor_script" "$phase6_keeper_coverage_floor_script" "$phase6_dual_write_parity_script" "$phase6_check_script" "$phase6_run_script" "$phase6_check_integration_script" "$phase6_run_integration_script" "$phase6_suite_script" "$phase6_suite_integration_script" "$phase6_handoff_check_script" "$phase6_handoff_run_script" "$phase6_handoff_check_integration_script" "$phase6_handoff_run_integration_script" "$phase6_summary_report_script" "$phase6_summary_report_integration_script"; do
+for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$chain_readme" "$chain_scaffold_file" "$chain_grpc_registry_file" "$settlement_mapping_doc" "$blockchain_sponsor_quickstart_doc" "$phase5_ci_script" "$phase5_integration_script" "$phase5_check_script" "$phase5_run_script" "$phase5_handoff_check_script" "$phase5_handoff_run_script" "$phase5_check_integration_script" "$phase5_run_integration_script" "$phase5_handoff_check_integration_script" "$phase5_handoff_run_integration_script" "$phase5_summary_report_script" "$phase5_summary_report_integration_script" "$ci_local_script" "$easy_node_blockchain_summary_reports_integration_script" "$phase6_ci_script" "$phase6_integration_script" "$phase6_contracts_ci_script" "$phase6_contracts_integration_script" "$phase6_contracts_live_smoke_script" "$phase6_module_coverage_floor_script" "$phase6_keeper_coverage_floor_script" "$phase6_dual_write_parity_script" "$phase6_check_script" "$phase6_run_script" "$phase6_check_integration_script" "$phase6_run_integration_script" "$phase6_suite_script" "$phase6_suite_integration_script" "$phase6_handoff_check_script" "$phase6_handoff_run_script" "$phase6_handoff_check_integration_script" "$phase6_handoff_run_integration_script" "$phase6_summary_report_script" "$phase6_summary_report_integration_script"; do
   if [[ ! -f "$f" ]]; then
     echo "missing required file: $f"
     exit 1
@@ -1137,6 +1139,60 @@ fi
 check_confirmation_lifecycle_wording "$chain_readme" "chain README"
 check_adapter_roundtrip_wording "$chain_readme" "chain README"
 check_confirmation_interface_wording "$chain_readme" "chain README"
+for module_name in vpnvalidator vpngovernance; do
+  if ! rg -Fq "$module_name" "$chain_readme"; then
+    echo "chain README must reference ${module_name} module presence"
+    exit 1
+  fi
+  if ! rg -Fq "$module_name" "$full_plan"; then
+    echo "full execution plan must reference ${module_name} module presence"
+    exit 1
+  fi
+  if ! rg -Fq "$module_name" "$product_roadmap"; then
+    echo "product roadmap must reference ${module_name} module presence"
+    exit 1
+  fi
+done
+if ! rg -Fq "vpnvalidator.json" "$chain_scaffold_file"; then
+  echo "chain scaffold must persist vpnvalidator state-dir file store"
+  exit 1
+fi
+if ! rg -Fq "vpngovernance.json" "$chain_scaffold_file"; then
+  echo "chain scaffold must persist vpngovernance state-dir file store"
+  exit 1
+fi
+if ! rg -Fq "ValidatorModule" "$chain_scaffold_file"; then
+  echo "chain scaffold must include validator module wiring in scaffold struct"
+  exit 1
+fi
+if ! rg -Fq "GovernanceModule" "$chain_scaffold_file"; then
+  echo "chain scaffold must include governance module wiring in scaffold struct"
+  exit 1
+fi
+if ! rg -Fq "validatormodule.NewAppModule" "$chain_scaffold_file"; then
+  echo "chain scaffold must instantiate vpnvalidator module app wiring"
+  exit 1
+fi
+if ! rg -Fq "governancemodule.NewAppModule" "$chain_scaffold_file"; then
+  echo "chain scaffold must instantiate vpngovernance module app wiring"
+  exit 1
+fi
+if ! rg -Fq "vpnvalidatorpb.RegisterMsgServer" "$chain_grpc_registry_file"; then
+  echo "chain grpc registry must wire vpnvalidator msg service registration"
+  exit 1
+fi
+if ! rg -Fq "vpnvalidatorpb.RegisterQueryServer" "$chain_grpc_registry_file"; then
+  echo "chain grpc registry must wire vpnvalidator query service registration"
+  exit 1
+fi
+if ! rg -Fq "vpngovernancepb.RegisterMsgServer" "$chain_grpc_registry_file"; then
+  echo "chain grpc registry must wire vpngovernance msg service registration"
+  exit 1
+fi
+if ! rg -Fq "vpngovernancepb.RegisterQueryServer" "$chain_grpc_registry_file"; then
+  echo "chain grpc registry must wire vpngovernance query service registration"
+  exit 1
+fi
 
 if ! rg -Fq "GET /x/vpnbilling/reservations[/{reservation_id}]" "$settlement_mapping_doc"; then
   echo "settlement bridge mapping must document list/by-id GET query mapping"

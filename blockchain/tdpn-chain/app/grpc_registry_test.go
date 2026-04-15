@@ -37,6 +37,17 @@ func TestRegisterGRPCServicesBillingAndSponsorRoundTrip(t *testing.T) {
 	if err := scaffold.RegisterGRPCServices(grpcServer); err != nil {
 		t.Fatalf("register grpc services: %v", err)
 	}
+	serviceInfo := grpcServer.GetServiceInfo()
+	for _, serviceName := range []string{
+		"tdpn.vpnvalidator.v1.Msg",
+		"tdpn.vpnvalidator.v1.Query",
+		"tdpn.vpngovernance.v1.Msg",
+		"tdpn.vpngovernance.v1.Query",
+	} {
+		if _, ok := serviceInfo[serviceName]; !ok {
+			t.Fatalf("expected grpc service registration for %s", serviceName)
+		}
+	}
 
 	lis := bufconn.Listen(1024 * 1024)
 	defer lis.Close()
