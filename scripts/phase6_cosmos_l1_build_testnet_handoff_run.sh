@@ -205,11 +205,13 @@ extract_roadmap_summary_path() {
 need_cmd jq
 need_cmd date
 need_cmd mktemp
+need_cmd cp
 
 reports_dir="${PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_RUN_REPORTS_DIR:-}"
 run_summary_json="${PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_RUN_RUN_SUMMARY_JSON:-}"
 handoff_summary_json="${PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_RUN_HANDOFF_SUMMARY_JSON:-}"
 summary_json="${PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_RUN_SUMMARY_JSON:-}"
+canonical_summary_json="${PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_RUN_CANONICAL_SUMMARY_JSON:-$ROOT_DIR/.easy-node-logs/phase6_cosmos_l1_build_testnet_handoff_run_summary.json}"
 print_summary_json="${PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_RUN_PRINT_SUMMARY_JSON:-1}"
 dry_run="${PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_RUN_DRY_RUN:-0}"
 run_phase6_cosmos_l1_build_testnet_run="${PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_RUN_RUN_PHASE6_COSMOS_L1_BUILD_TESTNET_RUN:-1}"
@@ -350,11 +352,13 @@ if [[ -z "$summary_json" ]]; then
 else
   summary_json="$(abs_path "$summary_json")"
 fi
+canonical_summary_json="$(abs_path "$canonical_summary_json")"
 
 mkdir -p "$reports_dir" \
   "$(dirname "$run_summary_json")" \
   "$(dirname "$handoff_summary_json")" \
-  "$(dirname "$summary_json")"
+  "$(dirname "$summary_json")" \
+  "$(dirname "$canonical_summary_json")"
 
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
@@ -518,6 +522,7 @@ jq -n \
   --argjson rc "$final_rc" \
   --arg reports_dir "$reports_dir" \
   --arg summary_json "$summary_json" \
+  --arg canonical_summary_json "$canonical_summary_json" \
   --arg run_summary_json "$run_summary_json" \
   --arg handoff_summary_json "$handoff_summary_json" \
   --arg run_roadmap_summary_json "$run_roadmap_summary_json" \
@@ -610,6 +615,7 @@ jq -n \
     artifacts: {
       reports_dir: $reports_dir,
       summary_json: $summary_json,
+      canonical_summary_json: $canonical_summary_json,
       run_summary_json: $run_summary_json,
       handoff_summary_json: $handoff_summary_json,
       run_roadmap_summary_json: (if $run_roadmap_summary_json == "" then null else $run_roadmap_summary_json end),
@@ -618,10 +624,16 @@ jq -n \
     }
   }' >"$summary_tmp"
 mv -f "$summary_tmp" "$summary_json"
+if [[ "$summary_json" != "$canonical_summary_json" ]]; then
+  canonical_tmp="$(mktemp "${canonical_summary_json}.tmp.XXXXXX")"
+  cp "$summary_json" "$canonical_tmp"
+  mv -f "$canonical_tmp" "$canonical_summary_json"
+fi
 
 echo "[phase6-cosmos-l1-build-testnet-handoff-run] status=$final_status rc=$final_rc dry_run=$dry_run"
 echo "[phase6-cosmos-l1-build-testnet-handoff-run] reports_dir=$reports_dir"
 echo "[phase6-cosmos-l1-build-testnet-handoff-run] summary_json=$summary_json"
+echo "[phase6-cosmos-l1-build-testnet-handoff-run] canonical_summary_json=$canonical_summary_json"
 if [[ "$print_summary_json" == "1" ]]; then
   cat "$summary_json"
 fi

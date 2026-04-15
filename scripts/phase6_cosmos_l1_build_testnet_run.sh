@@ -156,6 +156,7 @@ reports_dir="${PHASE6_COSMOS_L1_BUILD_TESTNET_RUN_REPORTS_DIR:-$ROOT_DIR/.easy-n
 ci_summary_json="${PHASE6_COSMOS_L1_BUILD_TESTNET_RUN_CI_SUMMARY_JSON:-$reports_dir/phase6_cosmos_l1_build_testnet_ci_summary.json}"
 check_summary_json="${PHASE6_COSMOS_L1_BUILD_TESTNET_RUN_CHECK_SUMMARY_JSON:-$reports_dir/phase6_cosmos_l1_build_testnet_check_summary.json}"
 summary_json="${PHASE6_COSMOS_L1_BUILD_TESTNET_RUN_SUMMARY_JSON:-$reports_dir/phase6_cosmos_l1_build_testnet_run_summary.json}"
+canonical_summary_json="${PHASE6_COSMOS_L1_BUILD_TESTNET_RUN_CANONICAL_SUMMARY_JSON:-$ROOT_DIR/.easy-node-logs/phase6_cosmos_l1_build_testnet_run_summary.json}"
 print_summary_json="${PHASE6_COSMOS_L1_BUILD_TESTNET_RUN_PRINT_SUMMARY_JSON:-1}"
 dry_run="${PHASE6_COSMOS_L1_BUILD_TESTNET_RUN_DRY_RUN:-0}"
 
@@ -253,8 +254,9 @@ reports_dir="$(abs_path "$reports_dir")"
 ci_summary_json="$(abs_path "$ci_summary_json")"
 check_summary_json="$(abs_path "$check_summary_json")"
 summary_json="$(abs_path "$summary_json")"
+canonical_summary_json="$(abs_path "$canonical_summary_json")"
 
-mkdir -p "$reports_dir" "$(dirname "$ci_summary_json")" "$(dirname "$check_summary_json")" "$(dirname "$summary_json")"
+mkdir -p "$reports_dir" "$(dirname "$ci_summary_json")" "$(dirname "$check_summary_json")" "$(dirname "$summary_json")" "$(dirname "$canonical_summary_json")"
 
 ci_script="${PHASE6_COSMOS_L1_BUILD_TESTNET_RUN_CI_SCRIPT:-$ROOT_DIR/scripts/ci_phase6_cosmos_l1_build_testnet.sh}"
 check_script="${PHASE6_COSMOS_L1_BUILD_TESTNET_RUN_CHECK_SCRIPT:-$ROOT_DIR/scripts/phase6_cosmos_l1_build_testnet_check.sh}"
@@ -407,6 +409,7 @@ jq -n \
   --argjson rc "$final_rc" \
   --arg reports_dir "$reports_dir" \
   --arg summary_json "$summary_json" \
+  --arg canonical_summary_json "$canonical_summary_json" \
   --arg ci_summary_json "$ci_summary_json" \
   --arg check_summary_json "$check_summary_json" \
   --arg dry_run "$dry_run" \
@@ -476,15 +479,20 @@ jq -n \
     artifacts: {
       reports_dir: $reports_dir,
       summary_json: $summary_json,
+      canonical_summary_json: $canonical_summary_json,
       ci_summary_json: $ci_summary_json,
       check_summary_json: $check_summary_json
     }
   }' >"$summary_tmp"
 mv -f "$summary_tmp" "$summary_json"
+if [[ "$summary_json" != "$canonical_summary_json" ]]; then
+  cp -f "$summary_json" "$canonical_summary_json"
+fi
 
 echo "[phase6-cosmos-l1-run] status=$final_status rc=$final_rc dry_run=$dry_run"
 echo "[phase6-cosmos-l1-run] reports_dir=$reports_dir"
 echo "[phase6-cosmos-l1-run] summary_json=$summary_json"
+echo "[phase6-cosmos-l1-run] canonical_summary_json=$canonical_summary_json"
 if [[ "$print_summary_json" == "1" ]]; then
   cat "$summary_json"
 fi

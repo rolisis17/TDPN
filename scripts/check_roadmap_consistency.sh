@@ -474,12 +474,28 @@ if ! rg -Fq "require-tdpnd-grpc-auth-live-smoke-ok" "$phase6_run_script"; then
   echo "phase6 run wrapper must forward/handle tdpnd_grpc_auth_live_smoke requirement"
   exit 1
 fi
+if ! rg -Fq "PHASE6_COSMOS_L1_BUILD_TESTNET_RUN_CANONICAL_SUMMARY_JSON" "$phase6_run_script"; then
+  echo "phase6 run wrapper must expose canonical summary artifact override env"
+  exit 1
+fi
+if ! rg -Fq "canonical_summary_json" "$phase6_run_script"; then
+  echo "phase6 run wrapper must emit canonical summary artifact metadata/logging"
+  exit 1
+fi
 if ! rg -Fq "phase6_cosmos_l1_build_testnet_check_summary" "$phase6_check_script"; then
   echo "phase6 check wrapper must emit phase6 check summary schema id"
   exit 1
 fi
 if ! rg -Fq "tdpnd_grpc_auth_live_smoke" "$phase6_check_script"; then
   echo "phase6 check wrapper must include tdpnd_grpc_auth_live_smoke readiness signal"
+  exit 1
+fi
+if ! rg -Fq "PHASE6_COSMOS_L1_BUILD_TESTNET_CHECK_CANONICAL_SUMMARY_JSON" "$phase6_check_script"; then
+  echo "phase6 check wrapper must expose canonical summary artifact override env"
+  exit 1
+fi
+if ! rg -Fq "canonical_summary_json" "$phase6_check_script"; then
+  echo "phase6 check wrapper must emit canonical summary artifact metadata"
   exit 1
 fi
 if ! rg -Fq "phase6_cosmos_l1_build_testnet_check_summary" "$phase6_run_script"; then
@@ -522,12 +538,28 @@ if ! rg -Fq "require-tdpnd-grpc-auth-live-smoke-ok" "$phase6_handoff_run_script"
   echo "phase6 handoff-run wrapper must forward/handle tdpnd_grpc_auth_live_smoke requirement"
   exit 1
 fi
+if ! rg -Fq "PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_RUN_CANONICAL_SUMMARY_JSON" "$phase6_handoff_run_script"; then
+  echo "phase6 handoff-run wrapper must expose canonical summary artifact override env"
+  exit 1
+fi
+if ! rg -Fq "canonical_summary_json" "$phase6_handoff_run_script"; then
+  echo "phase6 handoff-run wrapper must emit canonical summary artifact metadata/logging"
+  exit 1
+fi
 if ! rg -Fq "phase6_cosmos_l1_build_testnet_handoff_check_summary" "$phase6_handoff_check_script"; then
   echo "phase6 handoff-check wrapper must emit phase6 handoff-check summary schema id"
   exit 1
 fi
 if ! rg -Fq "tdpnd_grpc_auth_live_smoke" "$phase6_handoff_check_script"; then
   echo "phase6 handoff-check wrapper must include tdpnd_grpc_auth_live_smoke readiness signal"
+  exit 1
+fi
+if ! rg -Fq "PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_CHECK_CANONICAL_SUMMARY_JSON" "$phase6_handoff_check_script"; then
+  echo "phase6 handoff-check wrapper must expose canonical summary artifact override env"
+  exit 1
+fi
+if ! rg -Fq "canonical_summary_json" "$phase6_handoff_check_script"; then
+  echo "phase6 handoff-check wrapper must emit canonical summary artifact metadata"
   exit 1
 fi
 if ! rg -Fq "phase6_cosmos_l1_build_testnet_handoff_check_summary" "$phase6_handoff_run_script"; then
@@ -543,12 +575,28 @@ if ! rg -Fq "require-tdpnd-grpc-auth-live-smoke-ok" "$phase6_run_integration_scr
   echo "phase6 run integration must validate tdpnd_grpc_auth_live_smoke requirement forwarding/handling"
   exit 1
 fi
+if ! rg -Fq "canonical_summary_json" "$phase6_run_integration_script"; then
+  echo "phase6 run integration must validate canonical summary artifact wiring"
+  exit 1
+fi
+if ! rg -Fq "cmp -s" "$phase6_run_integration_script"; then
+  echo "phase6 run integration must validate canonical and run summary content parity"
+  exit 1
+fi
 if ! rg -Fq "fail-closed path" "$phase6_check_integration_script"; then
   echo "phase6 check integration must validate fail-closed behavior"
   exit 1
 fi
 if ! rg -Fq "tdpnd_grpc_auth_live_smoke" "$phase6_check_integration_script"; then
   echo "phase6 check integration must validate tdpnd_grpc_auth_live_smoke readiness signal"
+  exit 1
+fi
+if ! rg -Fq "canonical_summary_json" "$phase6_check_integration_script"; then
+  echo "phase6 check integration must validate canonical summary artifact wiring"
+  exit 1
+fi
+if ! rg -Fq "cmp -s" "$phase6_check_integration_script"; then
+  echo "phase6 check integration must validate canonical and run summary content parity"
   exit 1
 fi
 if ! rg -Fq "stage-failure propagation path" "$phase6_suite_integration_script"; then
@@ -576,12 +624,28 @@ if ! rg -Fq "require-tdpnd-grpc-auth-live-smoke-ok" "$phase6_handoff_run_integra
   echo "phase6 handoff-run integration must validate tdpnd_grpc_auth_live_smoke requirement forwarding/handling"
   exit 1
 fi
+if ! rg -Fq "canonical_summary_json" "$phase6_handoff_run_integration_script"; then
+  echo "phase6 handoff-run integration must validate canonical summary artifact wiring"
+  exit 1
+fi
+if ! rg -Fq "cmp -s" "$phase6_handoff_run_integration_script"; then
+  echo "phase6 handoff-run integration must validate canonical and run summary content parity"
+  exit 1
+fi
 if ! rg -Fq "fail-closed path" "$phase6_handoff_check_integration_script"; then
   echo "phase6 handoff-check integration must validate fail-closed behavior"
   exit 1
 fi
 if ! rg -Fq "tdpnd_grpc_auth_live_smoke" "$phase6_handoff_check_integration_script"; then
   echo "phase6 handoff-check integration must validate tdpnd_grpc_auth_live_smoke readiness signal"
+  exit 1
+fi
+if ! rg -Fq "canonical_summary_json" "$phase6_handoff_check_integration_script"; then
+  echo "phase6 handoff-check integration must validate canonical summary artifact wiring"
+  exit 1
+fi
+if ! rg -Fq "cmp -s" "$phase6_handoff_check_integration_script"; then
+  echo "phase6 handoff-check integration must validate canonical and run summary content parity"
   exit 1
 fi
 if ! rg -Fq "phase6_cosmos_l1_summary_report" "$phase6_summary_report_script"; then

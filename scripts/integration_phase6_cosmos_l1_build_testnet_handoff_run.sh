@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-for cmd in bash jq mktemp chmod grep cat sed wc; do
+for cmd in bash jq mktemp chmod grep cat sed wc cmp; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "missing required command: $cmd"
     exit 2
@@ -25,6 +25,10 @@ PASS_STDOUT="$TMP_DIR/pass.stdout"
 DRY_STDOUT="$TMP_DIR/dry.stdout"
 RUN_FAIL_STDOUT="$TMP_DIR/run_fail.stdout"
 HANDOFF_FAIL_STDOUT="$TMP_DIR/handoff_fail.stdout"
+PASS_CANONICAL_SUMMARY="$TMP_DIR/pass_wrapper_canonical.json"
+DRY_CANONICAL_SUMMARY="$TMP_DIR/dry_wrapper_canonical.json"
+RUN_FAIL_CANONICAL_SUMMARY="$TMP_DIR/run_fail_wrapper_canonical.json"
+HANDOFF_FAIL_CANONICAL_SUMMARY="$TMP_DIR/handoff_fail_wrapper_canonical.json"
 
 FAKE_RUN="$TMP_DIR/fake_phase6_cosmos_l1_build_testnet_run.sh"
 cat >"$FAKE_RUN" <<'EOF_FAKE_RUN'
@@ -225,6 +229,7 @@ PASS_WRAPPER_SUMMARY="$TMP_DIR/pass_wrapper.json"
 PHASE6_HANDOFF_RUN_CAPTURE_FILE="$CAPTURE" \
 PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_RUN_RUN_SCRIPT="$FAKE_RUN" \
 PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_RUN_HANDOFF_CHECK_SCRIPT="$FAKE_HANDOFF" \
+PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_RUN_CANONICAL_SUMMARY_JSON="$PASS_CANONICAL_SUMMARY" \
 bash "$RUNNER" \
   --reports-dir "$TMP_DIR/reports_pass" \
   --run-summary-json "$TMP_DIR/pass_run_summary.json" \
@@ -256,12 +261,28 @@ if [[ "$handoff_line" != *"--require-run-pipeline-ok 1"* || "$handoff_line" != *
   echo "$handoff_line"
   exit 1
 fi
+if [[ ! -f "$PASS_CANONICAL_SUMMARY" ]]; then
+  echo "missing pass-path canonical summary file: $PASS_CANONICAL_SUMMARY"
+  exit 1
+fi
+if ! cmp -s "$PASS_WRAPPER_SUMMARY" "$PASS_CANONICAL_SUMMARY"; then
+  echo "pass-path canonical summary content mismatch"
+  cat "$PASS_WRAPPER_SUMMARY"
+  cat "$PASS_CANONICAL_SUMMARY"
+  exit 1
+fi
+if ! grep -Fq -- "[phase6-cosmos-l1-build-testnet-handoff-run] canonical_summary_json=$PASS_CANONICAL_SUMMARY" "$PASS_STDOUT"; then
+  echo "pass-path log missing canonical summary line"
+  cat "$PASS_STDOUT"
+  exit 1
+fi
 
-if ! jq -e --arg run_summary "$TMP_DIR/pass_run_summary.json" --arg handoff_summary "$TMP_DIR/pass_handoff_summary.json" '
+if ! jq -e --arg run_summary "$TMP_DIR/pass_run_summary.json" --arg handoff_summary "$TMP_DIR/pass_handoff_summary.json" --arg canonical "$PASS_CANONICAL_SUMMARY" '
   .version == 1
   and .schema.id == "phase6_cosmos_l1_build_testnet_handoff_run_summary"
   and .status == "pass"
   and .rc == 0
+  and .artifacts.canonical_summary_json == $canonical
   and .inputs.dry_run == false
   and .steps.phase6_cosmos_l1_build_testnet_run.status == "pass"
   and .steps.phase6_cosmos_l1_build_testnet_run.rc == 0
@@ -285,6 +306,7 @@ DRY_WRAPPER_SUMMARY="$TMP_DIR/dry_wrapper.json"
 PHASE6_HANDOFF_RUN_CAPTURE_FILE="$CAPTURE" \
 PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_RUN_RUN_SCRIPT="$FAKE_RUN" \
 PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_RUN_HANDOFF_CHECK_SCRIPT="$FAKE_HANDOFF" \
+PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_RUN_CANONICAL_SUMMARY_JSON="$DRY_CANONICAL_SUMMARY" \
 bash "$RUNNER" \
   --reports-dir "$TMP_DIR/reports_dry" \
   --run-summary-json "$TMP_DIR/dry_run_summary.json" \
@@ -331,6 +353,7 @@ set +e
 PHASE6_HANDOFF_RUN_CAPTURE_FILE="$CAPTURE" \
 PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_RUN_RUN_SCRIPT="$FAKE_RUN" \
 PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_RUN_HANDOFF_CHECK_SCRIPT="$FAKE_HANDOFF" \
+PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_RUN_CANONICAL_SUMMARY_JSON="$RUN_FAIL_CANONICAL_SUMMARY" \
 FAKE_RUN_FAIL=1 \
 FAKE_RUN_FAIL_RC=27 \
 bash "$RUNNER" \
@@ -354,9 +377,25 @@ if [[ -z "$run_line" || -z "$handoff_line" ]]; then
   cat "$RUN_FAIL_STDOUT"
   exit 1
 fi
-if ! jq -e '
+if [[ ! -f "$RUN_FAIL_CANONICAL_SUMMARY" ]]; then
+  echo "missing run-fail canonical summary file: $RUN_FAIL_CANONICAL_SUMMARY"
+  exit 1
+fi
+if ! cmp -s "$RUN_FAIL_WRAPPER_SUMMARY" "$RUN_FAIL_CANONICAL_SUMMARY"; then
+  echo "run-fail canonical summary content mismatch"
+  cat "$RUN_FAIL_WRAPPER_SUMMARY"
+  cat "$RUN_FAIL_CANONICAL_SUMMARY"
+  exit 1
+fi
+if ! grep -Fq -- "[phase6-cosmos-l1-build-testnet-handoff-run] canonical_summary_json=$RUN_FAIL_CANONICAL_SUMMARY" "$RUN_FAIL_STDOUT"; then
+  echo "run-fail log missing canonical summary line"
+  cat "$RUN_FAIL_STDOUT"
+  exit 1
+fi
+if ! jq -e --arg canonical "$RUN_FAIL_CANONICAL_SUMMARY" '
   .status == "fail"
   and .rc == 27
+  and .artifacts.canonical_summary_json == $canonical
   and .steps.phase6_cosmos_l1_build_testnet_run.status == "fail"
   and .steps.phase6_cosmos_l1_build_testnet_run.rc == 27
   and .steps.phase6_cosmos_l1_build_testnet_run.command_rc == 27
@@ -378,6 +417,7 @@ set +e
 PHASE6_HANDOFF_RUN_CAPTURE_FILE="$CAPTURE" \
 PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_RUN_RUN_SCRIPT="$FAKE_RUN" \
 PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_RUN_HANDOFF_CHECK_SCRIPT="$FAKE_HANDOFF" \
+PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_RUN_CANONICAL_SUMMARY_JSON="$HANDOFF_FAIL_CANONICAL_SUMMARY" \
 FAKE_HANDOFF_FAIL=1 \
 FAKE_HANDOFF_FAIL_RC=19 \
 bash "$RUNNER" \

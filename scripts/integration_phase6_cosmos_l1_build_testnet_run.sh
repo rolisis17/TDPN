@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-for cmd in bash jq mktemp chmod grep sed wc cat; do
+for cmd in bash jq mktemp chmod grep sed wc cat cmp; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "missing required command: $cmd"
     exit 2
@@ -30,6 +30,10 @@ SUCCESS_RUN_SUMMARY="$TMP_DIR/run_success.json"
 DRY_RUN_RUN_SUMMARY="$TMP_DIR/run_dry.json"
 CI_FAIL_RUN_SUMMARY="$TMP_DIR/run_ci_fail.json"
 CHECK_FAIL_RUN_SUMMARY="$TMP_DIR/run_check_fail.json"
+SUCCESS_CANONICAL_SUMMARY="$TMP_DIR/canonical_run_success.json"
+DRY_RUN_CANONICAL_SUMMARY="$TMP_DIR/canonical_run_dry.json"
+CI_FAIL_CANONICAL_SUMMARY="$TMP_DIR/canonical_run_ci_fail.json"
+CHECK_FAIL_CANONICAL_SUMMARY="$TMP_DIR/canonical_run_check_fail.json"
 
 FAKE_CI="$TMP_DIR/fake_ci_phase6.sh"
 cat >"$FAKE_CI" <<'EOF_FAKE_CI'
@@ -153,11 +157,43 @@ assert_ci_then_check_order() {
   fi
 }
 
+assert_canonical_summary_artifact() {
+  local run_summary_json="$1"
+  local canonical_summary_json="$2"
+  local log_path="$3"
+
+  if [[ ! -f "$canonical_summary_json" ]]; then
+    echo "missing canonical run summary: $canonical_summary_json"
+    cat "$log_path"
+    exit 1
+  fi
+
+  if ! jq -e --arg canonical "$canonical_summary_json" '.artifacts.canonical_summary_json == $canonical' "$run_summary_json" >/dev/null; then
+    echo "run summary missing canonical_summary_json artifact field"
+    cat "$run_summary_json"
+    exit 1
+  fi
+
+  if ! cmp -s "$run_summary_json" "$canonical_summary_json"; then
+    echo "canonical run summary content mismatch"
+    cat "$run_summary_json"
+    cat "$canonical_summary_json"
+    exit 1
+  fi
+
+  if ! grep -Fq -- "[phase6-cosmos-l1-run] canonical_summary_json=$canonical_summary_json" "$log_path"; then
+    echo "missing canonical summary log line"
+    cat "$log_path"
+    exit 1
+  fi
+}
+
 echo "[phase6-cosmos-l1-run] success path"
 : >"$CAPTURE"
 PHASE6_COSMOS_L1_BUILD_TESTNET_RUN_CAPTURE_FILE="$CAPTURE" \
 PHASE6_COSMOS_L1_BUILD_TESTNET_RUN_CI_SCRIPT="$FAKE_CI" \
 PHASE6_COSMOS_L1_BUILD_TESTNET_RUN_CHECK_SCRIPT="$FAKE_CHECK" \
+PHASE6_COSMOS_L1_BUILD_TESTNET_RUN_CANONICAL_SUMMARY_JSON="$SUCCESS_CANONICAL_SUMMARY" \
 bash "$RUNNER" \
   --reports-dir "$TMP_DIR/reports_success" \
   --ci-summary-json "$TMP_DIR/ci_success_summary.json" \
@@ -200,12 +236,14 @@ if ! jq -e '
   cat "$SUCCESS_RUN_SUMMARY"
   exit 1
 fi
+assert_canonical_summary_artifact "$SUCCESS_RUN_SUMMARY" "$SUCCESS_CANONICAL_SUMMARY" "$SUCCESS_LOG"
 
 echo "[phase6-cosmos-l1-run] dry-run forwarding + toggle safety"
 : >"$CAPTURE"
 PHASE6_COSMOS_L1_BUILD_TESTNET_RUN_CAPTURE_FILE="$CAPTURE" \
 PHASE6_COSMOS_L1_BUILD_TESTNET_RUN_CI_SCRIPT="$FAKE_CI" \
 PHASE6_COSMOS_L1_BUILD_TESTNET_RUN_CHECK_SCRIPT="$FAKE_CHECK" \
+PHASE6_COSMOS_L1_BUILD_TESTNET_RUN_CANONICAL_SUMMARY_JSON="$DRY_RUN_CANONICAL_SUMMARY" \
 bash "$RUNNER" \
   --reports-dir "$TMP_DIR/reports_dry" \
   --ci-summary-json "$TMP_DIR/ci_dry_summary.json" \
@@ -279,6 +317,7 @@ if ! jq -e '
   cat "$DRY_RUN_RUN_SUMMARY"
   exit 1
 fi
+assert_canonical_summary_artifact "$DRY_RUN_RUN_SUMMARY" "$DRY_RUN_CANONICAL_SUMMARY" "$DRY_RUN_LOG"
 
 echo "[phase6-cosmos-l1-run] ci-failure propagation"
 : >"$CAPTURE"
@@ -288,6 +327,7 @@ PHASE6_COSMOS_L1_BUILD_TESTNET_RUN_CI_SCRIPT="$FAKE_CI" \
 PHASE6_COSMOS_L1_BUILD_TESTNET_RUN_CHECK_SCRIPT="$FAKE_CHECK" \
 FAKE_CI_FAIL=1 \
 FAKE_CI_FAIL_RC=27 \
+PHASE6_COSMOS_L1_BUILD_TESTNET_RUN_CANONICAL_SUMMARY_JSON="$CI_FAIL_CANONICAL_SUMMARY" \
 bash "$RUNNER" \
   --reports-dir "$TMP_DIR/reports_ci_fail" \
   --ci-summary-json "$TMP_DIR/ci_fail_summary.json" \
@@ -325,6 +365,7 @@ if ! jq -e '
   cat "$CI_FAIL_RUN_SUMMARY"
   exit 1
 fi
+assert_canonical_summary_artifact "$CI_FAIL_RUN_SUMMARY" "$CI_FAIL_CANONICAL_SUMMARY" "$CI_FAIL_LOG"
 
 echo "[phase6-cosmos-l1-run] check-failure propagation"
 : >"$CAPTURE"
@@ -334,6 +375,7 @@ PHASE6_COSMOS_L1_BUILD_TESTNET_RUN_CI_SCRIPT="$FAKE_CI" \
 PHASE6_COSMOS_L1_BUILD_TESTNET_RUN_CHECK_SCRIPT="$FAKE_CHECK" \
 FAKE_CHECK_FAIL=1 \
 FAKE_CHECK_FAIL_RC=19 \
+PHASE6_COSMOS_L1_BUILD_TESTNET_RUN_CANONICAL_SUMMARY_JSON="$CHECK_FAIL_CANONICAL_SUMMARY" \
 bash "$RUNNER" \
   --reports-dir "$TMP_DIR/reports_check_fail" \
   --ci-summary-json "$TMP_DIR/ci_check_fail_summary.json" \
@@ -371,5 +413,6 @@ if ! jq -e '
   cat "$CHECK_FAIL_RUN_SUMMARY"
   exit 1
 fi
+assert_canonical_summary_artifact "$CHECK_FAIL_RUN_SUMMARY" "$CHECK_FAIL_CANONICAL_SUMMARY" "$CHECK_FAIL_LOG"
 
 echo "phase6 cosmos l1 build testnet run integration ok"

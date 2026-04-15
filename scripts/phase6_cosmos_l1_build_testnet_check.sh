@@ -161,6 +161,7 @@ need_cmd mktemp
 
 ci_phase6_summary_json="${PHASE6_COSMOS_L1_BUILD_TESTNET_CHECK_CI_PHASE6_SUMMARY_JSON:-${PHASE6_COSMOS_L1_BUILD_TESTNET_CHECK_CI_SUMMARY_JSON:-${CI_PHASE6_COSMOS_L1_SUMMARY_JSON:-$ROOT_DIR/.easy-node-logs/phase6_cosmos_l1_build_testnet_ci_summary.json}}}"
 summary_json="${PHASE6_COSMOS_L1_BUILD_TESTNET_CHECK_SUMMARY_JSON:-$ROOT_DIR/.easy-node-logs/phase6_cosmos_l1_build_testnet_check_summary.json}"
+canonical_summary_json="${PHASE6_COSMOS_L1_BUILD_TESTNET_CHECK_CANONICAL_SUMMARY_JSON:-$ROOT_DIR/.easy-node-logs/phase6_cosmos_l1_build_testnet_check_summary.json}"
 show_json="${PHASE6_COSMOS_L1_BUILD_TESTNET_CHECK_SHOW_JSON:-0}"
 
 require_chain_scaffold_ok="${PHASE6_COSMOS_L1_BUILD_TESTNET_CHECK_REQUIRE_CHAIN_SCAFFOLD_OK:-1}"
@@ -287,7 +288,9 @@ bool_arg_or_die "--show-json" "$show_json"
 
 ci_phase6_summary_json="$(abs_path "$ci_phase6_summary_json")"
 summary_json="$(abs_path "$summary_json")"
+canonical_summary_json="$(abs_path "$canonical_summary_json")"
 mkdir -p "$(dirname "$summary_json")"
+mkdir -p "$(dirname "$canonical_summary_json")"
 
 stage_ids=(
   "chain_scaffold"
@@ -416,6 +419,7 @@ jq -n \
   --argjson rc "$rc" \
   --arg ci_phase6_summary_json "$ci_phase6_summary_json" \
   --arg summary_json "$summary_json" \
+  --arg canonical_summary_json "$canonical_summary_json" \
   --arg show_json "$show_json" \
   --argjson ci_phase6_summary_usable "$ci_phase6_summary_usable" \
   --argjson policy "$policy_json" \
@@ -450,9 +454,17 @@ jq -n \
     decision: {
       pass: ($status == "pass"),
       reasons: $reasons
+    },
+    artifacts: {
+      summary_json: $summary_json,
+      canonical_summary_json: $canonical_summary_json
     }
   }' >"$summary_tmp"
 mv -f "$summary_tmp" "$summary_json"
+
+if [[ "$summary_json" != "$canonical_summary_json" ]]; then
+  cp -f "$summary_json" "$canonical_summary_json"
+fi
 
 if [[ "$show_json" == "1" ]]; then
   cat "$summary_json"

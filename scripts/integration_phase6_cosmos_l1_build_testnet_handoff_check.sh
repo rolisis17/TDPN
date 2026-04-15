@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-for cmd in bash jq mktemp chmod grep cat; do
+for cmd in bash jq mktemp chmod grep cat cmp; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "missing required command: $cmd"
     exit 2
@@ -24,16 +24,19 @@ PASS_RUN="$TMP_DIR/run_pass.json"
 PASS_CHECK="$TMP_DIR/check_pass.json"
 PASS_OUTPUT="$TMP_DIR/pass_output.json"
 PASS_LOG="$TMP_DIR/pass.log"
+PASS_CANONICAL="$TMP_DIR/pass_canonical_summary.json"
 
 FAIL_RUN="$TMP_DIR/run_fail.json"
 FAIL_CHECK="$TMP_DIR/check_fail.json"
 FAIL_OUTPUT="$TMP_DIR/fail_output.json"
 FAIL_LOG="$TMP_DIR/fail.log"
+FAIL_CANONICAL="$TMP_DIR/fail_canonical_summary.json"
 
 RELAXED_RUN="$TMP_DIR/run_relaxed.json"
 RELAXED_CHECK="$TMP_DIR/check_relaxed.json"
 RELAXED_OUTPUT="$TMP_DIR/relaxed_output.json"
 RELAXED_LOG="$TMP_DIR/relaxed.log"
+RELAXED_CANONICAL="$TMP_DIR/relaxed_canonical_summary.json"
 
 cat >"$PASS_CHECK" <<'EOF_PASS_CHECK'
 {
@@ -92,16 +95,23 @@ cat >"$PASS_RUN" <<EOF_PASS_RUN
 EOF_PASS_RUN
 
 echo "[phase6-cosmos-l1-handoff-check] pass path"
+PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_CHECK_CANONICAL_SUMMARY_JSON="$PASS_CANONICAL" \
 "$SCRIPT_UNDER_TEST" \
   --phase6-run-summary-json "$PASS_RUN" \
   --summary-json "$PASS_OUTPUT" \
   --show-json 0 >"$PASS_LOG" 2>&1
 
+if [[ ! -f "$PASS_CANONICAL" ]]; then
+  echo "missing canonical summary on pass path: $PASS_CANONICAL"
+  cat "$PASS_LOG"
+  exit 1
+fi
 if ! jq -e '
   .version == 1
   and .schema.id == "phase6_cosmos_l1_build_testnet_handoff_check_summary"
   and .status == "pass"
   and .rc == 0
+  and .artifacts.canonical_summary_json == $expected_canonical
   and .fail_closed == true
   and .inputs.usable.phase6_run_summary_json == true
   and .inputs.usable.phase6_check_summary_json == true
@@ -114,10 +124,16 @@ if ! jq -e '
   and .handoff.tdpnd_grpc_runtime_smoke_ok == true
   and .handoff.tdpnd_grpc_live_smoke_ok == true
   and .handoff.tdpnd_grpc_auth_live_smoke_ok == true
-' "$PASS_OUTPUT" >/dev/null; then
+' --arg expected_canonical "$PASS_CANONICAL" "$PASS_OUTPUT" >/dev/null; then
   echo "pass-path summary mismatch"
   cat "$PASS_OUTPUT"
   cat "$PASS_LOG"
+  exit 1
+fi
+if ! cmp -s "$PASS_OUTPUT" "$PASS_CANONICAL"; then
+  echo "pass-path canonical summary diverges from run summary"
+  cat "$PASS_OUTPUT"
+  cat "$PASS_CANONICAL"
   exit 1
 fi
 
@@ -176,6 +192,7 @@ EOF_FAIL_RUN
 
 echo "[phase6-cosmos-l1-handoff-check] fail-closed path"
 set +e
+PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_CHECK_CANONICAL_SUMMARY_JSON="$FAIL_CANONICAL" \
 "$SCRIPT_UNDER_TEST" \
   --phase6-run-summary-json "$FAIL_RUN" \
   --summary-json "$FAIL_OUTPUT" \
@@ -187,18 +204,30 @@ if [[ "$fail_rc" -ne 1 ]]; then
   cat "$FAIL_LOG"
   exit 1
 fi
+if [[ ! -f "$FAIL_CANONICAL" ]]; then
+  echo "missing canonical summary on fail path: $FAIL_CANONICAL"
+  cat "$FAIL_LOG"
+  exit 1
+fi
 if ! jq -e '
   .status == "fail"
   and .rc == 1
+  and .artifacts.canonical_summary_json == $expected_canonical
   and .handoff.run_pipeline_ok == true
   and .handoff.proto_surface_ok == true
   and .handoff.tdpnd_grpc_auth_live_smoke_ok == false
   and .handoff.tdpnd_grpc_auth_live_smoke_status == "fail"
   and ((.decision.reasons // []) | any(test("tdpnd_grpc_auth_live_smoke_ok is false")))
-' "$FAIL_OUTPUT" >/dev/null; then
+' --arg expected_canonical "$FAIL_CANONICAL" "$FAIL_OUTPUT" >/dev/null; then
   echo "fail-path summary mismatch"
   cat "$FAIL_OUTPUT"
   cat "$FAIL_LOG"
+  exit 1
+fi
+if ! cmp -s "$FAIL_OUTPUT" "$FAIL_CANONICAL"; then
+  echo "fail-path canonical summary diverges from run summary"
+  cat "$FAIL_OUTPUT"
+  cat "$FAIL_CANONICAL"
   exit 1
 fi
 
@@ -256,6 +285,7 @@ cat >"$RELAXED_RUN" <<EOF_RELAXED_RUN
 EOF_RELAXED_RUN
 
 echo "[phase6-cosmos-l1-handoff-check] relaxed toggle path"
+PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_CHECK_CANONICAL_SUMMARY_JSON="$RELAXED_CANONICAL" \
 "$SCRIPT_UNDER_TEST" \
   --phase6-run-summary-json "$RELAXED_RUN" \
   --summary-json "$RELAXED_OUTPUT" \
@@ -263,19 +293,31 @@ echo "[phase6-cosmos-l1-handoff-check] relaxed toggle path"
   --require-tdpnd-auth-live-smoke-ok 0 \
   --show-json 0 >"$RELAXED_LOG" 2>&1
 
+if [[ ! -f "$RELAXED_CANONICAL" ]]; then
+  echo "missing canonical summary on relaxed path: $RELAXED_CANONICAL"
+  cat "$RELAXED_LOG"
+  exit 1
+fi
 if ! jq -e '
   .status == "pass"
   and .rc == 0
+  and .artifacts.canonical_summary_json == $expected_canonical
   and .inputs.requirements.tdpnd_grpc_live_smoke_ok == false
   and .inputs.requirements.tdpnd_grpc_auth_live_smoke_ok == false
   and .handoff.tdpnd_grpc_live_smoke_ok == false
   and .handoff.tdpnd_grpc_live_smoke_status == "fail"
   and .handoff.tdpnd_grpc_auth_live_smoke_ok == false
   and .handoff.tdpnd_grpc_auth_live_smoke_status == "fail"
-' "$RELAXED_OUTPUT" >/dev/null; then
+' --arg expected_canonical "$RELAXED_CANONICAL" "$RELAXED_OUTPUT" >/dev/null; then
   echo "relaxed-path summary mismatch"
   cat "$RELAXED_OUTPUT"
   cat "$RELAXED_LOG"
+  exit 1
+fi
+if ! cmp -s "$RELAXED_OUTPUT" "$RELAXED_CANONICAL"; then
+  echo "relaxed-path canonical summary diverges from run summary"
+  cat "$RELAXED_OUTPUT"
+  cat "$RELAXED_CANONICAL"
   exit 1
 fi
 

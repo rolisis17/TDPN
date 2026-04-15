@@ -214,6 +214,7 @@ need_cmd mktemp
 phase6_run_summary_json="${PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_CHECK_PHASE6_RUN_SUMMARY_JSON:-${PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_CHECK_RUN_SUMMARY_JSON:-}}"
 phase6_check_summary_json="${PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_CHECK_PHASE6_CHECK_SUMMARY_JSON:-${PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_CHECK_CHECK_SUMMARY_JSON:-}}"
 summary_json="${PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_CHECK_SUMMARY_JSON:-$ROOT_DIR/.easy-node-logs/phase6_cosmos_l1_build_testnet_handoff_check_summary.json}"
+canonical_summary_json="${PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_CHECK_CANONICAL_SUMMARY_JSON:-$ROOT_DIR/.easy-node-logs/phase6_cosmos_l1_build_testnet_handoff_check_summary.json}"
 show_json="${PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_CHECK_SHOW_JSON:-0}"
 require_run_pipeline_ok="${PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_CHECK_REQUIRE_RUN_PIPELINE_OK:-1}"
 require_chain_scaffold_ok="${PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_CHECK_REQUIRE_CHAIN_SCAFFOLD_OK:-1}"
@@ -259,7 +260,9 @@ bool_arg_or_die "--show-json" "$show_json"
 phase6_run_summary_json="$(abs_path "$phase6_run_summary_json")"
 phase6_check_summary_json="$(abs_path "$phase6_check_summary_json")"
 summary_json="$(abs_path "$summary_json")"
+canonical_summary_json="$(abs_path "$canonical_summary_json")"
 mkdir -p "$(dirname "$summary_json")"
+mkdir -p "$(dirname "$canonical_summary_json")"
 generated_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 declare -a reasons=()
@@ -355,12 +358,15 @@ status="pass"; rc=0
 if ((${#reasons[@]} > 0)); then status="fail"; rc=1; fi
 if ((${#reasons[@]} > 0)); then reasons_json="$(printf '%s\n' "${reasons[@]}" | jq -R . | jq -s .)"; else reasons_json='[]'; fi
 
+summary_tmp="$(mktemp)"
 jq -n \
   --arg generated_at_utc "$generated_at_utc" \
   --arg status "$status" \
   --argjson rc "$rc" \
   --arg phase6_run_summary_json "$phase6_run_summary_json" \
   --arg phase6_check_summary_json "$resolved_check_summary_json" \
+  --arg summary_json "$summary_json" \
+  --arg canonical_summary_json "$canonical_summary_json" \
   --argjson run_summary_usable "$phase6_run_summary_usable" \
   --argjson check_summary_usable "$phase6_check_summary_usable" \
   --arg show_json "$show_json" \
@@ -387,7 +393,6 @@ jq -n \
   --argjson tdpnd_grpc_live_smoke_ok "$tdpnd_grpc_live_smoke_ok" --arg tdpnd_grpc_live_smoke_status "$tdpnd_grpc_live_smoke_status" --argjson tdpnd_grpc_live_smoke_resolved "$tdpnd_grpc_live_smoke_resolved" --arg tdpnd_grpc_live_smoke_source "$tdpnd_grpc_live_smoke_source" \
   --argjson tdpnd_grpc_auth_live_smoke_ok "$tdpnd_grpc_auth_live_smoke_ok" --arg tdpnd_grpc_auth_live_smoke_status "$tdpnd_grpc_auth_live_smoke_status" --argjson tdpnd_grpc_auth_live_smoke_resolved "$tdpnd_grpc_auth_live_smoke_resolved" --arg tdpnd_grpc_auth_live_smoke_source "$tdpnd_grpc_auth_live_smoke_source" \
   --argjson reasons "$reasons_json" \
-  --arg summary_json "$summary_json" \
   '{
     version: 1,
     schema: { id: "phase6_cosmos_l1_build_testnet_handoff_check_summary", major: 1, minor: 0 },
@@ -458,8 +463,16 @@ jq -n \
       }
     },
     decision: { pass: ($status == "pass"), reasons: $reasons, warnings: [] },
-    artifacts: { summary_json: $summary_json }
-  }' >"$summary_json"
+    artifacts: {
+      summary_json: $summary_json,
+      canonical_summary_json: $canonical_summary_json
+    }
+  }' >"$summary_tmp"
+mv -f "$summary_tmp" "$summary_json"
+
+if [[ "$summary_json" != "$canonical_summary_json" ]]; then
+  cp -f "$summary_json" "$canonical_summary_json"
+fi
 
 if [[ "$show_json" == "1" ]]; then
   cat "$summary_json"
