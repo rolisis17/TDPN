@@ -154,6 +154,22 @@ get_expect_status() {
   fi
 }
 
+assert_response_contains() {
+  local needle="$1"
+  local context="$2"
+  local body
+  body="$(cat "${RESP_FILE}" 2>/dev/null || true)"
+  if [[ "${body}" != *"${needle}"* ]]; then
+    echo "unexpected response body for ${context}: expected to contain '${needle}'"
+    echo "response:"
+    printf '%s\n' "${body}"
+    echo
+    echo "issuer log:"
+    cat "${LOG_FILE}"
+    return 1
+  fi
+}
+
 PORT="$(pick_port)"
 if [[ -z "${PORT}" ]]; then
   echo "failed to allocate issuer sponsor live-smoke port"
@@ -232,6 +248,25 @@ if [[ -z "${pop_pub_key}" ]]; then
   exit 1
 fi
 
+token_missing_proof_payload="$(jq -n \
+  --arg subject "${SUBJECT_ID}" \
+  --arg pop_pub_key "${pop_pub_key}" \
+  '{tier:1,subject:$subject,token_type:"client_access",pop_pub_key:$pop_pub_key}')"
+echo "[issuer-sponsor-live-smoke] payment-proof negative path invalid proof (missing payment_proof)"
+post_expect_status "${BASE_URL}/v1/sponsor/token" "${token_missing_proof_payload}" "402" "${SPONSOR_TOKEN}"
+assert_response_contains "payment proof required" "missing sponsor token payment_proof"
+
+token_mismatched_proof_payload="$(jq -n \
+  --arg subject "${SUBJECT_ID}" \
+  --arg pop_pub_key "${pop_pub_key}" \
+  --arg reservation_id "${RESERVATION_ID}" \
+  --arg sponsor_id "mismatched-sponsor-live-smoke" \
+  --arg session_id "${SESSION_ID}" \
+  '{tier:1,subject:$subject,token_type:"client_access",pop_pub_key:$pop_pub_key,payment_proof:{reservation_id:$reservation_id,sponsor_id:$sponsor_id,subject:$subject,session_id:$session_id}}')"
+post_expect_status "${BASE_URL}/v1/sponsor/token" "${token_mismatched_proof_payload}" "402" "${SPONSOR_TOKEN}"
+assert_response_contains "reservation sponsor mismatch" "mismatched sponsor token payment_proof"
+echo "[issuer-sponsor-live-smoke] payment-proof negative path invalid proof (mismatched sponsor)"
+
 token_payload="$(jq -n \
   --arg subject "${SUBJECT_ID}" \
   --arg pop_pub_key "${pop_pub_key}" \
@@ -239,6 +274,15 @@ token_payload="$(jq -n \
   --arg sponsor_id "${SPONSOR_ID}" \
   --arg session_id "${SESSION_ID}" \
   '{tier:1,subject:$subject,token_type:"client_access",pop_pub_key:$pop_pub_key,payment_proof:{reservation_id:$reservation_id,sponsor_id:$sponsor_id,subject:$subject,session_id:$session_id}}')"
+echo "[issuer-sponsor-live-smoke] payment-proof happy path token issuance"
+post_expect_status "${BASE_URL}/v1/sponsor/token" "${token_payload}" "200" "${SPONSOR_TOKEN}"
+jq -e '
+  (.token | type == "string" and length > 0) and
+  (.expires | type == "number" and . > 0) and
+  (.jti | type == "string" and length > 0)
+' "${RESP_FILE}" >/dev/null
+
+echo "[issuer-sponsor-live-smoke] payment-proof negative path duplicate proof replay"
 post_expect_status "${BASE_URL}/v1/sponsor/token" "${token_payload}" "200" "${SPONSOR_TOKEN}"
 jq -e '
   (.token | type == "string" and length > 0) and

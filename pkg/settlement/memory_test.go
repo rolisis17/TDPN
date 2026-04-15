@@ -1001,6 +1001,209 @@ func TestMemoryServiceSponsorFlowAuthorizeIdempotent(t *testing.T) {
 	}
 }
 
+func TestMemoryServiceAuthorizePaymentRequiresReservationID(t *testing.T) {
+	s := NewMemoryService()
+	_, err := s.AuthorizePayment(context.Background(), PaymentProof{
+		ReservationID: "   ",
+		SponsorID:     "sponsor-1",
+		SubjectID:     "client-1",
+		SessionID:     "sess-1",
+	})
+	if err == nil {
+		t.Fatalf("expected missing reservation_id to fail")
+	}
+	if err.Error() != "authorize payment requires reservation_id" {
+		t.Fatalf("unexpected error for missing reservation_id: %v", err)
+	}
+}
+
+func TestMemoryServiceAuthorizePaymentReservationNotFound(t *testing.T) {
+	s := NewMemoryService()
+	_, err := s.AuthorizePayment(context.Background(), PaymentProof{
+		ReservationID: "sres-missing-1",
+		SponsorID:     "sponsor-missing-1",
+		SubjectID:     "client-missing-1",
+		SessionID:     "sess-missing-1",
+	})
+	if err == nil {
+		t.Fatalf("expected unknown reservation to fail")
+	}
+	if err.Error() != "reservation not found: sres-missing-1" {
+		t.Fatalf("unexpected error for unknown reservation: %v", err)
+	}
+}
+
+func TestMemoryServiceAuthorizePaymentRejectsProofFieldMismatches(t *testing.T) {
+	s := NewMemoryService()
+	ctx := context.Background()
+	_, err := s.ReserveSponsorCredits(ctx, SponsorCreditReservation{
+		ReservationID: "sres-mismatch-1",
+		SponsorID:     "sponsor-good-1",
+		SubjectID:     "client-good-1",
+		SessionID:     "sess-good-1",
+		AmountMicros:  700,
+	})
+	if err != nil {
+		t.Fatalf("ReserveSponsorCredits: %v", err)
+	}
+
+	testCases := []struct {
+		name    string
+		proof   PaymentProof
+		wantErr string
+	}{
+		{
+			name: "sponsor mismatch",
+			proof: PaymentProof{
+				ReservationID: "sres-mismatch-1",
+				SponsorID:     "sponsor-bad-1",
+				SubjectID:     "client-good-1",
+				SessionID:     "sess-good-1",
+			},
+			wantErr: "reservation sponsor mismatch",
+		},
+		{
+			name: "subject mismatch",
+			proof: PaymentProof{
+				ReservationID: "sres-mismatch-1",
+				SponsorID:     "sponsor-good-1",
+				SubjectID:     "client-bad-1",
+				SessionID:     "sess-good-1",
+			},
+			wantErr: "reservation subject mismatch",
+		},
+		{
+			name: "session mismatch",
+			proof: PaymentProof{
+				ReservationID: "sres-mismatch-1",
+				SponsorID:     "sponsor-good-1",
+				SubjectID:     "client-good-1",
+				SessionID:     "sess-bad-1",
+			},
+			wantErr: "reservation session mismatch",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := s.AuthorizePayment(ctx, tc.proof)
+			if err == nil {
+				t.Fatalf("expected authorize mismatch to fail")
+			}
+			if err.Error() != tc.wantErr {
+				t.Fatalf("unexpected authorize mismatch error: got %v want %s", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestMemoryServiceAuthorizePaymentRejectsExpiredReservation(t *testing.T) {
+	s := NewMemoryService()
+	ctx := context.Background()
+	createdAt := time.Now().UTC().Add(-15 * time.Minute)
+	_, err := s.ReserveSponsorCredits(ctx, SponsorCreditReservation{
+		ReservationID: "sres-expired-1",
+		SponsorID:     "sponsor-expired-1",
+		SubjectID:     "client-expired-1",
+		SessionID:     "sess-expired-1",
+		AmountMicros:  500,
+		CreatedAt:     createdAt,
+		ExpiresAt:     createdAt.Add(1 * time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("ReserveSponsorCredits: %v", err)
+	}
+
+	_, err = s.AuthorizePayment(ctx, PaymentProof{
+		ReservationID: "sres-expired-1",
+		SponsorID:     "sponsor-expired-1",
+		SubjectID:     "client-expired-1",
+		SessionID:     "sess-expired-1",
+	})
+	if err == nil {
+		t.Fatalf("expected expired reservation to fail authorization")
+	}
+	if err.Error() != "reservation expired: sres-expired-1" {
+		t.Fatalf("unexpected error for expired reservation: %v", err)
+	}
+}
+
+func TestMemoryServiceAuthorizePaymentRejectsConsumedReservationWithoutPriorAuthRecord(t *testing.T) {
+	s := NewMemoryService()
+	ctx := context.Background()
+	_, err := s.ReserveSponsorCredits(ctx, SponsorCreditReservation{
+		ReservationID: "sres-consumed-1",
+		SponsorID:     "sponsor-consumed-1",
+		SubjectID:     "client-consumed-1",
+		SessionID:     "sess-consumed-1",
+		AmountMicros:  444,
+	})
+	if err != nil {
+		t.Fatalf("ReserveSponsorCredits: %v", err)
+	}
+
+	s.mu.Lock()
+	reservation := s.sponsorReservationsByID["sres-consumed-1"]
+	reservation.ConsumedAt = time.Now().UTC().Add(-time.Minute)
+	s.sponsorReservationsByID["sres-consumed-1"] = reservation
+	delete(s.paymentAuthByReservationID, "sres-consumed-1")
+	s.mu.Unlock()
+
+	_, err = s.AuthorizePayment(ctx, PaymentProof{
+		ReservationID: "sres-consumed-1",
+		SponsorID:     "sponsor-consumed-1",
+		SubjectID:     "client-consumed-1",
+		SessionID:     "sess-consumed-1",
+	})
+	if err == nil {
+		t.Fatalf("expected consumed reservation to fail authorization")
+	}
+	if err.Error() != "reservation already consumed: sres-consumed-1" {
+		t.Fatalf("unexpected error for consumed reservation: %v", err)
+	}
+}
+
+func TestMemoryServiceAuthorizePaymentDuplicateProofReplayPreservesIdempotency(t *testing.T) {
+	s := NewMemoryService()
+	ctx := context.Background()
+	_, err := s.ReserveSponsorCredits(ctx, SponsorCreditReservation{
+		ReservationID: "sres-replay-1",
+		SponsorID:     "sponsor-replay-1",
+		SubjectID:     "client-replay-1",
+		SessionID:     "sess-replay-1",
+		AmountMicros:  333,
+	})
+	if err != nil {
+		t.Fatalf("ReserveSponsorCredits: %v", err)
+	}
+
+	authA, err := s.AuthorizePayment(ctx, PaymentProof{
+		ReservationID: "sres-replay-1",
+		SponsorID:     "sponsor-replay-1",
+		SubjectID:     "client-replay-1",
+		SessionID:     "sess-replay-1",
+	})
+	if err != nil {
+		t.Fatalf("AuthorizePayment first: %v", err)
+	}
+
+	authB, err := s.AuthorizePayment(ctx, PaymentProof{
+		ReservationID: "sres-replay-1",
+		SponsorID:     "sponsor-other",
+		SubjectID:     "client-other",
+		SessionID:     "sess-other",
+	})
+	if err != nil {
+		t.Fatalf("AuthorizePayment duplicate replay: %v", err)
+	}
+	if !authB.IdempotentReplay {
+		t.Fatalf("expected idempotent replay marker on duplicate proof")
+	}
+	if authA.ReservationID != authB.ReservationID || authA.SponsorID != authB.SponsorID || authA.SubjectID != authB.SubjectID || authA.SessionID != authB.SessionID {
+		t.Fatalf("expected replay authorization to return original authorization identity")
+	}
+}
+
 func TestMemoryServiceQuotePriceCurrencyConversion(t *testing.T) {
 	s := NewMemoryService(
 		WithPricePerMiBMicros(1000),

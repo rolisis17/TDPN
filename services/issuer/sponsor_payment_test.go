@@ -2,6 +2,7 @@ package issuer
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -112,6 +113,218 @@ func TestSponsorReserveAndIssueTokenFlow(t *testing.T) {
 	}
 	if statusResp.ConsumedAt <= 0 {
 		t.Fatalf("expected consumed reservation after token issuance: %+v", statusResp)
+	}
+}
+
+func TestSponsorIssueTokenRequiresPaymentProof(t *testing.T) {
+	s := newSponsorTestService(t)
+	popPubB64 := sponsorTestPopPubKey(t)
+	reqBody, _ := json.Marshal(proto.IssueTokenRequest{
+		Tier:      1,
+		Subject:   "client-1",
+		TokenType: crypto.TokenTypeClientAccess,
+		PopPubKey: popPubB64,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/sponsor/token", bytes.NewReader(reqBody))
+	req.Header.Set("X-Sponsor-Token", "sponsor-secret-token")
+	rr := httptest.NewRecorder()
+
+	s.handleSponsorIssueToken(rr, req)
+
+	if rr.Code != http.StatusPaymentRequired {
+		t.Fatalf("expected status %d, got %d body=%s", http.StatusPaymentRequired, rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "payment proof required") {
+		t.Fatalf("expected missing payment proof error, body=%s", rr.Body.String())
+	}
+}
+
+func TestSponsorIssueTokenRejectsPaymentProofMismatches(t *testing.T) {
+	tests := []struct {
+		name        string
+		mutateProof func(*proto.SponsorPaymentProof)
+		wantMessage string
+	}{
+		{
+			name: "sponsor mismatch",
+			mutateProof: func(proof *proto.SponsorPaymentProof) {
+				proof.SponsorID = "sponsor-2"
+			},
+			wantMessage: "payment proof invalid: reservation sponsor mismatch",
+		},
+		{
+			name: "subject mismatch",
+			mutateProof: func(proof *proto.SponsorPaymentProof) {
+				proof.Subject = "client-2"
+			},
+			wantMessage: "payment proof invalid: reservation subject mismatch",
+		},
+		{
+			name: "session mismatch",
+			mutateProof: func(proof *proto.SponsorPaymentProof) {
+				proof.SessionID = "sess-2"
+			},
+			wantMessage: "payment proof invalid: reservation session mismatch",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newSponsorTestService(t)
+			const reservationID = "sres-mismatch-1"
+			reserveReqBody, _ := json.Marshal(proto.SponsorReserveRequest{
+				ReservationID: reservationID,
+				SponsorID:     "sponsor-1",
+				Subject:       "client-1",
+				SessionID:     "sess-1",
+				AmountMicros:  1000,
+			})
+			reserveReq := httptest.NewRequest(http.MethodPost, "/v1/sponsor/reserve", bytes.NewReader(reserveReqBody))
+			reserveReq.Header.Set("X-Sponsor-Token", "sponsor-secret-token")
+			reserveRR := httptest.NewRecorder()
+			s.handleSponsorReserve(reserveRR, reserveReq)
+			if reserveRR.Code != http.StatusOK {
+				t.Fatalf("reserve status=%d body=%s", reserveRR.Code, reserveRR.Body.String())
+			}
+
+			proof := &proto.SponsorPaymentProof{
+				ReservationID: reservationID,
+				SponsorID:     "sponsor-1",
+				Subject:       "client-1",
+				SessionID:     "sess-1",
+			}
+			tc.mutateProof(proof)
+
+			tokenReqBody, _ := json.Marshal(proto.IssueTokenRequest{
+				Tier:         1,
+				Subject:      "client-1",
+				TokenType:    crypto.TokenTypeClientAccess,
+				PopPubKey:    sponsorTestPopPubKey(t),
+				PaymentProof: proof,
+			})
+			tokenReq := httptest.NewRequest(http.MethodPost, "/v1/sponsor/token", bytes.NewReader(tokenReqBody))
+			tokenReq.Header.Set("X-Sponsor-Token", "sponsor-secret-token")
+			tokenRR := httptest.NewRecorder()
+			s.handleSponsorIssueToken(tokenRR, tokenReq)
+
+			if tokenRR.Code != http.StatusPaymentRequired {
+				t.Fatalf("expected status %d, got %d body=%s", http.StatusPaymentRequired, tokenRR.Code, tokenRR.Body.String())
+			}
+			if !strings.Contains(tokenRR.Body.String(), tc.wantMessage) {
+				t.Fatalf("expected response to contain %q, body=%s", tc.wantMessage, tokenRR.Body.String())
+			}
+		})
+	}
+}
+
+func TestSponsorIssueTokenRejectsExpiredPaymentReservation(t *testing.T) {
+	s := newSponsorTestService(t)
+	const reservationID = "sres-expired-1"
+	_, err := s.settlementService().ReserveSponsorCredits(context.Background(), settlement.SponsorCreditReservation{
+		ReservationID: reservationID,
+		SponsorID:     "sponsor-1",
+		SubjectID:     "client-1",
+		SessionID:     "sess-expired-1",
+		AmountMicros:  1000,
+		ExpiresAt:     time.Now().UTC().Add(-1 * time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("ReserveSponsorCredits: %v", err)
+	}
+
+	reqBody, _ := json.Marshal(proto.IssueTokenRequest{
+		Tier:      1,
+		Subject:   "client-1",
+		TokenType: crypto.TokenTypeClientAccess,
+		PopPubKey: sponsorTestPopPubKey(t),
+		PaymentProof: &proto.SponsorPaymentProof{
+			ReservationID: reservationID,
+			SponsorID:     "sponsor-1",
+			Subject:       "client-1",
+			SessionID:     "sess-expired-1",
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/sponsor/token", bytes.NewReader(reqBody))
+	req.Header.Set("X-Sponsor-Token", "sponsor-secret-token")
+	rr := httptest.NewRecorder()
+	s.handleSponsorIssueToken(rr, req)
+
+	if rr.Code != http.StatusPaymentRequired {
+		t.Fatalf("expected status %d, got %d body=%s", http.StatusPaymentRequired, rr.Code, rr.Body.String())
+	}
+	wantMessage := "payment proof invalid: reservation expired: " + reservationID
+	if !strings.Contains(rr.Body.String(), wantMessage) {
+		t.Fatalf("expected response to contain %q, body=%s", wantMessage, rr.Body.String())
+	}
+}
+
+func TestSponsorIssueTokenAllowsDuplicatePaymentProofReplay(t *testing.T) {
+	s := newSponsorTestService(t)
+	const reservationID = "sres-replay-1"
+	reserveReqBody, _ := json.Marshal(proto.SponsorReserveRequest{
+		ReservationID: reservationID,
+		SponsorID:     "sponsor-1",
+		Subject:       "client-1",
+		SessionID:     "sess-replay-1",
+		AmountMicros:  1000,
+	})
+	reserveReq := httptest.NewRequest(http.MethodPost, "/v1/sponsor/reserve", bytes.NewReader(reserveReqBody))
+	reserveReq.Header.Set("X-Sponsor-Token", "sponsor-secret-token")
+	reserveRR := httptest.NewRecorder()
+	s.handleSponsorReserve(reserveRR, reserveReq)
+	if reserveRR.Code != http.StatusOK {
+		t.Fatalf("reserve status=%d body=%s", reserveRR.Code, reserveRR.Body.String())
+	}
+
+	tokenReqBody, _ := json.Marshal(proto.IssueTokenRequest{
+		Tier:      1,
+		Subject:   "client-1",
+		TokenType: crypto.TokenTypeClientAccess,
+		PopPubKey: sponsorTestPopPubKey(t),
+		PaymentProof: &proto.SponsorPaymentProof{
+			ReservationID: reservationID,
+			SponsorID:     "sponsor-1",
+			Subject:       "client-1",
+			SessionID:     "sess-replay-1",
+		},
+	})
+
+	firstReq := httptest.NewRequest(http.MethodPost, "/v1/sponsor/token", bytes.NewReader(tokenReqBody))
+	firstReq.Header.Set("X-Sponsor-Token", "sponsor-secret-token")
+	firstRR := httptest.NewRecorder()
+	s.handleSponsorIssueToken(firstRR, firstReq)
+	if firstRR.Code != http.StatusOK {
+		t.Fatalf("first sponsor token status=%d body=%s", firstRR.Code, firstRR.Body.String())
+	}
+	var firstResp proto.IssueTokenResponse
+	if err := json.Unmarshal(firstRR.Body.Bytes(), &firstResp); err != nil {
+		t.Fatalf("decode first token response: %v", err)
+	}
+	if firstResp.Token == "" || firstResp.JTI == "" {
+		t.Fatalf("unexpected first token response: %+v", firstResp)
+	}
+
+	secondReq := httptest.NewRequest(http.MethodPost, "/v1/sponsor/token", bytes.NewReader(tokenReqBody))
+	secondReq.Header.Set("X-Sponsor-Token", "sponsor-secret-token")
+	secondRR := httptest.NewRecorder()
+	s.handleSponsorIssueToken(secondRR, secondReq)
+	if secondRR.Code != http.StatusOK {
+		t.Fatalf("second sponsor token status=%d body=%s", secondRR.Code, secondRR.Body.String())
+	}
+	var secondResp proto.IssueTokenResponse
+	if err := json.Unmarshal(secondRR.Body.Bytes(), &secondResp); err != nil {
+		t.Fatalf("decode second token response: %v", err)
+	}
+	if secondResp.Token == "" || secondResp.JTI == "" {
+		t.Fatalf("unexpected second token response: %+v", secondResp)
+	}
+
+	reservation, err := s.settlementService().GetSponsorReservation(context.Background(), reservationID)
+	if err != nil {
+		t.Fatalf("GetSponsorReservation: %v", err)
+	}
+	if reservation.ConsumedAt.IsZero() {
+		t.Fatalf("expected consumed reservation after replay issuance")
 	}
 }
 
@@ -382,4 +595,13 @@ func newSponsorTestService(t *testing.T) *Service {
 		minTokenEpoch:               1,
 		subjects:                    map[string]proto.SubjectProfile{},
 	}
+}
+
+func sponsorTestPopPubKey(t *testing.T) string {
+	t.Helper()
+	popPub, _, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("GenerateEd25519Keypair: %v", err)
+	}
+	return crypto.EncodeEd25519PublicKey(popPub)
 }

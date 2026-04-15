@@ -1212,6 +1212,18 @@ if [[ ! -f "$ROOT_DIR/scripts/integration_issuer_sponsor_api_live_smoke.sh" ]]; 
   echo "missing required script: scripts/integration_issuer_sponsor_api_live_smoke.sh"
   exit 1
 fi
+if ! rg -Fq "[issuer-sponsor-live-smoke] payment-proof happy path token issuance" "$ROOT_DIR/scripts/integration_issuer_sponsor_api_live_smoke.sh"; then
+  echo "issuer sponsor live-smoke integration must include stable marker for payment-proof happy path token issuance"
+  exit 1
+fi
+if ! rg -Fq "[issuer-sponsor-live-smoke] payment-proof negative path invalid proof" "$ROOT_DIR/scripts/integration_issuer_sponsor_api_live_smoke.sh"; then
+  echo "issuer sponsor live-smoke integration must include stable marker for payment-proof negative path invalid proof"
+  exit 1
+fi
+if ! rg -Fq "[issuer-sponsor-live-smoke] payment-proof negative path duplicate proof replay" "$ROOT_DIR/scripts/integration_issuer_sponsor_api_live_smoke.sh"; then
+  echo "issuer sponsor live-smoke integration must include stable marker for payment-proof negative path duplicate proof replay"
+  exit 1
+fi
 if ! rg -Fq "settlement_adapter_roundtrip" "$phase5_integration_script"; then
   echo "phase5 ci integration script must validate settlement_adapter_roundtrip stage"
   exit 1
