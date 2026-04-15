@@ -324,12 +324,16 @@ func TestHandleSettlementStatusReturnsReport(t *testing.T) {
 	stub := &settlementServiceStub{
 		reconcileFn: func(_ context.Context) (settlement.ReconcileReport, error) {
 			return settlement.ReconcileReport{
-				GeneratedAt:              now,
-				PendingAdapterOperations: 4,
-				PendingOperations:        7,
-				SubmittedOperations:      3,
-				ConfirmedOperations:      2,
-				FailedOperations:         1,
+				GeneratedAt:               now,
+				PendingAdapterOperations:  4,
+				ShadowAdapterConfigured:   true,
+				ShadowAttemptedOperations: 9,
+				ShadowSubmittedOperations: 8,
+				ShadowFailedOperations:    1,
+				PendingOperations:         7,
+				SubmittedOperations:       3,
+				ConfirmedOperations:       2,
+				FailedOperations:          1,
 			}, nil
 		},
 	}
@@ -357,6 +361,13 @@ func TestHandleSettlementStatusReturnsReport(t *testing.T) {
 	}
 	if !resp.ReportGeneratedAt.Equal(now) {
 		t.Fatalf("expected report_generated_at %s, got %s", now, resp.ReportGeneratedAt)
+	}
+	if !resp.ShadowAdapterConfigured {
+		t.Fatalf("expected shadow adapter configured in status response")
+	}
+	if resp.ShadowAttemptedOperations != 9 || resp.ShadowSubmittedOperations != 8 || resp.ShadowFailedOperations != 1 {
+		t.Fatalf("unexpected shadow counters: attempted=%d submitted=%d failed=%d",
+			resp.ShadowAttemptedOperations, resp.ShadowSubmittedOperations, resp.ShadowFailedOperations)
 	}
 	if resp.PendingAdapterOperations != 4 || resp.PendingOperations != 7 || resp.SubmittedOperations != 3 || resp.ConfirmedOperations != 2 || resp.FailedOperations != 1 {
 		t.Fatalf("unexpected reconcile counters: %+v", resp)
@@ -417,12 +428,16 @@ func TestHandleSettlementStatusReconcileErrorIsFailSoft(t *testing.T) {
 	}
 	s := &Service{settlement: stub}
 	s.settlementStatus.lastReport = settlement.ReconcileReport{
-		GeneratedAt:              time.Unix(1700000100, 0).UTC(),
-		PendingAdapterOperations: 5,
-		PendingOperations:        6,
-		SubmittedOperations:      2,
-		ConfirmedOperations:      1,
-		FailedOperations:         3,
+		GeneratedAt:               time.Unix(1700000100, 0).UTC(),
+		PendingAdapterOperations:  5,
+		ShadowAdapterConfigured:   true,
+		ShadowAttemptedOperations: 4,
+		ShadowSubmittedOperations: 3,
+		ShadowFailedOperations:    1,
+		PendingOperations:         6,
+		SubmittedOperations:       2,
+		ConfirmedOperations:       1,
+		FailedOperations:          3,
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/settlement/status", nil)
@@ -444,6 +459,13 @@ func TestHandleSettlementStatusReconcileErrorIsFailSoft(t *testing.T) {
 	}
 	if !strings.Contains(resp.LastError, "temporary reconcile outage") {
 		t.Fatalf("expected reconcile error in response, got %q", resp.LastError)
+	}
+	if !resp.ShadowAdapterConfigured {
+		t.Fatalf("expected cached shadow adapter configured flag in fail-soft response")
+	}
+	if resp.ShadowAttemptedOperations != 4 || resp.ShadowSubmittedOperations != 3 || resp.ShadowFailedOperations != 1 {
+		t.Fatalf("expected cached shadow counters in fail-soft response, got attempted=%d submitted=%d failed=%d",
+			resp.ShadowAttemptedOperations, resp.ShadowSubmittedOperations, resp.ShadowFailedOperations)
 	}
 	if resp.PendingAdapterOperations != 5 || resp.PendingOperations != 6 || resp.SubmittedOperations != 2 || resp.ConfirmedOperations != 1 || resp.FailedOperations != 3 {
 		t.Fatalf("expected cached counters in fail-soft response, got %+v", resp)

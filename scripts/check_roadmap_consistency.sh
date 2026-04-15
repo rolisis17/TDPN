@@ -12,6 +12,7 @@ cosmos_runtime_doc="docs/cosmos-settlement-runtime.md"
 chain_readme="blockchain/tdpn-chain/README.md"
 settlement_mapping_doc="blockchain/tdpn-chain/docs/settlement-bridge-mapping.md"
 blockchain_sponsor_quickstart_doc="docs/blockchain-app-sponsorship-quickstart.md"
+protocol_doc="docs/protocol.md"
 phase5_ci_script="scripts/ci_phase5_settlement_layer.sh"
 phase5_integration_script="scripts/integration_ci_phase5_settlement_layer.sh"
 
@@ -69,6 +70,10 @@ for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$bootstrap_validator
     exit 1
   fi
 done
+if [[ ! -f "$protocol_doc" ]]; then
+  echo "missing required file: $protocol_doc"
+  exit 1
+fi
 
 if ! rg -q "authoritative source for sequencing" "$full_plan"; then
   echo "full execution plan must declare canonical/authoritative sequencing"
@@ -274,6 +279,29 @@ if ! rg -Fq "blockchain-app-sponsorship-quickstart.md" "$cosmos_runtime_doc"; th
   echo "cosmos settlement runtime guide must link blockchain sponsor quickstart"
   exit 1
 fi
+if ! rg -Fq "Shadow telemetry fields in status payload" "$cosmos_runtime_doc"; then
+  echo "cosmos settlement runtime guide must document issuer shadow telemetry status fields"
+  exit 1
+fi
+if ! rg -Fq "Shadow telemetry fields are also surfaced on exit status snapshots" "$cosmos_runtime_doc"; then
+  echo "cosmos settlement runtime guide must document exit shadow telemetry status fields"
+  exit 1
+fi
+for shadow_status_key in \
+  "shadow_adapter_configured" \
+  "shadow_attempted_operations" \
+  "shadow_submitted_operations" \
+  "shadow_failed_operations"
+do
+  if ! rg -Fq "$shadow_status_key" "$cosmos_runtime_doc"; then
+    echo "cosmos settlement runtime guide must document settlement shadow telemetry key: $shadow_status_key"
+    exit 1
+  fi
+  if ! rg -Fq "$shadow_status_key" "$protocol_doc"; then
+    echo "protocol doc must document settlement shadow telemetry key: $shadow_status_key"
+    exit 1
+  fi
+done
 check_confirmation_interface_wording "$cosmos_runtime_doc" "cosmos settlement runtime guide"
 
 if ! rg -Fq -- "--state-dir" "$chain_readme"; then

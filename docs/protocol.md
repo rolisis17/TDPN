@@ -142,8 +142,18 @@ Serialization for MVP:
   - Non-objective/subjective abuse inputs are out of scope for automated v1 slashing and remain policy-governed.
 - `GET /v1/settlement/status`
   - Issuer admin-protected settlement status endpoint; returns reconciliation/backlog counters and can return degraded `503` status details if reconcile fails.
+  - Includes shadow settlement telemetry fields:
+    - `shadow_adapter_configured`
+    - `shadow_attempted_operations`
+    - `shadow_submitted_operations`
+    - `shadow_failed_operations`
 - `GET /v1/settlement/status`
   - Exit settlement status/backlog snapshot endpoint; remains fail-soft and can return stale snapshot metadata when reconciliation fails.
+  - Includes shadow settlement telemetry fields:
+    - `shadow_adapter_configured`
+    - `shadow_attempted_operations`
+    - `shadow_submitted_operations`
+    - `shadow_failed_operations`
 - `GET /v1/revocations`
 - `GET /v1/metrics` (exit counters)
 

@@ -101,6 +101,11 @@ Issuer control-plane endpoints:
   - dApp onboarding quickstart: `blockchain-app-sponsorship-quickstart.md`
 - Settlement status:
   - `GET /v1/settlement/status` (admin auth required, returns reconcile/backlog counters; fail-soft degraded `503` payload if reconcile fails)
+  - Shadow telemetry fields in status payload:
+    - `shadow_adapter_configured`
+    - `shadow_attempted_operations`
+    - `shadow_submitted_operations`
+    - `shadow_failed_operations`
 - Objective slash evidence intake (admin):
   - `POST /v1/admin/slash/evidence`
   - accepts only objective machine-verifiable evidence in v1, with `evidence_ref`/proof reference format `sha256:<value>` or `obj://<path>`.
@@ -113,6 +118,11 @@ Issuer control-plane endpoints:
 Exit service records usage, settles sessions, and issues provider rewards while keeping close-path non-blocking if settlement/chain steps fail.
 Exit settlement status endpoint:
 - `GET /v1/settlement/status` (returns latest backlog snapshot; if reconcile fails response stays `200` with `stale=true` and `last_error`)
+- Shadow telemetry fields are also surfaced on exit status snapshots:
+  - `shadow_adapter_configured`
+  - `shadow_attempted_operations`
+  - `shadow_submitted_operations`
+  - `shadow_failed_operations`
 
 ## Reconciliation Behavior
 

@@ -253,11 +253,15 @@ func TestHandleSettlementStatusIncludesLifecycleCounters(t *testing.T) {
 	now := time.Unix(1713300000, 0).UTC()
 	stub := &issuerSettlementReconcileStub{
 		report: settlement.ReconcileReport{
-			GeneratedAt:         now,
-			PendingOperations:   4,
-			SubmittedOperations: 7,
-			ConfirmedOperations: 3,
-			FailedOperations:    1,
+			GeneratedAt:               now,
+			ShadowAdapterConfigured:   true,
+			ShadowAttemptedOperations: 9,
+			ShadowSubmittedOperations: 7,
+			ShadowFailedOperations:    2,
+			PendingOperations:         4,
+			SubmittedOperations:       7,
+			ConfirmedOperations:       3,
+			FailedOperations:          1,
 		},
 	}
 	s := &Service{
@@ -275,12 +279,16 @@ func TestHandleSettlementStatusIncludesLifecycleCounters(t *testing.T) {
 		t.Fatalf("expected status 200, got %d body=%s", rr.Code, rr.Body.String())
 	}
 	var resp struct {
-		Status              string `json:"status"`
-		GeneratedAt         int64  `json:"generated_at"`
-		PendingOperations   int    `json:"pending_operations"`
-		SubmittedOperations int    `json:"submitted_operations"`
-		ConfirmedOperations int    `json:"confirmed_operations"`
-		FailedOperations    int    `json:"failed_operations"`
+		Status                   string `json:"status"`
+		GeneratedAt              int64  `json:"generated_at"`
+		ShadowAdapterConfigured  bool   `json:"shadow_adapter_configured"`
+		ShadowAttemptedOperations int   `json:"shadow_attempted_operations"`
+		ShadowSubmittedOperations int   `json:"shadow_submitted_operations"`
+		ShadowFailedOperations    int   `json:"shadow_failed_operations"`
+		PendingOperations        int    `json:"pending_operations"`
+		SubmittedOperations      int    `json:"submitted_operations"`
+		ConfirmedOperations      int    `json:"confirmed_operations"`
+		FailedOperations         int    `json:"failed_operations"`
 	}
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response: %v", err)
@@ -290,6 +298,9 @@ func TestHandleSettlementStatusIncludesLifecycleCounters(t *testing.T) {
 	}
 	if resp.GeneratedAt != now.Unix() {
 		t.Fatalf("expected generated_at %d, got %d", now.Unix(), resp.GeneratedAt)
+	}
+	if !resp.ShadowAdapterConfigured || resp.ShadowAttemptedOperations != 9 || resp.ShadowSubmittedOperations != 7 || resp.ShadowFailedOperations != 2 {
+		t.Fatalf("unexpected shadow telemetry: %+v", resp)
 	}
 	if resp.PendingOperations != 4 || resp.SubmittedOperations != 7 || resp.ConfirmedOperations != 3 || resp.FailedOperations != 1 {
 		t.Fatalf("unexpected lifecycle counters: %+v", resp)
@@ -303,11 +314,15 @@ func TestHandleSettlementStatusIncludesConfirmedCounterWhenNoBacklog(t *testing.
 	now := time.Unix(1713400000, 0).UTC()
 	stub := &issuerSettlementReconcileStub{
 		report: settlement.ReconcileReport{
-			GeneratedAt:         now,
-			PendingOperations:   0,
-			SubmittedOperations: 2,
-			ConfirmedOperations: 5,
-			FailedOperations:    0,
+			GeneratedAt:               now,
+			ShadowAdapterConfigured:   true,
+			ShadowAttemptedOperations: 3,
+			ShadowSubmittedOperations: 3,
+			ShadowFailedOperations:    0,
+			PendingOperations:         0,
+			SubmittedOperations:       2,
+			ConfirmedOperations:       5,
+			FailedOperations:          0,
 		},
 	}
 	s := &Service{
@@ -325,12 +340,16 @@ func TestHandleSettlementStatusIncludesConfirmedCounterWhenNoBacklog(t *testing.
 		t.Fatalf("expected status 200, got %d body=%s", rr.Code, rr.Body.String())
 	}
 	var resp struct {
-		Status              string `json:"status"`
-		GeneratedAt         int64  `json:"generated_at"`
-		PendingOperations   int    `json:"pending_operations"`
-		SubmittedOperations int    `json:"submitted_operations"`
-		ConfirmedOperations int    `json:"confirmed_operations"`
-		FailedOperations    int    `json:"failed_operations"`
+		Status                    string `json:"status"`
+		GeneratedAt               int64  `json:"generated_at"`
+		ShadowAdapterConfigured   bool   `json:"shadow_adapter_configured"`
+		ShadowAttemptedOperations int    `json:"shadow_attempted_operations"`
+		ShadowSubmittedOperations int    `json:"shadow_submitted_operations"`
+		ShadowFailedOperations    int    `json:"shadow_failed_operations"`
+		PendingOperations         int    `json:"pending_operations"`
+		SubmittedOperations       int    `json:"submitted_operations"`
+		ConfirmedOperations       int    `json:"confirmed_operations"`
+		FailedOperations          int    `json:"failed_operations"`
 	}
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response: %v", err)
@@ -340,6 +359,9 @@ func TestHandleSettlementStatusIncludesConfirmedCounterWhenNoBacklog(t *testing.
 	}
 	if resp.GeneratedAt != now.Unix() {
 		t.Fatalf("expected generated_at %d, got %d", now.Unix(), resp.GeneratedAt)
+	}
+	if !resp.ShadowAdapterConfigured || resp.ShadowAttemptedOperations != 3 || resp.ShadowSubmittedOperations != 3 || resp.ShadowFailedOperations != 0 {
+		t.Fatalf("unexpected shadow telemetry: %+v", resp)
 	}
 	if resp.PendingOperations != 0 || resp.SubmittedOperations != 2 || resp.ConfirmedOperations != 5 || resp.FailedOperations != 0 {
 		t.Fatalf("unexpected lifecycle counters: %+v", resp)

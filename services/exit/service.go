@@ -148,16 +148,20 @@ type settlementStatusSnapshot struct {
 }
 
 type settlementStatusResponse struct {
-	Enabled                  bool      `json:"enabled"`
-	Stale                    bool      `json:"stale"`
-	CheckedAt                time.Time `json:"checked_at,omitempty"`
-	ReportGeneratedAt        time.Time `json:"report_generated_at,omitempty"`
-	PendingAdapterOperations int       `json:"pending_adapter_operations"`
-	PendingOperations        int       `json:"pending_operations"`
-	SubmittedOperations      int       `json:"submitted_operations"`
-	ConfirmedOperations      int       `json:"confirmed_operations"`
-	FailedOperations         int       `json:"failed_operations"`
-	LastError                string    `json:"last_error,omitempty"`
+	Enabled                   bool      `json:"enabled"`
+	Stale                     bool      `json:"stale"`
+	CheckedAt                 time.Time `json:"checked_at,omitempty"`
+	ReportGeneratedAt         time.Time `json:"report_generated_at,omitempty"`
+	PendingAdapterOperations  int       `json:"pending_adapter_operations"`
+	ShadowAdapterConfigured   bool      `json:"shadow_adapter_configured"`
+	ShadowAttemptedOperations int       `json:"shadow_attempted_operations"`
+	ShadowSubmittedOperations int       `json:"shadow_submitted_operations"`
+	ShadowFailedOperations    int       `json:"shadow_failed_operations"`
+	PendingOperations         int       `json:"pending_operations"`
+	SubmittedOperations       int       `json:"submitted_operations"`
+	ConfirmedOperations       int       `json:"confirmed_operations"`
+	FailedOperations          int       `json:"failed_operations"`
+	LastError                 string    `json:"last_error,omitempty"`
 }
 
 var deriveWGPublicKeyFromPrivateFile = wg.DerivePublicKeyFromPrivateFile
@@ -2106,6 +2110,10 @@ func (s *Service) handleSettlementStatus(w http.ResponseWriter, r *http.Request)
 		resp.Stale = stale
 		resp.ReportGeneratedAt = report.GeneratedAt
 		resp.PendingAdapterOperations = report.PendingAdapterOperations
+		resp.ShadowAdapterConfigured = report.ShadowAdapterConfigured
+		resp.ShadowAttemptedOperations = report.ShadowAttemptedOperations
+		resp.ShadowSubmittedOperations = report.ShadowSubmittedOperations
+		resp.ShadowFailedOperations = report.ShadowFailedOperations
 		resp.PendingOperations = report.PendingOperations
 		resp.SubmittedOperations = report.SubmittedOperations
 		resp.ConfirmedOperations = report.ConfirmedOperations
