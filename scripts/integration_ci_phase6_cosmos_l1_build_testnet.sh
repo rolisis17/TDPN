@@ -22,20 +22,24 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 
 CAPTURE="$TMP_DIR/stage_calls.tsv"
 SUCCESS_LOG="$TMP_DIR/success.log"
+SAME_PATH_LOG="$TMP_DIR/same_path.log"
 DRY_RUN_LOG="$TMP_DIR/dry_run.log"
 TOGGLE_LOG="$TMP_DIR/toggle.log"
 FAIL_LOG="$TMP_DIR/fail.log"
 
 SUCCESS_REPORTS_DIR="$TMP_DIR/reports_success"
+SAME_PATH_REPORTS_DIR="$TMP_DIR/reports_same_path"
 DRY_RUN_REPORTS_DIR="$TMP_DIR/reports_dry_run"
 TOGGLE_REPORTS_DIR="$TMP_DIR/reports_toggle"
 FAIL_REPORTS_DIR="$TMP_DIR/reports_fail"
 
 SUCCESS_SUMMARY_JSON="$TMP_DIR/summary_success.json"
+SAME_PATH_SUMMARY_JSON="$TMP_DIR/summary_same_path.json"
 DRY_RUN_SUMMARY_JSON="$TMP_DIR/summary_dry_run.json"
 TOGGLE_SUMMARY_JSON="$TMP_DIR/summary_toggle.json"
 FAIL_SUMMARY_JSON="$TMP_DIR/summary_fail.json"
 SUCCESS_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_success.json"
+SAME_PATH_CANONICAL_SUMMARY_JSON="$SAME_PATH_SUMMARY_JSON"
 DRY_RUN_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_dry_run.json"
 TOGGLE_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_toggle.json"
 FAIL_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_fail.json"
@@ -242,6 +246,40 @@ if ! grep -Fq -- '[ci-phase6-cosmos-l1] status=pass rc=0 dry_run=0' "$SUCCESS_LO
   exit 1
 fi
 assert_canonical_summary_artifact "$SUCCESS_SUMMARY_JSON" "$SUCCESS_CANONICAL_SUMMARY_JSON" "$SUCCESS_LOG"
+
+echo "[ci-phase6-cosmos-l1] same-path canonical summary path"
+: >"$CAPTURE"
+CI_PHASE6_CAPTURE_FILE="$CAPTURE" \
+CI_PHASE6_COSMOS_L1_BUILD_TESTNET_CANONICAL_SUMMARY_JSON="$SAME_PATH_CANONICAL_SUMMARY_JSON" \
+"$GATE_SCRIPT" \
+  --reports-dir "$SAME_PATH_REPORTS_DIR" \
+  --summary-json "$SAME_PATH_SUMMARY_JSON" \
+  --print-summary-json 0 >"$SAME_PATH_LOG" 2>&1
+
+assert_stage_order "$CAPTURE" "${STAGE_IDS[@]}"
+
+if [[ ! -f "$SAME_PATH_SUMMARY_JSON" ]]; then
+  echo "missing same-path summary json: $SAME_PATH_SUMMARY_JSON"
+  cat "$SAME_PATH_LOG"
+  exit 1
+fi
+if ! jq -e --arg same_path "$SAME_PATH_SUMMARY_JSON" '
+  .status == "pass"
+  and .rc == 0
+  and .artifacts.summary_json == $same_path
+  and .artifacts.canonical_summary_json == $same_path
+  and .artifacts.summary_json == .artifacts.canonical_summary_json
+' "$SAME_PATH_SUMMARY_JSON" >/dev/null; then
+  echo "same-path summary missing expected status/rc or artifact equality fields"
+  cat "$SAME_PATH_SUMMARY_JSON"
+  exit 1
+fi
+if ! grep -Fq -- '[ci-phase6-cosmos-l1] status=pass rc=0 dry_run=0' "$SAME_PATH_LOG"; then
+  echo "same-path log missing final pass status line"
+  cat "$SAME_PATH_LOG"
+  exit 1
+fi
+assert_canonical_summary_artifact "$SAME_PATH_SUMMARY_JSON" "$SAME_PATH_CANONICAL_SUMMARY_JSON" "$SAME_PATH_LOG"
 
 echo "[ci-phase6-cosmos-l1] dry-run skip accounting"
 : >"$CAPTURE"
