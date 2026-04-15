@@ -421,6 +421,105 @@ func TestMemoryServiceSettleSessionCurrencyConversion(t *testing.T) {
 	}
 }
 
+func TestMemoryServiceDualAssetSessionEntitlementEquivalence(t *testing.T) {
+	const (
+		pricePerMiBMicros = int64(1_000_000) // 1.0 unit per MiB in base settlement currency.
+		usageBytes        = int64(2 * 1024 * 1024)
+	)
+
+	s := NewMemoryService(
+		WithPricePerMiBMicros(pricePerMiBMicros),
+		WithCurrency("USDC"),
+		WithCurrencyRate("TDPN", 2, 1), // 1 USDC micro == 2 TDPN micros.
+	)
+	ctx := context.Background()
+
+	if _, err := s.ReserveFunds(ctx, FundReservation{
+		SessionID:    "sess-eq-usdc-ok",
+		SubjectID:    "client-eq-usdc-ok",
+		AmountMicros: 2_000_000,
+		Currency:     "USDC",
+	}); err != nil {
+		t.Fatalf("ReserveFunds usdc success case: %v", err)
+	}
+	if err := s.RecordUsage(ctx, UsageRecord{
+		SessionID:    "sess-eq-usdc-ok",
+		SubjectID:    "client-eq-usdc-ok",
+		BytesIngress: usageBytes,
+	}); err != nil {
+		t.Fatalf("RecordUsage usdc success case: %v", err)
+	}
+	usdcSettlement, err := s.SettleSession(ctx, "sess-eq-usdc-ok")
+	if err != nil {
+		t.Fatalf("SettleSession usdc success case: %v", err)
+	}
+
+	if _, err := s.ReserveFunds(ctx, FundReservation{
+		SessionID:    "sess-eq-tdpn-ok",
+		SubjectID:    "client-eq-tdpn-ok",
+		AmountMicros: 4_000_000,
+		Currency:     "TDPN",
+	}); err != nil {
+		t.Fatalf("ReserveFunds tdpn success case: %v", err)
+	}
+	if err := s.RecordUsage(ctx, UsageRecord{
+		SessionID:    "sess-eq-tdpn-ok",
+		SubjectID:    "client-eq-tdpn-ok",
+		BytesIngress: usageBytes,
+	}); err != nil {
+		t.Fatalf("RecordUsage tdpn success case: %v", err)
+	}
+	tdpnSettlement, err := s.SettleSession(ctx, "sess-eq-tdpn-ok")
+	if err != nil {
+		t.Fatalf("SettleSession tdpn success case: %v", err)
+	}
+
+	if usdcSettlement.ChargedMicros != 2_000_000 {
+		t.Fatalf("expected USDC charged micros 2000000, got %d", usdcSettlement.ChargedMicros)
+	}
+	if tdpnSettlement.ChargedMicros != 4_000_000 {
+		t.Fatalf("expected TDPN charged micros 4000000, got %d", tdpnSettlement.ChargedMicros)
+	}
+
+	if _, err := s.ReserveFunds(ctx, FundReservation{
+		SessionID:    "sess-eq-usdc-fail",
+		SubjectID:    "client-eq-usdc-fail",
+		AmountMicros: 1_999_999,
+		Currency:     "USDC",
+	}); err != nil {
+		t.Fatalf("ReserveFunds usdc insufficient case: %v", err)
+	}
+	if err := s.RecordUsage(ctx, UsageRecord{
+		SessionID:    "sess-eq-usdc-fail",
+		SubjectID:    "client-eq-usdc-fail",
+		BytesIngress: usageBytes,
+	}); err != nil {
+		t.Fatalf("RecordUsage usdc insufficient case: %v", err)
+	}
+	if _, err := s.SettleSession(ctx, "sess-eq-usdc-fail"); err == nil {
+		t.Fatalf("expected USDC insufficient reservation to fail")
+	}
+
+	if _, err := s.ReserveFunds(ctx, FundReservation{
+		SessionID:    "sess-eq-tdpn-fail",
+		SubjectID:    "client-eq-tdpn-fail",
+		AmountMicros: 3_999_999,
+		Currency:     "TDPN",
+	}); err != nil {
+		t.Fatalf("ReserveFunds tdpn insufficient case: %v", err)
+	}
+	if err := s.RecordUsage(ctx, UsageRecord{
+		SessionID:    "sess-eq-tdpn-fail",
+		SubjectID:    "client-eq-tdpn-fail",
+		BytesIngress: usageBytes,
+	}); err != nil {
+		t.Fatalf("RecordUsage tdpn insufficient case: %v", err)
+	}
+	if _, err := s.SettleSession(ctx, "sess-eq-tdpn-fail"); err == nil {
+		t.Fatalf("expected TDPN insufficient reservation to fail")
+	}
+}
+
 func TestMemoryServiceSubmitSlashEvidenceRequiresObjectiveSchema(t *testing.T) {
 	s := NewMemoryService()
 	ctx := context.Background()

@@ -443,6 +443,91 @@ func runSettlementForAdapterEnvTest(t *testing.T, svc settlement.Service, sessio
 	}
 }
 
+func TestSettlementServiceFromEnvCurrencyNativeDualQuoteBehavior(t *testing.T) {
+	t.Setenv("SETTLEMENT_PRICE_PER_MIB_MICROS", "2000000")
+	t.Setenv("SETTLEMENT_CURRENCY", "USDC")
+	t.Setenv("SETTLEMENT_NATIVE_CURRENCY", "TDPN")
+	t.Setenv("SETTLEMENT_NATIVE_RATE_NUMERATOR", "3")
+	t.Setenv("SETTLEMENT_NATIVE_RATE_DENOMINATOR", "2")
+	t.Setenv("SETTLEMENT_CHAIN_ADAPTER", "")
+
+	svc := newSettlementServiceFromEnv()
+	ctx := context.Background()
+
+	baseQuote, err := svc.QuotePrice(ctx, "subject-currency-base", "")
+	if err != nil {
+		t.Fatalf("quote base currency: %v", err)
+	}
+	if baseQuote.Currency != "USDC" {
+		t.Fatalf("expected base quote currency USDC, got %s", baseQuote.Currency)
+	}
+	if baseQuote.PricePerMiBMicros != 2000000 {
+		t.Fatalf("expected base quote 2000000 micros, got %d", baseQuote.PricePerMiBMicros)
+	}
+
+	nativeQuote, err := svc.QuotePrice(ctx, "subject-currency-native", "TDPN")
+	if err != nil {
+		t.Fatalf("quote native currency: %v", err)
+	}
+	if nativeQuote.Currency != "TDPN" {
+		t.Fatalf("expected native quote currency TDPN, got %s", nativeQuote.Currency)
+	}
+	if nativeQuote.PricePerMiBMicros != 3000000 {
+		t.Fatalf("expected native quote 3000000 micros with 3/2 conversion, got %d", nativeQuote.PricePerMiBMicros)
+	}
+}
+
+func TestSettlementServiceFromEnvDualNativeCurrencySettlementCoherence(t *testing.T) {
+	t.Setenv("SETTLEMENT_PRICE_PER_MIB_MICROS", "2000000")
+	t.Setenv("SETTLEMENT_CURRENCY", "USDC")
+	t.Setenv("SETTLEMENT_NATIVE_CURRENCY", "TDPN")
+	t.Setenv("SETTLEMENT_NATIVE_RATE_NUMERATOR", "3")
+	t.Setenv("SETTLEMENT_NATIVE_RATE_DENOMINATOR", "2")
+	t.Setenv("SETTLEMENT_CHAIN_ADAPTER", "")
+
+	svc := newSettlementServiceFromEnv()
+	ctx := context.Background()
+	sessionID := "sess-dual-native-coherent"
+
+	nativeQuote, err := svc.QuotePrice(ctx, "subject-dual-native", "TDPN")
+	if err != nil {
+		t.Fatalf("quote native currency: %v", err)
+	}
+
+	if _, err := svc.ReserveFunds(ctx, settlement.FundReservation{
+		SessionID:    sessionID,
+		SubjectID:    "subject-dual-native",
+		AmountMicros: 3500000,
+		Currency:     "TDPN",
+	}); err != nil {
+		t.Fatalf("reserve funds in native currency: %v", err)
+	}
+
+	if err := svc.RecordUsage(ctx, settlement.UsageRecord{
+		SessionID:    sessionID,
+		SubjectID:    "subject-dual-native",
+		BytesIngress: 1048576,
+		BytesEgress:  0,
+		RecordedAt:   time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("record usage: %v", err)
+	}
+
+	settled, err := svc.SettleSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("settle session: %v", err)
+	}
+	if settled.Currency != "TDPN" {
+		t.Fatalf("expected settlement in TDPN, got %s", settled.Currency)
+	}
+	if settled.ChargedMicros != nativeQuote.PricePerMiBMicros {
+		t.Fatalf("expected charged micros %d to match native quote, got %d", nativeQuote.PricePerMiBMicros, settled.ChargedMicros)
+	}
+	if settled.ChargedMicros != 3000000 {
+		t.Fatalf("expected deterministic converted charge 3000000, got %d", settled.ChargedMicros)
+	}
+}
+
 func TestNewSettlementServiceFromEnvCosmosDefaultHTTPSubmitMode(t *testing.T) {
 	seenCh := make(chan settlementAdapterRequest, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

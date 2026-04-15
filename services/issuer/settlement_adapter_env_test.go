@@ -253,3 +253,67 @@ func TestNewSettlementServiceFromEnvCosmosSignedTxMissingCredentialsFallsBack(t 
 	case <-time.After(200 * time.Millisecond):
 	}
 }
+
+func TestNewSettlementServiceFromEnvCurrencyBaseFromEnv(t *testing.T) {
+	t.Setenv("SETTLEMENT_CURRENCY", "usdc")
+	t.Setenv("SETTLEMENT_NATIVE_CURRENCY", "")
+	t.Setenv("SETTLEMENT_NATIVE_RATE_NUMERATOR", "")
+	t.Setenv("SETTLEMENT_NATIVE_RATE_DENOMINATOR", "")
+	t.Setenv("SETTLEMENT_CHAIN_ADAPTER", "")
+
+	svc := newSettlementServiceFromEnv()
+
+	quoteDefault, err := svc.QuotePrice(context.Background(), "client-currency", "")
+	if err != nil {
+		t.Fatalf("QuotePrice default currency: %v", err)
+	}
+	if quoteDefault.Currency != "USDC" {
+		t.Fatalf("expected base quote currency USDC, got %s", quoteDefault.Currency)
+	}
+	if quoteDefault.PricePerMiBMicros != 1000 {
+		t.Fatalf("expected base quote price 1000, got %d", quoteDefault.PricePerMiBMicros)
+	}
+
+	quoteExplicit, err := svc.QuotePrice(context.Background(), "client-currency", "USDC")
+	if err != nil {
+		t.Fatalf("QuotePrice explicit USDC currency: %v", err)
+	}
+	if quoteExplicit.Currency != "USDC" {
+		t.Fatalf("expected explicit quote currency USDC, got %s", quoteExplicit.Currency)
+	}
+	if quoteExplicit.PricePerMiBMicros != 1000 {
+		t.Fatalf("expected explicit USDC quote price 1000, got %d", quoteExplicit.PricePerMiBMicros)
+	}
+}
+
+func TestNewSettlementServiceFromEnvDualNativeCurrencyConversion(t *testing.T) {
+	t.Setenv("SETTLEMENT_CURRENCY", "USDC")
+	t.Setenv("SETTLEMENT_NATIVE_CURRENCY", "tdpn")
+	t.Setenv("SETTLEMENT_NATIVE_RATE_NUMERATOR", "3")
+	t.Setenv("SETTLEMENT_NATIVE_RATE_DENOMINATOR", "2")
+	t.Setenv("SETTLEMENT_CHAIN_ADAPTER", "")
+
+	svc := newSettlementServiceFromEnv()
+
+	baseQuote, err := svc.QuotePrice(context.Background(), "client-dual", "")
+	if err != nil {
+		t.Fatalf("QuotePrice base currency: %v", err)
+	}
+	if baseQuote.Currency != "USDC" {
+		t.Fatalf("expected base quote currency USDC, got %s", baseQuote.Currency)
+	}
+	if baseQuote.PricePerMiBMicros != 1000 {
+		t.Fatalf("expected base quote price 1000, got %d", baseQuote.PricePerMiBMicros)
+	}
+
+	nativeQuote, err := svc.QuotePrice(context.Background(), "client-dual", "TDPN")
+	if err != nil {
+		t.Fatalf("QuotePrice native currency: %v", err)
+	}
+	if nativeQuote.Currency != "TDPN" {
+		t.Fatalf("expected native quote currency TDPN, got %s", nativeQuote.Currency)
+	}
+	if nativeQuote.PricePerMiBMicros != 1500 {
+		t.Fatalf("expected native quote price 1500, got %d", nativeQuote.PricePerMiBMicros)
+	}
+}
