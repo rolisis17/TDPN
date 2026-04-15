@@ -706,6 +706,14 @@ if ! rg -Fq "phase6_cosmos_l1_summary_report" "$phase6_summary_report_script"; t
   echo "phase6 summary report helper must emit phase6 summary report schema id"
   exit 1
 fi
+if ! rg -Fq "PHASE6_COSMOS_L1_SUMMARY_REPORT_CANONICAL_SUMMARY_JSON" "$phase6_summary_report_script"; then
+  echo "phase6 summary report helper must expose canonical summary artifact override env"
+  exit 1
+fi
+if ! rg -Fq "canonical_summary_json" "$phase6_summary_report_script"; then
+  echo "phase6 summary report helper must emit canonical summary artifact metadata/logging"
+  exit 1
+fi
 if ! rg -Fq "phase6_cosmos_l1_build_testnet_ci_summary.json" "$phase6_summary_report_script"; then
   echo "phase6 summary report helper must probe build/testnet ci summary artifact"
   exit 1
@@ -724,6 +732,14 @@ if ! rg -Fq "phase6_cosmos_l1_build_testnet_suite_" "$phase6_summary_report_scri
 fi
 if ! rg -Fq "phase6_cosmos_l1_summary_report.sh" "$phase6_summary_report_integration_script"; then
   echo "phase6 summary report integration script must execute summary report helper"
+  exit 1
+fi
+if ! rg -Fq "canonical_summary_json" "$phase6_summary_report_integration_script"; then
+  echo "phase6 summary report integration script must validate canonical summary artifact wiring"
+  exit 1
+fi
+if ! rg -Fq "cmp -s" "$phase6_summary_report_integration_script"; then
+  echo "phase6 summary report integration script must validate canonical and run summary content parity"
   exit 1
 fi
 if ! rg -Fq "pass path" "$phase6_summary_report_integration_script"; then
@@ -1229,6 +1245,14 @@ if ! rg -Fq "phase5_settlement_layer_summary_report" "$phase5_summary_report_scr
   echo "phase5 summary report helper must emit phase5 summary report schema id"
   exit 1
 fi
+if ! rg -Fq "PHASE5_SETTLEMENT_LAYER_SUMMARY_REPORT_CANONICAL_SUMMARY_JSON" "$phase5_summary_report_script"; then
+  echo "phase5 summary report helper must expose canonical summary artifact override env"
+  exit 1
+fi
+if ! rg -Fq "canonical_summary_json" "$phase5_summary_report_script"; then
+  echo "phase5 summary report helper must emit canonical summary artifact metadata/logging"
+  exit 1
+fi
 for phase5_helper_artifact in \
   "phase5_settlement_layer_ci_summary.json" \
   "phase5_settlement_layer_check_summary.json" \
@@ -1251,6 +1275,14 @@ if ! rg -Fq "phase5_settlement_layer_handoff_run_" "$phase5_summary_report_scrip
 fi
 if ! rg -Fq "phase5_settlement_layer_summary_report.sh" "$phase5_summary_report_integration_script"; then
   echo "phase5 summary report integration script must execute summary report helper"
+  exit 1
+fi
+if ! rg -Fq "canonical_summary_json" "$phase5_summary_report_integration_script"; then
+  echo "phase5 summary report integration script must validate canonical summary artifact wiring"
+  exit 1
+fi
+if ! rg -Fq "cmp -s" "$phase5_summary_report_integration_script"; then
+  echo "phase5 summary report integration script must validate canonical and run summary content parity"
   exit 1
 fi
 if ! rg -Fq "pass path" "$phase5_summary_report_integration_script"; then
