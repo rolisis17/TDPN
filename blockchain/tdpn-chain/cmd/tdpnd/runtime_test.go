@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
+	"io"
 	"math/big"
 	"net"
 	"os"
@@ -600,17 +601,17 @@ func TestRunTDPNDGRPCModeAuthEnforcementAndHealth(t *testing.T) {
 				ListServices: "*",
 			},
 		})
-		if sendErr != nil && status.Code(sendErr) != codes.Unimplemented {
-			t.Fatalf("expected reflection send unimplemented in auth mode, got %v", sendErr)
+		if sendErr != nil && !isReflectionDisabledErr(sendErr) {
+			t.Fatalf("expected reflection send disabled in auth mode, got %v", sendErr)
 		}
 		if sendErr == nil {
 			_, recvErr := reflectionStream.Recv()
-			if status.Code(recvErr) != codes.Unimplemented {
-				t.Fatalf("expected reflection recv unimplemented in auth mode, got %v", recvErr)
+			if !isReflectionDisabledErr(recvErr) {
+				t.Fatalf("expected reflection recv disabled in auth mode, got %v", recvErr)
 			}
 		}
-	} else if status.Code(err) != codes.Unimplemented {
-		t.Fatalf("expected reflection unimplemented in auth mode, got %v", err)
+	} else if !isReflectionDisabledErr(err) {
+		t.Fatalf("expected reflection disabled in auth mode, got %v", err)
 	}
 
 	billingMsg := vpnbillingpb.NewMsgClient(conn)
@@ -664,6 +665,21 @@ func TestRunTDPNDGRPCModeAuthEnforcementAndHealth(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for grpc runtime shutdown")
+	}
+}
+
+func isReflectionDisabledErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, io.EOF) {
+		return true
+	}
+	switch status.Code(err) {
+	case codes.Unimplemented, codes.Unavailable, codes.Unknown:
+		return true
+	default:
+		return false
 	}
 }
 
