@@ -76,12 +76,13 @@ Exit gate:
 - Phase 5 CI includes `settlement_shadow_env` running `scripts/integration_cosmos_settlement_shadow_env.sh` to validate shadow adapter env wiring and fail-open behavior.
 - Phase 5 CI includes `settlement_shadow_status_surface` running `scripts/integration_cosmos_settlement_shadow_status_surface.sh` to validate shadow telemetry/status surfacing in settlement status endpoints.
 - Phase 5 CI also includes `settlement_adapter_signed_tx_roundtrip` backed by `scripts/integration_cosmos_adapter_tdpnd_signed_tx_roundtrip.sh` to validate signed-tx adapter relay into `tdpnd` bridge writes before promotion.
-- Phase 5 CI/check/run/handoff wrappers now emit canonical summary artifacts under `.easy-node-logs`:
+- Phase 5 CI/check/run/handoff wrappers now emit canonical summary artifacts under `.easy-node-logs`; these are the helper input contracts for `scripts/phase5_settlement_layer_summary_report.sh`:
   - `phase5_settlement_layer_ci_summary.json`
   - `phase5_settlement_layer_check_summary.json`
   - `phase5_settlement_layer_run_summary.json`
   - `phase5_settlement_layer_handoff_check_summary.json`
   - `phase5_settlement_layer_handoff_run_summary.json`
+- Phase 5 operator summary helper `scripts/phase5_settlement_layer_summary_report.sh` aggregates CI/check/run/handoff summaries into compact operator output plus normalized JSON, with contract coverage from `scripts/integration_phase5_settlement_layer_summary_report.sh`.
 - Phase 6 CI now includes `scripts/ci_phase6_cosmos_l1_build_testnet.sh` with contract coverage from `scripts/integration_ci_phase6_cosmos_l1_build_testnet.sh` for chain scaffold/proto/query/gRPC runtime gate ordering and dry-run/first-failure accounting.
 - Phase 6 build/testnet CI includes `local_testnet_smoke` wired to `scripts/integration_cosmos_local_testnet_smoke.sh` for deterministic local multi-node `tdpnd` lifecycle coverage (`init -> start -> status -> stop -> status`).
 - Phase 6 build/testnet CI now includes `tdpnd_grpc_auth_live_smoke` wired to `scripts/integration_cosmos_tdpnd_grpc_auth_live_smoke.sh` for auth-token gRPC live-smoke coverage.

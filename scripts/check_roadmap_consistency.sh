@@ -23,6 +23,8 @@ phase5_check_integration_script="scripts/integration_phase5_settlement_layer_che
 phase5_run_integration_script="scripts/integration_phase5_settlement_layer_run.sh"
 phase5_handoff_check_integration_script="scripts/integration_phase5_settlement_layer_handoff_check.sh"
 phase5_handoff_run_integration_script="scripts/integration_phase5_settlement_layer_handoff_run.sh"
+phase5_summary_report_script="scripts/phase5_settlement_layer_summary_report.sh"
+phase5_summary_report_integration_script="scripts/integration_phase5_settlement_layer_summary_report.sh"
 phase6_ci_script="scripts/ci_phase6_cosmos_l1_build_testnet.sh"
 phase6_integration_script="scripts/integration_ci_phase6_cosmos_l1_build_testnet.sh"
 phase6_contracts_ci_script="scripts/ci_phase6_cosmos_l1_contracts.sh"
@@ -91,7 +93,7 @@ check_confirmation_interface_wording() {
   fi
 }
 
-for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$chain_readme" "$settlement_mapping_doc" "$blockchain_sponsor_quickstart_doc" "$phase5_ci_script" "$phase5_integration_script" "$phase5_check_script" "$phase5_run_script" "$phase5_handoff_check_script" "$phase5_handoff_run_script" "$phase5_check_integration_script" "$phase5_run_integration_script" "$phase5_handoff_check_integration_script" "$phase5_handoff_run_integration_script" "$phase6_ci_script" "$phase6_integration_script" "$phase6_contracts_ci_script" "$phase6_contracts_integration_script" "$phase6_contracts_live_smoke_script" "$phase6_module_coverage_floor_script" "$phase6_keeper_coverage_floor_script" "$phase6_check_script" "$phase6_run_script" "$phase6_check_integration_script" "$phase6_run_integration_script" "$phase6_suite_script" "$phase6_suite_integration_script" "$phase6_handoff_check_script" "$phase6_handoff_run_script" "$phase6_handoff_check_integration_script" "$phase6_handoff_run_integration_script" "$phase6_summary_report_script" "$phase6_summary_report_integration_script"; do
+for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$chain_readme" "$settlement_mapping_doc" "$blockchain_sponsor_quickstart_doc" "$phase5_ci_script" "$phase5_integration_script" "$phase5_check_script" "$phase5_run_script" "$phase5_handoff_check_script" "$phase5_handoff_run_script" "$phase5_check_integration_script" "$phase5_run_integration_script" "$phase5_handoff_check_integration_script" "$phase5_handoff_run_integration_script" "$phase5_summary_report_script" "$phase5_summary_report_integration_script" "$phase6_ci_script" "$phase6_integration_script" "$phase6_contracts_ci_script" "$phase6_contracts_integration_script" "$phase6_contracts_live_smoke_script" "$phase6_module_coverage_floor_script" "$phase6_keeper_coverage_floor_script" "$phase6_check_script" "$phase6_run_script" "$phase6_check_integration_script" "$phase6_run_integration_script" "$phase6_suite_script" "$phase6_suite_integration_script" "$phase6_handoff_check_script" "$phase6_handoff_run_script" "$phase6_handoff_check_integration_script" "$phase6_handoff_run_integration_script" "$phase6_summary_report_script" "$phase6_summary_report_integration_script"; do
   if [[ ! -f "$f" ]]; then
     echo "missing required file: $f"
     exit 1
@@ -230,6 +232,14 @@ if ! rg -Fq "integration_phase6_cosmos_l1_summary_report.sh" "$full_plan"; then
   echo "full execution plan must document phase6 summary report integration contract script"
   exit 1
 fi
+if ! rg -Fq "phase5_settlement_layer_summary_report.sh" "$full_plan"; then
+  echo "full execution plan must document phase5 summary report helper script"
+  exit 1
+fi
+if ! rg -Fq "integration_phase5_settlement_layer_summary_report.sh" "$full_plan"; then
+  echo "full execution plan must document phase5 summary report integration contract script"
+  exit 1
+fi
 if ! rg -Fq "tdpnd_grpc_auth_live_smoke_ok" "$full_plan"; then
   echo "full execution plan must document phase6 readiness/handoff tdpnd_grpc_auth_live_smoke_ok signal"
   exit 1
@@ -331,6 +341,14 @@ if ! rg -Fq "phase6_cosmos_l1_summary_report.sh" "$product_roadmap"; then
 fi
 if ! rg -Fq "integration_phase6_cosmos_l1_summary_report.sh" "$product_roadmap"; then
   echo "product roadmap must document phase6 summary report integration contract script"
+  exit 1
+fi
+if ! rg -Fq "phase5_settlement_layer_summary_report.sh" "$product_roadmap"; then
+  echo "product roadmap must document phase5 summary report helper script"
+  exit 1
+fi
+if ! rg -Fq "integration_phase5_settlement_layer_summary_report.sh" "$product_roadmap"; then
+  echo "product roadmap must document phase5 summary report integration contract script"
   exit 1
 fi
 if ! rg -Fq "tdpnd_grpc_auth_live_smoke_ok" "$product_roadmap"; then
@@ -935,6 +953,14 @@ if ! rg -Fq "integration_phase6_cosmos_l1_summary_report.sh" "$chain_readme"; th
   echo "chain README must document phase6 summary report integration contract script"
   exit 1
 fi
+if ! rg -Fq "phase5_settlement_layer_summary_report.sh" "$chain_readme"; then
+  echo "chain README must document phase5 summary report helper script"
+  exit 1
+fi
+if ! rg -Fq "integration_phase5_settlement_layer_summary_report.sh" "$chain_readme"; then
+  echo "chain README must document phase5 summary report integration contract script"
+  exit 1
+fi
 if ! rg -Fq "blockchain-app-sponsorship-quickstart.md" "$chain_readme"; then
   echo "chain README must link blockchain sponsor quickstart"
   exit 1
@@ -1165,6 +1191,50 @@ if ! rg -Fq "canonical_summary_json" "$phase5_handoff_check_integration_script";
 fi
 if ! rg -Fq "cmp -s" "$phase5_handoff_check_integration_script"; then
   echo "phase5 handoff-check integration must validate canonical and run summary content parity"
+  exit 1
+fi
+if ! rg -Fq "phase5_settlement_layer_summary_report" "$phase5_summary_report_script"; then
+  echo "phase5 summary report helper must emit phase5 summary report schema id"
+  exit 1
+fi
+for phase5_helper_artifact in \
+  "phase5_settlement_layer_ci_summary.json" \
+  "phase5_settlement_layer_check_summary.json" \
+  "phase5_settlement_layer_run_summary.json" \
+  "phase5_settlement_layer_handoff_check_summary.json" \
+  "phase5_settlement_layer_handoff_run_summary.json"
+do
+  if ! rg -Fq "$phase5_helper_artifact" "$phase5_summary_report_script"; then
+    echo "phase5 summary report helper must probe canonical phase5 artifact: $phase5_helper_artifact"
+    exit 1
+  fi
+done
+if ! rg -Fq "ci_phase5_settlement_layer_" "$phase5_summary_report_script"; then
+  echo "phase5 summary report helper must include fallback discovery for timestamped ci summaries"
+  exit 1
+fi
+if ! rg -Fq "phase5_settlement_layer_handoff_run_" "$phase5_summary_report_script"; then
+  echo "phase5 summary report helper must include fallback discovery for timestamped handoff-run summaries"
+  exit 1
+fi
+if ! rg -Fq "phase5_settlement_layer_summary_report.sh" "$phase5_summary_report_integration_script"; then
+  echo "phase5 summary report integration script must execute summary report helper"
+  exit 1
+fi
+if ! rg -Fq "pass path" "$phase5_summary_report_integration_script"; then
+  echo "phase5 summary report integration script must validate pass path"
+  exit 1
+fi
+if ! rg -Fq "fail path" "$phase5_summary_report_integration_script"; then
+  echo "phase5 summary report integration script must validate fail path"
+  exit 1
+fi
+if ! rg -Fq "missing-input path" "$phase5_summary_report_integration_script"; then
+  echo "phase5 summary report integration script must validate missing-input path"
+  exit 1
+fi
+if ! rg -Fq "fallback discovery path" "$phase5_summary_report_integration_script"; then
+  echo "phase5 summary report integration script must validate fallback path"
   exit 1
 fi
 for phase5_canonical_summary in \
