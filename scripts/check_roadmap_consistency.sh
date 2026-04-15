@@ -210,6 +210,14 @@ if ! rg -Fq "integration_cosmos_tdpnd_grpc_auth_live_smoke.sh" "$full_plan"; the
   echo "full execution plan must document phase6 tdpnd gRPC auth live-smoke script"
   exit 1
 fi
+if ! rg -Fq "billing/rewards/slashing/sponsor/validator/governance query dispatch" "$full_plan"; then
+  echo "full execution plan must document six-module gRPC live query dispatch posture"
+  exit 1
+fi
+if ! rg -Fq "billing/rewards/slashing/sponsor/validator/governance query RPCs" "$full_plan"; then
+  echo "full execution plan must document six-module gRPC auth query-RPC coverage posture"
+  exit 1
+fi
 if ! rg -Fq "ci_phase6_cosmos_l1_contracts.sh" "$full_plan"; then
   echo "full execution plan must document phase6 cosmos l1 contracts ci gate script"
   exit 1
@@ -357,6 +365,14 @@ if ! rg -Fq "validator/governance Msg+Query roundtrip contracts in addition to b
 fi
 if ! rg -Fq "integration_cosmos_tdpnd_grpc_auth_live_smoke.sh" "$product_roadmap"; then
   echo "product roadmap must document phase6 tdpnd gRPC auth live-smoke script"
+  exit 1
+fi
+if ! rg -Fq "billing/rewards/slashing/sponsor/validator/governance query dispatch" "$product_roadmap"; then
+  echo "product roadmap must document six-module gRPC live query dispatch posture"
+  exit 1
+fi
+if ! rg -Fq "billing/rewards/slashing/sponsor/validator/governance query RPCs" "$product_roadmap"; then
+  echo "product roadmap must document six-module gRPC auth query-RPC coverage posture"
   exit 1
 fi
 if ! rg -Fq "ci_phase6_cosmos_l1_contracts.sh" "$product_roadmap"; then
@@ -557,6 +573,8 @@ do
 done
 for live_grpc_service in \
   "tdpn.vpnbilling.v1.Query" \
+  "tdpn.vpnrewards.v1.Query" \
+  "tdpn.vpnslashing.v1.Query" \
   "tdpn.vpnsponsor.v1.Query" \
   "tdpn.vpnvalidator.v1.Query" \
   "tdpn.vpngovernance.v1.Query"
@@ -568,6 +586,8 @@ do
 done
 for live_grpc_method in \
   "tdpn.vpnbilling.v1.Query/ListCreditReservations" \
+  "tdpn.vpnrewards.v1.Query/ListRewardAccruals" \
+  "tdpn.vpnslashing.v1.Query/ListSlashEvidence" \
   "tdpn.vpnsponsor.v1.Query/ListSponsorAuthorizations" \
   "tdpn.vpnvalidator.v1.Query/ListValidatorEligibilities" \
   "tdpn.vpngovernance.v1.Query/ListGovernancePolicies"

@@ -20,6 +20,8 @@ import (
 
 	"github.com/tdpn/tdpn-chain/app"
 	vpnbillingpb "github.com/tdpn/tdpn-chain/proto/gen/go/tdpn/vpnbilling/v1"
+	vpnrewardspb "github.com/tdpn/tdpn-chain/proto/gen/go/tdpn/vpnrewards/v1"
+	vpnslashingpb "github.com/tdpn/tdpn-chain/proto/gen/go/tdpn/vpnslashing/v1"
 	vpngovernancepb "github.com/tdpn/tdpn-chain/proto/gen/go/tdpn/vpngovernance/v1"
 	vpnsponsorpb "github.com/tdpn/tdpn-chain/proto/gen/go/tdpn/vpnsponsor/v1"
 	vpnvalidatorpb "github.com/tdpn/tdpn-chain/proto/gen/go/tdpn/vpnvalidator/v1"
@@ -709,6 +711,8 @@ func TestRunTDPNDGRPCModeAuthEnforcementAndHealth(t *testing.T) {
 
 	billingMsg := vpnbillingpb.NewMsgClient(conn)
 	billingQuery := vpnbillingpb.NewQueryClient(conn)
+	rewardsQuery := vpnrewardspb.NewQueryClient(conn)
+	slashingQuery := vpnslashingpb.NewQueryClient(conn)
 	sponsorQuery := vpnsponsorpb.NewQueryClient(conn)
 	validatorQuery := vpnvalidatorpb.NewQueryClient(conn)
 	governanceQuery := vpngovernancepb.NewQueryClient(conn)
@@ -765,6 +769,14 @@ func TestRunTDPNDGRPCModeAuthEnforcementAndHealth(t *testing.T) {
 
 	assertQueryAuthParity("vpnbilling/ListCreditReservations", func(callCtx context.Context) error {
 		_, callErr := billingQuery.ListCreditReservations(callCtx, &vpnbillingpb.QueryListCreditReservationsRequest{})
+		return callErr
+	})
+	assertQueryAuthParity("vpnrewards/ListRewardAccruals", func(callCtx context.Context) error {
+		_, callErr := rewardsQuery.ListRewardAccruals(callCtx, &vpnrewardspb.QueryListRewardAccrualsRequest{})
+		return callErr
+	})
+	assertQueryAuthParity("vpnslashing/ListSlashEvidence", func(callCtx context.Context) error {
+		_, callErr := slashingQuery.ListSlashEvidence(callCtx, &vpnslashingpb.QueryListSlashEvidenceRequest{})
 		return callErr
 	})
 	assertQueryAuthParity("vpnsponsor/ListSponsorAuthorizations", func(callCtx context.Context) error {
