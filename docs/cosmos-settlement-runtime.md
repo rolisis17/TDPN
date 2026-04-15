@@ -109,6 +109,7 @@ Exit settlement status endpoint:
 - Deferred adapter operations are tracked per idempotency key (`pending` lifecycle).
 - Periodic reconcile loops in issuer/exit call settlement `Reconcile(...)`.
 - Successful replay marks operations `submitted` and clears deferred backlog.
+- When an adapter supports by-id bridge queries, reconcile can promote `submitted` records to `confirmed` after chain-side visibility checks.
 - Failures remain deferred and are retried in future cycles.
 - Cosmos adapter retry policy:
   - retryable: transport/network errors, HTTP `408`, `425`, `429`, and `5xx`.
