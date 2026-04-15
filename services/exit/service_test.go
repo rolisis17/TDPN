@@ -901,6 +901,171 @@ func TestNewSettlementServiceFromEnvCosmosShadowAdapterMirrorsSubmissions(t *tes
 	}
 }
 
+func TestNewSettlementServiceFromEnvCosmosShadowAdapterSignedTxModeUsesConfiguredFields(t *testing.T) {
+	primarySeenCh := make(chan settlementAdapterRequest, 2)
+	primarySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		primarySeenCh <- settlementAdapterRequest{
+			path: r.URL.Path,
+			auth: r.Header.Get("Authorization"),
+			body: body,
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer primarySrv.Close()
+
+	shadowSeenCh := make(chan settlementAdapterRequest, 2)
+	shadowSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		shadowSeenCh <- settlementAdapterRequest{
+			path: r.URL.Path,
+			auth: r.Header.Get("Authorization"),
+			body: body,
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer shadowSrv.Close()
+
+	t.Setenv("SETTLEMENT_CHAIN_ADAPTER", "cosmos")
+	t.Setenv("COSMOS_SETTLEMENT_ENDPOINT", primarySrv.URL)
+	t.Setenv("COSMOS_SETTLEMENT_API_KEY", "api-primary-http")
+	t.Setenv("COSMOS_SETTLEMENT_QUEUE_SIZE", "8")
+	t.Setenv("COSMOS_SETTLEMENT_MAX_RETRIES", "1")
+	t.Setenv("COSMOS_SETTLEMENT_BASE_BACKOFF_MS", "5")
+	t.Setenv("COSMOS_SETTLEMENT_HTTP_TIMEOUT_MS", "500")
+	t.Setenv("COSMOS_SETTLEMENT_SUBMIT_MODE", "")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_BROADCAST_PATH", "")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_CHAIN_ID", "")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_SIGNER", "")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_SECRET", "")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_SECRET_FILE", "")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_KEY_ID", "")
+
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_ENDPOINT", shadowSrv.URL)
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_API_KEY", "api-shadow-signed")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_QUEUE_SIZE", "8")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_MAX_RETRIES", "1")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_BASE_BACKOFF_MS", "5")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_HTTP_TIMEOUT_MS", "500")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SUBMIT_MODE", settlement.CosmosSubmitModeSignedTx)
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_BROADCAST_PATH", "/shadow/custom/tx")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_CHAIN_ID", "tdpn-shadow-1")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_SIGNER", "shadow-signer-1")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_SECRET", "")
+	secretFile := filepath.Join(t.TempDir(), "exit_shadow_signed_tx_secret.txt")
+	if err := os.WriteFile(secretFile, []byte(" shadow-secret \n"), 0o600); err != nil {
+		t.Fatalf("write shadow signed-tx secret file: %v", err)
+	}
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_SECRET_FILE", secretFile)
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_KEY_ID", "shadow-kms-key-1")
+
+	svc := newSettlementServiceFromEnv()
+	ctx := context.Background()
+	sessionID := "sess-shadow-signedtx"
+	if _, err := svc.ReserveFunds(ctx, settlement.FundReservation{
+		SessionID:    sessionID,
+		SubjectID:    "subject-shadow-signedtx",
+		AmountMicros: 200000,
+	}); err != nil {
+		t.Fatalf("reserve funds: %v", err)
+	}
+	if err := svc.RecordUsage(ctx, settlement.UsageRecord{
+		SessionID:    sessionID,
+		SubjectID:    "subject-shadow-signedtx",
+		BytesIngress: 4096,
+		BytesEgress:  2048,
+		RecordedAt:   time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("record usage: %v", err)
+	}
+	sessionSettlement, err := svc.SettleSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("settle session: %v", err)
+	}
+	if !sessionSettlement.AdapterSubmitted || sessionSettlement.AdapterDeferred {
+		t.Fatalf("expected primary adapter to remain canonical, got submitted=%t deferred=%t",
+			sessionSettlement.AdapterSubmitted, sessionSettlement.AdapterDeferred)
+	}
+	if !sessionSettlement.ShadowAdapterSubmitted {
+		t.Fatalf("expected shadow adapter submission marker on settlement")
+	}
+	if sessionSettlement.ShadowAdapterStatus != settlement.OperationStatusSubmitted {
+		t.Fatalf("expected shadow settlement status submitted, got %s", sessionSettlement.ShadowAdapterStatus)
+	}
+
+	primaryRequests := collectSettlementAdapterRequests(t, primarySeenCh, 1)
+	shadowRequests := collectSettlementAdapterRequests(t, shadowSeenCh, 1)
+
+	primaryReq := primaryRequests[0]
+	if primaryReq.path != "/x/vpnbilling/settlements" {
+		t.Fatalf("expected canonical primary HTTP path, got %q", primaryReq.path)
+	}
+	if primaryReq.auth != "Bearer api-primary-http" {
+		t.Fatalf("expected primary bearer auth, got %q", primaryReq.auth)
+	}
+	var primaryBody map[string]any
+	if err := json.Unmarshal(primaryReq.body, &primaryBody); err != nil {
+		t.Fatalf("decode primary settlement payload: %v", err)
+	}
+	if _, ok := primaryBody["tx"]; ok {
+		t.Fatalf("expected primary payload to stay canonical HTTP shape, got signed-tx envelope")
+	}
+	if gotSessionID, _ := primaryBody["SessionID"].(string); gotSessionID != sessionID {
+		t.Fatalf("expected primary payload SessionID %q, got %q", sessionID, gotSessionID)
+	}
+
+	shadowReq := shadowRequests[0]
+	if shadowReq.path != "/shadow/custom/tx" {
+		t.Fatalf("expected shadow signed-tx broadcast path override, got %q", shadowReq.path)
+	}
+	if shadowReq.auth != "Bearer api-shadow-signed" {
+		t.Fatalf("expected shadow bearer auth in signed-tx mode, got %q", shadowReq.auth)
+	}
+	var signedReq struct {
+		Mode string `json:"mode"`
+		Tx   struct {
+			ChainID        string          `json:"chain_id"`
+			KeyID          string          `json:"key_id"`
+			Signer         string          `json:"signer"`
+			MessageType    string          `json:"message_type"`
+			Message        json.RawMessage `json:"message"`
+			IdempotencyKey string          `json:"idempotency_key"`
+			Signature      string          `json:"signature"`
+		} `json:"tx"`
+	}
+	if err := json.Unmarshal(shadowReq.body, &signedReq); err != nil {
+		t.Fatalf("decode shadow signed-tx broadcast request: %v", err)
+	}
+	if signedReq.Mode != "BROADCAST_MODE_SYNC" {
+		t.Fatalf("expected signed-tx broadcast mode BROADCAST_MODE_SYNC, got %q", signedReq.Mode)
+	}
+	if signedReq.Tx.ChainID != "tdpn-shadow-1" {
+		t.Fatalf("expected shadow chain id from env, got %q", signedReq.Tx.ChainID)
+	}
+	if signedReq.Tx.KeyID != "shadow-kms-key-1" {
+		t.Fatalf("expected shadow key id from env, got %q", signedReq.Tx.KeyID)
+	}
+	if signedReq.Tx.Signer != "shadow-signer-1" {
+		t.Fatalf("expected shadow signer from env, got %q", signedReq.Tx.Signer)
+	}
+	if signedReq.Tx.MessageType != "/x/vpnbilling/settlements" {
+		t.Fatalf("expected settlement message type in shadow signed-tx request, got %q", signedReq.Tx.MessageType)
+	}
+	if signedReq.Tx.IdempotencyKey == "" {
+		t.Fatalf("expected non-empty shadow idempotency key")
+	}
+	if signedReq.Tx.Signature == "" {
+		t.Fatalf("expected non-empty shadow signed-tx signature")
+	}
+	var signedMessage map[string]any
+	if err := json.Unmarshal(signedReq.Tx.Message, &signedMessage); err != nil {
+		t.Fatalf("decode shadow signed-tx message payload: %v", err)
+	}
+	if gotSessionID, _ := signedMessage["SessionID"].(string); gotSessionID != sessionID {
+		t.Fatalf("expected shadow signed-tx message SessionID %q, got %q", sessionID, gotSessionID)
+	}
+}
+
 func TestNewSettlementServiceFromEnvCosmosShadowAdapterInitFailureDoesNotBlockPrimary(t *testing.T) {
 	primarySeenCh := make(chan settlementAdapterRequest, 2)
 	primarySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

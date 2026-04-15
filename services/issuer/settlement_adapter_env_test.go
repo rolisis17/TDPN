@@ -411,6 +411,110 @@ func TestNewSettlementServiceFromEnvCosmosShadowInitFailureDoesNotBreakPrimary(t
 	}
 }
 
+func TestNewSettlementServiceFromEnvCosmosShadowSignedTxModeUsesShadowEnv(t *testing.T) {
+	primaryReqCh := make(chan observedCosmosRequest, 1)
+	primaryServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		_ = r.Body.Close()
+		primaryReqCh <- observedCosmosRequest{
+			path:    r.URL.Path,
+			auth:    r.Header.Get("Authorization"),
+			payload: b,
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer primaryServer.Close()
+
+	shadowReqCh := make(chan observedCosmosRequest, 1)
+	shadowServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		_ = r.Body.Close()
+		shadowReqCh <- observedCosmosRequest{
+			path:    r.URL.Path,
+			auth:    r.Header.Get("Authorization"),
+			payload: b,
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer shadowServer.Close()
+
+	shadowSecretFile := filepath.Join(t.TempDir(), "shadow_signed_tx_secret.txt")
+	if err := os.WriteFile(shadowSecretFile, []byte(" shadow-secret \n"), 0o600); err != nil {
+		t.Fatalf("write shadow signed-tx secret file: %v", err)
+	}
+
+	t.Setenv("SETTLEMENT_CHAIN_ADAPTER", "cosmos")
+	t.Setenv("COSMOS_SETTLEMENT_ENDPOINT", primaryServer.URL)
+	t.Setenv("COSMOS_SETTLEMENT_API_KEY", "primary-api")
+	t.Setenv("COSMOS_SETTLEMENT_SUBMIT_MODE", "")
+
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_ENDPOINT", shadowServer.URL)
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_API_KEY", "shadow-api")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SUBMIT_MODE", "signed-tx")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_BROADCAST_PATH", "/shadow/custom/txs")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_CHAIN_ID", "tdpn-shadow-1")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_SIGNER", "shadow-signer-1")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_SECRET", "")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_SECRET_FILE", shadowSecretFile)
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_KEY_ID", "shadow-kms-key-1")
+
+	svc := newSettlementServiceFromEnv()
+	reservation := reserveSponsorCreditsForAdapterTest(t, svc, "sres-shadow-signed-tx")
+	if reservation.Status != settlement.OperationStatusSubmitted {
+		t.Fatalf("expected submitted reservation with primary cosmos adapter, got %s", reservation.Status)
+	}
+	if !reservation.AdapterSubmitted {
+		t.Fatalf("expected primary adapter submitted marker")
+	}
+	if !reservation.ShadowAdapterSubmitted {
+		t.Fatalf("expected shadow adapter submitted marker")
+	}
+
+	primaryReq := waitObservedCosmosRequest(t, primaryReqCh)
+	if primaryReq.path != "/x/vpnsponsor/reservations" {
+		t.Fatalf("expected primary http submit path /x/vpnsponsor/reservations, got %s", primaryReq.path)
+	}
+	if primaryReq.auth != "Bearer primary-api" {
+		t.Fatalf("expected primary auth header to propagate, got %q", primaryReq.auth)
+	}
+
+	shadowReq := waitObservedCosmosRequest(t, shadowReqCh)
+	if shadowReq.path != "/shadow/custom/txs" {
+		t.Fatalf("expected shadow signed-tx broadcast path /shadow/custom/txs, got %s", shadowReq.path)
+	}
+	if shadowReq.auth != "Bearer shadow-api" {
+		t.Fatalf("expected shadow auth header to propagate, got %q", shadowReq.auth)
+	}
+
+	var payload struct {
+		Mode string `json:"mode"`
+		Tx   struct {
+			ChainID     string `json:"chain_id"`
+			KeyID       string `json:"key_id"`
+			Signer      string `json:"signer"`
+			MessageType string `json:"message_type"`
+		} `json:"tx"`
+	}
+	if err := json.Unmarshal(shadowReq.payload, &payload); err != nil {
+		t.Fatalf("decode shadow signed-tx payload: %v", err)
+	}
+	if payload.Mode != "BROADCAST_MODE_SYNC" {
+		t.Fatalf("expected broadcast mode BROADCAST_MODE_SYNC, got %s", payload.Mode)
+	}
+	if payload.Tx.ChainID != "tdpn-shadow-1" {
+		t.Fatalf("expected shadow chain id tdpn-shadow-1, got %s", payload.Tx.ChainID)
+	}
+	if payload.Tx.KeyID != "shadow-kms-key-1" {
+		t.Fatalf("expected shadow key id shadow-kms-key-1, got %s", payload.Tx.KeyID)
+	}
+	if payload.Tx.Signer != "shadow-signer-1" {
+		t.Fatalf("expected shadow signer shadow-signer-1, got %s", payload.Tx.Signer)
+	}
+	if payload.Tx.MessageType != "/x/vpnsponsor/reservations" {
+		t.Fatalf("expected shadow message type /x/vpnsponsor/reservations, got %s", payload.Tx.MessageType)
+	}
+}
+
 func TestNewSettlementServiceFromEnvCurrencyBaseFromEnv(t *testing.T) {
 	t.Setenv("SETTLEMENT_CURRENCY", "usdc")
 	t.Setenv("SETTLEMENT_NATIVE_CURRENCY", "")
