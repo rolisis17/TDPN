@@ -69,6 +69,11 @@ This workspace defines the initial module boundaries for TDPN's VPN-compatible b
       - `POST /x/vpnslashing/evidence`
         - v1 accepts only objective machine-verifiable evidence with canonical `evidence_ref`/proof reference format `sha256:<value>` or `obj://<path>`.
         - Bridge behavior no longer derives proof references from violation-type fallback.
+      - `POST /x/vpnvalidator/eligibilities`
+      - `POST /x/vpnvalidator/status-records`
+      - `POST /x/vpngovernance/policies`
+      - `POST /x/vpngovernance/decisions`
+      - `POST /x/vpngovernance/audit-actions`
     - query (`GET`) endpoints:
       - `GET /x/vpnbilling/reservations` and `GET /x/vpnbilling/reservations/{reservation_id}`
       - `GET /x/vpnbilling/settlements` and `GET /x/vpnbilling/settlements/{settlement_id}`
@@ -83,7 +88,7 @@ This workspace defines the initial module boundaries for TDPN's VPN-compatible b
       - `GET /x/vpngovernance/policies` and `GET /x/vpngovernance/policies/{policy_id}`
       - `GET /x/vpngovernance/decisions` and `GET /x/vpngovernance/decisions/{decision_id}`
       - `GET /x/vpngovernance/audit-actions` and `GET /x/vpngovernance/audit-actions/{action_id}`
-    - bearer auth is required on `POST` endpoints only when `--settlement-http-auth-token` is set; `GET` query routes and `GET /health` remain open.
+    - bearer auth is required on all `POST` endpoints (including validator/governance writes) only when `--settlement-http-auth-token` is set; `GET` query routes and `GET /health` remain open.
   - issuer/exit services can point `COSMOS_SETTLEMENT_ENDPOINT` to this bridge.
   - this bridge is control-plane only and does not couple VPN dataplane forwarding to chain/bridge liveness.
   - one-command local helper from repo root:

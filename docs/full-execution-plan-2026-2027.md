@@ -77,7 +77,7 @@ Exit gate:
 - `vpnvalidator` now exposes deterministic epoch selection helpers (hard-gate filtering, warmup/cooldown checks, stable-seat then rotating-seat fill, and operator/ASN/region concentration caps).
 - `vpngovernance` gRPC contracts now include audit-action RPC/query surfaces (`RecordAuditAction`, `GovernanceAuditAction`, `ListGovernanceAuditActions`) for bootstrap governance audit trails.
 - `vpnvalidator` gRPC contracts now include `PreviewEpochSelection` query for deterministic epoch-selection previews from policy + candidate inputs.
-- Settlement bridge now includes read/query `GET` endpoints (list + by-id) across billing/rewards/sponsor/slashing modules in addition to `POST` write paths.
+- Settlement bridge now includes read/query `GET` endpoints (list + by-id) and write `POST` endpoints across billing/rewards/sponsor/slashing plus validator/governance modules, with bearer auth applied to `POST` only when configured.
 - CI/local integration now includes `scripts/integration_cosmos_tdpnd_state_dir_persistence.sh` for state-dir wiring and reopen-persistence verification.
 - Phase 5 CI now includes the `settlement_adapter_roundtrip` gate backed by `scripts/integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh` to verify end-to-end adapter -> `tdpnd` bridge submissions before promotion.
 - Phase 5 CI includes `settlement_shadow_env` running `scripts/integration_cosmos_settlement_shadow_env.sh` to validate shadow adapter env wiring and fail-open behavior.

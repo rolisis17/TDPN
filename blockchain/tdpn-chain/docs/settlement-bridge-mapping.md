@@ -21,6 +21,11 @@ This mapping reflects phase-1 stateful module wiring while keeping chain respons
     - `POST /x/vpnrewards/issues` -> `x/vpnrewards`
     - `POST /x/vpnsponsor/reservations` -> `x/vpnsponsor`
     - `POST /x/vpnslashing/evidence` -> `x/vpnslashing`
+    - `POST /x/vpnvalidator/eligibilities` -> `x/vpnvalidator`
+    - `POST /x/vpnvalidator/status-records` -> `x/vpnvalidator`
+    - `POST /x/vpngovernance/policies` -> `x/vpngovernance`
+    - `POST /x/vpngovernance/decisions` -> `x/vpngovernance`
+    - `POST /x/vpngovernance/audit-actions` -> `x/vpngovernance`
       - validation expectation: reject evidence without canonical `sha256:<value>` or `obj://<path>` proof reference.
   - query paths (`GET`, list + by-id):
     - `GET /x/vpnbilling/reservations[/{reservation_id}]`
@@ -36,7 +41,7 @@ This mapping reflects phase-1 stateful module wiring while keeping chain respons
     - `GET /x/vpngovernance/policies[/{policy_id}]`
     - `GET /x/vpngovernance/decisions[/{decision_id}]`
     - `GET /x/vpngovernance/audit-actions[/{action_id}]`
-  - bridge auth policy: bearer token (when configured) applies to `POST` writes only; `GET` query routes and `GET /health` remain open.
+  - bridge auth policy: bearer token (when configured) applies to all `POST` writes (including validator/governance write routes); `GET` query routes and `GET /health` remain open.
 
 ## Reconciliation contract
 - Records use canonical lifecycle statuses via `types/ReconciliationStatus`: `pending -> submitted -> confirmed`, with explicit `failed` retained for replay/reconciliation.

@@ -178,6 +178,22 @@ func (s *ChainScaffold) SponsorMsgServer() SponsorMsgServer {
 	return sponsorMsgServer{msgServer: sponsormodule.NewMsgServer(&s.SponsorModule.Keeper)}
 }
 
+// ValidatorMsgServer returns vpnvalidator message operations wired to scaffold state.
+func (s *ChainScaffold) ValidatorMsgServer() ValidatorMsgServer {
+	if s == nil {
+		return validatorMsgServer{msgServer: validatormodule.NewMsgServer(nil)}
+	}
+	return validatorMsgServer{msgServer: validatormodule.NewMsgServer(&s.ValidatorModule.Keeper)}
+}
+
+// GovernanceMsgServer returns vpngovernance message operations wired to scaffold state.
+func (s *ChainScaffold) GovernanceMsgServer() GovernanceMsgServer {
+	if s == nil {
+		return governanceMsgServer{msgServer: governancemodule.NewMsgServer(nil)}
+	}
+	return governanceMsgServer{msgServer: governancemodule.NewMsgServer(&s.GovernanceModule.Keeper)}
+}
+
 // BillingQueryServer returns vpnbilling query operations wired to scaffold state.
 func (s *ChainScaffold) BillingQueryServer() BillingQueryServer {
 	if s == nil {

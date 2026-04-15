@@ -126,6 +126,14 @@ if ! rg -Fq "Settlement bridge now includes read/query" "$full_plan"; then
   echo "full execution plan must document settlement bridge read/query expansion"
   exit 1
 fi
+if ! rg -Fq "write \`POST\` endpoints across billing/rewards/sponsor/slashing plus validator/governance modules" "$full_plan"; then
+  echo "full execution plan must document validator/governance settlement bridge POST write expansion"
+  exit 1
+fi
+if ! rg -Fq "bearer auth applied to \`POST\` only when configured" "$full_plan"; then
+  echo "full execution plan must document POST-only settlement bridge auth contract"
+  exit 1
+fi
 if ! rg -Fq "settlement_adapter_roundtrip" "$full_plan"; then
   echo "full execution plan must document settlement_adapter_roundtrip gate posture"
   exit 1
@@ -901,6 +909,14 @@ if ! rg -Fq 'module query `GET` endpoints' "$product_roadmap"; then
   echo "product roadmap must document settlement bridge GET query endpoints"
   exit 1
 fi
+if ! rg -Fq "validator/governance routes" "$product_roadmap"; then
+  echo "product roadmap must document validator/governance settlement bridge route coverage"
+  exit 1
+fi
+if ! rg -Fq "bearer auth applies to \`POST\` only" "$product_roadmap"; then
+  echo "product roadmap must document POST-only settlement bridge auth contract"
+  exit 1
+fi
 if ! rg -Fq "integration_cosmos_tdpnd_state_dir_persistence.sh" "$product_roadmap"; then
   echo "product roadmap must document state-dir persistence integration check"
   exit 1
@@ -1036,6 +1052,22 @@ do
     exit 1
   fi
 done
+for bridge_write_path in \
+  "POST /x/vpnvalidator/eligibilities" \
+  "POST /x/vpnvalidator/status-records" \
+  "POST /x/vpngovernance/policies" \
+  "POST /x/vpngovernance/decisions" \
+  "POST /x/vpngovernance/audit-actions"
+do
+  if ! rg -Fq "$bridge_write_path" "$cosmos_runtime_doc"; then
+    echo "cosmos settlement runtime guide must document validator/governance bridge write endpoint: $bridge_write_path"
+    exit 1
+  fi
+done
+if ! rg -Fq "including validator/governance writes" "$cosmos_runtime_doc"; then
+  echo "cosmos settlement runtime guide must document POST-only auth posture including validator/governance writes"
+  exit 1
+fi
 if ! rg -Fq "integration_cosmos_tdpnd_state_dir_persistence.sh" "$cosmos_runtime_doc"; then
   echo "cosmos settlement runtime guide must document state-dir persistence integration script"
   exit 1
@@ -1099,6 +1131,22 @@ if ! rg -Fq -- "--state-dir" "$chain_readme"; then
 fi
 if ! rg -Fq "GET /x/vpnbilling/reservations" "$chain_readme"; then
   echo "chain README must document settlement bridge GET query endpoints"
+  exit 1
+fi
+for bridge_write_path in \
+  "POST /x/vpnvalidator/eligibilities" \
+  "POST /x/vpnvalidator/status-records" \
+  "POST /x/vpngovernance/policies" \
+  "POST /x/vpngovernance/decisions" \
+  "POST /x/vpngovernance/audit-actions"
+do
+  if ! rg -Fq "$bridge_write_path" "$chain_readme"; then
+    echo "chain README must document validator/governance bridge write endpoint: $bridge_write_path"
+    exit 1
+  fi
+done
+if ! rg -Fq "including validator/governance writes" "$chain_readme"; then
+  echo "chain README must document POST-only auth posture including validator/governance writes"
   exit 1
 fi
 if ! rg -Fq "integration_cosmos_tdpnd_state_dir_persistence.sh" "$chain_readme"; then
@@ -1305,6 +1353,22 @@ do
     exit 1
   fi
 done
+for new_bridge_post_path in \
+  "POST /x/vpnvalidator/eligibilities" \
+  "POST /x/vpnvalidator/status-records" \
+  "POST /x/vpngovernance/policies" \
+  "POST /x/vpngovernance/decisions" \
+  "POST /x/vpngovernance/audit-actions"
+do
+  if ! rg -Fq "$new_bridge_post_path" "$settlement_mapping_doc"; then
+    echo "settlement bridge mapping must document validator/governance POST contract path: $new_bridge_post_path"
+    exit 1
+  fi
+done
+if ! rg -Fq "including validator/governance write routes" "$settlement_mapping_doc"; then
+  echo "settlement bridge mapping must document POST-only auth posture including validator/governance writes"
+  exit 1
+fi
 for bridge_route in \
   "/x/vpnvalidator/eligibilities" \
   "/x/vpnvalidator/status-records" \

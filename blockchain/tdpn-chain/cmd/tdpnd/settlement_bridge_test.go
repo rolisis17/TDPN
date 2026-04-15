@@ -272,6 +272,36 @@ func TestRunTDPNDSettlementHTTPAuthContractGETOpenPOSTBearerRequired(t *testing.
 			postBody:  `{"EvidenceID":"ev-auth-contract-1","SubjectID":"provider-auth-contract-1","SessionID":"sess-auth-contract-1","ViolationType":"objective","EvidenceRef":"sha256:proof-auth-contract-1","ObservedAt":"2026-01-01T00:00:00Z"}`,
 			verifyGET: "/x/vpnslashing/evidence/ev-auth-contract-1",
 		},
+		{
+			name:      "validator-eligibility",
+			postPath:  "/x/vpnvalidator/eligibilities",
+			postBody:  `{"ValidatorID":"val-auth-contract-1","OperatorAddress":"op-auth-contract-1","Eligible":true,"PolicyReason":"bootstrap","UpdatedAt":"2026-01-01T00:00:00Z","Status":"confirmed"}`,
+			verifyGET: "/x/vpnvalidator/eligibilities/val-auth-contract-1",
+		},
+		{
+			name:      "validator-status",
+			postPath:  "/x/vpnvalidator/status-records",
+			postBody:  `{"StatusID":"status-auth-contract-1","ValidatorID":"val-auth-contract-1","ConsensusAddress":"cons-auth-contract-1","LifecycleStatus":"active","EvidenceHeight":123,"EvidenceRef":"sha256:status-auth-contract-1","RecordedAt":"2026-01-01T00:00:01Z","Status":"submitted"}`,
+			verifyGET: "/x/vpnvalidator/status-records/status-auth-contract-1",
+		},
+		{
+			name:      "governance-policy",
+			postPath:  "/x/vpngovernance/policies",
+			postBody:  `{"PolicyID":"policy-auth-contract-1","Title":"auth-contract-policy","Description":"auth contract test policy","Version":1,"ActivatedAt":"2026-01-01T00:00:00Z","Status":"confirmed"}`,
+			verifyGET: "/x/vpngovernance/policies/policy-auth-contract-1",
+		},
+		{
+			name:      "governance-decision",
+			postPath:  "/x/vpngovernance/decisions",
+			postBody:  `{"DecisionID":"decision-auth-contract-1","PolicyID":"policy-auth-contract-1","ProposalID":"proposal-auth-contract-1","Outcome":"approve","Decider":"bootstrap-multisig","Reason":"auth contract decision","DecidedAt":"2026-01-01T00:00:02Z","Status":"submitted"}`,
+			verifyGET: "/x/vpngovernance/decisions/decision-auth-contract-1",
+		},
+		{
+			name:      "governance-audit-action",
+			postPath:  "/x/vpngovernance/audit-actions",
+			postBody:  `{"ActionID":"action-auth-contract-1","Action":"policy.bootstrap","Actor":"bootstrap-multisig","Reason":"auth contract audit","EvidencePointer":"obj://audit/action-auth-contract-1","Timestamp":"2026-01-01T00:00:03Z"}`,
+			verifyGET: "/x/vpngovernance/audit-actions/action-auth-contract-1",
+		},
 	}
 
 	validHeaders := map[string]string{"Authorization": "Bearer " + authToken}
@@ -413,37 +443,242 @@ func TestRunTDPNDSettlementHTTPHappyPathPerEndpoint(t *testing.T) {
 	waitForHTTPReady(t, baseURL+"/health")
 
 	cases := []struct {
-		path string
-		body string
+		path       string
+		body       string
+		verifyGET  string
+		objectKey  string
+		idField    string
+		idValue    string
+		envelopeID string
 	}{
 		{
-			path: "/x/vpnbilling/settlements",
-			body: `{"SettlementID":"set-http-1","SessionID":"sess-http-1","SubjectID":"subject-http-1","ChargedMicros":250,"Currency":"uusdc","SettledAt":"2026-01-01T00:00:00Z"}`,
+			path:      "/x/vpnbilling/settlements",
+			body:      `{"SettlementID":"set-http-1","SessionID":"sess-http-1","SubjectID":"subject-http-1","ChargedMicros":250,"Currency":"uusdc","SettledAt":"2026-01-01T00:00:00Z"}`,
+			verifyGET: "/x/vpnbilling/settlements/set-http-1",
+			objectKey: "settlement",
+			idField:   "SettlementID",
+			idValue:   "set-http-1",
 		},
 		{
-			path: "/x/vpnrewards/issues",
-			body: `{"RewardID":"reward-http-1","ProviderSubjectID":"provider-http-1","SessionID":"sess-http-1","RewardMicros":100,"Currency":"uusdc","IssuedAt":"2026-01-01T00:00:00Z"}`,
+			path:       "/x/vpnrewards/issues",
+			body:       `{"RewardID":"reward-http-1","ProviderSubjectID":"provider-http-1","SessionID":"sess-http-1","RewardMicros":100,"Currency":"uusdc","IssuedAt":"2026-01-01T00:00:00Z"}`,
+			verifyGET:  "/x/vpnrewards/accruals/reward-http-1",
+			objectKey:  "accrual",
+			idField:    "AccrualID",
+			idValue:    "reward-http-1",
+			envelopeID: "dist:reward-http-1",
 		},
 		{
-			path: "/x/vpnsponsor/reservations",
-			body: `{"ReservationID":"res-http-1","SponsorID":"sponsor-http-1","SubjectID":"app-http-1","SessionID":"sess-http-1","AmountMicros":500,"Currency":"uusdc","CreatedAt":"2026-01-01T00:00:00Z","ExpiresAt":"2026-12-31T00:00:00Z"}`,
+			path:      "/x/vpnsponsor/reservations",
+			body:      `{"ReservationID":"res-http-1","SponsorID":"sponsor-http-1","SubjectID":"app-http-1","SessionID":"sess-http-1","AmountMicros":500,"Currency":"uusdc","CreatedAt":"2026-01-01T00:00:00Z","ExpiresAt":"2026-12-31T00:00:00Z"}`,
+			verifyGET: "/x/vpnsponsor/delegations/res-http-1",
+			objectKey: "delegation",
+			idField:   "ReservationID",
+			idValue:   "res-http-1",
 		},
 		{
-			path: "/x/vpnslashing/evidence",
-			body: `{"EvidenceID":"ev-http-1","SubjectID":"provider-http-1","SessionID":"sess-http-1","ViolationType":"objective","EvidenceRef":"sha256:proof-http-1","ObservedAt":"2026-01-01T00:00:00Z"}`,
+			path:      "/x/vpnslashing/evidence",
+			body:      `{"EvidenceID":"ev-http-1","SubjectID":"provider-http-1","SessionID":"sess-http-1","ViolationType":"objective","EvidenceRef":"sha256:proof-http-1","ObservedAt":"2026-01-01T00:00:00Z"}`,
+			verifyGET: "/x/vpnslashing/evidence/ev-http-1",
+			objectKey: "evidence",
+			idField:   "EvidenceID",
+			idValue:   "ev-http-1",
+		},
+		{
+			path:      "/x/vpnvalidator/eligibilities",
+			body:      `{"ValidatorID":"val-http-1","OperatorAddress":"op-http-1","Eligible":true,"PolicyReason":"bootstrap policy","UpdatedAt":"2026-01-01T00:00:00Z","Status":"confirmed"}`,
+			verifyGET: "/x/vpnvalidator/eligibilities/val-http-1",
+			objectKey: "eligibility",
+			idField:   "ValidatorID",
+			idValue:   "val-http-1",
+		},
+		{
+			path:      "/x/vpnvalidator/status-records",
+			body:      `{"StatusID":"status-http-1","ValidatorID":"val-http-1","ConsensusAddress":"cons-http-1","LifecycleStatus":"active","EvidenceHeight":7,"EvidenceRef":"sha256:status-http-1","RecordedAt":"2026-01-01T00:00:01Z","Status":"submitted"}`,
+			verifyGET: "/x/vpnvalidator/status-records/status-http-1",
+			objectKey: "status",
+			idField:   "StatusID",
+			idValue:   "status-http-1",
+		},
+		{
+			path:      "/x/vpngovernance/policies",
+			body:      `{"PolicyID":"policy-http-1","Title":"policy-http-title","Description":"policy-http-description","Version":1,"ActivatedAt":"2026-01-01T00:00:00Z","Status":"submitted"}`,
+			verifyGET: "/x/vpngovernance/policies/policy-http-1",
+			objectKey: "policy",
+			idField:   "PolicyID",
+			idValue:   "policy-http-1",
+		},
+		{
+			path:      "/x/vpngovernance/decisions",
+			body:      `{"DecisionID":"decision-http-1","PolicyID":"policy-http-1","ProposalID":"proposal-http-1","Outcome":"approve","Decider":"bootstrap-multisig","Reason":"happy path","DecidedAt":"2026-01-01T00:00:02Z","Status":"confirmed"}`,
+			verifyGET: "/x/vpngovernance/decisions/decision-http-1",
+			objectKey: "decision",
+			idField:   "DecisionID",
+			idValue:   "decision-http-1",
+		},
+		{
+			path:      "/x/vpngovernance/audit-actions",
+			body:      `{"ActionID":"action-http-1","Action":"policy.bootstrap","Actor":"bootstrap-multisig","Reason":"happy path audit","EvidencePointer":"obj://audit/action-http-1","Timestamp":"2026-01-01T00:00:03Z"}`,
+			verifyGET: "/x/vpngovernance/audit-actions/action-http-1",
+			objectKey: "action",
+			idField:   "ActionID",
+			idValue:   "action-http-1",
 		},
 	}
 
 	for _, tc := range cases {
-		resp, err := http.Post(baseURL+tc.path, "application/json", bytes.NewReader([]byte(tc.body)))
+		status, payload := doJSONRequest(t, http.MethodPost, baseURL+tc.path, tc.body, nil)
+		if status != http.StatusOK {
+			t.Fatalf("expected 200 for %s, got %d payload=%v", tc.path, status, payload)
+		}
+
+		id, ok := payload["id"].(string)
+		if !ok {
+			t.Fatalf("expected POST %s to return id string, got payload=%v", tc.path, payload)
+		}
+		expectedEnvelopeID := tc.envelopeID
+		if expectedEnvelopeID == "" {
+			expectedEnvelopeID = tc.idValue
+		}
+		if id != expectedEnvelopeID {
+			t.Fatalf("expected POST %s to return id=%s, got %s", tc.path, expectedEnvelopeID, id)
+		}
+
+		status, payload = doJSONRequest(t, http.MethodGet, baseURL+tc.verifyGET, "", nil)
+		if status != http.StatusOK {
+			t.Fatalf("expected GET %s to return 200, got %d payload=%v", tc.verifyGET, status, payload)
+		}
+		expectJSONIDField(t, payload, tc.objectKey, tc.idField, tc.idValue)
+	}
+
+	cancel()
+	select {
+	case err := <-runDone:
 		if err != nil {
-			t.Fatalf("post %s failed: %v", tc.path, err)
+			t.Fatalf("expected clean shutdown, got %v", err)
 		}
-		body, _ := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("expected 200 for %s, got %d body=%s", tc.path, resp.StatusCode, strings.TrimSpace(string(body)))
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for runtime shutdown")
+	}
+}
+
+func TestRunTDPNDSettlementHTTPValidatorGovernanceWriteMethodContract(t *testing.T) {
+	httpListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen http: %v", err)
+	}
+	defer httpListener.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runDone := make(chan error, 1)
+	go func() {
+		runDone <- runTDPND(
+			ctx,
+			[]string{"--settlement-http-listen", "settlement-validator-governance-write-test"},
+			nil,
+			func() chainScaffold { return app.NewChainScaffold() },
+			runtimeDeps{
+				Listen: func(_, _ string) (net.Listener, error) {
+					return nil, errors.New("grpc listener should not be used")
+				},
+				ListenHTTP: func(_, address string) (net.Listener, error) {
+					if address != "settlement-validator-governance-write-test" {
+						return nil, errors.New("unexpected settlement listen address")
+					}
+					return httpListener, nil
+				},
+				NewGRPCServer: func(opts ...grpc.ServerOption) grpcRuntimeServer {
+					return grpc.NewServer(opts...)
+				},
+			},
+		)
+	}()
+
+	baseURL := "http://" + httpListener.Addr().String()
+	waitForHTTPReady(t, baseURL+"/health")
+
+	cases := []struct {
+		name      string
+		path      string
+		postBody  string
+		verifyGET string
+		objectKey string
+		idField   string
+		idValue   string
+	}{
+		{
+			name:      "validator-eligibility",
+			path:      "/x/vpnvalidator/eligibilities",
+			postBody:  `{"ValidatorID":"val-method-1","OperatorAddress":"op-method-1","Eligible":true,"PolicyReason":"method test","UpdatedAt":"2026-01-01T00:00:00Z","Status":"confirmed"}`,
+			verifyGET: "/x/vpnvalidator/eligibilities/val-method-1",
+			objectKey: "eligibility",
+			idField:   "ValidatorID",
+			idValue:   "val-method-1",
+		},
+		{
+			name:      "validator-status",
+			path:      "/x/vpnvalidator/status-records",
+			postBody:  `{"StatusID":"status-method-1","ValidatorID":"val-method-1","ConsensusAddress":"cons-method-1","LifecycleStatus":"active","EvidenceHeight":9,"EvidenceRef":"sha256:status-method-1","RecordedAt":"2026-01-01T00:00:01Z","Status":"submitted"}`,
+			verifyGET: "/x/vpnvalidator/status-records/status-method-1",
+			objectKey: "status",
+			idField:   "StatusID",
+			idValue:   "status-method-1",
+		},
+		{
+			name:      "governance-policy",
+			path:      "/x/vpngovernance/policies",
+			postBody:  `{"PolicyID":"policy-method-1","Title":"method policy","Description":"method policy description","Version":1,"ActivatedAt":"2026-01-01T00:00:00Z","Status":"confirmed"}`,
+			verifyGET: "/x/vpngovernance/policies/policy-method-1",
+			objectKey: "policy",
+			idField:   "PolicyID",
+			idValue:   "policy-method-1",
+		},
+		{
+			name:      "governance-decision",
+			path:      "/x/vpngovernance/decisions",
+			postBody:  `{"DecisionID":"decision-method-1","PolicyID":"policy-method-1","ProposalID":"proposal-method-1","Outcome":"approve","Decider":"bootstrap-multisig","Reason":"method decision","DecidedAt":"2026-01-01T00:00:02Z","Status":"submitted"}`,
+			verifyGET: "/x/vpngovernance/decisions/decision-method-1",
+			objectKey: "decision",
+			idField:   "DecisionID",
+			idValue:   "decision-method-1",
+		},
+		{
+			name:      "governance-audit-action",
+			path:      "/x/vpngovernance/audit-actions",
+			postBody:  `{"ActionID":"action-method-1","Action":"policy.bootstrap","Actor":"bootstrap-multisig","Reason":"method audit","EvidencePointer":"obj://audit/action-method-1","Timestamp":"2026-01-01T00:00:03Z"}`,
+			verifyGET: "/x/vpngovernance/audit-actions/action-method-1",
+			objectKey: "action",
+			idField:   "ActionID",
+			idValue:   "action-method-1",
+		},
+	}
+
+	for _, tc := range cases {
+		status, payload := doJSONRequest(t, http.MethodGet, baseURL+tc.path, "", nil)
+		if status != http.StatusOK {
+			t.Fatalf("[%s] expected GET list before write to return 200, got %d payload=%v", tc.name, status, payload)
 		}
+
+		status, payload = doJSONRequest(t, http.MethodPut, baseURL+tc.path, tc.postBody, nil)
+		if status != http.StatusMethodNotAllowed {
+			t.Fatalf("[%s] expected PUT to return 405, got %d payload=%v", tc.name, status, payload)
+		}
+		if payload["error"] != "method not allowed" {
+			t.Fatalf("[%s] expected PUT payload error=method not allowed, got %v", tc.name, payload["error"])
+		}
+
+		status, payload = doJSONRequest(t, http.MethodPost, baseURL+tc.path, tc.postBody, nil)
+		if status != http.StatusOK {
+			t.Fatalf("[%s] expected POST to return 200, got %d payload=%v", tc.name, status, payload)
+		}
+
+		status, payload = doJSONRequest(t, http.MethodGet, baseURL+tc.verifyGET, "", nil)
+		if status != http.StatusOK {
+			t.Fatalf("[%s] expected GET by-id %s to return 200, got %d payload=%v", tc.name, tc.verifyGET, status, payload)
+		}
+		expectJSONIDField(t, payload, tc.objectKey, tc.idField, tc.idValue)
 	}
 
 	cancel()
@@ -1037,6 +1272,26 @@ func TestRunTDPNDSettlementHTTPGETQueriesRemainOpenWithAuth(t *testing.T) {
 			path: "/x/vpnslashing/evidence",
 			body: `{"EvidenceID":"ev-auth-open-1","SubjectID":"provider-auth-open-1","SessionID":"sess-auth-open-1","ViolationType":"objective","EvidenceRef":"sha256:proof-auth-open-1","ObservedAt":"2026-01-01T00:00:00Z"}`,
 		},
+		{
+			path: "/x/vpnvalidator/eligibilities",
+			body: `{"ValidatorID":"val-auth-open-1","OperatorAddress":"op-auth-open-1","Eligible":true,"PolicyReason":"bootstrap policy","UpdatedAt":"2026-01-01T00:00:00Z","Status":"confirmed"}`,
+		},
+		{
+			path: "/x/vpnvalidator/status-records",
+			body: `{"StatusID":"status-auth-open-1","ValidatorID":"val-auth-open-1","ConsensusAddress":"cons-auth-open-1","LifecycleStatus":"active","EvidenceHeight":99,"EvidenceRef":"sha256:status-auth-open-1","RecordedAt":"2026-01-01T00:00:01Z","Status":"submitted"}`,
+		},
+		{
+			path: "/x/vpngovernance/policies",
+			body: `{"PolicyID":"policy-auth-open-1","Title":"auth-open-policy","Description":"auth open read query","Version":1,"ActivatedAt":"2026-01-01T00:00:00Z","Status":"submitted"}`,
+		},
+		{
+			path: "/x/vpngovernance/decisions",
+			body: `{"DecisionID":"decision-auth-open-1","PolicyID":"policy-auth-open-1","ProposalID":"proposal-auth-open-1","Outcome":"approve","Decider":"bootstrap-multisig","Reason":"contract auth-open coverage","DecidedAt":"2026-01-01T00:00:01Z","Status":"confirmed"}`,
+		},
+		{
+			path: "/x/vpngovernance/audit-actions",
+			body: `{"ActionID":"action-auth-open-1","Action":"policy.bootstrap","Actor":"bootstrap-multisig","Reason":"auth-open query coverage","EvidencePointer":"obj://audit/action-auth-open-1","Timestamp":"2026-01-01T00:00:02Z"}`,
+		},
 	}
 
 	for _, tc := range seedCases {
@@ -1057,67 +1312,6 @@ func TestRunTDPNDSettlementHTTPGETQueriesRemainOpenWithAuth(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("apply penalty seed in auth mode: %v", err)
-	}
-
-	validatorMsg := validatormodule.NewMsgServer(&scaffold.ValidatorModule.Keeper)
-	if _, err := validatorMsg.SetValidatorEligibility(validatormodule.SetValidatorEligibilityRequest{
-		Eligibility: validatortypes.ValidatorEligibility{
-			ValidatorID:     "val-auth-open-1",
-			OperatorAddress: "op-auth-open-1",
-			Eligible:        true,
-			PolicyReason:    "bootstrap policy",
-		},
-	}); err != nil {
-		t.Fatalf("set validator eligibility seed in auth mode: %v", err)
-	}
-	if _, err := validatorMsg.RecordValidatorStatus(validatormodule.RecordValidatorStatusRequest{
-		Record: validatortypes.ValidatorStatusRecord{
-			StatusID:        "status-auth-open-1",
-			ValidatorID:     "val-auth-open-1",
-			LifecycleStatus: validatortypes.ValidatorLifecycleActive,
-			EvidenceHeight:  99,
-			EvidenceRef:     "sha256:status-auth-open-1",
-		},
-	}); err != nil {
-		t.Fatalf("record validator status seed in auth mode: %v", err)
-	}
-
-	governanceMsg := governancemodule.NewMsgServer(&scaffold.GovernanceModule.Keeper)
-	if _, err := governanceMsg.CreatePolicy(governancemodule.CreatePolicyRequest{
-		Policy: governancetypes.GovernancePolicy{
-			PolicyID:        "policy-auth-open-1",
-			Title:           "auth-open-policy",
-			Description:     "auth open read query",
-			Version:         1,
-			ActivatedAtUnix: 1735689600,
-		},
-	}); err != nil {
-		t.Fatalf("create governance policy seed in auth mode: %v", err)
-	}
-	if _, err := governanceMsg.RecordDecision(governancemodule.RecordDecisionRequest{
-		Decision: governancetypes.GovernanceDecision{
-			DecisionID:    "decision-auth-open-1",
-			PolicyID:      "policy-auth-open-1",
-			ProposalID:    "proposal-auth-open-1",
-			Outcome:       governancetypes.DecisionOutcomeApprove,
-			Decider:       "bootstrap-multisig",
-			Reason:        "contract auth-open coverage",
-			DecidedAtUnix: 1735689601,
-		},
-	}); err != nil {
-		t.Fatalf("record governance decision seed in auth mode: %v", err)
-	}
-	if _, err := governanceMsg.RecordAuditAction(governancemodule.RecordAuditActionRequest{
-		Action: governancetypes.GovernanceAuditAction{
-			ActionID:        "action-auth-open-1",
-			Action:          "policy.bootstrap",
-			Actor:           "bootstrap-multisig",
-			Reason:          "auth-open query coverage",
-			EvidencePointer: "obj://audit/action-auth-open-1",
-			TimestampUnix:   1735689602,
-		},
-	}); err != nil {
-		t.Fatalf("record governance audit action seed in auth mode: %v", err)
 	}
 
 	openGETChecks := []string{

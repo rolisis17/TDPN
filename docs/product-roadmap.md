@@ -190,7 +190,7 @@ Current implementation posture:
 - `vpnvalidator` now includes deterministic epoch selection helpers for bootstrap policy enforcement (hard gates, warmup/cooldown, stable+rotating seats, and operator/ASN/region caps).
 - `vpngovernance` gRPC contracts now include audit-action RPC/query surfaces (`RecordAuditAction`, `GovernanceAuditAction`, `ListGovernanceAuditActions`) for bootstrap governance audit trails.
 - `vpnvalidator` gRPC contracts now include `PreviewEpochSelection` query for deterministic epoch-selection previews from policy + candidate inputs.
-- settlement bridge now exposes module query `GET` endpoints (list + by-id) alongside existing `POST` write endpoints.
+- settlement bridge now exposes module query `GET` endpoints (list + by-id) and module write `POST` endpoints across billing/rewards/sponsor/slashing plus validator/governance routes; bearer auth applies to `POST` only when bridge auth is configured.
 - Cosmos CI/local block now includes `scripts/integration_cosmos_tdpnd_state_dir_persistence.sh` to verify state-dir wiring and persistence across reopen.
 - phase5 settlement CI now includes these blockchain gate stages and scripts:
   - `settlement_adapter_roundtrip` -> `scripts/integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh`

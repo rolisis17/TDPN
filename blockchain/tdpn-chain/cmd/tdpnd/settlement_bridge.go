@@ -13,9 +13,11 @@ import (
 	"github.com/tdpn/tdpn-chain/app"
 	chaintypes "github.com/tdpn/tdpn-chain/types"
 	billingtypes "github.com/tdpn/tdpn-chain/x/vpnbilling/types"
+	governancetypes "github.com/tdpn/tdpn-chain/x/vpngovernance/types"
 	rewardtypes "github.com/tdpn/tdpn-chain/x/vpnrewards/types"
 	slashingtypes "github.com/tdpn/tdpn-chain/x/vpnslashing/types"
 	sponsortypes "github.com/tdpn/tdpn-chain/x/vpnsponsor/types"
+	validatortypes "github.com/tdpn/tdpn-chain/x/vpnvalidator/types"
 )
 
 type settlementBridgeScaffold interface {
@@ -27,7 +29,9 @@ type settlementBridgeScaffold interface {
 	SponsorQueryServer() app.SponsorQueryServer
 	SlashingMsgServer() app.SlashingMsgServer
 	SlashingQueryServer() app.SlashingQueryServer
+	ValidatorMsgServer() app.ValidatorMsgServer
 	ValidatorQueryServer() app.ValidatorQueryServer
+	GovernanceMsgServer() app.GovernanceMsgServer
 	GovernanceQueryServer() app.GovernanceQueryServer
 }
 
@@ -86,6 +90,55 @@ type settlementSlashEvidencePayload struct {
 	EvidenceRef   string    `json:"EvidenceRef"`
 	ObservedAt    time.Time `json:"ObservedAt"`
 	Status        string    `json:"Status"`
+}
+
+type settlementValidatorEligibilityPayload struct {
+	ValidatorID     string    `json:"ValidatorID"`
+	OperatorAddress string    `json:"OperatorAddress"`
+	Eligible        bool      `json:"Eligible"`
+	PolicyReason    string    `json:"PolicyReason"`
+	UpdatedAt       time.Time `json:"UpdatedAt"`
+	Status          string    `json:"Status"`
+}
+
+type settlementValidatorStatusPayload struct {
+	StatusID         string    `json:"StatusID"`
+	ValidatorID      string    `json:"ValidatorID"`
+	ConsensusAddress string    `json:"ConsensusAddress"`
+	LifecycleStatus  string    `json:"LifecycleStatus"`
+	EvidenceHeight   int64     `json:"EvidenceHeight"`
+	EvidenceRef      string    `json:"EvidenceRef"`
+	RecordedAt       time.Time `json:"RecordedAt"`
+	Status           string    `json:"Status"`
+}
+
+type settlementGovernancePolicyPayload struct {
+	PolicyID    string    `json:"PolicyID"`
+	Title       string    `json:"Title"`
+	Description string    `json:"Description"`
+	Version     uint64    `json:"Version"`
+	ActivatedAt time.Time `json:"ActivatedAt"`
+	Status      string    `json:"Status"`
+}
+
+type settlementGovernanceDecisionPayload struct {
+	DecisionID string    `json:"DecisionID"`
+	PolicyID   string    `json:"PolicyID"`
+	ProposalID string    `json:"ProposalID"`
+	Outcome    string    `json:"Outcome"`
+	Decider    string    `json:"Decider"`
+	Reason     string    `json:"Reason"`
+	DecidedAt  time.Time `json:"DecidedAt"`
+	Status     string    `json:"Status"`
+}
+
+type settlementGovernanceAuditActionPayload struct {
+	ActionID        string    `json:"ActionID"`
+	Action          string    `json:"Action"`
+	Actor           string    `json:"Actor"`
+	Reason          string    `json:"Reason"`
+	EvidencePointer string    `json:"EvidencePointer"`
+	Timestamp       time.Time `json:"Timestamp"`
 }
 
 func runSettlementHTTPMode(
@@ -741,207 +794,371 @@ func (h *settlementBridgeHandler) handleSlashPenalties(w http.ResponseWriter, r 
 }
 
 func (h *settlementBridgeHandler) handleValidatorEligibilities(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeJSON(w, http.StatusMethodNotAllowed, bridgeEnvelope{OK: false, Error: "method not allowed"})
-		return
-	}
+	if r.Method == http.MethodGet {
+		validatorID, hasID, ok := getEntityID(r.URL.Path, "/x/vpnvalidator/eligibilities")
+		if !ok {
+			writeJSON(w, http.StatusNotFound, bridgeEnvelope{OK: false, Error: "not found"})
+			return
+		}
+		if hasID {
+			resp, err := h.scaffold.ValidatorQueryServer().GetEligibility(r.Context(), app.ValidatorGetEligibilityRequest{
+				ValidatorID: validatorID,
+			})
+			if err != nil {
+				writeBridgeError(w, err)
+				return
+			}
+			if !resp.Found {
+				writeJSON(w, http.StatusNotFound, bridgeEnvelope{OK: false, Error: "not found"})
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"ok":          true,
+				"eligibility": resp.Eligibility,
+			})
+			return
+		}
 
-	validatorID, hasID, ok := getEntityID(r.URL.Path, "/x/vpnvalidator/eligibilities")
-	if !ok {
-		writeJSON(w, http.StatusNotFound, bridgeEnvelope{OK: false, Error: "not found"})
-		return
-	}
-	if hasID {
-		resp, err := h.scaffold.ValidatorQueryServer().GetEligibility(r.Context(), app.ValidatorGetEligibilityRequest{
-			ValidatorID: validatorID,
-		})
+		resp, err := h.scaffold.ValidatorQueryServer().ListEligibilities(r.Context(), app.ValidatorListEligibilitiesRequest{})
 		if err != nil {
 			writeBridgeError(w, err)
 			return
 		}
-		if !resp.Found {
-			writeJSON(w, http.StatusNotFound, bridgeEnvelope{OK: false, Error: "not found"})
-			return
-		}
 		writeJSON(w, http.StatusOK, map[string]any{
-			"ok":          true,
-			"eligibility": resp.Eligibility,
+			"ok":            true,
+			"eligibilities": resp.Eligibilities,
 		})
 		return
 	}
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, bridgeEnvelope{OK: false, Error: "method not allowed"})
+		return
+	}
+	if !h.authorizePOST(w, r) {
+		return
+	}
 
-	resp, err := h.scaffold.ValidatorQueryServer().ListEligibilities(r.Context(), app.ValidatorListEligibilitiesRequest{})
+	var payload settlementValidatorEligibilityPayload
+	if err := decodeJSON(r, &payload); err != nil {
+		writeJSON(w, http.StatusBadRequest, bridgeEnvelope{OK: false, Error: err.Error()})
+		return
+	}
+
+	resp, err := h.scaffold.ValidatorMsgServer().SetEligibility(r.Context(), app.ValidatorSetEligibilityRequest{
+		Record: validatortypes.ValidatorEligibility{
+			ValidatorID:     payload.ValidatorID,
+			OperatorAddress: payload.OperatorAddress,
+			Eligible:        payload.Eligible,
+			PolicyReason:    payload.PolicyReason,
+			UpdatedAtUnix:   unixOrZero(payload.UpdatedAt),
+			Status:          mapReconciliationStatus(payload.Status, chaintypes.ReconciliationSubmitted),
+		},
+	})
 	if err != nil {
 		writeBridgeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":            true,
-		"eligibilities": resp.Eligibilities,
+
+	writeJSON(w, http.StatusOK, bridgeEnvelope{
+		OK:     true,
+		Replay: resp.Replay,
+		ID:     resp.Eligibility.ValidatorID,
 	})
 }
 
 func (h *settlementBridgeHandler) handleValidatorStatusRecords(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeJSON(w, http.StatusMethodNotAllowed, bridgeEnvelope{OK: false, Error: "method not allowed"})
-		return
-	}
+	if r.Method == http.MethodGet {
+		statusID, hasID, ok := getEntityID(r.URL.Path, "/x/vpnvalidator/status-records")
+		if !ok {
+			writeJSON(w, http.StatusNotFound, bridgeEnvelope{OK: false, Error: "not found"})
+			return
+		}
+		if hasID {
+			resp, err := h.scaffold.ValidatorQueryServer().GetStatusRecord(r.Context(), app.ValidatorGetStatusRecordRequest{
+				StatusID: statusID,
+			})
+			if err != nil {
+				writeBridgeError(w, err)
+				return
+			}
+			if !resp.Found {
+				writeJSON(w, http.StatusNotFound, bridgeEnvelope{OK: false, Error: "not found"})
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"ok":     true,
+				"status": resp.Record,
+			})
+			return
+		}
 
-	statusID, hasID, ok := getEntityID(r.URL.Path, "/x/vpnvalidator/status-records")
-	if !ok {
-		writeJSON(w, http.StatusNotFound, bridgeEnvelope{OK: false, Error: "not found"})
-		return
-	}
-	if hasID {
-		resp, err := h.scaffold.ValidatorQueryServer().GetStatusRecord(r.Context(), app.ValidatorGetStatusRecordRequest{
-			StatusID: statusID,
-		})
+		resp, err := h.scaffold.ValidatorQueryServer().ListStatusRecords(r.Context(), app.ValidatorListStatusRecordsRequest{})
 		if err != nil {
 			writeBridgeError(w, err)
 			return
 		}
-		if !resp.Found {
-			writeJSON(w, http.StatusNotFound, bridgeEnvelope{OK: false, Error: "not found"})
-			return
-		}
 		writeJSON(w, http.StatusOK, map[string]any{
-			"ok":     true,
-			"status": resp.Record,
+			"ok":      true,
+			"records": resp.Records,
 		})
 		return
 	}
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, bridgeEnvelope{OK: false, Error: "method not allowed"})
+		return
+	}
+	if !h.authorizePOST(w, r) {
+		return
+	}
 
-	resp, err := h.scaffold.ValidatorQueryServer().ListStatusRecords(r.Context(), app.ValidatorListStatusRecordsRequest{})
+	var payload settlementValidatorStatusPayload
+	if err := decodeJSON(r, &payload); err != nil {
+		writeJSON(w, http.StatusBadRequest, bridgeEnvelope{OK: false, Error: err.Error()})
+		return
+	}
+
+	resp, err := h.scaffold.ValidatorMsgServer().RecordStatus(r.Context(), app.ValidatorRecordStatusRequest{
+		Record: validatortypes.ValidatorStatusRecord{
+			StatusID:         payload.StatusID,
+			ValidatorID:      payload.ValidatorID,
+			ConsensusAddress: payload.ConsensusAddress,
+			LifecycleStatus:  strings.ToLower(strings.TrimSpace(payload.LifecycleStatus)),
+			EvidenceHeight:   payload.EvidenceHeight,
+			EvidenceRef:      payload.EvidenceRef,
+			RecordedAtUnix:   unixOrZero(payload.RecordedAt),
+			Status:           mapReconciliationStatus(payload.Status, chaintypes.ReconciliationSubmitted),
+		},
+	})
 	if err != nil {
 		writeBridgeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":      true,
-		"records": resp.Records,
+
+	writeJSON(w, http.StatusOK, bridgeEnvelope{
+		OK:     true,
+		Replay: resp.Replay,
+		ID:     resp.Status.StatusID,
 	})
 }
 
 func (h *settlementBridgeHandler) handleGovernancePolicies(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeJSON(w, http.StatusMethodNotAllowed, bridgeEnvelope{OK: false, Error: "method not allowed"})
-		return
-	}
-
-	policyID, hasID, ok := getEntityID(r.URL.Path, "/x/vpngovernance/policies")
-	if !ok {
-		writeJSON(w, http.StatusNotFound, bridgeEnvelope{OK: false, Error: "not found"})
-		return
-	}
-	if hasID {
-		resp, err := h.scaffold.GovernanceQueryServer().GetPolicy(r.Context(), app.GovernanceGetPolicyRequest{
-			PolicyID: policyID,
-		})
-		if err != nil {
-			writeBridgeError(w, err)
-			return
-		}
-		if !resp.Found {
+	if r.Method == http.MethodGet {
+		policyID, hasID, ok := getEntityID(r.URL.Path, "/x/vpngovernance/policies")
+		if !ok {
 			writeJSON(w, http.StatusNotFound, bridgeEnvelope{OK: false, Error: "not found"})
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{
-			"ok":     true,
-			"policy": resp.Policy,
-		})
-		return
-	}
-
-	resp, err := h.scaffold.GovernanceQueryServer().ListPolicies(r.Context(), app.GovernanceListPoliciesRequest{})
-	if err != nil {
-		writeBridgeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":       true,
-		"policies": resp.Policies,
-	})
-}
-
-func (h *settlementBridgeHandler) handleGovernanceDecisions(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeJSON(w, http.StatusMethodNotAllowed, bridgeEnvelope{OK: false, Error: "method not allowed"})
-		return
-	}
-
-	decisionID, hasID, ok := getEntityID(r.URL.Path, "/x/vpngovernance/decisions")
-	if !ok {
-		writeJSON(w, http.StatusNotFound, bridgeEnvelope{OK: false, Error: "not found"})
-		return
-	}
-	if hasID {
-		resp, err := h.scaffold.GovernanceQueryServer().GetDecision(r.Context(), app.GovernanceGetDecisionRequest{
-			DecisionID: decisionID,
-		})
-		if err != nil {
-			writeBridgeError(w, err)
+		if hasID {
+			resp, err := h.scaffold.GovernanceQueryServer().GetPolicy(r.Context(), app.GovernanceGetPolicyRequest{
+				PolicyID: policyID,
+			})
+			if err != nil {
+				writeBridgeError(w, err)
+				return
+			}
+			if !resp.Found {
+				writeJSON(w, http.StatusNotFound, bridgeEnvelope{OK: false, Error: "not found"})
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"ok":     true,
+				"policy": resp.Policy,
+			})
 			return
 		}
-		if !resp.Found {
-			writeJSON(w, http.StatusNotFound, bridgeEnvelope{OK: false, Error: "not found"})
+
+		resp, err := h.scaffold.GovernanceQueryServer().ListPolicies(r.Context(), app.GovernanceListPoliciesRequest{})
+		if err != nil {
+			writeBridgeError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"ok":       true,
-			"decision": resp.Decision,
+			"policies": resp.Policies,
 		})
 		return
 	}
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, bridgeEnvelope{OK: false, Error: "method not allowed"})
+		return
+	}
+	if !h.authorizePOST(w, r) {
+		return
+	}
 
-	resp, err := h.scaffold.GovernanceQueryServer().ListDecisions(r.Context(), app.GovernanceListDecisionsRequest{})
+	var payload settlementGovernancePolicyPayload
+	if err := decodeJSON(r, &payload); err != nil {
+		writeJSON(w, http.StatusBadRequest, bridgeEnvelope{OK: false, Error: err.Error()})
+		return
+	}
+
+	resp, err := h.scaffold.GovernanceMsgServer().CreatePolicy(r.Context(), app.GovernanceCreatePolicyRequest{
+		Record: governancetypes.GovernancePolicy{
+			PolicyID:        payload.PolicyID,
+			Title:           payload.Title,
+			Description:     payload.Description,
+			Version:         payload.Version,
+			ActivatedAtUnix: unixOrZero(payload.ActivatedAt),
+			Status:          mapReconciliationStatus(payload.Status, chaintypes.ReconciliationSubmitted),
+		},
+	})
 	if err != nil {
 		writeBridgeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":        true,
-		"decisions": resp.Decisions,
+
+	writeJSON(w, http.StatusOK, bridgeEnvelope{
+		OK:     true,
+		Replay: resp.Replay,
+		ID:     resp.Policy.PolicyID,
 	})
 }
 
-func (h *settlementBridgeHandler) handleGovernanceAuditActions(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeJSON(w, http.StatusMethodNotAllowed, bridgeEnvelope{OK: false, Error: "method not allowed"})
-		return
-	}
+func (h *settlementBridgeHandler) handleGovernanceDecisions(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		decisionID, hasID, ok := getEntityID(r.URL.Path, "/x/vpngovernance/decisions")
+		if !ok {
+			writeJSON(w, http.StatusNotFound, bridgeEnvelope{OK: false, Error: "not found"})
+			return
+		}
+		if hasID {
+			resp, err := h.scaffold.GovernanceQueryServer().GetDecision(r.Context(), app.GovernanceGetDecisionRequest{
+				DecisionID: decisionID,
+			})
+			if err != nil {
+				writeBridgeError(w, err)
+				return
+			}
+			if !resp.Found {
+				writeJSON(w, http.StatusNotFound, bridgeEnvelope{OK: false, Error: "not found"})
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"ok":       true,
+				"decision": resp.Decision,
+			})
+			return
+		}
 
-	actionID, hasID, ok := getEntityID(r.URL.Path, "/x/vpngovernance/audit-actions")
-	if !ok {
-		writeJSON(w, http.StatusNotFound, bridgeEnvelope{OK: false, Error: "not found"})
-		return
-	}
-	if hasID {
-		resp, err := h.scaffold.GovernanceQueryServer().GetAuditAction(r.Context(), app.GovernanceGetAuditActionRequest{
-			ActionID: actionID,
-		})
+		resp, err := h.scaffold.GovernanceQueryServer().ListDecisions(r.Context(), app.GovernanceListDecisionsRequest{})
 		if err != nil {
 			writeBridgeError(w, err)
 			return
 		}
-		if !resp.Found {
-			writeJSON(w, http.StatusNotFound, bridgeEnvelope{OK: false, Error: "not found"})
-			return
-		}
 		writeJSON(w, http.StatusOK, map[string]any{
-			"ok":     true,
-			"action": resp.Action,
+			"ok":        true,
+			"decisions": resp.Decisions,
 		})
 		return
 	}
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, bridgeEnvelope{OK: false, Error: "method not allowed"})
+		return
+	}
+	if !h.authorizePOST(w, r) {
+		return
+	}
 
-	resp, err := h.scaffold.GovernanceQueryServer().ListAuditActions(r.Context(), app.GovernanceListAuditActionsRequest{})
+	var payload settlementGovernanceDecisionPayload
+	if err := decodeJSON(r, &payload); err != nil {
+		writeJSON(w, http.StatusBadRequest, bridgeEnvelope{OK: false, Error: err.Error()})
+		return
+	}
+
+	resp, err := h.scaffold.GovernanceMsgServer().RecordDecision(r.Context(), app.GovernanceRecordDecisionRequest{
+		Record: governancetypes.GovernanceDecision{
+			DecisionID:    payload.DecisionID,
+			PolicyID:      payload.PolicyID,
+			ProposalID:    payload.ProposalID,
+			Outcome:       strings.ToLower(strings.TrimSpace(payload.Outcome)),
+			Decider:       payload.Decider,
+			Reason:        payload.Reason,
+			DecidedAtUnix: unixOrZero(payload.DecidedAt),
+			Status:        mapReconciliationStatus(payload.Status, chaintypes.ReconciliationSubmitted),
+		},
+	})
 	if err != nil {
 		writeBridgeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":      true,
-		"actions": resp.Actions,
+
+	writeJSON(w, http.StatusOK, bridgeEnvelope{
+		OK:     true,
+		Replay: resp.Replay,
+		ID:     resp.Decision.DecisionID,
+	})
+}
+
+func (h *settlementBridgeHandler) handleGovernanceAuditActions(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		actionID, hasID, ok := getEntityID(r.URL.Path, "/x/vpngovernance/audit-actions")
+		if !ok {
+			writeJSON(w, http.StatusNotFound, bridgeEnvelope{OK: false, Error: "not found"})
+			return
+		}
+		if hasID {
+			resp, err := h.scaffold.GovernanceQueryServer().GetAuditAction(r.Context(), app.GovernanceGetAuditActionRequest{
+				ActionID: actionID,
+			})
+			if err != nil {
+				writeBridgeError(w, err)
+				return
+			}
+			if !resp.Found {
+				writeJSON(w, http.StatusNotFound, bridgeEnvelope{OK: false, Error: "not found"})
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"ok":     true,
+				"action": resp.Action,
+			})
+			return
+		}
+
+		resp, err := h.scaffold.GovernanceQueryServer().ListAuditActions(r.Context(), app.GovernanceListAuditActionsRequest{})
+		if err != nil {
+			writeBridgeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":      true,
+			"actions": resp.Actions,
+		})
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, bridgeEnvelope{OK: false, Error: "method not allowed"})
+		return
+	}
+	if !h.authorizePOST(w, r) {
+		return
+	}
+
+	var payload settlementGovernanceAuditActionPayload
+	if err := decodeJSON(r, &payload); err != nil {
+		writeJSON(w, http.StatusBadRequest, bridgeEnvelope{OK: false, Error: err.Error()})
+		return
+	}
+
+	resp, err := h.scaffold.GovernanceMsgServer().RecordAuditAction(r.Context(), app.GovernanceRecordAuditActionRequest{
+		Record: governancetypes.GovernanceAuditAction{
+			ActionID:        payload.ActionID,
+			Action:          payload.Action,
+			Actor:           payload.Actor,
+			Reason:          payload.Reason,
+			EvidencePointer: payload.EvidencePointer,
+			TimestampUnix:   unixOrZero(payload.Timestamp),
+		},
+	})
+	if err != nil {
+		writeBridgeError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, bridgeEnvelope{
+		OK:     true,
+		Replay: resp.Replay,
+		ID:     resp.Action.ActionID,
 	})
 }
 

@@ -66,6 +66,11 @@ Shadow dual-write note:
     - `POST /x/vpnslashing/evidence`
       - v1 validation expectation: slash evidence must be machine-verifiable, and `evidence_ref`/proof reference must use `sha256:<value>` or `obj://<path>`.
       - Bridge mapping no longer derives proof references from violation-type fallback; callers must provide canonical proof references.
+    - `POST /x/vpnvalidator/eligibilities`
+    - `POST /x/vpnvalidator/status-records`
+    - `POST /x/vpngovernance/policies`
+    - `POST /x/vpngovernance/decisions`
+    - `POST /x/vpngovernance/audit-actions`
   - query (`GET`) endpoints:
     - `GET /x/vpnbilling/reservations` and `GET /x/vpnbilling/reservations/{reservation_id}`
     - `GET /x/vpnbilling/settlements` and `GET /x/vpnbilling/settlements/{settlement_id}`
@@ -80,7 +85,7 @@ Shadow dual-write note:
     - `GET /x/vpngovernance/policies` and `GET /x/vpngovernance/policies/{policy_id}`
     - `GET /x/vpngovernance/decisions` and `GET /x/vpngovernance/decisions/{decision_id}`
     - `GET /x/vpngovernance/audit-actions` and `GET /x/vpngovernance/audit-actions/{action_id}`
-  - when `--settlement-http-auth-token` is set, bearer auth is required on `POST` endpoints only; `GET` query paths and `GET /health` remain open.
+  - when `--settlement-http-auth-token` is set, bearer auth is required on all `POST` endpoints (including validator/governance writes) only; `GET` query paths and `GET /health` remain open.
 - VPN services can target this bridge with `COSMOS_SETTLEMENT_ENDPOINT=http://127.0.0.1:8080`.
 - Bridge responsibilities remain control-plane only; VPN dataplane forwarding does not couple to bridge liveness.
 
