@@ -205,7 +205,7 @@ Exit settlement status endpoint:
   - `./scripts/integration_cosmos_tdpnd_grpc_auth_live_smoke.sh`
 - CI/runtime smoke suite split:
   - `integration_cosmos_grpc_app_roundtrip.sh`: targeted `./app` gRPC roundtrip tests for billing/sponsor plus validator/governance `Msg`/`Query` contracts.
-  - `integration_cosmos_tdpnd_grpc_runtime_smoke.sh`: targeted `cmd/tdpnd` runtime tests, including auth/TLS behavior plus validator/governance real-scaffold roundtrip and `PreviewEpochSelection` query coverage.
+  - `integration_cosmos_tdpnd_grpc_runtime_smoke.sh`: targeted `cmd/tdpnd` runtime tests, including auth/TLS behavior plus validator/governance real-scaffold roundtrip, reflected core-module query-service checks, and `PreviewEpochSelection` query coverage.
   - `integration_cosmos_tdpnd_settlement_bridge_smoke.sh`: targeted settlement HTTP bridge runtime tests (`/health`, module POST writes, module GET query/list paths, auth checks, and combined gRPC/HTTP serve mode).
   - `integration_cosmos_tdpnd_state_dir_persistence.sh`: targeted state-dir persistence tests (`app` scaffold reopen + `cmd/tdpnd` state-dir runtime wiring/error propagation).
   - `integration_cosmos_tdpnd_settlement_bridge_live_smoke.sh`: live `tdpnd --settlement-http-listen` process smoke (startup, auth enforcement, module POST acceptance, validator/governance GET by-id/list query coverage, graceful shutdown).

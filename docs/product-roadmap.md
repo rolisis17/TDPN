@@ -210,7 +210,7 @@ Current implementation posture:
 - phase5 summary helper fallback discovery includes timestamped CI and handoff-run summary directories when canonical/default summary files are absent.
 - phase6 Cosmos L1 build/testnet CI scaffold now runs via `scripts/ci_phase6_cosmos_l1_build_testnet.sh` with contract checks in `scripts/integration_ci_phase6_cosmos_l1_build_testnet.sh`.
 - phase6 build/testnet CI includes `local_testnet_smoke` wired to `scripts/integration_cosmos_local_testnet_smoke.sh` for deterministic local multi-node `tdpnd` lifecycle coverage (`init -> start -> status -> stop -> status`).
-- phase6 gRPC runtime smoke now includes validator/governance real-scaffold roundtrip coverage with auth-query parity and deterministic `PreviewEpochSelection` query checks.
+- phase6 gRPC runtime smoke now includes validator/governance real-scaffold roundtrip coverage, reflected core-module query-service checks, auth-query parity, and deterministic `PreviewEpochSelection` query checks.
 - phase6 gRPC live smoke now validates reflected module-service parity plus live validator/governance query dispatch via grpcurl.
 - phase6 build/testnet CI now includes `tdpnd_grpc_auth_live_smoke` wired to `scripts/integration_cosmos_tdpnd_grpc_auth_live_smoke.sh` for auth-token gRPC live-smoke coverage across billing/sponsor/validator/governance query RPCs.
 - phase6 Cosmos L1 contracts CI gate now runs via `scripts/ci_phase6_cosmos_l1_contracts.sh` with contract checks in `scripts/integration_ci_phase6_cosmos_l1_contracts.sh` for wrapper wiring plus first-failure RC propagation with full-stage accounting (non-short-circuit stage execution), and live-smoke coverage in `scripts/integration_phase6_cosmos_l1_contracts_live_smoke.sh`.

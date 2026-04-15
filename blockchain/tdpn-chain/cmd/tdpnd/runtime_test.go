@@ -543,6 +543,97 @@ func TestRunTDPNDGRPCModeRegistersHealthAndReflection(t *testing.T) {
 	}
 }
 
+func TestRunTDPNDGRPCModeReflectionIncludesCoreModuleQueries(t *testing.T) {
+	bufListener := bufconn.Listen(1024 * 1024)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runDone := make(chan error, 1)
+	go func() {
+		runDone <- runTDPND(
+			ctx,
+			[]string{"--grpc-listen", "bufnet"},
+			nil,
+			func() chainScaffold { return app.NewChainScaffold() },
+			runtimeDeps{
+				Listen: func(_, _ string) (net.Listener, error) {
+					return bufListener, nil
+				},
+				NewGRPCServer: func(opts ...grpc.ServerOption) grpcRuntimeServer {
+					return grpc.NewServer(opts...)
+				},
+			},
+		)
+	}()
+
+	dialCtx, dialCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer dialCancel()
+
+	conn, err := grpc.DialContext(
+		dialCtx,
+		"bufnet",
+		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
+			return bufListener.Dial()
+		}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithBlock(),
+	)
+	if err != nil {
+		t.Fatalf("dial grpc bufconn: %v", err)
+	}
+	defer conn.Close()
+
+	reflectionClient := reflectionv1alpha.NewServerReflectionClient(conn)
+	stream, err := reflectionClient.ServerReflectionInfo(context.Background())
+	if err != nil {
+		t.Fatalf("open reflection stream: %v", err)
+	}
+	if err := stream.Send(&reflectionv1alpha.ServerReflectionRequest{
+		MessageRequest: &reflectionv1alpha.ServerReflectionRequest_ListServices{
+			ListServices: "*",
+		},
+	}); err != nil {
+		t.Fatalf("send reflection list request: %v", err)
+	}
+
+	reflectionResp, err := stream.Recv()
+	if err != nil {
+		t.Fatalf("recv reflection list response: %v", err)
+	}
+
+	serviceNames := make([]string, 0)
+	for _, svc := range reflectionResp.GetListServicesResponse().GetService() {
+		serviceNames = append(serviceNames, svc.GetName())
+	}
+
+	for _, expectedQueryService := range []string{
+		"tdpn.vpnbilling.v1.Query",
+		"tdpn.vpnsponsor.v1.Query",
+		"tdpn.vpnvalidator.v1.Query",
+		"tdpn.vpngovernance.v1.Query",
+	} {
+		if !containsReflectionService(serviceNames, expectedQueryService) {
+			t.Fatalf("expected reflected service %q, got %v", expectedQueryService, serviceNames)
+		}
+	}
+
+	if err := stream.CloseSend(); err != nil {
+		t.Fatalf("close reflection stream: %v", err)
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatalf("close grpc conn: %v", err)
+	}
+	cancel()
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("expected graceful shutdown success, got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for grpc runtime shutdown")
+	}
+}
+
 func TestRunTDPNDGRPCModeAuthEnforcementAndHealth(t *testing.T) {
 	const authToken = "tdpn-test-token"
 
@@ -1370,6 +1461,15 @@ func containsGovernanceDecisionID(records []*vpngovernancepb.GovernanceDecision,
 func containsGovernanceActionID(records []*vpngovernancepb.GovernanceAuditAction, want string) bool {
 	for _, record := range records {
 		if record.GetActionId() == want {
+			return true
+		}
+	}
+	return false
+}
+
+func containsReflectionService(services []string, target string) bool {
+	for _, service := range services {
+		if service == target {
 			return true
 		}
 	}

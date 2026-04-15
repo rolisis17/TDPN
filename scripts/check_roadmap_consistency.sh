@@ -521,8 +521,16 @@ if ! rg -Fq "TestRunTDPNDGRPCModeRealScaffoldValidatorAndGovernanceRoundTrip" "$
   echo "phase6 grpc runtime smoke script must include validator/governance real-scaffold runtime roundtrip contract test"
   exit 1
 fi
+if ! rg -Fq "TestRunTDPNDGRPCModeReflectionIncludesCoreModuleQueries" "$phase6_grpc_runtime_smoke_script"; then
+  echo "phase6 grpc runtime smoke script must include reflected core-module query service contract test"
+  exit 1
+fi
 if ! rg -Fq "TestRunTDPNDGRPCModeRealScaffoldValidatorAndGovernanceRoundTrip" "$chain_runtime_test_file"; then
   echo "runtime test suite must include validator/governance real-scaffold grpc roundtrip contract test"
+  exit 1
+fi
+if ! rg -Fq "TestRunTDPNDGRPCModeReflectionIncludesCoreModuleQueries" "$chain_runtime_test_file"; then
+  echo "runtime test suite must include reflected core-module query service contract test"
   exit 1
 fi
 for runtime_grpc_contract in \
@@ -533,6 +541,17 @@ for runtime_grpc_contract in \
 do
   if ! rg -Fq "$runtime_grpc_contract" "$chain_runtime_test_file"; then
     echo "runtime test suite must include validator/governance grpc contract marker: $runtime_grpc_contract"
+    exit 1
+  fi
+done
+for runtime_reflection_service in \
+  "tdpn.vpnbilling.v1.Query" \
+  "tdpn.vpnsponsor.v1.Query" \
+  "tdpn.vpnvalidator.v1.Query" \
+  "tdpn.vpngovernance.v1.Query"
+do
+  if ! rg -Fq "$runtime_reflection_service" "$chain_runtime_test_file"; then
+    echo "runtime reflection coverage must include core query service marker: $runtime_reflection_service"
     exit 1
   fi
 done
