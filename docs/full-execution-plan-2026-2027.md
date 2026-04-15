@@ -84,6 +84,7 @@ Exit gate:
   - `phase5_settlement_layer_handoff_check_summary.json`
   - `phase5_settlement_layer_handoff_run_summary.json`
 - Phase 5 operator summary helper `scripts/phase5_settlement_layer_summary_report.sh` aggregates CI/check/run/handoff summaries into compact operator output plus normalized JSON, with contract coverage from `scripts/integration_phase5_settlement_layer_summary_report.sh`.
+- Phase 5 wrapper summaries now propagate sponsor live-smoke signals end-to-end: run (`signals.issuer_sponsor_api_live_smoke_*`), handoff-run (`handoff.issuer_sponsor_api_live_smoke_*`), and aggregate report (`signals.issuer_sponsor_api_live_smoke`).
 - Phase 5 summary helper fallback discovery now includes timestamped CI and handoff-run summary directories when canonical/default summary files are absent.
 - Easy-node exposes blockchain summary wrappers:
   - `./scripts/easy_node.sh phase5-settlement-layer-summary-report`

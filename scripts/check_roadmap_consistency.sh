@@ -1508,6 +1508,14 @@ if ! rg -Fq -- "--print-summary-json" "$easy_node_blockchain_summary_reports_int
   echo "easy-node summary-report integration must validate print-summary-json forwarding"
   exit 1
 fi
+if ! rg -Fq ".signals.issuer_sponsor_api_live_smoke.status" "$easy_node_blockchain_summary_reports_integration_script"; then
+  echo "easy-node summary-report integration must validate phase5 sponsor signal status surfacing"
+  exit 1
+fi
+if ! rg -Fq ".signals.issuer_sponsor_api_live_smoke.ok" "$easy_node_blockchain_summary_reports_integration_script"; then
+  echo "easy-node summary-report integration must validate phase5 sponsor signal health surfacing"
+  exit 1
+fi
 for phase5_canonical_summary in \
   "phase5_settlement_layer_ci_summary.json" \
   "phase5_settlement_layer_check_summary.json" \
