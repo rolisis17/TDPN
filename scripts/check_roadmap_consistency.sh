@@ -12,6 +12,7 @@ cosmos_runtime_doc="docs/cosmos-settlement-runtime.md"
 chain_readme="blockchain/tdpn-chain/README.md"
 chain_scaffold_file="blockchain/tdpn-chain/app/scaffold.go"
 chain_grpc_registry_file="blockchain/tdpn-chain/app/grpc_registry.go"
+chain_grpc_registry_test_file="blockchain/tdpn-chain/app/grpc_registry_test.go"
 chain_settlement_bridge_file="blockchain/tdpn-chain/cmd/tdpnd/settlement_bridge.go"
 chain_runtime_test_file="blockchain/tdpn-chain/cmd/tdpnd/runtime_test.go"
 settlement_mapping_doc="blockchain/tdpn-chain/docs/settlement-bridge-mapping.md"
@@ -106,7 +107,7 @@ check_confirmation_interface_wording() {
   fi
 }
 
-for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$chain_readme" "$chain_scaffold_file" "$chain_grpc_registry_file" "$chain_settlement_bridge_file" "$chain_runtime_test_file" "$settlement_mapping_doc" "$blockchain_sponsor_quickstart_doc" "$phase5_ci_script" "$phase5_integration_script" "$phase5_check_script" "$phase5_run_script" "$phase5_handoff_check_script" "$phase5_handoff_run_script" "$phase5_check_integration_script" "$phase5_run_integration_script" "$phase5_handoff_check_integration_script" "$phase5_handoff_run_integration_script" "$phase5_summary_report_script" "$phase5_summary_report_integration_script" "$ci_local_script" "$easy_node_blockchain_summary_reports_integration_script" "$phase6_ci_script" "$phase6_integration_script" "$phase6_contracts_ci_script" "$phase6_contracts_integration_script" "$phase6_contracts_live_smoke_script" "$phase6_grpc_app_roundtrip_script" "$phase6_grpc_runtime_smoke_script" "$phase6_grpc_live_smoke_script" "$phase6_grpc_auth_live_smoke_script" "$phase6_settlement_bridge_smoke_script" "$phase6_settlement_bridge_live_smoke_script" "$phase6_module_coverage_floor_script" "$phase6_keeper_coverage_floor_script" "$phase6_dual_write_parity_script" "$phase6_check_script" "$phase6_run_script" "$phase6_check_integration_script" "$phase6_run_integration_script" "$phase6_suite_script" "$phase6_suite_integration_script" "$phase6_handoff_check_script" "$phase6_handoff_run_script" "$phase6_handoff_check_integration_script" "$phase6_handoff_run_integration_script" "$phase6_summary_report_script" "$phase6_summary_report_integration_script"; do
+for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$chain_readme" "$chain_scaffold_file" "$chain_grpc_registry_file" "$chain_grpc_registry_test_file" "$chain_settlement_bridge_file" "$chain_runtime_test_file" "$settlement_mapping_doc" "$blockchain_sponsor_quickstart_doc" "$phase5_ci_script" "$phase5_integration_script" "$phase5_check_script" "$phase5_run_script" "$phase5_handoff_check_script" "$phase5_handoff_run_script" "$phase5_check_integration_script" "$phase5_run_integration_script" "$phase5_handoff_check_integration_script" "$phase5_handoff_run_integration_script" "$phase5_summary_report_script" "$phase5_summary_report_integration_script" "$ci_local_script" "$easy_node_blockchain_summary_reports_integration_script" "$phase6_ci_script" "$phase6_integration_script" "$phase6_contracts_ci_script" "$phase6_contracts_integration_script" "$phase6_contracts_live_smoke_script" "$phase6_grpc_app_roundtrip_script" "$phase6_grpc_runtime_smoke_script" "$phase6_grpc_live_smoke_script" "$phase6_grpc_auth_live_smoke_script" "$phase6_settlement_bridge_smoke_script" "$phase6_settlement_bridge_live_smoke_script" "$phase6_module_coverage_floor_script" "$phase6_keeper_coverage_floor_script" "$phase6_dual_write_parity_script" "$phase6_check_script" "$phase6_run_script" "$phase6_check_integration_script" "$phase6_run_integration_script" "$phase6_suite_script" "$phase6_suite_integration_script" "$phase6_handoff_check_script" "$phase6_handoff_run_script" "$phase6_handoff_check_integration_script" "$phase6_handoff_run_integration_script" "$phase6_summary_report_script" "$phase6_summary_report_integration_script"; do
   if [[ ! -f "$f" ]]; then
     echo "missing required file: $f"
     exit 1
@@ -510,6 +511,10 @@ fi
 if ! rg -Fq "TestRegisterGRPCServicesValidatorAndGovernanceRoundTrip" "$phase6_grpc_app_roundtrip_script" \
   && ! rg -Fq "TestRegisterGRPCServicesValidatorGovernanceRoundTrip" "$phase6_grpc_app_roundtrip_script"; then
   echo "phase6 grpc app roundtrip script must include validator/governance Msg+Query grpc roundtrip contract test"
+  exit 1
+fi
+if ! rg -Fq "PreviewEpochSelection" "$chain_grpc_registry_test_file"; then
+  echo "grpc app roundtrip test suite must include validator PreviewEpochSelection contract coverage"
   exit 1
 fi
 if ! rg -Fq "TestRunTDPNDGRPCModeRealScaffoldValidatorAndGovernanceRoundTrip" "$phase6_grpc_runtime_smoke_script"; then

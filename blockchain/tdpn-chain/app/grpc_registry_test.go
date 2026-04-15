@@ -253,6 +253,41 @@ func TestRegisterGRPCServicesValidatorAndGovernanceRoundTrip(t *testing.T) {
 		t.Fatalf("expected validator eligibility %q in list", eligibilityID)
 	}
 
+	previewResp, err := validatorQuery.PreviewEpochSelection(ctx, &vpnvalidatorpb.QueryPreviewEpochSelectionRequest{
+		Policy: &vpnvalidatorpb.EpochSelectionPolicy{
+			Epoch:               17,
+			StableSeatCount:     1,
+			RotatingSeatCount:   0,
+			MinStake:            1,
+			MinStakeAgeEpochs:   1,
+			MinHealthScore:      1,
+			MinResourceHeadroom: 1,
+		},
+		Candidates: []*vpnvalidatorpb.EpochValidatorCandidate{
+			{
+				ValidatorId:         eligibilityID,
+				OperatorId:          "operator-grpc-rt-1",
+				Asn:                 "64513",
+				Region:              "au-south",
+				Stake:               100,
+				StakeAgeEpochs:      9,
+				HealthScore:         100,
+				ResourceHeadroom:    100,
+				Score:               100,
+				StableSeatPreferred: true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("preview epoch selection: %v", err)
+	}
+	if previewResp.GetResult() == nil {
+		t.Fatalf("expected non-nil preview epoch selection result")
+	}
+	if len(previewResp.GetResult().GetStableSeats())+len(previewResp.GetResult().GetRotatingSeats()) == 0 {
+		t.Fatalf("expected preview epoch selection to choose candidate, got %+v", previewResp.GetResult())
+	}
+
 	statusID := "validator-status-grpc-rt-1"
 	statusResp, err := validatorMsg.RecordValidatorStatus(ctx, &vpnvalidatorpb.MsgRecordValidatorStatusRequest{
 		Record: &vpnvalidatorpb.ValidatorStatusRecord{
