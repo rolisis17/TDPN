@@ -89,6 +89,7 @@ Issuer control-plane endpoints:
   - `POST /v1/sponsor/reserve`
   - `GET /v1/sponsor/status?reservation_id=...`
   - `POST /v1/sponsor/token`
+  - dApp onboarding quickstart: `blockchain-app-sponsorship-quickstart.md`
 - Settlement status:
   - `GET /v1/settlement/status` (admin auth required, returns reconcile/backlog counters; fail-soft degraded `503` payload if reconcile fails)
 - Objective slash evidence intake (admin):

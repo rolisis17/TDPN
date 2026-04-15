@@ -23,6 +23,7 @@ This workspace defines the initial module boundaries for TDPN's VPN-compatible b
 ## Integration notes
 - Current app-side bridge is `pkg/settlement` with optional Cosmos adapter.
 - Issuer sponsor API endpoints map to `quote -> reserve -> token issue -> status` flow.
+- dApp sponsorship quickstart (issuer sponsor API happy path): `../../docs/blockchain-app-sponsorship-quickstart.md`.
 - Reconciliation lifecycle supports `pending -> submitted -> confirmed`; settlement/reward/sponsor/slash records move `submitted -> confirmed` when adapter query surfaces observe by-id bridge records.
 - Query-by-id confirmation capability is exposed through optional settlement adapter interface `ChainConfirmationQuerier` (`pkg/settlement/types.go`).
 - Runtime env/operator wiring reference: `docs/cosmos-settlement-runtime.md`.

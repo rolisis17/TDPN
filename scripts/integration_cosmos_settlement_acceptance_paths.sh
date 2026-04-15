@@ -11,8 +11,8 @@ export GOCACHE="${GOCACHE:-$ROOT_DIR/.gocache}"
 timeout 30s go test ./pkg/settlement -count=1 -run '^(TestMemoryServiceSponsorFlowAuthorizeIdempotent)$'
 timeout 30s go test ./services/issuer -count=1 -run '^(TestSponsorReserveAndIssueTokenFlow|TestHandleIssueTokenRequiresPaymentProofWhenEnabled)$'
 
-# Chain-outage fail-soft coverage: defer on adapter failure and keep close/status paths non-blocking.
-timeout 30s go test ./pkg/settlement -count=1 -run '^(TestMemoryServiceAdapterDeferredOnFailure|TestMemoryServiceReconcileReplaySuccessClearsBacklog)$'
+# Chain-outage fail-soft coverage: defer on adapter failure, replay to submitted, then confirm lifecycle advancement.
+timeout 30s go test ./pkg/settlement -count=1 -run '^(TestMemoryServiceAdapterDeferredOnFailure|TestMemoryServiceReconcileReplaySuccessClearsBacklog|TestMemoryServiceReconcileReplayPromotesToConfirmedWhenQuerierAvailable)$'
 timeout 30s go test ./services/exit -count=1 -run '^(TestSettlementReserveAndFinalizeWarningsDoNotBlockSessionClose|TestHandlePathCloseDeferredChainAdapterDoesNotBlockSessionClose|TestHandleSettlementStatusReconcileErrorIsFailSoft)$'
 
 # Dual-asset pricing coverage: stable-denominated baseline plus native-token conversion/equivalence.

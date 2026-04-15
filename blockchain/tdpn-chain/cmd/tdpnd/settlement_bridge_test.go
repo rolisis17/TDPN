@@ -173,6 +173,135 @@ func TestRunTDPNDSettlementHTTPAuthRequiredOnPOST(t *testing.T) {
 	}
 }
 
+func TestRunTDPNDSettlementHTTPAuthContractGETOpenPOSTBearerRequired(t *testing.T) {
+	httpListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen http: %v", err)
+	}
+	defer httpListener.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	const authToken = "bridge-contract-secret"
+	runDone := make(chan error, 1)
+	go func() {
+		runDone <- runTDPND(
+			ctx,
+			[]string{
+				"--settlement-http-listen", "settlement-auth-contract-test",
+				"--settlement-http-auth-token", authToken,
+			},
+			nil,
+			func() chainScaffold { return app.NewChainScaffold() },
+			runtimeDeps{
+				Listen: func(_, _ string) (net.Listener, error) {
+					return nil, errors.New("grpc listener should not be used")
+				},
+				ListenHTTP: func(_, address string) (net.Listener, error) {
+					if address != "settlement-auth-contract-test" {
+						return nil, errors.New("unexpected settlement listen address")
+					}
+					return httpListener, nil
+				},
+				NewGRPCServer: func(opts ...grpc.ServerOption) grpcRuntimeServer {
+					return grpc.NewServer(opts...)
+				},
+			},
+		)
+	}()
+
+	baseURL := "http://" + httpListener.Addr().String()
+	waitForHTTPReady(t, baseURL+"/health")
+
+	// Auth mode must keep query GET endpoints open (never 401-gated).
+	openGetPaths := []string{
+		"/health",
+		"/x/vpnbilling/reservations",
+		"/x/vpnbilling/settlements",
+		"/x/vpnrewards/accruals",
+		"/x/vpnrewards/distributions",
+		"/x/vpnsponsor/authorizations",
+		"/x/vpnsponsor/delegations",
+		"/x/vpnslashing/evidence",
+		"/x/vpnslashing/penalties",
+	}
+	for _, path := range openGetPaths {
+		status, payload := doJSONRequest(t, http.MethodGet, baseURL+path, "", nil)
+		if status != http.StatusOK {
+			t.Fatalf("expected unauthenticated GET %s to return 200 in auth mode, got %d payload=%v", path, status, payload)
+		}
+	}
+
+	testCases := []struct {
+		name      string
+		postPath  string
+		postBody  string
+		verifyGET string
+	}{
+		{
+			name:     "billing",
+			postPath: "/x/vpnbilling/settlements",
+			postBody: `{"SettlementID":"set-auth-contract-1","ReservationID":"res-auth-contract-1","SessionID":"sess-auth-contract-1","SubjectID":"subject-auth-contract-1","ChargedMicros":250,"Currency":"uusdc","SettledAt":"2026-01-01T00:00:00Z"}`,
+			verifyGET: "/x/vpnbilling/settlements/set-auth-contract-1",
+		},
+		{
+			name:     "rewards",
+			postPath: "/x/vpnrewards/issues",
+			postBody: `{"RewardID":"reward-auth-contract-1","ProviderSubjectID":"provider-auth-contract-1","SessionID":"sess-auth-contract-1","RewardMicros":100,"Currency":"uusdc","IssuedAt":"2026-01-01T00:00:00Z"}`,
+			verifyGET: "/x/vpnrewards/accruals/reward-auth-contract-1",
+		},
+		{
+			name:     "sponsor",
+			postPath: "/x/vpnsponsor/reservations",
+			postBody: `{"ReservationID":"sponsor-res-auth-contract-1","SponsorID":"sponsor-auth-contract-1","SubjectID":"app-auth-contract-1","SessionID":"sess-auth-contract-1","AmountMicros":500,"Currency":"uusdc","CreatedAt":"2026-01-01T00:00:00Z","ExpiresAt":"2026-12-31T00:00:00Z"}`,
+			verifyGET: "/x/vpnsponsor/delegations/sponsor-res-auth-contract-1",
+		},
+		{
+			name:     "slashing",
+			postPath: "/x/vpnslashing/evidence",
+			postBody: `{"EvidenceID":"ev-auth-contract-1","SubjectID":"provider-auth-contract-1","SessionID":"sess-auth-contract-1","ViolationType":"objective","EvidenceRef":"sha256:proof-auth-contract-1","ObservedAt":"2026-01-01T00:00:00Z"}`,
+			verifyGET: "/x/vpnslashing/evidence/ev-auth-contract-1",
+		},
+	}
+
+	validHeaders := map[string]string{"Authorization": "Bearer " + authToken}
+	wrongHeaders := map[string]string{"Authorization": "Bearer wrong-token"}
+
+	for _, tc := range testCases {
+		status, payload := doJSONRequest(t, http.MethodPost, baseURL+tc.postPath, tc.postBody, nil)
+		if status != http.StatusUnauthorized {
+			t.Fatalf("[%s] expected unauthenticated POST to return 401, got %d payload=%v", tc.name, status, payload)
+		}
+
+		status, payload = doJSONRequest(t, http.MethodPost, baseURL+tc.postPath, tc.postBody, wrongHeaders)
+		if status != http.StatusUnauthorized {
+			t.Fatalf("[%s] expected wrong bearer POST to return 401, got %d payload=%v", tc.name, status, payload)
+		}
+
+		status, payload = doJSONRequest(t, http.MethodPost, baseURL+tc.postPath, tc.postBody, validHeaders)
+		if status != http.StatusOK {
+			t.Fatalf("[%s] expected valid bearer POST to return 200, got %d payload=%v", tc.name, status, payload)
+		}
+
+		status, payload = doJSONRequest(t, http.MethodGet, baseURL+tc.verifyGET, "", nil)
+		if status != http.StatusOK {
+			t.Fatalf("[%s] expected unauthenticated GET %s to remain open after write, got %d payload=%v",
+				tc.name, tc.verifyGET, status, payload)
+		}
+	}
+
+	cancel()
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("expected clean shutdown, got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for runtime shutdown")
+	}
+}
+
 func TestRunTDPNDSettlementHTTPSlashEvidenceRejectsInvalidObjectiveRef(t *testing.T) {
 	httpListener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
