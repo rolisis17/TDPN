@@ -11,6 +11,7 @@ bootstrap_validator_doc="docs/blockchain-bootstrap-validator-plan.md"
 cosmos_runtime_doc="docs/cosmos-settlement-runtime.md"
 chain_readme="blockchain/tdpn-chain/README.md"
 settlement_mapping_doc="blockchain/tdpn-chain/docs/settlement-bridge-mapping.md"
+blockchain_sponsor_quickstart_doc="docs/blockchain-app-sponsorship-quickstart.md"
 phase5_ci_script="scripts/ci_phase5_settlement_layer.sh"
 phase5_integration_script="scripts/integration_ci_phase5_settlement_layer.sh"
 
@@ -62,7 +63,7 @@ check_confirmation_interface_wording() {
   fi
 }
 
-for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$chain_readme" "$settlement_mapping_doc" "$phase5_ci_script" "$phase5_integration_script"; do
+for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$chain_readme" "$settlement_mapping_doc" "$blockchain_sponsor_quickstart_doc" "$phase5_ci_script" "$phase5_integration_script"; do
   if [[ ! -f "$f" ]]; then
     echo "missing required file: $f"
     exit 1
@@ -246,6 +247,10 @@ if ! rg -Fq "integration_cosmos_tdpnd_state_dir_persistence.sh" "$cosmos_runtime
   echo "cosmos settlement runtime guide must document state-dir persistence integration script"
   exit 1
 fi
+if ! rg -Fq "blockchain-app-sponsorship-quickstart.md" "$cosmos_runtime_doc"; then
+  echo "cosmos settlement runtime guide must link blockchain sponsor quickstart"
+  exit 1
+fi
 check_confirmation_interface_wording "$cosmos_runtime_doc" "cosmos settlement runtime guide"
 
 if ! rg -Fq -- "--state-dir" "$chain_readme"; then
@@ -258,6 +263,10 @@ if ! rg -Fq "GET /x/vpnbilling/reservations" "$chain_readme"; then
 fi
 if ! rg -Fq "integration_cosmos_tdpnd_state_dir_persistence.sh" "$chain_readme"; then
   echo "chain README must document state-dir persistence integration coverage"
+  exit 1
+fi
+if ! rg -Fq "blockchain-app-sponsorship-quickstart.md" "$chain_readme"; then
+  echo "chain README must link blockchain sponsor quickstart"
   exit 1
 fi
 if rg -Fq "Storage remains an in-memory placeholder; Cosmos SDK KV store integration is still pending." "$chain_readme"; then
@@ -311,6 +320,24 @@ fi
 check_confirmation_lifecycle_wording "$settlement_mapping_doc" "settlement bridge mapping"
 check_adapter_roundtrip_wording "$settlement_mapping_doc" "settlement bridge mapping"
 check_confirmation_interface_wording "$settlement_mapping_doc" "settlement bridge mapping"
+
+for sponsor_quickstart_contract in \
+  "/v1/sponsor/quote" \
+  "/v1/sponsor/reserve" \
+  "/v1/sponsor/token" \
+  "/v1/sponsor/status?reservation_id=" \
+  "X-Sponsor-Token" \
+  "payment_proof"
+do
+  if ! rg -Fq "$sponsor_quickstart_contract" "$blockchain_sponsor_quickstart_doc"; then
+    echo "blockchain sponsor quickstart must document contract field/path: $sponsor_quickstart_contract"
+    exit 1
+  fi
+done
+if ! rg -Fq "without requiring user wallet signing in the happy path" "$blockchain_sponsor_quickstart_doc"; then
+  echo "blockchain sponsor quickstart must document no-wallet-signing happy path"
+  exit 1
+fi
 
 for phase5_script in "$phase5_ci_script" "$phase5_integration_script"; do
   if rg -qi "phase4 windows full parity" "$phase5_script"; then
