@@ -63,12 +63,51 @@ What this does:
    - issuer dispute
    - multi-issuer
    - load/chaos
+   - easy-node config v1 contract (`integration_easy_node_config_v1.sh`)
+   - local API config defaults contract (`integration_local_api_config_defaults.sh`)
+   - local control API forwarding contract (`integration_local_control_api_contract.sh`)
+   - desktop scaffold contract (`integration_desktop_scaffold_contract.sh`)
 
 Expected result:
 - final line: `[ci] ok`
 
 If it fails:
 - script prints relevant logs from `/tmp/*`.
+
+## 3a) Phase 0/1 targeted gates
+
+`ci_phase0` (fast Phase-0 product-surface gate):
+
+```bash
+./scripts/ci_phase0.sh
+```
+
+- Purpose: fail-fast contract check for launcher wiring/runtime, simple prompt budget (`<=6` prompts), config-v1, and local control API forwarding.
+- When to run: before full `ci_local.sh` when editing launcher/simple-mode flow, prompt flow, or config-v1/local API surface.
+- Expected artifacts: console step lines (`[ci-phase0] ...`); no aggregate summary file.
+- Exit meaning: `0` with final `[ci-phase0] ok` on full pass; non-zero on first failing step (`2` for invalid args/missing executable step script).
+
+`ci_phase1_resilience` (focused Phase-1 resilience wrapper gate):
+
+```bash
+./scripts/ci_phase1_resilience.sh
+```
+
+- Purpose: run profile-matrix/RC-resilience wrapper chain checks (`three_machine_docker_profile_matrix`, `profile_compare_docker_matrix`, `three_machine_docker_profile_matrix_record`, `vpn_rc_matrix_path`, `vpn_rc_resilience_path`) with deterministic stage accounting.
+- When to run: after changes to phase-1 resilience wrappers, profile-matrix orchestration, or RC chain wiring; use `--dry-run 1` for contract-only verification.
+- Expected artifacts: report tree under `.easy-node-logs/ci_phase1_resilience_<stamp>/`, including `ci_phase1_resilience_summary.json` plus per-stage summary/report artifacts.
+- Exit meaning: `0` when all enabled stages pass; non-zero when any enabled stage fails (summary `status=fail` and per-stage `status/rc` fields identify failure).
+
+`integration_session_churn_guard` (session lifecycle churn guard integration):
+
+```bash
+./scripts/integration_session_churn_guard.sh
+```
+
+- Purpose: verify default direct-exit churn guard behavior (forced reuse/min-refresh floor) and explicit override path (`CLIENT_DIRECT_EXIT_ALLOW_SESSION_CHURN=1`) in one deterministic run.
+- When to run: after edits to client session reuse/refresh logic, direct-exit defaults, or guard env wiring.
+- Expected artifacts: `/tmp/integration_session_churn_guard_guarded.log` and `/tmp/integration_session_churn_guard_churn.log`; terminal summary line with guarded/churn selection and reuse counts.
+- Exit meaning: `0` when guard and override assertions both hold; non-zero on mismatch/failure (`2` for missing required commands).
 
 ## 4) Manual end-to-end run (to understand flow)
 
@@ -121,10 +160,46 @@ Single-host docker 3-machine rehearsal (A/B stacks + machine-C style runner):
   --print-summary-json 1
 ```
 
+Three-machine docker profile matrix rehearsal (phase-1 resilience matrix path):
+
+```bash
+./scripts/easy_node.sh three-machine-docker-profile-matrix \
+  --profiles 1hop,2hop,3hop \
+  --rounds 3 \
+  --print-summary-json 1
+```
+
+Three-machine docker profile matrix recorded rehearsal (phase-1 resilience receipt path):
+
+```bash
+./scripts/easy_node.sh three-machine-docker-profile-matrix-record \
+  --profiles 1hop,2hop,3hop \
+  --rounds 3 \
+  --print-summary-json 1
+```
+
 Notes:
 - This runs the machine-C control-plane validate/soak flow against two local
   dockerized operator stacks (`A` + `B`) for fast iteration.
 - It is not a replacement for final true multi-host production signoff.
+- `single-machine-prod-readiness` and `vpn-rc-standard-path` now run this docker rehearsal with peer failover enabled by default.
+- Diagnostic override knobs: `single-machine-prod-readiness --three-machine-docker-readiness-run-peer-failover 0` or low-level `three-machine-docker-readiness --run-peer-failover 0`.
+- Docker profile matrix wrapper is now exposed in launcher advanced option 77 and maps to `profile-compare-campaign-signoff --campaign-execution-mode docker --campaign-start-local-stack 0`.
+- Coverage status for that wrapper: docker campaign-signoff contract is exercised by `integration_profile_compare_campaign_signoff.sh`, and launcher signoff forwarding remains guarded by `integration_easy_mode_launcher_wiring.sh` plus `integration_easy_mode_launcher_runtime.sh`.
+- `easy_node.sh profile-compare-docker-matrix` now provides a direct docker-first campaign wrapper for `1hop/2hop/3hop`, with pass-through overrides and deterministic summary/report artifact output.
+- dispatch/forwarding contract for `profile-compare-docker-matrix` is exercised by `integration_profile_compare_docker_matrix.sh` (now in both `ci_local.sh` and `beta_preflight.sh`).
+- one-command RC matrix chain path is now exposed as `easy_node.sh vpn-rc-matrix-path` for refresh/check handoff in one run.
+- contract coverage for `vpn-rc-matrix-path` is exercised by `integration_vpn_rc_matrix_path.sh` in both `ci_local.sh` and `beta_preflight.sh`.
+- one-command RC resilience chain path is now exposed as `easy_node.sh vpn-rc-resilience-path` for phase-1 resilience handoff in one run.
+- contract coverage for `vpn-rc-resilience-path` is exercised by `integration_vpn_rc_resilience_path.sh` in both `ci_local.sh` and `beta_preflight.sh`.
+- three-machine docker profile matrix flow (`easy_node.sh three-machine-docker-profile-matrix`) is now guarded in both local gates by `integration_three_machine_docker_profile_matrix.sh`.
+- three-machine docker profile matrix record flow (`easy_node.sh three-machine-docker-profile-matrix-record`) is now guarded in both local gates by `integration_three_machine_docker_profile_matrix_record.sh`.
+
+Phase-1 RC resilience path example:
+
+```bash
+./scripts/easy_node.sh vpn-rc-resilience-path
+```
 
 Path profile presets for client routing tests:
 
@@ -133,6 +208,10 @@ Path profile presets for client routing tests:
 - Private: `--distinct-operators 1 --distinct-countries 1 --locality-soft-bias 0`
 - Shortcut: use `--path-profile 1hop|2hop|3hop` (compatibility aliases `speed|balanced|private`, legacy `fast|privacy` still work) on validate/soak/runbook wrappers; explicit flags still override preset values.
 - Experimental 1-hop benchmark mode (non-strict only): `--path-profile 1hop` (or `speed-1hop`) enables direct-exit mode in `client-test` and `client-vpn-up` when `--beta-profile 0 --prod-profile 0`, and is intentionally blocked in strict/prod flows.
+- Session churn guard env: `CLIENT_SESSION_MIN_REFRESH_SEC` sets a minimum refresh interval to avoid rapid session reopen/close loops during unstable control-plane periods.
+- Direct-exit default behavior: with churn protection on, `1hop` uses that minimum refresh guard by default; diagnostics override with `CLIENT_SESSION_MIN_REFRESH_SEC=0` or `CLIENT_DIRECT_EXIT_ALLOW_SESSION_CHURN=1` when churn reproduction is intentional.
+- Local control API profile operations stay on the same config-v1 contract (`/v1/set_profile` -> `config-v1-set-profile`); start daemon roles with `--config deploy/config/easy_mode_config_v1.conf` to keep runtime profile defaults aligned with launcher defaults.
+- New coverage this round: `integration_easy_node_config_v1.sh` now gates `config-v1-init/show/set-profile` behavior and required server federation default keys, and runs in both `ci_local.sh` and `beta_preflight.sh`.
 - Planned future track: optional micro-relay-based 3-hop mode is tracked in `docs/global-privacy-mesh-track.md` and is not part of the current production validation baseline yet.
 
 Single-machine profile comparison (decision support for default profile):
@@ -316,6 +395,8 @@ Server federation readiness checks (machine A/B host):
 ```
 
 Notes:
+- simple launcher server mode (main menu `2`) now starts `server-session` with federation wait on by default (`SIMPLE_SERVER_FEDERATION_WAIT=1`, `--federation-wait 1`).
+- diagnostics override: set `SIMPLE_SERVER_FEDERATION_WAIT=0` in config, or run expert startup with `server-session --federation-wait 0`.
 - `server-federation-wait` is useful after restarting one operator in a multi-peer setup; it waits for peer-sync and issuer-sync quorum plus healthy/eligible peer availability.
 - `server-federation-status` now surfaces per-peer cooldown retry windows (`retry_after_sec`) and sync-source operator details so operators can see both retry timing and current source diversity.
 - `server-federation-status` can also enforce the same strict policy thresholds in one shot (`--fail-on-not-ready 1`) and produce a machine-readable summary artifact (`--summary-json`) that now includes explicit readiness failure reasons (`readiness.failure_reasons`).

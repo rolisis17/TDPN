@@ -89,6 +89,16 @@ Serialization for MVP:
   - Returns capability token for requester and effective tier.
   - Request includes `token_type` and `pop_pub_key`; response token is bound to that key via `cnf_ed25519`.
   - Client token requests can optionally include `anon_cred` instead of `subject` for pseudonymous tiering.
+  - Client token requests can include `payment_proof` (`reservation_id`, sponsor/session metadata) for sponsor-credit authorization.
+- `POST /v1/sponsor/quote`
+  - Sponsor API endpoint returning current issuer settlement quote for a target subject.
+  - Optional `currency` selector allows quoting in either stable settlement currency or configured native token flow.
+- `POST /v1/sponsor/reserve`
+  - Sponsor API endpoint creating an idempotent sponsor credit reservation for a user/session.
+- `GET /v1/sponsor/status?reservation_id=...`
+  - Sponsor API endpoint returning reservation lifecycle state (`pending|submitted|confirmed|failed`) and consumption timestamps.
+- `POST /v1/sponsor/token`
+  - Sponsor-authenticated wrapper around token issuance; requires valid sponsor payment proof for client access tokens.
 - `POST /v1/provider/relay/upsert`
   - Provider-role token gated relay advertisement endpoint for directory ingestion.
   - Requires `aud=provider` + `token_type=provider_role`.
@@ -126,6 +136,12 @@ Serialization for MVP:
 - `GET /v1/admin/anon-credential/get?credential_id=<id>`
 - `GET /v1/admin/audit`
 - `POST /v1/admin/revoke-token`
+- `POST /v1/admin/slash/evidence`
+  - Issuer admin endpoint for objective, machine-verifiable slash evidence submission into settlement control-plane tracking.
+- `GET /v1/settlement/status`
+  - Issuer admin-protected settlement status endpoint; returns reconciliation/backlog counters and can return degraded `503` status details if reconcile fails.
+- `GET /v1/settlement/status`
+  - Exit settlement status/backlog snapshot endpoint; remains fail-soft and can return stale snapshot metadata when reconciliation fails.
 - `GET /v1/revocations`
 - `GET /v1/metrics` (exit counters)
 
@@ -273,6 +289,7 @@ Directory peer-membership feed shape:
    - Request includes token class (`token_type`) and a PoP public key (`pop_pub_key`).
    - For path-open tokens use `token_type=client_access`.
    - Optional anonymous credential (`anon_cred`) allows pseudonymous Tier-2/3 issuance without exposing a stable user subject string.
+   - Optional sponsor-backed payment proof (`payment_proof`) authorizes prepaid session credits before client token minting.
    - By default, issuer emits a per-token anonymous credential presentation id (`anon_cred_id`) instead of the raw credential id, reducing cross-session linkability at exit operators.
    - Issuer can temporarily cap anonymous credential tier during dispute windows (`/v1/admin/anon-credential/dispute`) and clear caps after adjudication (`/v1/admin/anon-credential/dispute/clear`).
    - Issuer token lifetime is configurable (`ISSUER_TOKEN_TTL_SEC`).
@@ -283,6 +300,7 @@ Directory peer-membership feed shape:
 {
   "msg": "PATH_OPEN",
   "exit_id": "exit-us-01",
+  "middle_relay_id": "relay-mid-01",
   "token": "<signed-token>",
   "token_proof": "base64url-ed25519-signature-over-path-open-fields",
   "token_proof_nonce": "client-generated-unique-nonce",
@@ -295,7 +313,7 @@ Directory peer-membership feed shape:
 }
 ```
 
-5. Entry resolves `exit_id` from directory descriptors (`control_url` + data `endpoint`) and opens forwarding state keyed by flow/session id.
+5. Entry resolves `exit_id` from directory descriptors (`control_url` + data `endpoint`). When present, `middle_relay_id` is validated against signed directory relay descriptors (middle-capable role metadata + operator-collision guards) before forwarding.
 6. Exit validates token claims, token class, and `token_proof` against `cnf_ed25519`.
    - Optional replay guard mode requires unique `token_proof_nonce` per token lifetime.
    - Then exit replies via entry:

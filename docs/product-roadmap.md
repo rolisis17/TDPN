@@ -1,6 +1,10 @@
 # Product Roadmap (VPN First)
 
-This roadmap keeps the focus on a production-grade decentralized VPN before adding staking/payment/blockchain layers.
+This roadmap keeps the focus on a production-grade decentralized VPN while building Cosmos-first payment/governance foundations in parallel.
+
+Canonical source of truth for cross-track sequencing:
+- `docs/full-execution-plan-2026-2027.md` is authoritative.
+- this roadmap and automation recommendations must remain aligned with that file.
 
 ## Decision Log (March 17, 2026)
 
@@ -21,6 +25,12 @@ Next 5 roadmap execution steps:
 5. Run comparative pilot metrics and decide default behavior from results.
 
 Status update (March 24, 2026):
+- simple launcher defaults are now sourced from a versioned config contract (`deploy/config/easy_mode_config_v1.conf`) with command support in `easy_node.sh` (`config-v1-show`, `config-v1-init`, `config-v1-set-profile`).
+- `client-vpn-status` now supports machine-readable output (`--show-json [0|1]`) for desktop/automation integration.
+- daemon role `--local-api` is now available with local control endpoints (`connect`, `disconnect`, `status`, `set_profile`, `get_diagnostics`, `update`) to support Windows desktop app integration.
+- local API profile defaults are now aligned to config v1 through shared profile contract usage: `/v1/set_profile` persists via `config-v1-set-profile`, and daemon runs started with `--config deploy/config/easy_mode_config_v1.conf` read the same profile defaults as launcher flows.
+- `easy_node.sh` now provides a dedicated local API launcher (`local-api-session`) that applies config-v1 defaults for connect behavior and supports explicit override flags for desktop/operator diagnostics.
+- chain-agnostic settlement service interfaces are now scaffolded in `pkg/settlement` with an in-memory implementation for early accounting/reconciliation integration.
 - `speed-1hop` is now available in `client-test` and `client-vpn-up` as an explicit non-strict experimental mode (`--path-profile speed-1hop`), with guardrails that fail closed in strict/beta/prod flows.
 - `profile-compare-local` is now available (`./scripts/easy_node.sh profile-compare-local ...`) to run repeatable single-machine profile comparisons with JSON/markdown artifacts and a policy-based default recommendation (never auto-defaulting `speed-1hop`).
 - `profile-compare-trend` is now available (`./scripts/easy_node.sh profile-compare-trend ...`) to aggregate multiple local comparison summaries into one reliability/latency trend recommendation (still keeping `speed-1hop` non-default).
@@ -41,9 +51,40 @@ Status update (March 24, 2026):
 - easy-node help/forwarding for `manual-validation-status` and `manual-validation-report` now explicitly includes `--profile-compare-signoff-summary-json` and overlay options, with wiring/integration checks to keep that operator contract stable.
 - easy launcher advanced menu now includes a dedicated `single-machine-prod-readiness` path (option 75), so one-host production sweeps are available without manual command assembly.
 - `vpn-rc-standard-path` is now available as one locked VPN RC operator path (`single-machine-prod-readiness` strict defaults + `roadmap-progress-report` refresh), and easy launcher advanced menu now includes that same flow as option 76.
+- easy launcher advanced menu now also includes a dedicated Docker profile matrix signoff path (option 77), which wraps `profile-compare-campaign-signoff` in docker campaign mode for one-command refresh + fail-closed default-profile gating.
+- coverage status for that wrapper path: docker campaign-signoff behavior is integration-tested (`integration_profile_compare_campaign_signoff.sh`), and launcher signoff forwarding remains contract-tested (`integration_easy_mode_launcher_wiring.sh`, `integration_easy_mode_launcher_runtime.sh`).
+- `profile-compare-docker-matrix` is now available in `easy_node.sh` as a docker-first campaign wrapper for `1hop/2hop/3hop` profile comparisons, with one-command summary/report artifact output.
+- wrapper dispatch/forwarding coverage for that command is now integration-tested (`integration_profile_compare_docker_matrix.sh`) in `ci_local` and `beta_preflight`.
+- `vpn-rc-matrix-path` is now the one-command RC matrix chain path for profile-campaign refresh/check handoff, with gate coverage wired into `ci_local` and `beta_preflight` via `integration_vpn_rc_matrix_path.sh`.
+- `vpn-rc-resilience-path` is now the phase-1 resilience chain path in `easy_node.sh`, with gate coverage wired into `ci_local` and `beta_preflight` via `integration_vpn_rc_resilience_path.sh`.
 - profile contract guard is now wired in local gates (`integration_path_profile_contract.sh` in `ci_local` / `beta_preflight`) to keep public profile UX/API naming fixed at `1hop|2hop|3hop` with compatibility aliases `speed|balanced|private` (`speed-1hop` explicit experimental alias on non-strict `client-test`/`client-vpn-up`), while retaining `fast|privacy` as legacy compatibility aliases.
 - launcher profile/expert split is now enforced as a contract: simple client flows stay preset-driven, while explicit policy overrides are isolated to advanced option 34 (`Client VPN up (real mode, expert/manual)`), with wiring/runtime coverage to prevent regressions.
+- simple launcher prompts are now further reduced: main-menu client/server no longer ask inline “expert override” questions, and provider simple mode auto-derives authority directory/issuer URLs from configured peer hosts; advanced overrides remain in Other options.
+- simple launcher server path now waits for federation readiness by default (`SIMPLE_SERVER_FEDERATION_WAIT=1` -> `server-session --federation-wait 1`), with diagnostics override via config `SIMPLE_SERVER_FEDERATION_WAIT=0` or expert `server-session --federation-wait 0`.
+- `client-vpn-preflight` is now profile-aware for real routing checks: it accepts `--path-profile` directly and auto-enables middle-relay diversity checks for `3hop` (`--middle-relay-check`, `--middle-relay-min-operators`, `--middle-relay-require-distinct`) with staged-lab override knobs.
+- launcher runtime wiring now forwards `--path-profile` into preflight paths (simple real-VPN flow and advanced option 31), with integration coverage to keep that contract stable.
+- simple-mode prompt budget is now contract-tested in integration gates: launcher wiring/runtime checks enforce the `<=6` prompt budget for client/server simple flows.
+- runtime `3hop` behavior is now strict-by-default in client selection: middle relay is required unless explicitly overridden with `CLIENT_REQUIRE_MIDDLE_RELAY=0`, and unit/integration coverage now exercises fail/override/pass middle-relay scenarios.
+- path-open contract now carries `middle_relay_id` end-to-end (`client -> entry -> exit`) and includes it in token-proof signing/verification; entry now rejects invalid middle-hop requests early (`middle-relay-equals-exit`, `unknown-middle-relay`, `middle-relay-role-invalid`, operator-collision reasons) with added unit coverage.
+- session lifecycle defaults are now explicit and stable in real VPN flows: `client-vpn-up` exports `CLIENT_SESSION_REUSE=1` and `CLIENT_SESSION_REFRESH_LEAD_SEC=20` by default (overrideable), and client runtime defaults to reuse-on when `CLIENT_SESSION_REUSE` is unset while preserving explicit disable (`0`) semantics.
+- client session churn guard now includes `CLIENT_SESSION_MIN_REFRESH_SEC` to enforce a minimum refresh interval floor during repeated control-plane retries.
+- in `1hop` direct-exit with churn protection on (default), the client applies that minimum refresh floor by default to prevent rapid reopen/close loops; diagnostics override is `CLIENT_SESSION_MIN_REFRESH_SEC=0` or (when churn behavior is needed) `CLIENT_DIRECT_EXIT_ALLOW_SESSION_CHURN=1`.
 - `three-machine-docker-readiness` is now available (`./scripts/easy_node.sh three-machine-docker-readiness ...`) to spin up two independent dockerized operator stacks on one host and run machine-C style validate/soak control-plane rehearsal checks while real multi-host signoff stays pending.
+- `three-machine-docker-readiness` now also supports an optional peer failover rehearsal (`--run-peer-failover 1`) that temporarily stops and restarts one stack directory and verifies sync-status failure/recovery plus relay serving continuity from the surviving stack.
+- `three-machine-docker-profile-matrix` is now the phase-1 resilience profile-matrix rehearsal path (`./scripts/easy_node.sh three-machine-docker-profile-matrix ...`) for one-command `1hop/2hop/3hop` docker comparison runs before real multi-host signoff.
+- coverage for that profile-matrix flow is now wired into `ci_local` and `beta_preflight` through `integration_three_machine_docker_profile_matrix.sh`.
+- `three-machine-docker-profile-matrix-record` is now available (`./scripts/easy_node.sh three-machine-docker-profile-matrix-record ...`) to wrap that phase-1 resilience matrix rehearsal in one recorded manual-validation receipt with durable summary/log artifacts.
+- coverage for that matrix-record flow is now wired into `ci_local` and `beta_preflight` through `integration_three_machine_docker_profile_matrix_record.sh`.
+- `ci_phase0.sh` is now the fast Phase-0 product-surface gate runner for launcher wiring/runtime, simple prompt-budget contract (`<=6` prompts), config-v1 contract, and local control API contract; use it for quick contract checks before full `ci_local`/preflight runs.
+- `ci_phase1_resilience.sh` is now the focused Phase-1 resilience gate runner for profile-matrix and RC resilience wrappers (`three_machine_docker_profile_matrix`, `profile_compare_docker_matrix`, `three_machine_docker_profile_matrix_record`, `vpn_rc_matrix_path`, `vpn_rc_resilience_path`), with one machine-readable summary artifact at `.easy-node-logs/ci_phase1_resilience_<stamp>/ci_phase1_resilience_summary.json`.
+- `integration_session_churn_guard.sh` now adds deterministic client session churn guard coverage (default direct-exit churn suppression vs explicit churn override) so session lifecycle defaults stay stable while retaining an intentional diagnostics override path.
+- `single-machine-prod-readiness` now defaults Docker rehearsal to include peer-failover (`--three-machine-docker-readiness-run-peer-failover 1`) so churn recovery is exercised in the standard readiness path (override with `0` when needed for diagnostics).
+- `vpn-rc-standard-path` now inherits that same peer-failover default through `single-machine-prod-readiness`; diagnostics can disable failover rehearsal in direct one-host runs with `--three-machine-docker-readiness-run-peer-failover 0` (or low-level `three-machine-docker-readiness --run-peer-failover 0`).
+- config-v1 coverage now includes a dedicated integration gate (`integration_easy_node_config_v1.sh`) in `ci_local` and `beta_preflight`, validating `config-v1-init`, `config-v1-show`, `config-v1-set-profile`, and server federation-wait default keys.
+- local API coverage now includes dedicated integration gates in `ci_local` and `beta_preflight`:
+  - `integration_local_api_config_defaults.sh` validates config-v1 driven local API connect defaults end-to-end.
+  - `integration_local_control_api_contract.sh` validates local API endpoint-to-command forwarding contracts.
+- desktop scaffold coverage now includes `integration_desktop_scaffold_contract.sh` in `ci_local` and `beta_preflight`, validating file/JSON contract and JS↔Rust `control_*` command alignment.
 - `three-machine-docker-readiness-record` is now available (`./scripts/easy_node.sh three-machine-docker-readiness-record ...`) to wrap that rehearsal in one recorded manual-validation receipt and keep a durable summary/log artifact.
 - `real-wg-privileged-matrix-record` is now available (`sudo ./scripts/easy_node.sh real-wg-privileged-matrix-record ...`) to wrap Linux root real-WG matrix validation into one recorded manual-validation receipt, surfaced as a non-blocking optional gate in the readiness handoff.
 - planning track docs for a future "Global Privacy Mesh" architecture are now added:
@@ -131,27 +172,34 @@ Exit criteria:
 - same connect/disconnect/status UX contract across Linux/Windows/macOS
 - platform-specific diagnostics and support playbooks are in place
 
-## Deferred Track: Staking/Payment/Blockchain
+## Parallel Track: Cosmos L1 Settlement and Governance Foundation
 
-Decision: defer until VPN production flow is stable.
+Decision:
+- build Cosmos-first chain compatibility now (no sidecar chain pivot), while VPN production hardening continues.
+- keep VPN dataplane independent from chain liveness and finality at all times.
 
-When to start:
-- Linux production metrics are stable
-- abuse/reputation governance is operating as expected
-- protocol interfaces needed by settlement layer are clear and stable
+Current implementation posture:
+- app-side settlement bridge remains `pkg/settlement` with graceful deferred writes.
+- chain adapter mode is optional and fail-soft (`memory` default, `cosmos` optional).
+- sponsor flow is staged through issuer sponsor APIs (`/v1/sponsor/quote|reserve|token|status`) plus payment-proof token issuance.
+- `tdpnd` runtime now supports `--state-dir` to switch chain module keepers from in-memory defaults to file-backed stores rooted at one state directory.
+- settlement bridge now exposes module query `GET` endpoints (list + by-id) alongside existing `POST` write endpoints.
+- Cosmos CI/local block now includes `scripts/integration_cosmos_tdpnd_state_dir_persistence.sh` to verify state-dir wiring and persistence across reopen.
 
-Bootstrap policy (when this track starts):
-- use a small-network manual governance phase first (allow/deny validator candidacy, emergency ban, manual adjudication with audit trail)
-- keep validator role server-side only; clients remain non-validating participants
-- keep VPN dataplane independent from blockchain liveness (grace mode + deferred settlement path)
-- transition to automated validator selection only after operator/diversity/safety thresholds are met
+Governance posture (hybrid bootstrap):
+- objective machine-verifiable events can be enforced on-chain.
+- subjective abuse and disputed cases stay policy-governed with human/multisig controls during bootstrap.
+- validator role remains server-side only and resource-isolated from VPN forwarding.
 
-Planned design guide:
-- `docs/blockchain-bootstrap-validator-plan.md` (manual bootstrap model, validator eligibility formula skeleton, epoch selection policy, and graduation criteria)
+Design guides:
+- `docs/full-execution-plan-2026-2027.md` (canonical sequencing)
+- `docs/blockchain-bootstrap-validator-plan.md` (validator bootstrap and graduation criteria)
+- `docs/cosmos-settlement-runtime.md` (issuer/exit runtime wiring, reconcile loops, and Cosmos adapter env contract)
+- `blockchain/tdpn-chain/` (Cosmos module workspace scaffold)
 
-L1 decision gate:
-- only start own-L1 build when the explicit 12-week go/no-go metrics gate in `docs/blockchain-bootstrap-validator-plan.md` is fully green
-- until then, keep blockchain functions in chain-assisted mode and keep VPN dataplane independent
+L1 gate and safety:
+- continue to use the explicit 12-week go/no-go metrics in `docs/blockchain-bootstrap-validator-plan.md`.
+- if any gate is missed, keep chain control-plane in assistive mode and preserve VPN grace semantics.
 
 ## True 3-Machine Validation Reminder (Before Wider Beta)
 
