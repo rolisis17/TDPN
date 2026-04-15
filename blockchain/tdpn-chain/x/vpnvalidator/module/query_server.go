@@ -48,6 +48,17 @@ type ListValidatorStatusRecordsResponse struct {
 	Records []types.ValidatorStatusRecord
 }
 
+// PreviewEpochSelectionRequest requests deterministic validator-set preview for an epoch.
+type PreviewEpochSelectionRequest struct {
+	Policy     types.EpochSelectionPolicy
+	Candidates []types.EpochValidatorCandidate
+}
+
+// PreviewEpochSelectionResponse contains deterministic stable/rotating seat selection preview.
+type PreviewEpochSelectionResponse struct {
+	Result types.EpochSelectionResult
+}
+
 // QueryServer exposes a lightweight Cosmos-style query surface for vpnvalidator.
 type QueryServer struct {
 	keeper *keeper.Keeper
@@ -98,5 +109,20 @@ func (s QueryServer) ListValidatorStatusRecords(_ ListValidatorStatusRecordsRequ
 
 	return ListValidatorStatusRecordsResponse{
 		Records: s.keeper.ListStatusRecords(),
+	}, nil
+}
+
+func (s QueryServer) PreviewEpochSelection(req PreviewEpochSelectionRequest) (PreviewEpochSelectionResponse, error) {
+	if s.keeper == nil {
+		return PreviewEpochSelectionResponse{}, ErrNilKeeper
+	}
+
+	result, err := s.keeper.SelectEpochValidators(req.Policy, req.Candidates)
+	if err != nil {
+		return PreviewEpochSelectionResponse{}, err
+	}
+
+	return PreviewEpochSelectionResponse{
+		Result: result,
 	}, nil
 }

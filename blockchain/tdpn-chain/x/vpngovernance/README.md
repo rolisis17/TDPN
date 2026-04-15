@@ -12,4 +12,5 @@ Design notes:
 - Keeper supports pluggable storage adapters (in-memory, file JSON, KV).
 - Create operations are idempotent by record ID and reject conflicting replays.
 - Audit-action writes are append-only by `action_id` with idempotent replay and conflict-on-divergence semantics.
+- gRPC/proto surfaces include `RecordAuditAction` plus query paths `GovernanceAuditAction` and `ListGovernanceAuditActions`.
 - Query surfaces provide deterministic sorted list output.

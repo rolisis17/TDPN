@@ -24,6 +24,11 @@ func TestQueryServerNilKeeper(t *testing.T) {
 		t.Fatalf("expected ErrNilKeeper for decision query, got %v", decisionErr)
 	}
 
+	_, auditErr := server.GetAuditAction(GetAuditActionRequest{ActionID: "audit-nil"})
+	if !errors.Is(auditErr, ErrNilKeeper) {
+		t.Fatalf("expected ErrNilKeeper for audit action query, got %v", auditErr)
+	}
+
 	_, listPoliciesErr := server.ListPolicies(ListPoliciesRequest{})
 	if !errors.Is(listPoliciesErr, ErrNilKeeper) {
 		t.Fatalf("expected ErrNilKeeper for list policies query, got %v", listPoliciesErr)
@@ -32,6 +37,11 @@ func TestQueryServerNilKeeper(t *testing.T) {
 	_, listDecisionsErr := server.ListDecisions(ListDecisionsRequest{})
 	if !errors.Is(listDecisionsErr, ErrNilKeeper) {
 		t.Fatalf("expected ErrNilKeeper for list decisions query, got %v", listDecisionsErr)
+	}
+
+	_, listAuditErr := server.ListAuditActions(ListAuditActionsRequest{})
+	if !errors.Is(listAuditErr, ErrNilKeeper) {
+		t.Fatalf("expected ErrNilKeeper for list audit actions query, got %v", listAuditErr)
 	}
 }
 
@@ -50,6 +60,11 @@ func TestQueryServerNotFound(t *testing.T) {
 	if !errors.Is(decisionErr, errDecisionNotFound) {
 		t.Fatalf("expected errDecisionNotFound, got %v", decisionErr)
 	}
+
+	_, auditErr := server.GetAuditAction(GetAuditActionRequest{ActionID: "audit-missing"})
+	if !errors.Is(auditErr, errAuditActionNotFound) {
+		t.Fatalf("expected errAuditActionNotFound, got %v", auditErr)
+	}
 }
 
 func TestQueryServerFound(t *testing.T) {
@@ -58,8 +73,12 @@ func TestQueryServerFound(t *testing.T) {
 	k := keeper.NewKeeper()
 	expectedPolicy := types.GovernancePolicy{PolicyID: "policy-1", Title: "Policy One", Version: 1, ActivatedAtUnix: 4102444800}
 	expectedDecision := types.GovernanceDecision{DecisionID: "decision-1", PolicyID: "policy-1", ProposalID: "proposal-1", Outcome: types.DecisionOutcomeApprove, Decider: "council", DecidedAtUnix: 4102444800}
+	expectedAudit := types.GovernanceAuditAction{ActionID: "audit-1", Action: "admin_disable_validator", Actor: "admin", Reason: "reason", EvidencePointer: "ipfs://audit-1", TimestampUnix: 4102444800}
 	k.UpsertPolicy(expectedPolicy)
 	k.UpsertDecision(expectedDecision)
+	if _, err := k.RecordAuditAction(expectedAudit); err != nil {
+		t.Fatalf("expected audit action seed success, got %v", err)
+	}
 
 	server := NewQueryServer(&k)
 
@@ -78,6 +97,14 @@ func TestQueryServerFound(t *testing.T) {
 	if decisionResp.Decision.DecisionID != expectedDecision.DecisionID {
 		t.Fatalf("unexpected decision id: %q", decisionResp.Decision.DecisionID)
 	}
+
+	auditResp, auditErr := server.GetAuditAction(GetAuditActionRequest{ActionID: "audit-1"})
+	if auditErr != nil {
+		t.Fatalf("expected audit query success, got %v", auditErr)
+	}
+	if auditResp.Action.ActionID != expectedAudit.ActionID {
+		t.Fatalf("unexpected audit action id: %q", auditResp.Action.ActionID)
+	}
 }
 
 func TestQueryServerListNonEmpty(t *testing.T) {
@@ -91,6 +118,9 @@ func TestQueryServerListNonEmpty(t *testing.T) {
 	k.UpsertDecision(types.GovernanceDecision{DecisionID: "decision-3", PolicyID: "policy-1", ProposalID: "proposal-3", Outcome: types.DecisionOutcomeApprove, Decider: "c3", DecidedAtUnix: 3})
 	k.UpsertDecision(types.GovernanceDecision{DecisionID: "decision-1", PolicyID: "policy-1", ProposalID: "proposal-1", Outcome: types.DecisionOutcomeReject, Decider: "c1", DecidedAtUnix: 1})
 	k.UpsertDecision(types.GovernanceDecision{DecisionID: "decision-2", PolicyID: "policy-1", ProposalID: "proposal-2", Outcome: types.DecisionOutcomeAbstain, Decider: "c2", DecidedAtUnix: 2})
+	_, _ = k.RecordAuditAction(types.GovernanceAuditAction{ActionID: "audit-3", Action: "admin_allow_validator", Actor: "a3", Reason: "r3", EvidencePointer: "ipfs://a3", TimestampUnix: 3})
+	_, _ = k.RecordAuditAction(types.GovernanceAuditAction{ActionID: "audit-1", Action: "admin_disable_validator", Actor: "a1", Reason: "r1", EvidencePointer: "ipfs://a1", TimestampUnix: 1})
+	_, _ = k.RecordAuditAction(types.GovernanceAuditAction{ActionID: "audit-2", Action: "admin_disable_validator", Actor: "a2", Reason: "r2", EvidencePointer: "ipfs://a2", TimestampUnix: 2})
 
 	server := NewQueryServer(&k)
 
@@ -114,5 +144,16 @@ func TestQueryServerListNonEmpty(t *testing.T) {
 	}
 	if decisionsResp.Decisions[0].DecisionID != "decision-1" || decisionsResp.Decisions[1].DecisionID != "decision-2" || decisionsResp.Decisions[2].DecisionID != "decision-3" {
 		t.Fatalf("expected sorted decision ids [decision-1 decision-2 decision-3], got [%s %s %s]", decisionsResp.Decisions[0].DecisionID, decisionsResp.Decisions[1].DecisionID, decisionsResp.Decisions[2].DecisionID)
+	}
+
+	auditResp, auditErr := server.ListAuditActions(ListAuditActionsRequest{})
+	if auditErr != nil {
+		t.Fatalf("expected list audit actions success, got %v", auditErr)
+	}
+	if len(auditResp.Actions) != 3 {
+		t.Fatalf("expected 3 audit actions, got %d", len(auditResp.Actions))
+	}
+	if auditResp.Actions[0].ActionID != "audit-1" || auditResp.Actions[1].ActionID != "audit-2" || auditResp.Actions[2].ActionID != "audit-3" {
+		t.Fatalf("expected sorted audit action ids [audit-1 audit-2 audit-3], got [%s %s %s]", auditResp.Actions[0].ActionID, auditResp.Actions[1].ActionID, auditResp.Actions[2].ActionID)
 	}
 }

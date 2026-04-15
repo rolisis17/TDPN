@@ -3,6 +3,7 @@ package module
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	validatorpb "github.com/tdpn/tdpn-chain/proto/gen/go/tdpn/vpnvalidator/v1"
 	chaintypes "github.com/tdpn/tdpn-chain/types"
@@ -12,6 +13,11 @@ import (
 
 var _ validatorpb.MsgServer = (*GRPCMsgServerAdapter)(nil)
 var _ validatorpb.QueryServer = (*GRPCQueryServerAdapter)(nil)
+
+const (
+	maxInt = int64(^uint(0) >> 1)
+	minInt = -maxInt - 1
+)
 
 // GRPCMsgServerAdapter adapts module MsgServer to protobuf gRPC MsgServer.
 type GRPCMsgServerAdapter struct {
@@ -127,6 +133,25 @@ func (a *GRPCQueryServerAdapter) ListValidatorStatusRecords(_ context.Context, _
 	}, nil
 }
 
+func (a *GRPCQueryServerAdapter) PreviewEpochSelection(_ context.Context, req *validatorpb.QueryPreviewEpochSelectionRequest) (*validatorpb.QueryPreviewEpochSelectionResponse, error) {
+	policy, err := fromProtoEpochSelectionPolicy(req.GetPolicy())
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := a.server.PreviewEpochSelection(PreviewEpochSelectionRequest{
+		Policy:     policy,
+		Candidates: fromProtoEpochValidatorCandidates(req.GetCandidates()),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &validatorpb.QueryPreviewEpochSelectionResponse{
+		Result: toProtoEpochSelectionResult(resp.Result),
+	}, nil
+}
+
 func fromProtoEligibility(pb *validatorpb.ValidatorEligibility) validatortypes.ValidatorEligibility {
 	if pb == nil {
 		return validatortypes.ValidatorEligibility{}
@@ -181,6 +206,126 @@ func toProtoStatusRecord(record validatortypes.ValidatorStatusRecord) *validator
 		RecordedAtUnix:   record.RecordedAtUnix,
 		Status:           statusToProto(record.Status),
 	}
+}
+
+func fromProtoEpochSelectionPolicy(pb *validatorpb.EpochSelectionPolicy) (validatortypes.EpochSelectionPolicy, error) {
+	if pb == nil {
+		return validatortypes.EpochSelectionPolicy{}, nil
+	}
+
+	stableSeatCount, err := protoInt64ToInt(pb.GetStableSeatCount(), "stable_seat_count")
+	if err != nil {
+		return validatortypes.EpochSelectionPolicy{}, err
+	}
+	rotatingSeatCount, err := protoInt64ToInt(pb.GetRotatingSeatCount(), "rotating_seat_count")
+	if err != nil {
+		return validatortypes.EpochSelectionPolicy{}, err
+	}
+	maxSeatsPerOperator, err := protoInt64ToInt(pb.GetMaxSeatsPerOperator(), "max_seats_per_operator")
+	if err != nil {
+		return validatortypes.EpochSelectionPolicy{}, err
+	}
+	maxSeatsPerASN, err := protoInt64ToInt(pb.GetMaxSeatsPerAsn(), "max_seats_per_asn")
+	if err != nil {
+		return validatortypes.EpochSelectionPolicy{}, err
+	}
+	maxSeatsPerRegion, err := protoInt64ToInt(pb.GetMaxSeatsPerRegion(), "max_seats_per_region")
+	if err != nil {
+		return validatortypes.EpochSelectionPolicy{}, err
+	}
+
+	return validatortypes.EpochSelectionPolicy{
+		Epoch:               pb.GetEpoch(),
+		StableSeatCount:     stableSeatCount,
+		RotatingSeatCount:   rotatingSeatCount,
+		MinStake:            pb.GetMinStake(),
+		MinStakeAgeEpochs:   pb.GetMinStakeAgeEpochs(),
+		MinHealthScore:      pb.GetMinHealthScore(),
+		MinResourceHeadroom: pb.GetMinResourceHeadroom(),
+		WarmupEpochs:        pb.GetWarmupEpochs(),
+		CooldownEpochs:      pb.GetCooldownEpochs(),
+		MaxSeatsPerOperator: maxSeatsPerOperator,
+		MaxSeatsPerASN:      maxSeatsPerASN,
+		MaxSeatsPerRegion:   maxSeatsPerRegion,
+	}, nil
+}
+
+func fromProtoEpochValidatorCandidates(candidates []*validatorpb.EpochValidatorCandidate) []validatortypes.EpochValidatorCandidate {
+	if len(candidates) == 0 {
+		return nil
+	}
+
+	converted := make([]validatortypes.EpochValidatorCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		converted = append(converted, fromProtoEpochValidatorCandidate(candidate))
+	}
+	return converted
+}
+
+func fromProtoEpochValidatorCandidate(pb *validatorpb.EpochValidatorCandidate) validatortypes.EpochValidatorCandidate {
+	if pb == nil {
+		return validatortypes.EpochValidatorCandidate{}
+	}
+
+	return validatortypes.EpochValidatorCandidate{
+		ValidatorID:                 pb.GetValidatorId(),
+		OperatorID:                  pb.GetOperatorId(),
+		ASN:                         pb.GetAsn(),
+		Region:                      pb.GetRegion(),
+		Stake:                       pb.GetStake(),
+		StakeAgeEpochs:              pb.GetStakeAgeEpochs(),
+		HealthScore:                 pb.GetHealthScore(),
+		ResourceHeadroom:            pb.GetResourceHeadroom(),
+		HasActiveSanction:           pb.GetHasActiveSanction(),
+		HasUnresolvedCriticalIssues: pb.GetHasUnresolvedCriticalIssues(),
+		ConsecutiveEligibleEpochs:   pb.GetConsecutiveEligibleEpochs(),
+		LastRemovedEpoch:            pb.GetLastRemovedEpoch(),
+		Score:                       pb.GetScore(),
+		StableSeatPreferred:         pb.GetStableSeatPreferred(),
+	}
+}
+
+func toProtoEpochSelectionResult(result validatortypes.EpochSelectionResult) *validatorpb.EpochSelectionResult {
+	stable := make([]*validatorpb.EpochValidatorCandidate, 0, len(result.StableSeats))
+	for _, candidate := range result.StableSeats {
+		stable = append(stable, toProtoEpochValidatorCandidate(candidate))
+	}
+
+	rotating := make([]*validatorpb.EpochValidatorCandidate, 0, len(result.RotatingSeats))
+	for _, candidate := range result.RotatingSeats {
+		rotating = append(rotating, toProtoEpochValidatorCandidate(candidate))
+	}
+
+	return &validatorpb.EpochSelectionResult{
+		StableSeats:   stable,
+		RotatingSeats: rotating,
+	}
+}
+
+func toProtoEpochValidatorCandidate(candidate validatortypes.EpochValidatorCandidate) *validatorpb.EpochValidatorCandidate {
+	return &validatorpb.EpochValidatorCandidate{
+		ValidatorId:                 candidate.ValidatorID,
+		OperatorId:                  candidate.OperatorID,
+		Asn:                         candidate.ASN,
+		Region:                      candidate.Region,
+		Stake:                       candidate.Stake,
+		StakeAgeEpochs:              candidate.StakeAgeEpochs,
+		HealthScore:                 candidate.HealthScore,
+		ResourceHeadroom:            candidate.ResourceHeadroom,
+		HasActiveSanction:           candidate.HasActiveSanction,
+		HasUnresolvedCriticalIssues: candidate.HasUnresolvedCriticalIssues,
+		ConsecutiveEligibleEpochs:   candidate.ConsecutiveEligibleEpochs,
+		LastRemovedEpoch:            candidate.LastRemovedEpoch,
+		Score:                       candidate.Score,
+		StableSeatPreferred:         candidate.StableSeatPreferred,
+	}
+}
+
+func protoInt64ToInt(value int64, fieldName string) (int, error) {
+	if value > maxInt || value < minInt {
+		return 0, fmt.Errorf("vpnvalidator: %s=%d out of int range", fieldName, value)
+	}
+	return int(value), nil
 }
 
 func statusFromProto(status validatorpb.ReconciliationStatus) chaintypes.ReconciliationStatus {

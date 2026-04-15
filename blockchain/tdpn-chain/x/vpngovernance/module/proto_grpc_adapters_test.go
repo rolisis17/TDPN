@@ -77,6 +77,71 @@ func TestProtoMsgServerAdapterRecordDecision(t *testing.T) {
 	}
 }
 
+func TestProtoMsgServerAdapterRecordAuditAction(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	adapter := NewProtoMsgServerAdapter(&k)
+
+	resp, err := adapter.RecordAuditAction(context.Background(), &pb.MsgRecordAuditActionRequest{Action: &pb.GovernanceAuditAction{
+		ActionId:        "audit-1",
+		Action:          "admin_disable_validator",
+		Actor:           "admin-1",
+		Reason:          "objective evidence verified",
+		EvidencePointer: "ipfs://audit-1",
+		TimestampUnix:   4102444800,
+	}})
+	if err != nil {
+		t.Fatalf("expected record audit action success, got %v", err)
+	}
+	if resp.GetAction() == nil {
+		t.Fatal("expected audit action in response")
+	}
+	if resp.GetAction().GetActionId() != "audit-1" {
+		t.Fatalf("expected action_id audit-1, got %q", resp.GetAction().GetActionId())
+	}
+	if resp.GetConflict() {
+		t.Fatal("expected conflict=false for successful record audit action")
+	}
+}
+
+func TestProtoMsgServerAdapterRecordAuditActionConflict(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	adapter := NewProtoMsgServerAdapter(&k)
+
+	_, err := adapter.RecordAuditAction(context.Background(), &pb.MsgRecordAuditActionRequest{Action: &pb.GovernanceAuditAction{
+		ActionId:        "audit-conflict-1",
+		Action:          "admin_disable_validator",
+		Actor:           "admin-1",
+		Reason:          "reason-1",
+		EvidencePointer: "ipfs://audit-conflict-1",
+		TimestampUnix:   4102444800,
+	}})
+	if err != nil {
+		t.Fatalf("seed record audit action failed: %v", err)
+	}
+
+	resp, err := adapter.RecordAuditAction(context.Background(), &pb.MsgRecordAuditActionRequest{Action: &pb.GovernanceAuditAction{
+		ActionId:        "audit-conflict-1",
+		Action:          "admin_disable_validator",
+		Actor:           "admin-1",
+		Reason:          "reason-2",
+		EvidencePointer: "ipfs://audit-conflict-1",
+		TimestampUnix:   4102444800,
+	}})
+	if err == nil {
+		t.Fatal("expected audit action conflict error")
+	}
+	if !errors.Is(err, ErrAuditActionConflict) {
+		t.Fatalf("expected ErrAuditActionConflict, got %v", err)
+	}
+	if !resp.GetConflict() {
+		t.Fatal("expected conflict=true on conflicting audit action")
+	}
+}
+
 func TestProtoQueryServerAdapterNotFoundReturnsFoundFalse(t *testing.T) {
 	t.Parallel()
 
@@ -98,6 +163,14 @@ func TestProtoQueryServerAdapterNotFoundReturnsFoundFalse(t *testing.T) {
 	if decisionResp.GetFound() {
 		t.Fatal("expected found=false for missing decision")
 	}
+
+	auditResp, err := adapter.GovernanceAuditAction(context.Background(), &pb.QueryGovernanceAuditActionRequest{ActionId: "missing-audit"})
+	if err != nil {
+		t.Fatalf("expected nil error for missing audit lookup, got %v", err)
+	}
+	if auditResp.GetFound() {
+		t.Fatal("expected found=false for missing audit action")
+	}
 }
 
 func TestProtoQueryServerAdapterGetAndList(t *testing.T) {
@@ -106,6 +179,16 @@ func TestProtoQueryServerAdapterGetAndList(t *testing.T) {
 	k := keeper.NewKeeper()
 	k.UpsertPolicy(types.GovernancePolicy{PolicyID: "policy-10", Title: "Policy Ten", Version: 10, ActivatedAtUnix: 4102444800, Status: chaintypes.ReconciliationPending})
 	k.UpsertDecision(types.GovernanceDecision{DecisionID: "decision-10", PolicyID: "policy-10", ProposalID: "proposal-10", Outcome: types.DecisionOutcomeReject, Decider: "council-10", DecidedAtUnix: 4102444800, Status: chaintypes.ReconciliationSubmitted})
+	if _, err := k.RecordAuditAction(types.GovernanceAuditAction{
+		ActionID:        "audit-10",
+		Action:          "admin_allow_validator",
+		Actor:           "admin-10",
+		Reason:          "reason-10",
+		EvidencePointer: "ipfs://audit-10",
+		TimestampUnix:   4102444800,
+	}); err != nil {
+		t.Fatalf("expected seed audit action success, got %v", err)
+	}
 
 	adapter := NewProtoQueryServerAdapter(&k)
 
@@ -134,6 +217,17 @@ func TestProtoQueryServerAdapterGetAndList(t *testing.T) {
 		t.Fatalf("expected submitted status, got %v", decisionResp.GetDecision().GetStatus())
 	}
 
+	auditResp, err := adapter.GovernanceAuditAction(context.Background(), &pb.QueryGovernanceAuditActionRequest{ActionId: "audit-10"})
+	if err != nil {
+		t.Fatalf("expected audit lookup success, got %v", err)
+	}
+	if !auditResp.GetFound() {
+		t.Fatal("expected found=true for audit lookup")
+	}
+	if auditResp.GetAction().GetActionId() != "audit-10" {
+		t.Fatalf("expected action_id audit-10, got %q", auditResp.GetAction().GetActionId())
+	}
+
 	listPoliciesResp, err := adapter.ListGovernancePolicies(context.Background(), &pb.QueryListGovernancePoliciesRequest{})
 	if err != nil {
 		t.Fatalf("expected list policies success, got %v", err)
@@ -148,6 +242,14 @@ func TestProtoQueryServerAdapterGetAndList(t *testing.T) {
 	}
 	if len(listDecisionsResp.GetDecisions()) != 1 {
 		t.Fatalf("expected 1 decision, got %d", len(listDecisionsResp.GetDecisions()))
+	}
+
+	listAuditResp, err := adapter.ListGovernanceAuditActions(context.Background(), &pb.QueryListGovernanceAuditActionsRequest{})
+	if err != nil {
+		t.Fatalf("expected list audit actions success, got %v", err)
+	}
+	if len(listAuditResp.GetActions()) != 1 {
+		t.Fatalf("expected 1 audit action, got %d", len(listAuditResp.GetActions()))
 	}
 }
 
@@ -186,6 +288,11 @@ func TestProtoAdaptersNilRequestsAreFailSafe(t *testing.T) {
 		t.Fatalf("expected ErrInvalidDecision for nil record request, got %v", recordErr)
 	}
 
+	_, recordAuditErr := msgAdapter.RecordAuditAction(context.Background(), nil)
+	if !errors.Is(recordAuditErr, ErrInvalidAuditAction) {
+		t.Fatalf("expected ErrInvalidAuditAction for nil audit request, got %v", recordAuditErr)
+	}
+
 	policyResp, policyErr := queryAdapter.GovernancePolicy(context.Background(), nil)
 	if policyErr != nil {
 		t.Fatalf("expected nil error for nil policy query request, got %v", policyErr)
@@ -206,5 +313,16 @@ func TestProtoAdaptersNilRequestsAreFailSafe(t *testing.T) {
 	}
 	if decisionResp.GetDecision() != nil {
 		t.Fatal("expected nil decision when found=false")
+	}
+
+	auditResp, auditErr := queryAdapter.GovernanceAuditAction(context.Background(), nil)
+	if auditErr != nil {
+		t.Fatalf("expected nil error for nil audit query request, got %v", auditErr)
+	}
+	if auditResp.GetFound() {
+		t.Fatal("expected found=false for nil audit query request")
+	}
+	if auditResp.GetAction() != nil {
+		t.Fatal("expected nil audit action when found=false")
 	}
 }

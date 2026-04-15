@@ -229,6 +229,110 @@ func (x *MsgRecordDecisionResponse) GetConflict() bool {
 	return false
 }
 
+type MsgRecordAuditActionRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Action        *GovernanceAuditAction `protobuf:"bytes,1,opt,name=action,proto3" json:"action,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MsgRecordAuditActionRequest) Reset() {
+	*x = MsgRecordAuditActionRequest{}
+	mi := &file_tdpn_vpngovernance_v1_tx_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MsgRecordAuditActionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MsgRecordAuditActionRequest) ProtoMessage() {}
+
+func (x *MsgRecordAuditActionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_tdpn_vpngovernance_v1_tx_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MsgRecordAuditActionRequest.ProtoReflect.Descriptor instead.
+func (*MsgRecordAuditActionRequest) Descriptor() ([]byte, []int) {
+	return file_tdpn_vpngovernance_v1_tx_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *MsgRecordAuditActionRequest) GetAction() *GovernanceAuditAction {
+	if x != nil {
+		return x.Action
+	}
+	return nil
+}
+
+type MsgRecordAuditActionResponse struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Action           *GovernanceAuditAction `protobuf:"bytes,1,opt,name=action,proto3" json:"action,omitempty"`
+	IdempotentReplay bool                   `protobuf:"varint,2,opt,name=idempotent_replay,json=idempotentReplay,proto3" json:"idempotent_replay,omitempty"`
+	Conflict         bool                   `protobuf:"varint,3,opt,name=conflict,proto3" json:"conflict,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *MsgRecordAuditActionResponse) Reset() {
+	*x = MsgRecordAuditActionResponse{}
+	mi := &file_tdpn_vpngovernance_v1_tx_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MsgRecordAuditActionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MsgRecordAuditActionResponse) ProtoMessage() {}
+
+func (x *MsgRecordAuditActionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_tdpn_vpngovernance_v1_tx_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MsgRecordAuditActionResponse.ProtoReflect.Descriptor instead.
+func (*MsgRecordAuditActionResponse) Descriptor() ([]byte, []int) {
+	return file_tdpn_vpngovernance_v1_tx_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *MsgRecordAuditActionResponse) GetAction() *GovernanceAuditAction {
+	if x != nil {
+		return x.Action
+	}
+	return nil
+}
+
+func (x *MsgRecordAuditActionResponse) GetIdempotentReplay() bool {
+	if x != nil {
+		return x.IdempotentReplay
+	}
+	return false
+}
+
+func (x *MsgRecordAuditActionResponse) GetConflict() bool {
+	if x != nil {
+		return x.Conflict
+	}
+	return false
+}
+
 var File_tdpn_vpngovernance_v1_tx_proto protoreflect.FileDescriptor
 
 const file_tdpn_vpngovernance_v1_tx_proto_rawDesc = "" +
@@ -245,10 +349,17 @@ const file_tdpn_vpngovernance_v1_tx_proto_rawDesc = "" +
 	"\x19MsgRecordDecisionResponse\x12E\n" +
 	"\bdecision\x18\x01 \x01(\v2).tdpn.vpngovernance.v1.GovernanceDecisionR\bdecision\x12+\n" +
 	"\x11idempotent_replay\x18\x02 \x01(\bR\x10idempotentReplay\x12\x1a\n" +
-	"\bconflict\x18\x03 \x01(\bR\bconflict2\xe9\x01\n" +
+	"\bconflict\x18\x03 \x01(\bR\bconflict\"c\n" +
+	"\x1bMsgRecordAuditActionRequest\x12D\n" +
+	"\x06action\x18\x01 \x01(\v2,.tdpn.vpngovernance.v1.GovernanceAuditActionR\x06action\"\xad\x01\n" +
+	"\x1cMsgRecordAuditActionResponse\x12D\n" +
+	"\x06action\x18\x01 \x01(\v2,.tdpn.vpngovernance.v1.GovernanceAuditActionR\x06action\x12+\n" +
+	"\x11idempotent_replay\x18\x02 \x01(\bR\x10idempotentReplay\x12\x1a\n" +
+	"\bconflict\x18\x03 \x01(\bR\bconflict2\xe7\x02\n" +
 	"\x03Msg\x12m\n" +
 	"\fCreatePolicy\x12-.tdpn.vpngovernance.v1.MsgCreatePolicyRequest\x1a..tdpn.vpngovernance.v1.MsgCreatePolicyResponse\x12s\n" +
-	"\x0eRecordDecision\x12/.tdpn.vpngovernance.v1.MsgRecordDecisionRequest\x1a0.tdpn.vpngovernance.v1.MsgRecordDecisionResponseB2Z0github.com/tdpn/tdpn-chain/x/vpngovernance/typesb\x06proto3"
+	"\x0eRecordDecision\x12/.tdpn.vpngovernance.v1.MsgRecordDecisionRequest\x1a0.tdpn.vpngovernance.v1.MsgRecordDecisionResponse\x12|\n" +
+	"\x11RecordAuditAction\x122.tdpn.vpngovernance.v1.MsgRecordAuditActionRequest\x1a3.tdpn.vpngovernance.v1.MsgRecordAuditActionResponseB2Z0github.com/tdpn/tdpn-chain/x/vpngovernance/typesb\x06proto3"
 
 var (
 	file_tdpn_vpngovernance_v1_tx_proto_rawDescOnce sync.Once
@@ -262,29 +373,36 @@ func file_tdpn_vpngovernance_v1_tx_proto_rawDescGZIP() []byte {
 	return file_tdpn_vpngovernance_v1_tx_proto_rawDescData
 }
 
-var file_tdpn_vpngovernance_v1_tx_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_tdpn_vpngovernance_v1_tx_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_tdpn_vpngovernance_v1_tx_proto_goTypes = []any{
-	(*MsgCreatePolicyRequest)(nil),    // 0: tdpn.vpngovernance.v1.MsgCreatePolicyRequest
-	(*MsgCreatePolicyResponse)(nil),   // 1: tdpn.vpngovernance.v1.MsgCreatePolicyResponse
-	(*MsgRecordDecisionRequest)(nil),  // 2: tdpn.vpngovernance.v1.MsgRecordDecisionRequest
-	(*MsgRecordDecisionResponse)(nil), // 3: tdpn.vpngovernance.v1.MsgRecordDecisionResponse
-	(*GovernancePolicy)(nil),          // 4: tdpn.vpngovernance.v1.GovernancePolicy
-	(*GovernanceDecision)(nil),        // 5: tdpn.vpngovernance.v1.GovernanceDecision
+	(*MsgCreatePolicyRequest)(nil),       // 0: tdpn.vpngovernance.v1.MsgCreatePolicyRequest
+	(*MsgCreatePolicyResponse)(nil),      // 1: tdpn.vpngovernance.v1.MsgCreatePolicyResponse
+	(*MsgRecordDecisionRequest)(nil),     // 2: tdpn.vpngovernance.v1.MsgRecordDecisionRequest
+	(*MsgRecordDecisionResponse)(nil),    // 3: tdpn.vpngovernance.v1.MsgRecordDecisionResponse
+	(*MsgRecordAuditActionRequest)(nil),  // 4: tdpn.vpngovernance.v1.MsgRecordAuditActionRequest
+	(*MsgRecordAuditActionResponse)(nil), // 5: tdpn.vpngovernance.v1.MsgRecordAuditActionResponse
+	(*GovernancePolicy)(nil),             // 6: tdpn.vpngovernance.v1.GovernancePolicy
+	(*GovernanceDecision)(nil),           // 7: tdpn.vpngovernance.v1.GovernanceDecision
+	(*GovernanceAuditAction)(nil),        // 8: tdpn.vpngovernance.v1.GovernanceAuditAction
 }
 var file_tdpn_vpngovernance_v1_tx_proto_depIdxs = []int32{
-	4, // 0: tdpn.vpngovernance.v1.MsgCreatePolicyRequest.policy:type_name -> tdpn.vpngovernance.v1.GovernancePolicy
-	4, // 1: tdpn.vpngovernance.v1.MsgCreatePolicyResponse.policy:type_name -> tdpn.vpngovernance.v1.GovernancePolicy
-	5, // 2: tdpn.vpngovernance.v1.MsgRecordDecisionRequest.decision:type_name -> tdpn.vpngovernance.v1.GovernanceDecision
-	5, // 3: tdpn.vpngovernance.v1.MsgRecordDecisionResponse.decision:type_name -> tdpn.vpngovernance.v1.GovernanceDecision
-	0, // 4: tdpn.vpngovernance.v1.Msg.CreatePolicy:input_type -> tdpn.vpngovernance.v1.MsgCreatePolicyRequest
-	2, // 5: tdpn.vpngovernance.v1.Msg.RecordDecision:input_type -> tdpn.vpngovernance.v1.MsgRecordDecisionRequest
-	1, // 6: tdpn.vpngovernance.v1.Msg.CreatePolicy:output_type -> tdpn.vpngovernance.v1.MsgCreatePolicyResponse
-	3, // 7: tdpn.vpngovernance.v1.Msg.RecordDecision:output_type -> tdpn.vpngovernance.v1.MsgRecordDecisionResponse
-	6, // [6:8] is the sub-list for method output_type
-	4, // [4:6] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	6, // 0: tdpn.vpngovernance.v1.MsgCreatePolicyRequest.policy:type_name -> tdpn.vpngovernance.v1.GovernancePolicy
+	6, // 1: tdpn.vpngovernance.v1.MsgCreatePolicyResponse.policy:type_name -> tdpn.vpngovernance.v1.GovernancePolicy
+	7, // 2: tdpn.vpngovernance.v1.MsgRecordDecisionRequest.decision:type_name -> tdpn.vpngovernance.v1.GovernanceDecision
+	7, // 3: tdpn.vpngovernance.v1.MsgRecordDecisionResponse.decision:type_name -> tdpn.vpngovernance.v1.GovernanceDecision
+	8, // 4: tdpn.vpngovernance.v1.MsgRecordAuditActionRequest.action:type_name -> tdpn.vpngovernance.v1.GovernanceAuditAction
+	8, // 5: tdpn.vpngovernance.v1.MsgRecordAuditActionResponse.action:type_name -> tdpn.vpngovernance.v1.GovernanceAuditAction
+	0, // 6: tdpn.vpngovernance.v1.Msg.CreatePolicy:input_type -> tdpn.vpngovernance.v1.MsgCreatePolicyRequest
+	2, // 7: tdpn.vpngovernance.v1.Msg.RecordDecision:input_type -> tdpn.vpngovernance.v1.MsgRecordDecisionRequest
+	4, // 8: tdpn.vpngovernance.v1.Msg.RecordAuditAction:input_type -> tdpn.vpngovernance.v1.MsgRecordAuditActionRequest
+	1, // 9: tdpn.vpngovernance.v1.Msg.CreatePolicy:output_type -> tdpn.vpngovernance.v1.MsgCreatePolicyResponse
+	3, // 10: tdpn.vpngovernance.v1.Msg.RecordDecision:output_type -> tdpn.vpngovernance.v1.MsgRecordDecisionResponse
+	5, // 11: tdpn.vpngovernance.v1.Msg.RecordAuditAction:output_type -> tdpn.vpngovernance.v1.MsgRecordAuditActionResponse
+	9, // [9:12] is the sub-list for method output_type
+	6, // [6:9] is the sub-list for method input_type
+	6, // [6:6] is the sub-list for extension type_name
+	6, // [6:6] is the sub-list for extension extendee
+	0, // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_tdpn_vpngovernance_v1_tx_proto_init() }
@@ -299,7 +417,7 @@ func file_tdpn_vpngovernance_v1_tx_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_tdpn_vpngovernance_v1_tx_proto_rawDesc), len(file_tdpn_vpngovernance_v1_tx_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -161,6 +161,9 @@ Exit settlement status endpoint:
 - Runtime registration contract per module is:
   - `RegisterMsgServer(...)` for tx service handlers.
   - `RegisterQueryServer(...)` for query/read-model handlers.
+- Governance/validator bootstrap RPC highlights:
+  - `tdpn.vpngovernance.v1.Msg/RecordAuditAction` plus query surfaces `GovernanceAuditAction` and `ListGovernanceAuditActions`.
+  - `tdpn.vpnvalidator.v1.Query/PreviewEpochSelection` for deterministic validator-set preview from policy + candidate inputs.
 - Optional local serve mode:
   - `go run ./cmd/tdpnd --grpc-listen 127.0.0.1:9090`
   - optional runtime hardening flags:

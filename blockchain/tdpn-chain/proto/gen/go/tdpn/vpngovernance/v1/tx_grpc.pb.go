@@ -19,8 +19,9 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Msg_CreatePolicy_FullMethodName   = "/tdpn.vpngovernance.v1.Msg/CreatePolicy"
-	Msg_RecordDecision_FullMethodName = "/tdpn.vpngovernance.v1.Msg/RecordDecision"
+	Msg_CreatePolicy_FullMethodName      = "/tdpn.vpngovernance.v1.Msg/CreatePolicy"
+	Msg_RecordDecision_FullMethodName    = "/tdpn.vpngovernance.v1.Msg/RecordDecision"
+	Msg_RecordAuditAction_FullMethodName = "/tdpn.vpngovernance.v1.Msg/RecordAuditAction"
 )
 
 // MsgClient is the client API for Msg service.
@@ -29,6 +30,7 @@ const (
 type MsgClient interface {
 	CreatePolicy(ctx context.Context, in *MsgCreatePolicyRequest, opts ...grpc.CallOption) (*MsgCreatePolicyResponse, error)
 	RecordDecision(ctx context.Context, in *MsgRecordDecisionRequest, opts ...grpc.CallOption) (*MsgRecordDecisionResponse, error)
+	RecordAuditAction(ctx context.Context, in *MsgRecordAuditActionRequest, opts ...grpc.CallOption) (*MsgRecordAuditActionResponse, error)
 }
 
 type msgClient struct {
@@ -59,12 +61,23 @@ func (c *msgClient) RecordDecision(ctx context.Context, in *MsgRecordDecisionReq
 	return out, nil
 }
 
+func (c *msgClient) RecordAuditAction(ctx context.Context, in *MsgRecordAuditActionRequest, opts ...grpc.CallOption) (*MsgRecordAuditActionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MsgRecordAuditActionResponse)
+	err := c.cc.Invoke(ctx, Msg_RecordAuditAction_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // MsgServer is the server API for Msg service.
 // All implementations must embed UnimplementedMsgServer
 // for forward compatibility.
 type MsgServer interface {
 	CreatePolicy(context.Context, *MsgCreatePolicyRequest) (*MsgCreatePolicyResponse, error)
 	RecordDecision(context.Context, *MsgRecordDecisionRequest) (*MsgRecordDecisionResponse, error)
+	RecordAuditAction(context.Context, *MsgRecordAuditActionRequest) (*MsgRecordAuditActionResponse, error)
 	mustEmbedUnimplementedMsgServer()
 }
 
@@ -80,6 +93,9 @@ func (UnimplementedMsgServer) CreatePolicy(context.Context, *MsgCreatePolicyRequ
 }
 func (UnimplementedMsgServer) RecordDecision(context.Context, *MsgRecordDecisionRequest) (*MsgRecordDecisionResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RecordDecision not implemented")
+}
+func (UnimplementedMsgServer) RecordAuditAction(context.Context, *MsgRecordAuditActionRequest) (*MsgRecordAuditActionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RecordAuditAction not implemented")
 }
 func (UnimplementedMsgServer) mustEmbedUnimplementedMsgServer() {}
 func (UnimplementedMsgServer) testEmbeddedByValue()             {}
@@ -138,6 +154,24 @@ func _Msg_RecordDecision_Handler(srv interface{}, ctx context.Context, dec func(
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Msg_RecordAuditAction_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgRecordAuditActionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).RecordAuditAction(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Msg_RecordAuditAction_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).RecordAuditAction(ctx, req.(*MsgRecordAuditActionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Msg_ServiceDesc is the grpc.ServiceDesc for Msg service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -152,6 +186,10 @@ var Msg_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RecordDecision",
 			Handler:    _Msg_RecordDecision_Handler,
+		},
+		{
+			MethodName: "RecordAuditAction",
+			Handler:    _Msg_RecordAuditAction_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

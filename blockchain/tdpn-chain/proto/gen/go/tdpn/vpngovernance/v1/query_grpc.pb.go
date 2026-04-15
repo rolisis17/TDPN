@@ -19,10 +19,12 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Query_GovernancePolicy_FullMethodName        = "/tdpn.vpngovernance.v1.Query/GovernancePolicy"
-	Query_GovernanceDecision_FullMethodName      = "/tdpn.vpngovernance.v1.Query/GovernanceDecision"
-	Query_ListGovernancePolicies_FullMethodName  = "/tdpn.vpngovernance.v1.Query/ListGovernancePolicies"
-	Query_ListGovernanceDecisions_FullMethodName = "/tdpn.vpngovernance.v1.Query/ListGovernanceDecisions"
+	Query_GovernancePolicy_FullMethodName           = "/tdpn.vpngovernance.v1.Query/GovernancePolicy"
+	Query_GovernanceDecision_FullMethodName         = "/tdpn.vpngovernance.v1.Query/GovernanceDecision"
+	Query_GovernanceAuditAction_FullMethodName      = "/tdpn.vpngovernance.v1.Query/GovernanceAuditAction"
+	Query_ListGovernancePolicies_FullMethodName     = "/tdpn.vpngovernance.v1.Query/ListGovernancePolicies"
+	Query_ListGovernanceDecisions_FullMethodName    = "/tdpn.vpngovernance.v1.Query/ListGovernanceDecisions"
+	Query_ListGovernanceAuditActions_FullMethodName = "/tdpn.vpngovernance.v1.Query/ListGovernanceAuditActions"
 )
 
 // QueryClient is the client API for Query service.
@@ -31,8 +33,10 @@ const (
 type QueryClient interface {
 	GovernancePolicy(ctx context.Context, in *QueryGovernancePolicyRequest, opts ...grpc.CallOption) (*QueryGovernancePolicyResponse, error)
 	GovernanceDecision(ctx context.Context, in *QueryGovernanceDecisionRequest, opts ...grpc.CallOption) (*QueryGovernanceDecisionResponse, error)
+	GovernanceAuditAction(ctx context.Context, in *QueryGovernanceAuditActionRequest, opts ...grpc.CallOption) (*QueryGovernanceAuditActionResponse, error)
 	ListGovernancePolicies(ctx context.Context, in *QueryListGovernancePoliciesRequest, opts ...grpc.CallOption) (*QueryListGovernancePoliciesResponse, error)
 	ListGovernanceDecisions(ctx context.Context, in *QueryListGovernanceDecisionsRequest, opts ...grpc.CallOption) (*QueryListGovernanceDecisionsResponse, error)
+	ListGovernanceAuditActions(ctx context.Context, in *QueryListGovernanceAuditActionsRequest, opts ...grpc.CallOption) (*QueryListGovernanceAuditActionsResponse, error)
 }
 
 type queryClient struct {
@@ -63,6 +67,16 @@ func (c *queryClient) GovernanceDecision(ctx context.Context, in *QueryGovernanc
 	return out, nil
 }
 
+func (c *queryClient) GovernanceAuditAction(ctx context.Context, in *QueryGovernanceAuditActionRequest, opts ...grpc.CallOption) (*QueryGovernanceAuditActionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(QueryGovernanceAuditActionResponse)
+	err := c.cc.Invoke(ctx, Query_GovernanceAuditAction_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *queryClient) ListGovernancePolicies(ctx context.Context, in *QueryListGovernancePoliciesRequest, opts ...grpc.CallOption) (*QueryListGovernancePoliciesResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(QueryListGovernancePoliciesResponse)
@@ -83,14 +97,26 @@ func (c *queryClient) ListGovernanceDecisions(ctx context.Context, in *QueryList
 	return out, nil
 }
 
+func (c *queryClient) ListGovernanceAuditActions(ctx context.Context, in *QueryListGovernanceAuditActionsRequest, opts ...grpc.CallOption) (*QueryListGovernanceAuditActionsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(QueryListGovernanceAuditActionsResponse)
+	err := c.cc.Invoke(ctx, Query_ListGovernanceAuditActions_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // QueryServer is the server API for Query service.
 // All implementations must embed UnimplementedQueryServer
 // for forward compatibility.
 type QueryServer interface {
 	GovernancePolicy(context.Context, *QueryGovernancePolicyRequest) (*QueryGovernancePolicyResponse, error)
 	GovernanceDecision(context.Context, *QueryGovernanceDecisionRequest) (*QueryGovernanceDecisionResponse, error)
+	GovernanceAuditAction(context.Context, *QueryGovernanceAuditActionRequest) (*QueryGovernanceAuditActionResponse, error)
 	ListGovernancePolicies(context.Context, *QueryListGovernancePoliciesRequest) (*QueryListGovernancePoliciesResponse, error)
 	ListGovernanceDecisions(context.Context, *QueryListGovernanceDecisionsRequest) (*QueryListGovernanceDecisionsResponse, error)
+	ListGovernanceAuditActions(context.Context, *QueryListGovernanceAuditActionsRequest) (*QueryListGovernanceAuditActionsResponse, error)
 	mustEmbedUnimplementedQueryServer()
 }
 
@@ -107,11 +133,17 @@ func (UnimplementedQueryServer) GovernancePolicy(context.Context, *QueryGovernan
 func (UnimplementedQueryServer) GovernanceDecision(context.Context, *QueryGovernanceDecisionRequest) (*QueryGovernanceDecisionResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GovernanceDecision not implemented")
 }
+func (UnimplementedQueryServer) GovernanceAuditAction(context.Context, *QueryGovernanceAuditActionRequest) (*QueryGovernanceAuditActionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GovernanceAuditAction not implemented")
+}
 func (UnimplementedQueryServer) ListGovernancePolicies(context.Context, *QueryListGovernancePoliciesRequest) (*QueryListGovernancePoliciesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListGovernancePolicies not implemented")
 }
 func (UnimplementedQueryServer) ListGovernanceDecisions(context.Context, *QueryListGovernanceDecisionsRequest) (*QueryListGovernanceDecisionsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListGovernanceDecisions not implemented")
+}
+func (UnimplementedQueryServer) ListGovernanceAuditActions(context.Context, *QueryListGovernanceAuditActionsRequest) (*QueryListGovernanceAuditActionsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListGovernanceAuditActions not implemented")
 }
 func (UnimplementedQueryServer) mustEmbedUnimplementedQueryServer() {}
 func (UnimplementedQueryServer) testEmbeddedByValue()               {}
@@ -170,6 +202,24 @@ func _Query_GovernanceDecision_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Query_GovernanceAuditAction_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(QueryGovernanceAuditActionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryServer).GovernanceAuditAction(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Query_GovernanceAuditAction_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryServer).GovernanceAuditAction(ctx, req.(*QueryGovernanceAuditActionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Query_ListGovernancePolicies_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(QueryListGovernancePoliciesRequest)
 	if err := dec(in); err != nil {
@@ -206,6 +256,24 @@ func _Query_ListGovernanceDecisions_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Query_ListGovernanceAuditActions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(QueryListGovernanceAuditActionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryServer).ListGovernanceAuditActions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Query_ListGovernanceAuditActions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryServer).ListGovernanceAuditActions(ctx, req.(*QueryListGovernanceAuditActionsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Query_ServiceDesc is the grpc.ServiceDesc for Query service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -222,12 +290,20 @@ var Query_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Query_GovernanceDecision_Handler,
 		},
 		{
+			MethodName: "GovernanceAuditAction",
+			Handler:    _Query_GovernanceAuditAction_Handler,
+		},
+		{
 			MethodName: "ListGovernancePolicies",
 			Handler:    _Query_ListGovernancePolicies_Handler,
 		},
 		{
 			MethodName: "ListGovernanceDecisions",
 			Handler:    _Query_ListGovernanceDecisions_Handler,
+		},
+		{
+			MethodName: "ListGovernanceAuditActions",
+			Handler:    _Query_ListGovernanceAuditActions_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

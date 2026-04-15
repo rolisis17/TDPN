@@ -188,6 +188,8 @@ Current implementation posture:
 - gRPC runtime registration now includes validator/governance service namespaces (`tdpn.vpnvalidator.v1.{Msg,Query}` and `tdpn.vpngovernance.v1.{Msg,Query}`).
 - `vpngovernance` now persists append-only governance admin audit actions (`action_id`, `action`, `actor`, `reason`, `evidence_pointer`, `timestamp_unix`) with replay-safe idempotency and conflict-on-divergence handling.
 - `vpnvalidator` now includes deterministic epoch selection helpers for bootstrap policy enforcement (hard gates, warmup/cooldown, stable+rotating seats, and operator/ASN/region caps).
+- `vpngovernance` gRPC contracts now include audit-action RPC/query surfaces (`RecordAuditAction`, `GovernanceAuditAction`, `ListGovernanceAuditActions`) for bootstrap governance audit trails.
+- `vpnvalidator` gRPC contracts now include `PreviewEpochSelection` query for deterministic epoch-selection previews from policy + candidate inputs.
 - settlement bridge now exposes module query `GET` endpoints (list + by-id) alongside existing `POST` write endpoints.
 - Cosmos CI/local block now includes `scripts/integration_cosmos_tdpnd_state_dir_persistence.sh` to verify state-dir wiring and persistence across reopen.
 - phase5 settlement CI now includes these blockchain gate stages and scripts:

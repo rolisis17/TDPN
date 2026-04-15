@@ -262,6 +262,91 @@ func (x *GovernanceDecision) GetStatus() ReconciliationStatus {
 	return ReconciliationStatus_RECONCILIATION_STATUS_UNSPECIFIED
 }
 
+// GovernanceAuditAction defines append-only governance bootstrap/admin actions.
+type GovernanceAuditAction struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	ActionId        string                 `protobuf:"bytes,1,opt,name=action_id,json=actionId,proto3" json:"action_id,omitempty"`
+	Action          string                 `protobuf:"bytes,2,opt,name=action,proto3" json:"action,omitempty"`
+	Actor           string                 `protobuf:"bytes,3,opt,name=actor,proto3" json:"actor,omitempty"`
+	Reason          string                 `protobuf:"bytes,4,opt,name=reason,proto3" json:"reason,omitempty"`
+	EvidencePointer string                 `protobuf:"bytes,5,opt,name=evidence_pointer,json=evidencePointer,proto3" json:"evidence_pointer,omitempty"`
+	TimestampUnix   int64                  `protobuf:"varint,6,opt,name=timestamp_unix,json=timestampUnix,proto3" json:"timestamp_unix,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *GovernanceAuditAction) Reset() {
+	*x = GovernanceAuditAction{}
+	mi := &file_tdpn_vpngovernance_v1_types_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GovernanceAuditAction) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GovernanceAuditAction) ProtoMessage() {}
+
+func (x *GovernanceAuditAction) ProtoReflect() protoreflect.Message {
+	mi := &file_tdpn_vpngovernance_v1_types_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GovernanceAuditAction.ProtoReflect.Descriptor instead.
+func (*GovernanceAuditAction) Descriptor() ([]byte, []int) {
+	return file_tdpn_vpngovernance_v1_types_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *GovernanceAuditAction) GetActionId() string {
+	if x != nil {
+		return x.ActionId
+	}
+	return ""
+}
+
+func (x *GovernanceAuditAction) GetAction() string {
+	if x != nil {
+		return x.Action
+	}
+	return ""
+}
+
+func (x *GovernanceAuditAction) GetActor() string {
+	if x != nil {
+		return x.Actor
+	}
+	return ""
+}
+
+func (x *GovernanceAuditAction) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *GovernanceAuditAction) GetEvidencePointer() string {
+	if x != nil {
+		return x.EvidencePointer
+	}
+	return ""
+}
+
+func (x *GovernanceAuditAction) GetTimestampUnix() int64 {
+	if x != nil {
+		return x.TimestampUnix
+	}
+	return 0
+}
+
 var File_tdpn_vpngovernance_v1_types_proto protoreflect.FileDescriptor
 
 const file_tdpn_vpngovernance_v1_types_proto_rawDesc = "" +
@@ -284,7 +369,14 @@ const file_tdpn_vpngovernance_v1_types_proto_rawDesc = "" +
 	"\adecider\x18\x05 \x01(\tR\adecider\x12\x16\n" +
 	"\x06reason\x18\x06 \x01(\tR\x06reason\x12&\n" +
 	"\x0fdecided_at_unix\x18\a \x01(\x03R\rdecidedAtUnix\x12C\n" +
-	"\x06status\x18\b \x01(\x0e2+.tdpn.vpngovernance.v1.ReconciliationStatusR\x06status*\xcc\x01\n" +
+	"\x06status\x18\b \x01(\x0e2+.tdpn.vpngovernance.v1.ReconciliationStatusR\x06status\"\xcc\x01\n" +
+	"\x15GovernanceAuditAction\x12\x1b\n" +
+	"\taction_id\x18\x01 \x01(\tR\bactionId\x12\x16\n" +
+	"\x06action\x18\x02 \x01(\tR\x06action\x12\x14\n" +
+	"\x05actor\x18\x03 \x01(\tR\x05actor\x12\x16\n" +
+	"\x06reason\x18\x04 \x01(\tR\x06reason\x12)\n" +
+	"\x10evidence_pointer\x18\x05 \x01(\tR\x0fevidencePointer\x12%\n" +
+	"\x0etimestamp_unix\x18\x06 \x01(\x03R\rtimestampUnix*\xcc\x01\n" +
 	"\x14ReconciliationStatus\x12%\n" +
 	"!RECONCILIATION_STATUS_UNSPECIFIED\x10\x00\x12!\n" +
 	"\x1dRECONCILIATION_STATUS_PENDING\x10\x01\x12#\n" +
@@ -305,11 +397,12 @@ func file_tdpn_vpngovernance_v1_types_proto_rawDescGZIP() []byte {
 }
 
 var file_tdpn_vpngovernance_v1_types_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_tdpn_vpngovernance_v1_types_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_tdpn_vpngovernance_v1_types_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_tdpn_vpngovernance_v1_types_proto_goTypes = []any{
-	(ReconciliationStatus)(0),  // 0: tdpn.vpngovernance.v1.ReconciliationStatus
-	(*GovernancePolicy)(nil),   // 1: tdpn.vpngovernance.v1.GovernancePolicy
-	(*GovernanceDecision)(nil), // 2: tdpn.vpngovernance.v1.GovernanceDecision
+	(ReconciliationStatus)(0),     // 0: tdpn.vpngovernance.v1.ReconciliationStatus
+	(*GovernancePolicy)(nil),      // 1: tdpn.vpngovernance.v1.GovernancePolicy
+	(*GovernanceDecision)(nil),    // 2: tdpn.vpngovernance.v1.GovernanceDecision
+	(*GovernanceAuditAction)(nil), // 3: tdpn.vpngovernance.v1.GovernanceAuditAction
 }
 var file_tdpn_vpngovernance_v1_types_proto_depIdxs = []int32{
 	0, // 0: tdpn.vpngovernance.v1.GovernancePolicy.status:type_name -> tdpn.vpngovernance.v1.ReconciliationStatus
@@ -332,7 +425,7 @@ func file_tdpn_vpngovernance_v1_types_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_tdpn_vpngovernance_v1_types_proto_rawDesc), len(file_tdpn_vpngovernance_v1_types_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   2,
+			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

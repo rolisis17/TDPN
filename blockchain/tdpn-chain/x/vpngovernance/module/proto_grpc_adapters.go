@@ -60,6 +60,24 @@ func (a *ProtoMsgServerAdapter) RecordDecision(_ context.Context, req *pb.MsgRec
 	return out, nil
 }
 
+func (a *ProtoMsgServerAdapter) RecordAuditAction(_ context.Context, req *pb.MsgRecordAuditActionRequest) (*pb.MsgRecordAuditActionResponse, error) {
+	record := governtypes.GovernanceAuditAction{}
+	if req != nil && req.GetAction() != nil {
+		record = fromProtoAuditAction(req.GetAction())
+	}
+
+	resp, err := a.msg.RecordAuditAction(RecordAuditActionRequest{Action: record})
+	out := &pb.MsgRecordAuditActionResponse{
+		Action:           toProtoAuditAction(resp.Action),
+		IdempotentReplay: resp.Idempotent,
+		Conflict:         errors.Is(err, ErrAuditActionConflict),
+	}
+	if err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
 // ProtoQueryServerAdapter bridges protobuf QueryServer RPCs to module QueryServer logic.
 type ProtoQueryServerAdapter struct {
 	pb.UnimplementedQueryServer
@@ -105,6 +123,23 @@ func (a *ProtoQueryServerAdapter) GovernanceDecision(_ context.Context, req *pb.
 	return &pb.QueryGovernanceDecisionResponse{Decision: toProtoDecision(resp.Decision), Found: true}, nil
 }
 
+func (a *ProtoQueryServerAdapter) GovernanceAuditAction(_ context.Context, req *pb.QueryGovernanceAuditActionRequest) (*pb.QueryGovernanceAuditActionResponse, error) {
+	actionID := ""
+	if req != nil {
+		actionID = req.GetActionId()
+	}
+
+	resp, err := a.query.GetAuditAction(GetAuditActionRequest{ActionID: actionID})
+	if err != nil {
+		if errors.Is(err, errAuditActionNotFound) {
+			return &pb.QueryGovernanceAuditActionResponse{Found: false}, nil
+		}
+		return nil, err
+	}
+
+	return &pb.QueryGovernanceAuditActionResponse{Action: toProtoAuditAction(resp.Action), Found: true}, nil
+}
+
 func (a *ProtoQueryServerAdapter) ListGovernancePolicies(_ context.Context, _ *pb.QueryListGovernancePoliciesRequest) (*pb.QueryListGovernancePoliciesResponse, error) {
 	resp, err := a.query.ListPolicies(ListPoliciesRequest{})
 	if err != nil {
@@ -129,6 +164,19 @@ func (a *ProtoQueryServerAdapter) ListGovernanceDecisions(_ context.Context, _ *
 		out = append(out, toProtoDecision(record))
 	}
 	return &pb.QueryListGovernanceDecisionsResponse{Decisions: out}, nil
+}
+
+func (a *ProtoQueryServerAdapter) ListGovernanceAuditActions(_ context.Context, _ *pb.QueryListGovernanceAuditActionsRequest) (*pb.QueryListGovernanceAuditActionsResponse, error) {
+	resp, err := a.query.ListAuditActions(ListAuditActionsRequest{})
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]*pb.GovernanceAuditAction, 0, len(resp.Actions))
+	for _, record := range resp.Actions {
+		out = append(out, toProtoAuditAction(record))
+	}
+	return &pb.QueryListGovernanceAuditActionsResponse{Actions: out}, nil
 }
 
 func fromProtoPolicy(in *pb.GovernancePolicy) governtypes.GovernancePolicy {
@@ -182,6 +230,32 @@ func toProtoDecision(in governtypes.GovernanceDecision) *pb.GovernanceDecision {
 		Reason:        in.Reason,
 		DecidedAtUnix: in.DecidedAtUnix,
 		Status:        toProtoStatus(in.Status),
+	}
+}
+
+func fromProtoAuditAction(in *pb.GovernanceAuditAction) governtypes.GovernanceAuditAction {
+	if in == nil {
+		return governtypes.GovernanceAuditAction{}
+	}
+
+	return governtypes.GovernanceAuditAction{
+		ActionID:        in.GetActionId(),
+		Action:          in.GetAction(),
+		Actor:           in.GetActor(),
+		Reason:          in.GetReason(),
+		EvidencePointer: in.GetEvidencePointer(),
+		TimestampUnix:   in.GetTimestampUnix(),
+	}
+}
+
+func toProtoAuditAction(in governtypes.GovernanceAuditAction) *pb.GovernanceAuditAction {
+	return &pb.GovernanceAuditAction{
+		ActionId:        in.ActionID,
+		Action:          in.Action,
+		Actor:           in.Actor,
+		Reason:          in.Reason,
+		EvidencePointer: in.EvidencePointer,
+		TimestampUnix:   in.TimestampUnix,
 	}
 }
 

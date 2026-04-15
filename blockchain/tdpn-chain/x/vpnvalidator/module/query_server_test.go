@@ -2,6 +2,8 @@ package module
 
 import (
 	"errors"
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/tdpn/tdpn-chain/x/vpnvalidator/keeper"
@@ -32,6 +34,11 @@ func TestQueryServerNilKeeper(t *testing.T) {
 	_, listStatusErr := server.ListValidatorStatusRecords(ListValidatorStatusRecordsRequest{})
 	if !errors.Is(listStatusErr, ErrNilKeeper) {
 		t.Fatalf("expected ErrNilKeeper for list status query, got %v", listStatusErr)
+	}
+
+	_, previewErr := server.PreviewEpochSelection(PreviewEpochSelectionRequest{})
+	if !errors.Is(previewErr, ErrNilKeeper) {
+		t.Fatalf("expected ErrNilKeeper for preview epoch selection query, got %v", previewErr)
 	}
 }
 
@@ -161,5 +168,118 @@ func TestQueryServerListNonEmpty(t *testing.T) {
 			statusResp.Records[1].StatusID,
 			statusResp.Records[2].StatusID,
 		)
+	}
+}
+
+func TestQueryServerPreviewEpochSelectionDeterministic(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	server := NewQueryServer(&k)
+
+	policy := baselinePreviewPolicy()
+	stableHigh := previewCandidate("stable-high", "op-stable-high", "asn-stable-high", "us", 90)
+	stableHigh.StableSeatPreferred = true
+	stableLow := previewCandidate("stable-low", "op-stable-low", "asn-stable-low", "eu", 80)
+	stableLow.StableSeatPreferred = true
+	rotateTop := previewCandidate("rotate-top", "op-rotate-top", "asn-rotate-top", "apac", 99)
+	rotateNext := previewCandidate("rotate-next", "op-rotate-next", "asn-rotate-next", "latam", 70)
+
+	respA, err := server.PreviewEpochSelection(PreviewEpochSelectionRequest{
+		Policy: policy,
+		Candidates: []types.EpochValidatorCandidate{
+			rotateTop,
+			stableLow,
+			rotateNext,
+			stableHigh,
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected preview success, got %v", err)
+	}
+
+	respB, err := server.PreviewEpochSelection(PreviewEpochSelectionRequest{
+		Policy: policy,
+		Candidates: []types.EpochValidatorCandidate{
+			stableHigh,
+			rotateNext,
+			rotateTop,
+			stableLow,
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected preview success for shuffled candidates, got %v", err)
+	}
+
+	if !reflect.DeepEqual(respA.Result.SelectedValidatorIDs(), respB.Result.SelectedValidatorIDs()) {
+		t.Fatalf(
+			"expected deterministic preview selection IDs %v and %v to match",
+			respA.Result.SelectedValidatorIDs(),
+			respB.Result.SelectedValidatorIDs(),
+		)
+	}
+
+	if len(respA.Result.StableSeats) != 1 || respA.Result.StableSeats[0].ValidatorID != "stable-high" {
+		t.Fatalf("expected stable seat [stable-high], got %+v", respA.Result.StableSeats)
+	}
+	if len(respA.Result.RotatingSeats) != 2 {
+		t.Fatalf("expected 2 rotating seats, got %d", len(respA.Result.RotatingSeats))
+	}
+	if respA.Result.RotatingSeats[0].ValidatorID != "rotate-top" || respA.Result.RotatingSeats[1].ValidatorID != "stable-low" {
+		t.Fatalf("expected rotating seats [rotate-top stable-low], got %+v", respA.Result.RotatingSeats)
+	}
+}
+
+func TestQueryServerPreviewEpochSelectionValidationErrorPropagation(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	server := NewQueryServer(&k)
+
+	_, err := server.PreviewEpochSelection(PreviewEpochSelectionRequest{
+		Policy: types.EpochSelectionPolicy{
+			Epoch:             10,
+			StableSeatCount:   0,
+			RotatingSeatCount: 0,
+		},
+	})
+	if err == nil {
+		t.Fatal("expected preview validation error for empty seat policy")
+	}
+	if !strings.Contains(err.Error(), "at least one stable or rotating seat is required") {
+		t.Fatalf("expected seat validation error, got %v", err)
+	}
+}
+
+func baselinePreviewPolicy() types.EpochSelectionPolicy {
+	return types.EpochSelectionPolicy{
+		Epoch:               10,
+		StableSeatCount:     1,
+		RotatingSeatCount:   2,
+		MinStake:            100,
+		MinStakeAgeEpochs:   3,
+		MinHealthScore:      70,
+		MinResourceHeadroom: 20,
+		WarmupEpochs:        2,
+		CooldownEpochs:      3,
+		MaxSeatsPerOperator: 10,
+		MaxSeatsPerASN:      10,
+		MaxSeatsPerRegion:   10,
+	}
+}
+
+func previewCandidate(validatorID string, operatorID string, asn string, region string, score int64) types.EpochValidatorCandidate {
+	return types.EpochValidatorCandidate{
+		ValidatorID:               validatorID,
+		OperatorID:                operatorID,
+		ASN:                       asn,
+		Region:                    region,
+		Stake:                     1_000,
+		StakeAgeEpochs:            6,
+		HealthScore:               95,
+		ResourceHeadroom:          60,
+		ConsecutiveEligibleEpochs: 4,
+		LastRemovedEpoch:          -1,
+		Score:                     score,
 	}
 }

@@ -23,6 +23,7 @@ const (
 	Query_ValidatorStatusRecord_FullMethodName      = "/tdpn.vpnvalidator.v1.Query/ValidatorStatusRecord"
 	Query_ListValidatorEligibilities_FullMethodName = "/tdpn.vpnvalidator.v1.Query/ListValidatorEligibilities"
 	Query_ListValidatorStatusRecords_FullMethodName = "/tdpn.vpnvalidator.v1.Query/ListValidatorStatusRecords"
+	Query_PreviewEpochSelection_FullMethodName      = "/tdpn.vpnvalidator.v1.Query/PreviewEpochSelection"
 )
 
 // QueryClient is the client API for Query service.
@@ -33,6 +34,7 @@ type QueryClient interface {
 	ValidatorStatusRecord(ctx context.Context, in *QueryValidatorStatusRecordRequest, opts ...grpc.CallOption) (*QueryValidatorStatusRecordResponse, error)
 	ListValidatorEligibilities(ctx context.Context, in *QueryListValidatorEligibilitiesRequest, opts ...grpc.CallOption) (*QueryListValidatorEligibilitiesResponse, error)
 	ListValidatorStatusRecords(ctx context.Context, in *QueryListValidatorStatusRecordsRequest, opts ...grpc.CallOption) (*QueryListValidatorStatusRecordsResponse, error)
+	PreviewEpochSelection(ctx context.Context, in *QueryPreviewEpochSelectionRequest, opts ...grpc.CallOption) (*QueryPreviewEpochSelectionResponse, error)
 }
 
 type queryClient struct {
@@ -83,6 +85,16 @@ func (c *queryClient) ListValidatorStatusRecords(ctx context.Context, in *QueryL
 	return out, nil
 }
 
+func (c *queryClient) PreviewEpochSelection(ctx context.Context, in *QueryPreviewEpochSelectionRequest, opts ...grpc.CallOption) (*QueryPreviewEpochSelectionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(QueryPreviewEpochSelectionResponse)
+	err := c.cc.Invoke(ctx, Query_PreviewEpochSelection_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // QueryServer is the server API for Query service.
 // All implementations must embed UnimplementedQueryServer
 // for forward compatibility.
@@ -91,6 +103,7 @@ type QueryServer interface {
 	ValidatorStatusRecord(context.Context, *QueryValidatorStatusRecordRequest) (*QueryValidatorStatusRecordResponse, error)
 	ListValidatorEligibilities(context.Context, *QueryListValidatorEligibilitiesRequest) (*QueryListValidatorEligibilitiesResponse, error)
 	ListValidatorStatusRecords(context.Context, *QueryListValidatorStatusRecordsRequest) (*QueryListValidatorStatusRecordsResponse, error)
+	PreviewEpochSelection(context.Context, *QueryPreviewEpochSelectionRequest) (*QueryPreviewEpochSelectionResponse, error)
 	mustEmbedUnimplementedQueryServer()
 }
 
@@ -112,6 +125,9 @@ func (UnimplementedQueryServer) ListValidatorEligibilities(context.Context, *Que
 }
 func (UnimplementedQueryServer) ListValidatorStatusRecords(context.Context, *QueryListValidatorStatusRecordsRequest) (*QueryListValidatorStatusRecordsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListValidatorStatusRecords not implemented")
+}
+func (UnimplementedQueryServer) PreviewEpochSelection(context.Context, *QueryPreviewEpochSelectionRequest) (*QueryPreviewEpochSelectionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method PreviewEpochSelection not implemented")
 }
 func (UnimplementedQueryServer) mustEmbedUnimplementedQueryServer() {}
 func (UnimplementedQueryServer) testEmbeddedByValue()               {}
@@ -206,6 +222,24 @@ func _Query_ListValidatorStatusRecords_Handler(srv interface{}, ctx context.Cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Query_PreviewEpochSelection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(QueryPreviewEpochSelectionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryServer).PreviewEpochSelection(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Query_PreviewEpochSelection_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryServer).PreviewEpochSelection(ctx, req.(*QueryPreviewEpochSelectionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Query_ServiceDesc is the grpc.ServiceDesc for Query service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -228,6 +262,10 @@ var Query_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListValidatorStatusRecords",
 			Handler:    _Query_ListValidatorStatusRecords_Handler,
+		},
+		{
+			MethodName: "PreviewEpochSelection",
+			Handler:    _Query_PreviewEpochSelection_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -373,6 +373,102 @@ func (x *QueryListValidatorStatusRecordsResponse) GetRecords() []*ValidatorStatu
 	return nil
 }
 
+type QueryPreviewEpochSelectionRequest struct {
+	state         protoimpl.MessageState     `protogen:"open.v1"`
+	Policy        *EpochSelectionPolicy      `protobuf:"bytes,1,opt,name=policy,proto3" json:"policy,omitempty"`
+	Candidates    []*EpochValidatorCandidate `protobuf:"bytes,2,rep,name=candidates,proto3" json:"candidates,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *QueryPreviewEpochSelectionRequest) Reset() {
+	*x = QueryPreviewEpochSelectionRequest{}
+	mi := &file_tdpn_vpnvalidator_v1_query_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *QueryPreviewEpochSelectionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueryPreviewEpochSelectionRequest) ProtoMessage() {}
+
+func (x *QueryPreviewEpochSelectionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_tdpn_vpnvalidator_v1_query_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueryPreviewEpochSelectionRequest.ProtoReflect.Descriptor instead.
+func (*QueryPreviewEpochSelectionRequest) Descriptor() ([]byte, []int) {
+	return file_tdpn_vpnvalidator_v1_query_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *QueryPreviewEpochSelectionRequest) GetPolicy() *EpochSelectionPolicy {
+	if x != nil {
+		return x.Policy
+	}
+	return nil
+}
+
+func (x *QueryPreviewEpochSelectionRequest) GetCandidates() []*EpochValidatorCandidate {
+	if x != nil {
+		return x.Candidates
+	}
+	return nil
+}
+
+type QueryPreviewEpochSelectionResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Result        *EpochSelectionResult  `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *QueryPreviewEpochSelectionResponse) Reset() {
+	*x = QueryPreviewEpochSelectionResponse{}
+	mi := &file_tdpn_vpnvalidator_v1_query_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *QueryPreviewEpochSelectionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueryPreviewEpochSelectionResponse) ProtoMessage() {}
+
+func (x *QueryPreviewEpochSelectionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_tdpn_vpnvalidator_v1_query_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueryPreviewEpochSelectionResponse.ProtoReflect.Descriptor instead.
+func (*QueryPreviewEpochSelectionResponse) Descriptor() ([]byte, []int) {
+	return file_tdpn_vpnvalidator_v1_query_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *QueryPreviewEpochSelectionResponse) GetResult() *EpochSelectionResult {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
 var File_tdpn_vpnvalidator_v1_query_proto protoreflect.FileDescriptor
 
 const file_tdpn_vpnvalidator_v1_query_proto_rawDesc = "" +
@@ -393,12 +489,20 @@ const file_tdpn_vpnvalidator_v1_query_proto_rawDesc = "" +
 	"\religibilities\x18\x01 \x03(\v2*.tdpn.vpnvalidator.v1.ValidatorEligibilityR\religibilities\"(\n" +
 	"&QueryListValidatorStatusRecordsRequest\"p\n" +
 	"'QueryListValidatorStatusRecordsResponse\x12E\n" +
-	"\arecords\x18\x01 \x03(\v2+.tdpn.vpnvalidator.v1.ValidatorStatusRecordR\arecords2\xd6\x04\n" +
+	"\arecords\x18\x01 \x03(\v2+.tdpn.vpnvalidator.v1.ValidatorStatusRecordR\arecords\"\xb6\x01\n" +
+	"!QueryPreviewEpochSelectionRequest\x12B\n" +
+	"\x06policy\x18\x01 \x01(\v2*.tdpn.vpnvalidator.v1.EpochSelectionPolicyR\x06policy\x12M\n" +
+	"\n" +
+	"candidates\x18\x02 \x03(\v2-.tdpn.vpnvalidator.v1.EpochValidatorCandidateR\n" +
+	"candidates\"h\n" +
+	"\"QueryPreviewEpochSelectionResponse\x12B\n" +
+	"\x06result\x18\x01 \x01(\v2*.tdpn.vpnvalidator.v1.EpochSelectionResultR\x06result2\xe3\x05\n" +
 	"\x05Query\x12\x87\x01\n" +
 	"\x14ValidatorEligibility\x126.tdpn.vpnvalidator.v1.QueryValidatorEligibilityRequest\x1a7.tdpn.vpnvalidator.v1.QueryValidatorEligibilityResponse\x12\x8a\x01\n" +
 	"\x15ValidatorStatusRecord\x127.tdpn.vpnvalidator.v1.QueryValidatorStatusRecordRequest\x1a8.tdpn.vpnvalidator.v1.QueryValidatorStatusRecordResponse\x12\x99\x01\n" +
 	"\x1aListValidatorEligibilities\x12<.tdpn.vpnvalidator.v1.QueryListValidatorEligibilitiesRequest\x1a=.tdpn.vpnvalidator.v1.QueryListValidatorEligibilitiesResponse\x12\x99\x01\n" +
-	"\x1aListValidatorStatusRecords\x12<.tdpn.vpnvalidator.v1.QueryListValidatorStatusRecordsRequest\x1a=.tdpn.vpnvalidator.v1.QueryListValidatorStatusRecordsResponseB1Z/github.com/tdpn/tdpn-chain/x/vpnvalidator/typesb\x06proto3"
+	"\x1aListValidatorStatusRecords\x12<.tdpn.vpnvalidator.v1.QueryListValidatorStatusRecordsRequest\x1a=.tdpn.vpnvalidator.v1.QueryListValidatorStatusRecordsResponse\x12\x8a\x01\n" +
+	"\x15PreviewEpochSelection\x127.tdpn.vpnvalidator.v1.QueryPreviewEpochSelectionRequest\x1a8.tdpn.vpnvalidator.v1.QueryPreviewEpochSelectionResponseB1Z/github.com/tdpn/tdpn-chain/x/vpnvalidator/typesb\x06proto3"
 
 var (
 	file_tdpn_vpnvalidator_v1_query_proto_rawDescOnce sync.Once
@@ -412,7 +516,7 @@ func file_tdpn_vpnvalidator_v1_query_proto_rawDescGZIP() []byte {
 	return file_tdpn_vpnvalidator_v1_query_proto_rawDescData
 }
 
-var file_tdpn_vpnvalidator_v1_query_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_tdpn_vpnvalidator_v1_query_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_tdpn_vpnvalidator_v1_query_proto_goTypes = []any{
 	(*QueryValidatorEligibilityRequest)(nil),        // 0: tdpn.vpnvalidator.v1.QueryValidatorEligibilityRequest
 	(*QueryValidatorEligibilityResponse)(nil),       // 1: tdpn.vpnvalidator.v1.QueryValidatorEligibilityResponse
@@ -422,27 +526,37 @@ var file_tdpn_vpnvalidator_v1_query_proto_goTypes = []any{
 	(*QueryListValidatorEligibilitiesResponse)(nil), // 5: tdpn.vpnvalidator.v1.QueryListValidatorEligibilitiesResponse
 	(*QueryListValidatorStatusRecordsRequest)(nil),  // 6: tdpn.vpnvalidator.v1.QueryListValidatorStatusRecordsRequest
 	(*QueryListValidatorStatusRecordsResponse)(nil), // 7: tdpn.vpnvalidator.v1.QueryListValidatorStatusRecordsResponse
-	(*ValidatorEligibility)(nil),                    // 8: tdpn.vpnvalidator.v1.ValidatorEligibility
-	(*ValidatorStatusRecord)(nil),                   // 9: tdpn.vpnvalidator.v1.ValidatorStatusRecord
+	(*QueryPreviewEpochSelectionRequest)(nil),       // 8: tdpn.vpnvalidator.v1.QueryPreviewEpochSelectionRequest
+	(*QueryPreviewEpochSelectionResponse)(nil),      // 9: tdpn.vpnvalidator.v1.QueryPreviewEpochSelectionResponse
+	(*ValidatorEligibility)(nil),                    // 10: tdpn.vpnvalidator.v1.ValidatorEligibility
+	(*ValidatorStatusRecord)(nil),                   // 11: tdpn.vpnvalidator.v1.ValidatorStatusRecord
+	(*EpochSelectionPolicy)(nil),                    // 12: tdpn.vpnvalidator.v1.EpochSelectionPolicy
+	(*EpochValidatorCandidate)(nil),                 // 13: tdpn.vpnvalidator.v1.EpochValidatorCandidate
+	(*EpochSelectionResult)(nil),                    // 14: tdpn.vpnvalidator.v1.EpochSelectionResult
 }
 var file_tdpn_vpnvalidator_v1_query_proto_depIdxs = []int32{
-	8, // 0: tdpn.vpnvalidator.v1.QueryValidatorEligibilityResponse.eligibility:type_name -> tdpn.vpnvalidator.v1.ValidatorEligibility
-	9, // 1: tdpn.vpnvalidator.v1.QueryValidatorStatusRecordResponse.record:type_name -> tdpn.vpnvalidator.v1.ValidatorStatusRecord
-	8, // 2: tdpn.vpnvalidator.v1.QueryListValidatorEligibilitiesResponse.eligibilities:type_name -> tdpn.vpnvalidator.v1.ValidatorEligibility
-	9, // 3: tdpn.vpnvalidator.v1.QueryListValidatorStatusRecordsResponse.records:type_name -> tdpn.vpnvalidator.v1.ValidatorStatusRecord
-	0, // 4: tdpn.vpnvalidator.v1.Query.ValidatorEligibility:input_type -> tdpn.vpnvalidator.v1.QueryValidatorEligibilityRequest
-	2, // 5: tdpn.vpnvalidator.v1.Query.ValidatorStatusRecord:input_type -> tdpn.vpnvalidator.v1.QueryValidatorStatusRecordRequest
-	4, // 6: tdpn.vpnvalidator.v1.Query.ListValidatorEligibilities:input_type -> tdpn.vpnvalidator.v1.QueryListValidatorEligibilitiesRequest
-	6, // 7: tdpn.vpnvalidator.v1.Query.ListValidatorStatusRecords:input_type -> tdpn.vpnvalidator.v1.QueryListValidatorStatusRecordsRequest
-	1, // 8: tdpn.vpnvalidator.v1.Query.ValidatorEligibility:output_type -> tdpn.vpnvalidator.v1.QueryValidatorEligibilityResponse
-	3, // 9: tdpn.vpnvalidator.v1.Query.ValidatorStatusRecord:output_type -> tdpn.vpnvalidator.v1.QueryValidatorStatusRecordResponse
-	5, // 10: tdpn.vpnvalidator.v1.Query.ListValidatorEligibilities:output_type -> tdpn.vpnvalidator.v1.QueryListValidatorEligibilitiesResponse
-	7, // 11: tdpn.vpnvalidator.v1.Query.ListValidatorStatusRecords:output_type -> tdpn.vpnvalidator.v1.QueryListValidatorStatusRecordsResponse
-	8, // [8:12] is the sub-list for method output_type
-	4, // [4:8] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	10, // 0: tdpn.vpnvalidator.v1.QueryValidatorEligibilityResponse.eligibility:type_name -> tdpn.vpnvalidator.v1.ValidatorEligibility
+	11, // 1: tdpn.vpnvalidator.v1.QueryValidatorStatusRecordResponse.record:type_name -> tdpn.vpnvalidator.v1.ValidatorStatusRecord
+	10, // 2: tdpn.vpnvalidator.v1.QueryListValidatorEligibilitiesResponse.eligibilities:type_name -> tdpn.vpnvalidator.v1.ValidatorEligibility
+	11, // 3: tdpn.vpnvalidator.v1.QueryListValidatorStatusRecordsResponse.records:type_name -> tdpn.vpnvalidator.v1.ValidatorStatusRecord
+	12, // 4: tdpn.vpnvalidator.v1.QueryPreviewEpochSelectionRequest.policy:type_name -> tdpn.vpnvalidator.v1.EpochSelectionPolicy
+	13, // 5: tdpn.vpnvalidator.v1.QueryPreviewEpochSelectionRequest.candidates:type_name -> tdpn.vpnvalidator.v1.EpochValidatorCandidate
+	14, // 6: tdpn.vpnvalidator.v1.QueryPreviewEpochSelectionResponse.result:type_name -> tdpn.vpnvalidator.v1.EpochSelectionResult
+	0,  // 7: tdpn.vpnvalidator.v1.Query.ValidatorEligibility:input_type -> tdpn.vpnvalidator.v1.QueryValidatorEligibilityRequest
+	2,  // 8: tdpn.vpnvalidator.v1.Query.ValidatorStatusRecord:input_type -> tdpn.vpnvalidator.v1.QueryValidatorStatusRecordRequest
+	4,  // 9: tdpn.vpnvalidator.v1.Query.ListValidatorEligibilities:input_type -> tdpn.vpnvalidator.v1.QueryListValidatorEligibilitiesRequest
+	6,  // 10: tdpn.vpnvalidator.v1.Query.ListValidatorStatusRecords:input_type -> tdpn.vpnvalidator.v1.QueryListValidatorStatusRecordsRequest
+	8,  // 11: tdpn.vpnvalidator.v1.Query.PreviewEpochSelection:input_type -> tdpn.vpnvalidator.v1.QueryPreviewEpochSelectionRequest
+	1,  // 12: tdpn.vpnvalidator.v1.Query.ValidatorEligibility:output_type -> tdpn.vpnvalidator.v1.QueryValidatorEligibilityResponse
+	3,  // 13: tdpn.vpnvalidator.v1.Query.ValidatorStatusRecord:output_type -> tdpn.vpnvalidator.v1.QueryValidatorStatusRecordResponse
+	5,  // 14: tdpn.vpnvalidator.v1.Query.ListValidatorEligibilities:output_type -> tdpn.vpnvalidator.v1.QueryListValidatorEligibilitiesResponse
+	7,  // 15: tdpn.vpnvalidator.v1.Query.ListValidatorStatusRecords:output_type -> tdpn.vpnvalidator.v1.QueryListValidatorStatusRecordsResponse
+	9,  // 16: tdpn.vpnvalidator.v1.Query.PreviewEpochSelection:output_type -> tdpn.vpnvalidator.v1.QueryPreviewEpochSelectionResponse
+	12, // [12:17] is the sub-list for method output_type
+	7,  // [7:12] is the sub-list for method input_type
+	7,  // [7:7] is the sub-list for extension type_name
+	7,  // [7:7] is the sub-list for extension extendee
+	0,  // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_tdpn_vpnvalidator_v1_query_proto_init() }
@@ -457,7 +571,7 @@ func file_tdpn_vpnvalidator_v1_query_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_tdpn_vpnvalidator_v1_query_proto_rawDesc), len(file_tdpn_vpnvalidator_v1_query_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

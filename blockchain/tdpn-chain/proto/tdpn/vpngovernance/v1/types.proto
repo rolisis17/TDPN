@@ -33,3 +33,13 @@ message GovernanceDecision {
   int64 decided_at_unix = 7;
   ReconciliationStatus status = 8;
 }
+
+// GovernanceAuditAction defines append-only governance bootstrap/admin actions.
+message GovernanceAuditAction {
+  string action_id = 1;
+  string action = 2;
+  string actor = 3;
+  string reason = 4;
+  string evidence_pointer = 5;
+  int64 timestamp_unix = 6;
+}

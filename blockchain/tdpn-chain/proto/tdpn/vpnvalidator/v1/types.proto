@@ -33,3 +33,43 @@ message ValidatorStatusRecord {
   int64 recorded_at_unix = 7;
   ReconciliationStatus status = 8;
 }
+
+// EpochSelectionPolicy defines deterministic validator-set policy inputs for epoch preview.
+message EpochSelectionPolicy {
+  int64 epoch = 1;
+  int64 stable_seat_count = 2;
+  int64 rotating_seat_count = 3;
+  int64 min_stake = 4;
+  int64 min_stake_age_epochs = 5;
+  int64 min_health_score = 6;
+  int64 min_resource_headroom = 7;
+  int64 warmup_epochs = 8;
+  int64 cooldown_epochs = 9;
+  int64 max_seats_per_operator = 10;
+  int64 max_seats_per_asn = 11;
+  int64 max_seats_per_region = 12;
+}
+
+// EpochValidatorCandidate captures objective candidate inputs for deterministic selection preview.
+message EpochValidatorCandidate {
+  string validator_id = 1;
+  string operator_id = 2;
+  string asn = 3;
+  string region = 4;
+  int64 stake = 5;
+  int64 stake_age_epochs = 6;
+  int64 health_score = 7;
+  int64 resource_headroom = 8;
+  bool has_active_sanction = 9;
+  bool has_unresolved_critical_issues = 10;
+  int64 consecutive_eligible_epochs = 11;
+  int64 last_removed_epoch = 12;
+  int64 score = 13;
+  bool stable_seat_preferred = 14;
+}
+
+// EpochSelectionResult is the deterministic stable/rotating seat output.
+message EpochSelectionResult {
+  repeated EpochValidatorCandidate stable_seats = 1;
+  repeated EpochValidatorCandidate rotating_seats = 2;
+}

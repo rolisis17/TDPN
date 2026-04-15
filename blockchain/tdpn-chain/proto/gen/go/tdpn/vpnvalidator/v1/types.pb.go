@@ -262,6 +262,341 @@ func (x *ValidatorStatusRecord) GetStatus() ReconciliationStatus {
 	return ReconciliationStatus_RECONCILIATION_STATUS_UNSPECIFIED
 }
 
+// EpochSelectionPolicy defines deterministic validator-set policy inputs for epoch preview.
+type EpochSelectionPolicy struct {
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	Epoch               int64                  `protobuf:"varint,1,opt,name=epoch,proto3" json:"epoch,omitempty"`
+	StableSeatCount     int64                  `protobuf:"varint,2,opt,name=stable_seat_count,json=stableSeatCount,proto3" json:"stable_seat_count,omitempty"`
+	RotatingSeatCount   int64                  `protobuf:"varint,3,opt,name=rotating_seat_count,json=rotatingSeatCount,proto3" json:"rotating_seat_count,omitempty"`
+	MinStake            int64                  `protobuf:"varint,4,opt,name=min_stake,json=minStake,proto3" json:"min_stake,omitempty"`
+	MinStakeAgeEpochs   int64                  `protobuf:"varint,5,opt,name=min_stake_age_epochs,json=minStakeAgeEpochs,proto3" json:"min_stake_age_epochs,omitempty"`
+	MinHealthScore      int64                  `protobuf:"varint,6,opt,name=min_health_score,json=minHealthScore,proto3" json:"min_health_score,omitempty"`
+	MinResourceHeadroom int64                  `protobuf:"varint,7,opt,name=min_resource_headroom,json=minResourceHeadroom,proto3" json:"min_resource_headroom,omitempty"`
+	WarmupEpochs        int64                  `protobuf:"varint,8,opt,name=warmup_epochs,json=warmupEpochs,proto3" json:"warmup_epochs,omitempty"`
+	CooldownEpochs      int64                  `protobuf:"varint,9,opt,name=cooldown_epochs,json=cooldownEpochs,proto3" json:"cooldown_epochs,omitempty"`
+	MaxSeatsPerOperator int64                  `protobuf:"varint,10,opt,name=max_seats_per_operator,json=maxSeatsPerOperator,proto3" json:"max_seats_per_operator,omitempty"`
+	MaxSeatsPerAsn      int64                  `protobuf:"varint,11,opt,name=max_seats_per_asn,json=maxSeatsPerAsn,proto3" json:"max_seats_per_asn,omitempty"`
+	MaxSeatsPerRegion   int64                  `protobuf:"varint,12,opt,name=max_seats_per_region,json=maxSeatsPerRegion,proto3" json:"max_seats_per_region,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *EpochSelectionPolicy) Reset() {
+	*x = EpochSelectionPolicy{}
+	mi := &file_tdpn_vpnvalidator_v1_types_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EpochSelectionPolicy) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EpochSelectionPolicy) ProtoMessage() {}
+
+func (x *EpochSelectionPolicy) ProtoReflect() protoreflect.Message {
+	mi := &file_tdpn_vpnvalidator_v1_types_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EpochSelectionPolicy.ProtoReflect.Descriptor instead.
+func (*EpochSelectionPolicy) Descriptor() ([]byte, []int) {
+	return file_tdpn_vpnvalidator_v1_types_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *EpochSelectionPolicy) GetEpoch() int64 {
+	if x != nil {
+		return x.Epoch
+	}
+	return 0
+}
+
+func (x *EpochSelectionPolicy) GetStableSeatCount() int64 {
+	if x != nil {
+		return x.StableSeatCount
+	}
+	return 0
+}
+
+func (x *EpochSelectionPolicy) GetRotatingSeatCount() int64 {
+	if x != nil {
+		return x.RotatingSeatCount
+	}
+	return 0
+}
+
+func (x *EpochSelectionPolicy) GetMinStake() int64 {
+	if x != nil {
+		return x.MinStake
+	}
+	return 0
+}
+
+func (x *EpochSelectionPolicy) GetMinStakeAgeEpochs() int64 {
+	if x != nil {
+		return x.MinStakeAgeEpochs
+	}
+	return 0
+}
+
+func (x *EpochSelectionPolicy) GetMinHealthScore() int64 {
+	if x != nil {
+		return x.MinHealthScore
+	}
+	return 0
+}
+
+func (x *EpochSelectionPolicy) GetMinResourceHeadroom() int64 {
+	if x != nil {
+		return x.MinResourceHeadroom
+	}
+	return 0
+}
+
+func (x *EpochSelectionPolicy) GetWarmupEpochs() int64 {
+	if x != nil {
+		return x.WarmupEpochs
+	}
+	return 0
+}
+
+func (x *EpochSelectionPolicy) GetCooldownEpochs() int64 {
+	if x != nil {
+		return x.CooldownEpochs
+	}
+	return 0
+}
+
+func (x *EpochSelectionPolicy) GetMaxSeatsPerOperator() int64 {
+	if x != nil {
+		return x.MaxSeatsPerOperator
+	}
+	return 0
+}
+
+func (x *EpochSelectionPolicy) GetMaxSeatsPerAsn() int64 {
+	if x != nil {
+		return x.MaxSeatsPerAsn
+	}
+	return 0
+}
+
+func (x *EpochSelectionPolicy) GetMaxSeatsPerRegion() int64 {
+	if x != nil {
+		return x.MaxSeatsPerRegion
+	}
+	return 0
+}
+
+// EpochValidatorCandidate captures objective candidate inputs for deterministic selection preview.
+type EpochValidatorCandidate struct {
+	state                       protoimpl.MessageState `protogen:"open.v1"`
+	ValidatorId                 string                 `protobuf:"bytes,1,opt,name=validator_id,json=validatorId,proto3" json:"validator_id,omitempty"`
+	OperatorId                  string                 `protobuf:"bytes,2,opt,name=operator_id,json=operatorId,proto3" json:"operator_id,omitempty"`
+	Asn                         string                 `protobuf:"bytes,3,opt,name=asn,proto3" json:"asn,omitempty"`
+	Region                      string                 `protobuf:"bytes,4,opt,name=region,proto3" json:"region,omitempty"`
+	Stake                       int64                  `protobuf:"varint,5,opt,name=stake,proto3" json:"stake,omitempty"`
+	StakeAgeEpochs              int64                  `protobuf:"varint,6,opt,name=stake_age_epochs,json=stakeAgeEpochs,proto3" json:"stake_age_epochs,omitempty"`
+	HealthScore                 int64                  `protobuf:"varint,7,opt,name=health_score,json=healthScore,proto3" json:"health_score,omitempty"`
+	ResourceHeadroom            int64                  `protobuf:"varint,8,opt,name=resource_headroom,json=resourceHeadroom,proto3" json:"resource_headroom,omitempty"`
+	HasActiveSanction           bool                   `protobuf:"varint,9,opt,name=has_active_sanction,json=hasActiveSanction,proto3" json:"has_active_sanction,omitempty"`
+	HasUnresolvedCriticalIssues bool                   `protobuf:"varint,10,opt,name=has_unresolved_critical_issues,json=hasUnresolvedCriticalIssues,proto3" json:"has_unresolved_critical_issues,omitempty"`
+	ConsecutiveEligibleEpochs   int64                  `protobuf:"varint,11,opt,name=consecutive_eligible_epochs,json=consecutiveEligibleEpochs,proto3" json:"consecutive_eligible_epochs,omitempty"`
+	LastRemovedEpoch            int64                  `protobuf:"varint,12,opt,name=last_removed_epoch,json=lastRemovedEpoch,proto3" json:"last_removed_epoch,omitempty"`
+	Score                       int64                  `protobuf:"varint,13,opt,name=score,proto3" json:"score,omitempty"`
+	StableSeatPreferred         bool                   `protobuf:"varint,14,opt,name=stable_seat_preferred,json=stableSeatPreferred,proto3" json:"stable_seat_preferred,omitempty"`
+	unknownFields               protoimpl.UnknownFields
+	sizeCache                   protoimpl.SizeCache
+}
+
+func (x *EpochValidatorCandidate) Reset() {
+	*x = EpochValidatorCandidate{}
+	mi := &file_tdpn_vpnvalidator_v1_types_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EpochValidatorCandidate) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EpochValidatorCandidate) ProtoMessage() {}
+
+func (x *EpochValidatorCandidate) ProtoReflect() protoreflect.Message {
+	mi := &file_tdpn_vpnvalidator_v1_types_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EpochValidatorCandidate.ProtoReflect.Descriptor instead.
+func (*EpochValidatorCandidate) Descriptor() ([]byte, []int) {
+	return file_tdpn_vpnvalidator_v1_types_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *EpochValidatorCandidate) GetValidatorId() string {
+	if x != nil {
+		return x.ValidatorId
+	}
+	return ""
+}
+
+func (x *EpochValidatorCandidate) GetOperatorId() string {
+	if x != nil {
+		return x.OperatorId
+	}
+	return ""
+}
+
+func (x *EpochValidatorCandidate) GetAsn() string {
+	if x != nil {
+		return x.Asn
+	}
+	return ""
+}
+
+func (x *EpochValidatorCandidate) GetRegion() string {
+	if x != nil {
+		return x.Region
+	}
+	return ""
+}
+
+func (x *EpochValidatorCandidate) GetStake() int64 {
+	if x != nil {
+		return x.Stake
+	}
+	return 0
+}
+
+func (x *EpochValidatorCandidate) GetStakeAgeEpochs() int64 {
+	if x != nil {
+		return x.StakeAgeEpochs
+	}
+	return 0
+}
+
+func (x *EpochValidatorCandidate) GetHealthScore() int64 {
+	if x != nil {
+		return x.HealthScore
+	}
+	return 0
+}
+
+func (x *EpochValidatorCandidate) GetResourceHeadroom() int64 {
+	if x != nil {
+		return x.ResourceHeadroom
+	}
+	return 0
+}
+
+func (x *EpochValidatorCandidate) GetHasActiveSanction() bool {
+	if x != nil {
+		return x.HasActiveSanction
+	}
+	return false
+}
+
+func (x *EpochValidatorCandidate) GetHasUnresolvedCriticalIssues() bool {
+	if x != nil {
+		return x.HasUnresolvedCriticalIssues
+	}
+	return false
+}
+
+func (x *EpochValidatorCandidate) GetConsecutiveEligibleEpochs() int64 {
+	if x != nil {
+		return x.ConsecutiveEligibleEpochs
+	}
+	return 0
+}
+
+func (x *EpochValidatorCandidate) GetLastRemovedEpoch() int64 {
+	if x != nil {
+		return x.LastRemovedEpoch
+	}
+	return 0
+}
+
+func (x *EpochValidatorCandidate) GetScore() int64 {
+	if x != nil {
+		return x.Score
+	}
+	return 0
+}
+
+func (x *EpochValidatorCandidate) GetStableSeatPreferred() bool {
+	if x != nil {
+		return x.StableSeatPreferred
+	}
+	return false
+}
+
+// EpochSelectionResult is the deterministic stable/rotating seat output.
+type EpochSelectionResult struct {
+	state         protoimpl.MessageState     `protogen:"open.v1"`
+	StableSeats   []*EpochValidatorCandidate `protobuf:"bytes,1,rep,name=stable_seats,json=stableSeats,proto3" json:"stable_seats,omitempty"`
+	RotatingSeats []*EpochValidatorCandidate `protobuf:"bytes,2,rep,name=rotating_seats,json=rotatingSeats,proto3" json:"rotating_seats,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EpochSelectionResult) Reset() {
+	*x = EpochSelectionResult{}
+	mi := &file_tdpn_vpnvalidator_v1_types_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EpochSelectionResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EpochSelectionResult) ProtoMessage() {}
+
+func (x *EpochSelectionResult) ProtoReflect() protoreflect.Message {
+	mi := &file_tdpn_vpnvalidator_v1_types_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EpochSelectionResult.ProtoReflect.Descriptor instead.
+func (*EpochSelectionResult) Descriptor() ([]byte, []int) {
+	return file_tdpn_vpnvalidator_v1_types_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *EpochSelectionResult) GetStableSeats() []*EpochValidatorCandidate {
+	if x != nil {
+		return x.StableSeats
+	}
+	return nil
+}
+
+func (x *EpochSelectionResult) GetRotatingSeats() []*EpochValidatorCandidate {
+	if x != nil {
+		return x.RotatingSeats
+	}
+	return nil
+}
+
 var File_tdpn_vpnvalidator_v1_types_proto protoreflect.FileDescriptor
 
 const file_tdpn_vpnvalidator_v1_types_proto_rawDesc = "" +
@@ -282,7 +617,41 @@ const file_tdpn_vpnvalidator_v1_types_proto_rawDesc = "" +
 	"\x0fevidence_height\x18\x05 \x01(\x03R\x0eevidenceHeight\x12!\n" +
 	"\fevidence_ref\x18\x06 \x01(\tR\vevidenceRef\x12(\n" +
 	"\x10recorded_at_unix\x18\a \x01(\x03R\x0erecordedAtUnix\x12B\n" +
-	"\x06status\x18\b \x01(\x0e2*.tdpn.vpnvalidator.v1.ReconciliationStatusR\x06status*\xcc\x01\n" +
+	"\x06status\x18\b \x01(\x0e2*.tdpn.vpnvalidator.v1.ReconciliationStatusR\x06status\"\x93\x04\n" +
+	"\x14EpochSelectionPolicy\x12\x14\n" +
+	"\x05epoch\x18\x01 \x01(\x03R\x05epoch\x12*\n" +
+	"\x11stable_seat_count\x18\x02 \x01(\x03R\x0fstableSeatCount\x12.\n" +
+	"\x13rotating_seat_count\x18\x03 \x01(\x03R\x11rotatingSeatCount\x12\x1b\n" +
+	"\tmin_stake\x18\x04 \x01(\x03R\bminStake\x12/\n" +
+	"\x14min_stake_age_epochs\x18\x05 \x01(\x03R\x11minStakeAgeEpochs\x12(\n" +
+	"\x10min_health_score\x18\x06 \x01(\x03R\x0eminHealthScore\x122\n" +
+	"\x15min_resource_headroom\x18\a \x01(\x03R\x13minResourceHeadroom\x12#\n" +
+	"\rwarmup_epochs\x18\b \x01(\x03R\fwarmupEpochs\x12'\n" +
+	"\x0fcooldown_epochs\x18\t \x01(\x03R\x0ecooldownEpochs\x123\n" +
+	"\x16max_seats_per_operator\x18\n" +
+	" \x01(\x03R\x13maxSeatsPerOperator\x12)\n" +
+	"\x11max_seats_per_asn\x18\v \x01(\x03R\x0emaxSeatsPerAsn\x12/\n" +
+	"\x14max_seats_per_region\x18\f \x01(\x03R\x11maxSeatsPerRegion\"\xc4\x04\n" +
+	"\x17EpochValidatorCandidate\x12!\n" +
+	"\fvalidator_id\x18\x01 \x01(\tR\vvalidatorId\x12\x1f\n" +
+	"\voperator_id\x18\x02 \x01(\tR\n" +
+	"operatorId\x12\x10\n" +
+	"\x03asn\x18\x03 \x01(\tR\x03asn\x12\x16\n" +
+	"\x06region\x18\x04 \x01(\tR\x06region\x12\x14\n" +
+	"\x05stake\x18\x05 \x01(\x03R\x05stake\x12(\n" +
+	"\x10stake_age_epochs\x18\x06 \x01(\x03R\x0estakeAgeEpochs\x12!\n" +
+	"\fhealth_score\x18\a \x01(\x03R\vhealthScore\x12+\n" +
+	"\x11resource_headroom\x18\b \x01(\x03R\x10resourceHeadroom\x12.\n" +
+	"\x13has_active_sanction\x18\t \x01(\bR\x11hasActiveSanction\x12C\n" +
+	"\x1ehas_unresolved_critical_issues\x18\n" +
+	" \x01(\bR\x1bhasUnresolvedCriticalIssues\x12>\n" +
+	"\x1bconsecutive_eligible_epochs\x18\v \x01(\x03R\x19consecutiveEligibleEpochs\x12,\n" +
+	"\x12last_removed_epoch\x18\f \x01(\x03R\x10lastRemovedEpoch\x12\x14\n" +
+	"\x05score\x18\r \x01(\x03R\x05score\x122\n" +
+	"\x15stable_seat_preferred\x18\x0e \x01(\bR\x13stableSeatPreferred\"\xbe\x01\n" +
+	"\x14EpochSelectionResult\x12P\n" +
+	"\fstable_seats\x18\x01 \x03(\v2-.tdpn.vpnvalidator.v1.EpochValidatorCandidateR\vstableSeats\x12T\n" +
+	"\x0erotating_seats\x18\x02 \x03(\v2-.tdpn.vpnvalidator.v1.EpochValidatorCandidateR\rrotatingSeats*\xcc\x01\n" +
 	"\x14ReconciliationStatus\x12%\n" +
 	"!RECONCILIATION_STATUS_UNSPECIFIED\x10\x00\x12!\n" +
 	"\x1dRECONCILIATION_STATUS_PENDING\x10\x01\x12#\n" +
@@ -303,20 +672,25 @@ func file_tdpn_vpnvalidator_v1_types_proto_rawDescGZIP() []byte {
 }
 
 var file_tdpn_vpnvalidator_v1_types_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_tdpn_vpnvalidator_v1_types_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_tdpn_vpnvalidator_v1_types_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_tdpn_vpnvalidator_v1_types_proto_goTypes = []any{
-	(ReconciliationStatus)(0),     // 0: tdpn.vpnvalidator.v1.ReconciliationStatus
-	(*ValidatorEligibility)(nil),  // 1: tdpn.vpnvalidator.v1.ValidatorEligibility
-	(*ValidatorStatusRecord)(nil), // 2: tdpn.vpnvalidator.v1.ValidatorStatusRecord
+	(ReconciliationStatus)(0),       // 0: tdpn.vpnvalidator.v1.ReconciliationStatus
+	(*ValidatorEligibility)(nil),    // 1: tdpn.vpnvalidator.v1.ValidatorEligibility
+	(*ValidatorStatusRecord)(nil),   // 2: tdpn.vpnvalidator.v1.ValidatorStatusRecord
+	(*EpochSelectionPolicy)(nil),    // 3: tdpn.vpnvalidator.v1.EpochSelectionPolicy
+	(*EpochValidatorCandidate)(nil), // 4: tdpn.vpnvalidator.v1.EpochValidatorCandidate
+	(*EpochSelectionResult)(nil),    // 5: tdpn.vpnvalidator.v1.EpochSelectionResult
 }
 var file_tdpn_vpnvalidator_v1_types_proto_depIdxs = []int32{
 	0, // 0: tdpn.vpnvalidator.v1.ValidatorEligibility.status:type_name -> tdpn.vpnvalidator.v1.ReconciliationStatus
 	0, // 1: tdpn.vpnvalidator.v1.ValidatorStatusRecord.status:type_name -> tdpn.vpnvalidator.v1.ReconciliationStatus
-	2, // [2:2] is the sub-list for method output_type
-	2, // [2:2] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	4, // 2: tdpn.vpnvalidator.v1.EpochSelectionResult.stable_seats:type_name -> tdpn.vpnvalidator.v1.EpochValidatorCandidate
+	4, // 3: tdpn.vpnvalidator.v1.EpochSelectionResult.rotating_seats:type_name -> tdpn.vpnvalidator.v1.EpochValidatorCandidate
+	4, // [4:4] is the sub-list for method output_type
+	4, // [4:4] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_tdpn_vpnvalidator_v1_types_proto_init() }
@@ -330,7 +704,7 @@ func file_tdpn_vpnvalidator_v1_types_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_tdpn_vpnvalidator_v1_types_proto_rawDesc), len(file_tdpn_vpnvalidator_v1_types_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   2,
+			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

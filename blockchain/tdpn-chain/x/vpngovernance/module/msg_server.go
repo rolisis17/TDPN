@@ -10,12 +10,14 @@ import (
 )
 
 var (
-	ErrNilKeeper        = errors.New("vpngovernance: keeper is nil")
-	ErrInvalidPolicy    = errors.New("vpngovernance: invalid policy")
-	ErrInvalidDecision  = errors.New("vpngovernance: invalid decision")
-	ErrPolicyConflict   = errors.New("vpngovernance: policy conflict")
-	ErrDecisionConflict = errors.New("vpngovernance: decision conflict")
-	ErrPolicyNotFound   = errors.New("vpngovernance: policy not found")
+	ErrNilKeeper           = errors.New("vpngovernance: keeper is nil")
+	ErrInvalidPolicy       = errors.New("vpngovernance: invalid policy")
+	ErrInvalidDecision     = errors.New("vpngovernance: invalid decision")
+	ErrInvalidAuditAction  = errors.New("vpngovernance: invalid audit action")
+	ErrPolicyConflict      = errors.New("vpngovernance: policy conflict")
+	ErrDecisionConflict    = errors.New("vpngovernance: decision conflict")
+	ErrAuditActionConflict = errors.New("vpngovernance: audit action conflict")
+	ErrPolicyNotFound      = errors.New("vpngovernance: policy not found")
 )
 
 // CreatePolicyRequest captures an intent to create or replay governance policy.
@@ -38,6 +40,18 @@ type RecordDecisionRequest struct {
 // RecordDecisionResponse returns persisted decision plus replay hints.
 type RecordDecisionResponse struct {
 	Decision   types.GovernanceDecision
+	Existed    bool
+	Idempotent bool
+}
+
+// RecordAuditActionRequest captures an intent to create or replay governance audit action.
+type RecordAuditActionRequest struct {
+	Action types.GovernanceAuditAction
+}
+
+// RecordAuditActionResponse returns persisted audit action plus replay hints.
+type RecordAuditActionResponse struct {
+	Action     types.GovernanceAuditAction
 	Existed    bool
 	Idempotent bool
 }
@@ -110,5 +124,31 @@ func (s MsgServer) RecordDecision(req RecordDecisionRequest) (RecordDecisionResp
 		}
 		return resp, fmt.Errorf("%w: %v", ErrInvalidDecision, err)
 	}
+	return resp, nil
+}
+
+func (s MsgServer) RecordAuditAction(req RecordAuditActionRequest) (RecordAuditActionResponse, error) {
+	if s.keeper == nil {
+		return RecordAuditActionResponse{}, ErrNilKeeper
+	}
+
+	existed := false
+	if req.Action.ActionID != "" {
+		_, existed = s.keeper.GetAuditAction(req.Action.ActionID)
+	}
+
+	record, err := s.keeper.RecordAuditAction(req.Action)
+	resp := RecordAuditActionResponse{
+		Action:     record,
+		Existed:    existed,
+		Idempotent: existed && err == nil,
+	}
+	if err != nil {
+		if strings.Contains(err.Error(), "conflicting fields") {
+			return resp, fmt.Errorf("%w: %v", ErrAuditActionConflict, err)
+		}
+		return resp, fmt.Errorf("%w: %v", ErrInvalidAuditAction, err)
+	}
+
 	return resp, nil
 }

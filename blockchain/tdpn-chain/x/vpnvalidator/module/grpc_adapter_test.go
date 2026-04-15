@@ -3,6 +3,8 @@ package module
 import (
 	"context"
 	"errors"
+	"reflect"
+	"strings"
 	"testing"
 
 	validatorpb "github.com/tdpn/tdpn-chain/proto/gen/go/tdpn/vpnvalidator/v1"
@@ -219,6 +221,79 @@ func TestGRPCQueryServerAdapterFoundAndList(t *testing.T) {
 	}
 }
 
+func TestGRPCQueryServerAdapterPreviewEpochSelectionDeterministic(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	adapter := NewGRPCQueryServerAdapter(&k)
+
+	requestA := &validatorpb.QueryPreviewEpochSelectionRequest{
+		Policy: baselinePreviewPolicyProto(),
+		Candidates: []*validatorpb.EpochValidatorCandidate{
+			previewCandidateProto("rotate-top", "op-rotate-top", "asn-rotate-top", "apac", 99, false),
+			previewCandidateProto("stable-low", "op-stable-low", "asn-stable-low", "eu", 80, true),
+			previewCandidateProto("rotate-next", "op-rotate-next", "asn-rotate-next", "latam", 70, false),
+			previewCandidateProto("stable-high", "op-stable-high", "asn-stable-high", "us", 90, true),
+		},
+	}
+	requestB := &validatorpb.QueryPreviewEpochSelectionRequest{
+		Policy: baselinePreviewPolicyProto(),
+		Candidates: []*validatorpb.EpochValidatorCandidate{
+			requestA.Candidates[3],
+			requestA.Candidates[2],
+			requestA.Candidates[0],
+			requestA.Candidates[1],
+		},
+	}
+
+	respA, err := adapter.PreviewEpochSelection(context.Background(), requestA)
+	if err != nil {
+		t.Fatalf("expected preview selection success, got %v", err)
+	}
+	respB, err := adapter.PreviewEpochSelection(context.Background(), requestB)
+	if err != nil {
+		t.Fatalf("expected preview selection success for shuffled input, got %v", err)
+	}
+
+	idsA := previewResultValidatorIDs(respA.GetResult())
+	idsB := previewResultValidatorIDs(respB.GetResult())
+	if !reflect.DeepEqual(idsA, idsB) {
+		t.Fatalf("expected deterministic selected ids, got %v and %v", idsA, idsB)
+	}
+
+	if len(respA.GetResult().GetStableSeats()) != 1 || respA.GetResult().GetStableSeats()[0].GetValidatorId() != "stable-high" {
+		t.Fatalf("expected stable seat [stable-high], got %+v", respA.GetResult().GetStableSeats())
+	}
+	if len(respA.GetResult().GetRotatingSeats()) != 2 {
+		t.Fatalf("expected 2 rotating seats, got %d", len(respA.GetResult().GetRotatingSeats()))
+	}
+	if respA.GetResult().GetRotatingSeats()[0].GetValidatorId() != "rotate-top" ||
+		respA.GetResult().GetRotatingSeats()[1].GetValidatorId() != "stable-low" {
+		t.Fatalf("expected rotating seats [rotate-top stable-low], got %+v", respA.GetResult().GetRotatingSeats())
+	}
+}
+
+func TestGRPCQueryServerAdapterPreviewEpochSelectionValidationErrorPropagation(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	adapter := NewGRPCQueryServerAdapter(&k)
+
+	_, err := adapter.PreviewEpochSelection(context.Background(), &validatorpb.QueryPreviewEpochSelectionRequest{
+		Policy: &validatorpb.EpochSelectionPolicy{
+			Epoch:             10,
+			StableSeatCount:   0,
+			RotatingSeatCount: 0,
+		},
+	})
+	if err == nil {
+		t.Fatal("expected preview validation error")
+	}
+	if !strings.Contains(err.Error(), "at least one stable or rotating seat is required") {
+		t.Fatalf("expected seat validation error, got %v", err)
+	}
+}
+
 func TestGRPCAdaptersNilKeeperPropagatesErrNilKeeper(t *testing.T) {
 	t.Parallel()
 
@@ -280,6 +355,14 @@ func TestGRPCAdaptersNilRequestsAreFailSafe(t *testing.T) {
 	}
 	if statusResp.GetRecord() != nil {
 		t.Fatal("expected nil status record when found=false")
+	}
+
+	_, previewErr := queryAdapter.PreviewEpochSelection(context.Background(), nil)
+	if previewErr == nil {
+		t.Fatal("expected deterministic validation error for nil preview request")
+	}
+	if !strings.Contains(previewErr.Error(), "at least one stable or rotating seat is required") {
+		t.Fatalf("expected seat validation error for nil preview request, got %v", previewErr)
 	}
 }
 
@@ -369,4 +452,53 @@ func TestStatusMappingFromAndToProtoCoversExplicitAndDefaultBranches(t *testing.
 			}
 		})
 	}
+}
+
+func baselinePreviewPolicyProto() *validatorpb.EpochSelectionPolicy {
+	return &validatorpb.EpochSelectionPolicy{
+		Epoch:               10,
+		StableSeatCount:     1,
+		RotatingSeatCount:   2,
+		MinStake:            100,
+		MinStakeAgeEpochs:   3,
+		MinHealthScore:      70,
+		MinResourceHeadroom: 20,
+		WarmupEpochs:        2,
+		CooldownEpochs:      3,
+		MaxSeatsPerOperator: 10,
+		MaxSeatsPerAsn:      10,
+		MaxSeatsPerRegion:   10,
+	}
+}
+
+func previewCandidateProto(validatorID string, operatorID string, asn string, region string, score int64, stablePreferred bool) *validatorpb.EpochValidatorCandidate {
+	return &validatorpb.EpochValidatorCandidate{
+		ValidatorId:               validatorID,
+		OperatorId:                operatorID,
+		Asn:                       asn,
+		Region:                    region,
+		Stake:                     1_000,
+		StakeAgeEpochs:            6,
+		HealthScore:               95,
+		ResourceHeadroom:          60,
+		ConsecutiveEligibleEpochs: 4,
+		LastRemovedEpoch:          -1,
+		Score:                     score,
+		StableSeatPreferred:       stablePreferred,
+	}
+}
+
+func previewResultValidatorIDs(result *validatorpb.EpochSelectionResult) []string {
+	if result == nil {
+		return nil
+	}
+
+	ids := make([]string, 0, len(result.GetStableSeats())+len(result.GetRotatingSeats()))
+	for _, candidate := range result.GetStableSeats() {
+		ids = append(ids, candidate.GetValidatorId())
+	}
+	for _, candidate := range result.GetRotatingSeats() {
+		ids = append(ids, candidate.GetValidatorId())
+	}
+	return ids
 }

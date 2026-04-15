@@ -11,6 +11,7 @@ service Query {
   rpc ValidatorStatusRecord(QueryValidatorStatusRecordRequest) returns (QueryValidatorStatusRecordResponse);
   rpc ListValidatorEligibilities(QueryListValidatorEligibilitiesRequest) returns (QueryListValidatorEligibilitiesResponse);
   rpc ListValidatorStatusRecords(QueryListValidatorStatusRecordsRequest) returns (QueryListValidatorStatusRecordsResponse);
+  rpc PreviewEpochSelection(QueryPreviewEpochSelectionRequest) returns (QueryPreviewEpochSelectionResponse);
 }
 
 message QueryValidatorEligibilityRequest {
@@ -41,4 +42,13 @@ message QueryListValidatorStatusRecordsRequest {}
 
 message QueryListValidatorStatusRecordsResponse {
   repeated ValidatorStatusRecord records = 1;
+}
+
+message QueryPreviewEpochSelectionRequest {
+  EpochSelectionPolicy policy = 1;
+  repeated EpochValidatorCandidate candidates = 2;
+}
+
+message QueryPreviewEpochSelectionResponse {
+  EpochSelectionResult result = 1;
 }

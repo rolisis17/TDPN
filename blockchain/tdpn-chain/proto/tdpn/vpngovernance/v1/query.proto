@@ -9,8 +9,10 @@ import "tdpn/vpngovernance/v1/types.proto";
 service Query {
   rpc GovernancePolicy(QueryGovernancePolicyRequest) returns (QueryGovernancePolicyResponse);
   rpc GovernanceDecision(QueryGovernanceDecisionRequest) returns (QueryGovernanceDecisionResponse);
+  rpc GovernanceAuditAction(QueryGovernanceAuditActionRequest) returns (QueryGovernanceAuditActionResponse);
   rpc ListGovernancePolicies(QueryListGovernancePoliciesRequest) returns (QueryListGovernancePoliciesResponse);
   rpc ListGovernanceDecisions(QueryListGovernanceDecisionsRequest) returns (QueryListGovernanceDecisionsResponse);
+  rpc ListGovernanceAuditActions(QueryListGovernanceAuditActionsRequest) returns (QueryListGovernanceAuditActionsResponse);
 }
 
 message QueryGovernancePolicyRequest {
@@ -31,6 +33,15 @@ message QueryGovernanceDecisionResponse {
   bool found = 2;
 }
 
+message QueryGovernanceAuditActionRequest {
+  string action_id = 1;
+}
+
+message QueryGovernanceAuditActionResponse {
+  GovernanceAuditAction action = 1;
+  bool found = 2;
+}
+
 message QueryListGovernancePoliciesRequest {}
 
 message QueryListGovernancePoliciesResponse {
@@ -41,4 +52,10 @@ message QueryListGovernanceDecisionsRequest {}
 
 message QueryListGovernanceDecisionsResponse {
   repeated GovernanceDecision decisions = 1;
+}
+
+message QueryListGovernanceAuditActionsRequest {}
+
+message QueryListGovernanceAuditActionsResponse {
+  repeated GovernanceAuditAction actions = 1;
 }

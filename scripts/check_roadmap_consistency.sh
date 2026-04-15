@@ -1161,12 +1161,30 @@ if ! rg -Fq "deterministic epoch selection helpers" "$full_plan"; then
   echo "full execution plan must document deterministic validator epoch selection posture"
   exit 1
 fi
+if ! rg -Fq "RecordAuditAction" "$full_plan" \
+  || ! rg -Fq "ListGovernanceAuditActions" "$full_plan"; then
+  echo "full execution plan must document governance audit-action RPC/query surfaces"
+  exit 1
+fi
+if ! rg -Fq "PreviewEpochSelection" "$full_plan"; then
+  echo "full execution plan must document validator preview epoch-selection query surface"
+  exit 1
+fi
 if ! rg -Fq "append-only governance admin audit actions" "$product_roadmap"; then
   echo "product roadmap must document append-only governance admin audit action posture"
   exit 1
 fi
 if ! rg -Fq "deterministic epoch selection helpers" "$product_roadmap"; then
   echo "product roadmap must document deterministic validator epoch selection posture"
+  exit 1
+fi
+if ! rg -Fq "RecordAuditAction" "$product_roadmap" \
+  || ! rg -Fq "ListGovernanceAuditActions" "$product_roadmap"; then
+  echo "product roadmap must document governance audit-action RPC/query surfaces"
+  exit 1
+fi
+if ! rg -Fq "PreviewEpochSelection" "$product_roadmap"; then
+  echo "product roadmap must document validator preview epoch-selection query surface"
   exit 1
 fi
 if ! rg -Fq "x/vpngovernance" "$bootstrap_validator_doc" \
@@ -1185,6 +1203,20 @@ if ! rg -Fq "append-only admin audit actions" "$chain_readme"; then
 fi
 if ! rg -Fq "deterministic epoch-selection helper logic" "$chain_readme"; then
   echo "chain README must document vpnvalidator deterministic epoch-selection capability"
+  exit 1
+fi
+if ! rg -Fq "RecordAuditAction" "$chain_readme" \
+  || ! rg -Fq "ListGovernanceAuditActions" "$chain_readme"; then
+  echo "chain README must document governance audit-action RPC/query surfaces"
+  exit 1
+fi
+if ! rg -Fq "PreviewEpochSelection" "$chain_readme"; then
+  echo "chain README must document validator preview epoch-selection query surface"
+  exit 1
+fi
+if ! rg -Fq "RecordAuditAction" "$cosmos_runtime_doc" \
+  || ! rg -Fq "PreviewEpochSelection" "$cosmos_runtime_doc"; then
+  echo "cosmos settlement runtime guide must document governance/validator bootstrap gRPC highlights"
   exit 1
 fi
 if ! rg -Fq "vpnvalidator.json" "$chain_scaffold_file"; then

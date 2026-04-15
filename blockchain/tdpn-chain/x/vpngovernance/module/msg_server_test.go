@@ -210,6 +210,121 @@ func TestMsgServerRecordDecisionInvalidPropagation(t *testing.T) {
 	}
 }
 
+func TestMsgServerRecordAuditActionHappyPath(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	server := NewMsgServer(&k)
+
+	resp, err := server.RecordAuditAction(RecordAuditActionRequest{Action: types.GovernanceAuditAction{
+		ActionID:        "audit-1",
+		Action:          "admin_disable_validator",
+		Actor:           "admin-1",
+		Reason:          "objective evidence verified",
+		EvidencePointer: "ipfs://audit-1",
+		TimestampUnix:   4102444800,
+	}})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if resp.Existed {
+		t.Fatal("expected existed=false for first audit action")
+	}
+	if resp.Idempotent {
+		t.Fatal("expected idempotent=false for first audit action")
+	}
+	if resp.Action.ActionID != "audit-1" {
+		t.Fatalf("expected action_id audit-1, got %q", resp.Action.ActionID)
+	}
+}
+
+func TestMsgServerRecordAuditActionIdempotentReplay(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	server := NewMsgServer(&k)
+
+	req := RecordAuditActionRequest{Action: types.GovernanceAuditAction{
+		ActionID:        "audit-2",
+		Action:          "admin_allow_validator",
+		Actor:           "admin-2",
+		Reason:          "manual override",
+		EvidencePointer: "ipfs://audit-2",
+		TimestampUnix:   4102444800,
+	}}
+	if _, err := server.RecordAuditAction(req); err != nil {
+		t.Fatalf("first record failed: %v", err)
+	}
+
+	resp, err := server.RecordAuditAction(req)
+	if err != nil {
+		t.Fatalf("expected idempotent replay to succeed, got %v", err)
+	}
+	if !resp.Existed {
+		t.Fatal("expected existed=true for replayed audit action")
+	}
+	if !resp.Idempotent {
+		t.Fatal("expected idempotent=true for replayed audit action")
+	}
+}
+
+func TestMsgServerRecordAuditActionConflictPropagation(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	server := NewMsgServer(&k)
+
+	base := RecordAuditActionRequest{Action: types.GovernanceAuditAction{
+		ActionID:        "audit-3",
+		Action:          "admin_disable_validator",
+		Actor:           "admin-3",
+		Reason:          "reason-1",
+		EvidencePointer: "ipfs://audit-3",
+		TimestampUnix:   4102444800,
+	}}
+	if _, err := server.RecordAuditAction(base); err != nil {
+		t.Fatalf("first record failed: %v", err)
+	}
+
+	conflict := base
+	conflict.Action.Reason = "reason-2"
+	resp, err := server.RecordAuditAction(conflict)
+	if err == nil {
+		t.Fatal("expected audit action conflict error")
+	}
+	if !errors.Is(err, ErrAuditActionConflict) {
+		t.Fatalf("expected ErrAuditActionConflict, got %v", err)
+	}
+	if !resp.Existed {
+		t.Fatal("expected existed=true on conflict")
+	}
+	if resp.Idempotent {
+		t.Fatal("expected idempotent=false on conflict")
+	}
+}
+
+func TestMsgServerRecordAuditActionInvalidPropagation(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	server := NewMsgServer(&k)
+
+	_, err := server.RecordAuditAction(RecordAuditActionRequest{Action: types.GovernanceAuditAction{
+		ActionID:        "audit-invalid",
+		Action:          "admin_disable_validator",
+		Actor:           "admin-invalid",
+		Reason:          "",
+		EvidencePointer: "ipfs://audit-invalid",
+		TimestampUnix:   4102444800,
+	}})
+	if err == nil {
+		t.Fatal("expected invalid audit action error")
+	}
+	if !errors.Is(err, ErrInvalidAuditAction) {
+		t.Fatalf("expected ErrInvalidAuditAction, got %v", err)
+	}
+}
+
 func TestMsgServerNilKeeper(t *testing.T) {
 	t.Parallel()
 
@@ -224,5 +339,17 @@ func TestMsgServerNilKeeper(t *testing.T) {
 	_, recordErr := server.RecordDecision(RecordDecisionRequest{Decision: types.GovernanceDecision{DecisionID: "decision-nil", PolicyID: "policy-nil", ProposalID: "proposal-nil", Outcome: types.DecisionOutcomeApprove, Decider: "council", DecidedAtUnix: 1}})
 	if !errors.Is(recordErr, ErrNilKeeper) {
 		t.Fatalf("expected ErrNilKeeper on record decision, got %v", recordErr)
+	}
+
+	_, recordAuditErr := server.RecordAuditAction(RecordAuditActionRequest{Action: types.GovernanceAuditAction{
+		ActionID:        "audit-nil",
+		Action:          "admin_disable_validator",
+		Actor:           "admin",
+		Reason:          "reason",
+		EvidencePointer: "ipfs://audit-nil",
+		TimestampUnix:   1,
+	}})
+	if !errors.Is(recordAuditErr, ErrNilKeeper) {
+		t.Fatalf("expected ErrNilKeeper on record audit action, got %v", recordAuditErr)
 	}
 }

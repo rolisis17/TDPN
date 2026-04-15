@@ -7,7 +7,10 @@ import (
 	"github.com/tdpn/tdpn-chain/x/vpngovernance/types"
 )
 
-var errDecisionNotFound = errors.New("vpngovernance: decision not found")
+var (
+	errDecisionNotFound    = errors.New("vpngovernance: decision not found")
+	errAuditActionNotFound = errors.New("vpngovernance: audit action not found")
+)
 
 // GetPolicyRequest requests governance policy by policy ID.
 type GetPolicyRequest struct {
@@ -29,6 +32,16 @@ type GetDecisionResponse struct {
 	Decision types.GovernanceDecision
 }
 
+// GetAuditActionRequest requests governance audit action by action ID.
+type GetAuditActionRequest struct {
+	ActionID string
+}
+
+// GetAuditActionResponse contains an audit action lookup result.
+type GetAuditActionResponse struct {
+	Action types.GovernanceAuditAction
+}
+
 // ListPoliciesRequest requests full policy read-model.
 type ListPoliciesRequest struct{}
 
@@ -43,6 +56,14 @@ type ListDecisionsRequest struct{}
 // ListDecisionsResponse contains all decisions sorted by DecisionID.
 type ListDecisionsResponse struct {
 	Decisions []types.GovernanceDecision
+}
+
+// ListAuditActionsRequest requests full governance audit-action read-model.
+type ListAuditActionsRequest struct{}
+
+// ListAuditActionsResponse contains all audit actions sorted by ActionID.
+type ListAuditActionsResponse struct {
+	Actions []types.GovernanceAuditAction
 }
 
 // QueryServer exposes a lightweight Cosmos-style query surface for vpngovernance.
@@ -78,6 +99,18 @@ func (s QueryServer) GetDecision(req GetDecisionRequest) (GetDecisionResponse, e
 	return GetDecisionResponse{Decision: record}, nil
 }
 
+func (s QueryServer) GetAuditAction(req GetAuditActionRequest) (GetAuditActionResponse, error) {
+	if s.keeper == nil {
+		return GetAuditActionResponse{}, ErrNilKeeper
+	}
+
+	record, ok := s.keeper.GetAuditAction(req.ActionID)
+	if !ok {
+		return GetAuditActionResponse{}, errAuditActionNotFound
+	}
+	return GetAuditActionResponse{Action: record}, nil
+}
+
 func (s QueryServer) ListPolicies(_ ListPoliciesRequest) (ListPoliciesResponse, error) {
 	if s.keeper == nil {
 		return ListPoliciesResponse{}, ErrNilKeeper
@@ -92,4 +125,12 @@ func (s QueryServer) ListDecisions(_ ListDecisionsRequest) (ListDecisionsRespons
 	}
 
 	return ListDecisionsResponse{Decisions: s.keeper.ListDecisions()}, nil
+}
+
+func (s QueryServer) ListAuditActions(_ ListAuditActionsRequest) (ListAuditActionsResponse, error) {
+	if s.keeper == nil {
+		return ListAuditActionsResponse{}, ErrNilKeeper
+	}
+
+	return ListAuditActionsResponse{Actions: s.keeper.ListAuditActions()}, nil
 }
