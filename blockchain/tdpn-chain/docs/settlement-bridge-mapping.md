@@ -44,7 +44,7 @@ This scaffold keeps chain responsibilities isolated from VPN dataplane runtime.
   - distribution requires existing accrual,
   - penalty requires existing evidence,
   - delegated credit requires existing authorization.
-- Keepers remain in-memory placeholders and intentionally do not block session dataplane behavior.
+- Keepers use in-memory defaults for lightweight/local runs, with file-backed `--state-dir` runtime persistence and a KV-adapter seam for Cosmos SDK integration.
 - Cosmos SDK/ABCI wiring can replace keeper storage without changing module responsibility boundaries.
 - Proto schemas for Msg/Query surfaces are staged under `proto/tdpn/*/v1`.
 - Runtime state persistence option:

@@ -226,6 +226,22 @@ if ! rg -Fq "integration_cosmos_tdpnd_state_dir_persistence.sh" "$settlement_map
   echo "settlement bridge mapping must document state-dir persistence integration script"
   exit 1
 fi
+if rg -Fq "Keepers remain in-memory placeholders and intentionally do not block session dataplane behavior." "$settlement_mapping_doc"; then
+  echo "settlement bridge mapping contains stale in-memory-placeholder keeper wording"
+  exit 1
+fi
+if ! rg -Fq "Keepers use in-memory defaults for lightweight/local runs" "$settlement_mapping_doc"; then
+  echo "settlement bridge mapping must document in-memory default keeper posture"
+  exit 1
+fi
+if ! rg -Fq "file-backed \`--state-dir\` runtime persistence" "$settlement_mapping_doc"; then
+  echo "settlement bridge mapping must document file-backed state-dir keeper posture"
+  exit 1
+fi
+if ! rg -Fq "KV-adapter seam for Cosmos SDK integration" "$settlement_mapping_doc"; then
+  echo "settlement bridge mapping must document keeper KV-adapter seam posture"
+  exit 1
+fi
 
 for phase5_script in "$phase5_ci_script" "$phase5_integration_script"; do
   if rg -qi "phase4 windows full parity" "$phase5_script"; then
