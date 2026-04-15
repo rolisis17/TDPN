@@ -204,6 +204,10 @@ if ! rg -Fq "phase6_cosmos_l1_build_testnet_handoff_run.sh" "$full_plan"; then
   echo "full execution plan must document phase6 handoff-run wrapper script"
   exit 1
 fi
+if ! rg -Fq "tdpnd_grpc_auth_live_smoke_ok" "$full_plan"; then
+  echo "full execution plan must document phase6 readiness/handoff tdpnd_grpc_auth_live_smoke_ok signal"
+  exit 1
+fi
 if ! rg -qi "confirmation lifecycle" "$full_plan"; then
   echo "full execution plan must document settlement confirmation lifecycle posture"
   exit 1
@@ -280,6 +284,10 @@ if ! rg -Fq "phase6_cosmos_l1_build_testnet_handoff_check.sh" "$product_roadmap"
 fi
 if ! rg -Fq "phase6_cosmos_l1_build_testnet_handoff_run.sh" "$product_roadmap"; then
   echo "product roadmap must document phase6 handoff-run wrapper script"
+  exit 1
+fi
+if ! rg -Fq "tdpnd_grpc_auth_live_smoke_ok" "$product_roadmap"; then
+  echo "product roadmap must document phase6 readiness/handoff tdpnd_grpc_auth_live_smoke_ok signal"
   exit 1
 fi
 
@@ -389,6 +397,10 @@ if ! rg -Fq "phase6_cosmos_l1_build_testnet_check_summary" "$phase6_check_script
   echo "phase6 check wrapper must emit phase6 check summary schema id"
   exit 1
 fi
+if ! rg -Fq "tdpnd_grpc_auth_live_smoke" "$phase6_check_script"; then
+  echo "phase6 check wrapper must include tdpnd_grpc_auth_live_smoke readiness signal"
+  exit 1
+fi
 if ! rg -Fq "phase6_cosmos_l1_build_testnet_check_summary" "$phase6_run_script"; then
   echo "phase6 run wrapper must validate phase6 check summary schema id"
   exit 1
@@ -421,6 +433,10 @@ if ! rg -Fq "phase6_cosmos_l1_build_testnet_handoff_check_summary" "$phase6_hand
   echo "phase6 handoff-check wrapper must emit phase6 handoff-check summary schema id"
   exit 1
 fi
+if ! rg -Fq "tdpnd_grpc_auth_live_smoke" "$phase6_handoff_check_script"; then
+  echo "phase6 handoff-check wrapper must include tdpnd_grpc_auth_live_smoke readiness signal"
+  exit 1
+fi
 if ! rg -Fq "phase6_cosmos_l1_build_testnet_handoff_check_summary" "$phase6_handoff_run_script"; then
   echo "phase6 handoff-run wrapper must validate phase6 handoff-check summary schema id"
   exit 1
@@ -431,6 +447,10 @@ if ! rg -Fq "ci-failure propagation" "$phase6_run_integration_script"; then
 fi
 if ! rg -Fq "fail-closed path" "$phase6_check_integration_script"; then
   echo "phase6 check integration must validate fail-closed behavior"
+  exit 1
+fi
+if ! rg -Fq "tdpnd_grpc_auth_live_smoke" "$phase6_check_integration_script"; then
+  echo "phase6 check integration must validate tdpnd_grpc_auth_live_smoke readiness signal"
   exit 1
 fi
 if ! rg -Fq "stage-failure propagation path" "$phase6_suite_integration_script"; then
@@ -447,6 +467,10 @@ if ! rg -Fq "run failure still runs handoff check" "$phase6_handoff_run_integrat
 fi
 if ! rg -Fq "fail-closed path" "$phase6_handoff_check_integration_script"; then
   echo "phase6 handoff-check integration must validate fail-closed behavior"
+  exit 1
+fi
+if ! rg -Fq "tdpnd_grpc_auth_live_smoke" "$phase6_handoff_check_integration_script"; then
+  echo "phase6 handoff-check integration must validate tdpnd_grpc_auth_live_smoke readiness signal"
   exit 1
 fi
 

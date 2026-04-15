@@ -18,6 +18,7 @@ Usage:
     [--require-grpc-app-roundtrip-ok [0|1]] \
     [--require-tdpnd-grpc-runtime-smoke-ok [0|1]] \
     [--require-tdpnd-grpc-live-smoke-ok [0|1]] \
+    [--require-tdpnd-grpc-auth-live-smoke-ok [0|1]] \
     [--summary-json PATH] \
     [--show-json [0|1]]
 
@@ -33,6 +34,7 @@ Notes:
       --phase6-build-testnet-check-summary-json
       --require-tdpnd-runtime-smoke-ok
       --require-tdpnd-live-smoke-ok
+      --require-tdpnd-auth-live-smoke-ok
   - If check summary is omitted, the checker falls back to run summary artifacts:
       .steps.phase6_cosmos_l1_build_testnet_check.artifacts.summary_json
       (or .artifacts.check_summary_json)
@@ -221,6 +223,7 @@ require_query_surface_ok="${PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_CHECK_REQUIRE
 require_grpc_app_roundtrip_ok="${PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_CHECK_REQUIRE_GRPC_APP_ROUNDTRIP_OK:-1}"
 require_tdpnd_grpc_runtime_smoke_ok="${PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_CHECK_REQUIRE_TDPND_GRPC_RUNTIME_SMOKE_OK:-${PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_CHECK_REQUIRE_TDPND_RUNTIME_SMOKE_OK:-1}}"
 require_tdpnd_grpc_live_smoke_ok="${PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_CHECK_REQUIRE_TDPND_GRPC_LIVE_SMOKE_OK:-${PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_CHECK_REQUIRE_TDPND_LIVE_SMOKE_OK:-1}}"
+require_tdpnd_grpc_auth_live_smoke_ok="${PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_CHECK_REQUIRE_TDPND_GRPC_AUTH_LIVE_SMOKE_OK:-${PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_CHECK_REQUIRE_TDPND_AUTH_LIVE_SMOKE_OK:-1}}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -234,6 +237,7 @@ while [[ $# -gt 0 ]]; do
     --require-grpc-app-roundtrip-ok) require_grpc_app_roundtrip_ok="${2:-1}"; shift $(( $#>=2 ? 2 : 1 )) ;;
     --require-tdpnd-grpc-runtime-smoke-ok|--require-tdpnd-runtime-smoke-ok) require_tdpnd_grpc_runtime_smoke_ok="${2:-1}"; shift $(( $#>=2 ? 2 : 1 )) ;;
     --require-tdpnd-grpc-live-smoke-ok|--require-tdpnd-live-smoke-ok) require_tdpnd_grpc_live_smoke_ok="${2:-1}"; shift $(( $#>=2 ? 2 : 1 )) ;;
+    --require-tdpnd-grpc-auth-live-smoke-ok|--require-tdpnd-auth-live-smoke-ok) require_tdpnd_grpc_auth_live_smoke_ok="${2:-1}"; shift $(( $#>=2 ? 2 : 1 )) ;;
     --summary-json) summary_json="${2:-}"; shift 2 ;;
     --show-json) show_json="${2:-1}"; shift $(( $#>=2 ? 2 : 1 )) ;;
     -h|--help) usage; exit 0 ;;
@@ -249,6 +253,7 @@ bool_arg_or_die "--require-query-surface-ok" "$require_query_surface_ok"
 bool_arg_or_die "--require-grpc-app-roundtrip-ok" "$require_grpc_app_roundtrip_ok"
 bool_arg_or_die "--require-tdpnd-grpc-runtime-smoke-ok" "$require_tdpnd_grpc_runtime_smoke_ok"
 bool_arg_or_die "--require-tdpnd-grpc-live-smoke-ok" "$require_tdpnd_grpc_live_smoke_ok"
+bool_arg_or_die "--require-tdpnd-grpc-auth-live-smoke-ok" "$require_tdpnd_grpc_auth_live_smoke_ok"
 bool_arg_or_die "--show-json" "$show_json"
 
 phase6_run_summary_json="$(abs_path "$phase6_run_summary_json")"
@@ -303,6 +308,7 @@ query_surface_pair="$(resolve_handoff_bool "query_surface_ok" "query_surface" "$
 grpc_app_roundtrip_pair="$(resolve_handoff_bool "grpc_app_roundtrip_ok" "grpc_app_roundtrip" "$resolved_check_summary_json" "$phase6_check_summary_usable")"
 tdpnd_grpc_runtime_smoke_pair="$(resolve_handoff_bool "tdpnd_grpc_runtime_smoke_ok" "tdpnd_grpc_runtime_smoke" "$resolved_check_summary_json" "$phase6_check_summary_usable")"
 tdpnd_grpc_live_smoke_pair="$(resolve_handoff_bool "tdpnd_grpc_live_smoke_ok" "tdpnd_grpc_live_smoke" "$resolved_check_summary_json" "$phase6_check_summary_usable")"
+tdpnd_grpc_auth_live_smoke_pair="$(resolve_handoff_bool "tdpnd_grpc_auth_live_smoke_ok" "tdpnd_grpc_auth_live_smoke" "$resolved_check_summary_json" "$phase6_check_summary_usable")"
 
 chain_scaffold_ok="${chain_scaffold_pair%%|*}"; chain_scaffold_pair="${chain_scaffold_pair#*|}"
 chain_scaffold_status="${chain_scaffold_pair%%|*}"; chain_scaffold_pair="${chain_scaffold_pair#*|}"
@@ -325,6 +331,9 @@ tdpnd_grpc_runtime_smoke_source="${tdpnd_grpc_runtime_smoke_pair%%|*}"; tdpnd_gr
 tdpnd_grpc_live_smoke_ok="${tdpnd_grpc_live_smoke_pair%%|*}"; tdpnd_grpc_live_smoke_pair="${tdpnd_grpc_live_smoke_pair#*|}"
 tdpnd_grpc_live_smoke_status="${tdpnd_grpc_live_smoke_pair%%|*}"; tdpnd_grpc_live_smoke_pair="${tdpnd_grpc_live_smoke_pair#*|}"
 tdpnd_grpc_live_smoke_source="${tdpnd_grpc_live_smoke_pair%%|*}"; tdpnd_grpc_live_smoke_resolved="${tdpnd_grpc_live_smoke_pair##*|}"
+tdpnd_grpc_auth_live_smoke_ok="${tdpnd_grpc_auth_live_smoke_pair%%|*}"; tdpnd_grpc_auth_live_smoke_pair="${tdpnd_grpc_auth_live_smoke_pair#*|}"
+tdpnd_grpc_auth_live_smoke_status="${tdpnd_grpc_auth_live_smoke_pair%%|*}"; tdpnd_grpc_auth_live_smoke_pair="${tdpnd_grpc_auth_live_smoke_pair#*|}"
+tdpnd_grpc_auth_live_smoke_source="${tdpnd_grpc_auth_live_smoke_pair%%|*}"; tdpnd_grpc_auth_live_smoke_resolved="${tdpnd_grpc_auth_live_smoke_pair##*|}"
 
 check_required_signal() {
   local require="$1"; local value="$2"; local status="$3"; local key="$4"
@@ -340,6 +349,7 @@ check_required_signal "$require_query_surface_ok" "$query_surface_ok" "$query_su
 check_required_signal "$require_grpc_app_roundtrip_ok" "$grpc_app_roundtrip_ok" "$grpc_app_roundtrip_status" "grpc_app_roundtrip_ok"
 check_required_signal "$require_tdpnd_grpc_runtime_smoke_ok" "$tdpnd_grpc_runtime_smoke_ok" "$tdpnd_grpc_runtime_smoke_status" "tdpnd_grpc_runtime_smoke_ok"
 check_required_signal "$require_tdpnd_grpc_live_smoke_ok" "$tdpnd_grpc_live_smoke_ok" "$tdpnd_grpc_live_smoke_status" "tdpnd_grpc_live_smoke_ok"
+check_required_signal "$require_tdpnd_grpc_auth_live_smoke_ok" "$tdpnd_grpc_auth_live_smoke_ok" "$tdpnd_grpc_auth_live_smoke_status" "tdpnd_grpc_auth_live_smoke_ok"
 
 status="pass"; rc=0
 if ((${#reasons[@]} > 0)); then status="fail"; rc=1; fi
@@ -362,6 +372,7 @@ jq -n \
   --argjson require_grpc_app_roundtrip_ok "$require_grpc_app_roundtrip_ok" \
   --argjson require_tdpnd_grpc_runtime_smoke_ok "$require_tdpnd_grpc_runtime_smoke_ok" \
   --argjson require_tdpnd_grpc_live_smoke_ok "$require_tdpnd_grpc_live_smoke_ok" \
+  --argjson require_tdpnd_grpc_auth_live_smoke_ok "$require_tdpnd_grpc_auth_live_smoke_ok" \
   --argjson run_pipeline_ok "$run_pipeline_ok" \
   --arg run_pipeline_status "$run_pipeline_status" \
   --argjson run_pipeline_resolved "$run_pipeline_resolved" \
@@ -374,6 +385,7 @@ jq -n \
   --argjson grpc_app_roundtrip_ok "$grpc_app_roundtrip_ok" --arg grpc_app_roundtrip_status "$grpc_app_roundtrip_status" --argjson grpc_app_roundtrip_resolved "$grpc_app_roundtrip_resolved" --arg grpc_app_roundtrip_source "$grpc_app_roundtrip_source" \
   --argjson tdpnd_grpc_runtime_smoke_ok "$tdpnd_grpc_runtime_smoke_ok" --arg tdpnd_grpc_runtime_smoke_status "$tdpnd_grpc_runtime_smoke_status" --argjson tdpnd_grpc_runtime_smoke_resolved "$tdpnd_grpc_runtime_smoke_resolved" --arg tdpnd_grpc_runtime_smoke_source "$tdpnd_grpc_runtime_smoke_source" \
   --argjson tdpnd_grpc_live_smoke_ok "$tdpnd_grpc_live_smoke_ok" --arg tdpnd_grpc_live_smoke_status "$tdpnd_grpc_live_smoke_status" --argjson tdpnd_grpc_live_smoke_resolved "$tdpnd_grpc_live_smoke_resolved" --arg tdpnd_grpc_live_smoke_source "$tdpnd_grpc_live_smoke_source" \
+  --argjson tdpnd_grpc_auth_live_smoke_ok "$tdpnd_grpc_auth_live_smoke_ok" --arg tdpnd_grpc_auth_live_smoke_status "$tdpnd_grpc_auth_live_smoke_status" --argjson tdpnd_grpc_auth_live_smoke_resolved "$tdpnd_grpc_auth_live_smoke_resolved" --arg tdpnd_grpc_auth_live_smoke_source "$tdpnd_grpc_auth_live_smoke_source" \
   --argjson reasons "$reasons_json" \
   --arg summary_json "$summary_json" \
   '{
@@ -396,7 +408,8 @@ jq -n \
         query_surface_ok: ($require_query_surface_ok == 1),
         grpc_app_roundtrip_ok: ($require_grpc_app_roundtrip_ok == 1),
         tdpnd_grpc_runtime_smoke_ok: ($require_tdpnd_grpc_runtime_smoke_ok == 1),
-        tdpnd_grpc_live_smoke_ok: ($require_tdpnd_grpc_live_smoke_ok == 1)
+        tdpnd_grpc_live_smoke_ok: ($require_tdpnd_grpc_live_smoke_ok == 1),
+        tdpnd_grpc_auth_live_smoke_ok: ($require_tdpnd_grpc_auth_live_smoke_ok == 1)
       },
       usable: {
         phase6_run_summary_json: ($run_summary_usable == 1),
@@ -429,6 +442,9 @@ jq -n \
       tdpnd_grpc_live_smoke_ok: $tdpnd_grpc_live_smoke_ok,
       tdpnd_grpc_live_smoke_status: $tdpnd_grpc_live_smoke_status,
       tdpnd_grpc_live_smoke_resolved: ($tdpnd_grpc_live_smoke_resolved == 1),
+      tdpnd_grpc_auth_live_smoke_ok: $tdpnd_grpc_auth_live_smoke_ok,
+      tdpnd_grpc_auth_live_smoke_status: $tdpnd_grpc_auth_live_smoke_status,
+      tdpnd_grpc_auth_live_smoke_resolved: ($tdpnd_grpc_auth_live_smoke_resolved == 1),
       sources: {
         run_pipeline_ok: $run_pipeline_source,
         chain_scaffold_ok: $chain_scaffold_source,
@@ -437,7 +453,8 @@ jq -n \
         query_surface_ok: $query_surface_source,
         grpc_app_roundtrip_ok: $grpc_app_roundtrip_source,
         tdpnd_grpc_runtime_smoke_ok: $tdpnd_grpc_runtime_smoke_source,
-        tdpnd_grpc_live_smoke_ok: $tdpnd_grpc_live_smoke_source
+        tdpnd_grpc_live_smoke_ok: $tdpnd_grpc_live_smoke_source,
+        tdpnd_grpc_auth_live_smoke_ok: $tdpnd_grpc_auth_live_smoke_source
       }
     },
     decision: { pass: ($status == "pass"), reasons: $reasons, warnings: [] },

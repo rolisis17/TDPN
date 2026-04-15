@@ -197,6 +197,7 @@ Current implementation posture:
 - phase6 canonical top-level suite wrapper is `scripts/phase6_cosmos_l1_build_testnet_suite.sh` with contract checks in `scripts/integration_phase6_cosmos_l1_build_testnet_suite.sh`.
 - phase6 readiness wrappers are available as `scripts/phase6_cosmos_l1_build_testnet_check.sh` and `scripts/phase6_cosmos_l1_build_testnet_run.sh` (integration-covered).
 - phase6 handoff wrappers are available as `scripts/phase6_cosmos_l1_build_testnet_handoff_check.sh` and `scripts/phase6_cosmos_l1_build_testnet_handoff_run.sh` (integration-covered).
+- phase6 readiness/handoff checker surfaces include `tdpnd_grpc_auth_live_smoke_ok` in addition to existing `tdpnd_grpc_runtime_smoke_ok` and `tdpnd_grpc_live_smoke_ok` signals.
 
 Governance posture (hybrid bootstrap):
 - objective machine-verifiable events can be enforced on-chain.

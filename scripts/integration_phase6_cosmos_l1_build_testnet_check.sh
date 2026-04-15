@@ -49,7 +49,8 @@ cat >"$PASS_SUMMARY" <<'EOF_PASS'
     "query_surface": { "status": "pass" },
     "grpc_app_roundtrip": { "status": "pass" },
     "tdpnd_grpc_runtime_smoke": { "status": "pass" },
-    "tdpnd_grpc_live_smoke": { "status": "pass" }
+    "tdpnd_grpc_live_smoke": { "status": "pass" },
+    "tdpnd_grpc_auth_live_smoke": { "status": "pass" }
   }
 }
 EOF_PASS
@@ -71,7 +72,8 @@ cat >"$FAIL_SUMMARY" <<'EOF_FAIL'
     "query_surface": { "status": "pass" },
     "grpc_app_roundtrip": { "status": "pass" },
     "tdpnd_grpc_runtime_smoke": { "status": "pass" },
-    "tdpnd_grpc_live_smoke": { "status": "fail" }
+    "tdpnd_grpc_live_smoke": { "status": "pass" },
+    "tdpnd_grpc_auth_live_smoke": { "status": "fail" }
   }
 }
 EOF_FAIL
@@ -93,7 +95,8 @@ cat >"$RELAXED_SUMMARY" <<'EOF_RELAXED'
     "query_surface": { "status": "pass" },
     "grpc_app_roundtrip": { "status": "pass" },
     "tdpnd_grpc_runtime_smoke": { "status": "pass" },
-    "tdpnd_grpc_live_smoke": { "status": "fail" }
+    "tdpnd_grpc_live_smoke": { "status": "pass" },
+    "tdpnd_grpc_auth_live_smoke": { "status": "fail" }
   }
 }
 EOF_RELAXED
@@ -117,6 +120,7 @@ if ! jq -e '
   and .policy.require_grpc_app_roundtrip_ok == true
   and .policy.require_tdpnd_grpc_runtime_smoke_ok == true
   and .policy.require_tdpnd_grpc_live_smoke_ok == true
+  and .policy.require_tdpnd_grpc_auth_live_smoke_ok == true
   and .signals.chain_scaffold_ok == true
   and .signals.proto_surface_ok == true
   and .signals.proto_codegen_surface_ok == true
@@ -124,6 +128,7 @@ if ! jq -e '
   and .signals.grpc_app_roundtrip_ok == true
   and .signals.tdpnd_grpc_runtime_smoke_ok == true
   and .signals.tdpnd_grpc_live_smoke_ok == true
+  and .signals.tdpnd_grpc_auth_live_smoke_ok == true
 ' "$PASS_OUTPUT" >/dev/null; then
   echo "pass-path summary contract mismatch"
   cat "$PASS_OUTPUT"
@@ -147,9 +152,9 @@ fi
 if ! jq -e '
   .status == "fail"
   and .rc == 1
-  and .signals.tdpnd_grpc_live_smoke_ok == false
-  and .stages.tdpnd_grpc_live_smoke.status == "fail"
-  and ((.decision.reasons // []) | any(test("tdpnd_grpc_live_smoke_ok is false")))
+  and .signals.tdpnd_grpc_auth_live_smoke_ok == false
+  and .stages.tdpnd_grpc_auth_live_smoke.status == "fail"
+  and ((.decision.reasons // []) | any(test("tdpnd_grpc_auth_live_smoke_ok is false")))
 ' "$FAIL_OUTPUT" >/dev/null; then
   echo "fail-path summary contract mismatch"
   cat "$FAIL_OUTPUT"
@@ -161,15 +166,15 @@ echo "[phase6-cosmos-l1-check] relaxed toggle path"
 "$SCRIPT_UNDER_TEST" \
   --ci-phase6-summary-json "$RELAXED_SUMMARY" \
   --summary-json "$RELAXED_OUTPUT" \
-  --require-tdpnd-grpc-live-smoke-ok 0 \
+  --require-tdpnd-grpc-auth-live-smoke-ok 0 \
   --show-json 0 >"$RELAXED_LOG" 2>&1
 
 if ! jq -e '
   .status == "pass"
   and .rc == 0
-  and .policy.require_tdpnd_grpc_live_smoke_ok == false
-  and .signals.tdpnd_grpc_live_smoke_ok == false
-  and .stages.tdpnd_grpc_live_smoke.status == "fail"
+  and .policy.require_tdpnd_grpc_auth_live_smoke_ok == false
+  and .signals.tdpnd_grpc_auth_live_smoke_ok == false
+  and .stages.tdpnd_grpc_auth_live_smoke.status == "fail"
 ' "$RELAXED_OUTPUT" >/dev/null; then
   echo "relaxed-toggle summary contract mismatch"
   cat "$RELAXED_OUTPUT"

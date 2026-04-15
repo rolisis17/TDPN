@@ -52,7 +52,8 @@ cat >"$PASS_CHECK" <<'EOF_PASS_CHECK'
     "query_surface_ok": true,
     "grpc_app_roundtrip_ok": true,
     "tdpnd_grpc_runtime_smoke_ok": true,
-    "tdpnd_grpc_live_smoke_ok": true
+    "tdpnd_grpc_live_smoke_ok": true,
+    "tdpnd_grpc_auth_live_smoke_ok": true
   }
 }
 EOF_PASS_CHECK
@@ -112,6 +113,7 @@ if ! jq -e '
   and .handoff.grpc_app_roundtrip_ok == true
   and .handoff.tdpnd_grpc_runtime_smoke_ok == true
   and .handoff.tdpnd_grpc_live_smoke_ok == true
+  and .handoff.tdpnd_grpc_auth_live_smoke_ok == true
 ' "$PASS_OUTPUT" >/dev/null; then
   echo "pass-path summary mismatch"
   cat "$PASS_OUTPUT"
@@ -131,12 +133,13 @@ cat >"$FAIL_CHECK" <<'EOF_FAIL_CHECK'
   "rc": 1,
   "signals": {
     "chain_scaffold_ok": true,
-    "proto_surface_ok": false,
+    "proto_surface_ok": true,
     "proto_codegen_surface_ok": true,
     "query_surface_ok": true,
     "grpc_app_roundtrip_ok": true,
     "tdpnd_grpc_runtime_smoke_ok": true,
-    "tdpnd_grpc_live_smoke_ok": true
+    "tdpnd_grpc_live_smoke_ok": true,
+    "tdpnd_grpc_auth_live_smoke_ok": false
   }
 }
 EOF_FAIL_CHECK
@@ -188,8 +191,10 @@ if ! jq -e '
   .status == "fail"
   and .rc == 1
   and .handoff.run_pipeline_ok == true
-  and .handoff.proto_surface_ok == false
-  and ((.decision.reasons // []) | any(test("proto_surface_ok is false")))
+  and .handoff.proto_surface_ok == true
+  and .handoff.tdpnd_grpc_auth_live_smoke_ok == false
+  and .handoff.tdpnd_grpc_auth_live_smoke_status == "fail"
+  and ((.decision.reasons // []) | any(test("tdpnd_grpc_auth_live_smoke_ok is false")))
 ' "$FAIL_OUTPUT" >/dev/null; then
   echo "fail-path summary mismatch"
   cat "$FAIL_OUTPUT"
@@ -214,7 +219,8 @@ cat >"$RELAXED_CHECK" <<'EOF_RELAXED_CHECK'
     "query_surface_ok": true,
     "grpc_app_roundtrip_ok": true,
     "tdpnd_grpc_runtime_smoke_ok": true,
-    "tdpnd_grpc_live_smoke_ok": false
+    "tdpnd_grpc_live_smoke_ok": false,
+    "tdpnd_grpc_auth_live_smoke_ok": false
   }
 }
 EOF_RELAXED_CHECK
@@ -254,14 +260,18 @@ echo "[phase6-cosmos-l1-handoff-check] relaxed toggle path"
   --phase6-run-summary-json "$RELAXED_RUN" \
   --summary-json "$RELAXED_OUTPUT" \
   --require-tdpnd-grpc-live-smoke-ok 0 \
+  --require-tdpnd-auth-live-smoke-ok 0 \
   --show-json 0 >"$RELAXED_LOG" 2>&1
 
 if ! jq -e '
   .status == "pass"
   and .rc == 0
   and .inputs.requirements.tdpnd_grpc_live_smoke_ok == false
+  and .inputs.requirements.tdpnd_grpc_auth_live_smoke_ok == false
   and .handoff.tdpnd_grpc_live_smoke_ok == false
   and .handoff.tdpnd_grpc_live_smoke_status == "fail"
+  and .handoff.tdpnd_grpc_auth_live_smoke_ok == false
+  and .handoff.tdpnd_grpc_auth_live_smoke_status == "fail"
 ' "$RELAXED_OUTPUT" >/dev/null; then
   echo "relaxed-path summary mismatch"
   cat "$RELAXED_OUTPUT"
