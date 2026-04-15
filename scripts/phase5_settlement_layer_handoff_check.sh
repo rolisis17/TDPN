@@ -11,10 +11,10 @@ Usage:
     [--phase5-run-summary-json PATH] \
     [--roadmap-summary-json PATH] \
     [--require-run-pipeline-ok [0|1]] \
-    [--require-windows-server-packaging-ok [0|1]] \
-    [--require-windows-role-runbooks-ok [0|1]] \
-    [--require-cross-platform-interop-ok [0|1]] \
-    [--require-role-combination-validation-ok [0|1]] \
+    [--require-settlement-failsoft-ok [0|1]] \
+    [--require-settlement-acceptance-ok [0|1]] \
+    [--require-settlement-bridge-smoke-ok [0|1]] \
+    [--require-settlement-state-persistence-ok [0|1]] \
     [--summary-json PATH] \
     [--show-json [0|1]]
 
@@ -31,6 +31,11 @@ Notes:
     both run steps pass with valid contracts.
   - Legacy compatibility: --phase4-run-summary-json is accepted as an alias
     for --phase5-run-summary-json.
+  - Legacy requirement aliases are accepted:
+      --require-windows-server-packaging-ok -> --require-settlement-failsoft-ok
+      --require-windows-role-runbooks-ok -> --require-settlement-acceptance-ok
+      --require-cross-platform-interop-ok -> --require-settlement-bridge-smoke-ok
+      --require-role-combination-validation-ok -> --require-settlement-state-persistence-ok
 USAGE
 }
 
@@ -400,10 +405,10 @@ roadmap_summary_json="${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_ROADMAP_SUMMARY_JS
 summary_json="${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_SUMMARY_JSON:-$ROOT_DIR/.easy-node-logs/phase5_settlement_layer_handoff_check_summary.json}"
 show_json="${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_SHOW_JSON:-0}"
 require_run_pipeline_ok="${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_REQUIRE_RUN_PIPELINE_OK:-1}"
-require_settlement_failsoft_ok="${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_REQUIRE_WINDOWS_SERVER_PACKAGING_OK:-1}"
-require_settlement_acceptance_ok="${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_REQUIRE_WINDOWS_ROLE_RUNBOOKS_OK:-1}"
-require_settlement_bridge_smoke_ok="${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_REQUIRE_CROSS_PLATFORM_INTEROP_OK:-1}"
-require_settlement_state_persistence_ok="${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_REQUIRE_ROLE_COMBINATION_VALIDATION_OK:-1}"
+require_settlement_failsoft_ok="${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_REQUIRE_SETTLEMENT_FAILSOFT_OK:-${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_REQUIRE_WINDOWS_SERVER_PACKAGING_OK:-1}}"
+require_settlement_acceptance_ok="${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_REQUIRE_SETTLEMENT_ACCEPTANCE_OK:-${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_REQUIRE_WINDOWS_ROLE_RUNBOOKS_OK:-1}}"
+require_settlement_bridge_smoke_ok="${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_REQUIRE_SETTLEMENT_BRIDGE_SMOKE_OK:-${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_REQUIRE_CROSS_PLATFORM_INTEROP_OK:-1}}"
+require_settlement_state_persistence_ok="${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_REQUIRE_SETTLEMENT_STATE_PERSISTENCE_OK:-${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_REQUIRE_ROLE_COMBINATION_VALIDATION_OK:-1}}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -428,7 +433,7 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
-    --require-windows-server-packaging-ok)
+    --require-settlement-failsoft-ok|--require-windows-server-packaging-ok)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         require_settlement_failsoft_ok="${2:-}"
         shift 2
@@ -437,7 +442,7 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
-    --require-windows-role-runbooks-ok)
+    --require-settlement-acceptance-ok|--require-windows-role-runbooks-ok)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         require_settlement_acceptance_ok="${2:-}"
         shift 2
@@ -446,7 +451,7 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
-    --require-cross-platform-interop-ok)
+    --require-settlement-bridge-smoke-ok|--require-cross-platform-interop-ok)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         require_settlement_bridge_smoke_ok="${2:-}"
         shift 2
@@ -455,7 +460,7 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
-    --require-role-combination-validation-ok)
+    --require-settlement-state-persistence-ok|--require-role-combination-validation-ok)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         require_settlement_state_persistence_ok="${2:-}"
         shift 2
@@ -490,10 +495,10 @@ while [[ $# -gt 0 ]]; do
 done
 
 bool_arg_or_die "--require-run-pipeline-ok" "$require_run_pipeline_ok"
-bool_arg_or_die "--require-windows-server-packaging-ok" "$require_settlement_failsoft_ok"
-bool_arg_or_die "--require-windows-role-runbooks-ok" "$require_settlement_acceptance_ok"
-bool_arg_or_die "--require-cross-platform-interop-ok" "$require_settlement_bridge_smoke_ok"
-bool_arg_or_die "--require-role-combination-validation-ok" "$require_settlement_state_persistence_ok"
+bool_arg_or_die "--require-settlement-failsoft-ok" "$require_settlement_failsoft_ok"
+bool_arg_or_die "--require-settlement-acceptance-ok" "$require_settlement_acceptance_ok"
+bool_arg_or_die "--require-settlement-bridge-smoke-ok" "$require_settlement_bridge_smoke_ok"
+bool_arg_or_die "--require-settlement-state-persistence-ok" "$require_settlement_state_persistence_ok"
 bool_arg_or_die "--show-json" "$show_json"
 
 phase5_run_summary_json="$(abs_path "$phase5_run_summary_json")"

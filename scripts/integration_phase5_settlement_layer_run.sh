@@ -96,6 +96,18 @@ cat >"$FAKE_CHECK" <<'EOF_FAKE_CHECK'
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ "${1:-}" == "--help" ]]; then
+  cat <<'EOF_HELP'
+Usage:
+  fake check
+    [--require-settlement-failsoft-ok [0|1]]
+    [--require-settlement-acceptance-ok [0|1]]
+    [--require-settlement-bridge-smoke-ok [0|1]]
+    [--require-settlement-state-persistence-ok [0|1]]
+EOF_HELP
+  exit 0
+fi
+
 capture="${PHASE5_SETTLEMENT_LAYER_RUN_CAPTURE_FILE:?}"
 printf 'check\t%s\n' "$*" >>"$capture"
 
@@ -195,7 +207,7 @@ bash "$RUNNER" \
   --print-summary-json 0 \
   --ci-run-settlement-failsoft 1 \
   --check-require-windows-server-packaging-ok 1 \
-  --check-require-cross-platform-interop-ok 1 \
+  --check-require-settlement-bridge-smoke-ok 1 \
   --check-show-json 1 >"$DRY_RUN_LOG" 2>&1
 
 ci_line="$(grep '^ci	' "$CAPTURE" | tail -n 1 || true)"
@@ -226,8 +238,13 @@ if [[ "$check_line" != *"--summary-json $TMP_DIR/check_dry_summary.json"* ]]; th
   echo "$check_line"
   exit 1
 fi
-if [[ "$check_line" != *"--require-windows-server-packaging-ok 1"* || "$check_line" != *"--require-cross-platform-interop-ok 1"* ]]; then
-  echo "check passthrough contract mismatch"
+if [[ "$check_line" != *"--require-settlement-failsoft-ok 1"* || "$check_line" != *"--require-settlement-bridge-smoke-ok 1"* ]]; then
+  echo "check requirement passthrough canonicalization mismatch"
+  echo "$check_line"
+  exit 1
+fi
+if [[ "$check_line" != *"--require-settlement-acceptance-ok 0"* || "$check_line" != *"--require-settlement-state-persistence-ok 0"* ]]; then
+  echo "dry-run default requirement relax canonicalization mismatch"
   echo "$check_line"
   exit 1
 fi
@@ -238,6 +255,11 @@ if [[ "$check_line" != *"--show-json 1"* ]]; then
 fi
 if [[ "$check_line" == *"--dry-run 1"* || "$check_line" == *"--print-summary-json 0"* ]]; then
   echo "wrapper-only flags leaked into checker"
+  echo "$check_line"
+  exit 1
+fi
+if [[ "$check_line" == *"--require-windows-server-packaging-ok"* || "$check_line" == *"--require-cross-platform-interop-ok"* || "$check_line" == *"--require-windows-role-runbooks-ok"* || "$check_line" == *"--require-role-combination-validation-ok"* ]]; then
+  echo "legacy checker requirement flags leaked despite canonical checker support"
   echo "$check_line"
   exit 1
 fi

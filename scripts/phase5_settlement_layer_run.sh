@@ -148,6 +148,95 @@ array_has_arg() {
   return 1
 }
 
+checker_flag_to_canonical() {
+  local flag="$1"
+  case "$flag" in
+    --require-windows-server-packaging-ok)
+      printf '%s' "--require-settlement-failsoft-ok"
+      ;;
+    --require-windows-role-runbooks-ok)
+      printf '%s' "--require-settlement-acceptance-ok"
+      ;;
+    --require-cross-platform-interop-ok)
+      printf '%s' "--require-settlement-bridge-smoke-ok"
+      ;;
+    --require-role-combination-validation-ok)
+      printf '%s' "--require-settlement-state-persistence-ok"
+      ;;
+    *)
+      printf '%s' "$flag"
+      ;;
+  esac
+}
+
+checker_flag_to_legacy() {
+  local flag="$1"
+  case "$flag" in
+    --require-settlement-failsoft-ok)
+      printf '%s' "--require-windows-server-packaging-ok"
+      ;;
+    --require-settlement-acceptance-ok)
+      printf '%s' "--require-windows-role-runbooks-ok"
+      ;;
+    --require-settlement-bridge-smoke-ok)
+      printf '%s' "--require-cross-platform-interop-ok"
+      ;;
+    --require-settlement-state-persistence-ok)
+      printf '%s' "--require-role-combination-validation-ok"
+      ;;
+    *)
+      printf '%s' "$flag"
+      ;;
+  esac
+}
+
+array_has_checker_flag() {
+  local flag="$1"
+  shift
+  local canonical legacy arg
+  canonical="$(checker_flag_to_canonical "$flag")"
+  legacy="$(checker_flag_to_legacy "$canonical")"
+  for arg in "$@"; do
+    if [[ "$arg" == "$canonical" || "$arg" == "$legacy" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+detect_checker_canonical_flags() {
+  local script_path="$1"
+  local help_output
+  set +e
+  help_output="$("$script_path" --help 2>&1)"
+  set -e
+  if [[ "$help_output" == *"--require-settlement-failsoft-ok"* ]] || [[ "$help_output" == *"--require-settlement-acceptance-ok"* ]] || [[ "$help_output" == *"--require-settlement-bridge-smoke-ok"* ]] || [[ "$help_output" == *"--require-settlement-state-persistence-ok"* ]]; then
+    printf '%s' "1"
+  else
+    printf '%s' "0"
+  fi
+}
+
+adapt_checker_flags_for_script() {
+  local supports_canonical="$1"
+  shift
+  local token out=()
+  for token in "$@"; do
+    if [[ "$token" == --require-* ]]; then
+      local canonical
+      canonical="$(checker_flag_to_canonical "$token")"
+      if [[ "$supports_canonical" == "1" ]]; then
+        out+=("$canonical")
+      else
+        out+=("$(checker_flag_to_legacy "$canonical")")
+      fi
+    else
+      out+=("$token")
+    fi
+  done
+  printf '%s\n' "${out[@]}"
+}
+
 need_cmd jq
 need_cmd date
 need_cmd mktemp
@@ -268,6 +357,8 @@ if [[ ! -x "$check_script" ]]; then
   exit 2
 fi
 
+check_script_supports_canonical_flags="$(detect_checker_canonical_flags "$check_script")"
+
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
@@ -320,25 +411,56 @@ else
   fi
 fi
 
-check_command_args=("$check_script" --ci-phase5-summary-json "$ci_summary_json" --summary-json "$check_summary_json")
+normalized_check_passthrough_args=()
 if ((${#check_passthrough_args[@]} > 0)); then
-  check_command_args+=("${check_passthrough_args[@]}")
+  idx=0
+  while (( idx < ${#check_passthrough_args[@]} )); do
+    token="${check_passthrough_args[$idx]}"
+    if [[ "$token" == --require-* ]]; then
+      normalized_check_passthrough_args+=("$(checker_flag_to_canonical "$token")")
+    else
+      normalized_check_passthrough_args+=("$token")
+    fi
+    ((idx += 1))
+  done
+fi
+
+check_command_args=("$check_script" --ci-phase5-summary-json "$ci_summary_json" --summary-json "$check_summary_json")
+if ((${#normalized_check_passthrough_args[@]} > 0)); then
+  mapfile -t adapted_check_passthrough_args < <(adapt_checker_flags_for_script "$check_script_supports_canonical_flags" "${normalized_check_passthrough_args[@]}")
+  check_command_args+=("${adapted_check_passthrough_args[@]}")
 fi
 if ! array_has_arg "--show-json" "${check_command_args[@]:1}"; then
   check_command_args+=(--show-json 0)
 fi
 if [[ "$dry_run" == "1" ]]; then
-  if ! array_has_arg "--require-windows-server-packaging-ok" "${check_command_args[@]:1}"; then
-    check_command_args+=(--require-windows-server-packaging-ok 0)
+  if ! array_has_checker_flag "--require-settlement-failsoft-ok" "${check_command_args[@]:1}"; then
+    if [[ "$check_script_supports_canonical_flags" == "1" ]]; then
+      check_command_args+=(--require-settlement-failsoft-ok 0)
+    else
+      check_command_args+=(--require-windows-server-packaging-ok 0)
+    fi
   fi
-  if ! array_has_arg "--require-windows-role-runbooks-ok" "${check_command_args[@]:1}"; then
-    check_command_args+=(--require-windows-role-runbooks-ok 0)
+  if ! array_has_checker_flag "--require-settlement-acceptance-ok" "${check_command_args[@]:1}"; then
+    if [[ "$check_script_supports_canonical_flags" == "1" ]]; then
+      check_command_args+=(--require-settlement-acceptance-ok 0)
+    else
+      check_command_args+=(--require-windows-role-runbooks-ok 0)
+    fi
   fi
-  if ! array_has_arg "--require-cross-platform-interop-ok" "${check_command_args[@]:1}"; then
-    check_command_args+=(--require-cross-platform-interop-ok 0)
+  if ! array_has_checker_flag "--require-settlement-bridge-smoke-ok" "${check_command_args[@]:1}"; then
+    if [[ "$check_script_supports_canonical_flags" == "1" ]]; then
+      check_command_args+=(--require-settlement-bridge-smoke-ok 0)
+    else
+      check_command_args+=(--require-cross-platform-interop-ok 0)
+    fi
   fi
-  if ! array_has_arg "--require-role-combination-validation-ok" "${check_command_args[@]:1}"; then
-    check_command_args+=(--require-role-combination-validation-ok 0)
+  if ! array_has_checker_flag "--require-settlement-state-persistence-ok" "${check_command_args[@]:1}"; then
+    if [[ "$check_script_supports_canonical_flags" == "1" ]]; then
+      check_command_args+=(--require-settlement-state-persistence-ok 0)
+    else
+      check_command_args+=(--require-role-combination-validation-ok 0)
+    fi
   fi
 fi
 check_command="$(print_cmd "${check_command_args[@]}")"

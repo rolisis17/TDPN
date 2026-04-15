@@ -28,11 +28,13 @@ MISSING_SUMMARY="$TMP_DIR/ci_phase5_missing.json"
 PASS_OUTPUT="$TMP_DIR/pass_output.json"
 FAIL_OUTPUT="$TMP_DIR/fail_output.json"
 RELAXED_OUTPUT="$TMP_DIR/relaxed_output.json"
+LEGACY_ALIAS_OUTPUT="$TMP_DIR/legacy_alias_output.json"
 MISSING_OUTPUT="$TMP_DIR/missing_output.json"
 
 PASS_LOG="$TMP_DIR/pass.log"
 FAIL_LOG="$TMP_DIR/fail.log"
 RELAXED_LOG="$TMP_DIR/relaxed.log"
+LEGACY_ALIAS_LOG="$TMP_DIR/legacy_alias.log"
 MISSING_LOG="$TMP_DIR/missing.log"
 
 cat >"$PASS_SUMMARY" <<'EOF_PASS'
@@ -169,11 +171,11 @@ if ! jq -e '
   exit 1
 fi
 
-echo "[phase5-settlement-layer-check] relaxed policy toggle path"
+echo "[phase5-settlement-layer-check] canonical relaxed policy toggle path"
 "$SCRIPT_UNDER_TEST" \
   --ci-phase5-summary-json "$RELAXED_SUMMARY" \
   --summary-json "$RELAXED_OUTPUT" \
-  --require-windows-role-runbooks-ok 0 \
+  --require-settlement-acceptance-ok 0 \
   --show-json 0 >"$RELAXED_LOG" 2>&1
 
 if ! jq -e '
@@ -186,6 +188,26 @@ if ! jq -e '
   echo "relaxed-policy summary mismatch"
   cat "$RELAXED_OUTPUT"
   cat "$RELAXED_LOG"
+  exit 1
+fi
+
+echo "[phase5-settlement-layer-check] legacy alias compatibility path"
+"$SCRIPT_UNDER_TEST" \
+  --ci-phase5-summary-json "$RELAXED_SUMMARY" \
+  --summary-json "$LEGACY_ALIAS_OUTPUT" \
+  --require-windows-role-runbooks-ok 0 \
+  --show-json 0 >"$LEGACY_ALIAS_LOG" 2>&1
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .policy.require_settlement_acceptance_ok == false
+  and .signals.settlement_acceptance_ok == false
+  and .stages.settlement_acceptance.status == "fail"
+' "$LEGACY_ALIAS_OUTPUT" >/dev/null; then
+  echo "legacy-alias policy summary mismatch"
+  cat "$LEGACY_ALIAS_OUTPUT"
+  cat "$LEGACY_ALIAS_LOG"
   exit 1
 fi
 

@@ -113,6 +113,32 @@ array_has_arg() {
   return 1
 }
 
+handoff_requirement_arg_present() {
+  local canonical="$1"
+  local legacy="$2"
+  shift 2
+  local args=("$@")
+  if array_has_arg "$canonical" "${args[@]}"; then
+    return 0
+  fi
+  if array_has_arg "$legacy" "${args[@]}"; then
+    return 0
+  fi
+  return 1
+}
+
+handoff_supports_settlement_requirement_flags() {
+  local help_out=""
+  help_out="$("$handoff_check_script" --help 2>/dev/null || true)"
+  if [[ "$help_out" == *"--require-settlement-failsoft-ok"* \
+     && "$help_out" == *"--require-settlement-acceptance-ok"* \
+     && "$help_out" == *"--require-settlement-bridge-smoke-ok"* \
+     && "$help_out" == *"--require-settlement-state-persistence-ok"* ]]; then
+    return 0
+  fi
+  return 1
+}
+
 json_file_valid() {
   local path="$1"
   [[ -f "$path" ]] && jq -e . "$path" >/dev/null 2>&1
@@ -429,20 +455,40 @@ if ! array_has_arg "--show-json" "${handoff_cmd[@]:1}"; then
   handoff_cmd+=(--show-json 0)
 fi
 if [[ "$dry_run" == "1" ]]; then
+  supports_settlement_flags="0"
+  if handoff_supports_settlement_requirement_flags; then
+    supports_settlement_flags="1"
+  fi
   if ! array_has_arg "--require-run-pipeline-ok" "${handoff_cmd[@]:1}"; then
     handoff_cmd+=(--require-run-pipeline-ok 0)
   fi
-  if ! array_has_arg "--require-windows-server-packaging-ok" "${handoff_cmd[@]:1}"; then
-    handoff_cmd+=(--require-windows-server-packaging-ok 0)
+  if ! handoff_requirement_arg_present "--require-settlement-failsoft-ok" "--require-windows-server-packaging-ok" "${handoff_cmd[@]:1}"; then
+    if [[ "$supports_settlement_flags" == "1" ]]; then
+      handoff_cmd+=(--require-settlement-failsoft-ok 0)
+    else
+      handoff_cmd+=(--require-windows-server-packaging-ok 0)
+    fi
   fi
-  if ! array_has_arg "--require-windows-role-runbooks-ok" "${handoff_cmd[@]:1}"; then
-    handoff_cmd+=(--require-windows-role-runbooks-ok 0)
+  if ! handoff_requirement_arg_present "--require-settlement-acceptance-ok" "--require-windows-role-runbooks-ok" "${handoff_cmd[@]:1}"; then
+    if [[ "$supports_settlement_flags" == "1" ]]; then
+      handoff_cmd+=(--require-settlement-acceptance-ok 0)
+    else
+      handoff_cmd+=(--require-windows-role-runbooks-ok 0)
+    fi
   fi
-  if ! array_has_arg "--require-cross-platform-interop-ok" "${handoff_cmd[@]:1}"; then
-    handoff_cmd+=(--require-cross-platform-interop-ok 0)
+  if ! handoff_requirement_arg_present "--require-settlement-bridge-smoke-ok" "--require-cross-platform-interop-ok" "${handoff_cmd[@]:1}"; then
+    if [[ "$supports_settlement_flags" == "1" ]]; then
+      handoff_cmd+=(--require-settlement-bridge-smoke-ok 0)
+    else
+      handoff_cmd+=(--require-cross-platform-interop-ok 0)
+    fi
   fi
-  if ! array_has_arg "--require-role-combination-validation-ok" "${handoff_cmd[@]:1}"; then
-    handoff_cmd+=(--require-role-combination-validation-ok 0)
+  if ! handoff_requirement_arg_present "--require-settlement-state-persistence-ok" "--require-role-combination-validation-ok" "${handoff_cmd[@]:1}"; then
+    if [[ "$supports_settlement_flags" == "1" ]]; then
+      handoff_cmd+=(--require-settlement-state-persistence-ok 0)
+    else
+      handoff_cmd+=(--require-role-combination-validation-ok 0)
+    fi
   fi
 fi
 handoff_command="$(print_cmd "${handoff_cmd[@]}")"

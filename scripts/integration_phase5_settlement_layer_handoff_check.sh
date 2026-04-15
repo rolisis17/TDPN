@@ -295,16 +295,16 @@ cat >"$UNRESOLVED_ROADMAP" <<'EOF_UNRESOLVED_ROADMAP'
 }
 EOF_UNRESOLVED_ROADMAP
 
-echo "[phase5-settlement-layer-handoff-check] unresolved booleans with relaxed requirements"
+echo "[phase5-settlement-layer-handoff-check] unresolved booleans with relaxed requirements (canonical flags + one legacy requirement alias)"
 "$SCRIPT_UNDER_TEST" \
   --phase5-run-summary-json "$UNRESOLVED_RUN" \
   --roadmap-summary-json "$UNRESOLVED_ROADMAP" \
   --summary-json "$UNRESOLVED_OUTPUT" \
   --require-run-pipeline-ok 0 \
   --require-windows-server-packaging-ok 0 \
-  --require-windows-role-runbooks-ok 0 \
-  --require-cross-platform-interop-ok 0 \
-  --require-role-combination-validation-ok 0 \
+  --require-settlement-acceptance-ok 0 \
+  --require-settlement-bridge-smoke-ok 0 \
+  --require-settlement-state-persistence-ok 0 \
   --show-json 0 >"$UNRESOLVED_LOG" 2>&1
 
 if ! jq -e '

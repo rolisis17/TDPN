@@ -158,6 +158,21 @@ cat >"$FAKE_HANDOFF" <<'EOF_FAKE_HANDOFF'
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ "${1:-}" == "--help" ]]; then
+  cat <<'EOF_HELP'
+Usage:
+  fake_phase5_settlement_layer_handoff_check.sh [flags]
+
+Flags:
+  --require-run-pipeline-ok [0|1]
+  --require-settlement-failsoft-ok [0|1]
+  --require-settlement-acceptance-ok [0|1]
+  --require-settlement-bridge-smoke-ok [0|1]
+  --require-settlement-state-persistence-ok [0|1]
+EOF_HELP
+  exit 0
+fi
+
 capture="${PHASE5_HANDOFF_RUN_CAPTURE_FILE:-${PHASE4_HANDOFF_RUN_CAPTURE_FILE:-}}"
 if [[ -z "$capture" ]]; then
   echo "missing capture file env: PHASE5_HANDOFF_RUN_CAPTURE_FILE"
@@ -295,8 +310,7 @@ bash "$RUNNER" \
   --dry-run 1 \
   --print-summary-json 0 \
   --run-theta 9 \
-  --handoff-require-windows-role-runbooks-ok 1 \
-  --handoff-require-role-combination-validation-ok 1 >"$DRY_STDOUT" 2>&1
+  --handoff-require-windows-role-runbooks-ok 1 >"$DRY_STDOUT" 2>&1
 
 run_line="$(grep '^run	' "$CAPTURE" | tail -n 1 || true)"
 handoff_line="$(grep '^handoff	' "$CAPTURE" | tail -n 1 || true)"
@@ -305,7 +319,7 @@ if [[ "$run_line" != *"--dry-run 1"* || "$run_line" != *"--theta 9"* ]]; then
   echo "$run_line"
   exit 1
 fi
-if [[ "$handoff_line" != *"--require-run-pipeline-ok 0"* || "$handoff_line" != *"--require-windows-server-packaging-ok 0"* || "$handoff_line" != *"--require-windows-role-runbooks-ok 1"* || "$handoff_line" != *"--require-cross-platform-interop-ok 0"* || "$handoff_line" != *"--require-role-combination-validation-ok 1"* ]]; then
+if [[ "$handoff_line" != *"--require-run-pipeline-ok 0"* || "$handoff_line" != *"--require-settlement-failsoft-ok 0"* || "$handoff_line" != *"--require-windows-role-runbooks-ok 1"* || "$handoff_line" != *"--require-settlement-bridge-smoke-ok 0"* || "$handoff_line" != *"--require-settlement-state-persistence-ok 0"* ]]; then
   echo "dry-run handoff relax/override mismatch"
   echo "$handoff_line"
   exit 1
@@ -324,6 +338,28 @@ if ! jq -e '
 ' "$DRY_WRAPPER_SUMMARY" >/dev/null; then
   echo "dry-run wrapper summary mismatch"
   cat "$DRY_WRAPPER_SUMMARY"
+  exit 1
+fi
+
+echo "[phase5-settlement-layer-handoff-run] legacy passthrough compatibility"
+: >"$CAPTURE"
+LEGACY_WRAPPER_SUMMARY="$TMP_DIR/legacy_wrapper.json"
+PHASE5_HANDOFF_RUN_CAPTURE_FILE="$CAPTURE" \
+PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_RUN_SCRIPT="$FAKE_RUN" \
+PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_HANDOFF_CHECK_SCRIPT="$FAKE_HANDOFF" \
+bash "$RUNNER" \
+  --reports-dir "$TMP_DIR/reports_legacy" \
+  --run-summary-json "$TMP_DIR/legacy_run_summary.json" \
+  --handoff-summary-json "$TMP_DIR/legacy_handoff_summary.json" \
+  --summary-json "$LEGACY_WRAPPER_SUMMARY" \
+  --dry-run 1 \
+  --print-summary-json 0 \
+  --handoff-require-cross-platform-interop-ok 1 > /dev/null 2>&1
+
+handoff_line="$(grep '^handoff	' "$CAPTURE" | tail -n 1 || true)"
+if [[ "$handoff_line" != *"--require-cross-platform-interop-ok 1"* ]]; then
+  echo "legacy handoff passthrough mismatch"
+  echo "$handoff_line"
   exit 1
 fi
 
