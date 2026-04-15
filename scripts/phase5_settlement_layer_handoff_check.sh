@@ -15,6 +15,7 @@ Usage:
     [--require-settlement-acceptance-ok [0|1]] \
     [--require-settlement-bridge-smoke-ok [0|1]] \
     [--require-settlement-state-persistence-ok [0|1]] \
+    [--require-issuer-sponsor-api-live-smoke-ok [0|1]] \
     [--summary-json PATH] \
     [--show-json [0|1]]
 
@@ -286,6 +287,11 @@ emit_summary_json() {
   local settlement_bridge_smoke_source="${34}"
   local settlement_state_persistence_source="${35}"
   local reasons_json="${36}"
+  local require_issuer_sponsor_api_live_smoke_ok="${37}"
+  local issuer_sponsor_api_live_smoke_status="${38}"
+  local issuer_sponsor_api_live_smoke_ok="${39}"
+  local issuer_sponsor_api_live_smoke_resolved="${40}"
+  local issuer_sponsor_api_live_smoke_source="${41}"
 
   local summary_tmp
   summary_tmp="$(mktemp)"
@@ -305,6 +311,7 @@ emit_summary_json() {
     --argjson require_settlement_acceptance_ok "$require_settlement_acceptance_ok" \
     --argjson require_settlement_bridge_smoke_ok "$require_settlement_bridge_smoke_ok" \
     --argjson require_settlement_state_persistence_ok "$require_settlement_state_persistence_ok" \
+    --argjson require_issuer_sponsor_api_live_smoke_ok "$require_issuer_sponsor_api_live_smoke_ok" \
     --arg run_pipeline_status "$run_pipeline_status" \
     --argjson run_pipeline_ok "$run_pipeline_ok" \
     --argjson run_pipeline_resolved "$run_pipeline_resolved" \
@@ -326,6 +333,10 @@ emit_summary_json() {
     --arg settlement_acceptance_source "$settlement_acceptance_source" \
     --arg settlement_bridge_smoke_source "$settlement_bridge_smoke_source" \
     --arg settlement_state_persistence_source "$settlement_state_persistence_source" \
+    --arg issuer_sponsor_api_live_smoke_status "$issuer_sponsor_api_live_smoke_status" \
+    --argjson issuer_sponsor_api_live_smoke_ok "$issuer_sponsor_api_live_smoke_ok" \
+    --argjson issuer_sponsor_api_live_smoke_resolved "$issuer_sponsor_api_live_smoke_resolved" \
+    --arg issuer_sponsor_api_live_smoke_source "$issuer_sponsor_api_live_smoke_source" \
     --argjson reasons "$reasons_json" \
     '{
       version: 1,
@@ -352,7 +363,8 @@ emit_summary_json() {
           settlement_failsoft_ok: ($require_settlement_failsoft_ok == 1),
           settlement_acceptance_ok: ($require_settlement_acceptance_ok == 1),
           settlement_bridge_smoke_ok: ($require_settlement_bridge_smoke_ok == 1),
-          settlement_state_persistence_ok: ($require_settlement_state_persistence_ok == 1)
+          settlement_state_persistence_ok: ($require_settlement_state_persistence_ok == 1),
+          issuer_sponsor_api_live_smoke_ok: ($require_issuer_sponsor_api_live_smoke_ok == 1)
         },
         usable: {
           phase5_run_summary_json: ($run_summary_usable == 1),
@@ -377,12 +389,16 @@ emit_summary_json() {
         settlement_state_persistence_ok: $settlement_state_persistence_ok,
         settlement_state_persistence_status: $settlement_state_persistence_status,
         settlement_state_persistence_resolved: ($settlement_state_persistence_resolved == 1),
+        issuer_sponsor_api_live_smoke_ok: $issuer_sponsor_api_live_smoke_ok,
+        issuer_sponsor_api_live_smoke_status: $issuer_sponsor_api_live_smoke_status,
+        issuer_sponsor_api_live_smoke_resolved: ($issuer_sponsor_api_live_smoke_resolved == 1),
         sources: {
           run_pipeline_ok: $run_pipeline_source,
           settlement_failsoft_ok: $settlement_failsoft_source,
           settlement_acceptance_ok: $settlement_acceptance_source,
           settlement_bridge_smoke_ok: $settlement_bridge_smoke_source,
-          settlement_state_persistence_ok: $settlement_state_persistence_source
+          settlement_state_persistence_ok: $settlement_state_persistence_source,
+          issuer_sponsor_api_live_smoke_ok: $issuer_sponsor_api_live_smoke_source
         }
       },
       decision: {
@@ -415,6 +431,7 @@ require_settlement_failsoft_ok="${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_REQUIRE_
 require_settlement_acceptance_ok="${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_REQUIRE_SETTLEMENT_ACCEPTANCE_OK:-${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_REQUIRE_WINDOWS_ROLE_RUNBOOKS_OK:-1}}"
 require_settlement_bridge_smoke_ok="${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_REQUIRE_SETTLEMENT_BRIDGE_SMOKE_OK:-${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_REQUIRE_CROSS_PLATFORM_INTEROP_OK:-1}}"
 require_settlement_state_persistence_ok="${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_REQUIRE_SETTLEMENT_STATE_PERSISTENCE_OK:-${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_REQUIRE_ROLE_COMBINATION_VALIDATION_OK:-1}}"
+require_issuer_sponsor_api_live_smoke_ok="${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_REQUIRE_ISSUER_SPONSOR_API_LIVE_SMOKE_OK:-1}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -475,6 +492,15 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --require-issuer-sponsor-api-live-smoke-ok)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_issuer_sponsor_api_live_smoke_ok="${2:-}"
+        shift 2
+      else
+        require_issuer_sponsor_api_live_smoke_ok="1"
+        shift
+      fi
+      ;;
     --summary-json)
       summary_json="${2:-}"
       shift 2
@@ -505,6 +531,7 @@ bool_arg_or_die "--require-settlement-failsoft-ok" "$require_settlement_failsoft
 bool_arg_or_die "--require-settlement-acceptance-ok" "$require_settlement_acceptance_ok"
 bool_arg_or_die "--require-settlement-bridge-smoke-ok" "$require_settlement_bridge_smoke_ok"
 bool_arg_or_die "--require-settlement-state-persistence-ok" "$require_settlement_state_persistence_ok"
+bool_arg_or_die "--require-issuer-sponsor-api-live-smoke-ok" "$require_issuer_sponsor_api_live_smoke_ok"
 bool_arg_or_die "--show-json" "$show_json"
 
 phase5_run_summary_json="$(abs_path "$phase5_run_summary_json")"
@@ -566,6 +593,7 @@ settlement_failsoft_pair="$(resolve_handoff_bool "settlement_failsoft_ok" "$road
 settlement_acceptance_pair="$(resolve_handoff_bool "settlement_acceptance_ok" "$roadmap_summary_json" "$roadmap_summary_usable" "$phase5_run_summary_json" "$phase5_run_summary_usable")"
 settlement_bridge_smoke_pair="$(resolve_handoff_bool "settlement_bridge_smoke_ok" "$roadmap_summary_json" "$roadmap_summary_usable" "$phase5_run_summary_json" "$phase5_run_summary_usable")"
 settlement_state_persistence_pair="$(resolve_handoff_bool "settlement_state_persistence_ok" "$roadmap_summary_json" "$roadmap_summary_usable" "$phase5_run_summary_json" "$phase5_run_summary_usable")"
+issuer_sponsor_api_live_smoke_pair="$(resolve_handoff_bool "issuer_sponsor_api_live_smoke_ok" "$roadmap_summary_json" "$roadmap_summary_usable" "$phase5_run_summary_json" "$phase5_run_summary_usable")"
 
 settlement_failsoft_ok="${settlement_failsoft_pair%%|*}"
 settlement_failsoft_pair="${settlement_failsoft_pair#*|}"
@@ -594,6 +622,13 @@ settlement_state_persistence_status="${settlement_state_persistence_pair%%|*}"
 settlement_state_persistence_pair="${settlement_state_persistence_pair#*|}"
 settlement_state_persistence_source="${settlement_state_persistence_pair%%|*}"
 settlement_state_persistence_resolved="${settlement_state_persistence_pair##*|}"
+
+issuer_sponsor_api_live_smoke_ok="${issuer_sponsor_api_live_smoke_pair%%|*}"
+issuer_sponsor_api_live_smoke_pair="${issuer_sponsor_api_live_smoke_pair#*|}"
+issuer_sponsor_api_live_smoke_status="${issuer_sponsor_api_live_smoke_pair%%|*}"
+issuer_sponsor_api_live_smoke_pair="${issuer_sponsor_api_live_smoke_pair#*|}"
+issuer_sponsor_api_live_smoke_source="${issuer_sponsor_api_live_smoke_pair%%|*}"
+issuer_sponsor_api_live_smoke_resolved="${issuer_sponsor_api_live_smoke_pair##*|}"
 
 if [[ "$require_run_pipeline_ok" == "1" && "$run_pipeline_value" != "true" ]]; then
   if [[ "$run_pipeline_status" == "missing" ]]; then
@@ -628,6 +663,13 @@ if [[ "$require_settlement_state_persistence_ok" == "1" && "$settlement_state_pe
     reasons+=("settlement_state_persistence_ok unresolved from provided artifacts")
   else
     reasons+=("settlement_state_persistence_ok is false")
+  fi
+fi
+if [[ "$require_issuer_sponsor_api_live_smoke_ok" == "1" && "$issuer_sponsor_api_live_smoke_ok" != "true" ]]; then
+  if [[ "$issuer_sponsor_api_live_smoke_status" == "missing" ]]; then
+    reasons+=("issuer_sponsor_api_live_smoke_ok unresolved from provided artifacts")
+  else
+    reasons+=("issuer_sponsor_api_live_smoke_ok is false")
   fi
 fi
 
@@ -680,7 +722,12 @@ emit_summary_json \
   "$settlement_acceptance_source" \
   "$settlement_bridge_smoke_source" \
   "$settlement_state_persistence_source" \
-  "$reasons_json"
+  "$reasons_json" \
+  "$require_issuer_sponsor_api_live_smoke_ok" \
+  "$issuer_sponsor_api_live_smoke_status" \
+  "$issuer_sponsor_api_live_smoke_ok" \
+  "$issuer_sponsor_api_live_smoke_resolved" \
+  "$issuer_sponsor_api_live_smoke_source"
 
 if [[ "$show_json" == "1" ]]; then
   cat "$summary_json"

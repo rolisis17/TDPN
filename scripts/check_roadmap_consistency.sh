@@ -1348,6 +1348,14 @@ if ! rg -Fq "PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_CANONICAL_SUMMARY_JSON" "$pha
   echo "phase5 handoff-check wrapper must expose canonical summary artifact override env"
   exit 1
 fi
+if ! rg -Fq "require-issuer-sponsor-api-live-smoke-ok" "$phase5_handoff_check_script"; then
+  echo "phase5 handoff-check wrapper must expose issuer sponsor live-smoke requirement toggle"
+  exit 1
+fi
+if ! rg -Fq "issuer_sponsor_api_live_smoke_ok" "$phase5_handoff_check_script"; then
+  echo "phase5 handoff-check wrapper must surface issuer_sponsor_api_live_smoke_ok signal"
+  exit 1
+fi
 if ! rg -Fq "canonical_summary_json" "$phase5_handoff_check_script"; then
   echo "phase5 handoff-check wrapper must emit canonical summary artifact metadata"
   exit 1
@@ -1358,6 +1366,14 @@ if ! rg -Fq "canonical_summary_json" "$phase5_handoff_check_integration_script";
 fi
 if ! rg -Fq "cmp -s" "$phase5_handoff_check_integration_script"; then
   echo "phase5 handoff-check integration must validate canonical and run summary content parity"
+  exit 1
+fi
+if ! rg -Fq "issuer_sponsor_api_live_smoke_ok" "$phase5_handoff_check_integration_script"; then
+  echo "phase5 handoff-check integration must validate issuer_sponsor_api_live_smoke_ok signal coverage"
+  exit 1
+fi
+if ! rg -Fq "require-issuer-sponsor-api-live-smoke-ok 0" "$phase5_handoff_check_integration_script"; then
+  echo "phase5 handoff-check integration must validate issuer sponsor live-smoke policy toggle behavior"
   exit 1
 fi
 if ! rg -Fq "phase5_settlement_layer_summary_report" "$phase5_summary_report_script"; then
