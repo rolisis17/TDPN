@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package tdpn.vpnrewards.v1;
+
+option go_package = "github.com/tdpn/tdpn-chain/x/vpnrewards/types";
+
+import "tdpn/vpnrewards/v1/types.proto";
+
+service Msg {
+  rpc RecordAccrual(MsgRecordAccrualRequest) returns (MsgRecordAccrualResponse);
+  rpc RecordDistribution(MsgRecordDistributionRequest) returns (MsgRecordDistributionResponse);
+}
+
+message MsgRecordAccrualRequest {
+  RewardAccrual accrual = 1;
+}
+
+message MsgRecordAccrualResponse {
+  RewardAccrual accrual = 1;
+}
+
+message MsgRecordDistributionRequest {
+  DistributionRecord distribution = 1;
+}
+
+message MsgRecordDistributionResponse {
+  DistributionRecord distribution = 1;
+}

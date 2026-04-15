@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package tdpn.vpnbilling.v1;
+
+option go_package = "github.com/tdpn/tdpn-chain/x/vpnbilling/types";
+
+import "tdpn/vpnbilling/v1/types.proto";
+
+service Query {
+  rpc CreditReservation(QueryCreditReservationRequest) returns (QueryCreditReservationResponse);
+  rpc SettlementRecord(QuerySettlementRecordRequest) returns (QuerySettlementRecordResponse);
+  rpc ListCreditReservations(QueryListCreditReservationsRequest) returns (QueryListCreditReservationsResponse);
+  rpc ListSettlementRecords(QueryListSettlementRecordsRequest) returns (QueryListSettlementRecordsResponse);
+}
+
+message QueryCreditReservationRequest {
+  string reservation_id = 1;
+}
+
+message QueryCreditReservationResponse {
+  CreditReservation reservation = 1;
+  bool found = 2;
+}
+
+message QuerySettlementRecordRequest {
+  string settlement_id = 1;
+}
+
+message QuerySettlementRecordResponse {
+  SettlementRecord settlement = 1;
+  bool found = 2;
+}
+
+message QueryListCreditReservationsRequest {}
+
+message QueryListCreditReservationsResponse {
+  repeated CreditReservation reservations = 1;
+}
+
+message QueryListSettlementRecordsRequest {}
+
+message QueryListSettlementRecordsResponse {
+  repeated SettlementRecord settlements = 1;
+}

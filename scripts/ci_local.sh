@@ -81,6 +81,9 @@ echo "[ci] manual validation report integration"
 echo "[ci] roadmap progress report integration"
 ./scripts/integration_roadmap_progress_report.sh
 
+echo "[ci] roadmap consistency integration"
+bash ./scripts/integration_roadmap_consistency.sh
+
 echo "[ci] pre-real-host readiness integration"
 ./scripts/integration_pre_real_host_readiness.sh
 
@@ -95,6 +98,21 @@ echo "[ci] single-machine prod readiness integration"
 
 echo "[ci] vpn-rc standard path integration"
 ./scripts/integration_vpn_rc_standard_path.sh
+
+echo "[ci] vpn-rc matrix path integration"
+./scripts/integration_vpn_rc_matrix_path.sh
+
+echo "[ci] vpn-rc resilience path integration"
+./scripts/integration_vpn_rc_resilience_path.sh
+
+echo "[ci] phase-1 resilience gate (dry-run contract)"
+ci_local_phase1_run_session_churn_guard="${CI_LOCAL_PHASE1_RUN_SESSION_CHURN_GUARD:-${CI_PHASE1_RESILIENCE_RUN_SESSION_CHURN_GUARD:-1}}"
+ci_local_phase1_run_3hop_runtime_integration="${CI_LOCAL_PHASE1_RUN_3HOP_RUNTIME_INTEGRATION:-${CI_PHASE1_RESILIENCE_RUN_3HOP_RUNTIME_INTEGRATION:-0}}"
+./scripts/ci_phase1_resilience.sh \
+  --dry-run 1 \
+  --print-summary-json 0 \
+  --run-session-churn-guard "$ci_local_phase1_run_session_churn_guard" \
+  --run-3hop-runtime-integration "$ci_local_phase1_run_3hop_runtime_integration"
 
 echo "[ci] client-vpn smoke integration"
 ./scripts/integration_client_vpn_smoke.sh
@@ -116,6 +134,12 @@ echo "[ci] three-machine prod signoff integration"
 
 echo "[ci] three-machine docker readiness integration"
 ./scripts/integration_three_machine_docker_readiness.sh
+
+echo "[ci] three-machine docker profile matrix integration"
+./scripts/integration_three_machine_docker_profile_matrix.sh
+
+echo "[ci] three-machine docker profile matrix record integration"
+./scripts/integration_three_machine_docker_profile_matrix_record.sh
 
 echo "[ci] three-machine docker readiness record integration"
 ./scripts/integration_three_machine_docker_readiness_record.sh
@@ -156,6 +180,60 @@ echo "[ci] challenge integration"
 echo "[ci] revocation integration"
 ./scripts/integration_revocation.sh
 
+echo "[ci] issuer slash-evidence integration"
+./scripts/integration_issuer_slash_evidence.sh
+
+echo "[ci] cosmos settlement fail-soft integration"
+./scripts/integration_cosmos_settlement_failsoft.sh
+
+echo "[ci] cosmos settlement acceptance paths integration"
+./scripts/integration_cosmos_settlement_acceptance_paths.sh
+
+echo "[ci] cosmos chain scaffold integration"
+./scripts/integration_cosmos_chain_scaffold.sh
+
+echo "[ci] cosmos vpnbilling tx integration"
+./scripts/integration_cosmos_vpnbilling_tx.sh
+
+echo "[ci] cosmos module tx surface integration"
+./scripts/integration_cosmos_module_tx_surface.sh
+
+echo "[ci] cosmos query surface integration"
+./scripts/integration_cosmos_query_surface.sh
+
+echo "[ci] cosmos proto surface integration"
+./scripts/integration_cosmos_proto_surface.sh
+
+echo "[ci] cosmos proto codegen surface integration"
+./scripts/integration_cosmos_proto_codegen_surface.sh
+
+echo "[ci] cosmos proto grpc surface integration"
+./scripts/integration_cosmos_proto_grpc_surface.sh
+
+echo "[ci] cosmos grpc app roundtrip integration"
+./scripts/integration_cosmos_grpc_app_roundtrip.sh
+
+echo "[ci] cosmos tdpnd grpc runtime smoke integration"
+./scripts/integration_cosmos_tdpnd_grpc_runtime_smoke.sh
+
+echo "[ci] cosmos tdpnd settlement bridge smoke integration"
+./scripts/integration_cosmos_tdpnd_settlement_bridge_smoke.sh
+
+echo "[ci] cosmos tdpnd state-dir persistence integration"
+./scripts/integration_cosmos_tdpnd_state_dir_persistence.sh
+
+echo "[ci] cosmos tdpnd settlement bridge live smoke integration"
+./scripts/integration_cosmos_tdpnd_settlement_bridge_live_smoke.sh
+
+echo "[ci] cosmos bridge local stack contract integration"
+./scripts/integration_cosmos_bridge_local_stack_contract.sh
+
+echo "[ci] cosmos adapter to tdpnd bridge roundtrip integration"
+./scripts/integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh
+
+echo "[ci] cosmos tdpnd grpc live smoke integration"
+./scripts/integration_cosmos_tdpnd_grpc_live_smoke.sh
+
 echo "[ci] token-proof replay integration"
 ./scripts/integration_token_proof_replay.sh
 
@@ -186,6 +264,15 @@ echo "[ci] easy-node server federation wait integration"
 echo "[ci] easy-node self-update integration"
 ./scripts/integration_easy_node_self_update.sh
 
+echo "[ci] phase-0 gate"
+./scripts/ci_phase0.sh
+
+echo "[ci] local API config-v1 defaults integration"
+./scripts/integration_local_api_config_defaults.sh
+
+echo "[ci] desktop scaffold contract integration"
+./scripts/integration_desktop_scaffold_contract.sh
+
 echo "[ci] easy-node client profile env integration"
 ./scripts/integration_easy_node_client_profile_env.sh
 
@@ -201,17 +288,14 @@ echo "[ci] profile compare trend integration"
 echo "[ci] profile compare campaign integration"
 ./scripts/integration_profile_compare_campaign.sh
 
+echo "[ci] profile compare docker matrix integration"
+./scripts/integration_profile_compare_docker_matrix.sh
+
 echo "[ci] profile compare campaign check integration"
 ./scripts/integration_profile_compare_campaign_check.sh
 
 echo "[ci] profile compare campaign signoff integration"
 ./scripts/integration_profile_compare_campaign_signoff.sh
-
-echo "[ci] easy-mode launcher wiring integration"
-./scripts/integration_easy_mode_launcher_wiring.sh
-
-echo "[ci] easy-mode launcher runtime integration"
-./scripts/integration_easy_mode_launcher_runtime.sh
 
 echo "[ci] incident snapshot integration"
 ./scripts/integration_incident_snapshot.sh
@@ -409,6 +493,9 @@ echo "[ci] session-reuse integration"
 
 echo "[ci] session-handoff integration"
 ./scripts/integration_session_handoff.sh
+
+echo "[ci] session churn guard integration"
+./scripts/integration_session_churn_guard.sh
 
 echo "[ci] issuer-trust-sync integration"
 ./scripts/integration_issuer_trust_sync.sh

@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package tdpn.vpnbilling.v1;
+
+option go_package = "github.com/tdpn/tdpn-chain/x/vpnbilling/types";
+
+import "tdpn/vpnbilling/v1/types.proto";
+
+service Msg {
+  rpc ReserveCredits(MsgReserveCreditsRequest) returns (MsgReserveCreditsResponse);
+  rpc FinalizeUsage(MsgFinalizeUsageRequest) returns (MsgFinalizeUsageResponse);
+}
+
+message MsgReserveCreditsRequest {
+  CreditReservation reservation = 1;
+}
+
+message MsgReserveCreditsResponse {
+  CreditReservation reservation = 1;
+  bool idempotent_replay = 2;
+  bool conflict = 3;
+}
+
+message MsgFinalizeUsageRequest {
+  SettlementRecord settlement = 1;
+}
+
+message MsgFinalizeUsageResponse {
+  SettlementRecord settlement = 1;
+  bool idempotent_replay = 2;
+  bool conflict = 3;
+}
