@@ -9,7 +9,7 @@ import (
 	"github.com/tdpn/tdpn-chain/x/vpnslashing/types"
 )
 
-// Keeper is an in-memory placeholder for evidence and penalty records.
+// Keeper defaults to in-memory storage and accepts pluggable stores (file-backed/KV adapters).
 type Keeper struct {
 	mu    sync.RWMutex
 	store KeeperStore

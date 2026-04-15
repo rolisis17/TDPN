@@ -9,7 +9,7 @@ import (
 	"github.com/tdpn/tdpn-chain/x/vpnbilling/types"
 )
 
-// Keeper is an in-memory stub until Cosmos SDK state stores are wired.
+// Keeper defaults to in-memory storage and accepts pluggable stores (file-backed/KV adapters).
 type Keeper struct {
 	mu    sync.RWMutex
 	store KeeperStore

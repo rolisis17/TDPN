@@ -9,7 +9,7 @@ import (
 	"github.com/tdpn/tdpn-chain/x/vpnrewards/types"
 )
 
-// Keeper is a placeholder implementation that will be swapped to Cosmos stores.
+// Keeper defaults to in-memory storage and accepts pluggable stores (file-backed/KV adapters).
 type Keeper struct {
 	mu    sync.RWMutex
 	store KeeperStore
