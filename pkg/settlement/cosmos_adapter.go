@@ -57,6 +57,9 @@ type CosmosAdapter struct {
 	workerWG     sync.WaitGroup
 }
 
+var _ ChainAdapter = (*CosmosAdapter)(nil)
+var _ ChainConfirmationQuerier = (*CosmosAdapter)(nil)
+
 type cosmosQueuedOperation struct {
 	path           string
 	payload        any
