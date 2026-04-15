@@ -63,3 +63,53 @@ func TestKVStoreUpsertGetList(t *testing.T) {
 		t.Fatalf("expected listed penalty %+v, got %+v", penalty, penaltyList[0])
 	}
 }
+
+func TestKVStoreInvalidPayloadsAreSafeOnGetAndList(t *testing.T) {
+	t.Parallel()
+
+	rawStore := kvtypes.NewMapStore()
+	store := NewKVStore(rawStore)
+
+	rawStore.Set([]byte("evidence/evidence-bad"), []byte("{invalid-json"))
+	rawStore.Set([]byte("penalty/penalty-bad"), []byte("{invalid-json"))
+
+	if _, ok := store.GetEvidence("evidence-bad"); ok {
+		t.Fatal("expected invalid evidence payload to be treated as not found")
+	}
+	if _, ok := store.GetPenalty("penalty-bad"); ok {
+		t.Fatal("expected invalid penalty payload to be treated as not found")
+	}
+
+	goodEvidence := types.SlashEvidence{
+		EvidenceID: "evidence-good",
+		SessionID:  "sess-good",
+		ProviderID: "provider-good",
+		Kind:       types.EvidenceKindObjective,
+		ProofHash:  "sha256:proof-good",
+		Status:     chaintypes.ReconciliationSubmitted,
+	}
+	goodPenalty := types.PenaltyDecision{
+		PenaltyID:       "penalty-good",
+		EvidenceID:      goodEvidence.EvidenceID,
+		SlashBasisPoint: 10,
+		Status:          chaintypes.ReconciliationSubmitted,
+	}
+	store.UpsertEvidence(goodEvidence)
+	store.UpsertPenalty(goodPenalty)
+
+	evidenceList := store.ListEvidence()
+	if len(evidenceList) != 1 {
+		t.Fatalf("expected only valid evidence entry to be listed, got %d", len(evidenceList))
+	}
+	if evidenceList[0].EvidenceID != goodEvidence.EvidenceID {
+		t.Fatalf("expected listed evidence id %q, got %q", goodEvidence.EvidenceID, evidenceList[0].EvidenceID)
+	}
+
+	penaltyList := store.ListPenalties()
+	if len(penaltyList) != 1 {
+		t.Fatalf("expected only valid penalty entry to be listed, got %d", len(penaltyList))
+	}
+	if penaltyList[0].PenaltyID != goodPenalty.PenaltyID {
+		t.Fatalf("expected listed penalty id %q, got %q", goodPenalty.PenaltyID, penaltyList[0].PenaltyID)
+	}
+}
