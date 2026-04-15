@@ -48,23 +48,48 @@ if ! jq -e '
   and .rc == 0
   and (.steps | type) == "object"
   and (.steps.ci_phase6_cosmos_l1_build_testnet | type) == "object"
+  and (.steps.phase6_cosmos_module_coverage_floor | type) == "object"
+  and (.steps.phase6_cosmos_keeper_coverage_floor | type) == "object"
+  and (.steps.phase6_cosmos_dual_write_parity | type) == "object"
   and (.steps.phase6_cosmos_l1_build_testnet_check | type) == "object"
   and (.steps.phase6_cosmos_l1_build_testnet_run | type) == "object"
   and (.steps.phase6_cosmos_l1_build_testnet_handoff_check | type) == "object"
   and (.steps.phase6_cosmos_l1_build_testnet_handoff_run | type) == "object"
   and (.steps.phase6_cosmos_l1_build_testnet_suite | type) == "object"
+  and (.steps.phase6_cosmos_l1_contracts_live_smoke | type) == "object"
   and .steps.ci_phase6_cosmos_l1_build_testnet.status == "pass"
+  and .steps.phase6_cosmos_module_coverage_floor.status == "pass"
+  and .steps.phase6_cosmos_keeper_coverage_floor.status == "pass"
+  and .steps.phase6_cosmos_dual_write_parity.status == "pass"
   and .steps.phase6_cosmos_l1_build_testnet_check.status == "pass"
   and .steps.phase6_cosmos_l1_build_testnet_run.status == "pass"
   and .steps.phase6_cosmos_l1_build_testnet_handoff_check.status == "pass"
   and .steps.phase6_cosmos_l1_build_testnet_handoff_run.status == "pass"
   and .steps.phase6_cosmos_l1_build_testnet_suite.status == "pass"
   and .steps.ci_phase6_cosmos_l1_build_testnet.rc == 0
+  and .steps.phase6_cosmos_module_coverage_floor.rc == 0
+  and .steps.phase6_cosmos_keeper_coverage_floor.rc == 0
+  and .steps.phase6_cosmos_dual_write_parity.rc == 0
   and .steps.phase6_cosmos_l1_build_testnet_check.rc == 0
   and .steps.phase6_cosmos_l1_build_testnet_run.rc == 0
   and .steps.phase6_cosmos_l1_build_testnet_handoff_check.rc == 0
   and .steps.phase6_cosmos_l1_build_testnet_handoff_run.rc == 0
   and .steps.phase6_cosmos_l1_build_testnet_suite.rc == 0
+  and .steps.phase6_cosmos_l1_contracts_live_smoke.rc == 0
+  and (
+    (
+      .inputs.run_phase6_cosmos_l1_contracts_live_smoke == false
+      and .steps.phase6_cosmos_l1_contracts_live_smoke.enabled == false
+      and .steps.phase6_cosmos_l1_contracts_live_smoke.status == "skip"
+      and .steps.phase6_cosmos_l1_contracts_live_smoke.command == null
+      and .steps.phase6_cosmos_l1_contracts_live_smoke.reason == "disabled"
+    ) or (
+      .inputs.run_phase6_cosmos_l1_contracts_live_smoke == true
+      and .steps.phase6_cosmos_l1_contracts_live_smoke.enabled == true
+      and .steps.phase6_cosmos_l1_contracts_live_smoke.status == "pass"
+      and (.steps.phase6_cosmos_l1_contracts_live_smoke.command | contains("CI_PHASE6_COSMOS_L1_CONTRACTS_RUN_PHASE6_COSMOS_L1_CONTRACTS_LIVE_SMOKE=0"))
+    )
+  )
 ' "$SUMMARY_JSON" >/dev/null; then
   echo "phase6 contracts live-smoke summary validation failed"
   cat "$SUMMARY_JSON"

@@ -347,6 +347,12 @@ if ! rg -Fq "integration_cosmos_keeper_coverage_floor.sh" "$product_roadmap"; th
   echo "product roadmap must document phase6 contracts keeper coverage floor integration script"
   exit 1
 fi
+for coverage_doc in "$full_plan" "$product_roadmap" "$chain_readme"; do
+  if ! rg -Fq "billing/rewards/slashing/sponsor/validator/governance" "$coverage_doc"; then
+    echo "$coverage_doc must explicitly document six-target phase6 coverage floor posture (billing/rewards/slashing/sponsor/validator/governance)"
+    exit 1
+  fi
+done
 if ! rg -Fq "phase6_cosmos_dual_write_parity" "$product_roadmap"; then
   echo "product roadmap must document phase6 contracts phase6_cosmos_dual_write_parity stage"
   exit 1
@@ -514,6 +520,17 @@ if ! rg -Fq "CI_PHASE6_COSMOS_L1_CONTRACTS_PHASE6_COSMOS_MODULE_COVERAGE_FLOOR_S
   echo "phase6 contracts ci integration script must expose module coverage floor script override wiring"
   exit 1
 fi
+for module_floor_contract in \
+  "COSMOS_MODULE_COVERAGE_FLOOR_VPNVALIDATOR_MODULE" \
+  "COSMOS_MODULE_COVERAGE_FLOOR_VPNGOVERNANCE_MODULE" \
+  "./x/vpnvalidator/module" \
+  "./x/vpngovernance/module"
+do
+  if ! rg -Fq "$module_floor_contract" "$phase6_module_coverage_floor_script"; then
+    echo "phase6 module coverage floor script must include validator/governance contract: $module_floor_contract"
+    exit 1
+  fi
+done
 if ! rg -Fq "cosmos_keeper_coverage_floor" "$phase6_contracts_ci_script"; then
   echo "phase6 contracts ci script must include cosmos_keeper_coverage_floor stage"
   exit 1
@@ -531,6 +548,17 @@ if ! rg -Fq "CI_PHASE6_COSMOS_L1_CONTRACTS_PHASE6_COSMOS_KEEPER_COVERAGE_FLOOR_S
   echo "phase6 contracts ci integration script must expose keeper coverage floor script wiring"
   exit 1
 fi
+for keeper_floor_contract in \
+  "COSMOS_KEEPER_COVERAGE_FLOOR_VPNVALIDATOR_KEEPER" \
+  "COSMOS_KEEPER_COVERAGE_FLOOR_VPNGOVERNANCE_KEEPER" \
+  "./x/vpnvalidator/keeper" \
+  "./x/vpngovernance/keeper"
+do
+  if ! rg -Fq "$keeper_floor_contract" "$phase6_keeper_coverage_floor_script"; then
+    echo "phase6 keeper coverage floor script must include validator/governance contract: $keeper_floor_contract"
+    exit 1
+  fi
+done
 if ! rg -Fq "phase6_cosmos_dual_write_parity" "$phase6_contracts_ci_script"; then
   echo "phase6 contracts ci script must include phase6_cosmos_dual_write_parity stage"
   exit 1

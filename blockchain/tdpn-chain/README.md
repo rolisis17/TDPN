@@ -42,6 +42,7 @@ This workspace defines the initial module boundaries for TDPN's VPN-compatible b
 - Integration coverage for easy-node blockchain summary-wrapper wiring is `scripts/integration_easy_node_blockchain_summary_reports.sh`.
 - Phase6 build/testnet/contracts/check/run/handoff/suite wrappers emit canonical summary artifacts in `.easy-node-logs` (`phase6_cosmos_l1_build_testnet_ci_summary.json`, `phase6_cosmos_l1_contracts_summary.json`, `phase6_cosmos_l1_build_testnet_check_summary.json`, `phase6_cosmos_l1_build_testnet_run_summary.json`, `phase6_cosmos_l1_build_testnet_handoff_check_summary.json`, `phase6_cosmos_l1_build_testnet_handoff_run_summary.json`, `phase6_cosmos_l1_build_testnet_suite_summary.json`) in addition to per-run reports.
 - Phase6 summary helper fallback discovery can resolve latest timestamped CI/contracts/suite summaries when canonical/default files are not present.
+- Phase6 coverage-floor contracts enforce six module and six keeper targets (billing/rewards/slashing/sponsor/validator/governance), including validator/governance floor env overrides and package checks in `integration_cosmos_module_coverage_floor.sh` and `integration_cosmos_keeper_coverage_floor.sh`.
 
 ## Workspace status
 - Go entrypoint: `cmd/tdpnd`.
