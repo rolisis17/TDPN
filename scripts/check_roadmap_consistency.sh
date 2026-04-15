@@ -35,6 +35,8 @@ phase6_integration_script="scripts/integration_ci_phase6_cosmos_l1_build_testnet
 phase6_contracts_ci_script="scripts/ci_phase6_cosmos_l1_contracts.sh"
 phase6_contracts_integration_script="scripts/integration_ci_phase6_cosmos_l1_contracts.sh"
 phase6_contracts_live_smoke_script="scripts/integration_phase6_cosmos_l1_contracts_live_smoke.sh"
+phase6_settlement_bridge_smoke_script="scripts/integration_cosmos_tdpnd_settlement_bridge_smoke.sh"
+phase6_settlement_bridge_live_smoke_script="scripts/integration_cosmos_tdpnd_settlement_bridge_live_smoke.sh"
 phase6_module_coverage_floor_script="scripts/integration_cosmos_module_coverage_floor.sh"
 phase6_keeper_coverage_floor_script="scripts/integration_cosmos_keeper_coverage_floor.sh"
 phase6_dual_write_parity_script="scripts/integration_cosmos_dual_write_parity.sh"
@@ -99,7 +101,7 @@ check_confirmation_interface_wording() {
   fi
 }
 
-for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$chain_readme" "$chain_scaffold_file" "$chain_grpc_registry_file" "$chain_settlement_bridge_file" "$settlement_mapping_doc" "$blockchain_sponsor_quickstart_doc" "$phase5_ci_script" "$phase5_integration_script" "$phase5_check_script" "$phase5_run_script" "$phase5_handoff_check_script" "$phase5_handoff_run_script" "$phase5_check_integration_script" "$phase5_run_integration_script" "$phase5_handoff_check_integration_script" "$phase5_handoff_run_integration_script" "$phase5_summary_report_script" "$phase5_summary_report_integration_script" "$ci_local_script" "$easy_node_blockchain_summary_reports_integration_script" "$phase6_ci_script" "$phase6_integration_script" "$phase6_contracts_ci_script" "$phase6_contracts_integration_script" "$phase6_contracts_live_smoke_script" "$phase6_module_coverage_floor_script" "$phase6_keeper_coverage_floor_script" "$phase6_dual_write_parity_script" "$phase6_check_script" "$phase6_run_script" "$phase6_check_integration_script" "$phase6_run_integration_script" "$phase6_suite_script" "$phase6_suite_integration_script" "$phase6_handoff_check_script" "$phase6_handoff_run_script" "$phase6_handoff_check_integration_script" "$phase6_handoff_run_integration_script" "$phase6_summary_report_script" "$phase6_summary_report_integration_script"; do
+for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$chain_readme" "$chain_scaffold_file" "$chain_grpc_registry_file" "$chain_settlement_bridge_file" "$settlement_mapping_doc" "$blockchain_sponsor_quickstart_doc" "$phase5_ci_script" "$phase5_integration_script" "$phase5_check_script" "$phase5_run_script" "$phase5_handoff_check_script" "$phase5_handoff_run_script" "$phase5_check_integration_script" "$phase5_run_integration_script" "$phase5_handoff_check_integration_script" "$phase5_handoff_run_integration_script" "$phase5_summary_report_script" "$phase5_summary_report_integration_script" "$ci_local_script" "$easy_node_blockchain_summary_reports_integration_script" "$phase6_ci_script" "$phase6_integration_script" "$phase6_contracts_ci_script" "$phase6_contracts_integration_script" "$phase6_contracts_live_smoke_script" "$phase6_settlement_bridge_smoke_script" "$phase6_settlement_bridge_live_smoke_script" "$phase6_module_coverage_floor_script" "$phase6_keeper_coverage_floor_script" "$phase6_dual_write_parity_script" "$phase6_check_script" "$phase6_run_script" "$phase6_check_integration_script" "$phase6_run_integration_script" "$phase6_suite_script" "$phase6_suite_integration_script" "$phase6_handoff_check_script" "$phase6_handoff_run_script" "$phase6_handoff_check_integration_script" "$phase6_handoff_run_integration_script" "$phase6_summary_report_script" "$phase6_summary_report_integration_script"; do
   if [[ ! -f "$f" ]]; then
     echo "missing required file: $f"
     exit 1
@@ -618,6 +620,31 @@ if ! rg -Fq "cmp -s" "$phase6_contracts_integration_script"; then
 fi
 if ! rg -Fq "[ci-phase6-cosmos-l1-contracts] canonical summary same-path" "$phase6_contracts_integration_script"; then
   echo "phase6 contracts ci integration script must include same-path canonical contract coverage marker"
+  exit 1
+fi
+if ! rg -Fq "TestRunTDPNDSettlementHTTPAuthContractGETOpenPOSTBearerRequired" "$phase6_settlement_bridge_smoke_script"; then
+  echo "settlement bridge smoke script must explicitly cover auth-contract regression test"
+  exit 1
+fi
+if ! rg -Fq "TestRunTDPNDSettlementHTTPValidatorGovernanceWriteMethodContract" "$phase6_settlement_bridge_smoke_script"; then
+  echo "settlement bridge smoke script must explicitly cover validator/governance write method contract test"
+  exit 1
+fi
+for live_smoke_validator_governance_path in \
+  "/x/vpnvalidator/eligibilities" \
+  "/x/vpnvalidator/status-records" \
+  "/x/vpngovernance/policies" \
+  "/x/vpngovernance/decisions" \
+  "/x/vpngovernance/audit-actions"
+do
+  if ! rg -Fq "$live_smoke_validator_governance_path" "$phase6_settlement_bridge_live_smoke_script"; then
+    echo "settlement bridge live-smoke script must explicitly cover validator/governance route: $live_smoke_validator_governance_path"
+    exit 1
+  fi
+done
+if ! rg -Fq "post_expect_status \"\${BASE_URL}/x/vpnvalidator/eligibilities\"" "$phase6_settlement_bridge_live_smoke_script" \
+  && ! rg -Fq "post_expect_status \"\${BASE_URL}/x/vpngovernance/policies\"" "$phase6_settlement_bridge_live_smoke_script"; then
+  echo "settlement bridge live-smoke script must explicitly validate validator/governance POST auth contract"
   exit 1
 fi
 if ! rg -Fq "CI_PHASE6_COSMOS_L1_BUILD_TESTNET_CANONICAL_SUMMARY_JSON" "$phase6_ci_script"; then

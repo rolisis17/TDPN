@@ -122,6 +122,7 @@ BASE_URL="http://127.0.0.1:${PORT}"
 wait_for_health_ready "${BASE_URL}/health"
 
 post_expect_status "${BASE_URL}/x/vpnslashing/evidence" '{"EvidenceID":"ev-unauth-1","SubjectID":"provider-1","SessionID":"sess-1","ViolationType":"double-sign","EvidenceRef":"sha256:abc","ObservedAt":"2026-01-01T00:00:00Z"}' "401"
+post_expect_status "${BASE_URL}/x/vpnvalidator/eligibilities" '{"ValidatorID":"val-unauth-1","OperatorAddress":"op-unauth-1","Eligible":true,"PolicyReason":"auth smoke","UpdatedAt":"2026-01-01T00:00:00Z","Status":"submitted"}' "401"
 
 post_expect_status "${BASE_URL}/x/vpnslashing/evidence" '{"EvidenceID":"ev-invalid-ref-1","SubjectID":"provider-1","SessionID":"sess-1","ViolationType":"double-sign","EvidenceRef":"proof-invalid-ref-1","ObservedAt":"2026-01-01T00:00:00Z"}' "400" "${TOKEN}"
 grep -q 'objective format' "${RESP_FILE}"
@@ -137,6 +138,27 @@ grep -q '"ok"[[:space:]]*:[[:space:]]*true' "${RESP_FILE}"
 
 post_expect_status "${BASE_URL}/x/vpnslashing/evidence" '{"EvidenceID":"ev-live-1","SubjectID":"provider-live-1","SessionID":"sess-live-1","ViolationType":"double-sign","EvidenceRef":"sha256:abc123","ObservedAt":"2026-01-01T00:00:00Z"}' "200" "${TOKEN}"
 grep -q '"ok"[[:space:]]*:[[:space:]]*true' "${RESP_FILE}"
+
+post_expect_status "${BASE_URL}/x/vpnvalidator/eligibilities" '{"ValidatorID":"val-live-1","OperatorAddress":"op-live-1","Eligible":true,"PolicyReason":"bootstrap policy","UpdatedAt":"2026-01-01T00:00:00Z","Status":"confirmed"}' "200" "${TOKEN}"
+grep -q '"ok"[[:space:]]*:[[:space:]]*true' "${RESP_FILE}"
+
+post_expect_status "${BASE_URL}/x/vpnvalidator/status-records" '{"StatusID":"status-live-1","ValidatorID":"val-live-1","ConsensusAddress":"cons-live-1","LifecycleStatus":"active","EvidenceHeight":7,"EvidenceRef":"sha256:status-live-1","RecordedAt":"2026-01-01T00:00:01Z","Status":"submitted"}' "200" "${TOKEN}"
+grep -q '"ok"[[:space:]]*:[[:space:]]*true' "${RESP_FILE}"
+
+post_expect_status "${BASE_URL}/x/vpngovernance/policies" '{"PolicyID":"policy-live-1","Title":"policy-live-title","Description":"policy-live-description","Version":1,"ActivatedAt":"2026-01-01T00:00:00Z","Status":"submitted"}' "200" "${TOKEN}"
+grep -q '"ok"[[:space:]]*:[[:space:]]*true' "${RESP_FILE}"
+
+post_expect_status "${BASE_URL}/x/vpngovernance/decisions" '{"DecisionID":"decision-live-1","PolicyID":"policy-live-1","ProposalID":"proposal-live-1","Outcome":"approve","Decider":"bootstrap-multisig","Reason":"smoke decision","DecidedAt":"2026-01-01T00:00:02Z","Status":"confirmed"}' "200" "${TOKEN}"
+grep -q '"ok"[[:space:]]*:[[:space:]]*true' "${RESP_FILE}"
+
+post_expect_status "${BASE_URL}/x/vpngovernance/audit-actions" '{"ActionID":"action-live-1","Action":"policy.bootstrap","Actor":"bootstrap-multisig","Reason":"smoke audit","EvidencePointer":"obj://audit/action-live-1","Timestamp":"2026-01-01T00:00:03Z"}' "200" "${TOKEN}"
+grep -q '"ok"[[:space:]]*:[[:space:]]*true' "${RESP_FILE}"
+
+# Replay/id behavior check: duplicate write should surface replay=true and preserve id.
+post_expect_status "${BASE_URL}/x/vpnvalidator/status-records" '{"StatusID":"status-live-1","ValidatorID":"val-live-1","ConsensusAddress":"cons-live-1","LifecycleStatus":"active","EvidenceHeight":7,"EvidenceRef":"sha256:status-live-1","RecordedAt":"2026-01-01T00:00:01Z","Status":"submitted"}' "200" "${TOKEN}"
+grep -q '"ok"[[:space:]]*:[[:space:]]*true' "${RESP_FILE}"
+grep -q '"replay"[[:space:]]*:[[:space:]]*true' "${RESP_FILE}"
+grep -q '"id"[[:space:]]*:[[:space:]]*"status-live-1"' "${RESP_FILE}"
 
 signal_runtime INT
 if ! wait_for_runtime_exit 30; then
