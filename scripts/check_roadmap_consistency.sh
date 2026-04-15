@@ -21,6 +21,7 @@ phase6_contracts_ci_script="scripts/ci_phase6_cosmos_l1_contracts.sh"
 phase6_contracts_integration_script="scripts/integration_ci_phase6_cosmos_l1_contracts.sh"
 phase6_contracts_live_smoke_script="scripts/integration_phase6_cosmos_l1_contracts_live_smoke.sh"
 phase6_module_coverage_floor_script="scripts/integration_cosmos_module_coverage_floor.sh"
+phase6_keeper_coverage_floor_script="scripts/integration_cosmos_keeper_coverage_floor.sh"
 phase6_check_script="scripts/phase6_cosmos_l1_build_testnet_check.sh"
 phase6_run_script="scripts/phase6_cosmos_l1_build_testnet_run.sh"
 phase6_check_integration_script="scripts/integration_phase6_cosmos_l1_build_testnet_check.sh"
@@ -80,7 +81,7 @@ check_confirmation_interface_wording() {
   fi
 }
 
-for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$chain_readme" "$settlement_mapping_doc" "$blockchain_sponsor_quickstart_doc" "$phase5_ci_script" "$phase5_integration_script" "$phase6_ci_script" "$phase6_integration_script" "$phase6_contracts_ci_script" "$phase6_contracts_integration_script" "$phase6_contracts_live_smoke_script" "$phase6_module_coverage_floor_script" "$phase6_check_script" "$phase6_run_script" "$phase6_check_integration_script" "$phase6_run_integration_script" "$phase6_suite_script" "$phase6_suite_integration_script" "$phase6_handoff_check_script" "$phase6_handoff_run_script" "$phase6_handoff_check_integration_script" "$phase6_handoff_run_integration_script"; do
+for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$chain_readme" "$settlement_mapping_doc" "$blockchain_sponsor_quickstart_doc" "$phase5_ci_script" "$phase5_integration_script" "$phase6_ci_script" "$phase6_integration_script" "$phase6_contracts_ci_script" "$phase6_contracts_integration_script" "$phase6_contracts_live_smoke_script" "$phase6_module_coverage_floor_script" "$phase6_keeper_coverage_floor_script" "$phase6_check_script" "$phase6_run_script" "$phase6_check_integration_script" "$phase6_run_integration_script" "$phase6_suite_script" "$phase6_suite_integration_script" "$phase6_handoff_check_script" "$phase6_handoff_run_script" "$phase6_handoff_check_integration_script" "$phase6_handoff_run_integration_script"; do
   if [[ ! -f "$f" ]]; then
     echo "missing required file: $f"
     exit 1
@@ -163,6 +164,14 @@ if ! rg -Fq "integration_cosmos_module_coverage_floor.sh" "$full_plan"; then
   echo "full execution plan must document phase6 contracts module coverage floor integration script"
   exit 1
 fi
+if ! rg -Fq "cosmos_keeper_coverage_floor" "$full_plan"; then
+  echo "full execution plan must document phase6 contracts cosmos_keeper_coverage_floor stage"
+  exit 1
+fi
+if ! rg -Fq "integration_cosmos_keeper_coverage_floor.sh" "$full_plan"; then
+  echo "full execution plan must document phase6 contracts keeper coverage floor integration script"
+  exit 1
+fi
 if ! rg -Fq "phase6_cosmos_l1_build_testnet_check.sh" "$full_plan"; then
   echo "full execution plan must document phase6 check wrapper script"
   exit 1
@@ -223,6 +232,14 @@ if ! rg -Fq "cosmos_module_coverage_floor" "$product_roadmap"; then
 fi
 if ! rg -Fq "integration_cosmos_module_coverage_floor.sh" "$product_roadmap"; then
   echo "product roadmap must document phase6 contracts module coverage floor integration script"
+  exit 1
+fi
+if ! rg -Fq "cosmos_keeper_coverage_floor" "$product_roadmap"; then
+  echo "product roadmap must document phase6 contracts cosmos_keeper_coverage_floor stage"
+  exit 1
+fi
+if ! rg -Fq "integration_cosmos_keeper_coverage_floor.sh" "$product_roadmap"; then
+  echo "product roadmap must document phase6 contracts keeper coverage floor integration script"
   exit 1
 fi
 if ! rg -Fq "phase6_cosmos_l1_build_testnet_check.sh" "$product_roadmap"; then
@@ -308,6 +325,23 @@ if ! rg -Fq "cosmos_module_coverage_floor" "$phase6_contracts_integration_script
 fi
 if ! rg -Fq "CI_PHASE6_COSMOS_L1_CONTRACTS_PHASE6_COSMOS_MODULE_COVERAGE_FLOOR_SCRIPT" "$phase6_contracts_integration_script"; then
   echo "phase6 contracts ci integration script must expose module coverage floor script override wiring"
+  exit 1
+fi
+if ! rg -Fq "cosmos_keeper_coverage_floor" "$phase6_contracts_ci_script"; then
+  echo "phase6 contracts ci script must include cosmos_keeper_coverage_floor stage"
+  exit 1
+fi
+if ! rg -Fq "integration_cosmos_keeper_coverage_floor.sh" "$phase6_contracts_ci_script"; then
+  echo "phase6 contracts ci script must wire integration_cosmos_keeper_coverage_floor.sh"
+  exit 1
+fi
+if ! rg -Fq "cosmos_keeper_coverage_floor" "$phase6_contracts_integration_script"; then
+  echo "phase6 contracts ci integration script must validate cosmos_keeper_coverage_floor stage wiring"
+  exit 1
+fi
+if ! rg -Fq "CI_PHASE6_COSMOS_L1_CONTRACTS_PHASE6_COSMOS_KEEPER_COVERAGE_FLOOR_SCRIPT" "$phase6_contracts_integration_script" \
+  && ! rg -Fq "integration_cosmos_keeper_coverage_floor.sh" "$phase6_contracts_integration_script"; then
+  echo "phase6 contracts ci integration script must expose keeper coverage floor script wiring"
   exit 1
 fi
 if ! rg -Fq "ci_phase6_cosmos_l1_contracts.sh" "$phase6_contracts_live_smoke_script"; then

@@ -39,6 +39,7 @@ FAIL_SUMMARY_JSON="$TMP_DIR/summary_fail.json"
 STAGE_ENV_NAMES=(
   "CI_PHASE6_COSMOS_L1_CONTRACTS_CI_PHASE6_COSMOS_L1_BUILD_TESTNET_SCRIPT"
   "CI_PHASE6_COSMOS_L1_CONTRACTS_PHASE6_COSMOS_MODULE_COVERAGE_FLOOR_SCRIPT"
+  "CI_PHASE6_COSMOS_L1_CONTRACTS_PHASE6_COSMOS_KEEPER_COVERAGE_FLOOR_SCRIPT"
   "CI_PHASE6_COSMOS_L1_CONTRACTS_PHASE6_COSMOS_L1_BUILD_TESTNET_CHECK_SCRIPT"
   "CI_PHASE6_COSMOS_L1_CONTRACTS_PHASE6_COSMOS_L1_BUILD_TESTNET_RUN_SCRIPT"
   "CI_PHASE6_COSMOS_L1_CONTRACTS_PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_CHECK_SCRIPT"
@@ -49,6 +50,7 @@ STAGE_ENV_NAMES=(
 STAGE_IDS=(
   "ci_phase6_cosmos_l1_build_testnet"
   "phase6_cosmos_module_coverage_floor"
+  "phase6_cosmos_keeper_coverage_floor"
   "phase6_cosmos_l1_build_testnet_check"
   "phase6_cosmos_l1_build_testnet_run"
   "phase6_cosmos_l1_build_testnet_handoff_check"
@@ -179,6 +181,7 @@ if ! jq -e '
   and .inputs.dry_run == false
   and .inputs.run_ci_phase6_cosmos_l1_build_testnet == true
   and .inputs.run_phase6_cosmos_module_coverage_floor == true
+  and .inputs.run_phase6_cosmos_keeper_coverage_floor == true
   and .inputs.run_phase6_cosmos_l1_build_testnet_check == true
   and .inputs.run_phase6_cosmos_l1_build_testnet_run == true
   and .inputs.run_phase6_cosmos_l1_build_testnet_handoff_check == true
@@ -244,6 +247,7 @@ CI_PHASE6_CONTRACTS_CAPTURE_FILE="$CAPTURE" \
   --print-summary-json 0 \
   --run-ci-phase6-cosmos-l1-build-testnet 0 \
   --run-phase6-cosmos-module-coverage-floor 0 \
+  --run-phase6-cosmos-keeper-coverage-floor 0 \
   --run-phase6-cosmos-l1-build-testnet-check 0 \
   --run-phase6-cosmos-l1-build-testnet-handoff-check 0 \
   --run-phase6-cosmos-l1-build-testnet-suite 0 >"$TOGGLE_LOG" 2>&1
@@ -266,6 +270,10 @@ if ! jq -e '
   and .steps.phase6_cosmos_module_coverage_floor.enabled == false
   and .steps.phase6_cosmos_module_coverage_floor.status == "skip"
   and .steps.phase6_cosmos_module_coverage_floor.reason == "disabled"
+  and .inputs.run_phase6_cosmos_keeper_coverage_floor == false
+  and .steps.phase6_cosmos_keeper_coverage_floor.enabled == false
+  and .steps.phase6_cosmos_keeper_coverage_floor.status == "skip"
+  and .steps.phase6_cosmos_keeper_coverage_floor.reason == "disabled"
   and .inputs.run_phase6_cosmos_l1_build_testnet_check == false
   and .steps.phase6_cosmos_l1_build_testnet_check.enabled == false
   and .steps.phase6_cosmos_l1_build_testnet_check.status == "skip"
@@ -319,6 +327,7 @@ if ! jq -e '
   and .inputs.dry_run == false
   and .steps.ci_phase6_cosmos_l1_build_testnet.status == "pass"
   and .steps.phase6_cosmos_module_coverage_floor.status == "pass"
+  and .steps.phase6_cosmos_keeper_coverage_floor.status == "pass"
   and .steps.phase6_cosmos_l1_build_testnet_check.status == "fail"
   and .steps.phase6_cosmos_l1_build_testnet_check.rc == 23
   and .steps.phase6_cosmos_l1_build_testnet_run.status == "pass"
