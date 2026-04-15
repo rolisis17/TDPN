@@ -23,6 +23,7 @@ MODULE_QUERY_CHECKS=(
   "tdpn.vpnbilling.v1.Query/ListCreditReservations|reservations"
   "tdpn.vpnrewards.v1.Query/ListRewardAccruals|accruals"
   "tdpn.vpnslashing.v1.Query/ListSlashEvidence|evidence"
+  "tdpn.vpnslashing.v1.Query/ListPenaltyDecisions|penalties"
   "tdpn.vpnsponsor.v1.Query/ListSponsorAuthorizations|authorizations"
   "tdpn.vpnvalidator.v1.Query/ListValidatorEligibilities|eligibilities"
   "tdpn.vpngovernance.v1.Query/ListGovernancePolicies|policies"

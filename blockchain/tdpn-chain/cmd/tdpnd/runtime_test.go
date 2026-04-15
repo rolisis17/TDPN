@@ -781,6 +781,10 @@ func TestRunTDPNDGRPCModeAuthEnforcementAndHealth(t *testing.T) {
 		_, callErr := slashingQuery.ListSlashEvidence(callCtx, &vpnslashingpb.QueryListSlashEvidenceRequest{})
 		return callErr
 	})
+	assertQueryAuthParity("vpnslashing/ListPenalties", func(callCtx context.Context) error {
+		_, callErr := slashingQuery.ListPenaltyDecisions(callCtx, &vpnslashingpb.QueryListPenaltyDecisionsRequest{})
+		return callErr
+	})
 	assertQueryAuthParity("vpnsponsor/ListSponsorAuthorizations", func(callCtx context.Context) error {
 		_, callErr := sponsorQuery.ListSponsorAuthorizations(callCtx, &vpnsponsorpb.QueryListSponsorAuthorizationsRequest{})
 		return callErr

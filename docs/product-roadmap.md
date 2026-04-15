@@ -186,7 +186,7 @@ Current implementation posture:
 - chain scaffold/module ordering now includes `vpnbilling`, `vpnrewards`, `vpnslashing`, `vpnsponsor`, `vpnvalidator`, and `vpngovernance`.
 - state-dir persistence now materializes validator/governance module state files (`vpnvalidator.json`, `vpngovernance.json`) alongside existing module stores.
 - gRPC runtime registration now includes validator/governance service namespaces (`tdpn.vpnvalidator.v1.{Msg,Query}` and `tdpn.vpngovernance.v1.{Msg,Query}`).
-- `scripts/integration_cosmos_grpc_app_roundtrip.sh` now explicitly covers validator/governance Msg+Query roundtrip contracts in addition to billing/sponsor coverage.
+- `scripts/integration_cosmos_grpc_app_roundtrip.sh` now explicitly covers billing/rewards/slashing/sponsor/validator/governance Msg+Query roundtrip contracts.
 - `vpngovernance` now persists append-only governance admin audit actions (`action_id`, `action`, `actor`, `reason`, `evidence_pointer`, `timestamp_unix`) with replay-safe idempotency and conflict-on-divergence handling.
 - `vpnvalidator` now includes deterministic epoch selection helpers for bootstrap policy enforcement (hard gates, warmup/cooldown, stable+rotating seats, and operator/ASN/region caps).
 - `vpngovernance` gRPC contracts now include audit-action RPC/query surfaces (`RecordAuditAction`, `GovernanceAuditAction`, `ListGovernanceAuditActions`) for bootstrap governance audit trails.

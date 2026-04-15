@@ -202,8 +202,8 @@ if ! rg -Fq "integration_cosmos_grpc_app_roundtrip.sh" "$full_plan"; then
   echo "full execution plan must document phase6 grpc app roundtrip integration script"
   exit 1
 fi
-if ! rg -Fq "validator/governance Msg+Query roundtrip contracts in addition to billing/sponsor coverage" "$full_plan"; then
-  echo "full execution plan must document validator/governance Msg+Query grpc app roundtrip posture"
+if ! rg -Fq "billing/rewards/slashing/sponsor/validator/governance Msg+Query roundtrip contracts" "$full_plan"; then
+  echo "full execution plan must document six-module Msg+Query grpc app roundtrip posture"
   exit 1
 fi
 if ! rg -Fq "integration_cosmos_tdpnd_grpc_auth_live_smoke.sh" "$full_plan"; then
@@ -359,8 +359,8 @@ if ! rg -Fq "integration_cosmos_grpc_app_roundtrip.sh" "$product_roadmap"; then
   echo "product roadmap must document phase6 grpc app roundtrip integration script"
   exit 1
 fi
-if ! rg -Fq "validator/governance Msg+Query roundtrip contracts in addition to billing/sponsor coverage" "$product_roadmap"; then
-  echo "product roadmap must document validator/governance Msg+Query grpc app roundtrip posture"
+if ! rg -Fq "billing/rewards/slashing/sponsor/validator/governance Msg+Query roundtrip contracts" "$product_roadmap"; then
+  echo "product roadmap must document six-module Msg+Query grpc app roundtrip posture"
   exit 1
 fi
 if ! rg -Fq "integration_cosmos_tdpnd_grpc_auth_live_smoke.sh" "$product_roadmap"; then
@@ -521,7 +521,7 @@ if ! rg -Fq "TestRegisterGRPCServicesNilInputs" "$phase6_grpc_app_roundtrip_scri
   exit 1
 fi
 if ! rg -Fq "TestRegisterGRPCServicesBillingAndSponsorRoundTrip" "$phase6_grpc_app_roundtrip_script"; then
-  echo "phase6 grpc app roundtrip script must include billing/sponsor grpc roundtrip contract test"
+  echo "phase6 grpc app roundtrip script must include core-module grpc roundtrip contract test anchor"
   exit 1
 fi
 if ! rg -Fq "TestRegisterGRPCServicesValidatorAndGovernanceRoundTrip" "$phase6_grpc_app_roundtrip_script" \
@@ -533,6 +533,15 @@ if ! rg -Fq "PreviewEpochSelection" "$chain_grpc_registry_test_file"; then
   echo "grpc app roundtrip test suite must include validator PreviewEpochSelection contract coverage"
   exit 1
 fi
+for app_roundtrip_contract in \
+  "ListRewardAccruals" \
+  "ListSlashEvidence"
+do
+  if ! rg -Fq "$app_roundtrip_contract" "$chain_grpc_registry_test_file"; then
+    echo "grpc app roundtrip test suite must include slashing/rewards contract marker: $app_roundtrip_contract"
+    exit 1
+  fi
+done
 if ! rg -Fq "TestRunTDPNDGRPCModeRealScaffoldValidatorAndGovernanceRoundTrip" "$phase6_grpc_runtime_smoke_script"; then
   echo "phase6 grpc runtime smoke script must include validator/governance real-scaffold runtime roundtrip contract test"
   exit 1
@@ -552,6 +561,7 @@ fi
 for runtime_grpc_contract in \
   "ListRewardAccruals" \
   "ListSlashEvidence" \
+  "ListPenaltyDecisions" \
   "ListSponsorAuthorizations" \
   "ListValidatorEligibilities" \
   "ListGovernancePolicies" \
@@ -592,6 +602,7 @@ for live_grpc_method in \
   "tdpn.vpnbilling.v1.Query/ListCreditReservations" \
   "tdpn.vpnrewards.v1.Query/ListRewardAccruals" \
   "tdpn.vpnslashing.v1.Query/ListSlashEvidence" \
+  "tdpn.vpnslashing.v1.Query/ListPenaltyDecisions" \
   "tdpn.vpnsponsor.v1.Query/ListSponsorAuthorizations" \
   "tdpn.vpnvalidator.v1.Query/ListValidatorEligibilities" \
   "tdpn.vpngovernance.v1.Query/ListGovernancePolicies"
@@ -836,6 +847,7 @@ for live_smoke_query_marker in \
   "/x/vpnsponsor/authorizations/auth:res-live-1" \
   "/x/vpnsponsor/delegations/res-live-1" \
   "/x/vpnslashing/evidence/ev-live-1" \
+  "/x/vpnslashing/penalties/pen-live-1" \
   "/x/vpnvalidator/eligibilities/val-live-1" \
   "/x/vpnvalidator/status-records/status-live-1" \
   "/x/vpngovernance/policies/policy-live-1" \
@@ -847,6 +859,7 @@ for live_smoke_query_marker in \
   "/x/vpnsponsor/authorizations\" \"200\"" \
   "/x/vpnsponsor/delegations\" \"200\"" \
   "/x/vpnslashing/evidence\" \"200\"" \
+  "/x/vpnslashing/penalties\" \"200\"" \
   "/x/vpnvalidator/eligibilities\" \"200\"" \
   "/x/vpnvalidator/status-records\" \"200\"" \
   "/x/vpngovernance/policies\" \"200\"" \
@@ -860,6 +873,9 @@ do
 done
 for grpc_auth_rpc_contract in \
   "tdpn.vpnbilling.v1.Query/ListCreditReservations" \
+  "tdpn.vpnrewards.v1.Query/ListRewardAccruals" \
+  "tdpn.vpnslashing.v1.Query/ListSlashEvidence" \
+  "tdpn.vpnslashing.v1.Query/ListPenaltyDecisions" \
   "tdpn.vpnsponsor.v1.Query/ListSponsorAuthorizations" \
   "tdpn.vpnvalidator.v1.Query/ListValidatorEligibilities" \
   "tdpn.vpngovernance.v1.Query/ListGovernancePolicies"
@@ -1333,8 +1349,8 @@ if ! rg -Fq "integration_cosmos_tdpnd_grpc_auth_live_smoke.sh" "$cosmos_runtime_
   echo "cosmos settlement runtime guide must document grpc auth live-smoke integration script"
   exit 1
 fi
-if ! rg -Fq "billing/sponsor plus validator/governance \`Msg\`/\`Query\` contracts" "$cosmos_runtime_doc"; then
-  echo "cosmos settlement runtime guide must document validator/governance Msg+Query grpc app roundtrip posture"
+if ! rg -Fq "billing/rewards/slashing/sponsor/validator/governance \`Msg\`/\`Query\` contracts" "$cosmos_runtime_doc"; then
+  echo "cosmos settlement runtime guide must document six-module Msg+Query grpc app roundtrip posture"
   exit 1
 fi
 if ! rg -Fq "settlement_shadow_env" "$cosmos_runtime_doc"; then
@@ -1434,8 +1450,8 @@ if ! rg -Fq "integration_cosmos_grpc_app_roundtrip.sh" "$chain_readme"; then
   echo "chain README must document grpc app roundtrip integration script"
   exit 1
 fi
-if ! rg -Fq "billing/sponsor plus validator/governance \`Msg\`/\`Query\` contracts" "$chain_readme"; then
-  echo "chain README must document validator/governance Msg+Query grpc app roundtrip posture"
+if ! rg -Fq "billing/rewards/slashing/sponsor/validator/governance \`Msg\`/\`Query\` contracts" "$chain_readme"; then
+  echo "chain README must document six-module Msg+Query grpc app roundtrip posture"
   exit 1
 fi
 if ! rg -Fq "phase6_cosmos_l1_summary_report.sh" "$chain_readme"; then

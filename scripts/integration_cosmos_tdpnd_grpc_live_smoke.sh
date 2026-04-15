@@ -172,6 +172,7 @@ if command -v grpcurl >/dev/null 2>&1; then
   assert_grpc_query_dispatch "${PORT}" "tdpn.vpnbilling.v1.Query/ListCreditReservations" "reservations"
   assert_grpc_query_dispatch "${PORT}" "tdpn.vpnrewards.v1.Query/ListRewardAccruals" "accruals"
   assert_grpc_query_dispatch "${PORT}" "tdpn.vpnslashing.v1.Query/ListSlashEvidence" "evidence"
+  assert_grpc_query_dispatch "${PORT}" "tdpn.vpnslashing.v1.Query/ListPenaltyDecisions" "penalties"
   assert_grpc_query_dispatch "${PORT}" "tdpn.vpnsponsor.v1.Query/ListSponsorAuthorizations" "authorizations"
   assert_grpc_query_dispatch "${PORT}" "tdpn.vpnvalidator.v1.Query/ListValidatorEligibilities" "eligibilities"
   assert_grpc_query_dispatch "${PORT}" "tdpn.vpngovernance.v1.Query/ListGovernancePolicies" "policies"

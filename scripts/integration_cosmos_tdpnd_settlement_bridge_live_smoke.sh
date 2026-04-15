@@ -9,6 +9,7 @@ export GOCACHE="${GOCACHE:-$ROOT_DIR/.gocache}"
 
 LOG_FILE="$(mktemp -t tdpnd-settlement-bridge-live.XXXXXX.log)"
 RESP_FILE="$(mktemp -t tdpnd-settlement-bridge-resp.XXXXXX.json)"
+GRPC_HELPER_FILE=""
 TDPND_PID=""
 
 signal_runtime() {
@@ -47,6 +48,9 @@ cleanup() {
     wait "${TDPND_PID}" 2>/dev/null || true
   fi
   rm -f "${LOG_FILE}" "${RESP_FILE}"
+  if [[ -n "${GRPC_HELPER_FILE}" ]]; then
+    rm -f "${GRPC_HELPER_FILE}"
+  fi
   set -e
 }
 trap cleanup EXIT
@@ -128,14 +132,87 @@ get_expect_status() {
 
 TOKEN="bridge-smoke-token"
 PORT="$(pick_port)"
+GRPC_PORT="$(pick_port)"
 if [[ -z "${PORT}" ]]; then
   echo "failed to allocate settlement bridge smoke-test port"
   exit 1
 fi
+if [[ -z "${GRPC_PORT}" ]]; then
+  echo "failed to allocate grpc smoke-test port"
+  exit 1
+fi
+
+GRPC_HELPER_FILE="$(mktemp "${ROOT_DIR}/blockchain/tdpn-chain/tdpnd-slashing-penalty-seed-XXXXXX.go")"
+cat >"${GRPC_HELPER_FILE}" <<'EOF'
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"strconv"
+	"time"
+
+	vpnslashingpb "github.com/tdpn/tdpn-chain/proto/gen/go/tdpn/vpnslashing/v1"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
+)
+
+func main() {
+	if len(os.Args) != 5 {
+		fmt.Fprintf(os.Stderr, "usage: %s <grpc-port> <token> <evidence-id> <penalty-id>\n", os.Args[0])
+		os.Exit(2)
+	}
+
+	grpcPort, err := strconv.Atoi(os.Args[1])
+	if err != nil || grpcPort <= 0 {
+		fmt.Fprintf(os.Stderr, "invalid grpc port %q: %v\n", os.Args[1], err)
+		os.Exit(2)
+	}
+
+	target := fmt.Sprintf("127.0.0.1:%d", grpcPort)
+	var conn *grpc.ClientConn
+	for attempt := 0; attempt < 50; attempt++ {
+		dialCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		conn, err = grpc.DialContext(dialCtx, target, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock())
+		cancel()
+		if err == nil {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "dial grpc %s: %v\n", target, err)
+		os.Exit(1)
+	}
+	defer conn.Close()
+
+	client := vpnslashingpb.NewMsgClient(conn)
+	callCtx := metadata.AppendToOutgoingContext(context.Background(), "authorization", "Bearer "+os.Args[2])
+	resp, err := client.RecordPenalty(callCtx, &vpnslashingpb.MsgRecordPenaltyRequest{
+		Penalty: &vpnslashingpb.PenaltyDecision{
+			PenaltyId:       os.Args[4],
+			EvidenceId:      os.Args[3],
+			SlashBasisPoint: 25,
+			Jailed:          false,
+			AppliedAtUnix:   1735689604,
+		},
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "record penalty: %v\n", err)
+		os.Exit(1)
+	}
+	if resp.GetPenalty().GetPenaltyId() != os.Args[4] {
+		fmt.Fprintf(os.Stderr, "unexpected penalty id %q\n", resp.GetPenalty().GetPenaltyId())
+		os.Exit(1)
+	}
+}
+EOF
 
 (
   cd blockchain/tdpn-chain
-  go run ./cmd/tdpnd --settlement-http-listen "127.0.0.1:${PORT}" --settlement-http-auth-token "${TOKEN}"
+  go run ./cmd/tdpnd --grpc-listen "127.0.0.1:${GRPC_PORT}" --grpc-auth-token "${TOKEN}" --settlement-http-listen "127.0.0.1:${PORT}" --settlement-http-auth-token "${TOKEN}"
 ) >"${LOG_FILE}" 2>&1 &
 TDPND_PID=$!
 
@@ -166,6 +243,13 @@ grep -q '"ok"[[:space:]]*:[[:space:]]*true' "${RESP_FILE}"
 
 post_expect_status "${BASE_URL}/x/vpnslashing/evidence" '{"EvidenceID":"ev-live-1","SubjectID":"provider-live-1","SessionID":"sess-live-1","ViolationType":"double-sign","EvidenceRef":"sha256:abc123","ObservedAt":"2026-01-01T00:00:00Z"}' "200" "${TOKEN}"
 grep -q '"ok"[[:space:]]*:[[:space:]]*true' "${RESP_FILE}"
+
+(
+  cd blockchain/tdpn-chain
+  go run "./$(basename "${GRPC_HELPER_FILE}")" "${GRPC_PORT}" "${TOKEN}" "ev-live-1" "pen-live-1"
+)
+rm -f "${GRPC_HELPER_FILE}"
+GRPC_HELPER_FILE=""
 
 post_expect_status "${BASE_URL}/x/vpnvalidator/eligibilities" '{"ValidatorID":"val-live-1","OperatorAddress":"op-live-1","Eligible":true,"PolicyReason":"bootstrap policy","UpdatedAt":"2026-01-01T00:00:00Z","Status":"confirmed"}' "200" "${TOKEN}"
 grep -q '"ok"[[:space:]]*:[[:space:]]*true' "${RESP_FILE}"
@@ -210,6 +294,10 @@ grep -q '"ReservationID"[[:space:]]*:[[:space:]]*"res-live-1"' "${RESP_FILE}"
 get_expect_status "${BASE_URL}/x/vpnslashing/evidence/ev-live-1" "200"
 grep -q '"evidence"' "${RESP_FILE}"
 grep -q '"EvidenceID"[[:space:]]*:[[:space:]]*"ev-live-1"' "${RESP_FILE}"
+
+get_expect_status "${BASE_URL}/x/vpnslashing/penalties/pen-live-1" "200"
+grep -q '"penalty"' "${RESP_FILE}"
+grep -q '"PenaltyID"[[:space:]]*:[[:space:]]*"pen-live-1"' "${RESP_FILE}"
 
 get_expect_status "${BASE_URL}/x/vpnvalidator/eligibilities/val-live-1" "200"
 grep -q '"eligibility"' "${RESP_FILE}"
@@ -259,6 +347,10 @@ grep -q '"ReservationID"[[:space:]]*:[[:space:]]*"res-live-1"' "${RESP_FILE}"
 get_expect_status "${BASE_URL}/x/vpnslashing/evidence" "200"
 grep -q '"evidence"' "${RESP_FILE}"
 grep -q '"EvidenceID"[[:space:]]*:[[:space:]]*"ev-live-1"' "${RESP_FILE}"
+
+get_expect_status "${BASE_URL}/x/vpnslashing/penalties" "200"
+grep -q '"penalties"' "${RESP_FILE}"
+grep -q '"PenaltyID"[[:space:]]*:[[:space:]]*"pen-live-1"' "${RESP_FILE}"
 
 get_expect_status "${BASE_URL}/x/vpnvalidator/eligibilities" "200"
 grep -q '"eligibilities"' "${RESP_FILE}"
