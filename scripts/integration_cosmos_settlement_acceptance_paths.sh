@@ -15,7 +15,9 @@ timeout 30s go test ./services/issuer -count=1 -run '^(TestSponsorReserveAndIssu
 timeout 30s go test ./pkg/settlement -count=1 -run '^(TestMemoryServiceAdapterDeferredOnFailure|TestMemoryServiceReconcileReplaySuccessClearsBacklog)$'
 timeout 30s go test ./services/exit -count=1 -run '^(TestSettlementReserveAndFinalizeWarningsDoNotBlockSessionClose|TestHandlePathCloseDeferredChainAdapterDoesNotBlockSessionClose|TestHandleSettlementStatusReconcileErrorIsFailSoft)$'
 
-# Dual-asset pricing surface coverage: stable-denominated baseline plus native-token conversion.
-timeout 30s go test ./pkg/settlement -count=1 -run '^(TestMemoryServiceQuotePriceCurrencyConversion|TestMemoryServiceSettleSessionCurrencyConversion)$'
+# Dual-asset pricing coverage: stable-denominated baseline plus native-token conversion/equivalence.
+timeout 30s go test ./pkg/settlement -count=1 -run '^(TestMemoryServiceQuotePriceCurrencyConversion|TestMemoryServiceSettleSessionCurrencyConversion|TestMemoryServiceDualAssetSessionEntitlementEquivalence)$'
+timeout 30s go test ./services/issuer -count=1 -run '^(TestNewSettlementServiceFromEnvCurrencyBaseFromEnv|TestNewSettlementServiceFromEnvDualNativeCurrencyConversion)$'
+timeout 30s go test ./services/exit -count=1 -run '^(TestSettlementServiceFromEnvCurrencyNativeDualQuoteBehavior|TestSettlementServiceFromEnvDualNativeCurrencySettlementCoherence)$'
 
 echo "cosmos settlement acceptance paths integration check ok"
