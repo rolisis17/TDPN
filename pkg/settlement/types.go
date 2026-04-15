@@ -161,3 +161,12 @@ type ChainAdapter interface {
 	SubmitSlashEvidence(ctx context.Context, evidence SlashEvidence) (referenceID string, err error)
 	Health(ctx context.Context) error
 }
+
+// ChainConfirmationQuerier is an optional adapter capability used by reconcile
+// flows to promote submitted records to confirmed when chain lookups succeed.
+type ChainConfirmationQuerier interface {
+	HasSessionSettlement(ctx context.Context, settlementID string) (bool, error)
+	HasRewardIssue(ctx context.Context, rewardID string) (bool, error)
+	HasSponsorReservation(ctx context.Context, reservationID string) (bool, error)
+	HasSlashEvidence(ctx context.Context, evidenceID string) (bool, error)
+}

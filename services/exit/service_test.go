@@ -369,6 +369,46 @@ func TestHandleSettlementStatusReturnsReport(t *testing.T) {
 	}
 }
 
+func TestHandleSettlementStatusSurfacesLifecycleCountersWithConfirmedProgress(t *testing.T) {
+	now := time.Unix(1700000200, 0).UTC()
+	stub := &settlementServiceStub{
+		reconcileFn: func(_ context.Context) (settlement.ReconcileReport, error) {
+			return settlement.ReconcileReport{
+				GeneratedAt:         now,
+				PendingOperations:   0,
+				SubmittedOperations: 4,
+				ConfirmedOperations: 6,
+				FailedOperations:    0,
+			}, nil
+		},
+	}
+	s := &Service{settlement: stub}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/settlement/status", nil)
+	rr := httptest.NewRecorder()
+	s.handleSettlementStatus(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status HTTP 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp settlementStatusResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode settlement status response: %v", err)
+	}
+	if !resp.Enabled || resp.Stale {
+		t.Fatalf("expected enabled fresh settlement status, got enabled=%t stale=%t", resp.Enabled, resp.Stale)
+	}
+	if !resp.ReportGeneratedAt.Equal(now) {
+		t.Fatalf("expected report_generated_at %s, got %s", now, resp.ReportGeneratedAt)
+	}
+	if resp.PendingOperations != 0 || resp.SubmittedOperations != 4 || resp.ConfirmedOperations != 6 || resp.FailedOperations != 0 {
+		t.Fatalf("unexpected lifecycle counters: %+v", resp)
+	}
+	if stub.reconcileCalls != 1 {
+		t.Fatalf("expected one reconcile call, got %d", stub.reconcileCalls)
+	}
+}
+
 func TestHandleSettlementStatusReconcileErrorIsFailSoft(t *testing.T) {
 	stub := &settlementServiceStub{
 		reconcileFn: func(_ context.Context) (settlement.ReconcileReport, error) {

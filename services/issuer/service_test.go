@@ -2,6 +2,7 @@ package issuer
 
 import (
 	"crypto/ed25519"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"privacynode/pkg/crypto"
+	"privacynode/pkg/settlement"
 )
 
 func TestBaseClaimsForTier1(t *testing.T) {
@@ -244,5 +246,105 @@ func TestHandleHealthMethodNotAllowed(t *testing.T) {
 	s.handleHealth(rr, req)
 	if rr.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("expected 405, got %d", rr.Code)
+	}
+}
+
+func TestHandleSettlementStatusIncludesLifecycleCounters(t *testing.T) {
+	now := time.Unix(1713300000, 0).UTC()
+	stub := &issuerSettlementReconcileStub{
+		report: settlement.ReconcileReport{
+			GeneratedAt:         now,
+			PendingOperations:   4,
+			SubmittedOperations: 7,
+			ConfirmedOperations: 3,
+			FailedOperations:    1,
+		},
+	}
+	s := &Service{
+		adminToken:      "admin-secret-token",
+		adminAllowToken: true,
+		settlement:      stub,
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/settlement/status", nil)
+	req.Header.Set("X-Admin-Token", "admin-secret-token")
+	rr := httptest.NewRecorder()
+	s.handleSettlementStatus(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		Status              string `json:"status"`
+		GeneratedAt         int64  `json:"generated_at"`
+		PendingOperations   int    `json:"pending_operations"`
+		SubmittedOperations int    `json:"submitted_operations"`
+		ConfirmedOperations int    `json:"confirmed_operations"`
+		FailedOperations    int    `json:"failed_operations"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Status != "backlog" {
+		t.Fatalf("expected backlog status, got %q", resp.Status)
+	}
+	if resp.GeneratedAt != now.Unix() {
+		t.Fatalf("expected generated_at %d, got %d", now.Unix(), resp.GeneratedAt)
+	}
+	if resp.PendingOperations != 4 || resp.SubmittedOperations != 7 || resp.ConfirmedOperations != 3 || resp.FailedOperations != 1 {
+		t.Fatalf("unexpected lifecycle counters: %+v", resp)
+	}
+	if stub.calls != 1 {
+		t.Fatalf("expected reconcile call count 1, got %d", stub.calls)
+	}
+}
+
+func TestHandleSettlementStatusIncludesConfirmedCounterWhenNoBacklog(t *testing.T) {
+	now := time.Unix(1713400000, 0).UTC()
+	stub := &issuerSettlementReconcileStub{
+		report: settlement.ReconcileReport{
+			GeneratedAt:         now,
+			PendingOperations:   0,
+			SubmittedOperations: 2,
+			ConfirmedOperations: 5,
+			FailedOperations:    0,
+		},
+	}
+	s := &Service{
+		adminToken:      "admin-secret-token",
+		adminAllowToken: true,
+		settlement:      stub,
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/settlement/status", nil)
+	req.Header.Set("X-Admin-Token", "admin-secret-token")
+	rr := httptest.NewRecorder()
+	s.handleSettlementStatus(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		Status              string `json:"status"`
+		GeneratedAt         int64  `json:"generated_at"`
+		PendingOperations   int    `json:"pending_operations"`
+		SubmittedOperations int    `json:"submitted_operations"`
+		ConfirmedOperations int    `json:"confirmed_operations"`
+		FailedOperations    int    `json:"failed_operations"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Status != "ok" {
+		t.Fatalf("expected ok status, got %q", resp.Status)
+	}
+	if resp.GeneratedAt != now.Unix() {
+		t.Fatalf("expected generated_at %d, got %d", now.Unix(), resp.GeneratedAt)
+	}
+	if resp.PendingOperations != 0 || resp.SubmittedOperations != 2 || resp.ConfirmedOperations != 5 || resp.FailedOperations != 0 {
+		t.Fatalf("unexpected lifecycle counters: %+v", resp)
+	}
+	if stub.calls != 1 {
+		t.Fatalf("expected reconcile call count 1, got %d", stub.calls)
 	}
 }

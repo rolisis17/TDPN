@@ -48,13 +48,6 @@ type deferredAdapterOperation struct {
 	LastError      string
 }
 
-type chainConfirmationAdapter interface {
-	HasSessionSettlement(ctx context.Context, settlementID string) (bool, error)
-	HasRewardIssue(ctx context.Context, rewardID string) (bool, error)
-	HasSponsorReservation(ctx context.Context, reservationID string) (bool, error)
-	HasSlashEvidence(ctx context.Context, evidenceID string) (bool, error)
-}
-
 type MemoryService struct {
 	mu sync.Mutex
 
@@ -808,7 +801,7 @@ func (s *MemoryService) confirmSubmittedAdapterOperations(ctx context.Context) {
 	if adapter == nil {
 		return
 	}
-	confirmer, ok := adapter.(chainConfirmationAdapter)
+	confirmer, ok := adapter.(ChainConfirmationQuerier)
 	if !ok {
 		return
 	}

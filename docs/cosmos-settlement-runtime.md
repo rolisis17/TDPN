@@ -111,6 +111,7 @@ Exit settlement status endpoint:
 - Periodic reconcile loops in issuer/exit call settlement `Reconcile(...)`.
 - Successful replay marks settlement/reward/sponsor/slash operations `submitted` and clears deferred backlog.
 - When adapter query surfaces observe by-id bridge records, reconcile promotes settlement/reward/sponsor/slash operations from `submitted` to `confirmed`.
+- This confirmation capability is exposed as optional settlement adapter interface `ChainConfirmationQuerier` (`pkg/settlement/types.go`).
 - `failed` remains an explicit reconciliation state for operator visibility, with replay/remediation driven by later reconcile cycles.
 - Cosmos adapter retry policy:
   - retryable: transport/network errors, HTTP `408`, `425`, `429`, and `5xx`.
