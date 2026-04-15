@@ -18,7 +18,8 @@ Usage:
     [--run-query-surface [0|1]] \
     [--run-grpc-app-roundtrip [0|1]] \
     [--run-tdpnd-grpc-runtime-smoke [0|1]] \
-    [--run-tdpnd-grpc-live-smoke [0|1]]
+    [--run-tdpnd-grpc-live-smoke [0|1]] \
+    [--run-tdpnd-grpc-auth-live-smoke [0|1]]
 
 Purpose:
   Run a focused Phase-6 Cosmos L1 build/testnet CI gate:
@@ -29,6 +30,7 @@ Purpose:
     5) integration_cosmos_grpc_app_roundtrip.sh
     6) integration_cosmos_tdpnd_grpc_runtime_smoke.sh
     7) integration_cosmos_tdpnd_grpc_live_smoke.sh
+    8) integration_cosmos_tdpnd_grpc_auth_live_smoke.sh
 
 Dry-run mode:
   --dry-run 1 skips stage execution, records deterministic skip accounting,
@@ -113,6 +115,7 @@ run_query_surface="${CI_PHASE6_COSMOS_L1_RUN_QUERY_SURFACE:-1}"
 run_grpc_app_roundtrip="${CI_PHASE6_COSMOS_L1_RUN_GRPC_APP_ROUNDTRIP:-1}"
 run_tdpnd_grpc_runtime_smoke="${CI_PHASE6_COSMOS_L1_RUN_TDPND_GRPC_RUNTIME_SMOKE:-1}"
 run_tdpnd_grpc_live_smoke="${CI_PHASE6_COSMOS_L1_RUN_TDPND_GRPC_LIVE_SMOKE:-1}"
+run_tdpnd_grpc_auth_live_smoke="${CI_PHASE6_COSMOS_L1_RUN_TDPND_GRPC_AUTH_LIVE_SMOKE:-1}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -205,6 +208,15 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --run-tdpnd-grpc-auth-live-smoke)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        run_tdpnd_grpc_auth_live_smoke="${2:-}"
+        shift 2
+      else
+        run_tdpnd_grpc_auth_live_smoke="1"
+        shift
+      fi
+      ;;
     -h|--help)
       usage
       exit 0
@@ -226,6 +238,7 @@ bool_arg_or_die "--run-query-surface" "$run_query_surface"
 bool_arg_or_die "--run-grpc-app-roundtrip" "$run_grpc_app_roundtrip"
 bool_arg_or_die "--run-tdpnd-grpc-runtime-smoke" "$run_tdpnd_grpc_runtime_smoke"
 bool_arg_or_die "--run-tdpnd-grpc-live-smoke" "$run_tdpnd_grpc_live_smoke"
+bool_arg_or_die "--run-tdpnd-grpc-auth-live-smoke" "$run_tdpnd_grpc_auth_live_smoke"
 
 chain_scaffold_script="${CI_PHASE6_COSMOS_L1_CHAIN_SCAFFOLD_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_chain_scaffold.sh}"
 proto_surface_script="${CI_PHASE6_COSMOS_L1_PROTO_SURFACE_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_proto_surface.sh}"
@@ -234,6 +247,7 @@ query_surface_script="${CI_PHASE6_COSMOS_L1_QUERY_SURFACE_SCRIPT:-$ROOT_DIR/scri
 grpc_app_roundtrip_script="${CI_PHASE6_COSMOS_L1_GRPC_APP_ROUNDTRIP_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_grpc_app_roundtrip.sh}"
 tdpnd_grpc_runtime_smoke_script="${CI_PHASE6_COSMOS_L1_TDPND_GRPC_RUNTIME_SMOKE_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_tdpnd_grpc_runtime_smoke.sh}"
 tdpnd_grpc_live_smoke_script="${CI_PHASE6_COSMOS_L1_TDPND_GRPC_LIVE_SMOKE_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_tdpnd_grpc_live_smoke.sh}"
+tdpnd_grpc_auth_live_smoke_script="${CI_PHASE6_COSMOS_L1_TDPND_GRPC_AUTH_LIVE_SMOKE_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_tdpnd_grpc_auth_live_smoke.sh}"
 
 stage_ids=(
   "chain_scaffold"
@@ -243,6 +257,7 @@ stage_ids=(
   "grpc_app_roundtrip"
   "tdpnd_grpc_runtime_smoke"
   "tdpnd_grpc_live_smoke"
+  "tdpnd_grpc_auth_live_smoke"
 )
 
 declare -A stage_script=(
@@ -253,6 +268,7 @@ declare -A stage_script=(
   ["grpc_app_roundtrip"]="$grpc_app_roundtrip_script"
   ["tdpnd_grpc_runtime_smoke"]="$tdpnd_grpc_runtime_smoke_script"
   ["tdpnd_grpc_live_smoke"]="$tdpnd_grpc_live_smoke_script"
+  ["tdpnd_grpc_auth_live_smoke"]="$tdpnd_grpc_auth_live_smoke_script"
 )
 
 declare -A stage_enabled=(
@@ -263,6 +279,7 @@ declare -A stage_enabled=(
   ["grpc_app_roundtrip"]="$run_grpc_app_roundtrip"
   ["tdpnd_grpc_runtime_smoke"]="$run_tdpnd_grpc_runtime_smoke"
   ["tdpnd_grpc_live_smoke"]="$run_tdpnd_grpc_live_smoke"
+  ["tdpnd_grpc_auth_live_smoke"]="$run_tdpnd_grpc_auth_live_smoke"
 )
 
 for stage_id in "${stage_ids[@]}"; do
@@ -373,6 +390,7 @@ jq -n \
   --arg run_grpc_app_roundtrip "$run_grpc_app_roundtrip" \
   --arg run_tdpnd_grpc_runtime_smoke "$run_tdpnd_grpc_runtime_smoke" \
   --arg run_tdpnd_grpc_live_smoke "$run_tdpnd_grpc_live_smoke" \
+  --arg run_tdpnd_grpc_auth_live_smoke "$run_tdpnd_grpc_auth_live_smoke" \
   --argjson steps "$steps_json" \
   '{
     version: 1,
@@ -393,7 +411,8 @@ jq -n \
       run_query_surface: ($run_query_surface == "1"),
       run_grpc_app_roundtrip: ($run_grpc_app_roundtrip == "1"),
       run_tdpnd_grpc_runtime_smoke: ($run_tdpnd_grpc_runtime_smoke == "1"),
-      run_tdpnd_grpc_live_smoke: ($run_tdpnd_grpc_live_smoke == "1")
+      run_tdpnd_grpc_live_smoke: ($run_tdpnd_grpc_live_smoke == "1"),
+      run_tdpnd_grpc_auth_live_smoke: ($run_tdpnd_grpc_auth_live_smoke == "1")
     },
     steps: $steps,
     artifacts: {

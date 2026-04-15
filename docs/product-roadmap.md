@@ -191,6 +191,7 @@ Current implementation posture:
   - `settlement_shadow_env` -> `scripts/integration_cosmos_settlement_shadow_env.sh`
   - `settlement_shadow_status_surface` -> `scripts/integration_cosmos_settlement_shadow_status_surface.sh`
 - phase6 Cosmos L1 build/testnet CI scaffold now runs via `scripts/ci_phase6_cosmos_l1_build_testnet.sh` with contract checks in `scripts/integration_ci_phase6_cosmos_l1_build_testnet.sh`.
+- phase6 build/testnet CI now includes `tdpnd_grpc_auth_live_smoke` wired to `scripts/integration_cosmos_tdpnd_grpc_auth_live_smoke.sh` for auth-token gRPC live-smoke coverage.
 - phase6 Cosmos L1 contracts CI gate now runs via `scripts/ci_phase6_cosmos_l1_contracts.sh` with contract checks in `scripts/integration_ci_phase6_cosmos_l1_contracts.sh`, plus live-smoke coverage in `scripts/integration_phase6_cosmos_l1_contracts_live_smoke.sh`.
 - phase6 Cosmos L1 contracts posture now includes both `cosmos_module_coverage_floor` (`scripts/integration_cosmos_module_coverage_floor.sh`) and `cosmos_keeper_coverage_floor` (`scripts/integration_cosmos_keeper_coverage_floor.sh`) before wrapper handoff/run stages.
 - phase6 canonical top-level suite wrapper is `scripts/phase6_cosmos_l1_build_testnet_suite.sh` with contract checks in `scripts/integration_phase6_cosmos_l1_build_testnet_suite.sh`.

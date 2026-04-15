@@ -144,6 +144,14 @@ if ! rg -Fq "integration_ci_phase6_cosmos_l1_build_testnet.sh" "$full_plan"; the
   echo "full execution plan must document phase6 cosmos l1 ci integration contract script"
   exit 1
 fi
+if ! rg -Fq "tdpnd_grpc_auth_live_smoke" "$full_plan"; then
+  echo "full execution plan must document phase6 tdpnd_grpc_auth_live_smoke stage"
+  exit 1
+fi
+if ! rg -Fq "integration_cosmos_tdpnd_grpc_auth_live_smoke.sh" "$full_plan"; then
+  echo "full execution plan must document phase6 tdpnd gRPC auth live-smoke script"
+  exit 1
+fi
 if ! rg -Fq "ci_phase6_cosmos_l1_contracts.sh" "$full_plan"; then
   echo "full execution plan must document phase6 cosmos l1 contracts ci gate script"
   exit 1
@@ -214,6 +222,14 @@ if ! rg -Fq "integration_ci_phase6_cosmos_l1_build_testnet.sh" "$product_roadmap
   echo "product roadmap must document phase6 cosmos l1 ci integration contract script"
   exit 1
 fi
+if ! rg -Fq "tdpnd_grpc_auth_live_smoke" "$product_roadmap"; then
+  echo "product roadmap must document phase6 tdpnd_grpc_auth_live_smoke stage"
+  exit 1
+fi
+if ! rg -Fq "integration_cosmos_tdpnd_grpc_auth_live_smoke.sh" "$product_roadmap"; then
+  echo "product roadmap must document phase6 tdpnd gRPC auth live-smoke script"
+  exit 1
+fi
 if ! rg -Fq "ci_phase6_cosmos_l1_contracts.sh" "$product_roadmap"; then
   echo "product roadmap must document phase6 cosmos l1 contracts ci gate script"
   exit 1
@@ -274,6 +290,7 @@ phase6_stage_specs=(
   "query_surface|integration_cosmos_query_surface.sh"
   "grpc_app_roundtrip|integration_cosmos_grpc_app_roundtrip.sh"
   "tdpnd_grpc_runtime_smoke|integration_cosmos_tdpnd_grpc_runtime_smoke.sh"
+  "tdpnd_grpc_auth_live_smoke|integration_cosmos_tdpnd_grpc_auth_live_smoke.sh"
   "tdpnd_grpc_live_smoke|integration_cosmos_tdpnd_grpc_live_smoke.sh"
 )
 for stage_spec in "${phase6_stage_specs[@]}"; do
@@ -649,6 +666,14 @@ if ! rg -Fq "GET /x/vpnbilling/reservations" "$chain_readme"; then
 fi
 if ! rg -Fq "integration_cosmos_tdpnd_state_dir_persistence.sh" "$chain_readme"; then
   echo "chain README must document state-dir persistence integration coverage"
+  exit 1
+fi
+if ! rg -Fq "tdpnd_grpc_auth_live_smoke" "$chain_readme"; then
+  echo "chain README must document phase6 tdpnd_grpc_auth_live_smoke stage"
+  exit 1
+fi
+if ! rg -Fq "integration_cosmos_tdpnd_grpc_auth_live_smoke.sh" "$chain_readme"; then
+  echo "chain README must document tdpnd gRPC auth live-smoke script"
   exit 1
 fi
 if ! rg -Fq "blockchain-app-sponsorship-quickstart.md" "$chain_readme"; then

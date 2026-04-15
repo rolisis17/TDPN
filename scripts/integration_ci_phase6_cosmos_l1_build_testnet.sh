@@ -44,6 +44,7 @@ STAGE_ENV_NAMES=(
   "CI_PHASE6_COSMOS_L1_GRPC_APP_ROUNDTRIP_SCRIPT"
   "CI_PHASE6_COSMOS_L1_TDPND_GRPC_RUNTIME_SMOKE_SCRIPT"
   "CI_PHASE6_COSMOS_L1_TDPND_GRPC_LIVE_SMOKE_SCRIPT"
+  "CI_PHASE6_COSMOS_L1_TDPND_GRPC_AUTH_LIVE_SMOKE_SCRIPT"
 )
 
 STAGE_IDS=(
@@ -54,6 +55,7 @@ STAGE_IDS=(
   "grpc_app_roundtrip"
   "tdpnd_grpc_runtime_smoke"
   "tdpnd_grpc_live_smoke"
+  "tdpnd_grpc_auth_live_smoke"
 )
 
 TOGGLE_STAGE_IDS=(
@@ -184,9 +186,11 @@ if ! jq -e '
   and .inputs.run_grpc_app_roundtrip == true
   and .inputs.run_tdpnd_grpc_runtime_smoke == true
   and .inputs.run_tdpnd_grpc_live_smoke == true
+  and .inputs.run_tdpnd_grpc_auth_live_smoke == true
   and (.steps | to_entries | all(.value.enabled == true and .value.status == "pass" and .value.rc == 0 and .value.command != null))
   and .steps.chain_scaffold.status == "pass"
   and .steps.tdpnd_grpc_live_smoke.status == "pass"
+  and .steps.tdpnd_grpc_auth_live_smoke.status == "pass"
 ' "$SUCCESS_SUMMARY_JSON" >/dev/null; then
   echo "success summary missing expected contract fields"
   cat "$SUCCESS_SUMMARY_JSON"
@@ -246,7 +250,8 @@ CI_PHASE6_CAPTURE_FILE="$CAPTURE" \
   --run-proto-surface 0 \
   --run-proto-codegen-surface 0 \
   --run-tdpnd-grpc-runtime-smoke 0 \
-  --run-tdpnd-grpc-live-smoke 0 >"$TOGGLE_LOG" 2>&1
+  --run-tdpnd-grpc-live-smoke 0 \
+  --run-tdpnd-grpc-auth-live-smoke 0 >"$TOGGLE_LOG" 2>&1
 
 assert_stage_order "$CAPTURE" "${TOGGLE_STAGE_IDS[@]}"
 
@@ -278,6 +283,10 @@ if ! jq -e '
   and .steps.tdpnd_grpc_live_smoke.enabled == false
   and .steps.tdpnd_grpc_live_smoke.status == "skip"
   and .steps.tdpnd_grpc_live_smoke.reason == "disabled"
+  and .inputs.run_tdpnd_grpc_auth_live_smoke == false
+  and .steps.tdpnd_grpc_auth_live_smoke.enabled == false
+  and .steps.tdpnd_grpc_auth_live_smoke.status == "skip"
+  and .steps.tdpnd_grpc_auth_live_smoke.reason == "disabled"
   and .steps.query_surface.enabled == true
   and .steps.query_surface.status == "pass"
   and .steps.grpc_app_roundtrip.enabled == true
@@ -292,7 +301,7 @@ echo "[ci-phase6-cosmos-l1] first-failure rc propagation"
 : >"$CAPTURE"
 set +e
 CI_PHASE6_CAPTURE_FILE="$CAPTURE" \
-CI_PHASE6_FAIL_MATRIX="proto_surface=23,query_surface=41,tdpnd_grpc_live_smoke=43" \
+CI_PHASE6_FAIL_MATRIX="proto_surface=23,query_surface=41,tdpnd_grpc_live_smoke=43,tdpnd_grpc_auth_live_smoke=47" \
 "$GATE_SCRIPT" \
   --reports-dir "$FAIL_REPORTS_DIR" \
   --summary-json "$FAIL_SUMMARY_JSON" \
@@ -324,6 +333,8 @@ if ! jq -e '
   and .steps.query_surface.rc == 41
   and .steps.tdpnd_grpc_live_smoke.status == "fail"
   and .steps.tdpnd_grpc_live_smoke.rc == 43
+  and .steps.tdpnd_grpc_auth_live_smoke.status == "fail"
+  and .steps.tdpnd_grpc_auth_live_smoke.rc == 47
 ' "$FAIL_SUMMARY_JSON" >/dev/null; then
   echo "fail summary missing expected first-failure accounting"
   cat "$FAIL_SUMMARY_JSON"
