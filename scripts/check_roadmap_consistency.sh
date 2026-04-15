@@ -249,5 +249,21 @@ for phase5_script in "$phase5_ci_script" "$phase5_integration_script"; do
     exit 1
   fi
 done
+if ! rg -Fq "settlement_adapter_roundtrip" "$phase5_ci_script"; then
+  echo "phase5 ci script must include settlement_adapter_roundtrip stage"
+  exit 1
+fi
+if ! rg -Fq "integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh" "$phase5_ci_script"; then
+  echo "phase5 ci script must wire integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh"
+  exit 1
+fi
+if ! rg -Fq "settlement_adapter_roundtrip" "$phase5_integration_script"; then
+  echo "phase5 ci integration script must validate settlement_adapter_roundtrip stage"
+  exit 1
+fi
+if ! rg -Fq "settlement_adapter_roundtrip" "$product_roadmap"; then
+  echo "product roadmap must document settlement_adapter_roundtrip phase5 stage"
+  exit 1
+fi
 
 echo "roadmap consistency check ok"

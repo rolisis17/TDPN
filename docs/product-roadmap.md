@@ -26,6 +26,7 @@ Next 5 roadmap execution steps:
 
 Status update (March 24, 2026):
 - simple launcher defaults are now sourced from a versioned config contract (`deploy/config/easy_mode_config_v1.conf`) with command support in `easy_node.sh` (`config-v1-show`, `config-v1-init`, `config-v1-set-profile`).
+- config-v1 now also carries optional self-update defaults (`SIMPLE_AUTO_UPDATE*`) so operators can enable automatic fast-forward pulls for simple server/client startup flows without per-machine shell env setup.
 - `client-vpn-status` now supports machine-readable output (`--show-json [0|1]`) for desktop/automation integration.
 - daemon role `--local-api` is now available with local control endpoints (`connect`, `disconnect`, `status`, `set_profile`, `get_diagnostics`, `update`) to support Windows desktop app integration.
 - local API profile defaults are now aligned to config v1 through shared profile contract usage: `/v1/set_profile` persists via `config-v1-set-profile`, and daemon runs started with `--config deploy/config/easy_mode_config_v1.conf` read the same profile defaults as launcher flows.
@@ -77,7 +78,153 @@ Status update (March 24, 2026):
 - coverage for that matrix-record flow is now wired into `ci_local` and `beta_preflight` through `integration_three_machine_docker_profile_matrix_record.sh`.
 - `ci_phase0.sh` is now the fast Phase-0 product-surface gate runner for launcher wiring/runtime, simple prompt-budget contract (`<=6` prompts), config-v1 contract, and local control API contract; use it for quick contract checks before full `ci_local`/preflight runs.
 - `ci_phase1_resilience.sh` is now the focused Phase-1 resilience gate runner for profile-matrix and RC resilience wrappers (`three_machine_docker_profile_matrix`, `profile_compare_docker_matrix`, `three_machine_docker_profile_matrix_record`, `vpn_rc_matrix_path`, `vpn_rc_resilience_path`), with one machine-readable summary artifact at `.easy-node-logs/ci_phase1_resilience_<stamp>/ci_phase1_resilience_summary.json`.
+- `ci_phase1_resilience.sh` now also includes a default-enabled `session_churn_guard` stage (`integration_session_churn_guard.sh`) and an optional `3hop` runtime stage (`integration_client_3hop_runtime.sh`, opt-in via `--run-3hop-runtime-integration 1`).
+- `integration_ci_phase1_resilience.sh` is now wired into both `ci_local` and `beta_preflight` as the Phase-1 gate handoff contract check (purpose: stage/toggle/dry-run/rc contract validation; run when Phase-1 gate wiring changes; artifacts: temp summary/log captures from the harness; exit: non-zero on any contract mismatch).
+- Phase-2 Linux production-candidate gate/handoff scripts are now part of the execution path, including signoff and roadmap handoff integrations:
+  - `ci_phase2_linux_prod_candidate.sh` (focused Phase-2 gate runner)
+  - `integration_ci_phase2_linux_prod_candidate.sh` (gate contract check)
+  - `phase2_linux_prod_candidate_check.sh` (handoff checker)
+  - `phase2_linux_prod_candidate_run.sh` (one-command run + check wrapper)
+- `integration_phase2_linux_prod_candidate_check.sh` (checker contract)
+- `integration_phase2_linux_prod_candidate_run.sh` (wrapper contract)
+- `phase2_linux_prod_candidate_handoff_check.sh` (Phase-2 handoff checker)
+- `phase2_linux_prod_candidate_handoff_run.sh` (Phase-2 handoff run wrapper)
+- `integration_phase2_linux_prod_candidate_handoff_check.sh` (handoff checker contract)
+- `integration_phase2_linux_prod_candidate_handoff_run.sh` (handoff wrapper contract)
+- `phase2_linux_prod_candidate_signoff.sh` is now available (`./scripts/easy_node.sh phase2-linux-prod-candidate-signoff ...`) with contract coverage in `integration_phase2_linux_prod_candidate_signoff.sh`.
+- `phase2-linux-prod-candidate-handoff-check` and `phase2-linux-prod-candidate-handoff-run` are now available via `./scripts/easy_node.sh ...`, with contract coverage in the matching `integration_phase2_linux_prod_candidate_handoff_check.sh` and `integration_phase2_linux_prod_candidate_handoff_run.sh` scripts.
+- `integration_roadmap_progress_phase2_handoff.sh` now guards the roadmap-progress Phase-2 handoff contract, and `roadmap-progress-report` surfaces that handoff in the generated `vpn_track` block of the JSON/markdown report.
+- Phase-3 Windows client-beta gate/handoff scripts are now available with contract coverage:
+  - `ci_phase3_windows_client_beta.sh`
+  - `phase3_windows_client_beta_check.sh`
+  - `phase3_windows_client_beta_run.sh`
+  - `phase3_windows_client_beta_handoff_check.sh`
+  - `phase3_windows_client_beta_handoff_run.sh`
+  - `integration_ci_phase3_windows_client_beta.sh`
+  - `integration_phase3_windows_client_beta_check.sh`
+  - `integration_phase3_windows_client_beta_run.sh`
+  - `integration_phase3_windows_client_beta_handoff_check.sh`
+  - `integration_phase3_windows_client_beta_handoff_run.sh`
+- Phase-3 wrapper commands are now available through `easy_node.sh`:
+  - `ci-phase3-windows-client-beta`
+  - `phase3-windows-client-beta-check`
+  - `phase3-windows-client-beta-run`
+  - `phase3-windows-client-beta-handoff-check`
+  - `phase3-windows-client-beta-handoff-run`
+- launcher advanced menu now includes Phase-3 options (`92`-`96`) for the same wrapper commands, with wiring/runtime coverage in `integration_easy_mode_launcher_wiring.sh` and `integration_easy_mode_launcher_runtime.sh`.
+- `roadmap-progress-report` now ingests a Phase-3 handoff summary (`--phase3-windows-client-beta-summary-json` or auto-detected) and surfaces it as `vpn_track.phase3_windows_client_beta_handoff`.
+- `integration_roadmap_progress_phase3_handoff.sh` now guards the Phase-3 roadmap ingestion contract.
+- Phase-4 Windows full-parity gate/handoff scripts are now available with contract coverage:
+  - `ci_phase4_windows_full_parity.sh`
+  - `phase4_windows_full_parity_check.sh`
+  - `phase4_windows_full_parity_run.sh`
+  - `phase4_windows_full_parity_handoff_check.sh`
+  - `phase4_windows_full_parity_handoff_run.sh`
+  - `integration_ci_phase4_windows_full_parity.sh`
+  - `integration_phase4_windows_full_parity_check.sh`
+  - `integration_phase4_windows_full_parity_run.sh`
+  - `integration_phase4_windows_full_parity_handoff_check.sh`
+  - `integration_phase4_windows_full_parity_handoff_run.sh`
+- Phase-4 wrapper commands are now available through `easy_node.sh`:
+  - `ci-phase4-windows-full-parity`
+  - `phase4-windows-full-parity-check`
+  - `phase4-windows-full-parity-run`
+  - `phase4-windows-full-parity-handoff-check`
+  - `phase4-windows-full-parity-handoff-run`
+- `roadmap-progress-report` now ingests a Phase-4 handoff summary (`--phase4-windows-full-parity-summary-json` or auto-detected) and surfaces it as `vpn_track.phase4_windows_full_parity_handoff`.
+- `integration_roadmap_progress_phase4_handoff.sh` now guards the Phase-4 roadmap ingestion contract.
+- Phase-5 settlement-layer gate/handoff scripts are now available with contract coverage:
+  - `ci_phase5_settlement_layer.sh`
+  - `ci_phase5_settlement_layer.sh` now includes `settlement_adapter_roundtrip` (backed by `integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh`) as a first-class stage.
+  - `phase5_settlement_layer_check.sh`
+  - `phase5_settlement_layer_run.sh`
+  - `phase5_settlement_layer_handoff_check.sh`
+  - `phase5_settlement_layer_handoff_run.sh`
+  - `integration_ci_phase5_settlement_layer.sh`
+  - `integration_phase5_settlement_layer_check.sh`
+  - `integration_phase5_settlement_layer_run.sh`
+  - `integration_phase5_settlement_layer_handoff_check.sh`
+  - `integration_phase5_settlement_layer_handoff_run.sh`
+- Phase-5 wrapper commands are now available through `easy_node.sh`:
+  - `ci-phase5-settlement-layer`
+  - `phase5-settlement-layer-check`
+  - `phase5-settlement-layer-run`
+  - `phase5-settlement-layer-handoff-check`
+  - `phase5-settlement-layer-handoff-run`
+- `vpn-non-blockchain-fastlane` is now available as a non-blockchain acceleration wrapper (`./scripts/easy_node.sh vpn-non-blockchain-fastlane --print-summary-json 1`) that runs runtime + Phase-1..4 handoff + roadmap flow while explicitly excluding Phase-5/blockchain settlement steps.
+- `roadmap-progress-report` now ingests a Phase-5 handoff summary (`--phase5-settlement-layer-summary-json` or auto-detected) and surfaces it as `vpn_track.phase5_settlement_layer_handoff`.
+- `integration_roadmap_progress_phase5_handoff.sh` now guards the Phase-5 roadmap ingestion contract.
+- quick usage:
+```bash
+./scripts/ci_phase2_linux_prod_candidate.sh
+./scripts/integration_ci_phase2_linux_prod_candidate.sh
+./scripts/phase2_linux_prod_candidate_check.sh
+./scripts/phase2_linux_prod_candidate_run.sh
+./scripts/integration_phase2_linux_prod_candidate_check.sh
+./scripts/integration_phase2_linux_prod_candidate_run.sh
+./scripts/phase2_linux_prod_candidate_handoff_check.sh
+./scripts/phase2_linux_prod_candidate_handoff_run.sh
+./scripts/integration_phase2_linux_prod_candidate_handoff_check.sh
+./scripts/integration_phase2_linux_prod_candidate_handoff_run.sh
+./scripts/phase2_linux_prod_candidate_signoff.sh
+./scripts/integration_phase2_linux_prod_candidate_signoff.sh
+./scripts/integration_roadmap_progress_phase2_handoff.sh
+./scripts/easy_node.sh phase2-linux-prod-candidate-handoff-check
+./scripts/easy_node.sh phase2-linux-prod-candidate-handoff-run
+./scripts/ci_phase3_windows_client_beta.sh
+./scripts/integration_ci_phase3_windows_client_beta.sh
+./scripts/phase3_windows_client_beta_check.sh
+./scripts/phase3_windows_client_beta_run.sh
+./scripts/phase3_windows_client_beta_handoff_check.sh
+./scripts/phase3_windows_client_beta_handoff_run.sh
+./scripts/integration_phase3_windows_client_beta_check.sh
+./scripts/integration_phase3_windows_client_beta_run.sh
+./scripts/integration_phase3_windows_client_beta_handoff_check.sh
+./scripts/integration_phase3_windows_client_beta_handoff_run.sh
+./scripts/integration_roadmap_progress_phase3_handoff.sh
+./scripts/easy_node.sh ci-phase3-windows-client-beta
+./scripts/easy_node.sh phase3-windows-client-beta-check
+./scripts/easy_node.sh phase3-windows-client-beta-run
+./scripts/easy_node.sh phase3-windows-client-beta-handoff-check
+./scripts/easy_node.sh phase3-windows-client-beta-handoff-run
+./scripts/ci_phase4_windows_full_parity.sh
+./scripts/integration_ci_phase4_windows_full_parity.sh
+./scripts/phase4_windows_full_parity_check.sh
+./scripts/phase4_windows_full_parity_run.sh
+./scripts/phase4_windows_full_parity_handoff_check.sh
+./scripts/phase4_windows_full_parity_handoff_run.sh
+./scripts/integration_phase4_windows_full_parity_check.sh
+./scripts/integration_phase4_windows_full_parity_run.sh
+./scripts/integration_phase4_windows_full_parity_handoff_check.sh
+./scripts/integration_phase4_windows_full_parity_handoff_run.sh
+./scripts/integration_roadmap_progress_phase4_handoff.sh
+./scripts/easy_node.sh ci-phase4-windows-full-parity
+./scripts/easy_node.sh phase4-windows-full-parity-check
+./scripts/easy_node.sh phase4-windows-full-parity-run
+./scripts/easy_node.sh phase4-windows-full-parity-handoff-check
+./scripts/easy_node.sh phase4-windows-full-parity-handoff-run
+./scripts/ci_phase5_settlement_layer.sh
+./scripts/integration_ci_phase5_settlement_layer.sh
+./scripts/integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh
+./scripts/phase5_settlement_layer_check.sh
+./scripts/phase5_settlement_layer_run.sh
+./scripts/phase5_settlement_layer_handoff_check.sh
+./scripts/phase5_settlement_layer_handoff_run.sh
+./scripts/integration_phase5_settlement_layer_check.sh
+./scripts/integration_phase5_settlement_layer_run.sh
+./scripts/integration_phase5_settlement_layer_handoff_check.sh
+./scripts/integration_phase5_settlement_layer_handoff_run.sh
+./scripts/integration_roadmap_progress_phase5_handoff.sh
+./scripts/easy_node.sh ci-phase5-settlement-layer
+./scripts/easy_node.sh phase5-settlement-layer-check
+./scripts/easy_node.sh phase5-settlement-layer-run
+./scripts/easy_node.sh phase5-settlement-layer-handoff-check
+./scripts/easy_node.sh phase5-settlement-layer-handoff-run
+```
 - `integration_session_churn_guard.sh` now adds deterministic client session churn guard coverage (default direct-exit churn suppression vs explicit churn override) so session lifecycle defaults stay stable while retaining an intentional diagnostics override path.
+- `vpn-rc-resilience-path` summary now emits explicit resilience handoff booleans (`profile_matrix_stable`, `peer_loss_recovery_ok`, `session_churn_guard_ok`) plus a `resilience_handoff` block for automation/reporting consumers.
+- `roadmap-progress-report` now ingests those resilience handoff booleans from `vpn_rc_resilience_path_summary.json` (auto-detect or explicit `--vpn-rc-resilience-summary-json`) and surfaces them in `vpn_track.resilience_handoff`.
+- `roadmap-progress-report` now also ingests Phase-1 handoff summaries (`--phase1-resilience-handoff-summary-json` or auto-detected) and surfaces them in `vpn_track.phase1_resilience_handoff`, including a deterministic non-blockchain actionable gate list (`vpn_track.non_blockchain_actionable_no_sudo_or_github`) for checks runnable without sudo or GitHub.
 - `single-machine-prod-readiness` now defaults Docker rehearsal to include peer-failover (`--three-machine-docker-readiness-run-peer-failover 1`) so churn recovery is exercised in the standard readiness path (override with `0` when needed for diagnostics).
 - `vpn-rc-standard-path` now inherits that same peer-failover default through `single-machine-prod-readiness`; diagnostics can disable failover rehearsal in direct one-host runs with `--three-machine-docker-readiness-run-peer-failover 0` (or low-level `three-machine-docker-readiness --run-peer-failover 0`).
 - config-v1 coverage now includes a dedicated integration gate (`integration_easy_node_config_v1.sh`) in `ci_local` and `beta_preflight`, validating `config-v1-init`, `config-v1-show`, `config-v1-set-profile`, and server federation-wait default keys.
