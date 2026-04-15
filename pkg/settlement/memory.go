@@ -48,6 +48,13 @@ type deferredAdapterOperation struct {
 	LastError      string
 }
 
+type chainConfirmationAdapter interface {
+	HasSessionSettlement(ctx context.Context, settlementID string) (bool, error)
+	HasRewardIssue(ctx context.Context, rewardID string) (bool, error)
+	HasSponsorReservation(ctx context.Context, reservationID string) (bool, error)
+	HasSlashEvidence(ctx context.Context, evidenceID string) (bool, error)
+}
+
 type MemoryService struct {
 	mu sync.Mutex
 
@@ -484,6 +491,7 @@ func (s *MemoryService) SubmitSlashEvidence(ctx context.Context, evidence SlashE
 
 func (s *MemoryService) Reconcile(ctx context.Context) (ReconcileReport, error) {
 	s.replayDeferredAdapterOperations(ctx)
+	s.confirmSubmittedAdapterOperations(ctx)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -793,6 +801,122 @@ func (s *MemoryService) replayDeferredAdapterOperation(ctx context.Context, adap
 	s.applyDeferredOperationStatusLocked(op, OperationStatusSubmitted, ref)
 	s.clearDeferredOperationLocked(op.IdempotencyKey)
 	s.mu.Unlock()
+}
+
+func (s *MemoryService) confirmSubmittedAdapterOperations(ctx context.Context) {
+	adapter := s.currentAdapter()
+	if adapter == nil {
+		return
+	}
+	confirmer, ok := adapter.(chainConfirmationAdapter)
+	if !ok {
+		return
+	}
+
+	type settlementSnapshot struct {
+		SessionID    string
+		SettlementID string
+	}
+	type rewardSnapshot struct {
+		RewardID string
+	}
+	type sponsorSnapshot struct {
+		ReservationID string
+	}
+	type slashSnapshot struct {
+		EvidenceID string
+	}
+
+	s.mu.Lock()
+	settlements := make([]settlementSnapshot, 0)
+	for sessionID, settlement := range s.settledBySession {
+		if settlement.Status == OperationStatusSubmitted && strings.TrimSpace(settlement.SettlementID) != "" {
+			settlements = append(settlements, settlementSnapshot{
+				SessionID:    sessionID,
+				SettlementID: settlement.SettlementID,
+			})
+		}
+	}
+	rewards := make([]rewardSnapshot, 0)
+	for rewardID, reward := range s.rewardsByID {
+		if reward.Status == OperationStatusSubmitted {
+			rewards = append(rewards, rewardSnapshot{RewardID: rewardID})
+		}
+	}
+	sponsorReservations := make([]sponsorSnapshot, 0)
+	for reservationID, reservation := range s.sponsorReservationsByID {
+		if reservation.Status == OperationStatusSubmitted {
+			sponsorReservations = append(sponsorReservations, sponsorSnapshot{ReservationID: reservationID})
+		}
+	}
+	slashEvidence := make([]slashSnapshot, 0)
+	for evidenceID, evidence := range s.slashEvidenceByID {
+		if evidence.Status == OperationStatusSubmitted {
+			slashEvidence = append(slashEvidence, slashSnapshot{EvidenceID: evidenceID})
+		}
+	}
+	s.mu.Unlock()
+
+	for _, snapshot := range settlements {
+		exists, err := confirmer.HasSessionSettlement(ctx, snapshot.SettlementID)
+		if err != nil || !exists {
+			continue
+		}
+		s.mu.Lock()
+		settlement, ok := s.settledBySession[snapshot.SessionID]
+		if ok && settlement.Status == OperationStatusSubmitted {
+			settlement.Status = OperationStatusConfirmed
+			settlement.AdapterDeferred = false
+			settlement.AdapterSubmitted = true
+			s.settledBySession[snapshot.SessionID] = settlement
+		}
+		s.mu.Unlock()
+	}
+	for _, snapshot := range rewards {
+		exists, err := confirmer.HasRewardIssue(ctx, snapshot.RewardID)
+		if err != nil || !exists {
+			continue
+		}
+		s.mu.Lock()
+		reward, ok := s.rewardsByID[snapshot.RewardID]
+		if ok && reward.Status == OperationStatusSubmitted {
+			reward.Status = OperationStatusConfirmed
+			reward.AdapterDeferred = false
+			reward.AdapterSubmitted = true
+			s.rewardsByID[snapshot.RewardID] = reward
+		}
+		s.mu.Unlock()
+	}
+	for _, snapshot := range sponsorReservations {
+		exists, err := confirmer.HasSponsorReservation(ctx, snapshot.ReservationID)
+		if err != nil || !exists {
+			continue
+		}
+		s.mu.Lock()
+		reservation, ok := s.sponsorReservationsByID[snapshot.ReservationID]
+		if ok && reservation.Status == OperationStatusSubmitted {
+			reservation.Status = OperationStatusConfirmed
+			reservation.AdapterDeferred = false
+			reservation.AdapterSubmitted = true
+			s.sponsorReservationsByID[snapshot.ReservationID] = reservation
+		}
+		s.mu.Unlock()
+	}
+	for _, snapshot := range slashEvidence {
+		exists, err := confirmer.HasSlashEvidence(ctx, snapshot.EvidenceID)
+		if err != nil || !exists {
+			continue
+		}
+		s.mu.Lock()
+		evidence, ok := s.slashEvidenceByID[snapshot.EvidenceID]
+		if ok && evidence.Status == OperationStatusSubmitted {
+			evidence.Status = OperationStatusConfirmed
+			evidence.AdapterDeferred = false
+			evidence.AdapterSubmitted = true
+			s.slashEvidenceByID[snapshot.EvidenceID] = evidence
+		}
+		s.mu.Unlock()
+	}
 }
 
 func (s *MemoryService) applyDeferredOperationStatusLocked(op deferredAdapterOperation, status OperationStatus, referenceID string) {

@@ -119,6 +119,42 @@ func (a *switchableAdapter) settlementCalls() int {
 	return a.sessionSubmitCalls
 }
 
+type confirmingAdapter struct{}
+
+func (a confirmingAdapter) SubmitSessionSettlement(_ context.Context, settlement SessionSettlement) (string, error) {
+	return "chain-set-" + settlement.SessionID, nil
+}
+
+func (a confirmingAdapter) SubmitRewardIssue(_ context.Context, reward RewardIssue) (string, error) {
+	return "chain-rew-" + reward.RewardID, nil
+}
+
+func (a confirmingAdapter) SubmitSponsorReservation(_ context.Context, reservation SponsorCreditReservation) (string, error) {
+	return "chain-sponsor-" + reservation.ReservationID, nil
+}
+
+func (a confirmingAdapter) SubmitSlashEvidence(_ context.Context, evidence SlashEvidence) (string, error) {
+	return "chain-slash-" + evidence.EvidenceID, nil
+}
+
+func (a confirmingAdapter) Health(_ context.Context) error { return nil }
+
+func (a confirmingAdapter) HasSessionSettlement(_ context.Context, settlementID string) (bool, error) {
+	return settlementID != "", nil
+}
+
+func (a confirmingAdapter) HasRewardIssue(_ context.Context, rewardID string) (bool, error) {
+	return rewardID != "", nil
+}
+
+func (a confirmingAdapter) HasSponsorReservation(_ context.Context, reservationID string) (bool, error) {
+	return reservationID != "", nil
+}
+
+func (a confirmingAdapter) HasSlashEvidence(_ context.Context, evidenceID string) (bool, error) {
+	return evidenceID != "", nil
+}
+
 func setupDeferredSettlement(t *testing.T, s *MemoryService, sessionID string) {
 	t.Helper()
 	ctx := context.Background()
@@ -325,6 +361,87 @@ func TestMemoryServiceReconcileReplayIsIdempotentAcrossRepeatedCalls(t *testing.
 	}
 	if gotCalls := adapter.settlementCalls(); gotCalls != 2 {
 		t.Fatalf("expected exactly two settlement submissions (initial fail + single replay), got %d", gotCalls)
+	}
+}
+
+func TestMemoryServiceReconcileMarksSubmittedAsConfirmedWhenQueryable(t *testing.T) {
+	s := NewMemoryService(
+		WithPricePerMiBMicros(1024*1024),
+		WithChainAdapter(confirmingAdapter{}),
+	)
+	ctx := context.Background()
+
+	_, err := s.ReserveFunds(ctx, FundReservation{
+		SessionID:    "sess-confirm-1",
+		SubjectID:    "client-confirm-1",
+		AmountMicros: 2_000_000,
+		Currency:     "TDPNC",
+	})
+	if err != nil {
+		t.Fatalf("ReserveFunds: %v", err)
+	}
+	if err := s.RecordUsage(ctx, UsageRecord{
+		SessionID:    "sess-confirm-1",
+		SubjectID:    "client-confirm-1",
+		BytesIngress: 1024 * 1024,
+	}); err != nil {
+		t.Fatalf("RecordUsage: %v", err)
+	}
+	if _, err := s.SettleSession(ctx, "sess-confirm-1"); err != nil {
+		t.Fatalf("SettleSession: %v", err)
+	}
+	if _, err := s.IssueReward(ctx, RewardIssue{
+		RewardID:          "rew-confirm-1",
+		ProviderSubjectID: "provider-confirm-1",
+		SessionID:         "sess-confirm-1",
+		RewardMicros:      25,
+		Currency:          "TDPNC",
+	}); err != nil {
+		t.Fatalf("IssueReward: %v", err)
+	}
+	if _, err := s.ReserveSponsorCredits(ctx, SponsorCreditReservation{
+		ReservationID: "sres-confirm-1",
+		SponsorID:     "sponsor-confirm-1",
+		SubjectID:     "client-confirm-1",
+		SessionID:     "sess-confirm-1",
+		AmountMicros:  100,
+		Currency:      "TDPNC",
+	}); err != nil {
+		t.Fatalf("ReserveSponsorCredits: %v", err)
+	}
+	if _, err := s.SubmitSlashEvidence(ctx, SlashEvidence{
+		EvidenceID:    "ev-confirm-1",
+		SubjectID:     "provider-confirm-1",
+		SessionID:     "sess-confirm-1",
+		ViolationType: "double-sign",
+		EvidenceRef:   "sha256:abcd1234",
+		SlashMicros:   11,
+		Currency:      "TDPNC",
+	}); err != nil {
+		t.Fatalf("SubmitSlashEvidence: %v", err)
+	}
+
+	report, err := s.Reconcile(ctx)
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if report.ConfirmedOperations < 4 {
+		t.Fatalf("expected at least four confirmed operations, got %d", report.ConfirmedOperations)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if got := s.settledBySession["sess-confirm-1"].Status; got != OperationStatusConfirmed {
+		t.Fatalf("expected settlement confirmed, got %s", got)
+	}
+	if got := s.rewardsByID["rew-confirm-1"].Status; got != OperationStatusConfirmed {
+		t.Fatalf("expected reward confirmed, got %s", got)
+	}
+	if got := s.sponsorReservationsByID["sres-confirm-1"].Status; got != OperationStatusConfirmed {
+		t.Fatalf("expected sponsor reservation confirmed, got %s", got)
+	}
+	if got := s.slashEvidenceByID["ev-confirm-1"].Status; got != OperationStatusConfirmed {
+		t.Fatalf("expected slash evidence confirmed, got %s", got)
 	}
 }
 

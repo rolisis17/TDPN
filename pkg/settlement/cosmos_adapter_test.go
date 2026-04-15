@@ -227,6 +227,80 @@ func TestCosmosAdapterRetries429And503(t *testing.T) {
 	}
 }
 
+func TestCosmosAdapterConfirmationQueryPathMappings(t *testing.T) {
+	seenPathCh := make(chan string, 4)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenPathCh <- r.URL.Path
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	adapter, err := NewCosmosAdapter(CosmosAdapterConfig{
+		Endpoint:    srv.URL,
+		QueueSize:   8,
+		MaxRetries:  1,
+		BaseBackoff: 5 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("NewCosmosAdapter: %v", err)
+	}
+	defer adapter.Close()
+
+	if ok, err := adapter.HasSessionSettlement(context.Background(), "set-1"); err != nil || !ok {
+		t.Fatalf("HasSessionSettlement expected true,nil got ok=%v err=%v", ok, err)
+	}
+	if got := <-seenPathCh; got != "/x/vpnbilling/settlements/set-1" {
+		t.Fatalf("unexpected settlement query path %q", got)
+	}
+
+	if ok, err := adapter.HasRewardIssue(context.Background(), "rew-1"); err != nil || !ok {
+		t.Fatalf("HasRewardIssue expected true,nil got ok=%v err=%v", ok, err)
+	}
+	if got := <-seenPathCh; got != "/x/vpnrewards/distributions/dist:rew-1" {
+		t.Fatalf("unexpected reward query path %q", got)
+	}
+
+	if ok, err := adapter.HasSponsorReservation(context.Background(), "sres-1"); err != nil || !ok {
+		t.Fatalf("HasSponsorReservation expected true,nil got ok=%v err=%v", ok, err)
+	}
+	if got := <-seenPathCh; got != "/x/vpnsponsor/delegations/sres-1" {
+		t.Fatalf("unexpected sponsor query path %q", got)
+	}
+
+	if ok, err := adapter.HasSlashEvidence(context.Background(), "ev-1"); err != nil || !ok {
+		t.Fatalf("HasSlashEvidence expected true,nil got ok=%v err=%v", ok, err)
+	}
+	if got := <-seenPathCh; got != "/x/vpnslashing/evidence/ev-1" {
+		t.Fatalf("unexpected slash query path %q", got)
+	}
+}
+
+func TestCosmosAdapterConfirmationQueriesReturnFalseOnNotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	adapter, err := NewCosmosAdapter(CosmosAdapterConfig{
+		Endpoint:    srv.URL,
+		QueueSize:   8,
+		MaxRetries:  1,
+		BaseBackoff: 5 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("NewCosmosAdapter: %v", err)
+	}
+	defer adapter.Close()
+
+	ok, err := adapter.HasSessionSettlement(context.Background(), "missing-settlement")
+	if err != nil {
+		t.Fatalf("HasSessionSettlement unexpected err: %v", err)
+	}
+	if ok {
+		t.Fatalf("expected HasSessionSettlement=false for 404 query")
+	}
+}
+
 func TestCosmosAdapterSignedTxModeSubmitsBroadcast(t *testing.T) {
 	type seenRequest struct {
 		path string

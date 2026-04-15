@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -263,6 +264,40 @@ func (a *CosmosAdapter) Health(ctx context.Context) error {
 	return nil
 }
 
+func (a *CosmosAdapter) HasSessionSettlement(ctx context.Context, settlementID string) (bool, error) {
+	settlementID = strings.TrimSpace(settlementID)
+	if settlementID == "" {
+		return false, fmt.Errorf("settlement id required")
+	}
+	return a.queryByID(ctx, "/x/vpnbilling/settlements/"+url.PathEscape(settlementID))
+}
+
+func (a *CosmosAdapter) HasRewardIssue(ctx context.Context, rewardID string) (bool, error) {
+	rewardID = strings.TrimSpace(rewardID)
+	if rewardID == "" {
+		return false, fmt.Errorf("reward id required")
+	}
+	// Bridge materializes reward submissions as distribution records with "dist:<reward_id>".
+	distributionID := "dist:" + rewardID
+	return a.queryByID(ctx, "/x/vpnrewards/distributions/"+url.PathEscape(distributionID))
+}
+
+func (a *CosmosAdapter) HasSponsorReservation(ctx context.Context, reservationID string) (bool, error) {
+	reservationID = strings.TrimSpace(reservationID)
+	if reservationID == "" {
+		return false, fmt.Errorf("reservation id required")
+	}
+	return a.queryByID(ctx, "/x/vpnsponsor/delegations/"+url.PathEscape(reservationID))
+}
+
+func (a *CosmosAdapter) HasSlashEvidence(ctx context.Context, evidenceID string) (bool, error) {
+	evidenceID = strings.TrimSpace(evidenceID)
+	if evidenceID == "" {
+		return false, fmt.Errorf("evidence id required")
+	}
+	return a.queryByID(ctx, "/x/vpnslashing/evidence/"+url.PathEscape(evidenceID))
+}
+
 func (a *CosmosAdapter) Close() {
 	a.workerCancel()
 	a.workerWG.Wait()
@@ -347,6 +382,28 @@ func (a *CosmosAdapter) submit(ctx context.Context, op cosmosQueuedOperation) er
 		}
 	}
 	return nil
+}
+
+func (a *CosmosAdapter) queryByID(ctx context.Context, path string) (bool, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.endpoint+path, nil)
+	if err != nil {
+		return false, err
+	}
+	if a.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+a.apiKey)
+	}
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return true, nil
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		return false, nil
+	}
+	return false, fmt.Errorf("cosmos query %s status %d", path, resp.StatusCode)
 }
 
 func (s *cosmosHTTPSignedTxSubmitter) Submit(ctx context.Context, op cosmosQueuedOperation) error {
