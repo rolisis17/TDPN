@@ -152,6 +152,18 @@ do
     exit 1
   fi
 done
+if ! rg -Fq "Cosmos adapter retry policy" "$cosmos_runtime_doc"; then
+  echo "cosmos settlement runtime guide must document adapter retry policy"
+  exit 1
+fi
+if ! rg -Fq "retryable: transport/network errors, HTTP \`408\`, \`425\`, \`429\`, and \`5xx\`." "$cosmos_runtime_doc"; then
+  echo "cosmos settlement runtime guide must document retryable adapter error classes"
+  exit 1
+fi
+if ! rg -Fq "non-retryable: other HTTP \`4xx\` validation/auth-style failures" "$cosmos_runtime_doc"; then
+  echo "cosmos settlement runtime guide must document non-retryable adapter error classes"
+  exit 1
+fi
 
 if ! rg -Fq 'GET /v1/settlement/status' "$cosmos_runtime_doc"; then
   echo "cosmos settlement runtime guide must document settlement status endpoint"
