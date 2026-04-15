@@ -616,6 +616,48 @@ func TestMemoryServiceReconcileReplaySuccessClearsBacklog(t *testing.T) {
 	}
 }
 
+func TestMemoryServiceReconcileReplayFailureMarksFailedAndRetainsBacklog(t *testing.T) {
+	adapter := &switchableAdapter{fail: true}
+	s := NewMemoryService(
+		WithPricePerMiBMicros(1024*1024),
+		WithChainAdapter(adapter),
+	)
+	setupDeferredSettlement(t, s, "sess-replay-fail-1")
+	ctx := context.Background()
+
+	report, err := s.Reconcile(ctx)
+	if err != nil {
+		t.Fatalf("Reconcile with persistent adapter failure: %v", err)
+	}
+	if report.PendingAdapterOperations != 1 {
+		t.Fatalf("expected deferred backlog to remain 1 after failed replay, got %d", report.PendingAdapterOperations)
+	}
+	if report.FailedOperations < 1 {
+		t.Fatalf("expected at least one failed operation after failed replay, got %d", report.FailedOperations)
+	}
+
+	s.mu.Lock()
+	settlement := s.settledBySession["sess-replay-fail-1"]
+	deferredOp, hasDeferredOp := s.deferredAdapterOps["settlement:set-sess-replay-fail-1"]
+	s.mu.Unlock()
+
+	if settlement.Status != OperationStatusFailed {
+		t.Fatalf("expected settlement status failed after failed replay, got %s", settlement.Status)
+	}
+	if !settlement.AdapterDeferred || settlement.AdapterSubmitted {
+		t.Fatalf("expected settlement adapter state deferred=true submitted=false after failed replay")
+	}
+	if !hasDeferredOp {
+		t.Fatalf("expected deferred operation to remain after failed replay")
+	}
+	if deferredOp.Attempts < 2 {
+		t.Fatalf("expected deferred operation attempts >= 2 (initial submit + replay), got %d", deferredOp.Attempts)
+	}
+	if gotCalls := adapter.settlementCalls(); gotCalls != 2 {
+		t.Fatalf("expected exactly two settlement submissions (initial fail + replay fail), got %d", gotCalls)
+	}
+}
+
 func TestMemoryServiceReconcileReplayIsIdempotentAcrossRepeatedCalls(t *testing.T) {
 	adapter := &switchableAdapter{fail: true}
 	s := NewMemoryService(

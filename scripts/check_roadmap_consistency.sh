@@ -446,6 +446,10 @@ if ! rg -Fq "integration_phase6_cosmos_l1_contracts_live_smoke.sh" "$phase6_cont
   echo "phase6 contracts ci script must wire integration_phase6_cosmos_l1_contracts_live_smoke.sh by default"
   exit 1
 fi
+if ! rg -Fq "CI_PHASE6_COSMOS_L1_CONTRACTS_RUN_PHASE6_COSMOS_L1_CONTRACTS_LIVE_SMOKE=0" "$phase6_contracts_ci_script"; then
+  echo "phase6 contracts ci script must enforce live-smoke recursion-guard env override"
+  exit 1
+fi
 if ! rg -Fq "assert_stage_order \"\$CAPTURE\" \"\${STAGE_IDS[@]}\"" "$phase6_contracts_integration_script"; then
   echo "phase6 contracts ci integration script must include stable STAGE_IDS ordering checks"
   exit 1
@@ -460,6 +464,10 @@ if ! rg -Fq "phase6_cosmos_l1_contracts_live_smoke.status == \"skip\"" "$phase6_
 fi
 if ! rg -Fq "phase6_cosmos_l1_contracts_live_smoke.status == \"fail\"" "$phase6_contracts_integration_script"; then
   echo "phase6 contracts ci integration script must validate live-smoke fail accounting"
+  exit 1
+fi
+if ! rg -Fq "phase6_cosmos_l1_contracts_live_smoke.command | contains(\"CI_PHASE6_COSMOS_L1_CONTRACTS_RUN_PHASE6_COSMOS_L1_CONTRACTS_LIVE_SMOKE=0\")" "$phase6_contracts_integration_script"; then
+  echo "phase6 contracts ci integration script must validate live-smoke recursion-guard command marker"
   exit 1
 fi
 if ! rg -Fq "cosmos_module_coverage_floor" "$phase6_contracts_ci_script"; then

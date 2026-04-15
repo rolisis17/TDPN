@@ -233,6 +233,8 @@ if ! jq -e '
   and .steps.ci_phase6_cosmos_l1_build_testnet.status == "pass"
   and .steps.phase6_cosmos_l1_build_testnet_suite.status == "pass"
   and .steps.phase6_cosmos_l1_contracts_live_smoke.status == "pass"
+  and (.steps.phase6_cosmos_l1_contracts_live_smoke.command | contains("CI_PHASE6_COSMOS_L1_CONTRACTS_RUN_PHASE6_COSMOS_L1_CONTRACTS_LIVE_SMOKE=0"))
+  and (.steps.phase6_cosmos_l1_build_testnet_suite.command | contains("CI_PHASE6_COSMOS_L1_CONTRACTS_RUN_PHASE6_COSMOS_L1_CONTRACTS_LIVE_SMOKE=0") | not)
 ' "$SUCCESS_SUMMARY_JSON" >/dev/null; then
   echo "success summary missing expected contract fields"
   cat "$SUCCESS_SUMMARY_JSON"
@@ -424,6 +426,8 @@ if ! jq -e '
   and .steps.phase6_cosmos_l1_build_testnet_suite.rc == 43
   and .steps.phase6_cosmos_l1_contracts_live_smoke.status == "fail"
   and .steps.phase6_cosmos_l1_contracts_live_smoke.rc == 47
+  and (.steps.phase6_cosmos_l1_contracts_live_smoke.command | contains("CI_PHASE6_COSMOS_L1_CONTRACTS_RUN_PHASE6_COSMOS_L1_CONTRACTS_LIVE_SMOKE=0"))
+  and (.steps.phase6_cosmos_l1_build_testnet_handoff_run.command | contains("CI_PHASE6_COSMOS_L1_CONTRACTS_RUN_PHASE6_COSMOS_L1_CONTRACTS_LIVE_SMOKE=0") | not)
 ' "$FAIL_SUMMARY_JSON" >/dev/null; then
   echo "fail summary missing expected first-failure accounting"
   cat "$FAIL_SUMMARY_JSON"

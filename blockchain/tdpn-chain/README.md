@@ -1,6 +1,6 @@
 # TDPN Chain Workspace (Cosmos + CometBFT)
 
-Status: scaffolding baseline for Cosmos-first rollout.
+Status: phase-1 stateful module wiring is in place; Cosmos-first rollout continues.
 
 This workspace defines the initial module boundaries for TDPN's VPN-compatible blockchain layer.
 
@@ -39,8 +39,8 @@ This workspace defines the initial module boundaries for TDPN's VPN-compatible b
 - Phase6 build/testnet/contracts/check/run/handoff/suite wrappers emit canonical summary artifacts in `.easy-node-logs` (`phase6_cosmos_l1_build_testnet_ci_summary.json`, `phase6_cosmos_l1_contracts_summary.json`, `phase6_cosmos_l1_build_testnet_check_summary.json`, `phase6_cosmos_l1_build_testnet_run_summary.json`, `phase6_cosmos_l1_build_testnet_handoff_check_summary.json`, `phase6_cosmos_l1_build_testnet_handoff_run_summary.json`, `phase6_cosmos_l1_build_testnet_suite_summary.json`) in addition to per-run reports.
 - Phase6 summary helper fallback discovery can resolve latest timestamped CI/contracts/suite summaries when canonical/default files are not present.
 
-## Scaffold status
-- Go scaffold entrypoint: `cmd/tdpnd`.
+## Workspace status
+- Go entrypoint: `cmd/tdpnd`.
 - Optional local gRPC serve mode:
   - `go run ./cmd/tdpnd --grpc-listen 127.0.0.1:9090 --state-dir ./.tdpn-chain-state`
   - optional runtime hardening flags:
@@ -84,7 +84,7 @@ This workspace defines the initial module boundaries for TDPN's VPN-compatible b
       - `COSMOS_SETTLEMENT_ENDPOINT=http://...`
       - optional `COSMOS_SETTLEMENT_API_KEY=...`
       - optional `TDPN_CHAIN_STATE_DIR=...`
-- Placeholder app wiring: `app/scaffold.go`.
+- App wiring root: `app/scaffold.go`.
 - Phase-1 app wiring exposes module msg servers:
   - `ChainScaffold.BillingMsgServer()` (`CreateReservation`, `FinalizeSettlement`)
   - `ChainScaffold.RewardsMsgServer()` (`CreateAccrual`, `RecordDistribution`)
@@ -101,7 +101,7 @@ This workspace defines the initial module boundaries for TDPN's VPN-compatible b
 - gRPC registration/runtime contract for each module is the generated pair:
   - `RegisterMsgServer(...)` from `tx_grpc.pb.go`
   - `RegisterQueryServer(...)` from `query_grpc.pb.go`
-- Proto toolchain scaffold:
+- Proto toolchain:
   - `./scripts/gen_proto.sh --lint-only` (contract validation only)
   - `./scripts/gen_proto.sh` (lint + generate when Buf toolchain is installed)
   - `./scripts/integration_cosmos_proto_grpc_surface.sh` (CI guard for local proto-module wiring + gRPC registration surface)
@@ -145,6 +145,6 @@ This workspace defines the initial module boundaries for TDPN's VPN-compatible b
 - `vpnbilling`: `CreateReservation` and `FinalizeSettlement` execute as stateful operations over keeper storage.
 - `vpnrewards`: `CreateAccrual` and `RecordDistribution` execute as stateful operations with accrual-confirmation advancement.
 - `vpnslashing`: `SubmitEvidence` and `ApplyPenalty` execute as stateful operations with evidence-confirmation advancement.
-- `vpnsponsor`: `CreateAuthorization` and `DelegateSessionCredit` execute as stateful operations with authorization checks.
+- `vpnsponsor`: `CreateAuthorization` and `DelegateCredit` (proto msg surface: `DelegateSessionCredit`) execute as stateful operations with authorization checks.
 - Replay safety is idempotent by operation key for each module; identical replays are accepted while conflicting duplicate payloads are rejected.
 - Storage posture: in-memory default for lightweight/local runs, optional file-backed state-dir stores for persistence, and a keeper KV-adapter seam for Cosmos SDK KV integration.

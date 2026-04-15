@@ -1,6 +1,6 @@
-# Settlement Bridge Mapping (Scaffold)
+# Settlement Bridge Mapping
 
-This scaffold keeps chain responsibilities isolated from VPN dataplane runtime.
+This mapping reflects phase-1 stateful module wiring while keeping chain responsibilities isolated from VPN dataplane runtime.
 
 ## App-side to chain-side mapping
 - `pkg/settlement` reservation intents -> `x/vpnbilling` `CreditReservation`.
