@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package tdpn.vpnsponsor.v1;
+
+option go_package = "github.com/tdpn/tdpn-chain/x/vpnsponsor/types";
+
+import "tdpn/vpnsponsor/v1/types.proto";
+
+service Query {
+  rpc SponsorAuthorization(QuerySponsorAuthorizationRequest) returns (QuerySponsorAuthorizationResponse);
+  rpc DelegatedSessionCredit(QueryDelegatedSessionCreditRequest) returns (QueryDelegatedSessionCreditResponse);
+  rpc ListSponsorAuthorizations(QueryListSponsorAuthorizationsRequest) returns (QueryListSponsorAuthorizationsResponse);
+  rpc ListDelegatedSessionCredits(QueryListDelegatedSessionCreditsRequest) returns (QueryListDelegatedSessionCreditsResponse);
+}
+
+message QuerySponsorAuthorizationRequest {
+  string authorization_id = 1;
+}
+
+message QuerySponsorAuthorizationResponse {
+  SponsorAuthorization authorization = 1;
+  bool found = 2;
+}
+
+message QueryDelegatedSessionCreditRequest {
+  string reservation_id = 1;
+}
+
+message QueryDelegatedSessionCreditResponse {
+  DelegatedSessionCredit delegation = 1;
+  bool found = 2;
+}
+
+message QueryListSponsorAuthorizationsRequest {}
+
+message QueryListSponsorAuthorizationsResponse {
+  repeated SponsorAuthorization authorizations = 1;
+}
+
+message QueryListDelegatedSessionCreditsRequest {}
+
+message QueryListDelegatedSessionCreditsResponse {
+  repeated DelegatedSessionCredit delegations = 1;
+}

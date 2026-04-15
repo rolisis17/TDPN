@@ -1,27 +1,35 @@
-# Blockchain Bootstrap and Validator Selection Plan (Deferred)
+# Blockchain Bootstrap and Validator Selection Plan
 
-This document captures the planned blockchain bootstrap model while VPN production hardening remains the current priority.
+This document captures the active Cosmos-first bootstrap model running in parallel with VPN production hardening.
+
+## Canonical Posture
+
+- Status: active Cosmos-first parallel build track.
+- VPN dataplane remains independent from chain liveness.
+- Hybrid governance: objective on-chain events + policy-governed subjective cases.
+- Validator bootstrap policy is active while decentralization matures.
 
 ## Purpose
 
 - Keep VPN dataplane independent from blockchain liveness.
 - Define a small-network bootstrap policy that is operationally safe before full decentralization.
-- Predefine validator eligibility and epoch selection so implementation can start later without re-deciding core rules.
+- Predefine validator eligibility and epoch selection while chain modules and integration are implemented.
 
 ## Scope and Status
 
-- Status: design-ready, implementation deferred until VPN RC signoff.
-- In scope: validator onboarding policy, manual governance bootstrap, eligibility scoring, epoch selection, and graduation criteria.
-- Out of scope for now: on-chain contract/runtime implementation details, tokenomics constants, and chain-client code integration.
+- Status: active implementation with phased rollout (`devnet -> testnet -> production gate`).
+- In scope: validator onboarding policy, hybrid governance bootstrap, eligibility scoring, epoch selection, and graduation criteria.
+- Out of scope for now: final tokenomics constants, full permissionless onboarding, and subjective abuse automation.
 
-## Phase 0: Manual Governance Bootstrap (Small Network)
+## Phase 0: Hybrid Governance Bootstrap (Small Network)
 
-During early network growth, use explicit governance controls.
+During early network growth, use hybrid controls.
 
+- Objective, machine-verifiable events are enforced on-chain in v1.
 - One governance authority (target: migrate to multisig before public scale).
 - Manual allow/deny for validator candidacy.
 - Manual emergency ban/disable for abusive or unstable validators.
-- Manual approval for dispute outcomes that are not yet fully machine-verifiable.
+- Policy-governed approval for dispute outcomes that are not yet fully machine-verifiable.
 - Every admin action must produce an append-only audit record (actor, reason, evidence pointer, timestamp, action id).
 
 Policy intent:
@@ -35,7 +43,7 @@ Policy intent:
 - VPN forwarding and validator workloads should be resource-isolated.
 - Idle VPN servers may become validator candidates, but role changes happen only at epoch boundaries (no real-time flapping).
 
-## Validator Eligibility (Future Automated Policy)
+## Validator Eligibility Policy
 
 A node is eligible only if hard gates pass, then it is ranked by score.
 
@@ -62,7 +70,7 @@ Notes:
 - Reputation-only selection is insufficient; stake cost + age + penalties are mandatory.
 - Weight tuning is governance-controlled and versioned.
 
-## Epoch Selection Policy (Future Automated Policy)
+## Epoch Selection Policy
 
 Baseline:
 
@@ -86,17 +94,17 @@ Stability controls:
 
 ## Abuse, Slashing, and Enforcement Baseline
 
-Objective slash events (automatable later):
+Objective slash events (on-chain in v1):
 
 - Double-sign/equivocation.
 - Extended unavailability beyond policy threshold.
 - Proven protocol violation with signed evidence.
 
-Subjective abuse handling (bootstrap phase):
+Subjective abuse handling (policy-governed):
 
 - Manual review with evidence pointer.
 - Time-bounded sanctions with explicit appeal state.
-- Escalation to slash only after policy quorum (manual first, automate later).
+- Escalation to slash only after policy quorum.
 
 ## VPN Independence Requirement
 
@@ -106,16 +114,16 @@ Subjective abuse handling (bootstrap phase):
 
 ## Graduation Criteria
 
-Move from manual bootstrap to semi-automated governance only after:
+Move from bootstrap governance to broader semi-automation only after:
 
 - Sufficient independent operators and geographic/provider diversity.
 - Sanctions/slashing workflows produce consistent outcomes with low manual override rate.
 - Incident response and audit trail are routinely exercised.
 - Chain-layer outages no longer threaten VPN user experience.
 
-## L1 Go/No-Go Metrics Gate (Before Building Our Own Chain)
+## Mainnet Activation Go/No-Go Metrics Gate
 
-Default decision remains **NO-GO** until every required gate below is met for the full measurement window.
+Default decision remains **NO-GO** for production activation until every required gate below is met for the full measurement window.
 
 Measurement window:
 
@@ -140,9 +148,9 @@ Required gates:
 
 Decision policy:
 
-- Any missed gate => NO-GO (continue chain-assisted VPN mode).
-- All gates met => GO for L1 build phase kickoff.
-- If GO is achieved, run a separate testnet readiness review before any mainnet commitment.
+- Any missed gate => NO-GO (continue staged rollout and governance hardening).
+- All gates met => GO for production activation.
+- If GO is achieved, run a separate security and readiness review before broad validator expansion.
 
 Evidence artifacts to use for this gate:
 
@@ -154,12 +162,13 @@ Evidence artifacts to use for this gate:
 
 Implementation sequence after GO:
 
-1. Keep settlement on existing chain while building L1 in parallel testnet.
-2. Run dual-write accounting (existing chain + L1 testnet) until reconciliation is stable.
-3. Cut over only after dual-write parity and security review signoff.
-4. Preserve rollback path to chain-assisted mode during initial L1 rollout.
+1. Keep VPN dataplane and session control independent from chain liveness during rollout.
+2. Run dual-write accounting (settlement ledger + TDPN chain) until reconciliation is stable.
+3. Cut over production settlement authority only after dual-write parity and security signoff.
+4. Preserve rollback path to grace/deferred settlement mode during initial production rollout.
 
 ## Roadmap Integration
 
-- Source roadmap: `docs/product-roadmap.md` (Deferred Track).
+- Source roadmap: `docs/product-roadmap.md` (Parallel Track: Cosmos L1 Settlement and Governance Foundation).
+- Canonical execution plan: `docs/full-execution-plan-2026-2027.md`.
 - Related implementation guide: `docs/mvp-implementation-plan.md`.

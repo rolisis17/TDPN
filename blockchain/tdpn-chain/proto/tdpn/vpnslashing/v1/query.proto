@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package tdpn.vpnslashing.v1;
+
+option go_package = "github.com/tdpn/tdpn-chain/x/vpnslashing/types";
+
+import "tdpn/vpnslashing/v1/types.proto";
+
+service Query {
+  rpc SlashEvidence(QuerySlashEvidenceRequest) returns (QuerySlashEvidenceResponse);
+  rpc PenaltyDecision(QueryPenaltyDecisionRequest) returns (QueryPenaltyDecisionResponse);
+  rpc ListSlashEvidence(QueryListSlashEvidenceRequest) returns (QueryListSlashEvidenceResponse);
+  rpc ListPenaltyDecisions(QueryListPenaltyDecisionsRequest) returns (QueryListPenaltyDecisionsResponse);
+}
+
+message QuerySlashEvidenceRequest {
+  string evidence_id = 1;
+}
+
+message QuerySlashEvidenceResponse {
+  SlashEvidence evidence = 1;
+  bool found = 2;
+}
+
+message QueryPenaltyDecisionRequest {
+  string penalty_id = 1;
+}
+
+message QueryPenaltyDecisionResponse {
+  PenaltyDecision penalty = 1;
+  bool found = 2;
+}
+
+message QueryListSlashEvidenceRequest {}
+
+message QueryListSlashEvidenceResponse {
+  repeated SlashEvidence evidence = 1;
+}
+
+message QueryListPenaltyDecisionsRequest {}
+
+message QueryListPenaltyDecisionsResponse {
+  repeated PenaltyDecision penalties = 1;
+}

@@ -3,6 +3,11 @@
 ## Objective
 Deliver a working 2-hop decentralized privacy path with tiered token policy using one executable that supports all roles.
 
+Current implementation accelerators now in place:
+- versioned easy-mode config contract (`deploy/config/easy_mode_config_v1.conf`)
+- local daemon control API role (`go run ./cmd/node --local-api`)
+- chain-agnostic settlement scaffolding (`pkg/settlement`)
+
 ## Phase 1: Foundation (current)
 - Monorepo scaffold and unified `node` binary
 - Role-based runtime (`--client --entry --exit --directory --issuer`)
@@ -61,10 +66,15 @@ Deliver a working 2-hop decentralized privacy path with tiered token policy usin
   - exit accounting/filtering hooks
 - Preserve Go control plane for development speed.
 
-## Deferred Phase 6: Blockchain Bootstrap (After VPN RC)
-- Start with manual governance bootstrap for validator admission/sanctions while network is small.
+## Parallel Phase 6 Foundation: Cosmos-Compatible Settlement/Governance
+- Build chain-facing settlement adapters and sponsor payment-proof wiring in parallel with VPN RC hardening.
 - Keep validator role server-side only and resource-isolated from VPN dataplane.
-- Introduce scored validator eligibility + fixed-epoch set selection once operator diversity is sufficient.
 - Keep VPN operation independent from blockchain liveness (grace mode + deferred settlement path).
-- Reference design guide: `docs/blockchain-bootstrap-validator-plan.md`.
-- Gate own-L1 kickoff on the explicit 12-week go/no-go metrics table in `docs/blockchain-bootstrap-validator-plan.md`.
+- Run periodic fail-soft settlement reconciliation in issuer/exit services to drain deferred chain submissions during outages/recovery.
+- Start with hybrid governance posture: objective machine-verifiable events can be automated, subjective abuse remains policy-governed during bootstrap.
+- Include issuer admin objective slash-evidence submission path (`POST /v1/admin/slash/evidence`) for deterministic v1 slashing evidence intake.
+- Reference design guides:
+  - `docs/full-execution-plan-2026-2027.md` (canonical sequencing)
+  - `docs/blockchain-bootstrap-validator-plan.md`
+  - `blockchain/tdpn-chain/` module scaffold
+- Keep own-L1 cutover gated by the explicit 12-week go/no-go metrics table in `docs/blockchain-bootstrap-validator-plan.md`.

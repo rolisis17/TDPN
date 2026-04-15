@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package tdpn.vpnrewards.v1;
+
+option go_package = "github.com/tdpn/tdpn-chain/x/vpnrewards/types";
+
+enum ReconciliationStatus {
+  RECONCILIATION_STATUS_UNSPECIFIED = 0;
+  RECONCILIATION_STATUS_PENDING = 1;
+  RECONCILIATION_STATUS_SUBMITTED = 2;
+  RECONCILIATION_STATUS_CONFIRMED = 3;
+  RECONCILIATION_STATUS_FAILED = 4;
+}
+
+// RewardAccrual links settled usage to provider rewards.
+message RewardAccrual {
+  string accrual_id = 1;
+  string session_id = 2;
+  string provider_id = 3;
+  string asset_denom = 4;
+  int64 amount = 5;
+  int64 accrued_at_unix = 6;
+  ReconciliationStatus operation_state = 7;
+}
+
+// DistributionRecord records payout references for accrued rewards.
+message DistributionRecord {
+  string distribution_id = 1;
+  string accrual_id = 2;
+  string payout_ref = 3;
+  int64 distributed_at = 4;
+  ReconciliationStatus status = 5;
+}

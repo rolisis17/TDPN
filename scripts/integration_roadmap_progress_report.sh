@@ -277,7 +277,9 @@ if ! jq -e '
   and (.vpn_track.pending_real_host_checks | length) == 2
   and .vpn_track.pending_real_host_checks[0].check_id == "machine_c_vpn_smoke"
   and .vpn_track.pending_real_host_checks[1].check_id == "three_machine_prod_signoff"
-  and .blockchain_track.status == "deferred"
+  and .blockchain_track.status == "parallel-cosmos-build"
+  and .blockchain_track.policy == "canonical execution plan: docs/full-execution-plan-2026-2027.md"
+  and (.blockchain_track.recommendation | contains("Cosmos-first blockchain track"))
   and (.next_actions | length) >= 1
   and (.next_actions[0].id // "") == "machine_c_vpn_smoke"
   and (.next_actions[1].id // "") == "profile_default_gate"

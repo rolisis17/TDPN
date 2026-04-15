@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package tdpn.vpnbilling.v1;
+
+option go_package = "github.com/tdpn/tdpn-chain/x/vpnbilling/types";
+
+enum ReconciliationStatus {
+  RECONCILIATION_STATUS_UNSPECIFIED = 0;
+  RECONCILIATION_STATUS_PENDING = 1;
+  RECONCILIATION_STATUS_SUBMITTED = 2;
+  RECONCILIATION_STATUS_CONFIRMED = 3;
+  RECONCILIATION_STATUS_FAILED = 4;
+}
+
+// CreditReservation captures sponsor or user prepaid credits reserved for a session.
+message CreditReservation {
+  string reservation_id = 1;
+  string sponsor_id = 2;
+  string session_id = 3;
+  string asset_denom = 4;
+  int64 amount = 5;
+  ReconciliationStatus status = 6;
+  int64 created_at_unix = 7;
+}
+
+// SettlementRecord finalizes billable usage for a session.
+message SettlementRecord {
+  string settlement_id = 1;
+  string reservation_id = 2;
+  string session_id = 3;
+  int64 billed_amount = 4;
+  int64 usage_bytes = 5;
+  string asset_denom = 6;
+  int64 settled_at_unix = 7;
+  ReconciliationStatus operation_state = 8;
+}

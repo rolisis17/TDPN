@@ -16,6 +16,7 @@ Usage:
     [--manual-validation-report-md PATH] \
     [--profile-compare-signoff-summary-json PATH] \
     [--single-machine-summary-json PATH] \
+    [--vpn-rc-resilience-summary-json PATH] \
     [--summary-json PATH] \
     [--report-md PATH] \
     [--print-report [0|1]] \
@@ -27,7 +28,7 @@ Purpose:
 
 Notes:
   - This does not replace real machine-C and true 3-machine production signoff.
-  - Blockchain/payment track is intentionally reported as deferred per VPN-first roadmap.
+  - Blockchain/payment track is reported as a Cosmos-first parallel track with VPN dataplane independence.
 USAGE
 }
 
@@ -130,6 +131,65 @@ single_machine_summary_usable_01() {
   fi
 }
 
+json_bool_value_or_empty() {
+  local path="$1"
+  local jq_expr="$2"
+  local value=""
+  if [[ ! -f "$path" ]]; then
+    printf '%s' ""
+    return
+  fi
+  value="$(jq -r "$jq_expr" "$path" 2>/dev/null || true)"
+  case "$value" in
+    true|false)
+      printf '%s' "$value"
+      ;;
+    *)
+      printf '%s' ""
+      ;;
+  esac
+}
+
+resilience_summary_usable_01() {
+  local path="$1"
+  if [[ ! -f "$path" ]]; then
+    printf '0'
+    return
+  fi
+  if jq -e 'type == "object"' "$path" >/dev/null 2>&1; then
+    printf '1'
+  else
+    printf '0'
+  fi
+}
+
+find_latest_resilience_summary_json() {
+  local logs_root="$ROOT_DIR/.easy-node-logs"
+  local candidate=""
+  if [[ ! -d "$logs_root" ]]; then
+    printf '%s' ""
+    return
+  fi
+  candidate="$(find "$logs_root" -type f -name 'vpn_rc_resilience_path_summary.json' 2>/dev/null | sort | tail -n 1 || true)"
+  printf '%s' "$candidate"
+}
+
+resolve_resilience_bool_with_fallback() {
+  local path="$1"
+  local explicit_expr="$2"
+  local fallback_expr="$3"
+  local value=""
+  value="$(json_bool_value_or_empty "$path" "$explicit_expr")"
+  if [[ -z "$value" && -n "$fallback_expr" ]]; then
+    value="$(json_bool_value_or_empty "$path" "$fallback_expr")"
+  fi
+  if [[ -n "$value" ]]; then
+    printf '%s' "$value"
+  else
+    printf '%s' "null"
+  fi
+}
+
 single_machine_refresh_transient_non_blocking_01() {
   local refresh_log="$1"
   local summary_path="$2"
@@ -209,6 +269,7 @@ manual_validation_summary_json="$ROOT_DIR/.easy-node-logs/manual_validation_read
 manual_validation_report_md="$ROOT_DIR/.easy-node-logs/manual_validation_readiness_report.md"
 profile_compare_signoff_summary_json="$ROOT_DIR/.easy-node-logs/profile_compare_campaign_signoff_summary.json"
 single_machine_summary_json="$ROOT_DIR/.easy-node-logs/single_machine_prod_readiness_latest.json"
+vpn_rc_resilience_summary_json="${ROADMAP_PROGRESS_VPN_RC_RESILIENCE_SUMMARY_JSON:-}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -252,6 +313,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --single-machine-summary-json)
       single_machine_summary_json="$(abs_path "${2:-}")"
+      shift 2
+      ;;
+    --vpn-rc-resilience-summary-json)
+      vpn_rc_resilience_summary_json="$(abs_path "${2:-}")"
       shift 2
       ;;
     --summary-json)
@@ -477,6 +542,65 @@ if [[ "$(manual_validation_summary_usable_01 "$manual_validation_summary_json")"
   exit 1
 fi
 
+if [[ -z "$vpn_rc_resilience_summary_json" ]]; then
+  vpn_rc_resilience_summary_json="$(find_latest_resilience_summary_json)"
+else
+  vpn_rc_resilience_summary_json="$(abs_path "$vpn_rc_resilience_summary_json")"
+fi
+
+resilience_handoff_available_json="false"
+resilience_handoff_source_summary_json=""
+resilience_profile_matrix_stable_json="null"
+resilience_peer_loss_recovery_ok_json="null"
+resilience_session_churn_guard_ok_json="null"
+if [[ -n "$vpn_rc_resilience_summary_json" ]] && [[ "$(resilience_summary_usable_01 "$vpn_rc_resilience_summary_json")" == "1" ]]; then
+  resilience_handoff_available_json="true"
+  resilience_handoff_source_summary_json="$vpn_rc_resilience_summary_json"
+  resilience_profile_matrix_stable_json="$(resolve_resilience_bool_with_fallback \
+    "$vpn_rc_resilience_summary_json" \
+    'if (.profile_matrix_stable | type) == "boolean" then .profile_matrix_stable
+      elif (.summary.profile_matrix_stable | type) == "boolean" then .summary.profile_matrix_stable
+      elif (.handoff.profile_matrix_stable | type) == "boolean" then .handoff.profile_matrix_stable
+      elif (.signals.profile_matrix_stable | type) == "boolean" then .signals.profile_matrix_stable
+      elif (.resilience_handoff.profile_matrix_stable | type) == "boolean" then .resilience_handoff.profile_matrix_stable
+      elif (.vpn_track.resilience_handoff.profile_matrix_stable | type) == "boolean" then .vpn_track.resilience_handoff.profile_matrix_stable
+      else empty end' \
+    '((.steps.three_machine_docker_profile_matrix.status // "") | ascii_downcase) as $s
+      | if $s == "pass" then true
+        elif $s == "fail" then false
+        else (
+          (.steps.three_machine_docker_profile_matrix.summary.profiles_fail // null) as $profiles_fail
+          | (.steps.three_machine_docker_profile_matrix.summary.profiles_total // null) as $profiles_total
+          | if (($profiles_fail | type) == "number") and (($profiles_total | type) == "number") and ($profiles_total > 0) then ($profiles_fail == 0) else empty end
+        ) end')"
+  resilience_peer_loss_recovery_ok_json="$(resolve_resilience_bool_with_fallback \
+    "$vpn_rc_resilience_summary_json" \
+    'if (.peer_loss_recovery_ok | type) == "boolean" then .peer_loss_recovery_ok
+      elif (.summary.peer_loss_recovery_ok | type) == "boolean" then .summary.peer_loss_recovery_ok
+      elif (.handoff.peer_loss_recovery_ok | type) == "boolean" then .handoff.peer_loss_recovery_ok
+      elif (.signals.peer_loss_recovery_ok | type) == "boolean" then .signals.peer_loss_recovery_ok
+      elif (.resilience_handoff.peer_loss_recovery_ok | type) == "boolean" then .resilience_handoff.peer_loss_recovery_ok
+      elif (.vpn_track.resilience_handoff.peer_loss_recovery_ok | type) == "boolean" then .vpn_track.resilience_handoff.peer_loss_recovery_ok
+      else empty end' \
+    '((.steps.vpn_rc_matrix_path.status // "") | ascii_downcase) as $s
+      | if $s == "pass" then true
+        elif $s == "fail" then false
+        else empty end')"
+  resilience_session_churn_guard_ok_json="$(resolve_resilience_bool_with_fallback \
+    "$vpn_rc_resilience_summary_json" \
+    'if (.session_churn_guard_ok | type) == "boolean" then .session_churn_guard_ok
+      elif (.summary.session_churn_guard_ok | type) == "boolean" then .summary.session_churn_guard_ok
+      elif (.handoff.session_churn_guard_ok | type) == "boolean" then .handoff.session_churn_guard_ok
+      elif (.signals.session_churn_guard_ok | type) == "boolean" then .signals.session_churn_guard_ok
+      elif (.resilience_handoff.session_churn_guard_ok | type) == "boolean" then .resilience_handoff.session_churn_guard_ok
+      elif (.vpn_track.resilience_handoff.session_churn_guard_ok | type) == "boolean" then .vpn_track.resilience_handoff.session_churn_guard_ok
+      else empty end' \
+    '((.steps.vpn_rc_matrix_path.status // "") | ascii_downcase) as $s
+      | if $s == "pass" then true
+        elif $s == "fail" then false
+        else empty end')"
+fi
+
 readiness_status="$(jq -r '.report.readiness_status // "UNKNOWN"' "$manual_validation_summary_json")"
 roadmap_stage="$(jq -r '.summary.roadmap_stage // "UNKNOWN"' "$manual_validation_summary_json")"
 single_machine_ready_json="$(jq -r '.summary.single_machine_ready // false' "$manual_validation_summary_json")"
@@ -641,9 +765,9 @@ next_actions_json="$(jq -c --arg next_action_check_id "$next_action_check_id" --
   | unique_commands_preserve_order
 ' "$manual_validation_summary_json")"
 
-blockchain_track_status="deferred"
-blockchain_track_policy="VPN-first roadmap"
-blockchain_track_recommendation="Keep blockchain off critical VPN dataplane path this week; evaluate Solana sidecar settlement after VPN production signoff."
+blockchain_track_status="parallel-cosmos-build"
+blockchain_track_policy="canonical execution plan: docs/full-execution-plan-2026-2027.md"
+blockchain_track_recommendation="Cosmos-first blockchain track: keep VPN dataplane independent, build settlement/reward/slash sponsor control-plane in parallel, keep state-dir-capable file-backed module stores available in tdpnd runtime, and avoid sidecar-chain drift."
 if [[ ! -f "$product_roadmap_doc" ]]; then
   blockchain_track_policy="roadmap file missing"
 fi
@@ -680,6 +804,11 @@ summary_payload="$(jq -n \
   --argjson real_host_gate_ready "$real_host_gate_ready_json" \
   --argjson machine_c_smoke_ready "$machine_c_smoke_ready_json" \
   --argjson vpn_rc_done_for_phase "$vpn_rc_done_for_phase" \
+  --argjson resilience_handoff_available "$resilience_handoff_available_json" \
+  --arg resilience_handoff_source_summary_json "$resilience_handoff_source_summary_json" \
+  --argjson resilience_profile_matrix_stable "$resilience_profile_matrix_stable_json" \
+  --argjson resilience_peer_loss_recovery_ok "$resilience_peer_loss_recovery_ok_json" \
+  --argjson resilience_session_churn_guard_ok "$resilience_session_churn_guard_ok_json" \
   --arg profile_default_gate_status "$profile_default_gate_status" \
   --arg docker_rehearsal_status "$docker_rehearsal_status" \
   --arg real_wg_privileged_status "$real_wg_privileged_status" \
@@ -731,6 +860,13 @@ summary_payload="$(jq -n \
       machine_c_smoke_ready: $machine_c_smoke_ready,
       real_host_gate_ready: $real_host_gate_ready,
       vpn_rc_done_for_phase: $vpn_rc_done_for_phase,
+      resilience_handoff: {
+        available: $resilience_handoff_available,
+        source_summary_json: (if $resilience_handoff_source_summary_json == "" then null else $resilience_handoff_source_summary_json end),
+        profile_matrix_stable: $resilience_profile_matrix_stable,
+        peer_loss_recovery_ok: $resilience_peer_loss_recovery_ok,
+        session_churn_guard_ok: $resilience_session_churn_guard_ok
+      },
       counts: {
         total_checks: $total_checks,
         pass_checks: $pass_checks,
@@ -788,6 +924,7 @@ summary_payload="$(jq -n \
       manual_validation_summary_json: $manual_validation_summary_json,
       manual_validation_report_md: $manual_validation_report_md,
       single_machine_summary_json: $single_machine_summary_json,
+      vpn_rc_resilience_summary_json: (if $resilience_handoff_source_summary_json == "" then null else $resilience_handoff_source_summary_json end),
       summary_json: $summary_json_path,
       report_md: $report_md_path
     }
@@ -824,6 +961,11 @@ cat >"$report_tmp" <<EOF_MD
 - Machine-C smoke ready: $(jq -r '.vpn_track.machine_c_smoke_ready' "$summary_json")
 - Real-host gate ready: $(jq -r '.vpn_track.real_host_gate_ready' "$summary_json")
 - VPN RC done for phase: \`$(jq -r '.vpn_track.vpn_rc_done_for_phase' "$summary_json")\`
+- Resilience handoff available: $(jq -r '.vpn_track.resilience_handoff.available' "$summary_json")
+- Resilience handoff source: $(jq -r '.vpn_track.resilience_handoff.source_summary_json // "none"' "$summary_json")
+- profile_matrix_stable: $(jq -r '.vpn_track.resilience_handoff.profile_matrix_stable // "null"' "$summary_json")
+- peer_loss_recovery_ok: $(jq -r '.vpn_track.resilience_handoff.peer_loss_recovery_ok // "null"' "$summary_json")
+- session_churn_guard_ok: $(jq -r '.vpn_track.resilience_handoff.session_churn_guard_ok // "null"' "$summary_json")
 - Checks: total=$(jq -r '.vpn_track.counts.total_checks' "$summary_json"), pass=$(jq -r '.vpn_track.counts.pass_checks' "$summary_json"), warn=$(jq -r '.vpn_track.counts.warn_checks' "$summary_json"), fail=$(jq -r '.vpn_track.counts.fail_checks' "$summary_json"), pending=$(jq -r '.vpn_track.counts.pending_checks' "$summary_json")
 - Blocking checks: $(jq -r '(.vpn_track.blocking_check_ids // []) | if length == 0 then "none" else join(",") end' "$summary_json")
 - Pending real-host checks: $(jq -r '(.vpn_track.pending_real_host_checks // []) | if length == 0 then "none" else map(.check_id) | join(",") end' "$summary_json")
@@ -860,6 +1002,7 @@ $next_actions_md
 - Manual validation summary: $(jq -r '.artifacts.manual_validation_summary_json' "$summary_json")
 - Manual validation report: $(jq -r '.artifacts.manual_validation_report_md' "$summary_json")
 - Single-machine summary: $(jq -r '.artifacts.single_machine_summary_json' "$summary_json")
+- VPN RC resilience summary: $(jq -r '.artifacts.vpn_rc_resilience_summary_json // "none"' "$summary_json")
 EOF_MD
 mv -f "$report_tmp" "$report_md"
 
@@ -873,6 +1016,8 @@ echo "[roadmap-progress-report] single_machine_refresh_status=$single_machine_re
 echo "[roadmap-progress-report] single_machine_refresh_non_blocking_transient=$single_machine_refresh_non_blocking_transient reason=$single_machine_refresh_non_blocking_reason"
 echo "[roadmap-progress-report] manual_validation_summary_valid_after_run=$manual_summary_valid_after_run restored_from_snapshot=$manual_summary_restored"
 echo "[roadmap-progress-report] single_machine_summary_valid_after_run=$single_machine_summary_valid_after_run restored_from_snapshot=$single_machine_summary_restored"
+echo "[roadmap-progress-report] resilience_handoff_available=$resilience_handoff_available_json source_summary_json=${resilience_handoff_source_summary_json:-}"
+echo "[roadmap-progress-report] profile_matrix_stable=$resilience_profile_matrix_stable_json peer_loss_recovery_ok=$resilience_peer_loss_recovery_ok_json session_churn_guard_ok=$resilience_session_churn_guard_ok_json"
 echo "[roadmap-progress-report] summary_json=$summary_json"
 echo "[roadmap-progress-report] report_md=$report_md"
 

@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package tdpn.vpnslashing.v1;
+
+option go_package = "github.com/tdpn/tdpn-chain/x/vpnslashing/types";
+
+enum ReconciliationStatus {
+  RECONCILIATION_STATUS_UNSPECIFIED = 0;
+  RECONCILIATION_STATUS_PENDING = 1;
+  RECONCILIATION_STATUS_SUBMITTED = 2;
+  RECONCILIATION_STATUS_CONFIRMED = 3;
+  RECONCILIATION_STATUS_FAILED = 4;
+}
+
+// SlashEvidence represents objective evidence submitted for deterministic slashing.
+message SlashEvidence {
+  string evidence_id = 1;
+  string session_id = 2;
+  string provider_id = 3;
+  string kind = 4;
+  string proof_hash = 5;
+  int64 submitted_at_unix = 6;
+}
+
+// PenaltyDecision captures slash/jail intent generated from verified evidence.
+message PenaltyDecision {
+  string penalty_id = 1;
+  string evidence_id = 2;
+  uint32 slash_basis_point = 3;
+  bool jailed = 4;
+  int64 applied_at_unix = 5;
+  ReconciliationStatus status = 6;
+}

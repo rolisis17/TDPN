@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+package tdpn.vpnsponsor.v1;
+
+option go_package = "github.com/tdpn/tdpn-chain/x/vpnsponsor/types";
+
+enum ReconciliationStatus {
+  RECONCILIATION_STATUS_UNSPECIFIED = 0;
+  RECONCILIATION_STATUS_PENDING = 1;
+  RECONCILIATION_STATUS_SUBMITTED = 2;
+  RECONCILIATION_STATUS_CONFIRMED = 3;
+  RECONCILIATION_STATUS_FAILED = 4;
+}
+
+// SponsorAuthorization grants an app permission to spend sponsor credits.
+message SponsorAuthorization {
+  string authorization_id = 1;
+  string sponsor_id = 2;
+  string app_id = 3;
+  int64 max_credits = 4;
+  int64 expires_at_unix = 5;
+}
+
+// DelegatedSessionCredit links sponsor authorization to a specific user session.
+message DelegatedSessionCredit {
+  string reservation_id = 1;
+  string sponsor_id = 2;
+  string app_id = 3;
+  string end_user_id = 4;
+  string session_id = 5;
+  int64 credits = 6;
+  ReconciliationStatus status = 7;
+  string authorization_id = 8;
+}

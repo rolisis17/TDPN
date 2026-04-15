@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package tdpn.vpnsponsor.v1;
+
+option go_package = "github.com/tdpn/tdpn-chain/x/vpnsponsor/types";
+
+import "tdpn/vpnsponsor/v1/types.proto";
+
+service Msg {
+  rpc CreateAuthorization(MsgCreateAuthorizationRequest) returns (MsgCreateAuthorizationResponse);
+  rpc DelegateSessionCredit(MsgDelegateSessionCreditRequest) returns (MsgDelegateSessionCreditResponse);
+}
+
+message MsgCreateAuthorizationRequest {
+  SponsorAuthorization authorization = 1;
+}
+
+message MsgCreateAuthorizationResponse {
+  SponsorAuthorization authorization = 1;
+}
+
+message MsgDelegateSessionCreditRequest {
+  DelegatedSessionCredit delegation = 1;
+}
+
+message MsgDelegateSessionCreditResponse {
+  DelegatedSessionCredit delegation = 1;
+}

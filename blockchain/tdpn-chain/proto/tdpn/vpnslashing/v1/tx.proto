@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package tdpn.vpnslashing.v1;
+
+option go_package = "github.com/tdpn/tdpn-chain/x/vpnslashing/types";
+
+import "tdpn/vpnslashing/v1/types.proto";
+
+service Msg {
+  rpc SubmitEvidence(MsgSubmitEvidenceRequest) returns (MsgSubmitEvidenceResponse);
+  rpc RecordPenalty(MsgRecordPenaltyRequest) returns (MsgRecordPenaltyResponse);
+}
+
+message MsgSubmitEvidenceRequest {
+  SlashEvidence evidence = 1;
+}
+
+message MsgSubmitEvidenceResponse {
+  SlashEvidence evidence = 1;
+}
+
+message MsgRecordPenaltyRequest {
+  PenaltyDecision penalty = 1;
+}
+
+message MsgRecordPenaltyResponse {
+  PenaltyDecision penalty = 1;
+}
