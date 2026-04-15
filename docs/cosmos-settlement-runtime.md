@@ -110,6 +110,9 @@ Exit settlement status endpoint:
 - Periodic reconcile loops in issuer/exit call settlement `Reconcile(...)`.
 - Successful replay marks operations `submitted` and clears deferred backlog.
 - Failures remain deferred and are retried in future cycles.
+- Cosmos adapter retry policy:
+  - retryable: transport/network errors, HTTP `408`, `425`, `429`, and `5xx`.
+  - non-retryable: other HTTP `4xx` validation/auth-style failures (no retry loop).
 
 ## CI Acceptance Coverage
 
