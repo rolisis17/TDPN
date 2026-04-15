@@ -44,6 +44,8 @@ FALLBACK_CI_OLD_DIR="$FALLBACK_REPORTS_DIR/ci_phase6_cosmos_l1_build_testnet_202
 FALLBACK_CI_NEW_DIR="$FALLBACK_REPORTS_DIR/ci_phase6_cosmos_l1_build_testnet_20260415_170000"
 FALLBACK_CONTRACTS_OLD_DIR="$FALLBACK_REPORTS_DIR/ci_phase6_cosmos_l1_contracts_20260415_170500"
 FALLBACK_CONTRACTS_NEW_DIR="$FALLBACK_REPORTS_DIR/ci_phase6_cosmos_l1_contracts_20260415_170700"
+FALLBACK_SUITE_OLD_DIR="$FALLBACK_REPORTS_DIR/phase6_cosmos_l1_build_testnet_suite_20260415_170100"
+FALLBACK_SUITE_NEW_DIR="$FALLBACK_REPORTS_DIR/phase6_cosmos_l1_build_testnet_suite_20260415_170300"
 
 cat >"$PASS_CI" <<'EOF_PASS_CI'
 {
@@ -215,7 +217,7 @@ if ! jq -e '
 fi
 
 mkdir -p "$FALLBACK_REPORTS_DIR"
-mkdir -p "$FALLBACK_CI_OLD_DIR" "$FALLBACK_CI_NEW_DIR" "$FALLBACK_CONTRACTS_OLD_DIR" "$FALLBACK_CONTRACTS_NEW_DIR"
+mkdir -p "$FALLBACK_CI_OLD_DIR" "$FALLBACK_CI_NEW_DIR" "$FALLBACK_CONTRACTS_OLD_DIR" "$FALLBACK_CONTRACTS_NEW_DIR" "$FALLBACK_SUITE_OLD_DIR" "$FALLBACK_SUITE_NEW_DIR"
 
 cat >"$FALLBACK_CI_OLD_DIR/ci_phase6_cosmos_l1_build_testnet_summary.json" <<'EOF_FALLBACK_CI_OLD'
 {
@@ -269,7 +271,7 @@ cat >"$FALLBACK_CONTRACTS_NEW_DIR/ci_phase6_cosmos_l1_contracts_summary.json" <<
 }
 EOF_FALLBACK_CONTRACTS_NEW
 
-cat >"$FALLBACK_REPORTS_DIR/phase6_cosmos_l1_build_testnet_suite_summary.json" <<'EOF_FALLBACK_SUITE'
+cat >"$FALLBACK_SUITE_OLD_DIR/phase6_cosmos_l1_build_testnet_suite_summary.json" <<'EOF_FALLBACK_SUITE_OLD'
 {
   "version": 1,
   "schema": {
@@ -280,7 +282,20 @@ cat >"$FALLBACK_REPORTS_DIR/phase6_cosmos_l1_build_testnet_suite_summary.json" <
   "status": "pass",
   "rc": 0
 }
-EOF_FALLBACK_SUITE
+EOF_FALLBACK_SUITE_OLD
+
+cat >"$FALLBACK_SUITE_NEW_DIR/phase6_cosmos_l1_build_testnet_suite_summary.json" <<'EOF_FALLBACK_SUITE_NEW'
+{
+  "version": 1,
+  "schema": {
+    "id": "phase6_cosmos_l1_build_testnet_suite_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "pass",
+  "rc": 0
+}
+EOF_FALLBACK_SUITE_NEW
 
 echo "[phase6-cosmos-l1-summary-report] fallback discovery path"
 "$SCRIPT_UNDER_TEST" \
@@ -292,6 +307,7 @@ echo "[phase6-cosmos-l1-summary-report] fallback discovery path"
 if ! jq -e \
   --arg expected_ci_path "$FALLBACK_CI_NEW_DIR/ci_phase6_cosmos_l1_build_testnet_summary.json" \
   --arg expected_contracts_path "$FALLBACK_CONTRACTS_NEW_DIR/ci_phase6_cosmos_l1_contracts_summary.json" \
+  --arg expected_suite_path "$FALLBACK_SUITE_NEW_DIR/phase6_cosmos_l1_build_testnet_suite_summary.json" \
   '
   .status == "pass"
   and .rc == 0
@@ -305,6 +321,7 @@ if ! jq -e \
   and .summaries.build_testnet_suite.status == "pass"
   and .summaries.build_testnet_ci.path == $expected_ci_path
   and .summaries.contracts_ci.path == $expected_contracts_path
+  and .summaries.build_testnet_suite.path == $expected_suite_path
 ' "$FALLBACK_REPORT_JSON" >/dev/null; then
   echo "phase6 summary report fallback-discovery contract mismatch"
   cat "$FALLBACK_REPORT_JSON"

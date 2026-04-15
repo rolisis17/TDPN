@@ -426,8 +426,40 @@ if ! rg -Fq "ci_phase6_cosmos_l1_contracts_summary" "$phase6_contracts_ci_script
   echo "phase6 contracts ci script must emit phase6 contracts summary schema id"
   exit 1
 fi
+if ! rg -Fq "CI_PHASE6_COSMOS_L1_CONTRACTS_CANONICAL_SUMMARY_JSON" "$phase6_contracts_ci_script"; then
+  echo "phase6 contracts ci script must expose canonical summary artifact override env"
+  exit 1
+fi
+if ! rg -Fq "canonical_summary_json" "$phase6_contracts_ci_script"; then
+  echo "phase6 contracts ci script must emit canonical summary artifact metadata/logging"
+  exit 1
+fi
 if ! rg -Fq "ci_phase6_cosmos_l1_contracts.sh" "$phase6_contracts_integration_script"; then
   echo "phase6 contracts ci integration script must execute phase6 contracts ci script"
+  exit 1
+fi
+if ! rg -Fq "canonical_summary_json" "$phase6_contracts_integration_script"; then
+  echo "phase6 contracts ci integration script must validate canonical summary artifact wiring"
+  exit 1
+fi
+if ! rg -Fq "cmp -s" "$phase6_contracts_integration_script"; then
+  echo "phase6 contracts ci integration script must validate canonical and run summary content parity"
+  exit 1
+fi
+if ! rg -Fq "CI_PHASE6_COSMOS_L1_BUILD_TESTNET_CANONICAL_SUMMARY_JSON" "$phase6_ci_script"; then
+  echo "phase6 ci script must expose canonical summary artifact override env"
+  exit 1
+fi
+if ! rg -Fq "canonical_summary_json" "$phase6_ci_script"; then
+  echo "phase6 ci script must emit canonical summary artifact metadata/logging"
+  exit 1
+fi
+if ! rg -Fq "canonical_summary_json" "$phase6_integration_script"; then
+  echo "phase6 ci integration script must validate canonical summary artifact wiring"
+  exit 1
+fi
+if ! rg -Fq "cmp -s" "$phase6_integration_script"; then
+  echo "phase6 ci integration script must validate canonical and run summary content parity"
   exit 1
 fi
 if ! rg -Fq "ci_phase6_cosmos_l1_build_testnet.sh" "$phase6_run_script"; then
@@ -468,6 +500,14 @@ if ! rg -Fq "phase6_cosmos_l1_build_testnet_handoff_run.sh" "$phase6_suite_scrip
 fi
 if ! rg -Fq "phase6_cosmos_l1_build_testnet_suite_summary" "$phase6_suite_script"; then
   echo "phase6 suite wrapper must emit phase6 suite summary schema id"
+  exit 1
+fi
+if ! rg -Fq "PHASE6_COSMOS_L1_BUILD_TESTNET_SUITE_CANONICAL_SUMMARY_JSON" "$phase6_suite_script"; then
+  echo "phase6 suite wrapper must expose canonical summary artifact override env"
+  exit 1
+fi
+if ! rg -Fq "canonical_summary_json" "$phase6_suite_script"; then
+  echo "phase6 suite wrapper must emit canonical summary artifact metadata/logging"
   exit 1
 fi
 if ! rg -Fq "phase6_cosmos_l1_build_testnet_run.sh" "$phase6_handoff_run_script"; then
@@ -519,6 +559,14 @@ if ! rg -Fq "fail-closed child summary contract path" "$phase6_suite_integration
   echo "phase6 suite integration must validate fail-closed child contract behavior"
   exit 1
 fi
+if ! rg -Fq "canonical_summary_json" "$phase6_suite_integration_script"; then
+  echo "phase6 suite integration must validate canonical summary artifact wiring"
+  exit 1
+fi
+if ! rg -Fq "cmp -s" "$phase6_suite_integration_script"; then
+  echo "phase6 suite integration must validate canonical and run summary content parity"
+  exit 1
+fi
 if ! rg -Fq "run failure still runs handoff check" "$phase6_handoff_run_integration_script"; then
   echo "phase6 handoff-run integration must validate run-failure propagation behavior"
   exit 1
@@ -552,6 +600,10 @@ if ! rg -Fq "phase6_cosmos_l1_build_testnet_suite_summary.json" "$phase6_summary
   echo "phase6 summary report helper must probe suite summary artifact"
   exit 1
 fi
+if ! rg -Fq "phase6_cosmos_l1_build_testnet_suite_" "$phase6_summary_report_script"; then
+  echo "phase6 summary report helper must support suite timestamped fallback discovery"
+  exit 1
+fi
 if ! rg -Fq "phase6_cosmos_l1_summary_report.sh" "$phase6_summary_report_integration_script"; then
   echo "phase6 summary report integration script must execute summary report helper"
   exit 1
@@ -566,6 +618,10 @@ if ! rg -Fq "fail path" "$phase6_summary_report_integration_script"; then
 fi
 if ! rg -Fq "missing-input path" "$phase6_summary_report_integration_script"; then
   echo "phase6 summary report integration script must validate missing-input path"
+  exit 1
+fi
+if ! rg -Fq "expected_suite_path" "$phase6_summary_report_integration_script"; then
+  echo "phase6 summary report integration script must validate suite fallback discovery path"
   exit 1
 fi
 

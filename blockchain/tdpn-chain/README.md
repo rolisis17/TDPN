@@ -32,6 +32,8 @@ This workspace defines the initial module boundaries for TDPN's VPN-compatible b
 - Local acceptance gate for settlement control-plane behavior: `scripts/integration_cosmos_settlement_acceptance_paths.sh`.
 - Phase5 CI includes `settlement_adapter_roundtrip` as a first-class stage running `scripts/integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh`.
 - Phase6 summary helper/report: `scripts/phase6_cosmos_l1_summary_report.sh` (integration contract: `scripts/integration_phase6_cosmos_l1_summary_report.sh`).
+- Phase6 build/testnet/contracts/suite wrappers emit canonical summary artifacts in `.easy-node-logs` (`phase6_cosmos_l1_build_testnet_ci_summary.json`, `phase6_cosmos_l1_contracts_summary.json`, `phase6_cosmos_l1_build_testnet_suite_summary.json`) in addition to per-run reports.
+- Phase6 summary helper fallback discovery can resolve latest timestamped CI/contracts/suite summaries when canonical/default files are not present.
 
 ## Scaffold status
 - Go scaffold entrypoint: `cmd/tdpnd`.

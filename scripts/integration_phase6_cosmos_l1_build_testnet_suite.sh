@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-for cmd in bash jq mktemp chmod grep cat sed wc; do
+for cmd in bash jq mktemp chmod grep cat sed wc cmp; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "missing required command: $cmd"
     exit 2
@@ -30,6 +30,10 @@ PASS_SUMMARY="$TMP_DIR/suite_pass_summary.json"
 DRY_RUN_SUMMARY="$TMP_DIR/suite_dry_run_summary.json"
 RUN_FAIL_SUMMARY="$TMP_DIR/suite_run_fail_summary.json"
 CONTRACT_FAIL_SUMMARY="$TMP_DIR/suite_contract_fail_summary.json"
+PASS_CANONICAL_SUMMARY="$TMP_DIR/canonical_suite_pass_summary.json"
+DRY_RUN_CANONICAL_SUMMARY="$TMP_DIR/canonical_suite_dry_run_summary.json"
+RUN_FAIL_CANONICAL_SUMMARY="$TMP_DIR/canonical_suite_run_fail_summary.json"
+CONTRACT_FAIL_CANONICAL_SUMMARY="$TMP_DIR/canonical_suite_contract_fail_summary.json"
 
 FAKE_CI="$TMP_DIR/fake_ci_phase6.sh"
 cat >"$FAKE_CI" <<'EOF_FAKE_CI'
@@ -237,6 +241,7 @@ PHASE6_SUITE_CAPTURE_FILE="$CAPTURE" \
 PHASE6_COSMOS_L1_BUILD_TESTNET_SUITE_CI_SCRIPT="$FAKE_CI" \
 PHASE6_COSMOS_L1_BUILD_TESTNET_SUITE_RUN_SCRIPT="$FAKE_RUN" \
 PHASE6_COSMOS_L1_BUILD_TESTNET_SUITE_HANDOFF_RUN_SCRIPT="$FAKE_HANDOFF_RUN" \
+PHASE6_COSMOS_L1_BUILD_TESTNET_SUITE_CANONICAL_SUMMARY_JSON="$PASS_CANONICAL_SUMMARY" \
 bash "$SUITE_RUNNER" \
   --reports-dir "$TMP_DIR/reports_pass" \
   --ci-summary-json "$TMP_DIR/ci_pass.json" \
@@ -273,12 +278,28 @@ if [[ "$handoff_run_line" != *"--run-phase6-cosmos-l1-build-testnet-run 0"* ]]; 
   echo "$handoff_run_line"
   exit 1
 fi
+if [[ ! -f "$PASS_CANONICAL_SUMMARY" ]]; then
+  echo "missing pass-path canonical summary file: $PASS_CANONICAL_SUMMARY"
+  exit 1
+fi
+if ! cmp -s "$PASS_SUMMARY" "$PASS_CANONICAL_SUMMARY"; then
+  echo "pass-path canonical summary content mismatch"
+  cat "$PASS_SUMMARY"
+  cat "$PASS_CANONICAL_SUMMARY"
+  exit 1
+fi
+if ! grep -Fq -- "[phase6-cosmos-l1-build-testnet-suite] canonical_summary_json=$PASS_CANONICAL_SUMMARY" "$PASS_LOG"; then
+  echo "pass-path log missing canonical summary line"
+  cat "$PASS_LOG"
+  exit 1
+fi
 
-if ! jq -e '
+if ! jq -e --arg canonical "$PASS_CANONICAL_SUMMARY" '
   .version == 1
   and .schema.id == "phase6_cosmos_l1_build_testnet_suite_summary"
   and .status == "pass"
   and .rc == 0
+  and .artifacts.canonical_summary_json == $canonical
   and .inputs.dry_run == false
   and .steps.ci_phase6_cosmos_l1_build_testnet.status == "pass"
   and .steps.ci_phase6_cosmos_l1_build_testnet.contract_valid == true
@@ -298,6 +319,7 @@ PHASE6_SUITE_CAPTURE_FILE="$CAPTURE" \
 PHASE6_COSMOS_L1_BUILD_TESTNET_SUITE_CI_SCRIPT="$FAKE_CI" \
 PHASE6_COSMOS_L1_BUILD_TESTNET_SUITE_RUN_SCRIPT="$FAKE_RUN" \
 PHASE6_COSMOS_L1_BUILD_TESTNET_SUITE_HANDOFF_RUN_SCRIPT="$FAKE_HANDOFF_RUN" \
+PHASE6_COSMOS_L1_BUILD_TESTNET_SUITE_CANONICAL_SUMMARY_JSON="$DRY_RUN_CANONICAL_SUMMARY" \
 bash "$SUITE_RUNNER" \
   --reports-dir "$TMP_DIR/reports_dry" \
   --ci-summary-json "$TMP_DIR/ci_dry.json" \
@@ -349,6 +371,7 @@ PHASE6_SUITE_CAPTURE_FILE="$CAPTURE" \
 PHASE6_COSMOS_L1_BUILD_TESTNET_SUITE_CI_SCRIPT="$FAKE_CI" \
 PHASE6_COSMOS_L1_BUILD_TESTNET_SUITE_RUN_SCRIPT="$FAKE_RUN" \
 PHASE6_COSMOS_L1_BUILD_TESTNET_SUITE_HANDOFF_RUN_SCRIPT="$FAKE_HANDOFF_RUN" \
+PHASE6_COSMOS_L1_BUILD_TESTNET_SUITE_CANONICAL_SUMMARY_JSON="$RUN_FAIL_CANONICAL_SUMMARY" \
 FAKE_RUN_FAIL=1 \
 FAKE_RUN_FAIL_RC=27 \
 bash "$SUITE_RUNNER" \
@@ -367,9 +390,25 @@ if [[ "$run_fail_rc" -ne 27 ]]; then
   exit 1
 fi
 assert_stage_order "$CAPTURE"
-if ! jq -e '
+if [[ ! -f "$RUN_FAIL_CANONICAL_SUMMARY" ]]; then
+  echo "missing run-fail canonical summary file: $RUN_FAIL_CANONICAL_SUMMARY"
+  exit 1
+fi
+if ! cmp -s "$RUN_FAIL_SUMMARY" "$RUN_FAIL_CANONICAL_SUMMARY"; then
+  echo "run-fail canonical summary content mismatch"
+  cat "$RUN_FAIL_SUMMARY"
+  cat "$RUN_FAIL_CANONICAL_SUMMARY"
+  exit 1
+fi
+if ! grep -Fq -- "[phase6-cosmos-l1-build-testnet-suite] canonical_summary_json=$RUN_FAIL_CANONICAL_SUMMARY" "$RUN_FAIL_LOG"; then
+  echo "run-fail log missing canonical summary line"
+  cat "$RUN_FAIL_LOG"
+  exit 1
+fi
+if ! jq -e --arg canonical "$RUN_FAIL_CANONICAL_SUMMARY" '
   .status == "fail"
   and .rc == 27
+  and .artifacts.canonical_summary_json == $canonical
   and .steps.ci_phase6_cosmos_l1_build_testnet.status == "pass"
   and .steps.phase6_cosmos_l1_build_testnet_run.status == "fail"
   and .steps.phase6_cosmos_l1_build_testnet_run.rc == 27
@@ -389,6 +428,7 @@ PHASE6_SUITE_CAPTURE_FILE="$CAPTURE" \
 PHASE6_COSMOS_L1_BUILD_TESTNET_SUITE_CI_SCRIPT="$FAKE_CI" \
 PHASE6_COSMOS_L1_BUILD_TESTNET_SUITE_RUN_SCRIPT="$FAKE_RUN" \
 PHASE6_COSMOS_L1_BUILD_TESTNET_SUITE_HANDOFF_RUN_SCRIPT="$FAKE_HANDOFF_RUN" \
+PHASE6_COSMOS_L1_BUILD_TESTNET_SUITE_CANONICAL_SUMMARY_JSON="$CONTRACT_FAIL_CANONICAL_SUMMARY" \
 FAKE_HANDOFF_RUN_OMIT_SUMMARY=1 \
 bash "$SUITE_RUNNER" \
   --reports-dir "$TMP_DIR/reports_contract_fail" \

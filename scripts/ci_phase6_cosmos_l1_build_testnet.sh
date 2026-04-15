@@ -107,6 +107,7 @@ need_cmd mktemp
 
 reports_dir="${CI_PHASE6_COSMOS_L1_REPORTS_DIR:-}"
 summary_json="${CI_PHASE6_COSMOS_L1_SUMMARY_JSON:-}"
+canonical_summary_json="${CI_PHASE6_COSMOS_L1_BUILD_TESTNET_CANONICAL_SUMMARY_JSON:-$ROOT_DIR/.easy-node-logs/phase6_cosmos_l1_build_testnet_ci_summary.json}"
 print_summary_json="${CI_PHASE6_COSMOS_L1_PRINT_SUMMARY_JSON:-1}"
 dry_run="${CI_PHASE6_COSMOS_L1_DRY_RUN:-0}"
 
@@ -317,9 +318,11 @@ if [[ -z "$summary_json" ]]; then
 else
   summary_json="$(abs_path "$summary_json")"
 fi
+canonical_summary_json="$(abs_path "$canonical_summary_json")"
 
 mkdir -p "$reports_dir"
 mkdir -p "$(dirname "$summary_json")"
+mkdir -p "$(dirname "$canonical_summary_json")"
 
 declare -A stage_status
 declare -A stage_rc
@@ -398,6 +401,7 @@ jq -n \
   --argjson rc "$final_rc" \
   --arg reports_dir "$reports_dir" \
   --arg summary_json "$summary_json" \
+  --arg canonical_summary_json "$canonical_summary_json" \
   --arg dry_run "$dry_run" \
   --arg print_summary_json "$print_summary_json" \
   --arg run_chain_scaffold "$run_chain_scaffold" \
@@ -436,14 +440,19 @@ jq -n \
     steps: $steps,
     artifacts: {
       reports_dir: $reports_dir,
-      summary_json: $summary_json
+      summary_json: $summary_json,
+      canonical_summary_json: $canonical_summary_json
     }
   }' >"$summary_tmp"
 mv -f "$summary_tmp" "$summary_json"
+if [[ "$summary_json" != "$canonical_summary_json" ]]; then
+  cp -f "$summary_json" "$canonical_summary_json"
+fi
 
 echo "[ci-phase6-cosmos-l1] status=$final_status rc=$final_rc dry_run=$dry_run"
 echo "[ci-phase6-cosmos-l1] reports_dir=$reports_dir"
 echo "[ci-phase6-cosmos-l1] summary_json=$summary_json"
+echo "[ci-phase6-cosmos-l1] canonical_summary_json=$canonical_summary_json"
 if [[ "$print_summary_json" == "1" ]]; then
   cat "$summary_json"
 fi

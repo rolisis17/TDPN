@@ -254,6 +254,12 @@ if (( configured_count == 0 )); then
       stage_path["contracts_ci"]="$discovered_contracts_ci"
     fi
   fi
+  if [[ ! -f "${stage_path[build_testnet_suite]}" ]]; then
+    discovered_build_testnet_suite=""
+    if discovered_build_testnet_suite="$(discover_latest_stage_summary "$reports_dir" "phase6_cosmos_l1_build_testnet_suite_" "phase6_cosmos_l1_build_testnet_suite_summary.json")"; then
+      stage_path["build_testnet_suite"]="$discovered_build_testnet_suite"
+    fi
+  fi
 fi
 
 for stage_id in build_testnet_ci contracts_ci build_testnet_suite; do

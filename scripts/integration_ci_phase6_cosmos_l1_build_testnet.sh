@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-for cmd in bash mktemp jq grep sed wc cat chmod; do
+for cmd in bash mktemp jq grep sed wc cat chmod cmp; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "missing required command: $cmd"
     exit 2
@@ -35,6 +35,10 @@ SUCCESS_SUMMARY_JSON="$TMP_DIR/summary_success.json"
 DRY_RUN_SUMMARY_JSON="$TMP_DIR/summary_dry_run.json"
 TOGGLE_SUMMARY_JSON="$TMP_DIR/summary_toggle.json"
 FAIL_SUMMARY_JSON="$TMP_DIR/summary_fail.json"
+SUCCESS_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_success.json"
+DRY_RUN_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_dry_run.json"
+TOGGLE_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_toggle.json"
+FAIL_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_fail.json"
 
 STAGE_ENV_NAMES=(
   "CI_PHASE6_COSMOS_L1_CHAIN_SCAFFOLD_SCRIPT"
@@ -159,9 +163,41 @@ assert_capture_empty() {
   fi
 }
 
+assert_canonical_summary_artifact() {
+  local summary_json="$1"
+  local canonical_json="$2"
+  local log_file="$3"
+
+  if [[ ! -f "$canonical_json" ]]; then
+    echo "missing canonical summary json: $canonical_json"
+    cat "$log_file"
+    exit 1
+  fi
+
+  if ! jq -e --arg canonical "$canonical_json" '.artifacts.canonical_summary_json == $canonical' "$summary_json" >/dev/null; then
+    echo "summary json missing canonical_summary_json artifact path"
+    cat "$summary_json"
+    exit 1
+  fi
+
+  if ! cmp -s "$summary_json" "$canonical_json"; then
+    echo "canonical summary json does not match summary json"
+    cat "$summary_json"
+    cat "$canonical_json"
+    exit 1
+  fi
+
+  if ! grep -Fq -- "[ci-phase6-cosmos-l1] canonical_summary_json=$canonical_json" "$log_file"; then
+    echo "log missing canonical summary path output"
+    cat "$log_file"
+    exit 1
+  fi
+}
+
 echo "[ci-phase6-cosmos-l1] success ordering path"
 : >"$CAPTURE"
 CI_PHASE6_CAPTURE_FILE="$CAPTURE" \
+CI_PHASE6_COSMOS_L1_BUILD_TESTNET_CANONICAL_SUMMARY_JSON="$SUCCESS_CANONICAL_SUMMARY_JSON" \
 "$GATE_SCRIPT" \
   --reports-dir "$SUCCESS_REPORTS_DIR" \
   --summary-json "$SUCCESS_SUMMARY_JSON" \
@@ -205,10 +241,12 @@ if ! grep -Fq -- '[ci-phase6-cosmos-l1] status=pass rc=0 dry_run=0' "$SUCCESS_LO
   cat "$SUCCESS_LOG"
   exit 1
 fi
+assert_canonical_summary_artifact "$SUCCESS_SUMMARY_JSON" "$SUCCESS_CANONICAL_SUMMARY_JSON" "$SUCCESS_LOG"
 
 echo "[ci-phase6-cosmos-l1] dry-run skip accounting"
 : >"$CAPTURE"
 CI_PHASE6_CAPTURE_FILE="$CAPTURE" \
+CI_PHASE6_COSMOS_L1_BUILD_TESTNET_CANONICAL_SUMMARY_JSON="$DRY_RUN_CANONICAL_SUMMARY_JSON" \
 "$GATE_SCRIPT" \
   --dry-run 1 \
   --reports-dir "$DRY_RUN_REPORTS_DIR" \
@@ -242,10 +280,12 @@ if ! grep -Fq -- 'step=chain_scaffold status=skip reason=dry-run' "$DRY_RUN_LOG"
   cat "$DRY_RUN_LOG"
   exit 1
 fi
+assert_canonical_summary_artifact "$DRY_RUN_SUMMARY_JSON" "$DRY_RUN_CANONICAL_SUMMARY_JSON" "$DRY_RUN_LOG"
 
 echo "[ci-phase6-cosmos-l1] toggle path"
 : >"$CAPTURE"
 CI_PHASE6_CAPTURE_FILE="$CAPTURE" \
+CI_PHASE6_COSMOS_L1_BUILD_TESTNET_CANONICAL_SUMMARY_JSON="$TOGGLE_CANONICAL_SUMMARY_JSON" \
 "$GATE_SCRIPT" \
   --reports-dir "$TOGGLE_REPORTS_DIR" \
   --summary-json "$TOGGLE_SUMMARY_JSON" \
@@ -305,12 +345,14 @@ if ! jq -e '
   cat "$TOGGLE_SUMMARY_JSON"
   exit 1
 fi
+assert_canonical_summary_artifact "$TOGGLE_SUMMARY_JSON" "$TOGGLE_CANONICAL_SUMMARY_JSON" "$TOGGLE_LOG"
 
 echo "[ci-phase6-cosmos-l1] first-failure rc propagation"
 : >"$CAPTURE"
 set +e
 CI_PHASE6_CAPTURE_FILE="$CAPTURE" \
 CI_PHASE6_FAIL_MATRIX="proto_surface=23,query_surface=41,tdpnd_grpc_live_smoke=43,tdpnd_grpc_auth_live_smoke=47" \
+CI_PHASE6_COSMOS_L1_BUILD_TESTNET_CANONICAL_SUMMARY_JSON="$FAIL_CANONICAL_SUMMARY_JSON" \
 "$GATE_SCRIPT" \
   --reports-dir "$FAIL_REPORTS_DIR" \
   --summary-json "$FAIL_SUMMARY_JSON" \
@@ -355,5 +397,6 @@ if ! grep -Fq -- '[ci-phase6-cosmos-l1] status=fail rc=23 dry_run=0' "$FAIL_LOG"
   cat "$FAIL_LOG"
   exit 1
 fi
+assert_canonical_summary_artifact "$FAIL_SUMMARY_JSON" "$FAIL_CANONICAL_SUMMARY_JSON" "$FAIL_LOG"
 
 echo "ci phase6 cosmos l1 build testnet integration check ok"

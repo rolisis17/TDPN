@@ -202,12 +202,14 @@ run_stage_capture() {
 need_cmd jq
 need_cmd date
 need_cmd mktemp
+need_cmd cp
 
 reports_dir="${PHASE6_COSMOS_L1_BUILD_TESTNET_SUITE_REPORTS_DIR:-$ROOT_DIR/.easy-node-logs}"
 ci_summary_json="${PHASE6_COSMOS_L1_BUILD_TESTNET_SUITE_CI_SUMMARY_JSON:-$reports_dir/phase6_cosmos_l1_build_testnet_ci_summary.json}"
 run_summary_json="${PHASE6_COSMOS_L1_BUILD_TESTNET_SUITE_RUN_SUMMARY_JSON:-$reports_dir/phase6_cosmos_l1_build_testnet_run_summary.json}"
 handoff_run_summary_json="${PHASE6_COSMOS_L1_BUILD_TESTNET_SUITE_HANDOFF_RUN_SUMMARY_JSON:-$reports_dir/phase6_cosmos_l1_build_testnet_handoff_run_summary.json}"
 summary_json="${PHASE6_COSMOS_L1_BUILD_TESTNET_SUITE_SUMMARY_JSON:-$reports_dir/phase6_cosmos_l1_build_testnet_suite_summary.json}"
+canonical_summary_json="${PHASE6_COSMOS_L1_BUILD_TESTNET_SUITE_CANONICAL_SUMMARY_JSON:-$ROOT_DIR/.easy-node-logs/phase6_cosmos_l1_build_testnet_suite_summary.json}"
 print_summary_json="${PHASE6_COSMOS_L1_BUILD_TESTNET_SUITE_PRINT_SUMMARY_JSON:-1}"
 dry_run="${PHASE6_COSMOS_L1_BUILD_TESTNET_SUITE_DRY_RUN:-0}"
 run_ci_phase6_cosmos_l1_build_testnet="${PHASE6_COSMOS_L1_BUILD_TESTNET_SUITE_RUN_CI_PHASE6_COSMOS_L1_BUILD_TESTNET:-1}"
@@ -350,12 +352,14 @@ ci_summary_json="$(abs_path "$ci_summary_json")"
 run_summary_json="$(abs_path "$run_summary_json")"
 handoff_run_summary_json="$(abs_path "$handoff_run_summary_json")"
 summary_json="$(abs_path "$summary_json")"
+canonical_summary_json="$(abs_path "$canonical_summary_json")"
 
 mkdir -p "$reports_dir" \
   "$(dirname "$ci_summary_json")" \
   "$(dirname "$run_summary_json")" \
   "$(dirname "$handoff_run_summary_json")" \
-  "$(dirname "$summary_json")"
+  "$(dirname "$summary_json")" \
+  "$(dirname "$canonical_summary_json")"
 
 ci_script="${PHASE6_COSMOS_L1_BUILD_TESTNET_SUITE_CI_SCRIPT:-$ROOT_DIR/scripts/ci_phase6_cosmos_l1_build_testnet.sh}"
 run_script="${PHASE6_COSMOS_L1_BUILD_TESTNET_SUITE_RUN_SCRIPT:-$ROOT_DIR/scripts/phase6_cosmos_l1_build_testnet_run.sh}"
@@ -569,6 +573,7 @@ jq -n \
   --argjson rc "$final_rc" \
   --arg reports_dir "$reports_dir" \
   --arg summary_json "$summary_json" \
+  --arg canonical_summary_json "$canonical_summary_json" \
   --arg ci_summary_json "$ci_summary_json" \
   --arg run_summary_json "$run_summary_json" \
   --arg handoff_run_summary_json "$handoff_run_summary_json" \
@@ -677,6 +682,7 @@ jq -n \
     artifacts: {
       reports_dir: $reports_dir,
       summary_json: $summary_json,
+      canonical_summary_json: $canonical_summary_json,
       ci_summary_json: $ci_summary_json,
       run_summary_json: $run_summary_json,
       handoff_run_summary_json: $handoff_run_summary_json,
@@ -686,10 +692,16 @@ jq -n \
     }
   }' >"$summary_tmp"
 mv -f "$summary_tmp" "$summary_json"
+if [[ "$summary_json" != "$canonical_summary_json" ]]; then
+  canonical_tmp="$(mktemp "${canonical_summary_json}.tmp.XXXXXX")"
+  cp "$summary_json" "$canonical_tmp"
+  mv -f "$canonical_tmp" "$canonical_summary_json"
+fi
 
 echo "[phase6-cosmos-l1-build-testnet-suite] status=$final_status rc=$final_rc dry_run=$dry_run"
 echo "[phase6-cosmos-l1-build-testnet-suite] reports_dir=$reports_dir"
 echo "[phase6-cosmos-l1-build-testnet-suite] summary_json=$summary_json"
+echo "[phase6-cosmos-l1-build-testnet-suite] canonical_summary_json=$canonical_summary_json"
 if [[ "$print_summary_json" == "1" ]]; then
   cat "$summary_json"
 fi
