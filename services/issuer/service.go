@@ -22,6 +22,7 @@ import (
 	"privacynode/pkg/crypto"
 	"privacynode/pkg/proto"
 	"privacynode/pkg/securehttp"
+	"privacynode/pkg/settlement"
 )
 
 type Service struct {
@@ -58,6 +59,14 @@ type Service struct {
 	anonCredExposeID              bool
 	betaStrict                    bool
 	prodStrict                    bool
+	settlementReconcileSec        int
+	settlement                    settlement.Service
+	requirePaymentProof           bool
+	sponsorAPIToken               string
+	sponsorMaxSubjectLen          int
+	sponsorMaxIDLen               int
+	sponsorMaxCurrencyLen         int
+	sponsorMaxReservationMicros   int64
 	mu                            sync.RWMutex
 	subjects                      map[string]proto.SubjectProfile
 	subjectsFile                  string
@@ -75,6 +84,13 @@ type Service struct {
 	minTokenEpoch                 int64
 	revocationVersion             int64
 }
+
+const (
+	defaultSponsorMaxSubjectLen        = 128
+	defaultSponsorMaxIDLen             = 128
+	defaultSponsorMaxCurrencyLen       = 16
+	defaultSponsorMaxReservationMicros = int64(1000000000)
+)
 
 func New() *Service {
 	addr := os.Getenv("ISSUER_ADDR")
@@ -198,6 +214,42 @@ func New() *Service {
 	disableAnonCred := os.Getenv("ISSUER_ALLOW_ANON_CRED") == "0"
 	betaStrict := os.Getenv("BETA_STRICT_MODE") == "1" || os.Getenv("ISSUER_BETA_STRICT") == "1"
 	prodStrict := os.Getenv("PROD_STRICT_MODE") == "1" || os.Getenv("ISSUER_PROD_STRICT") == "1"
+	settlementReconcileSec := 60
+	if v := strings.TrimSpace(os.Getenv("ISSUER_SETTLEMENT_RECONCILE_SEC")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			settlementReconcileSec = n
+		}
+	}
+	requirePaymentProof := os.Getenv("ISSUER_REQUIRE_PAYMENT_PROOF") == "1"
+	sponsorAPIToken := strings.TrimSpace(os.Getenv("ISSUER_SPONSOR_API_TOKEN"))
+	if sponsorAPIToken == "" {
+		sponsorAPIToken = "dev-sponsor-token"
+	}
+	sponsorMaxSubjectLen := defaultSponsorMaxSubjectLen
+	if v := strings.TrimSpace(os.Getenv("ISSUER_SPONSOR_MAX_SUBJECT_LEN")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			sponsorMaxSubjectLen = n
+		}
+	}
+	sponsorMaxIDLen := defaultSponsorMaxIDLen
+	if v := strings.TrimSpace(os.Getenv("ISSUER_SPONSOR_MAX_ID_LEN")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			sponsorMaxIDLen = n
+		}
+	}
+	sponsorMaxCurrencyLen := defaultSponsorMaxCurrencyLen
+	if v := strings.TrimSpace(os.Getenv("ISSUER_SPONSOR_MAX_CURRENCY_LEN")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			sponsorMaxCurrencyLen = n
+		}
+	}
+	sponsorMaxReservationMicros := defaultSponsorMaxReservationMicros
+	if v := strings.TrimSpace(os.Getenv("ISSUER_SPONSOR_MAX_RESERVATION_MICROS")); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			sponsorMaxReservationMicros = n
+		}
+	}
+	settlementSvc := newSettlementServiceFromEnv()
 	return &Service{
 		addr:                          addr,
 		issuerID:                      issuerID,
@@ -228,6 +280,14 @@ func New() *Service {
 		anonCredExposeID:              anonCredExposeID,
 		betaStrict:                    betaStrict,
 		prodStrict:                    prodStrict,
+		settlementReconcileSec:        settlementReconcileSec,
+		settlement:                    settlementSvc,
+		requirePaymentProof:           requirePaymentProof,
+		sponsorAPIToken:               sponsorAPIToken,
+		sponsorMaxSubjectLen:          sponsorMaxSubjectLen,
+		sponsorMaxIDLen:               sponsorMaxIDLen,
+		sponsorMaxCurrencyLen:         sponsorMaxCurrencyLen,
+		sponsorMaxReservationMicros:   sponsorMaxReservationMicros,
 		subjects:                      make(map[string]proto.SubjectProfile),
 		subjectsFile:                  subjectsFile,
 		revocations:                   make(map[string]int64),
@@ -279,6 +339,11 @@ func (s *Service) Run(ctx context.Context) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/health", s.handleHealth)
 	mux.HandleFunc("/v1/token", s.handleIssueToken)
+	mux.HandleFunc("/v1/sponsor/token", s.handleSponsorIssueToken)
+	mux.HandleFunc("/v1/sponsor/quote", s.handleSponsorQuote)
+	mux.HandleFunc("/v1/sponsor/reserve", s.handleSponsorReserve)
+	mux.HandleFunc("/v1/sponsor/status", s.handleSponsorStatus)
+	mux.HandleFunc("/v1/settlement/status", s.handleSettlementStatus)
 	mux.HandleFunc("/v1/pubkey", s.handlePubKey)
 	mux.HandleFunc("/v1/pubkeys", s.handlePubKeys)
 	mux.HandleFunc("/v1/trust/relays", s.handleRelayTrust)
@@ -300,6 +365,7 @@ func (s *Service) Run(ctx context.Context) error {
 	mux.HandleFunc("/v1/admin/anon-credential/get", s.handleGetAnonymousCredentialStatus)
 	mux.HandleFunc("/v1/admin/audit", s.handleGetAudit)
 	mux.HandleFunc("/v1/admin/revoke-token", s.handleRevokeToken)
+	mux.HandleFunc("/v1/admin/slash/evidence", s.handleSubmitSlashEvidence)
 	mux.HandleFunc("/v1/revocations", s.handleRevocations)
 
 	s.httpSrv = &http.Server{Addr: s.addr, Handler: mux}
@@ -313,6 +379,11 @@ func (s *Service) Run(ctx context.Context) error {
 	if s.keyRotateSec > 0 {
 		rotateTicker = time.NewTicker(time.Duration(s.keyRotateSec) * time.Second)
 		defer rotateTicker.Stop()
+	}
+	var settlementReconcileTicker *time.Ticker
+	if s.settlement != nil && s.settlementReconcileSec > 0 {
+		settlementReconcileTicker = time.NewTicker(time.Duration(s.settlementReconcileSec) * time.Second)
+		defer settlementReconcileTicker.Stop()
 	}
 
 	for {
@@ -333,7 +404,39 @@ func (s *Service) Run(ctx context.Context) error {
 			} else {
 				log.Printf("issuer key rotated epoch=%d min_token_epoch=%d", s.currentKeyEpoch(), s.currentMinTokenEpoch())
 			}
+		case <-tickerC(settlementReconcileTicker):
+			s.reconcileSettlement(ctx)
 		}
+	}
+}
+
+func (s *Service) reconcileSettlement(ctx context.Context) {
+	if s.settlement == nil {
+		return
+	}
+	reconcileCtx := ctx
+	if reconcileCtx == nil {
+		reconcileCtx = context.Background()
+	}
+	if _, hasDeadline := reconcileCtx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		reconcileCtx, cancel = context.WithTimeout(reconcileCtx, 4*time.Second)
+		defer cancel()
+	}
+	report, err := s.settlementService().Reconcile(reconcileCtx)
+	if err != nil {
+		log.Printf("issuer settlement reconcile warning: %v", err)
+		return
+	}
+	if report.PendingAdapterOperations > 0 || report.PendingOperations > 0 || report.FailedOperations > 0 {
+		log.Printf(
+			"issuer settlement reconcile backlog pending_adapter=%d pending=%d failed=%d submitted=%d confirmed=%d",
+			report.PendingAdapterOperations,
+			report.PendingOperations,
+			report.FailedOperations,
+			report.SubmittedOperations,
+			report.ConfirmedOperations,
+		)
 	}
 }
 
@@ -438,6 +541,27 @@ func (s *Service) handleIssueToken(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
+	s.issueTokenRequest(w, req, false)
+}
+
+func (s *Service) handleSponsorIssueToken(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSponsor(w, r) {
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req proto.IssueTokenRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	s.issueTokenRequest(w, req, true)
+}
+
+func (s *Service) issueTokenRequest(w http.ResponseWriter, req proto.IssueTokenRequest, forcePaymentProof bool) {
 	if req.Tier < 1 || req.Tier > 3 {
 		http.Error(w, "tier must be 1..3", http.StatusBadRequest)
 		return
@@ -488,6 +612,10 @@ func (s *Service) handleIssueToken(w http.ResponseWriter, r *http.Request) {
 				effectiveTier = capTier
 			}
 			subject := anonymousSubjectAlias(cred.CredentialID)
+			if err := s.ensureClientPaymentAuthorization(req, subject, forcePaymentProof); err != nil {
+				http.Error(w, err.Error(), http.StatusPaymentRequired)
+				return
+			}
 			claims = baseClaimsForTier(s.issuerID, subject, keyEpoch, "exit", tokenType, popPubKey, effectiveTier, expires, req.ExitScope)
 			claims.AnonCredID = anonymousCredentialPresentationID(s.issuerID, cred.CredentialID, claims.TokenID, s.anonCredExposeID)
 		} else {
@@ -496,6 +624,10 @@ func (s *Service) handleIssueToken(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			effectiveTier := s.effectiveTierFor(req.Subject, req.Tier)
+			if err := s.ensureClientPaymentAuthorization(req, req.Subject, forcePaymentProof); err != nil {
+				http.Error(w, err.Error(), http.StatusPaymentRequired)
+				return
+			}
 			claims = baseClaimsForTier(s.issuerID, req.Subject, keyEpoch, "exit", tokenType, popPubKey, effectiveTier, expires, req.ExitScope)
 		}
 	case crypto.TokenTypeProviderRole:
@@ -519,6 +651,288 @@ func (s *Service) handleIssueToken(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		http.Error(w, "encode error", http.StatusInternalServerError)
 	}
+}
+
+func (s *Service) handleSponsorQuote(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSponsor(w, r) {
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req proto.SponsorQuoteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	req.Subject = strings.TrimSpace(req.Subject)
+	req.Currency = strings.TrimSpace(req.Currency)
+	if err := s.validateSponsorQuoteInput(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	quote, err := s.settlementService().QuotePrice(r.Context(), req.Subject, req.Currency)
+	if err != nil {
+		http.Error(w, "quote failed", http.StatusBadGateway)
+		return
+	}
+	resp := proto.SponsorQuoteResponse{
+		Subject:           quote.SubjectID,
+		PricePerMiBMicros: quote.PricePerMiBMicros,
+		Currency:          quote.Currency,
+		QuotedAt:          quote.QuotedAt.Unix(),
+		ExpiresAt:         quote.ExpiresAt.Unix(),
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func (s *Service) handleSponsorReserve(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSponsor(w, r) {
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req proto.SponsorReserveRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	req.ReservationID = strings.TrimSpace(req.ReservationID)
+	req.SponsorID = strings.TrimSpace(req.SponsorID)
+	req.Subject = strings.TrimSpace(req.Subject)
+	req.SessionID = strings.TrimSpace(req.SessionID)
+	req.Currency = strings.TrimSpace(req.Currency)
+	if req.ReservationID == "" {
+		req.ReservationID = fmt.Sprintf("sres-%d", time.Now().UnixNano())
+	}
+	if err := s.validateSponsorReserveInput(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	reservation, err := s.settlementService().ReserveSponsorCredits(r.Context(), settlement.SponsorCreditReservation{
+		ReservationID: req.ReservationID,
+		SponsorID:     req.SponsorID,
+		SubjectID:     req.Subject,
+		SessionID:     req.SessionID,
+		AmountMicros:  req.AmountMicros,
+		Currency:      req.Currency,
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	resp := sponsorReservationResponse(reservation)
+	resp.Accepted = true
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func (s *Service) handleSponsorStatus(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSponsor(w, r) {
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	reservationID := strings.TrimSpace(r.URL.Query().Get("reservation_id"))
+	if err := s.validateSponsorReservationID(reservationID); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	reservation, err := s.settlementService().GetSponsorReservation(r.Context(), reservationID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	resp := sponsorReservationResponse(reservation)
+	resp.Accepted = true
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func (s *Service) handleSettlementStatus(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	reconcileCtx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
+	defer cancel()
+	report, err := s.settlementService().Reconcile(reconcileCtx)
+	if err != nil {
+		log.Printf("issuer settlement status warning: %v", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status": "degraded",
+			"error":  "reconcile failed",
+		})
+		return
+	}
+
+	status := "ok"
+	if report.PendingAdapterOperations > 0 || report.PendingOperations > 0 || report.FailedOperations > 0 {
+		status = "backlog"
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"status":                     status,
+		"generated_at":               report.GeneratedAt.Unix(),
+		"pending_adapter_operations": report.PendingAdapterOperations,
+		"pending_operations":         report.PendingOperations,
+		"submitted_operations":       report.SubmittedOperations,
+		"confirmed_operations":       report.ConfirmedOperations,
+		"failed_operations":          report.FailedOperations,
+	})
+}
+
+func sponsorReservationResponse(in settlement.SponsorCreditReservation) proto.SponsorReserveResponse {
+	out := proto.SponsorReserveResponse{
+		ReservationID: in.ReservationID,
+		SponsorID:     in.SponsorID,
+		Subject:       in.SubjectID,
+		SessionID:     in.SessionID,
+		AmountMicros:  in.AmountMicros,
+		Currency:      in.Currency,
+		Status:        string(in.Status),
+		CreatedAt:     in.CreatedAt.Unix(),
+		ExpiresAt:     in.ExpiresAt.Unix(),
+	}
+	if !in.ConsumedAt.IsZero() {
+		out.ConsumedAt = in.ConsumedAt.Unix()
+	}
+	return out
+}
+
+func (s *Service) validateSponsorQuoteInput(req *proto.SponsorQuoteRequest) error {
+	if strings.TrimSpace(req.Subject) == "" {
+		return fmt.Errorf("subject required")
+	}
+	if len(req.Subject) > s.effectiveSponsorMaxSubjectLen() {
+		return fmt.Errorf("subject too long: max %d", s.effectiveSponsorMaxSubjectLen())
+	}
+	if req.Currency != "" && len(req.Currency) > s.effectiveSponsorMaxCurrencyLen() {
+		return fmt.Errorf("currency too long: max %d", s.effectiveSponsorMaxCurrencyLen())
+	}
+	return nil
+}
+
+func (s *Service) validateSponsorReserveInput(req *proto.SponsorReserveRequest) error {
+	if strings.TrimSpace(req.SponsorID) == "" {
+		return fmt.Errorf("sponsor_id required")
+	}
+	if strings.TrimSpace(req.Subject) == "" {
+		return fmt.Errorf("subject required")
+	}
+	if strings.TrimSpace(req.SessionID) == "" {
+		return fmt.Errorf("session_id required")
+	}
+	if req.AmountMicros <= 0 {
+		return fmt.Errorf("amount_micros must be > 0")
+	}
+	if req.AmountMicros > s.effectiveSponsorMaxReservationMicros() {
+		return fmt.Errorf("amount_micros exceeds max %d", s.effectiveSponsorMaxReservationMicros())
+	}
+	if len(req.ReservationID) > s.effectiveSponsorMaxIDLen() {
+		return fmt.Errorf("reservation_id too long: max %d", s.effectiveSponsorMaxIDLen())
+	}
+	if len(req.SponsorID) > s.effectiveSponsorMaxIDLen() {
+		return fmt.Errorf("sponsor_id too long: max %d", s.effectiveSponsorMaxIDLen())
+	}
+	if len(req.Subject) > s.effectiveSponsorMaxSubjectLen() {
+		return fmt.Errorf("subject too long: max %d", s.effectiveSponsorMaxSubjectLen())
+	}
+	if len(req.SessionID) > s.effectiveSponsorMaxIDLen() {
+		return fmt.Errorf("session_id too long: max %d", s.effectiveSponsorMaxIDLen())
+	}
+	if req.Currency != "" && len(req.Currency) > s.effectiveSponsorMaxCurrencyLen() {
+		return fmt.Errorf("currency too long: max %d", s.effectiveSponsorMaxCurrencyLen())
+	}
+	return nil
+}
+
+func (s *Service) validateSponsorReservationID(reservationID string) error {
+	if reservationID == "" {
+		return fmt.Errorf("reservation_id required")
+	}
+	if len(reservationID) > s.effectiveSponsorMaxIDLen() {
+		return fmt.Errorf("reservation_id too long: max %d", s.effectiveSponsorMaxIDLen())
+	}
+	return nil
+}
+
+func (s *Service) effectiveSponsorMaxSubjectLen() int {
+	if s.sponsorMaxSubjectLen > 0 {
+		return s.sponsorMaxSubjectLen
+	}
+	return defaultSponsorMaxSubjectLen
+}
+
+func (s *Service) effectiveSponsorMaxIDLen() int {
+	if s.sponsorMaxIDLen > 0 {
+		return s.sponsorMaxIDLen
+	}
+	return defaultSponsorMaxIDLen
+}
+
+func (s *Service) effectiveSponsorMaxCurrencyLen() int {
+	if s.sponsorMaxCurrencyLen > 0 {
+		return s.sponsorMaxCurrencyLen
+	}
+	return defaultSponsorMaxCurrencyLen
+}
+
+func (s *Service) effectiveSponsorMaxReservationMicros() int64 {
+	if s.sponsorMaxReservationMicros > 0 {
+		return s.sponsorMaxReservationMicros
+	}
+	return defaultSponsorMaxReservationMicros
+}
+
+func (s *Service) ensureClientPaymentAuthorization(req proto.IssueTokenRequest, defaultSubject string, force bool) error {
+	if req.TokenType == crypto.TokenTypeProviderRole {
+		return nil
+	}
+	if !force && !s.requirePaymentProof && req.PaymentProof == nil {
+		return nil
+	}
+	if req.PaymentProof == nil {
+		return fmt.Errorf("payment proof required")
+	}
+	subject := strings.TrimSpace(req.PaymentProof.Subject)
+	if subject == "" {
+		subject = strings.TrimSpace(defaultSubject)
+	}
+	_, err := s.settlementService().AuthorizePayment(context.Background(), settlement.PaymentProof{
+		ReservationID: strings.TrimSpace(req.PaymentProof.ReservationID),
+		SponsorID:     strings.TrimSpace(req.PaymentProof.SponsorID),
+		SubjectID:     subject,
+		SessionID:     strings.TrimSpace(req.PaymentProof.SessionID),
+	})
+	if err != nil {
+		return fmt.Errorf("payment proof invalid: %w", err)
+	}
+	return nil
+}
+
+func (s *Service) settlementService() settlement.Service {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.settlement == nil {
+		s.settlement = settlement.NewMemoryService()
+	}
+	return s.settlement
 }
 
 func (s *Service) handleUpsertSubject(w http.ResponseWriter, r *http.Request) {
@@ -1320,6 +1734,68 @@ func (s *Service) handleRevokeToken(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(proto.Revocation{JTI: req.JTI, Until: req.Until})
 }
 
+func (s *Service) handleSubmitSlashEvidence(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req proto.SubmitSlashEvidenceRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+
+	evidence, err := s.settlementService().SubmitSlashEvidence(r.Context(), settlement.SlashEvidence{
+		EvidenceID:    strings.TrimSpace(req.EvidenceID),
+		SubjectID:     strings.TrimSpace(req.Subject),
+		SessionID:     strings.TrimSpace(req.SessionID),
+		ViolationType: strings.TrimSpace(req.ViolationType),
+		EvidenceRef:   strings.TrimSpace(req.EvidenceRef),
+		SlashMicros:   req.SlashMicros,
+		Currency:      strings.TrimSpace(req.Currency),
+		ObservedAt:    time.Now().UTC(),
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	s.recordAudit(proto.AuditEvent{
+		Action:      "subject-slash-evidence-submit",
+		Subject:     evidence.SubjectID,
+		Reason:      req.Reason,
+		CaseID:      evidence.EvidenceID,
+		EvidenceRef: evidence.EvidenceRef,
+		Value:       float64(evidence.SlashMicros),
+	})
+
+	resp := proto.SubmitSlashEvidenceResponse{
+		Accepted:           true,
+		EvidenceID:         evidence.EvidenceID,
+		Subject:            evidence.SubjectID,
+		SessionID:          evidence.SessionID,
+		ViolationType:      evidence.ViolationType,
+		EvidenceRef:        evidence.EvidenceRef,
+		SlashMicros:        evidence.SlashMicros,
+		Currency:           evidence.Currency,
+		Status:             string(evidence.Status),
+		AdapterSubmitted:   evidence.AdapterSubmitted,
+		AdapterReferenceID: evidence.AdapterReferenceID,
+		AdapterDeferred:    evidence.AdapterDeferred,
+		IdempotentReplay:   evidence.IdempotentReplay,
+	}
+	if !evidence.ObservedAt.IsZero() {
+		resp.ObservedAt = evidence.ObservedAt.Unix()
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
 func (s *Service) handleRevocations(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -1366,6 +1842,35 @@ func (s *Service) requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 	}
 	http.Error(w, "unauthorized", http.StatusUnauthorized)
 	return false
+}
+
+func (s *Service) requireSponsor(w http.ResponseWriter, r *http.Request) bool {
+	expected := strings.TrimSpace(s.sponsorAPIToken)
+	if expected == "" {
+		http.Error(w, "sponsor auth disabled", http.StatusForbidden)
+		return false
+	}
+	token := strings.TrimSpace(r.Header.Get("X-Sponsor-Token"))
+	if token == "" {
+		token = parseBearerToken(r.Header.Get("Authorization"))
+	}
+	if token == expected {
+		return true
+	}
+	http.Error(w, "unauthorized sponsor", http.StatusUnauthorized)
+	return false
+}
+
+func parseBearerToken(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	parts := strings.Fields(raw)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+		return ""
+	}
+	return strings.TrimSpace(parts[1])
 }
 
 func isLoopbackBindAddr(addr string) bool {
@@ -1754,6 +2259,99 @@ func (s *Service) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("ok"))
+}
+
+func newSettlementServiceFromEnv() settlement.Service {
+	pricePerMiB := int64(1000)
+	if raw := strings.TrimSpace(os.Getenv("SETTLEMENT_PRICE_PER_MIB_MICROS")); raw != "" {
+		if n, err := strconv.ParseInt(raw, 10, 64); err == nil && n > 0 {
+			pricePerMiB = n
+		}
+	}
+	currency := strings.TrimSpace(os.Getenv("SETTLEMENT_CURRENCY"))
+	if currency == "" {
+		currency = "TDPNC"
+	}
+
+	opts := []settlement.MemoryOption{
+		settlement.WithPricePerMiBMicros(pricePerMiB),
+		settlement.WithCurrency(currency),
+	}
+	nativeCurrency := strings.ToUpper(strings.TrimSpace(os.Getenv("SETTLEMENT_NATIVE_CURRENCY")))
+	if nativeCurrency != "" && nativeCurrency != strings.ToUpper(currency) {
+		rateNumerator := int64(1)
+		rateDenominator := int64(1)
+		if raw := strings.TrimSpace(os.Getenv("SETTLEMENT_NATIVE_RATE_NUMERATOR")); raw != "" {
+			if n, err := strconv.ParseInt(raw, 10, 64); err == nil && n > 0 {
+				rateNumerator = n
+			}
+		}
+		if raw := strings.TrimSpace(os.Getenv("SETTLEMENT_NATIVE_RATE_DENOMINATOR")); raw != "" {
+			if n, err := strconv.ParseInt(raw, 10, 64); err == nil && n > 0 {
+				rateDenominator = n
+			}
+		}
+		opts = append(opts, settlement.WithCurrencyRate(nativeCurrency, rateNumerator, rateDenominator))
+	}
+
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("SETTLEMENT_CHAIN_ADAPTER")), "cosmos") {
+		endpoint := strings.TrimSpace(os.Getenv("COSMOS_SETTLEMENT_ENDPOINT"))
+		if endpoint == "" {
+			log.Printf("issuer settlement: cosmos adapter requested but COSMOS_SETTLEMENT_ENDPOINT is empty; running memory-only mode")
+		} else {
+			queueSize := 256
+			if raw := strings.TrimSpace(os.Getenv("COSMOS_SETTLEMENT_QUEUE_SIZE")); raw != "" {
+				if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+					queueSize = n
+				}
+			}
+			retries := 3
+			if raw := strings.TrimSpace(os.Getenv("COSMOS_SETTLEMENT_MAX_RETRIES")); raw != "" {
+				if n, err := strconv.Atoi(raw); err == nil && n >= 0 {
+					retries = n
+				}
+			}
+			backoff := 250 * time.Millisecond
+			if raw := strings.TrimSpace(os.Getenv("COSMOS_SETTLEMENT_BASE_BACKOFF_MS")); raw != "" {
+				if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+					backoff = time.Duration(n) * time.Millisecond
+				}
+			}
+			timeout := 4 * time.Second
+			if raw := strings.TrimSpace(os.Getenv("COSMOS_SETTLEMENT_HTTP_TIMEOUT_MS")); raw != "" {
+				if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+					timeout = time.Duration(n) * time.Millisecond
+				}
+			}
+			submitMode := strings.TrimSpace(os.Getenv("COSMOS_SETTLEMENT_SUBMIT_MODE"))
+			if submitMode == "" {
+				submitMode = settlement.CosmosSubmitModeHTTP
+			}
+			adapter, err := settlement.NewCosmosAdapter(settlement.CosmosAdapterConfig{
+				Endpoint:              endpoint,
+				APIKey:                strings.TrimSpace(os.Getenv("COSMOS_SETTLEMENT_API_KEY")),
+				QueueSize:             queueSize,
+				MaxRetries:            retries,
+				BaseBackoff:           backoff,
+				HTTPTimeout:           timeout,
+				SubmitMode:            submitMode,
+				SignedTxBroadcastPath: strings.TrimSpace(os.Getenv("COSMOS_SETTLEMENT_SIGNED_TX_BROADCAST_PATH")),
+				SignedTxChainID:       strings.TrimSpace(os.Getenv("COSMOS_SETTLEMENT_SIGNED_TX_CHAIN_ID")),
+				SignedTxSigner:        strings.TrimSpace(os.Getenv("COSMOS_SETTLEMENT_SIGNED_TX_SIGNER")),
+				SignedTxSecret:        strings.TrimSpace(os.Getenv("COSMOS_SETTLEMENT_SIGNED_TX_SECRET")),
+				SignedTxSecretFile:    strings.TrimSpace(os.Getenv("COSMOS_SETTLEMENT_SIGNED_TX_SECRET_FILE")),
+				SignedTxKeyID:         strings.TrimSpace(os.Getenv("COSMOS_SETTLEMENT_SIGNED_TX_KEY_ID")),
+			})
+			if err != nil {
+				log.Printf("issuer settlement: cosmos adapter init failed (%v); running memory-only mode", err)
+			} else {
+				opts = append(opts, settlement.WithChainAdapter(adapter))
+				log.Printf("issuer settlement: cosmos adapter enabled endpoint=%s", endpoint)
+			}
+		}
+	}
+
+	return settlement.NewMemoryService(opts...)
 }
 
 func baseClaimsForTier(issuerID string, subject string, keyEpoch int64, audience string, tokenType string, cnfPubKey string, tier int, expires time.Time, exitScope []string) crypto.CapabilityClaims {

@@ -24,6 +24,7 @@ import (
 	"privacynode/pkg/proto"
 	"privacynode/pkg/relay"
 	"privacynode/pkg/securehttp"
+	"privacynode/pkg/settlement"
 	"privacynode/pkg/wg"
 )
 
@@ -38,58 +39,61 @@ type sessionInfo struct {
 	peerAddr      string
 	peerLastSeen  int64
 	downNonce     uint64
+	ingressBytes  int64
+	egressBytes   int64
 }
 
 type Service struct {
-	addr                  string
-	dataAddr              string
-	issuerURL             string
-	issuerURLs            []string
-	issuerMinSources      int
-	issuerMinOperators    int
-	issuerRequireID       bool
-	revocationsURL        string
-	revocationsURLs       []string
-	dataMode              string
-	opaqueSinkAddr        string
-	opaqueSourceAddr      string
-	opaqueEcho            bool
-	wgPubKey              string
-	wgExitIP              string
-	wgMTU                 int
-	wgKeepaliveSec        int
-	ipAllocCursor         uint32
-	wgInterface           string
-	wgPrivateKey          string
-	wgListenPort          int
-	wgBackend             string
-	wgKernelProxy         bool
-	wgKernelProxyMax      int
-	wgKernelProxyIdle     time.Duration
-	sessionCleanupSec     int
-	wgKernelTargetUDP     *net.UDPAddr
-	wgManager             wg.Manager
-	liveWGMode            bool
-	wgOnlyMode            bool
-	egressBackend         string
-	egressIface           string
-	egressCIDR            string
-	egressChain           string
-	egressConfigured      bool
-	tokenProofReplayGuard bool
-	peerRebindAfter       time.Duration
-	revocationRefreshSec  int
-	accountingFile        string
-	accountingFlushSec    int
-	startupSyncTimeout    time.Duration
-	betaStrict            bool
-	prodStrict            bool
-	enforcer              *policy.Enforcer
-	httpClient            *http.Client
-	httpSrv               *http.Server
-	udpConn               *net.UDPConn
-	opaqueSourceConn      *net.UDPConn
-	opaqueSinkUDP         *net.UDPAddr
+	addr                   string
+	dataAddr               string
+	issuerURL              string
+	issuerURLs             []string
+	issuerMinSources       int
+	issuerMinOperators     int
+	issuerRequireID        bool
+	revocationsURL         string
+	revocationsURLs        []string
+	dataMode               string
+	opaqueSinkAddr         string
+	opaqueSourceAddr       string
+	opaqueEcho             bool
+	wgPubKey               string
+	wgExitIP               string
+	wgMTU                  int
+	wgKeepaliveSec         int
+	ipAllocCursor          uint32
+	wgInterface            string
+	wgPrivateKey           string
+	wgListenPort           int
+	wgBackend              string
+	wgKernelProxy          bool
+	wgKernelProxyMax       int
+	wgKernelProxyIdle      time.Duration
+	sessionCleanupSec      int
+	wgKernelTargetUDP      *net.UDPAddr
+	wgManager              wg.Manager
+	liveWGMode             bool
+	wgOnlyMode             bool
+	egressBackend          string
+	egressIface            string
+	egressCIDR             string
+	egressChain            string
+	egressConfigured       bool
+	tokenProofReplayGuard  bool
+	peerRebindAfter        time.Duration
+	revocationRefreshSec   int
+	accountingFile         string
+	accountingFlushSec     int
+	settlementReconcileSec int
+	startupSyncTimeout     time.Duration
+	betaStrict             bool
+	prodStrict             bool
+	enforcer               *policy.Enforcer
+	httpClient             *http.Client
+	httpSrv                *http.Server
+	udpConn                *net.UDPConn
+	opaqueSourceConn       *net.UDPConn
+	opaqueSinkUDP          *net.UDPAddr
 
 	mu                sync.RWMutex
 	issuerPub         ed25519.PublicKey
@@ -103,6 +107,9 @@ type Service struct {
 	revokedJTI        map[string]int64
 	minTokenEpoch     map[string]int64
 	revocationVersion map[string]int64
+	settlement        settlement.Service
+	sessionReserve    int64
+	settlementStatus  settlementStatusSnapshot
 }
 
 type exitMetrics struct {
@@ -132,6 +139,25 @@ type exitMetrics struct {
 	ActiveWGProxySessions   uint64 `json:"active_wg_proxy_sessions"`
 	ActiveSessions          uint64 `json:"active_sessions"`
 	AccountingUpdatedUnix   int64  `json:"accounting_updated_unix"`
+}
+
+type settlementStatusSnapshot struct {
+	lastReport    settlement.ReconcileReport
+	lastCheckedAt time.Time
+	lastError     string
+}
+
+type settlementStatusResponse struct {
+	Enabled                  bool      `json:"enabled"`
+	Stale                    bool      `json:"stale"`
+	CheckedAt                time.Time `json:"checked_at,omitempty"`
+	ReportGeneratedAt        time.Time `json:"report_generated_at,omitempty"`
+	PendingAdapterOperations int       `json:"pending_adapter_operations"`
+	PendingOperations        int       `json:"pending_operations"`
+	SubmittedOperations      int       `json:"submitted_operations"`
+	ConfirmedOperations      int       `json:"confirmed_operations"`
+	FailedOperations         int       `json:"failed_operations"`
+	LastError                string    `json:"last_error,omitempty"`
 }
 
 var deriveWGPublicKeyFromPrivateFile = wg.DerivePublicKeyFromPrivateFile
@@ -288,6 +314,12 @@ func New() *Service {
 			accountingFlushSec = n
 		}
 	}
+	settlementReconcileSec := 60
+	if v := os.Getenv("EXIT_SETTLEMENT_RECONCILE_SEC"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			settlementReconcileSec = n
+		}
+	}
 	startupSyncTimeout := time.Duration(0)
 	if v := strings.TrimSpace(os.Getenv("EXIT_STARTUP_SYNC_TIMEOUT_SEC")); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
@@ -296,6 +328,12 @@ func New() *Service {
 	}
 	betaStrict := os.Getenv("BETA_STRICT_MODE") == "1" || os.Getenv("EXIT_BETA_STRICT") == "1"
 	prodStrict := os.Getenv("PROD_STRICT_MODE") == "1" || os.Getenv("EXIT_PROD_STRICT") == "1"
+	sessionReserve := int64(200000)
+	if raw := strings.TrimSpace(os.Getenv("EXIT_SESSION_RESERVE_MICROS")); raw != "" {
+		if n, err := strconv.ParseInt(raw, 10, 64); err == nil && n > 0 {
+			sessionReserve = n
+		}
+	}
 	wgOnlyMode := os.Getenv("WG_ONLY_MODE") == "1" || os.Getenv("EXIT_WG_ONLY_MODE") == "1"
 	if prodStrict {
 		wgOnlyMode = true
@@ -314,59 +352,152 @@ func New() *Service {
 	}
 
 	return &Service{
-		addr:                  addr,
-		dataAddr:              dataAddr,
-		issuerURL:             issuerURL,
-		issuerURLs:            issuerURLs,
-		issuerMinSources:      issuerMinSources,
-		issuerMinOperators:    issuerMinOperators,
-		issuerRequireID:       issuerRequireID,
-		revocationsURL:        revocationsURL,
-		revocationsURLs:       revocationsURLs,
-		dataMode:              dataMode,
-		opaqueSinkAddr:        opaqueSinkAddr,
-		opaqueSourceAddr:      opaqueSourceAddr,
-		opaqueEcho:            opaqueEcho,
-		wgPubKey:              wgPubKey,
-		wgExitIP:              wgExitIP,
-		wgMTU:                 1280,
-		wgKeepaliveSec:        25,
-		ipAllocCursor:         2,
-		wgInterface:           wgInterface,
-		wgPrivateKey:          wgPrivateKey,
-		wgListenPort:          wgListenPort,
-		wgBackend:             wgBackend,
-		wgKernelProxy:         wgKernelProxy,
-		wgKernelProxyMax:      wgKernelProxyMax,
-		wgKernelProxyIdle:     wgKernelProxyIdle,
-		sessionCleanupSec:     sessionCleanupSec,
-		wgManager:             wgManager,
-		liveWGMode:            liveWGMode,
-		wgOnlyMode:            wgOnlyMode,
-		egressBackend:         egressBackend,
-		egressIface:           egressIface,
-		egressCIDR:            egressCIDR,
-		egressChain:           egressChain,
-		tokenProofReplayGuard: tokenProofReplayGuard,
-		peerRebindAfter:       peerRebindAfter,
-		revocationRefreshSec:  revocationRefreshSec,
-		accountingFile:        accountingFile,
-		accountingFlushSec:    accountingFlushSec,
-		startupSyncTimeout:    startupSyncTimeout,
-		betaStrict:            betaStrict,
-		prodStrict:            prodStrict,
-		enforcer:              policy.NewEnforcer(),
-		httpClient:            &http.Client{Timeout: 5 * time.Second},
-		issuerPubs:            make(map[string]ed25519.PublicKey),
-		issuerKeyIssuer:       make(map[string]string),
-		sessions:              make(map[string]sessionInfo),
-		wgSessionProxies:      make(map[string]*net.UDPConn),
-		wgProxyLastSeen:       make(map[string]int64),
-		proofNonceSeen:        make(map[string]map[string]int64),
-		revokedJTI:            make(map[string]int64),
-		minTokenEpoch:         make(map[string]int64),
-		revocationVersion:     make(map[string]int64),
+		addr:                   addr,
+		dataAddr:               dataAddr,
+		issuerURL:              issuerURL,
+		issuerURLs:             issuerURLs,
+		issuerMinSources:       issuerMinSources,
+		issuerMinOperators:     issuerMinOperators,
+		issuerRequireID:        issuerRequireID,
+		revocationsURL:         revocationsURL,
+		revocationsURLs:        revocationsURLs,
+		dataMode:               dataMode,
+		opaqueSinkAddr:         opaqueSinkAddr,
+		opaqueSourceAddr:       opaqueSourceAddr,
+		opaqueEcho:             opaqueEcho,
+		wgPubKey:               wgPubKey,
+		wgExitIP:               wgExitIP,
+		wgMTU:                  1280,
+		wgKeepaliveSec:         25,
+		ipAllocCursor:          2,
+		wgInterface:            wgInterface,
+		wgPrivateKey:           wgPrivateKey,
+		wgListenPort:           wgListenPort,
+		wgBackend:              wgBackend,
+		wgKernelProxy:          wgKernelProxy,
+		wgKernelProxyMax:       wgKernelProxyMax,
+		wgKernelProxyIdle:      wgKernelProxyIdle,
+		sessionCleanupSec:      sessionCleanupSec,
+		wgManager:              wgManager,
+		liveWGMode:             liveWGMode,
+		wgOnlyMode:             wgOnlyMode,
+		egressBackend:          egressBackend,
+		egressIface:            egressIface,
+		egressCIDR:             egressCIDR,
+		egressChain:            egressChain,
+		tokenProofReplayGuard:  tokenProofReplayGuard,
+		peerRebindAfter:        peerRebindAfter,
+		revocationRefreshSec:   revocationRefreshSec,
+		accountingFile:         accountingFile,
+		accountingFlushSec:     accountingFlushSec,
+		settlementReconcileSec: settlementReconcileSec,
+		startupSyncTimeout:     startupSyncTimeout,
+		betaStrict:             betaStrict,
+		prodStrict:             prodStrict,
+		enforcer:               policy.NewEnforcer(),
+		httpClient:             &http.Client{Timeout: 5 * time.Second},
+		issuerPubs:             make(map[string]ed25519.PublicKey),
+		issuerKeyIssuer:        make(map[string]string),
+		sessions:               make(map[string]sessionInfo),
+		wgSessionProxies:       make(map[string]*net.UDPConn),
+		wgProxyLastSeen:        make(map[string]int64),
+		proofNonceSeen:         make(map[string]map[string]int64),
+		revokedJTI:             make(map[string]int64),
+		minTokenEpoch:          make(map[string]int64),
+		revocationVersion:      make(map[string]int64),
+		settlement:             newSettlementServiceFromEnv(),
+		sessionReserve:         sessionReserve,
 	}
+}
+
+func newSettlementServiceFromEnv() settlement.Service {
+	pricePerMiB := int64(1000)
+	if raw := strings.TrimSpace(os.Getenv("SETTLEMENT_PRICE_PER_MIB_MICROS")); raw != "" {
+		if n, err := strconv.ParseInt(raw, 10, 64); err == nil && n > 0 {
+			pricePerMiB = n
+		}
+	}
+	currency := strings.TrimSpace(os.Getenv("SETTLEMENT_CURRENCY"))
+	if currency == "" {
+		currency = "TDPNC"
+	}
+	opts := []settlement.MemoryOption{
+		settlement.WithPricePerMiBMicros(pricePerMiB),
+		settlement.WithCurrency(currency),
+	}
+	nativeCurrency := strings.ToUpper(strings.TrimSpace(os.Getenv("SETTLEMENT_NATIVE_CURRENCY")))
+	if nativeCurrency != "" && nativeCurrency != strings.ToUpper(currency) {
+		rateNumerator := int64(1)
+		rateDenominator := int64(1)
+		if raw := strings.TrimSpace(os.Getenv("SETTLEMENT_NATIVE_RATE_NUMERATOR")); raw != "" {
+			if n, err := strconv.ParseInt(raw, 10, 64); err == nil && n > 0 {
+				rateNumerator = n
+			}
+		}
+		if raw := strings.TrimSpace(os.Getenv("SETTLEMENT_NATIVE_RATE_DENOMINATOR")); raw != "" {
+			if n, err := strconv.ParseInt(raw, 10, 64); err == nil && n > 0 {
+				rateDenominator = n
+			}
+		}
+		opts = append(opts, settlement.WithCurrencyRate(nativeCurrency, rateNumerator, rateDenominator))
+	}
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("SETTLEMENT_CHAIN_ADAPTER")), "cosmos") {
+		endpoint := strings.TrimSpace(os.Getenv("COSMOS_SETTLEMENT_ENDPOINT"))
+		if endpoint == "" {
+			log.Printf("exit settlement: cosmos adapter requested but COSMOS_SETTLEMENT_ENDPOINT is empty; running memory-only mode")
+		} else {
+			queueSize := 256
+			if raw := strings.TrimSpace(os.Getenv("COSMOS_SETTLEMENT_QUEUE_SIZE")); raw != "" {
+				if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+					queueSize = n
+				}
+			}
+			retries := 3
+			if raw := strings.TrimSpace(os.Getenv("COSMOS_SETTLEMENT_MAX_RETRIES")); raw != "" {
+				if n, err := strconv.Atoi(raw); err == nil && n >= 0 {
+					retries = n
+				}
+			}
+			backoff := 250 * time.Millisecond
+			if raw := strings.TrimSpace(os.Getenv("COSMOS_SETTLEMENT_BASE_BACKOFF_MS")); raw != "" {
+				if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+					backoff = time.Duration(n) * time.Millisecond
+				}
+			}
+			timeout := 4 * time.Second
+			if raw := strings.TrimSpace(os.Getenv("COSMOS_SETTLEMENT_HTTP_TIMEOUT_MS")); raw != "" {
+				if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+					timeout = time.Duration(n) * time.Millisecond
+				}
+			}
+			submitMode := strings.TrimSpace(os.Getenv("COSMOS_SETTLEMENT_SUBMIT_MODE"))
+			if submitMode == "" {
+				submitMode = settlement.CosmosSubmitModeHTTP
+			}
+			adapter, err := settlement.NewCosmosAdapter(settlement.CosmosAdapterConfig{
+				Endpoint:              endpoint,
+				APIKey:                strings.TrimSpace(os.Getenv("COSMOS_SETTLEMENT_API_KEY")),
+				QueueSize:             queueSize,
+				MaxRetries:            retries,
+				BaseBackoff:           backoff,
+				HTTPTimeout:           timeout,
+				SubmitMode:            submitMode,
+				SignedTxBroadcastPath: strings.TrimSpace(os.Getenv("COSMOS_SETTLEMENT_SIGNED_TX_BROADCAST_PATH")),
+				SignedTxChainID:       strings.TrimSpace(os.Getenv("COSMOS_SETTLEMENT_SIGNED_TX_CHAIN_ID")),
+				SignedTxSigner:        strings.TrimSpace(os.Getenv("COSMOS_SETTLEMENT_SIGNED_TX_SIGNER")),
+				SignedTxSecret:        strings.TrimSpace(os.Getenv("COSMOS_SETTLEMENT_SIGNED_TX_SECRET")),
+				SignedTxSecretFile:    strings.TrimSpace(os.Getenv("COSMOS_SETTLEMENT_SIGNED_TX_SECRET_FILE")),
+				SignedTxKeyID:         strings.TrimSpace(os.Getenv("COSMOS_SETTLEMENT_SIGNED_TX_KEY_ID")),
+			})
+			if err != nil {
+				log.Printf("exit settlement: cosmos adapter init failed (%v); running memory-only mode", err)
+			} else {
+				opts = append(opts, settlement.WithChainAdapter(adapter))
+				log.Printf("exit settlement: cosmos adapter enabled endpoint=%s", endpoint)
+			}
+		}
+	}
+	return settlement.NewMemoryService(opts...)
 }
 
 func (s *Service) Run(ctx context.Context) error {
@@ -376,8 +507,8 @@ func (s *Service) Run(ctx context.Context) error {
 	}
 	s.httpClient = httpClient
 
-	log.Printf("exit wg backend=%s iface=%s listen_port=%d kernel_proxy=%t kernel_proxy_max_sessions=%d kernel_proxy_idle_sec=%d opaque_echo=%t token_proof_replay_guard=%t peer_rebind_sec=%d startup_sync_timeout_sec=%d issuer_min_sources=%d issuer_min_operators=%d issuer_require_id=%t wg_only=%t beta_strict=%t",
-		s.wgBackend, s.wgInterface, s.wgListenPort, s.wgKernelProxy, s.effectiveWGKernelProxyMax(), int(s.wgKernelProxyIdle/time.Second), s.opaqueEcho, s.tokenProofReplayGuard, int(s.peerRebindAfter/time.Second), int(s.startupSyncTimeout/time.Second), s.issuerMinSources, s.issuerMinOperators, s.issuerRequireID, s.wgOnlyMode, s.betaStrict)
+	log.Printf("exit wg backend=%s iface=%s listen_port=%d kernel_proxy=%t kernel_proxy_max_sessions=%d kernel_proxy_idle_sec=%d opaque_echo=%t token_proof_replay_guard=%t peer_rebind_sec=%d startup_sync_timeout_sec=%d issuer_min_sources=%d issuer_min_operators=%d issuer_require_id=%t wg_only=%t beta_strict=%t settlement_reconcile_sec=%d",
+		s.wgBackend, s.wgInterface, s.wgListenPort, s.wgKernelProxy, s.effectiveWGKernelProxyMax(), int(s.wgKernelProxyIdle/time.Second), s.opaqueEcho, s.tokenProofReplayGuard, int(s.peerRebindAfter/time.Second), int(s.startupSyncTimeout/time.Second), s.issuerMinSources, s.issuerMinOperators, s.issuerRequireID, s.wgOnlyMode, s.betaStrict, s.settlementReconcileSec)
 	if err := s.validateRuntimeConfig(); err != nil {
 		return err
 	}
@@ -424,6 +555,7 @@ func (s *Service) Run(ctx context.Context) error {
 	mux.HandleFunc("/v1/path/close", s.handlePathClose)
 	mux.HandleFunc("/v1/health", s.handleHealth)
 	mux.HandleFunc("/v1/metrics", s.handleMetrics)
+	mux.HandleFunc("/v1/settlement/status", s.handleSettlementStatus)
 
 	s.httpSrv = &http.Server{Addr: s.addr, Handler: mux}
 	errCh := make(chan error, 2)
@@ -453,6 +585,11 @@ func (s *Service) Run(ctx context.Context) error {
 	if s.accountingFile != "" {
 		accountingTicker = time.NewTicker(time.Duration(s.accountingFlushSec) * time.Second)
 		defer accountingTicker.Stop()
+	}
+	var settlementReconcileTicker *time.Ticker
+	if s.settlementReconcileSec > 0 && s.settlement != nil {
+		settlementReconcileTicker = time.NewTicker(time.Duration(s.settlementReconcileSec) * time.Second)
+		defer settlementReconcileTicker.Stop()
 	}
 
 	for {
@@ -487,6 +624,10 @@ func (s *Service) Run(ctx context.Context) error {
 			}
 		case <-cleanupTicker.C:
 			s.cleanupExpiredSessions(time.Now())
+		case <-tickerC(settlementReconcileTicker):
+			reconcileCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			s.reconcileSettlement(reconcileCtx)
+			cancel()
 		case <-tickerC(accountingTicker):
 			if err := s.flushAccountingSnapshot(time.Now()); err != nil {
 				log.Printf("exit accounting flush failed: %v", err)
@@ -515,6 +656,9 @@ func (s *Service) validateRuntimeConfig() error {
 	}
 	if s.sessionCleanupSec == 0 {
 		s.sessionCleanupSec = 30
+	}
+	if s.settlementReconcileSec < 0 {
+		return fmt.Errorf("EXIT_SETTLEMENT_RECONCILE_SEC must be >=0")
 	}
 	if s.wgListenPort == 0 {
 		s.wgListenPort = 51831
@@ -816,6 +960,7 @@ func (s *Service) startUDP(ctx context.Context, errCh chan<- error) error {
 					_, _ = conn.WriteToUDP(raw, s.opaqueSinkUDP)
 				}
 				s.recordAccept(uint64(len(raw)), claims.Tier)
+				s.recordSessionIngress(sessionID, int64(len(raw)))
 			default:
 				var inner proto.InnerPacket
 				if err := json.Unmarshal(payload, &inner); err != nil {
@@ -848,6 +993,7 @@ func (s *Service) startUDP(ctx context.Context, errCh chan<- error) error {
 				}
 				log.Printf("exit accepted packet session=%s dest_port=%d payload_len=%d", sessionID, inner.DestinationPort, len(inner.Payload))
 				s.recordAccept(uint64(len(inner.Payload)), claims.Tier)
+				s.recordSessionIngress(sessionID, int64(len(inner.Payload)))
 			}
 		}
 	}()
@@ -911,6 +1057,7 @@ func (s *Service) startOpaqueSource(ctx context.Context, errCh chan<- error) err
 				continue
 			}
 			s.recordDownlinkForward(uint64(len(payload)))
+			s.recordSessionEgress(sessionID, int64(len(payload)))
 		}
 	}()
 
@@ -1107,6 +1254,7 @@ func (s *Service) runWGSessionProxy(sessionID string, proxyConn *net.UDPConn) {
 			continue
 		}
 		s.recordDownlinkForward(uint64(len(payload)))
+		s.recordSessionEgress(sessionID, int64(len(payload)))
 	}
 }
 
@@ -1376,6 +1524,11 @@ func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
 	if staleProxy != nil {
 		_ = staleProxy.Close()
 	}
+	subjectForSettlement := strings.TrimSpace(claims.Subject)
+	if subjectForSettlement == "" {
+		subjectForSettlement = "client-anon"
+	}
+	s.reserveSettlementForSession(r.Context(), req.SessionID, subjectForSettlement)
 
 	if req.Transport == "wireguard-udp" {
 		wgCfg := wg.SessionConfig{
@@ -1460,6 +1613,7 @@ func (s *Service) handlePathClose(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	s.finalizeSettlementForSession(r.Context(), req.SessionID, session)
 	log.Printf("exit closed session=%s", req.SessionID)
 	_ = json.NewEncoder(w).Encode(proto.PathCloseResponse{Closed: true})
 }
@@ -1511,6 +1665,7 @@ func verifyPathOpenTokenProof(req proto.PathOpenRequest, claims crypto.Capabilit
 	input := crypto.PathOpenProofInput{
 		Token:           req.Token,
 		ExitID:          req.ExitID,
+		MiddleRelayID:   req.MiddleRelayID,
 		TokenProofNonce: req.TokenProofNonce,
 		ClientInnerPub:  req.ClientInnerPub,
 		Transport:       req.Transport,
@@ -1910,6 +2065,133 @@ func (s *Service) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(m)
 }
 
+func (s *Service) handleSettlementStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	resp := settlementStatusResponse{
+		Enabled: s.settlement != nil,
+	}
+	if s.settlement != nil {
+		reconcileCtx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		report, stale, err := s.reconcileSettlementStatus(reconcileCtx)
+		cancel()
+		if err != nil {
+			log.Printf("exit settlement status warning err=%v", err)
+		}
+		s.mu.RLock()
+		resp.CheckedAt = s.settlementStatus.lastCheckedAt
+		resp.LastError = s.settlementStatus.lastError
+		s.mu.RUnlock()
+		resp.Stale = stale
+		resp.ReportGeneratedAt = report.GeneratedAt
+		resp.PendingAdapterOperations = report.PendingAdapterOperations
+		resp.PendingOperations = report.PendingOperations
+		resp.SubmittedOperations = report.SubmittedOperations
+		resp.ConfirmedOperations = report.ConfirmedOperations
+		resp.FailedOperations = report.FailedOperations
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func (s *Service) reserveSettlementForSession(ctx context.Context, sessionID string, subjectID string) {
+	if s.settlement == nil {
+		return
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	subjectID = strings.TrimSpace(subjectID)
+	if sessionID == "" || subjectID == "" {
+		return
+	}
+	amount := s.sessionReserve
+	if amount <= 0 {
+		amount = 200000
+	}
+	_, err := s.settlement.ReserveFunds(ctx, settlement.FundReservation{
+		SessionID:    sessionID,
+		SubjectID:    subjectID,
+		AmountMicros: amount,
+	})
+	if err != nil {
+		log.Printf("exit settlement reserve warning session=%s err=%v", sessionID, err)
+	}
+}
+
+func (s *Service) finalizeSettlementForSession(ctx context.Context, sessionID string, session sessionInfo) {
+	if s.settlement == nil {
+		return
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return
+	}
+	subjectID := strings.TrimSpace(session.claims.Subject)
+	if subjectID == "" {
+		subjectID = "client-anon"
+	}
+	if err := s.settlement.RecordUsage(ctx, settlement.UsageRecord{
+		SessionID:    sessionID,
+		SubjectID:    subjectID,
+		BytesIngress: session.ingressBytes,
+		BytesEgress:  session.egressBytes,
+		RecordedAt:   time.Now().UTC(),
+	}); err != nil {
+		log.Printf("exit settlement usage warning session=%s err=%v", sessionID, err)
+		return
+	}
+	sessionSettlement, err := s.settlement.SettleSession(ctx, sessionID)
+	if err != nil {
+		log.Printf("exit settlement finalize warning session=%s err=%v", sessionID, err)
+		return
+	}
+	rewardMicros := sessionSettlement.ChargedMicros / 2
+	if rewardMicros <= 0 {
+		return
+	}
+	providerSubjectID := "exit:" + strings.ReplaceAll(s.addr, ":", "_")
+	if _, err := s.settlement.IssueReward(ctx, settlement.RewardIssue{
+		RewardID:          "rew-" + sessionID,
+		ProviderSubjectID: providerSubjectID,
+		SessionID:         sessionID,
+		RewardMicros:      rewardMicros,
+		Currency:          sessionSettlement.Currency,
+		IssuedAt:          time.Now().UTC(),
+	}); err != nil {
+		log.Printf("exit settlement reward warning session=%s err=%v", sessionID, err)
+	}
+}
+
+func (s *Service) reconcileSettlement(ctx context.Context) {
+	report, _, err := s.reconcileSettlementStatus(ctx)
+	if err != nil {
+		log.Printf("exit settlement reconcile warning err=%v", err)
+		return
+	}
+	if report.PendingAdapterOperations > 0 || report.FailedOperations > 0 {
+		log.Printf("exit settlement reconcile pending=%d failed=%d", report.PendingAdapterOperations, report.FailedOperations)
+	}
+}
+
+func (s *Service) reconcileSettlementStatus(ctx context.Context) (settlement.ReconcileReport, bool, error) {
+	if s.settlement == nil {
+		return settlement.ReconcileReport{}, false, nil
+	}
+	report, err := s.settlement.Reconcile(ctx)
+	checkedAt := time.Now().UTC()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.settlementStatus.lastCheckedAt = checkedAt
+	if err != nil {
+		s.settlementStatus.lastError = err.Error()
+		return s.settlementStatus.lastReport, true, err
+	}
+	s.settlementStatus.lastReport = report
+	s.settlementStatus.lastError = ""
+	return report, false, nil
+}
+
 func (s *Service) recordAccept(bytes uint64, tier int) {
 	s.mu.Lock()
 	s.metrics.AcceptedPackets++
@@ -1923,6 +2205,32 @@ func (s *Service) recordAccept(bytes uint64, tier int) {
 		s.metrics.AcceptedTier3Packets++
 	}
 	s.metrics.AccountingUpdatedUnix = time.Now().Unix()
+	s.mu.Unlock()
+}
+
+func (s *Service) recordSessionIngress(sessionID string, bytes int64) {
+	if bytes <= 0 || strings.TrimSpace(sessionID) == "" {
+		return
+	}
+	s.mu.Lock()
+	session, ok := s.sessions[sessionID]
+	if ok {
+		session.ingressBytes += bytes
+		s.sessions[sessionID] = session
+	}
+	s.mu.Unlock()
+}
+
+func (s *Service) recordSessionEgress(sessionID string, bytes int64) {
+	if bytes <= 0 || strings.TrimSpace(sessionID) == "" {
+		return
+	}
+	s.mu.Lock()
+	session, ok := s.sessions[sessionID]
+	if ok {
+		session.egressBytes += bytes
+		s.sessions[sessionID] = session
+	}
 	s.mu.Unlock()
 }
 

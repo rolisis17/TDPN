@@ -141,7 +141,9 @@ for env_key in \
   "COSMOS_SETTLEMENT_SIGNED_TX_BROADCAST_PATH" \
   "COSMOS_SETTLEMENT_SIGNED_TX_CHAIN_ID" \
   "COSMOS_SETTLEMENT_SIGNED_TX_SIGNER" \
-  "COSMOS_SETTLEMENT_SIGNED_TX_SECRET"
+  "COSMOS_SETTLEMENT_SIGNED_TX_SECRET" \
+  "COSMOS_SETTLEMENT_SIGNED_TX_SECRET_FILE" \
+  "COSMOS_SETTLEMENT_SIGNED_TX_KEY_ID"
 do
   if ! rg -Fq "$env_key" "$cosmos_runtime_doc"; then
     echo "cosmos settlement runtime guide must document $env_key"
