@@ -809,6 +809,13 @@ func TestMemoryServiceCosmosAdapterAsyncFailureAfterEnqueueReplaysAndConfirms(t 
 	waitForCondition(t, 2*time.Second, func() bool {
 		return adapter.deferredOperationCount() == 1
 	}, "adapter deferred backlog after async failure")
+	reportWithDeferred, err := s.Reconcile(ctx)
+	if err != nil {
+		t.Fatalf("Reconcile with async adapter deferred backlog: %v", err)
+	}
+	if reportWithDeferred.PendingAdapterOperations < 1 {
+		t.Fatalf("expected reconcile report pending adapter operations >= 1 while adapter backlog exists, got %d", reportWithDeferred.PendingAdapterOperations)
+	}
 
 	failWrites.Store(false)
 	waitForCondition(t, 2*time.Second, func() bool {

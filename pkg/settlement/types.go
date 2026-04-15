@@ -194,3 +194,9 @@ type ChainConfirmationQuerier interface {
 	HasSponsorReservation(ctx context.Context, reservationID string) (bool, error)
 	HasSlashEvidence(ctx context.Context, evidenceID string) (bool, error)
 }
+
+// ChainDeferredReporter is an optional chain-adapter extension for surfacing
+// adapter-internal deferred backlog (for async submission failures after enqueue).
+type ChainDeferredReporter interface {
+	DeferredOperationCount() int
+}

@@ -504,6 +504,11 @@ func (s *MemoryService) Reconcile(ctx context.Context) (ReconcileReport, error) 
 	s.replayDeferredAdapterOperations(ctx)
 	s.confirmSubmittedAdapterOperations(ctx)
 
+	adapterDeferredCount := 0
+	if reporter, ok := s.currentAdapter().(ChainDeferredReporter); ok && reporter != nil {
+		adapterDeferredCount = reporter.DeferredOperationCount()
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	report := ReconcileReport{
@@ -515,7 +520,7 @@ func (s *MemoryService) Reconcile(ctx context.Context) (ReconcileReport, error) 
 		SponsorReservations:      len(s.sponsorReservationsByID),
 		SponsorAuthorizations:    len(s.paymentAuthByReservationID),
 		SubmittedSlashEvidence:   len(s.slashEvidenceByID),
-		PendingAdapterOperations: len(s.deferredAdapterOps),
+		PendingAdapterOperations: len(s.deferredAdapterOps) + adapterDeferredCount,
 		ShadowAdapterConfigured:  s.shadowAdapter != nil,
 	}
 

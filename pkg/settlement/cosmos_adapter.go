@@ -449,6 +449,12 @@ func (a *CosmosAdapter) deferredOperationCount() int {
 	return len(a.deferredOp)
 }
 
+// DeferredOperationCount exposes adapter-internal deferred backlog size through
+// the optional ChainDeferredReporter interface.
+func (a *CosmosAdapter) DeferredOperationCount() int {
+	return a.deferredOperationCount()
+}
+
 func (a *CosmosAdapter) deferredOperationByID(id string) (cosmosDeferredOperation, bool) {
 	a.stateMu.Lock()
 	defer a.stateMu.Unlock()
