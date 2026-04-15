@@ -1,6 +1,6 @@
 # TDPN Full Execution Plan (VPN -> Windows Native -> Cosmos L1)
 
-Last updated: 2026-04-15
+Last updated: 2026-04-16
 
 This is the implementation baseline for the next stages of TDPN.
 
@@ -67,12 +67,14 @@ Exit gate:
 ### Phase 7: Mainnet Cutover
 - progressive migration with rollback path to chain-assisted mode
 
-## Cosmos Execution Update (April 15, 2026)
+## Cosmos Execution Update (April 16, 2026)
 
 - `tdpnd` runtime now supports `--state-dir` to enable file-backed module stores without coupling VPN dataplane behavior to chain liveness.
 - Chain scaffold/module ordering now includes `vpnbilling`, `vpnrewards`, `vpnslashing`, `vpnsponsor`, `vpnvalidator`, and `vpngovernance`.
 - Runtime state-dir persistence now materializes module state files for validator/governance namespaces (`vpnvalidator.json`, `vpngovernance.json`) alongside existing module stores.
 - gRPC runtime registration now includes module service namespaces for validator/governance (`tdpn.vpnvalidator.v1.{Msg,Query}` and `tdpn.vpngovernance.v1.{Msg,Query}`) in addition to billing/rewards/slashing/sponsor.
+- `vpngovernance` now persists append-only admin audit actions (`action_id`, `action`, `actor`, `reason`, `evidence_pointer`, `timestamp_unix`) with replay-safe idempotency and conflict-on-divergence behavior.
+- `vpnvalidator` now exposes deterministic epoch selection helpers (hard-gate filtering, warmup/cooldown checks, stable-seat then rotating-seat fill, and operator/ASN/region concentration caps).
 - Settlement bridge now includes read/query `GET` endpoints (list + by-id) across billing/rewards/sponsor/slashing modules in addition to `POST` write paths.
 - CI/local integration now includes `scripts/integration_cosmos_tdpnd_state_dir_persistence.sh` for state-dir wiring and reopen-persistence verification.
 - Phase 5 CI now includes the `settlement_adapter_roundtrip` gate backed by `scripts/integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh` to verify end-to-end adapter -> `tdpnd` bridge submissions before promotion.

@@ -20,6 +20,9 @@ This document captures the active Cosmos-first bootstrap model running in parall
 - Status: active implementation with phased rollout (`devnet -> testnet -> production gate`).
 - In scope: validator onboarding policy, hybrid governance bootstrap, eligibility scoring, epoch selection, and graduation criteria.
 - Out of scope for now: final tokenomics constants, full permissionless onboarding, and subjective abuse automation.
+- Current module posture:
+  - `x/vpngovernance` persists append-only admin audit actions (`action_id`, `action`, `actor`, `reason`, `evidence_pointer`, `timestamp_unix`) with replay-safe idempotency.
+  - `x/vpnvalidator` provides deterministic epoch selection helpers for hard gates, warmup/cooldown checks, stable-seat/rotating-seat fill, and concentration caps.
 
 ## Phase 0: Hybrid Governance Bootstrap (Small Network)
 

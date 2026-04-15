@@ -35,6 +35,16 @@ type GovernanceDecision struct {
 	Status        chaintypes.ReconciliationStatus
 }
 
+// GovernanceAuditAction captures append-only bootstrap governance admin actions.
+type GovernanceAuditAction struct {
+	ActionID        string
+	Action          string
+	Actor           string
+	Reason          string
+	EvidencePointer string
+	TimestampUnix   int64
+}
+
 func (p GovernancePolicy) ValidateBasic() error {
 	if strings.TrimSpace(p.PolicyID) == "" {
 		return errors.New("policy id is required")
@@ -69,6 +79,28 @@ func (d GovernanceDecision) ValidateBasic() error {
 	}
 	if !isValidDecisionOutcome(d.Outcome) {
 		return errors.New("decision outcome must be approve, reject, or abstain")
+	}
+	return nil
+}
+
+func (a GovernanceAuditAction) ValidateBasic() error {
+	if strings.TrimSpace(a.ActionID) == "" {
+		return errors.New("action id is required")
+	}
+	if strings.TrimSpace(a.Action) == "" {
+		return errors.New("action is required")
+	}
+	if strings.TrimSpace(a.Actor) == "" {
+		return errors.New("actor is required")
+	}
+	if strings.TrimSpace(a.Reason) == "" {
+		return errors.New("reason is required")
+	}
+	if strings.TrimSpace(a.EvidencePointer) == "" {
+		return errors.New("evidence pointer is required")
+	}
+	if a.TimestampUnix <= 0 {
+		return errors.New("timestamp_unix must be positive")
 	}
 	return nil
 }

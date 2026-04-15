@@ -133,6 +133,14 @@ func (k *Keeper) ListStatusRecords() []types.ValidatorStatusRecord {
 	return records
 }
 
+// SelectEpochValidators applies deterministic bootstrap policy for stable and rotating seat selection.
+func (k *Keeper) SelectEpochValidators(
+	policy types.EpochSelectionPolicy,
+	candidates []types.EpochValidatorCandidate,
+) (types.EpochSelectionResult, error) {
+	return types.SelectEpochValidators(policy, candidates)
+}
+
 func normalizeEligibility(record types.ValidatorEligibility) types.ValidatorEligibility {
 	if record.Status == "" {
 		record.Status = chaintypes.ReconciliationPending

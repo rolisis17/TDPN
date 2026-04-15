@@ -1153,6 +1153,40 @@ for module_name in vpnvalidator vpngovernance; do
     exit 1
   fi
 done
+if ! rg -Fq "append-only admin audit actions" "$full_plan"; then
+  echo "full execution plan must document append-only governance admin audit actions posture"
+  exit 1
+fi
+if ! rg -Fq "deterministic epoch selection helpers" "$full_plan"; then
+  echo "full execution plan must document deterministic validator epoch selection posture"
+  exit 1
+fi
+if ! rg -Fq "append-only governance admin audit actions" "$product_roadmap"; then
+  echo "product roadmap must document append-only governance admin audit action posture"
+  exit 1
+fi
+if ! rg -Fq "deterministic epoch selection helpers" "$product_roadmap"; then
+  echo "product roadmap must document deterministic validator epoch selection posture"
+  exit 1
+fi
+if ! rg -Fq "x/vpngovernance" "$bootstrap_validator_doc" \
+  || ! rg -Fq "append-only admin audit actions" "$bootstrap_validator_doc"; then
+  echo "bootstrap validator plan must document vpngovernance append-only audit-action posture"
+  exit 1
+fi
+if ! rg -Fq "x/vpnvalidator" "$bootstrap_validator_doc" \
+  || ! rg -Fq "deterministic epoch selection helpers" "$bootstrap_validator_doc"; then
+  echo "bootstrap validator plan must document vpnvalidator deterministic epoch-selection posture"
+  exit 1
+fi
+if ! rg -Fq "append-only admin audit actions" "$chain_readme"; then
+  echo "chain README must document vpngovernance append-only audit-action capability"
+  exit 1
+fi
+if ! rg -Fq "deterministic epoch-selection helper logic" "$chain_readme"; then
+  echo "chain README must document vpnvalidator deterministic epoch-selection capability"
+  exit 1
+fi
 if ! rg -Fq "vpnvalidator.json" "$chain_scaffold_file"; then
   echo "chain scaffold must persist vpnvalidator state-dir file store"
   exit 1

@@ -131,3 +131,73 @@ func TestGovernanceDecisionValidateBasic(t *testing.T) {
 		})
 	}
 }
+
+func TestGovernanceAuditActionValidateBasic(t *testing.T) {
+	t.Parallel()
+
+	base := GovernanceAuditAction{
+		ActionID:        "action-1",
+		Action:          "admin_allow_validator",
+		Actor:           "bootstrap-admin-1",
+		Reason:          "manual bootstrap allowlist",
+		EvidencePointer: "ipfs://audit/action-1",
+		TimestampUnix:   4102444800,
+	}
+
+	tests := []struct {
+		name    string
+		record  GovernanceAuditAction
+		wantErr string
+	}{
+		{name: "valid", record: base},
+		{
+			name:    "missing action id",
+			record:  GovernanceAuditAction{Action: base.Action, Actor: base.Actor, Reason: base.Reason, EvidencePointer: base.EvidencePointer, TimestampUnix: base.TimestampUnix},
+			wantErr: "action id is required",
+		},
+		{
+			name:    "missing action",
+			record:  GovernanceAuditAction{ActionID: base.ActionID, Actor: base.Actor, Reason: base.Reason, EvidencePointer: base.EvidencePointer, TimestampUnix: base.TimestampUnix},
+			wantErr: "action is required",
+		},
+		{
+			name:    "missing actor",
+			record:  GovernanceAuditAction{ActionID: base.ActionID, Action: base.Action, Reason: base.Reason, EvidencePointer: base.EvidencePointer, TimestampUnix: base.TimestampUnix},
+			wantErr: "actor is required",
+		},
+		{
+			name:    "missing reason",
+			record:  GovernanceAuditAction{ActionID: base.ActionID, Action: base.Action, Actor: base.Actor, EvidencePointer: base.EvidencePointer, TimestampUnix: base.TimestampUnix},
+			wantErr: "reason is required",
+		},
+		{
+			name:    "missing evidence pointer",
+			record:  GovernanceAuditAction{ActionID: base.ActionID, Action: base.Action, Actor: base.Actor, Reason: base.Reason, TimestampUnix: base.TimestampUnix},
+			wantErr: "evidence pointer is required",
+		},
+		{
+			name:    "non-positive timestamp",
+			record:  GovernanceAuditAction{ActionID: base.ActionID, Action: base.Action, Actor: base.Actor, Reason: base.Reason, EvidencePointer: base.EvidencePointer, TimestampUnix: 0},
+			wantErr: "timestamp_unix must be positive",
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			err := tc.record.ValidateBasic()
+			if tc.wantErr == "" && err != nil {
+				t.Fatalf("expected nil error, got %v", err)
+			}
+			if tc.wantErr != "" {
+				if err == nil {
+					t.Fatalf("expected error %q, got nil", tc.wantErr)
+				}
+				if err.Error() != tc.wantErr {
+					t.Fatalf("expected error %q, got %q", tc.wantErr, err.Error())
+				}
+			}
+		})
+	}
+}

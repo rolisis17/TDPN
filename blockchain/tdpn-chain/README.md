@@ -14,8 +14,8 @@ This workspace defines the initial module boundaries for TDPN's VPN-compatible b
 - `x/vpnrewards`: provider reward accrual/distribution events.
 - `x/vpnslashing`: objective slash evidence ingestion and deterministic penalty execution.
 - `x/vpnsponsor`: sponsor account controls and credit delegation to end-user sessions.
-- `x/vpnvalidator`: validator eligibility and policy-scored validator metadata (scaffolded runtime module presence).
-- `x/vpngovernance`: governance/policy control-plane module namespace (scaffolded runtime module presence).
+- `x/vpnvalidator`: validator eligibility/state records plus deterministic epoch-selection helper logic (hard gates, warmup/cooldown, stable+rotating seats, concentration caps).
+- `x/vpngovernance`: governance/policy control-plane records including append-only admin audit actions with replay-safe idempotency.
 
 ## Governance posture (hybrid v1)
 - Objective machine-verifiable events can be enforced on-chain.

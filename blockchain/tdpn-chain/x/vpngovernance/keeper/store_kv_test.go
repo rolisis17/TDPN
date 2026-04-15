@@ -35,6 +35,24 @@ func TestKVStoreUpsertGetList(t *testing.T) {
 		t.Fatalf("expected decision %+v, got %+v", decision, gotDecision)
 	}
 
+	auditAction := types.GovernanceAuditAction{
+		ActionID:        "audit-1",
+		Action:          "admin_allow_validator",
+		Actor:           "bootstrap-admin-1",
+		Reason:          "bootstrap policy update",
+		EvidencePointer: "ipfs://evidence/audit-1",
+		TimestampUnix:   4102444800,
+	}
+	store.PutAuditAction(auditAction)
+
+	gotAudit, ok := store.GetAuditAction(auditAction.ActionID)
+	if !ok {
+		t.Fatal("expected audit action to exist")
+	}
+	if gotAudit != auditAction {
+		t.Fatalf("expected audit action %+v, got %+v", auditAction, gotAudit)
+	}
+
 	policies := store.ListPolicies()
 	if len(policies) != 1 {
 		t.Fatalf("expected 1 policy, got %d", len(policies))
@@ -49,6 +67,14 @@ func TestKVStoreUpsertGetList(t *testing.T) {
 	}
 	if decisions[0] != decision {
 		t.Fatalf("expected listed decision %+v, got %+v", decision, decisions[0])
+	}
+
+	auditActions := store.ListAuditActions()
+	if len(auditActions) != 1 {
+		t.Fatalf("expected 1 audit action, got %d", len(auditActions))
+	}
+	if auditActions[0] != auditAction {
+		t.Fatalf("expected listed audit action %+v, got %+v", auditAction, auditActions[0])
 	}
 }
 
@@ -65,6 +91,10 @@ func TestKVStoreListOrderingAndSkipsMalformedEntries(t *testing.T) {
 	store.UpsertDecision(types.GovernanceDecision{DecisionID: "decision-2", PolicyID: "policy-2", ProposalID: "proposal-2", Outcome: types.DecisionOutcomeApprove, Decider: "c2", DecidedAtUnix: 2, Status: chaintypes.ReconciliationSubmitted})
 	store.UpsertDecision(types.GovernanceDecision{DecisionID: "decision-1", PolicyID: "policy-1", ProposalID: "proposal-1", Outcome: types.DecisionOutcomeReject, Decider: "c1", DecidedAtUnix: 1, Status: chaintypes.ReconciliationSubmitted})
 	backend.Set([]byte("decision/bad-json"), []byte("{not-valid-json"))
+
+	store.PutAuditAction(types.GovernanceAuditAction{ActionID: "audit-2", Action: "admin_allow_validator", Actor: "a2", Reason: "r2", EvidencePointer: "ipfs://a2", TimestampUnix: 2})
+	store.PutAuditAction(types.GovernanceAuditAction{ActionID: "audit-1", Action: "admin_disable_validator", Actor: "a1", Reason: "r1", EvidencePointer: "ipfs://a1", TimestampUnix: 1})
+	backend.Set([]byte("audit_action/bad-json"), []byte("{not-valid-json"))
 
 	policies := store.ListPolicies()
 	if len(policies) != 2 {
@@ -86,5 +116,16 @@ func TestKVStoreListOrderingAndSkipsMalformedEntries(t *testing.T) {
 	}
 	if _, ok := store.GetDecision("bad-json"); ok {
 		t.Fatal("expected malformed decision payload to be rejected by GetDecision")
+	}
+
+	auditActions := store.ListAuditActions()
+	if len(auditActions) != 2 {
+		t.Fatalf("expected 2 valid audit actions, got %d", len(auditActions))
+	}
+	if auditActions[0].ActionID != "audit-1" || auditActions[1].ActionID != "audit-2" {
+		t.Fatalf("expected audit list ordered by key, got %+v", auditActions)
+	}
+	if _, ok := store.GetAuditAction("bad-json"); ok {
+		t.Fatal("expected malformed audit payload to be rejected by GetAuditAction")
 	}
 }

@@ -128,6 +128,49 @@ func (k *Keeper) ListDecisions() []types.GovernanceDecision {
 	return records
 }
 
+// RecordAuditAction inserts an append-only governance admin action keyed by ActionID.
+// Replaying the exact same record is idempotent, while divergent payloads conflict.
+func (k *Keeper) RecordAuditAction(record types.GovernanceAuditAction) (types.GovernanceAuditAction, error) {
+	if err := record.ValidateBasic(); err != nil {
+		return types.GovernanceAuditAction{}, err
+	}
+
+	normalized := normalizeAuditAction(record)
+
+	k.mu.Lock()
+	defer k.mu.Unlock()
+
+	existing, ok := k.store.GetAuditAction(normalized.ActionID)
+	if ok {
+		normalizedExisting := normalizeAuditAction(existing)
+		if !auditActionRecordsEqual(normalizedExisting, normalized) {
+			return types.GovernanceAuditAction{}, conflictError("audit action", normalized.ActionID)
+		}
+		k.store.PutAuditAction(normalizedExisting)
+		return normalizedExisting, nil
+	}
+
+	k.store.PutAuditAction(normalized)
+	return normalized, nil
+}
+
+func (k *Keeper) GetAuditAction(actionID string) (types.GovernanceAuditAction, bool) {
+	k.mu.RLock()
+	defer k.mu.RUnlock()
+	return k.store.GetAuditAction(actionID)
+}
+
+func (k *Keeper) ListAuditActions() []types.GovernanceAuditAction {
+	k.mu.RLock()
+	defer k.mu.RUnlock()
+
+	records := append([]types.GovernanceAuditAction(nil), k.store.ListAuditActions()...)
+	sort.Slice(records, func(i, j int) bool {
+		return strings.Compare(records[i].ActionID, records[j].ActionID) < 0
+	})
+	return records
+}
+
 func normalizePolicy(record types.GovernancePolicy) types.GovernancePolicy {
 	if record.Status == "" {
 		record.Status = chaintypes.ReconciliationPending
@@ -140,6 +183,15 @@ func normalizeDecision(record types.GovernanceDecision) types.GovernanceDecision
 		record.Status = chaintypes.ReconciliationPending
 	}
 	record.Outcome = strings.ToLower(strings.TrimSpace(record.Outcome))
+	return record
+}
+
+func normalizeAuditAction(record types.GovernanceAuditAction) types.GovernanceAuditAction {
+	record.ActionID = strings.TrimSpace(record.ActionID)
+	record.Action = strings.TrimSpace(record.Action)
+	record.Actor = strings.TrimSpace(record.Actor)
+	record.Reason = strings.TrimSpace(record.Reason)
+	record.EvidencePointer = strings.TrimSpace(record.EvidencePointer)
 	return record
 }
 
@@ -161,6 +213,15 @@ func decisionRecordsEqual(a, b types.GovernanceDecision) bool {
 		a.Reason == b.Reason &&
 		a.DecidedAtUnix == b.DecidedAtUnix &&
 		a.Status == b.Status
+}
+
+func auditActionRecordsEqual(a, b types.GovernanceAuditAction) bool {
+	return a.ActionID == b.ActionID &&
+		a.Action == b.Action &&
+		a.Actor == b.Actor &&
+		a.Reason == b.Reason &&
+		a.EvidencePointer == b.EvidencePointer &&
+		a.TimestampUnix == b.TimestampUnix
 }
 
 func conflictError(kind string, id string) error {

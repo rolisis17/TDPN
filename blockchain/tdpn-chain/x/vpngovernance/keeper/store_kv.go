@@ -8,8 +8,9 @@ import (
 )
 
 const (
-	policyPrefix   = "policy/"
-	decisionPrefix = "decision/"
+	policyPrefix      = "policy/"
+	decisionPrefix    = "decision/"
+	auditActionPrefix = "audit_action/"
 )
 
 // KVStore adapts KeeperStore onto a generic key/value backend.
@@ -93,10 +94,48 @@ func (s *KVStore) ListDecisions() []types.GovernanceDecision {
 	return records
 }
 
+func (s *KVStore) PutAuditAction(record types.GovernanceAuditAction) {
+	payload, err := json.Marshal(record)
+	if err != nil {
+		return
+	}
+	s.store.Set(auditActionKey(record.ActionID), payload)
+}
+
+func (s *KVStore) GetAuditAction(actionID string) (types.GovernanceAuditAction, bool) {
+	payload, ok := s.store.Get(auditActionKey(actionID))
+	if !ok {
+		return types.GovernanceAuditAction{}, false
+	}
+
+	var record types.GovernanceAuditAction
+	if err := json.Unmarshal(payload, &record); err != nil {
+		return types.GovernanceAuditAction{}, false
+	}
+
+	return record, true
+}
+
+func (s *KVStore) ListAuditActions() []types.GovernanceAuditAction {
+	records := make([]types.GovernanceAuditAction, 0)
+	s.store.IteratePrefix([]byte(auditActionPrefix), func(_ []byte, value []byte) bool {
+		var record types.GovernanceAuditAction
+		if err := json.Unmarshal(value, &record); err == nil {
+			records = append(records, record)
+		}
+		return true
+	})
+	return records
+}
+
 func policyKey(policyID string) []byte {
 	return []byte(policyPrefix + policyID)
 }
 
 func decisionKey(decisionID string) []byte {
 	return []byte(decisionPrefix + decisionID)
+}
+
+func auditActionKey(actionID string) []byte {
+	return []byte(auditActionPrefix + actionID)
 }

@@ -11,8 +11,9 @@ import (
 )
 
 type trackingStore struct {
-	policies  map[string]types.GovernancePolicy
-	decisions map[string]types.GovernanceDecision
+	policies     map[string]types.GovernancePolicy
+	decisions    map[string]types.GovernanceDecision
+	auditActions map[string]types.GovernanceAuditAction
 
 	upsertPolicyCalls   int
 	getPolicyCalls      int
@@ -20,12 +21,16 @@ type trackingStore struct {
 	getDecisionCalls    int
 	listPolicyCalls     int
 	listDecisionCalls   int
+	putAuditCalls       int
+	getAuditCalls       int
+	listAuditCalls      int
 }
 
 func newTrackingStore() *trackingStore {
 	return &trackingStore{
-		policies:  make(map[string]types.GovernancePolicy),
-		decisions: make(map[string]types.GovernanceDecision),
+		policies:     make(map[string]types.GovernancePolicy),
+		decisions:    make(map[string]types.GovernanceDecision),
+		auditActions: make(map[string]types.GovernanceAuditAction),
 	}
 }
 
@@ -77,6 +82,32 @@ func (s *trackingStore) ListDecisions() []types.GovernanceDecision {
 	records := make([]types.GovernanceDecision, 0, len(ids))
 	for _, id := range ids {
 		records = append(records, s.decisions[id])
+	}
+	return records
+}
+
+func (s *trackingStore) PutAuditAction(record types.GovernanceAuditAction) {
+	s.putAuditCalls++
+	s.auditActions[record.ActionID] = record
+}
+
+func (s *trackingStore) GetAuditAction(actionID string) (types.GovernanceAuditAction, bool) {
+	s.getAuditCalls++
+	record, ok := s.auditActions[actionID]
+	return record, ok
+}
+
+func (s *trackingStore) ListAuditActions() []types.GovernanceAuditAction {
+	s.listAuditCalls++
+	ids := make([]string, 0, len(s.auditActions))
+	for id := range s.auditActions {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+
+	records := make([]types.GovernanceAuditAction, 0, len(ids))
+	for _, id := range ids {
+		records = append(records, s.auditActions[id])
 	}
 	return records
 }
@@ -165,6 +196,24 @@ func TestKeeperCreateAndRecordUseCustomStore(t *testing.T) {
 	if store.upsertDecisionCalls == 0 || store.getDecisionCalls == 0 {
 		t.Fatalf("expected record path to touch custom decision store, got upsert=%d get=%d", store.upsertDecisionCalls, store.getDecisionCalls)
 	}
+
+	recordedAudit, err := k.RecordAuditAction(types.GovernanceAuditAction{
+		ActionID:        "audit-1",
+		Action:          "admin_allow_validator",
+		Actor:           "bootstrap-admin-1",
+		Reason:          "incident response bootstrap",
+		EvidencePointer: "ipfs://evidence/audit-1",
+		TimestampUnix:   4102444800,
+	})
+	if err != nil {
+		t.Fatalf("RecordAuditAction returned unexpected error: %v", err)
+	}
+	if recordedAudit.ActionID != "audit-1" {
+		t.Fatalf("expected action id %q, got %q", "audit-1", recordedAudit.ActionID)
+	}
+	if store.putAuditCalls == 0 || store.getAuditCalls == 0 {
+		t.Fatalf("expected record path to touch custom audit store, got put=%d get=%d", store.putAuditCalls, store.getAuditCalls)
+	}
 }
 
 func TestNewFileStorePersistsAcrossReopen(t *testing.T) {
@@ -181,6 +230,16 @@ func TestNewFileStorePersistsAcrossReopen(t *testing.T) {
 
 	decision := types.GovernanceDecision{DecisionID: "decision-persist", PolicyID: policy.PolicyID, ProposalID: "proposal-persist", Outcome: types.DecisionOutcomeReject, Decider: "multisig", DecidedAtUnix: 4102444800, Status: chaintypes.ReconciliationConfirmed}
 	store.UpsertDecision(decision)
+
+	audit := types.GovernanceAuditAction{
+		ActionID:        "audit-persist",
+		Action:          "admin_disable_validator",
+		Actor:           "bootstrap-admin-1",
+		Reason:          "validated signed evidence",
+		EvidencePointer: "ipfs://evidence/audit-persist",
+		TimestampUnix:   4102444801,
+	}
+	store.PutAuditAction(audit)
 
 	reopened, err := NewFileStore(path)
 	if err != nil {
@@ -201,6 +260,14 @@ func TestNewFileStorePersistsAcrossReopen(t *testing.T) {
 	}
 	if gotDecision != decision {
 		t.Fatalf("expected persisted decision %+v, got %+v", decision, gotDecision)
+	}
+
+	gotAudit, ok := reopened.GetAuditAction(audit.ActionID)
+	if !ok {
+		t.Fatal("expected persisted audit action to be loaded after reopen")
+	}
+	if gotAudit != audit {
+		t.Fatalf("expected persisted audit action %+v, got %+v", audit, gotAudit)
 	}
 }
 
@@ -232,6 +299,18 @@ func TestFileStoreListOrderingAndGetPaths(t *testing.T) {
 		store.UpsertDecision(types.GovernanceDecision{DecisionID: id, PolicyID: "policy-1", ProposalID: "proposal", Outcome: types.DecisionOutcomeApprove, Decider: "council", DecidedAtUnix: int64(4102444800 + i), Status: chaintypes.ReconciliationSubmitted})
 	}
 
+	auditIDs := []string{"audit-2", "audit-10", "audit-1"}
+	for i, id := range auditIDs {
+		store.PutAuditAction(types.GovernanceAuditAction{
+			ActionID:        id,
+			Action:          "admin_allow_validator",
+			Actor:           "bootstrap-admin",
+			Reason:          "bootstrap update",
+			EvidencePointer: "ipfs://evidence/" + id,
+			TimestampUnix:   int64(4102444800 + i),
+		})
+	}
+
 	gotPolicies := store.ListPolicies()
 	if len(gotPolicies) != len(policyIDs) {
 		t.Fatalf("expected %d policies, got %d", len(policyIDs), len(gotPolicies))
@@ -261,6 +340,21 @@ func TestFileStoreListOrderingAndGetPaths(t *testing.T) {
 			t.Fatalf("expected GetDecision(%q) to succeed", expectedID)
 		}
 	}
+
+	gotAuditActions := store.ListAuditActions()
+	if len(gotAuditActions) != len(auditIDs) {
+		t.Fatalf("expected %d audit actions, got %d", len(auditIDs), len(gotAuditActions))
+	}
+	expectedAuditIDs := append([]string(nil), auditIDs...)
+	sort.Strings(expectedAuditIDs)
+	for i, expectedID := range expectedAuditIDs {
+		if gotAuditActions[i].ActionID != expectedID {
+			t.Fatalf("expected audit action index %d to be %q, got %q", i, expectedID, gotAuditActions[i].ActionID)
+		}
+		if _, ok := store.GetAuditAction(expectedID); !ok {
+			t.Fatalf("expected GetAuditAction(%q) to succeed", expectedID)
+		}
+	}
 }
 
 func TestFileStoreWhitespaceSnapshotLoadsAndPersists(t *testing.T) {
@@ -281,8 +375,19 @@ func TestFileStoreWhitespaceSnapshotLoadsAndPersists(t *testing.T) {
 	if got := store.ListDecisions(); len(got) != 0 {
 		t.Fatalf("expected no decisions from whitespace snapshot, got %d", len(got))
 	}
+	if got := store.ListAuditActions(); len(got) != 0 {
+		t.Fatalf("expected no audit actions from whitespace snapshot, got %d", len(got))
+	}
 
 	store.UpsertPolicy(types.GovernancePolicy{PolicyID: "policy-whitespace", Title: "Whitespace Policy", Version: 7, ActivatedAtUnix: 4102444800, Status: chaintypes.ReconciliationConfirmed})
+	store.PutAuditAction(types.GovernanceAuditAction{
+		ActionID:        "audit-whitespace",
+		Action:          "admin_allow_validator",
+		Actor:           "bootstrap-admin",
+		Reason:          "whitespace bootstrap",
+		EvidencePointer: "ipfs://evidence/audit-whitespace",
+		TimestampUnix:   4102444800,
+	})
 
 	reopened, err := NewFileStore(path)
 	if err != nil {
@@ -294,5 +399,13 @@ func TestFileStoreWhitespaceSnapshotLoadsAndPersists(t *testing.T) {
 	}
 	if got.PolicyID != "policy-whitespace" || got.Status != chaintypes.ReconciliationConfirmed {
 		t.Fatalf("unexpected persisted policy: %+v", got)
+	}
+
+	audit, ok := reopened.GetAuditAction("audit-whitespace")
+	if !ok {
+		t.Fatal("expected persisted audit action after whitespace bootstrap")
+	}
+	if audit.ActionID != "audit-whitespace" {
+		t.Fatalf("unexpected persisted audit action: %+v", audit)
 	}
 }

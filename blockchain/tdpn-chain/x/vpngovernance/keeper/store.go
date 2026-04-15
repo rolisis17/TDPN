@@ -21,18 +21,23 @@ type KeeperStore interface {
 	UpsertDecision(record types.GovernanceDecision)
 	GetDecision(decisionID string) (types.GovernanceDecision, bool)
 	ListDecisions() []types.GovernanceDecision
+	PutAuditAction(record types.GovernanceAuditAction)
+	GetAuditAction(actionID string) (types.GovernanceAuditAction, bool)
+	ListAuditActions() []types.GovernanceAuditAction
 }
 
 // InMemoryStore is the default keeper store implementation.
 type InMemoryStore struct {
-	policies  map[string]types.GovernancePolicy
-	decisions map[string]types.GovernanceDecision
+	policies     map[string]types.GovernancePolicy
+	decisions    map[string]types.GovernanceDecision
+	auditActions map[string]types.GovernanceAuditAction
 }
 
 func NewInMemoryStore() *InMemoryStore {
 	return &InMemoryStore{
-		policies:  make(map[string]types.GovernancePolicy),
-		decisions: make(map[string]types.GovernanceDecision),
+		policies:     make(map[string]types.GovernancePolicy),
+		decisions:    make(map[string]types.GovernanceDecision),
+		auditActions: make(map[string]types.GovernanceAuditAction),
 	}
 }
 
@@ -82,9 +87,33 @@ func (s *InMemoryStore) ListDecisions() []types.GovernanceDecision {
 	return records
 }
 
+func (s *InMemoryStore) PutAuditAction(record types.GovernanceAuditAction) {
+	s.auditActions[record.ActionID] = record
+}
+
+func (s *InMemoryStore) GetAuditAction(actionID string) (types.GovernanceAuditAction, bool) {
+	record, ok := s.auditActions[actionID]
+	return record, ok
+}
+
+func (s *InMemoryStore) ListAuditActions() []types.GovernanceAuditAction {
+	ids := make([]string, 0, len(s.auditActions))
+	for id := range s.auditActions {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+
+	records := make([]types.GovernanceAuditAction, 0, len(ids))
+	for _, id := range ids {
+		records = append(records, s.auditActions[id])
+	}
+	return records
+}
+
 type fileStoreSnapshot struct {
-	Policies  map[string]types.GovernancePolicy   `json:"policies"`
-	Decisions map[string]types.GovernanceDecision `json:"decisions"`
+	Policies     map[string]types.GovernancePolicy      `json:"policies"`
+	Decisions    map[string]types.GovernanceDecision    `json:"decisions"`
+	AuditActions map[string]types.GovernanceAuditAction `json:"audit_actions"`
 }
 
 // FileStore persists governance policies and decisions in a JSON file.
@@ -93,6 +122,7 @@ type FileStore struct {
 	path      string
 	policies  map[string]types.GovernancePolicy
 	decisions map[string]types.GovernanceDecision
+	audit     map[string]types.GovernanceAuditAction
 }
 
 // NewFileStore constructs a file-backed keeper store and loads existing state when present.
@@ -105,6 +135,7 @@ func NewFileStore(path string) (*FileStore, error) {
 		path:      path,
 		policies:  make(map[string]types.GovernancePolicy),
 		decisions: make(map[string]types.GovernanceDecision),
+		audit:     make(map[string]types.GovernanceAuditAction),
 	}
 
 	if err := store.load(); err != nil {
@@ -137,6 +168,9 @@ func (s *FileStore) load() error {
 	}
 	if snapshot.Decisions != nil {
 		s.decisions = snapshot.Decisions
+	}
+	if snapshot.AuditActions != nil {
+		s.audit = snapshot.AuditActions
 	}
 
 	return nil
@@ -206,10 +240,43 @@ func (s *FileStore) ListDecisions() []types.GovernanceDecision {
 	return records
 }
 
+func (s *FileStore) PutAuditAction(record types.GovernanceAuditAction) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.audit[record.ActionID] = record
+	_ = s.persistLocked()
+}
+
+func (s *FileStore) GetAuditAction(actionID string) (types.GovernanceAuditAction, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	record, ok := s.audit[actionID]
+	return record, ok
+}
+
+func (s *FileStore) ListAuditActions() []types.GovernanceAuditAction {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	ids := make([]string, 0, len(s.audit))
+	for id := range s.audit {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+
+	records := make([]types.GovernanceAuditAction, 0, len(ids))
+	for _, id := range ids {
+		records = append(records, s.audit[id])
+	}
+	return records
+}
+
 func (s *FileStore) persistLocked() error {
 	snapshot := fileStoreSnapshot{
-		Policies:  s.policies,
-		Decisions: s.decisions,
+		Policies:     s.policies,
+		Decisions:    s.decisions,
+		AuditActions: s.audit,
 	}
 
 	payload, err := json.MarshalIndent(snapshot, "", "  ")

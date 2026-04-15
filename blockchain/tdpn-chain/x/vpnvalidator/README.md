@@ -7,6 +7,7 @@ Responsibilities:
 - maintain validator eligibility decisions keyed by `validator_id`;
 - persist objective validator lifecycle status records (`active`, `jailed`, `suspended`);
 - provide idempotent create/upsert semantics for replay-safe ingest;
+- provide deterministic epoch-selection helpers for bootstrap governance policy (hard gates, warmup/cooldown checks, stable+rotating pools, and concentration caps);
 - expose query surfaces for control plane reconciliation and audits.
 
 Out of scope:

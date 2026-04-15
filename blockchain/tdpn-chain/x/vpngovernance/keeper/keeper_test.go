@@ -301,3 +301,102 @@ func TestKeeperListDecisionsDeterministicByDecisionID(t *testing.T) {
 		t.Fatalf("expected sorted decision ids [decision-1 decision-2 decision-3], got [%s %s %s]", list[0].DecisionID, list[1].DecisionID, list[2].DecisionID)
 	}
 }
+
+func TestKeeperRecordAuditActionDefaultsAndIdempotency(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	input := types.GovernanceAuditAction{
+		ActionID:        "audit-1",
+		Action:          "admin_allow_validator",
+		Actor:           "bootstrap-admin-1",
+		Reason:          "bootstrap allowlist update",
+		EvidencePointer: "ipfs://evidence/audit-1",
+		TimestampUnix:   4102444800,
+	}
+
+	created, err := k.RecordAuditAction(input)
+	if err != nil {
+		t.Fatalf("RecordAuditAction returned unexpected error: %v", err)
+	}
+	if created.ActionID != input.ActionID {
+		t.Fatalf("expected action id %q, got %q", input.ActionID, created.ActionID)
+	}
+
+	idempotent, err := k.RecordAuditAction(input)
+	if err != nil {
+		t.Fatalf("RecordAuditAction idempotent replay returned unexpected error: %v", err)
+	}
+	if idempotent != created {
+		t.Fatalf("expected idempotent replay to return created record, got %+v vs %+v", idempotent, created)
+	}
+
+	got, ok := k.GetAuditAction(input.ActionID)
+	if !ok {
+		t.Fatal("expected persisted audit action")
+	}
+	if got != created {
+		t.Fatalf("expected stored audit action %+v, got %+v", created, got)
+	}
+}
+
+func TestKeeperRecordAuditActionConflict(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	initial := types.GovernanceAuditAction{
+		ActionID:        "audit-1",
+		Action:          "admin_allow_validator",
+		Actor:           "bootstrap-admin-1",
+		Reason:          "bootstrap allowlist update",
+		EvidencePointer: "ipfs://evidence/audit-1",
+		TimestampUnix:   4102444800,
+	}
+	if _, err := k.RecordAuditAction(initial); err != nil {
+		t.Fatalf("seed RecordAuditAction failed: %v", err)
+	}
+
+	conflict := initial
+	conflict.Reason = "different reason"
+	_, err := k.RecordAuditAction(conflict)
+	if err == nil {
+		t.Fatal("expected conflict error")
+	}
+	if !strings.Contains(err.Error(), "conflicting fields") {
+		t.Fatalf("expected conflict error details, got %v", err)
+	}
+}
+
+func TestKeeperRecordAuditActionValidation(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	_, err := k.RecordAuditAction(types.GovernanceAuditAction{
+		ActionID:        "audit-1",
+		Action:          "admin_allow_validator",
+		Actor:           "bootstrap-admin-1",
+		Reason:          "",
+		EvidencePointer: "ipfs://evidence/audit-1",
+		TimestampUnix:   4102444800,
+	})
+	if err == nil {
+		t.Fatal("expected validation error for missing reason")
+	}
+}
+
+func TestKeeperListAuditActionsDeterministicByActionID(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	_, _ = k.RecordAuditAction(types.GovernanceAuditAction{ActionID: "audit-3", Action: "admin_allow_validator", Actor: "admin-1", Reason: "r3", EvidencePointer: "ipfs://a3", TimestampUnix: 3})
+	_, _ = k.RecordAuditAction(types.GovernanceAuditAction{ActionID: "audit-1", Action: "admin_disable_validator", Actor: "admin-1", Reason: "r1", EvidencePointer: "ipfs://a1", TimestampUnix: 1})
+	_, _ = k.RecordAuditAction(types.GovernanceAuditAction{ActionID: "audit-2", Action: "admin_allow_validator", Actor: "admin-2", Reason: "r2", EvidencePointer: "ipfs://a2", TimestampUnix: 2})
+
+	list := k.ListAuditActions()
+	if len(list) != 3 {
+		t.Fatalf("expected 3 audit actions, got %d", len(list))
+	}
+	if list[0].ActionID != "audit-1" || list[1].ActionID != "audit-2" || list[2].ActionID != "audit-3" {
+		t.Fatalf("expected sorted audit ids [audit-1 audit-2 audit-3], got [%s %s %s]", list[0].ActionID, list[1].ActionID, list[2].ActionID)
+	}
+}
