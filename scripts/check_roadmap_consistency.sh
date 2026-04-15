@@ -37,6 +37,20 @@ if ! rg -Fq "Settlement bridge now includes read/query" "$full_plan"; then
   echo "full execution plan must document settlement bridge read/query expansion"
   exit 1
 fi
+if ! rg -Fq "settlement_adapter_roundtrip" "$full_plan"; then
+  echo "full execution plan must document settlement_adapter_roundtrip gate posture"
+  exit 1
+fi
+if ! rg -qi "confirmation lifecycle" "$full_plan"; then
+  echo "full execution plan must document settlement confirmation lifecycle posture"
+  exit 1
+fi
+for settlement_state in pending submitted confirmed failed; do
+  if ! rg -qw "$settlement_state" "$full_plan"; then
+    echo "full execution plan confirmation lifecycle must include state: $settlement_state"
+    exit 1
+  fi
+done
 
 if ! rg -q "Canonical source of truth" "$product_roadmap"; then
   echo "product roadmap must declare canonical source alignment"

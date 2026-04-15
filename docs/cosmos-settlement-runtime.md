@@ -108,8 +108,8 @@ Exit settlement status endpoint:
 
 - Deferred adapter operations are tracked per idempotency key (`pending` lifecycle).
 - Periodic reconcile loops in issuer/exit call settlement `Reconcile(...)`.
-- Successful replay marks operations `submitted` and clears deferred backlog.
-- When an adapter supports by-id bridge queries, reconcile can promote `submitted` records to `confirmed` after chain-side visibility checks.
+- Successful replay marks settlement/reward/sponsor/slash operations `submitted` and clears deferred backlog.
+- When adapter query surfaces observe by-id bridge records, reconcile promotes settlement/reward/sponsor/slash operations from `submitted` to `confirmed`.
 - Failures remain deferred and are retried in future cycles.
 - Cosmos adapter retry policy:
   - retryable: transport/network errors, HTTP `408`, `425`, `429`, and `5xx`.
@@ -124,6 +124,7 @@ Exit settlement status endpoint:
 - This check is wired into `scripts/ci_local.sh` under the Cosmos settlement block.
 - `scripts/integration_cosmos_tdpnd_state_dir_persistence.sh` validates `tdpnd --state-dir` integration and scaffold persistence/reopen behavior for file-backed module stores.
 - This state-dir persistence check is wired into `scripts/ci_local.sh` under the Cosmos runtime block.
+- Phase5 CI treats settlement adapter roundtrip as a first-class stage: `settlement_adapter_roundtrip` runs `scripts/integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh`.
 
 ## Chain gRPC Contract
 

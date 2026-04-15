@@ -31,6 +31,7 @@ This scaffold keeps chain responsibilities isolated from VPN dataplane runtime.
 
 ## Reconciliation contract
 - Records use `pending|submitted|confirmed|failed` status placeholders via `types/ReconciliationStatus`.
+- Reconcile can promote settlement/reward/sponsor/slash records from `submitted` to `confirmed` when adapter query surfaces observe corresponding by-id bridge records.
 - Phase-1 app wiring is stateful across all module msg surfaces:
   - `vpnbilling`: reservation create + settlement finalize.
   - `vpnrewards`: accrual create + distribution record.
@@ -50,3 +51,4 @@ This scaffold keeps chain responsibilities isolated from VPN dataplane runtime.
 - Runtime state persistence option:
   - `tdpnd --state-dir <path>` enables file-backed module stores rooted at one runtime state directory.
   - integration gate: `scripts/integration_cosmos_tdpnd_state_dir_persistence.sh`.
+- Phase5 CI includes `settlement_adapter_roundtrip` as a first-class stage running `scripts/integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh`.

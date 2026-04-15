@@ -71,6 +71,8 @@ Exit gate:
 - `tdpnd` runtime now supports `--state-dir` to enable file-backed module stores without coupling VPN dataplane behavior to chain liveness.
 - Settlement bridge now includes read/query `GET` endpoints (list + by-id) across billing/rewards/sponsor/slashing modules in addition to `POST` write paths.
 - CI/local integration now includes `scripts/integration_cosmos_tdpnd_state_dir_persistence.sh` for state-dir wiring and reopen-persistence verification.
+- Phase 5 CI now includes the `settlement_adapter_roundtrip` gate to verify end-to-end adapter -> `tdpnd` bridge submissions before promotion.
+- Settlement confirmation lifecycle posture is canonicalized as `pending` -> `submitted` -> `confirmed` with explicit `failed` records retained for replay/reconciliation.
 
 ## Non-Negotiables
 

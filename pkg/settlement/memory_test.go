@@ -155,6 +155,42 @@ func (a confirmingAdapter) HasSlashEvidence(_ context.Context, evidenceID string
 	return evidenceID != "", nil
 }
 
+type notFoundConfirmingAdapter struct{ confirmingAdapter }
+
+func (a notFoundConfirmingAdapter) HasSessionSettlement(_ context.Context, _ string) (bool, error) {
+	return false, nil
+}
+
+func (a notFoundConfirmingAdapter) HasRewardIssue(_ context.Context, _ string) (bool, error) {
+	return false, nil
+}
+
+func (a notFoundConfirmingAdapter) HasSponsorReservation(_ context.Context, _ string) (bool, error) {
+	return false, nil
+}
+
+func (a notFoundConfirmingAdapter) HasSlashEvidence(_ context.Context, _ string) (bool, error) {
+	return false, nil
+}
+
+type errorConfirmingAdapter struct{ confirmingAdapter }
+
+func (a errorConfirmingAdapter) HasSessionSettlement(_ context.Context, _ string) (bool, error) {
+	return false, errFakeAdapter
+}
+
+func (a errorConfirmingAdapter) HasRewardIssue(_ context.Context, _ string) (bool, error) {
+	return false, errFakeAdapter
+}
+
+func (a errorConfirmingAdapter) HasSponsorReservation(_ context.Context, _ string) (bool, error) {
+	return false, errFakeAdapter
+}
+
+func (a errorConfirmingAdapter) HasSlashEvidence(_ context.Context, _ string) (bool, error) {
+	return false, errFakeAdapter
+}
+
 func setupDeferredSettlement(t *testing.T, s *MemoryService, sessionID string) {
 	t.Helper()
 	ctx := context.Background()
@@ -443,6 +479,167 @@ func TestMemoryServiceReconcileMarksSubmittedAsConfirmedWhenQueryable(t *testing
 	if got := s.slashEvidenceByID["ev-confirm-1"].Status; got != OperationStatusConfirmed {
 		t.Fatalf("expected slash evidence confirmed, got %s", got)
 	}
+}
+
+func setupSubmittedConfirmationRecords(t *testing.T, s *MemoryService, suffix string) (string, string, string, string) {
+	t.Helper()
+	ctx := context.Background()
+
+	sessionID := "sess-confirm-" + suffix
+	subjectID := "client-confirm-" + suffix
+	rewardID := "rew-confirm-" + suffix
+	sponsorReservationID := "sres-confirm-" + suffix
+	evidenceID := "ev-confirm-" + suffix
+
+	if _, err := s.ReserveFunds(ctx, FundReservation{
+		SessionID:    sessionID,
+		SubjectID:    subjectID,
+		AmountMicros: 2_000_000,
+		Currency:     "TDPNC",
+	}); err != nil {
+		t.Fatalf("ReserveFunds: %v", err)
+	}
+	if err := s.RecordUsage(ctx, UsageRecord{
+		SessionID:    sessionID,
+		SubjectID:    subjectID,
+		BytesIngress: 1024 * 1024,
+	}); err != nil {
+		t.Fatalf("RecordUsage: %v", err)
+	}
+	settlement, err := s.SettleSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("SettleSession: %v", err)
+	}
+	if settlement.Status != OperationStatusSubmitted {
+		t.Fatalf("expected settlement submitted before reconcile confirmation checks, got %s", settlement.Status)
+	}
+
+	reward, err := s.IssueReward(ctx, RewardIssue{
+		RewardID:          rewardID,
+		ProviderSubjectID: "provider-" + suffix,
+		SessionID:         sessionID,
+		RewardMicros:      25,
+		Currency:          "TDPNC",
+	})
+	if err != nil {
+		t.Fatalf("IssueReward: %v", err)
+	}
+	if reward.Status != OperationStatusSubmitted {
+		t.Fatalf("expected reward submitted before reconcile confirmation checks, got %s", reward.Status)
+	}
+
+	reservation, err := s.ReserveSponsorCredits(ctx, SponsorCreditReservation{
+		ReservationID: sponsorReservationID,
+		SponsorID:     "sponsor-" + suffix,
+		SubjectID:     subjectID,
+		SessionID:     sessionID,
+		AmountMicros:  100,
+		Currency:      "TDPNC",
+	})
+	if err != nil {
+		t.Fatalf("ReserveSponsorCredits: %v", err)
+	}
+	if reservation.Status != OperationStatusSubmitted {
+		t.Fatalf("expected sponsor reservation submitted before reconcile confirmation checks, got %s", reservation.Status)
+	}
+
+	evidence, err := s.SubmitSlashEvidence(ctx, SlashEvidence{
+		EvidenceID:    evidenceID,
+		SubjectID:     "provider-" + suffix,
+		SessionID:     sessionID,
+		ViolationType: "double-sign",
+		EvidenceRef:   "sha256:" + suffix,
+		SlashMicros:   11,
+		Currency:      "TDPNC",
+	})
+	if err != nil {
+		t.Fatalf("SubmitSlashEvidence: %v", err)
+	}
+	if evidence.Status != OperationStatusSubmitted {
+		t.Fatalf("expected slash evidence submitted before reconcile confirmation checks, got %s", evidence.Status)
+	}
+
+	return sessionID, rewardID, sponsorReservationID, evidenceID
+}
+
+func assertSubmittedConfirmationRecords(t *testing.T, s *MemoryService, sessionID string, rewardID string, sponsorReservationID string, evidenceID string) {
+	t.Helper()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	settlement := s.settledBySession[sessionID]
+	if settlement.Status != OperationStatusSubmitted {
+		t.Fatalf("expected settlement to remain submitted, got %s", settlement.Status)
+	}
+	if !settlement.AdapterSubmitted || settlement.AdapterDeferred {
+		t.Fatalf("expected settlement adapter state submitted=true deferred=false")
+	}
+
+	reward := s.rewardsByID[rewardID]
+	if reward.Status != OperationStatusSubmitted {
+		t.Fatalf("expected reward to remain submitted, got %s", reward.Status)
+	}
+	if !reward.AdapterSubmitted || reward.AdapterDeferred {
+		t.Fatalf("expected reward adapter state submitted=true deferred=false")
+	}
+
+	reservation := s.sponsorReservationsByID[sponsorReservationID]
+	if reservation.Status != OperationStatusSubmitted {
+		t.Fatalf("expected sponsor reservation to remain submitted, got %s", reservation.Status)
+	}
+	if !reservation.AdapterSubmitted || reservation.AdapterDeferred {
+		t.Fatalf("expected sponsor reservation adapter state submitted=true deferred=false")
+	}
+
+	evidence := s.slashEvidenceByID[evidenceID]
+	if evidence.Status != OperationStatusSubmitted {
+		t.Fatalf("expected slash evidence to remain submitted, got %s", evidence.Status)
+	}
+	if !evidence.AdapterSubmitted || evidence.AdapterDeferred {
+		t.Fatalf("expected slash evidence adapter state submitted=true deferred=false")
+	}
+}
+
+func TestMemoryServiceReconcileKeepsSubmittedWhenConfirmationNotFound(t *testing.T) {
+	s := NewMemoryService(
+		WithPricePerMiBMicros(1024*1024),
+		WithChainAdapter(notFoundConfirmingAdapter{}),
+	)
+	sessionID, rewardID, sponsorReservationID, evidenceID := setupSubmittedConfirmationRecords(t, s, "not-found-1")
+
+	report, err := s.Reconcile(context.Background())
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if report.ConfirmedOperations != 0 {
+		t.Fatalf("expected no confirmed operations when lookups return not found, got %d", report.ConfirmedOperations)
+	}
+	if report.SubmittedOperations < 4 {
+		t.Fatalf("expected at least four submitted operations, got %d", report.SubmittedOperations)
+	}
+
+	assertSubmittedConfirmationRecords(t, s, sessionID, rewardID, sponsorReservationID, evidenceID)
+}
+
+func TestMemoryServiceReconcileKeepsSubmittedWhenConfirmationLookupErrors(t *testing.T) {
+	s := NewMemoryService(
+		WithPricePerMiBMicros(1024*1024),
+		WithChainAdapter(errorConfirmingAdapter{}),
+	)
+	sessionID, rewardID, sponsorReservationID, evidenceID := setupSubmittedConfirmationRecords(t, s, "lookup-error-1")
+
+	report, err := s.Reconcile(context.Background())
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if report.ConfirmedOperations != 0 {
+		t.Fatalf("expected no confirmed operations when lookups return errors, got %d", report.ConfirmedOperations)
+	}
+	if report.SubmittedOperations < 4 {
+		t.Fatalf("expected at least four submitted operations, got %d", report.SubmittedOperations)
+	}
+
+	assertSubmittedConfirmationRecords(t, s, sessionID, rewardID, sponsorReservationID, evidenceID)
 }
 
 func TestMemoryServiceSponsorFlowAuthorizeIdempotent(t *testing.T) {
