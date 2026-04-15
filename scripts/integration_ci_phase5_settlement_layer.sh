@@ -41,6 +41,7 @@ STAGE_ENV_NAMES=(
   "CI_PHASE5_SETTLEMENT_LAYER_WINDOWS_ROLE_RUNBOOKS_SCRIPT"
   "CI_PHASE5_SETTLEMENT_LAYER_CROSS_PLATFORM_INTEROP_SCRIPT"
   "CI_PHASE5_SETTLEMENT_LAYER_ROLE_COMBINATION_VALIDATION_SCRIPT"
+  "CI_PHASE5_SETTLEMENT_LAYER_SETTLEMENT_ADAPTER_ROUNDTRIP_SCRIPT"
   "CI_PHASE5_SETTLEMENT_LAYER_PHASE5_SETTLEMENT_LAYER_CHECK_SCRIPT"
   "CI_PHASE5_SETTLEMENT_LAYER_PHASE5_SETTLEMENT_LAYER_RUN_SCRIPT"
   "CI_PHASE5_SETTLEMENT_LAYER_PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_SCRIPT"
@@ -52,6 +53,7 @@ STAGE_IDS=(
   "settlement_acceptance"
   "settlement_bridge_smoke"
   "settlement_state_persistence"
+  "settlement_adapter_roundtrip"
   "phase5_settlement_layer_check"
   "phase5_settlement_layer_run"
   "phase5_settlement_layer_handoff_check"
@@ -179,11 +181,14 @@ if ! jq -e '
   and .schema.major == 1
   and .schema.minor == 0
   and .inputs.dry_run == false
+  and .inputs.run_settlement_adapter_roundtrip == true
   and .inputs.run_phase5_settlement_layer_check == true
   and .inputs.run_phase5_settlement_layer_run == true
   and .inputs.run_phase5_settlement_layer_handoff_check == true
   and .inputs.run_phase5_settlement_layer_handoff_run == true
   and (.steps | to_entries | all(.value.enabled == true and .value.status == "pass" and .value.rc == 0 and .value.command != null))
+  and .steps.settlement_adapter_roundtrip.status == "pass"
+  and .steps.settlement_adapter_roundtrip.rc == 0
   and .steps.phase5_settlement_layer_check.status == "pass"
   and .steps.phase5_settlement_layer_check.rc == 0
   and .steps.phase5_settlement_layer_run.status == "pass"
@@ -223,6 +228,8 @@ if ! jq -e '
   .status == "pass"
   and .rc == 0
   and .inputs.dry_run == true
+  and .steps.settlement_adapter_roundtrip.status == "skip"
+  and .steps.settlement_adapter_roundtrip.reason == "dry-run"
   and .steps.phase5_settlement_layer_check.status == "skip"
   and .steps.phase5_settlement_layer_check.reason == "dry-run"
   and .steps.phase5_settlement_layer_run.status == "skip"
@@ -257,6 +264,7 @@ CI_PHASE5_CAPTURE_FILE="$CAPTURE" \
   --print-summary-json 0 \
   --run-settlement-failsoft 0 \
   --run-settlement-acceptance 0 \
+  --run-settlement-adapter-roundtrip 0 \
   --run-phase5-settlement-layer-check 0 \
   --run-phase5-settlement-layer-run 0 \
   --run-phase5-settlement-layer-handoff-check 0 \
@@ -276,6 +284,10 @@ if ! jq -e '
   and .steps.settlement_failsoft.enabled == false
   and .steps.settlement_failsoft.status == "skip"
   and .steps.settlement_failsoft.reason == "disabled"
+  and .inputs.run_settlement_adapter_roundtrip == false
+  and .steps.settlement_adapter_roundtrip.enabled == false
+  and .steps.settlement_adapter_roundtrip.status == "skip"
+  and .steps.settlement_adapter_roundtrip.reason == "disabled"
   and .steps.settlement_bridge_smoke.enabled == true
   and .steps.settlement_bridge_smoke.status == "pass"
   and .inputs.run_phase5_settlement_layer_check == false
@@ -304,7 +316,7 @@ echo "[ci-phase5-settlement-layer] first-failure rc propagation"
 : >"$CAPTURE"
 set +e
 CI_PHASE5_CAPTURE_FILE="$CAPTURE" \
-CI_PHASE5_FAIL_MATRIX="settlement_acceptance=23,settlement_bridge_smoke=41,phase5_settlement_layer_check=47,phase5_settlement_layer_run=53,phase5_settlement_layer_handoff_check=55,phase5_settlement_layer_handoff_run=59" \
+CI_PHASE5_FAIL_MATRIX="settlement_acceptance=23,settlement_bridge_smoke=41,settlement_adapter_roundtrip=43,phase5_settlement_layer_check=47,phase5_settlement_layer_run=53,phase5_settlement_layer_handoff_check=55,phase5_settlement_layer_handoff_run=59" \
 "$GATE_SCRIPT" \
   --reports-dir "$FAIL_REPORTS_DIR" \
   --summary-json "$FAIL_SUMMARY_JSON" \
@@ -333,6 +345,8 @@ if ! jq -e '
   and .steps.settlement_acceptance.rc == 23
   and .steps.settlement_bridge_smoke.status == "fail"
   and .steps.settlement_bridge_smoke.rc == 41
+  and .steps.settlement_adapter_roundtrip.status == "fail"
+  and .steps.settlement_adapter_roundtrip.rc == 43
   and .steps.phase5_settlement_layer_check.status == "fail"
   and .steps.phase5_settlement_layer_check.rc == 47
   and .steps.phase5_settlement_layer_run.status == "fail"

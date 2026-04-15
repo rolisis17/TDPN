@@ -16,6 +16,7 @@ Usage:
     [--run-settlement-acceptance [0|1]] \
     [--run-settlement-bridge-smoke [0|1]] \
     [--run-settlement-state-persistence [0|1]] \
+    [--run-settlement-adapter-roundtrip [0|1]] \
     [--run-phase5-settlement-layer-check [0|1]] \
     [--run-phase5-settlement-layer-run [0|1]] \
     [--run-phase5-settlement-layer-handoff-check [0|1]] \
@@ -28,10 +29,11 @@ Purpose:
     2) integration_cosmos_settlement_acceptance_paths.sh
     3) integration_cosmos_tdpnd_settlement_bridge_smoke.sh
     4) integration_cosmos_tdpnd_state_dir_persistence.sh
-    5) integration_phase5_settlement_layer_check.sh
-    6) integration_phase5_settlement_layer_run.sh
-    7) integration_phase5_settlement_layer_handoff_check.sh
-    8) integration_phase5_settlement_layer_handoff_run.sh
+    5) integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh
+    6) integration_phase5_settlement_layer_check.sh
+    7) integration_phase5_settlement_layer_run.sh
+    8) integration_phase5_settlement_layer_handoff_check.sh
+    9) integration_phase5_settlement_layer_handoff_run.sh
 
 Dry-run mode:
   --dry-run 1 skips stage execution, records deterministic skip accounting,
@@ -113,6 +115,7 @@ run_settlement_failsoft="${CI_PHASE5_SETTLEMENT_LAYER_RUN_SETTLEMENT_FAILSOFT:-$
 run_settlement_acceptance="${CI_PHASE5_SETTLEMENT_LAYER_RUN_SETTLEMENT_ACCEPTANCE:-${CI_PHASE5_SETTLEMENT_LAYER_RUN_WINDOWS_ROLE_RUNBOOKS:-1}}"
 run_settlement_bridge_smoke="${CI_PHASE5_SETTLEMENT_LAYER_RUN_SETTLEMENT_BRIDGE_SMOKE:-${CI_PHASE5_SETTLEMENT_LAYER_RUN_CROSS_PLATFORM_INTEROP:-1}}"
 run_settlement_state_persistence="${CI_PHASE5_SETTLEMENT_LAYER_RUN_SETTLEMENT_STATE_PERSISTENCE:-${CI_PHASE5_SETTLEMENT_LAYER_RUN_ROLE_COMBINATION_VALIDATION:-1}}"
+run_settlement_adapter_roundtrip="${CI_PHASE5_SETTLEMENT_LAYER_RUN_SETTLEMENT_ADAPTER_ROUNDTRIP:-1}"
 run_phase5_settlement_layer_check="${CI_PHASE5_SETTLEMENT_LAYER_RUN_PHASE5_SETTLEMENT_LAYER_CHECK:-1}"
 run_phase5_settlement_layer_run="${CI_PHASE5_SETTLEMENT_LAYER_RUN_PHASE5_SETTLEMENT_LAYER_RUN:-1}"
 run_phase5_settlement_layer_handoff_check="${CI_PHASE5_SETTLEMENT_LAYER_RUN_PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK:-1}"
@@ -182,6 +185,15 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --run-settlement-adapter-roundtrip)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        run_settlement_adapter_roundtrip="${2:-}"
+        shift 2
+      else
+        run_settlement_adapter_roundtrip="1"
+        shift
+      fi
+      ;;
     --run-phase5-settlement-layer-check)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         run_phase5_settlement_layer_check="${2:-}"
@@ -236,6 +248,7 @@ bool_arg_or_die "--run-settlement-failsoft" "$run_settlement_failsoft"
 bool_arg_or_die "--run-settlement-acceptance" "$run_settlement_acceptance"
 bool_arg_or_die "--run-settlement-bridge-smoke" "$run_settlement_bridge_smoke"
 bool_arg_or_die "--run-settlement-state-persistence" "$run_settlement_state_persistence"
+bool_arg_or_die "--run-settlement-adapter-roundtrip" "$run_settlement_adapter_roundtrip"
 bool_arg_or_die "--run-phase5-settlement-layer-check" "$run_phase5_settlement_layer_check"
 bool_arg_or_die "--run-phase5-settlement-layer-run" "$run_phase5_settlement_layer_run"
 bool_arg_or_die "--run-phase5-settlement-layer-handoff-check" "$run_phase5_settlement_layer_handoff_check"
@@ -245,6 +258,7 @@ settlement_failsoft_script="${CI_PHASE5_SETTLEMENT_LAYER_SETTLEMENT_FAILSOFT_SCR
 settlement_acceptance_script="${CI_PHASE5_SETTLEMENT_LAYER_SETTLEMENT_ACCEPTANCE_SCRIPT:-${CI_PHASE5_SETTLEMENT_LAYER_WINDOWS_ROLE_RUNBOOKS_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_settlement_acceptance_paths.sh}}"
 settlement_bridge_smoke_script="${CI_PHASE5_SETTLEMENT_LAYER_SETTLEMENT_BRIDGE_SMOKE_SCRIPT:-${CI_PHASE5_SETTLEMENT_LAYER_CROSS_PLATFORM_INTEROP_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_tdpnd_settlement_bridge_smoke.sh}}"
 settlement_state_persistence_script="${CI_PHASE5_SETTLEMENT_LAYER_SETTLEMENT_STATE_PERSISTENCE_SCRIPT:-${CI_PHASE5_SETTLEMENT_LAYER_ROLE_COMBINATION_VALIDATION_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_tdpnd_state_dir_persistence.sh}}"
+settlement_adapter_roundtrip_script="${CI_PHASE5_SETTLEMENT_LAYER_SETTLEMENT_ADAPTER_ROUNDTRIP_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh}"
 phase5_settlement_layer_check_script="${CI_PHASE5_SETTLEMENT_LAYER_PHASE5_SETTLEMENT_LAYER_CHECK_SCRIPT:-$ROOT_DIR/scripts/integration_phase5_settlement_layer_check.sh}"
 phase5_settlement_layer_run_script="${CI_PHASE5_SETTLEMENT_LAYER_PHASE5_SETTLEMENT_LAYER_RUN_SCRIPT:-$ROOT_DIR/scripts/integration_phase5_settlement_layer_run.sh}"
 phase5_settlement_layer_handoff_check_script="${CI_PHASE5_SETTLEMENT_LAYER_PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_SCRIPT:-$ROOT_DIR/scripts/integration_phase5_settlement_layer_handoff_check.sh}"
@@ -255,6 +269,7 @@ stage_ids=(
   "settlement_acceptance"
   "settlement_bridge_smoke"
   "settlement_state_persistence"
+  "settlement_adapter_roundtrip"
   "phase5_settlement_layer_check"
   "phase5_settlement_layer_run"
   "phase5_settlement_layer_handoff_check"
@@ -266,6 +281,7 @@ declare -A stage_script=(
   ["settlement_acceptance"]="$settlement_acceptance_script"
   ["settlement_bridge_smoke"]="$settlement_bridge_smoke_script"
   ["settlement_state_persistence"]="$settlement_state_persistence_script"
+  ["settlement_adapter_roundtrip"]="$settlement_adapter_roundtrip_script"
   ["phase5_settlement_layer_check"]="$phase5_settlement_layer_check_script"
   ["phase5_settlement_layer_run"]="$phase5_settlement_layer_run_script"
   ["phase5_settlement_layer_handoff_check"]="$phase5_settlement_layer_handoff_check_script"
@@ -277,6 +293,7 @@ declare -A stage_enabled=(
   ["settlement_acceptance"]="$run_settlement_acceptance"
   ["settlement_bridge_smoke"]="$run_settlement_bridge_smoke"
   ["settlement_state_persistence"]="$run_settlement_state_persistence"
+  ["settlement_adapter_roundtrip"]="$run_settlement_adapter_roundtrip"
   ["phase5_settlement_layer_check"]="$run_phase5_settlement_layer_check"
   ["phase5_settlement_layer_run"]="$run_phase5_settlement_layer_run"
   ["phase5_settlement_layer_handoff_check"]="$run_phase5_settlement_layer_handoff_check"
@@ -388,6 +405,7 @@ jq -n \
   --arg run_settlement_acceptance "$run_settlement_acceptance" \
   --arg run_settlement_bridge_smoke "$run_settlement_bridge_smoke" \
   --arg run_settlement_state_persistence "$run_settlement_state_persistence" \
+  --arg run_settlement_adapter_roundtrip "$run_settlement_adapter_roundtrip" \
   --arg run_phase5_settlement_layer_check "$run_phase5_settlement_layer_check" \
   --arg run_phase5_settlement_layer_run "$run_phase5_settlement_layer_run" \
   --arg run_phase5_settlement_layer_handoff_check "$run_phase5_settlement_layer_handoff_check" \
@@ -410,6 +428,7 @@ jq -n \
       run_settlement_acceptance: ($run_settlement_acceptance == "1"),
       run_settlement_bridge_smoke: ($run_settlement_bridge_smoke == "1"),
       run_settlement_state_persistence: ($run_settlement_state_persistence == "1"),
+      run_settlement_adapter_roundtrip: ($run_settlement_adapter_roundtrip == "1"),
       run_phase5_settlement_layer_check: ($run_phase5_settlement_layer_check == "1"),
       run_phase5_settlement_layer_run: ($run_phase5_settlement_layer_run == "1"),
       run_phase5_settlement_layer_handoff_check: ($run_phase5_settlement_layer_handoff_check == "1"),
