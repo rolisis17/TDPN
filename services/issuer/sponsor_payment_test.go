@@ -621,6 +621,64 @@ func TestSponsorEndpointsRequireSponsorToken(t *testing.T) {
 	}
 }
 
+func TestSponsorEndpointsAcceptBearerTokenWhenXSponsorTokenMissing(t *testing.T) {
+	s := newSponsorTestService(t)
+	reqBody, _ := json.Marshal(proto.SponsorQuoteRequest{Subject: "client-1"})
+	req := httptest.NewRequest(http.MethodPost, "/v1/sponsor/quote", bytes.NewReader(reqBody))
+	req.Header.Set("Authorization", "Bearer sponsor-secret-token")
+	rr := httptest.NewRecorder()
+	s.handleSponsorQuote(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected bearer-backed sponsor request to pass, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestSponsorEndpointsRejectMalformedOrConflictingBearerToken(t *testing.T) {
+	s := newSponsorTestService(t)
+	reqBody, _ := json.Marshal(proto.SponsorQuoteRequest{Subject: "client-1"})
+
+	tests := []struct {
+		name              string
+		xSponsorToken     string
+		authorization     string
+		expectedHTTPCode  int
+	}{
+		{
+			name:             "malformed bearer token",
+			authorization:    "Bearer",
+			expectedHTTPCode: http.StatusUnauthorized,
+		},
+		{
+			name:             "wrong bearer token",
+			authorization:    "Bearer wrong-token",
+			expectedHTTPCode: http.StatusUnauthorized,
+		},
+		{
+			name:             "x sponsor token takes precedence over bearer fallback",
+			xSponsorToken:    "wrong-x-token",
+			authorization:    "Bearer sponsor-secret-token",
+			expectedHTTPCode: http.StatusUnauthorized,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/v1/sponsor/quote", bytes.NewReader(reqBody))
+			if tc.xSponsorToken != "" {
+				req.Header.Set("X-Sponsor-Token", tc.xSponsorToken)
+			}
+			if tc.authorization != "" {
+				req.Header.Set("Authorization", tc.authorization)
+			}
+			rr := httptest.NewRecorder()
+			s.handleSponsorQuote(rr, req)
+			if rr.Code != tc.expectedHTTPCode {
+				t.Fatalf("expected status %d, got %d body=%s", tc.expectedHTTPCode, rr.Code, rr.Body.String())
+			}
+		})
+	}
+}
+
 func TestSponsorQuoteValidation(t *testing.T) {
 	s := newSponsorTestService(t)
 	s.sponsorMaxSubjectLen = 8

@@ -263,6 +263,103 @@ func TestNewSettlementServiceFromEnvCosmosSignedTxMissingCredentialsFallsBack(t 
 	}
 }
 
+func TestNewSettlementServiceFromEnvCosmosQueueFullDefersWithoutBlocking(t *testing.T) {
+	reqCh := make(chan observedCosmosRequest, 4)
+	releaseCh := make(chan struct{})
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		_ = r.Body.Close()
+		reqCh <- observedCosmosRequest{
+			path:    r.URL.Path,
+			auth:    r.Header.Get("Authorization"),
+			payload: b,
+		}
+		<-releaseCh
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+	defer close(releaseCh)
+
+	t.Setenv("SETTLEMENT_CHAIN_ADAPTER", "cosmos")
+	t.Setenv("COSMOS_SETTLEMENT_ENDPOINT", ts.URL)
+	t.Setenv("COSMOS_SETTLEMENT_API_KEY", "primary-api")
+	t.Setenv("COSMOS_SETTLEMENT_QUEUE_SIZE", "1")
+	t.Setenv("COSMOS_SETTLEMENT_MAX_RETRIES", "0")
+	t.Setenv("COSMOS_SETTLEMENT_HTTP_TIMEOUT_MS", "1000")
+
+	svc := newSettlementServiceFromEnv()
+	first := reserveSponsorCreditsForAdapterTest(t, svc, "sres-queue-full-1")
+	second := reserveSponsorCreditsForAdapterTest(t, svc, "sres-queue-full-2")
+	third := reserveSponsorCreditsForAdapterTest(t, svc, "sres-queue-full-3")
+
+	records := []settlement.SponsorCreditReservation{first, second, third}
+	submittedCount := 0
+	deferredPendingCount := 0
+	for _, rec := range records {
+		if rec.Status == settlement.OperationStatusSubmitted && rec.AdapterSubmitted && !rec.AdapterDeferred {
+			submittedCount++
+		}
+		if rec.Status == settlement.OperationStatusPending && rec.AdapterDeferred && !rec.AdapterSubmitted {
+			deferredPendingCount++
+		}
+	}
+	if submittedCount < 1 {
+		t.Fatalf("expected at least one submitted reservation under queue pressure, got submitted_count=%d", submittedCount)
+	}
+	if deferredPendingCount < 1 {
+		t.Fatalf("expected at least one deferred/pending reservation under queue pressure, got deferred_pending_count=%d", deferredPendingCount)
+	}
+
+	got := waitObservedCosmosRequest(t, reqCh)
+	if got.path != "/x/vpnsponsor/reservations" {
+		t.Fatalf("expected queue-full request path /x/vpnsponsor/reservations, got %s", got.path)
+	}
+	if got.auth != "Bearer primary-api" {
+		t.Fatalf("expected queue-full auth header to propagate, got %q", got.auth)
+	}
+}
+
+func TestNewSettlementServiceFromEnvCosmosPrimary5xxStillReturnsSubmittedAsync(t *testing.T) {
+	reqCh := make(chan observedCosmosRequest, 4)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		_ = r.Body.Close()
+		reqCh <- observedCosmosRequest{
+			path:    r.URL.Path,
+			auth:    r.Header.Get("Authorization"),
+			payload: b,
+		}
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	defer ts.Close()
+
+	t.Setenv("SETTLEMENT_CHAIN_ADAPTER", "cosmos")
+	t.Setenv("COSMOS_SETTLEMENT_ENDPOINT", ts.URL)
+	t.Setenv("COSMOS_SETTLEMENT_API_KEY", "primary-api")
+	t.Setenv("COSMOS_SETTLEMENT_MAX_RETRIES", "0")
+	t.Setenv("COSMOS_SETTLEMENT_HTTP_TIMEOUT_MS", "500")
+
+	svc := newSettlementServiceFromEnv()
+	reservation := reserveSponsorCreditsForAdapterTest(t, svc, "sres-primary-5xx")
+	if reservation.Status != settlement.OperationStatusSubmitted {
+		t.Fatalf("expected submitted reservation on async 5xx fail-soft path, got %s", reservation.Status)
+	}
+	if !reservation.AdapterSubmitted {
+		t.Fatalf("expected adapter submitted marker on async 5xx fail-soft path")
+	}
+	if reservation.AdapterDeferred {
+		t.Fatalf("expected no immediate adapter deferred marker on async 5xx fail-soft path")
+	}
+
+	got := waitObservedCosmosRequest(t, reqCh)
+	if got.path != "/x/vpnsponsor/reservations" {
+		t.Fatalf("expected 5xx request path /x/vpnsponsor/reservations, got %s", got.path)
+	}
+	if got.auth != "Bearer primary-api" {
+		t.Fatalf("expected 5xx auth header to propagate, got %q", got.auth)
+	}
+}
+
 func TestNewSettlementServiceFromEnvCosmosShadowMirrorsSponsorReservationToPrimaryAndShadow(t *testing.T) {
 	primaryReqCh := make(chan observedCosmosRequest, 1)
 	primaryServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
