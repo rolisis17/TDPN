@@ -119,6 +119,86 @@ func (a *switchableAdapter) settlementCalls() int {
 	return a.sessionSubmitCalls
 }
 
+type replayConfirmingAdapter struct {
+	mu                 sync.Mutex
+	fail               bool
+	sessionSubmitCalls int
+}
+
+func (a *replayConfirmingAdapter) setFail(v bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.fail = v
+}
+
+func (a *replayConfirmingAdapter) SubmitSessionSettlement(_ context.Context, settlement SessionSettlement) (string, error) {
+	a.mu.Lock()
+	a.sessionSubmitCalls++
+	fail := a.fail
+	a.mu.Unlock()
+	if fail {
+		return "", errFakeAdapter
+	}
+	return "chain-set-" + settlement.SessionID, nil
+}
+
+func (a *replayConfirmingAdapter) SubmitRewardIssue(_ context.Context, _ RewardIssue) (string, error) {
+	a.mu.Lock()
+	fail := a.fail
+	a.mu.Unlock()
+	if fail {
+		return "", errFakeAdapter
+	}
+	return "chain-rew-ok", nil
+}
+
+func (a *replayConfirmingAdapter) SubmitSponsorReservation(_ context.Context, _ SponsorCreditReservation) (string, error) {
+	a.mu.Lock()
+	fail := a.fail
+	a.mu.Unlock()
+	if fail {
+		return "", errFakeAdapter
+	}
+	return "chain-sponsor-res-ok", nil
+}
+
+func (a *replayConfirmingAdapter) SubmitSlashEvidence(_ context.Context, _ SlashEvidence) (string, error) {
+	a.mu.Lock()
+	fail := a.fail
+	a.mu.Unlock()
+	if fail {
+		return "", errFakeAdapter
+	}
+	return "chain-slash-ok", nil
+}
+
+func (a *replayConfirmingAdapter) Health(_ context.Context) error { return nil }
+
+func (a *replayConfirmingAdapter) HasSessionSettlement(_ context.Context, settlementID string) (bool, error) {
+	a.mu.Lock()
+	fail := a.fail
+	a.mu.Unlock()
+	return !fail && settlementID != "", nil
+}
+
+func (a *replayConfirmingAdapter) HasRewardIssue(_ context.Context, _ string) (bool, error) {
+	return false, nil
+}
+
+func (a *replayConfirmingAdapter) HasSponsorReservation(_ context.Context, _ string) (bool, error) {
+	return false, nil
+}
+
+func (a *replayConfirmingAdapter) HasSlashEvidence(_ context.Context, _ string) (bool, error) {
+	return false, nil
+}
+
+func (a *replayConfirmingAdapter) settlementCalls() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.sessionSubmitCalls
+}
+
 type confirmingAdapter struct{}
 
 func (a confirmingAdapter) SubmitSessionSettlement(_ context.Context, settlement SessionSettlement) (string, error) {
@@ -394,6 +474,41 @@ func TestMemoryServiceReconcileReplayIsIdempotentAcrossRepeatedCalls(t *testing.
 	if first.PendingAdapterOperations != 0 || second.PendingAdapterOperations != 0 {
 		t.Fatalf("expected no pending operations after successful replay, got first=%d second=%d",
 			first.PendingAdapterOperations, second.PendingAdapterOperations)
+	}
+	if gotCalls := adapter.settlementCalls(); gotCalls != 2 {
+		t.Fatalf("expected exactly two settlement submissions (initial fail + single replay), got %d", gotCalls)
+	}
+}
+
+func TestMemoryServiceReconcileReplayPromotesToConfirmedWhenQuerierAvailable(t *testing.T) {
+	adapter := &replayConfirmingAdapter{fail: true}
+	s := NewMemoryService(
+		WithPricePerMiBMicros(1024*1024),
+		WithChainAdapter(adapter),
+	)
+	setupDeferredSettlement(t, s, "sess-replay-confirm-1")
+	ctx := context.Background()
+
+	adapter.setFail(false)
+	report, err := s.Reconcile(ctx)
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if report.PendingAdapterOperations != 0 {
+		t.Fatalf("expected deferred backlog cleared after replay, got %d", report.PendingAdapterOperations)
+	}
+	if report.ConfirmedOperations < 1 {
+		t.Fatalf("expected at least one confirmed operation after replay+query, got %d", report.ConfirmedOperations)
+	}
+
+	s.mu.Lock()
+	settlement := s.settledBySession["sess-replay-confirm-1"]
+	s.mu.Unlock()
+	if settlement.Status != OperationStatusConfirmed {
+		t.Fatalf("expected settlement confirmed after replay+query, got %s", settlement.Status)
+	}
+	if !settlement.AdapterSubmitted || settlement.AdapterDeferred {
+		t.Fatalf("expected adapter state submitted=true deferred=false after replay+query")
 	}
 	if gotCalls := adapter.settlementCalls(); gotCalls != 2 {
 		t.Fatalf("expected exactly two settlement submissions (initial fail + single replay), got %d", gotCalls)

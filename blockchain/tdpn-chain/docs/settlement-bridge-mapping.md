@@ -32,6 +32,7 @@ This scaffold keeps chain responsibilities isolated from VPN dataplane runtime.
 ## Reconciliation contract
 - Records use `pending|submitted|confirmed|failed` status placeholders via `types/ReconciliationStatus`.
 - Reconcile can promote settlement/reward/sponsor/slash records from `submitted` to `confirmed` when adapter query surfaces observe corresponding by-id bridge records.
+- This query-by-id confirmation capability is exposed via optional settlement adapter interface `ChainConfirmationQuerier` (`pkg/settlement/types.go`).
 - Phase-1 app wiring is stateful across all module msg surfaces:
   - `vpnbilling`: reservation create + settlement finalize.
   - `vpnrewards`: accrual create + distribution record.

@@ -48,6 +48,20 @@ check_adapter_roundtrip_wording() {
   fi
 }
 
+check_confirmation_interface_wording() {
+  local file_path="$1"
+  local label="$2"
+
+  if ! rg -Fq "ChainConfirmationQuerier" "$file_path"; then
+    echo "$label must reference ChainConfirmationQuerier confirmation interface"
+    exit 1
+  fi
+  if ! rg -Fq "pkg/settlement/types.go" "$file_path"; then
+    echo "$label must reference canonical confirmation interface location (pkg/settlement/types.go)"
+    exit 1
+  fi
+}
+
 for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$chain_readme" "$settlement_mapping_doc" "$phase5_ci_script" "$phase5_integration_script"; do
   if [[ ! -f "$f" ]]; then
     echo "missing required file: $f"
@@ -232,6 +246,7 @@ if ! rg -Fq "integration_cosmos_tdpnd_state_dir_persistence.sh" "$cosmos_runtime
   echo "cosmos settlement runtime guide must document state-dir persistence integration script"
   exit 1
 fi
+check_confirmation_interface_wording "$cosmos_runtime_doc" "cosmos settlement runtime guide"
 
 if ! rg -Fq -- "--state-dir" "$chain_readme"; then
   echo "chain README must document optional --state-dir runtime flag"
@@ -263,6 +278,7 @@ if ! rg -Fq "keeper KV-adapter seam for Cosmos SDK KV integration" "$chain_readm
 fi
 check_confirmation_lifecycle_wording "$chain_readme" "chain README"
 check_adapter_roundtrip_wording "$chain_readme" "chain README"
+check_confirmation_interface_wording "$chain_readme" "chain README"
 
 if ! rg -Fq "GET /x/vpnbilling/reservations[/{reservation_id}]" "$settlement_mapping_doc"; then
   echo "settlement bridge mapping must document list/by-id GET query mapping"
@@ -294,6 +310,7 @@ if ! rg -Fq "KV-adapter seam for Cosmos SDK integration" "$settlement_mapping_do
 fi
 check_confirmation_lifecycle_wording "$settlement_mapping_doc" "settlement bridge mapping"
 check_adapter_roundtrip_wording "$settlement_mapping_doc" "settlement bridge mapping"
+check_confirmation_interface_wording "$settlement_mapping_doc" "settlement bridge mapping"
 
 for phase5_script in "$phase5_ci_script" "$phase5_integration_script"; do
   if rg -qi "phase4 windows full parity" "$phase5_script"; then

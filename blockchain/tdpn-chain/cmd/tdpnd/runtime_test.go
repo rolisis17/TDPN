@@ -307,6 +307,41 @@ func TestRunTDPNDGRPCModeListenError(t *testing.T) {
 	}
 }
 
+func TestRunRuntimeServersCancelsPeerRunnerOnFirstError(t *testing.T) {
+	t.Parallel()
+
+	peerObservedCancel := make(chan struct{})
+	leaderStarted := make(chan struct{})
+	wantErr := errors.New("runner failed")
+
+	err := runRuntimeServers(
+		context.Background(),
+		func(context.Context) error {
+			close(leaderStarted)
+			return wantErr
+		},
+		func(ctx context.Context) error {
+			<-leaderStarted
+			select {
+			case <-ctx.Done():
+				close(peerObservedCancel)
+				return nil
+			case <-time.After(2 * time.Second):
+				return errors.New("peer runner did not observe cancellation")
+			}
+		},
+	)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("expected first error %v, got %v", wantErr, err)
+	}
+
+	select {
+	case <-peerObservedCancel:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected peer runner to observe cancellation after first error")
+	}
+}
+
 func TestRunTDPNDGRPCModeRegisterErrorClosesListener(t *testing.T) {
 	t.Parallel()
 
