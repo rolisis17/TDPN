@@ -91,6 +91,26 @@ wait_for_health_ready() {
   return 1
 }
 
+start_issuer_runtime() {
+  local port="$1"
+  : >"${LOG_FILE}"
+  (
+    ISSUER_ADDR="127.0.0.1:${port}" \
+    ISSUER_PRIVATE_KEY_FILE="${TMP_DIR}/issuer_ed25519.key" \
+    ISSUER_PREVIOUS_PUBKEYS_FILE="${TMP_DIR}/issuer_previous_pubkeys.txt" \
+    ISSUER_EPOCHS_FILE="${TMP_DIR}/issuer_epochs.json" \
+    ISSUER_SUBJECTS_FILE="${TMP_DIR}/issuer_subjects.json" \
+    ISSUER_REVOCATIONS_FILE="${TMP_DIR}/issuer_revocations.json" \
+    ISSUER_ANON_REVOCATIONS_FILE="${TMP_DIR}/issuer_anon_revocations.json" \
+    ISSUER_ANON_DISPUTES_FILE="${TMP_DIR}/issuer_anon_disputes.json" \
+    ISSUER_AUDIT_FILE="${TMP_DIR}/issuer_audit.json" \
+    ISSUER_SETTLEMENT_RECONCILE_SEC=0 \
+    ISSUER_SPONSOR_API_TOKEN="${SPONSOR_TOKEN}" \
+    go run ./cmd/node --issuer
+  ) >"${LOG_FILE}" 2>&1 &
+  ISSUER_PID=$!
+}
+
 post_expect_status() {
   local url="$1"
   local payload="$2"
@@ -145,25 +165,34 @@ SUBJECT_ID="client-live-1"
 SPONSOR_ID="dapp-operator-live-1"
 RESERVATION_ID="sres-live-${RANDOM}-$(date +%s)"
 SESSION_ID="sess-live-${RANDOM}-$(date +%s)"
-BASE_URL="http://127.0.0.1:${PORT}"
-
-(
-  ISSUER_ADDR="127.0.0.1:${PORT}" \
-  ISSUER_PRIVATE_KEY_FILE="${TMP_DIR}/issuer_ed25519.key" \
-  ISSUER_PREVIOUS_PUBKEYS_FILE="${TMP_DIR}/issuer_previous_pubkeys.txt" \
-  ISSUER_EPOCHS_FILE="${TMP_DIR}/issuer_epochs.json" \
-  ISSUER_SUBJECTS_FILE="${TMP_DIR}/issuer_subjects.json" \
-  ISSUER_REVOCATIONS_FILE="${TMP_DIR}/issuer_revocations.json" \
-  ISSUER_ANON_REVOCATIONS_FILE="${TMP_DIR}/issuer_anon_revocations.json" \
-  ISSUER_ANON_DISPUTES_FILE="${TMP_DIR}/issuer_anon_disputes.json" \
-  ISSUER_AUDIT_FILE="${TMP_DIR}/issuer_audit.json" \
-  ISSUER_SETTLEMENT_RECONCILE_SEC=0 \
-  ISSUER_SPONSOR_API_TOKEN="${SPONSOR_TOKEN}" \
-  go run ./cmd/node --issuer
-) >"${LOG_FILE}" 2>&1 &
-ISSUER_PID=$!
-
-wait_for_health_ready "${BASE_URL}/v1/health"
+BASE_URL=""
+started="0"
+for _ in $(seq 1 12); do
+  PORT="$(pick_port)"
+  if [[ -z "${PORT}" ]]; then
+    continue
+  fi
+  BASE_URL="http://127.0.0.1:${PORT}"
+  start_issuer_runtime "${PORT}"
+  if wait_for_health_ready "${BASE_URL}/v1/health"; then
+    started="1"
+    break
+  fi
+  if [[ -n "${ISSUER_PID}" ]]; then
+    wait "${ISSUER_PID}" 2>/dev/null || true
+    ISSUER_PID=""
+  fi
+  if ! grep -Fq "address already in use" "${LOG_FILE}"; then
+    echo "issuer failed to start for non-bind-conflict reason"
+    cat "${LOG_FILE}"
+    exit 1
+  fi
+done
+if [[ "${started}" != "1" ]]; then
+  echo "failed to start issuer sponsor live-smoke runtime after bind-conflict retries"
+  cat "${LOG_FILE}"
+  exit 1
+fi
 
 quote_payload="$(jq -n --arg subject "${SUBJECT_ID}" --arg currency "TDPNC" '{subject:$subject,currency:$currency}')"
 post_expect_status "${BASE_URL}/v1/sponsor/quote" "${quote_payload}" "200" "${SPONSOR_TOKEN}"

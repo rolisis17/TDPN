@@ -30,6 +30,10 @@ Use these in issuer/exit service environments:
 - `COSMOS_SETTLEMENT_SIGNED_TX_SECRET` (inline secret; required unless secret-file is provided)
 - `COSMOS_SETTLEMENT_SIGNED_TX_SECRET_FILE` (optional secret file path; used when inline secret is empty)
 - `COSMOS_SETTLEMENT_SIGNED_TX_KEY_ID` (optional signer key id tag embedded in signed-tx payload)
+- `COSMOS_SETTLEMENT_SHADOW_ENDPOINT` (optional; enables best-effort shadow dual-write mirror)
+- `COSMOS_SETTLEMENT_SHADOW_API_KEY` (optional bearer auth for shadow endpoint)
+- `COSMOS_SETTLEMENT_SHADOW_SUBMIT_MODE` (`http|signed-tx`, optional; default follows HTTP mirror behavior)
+- `COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_BROADCAST_PATH` (optional signed-tx shadow path override)
 
 `COSMOS_SETTLEMENT_ENDPOINT` may point to a local `tdpnd` settlement HTTP bridge when running chain-integrated settlement control-plane flows.
 
@@ -37,6 +41,11 @@ Signed-tx mode note:
 - `COSMOS_SETTLEMENT_SIGNED_TX_SIGNER` is required when `COSMOS_SETTLEMENT_SUBMIT_MODE=signed-tx`.
 - Secret resolution order: `COSMOS_SETTLEMENT_SIGNED_TX_SECRET` first; if empty, `COSMOS_SETTLEMENT_SIGNED_TX_SECRET_FILE` is read and trimmed and must resolve to non-empty content.
 - Service behavior remains fail-soft: VPN session setup/forwarding stays available while settlement writes are deferred and reconciled later.
+
+Shadow dual-write note:
+- `COSMOS_SETTLEMENT_SHADOW_ENDPOINT` enables optional best-effort shadow submissions for settlement/reward/sponsor/slash writes.
+- Shadow submission failures never block primary adapter submission, session setup, or dataplane forwarding.
+- Shadow outcomes are surfaced for operator visibility via reconcile metadata (`attempted/submitted/failed` shadow counters plus per-record shadow fields).
 
 ## TDPND Settlement HTTP Bridge
 

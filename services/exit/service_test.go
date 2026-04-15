@@ -459,6 +459,30 @@ type settlementAdapterRequest struct {
 	body []byte
 }
 
+func collectSettlementAdapterRequests(t *testing.T, ch <-chan settlementAdapterRequest, count int) []settlementAdapterRequest {
+	t.Helper()
+	out := make([]settlementAdapterRequest, 0, count)
+	timeout := time.After(2 * time.Second)
+	for len(out) < count {
+		select {
+		case req := <-ch:
+			out = append(out, req)
+		case <-timeout:
+			t.Fatalf("timed out waiting for %d adapter requests; got %d", count, len(out))
+		}
+	}
+	return out
+}
+
+func hasSettlementAdapterRequest(requests []settlementAdapterRequest, path string, auth string) bool {
+	for _, req := range requests {
+		if req.path == path && req.auth == auth {
+			return true
+		}
+	}
+	return false
+}
+
 func runSettlementForAdapterEnvTest(t *testing.T, svc settlement.Service, sessionID string) {
 	t.Helper()
 	ctx := context.Background()
@@ -721,6 +745,218 @@ func TestNewSettlementServiceFromEnvCosmosSignedTxMissingRequiredFieldsFallsBack
 	}
 	if report.PendingAdapterOperations != 0 || report.FailedOperations != 0 {
 		t.Fatalf("expected no adapter operations after fallback, got pending=%d failed=%d", report.PendingAdapterOperations, report.FailedOperations)
+	}
+}
+
+func TestNewSettlementServiceFromEnvCosmosShadowAdapterMirrorsSubmissions(t *testing.T) {
+	primarySeenCh := make(chan settlementAdapterRequest, 4)
+	primarySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		primarySeenCh <- settlementAdapterRequest{
+			path: r.URL.Path,
+			auth: r.Header.Get("Authorization"),
+			body: body,
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer primarySrv.Close()
+
+	shadowSeenCh := make(chan settlementAdapterRequest, 4)
+	shadowSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		shadowSeenCh <- settlementAdapterRequest{
+			path: r.URL.Path,
+			auth: r.Header.Get("Authorization"),
+			body: body,
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer shadowSrv.Close()
+
+	t.Setenv("SETTLEMENT_CHAIN_ADAPTER", "cosmos")
+	t.Setenv("COSMOS_SETTLEMENT_ENDPOINT", primarySrv.URL)
+	t.Setenv("COSMOS_SETTLEMENT_API_KEY", "api-primary-1")
+	t.Setenv("COSMOS_SETTLEMENT_QUEUE_SIZE", "8")
+	t.Setenv("COSMOS_SETTLEMENT_MAX_RETRIES", "1")
+	t.Setenv("COSMOS_SETTLEMENT_BASE_BACKOFF_MS", "5")
+	t.Setenv("COSMOS_SETTLEMENT_HTTP_TIMEOUT_MS", "500")
+	t.Setenv("COSMOS_SETTLEMENT_SUBMIT_MODE", "")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_BROADCAST_PATH", "")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_CHAIN_ID", "")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_SIGNER", "")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_SECRET", "")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_SECRET_FILE", "")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_KEY_ID", "")
+
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_ENDPOINT", shadowSrv.URL)
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_API_KEY", "api-shadow-1")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_QUEUE_SIZE", "8")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_MAX_RETRIES", "1")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_BASE_BACKOFF_MS", "5")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_HTTP_TIMEOUT_MS", "500")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SUBMIT_MODE", "")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_BROADCAST_PATH", "")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_CHAIN_ID", "")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_SIGNER", "")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_SECRET", "")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_SECRET_FILE", "")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_KEY_ID", "")
+
+	svc := newSettlementServiceFromEnv()
+	ctx := context.Background()
+	sessionID := "sess-shadow-mirror"
+	if _, err := svc.ReserveFunds(ctx, settlement.FundReservation{
+		SessionID:    sessionID,
+		SubjectID:    "subject-shadow-mirror",
+		AmountMicros: 200000,
+	}); err != nil {
+		t.Fatalf("reserve funds: %v", err)
+	}
+	if err := svc.RecordUsage(ctx, settlement.UsageRecord{
+		SessionID:    sessionID,
+		SubjectID:    "subject-shadow-mirror",
+		BytesIngress: 4096,
+		BytesEgress:  2048,
+		RecordedAt:   time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("record usage: %v", err)
+	}
+	sessionSettlement, err := svc.SettleSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("settle session: %v", err)
+	}
+	if !sessionSettlement.AdapterSubmitted || sessionSettlement.AdapterDeferred {
+		t.Fatalf("expected primary adapter submission to remain canonical, got submitted=%t deferred=%t",
+			sessionSettlement.AdapterSubmitted, sessionSettlement.AdapterDeferred)
+	}
+	if !sessionSettlement.ShadowAdapterSubmitted {
+		t.Fatalf("expected shadow adapter submission marker on settlement")
+	}
+	if sessionSettlement.ShadowAdapterStatus != settlement.OperationStatusSubmitted {
+		t.Fatalf("expected shadow settlement status submitted, got %s", sessionSettlement.ShadowAdapterStatus)
+	}
+
+	reward, err := svc.IssueReward(ctx, settlement.RewardIssue{
+		RewardID:          "rew-shadow-mirror-1",
+		ProviderSubjectID: "provider-shadow-mirror-1",
+		SessionID:         sessionID,
+		RewardMicros:      100,
+		Currency:          "TDPNC",
+	})
+	if err != nil {
+		t.Fatalf("issue reward: %v", err)
+	}
+	if !reward.ShadowAdapterSubmitted {
+		t.Fatalf("expected shadow adapter submission marker on reward")
+	}
+
+	primaryRequests := collectSettlementAdapterRequests(t, primarySeenCh, 2)
+	shadowRequests := collectSettlementAdapterRequests(t, shadowSeenCh, 2)
+
+	if !hasSettlementAdapterRequest(primaryRequests, "/x/vpnbilling/settlements", "Bearer api-primary-1") {
+		t.Fatalf("expected primary settlement submission with primary auth, got %+v", primaryRequests)
+	}
+	if !hasSettlementAdapterRequest(primaryRequests, "/x/vpnrewards/issues", "Bearer api-primary-1") {
+		t.Fatalf("expected primary reward submission with primary auth, got %+v", primaryRequests)
+	}
+	if !hasSettlementAdapterRequest(shadowRequests, "/x/vpnbilling/settlements", "Bearer api-shadow-1") {
+		t.Fatalf("expected shadow settlement submission with shadow auth, got %+v", shadowRequests)
+	}
+	if !hasSettlementAdapterRequest(shadowRequests, "/x/vpnrewards/issues", "Bearer api-shadow-1") {
+		t.Fatalf("expected shadow reward submission with shadow auth, got %+v", shadowRequests)
+	}
+
+	report, err := svc.Reconcile(context.Background())
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if !report.ShadowAdapterConfigured {
+		t.Fatalf("expected shadow adapter configured in reconcile report")
+	}
+	if report.ShadowAttemptedOperations < 2 || report.ShadowSubmittedOperations < 2 || report.ShadowFailedOperations != 0 {
+		t.Fatalf("unexpected shadow report counts attempted=%d submitted=%d failed=%d",
+			report.ShadowAttemptedOperations, report.ShadowSubmittedOperations, report.ShadowFailedOperations)
+	}
+}
+
+func TestNewSettlementServiceFromEnvCosmosShadowAdapterInitFailureDoesNotBlockPrimary(t *testing.T) {
+	primarySeenCh := make(chan settlementAdapterRequest, 2)
+	primarySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		primarySeenCh <- settlementAdapterRequest{
+			path: r.URL.Path,
+			auth: r.Header.Get("Authorization"),
+			body: body,
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer primarySrv.Close()
+
+	shadowSeenCh := make(chan settlementAdapterRequest, 1)
+	shadowSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		shadowSeenCh <- settlementAdapterRequest{
+			path: r.URL.Path,
+			auth: r.Header.Get("Authorization"),
+			body: body,
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer shadowSrv.Close()
+
+	t.Setenv("SETTLEMENT_CHAIN_ADAPTER", "cosmos")
+	t.Setenv("COSMOS_SETTLEMENT_ENDPOINT", primarySrv.URL)
+	t.Setenv("COSMOS_SETTLEMENT_API_KEY", "api-primary-only")
+	t.Setenv("COSMOS_SETTLEMENT_QUEUE_SIZE", "8")
+	t.Setenv("COSMOS_SETTLEMENT_MAX_RETRIES", "1")
+	t.Setenv("COSMOS_SETTLEMENT_BASE_BACKOFF_MS", "5")
+	t.Setenv("COSMOS_SETTLEMENT_HTTP_TIMEOUT_MS", "500")
+	t.Setenv("COSMOS_SETTLEMENT_SUBMIT_MODE", "")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_BROADCAST_PATH", "")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_CHAIN_ID", "")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_SIGNER", "")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_SECRET", "")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_SECRET_FILE", "")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_KEY_ID", "")
+
+	// Force shadow adapter init failure (signed-tx mode requires signer).
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_ENDPOINT", shadowSrv.URL)
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SUBMIT_MODE", settlement.CosmosSubmitModeSignedTx)
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_SIGNER", "")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_SECRET", "shadow-secret")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_SECRET_FILE", "")
+
+	svc := newSettlementServiceFromEnv()
+	runSettlementForAdapterEnvTest(t, svc, "sess-shadow-init-fallback")
+
+	select {
+	case got := <-primarySeenCh:
+		if got.path != "/x/vpnbilling/settlements" {
+			t.Fatalf("expected primary settlement path, got %q", got.path)
+		}
+		if got.auth != "Bearer api-primary-only" {
+			t.Fatalf("expected primary auth header, got %q", got.auth)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for primary settlement submit")
+	}
+
+	select {
+	case got := <-shadowSeenCh:
+		t.Fatalf("expected no shadow requests when shadow adapter init fails, got path=%s", got.path)
+	case <-time.After(800 * time.Millisecond):
+	}
+
+	report, err := svc.Reconcile(context.Background())
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if report.ShadowAdapterConfigured {
+		t.Fatalf("expected shadow adapter to remain disabled after init failure")
+	}
+	if report.ShadowAttemptedOperations != 0 || report.ShadowSubmittedOperations != 0 || report.ShadowFailedOperations != 0 {
+		t.Fatalf("expected no shadow operation accounting, got attempted=%d submitted=%d failed=%d",
+			report.ShadowAttemptedOperations, report.ShadowSubmittedOperations, report.ShadowFailedOperations)
 	}
 }
 

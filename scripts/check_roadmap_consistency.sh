@@ -223,6 +223,21 @@ do
     exit 1
   fi
 done
+for shadow_env_key in \
+  "COSMOS_SETTLEMENT_SHADOW_ENDPOINT" \
+  "COSMOS_SETTLEMENT_SHADOW_API_KEY" \
+  "COSMOS_SETTLEMENT_SHADOW_SUBMIT_MODE" \
+  "COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_BROADCAST_PATH"
+do
+  if ! rg -Fq "$shadow_env_key" "$cosmos_runtime_doc"; then
+    echo "cosmos settlement runtime guide must document $shadow_env_key"
+    exit 1
+  fi
+done
+if ! rg -Fq "Shadow submission failures never block primary adapter submission, session setup, or dataplane forwarding." "$cosmos_runtime_doc"; then
+  echo "cosmos settlement runtime guide must document shadow adapter non-blocking behavior"
+  exit 1
+fi
 if ! rg -Fq "Cosmos adapter retry policy" "$cosmos_runtime_doc"; then
   echo "cosmos settlement runtime guide must document adapter retry policy"
   exit 1

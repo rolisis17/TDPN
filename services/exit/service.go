@@ -441,59 +441,78 @@ func newSettlementServiceFromEnv() settlement.Service {
 		}
 		opts = append(opts, settlement.WithCurrencyRate(nativeCurrency, rateNumerator, rateDenominator))
 	}
+	newCosmosAdapterFromEnv := func(prefix string) (*settlement.CosmosAdapter, string, error) {
+		endpoint := strings.TrimSpace(os.Getenv(prefix + "ENDPOINT"))
+		if endpoint == "" {
+			return nil, "", nil
+		}
+
+		queueSize := 256
+		if raw := strings.TrimSpace(os.Getenv(prefix + "QUEUE_SIZE")); raw != "" {
+			if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+				queueSize = n
+			}
+		}
+		retries := 3
+		if raw := strings.TrimSpace(os.Getenv(prefix + "MAX_RETRIES")); raw != "" {
+			if n, err := strconv.Atoi(raw); err == nil && n >= 0 {
+				retries = n
+			}
+		}
+		backoff := 250 * time.Millisecond
+		if raw := strings.TrimSpace(os.Getenv(prefix + "BASE_BACKOFF_MS")); raw != "" {
+			if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+				backoff = time.Duration(n) * time.Millisecond
+			}
+		}
+		timeout := 4 * time.Second
+		if raw := strings.TrimSpace(os.Getenv(prefix + "HTTP_TIMEOUT_MS")); raw != "" {
+			if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+				timeout = time.Duration(n) * time.Millisecond
+			}
+		}
+		submitMode := strings.TrimSpace(os.Getenv(prefix + "SUBMIT_MODE"))
+		if submitMode == "" {
+			submitMode = settlement.CosmosSubmitModeHTTP
+		}
+		adapter, err := settlement.NewCosmosAdapter(settlement.CosmosAdapterConfig{
+			Endpoint:              endpoint,
+			APIKey:                strings.TrimSpace(os.Getenv(prefix + "API_KEY")),
+			QueueSize:             queueSize,
+			MaxRetries:            retries,
+			BaseBackoff:           backoff,
+			HTTPTimeout:           timeout,
+			SubmitMode:            submitMode,
+			SignedTxBroadcastPath: strings.TrimSpace(os.Getenv(prefix + "SIGNED_TX_BROADCAST_PATH")),
+			SignedTxChainID:       strings.TrimSpace(os.Getenv(prefix + "SIGNED_TX_CHAIN_ID")),
+			SignedTxSigner:        strings.TrimSpace(os.Getenv(prefix + "SIGNED_TX_SIGNER")),
+			SignedTxSecret:        strings.TrimSpace(os.Getenv(prefix + "SIGNED_TX_SECRET")),
+			SignedTxSecretFile:    strings.TrimSpace(os.Getenv(prefix + "SIGNED_TX_SECRET_FILE")),
+			SignedTxKeyID:         strings.TrimSpace(os.Getenv(prefix + "SIGNED_TX_KEY_ID")),
+		})
+		if err != nil {
+			return nil, endpoint, err
+		}
+		return adapter, endpoint, nil
+	}
 	if strings.EqualFold(strings.TrimSpace(os.Getenv("SETTLEMENT_CHAIN_ADAPTER")), "cosmos") {
-		endpoint := strings.TrimSpace(os.Getenv("COSMOS_SETTLEMENT_ENDPOINT"))
+		adapter, endpoint, err := newCosmosAdapterFromEnv("COSMOS_SETTLEMENT_")
 		if endpoint == "" {
 			log.Printf("exit settlement: cosmos adapter requested but COSMOS_SETTLEMENT_ENDPOINT is empty; running memory-only mode")
+		} else if err != nil {
+			log.Printf("exit settlement: cosmos adapter init failed (%v); running memory-only mode", err)
 		} else {
-			queueSize := 256
-			if raw := strings.TrimSpace(os.Getenv("COSMOS_SETTLEMENT_QUEUE_SIZE")); raw != "" {
-				if n, err := strconv.Atoi(raw); err == nil && n > 0 {
-					queueSize = n
-				}
-			}
-			retries := 3
-			if raw := strings.TrimSpace(os.Getenv("COSMOS_SETTLEMENT_MAX_RETRIES")); raw != "" {
-				if n, err := strconv.Atoi(raw); err == nil && n >= 0 {
-					retries = n
-				}
-			}
-			backoff := 250 * time.Millisecond
-			if raw := strings.TrimSpace(os.Getenv("COSMOS_SETTLEMENT_BASE_BACKOFF_MS")); raw != "" {
-				if n, err := strconv.Atoi(raw); err == nil && n > 0 {
-					backoff = time.Duration(n) * time.Millisecond
-				}
-			}
-			timeout := 4 * time.Second
-			if raw := strings.TrimSpace(os.Getenv("COSMOS_SETTLEMENT_HTTP_TIMEOUT_MS")); raw != "" {
-				if n, err := strconv.Atoi(raw); err == nil && n > 0 {
-					timeout = time.Duration(n) * time.Millisecond
-				}
-			}
-			submitMode := strings.TrimSpace(os.Getenv("COSMOS_SETTLEMENT_SUBMIT_MODE"))
-			if submitMode == "" {
-				submitMode = settlement.CosmosSubmitModeHTTP
-			}
-			adapter, err := settlement.NewCosmosAdapter(settlement.CosmosAdapterConfig{
-				Endpoint:              endpoint,
-				APIKey:                strings.TrimSpace(os.Getenv("COSMOS_SETTLEMENT_API_KEY")),
-				QueueSize:             queueSize,
-				MaxRetries:            retries,
-				BaseBackoff:           backoff,
-				HTTPTimeout:           timeout,
-				SubmitMode:            submitMode,
-				SignedTxBroadcastPath: strings.TrimSpace(os.Getenv("COSMOS_SETTLEMENT_SIGNED_TX_BROADCAST_PATH")),
-				SignedTxChainID:       strings.TrimSpace(os.Getenv("COSMOS_SETTLEMENT_SIGNED_TX_CHAIN_ID")),
-				SignedTxSigner:        strings.TrimSpace(os.Getenv("COSMOS_SETTLEMENT_SIGNED_TX_SIGNER")),
-				SignedTxSecret:        strings.TrimSpace(os.Getenv("COSMOS_SETTLEMENT_SIGNED_TX_SECRET")),
-				SignedTxSecretFile:    strings.TrimSpace(os.Getenv("COSMOS_SETTLEMENT_SIGNED_TX_SECRET_FILE")),
-				SignedTxKeyID:         strings.TrimSpace(os.Getenv("COSMOS_SETTLEMENT_SIGNED_TX_KEY_ID")),
-			})
-			if err != nil {
-				log.Printf("exit settlement: cosmos adapter init failed (%v); running memory-only mode", err)
+			opts = append(opts, settlement.WithChainAdapter(adapter))
+			log.Printf("exit settlement: cosmos adapter enabled endpoint=%s", endpoint)
+		}
+
+		shadowAdapter, shadowEndpoint, shadowErr := newCosmosAdapterFromEnv("COSMOS_SETTLEMENT_SHADOW_")
+		if shadowEndpoint != "" {
+			if shadowErr != nil {
+				log.Printf("exit settlement: cosmos shadow adapter init failed (%v); continuing without shadow adapter", shadowErr)
 			} else {
-				opts = append(opts, settlement.WithChainAdapter(adapter))
-				log.Printf("exit settlement: cosmos adapter enabled endpoint=%s", endpoint)
+				opts = append(opts, settlement.WithShadowChainAdapter(shadowAdapter))
+				log.Printf("exit settlement: cosmos shadow adapter enabled endpoint=%s", shadowEndpoint)
 			}
 		}
 	}
