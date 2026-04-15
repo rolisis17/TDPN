@@ -37,6 +37,50 @@ func TestGRPCMsgServerAdapterCreateAuthorization(t *testing.T) {
 	}
 }
 
+func TestGRPCMsgServerAdapterCreateAuthorizationConflictClassification(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	adapter := NewGRPCMsgServerAdapter(&k)
+
+	_, err := adapter.CreateAuthorization(context.Background(), &sponsorpb.MsgCreateAuthorizationRequest{
+		Authorization: &sponsorpb.SponsorAuthorization{
+			AuthorizationId: "auth-conflict-1",
+			SponsorId:       "sponsor-conflict",
+			AppId:           "app-conflict",
+			MaxCredits:      100,
+			ExpiresAtUnix:   1700000000,
+		},
+	})
+	if err != nil {
+		t.Fatalf("seed create authorization failed: %v", err)
+	}
+
+	_, err = adapter.CreateAuthorization(context.Background(), &sponsorpb.MsgCreateAuthorizationRequest{
+		Authorization: &sponsorpb.SponsorAuthorization{
+			AuthorizationId: "auth-conflict-1",
+			SponsorId:       "sponsor-conflict",
+			AppId:           "app-conflict",
+			MaxCredits:      101,
+			ExpiresAtUnix:   1700000000,
+		},
+	})
+	if err == nil {
+		t.Fatal("expected authorization conflict error")
+	}
+	if !errors.Is(err, ErrAuthorizationConflict) {
+		t.Fatalf("expected ErrAuthorizationConflict, got %v", err)
+	}
+
+	stored, ok := k.GetAuthorization("auth-conflict-1")
+	if !ok {
+		t.Fatal("expected seeded authorization to remain stored")
+	}
+	if stored.MaxCredits != 100 {
+		t.Fatalf("expected stored max_credits to remain 100 after conflict, got %d", stored.MaxCredits)
+	}
+}
+
 func TestGRPCMsgServerAdapterDelegateSessionCredit(t *testing.T) {
 	t.Parallel()
 

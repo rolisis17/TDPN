@@ -1,8 +1,10 @@
 package keeper
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/tdpn/tdpn-chain/x/vpnbilling/types"
@@ -98,5 +100,92 @@ func TestNewFileStoreInvalidPath(t *testing.T) {
 
 	if _, err := NewFileStore(filepath.Join(blockerFile, "state.json")); err == nil {
 		t.Fatal("expected error when parent path is a file")
+	}
+}
+
+func TestNewFileStoreAcceptsEmptyExistingFile(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "vpnbilling-state.json")
+	if err := os.WriteFile(storePath, []byte{}, 0o600); err != nil {
+		t.Fatalf("write empty state file: %v", err)
+	}
+
+	store, err := NewFileStore(storePath)
+	if err != nil {
+		t.Fatalf("NewFileStore returned unexpected error for empty file: %v", err)
+	}
+
+	if got := store.ListReservations(); len(got) != 0 {
+		t.Fatalf("expected no reservations from empty file, got %d", len(got))
+	}
+	if got := store.ListSettlements(); len(got) != 0 {
+		t.Fatalf("expected no settlements from empty file, got %d", len(got))
+	}
+}
+
+func TestNewFileStoreRejectsMalformedJSON(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "vpnbilling-state.json")
+	if err := os.WriteFile(storePath, []byte("{not-json"), 0o600); err != nil {
+		t.Fatalf("write malformed state file: %v", err)
+	}
+
+	_, err := NewFileStore(storePath)
+	if err == nil {
+		t.Fatal("expected malformed JSON to return an error")
+	}
+	if !strings.Contains(err.Error(), "decode file store state") {
+		t.Fatalf("expected decode error context, got: %v", err)
+	}
+}
+
+func TestFileStorePersistsDeterministicSortedSnapshot(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "vpnbilling-state.json")
+
+	store, err := NewFileStore(storePath)
+	if err != nil {
+		t.Fatalf("NewFileStore returned unexpected error: %v", err)
+	}
+
+	store.UpsertReservation(types.CreditReservation{ReservationID: "res-20", SessionID: "sess-20", Amount: 20})
+	store.UpsertReservation(types.CreditReservation{ReservationID: "res-01", SessionID: "sess-01", Amount: 1})
+	store.UpsertSettlement(types.SettlementRecord{SettlementID: "set-20", SessionID: "sess-20", BilledAmount: 20})
+	store.UpsertSettlement(types.SettlementRecord{SettlementID: "set-01", SessionID: "sess-01", BilledAmount: 1})
+
+	payload, err := os.ReadFile(storePath)
+	if err != nil {
+		t.Fatalf("read persisted snapshot: %v", err)
+	}
+
+	var snapshot fileStoreSnapshot
+	if err := json.Unmarshal(payload, &snapshot); err != nil {
+		t.Fatalf("decode persisted snapshot: %v", err)
+	}
+	if len(snapshot.Reservations) != 2 {
+		t.Fatalf("expected 2 reservations in snapshot, got %d", len(snapshot.Reservations))
+	}
+	if len(snapshot.Settlements) != 2 {
+		t.Fatalf("expected 2 settlements in snapshot, got %d", len(snapshot.Settlements))
+	}
+	if snapshot.Reservations[0].ReservationID != "res-01" || snapshot.Reservations[1].ReservationID != "res-20" {
+		t.Fatalf("expected sorted reservation ids [res-01 res-20], got [%s %s]", snapshot.Reservations[0].ReservationID, snapshot.Reservations[1].ReservationID)
+	}
+	if snapshot.Settlements[0].SettlementID != "set-01" || snapshot.Settlements[1].SettlementID != "set-20" {
+		t.Fatalf("expected sorted settlement ids [set-01 set-20], got [%s %s]", snapshot.Settlements[0].SettlementID, snapshot.Settlements[1].SettlementID)
+	}
+
+	tmpFiles, err := filepath.Glob(filepath.Join(tempDir, "vpnbilling-state.json.tmp-*"))
+	if err != nil {
+		t.Fatalf("glob temp files: %v", err)
+	}
+	if len(tmpFiles) != 0 {
+		t.Fatalf("expected no leftover temp files after atomic write, found %d: %v", len(tmpFiles), tmpFiles)
 	}
 }

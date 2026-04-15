@@ -113,3 +113,54 @@ func TestKVStoreInvalidPayloadsAreSafeOnGetAndList(t *testing.T) {
 		t.Fatalf("expected listed penalty id %q, got %q", goodPenalty.PenaltyID, penaltyList[0].PenaltyID)
 	}
 }
+
+func TestNewKVStoreNilFallbackAndPrefixIsolation(t *testing.T) {
+	t.Parallel()
+
+	store := NewKVStore(nil)
+
+	evidence := types.SlashEvidence{
+		EvidenceID: "evidence-fallback",
+		ProviderID: "provider-fallback",
+		Kind:       types.EvidenceKindObjective,
+		ProofHash:  "sha256:proof-fallback",
+		Status:     chaintypes.ReconciliationPending,
+	}
+	penalty := types.PenaltyDecision{
+		PenaltyID:       "penalty-fallback",
+		EvidenceID:      evidence.EvidenceID,
+		SlashBasisPoint: 5,
+		Status:          chaintypes.ReconciliationSubmitted,
+	}
+	store.UpsertEvidence(evidence)
+	store.UpsertPenalty(penalty)
+
+	gotEvidence, ok := store.GetEvidence(evidence.EvidenceID)
+	if !ok {
+		t.Fatal("expected evidence to be readable from nil-store fallback")
+	}
+	if gotEvidence != evidence {
+		t.Fatalf("expected fallback evidence %+v, got %+v", evidence, gotEvidence)
+	}
+
+	gotPenalty, ok := store.GetPenalty(penalty.PenaltyID)
+	if !ok {
+		t.Fatal("expected penalty to be readable from nil-store fallback")
+	}
+	if gotPenalty != penalty {
+		t.Fatalf("expected fallback penalty %+v, got %+v", penalty, gotPenalty)
+	}
+
+	// Ensure prefix scans stay isolated to vpnslashing namespaces.
+	rawStore := kvtypes.NewMapStore()
+	rawStore.Set([]byte("other/evidence-entry"), []byte(`{"EvidenceID":"other"}`))
+	rawStore.Set([]byte("other/penalty-entry"), []byte(`{"PenaltyID":"other"}`))
+	prefixIsolated := NewKVStore(rawStore)
+
+	if got := len(prefixIsolated.ListEvidence()); got != 0 {
+		t.Fatalf("expected 0 evidence entries from unrelated prefix, got %d", got)
+	}
+	if got := len(prefixIsolated.ListPenalties()); got != 0 {
+		t.Fatalf("expected 0 penalty entries from unrelated prefix, got %d", got)
+	}
+}

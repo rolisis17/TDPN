@@ -3,6 +3,7 @@ package keeper
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	chaintypes "github.com/tdpn/tdpn-chain/types"
@@ -246,5 +247,132 @@ func TestNewFileStoreInvalidPath(t *testing.T) {
 	_, err := NewFileStore(filepath.Join(blockerFile, "vpnslashing.json"))
 	if err == nil {
 		t.Fatal("expected NewFileStore to fail when parent path is not a directory")
+	}
+}
+
+func TestFileStoreListEvidenceAndPenaltiesAcrossReopen(t *testing.T) {
+	t.Parallel()
+
+	storePath := filepath.Join(t.TempDir(), "state", "vpnslashing.json")
+	store, err := NewFileStore(storePath)
+	if err != nil {
+		t.Fatalf("NewFileStore returned unexpected error: %v", err)
+	}
+
+	evidenceA := types.SlashEvidence{
+		EvidenceID: "evidence-file-a",
+		ProviderID: "provider-a",
+		Kind:       types.EvidenceKindObjective,
+		ProofHash:  "sha256:proof-a",
+		Status:     chaintypes.ReconciliationPending,
+	}
+	evidenceB := types.SlashEvidence{
+		EvidenceID: "evidence-file-b",
+		ProviderID: "provider-b",
+		Kind:       types.EvidenceKindObjective,
+		ProofHash:  "sha256:proof-b",
+		Status:     chaintypes.ReconciliationSubmitted,
+	}
+	penaltyA := types.PenaltyDecision{
+		PenaltyID:       "penalty-file-a",
+		EvidenceID:      evidenceA.EvidenceID,
+		SlashBasisPoint: 10,
+		Status:          chaintypes.ReconciliationSubmitted,
+	}
+	penaltyB := types.PenaltyDecision{
+		PenaltyID:       "penalty-file-b",
+		EvidenceID:      evidenceB.EvidenceID,
+		SlashBasisPoint: 25,
+		Status:          chaintypes.ReconciliationConfirmed,
+	}
+
+	store.UpsertEvidence(evidenceA)
+	store.UpsertEvidence(evidenceB)
+	store.UpsertPenalty(penaltyA)
+	store.UpsertPenalty(penaltyB)
+
+	reopened, err := NewFileStore(storePath)
+	if err != nil {
+		t.Fatalf("reopening file store returned unexpected error: %v", err)
+	}
+
+	evidenceList := reopened.ListEvidence()
+	if len(evidenceList) != 2 {
+		t.Fatalf("expected 2 evidence entries after reopen, got %d", len(evidenceList))
+	}
+	evidenceByID := make(map[string]types.SlashEvidence, len(evidenceList))
+	for _, record := range evidenceList {
+		evidenceByID[record.EvidenceID] = record
+	}
+	if evidenceByID[evidenceA.EvidenceID] != evidenceA {
+		t.Fatalf("expected evidence %q to round-trip through list", evidenceA.EvidenceID)
+	}
+	if evidenceByID[evidenceB.EvidenceID] != evidenceB {
+		t.Fatalf("expected evidence %q to round-trip through list", evidenceB.EvidenceID)
+	}
+
+	penaltyList := reopened.ListPenalties()
+	if len(penaltyList) != 2 {
+		t.Fatalf("expected 2 penalty entries after reopen, got %d", len(penaltyList))
+	}
+	penaltyByID := make(map[string]types.PenaltyDecision, len(penaltyList))
+	for _, record := range penaltyList {
+		penaltyByID[record.PenaltyID] = record
+	}
+	if penaltyByID[penaltyA.PenaltyID] != penaltyA {
+		t.Fatalf("expected penalty %q to round-trip through list", penaltyA.PenaltyID)
+	}
+	if penaltyByID[penaltyB.PenaltyID] != penaltyB {
+		t.Fatalf("expected penalty %q to round-trip through list", penaltyB.PenaltyID)
+	}
+}
+
+func TestNewFileStoreWhitespaceSeedInitializesEmptyState(t *testing.T) {
+	t.Parallel()
+
+	storePath := filepath.Join(t.TempDir(), "state", "vpnslashing.json")
+	if err := os.MkdirAll(filepath.Dir(storePath), 0o755); err != nil {
+		t.Fatalf("failed creating store dir: %v", err)
+	}
+	if err := os.WriteFile(storePath, []byte(" \n\t "), 0o644); err != nil {
+		t.Fatalf("failed seeding whitespace state file: %v", err)
+	}
+
+	store, err := NewFileStore(storePath)
+	if err != nil {
+		t.Fatalf("NewFileStore with whitespace seed returned unexpected error: %v", err)
+	}
+
+	if got := len(store.ListEvidence()); got != 0 {
+		t.Fatalf("expected empty evidence list for whitespace seed, got %d", got)
+	}
+	if got := len(store.ListPenalties()); got != 0 {
+		t.Fatalf("expected empty penalty list for whitespace seed, got %d", got)
+	}
+
+	payload, err := os.ReadFile(storePath)
+	if err != nil {
+		t.Fatalf("failed reading persisted store file: %v", err)
+	}
+	content := string(payload)
+	if !strings.Contains(content, "\"evidence\"") || !strings.Contains(content, "\"penalties\"") {
+		t.Fatalf("expected initialized file to contain store keys, got: %s", content)
+	}
+}
+
+func TestNewFileStoreInvalidJSON(t *testing.T) {
+	t.Parallel()
+
+	storePath := filepath.Join(t.TempDir(), "state", "vpnslashing.json")
+	if err := os.MkdirAll(filepath.Dir(storePath), 0o755); err != nil {
+		t.Fatalf("failed creating store dir: %v", err)
+	}
+	if err := os.WriteFile(storePath, []byte("{bad-json"), 0o644); err != nil {
+		t.Fatalf("failed seeding invalid JSON file: %v", err)
+	}
+
+	_, err := NewFileStore(storePath)
+	if err == nil {
+		t.Fatal("expected NewFileStore to fail with invalid JSON state")
 	}
 }
