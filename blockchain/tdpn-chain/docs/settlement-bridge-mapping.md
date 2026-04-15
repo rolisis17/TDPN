@@ -11,6 +11,10 @@ This mapping reflects phase-1 stateful module wiring while keeping chain respons
   - `evidence_ref`/proof reference must be canonical: `sha256:<value>` or `obj://<path>`.
   - fallback derivation from violation type is removed; callers must submit explicit canonical proof references.
 - sponsor API credit delegation -> `x/vpnsponsor` `SponsorAuthorization` and `DelegatedSessionCredit`.
+  - sponsor reservation bridge payload supports optional identity split fields:
+    - `AppID` (dApp/application identity),
+    - `EndUserID` (end-user/session subject identity).
+  - legacy compatibility remains: when `AppID` or `EndUserID` are omitted, mapping falls back to `SubjectID`.
 - optional `tdpnd` settlement HTTP bridge routing:
   - write paths (`POST`):
     - `POST /x/vpnbilling/settlements` -> `x/vpnbilling`

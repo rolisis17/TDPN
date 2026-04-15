@@ -61,6 +61,8 @@ Shadow dual-write note:
     - `POST /x/vpnbilling/settlements`
     - `POST /x/vpnrewards/issues`
     - `POST /x/vpnsponsor/reservations`
+      - sponsor reservation payload supports optional `AppID` and `EndUserID`.
+      - when omitted, bridge compatibility fallback derives both from `SubjectID`.
     - `POST /x/vpnslashing/evidence`
       - v1 validation expectation: slash evidence must be machine-verifiable, and `evidence_ref`/proof reference must use `sha256:<value>` or `obj://<path>`.
       - Bridge mapping no longer derives proof references from violation-type fallback; callers must provide canonical proof references.
