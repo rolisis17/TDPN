@@ -52,6 +52,7 @@ STAGE_ENV_NAMES=(
   "CI_PHASE6_COSMOS_L1_CONTRACTS_PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_CHECK_SCRIPT"
   "CI_PHASE6_COSMOS_L1_CONTRACTS_PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_RUN_SCRIPT"
   "CI_PHASE6_COSMOS_L1_CONTRACTS_PHASE6_COSMOS_L1_BUILD_TESTNET_SUITE_SCRIPT"
+  "CI_PHASE6_COSMOS_L1_CONTRACTS_PHASE6_COSMOS_L1_CONTRACTS_LIVE_SMOKE_SCRIPT"
 )
 
 STAGE_IDS=(
@@ -63,6 +64,7 @@ STAGE_IDS=(
   "phase6_cosmos_l1_build_testnet_handoff_check"
   "phase6_cosmos_l1_build_testnet_handoff_run"
   "phase6_cosmos_l1_build_testnet_suite"
+  "phase6_cosmos_l1_contracts_live_smoke"
 )
 
 TOGGLE_STAGE_IDS=(
@@ -226,9 +228,11 @@ if ! jq -e '
   and .inputs.run_phase6_cosmos_l1_build_testnet_handoff_check == true
   and .inputs.run_phase6_cosmos_l1_build_testnet_handoff_run == true
   and .inputs.run_phase6_cosmos_l1_build_testnet_suite == true
+  and .inputs.run_phase6_cosmos_l1_contracts_live_smoke == true
   and (.steps | to_entries | all(.value.enabled == true and .value.status == "pass" and .value.rc == 0 and .value.command != null))
   and .steps.ci_phase6_cosmos_l1_build_testnet.status == "pass"
   and .steps.phase6_cosmos_l1_build_testnet_suite.status == "pass"
+  and .steps.phase6_cosmos_l1_contracts_live_smoke.status == "pass"
 ' "$SUCCESS_SUMMARY_JSON" >/dev/null; then
   echo "success summary missing expected contract fields"
   cat "$SUCCESS_SUMMARY_JSON"
@@ -325,7 +329,8 @@ CI_PHASE6_COSMOS_L1_CONTRACTS_CANONICAL_SUMMARY_JSON="$TOGGLE_CANONICAL_SUMMARY_
   --run-phase6-cosmos-keeper-coverage-floor 0 \
   --run-phase6-cosmos-l1-build-testnet-check 0 \
   --run-phase6-cosmos-l1-build-testnet-handoff-check 0 \
-  --run-phase6-cosmos-l1-build-testnet-suite 0 >"$TOGGLE_LOG" 2>&1
+  --run-phase6-cosmos-l1-build-testnet-suite 0 \
+  --run-phase6-cosmos-l1-contracts-live-smoke 0 >"$TOGGLE_LOG" 2>&1
 
 assert_stage_order "$CAPTURE" "${TOGGLE_STAGE_IDS[@]}"
 
@@ -361,6 +366,10 @@ if ! jq -e '
   and .steps.phase6_cosmos_l1_build_testnet_suite.enabled == false
   and .steps.phase6_cosmos_l1_build_testnet_suite.status == "skip"
   and .steps.phase6_cosmos_l1_build_testnet_suite.reason == "disabled"
+  and .inputs.run_phase6_cosmos_l1_contracts_live_smoke == false
+  and .steps.phase6_cosmos_l1_contracts_live_smoke.enabled == false
+  and .steps.phase6_cosmos_l1_contracts_live_smoke.status == "skip"
+  and .steps.phase6_cosmos_l1_contracts_live_smoke.reason == "disabled"
   and .steps.phase6_cosmos_l1_build_testnet_run.enabled == true
   and .steps.phase6_cosmos_l1_build_testnet_run.status == "pass"
   and .steps.phase6_cosmos_l1_build_testnet_handoff_run.enabled == true
@@ -376,7 +385,7 @@ echo "[ci-phase6-cosmos-l1-contracts] first-failure rc propagation"
 : >"$CAPTURE"
 set +e
 CI_PHASE6_CONTRACTS_CAPTURE_FILE="$CAPTURE" \
-CI_PHASE6_CONTRACTS_FAIL_MATRIX="phase6_cosmos_l1_build_testnet_check=23,phase6_cosmos_l1_build_testnet_handoff_check=41,phase6_cosmos_l1_build_testnet_suite=43" \
+CI_PHASE6_CONTRACTS_FAIL_MATRIX="phase6_cosmos_l1_build_testnet_check=23,phase6_cosmos_l1_build_testnet_handoff_check=41,phase6_cosmos_l1_build_testnet_suite=43,phase6_cosmos_l1_contracts_live_smoke=47" \
 CI_PHASE6_COSMOS_L1_CONTRACTS_CANONICAL_SUMMARY_JSON="$FAIL_CANONICAL_SUMMARY_JSON" \
 "$GATE_SCRIPT" \
   --reports-dir "$FAIL_REPORTS_DIR" \
@@ -413,6 +422,8 @@ if ! jq -e '
   and .steps.phase6_cosmos_l1_build_testnet_handoff_run.status == "pass"
   and .steps.phase6_cosmos_l1_build_testnet_suite.status == "fail"
   and .steps.phase6_cosmos_l1_build_testnet_suite.rc == 43
+  and .steps.phase6_cosmos_l1_contracts_live_smoke.status == "fail"
+  and .steps.phase6_cosmos_l1_contracts_live_smoke.rc == 47
 ' "$FAIL_SUMMARY_JSON" >/dev/null; then
   echo "fail summary missing expected first-failure accounting"
   cat "$FAIL_SUMMARY_JSON"

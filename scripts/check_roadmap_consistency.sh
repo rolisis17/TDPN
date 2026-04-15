@@ -419,6 +419,7 @@ for stage_spec in "${phase6_stage_specs[@]}"; do
   fi
 done
 phase6_contract_gate_specs=(
+  "phase6_cosmos_l1_contracts_live_smoke|integration_phase6_cosmos_l1_contracts_live_smoke.sh"
   "phase6_cosmos_l1_build_testnet_check|integration_phase6_cosmos_l1_build_testnet_check.sh"
   "phase6_cosmos_l1_build_testnet_run|integration_phase6_cosmos_l1_build_testnet_run.sh"
   "phase6_cosmos_l1_build_testnet_suite|integration_phase6_cosmos_l1_build_testnet_suite.sh"
@@ -437,6 +438,30 @@ for gate_spec in "${phase6_contract_gate_specs[@]}"; do
     exit 1
   fi
 done
+if ! rg -Fq "phase6_cosmos_l1_contracts_live_smoke" "$phase6_contracts_ci_script"; then
+  echo "phase6 contracts ci script must include phase6_cosmos_l1_contracts_live_smoke stage"
+  exit 1
+fi
+if ! rg -Fq "integration_phase6_cosmos_l1_contracts_live_smoke.sh" "$phase6_contracts_ci_script"; then
+  echo "phase6 contracts ci script must wire integration_phase6_cosmos_l1_contracts_live_smoke.sh by default"
+  exit 1
+fi
+if ! rg -Fq "assert_stage_order \"\$CAPTURE\" \"\${STAGE_IDS[@]}\"" "$phase6_contracts_integration_script"; then
+  echo "phase6 contracts ci integration script must include stable STAGE_IDS ordering checks"
+  exit 1
+fi
+if ! rg -Fq "phase6_cosmos_l1_contracts_live_smoke.status == \"pass\"" "$phase6_contracts_integration_script"; then
+  echo "phase6 contracts ci integration script must validate live-smoke pass accounting"
+  exit 1
+fi
+if ! rg -Fq "phase6_cosmos_l1_contracts_live_smoke.status == \"skip\"" "$phase6_contracts_integration_script"; then
+  echo "phase6 contracts ci integration script must validate live-smoke skip accounting"
+  exit 1
+fi
+if ! rg -Fq "phase6_cosmos_l1_contracts_live_smoke.status == \"fail\"" "$phase6_contracts_integration_script"; then
+  echo "phase6 contracts ci integration script must validate live-smoke fail accounting"
+  exit 1
+fi
 if ! rg -Fq "cosmos_module_coverage_floor" "$phase6_contracts_ci_script"; then
   echo "phase6 contracts ci script must include cosmos_module_coverage_floor stage"
   exit 1
