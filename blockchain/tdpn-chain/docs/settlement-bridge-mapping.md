@@ -7,6 +7,9 @@ This scaffold keeps chain responsibilities isolated from VPN dataplane runtime.
 - `pkg/settlement` usage finalization -> `x/vpnbilling` `SettlementRecord`.
 - reward accrual after settlement -> `x/vpnrewards` `RewardAccrual` and `DistributionRecord`.
 - objective slash evidence ingestion -> `x/vpnslashing` `SlashEvidence` and `PenaltyDecision`.
+  - v1 scope is objective, machine-verifiable evidence only.
+  - `evidence_ref`/proof reference must be canonical: `sha256:<value>` or `obj://<path>`.
+  - fallback derivation from violation type is removed; callers must submit explicit canonical proof references.
 - sponsor API credit delegation -> `x/vpnsponsor` `SponsorAuthorization` and `DelegatedSessionCredit`.
 - optional `tdpnd` settlement HTTP bridge routing:
   - write paths (`POST`):
@@ -14,6 +17,7 @@ This scaffold keeps chain responsibilities isolated from VPN dataplane runtime.
     - `POST /x/vpnrewards/issues` -> `x/vpnrewards`
     - `POST /x/vpnsponsor/reservations` -> `x/vpnsponsor`
     - `POST /x/vpnslashing/evidence` -> `x/vpnslashing`
+      - validation expectation: reject evidence without canonical `sha256:<value>` or `obj://<path>` proof reference.
   - query paths (`GET`, list + by-id):
     - `GET /x/vpnbilling/reservations[/{reservation_id}]`
     - `GET /x/vpnbilling/settlements[/{settlement_id}]`

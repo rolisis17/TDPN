@@ -138,6 +138,8 @@ Serialization for MVP:
 - `POST /v1/admin/revoke-token`
 - `POST /v1/admin/slash/evidence`
   - Issuer admin endpoint for objective, machine-verifiable slash evidence submission into settlement control-plane tracking.
+  - v1 requires `evidence_ref`/proof reference in canonical format: `sha256:<value>` or `obj://<path>`.
+  - Non-objective/subjective abuse inputs are out of scope for automated v1 slashing and remain policy-governed.
 - `GET /v1/settlement/status`
   - Issuer admin-protected settlement status endpoint; returns reconciliation/backlog counters and can return degraded `503` status details if reconcile fails.
 - `GET /v1/settlement/status`

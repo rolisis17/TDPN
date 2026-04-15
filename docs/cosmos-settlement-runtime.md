@@ -53,6 +53,8 @@ Signed-tx mode note:
     - `POST /x/vpnrewards/issues`
     - `POST /x/vpnsponsor/reservations`
     - `POST /x/vpnslashing/evidence`
+      - v1 validation expectation: slash evidence must be machine-verifiable, and `evidence_ref`/proof reference must use `sha256:<value>` or `obj://<path>`.
+      - Bridge mapping no longer derives proof references from violation-type fallback; callers must provide canonical proof references.
   - query (`GET`) endpoints:
     - `GET /x/vpnbilling/reservations` and `GET /x/vpnbilling/reservations/{reservation_id}`
     - `GET /x/vpnbilling/settlements` and `GET /x/vpnbilling/settlements/{settlement_id}`
@@ -91,6 +93,7 @@ Issuer control-plane endpoints:
   - `GET /v1/settlement/status` (admin auth required, returns reconcile/backlog counters; fail-soft degraded `503` payload if reconcile fails)
 - Objective slash evidence intake (admin):
   - `POST /v1/admin/slash/evidence`
+  - accepts only objective machine-verifiable evidence in v1, with `evidence_ref`/proof reference format `sha256:<value>` or `obj://<path>`.
 
 ## Exit Runtime Controls
 

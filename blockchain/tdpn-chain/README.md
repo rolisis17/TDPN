@@ -18,6 +18,7 @@ This workspace defines the initial module boundaries for TDPN's VPN-compatible b
 ## Governance posture (hybrid v1)
 - Objective machine-verifiable events can be enforced on-chain.
 - Subjective abuse decisions remain policy-governed/multisig during bootstrap.
+- Slash evidence in v1 must carry canonical machine-verifiable proof references: `sha256:<value>` or `obj://<path>`.
 
 ## Integration notes
 - Current app-side bridge is `pkg/settlement` with optional Cosmos adapter.
@@ -49,6 +50,8 @@ This workspace defines the initial module boundaries for TDPN's VPN-compatible b
       - `POST /x/vpnrewards/issues`
       - `POST /x/vpnsponsor/reservations`
       - `POST /x/vpnslashing/evidence`
+        - v1 accepts only objective machine-verifiable evidence with canonical `evidence_ref`/proof reference format `sha256:<value>` or `obj://<path>`.
+        - Bridge behavior no longer derives proof references from violation-type fallback.
     - query (`GET`) endpoints:
       - `GET /x/vpnbilling/reservations` and `GET /x/vpnbilling/reservations/{reservation_id}`
       - `GET /x/vpnbilling/settlements` and `GET /x/vpnbilling/settlements/{settlement_id}`
