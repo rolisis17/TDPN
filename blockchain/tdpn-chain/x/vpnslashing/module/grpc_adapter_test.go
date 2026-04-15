@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	pb "github.com/tdpn/tdpn-chain/proto/gen/go/tdpn/vpnslashing/v1"
+	chaintypes "github.com/tdpn/tdpn-chain/types"
 	"github.com/tdpn/tdpn-chain/x/vpnslashing/keeper"
 	modtypes "github.com/tdpn/tdpn-chain/x/vpnslashing/types"
 )
@@ -161,5 +162,106 @@ func TestGRPCAdaptersNilKeeperPropagatesErrNilKeeper(t *testing.T) {
 	_, queryErr := queryAdapter.ListSlashEvidence(context.Background(), &pb.QueryListSlashEvidenceRequest{})
 	if !errors.Is(queryErr, ErrNilKeeper) {
 		t.Fatalf("expected ErrNilKeeper from query adapter, got %v", queryErr)
+	}
+}
+
+func TestModuleStatusToProtoMappings(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		input  chaintypes.ReconciliationStatus
+		expect pb.ReconciliationStatus
+	}{
+		{
+			name:   "pending",
+			input:  chaintypes.ReconciliationPending,
+			expect: pb.ReconciliationStatus_RECONCILIATION_STATUS_PENDING,
+		},
+		{
+			name:   "submitted",
+			input:  chaintypes.ReconciliationSubmitted,
+			expect: pb.ReconciliationStatus_RECONCILIATION_STATUS_SUBMITTED,
+		},
+		{
+			name:   "confirmed",
+			input:  chaintypes.ReconciliationConfirmed,
+			expect: pb.ReconciliationStatus_RECONCILIATION_STATUS_CONFIRMED,
+		},
+		{
+			name:   "failed",
+			input:  chaintypes.ReconciliationFailed,
+			expect: pb.ReconciliationStatus_RECONCILIATION_STATUS_FAILED,
+		},
+		{
+			name:   "default unknown",
+			input:  chaintypes.ReconciliationStatus("unexpected-status"),
+			expect: pb.ReconciliationStatus_RECONCILIATION_STATUS_UNSPECIFIED,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := moduleStatusToProto(tc.input)
+			if got != tc.expect {
+				t.Fatalf("expected proto status %v, got %v", tc.expect, got)
+			}
+		})
+	}
+}
+
+func TestProtoStatusToModuleMappings(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		input  pb.ReconciliationStatus
+		expect chaintypes.ReconciliationStatus
+	}{
+		{
+			name:   "pending",
+			input:  pb.ReconciliationStatus_RECONCILIATION_STATUS_PENDING,
+			expect: chaintypes.ReconciliationPending,
+		},
+		{
+			name:   "submitted",
+			input:  pb.ReconciliationStatus_RECONCILIATION_STATUS_SUBMITTED,
+			expect: chaintypes.ReconciliationSubmitted,
+		},
+		{
+			name:   "confirmed",
+			input:  pb.ReconciliationStatus_RECONCILIATION_STATUS_CONFIRMED,
+			expect: chaintypes.ReconciliationConfirmed,
+		},
+		{
+			name:   "failed",
+			input:  pb.ReconciliationStatus_RECONCILIATION_STATUS_FAILED,
+			expect: chaintypes.ReconciliationFailed,
+		},
+		{
+			name:   "default unspecified",
+			input:  pb.ReconciliationStatus_RECONCILIATION_STATUS_UNSPECIFIED,
+			expect: "",
+		},
+		{
+			name:   "default unknown enum",
+			input:  pb.ReconciliationStatus(999),
+			expect: "",
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := protoStatusToModule(tc.input)
+			if got != tc.expect {
+				t.Fatalf("expected module status %q, got %q", tc.expect, got)
+			}
+		})
 	}
 }

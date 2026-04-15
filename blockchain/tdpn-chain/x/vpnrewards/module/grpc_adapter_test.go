@@ -183,3 +183,91 @@ func TestGRPCAdaptersNilKeeperPropagation(t *testing.T) {
 		t.Fatalf("expected ErrNilKeeper from query adapter list, got %v", listErr)
 	}
 }
+
+func TestStatusMappingFromAndToProtoCoversExplicitAndDefaultBranches(t *testing.T) {
+	t.Parallel()
+
+	fromProtoCases := []struct {
+		name string
+		in   pb.ReconciliationStatus
+		want chaintypes.ReconciliationStatus
+	}{
+		{
+			name: "pending",
+			in:   pb.ReconciliationStatus_RECONCILIATION_STATUS_PENDING,
+			want: chaintypes.ReconciliationPending,
+		},
+		{
+			name: "submitted",
+			in:   pb.ReconciliationStatus_RECONCILIATION_STATUS_SUBMITTED,
+			want: chaintypes.ReconciliationSubmitted,
+		},
+		{
+			name: "confirmed",
+			in:   pb.ReconciliationStatus_RECONCILIATION_STATUS_CONFIRMED,
+			want: chaintypes.ReconciliationConfirmed,
+		},
+		{
+			name: "failed",
+			in:   pb.ReconciliationStatus_RECONCILIATION_STATUS_FAILED,
+			want: chaintypes.ReconciliationFailed,
+		},
+		{
+			name: "default-unspecified",
+			in:   pb.ReconciliationStatus_RECONCILIATION_STATUS_UNSPECIFIED,
+			want: "",
+		},
+	}
+	for _, tc := range fromProtoCases {
+		tc := tc
+		t.Run("fromProto/"+tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := protoStatusToModule(tc.in)
+			if got != tc.want {
+				t.Fatalf("protoStatusToModule(%v): expected %q, got %q", tc.in, tc.want, got)
+			}
+		})
+	}
+
+	toProtoCases := []struct {
+		name string
+		in   chaintypes.ReconciliationStatus
+		want pb.ReconciliationStatus
+	}{
+		{
+			name: "pending",
+			in:   chaintypes.ReconciliationPending,
+			want: pb.ReconciliationStatus_RECONCILIATION_STATUS_PENDING,
+		},
+		{
+			name: "submitted",
+			in:   chaintypes.ReconciliationSubmitted,
+			want: pb.ReconciliationStatus_RECONCILIATION_STATUS_SUBMITTED,
+		},
+		{
+			name: "confirmed",
+			in:   chaintypes.ReconciliationConfirmed,
+			want: pb.ReconciliationStatus_RECONCILIATION_STATUS_CONFIRMED,
+		},
+		{
+			name: "failed",
+			in:   chaintypes.ReconciliationFailed,
+			want: pb.ReconciliationStatus_RECONCILIATION_STATUS_FAILED,
+		},
+		{
+			name: "default-empty",
+			in:   "",
+			want: pb.ReconciliationStatus_RECONCILIATION_STATUS_UNSPECIFIED,
+		},
+	}
+	for _, tc := range toProtoCases {
+		tc := tc
+		t.Run("toProto/"+tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := moduleStatusToProto(tc.in)
+			if got != tc.want {
+				t.Fatalf("moduleStatusToProto(%q): expected %v, got %v", tc.in, tc.want, got)
+			}
+		})
+	}
+}

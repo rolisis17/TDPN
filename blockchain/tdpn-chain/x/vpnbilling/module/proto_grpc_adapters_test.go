@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	pb "github.com/tdpn/tdpn-chain/proto/gen/go/tdpn/vpnbilling/v1"
+	chaintypes "github.com/tdpn/tdpn-chain/types"
 	"github.com/tdpn/tdpn-chain/x/vpnbilling/keeper"
 	"github.com/tdpn/tdpn-chain/x/vpnbilling/types"
 )
@@ -253,5 +254,132 @@ func TestProtoQueryServerAdapterGetAndList(t *testing.T) {
 	}
 	if len(listSettlementsResp.GetSettlements()) != 1 {
 		t.Fatalf("expected 1 settlement, got %d", len(listSettlementsResp.GetSettlements()))
+	}
+}
+
+func TestFromProtoStatusCoversExplicitEnumsAndDefault(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		input  pb.ReconciliationStatus
+		expect chaintypes.ReconciliationStatus
+	}{
+		{
+			name:   "pending",
+			input:  pb.ReconciliationStatus_RECONCILIATION_STATUS_PENDING,
+			expect: chaintypes.ReconciliationPending,
+		},
+		{
+			name:   "submitted",
+			input:  pb.ReconciliationStatus_RECONCILIATION_STATUS_SUBMITTED,
+			expect: chaintypes.ReconciliationSubmitted,
+		},
+		{
+			name:   "confirmed",
+			input:  pb.ReconciliationStatus_RECONCILIATION_STATUS_CONFIRMED,
+			expect: chaintypes.ReconciliationConfirmed,
+		},
+		{
+			name:   "failed",
+			input:  pb.ReconciliationStatus_RECONCILIATION_STATUS_FAILED,
+			expect: chaintypes.ReconciliationFailed,
+		},
+		{
+			name:   "unspecified defaults empty",
+			input:  pb.ReconciliationStatus_RECONCILIATION_STATUS_UNSPECIFIED,
+			expect: "",
+		},
+		{
+			name:   "unknown numeric defaults empty",
+			input:  pb.ReconciliationStatus(99),
+			expect: "",
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := fromProtoStatus(tc.input)
+			if got != tc.expect {
+				t.Fatalf("fromProtoStatus(%v): expected %q, got %q", tc.input, tc.expect, got)
+			}
+		})
+	}
+}
+
+func TestToProtoStatusCoversExplicitEnumsAndDefault(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		input  chaintypes.ReconciliationStatus
+		expect pb.ReconciliationStatus
+	}{
+		{
+			name:   "pending",
+			input:  chaintypes.ReconciliationPending,
+			expect: pb.ReconciliationStatus_RECONCILIATION_STATUS_PENDING,
+		},
+		{
+			name:   "submitted",
+			input:  chaintypes.ReconciliationSubmitted,
+			expect: pb.ReconciliationStatus_RECONCILIATION_STATUS_SUBMITTED,
+		},
+		{
+			name:   "confirmed",
+			input:  chaintypes.ReconciliationConfirmed,
+			expect: pb.ReconciliationStatus_RECONCILIATION_STATUS_CONFIRMED,
+		},
+		{
+			name:   "failed",
+			input:  chaintypes.ReconciliationFailed,
+			expect: pb.ReconciliationStatus_RECONCILIATION_STATUS_FAILED,
+		},
+		{
+			name:   "empty defaults unspecified",
+			input:  "",
+			expect: pb.ReconciliationStatus_RECONCILIATION_STATUS_UNSPECIFIED,
+		},
+		{
+			name:   "unknown string defaults unspecified",
+			input:  chaintypes.ReconciliationStatus("mystery"),
+			expect: pb.ReconciliationStatus_RECONCILIATION_STATUS_UNSPECIFIED,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := toProtoStatus(tc.input)
+			if got != tc.expect {
+				t.Fatalf("toProtoStatus(%q): expected %v, got %v", tc.input, tc.expect, got)
+			}
+		})
+	}
+}
+
+func TestProtoQueryServerAdapterNilRequestsUseDefaultLookupPath(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	adapter := NewProtoQueryServerAdapter(&k)
+
+	reservationResp, err := adapter.CreditReservation(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("expected nil error for nil reservation query request, got %v", err)
+	}
+	if reservationResp.GetFound() {
+		t.Fatal("expected found=false for nil reservation query request")
+	}
+
+	settlementResp, err := adapter.SettlementRecord(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("expected nil error for nil settlement query request, got %v", err)
+	}
+	if settlementResp.GetFound() {
+		t.Fatal("expected found=false for nil settlement query request")
 	}
 }
