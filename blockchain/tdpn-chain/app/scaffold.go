@@ -16,7 +16,7 @@ import (
 	sponsormodule "github.com/tdpn/tdpn-chain/x/vpnsponsor/module"
 )
 
-// ChainScaffold keeps module placeholders together until Cosmos SDK app wiring is added.
+// ChainScaffold wires the phase-6 module set for local runtime/testnet gates.
 type ChainScaffold struct {
 	BillingModule  billingmodule.AppModule
 	RewardsModule  rewardsmodule.AppModule

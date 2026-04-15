@@ -45,5 +45,7 @@ If `buf` is not installed, the script exits with install instructions:
 
 - Generated Go/protobuf artifacts are written under:
   - `proto/gen/go`
-- This repo currently checks in only pipeline scaffolding and placeholders.
-- Generated code may be committed later when the codegen workflow is finalized.
+- This repo currently checks in generated Go/protobuf outputs used by chain modules,
+  gRPC registration, and phase-6 contract/runtime checks.
+- When schemas change, regenerate locally with `./scripts/gen_proto.sh` and update
+  checked-in generated artifacts under `proto/gen/go`.
