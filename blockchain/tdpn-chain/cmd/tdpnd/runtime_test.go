@@ -20,7 +20,9 @@ import (
 
 	"github.com/tdpn/tdpn-chain/app"
 	vpnbillingpb "github.com/tdpn/tdpn-chain/proto/gen/go/tdpn/vpnbilling/v1"
+	vpngovernancepb "github.com/tdpn/tdpn-chain/proto/gen/go/tdpn/vpngovernance/v1"
 	vpnsponsorpb "github.com/tdpn/tdpn-chain/proto/gen/go/tdpn/vpnsponsor/v1"
+	vpnvalidatorpb "github.com/tdpn/tdpn-chain/proto/gen/go/tdpn/vpnvalidator/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
@@ -615,6 +617,9 @@ func TestRunTDPNDGRPCModeAuthEnforcementAndHealth(t *testing.T) {
 	}
 
 	billingMsg := vpnbillingpb.NewMsgClient(conn)
+	billingQuery := vpnbillingpb.NewQueryClient(conn)
+	validatorQuery := vpnvalidatorpb.NewQueryClient(conn)
+	governanceQuery := vpngovernancepb.NewQueryClient(conn)
 
 	_, err = billingMsg.ReserveCredits(context.Background(), &vpnbillingpb.MsgReserveCreditsRequest{
 		Reservation: &vpnbillingpb.CreditReservation{
@@ -653,6 +658,31 @@ func TestRunTDPNDGRPCModeAuthEnforcementAndHealth(t *testing.T) {
 	if okResp.GetReservation().GetReservationId() != "res-auth-3" {
 		t.Fatalf("unexpected authorized reservation id %q", okResp.GetReservation().GetReservationId())
 	}
+
+	assertQueryAuthParity := func(name string, invoke func(context.Context) error) {
+		if callErr := invoke(context.Background()); status.Code(callErr) != codes.Unauthenticated {
+			t.Fatalf("expected unauthenticated %s without token, got %v", name, callErr)
+		}
+		if callErr := invoke(wrongTokenCtx); status.Code(callErr) != codes.Unauthenticated {
+			t.Fatalf("expected unauthenticated %s with wrong token, got %v", name, callErr)
+		}
+		if callErr := invoke(okTokenCtx); callErr != nil {
+			t.Fatalf("expected authorized %s success, got %v", name, callErr)
+		}
+	}
+
+	assertQueryAuthParity("vpnbilling/ListCreditReservations", func(callCtx context.Context) error {
+		_, callErr := billingQuery.ListCreditReservations(callCtx, &vpnbillingpb.QueryListCreditReservationsRequest{})
+		return callErr
+	})
+	assertQueryAuthParity("vpnvalidator/ListValidatorEligibilities", func(callCtx context.Context) error {
+		_, callErr := validatorQuery.ListValidatorEligibilities(callCtx, &vpnvalidatorpb.QueryListValidatorEligibilitiesRequest{})
+		return callErr
+	})
+	assertQueryAuthParity("vpngovernance/ListGovernancePolicies", func(callCtx context.Context) error {
+		_, callErr := governanceQuery.ListGovernancePolicies(callCtx, &vpngovernancepb.QueryListGovernancePoliciesRequest{})
+		return callErr
+	})
 
 	if err := conn.Close(); err != nil {
 		t.Fatalf("close grpc conn: %v", err)
@@ -929,6 +959,309 @@ func TestRunTDPNDGRPCModeRealScaffoldBillingAndSponsorRoundTrip(t *testing.T) {
 	}
 }
 
+func TestRunTDPNDGRPCModeRealScaffoldValidatorAndGovernanceRoundTrip(t *testing.T) {
+	bufListener := bufconn.Listen(1024 * 1024)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runDone := make(chan error, 1)
+	go func() {
+		runDone <- runTDPND(
+			ctx,
+			[]string{"--grpc-listen", "bufnet"},
+			nil,
+			func() chainScaffold { return app.NewChainScaffold() },
+			runtimeDeps{
+				Listen: func(_, _ string) (net.Listener, error) {
+					return bufListener, nil
+				},
+				NewGRPCServer: func(opts ...grpc.ServerOption) grpcRuntimeServer {
+					return grpc.NewServer(opts...)
+				},
+			},
+		)
+	}()
+
+	dialCtx, dialCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer dialCancel()
+
+	conn, err := grpc.DialContext(
+		dialCtx,
+		"bufnet",
+		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
+			return bufListener.Dial()
+		}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithBlock(),
+	)
+	if err != nil {
+		t.Fatalf("dial grpc bufconn: %v", err)
+	}
+	defer conn.Close()
+
+	validatorMsg := vpnvalidatorpb.NewMsgClient(conn)
+	validatorQuery := vpnvalidatorpb.NewQueryClient(conn)
+	governanceMsg := vpngovernancepb.NewMsgClient(conn)
+	governanceQuery := vpngovernancepb.NewQueryClient(conn)
+
+	eligibilityID := "validator-runtime-rt-1"
+	eligibilityResp, err := validatorMsg.SetValidatorEligibility(context.Background(), &vpnvalidatorpb.MsgSetValidatorEligibilityRequest{
+		Eligibility: &vpnvalidatorpb.ValidatorEligibility{
+			ValidatorId:     eligibilityID,
+			OperatorAddress: "tdpnvaloper1runtime1",
+			Eligible:        true,
+			PolicyReason:    "bootstrap allowlist",
+			UpdatedAtUnix:   1713002001,
+			Status:          vpnvalidatorpb.ReconciliationStatus_RECONCILIATION_STATUS_SUBMITTED,
+		},
+	})
+	if err != nil {
+		t.Fatalf("set validator eligibility failed: %v", err)
+	}
+	if eligibilityResp.GetEligibility().GetValidatorId() != eligibilityID {
+		t.Fatalf("unexpected validator eligibility id %q", eligibilityResp.GetEligibility().GetValidatorId())
+	}
+
+	eligibilityByID, err := validatorQuery.ValidatorEligibility(context.Background(), &vpnvalidatorpb.QueryValidatorEligibilityRequest{
+		ValidatorId: eligibilityID,
+	})
+	if err != nil {
+		t.Fatalf("query validator eligibility failed: %v", err)
+	}
+	if !eligibilityByID.GetFound() {
+		t.Fatal("expected validator eligibility found=true")
+	}
+	if eligibilityByID.GetEligibility().GetOperatorAddress() != "tdpnvaloper1runtime1" {
+		t.Fatalf("unexpected validator operator address %q", eligibilityByID.GetEligibility().GetOperatorAddress())
+	}
+
+	eligibilityList, err := validatorQuery.ListValidatorEligibilities(context.Background(), &vpnvalidatorpb.QueryListValidatorEligibilitiesRequest{})
+	if err != nil {
+		t.Fatalf("list validator eligibilities failed: %v", err)
+	}
+	if !containsValidatorEligibilityID(eligibilityList.GetEligibilities(), eligibilityID) {
+		t.Fatalf("expected validator eligibility %q in list, got %v", eligibilityID, eligibilityList.GetEligibilities())
+	}
+
+	previewResp, err := validatorQuery.PreviewEpochSelection(context.Background(), &vpnvalidatorpb.QueryPreviewEpochSelectionRequest{
+		Policy: &vpnvalidatorpb.EpochSelectionPolicy{
+			Epoch:               99,
+			StableSeatCount:     1,
+			RotatingSeatCount:   0,
+			MinStake:            1,
+			MinStakeAgeEpochs:   1,
+			MinHealthScore:      1,
+			MinResourceHeadroom: 1,
+		},
+		Candidates: []*vpnvalidatorpb.EpochValidatorCandidate{
+			{
+				ValidatorId:         eligibilityID,
+				OperatorId:          "operator-runtime-1",
+				Asn:                 "64512",
+				Region:              "au-west",
+				Stake:               100,
+				StakeAgeEpochs:      10,
+				HealthScore:         100,
+				ResourceHeadroom:    100,
+				Score:               100,
+				StableSeatPreferred: true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("preview epoch selection failed: %v", err)
+	}
+	if previewResp.GetResult() == nil {
+		t.Fatal("expected non-nil preview epoch result")
+	}
+	if len(previewResp.GetResult().GetStableSeats())+len(previewResp.GetResult().GetRotatingSeats()) == 0 {
+		t.Fatalf("expected preview epoch selection to choose candidate, got %+v", previewResp.GetResult())
+	}
+
+	statusID := "validator-status-runtime-rt-1"
+	statusResp, err := validatorMsg.RecordValidatorStatus(context.Background(), &vpnvalidatorpb.MsgRecordValidatorStatusRequest{
+		Record: &vpnvalidatorpb.ValidatorStatusRecord{
+			StatusId:         statusID,
+			ValidatorId:      eligibilityID,
+			ConsensusAddress: "tdpnvalcons1runtime1",
+			LifecycleStatus:  "active",
+			EvidenceHeight:   77,
+			EvidenceRef:      "evidence://validator/runtime/77",
+			RecordedAtUnix:   1713002002,
+			Status:           vpnvalidatorpb.ReconciliationStatus_RECONCILIATION_STATUS_PENDING,
+		},
+	})
+	if err != nil {
+		t.Fatalf("record validator status failed: %v", err)
+	}
+	if statusResp.GetRecord().GetStatusId() != statusID {
+		t.Fatalf("unexpected validator status id %q", statusResp.GetRecord().GetStatusId())
+	}
+
+	statusByID, err := validatorQuery.ValidatorStatusRecord(context.Background(), &vpnvalidatorpb.QueryValidatorStatusRecordRequest{
+		StatusId: statusID,
+	})
+	if err != nil {
+		t.Fatalf("query validator status failed: %v", err)
+	}
+	if !statusByID.GetFound() {
+		t.Fatal("expected validator status found=true")
+	}
+	if statusByID.GetRecord().GetLifecycleStatus() != "active" {
+		t.Fatalf("unexpected validator lifecycle status %q", statusByID.GetRecord().GetLifecycleStatus())
+	}
+
+	statusList, err := validatorQuery.ListValidatorStatusRecords(context.Background(), &vpnvalidatorpb.QueryListValidatorStatusRecordsRequest{})
+	if err != nil {
+		t.Fatalf("list validator statuses failed: %v", err)
+	}
+	if !containsValidatorStatusID(statusList.GetRecords(), statusID) {
+		t.Fatalf("expected validator status %q in list, got %v", statusID, statusList.GetRecords())
+	}
+
+	policyID := "governance-policy-runtime-rt-1"
+	policyResp, err := governanceMsg.CreatePolicy(context.Background(), &vpngovernancepb.MsgCreatePolicyRequest{
+		Policy: &vpngovernancepb.GovernancePolicy{
+			PolicyId:        policyID,
+			Title:           "Runtime validator policy",
+			Description:     "runtime roundtrip governance policy",
+			Version:         1,
+			ActivatedAtUnix: 1713002003,
+			Status:          vpngovernancepb.ReconciliationStatus_RECONCILIATION_STATUS_CONFIRMED,
+		},
+	})
+	if err != nil {
+		t.Fatalf("create governance policy failed: %v", err)
+	}
+	if policyResp.GetPolicy().GetPolicyId() != policyID {
+		t.Fatalf("unexpected governance policy id %q", policyResp.GetPolicy().GetPolicyId())
+	}
+	if policyResp.GetIdempotentReplay() || policyResp.GetConflict() {
+		t.Fatalf("unexpected governance policy replay/conflict flags: replay=%v conflict=%v", policyResp.GetIdempotentReplay(), policyResp.GetConflict())
+	}
+
+	policyByID, err := governanceQuery.GovernancePolicy(context.Background(), &vpngovernancepb.QueryGovernancePolicyRequest{
+		PolicyId: policyID,
+	})
+	if err != nil {
+		t.Fatalf("query governance policy failed: %v", err)
+	}
+	if !policyByID.GetFound() {
+		t.Fatal("expected governance policy found=true")
+	}
+	if policyByID.GetPolicy().GetTitle() != "Runtime validator policy" {
+		t.Fatalf("unexpected governance policy title %q", policyByID.GetPolicy().GetTitle())
+	}
+
+	policyList, err := governanceQuery.ListGovernancePolicies(context.Background(), &vpngovernancepb.QueryListGovernancePoliciesRequest{})
+	if err != nil {
+		t.Fatalf("list governance policies failed: %v", err)
+	}
+	if !containsGovernancePolicyID(policyList.GetPolicies(), policyID) {
+		t.Fatalf("expected governance policy %q in list, got %v", policyID, policyList.GetPolicies())
+	}
+
+	decisionID := "governance-decision-runtime-rt-1"
+	decisionResp, err := governanceMsg.RecordDecision(context.Background(), &vpngovernancepb.MsgRecordDecisionRequest{
+		Decision: &vpngovernancepb.GovernanceDecision{
+			DecisionId:    decisionID,
+			PolicyId:      policyID,
+			ProposalId:    "proposal-runtime-rt-1",
+			Outcome:       "approve",
+			Decider:       "bootstrap-multisig",
+			Reason:        "objective eligibility criteria met",
+			DecidedAtUnix: 1713002004,
+			Status:        vpngovernancepb.ReconciliationStatus_RECONCILIATION_STATUS_SUBMITTED,
+		},
+	})
+	if err != nil {
+		t.Fatalf("record governance decision failed: %v", err)
+	}
+	if decisionResp.GetDecision().GetDecisionId() != decisionID {
+		t.Fatalf("unexpected governance decision id %q", decisionResp.GetDecision().GetDecisionId())
+	}
+	if decisionResp.GetIdempotentReplay() || decisionResp.GetConflict() {
+		t.Fatalf("unexpected governance decision replay/conflict flags: replay=%v conflict=%v", decisionResp.GetIdempotentReplay(), decisionResp.GetConflict())
+	}
+
+	decisionByID, err := governanceQuery.GovernanceDecision(context.Background(), &vpngovernancepb.QueryGovernanceDecisionRequest{
+		DecisionId: decisionID,
+	})
+	if err != nil {
+		t.Fatalf("query governance decision failed: %v", err)
+	}
+	if !decisionByID.GetFound() {
+		t.Fatal("expected governance decision found=true")
+	}
+	if decisionByID.GetDecision().GetPolicyId() != policyID {
+		t.Fatalf("unexpected governance decision policy id %q", decisionByID.GetDecision().GetPolicyId())
+	}
+
+	decisionList, err := governanceQuery.ListGovernanceDecisions(context.Background(), &vpngovernancepb.QueryListGovernanceDecisionsRequest{})
+	if err != nil {
+		t.Fatalf("list governance decisions failed: %v", err)
+	}
+	if !containsGovernanceDecisionID(decisionList.GetDecisions(), decisionID) {
+		t.Fatalf("expected governance decision %q in list, got %v", decisionID, decisionList.GetDecisions())
+	}
+
+	actionID := "governance-audit-runtime-rt-1"
+	actionResp, err := governanceMsg.RecordAuditAction(context.Background(), &vpngovernancepb.MsgRecordAuditActionRequest{
+		Action: &vpngovernancepb.GovernanceAuditAction{
+			ActionId:        actionID,
+			Action:          "manual_override",
+			Actor:           "bootstrap-admin",
+			Reason:          "runtime roundtrip audit trace",
+			EvidencePointer: "ipfs://governance/runtime/audit-rt-1",
+			TimestampUnix:   1713002005,
+		},
+	})
+	if err != nil {
+		t.Fatalf("record governance audit action failed: %v", err)
+	}
+	if actionResp.GetAction().GetActionId() != actionID {
+		t.Fatalf("unexpected governance audit action id %q", actionResp.GetAction().GetActionId())
+	}
+	if actionResp.GetIdempotentReplay() || actionResp.GetConflict() {
+		t.Fatalf("unexpected governance audit replay/conflict flags: replay=%v conflict=%v", actionResp.GetIdempotentReplay(), actionResp.GetConflict())
+	}
+
+	actionByID, err := governanceQuery.GovernanceAuditAction(context.Background(), &vpngovernancepb.QueryGovernanceAuditActionRequest{
+		ActionId: actionID,
+	})
+	if err != nil {
+		t.Fatalf("query governance audit action failed: %v", err)
+	}
+	if !actionByID.GetFound() {
+		t.Fatal("expected governance audit action found=true")
+	}
+	if actionByID.GetAction().GetActor() != "bootstrap-admin" {
+		t.Fatalf("unexpected governance audit actor %q", actionByID.GetAction().GetActor())
+	}
+
+	actionList, err := governanceQuery.ListGovernanceAuditActions(context.Background(), &vpngovernancepb.QueryListGovernanceAuditActionsRequest{})
+	if err != nil {
+		t.Fatalf("list governance audit actions failed: %v", err)
+	}
+	if !containsGovernanceActionID(actionList.GetActions(), actionID) {
+		t.Fatalf("expected governance audit action %q in list, got %v", actionID, actionList.GetActions())
+	}
+
+	if err := conn.Close(); err != nil {
+		t.Fatalf("close grpc conn: %v", err)
+	}
+	cancel()
+
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("expected graceful shutdown success, got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for runtime shutdown")
+	}
+}
+
 func writeSelfSignedTLSCertAndKey(t *testing.T) (string, string) {
 	t.Helper()
 
@@ -987,6 +1320,51 @@ func containsSponsorAuthorizationID(records []*vpnsponsorpb.SponsorAuthorization
 func containsSponsorDelegationReservationID(records []*vpnsponsorpb.DelegatedSessionCredit, want string) bool {
 	for _, record := range records {
 		if record.GetReservationId() == want {
+			return true
+		}
+	}
+	return false
+}
+
+func containsValidatorEligibilityID(records []*vpnvalidatorpb.ValidatorEligibility, want string) bool {
+	for _, record := range records {
+		if record.GetValidatorId() == want {
+			return true
+		}
+	}
+	return false
+}
+
+func containsValidatorStatusID(records []*vpnvalidatorpb.ValidatorStatusRecord, want string) bool {
+	for _, record := range records {
+		if record.GetStatusId() == want {
+			return true
+		}
+	}
+	return false
+}
+
+func containsGovernancePolicyID(records []*vpngovernancepb.GovernancePolicy, want string) bool {
+	for _, record := range records {
+		if record.GetPolicyId() == want {
+			return true
+		}
+	}
+	return false
+}
+
+func containsGovernanceDecisionID(records []*vpngovernancepb.GovernanceDecision, want string) bool {
+	for _, record := range records {
+		if record.GetDecisionId() == want {
+			return true
+		}
+	}
+	return false
+}
+
+func containsGovernanceActionID(records []*vpngovernancepb.GovernanceAuditAction, want string) bool {
+	for _, record := range records {
+		if record.GetActionId() == want {
 			return true
 		}
 	}

@@ -148,12 +148,12 @@ This workspace defines the initial module boundaries for TDPN's VPN-compatible b
   - `./scripts/integration_cosmos_tdpnd_grpc_auth_live_smoke.sh`
 - CI/runtime smoke suite coverage:
   - `integration_cosmos_grpc_app_roundtrip.sh`: targeted `./app` gRPC roundtrip tests for billing/sponsor plus validator/governance `Msg`/`Query` contracts.
-  - `integration_cosmos_tdpnd_grpc_runtime_smoke.sh`: targeted `cmd/tdpnd` runtime tests, including auth/TLS behavior.
+  - `integration_cosmos_tdpnd_grpc_runtime_smoke.sh`: targeted `cmd/tdpnd` runtime tests, including auth/TLS behavior plus validator/governance real-scaffold roundtrip and `PreviewEpochSelection` query coverage.
   - `integration_cosmos_tdpnd_settlement_bridge_smoke.sh`: targeted settlement HTTP bridge runtime tests (`/health`, module POST write routes, module GET query/list routes, auth checks, and combined gRPC+HTTP serve mode).
   - `integration_cosmos_tdpnd_state_dir_persistence.sh`: targeted state-dir persistence runtime tests (`app` scaffold reopen + `cmd/tdpnd` state-dir wiring/error checks).
   - `integration_cosmos_tdpnd_settlement_bridge_live_smoke.sh`: live `tdpnd --settlement-http-listen` process smoke (startup, auth enforcement, module POST acceptance, validator/governance GET by-id/list query coverage, graceful shutdown).
   - `integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh`: live adapter roundtrip from `pkg/settlement` through bridge submission paths.
-  - `integration_cosmos_tdpnd_grpc_live_smoke.sh`: live `tdpnd --grpc-listen` process smoke (startup, health/reflection availability, graceful shutdown).
+  - `integration_cosmos_tdpnd_grpc_live_smoke.sh`: live `tdpnd --grpc-listen` process smoke (startup, health/reflection availability, reflected module-service parity, validator/governance query dispatch, graceful shutdown).
   - `integration_cosmos_tdpnd_grpc_auth_live_smoke.sh`: live auth-token gRPC smoke (`tdpnd --grpc-auth-token`) validating token gating for billing/validator/governance query RPCs.
 - Phase-6 build/testnet CI stage wiring includes `tdpnd_grpc_auth_live_smoke` -> `scripts/integration_cosmos_tdpnd_grpc_auth_live_smoke.sh`.
 - Optional live smoke:

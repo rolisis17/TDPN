@@ -108,6 +108,45 @@ wait_for_grpcurl_reflection() {
   return 1
 }
 
+assert_grpc_services_include() {
+  local services="$1"
+  local service_name="$2"
+  if ! grep -q "^${service_name}$" <<<"${services}"; then
+    echo "expected grpc reflection list to include ${service_name}"
+    echo "grpc services:"
+    echo "${services}"
+    cat "${LOG_FILE}"
+    exit 1
+  fi
+}
+
+assert_grpc_query_dispatch() {
+  local port="$1"
+  local method="$2"
+  local expected_field="$3"
+  local output
+  local rc
+
+  set +e
+  output="$(grpcurl -plaintext -max-time 2 -d '{}' "127.0.0.1:${port}" "${method}" 2>&1)"
+  rc=$?
+  set -e
+  if (( rc != 0 )); then
+    echo "expected grpc query dispatch for ${method} to succeed (rc=${rc})"
+    echo "grpc query output:"
+    echo "${output}"
+    cat "${LOG_FILE}"
+    exit 1
+  fi
+  if ! grep -Eq "\"${expected_field}\"[[:space:]]*:" <<<"${output}"; then
+    echo "expected grpc query ${method} response to include ${expected_field} field"
+    echo "grpc query output:"
+    echo "${output}"
+    cat "${LOG_FILE}"
+    exit 1
+  fi
+}
+
 PORT="$(pick_port)"
 if [[ -z "${PORT}" ]]; then
   echo "failed to allocate smoke-test grpc port"
@@ -123,6 +162,13 @@ TDPND_PID=$!
 if command -v grpcurl >/dev/null 2>&1; then
   wait_for_grpcurl_health "${PORT}"
   wait_for_grpcurl_reflection "${PORT}"
+  SERVICES="$(grpcurl -plaintext -max-time 2 "127.0.0.1:${PORT}" list 2>/dev/null || true)"
+  assert_grpc_services_include "${SERVICES}" "tdpn.vpnbilling.v1.Query"
+  assert_grpc_services_include "${SERVICES}" "tdpn.vpnsponsor.v1.Query"
+  assert_grpc_services_include "${SERVICES}" "tdpn.vpnvalidator.v1.Query"
+  assert_grpc_services_include "${SERVICES}" "tdpn.vpngovernance.v1.Query"
+  assert_grpc_query_dispatch "${PORT}" "tdpn.vpnvalidator.v1.Query/ListValidatorEligibilities" "eligibilities"
+  assert_grpc_query_dispatch "${PORT}" "tdpn.vpngovernance.v1.Query/ListGovernancePolicies" "policies"
 else
   wait_for_tcp_ready "${PORT}"
   sleep 0.15
