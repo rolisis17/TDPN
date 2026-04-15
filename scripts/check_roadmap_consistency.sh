@@ -550,6 +550,8 @@ if ! rg -Fq "TestRunTDPNDGRPCModeReflectionIncludesCoreModuleQueries" "$chain_ru
   exit 1
 fi
 for runtime_grpc_contract in \
+  "ListRewardAccruals" \
+  "ListSlashEvidence" \
   "ListSponsorAuthorizations" \
   "ListValidatorEligibilities" \
   "ListGovernancePolicies" \
@@ -562,6 +564,8 @@ do
 done
 for runtime_reflection_service in \
   "tdpn.vpnbilling.v1.Query" \
+  "tdpn.vpnrewards.v1.Query" \
+  "tdpn.vpnslashing.v1.Query" \
   "tdpn.vpnsponsor.v1.Query" \
   "tdpn.vpnvalidator.v1.Query" \
   "tdpn.vpngovernance.v1.Query"

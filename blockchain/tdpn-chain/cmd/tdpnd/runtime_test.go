@@ -610,6 +610,8 @@ func TestRunTDPNDGRPCModeReflectionIncludesCoreModuleQueries(t *testing.T) {
 
 	for _, expectedQueryService := range []string{
 		"tdpn.vpnbilling.v1.Query",
+		"tdpn.vpnrewards.v1.Query",
+		"tdpn.vpnslashing.v1.Query",
 		"tdpn.vpnsponsor.v1.Query",
 		"tdpn.vpnvalidator.v1.Query",
 		"tdpn.vpngovernance.v1.Query",
