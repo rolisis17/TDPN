@@ -567,6 +567,8 @@ do
   fi
 done
 for live_grpc_method in \
+  "tdpn.vpnbilling.v1.Query/ListCreditReservations" \
+  "tdpn.vpnsponsor.v1.Query/ListSponsorAuthorizations" \
   "tdpn.vpnvalidator.v1.Query/ListValidatorEligibilities" \
   "tdpn.vpngovernance.v1.Query/ListGovernancePolicies"
 do
