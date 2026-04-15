@@ -163,11 +163,22 @@ func TestKeeperFinalizeSettlementDefaultsAndIdempotency(t *testing.T) {
 	t.Parallel()
 
 	k := NewKeeper()
+	reservation, err := k.CreateReservation(types.CreditReservation{
+		ReservationID: "res-1",
+		SessionID:     "sess-1",
+		AssetDenom:    "uusdc",
+		Amount:        100,
+	})
+	if err != nil {
+		t.Fatalf("CreateReservation returned unexpected error: %v", err)
+	}
 
 	input := types.SettlementRecord{
-		SettlementID: "set-1",
-		SessionID:    "sess-1",
-		BilledAmount: 50,
+		SettlementID:  "set-1",
+		ReservationID: reservation.ReservationID,
+		SessionID:     reservation.SessionID,
+		BilledAmount:  50,
+		AssetDenom:    reservation.AssetDenom,
 	}
 
 	finalized, err := k.FinalizeSettlement(input)
@@ -201,24 +212,122 @@ func TestKeeperFinalizeSettlementConflict(t *testing.T) {
 	t.Parallel()
 
 	k := NewKeeper()
+	reservation, err := k.CreateReservation(types.CreditReservation{
+		ReservationID: "res-1",
+		SessionID:     "sess-1",
+		AssetDenom:    "uusdc",
+		Amount:        100,
+	})
+	if err != nil {
+		t.Fatalf("CreateReservation returned unexpected error: %v", err)
+	}
 
 	initial := types.SettlementRecord{
-		SettlementID: "set-1",
-		SessionID:    "sess-1",
-		BilledAmount: 50,
+		SettlementID:  "set-1",
+		ReservationID: reservation.ReservationID,
+		SessionID:     reservation.SessionID,
+		BilledAmount:  50,
+		AssetDenom:    reservation.AssetDenom,
 	}
-	if _, err := k.FinalizeSettlement(initial); err != nil {
+	if _, err = k.FinalizeSettlement(initial); err != nil {
 		t.Fatalf("FinalizeSettlement returned unexpected error: %v", err)
 	}
 
 	conflict := initial
 	conflict.BilledAmount = 70
-	_, err := k.FinalizeSettlement(conflict)
+	_, err = k.FinalizeSettlement(conflict)
 	if err == nil {
 		t.Fatal("expected conflict error for settlement with same id but different fields")
 	}
 	if !strings.Contains(err.Error(), "conflicting fields") {
 		t.Fatalf("expected conflict error message, got: %v", err)
+	}
+}
+
+func TestKeeperFinalizeSettlementRejectsSessionMismatch(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	reservation, err := k.CreateReservation(types.CreditReservation{
+		ReservationID: "res-session-mismatch",
+		SessionID:     "sess-a",
+		AssetDenom:    "uusdc",
+		Amount:        100,
+	})
+	if err != nil {
+		t.Fatalf("CreateReservation returned unexpected error: %v", err)
+	}
+
+	_, err = k.FinalizeSettlement(types.SettlementRecord{
+		SettlementID:  "set-session-mismatch",
+		ReservationID: reservation.ReservationID,
+		SessionID:     "sess-b",
+		BilledAmount:  10,
+		AssetDenom:    reservation.AssetDenom,
+	})
+	if err == nil {
+		t.Fatal("expected session mismatch error")
+	}
+	if !strings.Contains(err.Error(), "does not match reservation session") {
+		t.Fatalf("expected session mismatch error message, got: %v", err)
+	}
+}
+
+func TestKeeperFinalizeSettlementRejectsAssetDenomMismatch(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	reservation, err := k.CreateReservation(types.CreditReservation{
+		ReservationID: "res-denom-mismatch",
+		SessionID:     "sess-1",
+		AssetDenom:    "uusdc",
+		Amount:        100,
+	})
+	if err != nil {
+		t.Fatalf("CreateReservation returned unexpected error: %v", err)
+	}
+
+	_, err = k.FinalizeSettlement(types.SettlementRecord{
+		SettlementID:  "set-denom-mismatch",
+		ReservationID: reservation.ReservationID,
+		SessionID:     reservation.SessionID,
+		BilledAmount:  10,
+		AssetDenom:    "utdpn",
+	})
+	if err == nil {
+		t.Fatal("expected asset denom mismatch error")
+	}
+	if !strings.Contains(err.Error(), "does not match reservation asset denom") {
+		t.Fatalf("expected asset denom mismatch error message, got: %v", err)
+	}
+}
+
+func TestKeeperFinalizeSettlementRejectsOvercharge(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	reservation, err := k.CreateReservation(types.CreditReservation{
+		ReservationID: "res-overcharge",
+		SessionID:     "sess-1",
+		AssetDenom:    "uusdc",
+		Amount:        100,
+	})
+	if err != nil {
+		t.Fatalf("CreateReservation returned unexpected error: %v", err)
+	}
+
+	_, err = k.FinalizeSettlement(types.SettlementRecord{
+		SettlementID:  "set-overcharge",
+		ReservationID: reservation.ReservationID,
+		SessionID:     reservation.SessionID,
+		BilledAmount:  101,
+		AssetDenom:    reservation.AssetDenom,
+	})
+	if err == nil {
+		t.Fatal("expected overcharge error")
+	}
+	if !strings.Contains(err.Error(), "exceeds reserved amount") {
+		t.Fatalf("expected overcharge error message, got: %v", err)
 	}
 }
 

@@ -541,7 +541,7 @@ func (s *Service) handleIssueToken(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
-	s.issueTokenRequest(w, req, false)
+	s.issueTokenRequest(r.Context(), w, req, false)
 }
 
 func (s *Service) handleSponsorIssueToken(w http.ResponseWriter, r *http.Request) {
@@ -558,10 +558,10 @@ func (s *Service) handleSponsorIssueToken(w http.ResponseWriter, r *http.Request
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
-	s.issueTokenRequest(w, req, true)
+	s.issueTokenRequest(r.Context(), w, req, true)
 }
 
-func (s *Service) issueTokenRequest(w http.ResponseWriter, req proto.IssueTokenRequest, forcePaymentProof bool) {
+func (s *Service) issueTokenRequest(ctx context.Context, w http.ResponseWriter, req proto.IssueTokenRequest, forcePaymentProof bool) {
 	if req.Tier < 1 || req.Tier > 3 {
 		http.Error(w, "tier must be 1..3", http.StatusBadRequest)
 		return
@@ -612,7 +612,7 @@ func (s *Service) issueTokenRequest(w http.ResponseWriter, req proto.IssueTokenR
 				effectiveTier = capTier
 			}
 			subject := anonymousSubjectAlias(cred.CredentialID)
-			if err := s.ensureClientPaymentAuthorization(req, subject, forcePaymentProof); err != nil {
+			if err := s.ensureClientPaymentAuthorization(ctx, req, subject, forcePaymentProof); err != nil {
 				http.Error(w, err.Error(), http.StatusPaymentRequired)
 				return
 			}
@@ -624,7 +624,7 @@ func (s *Service) issueTokenRequest(w http.ResponseWriter, req proto.IssueTokenR
 				return
 			}
 			effectiveTier := s.effectiveTierFor(req.Subject, req.Tier)
-			if err := s.ensureClientPaymentAuthorization(req, req.Subject, forcePaymentProof); err != nil {
+			if err := s.ensureClientPaymentAuthorization(ctx, req, req.Subject, forcePaymentProof); err != nil {
 				http.Error(w, err.Error(), http.StatusPaymentRequired)
 				return
 			}
@@ -787,17 +787,17 @@ func (s *Service) handleSettlementStatus(w http.ResponseWriter, r *http.Request)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"status":                     status,
-		"generated_at":               report.GeneratedAt.Unix(),
-		"pending_adapter_operations": report.PendingAdapterOperations,
-		"shadow_adapter_configured":  report.ShadowAdapterConfigured,
+		"status":                      status,
+		"generated_at":                report.GeneratedAt.Unix(),
+		"pending_adapter_operations":  report.PendingAdapterOperations,
+		"shadow_adapter_configured":   report.ShadowAdapterConfigured,
 		"shadow_attempted_operations": report.ShadowAttemptedOperations,
 		"shadow_submitted_operations": report.ShadowSubmittedOperations,
 		"shadow_failed_operations":    report.ShadowFailedOperations,
-		"pending_operations":         report.PendingOperations,
-		"submitted_operations":       report.SubmittedOperations,
-		"confirmed_operations":       report.ConfirmedOperations,
-		"failed_operations":          report.FailedOperations,
+		"pending_operations":          report.PendingOperations,
+		"submitted_operations":        report.SubmittedOperations,
+		"confirmed_operations":        report.ConfirmedOperations,
+		"failed_operations":           report.FailedOperations,
 	})
 }
 
@@ -904,7 +904,7 @@ func (s *Service) effectiveSponsorMaxReservationMicros() int64 {
 	return defaultSponsorMaxReservationMicros
 }
 
-func (s *Service) ensureClientPaymentAuthorization(req proto.IssueTokenRequest, defaultSubject string, force bool) error {
+func (s *Service) ensureClientPaymentAuthorization(ctx context.Context, req proto.IssueTokenRequest, defaultSubject string, force bool) error {
 	if req.TokenType == crypto.TokenTypeProviderRole {
 		return nil
 	}
@@ -914,11 +914,18 @@ func (s *Service) ensureClientPaymentAuthorization(req proto.IssueTokenRequest, 
 	if req.PaymentProof == nil {
 		return fmt.Errorf("payment proof required")
 	}
+	requestSubject := strings.TrimSpace(req.Subject)
 	subject := strings.TrimSpace(req.PaymentProof.Subject)
+	if subject != "" && requestSubject != "" && subject != requestSubject {
+		return fmt.Errorf("payment proof invalid: request subject mismatch")
+	}
 	if subject == "" {
 		subject = strings.TrimSpace(defaultSubject)
 	}
-	_, err := s.settlementService().AuthorizePayment(context.Background(), settlement.PaymentProof{
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	_, err := s.settlementService().AuthorizePayment(ctx, settlement.PaymentProof{
 		ReservationID: strings.TrimSpace(req.PaymentProof.ReservationID),
 		SponsorID:     strings.TrimSpace(req.PaymentProof.SponsorID),
 		SubjectID:     subject,

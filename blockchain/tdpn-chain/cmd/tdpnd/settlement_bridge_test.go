@@ -240,27 +240,27 @@ func TestRunTDPNDSettlementHTTPAuthContractGETOpenPOSTBearerRequired(t *testing.
 		verifyGET string
 	}{
 		{
-			name:     "billing",
-			postPath: "/x/vpnbilling/settlements",
-			postBody: `{"SettlementID":"set-auth-contract-1","ReservationID":"res-auth-contract-1","SessionID":"sess-auth-contract-1","SubjectID":"subject-auth-contract-1","ChargedMicros":250,"Currency":"uusdc","SettledAt":"2026-01-01T00:00:00Z"}`,
+			name:      "billing",
+			postPath:  "/x/vpnbilling/settlements",
+			postBody:  `{"SettlementID":"set-auth-contract-1","ReservationID":"res-auth-contract-1","SessionID":"sess-auth-contract-1","SubjectID":"subject-auth-contract-1","ChargedMicros":250,"Currency":"uusdc","SettledAt":"2026-01-01T00:00:00Z"}`,
 			verifyGET: "/x/vpnbilling/settlements/set-auth-contract-1",
 		},
 		{
-			name:     "rewards",
-			postPath: "/x/vpnrewards/issues",
-			postBody: `{"RewardID":"reward-auth-contract-1","ProviderSubjectID":"provider-auth-contract-1","SessionID":"sess-auth-contract-1","RewardMicros":100,"Currency":"uusdc","IssuedAt":"2026-01-01T00:00:00Z"}`,
+			name:      "rewards",
+			postPath:  "/x/vpnrewards/issues",
+			postBody:  `{"RewardID":"reward-auth-contract-1","ProviderSubjectID":"provider-auth-contract-1","SessionID":"sess-auth-contract-1","RewardMicros":100,"Currency":"uusdc","IssuedAt":"2026-01-01T00:00:00Z"}`,
 			verifyGET: "/x/vpnrewards/accruals/reward-auth-contract-1",
 		},
 		{
-			name:     "sponsor",
-			postPath: "/x/vpnsponsor/reservations",
-			postBody: `{"ReservationID":"sponsor-res-auth-contract-1","SponsorID":"sponsor-auth-contract-1","SubjectID":"app-auth-contract-1","SessionID":"sess-auth-contract-1","AmountMicros":500,"Currency":"uusdc","CreatedAt":"2026-01-01T00:00:00Z","ExpiresAt":"2026-12-31T00:00:00Z"}`,
+			name:      "sponsor",
+			postPath:  "/x/vpnsponsor/reservations",
+			postBody:  `{"ReservationID":"sponsor-res-auth-contract-1","SponsorID":"sponsor-auth-contract-1","SubjectID":"app-auth-contract-1","SessionID":"sess-auth-contract-1","AmountMicros":500,"Currency":"uusdc","CreatedAt":"2026-01-01T00:00:00Z","ExpiresAt":"2026-12-31T00:00:00Z"}`,
 			verifyGET: "/x/vpnsponsor/delegations/sponsor-res-auth-contract-1",
 		},
 		{
-			name:     "slashing",
-			postPath: "/x/vpnslashing/evidence",
-			postBody: `{"EvidenceID":"ev-auth-contract-1","SubjectID":"provider-auth-contract-1","SessionID":"sess-auth-contract-1","ViolationType":"objective","EvidenceRef":"sha256:proof-auth-contract-1","ObservedAt":"2026-01-01T00:00:00Z"}`,
+			name:      "slashing",
+			postPath:  "/x/vpnslashing/evidence",
+			postBody:  `{"EvidenceID":"ev-auth-contract-1","SubjectID":"provider-auth-contract-1","SessionID":"sess-auth-contract-1","ViolationType":"objective","EvidenceRef":"sha256:proof-auth-contract-1","ObservedAt":"2026-01-01T00:00:00Z"}`,
 			verifyGET: "/x/vpnslashing/evidence/ev-auth-contract-1",
 		},
 	}
@@ -436,6 +436,232 @@ func TestRunTDPNDSettlementHTTPHappyPathPerEndpoint(t *testing.T) {
 			t.Fatalf("expected 200 for %s, got %d body=%s", tc.path, resp.StatusCode, strings.TrimSpace(string(body)))
 		}
 	}
+
+	cancel()
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("expected clean shutdown, got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for runtime shutdown")
+	}
+}
+
+func TestRunTDPNDSettlementHTTPBillingZeroChargeSettlementContract(t *testing.T) {
+	httpListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen http: %v", err)
+	}
+	defer httpListener.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runDone := make(chan error, 1)
+	go func() {
+		runDone <- runTDPND(
+			ctx,
+			[]string{"--settlement-http-listen", "settlement-zero-charge-test"},
+			nil,
+			func() chainScaffold { return app.NewChainScaffold() },
+			runtimeDeps{
+				Listen: func(_, _ string) (net.Listener, error) {
+					return nil, errors.New("grpc listener should not be used")
+				},
+				ListenHTTP: func(_, address string) (net.Listener, error) {
+					if address != "settlement-zero-charge-test" {
+						return nil, errors.New("unexpected settlement listen address")
+					}
+					return httpListener, nil
+				},
+				NewGRPCServer: func(opts ...grpc.ServerOption) grpcRuntimeServer {
+					return grpc.NewServer(opts...)
+				},
+			},
+		)
+	}()
+
+	baseURL := "http://" + httpListener.Addr().String()
+	waitForHTTPReady(t, baseURL+"/health")
+
+	status, payload := doJSONRequest(
+		t,
+		http.MethodPost,
+		baseURL+"/x/vpnbilling/settlements",
+		`{"SettlementID":"set-zero-charge-1","ReservationID":"res-zero-charge-1","SessionID":"sess-zero-charge-1","SubjectID":"subject-zero-charge-1","ChargedMicros":0,"Currency":"uusdc","SettledAt":"2026-01-01T00:00:00Z","Status":"submitted"}`,
+		nil,
+	)
+	if status != http.StatusOK {
+		t.Fatalf("expected zero-charge settlement POST to return 200, got %d payload=%v", status, payload)
+	}
+
+	status, payload = doJSONRequest(t, http.MethodGet, baseURL+"/x/vpnbilling/reservations/res-zero-charge-1", "", nil)
+	if status != http.StatusOK {
+		t.Fatalf("expected reservation GET to return 200, got %d payload=%v", status, payload)
+	}
+	expectJSONIntField(t, payload, "reservation", "Amount", 1)
+	expectJSONStringField(t, payload, "reservation", "ReservationID", "res-zero-charge-1")
+
+	status, payload = doJSONRequest(t, http.MethodGet, baseURL+"/x/vpnbilling/settlements/set-zero-charge-1", "", nil)
+	if status != http.StatusOK {
+		t.Fatalf("expected settlement GET to return 200, got %d payload=%v", status, payload)
+	}
+	expectJSONIntField(t, payload, "settlement", "BilledAmount", 0)
+	expectJSONStringField(t, payload, "settlement", "ReservationID", "res-zero-charge-1")
+
+	cancel()
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("expected clean shutdown, got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for runtime shutdown")
+	}
+}
+
+func TestRunTDPNDSettlementHTTPSponsorIdentityMappingDistinctAppAndEndUser(t *testing.T) {
+	httpListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen http: %v", err)
+	}
+	defer httpListener.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runDone := make(chan error, 1)
+	go func() {
+		runDone <- runTDPND(
+			ctx,
+			[]string{"--settlement-http-listen", "settlement-sponsor-identity-test"},
+			nil,
+			func() chainScaffold { return app.NewChainScaffold() },
+			runtimeDeps{
+				Listen: func(_, _ string) (net.Listener, error) {
+					return nil, errors.New("grpc listener should not be used")
+				},
+				ListenHTTP: func(_, address string) (net.Listener, error) {
+					if address != "settlement-sponsor-identity-test" {
+						return nil, errors.New("unexpected settlement listen address")
+					}
+					return httpListener, nil
+				},
+				NewGRPCServer: func(opts ...grpc.ServerOption) grpcRuntimeServer {
+					return grpc.NewServer(opts...)
+				},
+			},
+		)
+	}()
+
+	baseURL := "http://" + httpListener.Addr().String()
+	waitForHTTPReady(t, baseURL+"/health")
+
+	const reservationID = "sponsor-res-ident-1"
+	const authorizationID = "auth:" + reservationID
+	const appID = "app-ident-1"
+	const endUserID = "enduser-ident-1"
+
+	status, payload := doJSONRequest(
+		t,
+		http.MethodPost,
+		baseURL+"/x/vpnsponsor/reservations",
+		`{"ReservationID":"`+reservationID+`","SponsorID":"sponsor-ident-1","SubjectID":"legacy-subject-ident-1","AppID":"`+appID+`","EndUserID":"`+endUserID+`","SessionID":"sess-ident-1","AmountMicros":500,"Currency":"uusdc","CreatedAt":"2026-01-01T00:00:00Z","ExpiresAt":"2026-12-31T00:00:00Z"}`,
+		nil,
+	)
+	if status != http.StatusOK {
+		t.Fatalf("expected sponsor POST to return 200, got %d payload=%v", status, payload)
+	}
+
+	status, payload = doJSONRequest(t, http.MethodGet, baseURL+"/x/vpnsponsor/authorizations/"+authorizationID, "", nil)
+	if status != http.StatusOK {
+		t.Fatalf("expected authorization GET to return 200, got %d payload=%v", status, payload)
+	}
+	expectJSONStringField(t, payload, "authorization", "AppID", appID)
+
+	status, payload = doJSONRequest(t, http.MethodGet, baseURL+"/x/vpnsponsor/delegations/"+reservationID, "", nil)
+	if status != http.StatusOK {
+		t.Fatalf("expected delegation GET to return 200, got %d payload=%v", status, payload)
+	}
+	expectJSONStringField(t, payload, "delegation", "AppID", appID)
+	expectJSONStringField(t, payload, "delegation", "EndUserID", endUserID)
+
+	cancel()
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("expected clean shutdown, got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for runtime shutdown")
+	}
+}
+
+func TestRunTDPNDSettlementHTTPSponsorIdentityMappingLegacySubjectFallback(t *testing.T) {
+	httpListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen http: %v", err)
+	}
+	defer httpListener.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runDone := make(chan error, 1)
+	go func() {
+		runDone <- runTDPND(
+			ctx,
+			[]string{"--settlement-http-listen", "settlement-sponsor-legacy-fallback-test"},
+			nil,
+			func() chainScaffold { return app.NewChainScaffold() },
+			runtimeDeps{
+				Listen: func(_, _ string) (net.Listener, error) {
+					return nil, errors.New("grpc listener should not be used")
+				},
+				ListenHTTP: func(_, address string) (net.Listener, error) {
+					if address != "settlement-sponsor-legacy-fallback-test" {
+						return nil, errors.New("unexpected settlement listen address")
+					}
+					return httpListener, nil
+				},
+				NewGRPCServer: func(opts ...grpc.ServerOption) grpcRuntimeServer {
+					return grpc.NewServer(opts...)
+				},
+			},
+		)
+	}()
+
+	baseURL := "http://" + httpListener.Addr().String()
+	waitForHTTPReady(t, baseURL+"/health")
+
+	const reservationID = "sponsor-res-legacy-1"
+	const authorizationID = "auth:" + reservationID
+	const subjectID = "legacy-subject-1"
+
+	status, payload := doJSONRequest(
+		t,
+		http.MethodPost,
+		baseURL+"/x/vpnsponsor/reservations",
+		`{"ReservationID":"`+reservationID+`","SponsorID":"sponsor-legacy-1","SubjectID":"`+subjectID+`","SessionID":"sess-legacy-1","AmountMicros":500,"Currency":"uusdc","CreatedAt":"2026-01-01T00:00:00Z","ExpiresAt":"2026-12-31T00:00:00Z"}`,
+		nil,
+	)
+	if status != http.StatusOK {
+		t.Fatalf("expected sponsor POST to return 200, got %d payload=%v", status, payload)
+	}
+
+	status, payload = doJSONRequest(t, http.MethodGet, baseURL+"/x/vpnsponsor/authorizations/"+authorizationID, "", nil)
+	if status != http.StatusOK {
+		t.Fatalf("expected authorization GET to return 200, got %d payload=%v", status, payload)
+	}
+	expectJSONStringField(t, payload, "authorization", "AppID", subjectID)
+
+	status, payload = doJSONRequest(t, http.MethodGet, baseURL+"/x/vpnsponsor/delegations/"+reservationID, "", nil)
+	if status != http.StatusOK {
+		t.Fatalf("expected delegation GET to return 200, got %d payload=%v", status, payload)
+	}
+	expectJSONStringField(t, payload, "delegation", "AppID", subjectID)
+	expectJSONStringField(t, payload, "delegation", "EndUserID", subjectID)
 
 	cancel()
 	select {
@@ -918,6 +1144,49 @@ func expectJSONIDField(t *testing.T, payload map[string]any, objectKey, idField,
 	}
 	if got != expectedID {
 		t.Fatalf("expected payload[%s][%s]=%s, got %s", objectKey, idField, expectedID, got)
+	}
+}
+
+func expectJSONStringField(t *testing.T, payload map[string]any, objectKey, field, expected string) {
+	t.Helper()
+
+	record, ok := payload[objectKey].(map[string]any)
+	if !ok {
+		t.Fatalf("expected payload[%s] to be object, got %#v", objectKey, payload[objectKey])
+	}
+	got, ok := record[field].(string)
+	if !ok {
+		t.Fatalf("expected payload[%s][%s] to be string, got %#v", objectKey, field, record[field])
+	}
+	if got != expected {
+		t.Fatalf("expected payload[%s][%s]=%s, got %s", objectKey, field, expected, got)
+	}
+}
+
+func expectJSONIntField(t *testing.T, payload map[string]any, objectKey, field string, expected int64) {
+	t.Helper()
+
+	record, ok := payload[objectKey].(map[string]any)
+	if !ok {
+		t.Fatalf("expected payload[%s] to be object, got %#v", objectKey, payload[objectKey])
+	}
+
+	raw, ok := record[field]
+	if !ok {
+		t.Fatalf("expected payload[%s][%s] to be present", objectKey, field)
+	}
+
+	gotFloat, ok := raw.(float64)
+	if !ok {
+		t.Fatalf("expected payload[%s][%s] to be number, got %#v", objectKey, field, raw)
+	}
+
+	got := int64(gotFloat)
+	if float64(got) != gotFloat {
+		t.Fatalf("expected payload[%s][%s] to be integer-compatible number, got %v", objectKey, field, gotFloat)
+	}
+	if got != expected {
+		t.Fatalf("expected payload[%s][%s]=%d, got %d", objectKey, field, expected, got)
 	}
 }
 

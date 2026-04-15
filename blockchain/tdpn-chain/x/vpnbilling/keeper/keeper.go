@@ -91,9 +91,27 @@ func (k *Keeper) FinalizeSettlement(record types.SettlementRecord) (types.Settle
 	}
 
 	normalized := normalizeSettlement(record)
+	if normalized.ReservationID == "" {
+		return types.SettlementRecord{}, reservationIDRequiredError()
+	}
 
 	k.mu.Lock()
 	defer k.mu.Unlock()
+
+	reservation, ok := k.store.GetReservation(normalized.ReservationID)
+	if !ok {
+		return types.SettlementRecord{}, reservationNotFoundError(normalized.ReservationID)
+	}
+	normalizedReservation := normalizeReservation(reservation)
+	if normalized.SessionID != normalizedReservation.SessionID {
+		return types.SettlementRecord{}, sessionMismatchError(normalized.SessionID, normalizedReservation.SessionID)
+	}
+	if normalized.AssetDenom != normalizedReservation.AssetDenom {
+		return types.SettlementRecord{}, assetDenomMismatchError(normalized.AssetDenom, normalizedReservation.AssetDenom)
+	}
+	if normalized.BilledAmount > normalizedReservation.Amount {
+		return types.SettlementRecord{}, overchargeError(normalized.BilledAmount, normalizedReservation.Amount)
+	}
 
 	existing, ok := k.store.GetSettlement(normalized.SettlementID)
 	if ok {
@@ -182,6 +200,26 @@ func settlementRecordsEqual(a, b types.SettlementRecord) bool {
 
 func conflictError(kind string, id string) error {
 	return fmt.Errorf("%s %q already exists with conflicting fields", kind, id)
+}
+
+func reservationIDRequiredError() error {
+	return fmt.Errorf("reservation id is required")
+}
+
+func reservationNotFoundError(reservationID string) error {
+	return fmt.Errorf("reservation %q not found", reservationID)
+}
+
+func sessionMismatchError(settlementSessionID, reservationSessionID string) error {
+	return fmt.Errorf("settlement session %q does not match reservation session %q", settlementSessionID, reservationSessionID)
+}
+
+func assetDenomMismatchError(settlementAssetDenom, reservationAssetDenom string) error {
+	return fmt.Errorf("settlement asset denom %q does not match reservation asset denom %q", settlementAssetDenom, reservationAssetDenom)
+}
+
+func overchargeError(billedAmount, reservedAmount int64) error {
+	return fmt.Errorf("billed amount %d exceeds reserved amount %d", billedAmount, reservedAmount)
 }
 
 func compareByID(a, b string) int {

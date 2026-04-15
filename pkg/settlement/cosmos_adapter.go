@@ -52,9 +52,14 @@ type CosmosAdapter struct {
 
 	signedTxSubmitter cosmosSignedTxSubmitter
 
+	stateMu    sync.Mutex
+	closed     bool
+	deferredOp map[string]cosmosDeferredOperation
+
 	workerCtx    context.Context
 	workerCancel context.CancelFunc
 	workerWG     sync.WaitGroup
+	closeOnce    sync.Once
 }
 
 var _ ChainAdapter = (*CosmosAdapter)(nil)
@@ -64,6 +69,15 @@ type cosmosQueuedOperation struct {
 	path           string
 	payload        any
 	idempotencyKey string
+}
+
+type cosmosDeferredOperation struct {
+	operation     cosmosQueuedOperation
+	deferredAt    time.Time
+	lastAttemptAt time.Time
+	attempts      int
+	lastError     string
+	replayable    bool
 }
 
 type cosmosSignedTxSubmitter interface {
@@ -117,6 +131,8 @@ func (e *cosmosRetryableError) Error() string {
 func (e *cosmosRetryableError) Unwrap() error {
 	return e.cause
 }
+
+var errCosmosAdapterClosedWithBacklog = errors.New("cosmos adapter closed with backlog")
 
 func NewCosmosAdapter(cfg CosmosAdapterConfig) (*CosmosAdapter, error) {
 	endpoint := strings.TrimRight(strings.TrimSpace(cfg.Endpoint), "/")
@@ -204,6 +220,7 @@ func NewCosmosAdapter(cfg CosmosAdapterConfig) (*CosmosAdapter, error) {
 		submitMode:        submitMode,
 		queue:             make(chan cosmosQueuedOperation, queueSize),
 		signedTxSubmitter: signedTxSubmitter,
+		deferredOp:        map[string]cosmosDeferredOperation{},
 		workerCtx:         workerCtx,
 		workerCancel:      workerCancel,
 	}
@@ -302,14 +319,23 @@ func (a *CosmosAdapter) HasSlashEvidence(ctx context.Context, evidenceID string)
 }
 
 func (a *CosmosAdapter) Close() {
-	a.workerCancel()
-	a.workerWG.Wait()
+	a.closeOnce.Do(func() {
+		a.stateMu.Lock()
+		a.closed = true
+		a.stateMu.Unlock()
+		a.workerCancel()
+		a.workerWG.Wait()
+	})
 }
 
 func (a *CosmosAdapter) enqueue(op cosmosQueuedOperation) error {
-	select {
-	case <-a.workerCtx.Done():
+	a.stateMu.Lock()
+	closed := a.closed
+	a.stateMu.Unlock()
+	if closed {
 		return fmt.Errorf("cosmos adapter closed")
+	}
+	select {
 	case a.queue <- op:
 		return nil
 	default:
@@ -319,22 +345,130 @@ func (a *CosmosAdapter) enqueue(op cosmosQueuedOperation) error {
 
 func (a *CosmosAdapter) runWorker() {
 	defer a.workerWG.Done()
+	replayTicker := time.NewTicker(a.replayInterval())
+	defer replayTicker.Stop()
 	for {
 		select {
 		case <-a.workerCtx.Done():
+			a.drainQueuedOperationsToDeferred(errCosmosAdapterClosedWithBacklog)
 			return
 		case op := <-a.queue:
-			_ = a.submitWithRetry(a.workerCtx, op)
+			a.processQueuedOperation(a.workerCtx, op)
+		case <-replayTicker.C:
+			a.replayDeferredOperations(a.workerCtx)
 		}
 	}
 }
 
+func (a *CosmosAdapter) processQueuedOperation(ctx context.Context, op cosmosQueuedOperation) {
+	attempts, err := a.submitWithRetryCount(ctx, op)
+	if err != nil {
+		a.markDeferredOperation(op, attempts, err, cosmosSubmitErrorRetryable(err))
+		return
+	}
+	a.clearDeferredOperation(op.idempotencyKey)
+}
+
+func (a *CosmosAdapter) replayDeferredOperations(ctx context.Context) {
+	ops := a.snapshotReplayableDeferredOperations()
+	for _, op := range ops {
+		if ctx.Err() != nil {
+			return
+		}
+		a.processQueuedOperation(ctx, op)
+	}
+}
+
+func (a *CosmosAdapter) drainQueuedOperationsToDeferred(err error) {
+	for {
+		select {
+		case op := <-a.queue:
+			a.markDeferredOperation(op, 0, err, false)
+		default:
+			return
+		}
+	}
+}
+
+func (a *CosmosAdapter) replayInterval() time.Duration {
+	if a.baseBackoff <= 0 {
+		return 250 * time.Millisecond
+	}
+	if a.baseBackoff < 25*time.Millisecond {
+		return 25 * time.Millisecond
+	}
+	return a.baseBackoff
+}
+
+func (a *CosmosAdapter) markDeferredOperation(op cosmosQueuedOperation, attempts int, submitErr error, replayable bool) {
+	now := time.Now().UTC()
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+	entry, ok := a.deferredOp[op.idempotencyKey]
+	if !ok {
+		entry = cosmosDeferredOperation{
+			operation:  op,
+			deferredAt: now,
+		}
+	}
+	if attempts <= 0 {
+		attempts = 1
+	}
+	entry.operation = op
+	entry.lastAttemptAt = now
+	entry.attempts += attempts
+	entry.replayable = replayable
+	if submitErr != nil {
+		entry.lastError = submitErr.Error()
+	}
+	a.deferredOp[op.idempotencyKey] = entry
+}
+
+func (a *CosmosAdapter) clearDeferredOperation(idempotencyKey string) {
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+	delete(a.deferredOp, idempotencyKey)
+}
+
+func (a *CosmosAdapter) snapshotReplayableDeferredOperations() []cosmosQueuedOperation {
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+	ops := make([]cosmosQueuedOperation, 0, len(a.deferredOp))
+	for _, entry := range a.deferredOp {
+		if !entry.replayable {
+			continue
+		}
+		ops = append(ops, entry.operation)
+	}
+	return ops
+}
+
+func (a *CosmosAdapter) deferredOperationCount() int {
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+	return len(a.deferredOp)
+}
+
+func (a *CosmosAdapter) deferredOperationByID(id string) (cosmosDeferredOperation, bool) {
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+	entry, ok := a.deferredOp[id]
+	return entry, ok
+}
+
 func (a *CosmosAdapter) submitWithRetry(ctx context.Context, op cosmosQueuedOperation) error {
+	_, err := a.submitWithRetryCount(ctx, op)
+	return err
+}
+
+func (a *CosmosAdapter) submitWithRetryCount(ctx context.Context, op cosmosQueuedOperation) (int, error) {
 	backoff := a.baseBackoff
 	var lastErr error
+	attempts := 0
 	for i := 0; i <= a.maxRetries; i++ {
+		attempts++
 		if err := a.submit(ctx, op); err == nil {
-			return nil
+			return attempts, nil
 		} else {
 			lastErr = err
 		}
@@ -345,12 +479,12 @@ func (a *CosmosAdapter) submitWithRetry(ctx context.Context, op cosmosQueuedOper
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return ctx.Err()
+			return attempts, ctx.Err()
 		case <-timer.C:
 		}
 		backoff *= 2
 	}
-	return lastErr
+	return attempts, lastErr
 }
 
 func (a *CosmosAdapter) submit(ctx context.Context, op cosmosQueuedOperation) error {

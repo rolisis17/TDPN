@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"time"
 
 	chaintypes "github.com/tdpn/tdpn-chain/types"
 	"github.com/tdpn/tdpn-chain/x/vpnsponsor/types"
@@ -95,8 +96,15 @@ func (k *Keeper) DelegateSessionCredit(record types.DelegatedSessionCredit) (typ
 	k.mu.Lock()
 	defer k.mu.Unlock()
 
-	if _, ok := k.store.GetAuthorization(normalized.AuthorizationID); !ok {
+	authorization, ok := k.store.GetAuthorization(normalized.AuthorizationID)
+	if !ok {
 		return types.DelegatedSessionCredit{}, authorizationNotFoundError(normalized.AuthorizationID)
+	}
+	if authorization.SponsorID != normalized.SponsorID || authorization.AppID != normalized.AppID {
+		return types.DelegatedSessionCredit{}, authorizationLinkageMismatchError(normalized.AuthorizationID)
+	}
+	if authorization.ExpiresAtUnix > 0 && authorization.ExpiresAtUnix <= time.Now().Unix() {
+		return types.DelegatedSessionCredit{}, authorizationExpiredError(normalized.AuthorizationID)
 	}
 
 	existing, ok := k.store.GetDelegation(normalized.ReservationID)
@@ -108,6 +116,9 @@ func (k *Keeper) DelegateSessionCredit(record types.DelegatedSessionCredit) (typ
 		// Normalize legacy records persisted via compatibility upserts.
 		k.store.UpsertDelegation(normalizedExisting)
 		return normalizedExisting, nil
+	}
+	if delegatedCreditsByAuthorization(k.store.ListDelegations(), normalized.AuthorizationID)+normalized.Credits > authorization.MaxCredits {
+		return types.DelegatedSessionCredit{}, authorizationCreditsExceededError(normalized.AuthorizationID, authorization.MaxCredits)
 	}
 
 	k.store.UpsertDelegation(normalized)
@@ -171,4 +182,26 @@ func conflictError(kind string, id string) error {
 
 func authorizationNotFoundError(authID string) error {
 	return fmt.Errorf("authorization %q not found", authID)
+}
+
+func authorizationLinkageMismatchError(authID string) error {
+	return fmt.Errorf("delegation sponsor/app linkage does not match authorization %q", authID)
+}
+
+func authorizationExpiredError(authID string) error {
+	return fmt.Errorf("authorization %q expired", authID)
+}
+
+func authorizationCreditsExceededError(authID string, maxCredits int64) error {
+	return fmt.Errorf("authorization %q max credits exceeded (%d)", authID, maxCredits)
+}
+
+func delegatedCreditsByAuthorization(records []types.DelegatedSessionCredit, authorizationID string) int64 {
+	var total int64
+	for _, record := range records {
+		if record.AuthorizationID == authorizationID {
+			total += record.Credits
+		}
+	}
+	return total
 }

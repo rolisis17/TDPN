@@ -2,7 +2,12 @@ package settlement
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -718,6 +723,108 @@ func TestMemoryServiceReconcileReplayPromotesToConfirmedWhenQuerierAvailable(t *
 	if gotCalls := adapter.settlementCalls(); gotCalls != 2 {
 		t.Fatalf("expected exactly two settlement submissions (initial fail + single replay), got %d", gotCalls)
 	}
+}
+
+func TestMemoryServiceCosmosAdapterAsyncFailureAfterEnqueueReplaysAndConfirms(t *testing.T) {
+	var failWrites atomic.Bool
+	failWrites.Store(true)
+
+	var submittedMu sync.Mutex
+	submittedSettlementByID := map[string]struct{}{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/x/vpnbilling/settlements":
+			var settlement SessionSettlement
+			if err := json.NewDecoder(r.Body).Decode(&settlement); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			if failWrites.Load() {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+			submittedMu.Lock()
+			submittedSettlementByID[settlement.SettlementID] = struct{}{}
+			submittedMu.Unlock()
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/x/vpnbilling/settlements/"):
+			settlementID := strings.TrimPrefix(r.URL.Path, "/x/vpnbilling/settlements/")
+			submittedMu.Lock()
+			_, ok := submittedSettlementByID[settlementID]
+			submittedMu.Unlock()
+			if !ok {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	adapter, err := NewCosmosAdapter(CosmosAdapterConfig{
+		Endpoint:    srv.URL,
+		QueueSize:   8,
+		MaxRetries:  0,
+		BaseBackoff: 10 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("NewCosmosAdapter: %v", err)
+	}
+	defer adapter.Close()
+
+	s := NewMemoryService(
+		WithPricePerMiBMicros(1024*1024),
+		WithChainAdapter(adapter),
+	)
+	ctx := context.Background()
+
+	if _, err := s.ReserveFunds(ctx, FundReservation{
+		SessionID:    "sess-cosmos-adapter-replay-1",
+		SubjectID:    "client-cosmos-adapter-replay-1",
+		AmountMicros: 2_000_000,
+		Currency:     "TDPNC",
+	}); err != nil {
+		t.Fatalf("ReserveFunds: %v", err)
+	}
+	if err := s.RecordUsage(ctx, UsageRecord{
+		SessionID:    "sess-cosmos-adapter-replay-1",
+		SubjectID:    "client-cosmos-adapter-replay-1",
+		BytesIngress: 1024 * 1024,
+	}); err != nil {
+		t.Fatalf("RecordUsage: %v", err)
+	}
+	settlement, err := s.SettleSession(ctx, "sess-cosmos-adapter-replay-1")
+	if err != nil {
+		t.Fatalf("SettleSession: %v", err)
+	}
+	if settlement.Status != OperationStatusSubmitted {
+		t.Fatalf("expected fail-soft settlement submit status submitted, got %s", settlement.Status)
+	}
+	if settlement.AdapterDeferred {
+		t.Fatalf("expected fail-soft async adapter path to avoid immediate deferred state")
+	}
+
+	waitForCondition(t, 2*time.Second, func() bool {
+		return adapter.deferredOperationCount() == 1
+	}, "adapter deferred backlog after async failure")
+
+	failWrites.Store(false)
+	waitForCondition(t, 2*time.Second, func() bool {
+		return adapter.deferredOperationCount() == 0
+	}, "adapter deferred backlog replay clear")
+
+	waitForCondition(t, 3*time.Second, func() bool {
+		_, err := s.Reconcile(ctx)
+		if err != nil {
+			return false
+		}
+		s.mu.Lock()
+		current := s.settledBySession["sess-cosmos-adapter-replay-1"]
+		s.mu.Unlock()
+		return current.Status == OperationStatusConfirmed && current.AdapterSubmitted && !current.AdapterDeferred
+	}, "memory reconcile confirmation after async replay")
 }
 
 func TestMemoryServiceReconcileMarksSubmittedAsConfirmedWhenQueryable(t *testing.T) {

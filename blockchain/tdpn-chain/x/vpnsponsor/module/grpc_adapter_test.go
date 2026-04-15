@@ -23,7 +23,7 @@ func TestGRPCMsgServerAdapterCreateAuthorization(t *testing.T) {
 			SponsorId:       "sponsor-1",
 			AppId:           "app-1",
 			MaxCredits:      100,
-			ExpiresAtUnix:   1700000000,
+			ExpiresAtUnix:   4102444800,
 		},
 	})
 	if err != nil {
@@ -49,7 +49,7 @@ func TestGRPCMsgServerAdapterCreateAuthorizationConflictClassification(t *testin
 			SponsorId:       "sponsor-conflict",
 			AppId:           "app-conflict",
 			MaxCredits:      100,
-			ExpiresAtUnix:   1700000000,
+			ExpiresAtUnix:   4102444800,
 		},
 	})
 	if err != nil {
@@ -62,7 +62,7 @@ func TestGRPCMsgServerAdapterCreateAuthorizationConflictClassification(t *testin
 			SponsorId:       "sponsor-conflict",
 			AppId:           "app-conflict",
 			MaxCredits:      101,
-			ExpiresAtUnix:   1700000000,
+			ExpiresAtUnix:   4102444800,
 		},
 	})
 	if err == nil {
@@ -93,7 +93,7 @@ func TestGRPCMsgServerAdapterDelegateSessionCredit(t *testing.T) {
 			SponsorId:       "sponsor-1",
 			AppId:           "app-1",
 			MaxCredits:      100,
-			ExpiresAtUnix:   1700000000,
+			ExpiresAtUnix:   4102444800,
 		},
 	})
 	if err != nil {
@@ -166,7 +166,7 @@ func TestGRPCQueryServerAdapterFoundAndList(t *testing.T) {
 		SponsorID:       "sponsor-1",
 		AppID:           "app-1",
 		MaxCredits:      100,
-		ExpiresAtUnix:   1700000000,
+		ExpiresAtUnix:   4102444800,
 		Status:          chaintypes.ReconciliationPending,
 	})
 	k.UpsertDelegation(sponsortypes.DelegatedSessionCredit{

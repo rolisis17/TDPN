@@ -303,6 +303,108 @@ func TestMsgServerFinalizeUsageMissingReservationPropagation(t *testing.T) {
 	}
 }
 
+func TestMsgServerFinalizeUsageSessionMismatchPropagation(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	server := NewMsgServer(&k)
+
+	if _, err := server.ReserveCredits(ReserveCreditsRequest{
+		Reservation: types.CreditReservation{
+			ReservationID: "res-10",
+			SessionID:     "sess-10",
+			AssetDenom:    "uusdc",
+			Amount:        100,
+		},
+	}); err != nil {
+		t.Fatalf("reserve failed: %v", err)
+	}
+
+	_, err := server.FinalizeUsage(FinalizeUsageRequest{
+		Settlement: types.SettlementRecord{
+			SettlementID:  "set-10",
+			ReservationID: "res-10",
+			SessionID:     "sess-10-other",
+			BilledAmount:  10,
+			AssetDenom:    "uusdc",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected invalid settlement error for session mismatch")
+	}
+	if !errors.Is(err, ErrInvalidSettlement) {
+		t.Fatalf("expected ErrInvalidSettlement, got %v", err)
+	}
+}
+
+func TestMsgServerFinalizeUsageAssetDenomMismatchPropagation(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	server := NewMsgServer(&k)
+
+	if _, err := server.ReserveCredits(ReserveCreditsRequest{
+		Reservation: types.CreditReservation{
+			ReservationID: "res-11",
+			SessionID:     "sess-11",
+			AssetDenom:    "uusdc",
+			Amount:        100,
+		},
+	}); err != nil {
+		t.Fatalf("reserve failed: %v", err)
+	}
+
+	_, err := server.FinalizeUsage(FinalizeUsageRequest{
+		Settlement: types.SettlementRecord{
+			SettlementID:  "set-11",
+			ReservationID: "res-11",
+			SessionID:     "sess-11",
+			BilledAmount:  10,
+			AssetDenom:    "utdpn",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected invalid settlement error for asset denom mismatch")
+	}
+	if !errors.Is(err, ErrInvalidSettlement) {
+		t.Fatalf("expected ErrInvalidSettlement, got %v", err)
+	}
+}
+
+func TestMsgServerFinalizeUsageOverchargePropagation(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	server := NewMsgServer(&k)
+
+	if _, err := server.ReserveCredits(ReserveCreditsRequest{
+		Reservation: types.CreditReservation{
+			ReservationID: "res-12",
+			SessionID:     "sess-12",
+			AssetDenom:    "uusdc",
+			Amount:        100,
+		},
+	}); err != nil {
+		t.Fatalf("reserve failed: %v", err)
+	}
+
+	_, err := server.FinalizeUsage(FinalizeUsageRequest{
+		Settlement: types.SettlementRecord{
+			SettlementID:  "set-12",
+			ReservationID: "res-12",
+			SessionID:     "sess-12",
+			BilledAmount:  101,
+			AssetDenom:    "uusdc",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected invalid settlement error for overcharge")
+	}
+	if !errors.Is(err, ErrInvalidSettlement) {
+		t.Fatalf("expected ErrInvalidSettlement, got %v", err)
+	}
+}
+
 func TestMsgServerNilKeeper(t *testing.T) {
 	t.Parallel()
 

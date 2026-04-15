@@ -14,6 +14,18 @@ import (
 	"time"
 )
 
+func waitForCondition(t *testing.T, timeout time.Duration, condition func() bool, description string) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if condition() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", description)
+}
+
 func TestCosmosAdapterSubmitsSettlementWithIdempotencyKey(t *testing.T) {
 	type seenRequest struct {
 		path string
@@ -758,5 +770,162 @@ func TestCosmosAdapterSignedTxModeRejectsUnreadableSecretFile(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatalf("expected unreadable secret file validation error")
+	}
+}
+
+func TestCosmosAdapterFailureAfterEnqueueTransitionsToDeferredReplayable(t *testing.T) {
+	var failWrites atomic.Bool
+	failWrites.Store(true)
+	var attempts int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/x/vpnbilling/settlements" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		atomic.AddInt32(&attempts, 1)
+		if failWrites.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	adapter, err := NewCosmosAdapter(CosmosAdapterConfig{
+		Endpoint:    srv.URL,
+		QueueSize:   8,
+		MaxRetries:  0,
+		BaseBackoff: 10 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("NewCosmosAdapter: %v", err)
+	}
+	defer adapter.Close()
+
+	if _, err := adapter.SubmitSessionSettlement(context.Background(), SessionSettlement{
+		SettlementID: "set-deferred-1",
+		SessionID:    "sess-deferred-1",
+	}); err != nil {
+		t.Fatalf("SubmitSessionSettlement: %v", err)
+	}
+
+	waitForCondition(t, 2*time.Second, func() bool {
+		return adapter.deferredOperationCount() == 1
+	}, "operation to be marked deferred")
+
+	entry, ok := adapter.deferredOperationByID("settlement:set-deferred-1")
+	if !ok {
+		t.Fatalf("expected deferred entry for settlement:set-deferred-1")
+	}
+	if !entry.replayable {
+		t.Fatalf("expected deferred entry to be replayable")
+	}
+	if entry.attempts < 1 {
+		t.Fatalf("expected deferred entry attempts >= 1, got %d", entry.attempts)
+	}
+	if !strings.Contains(entry.lastError, "status 503") {
+		t.Fatalf("expected deferred entry error to include status 503, got %q", entry.lastError)
+	}
+
+	failWrites.Store(false)
+	waitForCondition(t, 2*time.Second, func() bool {
+		return adapter.deferredOperationCount() == 0
+	}, "deferred replay to clear")
+
+	if got := atomic.LoadInt32(&attempts); got < 2 {
+		t.Fatalf("expected at least two submit attempts, got %d", got)
+	}
+}
+
+func TestCosmosAdapterCloseDrainsBacklogToDeferred(t *testing.T) {
+	startedCh := make(chan string, 2)
+	releaseCh := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/x/vpnrewards/issues" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		select {
+		case startedCh <- r.Header.Get("Idempotency-Key"):
+		default:
+		}
+		select {
+		case <-releaseCh:
+			w.WriteHeader(http.StatusOK)
+		case <-r.Context().Done():
+			return
+		}
+	}))
+	defer srv.Close()
+
+	adapter, err := NewCosmosAdapter(CosmosAdapterConfig{
+		Endpoint:    srv.URL,
+		QueueSize:   8,
+		MaxRetries:  0,
+		BaseBackoff: 10 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("NewCosmosAdapter: %v", err)
+	}
+
+	if _, err := adapter.SubmitRewardIssue(context.Background(), RewardIssue{
+		RewardID:          "rew-close-1",
+		ProviderSubjectID: "provider-close-1",
+		SessionID:         "sess-close-1",
+		RewardMicros:      100,
+	}); err != nil {
+		t.Fatalf("SubmitRewardIssue first: %v", err)
+	}
+	if _, err := adapter.SubmitRewardIssue(context.Background(), RewardIssue{
+		RewardID:          "rew-close-2",
+		ProviderSubjectID: "provider-close-2",
+		SessionID:         "sess-close-2",
+		RewardMicros:      200,
+	}); err != nil {
+		t.Fatalf("SubmitRewardIssue second: %v", err)
+	}
+
+	select {
+	case <-startedCh:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for first queued submit to start")
+	}
+
+	adapter.Close()
+	close(releaseCh)
+
+	waitForCondition(t, 2*time.Second, func() bool {
+		return adapter.deferredOperationCount() == 2
+	}, "close backlog to deferred transition")
+
+	first, ok := adapter.deferredOperationByID("reward:rew-close-1")
+	if !ok {
+		t.Fatalf("expected deferred entry for reward:rew-close-1")
+	}
+	if first.replayable {
+		t.Fatalf("expected closed in-flight deferred entry to be non-replayable")
+	}
+	if first.lastError == "" {
+		t.Fatalf("expected closed in-flight deferred entry to include a last error")
+	}
+
+	second, ok := adapter.deferredOperationByID("reward:rew-close-2")
+	if !ok {
+		t.Fatalf("expected deferred entry for reward:rew-close-2")
+	}
+	if second.replayable {
+		t.Fatalf("expected closed queued deferred entry to be non-replayable")
+	}
+	if !strings.Contains(second.lastError, "closed with backlog") && !strings.Contains(second.lastError, "context canceled") {
+		t.Fatalf("expected close-path deferred error marker, got %q", second.lastError)
+	}
+
+	if _, err := adapter.SubmitRewardIssue(context.Background(), RewardIssue{
+		RewardID:          "rew-after-close",
+		ProviderSubjectID: "provider-close-3",
+		SessionID:         "sess-close-3",
+		RewardMicros:      300,
+	}); err == nil {
+		t.Fatalf("expected submit after close to fail")
 	}
 }

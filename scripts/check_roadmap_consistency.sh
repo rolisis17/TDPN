@@ -1216,8 +1216,20 @@ if ! rg -Fq "[issuer-sponsor-live-smoke] payment-proof happy path token issuance
   echo "issuer sponsor live-smoke integration must include stable marker for payment-proof happy path token issuance"
   exit 1
 fi
-if ! rg -Fq "[issuer-sponsor-live-smoke] payment-proof negative path invalid proof" "$ROOT_DIR/scripts/integration_issuer_sponsor_api_live_smoke.sh"; then
-  echo "issuer sponsor live-smoke integration must include stable marker for payment-proof negative path invalid proof"
+if ! rg -Fq "[issuer-sponsor-live-smoke] payment-proof negative path invalid proof (missing payment_proof)" "$ROOT_DIR/scripts/integration_issuer_sponsor_api_live_smoke.sh"; then
+  echo "issuer sponsor live-smoke integration must include stable marker for payment-proof negative path missing payment_proof"
+  exit 1
+fi
+if ! rg -Fq "[issuer-sponsor-live-smoke] payment-proof negative path invalid proof (mismatched sponsor)" "$ROOT_DIR/scripts/integration_issuer_sponsor_api_live_smoke.sh"; then
+  echo "issuer sponsor live-smoke integration must include stable marker for payment-proof negative path mismatched sponsor"
+  exit 1
+fi
+if ! rg -Fq "[issuer-sponsor-live-smoke] payment-proof negative path invalid proof (mismatched subject)" "$ROOT_DIR/scripts/integration_issuer_sponsor_api_live_smoke.sh"; then
+  echo "issuer sponsor live-smoke integration must include stable marker for payment-proof negative path mismatched subject"
+  exit 1
+fi
+if ! rg -Fq "[issuer-sponsor-live-smoke] payment-proof negative path invalid proof (mismatched session)" "$ROOT_DIR/scripts/integration_issuer_sponsor_api_live_smoke.sh"; then
+  echo "issuer sponsor live-smoke integration must include stable marker for payment-proof negative path mismatched session"
   exit 1
 fi
 if ! rg -Fq "[issuer-sponsor-live-smoke] payment-proof negative path invalid proof (unknown reservation)" "$ROOT_DIR/scripts/integration_issuer_sponsor_api_live_smoke.sh"; then

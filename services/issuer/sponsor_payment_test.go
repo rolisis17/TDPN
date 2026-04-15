@@ -291,7 +291,7 @@ func TestSponsorIssueTokenRejectsPaymentProofMismatches(t *testing.T) {
 			mutateProof: func(proof *proto.SponsorPaymentProof) {
 				proof.Subject = "client-2"
 			},
-			wantMessage: "payment proof invalid: reservation subject mismatch",
+			wantMessage: "payment proof invalid: request subject mismatch",
 		},
 		{
 			name: "session mismatch",
@@ -346,6 +346,154 @@ func TestSponsorIssueTokenRejectsPaymentProofMismatches(t *testing.T) {
 			}
 			if !strings.Contains(tokenRR.Body.String(), tc.wantMessage) {
 				t.Fatalf("expected response to contain %q, body=%s", tc.wantMessage, tokenRR.Body.String())
+			}
+		})
+	}
+}
+
+func TestIssueEndpointsRejectRequestAndPaymentProofSubjectMismatch(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		call func(*Service, *httptest.ResponseRecorder, *http.Request)
+	}{
+		{
+			name: "client token endpoint",
+			path: "/v1/token",
+			call: func(s *Service, rr *httptest.ResponseRecorder, req *http.Request) {
+				s.handleIssueToken(rr, req)
+			},
+		},
+		{
+			name: "sponsor token endpoint",
+			path: "/v1/sponsor/token",
+			call: func(s *Service, rr *httptest.ResponseRecorder, req *http.Request) {
+				s.handleSponsorIssueToken(rr, req)
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newSponsorTestService(t)
+			s.requirePaymentProof = false
+			const reservationID = "sres-request-proof-subject-mismatch"
+			const sessionID = "sess-request-proof-subject-mismatch"
+			_, err := s.settlementService().ReserveSponsorCredits(context.Background(), settlement.SponsorCreditReservation{
+				ReservationID: reservationID,
+				SponsorID:     "sponsor-1",
+				SubjectID:     "client-2",
+				SessionID:     sessionID,
+				AmountMicros:  1000,
+				ExpiresAt:     time.Now().UTC().Add(2 * time.Minute),
+			})
+			if err != nil {
+				t.Fatalf("ReserveSponsorCredits: %v", err)
+			}
+
+			reqBody, _ := json.Marshal(proto.IssueTokenRequest{
+				Tier:      1,
+				Subject:   "client-1",
+				TokenType: crypto.TokenTypeClientAccess,
+				PopPubKey: sponsorTestPopPubKey(t),
+				PaymentProof: &proto.SponsorPaymentProof{
+					ReservationID: reservationID,
+					SponsorID:     "sponsor-1",
+					Subject:       "client-2",
+					SessionID:     sessionID,
+				},
+			})
+			req := httptest.NewRequest(http.MethodPost, tc.path, bytes.NewReader(reqBody))
+			if tc.path == "/v1/sponsor/token" {
+				req.Header.Set("X-Sponsor-Token", "sponsor-secret-token")
+			}
+			rr := httptest.NewRecorder()
+			tc.call(s, rr, req)
+
+			if rr.Code != http.StatusPaymentRequired {
+				t.Fatalf("expected status %d, got %d body=%s", http.StatusPaymentRequired, rr.Code, rr.Body.String())
+			}
+			if !strings.Contains(rr.Body.String(), "payment proof invalid: request subject mismatch") {
+				t.Fatalf("expected request/proof subject mismatch error, body=%s", rr.Body.String())
+			}
+		})
+	}
+}
+
+func TestIssueEndpointsPropagateCanceledRequestContextToAuthorizePayment(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		call func(*Service, *httptest.ResponseRecorder, *http.Request)
+	}{
+		{
+			name: "client token endpoint",
+			path: "/v1/token",
+			call: func(s *Service, rr *httptest.ResponseRecorder, req *http.Request) {
+				s.handleIssueToken(rr, req)
+			},
+		},
+		{
+			name: "sponsor token endpoint",
+			path: "/v1/sponsor/token",
+			call: func(s *Service, rr *httptest.ResponseRecorder, req *http.Request) {
+				s.handleSponsorIssueToken(rr, req)
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newSponsorTestService(t)
+			baseSettlement := settlement.NewMemoryService()
+			probe := &authorizePaymentContextProbe{Service: baseSettlement}
+			s.settlement = probe
+			const reservationID = "sres-context-cancelled"
+			const subjectID = "client-ctx"
+			const sessionID = "sess-ctx"
+			_, err := s.settlementService().ReserveSponsorCredits(context.Background(), settlement.SponsorCreditReservation{
+				ReservationID: reservationID,
+				SponsorID:     "sponsor-1",
+				SubjectID:     subjectID,
+				SessionID:     sessionID,
+				AmountMicros:  1000,
+				ExpiresAt:     time.Now().UTC().Add(2 * time.Minute),
+			})
+			if err != nil {
+				t.Fatalf("ReserveSponsorCredits: %v", err)
+			}
+
+			reqBody, _ := json.Marshal(proto.IssueTokenRequest{
+				Tier:      1,
+				Subject:   subjectID,
+				TokenType: crypto.TokenTypeClientAccess,
+				PopPubKey: sponsorTestPopPubKey(t),
+				PaymentProof: &proto.SponsorPaymentProof{
+					ReservationID: reservationID,
+					SponsorID:     "sponsor-1",
+					Subject:       subjectID,
+					SessionID:     sessionID,
+				},
+			})
+			req := httptest.NewRequest(http.MethodPost, tc.path, bytes.NewReader(reqBody))
+			if tc.path == "/v1/sponsor/token" {
+				req.Header.Set("X-Sponsor-Token", "sponsor-secret-token")
+			}
+			canceledCtx, cancel := context.WithCancel(req.Context())
+			cancel()
+			req = req.WithContext(canceledCtx)
+
+			rr := httptest.NewRecorder()
+			tc.call(s, rr, req)
+
+			if rr.Code != http.StatusPaymentRequired {
+				t.Fatalf("expected status %d, got %d body=%s", http.StatusPaymentRequired, rr.Code, rr.Body.String())
+			}
+			if !strings.Contains(rr.Body.String(), "payment proof invalid: context canceled") {
+				t.Fatalf("expected canceled context error, body=%s", rr.Body.String())
+			}
+			if !probe.sawCanceledContext {
+				t.Fatalf("expected AuthorizePayment to observe canceled request context")
 			}
 		})
 	}
@@ -738,4 +886,17 @@ func sponsorTestPopPubKey(t *testing.T) string {
 		t.Fatalf("GenerateEd25519Keypair: %v", err)
 	}
 	return crypto.EncodeEd25519PublicKey(popPub)
+}
+
+type authorizePaymentContextProbe struct {
+	settlement.Service
+	sawCanceledContext bool
+}
+
+func (p *authorizePaymentContextProbe) AuthorizePayment(ctx context.Context, proof settlement.PaymentProof) (settlement.PaymentAuthorization, error) {
+	if err := ctx.Err(); err != nil {
+		p.sawCanceledContext = true
+		return settlement.PaymentAuthorization{}, err
+	}
+	return p.Service.AuthorizePayment(ctx, proof)
 }

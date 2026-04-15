@@ -66,6 +66,8 @@ type settlementSponsorReservationPayload struct {
 	ReservationID string    `json:"ReservationID"`
 	SponsorID     string    `json:"SponsorID"`
 	SubjectID     string    `json:"SubjectID"`
+	AppID         string    `json:"AppID,omitempty"`
+	EndUserID     string    `json:"EndUserID,omitempty"`
 	SessionID     string    `json:"SessionID"`
 	AmountMicros  int64     `json:"AmountMicros"`
 	Currency      string    `json:"Currency"`
@@ -473,12 +475,27 @@ func (h *settlementBridgeHandler) handleSponsorReservation(w http.ResponseWriter
 	}
 	createdUnix := unixOrZero(payload.CreatedAt)
 	expiresUnix := unixOrZero(payload.ExpiresAt)
+	subjectID := strings.TrimSpace(payload.SubjectID)
+	appID := strings.TrimSpace(payload.AppID)
+	endUserID := strings.TrimSpace(payload.EndUserID)
+	if appID == "" {
+		appID = subjectID
+	}
+	if endUserID == "" {
+		endUserID = subjectID
+	}
+	if appID == "" {
+		appID = endUserID
+	}
+	if endUserID == "" {
+		endUserID = appID
+	}
 
 	_, err := h.scaffold.SponsorMsgServer().CreateAuthorization(r.Context(), app.SponsorCreateAuthorizationRequest{
 		Record: sponsortypes.SponsorAuthorization{
 			AuthorizationID: authorizationID,
 			SponsorID:       payload.SponsorID,
-			AppID:           payload.SubjectID,
+			AppID:           appID,
 			MaxCredits:      maxCredits,
 			ExpiresAtUnix:   expiresUnix,
 			Status:          mapReconciliationStatus(payload.Status, chaintypes.ReconciliationPending),
@@ -494,8 +511,8 @@ func (h *settlementBridgeHandler) handleSponsorReservation(w http.ResponseWriter
 			ReservationID:   payload.ReservationID,
 			AuthorizationID: authorizationID,
 			SponsorID:       payload.SponsorID,
-			AppID:           payload.SubjectID,
-			EndUserID:       payload.SubjectID,
+			AppID:           appID,
+			EndUserID:       endUserID,
 			SessionID:       payload.SessionID,
 			Credits:         payload.AmountMicros,
 			Status:          mapReconciliationStatus(payload.Status, chaintypes.ReconciliationPending),

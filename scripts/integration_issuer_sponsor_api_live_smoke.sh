@@ -256,6 +256,16 @@ echo "[issuer-sponsor-live-smoke] payment-proof negative path invalid proof (mis
 post_expect_status "${BASE_URL}/v1/sponsor/token" "${token_missing_proof_payload}" "402" "${SPONSOR_TOKEN}"
 assert_response_contains "payment proof required" "missing sponsor token payment_proof"
 
+token_blank_reservation_id_payload="$(jq -n \
+  --arg subject "${SUBJECT_ID}" \
+  --arg pop_pub_key "${pop_pub_key}" \
+  --arg sponsor_id "${SPONSOR_ID}" \
+  --arg session_id "${SESSION_ID}" \
+  '{tier:1,subject:$subject,token_type:"client_access",pop_pub_key:$pop_pub_key,payment_proof:{reservation_id:"",sponsor_id:$sponsor_id,subject:$subject,session_id:$session_id}}')"
+echo "[issuer-sponsor-live-smoke] payment-proof negative path invalid proof (blank reservation_id)"
+post_expect_status "${BASE_URL}/v1/sponsor/token" "${token_blank_reservation_id_payload}" "402" "${SPONSOR_TOKEN}"
+assert_response_contains "authorize payment requires reservation_id" "blank reservation_id token payment_proof"
+
 token_mismatched_proof_payload="$(jq -n \
   --arg subject "${SUBJECT_ID}" \
   --arg pop_pub_key "${pop_pub_key}" \
@@ -266,6 +276,30 @@ token_mismatched_proof_payload="$(jq -n \
 post_expect_status "${BASE_URL}/v1/sponsor/token" "${token_mismatched_proof_payload}" "402" "${SPONSOR_TOKEN}"
 assert_response_contains "reservation sponsor mismatch" "mismatched sponsor token payment_proof"
 echo "[issuer-sponsor-live-smoke] payment-proof negative path invalid proof (mismatched sponsor)"
+
+token_subject_mismatch_payload="$(jq -n \
+  --arg subject "${SUBJECT_ID}" \
+  --arg pop_pub_key "${pop_pub_key}" \
+  --arg reservation_id "${RESERVATION_ID}" \
+  --arg sponsor_id "${SPONSOR_ID}" \
+  --arg mismatched_subject "client-live-mismatch-subject" \
+  --arg session_id "${SESSION_ID}" \
+  '{tier:1,subject:$subject,token_type:"client_access",pop_pub_key:$pop_pub_key,payment_proof:{reservation_id:$reservation_id,sponsor_id:$sponsor_id,subject:$mismatched_subject,session_id:$session_id}}')"
+post_expect_status "${BASE_URL}/v1/sponsor/token" "${token_subject_mismatch_payload}" "402" "${SPONSOR_TOKEN}"
+assert_response_contains "subject mismatch" "mismatched subject token payment_proof"
+echo "[issuer-sponsor-live-smoke] payment-proof negative path invalid proof (mismatched subject)"
+
+token_session_mismatch_payload="$(jq -n \
+  --arg subject "${SUBJECT_ID}" \
+  --arg pop_pub_key "${pop_pub_key}" \
+  --arg reservation_id "${RESERVATION_ID}" \
+  --arg sponsor_id "${SPONSOR_ID}" \
+  --arg subject_proof "${SUBJECT_ID}" \
+  --arg mismatched_session "sess-live-mismatch-${RANDOM}-$(date +%s)" \
+  '{tier:1,subject:$subject,token_type:"client_access",pop_pub_key:$pop_pub_key,payment_proof:{reservation_id:$reservation_id,sponsor_id:$sponsor_id,subject:$subject_proof,session_id:$mismatched_session}}')"
+post_expect_status "${BASE_URL}/v1/sponsor/token" "${token_session_mismatch_payload}" "402" "${SPONSOR_TOKEN}"
+assert_response_contains "session mismatch" "mismatched session token payment_proof"
+echo "[issuer-sponsor-live-smoke] payment-proof negative path invalid proof (mismatched session)"
 
 unknown_reservation_id="sres-live-missing-${RANDOM}-$(date +%s)"
 token_unknown_reservation_payload="$(jq -n \
@@ -294,6 +328,23 @@ jq -e '
   (.jti | type == "string" and length > 0)
 ' "${RESP_FILE}" >/dev/null
 
+get_expect_status "${BASE_URL}/v1/sponsor/status?reservation_id=${RESERVATION_ID}" "200" "${SPONSOR_TOKEN}"
+jq -e --arg reservation_id "${RESERVATION_ID}" --arg sponsor_id "${SPONSOR_ID}" --arg subject "${SUBJECT_ID}" --arg session_id "${SESSION_ID}" '
+  .accepted == true and
+  .reservation_id == $reservation_id and
+  .sponsor_id == $sponsor_id and
+  .subject == $subject and
+  .session_id == $session_id and
+  (.status | type == "string" and length > 0) and
+  (.consumed_at | type == "number" and . > 0)
+' "${RESP_FILE}" >/dev/null
+consumed_at_after_first_issue="$(jq -r '.consumed_at // empty' "${RESP_FILE}")"
+if [[ -z "${consumed_at_after_first_issue}" || "${consumed_at_after_first_issue}" == "null" ]]; then
+  echo "expected consumed_at after first payment-proof success"
+  cat "${RESP_FILE}"
+  exit 1
+fi
+
 echo "[issuer-sponsor-live-smoke] payment-proof negative path duplicate proof replay"
 post_expect_status "${BASE_URL}/v1/sponsor/token" "${token_payload}" "200" "${SPONSOR_TOKEN}"
 jq -e '
@@ -312,6 +363,13 @@ jq -e --arg reservation_id "${RESERVATION_ID}" --arg sponsor_id "${SPONSOR_ID}" 
   (.status | type == "string" and length > 0) and
   (.consumed_at | type == "number" and . > 0)
 ' "${RESP_FILE}" >/dev/null
+consumed_at_after_replay="$(jq -r '.consumed_at // empty' "${RESP_FILE}")"
+if [[ "${consumed_at_after_replay}" != "${consumed_at_after_first_issue}" ]]; then
+  echo "duplicate payment-proof replay must be idempotent for consumed_at"
+  echo "first consumed_at=${consumed_at_after_first_issue} replay consumed_at=${consumed_at_after_replay}"
+  cat "${RESP_FILE}"
+  exit 1
+fi
 
 signal_runtime INT
 if ! wait_for_runtime_exit 30; then

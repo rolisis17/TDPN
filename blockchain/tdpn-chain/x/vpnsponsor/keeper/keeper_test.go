@@ -3,6 +3,7 @@ package keeper
 import (
 	"strings"
 	"testing"
+	"time"
 
 	chaintypes "github.com/tdpn/tdpn-chain/types"
 	"github.com/tdpn/tdpn-chain/x/vpnsponsor/types"
@@ -286,6 +287,105 @@ func TestKeeperDelegateSessionCreditMissingAuthorization(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("expected missing authorization error message, got: %v", err)
+	}
+}
+
+func TestKeeperDelegateSessionCreditAuthorizationLinkageMismatch(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	if _, err := k.CreateAuthorization(types.SponsorAuthorization{
+		AuthorizationID: "auth-1",
+		SponsorID:       "sponsor-1",
+		AppID:           "app-1",
+		MaxCredits:      100,
+	}); err != nil {
+		t.Fatalf("CreateAuthorization returned unexpected error: %v", err)
+	}
+
+	_, err := k.DelegateSessionCredit(types.DelegatedSessionCredit{
+		ReservationID:   "res-1",
+		AuthorizationID: "auth-1",
+		SponsorID:       "sponsor-other",
+		AppID:           "app-1",
+		SessionID:       "sess-1",
+		Credits:         10,
+	})
+	if err == nil {
+		t.Fatal("expected linkage mismatch error")
+	}
+	if !strings.Contains(err.Error(), "linkage does not match") {
+		t.Fatalf("expected linkage mismatch error message, got: %v", err)
+	}
+}
+
+func TestKeeperDelegateSessionCreditExpiredAuthorization(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	if _, err := k.CreateAuthorization(types.SponsorAuthorization{
+		AuthorizationID: "auth-1",
+		SponsorID:       "sponsor-1",
+		AppID:           "app-1",
+		MaxCredits:      100,
+		ExpiresAtUnix:   time.Now().Unix() - 1,
+	}); err != nil {
+		t.Fatalf("CreateAuthorization returned unexpected error: %v", err)
+	}
+
+	_, err := k.DelegateSessionCredit(types.DelegatedSessionCredit{
+		ReservationID:   "res-1",
+		AuthorizationID: "auth-1",
+		SponsorID:       "sponsor-1",
+		AppID:           "app-1",
+		SessionID:       "sess-1",
+		Credits:         10,
+	})
+	if err == nil {
+		t.Fatal("expected expired authorization error")
+	}
+	if !strings.Contains(err.Error(), "expired") {
+		t.Fatalf("expected expired authorization error message, got: %v", err)
+	}
+}
+
+func TestKeeperDelegateSessionCreditMaxCreditsExceeded(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	if _, err := k.CreateAuthorization(types.SponsorAuthorization{
+		AuthorizationID: "auth-1",
+		SponsorID:       "sponsor-1",
+		AppID:           "app-1",
+		MaxCredits:      100,
+	}); err != nil {
+		t.Fatalf("CreateAuthorization returned unexpected error: %v", err)
+	}
+
+	if _, err := k.DelegateSessionCredit(types.DelegatedSessionCredit{
+		ReservationID:   "res-1",
+		AuthorizationID: "auth-1",
+		SponsorID:       "sponsor-1",
+		AppID:           "app-1",
+		SessionID:       "sess-1",
+		Credits:         60,
+	}); err != nil {
+		t.Fatalf("first DelegateSessionCredit returned unexpected error: %v", err)
+	}
+
+	_, err := k.DelegateSessionCredit(types.DelegatedSessionCredit{
+		ReservationID:   "res-2",
+		AuthorizationID: "auth-1",
+		SponsorID:       "sponsor-1",
+		AppID:           "app-1",
+		SessionID:       "sess-2",
+		Credits:         41,
+	})
+	if err == nil {
+		t.Fatal("expected max credits exceeded error")
+	}
+	if !strings.Contains(err.Error(), "max credits exceeded") {
+		t.Fatalf("expected max credits exceeded error message, got: %v", err)
 	}
 }
 
