@@ -205,6 +205,7 @@ Current implementation posture:
 - phase6 build/testnet CI now includes `tdpnd_grpc_auth_live_smoke` wired to `scripts/integration_cosmos_tdpnd_grpc_auth_live_smoke.sh` for auth-token gRPC live-smoke coverage.
 - phase6 Cosmos L1 contracts CI gate now runs via `scripts/ci_phase6_cosmos_l1_contracts.sh` with contract checks in `scripts/integration_ci_phase6_cosmos_l1_contracts.sh`, plus live-smoke coverage in `scripts/integration_phase6_cosmos_l1_contracts_live_smoke.sh`.
 - phase6 Cosmos L1 contracts posture now includes both `cosmos_module_coverage_floor` (`scripts/integration_cosmos_module_coverage_floor.sh`) and `cosmos_keeper_coverage_floor` (`scripts/integration_cosmos_keeper_coverage_floor.sh`) before wrapper handoff/run stages.
+- phase6 Cosmos L1 contracts posture now includes `phase6_cosmos_dual_write_parity` wired to `scripts/integration_cosmos_dual_write_parity.sh` before wrapper handoff/run stages.
 - phase6 canonical top-level suite wrapper is `scripts/phase6_cosmos_l1_build_testnet_suite.sh` with contract checks in `scripts/integration_phase6_cosmos_l1_build_testnet_suite.sh`.
 - phase6 readiness wrappers are available as `scripts/phase6_cosmos_l1_build_testnet_check.sh` and `scripts/phase6_cosmos_l1_build_testnet_run.sh` (integration-covered).
 - phase6 handoff wrappers are available as `scripts/phase6_cosmos_l1_build_testnet_handoff_check.sh` and `scripts/phase6_cosmos_l1_build_testnet_handoff_run.sh` (integration-covered).

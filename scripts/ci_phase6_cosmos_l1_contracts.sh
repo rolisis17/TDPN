@@ -15,6 +15,7 @@ Usage:
     [--run-ci-phase6-cosmos-l1-build-testnet [0|1]] \
     [--run-phase6-cosmos-module-coverage-floor [0|1]] \
     [--run-phase6-cosmos-keeper-coverage-floor [0|1]] \
+    [--run-phase6-cosmos-dual-write-parity [0|1]] \
     [--run-phase6-cosmos-l1-build-testnet-check [0|1]] \
     [--run-phase6-cosmos-l1-build-testnet-run [0|1]] \
     [--run-phase6-cosmos-l1-build-testnet-handoff-check [0|1]] \
@@ -27,12 +28,13 @@ Purpose:
     1) integration_ci_phase6_cosmos_l1_build_testnet.sh
     2) integration_cosmos_module_coverage_floor.sh
     3) integration_cosmos_keeper_coverage_floor.sh
-    4) integration_phase6_cosmos_l1_build_testnet_check.sh
-    5) integration_phase6_cosmos_l1_build_testnet_run.sh
-    6) integration_phase6_cosmos_l1_build_testnet_handoff_check.sh
-    7) integration_phase6_cosmos_l1_build_testnet_handoff_run.sh
-    8) integration_phase6_cosmos_l1_build_testnet_suite.sh
-    9) integration_phase6_cosmos_l1_contracts_live_smoke.sh
+    4) integration_cosmos_dual_write_parity.sh
+    5) integration_phase6_cosmos_l1_build_testnet_check.sh
+    6) integration_phase6_cosmos_l1_build_testnet_run.sh
+    7) integration_phase6_cosmos_l1_build_testnet_handoff_check.sh
+    8) integration_phase6_cosmos_l1_build_testnet_handoff_run.sh
+    9) integration_phase6_cosmos_l1_build_testnet_suite.sh
+    10) integration_phase6_cosmos_l1_contracts_live_smoke.sh
 
 Dry-run mode:
   --dry-run 1 skips stage execution, records deterministic skip accounting,
@@ -114,6 +116,7 @@ dry_run="${CI_PHASE6_COSMOS_L1_CONTRACTS_DRY_RUN:-0}"
 run_ci_phase6_cosmos_l1_build_testnet="${CI_PHASE6_COSMOS_L1_CONTRACTS_RUN_CI_PHASE6_COSMOS_L1_BUILD_TESTNET:-1}"
 run_phase6_cosmos_module_coverage_floor="${CI_PHASE6_COSMOS_L1_CONTRACTS_RUN_PHASE6_COSMOS_MODULE_COVERAGE_FLOOR:-1}"
 run_phase6_cosmos_keeper_coverage_floor="${CI_PHASE6_COSMOS_L1_CONTRACTS_RUN_PHASE6_COSMOS_KEEPER_COVERAGE_FLOOR:-1}"
+run_phase6_cosmos_dual_write_parity="${CI_PHASE6_COSMOS_L1_CONTRACTS_RUN_PHASE6_COSMOS_DUAL_WRITE_PARITY:-1}"
 run_phase6_cosmos_l1_build_testnet_check="${CI_PHASE6_COSMOS_L1_CONTRACTS_RUN_PHASE6_COSMOS_L1_BUILD_TESTNET_CHECK:-1}"
 run_phase6_cosmos_l1_build_testnet_run="${CI_PHASE6_COSMOS_L1_CONTRACTS_RUN_PHASE6_COSMOS_L1_BUILD_TESTNET_RUN:-1}"
 run_phase6_cosmos_l1_build_testnet_handoff_check="${CI_PHASE6_COSMOS_L1_CONTRACTS_RUN_PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_CHECK:-1}"
@@ -173,6 +176,15 @@ while [[ $# -gt 0 ]]; do
         shift 2
       else
         run_phase6_cosmos_keeper_coverage_floor="1"
+        shift
+      fi
+      ;;
+    --run-phase6-cosmos-dual-write-parity)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        run_phase6_cosmos_dual_write_parity="${2:-}"
+        shift 2
+      else
+        run_phase6_cosmos_dual_write_parity="1"
         shift
       fi
       ;;
@@ -247,6 +259,7 @@ bool_arg_or_die "--dry-run" "$dry_run"
 bool_arg_or_die "--run-ci-phase6-cosmos-l1-build-testnet" "$run_ci_phase6_cosmos_l1_build_testnet"
 bool_arg_or_die "--run-phase6-cosmos-module-coverage-floor" "$run_phase6_cosmos_module_coverage_floor"
 bool_arg_or_die "--run-phase6-cosmos-keeper-coverage-floor" "$run_phase6_cosmos_keeper_coverage_floor"
+bool_arg_or_die "--run-phase6-cosmos-dual-write-parity" "$run_phase6_cosmos_dual_write_parity"
 bool_arg_or_die "--run-phase6-cosmos-l1-build-testnet-check" "$run_phase6_cosmos_l1_build_testnet_check"
 bool_arg_or_die "--run-phase6-cosmos-l1-build-testnet-run" "$run_phase6_cosmos_l1_build_testnet_run"
 bool_arg_or_die "--run-phase6-cosmos-l1-build-testnet-handoff-check" "$run_phase6_cosmos_l1_build_testnet_handoff_check"
@@ -257,6 +270,7 @@ bool_arg_or_die "--run-phase6-cosmos-l1-contracts-live-smoke" "$run_phase6_cosmo
 ci_phase6_cosmos_l1_build_testnet_script="${CI_PHASE6_COSMOS_L1_CONTRACTS_CI_PHASE6_COSMOS_L1_BUILD_TESTNET_SCRIPT:-$ROOT_DIR/scripts/integration_ci_phase6_cosmos_l1_build_testnet.sh}"
 phase6_cosmos_module_coverage_floor_script="${CI_PHASE6_COSMOS_L1_CONTRACTS_PHASE6_COSMOS_MODULE_COVERAGE_FLOOR_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_module_coverage_floor.sh}"
 phase6_cosmos_keeper_coverage_floor_script="${CI_PHASE6_COSMOS_L1_CONTRACTS_PHASE6_COSMOS_KEEPER_COVERAGE_FLOOR_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_keeper_coverage_floor.sh}"
+phase6_cosmos_dual_write_parity_script="${CI_PHASE6_COSMOS_L1_CONTRACTS_PHASE6_COSMOS_DUAL_WRITE_PARITY_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_dual_write_parity.sh}"
 phase6_cosmos_l1_build_testnet_check_script="${CI_PHASE6_COSMOS_L1_CONTRACTS_PHASE6_COSMOS_L1_BUILD_TESTNET_CHECK_SCRIPT:-$ROOT_DIR/scripts/integration_phase6_cosmos_l1_build_testnet_check.sh}"
 phase6_cosmos_l1_build_testnet_run_script="${CI_PHASE6_COSMOS_L1_CONTRACTS_PHASE6_COSMOS_L1_BUILD_TESTNET_RUN_SCRIPT:-$ROOT_DIR/scripts/integration_phase6_cosmos_l1_build_testnet_run.sh}"
 phase6_cosmos_l1_build_testnet_handoff_check_script="${CI_PHASE6_COSMOS_L1_CONTRACTS_PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_CHECK_SCRIPT:-$ROOT_DIR/scripts/integration_phase6_cosmos_l1_build_testnet_handoff_check.sh}"
@@ -268,6 +282,7 @@ stage_ids=(
   "ci_phase6_cosmos_l1_build_testnet"
   "phase6_cosmos_module_coverage_floor"
   "phase6_cosmos_keeper_coverage_floor"
+  "phase6_cosmos_dual_write_parity"
   "phase6_cosmos_l1_build_testnet_check"
   "phase6_cosmos_l1_build_testnet_run"
   "phase6_cosmos_l1_build_testnet_handoff_check"
@@ -280,6 +295,7 @@ declare -A stage_script=(
   ["ci_phase6_cosmos_l1_build_testnet"]="$ci_phase6_cosmos_l1_build_testnet_script"
   ["phase6_cosmos_module_coverage_floor"]="$phase6_cosmos_module_coverage_floor_script"
   ["phase6_cosmos_keeper_coverage_floor"]="$phase6_cosmos_keeper_coverage_floor_script"
+  ["phase6_cosmos_dual_write_parity"]="$phase6_cosmos_dual_write_parity_script"
   ["phase6_cosmos_l1_build_testnet_check"]="$phase6_cosmos_l1_build_testnet_check_script"
   ["phase6_cosmos_l1_build_testnet_run"]="$phase6_cosmos_l1_build_testnet_run_script"
   ["phase6_cosmos_l1_build_testnet_handoff_check"]="$phase6_cosmos_l1_build_testnet_handoff_check_script"
@@ -292,6 +308,7 @@ declare -A stage_enabled=(
   ["ci_phase6_cosmos_l1_build_testnet"]="$run_ci_phase6_cosmos_l1_build_testnet"
   ["phase6_cosmos_module_coverage_floor"]="$run_phase6_cosmos_module_coverage_floor"
   ["phase6_cosmos_keeper_coverage_floor"]="$run_phase6_cosmos_keeper_coverage_floor"
+  ["phase6_cosmos_dual_write_parity"]="$run_phase6_cosmos_dual_write_parity"
   ["phase6_cosmos_l1_build_testnet_check"]="$run_phase6_cosmos_l1_build_testnet_check"
   ["phase6_cosmos_l1_build_testnet_run"]="$run_phase6_cosmos_l1_build_testnet_run"
   ["phase6_cosmos_l1_build_testnet_handoff_check"]="$run_phase6_cosmos_l1_build_testnet_handoff_check"
@@ -412,6 +429,7 @@ jq -n \
   --arg run_ci_phase6_cosmos_l1_build_testnet "$run_ci_phase6_cosmos_l1_build_testnet" \
   --arg run_phase6_cosmos_module_coverage_floor "$run_phase6_cosmos_module_coverage_floor" \
   --arg run_phase6_cosmos_keeper_coverage_floor "$run_phase6_cosmos_keeper_coverage_floor" \
+  --arg run_phase6_cosmos_dual_write_parity "$run_phase6_cosmos_dual_write_parity" \
   --arg run_phase6_cosmos_l1_build_testnet_check "$run_phase6_cosmos_l1_build_testnet_check" \
   --arg run_phase6_cosmos_l1_build_testnet_run "$run_phase6_cosmos_l1_build_testnet_run" \
   --arg run_phase6_cosmos_l1_build_testnet_handoff_check "$run_phase6_cosmos_l1_build_testnet_handoff_check" \
@@ -435,6 +453,7 @@ jq -n \
       run_ci_phase6_cosmos_l1_build_testnet: ($run_ci_phase6_cosmos_l1_build_testnet == "1"),
       run_phase6_cosmos_module_coverage_floor: ($run_phase6_cosmos_module_coverage_floor == "1"),
       run_phase6_cosmos_keeper_coverage_floor: ($run_phase6_cosmos_keeper_coverage_floor == "1"),
+      run_phase6_cosmos_dual_write_parity: ($run_phase6_cosmos_dual_write_parity == "1"),
       run_phase6_cosmos_l1_build_testnet_check: ($run_phase6_cosmos_l1_build_testnet_check == "1"),
       run_phase6_cosmos_l1_build_testnet_run: ($run_phase6_cosmos_l1_build_testnet_run == "1"),
       run_phase6_cosmos_l1_build_testnet_handoff_check: ($run_phase6_cosmos_l1_build_testnet_handoff_check == "1"),
