@@ -25,6 +25,11 @@ PASS_ROADMAP="$TMP_DIR/roadmap_pass.json"
 PASS_CHECK="$TMP_DIR/check_pass.json"
 PASS_OUTPUT="$TMP_DIR/pass_output.json"
 PASS_LOG="$TMP_DIR/pass.log"
+ENV_ROADMAP="$TMP_DIR/roadmap_env_relaxed.json"
+ENV_CANONICAL_OUTPUT="$TMP_DIR/env_canonical_output.json"
+ENV_CANONICAL_LOG="$TMP_DIR/env_canonical.log"
+ENV_LEGACY_OUTPUT="$TMP_DIR/env_legacy_output.json"
+ENV_LEGACY_LOG="$TMP_DIR/env_legacy.log"
 LEGACY_ALIAS_OUTPUT="$TMP_DIR/legacy_alias_output.json"
 LEGACY_ALIAS_LOG="$TMP_DIR/legacy_alias.log"
 
@@ -159,6 +164,65 @@ if ! jq -e '
   echo "legacy alias summary mismatch"
   cat "$LEGACY_ALIAS_OUTPUT"
   cat "$LEGACY_ALIAS_LOG"
+  exit 1
+fi
+
+cat >"$ENV_ROADMAP" <<'EOF_ENV_ROADMAP'
+{
+  "version": 1,
+  "status": "pass",
+  "rc": 0,
+  "vpn_track": {
+    "phase5_settlement_layer_handoff": {
+      "settlement_failsoft_ok": true,
+      "settlement_acceptance_ok": false,
+      "settlement_bridge_smoke_ok": true,
+      "settlement_state_persistence_ok": true
+    }
+  }
+}
+EOF_ENV_ROADMAP
+
+echo "[phase5-settlement-layer-handoff-check] canonical env-var requirement toggle path"
+PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_REQUIRE_SETTLEMENT_ACCEPTANCE_OK=0 \
+"$SCRIPT_UNDER_TEST" \
+  --phase5-run-summary-json "$PASS_RUN" \
+  --roadmap-summary-json "$ENV_ROADMAP" \
+  --summary-json "$ENV_CANONICAL_OUTPUT" \
+  --show-json 0 >"$ENV_CANONICAL_LOG" 2>&1
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.requirements.settlement_acceptance_ok == false
+  and .handoff.settlement_acceptance_ok == false
+  and .handoff.settlement_acceptance_status == "fail"
+' "$ENV_CANONICAL_OUTPUT" >/dev/null; then
+  echo "canonical-env summary mismatch"
+  cat "$ENV_CANONICAL_OUTPUT"
+  cat "$ENV_CANONICAL_LOG"
+  exit 1
+fi
+
+echo "[phase5-settlement-layer-handoff-check] legacy env-var compatibility path"
+PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_REQUIRE_SETTLEMENT_ACCEPTANCE_OK= \
+PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_REQUIRE_WINDOWS_ROLE_RUNBOOKS_OK=0 \
+"$SCRIPT_UNDER_TEST" \
+  --phase5-run-summary-json "$PASS_RUN" \
+  --roadmap-summary-json "$ENV_ROADMAP" \
+  --summary-json "$ENV_LEGACY_OUTPUT" \
+  --show-json 0 >"$ENV_LEGACY_LOG" 2>&1
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.requirements.settlement_acceptance_ok == false
+  and .handoff.settlement_acceptance_ok == false
+  and .handoff.settlement_acceptance_status == "fail"
+' "$ENV_LEGACY_OUTPUT" >/dev/null; then
+  echo "legacy-env summary mismatch"
+  cat "$ENV_LEGACY_OUTPUT"
+  cat "$ENV_LEGACY_LOG"
   exit 1
 fi
 

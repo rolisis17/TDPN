@@ -132,4 +132,4 @@ This workspace defines the initial module boundaries for TDPN's VPN-compatible b
 - `vpnslashing`: `SubmitEvidence` and `ApplyPenalty` execute as stateful operations with evidence-confirmation advancement.
 - `vpnsponsor`: `CreateAuthorization` and `DelegateSessionCredit` execute as stateful operations with authorization checks.
 - Replay safety is idempotent by operation key for each module; identical replays are accepted while conflicting duplicate payloads are rejected.
-- Storage remains an in-memory placeholder; Cosmos SDK KV store integration is still pending.
+- Storage posture: in-memory default for lightweight/local runs, optional file-backed state-dir stores for persistence, and a keeper KV-adapter seam for Cosmos SDK KV integration.

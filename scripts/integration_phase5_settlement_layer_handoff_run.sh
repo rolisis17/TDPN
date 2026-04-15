@@ -23,6 +23,7 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 CAPTURE="$TMP_DIR/capture.tsv"
 PASS_STDOUT="$TMP_DIR/pass.stdout"
 DRY_STDOUT="$TMP_DIR/dry.stdout"
+ENV_DRY_STDOUT="$TMP_DIR/env_dry.stdout"
 FAIL_STDOUT="$TMP_DIR/fail.stdout"
 RUN_CONTRACT_FAIL_STDOUT="$TMP_DIR/run_contract_fail.stdout"
 HANDOFF_CONTRACT_FAIL_STDOUT="$TMP_DIR/handoff_contract_fail.stdout"
@@ -159,7 +160,21 @@ cat >"$FAKE_HANDOFF" <<'EOF_FAKE_HANDOFF'
 set -euo pipefail
 
 if [[ "${1:-}" == "--help" ]]; then
-  cat <<'EOF_HELP'
+  help_mode="${FAKE_HANDOFF_HELP_MODE:-canonical}"
+  if [[ "$help_mode" == "legacy" ]]; then
+    cat <<'EOF_HELP_LEGACY'
+Usage:
+  fake_phase5_settlement_layer_handoff_check.sh [flags]
+
+Flags:
+  --require-run-pipeline-ok [0|1]
+  --require-windows-server-packaging-ok [0|1]
+  --require-windows-role-runbooks-ok [0|1]
+  --require-cross-platform-interop-ok [0|1]
+  --require-role-combination-validation-ok [0|1]
+EOF_HELP_LEGACY
+  else
+    cat <<'EOF_HELP'
 Usage:
   fake_phase5_settlement_layer_handoff_check.sh [flags]
 
@@ -170,6 +185,7 @@ Flags:
   --require-settlement-bridge-smoke-ok [0|1]
   --require-settlement-state-persistence-ok [0|1]
 EOF_HELP
+  fi
   exit 0
 fi
 
@@ -338,6 +354,52 @@ if ! jq -e '
 ' "$DRY_WRAPPER_SUMMARY" >/dev/null; then
   echo "dry-run wrapper summary mismatch"
   cat "$DRY_WRAPPER_SUMMARY"
+  exit 1
+fi
+
+echo "[phase5-settlement-layer-handoff-run] env dry-run + legacy requirement compatibility"
+: >"$CAPTURE"
+ENV_DRY_WRAPPER_SUMMARY="$TMP_DIR/env_dry_wrapper.json"
+PHASE5_HANDOFF_RUN_CAPTURE_FILE="$CAPTURE" \
+PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_RUN_SCRIPT="$FAKE_RUN" \
+PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_HANDOFF_CHECK_SCRIPT="$FAKE_HANDOFF" \
+PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_DRY_RUN=1 \
+FAKE_HANDOFF_HELP_MODE=legacy \
+bash "$RUNNER" \
+  --reports-dir "$TMP_DIR/reports_env_dry" \
+  --run-summary-json "$TMP_DIR/env_dry_run_summary.json" \
+  --handoff-summary-json "$TMP_DIR/env_dry_handoff_summary.json" \
+  --summary-json "$ENV_DRY_WRAPPER_SUMMARY" \
+  --print-summary-json 0 \
+  --handoff-require-settlement-bridge-smoke-ok 1 \
+  --handoff-require-windows-role-runbooks-ok 1 >"$ENV_DRY_STDOUT" 2>&1
+
+run_line="$(grep '^run	' "$CAPTURE" | tail -n 1 || true)"
+handoff_line="$(grep '^handoff	' "$CAPTURE" | tail -n 1 || true)"
+if [[ "$run_line" != *"--dry-run 1"* ]]; then
+  echo "env dry-run should forward --dry-run 1 to run stage"
+  echo "$run_line"
+  exit 1
+fi
+if [[ "$handoff_line" != *"--require-run-pipeline-ok 0"* || "$handoff_line" != *"--require-windows-server-packaging-ok 0"* || "$handoff_line" != *"--require-windows-role-runbooks-ok 1"* || "$handoff_line" != *"--require-cross-platform-interop-ok 1"* || "$handoff_line" != *"--require-role-combination-validation-ok 0"* ]]; then
+  echo "env dry-run legacy handoff requirement forwarding mismatch"
+  echo "$handoff_line"
+  exit 1
+fi
+if [[ "$handoff_line" == *"--require-settlement-failsoft-ok"* || "$handoff_line" == *"--require-settlement-acceptance-ok"* || "$handoff_line" == *"--require-settlement-bridge-smoke-ok"* || "$handoff_line" == *"--require-settlement-state-persistence-ok"* ]]; then
+  echo "canonical handoff requirement flags leaked for legacy checker help mode"
+  echo "$handoff_line"
+  exit 1
+fi
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.dry_run == true
+  and .steps.phase5_settlement_layer_run.contract_valid == true
+  and .steps.phase5_settlement_layer_handoff_check.contract_valid == true
+' "$ENV_DRY_WRAPPER_SUMMARY" >/dev/null; then
+  echo "env dry-run wrapper summary mismatch"
+  cat "$ENV_DRY_WRAPPER_SUMMARY"
   exit 1
 fi
 

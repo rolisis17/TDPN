@@ -113,18 +113,82 @@ array_has_arg() {
   return 1
 }
 
+handoff_requirement_flag_to_canonical() {
+  local flag="$1"
+  case "$flag" in
+    --require-windows-server-packaging-ok)
+      printf '%s' "--require-settlement-failsoft-ok"
+      ;;
+    --require-windows-role-runbooks-ok)
+      printf '%s' "--require-settlement-acceptance-ok"
+      ;;
+    --require-cross-platform-interop-ok)
+      printf '%s' "--require-settlement-bridge-smoke-ok"
+      ;;
+    --require-role-combination-validation-ok)
+      printf '%s' "--require-settlement-state-persistence-ok"
+      ;;
+    *)
+      printf '%s' "$flag"
+      ;;
+  esac
+}
+
+handoff_requirement_flag_to_legacy() {
+  local flag="$1"
+  case "$flag" in
+    --require-settlement-failsoft-ok)
+      printf '%s' "--require-windows-server-packaging-ok"
+      ;;
+    --require-settlement-acceptance-ok)
+      printf '%s' "--require-windows-role-runbooks-ok"
+      ;;
+    --require-settlement-bridge-smoke-ok)
+      printf '%s' "--require-cross-platform-interop-ok"
+      ;;
+    --require-settlement-state-persistence-ok)
+      printf '%s' "--require-role-combination-validation-ok"
+      ;;
+    *)
+      printf '%s' "$flag"
+      ;;
+  esac
+}
+
 handoff_requirement_arg_present() {
   local canonical="$1"
   local legacy="$2"
+  local arg normalized
   shift 2
-  local args=("$@")
-  if array_has_arg "$canonical" "${args[@]}"; then
-    return 0
-  fi
-  if array_has_arg "$legacy" "${args[@]}"; then
-    return 0
-  fi
+  for arg in "$@"; do
+    normalized="$(handoff_requirement_flag_to_canonical "$arg")"
+    if [[ "$normalized" == "$canonical" || "$normalized" == "$legacy" ]]; then
+      return 0
+    fi
+  done
   return 1
+}
+
+adapt_handoff_requirement_flags_for_script() {
+  local supports_canonical="$1"
+  local token canonical
+  local out=()
+  shift
+  for token in "$@"; do
+    if [[ "$token" == --require-* ]]; then
+      if [[ "$supports_canonical" == "1" ]]; then
+        out+=("$token")
+      else
+        canonical="$(handoff_requirement_flag_to_canonical "$token")"
+        out+=("$(handoff_requirement_flag_to_legacy "$canonical")")
+      fi
+    else
+      out+=("$token")
+    fi
+  done
+  if ((${#out[@]} > 0)); then
+    printf '%s\n' "${out[@]}"
+  fi
 }
 
 handoff_supports_settlement_requirement_flags() {
@@ -355,6 +419,14 @@ if [[ "$run_phase5_settlement_layer_handoff_check" == "1" && ! -x "$handoff_chec
   exit 2
 fi
 
+supports_settlement_flags="1"
+if [[ "$run_phase5_settlement_layer_handoff_check" == "1" ]]; then
+  supports_settlement_flags="0"
+  if handoff_supports_settlement_requirement_flags; then
+    supports_settlement_flags="1"
+  fi
+fi
+
 run_stamp="$(date -u +%Y%m%d_%H%M%S)"
 if [[ -z "$reports_dir" ]]; then
   reports_dir="$ROOT_DIR/.easy-node-logs/phase5_settlement_layer_handoff_run_${run_stamp}"
@@ -449,16 +521,15 @@ if [[ -n "$run_roadmap_summary_json" ]] && ! array_has_arg "--roadmap-summary-js
   handoff_cmd+=(--roadmap-summary-json "$run_roadmap_summary_json")
 fi
 if ((${#handoff_passthrough_args[@]} > 0)); then
-  handoff_cmd+=("${handoff_passthrough_args[@]}")
+  mapfile -t adapted_handoff_passthrough_args < <(adapt_handoff_requirement_flags_for_script "$supports_settlement_flags" "${handoff_passthrough_args[@]}")
+  if ((${#adapted_handoff_passthrough_args[@]} > 0)); then
+    handoff_cmd+=("${adapted_handoff_passthrough_args[@]}")
+  fi
 fi
 if ! array_has_arg "--show-json" "${handoff_cmd[@]:1}"; then
   handoff_cmd+=(--show-json 0)
 fi
 if [[ "$dry_run" == "1" ]]; then
-  supports_settlement_flags="0"
-  if handoff_supports_settlement_requirement_flags; then
-    supports_settlement_flags="1"
-  fi
   if ! array_has_arg "--require-run-pipeline-ok" "${handoff_cmd[@]:1}"; then
     handoff_cmd+=(--require-run-pipeline-ok 0)
   fi

@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -90,6 +91,27 @@ type cosmosSignedTx struct {
 type cosmosBroadcastRequest struct {
 	Mode string         `json:"mode"`
 	Tx   cosmosSignedTx `json:"tx"`
+}
+
+type cosmosHTTPStatusError struct {
+	message    string
+	statusCode int
+}
+
+func (e *cosmosHTTPStatusError) Error() string {
+	return e.message
+}
+
+type cosmosRetryableError struct {
+	cause error
+}
+
+func (e *cosmosRetryableError) Error() string {
+	return e.cause.Error()
+}
+
+func (e *cosmosRetryableError) Unwrap() error {
+	return e.cause
 }
 
 func NewCosmosAdapter(cfg CosmosAdapterConfig) (*CosmosAdapter, error) {
@@ -278,7 +300,7 @@ func (a *CosmosAdapter) submitWithRetry(ctx context.Context, op cosmosQueuedOper
 		} else {
 			lastErr = err
 		}
-		if i == a.maxRetries {
+		if i == a.maxRetries || !cosmosSubmitErrorRetryable(lastErr) {
 			break
 		}
 		timer := time.NewTimer(backoff)
@@ -312,11 +334,17 @@ func (a *CosmosAdapter) submit(ctx context.Context, op cosmosQueuedOperation) er
 	}
 	resp, err := a.client.Do(req)
 	if err != nil {
-		return err
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return &cosmosRetryableError{cause: err}
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("cosmos submit %s status %d", op.path, resp.StatusCode)
+		return &cosmosHTTPStatusError{
+			message:    fmt.Sprintf("cosmos submit %s status %d", op.path, resp.StatusCode),
+			statusCode: resp.StatusCode,
+		}
 	}
 	return nil
 }
@@ -355,7 +383,10 @@ func (s *cosmosHTTPSignedTxSubmitter) Submit(ctx context.Context, op cosmosQueue
 	}
 	resp, err := s.client.Do(req)
 	if err != nil {
-		return err
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return &cosmosRetryableError{cause: err}
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -363,11 +394,38 @@ func (s *cosmosHTTPSignedTxSubmitter) Submit(ctx context.Context, op cosmosQueue
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, maxBody))
 		trimmed := strings.TrimSpace(string(b))
 		if trimmed == "" {
-			return fmt.Errorf("cosmos signed-tx submit %s status %d", s.broadcastPath, resp.StatusCode)
+			return &cosmosHTTPStatusError{
+				message:    fmt.Sprintf("cosmos signed-tx submit %s status %d", s.broadcastPath, resp.StatusCode),
+				statusCode: resp.StatusCode,
+			}
 		}
-		return fmt.Errorf("cosmos signed-tx submit %s status %d: %s", s.broadcastPath, resp.StatusCode, trimmed)
+		return &cosmosHTTPStatusError{
+			message:    fmt.Sprintf("cosmos signed-tx submit %s status %d: %s", s.broadcastPath, resp.StatusCode, trimmed),
+			statusCode: resp.StatusCode,
+		}
 	}
 	return nil
+}
+
+func cosmosSubmitErrorRetryable(err error) bool {
+	if err == nil {
+		return false
+	}
+	var retryableErr *cosmosRetryableError
+	if errors.As(err, &retryableErr) {
+		return true
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var statusErr *cosmosHTTPStatusError
+	if errors.As(err, &statusErr) {
+		return statusErr.statusCode == http.StatusRequestTimeout ||
+			statusErr.statusCode == http.StatusTooEarly ||
+			statusErr.statusCode == http.StatusTooManyRequests ||
+			statusErr.statusCode >= http.StatusInternalServerError
+	}
+	return false
 }
 
 func (s *cosmosHTTPSignedTxSubmitter) sign(tx cosmosSignedTx) string {

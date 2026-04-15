@@ -91,7 +91,7 @@ json_text_or_empty() {
     printf '%s' ""
     return
   fi
-  jq -r "$expr // empty" "$path" 2>/dev/null || true
+  jq -r "($expr) | if . == null then empty else . end" "$path" 2>/dev/null || true
 }
 
 normalize_boolish_or_empty() {

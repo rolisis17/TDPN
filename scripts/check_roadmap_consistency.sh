@@ -185,6 +185,22 @@ if ! rg -Fq "integration_cosmos_tdpnd_state_dir_persistence.sh" "$chain_readme";
   echo "chain README must document state-dir persistence integration coverage"
   exit 1
 fi
+if rg -Fq "Storage remains an in-memory placeholder; Cosmos SDK KV store integration is still pending." "$chain_readme"; then
+  echo "chain README contains stale in-memory-placeholder storage wording"
+  exit 1
+fi
+if ! rg -Fq "in-memory default for lightweight/local runs" "$chain_readme"; then
+  echo "chain README must document in-memory default storage posture"
+  exit 1
+fi
+if ! rg -Fq "optional file-backed state-dir stores for persistence" "$chain_readme"; then
+  echo "chain README must document file-backed state-dir storage posture"
+  exit 1
+fi
+if ! rg -Fq "keeper KV-adapter seam for Cosmos SDK KV integration" "$chain_readme"; then
+  echo "chain README must document keeper KV-adapter seam posture"
+  exit 1
+fi
 
 if ! rg -Fq "GET /x/vpnbilling/reservations[/{reservation_id}]" "$settlement_mapping_doc"; then
   echo "settlement bridge mapping must document list/by-id GET query mapping"

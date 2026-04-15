@@ -22,6 +22,7 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 
 CAPTURE="$TMP_DIR/stage_capture.tsv"
 DRY_RUN_LOG="$TMP_DIR/dry_run.log"
+ENV_DRY_RUN_LOG="$TMP_DIR/env_dry_run.log"
 CI_FAIL_LOG="$TMP_DIR/ci_fail.log"
 CONTRACT_FAIL_LOG="$TMP_DIR/contract_fail.log"
 
@@ -97,7 +98,18 @@ cat >"$FAKE_CHECK" <<'EOF_FAKE_CHECK'
 set -euo pipefail
 
 if [[ "${1:-}" == "--help" ]]; then
-  cat <<'EOF_HELP'
+  help_mode="${FAKE_CHECK_HELP_MODE:-canonical}"
+  if [[ "$help_mode" == "legacy" ]]; then
+    cat <<'EOF_HELP_LEGACY'
+Usage:
+  fake check
+    [--require-windows-server-packaging-ok [0|1]]
+    [--require-windows-role-runbooks-ok [0|1]]
+    [--require-cross-platform-interop-ok [0|1]]
+    [--require-role-combination-validation-ok [0|1]]
+EOF_HELP_LEGACY
+  else
+    cat <<'EOF_HELP'
 Usage:
   fake check
     [--require-settlement-failsoft-ok [0|1]]
@@ -105,6 +117,7 @@ Usage:
     [--require-settlement-bridge-smoke-ok [0|1]]
     [--require-settlement-state-persistence-ok [0|1]]
 EOF_HELP
+  fi
   exit 0
 fi
 
@@ -190,6 +203,7 @@ EOF_FAKE_CHECK
 chmod +x "$FAKE_CHECK"
 
 DRY_RUN_RUN_SUMMARY="$TMP_DIR/run_dry.json"
+ENV_DRY_RUN_RUN_SUMMARY="$TMP_DIR/run_env_dry.json"
 CI_FAIL_RUN_SUMMARY="$TMP_DIR/run_ci_fail.json"
 CONTRACT_FAIL_RUN_SUMMARY="$TMP_DIR/run_contract_fail.json"
 
@@ -288,6 +302,57 @@ if ! jq -e '
 ' "$DRY_RUN_RUN_SUMMARY" >/dev/null; then
   echo "dry-run combined summary contract mismatch"
   cat "$DRY_RUN_RUN_SUMMARY"
+  exit 1
+fi
+
+echo "[phase5-settlement-layer-run] env dry-run + legacy checker requirement compatibility"
+: >"$CAPTURE"
+PHASE5_SETTLEMENT_LAYER_RUN_CAPTURE_FILE="$CAPTURE" \
+PHASE5_SETTLEMENT_LAYER_RUN_CI_SCRIPT="$FAKE_CI" \
+PHASE5_SETTLEMENT_LAYER_RUN_CHECK_SCRIPT="$FAKE_CHECK" \
+PHASE5_SETTLEMENT_LAYER_RUN_DRY_RUN=1 \
+FAKE_CHECK_HELP_MODE=legacy \
+bash "$RUNNER" \
+  --reports-dir "$TMP_DIR/reports_env_dry" \
+  --ci-summary-json "$TMP_DIR/ci_env_dry_summary.json" \
+  --check-summary-json "$TMP_DIR/check_env_dry_summary.json" \
+  --summary-json "$ENV_DRY_RUN_RUN_SUMMARY" \
+  --print-summary-json 0 \
+  --check-require-settlement-acceptance-ok 1 \
+  --check-require-windows-server-packaging-ok 1 >"$ENV_DRY_RUN_LOG" 2>&1
+
+ci_line="$(grep '^ci	' "$CAPTURE" | tail -n 1 || true)"
+check_line="$(grep '^check	' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$ci_line" || -z "$check_line" ]]; then
+  echo "expected both stages to run in env dry-run path"
+  cat "$CAPTURE"
+  cat "$ENV_DRY_RUN_LOG"
+  exit 1
+fi
+if [[ "$ci_line" != *"--dry-run 1"* ]]; then
+  echo "env dry-run did not forward --dry-run 1 to ci stage"
+  echo "$ci_line"
+  exit 1
+fi
+if [[ "$check_line" != *"--require-windows-server-packaging-ok 1"* || "$check_line" != *"--require-windows-role-runbooks-ok 1"* || "$check_line" != *"--require-cross-platform-interop-ok 0"* || "$check_line" != *"--require-role-combination-validation-ok 0"* ]]; then
+  echo "env dry-run legacy checker requirement forwarding mismatch"
+  echo "$check_line"
+  exit 1
+fi
+if [[ "$check_line" == *"--require-settlement-failsoft-ok"* || "$check_line" == *"--require-settlement-acceptance-ok"* || "$check_line" == *"--require-settlement-bridge-smoke-ok"* || "$check_line" == *"--require-settlement-state-persistence-ok"* ]]; then
+  echo "canonical checker requirement flags leaked for legacy checker help mode"
+  echo "$check_line"
+  exit 1
+fi
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.dry_run == true
+  and .steps.ci_phase5_settlement_layer.contract_valid == true
+  and .steps.phase5_settlement_layer_check.contract_valid == true
+' "$ENV_DRY_RUN_RUN_SUMMARY" >/dev/null; then
+  echo "env dry-run combined summary contract mismatch"
+  cat "$ENV_DRY_RUN_RUN_SUMMARY"
   exit 1
 fi
 

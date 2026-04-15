@@ -28,12 +28,16 @@ MISSING_SUMMARY="$TMP_DIR/ci_phase5_missing.json"
 PASS_OUTPUT="$TMP_DIR/pass_output.json"
 FAIL_OUTPUT="$TMP_DIR/fail_output.json"
 RELAXED_OUTPUT="$TMP_DIR/relaxed_output.json"
+ENV_CANONICAL_OUTPUT="$TMP_DIR/env_canonical_output.json"
+ENV_LEGACY_OUTPUT="$TMP_DIR/env_legacy_output.json"
 LEGACY_ALIAS_OUTPUT="$TMP_DIR/legacy_alias_output.json"
 MISSING_OUTPUT="$TMP_DIR/missing_output.json"
 
 PASS_LOG="$TMP_DIR/pass.log"
 FAIL_LOG="$TMP_DIR/fail.log"
 RELAXED_LOG="$TMP_DIR/relaxed.log"
+ENV_CANONICAL_LOG="$TMP_DIR/env_canonical.log"
+ENV_LEGACY_LOG="$TMP_DIR/env_legacy.log"
 LEGACY_ALIAS_LOG="$TMP_DIR/legacy_alias.log"
 MISSING_LOG="$TMP_DIR/missing.log"
 
@@ -188,6 +192,47 @@ if ! jq -e '
   echo "relaxed-policy summary mismatch"
   cat "$RELAXED_OUTPUT"
   cat "$RELAXED_LOG"
+  exit 1
+fi
+
+echo "[phase5-settlement-layer-check] canonical env-var requirement toggle path"
+PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_SETTLEMENT_ACCEPTANCE_OK=0 \
+"$SCRIPT_UNDER_TEST" \
+  --ci-phase5-summary-json "$RELAXED_SUMMARY" \
+  --summary-json "$ENV_CANONICAL_OUTPUT" \
+  --show-json 0 >"$ENV_CANONICAL_LOG" 2>&1
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .policy.require_settlement_acceptance_ok == false
+  and .signals.settlement_acceptance_ok == false
+  and .stages.settlement_acceptance.status == "fail"
+' "$ENV_CANONICAL_OUTPUT" >/dev/null; then
+  echo "canonical-env policy summary mismatch"
+  cat "$ENV_CANONICAL_OUTPUT"
+  cat "$ENV_CANONICAL_LOG"
+  exit 1
+fi
+
+echo "[phase5-settlement-layer-check] legacy env-var compatibility path"
+PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_SETTLEMENT_ACCEPTANCE_OK= \
+PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_WINDOWS_ROLE_RUNBOOKS_OK=0 \
+"$SCRIPT_UNDER_TEST" \
+  --ci-phase5-summary-json "$RELAXED_SUMMARY" \
+  --summary-json "$ENV_LEGACY_OUTPUT" \
+  --show-json 0 >"$ENV_LEGACY_LOG" 2>&1
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .policy.require_settlement_acceptance_ok == false
+  and .signals.settlement_acceptance_ok == false
+  and .stages.settlement_acceptance.status == "fail"
+' "$ENV_LEGACY_OUTPUT" >/dev/null; then
+  echo "legacy-env policy summary mismatch"
+  cat "$ENV_LEGACY_OUTPUT"
+  cat "$ENV_LEGACY_LOG"
   exit 1
 fi
 

@@ -110,6 +110,123 @@ func TestCosmosAdapterRetriesTransientFailure(t *testing.T) {
 	}
 }
 
+func TestCosmosAdapterDoesNotRetryNonRetryable4xx(t *testing.T) {
+	var attempts int32
+	firstAttemptCh := make(chan struct{}, 1)
+	secondAttemptCh := make(chan struct{}, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&attempts, 1)
+		if n == 1 {
+			select {
+			case firstAttemptCh <- struct{}{}:
+			default:
+			}
+		}
+		if n == 2 {
+			select {
+			case secondAttemptCh <- struct{}{}:
+			default:
+			}
+		}
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer srv.Close()
+
+	adapter, err := NewCosmosAdapter(CosmosAdapterConfig{
+		Endpoint:    srv.URL,
+		QueueSize:   8,
+		MaxRetries:  3,
+		BaseBackoff: 5 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("NewCosmosAdapter: %v", err)
+	}
+	defer adapter.Close()
+
+	if _, err := adapter.SubmitRewardIssue(context.Background(), RewardIssue{
+		RewardID:          "rew-4xx-1",
+		ProviderSubjectID: "provider-1",
+		SessionID:         "sess-1",
+		RewardMicros:      100,
+	}); err != nil {
+		t.Fatalf("SubmitRewardIssue: %v", err)
+	}
+
+	select {
+	case <-firstAttemptCh:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for first attempt")
+	}
+
+	select {
+	case <-secondAttemptCh:
+		t.Fatalf("unexpected retry for non-retryable 4xx response")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	if got := atomic.LoadInt32(&attempts); got != 1 {
+		t.Fatalf("expected exactly one attempt, got %d", got)
+	}
+}
+
+func TestCosmosAdapterRetries429And503(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		statusCode int
+	}{
+		{name: "too_many_requests", statusCode: http.StatusTooManyRequests},
+		{name: "service_unavailable", statusCode: http.StatusServiceUnavailable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var attempts int32
+			doneCh := make(chan struct{}, 1)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				n := atomic.AddInt32(&attempts, 1)
+				if n == 1 {
+					w.WriteHeader(tc.statusCode)
+					return
+				}
+				w.WriteHeader(http.StatusOK)
+				select {
+				case doneCh <- struct{}{}:
+				default:
+				}
+			}))
+			defer srv.Close()
+
+			adapter, err := NewCosmosAdapter(CosmosAdapterConfig{
+				Endpoint:    srv.URL,
+				QueueSize:   8,
+				MaxRetries:  2,
+				BaseBackoff: 5 * time.Millisecond,
+			})
+			if err != nil {
+				t.Fatalf("NewCosmosAdapter: %v", err)
+			}
+			defer adapter.Close()
+
+			if _, err := adapter.SubmitSponsorReservation(context.Background(), SponsorCreditReservation{
+				ReservationID: "res-1",
+				SponsorID:     "sp-1",
+				SessionID:     "sess-1",
+				AmountMicros:  100,
+				Currency:      "USD",
+			}); err != nil {
+				t.Fatalf("SubmitSponsorReservation: %v", err)
+			}
+
+			select {
+			case <-doneCh:
+			case <-time.After(2 * time.Second):
+				t.Fatalf("timed out waiting for retry success")
+			}
+			if got := atomic.LoadInt32(&attempts); got < 2 {
+				t.Fatalf("expected at least two attempts, got %d", got)
+			}
+		})
+	}
+}
+
 func TestCosmosAdapterSignedTxModeSubmitsBroadcast(t *testing.T) {
 	type seenRequest struct {
 		path string
