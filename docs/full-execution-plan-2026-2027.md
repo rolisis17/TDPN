@@ -84,6 +84,7 @@ Exit gate:
 - Phase 6 readiness wrappers are available via `scripts/phase6_cosmos_l1_build_testnet_check.sh` and `scripts/phase6_cosmos_l1_build_testnet_run.sh`, each with integration contracts.
 - Phase 6 handoff wrappers are available via `scripts/phase6_cosmos_l1_build_testnet_handoff_check.sh` and `scripts/phase6_cosmos_l1_build_testnet_handoff_run.sh`, each with integration contracts.
 - Phase 6 readiness/handoff checker surfaces include `tdpnd_grpc_auth_live_smoke_ok` in addition to existing `tdpnd_grpc_runtime_smoke_ok` and `tdpnd_grpc_live_smoke_ok` signals.
+- Phase 6 run/handoff-run dry-run relaxation also covers `tdpnd_grpc_auth_live_smoke_ok` by default unless explicitly required by wrapper inputs.
 - Settlement confirmation lifecycle posture is canonicalized as `pending` -> `submitted` -> `confirmed` with explicit `failed` records retained for replay/reconciliation.
 
 ## Non-Negotiables

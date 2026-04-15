@@ -80,7 +80,8 @@ cat >"$check_summary" <<'EOF_CHECK'
     "query_surface_ok": true,
     "grpc_app_roundtrip_ok": true,
     "tdpnd_grpc_runtime_smoke_ok": true,
-    "tdpnd_grpc_live_smoke_ok": true
+    "tdpnd_grpc_live_smoke_ok": true,
+    "tdpnd_grpc_auth_live_smoke_ok": true
   }
 }
 EOF_CHECK
@@ -98,7 +99,8 @@ cat >"$roadmap_summary" <<'EOF_ROADMAP'
       "query_surface_ok": true,
       "grpc_app_roundtrip_ok": true,
       "tdpnd_grpc_runtime_smoke_ok": true,
-      "tdpnd_grpc_live_smoke_ok": true
+      "tdpnd_grpc_live_smoke_ok": true,
+      "tdpnd_grpc_auth_live_smoke_ok": true
     }
   }
 }
@@ -198,7 +200,8 @@ if [[ -n "$summary_json" && "${FAKE_HANDOFF_OMIT_SUMMARY:-0}" != "1" ]]; then
     "query_surface_ok": true,
     "grpc_app_roundtrip_ok": true,
     "tdpnd_grpc_runtime_smoke_ok": true,
-    "tdpnd_grpc_live_smoke_ok": true
+    "tdpnd_grpc_live_smoke_ok": true,
+    "tdpnd_grpc_auth_live_smoke_ok": true
   },
   "decision": {
     "pass": true,
@@ -299,7 +302,7 @@ if [[ "$run_line" != *"--dry-run 1"* || "$run_line" != *"--theta 9"* ]]; then
   echo "$run_line"
   exit 1
 fi
-if [[ "$handoff_line" != *"--require-run-pipeline-ok 0"* || "$handoff_line" != *"--require-chain-scaffold-ok 0"* || "$handoff_line" != *"--require-proto-surface-ok 1"* || "$handoff_line" != *"--require-proto-codegen-surface-ok 0"* || "$handoff_line" != *"--require-query-surface-ok 0"* || "$handoff_line" != *"--require-grpc-app-roundtrip-ok 0"* || "$handoff_line" != *"--require-tdpnd-grpc-runtime-smoke-ok 0"* || "$handoff_line" != *"--require-tdpnd-grpc-live-smoke-ok 0"* ]]; then
+if [[ "$handoff_line" != *"--require-run-pipeline-ok 0"* || "$handoff_line" != *"--require-chain-scaffold-ok 0"* || "$handoff_line" != *"--require-proto-surface-ok 1"* || "$handoff_line" != *"--require-proto-codegen-surface-ok 0"* || "$handoff_line" != *"--require-query-surface-ok 0"* || "$handoff_line" != *"--require-grpc-app-roundtrip-ok 0"* || "$handoff_line" != *"--require-tdpnd-grpc-runtime-smoke-ok 0"* || "$handoff_line" != *"--require-tdpnd-grpc-live-smoke-ok 0"* || "$handoff_line" != *"--require-tdpnd-grpc-auth-live-smoke-ok 0"* ]]; then
   echo "dry-run handoff relax/override mismatch"
   echo "$handoff_line"
   exit 1

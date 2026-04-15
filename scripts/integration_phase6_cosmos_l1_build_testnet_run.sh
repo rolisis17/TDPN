@@ -247,7 +247,7 @@ if [[ "$check_line" != *"--require-chain-scaffold-ok 1"* ]]; then
   echo "$check_line"
   exit 1
 fi
-if [[ "$check_line" != *"--require-proto-surface-ok 0"* || "$check_line" != *"--require-proto-codegen-surface-ok 0"* || "$check_line" != *"--require-query-surface-ok 0"* || "$check_line" != *"--require-grpc-app-roundtrip-ok 0"* || "$check_line" != *"--require-tdpnd-grpc-runtime-smoke-ok 0"* || "$check_line" != *"--require-tdpnd-grpc-live-smoke-ok 0"* ]]; then
+if [[ "$check_line" != *"--require-proto-surface-ok 0"* || "$check_line" != *"--require-proto-codegen-surface-ok 0"* || "$check_line" != *"--require-query-surface-ok 0"* || "$check_line" != *"--require-grpc-app-roundtrip-ok 0"* || "$check_line" != *"--require-tdpnd-grpc-runtime-smoke-ok 0"* || "$check_line" != *"--require-tdpnd-grpc-live-smoke-ok 0"* || "$check_line" != *"--require-tdpnd-grpc-auth-live-smoke-ok 0"* ]]; then
   echo "dry-run default requirement relax forwarding mismatch"
   echo "$check_line"
   exit 1
