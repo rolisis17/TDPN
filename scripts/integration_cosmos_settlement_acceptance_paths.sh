@@ -19,6 +19,9 @@ timeout 30s go test ./services/exit -count=1 -run '^(TestSettlementReserveAndFin
 # Shadow env wiring coverage: issuer/exit mirror and fail-open shadow adapter behavior.
 timeout 60s bash ./scripts/integration_cosmos_settlement_shadow_env.sh
 
+# Shadow status surface coverage: issuer/exit status endpoints expose shadow telemetry fields.
+timeout 60s bash ./scripts/integration_cosmos_settlement_shadow_status_surface.sh
+
 # Dual-asset pricing coverage: stable-denominated baseline plus native-token conversion/equivalence.
 timeout 30s go test ./pkg/settlement -count=1 -run '^(TestMemoryServiceQuotePriceCurrencyConversion|TestMemoryServiceSettleSessionCurrencyConversion|TestMemoryServiceDualAssetSessionEntitlementEquivalence)$'
 timeout 30s go test ./services/issuer -count=1 -run '^(TestNewSettlementServiceFromEnvCurrencyBaseFromEnv|TestNewSettlementServiceFromEnvDualNativeCurrencyConversion)$'

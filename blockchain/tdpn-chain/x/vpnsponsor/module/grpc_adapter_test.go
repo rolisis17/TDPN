@@ -2,6 +2,7 @@ package module
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	sponsorpb "github.com/tdpn/tdpn-chain/proto/gen/go/tdpn/vpnsponsor/v1"
@@ -185,5 +186,70 @@ func TestGRPCQueryServerAdapterFoundAndList(t *testing.T) {
 	}
 	if listDelegationsResp.GetDelegations()[0].GetReservationId() != "res-1" {
 		t.Fatalf("expected listed reservation_id res-1, got %q", listDelegationsResp.GetDelegations()[0].GetReservationId())
+	}
+}
+
+func TestGRPCAdaptersNilKeeperPropagatesErrNilKeeper(t *testing.T) {
+	t.Parallel()
+
+	var k *keeper.Keeper
+	msgAdapter := NewGRPCMsgServerAdapter(k)
+	queryAdapter := NewGRPCQueryServerAdapter(k)
+
+	_, msgErr := msgAdapter.CreateAuthorization(context.Background(), &sponsorpb.MsgCreateAuthorizationRequest{
+		Authorization: &sponsorpb.SponsorAuthorization{
+			AuthorizationId: "auth-nil",
+			SponsorId:       "sponsor-nil",
+			AppId:           "app-nil",
+			MaxCredits:      1,
+		},
+	})
+	if !errors.Is(msgErr, ErrNilKeeper) {
+		t.Fatalf("expected ErrNilKeeper from msg adapter, got %v", msgErr)
+	}
+
+	_, queryErr := queryAdapter.ListSponsorAuthorizations(context.Background(), &sponsorpb.QueryListSponsorAuthorizationsRequest{})
+	if !errors.Is(queryErr, ErrNilKeeper) {
+		t.Fatalf("expected ErrNilKeeper from query adapter, got %v", queryErr)
+	}
+}
+
+func TestGRPCAdaptersNilRequestsAreFailSafe(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	msgAdapter := NewGRPCMsgServerAdapter(&k)
+	queryAdapter := NewGRPCQueryServerAdapter(&k)
+
+	_, createErr := msgAdapter.CreateAuthorization(context.Background(), nil)
+	if !errors.Is(createErr, ErrInvalidAuthorization) {
+		t.Fatalf("expected ErrInvalidAuthorization for nil create request, got %v", createErr)
+	}
+
+	_, delegateErr := msgAdapter.DelegateSessionCredit(context.Background(), nil)
+	if !errors.Is(delegateErr, ErrInvalidDelegation) {
+		t.Fatalf("expected ErrInvalidDelegation for nil delegate request, got %v", delegateErr)
+	}
+
+	authorizationResp, authorizationErr := queryAdapter.SponsorAuthorization(context.Background(), nil)
+	if authorizationErr != nil {
+		t.Fatalf("expected nil error for nil authorization query request, got %v", authorizationErr)
+	}
+	if authorizationResp.GetFound() {
+		t.Fatal("expected found=false for nil authorization query request")
+	}
+	if authorizationResp.GetAuthorization() != nil {
+		t.Fatal("expected nil authorization when found=false")
+	}
+
+	delegationResp, delegationErr := queryAdapter.DelegatedSessionCredit(context.Background(), nil)
+	if delegationErr != nil {
+		t.Fatalf("expected nil error for nil delegation query request, got %v", delegationErr)
+	}
+	if delegationResp.GetFound() {
+		t.Fatal("expected found=false for nil delegation query request")
+	}
+	if delegationResp.GetDelegation() != nil {
+		t.Fatal("expected nil delegation when found=false")
 	}
 }

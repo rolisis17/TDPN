@@ -15,6 +15,8 @@ blockchain_sponsor_quickstart_doc="docs/blockchain-app-sponsorship-quickstart.md
 protocol_doc="docs/protocol.md"
 phase5_ci_script="scripts/ci_phase5_settlement_layer.sh"
 phase5_integration_script="scripts/integration_ci_phase5_settlement_layer.sh"
+phase6_ci_script="scripts/ci_phase6_cosmos_l1_build_testnet.sh"
+phase6_integration_script="scripts/integration_ci_phase6_cosmos_l1_build_testnet.sh"
 
 check_confirmation_lifecycle_wording() {
   local file_path="$1"
@@ -64,7 +66,7 @@ check_confirmation_interface_wording() {
   fi
 }
 
-for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$chain_readme" "$settlement_mapping_doc" "$blockchain_sponsor_quickstart_doc" "$phase5_ci_script" "$phase5_integration_script"; do
+for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$chain_readme" "$settlement_mapping_doc" "$blockchain_sponsor_quickstart_doc" "$phase5_ci_script" "$phase5_integration_script" "$phase6_ci_script" "$phase6_integration_script"; do
   if [[ ! -f "$f" ]]; then
     echo "missing required file: $f"
     exit 1
@@ -119,6 +121,14 @@ if ! rg -Fq "integration_cosmos_adapter_tdpnd_signed_tx_roundtrip.sh" "$full_pla
   echo "full execution plan must document signed-tx adapter roundtrip integration script"
   exit 1
 fi
+if ! rg -Fq "ci_phase6_cosmos_l1_build_testnet.sh" "$full_plan"; then
+  echo "full execution plan must document phase6 cosmos l1 ci scaffold script"
+  exit 1
+fi
+if ! rg -Fq "integration_ci_phase6_cosmos_l1_build_testnet.sh" "$full_plan"; then
+  echo "full execution plan must document phase6 cosmos l1 ci integration contract script"
+  exit 1
+fi
 if ! rg -qi "confirmation lifecycle" "$full_plan"; then
   echo "full execution plan must document settlement confirmation lifecycle posture"
   exit 1
@@ -126,6 +136,40 @@ fi
 for settlement_state in pending submitted confirmed failed; do
   if ! rg -qw "$settlement_state" "$full_plan"; then
     echo "full execution plan confirmation lifecycle must include state: $settlement_state"
+    exit 1
+  fi
+done
+if ! rg -Fq "ci_phase6_cosmos_l1_build_testnet.sh" "$product_roadmap"; then
+  echo "product roadmap must document phase6 cosmos l1 ci scaffold script"
+  exit 1
+fi
+if ! rg -Fq "integration_ci_phase6_cosmos_l1_build_testnet.sh" "$product_roadmap"; then
+  echo "product roadmap must document phase6 cosmos l1 ci integration contract script"
+  exit 1
+fi
+
+phase6_stage_specs=(
+  "chain_scaffold|integration_cosmos_chain_scaffold.sh"
+  "proto_surface|integration_cosmos_proto_surface.sh"
+  "proto_codegen_surface|integration_cosmos_proto_codegen_surface.sh"
+  "query_surface|integration_cosmos_query_surface.sh"
+  "grpc_app_roundtrip|integration_cosmos_grpc_app_roundtrip.sh"
+  "tdpnd_grpc_runtime_smoke|integration_cosmos_tdpnd_grpc_runtime_smoke.sh"
+  "tdpnd_grpc_live_smoke|integration_cosmos_tdpnd_grpc_live_smoke.sh"
+)
+for stage_spec in "${phase6_stage_specs[@]}"; do
+  stage_id="${stage_spec%%|*}"
+  stage_script="${stage_spec#*|}"
+  if ! rg -Fq "$stage_id" "$phase6_ci_script"; then
+    echo "phase6 ci script must include ${stage_id} stage"
+    exit 1
+  fi
+  if ! rg -Fq "$stage_script" "$phase6_ci_script"; then
+    echo "phase6 ci script must wire ${stage_script}"
+    exit 1
+  fi
+  if ! rg -Fq "$stage_id" "$phase6_integration_script"; then
+    echo "phase6 ci integration script must validate ${stage_id} stage"
     exit 1
   fi
 done
@@ -484,9 +528,23 @@ if ! rg -Fq "settlement_shadow_status_surface" "$phase5_integration_script"; the
   echo "phase5 ci integration script must validate settlement_shadow_status_surface stage"
   exit 1
 fi
-if ! rg -Fq "settlement_adapter_roundtrip" "$product_roadmap"; then
-  echo "product roadmap must document settlement_adapter_roundtrip phase5 stage"
-  exit 1
-fi
+phase5_blockchain_gate_specs=(
+  "settlement_adapter_roundtrip|scripts/integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh"
+  "settlement_adapter_signed_tx_roundtrip|scripts/integration_cosmos_adapter_tdpnd_signed_tx_roundtrip.sh"
+  "settlement_shadow_env|scripts/integration_cosmos_settlement_shadow_env.sh"
+  "settlement_shadow_status_surface|scripts/integration_cosmos_settlement_shadow_status_surface.sh"
+)
+for gate_spec in "${phase5_blockchain_gate_specs[@]}"; do
+  gate_stage="${gate_spec%%|*}"
+  gate_script="${gate_spec#*|}"
+  if ! rg -Fq "$gate_stage" "$product_roadmap"; then
+    echo "product roadmap must document ${gate_stage} phase5 stage"
+    exit 1
+  fi
+  if ! rg -Fq "$gate_script" "$product_roadmap"; then
+    echo "product roadmap must document ${gate_script} phase5 integration script"
+    exit 1
+  fi
+done
 
 echo "roadmap consistency check ok"

@@ -185,7 +185,12 @@ Current implementation posture:
 - `tdpnd` runtime now supports `--state-dir` to switch chain module keepers from in-memory defaults to file-backed stores rooted at one state directory.
 - settlement bridge now exposes module query `GET` endpoints (list + by-id) alongside existing `POST` write endpoints.
 - Cosmos CI/local block now includes `scripts/integration_cosmos_tdpnd_state_dir_persistence.sh` to verify state-dir wiring and persistence across reopen.
-- phase5 settlement CI now includes a `settlement_adapter_roundtrip` stage backed by `scripts/integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh`.
+- phase5 settlement CI now includes these blockchain gate stages and scripts:
+  - `settlement_adapter_roundtrip` -> `scripts/integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh`
+  - `settlement_adapter_signed_tx_roundtrip` -> `scripts/integration_cosmos_adapter_tdpnd_signed_tx_roundtrip.sh`
+  - `settlement_shadow_env` -> `scripts/integration_cosmos_settlement_shadow_env.sh`
+  - `settlement_shadow_status_surface` -> `scripts/integration_cosmos_settlement_shadow_status_surface.sh`
+- phase6 Cosmos L1 build/testnet CI scaffold now runs via `scripts/ci_phase6_cosmos_l1_build_testnet.sh` with contract checks in `scripts/integration_ci_phase6_cosmos_l1_build_testnet.sh`.
 
 Governance posture (hybrid bootstrap):
 - objective machine-verifiable events can be enforced on-chain.
