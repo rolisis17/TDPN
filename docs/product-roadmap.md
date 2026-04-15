@@ -191,6 +191,7 @@ Current implementation posture:
   - `settlement_shadow_env` -> `scripts/integration_cosmos_settlement_shadow_env.sh`
   - `settlement_shadow_status_surface` -> `scripts/integration_cosmos_settlement_shadow_status_surface.sh`
 - phase6 Cosmos L1 build/testnet CI scaffold now runs via `scripts/ci_phase6_cosmos_l1_build_testnet.sh` with contract checks in `scripts/integration_ci_phase6_cosmos_l1_build_testnet.sh`.
+- phase6 build/testnet CI includes `local_testnet_smoke` wired to `scripts/integration_cosmos_local_testnet_smoke.sh` for deterministic local multi-node `tdpnd` lifecycle coverage (`init -> start -> status -> stop -> status`).
 - phase6 build/testnet CI now includes `tdpnd_grpc_auth_live_smoke` wired to `scripts/integration_cosmos_tdpnd_grpc_auth_live_smoke.sh` for auth-token gRPC live-smoke coverage.
 - phase6 Cosmos L1 contracts CI gate now runs via `scripts/ci_phase6_cosmos_l1_contracts.sh` with contract checks in `scripts/integration_ci_phase6_cosmos_l1_contracts.sh`, plus live-smoke coverage in `scripts/integration_phase6_cosmos_l1_contracts_live_smoke.sh`.
 - phase6 Cosmos L1 contracts posture now includes both `cosmos_module_coverage_floor` (`scripts/integration_cosmos_module_coverage_floor.sh`) and `cosmos_keeper_coverage_floor` (`scripts/integration_cosmos_keeper_coverage_floor.sh`) before wrapper handoff/run stages.
@@ -199,6 +200,7 @@ Current implementation posture:
 - phase6 handoff wrappers are available as `scripts/phase6_cosmos_l1_build_testnet_handoff_check.sh` and `scripts/phase6_cosmos_l1_build_testnet_handoff_run.sh` (integration-covered).
 - phase6 readiness/handoff checker surfaces include `tdpnd_grpc_auth_live_smoke_ok` in addition to existing `tdpnd_grpc_runtime_smoke_ok` and `tdpnd_grpc_live_smoke_ok` signals.
 - phase6 run/handoff-run dry-run relaxation also covers `tdpnd_grpc_auth_live_smoke_ok` by default unless explicitly required by wrapper inputs.
+- phase6 operator summary helper `scripts/phase6_cosmos_l1_summary_report.sh` aggregates CI/contracts/suite summary artifacts into compact operator lines plus normalized JSON output, with integration coverage from `scripts/integration_phase6_cosmos_l1_summary_report.sh`.
 
 Governance posture (hybrid bootstrap):
 - objective machine-verifiable events can be enforced on-chain.

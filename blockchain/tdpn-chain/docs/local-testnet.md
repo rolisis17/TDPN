@@ -47,6 +47,7 @@ scripts/testnet_local_stop.sh --dry-run
 
 ## Useful options
 - `testnet_local_init.sh`
+  - `--testnet-dir <path>`
   - `--node-count <n>`
   - `--base-grpc-port <port>`
   - `--base-settlement-port <port>`

@@ -32,6 +32,8 @@ phase6_handoff_check_script="scripts/phase6_cosmos_l1_build_testnet_handoff_chec
 phase6_handoff_run_script="scripts/phase6_cosmos_l1_build_testnet_handoff_run.sh"
 phase6_handoff_check_integration_script="scripts/integration_phase6_cosmos_l1_build_testnet_handoff_check.sh"
 phase6_handoff_run_integration_script="scripts/integration_phase6_cosmos_l1_build_testnet_handoff_run.sh"
+phase6_summary_report_script="scripts/phase6_cosmos_l1_summary_report.sh"
+phase6_summary_report_integration_script="scripts/integration_phase6_cosmos_l1_summary_report.sh"
 
 check_confirmation_lifecycle_wording() {
   local file_path="$1"
@@ -81,7 +83,7 @@ check_confirmation_interface_wording() {
   fi
 }
 
-for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$chain_readme" "$settlement_mapping_doc" "$blockchain_sponsor_quickstart_doc" "$phase5_ci_script" "$phase5_integration_script" "$phase6_ci_script" "$phase6_integration_script" "$phase6_contracts_ci_script" "$phase6_contracts_integration_script" "$phase6_contracts_live_smoke_script" "$phase6_module_coverage_floor_script" "$phase6_keeper_coverage_floor_script" "$phase6_check_script" "$phase6_run_script" "$phase6_check_integration_script" "$phase6_run_integration_script" "$phase6_suite_script" "$phase6_suite_integration_script" "$phase6_handoff_check_script" "$phase6_handoff_run_script" "$phase6_handoff_check_integration_script" "$phase6_handoff_run_integration_script"; do
+for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$chain_readme" "$settlement_mapping_doc" "$blockchain_sponsor_quickstart_doc" "$phase5_ci_script" "$phase5_integration_script" "$phase6_ci_script" "$phase6_integration_script" "$phase6_contracts_ci_script" "$phase6_contracts_integration_script" "$phase6_contracts_live_smoke_script" "$phase6_module_coverage_floor_script" "$phase6_keeper_coverage_floor_script" "$phase6_check_script" "$phase6_run_script" "$phase6_check_integration_script" "$phase6_run_integration_script" "$phase6_suite_script" "$phase6_suite_integration_script" "$phase6_handoff_check_script" "$phase6_handoff_run_script" "$phase6_handoff_check_integration_script" "$phase6_handoff_run_integration_script" "$phase6_summary_report_script" "$phase6_summary_report_integration_script"; do
   if [[ ! -f "$f" ]]; then
     echo "missing required file: $f"
     exit 1
@@ -144,6 +146,14 @@ if ! rg -Fq "integration_ci_phase6_cosmos_l1_build_testnet.sh" "$full_plan"; the
   echo "full execution plan must document phase6 cosmos l1 ci integration contract script"
   exit 1
 fi
+if ! rg -Fq "local_testnet_smoke" "$full_plan"; then
+  echo "full execution plan must document phase6 local_testnet_smoke stage"
+  exit 1
+fi
+if ! rg -Fq "integration_cosmos_local_testnet_smoke.sh" "$full_plan"; then
+  echo "full execution plan must document phase6 local testnet smoke integration script"
+  exit 1
+fi
 if ! rg -Fq "tdpnd_grpc_auth_live_smoke" "$full_plan"; then
   echo "full execution plan must document phase6 tdpnd_grpc_auth_live_smoke stage"
   exit 1
@@ -204,6 +214,14 @@ if ! rg -Fq "phase6_cosmos_l1_build_testnet_handoff_run.sh" "$full_plan"; then
   echo "full execution plan must document phase6 handoff-run wrapper script"
   exit 1
 fi
+if ! rg -Fq "phase6_cosmos_l1_summary_report.sh" "$full_plan"; then
+  echo "full execution plan must document phase6 summary report helper script"
+  exit 1
+fi
+if ! rg -Fq "integration_phase6_cosmos_l1_summary_report.sh" "$full_plan"; then
+  echo "full execution plan must document phase6 summary report integration contract script"
+  exit 1
+fi
 if ! rg -Fq "tdpnd_grpc_auth_live_smoke_ok" "$full_plan"; then
   echo "full execution plan must document phase6 readiness/handoff tdpnd_grpc_auth_live_smoke_ok signal"
   exit 1
@@ -229,6 +247,14 @@ if ! rg -Fq "ci_phase6_cosmos_l1_build_testnet.sh" "$product_roadmap"; then
 fi
 if ! rg -Fq "integration_ci_phase6_cosmos_l1_build_testnet.sh" "$product_roadmap"; then
   echo "product roadmap must document phase6 cosmos l1 ci integration contract script"
+  exit 1
+fi
+if ! rg -Fq "local_testnet_smoke" "$product_roadmap"; then
+  echo "product roadmap must document phase6 local_testnet_smoke stage"
+  exit 1
+fi
+if ! rg -Fq "integration_cosmos_local_testnet_smoke.sh" "$product_roadmap"; then
+  echo "product roadmap must document phase6 local testnet smoke integration script"
   exit 1
 fi
 if ! rg -Fq "tdpnd_grpc_auth_live_smoke" "$product_roadmap"; then
@@ -291,6 +317,14 @@ if ! rg -Fq "phase6_cosmos_l1_build_testnet_handoff_run.sh" "$product_roadmap"; 
   echo "product roadmap must document phase6 handoff-run wrapper script"
   exit 1
 fi
+if ! rg -Fq "phase6_cosmos_l1_summary_report.sh" "$product_roadmap"; then
+  echo "product roadmap must document phase6 summary report helper script"
+  exit 1
+fi
+if ! rg -Fq "integration_phase6_cosmos_l1_summary_report.sh" "$product_roadmap"; then
+  echo "product roadmap must document phase6 summary report integration contract script"
+  exit 1
+fi
 if ! rg -Fq "tdpnd_grpc_auth_live_smoke_ok" "$product_roadmap"; then
   echo "product roadmap must document phase6 readiness/handoff tdpnd_grpc_auth_live_smoke_ok signal"
   exit 1
@@ -303,6 +337,7 @@ fi
 
 phase6_stage_specs=(
   "chain_scaffold|integration_cosmos_chain_scaffold.sh"
+  "local_testnet_smoke|integration_cosmos_local_testnet_smoke.sh"
   "proto_surface|integration_cosmos_proto_surface.sh"
   "proto_codegen_surface|integration_cosmos_proto_codegen_surface.sh"
   "query_surface|integration_cosmos_query_surface.sh"
@@ -499,6 +534,38 @@ if ! rg -Fq "fail-closed path" "$phase6_handoff_check_integration_script"; then
 fi
 if ! rg -Fq "tdpnd_grpc_auth_live_smoke" "$phase6_handoff_check_integration_script"; then
   echo "phase6 handoff-check integration must validate tdpnd_grpc_auth_live_smoke readiness signal"
+  exit 1
+fi
+if ! rg -Fq "phase6_cosmos_l1_summary_report" "$phase6_summary_report_script"; then
+  echo "phase6 summary report helper must emit phase6 summary report schema id"
+  exit 1
+fi
+if ! rg -Fq "phase6_cosmos_l1_build_testnet_ci_summary.json" "$phase6_summary_report_script"; then
+  echo "phase6 summary report helper must probe build/testnet ci summary artifact"
+  exit 1
+fi
+if ! rg -Fq "phase6_cosmos_l1_contracts_summary.json" "$phase6_summary_report_script"; then
+  echo "phase6 summary report helper must probe contracts summary artifact"
+  exit 1
+fi
+if ! rg -Fq "phase6_cosmos_l1_build_testnet_suite_summary.json" "$phase6_summary_report_script"; then
+  echo "phase6 summary report helper must probe suite summary artifact"
+  exit 1
+fi
+if ! rg -Fq "phase6_cosmos_l1_summary_report.sh" "$phase6_summary_report_integration_script"; then
+  echo "phase6 summary report integration script must execute summary report helper"
+  exit 1
+fi
+if ! rg -Fq "pass path" "$phase6_summary_report_integration_script"; then
+  echo "phase6 summary report integration script must validate pass path"
+  exit 1
+fi
+if ! rg -Fq "fail path" "$phase6_summary_report_integration_script"; then
+  echo "phase6 summary report integration script must validate fail path"
+  exit 1
+fi
+if ! rg -Fq "missing-input path" "$phase6_summary_report_integration_script"; then
+  echo "phase6 summary report integration script must validate missing-input path"
   exit 1
 fi
 

@@ -38,6 +38,7 @@ FAIL_SUMMARY_JSON="$TMP_DIR/summary_fail.json"
 
 STAGE_ENV_NAMES=(
   "CI_PHASE6_COSMOS_L1_CHAIN_SCAFFOLD_SCRIPT"
+  "CI_PHASE6_COSMOS_L1_LOCAL_TESTNET_SMOKE_SCRIPT"
   "CI_PHASE6_COSMOS_L1_PROTO_SURFACE_SCRIPT"
   "CI_PHASE6_COSMOS_L1_PROTO_CODEGEN_SURFACE_SCRIPT"
   "CI_PHASE6_COSMOS_L1_QUERY_SURFACE_SCRIPT"
@@ -49,6 +50,7 @@ STAGE_ENV_NAMES=(
 
 STAGE_IDS=(
   "chain_scaffold"
+  "local_testnet_smoke"
   "proto_surface"
   "proto_codegen_surface"
   "query_surface"
@@ -180,6 +182,7 @@ if ! jq -e '
   and .schema.minor == 0
   and .inputs.dry_run == false
   and .inputs.run_chain_scaffold == true
+  and .inputs.run_local_testnet_smoke == true
   and .inputs.run_proto_surface == true
   and .inputs.run_proto_codegen_surface == true
   and .inputs.run_query_surface == true
@@ -189,6 +192,7 @@ if ! jq -e '
   and .inputs.run_tdpnd_grpc_auth_live_smoke == true
   and (.steps | to_entries | all(.value.enabled == true and .value.status == "pass" and .value.rc == 0 and .value.command != null))
   and .steps.chain_scaffold.status == "pass"
+  and .steps.local_testnet_smoke.status == "pass"
   and .steps.tdpnd_grpc_live_smoke.status == "pass"
   and .steps.tdpnd_grpc_auth_live_smoke.status == "pass"
 ' "$SUCCESS_SUMMARY_JSON" >/dev/null; then
@@ -247,6 +251,7 @@ CI_PHASE6_CAPTURE_FILE="$CAPTURE" \
   --summary-json "$TOGGLE_SUMMARY_JSON" \
   --print-summary-json 0 \
   --run-chain-scaffold 0 \
+  --run-local-testnet-smoke 0 \
   --run-proto-surface 0 \
   --run-proto-codegen-surface 0 \
   --run-tdpnd-grpc-runtime-smoke 0 \
@@ -267,6 +272,10 @@ if ! jq -e '
   and .steps.chain_scaffold.enabled == false
   and .steps.chain_scaffold.status == "skip"
   and .steps.chain_scaffold.reason == "disabled"
+  and .inputs.run_local_testnet_smoke == false
+  and .steps.local_testnet_smoke.enabled == false
+  and .steps.local_testnet_smoke.status == "skip"
+  and .steps.local_testnet_smoke.reason == "disabled"
   and .inputs.run_proto_surface == false
   and .steps.proto_surface.enabled == false
   and .steps.proto_surface.status == "skip"
@@ -327,6 +336,7 @@ if ! jq -e '
   and .rc == 23
   and .inputs.dry_run == false
   and .steps.chain_scaffold.status == "pass"
+  and .steps.local_testnet_smoke.status == "pass"
   and .steps.proto_surface.status == "fail"
   and .steps.proto_surface.rc == 23
   and .steps.query_surface.status == "fail"

@@ -1,6 +1,7 @@
 package keeper
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -239,6 +240,71 @@ func TestSubmitEvidenceInvalidProofFormat(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected invalid evidence to fail")
+	}
+}
+
+func TestSubmitEvidenceInvalidProofFormats(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	invalidProofs := []string{
+		"sha-256:proof",
+		"object://bucket/key",
+		"sha256/proof",
+		"obj:/bucket/key",
+		"sha256:\t ",
+		"obj://   ",
+	}
+
+	for idx, proof := range invalidProofs {
+		evidenceID := fmt.Sprintf("evidence-invalid-proof-%d", idx)
+		_, err := k.SubmitEvidence(types.SlashEvidence{
+			EvidenceID: evidenceID,
+			Kind:       types.EvidenceKindObjective,
+			ProofHash:  proof,
+		})
+		if err == nil {
+			t.Fatalf("expected invalid evidence to fail for proof %q", proof)
+		}
+		if !strings.Contains(err.Error(), "proof hash must use objective format") {
+			t.Fatalf("expected objective proof format error for proof %q, got %v", proof, err)
+		}
+		if _, ok := k.GetEvidence(evidenceID); ok {
+			t.Fatalf("expected invalid evidence %q to not be stored", evidenceID)
+		}
+	}
+}
+
+func TestSubmitEvidenceReplayThenConflictOnProofHashChange(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	base := types.SlashEvidence{
+		EvidenceID: "evidence-replay-conflict",
+		Kind:       types.EvidenceKindObjective,
+		ProofHash:  "obj://bucket/path/replay-conflict",
+	}
+
+	first, err := k.SubmitEvidence(base)
+	if err != nil {
+		t.Fatalf("first submit failed: %v", err)
+	}
+	replay, err := k.SubmitEvidence(base)
+	if err != nil {
+		t.Fatalf("replay submit failed: %v", err)
+	}
+	if replay != first {
+		t.Fatalf("expected replay to be idempotent, first=%+v replay=%+v", first, replay)
+	}
+
+	conflict := base
+	conflict.ProofHash = "sha256:replay-conflict-updated"
+	_, err = k.SubmitEvidence(conflict)
+	if err == nil {
+		t.Fatal("expected proof hash change conflict")
+	}
+	if !strings.Contains(err.Error(), "conflicting fields") {
+		t.Fatalf("expected conflict error, got %v", err)
 	}
 }
 

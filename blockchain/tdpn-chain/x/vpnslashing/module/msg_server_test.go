@@ -143,6 +143,99 @@ func TestMsgServerSubmitSlashEvidenceInvalidProofFormatPropagation(t *testing.T)
 	}
 }
 
+func TestMsgServerSubmitSlashEvidenceInvalidProofFormatsPropagation(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		evidence  string
+		proofHash string
+	}{
+		{name: "wrong sha prefix", evidence: "evidence-msg-invalid-proof-1", proofHash: "sha-256:proof"},
+		{name: "wrong obj prefix", evidence: "evidence-msg-invalid-proof-2", proofHash: "object://bucket/path"},
+		{name: "sha malformed separator", evidence: "evidence-msg-invalid-proof-3", proofHash: "sha256/proof"},
+		{name: "obj malformed separator", evidence: "evidence-msg-invalid-proof-4", proofHash: "obj:/bucket/path"},
+		{name: "sha whitespace payload", evidence: "evidence-msg-invalid-proof-5", proofHash: "sha256:\t "},
+		{name: "obj whitespace payload", evidence: "evidence-msg-invalid-proof-6", proofHash: "obj://  \n"},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			k := keeper.NewKeeper()
+			server := NewMsgServer(&k)
+
+			resp, err := server.SubmitSlashEvidence(SubmitSlashEvidenceRequest{
+				Evidence: types.SlashEvidence{
+					EvidenceID: tc.evidence,
+					Kind:       types.EvidenceKindObjective,
+					ProofHash:  tc.proofHash,
+				},
+			})
+			if err == nil {
+				t.Fatalf("expected invalid evidence error for proof %q", tc.proofHash)
+			}
+			if !errors.Is(err, ErrInvalidEvidence) {
+				t.Fatalf("expected ErrInvalidEvidence for proof %q, got %v", tc.proofHash, err)
+			}
+			if resp.Existed {
+				t.Fatalf("expected existed=false for invalid proof %q", tc.proofHash)
+			}
+			if resp.Idempotent {
+				t.Fatalf("expected idempotent=false for invalid proof %q", tc.proofHash)
+			}
+		})
+	}
+}
+
+func TestMsgServerSubmitSlashEvidenceReplayThenConflictOnProofHashChange(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	server := NewMsgServer(&k)
+
+	base := SubmitSlashEvidenceRequest{
+		Evidence: types.SlashEvidence{
+			EvidenceID: "evidence-msg-replay-conflict",
+			Kind:       types.EvidenceKindObjective,
+			ProofHash:  "obj://bucket/replay-conflict",
+		},
+	}
+	first, err := server.SubmitSlashEvidence(base)
+	if err != nil {
+		t.Fatalf("first submit failed: %v", err)
+	}
+	if first.Existed || first.Idempotent {
+		t.Fatalf("expected first submit to be non-replay, got existed=%t idempotent=%t", first.Existed, first.Idempotent)
+	}
+
+	replay, err := server.SubmitSlashEvidence(base)
+	if err != nil {
+		t.Fatalf("expected replay submit to succeed, got %v", err)
+	}
+	if !replay.Existed || !replay.Idempotent {
+		t.Fatalf("expected replay to be idempotent, got existed=%t idempotent=%t", replay.Existed, replay.Idempotent)
+	}
+
+	conflict := base
+	conflict.Evidence.ProofHash = "sha256:replay-conflict-updated"
+	conflictResp, err := server.SubmitSlashEvidence(conflict)
+	if err == nil {
+		t.Fatal("expected evidence conflict error")
+	}
+	if !errors.Is(err, ErrEvidenceConflict) {
+		t.Fatalf("expected ErrEvidenceConflict, got %v", err)
+	}
+	if !conflictResp.Existed {
+		t.Fatal("expected existed=true on conflicting replay")
+	}
+	if conflictResp.Idempotent {
+		t.Fatal("expected idempotent=false on conflicting replay")
+	}
+}
+
 func TestMsgServerApplyPenaltyHappyPath(t *testing.T) {
 	t.Parallel()
 

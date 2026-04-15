@@ -77,6 +77,7 @@ Exit gate:
 - Phase 5 CI includes `settlement_shadow_status_surface` running `scripts/integration_cosmos_settlement_shadow_status_surface.sh` to validate shadow telemetry/status surfacing in settlement status endpoints.
 - Phase 5 CI also includes `settlement_adapter_signed_tx_roundtrip` backed by `scripts/integration_cosmos_adapter_tdpnd_signed_tx_roundtrip.sh` to validate signed-tx adapter relay into `tdpnd` bridge writes before promotion.
 - Phase 6 CI now includes `scripts/ci_phase6_cosmos_l1_build_testnet.sh` with contract coverage from `scripts/integration_ci_phase6_cosmos_l1_build_testnet.sh` for chain scaffold/proto/query/gRPC runtime gate ordering and dry-run/first-failure accounting.
+- Phase 6 build/testnet CI includes `local_testnet_smoke` wired to `scripts/integration_cosmos_local_testnet_smoke.sh` for deterministic local multi-node `tdpnd` lifecycle coverage (`init -> start -> status -> stop -> status`).
 - Phase 6 build/testnet CI now includes `tdpnd_grpc_auth_live_smoke` wired to `scripts/integration_cosmos_tdpnd_grpc_auth_live_smoke.sh` for auth-token gRPC live-smoke coverage.
 - Phase 6 contracts CI gate now includes `scripts/ci_phase6_cosmos_l1_contracts.sh` with contract coverage from `scripts/integration_ci_phase6_cosmos_l1_contracts.sh` for wrapper contract wiring and fail-fast propagation, plus live-smoke coverage from `scripts/integration_phase6_cosmos_l1_contracts_live_smoke.sh`.
 - Phase 6 contracts CI gate includes both `cosmos_module_coverage_floor` (`scripts/integration_cosmos_module_coverage_floor.sh`) and `cosmos_keeper_coverage_floor` (`scripts/integration_cosmos_keeper_coverage_floor.sh`) before wrapper handoff/run stages.
@@ -85,6 +86,7 @@ Exit gate:
 - Phase 6 handoff wrappers are available via `scripts/phase6_cosmos_l1_build_testnet_handoff_check.sh` and `scripts/phase6_cosmos_l1_build_testnet_handoff_run.sh`, each with integration contracts.
 - Phase 6 readiness/handoff checker surfaces include `tdpnd_grpc_auth_live_smoke_ok` in addition to existing `tdpnd_grpc_runtime_smoke_ok` and `tdpnd_grpc_live_smoke_ok` signals.
 - Phase 6 run/handoff-run dry-run relaxation also covers `tdpnd_grpc_auth_live_smoke_ok` by default unless explicitly required by wrapper inputs.
+- Phase 6 operator summary helper `scripts/phase6_cosmos_l1_summary_report.sh` aggregates CI/contracts/suite summary artifacts into compact operator lines plus normalized JSON output, with contract coverage from `scripts/integration_phase6_cosmos_l1_summary_report.sh`.
 - Settlement confirmation lifecycle posture is canonicalized as `pending` -> `submitted` -> `confirmed` with explicit `failed` records retained for replay/reconciliation.
 
 ## Non-Negotiables

@@ -13,6 +13,7 @@ Usage:
     [--print-summary-json [0|1]] \
     [--dry-run [0|1]] \
     [--run-chain-scaffold [0|1]] \
+    [--run-local-testnet-smoke [0|1]] \
     [--run-proto-surface [0|1]] \
     [--run-proto-codegen-surface [0|1]] \
     [--run-query-surface [0|1]] \
@@ -24,13 +25,14 @@ Usage:
 Purpose:
   Run a focused Phase-6 Cosmos L1 build/testnet CI gate:
     1) integration_cosmos_chain_scaffold.sh
-    2) integration_cosmos_proto_surface.sh
-    3) integration_cosmos_proto_codegen_surface.sh
-    4) integration_cosmos_query_surface.sh
-    5) integration_cosmos_grpc_app_roundtrip.sh
-    6) integration_cosmos_tdpnd_grpc_runtime_smoke.sh
-    7) integration_cosmos_tdpnd_grpc_live_smoke.sh
-    8) integration_cosmos_tdpnd_grpc_auth_live_smoke.sh
+    2) integration_cosmos_local_testnet_smoke.sh
+    3) integration_cosmos_proto_surface.sh
+    4) integration_cosmos_proto_codegen_surface.sh
+    5) integration_cosmos_query_surface.sh
+    6) integration_cosmos_grpc_app_roundtrip.sh
+    7) integration_cosmos_tdpnd_grpc_runtime_smoke.sh
+    8) integration_cosmos_tdpnd_grpc_live_smoke.sh
+    9) integration_cosmos_tdpnd_grpc_auth_live_smoke.sh
 
 Dry-run mode:
   --dry-run 1 skips stage execution, records deterministic skip accounting,
@@ -109,6 +111,7 @@ print_summary_json="${CI_PHASE6_COSMOS_L1_PRINT_SUMMARY_JSON:-1}"
 dry_run="${CI_PHASE6_COSMOS_L1_DRY_RUN:-0}"
 
 run_chain_scaffold="${CI_PHASE6_COSMOS_L1_RUN_CHAIN_SCAFFOLD:-1}"
+run_local_testnet_smoke="${CI_PHASE6_COSMOS_L1_RUN_LOCAL_TESTNET_SMOKE:-1}"
 run_proto_surface="${CI_PHASE6_COSMOS_L1_RUN_PROTO_SURFACE:-1}"
 run_proto_codegen_surface="${CI_PHASE6_COSMOS_L1_RUN_PROTO_CODEGEN_SURFACE:-1}"
 run_query_surface="${CI_PHASE6_COSMOS_L1_RUN_QUERY_SURFACE:-1}"
@@ -151,6 +154,15 @@ while [[ $# -gt 0 ]]; do
         shift 2
       else
         run_chain_scaffold="1"
+        shift
+      fi
+      ;;
+    --run-local-testnet-smoke)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        run_local_testnet_smoke="${2:-}"
+        shift 2
+      else
+        run_local_testnet_smoke="1"
         shift
       fi
       ;;
@@ -232,6 +244,7 @@ done
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
 bool_arg_or_die "--dry-run" "$dry_run"
 bool_arg_or_die "--run-chain-scaffold" "$run_chain_scaffold"
+bool_arg_or_die "--run-local-testnet-smoke" "$run_local_testnet_smoke"
 bool_arg_or_die "--run-proto-surface" "$run_proto_surface"
 bool_arg_or_die "--run-proto-codegen-surface" "$run_proto_codegen_surface"
 bool_arg_or_die "--run-query-surface" "$run_query_surface"
@@ -241,6 +254,7 @@ bool_arg_or_die "--run-tdpnd-grpc-live-smoke" "$run_tdpnd_grpc_live_smoke"
 bool_arg_or_die "--run-tdpnd-grpc-auth-live-smoke" "$run_tdpnd_grpc_auth_live_smoke"
 
 chain_scaffold_script="${CI_PHASE6_COSMOS_L1_CHAIN_SCAFFOLD_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_chain_scaffold.sh}"
+local_testnet_smoke_script="${CI_PHASE6_COSMOS_L1_LOCAL_TESTNET_SMOKE_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_local_testnet_smoke.sh}"
 proto_surface_script="${CI_PHASE6_COSMOS_L1_PROTO_SURFACE_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_proto_surface.sh}"
 proto_codegen_surface_script="${CI_PHASE6_COSMOS_L1_PROTO_CODEGEN_SURFACE_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_proto_codegen_surface.sh}"
 query_surface_script="${CI_PHASE6_COSMOS_L1_QUERY_SURFACE_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_query_surface.sh}"
@@ -251,6 +265,7 @@ tdpnd_grpc_auth_live_smoke_script="${CI_PHASE6_COSMOS_L1_TDPND_GRPC_AUTH_LIVE_SM
 
 stage_ids=(
   "chain_scaffold"
+  "local_testnet_smoke"
   "proto_surface"
   "proto_codegen_surface"
   "query_surface"
@@ -262,6 +277,7 @@ stage_ids=(
 
 declare -A stage_script=(
   ["chain_scaffold"]="$chain_scaffold_script"
+  ["local_testnet_smoke"]="$local_testnet_smoke_script"
   ["proto_surface"]="$proto_surface_script"
   ["proto_codegen_surface"]="$proto_codegen_surface_script"
   ["query_surface"]="$query_surface_script"
@@ -273,6 +289,7 @@ declare -A stage_script=(
 
 declare -A stage_enabled=(
   ["chain_scaffold"]="$run_chain_scaffold"
+  ["local_testnet_smoke"]="$run_local_testnet_smoke"
   ["proto_surface"]="$run_proto_surface"
   ["proto_codegen_surface"]="$run_proto_codegen_surface"
   ["query_surface"]="$run_query_surface"
@@ -384,6 +401,7 @@ jq -n \
   --arg dry_run "$dry_run" \
   --arg print_summary_json "$print_summary_json" \
   --arg run_chain_scaffold "$run_chain_scaffold" \
+  --arg run_local_testnet_smoke "$run_local_testnet_smoke" \
   --arg run_proto_surface "$run_proto_surface" \
   --arg run_proto_codegen_surface "$run_proto_codegen_surface" \
   --arg run_query_surface "$run_query_surface" \
@@ -406,6 +424,7 @@ jq -n \
       dry_run: ($dry_run == "1"),
       print_summary_json: ($print_summary_json == "1"),
       run_chain_scaffold: ($run_chain_scaffold == "1"),
+      run_local_testnet_smoke: ($run_local_testnet_smoke == "1"),
       run_proto_surface: ($run_proto_surface == "1"),
       run_proto_codegen_surface: ($run_proto_codegen_surface == "1"),
       run_query_surface: ($run_query_surface == "1"),

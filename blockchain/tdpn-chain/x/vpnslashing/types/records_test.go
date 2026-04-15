@@ -18,8 +18,16 @@ func TestSlashEvidenceValidateBasic(t *testing.T) {
 	}{
 		{name: "valid sha256", record: base},
 		{
+			name:   "valid sha256 payload edge separators",
+			record: SlashEvidence{EvidenceID: base.EvidenceID, Kind: base.Kind, ProofHash: "sha256:proof:segment@v1"},
+		},
+		{
 			name:   "valid object uri",
 			record: SlashEvidence{EvidenceID: base.EvidenceID, Kind: base.Kind, ProofHash: "obj://bucket/key"},
+		},
+		{
+			name:   "valid object uri nested path edge",
+			record: SlashEvidence{EvidenceID: base.EvidenceID, Kind: base.Kind, ProofHash: "obj://bucket/path/to/file.log?part=1#chunk"},
 		},
 		{
 			name:    "missing evidence id",
@@ -42,13 +50,48 @@ func TestSlashEvidenceValidateBasic(t *testing.T) {
 			wantErr: "proof hash must use objective format (sha256:<value> or obj://<value>)",
 		},
 		{
+			name:    "invalid wrong sha256 prefix",
+			record:  SlashEvidence{EvidenceID: base.EvidenceID, Kind: base.Kind, ProofHash: "sha-256:proof"},
+			wantErr: "proof hash must use objective format (sha256:<value> or obj://<value>)",
+		},
+		{
+			name:    "invalid uppercase sha256 prefix",
+			record:  SlashEvidence{EvidenceID: base.EvidenceID, Kind: base.Kind, ProofHash: "SHA256:proof"},
+			wantErr: "proof hash must use objective format (sha256:<value> or obj://<value>)",
+		},
+		{
+			name:    "invalid wrong object prefix",
+			record:  SlashEvidence{EvidenceID: base.EvidenceID, Kind: base.Kind, ProofHash: "object://bucket/key"},
+			wantErr: "proof hash must use objective format (sha256:<value> or obj://<value>)",
+		},
+		{
+			name:    "invalid malformed sha256 separator",
+			record:  SlashEvidence{EvidenceID: base.EvidenceID, Kind: base.Kind, ProofHash: "sha256/proof"},
+			wantErr: "proof hash must use objective format (sha256:<value> or obj://<value>)",
+		},
+		{
+			name:    "invalid malformed object separator",
+			record:  SlashEvidence{EvidenceID: base.EvidenceID, Kind: base.Kind, ProofHash: "obj:/bucket/key"},
+			wantErr: "proof hash must use objective format (sha256:<value> or obj://<value>)",
+		},
+		{
 			name:    "invalid sha256 empty suffix",
 			record:  SlashEvidence{EvidenceID: base.EvidenceID, Kind: base.Kind, ProofHash: "sha256:"},
 			wantErr: "proof hash must use objective format (sha256:<value> or obj://<value>)",
 		},
 		{
+			name:    "invalid sha256 whitespace only suffix",
+			record:  SlashEvidence{EvidenceID: base.EvidenceID, Kind: base.Kind, ProofHash: "sha256:\t  \n"},
+			wantErr: "proof hash must use objective format (sha256:<value> or obj://<value>)",
+		},
+		{
 			name:    "invalid object uri empty suffix",
 			record:  SlashEvidence{EvidenceID: base.EvidenceID, Kind: base.Kind, ProofHash: "obj://"},
+			wantErr: "proof hash must use objective format (sha256:<value> or obj://<value>)",
+		},
+		{
+			name:    "invalid object uri whitespace only suffix",
+			record:  SlashEvidence{EvidenceID: base.EvidenceID, Kind: base.Kind, ProofHash: "obj://   \t"},
 			wantErr: "proof hash must use objective format (sha256:<value> or obj://<value>)",
 		},
 	}

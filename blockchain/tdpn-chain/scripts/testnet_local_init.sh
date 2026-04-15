@@ -16,6 +16,7 @@ usage() {
 Usage: scripts/testnet_local_init.sh [options]
 
 Options:
+  --testnet-dir <path>        Testnet root directory (default: ./.tdpn-testnet)
   --node-count <n>            Number of nodes (default: 3)
   --base-grpc-port <port>     Base gRPC port; node i uses base+(i-1) (default: 19090)
   --base-settlement-port <p>  Base settlement port; node i uses base+(i-1) (default: 18080)
@@ -37,6 +38,11 @@ need_value() {
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --testnet-dir)
+      need_value "$1" "${2:-}"
+      TESTNET_DIR="$2"
+      shift 2
+      ;;
     --node-count)
       need_value "$1" "${2:-}"
       NODE_COUNT="$2"
