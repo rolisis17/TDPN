@@ -149,6 +149,7 @@ Exit settlement status endpoint:
 - This state-dir persistence check is wired into `scripts/ci_local.sh` under the Cosmos runtime block.
 - Phase5 CI treats settlement adapter roundtrip as a first-class stage: `settlement_adapter_roundtrip` runs `scripts/integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh`.
 - Phase5 CI includes shadow env stage `settlement_shadow_env`: `scripts/integration_cosmos_settlement_shadow_env.sh` validates shadow adapter HTTP wiring, signed-tx shadow wiring, and fail-open behavior.
+- Phase5 CI includes shadow status stage `settlement_shadow_status_surface`: `scripts/integration_cosmos_settlement_shadow_status_surface.sh` validates issuer/exit settlement status shadow telemetry surfacing.
 
 ## Chain gRPC Contract
 
