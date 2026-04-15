@@ -23,14 +23,19 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 PASS_SUMMARY="$TMP_DIR/ci_phase5_pass.json"
 FAIL_SUMMARY="$TMP_DIR/ci_phase5_fail.json"
 RELAXED_SUMMARY="$TMP_DIR/ci_phase5_relaxed.json"
+SPONSOR_FAIL_SUMMARY="$TMP_DIR/ci_phase5_sponsor_fail.json"
 MISSING_SUMMARY="$TMP_DIR/ci_phase5_missing.json"
 
 PASS_OUTPUT="$TMP_DIR/pass_output.json"
 FAIL_OUTPUT="$TMP_DIR/fail_output.json"
 RELAXED_OUTPUT="$TMP_DIR/relaxed_output.json"
+SPONSOR_FAIL_OUTPUT="$TMP_DIR/sponsor_fail_output.json"
+SPONSOR_RELAXED_OUTPUT="$TMP_DIR/sponsor_relaxed_output.json"
 PASS_CANONICAL="$TMP_DIR/pass_canonical_summary.json"
 FAIL_CANONICAL="$TMP_DIR/fail_canonical_summary.json"
 RELAXED_CANONICAL="$TMP_DIR/relaxed_canonical_summary.json"
+SPONSOR_FAIL_CANONICAL="$TMP_DIR/sponsor_fail_canonical_summary.json"
+SPONSOR_RELAXED_CANONICAL="$TMP_DIR/sponsor_relaxed_canonical_summary.json"
 ENV_CANONICAL_OUTPUT="$TMP_DIR/env_canonical_output.json"
 ENV_LEGACY_OUTPUT="$TMP_DIR/env_legacy_output.json"
 LEGACY_ALIAS_OUTPUT="$TMP_DIR/legacy_alias_output.json"
@@ -39,6 +44,8 @@ MISSING_OUTPUT="$TMP_DIR/missing_output.json"
 PASS_LOG="$TMP_DIR/pass.log"
 FAIL_LOG="$TMP_DIR/fail.log"
 RELAXED_LOG="$TMP_DIR/relaxed.log"
+SPONSOR_FAIL_LOG="$TMP_DIR/sponsor_fail.log"
+SPONSOR_RELAXED_LOG="$TMP_DIR/sponsor_relaxed.log"
 ENV_CANONICAL_LOG="$TMP_DIR/env_canonical.log"
 ENV_LEGACY_LOG="$TMP_DIR/env_legacy.log"
 LEGACY_ALIAS_LOG="$TMP_DIR/legacy_alias.log"
@@ -65,6 +72,9 @@ cat >"$PASS_SUMMARY" <<'EOF_PASS'
       "status": "pass"
     },
     "settlement_state_persistence": {
+      "status": "pass"
+    },
+    "issuer_sponsor_api_live_smoke": {
       "status": "pass"
     }
   }
@@ -93,6 +103,9 @@ cat >"$FAIL_SUMMARY" <<'EOF_FAIL'
     },
     "settlement_state_persistence": {
       "status": "pass"
+    },
+    "issuer_sponsor_api_live_smoke": {
+      "status": "pass"
     }
   }
 }
@@ -120,10 +133,43 @@ cat >"$RELAXED_SUMMARY" <<'EOF_RELAXED'
     },
     "settlement_state_persistence": {
       "status": "pass"
+    },
+    "issuer_sponsor_api_live_smoke": {
+      "status": "pass"
     }
   }
 }
 EOF_RELAXED
+
+cat >"$SPONSOR_FAIL_SUMMARY" <<'EOF_SPONSOR_FAIL'
+{
+  "version": 1,
+  "schema": {
+    "id": "ci_phase5_settlement_layer_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "pass",
+  "rc": 0,
+  "steps": {
+    "settlement_failsoft": {
+      "status": "pass"
+    },
+    "settlement_acceptance": {
+      "status": "pass"
+    },
+    "settlement_bridge_smoke": {
+      "status": "pass"
+    },
+    "settlement_state_persistence": {
+      "status": "pass"
+    },
+    "issuer_sponsor_api_live_smoke": {
+      "status": "fail"
+    }
+  }
+}
+EOF_SPONSOR_FAIL
 
 echo "[phase5-settlement-layer-check] stage-derived pass path"
 PHASE5_SETTLEMENT_LAYER_CHECK_CANONICAL_SUMMARY_JSON="$PASS_CANONICAL" \
@@ -148,10 +194,12 @@ if ! jq -e '
   and .policy.require_settlement_acceptance_ok == true
   and .policy.require_settlement_bridge_smoke_ok == true
   and .policy.require_settlement_state_persistence_ok == true
+  and .policy.require_issuer_sponsor_api_live_smoke_ok == true
   and .signals.settlement_failsoft_ok == true
   and .signals.settlement_acceptance_ok == true
   and .signals.settlement_bridge_smoke_ok == true
   and .signals.settlement_state_persistence_ok == true
+  and .signals.issuer_sponsor_api_live_smoke_ok == true
 ' --arg expected_canonical "$PASS_CANONICAL" "$PASS_OUTPUT" >/dev/null; then
   echo "pass-path summary contract mismatch"
   cat "$PASS_OUTPUT"
@@ -234,6 +282,55 @@ if ! cmp -s "$RELAXED_OUTPUT" "$RELAXED_CANONICAL"; then
   echo "relaxed-path canonical summary diverges from run summary"
   cat "$RELAXED_OUTPUT"
   cat "$RELAXED_CANONICAL"
+  exit 1
+fi
+
+echo "[phase5-settlement-layer-check] fail-closed path on sponsor live-smoke failure"
+set +e
+PHASE5_SETTLEMENT_LAYER_CHECK_CANONICAL_SUMMARY_JSON="$SPONSOR_FAIL_CANONICAL" \
+"$SCRIPT_UNDER_TEST" \
+  --ci-phase5-summary-json "$SPONSOR_FAIL_SUMMARY" \
+  --summary-json "$SPONSOR_FAIL_OUTPUT" \
+  --show-json 0 >"$SPONSOR_FAIL_LOG" 2>&1
+sponsor_fail_rc=$?
+set -e
+if [[ "$sponsor_fail_rc" -ne 1 ]]; then
+  echo "expected rc=1 for sponsor fail-closed path, got rc=$sponsor_fail_rc"
+  cat "$SPONSOR_FAIL_LOG"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .policy.require_issuer_sponsor_api_live_smoke_ok == true
+  and .signals.issuer_sponsor_api_live_smoke_ok == false
+  and .stages.issuer_sponsor_api_live_smoke.status == "fail"
+  and ((.decision.reasons // []) | any(test("issuer_sponsor_api_live_smoke_ok is false")))
+' "$SPONSOR_FAIL_OUTPUT" >/dev/null; then
+  echo "sponsor fail-path summary mismatch"
+  cat "$SPONSOR_FAIL_OUTPUT"
+  cat "$SPONSOR_FAIL_LOG"
+  exit 1
+fi
+
+echo "[phase5-settlement-layer-check] sponsor policy toggle path"
+PHASE5_SETTLEMENT_LAYER_CHECK_CANONICAL_SUMMARY_JSON="$SPONSOR_RELAXED_CANONICAL" \
+"$SCRIPT_UNDER_TEST" \
+  --ci-phase5-summary-json "$SPONSOR_FAIL_SUMMARY" \
+  --summary-json "$SPONSOR_RELAXED_OUTPUT" \
+  --require-issuer-sponsor-api-live-smoke-ok 0 \
+  --show-json 0 >"$SPONSOR_RELAXED_LOG" 2>&1
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .policy.require_issuer_sponsor_api_live_smoke_ok == false
+  and .signals.issuer_sponsor_api_live_smoke_ok == false
+  and .stages.issuer_sponsor_api_live_smoke.status == "fail"
+' "$SPONSOR_RELAXED_OUTPUT" >/dev/null; then
+  echo "sponsor relaxed-policy summary mismatch"
+  cat "$SPONSOR_RELAXED_OUTPUT"
+  cat "$SPONSOR_RELAXED_LOG"
   exit 1
 fi
 
