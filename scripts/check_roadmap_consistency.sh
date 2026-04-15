@@ -11,8 +11,10 @@ bootstrap_validator_doc="docs/blockchain-bootstrap-validator-plan.md"
 cosmos_runtime_doc="docs/cosmos-settlement-runtime.md"
 chain_readme="blockchain/tdpn-chain/README.md"
 settlement_mapping_doc="blockchain/tdpn-chain/docs/settlement-bridge-mapping.md"
+phase5_ci_script="scripts/ci_phase5_settlement_layer.sh"
+phase5_integration_script="scripts/integration_ci_phase5_settlement_layer.sh"
 
-for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$chain_readme" "$settlement_mapping_doc"; do
+for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$chain_readme" "$settlement_mapping_doc" "$phase5_ci_script" "$phase5_integration_script"; do
   if [[ ! -f "$f" ]]; then
     echo "missing required file: $f"
     exit 1
@@ -196,5 +198,12 @@ if ! rg -Fq "integration_cosmos_tdpnd_state_dir_persistence.sh" "$settlement_map
   echo "settlement bridge mapping must document state-dir persistence integration script"
   exit 1
 fi
+
+for phase5_script in "$phase5_ci_script" "$phase5_integration_script"; do
+  if rg -qi "phase4 windows full parity" "$phase5_script"; then
+    echo "phase5 settlement tooling contains stale phase4 wording: $phase5_script"
+    exit 1
+  fi
+done
 
 echo "roadmap consistency check ok"

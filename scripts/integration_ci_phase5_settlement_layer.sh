@@ -68,8 +68,8 @@ cat >"$FAKE_STAGE_HELPER" <<'EOF_FAKE_STAGE_HELPER'
 #!/usr/bin/env bash
 set -euo pipefail
 
-capture="${CI_PHASE4_CAPTURE_FILE:?}"
-stage_id="${CI_PHASE4_STAGE_ID:?}"
+capture="${CI_PHASE5_CAPTURE_FILE:?}"
+stage_id="${CI_PHASE5_STAGE_ID:?}"
 
 {
   printf '%s' "$stage_id"
@@ -79,7 +79,7 @@ stage_id="${CI_PHASE4_STAGE_ID:?}"
   printf '\n'
 } >>"$capture"
 
-fail_matrix="${CI_PHASE4_FAIL_MATRIX:-}"
+fail_matrix="${CI_PHASE5_FAIL_MATRIX:-}"
 if [[ -n "$fail_matrix" ]]; then
   old_ifs="$IFS"
   IFS=',;'
@@ -109,9 +109,9 @@ for idx in "${!STAGE_ENV_NAMES[@]}"; do
   cat >"$fake_stage" <<EOF_FAKE_STAGE
 #!/usr/bin/env bash
 set -euo pipefail
-CI_PHASE4_CAPTURE_FILE="\${CI_PHASE4_CAPTURE_FILE:?}" \
-CI_PHASE4_STAGE_ID="$stage_id" \
-CI_PHASE4_FAIL_MATRIX="\${CI_PHASE4_FAIL_MATRIX:-}" \
+CI_PHASE5_CAPTURE_FILE="\${CI_PHASE5_CAPTURE_FILE:?}" \
+CI_PHASE5_STAGE_ID="$stage_id" \
+CI_PHASE5_FAIL_MATRIX="\${CI_PHASE5_FAIL_MATRIX:-}" \
 "$FAKE_STAGE_HELPER" "\$@"
 EOF_FAKE_STAGE
   chmod +x "$fake_stage"
@@ -159,7 +159,7 @@ assert_capture_empty() {
 
 echo "[ci-phase5-settlement-layer] success ordering path"
 : >"$CAPTURE"
-CI_PHASE4_CAPTURE_FILE="$CAPTURE" \
+CI_PHASE5_CAPTURE_FILE="$CAPTURE" \
 "$GATE_SCRIPT" \
   --reports-dir "$SUCCESS_REPORTS_DIR" \
   --summary-json "$SUCCESS_SUMMARY_JSON" \
@@ -205,7 +205,7 @@ fi
 
 echo "[ci-phase5-settlement-layer] dry-run skip accounting"
 : >"$CAPTURE"
-CI_PHASE4_CAPTURE_FILE="$CAPTURE" \
+CI_PHASE5_CAPTURE_FILE="$CAPTURE" \
 "$GATE_SCRIPT" \
   --dry-run 1 \
   --reports-dir "$DRY_RUN_REPORTS_DIR" \
@@ -250,7 +250,7 @@ fi
 
 echo "[ci-phase5-settlement-layer] toggle path"
 : >"$CAPTURE"
-CI_PHASE4_CAPTURE_FILE="$CAPTURE" \
+CI_PHASE5_CAPTURE_FILE="$CAPTURE" \
 "$GATE_SCRIPT" \
   --reports-dir "$TOGGLE_REPORTS_DIR" \
   --summary-json "$TOGGLE_SUMMARY_JSON" \
@@ -303,8 +303,8 @@ fi
 echo "[ci-phase5-settlement-layer] first-failure rc propagation"
 : >"$CAPTURE"
 set +e
-CI_PHASE4_CAPTURE_FILE="$CAPTURE" \
-CI_PHASE4_FAIL_MATRIX="settlement_acceptance=23,settlement_bridge_smoke=41,phase5_settlement_layer_check=47,phase5_settlement_layer_run=53,phase5_settlement_layer_handoff_check=55,phase5_settlement_layer_handoff_run=59" \
+CI_PHASE5_CAPTURE_FILE="$CAPTURE" \
+CI_PHASE5_FAIL_MATRIX="settlement_acceptance=23,settlement_bridge_smoke=41,phase5_settlement_layer_check=47,phase5_settlement_layer_run=53,phase5_settlement_layer_handoff_check=55,phase5_settlement_layer_handoff_run=59" \
 "$GATE_SCRIPT" \
   --reports-dir "$FAIL_REPORTS_DIR" \
   --summary-json "$FAIL_SUMMARY_JSON" \
@@ -353,5 +353,4 @@ if ! grep -Fq -- '[ci-phase5-settlement-layer] status=fail rc=23 dry_run=0' "$FA
   exit 1
 fi
 
-echo "ci phase4 windows full parity integration check ok"
-
+echo "ci phase5 settlement layer integration check ok"
