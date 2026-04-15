@@ -23,6 +23,7 @@ This workspace defines the initial module boundaries for TDPN's VPN-compatible b
 - Current app-side bridge is `pkg/settlement` with optional Cosmos adapter.
 - Issuer sponsor API endpoints map to `quote -> reserve -> token issue -> status` flow.
 - Runtime env/operator wiring reference: `docs/cosmos-settlement-runtime.md`.
+- Local multi-node operator bootstrap: `docs/local-testnet.md`.
 - Local acceptance gate for settlement control-plane behavior: `scripts/integration_cosmos_settlement_acceptance_paths.sh`.
 
 ## Scaffold status
