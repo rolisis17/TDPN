@@ -22,12 +22,12 @@ Usage:
     [--run-phase5-settlement-layer-handoff-run [0|1]]
 
 Purpose:
-  Run a focused Phase-5 settlement layer CI gate around server/federation/
-  multi-machine readiness and full-parity wrappers:
-    1) integration_easy_node_server_preflight.sh
-    2) integration_prod_operator_lifecycle_runbook.sh
-    3) integration_three_machine_prod_signoff.sh
-    4) integration_machine_b_federation_check.sh
+  Run a focused Phase-5 settlement layer CI gate around Cosmos settlement
+  integration readiness:
+    1) integration_cosmos_settlement_failsoft.sh
+    2) integration_cosmos_settlement_acceptance_paths.sh
+    3) integration_cosmos_tdpnd_settlement_bridge_smoke.sh
+    4) integration_cosmos_tdpnd_state_dir_persistence.sh
     5) integration_phase5_settlement_layer_check.sh
     6) integration_phase5_settlement_layer_run.sh
     7) integration_phase5_settlement_layer_handoff_check.sh
@@ -109,10 +109,10 @@ summary_json="${CI_PHASE5_SETTLEMENT_LAYER_SUMMARY_JSON:-}"
 print_summary_json="${CI_PHASE5_SETTLEMENT_LAYER_PRINT_SUMMARY_JSON:-1}"
 dry_run="${CI_PHASE5_SETTLEMENT_LAYER_DRY_RUN:-0}"
 
-run_settlement_failsoft="${CI_PHASE5_SETTLEMENT_LAYER_RUN_WINDOWS_SERVER_PACKAGING:-1}"
-run_settlement_acceptance="${CI_PHASE5_SETTLEMENT_LAYER_RUN_WINDOWS_ROLE_RUNBOOKS:-1}"
-run_settlement_bridge_smoke="${CI_PHASE5_SETTLEMENT_LAYER_RUN_CROSS_PLATFORM_INTEROP:-1}"
-run_settlement_state_persistence="${CI_PHASE5_SETTLEMENT_LAYER_RUN_ROLE_COMBINATION_VALIDATION:-1}"
+run_settlement_failsoft="${CI_PHASE5_SETTLEMENT_LAYER_RUN_SETTLEMENT_FAILSOFT:-${CI_PHASE5_SETTLEMENT_LAYER_RUN_WINDOWS_SERVER_PACKAGING:-1}}"
+run_settlement_acceptance="${CI_PHASE5_SETTLEMENT_LAYER_RUN_SETTLEMENT_ACCEPTANCE:-${CI_PHASE5_SETTLEMENT_LAYER_RUN_WINDOWS_ROLE_RUNBOOKS:-1}}"
+run_settlement_bridge_smoke="${CI_PHASE5_SETTLEMENT_LAYER_RUN_SETTLEMENT_BRIDGE_SMOKE:-${CI_PHASE5_SETTLEMENT_LAYER_RUN_CROSS_PLATFORM_INTEROP:-1}}"
+run_settlement_state_persistence="${CI_PHASE5_SETTLEMENT_LAYER_RUN_SETTLEMENT_STATE_PERSISTENCE:-${CI_PHASE5_SETTLEMENT_LAYER_RUN_ROLE_COMBINATION_VALIDATION:-1}}"
 run_phase5_settlement_layer_check="${CI_PHASE5_SETTLEMENT_LAYER_RUN_PHASE5_SETTLEMENT_LAYER_CHECK:-1}"
 run_phase5_settlement_layer_run="${CI_PHASE5_SETTLEMENT_LAYER_RUN_PHASE5_SETTLEMENT_LAYER_RUN:-1}"
 run_phase5_settlement_layer_handoff_check="${CI_PHASE5_SETTLEMENT_LAYER_RUN_PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK:-1}"
@@ -241,10 +241,10 @@ bool_arg_or_die "--run-phase5-settlement-layer-run" "$run_phase5_settlement_laye
 bool_arg_or_die "--run-phase5-settlement-layer-handoff-check" "$run_phase5_settlement_layer_handoff_check"
 bool_arg_or_die "--run-phase5-settlement-layer-handoff-run" "$run_phase5_settlement_layer_handoff_run"
 
-settlement_failsoft_script="${CI_PHASE5_SETTLEMENT_LAYER_WINDOWS_SERVER_PACKAGING_SCRIPT:-$ROOT_DIR/scripts/integration_easy_node_server_preflight.sh}"
-settlement_acceptance_script="${CI_PHASE5_SETTLEMENT_LAYER_WINDOWS_ROLE_RUNBOOKS_SCRIPT:-$ROOT_DIR/scripts/integration_prod_operator_lifecycle_runbook.sh}"
-settlement_bridge_smoke_script="${CI_PHASE5_SETTLEMENT_LAYER_CROSS_PLATFORM_INTEROP_SCRIPT:-$ROOT_DIR/scripts/integration_three_machine_prod_signoff.sh}"
-settlement_state_persistence_script="${CI_PHASE5_SETTLEMENT_LAYER_ROLE_COMBINATION_VALIDATION_SCRIPT:-$ROOT_DIR/scripts/integration_machine_b_federation_check.sh}"
+settlement_failsoft_script="${CI_PHASE5_SETTLEMENT_LAYER_SETTLEMENT_FAILSOFT_SCRIPT:-${CI_PHASE5_SETTLEMENT_LAYER_WINDOWS_SERVER_PACKAGING_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_settlement_failsoft.sh}}"
+settlement_acceptance_script="${CI_PHASE5_SETTLEMENT_LAYER_SETTLEMENT_ACCEPTANCE_SCRIPT:-${CI_PHASE5_SETTLEMENT_LAYER_WINDOWS_ROLE_RUNBOOKS_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_settlement_acceptance_paths.sh}}"
+settlement_bridge_smoke_script="${CI_PHASE5_SETTLEMENT_LAYER_SETTLEMENT_BRIDGE_SMOKE_SCRIPT:-${CI_PHASE5_SETTLEMENT_LAYER_CROSS_PLATFORM_INTEROP_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_tdpnd_settlement_bridge_smoke.sh}}"
+settlement_state_persistence_script="${CI_PHASE5_SETTLEMENT_LAYER_SETTLEMENT_STATE_PERSISTENCE_SCRIPT:-${CI_PHASE5_SETTLEMENT_LAYER_ROLE_COMBINATION_VALIDATION_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_tdpnd_state_dir_persistence.sh}}"
 phase5_settlement_layer_check_script="${CI_PHASE5_SETTLEMENT_LAYER_PHASE5_SETTLEMENT_LAYER_CHECK_SCRIPT:-$ROOT_DIR/scripts/integration_phase5_settlement_layer_check.sh}"
 phase5_settlement_layer_run_script="${CI_PHASE5_SETTLEMENT_LAYER_PHASE5_SETTLEMENT_LAYER_RUN_SCRIPT:-$ROOT_DIR/scripts/integration_phase5_settlement_layer_run.sh}"
 phase5_settlement_layer_handoff_check_script="${CI_PHASE5_SETTLEMENT_LAYER_PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_SCRIPT:-$ROOT_DIR/scripts/integration_phase5_settlement_layer_handoff_check.sh}"
@@ -431,4 +431,3 @@ if [[ "$print_summary_json" == "1" ]]; then
 fi
 
 exit "$final_rc"
-
