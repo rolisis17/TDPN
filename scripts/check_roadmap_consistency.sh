@@ -561,7 +561,9 @@ if ! rg -Fq "PreviewEpochSelection" "$chain_grpc_registry_test_file"; then
 fi
 for app_roundtrip_contract in \
   "ListRewardAccruals" \
-  "ListSlashEvidence"
+  "ListSlashEvidence" \
+  "ListDistributionRecords" \
+  "ListPenaltyDecisions"
 do
   if ! rg -Fq "$app_roundtrip_contract" "$chain_grpc_registry_test_file"; then
     echo "grpc app roundtrip test suite must include slashing/rewards contract marker: $app_roundtrip_contract"

@@ -116,10 +116,16 @@ func TestRegisterGRPCServicesBillingAndSponsorRoundTrip(t *testing.T) {
 	if _, err := rewardsQuery.ListRewardAccruals(ctx, &vpnrewardspb.QueryListRewardAccrualsRequest{}); err != nil {
 		t.Fatalf("rewards list accruals: %v", err)
 	}
+	if _, err := rewardsQuery.ListDistributionRecords(ctx, &vpnrewardspb.QueryListDistributionRecordsRequest{}); err != nil {
+		t.Fatalf("rewards list distribution records: %v", err)
+	}
 
 	slashingQuery := vpnslashingpb.NewQueryClient(conn)
 	if _, err := slashingQuery.ListSlashEvidence(ctx, &vpnslashingpb.QueryListSlashEvidenceRequest{}); err != nil {
 		t.Fatalf("slashing list evidence: %v", err)
+	}
+	if _, err := slashingQuery.ListPenaltyDecisions(ctx, &vpnslashingpb.QueryListPenaltyDecisionsRequest{}); err != nil {
+		t.Fatalf("slashing list penalty decisions: %v", err)
 	}
 
 	sponsorMsg := vpnsponsorpb.NewMsgClient(conn)
