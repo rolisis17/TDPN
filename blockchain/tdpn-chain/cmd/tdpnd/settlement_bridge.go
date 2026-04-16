@@ -17,6 +17,7 @@ import (
 	rewardtypes "github.com/tdpn/tdpn-chain/x/vpnrewards/types"
 	slashingtypes "github.com/tdpn/tdpn-chain/x/vpnslashing/types"
 	sponsortypes "github.com/tdpn/tdpn-chain/x/vpnsponsor/types"
+	validatormodule "github.com/tdpn/tdpn-chain/x/vpnvalidator/module"
 	validatortypes "github.com/tdpn/tdpn-chain/x/vpnvalidator/types"
 )
 
@@ -110,6 +111,16 @@ type settlementValidatorStatusPayload struct {
 	EvidenceRef      string    `json:"EvidenceRef"`
 	RecordedAt       time.Time `json:"RecordedAt"`
 	Status           string    `json:"Status"`
+}
+
+type settlementValidatorEpochSelectionPreviewPayload struct {
+	Policy     validatortypes.EpochSelectionPolicy      `json:"Policy"`
+	Candidates []validatortypes.EpochValidatorCandidate `json:"Candidates"`
+}
+
+type settlementValidatorEpochSelectionPreviewResponse struct {
+	OK      bool                                `json:"ok"`
+	Preview validatortypes.EpochSelectionResult `json:"preview"`
 }
 
 type settlementGovernancePolicyPayload struct {
@@ -214,6 +225,8 @@ func (h *settlementBridgeHandler) routes() http.Handler {
 	mux.HandleFunc("/x/vpnvalidator/eligibilities/", h.handleValidatorEligibilities)
 	mux.HandleFunc("/x/vpnvalidator/status-records", h.handleValidatorStatusRecords)
 	mux.HandleFunc("/x/vpnvalidator/status-records/", h.handleValidatorStatusRecords)
+	mux.HandleFunc("/x/vpnvalidator/epoch-selection-preview", h.handleValidatorEpochSelectionPreview)
+	mux.HandleFunc("/x/vpnvalidator/epoch-selection-preview/", h.handleValidatorEpochSelectionPreview)
 	mux.HandleFunc("/x/vpngovernance/policies", h.handleGovernancePolicies)
 	mux.HandleFunc("/x/vpngovernance/policies/", h.handleGovernancePolicies)
 	mux.HandleFunc("/x/vpngovernance/decisions", h.handleGovernanceDecisions)
@@ -941,6 +954,42 @@ func (h *settlementBridgeHandler) handleValidatorStatusRecords(w http.ResponseWr
 	})
 }
 
+func (h *settlementBridgeHandler) handleValidatorEpochSelectionPreview(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, bridgeEnvelope{OK: false, Error: "method not allowed"})
+		return
+	}
+	if !h.authorizePOST(w, r) {
+		return
+	}
+
+	var payload settlementValidatorEpochSelectionPreviewPayload
+	if err := decodeJSON(r, &payload); err != nil {
+		writeJSON(w, http.StatusBadRequest, bridgeEnvelope{OK: false, Error: err.Error()})
+		return
+	}
+
+	queryServer, err := h.validatorEpochSelectionPreviewQueryServer()
+	if err != nil {
+		writeBridgeError(w, err)
+		return
+	}
+
+	resp, err := queryServer.PreviewEpochSelection(validatormodule.PreviewEpochSelectionRequest{
+		Policy:     payload.Policy,
+		Candidates: payload.Candidates,
+	})
+	if err != nil {
+		writeBridgeError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, settlementValidatorEpochSelectionPreviewResponse{
+		OK:      true,
+		Preview: normalizeEpochSelectionResult(resp.Result),
+	})
+}
+
 func (h *settlementBridgeHandler) handleGovernancePolicies(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		policyID, hasID, ok := getEntityID(r.URL.Path, "/x/vpngovernance/policies")
@@ -1177,6 +1226,19 @@ func (h *settlementBridgeHandler) authorizePOST(w http.ResponseWriter, r *http.R
 	return true
 }
 
+func (h *settlementBridgeHandler) validatorEpochSelectionPreviewQueryServer() (validatormodule.QueryServer, error) {
+	if h == nil || h.scaffold == nil {
+		return validatormodule.QueryServer{}, errors.New("vpnvalidator preview query server not wired")
+	}
+
+	scaffold, ok := h.scaffold.(*app.ChainScaffold)
+	if !ok || scaffold == nil {
+		return validatormodule.QueryServer{}, errors.New("vpnvalidator preview query server not wired")
+	}
+
+	return validatormodule.NewQueryServer(&scaffold.ValidatorModule.Keeper), nil
+}
+
 func hasValidBearerTokenHeader(rawHeader, expectedToken string) bool {
 	rawHeader = strings.TrimSpace(rawHeader)
 	parts := strings.SplitN(rawHeader, " ", 2)
@@ -1218,6 +1280,16 @@ func mapReconciliationStatus(raw string, fallback chaintypes.ReconciliationStatu
 	default:
 		return fallback
 	}
+}
+
+func normalizeEpochSelectionResult(result validatortypes.EpochSelectionResult) validatortypes.EpochSelectionResult {
+	if result.StableSeats == nil {
+		result.StableSeats = []validatortypes.EpochValidatorCandidate{}
+	}
+	if result.RotatingSeats == nil {
+		result.RotatingSeats = []validatortypes.EpochValidatorCandidate{}
+	}
+	return result
 }
 
 func decodeJSON(r *http.Request, out any) error {

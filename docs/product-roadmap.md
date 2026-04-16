@@ -240,7 +240,7 @@ Current implementation posture:
 - phase7 handoff wrappers stay fail-closed for cutover readiness and keep optional operator approval semantics unchanged.
 - phase7 cutover keeps VPN dataplane independent from chain liveness; chain-side write degradation remains deferred/reconciled and must not block forwarding.
 - Mainnet activation gate reporting stays aligned with the `Mainnet Activation Go/No-Go Metrics Gate` in `docs/blockchain-bootstrap-validator-plan.md`: the canonical validator-policy summary can be ingested through `scripts/roadmap_progress_report.sh`, and the default production decision remains NO-GO until the full gate window is met.
-- settlement bridge live process smoke now validates auth enforcement, write acceptance, and billing/rewards/sponsor/slashing/validator/governance GET by-id plus list query behavior in auth-enabled runtime mode.
+- settlement bridge live process smoke (`scripts/integration_cosmos_tdpnd_settlement_bridge_live_smoke.sh`) now validates auth enforcement, write acceptance, and billing/rewards/sponsor/slashing/validator/governance GET by-id plus list query behavior in auth-enabled runtime mode, and it now also covers `tdpn.vpnvalidator.v1.Query/PreviewEpochSelection` auth posture and deterministic preview selection through the live gRPC runtime.
 - easy-node exposes blockchain summary wrappers:
   - `./scripts/easy_node.sh phase5-settlement-layer-summary-report`
   - `./scripts/easy_node.sh phase6-cosmos-l1-summary-report`

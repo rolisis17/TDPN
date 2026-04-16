@@ -143,7 +143,7 @@ Exit gate:
 - Phase 7 cutover safety posture requires phase6 readiness signals, dual-write parity confirmation, rollback path readiness, and an optional operator approval gate before promotion.
 - Phase 7 cutover keeps VPN dataplane independent from chain liveness; chain-side write outages remain deferred/reconciled and must not block forwarding.
 - Settlement confirmation lifecycle posture is canonicalized as `pending` -> `submitted` -> `confirmed` with explicit `failed` records retained for replay/reconciliation.
-- Settlement bridge live process smoke now validates auth enforcement, write acceptance, and billing/rewards/sponsor/slashing/validator/governance GET by-id plus list query behavior in auth-enabled runtime mode.
+- Settlement bridge live process smoke (`scripts/integration_cosmos_tdpnd_settlement_bridge_live_smoke.sh`) now validates auth enforcement, write acceptance, and billing/rewards/sponsor/slashing/validator/governance GET by-id plus list query behavior in auth-enabled runtime mode, and it now also covers `tdpn.vpnvalidator.v1.Query/PreviewEpochSelection` auth posture and deterministic preview selection through the live gRPC runtime.
 
 ## Non-Negotiables
 

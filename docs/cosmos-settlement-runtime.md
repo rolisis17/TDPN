@@ -183,6 +183,7 @@ Exit settlement status endpoint:
 - Governance/validator bootstrap RPC highlights:
   - `tdpn.vpngovernance.v1.Msg/RecordAuditAction` plus query surfaces `GovernanceAuditAction` and `ListGovernanceAuditActions`.
   - `tdpn.vpnvalidator.v1.Query/PreviewEpochSelection` for deterministic validator-set preview from policy + candidate inputs.
+  - `scripts/integration_cosmos_tdpnd_settlement_bridge_live_smoke.sh` now exercises `PreviewEpochSelection` with and without `--grpc-auth-token` so the preview endpoint stays bearer-gated in auth mode and remains deterministic when authenticated.
 - Optional local serve mode:
   - `go run ./cmd/tdpnd --grpc-listen 127.0.0.1:9090`
   - optional runtime hardening flags:
@@ -218,6 +219,7 @@ Exit settlement status endpoint:
   - `integration_cosmos_tdpnd_settlement_bridge_smoke.sh`: targeted settlement HTTP bridge runtime tests (`/health`, module POST writes, module GET query/list paths, auth checks, and combined gRPC/HTTP serve mode).
   - `integration_cosmos_tdpnd_state_dir_persistence.sh`: targeted state-dir persistence tests (`app` scaffold reopen + `cmd/tdpnd` state-dir runtime wiring/error propagation).
   - `integration_cosmos_tdpnd_settlement_bridge_live_smoke.sh`: live `tdpnd --settlement-http-listen` process smoke (startup, auth enforcement, module POST acceptance, billing/rewards/sponsor/slashing/validator/governance GET by-id/list query coverage, graceful shutdown).
+  - `integration_cosmos_tdpnd_settlement_bridge_live_smoke.sh` also validates `tdpn.vpnvalidator.v1.Query/PreviewEpochSelection` auth posture and deterministic seat selection through the live gRPC runtime.
   - `integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh`: live adapter roundtrip from `pkg/settlement` into `tdpnd` bridge endpoints (settlement/reward/sponsor/slash submission paths).
   - `integration_cosmos_tdpnd_grpc_live_smoke.sh`: live `tdpnd --grpc-listen` process smoke (startup, health/reflection availability, reflected module-service parity, billing/rewards/slashing/sponsor/validator/governance query dispatch, graceful shutdown).
   - `integration_cosmos_tdpnd_grpc_auth_live_smoke.sh`: live `tdpnd --grpc-auth-token` process smoke (health-open posture plus bearer-token gating for billing/rewards/slashing/sponsor/validator/governance query RPCs).

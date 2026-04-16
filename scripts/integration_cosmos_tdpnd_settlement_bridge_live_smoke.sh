@@ -10,6 +10,7 @@ export GOCACHE="${GOCACHE:-$ROOT_DIR/.gocache}"
 LOG_FILE="$(mktemp -t tdpnd-settlement-bridge-live.XXXXXX.log)"
 RESP_FILE="$(mktemp -t tdpnd-settlement-bridge-resp.XXXXXX.json)"
 GRPC_HELPER_FILE=""
+GRPC_PREVIEW_HELPER_FILE=""
 TDPND_PID=""
 
 signal_runtime() {
@@ -50,6 +51,9 @@ cleanup() {
   rm -f "${LOG_FILE}" "${RESP_FILE}"
   if [[ -n "${GRPC_HELPER_FILE}" ]]; then
     rm -f "${GRPC_HELPER_FILE}"
+  fi
+  if [[ -n "${GRPC_PREVIEW_HELPER_FILE}" ]]; then
+    rm -f "${GRPC_PREVIEW_HELPER_FILE}"
   fi
   set -e
 }
@@ -210,6 +214,103 @@ func main() {
 }
 EOF
 
+GRPC_PREVIEW_HELPER_FILE="$(mktemp "${ROOT_DIR}/blockchain/tdpn-chain/tdpnd-validator-preview-seed-XXXXXX.go")"
+cat >"${GRPC_PREVIEW_HELPER_FILE}" <<'EOF'
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"strconv"
+	"time"
+
+	vpnvalidatorpb "github.com/tdpn/tdpn-chain/proto/gen/go/tdpn/vpnvalidator/v1"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
+)
+
+func main() {
+	if len(os.Args) != 4 {
+		fmt.Fprintf(os.Stderr, "usage: %s <grpc-port> <token> <validator-id>\n", os.Args[0])
+		os.Exit(2)
+	}
+
+	grpcPort, err := strconv.Atoi(os.Args[1])
+	if err != nil || grpcPort <= 0 {
+		fmt.Fprintf(os.Stderr, "invalid grpc port %q: %v\n", os.Args[1], err)
+		os.Exit(2)
+	}
+
+	target := fmt.Sprintf("127.0.0.1:%d", grpcPort)
+	var conn *grpc.ClientConn
+	for attempt := 0; attempt < 50; attempt++ {
+		dialCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		conn, err = grpc.DialContext(dialCtx, target, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock())
+		cancel()
+		if err == nil {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "dial grpc %s: %v\n", target, err)
+		os.Exit(1)
+	}
+	defer conn.Close()
+
+	client := vpnvalidatorpb.NewQueryClient(conn)
+	previewReq := &vpnvalidatorpb.QueryPreviewEpochSelectionRequest{
+		Policy: &vpnvalidatorpb.EpochSelectionPolicy{
+			Epoch:               29,
+			StableSeatCount:     1,
+			RotatingSeatCount:   0,
+			MinStake:            1,
+			MinStakeAgeEpochs:   1,
+			MinHealthScore:      1,
+			MinResourceHeadroom: 1,
+		},
+		Candidates: []*vpnvalidatorpb.EpochValidatorCandidate{
+			{
+				ValidatorId:         os.Args[3],
+				OperatorId:          "operator-preview-1",
+				Asn:                 "64514",
+				Region:              "au-east",
+				Stake:               100,
+				StakeAgeEpochs:      9,
+				HealthScore:         100,
+				ResourceHeadroom:    100,
+				Score:               100,
+				StableSeatPreferred: true,
+			},
+		},
+	}
+
+	if _, err := client.PreviewEpochSelection(context.Background(), previewReq); status.Code(err) != codes.Unauthenticated {
+		fmt.Fprintf(os.Stderr, "expected unauthenticated preview call to fail with codes.Unauthenticated, got %v\n", err)
+		os.Exit(1)
+	}
+
+	callCtx := metadata.AppendToOutgoingContext(context.Background(), "authorization", "Bearer "+os.Args[2])
+	resp, err := client.PreviewEpochSelection(callCtx, previewReq)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "preview epoch selection: %v\n", err)
+		os.Exit(1)
+	}
+	if resp.GetResult() == nil {
+		fmt.Fprintln(os.Stderr, "expected non-nil preview epoch selection result")
+		os.Exit(1)
+	}
+	if len(resp.GetResult().GetStableSeats())+len(resp.GetResult().GetRotatingSeats()) == 0 {
+		fmt.Fprintf(os.Stderr, "expected preview epoch selection to choose validator %q, got %+v\n", os.Args[3], resp.GetResult())
+		os.Exit(1)
+	}
+}
+EOF
+
 (
   cd blockchain/tdpn-chain
   go run ./cmd/tdpnd --grpc-listen "127.0.0.1:${GRPC_PORT}" --grpc-auth-token "${TOKEN}" --settlement-http-listen "127.0.0.1:${PORT}" --settlement-http-auth-token "${TOKEN}"
@@ -250,6 +351,13 @@ grep -q '"ok"[[:space:]]*:[[:space:]]*true' "${RESP_FILE}"
 )
 rm -f "${GRPC_HELPER_FILE}"
 GRPC_HELPER_FILE=""
+
+(
+  cd blockchain/tdpn-chain
+  go run "./$(basename "${GRPC_PREVIEW_HELPER_FILE}")" "${GRPC_PORT}" "${TOKEN}" "val-live-preview-1"
+)
+rm -f "${GRPC_PREVIEW_HELPER_FILE}"
+GRPC_PREVIEW_HELPER_FILE=""
 
 post_expect_status "${BASE_URL}/x/vpnvalidator/eligibilities" '{"ValidatorID":"val-live-1","OperatorAddress":"op-live-1","Eligible":true,"PolicyReason":"bootstrap policy","UpdatedAt":"2026-01-01T00:00:00Z","Status":"confirmed"}' "200" "${TOKEN}"
 grep -q '"ok"[[:space:]]*:[[:space:]]*true' "${RESP_FILE}"

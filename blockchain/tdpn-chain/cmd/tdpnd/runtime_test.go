@@ -12,6 +12,7 @@ import (
 	"io"
 	"math/big"
 	"net"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -1422,6 +1423,107 @@ func TestRunTDPNDGRPCModeRealScaffoldValidatorAndGovernanceRoundTrip(t *testing.
 	case err := <-runDone:
 		if err != nil {
 			t.Fatalf("expected graceful shutdown success, got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for runtime shutdown")
+	}
+}
+
+func TestRunTDPNDSettlementHTTPEpochSelectionPreviewAuthAndMethodBehavior(t *testing.T) {
+	httpListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen http: %v", err)
+	}
+	defer httpListener.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	const authToken = "preview-bridge-secret"
+
+	runDone := make(chan error, 1)
+	go func() {
+		runDone <- runTDPND(
+			ctx,
+			[]string{
+				"--settlement-http-listen", "settlement-preview-test",
+				"--settlement-http-auth-token", authToken,
+			},
+			nil,
+			func() chainScaffold { return app.NewChainScaffold() },
+			runtimeDeps{
+				Listen: func(_, _ string) (net.Listener, error) {
+					return nil, errors.New("grpc listener should not be used")
+				},
+				ListenHTTP: func(_, address string) (net.Listener, error) {
+					if address != "settlement-preview-test" {
+						return nil, errors.New("unexpected settlement listen address")
+					}
+					return httpListener, nil
+				},
+				NewGRPCServer: func(opts ...grpc.ServerOption) grpcRuntimeServer {
+					return grpc.NewServer(opts...)
+				},
+			},
+		)
+	}()
+
+	baseURL := "http://" + httpListener.Addr().String()
+	waitForHTTPReady(t, baseURL+"/health")
+
+	previewPath := baseURL + "/x/vpnvalidator/epoch-selection-preview"
+	requestBody := `{"Policy":{"Epoch":99,"StableSeatCount":1,"RotatingSeatCount":0,"MinStake":1,"MinStakeAgeEpochs":1,"MinHealthScore":1,"MinResourceHeadroom":1,"WarmupEpochs":0,"CooldownEpochs":0,"MaxSeatsPerOperator":0,"MaxSeatsPerASN":0,"MaxSeatsPerRegion":0},"Candidates":[{"ValidatorID":"validator-preview-1","OperatorID":"operator-preview-1","ASN":"64512","Region":"au-west","Stake":100,"StakeAgeEpochs":10,"HealthScore":100,"ResourceHeadroom":100,"HasActiveSanction":false,"HasUnresolvedCriticalIssues":false,"ConsecutiveEligibleEpochs":10,"LastRemovedEpoch":-1,"Score":100,"StableSeatPreferred":true}]}`
+
+	getStatus, getPayload := doJSONRequest(t, http.MethodGet, previewPath, "", nil)
+	if getStatus != http.StatusMethodNotAllowed {
+		t.Fatalf("expected GET preview endpoint to return 405, got %d payload=%v", getStatus, getPayload)
+	}
+
+	postStatus, postPayload := doJSONRequest(t, http.MethodPost, previewPath, requestBody, nil)
+	if postStatus != http.StatusUnauthorized {
+		t.Fatalf("expected unauthenticated preview POST to return 401, got %d payload=%v", postStatus, postPayload)
+	}
+
+	validHeaders := map[string]string{"Authorization": "Bearer " + authToken}
+	postStatus, postPayload = doJSONRequest(t, http.MethodPost, previewPath, requestBody, validHeaders)
+	if postStatus != http.StatusOK {
+		t.Fatalf("expected authenticated preview POST to return 200, got %d payload=%v", postStatus, postPayload)
+	}
+
+	if ok, _ := postPayload["ok"].(bool); !ok {
+		t.Fatalf("expected ok=true preview payload, got %v", postPayload)
+	}
+	preview, ok := postPayload["preview"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected preview object, got %#v", postPayload["preview"])
+	}
+	stableSeats, ok := preview["StableSeats"].([]any)
+	if !ok {
+		t.Fatalf("expected preview.StableSeats array, got %#v", preview["StableSeats"])
+	}
+	if len(stableSeats) != 1 {
+		t.Fatalf("expected one stable seat in preview, got %d payload=%v", len(stableSeats), postPayload)
+	}
+	rotatingSeats, ok := preview["RotatingSeats"].([]any)
+	if !ok {
+		t.Fatalf("expected preview.RotatingSeats array, got %#v", preview["RotatingSeats"])
+	}
+	if len(rotatingSeats) != 0 {
+		t.Fatalf("expected zero rotating seats in preview, got %d payload=%v", len(rotatingSeats), postPayload)
+	}
+	firstSeat, ok := stableSeats[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected preview stable seat object, got %#v", stableSeats[0])
+	}
+	if got := firstSeat["ValidatorID"]; got != "validator-preview-1" {
+		t.Fatalf("expected stable preview validator validator-preview-1, got %v", got)
+	}
+
+	cancel()
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("expected clean shutdown, got %v", err)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for runtime shutdown")

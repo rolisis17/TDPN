@@ -430,6 +430,10 @@ if ! rg -Fq "integration_cosmos_tdpnd_grpc_auth_live_smoke.sh" "$full_plan"; the
   echo "full execution plan must document phase6 tdpnd gRPC auth live-smoke script"
   exit 1
 fi
+if ! rg -Fq "integration_cosmos_tdpnd_settlement_bridge_live_smoke.sh" "$full_plan"; then
+  echo "full execution plan must document settlement bridge live-smoke script"
+  exit 1
+fi
 if ! rg -Fq "tdpnd_comet_runtime_smoke" "$full_plan"; then
   echo "full execution plan must document phase6 tdpnd_comet_runtime_smoke stage"
   exit 1
@@ -719,6 +723,10 @@ if ! rg -Fq "billing/rewards/slashing/sponsor/validator/governance Msg+Query rou
 fi
 if ! rg -Fq "integration_cosmos_tdpnd_grpc_auth_live_smoke.sh" "$product_roadmap"; then
   echo "product roadmap must document phase6 tdpnd gRPC auth live-smoke script"
+  exit 1
+fi
+if ! rg -Fq "integration_cosmos_tdpnd_settlement_bridge_live_smoke.sh" "$product_roadmap"; then
+  echo "product roadmap must document settlement bridge live-smoke script"
   exit 1
 fi
 if ! rg -Fq "tdpnd_comet_runtime_smoke" "$product_roadmap"; then
@@ -1290,6 +1298,10 @@ if ! rg -Fq "TestRunTDPNDSettlementHTTPValidatorGovernanceWriteMethodContract" "
   echo "settlement bridge smoke script must explicitly cover validator/governance write method contract test"
   exit 1
 fi
+if ! rg -Fq "TestRunTDPNDSettlementHTTPValidatorEpochSelectionPreviewContract" "$phase6_settlement_bridge_smoke_script"; then
+  echo "settlement bridge smoke script must explicitly cover validator epoch-selection preview contract test"
+  exit 1
+fi
 for settlement_bridge_smoke_contract in \
   "TestRunTDPNDSettlementHTTPSlashEvidenceRejectsInvalidObjectiveRef" \
   "TestRunTDPNDSettlementHTTPBillingZeroChargeSettlementContract" \
@@ -1332,6 +1344,18 @@ done
 if ! rg -Fq "post_expect_status \"\${BASE_URL}/x/vpnvalidator/eligibilities\"" "$phase6_settlement_bridge_live_smoke_script" \
   || ! rg -Fq "post_expect_status \"\${BASE_URL}/x/vpngovernance/policies\"" "$phase6_settlement_bridge_live_smoke_script"; then
   echo "settlement bridge live-smoke script must explicitly validate validator and governance POST auth contract"
+  exit 1
+fi
+if ! rg -Fq "PreviewEpochSelection" "$phase6_settlement_bridge_live_smoke_script"; then
+  echo "settlement bridge live-smoke script must explicitly validate validator preview query coverage"
+  exit 1
+fi
+if ! rg -Fq "codes.Unauthenticated" "$phase6_settlement_bridge_live_smoke_script"; then
+  echo "settlement bridge live-smoke script must explicitly validate unauthenticated validator preview rejection"
+  exit 1
+fi
+if ! rg -Fq "tdpnd-validator-preview-seed" "$phase6_settlement_bridge_live_smoke_script"; then
+  echo "settlement bridge live-smoke script must include the validator preview gRPC helper"
   exit 1
 fi
 for live_smoke_query_marker in \
@@ -2278,6 +2302,14 @@ if ! rg -Fq "integration_cosmos_grpc_app_roundtrip.sh" "$cosmos_runtime_doc"; th
 fi
 if ! rg -Fq "integration_cosmos_tdpnd_grpc_auth_live_smoke.sh" "$cosmos_runtime_doc"; then
   echo "cosmos settlement runtime guide must document grpc auth live-smoke integration script"
+  exit 1
+fi
+if ! rg -Fq "integration_cosmos_tdpnd_settlement_bridge_live_smoke.sh" "$cosmos_runtime_doc"; then
+  echo "cosmos settlement runtime guide must document settlement bridge live-smoke integration script"
+  exit 1
+fi
+if ! rg -Fq "PreviewEpochSelection" "$cosmos_runtime_doc"; then
+  echo "cosmos settlement runtime guide must document validator preview epoch-selection coverage"
   exit 1
 fi
 if ! rg -Fq "billing/rewards/slashing/sponsor/validator/governance \`Msg\`/\`Query\` contracts" "$cosmos_runtime_doc"; then
