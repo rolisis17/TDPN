@@ -742,8 +742,10 @@ if ! jq -e '
   and .blockchain_track.mainnet_activation_missing_metrics_action.reason == null
   and .blockchain_track.mainnet_activation_missing_metrics_action.normalize_command == null
   and .blockchain_track.mainnet_activation_missing_metrics_action.rerun_bundle_command == null
+  and .blockchain_track.mainnet_activation_missing_metrics_action.checklist_command == null
   and .blockchain_track.mainnet_activation_missing_metrics_action.template_command == null
   and .blockchain_track.mainnet_activation_missing_metrics_action.cycle_command == null
+  and .blockchain_track.mainnet_activation_missing_metrics_action.seeded_cycle_command == null
   and .blockchain_track.phase7_mainnet_cutover_summary_report.available == true
   and .blockchain_track.phase7_mainnet_cutover_summary_report.status == "pass"
   and .blockchain_track.phase7_mainnet_cutover_summary_report.mainnet_activation_gate_go_ok == false
@@ -1059,8 +1061,10 @@ if ! jq -e '
   and .blockchain_track.mainnet_activation_missing_metrics_action.reason == null
   and .blockchain_track.mainnet_activation_missing_metrics_action.normalize_command == null
   and .blockchain_track.mainnet_activation_missing_metrics_action.rerun_bundle_command == null
+  and .blockchain_track.mainnet_activation_missing_metrics_action.checklist_command == null
   and .blockchain_track.mainnet_activation_missing_metrics_action.template_command == null
   and .blockchain_track.mainnet_activation_missing_metrics_action.cycle_command == null
+  and .blockchain_track.mainnet_activation_missing_metrics_action.seeded_cycle_command == null
 ' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_missing_summary.json" >/dev/null; then
   echo "missing gate summary JSON missing expected fallback fields"
   cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_missing_summary.json"
@@ -1141,8 +1145,10 @@ if ! jq -e --arg src "$PHASE7_MAINNET_CUTOVER_CHECK_SUMMARY_JSON" '
   and .blockchain_track.mainnet_activation_missing_metrics_action.reason == null
   and .blockchain_track.mainnet_activation_missing_metrics_action.normalize_command == null
   and .blockchain_track.mainnet_activation_missing_metrics_action.rerun_bundle_command == null
+  and .blockchain_track.mainnet_activation_missing_metrics_action.checklist_command == null
   and .blockchain_track.mainnet_activation_missing_metrics_action.template_command == null
   and .blockchain_track.mainnet_activation_missing_metrics_action.cycle_command == null
+  and .blockchain_track.mainnet_activation_missing_metrics_action.seeded_cycle_command == null
   and .blockchain_track.bootstrap_governance_graduation_gate.available == true
   and .blockchain_track.bootstrap_governance_graduation_gate.status == "GO"
   and .blockchain_track.bootstrap_governance_graduation_gate.decision == "GO"
@@ -1217,8 +1223,10 @@ if ! jq -e --arg src "$PHASE7_MAINNET_CUTOVER_CHECK_NO_GO_SUMMARY_JSON" '
   and .blockchain_track.mainnet_activation_missing_metrics_action.reason == null
   and .blockchain_track.mainnet_activation_missing_metrics_action.normalize_command == null
   and .blockchain_track.mainnet_activation_missing_metrics_action.rerun_bundle_command == null
+  and .blockchain_track.mainnet_activation_missing_metrics_action.checklist_command == null
   and .blockchain_track.mainnet_activation_missing_metrics_action.template_command == null
   and .blockchain_track.mainnet_activation_missing_metrics_action.cycle_command == null
+  and .blockchain_track.mainnet_activation_missing_metrics_action.seeded_cycle_command == null
   and .blockchain_track.bootstrap_governance_graduation_gate.available == true
   and .blockchain_track.bootstrap_governance_graduation_gate.status == "NO-GO"
   and .blockchain_track.bootstrap_governance_graduation_gate.decision == "NO-GO"
@@ -1364,10 +1372,14 @@ if ! jq -e --arg src "$AUTO_MAINNET_GATE_SUMMARY_JSON" '
   and ((.blockchain_track.mainnet_activation_missing_metrics_action.normalize_command // "") | contains("--input-json <operator-metrics-input.json>"))
   and ((.blockchain_track.mainnet_activation_missing_metrics_action.rerun_bundle_command // "") | startswith("./scripts/easy_node.sh blockchain-gate-bundle "))
   and ((.blockchain_track.mainnet_activation_missing_metrics_action.rerun_bundle_command // "") | contains("--blockchain-mainnet-activation-metrics-input-json <operator-metrics-input.json>"))
+  and ((.blockchain_track.mainnet_activation_missing_metrics_action.checklist_command // "") | startswith("./scripts/easy_node.sh blockchain-mainnet-activation-metrics-missing-checklist "))
+  and ((.blockchain_track.mainnet_activation_missing_metrics_action.checklist_command // "") | contains("--metrics-summary-json .easy-node-logs/blockchain_gate_bundle_summary.json"))
   and ((.blockchain_track.mainnet_activation_missing_metrics_action.template_command // "") | startswith("./scripts/easy_node.sh blockchain-mainnet-activation-metrics-input-template "))
   and ((.blockchain_track.mainnet_activation_missing_metrics_action.template_command // "") | contains("--output-json <operator-metrics-input.template.json>"))
   and ((.blockchain_track.mainnet_activation_missing_metrics_action.cycle_command // "") | startswith("./scripts/easy_node.sh blockchain-mainnet-activation-gate-cycle "))
   and ((.blockchain_track.mainnet_activation_missing_metrics_action.cycle_command // "") | contains("--input-json <operator-metrics-input.json>"))
+  and ((.blockchain_track.mainnet_activation_missing_metrics_action.seeded_cycle_command // "") | startswith("./scripts/easy_node.sh blockchain-mainnet-activation-gate-cycle-seeded "))
+  and ((.blockchain_track.mainnet_activation_missing_metrics_action.seeded_cycle_command // "") | contains("--refresh-roadmap 1"))
 ' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_summary.json" >/dev/null; then
   echo "auto-discovered gate summary JSON missing expected fields"
   cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_summary.json"
@@ -1388,6 +1400,11 @@ if ! rg -q 'blockchain-gate-bundle --blockchain-mainnet-activation-metrics-input
   cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"
   exit 1
 fi
+if ! rg -q 'blockchain-mainnet-activation-metrics-missing-checklist --metrics-summary-json .easy-node-logs/blockchain_gate_bundle_summary.json' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"; then
+  echo "auto-discovered report missing missing-checklist command"
+  cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"
+  exit 1
+fi
 if ! rg -q 'blockchain-mainnet-activation-metrics-input-template --output-json <operator-metrics-input.template.json>' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"; then
   echo "auto-discovered report missing metrics-input template command"
   cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"
@@ -1395,6 +1412,11 @@ if ! rg -q 'blockchain-mainnet-activation-metrics-input-template --output-json <
 fi
 if ! rg -q 'blockchain-mainnet-activation-gate-cycle --input-json <operator-metrics-input.json>' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"; then
   echo "auto-discovered report missing one-command gate cycle command"
+  cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"
+  exit 1
+fi
+if ! rg -q 'blockchain-mainnet-activation-gate-cycle-seeded --reports-dir .easy-node-logs/blockchain_mainnet_activation_gate_cycle_seeded' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"; then
+  echo "auto-discovered report missing seeded one-command gate cycle command"
   cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"
   exit 1
 fi
@@ -1406,6 +1428,70 @@ fi
 if ! rg -q 'blockchain_mainnet_activation_missing_metrics_action_template_command=.*blockchain-mainnet-activation-metrics-input-template .* cycle_command=.*blockchain-mainnet-activation-gate-cycle ' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log; then
   echo "auto-discovered log missing template/cycle actionable commands"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log
+  exit 1
+fi
+if ! rg -q 'blockchain_mainnet_activation_missing_metrics_action_checklist_command=.*blockchain-mainnet-activation-metrics-missing-checklist ' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log; then
+  echo "auto-discovered log missing checklist actionable command"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log
+  exit 1
+fi
+if ! rg -q 'blockchain_mainnet_activation_missing_metrics_action_seeded_cycle_command=.*blockchain-mainnet-activation-gate-cycle-seeded ' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log; then
+  echo "auto-discovered log missing seeded cycle actionable command"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log
+  exit 1
+fi
+
+echo "[roadmap-progress-report] blockchain mainnet activation gate auto-discovery ignores seeded artifacts"
+AUTO_MAINNET_GATE_SEEDED_SUMMARY_JSON="$ROADMAP_PROGRESS_TEST_LOGS_ROOT/blockchain_mainnet_activation_gate_cycle_seeded/blockchain_mainnet_activation_gate_summary.json"
+mkdir -p "$(dirname "$AUTO_MAINNET_GATE_SEEDED_SUMMARY_JSON")"
+cat >"$AUTO_MAINNET_GATE_SEEDED_SUMMARY_JSON" <<'EOF_AUTO_MAINNET_GATE_SEEDED'
+{
+  "version": 1,
+  "schema": {
+    "id": "blockchain_mainnet_activation_gate_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "go",
+  "decision": "GO",
+  "go": true,
+  "no_go": false,
+  "reasons": [
+    "seeded example path should be ignored"
+  ],
+  "inputs": {
+    "seed_example_input": true
+  },
+  "source_paths": [
+    "seeded_metrics_input"
+  ]
+}
+EOF_AUTO_MAINNET_GATE_SEEDED
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$MINIMAL_MANUAL_SUMMARY_JSON" \
+  --phase7-mainnet-cutover-summary-json "" \
+  --summary-json "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_seeded_ignored_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_seeded_ignored_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto_seeded_ignored.log 2>&1; then
+  echo "expected success when seeded mainnet activation gate summary exists"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto_seeded_ignored.log
+  exit 1
+fi
+if ! jq -e --arg preferred_src "$AUTO_MAINNET_GATE_SUMMARY_JSON" --arg seeded_src "$AUTO_MAINNET_GATE_SEEDED_SUMMARY_JSON" '
+  .blockchain_track.mainnet_activation_gate.available == true
+  and .blockchain_track.mainnet_activation_gate.status == "no-go"
+  and .blockchain_track.mainnet_activation_gate.decision == "NO-GO"
+  and .blockchain_track.mainnet_activation_gate.go == false
+  and .blockchain_track.mainnet_activation_gate.no_go == true
+  and .blockchain_track.mainnet_activation_gate.input_summary_json == $preferred_src
+  and .blockchain_track.mainnet_activation_gate.source_summary_json == $preferred_src
+  and .blockchain_track.mainnet_activation_gate.source_summary_json != $seeded_src
+' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_seeded_ignored_summary.json" >/dev/null; then
+  echo "auto-discovered mainnet gate did not ignore seeded summary artifact"
+  cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_seeded_ignored_summary.json"
   exit 1
 fi
 
@@ -1458,6 +1544,60 @@ if ! jq -e --arg src "$AUTO_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_SUMMARY_JSON" '
 ' "$TMP_DIR/roadmap_progress_bootstrap_governance_graduation_gate_auto_summary.json" >/dev/null; then
   echo "auto-discovered bootstrap governance graduation gate summary JSON missing expected fields"
   cat "$TMP_DIR/roadmap_progress_bootstrap_governance_graduation_gate_auto_summary.json"
+  exit 1
+fi
+
+echo "[roadmap-progress-report] blockchain bootstrap governance graduation gate auto-discovery ignores seeded artifacts"
+AUTO_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_SEEDED_SUMMARY_JSON="$ROADMAP_PROGRESS_TEST_LOGS_ROOT/blockchain_mainnet_activation_gate_cycle_seeded/blockchain_bootstrap_governance_graduation_gate_summary.json"
+mkdir -p "$(dirname "$AUTO_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_SEEDED_SUMMARY_JSON")"
+cat >"$AUTO_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_SEEDED_SUMMARY_JSON" <<'EOF_AUTO_BOOTSTRAP_GATE_SEEDED'
+{
+  "version": 1,
+  "schema": {
+    "id": "blockchain_bootstrap_governance_graduation_gate_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "NO-GO",
+  "decision": "NO-GO",
+  "go": false,
+  "no_go": true,
+  "reasons": [
+    "seeded bootstrap path should be ignored"
+  ],
+  "inputs": {
+    "seed_example_input": true
+  },
+  "source_paths": [
+    "seeded_bootstrap_metrics_input"
+  ]
+}
+EOF_AUTO_BOOTSTRAP_GATE_SEEDED
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$MINIMAL_MANUAL_SUMMARY_JSON" \
+  --phase7-mainnet-cutover-summary-json "" \
+  --summary-json "$TMP_DIR/roadmap_progress_bootstrap_governance_graduation_gate_auto_seeded_ignored_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_bootstrap_governance_graduation_gate_auto_seeded_ignored_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_bootstrap_governance_graduation_gate_auto_seeded_ignored.log 2>&1; then
+  echo "expected success when seeded bootstrap governance graduation gate summary exists"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_bootstrap_governance_graduation_gate_auto_seeded_ignored.log
+  exit 1
+fi
+if ! jq -e --arg preferred_src "$AUTO_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_SUMMARY_JSON" --arg seeded_src "$AUTO_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_SEEDED_SUMMARY_JSON" '
+  .blockchain_track.bootstrap_governance_graduation_gate.available == true
+  and .blockchain_track.bootstrap_governance_graduation_gate.status == "GO"
+  and .blockchain_track.bootstrap_governance_graduation_gate.decision == "GO"
+  and .blockchain_track.bootstrap_governance_graduation_gate.go == true
+  and .blockchain_track.bootstrap_governance_graduation_gate.no_go == false
+  and .blockchain_track.bootstrap_governance_graduation_gate.input_summary_json == $preferred_src
+  and .blockchain_track.bootstrap_governance_graduation_gate.source_summary_json == $preferred_src
+  and .blockchain_track.bootstrap_governance_graduation_gate.source_summary_json != $seeded_src
+' "$TMP_DIR/roadmap_progress_bootstrap_governance_graduation_gate_auto_seeded_ignored_summary.json" >/dev/null; then
+  echo "auto-discovered bootstrap governance graduation gate did not ignore seeded summary artifact"
+  cat "$TMP_DIR/roadmap_progress_bootstrap_governance_graduation_gate_auto_seeded_ignored_summary.json"
   exit 1
 fi
 
@@ -3179,6 +3319,85 @@ if ! jq -e --arg src "$AUTO_PHASE5_GOOD_JSON" '
 ' "$TMP_DIR/roadmap_progress_auto_phase5_summary.json" >/dev/null; then
   echo "auto phase5 source selection summary mismatch"
   cat "$TMP_DIR/roadmap_progress_auto_phase5_summary.json"
+  exit 1
+fi
+
+echo "[roadmap-progress-report] phase5 sparse source backfills null signals from richer available summary"
+FALLBACK_PHASE5_LOGS_ROOT="$TMP_DIR/fallback_phase5_logs_root"
+FALLBACK_PHASE5_RICH_DIR="$FALLBACK_PHASE5_LOGS_ROOT/rich_older"
+FALLBACK_PHASE5_SPARSE_DIR="$FALLBACK_PHASE5_LOGS_ROOT/sparse_newer"
+mkdir -p "$FALLBACK_PHASE5_RICH_DIR" "$FALLBACK_PHASE5_SPARSE_DIR"
+
+FALLBACK_PHASE5_RICH_JSON="$FALLBACK_PHASE5_RICH_DIR/phase5_settlement_layer_handoff_check_summary.json"
+cat >"$FALLBACK_PHASE5_RICH_JSON" <<'EOF_FALLBACK_PHASE5_RICH'
+{
+  "schema": {
+    "id": "phase5_settlement_layer_handoff_check_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "pass",
+  "settlement_failsoft_ok": true,
+  "settlement_acceptance_ok": true,
+  "settlement_bridge_smoke_ok": true,
+  "settlement_state_persistence_ok": true,
+  "settlement_adapter_roundtrip_status": "pass",
+  "settlement_adapter_roundtrip_ok": true,
+  "issuer_sponsor_api_live_smoke_status": "pass",
+  "issuer_sponsor_api_live_smoke_ok": true,
+  "issuer_settlement_status_live_smoke_status": "pass",
+  "issuer_settlement_status_live_smoke_ok": true
+}
+EOF_FALLBACK_PHASE5_RICH
+touch -t 202601040404 "$FALLBACK_PHASE5_RICH_JSON"
+
+FALLBACK_PHASE5_SPARSE_JSON="$FALLBACK_PHASE5_SPARSE_DIR/phase5_settlement_layer_handoff_check_summary.json"
+cat >"$FALLBACK_PHASE5_SPARSE_JSON" <<'EOF_FALLBACK_PHASE5_SPARSE'
+{
+  "schema": {
+    "id": "phase5_settlement_layer_handoff_check_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "pass",
+  "settlement_failsoft_ok": true,
+  "settlement_acceptance_ok": true,
+  "settlement_bridge_smoke_ok": true,
+  "settlement_state_persistence_ok": true,
+  "issuer_sponsor_api_live_smoke_status": "pass",
+  "issuer_sponsor_api_live_smoke_ok": true
+}
+EOF_FALLBACK_PHASE5_SPARSE
+touch -t 202601050505 "$FALLBACK_PHASE5_SPARSE_JSON"
+
+if ! ROADMAP_PROGRESS_LOGS_ROOT="$FALLBACK_PHASE5_LOGS_ROOT" \
+  run_roadmap_progress_report \
+    --refresh-manual-validation 0 \
+    --refresh-single-machine-readiness 0 \
+    --manual-validation-summary-json "$MINIMAL_MANUAL_SUMMARY_JSON" \
+    --phase5-settlement-layer-summary-json "$FALLBACK_PHASE5_SPARSE_JSON" \
+    --summary-json "$TMP_DIR/roadmap_progress_phase5_sparse_source_fallback_summary.json" \
+    --report-md "$TMP_DIR/roadmap_progress_phase5_sparse_source_fallback_report.md" \
+    --print-report 0 \
+    --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_phase5_sparse_source_fallback.log 2>&1; then
+  echo "expected success for phase5 sparse source fallback path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_phase5_sparse_source_fallback.log
+  exit 1
+fi
+if ! jq -e --arg src "$FALLBACK_PHASE5_SPARSE_JSON" '
+  .status == "warn"
+  and .rc == 0
+  and .vpn_track.phase5_settlement_layer_handoff.available == true
+  and .vpn_track.phase5_settlement_layer_handoff.source_summary_json == $src
+  and .vpn_track.phase5_settlement_layer_handoff.status == "pass"
+  and .vpn_track.phase5_settlement_layer_handoff.settlement_adapter_roundtrip_status == "pass"
+  and .vpn_track.phase5_settlement_layer_handoff.settlement_adapter_roundtrip_ok == true
+  and .vpn_track.phase5_settlement_layer_handoff.issuer_settlement_status_live_smoke_status == "pass"
+  and .vpn_track.phase5_settlement_layer_handoff.issuer_settlement_status_live_smoke_ok == true
+  and .artifacts.phase5_settlement_layer_summary_json == $src
+' "$TMP_DIR/roadmap_progress_phase5_sparse_source_fallback_summary.json" >/dev/null; then
+  echo "phase5 sparse source fallback summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_phase5_sparse_source_fallback_summary.json"
   exit 1
 fi
 

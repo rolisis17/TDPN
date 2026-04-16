@@ -309,6 +309,7 @@ if ! printf '%s\n' "$baseline_json" | jq -e '
   and .summary.profile_default_gate.available == false
   and .summary.profile_default_gate.valid_json == false
   and .summary.profile_default_gate.summary_json == "'"$PROFILE_SIGNOFF_SUMMARY_JSON"'"
+  and (.summary.profile_default_gate.notes | contains("subject fallback when --subject is omitted: CAMPAIGN_SUBJECT (preferred), INVITE_KEY fallback"))
   and .summary.docker_rehearsal_gate.status == "pending"
   and .summary.docker_rehearsal_gate.ready == false
   and .summary.docker_rehearsal_gate.check_id == "three_machine_docker_readiness"
@@ -987,6 +988,7 @@ if ! printf '%s\n' "$profile_blocked_json" | jq -e '
   and (.summary.profile_default_gate.next_command | startswith("sudo ./scripts/easy_node.sh profile-compare-campaign-signoff"))
   and (.summary.profile_default_gate.next_command | contains("--campaign-timeout-sec 1200"))
   and (.summary.profile_default_gate.next_command | contains("--summary-json '"$PROFILE_SIGNOFF_SUMMARY_JSON"'"))
+  and (.summary.profile_default_gate.notes | contains("subject fallback when --subject is omitted: CAMPAIGN_SUBJECT (preferred), INVITE_KEY fallback"))
 ' >/dev/null; then
   echo "profile-blocked status JSON missing expected profile_default_gate fields"
   printf '%s\n' "$profile_blocked_json"
@@ -1037,6 +1039,7 @@ if ! printf '%s\n' "$profile_stale_json" | jq -e '
   and (.summary.profile_default_gate.next_command | startswith("sudo ./scripts/easy_node.sh profile-compare-campaign-signoff"))
   and (.summary.profile_default_gate.next_command | contains("--campaign-timeout-sec 1200"))
   and (.summary.profile_default_gate.next_command | contains("--summary-json '"$PROFILE_SIGNOFF_SUMMARY_JSON"'"))
+  and (.summary.profile_default_gate.notes | contains("subject fallback when --subject is omitted: CAMPAIGN_SUBJECT (preferred), INVITE_KEY fallback"))
 ' >/dev/null; then
   echo "profile-stale status JSON missing expected stale profile_default_gate fields"
   printf '%s\n' "$profile_stale_json"
@@ -1115,6 +1118,7 @@ if ! printf '%s\n' "$profile_no_go_insufficient_json" | jq -e '
   and .summary.profile_default_gate.insufficient_evidence == true
   and (.summary.profile_default_gate.notes | contains("insufficient/unstable"))
   and (.summary.profile_default_gate.notes | contains("operator action: Use a fresh invite key from active issuer and rerun signoff"))
+  and (.summary.profile_default_gate.notes | contains("subject fallback when --subject is omitted: CAMPAIGN_SUBJECT (preferred), INVITE_KEY fallback"))
   and .summary.profile_default_gate.decision_next_operator_action == "Use a fresh invite key from active issuer and rerun signoff"
   and .summary.profile_default_gate.diagnostics_root_required == true
   and .summary.profile_default_gate.next_command_source == "sudo_required_diagnostics_root_required"
@@ -1200,6 +1204,7 @@ if ! printf '%s\n' "$profile_no_go_insufficient_json" | jq -e --arg matrix "$PRO
   and (.summary.profile_default_gate.next_command | contains("--campaign-exit-url http://127.0.0.1:18084"))
   and (.summary.profile_default_gate.next_command_sudo | startswith("sudo ./scripts/easy_node.sh profile-compare-campaign-signoff"))
   and (.summary.profile_default_gate.next_command_sudo | contains("--campaign-timeout-sec 1200"))
+  and (.summary.profile_default_gate.notes | contains("subject fallback when --subject is omitted: CAMPAIGN_SUBJECT (preferred), INVITE_KEY fallback"))
   and (.summary.profile_default_gate.next_command_source | test("docker"))
   and .summary.profile_default_gate.next_command_sudo_only_reason == null
   and .summary.profile_default_gate.docker_rehearsal_hint_available == true
@@ -1260,6 +1265,7 @@ if ! printf '%s\n' "$profile_no_go_insufficient_json" | jq -e '
   and .summary.profile_default_gate.next_command_source == "sudo_required_diagnostics_root_required_docker_start_local_stack_1"
   and .summary.profile_default_gate.next_command_sudo_only_reason == "diagnostics_root_required_docker_start_local_stack_1"
   and (.summary.profile_default_gate.notes | contains("docker hint requires --campaign-start-local-stack 1"))
+  and (.summary.profile_default_gate.notes | contains("subject fallback when --subject is omitted: CAMPAIGN_SUBJECT (preferred), INVITE_KEY fallback"))
   and .summary.profile_default_gate.docker_rehearsal_hint_available == true
 ' >/dev/null; then
   echo "profile-no-go-insufficient docker-stack status JSON missing sudo-selection guidance fields"
@@ -1342,6 +1348,7 @@ if ! printf '%s\n' "$profile_invalid_summary_json" | jq -e '
   and .summary.profile_default_gate.available == true
   and .summary.profile_default_gate.valid_json == false
   and (.summary.profile_default_gate.notes | contains("summary JSON is invalid"))
+  and (.summary.profile_default_gate.notes | contains("subject fallback when --subject is omitted: CAMPAIGN_SUBJECT (preferred), INVITE_KEY fallback"))
   and (
     (.summary.profile_default_gate.next_command | startswith("./scripts/easy_node.sh profile-compare-campaign-signoff"))
     or

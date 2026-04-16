@@ -1832,6 +1832,170 @@ resolve_phase5_bool_with_fallback() {
   fi
 }
 
+phase5_best_signal_source_summary_json() {
+  local preferred_path="$1"
+  local signal="$2"
+  local signal_kind="$3"
+  local logs_root=""
+  local candidate=""
+  local candidate_abs=""
+  local candidate_value=""
+  local candidate_mtime=0
+  local candidate_score=0
+  local candidate_non_dry=1
+  local candidate_non_degraded=1
+  local candidate_quality=0
+  local best_path=""
+  local best_mtime=-1
+  local best_score=-1
+  local best_non_dry=-1
+  local best_non_degraded=-1
+  local best_quality=-999999
+  local seen_paths_nl=$'\n'
+  local -a candidates=()
+
+  preferred_path="$(abs_path "$preferred_path")"
+  if [[ -n "$preferred_path" ]]; then
+    candidates+=("$preferred_path")
+  fi
+
+  logs_root="$(roadmap_resilience_logs_root)"
+  if [[ -d "$logs_root" ]]; then
+    while IFS= read -r -d '' candidate; do
+      candidates+=("$candidate")
+    done < <(find "$logs_root" -type f \
+      \( -name 'phase5_settlement_layer_handoff_check_summary.json' \
+         -o -name 'phase5_settlement_layer_handoff_summary.json' \
+         -o -name 'phase5_settlement_layer_handoff_run_summary.json' \
+         -o -name 'phase5_settlement_layer_check_summary.json' \
+         -o -name 'phase5_settlement_layer_run_summary.json' \) \
+      -print0 2>/dev/null || true)
+  fi
+
+  for candidate in "${candidates[@]}"; do
+    candidate_abs="$(abs_path "$candidate")"
+    if [[ -z "$candidate_abs" ]]; then
+      continue
+    fi
+    if [[ "$seen_paths_nl" == *$'\n'"$candidate_abs"$'\n'* ]]; then
+      continue
+    fi
+    seen_paths_nl+="$candidate_abs"$'\n'
+    if [[ "$(phase5_settlement_layer_summary_usable_01 "$candidate_abs")" != "1" ]]; then
+      continue
+    fi
+
+    candidate_value=""
+    case "$signal_kind" in
+      bool)
+        candidate_value="$(candidate_bool_signal_value_or_empty "$candidate_abs" "$signal")"
+        ;;
+      string)
+        candidate_value="$(candidate_string_signal_value_or_empty "$candidate_abs" "$signal")"
+        ;;
+      *)
+        continue
+        ;;
+    esac
+    if [[ -z "$candidate_value" ]]; then
+      continue
+    fi
+
+    candidate_score="$(phase5_settlement_layer_summary_completeness_score "$candidate_abs")"
+    if ! [[ "$candidate_score" =~ ^[0-9]+$ ]]; then
+      candidate_score=0
+    fi
+    candidate_non_dry=1
+    if [[ "$(summary_effective_dry_run_01 "$candidate_abs")" == "1" ]]; then
+      candidate_non_dry=0
+    fi
+    candidate_non_degraded=1
+    if [[ "$(phase5_settlement_layer_summary_obviously_degraded_01 "$candidate_abs")" == "1" ]]; then
+      candidate_non_degraded=0
+    fi
+    candidate_quality="$(phase5_settlement_layer_summary_quality_score "$candidate_abs")"
+    if ! [[ "$candidate_quality" =~ ^-?[0-9]+$ ]]; then
+      candidate_quality=0
+    fi
+    candidate_mtime="$(file_mtime_epoch "$candidate_abs")"
+    if ! [[ "$candidate_mtime" =~ ^[0-9]+$ ]]; then
+      candidate_mtime=0
+    fi
+
+    if (( candidate_score > best_score )); then
+      best_score="$candidate_score"
+      best_non_dry="$candidate_non_dry"
+      best_non_degraded="$candidate_non_degraded"
+      best_quality="$candidate_quality"
+      best_mtime="$candidate_mtime"
+      best_path="$candidate_abs"
+    elif (( candidate_score == best_score )); then
+      if (( candidate_non_dry > best_non_dry )); then
+        best_non_dry="$candidate_non_dry"
+        best_non_degraded="$candidate_non_degraded"
+        best_quality="$candidate_quality"
+        best_mtime="$candidate_mtime"
+        best_path="$candidate_abs"
+      elif (( candidate_non_dry == best_non_dry )); then
+        if (( candidate_non_degraded > best_non_degraded )); then
+          best_non_degraded="$candidate_non_degraded"
+          best_quality="$candidate_quality"
+          best_mtime="$candidate_mtime"
+          best_path="$candidate_abs"
+        elif (( candidate_non_degraded == best_non_degraded )); then
+          if (( candidate_quality > best_quality )); then
+            best_quality="$candidate_quality"
+            best_mtime="$candidate_mtime"
+            best_path="$candidate_abs"
+          elif (( candidate_quality == best_quality )); then
+            if (( candidate_mtime > best_mtime )); then
+              best_mtime="$candidate_mtime"
+              best_path="$candidate_abs"
+            elif (( candidate_mtime == best_mtime )) && [[ "$candidate_abs" > "$best_path" ]]; then
+              # Deterministic tie-break when score/dryness/degradation/quality/mtime are equal.
+              best_path="$candidate_abs"
+            fi
+          fi
+        fi
+      fi
+    fi
+  done
+
+  printf '%s' "$best_path"
+}
+
+phase5_best_string_signal_from_available() {
+  local preferred_path="$1"
+  local signal="$2"
+  local source_path=""
+  local value=""
+  source_path="$(phase5_best_signal_source_summary_json "$preferred_path" "$signal" "string")"
+  if [[ -z "$source_path" ]]; then
+    printf '%s' ""
+    return
+  fi
+  value="$(candidate_string_signal_value_or_empty "$source_path" "$signal")"
+  printf '%s' "$value"
+}
+
+phase5_best_bool_signal_from_available() {
+  local preferred_path="$1"
+  local signal="$2"
+  local source_path=""
+  local value=""
+  source_path="$(phase5_best_signal_source_summary_json "$preferred_path" "$signal" "bool")"
+  if [[ -z "$source_path" ]]; then
+    printf '%s' "null"
+    return
+  fi
+  value="$(candidate_bool_signal_value_or_empty "$source_path" "$signal")"
+  if [[ -n "$value" ]]; then
+    printf '%s' "$value"
+  else
+    printf '%s' "null"
+  fi
+}
+
 phase6_cosmos_l1_summary_kind_from_source() {
   local path="$1"
   local schema_id=""
@@ -2038,6 +2202,9 @@ find_latest_blockchain_mainnet_activation_gate_summary_json() {
     if [[ "$(json_file_valid_01 "$candidate")" != "1" ]]; then
       continue
     fi
+    if [[ "$(blockchain_gate_candidate_is_seeded_01 "$candidate")" == "1" ]]; then
+      continue
+    fi
     candidate_mtime="$(file_mtime_epoch "$candidate")"
     if ! [[ "$candidate_mtime" =~ ^[0-9]+$ ]]; then
       candidate_mtime=0
@@ -2054,6 +2221,32 @@ find_latest_blockchain_mainnet_activation_gate_summary_json() {
        -o -name '*activation*gate*summary*.json' \) \
     -print0 2>/dev/null || true)
   printf '%s' "$best_path"
+}
+
+blockchain_gate_candidate_is_seeded_01() {
+  local path="$1"
+  local path_lc=""
+  path_lc="$(printf '%s' "$path" | tr '[:upper:]' '[:lower:]')"
+
+  case "$path_lc" in
+    *blockchain_mainnet_activation_gate_cycle_seeded*|*blockchain-mainnet-activation-gate-cycle-seeded*|*blockchain_mainnet_activation_gate_seeded*|*blockchain_bootstrap_governance_graduation_gate_seeded*)
+      printf '1'
+      return
+      ;;
+  esac
+
+  if [[ -f "$path" ]] && jq -e '
+    ((.inputs.seed_example_input // false) | type == "boolean" and . == true)
+    or ((.inputs.include_example_values // false) | type == "boolean" and . == true)
+    or ((.include_example_values // false) | type == "boolean" and . == true)
+    or (((.artifacts.summary_json // "") | tostring | ascii_downcase) | contains("cycle_seeded"))
+    or (((.artifacts.canonical_summary_json // "") | tostring | ascii_downcase) | contains("cycle_seeded"))
+  ' "$path" >/dev/null 2>&1; then
+    printf '1'
+    return
+  fi
+
+  printf '0'
 }
 
 blockchain_mainnet_activation_gate_summary_normalize_json() {
@@ -2206,6 +2399,9 @@ find_latest_blockchain_bootstrap_governance_graduation_gate_summary_json() {
   fi
   while IFS= read -r -d '' candidate; do
     if [[ "$(json_file_valid_01 "$candidate")" != "1" ]]; then
+      continue
+    fi
+    if [[ "$(blockchain_gate_candidate_is_seeded_01 "$candidate")" == "1" ]]; then
       continue
     fi
     candidate_mtime="$(file_mtime_epoch "$candidate")"
@@ -3914,6 +4110,26 @@ if [[ -n "$phase5_settlement_layer_summary_json" ]]; then
           fi
         fi
       fi
+      if [[ -z "$phase5_settlement_layer_handoff_settlement_adapter_roundtrip_status_json" ]]; then
+        phase5_settlement_layer_handoff_settlement_adapter_roundtrip_status_json="$(phase5_best_string_signal_from_available \
+          "$phase5_settlement_layer_handoff_source_summary_json" \
+          "settlement_adapter_roundtrip_status")"
+      fi
+      if [[ "$phase5_settlement_layer_handoff_settlement_adapter_roundtrip_ok_json" == "null" ]]; then
+        phase5_settlement_layer_handoff_settlement_adapter_roundtrip_ok_json="$(phase5_best_bool_signal_from_available \
+          "$phase5_settlement_layer_handoff_source_summary_json" \
+          "settlement_adapter_roundtrip_ok")"
+      fi
+      if [[ "$phase5_settlement_layer_handoff_settlement_adapter_roundtrip_ok_json" == "null" ]]; then
+        case "${phase5_settlement_layer_handoff_settlement_adapter_roundtrip_status_json,,}" in
+          pass)
+            phase5_settlement_layer_handoff_settlement_adapter_roundtrip_ok_json="true"
+            ;;
+          fail)
+            phase5_settlement_layer_handoff_settlement_adapter_roundtrip_ok_json="false"
+            ;;
+        esac
+      fi
       phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_status_json="$(jq -r '
         if (.issuer_sponsor_api_live_smoke_status | type) == "string" then .issuer_sponsor_api_live_smoke_status
         elif (.summary.issuer_sponsor_api_live_smoke_status | type) == "string" then .summary.issuer_sponsor_api_live_smoke_status
@@ -3996,6 +4212,16 @@ if [[ -n "$phase5_settlement_layer_summary_json" ]]; then
               elif $s == "fail" then false
               else empty end
           end')"
+      if [[ -z "$phase5_settlement_layer_handoff_issuer_settlement_status_live_smoke_status_json" ]]; then
+        phase5_settlement_layer_handoff_issuer_settlement_status_live_smoke_status_json="$(phase5_best_string_signal_from_available \
+          "$phase5_settlement_layer_handoff_source_summary_json" \
+          "issuer_settlement_status_live_smoke_status")"
+      fi
+      if [[ "$phase5_settlement_layer_handoff_issuer_settlement_status_live_smoke_ok_json" == "null" ]]; then
+        phase5_settlement_layer_handoff_issuer_settlement_status_live_smoke_ok_json="$(phase5_best_bool_signal_from_available \
+          "$phase5_settlement_layer_handoff_source_summary_json" \
+          "issuer_settlement_status_live_smoke_ok")"
+      fi
       if [[ "$phase5_settlement_layer_handoff_issuer_settlement_status_live_smoke_ok_json" == "null" ]]; then
         case "${phase5_settlement_layer_handoff_issuer_settlement_status_live_smoke_status_json,,}" in
           pass)
@@ -4640,8 +4866,10 @@ blockchain_mainnet_activation_missing_metrics_action_id=""
 blockchain_mainnet_activation_missing_metrics_action_reason=""
 blockchain_mainnet_activation_missing_metrics_action_normalize_command=""
 blockchain_mainnet_activation_missing_metrics_action_rerun_bundle_command=""
+blockchain_mainnet_activation_missing_metrics_action_checklist_command=""
 blockchain_mainnet_activation_missing_metrics_action_template_command=""
 blockchain_mainnet_activation_missing_metrics_action_cycle_command=""
+blockchain_mainnet_activation_missing_metrics_action_seeded_cycle_command=""
 blockchain_mainnet_activation_missing_metrics_reasons_match_json="$(
   jq -r '
     if any(.[]?; ((. | tostring | ascii_downcase) | test("missing or invalid metric|missing required metrics|missing metrics|invalid metrics|required_metrics|metrics_json"))) then
@@ -4661,8 +4889,10 @@ if [[ "$blockchain_mainnet_activation_gate_source_summary_kind" != "" ]] \
   blockchain_mainnet_activation_missing_metrics_action_reason="mainnet activation gate is NO-GO because required metrics evidence is missing/invalid; normalize operator metrics input and rerun gate bundle."
   blockchain_mainnet_activation_missing_metrics_action_normalize_command="./scripts/easy_node.sh blockchain-mainnet-activation-metrics-input --input-json <operator-metrics-input.json> --summary-json .easy-node-logs/blockchain_mainnet_activation_metrics_input_summary.json --canonical-summary-json .easy-node-logs/blockchain_mainnet_activation_metrics_input.json --print-summary-json 1"
   blockchain_mainnet_activation_missing_metrics_action_rerun_bundle_command="./scripts/easy_node.sh blockchain-gate-bundle --blockchain-mainnet-activation-metrics-input-json <operator-metrics-input.json> --summary-json .easy-node-logs/blockchain_gate_bundle_latest_summary.json --canonical-summary-json .easy-node-logs/blockchain_gate_bundle_summary.json --print-summary-json 1"
+  blockchain_mainnet_activation_missing_metrics_action_checklist_command="./scripts/easy_node.sh blockchain-mainnet-activation-metrics-missing-checklist --metrics-summary-json .easy-node-logs/blockchain_gate_bundle_summary.json --output-json .easy-node-logs/blockchain_mainnet_activation_metrics_missing_checklist.json --output-md .easy-node-logs/blockchain_mainnet_activation_metrics_missing_checklist.md --print-output-json 1"
   blockchain_mainnet_activation_missing_metrics_action_template_command="./scripts/easy_node.sh blockchain-mainnet-activation-metrics-input-template --output-json <operator-metrics-input.template.json> --canonical-output-json .easy-node-logs/blockchain_mainnet_activation_metrics_input_template.json --print-output-json 1"
   blockchain_mainnet_activation_missing_metrics_action_cycle_command="./scripts/easy_node.sh blockchain-mainnet-activation-gate-cycle --input-json <operator-metrics-input.json> --reports-dir .easy-node-logs/blockchain_mainnet_activation_gate_cycle --summary-json .easy-node-logs/blockchain_mainnet_activation_gate_cycle_latest_summary.json --canonical-summary-json .easy-node-logs/blockchain_mainnet_activation_gate_cycle_summary.json --refresh-roadmap 1 --print-summary-json 1"
+  blockchain_mainnet_activation_missing_metrics_action_seeded_cycle_command="./scripts/easy_node.sh blockchain-mainnet-activation-gate-cycle-seeded --reports-dir .easy-node-logs/blockchain_mainnet_activation_gate_cycle_seeded --summary-json .easy-node-logs/blockchain_mainnet_activation_gate_cycle_seeded_latest_summary.json --canonical-summary-json .easy-node-logs/blockchain_mainnet_activation_gate_cycle_seeded_summary.json --refresh-roadmap 1 --print-summary-json 1"
 fi
 
 readiness_status="$(jq -r '.report.readiness_status // "UNKNOWN"' "$manual_validation_summary_json")"
@@ -5308,8 +5538,10 @@ summary_payload="$(jq -n \
   --arg blockchain_mainnet_activation_missing_metrics_action_reason "$blockchain_mainnet_activation_missing_metrics_action_reason" \
   --arg blockchain_mainnet_activation_missing_metrics_action_normalize_command "$blockchain_mainnet_activation_missing_metrics_action_normalize_command" \
   --arg blockchain_mainnet_activation_missing_metrics_action_rerun_bundle_command "$blockchain_mainnet_activation_missing_metrics_action_rerun_bundle_command" \
+  --arg blockchain_mainnet_activation_missing_metrics_action_checklist_command "$blockchain_mainnet_activation_missing_metrics_action_checklist_command" \
   --arg blockchain_mainnet_activation_missing_metrics_action_template_command "$blockchain_mainnet_activation_missing_metrics_action_template_command" \
   --arg blockchain_mainnet_activation_missing_metrics_action_cycle_command "$blockchain_mainnet_activation_missing_metrics_action_cycle_command" \
+  --arg blockchain_mainnet_activation_missing_metrics_action_seeded_cycle_command "$blockchain_mainnet_activation_missing_metrics_action_seeded_cycle_command" \
   --arg profile_default_gate_status "$profile_default_gate_status" \
   --arg profile_default_gate_next_command "$profile_default_gate_next_command" \
   --arg profile_default_gate_next_command_sudo "$profile_default_gate_next_command_sudo" \
@@ -5590,8 +5822,10 @@ summary_payload="$(jq -n \
         reason: (if $blockchain_mainnet_activation_missing_metrics_action_reason == "" then null else $blockchain_mainnet_activation_missing_metrics_action_reason end),
         normalize_command: (if $blockchain_mainnet_activation_missing_metrics_action_normalize_command == "" then null else $blockchain_mainnet_activation_missing_metrics_action_normalize_command end),
         rerun_bundle_command: (if $blockchain_mainnet_activation_missing_metrics_action_rerun_bundle_command == "" then null else $blockchain_mainnet_activation_missing_metrics_action_rerun_bundle_command end),
+        checklist_command: (if $blockchain_mainnet_activation_missing_metrics_action_checklist_command == "" then null else $blockchain_mainnet_activation_missing_metrics_action_checklist_command end),
         template_command: (if $blockchain_mainnet_activation_missing_metrics_action_template_command == "" then null else $blockchain_mainnet_activation_missing_metrics_action_template_command end),
-        cycle_command: (if $blockchain_mainnet_activation_missing_metrics_action_cycle_command == "" then null else $blockchain_mainnet_activation_missing_metrics_action_cycle_command end)
+        cycle_command: (if $blockchain_mainnet_activation_missing_metrics_action_cycle_command == "" then null else $blockchain_mainnet_activation_missing_metrics_action_cycle_command end),
+        seeded_cycle_command: (if $blockchain_mainnet_activation_missing_metrics_action_seeded_cycle_command == "" then null else $blockchain_mainnet_activation_missing_metrics_action_seeded_cycle_command end)
       }
     },
     refresh: {
@@ -5823,8 +6057,10 @@ $pending_real_host_checks_md
 - Mainnet activation missing-metrics action reason: $(jq -r '.blockchain_track.mainnet_activation_missing_metrics_action.reason // "none"' "$summary_json")
 - Mainnet activation missing-metrics normalize command: $(jq -r '.blockchain_track.mainnet_activation_missing_metrics_action.normalize_command // "none"' "$summary_json")
 - Mainnet activation missing-metrics rerun bundle command: $(jq -r '.blockchain_track.mainnet_activation_missing_metrics_action.rerun_bundle_command // "none"' "$summary_json")
+- Mainnet activation missing-metrics checklist command: $(jq -r '.blockchain_track.mainnet_activation_missing_metrics_action.checklist_command // "none"' "$summary_json")
 - Mainnet activation missing-metrics template command: $(jq -r '.blockchain_track.mainnet_activation_missing_metrics_action.template_command // "none"' "$summary_json")
 - Mainnet activation missing-metrics gate cycle command: $(jq -r '.blockchain_track.mainnet_activation_missing_metrics_action.cycle_command // "none"' "$summary_json")
+- Mainnet activation missing-metrics seeded gate cycle command: $(jq -r '.blockchain_track.mainnet_activation_missing_metrics_action.seeded_cycle_command // "none"' "$summary_json")
 - Bootstrap governance graduation gate available: $(jq -r '.blockchain_track.bootstrap_governance_graduation_gate.available' "$summary_json")
 - Bootstrap governance graduation gate input: $(jq -r '.blockchain_track.bootstrap_governance_graduation_gate.input_summary_json // "none"' "$summary_json")
 - Bootstrap governance graduation gate source: $(jq -r '.blockchain_track.bootstrap_governance_graduation_gate.source_summary_json // "none"' "$summary_json")
@@ -5907,7 +6143,9 @@ echo "[roadmap-progress-report] phase7_mainnet_cutover_summary_status=$phase7_ma
 echo "[roadmap-progress-report] mainnet_activation_gate_available=$blockchain_mainnet_activation_gate_available_json source_summary_json=${blockchain_mainnet_activation_gate_source_summary_json:-} source_kind=${blockchain_mainnet_activation_gate_source_summary_kind:-} status=$blockchain_mainnet_activation_gate_status_json decision=${blockchain_mainnet_activation_gate_decision_json:-} go=$blockchain_mainnet_activation_gate_go_json no_go=$blockchain_mainnet_activation_gate_no_go_json"
 echo "[roadmap-progress-report] blockchain_mainnet_activation_missing_metrics_action_available=$blockchain_mainnet_activation_missing_metrics_action_available_json action_id=${blockchain_mainnet_activation_missing_metrics_action_id:-} reason=${blockchain_mainnet_activation_missing_metrics_action_reason:-}"
 echo "[roadmap-progress-report] blockchain_mainnet_activation_missing_metrics_action_normalize_command=${blockchain_mainnet_activation_missing_metrics_action_normalize_command:-} rerun_bundle_command=${blockchain_mainnet_activation_missing_metrics_action_rerun_bundle_command:-}"
+echo "[roadmap-progress-report] blockchain_mainnet_activation_missing_metrics_action_checklist_command=${blockchain_mainnet_activation_missing_metrics_action_checklist_command:-}"
 echo "[roadmap-progress-report] blockchain_mainnet_activation_missing_metrics_action_template_command=${blockchain_mainnet_activation_missing_metrics_action_template_command:-} cycle_command=${blockchain_mainnet_activation_missing_metrics_action_cycle_command:-}"
+echo "[roadmap-progress-report] blockchain_mainnet_activation_missing_metrics_action_seeded_cycle_command=${blockchain_mainnet_activation_missing_metrics_action_seeded_cycle_command:-}"
 echo "[roadmap-progress-report] bootstrap_governance_graduation_gate_available=$blockchain_bootstrap_governance_graduation_gate_available_json source_summary_json=${blockchain_bootstrap_governance_graduation_gate_source_summary_json:-} source_kind=${blockchain_bootstrap_governance_graduation_gate_source_summary_kind:-} status=$blockchain_bootstrap_governance_graduation_gate_status_json decision=${blockchain_bootstrap_governance_graduation_gate_decision_json:-} go=$blockchain_bootstrap_governance_graduation_gate_go_json no_go=$blockchain_bootstrap_governance_graduation_gate_no_go_json"
 echo "[roadmap-progress-report] profile_default_gate_status=$profile_default_gate_status next_command=${profile_default_gate_next_command:-} next_command_sudo=${profile_default_gate_next_command_sudo:-} next_command_source=${profile_default_gate_next_command_source:-}"
 echo "[roadmap-progress-report] profile_default_gate_docker_hint_available=$profile_default_gate_docker_hint_available_json docker_hint_source=${profile_default_gate_docker_hint_source:-} campaign_check_summary_resolved=${profile_default_gate_campaign_check_summary_json_resolved:-} docker_matrix_summary_json=${profile_default_gate_docker_matrix_summary_json:-} docker_profile_summary_json=${profile_default_gate_docker_profile_summary_json:-}"

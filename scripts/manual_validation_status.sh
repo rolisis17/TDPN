@@ -836,6 +836,7 @@ build_profile_default_gate_json() {
   local next_command_sudo=""
   local next_command_source="default_non_sudo"
   local next_command_sudo_only_reason=""
+  local subject_fallback_guidance="subject fallback when --subject is omitted: CAMPAIGN_SUBJECT (preferred), INVITE_KEY fallback"
   local available="0"
   local valid_json="0"
   local status="pending"
@@ -1085,6 +1086,11 @@ build_profile_default_gate_json() {
       elif [[ "$next_command_source" == "default_non_sudo" ]]; then
         next_command_source="default_non_sudo"
       fi
+    fi
+  fi
+  if [[ "$status" == "pending" && "$next_command" == *"profile-compare-campaign-signoff"* && "$next_command" != *"--subject "* ]]; then
+    if [[ "$notes" != *"$subject_fallback_guidance"* ]]; then
+      notes="$notes; $subject_fallback_guidance"
     fi
   fi
   if [[ "$status" != "pending" ]]; then
