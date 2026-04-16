@@ -1191,12 +1191,67 @@ if ! printf '%s\n' "$profile_no_go_insufficient_json" | jq -e --arg matrix "$PRO
   and (.summary.profile_default_gate.next_command | contains("--campaign-exit-url http://127.0.0.1:18084"))
   and (.summary.profile_default_gate.next_command_sudo | startswith("sudo ./scripts/easy_node.sh profile-compare-campaign-signoff"))
   and (.summary.profile_default_gate.next_command_source | test("docker"))
+  and .summary.profile_default_gate.next_command_sudo_only_reason == null
   and .summary.profile_default_gate.docker_rehearsal_hint_available == true
   and .summary.profile_default_gate.artifacts.docker_rehearsal_matrix_summary_json == $matrix
   and .summary.profile_default_gate.artifacts.docker_rehearsal_profile_summary_json == $profile
   and .summary.profile_default_gate.artifacts.campaign_check_summary_json_resolved == "'"$PROFILE_NO_GO_INSUFFICIENT_CHECK_SUMMARY_JSON"'"
 ' >/dev/null; then
   echo "profile-no-go-insufficient status JSON missing docker-hint guidance fields"
+  printf '%s\n' "$profile_no_go_insufficient_json"
+  exit 1
+fi
+
+echo "[manual-validation] profile-default no-go insufficient guidance prefers sudo when docker hint implies local stack"
+cat >"$PROFILE_SIGNOFF_SUMMARY_JSON" <<EOF_PROFILE_SIGNOFF_NO_GO_INSUFFICIENT_DOCKER_STACK
+{
+  "version": 1,
+  "status": "fail",
+  "final_rc": 1,
+  "failure_stage": "campaign_check",
+  "inputs": {
+    "refresh_campaign": true,
+    "campaign_refresh_overrides_effective": {
+      "execution_mode": "docker",
+      "start_local_stack": "1"
+    }
+  },
+  "decision": {
+    "decision": "NO-GO",
+    "recommended_profile": "balanced",
+    "diagnostics": {
+      "root_required": true
+    },
+    "next_operator_action": "Use a fresh invite key from active issuer and rerun signoff"
+  },
+  "artifacts": {
+    "campaign_check_summary_json": "$(basename "$PROFILE_NO_GO_INSUFFICIENT_CHECK_SUMMARY_JSON")"
+  }
+}
+EOF_PROFILE_SIGNOFF_NO_GO_INSUFFICIENT_DOCKER_STACK
+
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR" \
+MANUAL_VALIDATION_PROFILE_COMPARE_SIGNOFF_SUMMARY_JSON="$PROFILE_SIGNOFF_SUMMARY_JSON" \
+RUNTIME_DOCTOR_SCRIPT="$FAKE_DOCTOR" \
+./scripts/manual_validation_status.sh --show-json 1 >$PROFILE_NO_GO_INSUFFICIENT_LOG
+
+profile_no_go_insufficient_json="$(awk '/^\[manual-validation-status\] summary_json_payload:/{flag=1; next} flag{print}' $PROFILE_NO_GO_INSUFFICIENT_LOG)"
+if [[ -z "$profile_no_go_insufficient_json" ]]; then
+  echo "profile-no-go-insufficient docker-stack status missing JSON payload"
+  cat $PROFILE_NO_GO_INSUFFICIENT_LOG
+  exit 1
+fi
+if ! printf '%s\n' "$profile_no_go_insufficient_json" | jq -e '
+  .summary.profile_default_gate.status == "pending"
+  and .summary.profile_default_gate.insufficient_evidence == true
+  and .summary.profile_default_gate.diagnostics_root_required == true
+  and (.summary.profile_default_gate.next_command | startswith("sudo ./scripts/easy_node.sh profile-compare-campaign-signoff"))
+  and .summary.profile_default_gate.next_command_source == "sudo_required_diagnostics_root_required_docker_start_local_stack_1"
+  and .summary.profile_default_gate.next_command_sudo_only_reason == "diagnostics_root_required_docker_start_local_stack_1"
+  and (.summary.profile_default_gate.notes | contains("docker hint requires --campaign-start-local-stack 1"))
+  and .summary.profile_default_gate.docker_rehearsal_hint_available == true
+' >/dev/null; then
+  echo "profile-no-go-insufficient docker-stack status JSON missing sudo-selection guidance fields"
   printf '%s\n' "$profile_no_go_insufficient_json"
   exit 1
 fi

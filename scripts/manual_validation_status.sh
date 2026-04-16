@@ -878,6 +878,7 @@ build_profile_default_gate_json() {
   local docker_hint_exit_url_arg=""
   local docker_hint_execution_mode_arg=""
   local docker_hint_start_local_stack_arg=""
+  local docker_hint_requires_local_stack_root="0"
 
   reports_dir="$(dirname "$signoff_summary_json")"
   if [[ "$signoff_summary_json" == "$default_signoff_summary_json" ]]; then
@@ -905,6 +906,9 @@ build_profile_default_gate_json() {
   docker_hint_profile_summary_json="$(jq -r '.docker_rehearsal.profile_summary_json // ""' <<<"$docker_hint_json" 2>/dev/null || true)"
   docker_hint_receipt_json="$(jq -r '.docker_rehearsal.receipt_json // ""' <<<"$docker_hint_json" 2>/dev/null || true)"
   docker_hint_command="$(jq -r '.docker_rehearsal.check_command // ""' <<<"$docker_hint_json" 2>/dev/null || true)"
+  if [[ "$docker_hint_available" == "1" && "$docker_hint_start_local_stack" == "1" ]]; then
+    docker_hint_requires_local_stack_root="1"
+  fi
 
   if [[ "$docker_hint_available" == "1" ]]; then
     printf -v docker_hint_execution_mode_arg '%q' "$docker_hint_execution_mode"
@@ -1052,19 +1056,28 @@ build_profile_default_gate_json() {
     esac
   fi
 
-  if [[ "$status" == "pending" && "$next_command" == "$next_command_default" ]]; then
-    # Keep docker rehearsal hint as primary when available; only force sudo from diagnostics
-    # when no docker hint is present, so we preserve non-root reproducibility where possible.
-    if [[ "$diagnostics_root_required" == "1" && "$docker_hint_available" != "1" ]]; then
+  if [[ "$status" == "pending" ]]; then
+    if [[ "$diagnostics_root_required" == "1" && "$docker_hint_requires_local_stack_root" == "1" ]]; then
       next_command="$next_command_sudo"
-      next_command_source="sudo_required_diagnostics_root_required"
-      next_command_sudo_only_reason="diagnostics_root_required"
-    fi
-    if [[ "$docker_hint_available" == "1" ]]; then
-      next_command="$next_command_no_sudo"
-      next_command_source="${docker_hint_source:-docker_rehearsal_artifacts}"
-    elif [[ "$next_command_source" == "default_non_sudo" ]]; then
-      next_command_source="default_non_sudo"
+      next_command_source="sudo_required_diagnostics_root_required_docker_start_local_stack_1"
+      next_command_sudo_only_reason="diagnostics_root_required_docker_start_local_stack_1"
+      if [[ "$notes" != *"docker hint requires --campaign-start-local-stack 1"* ]]; then
+        notes="$notes; docker hint requires --campaign-start-local-stack 1, so sudo is required"
+      fi
+    elif [[ "$next_command" == "$next_command_default" ]]; then
+      # Keep docker rehearsal hint as primary when available unless diagnostics show a
+      # root-required failure and the hint itself asks to start the local stack.
+      if [[ "$diagnostics_root_required" == "1" && "$docker_hint_available" != "1" ]]; then
+        next_command="$next_command_sudo"
+        next_command_source="sudo_required_diagnostics_root_required"
+        next_command_sudo_only_reason="diagnostics_root_required"
+      fi
+      if [[ "$docker_hint_available" == "1" ]]; then
+        next_command="$next_command_no_sudo"
+        next_command_source="${docker_hint_source:-docker_rehearsal_artifacts}"
+      elif [[ "$next_command_source" == "default_non_sudo" ]]; then
+        next_command_source="default_non_sudo"
+      fi
     fi
   fi
   if [[ "$status" != "pending" ]]; then

@@ -903,7 +903,7 @@ decision_reason=""
 recommended_profile=""
 support_rate_pct="0"
 trend_source_value=""
-decision_diagnostics_json='{"source_schema":"none","legacy":null,"aggregated_diagnostics":{"transport_mismatch_failures":0,"token_proof_invalid_failures":0,"unknown_exit_failures":0,"directory_trust_failures":0},"likely_primary_failure":"none","operator_hint":""}'
+decision_diagnostics_json='{"source_schema":"none","legacy":null,"aggregated_diagnostics":{"transport_mismatch_failures":0,"token_proof_invalid_failures":0,"unknown_exit_failures":0,"directory_trust_failures":0,"root_required_failures":0,"endpoint_unreachable_failures":0},"likely_primary_failure":"none","operator_hint":""}'
 next_operator_action=""
 campaign_check_summary_present=0
 if [[ -f "$campaign_check_summary_json" ]] && jq -e . "$campaign_check_summary_json" >/dev/null 2>&1; then
@@ -955,7 +955,9 @@ if [[ -f "$campaign_summary_json" ]] && jq -e . "$campaign_summary_json" >/dev/n
           transport_mismatch_failures: (($agg_source.transport_mismatch_failures // 0) | to_nonneg_int),
           token_proof_invalid_failures: (($agg_source.token_proof_invalid_failures // 0) | to_nonneg_int),
           unknown_exit_failures: (($agg_source.unknown_exit_failures // 0) | to_nonneg_int),
-          directory_trust_failures: (($agg_source.directory_trust_failures // 0) | to_nonneg_int)
+          directory_trust_failures: (($agg_source.directory_trust_failures // 0) | to_nonneg_int),
+          root_required_failures: (($agg_source.root_required_failures // 0) | to_nonneg_int),
+          endpoint_unreachable_failures: (($agg_source.endpoint_unreachable_failures // 0) | to_nonneg_int)
         },
         likely_primary_failure: (
           ($current_primary | normalized_primary) as $explicit
@@ -964,6 +966,8 @@ if [[ -f "$campaign_summary_json" ]] && jq -e . "$campaign_summary_json" >/dev/n
             elif (($agg_source.unknown_exit_failures // 0) | to_nonneg_int) > 0 then "unknown_exit"
             elif (($agg_source.transport_mismatch_failures // 0) | to_nonneg_int) > 0 then "transport_mismatch"
             elif (($agg_source.directory_trust_failures // 0) | to_nonneg_int) > 0 then "directory_trust"
+            elif (($agg_source.root_required_failures // 0) | to_nonneg_int) > 0 then "root_required"
+            elif (($agg_source.endpoint_unreachable_failures // 0) | to_nonneg_int) > 0 then "endpoint_unreachable"
             else infer_primary_from_legacy($legacy)
             end
         ),

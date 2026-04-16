@@ -848,7 +848,9 @@ assert_diag_case() {
   local expected_token_invalid="${6:-0}"
   local expected_unknown_exit="${7:-0}"
   local expected_directory_trust="${8:-0}"
-  local expected_operator_hint="${9:-}"
+  local expected_root_required="${9:-0}"
+  local expected_endpoint_unreachable="${10:-0}"
+  local expected_operator_hint="${11:-}"
   local summary_out="$TMP_DIR/profile_compare_campaign_signoff_diag_${case_name}.json"
   local check_out="$DIAG_REPORTS_DIR/profile_compare_campaign_check_summary_${case_name}.json"
 
@@ -874,6 +876,8 @@ assert_diag_case() {
     --argjson expected_token_invalid "$expected_token_invalid" \
     --argjson expected_unknown_exit "$expected_unknown_exit" \
     --argjson expected_directory_trust "$expected_directory_trust" \
+    --argjson expected_root_required "$expected_root_required" \
+    --argjson expected_endpoint_unreachable "$expected_endpoint_unreachable" \
     '
     .status == "ok"
     and .final_rc == 0
@@ -886,6 +890,8 @@ assert_diag_case() {
     and .decision.diagnostics.aggregated_diagnostics.token_proof_invalid_failures == $expected_token_invalid
     and .decision.diagnostics.aggregated_diagnostics.unknown_exit_failures == $expected_unknown_exit
     and .decision.diagnostics.aggregated_diagnostics.directory_trust_failures == $expected_directory_trust
+    and .decision.diagnostics.aggregated_diagnostics.root_required_failures == $expected_root_required
+    and .decision.diagnostics.aggregated_diagnostics.endpoint_unreachable_failures == $expected_endpoint_unreachable
     and (if $expected_source_schema == "legacy" then .decision.diagnostics.legacy != null else true end)
     ' \
     "$summary_out" >/dev/null 2>&1; then
@@ -933,6 +939,38 @@ cat >"$DIAG_CAMPAIGN_JSON" <<'EOF_DIAG_SUMMARY_TRUST'
 EOF_DIAG_SUMMARY_TRUST
 assert_diag_case "legacy_summary_trust" "legacy" "directory_trust" "Run trust/runtime reset path then rerun"
 
+cat >"$DIAG_CAMPAIGN_JSON" <<'EOF_DIAG_LEGACY_ROOT_COUNT'
+{
+  "version": 1,
+  "status": "pass",
+  "summary": {"runs_total": 3},
+  "decision": {"recommended_default_profile": "balanced"},
+  "trend": {"status": "pass"},
+  "diagnostics": {
+    "root_required_failures": 3,
+    "endpoint_unreachable_failures": 0
+  }
+}
+EOF_DIAG_LEGACY_ROOT_COUNT
+assert_diag_case "legacy_root_counter" "legacy" "root_required" "Run signoff with sudo (root) or force docker campaign refresh mode, then rerun" 0 0 0 0 3 0
+
+cat >"$DIAG_CAMPAIGN_JSON" <<'EOF_DIAG_LEGACY_SUMMARY_ENDPOINT_COUNT'
+{
+  "version": 1,
+  "status": "pass",
+  "summary": {
+    "runs_total": 3,
+    "diagnostics": {
+      "root_required_failures": 0,
+      "endpoint_unreachable_failures": 2
+    }
+  },
+  "decision": {"recommended_default_profile": "balanced"},
+  "trend": {"status": "pass"}
+}
+EOF_DIAG_LEGACY_SUMMARY_ENDPOINT_COUNT
+assert_diag_case "legacy_summary_endpoint_counter" "legacy" "endpoint_unreachable" "Verify directory/issuer/entry/exit endpoints are reachable, then rerun signoff" 0 0 0 0 0 2
+
 cat >"$DIAG_CAMPAIGN_JSON" <<'EOF_DIAG_CURRENT_TRANSPORT'
 {
   "version": 1,
@@ -961,13 +999,14 @@ cat >"$DIAG_CAMPAIGN_JSON" <<'EOF_DIAG_CURRENT_ROOT'
     "transport_mismatch_failures": 0,
     "token_proof_invalid_failures": 0,
     "unknown_exit_failures": 0,
-    "directory_trust_failures": 0
+    "directory_trust_failures": 0,
+    "root_required_failures": 5,
+    "endpoint_unreachable_failures": 0
   },
-  "likely_primary_failure": "root_required",
   "operator_hint": "requires root privileges to run local stack"
 }
 EOF_DIAG_CURRENT_ROOT
-assert_diag_case "current_root_required" "current" "root_required" "Run signoff with sudo (root) or force docker campaign refresh mode, then rerun" 0 0 0 0 "requires root privileges to run local stack"
+assert_diag_case "current_root_required" "current" "root_required" "Run signoff with sudo (root) or force docker campaign refresh mode, then rerun" 0 0 0 0 5 0 "requires root privileges to run local stack"
 
 cat >"$DIAG_CAMPAIGN_JSON" <<'EOF_DIAG_CURRENT_ENDPOINT'
 {
@@ -980,13 +1019,14 @@ cat >"$DIAG_CAMPAIGN_JSON" <<'EOF_DIAG_CURRENT_ENDPOINT'
     "transport_mismatch_failures": 0,
     "token_proof_invalid_failures": 0,
     "unknown_exit_failures": 0,
-    "directory_trust_failures": 0
+    "directory_trust_failures": 0,
+    "root_required_failures": 0,
+    "endpoint_unreachable_failures": 4
   },
-  "likely_primary_failure": "endpoint_unreachable",
   "operator_hint": "directory endpoint did not respond"
 }
 EOF_DIAG_CURRENT_ENDPOINT
-assert_diag_case "current_endpoint_unreachable" "current" "endpoint_unreachable" "Verify directory/issuer/entry/exit endpoints are reachable, then rerun signoff" 0 0 0 0 "directory endpoint did not respond"
+assert_diag_case "current_endpoint_unreachable" "current" "endpoint_unreachable" "Verify directory/issuer/entry/exit endpoints are reachable, then rerun signoff" 0 0 0 0 0 4 "directory endpoint did not respond"
 
 FAKE_FORWARD="$TMP_DIR/fake_profile_compare_campaign_signoff_forward.sh"
 cat >"$FAKE_FORWARD" <<'EOF_FORWARD'
