@@ -4868,8 +4868,22 @@ blockchain_mainnet_activation_missing_metrics_action_normalize_command=""
 blockchain_mainnet_activation_missing_metrics_action_rerun_bundle_command=""
 blockchain_mainnet_activation_missing_metrics_action_checklist_command=""
 blockchain_mainnet_activation_missing_metrics_action_template_command=""
+blockchain_mainnet_activation_missing_metrics_action_operator_pack_command=""
 blockchain_mainnet_activation_missing_metrics_action_cycle_command=""
 blockchain_mainnet_activation_missing_metrics_action_seeded_cycle_command=""
+blockchain_mainnet_activation_missing_metrics_action_metrics_summary_json="$ROOT_DIR/.easy-node-logs/blockchain_gate_bundle_summary.json"
+blockchain_mainnet_activation_missing_metrics_action_metrics_summary_json_for_command=".easy-node-logs/blockchain_gate_bundle_summary.json"
+if [[ -n "${blockchain_mainnet_activation_gate_source_summary_json:-}" ]]; then
+  blockchain_mainnet_activation_missing_metrics_action_metrics_summary_candidate_json="$(dirname "$blockchain_mainnet_activation_gate_source_summary_json")/blockchain_mainnet_activation_metrics_summary.json"
+  if [[ "$(json_file_valid_01 "$blockchain_mainnet_activation_missing_metrics_action_metrics_summary_candidate_json")" == "1" ]]; then
+    blockchain_mainnet_activation_missing_metrics_action_metrics_summary_json="$blockchain_mainnet_activation_missing_metrics_action_metrics_summary_candidate_json"
+    if [[ "$blockchain_mainnet_activation_missing_metrics_action_metrics_summary_json" == "$ROOT_DIR/"* ]]; then
+      blockchain_mainnet_activation_missing_metrics_action_metrics_summary_json_for_command="${blockchain_mainnet_activation_missing_metrics_action_metrics_summary_json#$ROOT_DIR/}"
+    else
+      blockchain_mainnet_activation_missing_metrics_action_metrics_summary_json_for_command="$blockchain_mainnet_activation_missing_metrics_action_metrics_summary_json"
+    fi
+  fi
+fi
 blockchain_mainnet_activation_missing_metrics_reasons_match_json="$(
   jq -r '
     if any(.[]?; ((. | tostring | ascii_downcase) | test("missing or invalid metric|missing required metrics|missing metrics|invalid metrics|required_metrics|metrics_json"))) then
@@ -4889,8 +4903,9 @@ if [[ "$blockchain_mainnet_activation_gate_source_summary_kind" != "" ]] \
   blockchain_mainnet_activation_missing_metrics_action_reason="mainnet activation gate is NO-GO because required metrics evidence is missing/invalid; normalize operator metrics input and rerun gate bundle."
   blockchain_mainnet_activation_missing_metrics_action_normalize_command="./scripts/easy_node.sh blockchain-mainnet-activation-metrics-input --input-json <operator-metrics-input.json> --summary-json .easy-node-logs/blockchain_mainnet_activation_metrics_input_summary.json --canonical-summary-json .easy-node-logs/blockchain_mainnet_activation_metrics_input.json --print-summary-json 1"
   blockchain_mainnet_activation_missing_metrics_action_rerun_bundle_command="./scripts/easy_node.sh blockchain-gate-bundle --blockchain-mainnet-activation-metrics-input-json <operator-metrics-input.json> --summary-json .easy-node-logs/blockchain_gate_bundle_latest_summary.json --canonical-summary-json .easy-node-logs/blockchain_gate_bundle_summary.json --print-summary-json 1"
-  blockchain_mainnet_activation_missing_metrics_action_checklist_command="./scripts/easy_node.sh blockchain-mainnet-activation-metrics-missing-checklist --metrics-summary-json .easy-node-logs/blockchain_gate_bundle_summary.json --output-json .easy-node-logs/blockchain_mainnet_activation_metrics_missing_checklist.json --output-md .easy-node-logs/blockchain_mainnet_activation_metrics_missing_checklist.md --print-output-json 1"
+  blockchain_mainnet_activation_missing_metrics_action_checklist_command="./scripts/easy_node.sh blockchain-mainnet-activation-metrics-missing-checklist --metrics-summary-json $blockchain_mainnet_activation_missing_metrics_action_metrics_summary_json_for_command --output-json .easy-node-logs/blockchain_mainnet_activation_metrics_missing_checklist.json --output-md .easy-node-logs/blockchain_mainnet_activation_metrics_missing_checklist.md --print-output-json 1"
   blockchain_mainnet_activation_missing_metrics_action_template_command="./scripts/easy_node.sh blockchain-mainnet-activation-metrics-input-template --output-json <operator-metrics-input.template.json> --canonical-output-json .easy-node-logs/blockchain_mainnet_activation_metrics_input_template.json --print-output-json 1"
+  blockchain_mainnet_activation_missing_metrics_action_operator_pack_command="./scripts/easy_node.sh blockchain-mainnet-activation-operator-pack --metrics-summary-json $blockchain_mainnet_activation_missing_metrics_action_metrics_summary_json_for_command --reports-dir .easy-node-logs/blockchain_mainnet_activation_operator_pack --summary-json .easy-node-logs/blockchain_mainnet_activation_operator_pack_latest_summary.json --canonical-summary-json .easy-node-logs/blockchain_mainnet_activation_operator_pack_summary.json --template-output-json <operator-metrics-input.template.json> --template-canonical-output-json .easy-node-logs/blockchain_mainnet_activation_metrics_input_template.json --missing-input-template-output-json .easy-node-logs/blockchain_mainnet_activation_metrics_missing_input_template.json --missing-input-template-canonical-output-json .easy-node-logs/blockchain_mainnet_activation_metrics_missing_input_template.canonical.json --checklist-output-json .easy-node-logs/blockchain_mainnet_activation_metrics_missing_checklist.json --checklist-output-md .easy-node-logs/blockchain_mainnet_activation_metrics_missing_checklist.md --print-summary-json 1"
   blockchain_mainnet_activation_missing_metrics_action_cycle_command="./scripts/easy_node.sh blockchain-mainnet-activation-gate-cycle --input-json <operator-metrics-input.json> --reports-dir .easy-node-logs/blockchain_mainnet_activation_gate_cycle --summary-json .easy-node-logs/blockchain_mainnet_activation_gate_cycle_latest_summary.json --canonical-summary-json .easy-node-logs/blockchain_mainnet_activation_gate_cycle_summary.json --refresh-roadmap 1 --print-summary-json 1"
   blockchain_mainnet_activation_missing_metrics_action_seeded_cycle_command="./scripts/easy_node.sh blockchain-mainnet-activation-gate-cycle-seeded --reports-dir .easy-node-logs/blockchain_mainnet_activation_gate_cycle_seeded --summary-json .easy-node-logs/blockchain_mainnet_activation_gate_cycle_seeded_latest_summary.json --canonical-summary-json .easy-node-logs/blockchain_mainnet_activation_gate_cycle_seeded_summary.json --refresh-roadmap 1 --print-summary-json 1"
 fi
@@ -5540,6 +5555,7 @@ summary_payload="$(jq -n \
   --arg blockchain_mainnet_activation_missing_metrics_action_rerun_bundle_command "$blockchain_mainnet_activation_missing_metrics_action_rerun_bundle_command" \
   --arg blockchain_mainnet_activation_missing_metrics_action_checklist_command "$blockchain_mainnet_activation_missing_metrics_action_checklist_command" \
   --arg blockchain_mainnet_activation_missing_metrics_action_template_command "$blockchain_mainnet_activation_missing_metrics_action_template_command" \
+  --arg blockchain_mainnet_activation_missing_metrics_action_operator_pack_command "$blockchain_mainnet_activation_missing_metrics_action_operator_pack_command" \
   --arg blockchain_mainnet_activation_missing_metrics_action_cycle_command "$blockchain_mainnet_activation_missing_metrics_action_cycle_command" \
   --arg blockchain_mainnet_activation_missing_metrics_action_seeded_cycle_command "$blockchain_mainnet_activation_missing_metrics_action_seeded_cycle_command" \
   --arg profile_default_gate_status "$profile_default_gate_status" \
@@ -5824,6 +5840,7 @@ summary_payload="$(jq -n \
         rerun_bundle_command: (if $blockchain_mainnet_activation_missing_metrics_action_rerun_bundle_command == "" then null else $blockchain_mainnet_activation_missing_metrics_action_rerun_bundle_command end),
         checklist_command: (if $blockchain_mainnet_activation_missing_metrics_action_checklist_command == "" then null else $blockchain_mainnet_activation_missing_metrics_action_checklist_command end),
         template_command: (if $blockchain_mainnet_activation_missing_metrics_action_template_command == "" then null else $blockchain_mainnet_activation_missing_metrics_action_template_command end),
+        operator_pack_command: (if $blockchain_mainnet_activation_missing_metrics_action_operator_pack_command == "" then null else $blockchain_mainnet_activation_missing_metrics_action_operator_pack_command end),
         cycle_command: (if $blockchain_mainnet_activation_missing_metrics_action_cycle_command == "" then null else $blockchain_mainnet_activation_missing_metrics_action_cycle_command end),
         seeded_cycle_command: (if $blockchain_mainnet_activation_missing_metrics_action_seeded_cycle_command == "" then null else $blockchain_mainnet_activation_missing_metrics_action_seeded_cycle_command end)
       }
@@ -6059,6 +6076,7 @@ $pending_real_host_checks_md
 - Mainnet activation missing-metrics rerun bundle command: $(jq -r '.blockchain_track.mainnet_activation_missing_metrics_action.rerun_bundle_command // "none"' "$summary_json")
 - Mainnet activation missing-metrics checklist command: $(jq -r '.blockchain_track.mainnet_activation_missing_metrics_action.checklist_command // "none"' "$summary_json")
 - Mainnet activation missing-metrics template command: $(jq -r '.blockchain_track.mainnet_activation_missing_metrics_action.template_command // "none"' "$summary_json")
+- Mainnet activation missing-metrics operator-pack command: $(jq -r '.blockchain_track.mainnet_activation_missing_metrics_action.operator_pack_command // "none"' "$summary_json")
 - Mainnet activation missing-metrics gate cycle command: $(jq -r '.blockchain_track.mainnet_activation_missing_metrics_action.cycle_command // "none"' "$summary_json")
 - Mainnet activation missing-metrics seeded gate cycle command: $(jq -r '.blockchain_track.mainnet_activation_missing_metrics_action.seeded_cycle_command // "none"' "$summary_json")
 - Bootstrap governance graduation gate available: $(jq -r '.blockchain_track.bootstrap_governance_graduation_gate.available' "$summary_json")
@@ -6144,7 +6162,7 @@ echo "[roadmap-progress-report] mainnet_activation_gate_available=$blockchain_ma
 echo "[roadmap-progress-report] blockchain_mainnet_activation_missing_metrics_action_available=$blockchain_mainnet_activation_missing_metrics_action_available_json action_id=${blockchain_mainnet_activation_missing_metrics_action_id:-} reason=${blockchain_mainnet_activation_missing_metrics_action_reason:-}"
 echo "[roadmap-progress-report] blockchain_mainnet_activation_missing_metrics_action_normalize_command=${blockchain_mainnet_activation_missing_metrics_action_normalize_command:-} rerun_bundle_command=${blockchain_mainnet_activation_missing_metrics_action_rerun_bundle_command:-}"
 echo "[roadmap-progress-report] blockchain_mainnet_activation_missing_metrics_action_checklist_command=${blockchain_mainnet_activation_missing_metrics_action_checklist_command:-}"
-echo "[roadmap-progress-report] blockchain_mainnet_activation_missing_metrics_action_template_command=${blockchain_mainnet_activation_missing_metrics_action_template_command:-} cycle_command=${blockchain_mainnet_activation_missing_metrics_action_cycle_command:-}"
+echo "[roadmap-progress-report] blockchain_mainnet_activation_missing_metrics_action_template_command=${blockchain_mainnet_activation_missing_metrics_action_template_command:-} operator_pack_command=${blockchain_mainnet_activation_missing_metrics_action_operator_pack_command:-} cycle_command=${blockchain_mainnet_activation_missing_metrics_action_cycle_command:-}"
 echo "[roadmap-progress-report] blockchain_mainnet_activation_missing_metrics_action_seeded_cycle_command=${blockchain_mainnet_activation_missing_metrics_action_seeded_cycle_command:-}"
 echo "[roadmap-progress-report] bootstrap_governance_graduation_gate_available=$blockchain_bootstrap_governance_graduation_gate_available_json source_summary_json=${blockchain_bootstrap_governance_graduation_gate_source_summary_json:-} source_kind=${blockchain_bootstrap_governance_graduation_gate_source_summary_kind:-} status=$blockchain_bootstrap_governance_graduation_gate_status_json decision=${blockchain_bootstrap_governance_graduation_gate_decision_json:-} go=$blockchain_bootstrap_governance_graduation_gate_go_json no_go=$blockchain_bootstrap_governance_graduation_gate_no_go_json"
 echo "[roadmap-progress-report] profile_default_gate_status=$profile_default_gate_status next_command=${profile_default_gate_next_command:-} next_command_sudo=${profile_default_gate_next_command_sudo:-} next_command_source=${profile_default_gate_next_command_source:-}"
