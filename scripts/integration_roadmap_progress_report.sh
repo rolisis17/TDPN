@@ -272,6 +272,13 @@ REPORT_MD="$TMP_DIR/roadmap_progress_report.md"
 PHASE5_SETTLEMENT_LAYER_SUMMARY_JSON="$TMP_DIR/phase5_settlement_layer_handoff_check_summary.json"
 PHASE6_COSMOS_L1_SUMMARY_JSON="$TMP_DIR/phase6_cosmos_l1_build_testnet_handoff_check_summary.json"
 PHASE0_SUMMARY_JSON="$TMP_DIR/ci_phase0_summary.json"
+PHASE7_MAINNET_CUTOVER_LOG_DIR="$ROADMAP_PROGRESS_TEST_LOGS_ROOT/phase7_mainnet_cutover_20260416_000001"
+mkdir -p "$PHASE7_MAINNET_CUTOVER_LOG_DIR"
+PHASE7_MAINNET_CUTOVER_CHECK_SUMMARY_JSON="$PHASE7_MAINNET_CUTOVER_LOG_DIR/phase7_mainnet_cutover_check_summary.json"
+PHASE7_MAINNET_CUTOVER_RUN_SUMMARY_JSON="$PHASE7_MAINNET_CUTOVER_LOG_DIR/phase7_mainnet_cutover_run_summary.json"
+PHASE7_MAINNET_CUTOVER_HANDOFF_CHECK_SUMMARY_JSON="$PHASE7_MAINNET_CUTOVER_LOG_DIR/phase7_mainnet_cutover_handoff_check_summary.json"
+PHASE7_MAINNET_CUTOVER_HANDOFF_RUN_SUMMARY_JSON="$PHASE7_MAINNET_CUTOVER_LOG_DIR/phase7_mainnet_cutover_handoff_run_summary.json"
+PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_JSON="$PHASE7_MAINNET_CUTOVER_LOG_DIR/phase7_mainnet_cutover_summary_report.json"
 cat >"$PHASE5_SETTLEMENT_LAYER_SUMMARY_JSON" <<'EOF_PHASE5_SUMMARY'
 {
   "version": 1,
@@ -341,6 +348,186 @@ cat >"$PHASE0_SUMMARY_JSON" <<'EOF_PHASE0_SUMMARY'
   }
 }
 EOF_PHASE0_SUMMARY
+cat >"$PHASE7_MAINNET_CUTOVER_CHECK_SUMMARY_JSON" <<'EOF_PHASE7_CHECK_SUMMARY'
+{
+  "version": 1,
+  "schema": {
+    "id": "phase7_mainnet_cutover_check_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "pass",
+  "rc": 0,
+  "signals": {
+    "check": true,
+    "run": true,
+    "handoff_check": true,
+    "handoff_run": true
+  },
+  "handoff": {
+    "check": true,
+    "run": true,
+    "handoff_check": true,
+    "handoff_run": true
+  }
+}
+EOF_PHASE7_CHECK_SUMMARY
+cat >"$PHASE7_MAINNET_CUTOVER_RUN_SUMMARY_JSON" <<'EOF_PHASE7_RUN_SUMMARY'
+{
+  "version": 1,
+  "schema": {
+    "id": "phase7_mainnet_cutover_run_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "pass",
+  "rc": 0,
+  "steps": {
+    "phase7_mainnet_cutover_check": {
+      "status": "pass",
+      "rc": 0,
+      "command_rc": 0,
+      "contract_valid": true,
+      "signal_snapshot": {
+        "check": true,
+        "run": true,
+        "handoff_check": true,
+        "handoff_run": true
+      }
+    }
+  },
+  "signals": {
+    "check": true,
+    "run": true,
+    "handoff_check": true,
+    "handoff_run": true
+  },
+  "handoff": {
+    "check": true,
+    "run": true,
+    "handoff_check": true,
+    "handoff_run": true
+  }
+}
+EOF_PHASE7_RUN_SUMMARY
+cat >"$PHASE7_MAINNET_CUTOVER_HANDOFF_CHECK_SUMMARY_JSON" <<'EOF_PHASE7_HANDOFF_CHECK_SUMMARY'
+{
+  "version": 1,
+  "schema": {
+    "id": "phase7_mainnet_cutover_handoff_check_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "pass",
+  "rc": 0,
+  "handoff": {
+    "check": true,
+    "run": true,
+    "handoff_check": true,
+    "handoff_run": true
+  },
+  "signals": {
+    "check": true,
+    "run": true,
+    "handoff_check": true,
+    "handoff_run": true
+  },
+  "decision": {
+    "pass": true,
+    "reasons": [],
+    "warnings": []
+  }
+}
+EOF_PHASE7_HANDOFF_CHECK_SUMMARY
+cat >"$PHASE7_MAINNET_CUTOVER_HANDOFF_RUN_SUMMARY_JSON" <<'EOF_PHASE7_HANDOFF_RUN_SUMMARY'
+{
+  "version": 1,
+  "schema": {
+    "id": "phase7_mainnet_cutover_handoff_run_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "pass",
+  "rc": 0,
+  "summaries": {
+    "check": {
+      "status": "pass",
+      "rc": 0
+    },
+    "run": {
+      "status": "pass",
+      "rc": 0
+    },
+    "handoff_check": {
+      "status": "pass",
+      "rc": 0
+    },
+    "handoff_run": {
+      "status": "pass",
+      "rc": 0
+    }
+  }
+}
+EOF_PHASE7_HANDOFF_RUN_SUMMARY
+cat >"$PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_JSON" <<'EOF_PHASE7_SUMMARY_REPORT'
+{
+  "version": 1,
+  "schema": {
+    "id": "phase7_mainnet_cutover_summary_report",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "pass",
+  "rc": 0,
+  "summaries": {
+    "check": {
+      "configured": true,
+      "exists": true,
+      "valid_json": true,
+      "schema_id": "phase7_mainnet_cutover_check_summary",
+      "schema_valid": true,
+      "raw_status": "pass",
+      "raw_rc": 0,
+      "status": "pass"
+    },
+    "run": {
+      "configured": true,
+      "exists": true,
+      "valid_json": true,
+      "schema_id": "phase7_mainnet_cutover_run_summary",
+      "schema_valid": true,
+      "raw_status": "pass",
+      "raw_rc": 0,
+      "status": "pass"
+    },
+    "handoff_check": {
+      "configured": true,
+      "exists": true,
+      "valid_json": true,
+      "schema_id": "phase7_mainnet_cutover_handoff_check_summary",
+      "schema_valid": true,
+      "raw_status": "pass",
+      "raw_rc": 0,
+      "status": "pass"
+    },
+    "handoff_run": {
+      "configured": true,
+      "exists": true,
+      "valid_json": true,
+      "schema_id": "phase7_mainnet_cutover_handoff_run_summary",
+      "schema_valid": true,
+      "raw_status": "pass",
+      "raw_rc": 0,
+      "status": "pass"
+    }
+  }
+}
+EOF_PHASE7_SUMMARY_REPORT
+cp "$PHASE7_MAINNET_CUTOVER_CHECK_SUMMARY_JSON" "$ROADMAP_PROGRESS_TEST_LOGS_ROOT/phase7_mainnet_cutover_check_summary.json"
+cp "$PHASE7_MAINNET_CUTOVER_RUN_SUMMARY_JSON" "$ROADMAP_PROGRESS_TEST_LOGS_ROOT/phase7_mainnet_cutover_run_summary.json"
+cp "$PHASE7_MAINNET_CUTOVER_HANDOFF_CHECK_SUMMARY_JSON" "$ROADMAP_PROGRESS_TEST_LOGS_ROOT/phase7_mainnet_cutover_handoff_check_summary.json"
+cp "$PHASE7_MAINNET_CUTOVER_HANDOFF_RUN_SUMMARY_JSON" "$ROADMAP_PROGRESS_TEST_LOGS_ROOT/phase7_mainnet_cutover_handoff_run_summary.json"
+cp "$PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_JSON" "$ROADMAP_PROGRESS_TEST_LOGS_ROOT/phase7_mainnet_cutover_summary_report.json"
 FAKE_ROADMAP_CAPTURE_FILE="$CAPTURE" \
 ROADMAP_PROGRESS_MANUAL_VALIDATION_REPORT_SCRIPT="$FAKE_MANUAL" \
 ROADMAP_PROGRESS_SINGLE_MACHINE_SCRIPT="$FAKE_SINGLE" \
@@ -428,6 +615,25 @@ if [[ "$PHASE6_OUTPUT_PRESENT" == "1" ]]; then
     exit 1
   fi
 fi
+PHASE7_OUTPUT_PRESENT=0
+if jq -e '.blockchain_track.phase7_mainnet_cutover.available == true' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  PHASE7_OUTPUT_PRESENT=1
+fi
+if [[ "$PHASE7_OUTPUT_PRESENT" == "1" ]]; then
+  if ! jq -e '
+    .blockchain_track.phase7_mainnet_cutover.available == true
+    and .blockchain_track.phase7_mainnet_cutover.status == "pass"
+    and .blockchain_track.phase7_mainnet_cutover.rc == 0
+    and .blockchain_track.phase7_mainnet_cutover.check == true
+    and .blockchain_track.phase7_mainnet_cutover.run == true
+    and .blockchain_track.phase7_mainnet_cutover.handoff_check == true
+    and .blockchain_track.phase7_mainnet_cutover.handoff_run == true
+  ' "$SUMMARY_JSON" >/dev/null; then
+    echo "summary JSON missing expected phase7 fields"
+    cat "$SUMMARY_JSON"
+    exit 1
+  fi
+fi
 if ! rg -q '\[roadmap-progress-report\] refresh_step=manual_validation_report status=running' /tmp/integration_roadmap_progress_report_ok.log; then
   echo "expected manual refresh running heartbeat line"
   cat /tmp/integration_roadmap_progress_report_ok.log
@@ -480,6 +686,13 @@ if [[ "$PHASE6_OUTPUT_PRESENT" == "1" ]]; then
     exit 1
   fi
 fi
+if [[ "$PHASE7_OUTPUT_PRESENT" == "1" ]]; then
+  if ! rg -q 'Phase-7|phase7_mainnet_cutover' "$REPORT_MD"; then
+    echo "report markdown missing phase7 line"
+    cat "$REPORT_MD"
+    exit 1
+  fi
+fi
 if ! rg -q '\[roadmap-progress-report\] phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_status=pass issuer_sponsor_api_live_smoke_ok=true' /tmp/integration_roadmap_progress_report_ok.log; then
   echo "expected phase5 issuer sponsor debug line in success path"
   cat /tmp/integration_roadmap_progress_report_ok.log
@@ -488,6 +701,13 @@ fi
 if [[ "$PHASE6_OUTPUT_PRESENT" == "1" ]]; then
   if ! rg -q '\[roadmap-progress-report\].*phase6' /tmp/integration_roadmap_progress_report_ok.log; then
     echo "expected phase6 debug line in success path"
+    cat /tmp/integration_roadmap_progress_report_ok.log
+    exit 1
+  fi
+fi
+if [[ "$PHASE7_OUTPUT_PRESENT" == "1" ]]; then
+  if ! rg -q '\[roadmap-progress-report\].*phase7' /tmp/integration_roadmap_progress_report_ok.log; then
+    echo "expected phase7 debug line in success path"
     cat /tmp/integration_roadmap_progress_report_ok.log
     exit 1
   fi

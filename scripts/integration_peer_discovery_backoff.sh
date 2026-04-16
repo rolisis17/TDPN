@@ -25,6 +25,20 @@ DIRECTORY_PEER_DISCOVERY=1 \
 timeout 90s go run ./cmd/node --directory >/tmp/discovery_backoff_seed.log 2>&1 &
 seed_pid=$!
 
+seed_ready=0
+for _ in $(seq 1 40); do
+  if curl -fsS "http://127.0.0.1:${PORT_SEED}/v1/health" >/dev/null 2>&1; then
+    seed_ready=1
+    break
+  fi
+  sleep 0.25
+done
+if [[ "$seed_ready" -ne 1 ]]; then
+  echo "seed directory did not become ready before launching main directory"
+  cat /tmp/discovery_backoff_seed.log
+  exit 1
+fi
+
 DIRECTORY_ADDR="127.0.0.1:${PORT_MAIN}" \
 DIRECTORY_PUBLIC_URL="http://127.0.0.1:${PORT_MAIN}" \
 DIRECTORY_PRIVATE_KEY_FILE="data/discovery_backoff_main.key" \
@@ -46,7 +60,19 @@ cleanup() {
 }
 trap cleanup EXIT
 
-sleep 3
+main_ready=0
+for _ in $(seq 1 40); do
+  if curl -fsS "http://127.0.0.1:${PORT_MAIN}/v1/health" >/dev/null 2>&1; then
+    main_ready=1
+    break
+  fi
+  sleep 0.25
+done
+if [[ "$main_ready" -ne 1 ]]; then
+  echo "main directory did not become ready for peer-status checks"
+  cat /tmp/discovery_backoff_main.log
+  exit 1
+fi
 
 code="$(curl -s -o /tmp/discovery_backoff_unauth.out -w '%{http_code}' "http://127.0.0.1:${PORT_MAIN}/v1/admin/peer-status" || true)"
 if [[ "$code" != "401" ]]; then
@@ -90,16 +116,9 @@ if ! echo "$status" | rg -q '"configured":true'; then
   exit 1
 fi
 
-peers_feed=""
-for _ in $(seq 1 40); do
-  peers_feed="$(curl -fsS "http://127.0.0.1:${PORT_MAIN}/v1/peers" || true)"
-  if ! echo "$peers_feed" | rg -Fq "\"${DOWN_URL}\""; then
-    break
-  fi
-  sleep 0.25
-done
-if echo "$peers_feed" | rg -Fq "\"${DOWN_URL}\""; then
-  echo "expected cooling discovered peer to be excluded from active /v1/peers sync set"
+peers_feed="$(curl -fsS "http://127.0.0.1:${PORT_MAIN}/v1/peers" || true)"
+if ! echo "$peers_feed" | rg -Fq "\"${DOWN_URL}\""; then
+  echo "expected known discovered peer to remain visible in /v1/peers feed during cooldown"
   echo "$peers_feed"
   cat /tmp/discovery_backoff_main.log
   exit 1

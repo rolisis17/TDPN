@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -47,6 +48,16 @@ type routeCandidate struct {
 	votes int
 }
 
+type relayDescriptorCandidate struct {
+	desc  proto.RelayDescriptor
+	votes int
+}
+
+type cachedRelayDescriptor struct {
+	desc      proto.RelayDescriptor
+	fetchedAt time.Time
+}
+
 type Service struct {
 	addr                  string
 	dataAddr              string
@@ -73,6 +84,7 @@ type Service struct {
 	mu                sync.RWMutex
 	sessions          map[string]sessionState
 	exitRouteCache    map[string]exitRoute
+	relayDescCache    map[string]cachedRelayDescriptor
 	openRPS           int
 	openBanThreshold  int
 	openBanDuration   time.Duration
@@ -215,6 +227,7 @@ func New() *Service {
 		httpClient:            &http.Client{Timeout: 5 * time.Second},
 		sessions:              make(map[string]sessionState),
 		exitRouteCache:        make(map[string]exitRoute),
+		relayDescCache:        make(map[string]cachedRelayDescriptor),
 		openRPS:               openRPS,
 		openBanThreshold:      openBanThreshold,
 		openBanDuration:       openBanDuration,
@@ -416,9 +429,6 @@ func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
-	if strings.TrimSpace(req.Transport) == "" {
-		req.Transport = "policy-json"
-	}
 	if strings.TrimSpace(req.TokenProof) == "" {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: "token-proof-required"})
@@ -443,6 +453,11 @@ func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
 			_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: "entry-exit-operator-collision"})
 			return
 		}
+	}
+	if reason := s.validateMiddleRelayRequest(r.Context(), req, route); reason != "" {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: reason})
+		return
 	}
 	clientIP := remoteIP(r.RemoteAddr)
 	if s.isBanned(clientIP, time.Now()) {
@@ -906,6 +921,209 @@ func (s *Service) resolveExitRoute(ctx context.Context, exitID string) (exitRout
 	s.exitRouteCache[exitID] = best
 	s.mu.Unlock()
 	return best, nil
+}
+
+func (s *Service) validateMiddleRelayRequest(ctx context.Context, req proto.PathOpenRequest, route exitRoute) string {
+	middleRelayID := strings.TrimSpace(req.MiddleRelayID)
+	if middleRelayID == "" {
+		return ""
+	}
+	exitID := strings.TrimSpace(req.ExitID)
+	if exitID != "" && middleRelayID == exitID {
+		return "middle-relay-equals-exit"
+	}
+	desc, err := s.resolveRelayDescriptor(ctx, middleRelayID)
+	if err != nil {
+		return "unknown-middle-relay"
+	}
+	if !relaySupportsMiddleDescriptor(desc) {
+		return "middle-relay-role-invalid"
+	}
+	middleOp := strings.TrimSpace(desc.OperatorID)
+	if middleOp == "" {
+		return ""
+	}
+	entryOp := strings.TrimSpace(s.operatorID)
+	if entryOp != "" && middleOp == entryOp {
+		return "entry-middle-operator-collision"
+	}
+	exitOp := strings.TrimSpace(route.operatorID)
+	if exitOp != "" && middleOp == exitOp {
+		return "middle-exit-operator-collision"
+	}
+	return ""
+}
+
+func (s *Service) resolveRelayDescriptor(ctx context.Context, relayID string) (proto.RelayDescriptor, error) {
+	relayID = strings.TrimSpace(relayID)
+	if relayID == "" {
+		return proto.RelayDescriptor{}, fmt.Errorf("relay id required")
+	}
+	now := time.Now()
+	requiredSources := maxInt(1, s.directoryMinSources)
+	requiredOperators := maxInt(1, s.directoryMinOperators)
+	requiredVotes := maxInt(1, s.directoryMinVotes)
+
+	s.mu.RLock()
+	cached, ok := s.relayDescCache[relayID]
+	s.mu.RUnlock()
+	if ok && now.Sub(cached.fetchedAt) <= s.routeTTL {
+		return cached.desc, nil
+	}
+
+	candidates := make(map[string]relayDescriptorCandidate)
+	descriptorVoters := make(map[string]map[string]struct{})
+	successSources := 0
+	successOperators := make(map[string]struct{})
+	var lastErr error
+
+	for _, durl := range s.directoryURLs {
+		dirPubs, sourceOperator, err := s.fetchDirectoryPubKeys(ctx, durl)
+		if err != nil {
+			lastErr = err
+			log.Printf("entry directory pubkey fetch failed url=%s err=%v", durl, err)
+			continue
+		}
+		relays, err := s.fetchRelaysVerified(ctx, durl, dirPubs)
+		if err != nil {
+			lastErr = err
+			log.Printf("entry directory relays fetch failed url=%s err=%v", durl, err)
+			continue
+		}
+		successSources++
+		successOperators[sourceOperator] = struct{}{}
+		seenFromSource := make(map[string]struct{})
+		for _, desc := range relays {
+			if strings.TrimSpace(desc.RelayID) != relayID {
+				continue
+			}
+			key := relayDescriptorVoteKey(desc)
+			if _, alreadySeen := seenFromSource[key]; alreadySeen {
+				continue
+			}
+			seenFromSource[key] = struct{}{}
+			if !markRouteVoter(descriptorVoters, key, sourceOperator) {
+				continue
+			}
+			candidate := candidates[key]
+			if candidate.votes == 0 {
+				candidate.desc = desc
+			}
+			candidate.votes++
+			candidates[key] = candidate
+		}
+	}
+
+	if successSources < requiredSources {
+		if lastErr == nil {
+			lastErr = fmt.Errorf("insufficient directory sources")
+		}
+		return proto.RelayDescriptor{}, fmt.Errorf("relay descriptor quorum not met for %s: success=%d required=%d: %w",
+			relayID, successSources, requiredSources, lastErr)
+	}
+	if len(successOperators) < requiredOperators {
+		if lastErr == nil {
+			lastErr = fmt.Errorf("insufficient directory operators")
+		}
+		return proto.RelayDescriptor{}, fmt.Errorf("relay descriptor operator quorum not met for %s: operators=%d required=%d: %w",
+			relayID, len(successOperators), requiredOperators, lastErr)
+	}
+	best, ok := pickBestRelayDescriptor(candidates, requiredVotes)
+	if !ok {
+		return proto.RelayDescriptor{}, fmt.Errorf("no relay descriptor met vote threshold for %s: required_votes=%d", relayID, requiredVotes)
+	}
+	s.mu.Lock()
+	if s.relayDescCache == nil {
+		s.relayDescCache = make(map[string]cachedRelayDescriptor)
+	}
+	s.relayDescCache[relayID] = cachedRelayDescriptor{desc: best, fetchedAt: now}
+	s.mu.Unlock()
+	return best, nil
+}
+
+func relayDescriptorVoteKey(desc proto.RelayDescriptor) string {
+	hopRoles := normalizeDescriptorList(desc.HopRoles)
+	capabilities := normalizeDescriptorList(desc.Capabilities)
+	return strings.Join([]string{
+		strings.TrimSpace(desc.RelayID),
+		strings.ToLower(strings.TrimSpace(desc.Role)),
+		strings.TrimSpace(desc.OperatorID),
+		normalizeHTTPURL(desc.ControlURL),
+		strings.TrimSpace(desc.Endpoint),
+		strings.TrimSpace(desc.CountryCode),
+		strings.TrimSpace(desc.Region),
+		strings.Join(hopRoles, ","),
+		strings.Join(capabilities, ","),
+	}, "|")
+}
+
+func normalizeDescriptorList(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		v := strings.ToLower(strings.TrimSpace(value))
+		if v == "" {
+			continue
+		}
+		if _, exists := seen[v]; exists {
+			continue
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func pickBestRelayDescriptor(candidates map[string]relayDescriptorCandidate, minVotes int) (proto.RelayDescriptor, bool) {
+	bestVotes := 0
+	bestKey := ""
+	var bestDesc proto.RelayDescriptor
+	for key, candidate := range candidates {
+		if candidate.votes < minVotes {
+			continue
+		}
+		if candidate.votes > bestVotes || (candidate.votes == bestVotes && (bestKey == "" || key < bestKey)) {
+			bestVotes = candidate.votes
+			bestKey = key
+			bestDesc = candidate.desc
+		}
+	}
+	if bestKey == "" {
+		return proto.RelayDescriptor{}, false
+	}
+	return bestDesc, true
+}
+
+func relaySupportsMiddleDescriptor(relay proto.RelayDescriptor) bool {
+	role := strings.ToLower(strings.TrimSpace(relay.Role))
+	if role == "middle" {
+		return true
+	}
+	for _, hopRole := range relay.HopRoles {
+		if hopRoleIsMiddleDescriptor(hopRole) {
+			return true
+		}
+	}
+	for _, capability := range relay.Capabilities {
+		switch strings.ToLower(strings.TrimSpace(capability)) {
+		case "middle", "relay", "micro-relay", "micro_relay", "transit", "three-hop-middle":
+			return true
+		}
+	}
+	return false
+}
+
+func hopRoleIsMiddleDescriptor(raw string) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "middle", "relay", "micro-relay", "micro_relay":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Service) fetchDirectoryPubKeys(ctx context.Context, directoryURL string) ([]ed25519.PublicKey, string, error) {

@@ -38,6 +38,7 @@ type CapabilityClaims struct {
 type PathOpenProofInput struct {
 	Token           string
 	ExitID          string
+	MiddleRelayID   string
 	TokenProofNonce string
 	ClientInnerPub  string
 	Transport       string
@@ -148,39 +149,110 @@ func VerifyPathOpenProof(proof string, pub ed25519.PublicKey, input PathOpenProo
 	if len(sig) != ed25519.SignatureSize {
 		return fmt.Errorf("invalid token proof size")
 	}
-	msg, err := pathOpenProofMessage(input)
+	msgs, err := pathOpenProofMessagesForVerification(input)
 	if err != nil {
 		return err
 	}
-	if !ed25519.Verify(pub, msg, sig) {
-		return fmt.Errorf("invalid token proof signature")
+	for _, msg := range msgs {
+		if ed25519.Verify(pub, msg, sig) {
+			return nil
+		}
 	}
-	return nil
+	return fmt.Errorf("invalid token proof signature")
 }
 
 func pathOpenProofMessage(input PathOpenProofInput) ([]byte, error) {
+	return pathOpenProofMessageVariant(input, true, true, true, true)
+}
+
+func pathOpenProofMessagesForVerification(input PathOpenProofInput) ([][]byte, error) {
+	variants := []struct {
+		includeMiddleRelayID   bool
+		includeTransport       bool
+		includeRequestedMTU    bool
+		includeRequestedRegion bool
+	}{
+		{includeMiddleRelayID: true, includeTransport: true, includeRequestedMTU: true, includeRequestedRegion: true},
+		{includeMiddleRelayID: true, includeTransport: true, includeRequestedMTU: true, includeRequestedRegion: false},
+		{includeMiddleRelayID: false, includeTransport: true, includeRequestedMTU: true, includeRequestedRegion: false},
+		{includeMiddleRelayID: true, includeTransport: true, includeRequestedMTU: false, includeRequestedRegion: false},
+		{includeMiddleRelayID: false, includeTransport: true, includeRequestedMTU: false, includeRequestedRegion: false},
+		{includeMiddleRelayID: true, includeTransport: false, includeRequestedMTU: false, includeRequestedRegion: false},
+		{includeMiddleRelayID: false, includeTransport: false, includeRequestedMTU: false, includeRequestedRegion: false},
+	}
+	out := make([][]byte, 0, len(variants))
+	seen := make(map[string]struct{}, len(variants))
+	for _, variant := range variants {
+		msg, err := pathOpenProofMessageVariant(
+			input,
+			variant.includeMiddleRelayID,
+			variant.includeTransport,
+			variant.includeRequestedMTU,
+			variant.includeRequestedRegion,
+		)
+		if err != nil {
+			return nil, err
+		}
+		key := string(msg)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, msg)
+	}
+	return out, nil
+}
+
+func pathOpenProofMessageVariant(input PathOpenProofInput, includeMiddleRelayID bool, includeTransport bool, includeRequestedMTU bool, includeRequestedRegion bool) ([]byte, error) {
+	normalized := normalizePathOpenProofInput(input)
+	middleRelayID := normalized.MiddleRelayID
+	transport := normalized.Transport
+	requestedMTU := normalized.RequestedMTU
+	requestedRegion := normalized.RequestedRegion
+
 	payload := struct {
-		Context         string `json:"ctx"`
-		Token           string `json:"token"`
-		ExitID          string `json:"exit_id"`
-		TokenProofNonce string `json:"token_proof_nonce"`
-		ClientInnerPub  string `json:"client_inner_pub"`
-		Transport       string `json:"transport"`
-		RequestedMTU    int    `json:"requested_mtu"`
-		RequestedRegion string `json:"requested_region"`
+		Context         string  `json:"ctx"`
+		Token           string  `json:"token"`
+		ExitID          string  `json:"exit_id"`
+		MiddleRelayID   *string `json:"middle_relay_id,omitempty"`
+		TokenProofNonce string  `json:"token_proof_nonce"`
+		ClientInnerPub  string  `json:"client_inner_pub"`
+		Transport       *string `json:"transport,omitempty"`
+		RequestedMTU    *int    `json:"requested_mtu,omitempty"`
+		RequestedRegion *string `json:"requested_region,omitempty"`
 	}{
 		Context:         pathOpenProofContext,
-		Token:           strings.TrimSpace(input.Token),
-		ExitID:          strings.TrimSpace(input.ExitID),
-		TokenProofNonce: strings.TrimSpace(input.TokenProofNonce),
-		ClientInnerPub:  strings.TrimSpace(input.ClientInnerPub),
-		Transport:       strings.TrimSpace(input.Transport),
-		RequestedMTU:    input.RequestedMTU,
-		RequestedRegion: strings.TrimSpace(input.RequestedRegion),
+		Token:           normalized.Token,
+		ExitID:          normalized.ExitID,
+		TokenProofNonce: normalized.TokenProofNonce,
+		ClientInnerPub:  normalized.ClientInnerPub,
+	}
+	if includeMiddleRelayID {
+		payload.MiddleRelayID = &middleRelayID
+	}
+	if includeTransport {
+		payload.Transport = &transport
+	}
+	if includeRequestedMTU {
+		payload.RequestedMTU = &requestedMTU
+	}
+	if includeRequestedRegion {
+		payload.RequestedRegion = &requestedRegion
 	}
 	msg, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("marshal path-open proof payload: %w", err)
 	}
 	return msg, nil
+}
+
+func normalizePathOpenProofInput(input PathOpenProofInput) PathOpenProofInput {
+	input.Token = strings.TrimSpace(input.Token)
+	input.ExitID = strings.TrimSpace(input.ExitID)
+	input.MiddleRelayID = strings.TrimSpace(input.MiddleRelayID)
+	input.TokenProofNonce = strings.TrimSpace(input.TokenProofNonce)
+	input.ClientInnerPub = strings.TrimSpace(input.ClientInnerPub)
+	input.Transport = strings.TrimSpace(input.Transport)
+	input.RequestedRegion = strings.TrimSpace(input.RequestedRegion)
+	return input
 }

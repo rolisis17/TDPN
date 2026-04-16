@@ -1,6 +1,9 @@
 package crypto
 
 import (
+	"crypto/ed25519"
+	"encoding/base64"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -77,6 +80,7 @@ func TestPathOpenProofSignVerify(t *testing.T) {
 	input := PathOpenProofInput{
 		Token:           "tok-1",
 		ExitID:          "exit-a",
+		MiddleRelayID:   "middle-a",
 		TokenProofNonce: "nonce-a",
 		ClientInnerPub:  "pub-a",
 		Transport:       "policy-json",
@@ -92,9 +96,57 @@ func TestPathOpenProofSignVerify(t *testing.T) {
 	}
 
 	mutated := input
-	mutated.ExitID = "exit-b"
+	mutated.MiddleRelayID = "middle-b"
 	if err := VerifyPathOpenProof(proof, pub, mutated); err == nil {
 		t.Fatalf("expected proof verification failure on mutated request")
+	}
+}
+
+func TestPathOpenProofVerifyLegacyNoRequestedRegion(t *testing.T) {
+	pub, priv, err := GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen failed: %v", err)
+	}
+	input := PathOpenProofInput{
+		Token:           "tok-legacy-region",
+		ExitID:          "exit-a",
+		MiddleRelayID:   "middle-a",
+		TokenProofNonce: "nonce-a",
+		ClientInnerPub:  "pub-a",
+		Transport:       "policy-json",
+		RequestedMTU:    1280,
+		RequestedRegion: "ap-southeast-2",
+	}
+	proof := signLegacyPathOpenProofNoRegion(t, priv, input)
+	if err := VerifyPathOpenProof(proof, pub, input); err != nil {
+		t.Fatalf("expected legacy no-region proof to verify, got: %v", err)
+	}
+}
+
+func TestPathOpenProofVerifyLegacyCoreContract(t *testing.T) {
+	pub, priv, err := GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen failed: %v", err)
+	}
+	input := PathOpenProofInput{
+		Token:           "tok-legacy-core",
+		ExitID:          "exit-a",
+		MiddleRelayID:   "middle-a",
+		TokenProofNonce: "nonce-a",
+		ClientInnerPub:  "pub-a",
+		Transport:       "policy-json",
+		RequestedMTU:    1280,
+		RequestedRegion: "us-east-1",
+	}
+	proof := signLegacyPathOpenProofCoreOnly(t, priv, input)
+	if err := VerifyPathOpenProof(proof, pub, input); err != nil {
+		t.Fatalf("expected legacy core-only proof to verify, got: %v", err)
+	}
+
+	mutated := input
+	mutated.Token = "tok-mutated"
+	if err := VerifyPathOpenProof(proof, pub, mutated); err == nil {
+		t.Fatalf("expected legacy proof verification failure when core field is mutated")
 	}
 }
 
@@ -114,4 +166,58 @@ func TestNormalizeEd25519PublicKey(t *testing.T) {
 	if _, err := NormalizeEd25519PublicKey(strings.Repeat("a", 8)); err == nil {
 		t.Fatalf("expected invalid key to fail normalization")
 	}
+}
+
+func signLegacyPathOpenProofNoRegion(t *testing.T, priv ed25519.PrivateKey, input PathOpenProofInput) string {
+	t.Helper()
+	normalized := normalizePathOpenProofInput(input)
+	payload := struct {
+		Context         string `json:"ctx"`
+		Token           string `json:"token"`
+		ExitID          string `json:"exit_id"`
+		MiddleRelayID   string `json:"middle_relay_id"`
+		TokenProofNonce string `json:"token_proof_nonce"`
+		ClientInnerPub  string `json:"client_inner_pub"`
+		Transport       string `json:"transport"`
+		RequestedMTU    int    `json:"requested_mtu"`
+	}{
+		Context:         pathOpenProofContext,
+		Token:           normalized.Token,
+		ExitID:          normalized.ExitID,
+		MiddleRelayID:   normalized.MiddleRelayID,
+		TokenProofNonce: normalized.TokenProofNonce,
+		ClientInnerPub:  normalized.ClientInnerPub,
+		Transport:       normalized.Transport,
+		RequestedMTU:    normalized.RequestedMTU,
+	}
+	msg, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal legacy no-region payload: %v", err)
+	}
+	sig := ed25519.Sign(priv, msg)
+	return base64.RawURLEncoding.EncodeToString(sig)
+}
+
+func signLegacyPathOpenProofCoreOnly(t *testing.T, priv ed25519.PrivateKey, input PathOpenProofInput) string {
+	t.Helper()
+	normalized := normalizePathOpenProofInput(input)
+	payload := struct {
+		Context         string `json:"ctx"`
+		Token           string `json:"token"`
+		ExitID          string `json:"exit_id"`
+		TokenProofNonce string `json:"token_proof_nonce"`
+		ClientInnerPub  string `json:"client_inner_pub"`
+	}{
+		Context:         pathOpenProofContext,
+		Token:           normalized.Token,
+		ExitID:          normalized.ExitID,
+		TokenProofNonce: normalized.TokenProofNonce,
+		ClientInnerPub:  normalized.ClientInnerPub,
+	}
+	msg, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal legacy core payload: %v", err)
+	}
+	sig := ed25519.Sign(priv, msg)
+	return base64.RawURLEncoding.EncodeToString(sig)
 }

@@ -91,10 +91,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 if [[ -n "$summary_json" ]]; then
-  mkdir -p "$(dirname "$summary_json")"
-  decision="${FAKE_CHECK_DECISION:-GO}"
-  support="${FAKE_CHECK_SUPPORT_PCT:-80}"
-  cat >"$summary_json" <<EOF_SUMMARY
+  if [[ "${FAKE_CHECK_SKIP_SUMMARY_WRITE:-0}" != "1" ]]; then
+    mkdir -p "$(dirname "$summary_json")"
+    decision="${FAKE_CHECK_DECISION:-GO}"
+    support="${FAKE_CHECK_SUPPORT_PCT:-80}"
+    cat >"$summary_json" <<EOF_SUMMARY
 {
   "decision": "$decision",
   "status": "ok",
@@ -107,6 +108,10 @@ if [[ -n "$summary_json" ]]; then
   }
 }
 EOF_SUMMARY
+  fi
+fi
+if [[ -n "${FAKE_CHECK_FAILURE_LINE:-}" ]]; then
+  echo "$FAKE_CHECK_FAILURE_LINE" >&2
 fi
 exit "${FAKE_CHECK_RC:-0}"
 EOF_FAKE_CHECK
@@ -235,6 +240,62 @@ fi
 if ! jq -e '.status == "fail" and .final_rc == 19 and .failure_stage == "campaign_check" and .decision.decision == "NO-GO" and .stages.campaign.status == "pass" and .stages.campaign_check.status == "fail"' "$CHECK_FAIL_SUMMARY" >/dev/null 2>&1; then
   echo "check-fail summary JSON missing expected fields"
   cat "$CHECK_FAIL_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-compare-campaign-signoff] check failure missing campaign artifact yields deterministic NO-GO context"
+: >"$SIGNOFF_CAPTURE"
+CHECK_FAIL_MISSING_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_check_fail_missing_campaign_summary.json"
+set +e
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_COMPARE_CAMPAIGN_SCRIPT="$FAKE_CAMPAIGN" \
+PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT="$FAKE_CHECK" \
+FAKE_CAMPAIGN_RC=0 \
+FAKE_CHECK_RC=1 \
+FAKE_CHECK_SKIP_SUMMARY_WRITE=1 \
+FAKE_CHECK_FAILURE_LINE='profile-compare-campaign-check failed: campaign summary JSON not found' \
+./scripts/profile_compare_campaign_signoff.sh \
+  --reports-dir "$TMP_DIR/reports_check_fail_missing_campaign_summary" \
+  --refresh-campaign 1 \
+  --summary-json "$CHECK_FAIL_MISSING_SUMMARY" >/tmp/integration_profile_compare_campaign_signoff_check_fail_missing_campaign_summary.log 2>&1
+rc_check_fail_missing_summary=$?
+set -e
+if [[ "$rc_check_fail_missing_summary" -ne 1 ]]; then
+  echo "expected rc=1 when campaign-check fails without summary (missing campaign artifact)"
+  cat /tmp/integration_profile_compare_campaign_signoff_check_fail_missing_campaign_summary.log
+  exit 1
+fi
+if ! jq -e '.status == "fail" and .final_rc == 1 and .failure_stage == "campaign_check" and .decision.decision == "NO-GO" and .decision.context == "synthetic_campaign_check_failure" and .decision.from_campaign_check_summary == false and .decision.reason == "campaign summary JSON missing" and .stages.campaign.status == "pass" and .stages.campaign_check.status == "fail"' "$CHECK_FAIL_MISSING_SUMMARY" >/dev/null 2>&1; then
+  echo "missing-campaign-artifact check-fail summary JSON missing deterministic NO-GO context"
+  cat "$CHECK_FAIL_MISSING_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-compare-campaign-signoff] check failure invalid campaign artifact yields deterministic NO-GO context"
+: >"$SIGNOFF_CAPTURE"
+CHECK_FAIL_INVALID_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_check_fail_invalid_campaign_summary.json"
+set +e
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_COMPARE_CAMPAIGN_SCRIPT="$FAKE_CAMPAIGN" \
+PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT="$FAKE_CHECK" \
+FAKE_CAMPAIGN_RC=0 \
+FAKE_CHECK_RC=1 \
+FAKE_CHECK_SKIP_SUMMARY_WRITE=1 \
+FAKE_CHECK_FAILURE_LINE='profile-compare-campaign-check failed: invalid campaign summary JSON schema (/tmp/fake.json)' \
+./scripts/profile_compare_campaign_signoff.sh \
+  --reports-dir "$TMP_DIR/reports_check_fail_invalid_campaign_summary" \
+  --refresh-campaign 1 \
+  --summary-json "$CHECK_FAIL_INVALID_SUMMARY" >/tmp/integration_profile_compare_campaign_signoff_check_fail_invalid_campaign_summary.log 2>&1
+rc_check_fail_invalid_summary=$?
+set -e
+if [[ "$rc_check_fail_invalid_summary" -ne 1 ]]; then
+  echo "expected rc=1 when campaign-check fails without summary (invalid campaign artifact)"
+  cat /tmp/integration_profile_compare_campaign_signoff_check_fail_invalid_campaign_summary.log
+  exit 1
+fi
+if ! jq -e '.status == "fail" and .final_rc == 1 and .failure_stage == "campaign_check" and .decision.decision == "NO-GO" and .decision.context == "synthetic_campaign_check_failure" and .decision.from_campaign_check_summary == false and .decision.reason == "campaign summary JSON invalid schema" and .stages.campaign.status == "pass" and .stages.campaign_check.status == "fail"' "$CHECK_FAIL_INVALID_SUMMARY" >/dev/null 2>&1; then
+  echo "invalid-campaign-artifact check-fail summary JSON missing deterministic NO-GO context"
+  cat "$CHECK_FAIL_INVALID_SUMMARY"
   exit 1
 fi
 

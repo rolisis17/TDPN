@@ -21,9 +21,28 @@ timeout 25s go run ./cmd/node --directory --issuer --entry --exit >"$LOG_FILE" 2
 node_pid=$!
 trap 'kill "$node_pid" >/dev/null 2>&1 || true' EXIT
 
-sleep 2
+wait_http_ready() {
+  local url="$1"
+  local tries="${2:-50}"
+  for _ in $(seq 1 "$tries"); do
+    if curl -fsS "$url" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.2
+  done
+  return 1
+}
 
-credential_id="anon-integration-1"
+if ! wait_http_ready "http://127.0.0.1:8081/v1/relays" 60 || \
+   ! wait_http_ready "http://127.0.0.1:8082/v1/pubkeys" 60 || \
+   ! wait_http_ready "http://127.0.0.1:8083/v1/health" 60 || \
+   ! wait_http_ready "http://127.0.0.1:8084/v1/health" 60; then
+  echo "node services did not become ready before anon-credential checks"
+  cat "$LOG_FILE"
+  exit 1
+fi
+
+credential_id="anon-integration-$(date +%s%N)"
 issue_json=$(curl -sS -X POST http://127.0.0.1:8082/v1/admin/anon-credential/issue \
   -H 'X-Admin-Token: dev-admin-token' \
   -H 'Content-Type: application/json' \

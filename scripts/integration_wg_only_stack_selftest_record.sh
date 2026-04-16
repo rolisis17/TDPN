@@ -133,6 +133,60 @@ fi
 
 : >"$CAPTURE"
 
+echo "[wg-only-stack-selftest-record] defer-no-root skip path"
+FAKE_EASY_CAPTURE_FILE="$CAPTURE" \
+WG_ONLY_STACK_SELFTEST_RECORD_EASY_NODE_SCRIPT="$FAKE_EASY_NODE" \
+WG_ONLY_STACK_SELFTEST_RECORD_EFFECTIVE_UID_OVERRIDE="1000" \
+./scripts/wg_only_stack_selftest_record.sh \
+  --defer-no-root 1 \
+  --strict-beta 1 \
+  --base-port 19293 \
+  --client-iface wgcnoroot0 \
+  --exit-iface wgenoroot0 \
+  --print-summary-json 1 >/tmp/integration_wg_only_stack_selftest_record_noroot.log 2>&1
+
+if ! rg -q 'wg-only-stack-selftest-record: status=skip' /tmp/integration_wg_only_stack_selftest_record_noroot.log; then
+  echo "expected skip status in defer-no-root path"
+  cat /tmp/integration_wg_only_stack_selftest_record_noroot.log
+  exit 1
+fi
+if rg -q '^wg-only-stack-selftest ' "$CAPTURE"; then
+  echo "wg-only selftest must not run in defer-no-root path"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q '^manual-validation-report --base-port 19293 --client-iface wgcnoroot0 --exit-iface wgenoroot0 --overlay-check-id wg_only_stack_selftest --overlay-status skip ' "$CAPTURE"; then
+  echo "expected manual-validation-report skip overlay call missing"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q '^manual-validation-record --check-id wg_only_stack_selftest --status skip ' "$CAPTURE"; then
+  echo "expected manual-validation-record skip call missing"
+  cat "$CAPTURE"
+  exit 1
+fi
+
+no_root_summary_json_path="$(sed -n 's/^summary_json: //p' /tmp/integration_wg_only_stack_selftest_record_noroot.log | tail -n 1)"
+if [[ -z "$no_root_summary_json_path" || ! -f "$no_root_summary_json_path" ]]; then
+  echo "expected defer-no-root summary JSON missing"
+  cat /tmp/integration_wg_only_stack_selftest_record_noroot.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "skip"
+  and .rc == 0
+  and .selftest.defer_no_root == true
+  and .selftest.effective_uid == 1000
+  and .selftest.deferred_no_root == true
+  and .manual_validation_report.status == "ok"
+' "$no_root_summary_json_path" >/dev/null; then
+  echo "defer-no-root summary JSON missing expected fields"
+  cat "$no_root_summary_json_path"
+  exit 1
+fi
+
+: >"$CAPTURE"
+
 echo "[wg-only-stack-selftest-record] manual validation malformed payload path"
 FAKE_EASY_CAPTURE_FILE="$CAPTURE" \
 FAKE_MANUAL_REPORT_INVALID_SCHEMA="1" \

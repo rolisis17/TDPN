@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TDPN Desktop (Scaffold)</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="hero">
+        <h1>TDPN Desktop</h1>
+        <p>Windows-native track scaffold (Tauri + local daemon API)</p>
+      </header>
+
+      <section class="card">
+        <h2>Connection</h2>
+        <div class="grid">
+          <label>
+            Bootstrap directory
+            <input id="bootstrap_directory" value="http://127.0.0.1:8081" />
+          </label>
+          <label>
+            Invite key
+            <input id="invite_key" placeholder="inv-..." />
+          </label>
+          <label>
+            Path profile
+            <select id="path_profile">
+              <option value="2hop">2hop (default)</option>
+              <option value="1hop">1hop</option>
+              <option value="3hop">3hop</option>
+            </select>
+          </label>
+          <label>
+            Interface
+            <input id="interface" value="wgvpn0" />
+          </label>
+          <label>
+            Discovery wait (sec)
+            <input id="discovery_wait_sec" type="number" min="1" value="20" />
+          </label>
+          <label>
+            Ready timeout (sec)
+            <input id="ready_timeout_sec" type="number" min="1" value="35" />
+          </label>
+          <label class="check">
+            <input id="run_preflight" type="checkbox" checked />
+            Run preflight
+          </label>
+          <label class="check">
+            <input id="prod_profile" type="checkbox" />
+            PROD profile
+          </label>
+          <label class="check">
+            <input id="install_route" type="checkbox" checked />
+            Install default route
+          </label>
+        </div>
+        <div class="actions">
+          <button id="connect_btn">Connect</button>
+          <button id="disconnect_btn" class="secondary">Disconnect</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Control</h2>
+        <div class="row">
+          <label>
+            Active profile
+            <select id="set_profile">
+              <option value="2hop">2hop</option>
+              <option value="1hop">1hop</option>
+              <option value="3hop">3hop</option>
+            </select>
+          </label>
+        </div>
+        <div class="actions">
+          <button id="set_profile_btn">Set Profile</button>
+          <button id="status_btn" class="secondary">Status</button>
+          <button id="diagnostics_btn" class="secondary">Diagnostics</button>
+          <button id="health_btn" class="secondary">Health</button>
+          <button id="update_btn" class="secondary">Update</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Output</h2>
+        <div class="meta">
+          <span id="api_base">API: loading...</span>
+        </div>
+        <pre id="output"></pre>
+      </section>
+    </main>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

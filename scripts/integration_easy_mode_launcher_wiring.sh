@@ -7,7 +7,7 @@ cd "$ROOT_DIR"
 CPP_UI="tools/easy_mode/easy_mode_ui.cpp"
 EASY_NODE="scripts/easy_node.sh"
 
-for cmd in rg; do
+for cmd in rg mktemp cat chmod; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "missing required command: $cmd"
     exit 2
@@ -37,19 +37,50 @@ check_cpp() {
   fi
 }
 
+check_cpp_absent() {
+  local pattern="$1"
+  local message="$2"
+  if rg -q -- "$pattern" "$CPP_UI"; then
+    echo "$message"
+    exit 1
+  fi
+}
+
+last_forward_line_for_label() {
+  local capture_file="$1"
+  local label="$2"
+  local line=""
+  while IFS= read -r candidate; do
+    line="$candidate"
+  done < <(rg "^${label}(	|$)" "$capture_file" || true)
+  printf '%s\n' "$line"
+}
+
+assert_forward_line_has_token() {
+  local line="$1"
+  local token="$2"
+  local message="$3"
+  if [[ "$line" != *"$token"* ]]; then
+    echo "$message"
+    printf 'forward line: %s\n' "$line"
+    exit 1
+  fi
+}
+
 echo "[easy-mode-wiring] main menu simplicity contract"
 check_cpp 'Main menu:' "launcher wiring failed: main menu heading missing"
 check_cpp '1\) Connect as CLIENT \(simple\)' "launcher wiring failed: simple CLIENT entry missing"
 check_cpp '2\) Connect as SERVER \(simple, provider default\)' "launcher wiring failed: simple SERVER entry missing"
 check_cpp '3\) Other options \(expert/tests\)' "launcher wiring failed: advanced options entry missing"
 
-echo "[easy-mode-wiring] simple server auto-invite wiring"
-check_cpp 'Auto-generate invite key\(s\) when server starts\?' "launcher wiring failed: simple server auto-invite prompt missing"
-check_cpp '--auto-invite ' "launcher wiring failed: simple server auto-invite forwarding missing"
-check_cpp '--auto-invite-count ' "launcher wiring failed: simple server auto-invite-count forwarding missing"
-check_cpp '--auto-invite-tier ' "launcher wiring failed: simple server auto-invite-tier forwarding missing"
-check_cpp '--auto-invite-wait-sec ' "launcher wiring failed: simple server auto-invite-wait-sec forwarding missing"
-check_cpp '--auto-invite-fail-open ' "launcher wiring failed: simple server auto-invite-fail-open forwarding missing"
+echo "[easy-mode-wiring] simple wrapper wiring"
+check_cpp 'simple-client-test' "launcher wiring failed: simple client dry-run wrapper wiring missing"
+check_cpp 'simple-client-vpn-preflight' "launcher wiring failed: simple client preflight wrapper wiring missing"
+check_cpp 'simple-client-vpn-session' "launcher wiring failed: simple client session wrapper wiring missing"
+check_cpp 'simple-server-preflight' "launcher wiring failed: simple server preflight wrapper wiring missing"
+check_cpp 'simple-server-session' "launcher wiring failed: simple server session wrapper wiring missing"
+check_cpp_absent 'Need expert client overrides now\?' "launcher wiring failed: simple client still exposes inline expert override prompt"
+check_cpp_absent 'Need expert server overrides now\?' "launcher wiring failed: simple server still exposes inline expert override prompt"
 
 echo "[easy-mode-wiring] advanced options presence"
 check_cpp '36\) Closed-beta PROD bundle \(strict preflight \+ integrity verify \+ signoff \+ run report \+ auto incident snapshot on fail\)' \
@@ -134,6 +165,66 @@ check_cpp '75\) Single-machine PROD readiness sweep \(all local gates \+ next ac
   "launcher wiring failed: option 75 menu label missing"
 check_cpp '76\) VPN RC standard path \(single-machine sweep \+ roadmap report\)' \
   "launcher wiring failed: option 76 menu label missing"
+check_cpp '78\) VPN RC matrix chain path \(campaign refresh/check handoff\)' \
+  "launcher wiring failed: option 78 menu label missing"
+check_cpp '79\) 3-machine Docker profile matrix \(resilience defaults\)' \
+  "launcher wiring failed: option 79 menu label missing"
+check_cpp '80\) VPN RC resilience path \(resilience defaults \+ integration coverage\)' \
+  "launcher wiring failed: option 80 menu label missing"
+check_cpp '81\) 3-machine Docker profile matrix record wrapper \(coverage defaults\)' \
+  "launcher wiring failed: option 81 menu label missing"
+check_cpp '82\) Phase-0 CI gate \(surface simplification fast gate\)' \
+  "launcher wiring failed: option 82 menu label missing"
+check_cpp '83\) Phase-1 resilience CI gate' \
+  "launcher wiring failed: option 83 menu label missing"
+check_cpp '84\) Phase-1 resilience handoff check' \
+  "launcher wiring failed: option 84 menu label missing"
+check_cpp '85\) Phase-1 resilience handoff run \(refresh \+ check\)' \
+  "launcher wiring failed: option 85 menu label missing"
+check_cpp '86\) Phase-2 Linux prod-candidate CI gate' \
+  "launcher wiring failed: option 86 menu label missing"
+check_cpp '87\) Phase-2 Linux prod-candidate check' \
+  "launcher wiring failed: option 87 menu label missing"
+check_cpp '88\) Phase-2 Linux prod-candidate run \(refresh \+ check\)' \
+  "launcher wiring failed: option 88 menu label missing"
+check_cpp '89\) Phase-2 Linux prod-candidate signoff \(run \+ roadmap report\)' \
+  "launcher wiring failed: option 89 menu label missing"
+check_cpp '90\) Phase-2 Linux prod-candidate handoff check' \
+  "launcher wiring failed: option 90 menu label missing"
+check_cpp '91\) Phase-2 Linux prod-candidate handoff run \(signoff \+ check\)' \
+  "launcher wiring failed: option 91 menu label missing"
+check_cpp '92\) Phase-3 Windows client beta CI gate' \
+  "launcher wiring failed: option 92 menu label missing"
+check_cpp '93\) Phase-3 Windows client beta check' \
+  "launcher wiring failed: option 93 menu label missing"
+check_cpp '94\) Phase-3 Windows client beta run \(refresh \+ check\)' \
+  "launcher wiring failed: option 94 menu label missing"
+check_cpp '95\) Phase-3 Windows client beta handoff check' \
+  "launcher wiring failed: option 95 menu label missing"
+check_cpp '96\) Phase-3 Windows client beta handoff run \(run \+ check\)' \
+  "launcher wiring failed: option 96 menu label missing"
+check_cpp '97\) Phase-4 Windows full parity CI gate' \
+  "launcher wiring failed: option 97 menu label missing"
+check_cpp '98\) Phase-4 Windows full parity check' \
+  "launcher wiring failed: option 98 menu label missing"
+check_cpp '99\) Phase-4 Windows full parity run \(refresh \+ check\)' \
+  "launcher wiring failed: option 99 menu label missing"
+check_cpp '100\) Phase-4 Windows full parity handoff check' \
+  "launcher wiring failed: option 100 menu label missing"
+check_cpp '101\) Phase-4 Windows full parity handoff run \(run \+ check\)' \
+  "launcher wiring failed: option 101 menu label missing"
+check_cpp '102\) Phase-5 settlement layer CI gate' \
+  "launcher wiring failed: option 102 menu label missing"
+check_cpp '103\) Phase-5 settlement layer check' \
+  "launcher wiring failed: option 103 menu label missing"
+check_cpp '104\) Phase-5 settlement layer run \(refresh \+ check\)' \
+  "launcher wiring failed: option 104 menu label missing"
+check_cpp '105\) Phase-5 settlement layer handoff check' \
+  "launcher wiring failed: option 105 menu label missing"
+check_cpp '106\) Phase-5 settlement layer handoff run \(run \+ check\)' \
+  "launcher wiring failed: option 106 menu label missing"
+check_cpp '107\) VPN non-blockchain fastlane \(runtime\+phase1-4 handoff\+roadmap\)' \
+  "launcher wiring failed: option 107 menu label missing"
 check_cpp '34\) Client VPN up \(real mode, expert/manual\)' \
   "launcher wiring failed: option 34 expert/manual label missing"
 
@@ -416,11 +507,658 @@ check_cpp 'if \(choice == "76"\)' "launcher wiring failed: option 76 handler mis
 check_cpp 'vpn-rc-standard-path' "launcher wiring failed: option 76 command missing"
 check_cpp 'Force profile campaign refresh if signoff runs\?' "launcher wiring failed: option 76 refresh prompt missing"
 check_cpp 'Print roadmap markdown report in terminal\?' "launcher wiring failed: option 76 print-report prompt missing"
+check_cpp 'readLine\("Force profile campaign refresh if signoff runs\? \(y/N\)", "n"\)' \
+  "launcher wiring failed: option 76 refresh prompt default missing"
+check_cpp 'readLine\("Print roadmap markdown report in terminal\? \(Y/n\)", "y"\)' \
+  "launcher wiring failed: option 76 print-report prompt default missing"
+check_cpp 'readLine\("Print summary JSON\? \(y/N\)", "n"\)' \
+  "launcher wiring failed: option 76 print-summary-json prompt default missing"
+check_cpp 'readLine\("Run with sudo\? \(Y/n\)", "y"\)' \
+  "launcher wiring failed: option 76 sudo prompt default missing"
 check_cpp '--run-profile-compare-campaign-signoff auto' "launcher wiring failed: option 76 signoff mode forwarding missing"
+check_cpp '--run-profile-compare-campaign-signoff auto"' "launcher wiring failed: option 76 signoff mode forwarding literal missing"
+check_cpp '--profile-compare-campaign-signoff-refresh-campaign " << \(profileSignoffRefreshCampaign \? "1" : "0"\)' \
+  "launcher wiring failed: option 76 refresh forwarding expression missing"
+check_cpp '--print-report " << \(printReport \? "1" : "0"\)' \
+  "launcher wiring failed: option 76 print-report forwarding expression missing"
+check_cpp '--print-summary-json " << \(printSummaryJson \? "1" : "0"\)' \
+  "launcher wiring failed: option 76 print-summary-json forwarding expression missing"
 check_cpp '--profile-compare-campaign-signoff-refresh-campaign ' "launcher wiring failed: option 76 refresh forwarding missing"
 check_cpp '--print-report ' "launcher wiring failed: option 76 print-report forwarding missing"
 check_cpp '--print-summary-json ' "launcher wiring failed: option 76 print-summary-json forwarding missing"
 check_cpp 'Run with sudo\? \(Y/n\)' "launcher wiring failed: option 76 sudo prompt missing"
+echo "[easy-mode-wiring] option 77 command wiring"
+check_cpp 'if \(choice == "77"\)' "launcher wiring failed: option 77 handler missing"
+check_cpp 'profile-compare-campaign-signoff' "launcher wiring failed: option 77 command missing"
+check_cpp '77\) Docker profile matrix signoff \(campaign refresh \+ fail-closed gate\)' \
+  "launcher wiring failed: option 77 numbered menu label missing"
+check_cpp 'Docker profile matrix signoff' "launcher wiring failed: option 77 menu label missing"
+check_cpp 'Campaign bootstrap directory URL' "launcher wiring failed: option 77 bootstrap prompt missing"
+check_cpp 'Campaign discovery wait sec' "launcher wiring failed: option 77 discovery wait prompt missing"
+check_cpp 'Refresh campaign before signoff gate\?' "launcher wiring failed: option 77 refresh prompt missing"
+check_cpp 'Fail if signoff decision is NO-GO\?' "launcher wiring failed: option 77 fail-on-no-go prompt missing"
+check_cpp 'Signoff summary JSON path \(optional\)' "launcher wiring failed: option 77 summary-json prompt missing"
+check_cpp 'Print signoff summary JSON payload\?' "launcher wiring failed: option 77 print-summary prompt missing"
+check_cpp 'Show signoff check JSON payload\?' "launcher wiring failed: option 77 show-json prompt missing"
+check_cpp 'readLine\("Reports dir", "\.easy-node-logs/profile_compare_campaign_docker"\)' \
+  "launcher wiring failed: option 77 reports-dir prompt default missing"
+check_cpp 'readLine\("Campaign discovery wait sec", "20"\)' \
+  "launcher wiring failed: option 77 discovery wait prompt default missing"
+check_cpp 'readLine\("Refresh campaign before signoff gate\? \(Y/n\)", "y"\)' \
+  "launcher wiring failed: option 77 refresh prompt default missing"
+check_cpp 'readLine\("Fail if signoff decision is NO-GO\? \(Y/n\)", "y"\)' \
+  "launcher wiring failed: option 77 fail-on-no-go prompt default missing"
+check_cpp 'readLine\("Print signoff summary JSON payload\? \(y/N\)", "n"\)' \
+  "launcher wiring failed: option 77 print-summary prompt default missing"
+check_cpp 'readLine\("Show signoff check JSON payload\? \(y/N\)", "n"\)' \
+  "launcher wiring failed: option 77 show-json prompt default missing"
+check_cpp 'readLine\("Run with sudo\? \(y/N\)", "n"\)' \
+  "launcher wiring failed: option 77 sudo prompt default missing"
+check_cpp '--campaign-execution-mode docker' "launcher wiring failed: option 77 missing fixed --campaign-execution-mode docker"
+check_cpp '--campaign-start-local-stack 0' "launcher wiring failed: option 77 missing fixed --campaign-start-local-stack 0"
+check_cpp '--refresh-campaign ' "launcher wiring failed: option 77 refresh forwarding missing"
+check_cpp '--fail-on-no-go ' "launcher wiring failed: option 77 fail-on-no-go forwarding missing"
+check_cpp '--campaign-bootstrap-directory ' "launcher wiring failed: option 77 bootstrap forwarding missing"
+check_cpp '--campaign-discovery-wait-sec ' "launcher wiring failed: option 77 discovery wait forwarding missing"
+check_cpp '--refresh-campaign " << \(refreshCampaign \? "1" : "0"\)' \
+  "launcher wiring failed: option 77 refresh forwarding expression missing"
+check_cpp '--fail-on-no-go " << \(failOnNoGo \? "1" : "0"\)' \
+  "launcher wiring failed: option 77 fail-on-no-go forwarding expression missing"
+check_cpp '--print-summary-json " << \(printSummaryJson \? "1" : "0"\)' \
+  "launcher wiring failed: option 77 print-summary forwarding expression missing"
+check_cpp '--show-json " << \(showJson \? "1" : "0"\)' \
+  "launcher wiring failed: option 77 show-json forwarding expression missing"
+check_cpp '--summary-json ' "launcher wiring failed: option 77 summary-json forwarding missing"
+check_cpp '--print-summary-json ' "launcher wiring failed: option 77 print-summary forwarding missing"
+check_cpp '--show-json ' "launcher wiring failed: option 77 show-json forwarding missing"
+
+echo "[easy-mode-wiring] option 78 command wiring"
+check_cpp 'if \(choice == "78"\)' "launcher wiring failed: option 78 handler missing"
+check_cpp '78\) VPN RC matrix chain path \(campaign refresh/check handoff\)' \
+  "launcher wiring failed: option 78 numbered menu label missing"
+check_cpp 'VPN RC matrix chain path' "launcher wiring failed: option 78 menu label missing"
+check_cpp 'vpn-rc-matrix-path' "launcher wiring failed: option 78 command keyword missing"
+check_cpp 'Run with sudo\? \(y/N\)' "launcher wiring failed: option 78 sudo prompt missing"
+check_cpp 'readLine\("Run with sudo\? \(y/N\)", "n"\)' \
+  "launcher wiring failed: option 78 sudo prompt default missing"
+check_cpp 'bool runWithSudo = parseYesNo\(readLine\("Run with sudo\? \(y/N\)", "n"\), false\);' \
+  "launcher wiring failed: option 78 sudo parse wiring missing"
+check_cpp 'cmd << shellEscape\(script\) << " vpn-rc-matrix-path"' \
+  "launcher wiring failed: option 78 command assembly missing"
+check_cpp '--campaign-execution-mode docker' \
+  "launcher wiring failed: option 78 fixed --campaign-execution-mode docker missing"
+check_cpp '--signoff-refresh-campaign 0' \
+  "launcher wiring failed: option 78 fixed --signoff-refresh-campaign 0 missing"
+check_cpp '--signoff-fail-on-no-go 1' \
+  "launcher wiring failed: option 78 fixed --signoff-fail-on-no-go 1 missing"
+check_cpp '--roadmap-refresh-manual-validation 1' \
+  "launcher wiring failed: option 78 fixed --roadmap-refresh-manual-validation 1 missing"
+check_cpp '--roadmap-refresh-single-machine-readiness 0' \
+  "launcher wiring failed: option 78 fixed --roadmap-refresh-single-machine-readiness 0 missing"
+check_cpp '--print-report 1' \
+  "launcher wiring failed: option 78 fixed --print-report 1 missing"
+check_cpp '--print-summary-json 1' \
+  "launcher wiring failed: option 78 fixed --print-summary-json 1 missing"
+check_cpp 'if \(runWithSudo\)' "launcher wiring failed: option 78 sudo branch missing"
+check_cpp 'cmd << "sudo ";' "launcher wiring failed: option 78 sudo forwarding missing"
+
+echo "[easy-mode-wiring] option 79 command wiring"
+check_cpp 'if \(choice == "79"\)' "launcher wiring failed: option 79 handler missing"
+check_cpp '79\) 3-machine Docker profile matrix \(resilience defaults\)' \
+  "launcher wiring failed: option 79 numbered menu label missing"
+check_cpp '3-machine Docker profile matrix' "launcher wiring failed: option 79 menu label missing"
+check_cpp 'three-machine-docker-profile-matrix' "launcher wiring failed: option 79 command keyword missing"
+check_cpp 'Run with sudo\? \(y/N\)' "launcher wiring failed: option 79 sudo prompt missing"
+check_cpp 'readLine\("Run with sudo\? \(y/N\)", "n"\)' \
+  "launcher wiring failed: option 79 sudo prompt default missing"
+check_cpp 'bool runWithSudo = parseYesNo\(readLine\("Run with sudo\? \(y/N\)", "n"\), false\);' \
+  "launcher wiring failed: option 79 sudo parse wiring missing"
+check_cpp 'cmd << shellEscape\(script\) << " three-machine-docker-profile-matrix"' \
+  "launcher wiring failed: option 79 command assembly missing"
+check_cpp '--run-peer-failover 1' \
+  "launcher wiring failed: option 79 fixed --run-peer-failover 1 missing"
+check_cpp '--print-summary-json 1' \
+  "launcher wiring failed: option 79 fixed --print-summary-json 1 missing"
+check_cpp '--docker-host-alias ' \
+  "launcher wiring failed: option 79 docker host forwarding missing"
+check_cpp '--bootstrap-directory ' \
+  "launcher wiring failed: option 79 bootstrap forwarding missing"
+check_cpp 'endpointFromHost\(hosts\.aHost, 8081\)' \
+  "launcher wiring failed: option 79 host-derived bootstrap default missing"
+check_cpp '"host\.docker\.internal"' \
+  "launcher wiring failed: option 79 fallback docker host alias default missing"
+check_cpp '"http://127\.0\.0\.1:18081"' \
+  "launcher wiring failed: option 79 fallback bootstrap default missing"
+
+echo "[easy-mode-wiring] option 80 command wiring"
+check_cpp 'if \(choice == "80"\)' "launcher wiring failed: option 80 handler missing"
+check_cpp '80\) VPN RC resilience path \(resilience defaults \+ integration coverage\)' \
+  "launcher wiring failed: option 80 numbered menu label missing"
+check_cpp 'VPN RC resilience path' "launcher wiring failed: option 80 menu label missing"
+check_cpp 'vpn-rc-resilience-path' "launcher wiring failed: option 80 command keyword missing"
+check_cpp 'Run with sudo\? \(y/N\)' "launcher wiring failed: option 80 sudo prompt missing"
+check_cpp 'readLine\("Run with sudo\? \(y/N\)", "n"\)' \
+  "launcher wiring failed: option 80 sudo prompt default missing"
+check_cpp 'bool runWithSudo = parseYesNo\(readLine\("Run with sudo\? \(y/N\)", "n"\), false\);' \
+  "launcher wiring failed: option 80 sudo parse wiring missing"
+check_cpp 'cmd << shellEscape\(script\) << " vpn-rc-resilience-path"' \
+  "launcher wiring failed: option 80 command assembly missing"
+check_cpp '--print-summary-json 1' \
+  "launcher wiring failed: option 80 fixed --print-summary-json 1 missing"
+check_cpp 'if \(runWithSudo\)' "launcher wiring failed: option 80 sudo branch missing"
+check_cpp 'cmd << "sudo ";' "launcher wiring failed: option 80 sudo forwarding missing"
+
+echo "[easy-mode-wiring] option 81 command wiring"
+check_cpp 'if \(choice == "81"\)' "launcher wiring failed: option 81 handler missing"
+check_cpp '81\) 3-machine Docker profile matrix record wrapper \(coverage defaults\)' \
+  "launcher wiring failed: option 81 numbered menu label missing"
+check_cpp '3-machine Docker profile matrix record wrapper' "launcher wiring failed: option 81 menu label missing"
+check_cpp 'three-machine-docker-profile-matrix-record' "launcher wiring failed: option 81 command keyword missing"
+check_cpp 'Run with sudo\? \(y/N\)' "launcher wiring failed: option 81 sudo prompt missing"
+check_cpp 'readLine\("Run with sudo\? \(y/N\)", "n"\)' \
+  "launcher wiring failed: option 81 sudo prompt default missing"
+check_cpp 'bool runWithSudo = parseYesNo\(readLine\("Run with sudo\? \(y/N\)", "n"\), false\);' \
+  "launcher wiring failed: option 81 sudo parse wiring missing"
+check_cpp 'cmd << shellEscape\(script\) << " three-machine-docker-profile-matrix-record"' \
+  "launcher wiring failed: option 81 command assembly missing"
+check_cpp '--print-summary-json 1' \
+  "launcher wiring failed: option 81 fixed --print-summary-json 1 missing"
+check_cpp 'if \(runWithSudo\)' "launcher wiring failed: option 81 sudo branch missing"
+check_cpp 'cmd << "sudo ";' "launcher wiring failed: option 81 sudo forwarding missing"
+
+echo "[easy-mode-wiring] option 82 command wiring"
+check_cpp 'if \(choice == "82"\)' "launcher wiring failed: option 82 handler missing"
+check_cpp '82\) Phase-0 CI gate \(surface simplification fast gate\)' \
+  "launcher wiring failed: option 82 numbered menu label missing"
+check_cpp 'Phase-0 CI gate' "launcher wiring failed: option 82 menu label missing"
+check_cpp 'ci-phase0' "launcher wiring failed: option 82 command keyword missing"
+check_cpp 'Run with sudo\? \(y/N\)' "launcher wiring failed: option 82 sudo prompt missing"
+check_cpp 'readLine\("Run with sudo\? \(y/N\)", "n"\)' \
+  "launcher wiring failed: option 82 sudo prompt default missing"
+check_cpp 'bool runWithSudo = parseYesNo\(readLine\("Run with sudo\? \(y/N\)", "n"\), false\);' \
+  "launcher wiring failed: option 82 sudo parse wiring missing"
+check_cpp 'cmd << shellEscape\(script\) << " ci-phase0"' \
+  "launcher wiring failed: option 82 command assembly missing"
+check_cpp 'if \(runWithSudo\)' "launcher wiring failed: option 82 sudo branch missing"
+check_cpp 'cmd << "sudo ";' "launcher wiring failed: option 82 sudo forwarding missing"
+
+echo "[easy-mode-wiring] option 83 command wiring"
+check_cpp 'if \(choice == "83"\)' "launcher wiring failed: option 83 handler missing"
+check_cpp '83\) Phase-1 resilience CI gate' \
+  "launcher wiring failed: option 83 numbered menu label missing"
+check_cpp 'Phase-1 resilience CI gate' "launcher wiring failed: option 83 menu label missing"
+check_cpp 'ci-phase1-resilience' "launcher wiring failed: option 83 command keyword missing"
+check_cpp 'Run with sudo\? \(y/N\)' "launcher wiring failed: option 83 sudo prompt missing"
+check_cpp 'readLine\("Run with sudo\? \(y/N\)", "n"\)' \
+  "launcher wiring failed: option 83 sudo prompt default missing"
+check_cpp 'bool runWithSudo = parseYesNo\(readLine\("Run with sudo\? \(y/N\)", "n"\), false\);' \
+  "launcher wiring failed: option 83 sudo parse wiring missing"
+check_cpp 'cmd << shellEscape\(script\) << " ci-phase1-resilience"' \
+  "launcher wiring failed: option 83 command assembly missing"
+check_cpp 'if \(runWithSudo\)' "launcher wiring failed: option 83 sudo branch missing"
+check_cpp 'cmd << "sudo ";' "launcher wiring failed: option 83 sudo forwarding missing"
+
+echo "[easy-mode-wiring] option 84 command wiring"
+check_cpp 'if \(choice == "84"\)' "launcher wiring failed: option 84 handler missing"
+check_cpp '84\) Phase-1 resilience handoff check' \
+  "launcher wiring failed: option 84 numbered menu label missing"
+check_cpp 'Phase-1 resilience handoff check' "launcher wiring failed: option 84 menu label missing"
+check_cpp 'phase1-resilience-handoff-check' "launcher wiring failed: option 84 command keyword missing"
+check_cpp 'Run with sudo\? \(y/N\)' "launcher wiring failed: option 84 sudo prompt missing"
+check_cpp 'readLine\("Run with sudo\? \(y/N\)", "n"\)' \
+  "launcher wiring failed: option 84 sudo prompt default missing"
+check_cpp 'bool runWithSudo = parseYesNo\(readLine\("Run with sudo\? \(y/N\)", "n"\), false\);' \
+  "launcher wiring failed: option 84 sudo parse wiring missing"
+check_cpp 'cmd << shellEscape\(script\) << " phase1-resilience-handoff-check"' \
+  "launcher wiring failed: option 84 command assembly missing"
+check_cpp '--print-summary-json 1' \
+  "launcher wiring failed: option 84 fixed --print-summary-json 1 missing"
+check_cpp 'if \(runWithSudo\)' "launcher wiring failed: option 84 sudo branch missing"
+check_cpp 'cmd << "sudo ";' "launcher wiring failed: option 84 sudo forwarding missing"
+
+echo "[easy-mode-wiring] option 85 command wiring"
+check_cpp 'if \(choice == "85"\)' "launcher wiring failed: option 85 handler missing"
+check_cpp '85\) Phase-1 resilience handoff run \(refresh \+ check\)' \
+  "launcher wiring failed: option 85 numbered menu label missing"
+check_cpp 'Phase-1 resilience handoff run \(refresh \+ check\)' "launcher wiring failed: option 85 menu label missing"
+check_cpp 'phase1-resilience-handoff-run' "launcher wiring failed: option 85 command keyword missing"
+check_cpp 'Run with sudo\? \(y/N\)' "launcher wiring failed: option 85 sudo prompt missing"
+check_cpp 'readLine\("Run with sudo\? \(y/N\)", "n"\)' \
+  "launcher wiring failed: option 85 sudo prompt default missing"
+check_cpp 'bool runWithSudo = parseYesNo\(readLine\("Run with sudo\? \(y/N\)", "n"\), false\);' \
+  "launcher wiring failed: option 85 sudo parse wiring missing"
+check_cpp 'cmd << shellEscape\(script\) << " phase1-resilience-handoff-run"' \
+  "launcher wiring failed: option 85 command assembly missing"
+check_cpp '--print-summary-json 1' \
+  "launcher wiring failed: option 85 fixed --print-summary-json 1 missing"
+check_cpp 'if \(runWithSudo\)' "launcher wiring failed: option 85 sudo branch missing"
+check_cpp 'cmd << "sudo ";' "launcher wiring failed: option 85 sudo forwarding missing"
+
+echo "[easy-mode-wiring] option 86 command wiring"
+check_cpp 'if \(choice == "86"\)' "launcher wiring failed: option 86 handler missing"
+check_cpp '86\) Phase-2 Linux prod-candidate CI gate' \
+  "launcher wiring failed: option 86 numbered menu label missing"
+check_cpp 'Phase-2 Linux prod-candidate CI gate' "launcher wiring failed: option 86 menu label missing"
+check_cpp 'ci-phase2-linux-prod-candidate' "launcher wiring failed: option 86 command keyword missing"
+check_cpp 'Run with sudo\? \(y/N\)' "launcher wiring failed: option 86 sudo prompt missing"
+check_cpp 'readLine\("Run with sudo\? \(y/N\)", "n"\)' \
+  "launcher wiring failed: option 86 sudo prompt default missing"
+check_cpp 'bool runWithSudo = parseYesNo\(readLine\("Run with sudo\? \(y/N\)", "n"\), false\);' \
+  "launcher wiring failed: option 86 sudo parse wiring missing"
+check_cpp 'cmd << shellEscape\(script\) << " ci-phase2-linux-prod-candidate"' \
+  "launcher wiring failed: option 86 command assembly missing"
+check_cpp 'if \(runWithSudo\)' "launcher wiring failed: option 86 sudo branch missing"
+check_cpp 'cmd << "sudo ";' "launcher wiring failed: option 86 sudo forwarding missing"
+
+echo "[easy-mode-wiring] option 87 command wiring"
+check_cpp 'if \(choice == "87"\)' "launcher wiring failed: option 87 handler missing"
+check_cpp '87\) Phase-2 Linux prod-candidate check' \
+  "launcher wiring failed: option 87 numbered menu label missing"
+check_cpp 'Phase-2 Linux prod-candidate check' "launcher wiring failed: option 87 menu label missing"
+check_cpp 'phase2-linux-prod-candidate-check' "launcher wiring failed: option 87 command keyword missing"
+check_cpp 'Run with sudo\? \(y/N\)' "launcher wiring failed: option 87 sudo prompt missing"
+check_cpp 'readLine\("Run with sudo\? \(y/N\)", "n"\)' \
+  "launcher wiring failed: option 87 sudo prompt default missing"
+check_cpp 'bool runWithSudo = parseYesNo\(readLine\("Run with sudo\? \(y/N\)", "n"\), false\);' \
+  "launcher wiring failed: option 87 sudo parse wiring missing"
+check_cpp 'cmd << shellEscape\(script\) << " phase2-linux-prod-candidate-check"' \
+  "launcher wiring failed: option 87 command assembly missing"
+check_cpp '--print-summary-json 1' \
+  "launcher wiring failed: option 87 fixed --print-summary-json 1 missing"
+check_cpp 'if \(runWithSudo\)' "launcher wiring failed: option 87 sudo branch missing"
+check_cpp 'cmd << "sudo ";' "launcher wiring failed: option 87 sudo forwarding missing"
+
+echo "[easy-mode-wiring] option 88 command wiring"
+check_cpp 'if \(choice == "88"\)' "launcher wiring failed: option 88 handler missing"
+check_cpp '88\) Phase-2 Linux prod-candidate run \(refresh \+ check\)' \
+  "launcher wiring failed: option 88 numbered menu label missing"
+check_cpp 'Phase-2 Linux prod-candidate run \(refresh \+ check\)' "launcher wiring failed: option 88 menu label missing"
+check_cpp 'phase2-linux-prod-candidate-run' "launcher wiring failed: option 88 command keyword missing"
+check_cpp 'Run with sudo\? \(y/N\)' "launcher wiring failed: option 88 sudo prompt missing"
+check_cpp 'readLine\("Run with sudo\? \(y/N\)", "n"\)' \
+  "launcher wiring failed: option 88 sudo prompt default missing"
+check_cpp 'bool runWithSudo = parseYesNo\(readLine\("Run with sudo\? \(y/N\)", "n"\), false\);' \
+  "launcher wiring failed: option 88 sudo parse wiring missing"
+check_cpp 'cmd << shellEscape\(script\) << " phase2-linux-prod-candidate-run"' \
+  "launcher wiring failed: option 88 command assembly missing"
+check_cpp '--print-summary-json 1' \
+  "launcher wiring failed: option 88 fixed --print-summary-json 1 missing"
+check_cpp 'if \(runWithSudo\)' "launcher wiring failed: option 88 sudo branch missing"
+check_cpp 'cmd << "sudo ";' "launcher wiring failed: option 88 sudo forwarding missing"
+
+echo "[easy-mode-wiring] option 89 command wiring"
+check_cpp 'if \(choice == "89"\)' "launcher wiring failed: option 89 handler missing"
+check_cpp '89\) Phase-2 Linux prod-candidate signoff \(run \+ roadmap report\)' \
+  "launcher wiring failed: option 89 numbered menu label missing"
+check_cpp 'Phase-2 Linux prod-candidate signoff \(run \+ roadmap report\)' \
+  "launcher wiring failed: option 89 menu label missing"
+check_cpp 'phase2-linux-prod-candidate-signoff' "launcher wiring failed: option 89 command keyword missing"
+check_cpp 'Run with sudo\? \(y/N\)' "launcher wiring failed: option 89 sudo prompt missing"
+check_cpp 'readLine\("Run with sudo\? \(y/N\)", "n"\)' \
+  "launcher wiring failed: option 89 sudo prompt default missing"
+check_cpp 'bool runWithSudo = parseYesNo\(readLine\("Run with sudo\? \(y/N\)", "n"\), false\);' \
+  "launcher wiring failed: option 89 sudo parse wiring missing"
+check_cpp 'cmd << shellEscape\(script\) << " phase2-linux-prod-candidate-signoff"' \
+  "launcher wiring failed: option 89 command assembly missing"
+check_cpp '--print-summary-json 1' \
+  "launcher wiring failed: option 89 fixed --print-summary-json 1 missing"
+check_cpp 'if \(runWithSudo\)' "launcher wiring failed: option 89 sudo branch missing"
+check_cpp 'cmd << "sudo ";' "launcher wiring failed: option 89 sudo forwarding missing"
+
+echo "[easy-mode-wiring] option 90 command wiring"
+check_cpp 'if \(choice == "90"\)' "launcher wiring failed: option 90 handler missing"
+check_cpp '90\) Phase-2 Linux prod-candidate handoff check' \
+  "launcher wiring failed: option 90 numbered menu label missing"
+check_cpp 'Phase-2 Linux prod-candidate handoff check' \
+  "launcher wiring failed: option 90 menu label missing"
+check_cpp 'phase2-linux-prod-candidate-handoff-check' \
+  "launcher wiring failed: option 90 command keyword missing"
+check_cpp 'Run with sudo\? \(y/N\)' "launcher wiring failed: option 90 sudo prompt missing"
+check_cpp 'readLine\("Run with sudo\? \(y/N\)", "n"\)' \
+  "launcher wiring failed: option 90 sudo prompt default missing"
+check_cpp 'bool runWithSudo = parseYesNo\(readLine\("Run with sudo\? \(y/N\)", "n"\), false\);' \
+  "launcher wiring failed: option 90 sudo parse wiring missing"
+check_cpp 'cmd << shellEscape\(script\) << " phase2-linux-prod-candidate-handoff-check"' \
+  "launcher wiring failed: option 90 command assembly missing"
+check_cpp '--show-json 1' \
+  "launcher wiring failed: option 90 fixed --show-json 1 missing"
+check_cpp 'if \(runWithSudo\)' "launcher wiring failed: option 90 sudo branch missing"
+check_cpp 'cmd << "sudo ";' "launcher wiring failed: option 90 sudo forwarding missing"
+
+echo "[easy-mode-wiring] option 91 command wiring"
+check_cpp 'if \(choice == "91"\)' "launcher wiring failed: option 91 handler missing"
+check_cpp '91\) Phase-2 Linux prod-candidate handoff run \(signoff \+ check\)' \
+  "launcher wiring failed: option 91 numbered menu label missing"
+check_cpp 'Phase-2 Linux prod-candidate handoff run \(signoff \+ check\)' \
+  "launcher wiring failed: option 91 menu label missing"
+check_cpp 'phase2-linux-prod-candidate-handoff-run' \
+  "launcher wiring failed: option 91 command keyword missing"
+check_cpp 'Run with sudo\? \(y/N\)' "launcher wiring failed: option 91 sudo prompt missing"
+check_cpp 'readLine\("Run with sudo\? \(y/N\)", "n"\)' \
+  "launcher wiring failed: option 91 sudo prompt default missing"
+check_cpp 'bool runWithSudo = parseYesNo\(readLine\("Run with sudo\? \(y/N\)", "n"\), false\);' \
+  "launcher wiring failed: option 91 sudo parse wiring missing"
+check_cpp 'cmd << shellEscape\(script\) << " phase2-linux-prod-candidate-handoff-run"' \
+  "launcher wiring failed: option 91 command assembly missing"
+check_cpp '--print-summary-json 1' \
+  "launcher wiring failed: option 91 fixed --print-summary-json 1 missing"
+check_cpp 'if \(runWithSudo\)' "launcher wiring failed: option 91 sudo branch missing"
+check_cpp 'cmd << "sudo ";' "launcher wiring failed: option 91 sudo forwarding missing"
+
+echo "[easy-mode-wiring] option 92 command wiring"
+check_cpp 'if \(choice == "92"\)' "launcher wiring failed: option 92 handler missing"
+check_cpp '92\) Phase-3 Windows client beta CI gate' \
+  "launcher wiring failed: option 92 numbered menu label missing"
+check_cpp 'Phase-3 Windows client beta CI gate' \
+  "launcher wiring failed: option 92 menu label missing"
+check_cpp 'ci-phase3-windows-client-beta' \
+  "launcher wiring failed: option 92 command keyword missing"
+check_cpp 'Run with sudo\? \(y/N\)' "launcher wiring failed: option 92 sudo prompt missing"
+check_cpp 'readLine\("Run with sudo\? \(y/N\)", "n"\)' \
+  "launcher wiring failed: option 92 sudo prompt default missing"
+check_cpp 'bool runWithSudo = parseYesNo\(readLine\("Run with sudo\? \(y/N\)", "n"\), false\);' \
+  "launcher wiring failed: option 92 sudo parse wiring missing"
+check_cpp 'cmd << shellEscape\(script\) << " ci-phase3-windows-client-beta"' \
+  "launcher wiring failed: option 92 command assembly missing"
+check_cpp 'if \(runWithSudo\)' "launcher wiring failed: option 92 sudo branch missing"
+check_cpp 'cmd << "sudo ";' "launcher wiring failed: option 92 sudo forwarding missing"
+
+echo "[easy-mode-wiring] option 93 command wiring"
+check_cpp 'if \(choice == "93"\)' "launcher wiring failed: option 93 handler missing"
+check_cpp '93\) Phase-3 Windows client beta check' \
+  "launcher wiring failed: option 93 numbered menu label missing"
+check_cpp 'Phase-3 Windows client beta check' \
+  "launcher wiring failed: option 93 menu label missing"
+check_cpp 'phase3-windows-client-beta-check' \
+  "launcher wiring failed: option 93 command keyword missing"
+check_cpp 'Run with sudo\? \(y/N\)' "launcher wiring failed: option 93 sudo prompt missing"
+check_cpp 'readLine\("Run with sudo\? \(y/N\)", "n"\)' \
+  "launcher wiring failed: option 93 sudo prompt default missing"
+check_cpp 'bool runWithSudo = parseYesNo\(readLine\("Run with sudo\? \(y/N\)", "n"\), false\);' \
+  "launcher wiring failed: option 93 sudo parse wiring missing"
+check_cpp 'cmd << shellEscape\(script\) << " phase3-windows-client-beta-check"' \
+  "launcher wiring failed: option 93 command assembly missing"
+check_cpp '--print-summary-json 1' \
+  "launcher wiring failed: option 93 fixed --print-summary-json 1 missing"
+check_cpp 'if \(runWithSudo\)' "launcher wiring failed: option 93 sudo branch missing"
+check_cpp 'cmd << "sudo ";' "launcher wiring failed: option 93 sudo forwarding missing"
+
+echo "[easy-mode-wiring] option 94 command wiring"
+check_cpp 'if \(choice == "94"\)' "launcher wiring failed: option 94 handler missing"
+check_cpp '94\) Phase-3 Windows client beta run \(refresh \+ check\)' \
+  "launcher wiring failed: option 94 numbered menu label missing"
+check_cpp 'Phase-3 Windows client beta run \(refresh \+ check\)' \
+  "launcher wiring failed: option 94 menu label missing"
+check_cpp 'phase3-windows-client-beta-run' \
+  "launcher wiring failed: option 94 command keyword missing"
+check_cpp 'Run with sudo\? \(y/N\)' "launcher wiring failed: option 94 sudo prompt missing"
+check_cpp 'readLine\("Run with sudo\? \(y/N\)", "n"\)' \
+  "launcher wiring failed: option 94 sudo prompt default missing"
+check_cpp 'bool runWithSudo = parseYesNo\(readLine\("Run with sudo\? \(y/N\)", "n"\), false\);' \
+  "launcher wiring failed: option 94 sudo parse wiring missing"
+check_cpp 'cmd << shellEscape\(script\) << " phase3-windows-client-beta-run"' \
+  "launcher wiring failed: option 94 command assembly missing"
+check_cpp '--print-summary-json 1' \
+  "launcher wiring failed: option 94 fixed --print-summary-json 1 missing"
+check_cpp 'if \(runWithSudo\)' "launcher wiring failed: option 94 sudo branch missing"
+check_cpp 'cmd << "sudo ";' "launcher wiring failed: option 94 sudo forwarding missing"
+
+echo "[easy-mode-wiring] option 95 command wiring"
+check_cpp 'if \(choice == "95"\)' "launcher wiring failed: option 95 handler missing"
+check_cpp '95\) Phase-3 Windows client beta handoff check' \
+  "launcher wiring failed: option 95 numbered menu label missing"
+check_cpp 'Phase-3 Windows client beta handoff check' \
+  "launcher wiring failed: option 95 menu label missing"
+check_cpp 'phase3-windows-client-beta-handoff-check' \
+  "launcher wiring failed: option 95 command keyword missing"
+check_cpp 'Run with sudo\? \(y/N\)' "launcher wiring failed: option 95 sudo prompt missing"
+check_cpp 'readLine\("Run with sudo\? \(y/N\)", "n"\)' \
+  "launcher wiring failed: option 95 sudo prompt default missing"
+check_cpp 'bool runWithSudo = parseYesNo\(readLine\("Run with sudo\? \(y/N\)", "n"\), false\);' \
+  "launcher wiring failed: option 95 sudo parse wiring missing"
+check_cpp 'cmd << shellEscape\(script\) << " phase3-windows-client-beta-handoff-check"' \
+  "launcher wiring failed: option 95 command assembly missing"
+check_cpp '--show-json 1' \
+  "launcher wiring failed: option 95 fixed --show-json 1 missing"
+check_cpp 'if \(runWithSudo\)' "launcher wiring failed: option 95 sudo branch missing"
+check_cpp 'cmd << "sudo ";' "launcher wiring failed: option 95 sudo forwarding missing"
+
+echo "[easy-mode-wiring] option 96 command wiring"
+check_cpp 'if \(choice == "96"\)' "launcher wiring failed: option 96 handler missing"
+check_cpp '96\) Phase-3 Windows client beta handoff run \(run \+ check\)' \
+  "launcher wiring failed: option 96 numbered menu label missing"
+check_cpp 'Phase-3 Windows client beta handoff run \(run \+ check\)' \
+  "launcher wiring failed: option 96 menu label missing"
+check_cpp 'phase3-windows-client-beta-handoff-run' \
+  "launcher wiring failed: option 96 command keyword missing"
+check_cpp 'Run with sudo\? \(y/N\)' "launcher wiring failed: option 96 sudo prompt missing"
+check_cpp 'readLine\("Run with sudo\? \(y/N\)", "n"\)' \
+  "launcher wiring failed: option 96 sudo prompt default missing"
+check_cpp 'bool runWithSudo = parseYesNo\(readLine\("Run with sudo\? \(y/N\)", "n"\), false\);' \
+  "launcher wiring failed: option 96 sudo parse wiring missing"
+check_cpp 'cmd << shellEscape\(script\) << " phase3-windows-client-beta-handoff-run"' \
+  "launcher wiring failed: option 96 command assembly missing"
+check_cpp '--print-summary-json 1' \
+  "launcher wiring failed: option 96 fixed --print-summary-json 1 missing"
+check_cpp 'if \(runWithSudo\)' "launcher wiring failed: option 96 sudo branch missing"
+check_cpp 'cmd << "sudo ";' "launcher wiring failed: option 96 sudo forwarding missing"
+
+echo "[easy-mode-wiring] option 97 command wiring"
+check_cpp 'if \(choice == "97"\)' "launcher wiring failed: option 97 handler missing"
+check_cpp '97\) Phase-4 Windows full parity CI gate' \
+  "launcher wiring failed: option 97 numbered menu label missing"
+check_cpp 'Phase-4 Windows full parity CI gate' \
+  "launcher wiring failed: option 97 menu label missing"
+check_cpp 'ci-phase4-windows-full-parity' \
+  "launcher wiring failed: option 97 command keyword missing"
+check_cpp 'Run with sudo\? \(y/N\)' "launcher wiring failed: option 97 sudo prompt missing"
+check_cpp 'readLine\("Run with sudo\? \(y/N\)", "n"\)' \
+  "launcher wiring failed: option 97 sudo prompt default missing"
+check_cpp 'bool runWithSudo = parseYesNo\(readLine\("Run with sudo\? \(y/N\)", "n"\), false\);' \
+  "launcher wiring failed: option 97 sudo parse wiring missing"
+check_cpp 'cmd << shellEscape\(script\) << " ci-phase4-windows-full-parity"' \
+  "launcher wiring failed: option 97 command assembly missing"
+check_cpp 'if \(runWithSudo\)' "launcher wiring failed: option 97 sudo branch missing"
+check_cpp 'cmd << "sudo ";' "launcher wiring failed: option 97 sudo forwarding missing"
+
+echo "[easy-mode-wiring] option 98 command wiring"
+check_cpp 'if \(choice == "98"\)' "launcher wiring failed: option 98 handler missing"
+check_cpp '98\) Phase-4 Windows full parity check' \
+  "launcher wiring failed: option 98 numbered menu label missing"
+check_cpp 'Phase-4 Windows full parity check' \
+  "launcher wiring failed: option 98 menu label missing"
+check_cpp 'phase4-windows-full-parity-check' \
+  "launcher wiring failed: option 98 command keyword missing"
+check_cpp 'Run with sudo\? \(y/N\)' "launcher wiring failed: option 98 sudo prompt missing"
+check_cpp 'readLine\("Run with sudo\? \(y/N\)", "n"\)' \
+  "launcher wiring failed: option 98 sudo prompt default missing"
+check_cpp 'bool runWithSudo = parseYesNo\(readLine\("Run with sudo\? \(y/N\)", "n"\), false\);' \
+  "launcher wiring failed: option 98 sudo parse wiring missing"
+check_cpp 'cmd << shellEscape\(script\) << " phase4-windows-full-parity-check"' \
+  "launcher wiring failed: option 98 command assembly missing"
+check_cpp '--print-summary-json 1' \
+  "launcher wiring failed: option 98 fixed --print-summary-json 1 missing"
+check_cpp 'if \(runWithSudo\)' "launcher wiring failed: option 98 sudo branch missing"
+check_cpp 'cmd << "sudo ";' "launcher wiring failed: option 98 sudo forwarding missing"
+
+echo "[easy-mode-wiring] option 99 command wiring"
+check_cpp 'if \(choice == "99"\)' "launcher wiring failed: option 99 handler missing"
+check_cpp '99\) Phase-4 Windows full parity run \(refresh \+ check\)' \
+  "launcher wiring failed: option 99 numbered menu label missing"
+check_cpp 'Phase-4 Windows full parity run \(refresh \+ check\)' \
+  "launcher wiring failed: option 99 menu label missing"
+check_cpp 'phase4-windows-full-parity-run' \
+  "launcher wiring failed: option 99 command keyword missing"
+check_cpp 'Run with sudo\? \(y/N\)' "launcher wiring failed: option 99 sudo prompt missing"
+check_cpp 'readLine\("Run with sudo\? \(y/N\)", "n"\)' \
+  "launcher wiring failed: option 99 sudo prompt default missing"
+check_cpp 'bool runWithSudo = parseYesNo\(readLine\("Run with sudo\? \(y/N\)", "n"\), false\);' \
+  "launcher wiring failed: option 99 sudo parse wiring missing"
+check_cpp 'cmd << shellEscape\(script\) << " phase4-windows-full-parity-run"' \
+  "launcher wiring failed: option 99 command assembly missing"
+check_cpp '--print-summary-json 1' \
+  "launcher wiring failed: option 99 fixed --print-summary-json 1 missing"
+check_cpp 'if \(runWithSudo\)' "launcher wiring failed: option 99 sudo branch missing"
+check_cpp 'cmd << "sudo ";' "launcher wiring failed: option 99 sudo forwarding missing"
+
+echo "[easy-mode-wiring] option 100 command wiring"
+check_cpp 'if \(choice == "100"\)' "launcher wiring failed: option 100 handler missing"
+check_cpp '100\) Phase-4 Windows full parity handoff check' \
+  "launcher wiring failed: option 100 numbered menu label missing"
+check_cpp 'Phase-4 Windows full parity handoff check' \
+  "launcher wiring failed: option 100 menu label missing"
+check_cpp 'phase4-windows-full-parity-handoff-check' \
+  "launcher wiring failed: option 100 command keyword missing"
+check_cpp 'Run with sudo\? \(y/N\)' "launcher wiring failed: option 100 sudo prompt missing"
+check_cpp 'readLine\("Run with sudo\? \(y/N\)", "n"\)' \
+  "launcher wiring failed: option 100 sudo prompt default missing"
+check_cpp 'bool runWithSudo = parseYesNo\(readLine\("Run with sudo\? \(y/N\)", "n"\), false\);' \
+  "launcher wiring failed: option 100 sudo parse wiring missing"
+check_cpp 'cmd << shellEscape\(script\) << " phase4-windows-full-parity-handoff-check"' \
+  "launcher wiring failed: option 100 command assembly missing"
+check_cpp '--show-json 1' \
+  "launcher wiring failed: option 100 fixed --show-json 1 missing"
+check_cpp 'if \(runWithSudo\)' "launcher wiring failed: option 100 sudo branch missing"
+check_cpp 'cmd << "sudo ";' "launcher wiring failed: option 100 sudo forwarding missing"
+
+echo "[easy-mode-wiring] option 101 command wiring"
+check_cpp 'if \(choice == "101"\)' "launcher wiring failed: option 101 handler missing"
+check_cpp '101\) Phase-4 Windows full parity handoff run \(run \+ check\)' \
+  "launcher wiring failed: option 101 numbered menu label missing"
+check_cpp 'Phase-4 Windows full parity handoff run \(run \+ check\)' \
+  "launcher wiring failed: option 101 menu label missing"
+check_cpp 'phase4-windows-full-parity-handoff-run' \
+  "launcher wiring failed: option 101 command keyword missing"
+check_cpp 'Run with sudo\? \(y/N\)' "launcher wiring failed: option 101 sudo prompt missing"
+check_cpp 'readLine\("Run with sudo\? \(y/N\)", "n"\)' \
+  "launcher wiring failed: option 101 sudo prompt default missing"
+check_cpp 'bool runWithSudo = parseYesNo\(readLine\("Run with sudo\? \(y/N\)", "n"\), false\);' \
+  "launcher wiring failed: option 101 sudo parse wiring missing"
+check_cpp 'cmd << shellEscape\(script\) << " phase4-windows-full-parity-handoff-run"' \
+  "launcher wiring failed: option 101 command assembly missing"
+check_cpp '--print-summary-json 1' \
+  "launcher wiring failed: option 101 fixed --print-summary-json 1 missing"
+check_cpp 'if \(runWithSudo\)' "launcher wiring failed: option 101 sudo branch missing"
+check_cpp 'cmd << "sudo ";' "launcher wiring failed: option 101 sudo forwarding missing"
+
+echo "[easy-mode-wiring] option 102 command wiring"
+check_cpp 'if \(choice == "102"\)' "launcher wiring failed: option 102 handler missing"
+check_cpp '102\) Phase-5 settlement layer CI gate' \
+  "launcher wiring failed: option 102 numbered menu label missing"
+check_cpp 'Phase-5 settlement layer CI gate' \
+  "launcher wiring failed: option 102 menu label missing"
+check_cpp 'ci-phase5-settlement-layer' \
+  "launcher wiring failed: option 102 command keyword missing"
+check_cpp 'Run with sudo\? \(y/N\)' "launcher wiring failed: option 102 sudo prompt missing"
+check_cpp 'readLine\("Run with sudo\? \(y/N\)", "n"\)' \
+  "launcher wiring failed: option 102 sudo prompt default missing"
+check_cpp 'bool runWithSudo = parseYesNo\(readLine\("Run with sudo\? \(y/N\)", "n"\), false\);' \
+  "launcher wiring failed: option 102 sudo parse wiring missing"
+check_cpp 'cmd << shellEscape\(script\) << " ci-phase5-settlement-layer"' \
+  "launcher wiring failed: option 102 command assembly missing"
+check_cpp 'if \(runWithSudo\)' "launcher wiring failed: option 102 sudo branch missing"
+check_cpp 'cmd << "sudo ";' "launcher wiring failed: option 102 sudo forwarding missing"
+
+echo "[easy-mode-wiring] option 103 command wiring"
+check_cpp 'if \(choice == "103"\)' "launcher wiring failed: option 103 handler missing"
+check_cpp '103\) Phase-5 settlement layer check' \
+  "launcher wiring failed: option 103 numbered menu label missing"
+check_cpp 'Phase-5 settlement layer check' \
+  "launcher wiring failed: option 103 menu label missing"
+check_cpp 'phase5-settlement-layer-check' \
+  "launcher wiring failed: option 103 command keyword missing"
+check_cpp 'Run with sudo\? \(y/N\)' "launcher wiring failed: option 103 sudo prompt missing"
+check_cpp 'readLine\("Run with sudo\? \(y/N\)", "n"\)' \
+  "launcher wiring failed: option 103 sudo prompt default missing"
+check_cpp 'bool runWithSudo = parseYesNo\(readLine\("Run with sudo\? \(y/N\)", "n"\), false\);' \
+  "launcher wiring failed: option 103 sudo parse wiring missing"
+check_cpp 'cmd << shellEscape\(script\) << " phase5-settlement-layer-check"' \
+  "launcher wiring failed: option 103 command assembly missing"
+check_cpp '--print-summary-json 1' \
+  "launcher wiring failed: option 103 fixed --print-summary-json 1 missing"
+check_cpp 'if \(runWithSudo\)' "launcher wiring failed: option 103 sudo branch missing"
+check_cpp 'cmd << "sudo ";' "launcher wiring failed: option 103 sudo forwarding missing"
+
+echo "[easy-mode-wiring] option 104 command wiring"
+check_cpp 'if \(choice == "104"\)' "launcher wiring failed: option 104 handler missing"
+check_cpp '104\) Phase-5 settlement layer run \(refresh \+ check\)' \
+  "launcher wiring failed: option 104 numbered menu label missing"
+check_cpp 'Phase-5 settlement layer run \(refresh \+ check\)' \
+  "launcher wiring failed: option 104 menu label missing"
+check_cpp 'phase5-settlement-layer-run' \
+  "launcher wiring failed: option 104 command keyword missing"
+check_cpp 'Run with sudo\? \(y/N\)' "launcher wiring failed: option 104 sudo prompt missing"
+check_cpp 'readLine\("Run with sudo\? \(y/N\)", "n"\)' \
+  "launcher wiring failed: option 104 sudo prompt default missing"
+check_cpp 'bool runWithSudo = parseYesNo\(readLine\("Run with sudo\? \(y/N\)", "n"\), false\);' \
+  "launcher wiring failed: option 104 sudo parse wiring missing"
+check_cpp 'cmd << shellEscape\(script\) << " phase5-settlement-layer-run"' \
+  "launcher wiring failed: option 104 command assembly missing"
+check_cpp '--print-summary-json 1' \
+  "launcher wiring failed: option 104 fixed --print-summary-json 1 missing"
+check_cpp 'if \(runWithSudo\)' "launcher wiring failed: option 104 sudo branch missing"
+check_cpp 'cmd << "sudo ";' "launcher wiring failed: option 104 sudo forwarding missing"
+
+echo "[easy-mode-wiring] option 105 command wiring"
+check_cpp 'if \(choice == "105"\)' "launcher wiring failed: option 105 handler missing"
+check_cpp '105\) Phase-5 settlement layer handoff check' \
+  "launcher wiring failed: option 105 numbered menu label missing"
+check_cpp 'Phase-5 settlement layer handoff check' \
+  "launcher wiring failed: option 105 menu label missing"
+check_cpp 'phase5-settlement-layer-handoff-check' \
+  "launcher wiring failed: option 105 command keyword missing"
+check_cpp 'Run with sudo\? \(y/N\)' "launcher wiring failed: option 105 sudo prompt missing"
+check_cpp 'readLine\("Run with sudo\? \(y/N\)", "n"\)' \
+  "launcher wiring failed: option 105 sudo prompt default missing"
+check_cpp 'bool runWithSudo = parseYesNo\(readLine\("Run with sudo\? \(y/N\)", "n"\), false\);' \
+  "launcher wiring failed: option 105 sudo parse wiring missing"
+check_cpp 'cmd << shellEscape\(script\) << " phase5-settlement-layer-handoff-check"' \
+  "launcher wiring failed: option 105 command assembly missing"
+check_cpp '--show-json 1' \
+  "launcher wiring failed: option 105 fixed --show-json 1 missing"
+check_cpp 'if \(runWithSudo\)' "launcher wiring failed: option 105 sudo branch missing"
+check_cpp 'cmd << "sudo ";' "launcher wiring failed: option 105 sudo forwarding missing"
+
+echo "[easy-mode-wiring] option 106 command wiring"
+check_cpp 'if \(choice == "106"\)' "launcher wiring failed: option 106 handler missing"
+check_cpp '106\) Phase-5 settlement layer handoff run \(run \+ check\)' \
+  "launcher wiring failed: option 106 numbered menu label missing"
+check_cpp 'Phase-5 settlement layer handoff run \(run \+ check\)' \
+  "launcher wiring failed: option 106 menu label missing"
+check_cpp 'phase5-settlement-layer-handoff-run' \
+  "launcher wiring failed: option 106 command keyword missing"
+check_cpp 'Run with sudo\? \(y/N\)' "launcher wiring failed: option 106 sudo prompt missing"
+check_cpp 'readLine\("Run with sudo\? \(y/N\)", "n"\)' \
+  "launcher wiring failed: option 106 sudo prompt default missing"
+check_cpp 'bool runWithSudo = parseYesNo\(readLine\("Run with sudo\? \(y/N\)", "n"\), false\);' \
+  "launcher wiring failed: option 106 sudo parse wiring missing"
+check_cpp 'cmd << shellEscape\(script\) << " phase5-settlement-layer-handoff-run"' \
+  "launcher wiring failed: option 106 command assembly missing"
+check_cpp '--print-summary-json 1' \
+  "launcher wiring failed: option 106 fixed --print-summary-json 1 missing"
+check_cpp 'if \(runWithSudo\)' "launcher wiring failed: option 106 sudo branch missing"
+check_cpp 'cmd << "sudo ";' "launcher wiring failed: option 106 sudo forwarding missing"
+
+echo "[easy-mode-wiring] option 107 command wiring"
+check_cpp 'if \(choice == "107"\)' "launcher wiring failed: option 107 handler missing"
+check_cpp '107\) VPN non-blockchain fastlane \(runtime\+phase1-4 handoff\+roadmap\)' \
+  "launcher wiring failed: option 107 numbered menu label missing"
+check_cpp 'VPN non-blockchain fastlane \(runtime\+phase1-4 handoff\+roadmap\)' \
+  "launcher wiring failed: option 107 menu label missing"
+check_cpp 'vpn-non-blockchain-fastlane' \
+  "launcher wiring failed: option 107 command keyword missing"
+check_cpp 'Run with sudo\? \(y/N\)' "launcher wiring failed: option 107 sudo prompt missing"
+check_cpp 'readLine\("Run with sudo\? \(y/N\)", "n"\)' \
+  "launcher wiring failed: option 107 sudo prompt default missing"
+check_cpp 'bool runWithSudo = parseYesNo\(readLine\("Run with sudo\? \(y/N\)", "n"\), false\);' \
+  "launcher wiring failed: option 107 sudo parse wiring missing"
+check_cpp 'cmd << shellEscape\(script\) << " vpn-non-blockchain-fastlane"' \
+  "launcher wiring failed: option 107 command assembly missing"
+check_cpp '--print-summary-json 1' \
+  "launcher wiring failed: option 107 fixed --print-summary-json 1 missing"
+check_cpp 'if \(runWithSudo\)' "launcher wiring failed: option 107 sudo branch missing"
+check_cpp 'cmd << "sudo ";' "launcher wiring failed: option 107 sudo forwarding missing"
+
 check_cpp '--min-peer-source-operators ' "launcher wiring failed: option 69/70 min-peer-source-operators forwarding missing"
 check_cpp '--min-issuer-source-operators ' "launcher wiring failed: option 69/70 min-issuer-source-operators forwarding missing"
 check_cpp '--summary-json ' "launcher wiring failed: option 69/70 summary-json forwarding missing"
@@ -483,6 +1221,26 @@ check_cpp '--summary-json ' "launcher wiring failed: option 73 summary-json forw
 check_cpp '--print-summary-json ' "launcher wiring failed: option 73 print-summary-json forwarding missing"
 
 echo "[easy-mode-wiring] easy_node help exposure"
+if ! "$EASY_NODE" --help --expert | rg -q 'simple-client-test'; then
+  echo "launcher wiring failed: easy_node help missing simple-client-test"
+  exit 1
+fi
+if ! "$EASY_NODE" --help --expert | rg -q 'simple-client-vpn-preflight'; then
+  echo "launcher wiring failed: easy_node help missing simple-client-vpn-preflight"
+  exit 1
+fi
+if ! "$EASY_NODE" --help --expert | rg -q 'simple-client-vpn-session'; then
+  echo "launcher wiring failed: easy_node help missing simple-client-vpn-session"
+  exit 1
+fi
+if ! "$EASY_NODE" --help --expert | rg -q 'simple-server-preflight'; then
+  echo "launcher wiring failed: easy_node help missing simple-server-preflight"
+  exit 1
+fi
+if ! "$EASY_NODE" --help --expert | rg -q 'simple-server-session'; then
+  echo "launcher wiring failed: easy_node help missing simple-server-session"
+  exit 1
+fi
 if ! "$EASY_NODE" --help --expert | rg -q 'prod-pilot-cohort-quick-signoff'; then
   echo "launcher wiring failed: easy_node help missing prod-pilot-cohort-quick-signoff"
   exit 1
@@ -605,6 +1363,46 @@ if ! "$EASY_NODE" --help --expert | rg -q 'prod-pilot-cohort-quick-dashboard'; t
 fi
 if ! "$EASY_NODE" --help --expert | rg -q 'vpn-rc-standard-path'; then
   echo "launcher wiring failed: easy_node help missing vpn-rc-standard-path"
+  exit 1
+fi
+if ! "$EASY_NODE" --help --expert | rg -q 'vpn-rc-matrix-path'; then
+  echo "launcher wiring failed: easy_node help missing vpn-rc-matrix-path"
+  exit 1
+fi
+if ! "$EASY_NODE" --help --expert | rg -q 'ci-phase0'; then
+  echo "launcher wiring failed: easy_node help missing ci-phase0"
+  exit 1
+fi
+if ! "$EASY_NODE" --help --expert | rg -q 'ci-phase1-resilience'; then
+  echo "launcher wiring failed: easy_node help missing ci-phase1-resilience"
+  exit 1
+fi
+if ! "$EASY_NODE" vpn-rc-resilience-path --help | rg -q -- '--docker-profile-matrix-timeout-sec'; then
+  echo "launcher wiring failed: vpn-rc-resilience-path help missing --docker-profile-matrix-timeout-sec"
+  exit 1
+fi
+if ! "$EASY_NODE" vpn-rc-resilience-path --help | rg -q -- '--rc-matrix-path-timeout-sec'; then
+  echo "launcher wiring failed: vpn-rc-resilience-path help missing --rc-matrix-path-timeout-sec"
+  exit 1
+fi
+if ! "$EASY_NODE" ci-phase1-resilience --help | rg -q -- '--vpn-rc-resilience-path-timeout-sec'; then
+  echo "launcher wiring failed: ci-phase1-resilience help missing --vpn-rc-resilience-path-timeout-sec"
+  exit 1
+fi
+if ! "$EASY_NODE" ci-phase1-resilience --help | rg -q -- '--session-churn-guard-timeout-sec'; then
+  echo "launcher wiring failed: ci-phase1-resilience help missing --session-churn-guard-timeout-sec"
+  exit 1
+fi
+if ! "$EASY_NODE" vpn-non-blockchain-fastlane --help | rg -q -- '--parallel'; then
+  echo "launcher wiring failed: vpn-non-blockchain-fastlane help missing --parallel"
+  exit 1
+fi
+if ! "$EASY_NODE" --help --expert | rg -q 'phase1-resilience-handoff-check'; then
+  echo "launcher wiring failed: easy_node help missing phase1-resilience-handoff-check"
+  exit 1
+fi
+if ! "$EASY_NODE" --help --expert | rg -q 'phase1-resilience-handoff-run'; then
+  echo "launcher wiring failed: easy_node help missing phase1-resilience-handoff-run"
   exit 1
 fi
 if ! "$EASY_NODE" prod-pilot-cohort-quick-signoff --help | rg -q -- '--max-alert-severity'; then
@@ -975,5 +1773,95 @@ if ! "$EASY_NODE" prod-pilot-cohort-quick-dashboard --help | rg -q -- '--inciden
   echo "launcher wiring failed: prod-pilot-cohort-quick-dashboard help missing --incident-snapshot-max-skipped-count"
   exit 1
 fi
+
+echo "[easy-mode-wiring] easy_node wrapper forwarding contracts"
+FORWARD_TMP_DIR="$(mktemp -d)"
+cleanup_forward_tmp() {
+  rm -rf "$FORWARD_TMP_DIR"
+}
+trap cleanup_forward_tmp EXIT
+
+FORWARD_CAPTURE="$FORWARD_TMP_DIR/easy_node_forwarding.tsv"
+FAKE_FORWARD_SCRIPT="$FORWARD_TMP_DIR/fake_forward.sh"
+cat >"$FAKE_FORWARD_SCRIPT" <<'EOF_FAKE_FORWARD'
+#!/usr/bin/env bash
+set -euo pipefail
+
+capture_file="${EASY_NODE_FORWARD_CAPTURE_FILE:?}"
+label="${EASY_NODE_FORWARD_LABEL:?}"
+
+{
+  printf '%s' "$label"
+  for arg in "$@"; do
+    printf '\t%s' "$arg"
+  done
+  printf '\n'
+} >>"$capture_file"
+EOF_FAKE_FORWARD
+chmod +x "$FAKE_FORWARD_SCRIPT"
+: >"$FORWARD_CAPTURE"
+
+if ! EASY_NODE_FORWARD_CAPTURE_FILE="$FORWARD_CAPTURE" \
+  EASY_NODE_FORWARD_LABEL="vpn_rc_resilience_path" \
+  VPN_RC_RESILIENCE_PATH_SCRIPT="$FAKE_FORWARD_SCRIPT" \
+  "$EASY_NODE" vpn-rc-resilience-path \
+  --docker-profile-matrix-timeout-sec 61 \
+  --rc-matrix-path-timeout-sec 62 \
+  --print-summary-json 0 >/dev/null 2>&1; then
+  echo "launcher wiring failed: vpn-rc-resilience-path forwarding invocation failed"
+  exit 1
+fi
+
+vpn_rc_forward_line="$(last_forward_line_for_label "$FORWARD_CAPTURE" "vpn_rc_resilience_path")"
+if [[ -z "$vpn_rc_forward_line" ]]; then
+  echo "launcher wiring failed: missing vpn-rc-resilience-path forwarding capture"
+  cat "$FORWARD_CAPTURE"
+  exit 1
+fi
+assert_forward_line_has_token "$vpn_rc_forward_line" $'\t--docker-profile-matrix-timeout-sec\t61' \
+  "launcher wiring failed: vpn-rc-resilience-path forwarding missing --docker-profile-matrix-timeout-sec 61"
+assert_forward_line_has_token "$vpn_rc_forward_line" $'\t--rc-matrix-path-timeout-sec\t62' \
+  "launcher wiring failed: vpn-rc-resilience-path forwarding missing --rc-matrix-path-timeout-sec 62"
+
+if ! EASY_NODE_FORWARD_CAPTURE_FILE="$FORWARD_CAPTURE" \
+  EASY_NODE_FORWARD_LABEL="ci_phase1_resilience" \
+  CI_PHASE1_RESILIENCE_SCRIPT="$FAKE_FORWARD_SCRIPT" \
+  "$EASY_NODE" ci-phase1-resilience \
+  --vpn-rc-resilience-path-timeout-sec 71 \
+  --session-churn-guard-timeout-sec 72 \
+  --print-summary-json 0 >/dev/null 2>&1; then
+  echo "launcher wiring failed: ci-phase1-resilience forwarding invocation failed"
+  exit 1
+fi
+
+ci_phase1_forward_line="$(last_forward_line_for_label "$FORWARD_CAPTURE" "ci_phase1_resilience")"
+if [[ -z "$ci_phase1_forward_line" ]]; then
+  echo "launcher wiring failed: missing ci-phase1-resilience forwarding capture"
+  cat "$FORWARD_CAPTURE"
+  exit 1
+fi
+assert_forward_line_has_token "$ci_phase1_forward_line" $'\t--vpn-rc-resilience-path-timeout-sec\t71' \
+  "launcher wiring failed: ci-phase1-resilience forwarding missing --vpn-rc-resilience-path-timeout-sec 71"
+assert_forward_line_has_token "$ci_phase1_forward_line" $'\t--session-churn-guard-timeout-sec\t72' \
+  "launcher wiring failed: ci-phase1-resilience forwarding missing --session-churn-guard-timeout-sec 72"
+
+if ! EASY_NODE_FORWARD_CAPTURE_FILE="$FORWARD_CAPTURE" \
+  EASY_NODE_FORWARD_LABEL="vpn_non_blockchain_fastlane" \
+  VPN_NON_BLOCKCHAIN_FASTLANE_SCRIPT="$FAKE_FORWARD_SCRIPT" \
+  "$EASY_NODE" vpn-non-blockchain-fastlane \
+  --parallel 0 \
+  --print-summary-json 0 >/dev/null 2>&1; then
+  echo "launcher wiring failed: vpn-non-blockchain-fastlane forwarding invocation failed"
+  exit 1
+fi
+
+fastlane_forward_line="$(last_forward_line_for_label "$FORWARD_CAPTURE" "vpn_non_blockchain_fastlane")"
+if [[ -z "$fastlane_forward_line" ]]; then
+  echo "launcher wiring failed: missing vpn-non-blockchain-fastlane forwarding capture"
+  cat "$FORWARD_CAPTURE"
+  exit 1
+fi
+assert_forward_line_has_token "$fastlane_forward_line" $'\t--parallel\t0' \
+  "launcher wiring failed: vpn-non-blockchain-fastlane forwarding missing --parallel 0"
 
 echo "easy-mode launcher wiring integration check ok"

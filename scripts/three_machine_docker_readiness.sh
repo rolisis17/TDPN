@@ -10,6 +10,9 @@ Usage:
   ./scripts/three_machine_docker_readiness.sh \
     [--run-validate [0|1]] \
     [--run-soak [0|1]] \
+    [--run-peer-failover [0|1]] \
+    [--peer-failover-downtime-sec N] \
+    [--peer-failover-timeout-sec N] \
     [--soak-rounds N] \
     [--soak-pause-sec N] \
     [--keep-stacks [0|1]] \
@@ -19,6 +22,8 @@ Usage:
     [--docker-host-alias HOST] \
     [--subject ID] \
     [--anon-cred TOKEN] \
+    [--bootstrap-directory URL] \
+    [--discovery-wait-sec N] \
     [--min-sources N] \
     [--min-operators N] \
     [--federation-timeout-sec N] \
@@ -116,6 +121,23 @@ wait_http_ok() {
   return 1
 }
 
+wait_sync_peer_success_state() {
+  local curl_bin="$1"
+  local status_url="$2"
+  local admin_token="$3"
+  local expected_success="$4"
+  local timeout_sec="$5"
+  local i body
+  for ((i = 1; i <= timeout_sec; i++)); do
+    body="$("$curl_bin" -fsS -H "X-Admin-Token: ${admin_token}" "$status_url" 2>/dev/null || true)"
+    if [[ -n "$body" ]] && printf '%s' "$body" | jq -e --argjson expected "$expected_success" '.peer.success == $expected' >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
 write_stack_override() {
   local file="$1"
   local stack_id="$2"
@@ -197,6 +219,9 @@ EOF_YAML
 
 run_validate="1"
 run_soak="1"
+run_peer_failover="0"
+peer_failover_downtime_sec="8"
+peer_failover_timeout_sec="45"
 soak_rounds="6"
 soak_pause_sec="3"
 keep_stacks="0"
@@ -206,6 +231,11 @@ stack_b_base_port="28080"
 docker_host_alias="${THREE_MACHINE_DOCKER_HOST_ALIAS:-host.docker.internal}"
 client_subject=""
 client_anon_cred=""
+client_min_selection_lines="${THREE_MACHINE_DOCKER_CLIENT_MIN_SELECTION_LINES:-1}"
+client_min_entry_operators="${THREE_MACHINE_DOCKER_CLIENT_MIN_ENTRY_OPERATORS:-1}"
+client_min_exit_operators="${THREE_MACHINE_DOCKER_CLIENT_MIN_EXIT_OPERATORS:-1}"
+bootstrap_directory=""
+discovery_wait_sec="${THREE_MACHINE_DISCOVERY_WAIT_SEC:-12}"
 min_sources="2"
 min_operators="2"
 federation_timeout_sec="90"
@@ -237,6 +267,23 @@ while [[ $# -gt 0 ]]; do
         run_soak="1"
         shift
       fi
+      ;;
+    --run-peer-failover)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        run_peer_failover="${2:-}"
+        shift 2
+      else
+        run_peer_failover="1"
+        shift
+      fi
+      ;;
+    --peer-failover-downtime-sec)
+      peer_failover_downtime_sec="${2:-}"
+      shift 2
+      ;;
+    --peer-failover-timeout-sec)
+      peer_failover_timeout_sec="${2:-}"
+      shift 2
       ;;
     --soak-rounds)
       soak_rounds="${2:-}"
@@ -282,6 +329,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --anon-cred)
       client_anon_cred="${2:-}"
+      shift 2
+      ;;
+    --bootstrap-directory)
+      bootstrap_directory="${2:-}"
+      shift 2
+      ;;
+    --discovery-wait-sec)
+      discovery_wait_sec="${2:-}"
       shift 2
       ;;
     --min-sources)
@@ -367,6 +422,7 @@ done
 
 bool_arg_or_die "--run-validate" "$run_validate"
 bool_arg_or_die "--run-soak" "$run_soak"
+bool_arg_or_die "--run-peer-failover" "$run_peer_failover"
 bool_arg_or_die "--keep-stacks" "$keep_stacks"
 bool_arg_or_die "--reset-data" "$reset_data"
 bool_arg_or_die "--distinct-operators" "$distinct_operators"
@@ -376,8 +432,14 @@ bool_arg_or_die "--prod-profile" "$prod_profile"
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
 int_arg_or_die "--soak-rounds" "$soak_rounds"
 int_arg_or_die "--soak-pause-sec" "$soak_pause_sec"
+int_arg_or_die "--peer-failover-downtime-sec" "$peer_failover_downtime_sec"
+int_arg_or_die "--peer-failover-timeout-sec" "$peer_failover_timeout_sec"
 int_arg_or_die "--stack-a-base-port" "$stack_a_base_port"
 int_arg_or_die "--stack-b-base-port" "$stack_b_base_port"
+int_arg_or_die "--discovery-wait-sec" "$discovery_wait_sec"
+int_arg_or_die "THREE_MACHINE_DOCKER_CLIENT_MIN_SELECTION_LINES" "$client_min_selection_lines"
+int_arg_or_die "THREE_MACHINE_DOCKER_CLIENT_MIN_ENTRY_OPERATORS" "$client_min_entry_operators"
+int_arg_or_die "THREE_MACHINE_DOCKER_CLIENT_MIN_EXIT_OPERATORS" "$client_min_exit_operators"
 int_arg_or_die "--min-sources" "$min_sources"
 int_arg_or_die "--min-operators" "$min_operators"
 int_arg_or_die "--federation-timeout-sec" "$federation_timeout_sec"
@@ -387,12 +449,19 @@ if [[ -n "$client_subject" && -n "$client_anon_cred" ]]; then
   echo "set only one of --subject or --anon-cred"
   exit 2
 fi
+if [[ -n "$bootstrap_directory" ]]; then
+  bootstrap_directory="$(trim "$bootstrap_directory")"
+fi
 if [[ -z "$docker_host_alias" ]]; then
   echo "--docker-host-alias must be non-empty"
   exit 2
 fi
 if ((stack_a_base_port < 1024 || stack_b_base_port < 1024)); then
   echo "--stack-a-base-port and --stack-b-base-port must be >= 1024"
+  exit 2
+fi
+if ((client_min_selection_lines < 1 || client_min_entry_operators < 1 || client_min_exit_operators < 1)); then
+  echo "THREE_MACHINE_DOCKER_CLIENT_MIN_* thresholds must be >= 1"
   exit 2
 fi
 if [[ "$prod_profile" == "1" ]]; then
@@ -679,6 +748,9 @@ if [[ "$run_validate" == "1" ]]; then
       --min-operators "$min_operators"
       --federation-timeout-sec "$federation_timeout_sec"
       --timeout-sec "$validate_timeout_sec"
+      --client-min-selection-lines "$client_min_selection_lines"
+      --client-min-entry-operators "$client_min_entry_operators"
+      --client-min-exit-operators "$client_min_exit_operators"
       --path-profile "$path_profile"
       --distinct-operators "$distinct_operators"
       --require-issuer-quorum "$require_issuer_quorum"
@@ -690,6 +762,9 @@ if [[ "$run_validate" == "1" ]]; then
     fi
     if [[ -n "$client_anon_cred" ]]; then
       validate_cmd+=(--anon-cred "$client_anon_cred")
+    fi
+    if [[ -n "$bootstrap_directory" ]]; then
+      validate_cmd+=(--bootstrap-directory "$bootstrap_directory" --discovery-wait-sec "$discovery_wait_sec")
     fi
     validate_cmd_print="$(print_cmd "${validate_cmd[@]}")"
     if THREE_MACHINE_VALIDATE_REWRITE_LOOPBACK_FOR_DOCKER=1 THREE_MACHINE_DOCKER_HOST_ALIAS="$docker_host_alias" "${validate_cmd[@]}"; then
@@ -706,6 +781,80 @@ if [[ "$run_validate" == "1" ]]; then
   fi
 else
   record_step "validate" "skip" 0 "disabled by flag"
+fi
+
+if [[ "$run_peer_failover" == "1" ]]; then
+  if [[ "$status" == "pass" ]]; then
+    failover_token_a="docker-a-directory-admin-token-001"
+    failover_status_url_a="${directory_a_url}/v1/admin/sync-status"
+    failover_stop_cmd_print="$(print_cmd "$docker_bin" compose --env-file "$env_b" -p "$project_b" -f "$compose_file" -f "$override_b" stop directory)"
+    failover_start_cmd_print="$(print_cmd "$docker_bin" compose --env-file "$env_b" -p "$project_b" -f "$compose_file" -f "$override_b" up -d directory)"
+    failover_note=""
+    failover_rc=0
+
+    if ! wait_sync_peer_success_state "$curl_bin" "$failover_status_url_a" "$failover_token_a" true "$peer_failover_timeout_sec"; then
+      failover_rc=1
+      failover_note="pre-failover sync-status did not reach peer.success=true"
+    fi
+
+    if [[ "$failover_rc" == "0" ]]; then
+      if ! compose_cmd "$project_b" "$override_b" "$env_b" stop directory >/dev/null 2>&1; then
+        failover_rc=1
+        failover_note="failed to stop stack B directory"
+      fi
+    fi
+
+    if [[ "$failover_rc" == "0" ]]; then
+      sleep "$peer_failover_downtime_sec"
+      if ! wait_sync_peer_success_state "$curl_bin" "$failover_status_url_a" "$failover_token_a" false "$peer_failover_timeout_sec"; then
+        failover_rc=1
+        failover_note="stack A did not observe peer.success=false during failover window"
+      fi
+    fi
+
+    if [[ "$failover_rc" == "0" ]]; then
+      if ! wait_http_ok "$curl_bin" "${directory_a_url}/v1/relays" "directory A during peer failover" 20; then
+        failover_rc=1
+        failover_note="directory A relays endpoint failed while peer was down"
+      fi
+    fi
+
+    if [[ "$failover_rc" == "0" ]]; then
+      if ! compose_cmd "$project_b" "$override_b" "$env_b" up -d directory >/dev/null 2>&1; then
+        failover_rc=1
+        failover_note="failed to restart stack B directory"
+      fi
+    fi
+
+    if [[ "$failover_rc" == "0" ]]; then
+      if ! wait_http_ok "$curl_bin" "${directory_b_url}/v1/relays" "directory B after failover restart" 30; then
+        failover_rc=1
+        failover_note="directory B did not recover after restart"
+      fi
+    fi
+
+    if [[ "$failover_rc" == "0" ]]; then
+      if ! wait_sync_peer_success_state "$curl_bin" "$failover_status_url_a" "$failover_token_a" true "$peer_failover_timeout_sec"; then
+        failover_rc=1
+        failover_note="stack A did not recover peer.success=true after stack B restart"
+      fi
+    fi
+
+    if [[ "$failover_rc" == "0" ]]; then
+      record_step "peer_failover" "pass" 0 "" "${failover_stop_cmd_print} && ${failover_start_cmd_print}"
+    else
+      status="fail"
+      final_rc=1
+      failed_step="peer_failover"
+      record_step "peer_failover" "fail" 1 "$failover_note" "${failover_stop_cmd_print} && ${failover_start_cmd_print}"
+      # Best-effort recovery so cleanup/down steps have a healthy compose state.
+      compose_cmd "$project_b" "$override_b" "$env_b" up -d directory >/dev/null 2>&1 || true
+    fi
+  else
+    record_step "peer_failover" "skip" 0 "skipped due to earlier failure"
+  fi
+else
+  record_step "peer_failover" "skip" 0 "disabled by flag"
 fi
 
 if [[ "$run_soak" == "1" ]]; then
@@ -726,6 +875,9 @@ if [[ "$run_soak" == "1" ]]; then
       --min-operators "$min_operators"
       --federation-timeout-sec "$federation_timeout_sec"
       --timeout-sec "$validate_timeout_sec"
+      --client-min-selection-lines "$client_min_selection_lines"
+      --client-min-entry-operators "$client_min_entry_operators"
+      --client-min-exit-operators "$client_min_exit_operators"
       --path-profile "$path_profile"
       --distinct-operators "$distinct_operators"
       --require-issuer-quorum "$require_issuer_quorum"
@@ -737,6 +889,9 @@ if [[ "$run_soak" == "1" ]]; then
     fi
     if [[ -n "$client_anon_cred" ]]; then
       soak_cmd+=(--anon-cred "$client_anon_cred")
+    fi
+    if [[ -n "$bootstrap_directory" ]]; then
+      soak_cmd+=(--bootstrap-directory "$bootstrap_directory" --discovery-wait-sec "$discovery_wait_sec")
     fi
     soak_cmd_print="$(print_cmd "${soak_cmd[@]}")"
     if THREE_MACHINE_VALIDATE_REWRITE_LOOPBACK_FOR_DOCKER=1 THREE_MACHINE_DOCKER_HOST_ALIAS="$docker_host_alias" "${soak_cmd[@]}"; then
@@ -827,21 +982,29 @@ jq -n \
   --arg project_b "$project_b" \
   --arg docker_host_alias "$docker_host_alias" \
   --arg path_profile "$path_profile" \
+  --arg bootstrap_directory "$bootstrap_directory" \
   --argjson compose_up_max_attempts "$compose_up_max_attempts" \
   --argjson compose_up_initial_backoff_sec "$compose_up_initial_backoff_sec" \
   --argjson rc "$final_rc" \
   --argjson run_validate "$run_validate" \
   --argjson run_soak "$run_soak" \
+  --argjson run_peer_failover "$run_peer_failover" \
+  --argjson peer_failover_downtime_sec "$peer_failover_downtime_sec" \
+  --argjson peer_failover_timeout_sec "$peer_failover_timeout_sec" \
   --argjson soak_rounds "$soak_rounds" \
   --argjson soak_pause_sec "$soak_pause_sec" \
   --argjson keep_stacks "$keep_stacks" \
   --argjson reset_data "$reset_data" \
   --argjson stack_a_base_port "$stack_a_base_port" \
   --argjson stack_b_base_port "$stack_b_base_port" \
+  --argjson discovery_wait_sec "$discovery_wait_sec" \
   --argjson min_sources "$min_sources" \
   --argjson min_operators "$min_operators" \
   --argjson federation_timeout_sec "$federation_timeout_sec" \
   --argjson timeout_sec "$validate_timeout_sec" \
+  --argjson client_min_selection_lines "$client_min_selection_lines" \
+  --argjson client_min_entry_operators "$client_min_entry_operators" \
+  --argjson client_min_exit_operators "$client_min_exit_operators" \
   --argjson distinct_operators "$distinct_operators" \
   --argjson require_issuer_quorum "$require_issuer_quorum" \
   --argjson beta_profile "$beta_profile" \
@@ -857,6 +1020,9 @@ jq -n \
     "config": {
       "run_validate": ($run_validate == 1),
       "run_soak": ($run_soak == 1),
+      "run_peer_failover": ($run_peer_failover == 1),
+      "peer_failover_downtime_sec": $peer_failover_downtime_sec,
+      "peer_failover_timeout_sec": $peer_failover_timeout_sec,
       "soak_rounds": $soak_rounds,
       "soak_pause_sec": $soak_pause_sec,
       "keep_stacks": ($keep_stacks == 1),
@@ -864,10 +1030,15 @@ jq -n \
       "stack_a_base_port": $stack_a_base_port,
       "stack_b_base_port": $stack_b_base_port,
       "docker_host_alias": $docker_host_alias,
+      "bootstrap_directory": $bootstrap_directory,
+      "discovery_wait_sec": $discovery_wait_sec,
       "min_sources": $min_sources,
       "min_operators": $min_operators,
       "federation_timeout_sec": $federation_timeout_sec,
       "timeout_sec": $timeout_sec,
+      "client_min_selection_lines": $client_min_selection_lines,
+      "client_min_entry_operators": $client_min_entry_operators,
+      "client_min_exit_operators": $client_min_exit_operators,
       "path_profile": $path_profile,
       "compose_up_max_attempts": $compose_up_max_attempts,
       "compose_up_initial_backoff_sec": $compose_up_initial_backoff_sec,

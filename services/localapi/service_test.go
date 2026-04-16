@@ -237,6 +237,9 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		if s.scriptPath != defaultScriptPath {
 			t.Fatalf("scriptPath=%q want=%q", s.scriptPath, defaultScriptPath)
 		}
+		if s.commandRunner != "" {
+			t.Fatalf("commandRunner=%q want empty", s.commandRunner)
+		}
 		if s.commandTimeout != defaultCommandTimeout {
 			t.Fatalf("commandTimeout=%s want=%s", s.commandTimeout, defaultCommandTimeout)
 		}
@@ -248,6 +251,7 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 	t.Run("overrides and timeout validation", func(t *testing.T) {
 		t.Setenv("LOCAL_CONTROL_API_ADDR", "0.0.0.0:9999")
 		t.Setenv("LOCAL_CONTROL_API_SCRIPT", " /tmp/easy_node.sh ")
+		t.Setenv("LOCAL_CONTROL_API_RUNNER", " bash ")
 		t.Setenv("LOCAL_CONTROL_API_COMMAND_TIMEOUT_SEC", "240")
 		t.Setenv("LOCAL_CONTROL_API_ALLOW_UPDATE", "1")
 
@@ -257,6 +261,9 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		}
 		if s.scriptPath != "/tmp/easy_node.sh" {
 			t.Fatalf("scriptPath=%q", s.scriptPath)
+		}
+		if s.commandRunner != "bash" {
+			t.Fatalf("commandRunner=%q", s.commandRunner)
 		}
 		if s.commandTimeout != 240*time.Second {
 			t.Fatalf("commandTimeout=%s", s.commandTimeout)
@@ -275,6 +282,55 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		s = New()
 		if s.commandTimeout != defaultCommandTimeout {
 			t.Fatalf("invalid timeout should fall back to default, got=%s want=%s", s.commandTimeout, defaultCommandTimeout)
+		}
+	})
+}
+
+func TestBuildEasyNodeCommandWithPlatform(t *testing.T) {
+	t.Run("linux defaults to direct script execution", func(t *testing.T) {
+		cmdName, cmdArgs := buildEasyNodeCommandWithPlatform("./scripts/easy_node.sh", []string{"client-vpn-status", "--show-json", "1"}, "linux", "")
+		if cmdName != "./scripts/easy_node.sh" {
+			t.Fatalf("cmdName=%q", cmdName)
+		}
+		want := []string{"client-vpn-status", "--show-json", "1"}
+		if strings.Join(cmdArgs, "\t") != strings.Join(want, "\t") {
+			t.Fatalf("cmdArgs=%v want=%v", cmdArgs, want)
+		}
+	})
+
+	t.Run("explicit runner prefixes script path", func(t *testing.T) {
+		cmdName, cmdArgs := buildEasyNodeCommandWithPlatform("./scripts/easy_node.sh", []string{"client-vpn-status"}, "linux", "bash")
+		if cmdName != "bash" {
+			t.Fatalf("cmdName=%q", cmdName)
+		}
+		want := []string{"./scripts/easy_node.sh", "client-vpn-status"}
+		if strings.Join(cmdArgs, "\t") != strings.Join(want, "\t") {
+			t.Fatalf("cmdArgs=%v want=%v", cmdArgs, want)
+		}
+	})
+
+	t.Run("windows ps1 defaults to powershell", func(t *testing.T) {
+		cmdName, cmdArgs := buildEasyNodeCommandWithPlatform(`C:\tdpn\easy_node.ps1`, []string{"client-vpn-status"}, "windows", "")
+		if cmdName != "powershell" {
+			t.Fatalf("cmdName=%q", cmdName)
+		}
+		wantPrefix := []string{"-NoProfile", "-ExecutionPolicy", "Bypass", "-File", `C:\tdpn\easy_node.ps1`}
+		if strings.Join(cmdArgs[:len(wantPrefix)], "\t") != strings.Join(wantPrefix, "\t") {
+			t.Fatalf("cmdArgs prefix=%v wantPrefix=%v", cmdArgs, wantPrefix)
+		}
+		if cmdArgs[len(cmdArgs)-1] != "client-vpn-status" {
+			t.Fatalf("cmdArgs tail=%v", cmdArgs)
+		}
+	})
+
+	t.Run("windows sh defaults to bash", func(t *testing.T) {
+		cmdName, cmdArgs := buildEasyNodeCommandWithPlatform(`C:\tdpn\easy_node.sh`, []string{"client-vpn-status"}, "windows", "")
+		if cmdName != "bash" {
+			t.Fatalf("cmdName=%q", cmdName)
+		}
+		want := []string{`C:\tdpn\easy_node.sh`, "client-vpn-status"}
+		if strings.Join(cmdArgs, "\t") != strings.Join(want, "\t") {
+			t.Fatalf("cmdArgs=%v want=%v", cmdArgs, want)
 		}
 	})
 }
@@ -312,6 +368,8 @@ func TestHandleConnectDefaults2Hop(t *testing.T) {
 
 	mustFlagValue(t, cmds[1], "--subject", "inv-test-2hop")
 	mustFlagValue(t, cmds[1], "--path-profile", "2hop")
+	mustFlagValue(t, cmds[1], "--session-reuse", "1")
+	mustFlagValue(t, cmds[1], "--allow-session-churn", "0")
 	mustFlagValue(t, cmds[1], "--min-operators", "2")
 	mustFlagValue(t, cmds[1], "--beta-profile", "1")
 	mustFlagValue(t, cmds[1], "--prod-profile", "0")
@@ -323,7 +381,7 @@ func TestHandleConnectOneHopNormalizationAndOverrides(t *testing.T) {
 	t.Run("one-hop defaults from profile alias", func(t *testing.T) {
 		svc, logPath := newFakeService(t, false)
 
-			code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
+		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
 				"bootstrap_directory":"http://dir.example:8081",
 				"invite_key":"inv-test-1hop",
 				"path_profile":" speed-1hop "
@@ -344,6 +402,8 @@ func TestHandleConnectOneHopNormalizationAndOverrides(t *testing.T) {
 		mustFlagValue(t, cmds[0], "--issuer-quorum-check", "0")
 		mustFlagValue(t, cmds[0], "--issuer-min-operators", "1")
 		mustFlagValue(t, cmds[1], "--path-profile", "1hop")
+		mustFlagValue(t, cmds[1], "--session-reuse", "1")
+		mustFlagValue(t, cmds[1], "--allow-session-churn", "0")
 		mustFlagValue(t, cmds[1], "--min-operators", "1")
 		mustFlagValue(t, cmds[1], "--beta-profile", "0")
 		mustFlagValue(t, cmds[1], "--prod-profile", "0")
@@ -371,6 +431,8 @@ func TestHandleConnectOneHopNormalizationAndOverrides(t *testing.T) {
 		if cmds[0][0] != "client-vpn-up" || cmds[1][0] != "client-vpn-status" {
 			t.Fatalf("unexpected command order: %v", cmds)
 		}
+		mustFlagValue(t, cmds[0], "--session-reuse", "1")
+		mustFlagValue(t, cmds[0], "--allow-session-churn", "0")
 		mustFlagValue(t, cmds[0], "--install-route", "1")
 	})
 }
@@ -402,6 +464,8 @@ func TestHandleConnectThreeHopProdOverrides(t *testing.T) {
 	mustFlagValue(t, cmds[0], "--interface", "wgtest0")
 	mustFlagValue(t, cmds[0], "--discovery-wait-sec", "33")
 	mustFlagValue(t, cmds[1], "--path-profile", "3hop")
+	mustFlagValue(t, cmds[1], "--session-reuse", "1")
+	mustFlagValue(t, cmds[1], "--allow-session-churn", "0")
 	mustFlagValue(t, cmds[1], "--prod-profile", "1")
 	mustFlagValue(t, cmds[1], "--beta-profile", "1")
 	mustFlagValue(t, cmds[1], "--ready-timeout-sec", "66")

@@ -667,6 +667,15 @@ func TestBootstrapDirectExitFallbackOnEntryUnknownExit(t *testing.T) {
 		Endpoint:   "127.0.0.1:9",
 		ValidUntil: time.Now().Add(time.Minute),
 	}, priv)
+	middle := signedDescFrom(t, proto.RelayDescriptor{
+		RelayID:    "middle-c",
+		Role:       "entry",
+		ControlURL: "http://middle.local",
+		OperatorID: "op-c",
+		Endpoint:   "127.0.0.1:51822",
+		HopRoles:   []string{"middle"},
+		ValidUntil: time.Now().Add(time.Minute),
+	}, priv)
 
 	entryOpenCalls := 0
 	exitOpenCalls := 0
@@ -674,7 +683,7 @@ func TestBootstrapDirectExitFallbackOnEntryUnknownExit(t *testing.T) {
 	seenSessionID := ""
 	handlers := map[string]func(*http.Request) (*http.Response, error){
 		directoryURL + "/v1/pubkey": jsonResp(map[string]string{"pub_key": base64.RawURLEncoding.EncodeToString(pub)}),
-		directoryURL + "/v1/relays": jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{entry, exit}}),
+		directoryURL + "/v1/relays": jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{entry, exit, middle}}),
 		issuerURL + "/v1/token": func(req *http.Request) (*http.Response, error) {
 			var in proto.IssueTokenRequest
 			if err := json.NewDecoder(req.Body).Decode(&in); err != nil {
@@ -703,6 +712,9 @@ func TestBootstrapDirectExitFallbackOnEntryUnknownExit(t *testing.T) {
 			}
 			if in.ExitID != "exit-b" {
 				t.Fatalf("unexpected direct fallback exit id: %q", in.ExitID)
+			}
+			if in.MiddleRelayID != "middle-c" {
+				t.Fatalf("unexpected direct fallback middle relay id: %q", in.MiddleRelayID)
 			}
 			seenSessionID = in.SessionID
 			return jsonResp(proto.PathOpenResponse{
@@ -740,6 +752,10 @@ func TestBootstrapDirectExitFallbackOnEntryUnknownExit(t *testing.T) {
 		healthCheckEnabled:       false,
 		allowDirectExitFallback:  true,
 		allowUnknownExitFallback: false,
+		pathProfile:              "3hop",
+		preferMiddleRelay:        true,
+		requireMiddleRelay:       true,
+		requireDistinctOps:       true,
 		httpClient:               &http.Client{Transport: mockRoundTripper{handlers: handlers}},
 	}
 

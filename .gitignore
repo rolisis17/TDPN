@@ -5,6 +5,7 @@
 # Local logs and run artifacts
 .easy-node-logs/
 :8081
+User/History/
 
 # Local server env (contains admin/operator secrets)
 deploy/.env.easy.server

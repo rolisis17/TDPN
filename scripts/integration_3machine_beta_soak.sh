@@ -525,14 +525,15 @@ if [[ "$beta_profile" == "1" ]]; then
   if ((min_operators < 2)); then
     min_operators="2"
   fi
-  if ((client_min_selection_lines < 8)); then
+  # Apply strict beta client-diversity defaults only when thresholds are unset (0).
+  if ((client_min_selection_lines == 0)); then
     client_min_selection_lines="8"
   fi
   if [[ "$distinct_operators" == "1" ]]; then
-    if ((client_min_entry_operators < 2)); then
+    if ((client_min_entry_operators == 0)); then
       client_min_entry_operators="2"
     fi
-    if ((client_min_exit_operators < 2)); then
+    if ((client_min_exit_operators == 0)); then
       client_min_exit_operators="2"
     fi
   fi
@@ -622,6 +623,11 @@ for round in $(seq 1 "$rounds"); do
     --beta-profile "$beta_profile"
     --prod-profile "$prod_profile"
   )
+  if [[ -n "$path_profile" ]]; then
+    cmd+=(--path-profile "$path_profile")
+  elif [[ -n "$normalized_path_profile" ]]; then
+    cmd+=(--path-profile "$normalized_path_profile")
+  fi
   if [[ -n "$directory_a" ]]; then
     cmd+=(--directory-a "$directory_a")
   fi

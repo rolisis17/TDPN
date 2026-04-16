@@ -172,6 +172,9 @@ single_machine_args=(
   --three-machine-docker-readiness-soak-pause-sec 3
   --three-machine-docker-readiness-path-profile balanced
   --three-machine-docker-readiness-keep-stacks 0
+  --three-machine-docker-readiness-run-peer-failover 1
+  --three-machine-docker-readiness-peer-failover-downtime-sec 8
+  --three-machine-docker-readiness-peer-failover-timeout-sec 45
   --run-profile-compare-campaign-signoff "$run_profile_compare_campaign_signoff"
   --profile-compare-campaign-signoff-refresh-campaign "$profile_compare_campaign_signoff_refresh_campaign"
   --summary-json "$single_machine_summary_json"

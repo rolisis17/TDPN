@@ -81,6 +81,21 @@ echo "[ci] manual validation report integration"
 echo "[ci] roadmap progress report integration"
 ./scripts/integration_roadmap_progress_report.sh
 
+echo "[ci] roadmap progress resilience handoff integration"
+./scripts/integration_roadmap_progress_resilience_handoff.sh
+
+echo "[ci] roadmap progress phase-2 handoff integration"
+./scripts/integration_roadmap_progress_phase2_handoff.sh
+
+echo "[ci] roadmap progress phase-3 handoff integration"
+./scripts/integration_roadmap_progress_phase3_handoff.sh
+
+echo "[ci] roadmap progress phase-4 handoff integration"
+./scripts/integration_roadmap_progress_phase4_handoff.sh
+
+echo "[ci] roadmap progress phase-5 handoff integration"
+./scripts/integration_roadmap_progress_phase5_handoff.sh
+
 echo "[ci] roadmap consistency integration"
 bash ./scripts/integration_roadmap_consistency.sh
 
@@ -105,6 +120,12 @@ echo "[ci] vpn-rc matrix path integration"
 echo "[ci] vpn-rc resilience path integration"
 ./scripts/integration_vpn_rc_resilience_path.sh
 
+echo "[ci] vpn non-blockchain fastlane integration"
+./scripts/integration_vpn_non_blockchain_fastlane.sh
+
+echo "[ci] blockchain fastlane integration"
+./scripts/integration_blockchain_fastlane.sh
+
 echo "[ci] phase-1 resilience gate (dry-run contract)"
 ci_local_phase1_run_session_churn_guard="${CI_LOCAL_PHASE1_RUN_SESSION_CHURN_GUARD:-${CI_PHASE1_RESILIENCE_RUN_SESSION_CHURN_GUARD:-1}}"
 ci_local_phase1_run_3hop_runtime_integration="${CI_LOCAL_PHASE1_RUN_3HOP_RUNTIME_INTEGRATION:-${CI_PHASE1_RESILIENCE_RUN_3HOP_RUNTIME_INTEGRATION:-0}}"
@@ -113,6 +134,103 @@ ci_local_phase1_run_3hop_runtime_integration="${CI_LOCAL_PHASE1_RUN_3HOP_RUNTIME
   --print-summary-json 0 \
   --run-session-churn-guard "$ci_local_phase1_run_session_churn_guard" \
   --run-3hop-runtime-integration "$ci_local_phase1_run_3hop_runtime_integration"
+
+echo "[ci] phase-1 resilience gate integration"
+./scripts/integration_ci_phase1_resilience.sh
+
+echo "[ci] phase-2 linux prod candidate gate integration"
+./scripts/integration_ci_phase2_linux_prod_candidate.sh
+
+echo "[ci] phase-2 linux prod candidate check integration"
+./scripts/integration_phase2_linux_prod_candidate_check.sh
+
+echo "[ci] phase-2 linux prod candidate handoff check integration"
+./scripts/integration_phase2_linux_prod_candidate_handoff_check.sh
+
+echo "[ci] phase-2 linux prod candidate run integration"
+./scripts/integration_phase2_linux_prod_candidate_run.sh
+
+echo "[ci] phase-2 linux prod candidate handoff run integration"
+./scripts/integration_phase2_linux_prod_candidate_handoff_run.sh
+
+echo "[ci] phase-2 linux prod candidate signoff integration"
+./scripts/integration_phase2_linux_prod_candidate_signoff.sh
+
+echo "[ci] phase-3 windows client beta gate integration"
+./scripts/integration_ci_phase3_windows_client_beta.sh
+
+echo "[ci] phase-3 windows client beta check integration"
+./scripts/integration_phase3_windows_client_beta_check.sh
+
+echo "[ci] phase-3 windows client beta run integration"
+./scripts/integration_phase3_windows_client_beta_run.sh
+
+echo "[ci] phase-3 windows client beta handoff check integration"
+./scripts/integration_phase3_windows_client_beta_handoff_check.sh
+
+echo "[ci] phase-3 windows client beta handoff run integration"
+./scripts/integration_phase3_windows_client_beta_handoff_run.sh
+
+echo "[ci] phase-4 windows full parity gate integration"
+./scripts/integration_ci_phase4_windows_full_parity.sh
+
+echo "[ci] phase-4 windows full parity check integration"
+./scripts/integration_phase4_windows_full_parity_check.sh
+
+echo "[ci] phase-4 windows full parity run integration"
+./scripts/integration_phase4_windows_full_parity_run.sh
+
+echo "[ci] phase-4 windows full parity handoff check integration"
+./scripts/integration_phase4_windows_full_parity_handoff_check.sh
+
+echo "[ci] phase-4 windows full parity handoff run integration"
+./scripts/integration_phase4_windows_full_parity_handoff_run.sh
+
+echo "[ci] phase-5 settlement layer gate integration"
+./scripts/integration_ci_phase5_settlement_layer.sh
+
+echo "[ci] phase-5 settlement layer check integration"
+./scripts/integration_phase5_settlement_layer_check.sh
+
+echo "[ci] phase-5 settlement layer run integration"
+./scripts/integration_phase5_settlement_layer_run.sh
+
+echo "[ci] phase-5 settlement layer handoff check integration"
+./scripts/integration_phase5_settlement_layer_handoff_check.sh
+
+echo "[ci] phase-5 settlement layer handoff run integration"
+./scripts/integration_phase5_settlement_layer_handoff_run.sh
+
+echo "[ci] phase-5 settlement layer summary report integration"
+./scripts/integration_phase5_settlement_layer_summary_report.sh
+
+echo "[ci] phase-6 cosmos l1 summary report integration"
+./scripts/integration_phase6_cosmos_l1_summary_report.sh
+
+echo "[ci] phase-7 mainnet cutover gate integration"
+./scripts/integration_ci_phase7_mainnet_cutover.sh
+
+echo "[ci] phase-7 mainnet cutover check integration"
+./scripts/integration_phase7_mainnet_cutover_check.sh
+
+echo "[ci] phase-7 mainnet cutover run integration"
+./scripts/integration_phase7_mainnet_cutover_run.sh
+
+echo "[ci] phase-7 mainnet cutover handoff check integration"
+./scripts/integration_phase7_mainnet_cutover_handoff_check.sh
+
+echo "[ci] phase-7 mainnet cutover handoff run integration"
+./scripts/integration_phase7_mainnet_cutover_handoff_run.sh
+
+echo "[ci] phase-7 mainnet cutover summary report integration"
+./scripts/integration_phase7_mainnet_cutover_summary_report.sh
+
+# Ordering contract: keep gate-wrapper coverage ahead of summary-wrapper coverage.
+echo "[ci] easy-node blockchain gate-wrapper integration"
+./scripts/integration_easy_node_blockchain_gate_wrappers.sh
+
+echo "[ci] easy-node blockchain summary-wrapper integration"
+./scripts/integration_easy_node_blockchain_summary_reports.sh
 
 echo "[ci] client-vpn smoke integration"
 ./scripts/integration_client_vpn_smoke.sh
@@ -266,15 +384,6 @@ echo "[ci] easy-node self-update integration"
 
 echo "[ci] phase-0 gate"
 ./scripts/ci_phase0.sh
-
-echo "[ci] phase5 settlement summary report integration"
-./scripts/integration_phase5_settlement_layer_summary_report.sh
-
-echo "[ci] phase6 cosmos l1 summary report integration"
-./scripts/integration_phase6_cosmos_l1_summary_report.sh
-
-echo "[ci] easy-node blockchain summary-report wrapper integration"
-./scripts/integration_easy_node_blockchain_summary_reports.sh
 
 echo "[ci] local API config-v1 defaults integration"
 ./scripts/integration_local_api_config_defaults.sh
@@ -505,6 +614,9 @@ echo "[ci] session-handoff integration"
 
 echo "[ci] session churn guard integration"
 ./scripts/integration_session_churn_guard.sh
+
+echo "[ci] client 3hop runtime integration"
+./scripts/integration_client_3hop_runtime.sh
 
 echo "[ci] issuer-trust-sync integration"
 ./scripts/integration_issuer_trust_sync.sh

@@ -527,17 +527,43 @@ if [[ -z "$failure_stage" ]]; then
 fi
 
 decision="unknown"
+decision_context="none"
+decision_reason=""
 recommended_profile=""
 support_rate_pct="0"
 trend_source_value=""
+campaign_check_summary_present=0
 if [[ -f "$campaign_check_summary_json" ]] && jq -e . "$campaign_check_summary_json" >/dev/null 2>&1; then
+  campaign_check_summary_present=1
   decision="$(jq -r '.decision // "unknown"' "$campaign_check_summary_json")"
+  decision_context="campaign_check_summary"
   recommended_profile="$(jq -r '.observed.recommended_profile // ""' "$campaign_check_summary_json")"
-  support_rate_pct="$(jq -r '.observed.support_rate_pct // 0' "$campaign_check_summary_json")"
+  support_rate_pct="$(jq -r '.observed.support_rate_pct // .observed.recommendation_support_rate_pct // 0' "$campaign_check_summary_json")"
   trend_source_value="$(jq -r '.observed.trend_source // ""' "$campaign_check_summary_json")"
 fi
 if ! is_non_negative_decimal "$support_rate_pct"; then
   support_rate_pct="0"
+fi
+if [[ "$decision" == "unknown" && "$failure_stage" == "campaign_check" ]]; then
+  decision="NO-GO"
+  decision_context="synthetic_campaign_check_failure"
+  check_failure_line=""
+  if [[ -f "$check_log" ]]; then
+    check_failure_line="$(grep -E 'profile-compare-campaign-check failed:' "$check_log" | tail -n 1 || true)"
+  fi
+  if [[ "$check_failure_line" == *"campaign summary JSON not found"* ]]; then
+    decision_reason="campaign summary JSON missing"
+  elif [[ "$check_failure_line" == *"invalid campaign summary JSON schema"* ]]; then
+    decision_reason="campaign summary JSON invalid schema"
+  elif [[ -n "$check_failure_line" ]]; then
+    decision_reason="$check_failure_line"
+  elif [[ ! -f "$campaign_summary_json" ]]; then
+    decision_reason="campaign summary JSON missing"
+  elif ! jq -e '.version == 1 and (.summary | type == "object") and (.decision | type == "object") and (.trend | type == "object")' "$campaign_summary_json" >/dev/null 2>&1; then
+    decision_reason="campaign summary JSON invalid schema"
+  else
+    decision_reason="campaign-check stage failed before emitting decision summary"
+  fi
 fi
 
 generated_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -558,6 +584,8 @@ jq -n \
   --arg campaign_cmd "$campaign_cmd_line" \
   --arg check_cmd "$check_cmd_line" \
   --arg decision "$decision" \
+  --arg decision_context "$decision_context" \
+  --arg decision_reason "$decision_reason" \
   --arg recommended_profile "$recommended_profile" \
   --arg support_rate_pct "$support_rate_pct" \
   --arg trend_source "$trend_source_value" \
@@ -588,6 +616,7 @@ jq -n \
   --argjson check_attempted "$check_attempted" \
   --arg check_status "$check_status" \
   --argjson check_rc "$check_rc" \
+  --argjson campaign_check_summary_present "$campaign_check_summary_present" \
   '{
     version: 1,
     generated_at_utc: $generated_at_utc,
@@ -644,6 +673,9 @@ jq -n \
     decision: {
       decision: $decision,
       go: ($decision == "GO"),
+      context: $decision_context,
+      reason: (if $decision_reason == "" then null else $decision_reason end),
+      from_campaign_check_summary: ($campaign_check_summary_present == 1),
       recommended_profile: $recommended_profile,
       support_rate_pct: ($support_rate_pct | tonumber),
       trend_source: $trend_source

@@ -20,6 +20,9 @@ func TestOpenPathWithChallengeRetries(t *testing.T) {
 			calls++
 			var in proto.PathOpenRequest
 			_ = json.NewDecoder(req.Body).Decode(&in)
+			if in.MiddleRelayID != "middle-a" {
+				return jsonResponse(proto.PathOpenResponse{Accepted: false, Reason: "missing middle relay id"})(req)
+			}
 			if calls == 1 {
 				return jsonResponse(proto.PathOpenResponse{
 					Accepted:   false,
@@ -43,11 +46,12 @@ func TestOpenPathWithChallengeRetries(t *testing.T) {
 		httpClient: &http.Client{Transport: mockRoundTripper{handlers: handlers}},
 	}
 	resp, err := c.openPathWithChallenge(context.Background(), entryURL, proto.PathOpenRequest{
-		ExitID:       "exit-a",
-		Token:        "tok",
-		Transport:    "policy-json",
-		SessionID:    "unused",
-		RequestedMTU: 1280,
+		ExitID:        "exit-a",
+		MiddleRelayID: "middle-a",
+		Token:         "tok",
+		Transport:     "policy-json",
+		SessionID:     "unused",
+		RequestedMTU:  1280,
 	})
 	if err != nil {
 		t.Fatalf("openPathWithChallenge failed: %v", err)

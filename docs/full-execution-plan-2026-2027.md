@@ -66,6 +66,15 @@ Exit gate:
 
 ### Phase 7: Mainnet Cutover
 - progressive migration with rollback path to chain-assisted mode
+- gate cutover on phase6 readiness signals and explicit dual-write parity confirmation
+- require rollback path readiness before promotion; keep an optional operator approval gate for final release decisions
+- `scripts/phase7_mainnet_cutover_check.sh` + `scripts/integration_phase7_mainnet_cutover_check.sh`
+- `scripts/phase7_mainnet_cutover_run.sh` + `scripts/integration_phase7_mainnet_cutover_run.sh`
+- `scripts/phase7_mainnet_cutover_handoff_check.sh` + `scripts/integration_phase7_mainnet_cutover_handoff_check.sh`
+- `scripts/phase7_mainnet_cutover_handoff_run.sh` + `scripts/integration_phase7_mainnet_cutover_handoff_run.sh`
+- `scripts/ci_phase7_mainnet_cutover.sh` + `scripts/integration_ci_phase7_mainnet_cutover.sh`
+- `scripts/phase7_mainnet_cutover_summary_report.sh` + `scripts/integration_phase7_mainnet_cutover_summary_report.sh`
+- VPN dataplane remains independent from chain liveness during and after cutover.
 
 ## Cosmos Execution Update (April 16, 2026)
 
@@ -97,6 +106,7 @@ Exit gate:
 - Easy-node exposes blockchain summary wrappers:
   - `./scripts/easy_node.sh phase5-settlement-layer-summary-report`
   - `./scripts/easy_node.sh phase6-cosmos-l1-summary-report`
+  - `./scripts/easy_node.sh phase7-mainnet-cutover-summary-report`
 - Phase 6 CI now includes `scripts/ci_phase6_cosmos_l1_build_testnet.sh` with contract coverage from `scripts/integration_ci_phase6_cosmos_l1_build_testnet.sh` for chain scaffold/proto/query/module-tx/gRPC runtime gate ordering and dry-run/first-failure accounting.
 - Phase 6 build/testnet CI includes `local_testnet_smoke` wired to `scripts/integration_cosmos_local_testnet_smoke.sh` for deterministic local multi-node `tdpnd` lifecycle coverage (`init -> start -> status -> stop -> status`).
 - Phase 6 build/testnet CI includes `module_tx_surface` wired to `scripts/integration_cosmos_module_tx_surface.sh` for six-module keeper/module transaction-surface coverage.
@@ -114,7 +124,19 @@ Exit gate:
 - Phase 6 operator summary helper `scripts/phase6_cosmos_l1_summary_report.sh` aggregates CI/contracts/suite summary artifacts into compact operator lines plus normalized JSON output, with contract coverage from `scripts/integration_phase6_cosmos_l1_summary_report.sh`.
 - Phase 6 build/testnet/contracts/check/run/handoff/suite wrappers now emit canonical summary artifacts under `.easy-node-logs/phase6_cosmos_l1_*_summary.json` in addition to per-run reports.
 - Phase 6 summary helper fallback discovery now includes CI/contracts/suite timestamped summary directories when canonical/default summary files are absent.
-- `scripts/roadmap_progress_report.sh` now consumes optional Phase 6 summary artifacts and surfaces `phase6_cosmos_l1_handoff` signals (`run_pipeline_ok`, `module_tx_surface_ok`, `tdpnd_grpc_runtime_smoke_ok`, `tdpnd_grpc_live_smoke_ok`, `tdpnd_grpc_auth_live_smoke_ok`) under `blockchain_track`, with integration coverage in `scripts/integration_roadmap_progress_report.sh`.
+- `scripts/roadmap_progress_report.sh` now consumes optional Phase 6 and Phase 7 cutover summary artifacts and surfaces `phase6_cosmos_l1_handoff` and `phase7_mainnet_cutover` status/signals under `blockchain_track`, with integration coverage in `scripts/integration_roadmap_progress_report.sh`.
+- Phase 7 mainnet cutover readiness wrappers are `scripts/phase7_mainnet_cutover_check.sh` and `scripts/phase7_mainnet_cutover_run.sh`, with integration coverage from `scripts/integration_phase7_mainnet_cutover_check.sh` and `scripts/integration_phase7_mainnet_cutover_run.sh`.
+- Phase 7 mainnet cutover handoff wrappers are `scripts/phase7_mainnet_cutover_handoff_check.sh` and `scripts/phase7_mainnet_cutover_handoff_run.sh`, with integration coverage from `scripts/integration_phase7_mainnet_cutover_handoff_check.sh` and `scripts/integration_phase7_mainnet_cutover_handoff_run.sh`; easy-node exposes `./scripts/easy_node.sh phase7-mainnet-cutover-handoff-check` and `./scripts/easy_node.sh phase7-mainnet-cutover-handoff-run`.
+- Easy-node fail-closed blockchain gate wrappers cover phase5 + phase6 + phase7 entrypoints: `./scripts/easy_node.sh ci-phase5-settlement-layer`, `./scripts/easy_node.sh phase5-settlement-layer-check`, `./scripts/easy_node.sh ci-phase6-cosmos-l1-build-testnet`, `./scripts/easy_node.sh ci-phase6-cosmos-l1-contracts`, `./scripts/easy_node.sh ci-phase7-mainnet-cutover`, `./scripts/easy_node.sh phase7-mainnet-cutover-check`, `./scripts/easy_node.sh phase7-mainnet-cutover-run`, `./scripts/easy_node.sh phase7-mainnet-cutover-handoff-check`, and `./scripts/easy_node.sh phase7-mainnet-cutover-handoff-run`.
+- Integration coverage for easy-node gate-wrapper dispatch and first-failure propagation is `scripts/integration_easy_node_blockchain_gate_wrappers.sh`; it validates phase5 + phase6 + phase7 wrappers, and VPN dataplane independence is unchanged.
+- Blockchain fastlane helper is `scripts/blockchain_fastlane.sh`; integration contract is `scripts/integration_blockchain_fastlane.sh`; easy-node entrypoint is `./scripts/easy_node.sh blockchain-fastlane`; this remains fail-closed control-plane wiring and preserves dataplane independence.
+- Phase 7 mainnet cutover CI wrapper is `scripts/ci_phase7_mainnet_cutover.sh`, with contract coverage from `scripts/integration_ci_phase7_mainnet_cutover.sh` for fail-closed stage ordering across check/run/handoff-check/handoff-run and first-failure RC propagation.
+- Phase 7 operator summary helper is `scripts/phase7_mainnet_cutover_summary_report.sh`, with integration coverage from `scripts/integration_phase7_mainnet_cutover_summary_report.sh`, and it aggregates check/run/handoff-check/handoff-run summary artifacts into canonical operator output.
+- Phase 7 cutover wrappers emit canonical summary artifacts consumed by the summary helper, including `phase7_mainnet_cutover_check_summary.json`, `phase7_mainnet_cutover_run_summary.json`, `phase7_mainnet_cutover_handoff_check_summary.json`, and `phase7_mainnet_cutover_handoff_run_summary.json`.
+- Phase 7 handoff wrappers are fail-closed readiness gates that preserve the optional operator approval gate before promotion.
+- Easy-node exposes Phase 7 summary wrapper `./scripts/easy_node.sh phase7-mainnet-cutover-summary-report`, backed by canonical check/run/handoff-check/handoff-run summary artifacts.
+- Phase 7 cutover safety posture requires phase6 readiness signals, dual-write parity confirmation, rollback path readiness, and an optional operator approval gate before promotion.
+- Phase 7 cutover keeps VPN dataplane independent from chain liveness; chain-side write outages remain deferred/reconciled and must not block forwarding.
 - Settlement confirmation lifecycle posture is canonicalized as `pending` -> `submitted` -> `confirmed` with explicit `failed` records retained for replay/reconciliation.
 - Settlement bridge live process smoke now validates auth enforcement, write acceptance, and billing/rewards/sponsor/slashing/validator/governance GET by-id plus list query behavior in auth-enabled runtime mode.
 

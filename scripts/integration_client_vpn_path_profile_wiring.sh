@@ -56,6 +56,20 @@ check_pattern '"CLIENT_SESSION_REUSE=1"' \
 check_pattern '"CLIENT_STICKY_PAIR_SEC=300"' \
   "client-vpn-up missing sticky-pair wiring for 1hop/speed-1hop"
 
+echo "[client-vpn-path-profile] session lifecycle defaults"
+check_pattern 'local session_reuse="\$\{CLIENT_SESSION_REUSE:-1\}"' \
+  "client-vpn-up missing CLIENT_SESSION_REUSE default wiring"
+check_pattern 'local session_refresh_lead_sec="\$\{CLIENT_SESSION_REFRESH_LEAD_SEC:-20\}"' \
+  "client-vpn-up missing CLIENT_SESSION_REFRESH_LEAD_SEC default wiring"
+check_pattern '"CLIENT_SESSION_REUSE=\$session_reuse"' \
+  "client-vpn-up missing exported CLIENT_SESSION_REUSE runtime env"
+check_pattern '"CLIENT_SESSION_REFRESH_LEAD_SEC=\$session_refresh_lead_sec"' \
+  "client-vpn-up missing exported CLIENT_SESSION_REFRESH_LEAD_SEC runtime env"
+check_pattern 'client-vpn-up requires CLIENT_SESSION_REUSE to be 0 or 1' \
+  "client-vpn-up missing CLIENT_SESSION_REUSE validation guardrail"
+check_pattern 'client-vpn-up requires CLIENT_SESSION_REFRESH_LEAD_SEC >= 1' \
+  "client-vpn-up missing CLIENT_SESSION_REFRESH_LEAD_SEC validation guardrail"
+
 echo "[client-vpn-path-profile] status/state visibility"
 check_pattern 'CLIENT_VPN_PATH_PROFILE=\$normalized_path_profile' \
   "client-vpn-up missing state record for path profile"

@@ -24,6 +24,7 @@ Usage:
     [--phase4-windows-full-parity-summary-json PATH] \
     [--phase5-settlement-layer-summary-json PATH] \
     [--phase6-cosmos-l1-summary-json PATH] \
+    [--phase7-mainnet-cutover-summary-json PATH] \
     [--summary-json PATH] \
     [--report-md PATH] \
     [--print-report [0|1]] \
@@ -1514,6 +1515,88 @@ phase6_cosmos_l1_summary_usable_01() {
   fi
 }
 
+phase7_mainnet_cutover_summary_kind_from_source() {
+  local path="$1"
+  local schema_id=""
+  local file_name=""
+  if [[ -f "$path" ]]; then
+    schema_id="$(jq -r '.schema.id // ""' "$path" 2>/dev/null || true)"
+  fi
+  case "$schema_id" in
+    phase7_mainnet_cutover_summary_report) printf '%s' "summary-report"; return ;;
+    phase7_mainnet_cutover_check_summary) printf '%s' "check"; return ;;
+    phase7_mainnet_cutover_run_summary) printf '%s' "run"; return ;;
+    phase7_mainnet_cutover_handoff_check_summary) printf '%s' "handoff-check"; return ;;
+    phase7_mainnet_cutover_handoff_run_summary) printf '%s' "handoff-run"; return ;;
+  esac
+  file_name="$(basename "$path")"
+  case "$file_name" in
+    phase7_mainnet_cutover_summary_report.json) printf '%s' "summary-report" ;;
+    phase7_mainnet_cutover_check_summary.json) printf '%s' "check" ;;
+    phase7_mainnet_cutover_run_summary.json) printf '%s' "run" ;;
+    phase7_mainnet_cutover_handoff_check_summary.json) printf '%s' "handoff-check" ;;
+    phase7_mainnet_cutover_handoff_run_summary.json) printf '%s' "handoff-run" ;;
+    *) printf '%s' "unknown" ;;
+  esac
+}
+
+phase7_mainnet_cutover_summary_usable_01() {
+  local path="$1"
+  if [[ ! -f "$path" ]]; then
+    printf '0'
+    return
+  fi
+  if jq -e '
+    type == "object"
+    and (
+      .schema == null
+      or (
+        (.schema | type) == "object"
+        and (
+          (.schema.id // "") == "phase7_mainnet_cutover_summary_report"
+          or (.schema.id // "") == "phase7_mainnet_cutover_check_summary"
+          or (.schema.id // "") == "phase7_mainnet_cutover_run_summary"
+          or (.schema.id // "") == "phase7_mainnet_cutover_handoff_check_summary"
+          or (.schema.id // "") == "phase7_mainnet_cutover_handoff_run_summary"
+        )
+        and ((.schema.major // 0) | type == "number")
+        and ((.schema.major // 0) >= 1)
+        and ((.schema.major // 0) <= 1)
+        and (((.schema.major // 0) | floor) == (.schema.major // 0))
+      )
+    )
+    and (
+      ((.summaries | type) == "object")
+      or ((.signals | type) == "object")
+      or ((.stages | type) == "object")
+      or ((.steps | type) == "object")
+    )
+  ' "$path" >/dev/null 2>&1; then
+    printf '1'
+  else
+    printf '0'
+  fi
+}
+
+phase7_mainnet_cutover_bool_value_or_null() {
+  local path="$1"
+  local jq_expr="$2"
+  local value=""
+  if [[ ! -f "$path" ]]; then
+    printf '%s' "null"
+    return
+  fi
+  value="$(jq -r "$jq_expr" "$path" 2>/dev/null || true)"
+  case "$value" in
+    true|false)
+      printf '%s' "$value"
+      ;;
+    *)
+      printf '%s' "null"
+      ;;
+  esac
+}
+
 phase6_cosmos_l1_linked_summary_candidates() {
   local source_path="$1"
   local emitted=""
@@ -1841,6 +1924,8 @@ phase3_windows_client_beta_summary_json="${ROADMAP_PROGRESS_PHASE3_WINDOWS_CLIEN
 phase4_windows_full_parity_summary_json="${ROADMAP_PROGRESS_PHASE4_WINDOWS_FULL_PARITY_SUMMARY_JSON:-}"
 phase5_settlement_layer_summary_json="${ROADMAP_PROGRESS_PHASE5_SETTLEMENT_LAYER_SUMMARY_JSON:-}"
 phase6_cosmos_l1_summary_json="${ROADMAP_PROGRESS_PHASE6_COSMOS_L1_SUMMARY_JSON:-}"
+phase7_mainnet_cutover_summary_json="${ROADMAP_PROGRESS_PHASE7_MAINNET_CUTOVER_SUMMARY_JSON:-$ROOT_DIR/.easy-node-logs/phase7_mainnet_cutover_summary_report.json}"
+phase7_mainnet_cutover_summary_json="$(abs_path "$phase7_mainnet_cutover_summary_json")"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -1917,6 +2002,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --phase6-cosmos-l1-summary-json)
       phase6_cosmos_l1_summary_json="$(abs_path "${2:-}")"
+      shift 2
+      ;;
+    --phase7-mainnet-cutover-summary-json)
+      phase7_mainnet_cutover_summary_json="$(abs_path "${2:-}")"
       shift 2
       ;;
     --summary-json)
@@ -2369,6 +2458,7 @@ if [[ -n "$phase1_resilience_handoff_summary_json" ]]; then
   fi
 fi
 
+vpn_rc_resilience_summary_from_phase1_linked_json="false"
 if [[ "$vpn_rc_resilience_summary_explicit_01" == "1" ]]; then
   vpn_rc_resilience_summary_json="$(abs_path "$vpn_rc_resilience_summary_json")"
 else
@@ -2377,9 +2467,13 @@ else
     vpn_rc_resilience_summary_json="$(phase1_linked_resilience_summary_json_from_source \
       "$phase1_resilience_handoff_source_summary_json" \
       "$phase1_resilience_handoff_source_summary_kind")"
+    if [[ -n "$vpn_rc_resilience_summary_json" ]]; then
+      vpn_rc_resilience_summary_from_phase1_linked_json="true"
+    fi
   fi
   if [[ -z "$vpn_rc_resilience_summary_json" ]]; then
     vpn_rc_resilience_summary_json="$(find_latest_resilience_summary_json)"
+    vpn_rc_resilience_summary_from_phase1_linked_json="false"
   fi
 fi
 
@@ -2434,6 +2528,45 @@ if [[ -n "$vpn_rc_resilience_summary_json" ]] && [[ "$(resilience_summary_usable
       | if $s == "pass" then true
         elif $s == "fail" then false
         else empty end')"
+fi
+
+# Keep resilience handoff internally consistent with the selected Phase-1 source
+# when its linked resilience artifact is stale/conflicting and no explicit
+# resilience summary was requested by the caller.
+if [[ "$vpn_rc_resilience_summary_explicit_01" != "1" \
+   && "$phase1_resilience_handoff_available_json" == "true" \
+   && -n "$phase1_resilience_handoff_source_summary_json" ]]; then
+  phase1_resilience_source_mtime=""
+  resolved_resilience_source_mtime=""
+  override_due_to_stale_resilience_source="false"
+  if [[ -n "$resilience_handoff_source_summary_json" ]]; then
+    phase1_resilience_source_mtime="$(file_mtime_epoch "$phase1_resilience_handoff_source_summary_json")"
+    resolved_resilience_source_mtime="$(file_mtime_epoch "$resilience_handoff_source_summary_json")"
+    if [[ "$phase1_resilience_source_mtime" =~ ^[0-9]+$ \
+       && "$resolved_resilience_source_mtime" =~ ^[0-9]+$ \
+       && "$resolved_resilience_source_mtime" -lt "$phase1_resilience_source_mtime" ]]; then
+      override_due_to_stale_resilience_source="true"
+    fi
+  fi
+  if [[ "$phase1_resilience_handoff_profile_matrix_stable_json" != "null" \
+     && "$phase1_resilience_handoff_peer_loss_recovery_ok_json" != "null" \
+     && "$phase1_resilience_handoff_session_churn_guard_ok_json" != "null" ]]; then
+    if [[ "$resilience_profile_matrix_stable_json" == "null" \
+       || "$resilience_peer_loss_recovery_ok_json" == "null" \
+       || "$resilience_session_churn_guard_ok_json" == "null" \
+       || "$resilience_profile_matrix_stable_json" != "$phase1_resilience_handoff_profile_matrix_stable_json" \
+       || "$resilience_peer_loss_recovery_ok_json" != "$phase1_resilience_handoff_peer_loss_recovery_ok_json" \
+       || "$resilience_session_churn_guard_ok_json" != "$phase1_resilience_handoff_session_churn_guard_ok_json" ]]; then
+      if [[ "$vpn_rc_resilience_summary_from_phase1_linked_json" == "true" \
+         || "$override_due_to_stale_resilience_source" == "true" ]]; then
+      resilience_handoff_available_json="true"
+      resilience_handoff_source_summary_json="$phase1_resilience_handoff_source_summary_json"
+      resilience_profile_matrix_stable_json="$phase1_resilience_handoff_profile_matrix_stable_json"
+      resilience_peer_loss_recovery_ok_json="$phase1_resilience_handoff_peer_loss_recovery_ok_json"
+      resilience_session_churn_guard_ok_json="$phase1_resilience_handoff_session_churn_guard_ok_json"
+      fi
+    fi
+  fi
 fi
 
 if [[ -z "$phase2_linux_prod_candidate_summary_json" ]]; then
@@ -2627,6 +2760,14 @@ if [[ -n "$phase3_windows_client_beta_summary_json" ]]; then
         'if (.windows_parity_ok | type) == "boolean" then .windows_parity_ok
           elif (.summary.windows_parity_ok | type) == "boolean" then .summary.windows_parity_ok
           elif (.handoff.windows_parity_ok | type) == "boolean" then .handoff.windows_parity_ok
+          elif ((.handoff.desktop_scaffold_ok | type) == "boolean"
+            and (.handoff.local_control_api_ok | type) == "boolean"
+            and (.handoff.launcher_wiring_ok | type) == "boolean"
+            and (.handoff.launcher_runtime_ok | type) == "boolean") then
+            (.handoff.desktop_scaffold_ok
+              and .handoff.local_control_api_ok
+              and .handoff.launcher_wiring_ok
+              and .handoff.launcher_runtime_ok)
           elif (.signals.windows_parity_ok | type) == "boolean" then .signals.windows_parity_ok
           elif (.phase3_windows_client_beta_handoff.windows_parity_ok | type) == "boolean" then .phase3_windows_client_beta_handoff.windows_parity_ok
           elif (.vpn_track.phase3_windows_client_beta_handoff.windows_parity_ok | type) == "boolean" then .vpn_track.phase3_windows_client_beta_handoff.windows_parity_ok
@@ -2647,6 +2788,9 @@ if [[ -n "$phase3_windows_client_beta_summary_json" ]]; then
         'if (.desktop_contract_ok | type) == "boolean" then .desktop_contract_ok
           elif (.summary.desktop_contract_ok | type) == "boolean" then .summary.desktop_contract_ok
           elif (.handoff.desktop_contract_ok | type) == "boolean" then .handoff.desktop_contract_ok
+          elif ((.handoff.desktop_scaffold_ok | type) == "boolean"
+            and (.handoff.local_control_api_ok | type) == "boolean") then
+            (.handoff.desktop_scaffold_ok and .handoff.local_control_api_ok)
           elif (.signals.desktop_contract_ok | type) == "boolean" then .signals.desktop_contract_ok
           elif (.phase3_windows_client_beta_handoff.desktop_contract_ok | type) == "boolean" then .phase3_windows_client_beta_handoff.desktop_contract_ok
           elif (.vpn_track.phase3_windows_client_beta_handoff.desktop_contract_ok | type) == "boolean" then .vpn_track.phase3_windows_client_beta_handoff.desktop_contract_ok
@@ -2667,6 +2811,9 @@ if [[ -n "$phase3_windows_client_beta_summary_json" ]]; then
         'if (.installer_update_ok | type) == "boolean" then .installer_update_ok
           elif (.summary.installer_update_ok | type) == "boolean" then .summary.installer_update_ok
           elif (.handoff.installer_update_ok | type) == "boolean" then .handoff.installer_update_ok
+          elif ((.handoff.easy_node_config_v1_ok | type) == "boolean"
+            and (.handoff.launcher_wiring_ok | type) == "boolean") then
+            (.handoff.easy_node_config_v1_ok and .handoff.launcher_wiring_ok)
           elif (.signals.installer_update_ok | type) == "boolean" then .signals.installer_update_ok
           elif (.phase3_windows_client_beta_handoff.installer_update_ok | type) == "boolean" then .phase3_windows_client_beta_handoff.installer_update_ok
           elif (.vpn_track.phase3_windows_client_beta_handoff.installer_update_ok | type) == "boolean" then .vpn_track.phase3_windows_client_beta_handoff.installer_update_ok
@@ -2687,6 +2834,9 @@ if [[ -n "$phase3_windows_client_beta_summary_json" ]]; then
         'if (.telemetry_stability_ok | type) == "boolean" then .telemetry_stability_ok
           elif (.summary.telemetry_stability_ok | type) == "boolean" then .summary.telemetry_stability_ok
           elif (.handoff.telemetry_stability_ok | type) == "boolean" then .handoff.telemetry_stability_ok
+          elif ((.handoff.local_api_config_defaults_ok | type) == "boolean"
+            and (.handoff.launcher_runtime_ok | type) == "boolean") then
+            (.handoff.local_api_config_defaults_ok and .handoff.launcher_runtime_ok)
           elif (.signals.telemetry_stability_ok | type) == "boolean" then .signals.telemetry_stability_ok
           elif (.phase3_windows_client_beta_handoff.telemetry_stability_ok | type) == "boolean" then .phase3_windows_client_beta_handoff.telemetry_stability_ok
           elif (.vpn_track.phase3_windows_client_beta_handoff.telemetry_stability_ok | type) == "boolean" then .vpn_track.phase3_windows_client_beta_handoff.telemetry_stability_ok
@@ -3273,6 +3423,93 @@ if [[ -n "$phase6_cosmos_l1_summary_json" ]]; then
   fi
 fi
 
+phase7_mainnet_cutover_summary_available_json="false"
+phase7_mainnet_cutover_summary_input_summary_json=""
+phase7_mainnet_cutover_summary_source_summary_json=""
+phase7_mainnet_cutover_summary_source_summary_kind=""
+phase7_mainnet_cutover_summary_status_json="missing"
+phase7_mainnet_cutover_summary_rc_json="null"
+phase7_mainnet_cutover_summary_check_ok_json="null"
+phase7_mainnet_cutover_summary_run_ok_json="null"
+phase7_mainnet_cutover_summary_handoff_check_ok_json="null"
+phase7_mainnet_cutover_summary_handoff_run_ok_json="null"
+if [[ -n "$phase7_mainnet_cutover_summary_json" ]]; then
+  phase7_mainnet_cutover_summary_input_summary_json="$phase7_mainnet_cutover_summary_json"
+  if [[ "$(phase7_mainnet_cutover_summary_usable_01 "$phase7_mainnet_cutover_summary_json")" == "1" ]]; then
+    phase7_mainnet_cutover_summary_source_summary_json="$(abs_path "$phase7_mainnet_cutover_summary_json")"
+    if [[ -n "$phase7_mainnet_cutover_summary_source_summary_json" ]] && [[ "$(phase7_mainnet_cutover_summary_usable_01 "$phase7_mainnet_cutover_summary_source_summary_json")" == "1" ]]; then
+      phase7_mainnet_cutover_summary_source_summary_kind="$(phase7_mainnet_cutover_summary_kind_from_source "$phase7_mainnet_cutover_summary_source_summary_json")"
+      phase7_mainnet_cutover_summary_status_json="$(jq -r '.status // "unknown"' "$phase7_mainnet_cutover_summary_source_summary_json" 2>/dev/null || echo "unknown")"
+      phase7_mainnet_cutover_summary_rc_json="$(jq -r 'if (.rc | type) == "number" then .rc else empty end' "$phase7_mainnet_cutover_summary_source_summary_json" 2>/dev/null || true)"
+      if [[ -z "$phase7_mainnet_cutover_summary_rc_json" ]]; then
+        phase7_mainnet_cutover_summary_rc_json="null"
+      fi
+      phase7_mainnet_cutover_summary_available_json="true"
+      phase7_mainnet_cutover_summary_check_ok_json="$(phase7_mainnet_cutover_bool_value_or_null \
+        "$phase7_mainnet_cutover_summary_source_summary_json" \
+        'if (.summaries.check.status | type) == "string" then
+            ((.summaries.check.status // "") | ascii_downcase) as $s
+            | if $s == "pass" then true elif $s == "fail" then false else empty end
+          elif (.signals.check_ok | type) == "boolean" then .signals.check_ok
+          elif (.stages.check.ok | type) == "boolean" then .stages.check.ok
+          elif (.steps.phase7_mainnet_cutover_check.status | type) == "string" then
+            ((.steps.phase7_mainnet_cutover_check.status // "") | ascii_downcase) as $s
+            | if $s == "pass" then true elif $s == "fail" then false else empty end
+          elif (.steps.phase7_mainnet_cutover_handoff_check.status | type) == "string" then
+            ((.steps.phase7_mainnet_cutover_handoff_check.status // "") | ascii_downcase) as $s
+            | if $s == "pass" then true elif $s == "fail" then false else empty end
+          elif (.status | type) == "string" then
+            ((.status // "") | ascii_downcase) as $s
+            | if $s == "pass" then true elif $s == "fail" then false else empty end
+          else empty end')"
+      phase7_mainnet_cutover_summary_run_ok_json="$(phase7_mainnet_cutover_bool_value_or_null \
+        "$phase7_mainnet_cutover_summary_source_summary_json" \
+        'if (.summaries.run.status | type) == "string" then
+            ((.summaries.run.status // "") | ascii_downcase) as $s
+            | if $s == "pass" then true elif $s == "fail" then false else empty end
+          elif (.signals.run_ok | type) == "boolean" then .signals.run_ok
+          elif (.stages.run.ok | type) == "boolean" then .stages.run.ok
+          elif (.steps.phase7_mainnet_cutover_run.status | type) == "string" then
+            ((.steps.phase7_mainnet_cutover_run.status // "") | ascii_downcase) as $s
+            | if $s == "pass" then true elif $s == "fail" then false else empty end
+          elif (.status | type) == "string" then
+            ((.status // "") | ascii_downcase) as $s
+            | if $s == "pass" then true elif $s == "fail" then false else empty end
+          else empty end')"
+      phase7_mainnet_cutover_summary_handoff_check_ok_json="$(phase7_mainnet_cutover_bool_value_or_null \
+        "$phase7_mainnet_cutover_summary_source_summary_json" \
+        'if (.summaries.handoff_check.status | type) == "string" then
+            ((.summaries.handoff_check.status // "") | ascii_downcase) as $s
+            | if $s == "pass" then true elif $s == "fail" then false else empty end
+          elif (.signals.handoff_check_ok | type) == "boolean" then .signals.handoff_check_ok
+          elif (.stages.handoff_check.ok | type) == "boolean" then .stages.handoff_check.ok
+          elif (.steps.phase7_mainnet_cutover_handoff_check.status | type) == "string" then
+            ((.steps.phase7_mainnet_cutover_handoff_check.status // "") | ascii_downcase) as $s
+            | if $s == "pass" then true elif $s == "fail" then false else empty end
+          elif (.status | type) == "string" then
+            ((.status // "") | ascii_downcase) as $s
+            | if $s == "pass" then true elif $s == "fail" then false else empty end
+          else empty end')"
+      phase7_mainnet_cutover_summary_handoff_run_ok_json="$(phase7_mainnet_cutover_bool_value_or_null \
+        "$phase7_mainnet_cutover_summary_source_summary_json" \
+        'if (.summaries.handoff_run.status | type) == "string" then
+            ((.summaries.handoff_run.status // "") | ascii_downcase) as $s
+            | if $s == "pass" then true elif $s == "fail" then false else empty end
+          elif (.signals.handoff_run_ok | type) == "boolean" then .signals.handoff_run_ok
+          elif (.stages.handoff_run.ok | type) == "boolean" then .stages.handoff_run.ok
+          elif (.steps.phase7_mainnet_cutover_handoff_run.status | type) == "string" then
+            ((.steps.phase7_mainnet_cutover_handoff_run.status // "") | ascii_downcase) as $s
+            | if $s == "pass" then true elif $s == "fail" then false else empty end
+          elif (.status | type) == "string" then
+            ((.status // "") | ascii_downcase) as $s
+            | if $s == "pass" then true elif $s == "fail" then false else empty end
+          else empty end')"
+    fi
+  else
+    phase7_mainnet_cutover_summary_status_json="invalid"
+  fi
+fi
+
 readiness_status="$(jq -r '.report.readiness_status // "UNKNOWN"' "$manual_validation_summary_json")"
 roadmap_stage="$(jq -r '.summary.roadmap_stage // "UNKNOWN"' "$manual_validation_summary_json")"
 single_machine_ready_json="$(jq -r '.summary.single_machine_ready // false' "$manual_validation_summary_json")"
@@ -3803,6 +4040,16 @@ summary_payload="$(jq -n \
   --argjson phase6_cosmos_l1_handoff_tdpnd_grpc_runtime_smoke_ok "$phase6_cosmos_l1_handoff_tdpnd_grpc_runtime_smoke_ok_json" \
   --argjson phase6_cosmos_l1_handoff_tdpnd_grpc_live_smoke_ok "$phase6_cosmos_l1_handoff_tdpnd_grpc_live_smoke_ok_json" \
   --argjson phase6_cosmos_l1_handoff_tdpnd_grpc_auth_live_smoke_ok "$phase6_cosmos_l1_handoff_tdpnd_grpc_auth_live_smoke_ok_json" \
+  --argjson phase7_mainnet_cutover_summary_available "$phase7_mainnet_cutover_summary_available_json" \
+  --arg phase7_mainnet_cutover_summary_input_summary_json "$phase7_mainnet_cutover_summary_input_summary_json" \
+  --arg phase7_mainnet_cutover_summary_source_summary_json "$phase7_mainnet_cutover_summary_source_summary_json" \
+  --arg phase7_mainnet_cutover_summary_source_summary_kind "$phase7_mainnet_cutover_summary_source_summary_kind" \
+  --arg phase7_mainnet_cutover_summary_status "$phase7_mainnet_cutover_summary_status_json" \
+  --argjson phase7_mainnet_cutover_summary_rc "$phase7_mainnet_cutover_summary_rc_json" \
+  --argjson phase7_mainnet_cutover_summary_check_ok "$phase7_mainnet_cutover_summary_check_ok_json" \
+  --argjson phase7_mainnet_cutover_summary_run_ok "$phase7_mainnet_cutover_summary_run_ok_json" \
+  --argjson phase7_mainnet_cutover_summary_handoff_check_ok "$phase7_mainnet_cutover_summary_handoff_check_ok_json" \
+  --argjson phase7_mainnet_cutover_summary_handoff_run_ok "$phase7_mainnet_cutover_summary_handoff_run_ok_json" \
   --arg profile_default_gate_status "$profile_default_gate_status" \
   --arg docker_rehearsal_status "$docker_rehearsal_status" \
   --arg real_wg_privileged_status "$real_wg_privileged_status" \
@@ -3997,6 +4244,18 @@ summary_payload="$(jq -n \
         tdpnd_grpc_runtime_smoke_ok: $phase6_cosmos_l1_handoff_tdpnd_grpc_runtime_smoke_ok,
         tdpnd_grpc_live_smoke_ok: $phase6_cosmos_l1_handoff_tdpnd_grpc_live_smoke_ok,
         tdpnd_grpc_auth_live_smoke_ok: $phase6_cosmos_l1_handoff_tdpnd_grpc_auth_live_smoke_ok
+      },
+      phase7_mainnet_cutover_summary_report: {
+        available: $phase7_mainnet_cutover_summary_available,
+        input_summary_json: (if $phase7_mainnet_cutover_summary_input_summary_json == "" then null else $phase7_mainnet_cutover_summary_input_summary_json end),
+        source_summary_json: (if $phase7_mainnet_cutover_summary_source_summary_json == "" then null else $phase7_mainnet_cutover_summary_source_summary_json end),
+        source_summary_kind: (if $phase7_mainnet_cutover_summary_source_summary_kind == "" then null else $phase7_mainnet_cutover_summary_source_summary_kind end),
+        status: $phase7_mainnet_cutover_summary_status,
+        rc: $phase7_mainnet_cutover_summary_rc,
+        check_ok: $phase7_mainnet_cutover_summary_check_ok,
+        run_ok: $phase7_mainnet_cutover_summary_run_ok,
+        handoff_check_ok: $phase7_mainnet_cutover_summary_handoff_check_ok,
+        handoff_run_ok: $phase7_mainnet_cutover_summary_handoff_run_ok
       }
     },
     refresh: {
@@ -4037,6 +4296,7 @@ summary_payload="$(jq -n \
       phase4_windows_full_parity_summary_json: (if $phase4_windows_full_parity_handoff_source_summary_json == "" then null else $phase4_windows_full_parity_handoff_source_summary_json end),
       phase5_settlement_layer_summary_json: (if $phase5_settlement_layer_handoff_source_summary_json == "" then null else $phase5_settlement_layer_handoff_source_summary_json end),
       phase6_cosmos_l1_summary_json: (if $phase6_cosmos_l1_handoff_source_summary_json == "" then null else $phase6_cosmos_l1_handoff_source_summary_json end),
+      phase7_mainnet_cutover_summary_json: (if $phase7_mainnet_cutover_summary_source_summary_json == "" then null else $phase7_mainnet_cutover_summary_source_summary_json end),
       vpn_rc_resilience_summary_json: (if $resilience_handoff_source_summary_json == "" then null else $resilience_handoff_source_summary_json end),
       summary_json: $summary_json_path,
       report_md: $report_md_path
@@ -4178,6 +4438,16 @@ $pending_real_host_checks_md
 - Phase-6 Cosmos L1 tdpnd_grpc_runtime_smoke_ok: $(jq -r '.blockchain_track.phase6_cosmos_l1_handoff.tdpnd_grpc_runtime_smoke_ok | if . == null then "null" else tostring end' "$summary_json")
 - Phase-6 Cosmos L1 tdpnd_grpc_live_smoke_ok: $(jq -r '.blockchain_track.phase6_cosmos_l1_handoff.tdpnd_grpc_live_smoke_ok | if . == null then "null" else tostring end' "$summary_json")
 - Phase-6 Cosmos L1 tdpnd_grpc_auth_live_smoke_ok: $(jq -r '.blockchain_track.phase6_cosmos_l1_handoff.tdpnd_grpc_auth_live_smoke_ok | if . == null then "null" else tostring end' "$summary_json")
+- Phase-7 mainnet cutover summary available: $(jq -r '.blockchain_track.phase7_mainnet_cutover_summary_report.available' "$summary_json")
+- Phase-7 mainnet cutover summary input: $(jq -r '.blockchain_track.phase7_mainnet_cutover_summary_report.input_summary_json // "none"' "$summary_json")
+- Phase-7 mainnet cutover summary source: $(jq -r '.blockchain_track.phase7_mainnet_cutover_summary_report.source_summary_json // "none"' "$summary_json")
+- Phase-7 mainnet cutover summary source kind: $(jq -r '.blockchain_track.phase7_mainnet_cutover_summary_report.source_summary_kind // "none"' "$summary_json")
+- Phase-7 mainnet cutover summary status: $(jq -r '.blockchain_track.phase7_mainnet_cutover_summary_report.status // "missing"' "$summary_json")
+- Phase-7 mainnet cutover summary rc: $(jq -r '.blockchain_track.phase7_mainnet_cutover_summary_report.rc // "null"' "$summary_json")
+- Phase-7 mainnet cutover check_ok: $(jq -r '.blockchain_track.phase7_mainnet_cutover_summary_report.check_ok | if . == null then "null" else tostring end' "$summary_json")
+- Phase-7 mainnet cutover run_ok: $(jq -r '.blockchain_track.phase7_mainnet_cutover_summary_report.run_ok | if . == null then "null" else tostring end' "$summary_json")
+- Phase-7 mainnet cutover handoff_check_ok: $(jq -r '.blockchain_track.phase7_mainnet_cutover_summary_report.handoff_check_ok | if . == null then "null" else tostring end' "$summary_json")
+- Phase-7 mainnet cutover handoff_run_ok: $(jq -r '.blockchain_track.phase7_mainnet_cutover_summary_report.handoff_run_ok | if . == null then "null" else tostring end' "$summary_json")
 
 ## Next Actions
 
@@ -4210,6 +4480,7 @@ $non_blockchain_actionable_no_sudo_or_github_md
 - Phase-4 Windows full parity summary source: $(jq -r '.artifacts.phase4_windows_full_parity_summary_json // "none"' "$summary_json")
 - Phase-5 settlement layer summary source: $(jq -r '.artifacts.phase5_settlement_layer_summary_json // "none"' "$summary_json")
 - Phase-6 Cosmos L1 summary source: $(jq -r '.artifacts.phase6_cosmos_l1_summary_json // "none"' "$summary_json")
+- Phase-7 mainnet cutover summary source: $(jq -r '.artifacts.phase7_mainnet_cutover_summary_json // "none"' "$summary_json")
 - VPN RC resilience summary: $(jq -r '.artifacts.vpn_rc_resilience_summary_json // "none"' "$summary_json")
 EOF_MD
 mv -f "$report_tmp" "$report_md"
@@ -4243,6 +4514,8 @@ echo "[roadmap-progress-report] phase5_settlement_layer_handoff_settlement_adapt
 echo "[roadmap-progress-report] phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_status=${phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_status_json:-null} issuer_sponsor_api_live_smoke_ok=$phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_ok_json"
 echo "[roadmap-progress-report] phase6_cosmos_l1_handoff_available=$phase6_cosmos_l1_handoff_available_json source_summary_json=${phase6_cosmos_l1_handoff_source_summary_json:-} source_kind=${phase6_cosmos_l1_handoff_source_summary_kind:-}"
 echo "[roadmap-progress-report] phase6_cosmos_l1_handoff_status=$phase6_cosmos_l1_handoff_status_json rc=$phase6_cosmos_l1_handoff_rc_json run_pipeline_ok=$phase6_cosmos_l1_handoff_run_pipeline_ok_json module_tx_surface_ok=$phase6_cosmos_l1_handoff_module_tx_surface_ok_json tdpnd_grpc_runtime_smoke_ok=$phase6_cosmos_l1_handoff_tdpnd_grpc_runtime_smoke_ok_json tdpnd_grpc_live_smoke_ok=$phase6_cosmos_l1_handoff_tdpnd_grpc_live_smoke_ok_json tdpnd_grpc_auth_live_smoke_ok=$phase6_cosmos_l1_handoff_tdpnd_grpc_auth_live_smoke_ok_json"
+echo "[roadmap-progress-report] phase7_mainnet_cutover_summary_available=$phase7_mainnet_cutover_summary_available_json source_summary_json=${phase7_mainnet_cutover_summary_source_summary_json:-} source_kind=${phase7_mainnet_cutover_summary_source_summary_kind:-}"
+echo "[roadmap-progress-report] phase7_mainnet_cutover_summary_status=$phase7_mainnet_cutover_summary_status_json rc=$phase7_mainnet_cutover_summary_rc_json check_ok=$phase7_mainnet_cutover_summary_check_ok_json run_ok=$phase7_mainnet_cutover_summary_run_ok_json handoff_check_ok=$phase7_mainnet_cutover_summary_handoff_check_ok_json handoff_run_ok=$phase7_mainnet_cutover_summary_handoff_run_ok_json"
 echo "[roadmap-progress-report] resilience_handoff_available=$resilience_handoff_available_json source_summary_json=${resilience_handoff_source_summary_json:-}"
 echo "[roadmap-progress-report] profile_matrix_stable=$resilience_profile_matrix_stable_json peer_loss_recovery_ok=$resilience_peer_loss_recovery_ok_json session_churn_guard_ok=$resilience_session_churn_guard_ok_json"
 echo "[roadmap-progress-report] summary_json=$summary_json"

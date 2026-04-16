@@ -31,7 +31,11 @@ phase5_handoff_check_integration_script="scripts/integration_phase5_settlement_l
 phase5_handoff_run_integration_script="scripts/integration_phase5_settlement_layer_handoff_run.sh"
 phase5_summary_report_script="scripts/phase5_settlement_layer_summary_report.sh"
 phase5_summary_report_integration_script="scripts/integration_phase5_settlement_layer_summary_report.sh"
+blockchain_fastlane_script="scripts/blockchain_fastlane.sh"
+blockchain_fastlane_integration_script="scripts/integration_blockchain_fastlane.sh"
 ci_local_script="scripts/ci_local.sh"
+easy_node_script="scripts/easy_node.sh"
+easy_node_blockchain_gate_wrappers_integration_script="scripts/integration_easy_node_blockchain_gate_wrappers.sh"
 easy_node_blockchain_summary_reports_integration_script="scripts/integration_easy_node_blockchain_summary_reports.sh"
 phase6_ci_script="scripts/ci_phase6_cosmos_l1_build_testnet.sh"
 phase6_integration_script="scripts/integration_ci_phase6_cosmos_l1_build_testnet.sh"
@@ -64,6 +68,18 @@ phase6_handoff_check_integration_script="scripts/integration_phase6_cosmos_l1_bu
 phase6_handoff_run_integration_script="scripts/integration_phase6_cosmos_l1_build_testnet_handoff_run.sh"
 phase6_summary_report_script="scripts/phase6_cosmos_l1_summary_report.sh"
 phase6_summary_report_integration_script="scripts/integration_phase6_cosmos_l1_summary_report.sh"
+phase7_check_script="scripts/phase7_mainnet_cutover_check.sh"
+phase7_check_integration_script="scripts/integration_phase7_mainnet_cutover_check.sh"
+phase7_run_script="scripts/phase7_mainnet_cutover_run.sh"
+phase7_run_integration_script="scripts/integration_phase7_mainnet_cutover_run.sh"
+phase7_handoff_check_script="scripts/phase7_mainnet_cutover_handoff_check.sh"
+phase7_handoff_check_integration_script="scripts/integration_phase7_mainnet_cutover_handoff_check.sh"
+phase7_handoff_run_script="scripts/phase7_mainnet_cutover_handoff_run.sh"
+phase7_handoff_run_integration_script="scripts/integration_phase7_mainnet_cutover_handoff_run.sh"
+phase7_ci_script="scripts/ci_phase7_mainnet_cutover.sh"
+phase7_ci_integration_script="scripts/integration_ci_phase7_mainnet_cutover.sh"
+phase7_summary_report_script="scripts/phase7_mainnet_cutover_summary_report.sh"
+phase7_summary_report_integration_script="scripts/integration_phase7_mainnet_cutover_summary_report.sh"
 
 check_confirmation_lifecycle_wording() {
   local file_path="$1"
@@ -113,7 +129,53 @@ check_confirmation_interface_wording() {
   fi
 }
 
-for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$roadmap_integration_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$chain_readme" "$chain_scaffold_file" "$chain_grpc_registry_file" "$chain_grpc_registry_test_file" "$chain_settlement_bridge_file" "$chain_runtime_test_file" "$settlement_mapping_doc" "$blockchain_sponsor_quickstart_doc" "$phase5_ci_script" "$phase5_integration_script" "$phase5_check_script" "$phase5_run_script" "$phase5_handoff_check_script" "$phase5_handoff_run_script" "$phase5_check_integration_script" "$phase5_run_integration_script" "$phase5_handoff_check_integration_script" "$phase5_handoff_run_integration_script" "$phase5_summary_report_script" "$phase5_summary_report_integration_script" "$ci_local_script" "$easy_node_blockchain_summary_reports_integration_script" "$phase6_ci_script" "$phase6_integration_script" "$phase6_contracts_ci_script" "$phase6_contracts_integration_script" "$phase6_contracts_live_smoke_script" "$phase6_grpc_app_roundtrip_script" "$phase6_grpc_runtime_smoke_script" "$phase6_grpc_live_smoke_script" "$phase6_grpc_auth_live_smoke_script" "$phase6_settlement_bridge_smoke_script" "$phase6_settlement_bridge_live_smoke_script" "$phase6_query_surface_script" "$phase6_module_tx_surface_script" "$phase6_proto_surface_script" "$phase6_proto_grpc_surface_script" "$phase6_proto_codegen_surface_script" "$phase6_module_coverage_floor_script" "$phase6_keeper_coverage_floor_script" "$phase6_dual_write_parity_script" "$phase6_check_script" "$phase6_run_script" "$phase6_check_integration_script" "$phase6_run_integration_script" "$phase6_suite_script" "$phase6_suite_integration_script" "$phase6_handoff_check_script" "$phase6_handoff_run_script" "$phase6_handoff_check_integration_script" "$phase6_handoff_run_integration_script" "$phase6_summary_report_script" "$phase6_summary_report_integration_script"; do
+check_phase7_roadmap_surface_cli() {
+  local file_path="$1"
+  local label="$2"
+
+  if ! rg -Fq -- "--phase7-mainnet-cutover-summary-json" "$file_path"; then
+    echo "$label must accept --phase7-mainnet-cutover-summary-json for the Phase 7 roadmap summary surface"
+    exit 1
+  fi
+  if ! rg -Fq "phase7_mainnet_cutover" "$file_path"; then
+    echo "$label must reference phase7_mainnet_cutover in the roadmap progress report JSON surface"
+    exit 1
+  fi
+}
+
+check_phase7_roadmap_surface_integration() {
+  local file_path="$1"
+  local label="$2"
+
+  if ! rg -Fq "blockchain_track.phase7_mainnet_cutover" "$file_path"; then
+    echo "$label must assert blockchain_track.phase7_mainnet_cutover in roadmap progress report integration coverage"
+    exit 1
+  fi
+  if ! rg -Fq ".blockchain_track.phase7_mainnet_cutover.status" "$file_path"; then
+    echo "$label must assert blockchain_track.phase7_mainnet_cutover.status in roadmap progress report integration coverage"
+    exit 1
+  fi
+  if ! rg -Fq ".blockchain_track.phase7_mainnet_cutover.rc" "$file_path"; then
+    echo "$label must assert blockchain_track.phase7_mainnet_cutover.rc in roadmap progress report integration coverage"
+    exit 1
+  fi
+}
+
+check_phase7_roadmap_surface_docs() {
+  local file_path="$1"
+  local label="$2"
+
+  if ! rg -Fq "phase7_mainnet_cutover_summary_report.sh" "$file_path"; then
+    echo "$label must mention the Phase 7 operator summary helper (phase7_mainnet_cutover_summary_report.sh)"
+    exit 1
+  fi
+  if ! rg -Fq "./scripts/easy_node.sh phase7-mainnet-cutover-summary-report" "$file_path"; then
+    echo "$label must mention the Phase 7 easy-node summary wrapper (phase7-mainnet-cutover-summary-report)"
+    exit 1
+  fi
+}
+
+for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$roadmap_integration_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$chain_readme" "$chain_scaffold_file" "$chain_grpc_registry_file" "$chain_grpc_registry_test_file" "$chain_settlement_bridge_file" "$chain_runtime_test_file" "$settlement_mapping_doc" "$blockchain_sponsor_quickstart_doc" "$phase5_ci_script" "$phase5_integration_script" "$phase5_check_script" "$phase5_run_script" "$phase5_handoff_check_script" "$phase5_handoff_run_script" "$phase5_check_integration_script" "$phase5_run_integration_script" "$phase5_handoff_check_integration_script" "$phase5_handoff_run_integration_script" "$phase5_summary_report_script" "$phase5_summary_report_integration_script" "$blockchain_fastlane_script" "$blockchain_fastlane_integration_script" "$ci_local_script" "$easy_node_script" "$easy_node_blockchain_gate_wrappers_integration_script" "$easy_node_blockchain_summary_reports_integration_script" "$phase6_ci_script" "$phase6_integration_script" "$phase6_contracts_ci_script" "$phase6_contracts_integration_script" "$phase6_contracts_live_smoke_script" "$phase6_grpc_app_roundtrip_script" "$phase6_grpc_runtime_smoke_script" "$phase6_grpc_live_smoke_script" "$phase6_grpc_auth_live_smoke_script" "$phase6_settlement_bridge_smoke_script" "$phase6_settlement_bridge_live_smoke_script" "$phase6_query_surface_script" "$phase6_module_tx_surface_script" "$phase6_proto_surface_script" "$phase6_proto_grpc_surface_script" "$phase6_proto_codegen_surface_script" "$phase6_module_coverage_floor_script" "$phase6_keeper_coverage_floor_script" "$phase6_dual_write_parity_script" "$phase6_check_script" "$phase6_run_script" "$phase6_check_integration_script" "$phase6_run_integration_script" "$phase6_suite_script" "$phase6_suite_integration_script" "$phase6_summary_report_script" "$phase6_summary_report_integration_script" "$phase7_check_script" "$phase7_check_integration_script" "$phase7_run_script" "$phase7_run_integration_script" "$phase7_ci_script" "$phase7_ci_integration_script" "$phase7_summary_report_script" "$phase7_summary_report_integration_script"; do
   if [[ ! -f "$f" ]]; then
     echo "missing required file: $f"
     exit 1
@@ -363,6 +425,82 @@ if ! rg -Fq "integration_phase6_cosmos_l1_summary_report.sh" "$full_plan"; then
   echo "full execution plan must document phase6 summary report integration contract script"
   exit 1
 fi
+if ! rg -Fq "phase7_mainnet_cutover_check.sh" "$full_plan"; then
+  echo "full execution plan must document phase7 mainnet cutover check wrapper script"
+  exit 1
+fi
+if ! rg -Fq "integration_phase7_mainnet_cutover_check.sh" "$full_plan"; then
+  echo "full execution plan must document phase7 mainnet cutover check integration contract script"
+  exit 1
+fi
+if ! rg -Fq "phase7_mainnet_cutover_run.sh" "$full_plan"; then
+  echo "full execution plan must document phase7 mainnet cutover run wrapper script"
+  exit 1
+fi
+if ! rg -Fq "phase7_mainnet_cutover_handoff_check.sh" "$full_plan"; then
+  echo "full execution plan must document phase7 mainnet cutover handoff check wrapper script"
+  exit 1
+fi
+if ! rg -Fq "integration_phase7_mainnet_cutover_handoff_check.sh" "$full_plan"; then
+  echo "full execution plan must document phase7 mainnet cutover handoff check integration contract script"
+  exit 1
+fi
+if ! rg -Fq "phase7_mainnet_cutover_handoff_run.sh" "$full_plan"; then
+  echo "full execution plan must document phase7 mainnet cutover handoff run wrapper script"
+  exit 1
+fi
+if ! rg -Fq "integration_phase7_mainnet_cutover_handoff_run.sh" "$full_plan"; then
+  echo "full execution plan must document phase7 mainnet cutover handoff run integration contract script"
+  exit 1
+fi
+if ! rg -Fq "integration_phase7_mainnet_cutover_run.sh" "$full_plan"; then
+  echo "full execution plan must document phase7 mainnet cutover run integration contract script"
+  exit 1
+fi
+if ! rg -Fq "ci_phase7_mainnet_cutover.sh" "$full_plan"; then
+  echo "full execution plan must document phase7 mainnet cutover ci wrapper script"
+  exit 1
+fi
+if ! rg -Fq "integration_ci_phase7_mainnet_cutover.sh" "$full_plan"; then
+  echo "full execution plan must document phase7 mainnet cutover ci integration contract script"
+  exit 1
+fi
+if ! rg -Fq "phase7_mainnet_cutover_summary_report.sh" "$full_plan"; then
+  echo "full execution plan must document phase7 mainnet cutover summary report helper script"
+  exit 1
+fi
+if ! rg -Fq "integration_phase7_mainnet_cutover_summary_report.sh" "$full_plan"; then
+  echo "full execution plan must document phase7 mainnet cutover summary report integration contract script"
+  exit 1
+fi
+if ! rg -Fq "phase7_mainnet_cutover_handoff_check_summary.json" "$full_plan"; then
+  echo "full execution plan must document phase7 handoff-check summary artifact"
+  exit 1
+fi
+if ! rg -Fq "phase7_mainnet_cutover_handoff_run_summary.json" "$full_plan"; then
+  echo "full execution plan must document phase7 handoff-run summary artifact"
+  exit 1
+fi
+if ! rg -Fq "phase6 readiness signals" "$full_plan"; then
+  echo "full execution plan must document phase7 dependency on phase6 readiness signals"
+  exit 1
+fi
+if ! rg -Fq "dual-write parity confirmation" "$full_plan"; then
+  echo "full execution plan must document phase7 dual-write parity confirmation posture"
+  exit 1
+fi
+if ! rg -Fq "rollback path readiness" "$full_plan"; then
+  echo "full execution plan must document phase7 rollback path readiness posture"
+  exit 1
+fi
+if ! rg -Fq "optional operator approval gate" "$full_plan"; then
+  echo "full execution plan must document phase7 optional operator approval gate posture"
+  exit 1
+fi
+if ! rg -qi "VPN dataplane.*independent.*chain liveness" "$full_plan"; then
+  echo "full execution plan must preserve VPN dataplane independence from chain liveness in phase7 posture"
+  exit 1
+fi
 if ! rg -Fq "phase5_settlement_layer_summary_report.sh" "$full_plan"; then
   echo "full execution plan must document phase5 summary report helper script"
   exit 1
@@ -385,6 +523,10 @@ if ! rg -Fq "phase6-cosmos-l1-summary-report" "$full_plan"; then
   echo "full execution plan must document easy-node phase6 summary wrapper command"
   exit 1
 fi
+if ! rg -Fq "integration_easy_node_blockchain_gate_wrappers.sh" "$full_plan"; then
+  echo "full execution plan must document easy-node blockchain gate-wrapper integration coverage script"
+  exit 1
+fi
 if ! rg -Fq "tdpnd_grpc_auth_live_smoke_ok" "$full_plan"; then
   echo "full execution plan must document phase6 readiness/handoff tdpnd_grpc_auth_live_smoke_ok signal"
   exit 1
@@ -405,6 +547,11 @@ if ! rg -Fq "roadmap_progress_report.sh" "$full_plan" \
   echo "full execution plan must document roadmap progress phase6 handoff signal surfacing contract"
   exit 1
 fi
+check_phase7_roadmap_surface_cli "$roadmap_script" "roadmap progress report script"
+check_phase7_roadmap_surface_integration "$roadmap_integration_script" "roadmap progress report integration script"
+check_phase7_roadmap_surface_docs "$full_plan" "full execution plan"
+check_phase7_roadmap_surface_docs "$product_roadmap" "product roadmap"
+check_phase7_roadmap_surface_docs "$cosmos_runtime_doc" "cosmos settlement runtime doc"
 if ! rg -qi "confirmation lifecycle" "$full_plan"; then
   echo "full execution plan must document settlement confirmation lifecycle posture"
   exit 1
@@ -545,6 +692,82 @@ if ! rg -Fq "integration_phase6_cosmos_l1_summary_report.sh" "$product_roadmap";
   echo "product roadmap must document phase6 summary report integration contract script"
   exit 1
 fi
+if ! rg -Fq "phase7_mainnet_cutover_check.sh" "$product_roadmap"; then
+  echo "product roadmap must document phase7 mainnet cutover check wrapper script"
+  exit 1
+fi
+if ! rg -Fq "integration_phase7_mainnet_cutover_check.sh" "$product_roadmap"; then
+  echo "product roadmap must document phase7 mainnet cutover check integration contract script"
+  exit 1
+fi
+if ! rg -Fq "phase7_mainnet_cutover_run.sh" "$product_roadmap"; then
+  echo "product roadmap must document phase7 mainnet cutover run wrapper script"
+  exit 1
+fi
+if ! rg -Fq "phase7_mainnet_cutover_handoff_check.sh" "$product_roadmap"; then
+  echo "product roadmap must document phase7 mainnet cutover handoff check wrapper script"
+  exit 1
+fi
+if ! rg -Fq "integration_phase7_mainnet_cutover_handoff_check.sh" "$product_roadmap"; then
+  echo "product roadmap must document phase7 mainnet cutover handoff check integration contract script"
+  exit 1
+fi
+if ! rg -Fq "phase7_mainnet_cutover_handoff_run.sh" "$product_roadmap"; then
+  echo "product roadmap must document phase7 mainnet cutover handoff run wrapper script"
+  exit 1
+fi
+if ! rg -Fq "integration_phase7_mainnet_cutover_handoff_run.sh" "$product_roadmap"; then
+  echo "product roadmap must document phase7 mainnet cutover handoff run integration contract script"
+  exit 1
+fi
+if ! rg -Fq "integration_phase7_mainnet_cutover_run.sh" "$product_roadmap"; then
+  echo "product roadmap must document phase7 mainnet cutover run integration contract script"
+  exit 1
+fi
+if ! rg -Fq "ci_phase7_mainnet_cutover.sh" "$product_roadmap"; then
+  echo "product roadmap must document phase7 mainnet cutover ci wrapper script"
+  exit 1
+fi
+if ! rg -Fq "integration_ci_phase7_mainnet_cutover.sh" "$product_roadmap"; then
+  echo "product roadmap must document phase7 mainnet cutover ci integration contract script"
+  exit 1
+fi
+if ! rg -Fq "phase7_mainnet_cutover_summary_report.sh" "$product_roadmap"; then
+  echo "product roadmap must document phase7 mainnet cutover summary report helper script"
+  exit 1
+fi
+if ! rg -Fq "integration_phase7_mainnet_cutover_summary_report.sh" "$product_roadmap"; then
+  echo "product roadmap must document phase7 mainnet cutover summary report integration contract script"
+  exit 1
+fi
+if ! rg -Fq "phase7_mainnet_cutover_handoff_check_summary.json" "$product_roadmap"; then
+  echo "product roadmap must document phase7 handoff-check summary artifact"
+  exit 1
+fi
+if ! rg -Fq "phase7_mainnet_cutover_handoff_run_summary.json" "$product_roadmap"; then
+  echo "product roadmap must document phase7 handoff-run summary artifact"
+  exit 1
+fi
+if ! rg -Fq "phase6 readiness signals" "$product_roadmap"; then
+  echo "product roadmap must document phase7 dependency on phase6 readiness signals"
+  exit 1
+fi
+if ! rg -Fq "dual-write parity confirmation" "$product_roadmap"; then
+  echo "product roadmap must document phase7 dual-write parity confirmation posture"
+  exit 1
+fi
+if ! rg -Fq "rollback path readiness" "$product_roadmap"; then
+  echo "product roadmap must document phase7 rollback path readiness posture"
+  exit 1
+fi
+if ! rg -Fq "optional operator approval gate" "$product_roadmap"; then
+  echo "product roadmap must document phase7 optional operator approval gate posture"
+  exit 1
+fi
+if ! rg -qi "VPN dataplane.*independent.*chain liveness" "$product_roadmap"; then
+  echo "product roadmap must preserve VPN dataplane independence from chain liveness in phase7 posture"
+  exit 1
+fi
 if ! rg -Fq "phase5_settlement_layer_summary_report.sh" "$product_roadmap"; then
   echo "product roadmap must document phase5 summary report helper script"
   exit 1
@@ -565,6 +788,10 @@ if ! rg -Fq "phase5-settlement-layer-summary-report" "$product_roadmap"; then
 fi
 if ! rg -Fq "phase6-cosmos-l1-summary-report" "$product_roadmap"; then
   echo "product roadmap must document easy-node phase6 summary wrapper command"
+  exit 1
+fi
+if ! rg -Fq "integration_easy_node_blockchain_gate_wrappers.sh" "$product_roadmap"; then
+  echo "product roadmap must document easy-node blockchain gate-wrapper integration coverage script"
   exit 1
 fi
 if ! rg -Fq "tdpnd_grpc_auth_live_smoke_ok" "$product_roadmap"; then
@@ -1314,6 +1541,262 @@ if ! rg -Fq "expected_suite_path" "$phase6_summary_report_integration_script"; t
 fi
 if ! rg -Fq "[phase6-cosmos-l1-summary-report] canonical-same-path pass path" "$phase6_summary_report_integration_script"; then
   echo "phase6 summary report integration script must include same-path canonical contract coverage marker"
+  exit 1
+fi
+if ! rg -Fq "phase7_mainnet_cutover_check_summary" "$phase7_check_script"; then
+  echo "phase7 check wrapper must emit phase7 check summary schema id"
+  exit 1
+fi
+if ! rg -Fq "module_tx_surface" "$phase7_check_script"; then
+  echo "phase7 check wrapper must include module_tx_surface readiness signal"
+  exit 1
+fi
+if ! rg -Fq "tdpnd_grpc_auth_live_smoke" "$phase7_check_script"; then
+  echo "phase7 check wrapper must include tdpnd_grpc_auth_live_smoke readiness signal"
+  exit 1
+fi
+if ! rg -qi "dual[-_ ]write[-_ ]parity" "$phase7_check_script"; then
+  echo "phase7 check wrapper must include dual-write parity confirmation signal"
+  exit 1
+fi
+if ! rg -qi "rollback(_path)?(_ready)?(_ok)?|rollback path" "$phase7_check_script"; then
+  echo "phase7 check wrapper must include rollback-path readiness signal"
+  exit 1
+fi
+if ! rg -qi "operator(_approval)?(_gate)?(_ok)?|approval gate|require-operator-approval" "$phase7_check_script"; then
+  echo "phase7 check wrapper must include optional operator approval gate signal/toggle"
+  exit 1
+fi
+if ! rg -Fq "phase7_mainnet_cutover_check.sh" "$phase7_run_script"; then
+  echo "phase7 run wrapper must invoke phase7 mainnet cutover check wrapper"
+  exit 1
+fi
+if ! rg -Fq "phase7_mainnet_cutover_check_summary" "$phase7_run_script"; then
+  echo "phase7 run wrapper must validate phase7 check summary schema id"
+  exit 1
+fi
+if ! rg -Fq "phase7_mainnet_cutover_summary_report" "$phase7_summary_report_script"; then
+  echo "phase7 summary report helper must emit phase7 summary report schema id"
+  exit 1
+fi
+if ! rg -Fq "phase7_mainnet_cutover_check_summary" "$phase7_summary_report_script"; then
+  echo "phase7 summary report helper must reference phase7 check summary schema"
+  exit 1
+fi
+if ! rg -Fq "phase7_mainnet_cutover_run_summary" "$phase7_summary_report_script"; then
+  echo "phase7 summary report helper must reference phase7 run summary schema"
+  exit 1
+fi
+if ! rg -Fq "phase7_mainnet_cutover_handoff_check_summary" "$phase7_summary_report_script"; then
+  echo "phase7 summary report helper must reference phase7 handoff-check summary schema"
+  exit 1
+fi
+if ! rg -Fq "phase7_mainnet_cutover_handoff_run_summary" "$phase7_summary_report_script"; then
+  echo "phase7 summary report helper must reference phase7 handoff-run summary schema"
+  exit 1
+fi
+if ! rg -Fq "phase7_mainnet_cutover_check_summary.json" "$phase7_summary_report_script"; then
+  echo "phase7 summary report helper must probe canonical phase7 check summary artifact"
+  exit 1
+fi
+if ! rg -Fq "phase7_mainnet_cutover_run_summary.json" "$phase7_summary_report_script"; then
+  echo "phase7 summary report helper must probe canonical phase7 run summary artifact"
+  exit 1
+fi
+if ! rg -Fq "phase7_mainnet_cutover_handoff_check_summary.json" "$phase7_summary_report_script"; then
+  echo "phase7 summary report helper must probe canonical phase7 handoff-check summary artifact"
+  exit 1
+fi
+if ! rg -Fq "phase7_mainnet_cutover_handoff_run_summary.json" "$phase7_summary_report_script"; then
+  echo "phase7 summary report helper must probe canonical phase7 handoff-run summary artifact"
+  exit 1
+fi
+if ! rg -Fq "PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_CANONICAL_SUMMARY_JSON" "$phase7_summary_report_script"; then
+  echo "phase7 summary report helper must expose canonical summary artifact override env"
+  exit 1
+fi
+if ! rg -Fq "canonical_summary_json" "$phase7_summary_report_script"; then
+  echo "phase7 summary report helper must emit canonical summary artifact metadata/logging"
+  exit 1
+fi
+if ! rg -Fq -- "--handoff-check-summary-json" "$phase7_summary_report_script"; then
+  echo "phase7 summary report helper must accept handoff-check summary input"
+  exit 1
+fi
+if ! rg -Fq -- "--handoff-run-summary-json" "$phase7_summary_report_script"; then
+  echo "phase7 summary report helper must accept handoff-run summary input"
+  exit 1
+fi
+if ! rg -Fq "phase7_mainnet_cutover_handoff_check_" "$phase7_summary_report_script"; then
+  echo "phase7 summary report helper must include fallback discovery for timestamped handoff-check summaries"
+  exit 1
+fi
+if ! rg -Fq "phase7_mainnet_cutover_handoff_run_" "$phase7_summary_report_script"; then
+  echo "phase7 summary report helper must include fallback discovery for timestamped handoff-run summaries"
+  exit 1
+fi
+if ! rg -Fq "phase7_mainnet_cutover_check.sh" "$phase7_check_integration_script"; then
+  echo "phase7 check integration script must execute phase7 check wrapper"
+  exit 1
+fi
+if ! rg -Fq "module_tx_surface_ok" "$phase7_check_integration_script"; then
+  echo "phase7 check integration script must validate module_tx_surface_ok signal"
+  exit 1
+fi
+if ! rg -Fq "tdpnd_grpc_auth_live_smoke_ok" "$phase7_check_integration_script"; then
+  echo "phase7 check integration script must validate tdpnd_grpc_auth_live_smoke_ok signal"
+  exit 1
+fi
+if ! rg -qi "dual[-_ ]write[-_ ]parity(_ok)?" "$phase7_check_integration_script"; then
+  echo "phase7 check integration script must validate dual-write parity signal"
+  exit 1
+fi
+if ! rg -qi "rollback(_path)?(_ready)?(_ok)?|rollback path" "$phase7_check_integration_script"; then
+  echo "phase7 check integration script must validate rollback-path readiness signal"
+  exit 1
+fi
+if ! rg -qi "operator(_approval)?(_gate)?(_ok)?|approval gate|require-operator-approval" "$phase7_check_integration_script"; then
+  echo "phase7 check integration script must validate optional operator approval gate signal/toggle"
+  exit 1
+fi
+if ! rg -Fq "phase7_mainnet_cutover_run.sh" "$phase7_run_integration_script"; then
+  echo "phase7 run integration script must execute phase7 run wrapper"
+  exit 1
+fi
+if ! rg -Fq "phase7_mainnet_cutover_check.sh" "$phase7_run_integration_script"; then
+  echo "phase7 run integration script must validate run->check invocation"
+  exit 1
+fi
+if ! rg -Fq "module_tx_surface_ok" "$phase7_run_integration_script"; then
+  echo "phase7 run integration script must validate module_tx_surface_ok signal"
+  exit 1
+fi
+if ! rg -Fq "tdpnd_grpc_auth_live_smoke_ok" "$phase7_run_integration_script"; then
+  echo "phase7 run integration script must validate tdpnd_grpc_auth_live_smoke_ok signal"
+  exit 1
+fi
+if ! rg -qi "dual[-_ ]write[-_ ]parity(_ok)?" "$phase7_run_integration_script"; then
+  echo "phase7 run integration script must validate dual-write parity signal"
+  exit 1
+fi
+if ! rg -qi "rollback(_path)?(_ready)?(_ok)?|rollback path" "$phase7_run_integration_script"; then
+  echo "phase7 run integration script must validate rollback-path readiness signal"
+  exit 1
+fi
+if ! rg -qi "operator(_approval)?(_gate)?(_ok)?|approval gate|require-operator-approval" "$phase7_run_integration_script"; then
+  echo "phase7 run integration script must validate optional operator approval gate signal/toggle"
+  exit 1
+fi
+if ! rg -Fq "ci_phase7_mainnet_cutover_summary" "$phase7_ci_script"; then
+  echo "phase7 ci wrapper must emit phase7 ci summary schema id"
+  exit 1
+fi
+if ! rg -Fq "integration_phase7_mainnet_cutover_check.sh" "$phase7_ci_script"; then
+  echo "phase7 ci wrapper must wire phase7 check integration stage script"
+  exit 1
+fi
+if ! rg -Fq "integration_phase7_mainnet_cutover_run.sh" "$phase7_ci_script"; then
+  echo "phase7 ci wrapper must wire phase7 run integration stage script"
+  exit 1
+fi
+if ! rg -Fq "integration_phase7_mainnet_cutover_handoff_check.sh" "$phase7_ci_script"; then
+  echo "phase7 ci wrapper must wire phase7 handoff check integration stage script"
+  exit 1
+fi
+if ! rg -Fq "integration_phase7_mainnet_cutover_handoff_run.sh" "$phase7_ci_script"; then
+  echo "phase7 ci wrapper must wire phase7 handoff run integration stage script"
+  exit 1
+fi
+if ! rg -Fq "integration_phase7_mainnet_cutover_summary_report.sh" "$phase7_ci_script"; then
+  echo "phase7 ci wrapper must wire phase7 summary report integration stage script"
+  exit 1
+fi
+for phase7_ci_stage_id in \
+  "phase7_mainnet_cutover_check" \
+  "phase7_mainnet_cutover_run" \
+  "phase7_mainnet_cutover_handoff_check" \
+  "phase7_mainnet_cutover_handoff_run" \
+  "phase7_mainnet_cutover_summary_report"
+do
+  if ! rg -Fq "$phase7_ci_stage_id" "$phase7_ci_script"; then
+    echo "phase7 ci wrapper must include stage id: $phase7_ci_stage_id"
+    exit 1
+  fi
+done
+if ! rg -Fq "ci_phase7_mainnet_cutover.sh" "$phase7_ci_integration_script"; then
+  echo "phase7 ci integration script must execute phase7 ci wrapper"
+  exit 1
+fi
+if ! rg -q "assert_stage_order.*STAGE_IDS" "$phase7_ci_integration_script"; then
+  echo "phase7 ci integration script must validate deterministic stage ordering"
+  exit 1
+fi
+if ! rg -qi "dry[-_ ]run" "$phase7_ci_integration_script"; then
+  echo "phase7 ci integration script must validate dry-run semantics"
+  exit 1
+fi
+if ! rg -qi "toggle" "$phase7_ci_integration_script"; then
+  echo "phase7 ci integration script must validate toggle semantics"
+  exit 1
+fi
+if ! rg -qi "first[-_ ]failure|failure propagation" "$phase7_ci_integration_script"; then
+  echo "phase7 ci integration script must validate failure propagation semantics"
+  exit 1
+fi
+for phase7_ci_integration_stage in \
+  "phase7_mainnet_cutover_check" \
+  "phase7_mainnet_cutover_run" \
+  "phase7_mainnet_cutover_handoff_check" \
+  "phase7_mainnet_cutover_handoff_run" \
+  "phase7_mainnet_cutover_summary_report"
+do
+  if ! rg -Fq "$phase7_ci_integration_stage" "$phase7_ci_integration_script"; then
+    echo "phase7 ci integration script must validate stage wiring for: $phase7_ci_integration_stage"
+    exit 1
+  fi
+done
+if ! rg -Fq "phase7_mainnet_cutover_summary_report.sh" "$phase7_summary_report_integration_script"; then
+  echo "phase7 summary report integration script must execute phase7 summary report helper"
+  exit 1
+fi
+if ! rg -Fq "phase7_mainnet_cutover_check_summary.json" "$phase7_summary_report_integration_script"; then
+  echo "phase7 summary report integration script must validate canonical phase7 check summary artifact wiring"
+  exit 1
+fi
+if ! rg -Fq "phase7_mainnet_cutover_run_summary.json" "$phase7_summary_report_integration_script"; then
+  echo "phase7 summary report integration script must validate canonical phase7 run summary artifact wiring"
+  exit 1
+fi
+if ! rg -Fq "phase7_mainnet_cutover_handoff_check_summary.json" "$phase7_summary_report_integration_script"; then
+  echo "phase7 summary report integration script must validate canonical phase7 handoff-check summary artifact wiring"
+  exit 1
+fi
+if ! rg -Fq "phase7_mainnet_cutover_handoff_run_summary.json" "$phase7_summary_report_integration_script"; then
+  echo "phase7 summary report integration script must validate canonical phase7 handoff-run summary artifact wiring"
+  exit 1
+fi
+if ! rg -Fq "module_tx_surface_ok" "$phase7_summary_report_integration_script"; then
+  echo "phase7 summary report integration script must validate module_tx_surface_ok summary signal"
+  exit 1
+fi
+if ! rg -Fq "tdpnd_grpc_auth_live_smoke_ok" "$phase7_summary_report_integration_script"; then
+  echo "phase7 summary report integration script must validate tdpnd_grpc_auth_live_smoke_ok summary signal"
+  exit 1
+fi
+if ! rg -qi "dual[-_ ]write[-_ ]parity(_ok)?" "$phase7_summary_report_integration_script"; then
+  echo "phase7 summary report integration script must validate dual-write parity summary signal"
+  exit 1
+fi
+if ! rg -qi "rollback(_path)?(_ready)?(_ok)?|rollback path" "$phase7_summary_report_integration_script"; then
+  echo "phase7 summary report integration script must validate rollback-path readiness summary signal"
+  exit 1
+fi
+if ! rg -qi "operator(_approval)?(_gate)?(_ok)?|approval gate|require-operator-approval" "$phase7_summary_report_integration_script"; then
+  echo "phase7 summary report integration script must validate optional operator approval gate summary signal/toggle"
+  exit 1
+fi
+if ! rg -Fq "canonical_summary_json" "$phase7_summary_report_integration_script"; then
+  echo "phase7 summary report integration script must validate canonical summary artifact wiring"
   exit 1
 fi
 
@@ -2299,8 +2782,152 @@ if ! rg -Fq "scripts/integration_phase6_cosmos_l1_summary_report.sh" "$ci_local_
   echo "ci_local.sh must run scripts/integration_phase6_cosmos_l1_summary_report.sh"
   exit 1
 fi
+if ! rg -Fq "scripts/integration_blockchain_fastlane.sh" "$ci_local_script"; then
+  echo "ci_local.sh must run scripts/integration_blockchain_fastlane.sh"
+  exit 1
+fi
+if ! rg -Fq "scripts/integration_ci_phase7_mainnet_cutover.sh" "$ci_local_script"; then
+  echo "ci_local.sh must run scripts/integration_ci_phase7_mainnet_cutover.sh"
+  exit 1
+fi
+if ! rg -Fq "scripts/integration_phase7_mainnet_cutover_check.sh" "$ci_local_script"; then
+  echo "ci_local.sh must run scripts/integration_phase7_mainnet_cutover_check.sh"
+  exit 1
+fi
+if ! rg -Fq "scripts/integration_phase7_mainnet_cutover_run.sh" "$ci_local_script"; then
+  echo "ci_local.sh must run scripts/integration_phase7_mainnet_cutover_run.sh"
+  exit 1
+fi
+if ! rg -Fq "scripts/integration_phase7_mainnet_cutover_handoff_check.sh" "$ci_local_script"; then
+  echo "ci_local.sh must run scripts/integration_phase7_mainnet_cutover_handoff_check.sh"
+  exit 1
+fi
+if ! rg -Fq "scripts/integration_phase7_mainnet_cutover_handoff_run.sh" "$ci_local_script"; then
+  echo "ci_local.sh must run scripts/integration_phase7_mainnet_cutover_handoff_run.sh"
+  exit 1
+fi
+if ! rg -Fq "scripts/integration_phase7_mainnet_cutover_summary_report.sh" "$ci_local_script"; then
+  echo "ci_local.sh must run scripts/integration_phase7_mainnet_cutover_summary_report.sh"
+  exit 1
+fi
+if ! rg -Fq "scripts/integration_easy_node_blockchain_gate_wrappers.sh" "$ci_local_script"; then
+  echo "ci_local.sh must run scripts/integration_easy_node_blockchain_gate_wrappers.sh"
+  exit 1
+fi
 if ! rg -Fq "scripts/integration_easy_node_blockchain_summary_reports.sh" "$ci_local_script"; then
   echo "ci_local.sh must run scripts/integration_easy_node_blockchain_summary_reports.sh"
+  exit 1
+fi
+if ! rg -Fq "ci-phase5-settlement-layer" "$easy_node_script"; then
+  echo "easy_node.sh must expose ci-phase5-settlement-layer command text"
+  exit 1
+fi
+if ! rg -Fq "phase5-settlement-layer-check" "$easy_node_script"; then
+  echo "easy_node.sh must expose phase5-settlement-layer-check command text"
+  exit 1
+fi
+if ! rg -Fq "phase5-settlement-layer-run" "$easy_node_script"; then
+  echo "easy_node.sh must expose phase5-settlement-layer-run command text"
+  exit 1
+fi
+if ! rg -Fq "phase5-settlement-layer-handoff-check" "$easy_node_script"; then
+  echo "easy_node.sh must expose phase5-settlement-layer-handoff-check command text"
+  exit 1
+fi
+if ! rg -Fq "phase5-settlement-layer-handoff-run" "$easy_node_script"; then
+  echo "easy_node.sh must expose phase5-settlement-layer-handoff-run command text"
+  exit 1
+fi
+if ! rg -Fq "ci-phase6-cosmos-l1-build-testnet" "$easy_node_script"; then
+  echo "easy_node.sh must expose ci-phase6-cosmos-l1-build-testnet command text"
+  exit 1
+fi
+if ! rg -Fq "ci-phase6-cosmos-l1-contracts" "$easy_node_script"; then
+  echo "easy_node.sh must expose ci-phase6-cosmos-l1-contracts command text"
+  exit 1
+fi
+if ! rg -Fq "ci-phase7-mainnet-cutover" "$easy_node_script"; then
+  echo "easy_node.sh must expose ci-phase7-mainnet-cutover command text"
+  exit 1
+fi
+if ! rg -Fq "phase7-mainnet-cutover-check" "$easy_node_script"; then
+  echo "easy_node.sh must expose phase7-mainnet-cutover-check command text"
+  exit 1
+fi
+if ! rg -Fq "phase7-mainnet-cutover-run" "$easy_node_script"; then
+  echo "easy_node.sh must expose phase7-mainnet-cutover-run command text"
+  exit 1
+fi
+if ! rg -Fq "phase7-mainnet-cutover-handoff-check" "$easy_node_script"; then
+  echo "easy_node.sh must expose phase7-mainnet-cutover-handoff-check command text"
+  exit 1
+fi
+if ! rg -Fq "phase7-mainnet-cutover-handoff-run" "$easy_node_script"; then
+  echo "easy_node.sh must expose phase7-mainnet-cutover-handoff-run command text"
+  exit 1
+fi
+if ! rg -Fq "phase7-mainnet-cutover-summary-report" "$easy_node_script"; then
+  echo "easy_node.sh must expose phase7-mainnet-cutover-summary-report command text"
+  exit 1
+fi
+if ! rg -Fq "blockchain-fastlane" "$easy_node_script"; then
+  echo "easy_node.sh must expose blockchain-fastlane command text"
+  exit 1
+fi
+if ! rg -Fq "rg -Fq" "$easy_node_blockchain_gate_wrappers_integration_script"; then
+  echo "easy-node gate-wrapper integration must validate command text via rg string checks"
+  exit 1
+fi
+if ! rg -Fq "ci-phase5-settlement-layer" "$easy_node_blockchain_gate_wrappers_integration_script"; then
+  echo "easy-node gate-wrapper integration must validate ci-phase5-settlement-layer command wiring"
+  exit 1
+fi
+if ! rg -Fq "phase5-settlement-layer-check" "$easy_node_blockchain_gate_wrappers_integration_script"; then
+  echo "easy-node gate-wrapper integration must validate phase5-settlement-layer-check command wiring"
+  exit 1
+fi
+if ! rg -Fq "phase5-settlement-layer-run" "$easy_node_blockchain_gate_wrappers_integration_script"; then
+  echo "easy-node gate-wrapper integration must validate phase5-settlement-layer-run command wiring"
+  exit 1
+fi
+if ! rg -Fq "phase5-settlement-layer-handoff-check" "$easy_node_blockchain_gate_wrappers_integration_script"; then
+  echo "easy-node gate-wrapper integration must validate phase5-settlement-layer-handoff-check command wiring"
+  exit 1
+fi
+if ! rg -Fq "phase5-settlement-layer-handoff-run" "$easy_node_blockchain_gate_wrappers_integration_script"; then
+  echo "easy-node gate-wrapper integration must validate phase5-settlement-layer-handoff-run command wiring"
+  exit 1
+fi
+if ! rg -Fq "ci-phase6-cosmos-l1-build-testnet" "$easy_node_blockchain_gate_wrappers_integration_script"; then
+  echo "easy-node gate-wrapper integration must validate ci-phase6-cosmos-l1-build-testnet command wiring"
+  exit 1
+fi
+if ! rg -Fq "ci-phase6-cosmos-l1-contracts" "$easy_node_blockchain_gate_wrappers_integration_script"; then
+  echo "easy-node gate-wrapper integration must validate ci-phase6-cosmos-l1-contracts command wiring"
+  exit 1
+fi
+if ! rg -Fq "ci-phase7-mainnet-cutover" "$easy_node_blockchain_gate_wrappers_integration_script"; then
+  echo "easy-node gate-wrapper integration must validate ci-phase7-mainnet-cutover command wiring"
+  exit 1
+fi
+if ! rg -Fq "phase7-mainnet-cutover-check" "$easy_node_blockchain_gate_wrappers_integration_script"; then
+  echo "easy-node gate-wrapper integration must validate phase7-mainnet-cutover-check command wiring"
+  exit 1
+fi
+if ! rg -Fq "phase7-mainnet-cutover-run" "$easy_node_blockchain_gate_wrappers_integration_script"; then
+  echo "easy-node gate-wrapper integration must validate phase7-mainnet-cutover-run command wiring"
+  exit 1
+fi
+if ! rg -Fq "phase7-mainnet-cutover-handoff-check" "$easy_node_blockchain_gate_wrappers_integration_script"; then
+  echo "easy-node gate-wrapper integration must validate phase7-mainnet-cutover-handoff-check command wiring"
+  exit 1
+fi
+if ! rg -Fq "phase7-mainnet-cutover-handoff-run" "$easy_node_blockchain_gate_wrappers_integration_script"; then
+  echo "easy-node gate-wrapper integration must validate phase7-mainnet-cutover-handoff-run command wiring"
+  exit 1
+fi
+if ! rg -Fq "blockchain-fastlane" "$easy_node_blockchain_gate_wrappers_integration_script"; then
+  echo "easy-node gate-wrapper integration must validate blockchain-fastlane command wiring"
   exit 1
 fi
 if ! rg -Fq "phase5-settlement-layer-summary-report" "$easy_node_blockchain_summary_reports_integration_script"; then
@@ -2309,6 +2936,14 @@ if ! rg -Fq "phase5-settlement-layer-summary-report" "$easy_node_blockchain_summ
 fi
 if ! rg -Fq "phase6-cosmos-l1-summary-report" "$easy_node_blockchain_summary_reports_integration_script"; then
   echo "easy-node summary-report integration must validate phase6 wrapper command wiring"
+  exit 1
+fi
+if ! rg -Fq "phase7-mainnet-cutover-summary-report" "$easy_node_blockchain_summary_reports_integration_script"; then
+  echo "easy-node summary-report integration must validate phase7 wrapper command wiring"
+  exit 1
+fi
+if ! rg -Fq "phase7_mainnet_cutover_summary_report.sh" "$easy_node_blockchain_summary_reports_integration_script"; then
+  echo "easy-node summary-report integration must validate phase7 summary wrapper path wiring"
   exit 1
 fi
 if ! rg -Fq -- "--summary-json" "$easy_node_blockchain_summary_reports_integration_script"; then
@@ -2347,6 +2982,55 @@ do
     exit 1
   fi
 done
+for blockchain_fastlane_doc in "$full_plan" "$product_roadmap"; do
+  doc_label="product roadmap"
+  if [[ "$blockchain_fastlane_doc" == "$full_plan" ]]; then
+    doc_label="full execution plan"
+  fi
+  if ! rg -Fq "scripts/blockchain_fastlane.sh" "$blockchain_fastlane_doc"; then
+    echo "${doc_label} must document scripts/blockchain_fastlane.sh"
+    exit 1
+  fi
+  if ! rg -Fq "scripts/integration_blockchain_fastlane.sh" "$blockchain_fastlane_doc"; then
+    echo "${doc_label} must document scripts/integration_blockchain_fastlane.sh"
+    exit 1
+  fi
+done
+if ! rg -Fq "blockchain_fastlane_summary" "$blockchain_fastlane_script"; then
+  echo "blockchain fastlane script must emit blockchain_fastlane_summary schema id"
+  exit 1
+fi
+for blockchain_fastlane_stage_script in \
+  "scripts/ci_phase5_settlement_layer.sh" \
+  "scripts/ci_phase6_cosmos_l1_build_testnet.sh" \
+  "scripts/ci_phase6_cosmos_l1_contracts.sh" \
+  "scripts/ci_phase7_mainnet_cutover.sh"
+do
+  if ! rg -Fq "$blockchain_fastlane_stage_script" "$blockchain_fastlane_script"; then
+    echo "blockchain fastlane script must reference stage script: $blockchain_fastlane_stage_script"
+    exit 1
+  fi
+done
+if ! rg -Fq "ordering" "$blockchain_fastlane_integration_script"; then
+  echo "integration blockchain fastlane script must validate ordering semantics"
+  exit 1
+fi
+if ! rg -Fq "dry-run" "$blockchain_fastlane_integration_script"; then
+  echo "integration blockchain fastlane script must validate dry-run semantics"
+  exit 1
+fi
+if ! rg -Fq "toggle" "$blockchain_fastlane_integration_script"; then
+  echo "integration blockchain fastlane script must validate toggle semantics"
+  exit 1
+fi
+if ! rg -Fq "failure propagation" "$blockchain_fastlane_integration_script"; then
+  echo "integration blockchain fastlane script must validate failure propagation semantics"
+  exit 1
+fi
+if ! rg -Fq "grep -Fq" "$blockchain_fastlane_integration_script"; then
+  echo "integration blockchain fastlane script must validate contracts via string checks"
+  exit 1
+fi
 phase5_blockchain_gate_specs=(
   "settlement_adapter_roundtrip|scripts/integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh"
   "settlement_adapter_signed_tx_roundtrip|scripts/integration_cosmos_adapter_tdpnd_signed_tx_roundtrip.sh"

@@ -36,6 +36,8 @@ AUTO_REFRESH_NON_ROOT_SKIP_SUMMARY="$TMP_DIR/auto_refresh_non_root_skip_summary.
 AUTO_REFRESH_NON_ROOT_SKIP_LOG="$TMP_DIR/auto_refresh_non_root_skip.log"
 DOCKER_REHEARSAL_SUMMARY="$TMP_DIR/docker_rehearsal_summary.json"
 DOCKER_REHEARSAL_LOG="$TMP_DIR/docker_rehearsal.log"
+DOCKER_REHEARSAL_DEFAULTS_SUMMARY="$TMP_DIR/docker_rehearsal_defaults_summary.json"
+DOCKER_REHEARSAL_DEFAULTS_LOG="$TMP_DIR/docker_rehearsal_defaults.log"
 DOCKER_REHEARSAL_ARGS_LOG="$TMP_DIR/docker_rehearsal_args.log"
 PROFILE_SIGNOFF_ARGS_LOG="$TMP_DIR/profile_signoff_args.log"
 MANUAL_REPORT_ARGS_LOG="$TMP_DIR/manual_report_args.log"
@@ -655,6 +657,9 @@ FAKE_THREE_MACHINE_DOCKER_READINESS_EXIT_RC=0 \
   --run-three-machine-docker-readiness 1 \
   --three-machine-docker-readiness-run-validate 1 \
   --three-machine-docker-readiness-run-soak 1 \
+  --three-machine-docker-readiness-run-peer-failover 1 \
+  --three-machine-docker-readiness-peer-failover-downtime-sec 5 \
+  --three-machine-docker-readiness-peer-failover-timeout-sec 20 \
   --three-machine-docker-readiness-soak-rounds 2 \
   --three-machine-docker-readiness-soak-pause-sec 1 \
   --three-machine-docker-readiness-path-profile balanced \
@@ -672,6 +677,9 @@ if ! jq -e '
   and .inputs.run_three_machine_docker_readiness == "1"
   and .inputs.three_machine_docker_readiness_run_validate == true
   and .inputs.three_machine_docker_readiness_run_soak == true
+  and .inputs.three_machine_docker_readiness_run_peer_failover == true
+  and .inputs.three_machine_docker_readiness_peer_failover_downtime_sec == 5
+  and .inputs.three_machine_docker_readiness_peer_failover_timeout_sec == 20
   and .inputs.three_machine_docker_readiness_soak_rounds == 2
   and .inputs.three_machine_docker_readiness_soak_pause_sec == 1
   and .inputs.three_machine_docker_readiness_path_profile == "balanced"
@@ -696,6 +704,65 @@ if ! rg -q -- '--soak-rounds 2' "$DOCKER_REHEARSAL_ARGS_LOG"; then
   cat "$DOCKER_REHEARSAL_ARGS_LOG"
   exit 1
 fi
+if ! rg -q -- '--run-peer-failover 1' "$DOCKER_REHEARSAL_ARGS_LOG"; then
+  echo "docker rehearsal args missing --run-peer-failover 1"
+  cat "$DOCKER_REHEARSAL_ARGS_LOG"
+  exit 1
+fi
+
+echo "[single-machine-prod-readiness] docker rehearsal default peer-failover forwarding"
+: >"$DOCKER_REHEARSAL_ARGS_LOG"
+FAKE_MANUAL_REPORT_MODE=pending_multi \
+SINGLE_MACHINE_CI_LOCAL_SCRIPT="$FAKE_CI" \
+SINGLE_MACHINE_BETA_PREFLIGHT_SCRIPT="$FAKE_BETA" \
+SINGLE_MACHINE_DEEP_TEST_SUITE_SCRIPT="$FAKE_DEEP_OK" \
+SINGLE_MACHINE_RUNTIME_FIX_RECORD_SCRIPT="$FAKE_RUNTIME_FIX_RECORD" \
+SINGLE_MACHINE_THREE_MACHINE_DOCKER_READINESS_SCRIPT="$FAKE_THREE_MACHINE_DOCKER_READINESS" \
+SINGLE_MACHINE_PROFILE_COMPARE_CAMPAIGN_SIGNOFF_SCRIPT="$FAKE_PROFILE_SIGNOFF" \
+SINGLE_MACHINE_PRE_REAL_HOST_READINESS_SCRIPT="$FAKE_PRE_REAL" \
+SINGLE_MACHINE_MANUAL_VALIDATION_REPORT_SCRIPT="$FAKE_MANUAL_REPORT" \
+THREE_MACHINE_DOCKER_DOCKER_BIN="bash" \
+FAKE_THREE_MACHINE_DOCKER_READINESS_ARGS_LOG="$DOCKER_REHEARSAL_ARGS_LOG" \
+FAKE_THREE_MACHINE_DOCKER_READINESS_STATUS="pass" \
+FAKE_THREE_MACHINE_DOCKER_READINESS_RC=0 \
+FAKE_THREE_MACHINE_DOCKER_READINESS_EXIT_RC=0 \
+./scripts/single_machine_prod_readiness.sh \
+  --run-ci-local 0 \
+  --run-beta-preflight 0 \
+  --run-deep-suite 0 \
+  --run-runtime-fix-record 0 \
+  --run-three-machine-docker-readiness 1 \
+  --three-machine-docker-readiness-summary-json "$TMP_DIR/docker_rehearsal_defaults_script_summary.json" \
+  --run-profile-compare-campaign-signoff 0 \
+  --run-pre-real-host-readiness 0 \
+  --run-real-wg-privileged-matrix 0 \
+  --summary-json "$DOCKER_REHEARSAL_DEFAULTS_SUMMARY" \
+  --print-summary-json 0 >"$DOCKER_REHEARSAL_DEFAULTS_LOG"
+
+if ! jq -e '
+  .status == "warn"
+  and .rc == 0
+  and .inputs.run_three_machine_docker_readiness == "1"
+  and .inputs.three_machine_docker_readiness_run_peer_failover == true
+  and .inputs.three_machine_docker_readiness_peer_failover_downtime_sec == 8
+  and .inputs.three_machine_docker_readiness_peer_failover_timeout_sec == 45
+  and (.steps[] | select(.step_id == "three_machine_docker_readiness") | .status == "pass")
+' "$DOCKER_REHEARSAL_DEFAULTS_SUMMARY" >/dev/null; then
+  echo "docker rehearsal default peer-failover summary JSON missing expected fields"
+  cat "$DOCKER_REHEARSAL_DEFAULTS_LOG"
+  cat "$DOCKER_REHEARSAL_DEFAULTS_SUMMARY"
+  exit 1
+fi
+for expected in \
+  '--run-peer-failover 1' \
+  '--peer-failover-downtime-sec 8' \
+  '--peer-failover-timeout-sec 45'; do
+  if ! rg -q -- "$expected" "$DOCKER_REHEARSAL_ARGS_LOG"; then
+    echo "docker rehearsal default args missing $expected"
+    cat "$DOCKER_REHEARSAL_ARGS_LOG"
+    exit 1
+  fi
+done
 
 echo "[single-machine-prod-readiness] profile-compare campaign signoff step"
 : >"$MANUAL_REPORT_ARGS_LOG"

@@ -1745,10 +1745,10 @@ func (s *Service) fetchPeerDirectoryPeers(ctx context.Context, peerURL string, p
 }
 
 func (s *Service) snapshotSyncPeers(now time.Time) []string {
-	peers := append([]string(nil), s.peerURLs...)
 	if !s.peerDiscoveryEnabled {
-		return normalizePeerURLs(peers)
+		return normalizePeerURLs(append([]string(nil), s.peerURLs...))
 	}
+	peers := make([]string, 0, len(s.peerURLs)+len(s.discoveredPeers))
 	s.peerMu.Lock()
 	if s.discoveredPeers == nil {
 		s.discoveredPeers = make(map[string]time.Time)
@@ -1766,8 +1766,18 @@ func (s *Service) snapshotSyncPeers(now time.Time) []string {
 		s.peerHintOperators = make(map[string]string)
 	}
 	s.pruneDiscoveredPeersLocked(now)
+	for _, configuredURL := range s.peerURLs {
+		configuredURL = normalizePeerURL(configuredURL)
+		if configuredURL == "" {
+			continue
+		}
+		if s.isPeerCoolingDownLocked(configuredURL, now) {
+			continue
+		}
+		peers = append(peers, configuredURL)
+	}
 	for peerURL := range s.discoveredPeers {
-		if s.isDiscoveredPeerCoolingDownLocked(peerURL, now) {
+		if s.isPeerCoolingDownLocked(peerURL, now) {
 			continue
 		}
 		peers = append(peers, peerURL)
@@ -1777,7 +1787,30 @@ func (s *Service) snapshotSyncPeers(now time.Time) []string {
 }
 
 func (s *Service) snapshotKnownPeers(now time.Time) []string {
-	peers := s.snapshotSyncPeers(now)
+	peers := append([]string(nil), s.peerURLs...)
+	if s.peerDiscoveryEnabled {
+		s.peerMu.Lock()
+		if s.discoveredPeers == nil {
+			s.discoveredPeers = make(map[string]time.Time)
+		}
+		if s.discoveredPeerVoters == nil {
+			s.discoveredPeerVoters = make(map[string]map[string]time.Time)
+		}
+		if s.discoveredPeerHealth == nil {
+			s.discoveredPeerHealth = make(map[string]discoveredPeerHealth)
+		}
+		if s.peerHintPubKeys == nil {
+			s.peerHintPubKeys = make(map[string]string)
+		}
+		if s.peerHintOperators == nil {
+			s.peerHintOperators = make(map[string]string)
+		}
+		s.pruneDiscoveredPeersLocked(now)
+		for peerURL := range s.discoveredPeers {
+			peers = append(peers, peerURL)
+		}
+		s.peerMu.Unlock()
+	}
 	self := normalizePeerURL(s.localURL)
 	if self != "" {
 		peers = append(peers, self)
@@ -2153,6 +2186,10 @@ func (s *Service) isConfiguredPeerLocked(peerURL string) bool {
 }
 
 func (s *Service) isDiscoveredPeerCoolingDownLocked(peerURL string, now time.Time) bool {
+	return s.isPeerCoolingDownLocked(peerURL, now)
+}
+
+func (s *Service) isPeerCoolingDownLocked(peerURL string, now time.Time) bool {
 	health, ok := s.discoveredPeerHealth[peerURL]
 	if !ok {
 		return false
@@ -2176,6 +2213,9 @@ func (s *Service) recordPeerSyncSuccess(peerURL string, now time.Time) {
 	if peerURL == "" {
 		return
 	}
+	logRecovery := false
+	recoveredFailures := 0
+	recoveredAt := time.Time{}
 	s.peerMu.Lock()
 	isConfigured := s.isConfiguredPeerLocked(peerURL)
 	_, isDiscovered := s.discoveredPeers[peerURL]
@@ -2187,12 +2227,30 @@ func (s *Service) recordPeerSyncSuccess(peerURL string, now time.Time) {
 		s.discoveredPeerHealth = make(map[string]discoveredPeerHealth)
 	}
 	health := s.discoveredPeerHealth[peerURL]
+	if !health.cooldownUntil.IsZero() {
+		logRecovery = true
+		recoveredFailures = health.consecutiveFailures
+		recoveredAt = health.cooldownUntil
+	}
 	health.lastSuccess = now
 	health.consecutiveFailures = 0
 	health.cooldownUntil = time.Time{}
 	health.lastError = ""
 	s.discoveredPeerHealth[peerURL] = health
 	s.peerMu.Unlock()
+	if logRecovery {
+		retryAfterSec := int64(0)
+		if now.Before(recoveredAt) {
+			retryAfterSec = int64(recoveredAt.Sub(now).Seconds())
+		}
+		log.Printf(
+			"directory peer cooldown recovered: peer=%s previous_failures=%d previous_retry_after_sec=%d previous_cooldown_until=%s",
+			peerURL,
+			recoveredFailures,
+			retryAfterSec,
+			recoveredAt.UTC().Format(time.RFC3339),
+		)
+	}
 }
 
 func (s *Service) recordPeerSyncFailure(peerURL string, now time.Time, err error) {
@@ -2200,6 +2258,10 @@ func (s *Service) recordPeerSyncFailure(peerURL string, now time.Time, err error
 	if peerURL == "" {
 		return
 	}
+	logCooldown := false
+	cooldownFailures := 0
+	cooldownUntil := time.Time{}
+	cooldownError := ""
 	s.peerMu.Lock()
 	isConfigured := s.isConfiguredPeerLocked(peerURL)
 	_, isDiscovered := s.discoveredPeers[peerURL]
@@ -2211,6 +2273,7 @@ func (s *Service) recordPeerSyncFailure(peerURL string, now time.Time, err error
 		s.discoveredPeerHealth = make(map[string]discoveredPeerHealth)
 	}
 	health := s.discoveredPeerHealth[peerURL]
+	wasCoolingDown := !health.cooldownUntil.IsZero() && now.Before(health.cooldownUntil)
 	health.lastFailure = now
 	health.consecutiveFailures++
 	if err != nil {
@@ -2220,7 +2283,7 @@ func (s *Service) recordPeerSyncFailure(peerURL string, now time.Time, err error
 		}
 		health.lastError = msg
 	}
-	if isDiscovered {
+	if isDiscovered || (isConfigured && s.peerDiscoveryEnabled) {
 		failThreshold := maxInt(1, s.peerDiscoveryFailN)
 		if health.consecutiveFailures >= failThreshold {
 			base := s.peerDiscoveryBackoff
@@ -2251,8 +2314,29 @@ func (s *Service) recordPeerSyncFailure(peerURL string, now time.Time, err error
 			health.cooldownUntil = now.Add(backoff)
 		}
 	}
+	isCoolingDown := !health.cooldownUntil.IsZero() && now.Before(health.cooldownUntil)
+	if !wasCoolingDown && isCoolingDown {
+		logCooldown = true
+		cooldownFailures = health.consecutiveFailures
+		cooldownUntil = health.cooldownUntil
+		cooldownError = health.lastError
+	}
 	s.discoveredPeerHealth[peerURL] = health
 	s.peerMu.Unlock()
+	if logCooldown {
+		retryAfterSec := int64(0)
+		if now.Before(cooldownUntil) {
+			retryAfterSec = int64(cooldownUntil.Sub(now).Seconds())
+		}
+		log.Printf(
+			"directory peer cooldown entered: peer=%s consecutive_failures=%d retry_after_sec=%d cooldown_until=%s last_error=%q",
+			peerURL,
+			cooldownFailures,
+			retryAfterSec,
+			cooldownUntil.UTC().Format(time.RFC3339),
+			cooldownError,
+		)
+	}
 }
 
 func (s *Service) preparePeerDescriptor(desc proto.RelayDescriptor) (proto.RelayDescriptor, bool) {
@@ -2816,6 +2900,7 @@ func (s *Service) buildProviderRelayDescriptor(req proto.ProviderRelayUpsertRequ
 		GeoConfidence:  clampScore(req.GeoConfidence),
 		Region:         normalizeRegion(req.Region),
 		Capabilities:   normalizeCapabilities(req.Capabilities, role),
+		HopRoles:       normalizeHopRoles(req.HopRoles),
 		ValidUntil:     now.Add(ttl),
 	}
 	if role == "exit" {
@@ -2925,7 +3010,7 @@ func (s *Service) isKnownPeer(peerURL string) bool {
 	if peerURL == "" {
 		return false
 	}
-	for _, known := range s.snapshotSyncPeers(time.Now()) {
+	for _, known := range s.snapshotKnownPeers(time.Now()) {
 		if known == peerURL {
 			return true
 		}
@@ -3670,6 +3755,9 @@ func peerDescriptorFingerprint(desc proto.RelayDescriptor) (string, error) {
 	caps := append([]string(nil), clone.Capabilities...)
 	sort.Strings(caps)
 	clone.Capabilities = caps
+	hopRoles := append([]string(nil), clone.HopRoles...)
+	sort.Strings(hopRoles)
+	clone.HopRoles = hopRoles
 	b, err := json.Marshal(clone)
 	if err != nil {
 		return "", err
@@ -3818,6 +3906,37 @@ func normalizeCapabilities(values []string, role string) []string {
 		}
 		seen[value] = struct{}{}
 		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func normalizeHopRoles(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(strings.ToLower(value))
+		switch value {
+		case "entry", "ingress", "guard":
+			value = "entry"
+		case "middle", "relay", "micro-relay", "micro_relay":
+			value = "middle"
+		case "exit", "egress":
+			value = "exit"
+		default:
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	sort.Strings(out)
 	return out
@@ -4542,10 +4661,8 @@ func (s *Service) snapshotPeerStatus(now time.Time) []proto.DirectoryPeerStatus 
 	out := make([]proto.DirectoryPeerStatus, 0, len(keys))
 	for _, url := range keys {
 		status := peerMap[url]
-		if status.Discovered {
-			status.CoolingDown = s.isDiscoveredPeerCoolingDownLocked(url, now)
-		}
-		status.Eligible = status.Configured || (status.Discovered && !status.CoolingDown)
+		status.CoolingDown = s.isPeerCoolingDownLocked(url, now)
+		status.Eligible = (status.Configured || status.Discovered) && !status.CoolingDown
 		out = append(out, status)
 	}
 	return out

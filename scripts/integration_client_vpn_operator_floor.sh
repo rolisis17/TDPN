@@ -40,11 +40,17 @@ case "$url" in
     printf '{"ok":true}\n'
     ;;
   */v1/relays)
-    if [[ "${FAKE_RELAY_PROFILE:-single}" == "multi" ]]; then
-      printf '{"relays":[{"role":"entry","operator_id":"op-a"},{"role":"exit","operator_id":"op-a"},{"role":"entry","operator_id":"op-b"},{"role":"exit","operator_id":"op-b"}]}\n'
-    else
-      printf '{"relays":[{"role":"entry","operator_id":"op-a"},{"role":"exit","operator_id":"op-a"}]}\n'
-    fi
+    case "${FAKE_RELAY_PROFILE:-single}" in
+      multi)
+        printf '{"relays":[{"role":"entry","operator_id":"op-a"},{"role":"exit","operator_id":"op-a"},{"role":"entry","operator_id":"op-b"},{"role":"exit","operator_id":"op-b"}]}\n'
+        ;;
+      multi_middle)
+        printf '{"relays":[{"role":"entry","operator_id":"op-a"},{"role":"exit","operator_id":"op-a"},{"role":"entry","operator_id":"op-b"},{"role":"exit","operator_id":"op-b"},{"role":"middle","operator_id":"op-c"}]}\n'
+        ;;
+      *)
+        printf '{"relays":[{"role":"entry","operator_id":"op-a"},{"role":"exit","operator_id":"op-a"}]}\n'
+        ;;
+    esac
     ;;
   *)
     printf '{}\n'
@@ -168,6 +174,55 @@ PATH="$TMP_BIN:$PATH" FAKE_RELAY_PROFILE="multi" ./scripts/easy_node.sh client-v
 if ! rg -q 'client-vpn preflight: OK' "$OUT_OK"; then
   echo "expected preflight success with multi-operator relay set"
   cat "$OUT_OK"
+  exit 1
+fi
+
+OUT_3HOP_FAIL="$TMP_DIR/preflight_3hop_fail.log"
+set +e
+PATH="$TMP_BIN:$PATH" FAKE_RELAY_PROFILE="multi" ./scripts/easy_node.sh client-vpn-preflight "${COMMON_ARGS[@]}" \
+  --path-profile 3hop \
+  --operator-floor-check 1 >"$OUT_3HOP_FAIL" 2>&1
+rc_3hop_fail=$?
+set -e
+if [[ "$rc_3hop_fail" -eq 0 ]]; then
+  echo "expected 3hop preflight to fail when no middle relays are available"
+  cat "$OUT_3HOP_FAIL"
+  exit 1
+fi
+if ! rg -q 'middle_relay_check: 1' "$OUT_3HOP_FAIL"; then
+  echo "missing expected auto-enabled middle relay check for 3hop profile"
+  cat "$OUT_3HOP_FAIL"
+  exit 1
+fi
+if ! rg -q 'middle-relay operator floor not met' "$OUT_3HOP_FAIL"; then
+  echo "missing expected middle-relay floor failure signal for 3hop profile"
+  cat "$OUT_3HOP_FAIL"
+  exit 1
+fi
+
+OUT_3HOP_OVERRIDE="$TMP_DIR/preflight_3hop_override.log"
+PATH="$TMP_BIN:$PATH" FAKE_RELAY_PROFILE="multi" ./scripts/easy_node.sh client-vpn-preflight "${COMMON_ARGS[@]}" \
+  --path-profile 3hop \
+  --operator-floor-check 1 \
+  --middle-relay-check 0 >"$OUT_3HOP_OVERRIDE" 2>&1
+if ! rg -q 'client-vpn preflight: OK' "$OUT_3HOP_OVERRIDE"; then
+  echo "expected 3hop preflight success when middle-relay check is explicitly disabled"
+  cat "$OUT_3HOP_OVERRIDE"
+  exit 1
+fi
+
+OUT_3HOP_OK="$TMP_DIR/preflight_3hop_ok.log"
+PATH="$TMP_BIN:$PATH" FAKE_RELAY_PROFILE="multi_middle" ./scripts/easy_node.sh client-vpn-preflight "${COMMON_ARGS[@]}" \
+  --path-profile 3hop \
+  --operator-floor-check 1 >"$OUT_3HOP_OK" 2>&1
+if ! rg -q 'client-vpn preflight: OK' "$OUT_3HOP_OK"; then
+  echo "expected 3hop preflight success with distinct middle relay operator present"
+  cat "$OUT_3HOP_OK"
+  exit 1
+fi
+if ! rg -q 'middle relay diversity: middle_ops=1 eligible_middle_ops=1' "$OUT_3HOP_OK"; then
+  echo "missing expected middle relay diversity summary for successful 3hop preflight"
+  cat "$OUT_3HOP_OK"
   exit 1
 fi
 

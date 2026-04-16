@@ -66,6 +66,12 @@ EOF_FIX
     exit 0
     ;;
   client-vpn-preflight)
+    if [[ "${FAKE_VPN_SMOKE_PREFLIGHT_ROOT_REQUIRED:-0}" == "1" ]]; then
+      echo "client-vpn preflight:"
+      echo "  [fail] run preflight with sudo for real VPN validation"
+      echo "client-vpn preflight: FAIL (issues=1)"
+      exit 1
+    fi
     echo "client-vpn preflight: OK"
     exit 0
     ;;
@@ -410,6 +416,47 @@ if ! rg -q 'runtime_doctor_before' "$CAPTURE"; then
   exit 1
 fi
 
+echo "[client-vpn-smoke] defer-no-root preflight path"
+: >"$CAPTURE"
+printf '1\n' >"$runtime_doctor_count"
+FAKE_EASY_CAPTURE_FILE="$CAPTURE" \
+FAKE_RUNTIME_DOCTOR_COUNT_FILE="$runtime_doctor_count" \
+FAKE_VPN_SMOKE_PREFLIGHT_ROOT_REQUIRED=1 \
+CLIENT_VPN_SMOKE_EASY_NODE_SCRIPT="$FAKE_EASY_NODE" \
+./scripts/client_vpn_smoke.sh \
+  --bootstrap-directory http://198.51.100.10:8081 \
+  --subject inv-defer \
+  --interface wgvpn15 \
+  --defer-no-root 1 \
+  --print-summary-json 1 >/tmp/integration_client_vpn_smoke_defer_no_root.log 2>&1
+
+if ! rg -q 'client-vpn-smoke: status=skip stage=preflight' /tmp/integration_client_vpn_smoke_defer_no_root.log; then
+  echo "expected skip status for defer-no-root preflight path"
+  cat /tmp/integration_client_vpn_smoke_defer_no_root.log
+  exit 1
+fi
+if rg -q '^client-vpn-up ' "$CAPTURE"; then
+  echo "did not expect up call in defer-no-root preflight path"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q '^manual-validation-record --check-id machine_c_vpn_smoke --status skip ' "$CAPTURE"; then
+  echo "expected manual-validation-record skip call missing in defer-no-root path"
+  cat "$CAPTURE"
+  exit 1
+fi
+defer_summary_json="$(sed -n 's/^summary_json: //p' /tmp/integration_client_vpn_smoke_defer_no_root.log | tail -n 1)"
+if [[ -z "$defer_summary_json" || ! -f "$defer_summary_json" ]]; then
+  echo "expected defer-no-root summary json file missing"
+  cat /tmp/integration_client_vpn_smoke_defer_no_root.log
+  exit 1
+fi
+if ! jq -e '.status == "skip" and .stage == "preflight" and .defer_no_root == true and .deferred_no_root == true and .manual_validation_report.status == "ok"' "$defer_summary_json" >/dev/null 2>&1; then
+  echo "defer-no-root summary json missing expected defer metadata"
+  cat "$defer_summary_json"
+  exit 1
+fi
+
 echo "[client-vpn-smoke] up failure path"
 : >"$CAPTURE"
 printf '1\n' >"$runtime_doctor_count"
@@ -698,6 +745,7 @@ CLIENT_VPN_SMOKE_SCRIPT="$FAKE_SMOKE" \
   --bootstrap-directory http://198.51.100.10:8081 \
   --subject inv-wrapper \
   --interface wgvpn11 \
+  --defer-no-root 1 \
   --pre-real-host-readiness 1 \
   --trust-reset-on-key-mismatch 1 \
   --trust-reset-scope global \
@@ -717,6 +765,11 @@ if ! rg -q -- '--subject inv-wrapper' "$TMP_DIR/smoke_wrapper_calls.log"; then
 fi
 if ! rg -q -- '--interface wgvpn11' "$TMP_DIR/smoke_wrapper_calls.log"; then
   echo "easy_node client-vpn-smoke forwarding missing interface"
+  cat "$TMP_DIR/smoke_wrapper_calls.log"
+  exit 1
+fi
+if ! rg -q -- '--defer-no-root 1' "$TMP_DIR/smoke_wrapper_calls.log"; then
+  echo "easy_node client-vpn-smoke forwarding missing defer-no-root"
   cat "$TMP_DIR/smoke_wrapper_calls.log"
   exit 1
 fi

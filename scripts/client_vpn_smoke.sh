@@ -50,6 +50,7 @@ Usage:
     [--mtls-client-cert-file PATH] \
     [--mtls-client-key-file PATH] \
     [--run-preflight [0|1]] \
+    [--defer-no-root [0|1]] \
     [--status-check [0|1]] \
     [--keep-up [0|1]] \
     [--record-result [0|1]] \
@@ -183,6 +184,7 @@ mtls_client_cert_file=""
 mtls_client_key_file=""
 
 run_preflight="1"
+defer_no_root="${CLIENT_VPN_SMOKE_DEFER_NO_ROOT:-0}"
 status_check="1"
 keep_up="0"
 record_result="1"
@@ -253,6 +255,15 @@ while [[ $# -gt 0 ]]; do
         shift 2
       else
         run_preflight="1"
+        shift
+      fi
+      ;;
+    --defer-no-root)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        defer_no_root="${2:-}"
+        shift 2
+      else
+        defer_no_root="1"
         shift
       fi
       ;;
@@ -386,6 +397,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 bool_arg_or_die "--run-preflight" "$run_preflight"
+bool_arg_or_die "--defer-no-root" "$defer_no_root"
 bool_arg_or_die "--status-check" "$status_check"
 bool_arg_or_die "--keep-up" "$keep_up"
 bool_arg_or_die "--record-result" "$record_result"
@@ -597,6 +609,7 @@ incident_snapshot_refresh_status="skipped"
 manual_validation_report_status="skipped"
 manual_validation_report_readiness_status=""
 manual_validation_report_next_action_check_id=""
+smoke_deferred_no_root="0"
 
 extract_json_payload() {
   local prefix="$1"
@@ -658,6 +671,32 @@ run_and_capture() {
     rm -f "$tmp"
     return "$rc"
   fi
+}
+
+output_indicates_no_root_requirement() {
+  local text="$1"
+  if [[ -z "$text" ]]; then
+    return 1
+  fi
+  if printf '%s\n' "$text" | grep -Eqi 'requires root|run preflight with sudo|must be root|permission denied|operation not permitted'; then
+    return 0
+  fi
+  return 1
+}
+
+defer_no_root_on_failure() {
+  local failed_output="$1"
+  local defer_note="$2"
+  if [[ "$defer_no_root" != "1" ]]; then
+    return 1
+  fi
+  if ! output_indicates_no_root_requirement "$failed_output"; then
+    return 1
+  fi
+  smoke_deferred_no_root="1"
+  result_stage="$stage"
+  finish_and_record "skip" "$defer_note"
+  return 0
 }
 
 attempt_up_retry_with_trust_reset() {
@@ -1185,6 +1224,8 @@ write_summary_json() {
     --arg summary_log "$summary_log" \
     --arg summary_json "$summary_json" \
     --argjson keep_up "$keep_up" \
+    --arg defer_no_root "$defer_no_root" \
+    --arg smoke_deferred_no_root "$smoke_deferred_no_root" \
     --argjson pre_real_host_readiness_enabled "$pre_real_host_readiness_enabled" \
     --argjson runtime_doctor_enabled "$runtime_doctor_enabled" \
     --argjson runtime_fix_on_non_ok "$runtime_fix_on_non_ok" \
@@ -1203,6 +1244,8 @@ write_summary_json() {
       stage: $stage,
       notes: $notes,
       keep_up: ($keep_up == "1"),
+      defer_no_root: ($defer_no_root == "1"),
+      deferred_no_root: ($smoke_deferred_no_root == "1"),
       pre_real_host_readiness: {
         enabled: ($pre_real_host_readiness_enabled == 1),
         status: $pre_real_host_readiness_status,
@@ -1368,6 +1411,9 @@ if [[ "$run_preflight" == "1" ]]; then
   stage="preflight"
   preflight_output=""
   if ! run_and_capture preflight_output "${preflight_cmd[@]}"; then
+    if defer_no_root_on_failure "$preflight_output" "client-vpn smoke deferred: preflight requires root privileges"; then
+      exit 0
+    fi
     result_stage="$stage"
     finish_and_record "fail" "client-vpn preflight failed"
     exit 1
@@ -1377,6 +1423,9 @@ fi
 stage="up"
 up_output=""
 if ! run_and_capture up_output "${up_cmd[@]}"; then
+  if defer_no_root_on_failure "$up_output" "client-vpn smoke deferred: client-vpn up requires root privileges"; then
+    exit 0
+  fi
   if ! attempt_up_retry_with_trust_reset "$up_output"; then
     result_stage="$stage"
     finish_and_record "fail" "${trust_reset_failure_note:-client-vpn up failed}"

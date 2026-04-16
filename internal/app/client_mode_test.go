@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -513,6 +514,7 @@ func TestNewClientReadsOpaqueSessionEnv(t *testing.T) {
 	t.Setenv("CLIENT_STICKY_PAIR_SEC", "75")
 	t.Setenv("CLIENT_SESSION_REUSE", "1")
 	t.Setenv("CLIENT_SESSION_REFRESH_LEAD_SEC", "55")
+	t.Setenv("CLIENT_SESSION_MIN_REFRESH_SEC", "12")
 	c := NewClient()
 	if c.opaqueSessionSec != 30 {
 		t.Fatalf("expected CLIENT_OPAQUE_SESSION_SEC parsed, got %d", c.opaqueSessionSec)
@@ -528,6 +530,116 @@ func TestNewClientReadsOpaqueSessionEnv(t *testing.T) {
 	}
 	if c.sessionRefreshLeadSec != 55 {
 		t.Fatalf("expected CLIENT_SESSION_REFRESH_LEAD_SEC parsed, got %d", c.sessionRefreshLeadSec)
+	}
+	if c.sessionMinRefreshSec != 12 {
+		t.Fatalf("expected CLIENT_SESSION_MIN_REFRESH_SEC parsed, got %d", c.sessionMinRefreshSec)
+	}
+}
+
+func TestNewClientSessionReuseDefaultsEnabledWhenUnset(t *testing.T) {
+	t.Setenv("CLIENT_FORCE_DIRECT_EXIT", "0")
+	t.Setenv("CLIENT_SESSION_REUSE", "")
+	c := NewClient()
+	if !c.sessionReuse {
+		t.Fatalf("expected session reuse enabled by default when CLIENT_SESSION_REUSE is unset")
+	}
+}
+
+func TestNewClientSessionReuseExplicitDisableWithoutDirectExitOverride(t *testing.T) {
+	t.Setenv("CLIENT_FORCE_DIRECT_EXIT", "0")
+	t.Setenv("CLIENT_SESSION_REUSE", "0")
+	c := NewClient()
+	if c.sessionReuse {
+		t.Fatalf("expected CLIENT_SESSION_REUSE=0 to disable session reuse when direct-exit override is not active")
+	}
+}
+
+func TestNewClientForceDirectExitDefaultsSessionReuse(t *testing.T) {
+	t.Setenv("CLIENT_FORCE_DIRECT_EXIT", "1")
+	t.Setenv("CLIENT_SESSION_REUSE", "")
+	c := NewClient()
+	if !c.sessionReuse {
+		t.Fatalf("expected CLIENT_FORCE_DIRECT_EXIT to default CLIENT_SESSION_REUSE to true when unset")
+	}
+	if c.stickyPairSec != 300 {
+		t.Fatalf("expected CLIENT_FORCE_DIRECT_EXIT to default CLIENT_STICKY_PAIR_SEC=300, got %d", c.stickyPairSec)
+	}
+	if c.sessionMinRefreshSec != 6 {
+		t.Fatalf("expected CLIENT_FORCE_DIRECT_EXIT to default CLIENT_SESSION_MIN_REFRESH_SEC=6, got %d", c.sessionMinRefreshSec)
+	}
+}
+
+func TestNewClientForceDirectExitOverridesExplicitSessionReuseDisable(t *testing.T) {
+	t.Setenv("CLIENT_FORCE_DIRECT_EXIT", "1")
+	t.Setenv("CLIENT_SESSION_REUSE", "0")
+	c := NewClient()
+	if !c.sessionReuse {
+		t.Fatalf("expected direct-exit mode to force session reuse on by default")
+	}
+}
+
+func TestNewClientDirectExitAllowSessionChurnRespectsExplicitDisable(t *testing.T) {
+	t.Setenv("CLIENT_FORCE_DIRECT_EXIT", "1")
+	t.Setenv("CLIENT_SESSION_REUSE", "0")
+	t.Setenv("CLIENT_DIRECT_EXIT_ALLOW_SESSION_CHURN", "1")
+	c := NewClient()
+	if c.sessionReuse {
+		t.Fatalf("expected CLIENT_DIRECT_EXIT_ALLOW_SESSION_CHURN=1 to preserve explicit CLIENT_SESSION_REUSE=0")
+	}
+	if c.sessionMinRefreshSec != 0 {
+		t.Fatalf("expected churn mode to avoid forced CLIENT_SESSION_MIN_REFRESH_SEC default, got %d", c.sessionMinRefreshSec)
+	}
+}
+
+func TestNewClientForceDirectExitSessionMinRefreshExplicitOverride(t *testing.T) {
+	t.Setenv("CLIENT_FORCE_DIRECT_EXIT", "1")
+	t.Setenv("CLIENT_SESSION_MIN_REFRESH_SEC", "0")
+	c := NewClient()
+	if c.sessionMinRefreshSec != 0 {
+		t.Fatalf("expected explicit CLIENT_SESSION_MIN_REFRESH_SEC=0 to override direct-exit default, got %d", c.sessionMinRefreshSec)
+	}
+}
+
+func TestNewClientPathProfileDefaultsTo2Hop(t *testing.T) {
+	t.Setenv("CLIENT_PATH_PROFILE", "")
+	c := NewClient()
+	if c.pathProfile != "2hop" {
+		t.Fatalf("expected default path profile 2hop, got %q", c.pathProfile)
+	}
+	if c.preferMiddleRelay {
+		t.Fatalf("expected middle preference disabled for default 2hop profile")
+	}
+}
+
+func TestNewClientPathProfile3HopEnablesMiddlePreference(t *testing.T) {
+	t.Setenv("CLIENT_PATH_PROFILE", "3hop")
+	c := NewClient()
+	if c.pathProfile != "3hop" {
+		t.Fatalf("expected path profile 3hop, got %q", c.pathProfile)
+	}
+	if !c.preferMiddleRelay {
+		t.Fatalf("expected middle preference enabled for 3hop profile")
+	}
+	if !c.requireMiddleRelay {
+		t.Fatalf("expected 3hop profile to require middle relay by default")
+	}
+}
+
+func TestNewClientRequireMiddleRelayEnvOverrideOn(t *testing.T) {
+	t.Setenv("CLIENT_PATH_PROFILE", "2hop")
+	t.Setenv("CLIENT_REQUIRE_MIDDLE_RELAY", "1")
+	c := NewClient()
+	if !c.requireMiddleRelay {
+		t.Fatalf("expected CLIENT_REQUIRE_MIDDLE_RELAY=1 to enable strict middle relay requirement")
+	}
+}
+
+func TestNewClientRequireMiddleRelayEnvOverrideOffFor3Hop(t *testing.T) {
+	t.Setenv("CLIENT_PATH_PROFILE", "3hop")
+	t.Setenv("CLIENT_REQUIRE_MIDDLE_RELAY", "0")
+	c := NewClient()
+	if c.requireMiddleRelay {
+		t.Fatalf("expected CLIENT_REQUIRE_MIDDLE_RELAY=0 to disable strict middle relay requirement override")
 	}
 }
 
@@ -682,6 +794,26 @@ func TestValidateRuntimeConfigForceDirectExitRejectsStrictModes(t *testing.T) {
 	}
 }
 
+func TestValidateRuntimeConfigRejectsDirectExitWith3HopProfile(t *testing.T) {
+	c := &Client{
+		pathProfile:              "3hop",
+		dataMode:                 "json",
+		innerSource:              "synthetic",
+		wgBackend:                "noop",
+		requireDistinctOps:       false,
+		allowDirectExitFallback:  true,
+		forceDirectExit:          true,
+		requireDistinctCountries: false,
+	}
+	err := c.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected direct-exit and 3hop profile conflict validation failure")
+	}
+	if !strings.Contains(err.Error(), "CLIENT_PATH_PROFILE=3hop is incompatible with CLIENT_FORCE_DIRECT_EXIT=1") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestValidateRuntimeConfigForceDirectExitRequiresFallbackEnabled(t *testing.T) {
 	c := &Client{
 		dataMode:                "json",
@@ -792,6 +924,51 @@ func TestActiveSessionNeedsRefresh(t *testing.T) {
 	}
 }
 
+func TestActiveSessionNeedsRefreshDirectExitUsesAdaptiveLead(t *testing.T) {
+	now := time.Now()
+	c := &Client{
+		forceDirectExit:       true,
+		sessionRefreshLeadSec: 20,
+	}
+	session := clientActiveSession{sessionExp: now.Add(5 * time.Second).Unix()}
+	if c.activeSessionNeedsRefresh(session, now) {
+		t.Fatalf("expected short-lived direct-exit session to avoid immediate refresh churn")
+	}
+	if !c.activeSessionNeedsRefresh(session, now.Add(4*time.Second)) {
+		t.Fatalf("expected short-lived direct-exit session to refresh near expiry")
+	}
+}
+
+func TestActiveSessionNeedsRefreshMinIntervalSuppressesEarlyRefresh(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	c := &Client{
+		sessionRefreshLeadSec: 20,
+		sessionMinRefreshSec:  6,
+	}
+	session := clientActiveSession{
+		sessionExp:    now.Add(10 * time.Second).Unix(),
+		establishedAt: now.Add(-3 * time.Second),
+	}
+	if c.activeSessionNeedsRefresh(session, now) {
+		t.Fatalf("expected min refresh interval to suppress early refresh")
+	}
+}
+
+func TestActiveSessionNeedsRefreshNearExpiryBypassesMinInterval(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	c := &Client{
+		sessionRefreshLeadSec: 20,
+		sessionMinRefreshSec:  60,
+	}
+	session := clientActiveSession{
+		sessionExp:    now.Add(1 * time.Second).Unix(),
+		establishedAt: now,
+	}
+	if !c.activeSessionNeedsRefresh(session, now) {
+		t.Fatalf("expected near-expiry session to refresh even before min refresh interval")
+	}
+}
+
 func TestTryReuseActiveSessionRefreshKeepsSessionForHandoff(t *testing.T) {
 	now := time.Now()
 	c := &Client{
@@ -832,5 +1009,19 @@ func TestTryReuseActiveSessionExpiredClearsSession(t *testing.T) {
 	}
 	if _, ok := c.snapshotActiveSession(); ok {
 		t.Fatalf("expected expired active session to be cleared")
+	}
+}
+
+func TestCloseSessionPathCloseFailureIsBestEffort(t *testing.T) {
+	c := &Client{
+		httpClient: &http.Client{Timeout: 100 * time.Millisecond},
+	}
+	session := clientActiveSession{
+		sessionID:       "session-1",
+		entryControlURL: "http://127.0.0.1:1",
+		transport:       "policy-json",
+	}
+	if err := c.closeSession(context.Background(), session); err != nil {
+		t.Fatalf("expected closeSession to ignore close-path failures, got %v", err)
 	}
 }

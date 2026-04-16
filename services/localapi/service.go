@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -28,6 +30,7 @@ const (
 type Service struct {
 	addr           string
 	scriptPath     string
+	commandRunner  string
 	commandTimeout time.Duration
 	allowUpdate    bool
 }
@@ -92,6 +95,7 @@ func New() *Service {
 	if scriptPath == "" {
 		scriptPath = defaultScriptPath
 	}
+	commandRunner := strings.TrimSpace(os.Getenv("LOCAL_CONTROL_API_RUNNER"))
 	commandTimeout := defaultCommandTimeout
 	if raw := strings.TrimSpace(os.Getenv("LOCAL_CONTROL_API_COMMAND_TIMEOUT_SEC")); raw != "" {
 		if v, err := strconv.Atoi(raw); err == nil && v >= 5 {
@@ -102,6 +106,7 @@ func New() *Service {
 	return &Service{
 		addr:           addr,
 		scriptPath:     scriptPath,
+		commandRunner:  commandRunner,
 		commandTimeout: commandTimeout,
 		allowUpdate:    allowUpdate,
 	}
@@ -130,7 +135,7 @@ func (s *Service) Run(ctx context.Context) error {
 		_ = srv.Shutdown(shutdownCtx)
 	}()
 
-	log.Printf("local control api listening on %s script=%s update_enabled=%t", s.addr, s.scriptPath, s.allowUpdate)
+	log.Printf("local control api listening on %s script=%s runner=%s update_enabled=%t", s.addr, s.scriptPath, s.commandRunner, s.allowUpdate)
 	err := srv.ListenAndServe()
 	if err == nil || errors.Is(err, http.ErrServerClosed) {
 		return nil
@@ -223,6 +228,8 @@ func (s *Service) handleConnect(w http.ResponseWriter, r *http.Request) {
 		"--min-sources", "1",
 		"--min-operators", strconv.Itoa(policy.minOperators),
 		"--path-profile", options.profile,
+		"--session-reuse", "1",
+		"--allow-session-churn", "0",
 		"--operator-floor-check", strconv.Itoa(policy.operatorFloorCheck),
 		"--operator-min-operators", strconv.Itoa(policy.operatorMin),
 		"--issuer-quorum-check", strconv.Itoa(policy.issuerQuorumCheck),
@@ -370,7 +377,8 @@ func (s *Service) runEasyNode(ctx context.Context, args ...string) (string, int,
 	cmdCtx, cancel := context.WithTimeout(ctx, s.commandTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(cmdCtx, s.scriptPath, args...)
+	cmdName, cmdArgs := buildEasyNodeCommandWithPlatform(s.scriptPath, args, runtime.GOOS, s.commandRunner)
+	cmd := exec.CommandContext(cmdCtx, cmdName, cmdArgs...)
 	var combined bytes.Buffer
 	cmd.Stdout = &combined
 	cmd.Stderr = &combined
@@ -387,6 +395,24 @@ func (s *Service) runEasyNode(ctx context.Context, args ...string) (string, int,
 		return output, exitErr.ExitCode(), err
 	}
 	return output, 127, err
+}
+
+func buildEasyNodeCommandWithPlatform(scriptPath string, args []string, goos string, commandRunner string) (string, []string) {
+	runner := strings.TrimSpace(commandRunner)
+	if runner != "" {
+		cmdArgs := append([]string{scriptPath}, args...)
+		return runner, cmdArgs
+	}
+	if strings.EqualFold(strings.TrimSpace(goos), "windows") {
+		ext := strings.ToLower(strings.TrimSpace(filepath.Ext(scriptPath)))
+		if ext == ".ps1" {
+			cmdArgs := append([]string{"-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath}, args...)
+			return "powershell", cmdArgs
+		}
+		cmdArgs := append([]string{scriptPath}, args...)
+		return "bash", cmdArgs
+	}
+	return scriptPath, args
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {
