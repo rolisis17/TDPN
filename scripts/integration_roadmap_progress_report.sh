@@ -636,8 +636,7 @@ cat >"$BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SUMMARY_JSON" <<'EOF_BLOCKCHAIN_MAINNE
     "validator and economics thresholds remain below go/no-go policy"
   ],
   "source_paths": [
-    "./docs/blockchain-bootstrap-validator-plan.md",
-    "./artifacts/blockchain/mainnet-activation-gate/validator-inventory.csv"
+    "./artifacts/blockchain/mainnet-activation-metrics/metrics.json"
   ]
 }
 EOF_BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SUMMARY
@@ -772,14 +771,15 @@ fi
 if ! jq -e '
   .blockchain_track.mainnet_activation_gate.available == true
   and .blockchain_track.mainnet_activation_gate.status == "NO-GO"
-  and .blockchain_track.mainnet_activation_gate.decision == "NO-GO"
-  and .blockchain_track.mainnet_activation_gate.go == false
-  and .blockchain_track.mainnet_activation_gate.no_go == true
-  and (.blockchain_track.mainnet_activation_gate.reasons | length) == 2
-  and (.blockchain_track.mainnet_activation_gate.source_paths | length) == 2
-  and .blockchain_track.mainnet_activation_gate.source_summary_json == "'"$BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SUMMARY_JSON"'"
-  and .blockchain_track.mainnet_activation_gate.source_summary_kind == "mainnet-activation-gate-summary"
-' "$SUMMARY_JSON" >/dev/null; then
+   and .blockchain_track.mainnet_activation_gate.decision == "NO-GO"
+   and .blockchain_track.mainnet_activation_gate.go == false
+   and .blockchain_track.mainnet_activation_gate.no_go == true
+   and (.blockchain_track.mainnet_activation_gate.reasons | length) == 2
+   and (.blockchain_track.mainnet_activation_gate.source_paths | length) == 1
+   and ((.blockchain_track.mainnet_activation_gate.source_paths // []) | index("./artifacts/blockchain/mainnet-activation-metrics/metrics.json")) != null
+   and .blockchain_track.mainnet_activation_gate.source_summary_json == "'"$BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SUMMARY_JSON"'"
+   and .blockchain_track.mainnet_activation_gate.source_summary_kind == "mainnet-activation-gate-summary"
+ ' "$SUMMARY_JSON" >/dev/null; then
   echo "summary JSON missing expected mainnet activation gate fields"
   cat "$SUMMARY_JSON"
   exit 1

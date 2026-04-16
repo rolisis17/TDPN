@@ -18,7 +18,19 @@ if [[ ! -x "$GATE_SCRIPT" ]]; then
 fi
 
 TMP_DIR="$(mktemp -d)"
-trap 'rm -rf "$TMP_DIR"' EXIT
+ROOT_PHASE7_SUMMARY_REPORT_JSON="$ROOT_DIR/.easy-node-logs/phase7_mainnet_cutover_summary_report.json"
+ROOT_PHASE7_SUMMARY_REPORT_BACKUP="$TMP_DIR/root_phase7_mainnet_cutover_summary_report.backup.json"
+ROOT_PHASE7_SUMMARY_REPORT_PRESENT="0"
+
+cleanup_root_phase7_summary_report() {
+  if [[ "$ROOT_PHASE7_SUMMARY_REPORT_PRESENT" == "1" ]]; then
+    cp "$ROOT_PHASE7_SUMMARY_REPORT_BACKUP" "$ROOT_PHASE7_SUMMARY_REPORT_JSON"
+  else
+    rm -f "$ROOT_PHASE7_SUMMARY_REPORT_JSON"
+  fi
+}
+
+trap 'cleanup_root_phase7_summary_report; rm -rf "$TMP_DIR"' EXIT
 
 CAPTURE="$TMP_DIR/stage_calls.tsv"
 SUCCESS_LOG="$TMP_DIR/success.log"
@@ -74,6 +86,9 @@ PHASE7_SOURCE_JSON="$TMP_DIR/phase7_summary_source.json"
 PHASE7_MISSING_JSON="$TMP_DIR/phase7_summary_missing.json"
 PHASE7_INVALID_JSON="$TMP_DIR/phase7_summary_invalid.json"
 PHASE7_ENV_OVERRIDE_JSON="$TMP_DIR/phase7_summary_env_override.json"
+DEFAULT_PHASE7_REPORTS_DIR="$TMP_DIR/reports_phase7_default"
+DEFAULT_PHASE7_REPORT_JSON="$DEFAULT_PHASE7_REPORTS_DIR/phase7_mainnet_cutover_summary_report.json"
+DEFAULT_PHASE7_SUMMARY_JSON="$TMP_DIR/summary_phase7_default.json"
 
 STAGE_ENV_NAMES=(
   "BLOCKCHAIN_FASTLANE_CI_PHASE5_SETTLEMENT_LAYER_SCRIPT"
@@ -145,6 +160,11 @@ fi
 exit 0
 EOF_FAKE_STAGE_HELPER
 chmod +x "$FAKE_STAGE_HELPER"
+
+if [[ -f "$ROOT_PHASE7_SUMMARY_REPORT_JSON" ]]; then
+  cp "$ROOT_PHASE7_SUMMARY_REPORT_JSON" "$ROOT_PHASE7_SUMMARY_REPORT_BACKUP"
+  ROOT_PHASE7_SUMMARY_REPORT_PRESENT="1"
+fi
 
 for idx in "${!STAGE_ENV_NAMES[@]}"; do
   env_name="${STAGE_ENV_NAMES[$idx]}"
@@ -329,6 +349,58 @@ cat >"$PHASE7_INVALID_JSON" <<'EOF_PHASE7_INVALID_JSON'
   "status":
 EOF_PHASE7_INVALID_JSON
 
+mkdir -p "$DEFAULT_PHASE7_REPORTS_DIR" "$(dirname "$ROOT_PHASE7_SUMMARY_REPORT_JSON")"
+cat >"$DEFAULT_PHASE7_SUMMARY_JSON" <<'EOF_DEFAULT_PHASE7_SUMMARY'
+{
+  "status": "pass",
+  "signals": {
+    "module_tx_surface_ok": true,
+    "tdpnd_grpc_live_smoke_ok": true,
+    "tdpnd_grpc_auth_live_smoke_ok": false,
+    "tdpnd_comet_runtime_smoke_ok": true,
+    "cosmos_module_coverage_floor_ok": true,
+    "cosmos_keeper_coverage_floor_ok": true,
+    "cosmos_app_coverage_floor_ok": true,
+    "dual_write_parity_ok": false,
+    "mainnet_activation_gate_go_ok": true
+  }
+}
+EOF_DEFAULT_PHASE7_SUMMARY
+
+cat >"$DEFAULT_PHASE7_REPORT_JSON" <<'EOF_DEFAULT_PHASE7_REPORT'
+{
+  "status": "pass",
+  "signals": {
+    "module_tx_surface_ok": true,
+    "tdpnd_grpc_live_smoke_ok": true,
+    "tdpnd_grpc_auth_live_smoke_ok": false,
+    "tdpnd_comet_runtime_smoke_ok": true,
+    "cosmos_module_coverage_floor_ok": true,
+    "cosmos_keeper_coverage_floor_ok": true,
+    "cosmos_app_coverage_floor_ok": true,
+    "dual_write_parity_ok": false,
+    "mainnet_activation_gate_go_ok": true
+  }
+}
+EOF_DEFAULT_PHASE7_REPORT
+
+cat >"$ROOT_PHASE7_SUMMARY_REPORT_JSON" <<'EOF_ROOT_PHASE7_SUMMARY'
+{
+  "status": "pass",
+  "signals": {
+    "module_tx_surface_ok": false,
+    "tdpnd_grpc_live_smoke_ok": false,
+    "tdpnd_grpc_auth_live_smoke_ok": true,
+    "tdpnd_comet_runtime_smoke_ok": false,
+    "cosmos_module_coverage_floor_ok": false,
+    "cosmos_keeper_coverage_floor_ok": false,
+    "cosmos_app_coverage_floor_ok": false,
+    "dual_write_parity_ok": true,
+    "mainnet_activation_gate_go_ok": false
+  }
+}
+EOF_ROOT_PHASE7_SUMMARY
+
 echo "[blockchain-fastlane] success ordering path"
 : >"$CAPTURE"
 BLOCKCHAIN_FASTLANE_CAPTURE_FILE="$CAPTURE" \
@@ -451,6 +523,42 @@ if ! jq -e --arg phase7_summary "$PHASE7_SOURCE_JSON" '
   exit 1
 fi
 assert_canonical_summary_artifact "$PHASE7_ENV_SUMMARY_JSON" "$PHASE7_ENV_CANONICAL_SUMMARY_JSON" "$PHASE7_ENV_LOG"
+
+echo "[blockchain-fastlane] phase7 summary default current-run path preference"
+: >"$CAPTURE"
+BLOCKCHAIN_FASTLANE_CAPTURE_FILE="$CAPTURE" \
+BLOCKCHAIN_FASTLANE_CANONICAL_SUMMARY_JSON="$DEFAULT_PHASE7_REPORTS_DIR/canonical_summary.json" \
+"$GATE_SCRIPT" \
+  --reports-dir "$DEFAULT_PHASE7_REPORTS_DIR" \
+  --summary-json "$DEFAULT_PHASE7_SUMMARY_JSON" \
+  --print-summary-json 0 >"$TMP_DIR/phase7_default.log" 2>&1
+
+assert_stage_order "$CAPTURE" "${STAGE_IDS_NO_METRICS[@]}"
+if ! jq -e --arg expected_input "$DEFAULT_PHASE7_REPORT_JSON" '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.phase7_mainnet_cutover_summary_report_json == $expected_input
+  and .artifacts.phase7_mainnet_cutover_summary_report_json == $expected_input
+  and .phase7_mainnet_cutover_summary_report.input_summary_json == $expected_input
+  and .phase7_mainnet_cutover_summary_report.available == true
+  and .phase7_mainnet_cutover_summary_report.status == "pass"
+  and .phase7_mainnet_cutover_summary_report.signals.module_tx_surface_ok == true
+  and .phase7_mainnet_cutover_summary_report.signals.tdpnd_grpc_live_smoke_ok == true
+  and .phase7_mainnet_cutover_summary_report.signals.tdpnd_grpc_auth_live_smoke_ok == false
+  and .phase7_mainnet_cutover_summary_report.signals.tdpnd_comet_runtime_smoke_ok == true
+  and .phase7_mainnet_cutover_summary_report.signals.cosmos_module_coverage_floor_ok == true
+  and .phase7_mainnet_cutover_summary_report.signals.cosmos_keeper_coverage_floor_ok == true
+  and .phase7_mainnet_cutover_summary_report.signals.cosmos_app_coverage_floor_ok == true
+  and .phase7_mainnet_cutover_summary_report.signals.dual_write_parity_ok == false
+  and .phase7_mainnet_cutover_summary_report.signals.mainnet_activation_gate_go_ok == true
+' "$DEFAULT_PHASE7_SUMMARY_JSON" >/dev/null; then
+  echo "phase7 default-path summary should prefer the current reports_dir artifact"
+  cat "$DEFAULT_PHASE7_SUMMARY_JSON"
+  cat "$ROOT_PHASE7_SUMMARY_REPORT_JSON"
+  cat "$TMP_DIR/phase7_default.log"
+  exit 1
+fi
+assert_canonical_summary_artifact "$DEFAULT_PHASE7_SUMMARY_JSON" "$DEFAULT_PHASE7_REPORTS_DIR/canonical_summary.json" "$TMP_DIR/phase7_default.log"
 
 cat >"$ENV_SOURCE_JSON_A" <<'EOF_ENV_SOURCE_JSON_A'
 {"paying_users_3mo_min": 1001}
@@ -749,6 +857,33 @@ if ! jq -e '
   exit 1
 fi
 assert_canonical_summary_artifact "$TOGGLE_SUMMARY_JSON" "$TOGGLE_CANONICAL_SUMMARY_JSON" "$TOGGLE_LOG"
+
+echo "[blockchain-fastlane] reject flag-like metrics-json path"
+set +e
+BLOCKCHAIN_FASTLANE_CAPTURE_FILE="$CAPTURE" \
+BLOCKCHAIN_FASTLANE_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_bad_path.json" \
+"$GATE_SCRIPT" \
+  --reports-dir "$TMP_DIR/reports_bad_path" \
+  --summary-json "$TMP_DIR/bad_path_summary.json" \
+  --blockchain-mainnet-activation-metrics-json --summary-json \
+  --print-summary-json 0 >"$TMP_DIR/bad_path.log" 2>&1
+bad_path_rc=$?
+set -e
+if [[ "$bad_path_rc" -eq 0 ]]; then
+  echo "expected flag-like metrics-json path to fail parsing"
+  cat "$TMP_DIR/bad_path.log"
+  exit 1
+fi
+if [[ "$bad_path_rc" -ne 2 ]]; then
+  echo "expected flag-like metrics-json path to exit 2"
+  cat "$TMP_DIR/bad_path.log"
+  exit 1
+fi
+if ! grep -Fq 'flag-like token: --summary-json' "$TMP_DIR/bad_path.log"; then
+  echo "expected flag-like token rejection message"
+  cat "$TMP_DIR/bad_path.log"
+  exit 1
+fi
 
 # activation gate failure semantics: a failing gate should be reflected in the wrapper rc.
 echo "[blockchain-fastlane] activation gate failure propagation"

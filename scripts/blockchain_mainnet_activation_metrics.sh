@@ -87,6 +87,22 @@ bool_arg_or_die() {
   fi
 }
 
+path_arg_or_die() {
+  local name="$1"
+  local value="$2"
+  value="$(trim "$value")"
+  if [[ -z "$value" ]]; then
+    echo "$name requires a value"
+    exit 2
+  fi
+  case "$value" in
+    -*)
+      echo "$name requires a path value, got flag-like token: $value"
+      exit 2
+      ;;
+  esac
+}
+
 numeric_text_or_empty() {
   local raw
   raw="$(trim "${1:-}")"
@@ -174,6 +190,12 @@ if [[ -z "$(trim "$canonical_summary_json")" ]]; then
   canonical_summary_json="$ROOT_DIR/.easy-node-logs/blockchain_mainnet_activation_metrics.json"
   canonical_summary_json_source="default"
 fi
+if [[ -n "$(trim "$summary_json")" ]]; then
+  path_arg_or_die "--summary-json" "$summary_json"
+fi
+if [[ -n "$(trim "$canonical_summary_json")" ]]; then
+  path_arg_or_die "--canonical-summary-json" "$canonical_summary_json"
+fi
 
 metric_keys=(
   measurement_window_weeks
@@ -247,11 +269,13 @@ fi
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --summary-json|--metrics-json)
+      path_arg_or_die "$1" "${2:-}"
       summary_json="${2:-}"
       summary_json_source="arg"
       shift 2
       ;;
     --canonical-summary-json|--canonical-metrics-json)
+      path_arg_or_die "$1" "${2:-}"
       canonical_summary_json="${2:-}"
       canonical_summary_json_source="arg"
       shift 2
@@ -266,6 +290,7 @@ while [[ $# -gt 0 ]]; do
       fi
       ;;
     --source-json)
+      path_arg_or_die "$1" "${2:-}"
       source_jsons_cli+=("${2:-}")
       shift 2
       ;;
@@ -306,6 +331,7 @@ if ((${#source_jsons[@]} > 0)); then
   for source_json in "${source_jsons[@]}"; do
     source_json="$(trim "$source_json")"
     if [[ -n "$source_json" ]]; then
+      path_arg_or_die "--source-json" "$source_json"
       source_jsons_abs+=("$(abs_path "$source_json")")
     fi
   done
@@ -495,8 +521,8 @@ else
 fi
 
 echo "[blockchain-mainnet-activation-metrics] status=$status ready_for_gate=$ready_for_gate required_provided=$required_provided_count required_missing=$required_missing_count required_invalid=$required_invalid_count summary_json=$summary_json canonical_summary_json=$canonical_summary_json"
-echo "[blockchain-mainnet-activation-metrics] required_missing_metrics=$(jq -r '.required_missing_metrics | if length == 0 then \"none\" else join(\",\") end' "$summary_json")"
-echo "[blockchain-mainnet-activation-metrics] invalid_metrics=$(jq -r '.invalid_metrics | if length == 0 then \"none\" else join(\",\") end' "$summary_json")"
+echo "[blockchain-mainnet-activation-metrics] required_missing_metrics=$(jq -r '.required_missing_metrics | if length == 0 then "none" else join(",") end' "$summary_json")"
+echo "[blockchain-mainnet-activation-metrics] invalid_metrics=$(jq -r '.invalid_metrics | if length == 0 then "none" else join(",") end' "$summary_json")"
 
 if [[ "$print_summary_json" == "1" ]]; then
   cat "$summary_json"

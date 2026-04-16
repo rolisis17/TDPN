@@ -93,6 +93,22 @@ bool_arg_or_die() {
   fi
 }
 
+path_arg_or_die() {
+  local name="$1"
+  local value="$2"
+  value="$(trim "$value")"
+  if [[ -z "$value" ]]; then
+    echo "$name requires a value"
+    exit 2
+  fi
+  case "$value" in
+    -*)
+      echo "$name requires a path value, got flag-like token: $value"
+      exit 2
+      ;;
+  esac
+}
+
 need_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
     echo "missing required command: $1"
@@ -2471,8 +2487,14 @@ phase4_windows_full_parity_summary_json="${ROADMAP_PROGRESS_PHASE4_WINDOWS_FULL_
 phase5_settlement_layer_summary_json="${ROADMAP_PROGRESS_PHASE5_SETTLEMENT_LAYER_SUMMARY_JSON:-}"
 phase6_cosmos_l1_summary_json="${ROADMAP_PROGRESS_PHASE6_COSMOS_L1_SUMMARY_JSON:-}"
 phase7_mainnet_cutover_summary_json="${ROADMAP_PROGRESS_PHASE7_MAINNET_CUTOVER_SUMMARY_JSON:-$default_log_dir/phase7_mainnet_cutover_summary_report.json}"
+if [[ -n "$(trim "$phase7_mainnet_cutover_summary_json")" ]]; then
+  path_arg_or_die "--phase7-mainnet-cutover-summary-json" "$phase7_mainnet_cutover_summary_json"
+fi
 phase7_mainnet_cutover_summary_json="$(abs_path "$phase7_mainnet_cutover_summary_json")"
 blockchain_mainnet_activation_gate_summary_json="${ROADMAP_PROGRESS_BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SUMMARY_JSON:-}"
+if [[ -n "$(trim "$blockchain_mainnet_activation_gate_summary_json")" ]]; then
+  path_arg_or_die "--blockchain-mainnet-activation-gate-summary-json" "$blockchain_mainnet_activation_gate_summary_json"
+fi
 blockchain_mainnet_activation_gate_summary_json="$(abs_path "$blockchain_mainnet_activation_gate_summary_json")"
 
 while [[ $# -gt 0 ]]; do
@@ -2552,18 +2574,28 @@ while [[ $# -gt 0 ]]; do
       phase6_cosmos_l1_summary_json="$(abs_path "${2:-}")"
       shift 2
       ;;
-      --phase7-mainnet-cutover-summary-json)
-        phase7_mainnet_cutover_summary_json="$(abs_path "${2:-}")"
-        shift 2
-        ;;
-      --blockchain-mainnet-activation-gate-summary-json)
-        blockchain_mainnet_activation_gate_summary_json="$(abs_path "${2:-}")"
-        shift 2
-        ;;
-      --summary-json)
-        summary_json="$(abs_path "${2:-}")"
-        shift 2
-        ;;
+    --phase7-mainnet-cutover-summary-json)
+      if [[ $# -lt 2 ]]; then
+        echo "--phase7-mainnet-cutover-summary-json requires a value"
+        exit 2
+      fi
+      if [[ -n "${2:-}" && "${2:-}" == -* ]]; then
+        echo "--phase7-mainnet-cutover-summary-json requires a path value, got flag-like token: ${2:-}"
+        exit 2
+      fi
+      phase7_mainnet_cutover_summary_json="$(abs_path "${2:-}")"
+      shift 2
+      ;;
+    --blockchain-mainnet-activation-gate-summary-json)
+      path_arg_or_die "--blockchain-mainnet-activation-gate-summary-json" "${2:-}"
+      blockchain_mainnet_activation_gate_summary_json="$(abs_path "${2:-}")"
+      shift 2
+      ;;
+    --summary-json)
+      path_arg_or_die "--summary-json" "${2:-}"
+      summary_json="$(abs_path "${2:-}")"
+      shift 2
+      ;;
     --report-md)
       report_md="$(abs_path "${2:-}")"
       shift 2

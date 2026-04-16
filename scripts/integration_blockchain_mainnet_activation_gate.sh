@@ -150,7 +150,9 @@ jq -e --arg metrics_path "$GO_METRICS" '
   and .input.state == "available"
   and .input.valid == true
   and (.reasons | length) == 0
-  and (.source_paths | index($metrics_path)) != null
+  and (.source_paths | length) == 1
+  and .source_paths[0] == $metrics_path
+  and .artifacts.metrics_json == $metrics_path
 ' "$GO_SUMMARY" >/dev/null
 if ! grep -Fq '"decision": "GO"' "$GO_LOG"; then
   echo "expected GO summary JSON in stdout log"
@@ -180,7 +182,9 @@ jq -e --arg metrics_path "$NO_GO_METRICS" '
   and (.failed_gate_ids | index("unit_economics")) != null
   and (.reasons | length) > 0
   and ((.reasons | index("vpn_recovery_mttr_p95_minutes=34 does not satisfy <= 30")) != null)
-  and (.source_paths | index($metrics_path)) != null
+  and (.source_paths | length) == 1
+  and .source_paths[0] == $metrics_path
+  and .artifacts.metrics_json == $metrics_path
 ' "$NO_GO_SUMMARY" >/dev/null
 if ! grep -Fq '[blockchain-mainnet-activation-gate] decision=NO-GO' "$NO_GO_LOG"; then
   echo "expected NO-GO decision log line"
@@ -207,7 +211,9 @@ jq -e --arg metrics_path "$WINDOW_SHORT_METRICS" '
   and (.failed_reasons | length) == 1
   and ((.failed_reasons | index("measurement_window_weeks=11 does not satisfy >= 12")) != null)
   and ((.reasons | index("measurement_window_weeks=11 does not satisfy >= 12")) != null)
-  and (.source_paths | index($metrics_path)) != null
+  and (.source_paths | length) == 1
+  and .source_paths[0] == $metrics_path
+  and .artifacts.metrics_json == $metrics_path
 ' "$WINDOW_SHORT_SUMMARY" >/dev/null
 if ! grep -Fq '[blockchain-mainnet-activation-gate] decision=NO-GO' "$WINDOW_SHORT_LOG"; then
   echo "expected measurement-window short NO-GO decision log line"
@@ -234,7 +240,9 @@ jq -e --arg metrics_path "$WINDOW_INVALID_METRICS" '
   and (.failed_reasons | length) == 1
   and ((.failed_reasons | index("missing or invalid metric: measurement_window_weeks")) != null)
   and ((.reasons | index("missing or invalid metric: measurement_window_weeks")) != null)
-  and (.source_paths | index($metrics_path)) != null
+  and (.source_paths | length) == 1
+  and .source_paths[0] == $metrics_path
+  and .artifacts.metrics_json == $metrics_path
 ' "$WINDOW_INVALID_SUMMARY" >/dev/null
 if ! grep -Fq '[blockchain-mainnet-activation-gate] decision=NO-GO' "$WINDOW_INVALID_LOG"; then
   echo "expected measurement-window invalid NO-GO decision log line"
@@ -266,7 +274,9 @@ jq -e --arg metrics_path "$MISSING_METRICS" '
   and (.failed_reasons | length) == 1
   and (.reasons | length) > 0
   and ((.reasons | index("metrics JSON file not found: " + $metrics_path)) != null)
-  and (.source_paths | index($metrics_path)) != null
+  and (.source_paths | length) == 1
+  and .source_paths[0] == $metrics_path
+  and .artifacts.metrics_json == $metrics_path
 ' "$MISSING_SUMMARY" >/dev/null
 
 echo "[blockchain-mainnet-activation-gate] invalid input with fail-close"
@@ -293,7 +303,9 @@ jq -e --arg metrics_path "$INVALID_METRICS" '
   and .failed_gate_ids == ["metrics_input"]
   and (.reasons | length) > 0
   and ((.reasons | index("metrics JSON is not valid JSON: " + $metrics_path)) != null)
-  and (.source_paths | index($metrics_path)) != null
+  and (.source_paths | length) == 1
+  and .source_paths[0] == $metrics_path
+  and .artifacts.metrics_json == $metrics_path
 ' "$INVALID_SUMMARY" >/dev/null
 
 echo "[blockchain-mainnet-activation-gate] NO-GO with fail-close"
@@ -320,6 +332,29 @@ jq -e '
 if ! grep -Fq '[blockchain-mainnet-activation-gate] decision=NO-GO' "$FAIL_CLOSE_LOG"; then
   echo "expected fail-close NO-GO log line"
   cat "$FAIL_CLOSE_LOG"
+  exit 1
+fi
+
+echo "[blockchain-mainnet-activation-gate] reject flag-like metrics path"
+set +e
+"$SCRIPT_UNDER_TEST" \
+  --metrics-json --summary-json "$TMP_DIR/bad_metrics_path_summary.json" \
+  --print-summary-json 0 >"$TMP_DIR/bad_metrics_path.log" 2>&1
+bad_metrics_path_rc=$?
+set -e
+if [[ "$bad_metrics_path_rc" -eq 0 ]]; then
+  echo "expected flag-like metrics path to fail parsing"
+  cat "$TMP_DIR/bad_metrics_path.log"
+  exit 1
+fi
+if [[ "$bad_metrics_path_rc" -ne 2 ]]; then
+  echo "expected flag-like metrics path to exit 2"
+  cat "$TMP_DIR/bad_metrics_path.log"
+  exit 1
+fi
+if ! grep -Fq 'flag-like token: --summary-json' "$TMP_DIR/bad_metrics_path.log"; then
+  echo "expected flag-like token rejection message"
+  cat "$TMP_DIR/bad_metrics_path.log"
   exit 1
 fi
 

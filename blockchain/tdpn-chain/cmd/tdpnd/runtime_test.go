@@ -1253,7 +1253,7 @@ func TestRunTDPNDGRPCModeRealScaffoldValidatorAndGovernanceRoundTrip(t *testing.
 			ConsensusAddress: "tdpnvalcons1runtime1",
 			LifecycleStatus:  "active",
 			EvidenceHeight:   77,
-			EvidenceRef:      "evidence://validator/runtime/77",
+			EvidenceRef:      "obj://validator/runtime/77",
 			RecordedAtUnix:   1713002002,
 			Status:           vpnvalidatorpb.ReconciliationStatus_RECONCILIATION_STATUS_PENDING,
 		},

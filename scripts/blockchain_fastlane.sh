@@ -67,6 +67,22 @@ bool_arg_or_die() {
   fi
 }
 
+path_arg_or_die() {
+  local name="$1"
+  local value="$2"
+  value="$(trim "$value")"
+  if [[ -z "$value" ]]; then
+    echo "$name requires a value"
+    exit 2
+  fi
+  case "$value" in
+    -*)
+      echo "$name requires a path value, got flag-like token: $value"
+      exit 2
+      ;;
+  esac
+}
+
 need_cmd() {
   local cmd="$1"
   if ! command -v "$cmd" >/dev/null 2>&1; then
@@ -169,10 +185,12 @@ fi
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --reports-dir)
+      path_arg_or_die "--reports-dir" "${2:-}"
       reports_dir="${2:-}"
       shift 2
       ;;
     --summary-json)
+      path_arg_or_die "--summary-json" "${2:-}"
       summary_json="${2:-}"
       shift 2
       ;;
@@ -240,14 +258,17 @@ while [[ $# -gt 0 ]]; do
       fi
       ;;
     --blockchain-mainnet-activation-metrics-json)
+      path_arg_or_die "--blockchain-mainnet-activation-metrics-json" "${2:-}"
       blockchain_mainnet_activation_metrics_json="${2:-}"
       shift 2
       ;;
     --blockchain-mainnet-activation-metrics-summary-json)
+      path_arg_or_die "--blockchain-mainnet-activation-metrics-summary-json" "${2:-}"
       blockchain_mainnet_activation_metrics_summary_json="${2:-}"
       shift 2
       ;;
     --blockchain-mainnet-activation-metrics-source-json)
+      path_arg_or_die "--blockchain-mainnet-activation-metrics-source-json" "${2:-}"
       append_unique_abs_path blockchain_mainnet_activation_metrics_source_jsons "${2:-}"
       shift 2
       ;;
@@ -261,10 +282,12 @@ while [[ $# -gt 0 ]]; do
       fi
       ;;
     --blockchain-mainnet-activation-gate-summary-json)
+      path_arg_or_die "--blockchain-mainnet-activation-gate-summary-json" "${2:-}"
       blockchain_mainnet_activation_gate_summary_json="${2:-}"
       shift 2
       ;;
     --phase7-mainnet-cutover-summary-report-json)
+      path_arg_or_die "--phase7-mainnet-cutover-summary-report-json" "${2:-}"
       phase7_mainnet_cutover_summary_report_json="${2:-}"
       shift 2
       ;;
@@ -341,16 +364,24 @@ if [[ -z "$summary_json" ]]; then
 else
   summary_json="$(abs_path "$summary_json")"
 fi
+if [[ -n "$(trim "$reports_dir")" ]]; then
+  path_arg_or_die "--reports-dir" "$reports_dir"
+fi
+if [[ -n "$(trim "$summary_json")" ]]; then
+  path_arg_or_die "--summary-json" "$summary_json"
+fi
 if [[ -z "$blockchain_mainnet_activation_metrics_json" && "$run_blockchain_mainnet_activation_metrics" == "1" ]]; then
   blockchain_mainnet_activation_metrics_json="$reports_dir/blockchain_mainnet_activation_metrics.json"
 fi
 if [[ -n "$blockchain_mainnet_activation_metrics_json" ]]; then
+  path_arg_or_die "--blockchain-mainnet-activation-metrics-json" "$blockchain_mainnet_activation_metrics_json"
   blockchain_mainnet_activation_metrics_json="$(abs_path "$blockchain_mainnet_activation_metrics_json")"
 fi
 if [[ -z "$blockchain_mainnet_activation_metrics_summary_json" && "$run_blockchain_mainnet_activation_metrics" == "1" ]]; then
   blockchain_mainnet_activation_metrics_summary_json="$reports_dir/blockchain_mainnet_activation_metrics_summary.json"
 fi
 if [[ -n "$blockchain_mainnet_activation_metrics_summary_json" ]]; then
+  path_arg_or_die "--blockchain-mainnet-activation-metrics-summary-json" "$blockchain_mainnet_activation_metrics_summary_json"
   blockchain_mainnet_activation_metrics_summary_json="$(abs_path "$blockchain_mainnet_activation_metrics_summary_json")"
 fi
 if [[ "$run_blockchain_mainnet_activation_metrics" == "1" && ${#blockchain_mainnet_activation_metrics_source_jsons[@]} -eq 0 ]]; then
@@ -363,12 +394,21 @@ if [[ -z "$blockchain_mainnet_activation_gate_summary_json" && "$run_blockchain_
   blockchain_mainnet_activation_gate_summary_json="$reports_dir/blockchain_mainnet_activation_gate_summary.json"
 fi
 if [[ -n "$blockchain_mainnet_activation_gate_summary_json" ]]; then
+  path_arg_or_die "--blockchain-mainnet-activation-gate-summary-json" "$blockchain_mainnet_activation_gate_summary_json"
   blockchain_mainnet_activation_gate_summary_json="$(abs_path "$blockchain_mainnet_activation_gate_summary_json")"
 fi
 if [[ -z "$phase7_mainnet_cutover_summary_report_json" ]] && [[ "$run_ci_phase7_mainnet_cutover" == "1" || "$run_blockchain_mainnet_activation_metrics" == "1" || "$run_blockchain_mainnet_activation_gate" == "1" ]]; then
-  phase7_mainnet_cutover_summary_report_json="$ROOT_DIR/.easy-node-logs/phase7_mainnet_cutover_summary_report.json"
+  # Prefer the current fastlane reports_dir artifact when Phase-7 is running so
+  # downstream metrics/gate stages consume the just-generated handoff evidence
+  # instead of a stale root canonical file from a prior invocation.
+  if [[ "$run_ci_phase7_mainnet_cutover" == "1" || -f "$reports_dir/phase7_mainnet_cutover_summary_report.json" ]]; then
+    phase7_mainnet_cutover_summary_report_json="$reports_dir/phase7_mainnet_cutover_summary_report.json"
+  else
+    phase7_mainnet_cutover_summary_report_json="$ROOT_DIR/.easy-node-logs/phase7_mainnet_cutover_summary_report.json"
+  fi
 fi
 if [[ -n "$phase7_mainnet_cutover_summary_report_json" ]]; then
+  path_arg_or_die "--phase7-mainnet-cutover-summary-report-json" "$phase7_mainnet_cutover_summary_report_json"
   phase7_mainnet_cutover_summary_report_json="$(abs_path "$phase7_mainnet_cutover_summary_report_json")"
 fi
 canonical_summary_json="$(abs_path "$canonical_summary_json")"

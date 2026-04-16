@@ -69,6 +69,22 @@ bool_arg_or_die() {
   fi
 }
 
+path_arg_or_die() {
+  local name="$1"
+  local value="$2"
+  value="$(trim "$value")"
+  if [[ -z "$value" ]]; then
+    echo "$name requires a value"
+    exit 2
+  fi
+  case "$value" in
+    -*)
+      echo "$name requires a path value, got flag-like token: $value"
+      exit 2
+      ;;
+  esac
+}
+
 array_to_json() {
   local -n arr_ref=$1
   if ((${#arr_ref[@]} == 0)); then
@@ -229,10 +245,12 @@ fail_close="${BLOCKCHAIN_MAINNET_ACTIVATION_GATE_FAIL_CLOSE:-0}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --metrics-json)
+      path_arg_or_die "--metrics-json" "${2:-}"
       metrics_json="${2:-}"
       shift 2
       ;;
     --summary-json)
+      path_arg_or_die "--summary-json" "${2:-}"
       summary_json="${2:-}"
       shift 2
       ;;
@@ -279,10 +297,16 @@ if [[ -z "$(trim "$metrics_json")" ]]; then
     metrics_source="missing"
   fi
 fi
+if [[ -n "$(trim "$metrics_json")" ]]; then
+  path_arg_or_die "--metrics-json" "$metrics_json"
+fi
 metrics_json="$(abs_path "$metrics_json")"
 
 if [[ -z "$(trim "$summary_json")" ]]; then
   summary_json="$ROOT_DIR/.easy-node-logs/blockchain_mainnet_activation_gate_summary.json"
+fi
+if [[ -n "$(trim "$summary_json")" ]]; then
+  path_arg_or_die "--summary-json" "$summary_json"
 fi
 summary_json="$(abs_path "$summary_json")"
 mkdir -p "$(dirname "$summary_json")"
@@ -318,9 +342,6 @@ fi
 
 if [[ -n "$(trim "$metrics_json")" ]]; then
   source_paths+=("$metrics_json")
-fi
-if [[ -n "$(trim "$summary_json")" ]]; then
-  source_paths+=("$summary_json")
 fi
 source_paths_json="$(array_to_json source_paths)"
 
@@ -360,6 +381,7 @@ if [[ "$input_valid" != "1" ]]; then
     --argjson source_paths "$source_paths_json" \
     --argjson gates '[]' \
     --arg summary_json "$summary_json" \
+    --arg metrics_json "$metrics_json" \
     '{
       version: 1,
       schema: {id: $schema_id, major: 1, minor: 0},
@@ -383,7 +405,8 @@ if [[ "$input_valid" != "1" ]]; then
       source_paths: $source_paths,
       gates: $gates,
       artifacts: {
-        summary_json: $summary_json
+        summary_json: $summary_json,
+        metrics_json: $metrics_json
       }
     }' >"$summary_tmp"
 else
@@ -516,6 +539,7 @@ else
     --argjson source_paths "$source_paths_json" \
     --argjson gates "$gates_json" \
     --arg summary_json "$summary_json" \
+    --arg metrics_json "$metrics_json" \
     '{
       version: 1,
       schema: {id: $schema_id, major: 1, minor: 0},
@@ -539,7 +563,8 @@ else
       source_paths: $source_paths,
       gates: $gates,
       artifacts: {
-        summary_json: $summary_json
+        summary_json: $summary_json,
+        metrics_json: $metrics_json
       }
     }' >"$summary_tmp"
 fi
