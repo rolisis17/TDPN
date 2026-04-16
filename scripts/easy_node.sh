@@ -241,9 +241,16 @@ Usage:
   ./scripts/easy_node.sh vpn-rc-resilience-path [--docker-profile-matrix-timeout-sec N] [--rc-matrix-path-timeout-sec N] [vpn_rc_resilience_path args...]
   ./scripts/easy_node.sh vpn-non-blockchain-fastlane [--parallel [0|1]] [vpn_non_blockchain_fastlane args...]
   ./scripts/easy_node.sh blockchain-fastlane [blockchain_fastlane args...]
+  ./scripts/easy_node.sh blockchain-gate-bundle [blockchain_gate_bundle args...]
   ./scripts/easy_node.sh ci-blockchain-parallel-sweep [ci_blockchain_parallel_sweep args...]
+  ./scripts/easy_node.sh blockchain-mainnet-activation-metrics-input [blockchain_mainnet_activation_metrics_input args...]
+  ./scripts/easy_node.sh blockchain-mainnet-activation-metrics-missing-checklist [blockchain_mainnet_activation_metrics_missing_checklist args...]
+  ./scripts/easy_node.sh blockchain-mainnet-activation-metrics-input-template [blockchain_mainnet_activation_metrics_input_template args...]
   ./scripts/easy_node.sh blockchain-mainnet-activation-metrics [blockchain_mainnet_activation_metrics args...]
   ./scripts/easy_node.sh blockchain-mainnet-activation-gate [blockchain_mainnet_activation_gate args...]
+  ./scripts/easy_node.sh blockchain-mainnet-activation-gate-cycle [blockchain_mainnet_activation_gate_cycle args...]
+  ./scripts/easy_node.sh blockchain-mainnet-activation-gate-cycle-seeded [blockchain_mainnet_activation_gate_cycle args...]
+  ./scripts/easy_node.sh blockchain-mainnet-activation-operator-pack [blockchain_mainnet_activation_operator_pack args...]
   ./scripts/easy_node.sh blockchain-bootstrap-governance-graduation-gate [blockchain_bootstrap_governance_graduation_gate args...]
   ./scripts/easy_node.sh roadmap-non-blockchain-actionable-run [--recommended-only [0|1]] [--max-actions N] [--action-timeout-sec N] [--parallel [0|1]] [roadmap_non_blockchain_actionable_run args...]
   ./scripts/easy_node.sh ci-phase0 [ci_phase0 args...]
@@ -366,9 +373,16 @@ Usage:
   ./scripts/easy_node.sh vpn-rc-resilience-path [--docker-profile-matrix-timeout-sec N] [--rc-matrix-path-timeout-sec N] [vpn_rc_resilience_path args...]
   ./scripts/easy_node.sh vpn-non-blockchain-fastlane [--parallel [0|1]] [vpn_non_blockchain_fastlane args...]
   ./scripts/easy_node.sh blockchain-fastlane [blockchain_fastlane args...]
+  ./scripts/easy_node.sh blockchain-gate-bundle [blockchain_gate_bundle args...]
   ./scripts/easy_node.sh ci-blockchain-parallel-sweep [ci_blockchain_parallel_sweep args...]
+  ./scripts/easy_node.sh blockchain-mainnet-activation-metrics-input [blockchain_mainnet_activation_metrics_input args...]
+  ./scripts/easy_node.sh blockchain-mainnet-activation-metrics-missing-checklist [blockchain_mainnet_activation_metrics_missing_checklist args...]
+  ./scripts/easy_node.sh blockchain-mainnet-activation-metrics-input-template [blockchain_mainnet_activation_metrics_input_template args...]
   ./scripts/easy_node.sh blockchain-mainnet-activation-metrics [blockchain_mainnet_activation_metrics args...]
   ./scripts/easy_node.sh blockchain-mainnet-activation-gate [blockchain_mainnet_activation_gate args...]
+  ./scripts/easy_node.sh blockchain-mainnet-activation-gate-cycle [blockchain_mainnet_activation_gate_cycle args...]
+  ./scripts/easy_node.sh blockchain-mainnet-activation-gate-cycle-seeded [blockchain_mainnet_activation_gate_cycle args...]
+  ./scripts/easy_node.sh blockchain-mainnet-activation-operator-pack [blockchain_mainnet_activation_operator_pack args...]
   ./scripts/easy_node.sh blockchain-bootstrap-governance-graduation-gate [blockchain_bootstrap_governance_graduation_gate args...]
   ./scripts/easy_node.sh roadmap-non-blockchain-actionable-run [--recommended-only [0|1]] [--max-actions N] [--action-timeout-sec N] [--parallel [0|1]] [roadmap_non_blockchain_actionable_run args...]
   ./scripts/easy_node.sh ci-phase0 [ci_phase0 args...]
@@ -512,9 +526,16 @@ Notes:
   - vpn-rc-resilience-path wraps the VPN RC resilience helper path, forwards timeout controls (`--docker-profile-matrix-timeout-sec`, `--rc-matrix-path-timeout-sec`), and preserves pass-through args.
   - vpn-non-blockchain-fastlane wraps the non-blockchain acceleration helper path, forwards `--parallel [0|1]`, and preserves pass-through args.
   - blockchain-fastlane wraps the blockchain acceleration helper path and preserves pass-through args.
+  - blockchain-gate-bundle wraps the blockchain gate bundle helper path and preserves pass-through args.
   - ci-blockchain-parallel-sweep wraps the blockchain parallel sweep helper path and preserves pass-through args.
+  - blockchain-mainnet-activation-metrics-input wraps the blockchain metrics evidence normalizer helper path and preserves pass-through args.
+  - blockchain-mainnet-activation-metrics-missing-checklist wraps the blockchain missing-metrics checklist helper path and preserves pass-through args.
+  - blockchain-mainnet-activation-metrics-input-template wraps the blockchain metrics evidence template helper path and preserves pass-through args.
   - blockchain-mainnet-activation-metrics wraps the blockchain mainnet activation metrics producer helper path and preserves pass-through args.
   - blockchain-mainnet-activation-gate wraps the blockchain mainnet activation gate helper path and preserves pass-through args.
+  - blockchain-mainnet-activation-gate-cycle wraps the blockchain mainnet activation gate cycle helper path and preserves pass-through args.
+  - blockchain-mainnet-activation-gate-cycle-seeded wraps the blockchain mainnet activation gate cycle helper path, auto-adds `--seed-example-input 1` for quick local runs, and preserves pass-through args.
+  - blockchain-mainnet-activation-operator-pack wraps the blockchain mainnet activation operator pack helper path and preserves pass-through args.
   - blockchain-bootstrap-governance-graduation-gate wraps the blockchain bootstrap governance graduation gate helper path and preserves pass-through args.
   - roadmap-non-blockchain-actionable-run resolves and runs the current roadmap no-sudo/no-GitHub actionable gate list in one command (supports `--recommended-only 1`, `--max-actions N`, per-action timeout via `--action-timeout-sec N`, and `--parallel [0|1]`).
   - ci-phase0 runs the fast Phase-0 simplification gate (launcher wiring/runtime + config-v1 + local API contract checks) with fail-fast behavior.
@@ -8197,6 +8218,15 @@ blockchain_fastlane() {
   "$fastlane_script" "$@"
 }
 
+blockchain_gate_bundle() {
+  local bundle_script="${BLOCKCHAIN_GATE_BUNDLE_SCRIPT:-$ROOT_DIR/scripts/blockchain_gate_bundle.sh}"
+  if [[ ! -x "$bundle_script" ]]; then
+    echo "missing helper script: $bundle_script"
+    exit 2
+  fi
+  "$bundle_script" "$@"
+}
+
 ci_blockchain_parallel_sweep() {
   local sweep_script="${CI_BLOCKCHAIN_PARALLEL_SWEEP_SCRIPT:-$ROOT_DIR/scripts/ci_blockchain_parallel_sweep.sh}"
   if [[ ! -x "$sweep_script" ]]; then
@@ -8204,6 +8234,33 @@ ci_blockchain_parallel_sweep() {
     exit 2
   fi
   "$sweep_script" "$@"
+}
+
+blockchain_mainnet_activation_metrics_input() {
+  local metrics_input_script="${BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_INPUT_SCRIPT:-$ROOT_DIR/scripts/blockchain_mainnet_activation_metrics_input.sh}"
+  if [[ ! -x "$metrics_input_script" ]]; then
+    echo "missing helper script: $metrics_input_script"
+    exit 2
+  fi
+  "$metrics_input_script" "$@"
+}
+
+blockchain_mainnet_activation_metrics_missing_checklist() {
+  local metrics_missing_checklist_script="${BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_MISSING_CHECKLIST_SCRIPT:-$ROOT_DIR/scripts/blockchain_mainnet_activation_metrics_missing_checklist.sh}"
+  if [[ ! -x "$metrics_missing_checklist_script" ]]; then
+    echo "missing helper script: $metrics_missing_checklist_script"
+    exit 2
+  fi
+  "$metrics_missing_checklist_script" "$@"
+}
+
+blockchain_mainnet_activation_metrics_input_template() {
+  local metrics_input_template_script="${BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_INPUT_TEMPLATE_SCRIPT:-$ROOT_DIR/scripts/blockchain_mainnet_activation_metrics_input_template.sh}"
+  if [[ ! -x "$metrics_input_template_script" ]]; then
+    echo "missing helper script: $metrics_input_template_script"
+    exit 2
+  fi
+  "$metrics_input_template_script" "$@"
 }
 
 blockchain_mainnet_activation_metrics() {
@@ -8222,6 +8279,33 @@ blockchain_mainnet_activation_gate() {
     exit 2
   fi
   "$gate_script" "$@"
+}
+
+blockchain_mainnet_activation_gate_cycle() {
+  local gate_cycle_script="${BLOCKCHAIN_MAINNET_ACTIVATION_GATE_CYCLE_SCRIPT:-$ROOT_DIR/scripts/blockchain_mainnet_activation_gate_cycle.sh}"
+  if [[ ! -x "$gate_cycle_script" ]]; then
+    echo "missing helper script: $gate_cycle_script"
+    exit 2
+  fi
+  "$gate_cycle_script" "$@"
+}
+
+blockchain_mainnet_activation_gate_cycle_seeded() {
+  local gate_cycle_script="${BLOCKCHAIN_MAINNET_ACTIVATION_GATE_CYCLE_SCRIPT:-$ROOT_DIR/scripts/blockchain_mainnet_activation_gate_cycle.sh}"
+  if [[ ! -x "$gate_cycle_script" ]]; then
+    echo "missing helper script: $gate_cycle_script"
+    exit 2
+  fi
+  "$gate_cycle_script" --seed-example-input 1 "$@"
+}
+
+blockchain_mainnet_activation_operator_pack() {
+  local operator_pack_script="${BLOCKCHAIN_MAINNET_ACTIVATION_OPERATOR_PACK_SCRIPT:-$ROOT_DIR/scripts/blockchain_mainnet_activation_operator_pack.sh}"
+  if [[ ! -x "$operator_pack_script" ]]; then
+    echo "missing helper script: $operator_pack_script"
+    exit 2
+  fi
+  "$operator_pack_script" "$@"
 }
 
 blockchain_bootstrap_governance_graduation_gate() {
@@ -14782,9 +14866,25 @@ main() {
       shift
       blockchain_fastlane "$@"
       ;;
+    blockchain-gate-bundle)
+      shift
+      blockchain_gate_bundle "$@"
+      ;;
     ci-blockchain-parallel-sweep)
       shift
       ci_blockchain_parallel_sweep "$@"
+      ;;
+    blockchain-mainnet-activation-metrics-input)
+      shift
+      blockchain_mainnet_activation_metrics_input "$@"
+      ;;
+    blockchain-mainnet-activation-metrics-missing-checklist)
+      shift
+      blockchain_mainnet_activation_metrics_missing_checklist "$@"
+      ;;
+    blockchain-mainnet-activation-metrics-input-template)
+      shift
+      blockchain_mainnet_activation_metrics_input_template "$@"
       ;;
     blockchain-mainnet-activation-metrics)
       shift
@@ -14793,6 +14893,18 @@ main() {
     blockchain-mainnet-activation-gate)
       shift
       blockchain_mainnet_activation_gate "$@"
+      ;;
+    blockchain-mainnet-activation-gate-cycle)
+      shift
+      blockchain_mainnet_activation_gate_cycle "$@"
+      ;;
+    blockchain-mainnet-activation-gate-cycle-seeded)
+      shift
+      blockchain_mainnet_activation_gate_cycle_seeded "$@"
+      ;;
+    blockchain-mainnet-activation-operator-pack)
+      shift
+      blockchain_mainnet_activation_operator_pack "$@"
       ;;
     blockchain-bootstrap-governance-graduation-gate)
       shift

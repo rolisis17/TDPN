@@ -59,7 +59,7 @@ assert_command_text_present() {
   local script_path="$1"
   local command_name="$2"
 
-  if ! rg -Fq "$command_name" "$script_path"; then
+  if ! rg -Fq "$command_name" "$script_path" && ! grep -Fq "$command_name" "$script_path"; then
     echo "missing command text in easy_node wrapper script: $command_name"
     exit 1
   fi
@@ -72,8 +72,11 @@ assert_forwarded_args() {
   local expected_summary_json="$4"
   local expected_custom_flag="$5"
   local expected_custom_value="$6"
+  local expect_seed_example_input="${7:-0}"
   local line
-  local marker a1 a2 a3 a4 a5 a6 a7 a8 extra
+  local marker expected_columns
+  local -a fields=()
+  local idx=1
 
   line="$(sed -n '1p' "$capture_file" || true)"
   if [[ -z "$line" ]]; then
@@ -82,35 +85,57 @@ assert_forwarded_args() {
     exit 1
   fi
 
-  IFS=$'\t' read -r marker a1 a2 a3 a4 a5 a6 a7 a8 extra <<<"$line"
+  IFS=$'\t' read -r -a fields <<<"$line"
+  marker="${fields[0]:-}"
 
   if [[ "$marker" != "$expected_marker" ]]; then
     echo "forwarded marker mismatch: expected $expected_marker"
     echo "$line"
     exit 1
   fi
-  if [[ "$a1" != "--reports-dir" || "$a2" != "$expected_reports_dir" ]]; then
+
+  expected_columns=9
+  if [[ "$expect_seed_example_input" == "1" ]]; then
+    expected_columns=11
+  fi
+  if [[ "${#fields[@]}" -ne "$expected_columns" ]]; then
+    echo "unexpected forwarded arg count: expected $expected_columns got ${#fields[@]}"
+    echo "$line"
+    exit 1
+  fi
+
+  if [[ "$expect_seed_example_input" == "1" ]]; then
+    if [[ "${fields[$idx]:-}" != "--seed-example-input" || "${fields[$((idx + 1))]:-}" != "1" ]]; then
+      echo "missing seeded-cycle forwarded args"
+      echo "$line"
+      exit 1
+    fi
+    idx=$((idx + 2))
+  fi
+
+  if [[ "${fields[$idx]:-}" != "--reports-dir" || "${fields[$((idx + 1))]:-}" != "$expected_reports_dir" ]]; then
     echo "forwarded --reports-dir mismatch"
     echo "$line"
     exit 1
   fi
-  if [[ "$a3" != "--summary-json" || "$a4" != "$expected_summary_json" ]]; then
+  idx=$((idx + 2))
+
+  if [[ "${fields[$idx]:-}" != "--summary-json" || "${fields[$((idx + 1))]:-}" != "$expected_summary_json" ]]; then
     echo "forwarded --summary-json mismatch"
     echo "$line"
     exit 1
   fi
-  if [[ "$a5" != "--print-summary-json" || "$a6" != "0" ]]; then
+  idx=$((idx + 2))
+
+  if [[ "${fields[$idx]:-}" != "--print-summary-json" || "${fields[$((idx + 1))]:-}" != "0" ]]; then
     echo "forwarded --print-summary-json mismatch"
     echo "$line"
     exit 1
   fi
-  if [[ "$a7" != "$expected_custom_flag" || "$a8" != "$expected_custom_value" ]]; then
+  idx=$((idx + 2))
+
+  if [[ "${fields[$idx]:-}" != "$expected_custom_flag" || "${fields[$((idx + 1))]:-}" != "$expected_custom_value" ]]; then
     echo "forwarded custom passthrough arg mismatch"
-    echo "$line"
-    exit 1
-  fi
-  if [[ -n "${extra:-}" ]]; then
-    echo "unexpected extra forwarded args"
     echo "$line"
     exit 1
   fi
@@ -118,8 +143,17 @@ assert_forwarded_args() {
 
 COMMANDS=(
   "blockchain-fastlane"
+  "blockchain-gate-bundle"
+  "ci-blockchain-parallel-sweep"
+  "blockchain-mainnet-activation-metrics-input"
+  "blockchain-mainnet-activation-metrics-missing-checklist"
+  "blockchain-mainnet-activation-metrics-input-template"
   "blockchain-mainnet-activation-metrics"
   "blockchain-mainnet-activation-gate"
+  "blockchain-mainnet-activation-gate-cycle"
+  "blockchain-mainnet-activation-gate-cycle-seeded"
+  "blockchain-mainnet-activation-operator-pack"
+  "blockchain-bootstrap-governance-graduation-gate"
   "ci-phase5-settlement-layer"
   "phase5-settlement-layer-check"
   "phase5-settlement-layer-run"
@@ -141,8 +175,17 @@ COMMANDS=(
 
 ENV_OVERRIDES=(
   "BLOCKCHAIN_FASTLANE_SCRIPT"
+  "BLOCKCHAIN_GATE_BUNDLE_SCRIPT"
+  "CI_BLOCKCHAIN_PARALLEL_SWEEP_SCRIPT"
+  "BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_INPUT_SCRIPT"
+  "BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_MISSING_CHECKLIST_SCRIPT"
+  "BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_INPUT_TEMPLATE_SCRIPT"
   "BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_SCRIPT"
   "BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SCRIPT"
+  "BLOCKCHAIN_MAINNET_ACTIVATION_GATE_CYCLE_SCRIPT"
+  "BLOCKCHAIN_MAINNET_ACTIVATION_GATE_CYCLE_SCRIPT"
+  "BLOCKCHAIN_MAINNET_ACTIVATION_OPERATOR_PACK_SCRIPT"
+  "BLOCKCHAIN_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_SCRIPT"
   "CI_PHASE5_SETTLEMENT_LAYER_SCRIPT"
   "PHASE5_SETTLEMENT_LAYER_CHECK_SCRIPT"
   "PHASE5_SETTLEMENT_LAYER_RUN_SCRIPT"
@@ -171,6 +214,10 @@ for idx in "${!COMMANDS[@]}"; do
   summary_json="$TMP_DIR/summary ${idx}.json"
   custom_flag="--sample-arg"
   custom_value="sample-value-${idx} ${command_name}"
+  expect_seed_example_input=0
+  if [[ "$command_name" == "blockchain-mainnet-activation-gate-cycle-seeded" ]]; then
+    expect_seed_example_input=1
+  fi
 
   assert_command_text_present "$SCRIPT_UNDER_TEST" "$command_name"
   create_fake_wrapper_script "$fake_script" "$marker"
@@ -192,7 +239,8 @@ for idx in "${!COMMANDS[@]}"; do
     "$reports_dir" \
     "$summary_json" \
     "$custom_flag" \
-    "$custom_value"
+    "$custom_value" \
+    "$expect_seed_example_input"
 done
 
 echo "easy-node blockchain gate wrapper integration ok"
