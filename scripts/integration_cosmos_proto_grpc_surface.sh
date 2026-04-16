@@ -29,12 +29,14 @@ fi
     github.com/tdpn/tdpn-chain/proto/gen/go/tdpn/vpnbilling/v1 \
     github.com/tdpn/tdpn-chain/proto/gen/go/tdpn/vpnrewards/v1 \
     github.com/tdpn/tdpn-chain/proto/gen/go/tdpn/vpnslashing/v1 \
-    github.com/tdpn/tdpn-chain/proto/gen/go/tdpn/vpnsponsor/v1
+    github.com/tdpn/tdpn-chain/proto/gen/go/tdpn/vpnsponsor/v1 \
+    github.com/tdpn/tdpn-chain/proto/gen/go/tdpn/vpnvalidator/v1 \
+    github.com/tdpn/tdpn-chain/proto/gen/go/tdpn/vpngovernance/v1
   rm -f "$tmp_mod" "$tmp_sum"
   trap - EXIT
 )
 
-for mod in vpnbilling vpnrewards vpnslashing vpnsponsor; do
+for mod in vpnbilling vpnrewards vpnslashing vpnsponsor vpnvalidator vpngovernance; do
   tx_file="$CHAIN_DIR/proto/gen/go/tdpn/$mod/v1/tx_grpc.pb.go"
   query_file="$CHAIN_DIR/proto/gen/go/tdpn/$mod/v1/query_grpc.pb.go"
 

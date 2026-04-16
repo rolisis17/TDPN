@@ -23,6 +23,12 @@ required=(
   "tdpn/vpnsponsor/v1/types.proto"
   "tdpn/vpnsponsor/v1/tx.proto"
   "tdpn/vpnsponsor/v1/query.proto"
+  "tdpn/vpnvalidator/v1/types.proto"
+  "tdpn/vpnvalidator/v1/tx.proto"
+  "tdpn/vpnvalidator/v1/query.proto"
+  "tdpn/vpngovernance/v1/types.proto"
+  "tdpn/vpngovernance/v1/tx.proto"
+  "tdpn/vpngovernance/v1/query.proto"
 )
 
 for rel in "${required[@]}"; do
@@ -41,7 +47,7 @@ for rel in "${required[@]}"; do
   fi
 done
 
-for mod in vpnbilling vpnrewards vpnslashing vpnsponsor; do
+for mod in vpnbilling vpnrewards vpnslashing vpnsponsor vpnvalidator vpngovernance; do
   tx="$PROTO_ROOT/tdpn/$mod/v1/tx.proto"
   query="$PROTO_ROOT/tdpn/$mod/v1/query.proto"
   if ! rg -q '^service Msg \{' "$tx"; then
@@ -88,6 +94,32 @@ if ! rg -q 'rpc ListSponsorAuthorizations\(QueryListSponsorAuthorizationsRequest
 fi
 if ! rg -q 'rpc ListDelegatedSessionCredits\(QueryListDelegatedSessionCreditsRequest\) returns \(QueryListDelegatedSessionCreditsResponse\);' "$PROTO_ROOT/tdpn/vpnsponsor/v1/query.proto"; then
   echo "vpnsponsor query proto missing ListDelegatedSessionCredits RPC"
+  exit 1
+fi
+
+if ! rg -q 'rpc ListValidatorEligibilities\(QueryListValidatorEligibilitiesRequest\) returns \(QueryListValidatorEligibilitiesResponse\);' "$PROTO_ROOT/tdpn/vpnvalidator/v1/query.proto"; then
+  echo "vpnvalidator query proto missing ListValidatorEligibilities RPC"
+  exit 1
+fi
+if ! rg -q 'rpc ListValidatorStatusRecords\(QueryListValidatorStatusRecordsRequest\) returns \(QueryListValidatorStatusRecordsResponse\);' "$PROTO_ROOT/tdpn/vpnvalidator/v1/query.proto"; then
+  echo "vpnvalidator query proto missing ListValidatorStatusRecords RPC"
+  exit 1
+fi
+if ! rg -q 'rpc PreviewEpochSelection\(QueryPreviewEpochSelectionRequest\) returns \(QueryPreviewEpochSelectionResponse\);' "$PROTO_ROOT/tdpn/vpnvalidator/v1/query.proto"; then
+  echo "vpnvalidator query proto missing PreviewEpochSelection RPC"
+  exit 1
+fi
+
+if ! rg -q 'rpc ListGovernancePolicies\(QueryListGovernancePoliciesRequest\) returns \(QueryListGovernancePoliciesResponse\);' "$PROTO_ROOT/tdpn/vpngovernance/v1/query.proto"; then
+  echo "vpngovernance query proto missing ListGovernancePolicies RPC"
+  exit 1
+fi
+if ! rg -q 'rpc ListGovernanceDecisions\(QueryListGovernanceDecisionsRequest\) returns \(QueryListGovernanceDecisionsResponse\);' "$PROTO_ROOT/tdpn/vpngovernance/v1/query.proto"; then
+  echo "vpngovernance query proto missing ListGovernanceDecisions RPC"
+  exit 1
+fi
+if ! rg -q 'rpc ListGovernanceAuditActions\(QueryListGovernanceAuditActionsRequest\) returns \(QueryListGovernanceAuditActionsResponse\);' "$PROTO_ROOT/tdpn/vpngovernance/v1/query.proto"; then
+  echo "vpngovernance query proto missing ListGovernanceAuditActions RPC"
   exit 1
 fi
 
