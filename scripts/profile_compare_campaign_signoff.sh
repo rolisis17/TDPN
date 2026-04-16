@@ -57,6 +57,8 @@ Notes:
     (--refresh-campaign 0).
   - --subject is a legacy alias of --campaign-subject.
   - --anon-cred remains an alias of --campaign-anon-cred.
+  - If no subject flag is provided, subject falls back to env:
+    CAMPAIGN_SUBJECT (preferred) then INVITE_KEY.
   - Single-instance lock is enabled by default per reports-dir; bypass only when
     intentionally running concurrent signoff with --allow-concurrent 1 (or
     PROFILE_COMPARE_CAMPAIGN_SIGNOFF_ALLOW_CONCURRENT=1).
@@ -500,6 +502,8 @@ campaign_subject="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_SUBJECT:-}"
 campaign_anon_cred="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_ANON_CRED:-}"
 subject_alias=""
 anon_cred_alias=""
+campaign_subject_cli_provided="0"
+campaign_subject_source=""
 campaign_start_local_stack="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_START_LOCAL_STACK:-}"
 original_args=("$@")
 
@@ -646,6 +650,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --campaign-subject)
       campaign_subject="${2:-}"
+      campaign_subject_cli_provided="1"
       shift 2
       ;;
     --campaign-anon-cred)
@@ -654,6 +659,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --subject)
       subject_alias="${2:-}"
+      campaign_subject_cli_provided="1"
       shift 2
       ;;
     --anon-cred)
@@ -773,6 +779,22 @@ if [[ -n "$subject_alias" ]]; then
 fi
 if [[ -n "$anon_cred_alias" ]]; then
   campaign_anon_cred="$anon_cred_alias"
+fi
+if [[ -z "$campaign_subject" && -z "$campaign_anon_cred" && "$campaign_subject_cli_provided" != "1" ]]; then
+  if [[ -n "${CAMPAIGN_SUBJECT:-}" ]]; then
+    campaign_subject="$(trim "${CAMPAIGN_SUBJECT:-}")"
+    if [[ -n "$campaign_subject" ]]; then
+      campaign_subject_source="env:CAMPAIGN_SUBJECT"
+    fi
+  elif [[ -n "${INVITE_KEY:-}" ]]; then
+    campaign_subject="$(trim "${INVITE_KEY:-}")"
+    if [[ -n "$campaign_subject" ]]; then
+      campaign_subject_source="env:INVITE_KEY"
+    fi
+  fi
+fi
+if [[ -n "$campaign_subject" && -z "$campaign_subject_source" ]]; then
+  campaign_subject_source="explicit"
 fi
 if [[ -n "$campaign_subject" && -n "$campaign_anon_cred" ]]; then
   echo "use either --campaign-subject or --campaign-anon-cred, not both"
@@ -1431,6 +1453,7 @@ jq -n \
   --arg campaign_exit_url "$campaign_exit_url" \
   --arg campaign_exit_url_effective "$campaign_exit_url_effective" \
   --arg campaign_subject "$campaign_subject" \
+  --arg campaign_subject_source "$campaign_subject_source" \
   --arg campaign_subject_effective "$campaign_subject_effective" \
   --arg campaign_anon_cred "$campaign_anon_cred" \
   --arg campaign_anon_cred_effective "$campaign_anon_cred_effective" \
@@ -1509,6 +1532,7 @@ jq -n \
         issuer_url: (if $campaign_issuer_url == "" then null else $campaign_issuer_url end),
         entry_url: (if $campaign_entry_url == "" then null else $campaign_entry_url end),
         exit_url: (if $campaign_exit_url == "" then null else $campaign_exit_url end),
+        subject_source: (if $campaign_subject_source == "" then null else $campaign_subject_source end),
         subject_configured: ($campaign_subject != ""),
         anon_cred_configured: ($campaign_anon_cred != ""),
         start_local_stack: (if $campaign_start_local_stack == "" then null else $campaign_start_local_stack end)

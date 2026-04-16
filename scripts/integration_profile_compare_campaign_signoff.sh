@@ -242,6 +242,115 @@ if ! jq -e '.status == "ok" and .final_rc == 0 and .inputs.campaign_refresh_over
   exit 1
 fi
 
+echo "[profile-compare-campaign-signoff] env CAMPAIGN_SUBJECT fallback takes precedence"
+: >"$SIGNOFF_CAPTURE"
+ENV_CAMPAIGN_SUBJECT_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_env_campaign_subject_summary.json"
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_COMPARE_CAMPAIGN_SCRIPT="$FAKE_CAMPAIGN" \
+PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT="$FAKE_CHECK" \
+FAKE_CAMPAIGN_RC=0 \
+FAKE_CHECK_RC=0 \
+FAKE_CHECK_DECISION=GO \
+CAMPAIGN_SUBJECT="inv-campaign-env" \
+INVITE_KEY="inv-invite-env" \
+./scripts/profile_compare_campaign_signoff.sh \
+  --reports-dir "$TMP_DIR/reports_env_campaign_subject" \
+  --refresh-campaign 1 \
+  --campaign-execution-mode docker \
+  --summary-json "$ENV_CAMPAIGN_SUBJECT_SUMMARY" >/tmp/integration_profile_compare_campaign_signoff_env_campaign_subject.log 2>&1
+
+if ! rg -q '\[profile-compare-campaign-signoff\] status=ok final_rc=0 decision=GO' /tmp/integration_profile_compare_campaign_signoff_env_campaign_subject.log; then
+  echo "expected env campaign-subject fallback status line not found"
+  cat /tmp/integration_profile_compare_campaign_signoff_env_campaign_subject.log
+  exit 1
+fi
+if ! rg -q -- '--subject inv-campaign-env' "$SIGNOFF_CAPTURE"; then
+  echo "expected CAMPAIGN_SUBJECT fallback forwarding flag missing"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+if rg -q -- '--subject inv-invite-env' "$SIGNOFF_CAPTURE"; then
+  echo "expected INVITE_KEY to be ignored when CAMPAIGN_SUBJECT is set"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+if ! jq -e '.inputs.campaign_refresh_overrides.subject_source == "env:CAMPAIGN_SUBJECT" and .inputs.campaign_refresh_overrides.subject_configured == true and .inputs.campaign_refresh_overrides_effective.subject_configured == true' "$ENV_CAMPAIGN_SUBJECT_SUMMARY" >/dev/null 2>&1; then
+  echo "expected CAMPAIGN_SUBJECT subject_source summary fields missing"
+  cat "$ENV_CAMPAIGN_SUBJECT_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-compare-campaign-signoff] env INVITE_KEY fallback applies when CAMPAIGN_SUBJECT absent"
+: >"$SIGNOFF_CAPTURE"
+ENV_INVITE_KEY_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_env_invite_key_summary.json"
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_COMPARE_CAMPAIGN_SCRIPT="$FAKE_CAMPAIGN" \
+PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT="$FAKE_CHECK" \
+FAKE_CAMPAIGN_RC=0 \
+FAKE_CHECK_RC=0 \
+FAKE_CHECK_DECISION=GO \
+INVITE_KEY="inv-invite-env-only" \
+./scripts/profile_compare_campaign_signoff.sh \
+  --reports-dir "$TMP_DIR/reports_env_invite_key" \
+  --refresh-campaign 1 \
+  --campaign-execution-mode docker \
+  --summary-json "$ENV_INVITE_KEY_SUMMARY" >/tmp/integration_profile_compare_campaign_signoff_env_invite_key.log 2>&1
+
+if ! rg -q '\[profile-compare-campaign-signoff\] status=ok final_rc=0 decision=GO' /tmp/integration_profile_compare_campaign_signoff_env_invite_key.log; then
+  echo "expected INVITE_KEY fallback status line not found"
+  cat /tmp/integration_profile_compare_campaign_signoff_env_invite_key.log
+  exit 1
+fi
+if ! rg -q -- '--subject inv-invite-env-only' "$SIGNOFF_CAPTURE"; then
+  echo "expected INVITE_KEY fallback forwarding flag missing"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+if ! jq -e '.inputs.campaign_refresh_overrides.subject_source == "env:INVITE_KEY" and .inputs.campaign_refresh_overrides.subject_configured == true and .inputs.campaign_refresh_overrides_effective.subject_configured == true' "$ENV_INVITE_KEY_SUMMARY" >/dev/null 2>&1; then
+  echo "expected INVITE_KEY subject_source summary fields missing"
+  cat "$ENV_INVITE_KEY_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-compare-campaign-signoff] explicit subject overrides env fallback"
+: >"$SIGNOFF_CAPTURE"
+EXPLICIT_SUBJECT_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_explicit_subject_summary.json"
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_COMPARE_CAMPAIGN_SCRIPT="$FAKE_CAMPAIGN" \
+PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT="$FAKE_CHECK" \
+FAKE_CAMPAIGN_RC=0 \
+FAKE_CHECK_RC=0 \
+FAKE_CHECK_DECISION=GO \
+CAMPAIGN_SUBJECT="inv-campaign-env-ignored" \
+INVITE_KEY="inv-invite-env-ignored" \
+./scripts/profile_compare_campaign_signoff.sh \
+  --reports-dir "$TMP_DIR/reports_explicit_subject_overrides_env" \
+  --refresh-campaign 1 \
+  --campaign-execution-mode docker \
+  --subject "inv-cli-explicit" \
+  --summary-json "$EXPLICIT_SUBJECT_SUMMARY" >/tmp/integration_profile_compare_campaign_signoff_explicit_subject.log 2>&1
+
+if ! rg -q '\[profile-compare-campaign-signoff\] status=ok final_rc=0 decision=GO' /tmp/integration_profile_compare_campaign_signoff_explicit_subject.log; then
+  echo "expected explicit subject override status line not found"
+  cat /tmp/integration_profile_compare_campaign_signoff_explicit_subject.log
+  exit 1
+fi
+if ! rg -q -- '--subject inv-cli-explicit' "$SIGNOFF_CAPTURE"; then
+  echo "expected explicit subject forwarding flag missing"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+if rg -q -- 'inv-campaign-env-ignored\|inv-invite-env-ignored' "$SIGNOFF_CAPTURE"; then
+  echo "unexpected env fallback value used when explicit subject provided"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+if ! jq -e '.inputs.campaign_refresh_overrides.subject_source == "explicit" and .inputs.campaign_refresh_overrides.subject_configured == true and .inputs.campaign_refresh_overrides_effective.subject_configured == true' "$EXPLICIT_SUBJECT_SUMMARY" >/dev/null 2>&1; then
+  echo "expected explicit subject_source summary fields missing"
+  cat "$EXPLICIT_SUBJECT_SUMMARY"
+  exit 1
+fi
+
 echo "[profile-compare-campaign-signoff] conflicting alias and campaign-prefixed values fail clearly"
 set +e
 ./scripts/profile_compare_campaign_signoff.sh \
