@@ -40,6 +40,15 @@ DUAL_OUTPUT="$TMP_DIR/dual_stage_output.json"
 DUAL_LOG="$TMP_DIR/dual_stage.log"
 DUAL_CANONICAL="$TMP_DIR/dual_stage_canonical_summary.json"
 
+APP_FLOOR_FALSE_CONTRACTS="$TMP_DIR/phase6_contracts_app_floor_false.json"
+APP_FLOOR_FAIL_OUTPUT="$TMP_DIR/app_floor_fail_output.json"
+APP_FLOOR_FAIL_LOG="$TMP_DIR/app_floor_fail.log"
+APP_FLOOR_FAIL_CANONICAL="$TMP_DIR/app_floor_fail_canonical_summary.json"
+
+APP_FLOOR_RELAXED_OUTPUT="$TMP_DIR/app_floor_relaxed_output.json"
+APP_FLOOR_RELAXED_LOG="$TMP_DIR/app_floor_relaxed.log"
+APP_FLOOR_RELAXED_CANONICAL="$TMP_DIR/app_floor_relaxed_canonical_summary.json"
+
 OP_DEFAULT_OUTPUT="$TMP_DIR/operator_default_output.json"
 OP_DEFAULT_LOG="$TMP_DIR/operator_default.log"
 OP_DEFAULT_CANONICAL="$TMP_DIR/operator_default_canonical_summary.json"
@@ -104,7 +113,10 @@ cat >"$PASS_CONTRACTS" <<'EOF_PASS_CONTRACTS'
   "status": "pass",
   "rc": 0,
   "signals": {
-    "dual_write_parity_ok": true
+    "dual_write_parity_ok": true,
+    "cosmos_module_coverage_floor_ok": true,
+    "cosmos_keeper_coverage_floor_ok": true,
+    "cosmos_app_coverage_floor_ok": true
   }
 }
 EOF_PASS_CONTRACTS
@@ -143,10 +155,38 @@ cat >"$DUAL_STAGE_CONTRACTS" <<'EOF_DUAL_STAGE_CONTRACTS'
   "steps": {
     "phase6_cosmos_dual_write_parity": {
       "status": "pass"
+    },
+    "phase6_cosmos_module_coverage_floor": {
+      "status": "pass"
+    },
+    "phase6_cosmos_keeper_coverage_floor": {
+      "status": "pass"
+    },
+    "phase6_cosmos_app_coverage_floor": {
+      "status": "pass"
     }
   }
 }
 EOF_DUAL_STAGE_CONTRACTS
+
+cat >"$APP_FLOOR_FALSE_CONTRACTS" <<'EOF_APP_FLOOR_FALSE_CONTRACTS'
+{
+  "version": 1,
+  "schema": {
+    "id": "ci_phase6_cosmos_l1_contracts_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "pass",
+  "rc": 0,
+  "signals": {
+    "dual_write_parity_ok": true,
+    "cosmos_module_coverage_floor_ok": true,
+    "cosmos_keeper_coverage_floor_ok": true,
+    "cosmos_app_coverage_floor_ok": false
+  }
+}
+EOF_APP_FLOOR_FALSE_CONTRACTS
 
 cat >"$ACTIVATION_GATE_GO_SUMMARY" <<'EOF_ACTIVATION_GATE_GO_SUMMARY'
 {
@@ -217,6 +257,9 @@ if ! jq -e '
   and .policy.require_tdpnd_grpc_auth_live_smoke_ok == true
   and .policy.require_tdpnd_comet_runtime_smoke_ok == false
   and .policy.require_dual_write_parity_ok == true
+  and .policy.require_cosmos_module_coverage_floor_ok == true
+  and .policy.require_cosmos_keeper_coverage_floor_ok == true
+  and .policy.require_cosmos_app_coverage_floor_ok == true
   and .policy.require_mainnet_activation_gate_go == false
   and .policy.require_rollback_path_ready == true
   and .policy.require_operator_approval_ok == false
@@ -227,8 +270,14 @@ if ! jq -e '
   and .signals.tdpnd_grpc_auth_live_smoke_ok == true
   and .signals.tdpnd_comet_runtime_smoke_ok == true
   and .signals.dual_write_parity_ok == true
+  and .signals.cosmos_module_coverage_floor_ok == true
+  and .signals.cosmos_keeper_coverage_floor_ok == true
+  and .signals.cosmos_app_coverage_floor_ok == true
   and .signals.mainnet_activation_gate_go == null
   and .stages.mainnet_activation_gate.status == "missing"
+  and .stages.cosmos_module_coverage_floor.status == "pass"
+  and .stages.cosmos_keeper_coverage_floor.status == "pass"
+  and .stages.cosmos_app_coverage_floor.status == "pass"
   and .signals.rollback_path_ready == true
   and .signals.operator_approval_ok == true
 ' --arg expected_canonical "$PASS_CANONICAL" "$PASS_OUTPUT" >/dev/null; then
@@ -311,10 +360,69 @@ if ! jq -e '
   and .rc == 0
   and .signals.dual_write_parity_ok == true
   and .stages.dual_write_parity.status == "pass"
+  and .signals.cosmos_module_coverage_floor_ok == true
+  and .signals.cosmos_keeper_coverage_floor_ok == true
+  and .signals.cosmos_app_coverage_floor_ok == true
+  and .stages.cosmos_module_coverage_floor.status == "pass"
+  and .stages.cosmos_keeper_coverage_floor.status == "pass"
+  and .stages.cosmos_app_coverage_floor.status == "pass"
 ' "$DUAL_OUTPUT" >/dev/null; then
   echo "dual-write fallback summary mismatch"
   cat "$DUAL_OUTPUT"
   cat "$DUAL_LOG"
+  exit 1
+fi
+
+echo "[phase7-mainnet-cutover-check] app coverage floor false fail-closed path"
+set +e
+PHASE7_MAINNET_CUTOVER_CHECK_CANONICAL_SUMMARY_JSON="$APP_FLOOR_FAIL_CANONICAL" \
+"$SCRIPT_UNDER_TEST" \
+  --phase6-handoff-summary-json "$PASS_HANDOFF" \
+  --phase6-contracts-summary-json "$APP_FLOOR_FALSE_CONTRACTS" \
+  --rollback-path-ready 1 \
+  --summary-json "$APP_FLOOR_FAIL_OUTPUT" \
+  --show-json 0 >"$APP_FLOOR_FAIL_LOG" 2>&1
+app_floor_fail_rc=$?
+set -e
+if [[ "$app_floor_fail_rc" -ne 1 ]]; then
+  echo "expected rc=1 when cosmos_app_coverage_floor_ok is required and false, got rc=$app_floor_fail_rc"
+  cat "$APP_FLOOR_FAIL_LOG"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .policy.require_cosmos_app_coverage_floor_ok == true
+  and .signals.cosmos_app_coverage_floor_ok == false
+  and .stages.cosmos_app_coverage_floor.status == "fail"
+  and ((.decision.reasons // []) | any(test("cosmos_app_coverage_floor_ok is false")))
+' "$APP_FLOOR_FAIL_OUTPUT" >/dev/null; then
+  echo "app-floor-fail summary mismatch"
+  cat "$APP_FLOOR_FAIL_OUTPUT"
+  cat "$APP_FLOOR_FAIL_LOG"
+  exit 1
+fi
+
+echo "[phase7-mainnet-cutover-check] app coverage floor relaxed requirement"
+PHASE7_MAINNET_CUTOVER_CHECK_CANONICAL_SUMMARY_JSON="$APP_FLOOR_RELAXED_CANONICAL" \
+"$SCRIPT_UNDER_TEST" \
+  --phase6-handoff-summary-json "$PASS_HANDOFF" \
+  --phase6-contracts-summary-json "$APP_FLOOR_FALSE_CONTRACTS" \
+  --rollback-path-ready 1 \
+  --require-cosmos-app-coverage-floor-ok 0 \
+  --summary-json "$APP_FLOOR_RELAXED_OUTPUT" \
+  --show-json 0 >"$APP_FLOOR_RELAXED_LOG" 2>&1
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .policy.require_cosmos_app_coverage_floor_ok == false
+  and .signals.cosmos_app_coverage_floor_ok == false
+  and .stages.cosmos_app_coverage_floor.status == "fail"
+' "$APP_FLOOR_RELAXED_OUTPUT" >/dev/null; then
+  echo "app-floor-relaxed summary mismatch"
+  cat "$APP_FLOOR_RELAXED_OUTPUT"
+  cat "$APP_FLOOR_RELAXED_LOG"
   exit 1
 fi
 

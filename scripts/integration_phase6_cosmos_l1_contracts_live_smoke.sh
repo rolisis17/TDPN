@@ -63,6 +63,7 @@ if ! jq -e --arg summary "$SUMMARY_JSON" --arg canonical "$CANONICAL_SUMMARY_JSO
   and (.steps.ci_phase6_cosmos_l1_build_testnet | type) == "object"
   and (.steps.phase6_cosmos_module_coverage_floor | type) == "object"
   and (.steps.phase6_cosmos_keeper_coverage_floor | type) == "object"
+  and (.steps.phase6_cosmos_app_coverage_floor | type) == "object"
   and (.steps.phase6_cosmos_dual_write_parity | type) == "object"
   and (.steps.phase6_cosmos_l1_build_testnet_check | type) == "object"
   and (.steps.phase6_cosmos_l1_build_testnet_run | type) == "object"
@@ -73,6 +74,7 @@ if ! jq -e --arg summary "$SUMMARY_JSON" --arg canonical "$CANONICAL_SUMMARY_JSO
   and .steps.ci_phase6_cosmos_l1_build_testnet.status == "pass"
   and .steps.phase6_cosmos_module_coverage_floor.status == "pass"
   and .steps.phase6_cosmos_keeper_coverage_floor.status == "pass"
+  and .steps.phase6_cosmos_app_coverage_floor.status == "pass"
   and .steps.phase6_cosmos_dual_write_parity.status == "pass"
   and .steps.phase6_cosmos_l1_build_testnet_check.status == "pass"
   and .steps.phase6_cosmos_l1_build_testnet_run.status == "pass"
@@ -82,6 +84,7 @@ if ! jq -e --arg summary "$SUMMARY_JSON" --arg canonical "$CANONICAL_SUMMARY_JSO
   and .steps.ci_phase6_cosmos_l1_build_testnet.rc == 0
   and .steps.phase6_cosmos_module_coverage_floor.rc == 0
   and .steps.phase6_cosmos_keeper_coverage_floor.rc == 0
+  and .steps.phase6_cosmos_app_coverage_floor.rc == 0
   and .steps.phase6_cosmos_dual_write_parity.rc == 0
   and .steps.phase6_cosmos_l1_build_testnet_check.rc == 0
   and .steps.phase6_cosmos_l1_build_testnet_run.rc == 0

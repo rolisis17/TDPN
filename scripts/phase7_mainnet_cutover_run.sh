@@ -268,6 +268,9 @@ declare signal_tdpnd_grpc_auth_live_smoke_ok="null"
 declare signal_tdpnd_comet_runtime_smoke_ok="null"
 declare signal_dual_write_parity_ok="null"
 declare signal_mainnet_activation_gate_go="null"
+declare signal_cosmos_module_coverage_floor_ok="null"
+declare signal_cosmos_keeper_coverage_floor_ok="null"
+declare signal_cosmos_app_coverage_floor_ok="null"
 declare signal_rollback_path_ready="null"
 declare signal_operator_approval_ok="null"
 
@@ -303,6 +306,9 @@ if check_summary_contract_valid "$check_summary_json"; then
   signal_tdpnd_comet_runtime_smoke_ok="$(extract_check_signal_json "$check_summary_json" "tdpnd_comet_runtime_smoke_ok")"
   signal_dual_write_parity_ok="$(extract_check_signal_json "$check_summary_json" "dual_write_parity_ok")"
   signal_mainnet_activation_gate_go="$(extract_check_signal_json "$check_summary_json" "mainnet_activation_gate_go")"
+  signal_cosmos_module_coverage_floor_ok="$(extract_check_signal_json "$check_summary_json" "cosmos_module_coverage_floor_ok")"
+  signal_cosmos_keeper_coverage_floor_ok="$(extract_check_signal_json "$check_summary_json" "cosmos_keeper_coverage_floor_ok")"
+  signal_cosmos_app_coverage_floor_ok="$(extract_check_signal_json "$check_summary_json" "cosmos_app_coverage_floor_ok")"
   signal_rollback_path_ready="$(extract_check_signal_json "$check_summary_json" "rollback_path_ready")"
   signal_operator_approval_ok="$(extract_check_signal_json "$check_summary_json" "operator_approval_ok")"
   if [[ "$check_command_rc" -ne 0 ]]; then
@@ -358,6 +364,9 @@ jq -n \
   --argjson signal_tdpnd_comet_runtime_smoke_ok "$signal_tdpnd_comet_runtime_smoke_ok" \
   --argjson signal_dual_write_parity_ok "$signal_dual_write_parity_ok" \
   --argjson signal_mainnet_activation_gate_go "$signal_mainnet_activation_gate_go" \
+  --argjson signal_cosmos_module_coverage_floor_ok "$signal_cosmos_module_coverage_floor_ok" \
+  --argjson signal_cosmos_keeper_coverage_floor_ok "$signal_cosmos_keeper_coverage_floor_ok" \
+  --argjson signal_cosmos_app_coverage_floor_ok "$signal_cosmos_app_coverage_floor_ok" \
   --argjson signal_rollback_path_ready "$signal_rollback_path_ready" \
   --argjson signal_operator_approval_ok "$signal_operator_approval_ok" \
   --arg check_log "$check_log" \
@@ -397,6 +406,9 @@ jq -n \
           tdpnd_comet_runtime_smoke_ok: $signal_tdpnd_comet_runtime_smoke_ok,
           dual_write_parity_ok: $signal_dual_write_parity_ok,
           mainnet_activation_gate_go: $signal_mainnet_activation_gate_go,
+          cosmos_module_coverage_floor_ok: $signal_cosmos_module_coverage_floor_ok,
+          cosmos_keeper_coverage_floor_ok: $signal_cosmos_keeper_coverage_floor_ok,
+          cosmos_app_coverage_floor_ok: $signal_cosmos_app_coverage_floor_ok,
           rollback_path_ready: $signal_rollback_path_ready,
           operator_approval_ok: $signal_operator_approval_ok
         },

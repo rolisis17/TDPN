@@ -47,6 +47,7 @@ STAGE_ENV_NAMES=(
   "CI_PHASE6_COSMOS_L1_CONTRACTS_CI_PHASE6_COSMOS_L1_BUILD_TESTNET_SCRIPT"
   "CI_PHASE6_COSMOS_L1_CONTRACTS_PHASE6_COSMOS_MODULE_COVERAGE_FLOOR_SCRIPT"
   "CI_PHASE6_COSMOS_L1_CONTRACTS_PHASE6_COSMOS_KEEPER_COVERAGE_FLOOR_SCRIPT"
+  "CI_PHASE6_COSMOS_L1_CONTRACTS_PHASE6_COSMOS_APP_COVERAGE_FLOOR_SCRIPT"
   "CI_PHASE6_COSMOS_L1_CONTRACTS_PHASE6_COSMOS_DUAL_WRITE_PARITY_SCRIPT"
   "CI_PHASE6_COSMOS_L1_CONTRACTS_PHASE6_COSMOS_L1_BUILD_TESTNET_CHECK_SCRIPT"
   "CI_PHASE6_COSMOS_L1_CONTRACTS_PHASE6_COSMOS_L1_BUILD_TESTNET_RUN_SCRIPT"
@@ -60,6 +61,7 @@ STAGE_IDS=(
   "ci_phase6_cosmos_l1_build_testnet"
   "phase6_cosmos_module_coverage_floor"
   "phase6_cosmos_keeper_coverage_floor"
+  "phase6_cosmos_app_coverage_floor"
   "phase6_cosmos_dual_write_parity"
   "phase6_cosmos_l1_build_testnet_check"
   "phase6_cosmos_l1_build_testnet_run"
@@ -225,6 +227,7 @@ if ! jq -e '
   and .inputs.run_ci_phase6_cosmos_l1_build_testnet == true
   and .inputs.run_phase6_cosmos_module_coverage_floor == true
   and .inputs.run_phase6_cosmos_keeper_coverage_floor == true
+  and .inputs.run_phase6_cosmos_app_coverage_floor == true
   and .inputs.run_phase6_cosmos_dual_write_parity == true
   and .inputs.run_phase6_cosmos_l1_build_testnet_check == true
   and .inputs.run_phase6_cosmos_l1_build_testnet_run == true
@@ -234,6 +237,7 @@ if ! jq -e '
   and .inputs.run_phase6_cosmos_l1_contracts_live_smoke == true
   and (.steps | to_entries | all(.value.enabled == true and .value.status == "pass" and .value.rc == 0 and .value.command != null))
   and .steps.ci_phase6_cosmos_l1_build_testnet.status == "pass"
+  and .steps.phase6_cosmos_app_coverage_floor.status == "pass"
   and .steps.phase6_cosmos_dual_write_parity.status == "pass"
   and .steps.phase6_cosmos_l1_build_testnet_suite.status == "pass"
   and .steps.phase6_cosmos_l1_contracts_live_smoke.status == "pass"
@@ -333,6 +337,7 @@ CI_PHASE6_COSMOS_L1_CONTRACTS_CANONICAL_SUMMARY_JSON="$TOGGLE_CANONICAL_SUMMARY_
   --run-ci-phase6-cosmos-l1-build-testnet 0 \
   --run-phase6-cosmos-module-coverage-floor 0 \
   --run-phase6-cosmos-keeper-coverage-floor 0 \
+  --run-phase6-cosmos-app-coverage-floor 0 \
   --run-phase6-cosmos-dual-write-parity 0 \
   --run-phase6-cosmos-l1-build-testnet-check 0 \
   --run-phase6-cosmos-l1-build-testnet-handoff-check 0 \
@@ -361,6 +366,10 @@ if ! jq -e '
   and .steps.phase6_cosmos_keeper_coverage_floor.enabled == false
   and .steps.phase6_cosmos_keeper_coverage_floor.status == "skip"
   and .steps.phase6_cosmos_keeper_coverage_floor.reason == "disabled"
+  and .inputs.run_phase6_cosmos_app_coverage_floor == false
+  and .steps.phase6_cosmos_app_coverage_floor.enabled == false
+  and .steps.phase6_cosmos_app_coverage_floor.status == "skip"
+  and .steps.phase6_cosmos_app_coverage_floor.reason == "disabled"
   and .inputs.run_phase6_cosmos_dual_write_parity == false
   and .steps.phase6_cosmos_dual_write_parity.enabled == false
   and .steps.phase6_cosmos_dual_write_parity.status == "skip"
@@ -396,7 +405,7 @@ echo "[ci-phase6-cosmos-l1-contracts] first-failure rc propagation"
 : >"$CAPTURE"
 set +e
 CI_PHASE6_CONTRACTS_CAPTURE_FILE="$CAPTURE" \
-CI_PHASE6_CONTRACTS_FAIL_MATRIX="phase6_cosmos_dual_write_parity=19,phase6_cosmos_l1_build_testnet_check=23,phase6_cosmos_l1_build_testnet_handoff_check=41,phase6_cosmos_l1_build_testnet_suite=43,phase6_cosmos_l1_contracts_live_smoke=47" \
+CI_PHASE6_CONTRACTS_FAIL_MATRIX="phase6_cosmos_app_coverage_floor=17,phase6_cosmos_dual_write_parity=19,phase6_cosmos_l1_build_testnet_check=23,phase6_cosmos_l1_build_testnet_handoff_check=41,phase6_cosmos_l1_build_testnet_suite=43,phase6_cosmos_l1_contracts_live_smoke=47" \
 CI_PHASE6_COSMOS_L1_CONTRACTS_CANONICAL_SUMMARY_JSON="$FAIL_CANONICAL_SUMMARY_JSON" \
 "$GATE_SCRIPT" \
   --reports-dir "$FAIL_REPORTS_DIR" \
@@ -405,8 +414,8 @@ CI_PHASE6_COSMOS_L1_CONTRACTS_CANONICAL_SUMMARY_JSON="$FAIL_CANONICAL_SUMMARY_JS
 fail_rc=$?
 set -e
 
-if [[ "$fail_rc" -ne 19 ]]; then
-  echo "expected fail rc=19, got rc=$fail_rc"
+if [[ "$fail_rc" -ne 17 ]]; then
+  echo "expected fail rc=17, got rc=$fail_rc"
   cat "$FAIL_LOG"
   exit 1
 fi
@@ -420,11 +429,13 @@ if [[ ! -f "$FAIL_SUMMARY_JSON" ]]; then
 fi
 if ! jq -e '
   .status == "fail"
-  and .rc == 19
+  and .rc == 17
   and .inputs.dry_run == false
   and .steps.ci_phase6_cosmos_l1_build_testnet.status == "pass"
   and .steps.phase6_cosmos_module_coverage_floor.status == "pass"
   and .steps.phase6_cosmos_keeper_coverage_floor.status == "pass"
+  and .steps.phase6_cosmos_app_coverage_floor.status == "fail"
+  and .steps.phase6_cosmos_app_coverage_floor.rc == 17
   and .steps.phase6_cosmos_dual_write_parity.status == "fail"
   and .steps.phase6_cosmos_dual_write_parity.rc == 19
   and .steps.phase6_cosmos_l1_build_testnet_check.status == "fail"
@@ -444,7 +455,7 @@ if ! jq -e '
   cat "$FAIL_SUMMARY_JSON"
   exit 1
 fi
-if ! grep -Fq -- '[ci-phase6-cosmos-l1-contracts] status=fail rc=19 dry_run=0' "$FAIL_LOG"; then
+if ! grep -Fq -- '[ci-phase6-cosmos-l1-contracts] status=fail rc=17 dry_run=0' "$FAIL_LOG"; then
   echo "fail log missing final fail status line"
   cat "$FAIL_LOG"
   exit 1

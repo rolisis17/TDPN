@@ -60,6 +60,7 @@ phase6_proto_grpc_surface_script="scripts/integration_cosmos_proto_grpc_surface.
 phase6_proto_codegen_surface_script="scripts/integration_cosmos_proto_codegen_surface.sh"
 phase6_module_coverage_floor_script="scripts/integration_cosmos_module_coverage_floor.sh"
 phase6_keeper_coverage_floor_script="scripts/integration_cosmos_keeper_coverage_floor.sh"
+phase6_app_coverage_floor_script="scripts/integration_cosmos_app_coverage_floor.sh"
 phase6_dual_write_parity_script="scripts/integration_cosmos_dual_write_parity.sh"
 phase6_check_script="scripts/phase6_cosmos_l1_build_testnet_check.sh"
 phase6_run_script="scripts/phase6_cosmos_l1_build_testnet_run.sh"
@@ -233,6 +234,33 @@ check_phase7_mainnet_activation_gate_doc_surface() {
   fi
 }
 
+check_phase7_coverage_floor_gating_doc_surface() {
+  local file_path="$1"
+  local label="$2"
+
+  if ! rg -Fq "coverage-floor signals" "$file_path"; then
+    echo "$label must document phase7 coverage-floor signal gating posture"
+    exit 1
+  fi
+  for token in \
+    "cosmos_module_coverage_floor" \
+    "cosmos_keeper_coverage_floor" \
+    "cosmos_app_coverage_floor" \
+    "dual-write parity confirmation" \
+    "phase7_mainnet_cutover_check.sh" \
+    "phase7_mainnet_cutover_handoff_check.sh"
+  do
+    if ! rg -Fq "$token" "$file_path"; then
+      echo "$label must include phase7 coverage-floor gating contract token: $token"
+      exit 1
+    fi
+  done
+  if ! rg -Fq -- "--require-mainnet-activation-gate-go" "$file_path"; then
+    echo "$label must include phase7 coverage-floor gating flag surface: --require-mainnet-activation-gate-go"
+    exit 1
+  fi
+}
+
 check_phase7_mainnet_activation_gate_signal_surface() {
   local file_path="$1"
   local label="$2"
@@ -348,7 +376,7 @@ check_mainnet_activation_gate_surface() {
   fi
 }
 
-for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$roadmap_integration_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$testing_guide_doc" "$chain_readme" "$chain_scaffold_file" "$chain_grpc_registry_file" "$chain_grpc_registry_test_file" "$chain_settlement_bridge_file" "$chain_runtime_test_file" "$settlement_mapping_doc" "$blockchain_sponsor_quickstart_doc" "$phase5_ci_script" "$phase5_integration_script" "$phase5_check_script" "$phase5_run_script" "$phase5_handoff_check_script" "$phase5_handoff_run_script" "$phase5_check_integration_script" "$phase5_run_integration_script" "$phase5_handoff_check_integration_script" "$phase5_handoff_run_integration_script" "$phase5_summary_report_script" "$phase5_summary_report_integration_script" "$blockchain_fastlane_script" "$blockchain_fastlane_integration_script" "$ci_local_script" "$easy_node_script" "$easy_node_blockchain_gate_wrappers_integration_script" "$easy_node_blockchain_summary_reports_integration_script" "$phase6_ci_script" "$phase6_integration_script" "$phase6_contracts_ci_script" "$phase6_contracts_integration_script" "$phase6_contracts_live_smoke_script" "$phase6_grpc_app_roundtrip_script" "$phase6_grpc_runtime_smoke_script" "$phase6_grpc_live_smoke_script" "$phase6_grpc_auth_live_smoke_script" "$phase6_settlement_bridge_smoke_script" "$phase6_settlement_bridge_live_smoke_script" "$phase6_query_surface_script" "$phase6_module_tx_surface_script" "$phase6_proto_surface_script" "$phase6_proto_grpc_surface_script" "$phase6_proto_codegen_surface_script" "$phase6_module_coverage_floor_script" "$phase6_keeper_coverage_floor_script" "$phase6_dual_write_parity_script" "$phase6_check_script" "$phase6_run_script" "$phase6_check_integration_script" "$phase6_run_integration_script" "$phase6_suite_script" "$phase6_suite_integration_script" "$phase6_summary_report_script" "$phase6_summary_report_integration_script" "$phase7_check_script" "$phase7_check_integration_script" "$phase7_run_script" "$phase7_run_integration_script" "$phase7_handoff_check_script" "$phase7_handoff_check_integration_script" "$phase7_handoff_run_script" "$phase7_handoff_run_integration_script" "$phase7_ci_script" "$phase7_ci_integration_script" "$phase7_summary_report_script" "$phase7_summary_report_integration_script"; do
+for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$roadmap_integration_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$testing_guide_doc" "$chain_readme" "$chain_scaffold_file" "$chain_grpc_registry_file" "$chain_grpc_registry_test_file" "$chain_settlement_bridge_file" "$chain_runtime_test_file" "$settlement_mapping_doc" "$blockchain_sponsor_quickstart_doc" "$phase5_ci_script" "$phase5_integration_script" "$phase5_check_script" "$phase5_run_script" "$phase5_handoff_check_script" "$phase5_handoff_run_script" "$phase5_check_integration_script" "$phase5_run_integration_script" "$phase5_handoff_check_integration_script" "$phase5_handoff_run_integration_script" "$phase5_summary_report_script" "$phase5_summary_report_integration_script" "$blockchain_fastlane_script" "$blockchain_fastlane_integration_script" "$ci_local_script" "$easy_node_script" "$easy_node_blockchain_gate_wrappers_integration_script" "$easy_node_blockchain_summary_reports_integration_script" "$phase6_ci_script" "$phase6_integration_script" "$phase6_contracts_ci_script" "$phase6_contracts_integration_script" "$phase6_contracts_live_smoke_script" "$phase6_grpc_app_roundtrip_script" "$phase6_grpc_runtime_smoke_script" "$phase6_grpc_live_smoke_script" "$phase6_grpc_auth_live_smoke_script" "$phase6_settlement_bridge_smoke_script" "$phase6_settlement_bridge_live_smoke_script" "$phase6_query_surface_script" "$phase6_module_tx_surface_script" "$phase6_proto_surface_script" "$phase6_proto_grpc_surface_script" "$phase6_proto_codegen_surface_script" "$phase6_module_coverage_floor_script" "$phase6_keeper_coverage_floor_script" "$phase6_app_coverage_floor_script" "$phase6_dual_write_parity_script" "$phase6_check_script" "$phase6_run_script" "$phase6_check_integration_script" "$phase6_run_integration_script" "$phase6_suite_script" "$phase6_suite_integration_script" "$phase6_summary_report_script" "$phase6_summary_report_integration_script" "$phase7_check_script" "$phase7_check_integration_script" "$phase7_run_script" "$phase7_run_integration_script" "$phase7_handoff_check_script" "$phase7_handoff_check_integration_script" "$phase7_handoff_run_script" "$phase7_handoff_run_integration_script" "$phase7_ci_script" "$phase7_ci_integration_script" "$phase7_summary_report_script" "$phase7_summary_report_integration_script"; do
   if [[ ! -f "$f" ]]; then
     echo "missing required file: $f"
     exit 1
@@ -594,6 +622,14 @@ if ! rg -Fq "integration_cosmos_keeper_coverage_floor.sh" "$full_plan"; then
   echo "full execution plan must document phase6 contracts keeper coverage floor integration script"
   exit 1
 fi
+if ! rg -Fq "cosmos_app_coverage_floor" "$full_plan"; then
+  echo "full execution plan must document phase6 contracts cosmos_app_coverage_floor stage"
+  exit 1
+fi
+if ! rg -Fq "integration_cosmos_app_coverage_floor.sh" "$full_plan"; then
+  echo "full execution plan must document phase6 contracts app coverage floor integration script"
+  exit 1
+fi
 if ! rg -Fq "phase6_cosmos_dual_write_parity" "$full_plan"; then
   echo "full execution plan must document phase6 contracts phase6_cosmos_dual_write_parity stage"
   exit 1
@@ -785,6 +821,9 @@ check_phase7_comet_signal_surface "$full_plan" "full execution plan"
 check_phase7_comet_signal_surface "$product_roadmap" "product roadmap"
 check_phase7_mainnet_activation_gate_doc_surface "$full_plan" "full execution plan"
 check_phase7_mainnet_activation_gate_doc_surface "$product_roadmap" "product roadmap"
+check_phase7_coverage_floor_gating_doc_surface "$full_plan" "full execution plan"
+check_phase7_coverage_floor_gating_doc_surface "$product_roadmap" "product roadmap"
+check_phase7_coverage_floor_gating_doc_surface "$cosmos_runtime_doc" "cosmos settlement runtime doc"
 if ! rg -qi "confirmation lifecycle" "$full_plan"; then
   echo "full execution plan must document settlement confirmation lifecycle posture"
   exit 1
@@ -893,6 +932,14 @@ if ! rg -Fq "cosmos_keeper_coverage_floor" "$product_roadmap"; then
 fi
 if ! rg -Fq "integration_cosmos_keeper_coverage_floor.sh" "$product_roadmap"; then
   echo "product roadmap must document phase6 contracts keeper coverage floor integration script"
+  exit 1
+fi
+if ! rg -Fq "cosmos_app_coverage_floor" "$product_roadmap"; then
+  echo "product roadmap must document phase6 contracts cosmos_app_coverage_floor stage"
+  exit 1
+fi
+if ! rg -Fq "integration_cosmos_app_coverage_floor.sh" "$product_roadmap"; then
+  echo "product roadmap must document phase6 contracts app coverage floor integration script"
   exit 1
 fi
 for coverage_doc in "$full_plan" "$product_roadmap" "$chain_readme"; do
@@ -1363,6 +1410,34 @@ do
     exit 1
   fi
 done
+if ! rg -Fq "cosmos_app_coverage_floor" "$phase6_contracts_ci_script"; then
+  echo "phase6 contracts ci script must include cosmos_app_coverage_floor stage"
+  exit 1
+fi
+if ! rg -Fq "integration_cosmos_app_coverage_floor.sh" "$phase6_contracts_ci_script"; then
+  echo "phase6 contracts ci script must wire integration_cosmos_app_coverage_floor.sh"
+  exit 1
+fi
+if ! rg -Fq "cosmos_app_coverage_floor" "$phase6_contracts_integration_script"; then
+  echo "phase6 contracts ci integration script must validate cosmos_app_coverage_floor stage wiring"
+  exit 1
+fi
+if ! rg -Fq "CI_PHASE6_COSMOS_L1_CONTRACTS_PHASE6_COSMOS_APP_COVERAGE_FLOOR_SCRIPT" "$phase6_contracts_integration_script" \
+  && ! rg -Fq "integration_cosmos_app_coverage_floor.sh" "$phase6_contracts_integration_script"; then
+  echo "phase6 contracts ci integration script must expose app coverage floor script wiring"
+  exit 1
+fi
+for app_floor_contract in \
+  "COSMOS_APP_COVERAGE_FLOOR_DEFAULT" \
+  "COSMOS_APP_COVERAGE_FLOOR" \
+  "go test ./app -count=1 -cover" \
+  "./app"
+do
+  if ! rg -Fq "$app_floor_contract" "$phase6_app_coverage_floor_script"; then
+    echo "phase6 app coverage floor script must include app contract marker: $app_floor_contract"
+    exit 1
+  fi
+done
 if ! rg -Fq "phase6_cosmos_dual_write_parity" "$phase6_contracts_ci_script"; then
   echo "phase6 contracts ci script must include phase6_cosmos_dual_write_parity stage"
   exit 1
@@ -1386,6 +1461,18 @@ if ! rg -Fq "ci_phase6_cosmos_l1_contracts.sh" "$phase6_contracts_live_smoke_scr
 fi
 if ! rg -Fq "ci_phase6_cosmos_l1_contracts_summary" "$phase6_contracts_live_smoke_script"; then
   echo "phase6 contracts live-smoke script must validate phase6 contracts summary schema id"
+  exit 1
+fi
+if ! rg -Fq "phase6_cosmos_app_coverage_floor" "$phase6_contracts_live_smoke_script"; then
+  echo "phase6 contracts live-smoke script must validate phase6_cosmos_app_coverage_floor stage presence"
+  exit 1
+fi
+if ! rg -Fq 'phase6_cosmos_app_coverage_floor.status == "pass"' "$phase6_contracts_live_smoke_script"; then
+  echo "phase6 contracts live-smoke script must validate phase6_cosmos_app_coverage_floor pass status"
+  exit 1
+fi
+if ! rg -Fq "phase6_cosmos_app_coverage_floor.rc == 0" "$phase6_contracts_live_smoke_script"; then
+  echo "phase6 contracts live-smoke script must validate phase6_cosmos_app_coverage_floor rc==0 contract"
   exit 1
 fi
 if ! rg -Fq "ci_phase6_cosmos_l1_contracts_summary" "$phase6_contracts_ci_script"; then
@@ -2490,6 +2577,14 @@ if ! rg -Fq "PreviewEpochSelection" "$cosmos_runtime_doc"; then
 fi
 if ! rg -Fq "billing/rewards/slashing/sponsor/validator/governance \`Msg\`/\`Query\` contracts" "$cosmos_runtime_doc"; then
   echo "cosmos settlement runtime guide must document six-module Msg+Query grpc app roundtrip posture"
+  exit 1
+fi
+if ! rg -Fq "cosmos_app_coverage_floor" "$cosmos_runtime_doc"; then
+  echo "cosmos settlement runtime guide must document cosmos_app_coverage_floor phase6 contracts stage"
+  exit 1
+fi
+if ! rg -Fq "integration_cosmos_app_coverage_floor.sh" "$cosmos_runtime_doc"; then
+  echo "cosmos settlement runtime guide must document cosmos_app_coverage_floor integration script"
   exit 1
 fi
 if ! rg -Fq "settlement_shadow_env" "$cosmos_runtime_doc"; then

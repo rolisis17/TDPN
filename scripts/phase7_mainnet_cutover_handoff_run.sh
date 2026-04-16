@@ -39,6 +39,9 @@ Notes:
       --require-tdpnd-comet-runtime-smoke-ok
       --require-mainnet-activation-gate-go
       --require-dual-write-parity-ok
+      --require-cosmos-module-coverage-floor-ok
+      --require-cosmos-keeper-coverage-floor-ok
+      --require-cosmos-app-coverage-floor-ok
       --require-rollback-path-ready (alias: --require-rollback-ready)
       --require-operator-approval-ok (alias: --require-operator-approval)
   - The handoff check runs even when the run stage fails.
@@ -472,6 +475,15 @@ if [[ "$dry_run" == "1" ]]; then
   if ! array_has_arg "--require-dual-write-parity-ok" "${handoff_cmd[@]:1}"; then
     handoff_cmd+=(--require-dual-write-parity-ok 0)
   fi
+  if ! array_has_arg "--require-cosmos-module-coverage-floor-ok" "${handoff_cmd[@]:1}"; then
+    handoff_cmd+=(--require-cosmos-module-coverage-floor-ok 0)
+  fi
+  if ! array_has_arg "--require-cosmos-keeper-coverage-floor-ok" "${handoff_cmd[@]:1}"; then
+    handoff_cmd+=(--require-cosmos-keeper-coverage-floor-ok 0)
+  fi
+  if ! array_has_arg "--require-cosmos-app-coverage-floor-ok" "${handoff_cmd[@]:1}"; then
+    handoff_cmd+=(--require-cosmos-app-coverage-floor-ok 0)
+  fi
   if ! array_has_arg "--require-rollback-path-ready" "${handoff_cmd[@]:1}" \
     && ! array_has_arg "--require-rollback-ready" "${handoff_cmd[@]:1}"; then
     handoff_cmd+=(--require-rollback-path-ready 0)
@@ -537,6 +549,9 @@ signal_tdpnd_grpc_auth_live_smoke_ok="null"
 signal_tdpnd_comet_runtime_smoke_ok="null"
 signal_mainnet_activation_gate_go="null"
 signal_dual_write_parity_ok="null"
+signal_cosmos_module_coverage_floor_ok="null"
+signal_cosmos_keeper_coverage_floor_ok="null"
+signal_cosmos_app_coverage_floor_ok="null"
 signal_rollback_path_ready="null"
 signal_operator_approval_ok="null"
 if [[ "$handoff_contract_valid" == "1" ]]; then
@@ -545,6 +560,9 @@ if [[ "$handoff_contract_valid" == "1" ]]; then
   signal_tdpnd_comet_runtime_smoke_ok="$(extract_handoff_signal_json "$handoff_summary_json" "tdpnd_comet_runtime_smoke_ok")"
   signal_mainnet_activation_gate_go="$(extract_handoff_signal_json "$handoff_summary_json" "mainnet_activation_gate_go")"
   signal_dual_write_parity_ok="$(extract_handoff_signal_json "$handoff_summary_json" "dual_write_parity_ok")"
+  signal_cosmos_module_coverage_floor_ok="$(extract_handoff_signal_json "$handoff_summary_json" "cosmos_module_coverage_floor_ok")"
+  signal_cosmos_keeper_coverage_floor_ok="$(extract_handoff_signal_json "$handoff_summary_json" "cosmos_keeper_coverage_floor_ok")"
+  signal_cosmos_app_coverage_floor_ok="$(extract_handoff_signal_json "$handoff_summary_json" "cosmos_app_coverage_floor_ok")"
   signal_rollback_path_ready="$(extract_handoff_signal_json "$handoff_summary_json" "rollback_path_ready")"
   signal_operator_approval_ok="$(extract_handoff_signal_json "$handoff_summary_json" "operator_approval_ok")"
 fi
@@ -590,6 +608,9 @@ jq -n \
   --argjson signal_tdpnd_comet_runtime_smoke_ok "$signal_tdpnd_comet_runtime_smoke_ok" \
   --argjson signal_mainnet_activation_gate_go "$signal_mainnet_activation_gate_go" \
   --argjson signal_dual_write_parity_ok "$signal_dual_write_parity_ok" \
+  --argjson signal_cosmos_module_coverage_floor_ok "$signal_cosmos_module_coverage_floor_ok" \
+  --argjson signal_cosmos_keeper_coverage_floor_ok "$signal_cosmos_keeper_coverage_floor_ok" \
+  --argjson signal_cosmos_app_coverage_floor_ok "$signal_cosmos_app_coverage_floor_ok" \
   --argjson signal_rollback_path_ready "$signal_rollback_path_ready" \
   --argjson signal_operator_approval_ok "$signal_operator_approval_ok" \
   '{
@@ -655,6 +676,9 @@ jq -n \
           tdpnd_comet_runtime_smoke_ok: $signal_tdpnd_comet_runtime_smoke_ok,
           mainnet_activation_gate_go: $signal_mainnet_activation_gate_go,
           dual_write_parity_ok: $signal_dual_write_parity_ok,
+          cosmos_module_coverage_floor_ok: $signal_cosmos_module_coverage_floor_ok,
+          cosmos_keeper_coverage_floor_ok: $signal_cosmos_keeper_coverage_floor_ok,
+          cosmos_app_coverage_floor_ok: $signal_cosmos_app_coverage_floor_ok,
           rollback_path_ready: $signal_rollback_path_ready,
           operator_approval_ok: $signal_operator_approval_ok
         },

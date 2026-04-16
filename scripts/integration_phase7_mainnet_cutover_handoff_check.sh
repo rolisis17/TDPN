@@ -68,6 +68,9 @@ cat >"$PASS_RUN" <<'EOF_PASS_RUN'
         "tdpnd_comet_runtime_smoke_ok": true,
         "mainnet_activation_gate_go": true,
         "dual_write_parity_ok": true,
+        "cosmos_module_coverage_floor_ok": true,
+        "cosmos_keeper_coverage_floor_ok": true,
+        "cosmos_app_coverage_floor_ok": true,
         "rollback_path_ready": true,
         "operator_approval_ok": true
       }
@@ -94,6 +97,9 @@ cat >"$PASS_CHECK" <<'EOF_PASS_CHECK'
     "tdpnd_comet_runtime_smoke_ok": true,
     "mainnet_activation_gate_go": true,
     "dual_write_parity_ok": true,
+    "cosmos_module_coverage_floor_ok": true,
+    "cosmos_keeper_coverage_floor_ok": true,
+    "cosmos_app_coverage_floor_ok": true,
     "rollback_path_ready": true,
     "operator_approval_ok": true
   }
@@ -145,6 +151,9 @@ cat >"$FAIL_RUN" <<'EOF_FAIL_RUN'
         "tdpnd_comet_runtime_smoke_ok": false,
         "mainnet_activation_gate_go": false,
         "dual_write_parity_ok": true,
+        "cosmos_module_coverage_floor_ok": false,
+        "cosmos_keeper_coverage_floor_ok": false,
+        "cosmos_app_coverage_floor_ok": false,
         "rollback_path_ready": true,
         "operator_approval_ok": true
       }
@@ -177,10 +186,16 @@ if ! jq -e '
   and .handoff.summary_report_ok == true
   and .handoff.module_tx_surface_ok == true
   and .handoff.tdpnd_grpc_auth_live_smoke_ok == true
+  and .handoff.cosmos_module_coverage_floor_ok == true
+  and .handoff.cosmos_keeper_coverage_floor_ok == true
+  and .handoff.cosmos_app_coverage_floor_ok == true
   and .handoff.mainnet_activation_gate_go == true
   and .handoff.dual_write_parity_ok == true
   and .handoff.rollback_path_ready == true
   and .handoff.operator_approval_ok == true
+  and .inputs.requirements.cosmos_module_coverage_floor_ok == true
+  and .inputs.requirements.cosmos_keeper_coverage_floor_ok == true
+  and .inputs.requirements.cosmos_app_coverage_floor_ok == true
   and .inputs.provided.phase7_check_summary_json == true
   and .inputs.usable.phase7_check_summary_json == true
   and .artifacts.canonical_summary_json == $expected_canonical
@@ -200,6 +215,26 @@ if ! jq -e '.signals.tdpnd_comet_runtime_smoke_ok == true' "$PASS_CHECK" >/dev/n
   cat "$PASS_CHECK"
   exit 1
 fi
+if ! jq -e '.steps.phase7_mainnet_cutover_check.signal_snapshot.cosmos_module_coverage_floor_ok == true' "$PASS_RUN" >/dev/null; then
+  echo "pass-path run fixture missing cosmos module coverage floor signal"
+  cat "$PASS_RUN"
+  exit 1
+fi
+if ! jq -e '.signals.cosmos_module_coverage_floor_ok == true' "$PASS_CHECK" >/dev/null; then
+  echo "pass-path check fixture missing cosmos module coverage floor signal"
+  cat "$PASS_CHECK"
+  exit 1
+fi
+if ! jq -e '.steps.phase7_mainnet_cutover_check.signal_snapshot.cosmos_keeper_coverage_floor_ok == true and .steps.phase7_mainnet_cutover_check.signal_snapshot.cosmos_app_coverage_floor_ok == true' "$PASS_RUN" >/dev/null; then
+  echo "pass-path run fixture missing cosmos keeper/app coverage floor signals"
+  cat "$PASS_RUN"
+  exit 1
+fi
+if ! jq -e '.signals.cosmos_keeper_coverage_floor_ok == true and .signals.cosmos_app_coverage_floor_ok == true' "$PASS_CHECK" >/dev/null; then
+  echo "pass-path check fixture missing cosmos keeper/app coverage floor signals"
+  cat "$PASS_CHECK"
+  exit 1
+fi
 if ! cmp -s "$PASS_OUTPUT" "$PASS_CANONICAL"; then
   echo "pass-path canonical summary diverges from run summary"
   cat "$PASS_OUTPUT"
@@ -213,6 +248,7 @@ PHASE7_MAINNET_CUTOVER_HANDOFF_CHECK_CANONICAL_SUMMARY_JSON="$FAIL_CANONICAL" \
 bash "$SCRIPT_UNDER_TEST" \
   --phase7-run-summary-json "$FAIL_RUN" \
   --phase7-summary-report-json "$PASS_REPORT" \
+  --require-cosmos-module-coverage-floor-ok 1 \
   --require-mainnet-activation-gate-go 1 \
   --summary-json "$FAIL_OUTPUT" \
   --show-json 0 >"$FAIL_LOG" 2>&1
@@ -230,8 +266,15 @@ if ! jq -e '
   and .handoff.mainnet_activation_gate_go_status == "fail"
   and .handoff.tdpnd_grpc_auth_live_smoke_ok == false
   and .handoff.tdpnd_grpc_auth_live_smoke_status == "fail"
+  and .handoff.cosmos_module_coverage_floor_ok == false
+  and .handoff.cosmos_module_coverage_floor_status == "fail"
+  and .handoff.cosmos_keeper_coverage_floor_ok == false
+  and .handoff.cosmos_keeper_coverage_floor_status == "fail"
+  and .handoff.cosmos_app_coverage_floor_ok == false
+  and .handoff.cosmos_app_coverage_floor_status == "fail"
   and ((.decision.reasons // []) | any(test("mainnet_activation_gate_go is false")))
   and ((.decision.reasons // []) | any(test("tdpnd_grpc_auth_live_smoke_ok is false")))
+  and ((.decision.reasons // []) | any(test("cosmos_module_coverage_floor_ok is false")))
 ' "$FAIL_OUTPUT" >/dev/null; then
   echo "fail-path summary mismatch"
   cat "$FAIL_OUTPUT"
@@ -261,6 +304,9 @@ bash "$SCRIPT_UNDER_TEST" \
   --phase7-run-summary-json "$FAIL_RUN" \
   --phase7-summary-report-json "$PASS_REPORT" \
   --summary-json "$RELAXED_OUTPUT" \
+  --require-cosmos-module-coverage-floor-ok 0 \
+  --require-cosmos-keeper-coverage-floor-ok 0 \
+  --require-cosmos-app-coverage-floor-ok 0 \
   --require-tdpnd-grpc-auth-live-smoke-ok 0 \
   --require-mainnet-activation-gate-go 0 \
   --show-json 0 >"$RELAXED_LOG" 2>&1
@@ -268,8 +314,17 @@ bash "$SCRIPT_UNDER_TEST" \
 if ! jq -e '
   .status == "pass"
   and .rc == 0
+  and .inputs.requirements.cosmos_module_coverage_floor_ok == false
+  and .inputs.requirements.cosmos_keeper_coverage_floor_ok == false
+  and .inputs.requirements.cosmos_app_coverage_floor_ok == false
   and .inputs.requirements.tdpnd_grpc_auth_live_smoke_ok == false
   and .inputs.requirements.mainnet_activation_gate_go == false
+  and .handoff.cosmos_module_coverage_floor_ok == false
+  and .handoff.cosmos_module_coverage_floor_status == "fail"
+  and .handoff.cosmos_keeper_coverage_floor_ok == false
+  and .handoff.cosmos_keeper_coverage_floor_status == "fail"
+  and .handoff.cosmos_app_coverage_floor_ok == false
+  and .handoff.cosmos_app_coverage_floor_status == "fail"
   and .handoff.mainnet_activation_gate_go == false
   and .handoff.mainnet_activation_gate_go_status == "fail"
   and .handoff.tdpnd_grpc_auth_live_smoke_ok == false

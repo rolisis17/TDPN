@@ -20,6 +20,9 @@ Usage:
     [--require-tdpnd-comet-runtime-smoke-ok [0|1]] \
     [--require-mainnet-activation-gate-go [0|1]] \
     [--require-dual-write-parity-ok [0|1]] \
+    [--require-cosmos-module-coverage-floor-ok [0|1]] \
+    [--require-cosmos-keeper-coverage-floor-ok [0|1]] \
+    [--require-cosmos-app-coverage-floor-ok [0|1]] \
     [--require-rollback-path-ready [0|1]] \
     [--require-operator-approval-ok [0|1]] \
     [--summary-json PATH] \
@@ -39,6 +42,9 @@ Resolved handoff signals:
   - tdpnd_comet_runtime_smoke_ok
   - mainnet_activation_gate_go
   - dual_write_parity_ok
+  - cosmos_module_coverage_floor_ok
+  - cosmos_keeper_coverage_floor_ok
+  - cosmos_app_coverage_floor_ok
   - rollback_path_ready
   - operator_approval_ok
 
@@ -321,6 +327,9 @@ require_tdpnd_grpc_auth_live_smoke_ok="${PHASE7_MAINNET_CUTOVER_HANDOFF_CHECK_RE
 require_tdpnd_comet_runtime_smoke_ok="${PHASE7_MAINNET_CUTOVER_HANDOFF_CHECK_REQUIRE_TDPND_COMET_RUNTIME_SMOKE_OK:-${PHASE7_MAINNET_CUTOVER_HANDOFF_CHECK_REQUIRE_TDPND_COMET_SMOKE_OK:-0}}"
 require_mainnet_activation_gate_go="${PHASE7_MAINNET_CUTOVER_HANDOFF_CHECK_REQUIRE_MAINNET_ACTIVATION_GATE_GO:-0}"
 require_dual_write_parity_ok="${PHASE7_MAINNET_CUTOVER_HANDOFF_CHECK_REQUIRE_DUAL_WRITE_PARITY_OK:-1}"
+require_cosmos_module_coverage_floor_ok="${PHASE7_MAINNET_CUTOVER_HANDOFF_CHECK_REQUIRE_COSMOS_MODULE_COVERAGE_FLOOR_OK:-1}"
+require_cosmos_keeper_coverage_floor_ok="${PHASE7_MAINNET_CUTOVER_HANDOFF_CHECK_REQUIRE_COSMOS_KEEPER_COVERAGE_FLOOR_OK:-1}"
+require_cosmos_app_coverage_floor_ok="${PHASE7_MAINNET_CUTOVER_HANDOFF_CHECK_REQUIRE_COSMOS_APP_COVERAGE_FLOOR_OK:-1}"
 require_rollback_path_ready="${PHASE7_MAINNET_CUTOVER_HANDOFF_CHECK_REQUIRE_ROLLBACK_PATH_READY:-1}"
 require_operator_approval_ok="${PHASE7_MAINNET_CUTOVER_HANDOFF_CHECK_REQUIRE_OPERATOR_APPROVAL_OK:-0}"
 
@@ -419,6 +428,33 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --require-cosmos-module-coverage-floor-ok)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_cosmos_module_coverage_floor_ok="${2:-}"
+        shift 2
+      else
+        require_cosmos_module_coverage_floor_ok="1"
+        shift
+      fi
+      ;;
+    --require-cosmos-keeper-coverage-floor-ok)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_cosmos_keeper_coverage_floor_ok="${2:-}"
+        shift 2
+      else
+        require_cosmos_keeper_coverage_floor_ok="1"
+        shift
+      fi
+      ;;
+    --require-cosmos-app-coverage-floor-ok)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_cosmos_app_coverage_floor_ok="${2:-}"
+        shift 2
+      else
+        require_cosmos_app_coverage_floor_ok="1"
+        shift
+      fi
+      ;;
     --require-rollback-path-ready|--require-rollback-ready)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         require_rollback_path_ready="${2:-}"
@@ -471,6 +507,9 @@ bool_arg_or_die "--require-tdpnd-grpc-auth-live-smoke-ok" "$require_tdpnd_grpc_a
 bool_arg_or_die "--require-tdpnd-comet-runtime-smoke-ok" "$require_tdpnd_comet_runtime_smoke_ok"
 bool_arg_or_die "--require-mainnet-activation-gate-go" "$require_mainnet_activation_gate_go"
 bool_arg_or_die "--require-dual-write-parity-ok" "$require_dual_write_parity_ok"
+bool_arg_or_die "--require-cosmos-module-coverage-floor-ok" "$require_cosmos_module_coverage_floor_ok"
+bool_arg_or_die "--require-cosmos-keeper-coverage-floor-ok" "$require_cosmos_keeper_coverage_floor_ok"
+bool_arg_or_die "--require-cosmos-app-coverage-floor-ok" "$require_cosmos_app_coverage_floor_ok"
 bool_arg_or_die "--require-rollback-path-ready" "$require_rollback_path_ready"
 bool_arg_or_die "--require-operator-approval-ok" "$require_operator_approval_ok"
 bool_arg_or_die "--show-json" "$show_json"
@@ -513,6 +552,9 @@ tdpnd_grpc_auth_live_smoke_pair="$(resolve_run_signal "tdpnd_grpc_auth_live_smok
 tdpnd_comet_runtime_smoke_pair="$(resolve_run_signal "tdpnd_comet_runtime_smoke_ok" "$phase7_run_summary_json" "$phase7_run_summary_usable" "$phase7_check_summary_json" "$phase7_check_summary_usable")"
 mainnet_activation_gate_pair="$(resolve_run_signal "mainnet_activation_gate_go" "$phase7_run_summary_json" "$phase7_run_summary_usable" "$phase7_check_summary_json" "$phase7_check_summary_usable")"
 dual_write_parity_pair="$(resolve_run_signal "dual_write_parity_ok" "$phase7_run_summary_json" "$phase7_run_summary_usable" "$phase7_check_summary_json" "$phase7_check_summary_usable")"
+cosmos_module_coverage_floor_pair="$(resolve_run_signal "cosmos_module_coverage_floor_ok" "$phase7_run_summary_json" "$phase7_run_summary_usable" "$phase7_check_summary_json" "$phase7_check_summary_usable")"
+cosmos_keeper_coverage_floor_pair="$(resolve_run_signal "cosmos_keeper_coverage_floor_ok" "$phase7_run_summary_json" "$phase7_run_summary_usable" "$phase7_check_summary_json" "$phase7_check_summary_usable")"
+cosmos_app_coverage_floor_pair="$(resolve_run_signal "cosmos_app_coverage_floor_ok" "$phase7_run_summary_json" "$phase7_run_summary_usable" "$phase7_check_summary_json" "$phase7_check_summary_usable")"
 rollback_path_ready_pair="$(resolve_run_signal "rollback_path_ready" "$phase7_run_summary_json" "$phase7_run_summary_usable" "$phase7_check_summary_json" "$phase7_check_summary_usable")"
 operator_approval_pair="$(resolve_run_signal "operator_approval_ok" "$phase7_run_summary_json" "$phase7_run_summary_usable" "$phase7_check_summary_json" "$phase7_check_summary_usable")"
 
@@ -553,6 +595,18 @@ dual_write_parity_ok="${dual_write_parity_pair%%|*}"; dual_write_parity_pair="${
 dual_write_parity_status="${dual_write_parity_pair%%|*}"; dual_write_parity_pair="${dual_write_parity_pair#*|}"
 dual_write_parity_source="${dual_write_parity_pair%%|*}"; dual_write_parity_resolved="${dual_write_parity_pair##*|}"
 
+cosmos_module_coverage_floor_ok="${cosmos_module_coverage_floor_pair%%|*}"; cosmos_module_coverage_floor_pair="${cosmos_module_coverage_floor_pair#*|}"
+cosmos_module_coverage_floor_status="${cosmos_module_coverage_floor_pair%%|*}"; cosmos_module_coverage_floor_pair="${cosmos_module_coverage_floor_pair#*|}"
+cosmos_module_coverage_floor_source="${cosmos_module_coverage_floor_pair%%|*}"; cosmos_module_coverage_floor_resolved="${cosmos_module_coverage_floor_pair##*|}"
+
+cosmos_keeper_coverage_floor_ok="${cosmos_keeper_coverage_floor_pair%%|*}"; cosmos_keeper_coverage_floor_pair="${cosmos_keeper_coverage_floor_pair#*|}"
+cosmos_keeper_coverage_floor_status="${cosmos_keeper_coverage_floor_pair%%|*}"; cosmos_keeper_coverage_floor_pair="${cosmos_keeper_coverage_floor_pair#*|}"
+cosmos_keeper_coverage_floor_source="${cosmos_keeper_coverage_floor_pair%%|*}"; cosmos_keeper_coverage_floor_resolved="${cosmos_keeper_coverage_floor_pair##*|}"
+
+cosmos_app_coverage_floor_ok="${cosmos_app_coverage_floor_pair%%|*}"; cosmos_app_coverage_floor_pair="${cosmos_app_coverage_floor_pair#*|}"
+cosmos_app_coverage_floor_status="${cosmos_app_coverage_floor_pair%%|*}"; cosmos_app_coverage_floor_pair="${cosmos_app_coverage_floor_pair#*|}"
+cosmos_app_coverage_floor_source="${cosmos_app_coverage_floor_pair%%|*}"; cosmos_app_coverage_floor_resolved="${cosmos_app_coverage_floor_pair##*|}"
+
 rollback_path_ready="${rollback_path_ready_pair%%|*}"; rollback_path_ready_pair="${rollback_path_ready_pair#*|}"
 rollback_path_ready_status="${rollback_path_ready_pair%%|*}"; rollback_path_ready_pair="${rollback_path_ready_pair#*|}"
 rollback_path_ready_source="${rollback_path_ready_pair%%|*}"; rollback_path_ready_resolved="${rollback_path_ready_pair##*|}"
@@ -570,6 +624,9 @@ check_required_signal "$require_tdpnd_grpc_auth_live_smoke_ok" "$tdpnd_grpc_auth
 check_required_signal "$require_tdpnd_comet_runtime_smoke_ok" "$tdpnd_comet_runtime_smoke_ok" "$tdpnd_comet_runtime_smoke_status" "tdpnd_comet_runtime_smoke_ok" reasons
 check_required_signal "$require_mainnet_activation_gate_go" "$mainnet_activation_gate_ok" "$mainnet_activation_gate_status" "mainnet_activation_gate_go" reasons
 check_required_signal "$require_dual_write_parity_ok" "$dual_write_parity_ok" "$dual_write_parity_status" "dual_write_parity_ok" reasons
+check_required_signal "$require_cosmos_module_coverage_floor_ok" "$cosmos_module_coverage_floor_ok" "$cosmos_module_coverage_floor_status" "cosmos_module_coverage_floor_ok" reasons
+check_required_signal "$require_cosmos_keeper_coverage_floor_ok" "$cosmos_keeper_coverage_floor_ok" "$cosmos_keeper_coverage_floor_status" "cosmos_keeper_coverage_floor_ok" reasons
+check_required_signal "$require_cosmos_app_coverage_floor_ok" "$cosmos_app_coverage_floor_ok" "$cosmos_app_coverage_floor_status" "cosmos_app_coverage_floor_ok" reasons
 check_required_signal "$require_rollback_path_ready" "$rollback_path_ready" "$rollback_path_ready_status" "rollback_path_ready" reasons
 check_required_signal "$require_operator_approval_ok" "$operator_approval_ok" "$operator_approval_status" "operator_approval_ok" reasons
 
@@ -612,6 +669,9 @@ jq -n \
   --argjson require_tdpnd_comet_runtime_smoke_ok "$require_tdpnd_comet_runtime_smoke_ok" \
   --argjson require_mainnet_activation_gate_go "$require_mainnet_activation_gate_go" \
   --argjson require_dual_write_parity_ok "$require_dual_write_parity_ok" \
+  --argjson require_cosmos_module_coverage_floor_ok "$require_cosmos_module_coverage_floor_ok" \
+  --argjson require_cosmos_keeper_coverage_floor_ok "$require_cosmos_keeper_coverage_floor_ok" \
+  --argjson require_cosmos_app_coverage_floor_ok "$require_cosmos_app_coverage_floor_ok" \
   --argjson require_rollback_path_ready "$require_rollback_path_ready" \
   --argjson require_operator_approval_ok "$require_operator_approval_ok" \
   --argjson run_pipeline_ok "$run_pipeline_ok" \
@@ -623,6 +683,9 @@ jq -n \
   --argjson tdpnd_comet_runtime_smoke_ok "$tdpnd_comet_runtime_smoke_ok" \
   --argjson mainnet_activation_gate_ok "$mainnet_activation_gate_ok" \
   --argjson dual_write_parity_ok "$dual_write_parity_ok" \
+  --argjson cosmos_module_coverage_floor_ok "$cosmos_module_coverage_floor_ok" \
+  --argjson cosmos_keeper_coverage_floor_ok "$cosmos_keeper_coverage_floor_ok" \
+  --argjson cosmos_app_coverage_floor_ok "$cosmos_app_coverage_floor_ok" \
   --argjson rollback_path_ready "$rollback_path_ready" \
   --argjson operator_approval_ok "$operator_approval_ok" \
   --arg run_pipeline_status "$run_pipeline_status" \
@@ -634,6 +697,9 @@ jq -n \
   --arg tdpnd_comet_runtime_smoke_status "$tdpnd_comet_runtime_smoke_status" \
   --arg mainnet_activation_gate_status "$mainnet_activation_gate_status" \
   --arg dual_write_parity_status "$dual_write_parity_status" \
+  --arg cosmos_module_coverage_floor_status "$cosmos_module_coverage_floor_status" \
+  --arg cosmos_keeper_coverage_floor_status "$cosmos_keeper_coverage_floor_status" \
+  --arg cosmos_app_coverage_floor_status "$cosmos_app_coverage_floor_status" \
   --arg rollback_path_ready_status "$rollback_path_ready_status" \
   --arg operator_approval_status "$operator_approval_status" \
   --argjson run_pipeline_resolved "$run_pipeline_resolved" \
@@ -645,6 +711,9 @@ jq -n \
   --argjson tdpnd_comet_runtime_smoke_resolved "$tdpnd_comet_runtime_smoke_resolved" \
   --argjson mainnet_activation_gate_resolved "$mainnet_activation_gate_resolved" \
   --argjson dual_write_parity_resolved "$dual_write_parity_resolved" \
+  --argjson cosmos_module_coverage_floor_resolved "$cosmos_module_coverage_floor_resolved" \
+  --argjson cosmos_keeper_coverage_floor_resolved "$cosmos_keeper_coverage_floor_resolved" \
+  --argjson cosmos_app_coverage_floor_resolved "$cosmos_app_coverage_floor_resolved" \
   --argjson rollback_path_ready_resolved "$rollback_path_ready_resolved" \
   --argjson operator_approval_resolved "$operator_approval_resolved" \
   --argjson run_pipeline_contract_valid "$run_pipeline_contract_valid" \
@@ -658,6 +727,9 @@ jq -n \
   --arg tdpnd_comet_runtime_smoke_source "$tdpnd_comet_runtime_smoke_source" \
   --arg mainnet_activation_gate_source "$mainnet_activation_gate_source" \
   --arg dual_write_parity_source "$dual_write_parity_source" \
+  --arg cosmos_module_coverage_floor_source "$cosmos_module_coverage_floor_source" \
+  --arg cosmos_keeper_coverage_floor_source "$cosmos_keeper_coverage_floor_source" \
+  --arg cosmos_app_coverage_floor_source "$cosmos_app_coverage_floor_source" \
   --arg rollback_path_ready_source "$rollback_path_ready_source" \
   --arg operator_approval_source "$operator_approval_source" \
   --argjson reasons "$reasons_json" \
@@ -702,6 +774,9 @@ jq -n \
         tdpnd_comet_runtime_smoke_ok: ($require_tdpnd_comet_runtime_smoke_ok == 1),
         mainnet_activation_gate_go: ($require_mainnet_activation_gate_go == 1),
         dual_write_parity_ok: ($require_dual_write_parity_ok == 1),
+        cosmos_module_coverage_floor_ok: ($require_cosmos_module_coverage_floor_ok == 1),
+        cosmos_keeper_coverage_floor_ok: ($require_cosmos_keeper_coverage_floor_ok == 1),
+        cosmos_app_coverage_floor_ok: ($require_cosmos_app_coverage_floor_ok == 1),
         rollback_path_ready: ($require_rollback_path_ready == 1),
         operator_approval_ok: ($require_operator_approval_ok == 1)
       }
@@ -736,6 +811,15 @@ jq -n \
       dual_write_parity_ok: $dual_write_parity_ok,
       dual_write_parity_status: $dual_write_parity_status,
       dual_write_parity_resolved: ($dual_write_parity_resolved == 1),
+      cosmos_module_coverage_floor_ok: $cosmos_module_coverage_floor_ok,
+      cosmos_module_coverage_floor_status: $cosmos_module_coverage_floor_status,
+      cosmos_module_coverage_floor_resolved: ($cosmos_module_coverage_floor_resolved == 1),
+      cosmos_keeper_coverage_floor_ok: $cosmos_keeper_coverage_floor_ok,
+      cosmos_keeper_coverage_floor_status: $cosmos_keeper_coverage_floor_status,
+      cosmos_keeper_coverage_floor_resolved: ($cosmos_keeper_coverage_floor_resolved == 1),
+      cosmos_app_coverage_floor_ok: $cosmos_app_coverage_floor_ok,
+      cosmos_app_coverage_floor_status: $cosmos_app_coverage_floor_status,
+      cosmos_app_coverage_floor_resolved: ($cosmos_app_coverage_floor_resolved == 1),
       rollback_path_ready: $rollback_path_ready,
       rollback_path_ready_status: $rollback_path_ready_status,
       rollback_path_ready_resolved: ($rollback_path_ready_resolved == 1),
@@ -752,6 +836,9 @@ jq -n \
         tdpnd_comet_runtime_smoke_ok: $tdpnd_comet_runtime_smoke_source,
         mainnet_activation_gate_go: $mainnet_activation_gate_source,
         dual_write_parity_ok: $dual_write_parity_source,
+        cosmos_module_coverage_floor_ok: $cosmos_module_coverage_floor_source,
+        cosmos_keeper_coverage_floor_ok: $cosmos_keeper_coverage_floor_source,
+        cosmos_app_coverage_floor_ok: $cosmos_app_coverage_floor_source,
         rollback_path_ready: $rollback_path_ready_source,
         operator_approval_ok: $operator_approval_source
       }
