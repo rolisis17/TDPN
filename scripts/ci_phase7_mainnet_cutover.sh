@@ -16,7 +16,8 @@ Usage:
     [--run-phase7-mainnet-cutover-run [0|1]] \
     [--run-phase7-mainnet-cutover-handoff-check [0|1]] \
     [--run-phase7-mainnet-cutover-handoff-run [0|1]] \
-    [--run-phase7-mainnet-cutover-summary-report [0|1]]
+    [--run-phase7-mainnet-cutover-summary-report [0|1]] \
+    [--run-phase7-mainnet-cutover-live-smoke [0|1]]
 
 Purpose:
   Run the Phase-7 mainnet cutover CI gate in deterministic order:
@@ -25,6 +26,7 @@ Purpose:
     3) integration_phase7_mainnet_cutover_handoff_check.sh
     4) integration_phase7_mainnet_cutover_handoff_run.sh
     5) integration_phase7_mainnet_cutover_summary_report.sh
+    6) integration_phase7_mainnet_cutover_live_smoke.sh
 
 Dry-run mode:
   --dry-run 1 skips stage execution, records deterministic skip accounting,
@@ -108,6 +110,7 @@ run_phase7_mainnet_cutover_run="${CI_PHASE7_MAINNET_CUTOVER_RUN_PHASE7_MAINNET_C
 run_phase7_mainnet_cutover_handoff_check="${CI_PHASE7_MAINNET_CUTOVER_RUN_PHASE7_MAINNET_CUTOVER_HANDOFF_CHECK:-1}"
 run_phase7_mainnet_cutover_handoff_run="${CI_PHASE7_MAINNET_CUTOVER_RUN_PHASE7_MAINNET_CUTOVER_HANDOFF_RUN:-1}"
 run_phase7_mainnet_cutover_summary_report="${CI_PHASE7_MAINNET_CUTOVER_RUN_PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT:-1}"
+run_phase7_mainnet_cutover_live_smoke="${CI_PHASE7_MAINNET_CUTOVER_RUN_PHASE7_MAINNET_CUTOVER_LIVE_SMOKE:-1}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -182,6 +185,15 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --run-phase7-mainnet-cutover-live-smoke)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        run_phase7_mainnet_cutover_live_smoke="${2:-}"
+        shift 2
+      else
+        run_phase7_mainnet_cutover_live_smoke="1"
+        shift
+      fi
+      ;;
     -h|--help)
       usage
       exit 0
@@ -201,12 +213,14 @@ bool_arg_or_die "--run-phase7-mainnet-cutover-run" "$run_phase7_mainnet_cutover_
 bool_arg_or_die "--run-phase7-mainnet-cutover-handoff-check" "$run_phase7_mainnet_cutover_handoff_check"
 bool_arg_or_die "--run-phase7-mainnet-cutover-handoff-run" "$run_phase7_mainnet_cutover_handoff_run"
 bool_arg_or_die "--run-phase7-mainnet-cutover-summary-report" "$run_phase7_mainnet_cutover_summary_report"
+bool_arg_or_die "--run-phase7-mainnet-cutover-live-smoke" "$run_phase7_mainnet_cutover_live_smoke"
 
 phase7_mainnet_cutover_check_script="${CI_PHASE7_MAINNET_CUTOVER_PHASE7_MAINNET_CUTOVER_CHECK_SCRIPT:-$ROOT_DIR/scripts/integration_phase7_mainnet_cutover_check.sh}"
 phase7_mainnet_cutover_run_script="${CI_PHASE7_MAINNET_CUTOVER_PHASE7_MAINNET_CUTOVER_RUN_SCRIPT:-$ROOT_DIR/scripts/integration_phase7_mainnet_cutover_run.sh}"
 phase7_mainnet_cutover_handoff_check_script="${CI_PHASE7_MAINNET_CUTOVER_PHASE7_MAINNET_CUTOVER_HANDOFF_CHECK_SCRIPT:-$ROOT_DIR/scripts/integration_phase7_mainnet_cutover_handoff_check.sh}"
 phase7_mainnet_cutover_handoff_run_script="${CI_PHASE7_MAINNET_CUTOVER_PHASE7_MAINNET_CUTOVER_HANDOFF_RUN_SCRIPT:-$ROOT_DIR/scripts/integration_phase7_mainnet_cutover_handoff_run.sh}"
 phase7_mainnet_cutover_summary_report_script="${CI_PHASE7_MAINNET_CUTOVER_PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_SCRIPT:-$ROOT_DIR/scripts/integration_phase7_mainnet_cutover_summary_report.sh}"
+phase7_mainnet_cutover_live_smoke_script="${CI_PHASE7_MAINNET_CUTOVER_PHASE7_MAINNET_CUTOVER_LIVE_SMOKE_SCRIPT:-$ROOT_DIR/scripts/integration_phase7_mainnet_cutover_live_smoke.sh}"
 
 stage_ids=(
   "phase7_mainnet_cutover_check"
@@ -214,6 +228,7 @@ stage_ids=(
   "phase7_mainnet_cutover_handoff_check"
   "phase7_mainnet_cutover_handoff_run"
   "phase7_mainnet_cutover_summary_report"
+  "phase7_mainnet_cutover_live_smoke"
 )
 
 declare -A stage_script=(
@@ -222,6 +237,7 @@ declare -A stage_script=(
   ["phase7_mainnet_cutover_handoff_check"]="$phase7_mainnet_cutover_handoff_check_script"
   ["phase7_mainnet_cutover_handoff_run"]="$phase7_mainnet_cutover_handoff_run_script"
   ["phase7_mainnet_cutover_summary_report"]="$phase7_mainnet_cutover_summary_report_script"
+  ["phase7_mainnet_cutover_live_smoke"]="$phase7_mainnet_cutover_live_smoke_script"
 )
 
 declare -A stage_enabled=(
@@ -230,6 +246,7 @@ declare -A stage_enabled=(
   ["phase7_mainnet_cutover_handoff_check"]="$run_phase7_mainnet_cutover_handoff_check"
   ["phase7_mainnet_cutover_handoff_run"]="$run_phase7_mainnet_cutover_handoff_run"
   ["phase7_mainnet_cutover_summary_report"]="$run_phase7_mainnet_cutover_summary_report"
+  ["phase7_mainnet_cutover_live_smoke"]="$run_phase7_mainnet_cutover_live_smoke"
 )
 
 for stage_id in "${stage_ids[@]}"; do
@@ -273,11 +290,16 @@ for stage_id in "${stage_ids[@]}"; do
   stage_reason["$stage_id"]=""
 
   if [[ "$enabled" == "1" ]]; then
-    stage_command["$stage_id"]="$(print_cmd "$script")"
+    run_cmd=("$script")
+    if [[ "$stage_id" == "phase7_mainnet_cutover_live_smoke" ]]; then
+      # Prevent recursive gate re-entry when the live-smoke script invokes this gate.
+      run_cmd=(env CI_PHASE7_MAINNET_CUTOVER_RUN_PHASE7_MAINNET_CUTOVER_LIVE_SMOKE=0 "$script")
+    fi
+    stage_command["$stage_id"]="$(print_cmd "${run_cmd[@]}")"
     if [[ "$dry_run" == "1" ]]; then
       stage_reason["$stage_id"]="dry-run"
       echo "[ci-phase7-mainnet-cutover] step=${stage_id} status=skip reason=dry-run"
-    elif run_step "$stage_id" "$script"; then
+    elif run_step "$stage_id" "${run_cmd[@]}"; then
       stage_status["$stage_id"]="pass"
       stage_rc["$stage_id"]=0
     else
@@ -341,6 +363,7 @@ jq -n \
   --arg run_phase7_mainnet_cutover_handoff_check "$run_phase7_mainnet_cutover_handoff_check" \
   --arg run_phase7_mainnet_cutover_handoff_run "$run_phase7_mainnet_cutover_handoff_run" \
   --arg run_phase7_mainnet_cutover_summary_report "$run_phase7_mainnet_cutover_summary_report" \
+  --arg run_phase7_mainnet_cutover_live_smoke "$run_phase7_mainnet_cutover_live_smoke" \
   --argjson steps "$steps_json" \
   '{
     version: 1,
@@ -359,7 +382,8 @@ jq -n \
       run_phase7_mainnet_cutover_run: ($run_phase7_mainnet_cutover_run == "1"),
       run_phase7_mainnet_cutover_handoff_check: ($run_phase7_mainnet_cutover_handoff_check == "1"),
       run_phase7_mainnet_cutover_handoff_run: ($run_phase7_mainnet_cutover_handoff_run == "1"),
-      run_phase7_mainnet_cutover_summary_report: ($run_phase7_mainnet_cutover_summary_report == "1")
+      run_phase7_mainnet_cutover_summary_report: ($run_phase7_mainnet_cutover_summary_report == "1"),
+      run_phase7_mainnet_cutover_live_smoke: ($run_phase7_mainnet_cutover_live_smoke == "1")
     },
     steps: $steps,
     artifacts: {

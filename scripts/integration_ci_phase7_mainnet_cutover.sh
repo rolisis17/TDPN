@@ -49,6 +49,7 @@ STAGE_ENV_NAMES=(
   "CI_PHASE7_MAINNET_CUTOVER_PHASE7_MAINNET_CUTOVER_HANDOFF_CHECK_SCRIPT"
   "CI_PHASE7_MAINNET_CUTOVER_PHASE7_MAINNET_CUTOVER_HANDOFF_RUN_SCRIPT"
   "CI_PHASE7_MAINNET_CUTOVER_PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_SCRIPT"
+  "CI_PHASE7_MAINNET_CUTOVER_PHASE7_MAINNET_CUTOVER_LIVE_SMOKE_SCRIPT"
 )
 
 STAGE_IDS=(
@@ -57,6 +58,7 @@ STAGE_IDS=(
   "phase7_mainnet_cutover_handoff_check"
   "phase7_mainnet_cutover_handoff_run"
   "phase7_mainnet_cutover_summary_report"
+  "phase7_mainnet_cutover_live_smoke"
 )
 
 TOGGLE_STAGE_IDS=(
@@ -217,12 +219,16 @@ if ! jq -e '
   and .inputs.run_phase7_mainnet_cutover_handoff_check == true
   and .inputs.run_phase7_mainnet_cutover_handoff_run == true
   and .inputs.run_phase7_mainnet_cutover_summary_report == true
+  and .inputs.run_phase7_mainnet_cutover_live_smoke == true
   and (.steps | to_entries | all(.value.enabled == true and .value.status == "pass" and .value.rc == 0 and .value.command != null))
   and .steps.phase7_mainnet_cutover_check.status == "pass"
   and .steps.phase7_mainnet_cutover_run.status == "pass"
   and .steps.phase7_mainnet_cutover_handoff_check.status == "pass"
   and .steps.phase7_mainnet_cutover_handoff_run.status == "pass"
   and .steps.phase7_mainnet_cutover_summary_report.status == "pass"
+  and .steps.phase7_mainnet_cutover_live_smoke.status == "pass"
+  and (.steps.phase7_mainnet_cutover_live_smoke.command | contains("CI_PHASE7_MAINNET_CUTOVER_RUN_PHASE7_MAINNET_CUTOVER_LIVE_SMOKE=0"))
+  and (.steps.phase7_mainnet_cutover_summary_report.command | contains("CI_PHASE7_MAINNET_CUTOVER_RUN_PHASE7_MAINNET_CUTOVER_LIVE_SMOKE=0") | not)
 ' "$SUCCESS_SUMMARY_JSON" >/dev/null; then
   echo "success summary missing expected contract fields"
   cat "$SUCCESS_SUMMARY_JSON"
@@ -293,6 +299,7 @@ if ! jq -e '
   and .inputs.run_phase7_mainnet_cutover_handoff_check == true
   and .inputs.run_phase7_mainnet_cutover_handoff_run == true
   and .inputs.run_phase7_mainnet_cutover_summary_report == true
+  and .inputs.run_phase7_mainnet_cutover_live_smoke == true
   and (.steps | to_entries | all(.value.enabled == true and .value.status == "skip" and .value.rc == 0 and .value.reason == "dry-run"))
 ' "$DRY_RUN_SUMMARY_JSON" >/dev/null; then
   echo "dry-run summary missing expected skip accounting"
@@ -321,7 +328,8 @@ CI_PHASE7_MAINNET_CUTOVER_CANONICAL_SUMMARY_JSON="$TOGGLE_CANONICAL_SUMMARY_JSON
   --print-summary-json 0 \
   --run-phase7-mainnet-cutover-check 0 \
   --run-phase7-mainnet-cutover-handoff-check 0 \
-  --run-phase7-mainnet-cutover-summary-report 0 >"$TOGGLE_LOG" 2>&1
+  --run-phase7-mainnet-cutover-summary-report 0 \
+  --run-phase7-mainnet-cutover-live-smoke 0 >"$TOGGLE_LOG" 2>&1
 
 assert_stage_order "$CAPTURE" "${TOGGLE_STAGE_IDS[@]}"
 
@@ -351,6 +359,10 @@ if ! jq -e '
   and .steps.phase7_mainnet_cutover_summary_report.enabled == false
   and .steps.phase7_mainnet_cutover_summary_report.status == "skip"
   and .steps.phase7_mainnet_cutover_summary_report.reason == "disabled"
+  and .inputs.run_phase7_mainnet_cutover_live_smoke == false
+  and .steps.phase7_mainnet_cutover_live_smoke.enabled == false
+  and .steps.phase7_mainnet_cutover_live_smoke.status == "skip"
+  and .steps.phase7_mainnet_cutover_live_smoke.reason == "disabled"
 ' "$TOGGLE_SUMMARY_JSON" >/dev/null; then
   echo "toggle summary missing expected disabled/enabled fields"
   cat "$TOGGLE_SUMMARY_JSON"
@@ -362,7 +374,7 @@ echo "[ci-phase7-mainnet-cutover] first-failure rc propagation"
 : >"$CAPTURE"
 set +e
 CI_PHASE7_CAPTURE_FILE="$CAPTURE" \
-CI_PHASE7_FAIL_MATRIX="phase7_mainnet_cutover_check=19,phase7_mainnet_cutover_run=23,phase7_mainnet_cutover_handoff_check=29,phase7_mainnet_cutover_handoff_run=31,phase7_mainnet_cutover_summary_report=41" \
+CI_PHASE7_FAIL_MATRIX="phase7_mainnet_cutover_check=19,phase7_mainnet_cutover_run=23,phase7_mainnet_cutover_handoff_check=29,phase7_mainnet_cutover_handoff_run=31,phase7_mainnet_cutover_summary_report=41,phase7_mainnet_cutover_live_smoke=43" \
 CI_PHASE7_MAINNET_CUTOVER_CANONICAL_SUMMARY_JSON="$FAIL_CANONICAL_SUMMARY_JSON" \
 "$GATE_SCRIPT" \
   --reports-dir "$FAIL_REPORTS_DIR" \
@@ -393,6 +405,7 @@ if ! jq -e '
   and .inputs.run_phase7_mainnet_cutover_handoff_check == true
   and .inputs.run_phase7_mainnet_cutover_handoff_run == true
   and .inputs.run_phase7_mainnet_cutover_summary_report == true
+  and .inputs.run_phase7_mainnet_cutover_live_smoke == true
   and .steps.phase7_mainnet_cutover_check.status == "fail"
   and .steps.phase7_mainnet_cutover_check.rc == 19
   and .steps.phase7_mainnet_cutover_run.status == "fail"
@@ -403,6 +416,10 @@ if ! jq -e '
   and .steps.phase7_mainnet_cutover_handoff_run.rc == 31
   and .steps.phase7_mainnet_cutover_summary_report.status == "fail"
   and .steps.phase7_mainnet_cutover_summary_report.rc == 41
+  and .steps.phase7_mainnet_cutover_live_smoke.status == "fail"
+  and .steps.phase7_mainnet_cutover_live_smoke.rc == 43
+  and (.steps.phase7_mainnet_cutover_live_smoke.command | contains("CI_PHASE7_MAINNET_CUTOVER_RUN_PHASE7_MAINNET_CUTOVER_LIVE_SMOKE=0"))
+  and (.steps.phase7_mainnet_cutover_handoff_run.command | contains("CI_PHASE7_MAINNET_CUTOVER_RUN_PHASE7_MAINNET_CUTOVER_LIVE_SMOKE=0") | not)
 ' "$FAIL_SUMMARY_JSON" >/dev/null; then
   echo "fail summary missing expected first-failure accounting"
   cat "$FAIL_SUMMARY_JSON"

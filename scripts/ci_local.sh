@@ -225,6 +225,9 @@ echo "[ci] phase-7 mainnet cutover handoff run integration"
 echo "[ci] phase-7 mainnet cutover summary report integration"
 ./scripts/integration_phase7_mainnet_cutover_summary_report.sh
 
+echo "[ci] phase-7 mainnet cutover live smoke integration"
+./scripts/integration_phase7_mainnet_cutover_live_smoke.sh
+
 # Ordering contract: keep gate-wrapper coverage ahead of summary-wrapper coverage.
 echo "[ci] easy-node blockchain gate-wrapper integration"
 ./scripts/integration_easy_node_blockchain_gate_wrappers.sh
