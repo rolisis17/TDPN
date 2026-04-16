@@ -21,6 +21,7 @@ FAIL1="$TMP_DIR/fail_action_1.sh"
 FAIL2="$TMP_DIR/fail_action_2.sh"
 SLOW1="$TMP_DIR/slow_action_1.sh"
 SLOW2="$TMP_DIR/slow_action_2.sh"
+UNREACHABLE_PROFILE="$TMP_DIR/profile_unreachable.sh"
 
 cat >"$PASS1" <<'EOF_PASS1'
 #!/usr/bin/env bash
@@ -67,6 +68,16 @@ sleep 4
 echo "slow action 2 done"
 EOF_SLOW2
 chmod +x "$SLOW2"
+
+cat >"$UNREACHABLE_PROFILE" <<'EOF_UNREACHABLE_PROFILE'
+#!/usr/bin/env bash
+set -euo pipefail
+echo "[profile-default-gate-run] 2026-01-01T00:00:00Z wait-fail label=directory-a url=http://100.113.245.61:8081/v1/pubkeys attempt=3 error=curl rc=7"
+echo "profile-default-gate-run failed: unreachable directory endpoint (directory-a) url=http://100.113.245.61:8081/v1/pubkeys timeout_sec=45"
+echo "last_error: curl rc=7: Failed to connect"
+exit 1
+EOF_UNREACHABLE_PROFILE
+chmod +x "$UNREACHABLE_PROFILE"
 
 cat >"$FAKE_ROADMAP" <<'EOF_FAKE_ROADMAP'
 #!/usr/bin/env bash
@@ -159,6 +170,15 @@ JSON
 }
 JSON
     ;;
+  profile_unreachable)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"profile_default_gate","label":"Profile default decision gate","command":"bash \"$UNREACHABLE_PROFILE\"","reason":"test-unreachable"}
+  ]
+}
+JSON
+    ;;
   *)
     echo "unknown fake scenario: $scenario"
     exit 2
@@ -179,6 +199,10 @@ if ! bash ./scripts/roadmap_next_actions_run.sh --help | grep -F -- "--exclude-i
 fi
 if ! bash ./scripts/roadmap_next_actions_run.sh --help | grep -F -- "--parallel [0|1]" >/dev/null; then
   echo "help output missing --parallel [0|1]"
+  exit 1
+fi
+if ! bash ./scripts/roadmap_next_actions_run.sh --help | grep -F -- "--allow-profile-default-gate-unreachable [0|1]" >/dev/null; then
+  echo "help output missing --allow-profile-default-gate-unreachable [0|1]"
   exit 1
 fi
 
@@ -352,6 +376,75 @@ if ! jq -e '
   exit 1
 fi
 
+echo "[roadmap-next-actions-run] profile unreachable hard-fail default path"
+SUMMARY_PROFILE_HARD_FAIL="$TMP_DIR/summary_profile_hard_fail.json"
+REPORTS_PROFILE_HARD_FAIL="$TMP_DIR/reports_profile_hard_fail"
+set +e
+ROADMAP_NEXT_ACTIONS_SCENARIO=profile_unreachable \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" UNREACHABLE_PROFILE="$UNREACHABLE_PROFILE" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_PROFILE_HARD_FAIL" \
+  --summary-json "$SUMMARY_PROFILE_HARD_FAIL" \
+  --print-summary-json 0
+profile_hard_fail_rc=$?
+set -e
+if [[ "$profile_hard_fail_rc" != "1" ]]; then
+  echo "expected profile unreachable hard-fail rc=1, got rc=$profile_hard_fail_rc"
+  cat "$SUMMARY_PROFILE_HARD_FAIL"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .summary.actions_executed == 1
+  and .summary.pass == 0
+  and .summary.fail == 1
+  and .summary.soft_failed == 0
+  and ((.actions // []) | length == 1)
+  and .actions[0].id == "profile_default_gate"
+  and .actions[0].status == "fail"
+  and .actions[0].rc == 1
+  and ((.actions[0].soft_failed // false) == false)
+' "$SUMMARY_PROFILE_HARD_FAIL" >/dev/null; then
+  echo "profile unreachable hard-fail summary mismatch"
+  cat "$SUMMARY_PROFILE_HARD_FAIL"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] profile unreachable soft-fail path"
+SUMMARY_PROFILE_SOFT_FAIL="$TMP_DIR/summary_profile_soft_fail.json"
+REPORTS_PROFILE_SOFT_FAIL="$TMP_DIR/reports_profile_soft_fail"
+ROADMAP_NEXT_ACTIONS_SCENARIO=profile_unreachable \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" UNREACHABLE_PROFILE="$UNREACHABLE_PROFILE" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_PROFILE_SOFT_FAIL" \
+  --summary-json "$SUMMARY_PROFILE_SOFT_FAIL" \
+  --allow-profile-default-gate-unreachable 1 \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.allow_profile_default_gate_unreachable == true
+  and .summary.actions_executed == 1
+  and .summary.pass == 1
+  and .summary.fail == 0
+  and .summary.soft_failed == 1
+  and ((.actions // []) | length == 1)
+  and .actions[0].id == "profile_default_gate"
+  and .actions[0].status == "pass"
+  and .actions[0].rc == 0
+  and .actions[0].command_rc == 1
+  and .actions[0].failure_kind == "soft_failed_unreachable_profile_default_gate"
+  and .actions[0].soft_failed == true
+' "$SUMMARY_PROFILE_SOFT_FAIL" >/dev/null; then
+  echo "profile unreachable soft-fail summary mismatch"
+  cat "$SUMMARY_PROFILE_SOFT_FAIL"
+  exit 1
+fi
+
 echo "[roadmap-next-actions-run] no-actions path"
 SUMMARY_EMPTY="$TMP_DIR/summary_empty.json"
 REPORTS_EMPTY="$TMP_DIR/reports_empty"
@@ -417,4 +510,3 @@ if (( parallel_elapsed_sec > 6 )); then
 fi
 
 echo "roadmap next-actions run integration check ok"
-

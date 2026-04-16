@@ -17,6 +17,7 @@ Usage:
     [--refresh-single-machine-readiness [0|1]] \
     [--parallel [0|1]] \
     [--max-actions N] \
+    [--allow-profile-default-gate-unreachable [0|1]] \
     [--include-id-prefix PREFIX] \
     [--exclude-id-prefix PREFIX] \
     [--print-summary-json [0|1]]
@@ -32,6 +33,7 @@ Defaults:
   --refresh-single-machine-readiness 0
   --parallel 0
   --max-actions 0   (0 = no limit)
+  --allow-profile-default-gate-unreachable 0
   --include-id-prefix ""   (disabled)
   --exclude-id-prefix ""   (disabled)
   --print-summary-json 1
@@ -119,6 +121,7 @@ refresh_manual_validation="${ROADMAP_NEXT_ACTIONS_RUN_REFRESH_MANUAL_VALIDATION:
 refresh_single_machine_readiness="${ROADMAP_NEXT_ACTIONS_RUN_REFRESH_SINGLE_MACHINE_READINESS:-0}"
 parallel="${ROADMAP_NEXT_ACTIONS_RUN_PARALLEL:-0}"
 max_actions="${ROADMAP_NEXT_ACTIONS_RUN_MAX_ACTIONS:-0}"
+allow_profile_default_gate_unreachable="${ROADMAP_NEXT_ACTIONS_RUN_ALLOW_PROFILE_DEFAULT_GATE_UNREACHABLE:-0}"
 include_id_prefix="${ROADMAP_NEXT_ACTIONS_RUN_INCLUDE_ID_PREFIX:-}"
 exclude_id_prefix="${ROADMAP_NEXT_ACTIONS_RUN_EXCLUDE_ID_PREFIX:-}"
 print_summary_json="${ROADMAP_NEXT_ACTIONS_RUN_PRINT_SUMMARY_JSON:-1}"
@@ -183,6 +186,15 @@ while [[ $# -gt 0 ]]; do
       max_actions="${2:-}"
       shift 2
       ;;
+    --allow-profile-default-gate-unreachable)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        allow_profile_default_gate_unreachable="${2:-}"
+        shift 2
+      else
+        allow_profile_default_gate_unreachable="1"
+        shift
+      fi
+      ;;
     --include-id-prefix)
       require_value_or_die "$1" "${2:-}"
       include_id_prefix="${2:-}"
@@ -218,6 +230,7 @@ bool_arg_or_die "--refresh-manual-validation" "$refresh_manual_validation"
 bool_arg_or_die "--refresh-single-machine-readiness" "$refresh_single_machine_readiness"
 bool_arg_or_die "--parallel" "$parallel"
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
+bool_arg_or_die "--allow-profile-default-gate-unreachable" "$allow_profile_default_gate_unreachable"
 int_arg_or_die "--max-actions" "$max_actions"
 int_arg_or_die "--action-timeout-sec" "$action_timeout_sec"
 
@@ -337,6 +350,7 @@ executed_count=0
 pass_count=0
 fail_count=0
 timed_out_count=0
+soft_fail_count=0
 
 for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
   action_json="$(printf '%s\n' "$selected_actions_json" | jq -c --argjson idx "$idx" '.[$idx]')"
@@ -594,9 +608,26 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
   action_timed_out="$(jq -r '.timed_out // false' "$action_result_file")"
   action_failure_kind="$(jq -r '.failure_kind // "command_failed"' "$action_result_file")"
   action_notes="$(jq -r '.notes // ""' "$action_result_file")"
+  action_soft_failed="false"
 
-  if [[ "$action_status" == "pass" ]]; then
+  if [[ "$allow_profile_default_gate_unreachable" == "1" \
+     && "$action_id" == "profile_default_gate" \
+     && "$action_status" != "pass" ]]; then
+    if [[ -f "$action_log" ]] && grep -E -q 'profile-default-gate-run failed: unreachable directory endpoint|[[:space:]]wait-fail[[:space:]]' "$action_log"; then
+      action_status="pass"
+      action_rc=0
+      action_failure_kind="soft_failed_unreachable_profile_default_gate"
+      action_notes="soft-failed unreachable profile_default_gate (allow flag enabled)"
+      action_soft_failed="true"
+    fi
+  fi
+
+  if [[ "$action_status" == "pass" && "$action_soft_failed" != "true" ]]; then
     echo "[roadmap-next-actions-run] action=$action_id status=pass rc=0"
+  elif [[ "$action_status" == "pass" && "$action_soft_failed" == "true" ]]; then
+    echo "[roadmap-next-actions-run] action=$action_id status=soft-fail rc=0 failure_kind=$action_failure_kind"
+    echo "[roadmap-next-actions-run] action=$action_id notes=$action_notes"
+    echo "[roadmap-next-actions-run] action=$action_id log=$action_log"
   else
     echo "[roadmap-next-actions-run] action=$action_id status=fail rc=$action_rc failure_kind=$action_failure_kind"
     if [[ -n "$action_notes" ]]; then
@@ -608,6 +639,9 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
   executed_count=$((executed_count + 1))
   if [[ "$action_status" == "pass" ]]; then
     pass_count=$((pass_count + 1))
+    if [[ "$action_soft_failed" == "true" ]]; then
+      soft_fail_count=$((soft_fail_count + 1))
+    fi
   else
     fail_count=$((fail_count + 1))
     final_status="fail"
@@ -619,7 +653,18 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
     fi
   fi
 
-  jq -c '.' "$action_result_file" >>"$actions_tmp"
+  jq -c \
+    --arg status "$action_status" \
+    --arg failure_kind "$action_failure_kind" \
+    --arg notes "$action_notes" \
+    --argjson rc "$action_rc" \
+    --argjson soft_failed "$action_soft_failed" \
+    '.status = $status
+     | .rc = $rc
+     | .failure_kind = $failure_kind
+     | .notes = (if $notes == "" then null else $notes end)
+     | .soft_failed = $soft_failed' \
+    "$action_result_file" >>"$actions_tmp"
 done
 
 actions_results_json="$(jq -s '.' "$actions_tmp")"
@@ -645,6 +690,7 @@ jq -n \
   --argjson refresh_single_machine_readiness "$refresh_single_machine_readiness" \
   --argjson parallel "$parallel" \
   --argjson max_actions "$max_actions" \
+  --argjson allow_profile_default_gate_unreachable "$allow_profile_default_gate_unreachable" \
   --argjson action_timeout_sec "$action_timeout_sec" \
   --argjson actions_count "$actions_count" \
   --argjson selected_action_ids "$selected_action_ids_json" \
@@ -652,6 +698,7 @@ jq -n \
   --argjson pass_count "$pass_count" \
   --argjson fail_count "$fail_count" \
   --argjson timed_out_count "$timed_out_count" \
+  --argjson soft_fail_count "$soft_fail_count" \
   --argjson actions "$actions_results_json" \
   '{
     version: 1,
@@ -666,6 +713,7 @@ jq -n \
       parallel: ($parallel == 1),
       max_actions: $max_actions,
       action_timeout_sec: $action_timeout_sec,
+      allow_profile_default_gate_unreachable: ($allow_profile_default_gate_unreachable == 1),
       include_id_prefix: (if $include_id_prefix == "" then null else $include_id_prefix end),
       exclude_id_prefix: (if $exclude_id_prefix == "" then null else $exclude_id_prefix end)
     },
@@ -678,7 +726,8 @@ jq -n \
       actions_executed: $executed_count,
       pass: $pass_count,
       fail: $fail_count,
-      timed_out: $timed_out_count
+      timed_out: $timed_out_count,
+      soft_failed: $soft_fail_count
     },
     actions: $actions,
     artifacts: {
@@ -698,4 +747,3 @@ if [[ "$print_summary_json" == "1" ]]; then
 fi
 
 exit "$final_rc"
-
