@@ -48,6 +48,7 @@ STAGE_ENV_NAMES=(
   "CI_PHASE5_SETTLEMENT_LAYER_WINDOWS_ROLE_RUNBOOKS_SCRIPT"
   "CI_PHASE5_SETTLEMENT_LAYER_CROSS_PLATFORM_INTEROP_SCRIPT"
   "CI_PHASE5_SETTLEMENT_LAYER_ROLE_COMBINATION_VALIDATION_SCRIPT"
+  "CI_PHASE5_SETTLEMENT_LAYER_SETTLEMENT_DUAL_ASSET_PARITY_SCRIPT"
   "CI_PHASE5_SETTLEMENT_LAYER_SETTLEMENT_ADAPTER_ROUNDTRIP_SCRIPT"
   "CI_PHASE5_SETTLEMENT_LAYER_SETTLEMENT_ADAPTER_SIGNED_TX_ROUNDTRIP_SCRIPT"
   "CI_PHASE5_SETTLEMENT_LAYER_SETTLEMENT_SHADOW_ENV_SCRIPT"
@@ -64,6 +65,7 @@ STAGE_IDS=(
   "settlement_acceptance"
   "settlement_bridge_smoke"
   "settlement_state_persistence"
+  "settlement_dual_asset_parity"
   "settlement_adapter_roundtrip"
   "settlement_adapter_signed_tx_roundtrip"
   "settlement_shadow_env"
@@ -228,6 +230,7 @@ if ! jq -e '
   and .schema.major == 1
   and .schema.minor == 0
   and .inputs.dry_run == false
+  and .inputs.run_settlement_dual_asset_parity == true
   and .inputs.run_settlement_adapter_roundtrip == true
   and .inputs.run_settlement_adapter_signed_tx_roundtrip == true
   and .inputs.run_settlement_shadow_env == true
@@ -240,6 +243,8 @@ if ! jq -e '
   and (.steps | to_entries | all(.value.enabled == true and .value.status == "pass" and .value.rc == 0 and .value.command != null))
   and .steps.settlement_adapter_roundtrip.status == "pass"
   and .steps.settlement_adapter_roundtrip.rc == 0
+  and .steps.settlement_dual_asset_parity.status == "pass"
+  and .steps.settlement_dual_asset_parity.rc == 0
   and .steps.settlement_adapter_signed_tx_roundtrip.status == "pass"
   and .steps.settlement_adapter_signed_tx_roundtrip.rc == 0
   and .steps.settlement_shadow_env.status == "pass"
@@ -319,6 +324,8 @@ if ! jq -e '
   .status == "pass"
   and .rc == 0
   and .inputs.dry_run == true
+  and .steps.settlement_dual_asset_parity.status == "skip"
+  and .steps.settlement_dual_asset_parity.reason == "dry-run"
   and .steps.settlement_adapter_roundtrip.status == "skip"
   and .steps.settlement_adapter_roundtrip.reason == "dry-run"
   and .steps.settlement_adapter_signed_tx_roundtrip.status == "skip"
@@ -365,6 +372,7 @@ CI_PHASE5_SETTLEMENT_LAYER_CANONICAL_SUMMARY_JSON="$TOGGLE_CANONICAL_SUMMARY_JSO
   --print-summary-json 0 \
   --run-settlement-failsoft 0 \
   --run-settlement-acceptance 0 \
+  --run-settlement-dual-asset-parity 0 \
   --run-settlement-adapter-roundtrip 0 \
   --run-settlement-adapter-signed-tx-roundtrip 0 \
   --run-settlement-shadow-env 0 \
@@ -389,6 +397,10 @@ if ! jq -e '
   and .steps.settlement_failsoft.enabled == false
   and .steps.settlement_failsoft.status == "skip"
   and .steps.settlement_failsoft.reason == "disabled"
+  and .inputs.run_settlement_dual_asset_parity == false
+  and .steps.settlement_dual_asset_parity.enabled == false
+  and .steps.settlement_dual_asset_parity.status == "skip"
+  and .steps.settlement_dual_asset_parity.reason == "disabled"
   and .inputs.run_settlement_adapter_roundtrip == false
   and .steps.settlement_adapter_roundtrip.enabled == false
   and .steps.settlement_adapter_roundtrip.status == "skip"
@@ -438,7 +450,7 @@ echo "[ci-phase5-settlement-layer] first-failure rc propagation"
 : >"$CAPTURE"
 set +e
 CI_PHASE5_CAPTURE_FILE="$CAPTURE" \
-CI_PHASE5_FAIL_MATRIX="settlement_acceptance=23,settlement_bridge_smoke=41,settlement_adapter_roundtrip=43,settlement_adapter_signed_tx_roundtrip=45,settlement_shadow_env=49,settlement_shadow_status_surface=51,issuer_sponsor_api_live_smoke=57,phase5_settlement_layer_check=47,phase5_settlement_layer_run=53,phase5_settlement_layer_handoff_check=55,phase5_settlement_layer_handoff_run=59" \
+CI_PHASE5_FAIL_MATRIX="settlement_acceptance=23,settlement_bridge_smoke=41,settlement_dual_asset_parity=42,settlement_adapter_roundtrip=43,settlement_adapter_signed_tx_roundtrip=45,settlement_shadow_env=49,settlement_shadow_status_surface=51,issuer_sponsor_api_live_smoke=57,phase5_settlement_layer_check=47,phase5_settlement_layer_run=53,phase5_settlement_layer_handoff_check=55,phase5_settlement_layer_handoff_run=59" \
 CI_PHASE5_SETTLEMENT_LAYER_CANONICAL_SUMMARY_JSON="$FAIL_CANONICAL_SUMMARY_JSON" \
 "$GATE_SCRIPT" \
   --reports-dir "$FAIL_REPORTS_DIR" \
@@ -468,6 +480,8 @@ if ! jq -e '
   and .steps.settlement_acceptance.rc == 23
   and .steps.settlement_bridge_smoke.status == "fail"
   and .steps.settlement_bridge_smoke.rc == 41
+  and .steps.settlement_dual_asset_parity.status == "fail"
+  and .steps.settlement_dual_asset_parity.rc == 42
   and .steps.settlement_adapter_roundtrip.status == "fail"
   and .steps.settlement_adapter_roundtrip.rc == 43
   and .steps.settlement_adapter_signed_tx_roundtrip.status == "fail"

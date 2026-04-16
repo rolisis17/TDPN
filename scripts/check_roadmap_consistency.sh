@@ -10,6 +10,7 @@ roadmap_script="scripts/roadmap_progress_report.sh"
 roadmap_integration_script="scripts/integration_roadmap_progress_report.sh"
 bootstrap_validator_doc="docs/blockchain-bootstrap-validator-plan.md"
 cosmos_runtime_doc="docs/cosmos-settlement-runtime.md"
+testing_guide_doc="docs/testing-guide.md"
 chain_readme="blockchain/tdpn-chain/README.md"
 chain_scaffold_file="blockchain/tdpn-chain/app/scaffold.go"
 chain_grpc_registry_file="blockchain/tdpn-chain/app/grpc_registry.go"
@@ -332,7 +333,7 @@ check_mainnet_activation_gate_surface() {
   fi
 }
 
-for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$roadmap_integration_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$chain_readme" "$chain_scaffold_file" "$chain_grpc_registry_file" "$chain_grpc_registry_test_file" "$chain_settlement_bridge_file" "$chain_runtime_test_file" "$settlement_mapping_doc" "$blockchain_sponsor_quickstart_doc" "$phase5_ci_script" "$phase5_integration_script" "$phase5_check_script" "$phase5_run_script" "$phase5_handoff_check_script" "$phase5_handoff_run_script" "$phase5_check_integration_script" "$phase5_run_integration_script" "$phase5_handoff_check_integration_script" "$phase5_handoff_run_integration_script" "$phase5_summary_report_script" "$phase5_summary_report_integration_script" "$blockchain_fastlane_script" "$blockchain_fastlane_integration_script" "$ci_local_script" "$easy_node_script" "$easy_node_blockchain_gate_wrappers_integration_script" "$easy_node_blockchain_summary_reports_integration_script" "$phase6_ci_script" "$phase6_integration_script" "$phase6_contracts_ci_script" "$phase6_contracts_integration_script" "$phase6_contracts_live_smoke_script" "$phase6_grpc_app_roundtrip_script" "$phase6_grpc_runtime_smoke_script" "$phase6_grpc_live_smoke_script" "$phase6_grpc_auth_live_smoke_script" "$phase6_settlement_bridge_smoke_script" "$phase6_settlement_bridge_live_smoke_script" "$phase6_query_surface_script" "$phase6_module_tx_surface_script" "$phase6_proto_surface_script" "$phase6_proto_grpc_surface_script" "$phase6_proto_codegen_surface_script" "$phase6_module_coverage_floor_script" "$phase6_keeper_coverage_floor_script" "$phase6_dual_write_parity_script" "$phase6_check_script" "$phase6_run_script" "$phase6_check_integration_script" "$phase6_run_integration_script" "$phase6_suite_script" "$phase6_suite_integration_script" "$phase6_summary_report_script" "$phase6_summary_report_integration_script" "$phase7_check_script" "$phase7_check_integration_script" "$phase7_run_script" "$phase7_run_integration_script" "$phase7_handoff_check_script" "$phase7_handoff_check_integration_script" "$phase7_handoff_run_script" "$phase7_handoff_run_integration_script" "$phase7_ci_script" "$phase7_ci_integration_script" "$phase7_summary_report_script" "$phase7_summary_report_integration_script"; do
+for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$roadmap_integration_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$testing_guide_doc" "$chain_readme" "$chain_scaffold_file" "$chain_grpc_registry_file" "$chain_grpc_registry_test_file" "$chain_settlement_bridge_file" "$chain_runtime_test_file" "$settlement_mapping_doc" "$blockchain_sponsor_quickstart_doc" "$phase5_ci_script" "$phase5_integration_script" "$phase5_check_script" "$phase5_run_script" "$phase5_handoff_check_script" "$phase5_handoff_run_script" "$phase5_check_integration_script" "$phase5_run_integration_script" "$phase5_handoff_check_integration_script" "$phase5_handoff_run_integration_script" "$phase5_summary_report_script" "$phase5_summary_report_integration_script" "$blockchain_fastlane_script" "$blockchain_fastlane_integration_script" "$ci_local_script" "$easy_node_script" "$easy_node_blockchain_gate_wrappers_integration_script" "$easy_node_blockchain_summary_reports_integration_script" "$phase6_ci_script" "$phase6_integration_script" "$phase6_contracts_ci_script" "$phase6_contracts_integration_script" "$phase6_contracts_live_smoke_script" "$phase6_grpc_app_roundtrip_script" "$phase6_grpc_runtime_smoke_script" "$phase6_grpc_live_smoke_script" "$phase6_grpc_auth_live_smoke_script" "$phase6_settlement_bridge_smoke_script" "$phase6_settlement_bridge_live_smoke_script" "$phase6_query_surface_script" "$phase6_module_tx_surface_script" "$phase6_proto_surface_script" "$phase6_proto_grpc_surface_script" "$phase6_proto_codegen_surface_script" "$phase6_module_coverage_floor_script" "$phase6_keeper_coverage_floor_script" "$phase6_dual_write_parity_script" "$phase6_check_script" "$phase6_run_script" "$phase6_check_integration_script" "$phase6_run_integration_script" "$phase6_suite_script" "$phase6_suite_integration_script" "$phase6_summary_report_script" "$phase6_summary_report_integration_script" "$phase7_check_script" "$phase7_check_integration_script" "$phase7_run_script" "$phase7_run_integration_script" "$phase7_handoff_check_script" "$phase7_handoff_check_integration_script" "$phase7_handoff_run_script" "$phase7_handoff_run_integration_script" "$phase7_ci_script" "$phase7_ci_integration_script" "$phase7_summary_report_script" "$phase7_summary_report_integration_script"; do
   if [[ ! -f "$f" ]]; then
     echo "missing required file: $f"
     exit 1
@@ -448,6 +449,18 @@ if ! rg -Fq "settlement_adapter_signed_tx_roundtrip" "$full_plan"; then
 fi
 if ! rg -Fq "integration_cosmos_adapter_tdpnd_signed_tx_roundtrip.sh" "$full_plan"; then
   echo "full execution plan must document signed-tx adapter roundtrip integration script"
+  exit 1
+fi
+if ! rg -Fq "settlement_dual_asset_parity" "$full_plan"; then
+  echo "full execution plan must document settlement_dual_asset_parity gate posture"
+  exit 1
+fi
+if ! rg -Fq "integration_cosmos_settlement_dual_asset_parity.sh" "$full_plan"; then
+  echo "full execution plan must document dual-asset parity integration script"
+  exit 1
+fi
+if ! rg -Fq "settlement_dual_asset_parity_ok" "$full_plan"; then
+  echo "full execution plan must document settlement_dual_asset_parity_ok summary signal posture"
   exit 1
 fi
 if ! rg -Fq "issuer_sponsor_api_live_smoke" "$full_plan"; then
@@ -1001,10 +1014,22 @@ if ! rg -Fq "integration_phase5_settlement_layer_summary_report.sh" "$product_ro
   echo "product roadmap must document phase5 summary report integration contract script"
   exit 1
 fi
+if ! rg -Fq "settlement_dual_asset_parity_ok" "$product_roadmap"; then
+  echo "product roadmap must document phase5 settlement_dual_asset_parity_ok signal posture"
+  exit 1
+fi
 if ! rg -iq "phase[[:space:]]*5 summary helper fallback discovery" "$product_roadmap" \
   || ! rg -iq "timestamped[[:space:]]+ci" "$product_roadmap" \
   || ! rg -iq "handoff-run" "$product_roadmap"; then
   echo "product roadmap must document phase5 summary helper fallback discovery for timestamped CI/handoff-run summaries"
+  exit 1
+fi
+if ! rg -Fq "settlement_dual_asset_parity" "$testing_guide_doc"; then
+  echo "testing guide must document settlement_dual_asset_parity stage in phase5 targeted gates"
+  exit 1
+fi
+if ! rg -Fq "integration_cosmos_settlement_dual_asset_parity.sh" "$testing_guide_doc"; then
+  echo "testing guide must document integration_cosmos_settlement_dual_asset_parity.sh in phase5 targeted gates"
   exit 1
 fi
 if ! rg -Fq "phase5-settlement-layer-summary-report" "$product_roadmap"; then
@@ -2412,6 +2437,18 @@ if ! rg -Fq "integration_cosmos_settlement_shadow_status_surface.sh" "$cosmos_ru
   echo "cosmos settlement runtime guide must document settlement_shadow_status_surface integration script"
   exit 1
 fi
+if ! rg -Fq "settlement_dual_asset_parity" "$cosmos_runtime_doc"; then
+  echo "cosmos settlement runtime guide must document settlement_dual_asset_parity phase5 stage"
+  exit 1
+fi
+if ! rg -Fq "integration_cosmos_settlement_dual_asset_parity.sh" "$cosmos_runtime_doc"; then
+  echo "cosmos settlement runtime guide must document settlement_dual_asset_parity integration script"
+  exit 1
+fi
+if ! rg -Fq "settlement_dual_asset_parity_ok" "$cosmos_runtime_doc"; then
+  echo "cosmos settlement runtime guide must document settlement_dual_asset_parity_ok summary signal posture"
+  exit 1
+fi
 if ! rg -Fq "issuer_sponsor_api_live_smoke" "$cosmos_runtime_doc"; then
   echo "cosmos settlement runtime guide must document issuer_sponsor_api_live_smoke phase5 stage"
   exit 1
@@ -2817,6 +2854,14 @@ if ! rg -Fq "integration_cosmos_settlement_shadow_status_surface.sh" "$phase5_ci
   echo "phase5 ci script must wire integration_cosmos_settlement_shadow_status_surface.sh"
   exit 1
 fi
+if ! rg -Fq "settlement_dual_asset_parity" "$phase5_ci_script"; then
+  echo "phase5 ci script must include settlement_dual_asset_parity stage"
+  exit 1
+fi
+if ! rg -Fq "integration_cosmos_settlement_dual_asset_parity.sh" "$phase5_ci_script"; then
+  echo "phase5 ci script must wire integration_cosmos_settlement_dual_asset_parity.sh"
+  exit 1
+fi
 if ! rg -Fq "issuer_sponsor_api_live_smoke" "$phase5_ci_script"; then
   echo "phase5 ci script must include issuer_sponsor_api_live_smoke stage"
   exit 1
@@ -2831,6 +2876,10 @@ if [[ ! -f "$ROOT_DIR/scripts/integration_cosmos_settlement_shadow_env.sh" ]]; t
 fi
 if [[ ! -f "$ROOT_DIR/scripts/integration_cosmos_settlement_shadow_status_surface.sh" ]]; then
   echo "missing required script: scripts/integration_cosmos_settlement_shadow_status_surface.sh"
+  exit 1
+fi
+if [[ ! -f "$ROOT_DIR/scripts/integration_cosmos_settlement_dual_asset_parity.sh" ]]; then
+  echo "missing required script: scripts/integration_cosmos_settlement_dual_asset_parity.sh"
   exit 1
 fi
 if [[ ! -f "$ROOT_DIR/scripts/integration_issuer_sponsor_api_live_smoke.sh" ]]; then
@@ -2881,8 +2930,24 @@ if ! rg -Fq "settlement_shadow_status_surface" "$phase5_integration_script"; the
   echo "phase5 ci integration script must validate settlement_shadow_status_surface stage"
   exit 1
 fi
+if ! rg -Fq "settlement_dual_asset_parity" "$phase5_integration_script"; then
+  echo "phase5 ci integration script must validate settlement_dual_asset_parity stage"
+  exit 1
+fi
 if ! rg -Fq "issuer_sponsor_api_live_smoke" "$phase5_integration_script"; then
   echo "phase5 ci integration script must validate issuer_sponsor_api_live_smoke stage"
+  exit 1
+fi
+if ! rg -Fq "settlement_dual_asset_parity.status == \"pass\"" "$phase5_integration_script"; then
+  echo "phase5 ci integration script must validate settlement_dual_asset_parity pass accounting"
+  exit 1
+fi
+if ! rg -Fq "settlement_dual_asset_parity.status == \"skip\"" "$phase5_integration_script"; then
+  echo "phase5 ci integration script must validate settlement_dual_asset_parity skip accounting"
+  exit 1
+fi
+if ! rg -Fq "settlement_dual_asset_parity.status == \"fail\"" "$phase5_integration_script"; then
+  echo "phase5 ci integration script must validate settlement_dual_asset_parity fail accounting"
   exit 1
 fi
 if ! rg -Fq "issuer_sponsor_api_live_smoke.status == \"pass\"" "$phase5_integration_script"; then
@@ -2941,6 +3006,10 @@ if ! rg -Fq "issuer_sponsor_api_live_smoke_ok" "$phase5_run_script"; then
   echo "phase5 run wrapper must surface issuer_sponsor_api_live_smoke_ok contract field"
   exit 1
 fi
+if ! rg -Fq "settlement_dual_asset_parity_ok" "$phase5_run_script"; then
+  echo "phase5 run wrapper must surface settlement_dual_asset_parity_ok contract field"
+  exit 1
+fi
 if ! rg -Fq "canonical_summary_json" "$phase5_run_integration_script"; then
   echo "phase5 run integration must validate canonical summary artifact wiring"
   exit 1
@@ -2957,6 +3026,10 @@ if ! rg -Fq "issuer_sponsor_api_live_smoke_ok" "$phase5_run_integration_script";
   echo "phase5 run integration must validate issuer_sponsor_api_live_smoke_ok contract field coverage"
   exit 1
 fi
+if ! rg -Fq "settlement_dual_asset_parity_ok" "$phase5_run_integration_script"; then
+  echo "phase5 run integration must validate settlement_dual_asset_parity_ok contract field coverage"
+  exit 1
+fi
 if ! rg -Fq "PHASE5_SETTLEMENT_LAYER_CHECK_CANONICAL_SUMMARY_JSON" "$phase5_check_script"; then
   echo "phase5 check wrapper must expose canonical summary artifact override env"
   exit 1
@@ -2967,6 +3040,10 @@ if ! rg -Fq "require-issuer-sponsor-api-live-smoke-ok" "$phase5_check_script"; t
 fi
 if ! rg -Fq "issuer_sponsor_api_live_smoke_ok" "$phase5_check_script"; then
   echo "phase5 check wrapper must surface issuer_sponsor_api_live_smoke_ok signal"
+  exit 1
+fi
+if ! rg -Fq "settlement_dual_asset_parity_ok" "$phase5_check_script"; then
+  echo "phase5 check wrapper must surface settlement_dual_asset_parity_ok signal"
   exit 1
 fi
 if ! rg -Fq "canonical_summary_json" "$phase5_check_script"; then
@@ -3013,6 +3090,10 @@ if ! rg -Fq "issuer_sponsor_api_live_smoke_ok" "$phase5_handoff_run_script"; the
   echo "phase5 handoff-run wrapper must surface issuer_sponsor_api_live_smoke_ok contract field"
   exit 1
 fi
+if ! rg -Fq "settlement_dual_asset_parity_ok" "$phase5_handoff_run_script"; then
+  echo "phase5 handoff-run wrapper must surface settlement_dual_asset_parity_ok contract field"
+  exit 1
+fi
 if ! rg -Fq "canonical_summary_json" "$phase5_handoff_run_integration_script"; then
   echo "phase5 handoff-run integration must validate canonical summary artifact wiring"
   exit 1
@@ -3029,6 +3110,10 @@ if ! rg -Fq "issuer_sponsor_api_live_smoke_ok" "$phase5_handoff_run_integration_
   echo "phase5 handoff-run integration must validate issuer_sponsor_api_live_smoke_ok contract field coverage"
   exit 1
 fi
+if ! rg -Fq "settlement_dual_asset_parity_ok" "$phase5_handoff_run_integration_script"; then
+  echo "phase5 handoff-run integration must validate settlement_dual_asset_parity_ok contract field coverage"
+  exit 1
+fi
 if ! rg -Fq "PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_CANONICAL_SUMMARY_JSON" "$phase5_handoff_check_script"; then
   echo "phase5 handoff-check wrapper must expose canonical summary artifact override env"
   exit 1
@@ -3039,6 +3124,10 @@ if ! rg -Fq "require-issuer-sponsor-api-live-smoke-ok" "$phase5_handoff_check_sc
 fi
 if ! rg -Fq "issuer_sponsor_api_live_smoke_ok" "$phase5_handoff_check_script"; then
   echo "phase5 handoff-check wrapper must surface issuer_sponsor_api_live_smoke_ok signal"
+  exit 1
+fi
+if ! rg -Fq "settlement_dual_asset_parity_ok" "$phase5_handoff_check_script"; then
+  echo "phase5 handoff-check wrapper must surface settlement_dual_asset_parity_ok signal"
   exit 1
 fi
 if ! rg -Fq "canonical_summary_json" "$phase5_handoff_check_script"; then
@@ -3055,6 +3144,10 @@ if ! rg -Fq "cmp -s" "$phase5_handoff_check_integration_script"; then
 fi
 if ! rg -Fq "issuer_sponsor_api_live_smoke_ok" "$phase5_handoff_check_integration_script"; then
   echo "phase5 handoff-check integration must validate issuer_sponsor_api_live_smoke_ok signal coverage"
+  exit 1
+fi
+if ! rg -Fq "settlement_dual_asset_parity_ok" "$phase5_handoff_check_integration_script"; then
+  echo "phase5 handoff-check integration must validate settlement_dual_asset_parity_ok signal coverage"
   exit 1
 fi
 if ! rg -Fq "require-issuer-sponsor-api-live-smoke-ok 0" "$phase5_handoff_check_integration_script"; then
@@ -3075,6 +3168,10 @@ if ! rg -Fq "canonical_summary_json" "$phase5_summary_report_script"; then
 fi
 if ! rg -Fq "issuer_sponsor_api_live_smoke_ok" "$phase5_summary_report_script"; then
   echo "phase5 summary report helper must surface issuer_sponsor_api_live_smoke_ok contract field"
+  exit 1
+fi
+if ! rg -Fq "settlement_dual_asset_parity_ok" "$phase5_summary_report_script"; then
+  echo "phase5 summary report helper must surface settlement_dual_asset_parity_ok contract field"
   exit 1
 fi
 for phase5_helper_artifact in \
@@ -3111,6 +3208,10 @@ if ! rg -Fq "cmp -s" "$phase5_summary_report_integration_script"; then
 fi
 if ! rg -Fq "issuer_sponsor_api_live_smoke_ok" "$phase5_summary_report_integration_script"; then
   echo "phase5 summary report integration script must validate issuer_sponsor_api_live_smoke_ok contract field coverage"
+  exit 1
+fi
+if ! rg -Fq "settlement_dual_asset_parity_ok" "$phase5_summary_report_integration_script"; then
+  echo "phase5 summary report integration script must validate settlement_dual_asset_parity_ok contract field coverage"
   exit 1
 fi
 if ! rg -Fq "pass path" "$phase5_summary_report_integration_script"; then
@@ -3322,6 +3423,14 @@ if ! rg -Fq ".signals.issuer_sponsor_api_live_smoke.ok" "$easy_node_blockchain_s
   echo "easy-node summary-report integration must validate phase5 sponsor signal health surfacing"
   exit 1
 fi
+if ! rg -Fq ".signals.settlement_dual_asset_parity.status" "$easy_node_blockchain_summary_reports_integration_script"; then
+  echo "easy-node summary-report integration must validate phase5 dual-asset parity signal status surfacing"
+  exit 1
+fi
+if ! rg -Fq ".signals.settlement_dual_asset_parity.ok" "$easy_node_blockchain_summary_reports_integration_script"; then
+  echo "easy-node summary-report integration must validate phase5 dual-asset parity signal health surfacing"
+  exit 1
+fi
 for phase5_canonical_summary in \
   "phase5_settlement_layer_ci_summary.json" \
   "phase5_settlement_layer_check_summary.json" \
@@ -3395,6 +3504,7 @@ phase5_blockchain_gate_specs=(
   "settlement_adapter_signed_tx_roundtrip|scripts/integration_cosmos_adapter_tdpnd_signed_tx_roundtrip.sh"
   "settlement_shadow_env|scripts/integration_cosmos_settlement_shadow_env.sh"
   "settlement_shadow_status_surface|scripts/integration_cosmos_settlement_shadow_status_surface.sh"
+  "settlement_dual_asset_parity|scripts/integration_cosmos_settlement_dual_asset_parity.sh"
   "issuer_sponsor_api_live_smoke|scripts/integration_issuer_sponsor_api_live_smoke.sh"
 )
 for gate_spec in "${phase5_blockchain_gate_specs[@]}"; do

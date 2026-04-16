@@ -198,6 +198,7 @@ Current implementation posture:
   - `settlement_adapter_signed_tx_roundtrip` -> `scripts/integration_cosmos_adapter_tdpnd_signed_tx_roundtrip.sh`
   - `settlement_shadow_env` -> `scripts/integration_cosmos_settlement_shadow_env.sh`
   - `settlement_shadow_status_surface` -> `scripts/integration_cosmos_settlement_shadow_status_surface.sh`
+  - `settlement_dual_asset_parity` -> `scripts/integration_cosmos_settlement_dual_asset_parity.sh`
   - `issuer_sponsor_api_live_smoke` -> `scripts/integration_issuer_sponsor_api_live_smoke.sh` (validates sponsor `quote -> reserve -> token -> status` happy path with no end-user wallet signing)
 - phase5 settlement CI/check/run/handoff wrappers now emit canonical summary artifacts under `.easy-node-logs`; these are the helper input contracts for `scripts/phase5_settlement_layer_summary_report.sh`:
   - `phase5_settlement_layer_ci_summary.json`
@@ -207,6 +208,7 @@ Current implementation posture:
   - `phase5_settlement_layer_handoff_run_summary.json`
 - phase5 operator summary helper `scripts/phase5_settlement_layer_summary_report.sh` aggregates CI/check/run/handoff summaries into compact operator output plus normalized JSON, with integration contract coverage from `scripts/integration_phase5_settlement_layer_summary_report.sh`.
 - phase5 run/handoff wrappers and aggregate report propagate sponsor live-smoke posture for downstream gates/reports via `signals.issuer_sponsor_api_live_smoke_*` and consolidated `signals.issuer_sponsor_api_live_smoke`.
+- phase5 run/handoff wrappers and aggregate report also propagate dual-asset parity posture via `signals.settlement_dual_asset_parity_status`/`signals.settlement_dual_asset_parity_ok`, handoff equivalents, and consolidated `signals.settlement_dual_asset_parity`.
 - phase5 summary helper fallback discovery includes timestamped CI and handoff-run summary directories when canonical/default summary files are absent.
 - phase6 Cosmos L1 build/testnet CI scaffold now runs via `scripts/ci_phase6_cosmos_l1_build_testnet.sh` with contract checks in `scripts/integration_ci_phase6_cosmos_l1_build_testnet.sh`, including scaffold/proto/query/module-tx/gRPC stage ordering.
 - phase6 build/testnet CI also exposes optional `tdpnd_comet_runtime_smoke` via `--run-tdpnd-comet-runtime-smoke` (`scripts/integration_cosmos_tdpnd_comet_runtime_smoke.sh`) as the Comet runtime-mode smoke path, while keeping VPN dataplane independent from chain liveness.

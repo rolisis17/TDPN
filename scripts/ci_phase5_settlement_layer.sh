@@ -16,6 +16,7 @@ Usage:
     [--run-settlement-acceptance [0|1]] \
     [--run-settlement-bridge-smoke [0|1]] \
     [--run-settlement-state-persistence [0|1]] \
+    [--run-settlement-dual-asset-parity [0|1]] \
     [--run-settlement-adapter-roundtrip [0|1]] \
     [--run-settlement-adapter-signed-tx-roundtrip [0|1]] \
     [--run-settlement-shadow-env [0|1]] \
@@ -33,15 +34,16 @@ Purpose:
     2) integration_cosmos_settlement_acceptance_paths.sh
     3) integration_cosmos_tdpnd_settlement_bridge_smoke.sh
     4) integration_cosmos_tdpnd_state_dir_persistence.sh
-    5) integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh
-    6) integration_cosmos_adapter_tdpnd_signed_tx_roundtrip.sh
-    7) integration_cosmos_settlement_shadow_env.sh
-    8) integration_cosmos_settlement_shadow_status_surface.sh
-    9) integration_issuer_sponsor_api_live_smoke.sh
-    10) integration_phase5_settlement_layer_check.sh
-    11) integration_phase5_settlement_layer_run.sh
-    12) integration_phase5_settlement_layer_handoff_check.sh
-    13) integration_phase5_settlement_layer_handoff_run.sh
+    5) integration_cosmos_settlement_dual_asset_parity.sh
+    6) integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh
+    7) integration_cosmos_adapter_tdpnd_signed_tx_roundtrip.sh
+    8) integration_cosmos_settlement_shadow_env.sh
+    9) integration_cosmos_settlement_shadow_status_surface.sh
+    10) integration_issuer_sponsor_api_live_smoke.sh
+    11) integration_phase5_settlement_layer_check.sh
+    12) integration_phase5_settlement_layer_run.sh
+    13) integration_phase5_settlement_layer_handoff_check.sh
+    14) integration_phase5_settlement_layer_handoff_run.sh
 
 Dry-run mode:
   --dry-run 1 skips stage execution, records deterministic skip accounting,
@@ -124,6 +126,7 @@ run_settlement_failsoft="${CI_PHASE5_SETTLEMENT_LAYER_RUN_SETTLEMENT_FAILSOFT:-$
 run_settlement_acceptance="${CI_PHASE5_SETTLEMENT_LAYER_RUN_SETTLEMENT_ACCEPTANCE:-${CI_PHASE5_SETTLEMENT_LAYER_RUN_WINDOWS_ROLE_RUNBOOKS:-1}}"
 run_settlement_bridge_smoke="${CI_PHASE5_SETTLEMENT_LAYER_RUN_SETTLEMENT_BRIDGE_SMOKE:-${CI_PHASE5_SETTLEMENT_LAYER_RUN_CROSS_PLATFORM_INTEROP:-1}}"
 run_settlement_state_persistence="${CI_PHASE5_SETTLEMENT_LAYER_RUN_SETTLEMENT_STATE_PERSISTENCE:-${CI_PHASE5_SETTLEMENT_LAYER_RUN_ROLE_COMBINATION_VALIDATION:-1}}"
+run_settlement_dual_asset_parity="${CI_PHASE5_SETTLEMENT_LAYER_RUN_SETTLEMENT_DUAL_ASSET_PARITY:-1}"
 run_settlement_adapter_roundtrip="${CI_PHASE5_SETTLEMENT_LAYER_RUN_SETTLEMENT_ADAPTER_ROUNDTRIP:-1}"
 run_settlement_adapter_signed_tx_roundtrip="${CI_PHASE5_SETTLEMENT_LAYER_RUN_SETTLEMENT_ADAPTER_SIGNED_TX_ROUNDTRIP:-1}"
 run_settlement_shadow_env="${CI_PHASE5_SETTLEMENT_LAYER_RUN_SETTLEMENT_SHADOW_ENV:-1}"
@@ -195,6 +198,15 @@ while [[ $# -gt 0 ]]; do
         shift 2
       else
         run_settlement_state_persistence="1"
+        shift
+      fi
+      ;;
+    --run-settlement-dual-asset-parity)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        run_settlement_dual_asset_parity="${2:-}"
+        shift 2
+      else
+        run_settlement_dual_asset_parity="1"
         shift
       fi
       ;;
@@ -297,6 +309,7 @@ bool_arg_or_die "--run-settlement-failsoft" "$run_settlement_failsoft"
 bool_arg_or_die "--run-settlement-acceptance" "$run_settlement_acceptance"
 bool_arg_or_die "--run-settlement-bridge-smoke" "$run_settlement_bridge_smoke"
 bool_arg_or_die "--run-settlement-state-persistence" "$run_settlement_state_persistence"
+bool_arg_or_die "--run-settlement-dual-asset-parity" "$run_settlement_dual_asset_parity"
 bool_arg_or_die "--run-settlement-adapter-roundtrip" "$run_settlement_adapter_roundtrip"
 bool_arg_or_die "--run-settlement-adapter-signed-tx-roundtrip" "$run_settlement_adapter_signed_tx_roundtrip"
 bool_arg_or_die "--run-settlement-shadow-env" "$run_settlement_shadow_env"
@@ -311,6 +324,7 @@ settlement_failsoft_script="${CI_PHASE5_SETTLEMENT_LAYER_SETTLEMENT_FAILSOFT_SCR
 settlement_acceptance_script="${CI_PHASE5_SETTLEMENT_LAYER_SETTLEMENT_ACCEPTANCE_SCRIPT:-${CI_PHASE5_SETTLEMENT_LAYER_WINDOWS_ROLE_RUNBOOKS_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_settlement_acceptance_paths.sh}}"
 settlement_bridge_smoke_script="${CI_PHASE5_SETTLEMENT_LAYER_SETTLEMENT_BRIDGE_SMOKE_SCRIPT:-${CI_PHASE5_SETTLEMENT_LAYER_CROSS_PLATFORM_INTEROP_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_tdpnd_settlement_bridge_smoke.sh}}"
 settlement_state_persistence_script="${CI_PHASE5_SETTLEMENT_LAYER_SETTLEMENT_STATE_PERSISTENCE_SCRIPT:-${CI_PHASE5_SETTLEMENT_LAYER_ROLE_COMBINATION_VALIDATION_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_tdpnd_state_dir_persistence.sh}}"
+settlement_dual_asset_parity_script="${CI_PHASE5_SETTLEMENT_LAYER_SETTLEMENT_DUAL_ASSET_PARITY_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_settlement_dual_asset_parity.sh}"
 settlement_adapter_roundtrip_script="${CI_PHASE5_SETTLEMENT_LAYER_SETTLEMENT_ADAPTER_ROUNDTRIP_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh}"
 settlement_adapter_signed_tx_roundtrip_script="${CI_PHASE5_SETTLEMENT_LAYER_SETTLEMENT_ADAPTER_SIGNED_TX_ROUNDTRIP_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_adapter_tdpnd_signed_tx_roundtrip.sh}"
 settlement_shadow_env_script="${CI_PHASE5_SETTLEMENT_LAYER_SETTLEMENT_SHADOW_ENV_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_settlement_shadow_env.sh}"
@@ -326,6 +340,7 @@ stage_ids=(
   "settlement_acceptance"
   "settlement_bridge_smoke"
   "settlement_state_persistence"
+  "settlement_dual_asset_parity"
   "settlement_adapter_roundtrip"
   "settlement_adapter_signed_tx_roundtrip"
   "settlement_shadow_env"
@@ -342,6 +357,7 @@ declare -A stage_script=(
   ["settlement_acceptance"]="$settlement_acceptance_script"
   ["settlement_bridge_smoke"]="$settlement_bridge_smoke_script"
   ["settlement_state_persistence"]="$settlement_state_persistence_script"
+  ["settlement_dual_asset_parity"]="$settlement_dual_asset_parity_script"
   ["settlement_adapter_roundtrip"]="$settlement_adapter_roundtrip_script"
   ["settlement_adapter_signed_tx_roundtrip"]="$settlement_adapter_signed_tx_roundtrip_script"
   ["settlement_shadow_env"]="$settlement_shadow_env_script"
@@ -358,6 +374,7 @@ declare -A stage_enabled=(
   ["settlement_acceptance"]="$run_settlement_acceptance"
   ["settlement_bridge_smoke"]="$run_settlement_bridge_smoke"
   ["settlement_state_persistence"]="$run_settlement_state_persistence"
+  ["settlement_dual_asset_parity"]="$run_settlement_dual_asset_parity"
   ["settlement_adapter_roundtrip"]="$run_settlement_adapter_roundtrip"
   ["settlement_adapter_signed_tx_roundtrip"]="$run_settlement_adapter_signed_tx_roundtrip"
   ["settlement_shadow_env"]="$run_settlement_shadow_env"
@@ -477,6 +494,7 @@ jq -n \
   --arg run_settlement_acceptance "$run_settlement_acceptance" \
   --arg run_settlement_bridge_smoke "$run_settlement_bridge_smoke" \
   --arg run_settlement_state_persistence "$run_settlement_state_persistence" \
+  --arg run_settlement_dual_asset_parity "$run_settlement_dual_asset_parity" \
   --arg run_settlement_adapter_roundtrip "$run_settlement_adapter_roundtrip" \
   --arg run_settlement_adapter_signed_tx_roundtrip "$run_settlement_adapter_signed_tx_roundtrip" \
   --arg run_settlement_shadow_env "$run_settlement_shadow_env" \
@@ -504,6 +522,7 @@ jq -n \
       run_settlement_acceptance: ($run_settlement_acceptance == "1"),
       run_settlement_bridge_smoke: ($run_settlement_bridge_smoke == "1"),
       run_settlement_state_persistence: ($run_settlement_state_persistence == "1"),
+      run_settlement_dual_asset_parity: ($run_settlement_dual_asset_parity == "1"),
       run_settlement_adapter_roundtrip: ($run_settlement_adapter_roundtrip == "1"),
       run_settlement_adapter_signed_tx_roundtrip: ($run_settlement_adapter_signed_tx_roundtrip == "1"),
       run_settlement_shadow_env: ($run_settlement_shadow_env == "1"),

@@ -331,6 +331,142 @@ resolve_sponsor_from_ci_summary() {
   return 0
 }
 
+resolve_dual_asset_from_handoff_or_check_summary() {
+  local summary_path="${1:-}"
+  if [[ "$(json_file_valid_01 "$summary_path")" != "1" ]]; then
+    return 1
+  fi
+
+  local value=""
+  local status=""
+  local source_field=""
+  local status_text=""
+
+  value="$(json_bool_or_empty "$summary_path" '
+    if (.handoff.settlement_dual_asset_parity_ok | type) == "boolean" then .handoff.settlement_dual_asset_parity_ok
+    elif (.signals.settlement_dual_asset_parity_ok | type) == "boolean" then .signals.settlement_dual_asset_parity_ok
+    elif (.stages.settlement_dual_asset_parity.ok | type) == "boolean" then .stages.settlement_dual_asset_parity.ok
+    elif (.phase5_settlement_layer_handoff.settlement_dual_asset_parity_ok | type) == "boolean" then .phase5_settlement_layer_handoff.settlement_dual_asset_parity_ok
+    elif (.vpn_track.phase5_settlement_layer_handoff.settlement_dual_asset_parity_ok | type) == "boolean" then .vpn_track.phase5_settlement_layer_handoff.settlement_dual_asset_parity_ok
+    else empty
+    end
+  ')"
+  if [[ -n "$value" ]]; then
+    source_field="$(json_text_or_empty "$summary_path" '
+      if (.handoff.settlement_dual_asset_parity_ok | type) == "boolean" then "handoff.settlement_dual_asset_parity_ok"
+      elif (.signals.settlement_dual_asset_parity_ok | type) == "boolean" then "signals.settlement_dual_asset_parity_ok"
+      elif (.stages.settlement_dual_asset_parity.ok | type) == "boolean" then "stages.settlement_dual_asset_parity.ok"
+      elif (.phase5_settlement_layer_handoff.settlement_dual_asset_parity_ok | type) == "boolean" then "phase5_settlement_layer_handoff.settlement_dual_asset_parity_ok"
+      elif (.vpn_track.phase5_settlement_layer_handoff.settlement_dual_asset_parity_ok | type) == "boolean" then "vpn_track.phase5_settlement_layer_handoff.settlement_dual_asset_parity_ok"
+      else empty
+      end
+    ')"
+    if [[ "$value" == "true" ]]; then
+      status="pass"
+    else
+      status="fail"
+    fi
+    printf '%s|%s|%s\n' "$value" "$status" "$source_field"
+    return 0
+  fi
+
+  status_text="$(json_text_or_empty "$summary_path" '
+    if (.handoff.settlement_dual_asset_parity_status | type) == "string" then .handoff.settlement_dual_asset_parity_status
+    elif (.stages.settlement_dual_asset_parity.status | type) == "string" then .stages.settlement_dual_asset_parity.status
+    elif (.steps.settlement_dual_asset_parity.status | type) == "string" then .steps.settlement_dual_asset_parity.status
+    else empty
+    end
+  ')"
+  case "${status_text,,}" in
+    pass)
+      value="true"
+      status="pass"
+      ;;
+    fail)
+      value="false"
+      status="fail"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  source_field="$(json_text_or_empty "$summary_path" '
+    if (.handoff.settlement_dual_asset_parity_status | type) == "string" then "handoff.settlement_dual_asset_parity_status"
+    elif (.stages.settlement_dual_asset_parity.status | type) == "string" then "stages.settlement_dual_asset_parity.status"
+    elif (.steps.settlement_dual_asset_parity.status | type) == "string" then "steps.settlement_dual_asset_parity.status"
+    else empty
+    end
+  ')"
+
+  printf '%s|%s|%s\n' "$value" "$status" "$source_field"
+  return 0
+}
+
+resolve_dual_asset_from_ci_summary() {
+  local summary_path="${1:-}"
+  if [[ "$(json_file_valid_01 "$summary_path")" != "1" ]]; then
+    return 1
+  fi
+
+  local value=""
+  local status=""
+  local source_field=""
+  local status_text=""
+
+  value="$(json_bool_or_empty "$summary_path" '
+    if (.signals.settlement_dual_asset_parity_ok | type) == "boolean" then .signals.settlement_dual_asset_parity_ok
+    elif (.steps.settlement_dual_asset_parity.ok | type) == "boolean" then .steps.settlement_dual_asset_parity.ok
+    else empty
+    end
+  ')"
+  if [[ -n "$value" ]]; then
+    source_field="$(json_text_or_empty "$summary_path" '
+      if (.signals.settlement_dual_asset_parity_ok | type) == "boolean" then "signals.settlement_dual_asset_parity_ok"
+      elif (.steps.settlement_dual_asset_parity.ok | type) == "boolean" then "steps.settlement_dual_asset_parity.ok"
+      else empty
+      end
+    ')"
+    if [[ "$value" == "true" ]]; then
+      status="pass"
+    else
+      status="fail"
+    fi
+    printf '%s|%s|%s\n' "$value" "$status" "$source_field"
+    return 0
+  fi
+
+  status_text="$(json_text_or_empty "$summary_path" '
+    if (.steps.settlement_dual_asset_parity.status | type) == "string" then .steps.settlement_dual_asset_parity.status
+    elif (.stages.settlement_dual_asset_parity.status | type) == "string" then .stages.settlement_dual_asset_parity.status
+    else empty
+    end
+  ')"
+  case "${status_text,,}" in
+    pass)
+      value="true"
+      status="pass"
+      ;;
+    fail)
+      value="false"
+      status="fail"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  source_field="$(json_text_or_empty "$summary_path" '
+    if (.steps.settlement_dual_asset_parity.status | type) == "string" then "steps.settlement_dual_asset_parity.status"
+    elif (.stages.settlement_dual_asset_parity.status | type) == "string" then "stages.settlement_dual_asset_parity.status"
+    else empty
+    end
+  ')"
+
+  printf '%s|%s|%s\n' "$value" "$status" "$source_field"
+  return 0
+}
+
 resolve_artifact_summary_path() {
   local summary_path="${1:-}"
   local expr="${2:-}"
@@ -403,6 +539,74 @@ resolve_sponsor_live_smoke_signal() {
   fi
 
   parsed="$(resolve_sponsor_from_ci_summary "$ci_summary_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|ci_phase5_settlement_layer_summary|%s|%s|0|5\n' "$value" "$status" "$source_field" "$ci_summary_path"
+    return
+  fi
+
+  printf '%s|%s|0|unresolved|||0|null\n' "null" "missing"
+}
+
+resolve_dual_asset_parity_signal() {
+  local handoff_check_summary_path="${1:-}"
+  local handoff_run_summary_path="${2:-}"
+  local check_summary_path="${3:-}"
+  local run_summary_path="${4:-}"
+  local ci_summary_path="${5:-}"
+
+  local parsed=""
+  local value=""
+  local status=""
+  local source_field=""
+  local fallback_path=""
+
+  parsed="$(resolve_dual_asset_from_handoff_or_check_summary "$handoff_check_summary_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|phase5_settlement_layer_handoff_check_summary|%s|%s|0|1\n' "$value" "$status" "$source_field" "$handoff_check_summary_path"
+    return
+  fi
+
+  fallback_path="$(resolve_artifact_summary_path "$handoff_run_summary_path" '.steps.phase5_settlement_layer_handoff_check.artifacts.summary_json // .artifacts.handoff_summary_json // empty')"
+  parsed="$(resolve_dual_asset_from_handoff_or_check_summary "$fallback_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|phase5_settlement_layer_handoff_run_summary.artifacts.handoff_summary_json|%s|%s|1|2\n' "$value" "$status" "$source_field" "$fallback_path"
+    return
+  fi
+
+  parsed="$(resolve_dual_asset_from_handoff_or_check_summary "$check_summary_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|phase5_settlement_layer_check_summary|%s|%s|0|3\n' "$value" "$status" "$source_field" "$check_summary_path"
+    return
+  fi
+
+  fallback_path="$(resolve_artifact_summary_path "$run_summary_path" '.steps.phase5_settlement_layer_check.artifacts.summary_json // .artifacts.check_summary_json // empty')"
+  parsed="$(resolve_dual_asset_from_handoff_or_check_summary "$fallback_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|phase5_settlement_layer_run_summary.artifacts.check_summary_json|%s|%s|1|4\n' "$value" "$status" "$source_field" "$fallback_path"
+    return
+  fi
+
+  parsed="$(resolve_dual_asset_from_ci_summary "$ci_summary_path" || true)"
   if [[ -n "$parsed" ]]; then
     value="${parsed%%|*}"
     parsed="${parsed#*|}"
@@ -620,6 +824,14 @@ sponsor_signal_source_field=""
 sponsor_signal_source_path=""
 sponsor_signal_source_fallback="0"
 sponsor_signal_source_priority_index="null"
+dual_asset_signal_ok="null"
+dual_asset_signal_status="missing"
+dual_asset_signal_resolved="0"
+dual_asset_signal_source="unresolved"
+dual_asset_signal_source_field=""
+dual_asset_signal_source_path=""
+dual_asset_signal_source_fallback="0"
+dual_asset_signal_source_priority_index="null"
 
 declare -a reasons=()
 declare -a warnings=()
@@ -767,6 +979,28 @@ sponsor_signal_pair="${sponsor_signal_pair#*|}"
 sponsor_signal_source_fallback="${sponsor_signal_pair%%|*}"
 sponsor_signal_source_priority_index="${sponsor_signal_pair##*|}"
 
+dual_asset_signal_pair="$(resolve_dual_asset_parity_signal \
+  "${stage_path[phase5_settlement_layer_handoff_check]}" \
+  "${stage_path[phase5_settlement_layer_handoff_run]}" \
+  "${stage_path[phase5_settlement_layer_check]}" \
+  "${stage_path[phase5_settlement_layer_run]}" \
+  "${stage_path[ci_phase5_settlement_layer]}" \
+)"
+dual_asset_signal_ok="${dual_asset_signal_pair%%|*}"
+dual_asset_signal_pair="${dual_asset_signal_pair#*|}"
+dual_asset_signal_status="${dual_asset_signal_pair%%|*}"
+dual_asset_signal_pair="${dual_asset_signal_pair#*|}"
+dual_asset_signal_resolved="${dual_asset_signal_pair%%|*}"
+dual_asset_signal_pair="${dual_asset_signal_pair#*|}"
+dual_asset_signal_source="${dual_asset_signal_pair%%|*}"
+dual_asset_signal_pair="${dual_asset_signal_pair#*|}"
+dual_asset_signal_source_field="${dual_asset_signal_pair%%|*}"
+dual_asset_signal_pair="${dual_asset_signal_pair#*|}"
+dual_asset_signal_source_path="${dual_asset_signal_pair%%|*}"
+dual_asset_signal_pair="${dual_asset_signal_pair#*|}"
+dual_asset_signal_source_fallback="${dual_asset_signal_pair%%|*}"
+dual_asset_signal_source_priority_index="${dual_asset_signal_pair##*|}"
+
 overall_status="missing"
 overall_rc=1
 if (( fail_count > 0 || invalid_count > 0 )); then
@@ -812,6 +1046,14 @@ jq -n \
   --arg sponsor_signal_source_path "$sponsor_signal_source_path" \
   --arg sponsor_signal_source_fallback "$sponsor_signal_source_fallback" \
   --arg sponsor_signal_source_priority_index "$sponsor_signal_source_priority_index" \
+  --arg dual_asset_signal_ok "$dual_asset_signal_ok" \
+  --arg dual_asset_signal_status "$dual_asset_signal_status" \
+  --arg dual_asset_signal_resolved "$dual_asset_signal_resolved" \
+  --arg dual_asset_signal_source "$dual_asset_signal_source" \
+  --arg dual_asset_signal_source_field "$dual_asset_signal_source_field" \
+  --arg dual_asset_signal_source_path "$dual_asset_signal_source_path" \
+  --arg dual_asset_signal_source_fallback "$dual_asset_signal_source_fallback" \
+  --arg dual_asset_signal_source_priority_index "$dual_asset_signal_source_priority_index" \
   '{
     version: 1,
     schema: {
@@ -867,6 +1109,32 @@ jq -n \
           "phase5_settlement_layer_run_summary.artifacts.check_summary_json",
           "ci_phase5_settlement_layer_summary"
         ]
+      },
+      settlement_dual_asset_parity: {
+        ok: (
+          if $dual_asset_signal_ok == "true" then true
+          elif $dual_asset_signal_ok == "false" then false
+          else null
+          end
+        ),
+        status: $dual_asset_signal_status,
+        resolved: ($dual_asset_signal_resolved == "1"),
+        source: $dual_asset_signal_source,
+        source_field: (if $dual_asset_signal_source_field == "" then null else $dual_asset_signal_source_field end),
+        source_path: (if $dual_asset_signal_source_path == "" then null else $dual_asset_signal_source_path end),
+        fallback: ($dual_asset_signal_source_fallback == "1"),
+        source_priority_index: (
+          if ($dual_asset_signal_source_priority_index | test("^[0-9]+$")) then ($dual_asset_signal_source_priority_index | tonumber)
+          else null
+          end
+        ),
+        source_priority: [
+          "phase5_settlement_layer_handoff_check_summary",
+          "phase5_settlement_layer_handoff_run_summary.artifacts.handoff_summary_json",
+          "phase5_settlement_layer_check_summary",
+          "phase5_settlement_layer_run_summary.artifacts.check_summary_json",
+          "ci_phase5_settlement_layer_summary"
+        ]
       }
     },
     decision: {
@@ -906,6 +1174,7 @@ for stage_id in \
 done
 echo "[phase5-summary] overall: status=${overall_status} pass=${pass_count} fail=${fail_count} missing=${missing_count} invalid=${invalid_count}"
 echo "[phase5-summary] issuer_sponsor_api_live_smoke: status=${sponsor_signal_status} ok=${sponsor_signal_ok} source=${sponsor_signal_source} fallback=${sponsor_signal_source_fallback} path=${sponsor_signal_source_path:-n/a}"
+echo "[phase5-summary] settlement_dual_asset_parity: status=${dual_asset_signal_status} ok=${dual_asset_signal_ok} source=${dual_asset_signal_source} fallback=${dual_asset_signal_source_fallback} path=${dual_asset_signal_source_path:-n/a}"
 echo "[phase5-summary] summary_json=${summary_json}"
 echo "[phase5-summary] canonical_summary_json=${canonical_summary_json}"
 

@@ -128,6 +128,9 @@ handoff_requirement_flag_to_canonical() {
     --require-role-combination-validation-ok)
       printf '%s' "--require-settlement-state-persistence-ok"
       ;;
+    --require-settlement-dual-asset-ok)
+      printf '%s' "--require-settlement-dual-asset-parity-ok"
+      ;;
     *)
       printf '%s' "$flag"
       ;;
@@ -148,6 +151,9 @@ handoff_requirement_flag_to_legacy() {
       ;;
     --require-settlement-state-persistence-ok)
       printf '%s' "--require-role-combination-validation-ok"
+      ;;
+    --require-settlement-dual-asset-parity-ok)
+      printf '%s' "--require-settlement-dual-asset-ok"
       ;;
     *)
       printf '%s' "$flag"
@@ -222,7 +228,8 @@ handoff_supports_settlement_requirement_flags() {
   if [[ "$help_out" == *"--require-settlement-failsoft-ok"* \
      && "$help_out" == *"--require-settlement-acceptance-ok"* \
      && "$help_out" == *"--require-settlement-bridge-smoke-ok"* \
-     && "$help_out" == *"--require-settlement-state-persistence-ok"* ]]; then
+     && "$help_out" == *"--require-settlement-state-persistence-ok"* \
+     && "$help_out" == *"--require-settlement-dual-asset-parity-ok"* ]]; then
     return 0
   fi
   return 1
@@ -357,6 +364,42 @@ extract_handoff_issuer_sponsor_live_smoke_signal() {
       (if (.handoff.sources.issuer_sponsor_api_live_smoke_ok | type) == "string"
            and (.handoff.sources.issuer_sponsor_api_live_smoke_ok | length) > 0
        then .handoff.sources.issuer_sponsor_api_live_smoke_ok
+       else "unresolved" end)
+    ] | join("|")
+  ' "$handoff_summary_json" 2>/dev/null || printf '%s\n' "null|missing|$fallback_required|0|unresolved"
+}
+
+extract_handoff_settlement_dual_asset_parity_signal() {
+  local handoff_summary_json="$1"
+  local fallback_required="$2"
+  if ! json_file_valid "$handoff_summary_json"; then
+    printf '%s\n' "null|missing|$fallback_required|0|unresolved"
+    return
+  fi
+  jq -r --arg fallback_required "$fallback_required" '
+    [
+      (if (.handoff.settlement_dual_asset_parity_ok | type) == "boolean"
+       then (if .handoff.settlement_dual_asset_parity_ok then "true" else "false" end)
+       else "null" end),
+      (if (.handoff.settlement_dual_asset_parity_status | type) == "string"
+           and (.handoff.settlement_dual_asset_parity_status | length) > 0
+       then .handoff.settlement_dual_asset_parity_status
+       elif (.handoff.settlement_dual_asset_parity_ok | type) == "boolean"
+       then (if .handoff.settlement_dual_asset_parity_ok then "pass" else "fail" end)
+       else "missing" end),
+      (if (.inputs.requirements.settlement_dual_asset_parity_ok | type) == "boolean"
+       then (if .inputs.requirements.settlement_dual_asset_parity_ok then "true" else "false" end)
+       elif $fallback_required != "null"
+       then $fallback_required
+       else "null" end),
+      (if (.handoff.settlement_dual_asset_parity_resolved | type) == "boolean"
+       then (if .handoff.settlement_dual_asset_parity_resolved then "1" else "0" end)
+       elif (.handoff.settlement_dual_asset_parity_ok | type) == "boolean"
+       then "1"
+       else "0" end),
+      (if (.handoff.sources.settlement_dual_asset_parity_ok | type) == "string"
+           and (.handoff.sources.settlement_dual_asset_parity_ok | length) > 0
+       then .handoff.sources.settlement_dual_asset_parity_ok
        else "unresolved" end)
     ] | join("|")
   ' "$handoff_summary_json" 2>/dev/null || printf '%s\n' "null|missing|$fallback_required|0|unresolved"
@@ -553,6 +596,12 @@ declare handoff_contract_error=""
 declare run_command=""
 declare handoff_command=""
 declare run_roadmap_summary_json=""
+declare handoff_require_settlement_dual_asset_parity_ok="null"
+declare handoff_settlement_dual_asset_parity_ok="null"
+declare handoff_settlement_dual_asset_parity_status="missing"
+declare handoff_settlement_dual_asset_parity_required="null"
+declare handoff_settlement_dual_asset_parity_resolved="0"
+declare handoff_settlement_dual_asset_parity_source="unresolved"
 declare handoff_require_issuer_sponsor_api_live_smoke_ok="null"
 declare handoff_issuer_sponsor_api_live_smoke_ok="null"
 declare handoff_issuer_sponsor_api_live_smoke_status="missing"
@@ -646,11 +695,16 @@ if [[ "$dry_run" == "1" ]]; then
       handoff_cmd+=(--require-role-combination-validation-ok 0)
     fi
   fi
+  if [[ "$supports_settlement_flags" == "1" ]] \
+    && ! handoff_requirement_arg_present "--require-settlement-dual-asset-parity-ok" "--require-settlement-dual-asset-ok" "${handoff_cmd[@]:1}"; then
+    handoff_cmd+=(--require-settlement-dual-asset-parity-ok 0)
+  fi
   if [[ "$supports_issuer_sponsor_requirement_flag" == "1" ]] \
     && ! handoff_requirement_arg_present "--require-issuer-sponsor-api-live-smoke-ok" "--require-issuer-sponsor-api-live-smoke-ok" "${handoff_cmd[@]:1}"; then
     handoff_cmd+=(--require-issuer-sponsor-api-live-smoke-ok 0)
   fi
 fi
+handoff_require_settlement_dual_asset_parity_ok="$(handoff_requirement_arg_value "--require-settlement-dual-asset-parity-ok" "--require-settlement-dual-asset-ok" "${handoff_cmd[@]:1}")"
 handoff_require_issuer_sponsor_api_live_smoke_ok="$(handoff_requirement_arg_value "--require-issuer-sponsor-api-live-smoke-ok" "--require-issuer-sponsor-api-live-smoke-ok" "${handoff_cmd[@]:1}")"
 handoff_command="$(print_cmd "${handoff_cmd[@]}")"
 
@@ -679,6 +733,29 @@ if [[ "$run_phase5_settlement_layer_handoff_check" == "1" ]]; then
   fi
 else
   echo "[phase5-settlement-layer-handoff-run] stage=phase5_settlement_layer_handoff_check status=skipped reason=disabled"
+fi
+
+handoff_settlement_dual_asset_pair="$(extract_handoff_settlement_dual_asset_parity_signal "$handoff_summary_json" "$handoff_require_settlement_dual_asset_parity_ok")"
+IFS='|' read -r \
+  handoff_settlement_dual_asset_parity_ok \
+  handoff_settlement_dual_asset_parity_status \
+  handoff_settlement_dual_asset_parity_required \
+  handoff_settlement_dual_asset_parity_resolved \
+  handoff_settlement_dual_asset_parity_source <<<"$handoff_settlement_dual_asset_pair"
+if [[ -z "$handoff_settlement_dual_asset_parity_ok" ]]; then
+  handoff_settlement_dual_asset_parity_ok="null"
+fi
+if [[ -z "$handoff_settlement_dual_asset_parity_status" ]]; then
+  handoff_settlement_dual_asset_parity_status="missing"
+fi
+if [[ -z "$handoff_settlement_dual_asset_parity_required" ]]; then
+  handoff_settlement_dual_asset_parity_required="$handoff_require_settlement_dual_asset_parity_ok"
+fi
+if [[ -z "$handoff_settlement_dual_asset_parity_resolved" ]]; then
+  handoff_settlement_dual_asset_parity_resolved="0"
+fi
+if [[ -z "$handoff_settlement_dual_asset_parity_source" ]]; then
+  handoff_settlement_dual_asset_parity_source="unresolved"
 fi
 
 handoff_issuer_sponsor_signal_pair="$(extract_handoff_issuer_sponsor_live_smoke_signal "$handoff_summary_json" "$handoff_require_issuer_sponsor_api_live_smoke_ok")"
@@ -762,6 +839,11 @@ jq -n \
   --arg handoff_contract_error "$handoff_contract_error" \
   --arg handoff_summary_exists "$handoff_summary_exists" \
   --arg handoff_log "$handoff_log" \
+  --arg handoff_settlement_dual_asset_parity_ok "$handoff_settlement_dual_asset_parity_ok" \
+  --arg handoff_settlement_dual_asset_parity_status "$handoff_settlement_dual_asset_parity_status" \
+  --arg handoff_settlement_dual_asset_parity_required "$handoff_settlement_dual_asset_parity_required" \
+  --arg handoff_settlement_dual_asset_parity_resolved "$handoff_settlement_dual_asset_parity_resolved" \
+  --arg handoff_settlement_dual_asset_parity_source "$handoff_settlement_dual_asset_parity_source" \
   --arg handoff_issuer_sponsor_api_live_smoke_ok "$handoff_issuer_sponsor_api_live_smoke_ok" \
   --arg handoff_issuer_sponsor_api_live_smoke_status "$handoff_issuer_sponsor_api_live_smoke_status" \
   --arg handoff_issuer_sponsor_api_live_smoke_required "$handoff_issuer_sponsor_api_live_smoke_required" \
@@ -832,6 +914,20 @@ jq -n \
       }
     },
     handoff: {
+      settlement_dual_asset_parity_ok: (
+        if $handoff_settlement_dual_asset_parity_ok == "true" then true
+        elif $handoff_settlement_dual_asset_parity_ok == "false" then false
+        else null
+        end
+      ),
+      settlement_dual_asset_parity_status: $handoff_settlement_dual_asset_parity_status,
+      settlement_dual_asset_parity_required: (
+        if $handoff_settlement_dual_asset_parity_required == "true" then true
+        elif $handoff_settlement_dual_asset_parity_required == "false" then false
+        else null
+        end
+      ),
+      settlement_dual_asset_parity_resolved: ($handoff_settlement_dual_asset_parity_resolved == "1"),
       issuer_sponsor_api_live_smoke_ok: (
         if $handoff_issuer_sponsor_api_live_smoke_ok == "true" then true
         elif $handoff_issuer_sponsor_api_live_smoke_ok == "false" then false
@@ -847,6 +943,7 @@ jq -n \
       ),
       issuer_sponsor_api_live_smoke_resolved: ($handoff_issuer_sponsor_api_live_smoke_resolved == "1"),
       sources: {
+        settlement_dual_asset_parity_ok: $handoff_settlement_dual_asset_parity_source,
         issuer_sponsor_api_live_smoke_ok: $handoff_issuer_sponsor_api_live_smoke_source
       }
     },

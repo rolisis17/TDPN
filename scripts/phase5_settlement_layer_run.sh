@@ -159,6 +159,82 @@ resolve_issuer_sponsor_api_live_smoke_signal() {
   fi
 }
 
+resolve_settlement_dual_asset_parity_signal() {
+  local check_summary_json="$1"
+  local resolved_tuple=""
+  if ! json_file_valid "$check_summary_json"; then
+    printf '%s\n' "null|missing|unresolved|0"
+    return
+  fi
+
+  resolved_tuple="$(
+    jq -r '
+      if (.signals.settlement_dual_asset_parity_ok? | type) == "boolean" then
+        [
+          (.signals.settlement_dual_asset_parity_ok | tostring),
+          (if .signals.settlement_dual_asset_parity_ok then "pass" else "fail" end),
+          "phase5_settlement_layer_check_summary.signals.settlement_dual_asset_parity_ok",
+          "1"
+        ]
+      elif (.stages.settlement_dual_asset_parity.ok? | type) == "boolean" then
+        [
+          (.stages.settlement_dual_asset_parity.ok | tostring),
+          (
+            if (.stages.settlement_dual_asset_parity.status? | type) == "string"
+              and (.stages.settlement_dual_asset_parity.status | length) > 0
+            then .stages.settlement_dual_asset_parity.status
+            else (if .stages.settlement_dual_asset_parity.ok then "pass" else "fail" end)
+            end
+          ),
+          "phase5_settlement_layer_check_summary.stages.settlement_dual_asset_parity.ok",
+          (
+            if (.stages.settlement_dual_asset_parity.resolved? | type) == "boolean"
+            then (if .stages.settlement_dual_asset_parity.resolved then "1" else "0" end)
+            else "1"
+            end
+          )
+        ]
+      elif (.stages.settlement_dual_asset_parity.status? | type) == "string"
+        and (.stages.settlement_dual_asset_parity.status | length) > 0 then
+        [
+          (
+            (.stages.settlement_dual_asset_parity.status | ascii_downcase) as $s
+            | if ($s == "pass" or $s == "ok" or $s == "true" or $s == "passed" or $s == "success" or $s == "succeeded")
+              then "true"
+              elif ($s == "fail" or $s == "false" or $s == "error" or $s == "failed" or $s == "blocked" or $s == "warn" or $s == "warning" or $s == "skip" or $s == "skipped" or $s == "invalid" or $s == "missing" or $s == "unresolved")
+              then "false"
+              else "null"
+              end
+          ),
+          .stages.settlement_dual_asset_parity.status,
+          "phase5_settlement_layer_check_summary.stages.settlement_dual_asset_parity.status",
+          (
+            if (.stages.settlement_dual_asset_parity.resolved? | type) == "boolean"
+            then (if .stages.settlement_dual_asset_parity.resolved then "1" else "0" end)
+            else "1"
+            end
+          )
+        ]
+      elif (.stages.settlement_dual_asset_parity.resolved? | type) == "boolean" then
+        [
+          "null",
+          "missing",
+          "phase5_settlement_layer_check_summary.stages.settlement_dual_asset_parity.resolved",
+          (if .stages.settlement_dual_asset_parity.resolved then "1" else "0" end)
+        ]
+      else
+        ["null", "missing", "unresolved", "0"]
+      end | join("|")
+    ' "$check_summary_json" 2>/dev/null || true
+  )"
+
+  if [[ -z "$resolved_tuple" ]]; then
+    printf '%s\n' "null|missing|unresolved|0"
+  else
+    printf '%s\n' "$resolved_tuple"
+  fi
+}
+
 ci_summary_contract_valid() {
   local path="$1"
   if ! json_file_valid "$path"; then
@@ -239,6 +315,9 @@ checker_flag_to_canonical() {
     --require-role-combination-validation-ok)
       printf '%s' "--require-settlement-state-persistence-ok"
       ;;
+    --require-settlement-dual-asset-ok)
+      printf '%s' "--require-settlement-dual-asset-parity-ok"
+      ;;
     *)
       printf '%s' "$flag"
       ;;
@@ -259,6 +338,9 @@ checker_flag_to_legacy() {
       ;;
     --require-settlement-state-persistence-ok)
       printf '%s' "--require-role-combination-validation-ok"
+      ;;
+    --require-settlement-dual-asset-parity-ok)
+      printf '%s' "--require-settlement-dual-asset-ok"
       ;;
     *)
       printf '%s' "$flag"
@@ -286,7 +368,7 @@ detect_checker_canonical_flags() {
   set +e
   help_output="$("$script_path" --help 2>&1)"
   set -e
-  if [[ "$help_output" == *"--require-settlement-failsoft-ok"* ]] || [[ "$help_output" == *"--require-settlement-acceptance-ok"* ]] || [[ "$help_output" == *"--require-settlement-bridge-smoke-ok"* ]] || [[ "$help_output" == *"--require-settlement-state-persistence-ok"* ]]; then
+  if [[ "$help_output" == *"--require-settlement-failsoft-ok"* ]] || [[ "$help_output" == *"--require-settlement-acceptance-ok"* ]] || [[ "$help_output" == *"--require-settlement-bridge-smoke-ok"* ]] || [[ "$help_output" == *"--require-settlement-state-persistence-ok"* ]] || [[ "$help_output" == *"--require-settlement-dual-asset-parity-ok"* ]]; then
     printf '%s' "1"
   else
     printf '%s' "0"
@@ -300,6 +382,19 @@ detect_checker_issuer_sponsor_requirement_flag() {
   help_output="$("$script_path" --help 2>&1)"
   set -e
   if [[ "$help_output" == *"--require-issuer-sponsor-api-live-smoke-ok"* ]]; then
+    printf '%s' "1"
+  else
+    printf '%s' "0"
+  fi
+}
+
+detect_checker_dual_asset_requirement_flag() {
+  local script_path="$1"
+  local help_output
+  set +e
+  help_output="$("$script_path" --help 2>&1)"
+  set -e
+  if [[ "$help_output" == *"--require-settlement-dual-asset-parity-ok"* ]] || [[ "$help_output" == *"--require-settlement-dual-asset-ok"* ]]; then
     printf '%s' "1"
   else
     printf '%s' "0"
@@ -451,6 +546,7 @@ fi
 
 check_script_supports_canonical_flags="$(detect_checker_canonical_flags "$check_script")"
 check_script_supports_issuer_sponsor_requirement_flag="$(detect_checker_issuer_sponsor_requirement_flag "$check_script")"
+check_script_supports_dual_asset_requirement_flag="$(detect_checker_dual_asset_requirement_flag "$check_script")"
 
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
@@ -471,6 +567,10 @@ declare ci_contract_error=""
 declare check_contract_error=""
 declare ci_command=""
 declare check_command=""
+declare settlement_dual_asset_parity_ok="null"
+declare settlement_dual_asset_parity_status="missing"
+declare settlement_dual_asset_parity_source="unresolved"
+declare settlement_dual_asset_parity_resolved="0"
 declare issuer_sponsor_api_live_smoke_ok="null"
 declare issuer_sponsor_api_live_smoke_status="missing"
 declare issuer_sponsor_api_live_smoke_source="unresolved"
@@ -559,6 +659,10 @@ if [[ "$dry_run" == "1" ]]; then
       check_command_args+=(--require-role-combination-validation-ok 0)
     fi
   fi
+  if [[ "$check_script_supports_dual_asset_requirement_flag" == "1" ]] \
+    && ! array_has_checker_flag "--require-settlement-dual-asset-parity-ok" "${check_command_args[@]:1}"; then
+    check_command_args+=(--require-settlement-dual-asset-parity-ok 0)
+  fi
   if [[ "$check_script_supports_issuer_sponsor_requirement_flag" == "1" ]] \
     && ! array_has_checker_flag "--require-issuer-sponsor-api-live-smoke-ok" "${check_command_args[@]:1}"; then
     check_command_args+=(--require-issuer-sponsor-api-live-smoke-ok 0)
@@ -588,6 +692,13 @@ else
   fi
 fi
 if json_file_valid "$check_summary_json"; then
+  settlement_dual_asset_parity_pair="$(resolve_settlement_dual_asset_parity_signal "$check_summary_json")"
+  settlement_dual_asset_parity_ok="${settlement_dual_asset_parity_pair%%|*}"
+  settlement_dual_asset_parity_pair="${settlement_dual_asset_parity_pair#*|}"
+  settlement_dual_asset_parity_status="${settlement_dual_asset_parity_pair%%|*}"
+  settlement_dual_asset_parity_pair="${settlement_dual_asset_parity_pair#*|}"
+  settlement_dual_asset_parity_source="${settlement_dual_asset_parity_pair%%|*}"
+  settlement_dual_asset_parity_resolved="${settlement_dual_asset_parity_pair##*|}"
   issuer_sponsor_api_live_smoke_pair="$(resolve_issuer_sponsor_api_live_smoke_signal "$check_summary_json")"
   issuer_sponsor_api_live_smoke_ok="${issuer_sponsor_api_live_smoke_pair%%|*}"
   issuer_sponsor_api_live_smoke_pair="${issuer_sponsor_api_live_smoke_pair#*|}"
@@ -646,6 +757,10 @@ jq -n \
   --arg check_contract_error "$check_contract_error" \
   --argjson ci_summary_exists "$ci_summary_exists" \
   --argjson check_summary_exists "$check_summary_exists" \
+  --argjson settlement_dual_asset_parity_ok "$settlement_dual_asset_parity_ok" \
+  --arg settlement_dual_asset_parity_status "$settlement_dual_asset_parity_status" \
+  --arg settlement_dual_asset_parity_source "$settlement_dual_asset_parity_source" \
+  --argjson settlement_dual_asset_parity_resolved "$settlement_dual_asset_parity_resolved" \
   --argjson issuer_sponsor_api_live_smoke_ok "$issuer_sponsor_api_live_smoke_ok" \
   --arg issuer_sponsor_api_live_smoke_status "$issuer_sponsor_api_live_smoke_status" \
   --arg issuer_sponsor_api_live_smoke_source "$issuer_sponsor_api_live_smoke_source" \
@@ -671,10 +786,14 @@ jq -n \
       print_summary_json: ($print_summary_json == "1")
     },
     signals: {
+      settlement_dual_asset_parity_ok: $settlement_dual_asset_parity_ok,
+      settlement_dual_asset_parity_status: $settlement_dual_asset_parity_status,
+      settlement_dual_asset_parity_resolved: ($settlement_dual_asset_parity_resolved == 1),
       issuer_sponsor_api_live_smoke_ok: $issuer_sponsor_api_live_smoke_ok,
       issuer_sponsor_api_live_smoke_status: $issuer_sponsor_api_live_smoke_status,
       issuer_sponsor_api_live_smoke_resolved: ($issuer_sponsor_api_live_smoke_resolved == 1),
       sources: {
+        settlement_dual_asset_parity_ok: $settlement_dual_asset_parity_source,
         issuer_sponsor_api_live_smoke_ok: $issuer_sponsor_api_live_smoke_source
       }
     },

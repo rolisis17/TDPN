@@ -64,6 +64,9 @@ cat >"$PASS_CI" <<'EOF_PASS_CI'
   "status": "pass",
   "rc": 0,
   "steps": {
+    "settlement_dual_asset_parity": {
+      "status": "fail"
+    },
     "issuer_sponsor_api_live_smoke": {
       "status": "fail"
     }
@@ -82,6 +85,7 @@ cat >"$PASS_CHECK" <<'EOF_PASS_CHECK'
   "status": "pass",
   "rc": 0,
   "signals": {
+    "settlement_dual_asset_parity_ok": false,
     "issuer_sponsor_api_live_smoke_ok": false
   }
 }
@@ -111,6 +115,7 @@ cat >"$PASS_HANDOFF_CHECK" <<'EOF_PASS_HANDOFF_CHECK'
   "status": "pass",
   "rc": 0,
   "handoff": {
+    "settlement_dual_asset_parity_ok": true,
     "issuer_sponsor_api_live_smoke_ok": true
   }
 }
@@ -171,6 +176,15 @@ if ! jq -e \
   and .signals.issuer_sponsor_api_live_smoke.fallback == false
   and .signals.issuer_sponsor_api_live_smoke.source_priority_index == 1
   and (.signals.issuer_sponsor_api_live_smoke.source_priority | length) == 5
+  and .signals.settlement_dual_asset_parity.status == "pass"
+  and .signals.settlement_dual_asset_parity.ok == true
+  and .signals.settlement_dual_asset_parity.resolved == true
+  and .signals.settlement_dual_asset_parity.source == "phase5_settlement_layer_handoff_check_summary"
+  and .signals.settlement_dual_asset_parity.source_field == "handoff.settlement_dual_asset_parity_ok"
+  and .signals.settlement_dual_asset_parity.source_path == $expected_signal_path
+  and .signals.settlement_dual_asset_parity.fallback == false
+  and .signals.settlement_dual_asset_parity.source_priority_index == 1
+  and (.signals.settlement_dual_asset_parity.source_priority | length) == 5
   and .artifacts.canonical_summary_json == $expected_canonical_summary_json
 ' "$PASS_REPORT_JSON" >/dev/null; then
   echo "phase5 summary report pass-path contract mismatch"
@@ -352,6 +366,14 @@ if ! jq -e '
   and .signals.issuer_sponsor_api_live_smoke.source_path == null
   and .signals.issuer_sponsor_api_live_smoke.fallback == false
   and .signals.issuer_sponsor_api_live_smoke.source_priority_index == null
+  and .signals.settlement_dual_asset_parity.status == "missing"
+  and .signals.settlement_dual_asset_parity.ok == null
+  and .signals.settlement_dual_asset_parity.resolved == false
+  and .signals.settlement_dual_asset_parity.source == "unresolved"
+  and .signals.settlement_dual_asset_parity.source_field == null
+  and .signals.settlement_dual_asset_parity.source_path == null
+  and .signals.settlement_dual_asset_parity.fallback == false
+  and .signals.settlement_dual_asset_parity.source_priority_index == null
 ' "$MISSING_REPORT_JSON" >/dev/null; then
   echo "phase5 summary report missing-input contract mismatch"
   cat "$MISSING_REPORT_JSON"
@@ -432,6 +454,7 @@ cat >"$FALLBACK_HANDOFF_CHECK_FROM_HANDOFF_RUN" <<'EOF_FALLBACK_HANDOFF_CHECK_FR
   "status": "pass",
   "rc": 0,
   "handoff": {
+    "settlement_dual_asset_parity_ok": true,
     "issuer_sponsor_api_live_smoke_ok": true
   }
 }
@@ -448,6 +471,7 @@ cat >"$FALLBACK_REPORTS_DIR/phase5_settlement_layer_check_summary.json" <<'EOF_F
   "status": "pass",
   "rc": 0,
   "signals": {
+    "settlement_dual_asset_parity_ok": false,
     "issuer_sponsor_api_live_smoke_ok": false
   }
 }
@@ -515,6 +539,14 @@ if ! jq -e \
   and .signals.issuer_sponsor_api_live_smoke.source_path == $expected_signal_path
   and .signals.issuer_sponsor_api_live_smoke.fallback == true
   and .signals.issuer_sponsor_api_live_smoke.source_priority_index == 2
+  and .signals.settlement_dual_asset_parity.status == "pass"
+  and .signals.settlement_dual_asset_parity.ok == true
+  and .signals.settlement_dual_asset_parity.resolved == true
+  and .signals.settlement_dual_asset_parity.source == "phase5_settlement_layer_handoff_run_summary.artifacts.handoff_summary_json"
+  and .signals.settlement_dual_asset_parity.source_field == "handoff.settlement_dual_asset_parity_ok"
+  and .signals.settlement_dual_asset_parity.source_path == $expected_signal_path
+  and .signals.settlement_dual_asset_parity.fallback == true
+  and .signals.settlement_dual_asset_parity.source_priority_index == 2
 ' "$FALLBACK_REPORT_JSON" >/dev/null; then
   echo "phase5 summary report fallback-discovery contract mismatch"
   cat "$FALLBACK_REPORT_JSON"

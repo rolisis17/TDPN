@@ -116,6 +116,7 @@ Usage:
     [--require-settlement-acceptance-ok [0|1]]
     [--require-settlement-bridge-smoke-ok [0|1]]
     [--require-settlement-state-persistence-ok [0|1]]
+    [--require-settlement-dual-asset-parity-ok [0|1]]
     [--require-issuer-sponsor-api-live-smoke-ok [0|1]]
 EOF_HELP
   fi
@@ -179,6 +180,7 @@ if [[ -n "$summary_json" && "${FAKE_CHECK_OMIT_SUMMARY:-0}" != "1" ]]; then
     "require_settlement_acceptance_ok": true,
     "require_settlement_bridge_smoke_ok": true,
     "require_settlement_state_persistence_ok": true,
+    "require_settlement_dual_asset_parity_ok": true,
     "require_issuer_sponsor_api_live_smoke_ok": true
   },
   "signals": {
@@ -186,6 +188,7 @@ if [[ -n "$summary_json" && "${FAKE_CHECK_OMIT_SUMMARY:-0}" != "1" ]]; then
     "settlement_acceptance_ok": true,
     "settlement_bridge_smoke_ok": true,
     "settlement_state_persistence_ok": true,
+    "settlement_dual_asset_parity_ok": true,
     "issuer_sponsor_api_live_smoke_ok": $issuer_sponsor_api_live_smoke_signal_json
   },
   "stages": {
@@ -205,6 +208,11 @@ if [[ -n "$summary_json" && "${FAKE_CHECK_OMIT_SUMMARY:-0}" != "1" ]]; then
       "ok": true
     },
     "settlement_state_persistence": {
+      "status": "$status",
+      "resolved": true,
+      "ok": true
+    },
+    "settlement_dual_asset_parity": {
       "status": "$status",
       "resolved": true,
       "ok": true

@@ -23,17 +23,22 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 PASS_SUMMARY="$TMP_DIR/ci_phase5_pass.json"
 FAIL_SUMMARY="$TMP_DIR/ci_phase5_fail.json"
 RELAXED_SUMMARY="$TMP_DIR/ci_phase5_relaxed.json"
+DUAL_FAIL_SUMMARY="$TMP_DIR/ci_phase5_dual_fail.json"
 SPONSOR_FAIL_SUMMARY="$TMP_DIR/ci_phase5_sponsor_fail.json"
 MISSING_SUMMARY="$TMP_DIR/ci_phase5_missing.json"
 
 PASS_OUTPUT="$TMP_DIR/pass_output.json"
 FAIL_OUTPUT="$TMP_DIR/fail_output.json"
 RELAXED_OUTPUT="$TMP_DIR/relaxed_output.json"
+DUAL_FAIL_OUTPUT="$TMP_DIR/dual_fail_output.json"
+DUAL_RELAXED_OUTPUT="$TMP_DIR/dual_relaxed_output.json"
 SPONSOR_FAIL_OUTPUT="$TMP_DIR/sponsor_fail_output.json"
 SPONSOR_RELAXED_OUTPUT="$TMP_DIR/sponsor_relaxed_output.json"
 PASS_CANONICAL="$TMP_DIR/pass_canonical_summary.json"
 FAIL_CANONICAL="$TMP_DIR/fail_canonical_summary.json"
 RELAXED_CANONICAL="$TMP_DIR/relaxed_canonical_summary.json"
+DUAL_FAIL_CANONICAL="$TMP_DIR/dual_fail_canonical_summary.json"
+DUAL_RELAXED_CANONICAL="$TMP_DIR/dual_relaxed_canonical_summary.json"
 SPONSOR_FAIL_CANONICAL="$TMP_DIR/sponsor_fail_canonical_summary.json"
 SPONSOR_RELAXED_CANONICAL="$TMP_DIR/sponsor_relaxed_canonical_summary.json"
 ENV_CANONICAL_OUTPUT="$TMP_DIR/env_canonical_output.json"
@@ -44,6 +49,8 @@ MISSING_OUTPUT="$TMP_DIR/missing_output.json"
 PASS_LOG="$TMP_DIR/pass.log"
 FAIL_LOG="$TMP_DIR/fail.log"
 RELAXED_LOG="$TMP_DIR/relaxed.log"
+DUAL_FAIL_LOG="$TMP_DIR/dual_fail.log"
+DUAL_RELAXED_LOG="$TMP_DIR/dual_relaxed.log"
 SPONSOR_FAIL_LOG="$TMP_DIR/sponsor_fail.log"
 SPONSOR_RELAXED_LOG="$TMP_DIR/sponsor_relaxed.log"
 ENV_CANONICAL_LOG="$TMP_DIR/env_canonical.log"
@@ -72,6 +79,9 @@ cat >"$PASS_SUMMARY" <<'EOF_PASS'
       "status": "pass"
     },
     "settlement_state_persistence": {
+      "status": "pass"
+    },
+    "settlement_dual_asset_parity": {
       "status": "pass"
     },
     "issuer_sponsor_api_live_smoke": {
@@ -104,6 +114,9 @@ cat >"$FAIL_SUMMARY" <<'EOF_FAIL'
     "settlement_state_persistence": {
       "status": "pass"
     },
+    "settlement_dual_asset_parity": {
+      "status": "pass"
+    },
     "issuer_sponsor_api_live_smoke": {
       "status": "pass"
     }
@@ -132,6 +145,9 @@ cat >"$RELAXED_SUMMARY" <<'EOF_RELAXED'
       "status": "pass"
     },
     "settlement_state_persistence": {
+      "status": "pass"
+    },
+    "settlement_dual_asset_parity": {
       "status": "pass"
     },
     "issuer_sponsor_api_live_smoke": {
@@ -164,12 +180,48 @@ cat >"$SPONSOR_FAIL_SUMMARY" <<'EOF_SPONSOR_FAIL'
     "settlement_state_persistence": {
       "status": "pass"
     },
+    "settlement_dual_asset_parity": {
+      "status": "pass"
+    },
     "issuer_sponsor_api_live_smoke": {
       "status": "fail"
     }
   }
 }
 EOF_SPONSOR_FAIL
+
+cat >"$DUAL_FAIL_SUMMARY" <<'EOF_DUAL_FAIL'
+{
+  "version": 1,
+  "schema": {
+    "id": "ci_phase5_settlement_layer_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "pass",
+  "rc": 0,
+  "steps": {
+    "settlement_failsoft": {
+      "status": "pass"
+    },
+    "settlement_acceptance": {
+      "status": "pass"
+    },
+    "settlement_bridge_smoke": {
+      "status": "pass"
+    },
+    "settlement_state_persistence": {
+      "status": "pass"
+    },
+    "settlement_dual_asset_parity": {
+      "status": "fail"
+    },
+    "issuer_sponsor_api_live_smoke": {
+      "status": "pass"
+    }
+  }
+}
+EOF_DUAL_FAIL
 
 echo "[phase5-settlement-layer-check] stage-derived pass path"
 PHASE5_SETTLEMENT_LAYER_CHECK_CANONICAL_SUMMARY_JSON="$PASS_CANONICAL" \
@@ -194,11 +246,13 @@ if ! jq -e '
   and .policy.require_settlement_acceptance_ok == true
   and .policy.require_settlement_bridge_smoke_ok == true
   and .policy.require_settlement_state_persistence_ok == true
+  and .policy.require_settlement_dual_asset_parity_ok == true
   and .policy.require_issuer_sponsor_api_live_smoke_ok == true
   and .signals.settlement_failsoft_ok == true
   and .signals.settlement_acceptance_ok == true
   and .signals.settlement_bridge_smoke_ok == true
   and .signals.settlement_state_persistence_ok == true
+  and .signals.settlement_dual_asset_parity_ok == true
   and .signals.issuer_sponsor_api_live_smoke_ok == true
 ' --arg expected_canonical "$PASS_CANONICAL" "$PASS_OUTPUT" >/dev/null; then
   echo "pass-path summary contract mismatch"
@@ -282,6 +336,55 @@ if ! cmp -s "$RELAXED_OUTPUT" "$RELAXED_CANONICAL"; then
   echo "relaxed-path canonical summary diverges from run summary"
   cat "$RELAXED_OUTPUT"
   cat "$RELAXED_CANONICAL"
+  exit 1
+fi
+
+echo "[phase5-settlement-layer-check] fail-closed path on dual-asset parity failure"
+set +e
+PHASE5_SETTLEMENT_LAYER_CHECK_CANONICAL_SUMMARY_JSON="$DUAL_FAIL_CANONICAL" \
+"$SCRIPT_UNDER_TEST" \
+  --ci-phase5-summary-json "$DUAL_FAIL_SUMMARY" \
+  --summary-json "$DUAL_FAIL_OUTPUT" \
+  --show-json 0 >"$DUAL_FAIL_LOG" 2>&1
+dual_fail_rc=$?
+set -e
+if [[ "$dual_fail_rc" -ne 1 ]]; then
+  echo "expected rc=1 for dual-asset parity fail-closed path, got rc=$dual_fail_rc"
+  cat "$DUAL_FAIL_LOG"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .policy.require_settlement_dual_asset_parity_ok == true
+  and .signals.settlement_dual_asset_parity_ok == false
+  and .stages.settlement_dual_asset_parity.status == "fail"
+  and ((.decision.reasons // []) | any(test("settlement_dual_asset_parity_ok is false")))
+' "$DUAL_FAIL_OUTPUT" >/dev/null; then
+  echo "dual-asset fail-path summary mismatch"
+  cat "$DUAL_FAIL_OUTPUT"
+  cat "$DUAL_FAIL_LOG"
+  exit 1
+fi
+
+echo "[phase5-settlement-layer-check] dual-asset policy toggle path"
+PHASE5_SETTLEMENT_LAYER_CHECK_CANONICAL_SUMMARY_JSON="$DUAL_RELAXED_CANONICAL" \
+"$SCRIPT_UNDER_TEST" \
+  --ci-phase5-summary-json "$DUAL_FAIL_SUMMARY" \
+  --summary-json "$DUAL_RELAXED_OUTPUT" \
+  --require-settlement-dual-asset-parity-ok 0 \
+  --show-json 0 >"$DUAL_RELAXED_LOG" 2>&1
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .policy.require_settlement_dual_asset_parity_ok == false
+  and .signals.settlement_dual_asset_parity_ok == false
+  and .stages.settlement_dual_asset_parity.status == "fail"
+' "$DUAL_RELAXED_OUTPUT" >/dev/null; then
+  echo "dual-asset relaxed-policy summary mismatch"
+  cat "$DUAL_RELAXED_OUTPUT"
+  cat "$DUAL_RELAXED_LOG"
   exit 1
 fi
 
@@ -390,6 +493,26 @@ if ! jq -e '
   and .stages.settlement_acceptance.status == "fail"
 ' "$LEGACY_ALIAS_OUTPUT" >/dev/null; then
   echo "legacy-alias policy summary mismatch"
+  cat "$LEGACY_ALIAS_OUTPUT"
+  cat "$LEGACY_ALIAS_LOG"
+  exit 1
+fi
+
+echo "[phase5-settlement-layer-check] dual-asset compatibility alias path"
+"$SCRIPT_UNDER_TEST" \
+  --ci-phase5-summary-json "$DUAL_FAIL_SUMMARY" \
+  --summary-json "$LEGACY_ALIAS_OUTPUT" \
+  --require-settlement-dual-asset-ok 0 \
+  --show-json 0 >"$LEGACY_ALIAS_LOG" 2>&1
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .policy.require_settlement_dual_asset_parity_ok == false
+  and .signals.settlement_dual_asset_parity_ok == false
+  and .stages.settlement_dual_asset_parity.status == "fail"
+' "$LEGACY_ALIAS_OUTPUT" >/dev/null; then
+  echo "dual-asset legacy-alias policy summary mismatch"
   cat "$LEGACY_ALIAS_OUTPUT"
   cat "$LEGACY_ALIAS_LOG"
   exit 1

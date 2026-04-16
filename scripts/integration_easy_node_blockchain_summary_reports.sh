@@ -273,6 +273,9 @@ cat >"$PHASE5_REAL_HANDOFF_CHECK" <<'EOF_PHASE5_REAL_HANDOFF_CHECK'
   "status": "pass",
   "rc": 0,
   "steps": {
+    "settlement_dual_asset_parity": {
+      "status": "pass"
+    },
     "issuer_sponsor_api_live_smoke": {
       "status": "pass"
     }
@@ -296,6 +299,10 @@ if ! jq -e '
   .status == "pass"
   and .rc == 0
   and .summaries.phase5_settlement_layer_handoff_check_summary.status == "pass"
+  and .signals.settlement_dual_asset_parity.status == "pass"
+  and .signals.settlement_dual_asset_parity.ok == true
+  and .signals.settlement_dual_asset_parity.resolved == true
+  and .signals.settlement_dual_asset_parity.source == "phase5_settlement_layer_handoff_check_summary"
   and .signals.issuer_sponsor_api_live_smoke.status == "pass"
   and .signals.issuer_sponsor_api_live_smoke.ok == true
   and .signals.issuer_sponsor_api_live_smoke.resolved == true

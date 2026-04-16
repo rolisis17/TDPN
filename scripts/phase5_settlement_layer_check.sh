@@ -13,6 +13,7 @@ Usage:
     [--require-settlement-acceptance-ok [0|1]] \
     [--require-settlement-bridge-smoke-ok [0|1]] \
     [--require-settlement-state-persistence-ok [0|1]] \
+    [--require-settlement-dual-asset-parity-ok [0|1]] \
     [--require-issuer-sponsor-api-live-smoke-ok [0|1]] \
     [--require-windows-server-packaging-ok [0|1]] \
     [--require-windows-role-runbooks-ok [0|1]] \
@@ -28,6 +29,7 @@ Purpose:
     - settlement_acceptance_ok
     - settlement_bridge_smoke_ok
     - settlement_state_persistence_ok
+    - settlement_dual_asset_parity_ok
     - issuer_sponsor_api_live_smoke_ok
 
 Notes:
@@ -176,6 +178,14 @@ resolve_signal_raw_or_empty() {
         elif (.steps.settlement_state_persistence.status? != null) then .steps.settlement_state_persistence.status
         else empty end'
       ;;
+    settlement_dual_asset_parity_ok)
+      json_text_or_empty "$path" 'if (.settlement_dual_asset_parity_ok? != null) then .settlement_dual_asset_parity_ok
+        elif (.summary.settlement_dual_asset_parity_ok? != null) then .summary.settlement_dual_asset_parity_ok
+        elif (.signals.settlement_dual_asset_parity_ok? != null) then .signals.settlement_dual_asset_parity_ok
+        elif (.stages.settlement_dual_asset_parity.status? != null) then .stages.settlement_dual_asset_parity.status
+        elif (.steps.settlement_dual_asset_parity.status? != null) then .steps.settlement_dual_asset_parity.status
+        else empty end'
+      ;;
     issuer_sponsor_api_live_smoke_ok)
       json_text_or_empty "$path" 'if (.issuer_sponsor_api_live_smoke_ok? != null) then .issuer_sponsor_api_live_smoke_ok
         elif (.summary.issuer_sponsor_api_live_smoke_ok? != null) then .summary.issuer_sponsor_api_live_smoke_ok
@@ -219,6 +229,10 @@ emit_summary_json() {
   local issuer_sponsor_api_live_smoke_status="${26}"
   local issuer_sponsor_api_live_smoke_ok="${27}"
   local issuer_sponsor_api_live_smoke_resolved="${28}"
+  local require_settlement_dual_asset_parity_ok="${29}"
+  local settlement_dual_asset_parity_status="${30}"
+  local settlement_dual_asset_parity_ok="${31}"
+  local settlement_dual_asset_parity_resolved="${32}"
 
   local summary_tmp
   summary_tmp="$(mktemp)"
@@ -235,21 +249,25 @@ emit_summary_json() {
     --argjson require_settlement_acceptance_ok "$require_settlement_acceptance_ok" \
     --argjson require_settlement_bridge_smoke_ok "$require_settlement_bridge_smoke_ok" \
     --argjson require_settlement_state_persistence_ok "$require_settlement_state_persistence_ok" \
+    --argjson require_settlement_dual_asset_parity_ok "$require_settlement_dual_asset_parity_ok" \
     --argjson require_issuer_sponsor_api_live_smoke_ok "$require_issuer_sponsor_api_live_smoke_ok" \
     --arg settlement_failsoft_status "$settlement_failsoft_status" \
     --arg settlement_acceptance_status "$settlement_acceptance_status" \
     --arg settlement_bridge_smoke_status "$settlement_bridge_smoke_status" \
     --arg settlement_state_persistence_status "$settlement_state_persistence_status" \
+    --arg settlement_dual_asset_parity_status "$settlement_dual_asset_parity_status" \
     --arg issuer_sponsor_api_live_smoke_status "$issuer_sponsor_api_live_smoke_status" \
     --argjson settlement_failsoft_ok "$settlement_failsoft_ok" \
     --argjson settlement_acceptance_ok "$settlement_acceptance_ok" \
     --argjson settlement_bridge_smoke_ok "$settlement_bridge_smoke_ok" \
     --argjson settlement_state_persistence_ok "$settlement_state_persistence_ok" \
+    --argjson settlement_dual_asset_parity_ok "$settlement_dual_asset_parity_ok" \
     --argjson issuer_sponsor_api_live_smoke_ok "$issuer_sponsor_api_live_smoke_ok" \
     --argjson settlement_failsoft_resolved "$settlement_failsoft_resolved" \
     --argjson settlement_acceptance_resolved "$settlement_acceptance_resolved" \
     --argjson settlement_bridge_smoke_resolved "$settlement_bridge_smoke_resolved" \
     --argjson settlement_state_persistence_resolved "$settlement_state_persistence_resolved" \
+    --argjson settlement_dual_asset_parity_resolved "$settlement_dual_asset_parity_resolved" \
     --argjson issuer_sponsor_api_live_smoke_resolved "$issuer_sponsor_api_live_smoke_resolved" \
     --argjson reasons "$reasons_json" \
     '{
@@ -279,6 +297,7 @@ emit_summary_json() {
         require_settlement_acceptance_ok: ($require_settlement_acceptance_ok == 1),
         require_settlement_bridge_smoke_ok: ($require_settlement_bridge_smoke_ok == 1),
         require_settlement_state_persistence_ok: ($require_settlement_state_persistence_ok == 1),
+        require_settlement_dual_asset_parity_ok: ($require_settlement_dual_asset_parity_ok == 1),
         require_issuer_sponsor_api_live_smoke_ok: ($require_issuer_sponsor_api_live_smoke_ok == 1)
       },
       stages: {
@@ -306,6 +325,12 @@ emit_summary_json() {
           resolved: ($settlement_state_persistence_resolved == 1),
           ok: ($settlement_state_persistence_ok == true)
         },
+        settlement_dual_asset_parity: {
+          enabled: ($require_settlement_dual_asset_parity_ok == 1),
+          status: $settlement_dual_asset_parity_status,
+          resolved: ($settlement_dual_asset_parity_resolved == 1),
+          ok: ($settlement_dual_asset_parity_ok == true)
+        },
         issuer_sponsor_api_live_smoke: {
           enabled: ($require_issuer_sponsor_api_live_smoke_ok == 1),
           status: $issuer_sponsor_api_live_smoke_status,
@@ -318,6 +343,7 @@ emit_summary_json() {
         settlement_acceptance_ok: ($settlement_acceptance_ok == true),
         settlement_bridge_smoke_ok: ($settlement_bridge_smoke_ok == true),
         settlement_state_persistence_ok: ($settlement_state_persistence_ok == true),
+        settlement_dual_asset_parity_ok: ($settlement_dual_asset_parity_ok == true),
         issuer_sponsor_api_live_smoke_ok: ($issuer_sponsor_api_live_smoke_ok == true)
       },
       decision: {
@@ -347,6 +373,7 @@ require_settlement_failsoft_ok="${PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_SETTLEME
 require_settlement_acceptance_ok="${PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_SETTLEMENT_ACCEPTANCE_OK:-${PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_WINDOWS_ROLE_RUNBOOKS_OK:-1}}"
 require_settlement_bridge_smoke_ok="${PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_SETTLEMENT_BRIDGE_SMOKE_OK:-${PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_CROSS_PLATFORM_INTEROP_OK:-1}}"
 require_settlement_state_persistence_ok="${PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_SETTLEMENT_STATE_PERSISTENCE_OK:-${PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_ROLE_COMBINATION_VALIDATION_OK:-1}}"
+require_settlement_dual_asset_parity_ok="${PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_SETTLEMENT_DUAL_ASSET_PARITY_OK:-${PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_SETTLEMENT_DUAL_ASSET_OK:-1}}"
 require_issuer_sponsor_api_live_smoke_ok="${PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_ISSUER_SPONSOR_API_LIVE_SMOKE_OK:-1}"
 
 while [[ $# -gt 0 ]]; do
@@ -392,6 +419,15 @@ while [[ $# -gt 0 ]]; do
         shift 2
       else
         require_settlement_state_persistence_ok="1"
+        shift
+      fi
+      ;;
+    --require-settlement-dual-asset-parity-ok|--require-settlement-dual-asset-ok)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_settlement_dual_asset_parity_ok="${2:-}"
+        shift 2
+      else
+        require_settlement_dual_asset_parity_ok="1"
         shift
       fi
       ;;
@@ -469,6 +505,7 @@ bool_arg_or_die "--require-settlement-failsoft-ok" "$require_settlement_failsoft
 bool_arg_or_die "--require-settlement-acceptance-ok" "$require_settlement_acceptance_ok"
 bool_arg_or_die "--require-settlement-bridge-smoke-ok" "$require_settlement_bridge_smoke_ok"
 bool_arg_or_die "--require-settlement-state-persistence-ok" "$require_settlement_state_persistence_ok"
+bool_arg_or_die "--require-settlement-dual-asset-parity-ok" "$require_settlement_dual_asset_parity_ok"
 bool_arg_or_die "--require-issuer-sponsor-api-live-smoke-ok" "$require_issuer_sponsor_api_live_smoke_ok"
 bool_arg_or_die "--show-json" "$show_json"
 
@@ -488,6 +525,7 @@ settlement_failsoft_raw=""
 settlement_acceptance_raw=""
 settlement_bridge_smoke_raw=""
 settlement_state_persistence_raw=""
+settlement_dual_asset_parity_raw=""
 issuer_sponsor_api_live_smoke_raw=""
 
 if [[ "$ci_phase5_summary_usable" == "1" ]]; then
@@ -495,6 +533,7 @@ if [[ "$ci_phase5_summary_usable" == "1" ]]; then
   settlement_acceptance_raw="$(resolve_signal_raw_or_empty "$ci_phase5_summary_json" "settlement_acceptance_ok")"
   settlement_bridge_smoke_raw="$(resolve_signal_raw_or_empty "$ci_phase5_summary_json" "settlement_bridge_smoke_ok")"
   settlement_state_persistence_raw="$(resolve_signal_raw_or_empty "$ci_phase5_summary_json" "settlement_state_persistence_ok")"
+  settlement_dual_asset_parity_raw="$(resolve_signal_raw_or_empty "$ci_phase5_summary_json" "settlement_dual_asset_parity_ok")"
   issuer_sponsor_api_live_smoke_raw="$(resolve_signal_raw_or_empty "$ci_phase5_summary_json" "issuer_sponsor_api_live_smoke_ok")"
 else
   reasons+=("ci phase5 summary file not found or invalid JSON: $ci_phase5_summary_json")
@@ -504,6 +543,7 @@ settlement_failsoft_ok="$(normalize_boolish_or_empty "$settlement_failsoft_raw")
 settlement_acceptance_ok="$(normalize_boolish_or_empty "$settlement_acceptance_raw")"
 settlement_bridge_smoke_ok="$(normalize_boolish_or_empty "$settlement_bridge_smoke_raw")"
 settlement_state_persistence_ok="$(normalize_boolish_or_empty "$settlement_state_persistence_raw")"
+settlement_dual_asset_parity_ok="$(normalize_boolish_or_empty "$settlement_dual_asset_parity_raw")"
 issuer_sponsor_api_live_smoke_ok="$(normalize_boolish_or_empty "$issuer_sponsor_api_live_smoke_raw")"
 
 if [[ -z "$settlement_failsoft_ok" ]]; then
@@ -518,6 +558,9 @@ fi
 if [[ -z "$settlement_state_persistence_ok" ]]; then
   settlement_state_persistence_ok="false"
 fi
+if [[ -z "$settlement_dual_asset_parity_ok" ]]; then
+  settlement_dual_asset_parity_ok="false"
+fi
 if [[ -z "$issuer_sponsor_api_live_smoke_ok" ]]; then
   issuer_sponsor_api_live_smoke_ok="false"
 fi
@@ -526,12 +569,14 @@ settlement_failsoft_resolved="0"
 settlement_acceptance_resolved="0"
 settlement_bridge_smoke_resolved="0"
 settlement_state_persistence_resolved="0"
+settlement_dual_asset_parity_resolved="0"
 issuer_sponsor_api_live_smoke_resolved="0"
 
 settlement_failsoft_status="$(stage_status_from_raw "$settlement_failsoft_raw")"
 settlement_acceptance_status="$(stage_status_from_raw "$settlement_acceptance_raw")"
 settlement_bridge_smoke_status="$(stage_status_from_raw "$settlement_bridge_smoke_raw")"
 settlement_state_persistence_status="$(stage_status_from_raw "$settlement_state_persistence_raw")"
+settlement_dual_asset_parity_status="$(stage_status_from_raw "$settlement_dual_asset_parity_raw")"
 issuer_sponsor_api_live_smoke_status="$(stage_status_from_raw "$issuer_sponsor_api_live_smoke_raw")"
 
 if [[ -n "$(trim "$settlement_failsoft_raw")" ]]; then
@@ -554,6 +599,11 @@ if [[ -n "$(trim "$settlement_state_persistence_raw")" ]]; then
 elif [[ "$ci_phase5_summary_usable" == "1" ]]; then
   reasons+=("settlement_state_persistence_ok could not be resolved from ci phase5 summary")
 fi
+if [[ -n "$(trim "$settlement_dual_asset_parity_raw")" ]]; then
+  settlement_dual_asset_parity_resolved="1"
+elif [[ "$ci_phase5_summary_usable" == "1" ]]; then
+  reasons+=("settlement_dual_asset_parity_ok could not be resolved from ci phase5 summary")
+fi
 if [[ -n "$(trim "$issuer_sponsor_api_live_smoke_raw")" ]]; then
   issuer_sponsor_api_live_smoke_resolved="1"
 elif [[ "$ci_phase5_summary_usable" == "1" ]]; then
@@ -571,6 +621,9 @@ if [[ "$require_settlement_bridge_smoke_ok" == "1" && "$settlement_bridge_smoke_
 fi
 if [[ "$require_settlement_state_persistence_ok" == "1" && "$settlement_state_persistence_ok" != "true" ]]; then
   reasons+=("settlement_state_persistence_ok is false")
+fi
+if [[ "$require_settlement_dual_asset_parity_ok" == "1" && "$settlement_dual_asset_parity_ok" != "true" ]]; then
+  reasons+=("settlement_dual_asset_parity_ok is false")
 fi
 if [[ "$require_issuer_sponsor_api_live_smoke_ok" == "1" && "$issuer_sponsor_api_live_smoke_ok" != "true" ]]; then
   reasons+=("issuer_sponsor_api_live_smoke_ok is false")
@@ -617,7 +670,11 @@ emit_summary_json \
   "$require_issuer_sponsor_api_live_smoke_ok" \
   "$issuer_sponsor_api_live_smoke_status" \
   "$issuer_sponsor_api_live_smoke_ok" \
-  "$issuer_sponsor_api_live_smoke_resolved"
+  "$issuer_sponsor_api_live_smoke_resolved" \
+  "$require_settlement_dual_asset_parity_ok" \
+  "$settlement_dual_asset_parity_status" \
+  "$settlement_dual_asset_parity_ok" \
+  "$settlement_dual_asset_parity_resolved"
 
 if [[ "$show_json" == "1" ]]; then
   cat "$summary_json"

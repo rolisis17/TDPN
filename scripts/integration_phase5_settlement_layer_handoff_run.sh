@@ -95,6 +95,7 @@ cat >"$check_summary" <<'EOF_CHECK'
     "settlement_acceptance_ok": true,
     "settlement_bridge_smoke_ok": true,
     "settlement_state_persistence_ok": true,
+    "settlement_dual_asset_parity_ok": true,
     "issuer_sponsor_api_live_smoke_ok": true
   }
 }
@@ -111,6 +112,7 @@ cat >"$roadmap_summary" <<'EOF_ROADMAP'
       "settlement_acceptance_ok": true,
       "settlement_bridge_smoke_ok": true,
       "settlement_state_persistence_ok": true,
+      "settlement_dual_asset_parity_ok": true,
       "issuer_sponsor_api_live_smoke_ok": true
     }
   }
@@ -180,6 +182,7 @@ Flags:
   --require-windows-role-runbooks-ok [0|1]
   --require-cross-platform-interop-ok [0|1]
   --require-role-combination-validation-ok [0|1]
+  --require-settlement-dual-asset-ok [0|1]
 EOF_HELP_LEGACY
   else
     cat <<'EOF_HELP'
@@ -192,6 +195,7 @@ Flags:
   --require-settlement-acceptance-ok [0|1]
   --require-settlement-bridge-smoke-ok [0|1]
   --require-settlement-state-persistence-ok [0|1]
+  --require-settlement-dual-asset-parity-ok [0|1]
   --require-issuer-sponsor-api-live-smoke-ok [0|1]
 EOF_HELP
   fi
@@ -207,6 +211,7 @@ printf 'handoff\t%s\n' "$*" >>"$capture"
 
 summary_json=""
 require_issuer_sponsor_api_live_smoke_ok="1"
+require_settlement_dual_asset_parity_ok="1"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --summary-json)
@@ -219,6 +224,15 @@ while [[ $# -gt 0 ]]; do
         shift 2
       else
         require_issuer_sponsor_api_live_smoke_ok="1"
+        shift
+      fi
+      ;;
+    --require-settlement-dual-asset-parity-ok|--require-settlement-dual-asset-ok)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_settlement_dual_asset_parity_ok="${2:-}"
+        shift 2
+      else
+        require_settlement_dual_asset_parity_ok="1"
         shift
       fi
       ;;
@@ -259,6 +273,30 @@ case "$sponsor_mode" in
     ;;
 esac
 
+dual_asset_mode="${FAKE_HANDOFF_DUAL_ASSET_SIGNAL_MODE:-pass}"
+dual_asset_ok_json="true"
+dual_asset_status="pass"
+dual_asset_resolved_json="true"
+dual_asset_source="phase5_settlement_layer_handoff_check.signals.settlement_dual_asset_parity_ok"
+case "$dual_asset_mode" in
+  unresolved)
+    dual_asset_ok_json="null"
+    dual_asset_status="missing"
+    dual_asset_resolved_json="false"
+    dual_asset_source="unresolved"
+    ;;
+  fail)
+    dual_asset_ok_json="false"
+    dual_asset_status="fail"
+    dual_asset_resolved_json="true"
+    ;;
+  *)
+    dual_asset_ok_json="true"
+    dual_asset_status="pass"
+    dual_asset_resolved_json="true"
+    ;;
+esac
+
 if [[ -n "$summary_json" && "${FAKE_HANDOFF_OMIT_SUMMARY:-0}" != "1" ]]; then
   mkdir -p "$(dirname "$summary_json")"
   cat >"$summary_json" <<EOF_SUMMARY
@@ -274,6 +312,7 @@ if [[ -n "$summary_json" && "${FAKE_HANDOFF_OMIT_SUMMARY:-0}" != "1" ]]; then
   "fail_closed": true,
   "inputs": {
     "requirements": {
+      "settlement_dual_asset_parity_ok": $( [[ "$require_settlement_dual_asset_parity_ok" == "1" ]] && printf '%s' "true" || printf '%s' "false" ),
       "issuer_sponsor_api_live_smoke_ok": $( [[ "$require_issuer_sponsor_api_live_smoke_ok" == "1" ]] && printf '%s' "true" || printf '%s' "false" )
     }
   },
@@ -283,10 +322,14 @@ if [[ -n "$summary_json" && "${FAKE_HANDOFF_OMIT_SUMMARY:-0}" != "1" ]]; then
     "settlement_acceptance_ok": true,
     "settlement_bridge_smoke_ok": true,
     "settlement_state_persistence_ok": true,
+    "settlement_dual_asset_parity_ok": $dual_asset_ok_json,
+    "settlement_dual_asset_parity_status": "$dual_asset_status",
+    "settlement_dual_asset_parity_resolved": $dual_asset_resolved_json,
     "issuer_sponsor_api_live_smoke_ok": $sponsor_ok_json,
     "issuer_sponsor_api_live_smoke_status": "$sponsor_status",
     "issuer_sponsor_api_live_smoke_resolved": $sponsor_resolved_json,
     "sources": {
+      "settlement_dual_asset_parity_ok": "$dual_asset_source",
       "issuer_sponsor_api_live_smoke_ok": "$sponsor_source"
     }
   },
@@ -377,6 +420,11 @@ if ! jq -e --arg run_summary "$TMP_DIR/pass_run_summary.json" --arg handoff_summ
   and .steps.phase5_settlement_layer_handoff_check.command_rc == 0
   and .steps.phase5_settlement_layer_handoff_check.contract_valid == true
   and .steps.phase5_settlement_layer_handoff_check.artifacts.summary_json == $handoff_summary
+  and .handoff.settlement_dual_asset_parity_ok == true
+  and .handoff.settlement_dual_asset_parity_status == "pass"
+  and .handoff.settlement_dual_asset_parity_required == true
+  and .handoff.settlement_dual_asset_parity_resolved == true
+  and .handoff.sources.settlement_dual_asset_parity_ok == "phase5_settlement_layer_handoff_check.signals.settlement_dual_asset_parity_ok"
   and .handoff.issuer_sponsor_api_live_smoke_ok == true
   and .handoff.issuer_sponsor_api_live_smoke_status == "pass"
   and .handoff.issuer_sponsor_api_live_smoke_required == true
@@ -396,6 +444,7 @@ PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_RUN_SCRIPT="$FAKE_RUN" \
 PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_HANDOFF_CHECK_SCRIPT="$FAKE_HANDOFF" \
 PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_CANONICAL_SUMMARY_JSON="$DRY_CANONICAL_SUMMARY" \
 FAKE_HANDOFF_SPONSOR_SIGNAL_MODE=unresolved \
+FAKE_HANDOFF_DUAL_ASSET_SIGNAL_MODE=unresolved \
 bash "$RUNNER" \
   --reports-dir "$TMP_DIR/reports_dry" \
   --run-summary-json "$TMP_DIR/dry_run_summary.json" \
@@ -418,6 +467,11 @@ if [[ "$handoff_line" != *"--require-run-pipeline-ok 0"* || "$handoff_line" != *
   echo "$handoff_line"
   exit 1
 fi
+if [[ "$handoff_line" != *"--require-settlement-dual-asset-parity-ok 0"* ]]; then
+  echo "dry-run handoff dual-asset relax mismatch"
+  echo "$handoff_line"
+  exit 1
+fi
 if [[ "$handoff_line" == *"--dry-run 1"* ]]; then
   echo "dry-run should not leak to handoff checker"
   echo "$handoff_line"
@@ -429,6 +483,11 @@ if ! jq -e '
   and .inputs.dry_run == true
   and .steps.phase5_settlement_layer_run.contract_valid == true
   and .steps.phase5_settlement_layer_handoff_check.contract_valid == true
+  and .handoff.settlement_dual_asset_parity_ok == null
+  and .handoff.settlement_dual_asset_parity_status == "missing"
+  and .handoff.settlement_dual_asset_parity_required == false
+  and .handoff.settlement_dual_asset_parity_resolved == false
+  and .handoff.sources.settlement_dual_asset_parity_ok == "unresolved"
   and .handoff.issuer_sponsor_api_live_smoke_ok == null
   and .handoff.issuer_sponsor_api_live_smoke_status == "missing"
   and .handoff.issuer_sponsor_api_live_smoke_required == false

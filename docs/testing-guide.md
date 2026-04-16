@@ -382,6 +382,7 @@ Usage:
 Status:
 - `ci_phase5_settlement_layer.sh` is the focused Phase-5 gate runner for settlement-layer readiness and contract checks.
 - `integration_ci_phase5_settlement_layer.sh` validates the Phase-5 gate contract.
+- canonical Phase-5 CI settlement blockchain stages include `settlement_adapter_roundtrip`, `settlement_adapter_signed_tx_roundtrip`, `settlement_shadow_env`, `settlement_shadow_status_surface`, `settlement_dual_asset_parity`, and `issuer_sponsor_api_live_smoke` (wired to `scripts/integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh`, `scripts/integration_cosmos_adapter_tdpnd_signed_tx_roundtrip.sh`, `scripts/integration_cosmos_settlement_shadow_env.sh`, `scripts/integration_cosmos_settlement_shadow_status_surface.sh`, `scripts/integration_cosmos_settlement_dual_asset_parity.sh`, and `scripts/integration_issuer_sponsor_api_live_smoke.sh`).
 - `phase5_settlement_layer_check.sh` validates the Phase-5 readiness/check artifact contract.
 - `phase5_settlement_layer_run.sh` runs the Phase-5 gate + check in one command.
 - `integration_phase5_settlement_layer_check.sh` validates checker behavior/contract.

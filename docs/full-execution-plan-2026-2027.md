@@ -97,6 +97,7 @@ Exit gate:
 - Phase 5 CI includes `settlement_shadow_env` running `scripts/integration_cosmos_settlement_shadow_env.sh` to validate shadow adapter env wiring and fail-open behavior.
 - Phase 5 CI includes `settlement_shadow_status_surface` running `scripts/integration_cosmos_settlement_shadow_status_surface.sh` to validate shadow telemetry/status surfacing in settlement status endpoints.
 - Phase 5 CI also includes `settlement_adapter_signed_tx_roundtrip` backed by `scripts/integration_cosmos_adapter_tdpnd_signed_tx_roundtrip.sh` to validate signed-tx adapter relay into `tdpnd` bridge writes before promotion.
+- Phase 5 CI also includes `settlement_dual_asset_parity` backed by `scripts/integration_cosmos_settlement_dual_asset_parity.sh` to validate stable/native pricing parity for equivalent session entitlement.
 - Phase 5 CI also includes `issuer_sponsor_api_live_smoke` backed by `scripts/integration_issuer_sponsor_api_live_smoke.sh` to validate sponsor API happy path (`quote -> reserve -> token -> status`) with no end-user wallet signing in the happy path.
 - Phase 5 CI/check/run/handoff wrappers now emit canonical summary artifacts under `.easy-node-logs`; these are the helper input contracts for `scripts/phase5_settlement_layer_summary_report.sh`:
   - `phase5_settlement_layer_ci_summary.json`
@@ -106,6 +107,7 @@ Exit gate:
   - `phase5_settlement_layer_handoff_run_summary.json`
 - Phase 5 operator summary helper `scripts/phase5_settlement_layer_summary_report.sh` aggregates CI/check/run/handoff summaries into compact operator output plus normalized JSON, with contract coverage from `scripts/integration_phase5_settlement_layer_summary_report.sh`.
 - Phase 5 wrapper summaries now propagate sponsor live-smoke signals end-to-end: run (`signals.issuer_sponsor_api_live_smoke_*`), handoff-run (`handoff.issuer_sponsor_api_live_smoke_*`), and aggregate report (`signals.issuer_sponsor_api_live_smoke`).
+- Phase 5 wrapper summaries now also propagate dual-asset parity signals end-to-end: run (`signals.settlement_dual_asset_parity_status`/`signals.settlement_dual_asset_parity_ok`), handoff-run (`handoff.settlement_dual_asset_parity_status`/`handoff.settlement_dual_asset_parity_ok`), and aggregate report (`signals.settlement_dual_asset_parity`).
 - Phase 5 summary helper fallback discovery now includes timestamped CI and handoff-run summary directories when canonical/default summary files are absent.
 - Easy-node exposes blockchain summary wrappers:
   - `./scripts/easy_node.sh phase5-settlement-layer-summary-report`
