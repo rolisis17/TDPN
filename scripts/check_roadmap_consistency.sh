@@ -34,6 +34,7 @@ phase5_summary_report_script="scripts/phase5_settlement_layer_summary_report.sh"
 phase5_summary_report_integration_script="scripts/integration_phase5_settlement_layer_summary_report.sh"
 blockchain_fastlane_script="scripts/blockchain_fastlane.sh"
 blockchain_fastlane_integration_script="scripts/integration_blockchain_fastlane.sh"
+blockchain_mainnet_activation_metrics_integration_script="scripts/integration_blockchain_mainnet_activation_metrics.sh"
 blockchain_mainnet_activation_gate_script="scripts/blockchain_mainnet_activation_gate.sh"
 blockchain_mainnet_activation_gate_integration_script="scripts/integration_blockchain_mainnet_activation_gate.sh"
 ci_local_script="scripts/ci_local.sh"
@@ -3525,6 +3526,34 @@ for f in "$blockchain_mainnet_activation_gate_script" "$blockchain_mainnet_activ
     exit 1
   fi
 done
+if [[ ! -f "$blockchain_mainnet_activation_metrics_integration_script" ]]; then
+  echo "missing required file: $blockchain_mainnet_activation_metrics_integration_script"
+  exit 1
+fi
+if ! rg -Fq "source-json env-only ingestion path" "$blockchain_mainnet_activation_metrics_integration_script"; then
+  echo "integration blockchain mainnet activation metrics script must validate source-json env-only ingestion"
+  exit 1
+fi
+if ! rg -Fq "source-json repeated cli dedupe + order path" "$blockchain_mainnet_activation_metrics_integration_script"; then
+  echo "integration blockchain mainnet activation metrics script must validate repeated cli source-json dedupe/order semantics"
+  exit 1
+fi
+if ! rg -Fq "explicit CLI source-json suppresses env fallback path" "$blockchain_mainnet_activation_metrics_integration_script"; then
+  echo "integration blockchain mainnet activation metrics script must validate explicit CLI source-json suppresses env fallback semantics"
+  exit 1
+fi
+if ! rg -Fq "BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_SOURCE_JSONS" "$blockchain_mainnet_activation_metrics_integration_script"; then
+  echo "integration blockchain mainnet activation metrics script must validate BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_SOURCE_JSONS env wiring"
+  exit 1
+fi
+if ! rg -Fq ".sources.source_jsons ==" "$blockchain_mainnet_activation_metrics_integration_script"; then
+  echo "integration blockchain mainnet activation metrics script must validate deterministic sources.source_jsons contract"
+  exit 1
+fi
+if ! rg -Fq ".sources.usable_source_jsons ==" "$blockchain_mainnet_activation_metrics_integration_script"; then
+  echo "integration blockchain mainnet activation metrics script must validate deterministic sources.usable_source_jsons contract"
+  exit 1
+fi
 if ! rg -Fq "measurement_window_weeks" "$blockchain_mainnet_activation_gate_script"; then
   echo "blockchain mainnet activation gate helper must enforce measurement_window_weeks metric gate"
   exit 1

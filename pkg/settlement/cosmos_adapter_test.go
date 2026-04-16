@@ -3,6 +3,7 @@ package settlement
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,12 @@ import (
 	"time"
 )
 
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
 func waitForCondition(t *testing.T, timeout time.Duration, condition func() bool, description string) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -24,6 +31,179 @@ func waitForCondition(t *testing.T, timeout time.Duration, condition func() bool
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for %s", description)
+}
+
+func TestCosmosAdapterHealthPaths(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/health" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer srv.Close()
+
+		adapter, err := NewCosmosAdapter(CosmosAdapterConfig{
+			Endpoint:    srv.URL,
+			QueueSize:   8,
+			MaxRetries:  1,
+			BaseBackoff: 5 * time.Millisecond,
+		})
+		if err != nil {
+			t.Fatalf("NewCosmosAdapter: %v", err)
+		}
+		defer adapter.Close()
+
+		if err := adapter.Health(context.Background()); err != nil {
+			t.Fatalf("Health expected nil error, got %v", err)
+		}
+	})
+
+	t.Run("failure_non_200", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}))
+		defer srv.Close()
+
+		adapter, err := NewCosmosAdapter(CosmosAdapterConfig{
+			Endpoint:    srv.URL,
+			QueueSize:   8,
+			MaxRetries:  1,
+			BaseBackoff: 5 * time.Millisecond,
+		})
+		if err != nil {
+			t.Fatalf("NewCosmosAdapter: %v", err)
+		}
+		defer adapter.Close()
+
+		err = adapter.Health(context.Background())
+		if err == nil {
+			t.Fatalf("Health expected non-200 error")
+		}
+		if !strings.Contains(err.Error(), "status 503") {
+			t.Fatalf("expected status 503 health error, got %v", err)
+		}
+	})
+
+	t.Run("failure_client_unavailable", func(t *testing.T) {
+		adapter, err := NewCosmosAdapter(CosmosAdapterConfig{
+			Endpoint:    "http://127.0.0.1:1",
+			QueueSize:   8,
+			MaxRetries:  1,
+			BaseBackoff: 5 * time.Millisecond,
+		})
+		if err != nil {
+			t.Fatalf("NewCosmosAdapter: %v", err)
+		}
+		defer adapter.Close()
+
+		adapter.client = &http.Client{
+			Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+				return nil, errors.New("transport unavailable")
+			}),
+		}
+
+		err = adapter.Health(context.Background())
+		if err == nil {
+			t.Fatalf("Health expected client transport error")
+		}
+		if !strings.Contains(err.Error(), "transport unavailable") {
+			t.Fatalf("unexpected health transport error: %v", err)
+		}
+	})
+}
+
+func TestCosmosAdapterSubmitWithRetryTransientEventuallySucceeds(t *testing.T) {
+	var attempts int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&attempts, 1)
+		if n <= 2 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	adapter, err := NewCosmosAdapter(CosmosAdapterConfig{
+		Endpoint:    srv.URL,
+		QueueSize:   8,
+		MaxRetries:  5,
+		BaseBackoff: 5 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("NewCosmosAdapter: %v", err)
+	}
+	defer adapter.Close()
+
+	err = adapter.submitWithRetry(context.Background(), cosmosQueuedOperation{
+		path: "/x/vpnrewards/issues",
+		payload: RewardIssue{
+			RewardID:          "rew-retry-direct-1",
+			ProviderSubjectID: "provider-1",
+			SessionID:         "sess-1",
+			RewardMicros:      100,
+			Currency:          "USD",
+		},
+		idempotencyKey: "reward:rew-retry-direct-1",
+	})
+	if err != nil {
+		t.Fatalf("submitWithRetry expected success, got %v", err)
+	}
+
+	if got := atomic.LoadInt32(&attempts); got != 3 {
+		t.Fatalf("expected exactly 3 attempts (2 transient failures + success), got %d", got)
+	}
+}
+
+func TestCosmosAdapterSubmitWithRetryRespectsContextDeadline(t *testing.T) {
+	var attempts int32
+
+	adapter, err := NewCosmosAdapter(CosmosAdapterConfig{
+		Endpoint:    "http://127.0.0.1:1",
+		QueueSize:   8,
+		MaxRetries:  100,
+		BaseBackoff: 20 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("NewCosmosAdapter: %v", err)
+	}
+	defer adapter.Close()
+
+	adapter.client = &http.Client{
+		Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			atomic.AddInt32(&attempts, 1)
+			return nil, errors.New("transient dial error")
+		}),
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	err = adapter.submitWithRetry(ctx, cosmosQueuedOperation{
+		path: "/x/vpnbilling/settlements",
+		payload: SessionSettlement{
+			SettlementID: "set-ctx-deadline-1",
+			SessionID:    "sess-ctx-deadline-1",
+		},
+		idempotencyKey: "settlement:set-ctx-deadline-1",
+	})
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatalf("submitWithRetry expected context deadline error")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected context deadline exceeded, got %v", err)
+	}
+	if elapsed > 200*time.Millisecond {
+		t.Fatalf("submitWithRetry took too long after context deadline: %s", elapsed)
+	}
+	if got := atomic.LoadInt32(&attempts); got < 2 || got > 4 {
+		t.Fatalf("unexpected retry attempts under deadline; got %d", got)
+	}
 }
 
 func TestCosmosAdapterSubmitsSettlementWithIdempotencyKey(t *testing.T) {

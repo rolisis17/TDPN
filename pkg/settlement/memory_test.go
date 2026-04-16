@@ -1076,6 +1076,149 @@ func TestMemoryServiceReconcileKeepsSubmittedWhenConfirmationLookupErrors(t *tes
 	assertSubmittedConfirmationRecords(t, s, sessionID, rewardID, sponsorReservationID, evidenceID)
 }
 
+func TestMemoryServiceGetSponsorReservationReturnsStoredReservationByID(t *testing.T) {
+	s := NewMemoryService()
+	ctx := context.Background()
+
+	stored, err := s.ReserveSponsorCredits(ctx, SponsorCreditReservation{
+		ReservationID: "sres-get-1",
+		SponsorID:     "sponsor-get-1",
+		SubjectID:     "client-get-1",
+		SessionID:     "sess-get-1",
+		AmountMicros:  777,
+		Currency:      "TDPNC",
+	})
+	if err != nil {
+		t.Fatalf("ReserveSponsorCredits: %v", err)
+	}
+
+	got, err := s.GetSponsorReservation(ctx, "sres-get-1")
+	if err != nil {
+		t.Fatalf("GetSponsorReservation: %v", err)
+	}
+	if got.ReservationID != stored.ReservationID {
+		t.Fatalf("expected reservation id %s, got %s", stored.ReservationID, got.ReservationID)
+	}
+	if got.SponsorID != stored.SponsorID {
+		t.Fatalf("expected sponsor id %s, got %s", stored.SponsorID, got.SponsorID)
+	}
+	if got.SubjectID != stored.SubjectID {
+		t.Fatalf("expected subject id %s, got %s", stored.SubjectID, got.SubjectID)
+	}
+	if got.SessionID != stored.SessionID {
+		t.Fatalf("expected session id %s, got %s", stored.SessionID, got.SessionID)
+	}
+	if got.AmountMicros != stored.AmountMicros {
+		t.Fatalf("expected amount_micros %d, got %d", stored.AmountMicros, got.AmountMicros)
+	}
+	if got.Currency != stored.Currency {
+		t.Fatalf("expected currency %s, got %s", stored.Currency, got.Currency)
+	}
+	if got.Status != stored.Status {
+		t.Fatalf("expected status %s, got %s", stored.Status, got.Status)
+	}
+	if got.CreatedAt.IsZero() {
+		t.Fatalf("expected created_at to be set")
+	}
+	if got.ExpiresAt.IsZero() {
+		t.Fatalf("expected expires_at to be set")
+	}
+}
+
+func TestMemoryServiceGetSponsorReservationNotFoundReturnsErrorContract(t *testing.T) {
+	s := NewMemoryService()
+
+	_, err := s.GetSponsorReservation(context.Background(), "sres-missing-1")
+	if err == nil {
+		t.Fatalf("expected unknown reservation lookup to fail")
+	}
+	if err.Error() != "reservation not found: sres-missing-1" {
+		t.Fatalf("unexpected error for unknown reservation lookup: %v", err)
+	}
+}
+
+func TestMemoryServiceGetSponsorReservationStatusPersistsAfterConsumeAndSessionSettle(t *testing.T) {
+	s := NewMemoryService()
+	ctx := context.Background()
+	sessionID := "sess-sponsor-status-1"
+
+	_, err := s.ReserveSponsorCredits(ctx, SponsorCreditReservation{
+		ReservationID: "sres-status-1",
+		SponsorID:     "sponsor-status-1",
+		SubjectID:     "client-status-1",
+		SessionID:     sessionID,
+		AmountMicros:  1500,
+		Currency:      "TDPNC",
+	})
+	if err != nil {
+		t.Fatalf("ReserveSponsorCredits: %v", err)
+	}
+
+	beforeConsume, err := s.GetSponsorReservation(ctx, "sres-status-1")
+	if err != nil {
+		t.Fatalf("GetSponsorReservation before consume: %v", err)
+	}
+	if beforeConsume.Status != OperationStatusConfirmed {
+		t.Fatalf("expected pre-consume status confirmed, got %s", beforeConsume.Status)
+	}
+	if !beforeConsume.ConsumedAt.IsZero() {
+		t.Fatalf("expected pre-consume consumed_at to be zero")
+	}
+
+	_, err = s.AuthorizePayment(ctx, PaymentProof{
+		ReservationID: "sres-status-1",
+		SponsorID:     "sponsor-status-1",
+		SubjectID:     "client-status-1",
+		SessionID:     sessionID,
+	})
+	if err != nil {
+		t.Fatalf("AuthorizePayment: %v", err)
+	}
+
+	afterConsume, err := s.GetSponsorReservation(ctx, "sres-status-1")
+	if err != nil {
+		t.Fatalf("GetSponsorReservation after consume: %v", err)
+	}
+	if afterConsume.Status != OperationStatusConfirmed {
+		t.Fatalf("expected post-consume status confirmed, got %s", afterConsume.Status)
+	}
+	if afterConsume.ConsumedAt.IsZero() {
+		t.Fatalf("expected post-consume consumed_at to be set")
+	}
+
+	_, err = s.ReserveFunds(ctx, FundReservation{
+		SessionID:    sessionID,
+		SubjectID:    "client-status-1",
+		AmountMicros: 10_000,
+		Currency:     "TDPNC",
+	})
+	if err != nil {
+		t.Fatalf("ReserveFunds: %v", err)
+	}
+	if err := s.RecordUsage(ctx, UsageRecord{
+		SessionID:    sessionID,
+		SubjectID:    "client-status-1",
+		BytesIngress: 1024 * 1024,
+		RecordedAt:   time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("RecordUsage: %v", err)
+	}
+	if _, err := s.SettleSession(ctx, sessionID); err != nil {
+		t.Fatalf("SettleSession: %v", err)
+	}
+
+	afterSettle, err := s.GetSponsorReservation(ctx, "sres-status-1")
+	if err != nil {
+		t.Fatalf("GetSponsorReservation after settle: %v", err)
+	}
+	if afterSettle.Status != afterConsume.Status {
+		t.Fatalf("expected sponsor status to persist after settle; got %s want %s", afterSettle.Status, afterConsume.Status)
+	}
+	if !afterSettle.ConsumedAt.Equal(afterConsume.ConsumedAt) {
+		t.Fatalf("expected consumed_at to persist after settle")
+	}
+}
+
 func TestMemoryServiceSponsorFlowAuthorizeIdempotent(t *testing.T) {
 	s := NewMemoryService()
 	ctx := context.Background()
