@@ -256,6 +256,7 @@ Usage:
   ./scripts/easy_node.sh blockchain-bootstrap-governance-graduation-gate [blockchain_bootstrap_governance_graduation_gate args...]
   ./scripts/easy_node.sh roadmap-non-blockchain-actionable-run [--recommended-only [0|1]] [--max-actions N] [--action-timeout-sec N] [--parallel [0|1]] [roadmap_non_blockchain_actionable_run args...]
   ./scripts/easy_node.sh roadmap-blockchain-actionable-run [--recommended-only [0|1]] [--max-actions N] [--action-timeout-sec N] [--parallel [0|1]] [roadmap_blockchain_actionable_run args...]
+  ./scripts/easy_node.sh roadmap-next-actions-run [--max-actions N] [--action-timeout-sec N] [--parallel [0|1]] [--include-id-prefix PREFIX] [--exclude-id-prefix PREFIX] [roadmap_next_actions_run args...]
   ./scripts/easy_node.sh ci-phase0 [ci_phase0 args...]
   ./scripts/easy_node.sh ci-phase1-resilience [--three-machine-docker-profile-matrix-timeout-sec N] [--profile-compare-docker-matrix-timeout-sec N] [--three-machine-docker-profile-matrix-record-timeout-sec N] [--vpn-rc-matrix-path-timeout-sec N] [--vpn-rc-resilience-path-timeout-sec N] [--session-churn-guard-timeout-sec N] [--3hop-runtime-integration-timeout-sec N] [ci_phase1_resilience args...]
   ./scripts/easy_node.sh phase1-resilience-handoff-check [phase1_resilience_handoff_check args...]
@@ -282,6 +283,8 @@ Usage:
   ./scripts/easy_node.sh phase5-settlement-layer-handoff-check [phase5_settlement_layer_handoff_check args...]
   ./scripts/easy_node.sh phase5-settlement-layer-handoff-run [phase5_settlement_layer_handoff_run args...]
   ./scripts/easy_node.sh phase5-settlement-layer-summary-report [phase5_settlement_layer_summary_report args...]
+  ./scripts/easy_node.sh issuer-sponsor-api-live-smoke [issuer_sponsor_api_live_smoke args...]
+  ./scripts/easy_node.sh issuer-settlement-status-live-smoke [issuer_settlement_status_live_smoke args...]
   ./scripts/easy_node.sh ci-phase6-cosmos-l1-build-testnet [ci_phase6_cosmos_l1_build_testnet args...]
   ./scripts/easy_node.sh ci-phase6-cosmos-l1-contracts [ci_phase6_cosmos_l1_contracts args...]
   ./scripts/easy_node.sh phase6-cosmos-l1-build-testnet-check [phase6_cosmos_l1_build_testnet_check args...]
@@ -391,6 +394,7 @@ Usage:
   ./scripts/easy_node.sh blockchain-bootstrap-governance-graduation-gate [blockchain_bootstrap_governance_graduation_gate args...]
   ./scripts/easy_node.sh roadmap-non-blockchain-actionable-run [--recommended-only [0|1]] [--max-actions N] [--action-timeout-sec N] [--parallel [0|1]] [roadmap_non_blockchain_actionable_run args...]
   ./scripts/easy_node.sh roadmap-blockchain-actionable-run [--recommended-only [0|1]] [--max-actions N] [--action-timeout-sec N] [--parallel [0|1]] [roadmap_blockchain_actionable_run args...]
+  ./scripts/easy_node.sh roadmap-next-actions-run [--max-actions N] [--action-timeout-sec N] [--parallel [0|1]] [--include-id-prefix PREFIX] [--exclude-id-prefix PREFIX] [roadmap_next_actions_run args...]
   ./scripts/easy_node.sh ci-phase0 [ci_phase0 args...]
   ./scripts/easy_node.sh ci-phase1-resilience [--three-machine-docker-profile-matrix-timeout-sec N] [--profile-compare-docker-matrix-timeout-sec N] [--three-machine-docker-profile-matrix-record-timeout-sec N] [--vpn-rc-matrix-path-timeout-sec N] [--vpn-rc-resilience-path-timeout-sec N] [--session-churn-guard-timeout-sec N] [--3hop-runtime-integration-timeout-sec N] [ci_phase1_resilience args...]
   ./scripts/easy_node.sh phase1-resilience-handoff-check [phase1_resilience_handoff_check args...]
@@ -417,6 +421,8 @@ Usage:
   ./scripts/easy_node.sh phase5-settlement-layer-handoff-check [phase5_settlement_layer_handoff_check args...]
   ./scripts/easy_node.sh phase5-settlement-layer-handoff-run [phase5_settlement_layer_handoff_run args...]
   ./scripts/easy_node.sh phase5-settlement-layer-summary-report [phase5_settlement_layer_summary_report args...]
+  ./scripts/easy_node.sh issuer-sponsor-api-live-smoke [issuer_sponsor_api_live_smoke args...]
+  ./scripts/easy_node.sh issuer-settlement-status-live-smoke [issuer_settlement_status_live_smoke args...]
   ./scripts/easy_node.sh ci-phase6-cosmos-l1-build-testnet [ci_phase6_cosmos_l1_build_testnet args...]
   ./scripts/easy_node.sh ci-phase6-cosmos-l1-contracts [ci_phase6_cosmos_l1_contracts args...]
   ./scripts/easy_node.sh phase6-cosmos-l1-build-testnet-check [phase6_cosmos_l1_build_testnet_check args...]
@@ -547,6 +553,7 @@ Notes:
   - blockchain-bootstrap-governance-graduation-gate wraps the blockchain bootstrap governance graduation gate helper path and preserves pass-through args.
   - roadmap-non-blockchain-actionable-run resolves and runs the current roadmap no-sudo/no-GitHub actionable gate list in one command (supports `--recommended-only 1`, `--max-actions N`, per-action timeout via `--action-timeout-sec N`, and `--parallel [0|1]`).
   - roadmap-blockchain-actionable-run resolves and runs the current roadmap blockchain actionable gate list in one command (supports `--recommended-only 1`, `--max-actions N`, per-action timeout via `--action-timeout-sec N`, and `--parallel [0|1]`).
+  - roadmap-next-actions-run wraps roadmap `next_actions` in one command with optional ID-prefix filtering, per-action timeout, and parallel execution controls.
   - ci-phase0 runs the fast Phase-0 simplification gate (launcher wiring/runtime + config-v1 + local API contract checks) with fail-fast behavior.
   - ci-phase1-resilience runs the Phase-1 resilience gate (route profile + peer churn + lifecycle stability checks), forwards per-stage timeout controls (`--*-timeout-sec`), and keeps fail-fast behavior.
   - phase1-resilience-handoff-check wraps the Phase-1 resilience handoff check helper script with pass-through args.
@@ -573,6 +580,8 @@ Notes:
   - phase5-settlement-layer-handoff-check wraps the Phase-5 settlement-layer handoff check helper script with pass-through args.
   - phase5-settlement-layer-handoff-run wraps the Phase-5 settlement-layer handoff run helper script with pass-through args.
   - phase5-settlement-layer-summary-report wraps the Phase-5 settlement summary-report helper script with pass-through args.
+  - issuer-sponsor-api-live-smoke wraps the phase5 issuer sponsor API live-smoke helper script with pass-through args.
+  - issuer-settlement-status-live-smoke wraps the phase5 issuer settlement-status live-smoke helper script with pass-through args.
   - ci-phase6-cosmos-l1-build-testnet runs the Phase-6 Cosmos L1 build-testnet gate with fail-fast behavior.
   - ci-phase6-cosmos-l1-contracts runs the Phase-6 Cosmos L1 contracts gate with fail-fast behavior.
   - phase6-cosmos-l1-build-testnet-check wraps the Phase-6 Cosmos L1 build-testnet fail-closed check helper script with pass-through args.
@@ -8345,6 +8354,11 @@ roadmap_blockchain_actionable_run() {
   "$script" "$@"
 }
 
+roadmap_next_actions_run() {
+  local script="${ROADMAP_NEXT_ACTIONS_RUN_SCRIPT:-$ROOT_DIR/scripts/roadmap_next_actions_run.sh}"
+  "$script" "$@"
+}
+
 ci_phase0() {
   local gate_script="${CI_PHASE0_SCRIPT:-$ROOT_DIR/scripts/ci_phase0.sh}"
   "$gate_script" "$@"
@@ -8473,6 +8487,16 @@ phase5_settlement_layer_handoff_run() {
 phase5_settlement_layer_summary_report() {
   local summary_report_script="${PHASE5_SETTLEMENT_LAYER_SUMMARY_REPORT_SCRIPT:-$ROOT_DIR/scripts/phase5_settlement_layer_summary_report.sh}"
   "$summary_report_script" "$@"
+}
+
+issuer_sponsor_api_live_smoke() {
+  local live_smoke_script="${ISSUER_SPONSOR_API_LIVE_SMOKE_SCRIPT:-$ROOT_DIR/scripts/integration_issuer_sponsor_api_live_smoke.sh}"
+  "$live_smoke_script" "$@"
+}
+
+issuer_settlement_status_live_smoke() {
+  local live_smoke_script="${ISSUER_SETTLEMENT_STATUS_LIVE_SMOKE_SCRIPT:-$ROOT_DIR/scripts/integration_issuer_settlement_status_live_smoke.sh}"
+  "$live_smoke_script" "$@"
 }
 
 ci_phase6_cosmos_l1_build_testnet() {
@@ -14954,6 +14978,10 @@ main() {
       shift
       roadmap_blockchain_actionable_run "$@"
       ;;
+    roadmap-next-actions-run)
+      shift
+      roadmap_next_actions_run "$@"
+      ;;
     ci-phase0)
       shift
       ci_phase0 "$@"
@@ -15057,6 +15085,14 @@ main() {
     phase5-settlement-layer-summary-report)
       shift
       phase5_settlement_layer_summary_report "$@"
+      ;;
+    issuer-sponsor-api-live-smoke)
+      shift
+      issuer_sponsor_api_live_smoke "$@"
+      ;;
+    issuer-settlement-status-live-smoke)
+      shift
+      issuer_settlement_status_live_smoke "$@"
       ;;
     ci-phase6-cosmos-l1-build-testnet)
       shift
