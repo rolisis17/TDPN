@@ -17,6 +17,7 @@ Usage:
     [--refresh-single-machine-readiness [0|1]] \
     [--parallel [0|1]] \
     [--max-actions N] \
+    [--profile-default-gate-subject ID] \
     [--allow-profile-default-gate-unreachable [0|1]] \
     [--include-id-prefix PREFIX] \
     [--exclude-id-prefix PREFIX] \
@@ -33,6 +34,7 @@ Defaults:
   --refresh-single-machine-readiness 0
   --parallel 0
   --max-actions 0   (0 = no limit)
+  --profile-default-gate-subject ""   (disabled)
   --allow-profile-default-gate-unreachable 0
   --include-id-prefix ""   (disabled)
   --exclude-id-prefix ""   (disabled)
@@ -42,6 +44,8 @@ Exit behavior:
   - Runs all selected commands (sequential by default, concurrent when --parallel=1).
   - Returns rc=0 only when all selected commands pass (or no actions selected).
   - Returns first failing action command rc otherwise.
+  - With --profile-default-gate-subject, profile_default_gate actions append
+    --campaign-subject when no subject/anon override flag is already present.
   - With --allow-profile-default-gate-unreachable=1, profile_default_gate can
     soft-fail on unreachable endpoint logs or missing invite-subject precondition logs.
 USAGE
@@ -110,6 +114,15 @@ sanitize_id() {
   printf '%s' "$value"
 }
 
+command_has_profile_subject_or_anon_arg() {
+  local command_text="${1:-}"
+  [[ "$command_text" =~ (^|[[:space:]])--campaign-subject([[:space:]=]|$) ]] && return 0
+  [[ "$command_text" =~ (^|[[:space:]])--subject([[:space:]=]|$) ]] && return 0
+  [[ "$command_text" =~ (^|[[:space:]])--campaign-anon-cred([[:space:]=]|$) ]] && return 0
+  [[ "$command_text" =~ (^|[[:space:]])--anon-cred([[:space:]=]|$) ]] && return 0
+  return 1
+}
+
 need_cmd jq
 need_cmd bash
 need_cmd date
@@ -123,6 +136,7 @@ refresh_manual_validation="${ROADMAP_NEXT_ACTIONS_RUN_REFRESH_MANUAL_VALIDATION:
 refresh_single_machine_readiness="${ROADMAP_NEXT_ACTIONS_RUN_REFRESH_SINGLE_MACHINE_READINESS:-0}"
 parallel="${ROADMAP_NEXT_ACTIONS_RUN_PARALLEL:-0}"
 max_actions="${ROADMAP_NEXT_ACTIONS_RUN_MAX_ACTIONS:-0}"
+profile_default_gate_subject="${ROADMAP_NEXT_ACTIONS_RUN_PROFILE_DEFAULT_GATE_SUBJECT:-}"
 allow_profile_default_gate_unreachable="${ROADMAP_NEXT_ACTIONS_RUN_ALLOW_PROFILE_DEFAULT_GATE_UNREACHABLE:-0}"
 include_id_prefix="${ROADMAP_NEXT_ACTIONS_RUN_INCLUDE_ID_PREFIX:-}"
 exclude_id_prefix="${ROADMAP_NEXT_ACTIONS_RUN_EXCLUDE_ID_PREFIX:-}"
@@ -186,6 +200,11 @@ while [[ $# -gt 0 ]]; do
     --max-actions)
       require_value_or_die "$1" "${2:-}"
       max_actions="${2:-}"
+      shift 2
+      ;;
+    --profile-default-gate-subject)
+      require_value_or_die "$1" "${2:-}"
+      profile_default_gate_subject="${2:-}"
       shift 2
       ;;
     --allow-profile-default-gate-unreachable)
@@ -360,6 +379,13 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
   action_label="$(printf '%s\n' "$action_json" | jq -r '.label // ""')"
   action_reason="$(printf '%s\n' "$action_json" | jq -r '.reason // ""')"
   action_command="$(printf '%s\n' "$action_json" | jq -r '.command // ""')"
+  if [[ "$action_id" == "profile_default_gate" \
+     && -n "$profile_default_gate_subject" \
+     && -n "$action_command" ]]; then
+    if ! command_has_profile_subject_or_anon_arg "$action_command"; then
+      action_command="$action_command --campaign-subject $(printf '%q' "$profile_default_gate_subject")"
+    fi
+  fi
   action_id_safe="$(sanitize_id "$action_id")"
   action_log="$reports_dir/action_$((idx + 1))_${action_id_safe}.log"
   action_result_file="$actions_results_tmp_dir/action_$((idx + 1))_${action_id_safe}.json"
@@ -698,6 +724,7 @@ jq -n \
   --argjson refresh_single_machine_readiness "$refresh_single_machine_readiness" \
   --argjson parallel "$parallel" \
   --argjson max_actions "$max_actions" \
+  --arg profile_default_gate_subject "$profile_default_gate_subject" \
   --argjson allow_profile_default_gate_unreachable "$allow_profile_default_gate_unreachable" \
   --argjson action_timeout_sec "$action_timeout_sec" \
   --argjson actions_count "$actions_count" \
@@ -721,6 +748,7 @@ jq -n \
       parallel: ($parallel == 1),
       max_actions: $max_actions,
       action_timeout_sec: $action_timeout_sec,
+      profile_default_gate_subject: (if $profile_default_gate_subject == "" then null else $profile_default_gate_subject end),
       allow_profile_default_gate_unreachable: ($allow_profile_default_gate_unreachable == 1),
       include_id_prefix: (if $include_id_prefix == "" then null else $include_id_prefix end),
       exclude_id_prefix: (if $exclude_id_prefix == "" then null else $exclude_id_prefix end)

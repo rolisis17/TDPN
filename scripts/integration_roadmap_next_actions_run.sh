@@ -23,6 +23,8 @@ SLOW1="$TMP_DIR/slow_action_1.sh"
 SLOW2="$TMP_DIR/slow_action_2.sh"
 UNREACHABLE_PROFILE="$TMP_DIR/profile_unreachable.sh"
 MISSING_SUBJECT_PROFILE="$TMP_DIR/profile_missing_subject.sh"
+FAKE_EASY_NODE="$TMP_DIR/fake_easy_node.sh"
+FAKE_EASY_NODE_CAPTURE="$TMP_DIR/fake_easy_node_capture.log"
 
 cat >"$PASS1" <<'EOF_PASS1'
 #!/usr/bin/env bash
@@ -89,6 +91,22 @@ echo "or define CAMPAIGN_SUBJECT/INVITE_KEY in runtime/default/env.client"
 exit 2
 EOF_MISSING_SUBJECT_PROFILE
 chmod +x "$MISSING_SUBJECT_PROFILE"
+
+cat >"$FAKE_EASY_NODE" <<'EOF_FAKE_EASY_NODE'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ -n "${FAKE_EASY_NODE_CAPTURE:-}" ]]; then
+  printf '%s\n' "$*" >>"$FAKE_EASY_NODE_CAPTURE"
+fi
+if [[ "$*" == *"--campaign-subject"* || "$*" == *"--subject"* || "$*" == *"--campaign-anon-cred"* || "$*" == *"--anon-cred"* ]]; then
+  echo "fake easy_node profile-default-gate-run ok"
+  exit 0
+fi
+echo "profile-default-gate-run failed: missing invite key subject"
+echo "provide --campaign-subject/--subject, or set CAMPAIGN_SUBJECT/INVITE_KEY"
+exit 2
+EOF_FAKE_EASY_NODE
+chmod +x "$FAKE_EASY_NODE"
 
 cat >"$FAKE_ROADMAP" <<'EOF_FAKE_ROADMAP'
 #!/usr/bin/env bash
@@ -199,6 +217,15 @@ JSON
 }
 JSON
     ;;
+  profile_missing_subject_easy_node)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"profile_default_gate","label":"Profile default decision gate","command":"bash \"$FAKE_EASY_NODE\" profile-default-gate-run --reports-dir /tmp/fake_profile_reports","reason":"test-precondition-override"}
+  ]
+}
+JSON
+    ;;
   *)
     echo "unknown fake scenario: $scenario"
     exit 2
@@ -223,6 +250,10 @@ if ! bash ./scripts/roadmap_next_actions_run.sh --help | grep -F -- "--parallel 
 fi
 if ! bash ./scripts/roadmap_next_actions_run.sh --help | grep -F -- "--allow-profile-default-gate-unreachable [0|1]" >/dev/null; then
   echo "help output missing --allow-profile-default-gate-unreachable [0|1]"
+  exit 1
+fi
+if ! bash ./scripts/roadmap_next_actions_run.sh --help | grep -F -- "--profile-default-gate-subject ID" >/dev/null; then
+  echo "help output missing --profile-default-gate-subject ID"
   exit 1
 fi
 
@@ -433,6 +464,44 @@ if ! jq -e '
   exit 1
 fi
 
+echo "[roadmap-next-actions-run] profile subject override appends campaign-subject and avoids precondition hard-fail"
+SUMMARY_PROFILE_SUBJECT_OVERRIDE="$TMP_DIR/summary_profile_subject_override.json"
+REPORTS_PROFILE_SUBJECT_OVERRIDE="$TMP_DIR/reports_profile_subject_override"
+: >"$FAKE_EASY_NODE_CAPTURE"
+ROADMAP_NEXT_ACTIONS_SCENARIO=profile_missing_subject_easy_node \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" MISSING_SUBJECT_PROFILE="$MISSING_SUBJECT_PROFILE" FAKE_EASY_NODE="$FAKE_EASY_NODE" FAKE_EASY_NODE_CAPTURE="$FAKE_EASY_NODE_CAPTURE" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_PROFILE_SUBJECT_OVERRIDE" \
+  --summary-json "$SUMMARY_PROFILE_SUBJECT_OVERRIDE" \
+  --profile-default-gate-subject inv-override-subject \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.allow_profile_default_gate_unreachable == false
+  and .inputs.profile_default_gate_subject == "inv-override-subject"
+  and .summary.actions_executed == 1
+  and .summary.pass == 1
+  and .summary.fail == 0
+  and .summary.soft_failed == 0
+  and ((.actions // []) | length == 1)
+  and .actions[0].id == "profile_default_gate"
+  and .actions[0].status == "pass"
+  and ((.actions[0].command // "") | contains("--campaign-subject"))
+  and ((.actions[0].soft_failed // false) == false)
+' "$SUMMARY_PROFILE_SUBJECT_OVERRIDE" >/dev/null; then
+  echo "profile subject override summary mismatch"
+  cat "$SUMMARY_PROFILE_SUBJECT_OVERRIDE"
+  exit 1
+fi
+if ! grep -E -- '--campaign-subject[[:space:]]+inv-override-subject([[:space:]]|$)' "$FAKE_EASY_NODE_CAPTURE" >/dev/null; then
+  echo "profile subject override command capture missing appended --campaign-subject"
+  cat "$FAKE_EASY_NODE_CAPTURE"
+  exit 1
+fi
+
 echo "[roadmap-next-actions-run] profile missing-subject soft-fail path"
 SUMMARY_PROFILE_PRECONDITION_SOFT_FAIL="$TMP_DIR/summary_profile_precondition_soft_fail.json"
 REPORTS_PROFILE_PRECONDITION_SOFT_FAIL="$TMP_DIR/reports_profile_precondition_soft_fail"
@@ -511,6 +580,7 @@ ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
 bash ./scripts/roadmap_next_actions_run.sh \
   --reports-dir "$REPORTS_PROFILE_SOFT_FAIL" \
   --summary-json "$SUMMARY_PROFILE_SOFT_FAIL" \
+  --profile-default-gate-subject inv-unreachable-override \
   --allow-profile-default-gate-unreachable 1 \
   --print-summary-json 0
 
@@ -518,12 +588,14 @@ if ! jq -e '
   .status == "pass"
   and .rc == 0
   and .inputs.allow_profile_default_gate_unreachable == true
+  and .inputs.profile_default_gate_subject == "inv-unreachable-override"
   and .summary.actions_executed == 1
   and .summary.pass == 1
   and .summary.fail == 0
   and .summary.soft_failed == 1
   and ((.actions // []) | length == 1)
   and .actions[0].id == "profile_default_gate"
+  and ((.actions[0].command // "") | contains("--campaign-subject"))
   and .actions[0].status == "pass"
   and .actions[0].rc == 0
   and .actions[0].command_rc == 1
