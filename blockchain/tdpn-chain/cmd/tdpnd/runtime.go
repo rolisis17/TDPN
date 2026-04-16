@@ -40,9 +40,10 @@ type grpcRuntimeServer interface {
 }
 
 type runtimeDeps struct {
-	Listen        func(network, address string) (net.Listener, error)
-	ListenHTTP    func(network, address string) (net.Listener, error)
-	NewGRPCServer func(opts ...grpc.ServerOption) grpcRuntimeServer
+	Listen          func(network, address string) (net.Listener, error)
+	ListenHTTP      func(network, address string) (net.Listener, error)
+	NewGRPCServer   func(opts ...grpc.ServerOption) grpcRuntimeServer
+	NewCometRuntime func(ctx context.Context, cfg cometRuntimeConfig, scaffold chainScaffold) (cometRuntime, error)
 }
 
 type grpcRuntimeConfig struct {
@@ -67,8 +68,9 @@ func newChainScaffold() chainScaffold {
 
 func defaultRuntimeDeps() runtimeDeps {
 	return runtimeDeps{
-		Listen:     net.Listen,
-		ListenHTTP: net.Listen,
+		Listen:          net.Listen,
+		ListenHTTP:      net.Listen,
+		NewCometRuntime: newDefaultCometRuntime,
 		NewGRPCServer: func(opts ...grpc.ServerOption) grpcRuntimeServer {
 			return grpc.NewServer(opts...)
 		},
@@ -109,6 +111,11 @@ func runTDPND(
 	grpcAuthToken := flags.String("grpc-auth-token", "", "optional bearer token for module gRPC methods")
 	settlementHTTPListen := flags.String("settlement-http-listen", "", "listen address for settlement HTTP bridge")
 	settlementHTTPAuthToken := flags.String("settlement-http-auth-token", "", "optional bearer token for settlement HTTP POST endpoints")
+	cometHome := flags.String("comet-home", "", "home directory for CometBFT runtime")
+	cometMoniker := flags.String("comet-moniker", "", "moniker for CometBFT runtime")
+	cometP2PLAddr := flags.String("comet-p2p-laddr", "", "listen address for CometBFT p2p networking")
+	cometRPCAddr := flags.String("comet-rpc-laddr", "", "listen address for CometBFT RPC server")
+	cometProxyApp := flags.String("comet-proxy-app", "", "proxy app label for the in-process CometBFT ABCI app")
 	stateDir := flags.String("state-dir", "", "optional state directory for file-backed module stores")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -132,7 +139,18 @@ func runTDPND(
 
 	grpcListenAddr := strings.TrimSpace(*grpcListen)
 	settlementListenAddr := strings.TrimSpace(*settlementHTTPListen)
-	if grpcListenAddr == "" && settlementListenAddr == "" {
+	cometCfg, cometEnabled, cometErr := parseCometRuntimeConfig(
+		*cometHome,
+		*cometMoniker,
+		*cometP2PLAddr,
+		*cometRPCAddr,
+		*cometProxyApp,
+	)
+	if cometErr != nil {
+		return cometErr
+	}
+
+	if grpcListenAddr == "" && settlementListenAddr == "" && !cometEnabled {
 		fmt.Fprintf(stdout, "tdpn-chain scaffold ready: %s\n", strings.Join(modules, ", "))
 		return nil
 	}
@@ -172,6 +190,34 @@ func runTDPND(
 		if !ok {
 			return errors.New("chain scaffold does not support settlement HTTP bridge")
 		}
+	}
+
+	if cometEnabled && grpcListenAddr == "" && settlementListenAddr == "" {
+		if deps.NewCometRuntime == nil {
+			deps.NewCometRuntime = newDefaultCometRuntime
+		}
+		return runCometMode(ctx, scaffold, cometCfg, deps.NewCometRuntime)
+	}
+
+	if cometEnabled {
+		if deps.NewCometRuntime == nil {
+			deps.NewCometRuntime = newDefaultCometRuntime
+		}
+		runners := make([]func(context.Context) error, 0, 3)
+		runners = append(runners, func(runCtx context.Context) error {
+			return runCometMode(runCtx, scaffold, cometCfg, deps.NewCometRuntime)
+		})
+		if grpcEnabled {
+			runners = append(runners, func(runCtx context.Context) error {
+				return runGRPCMode(runCtx, scaffold, grpcCfg, grpcOptions, deps)
+			})
+		}
+		if settlementEnabled {
+			runners = append(runners, func(runCtx context.Context) error {
+				return runSettlementHTTPMode(runCtx, settlementScaffold, settlementCfg, deps)
+			})
+		}
+		return runRuntimeServers(ctx, runners...)
 	}
 
 	if grpcEnabled && !settlementEnabled {

@@ -175,6 +175,27 @@ check_phase7_roadmap_surface_docs() {
   fi
 }
 
+check_phase7_comet_signal_surface() {
+  local file_path="$1"
+  local label="$2"
+
+  if ! rg -Fq "tdpnd_comet_runtime_smoke_ok" "$file_path"; then
+    echo "$label must propagate tdpnd_comet_runtime_smoke_ok in phase7 handoff contracts"
+    exit 1
+  fi
+}
+
+check_phase7_comet_forwarding_surface() {
+  local file_path="$1"
+  local label="$2"
+
+  if ! rg -Fq -- "--handoff-require-tdpnd-comet-runtime-smoke-ok" "$file_path" \
+    && ! rg -Fq -- "--require-tdpnd-comet-runtime-smoke-ok" "$file_path"; then
+    echo "$label must include comet signal forwarding for phase7 handoff dry-run coverage"
+    exit 1
+  fi
+}
+
 for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$roadmap_integration_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$chain_readme" "$chain_scaffold_file" "$chain_grpc_registry_file" "$chain_grpc_registry_test_file" "$chain_settlement_bridge_file" "$chain_runtime_test_file" "$settlement_mapping_doc" "$blockchain_sponsor_quickstart_doc" "$phase5_ci_script" "$phase5_integration_script" "$phase5_check_script" "$phase5_run_script" "$phase5_handoff_check_script" "$phase5_handoff_run_script" "$phase5_check_integration_script" "$phase5_run_integration_script" "$phase5_handoff_check_integration_script" "$phase5_handoff_run_integration_script" "$phase5_summary_report_script" "$phase5_summary_report_integration_script" "$blockchain_fastlane_script" "$blockchain_fastlane_integration_script" "$ci_local_script" "$easy_node_script" "$easy_node_blockchain_gate_wrappers_integration_script" "$easy_node_blockchain_summary_reports_integration_script" "$phase6_ci_script" "$phase6_integration_script" "$phase6_contracts_ci_script" "$phase6_contracts_integration_script" "$phase6_contracts_live_smoke_script" "$phase6_grpc_app_roundtrip_script" "$phase6_grpc_runtime_smoke_script" "$phase6_grpc_live_smoke_script" "$phase6_grpc_auth_live_smoke_script" "$phase6_settlement_bridge_smoke_script" "$phase6_settlement_bridge_live_smoke_script" "$phase6_query_surface_script" "$phase6_module_tx_surface_script" "$phase6_proto_surface_script" "$phase6_proto_grpc_surface_script" "$phase6_proto_codegen_surface_script" "$phase6_module_coverage_floor_script" "$phase6_keeper_coverage_floor_script" "$phase6_dual_write_parity_script" "$phase6_check_script" "$phase6_run_script" "$phase6_check_integration_script" "$phase6_run_integration_script" "$phase6_suite_script" "$phase6_suite_integration_script" "$phase6_summary_report_script" "$phase6_summary_report_integration_script" "$phase7_check_script" "$phase7_check_integration_script" "$phase7_run_script" "$phase7_run_integration_script" "$phase7_ci_script" "$phase7_ci_integration_script" "$phase7_summary_report_script" "$phase7_summary_report_integration_script"; do
   if [[ ! -f "$f" ]]; then
     echo "missing required file: $f"
@@ -339,6 +360,18 @@ if ! rg -Fq "billing/rewards/slashing/sponsor/validator/governance Msg+Query rou
 fi
 if ! rg -Fq "integration_cosmos_tdpnd_grpc_auth_live_smoke.sh" "$full_plan"; then
   echo "full execution plan must document phase6 tdpnd gRPC auth live-smoke script"
+  exit 1
+fi
+if ! rg -Fq "tdpnd_comet_runtime_smoke" "$full_plan"; then
+  echo "full execution plan must document phase6 tdpnd_comet_runtime_smoke stage"
+  exit 1
+fi
+if ! rg -Fq -- "--run-tdpnd-comet-runtime-smoke" "$full_plan"; then
+  echo "full execution plan must document phase6 comet runtime smoke CLI toggle"
+  exit 1
+fi
+if ! rg -Fq "integration_cosmos_tdpnd_comet_runtime_smoke.sh" "$full_plan"; then
+  echo "full execution plan must document phase6 comet runtime smoke script"
   exit 1
 fi
 if ! rg -Fq "billing/rewards/slashing/sponsor/validator/governance query dispatch" "$full_plan"; then
@@ -552,6 +585,8 @@ check_phase7_roadmap_surface_integration "$roadmap_integration_script" "roadmap 
 check_phase7_roadmap_surface_docs "$full_plan" "full execution plan"
 check_phase7_roadmap_surface_docs "$product_roadmap" "product roadmap"
 check_phase7_roadmap_surface_docs "$cosmos_runtime_doc" "cosmos settlement runtime doc"
+check_phase7_comet_signal_surface "$full_plan" "full execution plan"
+check_phase7_comet_signal_surface "$product_roadmap" "product roadmap"
 if ! rg -qi "confirmation lifecycle" "$full_plan"; then
   echo "full execution plan must document settlement confirmation lifecycle posture"
   exit 1
@@ -600,6 +635,18 @@ if ! rg -Fq "billing/rewards/slashing/sponsor/validator/governance Msg+Query rou
 fi
 if ! rg -Fq "integration_cosmos_tdpnd_grpc_auth_live_smoke.sh" "$product_roadmap"; then
   echo "product roadmap must document phase6 tdpnd gRPC auth live-smoke script"
+  exit 1
+fi
+if ! rg -Fq "tdpnd_comet_runtime_smoke" "$product_roadmap"; then
+  echo "product roadmap must document phase6 tdpnd_comet_runtime_smoke stage"
+  exit 1
+fi
+if ! rg -Fq -- "--run-tdpnd-comet-runtime-smoke" "$product_roadmap"; then
+  echo "product roadmap must document phase6 comet runtime smoke CLI toggle"
+  exit 1
+fi
+if ! rg -Fq "integration_cosmos_tdpnd_comet_runtime_smoke.sh" "$product_roadmap"; then
+  echo "product roadmap must document phase6 comet runtime smoke script"
   exit 1
 fi
 if ! rg -Fq "billing/rewards/slashing/sponsor/validator/governance query dispatch" "$product_roadmap"; then
@@ -1275,6 +1322,10 @@ if ! rg -Fq "require-tdpnd-grpc-auth-live-smoke-ok" "$phase6_run_script"; then
   echo "phase6 run wrapper must forward/handle tdpnd_grpc_auth_live_smoke requirement"
   exit 1
 fi
+if ! rg -Fq "require-tdpnd-comet-runtime-smoke-ok" "$phase6_run_script"; then
+  echo "phase6 run wrapper must forward/handle tdpnd_comet_runtime_smoke requirement"
+  exit 1
+fi
 if ! rg -Fq "require-module-tx-surface-ok" "$phase6_run_script"; then
   echo "phase6 run wrapper must forward/handle module_tx_surface requirement"
   exit 1
@@ -1293,6 +1344,22 @@ if ! rg -Fq "phase6_cosmos_l1_build_testnet_check_summary" "$phase6_check_script
 fi
 if ! rg -Fq "tdpnd_grpc_auth_live_smoke" "$phase6_check_script"; then
   echo "phase6 check wrapper must include tdpnd_grpc_auth_live_smoke readiness signal"
+  exit 1
+fi
+if ! rg -Fq "tdpnd_comet_runtime_smoke" "$phase6_check_script"; then
+  echo "phase6 check wrapper must include tdpnd_comet_runtime_smoke readiness signal"
+  exit 1
+fi
+if ! rg -Fq "tdpnd_comet_runtime_smoke" "$phase6_ci_script"; then
+  echo "phase6 CI gate must include tdpnd_comet_runtime_smoke stage"
+  exit 1
+fi
+if ! rg -Fq -- "--run-tdpnd-comet-runtime-smoke" "$phase6_ci_script"; then
+  echo "phase6 CI gate must expose tdpnd_comet_runtime_smoke toggle"
+  exit 1
+fi
+if ! rg -Fq "CI_PHASE6_COSMOS_L1_RUN_TDPND_COMET_RUNTIME_SMOKE" "$phase6_ci_script"; then
+  echo "phase6 CI gate must expose comet runtime smoke env toggle"
   exit 1
 fi
 if ! rg -Fq "module_tx_surface" "$phase6_check_script"; then
@@ -1347,6 +1414,10 @@ if ! rg -Fq "require-tdpnd-grpc-auth-live-smoke-ok" "$phase6_handoff_run_script"
   echo "phase6 handoff-run wrapper must forward/handle tdpnd_grpc_auth_live_smoke requirement"
   exit 1
 fi
+if ! rg -Fq "require-tdpnd-comet-runtime-smoke-ok" "$phase6_handoff_run_script"; then
+  echo "phase6 handoff-run wrapper must forward/handle tdpnd_comet_runtime_smoke requirement"
+  exit 1
+fi
 if ! rg -Fq "require-module-tx-surface-ok" "$phase6_handoff_run_script"; then
   echo "phase6 handoff-run wrapper must forward/handle module_tx_surface requirement"
   exit 1
@@ -1387,9 +1458,22 @@ if ! rg -Fq "ci-failure propagation" "$phase6_run_integration_script"; then
   echo "phase6 run integration must validate ci-failure propagation behavior"
   exit 1
 fi
+if ! rg -Fq "tdpnd_comet_runtime_smoke" "$phase6_integration_script"; then
+  echo "phase6 CI integration must validate tdpnd_comet_runtime_smoke stage"
+  exit 1
+fi
+if ! rg -Fq -- "--run-tdpnd-comet-runtime-smoke" "$phase6_integration_script"; then
+  echo "phase6 CI integration must validate comet runtime smoke CLI toggle"
+  exit 1
+fi
 if ! rg -Fq "require-tdpnd-grpc-auth-live-smoke-ok" "$phase6_run_integration_script" \
   && ! rg -Fq "tdpnd_grpc_auth_live_smoke" "$phase6_run_integration_script"; then
   echo "phase6 run integration must validate tdpnd_grpc_auth_live_smoke requirement forwarding/handling"
+  exit 1
+fi
+if ! rg -Fq "require-tdpnd-comet-runtime-smoke-ok" "$phase6_run_integration_script" \
+  && ! rg -Fq "tdpnd_comet_runtime_smoke" "$phase6_run_integration_script"; then
+  echo "phase6 run integration must validate tdpnd_comet_runtime_smoke requirement forwarding/handling"
   exit 1
 fi
 if ! rg -Fq "require-module-tx-surface-ok" "$phase6_run_integration_script" \
@@ -1411,6 +1495,10 @@ if ! rg -Fq "fail-closed path" "$phase6_check_integration_script"; then
 fi
 if ! rg -Fq "tdpnd_grpc_auth_live_smoke" "$phase6_check_integration_script"; then
   echo "phase6 check integration must validate tdpnd_grpc_auth_live_smoke readiness signal"
+  exit 1
+fi
+if ! rg -Fq "tdpnd_comet_runtime_smoke" "$phase6_check_integration_script"; then
+  echo "phase6 check integration must validate tdpnd_comet_runtime_smoke readiness signal"
   exit 1
 fi
 if ! rg -Fq "module_tx_surface" "$phase6_check_integration_script"; then
@@ -1450,6 +1538,11 @@ if ! rg -Fq "require-tdpnd-grpc-auth-live-smoke-ok" "$phase6_handoff_run_integra
   echo "phase6 handoff-run integration must validate tdpnd_grpc_auth_live_smoke requirement forwarding/handling"
   exit 1
 fi
+if ! rg -Fq "require-tdpnd-comet-runtime-smoke-ok" "$phase6_handoff_run_integration_script" \
+  && ! rg -Fq "tdpnd_comet_runtime_smoke" "$phase6_handoff_run_integration_script"; then
+  echo "phase6 handoff-run integration must validate tdpnd_comet_runtime_smoke requirement forwarding/handling"
+  exit 1
+fi
 if ! rg -Fq "require-module-tx-surface-ok" "$phase6_handoff_run_integration_script" \
   && ! rg -Fq "module_tx_surface" "$phase6_handoff_run_integration_script"; then
   echo "phase6 handoff-run integration must validate module_tx_surface requirement forwarding/handling"
@@ -1469,6 +1562,10 @@ if ! rg -Fq "fail-closed path" "$phase6_handoff_check_integration_script"; then
 fi
 if ! rg -Fq "tdpnd_grpc_auth_live_smoke" "$phase6_handoff_check_integration_script"; then
   echo "phase6 handoff-check integration must validate tdpnd_grpc_auth_live_smoke readiness signal"
+  exit 1
+fi
+if ! rg -Fq "tdpnd_comet_runtime_smoke" "$phase6_handoff_check_integration_script"; then
+  echo "phase6 handoff-check integration must validate tdpnd_comet_runtime_smoke readiness signal"
   exit 1
 fi
 if ! rg -Fq "module_tx_surface" "$phase6_handoff_check_integration_script"; then
@@ -1635,6 +1732,11 @@ if ! rg -Fq "phase7_mainnet_cutover_handoff_run_" "$phase7_summary_report_script
   echo "phase7 summary report helper must include fallback discovery for timestamped handoff-run summaries"
   exit 1
 fi
+check_phase7_comet_signal_surface "$phase7_check_integration_script" "phase7 check integration script"
+check_phase7_comet_signal_surface "$phase7_run_integration_script" "phase7 run integration script"
+check_phase7_comet_signal_surface "$phase7_handoff_check_integration_script" "phase7 handoff-check integration script"
+check_phase7_comet_signal_surface "$phase7_handoff_run_integration_script" "phase7 handoff-run integration script"
+check_phase7_comet_forwarding_surface "$phase7_handoff_run_integration_script" "phase7 handoff-run integration script"
 if ! rg -Fq "phase7_mainnet_cutover_check.sh" "$phase7_check_integration_script"; then
   echo "phase7 check integration script must execute phase7 check wrapper"
   exit 1
@@ -1891,6 +1993,10 @@ if ! rg -Fq ".blockchain_track.phase6_cosmos_l1_handoff.tdpnd_grpc_auth_live_smo
   echo "roadmap_progress_report.sh must surface phase6 tdpnd_grpc_auth_live_smoke_ok in output paths"
   exit 1
 fi
+if ! rg -Fq ".blockchain_track.phase6_cosmos_l1_handoff.tdpnd_comet_runtime_smoke_ok" "$roadmap_script"; then
+  echo "roadmap_progress_report.sh must surface phase6 tdpnd_comet_runtime_smoke_ok in output paths"
+  exit 1
+fi
 if ! rg -Fq ".artifacts.phase6_cosmos_l1_summary_json" "$roadmap_script"; then
   echo "roadmap_progress_report.sh must include phase6 artifact reference field"
   exit 1
@@ -1909,6 +2015,10 @@ if ! rg -Fq ".blockchain_track.phase6_cosmos_l1_handoff.module_tx_surface_ok" "$
 fi
 if ! rg -Fq ".blockchain_track.phase6_cosmos_l1_handoff.tdpnd_grpc_auth_live_smoke_ok" "$roadmap_integration_script"; then
   echo "integration_roadmap_progress_report.sh must validate phase6 tdpnd_grpc_auth_live_smoke_ok summary signal"
+  exit 1
+fi
+if ! rg -Fq ".blockchain_track.phase6_cosmos_l1_handoff.tdpnd_comet_runtime_smoke_ok" "$roadmap_integration_script"; then
+  echo "integration_roadmap_progress_report.sh must validate phase6 tdpnd_comet_runtime_smoke_ok summary signal"
   exit 1
 fi
 if ! rg -Fq ".artifacts.phase6_cosmos_l1_summary_json" "$roadmap_integration_script"; then
@@ -2136,6 +2246,18 @@ if ! rg -Fq "integration_cosmos_local_testnet_smoke.sh" "$chain_readme"; then
 fi
 if ! rg -Fq "tdpnd_grpc_auth_live_smoke" "$chain_readme"; then
   echo "chain README must document phase6 tdpnd_grpc_auth_live_smoke stage"
+  exit 1
+fi
+if ! rg -Fq "tdpnd_comet_runtime_smoke" "$chain_readme"; then
+  echo "chain README must document phase6 tdpnd_comet_runtime_smoke stage"
+  exit 1
+fi
+if ! rg -Fq -- "--run-tdpnd-comet-runtime-smoke" "$chain_readme"; then
+  echo "chain README must document phase6 comet runtime smoke CLI toggle"
+  exit 1
+fi
+if ! rg -Fq "integration_cosmos_tdpnd_comet_runtime_smoke.sh" "$chain_readme"; then
+  echo "chain README must document comet runtime smoke script"
   exit 1
 fi
 if ! rg -Fq "integration_cosmos_tdpnd_grpc_auth_live_smoke.sh" "$chain_readme"; then

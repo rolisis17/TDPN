@@ -92,6 +92,7 @@ if [[ -n "$summary_json" && "${FAKE_PHASE7_CHECK_OMIT_SUMMARY:-0}" != "1" ]]; th
     "tdpnd_grpc_runtime_smoke_ok": true,
     "tdpnd_grpc_live_smoke_ok": true,
     "tdpnd_grpc_auth_live_smoke_ok": true,
+    "tdpnd_comet_runtime_smoke_ok": true,
     "dual_write_parity_ok": true,
     "rollback_path_ready": true,
     "operator_approval_ok": true
@@ -197,6 +198,7 @@ if ! jq -e '
   and .steps.phase7_mainnet_cutover_check.contract_valid == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.module_tx_surface_ok == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_grpc_auth_live_smoke_ok == true
+  and .steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_comet_runtime_smoke_ok == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.dual_write_parity_ok == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.rollback_path_ready == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.operator_approval_ok == true
@@ -239,6 +241,7 @@ if ! jq -e '
   and .steps.phase7_mainnet_cutover_check.contract_valid == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.module_tx_surface_ok == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_grpc_auth_live_smoke_ok == true
+  and .steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_comet_runtime_smoke_ok == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.dual_write_parity_ok == true
 ' "$DRY_RUN_SUMMARY" >/dev/null; then
   echo "dry-run summary mismatch"
@@ -280,6 +283,7 @@ if ! jq -e '
   and .steps.phase7_mainnet_cutover_check.contract_valid == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.module_tx_surface_ok == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_grpc_auth_live_smoke_ok == true
+  and .steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_comet_runtime_smoke_ok == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.dual_write_parity_ok == true
 ' "$DRY_EXPLICIT_RUN_SUMMARY" >/dev/null; then
   echo "dry-run explicit summary mismatch"
@@ -358,6 +362,7 @@ if ! jq -e '
   and (.steps.phase7_mainnet_cutover_check.contract_error | type) == "string"
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.module_tx_surface_ok == null
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_grpc_auth_live_smoke_ok == null
+  and .steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_comet_runtime_smoke_ok == null
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.dual_write_parity_ok == null
 ' "$INVALID_RUN_SUMMARY" >/dev/null; then
   echo "invalid-child-summary run summary mismatch"

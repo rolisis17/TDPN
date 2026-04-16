@@ -20,6 +20,7 @@ Usage:
     [--run-module-tx-surface [0|1]] \
     [--run-grpc-app-roundtrip [0|1]] \
     [--run-tdpnd-grpc-runtime-smoke [0|1]] \
+    [--run-tdpnd-comet-runtime-smoke [0|1]] \
     [--run-tdpnd-grpc-live-smoke [0|1]] \
     [--run-tdpnd-grpc-auth-live-smoke [0|1]]
 
@@ -33,8 +34,9 @@ Purpose:
     6) integration_cosmos_module_tx_surface.sh
     7) integration_cosmos_grpc_app_roundtrip.sh
     8) integration_cosmos_tdpnd_grpc_runtime_smoke.sh
-    9) integration_cosmos_tdpnd_grpc_live_smoke.sh
-    10) integration_cosmos_tdpnd_grpc_auth_live_smoke.sh
+    9) integration_cosmos_tdpnd_comet_runtime_smoke.sh
+    10) integration_cosmos_tdpnd_grpc_live_smoke.sh
+    11) integration_cosmos_tdpnd_grpc_auth_live_smoke.sh
 
 Dry-run mode:
   --dry-run 1 skips stage execution, records deterministic skip accounting,
@@ -121,6 +123,7 @@ run_query_surface="${CI_PHASE6_COSMOS_L1_RUN_QUERY_SURFACE:-1}"
 run_module_tx_surface="${CI_PHASE6_COSMOS_L1_RUN_MODULE_TX_SURFACE:-1}"
 run_grpc_app_roundtrip="${CI_PHASE6_COSMOS_L1_RUN_GRPC_APP_ROUNDTRIP:-1}"
 run_tdpnd_grpc_runtime_smoke="${CI_PHASE6_COSMOS_L1_RUN_TDPND_GRPC_RUNTIME_SMOKE:-1}"
+run_tdpnd_comet_runtime_smoke="${CI_PHASE6_COSMOS_L1_RUN_TDPND_COMET_RUNTIME_SMOKE:-0}"
 run_tdpnd_grpc_live_smoke="${CI_PHASE6_COSMOS_L1_RUN_TDPND_GRPC_LIVE_SMOKE:-1}"
 run_tdpnd_grpc_auth_live_smoke="${CI_PHASE6_COSMOS_L1_RUN_TDPND_GRPC_AUTH_LIVE_SMOKE:-1}"
 
@@ -224,6 +227,15 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --run-tdpnd-comet-runtime-smoke)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        run_tdpnd_comet_runtime_smoke="${2:-}"
+        shift 2
+      else
+        run_tdpnd_comet_runtime_smoke="1"
+        shift
+      fi
+      ;;
     --run-tdpnd-grpc-live-smoke)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         run_tdpnd_grpc_live_smoke="${2:-}"
@@ -264,6 +276,7 @@ bool_arg_or_die "--run-query-surface" "$run_query_surface"
 bool_arg_or_die "--run-module-tx-surface" "$run_module_tx_surface"
 bool_arg_or_die "--run-grpc-app-roundtrip" "$run_grpc_app_roundtrip"
 bool_arg_or_die "--run-tdpnd-grpc-runtime-smoke" "$run_tdpnd_grpc_runtime_smoke"
+bool_arg_or_die "--run-tdpnd-comet-runtime-smoke" "$run_tdpnd_comet_runtime_smoke"
 bool_arg_or_die "--run-tdpnd-grpc-live-smoke" "$run_tdpnd_grpc_live_smoke"
 bool_arg_or_die "--run-tdpnd-grpc-auth-live-smoke" "$run_tdpnd_grpc_auth_live_smoke"
 
@@ -275,6 +288,7 @@ query_surface_script="${CI_PHASE6_COSMOS_L1_QUERY_SURFACE_SCRIPT:-$ROOT_DIR/scri
 module_tx_surface_script="${CI_PHASE6_COSMOS_L1_MODULE_TX_SURFACE_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_module_tx_surface.sh}"
 grpc_app_roundtrip_script="${CI_PHASE6_COSMOS_L1_GRPC_APP_ROUNDTRIP_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_grpc_app_roundtrip.sh}"
 tdpnd_grpc_runtime_smoke_script="${CI_PHASE6_COSMOS_L1_TDPND_GRPC_RUNTIME_SMOKE_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_tdpnd_grpc_runtime_smoke.sh}"
+tdpnd_comet_runtime_smoke_script="${CI_PHASE6_COSMOS_L1_TDPND_COMET_RUNTIME_SMOKE_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_tdpnd_comet_runtime_smoke.sh}"
 tdpnd_grpc_live_smoke_script="${CI_PHASE6_COSMOS_L1_TDPND_GRPC_LIVE_SMOKE_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_tdpnd_grpc_live_smoke.sh}"
 tdpnd_grpc_auth_live_smoke_script="${CI_PHASE6_COSMOS_L1_TDPND_GRPC_AUTH_LIVE_SMOKE_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_tdpnd_grpc_auth_live_smoke.sh}"
 
@@ -287,6 +301,7 @@ stage_ids=(
   "module_tx_surface"
   "grpc_app_roundtrip"
   "tdpnd_grpc_runtime_smoke"
+  "tdpnd_comet_runtime_smoke"
   "tdpnd_grpc_live_smoke"
   "tdpnd_grpc_auth_live_smoke"
 )
@@ -300,6 +315,7 @@ declare -A stage_script=(
   ["module_tx_surface"]="$module_tx_surface_script"
   ["grpc_app_roundtrip"]="$grpc_app_roundtrip_script"
   ["tdpnd_grpc_runtime_smoke"]="$tdpnd_grpc_runtime_smoke_script"
+  ["tdpnd_comet_runtime_smoke"]="$tdpnd_comet_runtime_smoke_script"
   ["tdpnd_grpc_live_smoke"]="$tdpnd_grpc_live_smoke_script"
   ["tdpnd_grpc_auth_live_smoke"]="$tdpnd_grpc_auth_live_smoke_script"
 )
@@ -313,6 +329,7 @@ declare -A stage_enabled=(
   ["module_tx_surface"]="$run_module_tx_surface"
   ["grpc_app_roundtrip"]="$run_grpc_app_roundtrip"
   ["tdpnd_grpc_runtime_smoke"]="$run_tdpnd_grpc_runtime_smoke"
+  ["tdpnd_comet_runtime_smoke"]="$run_tdpnd_comet_runtime_smoke"
   ["tdpnd_grpc_live_smoke"]="$run_tdpnd_grpc_live_smoke"
   ["tdpnd_grpc_auth_live_smoke"]="$run_tdpnd_grpc_auth_live_smoke"
 )
@@ -429,6 +446,7 @@ jq -n \
   --arg run_module_tx_surface "$run_module_tx_surface" \
   --arg run_grpc_app_roundtrip "$run_grpc_app_roundtrip" \
   --arg run_tdpnd_grpc_runtime_smoke "$run_tdpnd_grpc_runtime_smoke" \
+  --arg run_tdpnd_comet_runtime_smoke "$run_tdpnd_comet_runtime_smoke" \
   --arg run_tdpnd_grpc_live_smoke "$run_tdpnd_grpc_live_smoke" \
   --arg run_tdpnd_grpc_auth_live_smoke "$run_tdpnd_grpc_auth_live_smoke" \
   --argjson steps "$steps_json" \
@@ -453,6 +471,7 @@ jq -n \
       run_module_tx_surface: ($run_module_tx_surface == "1"),
       run_grpc_app_roundtrip: ($run_grpc_app_roundtrip == "1"),
       run_tdpnd_grpc_runtime_smoke: ($run_tdpnd_grpc_runtime_smoke == "1"),
+      run_tdpnd_comet_runtime_smoke: ($run_tdpnd_comet_runtime_smoke == "1"),
       run_tdpnd_grpc_live_smoke: ($run_tdpnd_grpc_live_smoke == "1"),
       run_tdpnd_grpc_auth_live_smoke: ($run_tdpnd_grpc_auth_live_smoke == "1")
     },

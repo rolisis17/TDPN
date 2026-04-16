@@ -36,6 +36,7 @@ Notes:
       --require-tdpnd-grpc-runtime-smoke-ok
       --require-tdpnd-grpc-live-smoke-ok
       --require-tdpnd-grpc-auth-live-smoke-ok
+      --require-tdpnd-comet-runtime-smoke-ok
       --require-dual-write-parity-ok
       --require-rollback-path-ready (alias: --require-rollback-ready)
       --require-operator-approval-ok (alias: --require-operator-approval)
@@ -461,6 +462,9 @@ if [[ "$dry_run" == "1" ]]; then
   if ! array_has_arg "--require-tdpnd-grpc-auth-live-smoke-ok" "${handoff_cmd[@]:1}"; then
     handoff_cmd+=(--require-tdpnd-grpc-auth-live-smoke-ok 0)
   fi
+  if ! array_has_arg "--require-tdpnd-comet-runtime-smoke-ok" "${handoff_cmd[@]:1}"; then
+    handoff_cmd+=(--require-tdpnd-comet-runtime-smoke-ok 0)
+  fi
   if ! array_has_arg "--require-dual-write-parity-ok" "${handoff_cmd[@]:1}"; then
     handoff_cmd+=(--require-dual-write-parity-ok 0)
   fi
@@ -526,12 +530,14 @@ fi
 
 signal_module_tx_surface_ok="null"
 signal_tdpnd_grpc_auth_live_smoke_ok="null"
+signal_tdpnd_comet_runtime_smoke_ok="null"
 signal_dual_write_parity_ok="null"
 signal_rollback_path_ready="null"
 signal_operator_approval_ok="null"
 if [[ "$handoff_contract_valid" == "1" ]]; then
   signal_module_tx_surface_ok="$(extract_handoff_signal_json "$handoff_summary_json" "module_tx_surface_ok")"
   signal_tdpnd_grpc_auth_live_smoke_ok="$(extract_handoff_signal_json "$handoff_summary_json" "tdpnd_grpc_auth_live_smoke_ok")"
+  signal_tdpnd_comet_runtime_smoke_ok="$(extract_handoff_signal_json "$handoff_summary_json" "tdpnd_comet_runtime_smoke_ok")"
   signal_dual_write_parity_ok="$(extract_handoff_signal_json "$handoff_summary_json" "dual_write_parity_ok")"
   signal_rollback_path_ready="$(extract_handoff_signal_json "$handoff_summary_json" "rollback_path_ready")"
   signal_operator_approval_ok="$(extract_handoff_signal_json "$handoff_summary_json" "operator_approval_ok")"
@@ -575,6 +581,7 @@ jq -n \
   --arg handoff_log "$handoff_log" \
   --argjson signal_module_tx_surface_ok "$signal_module_tx_surface_ok" \
   --argjson signal_tdpnd_grpc_auth_live_smoke_ok "$signal_tdpnd_grpc_auth_live_smoke_ok" \
+  --argjson signal_tdpnd_comet_runtime_smoke_ok "$signal_tdpnd_comet_runtime_smoke_ok" \
   --argjson signal_dual_write_parity_ok "$signal_dual_write_parity_ok" \
   --argjson signal_rollback_path_ready "$signal_rollback_path_ready" \
   --argjson signal_operator_approval_ok "$signal_operator_approval_ok" \
@@ -638,6 +645,7 @@ jq -n \
         signal_snapshot: {
           module_tx_surface_ok: $signal_module_tx_surface_ok,
           tdpnd_grpc_auth_live_smoke_ok: $signal_tdpnd_grpc_auth_live_smoke_ok,
+          tdpnd_comet_runtime_smoke_ok: $signal_tdpnd_comet_runtime_smoke_ok,
           dual_write_parity_ok: $signal_dual_write_parity_ok,
           rollback_path_ready: $signal_rollback_path_ready,
           operator_approval_ok: $signal_operator_approval_ok

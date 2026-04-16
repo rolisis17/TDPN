@@ -311,13 +311,15 @@ cat >"$PHASE6_COSMOS_L1_SUMMARY_JSON" <<'EOF_PHASE6_SUMMARY'
     "module_tx_surface_ok": true,
     "tdpnd_grpc_runtime_smoke_ok": true,
     "tdpnd_grpc_live_smoke_ok": true,
-    "tdpnd_grpc_auth_live_smoke_ok": true
+    "tdpnd_grpc_auth_live_smoke_ok": true,
+    "tdpnd_comet_runtime_smoke_ok": true
   },
   "signals": {
     "module_tx_surface_ok": true,
     "tdpnd_grpc_runtime_smoke_ok": true,
     "tdpnd_grpc_live_smoke_ok": true,
-    "tdpnd_grpc_auth_live_smoke_ok": true
+    "tdpnd_grpc_auth_live_smoke_ok": true,
+    "tdpnd_comet_runtime_smoke_ok": true
   },
   "artifacts": {
     "summary_json": "phase6_cosmos_l1_build_testnet_handoff_check_summary.json"
@@ -608,6 +610,7 @@ if [[ "$PHASE6_OUTPUT_PRESENT" == "1" ]]; then
     and .blockchain_track.phase6_cosmos_l1_handoff.tdpnd_grpc_runtime_smoke_ok == true
     and .blockchain_track.phase6_cosmos_l1_handoff.tdpnd_grpc_live_smoke_ok == true
     and .blockchain_track.phase6_cosmos_l1_handoff.tdpnd_grpc_auth_live_smoke_ok == true
+    and .blockchain_track.phase6_cosmos_l1_handoff.tdpnd_comet_runtime_smoke_ok == true
     and .artifacts.phase6_cosmos_l1_summary_json == "'"$PHASE6_COSMOS_L1_SUMMARY_JSON"'"
   ' "$SUMMARY_JSON" >/dev/null; then
     echo "summary JSON missing expected phase6 fields"

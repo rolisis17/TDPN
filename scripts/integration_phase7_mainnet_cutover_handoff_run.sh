@@ -91,6 +91,7 @@ cat >"$check_summary" <<'EOF_CHECK'
     "tdpnd_grpc_runtime_smoke_ok": true,
     "tdpnd_grpc_live_smoke_ok": true,
     "tdpnd_grpc_auth_live_smoke_ok": true,
+    "tdpnd_comet_runtime_smoke_ok": true,
     "dual_write_parity_ok": true,
     "rollback_path_ready": true,
     "operator_approval_ok": true
@@ -121,6 +122,17 @@ if [[ -n "$summary_json" && "${FAKE_PHASE7_RUN_OMIT_SUMMARY:-0}" != "1" ]]; then
       "rc": $rc,
       "command_rc": $rc,
       "contract_valid": true,
+      "signal_snapshot": {
+        "run_pipeline_ok": true,
+        "module_tx_surface_ok": true,
+        "tdpnd_grpc_runtime_smoke_ok": true,
+        "tdpnd_grpc_live_smoke_ok": true,
+        "tdpnd_grpc_auth_live_smoke_ok": true,
+        "tdpnd_comet_runtime_smoke_ok": true,
+        "dual_write_parity_ok": true,
+        "rollback_path_ready": true,
+        "operator_approval_ok": true
+      },
       "artifacts": {
         "summary_json": "$check_summary"
       }
@@ -191,6 +203,7 @@ if [[ -n "$summary_json" && "${FAKE_PHASE7_HANDOFF_OMIT_SUMMARY:-0}" != "1" ]]; 
     "tdpnd_grpc_runtime_smoke_ok": true,
     "tdpnd_grpc_live_smoke_ok": true,
     "tdpnd_grpc_auth_live_smoke_ok": true,
+    "tdpnd_comet_runtime_smoke_ok": true,
     "dual_write_parity_ok": true,
     "rollback_path_ready": true,
     "operator_approval_ok": true
@@ -263,7 +276,8 @@ bash "$RUNNER" \
   --summary-json "$PASS_SUMMARY" \
   --print-summary-json 0 \
   --run-alpha 7 \
-  --handoff-require-run-pipeline-ok 1 >"$PASS_LOG" 2>&1
+  --handoff-require-run-pipeline-ok 1 \
+  --handoff-require-tdpnd-comet-runtime-smoke-ok 1 >"$PASS_LOG" 2>&1
 
 assert_two_stage_invocations "$CAPTURE"
 run_line="$(grep '^run	' "$CAPTURE" | tail -n 1 || true)"
@@ -280,6 +294,11 @@ if [[ "$handoff_line" != *"--phase7-run-summary-json $TMP_DIR/pass_run_summary.j
 fi
 if [[ "$handoff_line" != *"--require-run-pipeline-ok 1"* || "$handoff_line" != *"--show-json 0"* ]]; then
   echo "pass path handoff defaults mismatch"
+  echo "$handoff_line"
+  exit 1
+fi
+if [[ "$handoff_line" != *"--require-tdpnd-comet-runtime-smoke-ok 1"* ]]; then
+  echo "pass path comet forwarding mismatch"
   echo "$handoff_line"
   exit 1
 fi
@@ -309,6 +328,11 @@ if ! jq -e --arg run_summary "$TMP_DIR/pass_run_summary.json" --arg handoff_summ
   cat "$PASS_SUMMARY"
   exit 1
 fi
+if ! jq -e '.handoff.tdpnd_comet_runtime_smoke_ok == true' "$TMP_DIR/pass_handoff_summary.json" >/dev/null; then
+  echo "pass path handoff fixture missing comet smoke signal"
+  cat "$TMP_DIR/pass_handoff_summary.json"
+  exit 1
+fi
 assert_canonical_summary_artifact "$PASS_SUMMARY" "$PASS_CANONICAL" "$PASS_LOG"
 
 echo "[phase7-mainnet-cutover-handoff-run] dry-run relax behavior"
@@ -326,7 +350,8 @@ bash "$RUNNER" \
   --print-summary-json 0 \
   --run-theta 9 \
   --handoff-require-module-tx-surface-ok 1 \
-  --handoff-require-rollback-ready 1 >"$DRY_LOG" 2>&1
+  --handoff-require-rollback-ready 1 \
+  --handoff-require-tdpnd-comet-runtime-smoke-ok 1 >"$DRY_LOG" 2>&1
 
 assert_two_stage_invocations "$CAPTURE"
 run_line="$(grep '^run	' "$CAPTURE" | tail -n 1 || true)"
@@ -343,6 +368,11 @@ if [[ "$handoff_line" != *"--require-run-pipeline-ok 0"* || "$handoff_line" != *
 fi
 if [[ "$handoff_line" != *"--require-module-tx-surface-ok 1"* ]]; then
   echo "dry-run explicit module-tx override mismatch"
+  echo "$handoff_line"
+  exit 1
+fi
+if [[ "$handoff_line" != *"--require-tdpnd-comet-runtime-smoke-ok 1"* ]]; then
+  echo "dry-run comet forwarding mismatch"
   echo "$handoff_line"
   exit 1
 fi
@@ -368,6 +398,11 @@ if ! jq -e '
 ' "$DRY_SUMMARY" >/dev/null; then
   echo "dry-run summary mismatch"
   cat "$DRY_SUMMARY"
+  exit 1
+fi
+if ! jq -e '.handoff.tdpnd_comet_runtime_smoke_ok == true' "$TMP_DIR/dry_handoff_summary.json" >/dev/null; then
+  echo "dry-run handoff fixture missing comet smoke signal"
+  cat "$TMP_DIR/dry_handoff_summary.json"
   exit 1
 fi
 assert_canonical_summary_artifact "$DRY_SUMMARY" "$DRY_CANONICAL" "$DRY_LOG"

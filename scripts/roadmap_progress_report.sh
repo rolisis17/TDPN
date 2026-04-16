@@ -1462,7 +1462,7 @@ phase6_cosmos_l1_summary_completeness_score() {
   local path="$1"
   local score=0
   local signal=""
-  for signal in run_pipeline_ok module_tx_surface_ok tdpnd_grpc_runtime_smoke_ok tdpnd_grpc_live_smoke_ok tdpnd_grpc_auth_live_smoke_ok; do
+  for signal in run_pipeline_ok module_tx_surface_ok tdpnd_grpc_runtime_smoke_ok tdpnd_grpc_live_smoke_ok tdpnd_grpc_auth_live_smoke_ok tdpnd_comet_runtime_smoke_ok; do
     if [[ "$(candidate_bool_signal_present_01 "$path" "$signal")" == "1" ]]; then
       score=$((score + 1))
     fi
@@ -3252,6 +3252,7 @@ phase6_cosmos_l1_handoff_module_tx_surface_ok_json="null"
 phase6_cosmos_l1_handoff_tdpnd_grpc_runtime_smoke_ok_json="null"
 phase6_cosmos_l1_handoff_tdpnd_grpc_live_smoke_ok_json="null"
 phase6_cosmos_l1_handoff_tdpnd_grpc_auth_live_smoke_ok_json="null"
+phase6_cosmos_l1_handoff_tdpnd_comet_runtime_smoke_ok_json="null"
 if [[ -n "$phase6_cosmos_l1_summary_json" ]]; then
   phase6_cosmos_l1_handoff_input_summary_json="$phase6_cosmos_l1_summary_json"
   if [[ "$(phase6_cosmos_l1_summary_usable_01 "$phase6_cosmos_l1_summary_json")" == "1" ]]; then
@@ -3409,6 +3410,33 @@ if [[ -n "$phase6_cosmos_l1_summary_json" ]]; then
               elif (.stages.tdpnd_auth_live_smoke.status | type) == "string" then .stages.tdpnd_auth_live_smoke.status
               elif (.steps.tdpnd_grpc_auth_live_smoke.status | type) == "string" then .steps.tdpnd_grpc_auth_live_smoke.status
               elif (.steps.tdpnd_auth_live_smoke.status | type) == "string" then .steps.tdpnd_auth_live_smoke.status
+              elif (.steps.phase6_cosmos_l1_build_testnet_check.status | type) == "string" then .steps.phase6_cosmos_l1_build_testnet_check.status
+              elif (.steps.phase6_cosmos_l1_build_testnet_handoff_check.status | type) == "string" then .steps.phase6_cosmos_l1_build_testnet_handoff_check.status
+              elif (.steps.ci_phase6_cosmos_l1_build_testnet.status | type) == "string" then .steps.ci_phase6_cosmos_l1_build_testnet.status
+              else "" end) | ascii_downcase) as $s
+            | if $s == "pass" then true
+              elif $s == "fail" then false
+              else empty end
+          end')"
+      phase6_cosmos_l1_handoff_tdpnd_comet_runtime_smoke_ok_json="$(resolve_phase6_bool_with_source_chain \
+        "$phase6_source_summary_json" \
+        'if (.tdpnd_comet_runtime_smoke_ok | type) == "boolean" then .tdpnd_comet_runtime_smoke_ok
+          elif (.summary.tdpnd_comet_runtime_smoke_ok | type) == "boolean" then .summary.tdpnd_comet_runtime_smoke_ok
+          elif (.handoff.tdpnd_comet_runtime_smoke_ok | type) == "boolean" then .handoff.tdpnd_comet_runtime_smoke_ok
+          elif (.signals.tdpnd_comet_runtime_smoke_ok | type) == "boolean" then .signals.tdpnd_comet_runtime_smoke_ok
+          elif (.phase6_cosmos_l1_handoff.tdpnd_comet_runtime_smoke_ok | type) == "boolean" then .phase6_cosmos_l1_handoff.tdpnd_comet_runtime_smoke_ok
+          elif (.vpn_track.phase6_cosmos_l1_handoff.tdpnd_comet_runtime_smoke_ok | type) == "boolean" then .vpn_track.phase6_cosmos_l1_handoff.tdpnd_comet_runtime_smoke_ok
+          elif (.blockchain_track.phase6_cosmos_l1_handoff.tdpnd_comet_runtime_smoke_ok | type) == "boolean" then .blockchain_track.phase6_cosmos_l1_handoff.tdpnd_comet_runtime_smoke_ok
+          else empty end' \
+        'if (.stages.tdpnd_comet_runtime_smoke.ok | type) == "boolean" then .stages.tdpnd_comet_runtime_smoke.ok
+          elif (.steps.tdpnd_comet_runtime_smoke.ok | type) == "boolean" then .steps.tdpnd_comet_runtime_smoke.ok
+          else
+            ((if (.tdpnd_comet_runtime_smoke_status | type) == "string" then .tdpnd_comet_runtime_smoke_status
+              elif (.summary.tdpnd_comet_runtime_smoke_status | type) == "string" then .summary.tdpnd_comet_runtime_smoke_status
+              elif (.handoff.tdpnd_comet_runtime_smoke_status | type) == "string" then .handoff.tdpnd_comet_runtime_smoke_status
+              elif (.signals.tdpnd_comet_runtime_smoke_status | type) == "string" then .signals.tdpnd_comet_runtime_smoke_status
+              elif (.stages.tdpnd_comet_runtime_smoke.status | type) == "string" then .stages.tdpnd_comet_runtime_smoke.status
+              elif (.steps.tdpnd_comet_runtime_smoke.status | type) == "string" then .steps.tdpnd_comet_runtime_smoke.status
               elif (.steps.phase6_cosmos_l1_build_testnet_check.status | type) == "string" then .steps.phase6_cosmos_l1_build_testnet_check.status
               elif (.steps.phase6_cosmos_l1_build_testnet_handoff_check.status | type) == "string" then .steps.phase6_cosmos_l1_build_testnet_handoff_check.status
               elif (.steps.ci_phase6_cosmos_l1_build_testnet.status | type) == "string" then .steps.ci_phase6_cosmos_l1_build_testnet.status
@@ -4040,6 +4068,7 @@ summary_payload="$(jq -n \
   --argjson phase6_cosmos_l1_handoff_tdpnd_grpc_runtime_smoke_ok "$phase6_cosmos_l1_handoff_tdpnd_grpc_runtime_smoke_ok_json" \
   --argjson phase6_cosmos_l1_handoff_tdpnd_grpc_live_smoke_ok "$phase6_cosmos_l1_handoff_tdpnd_grpc_live_smoke_ok_json" \
   --argjson phase6_cosmos_l1_handoff_tdpnd_grpc_auth_live_smoke_ok "$phase6_cosmos_l1_handoff_tdpnd_grpc_auth_live_smoke_ok_json" \
+  --argjson phase6_cosmos_l1_handoff_tdpnd_comet_runtime_smoke_ok "$phase6_cosmos_l1_handoff_tdpnd_comet_runtime_smoke_ok_json" \
   --argjson phase7_mainnet_cutover_summary_available "$phase7_mainnet_cutover_summary_available_json" \
   --arg phase7_mainnet_cutover_summary_input_summary_json "$phase7_mainnet_cutover_summary_input_summary_json" \
   --arg phase7_mainnet_cutover_summary_source_summary_json "$phase7_mainnet_cutover_summary_source_summary_json" \
@@ -4243,7 +4272,8 @@ summary_payload="$(jq -n \
         module_tx_surface_ok: $phase6_cosmos_l1_handoff_module_tx_surface_ok,
         tdpnd_grpc_runtime_smoke_ok: $phase6_cosmos_l1_handoff_tdpnd_grpc_runtime_smoke_ok,
         tdpnd_grpc_live_smoke_ok: $phase6_cosmos_l1_handoff_tdpnd_grpc_live_smoke_ok,
-        tdpnd_grpc_auth_live_smoke_ok: $phase6_cosmos_l1_handoff_tdpnd_grpc_auth_live_smoke_ok
+        tdpnd_grpc_auth_live_smoke_ok: $phase6_cosmos_l1_handoff_tdpnd_grpc_auth_live_smoke_ok,
+        tdpnd_comet_runtime_smoke_ok: $phase6_cosmos_l1_handoff_tdpnd_comet_runtime_smoke_ok
       },
       phase7_mainnet_cutover_summary_report: {
         available: $phase7_mainnet_cutover_summary_available,
@@ -4438,6 +4468,7 @@ $pending_real_host_checks_md
 - Phase-6 Cosmos L1 tdpnd_grpc_runtime_smoke_ok: $(jq -r '.blockchain_track.phase6_cosmos_l1_handoff.tdpnd_grpc_runtime_smoke_ok | if . == null then "null" else tostring end' "$summary_json")
 - Phase-6 Cosmos L1 tdpnd_grpc_live_smoke_ok: $(jq -r '.blockchain_track.phase6_cosmos_l1_handoff.tdpnd_grpc_live_smoke_ok | if . == null then "null" else tostring end' "$summary_json")
 - Phase-6 Cosmos L1 tdpnd_grpc_auth_live_smoke_ok: $(jq -r '.blockchain_track.phase6_cosmos_l1_handoff.tdpnd_grpc_auth_live_smoke_ok | if . == null then "null" else tostring end' "$summary_json")
+- Phase-6 Cosmos L1 tdpnd_comet_runtime_smoke_ok: $(jq -r '.blockchain_track.phase6_cosmos_l1_handoff.tdpnd_comet_runtime_smoke_ok | if . == null then "null" else tostring end' "$summary_json")
 - Phase-7 mainnet cutover summary available: $(jq -r '.blockchain_track.phase7_mainnet_cutover_summary_report.available' "$summary_json")
 - Phase-7 mainnet cutover summary input: $(jq -r '.blockchain_track.phase7_mainnet_cutover_summary_report.input_summary_json // "none"' "$summary_json")
 - Phase-7 mainnet cutover summary source: $(jq -r '.blockchain_track.phase7_mainnet_cutover_summary_report.source_summary_json // "none"' "$summary_json")
@@ -4513,7 +4544,7 @@ echo "[roadmap-progress-report] phase5_settlement_layer_handoff_settlement_fails
 echo "[roadmap-progress-report] phase5_settlement_layer_handoff_settlement_adapter_roundtrip_status=${phase5_settlement_layer_handoff_settlement_adapter_roundtrip_status_json:-null} settlement_adapter_roundtrip_ok=$phase5_settlement_layer_handoff_settlement_adapter_roundtrip_ok_json"
 echo "[roadmap-progress-report] phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_status=${phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_status_json:-null} issuer_sponsor_api_live_smoke_ok=$phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_ok_json"
 echo "[roadmap-progress-report] phase6_cosmos_l1_handoff_available=$phase6_cosmos_l1_handoff_available_json source_summary_json=${phase6_cosmos_l1_handoff_source_summary_json:-} source_kind=${phase6_cosmos_l1_handoff_source_summary_kind:-}"
-echo "[roadmap-progress-report] phase6_cosmos_l1_handoff_status=$phase6_cosmos_l1_handoff_status_json rc=$phase6_cosmos_l1_handoff_rc_json run_pipeline_ok=$phase6_cosmos_l1_handoff_run_pipeline_ok_json module_tx_surface_ok=$phase6_cosmos_l1_handoff_module_tx_surface_ok_json tdpnd_grpc_runtime_smoke_ok=$phase6_cosmos_l1_handoff_tdpnd_grpc_runtime_smoke_ok_json tdpnd_grpc_live_smoke_ok=$phase6_cosmos_l1_handoff_tdpnd_grpc_live_smoke_ok_json tdpnd_grpc_auth_live_smoke_ok=$phase6_cosmos_l1_handoff_tdpnd_grpc_auth_live_smoke_ok_json"
+echo "[roadmap-progress-report] phase6_cosmos_l1_handoff_status=$phase6_cosmos_l1_handoff_status_json rc=$phase6_cosmos_l1_handoff_rc_json run_pipeline_ok=$phase6_cosmos_l1_handoff_run_pipeline_ok_json module_tx_surface_ok=$phase6_cosmos_l1_handoff_module_tx_surface_ok_json tdpnd_grpc_runtime_smoke_ok=$phase6_cosmos_l1_handoff_tdpnd_grpc_runtime_smoke_ok_json tdpnd_grpc_live_smoke_ok=$phase6_cosmos_l1_handoff_tdpnd_grpc_live_smoke_ok_json tdpnd_grpc_auth_live_smoke_ok=$phase6_cosmos_l1_handoff_tdpnd_grpc_auth_live_smoke_ok_json tdpnd_comet_runtime_smoke_ok=$phase6_cosmos_l1_handoff_tdpnd_comet_runtime_smoke_ok_json"
 echo "[roadmap-progress-report] phase7_mainnet_cutover_summary_available=$phase7_mainnet_cutover_summary_available_json source_summary_json=${phase7_mainnet_cutover_summary_source_summary_json:-} source_kind=${phase7_mainnet_cutover_summary_source_summary_kind:-}"
 echo "[roadmap-progress-report] phase7_mainnet_cutover_summary_status=$phase7_mainnet_cutover_summary_status_json rc=$phase7_mainnet_cutover_summary_rc_json check_ok=$phase7_mainnet_cutover_summary_check_ok_json run_ok=$phase7_mainnet_cutover_summary_run_ok_json handoff_check_ok=$phase7_mainnet_cutover_summary_handoff_check_ok_json handoff_run_ok=$phase7_mainnet_cutover_summary_handoff_run_ok_json"
 echo "[roadmap-progress-report] resilience_handoff_available=$resilience_handoff_available_json source_summary_json=${resilience_handoff_source_summary_json:-}"

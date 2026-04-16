@@ -108,6 +108,7 @@ Exit gate:
   - `./scripts/easy_node.sh phase6-cosmos-l1-summary-report`
   - `./scripts/easy_node.sh phase7-mainnet-cutover-summary-report`
 - Phase 6 CI now includes `scripts/ci_phase6_cosmos_l1_build_testnet.sh` with contract coverage from `scripts/integration_ci_phase6_cosmos_l1_build_testnet.sh` for chain scaffold/proto/query/module-tx/gRPC runtime gate ordering and dry-run/first-failure accounting.
+- Phase 6 build/testnet CI also exposes optional `tdpnd_comet_runtime_smoke` via `--run-tdpnd-comet-runtime-smoke` (`scripts/integration_cosmos_tdpnd_comet_runtime_smoke.sh`) for the Comet runtime-mode smoke path, while keeping VPN dataplane independent from chain liveness.
 - Phase 6 build/testnet CI includes `local_testnet_smoke` wired to `scripts/integration_cosmos_local_testnet_smoke.sh` for deterministic local multi-node `tdpnd` lifecycle coverage (`init -> start -> status -> stop -> status`).
 - Phase 6 build/testnet CI includes `module_tx_surface` wired to `scripts/integration_cosmos_module_tx_surface.sh` for six-module keeper/module transaction-surface coverage.
 - Phase 6 gRPC runtime smoke now includes validator/governance real-scaffold roundtrip coverage, reflected core-module query-service checks, auth-query parity, and deterministic `PreviewEpochSelection` query checks.
@@ -119,8 +120,9 @@ Exit gate:
 - Phase 6 canonical top-level suite wrapper is `scripts/phase6_cosmos_l1_build_testnet_suite.sh` with contract coverage from `scripts/integration_phase6_cosmos_l1_build_testnet_suite.sh`.
 - Phase 6 readiness wrappers are available via `scripts/phase6_cosmos_l1_build_testnet_check.sh` and `scripts/phase6_cosmos_l1_build_testnet_run.sh`, each with integration contracts.
 - Phase 6 handoff wrappers are available via `scripts/phase6_cosmos_l1_build_testnet_handoff_check.sh` and `scripts/phase6_cosmos_l1_build_testnet_handoff_run.sh`, each with integration contracts.
-- Phase 6 readiness/handoff checker surfaces include `module_tx_surface_ok` and `tdpnd_grpc_auth_live_smoke_ok` in addition to existing `tdpnd_grpc_runtime_smoke_ok` and `tdpnd_grpc_live_smoke_ok` signals.
+- Phase 6 readiness/handoff checker surfaces include `module_tx_surface_ok`, `tdpnd_grpc_auth_live_smoke_ok`, and optional `tdpnd_comet_runtime_smoke_ok` in addition to existing `tdpnd_grpc_runtime_smoke_ok` and `tdpnd_grpc_live_smoke_ok` signals, while keeping VPN dataplane independence from chain liveness.
 - Phase 6 run/handoff-run dry-run relaxation also covers `module_tx_surface_ok` and `tdpnd_grpc_auth_live_smoke_ok` by default unless explicitly required by wrapper inputs.
+- Phase 6 runtime smoke contract now also tracks optional `tdpnd_comet_runtime_smoke` enablement as a dedicated Comet-mode stage, without coupling VPN dataplane forwarding to chain liveness.
 - Phase 6 operator summary helper `scripts/phase6_cosmos_l1_summary_report.sh` aggregates CI/contracts/suite summary artifacts into compact operator lines plus normalized JSON output, with contract coverage from `scripts/integration_phase6_cosmos_l1_summary_report.sh`.
 - Phase 6 build/testnet/contracts/check/run/handoff/suite wrappers now emit canonical summary artifacts under `.easy-node-logs/phase6_cosmos_l1_*_summary.json` in addition to per-run reports.
 - Phase 6 summary helper fallback discovery now includes CI/contracts/suite timestamped summary directories when canonical/default summary files are absent.

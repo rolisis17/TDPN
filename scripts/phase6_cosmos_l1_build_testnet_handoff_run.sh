@@ -463,6 +463,9 @@ if [[ "$dry_run" == "1" ]]; then
   if ! array_has_arg "--require-tdpnd-grpc-auth-live-smoke-ok" "${handoff_cmd[@]:1}"; then
     handoff_cmd+=(--require-tdpnd-grpc-auth-live-smoke-ok 0)
   fi
+  if ! array_has_arg "--require-tdpnd-comet-runtime-smoke-ok" "${handoff_cmd[@]:1}"; then
+    handoff_cmd+=(--require-tdpnd-comet-runtime-smoke-ok 0)
+  fi
 fi
 handoff_command="$(print_cmd "${handoff_cmd[@]}")"
 

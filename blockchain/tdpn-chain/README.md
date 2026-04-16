@@ -48,6 +48,7 @@ This workspace defines the initial module boundaries for TDPN's VPN-compatible b
 - Blockchain fastlane helper is `scripts/blockchain_fastlane.sh`; integration contract is `scripts/integration_blockchain_fastlane.sh`; easy-node entrypoint is `./scripts/easy_node.sh blockchain-fastlane`; this remains fail-closed control-plane wiring and preserves dataplane independence.
 - Integration coverage for easy-node blockchain summary-wrapper wiring is `scripts/integration_easy_node_blockchain_summary_reports.sh`.
 - Phase6 build/testnet/contracts/check/run/handoff/suite wrappers emit canonical summary artifacts in `.easy-node-logs` (`phase6_cosmos_l1_build_testnet_ci_summary.json`, `phase6_cosmos_l1_contracts_summary.json`, `phase6_cosmos_l1_build_testnet_check_summary.json`, `phase6_cosmos_l1_build_testnet_run_summary.json`, `phase6_cosmos_l1_build_testnet_handoff_check_summary.json`, `phase6_cosmos_l1_build_testnet_handoff_run_summary.json`, `phase6_cosmos_l1_build_testnet_suite_summary.json`) in addition to per-run reports.
+- Phase6 build/testnet CI also exposes optional `tdpnd_comet_runtime_smoke` via `--run-tdpnd-comet-runtime-smoke` (`scripts/integration_cosmos_tdpnd_comet_runtime_smoke.sh`) as the Comet runtime-mode smoke path, while keeping VPN dataplane independent from chain liveness.
 - Phase6 summary helper fallback discovery can resolve latest timestamped CI/contracts/suite summaries when canonical/default files are not present.
 - Phase6 coverage-floor contracts enforce six module and six keeper targets (billing/rewards/slashing/sponsor/validator/governance), including validator/governance floor env overrides and package checks in `integration_cosmos_module_coverage_floor.sh` and `integration_cosmos_keeper_coverage_floor.sh`.
 
@@ -106,6 +107,12 @@ This workspace defines the initial module boundaries for TDPN's VPN-compatible b
       - `COSMOS_SETTLEMENT_ENDPOINT=http://...`
       - optional `COSMOS_SETTLEMENT_API_KEY=...`
       - optional `TDPN_CHAIN_STATE_DIR=...`
+- Optional Comet runtime mode (real CometBFT node lifecycle, with local ABCI app):
+  - `go run ./cmd/tdpnd --comet-home ./.tdpn-comet-home --comet-moniker tdpn-local --comet-p2p-laddr tcp://127.0.0.1:26656 --comet-rpc-laddr tcp://127.0.0.1:26657 --comet-proxy-app tdpn-local`
+  - optional side-by-side control-plane services:
+    - `--grpc-listen`
+    - `--settlement-http-listen`
+    - `--state-dir`
 - App wiring root: `app/scaffold.go`.
 - Phase-1 app wiring exposes module msg servers:
   - `ChainScaffold.BillingMsgServer()` (`CreateReservation`, `FinalizeSettlement`)
@@ -146,6 +153,7 @@ This workspace defines the initial module boundaries for TDPN's VPN-compatible b
   - `./scripts/integration_cosmos_proto_grpc_surface.sh`
   - `./scripts/integration_cosmos_grpc_app_roundtrip.sh` (app-level gRPC roundtrip for billing/rewards/slashing/sponsor/validator/governance Msg+Query contracts)
   - `./scripts/integration_cosmos_tdpnd_grpc_runtime_smoke.sh`
+  - `./scripts/integration_cosmos_tdpnd_comet_runtime_smoke.sh`
   - `./scripts/integration_cosmos_tdpnd_settlement_bridge_smoke.sh`
   - `./scripts/integration_cosmos_tdpnd_state_dir_persistence.sh`
   - `./scripts/integration_cosmos_tdpnd_settlement_bridge_live_smoke.sh`

@@ -357,6 +357,9 @@ if [[ "$dry_run" == "1" ]]; then
   if ! array_has_arg "--require-tdpnd-grpc-auth-live-smoke-ok" "${check_command_args[@]:1}"; then
     check_command_args+=(--require-tdpnd-grpc-auth-live-smoke-ok 0)
   fi
+  if ! array_has_arg "--require-tdpnd-comet-runtime-smoke-ok" "${check_command_args[@]:1}"; then
+    check_command_args+=(--require-tdpnd-comet-runtime-smoke-ok 0)
+  fi
 fi
 check_command="$(print_cmd "${check_command_args[@]}")"
 set +e

@@ -18,6 +18,7 @@ Usage:
     [--require-tdpnd-grpc-runtime-smoke-ok [0|1]] \
     [--require-tdpnd-grpc-live-smoke-ok [0|1]] \
     [--require-tdpnd-grpc-auth-live-smoke-ok [0|1]] \
+    [--require-tdpnd-comet-runtime-smoke-ok [0|1]] \
     [--summary-json PATH] \
     [--show-json [0|1]]
 
@@ -33,12 +34,13 @@ Purpose:
     - tdpnd_grpc_runtime_smoke_ok
     - tdpnd_grpc_live_smoke_ok
     - tdpnd_grpc_auth_live_smoke_ok
+    - tdpnd_comet_runtime_smoke_ok
 
 Notes:
   - Canonical CI summary flag is --ci-phase6-summary-json.
   - Aliases --ci-phase6-cosmos-l1-summary-json and --ci-phase6-build-testnet-summary-json are accepted.
   - Canonical tdpnd-smoke flags are --require-tdpnd-grpc-runtime-smoke-ok, --require-tdpnd-grpc-live-smoke-ok,
-    and --require-tdpnd-grpc-auth-live-smoke-ok.
+    --require-tdpnd-grpc-auth-live-smoke-ok, and --require-tdpnd-comet-runtime-smoke-ok.
   - Aliases --require-tdpnd-runtime-smoke-ok, --require-tdpnd-live-smoke-ok,
     and --require-tdpnd-auth-live-smoke-ok are accepted.
   - Canonical env vars are PHASE6_COSMOS_L1_BUILD_TESTNET_CHECK_REQUIRE_*_OK.
@@ -175,6 +177,7 @@ require_grpc_app_roundtrip_ok="${PHASE6_COSMOS_L1_BUILD_TESTNET_CHECK_REQUIRE_GR
 require_tdpnd_grpc_runtime_smoke_ok="${PHASE6_COSMOS_L1_BUILD_TESTNET_CHECK_REQUIRE_TDPND_GRPC_RUNTIME_SMOKE_OK:-${PHASE6_COSMOS_L1_BUILD_TESTNET_CHECK_REQUIRE_TDPND_RUNTIME_SMOKE_OK:-1}}"
 require_tdpnd_grpc_live_smoke_ok="${PHASE6_COSMOS_L1_BUILD_TESTNET_CHECK_REQUIRE_TDPND_GRPC_LIVE_SMOKE_OK:-${PHASE6_COSMOS_L1_BUILD_TESTNET_CHECK_REQUIRE_TDPND_LIVE_SMOKE_OK:-1}}"
 require_tdpnd_grpc_auth_live_smoke_ok="${PHASE6_COSMOS_L1_BUILD_TESTNET_CHECK_REQUIRE_TDPND_GRPC_AUTH_LIVE_SMOKE_OK:-${PHASE6_COSMOS_L1_BUILD_TESTNET_CHECK_REQUIRE_TDPND_AUTH_LIVE_SMOKE_OK:-1}}"
+require_tdpnd_comet_runtime_smoke_ok="${PHASE6_COSMOS_L1_BUILD_TESTNET_CHECK_REQUIRE_TDPND_COMET_RUNTIME_SMOKE_OK:-0}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -263,6 +266,15 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --require-tdpnd-comet-runtime-smoke-ok)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_tdpnd_comet_runtime_smoke_ok="${2:-}"
+        shift 2
+      else
+        require_tdpnd_comet_runtime_smoke_ok="1"
+        shift
+      fi
+      ;;
     --summary-json)
       summary_json="${2:-}"
       shift 2
@@ -297,6 +309,7 @@ bool_arg_or_die "--require-grpc-app-roundtrip-ok" "$require_grpc_app_roundtrip_o
 bool_arg_or_die "--require-tdpnd-grpc-runtime-smoke-ok" "$require_tdpnd_grpc_runtime_smoke_ok"
 bool_arg_or_die "--require-tdpnd-grpc-live-smoke-ok" "$require_tdpnd_grpc_live_smoke_ok"
 bool_arg_or_die "--require-tdpnd-grpc-auth-live-smoke-ok" "$require_tdpnd_grpc_auth_live_smoke_ok"
+bool_arg_or_die "--require-tdpnd-comet-runtime-smoke-ok" "$require_tdpnd_comet_runtime_smoke_ok"
 bool_arg_or_die "--show-json" "$show_json"
 
 ci_phase6_summary_json="$(abs_path "$ci_phase6_summary_json")"
@@ -315,6 +328,7 @@ stage_ids=(
   "tdpnd_grpc_runtime_smoke"
   "tdpnd_grpc_live_smoke"
   "tdpnd_grpc_auth_live_smoke"
+  "tdpnd_comet_runtime_smoke"
 )
 
 declare -A stage_require=(
@@ -327,6 +341,7 @@ declare -A stage_require=(
   ["tdpnd_grpc_runtime_smoke"]="$require_tdpnd_grpc_runtime_smoke_ok"
   ["tdpnd_grpc_live_smoke"]="$require_tdpnd_grpc_live_smoke_ok"
   ["tdpnd_grpc_auth_live_smoke"]="$require_tdpnd_grpc_auth_live_smoke_ok"
+  ["tdpnd_comet_runtime_smoke"]="$require_tdpnd_comet_runtime_smoke_ok"
 )
 
 generated_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"

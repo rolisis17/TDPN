@@ -57,7 +57,8 @@ cat >"$PASS_CHECK" <<'EOF_PASS_CHECK'
     "grpc_app_roundtrip_ok": true,
     "tdpnd_grpc_runtime_smoke_ok": true,
     "tdpnd_grpc_live_smoke_ok": true,
-    "tdpnd_grpc_auth_live_smoke_ok": true
+    "tdpnd_grpc_auth_live_smoke_ok": true,
+    "tdpnd_comet_runtime_smoke_ok": true
   }
 }
 EOF_PASS_CHECK
@@ -126,6 +127,7 @@ if ! jq -e '
   and .handoff.tdpnd_grpc_runtime_smoke_ok == true
   and .handoff.tdpnd_grpc_live_smoke_ok == true
   and .handoff.tdpnd_grpc_auth_live_smoke_ok == true
+  and .handoff.tdpnd_comet_runtime_smoke_ok == true
 ' --arg expected_canonical "$PASS_CANONICAL" "$PASS_OUTPUT" >/dev/null; then
   echo "pass-path summary mismatch"
   cat "$PASS_OUTPUT"
@@ -158,7 +160,8 @@ cat >"$FAIL_CHECK" <<'EOF_FAIL_CHECK'
     "grpc_app_roundtrip_ok": true,
     "tdpnd_grpc_runtime_smoke_ok": true,
     "tdpnd_grpc_live_smoke_ok": true,
-    "tdpnd_grpc_auth_live_smoke_ok": false
+    "tdpnd_grpc_auth_live_smoke_ok": false,
+    "tdpnd_comet_runtime_smoke_ok": false
   }
 }
 EOF_FAIL_CHECK
@@ -220,6 +223,8 @@ if ! jq -e '
   and .handoff.proto_surface_ok == true
   and .handoff.tdpnd_grpc_auth_live_smoke_ok == false
   and .handoff.tdpnd_grpc_auth_live_smoke_status == "fail"
+  and .handoff.tdpnd_comet_runtime_smoke_ok == false
+  and .handoff.tdpnd_comet_runtime_smoke_status == "fail"
   and ((.decision.reasons // []) | any(test("tdpnd_grpc_auth_live_smoke_ok is false")))
 ' --arg expected_canonical "$FAIL_CANONICAL" "$FAIL_OUTPUT" >/dev/null; then
   echo "fail-path summary mismatch"
@@ -253,7 +258,8 @@ cat >"$RELAXED_CHECK" <<'EOF_RELAXED_CHECK'
     "grpc_app_roundtrip_ok": true,
     "tdpnd_grpc_runtime_smoke_ok": true,
     "tdpnd_grpc_live_smoke_ok": false,
-    "tdpnd_grpc_auth_live_smoke_ok": false
+    "tdpnd_grpc_auth_live_smoke_ok": false,
+    "tdpnd_comet_runtime_smoke_ok": false
   }
 }
 EOF_RELAXED_CHECK
@@ -295,6 +301,7 @@ PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_CHECK_CANONICAL_SUMMARY_JSON="$RELAXED_CA
   --summary-json "$RELAXED_OUTPUT" \
   --require-module-tx-surface-ok 0 \
   --require-tdpnd-grpc-live-smoke-ok 0 \
+  --require-tdpnd-comet-runtime-smoke-ok 0 \
   --require-tdpnd-auth-live-smoke-ok 0 \
   --show-json 0 >"$RELAXED_LOG" 2>&1
 
@@ -309,6 +316,7 @@ if ! jq -e '
   and .artifacts.canonical_summary_json == $expected_canonical
   and .inputs.requirements.module_tx_surface_ok == false
   and .inputs.requirements.tdpnd_grpc_live_smoke_ok == false
+  and .inputs.requirements.tdpnd_comet_runtime_smoke_ok == false
   and .inputs.requirements.tdpnd_grpc_auth_live_smoke_ok == false
   and .handoff.module_tx_surface_ok == false
   and .handoff.module_tx_surface_status == "fail"
@@ -316,6 +324,8 @@ if ! jq -e '
   and .handoff.tdpnd_grpc_live_smoke_status == "fail"
   and .handoff.tdpnd_grpc_auth_live_smoke_ok == false
   and .handoff.tdpnd_grpc_auth_live_smoke_status == "fail"
+  and .handoff.tdpnd_comet_runtime_smoke_ok == false
+  and .handoff.tdpnd_comet_runtime_smoke_status == "fail"
 ' --arg expected_canonical "$RELAXED_CANONICAL" "$RELAXED_OUTPUT" >/dev/null; then
   echo "relaxed-path summary mismatch"
   cat "$RELAXED_OUTPUT"

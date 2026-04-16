@@ -27,6 +27,7 @@ HOST="${LOCAL_TESTNET_SMOKE_HOST:-127.0.0.1}"
 START_WAIT_SECONDS="${LOCAL_TESTNET_SMOKE_START_WAIT_SECONDS:-40}"
 STOP_WAIT_SECONDS="${LOCAL_TESTNET_SMOKE_STOP_WAIT_SECONDS:-20}"
 STOP_GRACE_SECONDS="${LOCAL_TESTNET_SMOKE_STOP_GRACE_SECONDS:-10}"
+RUNTIME_MODE_SPEC="${LOCAL_TESTNET_SMOKE_RUNTIME_MODE:-${LOCAL_TESTNET_SMOKE_RUNTIME_MODES:-scaffold}}"
 
 if ! [[ "$NODE_COUNT" =~ ^[0-9]+$ ]] || (( NODE_COUNT < 2 || NODE_COUNT > 3 )); then
   echo "LOCAL_TESTNET_SMOKE_NODE_COUNT must be 2 or 3 (got: $NODE_COUNT)"
@@ -49,6 +50,52 @@ if (( BASE_SETTLEMENT_PORT + NODE_COUNT - 1 > 65535 )); then
   exit 2
 fi
 
+normalize_runtime_mode() {
+  local mode
+  mode="$(printf '%s' "$1" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
+  case "$mode" in
+    scaffold|comet)
+      printf '%s' "$mode"
+      ;;
+    *)
+      echo "LOCAL_TESTNET_SMOKE_RUNTIME_MODE must be scaffold, comet, or both (got: $1)"
+      exit 2
+      ;;
+  esac
+}
+
+runtime_modes=()
+runtime_mode_spec_lower="$(printf '%s' "$RUNTIME_MODE_SPEC" | tr '[:upper:]' '[:lower:]')"
+case "$runtime_mode_spec_lower" in
+  scaffold)
+    runtime_modes=(scaffold)
+    ;;
+  comet)
+    runtime_modes=(comet)
+    ;;
+  both|all)
+    runtime_modes=(scaffold comet)
+    ;;
+  *)
+    IFS=',' read -r -a runtime_modes <<< "$RUNTIME_MODE_SPEC"
+    ;;
+esac
+
+validated_runtime_modes=()
+for runtime_mode in "${runtime_modes[@]}"; do
+  if [[ -z "${runtime_mode// }" ]]; then
+    continue
+  fi
+  validated_runtime_modes+=("$(normalize_runtime_mode "$runtime_mode")")
+done
+
+if [[ "${#validated_runtime_modes[@]}" -eq 0 ]]; then
+  echo "LOCAL_TESTNET_SMOKE_RUNTIME_MODE resolved to no runnable modes (got: $RUNTIME_MODE_SPEC)"
+  exit 2
+fi
+
+runtime_modes=("${validated_runtime_modes[@]}")
+
 port_in_use() {
   local host="$1"
   local port="$2"
@@ -70,9 +117,6 @@ for i in $(seq 0 $((NODE_COUNT - 1))); do
   fi
 done
 
-TMP_DIR="$(mktemp -d -t cosmos-local-testnet-smoke.XXXXXX)"
-WORK_TESTNET_DIR="$TMP_DIR/testnet"
-
 log_paths() {
   if [[ -d "$WORK_TESTNET_DIR" ]]; then
     find "$WORK_TESTNET_DIR" -maxdepth 2 -type f -name '*.log' -print 2>/dev/null || true
@@ -87,16 +131,6 @@ print_node_logs() {
     tail -n 200 "$log_file" || true
   done < <(log_paths)
 }
-
-cleanup() {
-  set +e
-  if [[ -f "$WORK_TESTNET_DIR/manifest.env" ]]; then
-    "$STOP_SCRIPT" --testnet-dir "$WORK_TESTNET_DIR" --wait-seconds "$STOP_GRACE_SECONDS" >/dev/null 2>&1 || true
-  fi
-  rm -rf "$TMP_DIR"
-  set -e
-}
-trap cleanup EXIT
 
 run_step() {
   local name="$1"
@@ -162,17 +196,42 @@ wait_for_counts() {
   return 1
 }
 
-run_step init "$INIT_SCRIPT" \
-  --testnet-dir "$WORK_TESTNET_DIR" \
-  --node-count "$NODE_COUNT" \
-  --base-grpc-port "$BASE_GRPC_PORT" \
-  --base-settlement-port "$BASE_SETTLEMENT_PORT" \
-  --host "$HOST"
+run_mode_smoke() (
+  set -euo pipefail
+  local runtime_mode="$1"
 
-run_step start "$START_SCRIPT" --testnet-dir "$WORK_TESTNET_DIR"
-wait_for_counts "$NODE_COUNT" "0" "$START_WAIT_SECONDS" "running"
+  TMP_DIR="$(mktemp -d -t cosmos-local-testnet-smoke.XXXXXX)"
+  WORK_TESTNET_DIR="$TMP_DIR/testnet"
 
-run_step stop "$STOP_SCRIPT" --testnet-dir "$WORK_TESTNET_DIR" --wait-seconds "$STOP_GRACE_SECONDS"
-wait_for_counts "0" "$NODE_COUNT" "$STOP_WAIT_SECONDS" "stopped"
+  cleanup() {
+    set +e
+    if [[ -f "$WORK_TESTNET_DIR/manifest.env" ]]; then
+      "$STOP_SCRIPT" --testnet-dir "$WORK_TESTNET_DIR" --runtime-mode "$runtime_mode" --wait-seconds "$STOP_GRACE_SECONDS" >/dev/null 2>&1 || true
+    fi
+    rm -rf "$TMP_DIR"
+    set -e
+  }
+  trap cleanup EXIT
 
-echo "cosmos local testnet smoke integration check ok"
+  run_step init "$INIT_SCRIPT" \
+    --testnet-dir "$WORK_TESTNET_DIR" \
+    --node-count "$NODE_COUNT" \
+    --base-grpc-port "$BASE_GRPC_PORT" \
+    --base-settlement-port "$BASE_SETTLEMENT_PORT" \
+    --host "$HOST" \
+    --runtime-mode "$runtime_mode"
+
+  run_step start "$START_SCRIPT" --testnet-dir "$WORK_TESTNET_DIR" --runtime-mode "$runtime_mode"
+  wait_for_counts "$NODE_COUNT" "0" "$START_WAIT_SECONDS" "running_${runtime_mode}"
+
+  run_step stop "$STOP_SCRIPT" --testnet-dir "$WORK_TESTNET_DIR" --runtime-mode "$runtime_mode" --wait-seconds "$STOP_GRACE_SECONDS"
+  wait_for_counts "0" "$NODE_COUNT" "$STOP_WAIT_SECONDS" "stopped_${runtime_mode}"
+
+  echo "cosmos local testnet smoke integration check ok (${runtime_mode})"
+)
+
+for runtime_mode in "${runtime_modes[@]}"; do
+  run_mode_smoke "$runtime_mode"
+done
+
+echo "cosmos local testnet smoke integration check ok for mode(s): ${runtime_modes[*]}"

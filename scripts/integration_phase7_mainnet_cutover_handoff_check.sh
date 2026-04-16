@@ -65,6 +65,7 @@ cat >"$PASS_RUN" <<'EOF_PASS_RUN'
         "tdpnd_grpc_runtime_smoke_ok": true,
         "tdpnd_grpc_live_smoke_ok": true,
         "tdpnd_grpc_auth_live_smoke_ok": true,
+        "tdpnd_comet_runtime_smoke_ok": true,
         "dual_write_parity_ok": true,
         "rollback_path_ready": true,
         "operator_approval_ok": true
@@ -89,6 +90,7 @@ cat >"$PASS_CHECK" <<'EOF_PASS_CHECK'
     "tdpnd_grpc_runtime_smoke_ok": true,
     "tdpnd_grpc_live_smoke_ok": true,
     "tdpnd_grpc_auth_live_smoke_ok": true,
+    "tdpnd_comet_runtime_smoke_ok": true,
     "dual_write_parity_ok": true,
     "rollback_path_ready": true,
     "operator_approval_ok": true
@@ -138,6 +140,7 @@ cat >"$FAIL_RUN" <<'EOF_FAIL_RUN'
         "tdpnd_grpc_runtime_smoke_ok": true,
         "tdpnd_grpc_live_smoke_ok": true,
         "tdpnd_grpc_auth_live_smoke_ok": false,
+        "tdpnd_comet_runtime_smoke_ok": false,
         "dual_write_parity_ok": true,
         "rollback_path_ready": true,
         "operator_approval_ok": true
@@ -183,6 +186,16 @@ if ! jq -e '
   cat "$PASS_LOG"
   exit 1
 fi
+if ! jq -e '.steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_comet_runtime_smoke_ok == true' "$PASS_RUN" >/dev/null; then
+  echo "pass-path run fixture missing comet smoke signal"
+  cat "$PASS_RUN"
+  exit 1
+fi
+if ! jq -e '.signals.tdpnd_comet_runtime_smoke_ok == true' "$PASS_CHECK" >/dev/null; then
+  echo "pass-path check fixture missing comet smoke signal"
+  cat "$PASS_CHECK"
+  exit 1
+fi
 if ! cmp -s "$PASS_OUTPUT" "$PASS_CANONICAL"; then
   echo "pass-path canonical summary diverges from run summary"
   cat "$PASS_OUTPUT"
@@ -215,6 +228,11 @@ if ! jq -e '
   echo "fail-path summary mismatch"
   cat "$FAIL_OUTPUT"
   cat "$FAIL_LOG"
+  exit 1
+fi
+if ! jq -e '.steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_comet_runtime_smoke_ok == false' "$FAIL_RUN" >/dev/null; then
+  echo "fail-path run fixture missing comet smoke signal"
+  cat "$FAIL_RUN"
   exit 1
 fi
 if [[ ! -f "$FAIL_CANONICAL" ]]; then

@@ -67,7 +67,8 @@ cat >"$PASS_HANDOFF" <<'EOF_PASS_HANDOFF'
     "module_tx_surface_ok": true,
     "tdpnd_grpc_runtime_smoke_ok": true,
     "tdpnd_grpc_live_smoke_ok": true,
-    "tdpnd_grpc_auth_live_smoke_ok": true
+    "tdpnd_grpc_auth_live_smoke_ok": true,
+    "tdpnd_comet_runtime_smoke_ok": true
   }
 }
 EOF_PASS_HANDOFF
@@ -103,7 +104,8 @@ cat >"$FAIL_HANDOFF" <<'EOF_FAIL_HANDOFF'
     "module_tx_surface_ok": false,
     "tdpnd_grpc_runtime_smoke_ok": true,
     "tdpnd_grpc_live_smoke_ok": true,
-    "tdpnd_grpc_auth_live_smoke_ok": true
+    "tdpnd_grpc_auth_live_smoke_ok": true,
+    "tdpnd_comet_runtime_smoke_ok": false
   }
 }
 EOF_FAIL_HANDOFF
@@ -155,6 +157,7 @@ if ! jq -e '
   and .policy.require_tdpnd_grpc_runtime_smoke_ok == true
   and .policy.require_tdpnd_grpc_live_smoke_ok == true
   and .policy.require_tdpnd_grpc_auth_live_smoke_ok == true
+  and .policy.require_tdpnd_comet_runtime_smoke_ok == false
   and .policy.require_dual_write_parity_ok == true
   and .policy.require_rollback_path_ready == true
   and .policy.require_operator_approval_ok == false
@@ -163,6 +166,7 @@ if ! jq -e '
   and .signals.tdpnd_grpc_runtime_smoke_ok == true
   and .signals.tdpnd_grpc_live_smoke_ok == true
   and .signals.tdpnd_grpc_auth_live_smoke_ok == true
+  and .signals.tdpnd_comet_runtime_smoke_ok == true
   and .signals.dual_write_parity_ok == true
   and .signals.rollback_path_ready == true
   and .signals.operator_approval_ok == true
@@ -199,6 +203,7 @@ if ! jq -e '
   .status == "fail"
   and .rc == 1
   and .signals.module_tx_surface_ok == false
+  and .signals.tdpnd_comet_runtime_smoke_ok == false
   and .stages.module_tx_surface.status == "fail"
   and ((.decision.reasons // []) | any(test("module_tx_surface_ok is false")))
 ' "$FAIL_OUTPUT" >/dev/null; then

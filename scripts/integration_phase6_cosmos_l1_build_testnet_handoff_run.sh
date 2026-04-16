@@ -88,7 +88,8 @@ cat >"$check_summary" <<'EOF_CHECK'
     "grpc_app_roundtrip_ok": true,
     "tdpnd_grpc_runtime_smoke_ok": true,
     "tdpnd_grpc_live_smoke_ok": true,
-    "tdpnd_grpc_auth_live_smoke_ok": true
+    "tdpnd_grpc_auth_live_smoke_ok": true,
+    "tdpnd_comet_runtime_smoke_ok": true
   }
 }
 EOF_CHECK
@@ -108,7 +109,8 @@ cat >"$roadmap_summary" <<'EOF_ROADMAP'
       "grpc_app_roundtrip_ok": true,
       "tdpnd_grpc_runtime_smoke_ok": true,
       "tdpnd_grpc_live_smoke_ok": true,
-      "tdpnd_grpc_auth_live_smoke_ok": true
+      "tdpnd_grpc_auth_live_smoke_ok": true,
+      "tdpnd_comet_runtime_smoke_ok": true
     }
   }
 }
@@ -329,13 +331,18 @@ if [[ "$run_line" != *"--dry-run 1"* || "$run_line" != *"--theta 9"* ]]; then
   echo "$run_line"
   exit 1
 fi
-if [[ "$handoff_line" != *"--require-run-pipeline-ok 0"* || "$handoff_line" != *"--require-chain-scaffold-ok 0"* || "$handoff_line" != *"--require-proto-surface-ok 1"* || "$handoff_line" != *"--require-proto-codegen-surface-ok 0"* || "$handoff_line" != *"--require-query-surface-ok 0"* || "$handoff_line" != *"--require-grpc-app-roundtrip-ok 0"* || "$handoff_line" != *"--require-tdpnd-grpc-runtime-smoke-ok 0"* || "$handoff_line" != *"--require-tdpnd-grpc-live-smoke-ok 0"* || "$handoff_line" != *"--require-tdpnd-grpc-auth-live-smoke-ok 0"* ]]; then
+if [[ "$handoff_line" != *"--require-run-pipeline-ok 0"* || "$handoff_line" != *"--require-chain-scaffold-ok 0"* || "$handoff_line" != *"--require-proto-surface-ok 1"* || "$handoff_line" != *"--require-proto-codegen-surface-ok 0"* || "$handoff_line" != *"--require-query-surface-ok 0"* || "$handoff_line" != *"--require-grpc-app-roundtrip-ok 0"* || "$handoff_line" != *"--require-tdpnd-grpc-runtime-smoke-ok 0"* || "$handoff_line" != *"--require-tdpnd-grpc-live-smoke-ok 0"* || "$handoff_line" != *"--require-tdpnd-grpc-auth-live-smoke-ok 0"* || "$handoff_line" != *"--require-tdpnd-comet-runtime-smoke-ok 0"* ]]; then
   echo "dry-run handoff relax/override mismatch"
   echo "$handoff_line"
   exit 1
 fi
 if [[ "$handoff_line" != *"--require-module-tx-surface-ok 0"* ]]; then
   echo "dry-run module-tx relax mismatch"
+  echo "$handoff_line"
+  exit 1
+fi
+if [[ "$handoff_line" != *"--require-tdpnd-comet-runtime-smoke-ok 0"* ]]; then
+  echo "dry-run comet-runtime relax mismatch"
   echo "$handoff_line"
   exit 1
 fi
@@ -370,7 +377,8 @@ bash "$RUNNER" \
   --summary-json "$DRY_OVERRIDE_WRAPPER_SUMMARY" \
   --dry-run 1 \
   --print-summary-json 0 \
-  --handoff-require-module-tx-surface-ok 1 >"$DRY_OVERRIDE_STDOUT" 2>&1
+  --handoff-require-module-tx-surface-ok 1 \
+  --handoff-require-tdpnd-comet-runtime-smoke-ok 1 >"$DRY_OVERRIDE_STDOUT" 2>&1
 
 handoff_line="$(grep '^handoff	' "$CAPTURE" | tail -n 1 || true)"
 if [[ "$handoff_line" != *"--require-module-tx-surface-ok 1"* ]]; then
@@ -380,6 +388,11 @@ if [[ "$handoff_line" != *"--require-module-tx-surface-ok 1"* ]]; then
 fi
 if [[ "$handoff_line" == *"--require-module-tx-surface-ok 0"* ]]; then
   echo "dry-run explicit module-tx override was unexpectedly relaxed"
+  echo "$handoff_line"
+  exit 1
+fi
+if [[ "$handoff_line" != *"--require-tdpnd-comet-runtime-smoke-ok 1"* ]]; then
+  echo "dry-run comet-runtime explicit override forwarding mismatch"
   echo "$handoff_line"
   exit 1
 fi

@@ -54,7 +54,8 @@ cat >"$PASS_SUMMARY" <<'EOF_PASS'
     "grpc_app_roundtrip": { "status": "pass" },
     "tdpnd_grpc_runtime_smoke": { "status": "pass" },
     "tdpnd_grpc_live_smoke": { "status": "pass" },
-    "tdpnd_grpc_auth_live_smoke": { "status": "pass" }
+    "tdpnd_grpc_auth_live_smoke": { "status": "pass" },
+    "tdpnd_comet_runtime_smoke": { "status": "pass" }
   }
 }
 EOF_PASS
@@ -78,7 +79,8 @@ cat >"$FAIL_SUMMARY" <<'EOF_FAIL'
     "grpc_app_roundtrip": { "status": "pass" },
     "tdpnd_grpc_runtime_smoke": { "status": "pass" },
     "tdpnd_grpc_live_smoke": { "status": "pass" },
-    "tdpnd_grpc_auth_live_smoke": { "status": "pass" }
+    "tdpnd_grpc_auth_live_smoke": { "status": "pass" },
+    "tdpnd_comet_runtime_smoke": { "status": "pass" }
   }
 }
 EOF_FAIL
@@ -102,7 +104,8 @@ cat >"$RELAXED_SUMMARY" <<'EOF_RELAXED'
     "grpc_app_roundtrip": { "status": "pass" },
     "tdpnd_grpc_runtime_smoke": { "status": "pass" },
     "tdpnd_grpc_live_smoke": { "status": "pass" },
-    "tdpnd_grpc_auth_live_smoke": { "status": "pass" }
+    "tdpnd_grpc_auth_live_smoke": { "status": "pass" },
+    "tdpnd_comet_runtime_smoke": { "status": "pass" }
   }
 }
 EOF_RELAXED
@@ -135,6 +138,7 @@ if ! jq -e '
   and .policy.require_tdpnd_grpc_runtime_smoke_ok == true
   and .policy.require_tdpnd_grpc_live_smoke_ok == true
   and .policy.require_tdpnd_grpc_auth_live_smoke_ok == true
+  and .policy.require_tdpnd_comet_runtime_smoke_ok == false
   and .signals.chain_scaffold_ok == true
   and .signals.proto_surface_ok == true
   and .signals.proto_codegen_surface_ok == true
@@ -144,6 +148,7 @@ if ! jq -e '
   and .signals.tdpnd_grpc_runtime_smoke_ok == true
   and .signals.tdpnd_grpc_live_smoke_ok == true
   and .signals.tdpnd_grpc_auth_live_smoke_ok == true
+  and .signals.tdpnd_comet_runtime_smoke_ok == true
 ' --arg expected_canonical "$PASS_CANONICAL" "$PASS_OUTPUT" >/dev/null; then
   echo "pass-path summary contract mismatch"
   cat "$PASS_OUTPUT"
@@ -181,6 +186,7 @@ if ! jq -e '
   and .rc == 1
   and .artifacts.canonical_summary_json == $expected_canonical
   and .signals.module_tx_surface_ok == false
+  and .signals.tdpnd_comet_runtime_smoke_ok == true
   and .stages.module_tx_surface.status == "fail"
   and ((.decision.reasons // []) | any(test("module_tx_surface_ok is false")))
 ' --arg expected_canonical "$FAIL_CANONICAL" "$FAIL_OUTPUT" >/dev/null; then
@@ -214,7 +220,9 @@ if ! jq -e '
   and .rc == 0
   and .artifacts.canonical_summary_json == $expected_canonical
   and .policy.require_module_tx_surface_ok == false
+  and .policy.require_tdpnd_comet_runtime_smoke_ok == false
   and .signals.module_tx_surface_ok == false
+  and .signals.tdpnd_comet_runtime_smoke_ok == true
   and .stages.module_tx_surface.status == "fail"
 ' --arg expected_canonical "$RELAXED_CANONICAL" "$RELAXED_OUTPUT" >/dev/null; then
   echo "relaxed-toggle summary contract mismatch"

@@ -18,6 +18,7 @@ Usage:
     [--require-tdpnd-grpc-runtime-smoke-ok [0|1]] \
     [--require-tdpnd-grpc-live-smoke-ok [0|1]] \
     [--require-tdpnd-grpc-auth-live-smoke-ok [0|1]] \
+    [--require-tdpnd-comet-runtime-smoke-ok [0|1]] \
     [--require-dual-write-parity-ok [0|1]] \
     [--require-rollback-path-ready [0|1]] \
     [--require-operator-approval-ok [0|1]] \
@@ -35,6 +36,7 @@ Resolved signals:
   - tdpnd_grpc_runtime_smoke_ok
   - tdpnd_grpc_live_smoke_ok
   - tdpnd_grpc_auth_live_smoke_ok
+  - tdpnd_comet_runtime_smoke_ok
   - dual_write_parity_ok (contracts summary; fallback stage/step: phase6_cosmos_dual_write_parity)
   - rollback_path_ready (manual)
   - operator_approval_ok (manual)
@@ -220,6 +222,7 @@ require_module_tx_surface_ok="${PHASE7_MAINNET_CUTOVER_CHECK_REQUIRE_MODULE_TX_S
 require_tdpnd_grpc_runtime_smoke_ok="${PHASE7_MAINNET_CUTOVER_CHECK_REQUIRE_TDPND_GRPC_RUNTIME_SMOKE_OK:-1}"
 require_tdpnd_grpc_live_smoke_ok="${PHASE7_MAINNET_CUTOVER_CHECK_REQUIRE_TDPND_GRPC_LIVE_SMOKE_OK:-1}"
 require_tdpnd_grpc_auth_live_smoke_ok="${PHASE7_MAINNET_CUTOVER_CHECK_REQUIRE_TDPND_GRPC_AUTH_LIVE_SMOKE_OK:-1}"
+require_tdpnd_comet_runtime_smoke_ok="${PHASE7_MAINNET_CUTOVER_CHECK_REQUIRE_TDPND_COMET_RUNTIME_SMOKE_OK:-0}"
 require_dual_write_parity_ok="${PHASE7_MAINNET_CUTOVER_CHECK_REQUIRE_DUAL_WRITE_PARITY_OK:-1}"
 require_rollback_path_ready="${PHASE7_MAINNET_CUTOVER_CHECK_REQUIRE_ROLLBACK_PATH_READY:-1}"
 require_operator_approval_ok="${PHASE7_MAINNET_CUTOVER_CHECK_REQUIRE_OPERATOR_APPROVAL_OK:-0}"
@@ -294,6 +297,15 @@ while [[ $# -gt 0 ]]; do
         shift 2
       else
         require_tdpnd_grpc_auth_live_smoke_ok="1"
+        shift
+      fi
+      ;;
+    --require-tdpnd-comet-runtime-smoke-ok)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_tdpnd_comet_runtime_smoke_ok="${2:-}"
+        shift 2
+      else
+        require_tdpnd_comet_runtime_smoke_ok="1"
         shift
       fi
       ;;
@@ -372,6 +384,7 @@ bool_arg_or_die "--require-module-tx-surface-ok" "$require_module_tx_surface_ok"
 bool_arg_or_die "--require-tdpnd-grpc-runtime-smoke-ok" "$require_tdpnd_grpc_runtime_smoke_ok"
 bool_arg_or_die "--require-tdpnd-grpc-live-smoke-ok" "$require_tdpnd_grpc_live_smoke_ok"
 bool_arg_or_die "--require-tdpnd-grpc-auth-live-smoke-ok" "$require_tdpnd_grpc_auth_live_smoke_ok"
+bool_arg_or_die "--require-tdpnd-comet-runtime-smoke-ok" "$require_tdpnd_comet_runtime_smoke_ok"
 bool_arg_or_die "--require-dual-write-parity-ok" "$require_dual_write_parity_ok"
 bool_arg_or_die "--require-rollback-path-ready" "$require_rollback_path_ready"
 bool_arg_or_die "--require-operator-approval-ok" "$require_operator_approval_ok"
@@ -413,6 +426,7 @@ module_tx_surface_pair="$(resolve_summary_bool "$phase6_handoff_summary_json" "m
 tdpnd_grpc_runtime_smoke_pair="$(resolve_summary_bool "$phase6_handoff_summary_json" "tdpnd_grpc_runtime_smoke_ok" "tdpnd_grpc_runtime_smoke" "phase6_handoff_summary_json")"
 tdpnd_grpc_live_smoke_pair="$(resolve_summary_bool "$phase6_handoff_summary_json" "tdpnd_grpc_live_smoke_ok" "tdpnd_grpc_live_smoke" "phase6_handoff_summary_json")"
 tdpnd_grpc_auth_live_smoke_pair="$(resolve_summary_bool "$phase6_handoff_summary_json" "tdpnd_grpc_auth_live_smoke_ok" "tdpnd_grpc_auth_live_smoke" "phase6_handoff_summary_json")"
+tdpnd_comet_runtime_smoke_pair="$(resolve_summary_bool "$phase6_handoff_summary_json" "tdpnd_comet_runtime_smoke_ok" "tdpnd_comet_runtime_smoke" "phase6_handoff_summary_json")"
 dual_write_parity_pair="$(resolve_summary_bool "$phase6_contracts_summary_json" "dual_write_parity_ok" "phase6_cosmos_dual_write_parity" "phase6_contracts_summary_json")"
 rollback_path_ready_pair="$(resolve_manual_bool "$rollback_path_ready")"
 operator_approval_pair="$(resolve_manual_bool "$operator_approval_ok")"
@@ -437,6 +451,10 @@ tdpnd_grpc_auth_live_smoke_ok="${tdpnd_grpc_auth_live_smoke_pair%%|*}"; tdpnd_gr
 tdpnd_grpc_auth_live_smoke_status="${tdpnd_grpc_auth_live_smoke_pair%%|*}"; tdpnd_grpc_auth_live_smoke_pair="${tdpnd_grpc_auth_live_smoke_pair#*|}"
 tdpnd_grpc_auth_live_smoke_resolved="${tdpnd_grpc_auth_live_smoke_pair%%|*}"; tdpnd_grpc_auth_live_smoke_source="${tdpnd_grpc_auth_live_smoke_pair##*|}"
 
+tdpnd_comet_runtime_smoke_ok="${tdpnd_comet_runtime_smoke_pair%%|*}"; tdpnd_comet_runtime_smoke_pair="${tdpnd_comet_runtime_smoke_pair#*|}"
+tdpnd_comet_runtime_smoke_status="${tdpnd_comet_runtime_smoke_pair%%|*}"; tdpnd_comet_runtime_smoke_pair="${tdpnd_comet_runtime_smoke_pair#*|}"
+tdpnd_comet_runtime_smoke_resolved="${tdpnd_comet_runtime_smoke_pair%%|*}"; tdpnd_comet_runtime_smoke_source="${tdpnd_comet_runtime_smoke_pair##*|}"
+
 dual_write_parity_ok="${dual_write_parity_pair%%|*}"; dual_write_parity_pair="${dual_write_parity_pair#*|}"
 dual_write_parity_status="${dual_write_parity_pair%%|*}"; dual_write_parity_pair="${dual_write_parity_pair#*|}"
 dual_write_parity_resolved="${dual_write_parity_pair%%|*}"; dual_write_parity_source="${dual_write_parity_pair##*|}"
@@ -454,6 +472,7 @@ check_required_signal "$require_module_tx_surface_ok" "$module_tx_surface_ok" "$
 check_required_signal "$require_tdpnd_grpc_runtime_smoke_ok" "$tdpnd_grpc_runtime_smoke_ok" "$tdpnd_grpc_runtime_smoke_status" "tdpnd_grpc_runtime_smoke_ok" reasons
 check_required_signal "$require_tdpnd_grpc_live_smoke_ok" "$tdpnd_grpc_live_smoke_ok" "$tdpnd_grpc_live_smoke_status" "tdpnd_grpc_live_smoke_ok" reasons
 check_required_signal "$require_tdpnd_grpc_auth_live_smoke_ok" "$tdpnd_grpc_auth_live_smoke_ok" "$tdpnd_grpc_auth_live_smoke_status" "tdpnd_grpc_auth_live_smoke_ok" reasons
+check_required_signal "$require_tdpnd_comet_runtime_smoke_ok" "$tdpnd_comet_runtime_smoke_ok" "$tdpnd_comet_runtime_smoke_status" "tdpnd_comet_runtime_smoke_ok" reasons
 check_required_signal "$require_dual_write_parity_ok" "$dual_write_parity_ok" "$dual_write_parity_status" "dual_write_parity_ok" reasons
 check_required_signal "$require_rollback_path_ready" "$rollback_path_ready_value" "$rollback_path_ready_status" "rollback_path_ready" reasons
 check_required_signal "$require_operator_approval_ok" "$operator_approval_value" "$operator_approval_status" "operator_approval_ok" reasons
@@ -489,6 +508,7 @@ jq -n \
   --argjson require_tdpnd_grpc_runtime_smoke_ok "$require_tdpnd_grpc_runtime_smoke_ok" \
   --argjson require_tdpnd_grpc_live_smoke_ok "$require_tdpnd_grpc_live_smoke_ok" \
   --argjson require_tdpnd_grpc_auth_live_smoke_ok "$require_tdpnd_grpc_auth_live_smoke_ok" \
+  --argjson require_tdpnd_comet_runtime_smoke_ok "$require_tdpnd_comet_runtime_smoke_ok" \
   --argjson require_dual_write_parity_ok "$require_dual_write_parity_ok" \
   --argjson require_rollback_path_ready "$require_rollback_path_ready" \
   --argjson require_operator_approval_ok "$require_operator_approval_ok" \
@@ -497,6 +517,7 @@ jq -n \
   --argjson tdpnd_grpc_runtime_smoke_ok "$tdpnd_grpc_runtime_smoke_ok" \
   --argjson tdpnd_grpc_live_smoke_ok "$tdpnd_grpc_live_smoke_ok" \
   --argjson tdpnd_grpc_auth_live_smoke_ok "$tdpnd_grpc_auth_live_smoke_ok" \
+  --argjson tdpnd_comet_runtime_smoke_ok "$tdpnd_comet_runtime_smoke_ok" \
   --argjson dual_write_parity_ok "$dual_write_parity_ok" \
   --argjson rollback_path_ready "$rollback_path_ready_value" \
   --argjson operator_approval_ok "$operator_approval_value" \
@@ -505,6 +526,7 @@ jq -n \
   --arg tdpnd_grpc_runtime_smoke_status "$tdpnd_grpc_runtime_smoke_status" \
   --arg tdpnd_grpc_live_smoke_status "$tdpnd_grpc_live_smoke_status" \
   --arg tdpnd_grpc_auth_live_smoke_status "$tdpnd_grpc_auth_live_smoke_status" \
+  --arg tdpnd_comet_runtime_smoke_status "$tdpnd_comet_runtime_smoke_status" \
   --arg dual_write_parity_status "$dual_write_parity_status" \
   --arg rollback_path_ready_status "$rollback_path_ready_status" \
   --arg operator_approval_status "$operator_approval_status" \
@@ -513,6 +535,7 @@ jq -n \
   --argjson tdpnd_grpc_runtime_smoke_resolved "$tdpnd_grpc_runtime_smoke_resolved" \
   --argjson tdpnd_grpc_live_smoke_resolved "$tdpnd_grpc_live_smoke_resolved" \
   --argjson tdpnd_grpc_auth_live_smoke_resolved "$tdpnd_grpc_auth_live_smoke_resolved" \
+  --argjson tdpnd_comet_runtime_smoke_resolved "$tdpnd_comet_runtime_smoke_resolved" \
   --argjson dual_write_parity_resolved "$dual_write_parity_resolved" \
   --argjson rollback_path_ready_resolved "$rollback_path_ready_resolved" \
   --argjson operator_approval_resolved "$operator_approval_resolved" \
@@ -521,6 +544,7 @@ jq -n \
   --arg tdpnd_grpc_runtime_smoke_source "$tdpnd_grpc_runtime_smoke_source" \
   --arg tdpnd_grpc_live_smoke_source "$tdpnd_grpc_live_smoke_source" \
   --arg tdpnd_grpc_auth_live_smoke_source "$tdpnd_grpc_auth_live_smoke_source" \
+  --arg tdpnd_comet_runtime_smoke_source "$tdpnd_comet_runtime_smoke_source" \
   --arg dual_write_parity_source "$dual_write_parity_source" \
   --arg rollback_path_ready_source "$rollback_path_ready_source" \
   --arg operator_approval_source "$operator_approval_source" \
@@ -560,6 +584,7 @@ jq -n \
       require_tdpnd_grpc_runtime_smoke_ok: ($require_tdpnd_grpc_runtime_smoke_ok == 1),
       require_tdpnd_grpc_live_smoke_ok: ($require_tdpnd_grpc_live_smoke_ok == 1),
       require_tdpnd_grpc_auth_live_smoke_ok: ($require_tdpnd_grpc_auth_live_smoke_ok == 1),
+      require_tdpnd_comet_runtime_smoke_ok: ($require_tdpnd_comet_runtime_smoke_ok == 1),
       require_dual_write_parity_ok: ($require_dual_write_parity_ok == 1),
       require_rollback_path_ready: ($require_rollback_path_ready == 1),
       require_operator_approval_ok: ($require_operator_approval_ok == 1)
@@ -570,6 +595,7 @@ jq -n \
       tdpnd_grpc_runtime_smoke_ok: $tdpnd_grpc_runtime_smoke_ok,
       tdpnd_grpc_live_smoke_ok: $tdpnd_grpc_live_smoke_ok,
       tdpnd_grpc_auth_live_smoke_ok: $tdpnd_grpc_auth_live_smoke_ok,
+      tdpnd_comet_runtime_smoke_ok: $tdpnd_comet_runtime_smoke_ok,
       dual_write_parity_ok: $dual_write_parity_ok,
       rollback_path_ready: $rollback_path_ready,
       operator_approval_ok: $operator_approval_ok
@@ -609,6 +635,13 @@ jq -n \
         resolved: ($tdpnd_grpc_auth_live_smoke_resolved == 1),
         ok: $tdpnd_grpc_auth_live_smoke_ok,
         source: $tdpnd_grpc_auth_live_smoke_source
+      },
+      tdpnd_comet_runtime_smoke: {
+        enabled: ($require_tdpnd_comet_runtime_smoke_ok == 1),
+        status: $tdpnd_comet_runtime_smoke_status,
+        resolved: ($tdpnd_comet_runtime_smoke_resolved == 1),
+        ok: $tdpnd_comet_runtime_smoke_ok,
+        source: $tdpnd_comet_runtime_smoke_source
       },
       dual_write_parity: {
         enabled: ($require_dual_write_parity_ok == 1),

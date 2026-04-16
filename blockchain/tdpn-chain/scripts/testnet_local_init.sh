@@ -9,6 +9,7 @@ NODE_COUNT=3
 BASE_GRPC_PORT=19090
 BASE_SETTLEMENT_PORT=18080
 HOST="127.0.0.1"
+RUNTIME_MODE="scaffold"
 DRY_RUN=0
 
 usage() {
@@ -21,9 +22,25 @@ Options:
   --base-grpc-port <port>     Base gRPC port; node i uses base+(i-1) (default: 19090)
   --base-settlement-port <p>  Base settlement port; node i uses base+(i-1) (default: 18080)
   --host <addr>               Bind host for generated listen addresses (default: 127.0.0.1)
+  --runtime-mode <mode>       Runtime mode: scaffold or comet (default: scaffold)
   --dry-run                   Print actions without writing files
   -h, --help                  Show help
 EOF
+}
+
+normalize_runtime_mode() {
+  local mode
+  mode="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+  case "$mode" in
+    scaffold|comet)
+      printf '%s' "$mode"
+      ;;
+    *)
+      echo "--runtime-mode must be scaffold or comet (got: $1)" >&2
+      usage
+      exit 2
+      ;;
+  esac
 }
 
 need_value() {
@@ -63,6 +80,11 @@ while [[ $# -gt 0 ]]; do
       HOST="$2"
       shift 2
       ;;
+    --runtime-mode)
+      need_value "$1" "${2:-}"
+      RUNTIME_MODE="$(normalize_runtime_mode "$2")"
+      shift 2
+      ;;
     --dry-run)
       DRY_RUN=1
       shift
@@ -100,6 +122,16 @@ if (( BASE_SETTLEMENT_PORT + NODE_COUNT - 1 > 65535 )); then
   echo "settlement port range exceeds 65535 for node-count=${NODE_COUNT}" >&2
   exit 2
 fi
+if (( BASE_GRPC_PORT + (2 * NODE_COUNT) - 1 > 65535 )); then
+  echo "comet p2p port range exceeds 65535 for node-count=${NODE_COUNT}" >&2
+  exit 2
+fi
+if (( BASE_SETTLEMENT_PORT + (2 * NODE_COUNT) - 1 > 65535 )); then
+  echo "comet rpc port range exceeds 65535 for node-count=${NODE_COUNT}" >&2
+  exit 2
+fi
+
+RUNTIME_MODE="$(normalize_runtime_mode "$RUNTIME_MODE")"
 
 MANIFEST="$TESTNET_DIR/manifest.env"
 
@@ -114,6 +146,7 @@ NODE_COUNT=$NODE_COUNT
 BASE_GRPC_PORT=$BASE_GRPC_PORT
 BASE_SETTLEMENT_PORT=$BASE_SETTLEMENT_PORT
 HOST=$HOST
+RUNTIME_MODE=$RUNTIME_MODE
 EOF
 fi
 
@@ -121,28 +154,54 @@ for i in $(seq 1 "$NODE_COUNT"); do
   NODE_DIR="$TESTNET_DIR/node${i}"
   GRPC_PORT=$((BASE_GRPC_PORT + i - 1))
   SETTLEMENT_PORT=$((BASE_SETTLEMENT_PORT + i - 1))
+  COMET_P2P_PORT=$((BASE_GRPC_PORT + NODE_COUNT + i - 1))
+  COMET_RPC_PORT=$((BASE_SETTLEMENT_PORT + NODE_COUNT + i - 1))
   STATE_DIR="$NODE_DIR/state"
+  COMET_HOME_DIR="$NODE_DIR/comet-home"
   LOG_FILE="$NODE_DIR/tdpnd.log"
   PID_FILE="$NODE_DIR/tdpnd.pid"
   CONFIG_FILE="$NODE_DIR/node.env"
 
   if [[ "$DRY_RUN" == "1" ]]; then
     echo "[dry-run] mkdir -p \"$STATE_DIR\""
+    if [[ "$RUNTIME_MODE" == "comet" ]]; then
+      echo "[dry-run] mkdir -p \"$COMET_HOME_DIR\""
+    fi
     echo "[dry-run] rm -f \"$PID_FILE\""
     echo "[dry-run] write $CONFIG_FILE"
   else
     mkdir -p "$STATE_DIR"
+    if [[ "$RUNTIME_MODE" == "comet" ]]; then
+      mkdir -p "$COMET_HOME_DIR"
+    fi
     rm -f "$PID_FILE"
-    cat > "$CONFIG_FILE" <<EOF
+    {
+      cat <<EOF
 NODE_ID=node${i}
 NODE_INDEX=$i
 NODE_DIR=$NODE_DIR
+RUNTIME_MODE=$RUNTIME_MODE
 GRPC_LISTEN=$HOST:$GRPC_PORT
 SETTLEMENT_HTTP_LISTEN=$HOST:$SETTLEMENT_PORT
+EOF
+      if [[ "$RUNTIME_MODE" == "comet" ]]; then
+        cat <<EOF
+COMET_P2P_LISTEN=tcp://$HOST:$COMET_P2P_PORT
+COMET_RPC_LISTEN=tcp://$HOST:$COMET_RPC_PORT
+COMET_PROXY_APP=tdpn-local-${i}
 STATE_DIR=$STATE_DIR
+COMET_HOME_DIR=$COMET_HOME_DIR
+EOF
+      else
+        cat <<EOF
+STATE_DIR=$STATE_DIR
+EOF
+      fi
+      cat <<EOF
 LOG_FILE=$LOG_FILE
 PID_FILE=$PID_FILE
 EOF
+    } > "$CONFIG_FILE"
   fi
 done
 
