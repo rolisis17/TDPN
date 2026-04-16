@@ -30,6 +30,11 @@ PARTIAL_SUMMARY="$TMP_DIR/metrics_partial_summary.json"
 PARTIAL_CANONICAL="$TMP_DIR/metrics_partial_canonical.json"
 PARTIAL_LOG="$TMP_DIR/partial.log"
 
+SOURCE_JSON="$TMP_DIR/metrics_source.json"
+SOURCE_SUMMARY="$TMP_DIR/metrics_source_summary.json"
+SOURCE_CANONICAL="$TMP_DIR/metrics_source_canonical.json"
+SOURCE_LOG="$TMP_DIR/source.log"
+
 echo "[blockchain-mainnet-activation-metrics] help surface"
 "$SCRIPT_UNDER_TEST" --help >"$HELP_LOG" 2>&1
 if ! grep -Fq "Usage:" "$HELP_LOG"; then
@@ -191,6 +196,117 @@ fi
 if ! grep -Fq '[blockchain-mainnet-activation-metrics] invalid_metrics=' "$PARTIAL_LOG"; then
   echo "partial log missing invalid_metrics line"
   cat "$PARTIAL_LOG"
+  exit 1
+fi
+
+echo "[blockchain-mainnet-activation-metrics] source-json autopopulation and precedence path"
+cat >"$SOURCE_JSON" <<'EOF_SOURCE'
+{
+  "pipeline": {
+    "window": {
+      "measurement_window_weeks": 12
+    },
+    "vpn": {
+      "slo": {
+        "vpn_connect_session_success_slo_pct": 99.71,
+        "vpn_recovery_mttr_p95_minutes": 23
+      }
+    }
+  },
+  "demand": {
+    "paying_users_3mo_min": 1410,
+    "paid_sessions_per_day_30d_avg": 13200
+  },
+  "validator": {
+    "supply": {
+      "validator_candidate_depth": 37,
+      "validator_independent_operators": 13
+    },
+    "concentration": {
+      "validator_max_operator_seat_share_pct": 19,
+      "validator_max_asn_provider_seat_share_pct": 25
+    },
+    "geo": {
+      "validator_region_count": 5,
+      "validator_country_count": 9
+    }
+  },
+  "governance": {
+    "manual_sanctions_reversed_pct_90d": 3.9,
+    "abuse_report_to_decision_p95_hours": 10
+  },
+  "economics": {
+    "subsidy_runway_months": 16,
+    "contribution_margin_3mo": 0.75
+  }
+}
+EOF_SOURCE
+
+set +e
+BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_VALIDATOR_REGION_COUNT=7 \
+  "$SCRIPT_UNDER_TEST" \
+    --source-json "$SOURCE_JSON" \
+    --paying-users-3mo-min 1777 \
+    --summary-json "$SOURCE_SUMMARY" \
+    --canonical-summary-json "$SOURCE_CANONICAL" \
+    --print-summary-json 0 >"$SOURCE_LOG" 2>&1
+source_rc=$?
+set -e
+
+if [[ "$source_rc" -ne 0 ]]; then
+  echo "expected source-json path to remain fail-soft (exit 0)"
+  cat "$SOURCE_LOG"
+  exit 1
+fi
+
+if ! jq -e \
+  --arg expected_source "$SOURCE_JSON" \
+  --arg expected_summary "$SOURCE_SUMMARY" \
+  --arg expected_canonical "$SOURCE_CANONICAL" \
+  '
+  .status == "complete"
+  and .rc == 0
+  and .ready_for_gate == true
+  and .counts.required == 14
+  and .counts.provided == 14
+  and .counts.missing == 0
+  and .counts.invalid == 0
+  and .measurement_window_weeks == 12
+  and .vpn_connect_session_success_slo_pct == 99.71
+  and .vpn_recovery_mttr_p95_minutes == 23
+  and .paying_users_3mo_min == 1777
+  and .validator_region_count == 7
+  and .validator_country_count == 9
+  and .sources.metrics.vpn_connect_session_success_slo_pct == "source_json"
+  and .sources.metrics.paying_users_3mo_min == "cli"
+  and .sources.metrics.validator_region_count == "env"
+  and ((.sources.source_jsons // []) | index($expected_source)) != null
+  and ((.sources.usable_source_jsons // []) | index($expected_source)) != null
+  and .artifacts.summary_json == $expected_summary
+  and .artifacts.canonical_summary_json == $expected_canonical
+  and .metrics.paying_users_3mo_min == 1777
+  and .metrics.validator_region_count == 7
+' "$SOURCE_SUMMARY" >/dev/null; then
+  echo "source-json metrics contract mismatch"
+  cat "$SOURCE_SUMMARY"
+  cat "$SOURCE_LOG"
+  exit 1
+fi
+
+if [[ ! -f "$SOURCE_CANONICAL" ]]; then
+  echo "source-json canonical metrics output missing"
+  cat "$SOURCE_LOG"
+  exit 1
+fi
+if ! cmp -s "$SOURCE_SUMMARY" "$SOURCE_CANONICAL"; then
+  echo "source-json summary/canonical mismatch"
+  cat "$SOURCE_SUMMARY"
+  cat "$SOURCE_CANONICAL"
+  exit 1
+fi
+if ! grep -Fq '[blockchain-mainnet-activation-metrics] status=complete' "$SOURCE_LOG"; then
+  echo "source-json log missing status line"
+  cat "$SOURCE_LOG"
   exit 1
 fi
 

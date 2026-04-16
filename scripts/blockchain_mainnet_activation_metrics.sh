@@ -10,6 +10,7 @@ Usage:
   ./scripts/blockchain_mainnet_activation_metrics.sh \
     [--summary-json PATH] \
     [--canonical-summary-json PATH] \
+    [--source-json PATH] \
     [--print-summary-json [0|1]] \
     [--measurement-window-weeks N] \
     [--vpn-connect-session-success-slo-pct N] \
@@ -34,6 +35,10 @@ Purpose:
 Notes:
   - Required gate metrics default to null when omitted.
   - Missing/partial inputs are fail-soft: script exits 0 and reports coverage.
+  - `--source-json PATH` is repeatable and accepts source artifacts for
+    auto-population of missing metrics.
+  - Source artifact fallback env:
+      BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_SOURCE_JSONS=path1.json,path2.json
   - Each metric can also be set via environment variable:
       BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_<UPPER_SNAKE_CASE_METRIC_NAME>
     Example:
@@ -85,7 +90,7 @@ bool_arg_or_die() {
 numeric_text_or_empty() {
   local raw
   raw="$(trim "${1:-}")"
-  if [[ "$raw" =~ ^-?[0-9]+([.][0-9]+)?$ ]]; then
+  if [[ "$raw" =~ ^-?[0-9]+([.][0-9]+)?([eE][+-]?[0-9]+)?$ ]]; then
     printf '%s' "$raw"
   else
     printf '%s' ""
@@ -115,14 +120,51 @@ assign_metric_value() {
   metric_source["$key"]="$source"
 }
 
+metric_locked_by_user() {
+  local source="${1:-}"
+  if [[ "$source" == env* || "$source" == cli* ]]; then
+    return 0
+  fi
+  return 1
+}
+
+extract_metric_from_source_json() {
+  local source_json="$1"
+  local key="$2"
+  local raw=""
+  local numeric=""
+
+  if [[ -z "$source_json" || ! -f "$source_json" ]]; then
+    printf '%s' ""
+    return
+  fi
+
+  raw="$(jq -r --arg key "$key" '
+    limit(1;
+      (
+        (.[$key] | select(type == "number")),
+        (.. | objects | .[$key]? | select(type == "number"))
+      )
+    )
+  ' "$source_json" 2>/dev/null || true)"
+  numeric="$(numeric_text_or_empty "$raw")"
+  printf '%s' "$numeric"
+}
+
 need_cmd jq
 need_cmd cp
 
 summary_json="${BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_SUMMARY_JSON:-}"
 canonical_summary_json="${BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_CANONICAL_SUMMARY_JSON:-$ROOT_DIR/.easy-node-logs/blockchain_mainnet_activation_metrics.json}"
 print_summary_json="${BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_PRINT_SUMMARY_JSON:-0}"
+source_jsons_env_csv="${BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_SOURCE_JSONS:-}"
 summary_json_source="env"
 canonical_summary_json_source="env"
+
+declare -a source_jsons_cli=()
+declare -a source_jsons_env=()
+declare -a source_jsons=()
+declare -a usable_source_jsons=()
 
 if [[ -z "$(trim "$summary_json")" ]]; then
   summary_json="$ROOT_DIR/.easy-node-logs/blockchain_mainnet_activation_metrics_summary.json"
@@ -192,6 +234,16 @@ for key in "${metric_keys[@]}"; do
   fi
 done
 
+if [[ -n "$(trim "$source_jsons_env_csv")" ]]; then
+  IFS=',' read -r -a source_jsons_env_raw <<<"$source_jsons_env_csv"
+  for source_json in "${source_jsons_env_raw[@]}"; do
+    source_json="$(trim "$source_json")"
+    if [[ -n "$source_json" ]]; then
+      source_jsons_env+=("$source_json")
+    fi
+  done
+fi
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --summary-json|--metrics-json)
@@ -212,6 +264,10 @@ while [[ $# -gt 0 ]]; do
         print_summary_json="1"
         shift
       fi
+      ;;
+    --source-json)
+      source_jsons_cli+=("${2:-}")
+      shift 2
       ;;
     -h|--help|help)
       usage
@@ -239,10 +295,51 @@ done
 
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
 
+if ((${#source_jsons_cli[@]} > 0)); then
+  source_jsons=("${source_jsons_cli[@]}")
+else
+  source_jsons=("${source_jsons_env[@]}")
+fi
+
+if ((${#source_jsons[@]} > 0)); then
+  declare -a source_jsons_abs=()
+  for source_json in "${source_jsons[@]}"; do
+    source_json="$(trim "$source_json")"
+    if [[ -n "$source_json" ]]; then
+      source_jsons_abs+=("$(abs_path "$source_json")")
+    fi
+  done
+  source_jsons=("${source_jsons_abs[@]}")
+fi
+
 summary_json="$(abs_path "$summary_json")"
 canonical_summary_json="$(abs_path "$canonical_summary_json")"
 mkdir -p "$(dirname "$summary_json")"
 mkdir -p "$(dirname "$canonical_summary_json")"
+
+for source_json in "${source_jsons[@]}"; do
+  if [[ ! -f "$source_json" ]]; then
+    continue
+  fi
+  if ! jq -e . "$source_json" >/dev/null 2>&1; then
+    continue
+  fi
+  usable_source_jsons+=("$source_json")
+  for key in "${metric_keys[@]}"; do
+    if metric_locked_by_user "${metric_source[$key]}"; then
+      continue
+    fi
+    if [[ -n "$(trim "${metric_raw[$key]}")" ]]; then
+      continue
+    fi
+    extracted_value="$(extract_metric_from_source_json "$source_json" "$key")"
+    if [[ -z "$extracted_value" ]]; then
+      continue
+    fi
+    metric_raw["$key"]="$extracted_value"
+    metric_source["$key"]="source_json"
+  done
+done
 
 declare -a required_missing_metrics=()
 declare -a required_provided_metrics=()
@@ -312,6 +409,8 @@ optional_metric_keys_json="$(array_to_json optional_metric_keys)"
 required_missing_metrics_json="$(array_to_json required_missing_metrics)"
 required_provided_metrics_json="$(array_to_json required_provided_metrics)"
 invalid_metrics_json="$(array_to_json invalid_metrics)"
+source_jsons_json="$(array_to_json source_jsons)"
+usable_source_jsons_json="$(array_to_json usable_source_jsons)"
 
 metrics_values_json='{}'
 sources_metrics_json='{}'
@@ -351,6 +450,8 @@ jq -n \
   --arg canonical_summary_json "$canonical_summary_json" \
   --arg summary_json_source "$summary_json_source" \
   --arg canonical_summary_json_source "$canonical_summary_json_source" \
+  --argjson source_jsons "$source_jsons_json" \
+  --argjson usable_source_jsons "$usable_source_jsons_json" \
   --argjson sources_metrics "$sources_metrics_json" \
   --argjson metrics_values "$metrics_values_json" \
   '{
@@ -373,6 +474,8 @@ jq -n \
     sources: {
       summary_json: $summary_json_source,
       canonical_summary_json: $canonical_summary_json_source,
+      source_jsons: $source_jsons,
+      usable_source_jsons: $usable_source_jsons,
       metrics: $sources_metrics
     },
     metrics: $metrics_values,

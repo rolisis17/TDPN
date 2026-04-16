@@ -265,6 +265,10 @@ check_blockchain_fastlane_activation_gate_surface() {
     "blockchain_mainnet_activation_metrics" \
     "scripts/blockchain_mainnet_activation_metrics.sh" \
     "scripts/integration_blockchain_mainnet_activation_metrics.sh" \
+    "--blockchain-mainnet-activation-metrics-source-json" \
+    "BLOCKCHAIN_FASTLANE_BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_SOURCE_JSONS" \
+    "inputs.blockchain_mainnet_activation_metrics_source_jsons" \
+    "artifacts.blockchain_mainnet_activation_metrics_source_jsons" \
     "mainnet activation gate" \
     "scripts/blockchain_mainnet_activation_gate.sh" \
     "scripts/integration_blockchain_mainnet_activation_gate.sh" \
@@ -3492,8 +3496,32 @@ if ! rg -Fq -- "--blockchain-mainnet-activation-gate-summary-json" "$blockchain_
   echo "blockchain fastlane script must expose --blockchain-mainnet-activation-gate-summary-json deterministic gate summary input"
   exit 1
 fi
+if ! rg -Fq -- "--blockchain-mainnet-activation-metrics-source-json" "$blockchain_fastlane_script"; then
+  echo "blockchain fastlane script must expose --blockchain-mainnet-activation-metrics-source-json deterministic metrics-source input"
+  exit 1
+fi
+if ! rg -Fq "BLOCKCHAIN_FASTLANE_BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_SOURCE_JSONS" "$blockchain_fastlane_script"; then
+  echo "blockchain fastlane script must expose BLOCKCHAIN_FASTLANE_BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_SOURCE_JSONS deterministic metrics-source env input"
+  exit 1
+fi
+if ! rg -Fq -- "--source-json" "$blockchain_fastlane_script"; then
+  echo "blockchain fastlane script must forward metrics-source artifacts via --source-json stage args"
+  exit 1
+fi
 if ! rg -Fq "BLOCKCHAIN_FASTLANE_BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SUMMARY_JSON" "$blockchain_fastlane_script"; then
   echo "blockchain fastlane script must expose BLOCKCHAIN_FASTLANE_BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SUMMARY_JSON deterministic gate summary env input"
+  exit 1
+fi
+if ! rg -Fq "inputs.blockchain_mainnet_activation_metrics_source_jsons" "$blockchain_fastlane_integration_script"; then
+  echo "integration blockchain fastlane script must validate inputs.blockchain_mainnet_activation_metrics_source_jsons contract"
+  exit 1
+fi
+if ! rg -Fq "artifacts.blockchain_mainnet_activation_metrics_source_jsons" "$blockchain_fastlane_integration_script"; then
+  echo "integration blockchain fastlane script must validate artifacts.blockchain_mainnet_activation_metrics_source_jsons contract"
+  exit 1
+fi
+if ! rg -Fq -- "--source-json" "$blockchain_fastlane_integration_script"; then
+  echo "integration blockchain fastlane script must validate metrics-source forwarding via --source-json"
   exit 1
 fi
 if ! rg -Fq "inputs.blockchain_mainnet_activation_gate_summary_json" "$blockchain_fastlane_integration_script"; then

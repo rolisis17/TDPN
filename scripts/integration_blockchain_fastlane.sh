@@ -49,6 +49,7 @@ FAIL_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_fail.json"
 SUCCESS_METRICS_JSON="$SUCCESS_REPORTS_DIR/blockchain_mainnet_activation_metrics.json"
 SUCCESS_GATE_SUMMARY_JSON="$SUCCESS_REPORTS_DIR/blockchain_mainnet_activation_gate_summary.json"
 SAME_PATH_GATE_SUMMARY_JSON="$SAME_PATH_REPORTS_DIR/blockchain_mainnet_activation_gate_summary.json"
+DEFAULT_SOURCE_JSON_PHASE5="$ROOT_DIR/.easy-node-logs/phase5_settlement_layer_handoff_check_summary.json"
 
 STAGE_ENV_NAMES=(
   "BLOCKCHAIN_FASTLANE_CI_PHASE5_SETTLEMENT_LAYER_SCRIPT"
@@ -242,13 +243,14 @@ BLOCKCHAIN_FASTLANE_CANONICAL_SUMMARY_JSON="$SUCCESS_CANONICAL_SUMMARY_JSON" \
 assert_stage_order "$CAPTURE" "${STAGE_IDS[@]}"
 assert_stage_invocation_contains "$CAPTURE" "blockchain_mainnet_activation_gate" "--metrics-json" "$SUCCESS_METRICS_JSON"
 assert_stage_invocation_contains "$CAPTURE" "blockchain_mainnet_activation_gate" "--summary-json" "$SUCCESS_GATE_SUMMARY_JSON"
+assert_stage_invocation_contains "$CAPTURE" "blockchain_mainnet_activation_metrics" "--source-json" "$DEFAULT_SOURCE_JSON_PHASE5"
 
 if [[ ! -f "$SUCCESS_SUMMARY_JSON" ]]; then
   echo "missing success summary json: $SUCCESS_SUMMARY_JSON"
   cat "$SUCCESS_LOG"
   exit 1
 fi
-if ! jq -e --arg gate_summary "$SUCCESS_GATE_SUMMARY_JSON" '
+if ! jq -e --arg gate_summary "$SUCCESS_GATE_SUMMARY_JSON" --arg default_source "$DEFAULT_SOURCE_JSON_PHASE5" '
   .status == "pass"
   and .rc == 0
   and .schema.id == "blockchain_fastlane_summary"
@@ -260,14 +262,19 @@ if ! jq -e --arg gate_summary "$SUCCESS_GATE_SUMMARY_JSON" '
   and .inputs.run_ci_phase6_cosmos_l1_contracts == true
   and .inputs.run_ci_phase7_mainnet_cutover == true
   and .inputs.run_blockchain_mainnet_activation_metrics == true
+  and ((.inputs.blockchain_mainnet_activation_metrics_source_jsons | type) == "array")
+  and ((.inputs.blockchain_mainnet_activation_metrics_source_jsons | length) > 0)
+  and ((.inputs.blockchain_mainnet_activation_metrics_source_jsons | index($default_source)) != null)
   and .inputs.run_blockchain_mainnet_activation_gate == true
   and (.steps | to_entries | all(.value.enabled == true and .value.status == "pass" and .value.rc == 0 and .value.command != null))
   and .steps.blockchain_mainnet_activation_metrics.enabled == true
   and .steps.blockchain_mainnet_activation_metrics.status == "pass"
   and .steps.blockchain_mainnet_activation_metrics.rc == 0
+  and .steps.blockchain_mainnet_activation_metrics.artifacts.source_jsons == .inputs.blockchain_mainnet_activation_metrics_source_jsons
   and .steps.blockchain_mainnet_activation_gate.enabled == true
   and .steps.blockchain_mainnet_activation_gate.status == "pass"
   and .steps.blockchain_mainnet_activation_gate.rc == 0
+  and .artifacts.blockchain_mainnet_activation_metrics_source_jsons == .inputs.blockchain_mainnet_activation_metrics_source_jsons
   and .inputs.blockchain_mainnet_activation_gate_summary_json == $gate_summary
   and .artifacts.blockchain_mainnet_activation_gate_summary_json == $gate_summary
   and .steps.blockchain_mainnet_activation_gate.artifacts.summary_json == $gate_summary

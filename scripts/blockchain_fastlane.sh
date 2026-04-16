@@ -19,6 +19,7 @@ Usage:
     [--run-blockchain-mainnet-activation-metrics [0|1]] \
     [--blockchain-mainnet-activation-metrics-json PATH] \
     [--blockchain-mainnet-activation-metrics-summary-json PATH] \
+    [--blockchain-mainnet-activation-metrics-source-json PATH] \
     [--run-blockchain-mainnet-activation-gate [0|1]] \
     [--blockchain-mainnet-activation-gate-summary-json PATH]
 
@@ -81,6 +82,45 @@ print_cmd() {
   printf '\n'
 }
 
+array_to_json() {
+  local -n arr_ref=$1
+  if ((${#arr_ref[@]} == 0)); then
+    printf '%s' "[]"
+    return
+  fi
+  printf '%s\n' "${arr_ref[@]}" | jq -R 'select(length > 0)' | jq -s .
+}
+
+append_unique_abs_path() {
+  local -n arr_ref=$1
+  local candidate_abs
+  local existing=""
+  candidate_abs="$(abs_path "${2:-}")"
+  if [[ -z "$candidate_abs" ]]; then
+    return
+  fi
+  for existing in "${arr_ref[@]}"; do
+    if [[ "$existing" == "$candidate_abs" ]]; then
+      return
+    fi
+  done
+  arr_ref+=("$candidate_abs")
+}
+
+append_csv_abs_paths_unique() {
+  local csv="${1:-}"
+  local -n arr_ref=$2
+  local old_ifs="$IFS"
+  local part=""
+  local parts=()
+  IFS=','
+  read -r -a parts <<<"$csv"
+  IFS="$old_ifs"
+  for part in "${parts[@]}"; do
+    append_unique_abs_path arr_ref "$part"
+  done
+}
+
 run_step() {
   local label="$1"
   shift
@@ -115,8 +155,14 @@ run_ci_phase7_mainnet_cutover="${BLOCKCHAIN_FASTLANE_RUN_CI_PHASE7_MAINNET_CUTOV
 run_blockchain_mainnet_activation_metrics="${BLOCKCHAIN_FASTLANE_RUN_BLOCKCHAIN_MAINNET_ACTIVATION_METRICS:-0}"
 blockchain_mainnet_activation_metrics_json="${BLOCKCHAIN_FASTLANE_BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_JSON:-}"
 blockchain_mainnet_activation_metrics_summary_json="${BLOCKCHAIN_FASTLANE_BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_SUMMARY_JSON:-}"
+blockchain_mainnet_activation_metrics_source_jsons_csv="${BLOCKCHAIN_FASTLANE_BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_SOURCE_JSONS:-}"
 run_blockchain_mainnet_activation_gate="${BLOCKCHAIN_FASTLANE_RUN_BLOCKCHAIN_MAINNET_ACTIVATION_GATE:-1}"
 blockchain_mainnet_activation_gate_summary_json="${BLOCKCHAIN_FASTLANE_BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SUMMARY_JSON:-}"
+declare -a blockchain_mainnet_activation_metrics_source_jsons=()
+
+if [[ -n "$(trim "$blockchain_mainnet_activation_metrics_source_jsons_csv")" ]]; then
+  append_csv_abs_paths_unique "$blockchain_mainnet_activation_metrics_source_jsons_csv" blockchain_mainnet_activation_metrics_source_jsons
+fi
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -197,6 +243,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --blockchain-mainnet-activation-metrics-summary-json)
       blockchain_mainnet_activation_metrics_summary_json="${2:-}"
+      shift 2
+      ;;
+    --blockchain-mainnet-activation-metrics-source-json)
+      append_unique_abs_path blockchain_mainnet_activation_metrics_source_jsons "${2:-}"
       shift 2
       ;;
     --run-blockchain-mainnet-activation-gate)
@@ -297,6 +347,12 @@ fi
 if [[ -n "$blockchain_mainnet_activation_metrics_summary_json" ]]; then
   blockchain_mainnet_activation_metrics_summary_json="$(abs_path "$blockchain_mainnet_activation_metrics_summary_json")"
 fi
+if [[ "$run_blockchain_mainnet_activation_metrics" == "1" && ${#blockchain_mainnet_activation_metrics_source_jsons[@]} -eq 0 ]]; then
+  append_unique_abs_path blockchain_mainnet_activation_metrics_source_jsons "$ROOT_DIR/.easy-node-logs/phase5_settlement_layer_handoff_check_summary.json"
+  append_unique_abs_path blockchain_mainnet_activation_metrics_source_jsons "$ROOT_DIR/.easy-node-logs/phase6_cosmos_l1_build_testnet_handoff_check_summary.json"
+  append_unique_abs_path blockchain_mainnet_activation_metrics_source_jsons "$ROOT_DIR/.easy-node-logs/phase7_mainnet_cutover_summary_report.json"
+  append_unique_abs_path blockchain_mainnet_activation_metrics_source_jsons "$ROOT_DIR/.easy-node-logs/roadmap_progress_summary.json"
+fi
 if [[ -z "$blockchain_mainnet_activation_gate_summary_json" && "$run_blockchain_mainnet_activation_gate" == "1" ]]; then
   blockchain_mainnet_activation_gate_summary_json="$reports_dir/blockchain_mainnet_activation_gate_summary.json"
 fi
@@ -317,6 +373,8 @@ fi
 if [[ -n "$blockchain_mainnet_activation_gate_summary_json" ]]; then
   mkdir -p "$(dirname "$blockchain_mainnet_activation_gate_summary_json")"
 fi
+
+blockchain_mainnet_activation_metrics_source_jsons_json="$(array_to_json blockchain_mainnet_activation_metrics_source_jsons)"
 
 declare -A stage_status
 declare -A stage_rc
@@ -343,6 +401,9 @@ for stage_id in "${stage_ids[@]}"; do
       if [[ -n "$blockchain_mainnet_activation_metrics_summary_json" ]]; then
         stage_args+=(--summary-json "$blockchain_mainnet_activation_metrics_summary_json")
       fi
+      for source_json in "${blockchain_mainnet_activation_metrics_source_jsons[@]}"; do
+        stage_args+=(--source-json "$source_json")
+      done
       stage_args+=(--print-summary-json 0)
       ;;
     "blockchain_mainnet_activation_gate")
@@ -391,9 +452,11 @@ for stage_id in "${stage_ids[@]}"; do
         jq -n \
           --arg metrics_json "$blockchain_mainnet_activation_metrics_json" \
           --arg summary_json "$blockchain_mainnet_activation_metrics_summary_json" \
+          --argjson source_jsons "$blockchain_mainnet_activation_metrics_source_jsons_json" \
           '{
             metrics_json: (if $metrics_json == "" then null else $metrics_json end),
-            summary_json: (if $summary_json == "" then null else $summary_json end)
+            summary_json: (if $summary_json == "" then null else $summary_json end),
+            source_jsons: $source_jsons
           }'
       )"
       ;;
@@ -453,6 +516,7 @@ jq -n \
   --arg run_blockchain_mainnet_activation_metrics "$run_blockchain_mainnet_activation_metrics" \
   --arg blockchain_mainnet_activation_metrics_json "$blockchain_mainnet_activation_metrics_json" \
   --arg blockchain_mainnet_activation_metrics_summary_json "$blockchain_mainnet_activation_metrics_summary_json" \
+  --argjson blockchain_mainnet_activation_metrics_source_jsons "$blockchain_mainnet_activation_metrics_source_jsons_json" \
   --arg run_blockchain_mainnet_activation_gate "$run_blockchain_mainnet_activation_gate" \
   --arg blockchain_mainnet_activation_gate_summary_json "$blockchain_mainnet_activation_gate_summary_json" \
   --argjson steps "$steps_json" \
@@ -476,6 +540,7 @@ jq -n \
       run_blockchain_mainnet_activation_metrics: ($run_blockchain_mainnet_activation_metrics == "1"),
       blockchain_mainnet_activation_metrics_json: (if $blockchain_mainnet_activation_metrics_json == "" then null else $blockchain_mainnet_activation_metrics_json end),
       blockchain_mainnet_activation_metrics_summary_json: (if $blockchain_mainnet_activation_metrics_summary_json == "" then null else $blockchain_mainnet_activation_metrics_summary_json end),
+      blockchain_mainnet_activation_metrics_source_jsons: $blockchain_mainnet_activation_metrics_source_jsons,
       run_blockchain_mainnet_activation_gate: ($run_blockchain_mainnet_activation_gate == "1"),
       blockchain_mainnet_activation_gate_summary_json: (if $blockchain_mainnet_activation_gate_summary_json == "" then null else $blockchain_mainnet_activation_gate_summary_json end)
     },
@@ -486,6 +551,7 @@ jq -n \
       canonical_summary_json: $canonical_summary_json,
       blockchain_mainnet_activation_metrics_json: (if $blockchain_mainnet_activation_metrics_json == "" then null else $blockchain_mainnet_activation_metrics_json end),
       blockchain_mainnet_activation_metrics_summary_json: (if $blockchain_mainnet_activation_metrics_summary_json == "" then null else $blockchain_mainnet_activation_metrics_summary_json end),
+      blockchain_mainnet_activation_metrics_source_jsons: $blockchain_mainnet_activation_metrics_source_jsons,
       blockchain_mainnet_activation_gate_summary_json: (if $blockchain_mainnet_activation_gate_summary_json == "" then null else $blockchain_mainnet_activation_gate_summary_json end)
     }
   }' >"$summary_tmp"
