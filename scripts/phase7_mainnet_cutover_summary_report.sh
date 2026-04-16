@@ -30,8 +30,10 @@ Notes:
   - If one or more summary paths are explicitly provided, only those are
     evaluated.
   - Optional input signals are preserved as-is in the combined output, including
-    `tdpnd_comet_runtime_smoke_ok` and `mainnet_activation_gate_go` when the
-    underlying phase7 summaries expose them.
+    `module_tx_surface(_ok)`, `tdpnd_grpc_live_smoke(_ok)`,
+    `tdpnd_grpc_auth_live_smoke(_ok)`, `tdpnd_comet_runtime_smoke_ok`, and
+    `mainnet_activation_gate_go` when the underlying phase7 summaries expose
+    them.
   - Exit codes:
       0: pass (at least one configured summary passed and none failed/invalid)
       1: fail or missing-only
@@ -545,6 +547,9 @@ jq -n \
       handoff_run: $handoff_run
     },
     signals: {
+      module_tx_surface_ok: resolve_signal_by_stage_priority([$check, $run, $handoff_check, $handoff_run]; ["module_tx_surface_ok", "module_tx_surface"]),
+      tdpnd_grpc_live_smoke_ok: resolve_signal_by_stage_priority([$check, $run, $handoff_check, $handoff_run]; ["tdpnd_grpc_live_smoke_ok", "tdpnd_grpc_live_smoke"]),
+      tdpnd_grpc_auth_live_smoke_ok: resolve_signal_by_stage_priority([$check, $run, $handoff_check, $handoff_run]; ["tdpnd_grpc_auth_live_smoke_ok", "tdpnd_grpc_auth_live_smoke"]),
       cosmos_module_coverage_floor_ok: resolve_signal_by_stage_priority([$check, $run, $handoff_check, $handoff_run]; ["cosmos_module_coverage_floor_ok", "cosmos_module_coverage_floor"]),
       cosmos_keeper_coverage_floor_ok: resolve_signal_by_stage_priority([$check, $run, $handoff_check, $handoff_run]; ["cosmos_keeper_coverage_floor_ok", "cosmos_keeper_coverage_floor"]),
       cosmos_app_coverage_floor_ok: resolve_signal_by_stage_priority([$check, $run, $handoff_check, $handoff_run]; ["cosmos_app_coverage_floor_ok", "cosmos_app_coverage_floor"]),

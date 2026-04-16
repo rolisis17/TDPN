@@ -348,6 +348,7 @@ cat >"$PHASE7_REAL_CHECK" <<'EOF_PHASE7_REAL_CHECK'
   "rc": 0,
   "signals": {
     "module_tx_surface_ok": true,
+    "tdpnd_grpc_live_smoke_ok": true,
     "tdpnd_grpc_auth_live_smoke_ok": true,
     "tdpnd_comet_runtime_smoke_ok": true,
     "rollback_path_ready": true,
@@ -370,6 +371,7 @@ cat >"$PHASE7_REAL_RUN" <<'EOF_PHASE7_REAL_RUN'
     "phase7_mainnet_cutover_check": {
       "signal_snapshot": {
         "module_tx_surface_ok": true,
+        "tdpnd_grpc_live_smoke_ok": true,
         "tdpnd_grpc_auth_live_smoke_ok": true,
         "tdpnd_comet_runtime_smoke_ok": true,
         "dual_write_parity_ok": true,
@@ -383,6 +385,7 @@ EOF_PHASE7_REAL_RUN
 
 if ! jq -e '
   .signals.module_tx_surface_ok == true
+  and .signals.tdpnd_grpc_live_smoke_ok == true
   and .signals.tdpnd_grpc_auth_live_smoke_ok == true
   and .signals.rollback_path_ready == true
   and .signals.operator_approval_ok == true
@@ -393,6 +396,7 @@ if ! jq -e '
 fi
 if ! jq -e '
   .steps.phase7_mainnet_cutover_check.signal_snapshot.module_tx_surface_ok == true
+  and .steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_grpc_live_smoke_ok == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_grpc_auth_live_smoke_ok == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.dual_write_parity_ok == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.rollback_path_ready == true
@@ -434,12 +438,16 @@ if ! jq -e \
   and .summaries.check.source_path == $expected_check
   and .summaries.check.raw_status == "pass"
   and .summaries.check.raw_rc == 0
+  and .signals.tdpnd_grpc_live_smoke_ok == true
+  and .signals.tdpnd_comet_runtime_smoke_ok == true
+  and .summaries.check.signal_snapshot.tdpnd_grpc_live_smoke_ok == true
   and .summaries.check.signal_snapshot.tdpnd_comet_runtime_smoke_ok == true
   and .summaries.run.status == "pass"
   and .summaries.run.source_kind == "explicit"
   and .summaries.run.source_path == $expected_run
   and .summaries.run.raw_status == "pass"
   and .summaries.run.raw_rc == 0
+  and .summaries.run.signal_snapshot.tdpnd_grpc_live_smoke_ok == true
   and .summaries.run.signal_snapshot.tdpnd_comet_runtime_smoke_ok == true
   and .decision.pass == true
   and .artifacts.summary_json == $expected_summary

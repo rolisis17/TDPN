@@ -203,6 +203,10 @@ check_phase7_summary_comet_signal_surface() {
     echo "$label must propagate tdpnd_comet_runtime_smoke_ok in phase7 summary contracts"
     exit 1
   fi
+  if ! rg -Fq "tdpnd_grpc_live_smoke_ok" "$file_path"; then
+    echo "$label must propagate tdpnd_grpc_live_smoke_ok in phase7 summary contracts"
+    exit 1
+  fi
 }
 
 check_phase7_comet_forwarding_surface() {
@@ -259,6 +263,46 @@ check_phase7_coverage_floor_gating_doc_surface() {
     echo "$label must include phase7 coverage-floor gating flag surface: --require-mainnet-activation-gate-go"
     exit 1
   fi
+}
+
+check_phase7_summary_coverage_signal_doc_surface() {
+  local file_path="$1"
+  local label="$2"
+
+  for token in \
+    "phase7_mainnet_cutover_summary_report.sh" \
+    "roadmap_progress_report.sh" \
+    "cosmos_module_coverage_floor_ok" \
+    "cosmos_keeper_coverage_floor_ok" \
+    "cosmos_app_coverage_floor_ok" \
+    "dual_write_parity_ok"
+  do
+    if ! rg -Fq "$token" "$file_path"; then
+      echo "$label must document phase7 summary/report coverage-floor signal surfacing token: $token"
+      exit 1
+    fi
+  done
+}
+
+check_phase7_roadmap_summary_coverage_signal_surface() {
+  local file_path="$1"
+  local label="$2"
+
+  if ! rg -Fq "phase7_mainnet_cutover_summary_report" "$file_path"; then
+    echo "$label must reference phase7_mainnet_cutover_summary_report for phase7 coverage-floor signal surfacing"
+    exit 1
+  fi
+  for signal in \
+    "cosmos_module_coverage_floor_ok" \
+    "cosmos_keeper_coverage_floor_ok" \
+    "cosmos_app_coverage_floor_ok" \
+    "dual_write_parity_ok"
+  do
+    if ! rg -Fq "$signal" "$file_path"; then
+      echo "$label must reference phase7 coverage-floor summary signal: $signal"
+      exit 1
+    fi
+  done
 }
 
 check_phase7_mainnet_activation_gate_signal_surface() {
@@ -817,6 +861,11 @@ check_phase7_roadmap_surface_integration "$roadmap_integration_script" "roadmap 
 check_phase7_roadmap_surface_docs "$full_plan" "full execution plan"
 check_phase7_roadmap_surface_docs "$product_roadmap" "product roadmap"
 check_phase7_roadmap_surface_docs "$cosmos_runtime_doc" "cosmos settlement runtime doc"
+check_phase7_summary_coverage_signal_doc_surface "$full_plan" "full execution plan"
+check_phase7_summary_coverage_signal_doc_surface "$product_roadmap" "product roadmap"
+check_phase7_summary_coverage_signal_doc_surface "$cosmos_runtime_doc" "cosmos settlement runtime doc"
+check_phase7_roadmap_summary_coverage_signal_surface "$roadmap_script" "roadmap progress report helper"
+check_phase7_roadmap_summary_coverage_signal_surface "$roadmap_integration_script" "roadmap progress report integration script"
 check_phase7_comet_signal_surface "$full_plan" "full execution plan"
 check_phase7_comet_signal_surface "$product_roadmap" "product roadmap"
 check_phase7_mainnet_activation_gate_doc_surface "$full_plan" "full execution plan"
@@ -2279,6 +2328,37 @@ if ! rg -Fq "blockchain mainnet activation gate phase7 NO-GO signal fallback pat
 fi
 if ! rg -Fq '.blockchain_track.mainnet_activation_gate.source_summary_kind == "phase7-mainnet-cutover-signal"' "$roadmap_integration_script"; then
   echo "roadmap progress report integration script must validate phase7-signal source_summary_kind for mainnet activation gate fallback"
+  exit 1
+fi
+for phase7_summary_signal in \
+  "cosmos_module_coverage_floor_ok" \
+  "cosmos_keeper_coverage_floor_ok" \
+  "cosmos_app_coverage_floor_ok" \
+  "dual_write_parity_ok"
+do
+  if ! rg -Fq ".blockchain_track.phase7_mainnet_cutover_summary_report.${phase7_summary_signal}" "$roadmap_script"; then
+    echo "roadmap progress report helper must surface phase7 summary signal under blockchain_track.phase7_mainnet_cutover_summary_report: ${phase7_summary_signal}"
+    exit 1
+  fi
+  if ! rg -Fq ".blockchain_track.phase7_mainnet_cutover_summary_report.${phase7_summary_signal}" "$roadmap_integration_script"; then
+    echo "roadmap progress report integration script must validate phase7 summary signal under blockchain_track.phase7_mainnet_cutover_summary_report: ${phase7_summary_signal}"
+    exit 1
+  fi
+  if ! rg -Fq "Phase-7 mainnet cutover ${phase7_summary_signal}" "$roadmap_script"; then
+    echo "roadmap progress report helper markdown summary must print phase7 summary signal line: ${phase7_summary_signal}"
+    exit 1
+  fi
+done
+if ! rg -Fq ".blockchain_track.phase7_mainnet_cutover_summary_report.tdpnd_grpc_live_smoke_ok" "$roadmap_script"; then
+  echo "roadmap progress report helper must surface phase7 summary signal under blockchain_track.phase7_mainnet_cutover_summary_report: tdpnd_grpc_live_smoke_ok"
+  exit 1
+fi
+if ! rg -Fq ".blockchain_track.phase7_mainnet_cutover_summary_report.tdpnd_grpc_live_smoke_ok" "$roadmap_integration_script"; then
+  echo "roadmap progress report integration script must validate phase7 summary signal under blockchain_track.phase7_mainnet_cutover_summary_report: tdpnd_grpc_live_smoke_ok"
+  exit 1
+fi
+if ! rg -Fq "Phase-7 mainnet cutover tdpnd_grpc_live_smoke_ok" "$roadmap_script"; then
+  echo "roadmap progress report helper markdown summary must print phase7 summary signal line: tdpnd_grpc_live_smoke_ok"
   exit 1
 fi
 if ! rg -Fq "ROADMAP_PROGRESS_LOG_DIR" "$roadmap_script"; then

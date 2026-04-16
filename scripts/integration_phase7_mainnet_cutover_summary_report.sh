@@ -68,8 +68,9 @@ cat >"$PASS_CHECK" <<'EOF_PASS_CHECK'
   "status": "pass",
   "rc": 0,
   "signals": {
-    "module_tx_surface_ok": true,
-    "tdpnd_grpc_auth_live_smoke_ok": true,
+    "module_tx_surface": true,
+    "tdpnd_grpc_live_smoke": true,
+    "tdpnd_grpc_auth_live_smoke": true,
     "tdpnd_comet_runtime_smoke_ok": true,
     "mainnet_activation_gate_go": true,
     "cosmos_module_coverage_floor_ok": true,
@@ -95,6 +96,7 @@ cat >"$PASS_RUN" <<'EOF_PASS_RUN'
     "phase7_mainnet_cutover_check": {
       "signal_snapshot": {
         "module_tx_surface_ok": true,
+        "tdpnd_grpc_live_smoke_ok": true,
         "tdpnd_grpc_auth_live_smoke_ok": true,
         "tdpnd_comet_runtime_smoke_ok": true,
         "mainnet_activation_gate_go": true,
@@ -122,6 +124,7 @@ cat >"$PASS_HANDOFF_CHECK" <<'EOF_PASS_HANDOFF_CHECK'
   "rc": 0,
   "handoff": {
     "module_tx_surface_ok": true,
+    "tdpnd_grpc_live_smoke_ok": true,
     "tdpnd_grpc_auth_live_smoke_ok": true,
     "tdpnd_comet_runtime_smoke_ok": true,
     "mainnet_activation_gate_go": true,
@@ -147,6 +150,7 @@ cat >"$PASS_HANDOFF_RUN" <<'EOF_PASS_HANDOFF_RUN'
   "rc": 0,
   "handoff": {
     "module_tx_surface_ok": true,
+    "tdpnd_grpc_live_smoke_ok": true,
     "tdpnd_grpc_auth_live_smoke_ok": true,
     "tdpnd_comet_runtime_smoke_ok": true,
     "mainnet_activation_gate_go": true,
@@ -162,8 +166,9 @@ EOF_PASS_HANDOFF_RUN
 
 echo "[phase7-mainnet-cutover-summary-report] pass path"
 if ! jq -e '
-  .signals.module_tx_surface_ok == true
-  and .signals.tdpnd_grpc_auth_live_smoke_ok == true
+  .signals.module_tx_surface == true
+  and .signals.tdpnd_grpc_live_smoke == true
+  and .signals.tdpnd_grpc_auth_live_smoke == true
   and .signals.mainnet_activation_gate_go == true
   and .signals.cosmos_module_coverage_floor_ok == true
   and .signals.cosmos_keeper_coverage_floor_ok == true
@@ -177,6 +182,7 @@ if ! jq -e '
 fi
 if ! jq -e '
   .steps.phase7_mainnet_cutover_check.signal_snapshot.module_tx_surface_ok == true
+  and .steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_grpc_live_smoke_ok == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_grpc_auth_live_smoke_ok == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.mainnet_activation_gate_go == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.dual_write_parity_ok == true
@@ -190,12 +196,12 @@ if ! jq -e '
   cat "$PASS_RUN"
   exit 1
 fi
-if ! jq -e '.handoff.mainnet_activation_gate_go == true and .handoff.cosmos_module_coverage_floor_ok == true and .handoff.cosmos_keeper_coverage_floor_ok == true and .handoff.cosmos_app_coverage_floor_ok == true' "$PASS_HANDOFF_CHECK" >/dev/null; then
+if ! jq -e '.handoff.module_tx_surface_ok == true and .handoff.tdpnd_grpc_live_smoke_ok == true and .handoff.tdpnd_grpc_auth_live_smoke_ok == true and .handoff.mainnet_activation_gate_go == true and .handoff.cosmos_module_coverage_floor_ok == true and .handoff.cosmos_keeper_coverage_floor_ok == true and .handoff.cosmos_app_coverage_floor_ok == true' "$PASS_HANDOFF_CHECK" >/dev/null; then
   echo "pass handoff-check fixture missing required mainnet activation gate signal assertion"
   cat "$PASS_HANDOFF_CHECK"
   exit 1
 fi
-if ! jq -e '.handoff.mainnet_activation_gate_go == true and .handoff.cosmos_module_coverage_floor_ok == true and .handoff.cosmos_keeper_coverage_floor_ok == true and .handoff.cosmos_app_coverage_floor_ok == true' "$PASS_HANDOFF_RUN" >/dev/null; then
+if ! jq -e '.handoff.module_tx_surface_ok == true and .handoff.tdpnd_grpc_live_smoke_ok == true and .handoff.tdpnd_grpc_auth_live_smoke_ok == true and .handoff.mainnet_activation_gate_go == true and .handoff.cosmos_module_coverage_floor_ok == true and .handoff.cosmos_keeper_coverage_floor_ok == true and .handoff.cosmos_app_coverage_floor_ok == true' "$PASS_HANDOFF_RUN" >/dev/null; then
   echo "pass handoff-run fixture missing required mainnet activation gate signal assertion"
   cat "$PASS_HANDOFF_RUN"
   exit 1
@@ -228,9 +234,15 @@ if ! jq -e \
   and .signals.cosmos_app_coverage_floor_ok == true
   and .signals.dual_write_parity_ok == true
   and .signals.mainnet_activation_gate_go_ok == true
+  and .signals.module_tx_surface_ok == true
+  and .signals.tdpnd_grpc_live_smoke_ok == true
+  and .signals.tdpnd_grpc_auth_live_smoke_ok == true
   and .signals.tdpnd_comet_runtime_smoke_ok == true
   and .summaries.check.status == "pass"
   and .summaries.check.source_kind == "explicit"
+  and .summaries.check.signal_snapshot.module_tx_surface == true
+  and .summaries.check.signal_snapshot.tdpnd_grpc_live_smoke == true
+  and .summaries.check.signal_snapshot.tdpnd_grpc_auth_live_smoke == true
   and .summaries.check.signal_snapshot.tdpnd_comet_runtime_smoke_ok == true
   and .summaries.check.signal_snapshot.mainnet_activation_gate_go == true
   and .summaries.check.signal_snapshot.cosmos_module_coverage_floor_ok == true
@@ -238,6 +250,9 @@ if ! jq -e \
   and .summaries.check.signal_snapshot.cosmos_app_coverage_floor_ok == true
   and .summaries.run.status == "pass"
   and .summaries.run.source_kind == "explicit"
+  and .summaries.run.signal_snapshot.module_tx_surface_ok == true
+  and .summaries.run.signal_snapshot.tdpnd_grpc_live_smoke_ok == true
+  and .summaries.run.signal_snapshot.tdpnd_grpc_auth_live_smoke_ok == true
   and .summaries.run.signal_snapshot.tdpnd_comet_runtime_smoke_ok == true
   and .summaries.run.signal_snapshot.mainnet_activation_gate_go == true
   and .summaries.run.signal_snapshot.cosmos_module_coverage_floor_ok == true
@@ -245,6 +260,9 @@ if ! jq -e \
   and .summaries.run.signal_snapshot.cosmos_app_coverage_floor_ok == true
   and .summaries.handoff_check.status == "pass"
   and .summaries.handoff_check.source_kind == "explicit"
+  and .summaries.handoff_check.signal_snapshot.module_tx_surface_ok == true
+  and .summaries.handoff_check.signal_snapshot.tdpnd_grpc_live_smoke_ok == true
+  and .summaries.handoff_check.signal_snapshot.tdpnd_grpc_auth_live_smoke_ok == true
   and .summaries.handoff_check.signal_snapshot.tdpnd_comet_runtime_smoke_ok == true
   and .summaries.handoff_check.signal_snapshot.mainnet_activation_gate_go == true
   and .summaries.handoff_check.signal_snapshot.cosmos_module_coverage_floor_ok == true
@@ -252,6 +270,9 @@ if ! jq -e \
   and .summaries.handoff_check.signal_snapshot.cosmos_app_coverage_floor_ok == true
   and .summaries.handoff_run.status == "pass"
   and .summaries.handoff_run.source_kind == "explicit"
+  and .summaries.handoff_run.signal_snapshot.module_tx_surface_ok == true
+  and .summaries.handoff_run.signal_snapshot.tdpnd_grpc_live_smoke_ok == true
+  and .summaries.handoff_run.signal_snapshot.tdpnd_grpc_auth_live_smoke_ok == true
   and .summaries.handoff_run.signal_snapshot.tdpnd_comet_runtime_smoke_ok == true
   and .summaries.handoff_run.signal_snapshot.mainnet_activation_gate_go == true
   and .summaries.handoff_run.signal_snapshot.cosmos_module_coverage_floor_ok == true
@@ -317,9 +338,24 @@ if ! jq -e \
   and .signals.cosmos_app_coverage_floor_ok == true
   and .signals.dual_write_parity_ok == true
   and .signals.mainnet_activation_gate_go_ok == true
+  and .signals.module_tx_surface_ok == true
+  and .signals.tdpnd_grpc_live_smoke_ok == true
+  and .signals.tdpnd_grpc_auth_live_smoke_ok == true
+  and .summaries.check.signal_snapshot.module_tx_surface == true
+  and .summaries.check.signal_snapshot.tdpnd_grpc_live_smoke == true
+  and .summaries.check.signal_snapshot.tdpnd_grpc_auth_live_smoke == true
   and .summaries.check.signal_snapshot.mainnet_activation_gate_go == true
+  and .summaries.run.signal_snapshot.module_tx_surface_ok == true
+  and .summaries.run.signal_snapshot.tdpnd_grpc_live_smoke_ok == true
+  and .summaries.run.signal_snapshot.tdpnd_grpc_auth_live_smoke_ok == true
   and .summaries.run.signal_snapshot.mainnet_activation_gate_go == true
+  and .summaries.handoff_check.signal_snapshot.module_tx_surface_ok == true
+  and .summaries.handoff_check.signal_snapshot.tdpnd_grpc_live_smoke_ok == true
+  and .summaries.handoff_check.signal_snapshot.tdpnd_grpc_auth_live_smoke_ok == true
   and .summaries.handoff_check.signal_snapshot.mainnet_activation_gate_go == true
+  and .summaries.handoff_run.signal_snapshot.module_tx_surface_ok == true
+  and .summaries.handoff_run.signal_snapshot.tdpnd_grpc_live_smoke_ok == true
+  and .summaries.handoff_run.signal_snapshot.tdpnd_grpc_auth_live_smoke_ok == true
   and .summaries.handoff_run.signal_snapshot.mainnet_activation_gate_go == true
   and .summaries.handoff_check.status == "pass"
   and .summaries.handoff_run.status == "pass"
