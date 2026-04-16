@@ -42,6 +42,8 @@ Exit behavior:
   - Runs all selected commands (sequential by default, concurrent when --parallel=1).
   - Returns rc=0 only when all selected commands pass (or no actions selected).
   - Returns first failing action command rc otherwise.
+  - With --allow-profile-default-gate-unreachable=1, profile_default_gate can
+    soft-fail on unreachable endpoint logs or missing invite-subject precondition logs.
 USAGE
 }
 
@@ -613,7 +615,13 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
   if [[ "$allow_profile_default_gate_unreachable" == "1" \
      && "$action_id" == "profile_default_gate" \
      && "$action_status" != "pass" ]]; then
-    if [[ -f "$action_log" ]] && grep -E -q 'profile-default-gate-run failed: unreachable directory endpoint|[[:space:]]wait-fail[[:space:]]' "$action_log"; then
+    if [[ -f "$action_log" ]] && grep -E -q 'profile-default-gate-run failed:[[:space:]]*missing invite key subject|provide[[:space:]]+--campaign-subject/--subject' "$action_log"; then
+      action_status="pass"
+      action_rc=0
+      action_failure_kind="soft_failed_profile_default_gate_precondition"
+      action_notes="soft-failed profile_default_gate missing invite-subject precondition (allow flag enabled)"
+      action_soft_failed="true"
+    elif [[ -f "$action_log" ]] && grep -E -q 'profile-default-gate-run failed:[[:space:]]*unreachable directory endpoint|[[:space:]]wait-fail[[:space:]]' "$action_log"; then
       action_status="pass"
       action_rc=0
       action_failure_kind="soft_failed_unreachable_profile_default_gate"

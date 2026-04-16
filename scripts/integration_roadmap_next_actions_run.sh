@@ -22,6 +22,7 @@ FAIL2="$TMP_DIR/fail_action_2.sh"
 SLOW1="$TMP_DIR/slow_action_1.sh"
 SLOW2="$TMP_DIR/slow_action_2.sh"
 UNREACHABLE_PROFILE="$TMP_DIR/profile_unreachable.sh"
+MISSING_SUBJECT_PROFILE="$TMP_DIR/profile_missing_subject.sh"
 
 cat >"$PASS1" <<'EOF_PASS1'
 #!/usr/bin/env bash
@@ -78,6 +79,16 @@ echo "last_error: curl rc=7: Failed to connect"
 exit 1
 EOF_UNREACHABLE_PROFILE
 chmod +x "$UNREACHABLE_PROFILE"
+
+cat >"$MISSING_SUBJECT_PROFILE" <<'EOF_MISSING_SUBJECT_PROFILE'
+#!/usr/bin/env bash
+set -euo pipefail
+echo "profile-default-gate-run failed: missing invite key subject"
+echo "provide --campaign-subject/--subject, or set CAMPAIGN_SUBJECT/INVITE_KEY"
+echo "or define CAMPAIGN_SUBJECT/INVITE_KEY in runtime/default/env.client"
+exit 2
+EOF_MISSING_SUBJECT_PROFILE
+chmod +x "$MISSING_SUBJECT_PROFILE"
 
 cat >"$FAKE_ROADMAP" <<'EOF_FAKE_ROADMAP'
 #!/usr/bin/env bash
@@ -175,6 +186,15 @@ JSON
 {
   "next_actions": [
     {"id":"profile_default_gate","label":"Profile default decision gate","command":"bash \"$UNREACHABLE_PROFILE\"","reason":"test-unreachable"}
+  ]
+}
+JSON
+    ;;
+  profile_missing_subject)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"profile_default_gate","label":"Profile default decision gate","command":"bash \"$MISSING_SUBJECT_PROFILE\"","reason":"test-precondition"}
   ]
 }
 JSON
@@ -373,6 +393,76 @@ if ! jq -e '
 ' "$SUMMARY_TIMEOUT" >/dev/null; then
   echo "timeout path summary mismatch"
   cat "$SUMMARY_TIMEOUT"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] profile missing-subject hard-fail default path"
+SUMMARY_PROFILE_PRECONDITION_HARD_FAIL="$TMP_DIR/summary_profile_precondition_hard_fail.json"
+REPORTS_PROFILE_PRECONDITION_HARD_FAIL="$TMP_DIR/reports_profile_precondition_hard_fail"
+set +e
+ROADMAP_NEXT_ACTIONS_SCENARIO=profile_missing_subject \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" MISSING_SUBJECT_PROFILE="$MISSING_SUBJECT_PROFILE" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_PROFILE_PRECONDITION_HARD_FAIL" \
+  --summary-json "$SUMMARY_PROFILE_PRECONDITION_HARD_FAIL" \
+  --print-summary-json 0
+profile_precondition_hard_fail_rc=$?
+set -e
+if [[ "$profile_precondition_hard_fail_rc" != "2" ]]; then
+  echo "expected profile missing-subject hard-fail rc=2, got rc=$profile_precondition_hard_fail_rc"
+  cat "$SUMMARY_PROFILE_PRECONDITION_HARD_FAIL"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 2
+  and .summary.actions_executed == 1
+  and .summary.pass == 0
+  and .summary.fail == 1
+  and .summary.soft_failed == 0
+  and ((.actions // []) | length == 1)
+  and .actions[0].id == "profile_default_gate"
+  and .actions[0].status == "fail"
+  and .actions[0].rc == 2
+  and .actions[0].failure_kind == "command_failed"
+  and ((.actions[0].soft_failed // false) == false)
+' "$SUMMARY_PROFILE_PRECONDITION_HARD_FAIL" >/dev/null; then
+  echo "profile missing-subject hard-fail summary mismatch"
+  cat "$SUMMARY_PROFILE_PRECONDITION_HARD_FAIL"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] profile missing-subject soft-fail path"
+SUMMARY_PROFILE_PRECONDITION_SOFT_FAIL="$TMP_DIR/summary_profile_precondition_soft_fail.json"
+REPORTS_PROFILE_PRECONDITION_SOFT_FAIL="$TMP_DIR/reports_profile_precondition_soft_fail"
+ROADMAP_NEXT_ACTIONS_SCENARIO=profile_missing_subject \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" MISSING_SUBJECT_PROFILE="$MISSING_SUBJECT_PROFILE" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_PROFILE_PRECONDITION_SOFT_FAIL" \
+  --summary-json "$SUMMARY_PROFILE_PRECONDITION_SOFT_FAIL" \
+  --allow-profile-default-gate-unreachable 1 \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.allow_profile_default_gate_unreachable == true
+  and .summary.actions_executed == 1
+  and .summary.pass == 1
+  and .summary.fail == 0
+  and .summary.soft_failed == 1
+  and ((.actions // []) | length == 1)
+  and .actions[0].id == "profile_default_gate"
+  and .actions[0].status == "pass"
+  and .actions[0].rc == 0
+  and .actions[0].command_rc == 2
+  and .actions[0].failure_kind == "soft_failed_profile_default_gate_precondition"
+  and .actions[0].soft_failed == true
+' "$SUMMARY_PROFILE_PRECONDITION_SOFT_FAIL" >/dev/null; then
+  echo "profile missing-subject soft-fail summary mismatch"
+  cat "$SUMMARY_PROFILE_PRECONDITION_SOFT_FAIL"
   exit 1
 fi
 
