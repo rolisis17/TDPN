@@ -832,6 +832,8 @@ build_profile_default_gate_json() {
   local next_command_default=""
   local next_command_no_sudo=""
   local next_command_docker=""
+  local next_command_wrapper=""
+  local next_command_wrapper_sudo=""
   local next_command=""
   local next_command_sudo=""
   local next_command_source="default_non_sudo"
@@ -876,11 +878,16 @@ build_profile_default_gate_json() {
   local docker_hint_receipt_json=""
   local docker_hint_command=""
   local docker_hint_directory_urls_arg=""
+  local docker_hint_directory_a=""
+  local docker_hint_directory_b=""
+  local docker_hint_directory_a_arg=""
+  local docker_hint_directory_b_arg=""
   local docker_hint_issuer_url_arg=""
   local docker_hint_entry_url_arg=""
   local docker_hint_exit_url_arg=""
   local docker_hint_execution_mode_arg=""
   local docker_hint_start_local_stack_arg=""
+  local docker_hint_wrapper_ready="0"
   local docker_hint_requires_local_stack_root="0"
 
   if [[ ! "$campaign_timeout_sec_default" =~ ^[0-9]+$ ]]; then
@@ -914,6 +921,13 @@ build_profile_default_gate_json() {
   docker_hint_profile_summary_json="$(jq -r '.docker_rehearsal.profile_summary_json // ""' <<<"$docker_hint_json" 2>/dev/null || true)"
   docker_hint_receipt_json="$(jq -r '.docker_rehearsal.receipt_json // ""' <<<"$docker_hint_json" 2>/dev/null || true)"
   docker_hint_command="$(jq -r '.docker_rehearsal.check_command // ""' <<<"$docker_hint_json" 2>/dev/null || true)"
+  if [[ "$docker_hint_available" == "1" && -n "$docker_hint_directory_urls" ]]; then
+    docker_hint_directory_a="$(printf '%s\n' "$docker_hint_directory_urls" | awk -F',' '{gsub(/^[[:space:]]+|[[:space:]]+$/, "", $1); print $1}')"
+    docker_hint_directory_b="$(printf '%s\n' "$docker_hint_directory_urls" | awk -F',' '{gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2}')"
+    if [[ -n "$docker_hint_directory_a" && -n "$docker_hint_directory_b" ]]; then
+      docker_hint_wrapper_ready="1"
+    fi
+  fi
   if [[ "$docker_hint_available" == "1" && "$docker_hint_start_local_stack" == "1" ]]; then
     docker_hint_requires_local_stack_root="1"
   fi
@@ -925,7 +939,16 @@ build_profile_default_gate_json() {
     printf -v docker_hint_issuer_url_arg '%q' "$docker_hint_issuer_url"
     printf -v docker_hint_entry_url_arg '%q' "$docker_hint_entry_url"
     printf -v docker_hint_exit_url_arg '%q' "$docker_hint_exit_url"
-    next_command_docker="$next_command_default --campaign-execution-mode $docker_hint_execution_mode_arg --campaign-start-local-stack $docker_hint_start_local_stack_arg --campaign-directory-urls $docker_hint_directory_urls_arg --campaign-issuer-url $docker_hint_issuer_url_arg --campaign-entry-url $docker_hint_entry_url_arg --campaign-exit-url $docker_hint_exit_url_arg"
+    if [[ "$docker_hint_wrapper_ready" == "1" ]]; then
+      printf -v docker_hint_directory_a_arg '%q' "$docker_hint_directory_a"
+      printf -v docker_hint_directory_b_arg '%q' "$docker_hint_directory_b"
+      next_command_wrapper="./scripts/easy_node.sh profile-default-gate-run --directory-a $docker_hint_directory_a_arg --directory-b $docker_hint_directory_b_arg --reports-dir $reports_dir_arg --refresh-campaign 1 --fail-on-no-go 0 --campaign-timeout-sec $campaign_timeout_sec_arg --summary-json $summary_json_arg --print-summary-json 1 --campaign-execution-mode $docker_hint_execution_mode_arg --campaign-start-local-stack $docker_hint_start_local_stack_arg --campaign-directory-urls $docker_hint_directory_urls_arg --campaign-issuer-url $docker_hint_issuer_url_arg --campaign-entry-url $docker_hint_entry_url_arg --campaign-exit-url $docker_hint_exit_url_arg"
+      next_command_wrapper_sudo="sudo ./scripts/easy_node.sh profile-default-gate-run --directory-a $docker_hint_directory_a_arg --directory-b $docker_hint_directory_b_arg --reports-dir $reports_dir_arg --refresh-campaign 1 --fail-on-no-go 0 --campaign-timeout-sec $campaign_timeout_sec_arg --summary-json $summary_json_arg --print-summary-json 1 --campaign-execution-mode $docker_hint_execution_mode_arg --campaign-start-local-stack $docker_hint_start_local_stack_arg --campaign-directory-urls $docker_hint_directory_urls_arg --campaign-issuer-url $docker_hint_issuer_url_arg --campaign-entry-url $docker_hint_entry_url_arg --campaign-exit-url $docker_hint_exit_url_arg"
+      next_command_docker="$next_command_wrapper"
+      next_command_sudo="$next_command_wrapper_sudo"
+    else
+      next_command_docker="$next_command_default --campaign-execution-mode $docker_hint_execution_mode_arg --campaign-start-local-stack $docker_hint_start_local_stack_arg --campaign-directory-urls $docker_hint_directory_urls_arg --campaign-issuer-url $docker_hint_issuer_url_arg --campaign-entry-url $docker_hint_entry_url_arg --campaign-exit-url $docker_hint_exit_url_arg"
+    fi
     next_command_no_sudo="$next_command_docker"
     next_command="$next_command_docker"
     next_command_source="${docker_hint_source:-docker_rehearsal_artifacts}"
@@ -1088,7 +1111,7 @@ build_profile_default_gate_json() {
       fi
     fi
   fi
-  if [[ "$status" == "pending" && "$next_command" == *"profile-compare-campaign-signoff"* && "$next_command" != *"--subject "* ]]; then
+  if [[ "$status" == "pending" && ( "$next_command" == *"profile-compare-campaign-signoff"* || "$next_command" == *"profile-default-gate-run"* ) && "$next_command" != *"--subject "* && "$next_command" != *"--campaign-subject "* ]]; then
     if [[ "$notes" != *"$subject_fallback_guidance"* ]]; then
       notes="$notes; $subject_fallback_guidance"
     fi

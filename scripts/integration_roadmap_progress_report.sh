@@ -743,6 +743,7 @@ if ! jq -e '
   and .blockchain_track.mainnet_activation_missing_metrics_action.normalize_command == null
   and .blockchain_track.mainnet_activation_missing_metrics_action.rerun_bundle_command == null
   and .blockchain_track.mainnet_activation_missing_metrics_action.checklist_command == null
+  and .blockchain_track.mainnet_activation_missing_metrics_action.missing_input_template_command == null
   and .blockchain_track.mainnet_activation_missing_metrics_action.template_command == null
   and .blockchain_track.mainnet_activation_missing_metrics_action.operator_pack_command == null
   and .blockchain_track.mainnet_activation_missing_metrics_action.cycle_command == null
@@ -1063,6 +1064,7 @@ if ! jq -e '
   and .blockchain_track.mainnet_activation_missing_metrics_action.normalize_command == null
   and .blockchain_track.mainnet_activation_missing_metrics_action.rerun_bundle_command == null
   and .blockchain_track.mainnet_activation_missing_metrics_action.checklist_command == null
+  and .blockchain_track.mainnet_activation_missing_metrics_action.missing_input_template_command == null
   and .blockchain_track.mainnet_activation_missing_metrics_action.template_command == null
   and .blockchain_track.mainnet_activation_missing_metrics_action.operator_pack_command == null
   and .blockchain_track.mainnet_activation_missing_metrics_action.cycle_command == null
@@ -1148,6 +1150,7 @@ if ! jq -e --arg src "$PHASE7_MAINNET_CUTOVER_CHECK_SUMMARY_JSON" '
   and .blockchain_track.mainnet_activation_missing_metrics_action.normalize_command == null
   and .blockchain_track.mainnet_activation_missing_metrics_action.rerun_bundle_command == null
   and .blockchain_track.mainnet_activation_missing_metrics_action.checklist_command == null
+  and .blockchain_track.mainnet_activation_missing_metrics_action.missing_input_template_command == null
   and .blockchain_track.mainnet_activation_missing_metrics_action.template_command == null
   and .blockchain_track.mainnet_activation_missing_metrics_action.operator_pack_command == null
   and .blockchain_track.mainnet_activation_missing_metrics_action.cycle_command == null
@@ -1227,6 +1230,7 @@ if ! jq -e --arg src "$PHASE7_MAINNET_CUTOVER_CHECK_NO_GO_SUMMARY_JSON" '
   and .blockchain_track.mainnet_activation_missing_metrics_action.normalize_command == null
   and .blockchain_track.mainnet_activation_missing_metrics_action.rerun_bundle_command == null
   and .blockchain_track.mainnet_activation_missing_metrics_action.checklist_command == null
+  and .blockchain_track.mainnet_activation_missing_metrics_action.missing_input_template_command == null
   and .blockchain_track.mainnet_activation_missing_metrics_action.template_command == null
   and .blockchain_track.mainnet_activation_missing_metrics_action.operator_pack_command == null
   and .blockchain_track.mainnet_activation_missing_metrics_action.cycle_command == null
@@ -1378,6 +1382,8 @@ if ! jq -e --arg src "$AUTO_MAINNET_GATE_SUMMARY_JSON" '
   and ((.blockchain_track.mainnet_activation_missing_metrics_action.rerun_bundle_command // "") | contains("--blockchain-mainnet-activation-metrics-input-json <operator-metrics-input.json>"))
   and ((.blockchain_track.mainnet_activation_missing_metrics_action.checklist_command // "") | startswith("./scripts/easy_node.sh blockchain-mainnet-activation-metrics-missing-checklist "))
   and ((.blockchain_track.mainnet_activation_missing_metrics_action.checklist_command // "") | contains("--metrics-summary-json .easy-node-logs/blockchain_gate_bundle_summary.json"))
+  and ((.blockchain_track.mainnet_activation_missing_metrics_action.missing_input_template_command // "") | startswith("./scripts/easy_node.sh blockchain-mainnet-activation-metrics-missing-input-template "))
+  and ((.blockchain_track.mainnet_activation_missing_metrics_action.missing_input_template_command // "") | contains("--metrics-summary-json .easy-node-logs/blockchain_gate_bundle_summary.json"))
   and ((.blockchain_track.mainnet_activation_missing_metrics_action.template_command // "") | startswith("./scripts/easy_node.sh blockchain-mainnet-activation-metrics-input-template "))
   and ((.blockchain_track.mainnet_activation_missing_metrics_action.template_command // "") | contains("--output-json <operator-metrics-input.template.json>"))
   and ((.blockchain_track.mainnet_activation_missing_metrics_action.operator_pack_command // "") | startswith("./scripts/easy_node.sh blockchain-mainnet-activation-operator-pack "))
@@ -1411,6 +1417,11 @@ if ! rg -q 'blockchain-gate-bundle --blockchain-mainnet-activation-metrics-input
 fi
 if ! rg -q 'blockchain-mainnet-activation-metrics-missing-checklist --metrics-summary-json .easy-node-logs/blockchain_gate_bundle_summary.json' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"; then
   echo "auto-discovered report missing missing-checklist command"
+  cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"
+  exit 1
+fi
+if ! rg -q 'blockchain-mainnet-activation-metrics-missing-input-template --metrics-summary-json .easy-node-logs/blockchain_gate_bundle_summary.json' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"; then
+  echo "auto-discovered report missing missing-input-template command"
   cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"
   exit 1
 fi
@@ -1449,8 +1460,23 @@ if ! rg -q 'blockchain_mainnet_activation_missing_metrics_action_available=true'
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log
   exit 1
 fi
-if ! rg -q 'blockchain_mainnet_activation_missing_metrics_action_template_command=.*blockchain-mainnet-activation-metrics-input-template .* operator_pack_command=.*blockchain-mainnet-activation-operator-pack .* cycle_command=.*blockchain-mainnet-activation-gate-cycle ' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log; then
-  echo "auto-discovered log missing template/operator-pack/cycle actionable commands"
+if ! rg -q 'blockchain_mainnet_activation_missing_metrics_action_template_command=.*blockchain-mainnet-activation-metrics-input-template ' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log; then
+  echo "auto-discovered log missing template actionable command"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log
+  exit 1
+fi
+if ! rg -q 'blockchain_mainnet_activation_missing_metrics_action_missing_input_template_command=.*blockchain-mainnet-activation-metrics-missing-input-template ' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log; then
+  echo "auto-discovered log missing missing-input-template actionable command"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log
+  exit 1
+fi
+if ! rg -q 'operator_pack_command=.*blockchain-mainnet-activation-operator-pack ' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log; then
+  echo "auto-discovered log missing operator-pack actionable command"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log
+  exit 1
+fi
+if ! rg -q 'cycle_command=.*blockchain-mainnet-activation-gate-cycle ' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log; then
+  echo "auto-discovered log missing cycle actionable command"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log
   exit 1
 fi
@@ -2238,8 +2264,8 @@ cat >"$OPTIONAL_PROFILE_HINT_MANUAL_SUMMARY_JSON" <<'EOF_OPTIONAL_PROFILE_HINT_S
       "notes": "profile compare campaign signoff decision is NO-GO but campaign-check evidence is insufficient/unstable; rerun with refresh-campaign=1",
       "decision": "NO-GO",
       "recommended_profile": "balanced",
-      "next_command": "./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1 --campaign-execution-mode docker --campaign-start-local-stack 0 --campaign-directory-urls http://127.0.0.1:18081\\,http://127.0.0.1:28081 --campaign-issuer-url http://127.0.0.1:18082 --campaign-entry-url http://127.0.0.1:18083 --campaign-exit-url http://127.0.0.1:18084",
-      "next_command_sudo": "sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1",
+      "next_command": "./scripts/easy_node.sh profile-default-gate-run --reports-dir .easy-node-logs --directory-a http://127.0.0.1:18081 --directory-b http://127.0.0.1:28081 --campaign-issuer-url http://127.0.0.1:18082 --campaign-entry-url http://127.0.0.1:18083 --campaign-exit-url http://127.0.0.1:18084 --subject INVITE_KEY --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1",
+      "next_command_sudo": "sudo ./scripts/easy_node.sh profile-default-gate-run --reports-dir .easy-node-logs --directory-a http://127.0.0.1:18081 --directory-b http://127.0.0.1:28081 --campaign-issuer-url http://127.0.0.1:18082 --campaign-entry-url http://127.0.0.1:18083 --campaign-exit-url http://127.0.0.1:18084 --subject INVITE_KEY --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1",
       "next_command_source": "docker_rehearsal_artifacts",
       "docker_rehearsal_hint_available": true,
       "docker_rehearsal_hint_source": "docker_rehearsal_artifacts",
@@ -2277,10 +2303,14 @@ if ! run_roadmap_progress_report \
   exit 1
 fi
 if ! jq -e '
-  ((.next_actions // []) | any(.id == "profile_default_gate" and (.command | startswith("./scripts/easy_node.sh profile-compare-campaign-signoff")) and (.command | contains("--campaign-execution-mode docker"))))
+  def is_profile_gate_non_sudo_cmd($cmd):
+    (($cmd // "") | test("^\\./scripts/easy_node\\.sh (profile-default-gate-run|profile-compare-campaign-signoff)( |$)"));
+  def is_profile_gate_sudo_cmd($cmd):
+    (($cmd // "") | test("^sudo \\./scripts/easy_node\\.sh (profile-default-gate-run|profile-compare-campaign-signoff)( |$)"));
+  ((.next_actions // []) | any(.id == "profile_default_gate" and is_profile_gate_non_sudo_cmd(.command)))
   and (.vpn_track.optional_gate_status.profile_default_gate == "pending")
-  and ((.vpn_track.profile_default_gate.next_command // "") | contains("--campaign-execution-mode docker"))
-  and ((.vpn_track.profile_default_gate.next_command_sudo // "") | startswith("sudo ./scripts/easy_node.sh profile-compare-campaign-signoff"))
+  and is_profile_gate_non_sudo_cmd(.vpn_track.profile_default_gate.next_command)
+  and is_profile_gate_sudo_cmd(.vpn_track.profile_default_gate.next_command_sudo)
   and ((.vpn_track.profile_default_gate.next_command_source // "") | test("docker"))
   and (.vpn_track.profile_default_gate.docker_hint_available == true)
 ' "$TMP_DIR/roadmap_progress_optional_profile_hint_summary.json" >/dev/null; then
@@ -2358,10 +2388,12 @@ if ! run_roadmap_progress_report \
   exit 1
 fi
 if ! jq -e '
-  ((.next_actions // []) | any(.id == "profile_default_gate" and (.command | startswith("sudo ./scripts/easy_node.sh profile-compare-campaign-signoff"))))
+  def is_profile_gate_sudo_cmd($cmd):
+    (($cmd // "") | test("^sudo \\./scripts/easy_node\\.sh (profile-default-gate-run|profile-compare-campaign-signoff)( |$)"));
+  ((.next_actions // []) | any(.id == "profile_default_gate" and is_profile_gate_sudo_cmd(.command)))
   and (.vpn_track.optional_gate_status.profile_default_gate == "pending")
   and ((.vpn_track.profile_default_gate.next_command_source // "") == "sudo_required_diagnostics_root_required")
-  and ((.vpn_track.profile_default_gate.next_command // "") | startswith("sudo ./scripts/easy_node.sh profile-compare-campaign-signoff"))
+  and is_profile_gate_sudo_cmd(.vpn_track.profile_default_gate.next_command)
   and (.vpn_track.profile_default_gate.docker_hint_available == false)
 ' "$TMP_DIR/roadmap_progress_profile_default_sudo_source_summary.json" >/dev/null; then
   echo "profile default sudo-source summary JSON missing expected command-source passthrough fields"
@@ -2402,8 +2434,8 @@ cat >"$PROFILE_DEFAULT_GATE_MANUAL_DOCKER_SUMMARY_JSON" <<'EOF_PROFILE_DEFAULT_G
       "notes": "profile compare campaign signoff decision is NO-GO but campaign-check evidence is insufficient/unstable; rerun with refresh-campaign=1",
       "decision": "NO-GO",
       "recommended_profile": "balanced",
-      "next_command": "./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1 --campaign-execution-mode docker --campaign-start-local-stack 0 --campaign-directory-urls http://127.0.0.1:18081\\,http://127.0.0.1:28081 --campaign-issuer-url http://127.0.0.1:18082 --campaign-entry-url http://127.0.0.1:18083 --campaign-exit-url http://127.0.0.1:18084",
-      "next_command_sudo": "sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1",
+      "next_command": "./scripts/easy_node.sh profile-default-gate-run --reports-dir .easy-node-logs --directory-a http://127.0.0.1:18081 --directory-b http://127.0.0.1:28081 --campaign-issuer-url http://127.0.0.1:18082 --campaign-entry-url http://127.0.0.1:18083 --campaign-exit-url http://127.0.0.1:18084 --subject INVITE_KEY --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1",
+      "next_command_sudo": "sudo ./scripts/easy_node.sh profile-default-gate-run --reports-dir .easy-node-logs --directory-a http://127.0.0.1:18081 --directory-b http://127.0.0.1:28081 --campaign-issuer-url http://127.0.0.1:18082 --campaign-entry-url http://127.0.0.1:18083 --campaign-exit-url http://127.0.0.1:18084 --subject INVITE_KEY --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1",
       "next_command_source": "docker_rehearsal_artifacts",
       "docker_rehearsal_hint_available": true
     },
@@ -2435,11 +2467,15 @@ if ! run_roadmap_progress_report \
   exit 1
 fi
 if ! jq -e '
-  ((.next_actions // []) | any(.id == "profile_default_gate" and (.command | startswith("./scripts/easy_node.sh profile-compare-campaign-signoff")) and (.command | contains("--campaign-execution-mode docker")) and (.command | contains("--campaign-start-local-stack 0"))))
+  def is_profile_gate_non_sudo_cmd($cmd):
+    (($cmd // "") | test("^\\./scripts/easy_node\\.sh (profile-default-gate-run|profile-compare-campaign-signoff)( |$)"));
+  def is_profile_gate_sudo_cmd($cmd):
+    (($cmd // "") | test("^sudo \\./scripts/easy_node\\.sh (profile-default-gate-run|profile-compare-campaign-signoff)( |$)"));
+  ((.next_actions // []) | any(.id == "profile_default_gate" and is_profile_gate_non_sudo_cmd(.command)))
   and (.vpn_track.optional_gate_status.profile_default_gate == "pending")
   and ((.vpn_track.profile_default_gate.next_command_source // "") == "docker_rehearsal_artifacts")
-  and ((.vpn_track.profile_default_gate.next_command // "") | contains("--campaign-start-local-stack 0"))
-  and ((.vpn_track.profile_default_gate.next_command_sudo // "") | startswith("sudo ./scripts/easy_node.sh profile-compare-campaign-signoff"))
+  and is_profile_gate_non_sudo_cmd(.vpn_track.profile_default_gate.next_command)
+  and is_profile_gate_sudo_cmd(.vpn_track.profile_default_gate.next_command_sudo)
   and (.vpn_track.profile_default_gate.docker_hint_available == true)
 ' "$TMP_DIR/roadmap_progress_profile_default_docker_source_summary.json" >/dev/null; then
   echo "profile default docker-source summary JSON missing expected command-source passthrough fields"

@@ -246,6 +246,7 @@ Usage:
   ./scripts/easy_node.sh ci-blockchain-parallel-sweep [ci_blockchain_parallel_sweep args...]
   ./scripts/easy_node.sh blockchain-mainnet-activation-metrics-input [blockchain_mainnet_activation_metrics_input args...]
   ./scripts/easy_node.sh blockchain-mainnet-activation-metrics-missing-checklist [blockchain_mainnet_activation_metrics_missing_checklist args...]
+  ./scripts/easy_node.sh blockchain-mainnet-activation-metrics-missing-input-template [blockchain_mainnet_activation_metrics_missing_input_template args...]
   ./scripts/easy_node.sh blockchain-mainnet-activation-metrics-input-template [blockchain_mainnet_activation_metrics_input_template args...]
   ./scripts/easy_node.sh blockchain-mainnet-activation-metrics [blockchain_mainnet_activation_metrics args...]
   ./scripts/easy_node.sh blockchain-mainnet-activation-gate [blockchain_mainnet_activation_gate args...]
@@ -379,6 +380,7 @@ Usage:
   ./scripts/easy_node.sh ci-blockchain-parallel-sweep [ci_blockchain_parallel_sweep args...]
   ./scripts/easy_node.sh blockchain-mainnet-activation-metrics-input [blockchain_mainnet_activation_metrics_input args...]
   ./scripts/easy_node.sh blockchain-mainnet-activation-metrics-missing-checklist [blockchain_mainnet_activation_metrics_missing_checklist args...]
+  ./scripts/easy_node.sh blockchain-mainnet-activation-metrics-missing-input-template [blockchain_mainnet_activation_metrics_missing_input_template args...]
   ./scripts/easy_node.sh blockchain-mainnet-activation-metrics-input-template [blockchain_mainnet_activation_metrics_input_template args...]
   ./scripts/easy_node.sh blockchain-mainnet-activation-metrics [blockchain_mainnet_activation_metrics args...]
   ./scripts/easy_node.sh blockchain-mainnet-activation-gate [blockchain_mainnet_activation_gate args...]
@@ -533,6 +535,7 @@ Notes:
   - ci-blockchain-parallel-sweep wraps the blockchain parallel sweep helper path and preserves pass-through args.
   - blockchain-mainnet-activation-metrics-input wraps the blockchain metrics evidence normalizer helper path and preserves pass-through args.
   - blockchain-mainnet-activation-metrics-missing-checklist wraps the blockchain missing-metrics checklist helper path and preserves pass-through args.
+  - blockchain-mainnet-activation-metrics-missing-input-template wraps the blockchain missing-input-template helper path and preserves pass-through args.
   - blockchain-mainnet-activation-metrics-input-template wraps the blockchain metrics evidence template helper path and preserves pass-through args.
   - blockchain-mainnet-activation-metrics wraps the blockchain mainnet activation metrics producer helper path and preserves pass-through args.
   - blockchain-mainnet-activation-gate wraps the blockchain mainnet activation gate helper path and preserves pass-through args.
@@ -8257,6 +8260,15 @@ blockchain_mainnet_activation_metrics_missing_checklist() {
   "$metrics_missing_checklist_script" "$@"
 }
 
+blockchain_mainnet_activation_metrics_missing_input_template() {
+  local metrics_missing_input_template_script="${BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_MISSING_INPUT_TEMPLATE_SCRIPT:-$ROOT_DIR/scripts/blockchain_mainnet_activation_metrics_missing_input_template.sh}"
+  if [[ ! -x "$metrics_missing_input_template_script" ]]; then
+    echo "missing helper script: $metrics_missing_input_template_script"
+    exit 2
+  fi
+  "$metrics_missing_input_template_script" "$@"
+}
+
 blockchain_mainnet_activation_metrics_input_template() {
   local metrics_input_template_script="${BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_INPUT_TEMPLATE_SCRIPT:-$ROOT_DIR/scripts/blockchain_mainnet_activation_metrics_input_template.sh}"
   if [[ ! -x "$metrics_input_template_script" ]]; then
@@ -14893,6 +14905,10 @@ main() {
     blockchain-mainnet-activation-metrics-missing-checklist)
       shift
       blockchain_mainnet_activation_metrics_missing_checklist "$@"
+      ;;
+    blockchain-mainnet-activation-metrics-missing-input-template)
+      shift
+      blockchain_mainnet_activation_metrics_missing_input_template "$@"
       ;;
     blockchain-mainnet-activation-metrics-input-template)
       shift

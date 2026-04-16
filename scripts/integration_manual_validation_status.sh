@@ -1177,7 +1177,7 @@ MANUAL_VALIDATION_PROFILE_COMPARE_SIGNOFF_SUMMARY_JSON="$PROFILE_SIGNOFF_SUMMARY
 RUNTIME_DOCTOR_SCRIPT="$FAKE_DOCTOR" \
 ./scripts/manual_validation_status.sh --show-json 1 >$PROFILE_NO_GO_INSUFFICIENT_LOG
 
-if ! rg -q '\[manual-validation-status\] profile_default_gate_next_command_sudo=sudo \./scripts/easy_node\.sh profile-compare-campaign-signoff' $PROFILE_NO_GO_INSUFFICIENT_LOG; then
+if ! rg -q '\[manual-validation-status\] profile_default_gate_next_command_sudo=sudo \./scripts/easy_node\.sh profile-default-gate-run' $PROFILE_NO_GO_INSUFFICIENT_LOG; then
   echo "profile-no-go-insufficient status missing profile_default_gate_next_command_sudo line"
   cat $PROFILE_NO_GO_INSUFFICIENT_LOG
   exit 1
@@ -1192,7 +1192,9 @@ if ! printf '%s\n' "$profile_no_go_insufficient_json" | jq -e --arg matrix "$PRO
   .summary.profile_default_gate.status == "pending"
   and .summary.profile_default_gate.insufficient_evidence == true
   and .summary.profile_default_gate.diagnostics_root_required == true
-  and (.summary.profile_default_gate.next_command | startswith("./scripts/easy_node.sh profile-compare-campaign-signoff"))
+  and (.summary.profile_default_gate.next_command | startswith("./scripts/easy_node.sh profile-default-gate-run"))
+  and (.summary.profile_default_gate.next_command | contains("--directory-a http://127.0.0.1:18081"))
+  and (.summary.profile_default_gate.next_command | contains("--directory-b http://127.0.0.1:28081"))
   and (.summary.profile_default_gate.next_command | contains("--campaign-execution-mode docker"))
   and (.summary.profile_default_gate.next_command | contains("--campaign-start-local-stack 0"))
   and (.summary.profile_default_gate.next_command | contains("--campaign-directory-urls"))
@@ -1202,7 +1204,9 @@ if ! printf '%s\n' "$profile_no_go_insufficient_json" | jq -e --arg matrix "$PRO
   and (.summary.profile_default_gate.next_command | contains("--campaign-issuer-url http://127.0.0.1:18082"))
   and (.summary.profile_default_gate.next_command | contains("--campaign-entry-url http://127.0.0.1:18083"))
   and (.summary.profile_default_gate.next_command | contains("--campaign-exit-url http://127.0.0.1:18084"))
-  and (.summary.profile_default_gate.next_command_sudo | startswith("sudo ./scripts/easy_node.sh profile-compare-campaign-signoff"))
+  and (.summary.profile_default_gate.next_command_sudo | startswith("sudo ./scripts/easy_node.sh profile-default-gate-run"))
+  and (.summary.profile_default_gate.next_command_sudo | contains("--directory-a http://127.0.0.1:18081"))
+  and (.summary.profile_default_gate.next_command_sudo | contains("--directory-b http://127.0.0.1:28081"))
   and (.summary.profile_default_gate.next_command_sudo | contains("--campaign-timeout-sec 1200"))
   and (.summary.profile_default_gate.notes | contains("subject fallback when --subject is omitted: CAMPAIGN_SUBJECT (preferred), INVITE_KEY fallback"))
   and (.summary.profile_default_gate.next_command_source | test("docker"))
@@ -1260,7 +1264,9 @@ if ! printf '%s\n' "$profile_no_go_insufficient_json" | jq -e '
   .summary.profile_default_gate.status == "pending"
   and .summary.profile_default_gate.insufficient_evidence == true
   and .summary.profile_default_gate.diagnostics_root_required == true
-  and (.summary.profile_default_gate.next_command | startswith("sudo ./scripts/easy_node.sh profile-compare-campaign-signoff"))
+  and (.summary.profile_default_gate.next_command | startswith("sudo ./scripts/easy_node.sh profile-default-gate-run"))
+  and (.summary.profile_default_gate.next_command | contains("--directory-a http://127.0.0.1:18081"))
+  and (.summary.profile_default_gate.next_command | contains("--directory-b http://127.0.0.1:28081"))
   and (.summary.profile_default_gate.next_command | contains("--campaign-timeout-sec 1200"))
   and .summary.profile_default_gate.next_command_source == "sudo_required_diagnostics_root_required_docker_start_local_stack_1"
   and .summary.profile_default_gate.next_command_sudo_only_reason == "diagnostics_root_required_docker_start_local_stack_1"
@@ -1349,13 +1355,13 @@ if ! printf '%s\n' "$profile_invalid_summary_json" | jq -e '
   and .summary.profile_default_gate.valid_json == false
   and (.summary.profile_default_gate.notes | contains("summary JSON is invalid"))
   and (.summary.profile_default_gate.notes | contains("subject fallback when --subject is omitted: CAMPAIGN_SUBJECT (preferred), INVITE_KEY fallback"))
-  and (
-    (.summary.profile_default_gate.next_command | startswith("./scripts/easy_node.sh profile-compare-campaign-signoff"))
-    or
-    (.summary.profile_default_gate.next_command | startswith("sudo ./scripts/easy_node.sh profile-compare-campaign-signoff"))
-  )
+  and (.summary.profile_default_gate.next_command | startswith("./scripts/easy_node.sh profile-default-gate-run"))
+  and (.summary.profile_default_gate.next_command | contains("--directory-a http://127.0.0.1:18081"))
+  and (.summary.profile_default_gate.next_command | contains("--directory-b http://127.0.0.1:28081"))
   and (.summary.profile_default_gate.next_command | contains("--campaign-timeout-sec 1200"))
-  and (.summary.profile_default_gate.next_command_sudo | startswith("sudo ./scripts/easy_node.sh profile-compare-campaign-signoff"))
+  and (.summary.profile_default_gate.next_command_sudo | startswith("sudo ./scripts/easy_node.sh profile-default-gate-run"))
+  and (.summary.profile_default_gate.next_command_sudo | contains("--directory-a http://127.0.0.1:18081"))
+  and (.summary.profile_default_gate.next_command_sudo | contains("--directory-b http://127.0.0.1:28081"))
   and (.summary.profile_default_gate.next_command_sudo | contains("--campaign-timeout-sec 1200"))
   and (.summary.profile_default_gate.next_command | contains("--summary-json '"$PROFILE_SIGNOFF_SUMMARY_JSON"'"))
 ' >/dev/null; then
