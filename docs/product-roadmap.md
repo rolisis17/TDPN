@@ -99,6 +99,22 @@ Strictly necessary vs optional (current project posture):
 - optional/expert (keep but do not make default): deep chaos/fault matrices, policy override flags, manual artifact-level campaign checks, and one-off diagnostics toggles
 - policy for UI and scripts: if a setting is rarely changed in healthy operation, it should be auto-defaulted, kept out of simple mode, and labeled as expert/custom
 
+Operator hardening snapshot (April 16, 2026, non-blockchain):
+- `pre-real-host-readiness` now supports explicit `--defer-no-root [0|1]` (default `0`, fail-closed by default).
+- `client-vpn-smoke` and `three-machine-prod-signoff` now pass their `--defer-no-root` setting through to `pre-real-host-readiness`, so defer behavior is consistent end-to-end.
+- `prod-pilot-runbook` now defaults pre-readiness defer to on for non-root operators (`auto` mode), and only continues after a pre-readiness failure when the failure is clearly root-only deferred; all other pre-readiness failures still block the runbook.
+- `prod-pilot-cohort-runbook` continues to use the same defer semantics at the top-level readiness gate before rounds begin.
+- manual readiness interpretation remains staged: it is expected to see `manual_validation_report.readiness_status=NOT_READY` while machine-C and true 3-machine external gates are still pending.
+
+What this means for operators:
+- if you are running as non-root and see a warning about root-only deferred pre-readiness, the pilot/cohort wrapper can proceed for diagnostics collection, but you should not treat that run as final production signoff.
+- next command after a root-only deferred warning is:
+  - `sudo ./scripts/easy_node.sh pre-real-host-readiness --strict-beta 1 --print-summary-json 1`
+- then rerun your pilot wrapper as root for final signoff evidence.
+
+Pending (documented, not yet complete):
+- continue improving server provider/authority operator diagnostics in wrapper UX (preflight/session surfaces) so HTTPS-vs-HTTP and peer/authority mismatch causes are surfaced even earlier in simple operator paths.
+
 ## Phase 1: Stable Linux Beta (Current Priority)
 
 Goal: reliable real-user beta on Linux servers + Linux clients.
@@ -237,7 +253,7 @@ Current implementation posture:
 - phase7 mainnet cutover CI wrapper is `scripts/ci_phase7_mainnet_cutover.sh`, with contract coverage in `scripts/integration_ci_phase7_mainnet_cutover.sh` for fail-closed stage ordering across check/run/handoff-check/handoff-run and first-failure RC propagation.
 - phase7 operator summary helper is `scripts/phase7_mainnet_cutover_summary_report.sh`, with integration coverage in `scripts/integration_phase7_mainnet_cutover_summary_report.sh`, and it aggregates check/run/handoff-check/handoff-run artifacts.
 - phase7 operator summary helper preserves optional `tdpnd_comet_runtime_smoke_ok` in the run signal snapshot, so Comet-mode validation can be surfaced when available without making it a hard requirement.
-- `scripts/roadmap_progress_report.sh` accepts optional `--blockchain-mainnet-activation-gate-summary-json` and surfaces `blockchain_track.mainnet_activation_gate` with available/status/decision/go/no_go/reasons/source_paths, staying fail-soft when the summary is missing or invalid.
+- `scripts/roadmap_progress_report.sh` accepts optional `--blockchain-mainnet-activation-gate-summary-json` and surfaces `blockchain_track.mainnet_activation_gate` with available/status/decision/go/no_go/reasons/source_paths, staying fail-soft when the summary is missing or invalid, and falling back to the Phase-7 propagated `mainnet_activation_gate_go` signal when no dedicated activation-gate summary is available.
 - phase7 cutover wrappers emit canonical summary artifacts consumed by the summary helper, including `phase7_mainnet_cutover_check_summary.json`, `phase7_mainnet_cutover_run_summary.json`, `phase7_mainnet_cutover_handoff_check_summary.json`, and `phase7_mainnet_cutover_handoff_run_summary.json`.
 - phase7 cutover CI/check/run/handoff-check/handoff-run wrappers feed canonical `.easy-node-logs` summary artifacts consumed by `scripts/phase7_mainnet_cutover_summary_report.sh`.
 - phase7 mainnet cutover safety posture requires phase6 readiness signals, dual-write parity confirmation, rollback path readiness, and an optional operator approval gate before promotion.

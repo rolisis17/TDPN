@@ -684,6 +684,10 @@ if ! rg -Fq "blockchain_track.mainnet_activation_gate" "$full_plan"; then
   echo "full execution plan must document blockchain_track.mainnet_activation_gate summary surface"
   exit 1
 fi
+if ! rg -Fq "Phase-7 propagated \`mainnet_activation_gate_go\` signal" "$full_plan"; then
+  echo "full execution plan must document phase7-signal fallback for mainnet activation gate summary surfacing"
+  exit 1
+fi
 if ! rg -Fq "Mainnet Activation Go/No-Go Metrics Gate" "$full_plan"; then
   echo "full execution plan must reference the blockchain mainnet activation gate policy"
   exit 1
@@ -985,6 +989,10 @@ if ! rg -Fq -- "--blockchain-mainnet-activation-gate-summary-json" "$product_roa
 fi
 if ! rg -Fq "blockchain_track.mainnet_activation_gate" "$product_roadmap"; then
   echo "product roadmap must document blockchain_track.mainnet_activation_gate summary surface"
+  exit 1
+fi
+if ! rg -Fq "Phase-7 propagated \`mainnet_activation_gate_go\` signal" "$product_roadmap"; then
+  echo "product roadmap must document phase7-signal fallback for mainnet activation gate summary surfacing"
   exit 1
 fi
 if ! rg -Fq "Mainnet Activation Go/No-Go Metrics Gate" "$product_roadmap"; then
@@ -2158,6 +2166,26 @@ if ! rg -Fq '.blockchain_track.mainnet_activation_gate.status == "missing"' "$ro
 fi
 if ! rg -Fq '.blockchain_track.mainnet_activation_gate.status == "invalid"' "$roadmap_integration_script"; then
   echo "roadmap progress report integration script must validate the invalid mainnet activation gate path"
+  exit 1
+fi
+if ! rg -Fq "phase7-mainnet-cutover-signal" "$roadmap_script"; then
+  echo "roadmap progress report helper must support phase7-signal fallback for mainnet activation gate when dedicated summary is absent"
+  exit 1
+fi
+if ! rg -Fq "blockchain mainnet activation gate phase7 signal fallback path" "$roadmap_integration_script"; then
+  echo "roadmap progress report integration script must validate the phase7-signal fallback path for mainnet activation gate"
+  exit 1
+fi
+if ! rg -Fq '.blockchain_track.mainnet_activation_gate.source_summary_kind == "phase7-mainnet-cutover-signal"' "$roadmap_integration_script"; then
+  echo "roadmap progress report integration script must validate phase7-signal source_summary_kind for mainnet activation gate fallback"
+  exit 1
+fi
+if ! rg -Fq "ROADMAP_PROGRESS_LOG_DIR" "$roadmap_script"; then
+  echo "roadmap progress report helper must expose ROADMAP_PROGRESS_LOG_DIR log-root override for deterministic isolated runs"
+  exit 1
+fi
+if ! rg -Fq "EASY_NODE_LOG_DIR" "$roadmap_script"; then
+  echo "roadmap progress report helper must honor EASY_NODE_LOG_DIR as a default log-root override"
   exit 1
 fi
 if ! rg -Fq "Mainnet Activation Go/No-Go Metrics Gate" "$bootstrap_validator_doc"; then

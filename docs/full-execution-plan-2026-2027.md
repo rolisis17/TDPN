@@ -41,6 +41,13 @@ Exit gate:
 - lock runbooks and reproducible release process
 - enforce SLO gates in pilot automation
 
+Operator note (April 16, 2026 non-blockchain hardening):
+- pre-real-host gating now supports explicit root-defer behavior (`--defer-no-root`), with fail-closed default.
+- pilot wrappers now treat root-only deferred readiness as warn-and-continue (for evidence collection) but still fail-close on all non-root-independent readiness failures.
+- practical next step after any root-only deferred warning is always a privileged rerun of pre-readiness before final signoff:
+  - `sudo ./scripts/easy_node.sh pre-real-host-readiness --strict-beta 1 --print-summary-json 1`
+  - then rerun pilot/cohort/signoff under root.
+
 ### Phase 3: Windows Native Client Beta
 - desktop-first client (`Tauri` + local daemon)
 - daemon control via stable local API:
@@ -76,7 +83,7 @@ Exit gate:
 - `scripts/phase7_mainnet_cutover_handoff_run.sh` + `scripts/integration_phase7_mainnet_cutover_handoff_run.sh`
 - `scripts/ci_phase7_mainnet_cutover.sh` + `scripts/integration_ci_phase7_mainnet_cutover.sh`
 - `scripts/phase7_mainnet_cutover_summary_report.sh` + `scripts/integration_phase7_mainnet_cutover_summary_report.sh`
-- `scripts/roadmap_progress_report.sh` accepts optional `--blockchain-mainnet-activation-gate-summary-json` and surfaces `blockchain_track.mainnet_activation_gate` with available/status/decision/go/no_go/reasons/source_paths, staying fail-soft when the summary is missing or invalid.
+- `scripts/roadmap_progress_report.sh` accepts optional `--blockchain-mainnet-activation-gate-summary-json` and surfaces `blockchain_track.mainnet_activation_gate` with available/status/decision/go/no_go/reasons/source_paths, staying fail-soft when the summary is missing or invalid, and falling back to the Phase-7 propagated `mainnet_activation_gate_go` signal when no dedicated activation-gate summary is available.
 - VPN dataplane remains independent from chain liveness during and after cutover.
 
 ## Cosmos Execution Update (April 16, 2026)
@@ -155,3 +162,7 @@ Exit gate:
 - VPN dataplane must never depend on chain finality/liveness.
 - simple UX remains simple; diagnostics depth remains available in expert flows.
 - `1hop` is never a silent fallback.
+- pre-readiness defer mode is never a silent success: root-only defer may continue selected runbooks with warning, but readiness stays non-ready until privileged reruns clear the gate.
+
+Near-term non-blockchain pending item:
+- expand server preflight/session operator diagnostics so provider/authority peering mismatches (including HTTPS-vs-HTTP endpoint posture) are surfaced consistently across simple and expert entrypoints.

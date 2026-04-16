@@ -348,7 +348,7 @@ resilience_summary_usable_01() {
 }
 
 roadmap_resilience_logs_root() {
-  local logs_root="${ROADMAP_PROGRESS_LOGS_ROOT:-$ROOT_DIR/.easy-node-logs}"
+  local logs_root="${ROADMAP_PROGRESS_LOGS_ROOT:-${ROADMAP_PROGRESS_LOG_DIR:-${EASY_NODE_LOG_DIR:-$ROOT_DIR/.easy-node-logs}}}"
   logs_root="$(abs_path "$logs_root")"
   printf '%s' "$logs_root"
 }
@@ -539,7 +539,8 @@ phase1_resilience_handoff_summary_usable_01() {
 }
 
 find_latest_phase1_resilience_handoff_summary_json() {
-  local logs_root="$ROOT_DIR/.easy-node-logs"
+  local logs_root
+  logs_root="$(roadmap_resilience_logs_root)"
   local candidate=""
   local candidate_mtime=0
   local candidate_score=0
@@ -1250,7 +1251,8 @@ phase2_linux_prod_candidate_summary_usable_01() {
 }
 
 find_latest_phase2_linux_prod_candidate_summary_json() {
-  local logs_root="$ROOT_DIR/.easy-node-logs"
+  local logs_root
+  logs_root="$(roadmap_resilience_logs_root)"
   local candidate=""
   local candidate_mtime=0
   local candidate_score=0
@@ -1361,7 +1363,8 @@ phase3_windows_client_beta_summary_usable_01() {
 }
 
 find_latest_phase3_windows_client_beta_summary_json() {
-  local logs_root="$ROOT_DIR/.easy-node-logs"
+  local logs_root
+  logs_root="$(roadmap_resilience_logs_root)"
   local candidate=""
   local candidate_mtime=0
   local candidate_score=0
@@ -1476,7 +1479,8 @@ phase4_windows_full_parity_summary_usable_01() {
 }
 
 find_latest_phase4_windows_full_parity_summary_json() {
-  local logs_root="$ROOT_DIR/.easy-node-logs"
+  local logs_root
+  logs_root="$(roadmap_resilience_logs_root)"
   local candidate=""
   local candidate_mtime=0
   local candidate_score=0
@@ -2168,7 +2172,8 @@ phase6_cosmos_l1_pick_best_source_summary_json() {
 }
 
 find_latest_phase6_cosmos_l1_summary_json() {
-  local logs_root="$ROOT_DIR/.easy-node-logs"
+  local logs_root
+  logs_root="$(roadmap_resilience_logs_root)"
   local candidate=""
   local candidate_mtime=0
   local candidate_score=0
@@ -2345,13 +2350,16 @@ single_machine_refresh_timeout_sec="${ROADMAP_PROGRESS_SINGLE_MACHINE_REFRESH_TI
 print_report="1"
 print_summary_json="1"
 
-summary_json="$ROOT_DIR/.easy-node-logs/roadmap_progress_summary.json"
-report_md="$ROOT_DIR/.easy-node-logs/roadmap_progress_report.md"
-manual_validation_summary_json="$ROOT_DIR/.easy-node-logs/manual_validation_readiness_summary.json"
-manual_validation_report_md="$ROOT_DIR/.easy-node-logs/manual_validation_readiness_report.md"
-profile_compare_signoff_summary_json="$ROOT_DIR/.easy-node-logs/profile_compare_campaign_signoff_summary.json"
-single_machine_summary_json="$ROOT_DIR/.easy-node-logs/single_machine_prod_readiness_latest.json"
-phase0_summary_json="${ROADMAP_PROGRESS_PHASE0_SUMMARY_JSON:-$ROOT_DIR/.easy-node-logs/ci_phase0_summary.json}"
+default_log_dir="${ROADMAP_PROGRESS_LOG_DIR:-${EASY_NODE_LOG_DIR:-$ROOT_DIR/.easy-node-logs}}"
+default_log_dir="$(abs_path "$default_log_dir")"
+
+summary_json="$default_log_dir/roadmap_progress_summary.json"
+report_md="$default_log_dir/roadmap_progress_report.md"
+manual_validation_summary_json="$default_log_dir/manual_validation_readiness_summary.json"
+manual_validation_report_md="$default_log_dir/manual_validation_readiness_report.md"
+profile_compare_signoff_summary_json="$default_log_dir/profile_compare_campaign_signoff_summary.json"
+single_machine_summary_json="$default_log_dir/single_machine_prod_readiness_latest.json"
+phase0_summary_json="${ROADMAP_PROGRESS_PHASE0_SUMMARY_JSON:-$default_log_dir/ci_phase0_summary.json}"
 phase1_resilience_handoff_summary_json="${ROADMAP_PROGRESS_PHASE1_RESILIENCE_HANDOFF_SUMMARY_JSON:-}"
 vpn_rc_resilience_summary_json="${ROADMAP_PROGRESS_VPN_RC_RESILIENCE_SUMMARY_JSON:-}"
 vpn_rc_resilience_summary_explicit_01="0"
@@ -2363,7 +2371,7 @@ phase3_windows_client_beta_summary_json="${ROADMAP_PROGRESS_PHASE3_WINDOWS_CLIEN
 phase4_windows_full_parity_summary_json="${ROADMAP_PROGRESS_PHASE4_WINDOWS_FULL_PARITY_SUMMARY_JSON:-}"
 phase5_settlement_layer_summary_json="${ROADMAP_PROGRESS_PHASE5_SETTLEMENT_LAYER_SUMMARY_JSON:-}"
 phase6_cosmos_l1_summary_json="${ROADMAP_PROGRESS_PHASE6_COSMOS_L1_SUMMARY_JSON:-}"
-phase7_mainnet_cutover_summary_json="${ROADMAP_PROGRESS_PHASE7_MAINNET_CUTOVER_SUMMARY_JSON:-$ROOT_DIR/.easy-node-logs/phase7_mainnet_cutover_summary_report.json}"
+phase7_mainnet_cutover_summary_json="${ROADMAP_PROGRESS_PHASE7_MAINNET_CUTOVER_SUMMARY_JSON:-$default_log_dir/phase7_mainnet_cutover_summary_report.json}"
 phase7_mainnet_cutover_summary_json="$(abs_path "$phase7_mainnet_cutover_summary_json")"
 blockchain_mainnet_activation_gate_summary_json="${ROADMAP_PROGRESS_BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SUMMARY_JSON:-}"
 blockchain_mainnet_activation_gate_summary_json="$(abs_path "$blockchain_mainnet_activation_gate_summary_json")"
@@ -2529,7 +2537,7 @@ mkdir -p "$(dirname "$manual_validation_summary_json")"
 mkdir -p "$(dirname "$manual_validation_report_md")"
 mkdir -p "$(dirname "$single_machine_summary_json")"
 
-log_dir="$ROOT_DIR/.easy-node-logs"
+log_dir="$default_log_dir"
 mkdir -p "$log_dir"
 ts="$(date +%Y%m%d_%H%M%S)"
 manual_refresh_log="$log_dir/roadmap_progress_manual_validation_${ts}.log"
@@ -4092,6 +4100,34 @@ if [[ -n "$blockchain_mainnet_activation_gate_summary_json" ]]; then
     else
       blockchain_mainnet_activation_gate_status_json="invalid"
     fi
+  fi
+fi
+
+# Fallback: when no dedicated activation-gate summary is available, inherit the
+# phase7 propagated mainnet_activation_gate_go signal if present.
+if [[ "$blockchain_mainnet_activation_gate_status_json" == "missing" ]] \
+  && [[ -z "$blockchain_mainnet_activation_gate_input_summary_json" ]] \
+  && [[ "$phase7_mainnet_cutover_summary_mainnet_activation_gate_go_ok_json" != "null" ]]; then
+  blockchain_mainnet_activation_gate_available_json="true"
+  blockchain_mainnet_activation_gate_source_summary_json="$phase7_mainnet_cutover_summary_source_summary_json"
+  if [[ -n "$blockchain_mainnet_activation_gate_source_summary_json" ]]; then
+    blockchain_mainnet_activation_gate_input_summary_json="$blockchain_mainnet_activation_gate_source_summary_json"
+    blockchain_mainnet_activation_gate_source_paths_json="$(jq -nc --arg p "$blockchain_mainnet_activation_gate_source_summary_json" '[$p]')"
+  else
+    blockchain_mainnet_activation_gate_source_paths_json="[]"
+  fi
+  blockchain_mainnet_activation_gate_source_summary_kind="phase7-mainnet-cutover-signal"
+  blockchain_mainnet_activation_gate_go_json="$phase7_mainnet_cutover_summary_mainnet_activation_gate_go_ok_json"
+  if [[ "$phase7_mainnet_cutover_summary_mainnet_activation_gate_go_ok_json" == "true" ]]; then
+    blockchain_mainnet_activation_gate_status_json="go"
+    blockchain_mainnet_activation_gate_decision_json="GO"
+    blockchain_mainnet_activation_gate_no_go_json="false"
+    blockchain_mainnet_activation_gate_reasons_json="[]"
+  else
+    blockchain_mainnet_activation_gate_status_json="no-go"
+    blockchain_mainnet_activation_gate_decision_json="NO-GO"
+    blockchain_mainnet_activation_gate_no_go_json="true"
+    blockchain_mainnet_activation_gate_reasons_json='["derived from phase7 mainnet_activation_gate_go signal=false"]'
   fi
 fi
 

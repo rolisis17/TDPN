@@ -17,106 +17,10 @@ mkdir -p "$INTEGRATION_STDOUT_LOG_DIR"
 ROADMAP_PROGRESS_REPORT_LOG_PREFIX="$INTEGRATION_STDOUT_LOG_DIR/integration_roadmap_progress_report"
 ROADMAP_PROGRESS_FORWARD_SUMMARY_JSON="$TMP_DIR/roadmap_progress_forward_summary.json"
 
-CANONICAL_LOG_DIR="$ROOT_DIR/.easy-node-logs"
-CANONICAL_LOG_DIR_EXISTED="0"
-if [[ -d "$CANONICAL_LOG_DIR" ]]; then
-  CANONICAL_LOG_DIR_EXISTED="1"
-fi
-CANONICAL_SNAPSHOT_DIR="$TMP_DIR/canonical_easy_node_logs_snapshot"
-CANONICAL_SNAPSHOT_MANIFEST="$CANONICAL_SNAPSHOT_DIR/manifest.txt"
-
-CANONICAL_SUMMARY_GLOBS=(
-  "$CANONICAL_LOG_DIR/roadmap_progress_summary.json"
-  "$CANONICAL_LOG_DIR/roadmap_progress_report.md"
-  "$CANONICAL_LOG_DIR/manual_validation_readiness_summary.json"
-  "$CANONICAL_LOG_DIR/manual_validation_readiness_report.md"
-  "$CANONICAL_LOG_DIR/profile_compare_campaign_signoff_summary.json"
-  "$CANONICAL_LOG_DIR/single_machine_prod_readiness_latest.json"
-  "$CANONICAL_LOG_DIR/phase5_settlement_layer*_summary.json"
-  "$CANONICAL_LOG_DIR/phase6_cosmos_l1*_summary.json"
-  "$CANONICAL_LOG_DIR/ci_phase6_cosmos_l1*_summary.json"
-  "$CANONICAL_LOG_DIR/phase7_mainnet_cutover*_summary.json"
-  "$CANONICAL_LOG_DIR/phase5_settlement_layer_*"
-  "$CANONICAL_LOG_DIR/phase6_cosmos_l1_build_testnet_*"
-  "$CANONICAL_LOG_DIR/phase7_mainnet_cutover_*"
-)
-
-snapshot_canonical_summary_artifacts() {
-  local rel=""
-  local path=""
-  mkdir -p "$CANONICAL_SNAPSHOT_DIR"
-  : >"$CANONICAL_SNAPSHOT_MANIFEST"
-
-  local -A seen_paths=()
-  shopt -s nullglob
-  for pattern in "${CANONICAL_SUMMARY_GLOBS[@]}"; do
-    for path in $pattern; do
-      if [[ -n "${seen_paths[$path]+x}" ]]; then
-        continue
-      fi
-      seen_paths["$path"]=1
-      if [[ ! -e "$path" ]]; then
-        continue
-      fi
-
-      rel="${path#"$ROOT_DIR"/}"
-      if [[ "$rel" == "$path" ]]; then
-        continue
-      fi
-      printf '%s\n' "$rel" >>"$CANONICAL_SNAPSHOT_MANIFEST"
-      mkdir -p "$CANONICAL_SNAPSHOT_DIR/$(dirname "$rel")"
-      if [[ -d "$path" ]]; then
-        cp -a "$path" "$CANONICAL_SNAPSHOT_DIR/$rel"
-      else
-        cp -p "$path" "$CANONICAL_SNAPSHOT_DIR/$rel"
-      fi
-    done
-  done
-  shopt -u nullglob
-}
-
-restore_canonical_summary_artifacts() {
-  local rel=""
-  local path=""
-  local snapshot_path=""
-
-  shopt -s nullglob
-  for pattern in "${CANONICAL_SUMMARY_GLOBS[@]}"; do
-    for path in $pattern; do
-      if [[ -e "$path" ]]; then
-        rm -rf "$path"
-      fi
-    done
-  done
-  shopt -u nullglob
-
-  if [[ -f "$CANONICAL_SNAPSHOT_MANIFEST" ]]; then
-    while IFS= read -r rel; do
-      if [[ -z "$rel" ]]; then
-        continue
-      fi
-      path="$ROOT_DIR/$rel"
-      snapshot_path="$CANONICAL_SNAPSHOT_DIR/$rel"
-      mkdir -p "$(dirname "$path")"
-      if [[ -d "$snapshot_path" ]]; then
-        cp -a "$snapshot_path" "$path"
-      else
-        cp -p "$snapshot_path" "$path"
-      fi
-    done <"$CANONICAL_SNAPSHOT_MANIFEST"
-  fi
-
-  if [[ "$CANONICAL_LOG_DIR_EXISTED" == "0" ]] && [[ -d "$CANONICAL_LOG_DIR" ]]; then
-    rmdir "$CANONICAL_LOG_DIR" >/dev/null 2>&1 || true
-  fi
-}
-
 cleanup_integration_artifacts() {
-  restore_canonical_summary_artifacts
   rm -rf "$TMP_DIR"
 }
 trap 'cleanup_integration_artifacts' EXIT
-snapshot_canonical_summary_artifacts
 
 TEST_LOG_DIR="$TMP_DIR/easy-node-logs"
 TEST_STATE_DIR="$TMP_DIR/manual-validation-state"
@@ -764,6 +668,8 @@ if ! jq -e '
   and .vpn_track.phase5_settlement_layer_handoff.issuer_sponsor_api_live_smoke_status == "pass"
   and .vpn_track.phase5_settlement_layer_handoff.issuer_sponsor_api_live_smoke_ok == true
   and .artifacts.phase0_summary_json == "'"$PHASE0_SUMMARY_JSON"'"
+  and .artifacts.manual_validation_summary_json == "'"$TEST_LOG_DIR/manual_validation_readiness_summary.json"'"
+  and .artifacts.manual_validation_report_md == "'"$TEST_LOG_DIR/manual_validation_readiness_report.md"'"
 ' "$SUMMARY_JSON" >/dev/null; then
   echo "summary JSON missing expected fields"
   cat "$SUMMARY_JSON"
@@ -931,6 +837,39 @@ if ! jq -e '
 ' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_missing_summary.json" >/dev/null; then
   echo "missing gate summary JSON missing expected fallback fields"
   cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_missing_summary.json"
+  exit 1
+fi
+
+echo "[roadmap-progress-report] blockchain mainnet activation gate phase7 signal fallback path"
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$MINIMAL_MANUAL_SUMMARY_JSON" \
+  --phase7-mainnet-cutover-summary-json "$PHASE7_MAINNET_CUTOVER_CHECK_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_mainnet_activation_gate_phase7_signal_fallback_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_mainnet_activation_gate_phase7_signal_fallback_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_phase7_signal_fallback.log 2>&1; then
+  echo "expected success when mainnet activation gate is derived from phase7 signal"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_phase7_signal_fallback.log
+  exit 1
+fi
+if ! jq -e --arg src "$PHASE7_MAINNET_CUTOVER_CHECK_SUMMARY_JSON" '
+  .blockchain_track.phase7_mainnet_cutover_summary_report.available == true
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.mainnet_activation_gate_go_ok == true
+  and .blockchain_track.mainnet_activation_gate.available == true
+  and .blockchain_track.mainnet_activation_gate.status == "go"
+  and .blockchain_track.mainnet_activation_gate.decision == "GO"
+  and .blockchain_track.mainnet_activation_gate.go == true
+  and .blockchain_track.mainnet_activation_gate.no_go == false
+  and (.blockchain_track.mainnet_activation_gate.reasons | length) == 0
+  and .blockchain_track.mainnet_activation_gate.input_summary_json == $src
+  and .blockchain_track.mainnet_activation_gate.source_summary_json == $src
+  and .blockchain_track.mainnet_activation_gate.source_summary_kind == "phase7-mainnet-cutover-signal"
+  and ((.blockchain_track.mainnet_activation_gate.source_paths // []) | index($src)) != null
+' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_phase7_signal_fallback_summary.json" >/dev/null; then
+  echo "phase7-signal fallback gate summary missing expected fields"
+  cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_phase7_signal_fallback_summary.json"
   exit 1
 fi
 
