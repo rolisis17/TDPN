@@ -32,6 +32,9 @@ if [[ "${FAKE_CAMPAIGN_FAIL_UNLESS_DOCKER:-0}" == "1" && " $* " != *" --executio
   echo "${FAKE_CAMPAIGN_FAIL_MESSAGE:---start-local-stack=1 requires root (run with sudo)}" >&2
   exit "${FAKE_CAMPAIGN_FAIL_UNLESS_DOCKER_RC:-31}"
 fi
+if [[ "${FAKE_CAMPAIGN_SLEEP_SEC:-0}" =~ ^[0-9]+$ ]] && [[ "${FAKE_CAMPAIGN_SLEEP_SEC:-0}" -gt 0 ]]; then
+  sleep "${FAKE_CAMPAIGN_SLEEP_SEC}"
+fi
 summary_json=""
 report_md=""
 while [[ $# -gt 0 ]]; do
@@ -196,6 +199,79 @@ for expected in \
     exit 1
   fi
 done
+
+echo "[profile-compare-campaign-signoff] alias forwarding works"
+: >"$SIGNOFF_CAPTURE"
+ALIAS_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_alias_summary.json"
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_COMPARE_CAMPAIGN_SCRIPT="$FAKE_CAMPAIGN" \
+PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT="$FAKE_CHECK" \
+FAKE_CAMPAIGN_RC=0 \
+FAKE_CHECK_RC=0 \
+FAKE_CHECK_DECISION=GO \
+./scripts/profile_compare_campaign_signoff.sh \
+  --reports-dir "$TMP_DIR/reports_alias" \
+  --refresh-campaign 1 \
+  --campaign-execution-mode docker \
+  --subject "inv-alias-test" \
+  --summary-json "$ALIAS_SUMMARY" >/tmp/integration_profile_compare_campaign_signoff_alias.log 2>&1
+
+if ! rg -q '\[profile-compare-campaign-signoff\] status=ok final_rc=0 decision=GO' /tmp/integration_profile_compare_campaign_signoff_alias.log; then
+  echo "expected alias forwarding status line not found"
+  cat /tmp/integration_profile_compare_campaign_signoff_alias.log
+  exit 1
+fi
+if ! rg -q -- '--subject inv-alias-test' "$SIGNOFF_CAPTURE"; then
+  echo "expected alias subject forwarding flag missing"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+if ! jq -e '.status == "ok" and .final_rc == 0 and .inputs.campaign_refresh_overrides.subject_configured == true and .inputs.campaign_refresh_overrides.anon_cred_configured == false' "$ALIAS_SUMMARY" >/dev/null 2>&1; then
+  echo "alias forwarding summary JSON missing expected fields"
+  cat "$ALIAS_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-compare-campaign-signoff] conflicting alias and campaign-prefixed values fail clearly"
+set +e
+./scripts/profile_compare_campaign_signoff.sh \
+  --reports-dir "$TMP_DIR/reports_conflict_subject" \
+  --refresh-campaign 1 \
+  --subject inv-alias-a \
+  --campaign-subject inv-alias-b \
+  --summary-json "$TMP_DIR/profile_compare_campaign_signoff_conflict_subject.json" >/tmp/integration_profile_compare_campaign_signoff_conflict_subject.log 2>&1
+rc_conflict_subject=$?
+set -e
+if [[ "$rc_conflict_subject" -ne 2 ]]; then
+  echo "expected rc=2 when --subject conflicts with --campaign-subject"
+  cat /tmp/integration_profile_compare_campaign_signoff_conflict_subject.log
+  exit 1
+fi
+if ! rg -q 'conflicting subject values: --subject and --campaign-subject must match when both are provided' /tmp/integration_profile_compare_campaign_signoff_conflict_subject.log; then
+  echo "expected subject conflict error message missing"
+  cat /tmp/integration_profile_compare_campaign_signoff_conflict_subject.log
+  exit 1
+fi
+
+set +e
+./scripts/profile_compare_campaign_signoff.sh \
+  --reports-dir "$TMP_DIR/reports_conflict_anon" \
+  --refresh-campaign 1 \
+  --anon-cred anon-a \
+  --campaign-anon-cred anon-b \
+  --summary-json "$TMP_DIR/profile_compare_campaign_signoff_conflict_anon.json" >/tmp/integration_profile_compare_campaign_signoff_conflict_anon.log 2>&1
+rc_conflict_anon=$?
+set -e
+if [[ "$rc_conflict_anon" -ne 2 ]]; then
+  echo "expected rc=2 when --anon-cred conflicts with --campaign-anon-cred"
+  cat /tmp/integration_profile_compare_campaign_signoff_conflict_anon.log
+  exit 1
+fi
+if ! rg -q 'conflicting anon credential values: --anon-cred and --campaign-anon-cred must match when both are provided' /tmp/integration_profile_compare_campaign_signoff_conflict_anon.log; then
+  echo "expected anon-cred conflict error message missing"
+  cat /tmp/integration_profile_compare_campaign_signoff_conflict_anon.log
+  exit 1
+fi
 
 echo "[profile-compare-campaign-signoff] campaign-subject/campaign-anon-cred mutual exclusion"
 set +e
@@ -537,6 +613,222 @@ if ! jq -e '.status == "fail" and .final_rc == 1 and .failure_stage == "campaign
   cat "$CHECK_FAIL_INVALID_SUMMARY"
   exit 1
 fi
+
+echo "[profile-compare-campaign-signoff] concurrent default lock fails fast"
+: >"$SIGNOFF_CAPTURE"
+LOCK_REPORTS_DIR="$TMP_DIR/reports_lock_default"
+LOCK_FIRST_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_lock_first.json"
+LOCK_SECOND_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_lock_second.json"
+LOCK_FIRST_LOG="/tmp/integration_profile_compare_campaign_signoff_lock_first.log"
+LOCK_SECOND_LOG="/tmp/integration_profile_compare_campaign_signoff_lock_second.log"
+
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_COMPARE_CAMPAIGN_SCRIPT="$FAKE_CAMPAIGN" \
+PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT="$FAKE_CHECK" \
+FAKE_CAMPAIGN_SLEEP_SEC=6 \
+FAKE_CAMPAIGN_RC=0 \
+FAKE_CHECK_RC=0 \
+./scripts/profile_compare_campaign_signoff.sh \
+  --reports-dir "$LOCK_REPORTS_DIR" \
+  --refresh-campaign 1 \
+  --campaign-summary-json "$TMP_DIR/lock_default_first_campaign_summary.json" \
+  --campaign-report-md "$TMP_DIR/lock_default_first_campaign_report.md" \
+  --campaign-check-summary-json "$TMP_DIR/lock_default_first_campaign_check_summary.json" \
+  --summary-json "$LOCK_FIRST_SUMMARY" >"$LOCK_FIRST_LOG" 2>&1 &
+lock_first_pid=$!
+
+lock_wait_ok=0
+for _ in $(seq 1 50); do
+  if [[ -d "$LOCK_REPORTS_DIR/.profile_compare_campaign_signoff.lock" ]]; then
+    lock_wait_ok=1
+    break
+  fi
+  sleep 0.1
+done
+if [[ "$lock_wait_ok" -ne 1 ]]; then
+  echo "timed out waiting for default lock directory"
+  cat "$LOCK_FIRST_LOG"
+  kill "$lock_first_pid" >/dev/null 2>&1 || true
+  wait "$lock_first_pid" >/dev/null 2>&1 || true
+  exit 1
+fi
+
+set +e
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_COMPARE_CAMPAIGN_SCRIPT="$FAKE_CAMPAIGN" \
+PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT="$FAKE_CHECK" \
+FAKE_CAMPAIGN_RC=0 \
+FAKE_CHECK_RC=0 \
+./scripts/profile_compare_campaign_signoff.sh \
+  --reports-dir "$LOCK_REPORTS_DIR" \
+  --refresh-campaign 1 \
+  --campaign-summary-json "$TMP_DIR/lock_default_second_campaign_summary.json" \
+  --campaign-report-md "$TMP_DIR/lock_default_second_campaign_report.md" \
+  --campaign-check-summary-json "$TMP_DIR/lock_default_second_campaign_check_summary.json" \
+  --summary-json "$LOCK_SECOND_SUMMARY" >"$LOCK_SECOND_LOG" 2>&1
+rc_lock_default_second=$?
+set -e
+if [[ "$rc_lock_default_second" -ne 3 ]]; then
+  echo "expected rc=3 when second concurrent signoff is blocked by lock"
+  cat "$LOCK_SECOND_LOG"
+  kill "$lock_first_pid" >/dev/null 2>&1 || true
+  wait "$lock_first_pid" >/dev/null 2>&1 || true
+  exit 1
+fi
+for expected in \
+  'another signoff run is already active for this reports-dir' \
+  'reports_dir:' \
+  'lock_dir:' \
+  'active_pid:' \
+  'active_start_time_utc:' \
+  'active_cmd:' \
+  '--allow-concurrent 1'; do
+  if ! rg -q -- "$expected" "$LOCK_SECOND_LOG"; then
+    echo "expected concurrent lock error detail missing: $expected"
+    cat "$LOCK_SECOND_LOG"
+    kill "$lock_first_pid" >/dev/null 2>&1 || true
+    wait "$lock_first_pid" >/dev/null 2>&1 || true
+    exit 1
+  fi
+done
+
+wait "$lock_first_pid"
+if ! jq -e '.status == "ok" and .final_rc == 0 and .inputs.signoff_lock.enabled == true and .inputs.signoff_lock.override_enabled == false and .inputs.signoff_lock.allow_concurrent == false' "$LOCK_FIRST_SUMMARY" >/dev/null 2>&1; then
+  echo "expected first locked run summary to report lock enabled"
+  cat "$LOCK_FIRST_SUMMARY"
+  exit 1
+fi
+if [[ -d "$LOCK_REPORTS_DIR/.profile_compare_campaign_signoff.lock" ]]; then
+  echo "lock directory should be cleaned up after first run exits"
+  exit 1
+fi
+if [[ -f "$LOCK_SECOND_SUMMARY" ]]; then
+  echo "second lock-blocked run should not produce signoff summary"
+  cat "$LOCK_SECOND_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-compare-campaign-signoff] override allows concurrent run"
+: >"$SIGNOFF_CAPTURE"
+LOCK_OVERRIDE_REPORTS_DIR="$TMP_DIR/reports_lock_override"
+LOCK_OVERRIDE_FIRST_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_lock_override_first.json"
+LOCK_OVERRIDE_SECOND_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_lock_override_second.json"
+LOCK_OVERRIDE_FIRST_LOG="/tmp/integration_profile_compare_campaign_signoff_lock_override_first.log"
+LOCK_OVERRIDE_SECOND_LOG="/tmp/integration_profile_compare_campaign_signoff_lock_override_second.log"
+
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_COMPARE_CAMPAIGN_SCRIPT="$FAKE_CAMPAIGN" \
+PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT="$FAKE_CHECK" \
+FAKE_CAMPAIGN_SLEEP_SEC=6 \
+FAKE_CAMPAIGN_RC=0 \
+FAKE_CHECK_RC=0 \
+./scripts/profile_compare_campaign_signoff.sh \
+  --reports-dir "$LOCK_OVERRIDE_REPORTS_DIR" \
+  --refresh-campaign 1 \
+  --campaign-summary-json "$TMP_DIR/lock_override_first_campaign_summary.json" \
+  --campaign-report-md "$TMP_DIR/lock_override_first_campaign_report.md" \
+  --campaign-check-summary-json "$TMP_DIR/lock_override_first_campaign_check_summary.json" \
+  --summary-json "$LOCK_OVERRIDE_FIRST_SUMMARY" >"$LOCK_OVERRIDE_FIRST_LOG" 2>&1 &
+lock_override_first_pid=$!
+
+lock_override_wait_ok=0
+for _ in $(seq 1 50); do
+  if [[ -d "$LOCK_OVERRIDE_REPORTS_DIR/.profile_compare_campaign_signoff.lock" ]]; then
+    lock_override_wait_ok=1
+    break
+  fi
+  sleep 0.1
+done
+if [[ "$lock_override_wait_ok" -ne 1 ]]; then
+  echo "timed out waiting for lock directory before override run"
+  cat "$LOCK_OVERRIDE_FIRST_LOG"
+  kill "$lock_override_first_pid" >/dev/null 2>&1 || true
+  wait "$lock_override_first_pid" >/dev/null 2>&1 || true
+  exit 1
+fi
+
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_COMPARE_CAMPAIGN_SCRIPT="$FAKE_CAMPAIGN" \
+PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT="$FAKE_CHECK" \
+FAKE_CAMPAIGN_RC=0 \
+FAKE_CHECK_RC=0 \
+./scripts/profile_compare_campaign_signoff.sh \
+  --reports-dir "$LOCK_OVERRIDE_REPORTS_DIR" \
+  --refresh-campaign 1 \
+  --allow-concurrent 1 \
+  --campaign-summary-json "$TMP_DIR/lock_override_second_campaign_summary.json" \
+  --campaign-report-md "$TMP_DIR/lock_override_second_campaign_report.md" \
+  --campaign-check-summary-json "$TMP_DIR/lock_override_second_campaign_check_summary.json" \
+  --summary-json "$LOCK_OVERRIDE_SECOND_SUMMARY" >"$LOCK_OVERRIDE_SECOND_LOG" 2>&1
+
+wait "$lock_override_first_pid"
+if ! jq -e '.status == "ok" and .final_rc == 0 and .inputs.signoff_lock.enabled == true and .inputs.signoff_lock.override_enabled == false and .inputs.signoff_lock.allow_concurrent == false' "$LOCK_OVERRIDE_FIRST_SUMMARY" >/dev/null 2>&1; then
+  echo "expected override first run summary to report lock enabled"
+  cat "$LOCK_OVERRIDE_FIRST_SUMMARY"
+  exit 1
+fi
+if ! jq -e '.status == "ok" and .final_rc == 0 and .inputs.signoff_lock.enabled == false and .inputs.signoff_lock.override_enabled == true and .inputs.signoff_lock.allow_concurrent == true' "$LOCK_OVERRIDE_SECOND_SUMMARY" >/dev/null 2>&1; then
+  echo "expected override second run summary to report lock override"
+  cat "$LOCK_OVERRIDE_SECOND_SUMMARY"
+  exit 1
+fi
+if [[ -d "$LOCK_OVERRIDE_REPORTS_DIR/.profile_compare_campaign_signoff.lock" ]]; then
+  echo "lock directory should be cleaned up after override scenario completes"
+  exit 1
+fi
+
+echo "[profile-compare-campaign-signoff] decision diagnostics + operator action mapping"
+DIAG_REPORTS_DIR="$TMP_DIR/reports_diag_actions"
+mkdir -p "$DIAG_REPORTS_DIR"
+DIAG_CAMPAIGN_JSON="$DIAG_REPORTS_DIR/profile_compare_campaign_summary.json"
+DIAG_REPORT_MD="$DIAG_REPORTS_DIR/profile_compare_campaign_report.md"
+printf '# diag report\n' >"$DIAG_REPORT_MD"
+
+run_diag_case() {
+  local case_name="$1"
+  local diagnostics_json="$2"
+  local expected_action="$3"
+  local summary_out="$TMP_DIR/profile_compare_campaign_signoff_diag_${case_name}.json"
+  local check_out="$DIAG_REPORTS_DIR/profile_compare_campaign_check_summary_${case_name}.json"
+
+  cat >"$DIAG_CAMPAIGN_JSON" <<EOF_DIAG
+{
+  "version": 1,
+  "status": "pass",
+  "summary": {"runs_total": 3},
+  "decision": {"recommended_default_profile": "balanced"},
+  "trend": {"status": "pass"},
+  "diagnostics": $diagnostics_json
+}
+EOF_DIAG
+
+  SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+  PROFILE_COMPARE_CAMPAIGN_SCRIPT="$FAKE_CAMPAIGN" \
+  PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT="$FAKE_CHECK" \
+  FAKE_CHECK_RC=0 \
+  FAKE_CHECK_DECISION=GO \
+  ./scripts/profile_compare_campaign_signoff.sh \
+    --reports-dir "$DIAG_REPORTS_DIR" \
+    --refresh-campaign 0 \
+    --campaign-summary-json "$DIAG_CAMPAIGN_JSON" \
+    --campaign-report-md "$DIAG_REPORT_MD" \
+    --campaign-check-summary-json "$check_out" \
+    --summary-json "$summary_out" >/tmp/integration_profile_compare_campaign_signoff_diag_${case_name}.log 2>&1
+
+  if ! jq -e --arg expected_action "$expected_action" --argjson expected_diag "$diagnostics_json" \
+    '.status == "ok" and .final_rc == 0 and .decision.decision == "GO" and .decision.diagnostics == $expected_diag and .decision.next_operator_action == $expected_action' \
+    "$summary_out" >/dev/null 2>&1; then
+    echo "diagnostics mapping assertion failed for case=$case_name"
+    cat "$summary_out"
+    exit 1
+  fi
+}
+
+run_diag_case "token" '{"failure_kinds":["token_proof_invalid"]}' "Use a fresh invite key from active issuer and rerun signoff"
+run_diag_case "unknown" '{"failure_kinds":["unknown_exit"]}' "Use a fresh invite key from active issuer and rerun signoff"
+run_diag_case "transport" '{"failure_kinds":["transport_mismatch"]}' "Rerun with remote docker campaign and opaque/udp transport defaults"
+run_diag_case "trust" '{"failure_kinds":["directory_trust"]}' "Run trust/runtime reset path then rerun"
+run_diag_case "none" '{"failure_kinds":[]}' ""
 
 FAKE_FORWARD="$TMP_DIR/fake_profile_compare_campaign_signoff_forward.sh"
 cat >"$FAKE_FORWARD" <<'EOF_FORWARD'

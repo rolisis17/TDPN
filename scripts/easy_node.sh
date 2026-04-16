@@ -241,9 +241,11 @@ Usage:
   ./scripts/easy_node.sh vpn-rc-resilience-path [--docker-profile-matrix-timeout-sec N] [--rc-matrix-path-timeout-sec N] [vpn_rc_resilience_path args...]
   ./scripts/easy_node.sh vpn-non-blockchain-fastlane [--parallel [0|1]] [vpn_non_blockchain_fastlane args...]
   ./scripts/easy_node.sh blockchain-fastlane [blockchain_fastlane args...]
+  ./scripts/easy_node.sh ci-blockchain-parallel-sweep [ci_blockchain_parallel_sweep args...]
   ./scripts/easy_node.sh blockchain-mainnet-activation-metrics [blockchain_mainnet_activation_metrics args...]
   ./scripts/easy_node.sh blockchain-mainnet-activation-gate [blockchain_mainnet_activation_gate args...]
-  ./scripts/easy_node.sh roadmap-non-blockchain-actionable-run [--recommended-only [0|1]] [--max-actions N] [--action-timeout-sec N] [roadmap_non_blockchain_actionable_run args...]
+  ./scripts/easy_node.sh blockchain-bootstrap-governance-graduation-gate [blockchain_bootstrap_governance_graduation_gate args...]
+  ./scripts/easy_node.sh roadmap-non-blockchain-actionable-run [--recommended-only [0|1]] [--max-actions N] [--action-timeout-sec N] [--parallel [0|1]] [roadmap_non_blockchain_actionable_run args...]
   ./scripts/easy_node.sh ci-phase0 [ci_phase0 args...]
   ./scripts/easy_node.sh ci-phase1-resilience [--three-machine-docker-profile-matrix-timeout-sec N] [--profile-compare-docker-matrix-timeout-sec N] [--three-machine-docker-profile-matrix-record-timeout-sec N] [--vpn-rc-matrix-path-timeout-sec N] [--vpn-rc-resilience-path-timeout-sec N] [--session-churn-guard-timeout-sec N] [--3hop-runtime-integration-timeout-sec N] [ci_phase1_resilience args...]
   ./scripts/easy_node.sh phase1-resilience-handoff-check [phase1_resilience_handoff_check args...]
@@ -288,7 +290,7 @@ Usage:
   ./scripts/easy_node.sh manual-validation-report
   ./scripts/easy_node.sh incident-snapshot [--bundle-dir PATH]
 
-Operator-safe commands are listed above. Full command and flag reference is available in expert help.
+Simple mode commands are listed above. Advanced flags are intentionally omitted here and grouped in expert help.
 Expert help:
   ./scripts/easy_node.sh --help --expert
   ./scripts/easy_node.sh help --expert
@@ -364,9 +366,11 @@ Usage:
   ./scripts/easy_node.sh vpn-rc-resilience-path [--docker-profile-matrix-timeout-sec N] [--rc-matrix-path-timeout-sec N] [vpn_rc_resilience_path args...]
   ./scripts/easy_node.sh vpn-non-blockchain-fastlane [--parallel [0|1]] [vpn_non_blockchain_fastlane args...]
   ./scripts/easy_node.sh blockchain-fastlane [blockchain_fastlane args...]
+  ./scripts/easy_node.sh ci-blockchain-parallel-sweep [ci_blockchain_parallel_sweep args...]
   ./scripts/easy_node.sh blockchain-mainnet-activation-metrics [blockchain_mainnet_activation_metrics args...]
   ./scripts/easy_node.sh blockchain-mainnet-activation-gate [blockchain_mainnet_activation_gate args...]
-  ./scripts/easy_node.sh roadmap-non-blockchain-actionable-run [--recommended-only [0|1]] [--max-actions N] [--action-timeout-sec N] [roadmap_non_blockchain_actionable_run args...]
+  ./scripts/easy_node.sh blockchain-bootstrap-governance-graduation-gate [blockchain_bootstrap_governance_graduation_gate args...]
+  ./scripts/easy_node.sh roadmap-non-blockchain-actionable-run [--recommended-only [0|1]] [--max-actions N] [--action-timeout-sec N] [--parallel [0|1]] [roadmap_non_blockchain_actionable_run args...]
   ./scripts/easy_node.sh ci-phase0 [ci_phase0 args...]
   ./scripts/easy_node.sh ci-phase1-resilience [--three-machine-docker-profile-matrix-timeout-sec N] [--profile-compare-docker-matrix-timeout-sec N] [--three-machine-docker-profile-matrix-record-timeout-sec N] [--vpn-rc-matrix-path-timeout-sec N] [--vpn-rc-resilience-path-timeout-sec N] [--session-churn-guard-timeout-sec N] [--3hop-runtime-integration-timeout-sec N] [ci_phase1_resilience args...]
   ./scripts/easy_node.sh phase1-resilience-handoff-check [phase1_resilience_handoff_check args...]
@@ -473,14 +477,14 @@ Notes:
   - server-federation-status prints directory peer+sync health (including configured/discovered peer failure streaks), can evaluate strict policy thresholds in one shot, and can emit machine-readable summary JSON for automation/handoff.
   - server-federation-wait blocks until directory peer-sync + issuer-sync quorum and peer-health readiness are met (or timeout), can optionally fail-close on configured-peer degradation/excessive cooldown/stale sync age, and can emit machine-readable summary JSON for automation.
   - client-test runs client-demo with --no-deps (no local server required on the client machine).
-  - profile-compare-local runs repeated client-test rounds across profiles (`speed`, `balanced`, `private`, `speed-1hop`), emits JSON/markdown comparison artifacts, and recommends a default while keeping `speed-1hop` experimental/non-default.
-  - profile-compare-trend aggregates multiple profile-compare-local summaries into one recommendation trend report, applies reliability/latency policy thresholds, and keeps `speed-1hop` non-default.
-  - client-vpn-profile-compare runs repeatable real client-vpn-smoke rounds across `1hop|2hop|3hop`, emits JSON/markdown comparison artifacts, and recommends default/latency/privacy profiles while keeping `1hop` experimental/non-default.
+  - profile-compare-local runs repeated client-test rounds across profiles (`speed`, `balanced`, `private`, `speed-1hop`), emits JSON/markdown comparison artifacts, and recommends a default while keeping `speed-1hop` experimental/non-default and out of simple mode.
+  - profile-compare-trend aggregates multiple profile-compare-local summaries into one recommendation trend report, applies reliability/latency policy thresholds, and keeps `speed-1hop` non-default and expert-only.
+  - client-vpn-profile-compare runs repeatable real client-vpn-smoke rounds across `1hop|2hop|3hop`, emits JSON/markdown comparison artifacts, and recommends default/latency/privacy profiles while keeping `1hop` experimental/non-default and outside the simple path.
   - profile-compare-campaign runs repeat local profile comparisons and auto-aggregates them into one campaign-level recommendation/report bundle.
   - profile-compare-docker-matrix wraps profile-compare-campaign with docker-first defaults (`1hop,2hop,3hop`) while preserving pass-through overrides and printing summary/report artifact paths.
   - profile-compare-campaign-check applies fail-closed policy gates to campaign artifacts and emits one GO/NO-GO decision for default-profile readiness.
-  - profile-compare-campaign-signoff runs optional campaign refresh + campaign-check fail-closed in one command and emits one signoff summary JSON for handoff.
-  - public path-profile contract is `1hop|2hop|3hop` with compatibility aliases `speed|balanced|private` (plus explicit experimental `speed-1hop` alias on non-strict `client-test`/`client-vpn-up` only). Legacy aliases `fast|privacy` are still accepted for compatibility but are deprecated.
+  - profile-compare-campaign-signoff runs campaign-check fail-closed in one command; `--refresh-campaign 1` attempts a fresh campaign run, while `--refresh-campaign 0` reuses existing campaign artifacts, and emits one signoff summary JSON for handoff.
+  - public path-profile contract is `1hop|2hop|3hop` with compatibility aliases `speed|balanced|private` (plus explicit experimental `speed-1hop` alias on non-strict `client-test`/`client-vpn-up` only). Legacy aliases `fast|privacy` are still accepted for compatibility but are deprecated; simple help should surface the preset aliases first and push experimental aliases into expert help.
   - wg-only-local-test runs host real-WireGuard integration checks (Linux + root required).
   - real-wg-privileged-matrix runs the host Linux root real-WG privileged matrix directly.
   - real-wg-privileged-matrix-record wraps that matrix into one recorded manual-validation step and refreshes the shared readiness report automatically.
@@ -508,9 +512,11 @@ Notes:
   - vpn-rc-resilience-path wraps the VPN RC resilience helper path, forwards timeout controls (`--docker-profile-matrix-timeout-sec`, `--rc-matrix-path-timeout-sec`), and preserves pass-through args.
   - vpn-non-blockchain-fastlane wraps the non-blockchain acceleration helper path, forwards `--parallel [0|1]`, and preserves pass-through args.
   - blockchain-fastlane wraps the blockchain acceleration helper path and preserves pass-through args.
+  - ci-blockchain-parallel-sweep wraps the blockchain parallel sweep helper path and preserves pass-through args.
   - blockchain-mainnet-activation-metrics wraps the blockchain mainnet activation metrics producer helper path and preserves pass-through args.
   - blockchain-mainnet-activation-gate wraps the blockchain mainnet activation gate helper path and preserves pass-through args.
-  - roadmap-non-blockchain-actionable-run resolves and runs the current roadmap no-sudo/no-GitHub actionable gate list in one command (supports `--recommended-only 1`, `--max-actions N`, and per-action timeout via `--action-timeout-sec N`).
+  - blockchain-bootstrap-governance-graduation-gate wraps the blockchain bootstrap governance graduation gate helper path and preserves pass-through args.
+  - roadmap-non-blockchain-actionable-run resolves and runs the current roadmap no-sudo/no-GitHub actionable gate list in one command (supports `--recommended-only 1`, `--max-actions N`, per-action timeout via `--action-timeout-sec N`, and `--parallel [0|1]`).
   - ci-phase0 runs the fast Phase-0 simplification gate (launcher wiring/runtime + config-v1 + local API contract checks) with fail-fast behavior.
   - ci-phase1-resilience runs the Phase-1 resilience gate (route profile + peer churn + lifecycle stability checks), forwards per-stage timeout controls (`--*-timeout-sec`), and keeps fail-fast behavior.
   - phase1-resilience-handoff-check wraps the Phase-1 resilience handoff check helper script with pass-through args.
@@ -1495,6 +1501,30 @@ normalize_url_csv_scheme() {
   echo "$out"
 }
 
+normalize_url_csv_scheme_unique() {
+  local csv="$1"
+  local scheme="$2"
+  local out=""
+  local item normalized dedupe_key
+  declare -A seen=()
+  while IFS= read -r item; do
+    [[ -z "$item" ]] && continue
+    normalized="$(trim_url "$(ensure_url_scheme "$item" "$scheme")")"
+    [[ -z "$normalized" ]] && continue
+    # URL host/scheme are case-insensitive; keep first-seen value but dedupe by lowercase key.
+    dedupe_key="$(printf '%s' "$normalized" | tr '[:upper:]' '[:lower:]')"
+    if [[ -n "${seen[$dedupe_key]+x}" ]]; then
+      continue
+    fi
+    seen["$dedupe_key"]=1
+    if [[ -n "$out" ]]; then
+      out+=","
+    fi
+    out+="$normalized"
+  done < <(split_csv_lines "$csv")
+  echo "$out"
+}
+
 split_csv_lines() {
   local csv="$1"
   printf '%s' "$csv" |
@@ -1915,6 +1945,68 @@ peer_dirs_have_reachable_relays() {
       return 0
     fi
   done < <(split_csv_lines "$peer_dirs")
+  return 1
+}
+
+print_prod_https_mismatch_hint_for_endpoint() {
+  local endpoint_url="$1"
+  local endpoint_label="$2"
+  local timeout_sec="${3:-4}"
+  endpoint_url="$(trim_url "$endpoint_url")"
+  if ! is_https_url "$endpoint_url"; then
+    return 1
+  fi
+  local http_probe_url
+  http_probe_url="http://${endpoint_url#https://}"
+  if curl -fsS --connect-timeout 2 --max-time "$timeout_sec" "$http_probe_url" >/dev/null 2>&1; then
+    echo "hint: ${endpoint_label} appears reachable over plain HTTP (${http_probe_url}) while HTTPS failed."
+    echo "hint: prod profile is fail-closed and requires TLS/mTLS-capable peer and authority endpoints."
+    echo "hint: either run all peered nodes with --prod-profile 1, or use --prod-profile 0 for non-TLS lab peering."
+    return 0
+  fi
+  return 1
+}
+
+print_prod_https_mismatch_hint_for_peer_relays() {
+  local peer_dirs="$1"
+  local timeout_sec="${2:-4}"
+  local peer endpoint_url
+  while IFS= read -r peer; do
+    [[ -z "$peer" ]] && continue
+    endpoint_url="$(trim_url "$peer")/v1/relays"
+    if print_prod_https_mismatch_hint_for_endpoint "$endpoint_url" "peer directory ${peer}" "$timeout_sec"; then
+      return 0
+    fi
+  done < <(split_csv_lines "$peer_dirs")
+  return 1
+}
+
+print_prod_https_mismatch_hint_for_peer_issuers() {
+  local peer_dirs="$1"
+  local timeout_sec="${2:-4}"
+  local peer peer_host peer_issuer_url endpoint_url
+  while IFS= read -r peer; do
+    [[ -z "$peer" ]] && continue
+    peer_host="$(host_from_url "$peer")"
+    [[ -z "$peer_host" ]] && continue
+    peer_issuer_url="$(ensure_url_scheme "$(url_from_host_port "$peer_host" 8082)" "https")"
+    endpoint_url="$(trim_url "$peer_issuer_url")/v1/pubkeys"
+    if print_prod_https_mismatch_hint_for_endpoint "$endpoint_url" "peer issuer ${peer_issuer_url}" "$timeout_sec"; then
+      return 0
+    fi
+  done < <(split_csv_lines "$peer_dirs")
+  return 1
+}
+
+print_provider_prod_http_authority_hint() {
+  local authority_directory="$1"
+  local authority_issuer="$2"
+  if [[ "$authority_directory" == http://* || "$authority_issuer" == http://* ]]; then
+    echo "hint: provider preflight is running with --prod-profile 1, so authority URLs are normalized to https before probing."
+    echo "hint: configured authority looks non-prod/http (directory=${authority_directory}, issuer=${authority_issuer:-[derived]})."
+    echo "hint: use --prod-profile 0 for a non-prod authority, or move the authority to HTTPS/mTLS before rerunning."
+    return 0
+  fi
   return 1
 }
 
@@ -3040,6 +3132,8 @@ server_preflight() {
   fi
 
   if [[ "$mode" == "provider" ]]; then
+    local authority_directory_input="$authority_directory"
+    local authority_issuer_input="$authority_issuer"
     if [[ -z "$authority_directory" && -n "$peer_dirs" ]]; then
       authority_directory="$(first_csv_item "$peer_dirs")"
     fi
@@ -3063,10 +3157,13 @@ server_preflight() {
     else
       peer_dirs="$(merge_url_csv "$peer_dirs" "$authority_directory")"
     fi
+    if [[ "$prod_profile" == "1" ]]; then
+      print_provider_prod_http_authority_hint "$authority_directory_input" "$authority_issuer_input" || true
+    fi
   fi
 
   if [[ -n "$peer_dirs" ]]; then
-    peer_dirs="$(normalize_url_csv_scheme "$peer_dirs" "$url_scheme")"
+    peer_dirs="$(normalize_url_csv_scheme_unique "$peer_dirs" "$url_scheme")"
     peer_dirs="$(filter_peer_dirs_excluding_host "$peer_dirs" "$local_host")"
   fi
 
@@ -3137,6 +3234,9 @@ server_preflight() {
       peer_payload="$(curl -fsS --connect-timeout 2 --max-time "$timeout_sec" "${peer_tls_opts[@]}" "$(trim_url "$peer_url")/v1/relays" 2>/dev/null || true)"
       if [[ -z "$peer_payload" ]]; then
         echo "[peer] fail: ${peer_url}/v1/relays unreachable"
+        if [[ "$prod_profile" == "1" ]]; then
+          print_prod_https_mismatch_hint_for_endpoint "$(trim_url "$peer_url")/v1/relays" "peer directory ${peer_url}" "$timeout_sec" || true
+        fi
         peer_fetch_fail=$((peer_fetch_fail + 1))
         continue
       fi
@@ -3188,6 +3288,9 @@ server_preflight() {
     authority_payload="$(curl -fsS --connect-timeout 2 --max-time "$timeout_sec" "${authority_tls_opts[@]}" "$(trim_url "$authority_issuer")/v1/pubkeys" 2>/dev/null || true)"
     if [[ -z "$authority_payload" ]]; then
       echo "[issuer] fail: authority issuer unreachable: ${authority_issuer}/v1/pubkeys"
+      if [[ "$prod_profile" == "1" ]]; then
+        print_prod_https_mismatch_hint_for_endpoint "$(trim_url "$authority_issuer")/v1/pubkeys" "authority issuer ${authority_issuer}" "$timeout_sec" || true
+      fi
       failures=$((failures + 1))
     elif ! authority_issuer_id="$(printf '%s\n' "$authority_payload" | jq -r '(.issuer // "") | tostring' 2>/dev/null)"; then
       echo "[issuer] fail: authority issuer payload parse failed"
@@ -3211,6 +3314,7 @@ server_preflight() {
     echo "[issuer] peer issuer ids observed: ${peer_issuer_count}"
     if ((peer_issuer_count < 1)); then
       echo "[issuer] fail: prod profile requires at least one reachable peer issuer id (self + peer => quorum of 2 issuer URLs)"
+      print_prod_https_mismatch_hint_for_peer_issuers "$peer_dirs" "$timeout_sec" || true
       failures=$((failures + 1))
     fi
   fi
@@ -3691,7 +3795,7 @@ server_up() {
   fi
 
   if [[ -n "$peer_dirs" ]]; then
-    peer_dirs="$(normalize_url_csv_scheme "$peer_dirs" "$url_scheme")"
+    peer_dirs="$(normalize_url_csv_scheme_unique "$peer_dirs" "$url_scheme")"
   fi
 
   if [[ -n "$peer_dirs" ]]; then
@@ -3838,6 +3942,9 @@ server_up() {
       if [[ "$op_check_rc" == "2" ]]; then
         if [[ "$peer_identity_strict_effective" == "1" ]]; then
           echo "server-up refused: could not verify operator-id uniqueness against peer directories."
+          if [[ "$prod_profile" == "1" ]]; then
+            print_prod_https_mismatch_hint_for_peer_relays "$peer_dirs" 4 || true
+          fi
           echo "check peer directory reachability and mTLS trust/certs, then retry."
           echo "temporary bypass (diagnostics only): --peer-identity-strict 0"
           exit 2
@@ -3874,6 +3981,9 @@ server_up() {
       if [[ "$issuer_check_rc" == "2" ]]; then
         if [[ "$issuer_identity_strict_effective" == "1" ]]; then
           echo "server-up refused: could not verify issuer-id uniqueness against peer directories."
+          if [[ "$prod_profile" == "1" ]]; then
+            print_prod_https_mismatch_hint_for_peer_issuers "$peer_dirs" 4 || true
+          fi
           echo "check peer issuer reachability and mTLS trust/certs, then retry."
           echo "temporary bypass (diagnostics only): --peer-identity-strict 0"
           exit 2
@@ -3918,11 +4028,28 @@ server_up() {
     exit_wg_private_key_local="$DEPLOY_DIR/data/entry-exit/exit_${relay_suffix_for_wg}_wg.key"
     exit_wg_private_key_container="/app/data/$(basename "$exit_wg_private_key_local")"
     mkdir -p "$(dirname "$exit_wg_private_key_local")"
-    if [[ -f "$exit_wg_private_key_local" ]]; then
+    if [[ -f "$exit_wg_private_key_local" && -r "$exit_wg_private_key_local" ]]; then
       exit_wg_key_prepared="1"
+    elif [[ -f "$exit_wg_private_key_local" ]]; then
+      secure_file_permissions "$exit_wg_private_key_local"
+      if [[ -r "$exit_wg_private_key_local" ]]; then
+        exit_wg_key_prepared="1"
+        echo "note: repaired exit wg private-key permissions before deriving EXIT_WG_PUBKEY ($exit_wg_private_key_local)"
+      elif [[ "$prod_profile" == "1" ]]; then
+        echo "server-up refused: exit wg private key is not readable and prod profile must fail closed ($exit_wg_private_key_local)"
+        echo "fix ownership or permissions (for example: chmod 600 '$exit_wg_private_key_local') or recreate the key as the current user, then rerun server-up."
+        exit 2
+      else
+        # Root-owned leftovers can exist after prior sudo-based runs. Do not fail
+        # startup here; allow runtime generation inside the container path.
+        echo "note: exit wg private-key exists but is not readable; deferring key initialization to runtime ($exit_wg_private_key_local)"
+      fi
     elif [[ -w "$(dirname "$exit_wg_private_key_local")" ]]; then
-      (umask 077 && wg genkey >"$exit_wg_private_key_local")
-      exit_wg_key_prepared="1"
+      if (umask 077 && wg genkey >"$exit_wg_private_key_local"); then
+        exit_wg_key_prepared="1"
+      else
+        echo "note: failed to write exit wg private-key before compose; deferring key initialization to runtime ($exit_wg_private_key_local)"
+      fi
     else
       # Some local test environments may have stale root-owned bind-mount dirs.
       # Defer key init to runtime instead of failing server-up preflight.
@@ -3930,17 +4057,42 @@ server_up() {
     fi
     if [[ "$exit_wg_key_prepared" == "1" ]]; then
       secure_file_permissions "$exit_wg_private_key_local"
-      if ! exit_wg_pubkey="$(wg pubkey <"$exit_wg_private_key_local")"; then
-        echo "server-up failed to derive EXIT_WG_PUBKEY from $exit_wg_private_key_local"
-        exit 1
+      if exit_wg_pubkey="$(wg pubkey <"$exit_wg_private_key_local" 2>/dev/null)"; then
+        exit_wg_pubkey="$(printf '%s' "$exit_wg_pubkey" | tr -d '\r\n')"
+        if [[ -z "$exit_wg_pubkey" ]]; then
+          if [[ "$prod_profile" == "1" ]]; then
+            echo "server-up refused: derived EXIT_WG_PUBKEY was empty in prod profile ($exit_wg_private_key_local)"
+            echo "fix the file permissions/contents or recreate the key as the current user, then rerun server-up."
+            exit 2
+          fi
+          echo "note: derived EXIT_WG_PUBKEY was empty; deferring pubkey derivation to runtime ($exit_wg_private_key_local)"
+          exit_wg_key_prepared="0"
+        fi
+      else
+        if [[ "$prod_profile" == "1" ]]; then
+          echo "server-up refused: could not derive EXIT_WG_PUBKEY from local key in prod profile ($exit_wg_private_key_local)"
+          echo "fix the file permissions/contents or recreate the key as the current user, then rerun server-up."
+          exit 2
+        fi
+        secure_file_permissions "$exit_wg_private_key_local"
+        if exit_wg_pubkey="$(wg pubkey <"$exit_wg_private_key_local" 2>/dev/null)"; then
+          exit_wg_pubkey="$(printf '%s' "$exit_wg_pubkey" | tr -d '\r\n')"
+          if [[ -n "$exit_wg_pubkey" ]]; then
+            echo "note: repaired exit wg private-key permissions before deriving EXIT_WG_PUBKEY ($exit_wg_private_key_local)"
+          else
+            echo "note: derived EXIT_WG_PUBKEY was empty; deferring pubkey derivation to runtime ($exit_wg_private_key_local)"
+            exit_wg_key_prepared="0"
+          fi
+        else
+          echo "note: could not derive EXIT_WG_PUBKEY from local key; deferring pubkey derivation to runtime ($exit_wg_private_key_local)"
+          exit_wg_key_prepared="0"
+        fi
       fi
-      exit_wg_pubkey="$(printf '%s' "$exit_wg_pubkey" | tr -d '\r\n')"
-      if [[ -z "$exit_wg_pubkey" ]]; then
-        echo "server-up failed to derive non-empty EXIT_WG_PUBKEY from $exit_wg_private_key_local"
-        exit 1
-      fi
-    else
+    fi
+    if [[ "$exit_wg_key_prepared" != "1" ]]; then
       exit_wg_pubkey="derive"
+    else
+      :
     fi
   fi
 
@@ -4055,6 +4207,9 @@ server_up() {
     wait_http_ok_with_opts "${url_scheme}://127.0.0.1:8083/v1/health" "local entry" 40 "${local_opts[@]}" || { compose_with_env "$PROVIDER_ENV_FILE" logs --tail=120 entry-exit; exit 1; }
     wait_http_ok_with_opts "${url_scheme}://127.0.0.1:8084/v1/health" "local exit" 40 "${local_opts[@]}" || { compose_with_env "$PROVIDER_ENV_FILE" logs --tail=120 entry-exit; exit 1; }
     wait_http_ok_with_opts "${authority_issuer}/v1/pubkeys" "authority issuer" 20 "${issuer_opts[@]}" || {
+      if [[ "$prod_profile" == "1" ]]; then
+        print_prod_https_mismatch_hint_for_endpoint "$(trim_url "$authority_issuer")/v1/pubkeys" "authority issuer ${authority_issuer}" 4 || true
+      fi
       echo "provider mode requires reachable authority issuer."
       exit 1
     }
@@ -6865,7 +7020,9 @@ wg_only_stack_selftest() {
 
 three_machine_validate() {
   ensure_deps_or_die
-  local script="${THREE_MACHINE_BETA_VALIDATE_SCRIPT:-$ROOT_DIR/scripts/integration_3machine_beta_validate.sh}"
+  local default_script="$ROOT_DIR/scripts/integration_3machine_beta_validate.sh"
+  local script="${THREE_MACHINE_BETA_VALIDATE_SCRIPT:-$default_script}"
+  local ci_stub_mode="${THREE_MACHINE_VALIDATE_CI_STUB_MODE:-}"
   local forwarded_path_profile="${EASY_NODE_PATH_PROFILE:-}"
   local arg_path_profile=""
   local prev=""
@@ -6879,11 +7036,22 @@ three_machine_validate() {
   if [[ -n "$arg_path_profile" ]]; then
     forwarded_path_profile="$arg_path_profile"
   fi
+  if [[ -z "$ci_stub_mode" ]]; then
+    if [[ "$script" != "$default_script" ]]; then
+      ci_stub_mode="1"
+    else
+      ci_stub_mode="0"
+    fi
+  fi
+  if [[ "$ci_stub_mode" != "0" && "$ci_stub_mode" != "1" ]]; then
+    echo "three-machine-validate requires THREE_MACHINE_VALIDATE_CI_STUB_MODE to be 0 or 1 when set"
+    exit 2
+  fi
   if [[ -n "$forwarded_path_profile" ]]; then
-    EASY_NODE_PATH_PROFILE="$forwarded_path_profile" "$script" "$@"
+    EASY_NODE_PATH_PROFILE="$forwarded_path_profile" THREE_MACHINE_VALIDATE_CI_STUB_MODE="$ci_stub_mode" "$script" "$@"
     return
   fi
-  "$script" "$@"
+  THREE_MACHINE_VALIDATE_CI_STUB_MODE="$ci_stub_mode" "$script" "$@"
 }
 
 three_machine_soak() {
@@ -8029,6 +8197,15 @@ blockchain_fastlane() {
   "$fastlane_script" "$@"
 }
 
+ci_blockchain_parallel_sweep() {
+  local sweep_script="${CI_BLOCKCHAIN_PARALLEL_SWEEP_SCRIPT:-$ROOT_DIR/scripts/ci_blockchain_parallel_sweep.sh}"
+  if [[ ! -x "$sweep_script" ]]; then
+    echo "missing helper script: $sweep_script"
+    exit 2
+  fi
+  "$sweep_script" "$@"
+}
+
 blockchain_mainnet_activation_metrics() {
   local metrics_script="${BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_SCRIPT:-$ROOT_DIR/scripts/blockchain_mainnet_activation_metrics.sh}"
   if [[ ! -x "$metrics_script" ]]; then
@@ -8040,6 +8217,15 @@ blockchain_mainnet_activation_metrics() {
 
 blockchain_mainnet_activation_gate() {
   local gate_script="${BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SCRIPT:-$ROOT_DIR/scripts/blockchain_mainnet_activation_gate.sh}"
+  if [[ ! -x "$gate_script" ]]; then
+    echo "missing helper script: $gate_script"
+    exit 2
+  fi
+  "$gate_script" "$@"
+}
+
+blockchain_bootstrap_governance_graduation_gate() {
+  local gate_script="${BLOCKCHAIN_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_SCRIPT:-$ROOT_DIR/scripts/blockchain_bootstrap_graduation_gate.sh}"
   if [[ ! -x "$gate_script" ]]; then
     echo "missing helper script: $gate_script"
     exit 2
@@ -10325,6 +10511,9 @@ client_test() {
   local require_middle_relay="${CLIENT_REQUIRE_MIDDLE_RELAY:-}"
   local allow_direct_exit_fallback="${CLIENT_ALLOW_DIRECT_EXIT_FALLBACK:-}"
   local force_direct_exit="${CLIENT_FORCE_DIRECT_EXIT:-}"
+  local client_inner_source="${CLIENT_INNER_SOURCE:-}"
+  local client_disable_synthetic_fallback="${CLIENT_DISABLE_SYNTHETIC_FALLBACK:-}"
+  local data_plane_mode="${DATA_PLANE_MODE:-}"
   local beta_profile="${EASY_NODE_BETA_PROFILE:-0}"
   local prod_profile="${EASY_NODE_PROD_PROFILE:-0}"
   local bootstrap_directory=""
@@ -10583,6 +10772,18 @@ client_test() {
     echo "client-test requires --require-cross-operator-pair to be 0 or 1"
     exit 2
   fi
+  if [[ -n "$client_inner_source" && "$client_inner_source" != "udp" && "$client_inner_source" != "synthetic" ]]; then
+    echo "client-test requires CLIENT_INNER_SOURCE to be udp or synthetic when set"
+    exit 2
+  fi
+  if [[ -n "$client_disable_synthetic_fallback" && "$client_disable_synthetic_fallback" != "0" && "$client_disable_synthetic_fallback" != "1" ]]; then
+    echo "client-test requires CLIENT_DISABLE_SYNTHETIC_FALLBACK to be 0 or 1 when set"
+    exit 2
+  fi
+  if [[ -n "$data_plane_mode" && "$data_plane_mode" != "json" && "$data_plane_mode" != "opaque" ]]; then
+    echo "client-test requires DATA_PLANE_MODE to be json or opaque when set"
+    exit 2
+  fi
   if [[ -n "$require_middle_relay" && "$require_middle_relay" != "0" && "$require_middle_relay" != "1" ]]; then
     echo "client-test requires CLIENT_REQUIRE_MIDDLE_RELAY to be 0 or 1 when set"
     exit 2
@@ -10621,6 +10822,8 @@ client_test() {
   if [[ -z "$allow_direct_exit_fallback" ]]; then
     if [[ "$beta_profile" == "1" || "$prod_profile" == "1" ]]; then
       allow_direct_exit_fallback="0"
+    elif [[ "$require_distinct_operators" == "1" ]]; then
+      allow_direct_exit_fallback="0"
     else
       allow_direct_exit_fallback="1"
     fi
@@ -10631,6 +10834,10 @@ client_test() {
   fi
   if [[ "$allow_direct_exit_fallback" == "1" && "$beta_profile" == "1" ]]; then
     echo "client-test does not allow CLIENT_ALLOW_DIRECT_EXIT_FALLBACK=1 with beta/prod profile"
+    exit 2
+  fi
+  if [[ "$allow_direct_exit_fallback" == "1" && "$require_distinct_operators" == "1" ]]; then
+    echo "client-test requires --distinct-operators 0 when CLIENT_ALLOW_DIRECT_EXIT_FALLBACK=1"
     exit 2
   fi
   if [[ -z "$force_direct_exit" ]]; then
@@ -10869,6 +11076,15 @@ EOF_CLIENT
     if [[ -n "$exit_region" ]]; then
       run_cmd+=(-e "CLIENT_EXIT_REGION=$exit_region")
     fi
+    if [[ -n "$client_inner_source" ]]; then
+      run_cmd+=(-e "CLIENT_INNER_SOURCE=$client_inner_source")
+    fi
+    if [[ -n "$client_disable_synthetic_fallback" ]]; then
+      run_cmd+=(-e "CLIENT_DISABLE_SYNTHETIC_FALLBACK=$client_disable_synthetic_fallback")
+    fi
+    if [[ -n "$data_plane_mode" ]]; then
+      run_cmd+=(-e "DATA_PLANE_MODE=$data_plane_mode")
+    fi
     run_cmd+=(client-demo)
 
     (
@@ -10930,6 +11146,15 @@ EOF_CLIENT
     fi
     if [[ -n "$exit_region" ]]; then
       local_cmd+=("CLIENT_EXIT_REGION=$exit_region")
+    fi
+    if [[ -n "$client_inner_source" ]]; then
+      local_cmd+=("CLIENT_INNER_SOURCE=$client_inner_source")
+    fi
+    if [[ -n "$client_disable_synthetic_fallback" ]]; then
+      local_cmd+=("CLIENT_DISABLE_SYNTHETIC_FALLBACK=$client_disable_synthetic_fallback")
+    fi
+    if [[ -n "$data_plane_mode" ]]; then
+      local_cmd+=("DATA_PLANE_MODE=$data_plane_mode")
     fi
     local_cmd+=(go run ./cmd/node --client)
 
@@ -14522,6 +14747,10 @@ main() {
       shift
       blockchain_fastlane "$@"
       ;;
+    ci-blockchain-parallel-sweep)
+      shift
+      ci_blockchain_parallel_sweep "$@"
+      ;;
     blockchain-mainnet-activation-metrics)
       shift
       blockchain_mainnet_activation_metrics "$@"
@@ -14529,6 +14758,10 @@ main() {
     blockchain-mainnet-activation-gate)
       shift
       blockchain_mainnet_activation_gate "$@"
+      ;;
+    blockchain-bootstrap-governance-graduation-gate)
+      shift
+      blockchain_bootstrap_governance_graduation_gate "$@"
       ;;
     roadmap-non-blockchain-actionable-run)
       shift

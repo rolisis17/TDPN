@@ -25,11 +25,14 @@ cat >"$FAKE_EASY" <<'EOF_FAKE'
 set -euo pipefail
 
 printf '%s\n' "$*" >>"${FAKE_CAPTURE_FILE:?}"
-printf 'env container_directory_urls=%s container_issuer_url=%s container_entry_url=%s container_exit_url=%s\n' \
+printf 'env container_directory_urls=%s container_issuer_url=%s container_entry_url=%s container_exit_url=%s client_inner_source=%s disable_synthetic_fallback=%s data_plane_mode=%s\n' \
   "${EASY_NODE_CLIENT_TEST_CONTAINER_DIRECTORY_URLS:-}" \
   "${EASY_NODE_CLIENT_TEST_CONTAINER_ISSUER_URL:-}" \
   "${EASY_NODE_CLIENT_TEST_CONTAINER_ENTRY_URL:-}" \
-  "${EASY_NODE_CLIENT_TEST_CONTAINER_EXIT_URL:-}" >>"${FAKE_CAPTURE_FILE:?}"
+  "${EASY_NODE_CLIENT_TEST_CONTAINER_EXIT_URL:-}" \
+  "${CLIENT_INNER_SOURCE:-}" \
+  "${CLIENT_DISABLE_SYNTHETIC_FALLBACK:-}" \
+  "${DATA_PLANE_MODE:-}" >>"${FAKE_CAPTURE_FILE:?}"
 cmd="${1:-}"
 shift || true
 
@@ -152,6 +155,128 @@ if rg -q '^wg-only-stack-up' "$CAPTURE"; then
   cat "$CAPTURE"
   exit 1
 fi
+remote_env_line="$(rg '^env ' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$remote_env_line" ]]; then
+  echo "missing remote env capture line"
+  cat "$CAPTURE"
+  exit 1
+fi
+for expected in 'client_inner_source=udp' 'disable_synthetic_fallback=1' 'data_plane_mode=opaque'; do
+  if ! grep -F -- "$expected" <<<"$remote_env_line" >/dev/null; then
+    echo "remote endpoint run missing $expected"
+    cat "$CAPTURE"
+    exit 1
+  fi
+done
+
+LOOPBACK_SUMMARY_JSON="$TMP_DIR/profile_compare_loopback_summary.json"
+LOOPBACK_REPORT_MD="$TMP_DIR/profile_compare_loopback_report.md"
+LOOPBACK_RUN_LOG="$TMP_DIR/profile_compare_loopback_run.log"
+: >"$CAPTURE"
+
+echo "[profile-compare-local] loopback endpoints keep transport defaults unchanged"
+FAKE_CAPTURE_FILE="$CAPTURE" \
+FAKE_COUNTER_DIR="$FAKE_COUNTER_DIR" \
+FAKE_LOG_DIR="$FAKE_LOG_DIR" \
+PROFILE_COMPARE_LOCAL_EASY_NODE_SCRIPT="$FAKE_EASY" \
+./scripts/profile_compare_local.sh \
+  --profiles balanced \
+  --rounds 1 \
+  --execution-mode local \
+  --directory-urls http://127.0.0.1:18081 \
+  --issuer-url http://127.0.0.1:18082 \
+  --entry-url http://127.0.0.1:18083 \
+  --exit-url http://127.0.0.1:18084 \
+  --summary-json "$LOOPBACK_SUMMARY_JSON" \
+  --report-md "$LOOPBACK_REPORT_MD" \
+  --print-summary-json 0 >"$LOOPBACK_RUN_LOG"
+
+if ! jq -e '
+  .status == "pass"
+  and .inputs.explicit_remote_endpoints == false
+  and (.summary.transport_mismatch_failures_total | type == "number")
+  and (.summary.token_proof_invalid_failures_total | type == "number")
+  and (.summary.unknown_exit_failures_total | type == "number")
+  and (.summary.directory_trust_failures_total | type == "number")
+  and ([.profiles[] | select(.profile == "balanced")][0].avg_transport_mismatch_failures | type == "number")
+  and ([.profiles[] | select(.profile == "balanced")][0].avg_token_proof_invalid_failures | type == "number")
+  and ([.profiles[] | select(.profile == "balanced")][0].avg_unknown_exit_failures | type == "number")
+  and ([.profiles[] | select(.profile == "balanced")][0].avg_directory_trust_failures | type == "number")
+  and ([.runs[] | select(.profile == "balanced")][0].transport_mismatch_failures | type == "number")
+  and ([.runs[] | select(.profile == "balanced")][0].token_proof_invalid_failures | type == "number")
+  and ([.runs[] | select(.profile == "balanced")][0].unknown_exit_failures | type == "number")
+  and ([.runs[] | select(.profile == "balanced")][0].directory_trust_failures | type == "number")
+' "$LOOPBACK_SUMMARY_JSON" >/dev/null; then
+  echo "loopback summary did not preserve explicit_remote_endpoints=false"
+  cat "$LOOPBACK_SUMMARY_JSON"
+  exit 1
+fi
+loopback_env_line="$(rg '^env ' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$loopback_env_line" ]]; then
+  echo "missing loopback env capture line"
+  cat "$CAPTURE"
+  exit 1
+fi
+for expected in 'client_inner_source=' 'disable_synthetic_fallback=' 'data_plane_mode='; do
+  if ! grep -F -- "$expected" <<<"$loopback_env_line" >/dev/null; then
+    echo "loopback run missing $expected"
+    cat "$CAPTURE"
+    exit 1
+  fi
+done
+if grep -F -- 'client_inner_source=udp' <<<"$loopback_env_line" >/dev/null; then
+  echo "loopback run unexpectedly forced udp inner source"
+  cat "$CAPTURE"
+  exit 1
+fi
+if grep -F -- 'disable_synthetic_fallback=1' <<<"$loopback_env_line" >/dev/null; then
+  echo "loopback run unexpectedly forced synthetic fallback disable"
+  cat "$CAPTURE"
+  exit 1
+fi
+if grep -F -- 'data_plane_mode=opaque' <<<"$loopback_env_line" >/dev/null; then
+  echo "loopback run unexpectedly forced opaque data plane mode"
+  cat "$CAPTURE"
+  exit 1
+fi
+
+OVERRIDE_SUMMARY_JSON="$TMP_DIR/profile_compare_override_summary.json"
+OVERRIDE_REPORT_MD="$TMP_DIR/profile_compare_override_report.md"
+OVERRIDE_RUN_LOG="$TMP_DIR/profile_compare_override_run.log"
+: >"$CAPTURE"
+
+echo "[profile-compare-local] explicit user transport env overrides are preserved"
+CLIENT_INNER_SOURCE=tcp \
+CLIENT_DISABLE_SYNTHETIC_FALLBACK=0 \
+FAKE_CAPTURE_FILE="$CAPTURE" \
+FAKE_COUNTER_DIR="$FAKE_COUNTER_DIR" \
+FAKE_LOG_DIR="$FAKE_LOG_DIR" \
+PROFILE_COMPARE_LOCAL_EASY_NODE_SCRIPT="$FAKE_EASY" \
+./scripts/profile_compare_local.sh \
+  --profiles balanced \
+  --rounds 1 \
+  --execution-mode local \
+  --directory-urls http://dir-b:8081 \
+  --issuer-url http://issuer-b:8082 \
+  --entry-url http://entry-b:8083 \
+  --exit-url http://exit-b:8084 \
+  --summary-json "$OVERRIDE_SUMMARY_JSON" \
+  --report-md "$OVERRIDE_REPORT_MD" \
+  --print-summary-json 0 >"$OVERRIDE_RUN_LOG"
+
+override_env_line="$(rg '^env ' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$override_env_line" ]]; then
+  echo "missing override env capture line"
+  cat "$CAPTURE"
+  exit 1
+fi
+for expected in 'client_inner_source=tcp' 'disable_synthetic_fallback=0' 'data_plane_mode=opaque'; do
+  if ! grep -F -- "$expected" <<<"$override_env_line" >/dev/null; then
+    echo "override run missing $expected"
+    cat "$CAPTURE"
+    exit 1
+  fi
+done
 
 DOCKER_SUMMARY_JSON="$TMP_DIR/profile_compare_docker_summary.json"
 DOCKER_REPORT_MD="$TMP_DIR/profile_compare_docker_report.md"

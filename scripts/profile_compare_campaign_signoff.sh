@@ -17,6 +17,7 @@ Usage:
     [--campaign-check-summary-json PATH] \
     [--refresh-campaign [0|1]] \
     [--fail-on-no-go [0|1]] \
+    [--allow-concurrent [0|1]] \
     [--allow-summary-overwrite [0|1]] \
     [--require-status-pass [0|1]] \
     [--require-trend-status-pass [0|1]] \
@@ -37,6 +38,7 @@ Usage:
     [--campaign-entry-url URL] \
     [--campaign-exit-url URL] \
     [--campaign-subject ID | --campaign-anon-cred TOKEN] \
+    [--subject ID | --anon-cred TOKEN] \
     [--campaign-start-local-stack auto|0|1] \
     [--summary-json PATH] \
     [--show-json [0|1]] \
@@ -51,6 +53,10 @@ Notes:
   - Default behavior refreshes campaign artifacts first (--refresh-campaign 1).
   - Reuse of an existing campaign summary happens only when refresh is disabled
     (--refresh-campaign 0).
+  - --subject/--anon-cred are aliases of --campaign-subject/--campaign-anon-cred.
+  - Single-instance lock is enabled by default per reports-dir; bypass only when
+    intentionally running concurrent signoff with --allow-concurrent 1 (or
+    PROFILE_COMPARE_CAMPAIGN_SIGNOFF_ALLOW_CONCURRENT=1).
   - When refresh inputs point at remote/bootstrap endpoints, the signoff step
     prefers a docker-style refresh to avoid local root-only bootstrap failures.
   - Keep --allow-summary-overwrite 0 in normal operation to avoid output
@@ -107,6 +113,30 @@ is_non_negative_decimal() {
   [[ "$value" =~ ^[0-9]+([.][0-9]+)?$ ]]
 }
 
+read_lock_metadata_field() {
+  local file_path="$1"
+  local field_name="$2"
+  if [[ ! -f "$file_path" ]]; then
+    printf '%s' ""
+    return
+  fi
+  awk -F= -v key="$field_name" '$1 == key {print substr($0, index($0, "=") + 1); exit}' "$file_path"
+}
+
+pid_is_running() {
+  local pid="${1:-}"
+  if [[ ! "$pid" =~ ^[0-9]+$ ]]; then
+    return 1
+  fi
+  if kill -0 "$pid" >/dev/null 2>&1; then
+    return 0
+  fi
+  if [[ -d "/proc/$pid" ]]; then
+    return 0
+  fi
+  return 1
+}
+
 detect_local_stack_block_reason() {
   local log_path="$1"
   local reason=""
@@ -151,6 +181,7 @@ campaign_report_md="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_REPORT_MD:-}"
 campaign_check_summary_json="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_CHECK_SUMMARY_JSON:-}"
 refresh_campaign="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REFRESH_CAMPAIGN:-1}"
 fail_on_no_go="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_FAIL_ON_NO_GO:-1}"
+allow_concurrent="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_ALLOW_CONCURRENT:-0}"
 allow_summary_overwrite="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_ALLOW_SUMMARY_OVERWRITE:-0}"
 summary_json="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_SUMMARY_JSON:-}"
 show_json="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_SHOW_JSON:-0}"
@@ -176,7 +207,10 @@ campaign_entry_url="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_ENTRY_URL:-}"
 campaign_exit_url="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_EXIT_URL:-}"
 campaign_subject="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_SUBJECT:-}"
 campaign_anon_cred="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_ANON_CRED:-}"
+subject_alias=""
+anon_cred_alias=""
 campaign_start_local_stack="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_START_LOCAL_STACK:-}"
+original_args=("$@")
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -211,6 +245,15 @@ while [[ $# -gt 0 ]]; do
         shift 2
       else
         fail_on_no_go="1"
+        shift
+      fi
+      ;;
+    --allow-concurrent)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        allow_concurrent="${2:-}"
+        shift 2
+      else
+        allow_concurrent="1"
         shift
       fi
       ;;
@@ -318,6 +361,14 @@ while [[ $# -gt 0 ]]; do
       campaign_anon_cred="${2:-}"
       shift 2
       ;;
+    --subject)
+      subject_alias="${2:-}"
+      shift 2
+      ;;
+    --anon-cred)
+      anon_cred_alias="${2:-}"
+      shift 2
+      ;;
     --campaign-start-local-stack)
       campaign_start_local_stack="${2:-}"
       shift 2
@@ -358,6 +409,7 @@ done
 
 bool_arg_or_die "--refresh-campaign" "$refresh_campaign"
 bool_arg_or_die "--fail-on-no-go" "$fail_on_no_go"
+bool_arg_or_die "--allow-concurrent" "$allow_concurrent"
 bool_arg_or_die "--allow-summary-overwrite" "$allow_summary_overwrite"
 bool_arg_or_die "--show-json" "$show_json"
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
@@ -393,6 +445,20 @@ if [[ -n "$campaign_start_local_stack" ]]; then
       ;;
   esac
 fi
+if [[ -n "$subject_alias" && -n "$campaign_subject" && "$subject_alias" != "$campaign_subject" ]]; then
+  echo "conflicting subject values: --subject and --campaign-subject must match when both are provided"
+  exit 2
+fi
+if [[ -n "$anon_cred_alias" && -n "$campaign_anon_cred" && "$anon_cred_alias" != "$campaign_anon_cred" ]]; then
+  echo "conflicting anon credential values: --anon-cred and --campaign-anon-cred must match when both are provided"
+  exit 2
+fi
+if [[ -n "$subject_alias" ]]; then
+  campaign_subject="$subject_alias"
+fi
+if [[ -n "$anon_cred_alias" ]]; then
+  campaign_anon_cred="$anon_cred_alias"
+fi
 if [[ -n "$campaign_subject" && -n "$campaign_anon_cred" ]]; then
   echo "use either --campaign-subject or --campaign-anon-cred, not both"
   exit 2
@@ -409,6 +475,62 @@ fi
 
 reports_dir="$(abs_path "$reports_dir")"
 mkdir -p "$reports_dir"
+
+lock_dir="$reports_dir/.profile_compare_campaign_signoff.lock"
+lock_metadata_file="$lock_dir/metadata"
+lock_acquired=0
+lock_owner_pid=""
+lock_owner_start_time_utc=""
+lock_owner_cmd=""
+lock_override_enabled="0"
+if [[ "$allow_concurrent" == "1" ]]; then
+  lock_override_enabled="1"
+fi
+
+cleanup_signoff_lock() {
+  if [[ "$lock_acquired" == "1" && -d "$lock_dir" ]]; then
+    rm -rf "$lock_dir" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup_signoff_lock EXIT
+
+if [[ "$lock_override_enabled" != "1" ]]; then
+  invocation_cmd_line="$(redact_sensitive_cmd_line "$(quote_cmd "$0" "${original_args[@]}")")"
+  invocation_cmd_line="$(printf '%s' "$invocation_cmd_line" | tr '\n' ' ')"
+  lock_self_start_time_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  stale_lock_cleaned=0
+  while true; do
+    if mkdir "$lock_dir" >/dev/null 2>&1; then
+      lock_acquired=1
+      {
+        printf 'pid=%s\n' "$$"
+        printf 'start_time_utc=%s\n' "$lock_self_start_time_utc"
+        printf 'cmd=%s\n' "$invocation_cmd_line"
+      } >"$lock_metadata_file"
+      break
+    fi
+
+    lock_owner_pid="$(read_lock_metadata_field "$lock_metadata_file" "pid")"
+    lock_owner_start_time_utc="$(read_lock_metadata_field "$lock_metadata_file" "start_time_utc")"
+    lock_owner_cmd="$(read_lock_metadata_field "$lock_metadata_file" "cmd")"
+
+    if [[ -n "$lock_owner_pid" && "$stale_lock_cleaned" == "0" ]] && ! pid_is_running "$lock_owner_pid"; then
+      if rm -rf "$lock_dir" >/dev/null 2>&1; then
+        stale_lock_cleaned=1
+        continue
+      fi
+    fi
+
+    echo "profile-compare-campaign-signoff: another signoff run is already active for this reports-dir"
+    echo "reports_dir: $reports_dir"
+    echo "lock_dir: $lock_dir"
+    echo "active_pid: ${lock_owner_pid:-unknown}"
+    echo "active_start_time_utc: ${lock_owner_start_time_utc:-unknown}"
+    echo "active_cmd: ${lock_owner_cmd:-unknown}"
+    echo "to bypass intentionally, rerun with --allow-concurrent 1 (or PROFILE_COMPARE_CAMPAIGN_SIGNOFF_ALLOW_CONCURRENT=1)"
+    exit 3
+  done
+fi
 
 if [[ -n "$campaign_summary_json" ]]; then
   campaign_summary_json="$(abs_path "$campaign_summary_json")"
@@ -683,6 +805,8 @@ decision_reason=""
 recommended_profile=""
 support_rate_pct="0"
 trend_source_value=""
+decision_diagnostics_json="null"
+next_operator_action=""
 campaign_check_summary_present=0
 if [[ -f "$campaign_check_summary_json" ]] && jq -e . "$campaign_check_summary_json" >/dev/null 2>&1; then
   campaign_check_summary_present=1
@@ -692,6 +816,48 @@ if [[ -f "$campaign_check_summary_json" ]] && jq -e . "$campaign_check_summary_j
   support_rate_pct="$(jq -r '.observed.support_rate_pct // .observed.recommendation_support_rate_pct // 0' "$campaign_check_summary_json")"
   trend_source_value="$(jq -r '.observed.trend_source // ""' "$campaign_check_summary_json")"
 fi
+
+if [[ -f "$campaign_summary_json" ]] && jq -e . "$campaign_summary_json" >/dev/null 2>&1; then
+  if jq -e '.diagnostics != null' "$campaign_summary_json" >/dev/null 2>&1; then
+    decision_diagnostics_json="$(jq -c '.diagnostics' "$campaign_summary_json")"
+  elif jq -e '.summary.diagnostics != null' "$campaign_summary_json" >/dev/null 2>&1; then
+    decision_diagnostics_json="$(jq -c '.summary.diagnostics' "$campaign_summary_json")"
+  fi
+fi
+
+if [[ "$decision_diagnostics_json" != "null" ]]; then
+  diagnostics_action_key="$(jq -r '
+    def lower_text:
+      if . == null then ""
+      elif type == "string" then ascii_downcase
+      else (tostring | ascii_downcase)
+      end;
+    . as $diag
+    | (if (($diag | lower_text | contains("token_proof_invalid")) or ($diag | lower_text | contains("unknown_exit")))
+       then "token_or_unknown_exit"
+       elif ($diag | lower_text | contains("transport_mismatch"))
+       then "transport_mismatch"
+       elif ($diag | lower_text | contains("directory_trust"))
+       then "directory_trust"
+       else "none"
+       end)
+  ' <<<"$decision_diagnostics_json")"
+  case "$diagnostics_action_key" in
+    token_or_unknown_exit)
+      next_operator_action="Use a fresh invite key from active issuer and rerun signoff"
+      ;;
+    transport_mismatch)
+      next_operator_action="Rerun with remote docker campaign and opaque/udp transport defaults"
+      ;;
+    directory_trust)
+      next_operator_action="Run trust/runtime reset path then rerun"
+      ;;
+    *)
+      next_operator_action=""
+      ;;
+  esac
+fi
+
 if ! is_non_negative_decimal "$support_rate_pct"; then
   support_rate_pct="0"
 fi
@@ -741,6 +907,8 @@ jq -n \
   --arg decision "$decision" \
   --arg decision_context "$decision_context" \
   --arg decision_reason "$decision_reason" \
+  --argjson decision_diagnostics "$decision_diagnostics_json" \
+  --arg next_operator_action "$next_operator_action" \
   --arg recommended_profile "$recommended_profile" \
   --arg support_rate_pct "$support_rate_pct" \
   --arg trend_source "$trend_source_value" \
@@ -748,6 +916,9 @@ jq -n \
   --arg campaign_refresh_effective "$campaign_refresh_effective" \
   --arg campaign_summary_reused "$campaign_summary_reused" \
   --arg fail_on_no_go "$fail_on_no_go" \
+  --arg allow_concurrent "$allow_concurrent" \
+  --arg lock_override_enabled "$lock_override_enabled" \
+  --arg lock_dir "$lock_dir" \
   --arg require_status_pass "$require_status_pass" \
   --arg require_trend_status_pass "$require_trend_status_pass" \
   --arg require_min_runs_total "$require_min_runs_total" \
@@ -807,6 +978,12 @@ jq -n \
       refresh_campaign_effective: ($campaign_refresh_effective == "1"),
       campaign_summary_reused: ($campaign_summary_reused == "1"),
       fail_on_no_go: ($fail_on_no_go == "1"),
+      signoff_lock: {
+        enabled: ($lock_override_enabled != "1"),
+        override_enabled: ($lock_override_enabled == "1"),
+        allow_concurrent: ($allow_concurrent == "1"),
+        lock_dir: $lock_dir
+      },
       policy: {
         require_status_pass: (if $require_status_pass == "" then null else ($require_status_pass | tonumber) end),
         require_trend_status_pass: (if $require_trend_status_pass == "" then null else ($require_trend_status_pass | tonumber) end),
@@ -885,6 +1062,8 @@ jq -n \
       context: $decision_context,
       reason: (if $decision_reason == "" then null else $decision_reason end),
       from_campaign_check_summary: ($campaign_check_summary_present == 1),
+      diagnostics: $decision_diagnostics,
+      next_operator_action: $next_operator_action,
       recommended_profile: $recommended_profile,
       support_rate_pct: ($support_rate_pct | tonumber),
       trend_source: $trend_source

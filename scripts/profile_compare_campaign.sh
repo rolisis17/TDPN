@@ -17,6 +17,7 @@ Usage:
   ./scripts/profile_compare_campaign.sh \
     [--campaign-runs N] \
     [--campaign-pause-sec N] \
+    [--allow-concurrent [0|1]] \
     [--reports-dir DIR] \
     [--profiles CSV] \
     [--rounds N] \
@@ -58,6 +59,8 @@ Purpose:
 Policy:
   - `speed-1hop` remains experimental/non-default.
   - campaign output is warning/fail aware and preserves per-run artifacts.
+  - campaign lock is fail-fast by default; override with --allow-concurrent 1
+    or PROFILE_COMPARE_CAMPAIGN_ALLOW_CONCURRENT=1 when intentional.
 USAGE
 }
 
@@ -88,6 +91,88 @@ print_cmd() {
   printf '\n'
 }
 
+lock_owner_field() {
+  local owner_file="$1"
+  local key="$2"
+  awk -F'=' -v key="$key" '$1 == key {sub(/^[^=]*=/, "", $0); print; exit}' "$owner_file" 2>/dev/null || true
+}
+
+declare -a acquired_lock_dirs=()
+rows_file=""
+
+cleanup_campaign_resources() {
+  local lock_dir owner_file owner_pid
+  if [[ -n "${rows_file:-}" ]]; then
+    rm -f "$rows_file"
+  fi
+  for lock_dir in "${acquired_lock_dirs[@]:-}"; do
+    [[ -z "$lock_dir" ]] && continue
+    owner_file="$lock_dir/owner"
+    owner_pid="$(lock_owner_field "$owner_file" "pid")"
+    if [[ "$owner_pid" == "$$" ]]; then
+      rm -rf "$lock_dir" 2>/dev/null || true
+    fi
+  done
+}
+
+acquire_campaign_lock() {
+  local lock_dir="$1"
+  local lock_scope="$2"
+  local owner_file="$lock_dir/owner"
+  local owner_pid owner_start_utc owner_command now_utc
+
+  now_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  if mkdir "$lock_dir" 2>/dev/null; then
+    {
+      printf 'pid=%s\n' "$$"
+      printf 'start_utc=%s\n' "$now_utc"
+      printf 'scope=%s\n' "$lock_scope"
+      printf 'command=%s\n' "$(print_cmd "$0" "${original_args[@]}")"
+    } >"$owner_file"
+    acquired_lock_dirs+=("$lock_dir")
+    return 0
+  fi
+
+  owner_pid="$(lock_owner_field "$owner_file" "pid")"
+  owner_start_utc="$(lock_owner_field "$owner_file" "start_utc")"
+  owner_command="$(lock_owner_field "$owner_file" "command")"
+
+  if [[ -n "$owner_pid" && "$owner_pid" =~ ^[0-9]+$ ]] && kill -0 "$owner_pid" 2>/dev/null; then
+    echo "profile-compare-campaign: another campaign run is active for $lock_scope"
+    echo "lock: $lock_dir"
+    echo "owner_pid: $owner_pid"
+    echo "owner_start_utc: ${owner_start_utc:-unknown}"
+    if [[ -n "$owner_command" ]]; then
+      echo "owner_command: $owner_command"
+    fi
+    echo "override with --allow-concurrent 1 or PROFILE_COMPARE_CAMPAIGN_ALLOW_CONCURRENT=1"
+    exit 1
+  fi
+
+  rm -rf "$lock_dir" 2>/dev/null || true
+  if mkdir "$lock_dir" 2>/dev/null; then
+    {
+      printf 'pid=%s\n' "$$"
+      printf 'start_utc=%s\n' "$now_utc"
+      printf 'scope=%s\n' "$lock_scope"
+      printf 'command=%s\n' "$(print_cmd "$0" "${original_args[@]}")"
+    } >"$owner_file"
+    acquired_lock_dirs+=("$lock_dir")
+    return 0
+  fi
+
+  owner_pid="$(lock_owner_field "$owner_file" "pid")"
+  owner_start_utc="$(lock_owner_field "$owner_file" "start_utc")"
+  echo "profile-compare-campaign: unable to acquire campaign lock for $lock_scope"
+  echo "lock: $lock_dir"
+  if [[ -n "$owner_pid" ]]; then
+    echo "owner_pid: $owner_pid"
+    echo "owner_start_utc: ${owner_start_utc:-unknown}"
+  fi
+  echo "override with --allow-concurrent 1 or PROFILE_COMPARE_CAMPAIGN_ALLOW_CONCURRENT=1"
+  exit 1
+}
+
 bool_arg_or_die() {
   local name="$1"
   local value="$2"
@@ -114,10 +199,105 @@ is_non_negative_decimal() {
   [[ "$value" =~ ^[0-9]+([.][0-9]+)?$ ]]
 }
 
+to_non_negative_int() {
+  local value="${1:-0}"
+  if [[ "$value" =~ ^[0-9]+$ ]]; then
+    printf '%s' "$value"
+    return 0
+  fi
+  if [[ "$value" =~ ^[0-9]+[.][0-9]+$ ]]; then
+    awk -v raw="$value" 'BEGIN { n = int(raw + 0); if (n < 0) n = 0; printf "%d", n }'
+    return 0
+  fi
+  printf '%s' "0"
+}
+
+extract_diagnostic_count() {
+  local summary_json_path="$1"
+  local key="$2"
+  local raw_value
+  raw_value="$(jq -r --arg key "$key" '
+    [
+      (.diagnostics[$key] // empty),
+      (.summary.diagnostics[$key] // empty),
+      (.summary[$key] // empty),
+      (.[$key] // empty)
+    ] | map(select(. != null)) | .[0] // 0
+  ' "$summary_json_path" 2>/dev/null || printf '%s' "0")"
+  to_non_negative_int "$raw_value"
+}
+
+host_is_loopback_local() {
+  local host="${1:-}"
+  host="${host#[}"
+  host="${host%]}"
+  case "$host" in
+    127.0.0.1|localhost|::1)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+url_host_from_endpoint() {
+  local raw="${1:-}"
+  local rest hostport host
+
+  if [[ -z "$raw" ]]; then
+    printf '%s\n' ""
+    return 0
+  fi
+
+  if [[ "$raw" == *"://"* ]]; then
+    rest="${raw#*://}"
+  else
+    rest="$raw"
+  fi
+  hostport="${rest%%/*}"
+  hostport="${hostport##*@}"
+
+  if [[ "$hostport" == \[*\]* ]]; then
+    host="${hostport#\[}"
+    host="${host%%]*}"
+    printf '%s\n' "$host"
+    return 0
+  fi
+
+  host="${hostport%%:*}"
+  printf '%s\n' "$host"
+}
+
+url_is_non_loopback_host() {
+  local host
+  host="$(url_host_from_endpoint "${1:-}")"
+  if [[ -z "$host" ]]; then
+    return 1
+  fi
+  if host_is_loopback_local "$host"; then
+    return 1
+  fi
+  return 0
+}
+
+url_csv_has_non_loopback_host() {
+  local csv="$1"
+  local item
+  IFS=',' read -r -a items <<<"$csv"
+  for item in "${items[@]}"; do
+    item="$(trim "$item")"
+    [[ -z "$item" ]] && continue
+    if url_is_non_loopback_host "$item"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 original_args=("$@")
 
 campaign_runs="3"
 campaign_pause_sec="0"
+allow_concurrent="${PROFILE_COMPARE_CAMPAIGN_ALLOW_CONCURRENT:-0}"
 reports_dir=""
 
 profiles_csv="balanced,speed,private,speed-1hop"
@@ -165,6 +345,15 @@ while [[ $# -gt 0 ]]; do
     --campaign-pause-sec)
       campaign_pause_sec="${2:-}"
       shift 2
+      ;;
+    --allow-concurrent)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        allow_concurrent="${2:-}"
+        shift 2
+      else
+        allow_concurrent="1"
+        shift
+      fi
       ;;
     --reports-dir)
       reports_dir="${2:-}"
@@ -355,6 +544,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
+bool_arg_or_die "--allow-concurrent" "$allow_concurrent"
 bool_arg_or_die "--force-stack-reset" "$force_stack_reset"
 bool_arg_or_die "--stack-strict-beta" "$stack_strict_beta"
 bool_arg_or_die "--cleanup-ifaces" "$cleanup_ifaces"
@@ -439,7 +629,13 @@ execution_mode_adjusted="0"
 execution_mode_adjustment_reason=""
 start_local_stack_adjusted="0"
 start_local_stack_adjustment_reason=""
-if [[ "$execution_mode_effective" == "local" && ( -n "$directory_urls" || -n "$bootstrap_directory" || -n "$issuer_url" || -n "$entry_url" || -n "$exit_url" ) ]]; then
+if [[ "$execution_mode_effective" == "local" ]] && {
+  [[ -n "$directory_urls" ]] ||
+  [[ -n "$bootstrap_directory" ]] ||
+  [[ -n "$issuer_url" ]] ||
+  [[ -n "$entry_url" ]] ||
+  [[ -n "$exit_url" ]];
+}; then
   execution_mode_effective="docker"
   execution_mode_adjusted="1"
   execution_mode_adjustment_reason="remote endpoint overrides requested"
@@ -448,6 +644,38 @@ if [[ "$execution_mode_effective" == "docker" && "$start_local_stack_effective" 
   start_local_stack_effective="0"
   start_local_stack_adjusted="1"
   start_local_stack_adjustment_reason="docker mode disables implicit local stack bootstrap"
+fi
+
+explicit_remote_endpoints="0"
+if [[ -n "$directory_urls" ]] && url_csv_has_non_loopback_host "$directory_urls"; then
+  explicit_remote_endpoints="1"
+fi
+if [[ "$explicit_remote_endpoints" == "0" && -n "$bootstrap_directory" ]] && url_is_non_loopback_host "$bootstrap_directory"; then
+  explicit_remote_endpoints="1"
+fi
+if [[ "$explicit_remote_endpoints" == "0" && -n "$issuer_url" ]] && url_is_non_loopback_host "$issuer_url"; then
+  explicit_remote_endpoints="1"
+fi
+if [[ "$explicit_remote_endpoints" == "0" && -n "$entry_url" ]] && url_is_non_loopback_host "$entry_url"; then
+  explicit_remote_endpoints="1"
+fi
+if [[ "$explicit_remote_endpoints" == "0" && -n "$exit_url" ]] && url_is_non_loopback_host "$exit_url"; then
+  explicit_remote_endpoints="1"
+fi
+
+transport_auto_client_inner_source="0"
+transport_auto_disable_synthetic_fallback="0"
+transport_auto_data_plane_mode_opaque="0"
+if [[ "$explicit_remote_endpoints" == "1" ]]; then
+  if [[ -z "${CLIENT_INNER_SOURCE+x}" ]]; then
+    transport_auto_client_inner_source="1"
+  fi
+  if [[ -z "${CLIENT_DISABLE_SYNTHETIC_FALLBACK+x}" ]]; then
+    transport_auto_disable_synthetic_fallback="1"
+  fi
+  if [[ -z "${DATA_PLANE_MODE+x}" ]]; then
+    transport_auto_data_plane_mode_opaque="1"
+  fi
 fi
 
 local_compare_script="${PROFILE_COMPARE_CAMPAIGN_LOCAL_SCRIPT:-$ROOT_DIR/scripts/profile_compare_local.sh}"
@@ -485,10 +713,20 @@ fi
 mkdir -p "$(dirname "$summary_json")" "$(dirname "$report_md")"
 
 summary_log="$reports_dir/profile_compare_campaign.log"
-: >"$summary_log"
 
 rows_file="$(mktemp)"
-trap 'rm -f "$rows_file"' EXIT
+trap cleanup_campaign_resources EXIT
+
+if [[ "$allow_concurrent" != "1" ]]; then
+  reports_lock_dir="$reports_dir/.profile_compare_campaign.lock"
+  summary_lock_dir="${summary_json}.lock"
+  acquire_campaign_lock "$reports_lock_dir" "reports_dir"
+  if [[ "$summary_lock_dir" != "$reports_lock_dir" ]]; then
+    acquire_campaign_lock "$summary_lock_dir" "summary_json"
+  fi
+fi
+
+: >"$summary_log"
 
 declare -a compare_summary_paths=()
 
@@ -705,6 +943,41 @@ fi
 
 selected_summaries_json="$(printf '%s\n' "${compare_summary_paths[@]}" | jq -R . | jq -s '.')"
 
+transport_mismatch_failures=0
+token_proof_invalid_failures=0
+unknown_exit_failures=0
+directory_trust_failures=0
+for summary_path in "${compare_summary_paths[@]}"; do
+  transport_mismatch_failures=$((transport_mismatch_failures + $(extract_diagnostic_count "$summary_path" "transport_mismatch_failures")))
+  token_proof_invalid_failures=$((token_proof_invalid_failures + $(extract_diagnostic_count "$summary_path" "token_proof_invalid_failures")))
+  unknown_exit_failures=$((unknown_exit_failures + $(extract_diagnostic_count "$summary_path" "unknown_exit_failures")))
+  directory_trust_failures=$((directory_trust_failures + $(extract_diagnostic_count "$summary_path" "directory_trust_failures")))
+done
+
+likely_primary_failure="none"
+if ((token_proof_invalid_failures > 0)); then
+  likely_primary_failure="token_proof_invalid"
+elif ((unknown_exit_failures > 0)); then
+  likely_primary_failure="unknown_exit"
+elif ((transport_mismatch_failures > 0)); then
+  likely_primary_failure="transport_mismatch"
+elif ((directory_trust_failures > 0)); then
+  likely_primary_failure="directory_trust"
+fi
+
+operator_hint="No dominant diagnostic failure signal detected across selected runs."
+case "$likely_primary_failure" in
+  token_proof_invalid|unknown_exit)
+    operator_hint="Check invite/issuer alignment and retry with a fresh invite key."
+    ;;
+  transport_mismatch)
+    operator_hint="Check live-WG transport requirements: DATA_PLANE_MODE and CLIENT_INNER_SOURCE must match the target environment."
+    ;;
+  directory_trust)
+    operator_hint="Check trust reset and runtime trusted-directory key alignment before retrying."
+    ;;
+esac
+
 jq -n \
   --arg generated_at_utc "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --arg status "$status" \
@@ -723,6 +996,7 @@ jq -n \
   --arg trend_status "$trend_status" \
   --arg trend_notes "$trend_notes" \
   --arg profiles "$profiles_csv" \
+  --arg allow_concurrent "$allow_concurrent" \
   --arg execution_mode "$execution_mode" \
   --arg execution_mode_effective "$execution_mode_effective" \
   --arg execution_mode_adjusted "$execution_mode_adjusted" \
@@ -740,6 +1014,12 @@ jq -n \
   --arg start_local_stack_effective "$start_local_stack_effective" \
   --arg start_local_stack_adjusted "$start_local_stack_adjusted" \
   --arg start_local_stack_adjustment_reason "$start_local_stack_adjustment_reason" \
+  --arg explicit_remote_endpoints "$explicit_remote_endpoints" \
+  --arg transport_auto_client_inner_source "$transport_auto_client_inner_source" \
+  --arg transport_auto_disable_synthetic_fallback "$transport_auto_disable_synthetic_fallback" \
+  --arg transport_auto_data_plane_mode_opaque "$transport_auto_data_plane_mode_opaque" \
+  --arg likely_primary_failure "$likely_primary_failure" \
+  --arg operator_hint "$operator_hint" \
   --argjson rc "$rc" \
   --argjson campaign_runs "$campaign_runs" \
   --argjson campaign_pause_sec "$campaign_pause_sec" \
@@ -770,6 +1050,10 @@ jq -n \
   --argjson runs_missing_summary "$runs_missing_summary" \
   --argjson runs "$runs_json" \
   --argjson selected_summaries "$selected_summaries_json" \
+  --argjson transport_mismatch_failures "$transport_mismatch_failures" \
+  --argjson token_proof_invalid_failures "$token_proof_invalid_failures" \
+  --argjson unknown_exit_failures "$unknown_exit_failures" \
+  --argjson directory_trust_failures "$directory_trust_failures" \
   '{
     version: 1,
     generated_at_utc: $generated_at_utc,
@@ -783,12 +1067,19 @@ jq -n \
       reports_dir: $reports_dir,
       compare: {
         profiles: $profiles,
+        allow_concurrent: ($allow_concurrent == "1"),
         rounds: $rounds,
         timeout_sec: $timeout_sec,
         execution_mode: $execution_mode,
         execution_mode_effective: $execution_mode_effective,
         execution_mode_adjusted: ($execution_mode_adjusted == "1"),
         execution_mode_adjustment_reason: (if $execution_mode_adjustment_reason == "" then null else $execution_mode_adjustment_reason end),
+        explicit_remote_endpoints: ($explicit_remote_endpoints == "1"),
+        transport_auto_defaults: {
+          client_inner_source_udp: ($transport_auto_client_inner_source == "1"),
+          disable_synthetic_fallback: ($transport_auto_disable_synthetic_fallback == "1"),
+          data_plane_mode_opaque: ($transport_auto_data_plane_mode_opaque == "1")
+        },
         directory_urls: $directory_urls,
         bootstrap_directory: $bootstrap_directory,
         discovery_wait_sec: $discovery_wait_sec,
@@ -830,6 +1121,14 @@ jq -n \
       runs_with_summary: $runs_with_summary,
       runs_missing_summary: $runs_missing_summary
     },
+    aggregated_diagnostics: {
+      transport_mismatch_failures: $transport_mismatch_failures,
+      token_proof_invalid_failures: $token_proof_invalid_failures,
+      unknown_exit_failures: $unknown_exit_failures,
+      directory_trust_failures: $directory_trust_failures
+    },
+    likely_primary_failure: $likely_primary_failure,
+    operator_hint: $operator_hint,
     decision: {
       recommended_default_profile: $recommended_default_profile,
       source: $decision_source,
