@@ -229,3 +229,147 @@ impl ProfileRequest {
 fn is_valid_path_profile(path_profile: &str) -> bool {
     matches!(path_profile, "1hop" | "2hop" | "3hop")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    fn with_env<T>(vars: &[(&str, Option<&str>)], f: impl FnOnce() -> T) -> T {
+        let saved: Vec<(String, Option<String>)> = vars
+            .iter()
+            .map(|(key, _)| (key.to_string(), std::env::var(key).ok()))
+            .collect();
+        for (key, value) in vars {
+            match value {
+                Some(v) => std::env::set_var(key, v),
+                None => std::env::remove_var(key),
+            }
+        }
+        let out = f();
+        for (key, value) in saved {
+            match value {
+                Some(v) => std::env::set_var(key, v),
+                None => std::env::remove_var(key),
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn from_env_uses_safe_defaults() {
+        let _guard = env_lock().lock().expect("env lock");
+        with_env(
+            &[
+                ("TDPN_LOCAL_API_BASE_URL", None),
+                ("TDPN_LOCAL_API_TIMEOUT_SEC", None),
+                ("TDPN_LOCAL_API_ALLOW_REMOTE", None),
+                ("TDPN_LOCAL_API_AUTH_BEARER", None),
+            ],
+            || {
+                let cfg = LocalApiConfig::from_env().expect("from_env");
+                assert_eq!(cfg.base_url, "http://127.0.0.1:8095");
+                assert_eq!(cfg.timeout_sec, 20);
+                assert!(!cfg.allow_remote);
+                assert_eq!(cfg.auth_bearer, None);
+            },
+        );
+    }
+
+    #[test]
+    fn from_env_rejects_non_http_schemes() {
+        let _guard = env_lock().lock().expect("env lock");
+        with_env(
+            &[
+                ("TDPN_LOCAL_API_BASE_URL", Some("ftp://127.0.0.1:8095")),
+                ("TDPN_LOCAL_API_ALLOW_REMOTE", Some("1")),
+            ],
+            || {
+                let err = LocalApiConfig::from_env().expect_err("expected scheme error");
+                assert!(err.contains("unsupported scheme"), "{err}");
+            },
+        );
+    }
+
+    #[test]
+    fn from_env_rejects_remote_host_by_default() {
+        let _guard = env_lock().lock().expect("env lock");
+        with_env(
+            &[
+                ("TDPN_LOCAL_API_BASE_URL", Some("http://100.64.0.10:8095")),
+                ("TDPN_LOCAL_API_ALLOW_REMOTE", None),
+            ],
+            || {
+                let err = LocalApiConfig::from_env().expect_err("expected loopback guard");
+                assert!(err.contains("not loopback"), "{err}");
+            },
+        );
+    }
+
+    #[test]
+    fn from_env_allows_remote_host_when_opted_in() {
+        let _guard = env_lock().lock().expect("env lock");
+        with_env(
+            &[
+                ("TDPN_LOCAL_API_BASE_URL", Some("http://100.64.0.10:8095")),
+                ("TDPN_LOCAL_API_ALLOW_REMOTE", Some("1")),
+                ("TDPN_LOCAL_API_AUTH_BEARER", Some("  test-token  ")),
+            ],
+            || {
+                let cfg = LocalApiConfig::from_env().expect("from_env");
+                assert_eq!(cfg.base_url, "http://100.64.0.10:8095");
+                assert!(cfg.allow_remote);
+                assert_eq!(cfg.auth_bearer.as_deref(), Some("test-token"));
+            },
+        );
+    }
+
+    #[test]
+    fn connect_request_requires_bootstrap_and_invite() {
+        let mut req = ConnectRequest {
+            bootstrap_directory: "".to_string(),
+            invite_key: "".to_string(),
+            path_profile: "2hop".to_string(),
+            interface: None,
+            discovery_wait_sec: None,
+            ready_timeout_sec: None,
+            run_preflight: None,
+            prod_profile: None,
+            install_route: None,
+        };
+        let err_bootstrap = req.validate().expect_err("missing bootstrap");
+        assert!(err_bootstrap.contains("bootstrap_directory"), "{err_bootstrap}");
+
+        req.bootstrap_directory = "http://127.0.0.1:8081".to_string();
+        let err_invite = req.validate().expect_err("missing invite");
+        assert!(err_invite.contains("invite_key"), "{err_invite}");
+    }
+
+    #[test]
+    fn path_profile_validation_is_strict() {
+        let bad_connect = ConnectRequest {
+            bootstrap_directory: "http://127.0.0.1:8081".to_string(),
+            invite_key: "inv-test".to_string(),
+            path_profile: "private".to_string(),
+            interface: None,
+            discovery_wait_sec: None,
+            ready_timeout_sec: None,
+            run_preflight: None,
+            prod_profile: None,
+            install_route: None,
+        };
+        let err = bad_connect.validate().expect_err("invalid path profile");
+        assert!(err.contains("1hop, 2hop, 3hop"), "{err}");
+
+        let bad_profile = ProfileRequest {
+            path_profile: "balanced".to_string(),
+        };
+        let profile_err = bad_profile.validate().expect_err("invalid set_profile");
+        assert!(profile_err.contains("1hop, 2hop, 3hop"), "{profile_err}");
+    }
+}
