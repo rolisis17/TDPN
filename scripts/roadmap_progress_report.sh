@@ -1986,28 +1986,52 @@ blockchain_mainnet_activation_gate_summary_normalize_json() {
       elif (.no_go | type) == "boolean" then .no_go
       elif (.go | type) == "boolean" then (if .go then false else true end)
       else (go_bool | if . == null then null else (not) end) end;
-    {
-      available: true,
-      status: (if (.status | type) == "string" and .status != "" then .status else "unknown" end),
-      decision: decision_text,
-      go: go_bool,
-      no_go: no_go_bool,
-      reasons: string_array_from([
+    def reason_text_candidates:
+      string_array_from([
         (if (.decision | type) == "object" then (.decision.reasons // []) else [] end),
         (.reasons // []),
         (if (.decision | type) == "object" then (.decision.reason // []) else [] end),
         (.go_reasons // []),
         (.no_go_reasons // []),
+        (.failed_reasons // []),
+        (if (.decision | type) == "object" then (.decision.failed_reasons // []) else [] end),
         (if (.decision | type) == "object" then (.decision.notes // []) else [] end)
-      ]),
-      source_paths: string_array_from([
+      ]);
+    def failed_gate_reason_fallback:
+      string_array_from([
+        (.failed_gate_ids // []),
+        (if (.decision | type) == "object" then (.decision.failed_gate_ids // []) else [] end)
+      ]);
+    def source_path_candidates:
+      string_array_from([
         (.source_paths // []),
         (.evidence_paths // []),
         (if (.artifacts | type) == "object" then (.artifacts.source_paths // []) else [] end),
         (if (.artifacts | type) == "object" then (.artifacts.evidence_paths // []) else [] end),
         (if (.decision | type) == "object" then (.decision.source_paths // []) else [] end),
         (if (.decision | type) == "object" then (.decision.evidence_paths // []) else [] end)
-      ])
+      ]);
+    def metrics_source_path_fallback:
+      string_array_from([
+        (if (.input | type) == "object" then (.input.metrics_json // []) else [] end),
+        (if (.artifacts | type) == "object" then (.artifacts.metrics_json // []) else [] end),
+        (.metrics_json // []),
+        (if (.decision | type) == "object" then (.decision.metrics_json // []) else [] end)
+      ]);
+    {
+      available: true,
+      status: (if (.status | type) == "string" and .status != "" then .status else "unknown" end),
+      decision: decision_text,
+      go: go_bool,
+      no_go: no_go_bool,
+      reasons: (
+        reason_text_candidates as $reasons
+        | if ($reasons | length) > 0 then $reasons else failed_gate_reason_fallback end
+      ),
+      source_paths: (
+        source_path_candidates as $source_paths
+        | if ($source_paths | length) > 0 then $source_paths else metrics_source_path_fallback end
+      )
     }
   ' "$path"
 }

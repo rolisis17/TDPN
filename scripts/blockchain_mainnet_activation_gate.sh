@@ -69,6 +69,15 @@ bool_arg_or_die() {
   fi
 }
 
+array_to_json() {
+  local -n arr_ref=$1
+  if ((${#arr_ref[@]} == 0)); then
+    printf '%s' "[]"
+    return
+  fi
+  printf '%s\n' "${arr_ref[@]}" | jq -R 'select(length > 0)' | jq -s 'unique'
+}
+
 json_valid01() {
   local path="$1"
   if [[ -n "$path" && -f "$path" ]] && jq -e . "$path" >/dev/null 2>&1; then
@@ -287,6 +296,7 @@ trap cleanup EXIT
 declare -a gate_json_entries=()
 declare -a failed_gate_ids=()
 declare -a failed_reasons=()
+declare -a source_paths=()
 
 input_state="available"
 input_reason=""
@@ -306,6 +316,14 @@ elif [[ "$(json_valid01 "$metrics_json")" != "1" ]]; then
   input_valid="0"
 fi
 
+if [[ -n "$(trim "$metrics_json")" ]]; then
+  source_paths+=("$metrics_json")
+fi
+if [[ -n "$(trim "$summary_json")" ]]; then
+  source_paths+=("$summary_json")
+fi
+source_paths_json="$(array_to_json source_paths)"
+
 decision="NO-GO"
 status="no-go"
 summary_rc="1"
@@ -315,6 +333,8 @@ measurement_window_weeks="null"
 if [[ "$input_valid" != "1" ]]; then
   failed_gate_ids+=("metrics_input")
   failed_reasons+=("$input_reason")
+  failed_gate_ids_json="$(array_to_json failed_gate_ids)"
+  failed_reasons_json="$(array_to_json failed_reasons)"
   if [[ "$fail_close" == "1" ]]; then
     exit_code="1"
   fi
@@ -333,8 +353,10 @@ if [[ "$input_valid" != "1" ]]; then
     --argjson input_valid "$input_valid" \
     --argjson measurement_window_weeks "$measurement_window_weeks" \
     --argjson counts "$(jq -n '{required: 12, evaluated: 0, pass: 0, fail: 0}')" \
-    --argjson failed_gate_ids "$(printf '%s\n' "${failed_gate_ids[@]}" | jq -R . | jq -s .)" \
-    --argjson failed_reasons "$(printf '%s\n' "${failed_reasons[@]}" | jq -R . | jq -s .)" \
+    --argjson failed_gate_ids "$failed_gate_ids_json" \
+    --argjson failed_reasons "$failed_reasons_json" \
+    --argjson reasons "$failed_reasons_json" \
+    --argjson source_paths "$source_paths_json" \
     --argjson gates '[]' \
     --arg summary_json "$summary_json" \
     '{
@@ -356,6 +378,8 @@ if [[ "$input_valid" != "1" ]]; then
       counts: $counts,
       failed_gate_ids: $failed_gate_ids,
       failed_reasons: $failed_reasons,
+      reasons: $reasons,
+      source_paths: $source_paths,
       gates: $gates,
       artifacts: {
         summary_json: $summary_json
@@ -486,6 +510,8 @@ else
     --argjson counts "$counts_json" \
     --argjson failed_gate_ids "$failed_gate_ids_json" \
     --argjson failed_reasons "$failed_reasons_json" \
+    --argjson reasons "$failed_reasons_json" \
+    --argjson source_paths "$source_paths_json" \
     --argjson gates "$gates_json" \
     --arg summary_json "$summary_json" \
     '{
@@ -507,6 +533,8 @@ else
       counts: $counts,
       failed_gate_ids: $failed_gate_ids,
       failed_reasons: $failed_reasons,
+      reasons: $reasons,
+      source_paths: $source_paths,
       gates: $gates,
       artifacts: {
         summary_json: $summary_json

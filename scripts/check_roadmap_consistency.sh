@@ -259,6 +259,9 @@ check_blockchain_fastlane_activation_gate_surface() {
     "scripts/blockchain_fastlane.sh" \
     "scripts/integration_blockchain_fastlane.sh" \
     "./scripts/easy_node.sh blockchain-fastlane" \
+    "blockchain_mainnet_activation_metrics" \
+    "scripts/blockchain_mainnet_activation_metrics.sh" \
+    "scripts/integration_blockchain_mainnet_activation_metrics.sh" \
     "mainnet activation gate" \
     "scripts/blockchain_mainnet_activation_gate.sh" \
     "scripts/integration_blockchain_mainnet_activation_gate.sh" \

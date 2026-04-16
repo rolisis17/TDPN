@@ -12,6 +12,11 @@ for cmd in jq mktemp rg chmod mkdir touch; do
 done
 
 TMP_DIR="$(mktemp -d)"
+INTEGRATION_STDOUT_LOG_DIR="$TMP_DIR/stdout-logs"
+mkdir -p "$INTEGRATION_STDOUT_LOG_DIR"
+ROADMAP_PROGRESS_REPORT_LOG_PREFIX="$INTEGRATION_STDOUT_LOG_DIR/integration_roadmap_progress_report"
+ROADMAP_PROGRESS_FORWARD_SUMMARY_JSON="$TMP_DIR/roadmap_progress_forward_summary.json"
+
 CANONICAL_LOG_DIR="$ROOT_DIR/.easy-node-logs"
 CANONICAL_LOG_DIR_EXISTED="0"
 if [[ -d "$CANONICAL_LOG_DIR" ]]; then
@@ -707,11 +712,11 @@ run_roadmap_progress_report \
   --summary-json "$SUMMARY_JSON" \
   --report-md "$REPORT_MD" \
   --print-report 0 \
-  --print-summary-json 0 >/tmp/integration_roadmap_progress_report_ok.log 2>&1
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log 2>&1
 
-if ! rg -q '\[roadmap-progress-report\] status=warn rc=0' /tmp/integration_roadmap_progress_report_ok.log; then
+if ! rg -q '\[roadmap-progress-report\] status=warn rc=0' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
   echo "expected warn status in success path"
-  cat /tmp/integration_roadmap_progress_report_ok.log
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log
   exit 1
 fi
 if [[ ! -f "$SUMMARY_JSON" || ! -f "$REPORT_MD" ]]; then
@@ -820,14 +825,14 @@ if ! jq -e '
   cat "$SUMMARY_JSON"
   exit 1
 fi
-if ! rg -q '\[roadmap-progress-report\] refresh_step=manual_validation_report status=running' /tmp/integration_roadmap_progress_report_ok.log; then
+if ! rg -q '\[roadmap-progress-report\] refresh_step=manual_validation_report status=running' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
   echo "expected manual refresh running heartbeat line"
-  cat /tmp/integration_roadmap_progress_report_ok.log
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log
   exit 1
 fi
-if ! rg -q '\[roadmap-progress-report\] refresh_step=manual_validation_report status=pass rc=0 timed_out=false' /tmp/integration_roadmap_progress_report_ok.log; then
+if ! rg -q '\[roadmap-progress-report\] refresh_step=manual_validation_report status=pass rc=0 timed_out=false' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
   echo "expected manual refresh completion heartbeat line"
-  cat /tmp/integration_roadmap_progress_report_ok.log
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log
   exit 1
 fi
 if ! rg -q 'manual-validation-report --profile-compare-signoff-summary-json' "$CAPTURE"; then
@@ -904,9 +909,9 @@ if ! run_roadmap_progress_report \
   --summary-json "$TMP_DIR/roadmap_progress_mainnet_activation_gate_missing_summary.json" \
   --report-md "$TMP_DIR/roadmap_progress_mainnet_activation_gate_missing_report.md" \
   --print-report 0 \
-  --print-summary-json 0 >/tmp/integration_roadmap_progress_report_mainnet_activation_gate_missing.log 2>&1; then
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_missing.log 2>&1; then
   echo "expected success when mainnet activation gate summary is missing"
-  cat /tmp/integration_roadmap_progress_report_mainnet_activation_gate_missing.log
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_missing.log
   exit 1
 fi
 if ! jq -e '
@@ -939,9 +944,9 @@ if ! run_roadmap_progress_report \
   --summary-json "$TMP_DIR/roadmap_progress_mainnet_activation_gate_invalid_summary.json" \
   --report-md "$TMP_DIR/roadmap_progress_mainnet_activation_gate_invalid_report.md" \
   --print-report 0 \
-  --print-summary-json 0 >/tmp/integration_roadmap_progress_report_mainnet_activation_gate_invalid.log 2>&1; then
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_invalid.log 2>&1; then
   echo "expected success when mainnet activation gate summary is invalid"
-  cat /tmp/integration_roadmap_progress_report_mainnet_activation_gate_invalid.log
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_invalid.log
   exit 1
 fi
 if ! jq -e '
@@ -994,9 +999,9 @@ if ! run_roadmap_progress_report \
   --summary-json "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_summary.json" \
   --report-md "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md" \
   --print-report 0 \
-  --print-summary-json 0 >/tmp/integration_roadmap_progress_report_mainnet_activation_gate_auto.log 2>&1; then
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log 2>&1; then
   echo "expected success when mainnet activation gate summary is auto-discovered"
-  cat /tmp/integration_roadmap_progress_report_mainnet_activation_gate_auto.log
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log
   exit 1
 fi
 if ! jq -e --arg src "$AUTO_MAINNET_GATE_SUMMARY_JSON" '
@@ -1015,22 +1020,77 @@ if ! jq -e --arg src "$AUTO_MAINNET_GATE_SUMMARY_JSON" '
   exit 1
 fi
 
-if ! rg -q '\[roadmap-progress-report\] phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_status=pass issuer_sponsor_api_live_smoke_ok=true' /tmp/integration_roadmap_progress_report_ok.log; then
+echo "[roadmap-progress-report] blockchain mainnet activation gate failed_reasons-only fallback path"
+FAILED_REASONS_ONLY_MAINNET_GATE_SUMMARY_JSON="$TMP_DIR/blockchain_mainnet_activation_gate_failed_reasons_only_summary.json"
+cat >"$FAILED_REASONS_ONLY_MAINNET_GATE_SUMMARY_JSON" <<'EOF_FAILED_REASONS_ONLY_MAINNET_GATE'
+{
+  "version": 1,
+  "schema": {
+    "id": "blockchain_mainnet_activation_gate_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "no-go",
+  "decision": "NO-GO",
+  "go": false,
+  "no_go": true,
+  "failed_gate_ids": [
+    "validator_candidate_depth"
+  ],
+  "failed_reasons": [
+    "validator candidate depth below threshold"
+  ],
+  "input": {
+    "metrics_json": "./artifacts/blockchain/mainnet_activation_metrics_snapshot.json"
+  },
+  "artifacts": {
+    "metrics_json": "./artifacts/blockchain/mainnet_activation_metrics_snapshot.json"
+  }
+}
+EOF_FAILED_REASONS_ONLY_MAINNET_GATE
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$MINIMAL_MANUAL_SUMMARY_JSON" \
+  --phase7-mainnet-cutover-summary-json "" \
+  --blockchain-mainnet-activation-gate-summary-json "$FAILED_REASONS_ONLY_MAINNET_GATE_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_mainnet_activation_gate_failed_reasons_only_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_mainnet_activation_gate_failed_reasons_only_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_failed_reasons_only.log 2>&1; then
+  echo "expected success when mainnet activation gate summary has only failed_reasons"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_failed_reasons_only.log
+  exit 1
+fi
+if ! jq -e '
+  .blockchain_track.mainnet_activation_gate.available == true
+  and .blockchain_track.mainnet_activation_gate.status == "no-go"
+  and .blockchain_track.mainnet_activation_gate.decision == "NO-GO"
+  and ((.blockchain_track.mainnet_activation_gate.reasons // []) | length) > 0
+  and ((.blockchain_track.mainnet_activation_gate.reasons // []) | index("validator candidate depth below threshold")) != null
+  and ((.blockchain_track.mainnet_activation_gate.source_paths // []) | index("./artifacts/blockchain/mainnet_activation_metrics_snapshot.json")) != null
+' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_failed_reasons_only_summary.json" >/dev/null; then
+  echo "failed_reasons-only gate summary JSON missing expected reason/source-path fallbacks"
+  cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_failed_reasons_only_summary.json"
+  exit 1
+fi
+
+if ! rg -q '\[roadmap-progress-report\] phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_status=pass issuer_sponsor_api_live_smoke_ok=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
   echo "expected phase5 issuer sponsor debug line in success path"
-  cat /tmp/integration_roadmap_progress_report_ok.log
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log
   exit 1
 fi
 if [[ "$PHASE6_OUTPUT_PRESENT" == "1" ]]; then
-  if ! rg -q '\[roadmap-progress-report\].*phase6' /tmp/integration_roadmap_progress_report_ok.log; then
+  if ! rg -q '\[roadmap-progress-report\].*phase6' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
     echo "expected phase6 debug line in success path"
-    cat /tmp/integration_roadmap_progress_report_ok.log
+    cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log
     exit 1
   fi
 fi
 if [[ "$PHASE7_OUTPUT_PRESENT" == "1" ]]; then
-  if ! rg -q '\[roadmap-progress-report\].*phase7' /tmp/integration_roadmap_progress_report_ok.log; then
+  if ! rg -q '\[roadmap-progress-report\].*phase7' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
     echo "expected phase7 debug line in success path"
-    cat /tmp/integration_roadmap_progress_report_ok.log
+    cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log
     exit 1
   fi
 fi
@@ -1049,9 +1109,9 @@ if ! run_roadmap_progress_report \
   --summary-json "$TMP_DIR/roadmap_progress_minimal_summary.json" \
   --report-md "$TMP_DIR/roadmap_progress_minimal_report.md" \
   --print-report 0 \
-  --print-summary-json 0 >/tmp/integration_roadmap_progress_report_minimal.log 2>&1; then
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_minimal.log 2>&1; then
   echo "expected success when manual-validation summary has partial schema"
-  cat /tmp/integration_roadmap_progress_report_minimal.log
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_minimal.log
   exit 1
 fi
 if ! jq -e '
@@ -1091,14 +1151,14 @@ if run_roadmap_progress_report \
   --summary-json "$TMP_DIR/roadmap_progress_incompatible_schema_summary.json" \
   --report-md "$TMP_DIR/roadmap_progress_incompatible_schema_report.md" \
   --print-report 0 \
-  --print-summary-json 0 >/tmp/integration_roadmap_progress_report_incompatible_schema.log 2>&1; then
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_incompatible_schema.log 2>&1; then
   echo "expected failure when manual-validation summary schema is incompatible"
-  cat /tmp/integration_roadmap_progress_report_incompatible_schema.log
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_incompatible_schema.log
   exit 1
 fi
-if ! rg -q 'manual-validation summary JSON is missing required fields or uses an incompatible schema' /tmp/integration_roadmap_progress_report_incompatible_schema.log; then
+if ! rg -q 'manual-validation summary JSON is missing required fields or uses an incompatible schema' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_incompatible_schema.log; then
   echo "incompatible schema path missing expected fail-close message"
-  cat /tmp/integration_roadmap_progress_report_incompatible_schema.log
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_incompatible_schema.log
   exit 1
 fi
 
@@ -1134,9 +1194,9 @@ if ! run_roadmap_progress_report \
   --summary-json "$TMP_DIR/roadmap_progress_fallback_summary.json" \
   --report-md "$TMP_DIR/roadmap_progress_fallback_report.md" \
   --print-report 0 \
-  --print-summary-json 0 >/tmp/integration_roadmap_progress_report_fallback.log 2>&1; then
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_fallback.log 2>&1; then
   echo "expected success when next_action_command is inferred from checks"
-  cat /tmp/integration_roadmap_progress_report_fallback.log
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_fallback.log
   exit 1
 fi
 if ! jq -e '
@@ -1192,9 +1252,9 @@ if ! run_roadmap_progress_report \
   --summary-json "$TMP_DIR/roadmap_progress_summary_gate_fallback_summary.json" \
   --report-md "$TMP_DIR/roadmap_progress_summary_gate_fallback_report.md" \
   --print-report 0 \
-  --print-summary-json 0 >/tmp/integration_roadmap_progress_report_summary_gate_fallback.log 2>&1; then
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_summary_gate_fallback.log 2>&1; then
   echo "expected success when real-host/docker gates are inferred from summary fields"
-  cat /tmp/integration_roadmap_progress_report_summary_gate_fallback.log
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_summary_gate_fallback.log
   exit 1
 fi
 if ! jq -e '
@@ -1258,9 +1318,9 @@ if ! run_roadmap_progress_report \
   --summary-json "$TMP_DIR/roadmap_progress_optional_fallback_summary.json" \
   --report-md "$TMP_DIR/roadmap_progress_optional_fallback_report.md" \
   --print-report 0 \
-  --print-summary-json 0 >/tmp/integration_roadmap_progress_report_optional_fallback.log 2>&1; then
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_optional_fallback.log 2>&1; then
   echo "expected success when optional gate next commands are inferred from command fields"
-  cat /tmp/integration_roadmap_progress_report_optional_fallback.log
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_optional_fallback.log
   exit 1
 fi
 if ! jq -e '
@@ -1297,9 +1357,9 @@ if ! run_roadmap_progress_report \
   --summary-json "$TMP_DIR/roadmap_progress_profile_default_gate_no_go_summary.json" \
   --report-md "$TMP_DIR/roadmap_progress_profile_default_gate_no_go_report.md" \
   --print-report 0 \
-  --print-summary-json 0 >/tmp/integration_roadmap_progress_report_profile_default_gate_no_go.log 2>&1; then
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_no_go.log 2>&1; then
   echo "expected success when profile default gate signoff summary reports NO-GO"
-  cat /tmp/integration_roadmap_progress_report_profile_default_gate_no_go.log
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_no_go.log
   exit 1
 fi
 if ! jq -e --arg src "$PROFILE_DEFAULT_GATE_SIGNOFF_NO_GO_JSON" '
@@ -1331,9 +1391,9 @@ if ! run_roadmap_progress_report \
   --summary-json "$TMP_DIR/roadmap_progress_profile_default_gate_pending_summary.json" \
   --report-md "$TMP_DIR/roadmap_progress_profile_default_gate_pending_report.md" \
   --print-report 0 \
-  --print-summary-json 0 >/tmp/integration_roadmap_progress_report_profile_default_gate_pending.log 2>&1; then
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_pending.log 2>&1; then
   echo "expected success when profile default gate signoff summary is pending"
-  cat /tmp/integration_roadmap_progress_report_profile_default_gate_pending.log
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_pending.log
   exit 1
 fi
 if ! jq -e --arg src "$PROFILE_DEFAULT_GATE_SIGNOFF_PENDING_JSON" '
@@ -1357,9 +1417,9 @@ if ! run_roadmap_progress_report \
   --summary-json "$TMP_DIR/roadmap_progress_profile_default_gate_missing_summary.json" \
   --report-md "$TMP_DIR/roadmap_progress_profile_default_gate_missing_report.md" \
   --print-report 0 \
-  --print-summary-json 0 >/tmp/integration_roadmap_progress_report_profile_default_gate_missing.log 2>&1; then
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_missing.log 2>&1; then
   echo "expected success when profile default gate signoff summary is missing"
-  cat /tmp/integration_roadmap_progress_report_profile_default_gate_missing.log
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_missing.log
   exit 1
 fi
 if ! jq -e '
@@ -1441,14 +1501,14 @@ if FAKE_ROADMAP_CAPTURE_FILE="$CAPTURE" \
     --summary-json "$TMP_DIR/roadmap_progress_manual_restore_summary.json" \
     --report-md "$TMP_DIR/roadmap_progress_manual_restore_report.md" \
     --print-report 0 \
-    --print-summary-json 0 >/tmp/integration_roadmap_progress_report_manual_restore.log 2>&1; then
+    --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_manual_restore.log 2>&1; then
   echo "expected failure when manual refresh emits invalid summary"
-  cat /tmp/integration_roadmap_progress_report_manual_restore.log
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_manual_restore.log
   exit 1
 fi
-if ! rg -q '\[roadmap-progress-report\] status=fail rc=1' /tmp/integration_roadmap_progress_report_manual_restore.log; then
+if ! rg -q '\[roadmap-progress-report\] status=fail rc=1' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_manual_restore.log; then
   echo "manual restore path missing fail status line"
-  cat /tmp/integration_roadmap_progress_report_manual_restore.log
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_manual_restore.log
   exit 1
 fi
 if ! jq -e '
@@ -1487,14 +1547,14 @@ if FAKE_ROADMAP_CAPTURE_FILE="$CAPTURE" \
     --summary-json "$TMP_DIR/roadmap_progress_manual_partial_restore_summary.json" \
     --report-md "$TMP_DIR/roadmap_progress_manual_partial_restore_report.md" \
     --print-report 0 \
-    --print-summary-json 0 >/tmp/integration_roadmap_progress_report_manual_partial_restore.log 2>&1; then
+    --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_manual_partial_restore.log 2>&1; then
   echo "expected failure when manual refresh emits partial summary schema"
-  cat /tmp/integration_roadmap_progress_report_manual_partial_restore.log
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_manual_partial_restore.log
   exit 1
 fi
-if ! rg -q '\[roadmap-progress-report\] status=fail rc=1' /tmp/integration_roadmap_progress_report_manual_partial_restore.log; then
+if ! rg -q '\[roadmap-progress-report\] status=fail rc=1' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_manual_partial_restore.log; then
   echo "manual partial restore path missing fail status line"
-  cat /tmp/integration_roadmap_progress_report_manual_partial_restore.log
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_manual_partial_restore.log
   exit 1
 fi
 if ! jq -e '
@@ -1540,14 +1600,14 @@ if FAKE_ROADMAP_CAPTURE_FILE="$CAPTURE" \
     --summary-json "$TMP_DIR/roadmap_progress_fail_summary.json" \
     --report-md "$TMP_DIR/roadmap_progress_fail_report.md" \
     --print-report 0 \
-    --print-summary-json 0 >/tmp/integration_roadmap_progress_report_fail.log 2>&1; then
+    --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_fail.log 2>&1; then
   echo "expected failure when single-machine refresh fails"
-  cat /tmp/integration_roadmap_progress_report_fail.log
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_fail.log
   exit 1
 fi
-if ! rg -q '\[roadmap-progress-report\] status=fail rc=1' /tmp/integration_roadmap_progress_report_fail.log; then
+if ! rg -q '\[roadmap-progress-report\] status=fail rc=1' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_fail.log; then
   echo "expected fail status when single-machine refresh fails"
-  cat /tmp/integration_roadmap_progress_report_fail.log
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_fail.log
   exit 1
 fi
 if ! jq -e '
@@ -1585,19 +1645,19 @@ if ! FAKE_ROADMAP_CAPTURE_FILE="$CAPTURE" \
     --summary-json "$TMP_DIR/roadmap_progress_transient_warn_summary.json" \
     --report-md "$TMP_DIR/roadmap_progress_transient_warn_report.md" \
     --print-report 0 \
-    --print-summary-json 0 >/tmp/integration_roadmap_progress_report_transient_warn.log 2>&1; then
+    --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_transient_warn.log 2>&1; then
   echo "expected success with warn status when single-machine refresh hits transient docker registry failure"
-  cat /tmp/integration_roadmap_progress_report_transient_warn.log
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_transient_warn.log
   exit 1
 fi
-if ! rg -q '\[roadmap-progress-report\] status=warn rc=0' /tmp/integration_roadmap_progress_report_transient_warn.log; then
+if ! rg -q '\[roadmap-progress-report\] status=warn rc=0' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_transient_warn.log; then
   echo "transient warning path missing warn status line"
-  cat /tmp/integration_roadmap_progress_report_transient_warn.log
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_transient_warn.log
   exit 1
 fi
-if ! rg -q '\[roadmap-progress-report\] refresh_step=single_machine_prod_readiness status=warn rc=1 timed_out=false' /tmp/integration_roadmap_progress_report_transient_warn.log; then
+if ! rg -q '\[roadmap-progress-report\] refresh_step=single_machine_prod_readiness status=warn rc=1 timed_out=false' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_transient_warn.log; then
   echo "transient warning path missing single-machine warn heartbeat line"
-  cat /tmp/integration_roadmap_progress_report_transient_warn.log
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_transient_warn.log
   exit 1
 fi
 if ! jq -e '
@@ -1631,19 +1691,19 @@ if command -v timeout >/dev/null 2>&1; then
       --summary-json "$TMP_DIR/roadmap_progress_timeout_summary.json" \
       --report-md "$TMP_DIR/roadmap_progress_timeout_report.md" \
       --print-report 0 \
-      --print-summary-json 0 >/tmp/integration_roadmap_progress_report_timeout.log 2>&1; then
+      --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_timeout.log 2>&1; then
     echo "expected failure when single-machine refresh times out"
-    cat /tmp/integration_roadmap_progress_report_timeout.log
+    cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_timeout.log
     exit 1
   fi
-  if ! rg -q '\[roadmap-progress-report\] refresh_step=single_machine_prod_readiness status=running timeout_sec=1' /tmp/integration_roadmap_progress_report_timeout.log; then
+  if ! rg -q '\[roadmap-progress-report\] refresh_step=single_machine_prod_readiness status=running timeout_sec=1' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_timeout.log; then
     echo "timeout path missing running heartbeat line"
-    cat /tmp/integration_roadmap_progress_report_timeout.log
+    cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_timeout.log
     exit 1
   fi
-  if ! rg -q '\[roadmap-progress-report\] refresh_step=single_machine_prod_readiness status=fail rc=124 timed_out=true' /tmp/integration_roadmap_progress_report_timeout.log; then
+  if ! rg -q '\[roadmap-progress-report\] refresh_step=single_machine_prod_readiness status=fail rc=124 timed_out=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_timeout.log; then
     echo "timeout path missing timeout completion heartbeat line"
-    cat /tmp/integration_roadmap_progress_report_timeout.log
+    cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_timeout.log
     exit 1
   fi
   if ! jq -e '
@@ -1735,7 +1795,7 @@ assert_phase1_actionable_contract_case() {
   local expected_fail_closed_no_go="$5"
   local phase1_summary_json="$TMP_DIR/roadmap_progress_phase1_actionable_${case_id}_summary.json"
   local phase1_report_md="$TMP_DIR/roadmap_progress_phase1_actionable_${case_id}_report.md"
-  local phase1_log="/tmp/integration_roadmap_progress_report_phase1_actionable_${case_id}.log"
+  local phase1_log="${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_phase1_actionable_${case_id}.log"
 
   if ! run_roadmap_progress_report \
     --refresh-manual-validation 0 \
@@ -1815,9 +1875,9 @@ if ! run_roadmap_progress_report \
   --summary-json "$TMP_DIR/roadmap_progress_phase0_actionable_summary.json" \
   --report-md "$TMP_DIR/roadmap_progress_phase0_actionable_report.md" \
   --print-report 0 \
-  --print-summary-json 0 >/tmp/integration_roadmap_progress_report_phase0_actionable.log 2>&1; then
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_phase0_actionable.log 2>&1; then
   echo "expected success for phase0 actionable-gate precedence path"
-  cat /tmp/integration_roadmap_progress_report_phase0_actionable.log
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_phase0_actionable.log
   exit 1
 fi
 if ! jq -e '
@@ -1908,9 +1968,9 @@ if ! run_roadmap_progress_report \
   --summary-json "$TMP_DIR/roadmap_progress_phase2_actionable_summary.json" \
   --report-md "$TMP_DIR/roadmap_progress_phase2_actionable_report.md" \
   --print-report 0 \
-  --print-summary-json 0 >/tmp/integration_roadmap_progress_report_phase2_actionable.log 2>&1; then
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_phase2_actionable.log 2>&1; then
   echo "expected success for phase2 actionable-gate progression path"
-  cat /tmp/integration_roadmap_progress_report_phase2_actionable.log
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_phase2_actionable.log
   exit 1
 fi
 if ! jq -e --arg p2src "$PHASE2_HANDOFF_FAIL_SUMMARY_JSON" '
@@ -1981,9 +2041,9 @@ if ! ROADMAP_PROGRESS_LOGS_ROOT="$AUTO_RESILIENCE_LOGS_ROOT" \
     --summary-json "$TMP_DIR/roadmap_progress_auto_resilience_summary.json" \
     --report-md "$TMP_DIR/roadmap_progress_auto_resilience_report.md" \
     --print-report 0 \
-    --print-summary-json 0 >/tmp/integration_roadmap_progress_report_auto_resilience.log 2>&1; then
+    --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_auto_resilience.log 2>&1; then
   echo "expected success for auto resilience source selection path"
-  cat /tmp/integration_roadmap_progress_report_auto_resilience.log
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_auto_resilience.log
   exit 1
 fi
 if ! jq -e --arg src "$AUTO_RESILIENCE_NEW_JSON" '
@@ -2083,9 +2143,9 @@ if ! ROADMAP_PROGRESS_LOGS_ROOT="$AUTO_PHASE5_LOGS_ROOT" \
     --summary-json "$TMP_DIR/roadmap_progress_auto_phase5_summary.json" \
     --report-md "$TMP_DIR/roadmap_progress_auto_phase5_report.md" \
     --print-report 0 \
-    --print-summary-json 0 >/tmp/integration_roadmap_progress_report_auto_phase5.log 2>&1; then
+    --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_auto_phase5.log 2>&1; then
   echo "expected success for auto phase5 source selection path"
-  cat /tmp/integration_roadmap_progress_report_auto_phase5.log
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_auto_phase5.log
   exit 1
 fi
 if ! jq -e --arg src "$AUTO_PHASE5_GOOD_JSON" '
@@ -2123,8 +2183,8 @@ ROADMAP_PROGRESS_REPORT_SCRIPT="$FAKE_FORWARD" \
 ./scripts/easy_node.sh roadmap-progress-report \
   --refresh-manual-validation 0 \
   --refresh-single-machine-readiness 1 \
-  --summary-json /tmp/roadmap_progress.json \
-  --print-summary-json 1 >/tmp/integration_roadmap_progress_report_forward.log 2>&1
+  --summary-json "$ROADMAP_PROGRESS_FORWARD_SUMMARY_JSON" \
+  --print-summary-json 1 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_forward.log 2>&1
 
 forward_line="$(rg '^roadmap-progress-report ' "$CAPTURE" | tail -n 1 || true)"
 if [[ -z "$forward_line" ]]; then
@@ -2132,7 +2192,7 @@ if [[ -z "$forward_line" ]]; then
   cat "$CAPTURE"
   exit 1
 fi
-for expected in '--refresh-manual-validation 0' '--refresh-single-machine-readiness 1' '--summary-json /tmp/roadmap_progress.json' '--print-summary-json 1'; do
+for expected in "--refresh-manual-validation 0" "--refresh-single-machine-readiness 1" "--summary-json $ROADMAP_PROGRESS_FORWARD_SUMMARY_JSON" "--print-summary-json 1"; do
   if [[ "$forward_line" != *"$expected"* ]]; then
     echo "forwarded command missing expected fragment: $expected"
     echo "$forward_line"

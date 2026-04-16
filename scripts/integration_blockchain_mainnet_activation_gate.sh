@@ -23,6 +23,7 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 GO_METRICS="$TMP_DIR/metrics_go.json"
 NO_GO_METRICS="$TMP_DIR/metrics_no_go.json"
 INVALID_METRICS="$TMP_DIR/metrics_invalid.json"
+MISSING_METRICS="$TMP_DIR/does_not_exist.json"
 
 GO_SUMMARY="$TMP_DIR/summary_go.json"
 NO_GO_SUMMARY="$TMP_DIR/summary_no_go.json"
@@ -88,7 +89,7 @@ BLOCKCHAIN_MAINNET_ACTIVATION_GATE_METRICS_JSON="$GO_METRICS" \
   --summary-json "$GO_SUMMARY" \
   --print-summary-json 1 >"$GO_LOG" 2>&1
 
-jq -e '
+jq -e --arg metrics_path "$GO_METRICS" '
   .decision == "GO"
   and .status == "go"
   and .rc == 0
@@ -102,6 +103,8 @@ jq -e '
   and (.gates | length) == 12
   and .input.state == "available"
   and .input.valid == true
+  and (.reasons | length) == 0
+  and (.source_paths | index($metrics_path)) != null
 ' "$GO_SUMMARY" >/dev/null
 if ! grep -Fq '"decision": "GO"' "$GO_LOG"; then
   echo "expected GO summary JSON in stdout log"
@@ -115,7 +118,7 @@ echo "[blockchain-mainnet-activation-gate] NO-GO path"
   --summary-json "$NO_GO_SUMMARY" \
   --print-summary-json 0 >"$NO_GO_LOG" 2>&1
 
-jq -e '
+jq -e --arg metrics_path "$NO_GO_METRICS" '
   .decision == "NO-GO"
   and .status == "no-go"
   and .rc == 1
@@ -129,6 +132,9 @@ jq -e '
   and (.failed_gate_ids | index("vpn_recovery_mttr_p95")) != null
   and (.failed_gate_ids | index("validator_operator_concentration")) != null
   and (.failed_gate_ids | index("unit_economics")) != null
+  and (.reasons | length) > 0
+  and ((.reasons | index("vpn_recovery_mttr_p95_minutes=34 does not satisfy <= 30")) != null)
+  and (.source_paths | index($metrics_path)) != null
 ' "$NO_GO_SUMMARY" >/dev/null
 if ! grep -Fq '[blockchain-mainnet-activation-gate] decision=NO-GO' "$NO_GO_LOG"; then
   echo "expected NO-GO decision log line"
@@ -139,7 +145,7 @@ fi
 echo "[blockchain-mainnet-activation-gate] missing input path"
 set +e
 "$SCRIPT_UNDER_TEST" \
-  --metrics-json "$TMP_DIR/does_not_exist.json" \
+  --metrics-json "$MISSING_METRICS" \
   --summary-json "$MISSING_SUMMARY" \
   --print-summary-json 0 >"$MISSING_LOG" 2>&1
 missing_rc=$?
@@ -149,7 +155,7 @@ if [[ "$missing_rc" -ne 0 ]]; then
   cat "$MISSING_LOG"
   exit 1
 fi
-jq -e '
+jq -e --arg metrics_path "$MISSING_METRICS" '
   .decision == "NO-GO"
   and .status == "no-go"
   and .rc == 1
@@ -158,6 +164,9 @@ jq -e '
   and .input.valid == false
   and .failed_gate_ids == ["metrics_input"]
   and (.failed_reasons | length) == 1
+  and (.reasons | length) > 0
+  and ((.reasons | index("metrics JSON file not found: " + $metrics_path)) != null)
+  and (.source_paths | index($metrics_path)) != null
 ' "$MISSING_SUMMARY" >/dev/null
 
 echo "[blockchain-mainnet-activation-gate] invalid input with fail-close"
@@ -174,7 +183,7 @@ if [[ "$invalid_rc" -eq 0 ]]; then
   cat "$INVALID_LOG"
   exit 1
 fi
-jq -e '
+jq -e --arg metrics_path "$INVALID_METRICS" '
   .decision == "NO-GO"
   and .status == "no-go"
   and .rc == 1
@@ -182,6 +191,9 @@ jq -e '
   and .input.state == "invalid"
   and .input.valid == false
   and .failed_gate_ids == ["metrics_input"]
+  and (.reasons | length) > 0
+  and ((.reasons | index("metrics JSON is not valid JSON: " + $metrics_path)) != null)
+  and (.source_paths | index($metrics_path)) != null
 ' "$INVALID_SUMMARY" >/dev/null
 
 echo "[blockchain-mainnet-activation-gate] NO-GO with fail-close"
