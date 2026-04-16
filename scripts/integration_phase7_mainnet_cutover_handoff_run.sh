@@ -343,6 +343,7 @@ if ! jq -e --arg run_summary "$TMP_DIR/pass_run_summary.json" --arg handoff_summ
   and .steps.phase7_mainnet_cutover_handoff_check.contract_valid == true
   and .steps.phase7_mainnet_cutover_handoff_check.artifacts.summary_json == $handoff_summary
   and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.module_tx_surface_ok == true
+  and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.tdpnd_grpc_live_smoke_ok == true
   and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.tdpnd_grpc_auth_live_smoke_ok == true
   and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.mainnet_activation_gate_go == true
   and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.dual_write_parity_ok == true
@@ -442,6 +443,7 @@ if ! jq -e '
   and .steps.phase7_mainnet_cutover_run.contract_valid == true
   and .steps.phase7_mainnet_cutover_handoff_check.contract_valid == true
   and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.module_tx_surface_ok == true
+  and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.tdpnd_grpc_live_smoke_ok == true
   and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.tdpnd_grpc_auth_live_smoke_ok == true
   and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.mainnet_activation_gate_go == true
   and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.dual_write_parity_ok == true
@@ -584,6 +586,7 @@ if ! jq -e '
   and .steps.phase7_mainnet_cutover_handoff_check.contract_valid == false
   and (.steps.phase7_mainnet_cutover_handoff_check.contract_error | type) == "string"
   and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.module_tx_surface_ok == null
+  and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.tdpnd_grpc_live_smoke_ok == null
   and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.tdpnd_grpc_auth_live_smoke_ok == null
   and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.mainnet_activation_gate_go == null
   and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.dual_write_parity_ok == null

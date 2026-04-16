@@ -545,6 +545,7 @@ if [[ -f "$handoff_summary_json" ]]; then
 fi
 
 signal_module_tx_surface_ok="null"
+signal_tdpnd_grpc_live_smoke_ok="null"
 signal_tdpnd_grpc_auth_live_smoke_ok="null"
 signal_tdpnd_comet_runtime_smoke_ok="null"
 signal_mainnet_activation_gate_go="null"
@@ -556,6 +557,7 @@ signal_rollback_path_ready="null"
 signal_operator_approval_ok="null"
 if [[ "$handoff_contract_valid" == "1" ]]; then
   signal_module_tx_surface_ok="$(extract_handoff_signal_json "$handoff_summary_json" "module_tx_surface_ok")"
+  signal_tdpnd_grpc_live_smoke_ok="$(extract_handoff_signal_json "$handoff_summary_json" "tdpnd_grpc_live_smoke_ok")"
   signal_tdpnd_grpc_auth_live_smoke_ok="$(extract_handoff_signal_json "$handoff_summary_json" "tdpnd_grpc_auth_live_smoke_ok")"
   signal_tdpnd_comet_runtime_smoke_ok="$(extract_handoff_signal_json "$handoff_summary_json" "tdpnd_comet_runtime_smoke_ok")"
   signal_mainnet_activation_gate_go="$(extract_handoff_signal_json "$handoff_summary_json" "mainnet_activation_gate_go")"
@@ -604,6 +606,7 @@ jq -n \
   --arg handoff_summary_exists "$handoff_summary_exists" \
   --arg handoff_log "$handoff_log" \
   --argjson signal_module_tx_surface_ok "$signal_module_tx_surface_ok" \
+  --argjson signal_tdpnd_grpc_live_smoke_ok "$signal_tdpnd_grpc_live_smoke_ok" \
   --argjson signal_tdpnd_grpc_auth_live_smoke_ok "$signal_tdpnd_grpc_auth_live_smoke_ok" \
   --argjson signal_tdpnd_comet_runtime_smoke_ok "$signal_tdpnd_comet_runtime_smoke_ok" \
   --argjson signal_mainnet_activation_gate_go "$signal_mainnet_activation_gate_go" \
@@ -672,6 +675,7 @@ jq -n \
         contract_error: (if $handoff_contract_error == "" then null else $handoff_contract_error end),
         signal_snapshot: {
           module_tx_surface_ok: $signal_module_tx_surface_ok,
+          tdpnd_grpc_live_smoke_ok: $signal_tdpnd_grpc_live_smoke_ok,
           tdpnd_grpc_auth_live_smoke_ok: $signal_tdpnd_grpc_auth_live_smoke_ok,
           tdpnd_comet_runtime_smoke_ok: $signal_tdpnd_comet_runtime_smoke_ok,
           mainnet_activation_gate_go: $signal_mainnet_activation_gate_go,

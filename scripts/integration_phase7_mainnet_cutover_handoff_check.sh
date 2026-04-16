@@ -185,6 +185,7 @@ if ! jq -e '
   and .handoff.run_pipeline_ok == true
   and .handoff.summary_report_ok == true
   and .handoff.module_tx_surface_ok == true
+  and .handoff.tdpnd_grpc_live_smoke_ok == true
   and .handoff.tdpnd_grpc_auth_live_smoke_ok == true
   and .handoff.cosmos_module_coverage_floor_ok == true
   and .handoff.cosmos_keeper_coverage_floor_ok == true
@@ -264,6 +265,8 @@ if ! jq -e '
   and .rc == 1
   and .handoff.mainnet_activation_gate_go == false
   and .handoff.mainnet_activation_gate_go_status == "fail"
+  and .handoff.tdpnd_grpc_live_smoke_ok == true
+  and .handoff.tdpnd_grpc_live_smoke_status == "pass"
   and .handoff.tdpnd_grpc_auth_live_smoke_ok == false
   and .handoff.tdpnd_grpc_auth_live_smoke_status == "fail"
   and .handoff.cosmos_module_coverage_floor_ok == false
@@ -327,6 +330,8 @@ if ! jq -e '
   and .handoff.cosmos_app_coverage_floor_status == "fail"
   and .handoff.mainnet_activation_gate_go == false
   and .handoff.mainnet_activation_gate_go_status == "fail"
+  and .handoff.tdpnd_grpc_live_smoke_ok == true
+  and .handoff.tdpnd_grpc_live_smoke_status == "pass"
   and .handoff.tdpnd_grpc_auth_live_smoke_ok == false
   and .handoff.tdpnd_grpc_auth_live_smoke_status == "fail"
 ' "$RELAXED_OUTPUT" >/dev/null; then

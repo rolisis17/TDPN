@@ -201,6 +201,7 @@ if ! jq -e '
   and .steps.phase7_mainnet_cutover_check.command_rc == 0
   and .steps.phase7_mainnet_cutover_check.contract_valid == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.module_tx_surface_ok == true
+  and .steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_grpc_live_smoke_ok == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_grpc_auth_live_smoke_ok == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_comet_runtime_smoke_ok == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.dual_write_parity_ok == true
@@ -248,6 +249,7 @@ if ! jq -e '
   and .inputs.dry_run == true
   and .steps.phase7_mainnet_cutover_check.contract_valid == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.module_tx_surface_ok == true
+  and .steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_grpc_live_smoke_ok == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_grpc_auth_live_smoke_ok == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_comet_runtime_smoke_ok == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.dual_write_parity_ok == true
@@ -294,6 +296,7 @@ if ! jq -e '
   and .inputs.dry_run == true
   and .steps.phase7_mainnet_cutover_check.contract_valid == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.module_tx_surface_ok == true
+  and .steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_grpc_live_smoke_ok == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_grpc_auth_live_smoke_ok == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_comet_runtime_smoke_ok == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.dual_write_parity_ok == true
@@ -338,6 +341,7 @@ if ! jq -e '
   and .steps.phase7_mainnet_cutover_check.command_rc == 23
   and .steps.phase7_mainnet_cutover_check.contract_valid == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.module_tx_surface_ok == true
+  and .steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_grpc_live_smoke_ok == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_grpc_auth_live_smoke_ok == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.dual_write_parity_ok == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.mainnet_activation_gate_go == true
@@ -381,6 +385,7 @@ if ! jq -e '
   and .steps.phase7_mainnet_cutover_check.contract_valid == false
   and (.steps.phase7_mainnet_cutover_check.contract_error | type) == "string"
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.module_tx_surface_ok == null
+  and .steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_grpc_live_smoke_ok == null
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_grpc_auth_live_smoke_ok == null
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_comet_runtime_smoke_ok == null
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.dual_write_parity_ok == null

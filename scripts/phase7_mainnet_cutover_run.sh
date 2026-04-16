@@ -264,6 +264,7 @@ declare check_rc=0
 declare check_contract_error=""
 declare check_command=""
 declare signal_module_tx_surface_ok="null"
+declare signal_tdpnd_grpc_live_smoke_ok="null"
 declare signal_tdpnd_grpc_auth_live_smoke_ok="null"
 declare signal_tdpnd_comet_runtime_smoke_ok="null"
 declare signal_dual_write_parity_ok="null"
@@ -302,6 +303,7 @@ if check_summary_contract_valid "$check_summary_json"; then
   check_status="$(jq -r '.status // "fail"' "$check_summary_json" 2>/dev/null || echo fail)"
   check_rc="$(jq -r '.rc // 0' "$check_summary_json" 2>/dev/null || echo 0)"
   signal_module_tx_surface_ok="$(extract_check_signal_json "$check_summary_json" "module_tx_surface_ok")"
+  signal_tdpnd_grpc_live_smoke_ok="$(extract_check_signal_json "$check_summary_json" "tdpnd_grpc_live_smoke_ok")"
   signal_tdpnd_grpc_auth_live_smoke_ok="$(extract_check_signal_json "$check_summary_json" "tdpnd_grpc_auth_live_smoke_ok")"
   signal_tdpnd_comet_runtime_smoke_ok="$(extract_check_signal_json "$check_summary_json" "tdpnd_comet_runtime_smoke_ok")"
   signal_dual_write_parity_ok="$(extract_check_signal_json "$check_summary_json" "dual_write_parity_ok")"
@@ -360,6 +362,7 @@ jq -n \
   --arg check_contract_error "$check_contract_error" \
   --argjson check_summary_exists "$check_summary_exists" \
   --argjson signal_module_tx_surface_ok "$signal_module_tx_surface_ok" \
+  --argjson signal_tdpnd_grpc_live_smoke_ok "$signal_tdpnd_grpc_live_smoke_ok" \
   --argjson signal_tdpnd_grpc_auth_live_smoke_ok "$signal_tdpnd_grpc_auth_live_smoke_ok" \
   --argjson signal_tdpnd_comet_runtime_smoke_ok "$signal_tdpnd_comet_runtime_smoke_ok" \
   --argjson signal_dual_write_parity_ok "$signal_dual_write_parity_ok" \
@@ -402,6 +405,7 @@ jq -n \
         contract_error: (if $check_contract_error == "" then null else $check_contract_error end),
         signal_snapshot: {
           module_tx_surface_ok: $signal_module_tx_surface_ok,
+          tdpnd_grpc_live_smoke_ok: $signal_tdpnd_grpc_live_smoke_ok,
           tdpnd_grpc_auth_live_smoke_ok: $signal_tdpnd_grpc_auth_live_smoke_ok,
           tdpnd_comet_runtime_smoke_ok: $signal_tdpnd_comet_runtime_smoke_ok,
           dual_write_parity_ok: $signal_dual_write_parity_ok,
