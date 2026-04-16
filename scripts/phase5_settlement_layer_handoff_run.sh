@@ -244,6 +244,15 @@ handoff_supports_issuer_sponsor_requirement_flag() {
   return 1
 }
 
+handoff_supports_issuer_admin_blockchain_handlers_coverage_requirement_flag() {
+  local help_out=""
+  help_out="$("$handoff_check_script" --help 2>/dev/null || true)"
+  if [[ "$help_out" == *"--require-issuer-admin-blockchain-handlers-coverage-ok"* ]]; then
+    return 0
+  fi
+  return 1
+}
+
 json_file_valid() {
   local path="$1"
   [[ -f "$path" ]] && jq -e . "$path" >/dev/null 2>&1
@@ -405,6 +414,44 @@ extract_handoff_settlement_dual_asset_parity_signal() {
   ' "$handoff_summary_json" 2>/dev/null || printf '%s\n' "null|missing|$fallback_required|0|unresolved"
 }
 
+extract_handoff_issuer_admin_blockchain_handlers_coverage_signal() {
+  local handoff_summary_json="$1"
+  local fallback_required="$2"
+  if ! json_file_valid "$handoff_summary_json"; then
+    printf '%s\n' "null|missing|$fallback_required|0|unresolved"
+    return
+  fi
+  # Consolidated summary source key compatibility:
+  # phase5_settlement_layer_handoff_check_summary.signals.issuer_admin_blockchain_handlers_coverage_ok
+  jq -r --arg fallback_required "$fallback_required" '
+    [
+      (if (.handoff.issuer_admin_blockchain_handlers_coverage_ok | type) == "boolean"
+       then (if .handoff.issuer_admin_blockchain_handlers_coverage_ok then "true" else "false" end)
+       else "null" end),
+      (if (.handoff.issuer_admin_blockchain_handlers_coverage_status | type) == "string"
+           and (.handoff.issuer_admin_blockchain_handlers_coverage_status | length) > 0
+       then .handoff.issuer_admin_blockchain_handlers_coverage_status
+       elif (.handoff.issuer_admin_blockchain_handlers_coverage_ok | type) == "boolean"
+       then (if .handoff.issuer_admin_blockchain_handlers_coverage_ok then "pass" else "fail" end)
+       else "missing" end),
+      (if (.inputs.requirements.issuer_admin_blockchain_handlers_coverage_ok | type) == "boolean"
+       then (if .inputs.requirements.issuer_admin_blockchain_handlers_coverage_ok then "true" else "false" end)
+       elif $fallback_required != "null"
+       then $fallback_required
+       else "null" end),
+      (if (.handoff.issuer_admin_blockchain_handlers_coverage_resolved | type) == "boolean"
+       then (if .handoff.issuer_admin_blockchain_handlers_coverage_resolved then "1" else "0" end)
+       elif (.handoff.issuer_admin_blockchain_handlers_coverage_ok | type) == "boolean"
+       then "1"
+       else "0" end),
+      (if (.handoff.sources.issuer_admin_blockchain_handlers_coverage_ok | type) == "string"
+           and (.handoff.sources.issuer_admin_blockchain_handlers_coverage_ok | length) > 0
+       then .handoff.sources.issuer_admin_blockchain_handlers_coverage_ok
+       else "unresolved" end)
+    ] | join("|")
+  ' "$handoff_summary_json" 2>/dev/null || printf '%s\n' "null|missing|$fallback_required|0|unresolved"
+}
+
 need_cmd jq
 need_cmd date
 need_cmd mktemp
@@ -536,6 +583,7 @@ fi
 
 supports_settlement_flags="1"
 supports_issuer_sponsor_requirement_flag="1"
+supports_issuer_admin_blockchain_handlers_coverage_requirement_flag="1"
 if [[ "$run_phase5_settlement_layer_handoff_check" == "1" ]]; then
   supports_settlement_flags="0"
   if handoff_supports_settlement_requirement_flags; then
@@ -544,6 +592,10 @@ if [[ "$run_phase5_settlement_layer_handoff_check" == "1" ]]; then
   supports_issuer_sponsor_requirement_flag="0"
   if handoff_supports_issuer_sponsor_requirement_flag; then
     supports_issuer_sponsor_requirement_flag="1"
+  fi
+  supports_issuer_admin_blockchain_handlers_coverage_requirement_flag="0"
+  if handoff_supports_issuer_admin_blockchain_handlers_coverage_requirement_flag; then
+    supports_issuer_admin_blockchain_handlers_coverage_requirement_flag="1"
   fi
 fi
 
@@ -608,6 +660,12 @@ declare handoff_issuer_sponsor_api_live_smoke_status="missing"
 declare handoff_issuer_sponsor_api_live_smoke_required="null"
 declare handoff_issuer_sponsor_api_live_smoke_resolved="0"
 declare handoff_issuer_sponsor_api_live_smoke_source="unresolved"
+declare handoff_require_issuer_admin_blockchain_handlers_coverage_ok="null"
+declare handoff_issuer_admin_blockchain_handlers_coverage_ok="null"
+declare handoff_issuer_admin_blockchain_handlers_coverage_status="missing"
+declare handoff_issuer_admin_blockchain_handlers_coverage_required="null"
+declare handoff_issuer_admin_blockchain_handlers_coverage_resolved="0"
+declare handoff_issuer_admin_blockchain_handlers_coverage_source="unresolved"
 
 declare -a run_cmd=("$run_script" --reports-dir "$reports_dir" --summary-json "$run_summary_json")
 if [[ "$dry_run" == "1" ]]; then
@@ -663,6 +721,11 @@ fi
 if ! array_has_arg "--show-json" "${handoff_cmd[@]:1}"; then
   handoff_cmd+=(--show-json 0)
 fi
+if [[ "$dry_run" != "1" ]] \
+  && [[ "$supports_issuer_admin_blockchain_handlers_coverage_requirement_flag" == "1" ]] \
+  && ! handoff_requirement_arg_present "--require-issuer-admin-blockchain-handlers-coverage-ok" "--require-issuer-admin-blockchain-handlers-coverage-ok" "${handoff_cmd[@]:1}"; then
+  handoff_cmd+=(--require-issuer-admin-blockchain-handlers-coverage-ok 1)
+fi
 if [[ "$dry_run" == "1" ]]; then
   if ! array_has_arg "--require-run-pipeline-ok" "${handoff_cmd[@]:1}"; then
     handoff_cmd+=(--require-run-pipeline-ok 0)
@@ -703,9 +766,14 @@ if [[ "$dry_run" == "1" ]]; then
     && ! handoff_requirement_arg_present "--require-issuer-sponsor-api-live-smoke-ok" "--require-issuer-sponsor-api-live-smoke-ok" "${handoff_cmd[@]:1}"; then
     handoff_cmd+=(--require-issuer-sponsor-api-live-smoke-ok 0)
   fi
+  if [[ "$supports_issuer_admin_blockchain_handlers_coverage_requirement_flag" == "1" ]] \
+    && ! handoff_requirement_arg_present "--require-issuer-admin-blockchain-handlers-coverage-ok" "--require-issuer-admin-blockchain-handlers-coverage-ok" "${handoff_cmd[@]:1}"; then
+    handoff_cmd+=(--require-issuer-admin-blockchain-handlers-coverage-ok 0)
+  fi
 fi
 handoff_require_settlement_dual_asset_parity_ok="$(handoff_requirement_arg_value "--require-settlement-dual-asset-parity-ok" "--require-settlement-dual-asset-ok" "${handoff_cmd[@]:1}")"
 handoff_require_issuer_sponsor_api_live_smoke_ok="$(handoff_requirement_arg_value "--require-issuer-sponsor-api-live-smoke-ok" "--require-issuer-sponsor-api-live-smoke-ok" "${handoff_cmd[@]:1}")"
+handoff_require_issuer_admin_blockchain_handlers_coverage_ok="$(handoff_requirement_arg_value "--require-issuer-admin-blockchain-handlers-coverage-ok" "--require-issuer-admin-blockchain-handlers-coverage-ok" "${handoff_cmd[@]:1}")"
 handoff_command="$(print_cmd "${handoff_cmd[@]}")"
 
 if [[ "$run_phase5_settlement_layer_handoff_check" == "1" ]]; then
@@ -781,6 +849,29 @@ if [[ -z "$handoff_issuer_sponsor_api_live_smoke_source" ]]; then
   handoff_issuer_sponsor_api_live_smoke_source="unresolved"
 fi
 
+handoff_issuer_admin_blockchain_handlers_coverage_pair="$(extract_handoff_issuer_admin_blockchain_handlers_coverage_signal "$handoff_summary_json" "$handoff_require_issuer_admin_blockchain_handlers_coverage_ok")"
+IFS='|' read -r \
+  handoff_issuer_admin_blockchain_handlers_coverage_ok \
+  handoff_issuer_admin_blockchain_handlers_coverage_status \
+  handoff_issuer_admin_blockchain_handlers_coverage_required \
+  handoff_issuer_admin_blockchain_handlers_coverage_resolved \
+  handoff_issuer_admin_blockchain_handlers_coverage_source <<<"$handoff_issuer_admin_blockchain_handlers_coverage_pair"
+if [[ -z "$handoff_issuer_admin_blockchain_handlers_coverage_ok" ]]; then
+  handoff_issuer_admin_blockchain_handlers_coverage_ok="null"
+fi
+if [[ -z "$handoff_issuer_admin_blockchain_handlers_coverage_status" ]]; then
+  handoff_issuer_admin_blockchain_handlers_coverage_status="missing"
+fi
+if [[ -z "$handoff_issuer_admin_blockchain_handlers_coverage_required" ]]; then
+  handoff_issuer_admin_blockchain_handlers_coverage_required="$handoff_require_issuer_admin_blockchain_handlers_coverage_ok"
+fi
+if [[ -z "$handoff_issuer_admin_blockchain_handlers_coverage_resolved" ]]; then
+  handoff_issuer_admin_blockchain_handlers_coverage_resolved="0"
+fi
+if [[ -z "$handoff_issuer_admin_blockchain_handlers_coverage_source" ]]; then
+  handoff_issuer_admin_blockchain_handlers_coverage_source="unresolved"
+fi
+
 final_rc=0
 if [[ "$run_phase5_settlement_layer_run" == "1" ]] && (( run_rc != 0 )) && (( final_rc == 0 )); then
   final_rc="$run_rc"
@@ -849,6 +940,11 @@ jq -n \
   --arg handoff_issuer_sponsor_api_live_smoke_required "$handoff_issuer_sponsor_api_live_smoke_required" \
   --arg handoff_issuer_sponsor_api_live_smoke_resolved "$handoff_issuer_sponsor_api_live_smoke_resolved" \
   --arg handoff_issuer_sponsor_api_live_smoke_source "$handoff_issuer_sponsor_api_live_smoke_source" \
+  --arg handoff_issuer_admin_blockchain_handlers_coverage_ok "$handoff_issuer_admin_blockchain_handlers_coverage_ok" \
+  --arg handoff_issuer_admin_blockchain_handlers_coverage_status "$handoff_issuer_admin_blockchain_handlers_coverage_status" \
+  --arg handoff_issuer_admin_blockchain_handlers_coverage_required "$handoff_issuer_admin_blockchain_handlers_coverage_required" \
+  --arg handoff_issuer_admin_blockchain_handlers_coverage_resolved "$handoff_issuer_admin_blockchain_handlers_coverage_resolved" \
+  --arg handoff_issuer_admin_blockchain_handlers_coverage_source "$handoff_issuer_admin_blockchain_handlers_coverage_source" \
   '{
     version: 1,
     schema: {
@@ -942,9 +1038,24 @@ jq -n \
         end
       ),
       issuer_sponsor_api_live_smoke_resolved: ($handoff_issuer_sponsor_api_live_smoke_resolved == "1"),
+      issuer_admin_blockchain_handlers_coverage_ok: (
+        if $handoff_issuer_admin_blockchain_handlers_coverage_ok == "true" then true
+        elif $handoff_issuer_admin_blockchain_handlers_coverage_ok == "false" then false
+        else null
+        end
+      ),
+      issuer_admin_blockchain_handlers_coverage_status: $handoff_issuer_admin_blockchain_handlers_coverage_status,
+      issuer_admin_blockchain_handlers_coverage_required: (
+        if $handoff_issuer_admin_blockchain_handlers_coverage_required == "true" then true
+        elif $handoff_issuer_admin_blockchain_handlers_coverage_required == "false" then false
+        else null
+        end
+      ),
+      issuer_admin_blockchain_handlers_coverage_resolved: ($handoff_issuer_admin_blockchain_handlers_coverage_resolved == "1"),
       sources: {
         settlement_dual_asset_parity_ok: $handoff_settlement_dual_asset_parity_source,
-        issuer_sponsor_api_live_smoke_ok: $handoff_issuer_sponsor_api_live_smoke_source
+        issuer_sponsor_api_live_smoke_ok: $handoff_issuer_sponsor_api_live_smoke_source,
+        issuer_admin_blockchain_handlers_coverage_ok: $handoff_issuer_admin_blockchain_handlers_coverage_source
       }
     },
     artifacts: {

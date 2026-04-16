@@ -197,6 +197,7 @@ Flags:
   --require-settlement-state-persistence-ok [0|1]
   --require-settlement-dual-asset-parity-ok [0|1]
   --require-issuer-sponsor-api-live-smoke-ok [0|1]
+  --require-issuer-admin-blockchain-handlers-coverage-ok [0|1]
 EOF_HELP
   fi
   exit 0
@@ -212,6 +213,7 @@ printf 'handoff\t%s\n' "$*" >>"$capture"
 summary_json=""
 require_issuer_sponsor_api_live_smoke_ok="1"
 require_settlement_dual_asset_parity_ok="1"
+require_issuer_admin_blockchain_handlers_coverage_ok="1"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --summary-json)
@@ -233,6 +235,15 @@ while [[ $# -gt 0 ]]; do
         shift 2
       else
         require_settlement_dual_asset_parity_ok="1"
+        shift
+      fi
+      ;;
+    --require-issuer-admin-blockchain-handlers-coverage-ok)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_issuer_admin_blockchain_handlers_coverage_ok="${2:-}"
+        shift 2
+      else
+        require_issuer_admin_blockchain_handlers_coverage_ok="1"
         shift
       fi
       ;;
@@ -297,6 +308,30 @@ case "$dual_asset_mode" in
     ;;
 esac
 
+issuer_admin_mode="${FAKE_HANDOFF_ISSUER_ADMIN_BLOCKCHAIN_HANDLERS_COVERAGE_SIGNAL_MODE:-pass}"
+issuer_admin_ok_json="true"
+issuer_admin_status="pass"
+issuer_admin_resolved_json="true"
+issuer_admin_source="phase5_settlement_layer_handoff_check.signals.issuer_admin_blockchain_handlers_coverage_ok"
+case "$issuer_admin_mode" in
+  unresolved)
+    issuer_admin_ok_json="null"
+    issuer_admin_status="missing"
+    issuer_admin_resolved_json="false"
+    issuer_admin_source="unresolved"
+    ;;
+  fail)
+    issuer_admin_ok_json="false"
+    issuer_admin_status="fail"
+    issuer_admin_resolved_json="true"
+    ;;
+  *)
+    issuer_admin_ok_json="true"
+    issuer_admin_status="pass"
+    issuer_admin_resolved_json="true"
+    ;;
+esac
+
 if [[ -n "$summary_json" && "${FAKE_HANDOFF_OMIT_SUMMARY:-0}" != "1" ]]; then
   mkdir -p "$(dirname "$summary_json")"
   cat >"$summary_json" <<EOF_SUMMARY
@@ -313,7 +348,8 @@ if [[ -n "$summary_json" && "${FAKE_HANDOFF_OMIT_SUMMARY:-0}" != "1" ]]; then
   "inputs": {
     "requirements": {
       "settlement_dual_asset_parity_ok": $( [[ "$require_settlement_dual_asset_parity_ok" == "1" ]] && printf '%s' "true" || printf '%s' "false" ),
-      "issuer_sponsor_api_live_smoke_ok": $( [[ "$require_issuer_sponsor_api_live_smoke_ok" == "1" ]] && printf '%s' "true" || printf '%s' "false" )
+      "issuer_sponsor_api_live_smoke_ok": $( [[ "$require_issuer_sponsor_api_live_smoke_ok" == "1" ]] && printf '%s' "true" || printf '%s' "false" ),
+      "issuer_admin_blockchain_handlers_coverage_ok": $( [[ "$require_issuer_admin_blockchain_handlers_coverage_ok" == "1" ]] && printf '%s' "true" || printf '%s' "false" )
     }
   },
   "handoff": {
@@ -328,9 +364,13 @@ if [[ -n "$summary_json" && "${FAKE_HANDOFF_OMIT_SUMMARY:-0}" != "1" ]]; then
     "issuer_sponsor_api_live_smoke_ok": $sponsor_ok_json,
     "issuer_sponsor_api_live_smoke_status": "$sponsor_status",
     "issuer_sponsor_api_live_smoke_resolved": $sponsor_resolved_json,
+    "issuer_admin_blockchain_handlers_coverage_ok": $issuer_admin_ok_json,
+    "issuer_admin_blockchain_handlers_coverage_status": "$issuer_admin_status",
+    "issuer_admin_blockchain_handlers_coverage_resolved": $issuer_admin_resolved_json,
     "sources": {
       "settlement_dual_asset_parity_ok": "$dual_asset_source",
-      "issuer_sponsor_api_live_smoke_ok": "$sponsor_source"
+      "issuer_sponsor_api_live_smoke_ok": "$sponsor_source",
+      "issuer_admin_blockchain_handlers_coverage_ok": "$issuer_admin_source"
     }
   },
   "decision": {
@@ -382,7 +422,7 @@ if [[ "$handoff_line" != *"--phase5-run-summary-json $TMP_DIR/pass_run_summary.j
   echo "$handoff_line"
   exit 1
 fi
-if [[ "$handoff_line" != *"--require-run-pipeline-ok 1"* || "$handoff_line" != *"--show-json 0"* ]]; then
+if [[ "$handoff_line" != *"--require-run-pipeline-ok 1"* || "$handoff_line" != *"--show-json 0"* || "$handoff_line" != *"--require-issuer-admin-blockchain-handlers-coverage-ok 1"* ]]; then
   echo "handoff default forwarding mismatch"
   echo "$handoff_line"
   exit 1
@@ -430,6 +470,11 @@ if ! jq -e --arg run_summary "$TMP_DIR/pass_run_summary.json" --arg handoff_summ
   and .handoff.issuer_sponsor_api_live_smoke_required == true
   and .handoff.issuer_sponsor_api_live_smoke_resolved == true
   and .handoff.sources.issuer_sponsor_api_live_smoke_ok == "phase5_settlement_layer_handoff_check.signals.issuer_sponsor_api_live_smoke_ok"
+  and .handoff.issuer_admin_blockchain_handlers_coverage_ok == true
+  and .handoff.issuer_admin_blockchain_handlers_coverage_status == "pass"
+  and .handoff.issuer_admin_blockchain_handlers_coverage_required == true
+  and .handoff.issuer_admin_blockchain_handlers_coverage_resolved == true
+  and .handoff.sources.issuer_admin_blockchain_handlers_coverage_ok == "phase5_settlement_layer_handoff_check.signals.issuer_admin_blockchain_handlers_coverage_ok"
 ' "$PASS_WRAPPER_SUMMARY" >/dev/null; then
   echo "pass-path combined summary mismatch"
   cat "$PASS_WRAPPER_SUMMARY"
@@ -445,6 +490,7 @@ PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_HANDOFF_CHECK_SCRIPT="$FAKE_HANDOFF" \
 PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_CANONICAL_SUMMARY_JSON="$DRY_CANONICAL_SUMMARY" \
 FAKE_HANDOFF_SPONSOR_SIGNAL_MODE=unresolved \
 FAKE_HANDOFF_DUAL_ASSET_SIGNAL_MODE=unresolved \
+FAKE_HANDOFF_ISSUER_ADMIN_BLOCKCHAIN_HANDLERS_COVERAGE_SIGNAL_MODE=unresolved \
 bash "$RUNNER" \
   --reports-dir "$TMP_DIR/reports_dry" \
   --run-summary-json "$TMP_DIR/dry_run_summary.json" \
@@ -462,7 +508,7 @@ if [[ "$run_line" != *"--dry-run 1"* || "$run_line" != *"--theta 9"* ]]; then
   echo "$run_line"
   exit 1
 fi
-if [[ "$handoff_line" != *"--require-run-pipeline-ok 0"* || "$handoff_line" != *"--require-settlement-failsoft-ok 0"* || "$handoff_line" != *"--require-windows-role-runbooks-ok 1"* || "$handoff_line" != *"--require-settlement-bridge-smoke-ok 0"* || "$handoff_line" != *"--require-settlement-state-persistence-ok 0"* || "$handoff_line" != *"--require-issuer-sponsor-api-live-smoke-ok 0"* ]]; then
+if [[ "$handoff_line" != *"--require-run-pipeline-ok 0"* || "$handoff_line" != *"--require-settlement-failsoft-ok 0"* || "$handoff_line" != *"--require-windows-role-runbooks-ok 1"* || "$handoff_line" != *"--require-settlement-bridge-smoke-ok 0"* || "$handoff_line" != *"--require-settlement-state-persistence-ok 0"* || "$handoff_line" != *"--require-issuer-sponsor-api-live-smoke-ok 0"* || "$handoff_line" != *"--require-issuer-admin-blockchain-handlers-coverage-ok 0"* ]]; then
   echo "dry-run handoff relax/override mismatch"
   echo "$handoff_line"
   exit 1
@@ -493,6 +539,11 @@ if ! jq -e '
   and .handoff.issuer_sponsor_api_live_smoke_required == false
   and .handoff.issuer_sponsor_api_live_smoke_resolved == false
   and .handoff.sources.issuer_sponsor_api_live_smoke_ok == "unresolved"
+  and .handoff.issuer_admin_blockchain_handlers_coverage_ok == null
+  and .handoff.issuer_admin_blockchain_handlers_coverage_status == "missing"
+  and .handoff.issuer_admin_blockchain_handlers_coverage_required == false
+  and .handoff.issuer_admin_blockchain_handlers_coverage_resolved == false
+  and .handoff.sources.issuer_admin_blockchain_handlers_coverage_ok == "unresolved"
 ' "$DRY_WRAPPER_SUMMARY" >/dev/null; then
   echo "dry-run wrapper summary mismatch"
   cat "$DRY_WRAPPER_SUMMARY"
@@ -536,6 +587,11 @@ if [[ "$handoff_line" == *"--require-settlement-failsoft-ok"* || "$handoff_line"
 fi
 if [[ "$handoff_line" == *"--require-issuer-sponsor-api-live-smoke-ok"* ]]; then
   echo "sponsor live-smoke requirement should not be auto-injected for legacy checker help mode"
+  echo "$handoff_line"
+  exit 1
+fi
+if [[ "$handoff_line" == *"--require-issuer-admin-blockchain-handlers-coverage-ok"* ]]; then
+  echo "issuer-admin handlers requirement should not be auto-injected for legacy checker help mode"
   echo "$handoff_line"
   exit 1
 fi

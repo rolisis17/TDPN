@@ -17,6 +17,7 @@ Usage:
     [--require-settlement-state-persistence-ok [0|1]] \
     [--require-settlement-dual-asset-parity-ok [0|1]] \
     [--require-issuer-sponsor-api-live-smoke-ok [0|1]] \
+    [--require-issuer-admin-blockchain-handlers-coverage-ok [0|1]] \
     [--summary-json PATH] \
     [--show-json [0|1]]
 
@@ -299,6 +300,11 @@ emit_summary_json() {
   local settlement_dual_asset_parity_ok="${44}"
   local settlement_dual_asset_parity_resolved="${45}"
   local settlement_dual_asset_parity_source="${46}"
+  local require_issuer_admin_blockchain_handlers_coverage_ok="${47}"
+  local issuer_admin_blockchain_handlers_coverage_status="${48}"
+  local issuer_admin_blockchain_handlers_coverage_ok="${49}"
+  local issuer_admin_blockchain_handlers_coverage_resolved="${50}"
+  local issuer_admin_blockchain_handlers_coverage_source="${51}"
 
   local summary_tmp
   summary_tmp="$(mktemp)"
@@ -320,6 +326,7 @@ emit_summary_json() {
     --argjson require_settlement_state_persistence_ok "$require_settlement_state_persistence_ok" \
     --argjson require_settlement_dual_asset_parity_ok "$require_settlement_dual_asset_parity_ok" \
     --argjson require_issuer_sponsor_api_live_smoke_ok "$require_issuer_sponsor_api_live_smoke_ok" \
+    --argjson require_issuer_admin_blockchain_handlers_coverage_ok "$require_issuer_admin_blockchain_handlers_coverage_ok" \
     --arg run_pipeline_status "$run_pipeline_status" \
     --argjson run_pipeline_ok "$run_pipeline_ok" \
     --argjson run_pipeline_resolved "$run_pipeline_resolved" \
@@ -349,6 +356,10 @@ emit_summary_json() {
     --argjson issuer_sponsor_api_live_smoke_ok "$issuer_sponsor_api_live_smoke_ok" \
     --argjson issuer_sponsor_api_live_smoke_resolved "$issuer_sponsor_api_live_smoke_resolved" \
     --arg issuer_sponsor_api_live_smoke_source "$issuer_sponsor_api_live_smoke_source" \
+    --arg issuer_admin_blockchain_handlers_coverage_status "$issuer_admin_blockchain_handlers_coverage_status" \
+    --argjson issuer_admin_blockchain_handlers_coverage_ok "$issuer_admin_blockchain_handlers_coverage_ok" \
+    --argjson issuer_admin_blockchain_handlers_coverage_resolved "$issuer_admin_blockchain_handlers_coverage_resolved" \
+    --arg issuer_admin_blockchain_handlers_coverage_source "$issuer_admin_blockchain_handlers_coverage_source" \
     --argjson reasons "$reasons_json" \
     '{
       version: 1,
@@ -377,7 +388,8 @@ emit_summary_json() {
           settlement_bridge_smoke_ok: ($require_settlement_bridge_smoke_ok == 1),
           settlement_state_persistence_ok: ($require_settlement_state_persistence_ok == 1),
           settlement_dual_asset_parity_ok: ($require_settlement_dual_asset_parity_ok == 1),
-          issuer_sponsor_api_live_smoke_ok: ($require_issuer_sponsor_api_live_smoke_ok == 1)
+          issuer_sponsor_api_live_smoke_ok: ($require_issuer_sponsor_api_live_smoke_ok == 1),
+          issuer_admin_blockchain_handlers_coverage_ok: ($require_issuer_admin_blockchain_handlers_coverage_ok == 1)
         },
         usable: {
           phase5_run_summary_json: ($run_summary_usable == 1),
@@ -408,6 +420,9 @@ emit_summary_json() {
         issuer_sponsor_api_live_smoke_ok: $issuer_sponsor_api_live_smoke_ok,
         issuer_sponsor_api_live_smoke_status: $issuer_sponsor_api_live_smoke_status,
         issuer_sponsor_api_live_smoke_resolved: ($issuer_sponsor_api_live_smoke_resolved == 1),
+        issuer_admin_blockchain_handlers_coverage_ok: $issuer_admin_blockchain_handlers_coverage_ok,
+        issuer_admin_blockchain_handlers_coverage_status: $issuer_admin_blockchain_handlers_coverage_status,
+        issuer_admin_blockchain_handlers_coverage_resolved: ($issuer_admin_blockchain_handlers_coverage_resolved == 1),
         sources: {
           run_pipeline_ok: $run_pipeline_source,
           settlement_failsoft_ok: $settlement_failsoft_source,
@@ -415,7 +430,8 @@ emit_summary_json() {
           settlement_bridge_smoke_ok: $settlement_bridge_smoke_source,
           settlement_state_persistence_ok: $settlement_state_persistence_source,
           settlement_dual_asset_parity_ok: $settlement_dual_asset_parity_source,
-          issuer_sponsor_api_live_smoke_ok: $issuer_sponsor_api_live_smoke_source
+          issuer_sponsor_api_live_smoke_ok: $issuer_sponsor_api_live_smoke_source,
+          issuer_admin_blockchain_handlers_coverage_ok: $issuer_admin_blockchain_handlers_coverage_source
         }
       },
       decision: {
@@ -450,6 +466,7 @@ require_settlement_bridge_smoke_ok="${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_REQU
 require_settlement_state_persistence_ok="${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_REQUIRE_SETTLEMENT_STATE_PERSISTENCE_OK:-${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_REQUIRE_ROLE_COMBINATION_VALIDATION_OK:-1}}"
 require_settlement_dual_asset_parity_ok="${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_REQUIRE_SETTLEMENT_DUAL_ASSET_PARITY_OK:-${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_REQUIRE_SETTLEMENT_DUAL_ASSET_OK:-1}}"
 require_issuer_sponsor_api_live_smoke_ok="${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_REQUIRE_ISSUER_SPONSOR_API_LIVE_SMOKE_OK:-1}"
+require_issuer_admin_blockchain_handlers_coverage_ok="${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_REQUIRE_ISSUER_ADMIN_BLOCKCHAIN_HANDLERS_COVERAGE_OK:-1}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -528,6 +545,15 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --require-issuer-admin-blockchain-handlers-coverage-ok)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_issuer_admin_blockchain_handlers_coverage_ok="${2:-}"
+        shift 2
+      else
+        require_issuer_admin_blockchain_handlers_coverage_ok="1"
+        shift
+      fi
+      ;;
     --summary-json)
       summary_json="${2:-}"
       shift 2
@@ -560,6 +586,7 @@ bool_arg_or_die "--require-settlement-bridge-smoke-ok" "$require_settlement_brid
 bool_arg_or_die "--require-settlement-state-persistence-ok" "$require_settlement_state_persistence_ok"
 bool_arg_or_die "--require-settlement-dual-asset-parity-ok" "$require_settlement_dual_asset_parity_ok"
 bool_arg_or_die "--require-issuer-sponsor-api-live-smoke-ok" "$require_issuer_sponsor_api_live_smoke_ok"
+bool_arg_or_die "--require-issuer-admin-blockchain-handlers-coverage-ok" "$require_issuer_admin_blockchain_handlers_coverage_ok"
 bool_arg_or_die "--show-json" "$show_json"
 
 phase5_run_summary_json="$(abs_path "$phase5_run_summary_json")"
@@ -623,6 +650,7 @@ settlement_bridge_smoke_pair="$(resolve_handoff_bool "settlement_bridge_smoke_ok
 settlement_state_persistence_pair="$(resolve_handoff_bool "settlement_state_persistence_ok" "$roadmap_summary_json" "$roadmap_summary_usable" "$phase5_run_summary_json" "$phase5_run_summary_usable")"
 settlement_dual_asset_parity_pair="$(resolve_handoff_bool "settlement_dual_asset_parity_ok" "$roadmap_summary_json" "$roadmap_summary_usable" "$phase5_run_summary_json" "$phase5_run_summary_usable")"
 issuer_sponsor_api_live_smoke_pair="$(resolve_handoff_bool "issuer_sponsor_api_live_smoke_ok" "$roadmap_summary_json" "$roadmap_summary_usable" "$phase5_run_summary_json" "$phase5_run_summary_usable")"
+issuer_admin_blockchain_handlers_coverage_pair="$(resolve_handoff_bool "issuer_admin_blockchain_handlers_coverage_ok" "$roadmap_summary_json" "$roadmap_summary_usable" "$phase5_run_summary_json" "$phase5_run_summary_usable")"
 
 settlement_failsoft_ok="${settlement_failsoft_pair%%|*}"
 settlement_failsoft_pair="${settlement_failsoft_pair#*|}"
@@ -665,6 +693,13 @@ issuer_sponsor_api_live_smoke_status="${issuer_sponsor_api_live_smoke_pair%%|*}"
 issuer_sponsor_api_live_smoke_pair="${issuer_sponsor_api_live_smoke_pair#*|}"
 issuer_sponsor_api_live_smoke_source="${issuer_sponsor_api_live_smoke_pair%%|*}"
 issuer_sponsor_api_live_smoke_resolved="${issuer_sponsor_api_live_smoke_pair##*|}"
+
+issuer_admin_blockchain_handlers_coverage_ok="${issuer_admin_blockchain_handlers_coverage_pair%%|*}"
+issuer_admin_blockchain_handlers_coverage_pair="${issuer_admin_blockchain_handlers_coverage_pair#*|}"
+issuer_admin_blockchain_handlers_coverage_status="${issuer_admin_blockchain_handlers_coverage_pair%%|*}"
+issuer_admin_blockchain_handlers_coverage_pair="${issuer_admin_blockchain_handlers_coverage_pair#*|}"
+issuer_admin_blockchain_handlers_coverage_source="${issuer_admin_blockchain_handlers_coverage_pair%%|*}"
+issuer_admin_blockchain_handlers_coverage_resolved="${issuer_admin_blockchain_handlers_coverage_pair##*|}"
 
 if [[ "$require_run_pipeline_ok" == "1" && "$run_pipeline_value" != "true" ]]; then
   if [[ "$run_pipeline_status" == "missing" ]]; then
@@ -713,6 +748,13 @@ if [[ "$require_issuer_sponsor_api_live_smoke_ok" == "1" && "$issuer_sponsor_api
     reasons+=("issuer_sponsor_api_live_smoke_ok unresolved from provided artifacts")
   else
     reasons+=("issuer_sponsor_api_live_smoke_ok is false")
+  fi
+fi
+if [[ "$require_issuer_admin_blockchain_handlers_coverage_ok" == "1" && "$issuer_admin_blockchain_handlers_coverage_ok" != "true" ]]; then
+  if [[ "$issuer_admin_blockchain_handlers_coverage_status" == "missing" ]]; then
+    reasons+=("issuer_admin_blockchain_handlers_coverage_ok unresolved from provided artifacts")
+  else
+    reasons+=("issuer_admin_blockchain_handlers_coverage_ok is false")
   fi
 fi
 
@@ -775,7 +817,12 @@ emit_summary_json \
   "$settlement_dual_asset_parity_status" \
   "$settlement_dual_asset_parity_ok" \
   "$settlement_dual_asset_parity_resolved" \
-  "$settlement_dual_asset_parity_source"
+  "$settlement_dual_asset_parity_source" \
+  "$require_issuer_admin_blockchain_handlers_coverage_ok" \
+  "$issuer_admin_blockchain_handlers_coverage_status" \
+  "$issuer_admin_blockchain_handlers_coverage_ok" \
+  "$issuer_admin_blockchain_handlers_coverage_resolved" \
+  "$issuer_admin_blockchain_handlers_coverage_source"
 
 if [[ "$show_json" == "1" ]]; then
   cat "$summary_json"

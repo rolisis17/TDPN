@@ -235,6 +235,82 @@ resolve_settlement_dual_asset_parity_signal() {
   fi
 }
 
+resolve_issuer_admin_blockchain_handlers_coverage_signal() {
+  local check_summary_json="$1"
+  local resolved_tuple=""
+  if ! json_file_valid "$check_summary_json"; then
+    printf '%s\n' "null|missing|unresolved|0"
+    return
+  fi
+
+  resolved_tuple="$(
+    jq -r '
+      if (.signals.issuer_admin_blockchain_handlers_coverage_ok? | type) == "boolean" then
+        [
+          (.signals.issuer_admin_blockchain_handlers_coverage_ok | tostring),
+          (if .signals.issuer_admin_blockchain_handlers_coverage_ok then "pass" else "fail" end),
+          "phase5_settlement_layer_check_summary.signals.issuer_admin_blockchain_handlers_coverage_ok",
+          "1"
+        ]
+      elif (.stages.issuer_admin_blockchain_handlers_coverage.ok? | type) == "boolean" then
+        [
+          (.stages.issuer_admin_blockchain_handlers_coverage.ok | tostring),
+          (
+            if (.stages.issuer_admin_blockchain_handlers_coverage.status? | type) == "string"
+              and (.stages.issuer_admin_blockchain_handlers_coverage.status | length) > 0
+            then .stages.issuer_admin_blockchain_handlers_coverage.status
+            else (if .stages.issuer_admin_blockchain_handlers_coverage.ok then "pass" else "fail" end)
+            end
+          ),
+          "phase5_settlement_layer_check_summary.stages.issuer_admin_blockchain_handlers_coverage.ok",
+          (
+            if (.stages.issuer_admin_blockchain_handlers_coverage.resolved? | type) == "boolean"
+            then (if .stages.issuer_admin_blockchain_handlers_coverage.resolved then "1" else "0" end)
+            else "1"
+            end
+          )
+        ]
+      elif (.stages.issuer_admin_blockchain_handlers_coverage.status? | type) == "string"
+        and (.stages.issuer_admin_blockchain_handlers_coverage.status | length) > 0 then
+        [
+          (
+            (.stages.issuer_admin_blockchain_handlers_coverage.status | ascii_downcase) as $s
+            | if ($s == "pass" or $s == "ok" or $s == "true" or $s == "passed" or $s == "success" or $s == "succeeded")
+              then "true"
+              elif ($s == "fail" or $s == "false" or $s == "error" or $s == "failed" or $s == "blocked" or $s == "warn" or $s == "warning" or $s == "skip" or $s == "skipped" or $s == "invalid" or $s == "missing" or $s == "unresolved")
+              then "false"
+              else "null"
+              end
+          ),
+          .stages.issuer_admin_blockchain_handlers_coverage.status,
+          "phase5_settlement_layer_check_summary.stages.issuer_admin_blockchain_handlers_coverage.status",
+          (
+            if (.stages.issuer_admin_blockchain_handlers_coverage.resolved? | type) == "boolean"
+            then (if .stages.issuer_admin_blockchain_handlers_coverage.resolved then "1" else "0" end)
+            else "1"
+            end
+          )
+        ]
+      elif (.stages.issuer_admin_blockchain_handlers_coverage.resolved? | type) == "boolean" then
+        [
+          "null",
+          "missing",
+          "phase5_settlement_layer_check_summary.stages.issuer_admin_blockchain_handlers_coverage.resolved",
+          (if .stages.issuer_admin_blockchain_handlers_coverage.resolved then "1" else "0" end)
+        ]
+      else
+        ["null", "missing", "unresolved", "0"]
+      end | join("|")
+    ' "$check_summary_json" 2>/dev/null || true
+  )"
+
+  if [[ -z "$resolved_tuple" ]]; then
+    printf '%s\n' "null|missing|unresolved|0"
+  else
+    printf '%s\n' "$resolved_tuple"
+  fi
+}
+
 ci_summary_contract_valid() {
   local path="$1"
   if ! json_file_valid "$path"; then
@@ -382,6 +458,19 @@ detect_checker_issuer_sponsor_requirement_flag() {
   help_output="$("$script_path" --help 2>&1)"
   set -e
   if [[ "$help_output" == *"--require-issuer-sponsor-api-live-smoke-ok"* ]]; then
+    printf '%s' "1"
+  else
+    printf '%s' "0"
+  fi
+}
+
+detect_checker_issuer_admin_blockchain_handlers_coverage_requirement_flag() {
+  local script_path="$1"
+  local help_output
+  set +e
+  help_output="$("$script_path" --help 2>&1)"
+  set -e
+  if [[ "$help_output" == *"--require-issuer-admin-blockchain-handlers-coverage-ok"* ]]; then
     printf '%s' "1"
   else
     printf '%s' "0"
@@ -547,6 +636,7 @@ fi
 check_script_supports_canonical_flags="$(detect_checker_canonical_flags "$check_script")"
 check_script_supports_issuer_sponsor_requirement_flag="$(detect_checker_issuer_sponsor_requirement_flag "$check_script")"
 check_script_supports_dual_asset_requirement_flag="$(detect_checker_dual_asset_requirement_flag "$check_script")"
+check_script_supports_issuer_admin_blockchain_handlers_coverage_requirement_flag="$(detect_checker_issuer_admin_blockchain_handlers_coverage_requirement_flag "$check_script")"
 
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
@@ -575,6 +665,10 @@ declare issuer_sponsor_api_live_smoke_ok="null"
 declare issuer_sponsor_api_live_smoke_status="missing"
 declare issuer_sponsor_api_live_smoke_source="unresolved"
 declare issuer_sponsor_api_live_smoke_resolved="0"
+declare issuer_admin_blockchain_handlers_coverage_ok="null"
+declare issuer_admin_blockchain_handlers_coverage_status="missing"
+declare issuer_admin_blockchain_handlers_coverage_source="unresolved"
+declare issuer_admin_blockchain_handlers_coverage_resolved="0"
 
 ci_command_args=("$ci_script")
 if [[ "$dry_run" == "1" ]]; then
@@ -667,6 +761,10 @@ if [[ "$dry_run" == "1" ]]; then
     && ! array_has_checker_flag "--require-issuer-sponsor-api-live-smoke-ok" "${check_command_args[@]:1}"; then
     check_command_args+=(--require-issuer-sponsor-api-live-smoke-ok 0)
   fi
+  if [[ "$check_script_supports_issuer_admin_blockchain_handlers_coverage_requirement_flag" == "1" ]] \
+    && ! array_has_checker_flag "--require-issuer-admin-blockchain-handlers-coverage-ok" "${check_command_args[@]:1}"; then
+    check_command_args+=(--require-issuer-admin-blockchain-handlers-coverage-ok 0)
+  fi
 fi
 check_command="$(print_cmd "${check_command_args[@]}")"
 set +e
@@ -706,6 +804,13 @@ if json_file_valid "$check_summary_json"; then
   issuer_sponsor_api_live_smoke_pair="${issuer_sponsor_api_live_smoke_pair#*|}"
   issuer_sponsor_api_live_smoke_source="${issuer_sponsor_api_live_smoke_pair%%|*}"
   issuer_sponsor_api_live_smoke_resolved="${issuer_sponsor_api_live_smoke_pair##*|}"
+  issuer_admin_blockchain_handlers_coverage_pair="$(resolve_issuer_admin_blockchain_handlers_coverage_signal "$check_summary_json")"
+  issuer_admin_blockchain_handlers_coverage_ok="${issuer_admin_blockchain_handlers_coverage_pair%%|*}"
+  issuer_admin_blockchain_handlers_coverage_pair="${issuer_admin_blockchain_handlers_coverage_pair#*|}"
+  issuer_admin_blockchain_handlers_coverage_status="${issuer_admin_blockchain_handlers_coverage_pair%%|*}"
+  issuer_admin_blockchain_handlers_coverage_pair="${issuer_admin_blockchain_handlers_coverage_pair#*|}"
+  issuer_admin_blockchain_handlers_coverage_source="${issuer_admin_blockchain_handlers_coverage_pair%%|*}"
+  issuer_admin_blockchain_handlers_coverage_resolved="${issuer_admin_blockchain_handlers_coverage_pair##*|}"
 fi
 
 final_status="pass"
@@ -765,6 +870,10 @@ jq -n \
   --arg issuer_sponsor_api_live_smoke_status "$issuer_sponsor_api_live_smoke_status" \
   --arg issuer_sponsor_api_live_smoke_source "$issuer_sponsor_api_live_smoke_source" \
   --argjson issuer_sponsor_api_live_smoke_resolved "$issuer_sponsor_api_live_smoke_resolved" \
+  --argjson issuer_admin_blockchain_handlers_coverage_ok "$issuer_admin_blockchain_handlers_coverage_ok" \
+  --arg issuer_admin_blockchain_handlers_coverage_status "$issuer_admin_blockchain_handlers_coverage_status" \
+  --arg issuer_admin_blockchain_handlers_coverage_source "$issuer_admin_blockchain_handlers_coverage_source" \
+  --argjson issuer_admin_blockchain_handlers_coverage_resolved "$issuer_admin_blockchain_handlers_coverage_resolved" \
   '{
     version: 1,
     schema: {
@@ -792,9 +901,20 @@ jq -n \
       issuer_sponsor_api_live_smoke_ok: $issuer_sponsor_api_live_smoke_ok,
       issuer_sponsor_api_live_smoke_status: $issuer_sponsor_api_live_smoke_status,
       issuer_sponsor_api_live_smoke_resolved: ($issuer_sponsor_api_live_smoke_resolved == 1),
+      issuer_admin_blockchain_handlers_coverage_ok: $issuer_admin_blockchain_handlers_coverage_ok,
+      issuer_admin_blockchain_handlers_coverage_status: $issuer_admin_blockchain_handlers_coverage_status,
+      issuer_admin_blockchain_handlers_coverage_resolved: ($issuer_admin_blockchain_handlers_coverage_resolved == 1),
+      issuer_admin_blockchain_handlers_coverage: {
+        status: $issuer_admin_blockchain_handlers_coverage_status,
+        ok: $issuer_admin_blockchain_handlers_coverage_ok,
+        source: $issuer_admin_blockchain_handlers_coverage_source,
+        source_path: $check_summary_json,
+        source_fallback: false
+      },
       sources: {
         settlement_dual_asset_parity_ok: $settlement_dual_asset_parity_source,
-        issuer_sponsor_api_live_smoke_ok: $issuer_sponsor_api_live_smoke_source
+        issuer_sponsor_api_live_smoke_ok: $issuer_sponsor_api_live_smoke_source,
+        issuer_admin_blockchain_handlers_coverage_ok: $issuer_admin_blockchain_handlers_coverage_source
       }
     },
     steps: {

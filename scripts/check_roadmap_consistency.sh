@@ -3130,6 +3130,22 @@ if ! rg -Fq "settlement_dual_asset_parity_ok" "$phase5_run_script"; then
   echo "phase5 run wrapper must surface settlement_dual_asset_parity_ok contract field"
   exit 1
 fi
+if ! rg -Fq "issuer_admin_blockchain_handlers_coverage_ok" "$phase5_run_script"; then
+  echo "phase5 run wrapper must surface issuer_admin_blockchain_handlers_coverage_ok contract field"
+  exit 1
+fi
+if ! rg -Fq "issuer_admin_blockchain_handlers_coverage_status" "$phase5_run_script"; then
+  echo "phase5 run wrapper must surface issuer_admin_blockchain_handlers_coverage_status contract field"
+  exit 1
+fi
+if ! rg -Fq "phase5_settlement_layer_check_summary.signals.issuer_admin_blockchain_handlers_coverage_ok" "$phase5_run_script"; then
+  echo "phase5 run wrapper must reference consolidated summary node phase5_settlement_layer_check_summary.signals.issuer_admin_blockchain_handlers_coverage_ok"
+  exit 1
+fi
+if ! rg -Fq "phase5_settlement_layer_check_summary.stages.issuer_admin_blockchain_handlers_coverage.status" "$phase5_run_script"; then
+  echo "phase5 run wrapper must reference consolidated summary node phase5_settlement_layer_check_summary.stages.issuer_admin_blockchain_handlers_coverage.status"
+  exit 1
+fi
 if ! rg -Fq "canonical_summary_json" "$phase5_run_integration_script"; then
   echo "phase5 run integration must validate canonical summary artifact wiring"
   exit 1
@@ -3150,6 +3166,18 @@ if ! rg -Fq "settlement_dual_asset_parity_ok" "$phase5_run_integration_script"; 
   echo "phase5 run integration must validate settlement_dual_asset_parity_ok contract field coverage"
   exit 1
 fi
+if ! rg -Fq "issuer_admin_blockchain_handlers_coverage_ok" "$phase5_run_integration_script"; then
+  echo "phase5 run integration must validate issuer_admin_blockchain_handlers_coverage_ok contract field coverage"
+  exit 1
+fi
+if ! rg -Fq "issuer_admin_blockchain_handlers_coverage_status" "$phase5_run_integration_script"; then
+  echo "phase5 run integration must validate issuer_admin_blockchain_handlers_coverage_status contract field coverage"
+  exit 1
+fi
+if ! rg -Fq "phase5_settlement_layer_check_summary.signals.issuer_admin_blockchain_handlers_coverage_ok" "$phase5_run_integration_script"; then
+  echo "phase5 run integration must validate consolidated summary node phase5_settlement_layer_check_summary.signals.issuer_admin_blockchain_handlers_coverage_ok coverage"
+  exit 1
+fi
 if ! rg -Fq "PHASE5_SETTLEMENT_LAYER_CHECK_CANONICAL_SUMMARY_JSON" "$phase5_check_script"; then
   echo "phase5 check wrapper must expose canonical summary artifact override env"
   exit 1
@@ -3164,6 +3192,14 @@ if ! rg -Fq "issuer_sponsor_api_live_smoke_ok" "$phase5_check_script"; then
 fi
 if ! rg -Fq "settlement_dual_asset_parity_ok" "$phase5_check_script"; then
   echo "phase5 check wrapper must surface settlement_dual_asset_parity_ok signal"
+  exit 1
+fi
+if ! rg -Fq "issuer_admin_blockchain_handlers_coverage_ok" "$phase5_check_script"; then
+  echo "phase5 check wrapper must surface issuer_admin_blockchain_handlers_coverage_ok signal"
+  exit 1
+fi
+if ! rg -Fq "issuer_admin_blockchain_handlers_coverage_status" "$phase5_check_script"; then
+  echo "phase5 check wrapper must surface issuer_admin_blockchain_handlers_coverage_status signal"
   exit 1
 fi
 if ! rg -Fq "canonical_summary_json" "$phase5_check_script"; then
@@ -3184,6 +3220,14 @@ if ! rg -Fq "sponsor live-smoke failure" "$phase5_check_integration_script"; the
 fi
 if ! rg -Fq "require-issuer-sponsor-api-live-smoke-ok 0" "$phase5_check_integration_script"; then
   echo "phase5 check integration must validate sponsor live-smoke policy toggle behavior"
+  exit 1
+fi
+if ! rg -Fq "issuer_admin_blockchain_handlers_coverage_ok" "$phase5_check_integration_script"; then
+  echo "phase5 check integration must validate issuer_admin_blockchain_handlers_coverage_ok signal coverage"
+  exit 1
+fi
+if ! rg -Fq "issuer_admin_blockchain_handlers_coverage_status" "$phase5_check_integration_script"; then
+  echo "phase5 check integration must validate issuer_admin_blockchain_handlers_coverage_status signal coverage"
   exit 1
 fi
 if ! rg -Fq "phase5_settlement_layer_run.sh" "$phase5_handoff_run_script"; then
@@ -3214,6 +3258,18 @@ if ! rg -Fq "settlement_dual_asset_parity_ok" "$phase5_handoff_run_script"; then
   echo "phase5 handoff-run wrapper must surface settlement_dual_asset_parity_ok contract field"
   exit 1
 fi
+if ! rg -Fq "issuer_admin_blockchain_handlers_coverage_ok" "$phase5_handoff_run_script"; then
+  echo "phase5 handoff-run wrapper must surface issuer_admin_blockchain_handlers_coverage_ok contract field"
+  exit 1
+fi
+if ! rg -Fq "issuer_admin_blockchain_handlers_coverage_status" "$phase5_handoff_run_script"; then
+  echo "phase5 handoff-run wrapper must surface issuer_admin_blockchain_handlers_coverage_status contract field"
+  exit 1
+fi
+if ! rg -Fq "phase5_settlement_layer_handoff_check_summary.signals.issuer_admin_blockchain_handlers_coverage_ok" "$phase5_handoff_run_script"; then
+  echo "phase5 handoff-run wrapper must reference consolidated summary node phase5_settlement_layer_handoff_check_summary.signals.issuer_admin_blockchain_handlers_coverage_ok"
+  exit 1
+fi
 if ! rg -Fq "canonical_summary_json" "$phase5_handoff_run_integration_script"; then
   echo "phase5 handoff-run integration must validate canonical summary artifact wiring"
   exit 1
@@ -3234,6 +3290,18 @@ if ! rg -Fq "settlement_dual_asset_parity_ok" "$phase5_handoff_run_integration_s
   echo "phase5 handoff-run integration must validate settlement_dual_asset_parity_ok contract field coverage"
   exit 1
 fi
+if ! rg -Fq "issuer_admin_blockchain_handlers_coverage_ok" "$phase5_handoff_run_integration_script"; then
+  echo "phase5 handoff-run integration must validate issuer_admin_blockchain_handlers_coverage_ok contract field coverage"
+  exit 1
+fi
+if ! rg -Fq "issuer_admin_blockchain_handlers_coverage_status" "$phase5_handoff_run_integration_script"; then
+  echo "phase5 handoff-run integration must validate issuer_admin_blockchain_handlers_coverage_status contract field coverage"
+  exit 1
+fi
+if ! rg -Fq "phase5_settlement_layer_handoff_check.signals.issuer_admin_blockchain_handlers_coverage_ok" "$phase5_handoff_run_integration_script"; then
+  echo "phase5 handoff-run integration must validate consolidated summary node phase5_settlement_layer_handoff_check.signals.issuer_admin_blockchain_handlers_coverage_ok coverage"
+  exit 1
+fi
 if ! rg -Fq "PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_CANONICAL_SUMMARY_JSON" "$phase5_handoff_check_script"; then
   echo "phase5 handoff-check wrapper must expose canonical summary artifact override env"
   exit 1
@@ -3248,6 +3316,14 @@ if ! rg -Fq "issuer_sponsor_api_live_smoke_ok" "$phase5_handoff_check_script"; t
 fi
 if ! rg -Fq "settlement_dual_asset_parity_ok" "$phase5_handoff_check_script"; then
   echo "phase5 handoff-check wrapper must surface settlement_dual_asset_parity_ok signal"
+  exit 1
+fi
+if ! rg -Fq "issuer_admin_blockchain_handlers_coverage_ok" "$phase5_handoff_check_script"; then
+  echo "phase5 handoff-check wrapper must surface issuer_admin_blockchain_handlers_coverage_ok signal"
+  exit 1
+fi
+if ! rg -Fq "issuer_admin_blockchain_handlers_coverage_status" "$phase5_handoff_check_script"; then
+  echo "phase5 handoff-check wrapper must surface issuer_admin_blockchain_handlers_coverage_status signal"
   exit 1
 fi
 if ! rg -Fq "canonical_summary_json" "$phase5_handoff_check_script"; then
@@ -3268,6 +3344,18 @@ if ! rg -Fq "issuer_sponsor_api_live_smoke_ok" "$phase5_handoff_check_integratio
 fi
 if ! rg -Fq "settlement_dual_asset_parity_ok" "$phase5_handoff_check_integration_script"; then
   echo "phase5 handoff-check integration must validate settlement_dual_asset_parity_ok signal coverage"
+  exit 1
+fi
+if ! rg -Fq "issuer_admin_blockchain_handlers_coverage_ok" "$phase5_handoff_check_integration_script"; then
+  echo "phase5 handoff-check integration must validate issuer_admin_blockchain_handlers_coverage_ok signal coverage"
+  exit 1
+fi
+if ! rg -Fq "issuer_admin_blockchain_handlers_coverage_status" "$phase5_handoff_check_integration_script"; then
+  echo "phase5 handoff-check integration must validate issuer_admin_blockchain_handlers_coverage_status signal coverage"
+  exit 1
+fi
+if ! rg -Fq "phase5_settlement_layer_check_summary.issuer_admin_blockchain_handlers_coverage_ok" "$phase5_handoff_check_integration_script"; then
+  echo "phase5 handoff-check integration must validate consolidated summary node phase5_settlement_layer_check_summary.issuer_admin_blockchain_handlers_coverage_ok coverage"
   exit 1
 fi
 if ! rg -Fq "require-issuer-sponsor-api-live-smoke-ok 0" "$phase5_handoff_check_integration_script"; then
@@ -3292,6 +3380,18 @@ if ! rg -Fq "issuer_sponsor_api_live_smoke_ok" "$phase5_summary_report_script"; 
 fi
 if ! rg -Fq "settlement_dual_asset_parity_ok" "$phase5_summary_report_script"; then
   echo "phase5 summary report helper must surface settlement_dual_asset_parity_ok contract field"
+  exit 1
+fi
+if ! rg -Fq "issuer_admin_blockchain_handlers_coverage_ok" "$phase5_summary_report_script"; then
+  echo "phase5 summary report helper must surface issuer_admin_blockchain_handlers_coverage_ok contract field"
+  exit 1
+fi
+if ! rg -Fq "issuer_admin_blockchain_handlers_coverage_status" "$phase5_summary_report_script"; then
+  echo "phase5 summary report helper must surface issuer_admin_blockchain_handlers_coverage_status contract field"
+  exit 1
+fi
+if ! rg -Fq "phase5_settlement_layer_handoff_check_summary" "$phase5_summary_report_script"; then
+  echo "phase5 summary report helper must reference consolidated summary node phase5_settlement_layer_handoff_check_summary"
   exit 1
 fi
 for phase5_helper_artifact in \
@@ -3332,6 +3432,19 @@ if ! rg -Fq "issuer_sponsor_api_live_smoke_ok" "$phase5_summary_report_integrati
 fi
 if ! rg -Fq "settlement_dual_asset_parity_ok" "$phase5_summary_report_integration_script"; then
   echo "phase5 summary report integration script must validate settlement_dual_asset_parity_ok contract field coverage"
+  exit 1
+fi
+if ! rg -Fq "issuer_admin_blockchain_handlers_coverage_ok" "$phase5_summary_report_integration_script"; then
+  echo "phase5 summary report integration script must validate issuer_admin_blockchain_handlers_coverage_ok contract field coverage"
+  exit 1
+fi
+if ! rg -Fq "issuer_admin_blockchain_handlers_coverage_status" "$phase5_summary_report_integration_script" \
+  && ! rg -Fq ".signals.issuer_admin_blockchain_handlers_coverage.status" "$phase5_summary_report_integration_script"; then
+  echo "phase5 summary report integration script must validate issuer_admin_blockchain_handlers_coverage_status contract field coverage"
+  exit 1
+fi
+if ! rg -Fq "phase5_settlement_layer_handoff_check_summary" "$phase5_summary_report_integration_script"; then
+  echo "phase5 summary report integration script must validate consolidated summary node phase5_settlement_layer_handoff_check_summary coverage"
   exit 1
 fi
 if ! rg -Fq "pass path" "$phase5_summary_report_integration_script"; then
@@ -3396,6 +3509,20 @@ if ! rg -Fq "scripts/integration_easy_node_blockchain_gate_wrappers.sh" "$ci_loc
 fi
 if ! rg -Fq "scripts/integration_easy_node_blockchain_summary_reports.sh" "$ci_local_script"; then
   echo "ci_local.sh must run scripts/integration_easy_node_blockchain_summary_reports.sh"
+  exit 1
+fi
+if ! rg -Fq "issuer_admin_blockchain_handlers_coverage_ok" "$easy_node_blockchain_summary_reports_integration_script" \
+  && ! rg -Fq ".signals.issuer_admin_blockchain_handlers_coverage.ok" "$easy_node_blockchain_summary_reports_integration_script"; then
+  echo "integration easy-node blockchain summary reports script must validate issuer_admin_blockchain_handlers_coverage_ok signal"
+  exit 1
+fi
+if ! rg -Fq "issuer_admin_blockchain_handlers_coverage_status" "$easy_node_blockchain_summary_reports_integration_script" \
+  && ! rg -Fq ".signals.issuer_admin_blockchain_handlers_coverage.status" "$easy_node_blockchain_summary_reports_integration_script"; then
+  echo "integration easy-node blockchain summary reports script must validate issuer_admin_blockchain_handlers_coverage_status signal"
+  exit 1
+fi
+if ! rg -Fq "phase5_settlement_layer_handoff_check_summary" "$easy_node_blockchain_summary_reports_integration_script"; then
+  echo "integration easy-node blockchain summary reports script must validate consolidated summary node phase5_settlement_layer_handoff_check_summary"
   exit 1
 fi
 if ! rg -Fq "ci-phase5-settlement-layer" "$easy_node_script"; then

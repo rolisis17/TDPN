@@ -99,6 +99,9 @@ cat >"$PASS_CI" <<'EOF_PASS_CI'
     },
     "issuer_sponsor_api_live_smoke": {
       "status": "fail"
+    },
+    "issuer_admin_blockchain_handlers_coverage": {
+      "status": "fail"
     }
   }
 }
@@ -116,7 +119,8 @@ cat >"$PASS_CHECK" <<'EOF_PASS_CHECK'
   "rc": 0,
   "signals": {
     "settlement_dual_asset_parity_ok": false,
-    "issuer_sponsor_api_live_smoke_ok": false
+    "issuer_sponsor_api_live_smoke_ok": false,
+    "issuer_admin_blockchain_handlers_coverage_ok": false
   }
 }
 EOF_PASS_CHECK
@@ -146,7 +150,8 @@ cat >"$PASS_HANDOFF_CHECK" <<'EOF_PASS_HANDOFF_CHECK'
   "rc": 0,
   "handoff": {
     "settlement_dual_asset_parity_ok": true,
-    "issuer_sponsor_api_live_smoke_ok": true
+    "issuer_sponsor_api_live_smoke_ok": true,
+    "issuer_admin_blockchain_handlers_coverage_ok": true
   }
 }
 EOF_PASS_HANDOFF_CHECK
@@ -215,6 +220,19 @@ if ! jq -e \
   and .signals.settlement_dual_asset_parity.fallback == false
   and .signals.settlement_dual_asset_parity.source_priority_index == 1
   and (.signals.settlement_dual_asset_parity.source_priority | length) == 5
+  and (
+    if (.signals | has("issuer_admin_blockchain_handlers_coverage")) then
+      .signals.issuer_admin_blockchain_handlers_coverage.status == "pass"
+      and .signals.issuer_admin_blockchain_handlers_coverage.ok == true
+      and .signals.issuer_admin_blockchain_handlers_coverage.resolved == true
+      and .signals.issuer_admin_blockchain_handlers_coverage.source == "phase5_settlement_layer_handoff_check_summary"
+      and .signals.issuer_admin_blockchain_handlers_coverage.source_field == "handoff.issuer_admin_blockchain_handlers_coverage_ok"
+      and .signals.issuer_admin_blockchain_handlers_coverage.source_path == $expected_signal_path
+      and .signals.issuer_admin_blockchain_handlers_coverage.fallback == false
+      and .signals.issuer_admin_blockchain_handlers_coverage.source_priority_index == 1
+      and (.signals.issuer_admin_blockchain_handlers_coverage.source_priority | length) == 5
+    else true end
+  )
   and .artifacts.canonical_summary_json == $expected_canonical_summary_json
 ' "$PASS_REPORT_JSON" >/dev/null; then
   echo "phase5 summary report pass-path contract mismatch"
@@ -405,6 +423,18 @@ if ! jq -e '
   and .signals.settlement_dual_asset_parity.source_path == null
   and .signals.settlement_dual_asset_parity.fallback == false
   and .signals.settlement_dual_asset_parity.source_priority_index == null
+  and (
+    if (.signals | has("issuer_admin_blockchain_handlers_coverage")) then
+      .signals.issuer_admin_blockchain_handlers_coverage.status == "missing"
+      and .signals.issuer_admin_blockchain_handlers_coverage.ok == null
+      and .signals.issuer_admin_blockchain_handlers_coverage.resolved == false
+      and .signals.issuer_admin_blockchain_handlers_coverage.source == "unresolved"
+      and .signals.issuer_admin_blockchain_handlers_coverage.source_field == null
+      and .signals.issuer_admin_blockchain_handlers_coverage.source_path == null
+      and .signals.issuer_admin_blockchain_handlers_coverage.fallback == false
+      and .signals.issuer_admin_blockchain_handlers_coverage.source_priority_index == null
+    else true end
+  )
 ' "$MISSING_REPORT_JSON" >/dev/null; then
   echo "phase5 summary report missing-input contract mismatch"
   cat "$MISSING_REPORT_JSON"
@@ -487,7 +517,8 @@ cat >"$FALLBACK_HANDOFF_CHECK_FROM_HANDOFF_RUN" <<'EOF_FALLBACK_HANDOFF_CHECK_FR
   "rc": 0,
   "handoff": {
     "settlement_dual_asset_parity_ok": true,
-    "issuer_sponsor_api_live_smoke_ok": true
+    "issuer_sponsor_api_live_smoke_ok": true,
+    "issuer_admin_blockchain_handlers_coverage_ok": true
   }
 }
 EOF_FALLBACK_HANDOFF_CHECK_FROM_HANDOFF_RUN
@@ -504,7 +535,8 @@ cat >"$FALLBACK_REPORTS_DIR/phase5_settlement_layer_check_summary.json" <<'EOF_F
   "rc": 0,
   "signals": {
     "settlement_dual_asset_parity_ok": false,
-    "issuer_sponsor_api_live_smoke_ok": false
+    "issuer_sponsor_api_live_smoke_ok": false,
+    "issuer_admin_blockchain_handlers_coverage_ok": false
   }
 }
 EOF_FALLBACK_CHECK
@@ -579,6 +611,18 @@ if ! jq -e \
   and .signals.settlement_dual_asset_parity.source_path == $expected_signal_path
   and .signals.settlement_dual_asset_parity.fallback == true
   and .signals.settlement_dual_asset_parity.source_priority_index == 2
+  and (
+    if (.signals | has("issuer_admin_blockchain_handlers_coverage")) then
+      .signals.issuer_admin_blockchain_handlers_coverage.status == "pass"
+      and .signals.issuer_admin_blockchain_handlers_coverage.ok == true
+      and .signals.issuer_admin_blockchain_handlers_coverage.resolved == true
+      and .signals.issuer_admin_blockchain_handlers_coverage.source == "phase5_settlement_layer_handoff_run_summary.artifacts.handoff_summary_json"
+      and .signals.issuer_admin_blockchain_handlers_coverage.source_field == "handoff.issuer_admin_blockchain_handlers_coverage_ok"
+      and .signals.issuer_admin_blockchain_handlers_coverage.source_path == $expected_signal_path
+      and .signals.issuer_admin_blockchain_handlers_coverage.fallback == true
+      and .signals.issuer_admin_blockchain_handlers_coverage.source_priority_index == 2
+    else true end
+  )
 ' "$FALLBACK_REPORT_JSON" >/dev/null; then
   echo "phase5 summary report fallback-discovery contract mismatch"
   cat "$FALLBACK_REPORT_JSON"

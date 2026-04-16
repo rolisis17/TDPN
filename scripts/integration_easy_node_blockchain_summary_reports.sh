@@ -278,6 +278,9 @@ cat >"$PHASE5_REAL_HANDOFF_CHECK" <<'EOF_PHASE5_REAL_HANDOFF_CHECK'
     },
     "issuer_sponsor_api_live_smoke": {
       "status": "pass"
+    },
+    "issuer_admin_blockchain_handlers_coverage": {
+      "status": "pass"
     }
   }
 }
@@ -307,6 +310,14 @@ if ! jq -e '
   and .signals.issuer_sponsor_api_live_smoke.ok == true
   and .signals.issuer_sponsor_api_live_smoke.resolved == true
   and .signals.issuer_sponsor_api_live_smoke.source == "phase5_settlement_layer_handoff_check_summary"
+  and (
+    if (.signals | has("issuer_admin_blockchain_handlers_coverage")) then
+      .signals.issuer_admin_blockchain_handlers_coverage.status == "pass"
+      and .signals.issuer_admin_blockchain_handlers_coverage.ok == true
+      and .signals.issuer_admin_blockchain_handlers_coverage.resolved == true
+      and .signals.issuer_admin_blockchain_handlers_coverage.source == "phase5_settlement_layer_handoff_check_summary"
+    else true end
+  )
 ' "$PHASE5_REAL_AGG_SUMMARY" >/dev/null; then
   echo "phase5 aggregated summary missing sponsor live-smoke signal/health contract fields"
   cat "$PHASE5_REAL_AGG_SUMMARY"

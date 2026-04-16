@@ -467,6 +467,210 @@ resolve_dual_asset_from_ci_summary() {
   return 0
 }
 
+resolve_issuer_admin_coverage_from_handoff_or_check_summary() {
+  local summary_path="${1:-}"
+  if [[ "$(json_file_valid_01 "$summary_path")" != "1" ]]; then
+    return 1
+  fi
+
+  local value=""
+  local status=""
+  local source_field=""
+  local status_text=""
+
+  value="$(json_bool_or_empty "$summary_path" '
+    if (.handoff.issuer_admin_blockchain_handlers_coverage_ok | type) == "boolean" then .handoff.issuer_admin_blockchain_handlers_coverage_ok
+    elif (.signals.issuer_admin_blockchain_handlers_coverage_ok | type) == "boolean" then .signals.issuer_admin_blockchain_handlers_coverage_ok
+    elif (.stages.issuer_admin_blockchain_handlers_coverage.ok | type) == "boolean" then .stages.issuer_admin_blockchain_handlers_coverage.ok
+    elif (.phase5_settlement_layer_handoff.issuer_admin_blockchain_handlers_coverage_ok | type) == "boolean" then .phase5_settlement_layer_handoff.issuer_admin_blockchain_handlers_coverage_ok
+    elif (.vpn_track.phase5_settlement_layer_handoff.issuer_admin_blockchain_handlers_coverage_ok | type) == "boolean" then .vpn_track.phase5_settlement_layer_handoff.issuer_admin_blockchain_handlers_coverage_ok
+    else empty
+    end
+  ')"
+  if [[ -n "$value" ]]; then
+    source_field="$(json_text_or_empty "$summary_path" '
+      if (.handoff.issuer_admin_blockchain_handlers_coverage_ok | type) == "boolean" then "handoff.issuer_admin_blockchain_handlers_coverage_ok"
+      elif (.signals.issuer_admin_blockchain_handlers_coverage_ok | type) == "boolean" then "signals.issuer_admin_blockchain_handlers_coverage_ok"
+      elif (.stages.issuer_admin_blockchain_handlers_coverage.ok | type) == "boolean" then "stages.issuer_admin_blockchain_handlers_coverage.ok"
+      elif (.phase5_settlement_layer_handoff.issuer_admin_blockchain_handlers_coverage_ok | type) == "boolean" then "phase5_settlement_layer_handoff.issuer_admin_blockchain_handlers_coverage_ok"
+      elif (.vpn_track.phase5_settlement_layer_handoff.issuer_admin_blockchain_handlers_coverage_ok | type) == "boolean" then "vpn_track.phase5_settlement_layer_handoff.issuer_admin_blockchain_handlers_coverage_ok"
+      else empty
+      end
+    ')"
+    if [[ "$value" == "true" ]]; then
+      status="pass"
+    else
+      status="fail"
+    fi
+    printf '%s|%s|%s\n' "$value" "$status" "$source_field"
+    return 0
+  fi
+
+  status_text="$(json_text_or_empty "$summary_path" '
+    if (.handoff.issuer_admin_blockchain_handlers_coverage_status | type) == "string" then .handoff.issuer_admin_blockchain_handlers_coverage_status
+    elif (.stages.issuer_admin_blockchain_handlers_coverage.status | type) == "string" then .stages.issuer_admin_blockchain_handlers_coverage.status
+    elif (.steps.issuer_admin_blockchain_handlers_coverage.status | type) == "string" then .steps.issuer_admin_blockchain_handlers_coverage.status
+    else empty
+    end
+  ')"
+  case "${status_text,,}" in
+    pass)
+      value="true"
+      status="pass"
+      ;;
+    fail)
+      value="false"
+      status="fail"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  source_field="$(json_text_or_empty "$summary_path" '
+    if (.handoff.issuer_admin_blockchain_handlers_coverage_status | type) == "string" then "handoff.issuer_admin_blockchain_handlers_coverage_status"
+    elif (.stages.issuer_admin_blockchain_handlers_coverage.status | type) == "string" then "stages.issuer_admin_blockchain_handlers_coverage.status"
+    elif (.steps.issuer_admin_blockchain_handlers_coverage.status | type) == "string" then "steps.issuer_admin_blockchain_handlers_coverage.status"
+    else empty
+    end
+  ')"
+
+  printf '%s|%s|%s\n' "$value" "$status" "$source_field"
+  return 0
+}
+
+resolve_issuer_admin_coverage_from_ci_summary() {
+  local summary_path="${1:-}"
+  if [[ "$(json_file_valid_01 "$summary_path")" != "1" ]]; then
+    return 1
+  fi
+
+  local value=""
+  local status=""
+  local source_field=""
+  local status_text=""
+
+  value="$(json_bool_or_empty "$summary_path" '
+    if (.signals.issuer_admin_blockchain_handlers_coverage_ok | type) == "boolean" then .signals.issuer_admin_blockchain_handlers_coverage_ok
+    elif (.steps.issuer_admin_blockchain_handlers_coverage.ok | type) == "boolean" then .steps.issuer_admin_blockchain_handlers_coverage.ok
+    else empty
+    end
+  ')"
+  if [[ -n "$value" ]]; then
+    source_field="$(json_text_or_empty "$summary_path" '
+      if (.signals.issuer_admin_blockchain_handlers_coverage_ok | type) == "boolean" then "signals.issuer_admin_blockchain_handlers_coverage_ok"
+      elif (.steps.issuer_admin_blockchain_handlers_coverage.ok | type) == "boolean" then "steps.issuer_admin_blockchain_handlers_coverage.ok"
+      else empty
+      end
+    ')"
+    if [[ "$value" == "true" ]]; then
+      status="pass"
+    else
+      status="fail"
+    fi
+    printf '%s|%s|%s\n' "$value" "$status" "$source_field"
+    return 0
+  fi
+
+  status_text="$(json_text_or_empty "$summary_path" '
+    if (.steps.issuer_admin_blockchain_handlers_coverage.status | type) == "string" then .steps.issuer_admin_blockchain_handlers_coverage.status
+    elif (.stages.issuer_admin_blockchain_handlers_coverage.status | type) == "string" then .stages.issuer_admin_blockchain_handlers_coverage.status
+    else empty
+    end
+  ')"
+  case "${status_text,,}" in
+    pass)
+      value="true"
+      status="pass"
+      ;;
+    fail)
+      value="false"
+      status="fail"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  source_field="$(json_text_or_empty "$summary_path" '
+    if (.steps.issuer_admin_blockchain_handlers_coverage.status | type) == "string" then "steps.issuer_admin_blockchain_handlers_coverage.status"
+    elif (.stages.issuer_admin_blockchain_handlers_coverage.status | type) == "string" then "stages.issuer_admin_blockchain_handlers_coverage.status"
+    else empty
+    end
+  ')"
+
+  printf '%s|%s|%s\n' "$value" "$status" "$source_field"
+  return 0
+}
+
+resolve_issuer_admin_coverage_signal() {
+  local handoff_check_summary_path="${1:-}"
+  local handoff_run_summary_path="${2:-}"
+  local check_summary_path="${3:-}"
+  local run_summary_path="${4:-}"
+  local ci_summary_path="${5:-}"
+
+  local parsed=""
+  local value=""
+  local status=""
+  local source_field=""
+  local fallback_path=""
+
+  parsed="$(resolve_issuer_admin_coverage_from_handoff_or_check_summary "$handoff_check_summary_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|phase5_settlement_layer_handoff_check_summary|%s|%s|0|1\n' "$value" "$status" "$source_field" "$handoff_check_summary_path"
+    return
+  fi
+
+  fallback_path="$(resolve_artifact_summary_path "$handoff_run_summary_path" '.steps.phase5_settlement_layer_handoff_check.artifacts.summary_json // .artifacts.handoff_summary_json // empty')"
+  parsed="$(resolve_issuer_admin_coverage_from_handoff_or_check_summary "$fallback_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|phase5_settlement_layer_handoff_run_summary.artifacts.handoff_summary_json|%s|%s|1|2\n' "$value" "$status" "$source_field" "$fallback_path"
+    return
+  fi
+
+  parsed="$(resolve_issuer_admin_coverage_from_handoff_or_check_summary "$check_summary_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|phase5_settlement_layer_check_summary|%s|%s|0|3\n' "$value" "$status" "$source_field" "$check_summary_path"
+    return
+  fi
+
+  fallback_path="$(resolve_artifact_summary_path "$run_summary_path" '.steps.phase5_settlement_layer_check.artifacts.summary_json // .artifacts.check_summary_json // empty')"
+  parsed="$(resolve_issuer_admin_coverage_from_handoff_or_check_summary "$fallback_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|phase5_settlement_layer_run_summary.artifacts.check_summary_json|%s|%s|1|4\n' "$value" "$status" "$source_field" "$fallback_path"
+    return
+  fi
+
+  parsed="$(resolve_issuer_admin_coverage_from_ci_summary "$ci_summary_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|ci_phase5_settlement_layer_summary|%s|%s|0|5\n' "$value" "$status" "$source_field" "$ci_summary_path"
+    return
+  fi
+
+  printf '%s|%s|0|unresolved|||0|null\n' "null" "missing"
+}
+
 resolve_artifact_summary_path() {
   local summary_path="${1:-}"
   local expr="${2:-}"
@@ -832,6 +1036,14 @@ dual_asset_signal_source_field=""
 dual_asset_signal_source_path=""
 dual_asset_signal_source_fallback="0"
 dual_asset_signal_source_priority_index="null"
+issuer_admin_coverage_signal_ok="null"
+issuer_admin_coverage_signal_status="missing"
+issuer_admin_coverage_signal_resolved="0"
+issuer_admin_coverage_signal_source="unresolved"
+issuer_admin_coverage_signal_source_field=""
+issuer_admin_coverage_signal_source_path=""
+issuer_admin_coverage_signal_source_fallback="0"
+issuer_admin_coverage_signal_source_priority_index="null"
 
 declare -a reasons=()
 declare -a warnings=()
@@ -1001,6 +1213,28 @@ dual_asset_signal_pair="${dual_asset_signal_pair#*|}"
 dual_asset_signal_source_fallback="${dual_asset_signal_pair%%|*}"
 dual_asset_signal_source_priority_index="${dual_asset_signal_pair##*|}"
 
+issuer_admin_coverage_signal_pair="$(resolve_issuer_admin_coverage_signal \
+  "${stage_path[phase5_settlement_layer_handoff_check]}" \
+  "${stage_path[phase5_settlement_layer_handoff_run]}" \
+  "${stage_path[phase5_settlement_layer_check]}" \
+  "${stage_path[phase5_settlement_layer_run]}" \
+  "${stage_path[ci_phase5_settlement_layer]}" \
+)"
+issuer_admin_coverage_signal_ok="${issuer_admin_coverage_signal_pair%%|*}"
+issuer_admin_coverage_signal_pair="${issuer_admin_coverage_signal_pair#*|}"
+issuer_admin_coverage_signal_status="${issuer_admin_coverage_signal_pair%%|*}"
+issuer_admin_coverage_signal_pair="${issuer_admin_coverage_signal_pair#*|}"
+issuer_admin_coverage_signal_resolved="${issuer_admin_coverage_signal_pair%%|*}"
+issuer_admin_coverage_signal_pair="${issuer_admin_coverage_signal_pair#*|}"
+issuer_admin_coverage_signal_source="${issuer_admin_coverage_signal_pair%%|*}"
+issuer_admin_coverage_signal_pair="${issuer_admin_coverage_signal_pair#*|}"
+issuer_admin_coverage_signal_source_field="${issuer_admin_coverage_signal_pair%%|*}"
+issuer_admin_coverage_signal_pair="${issuer_admin_coverage_signal_pair#*|}"
+issuer_admin_coverage_signal_source_path="${issuer_admin_coverage_signal_pair%%|*}"
+issuer_admin_coverage_signal_pair="${issuer_admin_coverage_signal_pair#*|}"
+issuer_admin_coverage_signal_source_fallback="${issuer_admin_coverage_signal_pair%%|*}"
+issuer_admin_coverage_signal_source_priority_index="${issuer_admin_coverage_signal_pair##*|}"
+
 overall_status="missing"
 overall_rc=1
 if (( fail_count > 0 || invalid_count > 0 )); then
@@ -1054,6 +1288,14 @@ jq -n \
   --arg dual_asset_signal_source_path "$dual_asset_signal_source_path" \
   --arg dual_asset_signal_source_fallback "$dual_asset_signal_source_fallback" \
   --arg dual_asset_signal_source_priority_index "$dual_asset_signal_source_priority_index" \
+  --arg issuer_admin_coverage_signal_ok "$issuer_admin_coverage_signal_ok" \
+  --arg issuer_admin_coverage_signal_status "$issuer_admin_coverage_signal_status" \
+  --arg issuer_admin_coverage_signal_resolved "$issuer_admin_coverage_signal_resolved" \
+  --arg issuer_admin_coverage_signal_source "$issuer_admin_coverage_signal_source" \
+  --arg issuer_admin_coverage_signal_source_field "$issuer_admin_coverage_signal_source_field" \
+  --arg issuer_admin_coverage_signal_source_path "$issuer_admin_coverage_signal_source_path" \
+  --arg issuer_admin_coverage_signal_source_fallback "$issuer_admin_coverage_signal_source_fallback" \
+  --arg issuer_admin_coverage_signal_source_priority_index "$issuer_admin_coverage_signal_source_priority_index" \
   '{
     version: 1,
     schema: {
@@ -1135,6 +1377,33 @@ jq -n \
           "phase5_settlement_layer_run_summary.artifacts.check_summary_json",
           "ci_phase5_settlement_layer_summary"
         ]
+      },
+      issuer_admin_blockchain_handlers_coverage: {
+        ok: (
+          if $issuer_admin_coverage_signal_ok == "true" then true
+          elif $issuer_admin_coverage_signal_ok == "false" then false
+          else null
+          end
+        ),
+        status: $issuer_admin_coverage_signal_status,
+        resolved: ($issuer_admin_coverage_signal_resolved == "1"),
+        source: $issuer_admin_coverage_signal_source,
+        source_field: (if $issuer_admin_coverage_signal_source_field == "" then null else $issuer_admin_coverage_signal_source_field end),
+        source_path: (if $issuer_admin_coverage_signal_source_path == "" then null else $issuer_admin_coverage_signal_source_path end),
+        fallback: ($issuer_admin_coverage_signal_source_fallback == "1"),
+        source_fallback: ($issuer_admin_coverage_signal_source_fallback == "1"),
+        source_priority_index: (
+          if ($issuer_admin_coverage_signal_source_priority_index | test("^[0-9]+$")) then ($issuer_admin_coverage_signal_source_priority_index | tonumber)
+          else null
+          end
+        ),
+        source_priority: [
+          "phase5_settlement_layer_handoff_check_summary",
+          "phase5_settlement_layer_handoff_run_summary.artifacts.handoff_summary_json",
+          "phase5_settlement_layer_check_summary",
+          "phase5_settlement_layer_run_summary.artifacts.check_summary_json",
+          "ci_phase5_settlement_layer_summary"
+        ]
       }
     },
     decision: {
@@ -1175,6 +1444,7 @@ done
 echo "[phase5-summary] overall: status=${overall_status} pass=${pass_count} fail=${fail_count} missing=${missing_count} invalid=${invalid_count}"
 echo "[phase5-summary] issuer_sponsor_api_live_smoke: status=${sponsor_signal_status} ok=${sponsor_signal_ok} source=${sponsor_signal_source} fallback=${sponsor_signal_source_fallback} path=${sponsor_signal_source_path:-n/a}"
 echo "[phase5-summary] settlement_dual_asset_parity: status=${dual_asset_signal_status} ok=${dual_asset_signal_ok} source=${dual_asset_signal_source} fallback=${dual_asset_signal_source_fallback} path=${dual_asset_signal_source_path:-n/a}"
+echo "[phase5-summary] issuer_admin_blockchain_handlers_coverage: status=${issuer_admin_coverage_signal_status} ok=${issuer_admin_coverage_signal_ok} source=${issuer_admin_coverage_signal_source} fallback=${issuer_admin_coverage_signal_source_fallback} path=${issuer_admin_coverage_signal_source_path:-n/a}"
 echo "[phase5-summary] summary_json=${summary_json}"
 echo "[phase5-summary] canonical_summary_json=${canonical_summary_json}"
 

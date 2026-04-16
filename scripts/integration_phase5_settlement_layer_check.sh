@@ -25,6 +25,7 @@ FAIL_SUMMARY="$TMP_DIR/ci_phase5_fail.json"
 RELAXED_SUMMARY="$TMP_DIR/ci_phase5_relaxed.json"
 DUAL_FAIL_SUMMARY="$TMP_DIR/ci_phase5_dual_fail.json"
 SPONSOR_FAIL_SUMMARY="$TMP_DIR/ci_phase5_sponsor_fail.json"
+ADMIN_FAIL_SUMMARY="$TMP_DIR/ci_phase5_admin_fail.json"
 MISSING_SUMMARY="$TMP_DIR/ci_phase5_missing.json"
 
 PASS_OUTPUT="$TMP_DIR/pass_output.json"
@@ -34,6 +35,8 @@ DUAL_FAIL_OUTPUT="$TMP_DIR/dual_fail_output.json"
 DUAL_RELAXED_OUTPUT="$TMP_DIR/dual_relaxed_output.json"
 SPONSOR_FAIL_OUTPUT="$TMP_DIR/sponsor_fail_output.json"
 SPONSOR_RELAXED_OUTPUT="$TMP_DIR/sponsor_relaxed_output.json"
+ADMIN_FAIL_OUTPUT="$TMP_DIR/admin_fail_output.json"
+ADMIN_RELAXED_OUTPUT="$TMP_DIR/admin_relaxed_output.json"
 PASS_CANONICAL="$TMP_DIR/pass_canonical_summary.json"
 FAIL_CANONICAL="$TMP_DIR/fail_canonical_summary.json"
 RELAXED_CANONICAL="$TMP_DIR/relaxed_canonical_summary.json"
@@ -41,6 +44,8 @@ DUAL_FAIL_CANONICAL="$TMP_DIR/dual_fail_canonical_summary.json"
 DUAL_RELAXED_CANONICAL="$TMP_DIR/dual_relaxed_canonical_summary.json"
 SPONSOR_FAIL_CANONICAL="$TMP_DIR/sponsor_fail_canonical_summary.json"
 SPONSOR_RELAXED_CANONICAL="$TMP_DIR/sponsor_relaxed_canonical_summary.json"
+ADMIN_FAIL_CANONICAL="$TMP_DIR/admin_fail_canonical_summary.json"
+ADMIN_RELAXED_CANONICAL="$TMP_DIR/admin_relaxed_canonical_summary.json"
 ENV_CANONICAL_OUTPUT="$TMP_DIR/env_canonical_output.json"
 ENV_LEGACY_OUTPUT="$TMP_DIR/env_legacy_output.json"
 LEGACY_ALIAS_OUTPUT="$TMP_DIR/legacy_alias_output.json"
@@ -53,6 +58,8 @@ DUAL_FAIL_LOG="$TMP_DIR/dual_fail.log"
 DUAL_RELAXED_LOG="$TMP_DIR/dual_relaxed.log"
 SPONSOR_FAIL_LOG="$TMP_DIR/sponsor_fail.log"
 SPONSOR_RELAXED_LOG="$TMP_DIR/sponsor_relaxed.log"
+ADMIN_FAIL_LOG="$TMP_DIR/admin_fail.log"
+ADMIN_RELAXED_LOG="$TMP_DIR/admin_relaxed.log"
 ENV_CANONICAL_LOG="$TMP_DIR/env_canonical.log"
 ENV_LEGACY_LOG="$TMP_DIR/env_legacy.log"
 LEGACY_ALIAS_LOG="$TMP_DIR/legacy_alias.log"
@@ -116,6 +123,9 @@ cat >"$PASS_SUMMARY" <<'EOF_PASS'
     },
     "issuer_sponsor_api_live_smoke": {
       "status": "pass"
+    },
+    "issuer_admin_blockchain_handlers_coverage": {
+      "status": "pass"
     }
   }
 }
@@ -148,6 +158,9 @@ cat >"$FAIL_SUMMARY" <<'EOF_FAIL'
       "status": "pass"
     },
     "issuer_sponsor_api_live_smoke": {
+      "status": "pass"
+    },
+    "issuer_admin_blockchain_handlers_coverage": {
       "status": "pass"
     }
   }
@@ -182,6 +195,9 @@ cat >"$RELAXED_SUMMARY" <<'EOF_RELAXED'
     },
     "issuer_sponsor_api_live_smoke": {
       "status": "pass"
+    },
+    "issuer_admin_blockchain_handlers_coverage": {
+      "status": "pass"
     }
   }
 }
@@ -215,6 +231,9 @@ cat >"$SPONSOR_FAIL_SUMMARY" <<'EOF_SPONSOR_FAIL'
     },
     "issuer_sponsor_api_live_smoke": {
       "status": "fail"
+    },
+    "issuer_admin_blockchain_handlers_coverage": {
+      "status": "pass"
     }
   }
 }
@@ -248,10 +267,49 @@ cat >"$DUAL_FAIL_SUMMARY" <<'EOF_DUAL_FAIL'
     },
     "issuer_sponsor_api_live_smoke": {
       "status": "pass"
+    },
+    "issuer_admin_blockchain_handlers_coverage": {
+      "status": "pass"
     }
   }
 }
 EOF_DUAL_FAIL
+
+cat >"$ADMIN_FAIL_SUMMARY" <<'EOF_ADMIN_FAIL'
+{
+  "version": 1,
+  "schema": {
+    "id": "ci_phase5_settlement_layer_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "pass",
+  "rc": 0,
+  "steps": {
+    "settlement_failsoft": {
+      "status": "pass"
+    },
+    "settlement_acceptance": {
+      "status": "pass"
+    },
+    "settlement_bridge_smoke": {
+      "status": "pass"
+    },
+    "settlement_state_persistence": {
+      "status": "pass"
+    },
+    "settlement_dual_asset_parity": {
+      "status": "pass"
+    },
+    "issuer_sponsor_api_live_smoke": {
+      "status": "pass"
+    },
+    "issuer_admin_blockchain_handlers_coverage": {
+      "status": "fail"
+    }
+  }
+}
+EOF_ADMIN_FAIL
 
 echo "[phase5-settlement-layer-check] stage-derived pass path"
 PHASE5_SETTLEMENT_LAYER_CHECK_CANONICAL_SUMMARY_JSON="$PASS_CANONICAL" \
@@ -284,6 +342,15 @@ if ! jq -e '
   and .signals.settlement_state_persistence_ok == true
   and .signals.settlement_dual_asset_parity_ok == true
   and .signals.issuer_sponsor_api_live_smoke_ok == true
+  and (
+    if (.signals | has("issuer_admin_blockchain_handlers_coverage_ok")) then
+      .policy.require_issuer_admin_blockchain_handlers_coverage_ok == true
+      and .signals.issuer_admin_blockchain_handlers_coverage_ok == true
+      and .signals.issuer_admin_blockchain_handlers_coverage_status == "pass"
+      and .stages.issuer_admin_blockchain_handlers_coverage.status == "pass"
+    else true
+    end
+  )
 ' --arg expected_canonical "$PASS_CANONICAL" "$PASS_OUTPUT" >/dev/null; then
   echo "pass-path summary contract mismatch"
   cat "$PASS_OUTPUT"
@@ -367,6 +434,91 @@ if ! cmp -s "$RELAXED_OUTPUT" "$RELAXED_CANONICAL"; then
   cat "$RELAXED_OUTPUT"
   cat "$RELAXED_CANONICAL"
   exit 1
+fi
+
+echo "[phase5-settlement-layer-check] issuer-admin coverage fail/skip compatibility path"
+set +e
+PHASE5_SETTLEMENT_LAYER_CHECK_CANONICAL_SUMMARY_JSON="$ADMIN_FAIL_CANONICAL" \
+"$SCRIPT_UNDER_TEST" \
+  --ci-phase5-summary-json "$ADMIN_FAIL_SUMMARY" \
+  --summary-json "$ADMIN_FAIL_OUTPUT" \
+  --show-json 0 >"$ADMIN_FAIL_LOG" 2>&1
+admin_fail_rc=$?
+set -e
+if [[ ! -f "$ADMIN_FAIL_CANONICAL" ]]; then
+  echo "missing canonical summary on issuer-admin fail path: $ADMIN_FAIL_CANONICAL"
+  cat "$ADMIN_FAIL_LOG"
+  exit 1
+fi
+if jq -e '.signals | has("issuer_admin_blockchain_handlers_coverage_ok")' "$ADMIN_FAIL_OUTPUT" >/dev/null; then
+  if [[ "$admin_fail_rc" -ne 1 ]]; then
+    echo "expected rc=1 for issuer-admin fail-closed path, got rc=$admin_fail_rc"
+    cat "$ADMIN_FAIL_LOG"
+    exit 1
+  fi
+  if ! jq -e '
+    .status == "fail"
+    and .rc == 1
+    and .policy.require_issuer_admin_blockchain_handlers_coverage_ok == true
+    and .signals.issuer_admin_blockchain_handlers_coverage_ok == false
+    and .stages.issuer_admin_blockchain_handlers_coverage.status == "fail"
+    and ((.decision.reasons // []) | any(test("issuer_admin_blockchain_handlers_coverage_ok is false")))
+  ' "$ADMIN_FAIL_OUTPUT" >/dev/null; then
+    echo "issuer-admin fail-path summary mismatch"
+    cat "$ADMIN_FAIL_OUTPUT"
+    cat "$ADMIN_FAIL_LOG"
+    exit 1
+  fi
+else
+  if [[ "$admin_fail_rc" -ne 0 ]]; then
+    echo "expected rc=0 when issuer-admin signal is not yet surfaced, got rc=$admin_fail_rc"
+    cat "$ADMIN_FAIL_LOG"
+    exit 1
+  fi
+  if ! jq -e '
+    .status == "pass"
+    and .rc == 0
+    and ((.signals | has("issuer_admin_blockchain_handlers_coverage_ok")) | not)
+  ' "$ADMIN_FAIL_OUTPUT" >/dev/null; then
+    echo "issuer-admin compatibility path summary mismatch"
+    cat "$ADMIN_FAIL_OUTPUT"
+    cat "$ADMIN_FAIL_LOG"
+    exit 1
+  fi
+fi
+if ! cmp -s "$ADMIN_FAIL_OUTPUT" "$ADMIN_FAIL_CANONICAL"; then
+  echo "issuer-admin fail-path canonical summary diverges from run summary"
+  cat "$ADMIN_FAIL_OUTPUT"
+  cat "$ADMIN_FAIL_CANONICAL"
+  exit 1
+fi
+
+supports_admin_requirement_flag=0
+if "$SCRIPT_UNDER_TEST" --help 2>/dev/null | grep -Fq -- "--require-issuer-admin-blockchain-handlers-coverage-ok"; then
+  supports_admin_requirement_flag=1
+fi
+
+if [[ "$supports_admin_requirement_flag" == "1" ]]; then
+  echo "[phase5-settlement-layer-check] issuer-admin policy toggle path"
+  PHASE5_SETTLEMENT_LAYER_CHECK_CANONICAL_SUMMARY_JSON="$ADMIN_RELAXED_CANONICAL" \
+  "$SCRIPT_UNDER_TEST" \
+    --ci-phase5-summary-json "$ADMIN_FAIL_SUMMARY" \
+    --summary-json "$ADMIN_RELAXED_OUTPUT" \
+    --require-issuer-admin-blockchain-handlers-coverage-ok 0 \
+    --show-json 0 >"$ADMIN_RELAXED_LOG" 2>&1
+
+  if ! jq -e '
+    .status == "pass"
+    and .rc == 0
+    and .policy.require_issuer_admin_blockchain_handlers_coverage_ok == false
+    and .signals.issuer_admin_blockchain_handlers_coverage_ok == false
+    and .stages.issuer_admin_blockchain_handlers_coverage.status == "fail"
+  ' "$ADMIN_RELAXED_OUTPUT" >/dev/null; then
+    echo "issuer-admin relaxed-policy summary mismatch"
+    cat "$ADMIN_RELAXED_OUTPUT"
+    cat "$ADMIN_RELAXED_LOG"
+    exit 1
+  fi
 fi
 
 echo "[phase5-settlement-layer-check] fail-closed path on dual-asset parity failure"

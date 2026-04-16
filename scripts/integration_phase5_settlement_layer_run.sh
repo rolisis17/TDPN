@@ -163,6 +163,27 @@ if [[ "$issuer_sponsor_api_live_smoke_mode" == "legacy_missing" ]]; then
   issuer_sponsor_api_live_smoke_stage_resolved_json="false"
 fi
 
+issuer_admin_blockchain_handlers_coverage_mode="${FAKE_CHECK_ISSUER_ADMIN_BLOCKCHAIN_HANDLERS_COVERAGE_MODE:-present}"
+issuer_admin_blockchain_handlers_coverage_status="$status"
+issuer_admin_blockchain_handlers_coverage_signal_json="true"
+issuer_admin_blockchain_handlers_coverage_stage_ok_json="true"
+issuer_admin_blockchain_handlers_coverage_stage_resolved_json="true"
+if [[ "$status" != "pass" ]]; then
+  issuer_admin_blockchain_handlers_coverage_signal_json="false"
+  issuer_admin_blockchain_handlers_coverage_stage_ok_json="false"
+fi
+if [[ "$issuer_admin_blockchain_handlers_coverage_mode" == "legacy_missing" ]]; then
+  issuer_admin_blockchain_handlers_coverage_status=""
+  issuer_admin_blockchain_handlers_coverage_signal_json="null"
+  issuer_admin_blockchain_handlers_coverage_stage_ok_json="null"
+  issuer_admin_blockchain_handlers_coverage_stage_resolved_json="false"
+elif [[ "$issuer_admin_blockchain_handlers_coverage_mode" == "fail" ]]; then
+  issuer_admin_blockchain_handlers_coverage_status="fail"
+  issuer_admin_blockchain_handlers_coverage_signal_json="false"
+  issuer_admin_blockchain_handlers_coverage_stage_ok_json="false"
+  issuer_admin_blockchain_handlers_coverage_stage_resolved_json="true"
+fi
+
 if [[ -n "$summary_json" && "${FAKE_CHECK_OMIT_SUMMARY:-0}" != "1" ]]; then
   mkdir -p "$(dirname "$summary_json")"
   cat >"$summary_json" <<EOF_CHECK_SUMMARY
@@ -181,7 +202,8 @@ if [[ -n "$summary_json" && "${FAKE_CHECK_OMIT_SUMMARY:-0}" != "1" ]]; then
     "require_settlement_bridge_smoke_ok": true,
     "require_settlement_state_persistence_ok": true,
     "require_settlement_dual_asset_parity_ok": true,
-    "require_issuer_sponsor_api_live_smoke_ok": true
+    "require_issuer_sponsor_api_live_smoke_ok": true,
+    "require_issuer_admin_blockchain_handlers_coverage_ok": true
   },
   "signals": {
     "settlement_failsoft_ok": true,
@@ -189,7 +211,8 @@ if [[ -n "$summary_json" && "${FAKE_CHECK_OMIT_SUMMARY:-0}" != "1" ]]; then
     "settlement_bridge_smoke_ok": true,
     "settlement_state_persistence_ok": true,
     "settlement_dual_asset_parity_ok": true,
-    "issuer_sponsor_api_live_smoke_ok": $issuer_sponsor_api_live_smoke_signal_json
+    "issuer_sponsor_api_live_smoke_ok": $issuer_sponsor_api_live_smoke_signal_json,
+    "issuer_admin_blockchain_handlers_coverage_ok": $issuer_admin_blockchain_handlers_coverage_signal_json
   },
   "stages": {
     "settlement_failsoft": {
@@ -221,6 +244,11 @@ if [[ -n "$summary_json" && "${FAKE_CHECK_OMIT_SUMMARY:-0}" != "1" ]]; then
       "status": "$issuer_sponsor_api_live_smoke_status",
       "resolved": $issuer_sponsor_api_live_smoke_stage_resolved_json,
       "ok": $issuer_sponsor_api_live_smoke_stage_ok_json
+    },
+    "issuer_admin_blockchain_handlers_coverage": {
+      "status": "$issuer_admin_blockchain_handlers_coverage_status",
+      "resolved": $issuer_admin_blockchain_handlers_coverage_stage_resolved_json,
+      "ok": $issuer_admin_blockchain_handlers_coverage_stage_ok_json
     }
   }
 }
@@ -357,6 +385,15 @@ if ! jq -e --arg canonical "$DRY_RUN_CANONICAL_SUMMARY" '
   and .signals.issuer_sponsor_api_live_smoke_status == "pass"
   and .signals.issuer_sponsor_api_live_smoke_resolved == true
   and .signals.sources.issuer_sponsor_api_live_smoke_ok == "phase5_settlement_layer_check_summary.signals.issuer_sponsor_api_live_smoke_ok"
+  and (
+    if (.signals | has("issuer_admin_blockchain_handlers_coverage_ok")) then
+      .signals.issuer_admin_blockchain_handlers_coverage_ok == true
+      and .signals.issuer_admin_blockchain_handlers_coverage_status == "pass"
+      and .signals.issuer_admin_blockchain_handlers_coverage_resolved == true
+      and .signals.sources.issuer_admin_blockchain_handlers_coverage_ok == "phase5_settlement_layer_check_summary.signals.issuer_admin_blockchain_handlers_coverage_ok"
+    else true
+    end
+  )
 ' "$DRY_RUN_RUN_SUMMARY" >/dev/null; then
   echo "dry-run combined summary contract mismatch"
   cat "$DRY_RUN_RUN_SUMMARY"
@@ -372,6 +409,7 @@ PHASE5_SETTLEMENT_LAYER_RUN_DRY_RUN=1 \
 PHASE5_SETTLEMENT_LAYER_RUN_CANONICAL_SUMMARY_JSON="$ENV_DRY_RUN_CANONICAL_SUMMARY" \
 FAKE_CHECK_HELP_MODE=legacy \
 FAKE_CHECK_ISSUER_SPONSOR_API_LIVE_SMOKE_MODE=legacy_missing \
+FAKE_CHECK_ISSUER_ADMIN_BLOCKCHAIN_HANDLERS_COVERAGE_MODE=legacy_missing \
 bash "$RUNNER" \
   --reports-dir "$TMP_DIR/reports_env_dry" \
   --ci-summary-json "$TMP_DIR/ci_env_dry_summary.json" \
@@ -419,6 +457,15 @@ if ! jq -e '
   and .signals.issuer_sponsor_api_live_smoke_status == "missing"
   and .signals.issuer_sponsor_api_live_smoke_resolved == false
   and .signals.sources.issuer_sponsor_api_live_smoke_ok == "phase5_settlement_layer_check_summary.stages.issuer_sponsor_api_live_smoke.resolved"
+  and (
+    if (.signals | has("issuer_admin_blockchain_handlers_coverage_ok")) then
+      .signals.issuer_admin_blockchain_handlers_coverage_ok == null
+      and .signals.issuer_admin_blockchain_handlers_coverage_status == "missing"
+      and .signals.issuer_admin_blockchain_handlers_coverage_resolved == false
+      and .signals.sources.issuer_admin_blockchain_handlers_coverage_ok == "phase5_settlement_layer_check_summary.stages.issuer_admin_blockchain_handlers_coverage.resolved"
+    else true
+    end
+  )
 ' "$ENV_DRY_RUN_RUN_SUMMARY" >/dev/null; then
   echo "env dry-run combined summary contract mismatch"
   cat "$ENV_DRY_RUN_RUN_SUMMARY"
@@ -497,6 +544,15 @@ if ! jq -e --arg canonical "$CI_FAIL_CANONICAL_SUMMARY" '
   and .signals.issuer_sponsor_api_live_smoke_status == "pass"
   and .signals.issuer_sponsor_api_live_smoke_resolved == true
   and .signals.sources.issuer_sponsor_api_live_smoke_ok == "phase5_settlement_layer_check_summary.signals.issuer_sponsor_api_live_smoke_ok"
+  and (
+    if (.signals | has("issuer_admin_blockchain_handlers_coverage_ok")) then
+      .signals.issuer_admin_blockchain_handlers_coverage_ok == true
+      and .signals.issuer_admin_blockchain_handlers_coverage_status == "pass"
+      and .signals.issuer_admin_blockchain_handlers_coverage_resolved == true
+      and .signals.sources.issuer_admin_blockchain_handlers_coverage_ok == "phase5_settlement_layer_check_summary.signals.issuer_admin_blockchain_handlers_coverage_ok"
+    else true
+    end
+  )
 ' "$CI_FAIL_RUN_SUMMARY" >/dev/null; then
   echo "ci-failure combined summary contract mismatch"
   cat "$CI_FAIL_RUN_SUMMARY"
@@ -543,6 +599,15 @@ if ! jq -e '
   and .signals.issuer_sponsor_api_live_smoke_status == "missing"
   and .signals.issuer_sponsor_api_live_smoke_resolved == false
   and .signals.sources.issuer_sponsor_api_live_smoke_ok == "unresolved"
+  and (
+    if (.signals | has("issuer_admin_blockchain_handlers_coverage_ok")) then
+      .signals.issuer_admin_blockchain_handlers_coverage_ok == null
+      and .signals.issuer_admin_blockchain_handlers_coverage_status == "missing"
+      and .signals.issuer_admin_blockchain_handlers_coverage_resolved == false
+      and .signals.sources.issuer_admin_blockchain_handlers_coverage_ok == "unresolved"
+    else true
+    end
+  )
 ' "$CONTRACT_FAIL_RUN_SUMMARY" >/dev/null; then
   echo "checker-contract-fail combined summary mismatch"
   cat "$CONTRACT_FAIL_RUN_SUMMARY"

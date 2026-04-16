@@ -97,7 +97,8 @@ cat >"$PASS_ROADMAP" <<'EOF_PASS_ROADMAP'
       "settlement_bridge_smoke_ok": true,
       "settlement_state_persistence_ok": true,
       "settlement_dual_asset_parity_ok": true,
-      "issuer_sponsor_api_live_smoke_ok": true
+      "issuer_sponsor_api_live_smoke_ok": true,
+      "issuer_admin_blockchain_handlers_coverage_ok": true
     }
   }
 }
@@ -119,7 +120,8 @@ cat >"$PASS_CHECK" <<'EOF_PASS_CHECK'
     "settlement_bridge_smoke_ok": true,
     "settlement_state_persistence_ok": true,
     "settlement_dual_asset_parity_ok": true,
-    "issuer_sponsor_api_live_smoke_ok": true
+    "issuer_sponsor_api_live_smoke_ok": true,
+    "issuer_admin_blockchain_handlers_coverage_ok": true
   }
 }
 EOF_PASS_CHECK
@@ -186,9 +188,12 @@ if ! jq -e '
   and .handoff.settlement_state_persistence_ok == true
   and .handoff.settlement_dual_asset_parity_ok == true
   and .handoff.issuer_sponsor_api_live_smoke_ok == true
+  and .handoff.issuer_admin_blockchain_handlers_coverage_ok == true
+  and .handoff.issuer_admin_blockchain_handlers_coverage_status == "pass"
   and .handoff.sources.settlement_failsoft_ok == "roadmap_progress_summary.vpn_track.phase5_settlement_layer_handoff.settlement_failsoft_ok"
   and .handoff.sources.settlement_dual_asset_parity_ok == "roadmap_progress_summary.vpn_track.phase5_settlement_layer_handoff.settlement_dual_asset_parity_ok"
   and .handoff.sources.issuer_sponsor_api_live_smoke_ok == "roadmap_progress_summary.vpn_track.phase5_settlement_layer_handoff.issuer_sponsor_api_live_smoke_ok"
+  and .handoff.sources.issuer_admin_blockchain_handlers_coverage_ok == "roadmap_progress_summary.vpn_track.phase5_settlement_layer_handoff.issuer_admin_blockchain_handlers_coverage_ok"
 ' --arg expected_canonical "$PASS_CANONICAL" "$PASS_OUTPUT" >/dev/null; then
   echo "primary pass-path summary mismatch"
   cat "$PASS_OUTPUT"
@@ -234,7 +239,8 @@ cat >"$ENV_ROADMAP" <<'EOF_ENV_ROADMAP'
       "settlement_bridge_smoke_ok": true,
       "settlement_state_persistence_ok": true,
       "settlement_dual_asset_parity_ok": true,
-      "issuer_sponsor_api_live_smoke_ok": true
+      "issuer_sponsor_api_live_smoke_ok": true,
+      "issuer_admin_blockchain_handlers_coverage_ok": true
     }
   }
 }
@@ -301,7 +307,8 @@ cat >"$FALLBACK_CHECK" <<'EOF_FALLBACK_CHECK'
     "settlement_bridge_smoke_ok": true,
     "settlement_state_persistence_ok": true,
     "settlement_dual_asset_parity_ok": true,
-    "issuer_sponsor_api_live_smoke_ok": true
+    "issuer_sponsor_api_live_smoke_ok": true,
+    "issuer_admin_blockchain_handlers_coverage_ok": true
   }
 }
 EOF_FALLBACK_CHECK
@@ -368,12 +375,15 @@ if ! jq -e '
   and .handoff.settlement_state_persistence_ok == true
   and .handoff.settlement_dual_asset_parity_ok == true
   and .handoff.issuer_sponsor_api_live_smoke_ok == true
+  and .handoff.issuer_admin_blockchain_handlers_coverage_ok == true
+  and .handoff.issuer_admin_blockchain_handlers_coverage_status == "pass"
   and .handoff.sources.settlement_failsoft_ok == "phase5_settlement_layer_check_summary.settlement_failsoft_ok"
   and .handoff.sources.settlement_acceptance_ok == "phase5_settlement_layer_check_summary.settlement_acceptance_ok"
   and .handoff.sources.settlement_bridge_smoke_ok == "phase5_settlement_layer_check_summary.settlement_bridge_smoke_ok"
   and .handoff.sources.settlement_state_persistence_ok == "phase5_settlement_layer_check_summary.settlement_state_persistence_ok"
   and .handoff.sources.settlement_dual_asset_parity_ok == "phase5_settlement_layer_check_summary.settlement_dual_asset_parity_ok"
   and .handoff.sources.issuer_sponsor_api_live_smoke_ok == "phase5_settlement_layer_check_summary.issuer_sponsor_api_live_smoke_ok"
+  and .handoff.sources.issuer_admin_blockchain_handlers_coverage_ok == "phase5_settlement_layer_check_summary.issuer_admin_blockchain_handlers_coverage_ok"
 ' "$FALLBACK_OUTPUT" >/dev/null; then
   echo "fallback-path summary mismatch"
   cat "$FALLBACK_OUTPUT"
@@ -438,6 +448,7 @@ PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_CANONICAL_SUMMARY_JSON="$UNRESOLVED_CANONI
   --require-settlement-state-persistence-ok 0 \
   --require-settlement-dual-asset-parity-ok 0 \
   --require-issuer-sponsor-api-live-smoke-ok 0 \
+  --require-issuer-admin-blockchain-handlers-coverage-ok 0 \
   --show-json 0 >"$UNRESOLVED_LOG" 2>&1
 
 if [[ ! -f "$UNRESOLVED_CANONICAL" ]]; then
@@ -456,6 +467,8 @@ if ! jq -e '
   and .handoff.settlement_state_persistence_ok == null
   and .handoff.settlement_dual_asset_parity_ok == null
   and .handoff.issuer_sponsor_api_live_smoke_ok == null
+  and .handoff.issuer_admin_blockchain_handlers_coverage_ok == null
+  and .handoff.issuer_admin_blockchain_handlers_coverage_status == "missing"
 ' --arg expected_canonical "$UNRESOLVED_CANONICAL" "$UNRESOLVED_OUTPUT" >/dev/null; then
   echo "unresolved relaxed summary mismatch"
   cat "$UNRESOLVED_OUTPUT"
@@ -511,7 +524,8 @@ cat >"$FAIL_ROADMAP" <<'EOF_FAIL_ROADMAP'
       "settlement_bridge_smoke_ok": true,
       "settlement_state_persistence_ok": true,
       "settlement_dual_asset_parity_ok": true,
-      "issuer_sponsor_api_live_smoke_ok": true
+      "issuer_sponsor_api_live_smoke_ok": true,
+      "issuer_admin_blockchain_handlers_coverage_ok": true
     }
   }
 }
