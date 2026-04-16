@@ -43,6 +43,7 @@ ROADMAP_PROGRESS_MISSING_PHASE5_SUMMARY_JSON="$TMP_DIR/missing_phase5_summary.js
 ROADMAP_PROGRESS_MISSING_PHASE6_SUMMARY_JSON="$TMP_DIR/missing_phase6_summary.json"
 ROADMAP_PROGRESS_MISSING_PHASE7_SUMMARY_JSON="$TMP_DIR/missing_phase7_summary.json"
 ROADMAP_PROGRESS_MISSING_BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SUMMARY_JSON="$TMP_DIR/missing_blockchain_mainnet_activation_gate_summary.json"
+ROADMAP_PROGRESS_MISSING_BLOCKCHAIN_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_SUMMARY_JSON="$TMP_DIR/missing_blockchain_bootstrap_governance_graduation_gate_summary.json"
 
 run_roadmap_progress_report() {
   ./scripts/roadmap_progress_report.sh \
@@ -641,8 +642,34 @@ cat >"$BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SUMMARY_JSON" <<'EOF_BLOCKCHAIN_MAINNE
 }
 EOF_BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SUMMARY
 
+BLOCKCHAIN_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_SUMMARY_JSON="$TMP_DIR/blockchain_bootstrap_governance_graduation_gate_summary.json"
+cat >"$BLOCKCHAIN_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_SUMMARY_JSON" <<'EOF_BLOCKCHAIN_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_SUMMARY'
+{
+  "version": 1,
+  "schema": {
+    "id": "bootstrap_governance_graduation_gate_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "GO",
+  "decision": {
+    "pass": true,
+    "go": true,
+    "no_go": false,
+    "reasons": [
+      "bootstrap governance graduation readiness met"
+    ]
+  },
+  "source_paths": [
+    "./artifacts/blockchain/bootstrap-governance-graduation/summary.json"
+  ]
+}
+EOF_BLOCKCHAIN_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_SUMMARY
+
 BLOCKCHAIN_MAINNET_ACTIVATION_GATE_INVALID_SUMMARY_JSON="$TMP_DIR/blockchain_mainnet_activation_gate_invalid_summary.json"
 printf '{"version":1,' >"$BLOCKCHAIN_MAINNET_ACTIVATION_GATE_INVALID_SUMMARY_JSON"
+BLOCKCHAIN_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_INVALID_SUMMARY_JSON="$TMP_DIR/blockchain_bootstrap_governance_graduation_gate_invalid_summary.json"
+printf '{"version":1,' >"$BLOCKCHAIN_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_INVALID_SUMMARY_JSON"
 PHASE7_MAINNET_CUTOVER_INVALID_SUMMARY_REPORT_JSON="$TMP_DIR/phase7_mainnet_cutover_invalid_summary_report.json"
 printf '{"version":1,' >"$PHASE7_MAINNET_CUTOVER_INVALID_SUMMARY_REPORT_JSON"
 
@@ -656,6 +683,7 @@ run_roadmap_progress_report \
   --phase5-settlement-layer-summary-json "$PHASE5_SETTLEMENT_LAYER_SUMMARY_JSON" \
   --phase7-mainnet-cutover-summary-json "$PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_JSON" \
   --blockchain-mainnet-activation-gate-summary-json "$BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SUMMARY_JSON" \
+  --blockchain-bootstrap-governance-graduation-gate-summary-json "$BLOCKCHAIN_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_SUMMARY_JSON" \
   --single-machine-summary-json "$SINGLE_MACHINE_SUMMARY_JSON" \
   --summary-json "$SUMMARY_JSON" \
   --report-md "$REPORT_MD" \
@@ -784,6 +812,21 @@ if ! jq -e '
   cat "$SUMMARY_JSON"
   exit 1
 fi
+if ! jq -e '
+  .blockchain_track.bootstrap_governance_graduation_gate.available == true
+  and .blockchain_track.bootstrap_governance_graduation_gate.status == "GO"
+  and .blockchain_track.bootstrap_governance_graduation_gate.decision == "GO"
+  and .blockchain_track.bootstrap_governance_graduation_gate.go == true
+  and .blockchain_track.bootstrap_governance_graduation_gate.no_go == false
+  and (.blockchain_track.bootstrap_governance_graduation_gate.reasons | length) == 1
+  and ((.blockchain_track.bootstrap_governance_graduation_gate.source_paths // []) | index("./artifacts/blockchain/bootstrap-governance-graduation/summary.json")) != null
+  and .blockchain_track.bootstrap_governance_graduation_gate.source_summary_json == "'"$BLOCKCHAIN_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_SUMMARY_JSON"'"
+  and .blockchain_track.bootstrap_governance_graduation_gate.source_summary_kind == "bootstrap-governance-graduation-gate-summary"
+' "$SUMMARY_JSON" >/dev/null; then
+  echo "summary JSON missing expected bootstrap governance graduation gate fields"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
 if ! rg -q '\[roadmap-progress-report\] refresh_step=manual_validation_report status=running' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
   echo "expected manual refresh running heartbeat line"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log
@@ -893,6 +936,11 @@ if ! rg -q 'Mainnet activation gate|mainnet_activation_gate' "$REPORT_MD"; then
   cat "$REPORT_MD"
   exit 1
 fi
+if ! rg -q 'Bootstrap governance graduation gate|bootstrap_governance_graduation_gate' "$REPORT_MD"; then
+  echo "report markdown missing bootstrap governance graduation gate line"
+  cat "$REPORT_MD"
+  exit 1
+fi
 
 echo "[roadmap-progress-report] blockchain mainnet activation gate missing summary path"
 MINIMAL_MANUAL_SUMMARY_JSON="$TMP_DIR/manual_validation_minimal_summary_for_gate_tests.json"
@@ -938,6 +986,37 @@ if ! jq -e '
 ' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_missing_summary.json" >/dev/null; then
   echo "missing gate summary JSON missing expected fallback fields"
   cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_missing_summary.json"
+  exit 1
+fi
+
+echo "[roadmap-progress-report] blockchain bootstrap governance graduation gate missing summary path"
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$MINIMAL_MANUAL_SUMMARY_JSON" \
+  --phase7-mainnet-cutover-summary-json "" \
+  --blockchain-bootstrap-governance-graduation-gate-summary-json "$ROADMAP_PROGRESS_MISSING_BLOCKCHAIN_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_bootstrap_governance_graduation_gate_missing_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_bootstrap_governance_graduation_gate_missing_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_bootstrap_governance_graduation_gate_missing.log 2>&1; then
+  echo "expected success when bootstrap governance graduation gate summary is missing"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_bootstrap_governance_graduation_gate_missing.log
+  exit 1
+fi
+if ! jq -e '
+  .blockchain_track.bootstrap_governance_graduation_gate.available == false
+  and .blockchain_track.bootstrap_governance_graduation_gate.status == "missing"
+  and .blockchain_track.bootstrap_governance_graduation_gate.decision == null
+  and .blockchain_track.bootstrap_governance_graduation_gate.go == null
+  and .blockchain_track.bootstrap_governance_graduation_gate.no_go == null
+  and (.blockchain_track.bootstrap_governance_graduation_gate.reasons | length) == 0
+  and (.blockchain_track.bootstrap_governance_graduation_gate.source_paths | length) == 0
+  and .blockchain_track.bootstrap_governance_graduation_gate.input_summary_json == "'"$ROADMAP_PROGRESS_MISSING_BLOCKCHAIN_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_SUMMARY_JSON"'"
+  and .blockchain_track.bootstrap_governance_graduation_gate.source_summary_json == null
+' "$TMP_DIR/roadmap_progress_bootstrap_governance_graduation_gate_missing_summary.json" >/dev/null; then
+  echo "missing bootstrap governance graduation gate summary JSON missing expected fallback fields"
+  cat "$TMP_DIR/roadmap_progress_bootstrap_governance_graduation_gate_missing_summary.json"
   exit 1
 fi
 
@@ -1072,6 +1151,37 @@ if ! jq -e '
 ' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_invalid_summary.json" >/dev/null; then
   echo "invalid gate summary JSON missing expected fallback fields"
   cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_invalid_summary.json"
+  exit 1
+fi
+
+echo "[roadmap-progress-report] blockchain bootstrap governance graduation gate invalid summary path"
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$MINIMAL_MANUAL_SUMMARY_JSON" \
+  --phase7-mainnet-cutover-summary-json "" \
+  --blockchain-bootstrap-governance-graduation-gate-summary-json "$BLOCKCHAIN_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_INVALID_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_bootstrap_governance_graduation_gate_invalid_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_bootstrap_governance_graduation_gate_invalid_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_bootstrap_governance_graduation_gate_invalid.log 2>&1; then
+  echo "expected success when bootstrap governance graduation gate summary is invalid"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_bootstrap_governance_graduation_gate_invalid.log
+  exit 1
+fi
+if ! jq -e '
+  .blockchain_track.bootstrap_governance_graduation_gate.available == false
+  and .blockchain_track.bootstrap_governance_graduation_gate.status == "invalid"
+  and .blockchain_track.bootstrap_governance_graduation_gate.decision == null
+  and .blockchain_track.bootstrap_governance_graduation_gate.go == null
+  and .blockchain_track.bootstrap_governance_graduation_gate.no_go == null
+  and (.blockchain_track.bootstrap_governance_graduation_gate.reasons | length) == 0
+  and (.blockchain_track.bootstrap_governance_graduation_gate.source_paths | length) == 0
+  and .blockchain_track.bootstrap_governance_graduation_gate.input_summary_json == "'"$BLOCKCHAIN_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_INVALID_SUMMARY_JSON"'"
+  and .blockchain_track.bootstrap_governance_graduation_gate.source_summary_json == null
+' "$TMP_DIR/roadmap_progress_bootstrap_governance_graduation_gate_invalid_summary.json" >/dev/null; then
+  echo "invalid bootstrap governance graduation gate summary JSON missing expected fallback fields"
+  cat "$TMP_DIR/roadmap_progress_bootstrap_governance_graduation_gate_invalid_summary.json"
   exit 1
 fi
 

@@ -26,6 +26,7 @@ Usage:
     [--phase6-cosmos-l1-summary-json PATH] \
     [--phase7-mainnet-cutover-summary-json PATH] \
     [--blockchain-mainnet-activation-gate-summary-json PATH] \
+    [--blockchain-bootstrap-governance-graduation-gate-summary-json PATH] \
     [--summary-json PATH] \
     [--report-md PATH] \
     [--print-report [0|1]] \
@@ -2155,6 +2156,32 @@ blockchain_mainnet_activation_gate_summary_normalize_json() {
   ' "$path"
 }
 
+blockchain_bootstrap_governance_graduation_gate_summary_kind_from_source() {
+  local path="$1"
+  local schema_id=""
+  local file_name=""
+  if [[ -f "$path" ]]; then
+    schema_id="$(jq -r '.schema.id // ""' "$path" 2>/dev/null || true)"
+  fi
+  case "$schema_id" in
+    blockchain_bootstrap_governance_graduation_gate_summary) printf '%s' "bootstrap-governance-graduation-gate-summary"; return ;;
+    bootstrap_governance_graduation_gate_summary) printf '%s' "bootstrap-governance-graduation-gate-summary"; return ;;
+    bootstrap_governance_graduation_summary) printf '%s' "bootstrap-governance-graduation-gate-summary"; return ;;
+  esac
+  file_name="$(basename "$path")"
+  case "$file_name" in
+    blockchain_bootstrap_governance_graduation_gate_summary.json) printf '%s' "bootstrap-governance-graduation-gate-summary" ;;
+    bootstrap_governance_graduation_gate_summary.json) printf '%s' "bootstrap-governance-graduation-gate-summary" ;;
+    *bootstrap*governance*graduation*gate*summary*.json) printf '%s' "bootstrap-governance-graduation-gate-summary" ;;
+    *) printf '%s' "unknown" ;;
+  esac
+}
+
+blockchain_bootstrap_governance_graduation_gate_summary_normalize_json() {
+  local path="$1"
+  blockchain_mainnet_activation_gate_summary_normalize_json "$path"
+}
+
 phase6_cosmos_l1_linked_summary_candidates() {
   local source_path="$1"
   local emitted=""
@@ -2496,6 +2523,11 @@ if [[ -n "$(trim "$blockchain_mainnet_activation_gate_summary_json")" ]]; then
   path_arg_or_die "--blockchain-mainnet-activation-gate-summary-json" "$blockchain_mainnet_activation_gate_summary_json"
 fi
 blockchain_mainnet_activation_gate_summary_json="$(abs_path "$blockchain_mainnet_activation_gate_summary_json")"
+blockchain_bootstrap_governance_graduation_gate_summary_json="${ROADMAP_PROGRESS_BLOCKCHAIN_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_SUMMARY_JSON:-}"
+if [[ -n "$(trim "$blockchain_bootstrap_governance_graduation_gate_summary_json")" ]]; then
+  path_arg_or_die "--blockchain-bootstrap-governance-graduation-gate-summary-json" "$blockchain_bootstrap_governance_graduation_gate_summary_json"
+fi
+blockchain_bootstrap_governance_graduation_gate_summary_json="$(abs_path "$blockchain_bootstrap_governance_graduation_gate_summary_json")"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -2589,6 +2621,11 @@ while [[ $# -gt 0 ]]; do
     --blockchain-mainnet-activation-gate-summary-json)
       path_arg_or_die "--blockchain-mainnet-activation-gate-summary-json" "${2:-}"
       blockchain_mainnet_activation_gate_summary_json="$(abs_path "${2:-}")"
+      shift 2
+      ;;
+    --blockchain-bootstrap-governance-graduation-gate-summary-json)
+      path_arg_or_die "--blockchain-bootstrap-governance-graduation-gate-summary-json" "${2:-}"
+      blockchain_bootstrap_governance_graduation_gate_summary_json="$(abs_path "${2:-}")"
       shift 2
       ;;
     --summary-json)
@@ -4398,6 +4435,36 @@ if [[ "$blockchain_mainnet_activation_gate_status_json" == "missing" ]] \
   fi
 fi
 
+blockchain_bootstrap_governance_graduation_gate_available_json="false"
+blockchain_bootstrap_governance_graduation_gate_input_summary_json=""
+blockchain_bootstrap_governance_graduation_gate_source_summary_json=""
+blockchain_bootstrap_governance_graduation_gate_source_summary_kind=""
+blockchain_bootstrap_governance_graduation_gate_status_json="missing"
+blockchain_bootstrap_governance_graduation_gate_decision_json=""
+blockchain_bootstrap_governance_graduation_gate_go_json="null"
+blockchain_bootstrap_governance_graduation_gate_no_go_json="null"
+blockchain_bootstrap_governance_graduation_gate_reasons_json="[]"
+blockchain_bootstrap_governance_graduation_gate_source_paths_json="[]"
+if [[ -n "$blockchain_bootstrap_governance_graduation_gate_summary_json" ]]; then
+  blockchain_bootstrap_governance_graduation_gate_input_summary_json="$blockchain_bootstrap_governance_graduation_gate_summary_json"
+  if [[ -f "$blockchain_bootstrap_governance_graduation_gate_summary_json" ]]; then
+    if [[ "$(json_file_valid_01 "$blockchain_bootstrap_governance_graduation_gate_summary_json")" == "1" ]]; then
+      blockchain_bootstrap_governance_graduation_gate_source_summary_json="$(abs_path "$blockchain_bootstrap_governance_graduation_gate_summary_json")"
+      blockchain_bootstrap_governance_graduation_gate_source_summary_kind="$(blockchain_bootstrap_governance_graduation_gate_summary_kind_from_source "$blockchain_bootstrap_governance_graduation_gate_summary_json")"
+      blockchain_bootstrap_governance_graduation_gate_summary_payload_json="$(blockchain_bootstrap_governance_graduation_gate_summary_normalize_json "$blockchain_bootstrap_governance_graduation_gate_summary_json")"
+      blockchain_bootstrap_governance_graduation_gate_available_json="$(jq -r '.available // false' <<<"$blockchain_bootstrap_governance_graduation_gate_summary_payload_json" 2>/dev/null || echo false)"
+      blockchain_bootstrap_governance_graduation_gate_status_json="$(jq -r '.status // "unknown"' <<<"$blockchain_bootstrap_governance_graduation_gate_summary_payload_json" 2>/dev/null || echo "unknown")"
+      blockchain_bootstrap_governance_graduation_gate_decision_json="$(jq -r '.decision // empty' <<<"$blockchain_bootstrap_governance_graduation_gate_summary_payload_json" 2>/dev/null || true)"
+      blockchain_bootstrap_governance_graduation_gate_go_json="$(jq -r 'if .go == null then "null" else (.go | tostring) end' <<<"$blockchain_bootstrap_governance_graduation_gate_summary_payload_json" 2>/dev/null || echo "null")"
+      blockchain_bootstrap_governance_graduation_gate_no_go_json="$(jq -r 'if .no_go == null then "null" else (.no_go | tostring) end' <<<"$blockchain_bootstrap_governance_graduation_gate_summary_payload_json" 2>/dev/null || echo "null")"
+      blockchain_bootstrap_governance_graduation_gate_reasons_json="$(jq -c '.reasons // []' <<<"$blockchain_bootstrap_governance_graduation_gate_summary_payload_json" 2>/dev/null || echo '[]')"
+      blockchain_bootstrap_governance_graduation_gate_source_paths_json="$(jq -c '.source_paths // []' <<<"$blockchain_bootstrap_governance_graduation_gate_summary_payload_json" 2>/dev/null || echo '[]')"
+    else
+      blockchain_bootstrap_governance_graduation_gate_status_json="invalid"
+    fi
+  fi
+fi
+
 readiness_status="$(jq -r '.report.readiness_status // "UNKNOWN"' "$manual_validation_summary_json")"
 roadmap_stage="$(jq -r '.summary.roadmap_stage // "UNKNOWN"' "$manual_validation_summary_json")"
 single_machine_ready_json="$(jq -r '.summary.single_machine_ready // false' "$manual_validation_summary_json")"
@@ -5021,6 +5088,16 @@ summary_payload="$(jq -n \
   --argjson blockchain_mainnet_activation_gate_no_go "$blockchain_mainnet_activation_gate_no_go_json" \
   --argjson blockchain_mainnet_activation_gate_reasons "$blockchain_mainnet_activation_gate_reasons_json" \
   --argjson blockchain_mainnet_activation_gate_source_paths "$blockchain_mainnet_activation_gate_source_paths_json" \
+  --argjson blockchain_bootstrap_governance_graduation_gate_available "$blockchain_bootstrap_governance_graduation_gate_available_json" \
+  --arg blockchain_bootstrap_governance_graduation_gate_input_summary_json "$blockchain_bootstrap_governance_graduation_gate_input_summary_json" \
+  --arg blockchain_bootstrap_governance_graduation_gate_source_summary_json "$blockchain_bootstrap_governance_graduation_gate_source_summary_json" \
+  --arg blockchain_bootstrap_governance_graduation_gate_source_summary_kind "$blockchain_bootstrap_governance_graduation_gate_source_summary_kind" \
+  --arg blockchain_bootstrap_governance_graduation_gate_status "$blockchain_bootstrap_governance_graduation_gate_status_json" \
+  --arg blockchain_bootstrap_governance_graduation_gate_decision_json "$blockchain_bootstrap_governance_graduation_gate_decision_json" \
+  --argjson blockchain_bootstrap_governance_graduation_gate_go "$blockchain_bootstrap_governance_graduation_gate_go_json" \
+  --argjson blockchain_bootstrap_governance_graduation_gate_no_go "$blockchain_bootstrap_governance_graduation_gate_no_go_json" \
+  --argjson blockchain_bootstrap_governance_graduation_gate_reasons "$blockchain_bootstrap_governance_graduation_gate_reasons_json" \
+  --argjson blockchain_bootstrap_governance_graduation_gate_source_paths "$blockchain_bootstrap_governance_graduation_gate_source_paths_json" \
   --arg profile_default_gate_status "$profile_default_gate_status" \
   --arg profile_default_gate_next_command "$profile_default_gate_next_command" \
   --arg profile_default_gate_next_command_sudo "$profile_default_gate_next_command_sudo" \
@@ -5277,6 +5354,18 @@ summary_payload="$(jq -n \
         no_go: $blockchain_mainnet_activation_gate_no_go,
         reasons: $blockchain_mainnet_activation_gate_reasons,
         source_paths: $blockchain_mainnet_activation_gate_source_paths
+      },
+      bootstrap_governance_graduation_gate: {
+        available: $blockchain_bootstrap_governance_graduation_gate_available,
+        input_summary_json: (if $blockchain_bootstrap_governance_graduation_gate_input_summary_json == "" then null else $blockchain_bootstrap_governance_graduation_gate_input_summary_json end),
+        source_summary_json: (if $blockchain_bootstrap_governance_graduation_gate_source_summary_json == "" then null else $blockchain_bootstrap_governance_graduation_gate_source_summary_json end),
+        source_summary_kind: (if $blockchain_bootstrap_governance_graduation_gate_source_summary_kind == "" then null else $blockchain_bootstrap_governance_graduation_gate_source_summary_kind end),
+        status: $blockchain_bootstrap_governance_graduation_gate_status,
+        decision: (if $blockchain_bootstrap_governance_graduation_gate_decision_json == "" then null else $blockchain_bootstrap_governance_graduation_gate_decision_json end),
+        go: $blockchain_bootstrap_governance_graduation_gate_go,
+        no_go: $blockchain_bootstrap_governance_graduation_gate_no_go,
+        reasons: $blockchain_bootstrap_governance_graduation_gate_reasons,
+        source_paths: $blockchain_bootstrap_governance_graduation_gate_source_paths
       }
     },
     refresh: {
@@ -5498,6 +5587,16 @@ $pending_real_host_checks_md
 - Mainnet activation gate no_go: $(jq -r '.blockchain_track.mainnet_activation_gate.no_go | if . == null then "null" else tostring end' "$summary_json")
 - Mainnet activation gate reasons: $(jq -r '.blockchain_track.mainnet_activation_gate.reasons | if length == 0 then "none" else join("; ") end' "$summary_json")
 - Mainnet activation gate source paths: $(jq -r '.blockchain_track.mainnet_activation_gate.source_paths | if length == 0 then "none" else join(", ") end' "$summary_json")
+- Bootstrap governance graduation gate available: $(jq -r '.blockchain_track.bootstrap_governance_graduation_gate.available' "$summary_json")
+- Bootstrap governance graduation gate input: $(jq -r '.blockchain_track.bootstrap_governance_graduation_gate.input_summary_json // "none"' "$summary_json")
+- Bootstrap governance graduation gate source: $(jq -r '.blockchain_track.bootstrap_governance_graduation_gate.source_summary_json // "none"' "$summary_json")
+- Bootstrap governance graduation gate source kind: $(jq -r '.blockchain_track.bootstrap_governance_graduation_gate.source_summary_kind // "none"' "$summary_json")
+- Bootstrap governance graduation gate status: $(jq -r '.blockchain_track.bootstrap_governance_graduation_gate.status // "missing"' "$summary_json")
+- Bootstrap governance graduation gate decision: $(jq -r '.blockchain_track.bootstrap_governance_graduation_gate.decision // "null"' "$summary_json")
+- Bootstrap governance graduation gate go: $(jq -r '.blockchain_track.bootstrap_governance_graduation_gate.go | if . == null then "null" else tostring end' "$summary_json")
+- Bootstrap governance graduation gate no_go: $(jq -r '.blockchain_track.bootstrap_governance_graduation_gate.no_go | if . == null then "null" else tostring end' "$summary_json")
+- Bootstrap governance graduation gate reasons: $(jq -r '.blockchain_track.bootstrap_governance_graduation_gate.reasons | if length == 0 then "none" else join("; ") end' "$summary_json")
+- Bootstrap governance graduation gate source paths: $(jq -r '.blockchain_track.bootstrap_governance_graduation_gate.source_paths | if length == 0 then "none" else join(", ") end' "$summary_json")
 
 ## Next Actions
 
@@ -5567,6 +5666,7 @@ echo "[roadmap-progress-report] phase6_cosmos_l1_handoff_status=$phase6_cosmos_l
 echo "[roadmap-progress-report] phase7_mainnet_cutover_summary_available=$phase7_mainnet_cutover_summary_available_json source_summary_json=${phase7_mainnet_cutover_summary_source_summary_json:-} source_kind=${phase7_mainnet_cutover_summary_source_summary_kind:-}"
 echo "[roadmap-progress-report] phase7_mainnet_cutover_summary_status=$phase7_mainnet_cutover_summary_status_json rc=$phase7_mainnet_cutover_summary_rc_json check_ok=$phase7_mainnet_cutover_summary_check_ok_json run_ok=$phase7_mainnet_cutover_summary_run_ok_json handoff_check_ok=$phase7_mainnet_cutover_summary_handoff_check_ok_json handoff_run_ok=$phase7_mainnet_cutover_summary_handoff_run_ok_json mainnet_activation_gate_go_ok=$phase7_mainnet_cutover_summary_mainnet_activation_gate_go_ok_json tdpnd_grpc_live_smoke_ok=$phase7_mainnet_cutover_summary_tdpnd_grpc_live_smoke_ok_json module_tx_surface_ok=$phase7_mainnet_cutover_summary_module_tx_surface_ok_json tdpnd_grpc_auth_live_smoke_ok=$phase7_mainnet_cutover_summary_tdpnd_grpc_auth_live_smoke_ok_json tdpnd_comet_runtime_smoke_ok=$phase7_mainnet_cutover_summary_tdpnd_comet_runtime_smoke_ok_json cosmos_module_coverage_floor_ok=$phase7_mainnet_cutover_summary_cosmos_module_coverage_floor_ok_json cosmos_keeper_coverage_floor_ok=$phase7_mainnet_cutover_summary_cosmos_keeper_coverage_floor_ok_json cosmos_app_coverage_floor_ok=$phase7_mainnet_cutover_summary_cosmos_app_coverage_floor_ok_json dual_write_parity_ok=$phase7_mainnet_cutover_summary_dual_write_parity_ok_json"
 echo "[roadmap-progress-report] mainnet_activation_gate_available=$blockchain_mainnet_activation_gate_available_json source_summary_json=${blockchain_mainnet_activation_gate_source_summary_json:-} source_kind=${blockchain_mainnet_activation_gate_source_summary_kind:-} status=$blockchain_mainnet_activation_gate_status_json decision=${blockchain_mainnet_activation_gate_decision_json:-} go=$blockchain_mainnet_activation_gate_go_json no_go=$blockchain_mainnet_activation_gate_no_go_json"
+echo "[roadmap-progress-report] bootstrap_governance_graduation_gate_available=$blockchain_bootstrap_governance_graduation_gate_available_json source_summary_json=${blockchain_bootstrap_governance_graduation_gate_source_summary_json:-} source_kind=${blockchain_bootstrap_governance_graduation_gate_source_summary_kind:-} status=$blockchain_bootstrap_governance_graduation_gate_status_json decision=${blockchain_bootstrap_governance_graduation_gate_decision_json:-} go=$blockchain_bootstrap_governance_graduation_gate_go_json no_go=$blockchain_bootstrap_governance_graduation_gate_no_go_json"
 echo "[roadmap-progress-report] profile_default_gate_status=$profile_default_gate_status next_command=${profile_default_gate_next_command:-} next_command_sudo=${profile_default_gate_next_command_sudo:-} next_command_source=${profile_default_gate_next_command_source:-}"
 echo "[roadmap-progress-report] profile_default_gate_docker_hint_available=$profile_default_gate_docker_hint_available_json docker_hint_source=${profile_default_gate_docker_hint_source:-} campaign_check_summary_resolved=${profile_default_gate_campaign_check_summary_json_resolved:-} docker_matrix_summary_json=${profile_default_gate_docker_matrix_summary_json:-} docker_profile_summary_json=${profile_default_gate_docker_profile_summary_json:-}"
 echo "[roadmap-progress-report] resilience_handoff_available=$resilience_handoff_available_json source_summary_json=${resilience_handoff_source_summary_json:-}"

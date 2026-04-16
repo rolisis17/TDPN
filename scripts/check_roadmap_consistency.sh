@@ -454,6 +454,38 @@ check_mainnet_activation_gate_surface() {
   fi
 }
 
+check_bootstrap_governance_graduation_gate_surface() {
+  local file_path="$1"
+  local label="$2"
+  local field=""
+
+  if ! rg -Fq -- "--blockchain-bootstrap-governance-graduation-gate-summary-json" "$file_path"; then
+    echo "$label must accept --blockchain-bootstrap-governance-graduation-gate-summary-json for the bootstrap governance graduation gate surface"
+    exit 1
+  fi
+  if ! rg -Fq "blockchain_track.bootstrap_governance_graduation_gate" "$file_path"; then
+    echo "$label must surface blockchain_track.bootstrap_governance_graduation_gate in the roadmap progress report JSON surface"
+    exit 1
+  fi
+  for field in \
+    "available" \
+    "input_summary_json" \
+    "source_summary_json" \
+    "source_summary_kind" \
+    "status" \
+    "decision" \
+    "go" \
+    "no_go" \
+    "reasons" \
+    "source_paths"
+  do
+    if ! rg -Fq ".blockchain_track.bootstrap_governance_graduation_gate.${field}" "$file_path"; then
+      echo "$label must expose blockchain_track.bootstrap_governance_graduation_gate.${field} in the roadmap progress report JSON surface"
+      exit 1
+    fi
+  done
+}
+
 for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$roadmap_integration_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$testing_guide_doc" "$chain_readme" "$chain_scaffold_file" "$chain_grpc_registry_file" "$chain_grpc_registry_test_file" "$chain_settlement_bridge_file" "$chain_runtime_test_file" "$settlement_mapping_doc" "$blockchain_sponsor_quickstart_doc" "$phase5_ci_script" "$phase5_integration_script" "$phase5_check_script" "$phase5_run_script" "$phase5_handoff_check_script" "$phase5_handoff_run_script" "$phase5_check_integration_script" "$phase5_run_integration_script" "$phase5_handoff_check_integration_script" "$phase5_handoff_run_integration_script" "$phase5_summary_report_script" "$phase5_summary_report_integration_script" "$blockchain_fastlane_script" "$blockchain_fastlane_integration_script" "$ci_local_script" "$easy_node_script" "$easy_node_blockchain_gate_wrappers_integration_script" "$easy_node_blockchain_summary_reports_integration_script" "$phase6_ci_script" "$phase6_integration_script" "$phase6_contracts_ci_script" "$phase6_contracts_integration_script" "$phase6_contracts_live_smoke_script" "$phase6_grpc_app_roundtrip_script" "$phase6_grpc_runtime_smoke_script" "$phase6_grpc_live_smoke_script" "$phase6_grpc_auth_live_smoke_script" "$phase6_settlement_bridge_smoke_script" "$phase6_settlement_bridge_live_smoke_script" "$phase6_query_surface_script" "$phase6_module_tx_surface_script" "$phase6_proto_surface_script" "$phase6_proto_grpc_surface_script" "$phase6_proto_codegen_surface_script" "$phase6_module_coverage_floor_script" "$phase6_keeper_coverage_floor_script" "$phase6_app_coverage_floor_script" "$phase6_dual_write_parity_script" "$phase6_check_script" "$phase6_run_script" "$phase6_check_integration_script" "$phase6_run_integration_script" "$phase6_suite_script" "$phase6_suite_integration_script" "$phase6_summary_report_script" "$phase6_summary_report_integration_script" "$phase7_check_script" "$phase7_check_integration_script" "$phase7_run_script" "$phase7_run_integration_script" "$phase7_handoff_check_script" "$phase7_handoff_check_integration_script" "$phase7_handoff_run_script" "$phase7_handoff_run_integration_script" "$phase7_ci_script" "$phase7_ci_integration_script" "$phase7_summary_report_script" "$phase7_summary_report_integration_script"; do
   if [[ ! -f "$f" ]]; then
     echo "missing required file: $f"
@@ -2341,6 +2373,8 @@ if ! rg -Fq "canonical_summary_json" "$phase7_summary_report_integration_script"
 fi
 check_mainnet_activation_gate_surface "$roadmap_script" "roadmap progress report helper"
 check_mainnet_activation_gate_surface "$roadmap_integration_script" "roadmap progress report integration script"
+check_bootstrap_governance_graduation_gate_surface "$roadmap_script" "roadmap progress report helper"
+check_bootstrap_governance_graduation_gate_surface "$roadmap_integration_script" "roadmap progress report integration script"
 if ! rg -Fq '.blockchain_track.mainnet_activation_gate.available == true' "$roadmap_integration_script"; then
   echo "roadmap progress report integration script must validate the available mainnet activation gate path"
   exit 1
@@ -2351,6 +2385,26 @@ if ! rg -Fq '.blockchain_track.mainnet_activation_gate.status == "missing"' "$ro
 fi
 if ! rg -Fq '.blockchain_track.mainnet_activation_gate.status == "invalid"' "$roadmap_integration_script"; then
   echo "roadmap progress report integration script must validate the invalid mainnet activation gate path"
+  exit 1
+fi
+if ! rg -Fq '.blockchain_track.bootstrap_governance_graduation_gate.available == true' "$roadmap_integration_script"; then
+  echo "roadmap progress report integration script must validate the available bootstrap governance graduation gate path"
+  exit 1
+fi
+if ! rg -Fq '.blockchain_track.bootstrap_governance_graduation_gate.status == "missing"' "$roadmap_integration_script"; then
+  echo "roadmap progress report integration script must validate the missing bootstrap governance graduation gate path"
+  exit 1
+fi
+if ! rg -Fq '.blockchain_track.bootstrap_governance_graduation_gate.status == "invalid"' "$roadmap_integration_script"; then
+  echo "roadmap progress report integration script must validate the invalid bootstrap governance graduation gate path"
+  exit 1
+fi
+if ! rg -Fq "blockchain bootstrap governance graduation gate missing summary path" "$roadmap_integration_script"; then
+  echo "roadmap progress report integration script must validate missing-summary coverage for bootstrap governance graduation gate"
+  exit 1
+fi
+if ! rg -Fq "blockchain bootstrap governance graduation gate invalid summary path" "$roadmap_integration_script"; then
+  echo "roadmap progress report integration script must validate invalid-summary coverage for bootstrap governance graduation gate"
   exit 1
 fi
 if ! rg -Fq "phase7-mainnet-cutover-signal" "$roadmap_script"; then
@@ -2539,6 +2593,10 @@ if ! rg -Fq ".artifacts.phase6_cosmos_l1_summary_json" "$roadmap_script"; then
   echo "roadmap_progress_report.sh must include phase6 artifact reference field"
   exit 1
 fi
+if ! rg -q -e "--blockchain-bootstrap-governance-graduation-gate-summary-json" -e "ROADMAP_PROGRESS_BLOCKCHAIN_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_SUMMARY_JSON" "$roadmap_script"; then
+  echo "roadmap_progress_report.sh must include bootstrap governance graduation gate summary argument/env wiring"
+  exit 1
+fi
 if ! rg -q -e "PHASE6_COSMOS_L1_SUMMARY_JSON" -e "--phase6-cosmos-l1-summary-json" "$roadmap_integration_script"; then
   echo "integration_roadmap_progress_report.sh must wire phase6 summary fixture/argument"
   exit 1
@@ -2561,6 +2619,10 @@ if ! rg -Fq ".blockchain_track.phase6_cosmos_l1_handoff.tdpnd_comet_runtime_smok
 fi
 if ! rg -Fq ".artifacts.phase6_cosmos_l1_summary_json" "$roadmap_integration_script"; then
   echo "integration_roadmap_progress_report.sh must validate phase6 artifact reference field"
+  exit 1
+fi
+if ! rg -Fq "ROADMAP_PROGRESS_MISSING_BLOCKCHAIN_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_SUMMARY_JSON" "$roadmap_integration_script"; then
+  echo "integration_roadmap_progress_report.sh must wire bootstrap governance graduation gate missing-summary fixture"
   exit 1
 fi
 

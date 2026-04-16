@@ -159,6 +159,7 @@ Automation:
 
 - `scripts/blockchain_mainnet_activation_metrics.sh` produces deterministic activation metrics JSON from explicit inputs plus optional source artifacts; `scripts/integration_blockchain_mainnet_activation_metrics.sh` covers complete/partial coverage and source artifact precedence.
 - `scripts/blockchain_fastlane.sh` is the blockchain helper path for phase5 + phase6 + phase7 + activation helpers, and `scripts/integration_blockchain_fastlane.sh` covers ordering, dry-run/toggle behavior, and failure propagation.
+- Bootstrap governance graduation gate helper is `scripts/blockchain_bootstrap_graduation_gate.sh`, with contract coverage in `scripts/integration_blockchain_bootstrap_graduation_gate.sh`.
 - `scripts/blockchain_mainnet_activation_gate.sh` evaluates the metrics gate from a bootstrap metrics JSON file and emits one summary JSON with the final GO/NO-GO decision.
 - `scripts/integration_blockchain_mainnet_activation_gate.sh` covers the GO path, NO-GO path, missing/invalid input handling, and fail-close behavior.
 - Canonical metrics fields consumed by the helper:
@@ -198,3 +199,4 @@ Implementation sequence after GO:
 - Source roadmap: `docs/product-roadmap.md` (Parallel Track: Cosmos L1 Settlement and Governance Foundation).
 - Canonical execution plan: `docs/full-execution-plan-2026-2027.md`.
 - Related implementation guide: `docs/mvp-implementation-plan.md`.
+- `scripts/roadmap_progress_report.sh` optionally ingests validator-policy graduation summaries via `--blockchain-bootstrap-governance-graduation-gate-summary-json`, with integration coverage in `scripts/integration_roadmap_progress_report.sh`; ingestion is fail-soft when the summary is missing or invalid.

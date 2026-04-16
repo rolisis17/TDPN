@@ -180,6 +180,7 @@ Exit settlement status endpoint:
 - Blockchain fastlane helper is `scripts/blockchain_fastlane.sh`; integration contract is `scripts/integration_blockchain_fastlane.sh`; easy-node entrypoint is `./scripts/easy_node.sh blockchain-fastlane`; this remains fail-closed control-plane wiring and preserves dataplane independence.
 - `blockchain_fastlane` summary surfacing now also includes Phase 7 summary/report runtime/readiness signals `module_tx_surface_ok`, `tdpnd_grpc_live_smoke_ok`, and `tdpnd_grpc_auth_live_smoke_ok`; optional `tdpnd_comet_runtime_smoke_ok` is preserved when present.
 - `blockchain_fastlane` deterministic Phase 7 summary/report input path contract is `--phase7-mainnet-cutover-summary-report-json` / `BLOCKCHAIN_FASTLANE_PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_JSON`.
+- bootstrap governance graduation gate helper is `scripts/blockchain_bootstrap_graduation_gate.sh` (integration: `scripts/integration_blockchain_bootstrap_graduation_gate.sh`); roadmap ingestion contract is optional `scripts/roadmap_progress_report.sh --blockchain-bootstrap-governance-graduation-gate-summary-json` (integration: `scripts/integration_roadmap_progress_report.sh`) and is fail-soft when the summary is missing or invalid.
 - Phase7 cutover summaries remain control-plane only and preserve canonical dataplane independence during chain degradation.
 
 ## Chain gRPC Contract
