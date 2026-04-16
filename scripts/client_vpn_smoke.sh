@@ -684,6 +684,29 @@ output_indicates_no_root_requirement() {
   return 1
 }
 
+derive_up_failure_note() {
+  local failed_output="$1"
+  if [[ -z "$failed_output" ]]; then
+    printf '%s' "client-vpn up failed"
+    return 0
+  fi
+
+  if printf '%s\n' "$failed_output" | grep -Eqi 'no suitable entry/exit relays found'; then
+    printf '%s' "client-vpn up failed: no suitable entry/exit relays found (balanced/2hop requires at least two distinct operators); add another operator relay or use --path-profile 1hop for single-operator labs"
+    return 0
+  fi
+  if printf '%s\n' "$failed_output" | grep -Eqi 'did not receive wg-session config within'; then
+    printf '%s' "client-vpn up failed: timed out waiting for wg-session config (control plane did not establish a viable path in time)"
+    return 0
+  fi
+  if printf '%s\n' "$failed_output" | grep -Eqi 'directory key is not trusted'; then
+    printf '%s' "client-vpn up failed: directory key trust mismatch (run client-vpn-trust-reset or enable --trust-reset-on-key-mismatch 1)"
+    return 0
+  fi
+
+  printf '%s' "client-vpn up failed"
+}
+
 defer_no_root_on_failure() {
   local failed_output="$1"
   local defer_note="$2"
@@ -1426,9 +1449,10 @@ if ! run_and_capture up_output "${up_cmd[@]}"; then
   if defer_no_root_on_failure "$up_output" "client-vpn smoke deferred: client-vpn up requires root privileges"; then
     exit 0
   fi
+  local_up_failure_note="$(derive_up_failure_note "$up_output")"
   if ! attempt_up_retry_with_trust_reset "$up_output"; then
     result_stage="$stage"
-    finish_and_record "fail" "${trust_reset_failure_note:-client-vpn up failed}"
+    finish_and_record "fail" "${trust_reset_failure_note:-$local_up_failure_note}"
     exit 1
   fi
 fi

@@ -7343,6 +7343,10 @@ EOF
   if [[ "$preflight_check" == "1" ]]; then
     preflight_status="ok"
     preflight_rc=0
+    local using_https_endpoints="0"
+    if [[ "$bootstrap_directory" == https://* || "$directory_a" == https://* || "$directory_b" == https://* || "$issuer_url" == https://* || "$entry_url" == https://* || "$exit_url" == https://* ]]; then
+      using_https_endpoints="1"
+    fi
     local preflight_require_root_effective="$preflight_require_root"
     if [[ "$skip_wg" == "1" ]]; then
       preflight_require_root_effective="0"
@@ -7402,6 +7406,15 @@ EOF
       if [[ "$preflight_rc" != "0" ]]; then
         preflight_status="fail"
         final_rc="$preflight_rc"
+        if [[ "$preflight_require_root_effective" == "1" && "${EUID:-$(id -u)}" != "0" ]]; then
+          echo "hint: rerun with sudo (strict preflight requires root for privileged checks)."
+        fi
+        if [[ ! -f "$mtls_ca_file" || ! -f "$mtls_client_cert_file" || ! -f "$mtls_client_key_file" ]]; then
+          echo "hint: strict preflight needs local mTLS files (ca/cert/key); generate or copy them, or pass --mtls-*-file explicitly."
+        fi
+        if [[ "$using_https_endpoints" == "1" ]]; then
+          echo "hint: verify this host can reach the remote HTTPS control-plane endpoints with the same mTLS trust bundle."
+        fi
       fi
     fi
   fi
