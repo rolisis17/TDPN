@@ -91,6 +91,26 @@ print_cmd() {
   printf '\n'
 }
 
+campaign_elapsed_sec() {
+  local started_epoch="${1:-0}"
+  local now_epoch
+  now_epoch="$(date +%s)"
+  if [[ ! "$started_epoch" =~ ^[0-9]+$ ]]; then
+    printf '%s' "0"
+    return 0
+  fi
+  if ((now_epoch < started_epoch)); then
+    printf '%s' "0"
+    return 0
+  fi
+  printf '%s' "$((now_epoch - started_epoch))"
+}
+
+campaign_log_event() {
+  local message="$1"
+  echo "[profile-compare-campaign] $message" | tee -a "$summary_log"
+}
+
 lock_owner_field() {
   local owner_file="$1"
   local key="$2"
@@ -727,6 +747,8 @@ if [[ "$allow_concurrent" != "1" ]]; then
 fi
 
 : >"$summary_log"
+campaign_started_epoch="$(date +%s)"
+campaign_log_event "stage=campaign-start runs_total=$campaign_runs profiles=\"$profiles_csv\" execution_mode=$execution_mode_effective start_local_stack=$start_local_stack_effective elapsed_sec=0"
 
 declare -a compare_summary_paths=()
 
@@ -781,6 +803,7 @@ for ((run_idx = 1; run_idx <= campaign_runs; run_idx++)); do
     compare_cmd+=(--anon-cred "$anon_cred")
   fi
 
+  campaign_log_event "stage=compare-start run_index=$run_idx run_total=$campaign_runs run_id=$run_id elapsed_sec=$(campaign_elapsed_sec "$campaign_started_epoch")"
   start_epoch="$(date +%s)"
   run_rc=0
   if "${compare_cmd[@]}" >"$compare_log" 2>&1; then
@@ -809,6 +832,11 @@ for ((run_idx = 1; run_idx <= campaign_runs; run_idx++)); do
     fi
   fi
 
+  progress_marker=""
+  if [[ -f "$compare_log" ]]; then
+    progress_marker="$(grep -E '\[profile-compare-local\] profile=.*round=' "$compare_log" | tail -n 1 || true)"
+  fi
+
   jq -n \
     --arg run_id "$run_id" \
     --arg status "$run_status" \
@@ -835,15 +863,19 @@ for ((run_idx = 1; run_idx <= campaign_runs; run_idx++)); do
       }
     }' >>"$rows_file"
 
-  echo "[profile-compare-campaign] run=$run_id status=$run_status rc=$run_summary_rc duration_sec=$duration_sec summary_json=$compare_summary log=$compare_log" | tee -a "$summary_log"
+  campaign_log_event "stage=compare-end run_index=$run_idx run_total=$campaign_runs run_id=$run_id status=$run_status rc=$run_summary_rc duration_sec=$duration_sec elapsed_sec=$(campaign_elapsed_sec "$campaign_started_epoch") summary_json=$compare_summary log=$compare_log"
+  if [[ -n "$progress_marker" ]]; then
+    campaign_log_event "stage=compare-progress run_index=$run_idx run_total=$campaign_runs run_id=$run_id marker=\"$progress_marker\" elapsed_sec=$(campaign_elapsed_sec "$campaign_started_epoch")"
+  fi
 
   if ((campaign_pause_sec > 0 && run_idx < campaign_runs)); then
+    campaign_log_event "stage=campaign-pause run_index=$run_idx run_total=$campaign_runs pause_sec=$campaign_pause_sec elapsed_sec=$(campaign_elapsed_sec "$campaign_started_epoch")"
     sleep "$campaign_pause_sec"
   fi
 done
 
 if [[ ${#compare_summary_paths[@]} -eq 0 ]]; then
-  echo "profile-compare-campaign: no valid compare summaries were produced" | tee -a "$summary_log"
+  campaign_log_event "stage=campaign-abort reason=no_valid_compare_summaries elapsed_sec=$(campaign_elapsed_sec "$campaign_started_epoch")"
   exit 1
 fi
 
@@ -878,11 +910,13 @@ for summary_path in "${compare_summary_paths[@]}"; do
 done
 
 trend_rc=0
+campaign_log_event "stage=trend-start reports=${#compare_summary_paths[@]} elapsed_sec=$(campaign_elapsed_sec "$campaign_started_epoch")"
 if "${trend_cmd[@]}" >"$trend_log" 2>&1; then
   trend_rc=0
 else
   trend_rc=$?
 fi
+campaign_log_event "stage=trend-end rc=$trend_rc elapsed_sec=$(campaign_elapsed_sec "$campaign_started_epoch") log=$trend_log"
 
 trend_status=""
 trend_notes=""
@@ -1197,6 +1231,7 @@ echo "summary_log: $summary_log"
 echo "summary_json: $summary_json"
 echo "report_md: $report_md"
 echo "trend_summary_json: $trend_summary_json"
+campaign_log_event "stage=campaign-end status=$status rc=$rc recommended_default_profile=$recommended_default_profile elapsed_sec=$(campaign_elapsed_sec "$campaign_started_epoch") summary_json=$summary_json"
 
 if [[ "$print_summary_json" == "1" ]]; then
   cat "$summary_json"

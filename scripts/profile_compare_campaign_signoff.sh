@@ -40,6 +40,7 @@ Usage:
     [--campaign-subject ID | --campaign-anon-cred TOKEN] \
     [--subject ID | --anon-cred TOKEN] \
     [--campaign-start-local-stack auto|0|1] \
+    [--campaign-timeout-sec N] \
     [--summary-json PATH] \
     [--show-json [0|1]] \
     [--print-summary-json [0|1]]
@@ -57,6 +58,8 @@ Notes:
   - Single-instance lock is enabled by default per reports-dir; bypass only when
     intentionally running concurrent signoff with --allow-concurrent 1 (or
     PROFILE_COMPARE_CAMPAIGN_SIGNOFF_ALLOW_CONCURRENT=1).
+  - Signoff emits periodic heartbeat lines while campaign refresh is running.
+  - --campaign-timeout-sec defaults to 0 (disabled / preserve existing behavior).
   - When refresh inputs point at remote/bootstrap endpoints, the signoff step
     prefers a docker-style refresh to avoid local root-only bootstrap failures.
   - Keep --allow-summary-overwrite 0 in normal operation to avoid output
@@ -170,6 +173,79 @@ redact_sensitive_cmd_line() {
   printf '%s' "$line"
 }
 
+run_campaign_refresh_monitored() {
+  local attempt_label="$1"
+  local log_path="$2"
+  shift 2
+  local -a cmd=("$@")
+  local start_sec now_sec elapsed_sec next_heartbeat_sec
+  local heartbeat_count_local=0
+  local timeout_triggered_local=0
+  local pid=""
+  local cmd_rc=0
+
+  campaign_timeout_triggered="0"
+  campaign_duration_sec="0"
+  campaign_failure_reason=""
+  campaign_heartbeat_count="0"
+
+  echo "[profile-compare-campaign-signoff] $(date -u +%Y-%m-%dT%H:%M:%SZ) campaign refresh started attempt=$attempt_label timeout_sec=$campaign_timeout_sec log=$log_path"
+  "${cmd[@]}" >"$log_path" 2>&1 &
+  pid=$!
+  start_sec="$(date +%s)"
+  next_heartbeat_sec=$((start_sec + campaign_heartbeat_interval_sec))
+
+  while kill -0 "$pid" >/dev/null 2>&1; do
+    sleep 1
+    now_sec="$(date +%s)"
+    elapsed_sec=$((now_sec - start_sec))
+
+    if (( now_sec >= next_heartbeat_sec )); then
+      heartbeat_count_local=$((heartbeat_count_local + 1))
+      echo "[profile-compare-campaign-signoff] $(date -u +%Y-%m-%dT%H:%M:%SZ) campaign refresh heartbeat attempt=$attempt_label elapsed_sec=$elapsed_sec timeout_sec=$campaign_timeout_sec log=$log_path"
+      next_heartbeat_sec=$((now_sec + campaign_heartbeat_interval_sec))
+    fi
+
+    if (( campaign_timeout_sec > 0 && elapsed_sec >= campaign_timeout_sec )); then
+      timeout_triggered_local=1
+      campaign_timeout_triggered="1"
+      campaign_failure_reason="campaign refresh timed out after ${campaign_timeout_sec}s (attempt=${attempt_label})"
+      echo "[profile-compare-campaign-signoff] $(date -u +%Y-%m-%dT%H:%M:%SZ) campaign refresh timeout attempt=$attempt_label elapsed_sec=$elapsed_sec timeout_sec=$campaign_timeout_sec log=$log_path"
+      kill "$pid" >/dev/null 2>&1 || true
+      sleep 1
+      if kill -0 "$pid" >/dev/null 2>&1; then
+        kill -9 "$pid" >/dev/null 2>&1 || true
+      fi
+      break
+    fi
+  done
+
+  if [[ "$timeout_triggered_local" == "1" ]]; then
+    wait "$pid" >/dev/null 2>&1 || true
+    campaign_duration_sec=$(( $(date +%s) - start_sec ))
+    campaign_heartbeat_count="$heartbeat_count_local"
+    return 124
+  fi
+
+  if wait "$pid"; then
+    cmd_rc=0
+  else
+    cmd_rc=$?
+  fi
+
+  campaign_duration_sec=$(( $(date +%s) - start_sec ))
+  campaign_heartbeat_count="$heartbeat_count_local"
+
+  if [[ "$cmd_rc" == "0" ]]; then
+    echo "[profile-compare-campaign-signoff] $(date -u +%Y-%m-%dT%H:%M:%SZ) campaign refresh completed attempt=$attempt_label duration_sec=$campaign_duration_sec heartbeats=$campaign_heartbeat_count log=$log_path"
+  else
+    campaign_failure_reason="campaign refresh command failed rc=$cmd_rc (attempt=${attempt_label})"
+    echo "[profile-compare-campaign-signoff] $(date -u +%Y-%m-%dT%H:%M:%SZ) campaign refresh failed attempt=$attempt_label rc=$cmd_rc duration_sec=$campaign_duration_sec heartbeats=$campaign_heartbeat_count log=$log_path"
+  fi
+
+  return "$cmd_rc"
+}
+
 need_cmd jq
 need_cmd date
 need_cmd mktemp
@@ -186,6 +262,8 @@ allow_summary_overwrite="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_ALLOW_SUMMARY_OVERWR
 summary_json="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_SUMMARY_JSON:-}"
 show_json="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_SHOW_JSON:-0}"
 print_summary_json="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_PRINT_SUMMARY_JSON:-0}"
+campaign_timeout_sec="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_TIMEOUT_SEC:-0}"
+campaign_heartbeat_interval_sec="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_HEARTBEAT_INTERVAL_SEC:-15}"
 
 require_status_pass="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REQUIRE_STATUS_PASS:-}"
 require_trend_status_pass="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REQUIRE_TREND_STATUS_PASS:-}"
@@ -373,6 +451,10 @@ while [[ $# -gt 0 ]]; do
       campaign_start_local_stack="${2:-}"
       shift 2
       ;;
+    --campaign-timeout-sec)
+      campaign_timeout_sec="${2:-}"
+      shift 2
+      ;;
     --summary-json)
       summary_json="${2:-}"
       shift 2
@@ -434,6 +516,18 @@ if [[ -n "$campaign_execution_mode" && "$campaign_execution_mode" != "docker" &&
 fi
 if [[ -n "$campaign_discovery_wait_sec" && ! "$campaign_discovery_wait_sec" =~ ^[0-9]+$ ]]; then
   echo "--campaign-discovery-wait-sec must be an integer"
+  exit 2
+fi
+if [[ -n "$campaign_timeout_sec" && ! "$campaign_timeout_sec" =~ ^[0-9]+$ ]]; then
+  echo "--campaign-timeout-sec must be a non-negative integer"
+  exit 2
+fi
+if [[ -n "$campaign_heartbeat_interval_sec" && ! "$campaign_heartbeat_interval_sec" =~ ^[0-9]+$ ]]; then
+  echo "PROFILE_COMPARE_CAMPAIGN_SIGNOFF_HEARTBEAT_INTERVAL_SEC must be a positive integer"
+  exit 2
+fi
+if (( campaign_heartbeat_interval_sec < 1 )); then
+  echo "PROFILE_COMPARE_CAMPAIGN_SIGNOFF_HEARTBEAT_INTERVAL_SEC must be >= 1"
   exit 2
 fi
 if [[ -n "$campaign_start_local_stack" ]]; then
@@ -615,6 +709,10 @@ campaign_cmd_line_initial=""
 campaign_cmd_line_fallback=""
 campaign_cmd_line_effective=""
 campaign_summary_reused="0"
+campaign_timeout_triggered="0"
+campaign_duration_sec="0"
+campaign_failure_reason=""
+campaign_heartbeat_count="0"
 
 campaign_fallback_eligible="0"
 campaign_fallback_attempted="0"
@@ -682,7 +780,7 @@ campaign_cmd_line_effective="$campaign_cmd_line"
 
 if [[ "$refresh_campaign" == "1" ]]; then
   campaign_attempted=1
-  if "${campaign_cmd[@]}" >"$campaign_log_initial" 2>&1; then
+  if run_campaign_refresh_monitored "initial" "$campaign_log_initial" "${campaign_cmd[@]}"; then
     campaign_status="pass"
     campaign_rc=0
     campaign_log_effective="$campaign_log_initial"
@@ -713,7 +811,7 @@ if [[ "$refresh_campaign" == "1" ]]; then
         campaign_cmd_line_effective="$campaign_cmd_line"
         campaign_log_effective="$campaign_log_fallback"
 
-        if "${campaign_cmd[@]}" >"$campaign_log_fallback" 2>&1; then
+        if run_campaign_refresh_monitored "fallback" "$campaign_log_fallback" "${campaign_cmd[@]}"; then
           campaign_status="pass"
           campaign_rc=0
         else
@@ -950,6 +1048,8 @@ jq -n \
   --arg campaign_anon_cred_effective "$campaign_anon_cred_effective" \
   --arg campaign_start_local_stack "$campaign_start_local_stack" \
   --arg campaign_start_local_stack_effective "$campaign_start_local_stack_effective" \
+  --arg campaign_timeout_sec "$campaign_timeout_sec" \
+  --arg campaign_heartbeat_interval_sec "$campaign_heartbeat_interval_sec" \
   --arg campaign_fallback_eligible "$campaign_fallback_eligible" \
   --arg campaign_fallback_attempted "$campaign_fallback_attempted" \
   --arg campaign_fallback_triggered "$campaign_fallback_triggered" \
@@ -962,6 +1062,10 @@ jq -n \
   --argjson campaign_attempted "$campaign_attempted" \
   --arg campaign_status "$campaign_status" \
   --argjson campaign_rc "$campaign_rc" \
+  --arg campaign_timeout_triggered "$campaign_timeout_triggered" \
+  --arg campaign_duration_sec "$campaign_duration_sec" \
+  --arg campaign_failure_reason "$campaign_failure_reason" \
+  --arg campaign_heartbeat_count "$campaign_heartbeat_count" \
   --argjson check_attempted "$check_attempted" \
   --arg check_status "$check_status" \
   --argjson check_rc "$check_rc" \
@@ -1021,6 +1125,10 @@ jq -n \
         anon_cred_configured: ($campaign_anon_cred_effective != ""),
         start_local_stack: (if $campaign_start_local_stack_effective == "" then null else $campaign_start_local_stack_effective end)
       },
+      campaign_refresh_runtime: {
+        timeout_sec: ($campaign_timeout_sec | tonumber),
+        heartbeat_interval_sec: ($campaign_heartbeat_interval_sec | tonumber)
+      },
       campaign_refresh_fallback: {
         eligible: ($campaign_fallback_eligible == "1"),
         attempted: ($campaign_fallback_attempted == "1"),
@@ -1040,6 +1148,11 @@ jq -n \
         rc: $campaign_rc,
         command: $campaign_cmd_effective,
         log: $campaign_log_effective,
+        timeout_sec: ($campaign_timeout_sec | tonumber),
+        timed_out: ($campaign_timeout_triggered == "1"),
+        duration_sec: ($campaign_duration_sec | tonumber),
+        heartbeat_count: ($campaign_heartbeat_count | tonumber),
+        failure_reason: (if $campaign_failure_reason == "" then null else $campaign_failure_reason end),
         initial_command: $campaign_cmd_initial,
         initial_log: $campaign_log_initial,
         fallback_command: (if $campaign_cmd_fallback == "" then null else $campaign_cmd_fallback end),
@@ -1085,6 +1198,9 @@ fi
 echo "[profile-compare-campaign-signoff] status=$status final_rc=$final_rc decision=$decision recommended_profile=${recommended_profile:-unset} summary_json=$summary_json"
 if [[ "$status" != "ok" ]]; then
   echo "[profile-compare-campaign-signoff] failure_stage=$failure_stage campaign_log=$campaign_log_effective check_log=$check_log"
+  if [[ "$failure_stage" == "campaign" && -n "$campaign_failure_reason" ]]; then
+    echo "[profile-compare-campaign-signoff] campaign_failure_reason=$campaign_failure_reason"
+  fi
 fi
 if [[ "$show_json" == "1" ]]; then
   cat "$summary_json"

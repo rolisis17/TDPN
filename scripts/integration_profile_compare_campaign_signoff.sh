@@ -161,7 +161,17 @@ if ! rg -q '\[profile-compare-campaign-signoff\] status=ok final_rc=0 decision=G
   cat /tmp/integration_profile_compare_campaign_signoff_success.log
   exit 1
 fi
-if ! jq -e '.status == "ok" and .final_rc == 0 and .decision.decision == "GO" and .stages.campaign.status == "pass" and .stages.campaign_check.status == "pass" and .stages.campaign.attempted == true and .stages.campaign_check.attempted == true and .inputs.campaign_refresh_overrides.execution_mode == "docker" and .inputs.campaign_refresh_overrides.directory_urls == "http://127.0.0.1:18081,http://127.0.0.1:28081" and .inputs.campaign_refresh_overrides.bootstrap_directory == "http://127.0.0.1:18081" and .inputs.campaign_refresh_overrides.discovery_wait_sec == 7 and .inputs.campaign_refresh_overrides.issuer_url == "http://127.0.0.1:18082" and .inputs.campaign_refresh_overrides.entry_url == "http://127.0.0.1:18083" and .inputs.campaign_refresh_overrides.exit_url == "http://127.0.0.1:18084" and .inputs.campaign_refresh_overrides.subject_configured == true and .inputs.campaign_refresh_overrides.anon_cred_configured == false and .inputs.campaign_refresh_overrides.start_local_stack == "0" and .inputs.campaign_refresh_overrides_effective.subject_configured == true and .inputs.campaign_refresh_overrides_effective.anon_cred_configured == false' "$SUCCESS_SUMMARY" >/dev/null 2>&1; then
+if ! rg -q 'campaign refresh started attempt=initial' /tmp/integration_profile_compare_campaign_signoff_success.log; then
+  echo "expected campaign refresh start line not found"
+  cat /tmp/integration_profile_compare_campaign_signoff_success.log
+  exit 1
+fi
+if ! rg -q 'campaign refresh completed attempt=initial' /tmp/integration_profile_compare_campaign_signoff_success.log; then
+  echo "expected campaign refresh completion line not found"
+  cat /tmp/integration_profile_compare_campaign_signoff_success.log
+  exit 1
+fi
+if ! jq -e '.status == "ok" and .final_rc == 0 and .decision.decision == "GO" and .stages.campaign.status == "pass" and .stages.campaign_check.status == "pass" and .stages.campaign.attempted == true and .stages.campaign_check.attempted == true and .stages.campaign.timed_out == false and .stages.campaign.timeout_sec == 0 and .inputs.campaign_refresh_runtime.timeout_sec == 0 and .inputs.campaign_refresh_runtime.heartbeat_interval_sec >= 1 and .inputs.campaign_refresh_overrides.execution_mode == "docker" and .inputs.campaign_refresh_overrides.directory_urls == "http://127.0.0.1:18081,http://127.0.0.1:28081" and .inputs.campaign_refresh_overrides.bootstrap_directory == "http://127.0.0.1:18081" and .inputs.campaign_refresh_overrides.discovery_wait_sec == 7 and .inputs.campaign_refresh_overrides.issuer_url == "http://127.0.0.1:18082" and .inputs.campaign_refresh_overrides.entry_url == "http://127.0.0.1:18083" and .inputs.campaign_refresh_overrides.exit_url == "http://127.0.0.1:18084" and .inputs.campaign_refresh_overrides.subject_configured == true and .inputs.campaign_refresh_overrides.anon_cred_configured == false and .inputs.campaign_refresh_overrides.start_local_stack == "0" and .inputs.campaign_refresh_overrides_effective.subject_configured == true and .inputs.campaign_refresh_overrides_effective.anon_cred_configured == false' "$SUCCESS_SUMMARY" >/dev/null 2>&1; then
   echo "success summary JSON missing expected fields"
   cat "$SUCCESS_SUMMARY"
   exit 1
@@ -499,6 +509,51 @@ for expected in '--execution-mode docker' '--start-local-stack 0'; do
     exit 1
   fi
 done
+
+echo "[profile-compare-campaign-signoff] campaign timeout fail-close with heartbeat diagnostics"
+: >"$SIGNOFF_CAPTURE"
+CAMPAIGN_TIMEOUT_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_campaign_timeout.json"
+set +e
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_COMPARE_CAMPAIGN_SCRIPT="$FAKE_CAMPAIGN" \
+PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT="$FAKE_CHECK" \
+PROFILE_COMPARE_CAMPAIGN_SIGNOFF_HEARTBEAT_INTERVAL_SEC=1 \
+FAKE_CAMPAIGN_SLEEP_SEC=4 \
+FAKE_CAMPAIGN_RC=0 \
+FAKE_CHECK_RC=0 \
+./scripts/profile_compare_campaign_signoff.sh \
+  --reports-dir "$TMP_DIR/reports_campaign_timeout" \
+  --refresh-campaign 1 \
+  --campaign-timeout-sec 2 \
+  --summary-json "$CAMPAIGN_TIMEOUT_SUMMARY" >/tmp/integration_profile_compare_campaign_signoff_campaign_timeout.log 2>&1
+rc_campaign_timeout=$?
+set -e
+if [[ "$rc_campaign_timeout" -ne 124 ]]; then
+  echo "expected rc=124 when campaign refresh times out"
+  cat /tmp/integration_profile_compare_campaign_signoff_campaign_timeout.log
+  exit 1
+fi
+for expected in \
+  'campaign refresh started attempt=initial' \
+  'campaign refresh heartbeat attempt=initial' \
+  'campaign refresh timeout attempt=initial' \
+  'campaign_failure_reason=campaign refresh timed out after 2s'; do
+  if ! rg -q -- "$expected" /tmp/integration_profile_compare_campaign_signoff_campaign_timeout.log; then
+    echo "expected timeout diagnostic output missing: $expected"
+    cat /tmp/integration_profile_compare_campaign_signoff_campaign_timeout.log
+    exit 1
+  fi
+done
+if [[ "$(wc -l < "$SIGNOFF_CAPTURE")" -ne 1 ]]; then
+  echo "campaign-timeout path should not run check stage"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+if ! jq -e '.status == "fail" and .final_rc == 124 and .failure_stage == "campaign" and .inputs.campaign_refresh_runtime.timeout_sec == 2 and .inputs.campaign_refresh_runtime.heartbeat_interval_sec == 1 and .stages.campaign.status == "fail" and .stages.campaign.timed_out == true and .stages.campaign.timeout_sec == 2 and .stages.campaign.duration_sec >= 2 and .stages.campaign.heartbeat_count >= 1 and (.stages.campaign.failure_reason | type == "string") and (.stages.campaign.failure_reason | contains("timed out")) and .stages.campaign_check.attempted == false' "$CAMPAIGN_TIMEOUT_SUMMARY" >/dev/null 2>&1; then
+  echo "campaign-timeout summary JSON missing expected fields"
+  cat "$CAMPAIGN_TIMEOUT_SUMMARY"
+  exit 1
+fi
 
 echo "[profile-compare-campaign-signoff] campaign failure fail-close"
 : >"$SIGNOFF_CAPTURE"
@@ -864,5 +919,35 @@ for expected in '--reports-dir /tmp/reports' '--refresh-campaign 0' '--campaign-
     exit 1
   fi
 done
+
+echo "[profile-compare-campaign-signoff] easy_node forwarding aliases"
+FORWARD_CAPTURE_FILE="$FORWARD_CAPTURE" \
+PROFILE_COMPARE_CAMPAIGN_SIGNOFF_SCRIPT="$FAKE_FORWARD" \
+./scripts/easy_node.sh profile-compare-campaign-signoff \
+  --reports-dir /tmp/reports-alias \
+  --refresh-campaign 1 \
+  --subject inv-forward-alias \
+  --anon-cred anon-forward-alias \
+  --summary-json /tmp/signoff-alias.json \
+  --print-summary-json 1
+
+alias_forward_line="$(rg '^profile-compare-campaign-signoff ' "$FORWARD_CAPTURE" | tail -n 1 || true)"
+if [[ -z "$alias_forward_line" ]]; then
+  echo "missing easy_node alias forwarding capture"
+  cat "$FORWARD_CAPTURE"
+  exit 1
+fi
+for expected in '--reports-dir /tmp/reports-alias' '--refresh-campaign 1' '--campaign-subject inv-forward-alias' '--campaign-anon-cred anon-forward-alias' '--summary-json /tmp/signoff-alias.json' '--print-summary-json 1'; do
+  if ! grep -F -- "$expected" <<<"$alias_forward_line" >/dev/null; then
+    echo "easy_node alias forwarding missing $expected"
+    cat "$FORWARD_CAPTURE"
+    exit 1
+  fi
+done
+if grep -F -- '--subject inv-forward-alias' <<<"$alias_forward_line" >/dev/null || grep -F -- '--anon-cred anon-forward-alias' <<<"$alias_forward_line" >/dev/null; then
+  echo "easy_node alias forwarding should normalize subject/anon-cred to campaign-prefixed flags"
+  cat "$FORWARD_CAPTURE"
+  exit 1
+fi
 
 echo "profile compare campaign signoff integration check ok"

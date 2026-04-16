@@ -54,6 +54,8 @@ count=$((count + 1))
 printf '%s\n' "$count" >"${FAKE_LOCAL_COUNTER_FILE:?}"
 
 printf 'run=%s summary=%s report=%s\n' "$count" "$summary_json" "$report_md" >>"${FAKE_LOCAL_CAPTURE_FILE:?}"
+echo "[profile-compare-local] profile=balanced round=1 status=pass rc=0 duration_sec=5"
+echo "[profile-compare-local] profile=speed round=2 status=pass rc=0 duration_sec=6"
 
 status="pass"
 rc=0
@@ -248,6 +250,37 @@ if ! rg -q 'profile-compare-campaign: status=pass' /tmp/integration_profile_comp
   cat /tmp/integration_profile_compare_campaign_success.log
   exit 1
 fi
+for marker in \
+  '[profile-compare-campaign] stage=campaign-start' \
+  '[profile-compare-campaign] stage=compare-start run_index=1 run_total=3 run_id=01' \
+  '[profile-compare-campaign] stage=compare-end run_index=1 run_total=3 run_id=01' \
+  '[profile-compare-campaign] stage=compare-progress run_index=1 run_total=3 run_id=01 marker="[profile-compare-local] profile=speed round=2 status=pass rc=0 duration_sec=6"' \
+  '[profile-compare-campaign] stage=trend-start reports=3' \
+  '[profile-compare-campaign] stage=trend-end rc=0' \
+  '[profile-compare-campaign] stage=campaign-end status=pass rc=0'; do
+  if ! rg -Fq -- "$marker" /tmp/integration_profile_compare_campaign_success.log; then
+    echo "expected progress marker missing from stdout: $marker"
+    cat /tmp/integration_profile_compare_campaign_success.log
+    exit 1
+  fi
+done
+SUCCESS_SUMMARY_LOG="$(jq -r '.artifacts.summary_log' "$SUCCESS_JSON")"
+if [[ -z "$SUCCESS_SUMMARY_LOG" || ! -f "$SUCCESS_SUMMARY_LOG" ]]; then
+  echo "expected summary log artifact path in campaign summary"
+  cat "$SUCCESS_JSON"
+  exit 1
+fi
+for marker in \
+  '[profile-compare-campaign] stage=campaign-start' \
+  '[profile-compare-campaign] stage=compare-progress run_index=1 run_total=3 run_id=01 marker="[profile-compare-local] profile=speed round=2 status=pass rc=0 duration_sec=6"' \
+  '[profile-compare-campaign] stage=trend-end rc=0' \
+  '[profile-compare-campaign] stage=campaign-end status=pass rc=0'; do
+  if ! rg -Fq -- "$marker" "$SUCCESS_SUMMARY_LOG"; then
+    echo "expected progress marker missing from summary log artifact: $marker"
+    cat "$SUCCESS_SUMMARY_LOG"
+    exit 1
+  fi
+done
 if ! jq -e '
   .status == "pass"
   and .rc == 0
