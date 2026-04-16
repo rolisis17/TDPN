@@ -383,14 +383,16 @@ cat >"$PHASE7_MAINNET_CUTOVER_CHECK_SUMMARY_JSON" <<'EOF_PHASE7_CHECK_SUMMARY'
     "run": true,
     "handoff_check": true,
     "handoff_run": true,
-    "mainnet_activation_gate_go": true
+    "mainnet_activation_gate_go": true,
+    "bootstrap_governance_graduation_gate_go": true
   },
   "handoff": {
     "check": true,
     "run": true,
     "handoff_check": true,
     "handoff_run": true,
-    "mainnet_activation_gate_go": true
+    "mainnet_activation_gate_go": true,
+    "bootstrap_governance_graduation_gate_go": true
   }
 }
 EOF_PHASE7_CHECK_SUMMARY
@@ -415,7 +417,8 @@ cat >"$PHASE7_MAINNET_CUTOVER_RUN_SUMMARY_JSON" <<'EOF_PHASE7_RUN_SUMMARY'
         "run": true,
         "handoff_check": true,
         "handoff_run": true,
-        "mainnet_activation_gate_go": true
+        "mainnet_activation_gate_go": true,
+        "bootstrap_governance_graduation_gate_go": true
       }
     }
   },
@@ -424,14 +427,16 @@ cat >"$PHASE7_MAINNET_CUTOVER_RUN_SUMMARY_JSON" <<'EOF_PHASE7_RUN_SUMMARY'
     "run": true,
     "handoff_check": true,
     "handoff_run": true,
-    "mainnet_activation_gate_go": true
+    "mainnet_activation_gate_go": true,
+    "bootstrap_governance_graduation_gate_go": true
   },
   "handoff": {
     "check": true,
     "run": true,
     "handoff_check": true,
     "handoff_run": true,
-    "mainnet_activation_gate_go": true
+    "mainnet_activation_gate_go": true,
+    "bootstrap_governance_graduation_gate_go": true
   }
 }
 EOF_PHASE7_RUN_SUMMARY
@@ -450,14 +455,16 @@ cat >"$PHASE7_MAINNET_CUTOVER_HANDOFF_CHECK_SUMMARY_JSON" <<'EOF_PHASE7_HANDOFF_
     "run": true,
     "handoff_check": true,
     "handoff_run": true,
-    "mainnet_activation_gate_go": true
+    "mainnet_activation_gate_go": true,
+    "bootstrap_governance_graduation_gate_go": true
   },
   "signals": {
     "check": true,
     "run": true,
     "handoff_check": true,
     "handoff_run": true,
-    "mainnet_activation_gate_go": true
+    "mainnet_activation_gate_go": true,
+    "bootstrap_governance_graduation_gate_go": true
   },
   "decision": {
     "pass": true,
@@ -478,6 +485,7 @@ cat >"$PHASE7_MAINNET_CUTOVER_HANDOFF_RUN_SUMMARY_JSON" <<'EOF_PHASE7_HANDOFF_RU
   "rc": 0,
   "signals": {
     "mainnet_activation_gate_go_ok": true,
+    "bootstrap_governance_graduation_gate_go_ok": true,
     "cosmos_module_coverage_floor_ok": true,
     "cosmos_keeper_coverage_floor_ok": true,
     "cosmos_app_coverage_floor_ok": true,
@@ -517,7 +525,8 @@ cat >"$PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_JSON" <<'EOF_PHASE7_SUMMARY_REPORT'
     "tdpnd_grpc_live_smoke_ok": true,
     "module_tx_surface_ok": true,
     "tdpnd_grpc_auth_live_smoke_ok": true,
-    "tdpnd_comet_runtime_smoke_ok": true
+    "tdpnd_comet_runtime_smoke_ok": true,
+    "bootstrap_governance_graduation_gate_go_ok": true
   },
   "summaries": {
     "check": {
@@ -530,6 +539,7 @@ cat >"$PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_JSON" <<'EOF_PHASE7_SUMMARY_REPORT'
       "raw_rc": 0,
       "signal_snapshot": {
         "mainnet_activation_gate_go": true,
+        "bootstrap_governance_graduation_gate_go": true,
         "tdpnd_grpc_live_smoke_ok": true,
         "module_tx_surface_ok": true,
         "tdpnd_grpc_auth_live_smoke_ok": true,
@@ -551,6 +561,7 @@ cat >"$PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_JSON" <<'EOF_PHASE7_SUMMARY_REPORT'
       "raw_rc": 0,
       "signal_snapshot": {
         "mainnet_activation_gate_go": true,
+        "bootstrap_governance_graduation_gate_go": true,
         "tdpnd_grpc_live_smoke_ok": true,
         "module_tx_surface_ok": true,
         "tdpnd_grpc_auth_live_smoke_ok": true,
@@ -572,6 +583,7 @@ cat >"$PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_JSON" <<'EOF_PHASE7_SUMMARY_REPORT'
       "raw_rc": 0,
       "signal_snapshot": {
         "mainnet_activation_gate_go": true,
+        "bootstrap_governance_graduation_gate_go": true,
         "tdpnd_grpc_live_smoke_ok": true,
         "module_tx_surface_ok": true,
         "tdpnd_grpc_auth_live_smoke_ok": true,
@@ -593,6 +605,7 @@ cat >"$PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_JSON" <<'EOF_PHASE7_SUMMARY_REPORT'
       "raw_rc": 0,
       "signal_snapshot": {
         "mainnet_activation_gate_go": true,
+        "bootstrap_governance_graduation_gate_go": true,
         "tdpnd_grpc_live_smoke_ok": true,
         "module_tx_surface_ok": true,
         "tdpnd_grpc_auth_live_smoke_ok": true,
@@ -721,9 +734,19 @@ if ! jq -e '
   and .blockchain_track.status == "parallel-cosmos-build"
   and .blockchain_track.policy == "canonical execution plan: docs/full-execution-plan-2026-2027.md"
   and (.blockchain_track.recommendation | contains("Cosmos-first blockchain track"))
+  and .blockchain_track.mainnet_activation_missing_metrics_action.available == false
+  and .blockchain_track.mainnet_activation_missing_metrics_action.id == null
+  and .blockchain_track.mainnet_activation_missing_metrics_action.reason == null
+  and .blockchain_track.mainnet_activation_missing_metrics_action.normalize_command == null
+  and .blockchain_track.mainnet_activation_missing_metrics_action.rerun_bundle_command == null
+  and .blockchain_track.mainnet_activation_missing_metrics_action.template_command == null
+  and .blockchain_track.mainnet_activation_missing_metrics_action.cycle_command == null
   and .blockchain_track.phase7_mainnet_cutover_summary_report.available == true
   and .blockchain_track.phase7_mainnet_cutover_summary_report.status == "pass"
-  and .blockchain_track.phase7_mainnet_cutover_summary_report.mainnet_activation_gate_go_ok == true
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.mainnet_activation_gate_go_ok == false
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.mainnet_activation_gate_go_ok_source == "dedicated-mainnet-activation-gate-summary"
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.bootstrap_governance_graduation_gate_go_ok == true
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.bootstrap_governance_graduation_gate_go_ok_source == "dedicated-bootstrap-governance-graduation-gate-summary"
   and .blockchain_track.phase7_mainnet_cutover_summary_report.tdpnd_grpc_live_smoke_ok == true
   and .blockchain_track.phase7_mainnet_cutover_summary_report.module_tx_surface_ok == true
   and .blockchain_track.phase7_mainnet_cutover_summary_report.tdpnd_grpc_auth_live_smoke_ok == true
@@ -837,6 +860,16 @@ if ! rg -q '\[roadmap-progress-report\] refresh_step=manual_validation_report st
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log
   exit 1
 fi
+if ! rg -q 'phase7_mainnet_cutover_summary_status=.*mainnet_activation_gate_go_ok=false.*mainnet_activation_gate_go_ok_source=dedicated-mainnet-activation-gate-summary.*bootstrap_governance_graduation_gate_go_ok=true.*bootstrap_governance_graduation_gate_go_ok_source=dedicated-bootstrap-governance-graduation-gate-summary' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
+  echo "expected phase7 heartbeat log line to include dedicated gate-aligned signals"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log
+  exit 1
+fi
+if ! rg -q 'blockchain_mainnet_activation_missing_metrics_action_available=false' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
+  echo "expected neutral blockchain missing-metrics actionable log line in default success path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log
+  exit 1
+fi
 if ! rg -q 'manual-validation-report --profile-compare-signoff-summary-json' "$CAPTURE"; then
   echo "expected manual-validation-report refresh call missing"
   cat "$CAPTURE"
@@ -886,8 +919,23 @@ if [[ "$PHASE7_OUTPUT_PRESENT" == "1" ]]; then
     exit 1
   fi
 fi
-if ! rg -q 'Phase-7 mainnet cutover mainnet_activation_gate_go_ok: true' "$REPORT_MD"; then
+if ! rg -q 'Phase-7 mainnet cutover mainnet_activation_gate_go_ok: false' "$REPORT_MD"; then
   echo "report markdown missing phase7 mainnet_activation_gate_go_ok line"
+  cat "$REPORT_MD"
+  exit 1
+fi
+if ! rg -q 'Phase-7 mainnet cutover mainnet_activation_gate_go_ok source: dedicated-mainnet-activation-gate-summary' "$REPORT_MD"; then
+  echo "report markdown missing phase7 mainnet_activation_gate_go_ok source line"
+  cat "$REPORT_MD"
+  exit 1
+fi
+if ! rg -q 'Phase-7 mainnet cutover bootstrap_governance_graduation_gate_go_ok: true' "$REPORT_MD"; then
+  echo "report markdown missing phase7 bootstrap_governance_graduation_gate_go_ok line"
+  cat "$REPORT_MD"
+  exit 1
+fi
+if ! rg -q 'Phase-7 mainnet cutover bootstrap_governance_graduation_gate_go_ok source: dedicated-bootstrap-governance-graduation-gate-summary' "$REPORT_MD"; then
+  echo "report markdown missing phase7 bootstrap_governance_graduation_gate_go_ok source line"
   cat "$REPORT_MD"
   exit 1
 fi
@@ -936,6 +984,11 @@ if ! rg -q 'Mainnet activation gate|mainnet_activation_gate' "$REPORT_MD"; then
   cat "$REPORT_MD"
   exit 1
 fi
+if ! rg -q 'Mainnet activation missing-metrics action available: false' "$REPORT_MD"; then
+  echo "report markdown missing neutral mainnet activation missing-metrics actionable line"
+  cat "$REPORT_MD"
+  exit 1
+fi
 if ! rg -q 'Bootstrap governance graduation gate|bootstrap_governance_graduation_gate' "$REPORT_MD"; then
   echo "report markdown missing bootstrap governance graduation gate line"
   cat "$REPORT_MD"
@@ -965,6 +1018,9 @@ if ! jq -e '
   .blockchain_track.phase7_mainnet_cutover_summary_report.available == false
   and .blockchain_track.phase7_mainnet_cutover_summary_report.status == "missing"
   and .blockchain_track.phase7_mainnet_cutover_summary_report.mainnet_activation_gate_go_ok == null
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.mainnet_activation_gate_go_ok_source == null
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.bootstrap_governance_graduation_gate_go_ok == null
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.bootstrap_governance_graduation_gate_go_ok_source == null
   and .blockchain_track.phase7_mainnet_cutover_summary_report.tdpnd_grpc_live_smoke_ok == null
   and .blockchain_track.phase7_mainnet_cutover_summary_report.module_tx_surface_ok == null
   and .blockchain_track.phase7_mainnet_cutover_summary_report.tdpnd_grpc_auth_live_smoke_ok == null
@@ -983,6 +1039,13 @@ if ! jq -e '
   and (.blockchain_track.mainnet_activation_gate.source_paths | length) == 0
   and .blockchain_track.mainnet_activation_gate.input_summary_json == "'"$ROADMAP_PROGRESS_MISSING_BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SUMMARY_JSON"'"
   and .blockchain_track.mainnet_activation_gate.source_summary_json == null
+  and .blockchain_track.mainnet_activation_missing_metrics_action.available == false
+  and .blockchain_track.mainnet_activation_missing_metrics_action.id == null
+  and .blockchain_track.mainnet_activation_missing_metrics_action.reason == null
+  and .blockchain_track.mainnet_activation_missing_metrics_action.normalize_command == null
+  and .blockchain_track.mainnet_activation_missing_metrics_action.rerun_bundle_command == null
+  and .blockchain_track.mainnet_activation_missing_metrics_action.template_command == null
+  and .blockchain_track.mainnet_activation_missing_metrics_action.cycle_command == null
 ' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_missing_summary.json" >/dev/null; then
   echo "missing gate summary JSON missing expected fallback fields"
   cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_missing_summary.json"
@@ -1037,6 +1100,9 @@ fi
 if ! jq -e --arg src "$PHASE7_MAINNET_CUTOVER_CHECK_SUMMARY_JSON" '
   .blockchain_track.phase7_mainnet_cutover_summary_report.available == true
   and .blockchain_track.phase7_mainnet_cutover_summary_report.mainnet_activation_gate_go_ok == true
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.mainnet_activation_gate_go_ok_source == "phase7-mainnet-cutover-summary-signal"
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.bootstrap_governance_graduation_gate_go_ok == true
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.bootstrap_governance_graduation_gate_go_ok_source == "phase7-mainnet-cutover-summary-signal"
   and .blockchain_track.phase7_mainnet_cutover_summary_report.tdpnd_grpc_live_smoke_ok == null
   and .blockchain_track.phase7_mainnet_cutover_summary_report.module_tx_surface_ok == null
   and .blockchain_track.phase7_mainnet_cutover_summary_report.tdpnd_grpc_auth_live_smoke_ok == null
@@ -1055,6 +1121,23 @@ if ! jq -e --arg src "$PHASE7_MAINNET_CUTOVER_CHECK_SUMMARY_JSON" '
   and .blockchain_track.mainnet_activation_gate.source_summary_json == $src
   and .blockchain_track.mainnet_activation_gate.source_summary_kind == "phase7-mainnet-cutover-signal"
   and ((.blockchain_track.mainnet_activation_gate.source_paths // []) | index($src)) != null
+  and .blockchain_track.mainnet_activation_missing_metrics_action.available == false
+  and .blockchain_track.mainnet_activation_missing_metrics_action.id == null
+  and .blockchain_track.mainnet_activation_missing_metrics_action.reason == null
+  and .blockchain_track.mainnet_activation_missing_metrics_action.normalize_command == null
+  and .blockchain_track.mainnet_activation_missing_metrics_action.rerun_bundle_command == null
+  and .blockchain_track.mainnet_activation_missing_metrics_action.template_command == null
+  and .blockchain_track.mainnet_activation_missing_metrics_action.cycle_command == null
+  and .blockchain_track.bootstrap_governance_graduation_gate.available == true
+  and .blockchain_track.bootstrap_governance_graduation_gate.status == "GO"
+  and .blockchain_track.bootstrap_governance_graduation_gate.decision == "GO"
+  and .blockchain_track.bootstrap_governance_graduation_gate.go == true
+  and .blockchain_track.bootstrap_governance_graduation_gate.no_go == false
+  and (.blockchain_track.bootstrap_governance_graduation_gate.reasons | length) == 0
+  and .blockchain_track.bootstrap_governance_graduation_gate.input_summary_json == $src
+  and .blockchain_track.bootstrap_governance_graduation_gate.source_summary_json == $src
+  and .blockchain_track.bootstrap_governance_graduation_gate.source_summary_kind == "phase7-mainnet-cutover-signal"
+  and ((.blockchain_track.bootstrap_governance_graduation_gate.source_paths // []) | index($src)) != null
 ' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_phase7_signal_fallback_summary.json" >/dev/null; then
   echo "phase7-signal fallback gate summary missing expected fields"
   cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_phase7_signal_fallback_summary.json"
@@ -1066,10 +1149,16 @@ PHASE7_MAINNET_CUTOVER_CHECK_NO_GO_SUMMARY_JSON="$TMP_DIR/phase7_mainnet_cutover
 jq '
   .signals.mainnet_activation_gate_go = false
   | .signals.mainnet_activation_gate_go_ok = false
+  | .signals.bootstrap_governance_graduation_gate_go = false
+  | .signals.bootstrap_governance_graduation_gate_go_ok = false
   | .handoff.mainnet_activation_gate_go = false
   | .handoff.mainnet_activation_gate_go_ok = false
+  | .handoff.bootstrap_governance_graduation_gate_go = false
+  | .handoff.bootstrap_governance_graduation_gate_go_ok = false
   | .mainnet_activation_gate_go = false
   | .mainnet_activation_gate_go_ok = false
+  | .bootstrap_governance_graduation_gate_go = false
+  | .bootstrap_governance_graduation_gate_go_ok = false
 ' "$PHASE7_MAINNET_CUTOVER_CHECK_SUMMARY_JSON" >"$PHASE7_MAINNET_CUTOVER_CHECK_NO_GO_SUMMARY_JSON"
 if ! run_roadmap_progress_report \
   --refresh-manual-validation 0 \
@@ -1087,6 +1176,9 @@ fi
 if ! jq -e --arg src "$PHASE7_MAINNET_CUTOVER_CHECK_NO_GO_SUMMARY_JSON" '
   .blockchain_track.phase7_mainnet_cutover_summary_report.available == true
   and .blockchain_track.phase7_mainnet_cutover_summary_report.mainnet_activation_gate_go_ok == false
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.mainnet_activation_gate_go_ok_source == "phase7-mainnet-cutover-summary-signal"
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.bootstrap_governance_graduation_gate_go_ok == false
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.bootstrap_governance_graduation_gate_go_ok_source == "phase7-mainnet-cutover-summary-signal"
   and .blockchain_track.phase7_mainnet_cutover_summary_report.tdpnd_grpc_live_smoke_ok == null
   and .blockchain_track.phase7_mainnet_cutover_summary_report.module_tx_surface_ok == null
   and .blockchain_track.phase7_mainnet_cutover_summary_report.tdpnd_grpc_auth_live_smoke_ok == null
@@ -1105,6 +1197,23 @@ if ! jq -e --arg src "$PHASE7_MAINNET_CUTOVER_CHECK_NO_GO_SUMMARY_JSON" '
   and .blockchain_track.mainnet_activation_gate.source_summary_json == $src
   and .blockchain_track.mainnet_activation_gate.source_summary_kind == "phase7-mainnet-cutover-signal"
   and ((.blockchain_track.mainnet_activation_gate.source_paths // []) | index($src)) != null
+  and .blockchain_track.mainnet_activation_missing_metrics_action.available == false
+  and .blockchain_track.mainnet_activation_missing_metrics_action.id == null
+  and .blockchain_track.mainnet_activation_missing_metrics_action.reason == null
+  and .blockchain_track.mainnet_activation_missing_metrics_action.normalize_command == null
+  and .blockchain_track.mainnet_activation_missing_metrics_action.rerun_bundle_command == null
+  and .blockchain_track.mainnet_activation_missing_metrics_action.template_command == null
+  and .blockchain_track.mainnet_activation_missing_metrics_action.cycle_command == null
+  and .blockchain_track.bootstrap_governance_graduation_gate.available == true
+  and .blockchain_track.bootstrap_governance_graduation_gate.status == "NO-GO"
+  and .blockchain_track.bootstrap_governance_graduation_gate.decision == "NO-GO"
+  and .blockchain_track.bootstrap_governance_graduation_gate.go == false
+  and .blockchain_track.bootstrap_governance_graduation_gate.no_go == true
+  and ((.blockchain_track.bootstrap_governance_graduation_gate.reasons // []) | index("derived from phase7 bootstrap_governance_graduation_gate_go signal=false")) != null
+  and .blockchain_track.bootstrap_governance_graduation_gate.input_summary_json == $src
+  and .blockchain_track.bootstrap_governance_graduation_gate.source_summary_json == $src
+  and .blockchain_track.bootstrap_governance_graduation_gate.source_summary_kind == "phase7-mainnet-cutover-signal"
+  and ((.blockchain_track.bootstrap_governance_graduation_gate.source_paths // []) | index($src)) != null
 ' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_phase7_signal_no_go_fallback_summary.json" >/dev/null; then
   echo "phase7 NO-GO signal fallback gate summary missing expected fields"
   cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_phase7_signal_no_go_fallback_summary.json"
@@ -1130,6 +1239,9 @@ if ! jq -e '
   .blockchain_track.phase7_mainnet_cutover_summary_report.available == false
   and .blockchain_track.phase7_mainnet_cutover_summary_report.status == "invalid"
   and .blockchain_track.phase7_mainnet_cutover_summary_report.mainnet_activation_gate_go_ok == null
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.mainnet_activation_gate_go_ok_source == null
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.bootstrap_governance_graduation_gate_go_ok == null
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.bootstrap_governance_graduation_gate_go_ok_source == null
   and .blockchain_track.phase7_mainnet_cutover_summary_report.tdpnd_grpc_live_smoke_ok == null
   and .blockchain_track.phase7_mainnet_cutover_summary_report.module_tx_surface_ok == null
   and .blockchain_track.phase7_mainnet_cutover_summary_report.tdpnd_grpc_auth_live_smoke_ok == null
@@ -1200,7 +1312,7 @@ cat >"$AUTO_MAINNET_GATE_SUMMARY_JSON" <<'EOF_AUTO_MAINNET_GATE'
   "go": false,
   "no_go": true,
   "reasons": [
-    "missing required metrics JSON path"
+    "missing or invalid metric: paying_users_3mo_min"
   ],
   "source_paths": [
     "metrics_input"
@@ -1228,11 +1340,109 @@ if ! jq -e --arg src "$AUTO_MAINNET_GATE_SUMMARY_JSON" '
   and .blockchain_track.mainnet_activation_gate.no_go == true
   and .blockchain_track.mainnet_activation_gate.input_summary_json == $src
   and .blockchain_track.mainnet_activation_gate.source_summary_json == $src
-  and ((.blockchain_track.mainnet_activation_gate.reasons // []) | index("missing required metrics JSON path")) != null
+  and ((.blockchain_track.mainnet_activation_gate.reasons // []) | index("missing or invalid metric: paying_users_3mo_min")) != null
   and ((.blockchain_track.mainnet_activation_gate.source_paths // []) | index("metrics_input")) != null
+  and .blockchain_track.mainnet_activation_missing_metrics_action.available == true
+  and .blockchain_track.mainnet_activation_missing_metrics_action.id == "blockchain_mainnet_activation_missing_metrics_no_go"
+  and ((.blockchain_track.mainnet_activation_missing_metrics_action.reason // "") | contains("required metrics evidence is missing/invalid"))
+  and ((.blockchain_track.mainnet_activation_missing_metrics_action.normalize_command // "") | startswith("./scripts/easy_node.sh blockchain-mainnet-activation-metrics-input "))
+  and ((.blockchain_track.mainnet_activation_missing_metrics_action.normalize_command // "") | contains("--input-json <operator-metrics-input.json>"))
+  and ((.blockchain_track.mainnet_activation_missing_metrics_action.rerun_bundle_command // "") | startswith("./scripts/easy_node.sh blockchain-gate-bundle "))
+  and ((.blockchain_track.mainnet_activation_missing_metrics_action.rerun_bundle_command // "") | contains("--blockchain-mainnet-activation-metrics-input-json <operator-metrics-input.json>"))
+  and ((.blockchain_track.mainnet_activation_missing_metrics_action.template_command // "") | startswith("./scripts/easy_node.sh blockchain-mainnet-activation-metrics-input-template "))
+  and ((.blockchain_track.mainnet_activation_missing_metrics_action.template_command // "") | contains("--output-json <operator-metrics-input.template.json>"))
+  and ((.blockchain_track.mainnet_activation_missing_metrics_action.cycle_command // "") | startswith("./scripts/easy_node.sh blockchain-mainnet-activation-gate-cycle "))
+  and ((.blockchain_track.mainnet_activation_missing_metrics_action.cycle_command // "") | contains("--input-json <operator-metrics-input.json>"))
 ' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_summary.json" >/dev/null; then
   echo "auto-discovered gate summary JSON missing expected fields"
   cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_summary.json"
+  exit 1
+fi
+if ! rg -q 'Mainnet activation missing-metrics action available: true' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"; then
+  echo "auto-discovered report missing blockchain missing-metrics actionable availability line"
+  cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"
+  exit 1
+fi
+if ! rg -q 'blockchain-mainnet-activation-metrics-input --input-json <operator-metrics-input.json>' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"; then
+  echo "auto-discovered report missing metrics-input normalization command"
+  cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"
+  exit 1
+fi
+if ! rg -q 'blockchain-gate-bundle --blockchain-mainnet-activation-metrics-input-json <operator-metrics-input.json>' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"; then
+  echo "auto-discovered report missing gate-bundle rerun command"
+  cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"
+  exit 1
+fi
+if ! rg -q 'blockchain-mainnet-activation-metrics-input-template --output-json <operator-metrics-input.template.json>' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"; then
+  echo "auto-discovered report missing metrics-input template command"
+  cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"
+  exit 1
+fi
+if ! rg -q 'blockchain-mainnet-activation-gate-cycle --input-json <operator-metrics-input.json>' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"; then
+  echo "auto-discovered report missing one-command gate cycle command"
+  cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"
+  exit 1
+fi
+if ! rg -q 'blockchain_mainnet_activation_missing_metrics_action_available=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log; then
+  echo "auto-discovered log missing blockchain missing-metrics actionable line"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log
+  exit 1
+fi
+if ! rg -q 'blockchain_mainnet_activation_missing_metrics_action_template_command=.*blockchain-mainnet-activation-metrics-input-template .* cycle_command=.*blockchain-mainnet-activation-gate-cycle ' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log; then
+  echo "auto-discovered log missing template/cycle actionable commands"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log
+  exit 1
+fi
+
+echo "[roadmap-progress-report] blockchain bootstrap governance graduation gate auto-discovery path"
+AUTO_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_SUMMARY_JSON="$ROADMAP_PROGRESS_TEST_LOGS_ROOT/blockchain_bootstrap_governance_graduation_gate_summary.json"
+cat >"$AUTO_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_SUMMARY_JSON" <<'EOF_AUTO_BOOTSTRAP_GATE'
+{
+  "version": 1,
+  "schema": {
+    "id": "blockchain_bootstrap_governance_graduation_gate_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "GO",
+  "decision": "GO",
+  "go": true,
+  "no_go": false,
+  "reasons": [
+    "bootstrap governance graduation readiness met"
+  ],
+  "source_paths": [
+    "bootstrap_metrics_input"
+  ]
+}
+EOF_AUTO_BOOTSTRAP_GATE
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$MINIMAL_MANUAL_SUMMARY_JSON" \
+  --phase7-mainnet-cutover-summary-json "" \
+  --summary-json "$TMP_DIR/roadmap_progress_bootstrap_governance_graduation_gate_auto_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_bootstrap_governance_graduation_gate_auto_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_bootstrap_governance_graduation_gate_auto.log 2>&1; then
+  echo "expected success when bootstrap governance graduation gate summary is auto-discovered"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_bootstrap_governance_graduation_gate_auto.log
+  exit 1
+fi
+if ! jq -e --arg src "$AUTO_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_SUMMARY_JSON" '
+  .blockchain_track.bootstrap_governance_graduation_gate.available == true
+  and .blockchain_track.bootstrap_governance_graduation_gate.status == "GO"
+  and .blockchain_track.bootstrap_governance_graduation_gate.decision == "GO"
+  and .blockchain_track.bootstrap_governance_graduation_gate.go == true
+  and .blockchain_track.bootstrap_governance_graduation_gate.no_go == false
+  and .blockchain_track.bootstrap_governance_graduation_gate.input_summary_json == $src
+  and .blockchain_track.bootstrap_governance_graduation_gate.source_summary_json == $src
+  and .blockchain_track.bootstrap_governance_graduation_gate.source_summary_kind == "bootstrap-governance-graduation-gate-summary"
+  and ((.blockchain_track.bootstrap_governance_graduation_gate.reasons // []) | index("bootstrap governance graduation readiness met")) != null
+  and ((.blockchain_track.bootstrap_governance_graduation_gate.source_paths // []) | index("bootstrap_metrics_input")) != null
+' "$TMP_DIR/roadmap_progress_bootstrap_governance_graduation_gate_auto_summary.json" >/dev/null; then
+  echo "auto-discovered bootstrap governance graduation gate summary JSON missing expected fields"
+  cat "$TMP_DIR/roadmap_progress_bootstrap_governance_graduation_gate_auto_summary.json"
   exit 1
 fi
 
@@ -1882,6 +2092,164 @@ if ! jq -e '
 ' "$TMP_DIR/roadmap_progress_optional_profile_hint_summary.json" >/dev/null; then
   echo "optional profile-hint summary JSON missing expected profile_default_gate guidance fields"
   cat "$TMP_DIR/roadmap_progress_optional_profile_hint_summary.json"
+  exit 1
+fi
+
+: >"$CAPTURE"
+
+echo "[roadmap-progress-report] profile default gate preserves sudo-required command-source from manual summary"
+PROFILE_DEFAULT_GATE_MANUAL_SUDO_SUMMARY_JSON="$TMP_DIR/manual_validation_profile_default_sudo_source_summary.json"
+cat >"$PROFILE_DEFAULT_GATE_MANUAL_SUDO_SUMMARY_JSON" <<'EOF_PROFILE_DEFAULT_GATE_MANUAL_SUDO_SUMMARY'
+{
+  "version": 1,
+  "checks": [
+    {
+      "check_id": "runtime_hygiene",
+      "label": "Runtime hygiene doctor",
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh runtime-doctor --show-json 1"
+    },
+    {
+      "check_id": "wg_only_stack_selftest",
+      "label": "WG-only stack selftest",
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh wg-only-stack-selftest-record --strict-beta 1 --print-summary-json 1"
+    }
+  ],
+  "summary": {
+    "next_action_check_id": "",
+    "next_action_command": "",
+    "roadmap_stage": "READY_FOR_MACHINE_C_SMOKE",
+    "single_machine_ready": true,
+    "blocking_check_ids": [],
+    "optional_check_ids": ["three_machine_docker_readiness", "real_wg_privileged_matrix"],
+    "profile_default_gate": {
+      "status": "pending",
+      "notes": "profile compare campaign signoff decision is NO-GO but campaign-check evidence is insufficient/unstable; rerun with refresh-campaign=1; operator action: Use a fresh invite key from active issuer and rerun signoff",
+      "decision": "NO-GO",
+      "recommended_profile": "balanced",
+      "decision_next_operator_action": "Use a fresh invite key from active issuer and rerun signoff",
+      "diagnostics_root_required": true,
+      "next_command": "sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1",
+      "next_command_sudo": "sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1",
+      "next_command_source": "sudo_required_diagnostics_root_required",
+      "next_command_sudo_only_reason": "diagnostics_root_required",
+      "docker_rehearsal_hint_available": false
+    },
+    "docker_rehearsal_gate": {
+      "status": "pass",
+      "command": "./scripts/easy_node.sh three-machine-docker-readiness-record --path-profile balanced --soak-rounds 6 --soak-pause-sec 3 --print-summary-json 1"
+    },
+    "real_wg_privileged_gate": {
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh real-wg-privileged-matrix-record --print-summary-json 1"
+    }
+  },
+  "report": {
+    "readiness_status": "NOT_READY"
+  }
+}
+EOF_PROFILE_DEFAULT_GATE_MANUAL_SUDO_SUMMARY
+
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$PROFILE_DEFAULT_GATE_MANUAL_SUDO_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_profile_default_sudo_source_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_profile_default_sudo_source_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_sudo_source.log 2>&1; then
+  echo "expected success when profile default gate uses sudo-required diagnostics command source"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_sudo_source.log
+  exit 1
+fi
+if ! jq -e '
+  ((.next_actions // []) | any(.id == "profile_default_gate" and (.command | startswith("sudo ./scripts/easy_node.sh profile-compare-campaign-signoff"))))
+  and (.vpn_track.optional_gate_status.profile_default_gate == "pending")
+  and ((.vpn_track.profile_default_gate.next_command_source // "") == "sudo_required_diagnostics_root_required")
+  and ((.vpn_track.profile_default_gate.next_command // "") | startswith("sudo ./scripts/easy_node.sh profile-compare-campaign-signoff"))
+  and (.vpn_track.profile_default_gate.docker_hint_available == false)
+' "$TMP_DIR/roadmap_progress_profile_default_sudo_source_summary.json" >/dev/null; then
+  echo "profile default sudo-source summary JSON missing expected command-source passthrough fields"
+  cat "$TMP_DIR/roadmap_progress_profile_default_sudo_source_summary.json"
+  exit 1
+fi
+
+: >"$CAPTURE"
+
+echo "[roadmap-progress-report] profile default gate preserves docker-hint command-source with safe start_local_stack"
+PROFILE_DEFAULT_GATE_MANUAL_DOCKER_SUMMARY_JSON="$TMP_DIR/manual_validation_profile_default_docker_source_summary.json"
+cat >"$PROFILE_DEFAULT_GATE_MANUAL_DOCKER_SUMMARY_JSON" <<'EOF_PROFILE_DEFAULT_GATE_MANUAL_DOCKER_SUMMARY'
+{
+  "version": 1,
+  "checks": [
+    {
+      "check_id": "runtime_hygiene",
+      "label": "Runtime hygiene doctor",
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh runtime-doctor --show-json 1"
+    },
+    {
+      "check_id": "wg_only_stack_selftest",
+      "label": "WG-only stack selftest",
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh wg-only-stack-selftest-record --strict-beta 1 --print-summary-json 1"
+    }
+  ],
+  "summary": {
+    "next_action_check_id": "",
+    "next_action_command": "",
+    "roadmap_stage": "READY_FOR_MACHINE_C_SMOKE",
+    "single_machine_ready": true,
+    "blocking_check_ids": [],
+    "optional_check_ids": ["three_machine_docker_readiness", "real_wg_privileged_matrix"],
+    "profile_default_gate": {
+      "status": "pending",
+      "notes": "profile compare campaign signoff decision is NO-GO but campaign-check evidence is insufficient/unstable; rerun with refresh-campaign=1",
+      "decision": "NO-GO",
+      "recommended_profile": "balanced",
+      "next_command": "./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1 --campaign-execution-mode docker --campaign-start-local-stack 0 --campaign-directory-urls http://127.0.0.1:18081\\,http://127.0.0.1:28081 --campaign-issuer-url http://127.0.0.1:18082 --campaign-entry-url http://127.0.0.1:18083 --campaign-exit-url http://127.0.0.1:18084",
+      "next_command_sudo": "sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1",
+      "next_command_source": "docker_rehearsal_artifacts",
+      "docker_rehearsal_hint_available": true
+    },
+    "docker_rehearsal_gate": {
+      "status": "pass",
+      "command": "./scripts/easy_node.sh three-machine-docker-readiness-record --path-profile balanced --soak-rounds 6 --soak-pause-sec 3 --print-summary-json 1"
+    },
+    "real_wg_privileged_gate": {
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh real-wg-privileged-matrix-record --print-summary-json 1"
+    }
+  },
+  "report": {
+    "readiness_status": "NOT_READY"
+  }
+}
+EOF_PROFILE_DEFAULT_GATE_MANUAL_DOCKER_SUMMARY
+
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$PROFILE_DEFAULT_GATE_MANUAL_DOCKER_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_profile_default_docker_source_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_profile_default_docker_source_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_docker_source.log 2>&1; then
+  echo "expected success when profile default gate uses docker command source with safe start_local_stack"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_docker_source.log
+  exit 1
+fi
+if ! jq -e '
+  ((.next_actions // []) | any(.id == "profile_default_gate" and (.command | startswith("./scripts/easy_node.sh profile-compare-campaign-signoff")) and (.command | contains("--campaign-execution-mode docker")) and (.command | contains("--campaign-start-local-stack 0"))))
+  and (.vpn_track.optional_gate_status.profile_default_gate == "pending")
+  and ((.vpn_track.profile_default_gate.next_command_source // "") == "docker_rehearsal_artifacts")
+  and ((.vpn_track.profile_default_gate.next_command // "") | contains("--campaign-start-local-stack 0"))
+  and ((.vpn_track.profile_default_gate.next_command_sudo // "") | startswith("sudo ./scripts/easy_node.sh profile-compare-campaign-signoff"))
+  and (.vpn_track.profile_default_gate.docker_hint_available == true)
+' "$TMP_DIR/roadmap_progress_profile_default_docker_source_summary.json" >/dev/null; then
+  echo "profile default docker-source summary JSON missing expected command-source passthrough fields"
+  cat "$TMP_DIR/roadmap_progress_profile_default_docker_source_summary.json"
   exit 1
 fi
 

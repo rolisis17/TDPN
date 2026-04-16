@@ -2177,6 +2177,39 @@ blockchain_bootstrap_governance_graduation_gate_summary_kind_from_source() {
   esac
 }
 
+find_latest_blockchain_bootstrap_governance_graduation_gate_summary_json() {
+  local logs_root
+  local candidate=""
+  local candidate_mtime=0
+  local best_path=""
+  local best_mtime=-1
+  logs_root="$(roadmap_resilience_logs_root)"
+  if [[ ! -d "$logs_root" ]]; then
+    printf '%s' ""
+    return
+  fi
+  while IFS= read -r -d '' candidate; do
+    if [[ "$(json_file_valid_01 "$candidate")" != "1" ]]; then
+      continue
+    fi
+    candidate_mtime="$(file_mtime_epoch "$candidate")"
+    if ! [[ "$candidate_mtime" =~ ^[0-9]+$ ]]; then
+      candidate_mtime=0
+    fi
+    if (( candidate_mtime > best_mtime )); then
+      best_mtime="$candidate_mtime"
+      best_path="$candidate"
+    elif (( candidate_mtime == best_mtime )) && [[ "$candidate" > "$best_path" ]]; then
+      best_path="$candidate"
+    fi
+  done < <(find "$logs_root" -type f \
+    \( -name 'blockchain_bootstrap_governance_graduation_gate_summary.json' \
+       -o -name 'bootstrap_governance_graduation_gate_summary.json' \
+       -o -name '*bootstrap*governance*graduation*gate*summary*.json' \) \
+    -print0 2>/dev/null || true)
+  printf '%s' "$best_path"
+}
+
 blockchain_bootstrap_governance_graduation_gate_summary_normalize_json() {
   local path="$1"
   blockchain_mainnet_activation_gate_summary_normalize_json "$path"
@@ -4142,6 +4175,9 @@ phase7_mainnet_cutover_summary_run_ok_json="null"
 phase7_mainnet_cutover_summary_handoff_check_ok_json="null"
 phase7_mainnet_cutover_summary_handoff_run_ok_json="null"
 phase7_mainnet_cutover_summary_mainnet_activation_gate_go_ok_json="null"
+phase7_mainnet_cutover_summary_bootstrap_governance_graduation_gate_go_ok_json="null"
+phase7_mainnet_cutover_summary_mainnet_activation_gate_go_ok_source_json=""
+phase7_mainnet_cutover_summary_bootstrap_governance_graduation_gate_go_ok_source_json=""
 phase7_mainnet_cutover_summary_tdpnd_grpc_live_smoke_ok_json="null"
 phase7_mainnet_cutover_summary_module_tx_surface_ok_json="null"
 phase7_mainnet_cutover_summary_tdpnd_grpc_auth_live_smoke_ok_json="null"
@@ -4240,6 +4276,27 @@ if [[ -n "$phase7_mainnet_cutover_summary_json" ]]; then
           elif (.mainnet_activation_gate_go_ok | type) == "boolean" then .mainnet_activation_gate_go_ok
           elif (.mainnet_activation_gate_go | type) == "boolean" then .mainnet_activation_gate_go
           else empty end')"
+      phase7_mainnet_cutover_summary_bootstrap_governance_graduation_gate_go_ok_json="$(phase7_mainnet_cutover_bool_value_or_null \
+        "$phase7_mainnet_cutover_summary_source_summary_json" \
+        'if (.summaries.check.signal_snapshot.bootstrap_governance_graduation_gate_go_ok | type) == "boolean" then .summaries.check.signal_snapshot.bootstrap_governance_graduation_gate_go_ok
+          elif (.summaries.check.signal_snapshot.bootstrap_governance_graduation_gate_go | type) == "boolean" then .summaries.check.signal_snapshot.bootstrap_governance_graduation_gate_go
+          elif (.summaries.run.signal_snapshot.bootstrap_governance_graduation_gate_go_ok | type) == "boolean" then .summaries.run.signal_snapshot.bootstrap_governance_graduation_gate_go_ok
+          elif (.summaries.run.signal_snapshot.bootstrap_governance_graduation_gate_go | type) == "boolean" then .summaries.run.signal_snapshot.bootstrap_governance_graduation_gate_go
+          elif (.summaries.handoff_check.signal_snapshot.bootstrap_governance_graduation_gate_go_ok | type) == "boolean" then .summaries.handoff_check.signal_snapshot.bootstrap_governance_graduation_gate_go_ok
+          elif (.summaries.handoff_check.signal_snapshot.bootstrap_governance_graduation_gate_go | type) == "boolean" then .summaries.handoff_check.signal_snapshot.bootstrap_governance_graduation_gate_go
+          elif (.summaries.handoff_run.signal_snapshot.bootstrap_governance_graduation_gate_go_ok | type) == "boolean" then .summaries.handoff_run.signal_snapshot.bootstrap_governance_graduation_gate_go_ok
+          elif (.summaries.handoff_run.signal_snapshot.bootstrap_governance_graduation_gate_go | type) == "boolean" then .summaries.handoff_run.signal_snapshot.bootstrap_governance_graduation_gate_go
+          elif (.steps.phase7_mainnet_cutover_check.signal_snapshot.bootstrap_governance_graduation_gate_go_ok | type) == "boolean" then .steps.phase7_mainnet_cutover_check.signal_snapshot.bootstrap_governance_graduation_gate_go_ok
+          elif (.steps.phase7_mainnet_cutover_check.signal_snapshot.bootstrap_governance_graduation_gate_go | type) == "boolean" then .steps.phase7_mainnet_cutover_check.signal_snapshot.bootstrap_governance_graduation_gate_go
+          elif (.handoff.bootstrap_governance_graduation_gate_go_ok | type) == "boolean" then .handoff.bootstrap_governance_graduation_gate_go_ok
+          elif (.handoff.bootstrap_governance_graduation_gate_go | type) == "boolean" then .handoff.bootstrap_governance_graduation_gate_go
+          elif (.signals.bootstrap_governance_graduation_gate_go_ok | type) == "boolean" then .signals.bootstrap_governance_graduation_gate_go_ok
+          elif (.signals.bootstrap_governance_graduation_gate_go | type) == "boolean" then .signals.bootstrap_governance_graduation_gate_go
+          elif (.bootstrap_governance_graduation_gate_go_ok | type) == "boolean" then .bootstrap_governance_graduation_gate_go_ok
+          elif (.bootstrap_governance_graduation_gate_go | type) == "boolean" then .bootstrap_governance_graduation_gate_go
+          else empty end')"
+      phase7_mainnet_cutover_summary_mainnet_activation_gate_go_ok_source_json="phase7-mainnet-cutover-summary-signal"
+      phase7_mainnet_cutover_summary_bootstrap_governance_graduation_gate_go_ok_source_json="phase7-mainnet-cutover-summary-signal"
       phase7_mainnet_cutover_summary_tdpnd_grpc_live_smoke_ok_json="$(phase7_mainnet_cutover_bool_value_or_null \
         "$phase7_mainnet_cutover_summary_source_summary_json" \
         'if (.signals.tdpnd_grpc_live_smoke_ok | type) == "boolean" then .signals.tdpnd_grpc_live_smoke_ok
@@ -4445,6 +4502,9 @@ blockchain_bootstrap_governance_graduation_gate_go_json="null"
 blockchain_bootstrap_governance_graduation_gate_no_go_json="null"
 blockchain_bootstrap_governance_graduation_gate_reasons_json="[]"
 blockchain_bootstrap_governance_graduation_gate_source_paths_json="[]"
+if [[ -z "$blockchain_bootstrap_governance_graduation_gate_summary_json" ]]; then
+  blockchain_bootstrap_governance_graduation_gate_summary_json="$(find_latest_blockchain_bootstrap_governance_graduation_gate_summary_json)"
+fi
 if [[ -n "$blockchain_bootstrap_governance_graduation_gate_summary_json" ]]; then
   blockchain_bootstrap_governance_graduation_gate_input_summary_json="$blockchain_bootstrap_governance_graduation_gate_summary_json"
   if [[ -f "$blockchain_bootstrap_governance_graduation_gate_summary_json" ]]; then
@@ -4463,6 +4523,82 @@ if [[ -n "$blockchain_bootstrap_governance_graduation_gate_summary_json" ]]; the
       blockchain_bootstrap_governance_graduation_gate_status_json="invalid"
     fi
   fi
+fi
+
+# Fallback: when no dedicated bootstrap-governance gate summary is available,
+# inherit the phase7 propagated bootstrap_governance_graduation_gate_go signal.
+if [[ "$blockchain_bootstrap_governance_graduation_gate_status_json" == "missing" ]] \
+  && [[ -z "$blockchain_bootstrap_governance_graduation_gate_input_summary_json" ]] \
+  && [[ "$phase7_mainnet_cutover_summary_bootstrap_governance_graduation_gate_go_ok_json" != "null" ]]; then
+  blockchain_bootstrap_governance_graduation_gate_available_json="true"
+  blockchain_bootstrap_governance_graduation_gate_source_summary_json="$phase7_mainnet_cutover_summary_source_summary_json"
+  if [[ -n "$blockchain_bootstrap_governance_graduation_gate_source_summary_json" ]]; then
+    blockchain_bootstrap_governance_graduation_gate_input_summary_json="$blockchain_bootstrap_governance_graduation_gate_source_summary_json"
+    blockchain_bootstrap_governance_graduation_gate_source_paths_json="$(jq -nc --arg p "$blockchain_bootstrap_governance_graduation_gate_source_summary_json" '[$p]')"
+  else
+    blockchain_bootstrap_governance_graduation_gate_source_paths_json="[]"
+  fi
+  blockchain_bootstrap_governance_graduation_gate_source_summary_kind="phase7-mainnet-cutover-signal"
+  blockchain_bootstrap_governance_graduation_gate_go_json="$phase7_mainnet_cutover_summary_bootstrap_governance_graduation_gate_go_ok_json"
+  if [[ "$phase7_mainnet_cutover_summary_bootstrap_governance_graduation_gate_go_ok_json" == "true" ]]; then
+    blockchain_bootstrap_governance_graduation_gate_status_json="GO"
+    blockchain_bootstrap_governance_graduation_gate_decision_json="GO"
+    blockchain_bootstrap_governance_graduation_gate_no_go_json="false"
+    blockchain_bootstrap_governance_graduation_gate_reasons_json="[]"
+  else
+    blockchain_bootstrap_governance_graduation_gate_status_json="NO-GO"
+    blockchain_bootstrap_governance_graduation_gate_decision_json="NO-GO"
+    blockchain_bootstrap_governance_graduation_gate_no_go_json="true"
+    blockchain_bootstrap_governance_graduation_gate_reasons_json='["derived from phase7 bootstrap_governance_graduation_gate_go signal=false"]'
+  fi
+fi
+
+# Conflict hardening: when dedicated gate summaries are available/valid, align
+# phase7 propagated gate booleans with dedicated gate decisions so operators
+# never see contradictory signals in one roadmap snapshot.
+if [[ "$phase7_mainnet_cutover_summary_available_json" == "true" ]]; then
+  if [[ "$blockchain_mainnet_activation_gate_source_summary_kind" != "" ]] \
+    && [[ "$blockchain_mainnet_activation_gate_source_summary_kind" != "phase7-mainnet-cutover-signal" ]] \
+    && [[ "$blockchain_mainnet_activation_gate_go_json" != "null" ]]; then
+    phase7_mainnet_cutover_summary_mainnet_activation_gate_go_ok_json="$blockchain_mainnet_activation_gate_go_json"
+    phase7_mainnet_cutover_summary_mainnet_activation_gate_go_ok_source_json="dedicated-mainnet-activation-gate-summary"
+  fi
+  if [[ "$blockchain_bootstrap_governance_graduation_gate_source_summary_kind" != "" ]] \
+    && [[ "$blockchain_bootstrap_governance_graduation_gate_source_summary_kind" != "phase7-mainnet-cutover-signal" ]] \
+    && [[ "$blockchain_bootstrap_governance_graduation_gate_go_json" != "null" ]]; then
+    phase7_mainnet_cutover_summary_bootstrap_governance_graduation_gate_go_ok_json="$blockchain_bootstrap_governance_graduation_gate_go_json"
+    phase7_mainnet_cutover_summary_bootstrap_governance_graduation_gate_go_ok_source_json="dedicated-bootstrap-governance-graduation-gate-summary"
+  fi
+fi
+
+blockchain_mainnet_activation_missing_metrics_action_available_json="false"
+blockchain_mainnet_activation_missing_metrics_action_id=""
+blockchain_mainnet_activation_missing_metrics_action_reason=""
+blockchain_mainnet_activation_missing_metrics_action_normalize_command=""
+blockchain_mainnet_activation_missing_metrics_action_rerun_bundle_command=""
+blockchain_mainnet_activation_missing_metrics_action_template_command=""
+blockchain_mainnet_activation_missing_metrics_action_cycle_command=""
+blockchain_mainnet_activation_missing_metrics_reasons_match_json="$(
+  jq -r '
+    if any(.[]?; ((. | tostring | ascii_downcase) | test("missing or invalid metric|missing required metrics|missing metrics|invalid metrics|required_metrics|metrics_json"))) then
+      "true"
+    else
+      "false"
+    end
+  ' <<<"$blockchain_mainnet_activation_gate_reasons_json" 2>/dev/null || echo "false"
+)"
+if [[ "$blockchain_mainnet_activation_gate_source_summary_kind" != "" ]] \
+  && [[ "$blockchain_mainnet_activation_gate_source_summary_kind" != "phase7-mainnet-cutover-signal" ]] \
+  && [[ "$blockchain_mainnet_activation_gate_available_json" == "true" ]] \
+  && [[ "$blockchain_mainnet_activation_gate_no_go_json" == "true" || "$blockchain_mainnet_activation_gate_decision_json" == "NO-GO" ]] \
+  && [[ "$blockchain_mainnet_activation_missing_metrics_reasons_match_json" == "true" ]]; then
+  blockchain_mainnet_activation_missing_metrics_action_available_json="true"
+  blockchain_mainnet_activation_missing_metrics_action_id="blockchain_mainnet_activation_missing_metrics_no_go"
+  blockchain_mainnet_activation_missing_metrics_action_reason="mainnet activation gate is NO-GO because required metrics evidence is missing/invalid; normalize operator metrics input and rerun gate bundle."
+  blockchain_mainnet_activation_missing_metrics_action_normalize_command="./scripts/easy_node.sh blockchain-mainnet-activation-metrics-input --input-json <operator-metrics-input.json> --summary-json .easy-node-logs/blockchain_mainnet_activation_metrics_input_summary.json --canonical-summary-json .easy-node-logs/blockchain_mainnet_activation_metrics_input.json --print-summary-json 1"
+  blockchain_mainnet_activation_missing_metrics_action_rerun_bundle_command="./scripts/easy_node.sh blockchain-gate-bundle --blockchain-mainnet-activation-metrics-input-json <operator-metrics-input.json> --summary-json .easy-node-logs/blockchain_gate_bundle_latest_summary.json --canonical-summary-json .easy-node-logs/blockchain_gate_bundle_summary.json --print-summary-json 1"
+  blockchain_mainnet_activation_missing_metrics_action_template_command="./scripts/easy_node.sh blockchain-mainnet-activation-metrics-input-template --output-json <operator-metrics-input.template.json> --canonical-output-json .easy-node-logs/blockchain_mainnet_activation_metrics_input_template.json --print-output-json 1"
+  blockchain_mainnet_activation_missing_metrics_action_cycle_command="./scripts/easy_node.sh blockchain-mainnet-activation-gate-cycle --input-json <operator-metrics-input.json> --reports-dir .easy-node-logs/blockchain_mainnet_activation_gate_cycle --summary-json .easy-node-logs/blockchain_mainnet_activation_gate_cycle_latest_summary.json --canonical-summary-json .easy-node-logs/blockchain_mainnet_activation_gate_cycle_summary.json --refresh-roadmap 1 --print-summary-json 1"
 fi
 
 readiness_status="$(jq -r '.report.readiness_status // "UNKNOWN"' "$manual_validation_summary_json")"
@@ -5070,6 +5206,9 @@ summary_payload="$(jq -n \
   --argjson phase7_mainnet_cutover_summary_handoff_check_ok "$phase7_mainnet_cutover_summary_handoff_check_ok_json" \
   --argjson phase7_mainnet_cutover_summary_handoff_run_ok "$phase7_mainnet_cutover_summary_handoff_run_ok_json" \
   --argjson phase7_mainnet_cutover_summary_mainnet_activation_gate_go_ok "$phase7_mainnet_cutover_summary_mainnet_activation_gate_go_ok_json" \
+  --argjson phase7_mainnet_cutover_summary_bootstrap_governance_graduation_gate_go_ok "$phase7_mainnet_cutover_summary_bootstrap_governance_graduation_gate_go_ok_json" \
+  --arg phase7_mainnet_cutover_summary_mainnet_activation_gate_go_ok_source "$phase7_mainnet_cutover_summary_mainnet_activation_gate_go_ok_source_json" \
+  --arg phase7_mainnet_cutover_summary_bootstrap_governance_graduation_gate_go_ok_source "$phase7_mainnet_cutover_summary_bootstrap_governance_graduation_gate_go_ok_source_json" \
   --argjson phase7_mainnet_cutover_summary_tdpnd_grpc_live_smoke_ok "$phase7_mainnet_cutover_summary_tdpnd_grpc_live_smoke_ok_json" \
   --argjson phase7_mainnet_cutover_summary_module_tx_surface_ok "$phase7_mainnet_cutover_summary_module_tx_surface_ok_json" \
   --argjson phase7_mainnet_cutover_summary_tdpnd_grpc_auth_live_smoke_ok "$phase7_mainnet_cutover_summary_tdpnd_grpc_auth_live_smoke_ok_json" \
@@ -5098,6 +5237,13 @@ summary_payload="$(jq -n \
   --argjson blockchain_bootstrap_governance_graduation_gate_no_go "$blockchain_bootstrap_governance_graduation_gate_no_go_json" \
   --argjson blockchain_bootstrap_governance_graduation_gate_reasons "$blockchain_bootstrap_governance_graduation_gate_reasons_json" \
   --argjson blockchain_bootstrap_governance_graduation_gate_source_paths "$blockchain_bootstrap_governance_graduation_gate_source_paths_json" \
+  --argjson blockchain_mainnet_activation_missing_metrics_action_available "$blockchain_mainnet_activation_missing_metrics_action_available_json" \
+  --arg blockchain_mainnet_activation_missing_metrics_action_id "$blockchain_mainnet_activation_missing_metrics_action_id" \
+  --arg blockchain_mainnet_activation_missing_metrics_action_reason "$blockchain_mainnet_activation_missing_metrics_action_reason" \
+  --arg blockchain_mainnet_activation_missing_metrics_action_normalize_command "$blockchain_mainnet_activation_missing_metrics_action_normalize_command" \
+  --arg blockchain_mainnet_activation_missing_metrics_action_rerun_bundle_command "$blockchain_mainnet_activation_missing_metrics_action_rerun_bundle_command" \
+  --arg blockchain_mainnet_activation_missing_metrics_action_template_command "$blockchain_mainnet_activation_missing_metrics_action_template_command" \
+  --arg blockchain_mainnet_activation_missing_metrics_action_cycle_command "$blockchain_mainnet_activation_missing_metrics_action_cycle_command" \
   --arg profile_default_gate_status "$profile_default_gate_status" \
   --arg profile_default_gate_next_command "$profile_default_gate_next_command" \
   --arg profile_default_gate_next_command_sudo "$profile_default_gate_next_command_sudo" \
@@ -5334,6 +5480,9 @@ summary_payload="$(jq -n \
         handoff_check_ok: $phase7_mainnet_cutover_summary_handoff_check_ok,
         handoff_run_ok: $phase7_mainnet_cutover_summary_handoff_run_ok,
         mainnet_activation_gate_go_ok: $phase7_mainnet_cutover_summary_mainnet_activation_gate_go_ok,
+        mainnet_activation_gate_go_ok_source: (if $phase7_mainnet_cutover_summary_mainnet_activation_gate_go_ok_source == "" then null else $phase7_mainnet_cutover_summary_mainnet_activation_gate_go_ok_source end),
+        bootstrap_governance_graduation_gate_go_ok: $phase7_mainnet_cutover_summary_bootstrap_governance_graduation_gate_go_ok,
+        bootstrap_governance_graduation_gate_go_ok_source: (if $phase7_mainnet_cutover_summary_bootstrap_governance_graduation_gate_go_ok_source == "" then null else $phase7_mainnet_cutover_summary_bootstrap_governance_graduation_gate_go_ok_source end),
         tdpnd_grpc_live_smoke_ok: $phase7_mainnet_cutover_summary_tdpnd_grpc_live_smoke_ok,
         module_tx_surface_ok: $phase7_mainnet_cutover_summary_module_tx_surface_ok,
         tdpnd_grpc_auth_live_smoke_ok: $phase7_mainnet_cutover_summary_tdpnd_grpc_auth_live_smoke_ok,
@@ -5366,6 +5515,15 @@ summary_payload="$(jq -n \
         no_go: $blockchain_bootstrap_governance_graduation_gate_no_go,
         reasons: $blockchain_bootstrap_governance_graduation_gate_reasons,
         source_paths: $blockchain_bootstrap_governance_graduation_gate_source_paths
+      },
+      mainnet_activation_missing_metrics_action: {
+        available: $blockchain_mainnet_activation_missing_metrics_action_available,
+        id: (if $blockchain_mainnet_activation_missing_metrics_action_id == "" then null else $blockchain_mainnet_activation_missing_metrics_action_id end),
+        reason: (if $blockchain_mainnet_activation_missing_metrics_action_reason == "" then null else $blockchain_mainnet_activation_missing_metrics_action_reason end),
+        normalize_command: (if $blockchain_mainnet_activation_missing_metrics_action_normalize_command == "" then null else $blockchain_mainnet_activation_missing_metrics_action_normalize_command end),
+        rerun_bundle_command: (if $blockchain_mainnet_activation_missing_metrics_action_rerun_bundle_command == "" then null else $blockchain_mainnet_activation_missing_metrics_action_rerun_bundle_command end),
+        template_command: (if $blockchain_mainnet_activation_missing_metrics_action_template_command == "" then null else $blockchain_mainnet_activation_missing_metrics_action_template_command end),
+        cycle_command: (if $blockchain_mainnet_activation_missing_metrics_action_cycle_command == "" then null else $blockchain_mainnet_activation_missing_metrics_action_cycle_command end)
       }
     },
     refresh: {
@@ -5569,6 +5727,9 @@ $pending_real_host_checks_md
 - Phase-7 mainnet cutover handoff_check_ok: $(jq -r '.blockchain_track.phase7_mainnet_cutover_summary_report.handoff_check_ok | if . == null then "null" else tostring end' "$summary_json")
 - Phase-7 mainnet cutover handoff_run_ok: $(jq -r '.blockchain_track.phase7_mainnet_cutover_summary_report.handoff_run_ok | if . == null then "null" else tostring end' "$summary_json")
 - Phase-7 mainnet cutover mainnet_activation_gate_go_ok: $(jq -r '.blockchain_track.phase7_mainnet_cutover_summary_report.mainnet_activation_gate_go_ok | if . == null then "null" else tostring end' "$summary_json")
+- Phase-7 mainnet cutover mainnet_activation_gate_go_ok source: $(jq -r '.blockchain_track.phase7_mainnet_cutover_summary_report.mainnet_activation_gate_go_ok_source // "none"' "$summary_json")
+- Phase-7 mainnet cutover bootstrap_governance_graduation_gate_go_ok: $(jq -r '.blockchain_track.phase7_mainnet_cutover_summary_report.bootstrap_governance_graduation_gate_go_ok | if . == null then "null" else tostring end' "$summary_json")
+- Phase-7 mainnet cutover bootstrap_governance_graduation_gate_go_ok source: $(jq -r '.blockchain_track.phase7_mainnet_cutover_summary_report.bootstrap_governance_graduation_gate_go_ok_source // "none"' "$summary_json")
 - Phase-7 mainnet cutover tdpnd_grpc_live_smoke_ok: $(jq -r '.blockchain_track.phase7_mainnet_cutover_summary_report.tdpnd_grpc_live_smoke_ok | if . == null then "null" else tostring end' "$summary_json")
 - Phase-7 mainnet cutover module_tx_surface_ok: $(jq -r '.blockchain_track.phase7_mainnet_cutover_summary_report.module_tx_surface_ok | if . == null then "null" else tostring end' "$summary_json")
 - Phase-7 mainnet cutover tdpnd_grpc_auth_live_smoke_ok: $(jq -r '.blockchain_track.phase7_mainnet_cutover_summary_report.tdpnd_grpc_auth_live_smoke_ok | if . == null then "null" else tostring end' "$summary_json")
@@ -5587,6 +5748,13 @@ $pending_real_host_checks_md
 - Mainnet activation gate no_go: $(jq -r '.blockchain_track.mainnet_activation_gate.no_go | if . == null then "null" else tostring end' "$summary_json")
 - Mainnet activation gate reasons: $(jq -r '.blockchain_track.mainnet_activation_gate.reasons | if length == 0 then "none" else join("; ") end' "$summary_json")
 - Mainnet activation gate source paths: $(jq -r '.blockchain_track.mainnet_activation_gate.source_paths | if length == 0 then "none" else join(", ") end' "$summary_json")
+- Mainnet activation missing-metrics action available: $(jq -r '.blockchain_track.mainnet_activation_missing_metrics_action.available | if . == null then "null" else tostring end' "$summary_json")
+- Mainnet activation missing-metrics action id: $(jq -r '.blockchain_track.mainnet_activation_missing_metrics_action.id // "none"' "$summary_json")
+- Mainnet activation missing-metrics action reason: $(jq -r '.blockchain_track.mainnet_activation_missing_metrics_action.reason // "none"' "$summary_json")
+- Mainnet activation missing-metrics normalize command: $(jq -r '.blockchain_track.mainnet_activation_missing_metrics_action.normalize_command // "none"' "$summary_json")
+- Mainnet activation missing-metrics rerun bundle command: $(jq -r '.blockchain_track.mainnet_activation_missing_metrics_action.rerun_bundle_command // "none"' "$summary_json")
+- Mainnet activation missing-metrics template command: $(jq -r '.blockchain_track.mainnet_activation_missing_metrics_action.template_command // "none"' "$summary_json")
+- Mainnet activation missing-metrics gate cycle command: $(jq -r '.blockchain_track.mainnet_activation_missing_metrics_action.cycle_command // "none"' "$summary_json")
 - Bootstrap governance graduation gate available: $(jq -r '.blockchain_track.bootstrap_governance_graduation_gate.available' "$summary_json")
 - Bootstrap governance graduation gate input: $(jq -r '.blockchain_track.bootstrap_governance_graduation_gate.input_summary_json // "none"' "$summary_json")
 - Bootstrap governance graduation gate source: $(jq -r '.blockchain_track.bootstrap_governance_graduation_gate.source_summary_json // "none"' "$summary_json")
@@ -5664,8 +5832,11 @@ echo "[roadmap-progress-report] phase5_settlement_layer_handoff_issuer_sponsor_a
 echo "[roadmap-progress-report] phase6_cosmos_l1_handoff_available=$phase6_cosmos_l1_handoff_available_json source_summary_json=${phase6_cosmos_l1_handoff_source_summary_json:-} source_kind=${phase6_cosmos_l1_handoff_source_summary_kind:-}"
 echo "[roadmap-progress-report] phase6_cosmos_l1_handoff_status=$phase6_cosmos_l1_handoff_status_json rc=$phase6_cosmos_l1_handoff_rc_json run_pipeline_ok=$phase6_cosmos_l1_handoff_run_pipeline_ok_json module_tx_surface_ok=$phase6_cosmos_l1_handoff_module_tx_surface_ok_json tdpnd_grpc_runtime_smoke_ok=$phase6_cosmos_l1_handoff_tdpnd_grpc_runtime_smoke_ok_json tdpnd_grpc_live_smoke_ok=$phase6_cosmos_l1_handoff_tdpnd_grpc_live_smoke_ok_json tdpnd_grpc_auth_live_smoke_ok=$phase6_cosmos_l1_handoff_tdpnd_grpc_auth_live_smoke_ok_json tdpnd_comet_runtime_smoke_ok=$phase6_cosmos_l1_handoff_tdpnd_comet_runtime_smoke_ok_json"
 echo "[roadmap-progress-report] phase7_mainnet_cutover_summary_available=$phase7_mainnet_cutover_summary_available_json source_summary_json=${phase7_mainnet_cutover_summary_source_summary_json:-} source_kind=${phase7_mainnet_cutover_summary_source_summary_kind:-}"
-echo "[roadmap-progress-report] phase7_mainnet_cutover_summary_status=$phase7_mainnet_cutover_summary_status_json rc=$phase7_mainnet_cutover_summary_rc_json check_ok=$phase7_mainnet_cutover_summary_check_ok_json run_ok=$phase7_mainnet_cutover_summary_run_ok_json handoff_check_ok=$phase7_mainnet_cutover_summary_handoff_check_ok_json handoff_run_ok=$phase7_mainnet_cutover_summary_handoff_run_ok_json mainnet_activation_gate_go_ok=$phase7_mainnet_cutover_summary_mainnet_activation_gate_go_ok_json tdpnd_grpc_live_smoke_ok=$phase7_mainnet_cutover_summary_tdpnd_grpc_live_smoke_ok_json module_tx_surface_ok=$phase7_mainnet_cutover_summary_module_tx_surface_ok_json tdpnd_grpc_auth_live_smoke_ok=$phase7_mainnet_cutover_summary_tdpnd_grpc_auth_live_smoke_ok_json tdpnd_comet_runtime_smoke_ok=$phase7_mainnet_cutover_summary_tdpnd_comet_runtime_smoke_ok_json cosmos_module_coverage_floor_ok=$phase7_mainnet_cutover_summary_cosmos_module_coverage_floor_ok_json cosmos_keeper_coverage_floor_ok=$phase7_mainnet_cutover_summary_cosmos_keeper_coverage_floor_ok_json cosmos_app_coverage_floor_ok=$phase7_mainnet_cutover_summary_cosmos_app_coverage_floor_ok_json dual_write_parity_ok=$phase7_mainnet_cutover_summary_dual_write_parity_ok_json"
+echo "[roadmap-progress-report] phase7_mainnet_cutover_summary_status=$phase7_mainnet_cutover_summary_status_json rc=$phase7_mainnet_cutover_summary_rc_json check_ok=$phase7_mainnet_cutover_summary_check_ok_json run_ok=$phase7_mainnet_cutover_summary_run_ok_json handoff_check_ok=$phase7_mainnet_cutover_summary_handoff_check_ok_json handoff_run_ok=$phase7_mainnet_cutover_summary_handoff_run_ok_json mainnet_activation_gate_go_ok=$phase7_mainnet_cutover_summary_mainnet_activation_gate_go_ok_json mainnet_activation_gate_go_ok_source=${phase7_mainnet_cutover_summary_mainnet_activation_gate_go_ok_source_json:-} bootstrap_governance_graduation_gate_go_ok=$phase7_mainnet_cutover_summary_bootstrap_governance_graduation_gate_go_ok_json bootstrap_governance_graduation_gate_go_ok_source=${phase7_mainnet_cutover_summary_bootstrap_governance_graduation_gate_go_ok_source_json:-} tdpnd_grpc_live_smoke_ok=$phase7_mainnet_cutover_summary_tdpnd_grpc_live_smoke_ok_json module_tx_surface_ok=$phase7_mainnet_cutover_summary_module_tx_surface_ok_json tdpnd_grpc_auth_live_smoke_ok=$phase7_mainnet_cutover_summary_tdpnd_grpc_auth_live_smoke_ok_json tdpnd_comet_runtime_smoke_ok=$phase7_mainnet_cutover_summary_tdpnd_comet_runtime_smoke_ok_json cosmos_module_coverage_floor_ok=$phase7_mainnet_cutover_summary_cosmos_module_coverage_floor_ok_json cosmos_keeper_coverage_floor_ok=$phase7_mainnet_cutover_summary_cosmos_keeper_coverage_floor_ok_json cosmos_app_coverage_floor_ok=$phase7_mainnet_cutover_summary_cosmos_app_coverage_floor_ok_json dual_write_parity_ok=$phase7_mainnet_cutover_summary_dual_write_parity_ok_json"
 echo "[roadmap-progress-report] mainnet_activation_gate_available=$blockchain_mainnet_activation_gate_available_json source_summary_json=${blockchain_mainnet_activation_gate_source_summary_json:-} source_kind=${blockchain_mainnet_activation_gate_source_summary_kind:-} status=$blockchain_mainnet_activation_gate_status_json decision=${blockchain_mainnet_activation_gate_decision_json:-} go=$blockchain_mainnet_activation_gate_go_json no_go=$blockchain_mainnet_activation_gate_no_go_json"
+echo "[roadmap-progress-report] blockchain_mainnet_activation_missing_metrics_action_available=$blockchain_mainnet_activation_missing_metrics_action_available_json action_id=${blockchain_mainnet_activation_missing_metrics_action_id:-} reason=${blockchain_mainnet_activation_missing_metrics_action_reason:-}"
+echo "[roadmap-progress-report] blockchain_mainnet_activation_missing_metrics_action_normalize_command=${blockchain_mainnet_activation_missing_metrics_action_normalize_command:-} rerun_bundle_command=${blockchain_mainnet_activation_missing_metrics_action_rerun_bundle_command:-}"
+echo "[roadmap-progress-report] blockchain_mainnet_activation_missing_metrics_action_template_command=${blockchain_mainnet_activation_missing_metrics_action_template_command:-} cycle_command=${blockchain_mainnet_activation_missing_metrics_action_cycle_command:-}"
 echo "[roadmap-progress-report] bootstrap_governance_graduation_gate_available=$blockchain_bootstrap_governance_graduation_gate_available_json source_summary_json=${blockchain_bootstrap_governance_graduation_gate_source_summary_json:-} source_kind=${blockchain_bootstrap_governance_graduation_gate_source_summary_kind:-} status=$blockchain_bootstrap_governance_graduation_gate_status_json decision=${blockchain_bootstrap_governance_graduation_gate_decision_json:-} go=$blockchain_bootstrap_governance_graduation_gate_go_json no_go=$blockchain_bootstrap_governance_graduation_gate_no_go_json"
 echo "[roadmap-progress-report] profile_default_gate_status=$profile_default_gate_status next_command=${profile_default_gate_next_command:-} next_command_sudo=${profile_default_gate_next_command_sudo:-} next_command_source=${profile_default_gate_next_command_source:-}"
 echo "[roadmap-progress-report] profile_default_gate_docker_hint_available=$profile_default_gate_docker_hint_available_json docker_hint_source=${profile_default_gate_docker_hint_source:-} campaign_check_summary_resolved=${profile_default_gate_campaign_check_summary_json_resolved:-} docker_matrix_summary_json=${profile_default_gate_docker_matrix_summary_json:-} docker_profile_summary_json=${profile_default_gate_docker_profile_summary_json:-}"
