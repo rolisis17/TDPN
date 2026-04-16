@@ -56,6 +56,17 @@ printf '%s\n' "$count" >"${FAKE_LOCAL_COUNTER_FILE:?}"
 printf 'run=%s summary=%s report=%s\n' "$count" "$summary_json" "$report_md" >>"${FAKE_LOCAL_CAPTURE_FILE:?}"
 echo "[profile-compare-local] profile=balanced round=1 status=pass rc=0 duration_sec=5"
 echo "[profile-compare-local] profile=speed round=2 status=pass rc=0 duration_sec=6"
+hard_fail_mode="${FAKE_LOCAL_HARD_FAIL_MODE:-none}"
+case "$hard_fail_mode" in
+  root_required)
+    echo "client test requires root (run with sudo)"
+    echo "permission denied"
+    ;;
+  endpoint_unreachable)
+    echo 'dial tcp 100.113.245.61:8081: connect: connection refused'
+    echo "could not resolve host: issuer.invalid"
+    ;;
+esac
 
 status="pass"
 rc=0
@@ -105,12 +116,20 @@ cat >"$summary_json" <<EOF_SUMMARY
   "decision": {
     "recommended_default_profile": "$recommended"
   },
+EOF_SUMMARY
+
+if [[ "$diag_mode" != "missing" ]]; then
+cat >>"$summary_json" <<EOF_SUMMARY
   "diagnostics": {
     "transport_mismatch_failures": $transport_mismatch_failures,
     "token_proof_invalid_failures": $token_proof_invalid_failures,
     "unknown_exit_failures": $unknown_exit_failures,
     "directory_trust_failures": $directory_trust_failures
   },
+EOF_SUMMARY
+fi
+
+cat >>"$summary_json" <<EOF_SUMMARY
   "profiles": [
     {"profile": "balanced", "runs_executed": 4, "runs_pass": 4, "runs_fail": 0, "avg_duration_sec": 10.2},
     {"profile": "speed", "runs_executed": 4, "runs_pass": 4, "runs_fail": 0, "avg_duration_sec": 9.6},
@@ -296,6 +315,8 @@ if ! jq -e '
   and .aggregated_diagnostics.token_proof_invalid_failures == 2
   and .aggregated_diagnostics.unknown_exit_failures == 3
   and .aggregated_diagnostics.directory_trust_failures == 0
+  and .aggregated_diagnostics.root_required_failures == 0
+  and .aggregated_diagnostics.endpoint_unreachable_failures == 0
   and .likely_primary_failure == "token_proof_invalid"
   and (.operator_hint | contains("invite/issuer alignment"))
 ' "$SUCCESS_JSON" >/dev/null 2>&1; then
@@ -326,11 +347,79 @@ if ! jq -e '
   and .aggregated_diagnostics.token_proof_invalid_failures == 0
   and .aggregated_diagnostics.unknown_exit_failures == 0
   and .aggregated_diagnostics.directory_trust_failures == 7
+  and .aggregated_diagnostics.root_required_failures == 0
+  and .aggregated_diagnostics.endpoint_unreachable_failures == 0
   and .likely_primary_failure == "directory_trust"
   and (.operator_hint | contains("trust reset"))
 ' "$DIRECTORY_DIAG_JSON" >/dev/null 2>&1; then
   echo "campaign diagnostics summary missing expected directory_trust values"
   cat "$DIRECTORY_DIAG_JSON"
+  exit 1
+fi
+
+echo "[profile-compare-campaign] log fallback diagnostics (root_required)"
+: >"$LOCAL_CAPTURE"
+: >"$TREND_CAPTURE"
+printf '0\n' >"$LOCAL_COUNTER"
+ROOT_FALLBACK_JSON="$TMP_DIR/campaign_root_fallback_diag.json"
+PROFILE_COMPARE_CAMPAIGN_LOCAL_SCRIPT="$FAKE_LOCAL" \
+PROFILE_COMPARE_CAMPAIGN_TREND_SCRIPT="$FAKE_TREND" \
+FAKE_LOCAL_CAPTURE_FILE="$LOCAL_CAPTURE" \
+FAKE_LOCAL_COUNTER_FILE="$LOCAL_COUNTER" \
+FAKE_LOCAL_FAIL_AT=0 \
+FAKE_LOCAL_DIAG_MODE=missing \
+FAKE_LOCAL_HARD_FAIL_MODE=root_required \
+FAKE_TREND_CAPTURE_FILE="$TREND_CAPTURE" \
+FAKE_TREND_FORCE_FAIL=0 \
+./scripts/profile_compare_campaign.sh \
+  --campaign-runs 1 \
+  --summary-json "$ROOT_FALLBACK_JSON" >/tmp/integration_profile_compare_campaign_root_fallback.log 2>&1
+
+if ! jq -e '
+  .aggregated_diagnostics.transport_mismatch_failures == 0
+  and .aggregated_diagnostics.token_proof_invalid_failures == 0
+  and .aggregated_diagnostics.unknown_exit_failures == 0
+  and .aggregated_diagnostics.directory_trust_failures == 0
+  and .aggregated_diagnostics.root_required_failures > 0
+  and .aggregated_diagnostics.endpoint_unreachable_failures == 0
+  and .likely_primary_failure == "root_required"
+  and (.operator_hint | contains("sudo/root"))
+' "$ROOT_FALLBACK_JSON" >/dev/null 2>&1; then
+  echo "campaign fallback diagnostics missing expected root_required values"
+  cat "$ROOT_FALLBACK_JSON"
+  exit 1
+fi
+
+echo "[profile-compare-campaign] log fallback diagnostics (endpoint_unreachable)"
+: >"$LOCAL_CAPTURE"
+: >"$TREND_CAPTURE"
+printf '0\n' >"$LOCAL_COUNTER"
+ENDPOINT_FALLBACK_JSON="$TMP_DIR/campaign_endpoint_fallback_diag.json"
+PROFILE_COMPARE_CAMPAIGN_LOCAL_SCRIPT="$FAKE_LOCAL" \
+PROFILE_COMPARE_CAMPAIGN_TREND_SCRIPT="$FAKE_TREND" \
+FAKE_LOCAL_CAPTURE_FILE="$LOCAL_CAPTURE" \
+FAKE_LOCAL_COUNTER_FILE="$LOCAL_COUNTER" \
+FAKE_LOCAL_FAIL_AT=0 \
+FAKE_LOCAL_DIAG_MODE=missing \
+FAKE_LOCAL_HARD_FAIL_MODE=endpoint_unreachable \
+FAKE_TREND_CAPTURE_FILE="$TREND_CAPTURE" \
+FAKE_TREND_FORCE_FAIL=0 \
+./scripts/profile_compare_campaign.sh \
+  --campaign-runs 1 \
+  --summary-json "$ENDPOINT_FALLBACK_JSON" >/tmp/integration_profile_compare_campaign_endpoint_fallback.log 2>&1
+
+if ! jq -e '
+  .aggregated_diagnostics.transport_mismatch_failures == 0
+  and .aggregated_diagnostics.token_proof_invalid_failures == 0
+  and .aggregated_diagnostics.unknown_exit_failures == 0
+  and .aggregated_diagnostics.directory_trust_failures == 0
+  and .aggregated_diagnostics.root_required_failures == 0
+  and .aggregated_diagnostics.endpoint_unreachable_failures > 0
+  and .likely_primary_failure == "endpoint_unreachable"
+  and (.operator_hint | contains("reachability and DNS"))
+' "$ENDPOINT_FALLBACK_JSON" >/dev/null 2>&1; then
+  echo "campaign fallback diagnostics missing expected endpoint_unreachable values"
+  cat "$ENDPOINT_FALLBACK_JSON"
   exit 1
 fi
 

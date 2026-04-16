@@ -247,6 +247,39 @@ extract_diagnostic_count() {
   to_non_negative_int "$raw_value"
 }
 
+has_diagnostic_key() {
+  local summary_json_path="$1"
+  local key="$2"
+  jq -e --arg key "$key" '
+    ((.diagnostics // {}) | has($key))
+    or ((.summary.diagnostics // {}) | has($key))
+    or ((.summary // {}) | has($key))
+    or (has($key))
+  ' "$summary_json_path" >/dev/null 2>&1
+}
+
+count_log_pattern() {
+  local log_path="$1"
+  local pattern="$2"
+  local count="0"
+  if [[ -n "$log_path" && -f "$log_path" ]]; then
+    count="$(grep -Eic -- "$pattern" "$log_path" 2>/dev/null || true)"
+  fi
+  count="${count:-0}"
+  if ! [[ "$count" =~ ^[0-9]+$ ]]; then
+    count="0"
+  fi
+  printf '%s\n' "$count"
+}
+
+log_path_for_summary() {
+  local summary_path="$1"
+  local rows_json="$2"
+  jq -r --arg summary_path "$summary_path" '
+    ([.[] | select(.artifacts.summary_json == $summary_path) | .artifacts.log][0] // "")
+  ' <<<"$rows_json" 2>/dev/null || printf '%s\n' ""
+}
+
 host_is_loopback_local() {
   local host="${1:-}"
   host="${host#[}"
@@ -981,11 +1014,21 @@ transport_mismatch_failures=0
 token_proof_invalid_failures=0
 unknown_exit_failures=0
 directory_trust_failures=0
+root_required_failures=0
+endpoint_unreachable_failures=0
 for summary_path in "${compare_summary_paths[@]}"; do
   transport_mismatch_failures=$((transport_mismatch_failures + $(extract_diagnostic_count "$summary_path" "transport_mismatch_failures")))
   token_proof_invalid_failures=$((token_proof_invalid_failures + $(extract_diagnostic_count "$summary_path" "token_proof_invalid_failures")))
   unknown_exit_failures=$((unknown_exit_failures + $(extract_diagnostic_count "$summary_path" "unknown_exit_failures")))
   directory_trust_failures=$((directory_trust_failures + $(extract_diagnostic_count "$summary_path" "directory_trust_failures")))
+  root_required_failures=$((root_required_failures + $(extract_diagnostic_count "$summary_path" "root_required_failures")))
+  endpoint_unreachable_failures=$((endpoint_unreachable_failures + $(extract_diagnostic_count "$summary_path" "endpoint_unreachable_failures")))
+
+  if ! has_diagnostic_key "$summary_path" "root_required_failures" || ! has_diagnostic_key "$summary_path" "endpoint_unreachable_failures"; then
+    run_log_path="$(trim "$(log_path_for_summary "$summary_path" "$runs_json")")"
+    root_required_failures=$((root_required_failures + $(count_log_pattern "$run_log_path" 'requires root|must be root|run with sudo|permission denied|operation not permitted')))
+    endpoint_unreachable_failures=$((endpoint_unreachable_failures + $(count_log_pattern "$run_log_path" 'connection refused|no route to host|network is unreachable|could not resolve host|temporary failure in name resolution|name or service not known|context deadline exceeded|i/o timeout|timed out|dial tcp: lookup .*: no such host')))
+  fi
 done
 
 likely_primary_failure="none"
@@ -997,6 +1040,12 @@ elif ((transport_mismatch_failures > 0)); then
   likely_primary_failure="transport_mismatch"
 elif ((directory_trust_failures > 0)); then
   likely_primary_failure="directory_trust"
+elif ((root_required_failures > 0 || endpoint_unreachable_failures > 0)); then
+  if ((root_required_failures >= endpoint_unreachable_failures)); then
+    likely_primary_failure="root_required"
+  else
+    likely_primary_failure="endpoint_unreachable"
+  fi
 fi
 
 operator_hint="No dominant diagnostic failure signal detected across selected runs."
@@ -1009,6 +1058,12 @@ case "$likely_primary_failure" in
     ;;
   directory_trust)
     operator_hint="Check trust reset and runtime trusted-directory key alignment before retrying."
+    ;;
+  root_required)
+    operator_hint="Run the required privileged step with sudo/root or switch to docker-mode workflow that avoids root-only local stack requirements."
+    ;;
+  endpoint_unreachable)
+    operator_hint="Check endpoint reachability and DNS/network routes for directory/issuer/entry/exit URLs before retrying."
     ;;
 esac
 
@@ -1088,6 +1143,8 @@ jq -n \
   --argjson token_proof_invalid_failures "$token_proof_invalid_failures" \
   --argjson unknown_exit_failures "$unknown_exit_failures" \
   --argjson directory_trust_failures "$directory_trust_failures" \
+  --argjson root_required_failures "$root_required_failures" \
+  --argjson endpoint_unreachable_failures "$endpoint_unreachable_failures" \
   '{
     version: 1,
     generated_at_utc: $generated_at_utc,
@@ -1159,7 +1216,9 @@ jq -n \
       transport_mismatch_failures: $transport_mismatch_failures,
       token_proof_invalid_failures: $token_proof_invalid_failures,
       unknown_exit_failures: $unknown_exit_failures,
-      directory_trust_failures: $directory_trust_failures
+      directory_trust_failures: $directory_trust_failures,
+      root_required_failures: $root_required_failures,
+      endpoint_unreachable_failures: $endpoint_unreachable_failures
     },
     likely_primary_failure: $likely_primary_failure,
     operator_hint: $operator_hint,

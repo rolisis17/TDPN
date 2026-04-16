@@ -99,6 +99,83 @@ OUT
 EOF
 chmod +x "$FAKE_DOCTOR_TIMEOUT"
 
+echo "[manual-validation] sudo-user safety fallback"
+SUDO_USER_INJECTION_MARKER="$TMP_DIR/manual_validation_sudo_user_eval_marker"
+SAFE_HOME_DIR="$TMP_DIR/manual_validation_safe_home"
+SUDO_SAFETY_STATUS_LOG="$TMP_DIR/integration_manual_validation_status_sudo_user_safety.log"
+SUDO_SAFETY_RECORD_LOG="$TMP_DIR/integration_manual_validation_record_sudo_user_safety.log"
+mkdir -p "$SAFE_HOME_DIR"
+rm -f "$SUDO_USER_INJECTION_MARKER"
+MALICIOUS_SUDO_USER="invalid\$(touch ${SUDO_USER_INJECTION_MARKER})"
+EXPECTED_FALLBACK_STATE_DIR="$SAFE_HOME_DIR/.local/state/privacynode/manual_validation"
+
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="" \
+XDG_STATE_HOME="" \
+HOME="$SAFE_HOME_DIR" \
+SUDO_USER="$MALICIOUS_SUDO_USER" \
+MANUAL_VALIDATION_PROFILE_COMPARE_SIGNOFF_SUMMARY_JSON="$PROFILE_SIGNOFF_SUMMARY_JSON" \
+RUNTIME_DOCTOR_SCRIPT="$FAKE_DOCTOR" \
+./scripts/manual_validation_status.sh --show-json 0 >"$SUDO_SAFETY_STATUS_LOG"
+
+if [[ -e "$SUDO_USER_INJECTION_MARKER" ]]; then
+  echo "manual-validation-status evaluated unsafe SUDO_USER payload"
+  cat "$SUDO_SAFETY_STATUS_LOG"
+  exit 1
+fi
+if ! grep -F -- "[manual-validation-status] state_dir=$EXPECTED_FALLBACK_STATE_DIR" "$SUDO_SAFETY_STATUS_LOG" >/dev/null; then
+  echo "manual-validation-status did not fall back to HOME-based state directory for invalid SUDO_USER"
+  cat "$SUDO_SAFETY_STATUS_LOG"
+  exit 1
+fi
+
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="" \
+XDG_STATE_HOME="" \
+HOME="$SAFE_HOME_DIR" \
+SUDO_USER="$MALICIOUS_SUDO_USER" \
+./scripts/manual_validation_record.sh \
+  --check-id sudo_user_validation_guard \
+  --status pass \
+  --notes "invalid sudo user must not execute" \
+  --show-json 0 >"$SUDO_SAFETY_RECORD_LOG"
+
+if [[ -e "$SUDO_USER_INJECTION_MARKER" ]]; then
+  echo "manual-validation-record evaluated unsafe SUDO_USER payload"
+  cat "$SUDO_SAFETY_RECORD_LOG"
+  exit 1
+fi
+if ! grep -F -- "[manual-validation-record] check_id=sudo_user_validation_guard status=pass state_dir=$EXPECTED_FALLBACK_STATE_DIR" "$SUDO_SAFETY_RECORD_LOG" >/dev/null; then
+  echo "manual-validation-record did not use HOME-based state directory fallback for invalid SUDO_USER"
+  cat "$SUDO_SAFETY_RECORD_LOG"
+  exit 1
+fi
+
+VALID_SUDO_USER="$(id -un 2>/dev/null || true)"
+VALID_SUDO_HOME=""
+if [[ -n "$VALID_SUDO_USER" && "$VALID_SUDO_USER" != "root" ]]; then
+  if command -v getent >/dev/null 2>&1; then
+    VALID_SUDO_HOME="$(getent passwd "$VALID_SUDO_USER" 2>/dev/null | cut -d: -f6 || true)"
+  fi
+  if [[ -z "$VALID_SUDO_HOME" && -r /etc/passwd ]]; then
+    VALID_SUDO_HOME="$(awk -F: -v user="$VALID_SUDO_USER" '$1 == user { print $6; exit }' /etc/passwd 2>/dev/null || true)"
+  fi
+fi
+if [[ -n "$VALID_SUDO_HOME" && "$VALID_SUDO_HOME" == /* ]]; then
+  VALID_SUDO_STATUS_LOG="$TMP_DIR/integration_manual_validation_status_valid_sudo_user.log"
+  EXPECTED_VALID_SUDO_STATE_DIR="$VALID_SUDO_HOME/.local/state/privacynode/manual_validation"
+  EASY_NODE_MANUAL_VALIDATION_STATE_DIR="" \
+  XDG_STATE_HOME="" \
+  HOME="$SAFE_HOME_DIR" \
+  SUDO_USER="$VALID_SUDO_USER" \
+  MANUAL_VALIDATION_PROFILE_COMPARE_SIGNOFF_SUMMARY_JSON="$PROFILE_SIGNOFF_SUMMARY_JSON" \
+  RUNTIME_DOCTOR_SCRIPT="$FAKE_DOCTOR" \
+  ./scripts/manual_validation_status.sh --show-json 0 >"$VALID_SUDO_STATUS_LOG"
+  if ! grep -F -- "[manual-validation-status] state_dir=$EXPECTED_VALID_SUDO_STATE_DIR" "$VALID_SUDO_STATUS_LOG" >/dev/null; then
+    echo "manual-validation-status did not preserve valid SUDO_USER home resolution"
+    cat "$VALID_SUDO_STATUS_LOG"
+    exit 1
+  fi
+fi
+
 echo "[manual-validation] baseline status"
 EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR" \
 MANUAL_VALIDATION_PROFILE_COMPARE_SIGNOFF_SUMMARY_JSON="$PROFILE_SIGNOFF_SUMMARY_JSON" \
@@ -991,7 +1068,11 @@ cat >"$PROFILE_SIGNOFF_SUMMARY_JSON" <<EOF_PROFILE_SIGNOFF_NO_GO_INSUFFICIENT
   },
   "decision": {
     "decision": "NO-GO",
-    "recommended_profile": "balanced"
+    "recommended_profile": "balanced",
+    "diagnostics": {
+      "root_required": true
+    },
+    "next_operator_action": "Use a fresh invite key from active issuer and rerun signoff"
   },
   "artifacts": {
     "campaign_check_summary_json": "$(basename "$PROFILE_NO_GO_INSUFFICIENT_CHECK_SUMMARY_JSON")"
@@ -1026,6 +1107,12 @@ if ! printf '%s\n' "$profile_no_go_insufficient_json" | jq -e '
   and .summary.profile_default_gate.refresh_campaign == true
   and .summary.profile_default_gate.insufficient_evidence == true
   and (.summary.profile_default_gate.notes | contains("insufficient/unstable"))
+  and (.summary.profile_default_gate.notes | contains("operator action: Use a fresh invite key from active issuer and rerun signoff"))
+  and .summary.profile_default_gate.decision_next_operator_action == "Use a fresh invite key from active issuer and rerun signoff"
+  and .summary.profile_default_gate.diagnostics_root_required == true
+  and .summary.profile_default_gate.next_command_source == "sudo_required_diagnostics_root_required"
+  and .summary.profile_default_gate.next_command_sudo_only_reason == "diagnostics_root_required"
+  and (.summary.profile_default_gate.next_command | startswith("sudo ./scripts/easy_node.sh profile-compare-campaign-signoff"))
 ' >/dev/null; then
   echo "profile-no-go-insufficient status JSON missing expected pending mapping fields"
   printf '%s\n' "$profile_no_go_insufficient_json"
@@ -1092,6 +1179,7 @@ fi
 if ! printf '%s\n' "$profile_no_go_insufficient_json" | jq -e --arg matrix "$PROFILE_DOCKER_HINT_MATRIX_SUMMARY_JSON" --arg profile "$PROFILE_DOCKER_HINT_PROFILE_SUMMARY_JSON" '
   .summary.profile_default_gate.status == "pending"
   and .summary.profile_default_gate.insufficient_evidence == true
+  and .summary.profile_default_gate.diagnostics_root_required == true
   and (.summary.profile_default_gate.next_command | startswith("./scripts/easy_node.sh profile-compare-campaign-signoff"))
   and (.summary.profile_default_gate.next_command | contains("--campaign-execution-mode docker"))
   and (.summary.profile_default_gate.next_command | contains("--campaign-start-local-stack 0"))

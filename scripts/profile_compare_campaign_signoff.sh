@@ -903,7 +903,7 @@ decision_reason=""
 recommended_profile=""
 support_rate_pct="0"
 trend_source_value=""
-decision_diagnostics_json="null"
+decision_diagnostics_json='{"source_schema":"none","legacy":null,"aggregated_diagnostics":{"transport_mismatch_failures":0,"token_proof_invalid_failures":0,"unknown_exit_failures":0,"directory_trust_failures":0},"likely_primary_failure":"none","operator_hint":""}'
 next_operator_action=""
 campaign_check_summary_present=0
 if [[ -f "$campaign_check_summary_json" ]] && jq -e . "$campaign_check_summary_json" >/dev/null 2>&1; then
@@ -916,45 +916,96 @@ if [[ -f "$campaign_check_summary_json" ]] && jq -e . "$campaign_check_summary_j
 fi
 
 if [[ -f "$campaign_summary_json" ]] && jq -e . "$campaign_summary_json" >/dev/null 2>&1; then
-  if jq -e '.diagnostics != null' "$campaign_summary_json" >/dev/null 2>&1; then
-    decision_diagnostics_json="$(jq -c '.diagnostics' "$campaign_summary_json")"
-  elif jq -e '.summary.diagnostics != null' "$campaign_summary_json" >/dev/null 2>&1; then
-    decision_diagnostics_json="$(jq -c '.summary.diagnostics' "$campaign_summary_json")"
+  diagnostics_ingested="$(jq -c '
+    def to_nonneg_int:
+      if . == null then 0
+      elif type == "number" then (if . < 0 then 0 else floor end)
+      elif type == "string" then ((tonumber? // 0) | if . < 0 then 0 else floor end)
+      else 0
+      end;
+    def normalized_primary:
+      if . == null then "none"
+      elif type == "string" then (if . == "" then "none" else . end)
+      else (tostring)
+      end;
+    def infer_primary_from_legacy($legacy):
+      ($legacy | tostring | ascii_downcase) as $txt
+      | if ($txt | contains("token_proof_invalid")) then "token_proof_invalid"
+        elif ($txt | contains("unknown_exit")) then "unknown_exit"
+        elif ($txt | contains("transport_mismatch")) then "transport_mismatch"
+        elif ($txt | contains("directory_trust")) then "directory_trust"
+        elif ($txt | contains("root_required")) then "root_required"
+        elif ($txt | contains("endpoint_unreachable")) then "endpoint_unreachable"
+        else "none"
+        end;
+    . as $root
+    | ($root.diagnostics // $root.summary.diagnostics // null) as $legacy
+    | ($root.aggregated_diagnostics // null) as $current_agg
+    | ($root.likely_primary_failure // null) as $current_primary
+    | ($root.operator_hint // null) as $current_hint
+    | (if $current_agg != null or $current_primary != null or $current_hint != null then "current"
+       elif $legacy != null then "legacy"
+       else "none"
+       end) as $source_schema
+    | (if $current_agg != null then $current_agg else $legacy end) as $agg_source
+    | {
+        source_schema: $source_schema,
+        legacy: $legacy,
+        aggregated_diagnostics: {
+          transport_mismatch_failures: (($agg_source.transport_mismatch_failures // 0) | to_nonneg_int),
+          token_proof_invalid_failures: (($agg_source.token_proof_invalid_failures // 0) | to_nonneg_int),
+          unknown_exit_failures: (($agg_source.unknown_exit_failures // 0) | to_nonneg_int),
+          directory_trust_failures: (($agg_source.directory_trust_failures // 0) | to_nonneg_int)
+        },
+        likely_primary_failure: (
+          ($current_primary | normalized_primary) as $explicit
+          | if $explicit != "none" then $explicit
+            elif (($agg_source.token_proof_invalid_failures // 0) | to_nonneg_int) > 0 then "token_proof_invalid"
+            elif (($agg_source.unknown_exit_failures // 0) | to_nonneg_int) > 0 then "unknown_exit"
+            elif (($agg_source.transport_mismatch_failures // 0) | to_nonneg_int) > 0 then "transport_mismatch"
+            elif (($agg_source.directory_trust_failures // 0) | to_nonneg_int) > 0 then "directory_trust"
+            else infer_primary_from_legacy($legacy)
+            end
+        ),
+        operator_hint: (
+          if $current_hint == null then ""
+          elif ($current_hint | type) == "string" then $current_hint
+          else ($current_hint | tostring)
+          end
+        )
+      }
+  ' "$campaign_summary_json" 2>/dev/null || true)"
+  if [[ -n "$diagnostics_ingested" ]] && jq -e . >/dev/null 2>&1 <<<"$diagnostics_ingested"; then
+    decision_diagnostics_json="$diagnostics_ingested"
   fi
 fi
 
-if [[ "$decision_diagnostics_json" != "null" ]]; then
-  diagnostics_action_key="$(jq -r '
-    def lower_text:
-      if . == null then ""
-      elif type == "string" then ascii_downcase
-      else (tostring | ascii_downcase)
-      end;
-    . as $diag
-    | (if (($diag | lower_text | contains("token_proof_invalid")) or ($diag | lower_text | contains("unknown_exit")))
-       then "token_or_unknown_exit"
-       elif ($diag | lower_text | contains("transport_mismatch"))
-       then "transport_mismatch"
-       elif ($diag | lower_text | contains("directory_trust"))
-       then "directory_trust"
-       else "none"
-       end)
-  ' <<<"$decision_diagnostics_json")"
-  case "$diagnostics_action_key" in
-    token_or_unknown_exit)
-      next_operator_action="Use a fresh invite key from active issuer and rerun signoff"
-      ;;
-    transport_mismatch)
-      next_operator_action="Rerun with remote docker campaign and opaque/udp transport defaults"
-      ;;
-    directory_trust)
-      next_operator_action="Run trust/runtime reset path then rerun"
-      ;;
-    *)
+diagnostics_primary_failure="$(jq -r '.likely_primary_failure // "none"' <<<"$decision_diagnostics_json" 2>/dev/null || printf '%s' "none")"
+diagnostics_operator_hint="$(jq -r '.operator_hint // ""' <<<"$decision_diagnostics_json" 2>/dev/null || printf '%s' "")"
+case "$diagnostics_primary_failure" in
+  token_proof_invalid|unknown_exit)
+    next_operator_action="Use a fresh invite key from active issuer and rerun signoff"
+    ;;
+  transport_mismatch)
+    next_operator_action="Rerun with remote docker campaign and opaque/udp transport defaults"
+    ;;
+  directory_trust)
+    next_operator_action="Run trust/runtime reset path then rerun"
+    ;;
+  root_required)
+    next_operator_action="Run signoff with sudo (root) or force docker campaign refresh mode, then rerun"
+    ;;
+  endpoint_unreachable)
+    next_operator_action="Verify directory/issuer/entry/exit endpoints are reachable, then rerun signoff"
+    ;;
+  *)
+    if [[ -n "$diagnostics_operator_hint" ]]; then
+      next_operator_action="$diagnostics_operator_hint"
+    else
       next_operator_action=""
-      ;;
-  esac
-fi
+    fi
+    ;;
+esac
 
 if ! is_non_negative_decimal "$support_rate_pct"; then
   support_rate_pct="0"

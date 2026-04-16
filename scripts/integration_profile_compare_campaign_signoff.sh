@@ -839,23 +839,18 @@ DIAG_CAMPAIGN_JSON="$DIAG_REPORTS_DIR/profile_compare_campaign_summary.json"
 DIAG_REPORT_MD="$DIAG_REPORTS_DIR/profile_compare_campaign_report.md"
 printf '# diag report\n' >"$DIAG_REPORT_MD"
 
-run_diag_case() {
+assert_diag_case() {
   local case_name="$1"
-  local diagnostics_json="$2"
-  local expected_action="$3"
+  local expected_source_schema="$2"
+  local expected_primary_failure="$3"
+  local expected_action="$4"
+  local expected_transport_mismatch="${5:-0}"
+  local expected_token_invalid="${6:-0}"
+  local expected_unknown_exit="${7:-0}"
+  local expected_directory_trust="${8:-0}"
+  local expected_operator_hint="${9:-}"
   local summary_out="$TMP_DIR/profile_compare_campaign_signoff_diag_${case_name}.json"
   local check_out="$DIAG_REPORTS_DIR/profile_compare_campaign_check_summary_${case_name}.json"
-
-  cat >"$DIAG_CAMPAIGN_JSON" <<EOF_DIAG
-{
-  "version": 1,
-  "status": "pass",
-  "summary": {"runs_total": 3},
-  "decision": {"recommended_default_profile": "balanced"},
-  "trend": {"status": "pass"},
-  "diagnostics": $diagnostics_json
-}
-EOF_DIAG
 
   SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
   PROFILE_COMPARE_CAMPAIGN_SCRIPT="$FAKE_CAMPAIGN" \
@@ -870,8 +865,29 @@ EOF_DIAG
     --campaign-check-summary-json "$check_out" \
     --summary-json "$summary_out" >/tmp/integration_profile_compare_campaign_signoff_diag_${case_name}.log 2>&1
 
-  if ! jq -e --arg expected_action "$expected_action" --argjson expected_diag "$diagnostics_json" \
-    '.status == "ok" and .final_rc == 0 and .decision.decision == "GO" and .decision.diagnostics == $expected_diag and .decision.next_operator_action == $expected_action' \
+  if ! jq -e \
+    --arg expected_source_schema "$expected_source_schema" \
+    --arg expected_primary_failure "$expected_primary_failure" \
+    --arg expected_action "$expected_action" \
+    --arg expected_operator_hint "$expected_operator_hint" \
+    --argjson expected_transport_mismatch "$expected_transport_mismatch" \
+    --argjson expected_token_invalid "$expected_token_invalid" \
+    --argjson expected_unknown_exit "$expected_unknown_exit" \
+    --argjson expected_directory_trust "$expected_directory_trust" \
+    '
+    .status == "ok"
+    and .final_rc == 0
+    and .decision.decision == "GO"
+    and .decision.next_operator_action == $expected_action
+    and .decision.diagnostics.source_schema == $expected_source_schema
+    and .decision.diagnostics.likely_primary_failure == $expected_primary_failure
+    and (.decision.diagnostics.operator_hint // "") == $expected_operator_hint
+    and .decision.diagnostics.aggregated_diagnostics.transport_mismatch_failures == $expected_transport_mismatch
+    and .decision.diagnostics.aggregated_diagnostics.token_proof_invalid_failures == $expected_token_invalid
+    and .decision.diagnostics.aggregated_diagnostics.unknown_exit_failures == $expected_unknown_exit
+    and .decision.diagnostics.aggregated_diagnostics.directory_trust_failures == $expected_directory_trust
+    and (if $expected_source_schema == "legacy" then .decision.diagnostics.legacy != null else true end)
+    ' \
     "$summary_out" >/dev/null 2>&1; then
     echo "diagnostics mapping assertion failed for case=$case_name"
     cat "$summary_out"
@@ -879,11 +895,98 @@ EOF_DIAG
   fi
 }
 
-run_diag_case "token" '{"failure_kinds":["token_proof_invalid"]}' "Use a fresh invite key from active issuer and rerun signoff"
-run_diag_case "unknown" '{"failure_kinds":["unknown_exit"]}' "Use a fresh invite key from active issuer and rerun signoff"
-run_diag_case "transport" '{"failure_kinds":["transport_mismatch"]}' "Rerun with remote docker campaign and opaque/udp transport defaults"
-run_diag_case "trust" '{"failure_kinds":["directory_trust"]}' "Run trust/runtime reset path then rerun"
-run_diag_case "none" '{"failure_kinds":[]}' ""
+cat >"$DIAG_CAMPAIGN_JSON" <<'EOF_DIAG_TOKEN'
+{
+  "version": 1,
+  "status": "pass",
+  "summary": {"runs_total": 3},
+  "decision": {"recommended_default_profile": "balanced"},
+  "trend": {"status": "pass"},
+  "diagnostics": {"failure_kinds": ["token_proof_invalid"]}
+}
+EOF_DIAG_TOKEN
+assert_diag_case "legacy_token" "legacy" "token_proof_invalid" "Use a fresh invite key from active issuer and rerun signoff"
+
+cat >"$DIAG_CAMPAIGN_JSON" <<'EOF_DIAG_UNKNOWN'
+{
+  "version": 1,
+  "status": "pass",
+  "summary": {"runs_total": 3},
+  "decision": {"recommended_default_profile": "balanced"},
+  "trend": {"status": "pass"},
+  "diagnostics": {"failure_kinds": ["unknown_exit"]}
+}
+EOF_DIAG_UNKNOWN
+assert_diag_case "legacy_unknown" "legacy" "unknown_exit" "Use a fresh invite key from active issuer and rerun signoff"
+
+cat >"$DIAG_CAMPAIGN_JSON" <<'EOF_DIAG_SUMMARY_TRUST'
+{
+  "version": 1,
+  "status": "pass",
+  "summary": {
+    "runs_total": 3,
+    "diagnostics": {"failure_kinds": ["directory_trust"]}
+  },
+  "decision": {"recommended_default_profile": "balanced"},
+  "trend": {"status": "pass"}
+}
+EOF_DIAG_SUMMARY_TRUST
+assert_diag_case "legacy_summary_trust" "legacy" "directory_trust" "Run trust/runtime reset path then rerun"
+
+cat >"$DIAG_CAMPAIGN_JSON" <<'EOF_DIAG_CURRENT_TRANSPORT'
+{
+  "version": 1,
+  "status": "pass",
+  "summary": {"runs_total": 3},
+  "decision": {"recommended_default_profile": "balanced"},
+  "trend": {"status": "pass"},
+  "aggregated_diagnostics": {
+    "transport_mismatch_failures": 2,
+    "token_proof_invalid_failures": 0,
+    "unknown_exit_failures": 0,
+    "directory_trust_failures": 0
+  }
+}
+EOF_DIAG_CURRENT_TRANSPORT
+assert_diag_case "current_transport" "current" "transport_mismatch" "Rerun with remote docker campaign and opaque/udp transport defaults" 2 0 0 0
+
+cat >"$DIAG_CAMPAIGN_JSON" <<'EOF_DIAG_CURRENT_ROOT'
+{
+  "version": 1,
+  "status": "pass",
+  "summary": {"runs_total": 3},
+  "decision": {"recommended_default_profile": "balanced"},
+  "trend": {"status": "pass"},
+  "aggregated_diagnostics": {
+    "transport_mismatch_failures": 0,
+    "token_proof_invalid_failures": 0,
+    "unknown_exit_failures": 0,
+    "directory_trust_failures": 0
+  },
+  "likely_primary_failure": "root_required",
+  "operator_hint": "requires root privileges to run local stack"
+}
+EOF_DIAG_CURRENT_ROOT
+assert_diag_case "current_root_required" "current" "root_required" "Run signoff with sudo (root) or force docker campaign refresh mode, then rerun" 0 0 0 0 "requires root privileges to run local stack"
+
+cat >"$DIAG_CAMPAIGN_JSON" <<'EOF_DIAG_CURRENT_ENDPOINT'
+{
+  "version": 1,
+  "status": "pass",
+  "summary": {"runs_total": 3},
+  "decision": {"recommended_default_profile": "balanced"},
+  "trend": {"status": "pass"},
+  "aggregated_diagnostics": {
+    "transport_mismatch_failures": 0,
+    "token_proof_invalid_failures": 0,
+    "unknown_exit_failures": 0,
+    "directory_trust_failures": 0
+  },
+  "likely_primary_failure": "endpoint_unreachable",
+  "operator_hint": "directory endpoint did not respond"
+}
+EOF_DIAG_CURRENT_ENDPOINT
+assert_diag_case "current_endpoint_unreachable" "current" "endpoint_unreachable" "Verify directory/issuer/entry/exit endpoints are reachable, then rerun signoff" 0 0 0 0 "directory endpoint did not respond"
 
 FAKE_FORWARD="$TMP_DIR/fake_profile_compare_campaign_signoff_forward.sh"
 cat >"$FAKE_FORWARD" <<'EOF_FORWARD'

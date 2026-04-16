@@ -58,6 +58,53 @@ abs_path() {
   fi
 }
 
+is_safe_username() {
+  local username="$1"
+  [[ "$username" =~ ^[A-Za-z_][A-Za-z0-9_.-]*[$]?$ ]]
+}
+
+resolve_sudo_user() {
+  local candidate
+  candidate="$(trim "${SUDO_USER:-}")"
+  if [[ -z "$candidate" || "$candidate" == "root" ]]; then
+    printf '%s\n' ""
+    return
+  fi
+  if ! is_safe_username "$candidate"; then
+    printf '%s\n' ""
+    return
+  fi
+  if ! id -u "$candidate" >/dev/null 2>&1; then
+    printf '%s\n' ""
+    return
+  fi
+  printf '%s\n' "$candidate"
+}
+
+lookup_home_dir_for_user() {
+  local username="$1"
+  local passwd_entry=""
+  local home_dir=""
+  if [[ -z "$username" ]]; then
+    printf '%s\n' ""
+    return
+  fi
+  if command -v getent >/dev/null 2>&1; then
+    passwd_entry="$(getent passwd "$username" 2>/dev/null || true)"
+  fi
+  if [[ -z "$passwd_entry" && -r /etc/passwd ]]; then
+    passwd_entry="$(awk -F: -v user="$username" '$1 == user { print; exit }' /etc/passwd 2>/dev/null || true)"
+  fi
+  if [[ -n "$passwd_entry" ]]; then
+    home_dir="$(printf '%s\n' "$passwd_entry" | cut -d: -f6)"
+  fi
+  if [[ "$home_dir" == /* ]]; then
+    printf '%s\n' "$home_dir"
+  else
+    printf '%s\n' ""
+  fi
+}
+
 need_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
     echo "missing required command: $1"
@@ -71,14 +118,13 @@ manual_validation_state_dir() {
     return
   fi
 
+  local sudo_user=""
   local home_dir=""
   local state_home=""
-  if [[ -n "${SUDO_USER:-}" && "${SUDO_USER:-}" != "root" ]]; then
-    home_dir="$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6 || true)"
-    if [[ -z "$home_dir" ]]; then
-      home_dir="$(eval echo "~$SUDO_USER" 2>/dev/null || true)"
-    fi
-    if [[ -n "$home_dir" && "$home_dir" != "~$SUDO_USER" ]]; then
+  sudo_user="$(resolve_sudo_user)"
+  if [[ -n "$sudo_user" ]]; then
+    home_dir="$(lookup_home_dir_for_user "$sudo_user")"
+    if [[ -n "$home_dir" ]]; then
       state_home="$home_dir/.local/state"
     fi
   fi
@@ -807,6 +853,9 @@ build_profile_default_gate_json() {
   local decision_normalized=""
   local decision_is_no_go="0"
   local insufficient_evidence="0"
+  local decision_diagnostics_json="null"
+  local decision_next_operator_action=""
+  local diagnostics_root_required="0"
   local campaign_summary_json_resolved=""
   local campaign_report_md_resolved=""
   local campaign_check_summary_json_resolved=""
@@ -898,6 +947,26 @@ build_profile_default_gate_json() {
     fi
     recommended_profile="$(jq -r '.decision.recommended_profile // ""' "$signoff_summary_json")"
     trend_source="$(jq -r '.decision.trend_source // ""' "$signoff_summary_json")"
+    decision_diagnostics_json="$(jq -c '.decision.diagnostics // null' "$signoff_summary_json" 2>/dev/null || printf '%s' "null")"
+    decision_next_operator_action="$(jq -r '.decision.next_operator_action // ""' "$signoff_summary_json" 2>/dev/null || true)"
+    diagnostics_root_required="$(jq -r '
+      (.decision.diagnostics // null) as $d
+      | if $d == null then "0"
+        elif ($d | type == "object") and (
+          ($d.root_required == true) or
+          ($d.non_root_refresh_blocked == true)
+        ) then "1"
+        elif (
+          [ $d
+            | .. | scalars
+            | tostring
+            | ascii_downcase
+            | select(test("root_required|non_root_refresh_blocked"))
+          ] | length
+        ) > 0 then "1"
+        else "0"
+        end
+    ' "$signoff_summary_json" 2>/dev/null || echo 0)"
     final_rc="$(jq -r '.final_rc // 0' "$signoff_summary_json")"
     refresh_campaign="$(jq -r '(.inputs.refresh_campaign // false) | if . then "1" else "0" end' "$signoff_summary_json")"
     campaign_summary_json="$(jq -r '.artifacts.campaign_summary_json // ""' "$signoff_summary_json")"
@@ -923,6 +992,9 @@ build_profile_default_gate_json() {
           if [[ "$insufficient_evidence" == "1" ]]; then
             status="pending"
             notes="profile compare campaign signoff decision is NO-GO but campaign-check evidence is insufficient/unstable; rerun with refresh-campaign=1"
+            if [[ -n "$decision_next_operator_action" ]]; then
+              notes="$notes; operator action: $decision_next_operator_action"
+            fi
           else
             status="warn"
             notes="profile compare campaign signoff decision is NO-GO"
@@ -961,6 +1033,9 @@ build_profile_default_gate_json() {
           if [[ "$insufficient_evidence" == "1" ]]; then
             status="pending"
             notes="profile compare campaign signoff decision is NO-GO but campaign-check evidence is insufficient/unstable; rerun with refresh-campaign=1"
+            if [[ -n "$decision_next_operator_action" ]]; then
+              notes="$notes; operator action: $decision_next_operator_action"
+            fi
           else
             status="warn"
             notes="profile compare campaign signoff decision is NO-GO"
@@ -978,6 +1053,13 @@ build_profile_default_gate_json() {
   fi
 
   if [[ "$status" == "pending" && "$next_command" == "$next_command_default" ]]; then
+    # Keep docker rehearsal hint as primary when available; only force sudo from diagnostics
+    # when no docker hint is present, so we preserve non-root reproducibility where possible.
+    if [[ "$diagnostics_root_required" == "1" && "$docker_hint_available" != "1" ]]; then
+      next_command="$next_command_sudo"
+      next_command_source="sudo_required_diagnostics_root_required"
+      next_command_sudo_only_reason="diagnostics_root_required"
+    fi
     if [[ "$docker_hint_available" == "1" ]]; then
       next_command="$next_command_no_sudo"
       next_command_source="${docker_hint_source:-docker_rehearsal_artifacts}"
@@ -1009,6 +1091,9 @@ build_profile_default_gate_json() {
     --arg stale_non_refreshed "$stale_non_refreshed" \
     --arg refresh_campaign "$refresh_campaign" \
     --arg insufficient_evidence "$insufficient_evidence" \
+    --argjson decision_diagnostics "$decision_diagnostics_json" \
+    --arg decision_next_operator_action "$decision_next_operator_action" \
+    --arg diagnostics_root_required "$diagnostics_root_required" \
     --arg campaign_summary_json "$campaign_summary_json" \
     --arg campaign_summary_json_resolved "$campaign_summary_json_resolved" \
     --arg campaign_report_md "$campaign_report_md" \
@@ -1039,6 +1124,9 @@ build_profile_default_gate_json() {
       stale_non_refreshed: ($stale_non_refreshed == "1"),
       refresh_campaign: ($refresh_campaign == "1"),
       insufficient_evidence: ($insufficient_evidence == "1"),
+      decision_diagnostics: $decision_diagnostics,
+      decision_next_operator_action: $decision_next_operator_action,
+      diagnostics_root_required: ($diagnostics_root_required == "1"),
       docker_rehearsal_hint_available: ($docker_hint_available == "1"),
       docker_rehearsal_hint_source: (if $docker_hint_source == "" then null else $docker_hint_source end),
       next_command: $next_command,
