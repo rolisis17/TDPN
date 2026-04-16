@@ -280,6 +280,7 @@ wait_for_directory_endpoint() {
     now_epoch="$(date +%s)"
     if (( endpoint_wait_timeout_sec == 0 || now_epoch >= deadline_epoch )); then
       echo "[profile-default-gate-run] $(timestamp_utc) wait-fail label=$label url=$probe_url attempt=$attempt error=$err_text"
+      echo "[profile-default-gate-run] $(timestamp_utc) failure_kind=unreachable_directory_endpoint label=$label url=$probe_url"
       echo "profile-default-gate-run failed: unreachable directory endpoint ($label) url=$probe_url timeout_sec=$endpoint_wait_timeout_sec"
       echo "last_error: $err_text"
       return 1
@@ -458,6 +459,7 @@ else
 fi
 
 if [[ -z "$campaign_subject_effective" ]]; then
+  echo "[profile-default-gate-run] $(timestamp_utc) failure_kind=missing_invite_subject_precondition env_client_file=$env_client_file"
   echo "profile-default-gate-run failed: missing invite key subject"
   echo "provide --campaign-subject/--subject, or set CAMPAIGN_SUBJECT/INVITE_KEY"
   echo "or define CAMPAIGN_SUBJECT/INVITE_KEY in $env_client_file"
@@ -470,8 +472,8 @@ campaign_directory_urls_passthrough="$(trim "$campaign_directory_urls_passthroug
 if [[ -z "$directory_a_input" || -z "$directory_b_input" ]]; then
   if [[ -n "$campaign_directory_urls_passthrough" ]]; then
     mapfile -t passthrough_directory_urls < <(split_csv_trim "$campaign_directory_urls_passthrough")
-    if (( ${#passthrough_directory_urls[@]} < 2 )); then
-      echo "profile-default-gate-run failed: --campaign-directory-urls must include at least two values (A,B)"
+    if (( ${#passthrough_directory_urls[@]} != 2 )); then
+      echo "profile-default-gate-run failed: --campaign-directory-urls must include exactly two values (A,B)"
       exit 2
     fi
     if [[ -z "$directory_a_input" ]]; then
@@ -497,8 +499,8 @@ campaign_directory_urls_effective="${directory_a_url},${directory_b_url}"
 
 if [[ -n "$campaign_directory_urls_passthrough" ]]; then
   mapfile -t passthrough_directory_urls < <(split_csv_trim "$campaign_directory_urls_passthrough")
-  if (( ${#passthrough_directory_urls[@]} < 2 )); then
-    echo "profile-default-gate-run failed: --campaign-directory-urls must include at least two values (A,B)"
+  if (( ${#passthrough_directory_urls[@]} != 2 )); then
+    echo "profile-default-gate-run failed: --campaign-directory-urls must include exactly two values (A,B)"
     exit 2
   fi
   passthrough_directory_a_url="$(normalize_directory_url "--campaign-directory-urls[A]" "${passthrough_directory_urls[0]}" "$directory_a_port")"

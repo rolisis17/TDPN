@@ -260,8 +260,37 @@ if [[ "$missing_subject_rc" -ne 2 ]]; then
   exit 1
 fi
 assert_file_contains "$MISSING_SUBJECT_LOG" "missing invite key subject" "missing clear missing-subject error text"
+assert_file_contains "$MISSING_SUBJECT_LOG" "failure_kind=missing_invite_subject_precondition" "missing stable missing-subject failure marker"
 if [[ -s "$SIGNOFF_CAPTURE" ]]; then
   echo "missing-subject path should not invoke signoff"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+
+echo "[profile-default-gate-run] campaign-directory-urls rejects 3-value input"
+: >"$SIGNOFF_CAPTURE"
+THREE_URLS_LOG="$TMP_DIR/profile_default_gate_run_three_urls.log"
+set +e
+PATH="$TMP_BIN:$PATH" \
+PROFILE_DEFAULT_GATE_RUN_SIGNOFF_SCRIPT="$FAKE_SIGNOFF" \
+PROFILE_DEFAULT_GATE_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_COUNTER_FILE="$TMP_DIR/curl_counter_three_urls.txt" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_FAIL_ATTEMPTS=0 \
+CAMPAIGN_SUBJECT="inv-env-three-urls" \
+"$SCRIPT_UNDER_TEST" \
+  --host-a "dir-a.test" \
+  --host-b "dir-b.test" \
+  --campaign-directory-urls "dir-a.test,dir-b.test,dir-c.test" >"$THREE_URLS_LOG" 2>&1
+three_urls_rc=$?
+set -e
+if [[ "$three_urls_rc" -ne 2 ]]; then
+  echo "expected three-value campaign-directory-urls path rc=2, got rc=$three_urls_rc"
+  cat "$THREE_URLS_LOG"
+  exit 1
+fi
+assert_file_contains "$THREE_URLS_LOG" "--campaign-directory-urls must include exactly two values (A,B)" "missing clear 3-value campaign-directory-urls rejection text"
+if [[ -s "$SIGNOFF_CAPTURE" ]]; then
+  echo "three-value campaign-directory-urls path should not invoke signoff"
   cat "$SIGNOFF_CAPTURE"
   exit 1
 fi
@@ -290,6 +319,7 @@ if [[ "$unreachable_rc" -eq 0 ]]; then
   exit 1
 fi
 assert_file_contains "$UNREACHABLE_LOG" "unreachable directory endpoint (directory_a)" "missing clear unreachable-endpoint error text"
+assert_file_contains "$UNREACHABLE_LOG" "failure_kind=unreachable_directory_endpoint label=directory_a" "missing stable unreachable-endpoint failure marker"
 if [[ -s "$SIGNOFF_CAPTURE" ]]; then
   echo "unreachable-endpoint path should not invoke signoff"
   cat "$SIGNOFF_CAPTURE"

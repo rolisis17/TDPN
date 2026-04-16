@@ -23,6 +23,8 @@ SLOW1="$TMP_DIR/slow_action_1.sh"
 SLOW2="$TMP_DIR/slow_action_2.sh"
 UNREACHABLE_PROFILE="$TMP_DIR/profile_unreachable.sh"
 MISSING_SUBJECT_PROFILE="$TMP_DIR/profile_missing_subject.sh"
+UNREACHABLE_PROFILE_MARKER="$TMP_DIR/profile_unreachable_marker.sh"
+MISSING_SUBJECT_PROFILE_MARKER="$TMP_DIR/profile_missing_subject_marker.sh"
 FAKE_EASY_NODE="$TMP_DIR/fake_easy_node.sh"
 FAKE_EASY_NODE_CAPTURE="$TMP_DIR/fake_easy_node_capture.log"
 
@@ -91,6 +93,24 @@ echo "or define CAMPAIGN_SUBJECT/INVITE_KEY in runtime/default/env.client"
 exit 2
 EOF_MISSING_SUBJECT_PROFILE
 chmod +x "$MISSING_SUBJECT_PROFILE"
+
+cat >"$UNREACHABLE_PROFILE_MARKER" <<'EOF_UNREACHABLE_PROFILE_MARKER'
+#!/usr/bin/env bash
+set -euo pipefail
+echo "failure_kind=unreachable_directory_endpoint"
+echo "marker-only unreachable endpoint"
+exit 1
+EOF_UNREACHABLE_PROFILE_MARKER
+chmod +x "$UNREACHABLE_PROFILE_MARKER"
+
+cat >"$MISSING_SUBJECT_PROFILE_MARKER" <<'EOF_MISSING_SUBJECT_PROFILE_MARKER'
+#!/usr/bin/env bash
+set -euo pipefail
+echo "failure_kind=missing_invite_subject_precondition"
+echo "marker-only missing subject"
+exit 2
+EOF_MISSING_SUBJECT_PROFILE_MARKER
+chmod +x "$MISSING_SUBJECT_PROFILE_MARKER"
 
 cat >"$FAKE_EASY_NODE" <<'EOF_FAKE_EASY_NODE'
 #!/usr/bin/env bash
@@ -217,11 +237,29 @@ JSON
 }
 JSON
     ;;
+  profile_missing_subject_marker)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"profile_default_gate","label":"Profile default decision gate","command":"bash \"$MISSING_SUBJECT_PROFILE_MARKER\"","reason":"test-precondition-marker"}
+  ]
+}
+JSON
+    ;;
   profile_missing_subject_easy_node)
     cat >"$summary_json" <<JSON
 {
   "next_actions": [
     {"id":"profile_default_gate","label":"Profile default decision gate","command":"bash \"$FAKE_EASY_NODE\" profile-default-gate-run --reports-dir /tmp/fake_profile_reports","reason":"test-precondition-override"}
+  ]
+}
+JSON
+    ;;
+  profile_unreachable_marker)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"profile_default_gate","label":"Profile default decision gate","command":"bash \"$UNREACHABLE_PROFILE_MARKER\"","reason":"test-unreachable-marker"}
   ]
 }
 JSON
@@ -481,6 +519,8 @@ if ! jq -e '
   .status == "pass"
   and .rc == 0
   and .inputs.allow_profile_default_gate_unreachable == false
+  and .inputs.action_timeout_sec == 0
+  and .inputs.profile_default_gate_default_timeout_sec == 1200
   and .inputs.profile_default_gate_subject == "inv-override-subject"
   and .summary.actions_executed == 1
   and .summary.pass == 1
@@ -488,7 +528,9 @@ if ! jq -e '
   and .summary.soft_failed == 0
   and ((.actions // []) | length == 1)
   and .actions[0].id == "profile_default_gate"
+  and ((.actions[0].command // "") | contains("fake_easy_node"))
   and .actions[0].status == "pass"
+  and .actions[0].timeout_sec == 1200
   and ((.actions[0].command // "") | contains("--campaign-subject"))
   and ((.actions[0].soft_failed // false) == false)
 ' "$SUMMARY_PROFILE_SUBJECT_OVERRIDE" >/dev/null; then
@@ -499,6 +541,35 @@ fi
 if ! grep -E -- '--campaign-subject[[:space:]]+inv-override-subject([[:space:]]|$)' "$FAKE_EASY_NODE_CAPTURE" >/dev/null; then
   echo "profile subject override command capture missing appended --campaign-subject"
   cat "$FAKE_EASY_NODE_CAPTURE"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] profile default timeout env override path"
+SUMMARY_PROFILE_TIMEOUT_OVERRIDE="$TMP_DIR/summary_profile_timeout_override.json"
+REPORTS_PROFILE_TIMEOUT_OVERRIDE="$TMP_DIR/reports_profile_timeout_override"
+: >"$FAKE_EASY_NODE_CAPTURE"
+ROADMAP_NEXT_ACTIONS_SCENARIO=profile_missing_subject_easy_node \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" MISSING_SUBJECT_PROFILE="$MISSING_SUBJECT_PROFILE" FAKE_EASY_NODE="$FAKE_EASY_NODE" FAKE_EASY_NODE_CAPTURE="$FAKE_EASY_NODE_CAPTURE" \
+ROADMAP_NEXT_ACTIONS_RUN_PROFILE_DEFAULT_GATE_DEFAULT_TIMEOUT_SEC=321 \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_PROFILE_TIMEOUT_OVERRIDE" \
+  --summary-json "$SUMMARY_PROFILE_TIMEOUT_OVERRIDE" \
+  --profile-default-gate-subject inv-timeout-override \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.action_timeout_sec == 0
+  and .inputs.profile_default_gate_default_timeout_sec == 321
+  and ((.actions // []) | length == 1)
+  and .actions[0].id == "profile_default_gate"
+  and .actions[0].timeout_sec == 321
+  and ((.actions[0].command // "") | contains("--campaign-subject"))
+' "$SUMMARY_PROFILE_TIMEOUT_OVERRIDE" >/dev/null; then
+  echo "profile default timeout override summary mismatch"
+  cat "$SUMMARY_PROFILE_TIMEOUT_OVERRIDE"
   exit 1
 fi
 
@@ -532,6 +603,38 @@ if ! jq -e '
 ' "$SUMMARY_PROFILE_PRECONDITION_SOFT_FAIL" >/dev/null; then
   echo "profile missing-subject soft-fail summary mismatch"
   cat "$SUMMARY_PROFILE_PRECONDITION_SOFT_FAIL"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] profile missing-subject marker soft-fail path"
+SUMMARY_PROFILE_PRECONDITION_MARKER_SOFT_FAIL="$TMP_DIR/summary_profile_precondition_marker_soft_fail.json"
+REPORTS_PROFILE_PRECONDITION_MARKER_SOFT_FAIL="$TMP_DIR/reports_profile_precondition_marker_soft_fail"
+ROADMAP_NEXT_ACTIONS_SCENARIO=profile_missing_subject_marker \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" MISSING_SUBJECT_PROFILE_MARKER="$MISSING_SUBJECT_PROFILE_MARKER" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_PROFILE_PRECONDITION_MARKER_SOFT_FAIL" \
+  --summary-json "$SUMMARY_PROFILE_PRECONDITION_MARKER_SOFT_FAIL" \
+  --allow-profile-default-gate-unreachable 1 \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .summary.actions_executed == 1
+  and .summary.pass == 1
+  and .summary.fail == 0
+  and .summary.soft_failed == 1
+  and ((.actions // []) | length == 1)
+  and .actions[0].id == "profile_default_gate"
+  and .actions[0].status == "pass"
+  and .actions[0].rc == 0
+  and .actions[0].command_rc == 2
+  and .actions[0].failure_kind == "soft_failed_profile_default_gate_precondition"
+  and .actions[0].soft_failed == true
+' "$SUMMARY_PROFILE_PRECONDITION_MARKER_SOFT_FAIL" >/dev/null; then
+  echo "profile missing-subject marker soft-fail summary mismatch"
+  cat "$SUMMARY_PROFILE_PRECONDITION_MARKER_SOFT_FAIL"
   exit 1
 fi
 
@@ -604,6 +707,38 @@ if ! jq -e '
 ' "$SUMMARY_PROFILE_SOFT_FAIL" >/dev/null; then
   echo "profile unreachable soft-fail summary mismatch"
   cat "$SUMMARY_PROFILE_SOFT_FAIL"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] profile unreachable marker soft-fail path"
+SUMMARY_PROFILE_MARKER_SOFT_FAIL="$TMP_DIR/summary_profile_marker_soft_fail.json"
+REPORTS_PROFILE_MARKER_SOFT_FAIL="$TMP_DIR/reports_profile_marker_soft_fail"
+ROADMAP_NEXT_ACTIONS_SCENARIO=profile_unreachable_marker \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" UNREACHABLE_PROFILE_MARKER="$UNREACHABLE_PROFILE_MARKER" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_PROFILE_MARKER_SOFT_FAIL" \
+  --summary-json "$SUMMARY_PROFILE_MARKER_SOFT_FAIL" \
+  --allow-profile-default-gate-unreachable 1 \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .summary.actions_executed == 1
+  and .summary.pass == 1
+  and .summary.fail == 0
+  and .summary.soft_failed == 1
+  and ((.actions // []) | length == 1)
+  and .actions[0].id == "profile_default_gate"
+  and .actions[0].status == "pass"
+  and .actions[0].rc == 0
+  and .actions[0].command_rc == 1
+  and .actions[0].failure_kind == "soft_failed_unreachable_profile_default_gate"
+  and .actions[0].soft_failed == true
+' "$SUMMARY_PROFILE_MARKER_SOFT_FAIL" >/dev/null; then
+  echo "profile unreachable marker soft-fail summary mismatch"
+  cat "$SUMMARY_PROFILE_MARKER_SOFT_FAIL"
   exit 1
 fi
 

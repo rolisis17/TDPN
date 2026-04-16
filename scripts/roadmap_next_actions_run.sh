@@ -30,6 +30,8 @@ Purpose:
 
 Defaults:
   --action-timeout-sec 0   (0 = no per-action timeout)
+  profile_default_gate default timeout sec: 1200
+    (env ROADMAP_NEXT_ACTIONS_RUN_PROFILE_DEFAULT_GATE_DEFAULT_TIMEOUT_SEC)
   --refresh-manual-validation 0
   --refresh-single-machine-readiness 0
   --parallel 0
@@ -46,6 +48,8 @@ Exit behavior:
   - Returns first failing action command rc otherwise.
   - With --profile-default-gate-subject, profile_default_gate actions append
     --campaign-subject when no subject/anon override flag is already present.
+  - With global --action-timeout-sec=0, profile_default_gate gets a default
+    per-action timeout from ROADMAP_NEXT_ACTIONS_RUN_PROFILE_DEFAULT_GATE_DEFAULT_TIMEOUT_SEC.
   - With --allow-profile-default-gate-unreachable=1, profile_default_gate can
     soft-fail on unreachable endpoint logs or missing invite-subject precondition logs.
 USAGE
@@ -123,6 +127,13 @@ command_has_profile_subject_or_anon_arg() {
   return 1
 }
 
+log_has_failure_kind_marker() {
+  local log_path="${1:-}"
+  local marker="${2:-}"
+  [[ -f "$log_path" ]] || return 1
+  grep -E -q "failure_kind[=:]\"?${marker}\"?([[:space:],]|$)" "$log_path"
+}
+
 need_cmd jq
 need_cmd bash
 need_cmd date
@@ -142,6 +153,7 @@ include_id_prefix="${ROADMAP_NEXT_ACTIONS_RUN_INCLUDE_ID_PREFIX:-}"
 exclude_id_prefix="${ROADMAP_NEXT_ACTIONS_RUN_EXCLUDE_ID_PREFIX:-}"
 print_summary_json="${ROADMAP_NEXT_ACTIONS_RUN_PRINT_SUMMARY_JSON:-1}"
 action_timeout_sec="${ROADMAP_NEXT_ACTIONS_RUN_ACTION_TIMEOUT_SEC:-0}"
+profile_default_gate_default_timeout_sec="${ROADMAP_NEXT_ACTIONS_RUN_PROFILE_DEFAULT_GATE_DEFAULT_TIMEOUT_SEC:-1200}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -254,6 +266,11 @@ bool_arg_or_die "--print-summary-json" "$print_summary_json"
 bool_arg_or_die "--allow-profile-default-gate-unreachable" "$allow_profile_default_gate_unreachable"
 int_arg_or_die "--max-actions" "$max_actions"
 int_arg_or_die "--action-timeout-sec" "$action_timeout_sec"
+int_arg_or_die "ROADMAP_NEXT_ACTIONS_RUN_PROFILE_DEFAULT_GATE_DEFAULT_TIMEOUT_SEC" "$profile_default_gate_default_timeout_sec"
+if (( profile_default_gate_default_timeout_sec < 1 )); then
+  echo "ROADMAP_NEXT_ACTIONS_RUN_PROFILE_DEFAULT_GATE_DEFAULT_TIMEOUT_SEC must be >= 1"
+  exit 2
+fi
 
 if (( action_timeout_sec > 0 )); then
   need_cmd timeout
@@ -339,6 +356,11 @@ if (( max_actions > 0 )); then
   selected_actions_json="$(printf '%s\n' "$selected_actions_json" | jq -c --argjson max_actions "$max_actions" '.[:$max_actions]')"
 fi
 
+selected_has_profile_default_gate="$(printf '%s\n' "$selected_actions_json" | jq -r 'any(.[]; (.id // "") == "profile_default_gate")')"
+if [[ "$selected_has_profile_default_gate" == "true" && "$action_timeout_sec" == "0" ]]; then
+  need_cmd timeout
+fi
+
 actions_count="$(printf '%s\n' "$selected_actions_json" | jq -r 'length')"
 selected_action_ids_json="$(printf '%s\n' "$selected_actions_json" | jq -c '[.[] | .id // "" | select(length > 0)]')"
 selected_action_ids_csv="$(printf '%s\n' "$selected_action_ids_json" | jq -r 'join(",")')"
@@ -364,6 +386,7 @@ declare -a action_labels
 declare -a action_reasons
 declare -a action_commands
 declare -a action_logs
+declare -a action_timeout_secs
 
 final_status="pass"
 final_rc=0
@@ -379,6 +402,10 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
   action_label="$(printf '%s\n' "$action_json" | jq -r '.label // ""')"
   action_reason="$(printf '%s\n' "$action_json" | jq -r '.reason // ""')"
   action_command="$(printf '%s\n' "$action_json" | jq -r '.command // ""')"
+  action_timeout_sec_effective="$action_timeout_sec"
+  if [[ "$action_id" == "profile_default_gate" && "$action_timeout_sec" == "0" ]]; then
+    action_timeout_sec_effective="$profile_default_gate_default_timeout_sec"
+  fi
   if [[ "$action_id" == "profile_default_gate" \
      && -n "$profile_default_gate_subject" \
      && -n "$action_command" ]]; then
@@ -395,6 +422,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
   action_reasons[$idx]="$action_reason"
   action_commands[$idx]="$action_command"
   action_logs[$idx]="$action_log"
+  action_timeout_secs[$idx]="$action_timeout_sec_effective"
   action_result_files[$idx]="$action_result_file"
 
   if [[ -z "$action_command" ]]; then
@@ -410,7 +438,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
       --argjson rc 4 \
       --argjson command_rc 4 \
       --argjson timed_out false \
-      --argjson timeout_sec "$action_timeout_sec" \
+      --argjson timeout_sec "$action_timeout_sec_effective" \
       '{
         id: $id,
         label: $label,
@@ -436,8 +464,8 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
         action_failure_kind="command_failed"
         action_notes="command failed"
         set +e
-        if (( action_timeout_sec > 0 )); then
-          timeout --foreground "${action_timeout_sec}s" bash -lc "$action_command" >"$action_log" 2>&1
+        if (( action_timeout_sec_effective > 0 )); then
+          timeout --foreground "${action_timeout_sec_effective}s" bash -lc "$action_command" >"$action_log" 2>&1
         else
           bash -lc "$action_command" >"$action_log" 2>&1
         fi
@@ -451,10 +479,10 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
         else
           action_status="fail"
           action_rc="$command_rc"
-          if (( command_rc == 124 )) && (( action_timeout_sec > 0 )); then
+          if (( command_rc == 124 )) && (( action_timeout_sec_effective > 0 )); then
             action_timed_out="true"
             action_failure_kind="timed_out"
-            action_notes="action timed out after ${action_timeout_sec}s"
+            action_notes="action timed out after ${action_timeout_sec_effective}s"
           fi
         fi
         jq -cn \
@@ -469,7 +497,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
           --argjson rc "$action_rc" \
           --argjson command_rc "$command_rc" \
           --argjson timed_out "$action_timed_out" \
-          --argjson timeout_sec "$action_timeout_sec" \
+          --argjson timeout_sec "$action_timeout_sec_effective" \
           '{
             id: $id,
             label: $label,
@@ -494,8 +522,8 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
       action_failure_kind="command_failed"
       action_notes="command failed"
       set +e
-      if (( action_timeout_sec > 0 )); then
-        timeout --foreground "${action_timeout_sec}s" bash -lc "$action_command" >"$action_log" 2>&1
+      if (( action_timeout_sec_effective > 0 )); then
+        timeout --foreground "${action_timeout_sec_effective}s" bash -lc "$action_command" >"$action_log" 2>&1
       else
         bash -lc "$action_command" >"$action_log" 2>&1
       fi
@@ -509,10 +537,10 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
       else
         action_status="fail"
         action_rc="$command_rc"
-        if (( command_rc == 124 )) && (( action_timeout_sec > 0 )); then
+        if (( command_rc == 124 )) && (( action_timeout_sec_effective > 0 )); then
           action_timed_out="true"
           action_failure_kind="timed_out"
-          action_notes="action timed out after ${action_timeout_sec}s"
+          action_notes="action timed out after ${action_timeout_sec_effective}s"
         fi
       fi
       jq -cn \
@@ -527,7 +555,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
         --argjson rc "$action_rc" \
         --argjson command_rc "$command_rc" \
         --argjson timed_out "$action_timed_out" \
-        --argjson timeout_sec "$action_timeout_sec" \
+        --argjson timeout_sec "$action_timeout_sec_effective" \
         '{
           id: $id,
           label: $label,
@@ -560,6 +588,7 @@ if [[ "$parallel" == "1" ]]; then
         action_reason="${action_reasons[$idx]}"
         action_command="${action_commands[$idx]}"
         action_log="${action_logs[$idx]}"
+        action_timeout_sec_effective="${action_timeout_secs[$idx]:-$action_timeout_sec}"
         action_result_file="${action_result_files[$idx]}"
         jq -cn \
           --arg id "$action_id" \
@@ -573,7 +602,7 @@ if [[ "$parallel" == "1" ]]; then
           --argjson rc "$wait_rc" \
           --argjson command_rc "$wait_rc" \
           --argjson timed_out false \
-          --argjson timeout_sec "$action_timeout_sec" \
+          --argjson timeout_sec "$action_timeout_sec_effective" \
           '{
             id: $id,
             label: $label,
@@ -600,6 +629,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
   action_reason="${action_reasons[$idx]}"
   action_command="${action_commands[$idx]}"
   action_log="${action_logs[$idx]}"
+  action_timeout_sec_effective="${action_timeout_secs[$idx]:-$action_timeout_sec}"
 
   if [[ ! -s "$action_result_file" ]] || ! jq -e . "$action_result_file" >/dev/null 2>&1; then
     jq -cn \
@@ -614,7 +644,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
       --argjson rc 125 \
       --argjson command_rc 125 \
       --argjson timed_out false \
-      --argjson timeout_sec "$action_timeout_sec" \
+      --argjson timeout_sec "$action_timeout_sec_effective" \
       '{
         id: $id,
         label: $label,
@@ -641,7 +671,19 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
   if [[ "$allow_profile_default_gate_unreachable" == "1" \
      && "$action_id" == "profile_default_gate" \
      && "$action_status" != "pass" ]]; then
-    if [[ -f "$action_log" ]] && grep -E -q 'profile-default-gate-run failed:[[:space:]]*missing invite key subject|provide[[:space:]]+--campaign-subject/--subject' "$action_log"; then
+    if log_has_failure_kind_marker "$action_log" "missing_invite_subject_precondition"; then
+      action_status="pass"
+      action_rc=0
+      action_failure_kind="soft_failed_profile_default_gate_precondition"
+      action_notes="soft-failed profile_default_gate missing invite-subject precondition (allow flag enabled)"
+      action_soft_failed="true"
+    elif log_has_failure_kind_marker "$action_log" "unreachable_directory_endpoint"; then
+      action_status="pass"
+      action_rc=0
+      action_failure_kind="soft_failed_unreachable_profile_default_gate"
+      action_notes="soft-failed unreachable profile_default_gate (allow flag enabled)"
+      action_soft_failed="true"
+    elif [[ -f "$action_log" ]] && grep -E -q 'profile-default-gate-run failed:[[:space:]]*missing invite key subject|provide[[:space:]]+--campaign-subject/--subject' "$action_log"; then
       action_status="pass"
       action_rc=0
       action_failure_kind="soft_failed_profile_default_gate_precondition"
@@ -726,6 +768,7 @@ jq -n \
   --argjson max_actions "$max_actions" \
   --arg profile_default_gate_subject "$profile_default_gate_subject" \
   --argjson allow_profile_default_gate_unreachable "$allow_profile_default_gate_unreachable" \
+  --argjson profile_default_gate_default_timeout_sec "$profile_default_gate_default_timeout_sec" \
   --argjson action_timeout_sec "$action_timeout_sec" \
   --argjson actions_count "$actions_count" \
   --argjson selected_action_ids "$selected_action_ids_json" \
@@ -748,6 +791,7 @@ jq -n \
       parallel: ($parallel == 1),
       max_actions: $max_actions,
       action_timeout_sec: $action_timeout_sec,
+      profile_default_gate_default_timeout_sec: $profile_default_gate_default_timeout_sec,
       profile_default_gate_subject: (if $profile_default_gate_subject == "" then null else $profile_default_gate_subject end),
       allow_profile_default_gate_unreachable: ($allow_profile_default_gate_unreachable == 1),
       include_id_prefix: (if $include_id_prefix == "" then null else $include_id_prefix end),
