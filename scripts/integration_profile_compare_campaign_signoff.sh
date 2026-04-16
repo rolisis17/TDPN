@@ -513,6 +513,18 @@ done
 echo "[profile-compare-campaign-signoff] campaign timeout fail-close with heartbeat diagnostics"
 : >"$SIGNOFF_CAPTURE"
 CAMPAIGN_TIMEOUT_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_campaign_timeout.json"
+CAMPAIGN_TIMEOUT_REPORTS_DIR="$TMP_DIR/reports_campaign_timeout"
+mkdir -p "$CAMPAIGN_TIMEOUT_REPORTS_DIR"
+cat >"$CAMPAIGN_TIMEOUT_REPORTS_DIR/profile_compare_campaign_check_summary.json" <<'JSON'
+{
+  "decision": "GO",
+  "observed": {
+    "recommended_profile": "balanced",
+    "support_rate_pct": 91,
+    "trend_source": "stale_prior_run"
+  }
+}
+JSON
 set +e
 SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
 PROFILE_COMPARE_CAMPAIGN_SCRIPT="$FAKE_CAMPAIGN" \
@@ -522,7 +534,7 @@ FAKE_CAMPAIGN_SLEEP_SEC=4 \
 FAKE_CAMPAIGN_RC=0 \
 FAKE_CHECK_RC=0 \
 ./scripts/profile_compare_campaign_signoff.sh \
-  --reports-dir "$TMP_DIR/reports_campaign_timeout" \
+  --reports-dir "$CAMPAIGN_TIMEOUT_REPORTS_DIR" \
   --refresh-campaign 1 \
   --campaign-timeout-sec 2 \
   --summary-json "$CAMPAIGN_TIMEOUT_SUMMARY" >/tmp/integration_profile_compare_campaign_signoff_campaign_timeout.log 2>&1
@@ -549,7 +561,7 @@ if [[ "$(wc -l < "$SIGNOFF_CAPTURE")" -ne 1 ]]; then
   cat "$SIGNOFF_CAPTURE"
   exit 1
 fi
-if ! jq -e '.status == "fail" and .final_rc == 124 and .failure_stage == "campaign" and .inputs.campaign_refresh_runtime.timeout_sec == 2 and .inputs.campaign_refresh_runtime.heartbeat_interval_sec == 1 and .stages.campaign.status == "fail" and .stages.campaign.timed_out == true and .stages.campaign.timeout_sec == 2 and .stages.campaign.duration_sec >= 2 and .stages.campaign.heartbeat_count >= 1 and (.stages.campaign.failure_reason | type == "string") and (.stages.campaign.failure_reason | contains("timed out")) and .stages.campaign_check.attempted == false' "$CAMPAIGN_TIMEOUT_SUMMARY" >/dev/null 2>&1; then
+if ! jq -e '.status == "fail" and .final_rc == 124 and .failure_stage == "campaign" and .decision.decision == "NO-GO" and .decision.context == "synthetic_campaign_failure" and .decision.from_campaign_check_summary == false and (.decision.reason | type == "string") and (.decision.reason | contains("timed out")) and .decision.diagnostics.source_schema == "synthetic_stage_failure" and .decision.diagnostics.likely_primary_failure == "campaign_timeout" and .inputs.campaign_refresh_runtime.timeout_sec == 2 and .inputs.campaign_refresh_runtime.heartbeat_interval_sec == 1 and .stages.campaign.status == "fail" and .stages.campaign.timed_out == true and .stages.campaign.timeout_sec == 2 and .stages.campaign.duration_sec >= 2 and .stages.campaign.heartbeat_count >= 1 and (.stages.campaign.failure_reason | type == "string") and (.stages.campaign.failure_reason | contains("timed out")) and .stages.campaign_check.attempted == false' "$CAMPAIGN_TIMEOUT_SUMMARY" >/dev/null 2>&1; then
   echo "campaign-timeout summary JSON missing expected fields"
   cat "$CAMPAIGN_TIMEOUT_SUMMARY"
   exit 1
@@ -558,6 +570,18 @@ fi
 echo "[profile-compare-campaign-signoff] campaign failure fail-close"
 : >"$SIGNOFF_CAPTURE"
 CAMPAIGN_FAIL_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_campaign_fail.json"
+CAMPAIGN_FAIL_REPORTS_DIR="$TMP_DIR/reports_campaign_fail"
+mkdir -p "$CAMPAIGN_FAIL_REPORTS_DIR"
+cat >"$CAMPAIGN_FAIL_REPORTS_DIR/profile_compare_campaign_check_summary.json" <<'JSON'
+{
+  "decision": "GO",
+  "observed": {
+    "recommended_profile": "balanced",
+    "support_rate_pct": 88,
+    "trend_source": "stale_prior_run"
+  }
+}
+JSON
 set +e
 SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
 PROFILE_COMPARE_CAMPAIGN_SCRIPT="$FAKE_CAMPAIGN" \
@@ -565,7 +589,7 @@ PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT="$FAKE_CHECK" \
 FAKE_CAMPAIGN_RC=23 \
 FAKE_CHECK_RC=0 \
 ./scripts/profile_compare_campaign_signoff.sh \
-  --reports-dir "$TMP_DIR/reports_campaign_fail" \
+  --reports-dir "$CAMPAIGN_FAIL_REPORTS_DIR" \
   --refresh-campaign 1 \
   --summary-json "$CAMPAIGN_FAIL_SUMMARY" >/tmp/integration_profile_compare_campaign_signoff_campaign_fail.log 2>&1
 rc_campaign_fail=$?
@@ -580,7 +604,7 @@ if [[ "$(wc -l < "$SIGNOFF_CAPTURE")" -ne 1 ]]; then
   cat "$SIGNOFF_CAPTURE"
   exit 1
 fi
-if ! jq -e '.status == "fail" and .final_rc == 23 and .failure_stage == "campaign" and .stages.campaign.status == "fail" and .stages.campaign_check.attempted == false' "$CAMPAIGN_FAIL_SUMMARY" >/dev/null 2>&1; then
+if ! jq -e '.status == "fail" and .final_rc == 23 and .failure_stage == "campaign" and .decision.decision == "NO-GO" and .decision.context == "synthetic_campaign_failure" and .decision.from_campaign_check_summary == false and (.decision.reason | type == "string") and (.decision.reason | contains("campaign refresh command failed rc=23")) and .decision.diagnostics.source_schema == "synthetic_stage_failure" and .decision.diagnostics.likely_primary_failure == "campaign_failure" and .stages.campaign.status == "fail" and .stages.campaign_check.attempted == false' "$CAMPAIGN_FAIL_SUMMARY" >/dev/null 2>&1; then
   echo "campaign-fail summary JSON missing expected fields"
   cat "$CAMPAIGN_FAIL_SUMMARY"
   exit 1

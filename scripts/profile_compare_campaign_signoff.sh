@@ -906,7 +906,7 @@ trend_source_value=""
 decision_diagnostics_json='{"source_schema":"none","legacy":null,"aggregated_diagnostics":{"transport_mismatch_failures":0,"token_proof_invalid_failures":0,"unknown_exit_failures":0,"directory_trust_failures":0,"root_required_failures":0,"endpoint_unreachable_failures":0},"likely_primary_failure":"none","operator_hint":""}'
 next_operator_action=""
 campaign_check_summary_present=0
-if [[ -f "$campaign_check_summary_json" ]] && jq -e . "$campaign_check_summary_json" >/dev/null 2>&1; then
+if [[ "$check_attempted" == "1" && -f "$campaign_check_summary_json" ]] && jq -e . "$campaign_check_summary_json" >/dev/null 2>&1; then
   campaign_check_summary_present=1
   decision="$(jq -r '.decision // "unknown"' "$campaign_check_summary_json")"
   decision_context="campaign_check_summary"
@@ -915,7 +915,7 @@ if [[ -f "$campaign_check_summary_json" ]] && jq -e . "$campaign_check_summary_j
   trend_source_value="$(jq -r '.observed.trend_source // ""' "$campaign_check_summary_json")"
 fi
 
-if [[ -f "$campaign_summary_json" ]] && jq -e . "$campaign_summary_json" >/dev/null 2>&1; then
+if [[ "$check_attempted" == "1" && -f "$campaign_summary_json" ]] && jq -e . "$campaign_summary_json" >/dev/null 2>&1; then
   diagnostics_ingested="$(jq -c '
     def to_nonneg_int:
       if . == null then 0
@@ -1013,6 +1013,47 @@ esac
 
 if ! is_non_negative_decimal "$support_rate_pct"; then
   support_rate_pct="0"
+fi
+if [[ "$failure_stage" == "campaign" ]]; then
+  synthetic_failure_kind="campaign_failure"
+  if [[ "$campaign_timeout_triggered" == "1" ]]; then
+    synthetic_failure_kind="campaign_timeout"
+  fi
+  decision="NO-GO"
+  decision_context="synthetic_campaign_failure"
+  campaign_check_summary_present=0
+  recommended_profile=""
+  support_rate_pct="0"
+  trend_source_value=""
+  if [[ -n "$campaign_failure_reason" ]]; then
+    decision_reason="$campaign_failure_reason"
+  elif [[ "$campaign_timeout_triggered" == "1" ]]; then
+    decision_reason="campaign refresh timed out after ${campaign_timeout_sec}s"
+  else
+    decision_reason="campaign stage failed before campaign-check"
+  fi
+  if [[ "$campaign_timeout_triggered" == "1" ]]; then
+    next_operator_action="Investigate campaign timeout, verify endpoint availability, and rerun signoff"
+  else
+    next_operator_action="Inspect campaign log and rerun signoff after fixing campaign-stage failure"
+  fi
+  decision_diagnostics_json="$(jq -nc \
+    --arg synthetic_failure_kind "$synthetic_failure_kind" \
+    --arg operator_hint "$next_operator_action" \
+    '{
+      source_schema: "synthetic_stage_failure",
+      legacy: null,
+      aggregated_diagnostics: {
+        transport_mismatch_failures: 0,
+        token_proof_invalid_failures: 0,
+        unknown_exit_failures: 0,
+        directory_trust_failures: 0,
+        root_required_failures: 0,
+        endpoint_unreachable_failures: 0
+      },
+      likely_primary_failure: $synthetic_failure_kind,
+      operator_hint: $operator_hint
+    }')"
 fi
 if [[ "$decision" == "unknown" && "$failure_stage" == "campaign_check" ]]; then
   decision="NO-GO"
