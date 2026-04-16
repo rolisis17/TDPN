@@ -204,6 +204,12 @@ echo "[ci] phase-5 settlement layer handoff run integration"
 echo "[ci] phase-5 settlement layer summary report integration"
 ./scripts/integration_phase5_settlement_layer_summary_report.sh
 
+echo "[ci] phase-6 cosmos l1 contracts gate integration"
+./scripts/integration_ci_phase6_cosmos_l1_contracts.sh
+
+echo "[ci] phase-6 cosmos l1 contracts live smoke integration"
+./scripts/integration_phase6_cosmos_l1_contracts_live_smoke.sh
+
 echo "[ci] phase-6 cosmos l1 summary report integration"
 ./scripts/integration_phase6_cosmos_l1_summary_report.sh
 

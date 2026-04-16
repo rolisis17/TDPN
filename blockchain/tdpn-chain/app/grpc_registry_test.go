@@ -349,7 +349,7 @@ func TestRegisterGRPCServicesValidatorAndGovernanceRoundTrip(t *testing.T) {
 			ConsensusAddress: "tdpnvalcons1grpcroundtrip",
 			LifecycleStatus:  "active",
 			EvidenceHeight:   42,
-			EvidenceRef:      "evidence://validator/grpc/42",
+			EvidenceRef:      "obj://validator/grpc/42",
 			RecordedAtUnix:   1713001002,
 			Status:           vpnvalidatorpb.ReconciliationStatus_RECONCILIATION_STATUS_PENDING,
 		},

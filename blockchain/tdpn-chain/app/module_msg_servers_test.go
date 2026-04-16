@@ -92,7 +92,7 @@ func TestSlashingMsgServer_AccessorAndFlow(t *testing.T) {
 	evidence := slashingtypes.SlashEvidence{
 		EvidenceID: "evidence-1",
 		Kind:       slashingtypes.EvidenceKindObjective,
-		ProofHash:  "sha256:abc",
+		ProofHash:  "sha256:6ca13d52ca70c883e0f0bb101e425a89e8624de51db2d2392593af6a84118090",
 	}
 	evResp, err := server.SubmitEvidence(context.Background(), SlashingSubmitEvidenceRequest{Record: evidence})
 	if err != nil {
@@ -138,7 +138,7 @@ func TestSlashingMsgServer_NilScaffold(t *testing.T) {
 		Record: slashingtypes.SlashEvidence{
 			EvidenceID: "evidence-nil",
 			Kind:       slashingtypes.EvidenceKindObjective,
-			ProofHash:  "sha256:nil",
+			ProofHash:  "sha256:97a85b9f687bba82d44975f5f92f40894dc150ae53b4683e2e1509313bac6f73",
 		},
 	})
 	if err == nil {

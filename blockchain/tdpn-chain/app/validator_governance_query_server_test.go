@@ -64,7 +64,7 @@ func TestValidatorQueryServer_AccessorHappyPathAndNotFound(t *testing.T) {
 		ValidatorID:     eligibility.ValidatorID,
 		LifecycleStatus: validatortypes.ValidatorLifecycleActive,
 		EvidenceHeight:  10,
-		EvidenceRef:     "sha256:status-query-1",
+		EvidenceRef:     "sha256:ce1ad56555311a8b138899bc99700d80aa1b55950daeab84a859a0c9f5fca6db",
 	}
 	if _, err := msgServer.RecordValidatorStatus(validatormodule.RecordValidatorStatusRequest{Record: status}); err != nil {
 		t.Fatalf("expected record validator status to succeed, got %v", err)
