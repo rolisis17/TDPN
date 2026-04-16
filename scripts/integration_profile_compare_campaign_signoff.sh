@@ -14,6 +14,12 @@ done
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
+TEST_LOG_DIR="$TMP_DIR/easy-node-logs"
+TEST_STATE_DIR="$TMP_DIR/manual-validation-state"
+mkdir -p "$TEST_LOG_DIR" "$TEST_STATE_DIR"
+export EASY_NODE_LOG_DIR="$TEST_LOG_DIR"
+export EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$TEST_STATE_DIR"
+
 SIGNOFF_CAPTURE="$TMP_DIR/signoff_capture.log"
 FORWARD_CAPTURE="$TMP_DIR/forward_capture.log"
 
@@ -22,6 +28,10 @@ cat >"$FAKE_CAMPAIGN" <<'EOF_FAKE_CAMPAIGN'
 #!/usr/bin/env bash
 set -euo pipefail
 printf 'campaign %s\n' "$*" >>"${SIGNOFF_CAPTURE_FILE:?}"
+if [[ "${FAKE_CAMPAIGN_FAIL_UNLESS_DOCKER:-0}" == "1" && " $* " != *" --execution-mode docker "* ]]; then
+  echo "${FAKE_CAMPAIGN_FAIL_MESSAGE:---start-local-stack=1 requires root (run with sudo)}" >&2
+  exit "${FAKE_CAMPAIGN_FAIL_UNLESS_DOCKER_RC:-31}"
+fi
 summary_json=""
 report_md=""
 while [[ $# -gt 0 ]]; do
@@ -180,6 +190,212 @@ for expected in \
   '--start-local-stack 0'; do
   if ! rg -q -- "$expected" "$SIGNOFF_CAPTURE"; then
     echo "expected campaign forwarding flag missing: $expected"
+    cat "$SIGNOFF_CAPTURE"
+    exit 1
+  fi
+done
+
+echo "[profile-compare-campaign-signoff] reuse existing campaign summary without refresh"
+: >"$SIGNOFF_CAPTURE"
+REUSE_REPORTS_DIR="$TMP_DIR/reports_reuse"
+REUSE_TREND_JSON="$REUSE_REPORTS_DIR/profile_compare_trend_summary.json"
+REUSE_CAMPAIGN_JSON="$REUSE_REPORTS_DIR/profile_compare_campaign_summary.json"
+REUSE_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_reuse_summary.json"
+mkdir -p "$REUSE_REPORTS_DIR"
+cat >"$REUSE_TREND_JSON" <<EOF_REUSE_TREND
+{
+  "version": 1,
+  "status": "pass",
+  "rc": 0,
+  "notes": "trend pass",
+  "summary": {
+    "reports_total": 3,
+    "pass_reports": 3,
+    "warn_reports": 0,
+    "fail_reports": 0
+  },
+  "decision": {
+    "recommended_default_profile": "balanced",
+    "source": "policy_reliability_latency",
+    "rationale": "balanced is reliable",
+    "recommendation_support_rate_pct": 80.0
+  },
+  "profiles": []
+}
+EOF_REUSE_TREND
+cat >"$REUSE_CAMPAIGN_JSON" <<EOF_REUSE_CAMPAIGN
+{
+  "version": 1,
+  "status": "pass",
+  "rc": 0,
+  "notes": "campaign pass",
+  "summary": {
+    "runs_total": 3,
+    "runs_pass": 3,
+    "runs_warn": 0,
+    "runs_fail": 0,
+    "runs_with_summary": 3
+  },
+  "decision": {
+    "recommended_default_profile": "balanced",
+    "source": "policy_reliability_latency",
+    "rationale": "balanced remains best"
+  },
+  "trend": {
+    "status": "pass",
+    "rc": 0,
+    "notes": "trend pass",
+    "summary_json": "$REUSE_TREND_JSON"
+  },
+  "runs": []
+}
+EOF_REUSE_CAMPAIGN
+
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_COMPARE_CAMPAIGN_SCRIPT="$FAKE_CAMPAIGN" \
+PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT="$FAKE_CHECK" \
+FAKE_CAMPAIGN_RC=99 \
+FAKE_CHECK_RC=0 \
+FAKE_CHECK_DECISION=GO \
+./scripts/profile_compare_campaign_signoff.sh \
+  --reports-dir "$REUSE_REPORTS_DIR" \
+  --refresh-campaign 0 \
+  --summary-json "$REUSE_SUMMARY" >/tmp/integration_profile_compare_campaign_signoff_reuse.log 2>&1
+
+if ! rg -q '\[profile-compare-campaign-signoff\] status=ok final_rc=0 decision=GO' /tmp/integration_profile_compare_campaign_signoff_reuse.log; then
+  echo "expected reuse status line not found"
+  cat /tmp/integration_profile_compare_campaign_signoff_reuse.log
+  exit 1
+fi
+if [[ "$(wc -l < "$SIGNOFF_CAPTURE")" -ne 1 ]]; then
+  echo "reuse path should only run the campaign-check stage"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+if ! jq -e '.status == "ok" and .final_rc == 0 and .inputs.refresh_campaign == false and .inputs.refresh_campaign_effective == false and .inputs.campaign_summary_reused == true and .stages.campaign.status == "skip" and .stages.campaign.attempted == false and .stages.campaign_check.status == "pass" and .stages.campaign_check.attempted == true' "$REUSE_SUMMARY" >/dev/null 2>&1; then
+  echo "reuse summary JSON missing expected fields"
+  cat "$REUSE_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-compare-campaign-signoff] refresh-campaign 1 runs campaign even when summary already exists"
+: >"$SIGNOFF_CAPTURE"
+REUSE_FORCE_REFRESH_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_reuse_force_refresh_summary.json"
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_COMPARE_CAMPAIGN_SCRIPT="$FAKE_CAMPAIGN" \
+PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT="$FAKE_CHECK" \
+FAKE_CAMPAIGN_RC=0 \
+FAKE_CHECK_RC=0 \
+FAKE_CHECK_DECISION=GO \
+./scripts/profile_compare_campaign_signoff.sh \
+  --reports-dir "$REUSE_REPORTS_DIR" \
+  --refresh-campaign 1 \
+  --summary-json "$REUSE_FORCE_REFRESH_SUMMARY" >/tmp/integration_profile_compare_campaign_signoff_reuse_force_refresh.log 2>&1
+
+if ! rg -q '\[profile-compare-campaign-signoff\] status=ok final_rc=0 decision=GO' /tmp/integration_profile_compare_campaign_signoff_reuse_force_refresh.log; then
+  echo "expected forced-refresh status line not found"
+  cat /tmp/integration_profile_compare_campaign_signoff_reuse_force_refresh.log
+  exit 1
+fi
+if [[ "$(wc -l < "$SIGNOFF_CAPTURE")" -ne 2 ]]; then
+  echo "forced-refresh path should run campaign and campaign-check stages"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+if ! jq -e '.status == "ok" and .final_rc == 0 and .inputs.refresh_campaign == true and .inputs.refresh_campaign_effective == true and .inputs.campaign_summary_reused == false and .stages.campaign.status == "pass" and .stages.campaign.attempted == true and .stages.campaign_check.status == "pass" and .stages.campaign_check.attempted == true' "$REUSE_FORCE_REFRESH_SUMMARY" >/dev/null 2>&1; then
+  echo "forced-refresh summary JSON missing expected fields"
+  cat "$REUSE_FORCE_REFRESH_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-compare-campaign-signoff] refresh uses docker inputs when remote endpoints are provided"
+: >"$SIGNOFF_CAPTURE"
+REMOTE_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_remote_summary.json"
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_COMPARE_CAMPAIGN_SCRIPT="$FAKE_CAMPAIGN" \
+PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT="$FAKE_CHECK" \
+FAKE_CAMPAIGN_RC=0 \
+FAKE_CHECK_RC=0 \
+FAKE_CHECK_DECISION=GO \
+./scripts/profile_compare_campaign_signoff.sh \
+  --reports-dir "$TMP_DIR/reports_remote" \
+  --refresh-campaign 1 \
+  --campaign-directory-urls "http://127.0.0.1:18081,http://127.0.0.1:28081" \
+  --campaign-bootstrap-directory "http://127.0.0.1:18081" \
+  --campaign-discovery-wait-sec 7 \
+  --campaign-issuer-url "http://127.0.0.1:18082" \
+  --campaign-entry-url "http://127.0.0.1:18083" \
+  --campaign-exit-url "http://127.0.0.1:18084" \
+  --summary-json "$REMOTE_SUMMARY" >/tmp/integration_profile_compare_campaign_signoff_remote.log 2>&1
+
+if ! rg -q '\[profile-compare-campaign-signoff\] status=ok final_rc=0 decision=GO' /tmp/integration_profile_compare_campaign_signoff_remote.log; then
+  echo "expected remote refresh status line not found"
+  cat /tmp/integration_profile_compare_campaign_signoff_remote.log
+  exit 1
+fi
+remote_forward_line="$(sed -n '1p' "$SIGNOFF_CAPTURE" || true)"
+for expected in \
+  '--execution-mode docker' \
+  '--start-local-stack 0' \
+  '--directory-urls http://127.0.0.1:18081,http://127.0.0.1:28081' \
+  '--bootstrap-directory http://127.0.0.1:18081' \
+  '--discovery-wait-sec 7' \
+  '--issuer-url http://127.0.0.1:18082' \
+  '--entry-url http://127.0.0.1:18083' \
+  '--exit-url http://127.0.0.1:18084'; do
+  if ! grep -F -- "$expected" <<<"$remote_forward_line" >/dev/null; then
+    echo "remote refresh path missing $expected"
+    cat "$SIGNOFF_CAPTURE"
+    exit 1
+  fi
+done
+if ! jq -e '.status == "ok" and .final_rc == 0 and .inputs.refresh_campaign == true and .inputs.refresh_campaign_effective == true and .inputs.campaign_refresh_overrides_effective.execution_mode == "docker" and .inputs.campaign_refresh_overrides_effective.start_local_stack == "0"' "$REMOTE_SUMMARY" >/dev/null 2>&1; then
+  echo "remote refresh summary JSON missing expected fields"
+  cat "$REMOTE_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-compare-campaign-signoff] automatic docker fallback when local refresh is root-blocked"
+: >"$SIGNOFF_CAPTURE"
+AUTO_FALLBACK_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_auto_fallback.json"
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_COMPARE_CAMPAIGN_SCRIPT="$FAKE_CAMPAIGN" \
+PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT="$FAKE_CHECK" \
+FAKE_CAMPAIGN_FAIL_UNLESS_DOCKER=1 \
+FAKE_CAMPAIGN_FAIL_MESSAGE='--start-local-stack=1 requires root (run with sudo)' \
+FAKE_CHECK_RC=0 \
+FAKE_CHECK_DECISION=GO \
+./scripts/profile_compare_campaign_signoff.sh \
+  --reports-dir "$TMP_DIR/reports_auto_fallback" \
+  --refresh-campaign 1 \
+  --summary-json "$AUTO_FALLBACK_SUMMARY" >/tmp/integration_profile_compare_campaign_signoff_auto_fallback.log 2>&1
+
+if ! rg -q '\[profile-compare-campaign-signoff\] campaign auto-fallback: mode=local->docker reason=local stack requires root' /tmp/integration_profile_compare_campaign_signoff_auto_fallback.log; then
+  echo "expected auto-fallback trace line not found"
+  cat /tmp/integration_profile_compare_campaign_signoff_auto_fallback.log
+  exit 1
+fi
+if ! jq -e '.status == "ok" and .final_rc == 0 and .inputs.refresh_campaign == true and .inputs.campaign_refresh_overrides.execution_mode == null and .inputs.campaign_refresh_overrides_effective.execution_mode == "docker" and .inputs.campaign_refresh_overrides_effective.start_local_stack == "0" and .inputs.campaign_refresh_fallback.eligible == true and .inputs.campaign_refresh_fallback.attempted == true and .inputs.campaign_refresh_fallback.triggered == true and .inputs.campaign_refresh_fallback.reason == "local stack requires root" and .inputs.campaign_refresh_fallback.initial_mode == "local" and .inputs.campaign_refresh_fallback.effective_mode == "docker" and .stages.campaign.status == "pass" and .stages.campaign.initial_command != null and .stages.campaign.fallback_command != null and .stages.campaign.initial_log != null and .stages.campaign.fallback_log != null and .stages.campaign_check.status == "pass"' "$AUTO_FALLBACK_SUMMARY" >/dev/null 2>&1; then
+  echo "auto-fallback summary JSON missing expected fields"
+  cat "$AUTO_FALLBACK_SUMMARY"
+  exit 1
+fi
+first_campaign_line="$(sed -n '1p' "$SIGNOFF_CAPTURE" || true)"
+second_campaign_line="$(sed -n '2p' "$SIGNOFF_CAPTURE" || true)"
+third_line="$(sed -n '3p' "$SIGNOFF_CAPTURE" || true)"
+if [[ "$first_campaign_line" != campaign* || "$second_campaign_line" != campaign* || "$third_line" != check* ]]; then
+  echo "auto-fallback path should run campaign, campaign fallback, then check"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+if grep -F -- '--execution-mode docker' <<<"$first_campaign_line" >/dev/null; then
+  echo "first auto-fallback attempt should preserve implicit local execution mode"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+for expected in '--execution-mode docker' '--start-local-stack 0'; do
+  if ! grep -F -- "$expected" <<<"$second_campaign_line" >/dev/null; then
+    echo "fallback campaign attempt missing $expected"
     cat "$SIGNOFF_CAPTURE"
     exit 1
   fi

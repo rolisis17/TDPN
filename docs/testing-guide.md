@@ -217,7 +217,12 @@ Retry example:
 
 - Purpose: resolve `vpn_track.non_blockchain_actionable_no_sudo_or_github` from `roadmap_progress_report`, then execute selected actions in one wrapper run.
 - Recommended use: `--recommended-only 1` for one fast next action, or run without it to execute all currently listed no-sudo/no-GitHub actions.
+- Clean launcher/wiring invocation path (same behavior through easy-node command routing):
+```bash
+./scripts/easy_node.sh roadmap-non-blockchain-actionable-run --recommended-only 1 --print-summary-json 1
+```
 - Optional limit: `--max-actions N` to cap how many actions run in one pass.
+- Optional parallel execution: `--parallel 1` to run selected no-sudo actions concurrently and reduce wall-clock time.
 - Optional per-action timeout: `--action-timeout-sec N` (or env `ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_ACTION_TIMEOUT_SEC`), where `0` keeps current unlimited behavior.
 - Timeout semantics: timed-out actions are marked `status=fail` with `timed_out=true`, `failure_kind=timed_out`, and `timeout_sec=N`; the runner continues remaining actions, and wrapper exit code still follows the first failing action (`124` for timeout).
 - Expected artifacts: one wrapper summary JSON and per-action logs under `.easy-node-logs/roadmap_non_blockchain_actionable_run_<stamp>/`.
@@ -384,6 +389,7 @@ Status:
 - `integration_ci_phase5_settlement_layer.sh` validates the Phase-5 gate contract.
 - canonical Phase-5 CI settlement blockchain stages include `settlement_adapter_roundtrip`, `settlement_adapter_signed_tx_roundtrip`, `settlement_shadow_env`, `settlement_shadow_status_surface`, `settlement_dual_asset_parity`, and `issuer_sponsor_api_live_smoke` (wired to `scripts/integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh`, `scripts/integration_cosmos_adapter_tdpnd_signed_tx_roundtrip.sh`, `scripts/integration_cosmos_settlement_shadow_env.sh`, `scripts/integration_cosmos_settlement_shadow_status_surface.sh`, `scripts/integration_cosmos_settlement_dual_asset_parity.sh`, and `scripts/integration_issuer_sponsor_api_live_smoke.sh`).
 - canonical Phase-5 CI settlement blockchain stages also include `issuer_admin_blockchain_handlers_coverage` wired to `scripts/integration_issuer_admin_blockchain_handlers_coverage_floor.sh`, validating issuer admin blockchain handler coverage floor for `upsert/promote/reputation/bond/recompute/get-subject/anon issue+revoke/audit/revoke-token`.
+- canonical Phase-6 Cosmos L1 contracts posture includes `cosmos_module_coverage_floor`, `cosmos_keeper_coverage_floor`, and `cosmos_app_coverage_floor` (wired to `scripts/integration_cosmos_module_coverage_floor.sh`, `scripts/integration_cosmos_keeper_coverage_floor.sh`, and `scripts/integration_cosmos_app_coverage_floor.sh`) before wrapper handoff/run stages.
 - `phase5_settlement_layer_check.sh` validates the Phase-5 readiness/check artifact contract.
 - `phase5_settlement_layer_run.sh` runs the Phase-5 gate + check in one command.
 - `integration_phase5_settlement_layer_check.sh` validates checker behavior/contract.
@@ -626,6 +632,25 @@ One-command campaign signoff (optional refresh + fail-closed check artifact):
   --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json \
   --print-summary-json 1
 ```
+
+No-sudo deterministic fallback (when docker rehearsal endpoints are known):
+
+```bash
+./scripts/easy_node.sh profile-compare-campaign-signoff \
+  --reports-dir .easy-node-logs \
+  --refresh-campaign 1 \
+  --fail-on-no-go 0 \
+  --campaign-execution-mode docker \
+  --campaign-start-local-stack 0 \
+  --campaign-directory-urls http://127.0.0.1:18081,http://127.0.0.1:28081 \
+  --campaign-issuer-url http://127.0.0.1:18082 \
+  --campaign-entry-url http://127.0.0.1:18083 \
+  --campaign-exit-url http://127.0.0.1:18084 \
+  --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json \
+  --print-summary-json 1
+```
+
+`manual-validation-status`, `manual-validation-report`, and `roadmap-progress-report` now surface this as the profile-default gate primary command when derivable, and also print an explicit `sudo` fallback command.
 
 Real client VPN smoke test (machine C / tester host, Linux root):
 

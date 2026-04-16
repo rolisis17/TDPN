@@ -517,14 +517,277 @@ profile_signoff_non_root_refresh_blocked_01() {
   printf '0'
 }
 
+resolve_signoff_artifact_path() {
+  local signoff_summary_json="$1"
+  local artifact_path="$2"
+  artifact_path="$(trim "$artifact_path")"
+  if [[ -z "$artifact_path" ]]; then
+    printf '%s' ""
+    return
+  fi
+  if [[ "$artifact_path" == /* ]]; then
+    printf '%s' "$artifact_path"
+    return
+  fi
+  printf '%s' "$(dirname "$signoff_summary_json")/$artifact_path"
+}
+
+resolve_path_with_base_file() {
+  local candidate_path="$1"
+  local base_file="$2"
+  candidate_path="$(trim "$candidate_path")"
+  if [[ -z "$candidate_path" ]]; then
+    printf '%s' ""
+    return
+  fi
+  if [[ "$candidate_path" == /* ]]; then
+    printf '%s' "$candidate_path"
+  else
+    printf '%s' "$(dirname "$base_file")/$candidate_path"
+  fi
+}
+
+find_first_valid_json_artifact_match() {
+  local artifacts_json="$1"
+  local pattern="$2"
+  local artifact=""
+  local artifact_abs=""
+  while IFS= read -r artifact; do
+    artifact="$(trim "$artifact")"
+    if [[ -z "$artifact" ]]; then
+      continue
+    fi
+    if [[ "$artifact" == /* ]]; then
+      artifact_abs="$artifact"
+    else
+      artifact_abs="$(abs_path "$artifact")"
+    fi
+    if [[ -z "$artifact_abs" ]]; then
+      continue
+    fi
+    if ! [[ "$artifact_abs" =~ $pattern ]]; then
+      continue
+    fi
+    if [[ -f "$artifact_abs" ]] && jq -e . "$artifact_abs" >/dev/null 2>&1; then
+      printf '%s' "$artifact_abs"
+      return
+    fi
+  done < <(printf '%s\n' "$artifacts_json" | jq -r '.[]?')
+  printf '%s' ""
+}
+
+build_profile_signoff_docker_hint_json() {
+  local signoff_summary_json="$1"
+  local docker_rehearsal_check_json="$2"
+  local docker_artifacts_json="[]"
+  local matrix_summary_json=""
+  local profile_summary_json=""
+  local candidate_profile_summary_json=""
+  local execution_mode=""
+  local start_local_stack=""
+  local directory_urls=""
+  local issuer_url=""
+  local entry_url=""
+  local exit_url=""
+  local endpoint_directory_a=""
+  local endpoint_directory_b=""
+  local endpoint_issuer_a=""
+  local endpoint_issuer_b=""
+  local endpoint_issuer=""
+  local endpoint_entry=""
+  local endpoint_exit=""
+  local docker_check_receipt_json=""
+  local docker_check_status=""
+  local docker_check_command=""
+  local used_signoff_overrides="0"
+  local used_docker_artifacts="0"
+  local available="0"
+  local source="none"
+
+  docker_artifacts_json="$(jq -c '.artifacts // []' <<<"$docker_rehearsal_check_json" 2>/dev/null || echo "[]")"
+  docker_check_receipt_json="$(jq -r '.receipt_json // ""' <<<"$docker_rehearsal_check_json" 2>/dev/null || true)"
+  docker_check_status="$(jq -r '.status // ""' <<<"$docker_rehearsal_check_json" 2>/dev/null || true)"
+  docker_check_command="$(jq -r '.command // ""' <<<"$docker_rehearsal_check_json" 2>/dev/null || true)"
+
+  matrix_summary_json="$(find_first_valid_json_artifact_match "$docker_artifacts_json" '_matrix\.json$')"
+  profile_summary_json="$(find_first_valid_json_artifact_match "$docker_artifacts_json" 'three_machine_docker_readiness_.*\.json$')"
+
+  if [[ -z "$profile_summary_json" && -n "$matrix_summary_json" && -f "$matrix_summary_json" ]]; then
+    while IFS= read -r candidate_profile_summary_json; do
+      candidate_profile_summary_json="$(resolve_path_with_base_file "$candidate_profile_summary_json" "$matrix_summary_json")"
+      if [[ -z "$candidate_profile_summary_json" ]]; then
+        continue
+      fi
+      if [[ -f "$candidate_profile_summary_json" ]] && jq -e . "$candidate_profile_summary_json" >/dev/null 2>&1; then
+        profile_summary_json="$candidate_profile_summary_json"
+        break
+      fi
+    done < <(jq -r '.profiles[]?.artifacts.summary_json // ""' "$matrix_summary_json" 2>/dev/null || true)
+  fi
+
+  if [[ -f "$signoff_summary_json" ]] && jq -e . "$signoff_summary_json" >/dev/null 2>&1; then
+    execution_mode="$(jq -r '.inputs.campaign_refresh_overrides_effective.execution_mode // .inputs.campaign_refresh_overrides.execution_mode // ""' "$signoff_summary_json" 2>/dev/null || true)"
+    start_local_stack="$(jq -r '.inputs.campaign_refresh_overrides_effective.start_local_stack // .inputs.campaign_refresh_overrides.start_local_stack // ""' "$signoff_summary_json" 2>/dev/null || true)"
+    directory_urls="$(jq -r '.inputs.campaign_refresh_overrides_effective.directory_urls // .inputs.campaign_refresh_overrides.directory_urls // ""' "$signoff_summary_json" 2>/dev/null || true)"
+    issuer_url="$(jq -r '.inputs.campaign_refresh_overrides_effective.issuer_url // .inputs.campaign_refresh_overrides.issuer_url // ""' "$signoff_summary_json" 2>/dev/null || true)"
+    entry_url="$(jq -r '.inputs.campaign_refresh_overrides_effective.entry_url // .inputs.campaign_refresh_overrides.entry_url // ""' "$signoff_summary_json" 2>/dev/null || true)"
+    exit_url="$(jq -r '.inputs.campaign_refresh_overrides_effective.exit_url // .inputs.campaign_refresh_overrides.exit_url // ""' "$signoff_summary_json" 2>/dev/null || true)"
+    if [[ -n "$execution_mode" || -n "$start_local_stack" || -n "$directory_urls" || -n "$issuer_url" || -n "$entry_url" || -n "$exit_url" ]]; then
+      used_signoff_overrides="1"
+    fi
+  fi
+
+  if [[ -n "$profile_summary_json" && -f "$profile_summary_json" ]]; then
+    endpoint_directory_a="$(jq -r '.endpoints.directory_a // ""' "$profile_summary_json" 2>/dev/null || true)"
+    endpoint_directory_b="$(jq -r '.endpoints.directory_b // ""' "$profile_summary_json" 2>/dev/null || true)"
+    endpoint_issuer_a="$(jq -r '.endpoints.issuer_a // ""' "$profile_summary_json" 2>/dev/null || true)"
+    endpoint_issuer_b="$(jq -r '.endpoints.issuer_b // ""' "$profile_summary_json" 2>/dev/null || true)"
+    endpoint_issuer="$(jq -r '.endpoints.issuer // ""' "$profile_summary_json" 2>/dev/null || true)"
+    endpoint_entry="$(jq -r '.endpoints.entry // ""' "$profile_summary_json" 2>/dev/null || true)"
+    endpoint_exit="$(jq -r '.endpoints.exit // ""' "$profile_summary_json" 2>/dev/null || true)"
+
+    if [[ -z "$directory_urls" ]]; then
+      if [[ -n "$endpoint_directory_a" && -n "$endpoint_directory_b" ]]; then
+        directory_urls="${endpoint_directory_a},${endpoint_directory_b}"
+      elif [[ -n "$endpoint_directory_a" ]]; then
+        directory_urls="$endpoint_directory_a"
+      elif [[ -n "$endpoint_directory_b" ]]; then
+        directory_urls="$endpoint_directory_b"
+      fi
+    fi
+    if [[ -z "$issuer_url" ]]; then
+      if [[ -n "$endpoint_issuer_a" ]]; then
+        issuer_url="$endpoint_issuer_a"
+      elif [[ -n "$endpoint_issuer" ]]; then
+        issuer_url="$endpoint_issuer"
+      elif [[ -n "$endpoint_issuer_b" ]]; then
+        issuer_url="$endpoint_issuer_b"
+      fi
+    fi
+    if [[ -z "$entry_url" && -n "$endpoint_entry" ]]; then
+      entry_url="$endpoint_entry"
+    fi
+    if [[ -z "$exit_url" && -n "$endpoint_exit" ]]; then
+      exit_url="$endpoint_exit"
+    fi
+    if [[ -z "$execution_mode" ]]; then
+      execution_mode="docker"
+    fi
+    used_docker_artifacts="1"
+  fi
+
+  if [[ "$execution_mode" == "docker" && -z "$start_local_stack" ]]; then
+    start_local_stack="0"
+  fi
+
+  if [[ "$execution_mode" == "docker" && -n "$directory_urls" && -n "$issuer_url" && -n "$entry_url" && -n "$exit_url" ]]; then
+    available="1"
+  fi
+
+  if [[ "$available" == "1" ]]; then
+    if [[ "$used_signoff_overrides" == "1" && "$used_docker_artifacts" == "1" ]]; then
+      source="signoff+docker_rehearsal_artifacts"
+    elif [[ "$used_docker_artifacts" == "1" ]]; then
+      source="docker_rehearsal_artifacts"
+    elif [[ "$used_signoff_overrides" == "1" ]]; then
+      source="signoff_overrides_effective"
+    else
+      source="derived"
+    fi
+  fi
+
+  jq -n \
+    --arg source "$source" \
+    --arg execution_mode "$execution_mode" \
+    --arg start_local_stack "$start_local_stack" \
+    --arg directory_urls "$directory_urls" \
+    --arg issuer_url "$issuer_url" \
+    --arg entry_url "$entry_url" \
+    --arg exit_url "$exit_url" \
+    --arg matrix_summary_json "$matrix_summary_json" \
+    --arg profile_summary_json "$profile_summary_json" \
+    --arg docker_check_receipt_json "$docker_check_receipt_json" \
+    --arg docker_check_status "$docker_check_status" \
+    --arg docker_check_command "$docker_check_command" \
+    --argjson available "$available" \
+    '{
+      available: ($available == 1),
+      source: $source,
+      execution_mode: (if $execution_mode == "" then null else $execution_mode end),
+      start_local_stack: (if $start_local_stack == "" then null else $start_local_stack end),
+      directory_urls: (if $directory_urls == "" then null else $directory_urls end),
+      issuer_url: (if $issuer_url == "" then null else $issuer_url end),
+      entry_url: (if $entry_url == "" then null else $entry_url end),
+      exit_url: (if $exit_url == "" then null else $exit_url end),
+      docker_rehearsal: {
+        check_status: (if $docker_check_status == "" then null else $docker_check_status end),
+        check_command: (if $docker_check_command == "" then null else $docker_check_command end),
+        receipt_json: (if $docker_check_receipt_json == "" then null else $docker_check_receipt_json end),
+        matrix_summary_json: (if $matrix_summary_json == "" then null else $matrix_summary_json end),
+        profile_summary_json: (if $profile_summary_json == "" then null else $profile_summary_json end)
+      }
+    }'
+}
+
+profile_signoff_insufficient_evidence_01() {
+  local signoff_summary_json="$1"
+  local campaign_check_summary_json="$2"
+  local resolved_campaign_check_summary_json=""
+  local insufficient_evidence="0"
+
+  resolved_campaign_check_summary_json="$(resolve_signoff_artifact_path "$signoff_summary_json" "$campaign_check_summary_json")"
+  if [[ -z "$resolved_campaign_check_summary_json" || ! -f "$resolved_campaign_check_summary_json" ]]; then
+    printf '0'
+    return
+  fi
+  if ! jq -e . "$resolved_campaign_check_summary_json" >/dev/null 2>&1; then
+    printf '0'
+    return
+  fi
+
+  insufficient_evidence="$(
+    jq -r '
+      def as_num_or_null:
+        if . == null then null else (try tonumber catch null) end;
+      (.inputs.policy.require_min_runs_total | as_num_or_null) as $require_min_runs_total
+      | (.inputs.policy.require_min_runs_with_summary | as_num_or_null) as $require_min_runs_with_summary
+      | (.observed.runs_total | as_num_or_null) as $runs_total
+      | (.observed.runs_with_summary | as_num_or_null) as $runs_with_summary
+      | (
+          ((.observed.campaign_status // "" | ascii_downcase) != "pass")
+          or ((.observed.trend_status // "" | ascii_downcase) != "pass")
+          or (
+            $require_min_runs_total != null
+            and ($runs_total == null or $runs_total < $require_min_runs_total)
+          )
+          or (
+            $require_min_runs_with_summary != null
+            and ($runs_with_summary == null or $runs_with_summary < $require_min_runs_with_summary)
+          )
+        )
+      | if . then "1" else "0" end
+    ' "$resolved_campaign_check_summary_json" 2>/dev/null || echo 0
+  )"
+  if [[ "$insufficient_evidence" != "1" ]]; then
+    insufficient_evidence="0"
+  fi
+  printf '%s' "$insufficient_evidence"
+}
+
 build_profile_default_gate_json() {
   local signoff_summary_json="$1"
+  local docker_rehearsal_check_json="${2:-}"
   local default_signoff_summary_json="$ROOT_DIR/.easy-node-logs/profile_compare_campaign_signoff_summary.json"
   local reports_dir=""
   local reports_dir_arg=""
   local summary_json_arg=""
+  local next_command_default=""
+  local next_command_no_sudo=""
+  local next_command_docker=""
   local next_command=""
   local next_command_sudo=""
+  local next_command_source="default_non_sudo"
+  local next_command_sudo_only_reason=""
   local available="0"
   local valid_json="0"
   local status="pending"
@@ -543,6 +806,29 @@ build_profile_default_gate_json() {
   local signoff_status=""
   local decision_normalized=""
   local decision_is_no_go="0"
+  local insufficient_evidence="0"
+  local campaign_summary_json_resolved=""
+  local campaign_report_md_resolved=""
+  local campaign_check_summary_json_resolved=""
+  local docker_hint_json='{"available":false}'
+  local docker_hint_available="0"
+  local docker_hint_source=""
+  local docker_hint_execution_mode=""
+  local docker_hint_start_local_stack=""
+  local docker_hint_directory_urls=""
+  local docker_hint_issuer_url=""
+  local docker_hint_entry_url=""
+  local docker_hint_exit_url=""
+  local docker_hint_matrix_summary_json=""
+  local docker_hint_profile_summary_json=""
+  local docker_hint_receipt_json=""
+  local docker_hint_command=""
+  local docker_hint_directory_urls_arg=""
+  local docker_hint_issuer_url_arg=""
+  local docker_hint_entry_url_arg=""
+  local docker_hint_exit_url_arg=""
+  local docker_hint_execution_mode_arg=""
+  local docker_hint_start_local_stack_arg=""
 
   reports_dir="$(dirname "$signoff_summary_json")"
   if [[ "$signoff_summary_json" == "$default_signoff_summary_json" ]]; then
@@ -552,8 +838,37 @@ build_profile_default_gate_json() {
     printf -v reports_dir_arg '%q' "$reports_dir"
     printf -v summary_json_arg '%q' "$signoff_summary_json"
   fi
-  next_command="./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir $reports_dir_arg --refresh-campaign 1 --fail-on-no-go 0 --summary-json $summary_json_arg --print-summary-json 1"
+  next_command_default="./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir $reports_dir_arg --refresh-campaign 1 --fail-on-no-go 0 --summary-json $summary_json_arg --print-summary-json 1"
+  next_command_no_sudo="$next_command_default"
+  next_command="$next_command_default"
   next_command_sudo="sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir $reports_dir_arg --refresh-campaign 1 --fail-on-no-go 0 --summary-json $summary_json_arg --print-summary-json 1"
+
+  docker_hint_json="$(build_profile_signoff_docker_hint_json "$signoff_summary_json" "$docker_rehearsal_check_json")"
+  docker_hint_available="$(jq -r 'if (.available // false) then "1" else "0" end' <<<"$docker_hint_json" 2>/dev/null || echo 0)"
+  docker_hint_source="$(jq -r '.source // ""' <<<"$docker_hint_json" 2>/dev/null || true)"
+  docker_hint_execution_mode="$(jq -r '.execution_mode // ""' <<<"$docker_hint_json" 2>/dev/null || true)"
+  docker_hint_start_local_stack="$(jq -r '.start_local_stack // ""' <<<"$docker_hint_json" 2>/dev/null || true)"
+  docker_hint_directory_urls="$(jq -r '.directory_urls // ""' <<<"$docker_hint_json" 2>/dev/null || true)"
+  docker_hint_issuer_url="$(jq -r '.issuer_url // ""' <<<"$docker_hint_json" 2>/dev/null || true)"
+  docker_hint_entry_url="$(jq -r '.entry_url // ""' <<<"$docker_hint_json" 2>/dev/null || true)"
+  docker_hint_exit_url="$(jq -r '.exit_url // ""' <<<"$docker_hint_json" 2>/dev/null || true)"
+  docker_hint_matrix_summary_json="$(jq -r '.docker_rehearsal.matrix_summary_json // ""' <<<"$docker_hint_json" 2>/dev/null || true)"
+  docker_hint_profile_summary_json="$(jq -r '.docker_rehearsal.profile_summary_json // ""' <<<"$docker_hint_json" 2>/dev/null || true)"
+  docker_hint_receipt_json="$(jq -r '.docker_rehearsal.receipt_json // ""' <<<"$docker_hint_json" 2>/dev/null || true)"
+  docker_hint_command="$(jq -r '.docker_rehearsal.check_command // ""' <<<"$docker_hint_json" 2>/dev/null || true)"
+
+  if [[ "$docker_hint_available" == "1" ]]; then
+    printf -v docker_hint_execution_mode_arg '%q' "$docker_hint_execution_mode"
+    printf -v docker_hint_start_local_stack_arg '%q' "$docker_hint_start_local_stack"
+    printf -v docker_hint_directory_urls_arg '%q' "$docker_hint_directory_urls"
+    printf -v docker_hint_issuer_url_arg '%q' "$docker_hint_issuer_url"
+    printf -v docker_hint_entry_url_arg '%q' "$docker_hint_entry_url"
+    printf -v docker_hint_exit_url_arg '%q' "$docker_hint_exit_url"
+    next_command_docker="$next_command_default --campaign-execution-mode $docker_hint_execution_mode_arg --campaign-start-local-stack $docker_hint_start_local_stack_arg --campaign-directory-urls $docker_hint_directory_urls_arg --campaign-issuer-url $docker_hint_issuer_url_arg --campaign-entry-url $docker_hint_entry_url_arg --campaign-exit-url $docker_hint_exit_url_arg"
+    next_command_no_sudo="$next_command_docker"
+    next_command="$next_command_docker"
+    next_command_source="${docker_hint_source:-docker_rehearsal_artifacts}"
+  fi
 
   if [[ -f "$signoff_summary_json" ]]; then
     available="1"
@@ -564,7 +879,14 @@ build_profile_default_gate_json() {
   if [[ "$available" == "1" && "$valid_json" != "1" ]]; then
     status="pending"
     notes="profile compare campaign signoff summary JSON is invalid; rerun with refresh-campaign=1"
-    next_command="$next_command_sudo"
+    if [[ "$docker_hint_available" == "1" ]]; then
+      next_command="$next_command_no_sudo"
+      next_command_source="${docker_hint_source:-docker_rehearsal_artifacts}"
+    else
+      next_command="$next_command_sudo"
+      next_command_source="sudo_required_invalid_signoff_json"
+      next_command_sudo_only_reason="invalid_signoff_json"
+    fi
   fi
 
   if [[ "$valid_json" == "1" ]]; then
@@ -581,8 +903,14 @@ build_profile_default_gate_json() {
     campaign_summary_json="$(jq -r '.artifacts.campaign_summary_json // ""' "$signoff_summary_json")"
     campaign_report_md="$(jq -r '.artifacts.campaign_report_md // ""' "$signoff_summary_json")"
     campaign_check_summary_json="$(jq -r '.artifacts.campaign_check_summary_json // ""' "$signoff_summary_json")"
+    campaign_summary_json_resolved="$(resolve_signoff_artifact_path "$signoff_summary_json" "$campaign_summary_json")"
+    campaign_report_md_resolved="$(resolve_signoff_artifact_path "$signoff_summary_json" "$campaign_report_md")"
+    campaign_check_summary_json_resolved="$(resolve_signoff_artifact_path "$signoff_summary_json" "$campaign_check_summary_json")"
     failure_stage="$(jq -r '.failure_stage // ""' "$signoff_summary_json")"
     non_root_refresh_blocked="$(profile_signoff_non_root_refresh_blocked_01 "$signoff_summary_json")"
+    if [[ "$decision_is_no_go" == "1" ]]; then
+      insufficient_evidence="$(profile_signoff_insufficient_evidence_01 "$signoff_summary_json" "$campaign_check_summary_json")"
+    fi
     if ! [[ "$final_rc" =~ ^-?[0-9]+$ ]]; then
       final_rc="0"
     fi
@@ -592,8 +920,13 @@ build_profile_default_gate_json() {
           status="pass"
           notes="profile compare campaign signoff decision is GO"
         elif [[ "$decision" == "NO-GO" || "$decision" == "NO_GO" || "$decision" == "NOGO" ]]; then
-          status="warn"
-          notes="profile compare campaign signoff decision is NO-GO"
+          if [[ "$insufficient_evidence" == "1" ]]; then
+            status="pending"
+            notes="profile compare campaign signoff decision is NO-GO but campaign-check evidence is insufficient/unstable; rerun with refresh-campaign=1"
+          else
+            status="warn"
+            notes="profile compare campaign signoff decision is NO-GO"
+          fi
         else
           status="warn"
           notes="profile compare campaign signoff status is ok but decision is ${decision:-unknown}"
@@ -604,14 +937,34 @@ build_profile_default_gate_json() {
           status="pending"
           stale_non_refreshed="1"
           notes="profile compare campaign signoff summary is stale (refresh-campaign=0); rerun with refresh-campaign=1"
-          next_command="$next_command_sudo"
+          if [[ "$docker_hint_available" == "1" ]]; then
+            next_command="$next_command_no_sudo"
+            next_command_source="${docker_hint_source:-docker_rehearsal_artifacts}"
+          else
+            next_command="$next_command_sudo"
+            next_command_source="sudo_required_stale_non_refreshed"
+            next_command_sudo_only_reason="stale_non_refreshed"
+          fi
         elif [[ "$non_root_refresh_blocked" == "1" ]]; then
           status="pending"
-          notes="profile compare campaign signoff refresh needs root for local stack (non-root host)"
-          next_command="$next_command_sudo"
+          if [[ "$docker_hint_available" == "1" ]]; then
+            notes="profile compare campaign signoff refresh needs root for local stack (non-root host); rerun with docker campaign overrides from recorded rehearsal"
+            next_command="$next_command_no_sudo"
+            next_command_source="${docker_hint_source:-docker_rehearsal_artifacts}"
+          else
+            notes="profile compare campaign signoff refresh needs root for local stack (non-root host)"
+            next_command="$next_command_sudo"
+            next_command_source="sudo_required_non_root_refresh_blocked"
+            next_command_sudo_only_reason="non_root_refresh_blocked"
+          fi
         elif [[ "$decision_is_no_go" == "1" ]]; then
-          status="warn"
-          notes="profile compare campaign signoff decision is NO-GO"
+          if [[ "$insufficient_evidence" == "1" ]]; then
+            status="pending"
+            notes="profile compare campaign signoff decision is NO-GO but campaign-check evidence is insufficient/unstable; rerun with refresh-campaign=1"
+          else
+            status="warn"
+            notes="profile compare campaign signoff decision is NO-GO"
+          fi
         else
           status="fail"
           notes="profile compare campaign signoff failed (final_rc=${final_rc})"
@@ -624,9 +977,27 @@ build_profile_default_gate_json() {
     esac
   fi
 
+  if [[ "$status" == "pending" && "$next_command" == "$next_command_default" ]]; then
+    if [[ "$docker_hint_available" == "1" ]]; then
+      next_command="$next_command_no_sudo"
+      next_command_source="${docker_hint_source:-docker_rehearsal_artifacts}"
+    elif [[ "$next_command_source" == "default_non_sudo" ]]; then
+      next_command_source="default_non_sudo"
+    fi
+  fi
+  if [[ "$status" != "pending" ]]; then
+    next_command_sudo_only_reason=""
+    if [[ "$next_command_source" == "default_non_sudo" || "$next_command_source" == "sudo_required_invalid_signoff_json" || "$next_command_source" == "sudo_required_stale_non_refreshed" || "$next_command_source" == "sudo_required_non_root_refresh_blocked" ]]; then
+      next_command_source="not_required"
+    fi
+  fi
+
   jq -n \
     --arg summary_json "$signoff_summary_json" \
     --arg next_command "$next_command" \
+    --arg next_command_sudo "$next_command_sudo" \
+    --arg next_command_source "$next_command_source" \
+    --arg next_command_sudo_only_reason "$next_command_sudo_only_reason" \
     --arg status "$status" \
     --arg notes "$notes" \
     --arg decision "$decision" \
@@ -637,9 +1008,19 @@ build_profile_default_gate_json() {
     --arg non_root_refresh_blocked "$non_root_refresh_blocked" \
     --arg stale_non_refreshed "$stale_non_refreshed" \
     --arg refresh_campaign "$refresh_campaign" \
+    --arg insufficient_evidence "$insufficient_evidence" \
     --arg campaign_summary_json "$campaign_summary_json" \
+    --arg campaign_summary_json_resolved "$campaign_summary_json_resolved" \
     --arg campaign_report_md "$campaign_report_md" \
+    --arg campaign_report_md_resolved "$campaign_report_md_resolved" \
     --arg campaign_check_summary_json "$campaign_check_summary_json" \
+    --arg campaign_check_summary_json_resolved "$campaign_check_summary_json_resolved" \
+    --arg docker_hint_available "$docker_hint_available" \
+    --arg docker_hint_source "$docker_hint_source" \
+    --arg docker_hint_matrix_summary_json "$docker_hint_matrix_summary_json" \
+    --arg docker_hint_profile_summary_json "$docker_hint_profile_summary_json" \
+    --arg docker_hint_receipt_json "$docker_hint_receipt_json" \
+    --arg docker_hint_command "$docker_hint_command" \
     --argjson available "$available" \
     --argjson valid_json "$valid_json" \
     '{
@@ -657,11 +1038,34 @@ build_profile_default_gate_json() {
       non_root_refresh_blocked: ($non_root_refresh_blocked == "1"),
       stale_non_refreshed: ($stale_non_refreshed == "1"),
       refresh_campaign: ($refresh_campaign == "1"),
+      insufficient_evidence: ($insufficient_evidence == "1"),
+      docker_rehearsal_hint_available: ($docker_hint_available == "1"),
+      docker_rehearsal_hint_source: (if $docker_hint_source == "" then null else $docker_hint_source end),
       next_command: $next_command,
+      next_command_sudo: $next_command_sudo,
+      next_command_source: $next_command_source,
+      next_command_sudo_only_reason: (if $next_command_sudo_only_reason == "" then null else $next_command_sudo_only_reason end),
+      next_command_candidates: (
+        [
+          {id: "primary", command: $next_command, requires_sudo: ($next_command | startswith("sudo "))}
+        ]
+        + (if $next_command_sudo != "" and $next_command_sudo != $next_command then
+            [{id: "sudo_fallback", command: $next_command_sudo, requires_sudo: true}]
+           else
+            []
+           end)
+      ),
       artifacts: {
         campaign_summary_json: $campaign_summary_json,
+        campaign_summary_json_resolved: $campaign_summary_json_resolved,
         campaign_report_md: $campaign_report_md,
-        campaign_check_summary_json: $campaign_check_summary_json
+        campaign_report_md_resolved: $campaign_report_md_resolved,
+        campaign_check_summary_json: $campaign_check_summary_json,
+        campaign_check_summary_json_resolved: $campaign_check_summary_json_resolved,
+        docker_rehearsal_matrix_summary_json: (if $docker_hint_matrix_summary_json == "" then null else $docker_hint_matrix_summary_json end),
+        docker_rehearsal_profile_summary_json: (if $docker_hint_profile_summary_json == "" then null else $docker_hint_profile_summary_json end),
+        docker_rehearsal_receipt_json: (if $docker_hint_receipt_json == "" then null else $docker_hint_receipt_json end),
+        docker_rehearsal_check_command: (if $docker_hint_command == "" then null else $docker_hint_command end)
       }
     }'
 }
@@ -962,7 +1366,7 @@ docker_rehearsal_check_json="$(build_recorded_check_json "three_machine_docker_r
 real_wg_privileged_check_json="$(build_recorded_check_json "real_wg_privileged_matrix" "Linux root real-WG privileged matrix" "sudo ./scripts/easy_node.sh real-wg-privileged-matrix-record --print-summary-json 1")"
 machine_c_check_json="$(build_recorded_check_json "machine_c_vpn_smoke" "Machine C VPN smoke test" "sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --path-profile balanced --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country")"
 three_machine_check_json="$(build_recorded_check_json "three_machine_prod_signoff" "True 3-machine production signoff" "sudo ./scripts/easy_node.sh three-machine-prod-signoff --bundle-dir .easy-node-logs/prod_gate_bundle --directory-a https://A_HOST:8081 --directory-b https://B_HOST:8081 --issuer-url https://A_HOST:8082 --entry-url https://A_HOST:8083 --exit-url https://A_HOST:8084 --pre-real-host-readiness 1 --runtime-fix 1 --print-summary-json 1")"
-profile_default_gate_json="$(build_profile_default_gate_json "$profile_compare_signoff_summary_json")"
+profile_default_gate_json="$(build_profile_default_gate_json "$profile_compare_signoff_summary_json" "$docker_rehearsal_check_json")"
 real_wg_host_linux="0"
 real_wg_host_root="0"
 real_wg_host_has_wg="0"
@@ -1270,6 +1674,12 @@ profile_default_gate_decision="$(printf '%s\n' "$combined_json" | jq -r '.summar
 profile_default_gate_recommended_profile="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.recommended_profile // ""')"
 profile_default_gate_summary_json="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.summary_json // ""')"
 profile_default_gate_next_command="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.next_command // ""')"
+profile_default_gate_next_command_sudo="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.next_command_sudo // ""')"
+profile_default_gate_next_command_source="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.next_command_source // ""')"
+profile_default_gate_docker_hint_available="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.docker_rehearsal_hint_available // false')"
+profile_default_gate_docker_matrix_summary_json="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.artifacts.docker_rehearsal_matrix_summary_json // ""')"
+profile_default_gate_docker_profile_summary_json="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.artifacts.docker_rehearsal_profile_summary_json // ""')"
+profile_default_gate_campaign_check_summary_json_resolved="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.artifacts.campaign_check_summary_json_resolved // ""')"
 docker_rehearsal_status="$(printf '%s\n' "$combined_json" | jq -r '.summary.docker_rehearsal_gate.status // ""')"
 docker_rehearsal_ready="$(printf '%s\n' "$combined_json" | jq -r '.summary.docker_rehearsal_gate.ready // false')"
 docker_rehearsal_command="$(printf '%s\n' "$combined_json" | jq -r '.summary.docker_rehearsal_gate.command // ""')"
@@ -1305,6 +1715,22 @@ if [[ -n "$profile_default_gate_summary_json" ]]; then
 fi
 if [[ -n "$profile_default_gate_next_command" ]]; then
   echo "[manual-validation-status] profile_default_gate_next_command=$profile_default_gate_next_command"
+fi
+if [[ -n "$profile_default_gate_next_command_sudo" ]]; then
+  echo "[manual-validation-status] profile_default_gate_next_command_sudo=$profile_default_gate_next_command_sudo"
+fi
+if [[ -n "$profile_default_gate_next_command_source" ]]; then
+  echo "[manual-validation-status] profile_default_gate_next_command_source=$profile_default_gate_next_command_source"
+fi
+echo "[manual-validation-status] profile_default_gate_docker_hint_available=$profile_default_gate_docker_hint_available"
+if [[ -n "$profile_default_gate_docker_matrix_summary_json" ]]; then
+  echo "[manual-validation-status] profile_default_gate_docker_matrix_summary_json=$profile_default_gate_docker_matrix_summary_json"
+fi
+if [[ -n "$profile_default_gate_docker_profile_summary_json" ]]; then
+  echo "[manual-validation-status] profile_default_gate_docker_profile_summary_json=$profile_default_gate_docker_profile_summary_json"
+fi
+if [[ -n "$profile_default_gate_campaign_check_summary_json_resolved" ]]; then
+  echo "[manual-validation-status] profile_default_gate_campaign_check_summary_json_resolved=$profile_default_gate_campaign_check_summary_json_resolved"
 fi
 if [[ -n "$docker_rehearsal_status" ]]; then
   echo "[manual-validation-status] docker_rehearsal_status=$docker_rehearsal_status"

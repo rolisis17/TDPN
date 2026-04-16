@@ -28,13 +28,27 @@ When `single-machine-prod-readiness` runs with `--run-profile-compare-campaign-s
 - `roadmap_stage=PRODUCTION_SIGNOFF_COMPLETE`: all tracked manual checks passed.
 `roadmap-progress-report` now adds a VPN RC-done phase signal plus the explicit list of pending real-host checks so the remaining external-only tail is visible at a glance.
 
+Manual readiness interpretation (operator quick guide):
+- `pre_real_host_readiness.status=pass` with `manual_validation_report.readiness_status=NOT_READY` is expected while external gates are still pending (`machine_c_vpn_smoke`, `three_machine_prod_signoff`).
+- `client-vpn-smoke` or `three-machine-prod-signoff` with `status=skip`, `defer_no_root=true`, `deferred_no_root=true`, and `stage=pre-real-host-readiness` means root-only defer was applied; treat as deferred, not complete.
+- same commands with `status=fail` and `deferred_no_root=false` mean a real blocker (not root-only); fail-closed behavior is working as intended.
+- `prod-pilot-runbook` / `prod-pilot-cohort-runbook` may continue after root-only deferred pre-readiness to collect pilot evidence, but final signoff still requires privileged reruns.
+- next command after any root-only deferred warning:
+  - `sudo ./scripts/easy_node.sh pre-real-host-readiness --strict-beta 1 --print-summary-json 1`
+
 They also surface an optional one-host docker rehearsal snapshot (`docker_rehearsal_status`, `docker_rehearsal_ready`, `docker_rehearsal_command`) so we can track that confidence pass without changing real-host signoff requirements.
 They now also surface an optional Linux root real-WG privileged matrix snapshot (`real_wg_privileged_status`, `real_wg_privileged_ready`, `real_wg_privileged_command`) so one-host dataplane confidence can be tracked alongside the docker rehearsal gate without changing machine-C / true 3-machine blockers.
 
 They also surface a non-blocking profile-default gate snapshot from `profile-compare-campaign-signoff` (status/decision/recommended profile + next command) so default-profile decision progress is visible in the same readiness handoff.
-When a profile-compare campaign refresh cannot run because local stack bootstrap needs root (`--start-local-stack=1 requires root`) and no docker rehearsal endpoints are available, that profile-default gate now reports `pending` with a sudo-ready rerun command instead of a hard `fail`, so single-machine readiness signaling stays focused on true blockers.
+That profile-default gate now reports `pending` when `decision=NO-GO` is driven by insufficient campaign evidence (for example low/incomplete campaign runs or local refresh blocked by root requirements), so one-host readiness stays focused on true blockers.
+`warn` is reserved for advisory `NO-GO` outcomes with sufficient campaign evidence.
 `single-machine-prod-readiness` now mirrors that same profile-default gate snapshot in its summary JSON (`summary.profile_default_gate`, `summary.profile_default_ready`) so the one-host sweep and manual-validation report stay consistent.
 It now also prints the same profile-default gate fields in stdout (`profile_default_gate_status`, `profile_default_gate_available`, `profile_default_gate_next_command`) so operators can see the rerun path immediately without opening JSON artifacts.
+When docker rehearsal artifacts are available, `profile_default_gate_next_command` now prefers a deterministic no-sudo refresh command (docker execution mode + explicit directory/issuer/entry/exit overrides), and also exposes `profile_default_gate_next_command_sudo` as explicit fallback.
+The same gate snapshot now includes artifact pointers for fast triage (`campaign_check_summary_json_resolved`, `docker_rehearsal_matrix_summary_json`, `docker_rehearsal_profile_summary_json`) plus source hints (`next_command_source`, `docker_rehearsal_hint_available`, `docker_rehearsal_hint_source`).
+Operator next steps:
+- if `profile_default_gate_status=pending`: rerun `./scripts/easy_node.sh profile-compare-campaign-signoff --refresh-campaign 1 --print-summary-json 1` (or use docker campaign mode / launcher option 77 when non-root).
+- if `profile_default_gate_status=warn`: keep the current default profile and continue machine-C + true 3-machine signoff; treat profile-default tuning as follow-up.
 `single-machine-prod-readiness` now also prints `next_action_check_id` and `next_action_command` directly in stdout so the next roadmap step is visible immediately in terminal output.
 It can now also include the one-host dockerized 3-machine rehearsal in that same sweep (`--run-three-machine-docker-readiness auto|0|1`) and surfaces the rehearsal status in summary JSON/stdout.
 It can now also include an optional Linux root real-WG matrix receipt refresh in that same sweep (`--run-real-wg-privileged-matrix auto|0|1`), and treats that matrix step as a non-blocking confidence gate in one-host readiness output.

@@ -433,6 +433,23 @@ if [[ -z "$client_iface" || -z "$exit_iface" ]]; then
   exit 2
 fi
 
+execution_mode_effective="$execution_mode"
+start_local_stack_effective="$start_local_stack"
+execution_mode_adjusted="0"
+execution_mode_adjustment_reason=""
+start_local_stack_adjusted="0"
+start_local_stack_adjustment_reason=""
+if [[ "$execution_mode_effective" == "local" && ( -n "$directory_urls" || -n "$bootstrap_directory" || -n "$issuer_url" || -n "$entry_url" || -n "$exit_url" ) ]]; then
+  execution_mode_effective="docker"
+  execution_mode_adjusted="1"
+  execution_mode_adjustment_reason="remote endpoint overrides requested"
+fi
+if [[ "$execution_mode_effective" == "docker" && "$start_local_stack_effective" == "auto" ]]; then
+  start_local_stack_effective="0"
+  start_local_stack_adjusted="1"
+  start_local_stack_adjustment_reason="docker mode disables implicit local stack bootstrap"
+fi
+
 local_compare_script="${PROFILE_COMPARE_CAMPAIGN_LOCAL_SCRIPT:-$ROOT_DIR/scripts/profile_compare_local.sh}"
 trend_script="${PROFILE_COMPARE_CAMPAIGN_TREND_SCRIPT:-$ROOT_DIR/scripts/profile_compare_trend.sh}"
 if [[ ! -x "$local_compare_script" ]]; then
@@ -486,12 +503,12 @@ for ((run_idx = 1; run_idx <= campaign_runs; run_idx++)); do
     --profiles "$profiles_csv"
     --rounds "$rounds"
     --timeout-sec "$timeout_sec"
-    --execution-mode "$execution_mode"
+    --execution-mode "$execution_mode_effective"
     --discovery-wait-sec "$discovery_wait_sec"
     --min-sources "$min_sources"
     --beta-profile "$beta_profile"
     --prod-profile "$prod_profile"
-    --start-local-stack "$start_local_stack"
+    --start-local-stack "$start_local_stack_effective"
     --force-stack-reset "$force_stack_reset"
     --stack-strict-beta "$stack_strict_beta"
     --base-port "$base_port"
@@ -707,6 +724,9 @@ jq -n \
   --arg trend_notes "$trend_notes" \
   --arg profiles "$profiles_csv" \
   --arg execution_mode "$execution_mode" \
+  --arg execution_mode_effective "$execution_mode_effective" \
+  --arg execution_mode_adjusted "$execution_mode_adjusted" \
+  --arg execution_mode_adjustment_reason "$execution_mode_adjustment_reason" \
   --arg directory_urls "$directory_urls" \
   --arg bootstrap_directory "$bootstrap_directory" \
   --arg issuer_url "$issuer_url" \
@@ -717,6 +737,9 @@ jq -n \
   --arg start_local_stack "$start_local_stack" \
   --arg client_iface "$client_iface" \
   --arg exit_iface "$exit_iface" \
+  --arg start_local_stack_effective "$start_local_stack_effective" \
+  --arg start_local_stack_adjusted "$start_local_stack_adjusted" \
+  --arg start_local_stack_adjustment_reason "$start_local_stack_adjustment_reason" \
   --argjson rc "$rc" \
   --argjson campaign_runs "$campaign_runs" \
   --argjson campaign_pause_sec "$campaign_pause_sec" \
@@ -763,6 +786,9 @@ jq -n \
         rounds: $rounds,
         timeout_sec: $timeout_sec,
         execution_mode: $execution_mode,
+        execution_mode_effective: $execution_mode_effective,
+        execution_mode_adjusted: ($execution_mode_adjusted == "1"),
+        execution_mode_adjustment_reason: (if $execution_mode_adjustment_reason == "" then null else $execution_mode_adjustment_reason end),
         directory_urls: $directory_urls,
         bootstrap_directory: $bootstrap_directory,
         discovery_wait_sec: $discovery_wait_sec,
@@ -781,7 +807,10 @@ jq -n \
         client_iface: $client_iface,
         exit_iface: $exit_iface,
         cleanup_ifaces: ($cleanup_ifaces == 1),
-        keep_stack: ($keep_stack == 1)
+        keep_stack: ($keep_stack == 1),
+        start_local_stack_effective: $start_local_stack_effective,
+        start_local_stack_adjusted: ($start_local_stack_adjusted == "1"),
+        start_local_stack_adjustment_reason: (if $start_local_stack_adjustment_reason == "" then null else $start_local_stack_adjustment_reason end)
       },
       trend: {
         max_reports: $trend_max_reports,

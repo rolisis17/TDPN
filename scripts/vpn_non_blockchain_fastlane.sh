@@ -15,6 +15,7 @@ Usage:
     [--phase2-linux-prod-candidate-handoff-run-summary-json PATH] \
     [--phase3-windows-client-beta-handoff-run-summary-json PATH] \
     [--phase4-windows-full-parity-handoff-run-summary-json PATH] \
+    [--profile-default-gate-summary-json PATH] \
     [--vpn-rc-resilience-summary-json PATH] \
     [--roadmap-progress-summary-json PATH] \
     [--roadmap-progress-report-md PATH] \
@@ -23,6 +24,8 @@ Usage:
     [--run-phase2-linux-prod-candidate-handoff-run [0|1]] \
     [--run-phase3-windows-client-beta-handoff-run [0|1]] \
     [--run-phase4-windows-full-parity-handoff-run [0|1]] \
+    [--run-profile-default-gate-refresh [0|1]] \
+    [--profile-default-gate-fail-closed [0|1]] \
     [--run-roadmap-progress-report [0|1]] \
     [--parallel [0|1]] \
     [--allow-policy-no-go [0|1]] \
@@ -33,6 +36,7 @@ Usage:
     [--phase2-<arg> ...] \
     [--phase3-<arg> ...] \
     [--phase4-<arg> ...] \
+    [--profile-<arg> ...] \
     [--roadmap-<arg> ...]
 
 Purpose:
@@ -42,16 +46,20 @@ Purpose:
     3) phase2_linux_prod_candidate_handoff_run.sh
     4) phase3_windows_client_beta_handoff_run.sh
     5) phase4_windows_full_parity_handoff_run.sh
-    6) roadmap_progress_report.sh
+    6) profile_compare_campaign_signoff.sh (profile-default evidence refresh)
+    7) roadmap_progress_report.sh
 
 Notes:
   - This wrapper intentionally excludes settlement-chain and chain modules.
-  - Independent non-chain stages (runtime + phase1..4 handoff-run) run in parallel by default.
+  - Independent non-chain stages (runtime + phase1..4 handoff-run + profile-default refresh) run in parallel by default.
     Use --parallel 0 (or VPN_NON_BLOCKCHAIN_FASTLANE_PARALLEL=0) for sequential debug mode.
-  - roadmap_progress_report runs after phase1..4 summaries are ready.
+  - roadmap_progress_report runs after phase1..4 + profile-default summaries are ready.
   - Dry-run is forwarded to phase1/2/3/4 handoff-run stages only.
   - --allow-policy-no-go is forwarded to phase1 unless an explicit
     --phase1-allow-policy-no-go passthrough is provided.
+  - Profile-default refresh is non-blocking by default (fail-open):
+    the step records evidence but does not fail the fastlane unless
+    --profile-default-gate-fail-closed 1 is set.
   - Wrapper emits a machine-readable summary JSON for both normal and dry-run.
 USAGE
 }
@@ -267,6 +275,21 @@ phase4_summary_contract_valid() {
   ' "$path" >/dev/null 2>&1
 }
 
+profile_default_gate_summary_contract_valid() {
+  local path="$1"
+  if ! json_file_valid "$path"; then
+    return 1
+  fi
+  jq -e '
+    ((.version // 0) | type) == "number"
+    and ((.status // "") | type) == "string"
+    and ((.final_rc // 0) | type) == "number"
+    and ((.decision // null) | type) == "object"
+    and (((.decision.decision // "") | type) == "string")
+    and (((.decision.go // false) | type) == "boolean")
+  ' "$path" >/dev/null 2>&1
+}
+
 roadmap_summary_contract_valid() {
   local path="$1"
   if ! json_file_valid "$path"; then
@@ -441,6 +464,7 @@ phase1_summary_json="${VPN_NON_BLOCKCHAIN_FASTLANE_PHASE1_RESILIENCE_HANDOFF_RUN
 phase2_summary_json="${VPN_NON_BLOCKCHAIN_FASTLANE_PHASE2_LINUX_PROD_CANDIDATE_HANDOFF_RUN_SUMMARY_JSON:-}"
 phase3_summary_json="${VPN_NON_BLOCKCHAIN_FASTLANE_PHASE3_WINDOWS_CLIENT_BETA_HANDOFF_RUN_SUMMARY_JSON:-}"
 phase4_summary_json="${VPN_NON_BLOCKCHAIN_FASTLANE_PHASE4_WINDOWS_FULL_PARITY_HANDOFF_RUN_SUMMARY_JSON:-}"
+profile_default_gate_summary_json="${VPN_NON_BLOCKCHAIN_FASTLANE_PROFILE_DEFAULT_GATE_SUMMARY_JSON:-}"
 roadmap_vpn_rc_resilience_summary_json="${VPN_NON_BLOCKCHAIN_FASTLANE_VPN_RC_RESILIENCE_SUMMARY_JSON:-}"
 roadmap_summary_json="${VPN_NON_BLOCKCHAIN_FASTLANE_ROADMAP_PROGRESS_SUMMARY_JSON:-}"
 roadmap_report_md="${VPN_NON_BLOCKCHAIN_FASTLANE_ROADMAP_PROGRESS_REPORT_MD:-}"
@@ -450,6 +474,8 @@ run_phase1_resilience_handoff_run="${VPN_NON_BLOCKCHAIN_FASTLANE_RUN_PHASE1_RESI
 run_phase2_linux_prod_candidate_handoff_run="${VPN_NON_BLOCKCHAIN_FASTLANE_RUN_PHASE2_LINUX_PROD_CANDIDATE_HANDOFF_RUN:-1}"
 run_phase3_windows_client_beta_handoff_run="${VPN_NON_BLOCKCHAIN_FASTLANE_RUN_PHASE3_WINDOWS_CLIENT_BETA_HANDOFF_RUN:-1}"
 run_phase4_windows_full_parity_handoff_run="${VPN_NON_BLOCKCHAIN_FASTLANE_RUN_PHASE4_WINDOWS_FULL_PARITY_HANDOFF_RUN:-1}"
+run_profile_default_gate_refresh="${VPN_NON_BLOCKCHAIN_FASTLANE_RUN_PROFILE_DEFAULT_GATE_REFRESH:-1}"
+profile_default_gate_fail_closed="${VPN_NON_BLOCKCHAIN_FASTLANE_PROFILE_DEFAULT_GATE_FAIL_CLOSED:-0}"
 run_roadmap_progress_report="${VPN_NON_BLOCKCHAIN_FASTLANE_RUN_ROADMAP_PROGRESS_REPORT:-1}"
 parallel="${VPN_NON_BLOCKCHAIN_FASTLANE_PARALLEL:-1}"
 allow_policy_no_go="${VPN_NON_BLOCKCHAIN_FASTLANE_ALLOW_POLICY_NO_GO:-0}"
@@ -461,6 +487,7 @@ declare -a phase1_passthrough_args=()
 declare -a phase2_passthrough_args=()
 declare -a phase3_passthrough_args=()
 declare -a phase4_passthrough_args=()
+declare -a profile_passthrough_args=()
 declare -a roadmap_passthrough_args=()
 
 while [[ $# -gt 0 ]]; do
@@ -491,6 +518,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --phase4-windows-full-parity-handoff-run-summary-json)
       phase4_summary_json="${2:-}"
+      shift 2
+      ;;
+    --profile-default-gate-summary-json)
+      profile_default_gate_summary_json="${2:-}"
       shift 2
       ;;
     --vpn-rc-resilience-summary-json)
@@ -547,6 +578,24 @@ while [[ $# -gt 0 ]]; do
         shift 2
       else
         run_phase4_windows_full_parity_handoff_run="1"
+        shift
+      fi
+      ;;
+    --run-profile-default-gate-refresh)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        run_profile_default_gate_refresh="${2:-}"
+        shift 2
+      else
+        run_profile_default_gate_refresh="1"
+        shift
+      fi
+      ;;
+    --profile-default-gate-fail-closed)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        profile_default_gate_fail_closed="${2:-}"
+        shift 2
+      else
+        profile_default_gate_fail_closed="1"
         shift
       fi
       ;;
@@ -665,6 +714,20 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --profile-*)
+      forwarded_flag="--${1#--profile-}"
+      if [[ "$forwarded_flag" == "--" ]]; then
+        echo "invalid profile-prefixed arg: $1"
+        exit 2
+      fi
+      if [[ $# -ge 2 && ! "${2:-}" =~ ^-- ]]; then
+        profile_passthrough_args+=("$forwarded_flag" "${2:-}")
+        shift 2
+      else
+        profile_passthrough_args+=("$forwarded_flag")
+        shift
+      fi
+      ;;
     --roadmap-*)
       forwarded_flag="--${1#--roadmap-}"
       if [[ "$forwarded_flag" == "--" ]]; then
@@ -696,6 +759,8 @@ bool_arg_or_die "--run-phase1-resilience-handoff-run" "$run_phase1_resilience_ha
 bool_arg_or_die "--run-phase2-linux-prod-candidate-handoff-run" "$run_phase2_linux_prod_candidate_handoff_run"
 bool_arg_or_die "--run-phase3-windows-client-beta-handoff-run" "$run_phase3_windows_client_beta_handoff_run"
 bool_arg_or_die "--run-phase4-windows-full-parity-handoff-run" "$run_phase4_windows_full_parity_handoff_run"
+bool_arg_or_die "--run-profile-default-gate-refresh" "$run_profile_default_gate_refresh"
+bool_arg_or_die "--profile-default-gate-fail-closed" "$profile_default_gate_fail_closed"
 bool_arg_or_die "--run-roadmap-progress-report" "$run_roadmap_progress_report"
 bool_arg_or_die "--parallel" "$parallel"
 bool_arg_or_die "--allow-policy-no-go" "$allow_policy_no_go"
@@ -727,6 +792,9 @@ fi
 if [[ -z "$phase4_summary_json" ]]; then
   phase4_summary_json="$reports_dir/phase4_windows_full_parity_handoff_run_summary.json"
 fi
+if [[ -z "$profile_default_gate_summary_json" ]]; then
+  profile_default_gate_summary_json="$reports_dir/profile_compare_campaign_signoff_summary.json"
+fi
 if [[ -z "$roadmap_vpn_rc_resilience_summary_json" ]]; then
   roadmap_vpn_rc_resilience_summary_json="$reports_dir/ci_phase1_resilience/vpn_rc_resilience_path/vpn_rc_resilience_path_summary.json"
 fi
@@ -743,6 +811,7 @@ phase1_summary_json="$(abs_path "$phase1_summary_json")"
 phase2_summary_json="$(abs_path "$phase2_summary_json")"
 phase3_summary_json="$(abs_path "$phase3_summary_json")"
 phase4_summary_json="$(abs_path "$phase4_summary_json")"
+profile_default_gate_summary_json="$(abs_path "$profile_default_gate_summary_json")"
 roadmap_vpn_rc_resilience_summary_json="$(abs_path "$roadmap_vpn_rc_resilience_summary_json")"
 roadmap_summary_json="$(abs_path "$roadmap_summary_json")"
 roadmap_report_md="$(abs_path "$roadmap_report_md")"
@@ -753,6 +822,7 @@ mkdir -p "$(dirname "$phase1_summary_json")"
 mkdir -p "$(dirname "$phase2_summary_json")"
 mkdir -p "$(dirname "$phase3_summary_json")"
 mkdir -p "$(dirname "$phase4_summary_json")"
+mkdir -p "$(dirname "$profile_default_gate_summary_json")"
 mkdir -p "$(dirname "$roadmap_vpn_rc_resilience_summary_json")"
 mkdir -p "$(dirname "$roadmap_summary_json")"
 mkdir -p "$(dirname "$roadmap_report_md")"
@@ -762,6 +832,7 @@ phase1_script="${VPN_NON_BLOCKCHAIN_FASTLANE_PHASE1_RESILIENCE_HANDOFF_RUN_SCRIP
 phase2_script="${VPN_NON_BLOCKCHAIN_FASTLANE_PHASE2_LINUX_PROD_CANDIDATE_HANDOFF_RUN_SCRIPT:-$ROOT_DIR/scripts/phase2_linux_prod_candidate_handoff_run.sh}"
 phase3_script="${VPN_NON_BLOCKCHAIN_FASTLANE_PHASE3_WINDOWS_CLIENT_BETA_HANDOFF_RUN_SCRIPT:-$ROOT_DIR/scripts/phase3_windows_client_beta_handoff_run.sh}"
 phase4_script="${VPN_NON_BLOCKCHAIN_FASTLANE_PHASE4_WINDOWS_FULL_PARITY_HANDOFF_RUN_SCRIPT:-$ROOT_DIR/scripts/phase4_windows_full_parity_handoff_run.sh}"
+profile_default_gate_script="${VPN_NON_BLOCKCHAIN_FASTLANE_PROFILE_DEFAULT_GATE_SCRIPT:-$ROOT_DIR/scripts/profile_compare_campaign_signoff.sh}"
 roadmap_script="${VPN_NON_BLOCKCHAIN_FASTLANE_ROADMAP_PROGRESS_REPORT_SCRIPT:-$ROOT_DIR/scripts/roadmap_progress_report.sh}"
 
 for script_path in \
@@ -770,6 +841,7 @@ for script_path in \
   "$phase2_script" \
   "$phase3_script" \
   "$phase4_script" \
+  "$profile_default_gate_script" \
   "$roadmap_script"; do
   if [[ ! -x "$script_path" ]]; then
     echo "missing executable stage script: $script_path"
@@ -855,6 +927,26 @@ if [[ "${#phase4_passthrough_args[@]}" -gt 0 ]]; then
   phase4_cmd+=("${phase4_passthrough_args[@]}")
 fi
 
+profile_default_gate_cmd=(
+  "$profile_default_gate_script"
+  --reports-dir "$reports_dir"
+  --summary-json "$profile_default_gate_summary_json"
+  --refresh-campaign 1
+  --campaign-execution-mode docker
+  --campaign-start-local-stack 0
+  --print-summary-json 0
+)
+if ! array_has_arg_or_equals_prefix "--fail-on-no-go" "${profile_passthrough_args[@]}"; then
+  if [[ "$profile_default_gate_fail_closed" == "1" ]]; then
+    profile_default_gate_cmd+=(--fail-on-no-go 1)
+  else
+    profile_default_gate_cmd+=(--fail-on-no-go 0)
+  fi
+fi
+if [[ "${#profile_passthrough_args[@]}" -gt 0 ]]; then
+  profile_default_gate_cmd+=("${profile_passthrough_args[@]}")
+fi
+
 resolve_roadmap_resilience_summary_path() {
   local fallback_path="$reports_dir/ci_phase1_resilience/vpn_rc_resilience_path/vpn_rc_resilience_path_summary.json"
   local candidate="$roadmap_vpn_rc_resilience_summary_json"
@@ -890,6 +982,7 @@ build_roadmap_cmd() {
   roadmap_cmd+=(
     --refresh-manual-validation 0
     --refresh-single-machine-readiness 0
+    --profile-compare-signoff-summary-json "$profile_default_gate_summary_json"
     --phase1-resilience-handoff-summary-json "$phase1_summary_json"
     --phase2-linux-prod-candidate-summary-json "$phase2_summary_json"
     --phase3-windows-client-beta-summary-json "$phase3_summary_json"
@@ -956,6 +1049,17 @@ phase4_summary_exists="false"
 phase4_log="$reports_dir/phase4_windows_full_parity_handoff_run.log"
 phase4_command=""
 
+profile_default_gate_status="skip"
+profile_default_gate_rc=0
+profile_default_gate_command_rc=0
+profile_default_gate_contract_valid="null"
+profile_default_gate_contract_error=""
+profile_default_gate_summary_exists="false"
+profile_default_gate_log="$reports_dir/profile_default_gate_refresh.log"
+profile_default_gate_command=""
+profile_default_gate_decision=""
+profile_default_gate_recommended_profile=""
+
 roadmap_status="skip"
 roadmap_rc=0
 roadmap_command_rc=0
@@ -970,6 +1074,7 @@ phase1_pid=""
 phase2_pid=""
 phase3_pid=""
 phase4_pid=""
+profile_default_gate_pid=""
 
 execution_mode="sequential"
 if [[ "$parallel" == "1" ]]; then
@@ -1062,6 +1167,34 @@ finalize_phase4_stage() {
   update_first_failure_rc "$phase4_rc"
 }
 
+finalize_profile_default_gate_stage() {
+  profile_default_gate_rc="$profile_default_gate_command_rc"
+  if profile_default_gate_summary_contract_valid "$profile_default_gate_summary_json"; then
+    profile_default_gate_contract_valid="1"
+    profile_default_gate_summary_exists="true"
+    profile_default_gate_decision="$(json_string_field_or_empty "$profile_default_gate_summary_json" '.decision.decision // ""')"
+    profile_default_gate_recommended_profile="$(json_string_field_or_empty "$profile_default_gate_summary_json" '.decision.recommended_profile // ""')"
+  else
+    profile_default_gate_contract_valid="0"
+    profile_default_gate_contract_error="profile-default gate summary JSON is missing required fields or uses an incompatible schema"
+    profile_default_gate_summary_exists="false"
+    if (( profile_default_gate_rc == 0 )); then
+      profile_default_gate_rc=3
+    fi
+    if [[ "$profile_default_gate_status" == "pass" || "$profile_default_gate_status" == "skip" ]]; then
+      profile_default_gate_status="fail"
+    fi
+  fi
+
+  if [[ "$profile_default_gate_fail_closed" == "1" ]]; then
+    update_first_failure_rc "$profile_default_gate_rc"
+  else
+    if [[ "$profile_default_gate_status" == "fail" ]]; then
+      profile_default_gate_status="warn"
+    fi
+  fi
+}
+
 if [[ "$parallel" == "1" ]]; then
   if [[ "$run_runtime_fix_record" == "1" ]]; then
     runtime_command="$(print_cmd "${runtime_cmd[@]}")"
@@ -1106,6 +1239,15 @@ if [[ "$parallel" == "1" ]]; then
     phase4_pid="$!"
   else
     echo "[vpn-non-blockchain-fastlane] stage=phase4_windows_full_parity_handoff_run status=skip reason=disabled"
+  fi
+
+  if [[ "$run_profile_default_gate_refresh" == "1" ]]; then
+    profile_default_gate_command="$(print_cmd "${profile_default_gate_cmd[@]}")"
+    echo "[vpn-non-blockchain-fastlane] stage=profile_default_gate_refresh status=running mode=parallel"
+    ("${profile_default_gate_cmd[@]}" >"$profile_default_gate_log" 2>&1) &
+    profile_default_gate_pid="$!"
+  else
+    echo "[vpn-non-blockchain-fastlane] stage=profile_default_gate_refresh status=skip reason=disabled"
   fi
 
   if [[ -n "$runtime_pid" ]]; then
@@ -1166,6 +1308,18 @@ if [[ "$parallel" == "1" ]]; then
     fi
     echo "[vpn-non-blockchain-fastlane] stage=phase4_windows_full_parity_handoff_run status=$phase4_status rc=$phase4_command_rc mode=parallel"
     finalize_phase4_stage
+  fi
+
+  if [[ -n "$profile_default_gate_pid" ]]; then
+    if wait "$profile_default_gate_pid"; then
+      profile_default_gate_command_rc=0
+      profile_default_gate_status="pass"
+    else
+      profile_default_gate_command_rc=$?
+      profile_default_gate_status="fail"
+    fi
+    echo "[vpn-non-blockchain-fastlane] stage=profile_default_gate_refresh status=$profile_default_gate_status rc=$profile_default_gate_command_rc mode=parallel"
+    finalize_profile_default_gate_stage
   fi
 else
   if [[ "$run_runtime_fix_record" == "1" ]]; then
@@ -1237,6 +1391,20 @@ else
   else
     echo "[vpn-non-blockchain-fastlane] stage=phase4_windows_full_parity_handoff_run status=skip reason=disabled"
   fi
+
+  if [[ "$run_profile_default_gate_refresh" == "1" ]]; then
+    profile_default_gate_command="$(print_cmd "${profile_default_gate_cmd[@]}")"
+    if run_stage_capture "profile_default_gate_refresh" "$profile_default_gate_log" "${profile_default_gate_cmd[@]}"; then
+      profile_default_gate_command_rc=0
+      profile_default_gate_status="pass"
+    else
+      profile_default_gate_command_rc=$?
+      profile_default_gate_status="fail"
+    fi
+    finalize_profile_default_gate_stage
+  else
+    echo "[vpn-non-blockchain-fastlane] stage=profile_default_gate_refresh status=skip reason=disabled"
+  fi
 fi
 
 if [[ "$run_roadmap_progress_report" == "1" ]]; then
@@ -1273,6 +1441,7 @@ phase1_passthrough_json="$(printf '%s\n' "${phase1_passthrough_args[@]}" | jq -R
 phase2_passthrough_json="$(printf '%s\n' "${phase2_passthrough_args[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))')"
 phase3_passthrough_json="$(printf '%s\n' "${phase3_passthrough_args[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))')"
 phase4_passthrough_json="$(printf '%s\n' "${phase4_passthrough_args[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))')"
+profile_passthrough_json="$(printf '%s\n' "${profile_passthrough_args[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))')"
 roadmap_passthrough_json="$(printf '%s\n' "${roadmap_passthrough_args[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))')"
 
 final_status="pass"
@@ -1292,6 +1461,7 @@ jq -n \
   --arg phase2_summary_json "$phase2_summary_json" \
   --arg phase3_summary_json "$phase3_summary_json" \
   --arg phase4_summary_json "$phase4_summary_json" \
+  --arg profile_default_gate_summary_json "$profile_default_gate_summary_json" \
   --arg roadmap_vpn_rc_resilience_summary_json "$roadmap_vpn_rc_resilience_summary_json" \
   --arg roadmap_summary_json "$roadmap_summary_json" \
   --arg roadmap_report_md "$roadmap_report_md" \
@@ -1302,6 +1472,8 @@ jq -n \
   --argjson run_phase2_linux_prod_candidate_handoff_run "$run_phase2_linux_prod_candidate_handoff_run" \
   --argjson run_phase3_windows_client_beta_handoff_run "$run_phase3_windows_client_beta_handoff_run" \
   --argjson run_phase4_windows_full_parity_handoff_run "$run_phase4_windows_full_parity_handoff_run" \
+  --argjson run_profile_default_gate_refresh "$run_profile_default_gate_refresh" \
+  --argjson profile_default_gate_fail_closed "$profile_default_gate_fail_closed" \
   --argjson run_roadmap_progress_report "$run_roadmap_progress_report" \
   --argjson parallel "$parallel" \
   --argjson allow_policy_no_go "$allow_policy_no_go" \
@@ -1311,6 +1483,7 @@ jq -n \
   --argjson phase2_passthrough_args "$phase2_passthrough_json" \
   --argjson phase3_passthrough_args "$phase3_passthrough_json" \
   --argjson phase4_passthrough_args "$phase4_passthrough_json" \
+  --argjson profile_passthrough_args "$profile_passthrough_json" \
   --argjson roadmap_passthrough_args "$roadmap_passthrough_json" \
   --arg runtime_status "$runtime_status" \
   --argjson runtime_rc "$runtime_rc" \
@@ -1359,6 +1532,16 @@ jq -n \
   --arg phase4_contract_error "$phase4_contract_error" \
   --arg phase4_summary_exists "$phase4_summary_exists" \
   --arg phase4_log "$phase4_log" \
+  --arg profile_default_gate_status "$profile_default_gate_status" \
+  --argjson profile_default_gate_rc "$profile_default_gate_rc" \
+  --argjson profile_default_gate_command_rc "$profile_default_gate_command_rc" \
+  --arg profile_default_gate_command "$profile_default_gate_command" \
+  --arg profile_default_gate_contract_valid "$profile_default_gate_contract_valid" \
+  --arg profile_default_gate_contract_error "$profile_default_gate_contract_error" \
+  --arg profile_default_gate_summary_exists "$profile_default_gate_summary_exists" \
+  --arg profile_default_gate_log "$profile_default_gate_log" \
+  --arg profile_default_gate_decision "$profile_default_gate_decision" \
+  --arg profile_default_gate_recommended_profile "$profile_default_gate_recommended_profile" \
   --arg roadmap_status "$roadmap_status" \
   --argjson roadmap_rc "$roadmap_rc" \
   --argjson roadmap_command_rc "$roadmap_command_rc" \
@@ -1386,7 +1569,8 @@ jq -n \
         "phase1_resilience_handoff_run",
         "phase2_linux_prod_candidate_handoff_run",
         "phase3_windows_client_beta_handoff_run",
-        "phase4_windows_full_parity_handoff_run"
+        "phase4_windows_full_parity_handoff_run",
+        "profile_default_gate_refresh"
       ],
       sequential_dependency_stages: ["roadmap_progress_report"]
     },
@@ -1399,6 +1583,8 @@ jq -n \
       run_phase2_linux_prod_candidate_handoff_run: ($run_phase2_linux_prod_candidate_handoff_run == 1),
       run_phase3_windows_client_beta_handoff_run: ($run_phase3_windows_client_beta_handoff_run == 1),
       run_phase4_windows_full_parity_handoff_run: ($run_phase4_windows_full_parity_handoff_run == 1),
+      run_profile_default_gate_refresh: ($run_profile_default_gate_refresh == 1),
+      profile_default_gate_fail_closed: ($profile_default_gate_fail_closed == 1),
       run_roadmap_progress_report: ($run_roadmap_progress_report == 1),
       allow_policy_no_go: ($allow_policy_no_go == 1),
       runtime_passthrough_args: $runtime_passthrough_args,
@@ -1406,6 +1592,7 @@ jq -n \
       phase2_passthrough_args: $phase2_passthrough_args,
       phase3_passthrough_args: $phase3_passthrough_args,
       phase4_passthrough_args: $phase4_passthrough_args,
+      profile_passthrough_args: $profile_passthrough_args,
       roadmap_passthrough_args: $roadmap_passthrough_args
     },
     steps: {
@@ -1550,6 +1737,30 @@ jq -n \
           log: $phase4_log
         }
       },
+      profile_default_gate_refresh: {
+        enabled: ($run_profile_default_gate_refresh == 1),
+        fail_closed: ($profile_default_gate_fail_closed == 1),
+        status: $profile_default_gate_status,
+        rc: $profile_default_gate_rc,
+        command_rc: $profile_default_gate_command_rc,
+        command: (if $profile_default_gate_command == "" then null else $profile_default_gate_command end),
+        contract_valid: (
+          if $profile_default_gate_contract_valid == "1" then true
+          elif $profile_default_gate_contract_valid == "0" then false
+          else null
+          end
+        ),
+        contract_error: (if $profile_default_gate_contract_error == "" then null else $profile_default_gate_contract_error end),
+        decision: {
+          decision: (if $profile_default_gate_decision == "" then null else $profile_default_gate_decision end),
+          recommended_profile: (if $profile_default_gate_recommended_profile == "" then null else $profile_default_gate_recommended_profile end)
+        },
+        artifacts: {
+          summary_json: $profile_default_gate_summary_json,
+          summary_exists: ($profile_default_gate_summary_exists == "true"),
+          log: $profile_default_gate_log
+        }
+      },
       roadmap_progress_report: {
         enabled: ($run_roadmap_progress_report == 1),
         status: $roadmap_status,
@@ -1627,6 +1838,7 @@ jq -n \
     phase2_linux_prod_candidate_handoff_run_summary_json: $phase2_summary_json,
     phase3_windows_client_beta_handoff_run_summary_json: $phase3_summary_json,
     phase4_windows_full_parity_handoff_run_summary_json: $phase4_summary_json,
+    profile_default_gate_summary_json: $profile_default_gate_summary_json,
     vpn_rc_resilience_summary_json: $roadmap_vpn_rc_resilience_summary_json,
     roadmap_progress_summary_json: $roadmap_summary_json,
     roadmap_progress_report_md: $roadmap_report_md

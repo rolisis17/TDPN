@@ -475,6 +475,13 @@ cat >"$PHASE7_MAINNET_CUTOVER_HANDOFF_RUN_SUMMARY_JSON" <<'EOF_PHASE7_HANDOFF_RU
   },
   "status": "pass",
   "rc": 0,
+  "signals": {
+    "mainnet_activation_gate_go_ok": true,
+    "cosmos_module_coverage_floor_ok": true,
+    "cosmos_keeper_coverage_floor_ok": true,
+    "cosmos_app_coverage_floor_ok": true,
+    "dual_write_parity_ok": true
+  },
   "summaries": {
     "check": {
       "status": "pass",
@@ -515,7 +522,11 @@ cat >"$PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_JSON" <<'EOF_PHASE7_SUMMARY_REPORT'
       "raw_status": "pass",
       "raw_rc": 0,
       "signal_snapshot": {
-        "mainnet_activation_gate_go": true
+        "mainnet_activation_gate_go": true,
+        "cosmos_module_coverage_floor_ok": true,
+        "cosmos_keeper_coverage_floor_ok": true,
+        "cosmos_app_coverage_floor_ok": true,
+        "dual_write_parity_ok": true
       },
       "status": "pass"
     },
@@ -528,7 +539,11 @@ cat >"$PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_JSON" <<'EOF_PHASE7_SUMMARY_REPORT'
       "raw_status": "pass",
       "raw_rc": 0,
       "signal_snapshot": {
-        "mainnet_activation_gate_go": true
+        "mainnet_activation_gate_go": true,
+        "cosmos_module_coverage_floor_ok": true,
+        "cosmos_keeper_coverage_floor_ok": true,
+        "cosmos_app_coverage_floor_ok": true,
+        "dual_write_parity_ok": true
       },
       "status": "pass"
     },
@@ -541,7 +556,11 @@ cat >"$PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_JSON" <<'EOF_PHASE7_SUMMARY_REPORT'
       "raw_status": "pass",
       "raw_rc": 0,
       "signal_snapshot": {
-        "mainnet_activation_gate_go": true
+        "mainnet_activation_gate_go": true,
+        "cosmos_module_coverage_floor_ok": true,
+        "cosmos_keeper_coverage_floor_ok": true,
+        "cosmos_app_coverage_floor_ok": true,
+        "dual_write_parity_ok": true
       },
       "status": "pass"
     },
@@ -554,7 +573,11 @@ cat >"$PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_JSON" <<'EOF_PHASE7_SUMMARY_REPORT'
       "raw_status": "pass",
       "raw_rc": 0,
       "signal_snapshot": {
-        "mainnet_activation_gate_go": true
+        "mainnet_activation_gate_go": true,
+        "cosmos_module_coverage_floor_ok": true,
+        "cosmos_keeper_coverage_floor_ok": true,
+        "cosmos_app_coverage_floor_ok": true,
+        "dual_write_parity_ok": true
       },
       "status": "pass"
     }
@@ -633,7 +656,7 @@ if ! jq -e '
   and .rc == 0
   and .vpn_track.readiness_status == "NOT_READY"
   and .vpn_track.roadmap_stage == "READY_FOR_MACHINE_C_SMOKE"
-  and .vpn_track.vpn_rc_done_for_phase == true
+  and .vpn_track.vpn_rc_done_for_phase == false
   and .vpn_track.phase0_product_surface.available == true
   and .vpn_track.phase0_product_surface.status == "pass"
   and .vpn_track.phase0_product_surface.contract_ok == true
@@ -652,6 +675,10 @@ if ! jq -e '
   and .blockchain_track.phase7_mainnet_cutover_summary_report.available == true
   and .blockchain_track.phase7_mainnet_cutover_summary_report.status == "pass"
   and .blockchain_track.phase7_mainnet_cutover_summary_report.mainnet_activation_gate_go_ok == true
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.cosmos_module_coverage_floor_ok == true
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.cosmos_keeper_coverage_floor_ok == true
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.cosmos_app_coverage_floor_ok == true
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.dual_write_parity_ok == true
   and (.next_actions | length) >= 1
   and (.next_actions[0].id // "") == "machine_c_vpn_smoke"
   and (.next_actions[1].id // "") == "profile_default_gate"
@@ -756,7 +783,7 @@ if ! rg -q '^- Phase-0 product surface available: true$' "$REPORT_MD"; then
   cat "$REPORT_MD"
   exit 1
 fi
-if ! rg -q 'VPN RC done for phase: `true`' "$REPORT_MD"; then
+if ! rg -q 'VPN RC done for phase: `false`' "$REPORT_MD"; then
   echo "report markdown missing VPN RC done signal"
   cat "$REPORT_MD"
   exit 1
@@ -795,6 +822,26 @@ if ! rg -q 'Phase-7 mainnet cutover mainnet_activation_gate_go_ok: true' "$REPOR
   cat "$REPORT_MD"
   exit 1
 fi
+if ! rg -q 'Phase-7 mainnet cutover cosmos_module_coverage_floor_ok: true' "$REPORT_MD"; then
+  echo "report markdown missing phase7 cosmos_module_coverage_floor_ok line"
+  cat "$REPORT_MD"
+  exit 1
+fi
+if ! rg -q 'Phase-7 mainnet cutover cosmos_keeper_coverage_floor_ok: true' "$REPORT_MD"; then
+  echo "report markdown missing phase7 cosmos_keeper_coverage_floor_ok line"
+  cat "$REPORT_MD"
+  exit 1
+fi
+if ! rg -q 'Phase-7 mainnet cutover cosmos_app_coverage_floor_ok: true' "$REPORT_MD"; then
+  echo "report markdown missing phase7 cosmos_app_coverage_floor_ok line"
+  cat "$REPORT_MD"
+  exit 1
+fi
+if ! rg -q 'Phase-7 mainnet cutover dual_write_parity_ok: true' "$REPORT_MD"; then
+  echo "report markdown missing phase7 dual_write_parity_ok line"
+  cat "$REPORT_MD"
+  exit 1
+fi
 if ! rg -q 'Mainnet activation gate|mainnet_activation_gate' "$REPORT_MD"; then
   echo "report markdown missing mainnet activation gate line"
   cat "$REPORT_MD"
@@ -824,6 +871,10 @@ if ! jq -e '
   .blockchain_track.phase7_mainnet_cutover_summary_report.available == false
   and .blockchain_track.phase7_mainnet_cutover_summary_report.status == "missing"
   and .blockchain_track.phase7_mainnet_cutover_summary_report.mainnet_activation_gate_go_ok == null
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.cosmos_module_coverage_floor_ok == null
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.cosmos_keeper_coverage_floor_ok == null
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.cosmos_app_coverage_floor_ok == null
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.dual_write_parity_ok == null
   and
   .blockchain_track.mainnet_activation_gate.available == false
   and .blockchain_track.mainnet_activation_gate.status == "missing"
@@ -857,6 +908,10 @@ fi
 if ! jq -e --arg src "$PHASE7_MAINNET_CUTOVER_CHECK_SUMMARY_JSON" '
   .blockchain_track.phase7_mainnet_cutover_summary_report.available == true
   and .blockchain_track.phase7_mainnet_cutover_summary_report.mainnet_activation_gate_go_ok == true
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.cosmos_module_coverage_floor_ok == null
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.cosmos_keeper_coverage_floor_ok == null
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.cosmos_app_coverage_floor_ok == null
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.dual_write_parity_ok == null
   and .blockchain_track.mainnet_activation_gate.available == true
   and .blockchain_track.mainnet_activation_gate.status == "go"
   and .blockchain_track.mainnet_activation_gate.decision == "GO"
@@ -899,6 +954,10 @@ fi
 if ! jq -e --arg src "$PHASE7_MAINNET_CUTOVER_CHECK_NO_GO_SUMMARY_JSON" '
   .blockchain_track.phase7_mainnet_cutover_summary_report.available == true
   and .blockchain_track.phase7_mainnet_cutover_summary_report.mainnet_activation_gate_go_ok == false
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.cosmos_module_coverage_floor_ok == null
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.cosmos_keeper_coverage_floor_ok == null
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.cosmos_app_coverage_floor_ok == null
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.dual_write_parity_ok == null
   and .blockchain_track.mainnet_activation_gate.available == true
   and .blockchain_track.mainnet_activation_gate.status == "no-go"
   and .blockchain_track.mainnet_activation_gate.decision == "NO-GO"
@@ -934,6 +993,10 @@ if ! jq -e '
   .blockchain_track.phase7_mainnet_cutover_summary_report.available == false
   and .blockchain_track.phase7_mainnet_cutover_summary_report.status == "invalid"
   and .blockchain_track.phase7_mainnet_cutover_summary_report.mainnet_activation_gate_go_ok == null
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.cosmos_module_coverage_floor_ok == null
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.cosmos_keeper_coverage_floor_ok == null
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.cosmos_app_coverage_floor_ok == null
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.dual_write_parity_ok == null
   and
   .blockchain_track.mainnet_activation_gate.available == false
   and .blockchain_track.mainnet_activation_gate.status == "invalid"
@@ -1053,6 +1116,60 @@ if ! jq -e '
 ' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_failed_reasons_only_summary.json" >/dev/null; then
   echo "failed_reasons-only gate summary JSON missing expected reason/source-path fallbacks"
   cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_failed_reasons_only_summary.json"
+  exit 1
+fi
+
+echo "[roadmap-progress-report] blockchain mainnet activation gate failed_gate_ids-only fallback path"
+FAILED_GATE_IDS_ONLY_MAINNET_GATE_SUMMARY_JSON="$TMP_DIR/blockchain_mainnet_activation_gate_failed_gate_ids_only_summary.json"
+cat >"$FAILED_GATE_IDS_ONLY_MAINNET_GATE_SUMMARY_JSON" <<'EOF_FAILED_GATE_IDS_ONLY_MAINNET_GATE'
+{
+  "version": 1,
+  "schema": {
+    "id": "blockchain_mainnet_activation_gate_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "no-go",
+  "decision": "NO-GO",
+  "go": false,
+  "no_go": true,
+  "failed_gate_ids": [
+    "validator_candidate_depth",
+    "subsidy_sustainability"
+  ],
+  "input": {
+    "metrics_json": "./artifacts/blockchain/mainnet_activation_metrics_snapshot_failed_gate_ids.json"
+  },
+  "artifacts": {
+    "metrics_json": "./artifacts/blockchain/mainnet_activation_metrics_snapshot_failed_gate_ids.json"
+  }
+}
+EOF_FAILED_GATE_IDS_ONLY_MAINNET_GATE
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$MINIMAL_MANUAL_SUMMARY_JSON" \
+  --phase7-mainnet-cutover-summary-json "" \
+  --blockchain-mainnet-activation-gate-summary-json "$FAILED_GATE_IDS_ONLY_MAINNET_GATE_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_mainnet_activation_gate_failed_gate_ids_only_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_mainnet_activation_gate_failed_gate_ids_only_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_failed_gate_ids_only.log 2>&1; then
+  echo "expected success when mainnet activation gate summary has only failed_gate_ids"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_failed_gate_ids_only.log
+  exit 1
+fi
+if ! jq -e '
+  .blockchain_track.mainnet_activation_gate.available == true
+  and .blockchain_track.mainnet_activation_gate.status == "no-go"
+  and .blockchain_track.mainnet_activation_gate.decision == "NO-GO"
+  and ((.blockchain_track.mainnet_activation_gate.reasons // []) | length) > 0
+  and ((.blockchain_track.mainnet_activation_gate.reasons // []) | index("validator_candidate_depth")) != null
+  and ((.blockchain_track.mainnet_activation_gate.reasons // []) | index("subsidy_sustainability")) != null
+  and ((.blockchain_track.mainnet_activation_gate.source_paths // []) | index("./artifacts/blockchain/mainnet_activation_metrics_snapshot_failed_gate_ids.json")) != null
+' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_failed_gate_ids_only_summary.json" >/dev/null; then
+  echo "failed_gate_ids-only gate summary JSON missing expected reason/source-path fallbacks"
+  cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_failed_gate_ids_only_summary.json"
   exit 1
 fi
 
@@ -1239,7 +1356,7 @@ if ! run_roadmap_progress_report \
   exit 1
 fi
 if ! jq -e '
-  .vpn_track.vpn_rc_done_for_phase == true
+  .vpn_track.vpn_rc_done_for_phase == false
   and (.vpn_track.pending_real_host_checks | length) == 2
   and ((.vpn_track.pending_real_host_checks | map(.check_id) | sort) == ["machine_c_vpn_smoke","three_machine_prod_signoff"])
   and (.vpn_track.next_action.check_id == "machine_c_vpn_smoke")
@@ -1249,6 +1366,205 @@ if ! jq -e '
 ' "$TMP_DIR/roadmap_progress_summary_gate_fallback_summary.json" >/dev/null; then
   echo "summary-gate fallback JSON missing expected inferred readiness fields"
   cat "$TMP_DIR/roadmap_progress_summary_gate_fallback_summary.json"
+  exit 1
+fi
+
+echo "[roadmap-progress-report] vpn_rc_done_for_phase follows resilience criteria (fail-closed)"
+READY_SIGNOFF_MANUAL_SUMMARY_JSON="$TMP_DIR/manual_validation_ready_signoff_summary.json"
+cat >"$READY_SIGNOFF_MANUAL_SUMMARY_JSON" <<'EOF_READY_SIGNOFF_MANUAL_SUMMARY'
+{
+  "version": 1,
+  "checks": [
+    {
+      "check_id": "runtime_hygiene",
+      "label": "Runtime hygiene doctor",
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh runtime-doctor --show-json 1"
+    },
+    {
+      "check_id": "wg_only_stack_selftest",
+      "label": "WG-only stack selftest",
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh wg-only-stack-selftest-record --strict-beta 1 --print-summary-json 1"
+    },
+    {
+      "check_id": "three_machine_docker_readiness",
+      "label": "One-host docker 3-machine rehearsal",
+      "status": "pass",
+      "command": "./scripts/easy_node.sh three-machine-docker-readiness-record --path-profile balanced --soak-rounds 6 --soak-pause-sec 3 --print-summary-json 1"
+    },
+    {
+      "check_id": "real_wg_privileged_matrix",
+      "label": "Linux root real-WG privileged matrix",
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh real-wg-privileged-matrix-record --print-summary-json 1"
+    },
+    {
+      "check_id": "machine_c_vpn_smoke",
+      "label": "Machine C VPN smoke test",
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --path-profile balanced --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country"
+    },
+    {
+      "check_id": "three_machine_prod_signoff",
+      "label": "True 3-machine production signoff",
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh three-machine-prod-signoff --bundle-dir .easy-node-logs/prod_gate_bundle --directory-a https://A_HOST:8081 --directory-b https://B_HOST:8081 --issuer-url https://A_HOST:8082 --entry-url https://A_HOST:8083 --exit-url https://A_HOST:8084 --pre-real-host-readiness 1 --runtime-fix 1 --print-summary-json 1"
+    }
+  ],
+  "summary": {
+    "next_action_check_id": "",
+    "next_action_label": "",
+    "next_action_command": "",
+    "roadmap_stage": "PRODUCTION_SIGNOFF_COMPLETE",
+    "single_machine_ready": true,
+    "blocking_check_ids": [],
+    "optional_check_ids": ["three_machine_docker_readiness", "real_wg_privileged_matrix"],
+    "pre_machine_c_gate": {
+      "ready": true
+    },
+    "real_host_gate": {
+      "ready": true,
+      "blockers": []
+    },
+    "docker_rehearsal_gate": {
+      "status": "pass"
+    },
+    "profile_default_gate": {
+      "status": "pass"
+    },
+    "real_wg_privileged_gate": {
+      "status": "pass"
+    }
+  },
+  "report": {
+    "readiness_status": "READY",
+    "ready": true
+  }
+}
+EOF_READY_SIGNOFF_MANUAL_SUMMARY
+
+READY_SIGNOFF_RESILIENCE_PASS_JSON="$TMP_DIR/ready_signoff_resilience_pass_summary.json"
+cat >"$READY_SIGNOFF_RESILIENCE_PASS_JSON" <<'EOF_READY_SIGNOFF_RESILIENCE_PASS'
+{
+  "version": 1,
+  "profile_matrix_stable": true,
+  "peer_loss_recovery_ok": true,
+  "session_churn_guard_ok": true
+}
+EOF_READY_SIGNOFF_RESILIENCE_PASS
+
+READY_SIGNOFF_RESILIENCE_FAIL_JSON="$TMP_DIR/ready_signoff_resilience_fail_summary.json"
+cat >"$READY_SIGNOFF_RESILIENCE_FAIL_JSON" <<'EOF_READY_SIGNOFF_RESILIENCE_FAIL'
+{
+  "version": 1,
+  "profile_matrix_stable": true,
+  "peer_loss_recovery_ok": false,
+  "session_churn_guard_ok": true
+}
+EOF_READY_SIGNOFF_RESILIENCE_FAIL
+
+READY_SIGNOFF_EMPTY_LOGS_ROOT="$TMP_DIR/ready_signoff_empty_logs"
+mkdir -p "$READY_SIGNOFF_EMPTY_LOGS_ROOT"
+MISSING_READY_SIGNOFF_PHASE1_SUMMARY_JSON="$TMP_DIR/missing_ready_signoff_phase1_summary.json"
+MISSING_READY_SIGNOFF_RESILIENCE_SUMMARY_JSON="$TMP_DIR/missing_ready_signoff_resilience_summary.json"
+
+READY_SIGNOFF_PASS_SUMMARY_JSON="$TMP_DIR/roadmap_progress_ready_signoff_resilience_pass_summary.json"
+if ! ROADMAP_PROGRESS_LOGS_ROOT="$READY_SIGNOFF_EMPTY_LOGS_ROOT" \
+  run_roadmap_progress_report \
+    --refresh-manual-validation 0 \
+    --refresh-single-machine-readiness 0 \
+    --manual-validation-summary-json "$READY_SIGNOFF_MANUAL_SUMMARY_JSON" \
+    --phase0-summary-json "$PHASE0_SUMMARY_JSON" \
+    --phase1-resilience-handoff-summary-json "$MISSING_READY_SIGNOFF_PHASE1_SUMMARY_JSON" \
+    --vpn-rc-resilience-summary-json "$READY_SIGNOFF_RESILIENCE_PASS_JSON" \
+    --summary-json "$READY_SIGNOFF_PASS_SUMMARY_JSON" \
+    --report-md "$TMP_DIR/roadmap_progress_ready_signoff_resilience_pass_report.md" \
+    --print-report 0 \
+    --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ready_signoff_resilience_pass.log 2>&1; then
+  echo "expected success for READY signoff resilience-pass path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ready_signoff_resilience_pass.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "ok"
+  and .rc == 0
+  and .vpn_track.readiness_status == "READY"
+  and .vpn_track.roadmap_stage == "PRODUCTION_SIGNOFF_COMPLETE"
+  and .vpn_track.vpn_rc_done_for_phase == true
+  and .vpn_track.resilience_handoff.available == true
+  and .vpn_track.resilience_handoff.profile_matrix_stable == true
+  and .vpn_track.resilience_handoff.peer_loss_recovery_ok == true
+  and .vpn_track.resilience_handoff.session_churn_guard_ok == true
+' "$READY_SIGNOFF_PASS_SUMMARY_JSON" >/dev/null; then
+  echo "READY signoff resilience-pass summary missing expected vpn_rc_done_for_phase=true contract"
+  cat "$READY_SIGNOFF_PASS_SUMMARY_JSON"
+  exit 1
+fi
+
+READY_SIGNOFF_FAIL_SUMMARY_JSON="$TMP_DIR/roadmap_progress_ready_signoff_resilience_fail_summary.json"
+if ! ROADMAP_PROGRESS_LOGS_ROOT="$READY_SIGNOFF_EMPTY_LOGS_ROOT" \
+  run_roadmap_progress_report \
+    --refresh-manual-validation 0 \
+    --refresh-single-machine-readiness 0 \
+    --manual-validation-summary-json "$READY_SIGNOFF_MANUAL_SUMMARY_JSON" \
+    --phase0-summary-json "$PHASE0_SUMMARY_JSON" \
+    --phase1-resilience-handoff-summary-json "$MISSING_READY_SIGNOFF_PHASE1_SUMMARY_JSON" \
+    --vpn-rc-resilience-summary-json "$READY_SIGNOFF_RESILIENCE_FAIL_JSON" \
+    --summary-json "$READY_SIGNOFF_FAIL_SUMMARY_JSON" \
+    --report-md "$TMP_DIR/roadmap_progress_ready_signoff_resilience_fail_report.md" \
+    --print-report 0 \
+    --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ready_signoff_resilience_fail.log 2>&1; then
+  echo "expected success for READY signoff resilience-fail path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ready_signoff_resilience_fail.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "ok"
+  and .rc == 0
+  and .vpn_track.readiness_status == "READY"
+  and .vpn_track.roadmap_stage == "PRODUCTION_SIGNOFF_COMPLETE"
+  and .vpn_track.vpn_rc_done_for_phase == false
+  and .vpn_track.resilience_handoff.available == true
+  and .vpn_track.resilience_handoff.profile_matrix_stable == true
+  and .vpn_track.resilience_handoff.peer_loss_recovery_ok == false
+  and .vpn_track.resilience_handoff.session_churn_guard_ok == true
+' "$READY_SIGNOFF_FAIL_SUMMARY_JSON" >/dev/null; then
+  echo "READY signoff resilience-fail summary missing expected fail-closed vpn_rc_done_for_phase=false contract"
+  cat "$READY_SIGNOFF_FAIL_SUMMARY_JSON"
+  exit 1
+fi
+
+READY_SIGNOFF_MISSING_SUMMARY_JSON="$TMP_DIR/roadmap_progress_ready_signoff_resilience_missing_summary.json"
+if ! ROADMAP_PROGRESS_LOGS_ROOT="$READY_SIGNOFF_EMPTY_LOGS_ROOT" \
+  run_roadmap_progress_report \
+    --refresh-manual-validation 0 \
+    --refresh-single-machine-readiness 0 \
+    --manual-validation-summary-json "$READY_SIGNOFF_MANUAL_SUMMARY_JSON" \
+    --phase0-summary-json "$PHASE0_SUMMARY_JSON" \
+    --phase1-resilience-handoff-summary-json "$MISSING_READY_SIGNOFF_PHASE1_SUMMARY_JSON" \
+    --vpn-rc-resilience-summary-json "$MISSING_READY_SIGNOFF_RESILIENCE_SUMMARY_JSON" \
+    --summary-json "$READY_SIGNOFF_MISSING_SUMMARY_JSON" \
+    --report-md "$TMP_DIR/roadmap_progress_ready_signoff_resilience_missing_report.md" \
+    --print-report 0 \
+    --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ready_signoff_resilience_missing.log 2>&1; then
+  echo "expected success for READY signoff resilience-missing path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ready_signoff_resilience_missing.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "ok"
+  and .rc == 0
+  and .vpn_track.readiness_status == "READY"
+  and .vpn_track.roadmap_stage == "PRODUCTION_SIGNOFF_COMPLETE"
+  and .vpn_track.vpn_rc_done_for_phase == false
+  and .vpn_track.resilience_handoff.available == false
+  and .vpn_track.resilience_handoff.profile_matrix_stable == null
+  and .vpn_track.resilience_handoff.peer_loss_recovery_ok == null
+  and .vpn_track.resilience_handoff.session_churn_guard_ok == null
+' "$READY_SIGNOFF_MISSING_SUMMARY_JSON" >/dev/null; then
+  echo "READY signoff resilience-missing summary missing expected fail-closed vpn_rc_done_for_phase=false contract"
+  cat "$READY_SIGNOFF_MISSING_SUMMARY_JSON"
   exit 1
 fi
 
@@ -1315,6 +1631,90 @@ fi
 
 : >"$CAPTURE"
 
+echo "[roadmap-progress-report] profile default gate exposes no-sudo primary command with sudo fallback"
+OPTIONAL_PROFILE_HINT_MANUAL_SUMMARY_JSON="$TMP_DIR/manual_validation_optional_profile_hint_summary.json"
+cat >"$OPTIONAL_PROFILE_HINT_MANUAL_SUMMARY_JSON" <<'EOF_OPTIONAL_PROFILE_HINT_SUMMARY'
+{
+  "version": 1,
+  "checks": [
+    {
+      "check_id": "runtime_hygiene",
+      "label": "Runtime hygiene doctor",
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh runtime-doctor --show-json 1"
+    },
+    {
+      "check_id": "wg_only_stack_selftest",
+      "label": "WG-only stack selftest",
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh wg-only-stack-selftest-record --strict-beta 1 --print-summary-json 1"
+    }
+  ],
+  "summary": {
+    "next_action_check_id": "",
+    "next_action_command": "",
+    "roadmap_stage": "READY_FOR_MACHINE_C_SMOKE",
+    "single_machine_ready": true,
+    "blocking_check_ids": [],
+    "optional_check_ids": ["three_machine_docker_readiness", "real_wg_privileged_matrix"],
+    "profile_default_gate": {
+      "status": "pending",
+      "notes": "profile compare campaign signoff decision is NO-GO but campaign-check evidence is insufficient/unstable; rerun with refresh-campaign=1",
+      "decision": "NO-GO",
+      "recommended_profile": "balanced",
+      "next_command": "./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1 --campaign-execution-mode docker --campaign-start-local-stack 0 --campaign-directory-urls http://127.0.0.1:18081\\,http://127.0.0.1:28081 --campaign-issuer-url http://127.0.0.1:18082 --campaign-entry-url http://127.0.0.1:18083 --campaign-exit-url http://127.0.0.1:18084",
+      "next_command_sudo": "sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1",
+      "next_command_source": "docker_rehearsal_artifacts",
+      "docker_rehearsal_hint_available": true,
+      "docker_rehearsal_hint_source": "docker_rehearsal_artifacts",
+      "artifacts": {
+        "campaign_check_summary_json_resolved": "/tmp/profile_compare_campaign_check_summary_insufficient.json",
+        "docker_rehearsal_matrix_summary_json": "/tmp/three_machine_docker_profile_matrix_record_hint_matrix.json",
+        "docker_rehearsal_profile_summary_json": "/tmp/three_machine_docker_readiness_hint_2hop.json"
+      }
+    },
+    "docker_rehearsal_gate": {
+      "status": "pass",
+      "command": "./scripts/easy_node.sh three-machine-docker-readiness-record --path-profile balanced --soak-rounds 6 --soak-pause-sec 3 --print-summary-json 1"
+    },
+    "real_wg_privileged_gate": {
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh real-wg-privileged-matrix-record --print-summary-json 1"
+    }
+  },
+  "report": {
+    "readiness_status": "NOT_READY"
+  }
+}
+EOF_OPTIONAL_PROFILE_HINT_SUMMARY
+
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$OPTIONAL_PROFILE_HINT_MANUAL_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_optional_profile_hint_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_optional_profile_hint_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_optional_profile_hint.log 2>&1; then
+  echo "expected success when profile default gate includes docker no-sudo guidance"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_optional_profile_hint.log
+  exit 1
+fi
+if ! jq -e '
+  ((.next_actions // []) | any(.id == "profile_default_gate" and (.command | startswith("./scripts/easy_node.sh profile-compare-campaign-signoff")) and (.command | contains("--campaign-execution-mode docker"))))
+  and (.vpn_track.optional_gate_status.profile_default_gate == "pending")
+  and ((.vpn_track.profile_default_gate.next_command // "") | contains("--campaign-execution-mode docker"))
+  and ((.vpn_track.profile_default_gate.next_command_sudo // "") | startswith("sudo ./scripts/easy_node.sh profile-compare-campaign-signoff"))
+  and ((.vpn_track.profile_default_gate.next_command_source // "") | test("docker"))
+  and (.vpn_track.profile_default_gate.docker_hint_available == true)
+' "$TMP_DIR/roadmap_progress_optional_profile_hint_summary.json" >/dev/null; then
+  echo "optional profile-hint summary JSON missing expected profile_default_gate guidance fields"
+  cat "$TMP_DIR/roadmap_progress_optional_profile_hint_summary.json"
+  exit 1
+fi
+
+: >"$CAPTURE"
+
 echo "[roadmap-progress-report] profile default gate derives warn from NO-GO signoff summary"
 PROFILE_DEFAULT_GATE_SIGNOFF_NO_GO_JSON="$TMP_DIR/profile_compare_campaign_signoff_no_go.json"
 cat >"$PROFILE_DEFAULT_GATE_SIGNOFF_NO_GO_JSON" <<'EOF_PROFILE_DEFAULT_GATE_SIGNOFF_NO_GO'
@@ -1349,6 +1749,73 @@ if ! jq -e --arg src "$PROFILE_DEFAULT_GATE_SIGNOFF_NO_GO_JSON" '
 ' "$TMP_DIR/roadmap_progress_profile_default_gate_no_go_summary.json" >/dev/null; then
   echo "NO-GO profile default gate summary mismatch"
   cat "$TMP_DIR/roadmap_progress_profile_default_gate_no_go_summary.json"
+  exit 1
+fi
+
+: >"$CAPTURE"
+
+echo "[roadmap-progress-report] profile default gate derives pending from NO-GO signoff when campaign evidence is insufficient"
+PROFILE_DEFAULT_GATE_SIGNOFF_NO_GO_INSUFFICIENT_JSON="$TMP_DIR/profile_compare_campaign_signoff_no_go_insufficient.json"
+PROFILE_DEFAULT_GATE_CAMPAIGN_CHECK_REL_PATH="profile_gate_signoff_artifacts/profile_compare_campaign_check_summary_insufficient.json"
+PROFILE_DEFAULT_GATE_CAMPAIGN_CHECK_ABS_PATH="$TMP_DIR/$PROFILE_DEFAULT_GATE_CAMPAIGN_CHECK_REL_PATH"
+mkdir -p "$(dirname "$PROFILE_DEFAULT_GATE_CAMPAIGN_CHECK_ABS_PATH")"
+cat >"$PROFILE_DEFAULT_GATE_CAMPAIGN_CHECK_ABS_PATH" <<'EOF_PROFILE_DEFAULT_GATE_CAMPAIGN_CHECK_INSUFFICIENT'
+{
+  "version": 1,
+  "decision": "NO-GO",
+  "status": "fail",
+  "rc": 1,
+  "inputs": {
+    "policy": {
+      "require_status_pass": true,
+      "require_trend_status_pass": true,
+      "require_min_runs_total": 3,
+      "require_min_runs_with_summary": 3
+    }
+  },
+  "observed": {
+    "campaign_status": "pass",
+    "trend_status": "pass",
+    "runs_total": 1,
+    "runs_with_summary": 1
+  }
+}
+EOF_PROFILE_DEFAULT_GATE_CAMPAIGN_CHECK_INSUFFICIENT
+cat >"$PROFILE_DEFAULT_GATE_SIGNOFF_NO_GO_INSUFFICIENT_JSON" <<EOF_PROFILE_DEFAULT_GATE_SIGNOFF_NO_GO_INSUFFICIENT
+{
+  "version": 1,
+  "status": "ok",
+  "final_rc": 0,
+  "decision": {
+    "decision": "NO-GO",
+    "go": false,
+    "recommended_profile": "balanced"
+  },
+  "artifacts": {
+    "campaign_check_summary_json": "$PROFILE_DEFAULT_GATE_CAMPAIGN_CHECK_REL_PATH"
+  }
+}
+EOF_PROFILE_DEFAULT_GATE_SIGNOFF_NO_GO_INSUFFICIENT
+
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$OPTIONAL_FALLBACK_MANUAL_SUMMARY_JSON" \
+  --profile-compare-signoff-summary-json "$PROFILE_DEFAULT_GATE_SIGNOFF_NO_GO_INSUFFICIENT_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_profile_default_gate_no_go_insufficient_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_profile_default_gate_no_go_insufficient_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_no_go_insufficient.log 2>&1; then
+  echo "expected success when profile default gate NO-GO has insufficient campaign evidence"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_no_go_insufficient.log
+  exit 1
+fi
+if ! jq -e --arg src "$PROFILE_DEFAULT_GATE_SIGNOFF_NO_GO_INSUFFICIENT_JSON" '
+  .vpn_track.optional_gate_status.profile_default_gate == "pending"
+  and .artifacts.profile_compare_signoff_summary_json == $src
+' "$TMP_DIR/roadmap_progress_profile_default_gate_no_go_insufficient_summary.json" >/dev/null; then
+  echo "NO-GO insufficient evidence profile default gate summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_profile_default_gate_no_go_insufficient_summary.json"
   exit 1
 fi
 

@@ -335,6 +335,80 @@ exit 0
 EOF_FAKE_PHASE4
 chmod +x "$FAKE_PHASE4"
 
+FAKE_PROFILE="$TMP_DIR/fake_profile_default_gate_signoff.sh"
+cat >"$FAKE_PROFILE" <<'EOF_FAKE_PROFILE'
+#!/usr/bin/env bash
+set -euo pipefail
+
+capture="${FASTLANE_CAPTURE_FILE:?}"
+capture_line="profile"
+for arg in "$@"; do
+  capture_line+=$'\t'"$arg"
+done
+if command -v flock >/dev/null 2>&1; then
+  {
+    flock -x 9
+    printf '%s\n' "$capture_line" >&9
+  } 9>>"$capture"
+else
+  printf '%s\n' "$capture_line" >>"$capture"
+fi
+
+summary_json=""
+decision="${FASTLANE_PROFILE_DECISION:-GO}"
+recommended_profile="${FASTLANE_PROFILE_RECOMMENDED_PROFILE:-2hop}"
+status="${FASTLANE_PROFILE_STATUS:-ok}"
+final_rc="${FASTLANE_PROFILE_FINAL_RC:-0}"
+
+if ! [[ "$final_rc" =~ ^[0-9]+$ ]]; then
+  final_rc=0
+fi
+if [[ "$decision" == "GO" ]]; then
+  decision_go=true
+else
+  decision_go=false
+fi
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --summary-json)
+      summary_json="${2:-}"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
+if [[ -n "$summary_json" ]]; then
+  mkdir -p "$(dirname "$summary_json")"
+  jq -n \
+    --arg status "$status" \
+    --argjson final_rc "$final_rc" \
+    --arg decision "$decision" \
+    --arg recommended_profile "$recommended_profile" \
+    --argjson decision_go "$decision_go" \
+    '{
+      version: 1,
+      status: $status,
+      final_rc: $final_rc,
+      decision: {
+        decision: $decision,
+        go: $decision_go,
+        recommended_profile: $recommended_profile
+      }
+    }' >"$summary_json"
+fi
+
+if [[ "${FASTLANE_FAIL_STAGE:-}" == "profile" ]]; then
+  exit "${FASTLANE_FAIL_RC:-47}"
+fi
+exit 0
+EOF_FAKE_PROFILE
+chmod +x "$FAKE_PROFILE"
+export VPN_NON_BLOCKCHAIN_FASTLANE_PROFILE_DEFAULT_GATE_SCRIPT="$FAKE_PROFILE"
+
 FAKE_ROADMAP="$TMP_DIR/fake_roadmap.sh"
 cat >"$FAKE_ROADMAP" <<'EOF_FAKE_ROADMAP'
 #!/usr/bin/env bash
@@ -501,6 +575,7 @@ bash "$RUNNER" \
   --phase2-linux-prod-candidate-handoff-run-summary-json "$TMP_DIR/phase2_success.json" \
   --phase3-windows-client-beta-handoff-run-summary-json "$TMP_DIR/phase3_success.json" \
   --phase4-windows-full-parity-handoff-run-summary-json "$TMP_DIR/phase4_success.json" \
+  --profile-default-gate-summary-json "$TMP_DIR/profile_success.json" \
   --roadmap-progress-summary-json "$TMP_DIR/roadmap_success.json" \
   --roadmap-progress-report-md "$TMP_DIR/roadmap_success.md" \
   --print-summary-json 0 \
@@ -509,6 +584,7 @@ bash "$RUNNER" \
   --phase2-beta 2 \
   --phase3-gamma 3 \
   --phase4-delta 4 \
+  --profile-zeta 6 \
   --roadmap-epsilon 5 >"$SUCCESS_LOG" 2>&1
 
 runtime_line="$(grep '^runtime' "$CAPTURE" | tail -n 1 || true)"
@@ -516,8 +592,9 @@ phase1_line="$(grep '^phase1' "$CAPTURE" | tail -n 1 || true)"
 phase2_line="$(grep '^phase2' "$CAPTURE" | tail -n 1 || true)"
 phase3_line="$(grep '^phase3' "$CAPTURE" | tail -n 1 || true)"
 phase4_line="$(grep '^phase4' "$CAPTURE" | tail -n 1 || true)"
+profile_line="$(grep '^profile' "$CAPTURE" | tail -n 1 || true)"
 roadmap_line="$(grep '^roadmap' "$CAPTURE" | tail -n 1 || true)"
-if [[ -z "$runtime_line" || -z "$phase1_line" || -z "$phase2_line" || -z "$phase3_line" || -z "$phase4_line" || -z "$roadmap_line" ]]; then
+if [[ -z "$runtime_line" || -z "$phase1_line" || -z "$phase2_line" || -z "$phase3_line" || -z "$phase4_line" || -z "$profile_line" || -z "$roadmap_line" ]]; then
   echo "missing expected stage invocations in success path"
   cat "$CAPTURE"
   cat "$SUCCESS_LOG"
@@ -529,6 +606,7 @@ phase1_line_sp="${phase1_line//$'\t'/ }"
 phase2_line_sp="${phase2_line//$'\t'/ }"
 phase3_line_sp="${phase3_line//$'\t'/ }"
 phase4_line_sp="${phase4_line//$'\t'/ }"
+profile_line_sp="${profile_line//$'\t'/ }"
 roadmap_line_sp="${roadmap_line//$'\t'/ }"
 expected_success_resilience="$TMP_DIR/reports_success/ci_phase1_resilience/vpn_rc_resilience_path/vpn_rc_resilience_path_summary.json"
 
@@ -562,8 +640,18 @@ if [[ "$phase4_line_sp" != *"--summary-json $TMP_DIR/phase4_success.json"* || "$
   echo "$phase4_line_sp"
   exit 1
 fi
+if [[ "$profile_line_sp" != *"--summary-json $TMP_DIR/profile_success.json"* || "$profile_line_sp" != *"--refresh-campaign 1"* || "$profile_line_sp" != *"--campaign-execution-mode docker"* || "$profile_line_sp" != *"--campaign-start-local-stack 0"* || "$profile_line_sp" != *"--fail-on-no-go 0"* || "$profile_line_sp" != *"--zeta 6"* ]]; then
+  echo "profile-default gate forwarding mismatch"
+  echo "$profile_line_sp"
+  exit 1
+fi
 if [[ "$roadmap_line_sp" != *"--phase2-linux-prod-candidate-summary-json $TMP_DIR/phase2_success.json"* || "$roadmap_line_sp" != *"--phase3-windows-client-beta-summary-json $TMP_DIR/phase3_success.json"* || "$roadmap_line_sp" != *"--phase4-windows-full-parity-summary-json $TMP_DIR/phase4_success.json"* || "$roadmap_line_sp" != *"--vpn-rc-resilience-summary-json $expected_success_resilience"* || "$roadmap_line_sp" != *"--summary-json $TMP_DIR/roadmap_success.json"* || "$roadmap_line_sp" != *"--report-md $TMP_DIR/roadmap_success.md"* || "$roadmap_line_sp" != *"--print-report 0"* || "$roadmap_line_sp" != *"--print-summary-json 0"* || "$roadmap_line_sp" != *"--epsilon 5"* ]]; then
   echo "roadmap forwarding mismatch"
+  echo "$roadmap_line_sp"
+  exit 1
+fi
+if [[ "$roadmap_line_sp" != *"--profile-compare-signoff-summary-json $TMP_DIR/profile_success.json"* ]]; then
+  echo "roadmap forwarding missing profile-compare signoff summary"
   echo "$roadmap_line_sp"
   exit 1
 fi
@@ -587,6 +675,11 @@ if ! grep -q '\[vpn-non-blockchain-fastlane\] stage=runtime_fix_record status=ru
   cat "$SUCCESS_LOG"
   exit 1
 fi
+if ! grep -q '\[vpn-non-blockchain-fastlane\] stage=profile_default_gate_refresh status=running mode=parallel' "$SUCCESS_LOG"; then
+  echo "expected profile-default parallel launch log line in success path"
+  cat "$SUCCESS_LOG"
+  exit 1
+fi
 
 if ! jq -e '
   .version == 1
@@ -604,17 +697,101 @@ if ! jq -e '
   and .steps.phase2_linux_prod_candidate_handoff_run.status == "pass"
   and .steps.phase3_windows_client_beta_handoff_run.status == "pass"
   and .steps.phase4_windows_full_parity_handoff_run.status == "pass"
+  and .steps.profile_default_gate_refresh.status == "pass"
+  and .steps.profile_default_gate_refresh.decision.decision == "GO"
   and .steps.roadmap_progress_report.status == "pass"
   and .steps.runtime_fix_record.contract_valid == true
   and .steps.phase1_resilience_handoff_run.contract_valid == true
   and .steps.phase2_linux_prod_candidate_handoff_run.contract_valid == true
   and .steps.phase3_windows_client_beta_handoff_run.contract_valid == true
   and .steps.phase4_windows_full_parity_handoff_run.contract_valid == true
+  and .steps.profile_default_gate_refresh.contract_valid == true
   and .steps.roadmap_progress_report.contract_valid == true
   and ((.steps | has("phase5_settlement_layer")) | not)
 ' "$SUCCESS_SUMMARY" >/dev/null; then
   echo "success summary contract mismatch"
   cat "$SUCCESS_SUMMARY"
+  exit 1
+fi
+
+echo "[vpn-non-blockchain-fastlane] profile-default gate non-blocking by default"
+: >"$CAPTURE"
+PROFILE_NON_BLOCKING_LOG="$TMP_DIR/profile_non_blocking.log"
+PROFILE_NON_BLOCKING_SUMMARY="$TMP_DIR/profile_non_blocking_wrapper.json"
+set +e
+FASTLANE_CAPTURE_FILE="$CAPTURE" \
+VPN_NON_BLOCKCHAIN_FASTLANE_RUNTIME_FIX_RECORD_SCRIPT="$FAKE_RUNTIME" \
+VPN_NON_BLOCKCHAIN_FASTLANE_PHASE1_RESILIENCE_HANDOFF_RUN_SCRIPT="$FAKE_PHASE1" \
+VPN_NON_BLOCKCHAIN_FASTLANE_PHASE2_LINUX_PROD_CANDIDATE_HANDOFF_RUN_SCRIPT="$FAKE_PHASE2" \
+VPN_NON_BLOCKCHAIN_FASTLANE_PHASE3_WINDOWS_CLIENT_BETA_HANDOFF_RUN_SCRIPT="$FAKE_PHASE3" \
+VPN_NON_BLOCKCHAIN_FASTLANE_PHASE4_WINDOWS_FULL_PARITY_HANDOFF_RUN_SCRIPT="$FAKE_PHASE4" \
+VPN_NON_BLOCKCHAIN_FASTLANE_ROADMAP_PROGRESS_REPORT_SCRIPT="$FAKE_ROADMAP" \
+FASTLANE_FAIL_STAGE="profile" \
+FASTLANE_FAIL_RC=67 \
+bash "$RUNNER" \
+  --reports-dir "$TMP_DIR/reports_profile_non_blocking" \
+  --summary-json "$PROFILE_NON_BLOCKING_SUMMARY" \
+  --print-summary-json 0 >"$PROFILE_NON_BLOCKING_LOG" 2>&1
+profile_non_blocking_rc=$?
+set -e
+if [[ "$profile_non_blocking_rc" -ne 0 ]]; then
+  echo "profile-default gate should be non-blocking by default; expected rc=0, got rc=$profile_non_blocking_rc"
+  cat "$PROFILE_NON_BLOCKING_LOG"
+  cat "$PROFILE_NON_BLOCKING_SUMMARY"
+  exit 1
+fi
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.profile_default_gate_fail_closed == false
+  and .steps.profile_default_gate_refresh.status == "warn"
+  and .steps.profile_default_gate_refresh.command_rc == 67
+  and .steps.roadmap_progress_report.status == "pass"
+' "$PROFILE_NON_BLOCKING_SUMMARY" >/dev/null; then
+  echo "profile-default non-blocking summary contract mismatch"
+  cat "$PROFILE_NON_BLOCKING_SUMMARY"
+  cat "$PROFILE_NON_BLOCKING_LOG"
+  exit 1
+fi
+
+echo "[vpn-non-blockchain-fastlane] profile-default gate fail-closed mode"
+: >"$CAPTURE"
+PROFILE_FAIL_CLOSED_LOG="$TMP_DIR/profile_fail_closed.log"
+PROFILE_FAIL_CLOSED_SUMMARY="$TMP_DIR/profile_fail_closed_wrapper.json"
+set +e
+FASTLANE_CAPTURE_FILE="$CAPTURE" \
+VPN_NON_BLOCKCHAIN_FASTLANE_RUNTIME_FIX_RECORD_SCRIPT="$FAKE_RUNTIME" \
+VPN_NON_BLOCKCHAIN_FASTLANE_PHASE1_RESILIENCE_HANDOFF_RUN_SCRIPT="$FAKE_PHASE1" \
+VPN_NON_BLOCKCHAIN_FASTLANE_PHASE2_LINUX_PROD_CANDIDATE_HANDOFF_RUN_SCRIPT="$FAKE_PHASE2" \
+VPN_NON_BLOCKCHAIN_FASTLANE_PHASE3_WINDOWS_CLIENT_BETA_HANDOFF_RUN_SCRIPT="$FAKE_PHASE3" \
+VPN_NON_BLOCKCHAIN_FASTLANE_PHASE4_WINDOWS_FULL_PARITY_HANDOFF_RUN_SCRIPT="$FAKE_PHASE4" \
+VPN_NON_BLOCKCHAIN_FASTLANE_ROADMAP_PROGRESS_REPORT_SCRIPT="$FAKE_ROADMAP" \
+FASTLANE_FAIL_STAGE="profile" \
+FASTLANE_FAIL_RC=68 \
+bash "$RUNNER" \
+  --reports-dir "$TMP_DIR/reports_profile_fail_closed" \
+  --summary-json "$PROFILE_FAIL_CLOSED_SUMMARY" \
+  --profile-default-gate-fail-closed 1 \
+  --print-summary-json 0 >"$PROFILE_FAIL_CLOSED_LOG" 2>&1
+profile_fail_closed_rc=$?
+set -e
+if [[ "$profile_fail_closed_rc" -ne 68 ]]; then
+  echo "profile-default gate fail-closed should fail wrapper; expected rc=68, got rc=$profile_fail_closed_rc"
+  cat "$PROFILE_FAIL_CLOSED_LOG"
+  cat "$PROFILE_FAIL_CLOSED_SUMMARY"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 68
+  and .inputs.profile_default_gate_fail_closed == true
+  and .steps.profile_default_gate_refresh.status == "fail"
+  and .steps.profile_default_gate_refresh.command_rc == 68
+  and .steps.roadmap_progress_report.status == "pass"
+' "$PROFILE_FAIL_CLOSED_SUMMARY" >/dev/null; then
+  echo "profile-default fail-closed summary contract mismatch"
+  cat "$PROFILE_FAIL_CLOSED_SUMMARY"
+  cat "$PROFILE_FAIL_CLOSED_LOG"
   exit 1
 fi
 
@@ -848,8 +1025,9 @@ expected_local_phase1="$TMP_DIR/reports_local/phase1_resilience_handoff_run_summ
 expected_local_phase2="$TMP_DIR/reports_local/phase2_linux_prod_candidate_handoff_run_summary.json"
 expected_local_phase3="$TMP_DIR/reports_local/phase3_windows_client_beta_handoff_run_summary.json"
 expected_local_phase4="$TMP_DIR/reports_local/phase4_windows_full_parity_handoff_run_summary.json"
+expected_local_profile="$TMP_DIR/reports_local/profile_compare_campaign_signoff_summary.json"
 expected_local_resilience="$TMP_DIR/reports_local/ci_phase1_resilience/vpn_rc_resilience_path/vpn_rc_resilience_path_summary.json"
-if [[ "$local_roadmap_line_sp" != *"--phase1-resilience-handoff-summary-json $expected_local_phase1"* || "$local_roadmap_line_sp" != *"--phase2-linux-prod-candidate-summary-json $expected_local_phase2"* || "$local_roadmap_line_sp" != *"--phase3-windows-client-beta-summary-json $expected_local_phase3"* || "$local_roadmap_line_sp" != *"--phase4-windows-full-parity-summary-json $expected_local_phase4"* || "$local_roadmap_line_sp" != *"--vpn-rc-resilience-summary-json $expected_local_resilience"* ]]; then
+if [[ "$local_roadmap_line_sp" != *"--phase1-resilience-handoff-summary-json $expected_local_phase1"* || "$local_roadmap_line_sp" != *"--phase2-linux-prod-candidate-summary-json $expected_local_phase2"* || "$local_roadmap_line_sp" != *"--phase3-windows-client-beta-summary-json $expected_local_phase3"* || "$local_roadmap_line_sp" != *"--phase4-windows-full-parity-summary-json $expected_local_phase4"* || "$local_roadmap_line_sp" != *"--profile-compare-signoff-summary-json $expected_local_profile"* || "$local_roadmap_line_sp" != *"--vpn-rc-resilience-summary-json $expected_local_resilience"* ]]; then
   echo "run-local roadmap summary forwarding mismatch"
   echo "$local_roadmap_line_sp"
   exit 1
@@ -864,12 +1042,14 @@ if ! jq -e \
   --arg p2 "$expected_local_phase2" \
   --arg p3 "$expected_local_phase3" \
   --arg p4 "$expected_local_phase4" \
+  --arg pp "$expected_local_profile" \
   --arg pr "$expected_local_resilience" \
   '
   .artifacts.phase1_resilience_handoff_run_summary_json == $p1
   and .artifacts.phase2_linux_prod_candidate_handoff_run_summary_json == $p2
   and .artifacts.phase3_windows_client_beta_handoff_run_summary_json == $p3
   and .artifacts.phase4_windows_full_parity_handoff_run_summary_json == $p4
+  and .artifacts.profile_default_gate_summary_json == $pp
   and .artifacts.vpn_rc_resilience_summary_json == $pr
 ' "$LOCAL_SUMMARY" >/dev/null; then
   echo "run-local summary contract missing expected artifact paths"
@@ -917,7 +1097,8 @@ if [[ "$runtime_line_sp" == *"--dry-run 1"* || "$roadmap_line_sp" == *"--dry-run
   exit 1
 fi
 expected_dry_resilience="$TMP_DIR/reports_dry/ci_phase1_resilience/vpn_rc_resilience_path/vpn_rc_resilience_path_summary.json"
-if [[ "$roadmap_line_sp" != *"--vpn-rc-resilience-summary-json $expected_dry_resilience"* ]]; then
+expected_dry_profile="$TMP_DIR/reports_dry/profile_compare_campaign_signoff_summary.json"
+if [[ "$roadmap_line_sp" != *"--vpn-rc-resilience-summary-json $expected_dry_resilience"* || "$roadmap_line_sp" != *"--profile-compare-signoff-summary-json $expected_dry_profile"* ]]; then
   echo "dry-run roadmap invocation missing run-local resilience summary path"
   echo "$roadmap_line_sp"
   exit 1
@@ -1004,7 +1185,7 @@ if [[ "$fail_rc" -ne 29 ]]; then
   cat "$FAIL_LOG"
   exit 1
 fi
-if ! grep -q '^phase3' "$CAPTURE" || ! grep -q '^phase4' "$CAPTURE" || ! grep -q '^roadmap' "$CAPTURE"; then
+if ! grep -q '^phase3' "$CAPTURE" || ! grep -q '^phase4' "$CAPTURE" || ! grep -q '^profile' "$CAPTURE" || ! grep -q '^roadmap' "$CAPTURE"; then
   echo "expected later stages to run after phase2 failure"
   cat "$CAPTURE"
   cat "$FAIL_LOG"
@@ -1017,6 +1198,7 @@ if ! jq -e '
   and .steps.phase2_linux_prod_candidate_handoff_run.rc == 29
   and .steps.phase3_windows_client_beta_handoff_run.status == "pass"
   and .steps.phase4_windows_full_parity_handoff_run.status == "pass"
+  and .steps.profile_default_gate_refresh.status == "pass"
   and .steps.roadmap_progress_report.status == "pass"
 ' "$FAIL_SUMMARY" >/dev/null; then
   echo "fail summary contract mismatch"

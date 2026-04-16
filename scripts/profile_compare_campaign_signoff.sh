@@ -48,6 +48,10 @@ Purpose:
 
 Notes:
   - Default behavior refreshes campaign artifacts first (--refresh-campaign 1).
+  - Reuse of an existing campaign summary happens only when refresh is disabled
+    (--refresh-campaign 0).
+  - When refresh inputs point at remote/bootstrap endpoints, the signoff step
+    prefers a docker-style refresh to avoid local root-only bootstrap failures.
   - Keep --allow-summary-overwrite 0 in normal operation to avoid output
     path collisions across campaign/check/signoff artifacts.
 USAGE
@@ -100,6 +104,25 @@ optional_bool_arg_or_die() {
 is_non_negative_decimal() {
   local value="$1"
   [[ "$value" =~ ^[0-9]+([.][0-9]+)?$ ]]
+}
+
+detect_local_stack_block_reason() {
+  local log_path="$1"
+  local reason=""
+
+  if [[ -f "$log_path" ]]; then
+    if grep -Eqi -- '--start-local-stack=1 requires root|requires root \(run with sudo\)' "$log_path"; then
+      reason="local stack requires root"
+    elif grep -Eqi -- 'permission denied|operation not permitted' "$log_path"; then
+      reason="local stack permission denied"
+    elif grep -Eqi -- 'failed to start local wg-only stack' "$log_path"; then
+      reason="local wg-only stack unavailable"
+    elif grep -Eqi -- 'profile-compare-campaign: no valid compare summaries were produced' "$log_path" && [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+      reason="local mode produced no summaries on non-root host"
+    fi
+  fi
+
+  printf '%s' "$reason"
 }
 
 quote_cmd() {
@@ -386,6 +409,41 @@ else
   summary_json="$reports_dir/profile_compare_campaign_signoff_summary.json"
 fi
 
+campaign_summary_available="0"
+campaign_summary_valid="0"
+campaign_summary_status=""
+campaign_summary_decision=""
+campaign_summary_refresh_campaign="0"
+if [[ -f "$campaign_summary_json" ]]; then
+  campaign_summary_available="1"
+  if jq -e '.version == 1 and (.summary | type == "object") and (.decision | type == "object") and (.trend | type == "object")' "$campaign_summary_json" >/dev/null 2>&1; then
+    campaign_summary_valid="1"
+    campaign_summary_status="$(jq -r '.status // ""' "$campaign_summary_json")"
+    campaign_summary_decision="$(jq -r '.decision.recommended_default_profile // ""' "$campaign_summary_json")"
+    campaign_summary_refresh_campaign="$(jq -r '(.inputs.refresh_campaign // false) | if . then "1" else "0" end' "$campaign_summary_json")"
+  fi
+fi
+
+campaign_refresh_effective="$refresh_campaign"
+campaign_execution_mode_effective="$campaign_execution_mode"
+campaign_directory_urls_effective="$campaign_directory_urls"
+campaign_bootstrap_directory_effective="$campaign_bootstrap_directory"
+campaign_discovery_wait_sec_effective="$campaign_discovery_wait_sec"
+campaign_issuer_url_effective="$campaign_issuer_url"
+campaign_entry_url_effective="$campaign_entry_url"
+campaign_exit_url_effective="$campaign_exit_url"
+campaign_start_local_stack_effective="$campaign_start_local_stack"
+
+if [[ "$campaign_refresh_effective" == "1" && -z "$campaign_execution_mode_effective" ]]; then
+  if [[ -n "$campaign_directory_urls_effective" || -n "$campaign_bootstrap_directory_effective" || -n "$campaign_issuer_url_effective" || -n "$campaign_entry_url_effective" || -n "$campaign_exit_url_effective" ]]; then
+    campaign_execution_mode_effective="docker"
+  fi
+fi
+
+if [[ "$campaign_refresh_effective" == "1" && "$campaign_execution_mode_effective" == "docker" && -z "$campaign_start_local_stack_effective" ]]; then
+  campaign_start_local_stack_effective="0"
+fi
+
 mkdir -p "$(dirname "$campaign_summary_json")" "$(dirname "$campaign_report_md")" "$(dirname "$campaign_check_summary_json")" "$(dirname "$summary_json")"
 
 if [[ "$allow_summary_overwrite" == "0" ]]; then
@@ -398,13 +456,29 @@ fi
 run_stamp="$(date -u +%Y%m%d_%H%M%S)"
 log_dir="${EASY_NODE_LOG_DIR:-$ROOT_DIR/.easy-node-logs}"
 mkdir -p "$log_dir"
-campaign_log="$log_dir/profile_compare_campaign_signoff_${run_stamp}_campaign.log"
+campaign_log_initial="$log_dir/profile_compare_campaign_signoff_${run_stamp}_campaign.log"
+campaign_log_fallback="$log_dir/profile_compare_campaign_signoff_${run_stamp}_campaign_fallback.log"
+campaign_log_effective="$campaign_log_initial"
 check_log="$log_dir/profile_compare_campaign_signoff_${run_stamp}_campaign_check.log"
 
 campaign_attempted=0
 campaign_status="skip"
 campaign_rc=0
 campaign_cmd_line=""
+campaign_cmd_line_initial=""
+campaign_cmd_line_fallback=""
+campaign_cmd_line_effective=""
+campaign_summary_reused="0"
+
+campaign_fallback_eligible="0"
+campaign_fallback_attempted="0"
+campaign_fallback_triggered="0"
+campaign_fallback_reason=""
+campaign_fallback_initial_mode=""
+campaign_fallback_initial_start_local_stack=""
+campaign_fallback_initial_rc="0"
+campaign_fallback_effective_mode=""
+campaign_fallback_effective_start_local_stack=""
 
 check_attempted=0
 check_status="skip"
@@ -415,50 +489,97 @@ status="ok"
 final_rc=0
 failure_stage=""
 
-campaign_cmd=(
-  "$CAMPAIGN_SCRIPT"
-  --reports-dir "$reports_dir"
-  --summary-json "$campaign_summary_json"
-  --report-md "$campaign_report_md"
-  --print-summary-json 0
-)
-if [[ -n "$campaign_execution_mode" ]]; then
-  campaign_cmd+=(--execution-mode "$campaign_execution_mode")
-fi
-if [[ -n "$campaign_directory_urls" ]]; then
-  campaign_cmd+=(--directory-urls "$campaign_directory_urls")
-fi
-if [[ -n "$campaign_bootstrap_directory" ]]; then
-  campaign_cmd+=(--bootstrap-directory "$campaign_bootstrap_directory")
-fi
-if [[ -n "$campaign_discovery_wait_sec" ]]; then
-  campaign_cmd+=(--discovery-wait-sec "$campaign_discovery_wait_sec")
-fi
-if [[ -n "$campaign_issuer_url" ]]; then
-  campaign_cmd+=(--issuer-url "$campaign_issuer_url")
-fi
-if [[ -n "$campaign_entry_url" ]]; then
-  campaign_cmd+=(--entry-url "$campaign_entry_url")
-fi
-if [[ -n "$campaign_exit_url" ]]; then
-  campaign_cmd+=(--exit-url "$campaign_exit_url")
-fi
-if [[ -n "$campaign_start_local_stack" ]]; then
-  campaign_cmd+=(--start-local-stack "$campaign_start_local_stack")
-fi
-campaign_cmd_line="$(quote_cmd "${campaign_cmd[@]}")"
+build_campaign_cmd() {
+  campaign_cmd=(
+    "$CAMPAIGN_SCRIPT"
+    --reports-dir "$reports_dir"
+    --summary-json "$campaign_summary_json"
+    --report-md "$campaign_report_md"
+    --print-summary-json 0
+  )
+  if [[ -n "$campaign_execution_mode_effective" ]]; then
+    campaign_cmd+=(--execution-mode "$campaign_execution_mode_effective")
+  fi
+  if [[ -n "$campaign_directory_urls_effective" ]]; then
+    campaign_cmd+=(--directory-urls "$campaign_directory_urls_effective")
+  fi
+  if [[ -n "$campaign_bootstrap_directory_effective" ]]; then
+    campaign_cmd+=(--bootstrap-directory "$campaign_bootstrap_directory_effective")
+  fi
+  if [[ -n "$campaign_discovery_wait_sec_effective" ]]; then
+    campaign_cmd+=(--discovery-wait-sec "$campaign_discovery_wait_sec_effective")
+  fi
+  if [[ -n "$campaign_issuer_url_effective" ]]; then
+    campaign_cmd+=(--issuer-url "$campaign_issuer_url_effective")
+  fi
+  if [[ -n "$campaign_entry_url_effective" ]]; then
+    campaign_cmd+=(--entry-url "$campaign_entry_url_effective")
+  fi
+  if [[ -n "$campaign_exit_url_effective" ]]; then
+    campaign_cmd+=(--exit-url "$campaign_exit_url_effective")
+  fi
+  if [[ -n "$campaign_start_local_stack_effective" ]]; then
+    campaign_cmd+=(--start-local-stack "$campaign_start_local_stack_effective")
+  fi
+  campaign_cmd_line="$(quote_cmd "${campaign_cmd[@]}")"
+}
+
+build_campaign_cmd
+campaign_cmd_line_initial="$campaign_cmd_line"
+campaign_cmd_line_effective="$campaign_cmd_line"
 
 if [[ "$refresh_campaign" == "1" ]]; then
   campaign_attempted=1
-  if "${campaign_cmd[@]}" >"$campaign_log" 2>&1; then
+  if "${campaign_cmd[@]}" >"$campaign_log_initial" 2>&1; then
     campaign_status="pass"
     campaign_rc=0
+    campaign_log_effective="$campaign_log_initial"
   else
     campaign_rc=$?
     campaign_status="fail"
-    status="fail"
-    final_rc="$campaign_rc"
-    failure_stage="campaign"
+    campaign_log_effective="$campaign_log_initial"
+
+    if [[ -z "$campaign_execution_mode" && "${campaign_execution_mode_effective:-local}" == "local" ]]; then
+      campaign_fallback_eligible="1"
+      campaign_fallback_reason="$(detect_local_stack_block_reason "$campaign_log_initial")"
+      if [[ -n "$campaign_fallback_reason" ]]; then
+        campaign_fallback_attempted="1"
+        campaign_fallback_triggered="1"
+        campaign_fallback_initial_mode="${campaign_execution_mode_effective:-local}"
+        campaign_fallback_initial_start_local_stack="${campaign_start_local_stack_effective:-auto}"
+        campaign_fallback_initial_rc="$campaign_rc"
+
+        campaign_execution_mode_effective="docker"
+        if [[ -z "$campaign_start_local_stack_effective" || "$campaign_start_local_stack_effective" == "auto" ]]; then
+          campaign_start_local_stack_effective="0"
+        fi
+        campaign_fallback_effective_mode="$campaign_execution_mode_effective"
+        campaign_fallback_effective_start_local_stack="${campaign_start_local_stack_effective:-auto}"
+
+        build_campaign_cmd
+        campaign_cmd_line_fallback="$campaign_cmd_line"
+        campaign_cmd_line_effective="$campaign_cmd_line"
+        campaign_log_effective="$campaign_log_fallback"
+
+        if "${campaign_cmd[@]}" >"$campaign_log_fallback" 2>&1; then
+          campaign_status="pass"
+          campaign_rc=0
+        else
+          campaign_rc=$?
+          campaign_status="fail"
+        fi
+      fi
+    fi
+
+    if [[ "$campaign_status" != "pass" ]]; then
+      status="fail"
+      final_rc="$campaign_rc"
+      failure_stage="campaign"
+    fi
+  fi
+else
+  if [[ "$campaign_summary_valid" == "1" ]]; then
+    campaign_summary_reused="1"
   fi
 fi
 
@@ -579,9 +700,13 @@ jq -n \
   --arg campaign_report_md "$campaign_report_md" \
   --arg campaign_check_summary_json "$campaign_check_summary_json" \
   --arg summary_json "$summary_json" \
-  --arg campaign_log "$campaign_log" \
+  --arg campaign_log_initial "$campaign_log_initial" \
+  --arg campaign_log_fallback "$campaign_log_fallback" \
+  --arg campaign_log_effective "$campaign_log_effective" \
   --arg check_log "$check_log" \
-  --arg campaign_cmd "$campaign_cmd_line" \
+  --arg campaign_cmd_initial "$campaign_cmd_line_initial" \
+  --arg campaign_cmd_fallback "$campaign_cmd_line_fallback" \
+  --arg campaign_cmd_effective "$campaign_cmd_line_effective" \
   --arg check_cmd "$check_cmd_line" \
   --arg decision "$decision" \
   --arg decision_context "$decision_context" \
@@ -590,6 +715,8 @@ jq -n \
   --arg support_rate_pct "$support_rate_pct" \
   --arg trend_source "$trend_source_value" \
   --arg refresh_campaign "$refresh_campaign" \
+  --arg campaign_refresh_effective "$campaign_refresh_effective" \
+  --arg campaign_summary_reused "$campaign_summary_reused" \
   --arg fail_on_no_go "$fail_on_no_go" \
   --arg require_status_pass "$require_status_pass" \
   --arg require_trend_status_pass "$require_trend_status_pass" \
@@ -603,13 +730,30 @@ jq -n \
   --arg disallow_experimental_default "$disallow_experimental_default" \
   --arg require_trend_source "$require_trend_source" \
   --arg campaign_execution_mode "$campaign_execution_mode" \
+  --arg campaign_execution_mode_effective "$campaign_execution_mode_effective" \
   --arg campaign_directory_urls "$campaign_directory_urls" \
+  --arg campaign_directory_urls_effective "$campaign_directory_urls_effective" \
   --arg campaign_bootstrap_directory "$campaign_bootstrap_directory" \
+  --arg campaign_bootstrap_directory_effective "$campaign_bootstrap_directory_effective" \
   --arg campaign_discovery_wait_sec "$campaign_discovery_wait_sec" \
+  --arg campaign_discovery_wait_sec_effective "$campaign_discovery_wait_sec_effective" \
   --arg campaign_issuer_url "$campaign_issuer_url" \
+  --arg campaign_issuer_url_effective "$campaign_issuer_url_effective" \
   --arg campaign_entry_url "$campaign_entry_url" \
+  --arg campaign_entry_url_effective "$campaign_entry_url_effective" \
   --arg campaign_exit_url "$campaign_exit_url" \
+  --arg campaign_exit_url_effective "$campaign_exit_url_effective" \
   --arg campaign_start_local_stack "$campaign_start_local_stack" \
+  --arg campaign_start_local_stack_effective "$campaign_start_local_stack_effective" \
+  --arg campaign_fallback_eligible "$campaign_fallback_eligible" \
+  --arg campaign_fallback_attempted "$campaign_fallback_attempted" \
+  --arg campaign_fallback_triggered "$campaign_fallback_triggered" \
+  --arg campaign_fallback_reason "$campaign_fallback_reason" \
+  --arg campaign_fallback_initial_mode "$campaign_fallback_initial_mode" \
+  --arg campaign_fallback_initial_start_local_stack "$campaign_fallback_initial_start_local_stack" \
+  --arg campaign_fallback_effective_mode "$campaign_fallback_effective_mode" \
+  --arg campaign_fallback_effective_start_local_stack "$campaign_fallback_effective_start_local_stack" \
+  --argjson campaign_fallback_initial_rc "$campaign_fallback_initial_rc" \
   --argjson campaign_attempted "$campaign_attempted" \
   --arg campaign_status "$campaign_status" \
   --argjson campaign_rc "$campaign_rc" \
@@ -626,6 +770,8 @@ jq -n \
     inputs: {
       reports_dir: $reports_dir,
       refresh_campaign: ($refresh_campaign == "1"),
+      refresh_campaign_effective: ($campaign_refresh_effective == "1"),
+      campaign_summary_reused: ($campaign_summary_reused == "1"),
       fail_on_no_go: ($fail_on_no_go == "1"),
       policy: {
         require_status_pass: (if $require_status_pass == "" then null else ($require_status_pass | tonumber) end),
@@ -649,6 +795,27 @@ jq -n \
         entry_url: (if $campaign_entry_url == "" then null else $campaign_entry_url end),
         exit_url: (if $campaign_exit_url == "" then null else $campaign_exit_url end),
         start_local_stack: (if $campaign_start_local_stack == "" then null else $campaign_start_local_stack end)
+      },
+      campaign_refresh_overrides_effective: {
+        execution_mode: (if $campaign_execution_mode_effective == "" then null else $campaign_execution_mode_effective end),
+        directory_urls: (if $campaign_directory_urls_effective == "" then null else $campaign_directory_urls_effective end),
+        bootstrap_directory: (if $campaign_bootstrap_directory_effective == "" then null else $campaign_bootstrap_directory_effective end),
+        discovery_wait_sec: (if $campaign_discovery_wait_sec_effective == "" then null else ($campaign_discovery_wait_sec_effective | tonumber) end),
+        issuer_url: (if $campaign_issuer_url_effective == "" then null else $campaign_issuer_url_effective end),
+        entry_url: (if $campaign_entry_url_effective == "" then null else $campaign_entry_url_effective end),
+        exit_url: (if $campaign_exit_url_effective == "" then null else $campaign_exit_url_effective end),
+        start_local_stack: (if $campaign_start_local_stack_effective == "" then null else $campaign_start_local_stack_effective end)
+      },
+      campaign_refresh_fallback: {
+        eligible: ($campaign_fallback_eligible == "1"),
+        attempted: ($campaign_fallback_attempted == "1"),
+        triggered: ($campaign_fallback_triggered == "1"),
+        reason: (if $campaign_fallback_reason == "" then null else $campaign_fallback_reason end),
+        initial_mode: (if $campaign_fallback_initial_mode == "" then null else $campaign_fallback_initial_mode end),
+        initial_start_local_stack: (if $campaign_fallback_initial_start_local_stack == "" then null else $campaign_fallback_initial_start_local_stack end),
+        initial_rc: (if $campaign_fallback_attempted == "1" then $campaign_fallback_initial_rc else null end),
+        effective_mode: (if $campaign_fallback_effective_mode == "" then null else $campaign_fallback_effective_mode end),
+        effective_start_local_stack: (if $campaign_fallback_effective_start_local_stack == "" then null else $campaign_fallback_effective_start_local_stack end)
       }
     },
     stages: {
@@ -656,8 +823,12 @@ jq -n \
         attempted: ($campaign_attempted == 1),
         status: $campaign_status,
         rc: $campaign_rc,
-        command: $campaign_cmd,
-        log: $campaign_log,
+        command: $campaign_cmd_effective,
+        log: $campaign_log_effective,
+        initial_command: $campaign_cmd_initial,
+        initial_log: $campaign_log_initial,
+        fallback_command: (if $campaign_cmd_fallback == "" then null else $campaign_cmd_fallback end),
+        fallback_log: (if $campaign_fallback_attempted == "1" then $campaign_log_fallback else null end),
         summary_json: $campaign_summary_json,
         report_md: $campaign_report_md
       },
@@ -690,9 +861,13 @@ jq -n \
 
 mv -f "$summary_tmp" "$summary_json"
 
+if [[ "$campaign_fallback_triggered" == "1" ]]; then
+  echo "[profile-compare-campaign-signoff] campaign auto-fallback: mode=${campaign_fallback_initial_mode:-local}->${campaign_fallback_effective_mode:-docker} reason=${campaign_fallback_reason:-unknown}"
+fi
+
 echo "[profile-compare-campaign-signoff] status=$status final_rc=$final_rc decision=$decision recommended_profile=${recommended_profile:-unset} summary_json=$summary_json"
 if [[ "$status" != "ok" ]]; then
-  echo "[profile-compare-campaign-signoff] failure_stage=$failure_stage campaign_log=$campaign_log check_log=$check_log"
+  echo "[profile-compare-campaign-signoff] failure_stage=$failure_stage campaign_log=$campaign_log_effective check_log=$check_log"
 fi
 if [[ "$show_json" == "1" ]]; then
   cat "$summary_json"

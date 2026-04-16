@@ -266,6 +266,13 @@ profile_default_gate_status_from_signoff_summary() {
           end
       ' "$path" 2>/dev/null || true
     )"
+    if [[ "$status" == "warn" ]] \
+       && [[ "$(profile_default_gate_signoff_decision_no_go_01 "$path")" == "1" ]] \
+       && [[ "$(profile_default_gate_no_go_insufficient_evidence_01 "$path")" == "1" ]]; then
+      # NO-GO due to insufficient campaign evidence should remain actionable but
+      # non-advisory until enough evidence is collected.
+      status="pending"
+    fi
   fi
   case "$status" in
     pass|warn|fail|pending|skip)
@@ -275,6 +282,97 @@ profile_default_gate_status_from_signoff_summary() {
       printf '%s' ""
       ;;
   esac
+}
+
+profile_default_gate_signoff_decision_no_go_01() {
+  local signoff_summary_path="$1"
+  if [[ ! -f "$signoff_summary_path" ]] || ! jq -e . "$signoff_summary_path" >/dev/null 2>&1; then
+    printf '0'
+    return
+  fi
+  if jq -e '
+    ((.decision.go | type) == "boolean" and .decision.go == false)
+    or (((.decision.decision // "") | ascii_upcase | gsub("[[:space:]_-]"; "")) == "NOGO")
+  ' "$signoff_summary_path" >/dev/null 2>&1; then
+    printf '1'
+  else
+    printf '0'
+  fi
+}
+
+profile_default_gate_campaign_check_summary_from_signoff() {
+  local signoff_summary_path="$1"
+  local candidate=""
+  local resolved=""
+  if [[ ! -f "$signoff_summary_path" ]] || ! jq -e . "$signoff_summary_path" >/dev/null 2>&1; then
+    printf '%s' ""
+    return
+  fi
+  while IFS= read -r candidate; do
+    candidate="$(trim "$candidate")"
+    if [[ -z "$candidate" ]]; then
+      continue
+    fi
+    resolved="$(resolve_path_with_base "$candidate" "$signoff_summary_path")"
+    if [[ -n "$resolved" ]]; then
+      printf '%s' "$resolved"
+      return
+    fi
+  done < <(jq -r '
+    [
+      (.artifacts.campaign_check_summary_json // ""),
+      (.stages.campaign_check.summary_json // ""),
+      (.inputs.campaign_check_summary_json // "")
+    ]
+    | .[]
+    | strings
+    | select(length > 0)
+  ' "$signoff_summary_path" 2>/dev/null || true)
+  printf '%s' ""
+}
+
+profile_default_gate_no_go_insufficient_evidence_01() {
+  local signoff_summary_path="$1"
+  local campaign_check_summary_path=""
+  if [[ "$(profile_default_gate_signoff_decision_no_go_01 "$signoff_summary_path")" != "1" ]]; then
+    printf '0'
+    return
+  fi
+  campaign_check_summary_path="$(profile_default_gate_campaign_check_summary_from_signoff "$signoff_summary_path")"
+  if [[ -z "$campaign_check_summary_path" ]] || [[ "$(json_file_valid_01 "$campaign_check_summary_path")" != "1" ]]; then
+    printf '0'
+    return
+  fi
+  if jq -e '
+    def to_bool:
+      if type == "boolean" then .
+      elif type == "number" then . != 0
+      elif type == "string" then ((ascii_downcase == "true") or (. == "1"))
+      else false
+      end;
+    def to_num:
+      if type == "number" then .
+      elif type == "string" then (if test("^-?[0-9]+(\\.[0-9]+)?$") then tonumber else null end)
+      else null
+      end;
+    (.inputs.policy // {}) as $policy
+    | (.observed // {}) as $observed
+    | ($policy.require_status_pass | to_bool) as $require_campaign_status_pass
+    | ($policy.require_trend_status_pass | to_bool) as $require_trend_status_pass
+    | ($policy.require_min_runs_total | to_num) as $min_runs_total
+    | ($policy.require_min_runs_with_summary | to_num) as $min_runs_with_summary
+    | ($observed.runs_total | to_num) as $runs_total
+    | ($observed.runs_with_summary | to_num) as $runs_with_summary
+    | (if $require_campaign_status_pass then (($observed.campaign_status // "") | ascii_downcase) == "pass" else true end) as $campaign_status_ok
+    | (if $require_trend_status_pass then (($observed.trend_status // "") | ascii_downcase) == "pass" else true end) as $trend_status_ok
+    | (if $min_runs_total == null then true else ($runs_total != null and $runs_total >= $min_runs_total) end) as $runs_total_ok
+    | (if $min_runs_with_summary == null then true else ($runs_with_summary != null and $runs_with_summary >= $min_runs_with_summary) end) as $runs_with_summary_ok
+    | (($campaign_status_ok and $trend_status_ok and $runs_total_ok and $runs_with_summary_ok) | not)
+  ' "$campaign_check_summary_path" >/dev/null 2>&1; then
+    printf '1'
+  else
+    printf '0'
+  fi
 }
 
 resolve_profile_default_gate_signoff_status() {
@@ -292,6 +390,7 @@ resolve_profile_default_gate_signoff_status() {
   fi
   if [[ "$(json_file_valid_01 "$manual_summary_path")" == "1" ]]; then
     while IFS= read -r candidate; do
+      candidate="$(resolve_path_with_base "$candidate" "$manual_summary_path")"
       if [[ -n "$candidate" ]]; then
         candidates+=("$candidate")
       fi
@@ -3974,6 +4073,10 @@ phase7_mainnet_cutover_summary_run_ok_json="null"
 phase7_mainnet_cutover_summary_handoff_check_ok_json="null"
 phase7_mainnet_cutover_summary_handoff_run_ok_json="null"
 phase7_mainnet_cutover_summary_mainnet_activation_gate_go_ok_json="null"
+phase7_mainnet_cutover_summary_cosmos_module_coverage_floor_ok_json="null"
+phase7_mainnet_cutover_summary_cosmos_keeper_coverage_floor_ok_json="null"
+phase7_mainnet_cutover_summary_cosmos_app_coverage_floor_ok_json="null"
+phase7_mainnet_cutover_summary_dual_write_parity_ok_json="null"
 if [[ -n "$phase7_mainnet_cutover_summary_json" ]]; then
   phase7_mainnet_cutover_summary_input_summary_json="$phase7_mainnet_cutover_summary_json"
   if [[ "$(phase7_mainnet_cutover_summary_usable_01 "$phase7_mainnet_cutover_summary_json")" == "1" ]]; then
@@ -4063,6 +4166,58 @@ if [[ -n "$phase7_mainnet_cutover_summary_json" ]]; then
           elif (.signals.mainnet_activation_gate_go | type) == "boolean" then .signals.mainnet_activation_gate_go
           elif (.mainnet_activation_gate_go_ok | type) == "boolean" then .mainnet_activation_gate_go_ok
           elif (.mainnet_activation_gate_go | type) == "boolean" then .mainnet_activation_gate_go
+          else empty end')"
+      phase7_mainnet_cutover_summary_cosmos_module_coverage_floor_ok_json="$(phase7_mainnet_cutover_bool_value_or_null \
+        "$phase7_mainnet_cutover_summary_source_summary_json" \
+        'if (.signals.cosmos_module_coverage_floor_ok | type) == "boolean" then .signals.cosmos_module_coverage_floor_ok
+          elif (.summaries.check.signal_snapshot.cosmos_module_coverage_floor_ok | type) == "boolean" then .summaries.check.signal_snapshot.cosmos_module_coverage_floor_ok
+          elif (.summaries.run.signal_snapshot.cosmos_module_coverage_floor_ok | type) == "boolean" then .summaries.run.signal_snapshot.cosmos_module_coverage_floor_ok
+          elif (.summaries.handoff_check.signal_snapshot.cosmos_module_coverage_floor_ok | type) == "boolean" then .summaries.handoff_check.signal_snapshot.cosmos_module_coverage_floor_ok
+          elif (.summaries.handoff_run.signal_snapshot.cosmos_module_coverage_floor_ok | type) == "boolean" then .summaries.handoff_run.signal_snapshot.cosmos_module_coverage_floor_ok
+          elif (.steps.phase7_mainnet_cutover_check.signal_snapshot.cosmos_module_coverage_floor_ok | type) == "boolean" then .steps.phase7_mainnet_cutover_check.signal_snapshot.cosmos_module_coverage_floor_ok
+          elif (.handoff.cosmos_module_coverage_floor_ok | type) == "boolean" then .handoff.cosmos_module_coverage_floor_ok
+          elif (.cosmos_module_coverage_floor_ok | type) == "boolean" then .cosmos_module_coverage_floor_ok
+          else empty end')"
+      phase7_mainnet_cutover_summary_cosmos_keeper_coverage_floor_ok_json="$(phase7_mainnet_cutover_bool_value_or_null \
+        "$phase7_mainnet_cutover_summary_source_summary_json" \
+        'if (.signals.cosmos_keeper_coverage_floor_ok | type) == "boolean" then .signals.cosmos_keeper_coverage_floor_ok
+          elif (.summaries.check.signal_snapshot.cosmos_keeper_coverage_floor_ok | type) == "boolean" then .summaries.check.signal_snapshot.cosmos_keeper_coverage_floor_ok
+          elif (.summaries.run.signal_snapshot.cosmos_keeper_coverage_floor_ok | type) == "boolean" then .summaries.run.signal_snapshot.cosmos_keeper_coverage_floor_ok
+          elif (.summaries.handoff_check.signal_snapshot.cosmos_keeper_coverage_floor_ok | type) == "boolean" then .summaries.handoff_check.signal_snapshot.cosmos_keeper_coverage_floor_ok
+          elif (.summaries.handoff_run.signal_snapshot.cosmos_keeper_coverage_floor_ok | type) == "boolean" then .summaries.handoff_run.signal_snapshot.cosmos_keeper_coverage_floor_ok
+          elif (.steps.phase7_mainnet_cutover_check.signal_snapshot.cosmos_keeper_coverage_floor_ok | type) == "boolean" then .steps.phase7_mainnet_cutover_check.signal_snapshot.cosmos_keeper_coverage_floor_ok
+          elif (.handoff.cosmos_keeper_coverage_floor_ok | type) == "boolean" then .handoff.cosmos_keeper_coverage_floor_ok
+          elif (.cosmos_keeper_coverage_floor_ok | type) == "boolean" then .cosmos_keeper_coverage_floor_ok
+          else empty end')"
+      phase7_mainnet_cutover_summary_cosmos_app_coverage_floor_ok_json="$(phase7_mainnet_cutover_bool_value_or_null \
+        "$phase7_mainnet_cutover_summary_source_summary_json" \
+        'if (.signals.cosmos_app_coverage_floor_ok | type) == "boolean" then .signals.cosmos_app_coverage_floor_ok
+          elif (.summaries.check.signal_snapshot.cosmos_app_coverage_floor_ok | type) == "boolean" then .summaries.check.signal_snapshot.cosmos_app_coverage_floor_ok
+          elif (.summaries.run.signal_snapshot.cosmos_app_coverage_floor_ok | type) == "boolean" then .summaries.run.signal_snapshot.cosmos_app_coverage_floor_ok
+          elif (.summaries.handoff_check.signal_snapshot.cosmos_app_coverage_floor_ok | type) == "boolean" then .summaries.handoff_check.signal_snapshot.cosmos_app_coverage_floor_ok
+          elif (.summaries.handoff_run.signal_snapshot.cosmos_app_coverage_floor_ok | type) == "boolean" then .summaries.handoff_run.signal_snapshot.cosmos_app_coverage_floor_ok
+          elif (.steps.phase7_mainnet_cutover_check.signal_snapshot.cosmos_app_coverage_floor_ok | type) == "boolean" then .steps.phase7_mainnet_cutover_check.signal_snapshot.cosmos_app_coverage_floor_ok
+          elif (.handoff.cosmos_app_coverage_floor_ok | type) == "boolean" then .handoff.cosmos_app_coverage_floor_ok
+          elif (.cosmos_app_coverage_floor_ok | type) == "boolean" then .cosmos_app_coverage_floor_ok
+          else empty end')"
+      phase7_mainnet_cutover_summary_dual_write_parity_ok_json="$(phase7_mainnet_cutover_bool_value_or_null \
+        "$phase7_mainnet_cutover_summary_source_summary_json" \
+        'if (.signals.dual_write_parity_ok | type) == "boolean" then .signals.dual_write_parity_ok
+          elif (.signals.dual_write_parity | type) == "boolean" then .signals.dual_write_parity
+          elif (.summaries.check.signal_snapshot.dual_write_parity_ok | type) == "boolean" then .summaries.check.signal_snapshot.dual_write_parity_ok
+          elif (.summaries.check.signal_snapshot.dual_write_parity | type) == "boolean" then .summaries.check.signal_snapshot.dual_write_parity
+          elif (.summaries.run.signal_snapshot.dual_write_parity_ok | type) == "boolean" then .summaries.run.signal_snapshot.dual_write_parity_ok
+          elif (.summaries.run.signal_snapshot.dual_write_parity | type) == "boolean" then .summaries.run.signal_snapshot.dual_write_parity
+          elif (.summaries.handoff_check.signal_snapshot.dual_write_parity_ok | type) == "boolean" then .summaries.handoff_check.signal_snapshot.dual_write_parity_ok
+          elif (.summaries.handoff_check.signal_snapshot.dual_write_parity | type) == "boolean" then .summaries.handoff_check.signal_snapshot.dual_write_parity
+          elif (.summaries.handoff_run.signal_snapshot.dual_write_parity_ok | type) == "boolean" then .summaries.handoff_run.signal_snapshot.dual_write_parity_ok
+          elif (.summaries.handoff_run.signal_snapshot.dual_write_parity | type) == "boolean" then .summaries.handoff_run.signal_snapshot.dual_write_parity
+          elif (.steps.phase7_mainnet_cutover_check.signal_snapshot.dual_write_parity_ok | type) == "boolean" then .steps.phase7_mainnet_cutover_check.signal_snapshot.dual_write_parity_ok
+          elif (.steps.phase7_mainnet_cutover_check.signal_snapshot.dual_write_parity | type) == "boolean" then .steps.phase7_mainnet_cutover_check.signal_snapshot.dual_write_parity
+          elif (.handoff.dual_write_parity_ok | type) == "boolean" then .handoff.dual_write_parity_ok
+          elif (.handoff.dual_write_parity | type) == "boolean" then .handoff.dual_write_parity
+          elif (.dual_write_parity_ok | type) == "boolean" then .dual_write_parity_ok
+          elif (.dual_write_parity | type) == "boolean" then .dual_write_parity
           else empty end')"
     fi
   else
@@ -4239,12 +4394,57 @@ docker_rehearsal_ready_json="$(
     | ($status == "pass" or $status == "skip")
   ' "$manual_validation_summary_json"
 )"
-vpn_rc_done_for_phase="false"
-if [[ "$single_machine_ready_json" == "true" && "$docker_rehearsal_ready_json" == "true" && "$pending_real_host_check_count" -gt 0 ]]; then
-  vpn_rc_done_for_phase="true"
+
+# Phase-level VPN RC completion is driven by resilience criteria, not by whether
+# real-host signoff checks are still pending.
+vpn_rc_profile_matrix_stable_effective_json="$resilience_profile_matrix_stable_json"
+if [[ "$vpn_rc_profile_matrix_stable_effective_json" == "null" && "$phase1_resilience_handoff_profile_matrix_stable_json" != "null" ]]; then
+  vpn_rc_profile_matrix_stable_effective_json="$phase1_resilience_handoff_profile_matrix_stable_json"
+fi
+vpn_rc_peer_loss_recovery_ok_effective_json="$resilience_peer_loss_recovery_ok_json"
+if [[ "$vpn_rc_peer_loss_recovery_ok_effective_json" == "null" && "$phase1_resilience_handoff_peer_loss_recovery_ok_json" != "null" ]]; then
+  vpn_rc_peer_loss_recovery_ok_effective_json="$phase1_resilience_handoff_peer_loss_recovery_ok_json"
+fi
+vpn_rc_session_churn_guard_ok_effective_json="$resilience_session_churn_guard_ok_json"
+if [[ "$vpn_rc_session_churn_guard_ok_effective_json" == "null" && "$phase1_resilience_handoff_session_churn_guard_ok_json" != "null" ]]; then
+  vpn_rc_session_churn_guard_ok_effective_json="$phase1_resilience_handoff_session_churn_guard_ok_json"
+fi
+vpn_rc_resilience_signals_complete_json="false"
+if [[ "$vpn_rc_profile_matrix_stable_effective_json" != "null" \
+   && "$vpn_rc_peer_loss_recovery_ok_effective_json" != "null" \
+   && "$vpn_rc_session_churn_guard_ok_effective_json" != "null" ]]; then
+  vpn_rc_resilience_signals_complete_json="true"
+fi
+vpn_rc_resilience_criteria_satisfied_json="false"
+if [[ "$vpn_rc_resilience_signals_complete_json" == "true" \
+   && "$vpn_rc_profile_matrix_stable_effective_json" == "true" \
+   && "$vpn_rc_peer_loss_recovery_ok_effective_json" == "true" \
+   && "$vpn_rc_session_churn_guard_ok_effective_json" == "true" ]]; then
+  vpn_rc_resilience_criteria_satisfied_json="true"
+fi
+vpn_rc_done_for_phase="$vpn_rc_resilience_criteria_satisfied_json"
+if [[ "$vpn_rc_done_for_phase" == "true" \
+   && "$resilience_handoff_available_json" != "true" \
+   && "$phase1_resilience_handoff_available_json" == "true" \
+   && "$phase1_resilience_handoff_status_json" != "pass" ]]; then
+  # Fail-closed when we relied on phase1 fallback signals but the phase1 handoff
+  # itself is not passing.
+  vpn_rc_done_for_phase="false"
 fi
 
 profile_default_gate_status="$(jq -r '.summary.profile_default_gate.status // "pending"' "$manual_validation_summary_json")"
+profile_default_gate_next_command="$(jq -r '.summary.profile_default_gate.next_command // .summary.profile_default_gate.command // ""' "$manual_validation_summary_json")"
+profile_default_gate_next_command_sudo="$(jq -r '.summary.profile_default_gate.next_command_sudo // ""' "$manual_validation_summary_json")"
+profile_default_gate_next_command_source="$(jq -r '.summary.profile_default_gate.next_command_source // ""' "$manual_validation_summary_json")"
+profile_default_gate_notes="$(jq -r '.summary.profile_default_gate.notes // ""' "$manual_validation_summary_json")"
+profile_default_gate_decision="$(jq -r '.summary.profile_default_gate.decision // ""' "$manual_validation_summary_json")"
+profile_default_gate_recommended_profile="$(jq -r '.summary.profile_default_gate.recommended_profile // ""' "$manual_validation_summary_json")"
+profile_default_gate_summary_json_manual="$(jq -r '.summary.profile_default_gate.summary_json // ""' "$manual_validation_summary_json")"
+profile_default_gate_docker_hint_available_json="$(jq -r '.summary.profile_default_gate.docker_rehearsal_hint_available // false' "$manual_validation_summary_json")"
+profile_default_gate_docker_hint_source="$(jq -r '.summary.profile_default_gate.docker_rehearsal_hint_source // ""' "$manual_validation_summary_json")"
+profile_default_gate_campaign_check_summary_json_resolved="$(jq -r '.summary.profile_default_gate.artifacts.campaign_check_summary_json_resolved // ""' "$manual_validation_summary_json")"
+profile_default_gate_docker_matrix_summary_json="$(jq -r '.summary.profile_default_gate.artifacts.docker_rehearsal_matrix_summary_json // ""' "$manual_validation_summary_json")"
+profile_default_gate_docker_profile_summary_json="$(jq -r '.summary.profile_default_gate.artifacts.docker_rehearsal_profile_summary_json // ""' "$manual_validation_summary_json")"
 profile_default_gate_signoff_resolution="$(resolve_profile_default_gate_signoff_status "$profile_compare_signoff_summary_json" "$manual_validation_summary_json")"
 profile_default_gate_signoff_status="${profile_default_gate_signoff_resolution%%$'\x1f'*}"
 profile_default_gate_signoff_source=""
@@ -4255,6 +4455,8 @@ if [[ -n "$profile_default_gate_signoff_status" ]]; then
   profile_default_gate_status="$profile_default_gate_signoff_status"
   if [[ -n "$profile_default_gate_signoff_source" ]]; then
     profile_compare_signoff_summary_json="$profile_default_gate_signoff_source"
+  elif [[ -n "$profile_default_gate_summary_json_manual" ]]; then
+    profile_compare_signoff_summary_json="$profile_default_gate_summary_json_manual"
   fi
 fi
 profile_default_gate_needs_attention_json="true"
@@ -4689,6 +4891,10 @@ summary_payload="$(jq -n \
   --argjson phase7_mainnet_cutover_summary_handoff_check_ok "$phase7_mainnet_cutover_summary_handoff_check_ok_json" \
   --argjson phase7_mainnet_cutover_summary_handoff_run_ok "$phase7_mainnet_cutover_summary_handoff_run_ok_json" \
   --argjson phase7_mainnet_cutover_summary_mainnet_activation_gate_go_ok "$phase7_mainnet_cutover_summary_mainnet_activation_gate_go_ok_json" \
+  --argjson phase7_mainnet_cutover_summary_cosmos_module_coverage_floor_ok "$phase7_mainnet_cutover_summary_cosmos_module_coverage_floor_ok_json" \
+  --argjson phase7_mainnet_cutover_summary_cosmos_keeper_coverage_floor_ok "$phase7_mainnet_cutover_summary_cosmos_keeper_coverage_floor_ok_json" \
+  --argjson phase7_mainnet_cutover_summary_cosmos_app_coverage_floor_ok "$phase7_mainnet_cutover_summary_cosmos_app_coverage_floor_ok_json" \
+  --argjson phase7_mainnet_cutover_summary_dual_write_parity_ok "$phase7_mainnet_cutover_summary_dual_write_parity_ok_json" \
   --argjson blockchain_mainnet_activation_gate_available "$blockchain_mainnet_activation_gate_available_json" \
   --arg blockchain_mainnet_activation_gate_input_summary_json "$blockchain_mainnet_activation_gate_input_summary_json" \
   --arg blockchain_mainnet_activation_gate_source_summary_json "$blockchain_mainnet_activation_gate_source_summary_json" \
@@ -4700,6 +4906,18 @@ summary_payload="$(jq -n \
   --argjson blockchain_mainnet_activation_gate_reasons "$blockchain_mainnet_activation_gate_reasons_json" \
   --argjson blockchain_mainnet_activation_gate_source_paths "$blockchain_mainnet_activation_gate_source_paths_json" \
   --arg profile_default_gate_status "$profile_default_gate_status" \
+  --arg profile_default_gate_next_command "$profile_default_gate_next_command" \
+  --arg profile_default_gate_next_command_sudo "$profile_default_gate_next_command_sudo" \
+  --arg profile_default_gate_next_command_source "$profile_default_gate_next_command_source" \
+  --arg profile_default_gate_notes "$profile_default_gate_notes" \
+  --arg profile_default_gate_decision "$profile_default_gate_decision" \
+  --arg profile_default_gate_recommended_profile "$profile_default_gate_recommended_profile" \
+  --arg profile_default_gate_summary_json_manual "$profile_default_gate_summary_json_manual" \
+  --argjson profile_default_gate_docker_hint_available "$profile_default_gate_docker_hint_available_json" \
+  --arg profile_default_gate_docker_hint_source "$profile_default_gate_docker_hint_source" \
+  --arg profile_default_gate_campaign_check_summary_json_resolved "$profile_default_gate_campaign_check_summary_json_resolved" \
+  --arg profile_default_gate_docker_matrix_summary_json "$profile_default_gate_docker_matrix_summary_json" \
+  --arg profile_default_gate_docker_profile_summary_json "$profile_default_gate_docker_profile_summary_json" \
   --arg docker_rehearsal_status "$docker_rehearsal_status" \
   --arg real_wg_privileged_status "$real_wg_privileged_status" \
   --argjson total_checks "$counts_total" \
@@ -4872,6 +5090,21 @@ summary_payload="$(jq -n \
         label: $next_action_label,
         command: $next_action_command
       },
+      profile_default_gate: {
+        status: $profile_default_gate_status,
+        next_command: (if $profile_default_gate_next_command == "" then null else $profile_default_gate_next_command end),
+        next_command_sudo: (if $profile_default_gate_next_command_sudo == "" then null else $profile_default_gate_next_command_sudo end),
+        next_command_source: (if $profile_default_gate_next_command_source == "" then null else $profile_default_gate_next_command_source end),
+        notes: (if $profile_default_gate_notes == "" then null else $profile_default_gate_notes end),
+        decision: (if $profile_default_gate_decision == "" then null else $profile_default_gate_decision end),
+        recommended_profile: (if $profile_default_gate_recommended_profile == "" then null else $profile_default_gate_recommended_profile end),
+        summary_json: (if $profile_default_gate_summary_json_manual == "" then null else $profile_default_gate_summary_json_manual end),
+        docker_hint_available: $profile_default_gate_docker_hint_available,
+        docker_hint_source: (if $profile_default_gate_docker_hint_source == "" then null else $profile_default_gate_docker_hint_source end),
+        campaign_check_summary_json_resolved: (if $profile_default_gate_campaign_check_summary_json_resolved == "" then null else $profile_default_gate_campaign_check_summary_json_resolved end),
+        docker_matrix_summary_json: (if $profile_default_gate_docker_matrix_summary_json == "" then null else $profile_default_gate_docker_matrix_summary_json end),
+        docker_profile_summary_json: (if $profile_default_gate_docker_profile_summary_json == "" then null else $profile_default_gate_docker_profile_summary_json end)
+      },
       optional_gate_status: {
         profile_default_gate: $profile_default_gate_status,
         docker_rehearsal_gate: $docker_rehearsal_status,
@@ -4907,7 +5140,11 @@ summary_payload="$(jq -n \
         run_ok: $phase7_mainnet_cutover_summary_run_ok,
         handoff_check_ok: $phase7_mainnet_cutover_summary_handoff_check_ok,
         handoff_run_ok: $phase7_mainnet_cutover_summary_handoff_run_ok,
-        mainnet_activation_gate_go_ok: $phase7_mainnet_cutover_summary_mainnet_activation_gate_go_ok
+        mainnet_activation_gate_go_ok: $phase7_mainnet_cutover_summary_mainnet_activation_gate_go_ok,
+        cosmos_module_coverage_floor_ok: $phase7_mainnet_cutover_summary_cosmos_module_coverage_floor_ok,
+        cosmos_keeper_coverage_floor_ok: $phase7_mainnet_cutover_summary_cosmos_keeper_coverage_floor_ok,
+        cosmos_app_coverage_floor_ok: $phase7_mainnet_cutover_summary_cosmos_app_coverage_floor_ok,
+        dual_write_parity_ok: $phase7_mainnet_cutover_summary_dual_write_parity_ok
       },
       mainnet_activation_gate: {
         available: $blockchain_mainnet_activation_gate_available,
@@ -5081,6 +5318,14 @@ cat >"$report_tmp" <<EOF_MD
 - Blocking checks: $(jq -r '(.vpn_track.blocking_check_ids // []) | if length == 0 then "none" else join(",") end' "$summary_json")
 - Pending real-host checks: $(jq -r '(.vpn_track.pending_real_host_checks // []) | if length == 0 then "none" else map(.check_id) | join(",") end' "$summary_json")
 - Optional gate status: profile=$(jq -r '.vpn_track.optional_gate_status.profile_default_gate' "$summary_json"), docker-rehearsal=$(jq -r '.vpn_track.optional_gate_status.docker_rehearsal_gate' "$summary_json"), real-wg=$(jq -r '.vpn_track.optional_gate_status.real_wg_privileged_gate' "$summary_json")
+- Profile gate next command: $(jq -r '.vpn_track.profile_default_gate.next_command // "none"' "$summary_json")
+- Profile gate sudo fallback: $(jq -r '.vpn_track.profile_default_gate.next_command_sudo // "none"' "$summary_json")
+- Profile gate command source: $(jq -r '.vpn_track.profile_default_gate.next_command_source // "none"' "$summary_json")
+- Profile gate docker hint available: $(jq -r '.vpn_track.profile_default_gate.docker_hint_available | if . == null then "null" else tostring end' "$summary_json")
+- Profile gate docker hint source: $(jq -r '.vpn_track.profile_default_gate.docker_hint_source // "none"' "$summary_json")
+- Profile gate campaign-check summary (resolved): $(jq -r '.vpn_track.profile_default_gate.campaign_check_summary_json_resolved // "none"' "$summary_json")
+- Profile gate docker matrix summary: $(jq -r '.vpn_track.profile_default_gate.docker_matrix_summary_json // "none"' "$summary_json")
+- Profile gate docker profile summary: $(jq -r '.vpn_track.profile_default_gate.docker_profile_summary_json // "none"' "$summary_json")
 - Primary next action: $(jq -r '.vpn_track.next_action.command // ""' "$summary_json")
 
 ## Pending Real-Host Checks
@@ -5115,6 +5360,10 @@ $pending_real_host_checks_md
 - Phase-7 mainnet cutover handoff_check_ok: $(jq -r '.blockchain_track.phase7_mainnet_cutover_summary_report.handoff_check_ok | if . == null then "null" else tostring end' "$summary_json")
 - Phase-7 mainnet cutover handoff_run_ok: $(jq -r '.blockchain_track.phase7_mainnet_cutover_summary_report.handoff_run_ok | if . == null then "null" else tostring end' "$summary_json")
 - Phase-7 mainnet cutover mainnet_activation_gate_go_ok: $(jq -r '.blockchain_track.phase7_mainnet_cutover_summary_report.mainnet_activation_gate_go_ok | if . == null then "null" else tostring end' "$summary_json")
+- Phase-7 mainnet cutover cosmos_module_coverage_floor_ok: $(jq -r '.blockchain_track.phase7_mainnet_cutover_summary_report.cosmos_module_coverage_floor_ok | if . == null then "null" else tostring end' "$summary_json")
+- Phase-7 mainnet cutover cosmos_keeper_coverage_floor_ok: $(jq -r '.blockchain_track.phase7_mainnet_cutover_summary_report.cosmos_keeper_coverage_floor_ok | if . == null then "null" else tostring end' "$summary_json")
+- Phase-7 mainnet cutover cosmos_app_coverage_floor_ok: $(jq -r '.blockchain_track.phase7_mainnet_cutover_summary_report.cosmos_app_coverage_floor_ok | if . == null then "null" else tostring end' "$summary_json")
+- Phase-7 mainnet cutover dual_write_parity_ok: $(jq -r '.blockchain_track.phase7_mainnet_cutover_summary_report.dual_write_parity_ok | if . == null then "null" else tostring end' "$summary_json")
 - Mainnet activation gate available: $(jq -r '.blockchain_track.mainnet_activation_gate.available' "$summary_json")
 - Mainnet activation gate input: $(jq -r '.blockchain_track.mainnet_activation_gate.input_summary_json // "none"' "$summary_json")
 - Mainnet activation gate source: $(jq -r '.blockchain_track.mainnet_activation_gate.source_summary_json // "none"' "$summary_json")
@@ -5192,8 +5441,10 @@ echo "[roadmap-progress-report] phase5_settlement_layer_handoff_issuer_sponsor_a
 echo "[roadmap-progress-report] phase6_cosmos_l1_handoff_available=$phase6_cosmos_l1_handoff_available_json source_summary_json=${phase6_cosmos_l1_handoff_source_summary_json:-} source_kind=${phase6_cosmos_l1_handoff_source_summary_kind:-}"
 echo "[roadmap-progress-report] phase6_cosmos_l1_handoff_status=$phase6_cosmos_l1_handoff_status_json rc=$phase6_cosmos_l1_handoff_rc_json run_pipeline_ok=$phase6_cosmos_l1_handoff_run_pipeline_ok_json module_tx_surface_ok=$phase6_cosmos_l1_handoff_module_tx_surface_ok_json tdpnd_grpc_runtime_smoke_ok=$phase6_cosmos_l1_handoff_tdpnd_grpc_runtime_smoke_ok_json tdpnd_grpc_live_smoke_ok=$phase6_cosmos_l1_handoff_tdpnd_grpc_live_smoke_ok_json tdpnd_grpc_auth_live_smoke_ok=$phase6_cosmos_l1_handoff_tdpnd_grpc_auth_live_smoke_ok_json tdpnd_comet_runtime_smoke_ok=$phase6_cosmos_l1_handoff_tdpnd_comet_runtime_smoke_ok_json"
 echo "[roadmap-progress-report] phase7_mainnet_cutover_summary_available=$phase7_mainnet_cutover_summary_available_json source_summary_json=${phase7_mainnet_cutover_summary_source_summary_json:-} source_kind=${phase7_mainnet_cutover_summary_source_summary_kind:-}"
-echo "[roadmap-progress-report] phase7_mainnet_cutover_summary_status=$phase7_mainnet_cutover_summary_status_json rc=$phase7_mainnet_cutover_summary_rc_json check_ok=$phase7_mainnet_cutover_summary_check_ok_json run_ok=$phase7_mainnet_cutover_summary_run_ok_json handoff_check_ok=$phase7_mainnet_cutover_summary_handoff_check_ok_json handoff_run_ok=$phase7_mainnet_cutover_summary_handoff_run_ok_json mainnet_activation_gate_go_ok=$phase7_mainnet_cutover_summary_mainnet_activation_gate_go_ok_json"
+echo "[roadmap-progress-report] phase7_mainnet_cutover_summary_status=$phase7_mainnet_cutover_summary_status_json rc=$phase7_mainnet_cutover_summary_rc_json check_ok=$phase7_mainnet_cutover_summary_check_ok_json run_ok=$phase7_mainnet_cutover_summary_run_ok_json handoff_check_ok=$phase7_mainnet_cutover_summary_handoff_check_ok_json handoff_run_ok=$phase7_mainnet_cutover_summary_handoff_run_ok_json mainnet_activation_gate_go_ok=$phase7_mainnet_cutover_summary_mainnet_activation_gate_go_ok_json cosmos_module_coverage_floor_ok=$phase7_mainnet_cutover_summary_cosmos_module_coverage_floor_ok_json cosmos_keeper_coverage_floor_ok=$phase7_mainnet_cutover_summary_cosmos_keeper_coverage_floor_ok_json cosmos_app_coverage_floor_ok=$phase7_mainnet_cutover_summary_cosmos_app_coverage_floor_ok_json dual_write_parity_ok=$phase7_mainnet_cutover_summary_dual_write_parity_ok_json"
 echo "[roadmap-progress-report] mainnet_activation_gate_available=$blockchain_mainnet_activation_gate_available_json source_summary_json=${blockchain_mainnet_activation_gate_source_summary_json:-} source_kind=${blockchain_mainnet_activation_gate_source_summary_kind:-} status=$blockchain_mainnet_activation_gate_status_json decision=${blockchain_mainnet_activation_gate_decision_json:-} go=$blockchain_mainnet_activation_gate_go_json no_go=$blockchain_mainnet_activation_gate_no_go_json"
+echo "[roadmap-progress-report] profile_default_gate_status=$profile_default_gate_status next_command=${profile_default_gate_next_command:-} next_command_sudo=${profile_default_gate_next_command_sudo:-} next_command_source=${profile_default_gate_next_command_source:-}"
+echo "[roadmap-progress-report] profile_default_gate_docker_hint_available=$profile_default_gate_docker_hint_available_json docker_hint_source=${profile_default_gate_docker_hint_source:-} campaign_check_summary_resolved=${profile_default_gate_campaign_check_summary_json_resolved:-} docker_matrix_summary_json=${profile_default_gate_docker_matrix_summary_json:-} docker_profile_summary_json=${profile_default_gate_docker_profile_summary_json:-}"
 echo "[roadmap-progress-report] resilience_handoff_available=$resilience_handoff_available_json source_summary_json=${resilience_handoff_source_summary_json:-}"
 echo "[roadmap-progress-report] profile_matrix_stable=$resilience_profile_matrix_stable_json peer_loss_recovery_ok=$resilience_peer_loss_recovery_ok_json session_churn_guard_ok=$resilience_session_churn_guard_ok_json"
 echo "[roadmap-progress-report] summary_json=$summary_json"
