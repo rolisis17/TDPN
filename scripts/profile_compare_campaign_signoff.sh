@@ -36,6 +36,7 @@ Usage:
     [--campaign-issuer-url URL] \
     [--campaign-entry-url URL] \
     [--campaign-exit-url URL] \
+    [--campaign-subject ID | --campaign-anon-cred TOKEN] \
     [--campaign-start-local-stack auto|0|1] \
     [--summary-json PATH] \
     [--show-json [0|1]] \
@@ -133,9 +134,16 @@ quote_cmd() {
   printf '\n'
 }
 
+redact_sensitive_cmd_line() {
+  local line="$1"
+  line="$(printf '%s' "$line" | sed -E 's/(--subject )[^ ]+/\1[redacted]/g; s/(--anon-cred )[^ ]+/\1[redacted]/g')"
+  printf '%s' "$line"
+}
+
 need_cmd jq
 need_cmd date
 need_cmd mktemp
+need_cmd sed
 
 reports_dir="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REPORTS_DIR:-$ROOT_DIR/.easy-node-logs}"
 campaign_summary_json="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_SUMMARY_JSON:-}"
@@ -166,6 +174,8 @@ campaign_discovery_wait_sec="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_DISCOVE
 campaign_issuer_url="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_ISSUER_URL:-}"
 campaign_entry_url="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_ENTRY_URL:-}"
 campaign_exit_url="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_EXIT_URL:-}"
+campaign_subject="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_SUBJECT:-}"
+campaign_anon_cred="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_ANON_CRED:-}"
 campaign_start_local_stack="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_START_LOCAL_STACK:-}"
 
 while [[ $# -gt 0 ]]; do
@@ -300,6 +310,14 @@ while [[ $# -gt 0 ]]; do
       campaign_exit_url="${2:-}"
       shift 2
       ;;
+    --campaign-subject)
+      campaign_subject="${2:-}"
+      shift 2
+      ;;
+    --campaign-anon-cred)
+      campaign_anon_cred="${2:-}"
+      shift 2
+      ;;
     --campaign-start-local-stack)
       campaign_start_local_stack="${2:-}"
       shift 2
@@ -375,6 +393,10 @@ if [[ -n "$campaign_start_local_stack" ]]; then
       ;;
   esac
 fi
+if [[ -n "$campaign_subject" && -n "$campaign_anon_cred" ]]; then
+  echo "use either --campaign-subject or --campaign-anon-cred, not both"
+  exit 2
+fi
 
 if [[ ! -x "$CAMPAIGN_SCRIPT" ]]; then
   echo "missing executable campaign script: $CAMPAIGN_SCRIPT"
@@ -432,6 +454,8 @@ campaign_discovery_wait_sec_effective="$campaign_discovery_wait_sec"
 campaign_issuer_url_effective="$campaign_issuer_url"
 campaign_entry_url_effective="$campaign_entry_url"
 campaign_exit_url_effective="$campaign_exit_url"
+campaign_subject_effective="$campaign_subject"
+campaign_anon_cred_effective="$campaign_anon_cred"
 campaign_start_local_stack_effective="$campaign_start_local_stack"
 
 if [[ "$campaign_refresh_effective" == "1" && -z "$campaign_execution_mode_effective" ]]; then
@@ -518,10 +542,16 @@ build_campaign_cmd() {
   if [[ -n "$campaign_exit_url_effective" ]]; then
     campaign_cmd+=(--exit-url "$campaign_exit_url_effective")
   fi
+  if [[ -n "$campaign_subject_effective" ]]; then
+    campaign_cmd+=(--subject "$campaign_subject_effective")
+  fi
+  if [[ -n "$campaign_anon_cred_effective" ]]; then
+    campaign_cmd+=(--anon-cred "$campaign_anon_cred_effective")
+  fi
   if [[ -n "$campaign_start_local_stack_effective" ]]; then
     campaign_cmd+=(--start-local-stack "$campaign_start_local_stack_effective")
   fi
-  campaign_cmd_line="$(quote_cmd "${campaign_cmd[@]}")"
+  campaign_cmd_line="$(redact_sensitive_cmd_line "$(quote_cmd "${campaign_cmd[@]}")")"
 }
 
 build_campaign_cmd
@@ -743,6 +773,10 @@ jq -n \
   --arg campaign_entry_url_effective "$campaign_entry_url_effective" \
   --arg campaign_exit_url "$campaign_exit_url" \
   --arg campaign_exit_url_effective "$campaign_exit_url_effective" \
+  --arg campaign_subject "$campaign_subject" \
+  --arg campaign_subject_effective "$campaign_subject_effective" \
+  --arg campaign_anon_cred "$campaign_anon_cred" \
+  --arg campaign_anon_cred_effective "$campaign_anon_cred_effective" \
   --arg campaign_start_local_stack "$campaign_start_local_stack" \
   --arg campaign_start_local_stack_effective "$campaign_start_local_stack_effective" \
   --arg campaign_fallback_eligible "$campaign_fallback_eligible" \
@@ -794,6 +828,8 @@ jq -n \
         issuer_url: (if $campaign_issuer_url == "" then null else $campaign_issuer_url end),
         entry_url: (if $campaign_entry_url == "" then null else $campaign_entry_url end),
         exit_url: (if $campaign_exit_url == "" then null else $campaign_exit_url end),
+        subject_configured: ($campaign_subject != ""),
+        anon_cred_configured: ($campaign_anon_cred != ""),
         start_local_stack: (if $campaign_start_local_stack == "" then null else $campaign_start_local_stack end)
       },
       campaign_refresh_overrides_effective: {
@@ -804,6 +840,8 @@ jq -n \
         issuer_url: (if $campaign_issuer_url_effective == "" then null else $campaign_issuer_url_effective end),
         entry_url: (if $campaign_entry_url_effective == "" then null else $campaign_entry_url_effective end),
         exit_url: (if $campaign_exit_url_effective == "" then null else $campaign_exit_url_effective end),
+        subject_configured: ($campaign_subject_effective != ""),
+        anon_cred_configured: ($campaign_anon_cred_effective != ""),
         start_local_stack: (if $campaign_start_local_stack_effective == "" then null else $campaign_start_local_stack_effective end)
       },
       campaign_refresh_fallback: {

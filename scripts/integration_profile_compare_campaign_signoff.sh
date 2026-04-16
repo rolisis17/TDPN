@@ -148,6 +148,7 @@ FAKE_CHECK_DECISION=GO \
   --campaign-issuer-url "http://127.0.0.1:18082" \
   --campaign-entry-url "http://127.0.0.1:18083" \
   --campaign-exit-url "http://127.0.0.1:18084" \
+  --campaign-subject "inv-signoff-test" \
   --campaign-start-local-stack 0 \
   --summary-json "$SUCCESS_SUMMARY" \
   --print-summary-json 0 >/tmp/integration_profile_compare_campaign_signoff_success.log 2>&1
@@ -157,7 +158,7 @@ if ! rg -q '\[profile-compare-campaign-signoff\] status=ok final_rc=0 decision=G
   cat /tmp/integration_profile_compare_campaign_signoff_success.log
   exit 1
 fi
-if ! jq -e '.status == "ok" and .final_rc == 0 and .decision.decision == "GO" and .stages.campaign.status == "pass" and .stages.campaign_check.status == "pass" and .stages.campaign.attempted == true and .stages.campaign_check.attempted == true and .inputs.campaign_refresh_overrides.execution_mode == "docker" and .inputs.campaign_refresh_overrides.directory_urls == "http://127.0.0.1:18081,http://127.0.0.1:28081" and .inputs.campaign_refresh_overrides.bootstrap_directory == "http://127.0.0.1:18081" and .inputs.campaign_refresh_overrides.discovery_wait_sec == 7 and .inputs.campaign_refresh_overrides.issuer_url == "http://127.0.0.1:18082" and .inputs.campaign_refresh_overrides.entry_url == "http://127.0.0.1:18083" and .inputs.campaign_refresh_overrides.exit_url == "http://127.0.0.1:18084" and .inputs.campaign_refresh_overrides.start_local_stack == "0"' "$SUCCESS_SUMMARY" >/dev/null 2>&1; then
+if ! jq -e '.status == "ok" and .final_rc == 0 and .decision.decision == "GO" and .stages.campaign.status == "pass" and .stages.campaign_check.status == "pass" and .stages.campaign.attempted == true and .stages.campaign_check.attempted == true and .inputs.campaign_refresh_overrides.execution_mode == "docker" and .inputs.campaign_refresh_overrides.directory_urls == "http://127.0.0.1:18081,http://127.0.0.1:28081" and .inputs.campaign_refresh_overrides.bootstrap_directory == "http://127.0.0.1:18081" and .inputs.campaign_refresh_overrides.discovery_wait_sec == 7 and .inputs.campaign_refresh_overrides.issuer_url == "http://127.0.0.1:18082" and .inputs.campaign_refresh_overrides.entry_url == "http://127.0.0.1:18083" and .inputs.campaign_refresh_overrides.exit_url == "http://127.0.0.1:18084" and .inputs.campaign_refresh_overrides.subject_configured == true and .inputs.campaign_refresh_overrides.anon_cred_configured == false and .inputs.campaign_refresh_overrides.start_local_stack == "0" and .inputs.campaign_refresh_overrides_effective.subject_configured == true and .inputs.campaign_refresh_overrides_effective.anon_cred_configured == false' "$SUCCESS_SUMMARY" >/dev/null 2>&1; then
   echo "success summary JSON missing expected fields"
   cat "$SUCCESS_SUMMARY"
   exit 1
@@ -187,6 +188,7 @@ for expected in \
   '--issuer-url http://127.0.0.1:18082' \
   '--entry-url http://127.0.0.1:18083' \
   '--exit-url http://127.0.0.1:18084' \
+  '--subject inv-signoff-test' \
   '--start-local-stack 0'; do
   if ! rg -q -- "$expected" "$SIGNOFF_CAPTURE"; then
     echo "expected campaign forwarding flag missing: $expected"
@@ -194,6 +196,27 @@ for expected in \
     exit 1
   fi
 done
+
+echo "[profile-compare-campaign-signoff] campaign-subject/campaign-anon-cred mutual exclusion"
+set +e
+./scripts/profile_compare_campaign_signoff.sh \
+  --reports-dir "$TMP_DIR/reports_mutual_exclusion" \
+  --refresh-campaign 1 \
+  --campaign-subject inv-a \
+  --campaign-anon-cred cred-b \
+  --summary-json "$TMP_DIR/profile_compare_campaign_signoff_mutual_exclusion.json" >/tmp/integration_profile_compare_campaign_signoff_mutual_exclusion.log 2>&1
+rc_mutual_exclusion=$?
+set -e
+if [[ "$rc_mutual_exclusion" -ne 2 ]]; then
+  echo "expected rc=2 when both --campaign-subject and --campaign-anon-cred are set"
+  cat /tmp/integration_profile_compare_campaign_signoff_mutual_exclusion.log
+  exit 1
+fi
+if ! rg -q 'use either --campaign-subject or --campaign-anon-cred, not both' /tmp/integration_profile_compare_campaign_signoff_mutual_exclusion.log; then
+  echo "expected mutual exclusion error message missing"
+  cat /tmp/integration_profile_compare_campaign_signoff_mutual_exclusion.log
+  exit 1
+fi
 
 echo "[profile-compare-campaign-signoff] reuse existing campaign summary without refresh"
 : >"$SIGNOFF_CAPTURE"
@@ -531,6 +554,7 @@ PROFILE_COMPARE_CAMPAIGN_SIGNOFF_SCRIPT="$FAKE_FORWARD" \
 ./scripts/easy_node.sh profile-compare-campaign-signoff \
   --reports-dir /tmp/reports \
   --refresh-campaign 0 \
+  --campaign-subject inv-forward-test \
   --require-min-runs-total 7 \
   --summary-json /tmp/signoff.json \
   --print-summary-json 1
@@ -541,7 +565,7 @@ if [[ -z "$forward_line" ]]; then
   cat "$FORWARD_CAPTURE"
   exit 1
 fi
-for expected in '--reports-dir /tmp/reports' '--refresh-campaign 0' '--require-min-runs-total 7' '--summary-json /tmp/signoff.json' '--print-summary-json 1'; do
+for expected in '--reports-dir /tmp/reports' '--refresh-campaign 0' '--campaign-subject inv-forward-test' '--require-min-runs-total 7' '--summary-json /tmp/signoff.json' '--print-summary-json 1'; do
   if ! grep -F -- "$expected" <<<"$forward_line" >/dev/null; then
     echo "easy_node forwarding missing $expected"
     cat "$FORWARD_CAPTURE"
