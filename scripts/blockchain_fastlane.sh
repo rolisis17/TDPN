@@ -15,7 +15,8 @@ Usage:
     [--run-ci-phase5-settlement-layer [0|1]] \
     [--run-ci-phase6-cosmos-l1-build-testnet [0|1]] \
     [--run-ci-phase6-cosmos-l1-contracts [0|1]] \
-    [--run-ci-phase7-mainnet-cutover [0|1]]
+    [--run-ci-phase7-mainnet-cutover [0|1]] \
+    [--run-blockchain-mainnet-activation-gate [0|1]]
 
 Purpose:
   Run blockchain CI gates in deterministic order:
@@ -23,6 +24,7 @@ Purpose:
     2) scripts/ci_phase6_cosmos_l1_build_testnet.sh
     3) scripts/ci_phase6_cosmos_l1_contracts.sh
     4) scripts/ci_phase7_mainnet_cutover.sh
+    5) scripts/blockchain_mainnet_activation_gate.sh
 
 Dry-run mode:
   --dry-run 1 skips stage execution, records deterministic skip accounting,
@@ -105,6 +107,7 @@ run_ci_phase5_settlement_layer="${BLOCKCHAIN_FASTLANE_RUN_CI_PHASE5_SETTLEMENT_L
 run_ci_phase6_cosmos_l1_build_testnet="${BLOCKCHAIN_FASTLANE_RUN_CI_PHASE6_COSMOS_L1_BUILD_TESTNET:-1}"
 run_ci_phase6_cosmos_l1_contracts="${BLOCKCHAIN_FASTLANE_RUN_CI_PHASE6_COSMOS_L1_CONTRACTS:-1}"
 run_ci_phase7_mainnet_cutover="${BLOCKCHAIN_FASTLANE_RUN_CI_PHASE7_MAINNET_CUTOVER:-1}"
+run_blockchain_mainnet_activation_gate="${BLOCKCHAIN_FASTLANE_RUN_BLOCKCHAIN_MAINNET_ACTIVATION_GATE:-1}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -170,6 +173,15 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --run-blockchain-mainnet-activation-gate)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        run_blockchain_mainnet_activation_gate="${2:-}"
+        shift 2
+      else
+        run_blockchain_mainnet_activation_gate="1"
+        shift
+      fi
+      ;;
     -h|--help)
       usage
       exit 0
@@ -188,17 +200,20 @@ bool_arg_or_die "--run-ci-phase5-settlement-layer" "$run_ci_phase5_settlement_la
 bool_arg_or_die "--run-ci-phase6-cosmos-l1-build-testnet" "$run_ci_phase6_cosmos_l1_build_testnet"
 bool_arg_or_die "--run-ci-phase6-cosmos-l1-contracts" "$run_ci_phase6_cosmos_l1_contracts"
 bool_arg_or_die "--run-ci-phase7-mainnet-cutover" "$run_ci_phase7_mainnet_cutover"
+bool_arg_or_die "--run-blockchain-mainnet-activation-gate" "$run_blockchain_mainnet_activation_gate"
 
 ci_phase5_settlement_layer_script="${BLOCKCHAIN_FASTLANE_CI_PHASE5_SETTLEMENT_LAYER_SCRIPT:-$ROOT_DIR/scripts/ci_phase5_settlement_layer.sh}"
 ci_phase6_cosmos_l1_build_testnet_script="${BLOCKCHAIN_FASTLANE_CI_PHASE6_COSMOS_L1_BUILD_TESTNET_SCRIPT:-$ROOT_DIR/scripts/ci_phase6_cosmos_l1_build_testnet.sh}"
 ci_phase6_cosmos_l1_contracts_script="${BLOCKCHAIN_FASTLANE_CI_PHASE6_COSMOS_L1_CONTRACTS_SCRIPT:-$ROOT_DIR/scripts/ci_phase6_cosmos_l1_contracts.sh}"
 ci_phase7_mainnet_cutover_script="${BLOCKCHAIN_FASTLANE_CI_PHASE7_MAINNET_CUTOVER_SCRIPT:-$ROOT_DIR/scripts/ci_phase7_mainnet_cutover.sh}"
+blockchain_mainnet_activation_gate_script="${BLOCKCHAIN_FASTLANE_BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SCRIPT:-$ROOT_DIR/scripts/blockchain_mainnet_activation_gate.sh}"
 
 stage_ids=(
   "ci_phase5_settlement_layer"
   "ci_phase6_cosmos_l1_build_testnet"
   "ci_phase6_cosmos_l1_contracts"
   "ci_phase7_mainnet_cutover"
+  "blockchain_mainnet_activation_gate"
 )
 
 declare -A stage_script=(
@@ -206,6 +221,7 @@ declare -A stage_script=(
   ["ci_phase6_cosmos_l1_build_testnet"]="$ci_phase6_cosmos_l1_build_testnet_script"
   ["ci_phase6_cosmos_l1_contracts"]="$ci_phase6_cosmos_l1_contracts_script"
   ["ci_phase7_mainnet_cutover"]="$ci_phase7_mainnet_cutover_script"
+  ["blockchain_mainnet_activation_gate"]="$blockchain_mainnet_activation_gate_script"
 )
 
 declare -A stage_enabled=(
@@ -213,6 +229,7 @@ declare -A stage_enabled=(
   ["ci_phase6_cosmos_l1_build_testnet"]="$run_ci_phase6_cosmos_l1_build_testnet"
   ["ci_phase6_cosmos_l1_contracts"]="$run_ci_phase6_cosmos_l1_contracts"
   ["ci_phase7_mainnet_cutover"]="$run_ci_phase7_mainnet_cutover"
+  ["blockchain_mainnet_activation_gate"]="$run_blockchain_mainnet_activation_gate"
 )
 
 for stage_id in "${stage_ids[@]}"; do
@@ -323,6 +340,7 @@ jq -n \
   --arg run_ci_phase6_cosmos_l1_build_testnet "$run_ci_phase6_cosmos_l1_build_testnet" \
   --arg run_ci_phase6_cosmos_l1_contracts "$run_ci_phase6_cosmos_l1_contracts" \
   --arg run_ci_phase7_mainnet_cutover "$run_ci_phase7_mainnet_cutover" \
+  --arg run_blockchain_mainnet_activation_gate "$run_blockchain_mainnet_activation_gate" \
   --argjson steps "$steps_json" \
   '{
     version: 1,
@@ -340,7 +358,8 @@ jq -n \
       run_ci_phase5_settlement_layer: ($run_ci_phase5_settlement_layer == "1"),
       run_ci_phase6_cosmos_l1_build_testnet: ($run_ci_phase6_cosmos_l1_build_testnet == "1"),
       run_ci_phase6_cosmos_l1_contracts: ($run_ci_phase6_cosmos_l1_contracts == "1"),
-      run_ci_phase7_mainnet_cutover: ($run_ci_phase7_mainnet_cutover == "1")
+      run_ci_phase7_mainnet_cutover: ($run_ci_phase7_mainnet_cutover == "1"),
+      run_blockchain_mainnet_activation_gate: ($run_blockchain_mainnet_activation_gate == "1")
     },
     steps: $steps,
     artifacts: {

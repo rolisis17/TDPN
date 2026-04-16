@@ -25,22 +25,26 @@ SUCCESS_LOG="$TMP_DIR/success.log"
 SAME_PATH_LOG="$TMP_DIR/same_path.log"
 DRY_RUN_LOG="$TMP_DIR/dry_run.log"
 TOGGLE_LOG="$TMP_DIR/toggle.log"
+GATE_FAIL_LOG="$TMP_DIR/gate_fail.log"
 FAIL_LOG="$TMP_DIR/fail.log"
 
 SUCCESS_REPORTS_DIR="$TMP_DIR/reports_success"
 SAME_PATH_REPORTS_DIR="$TMP_DIR/reports_same_path"
 DRY_RUN_REPORTS_DIR="$TMP_DIR/reports_dry_run"
 TOGGLE_REPORTS_DIR="$TMP_DIR/reports_toggle"
+GATE_FAIL_REPORTS_DIR="$TMP_DIR/reports_gate_fail"
 FAIL_REPORTS_DIR="$TMP_DIR/reports_fail"
 
 SUCCESS_SUMMARY_JSON="$TMP_DIR/summary_success.json"
 SAME_PATH_SUMMARY_JSON="$TMP_DIR/summary_same_path.json"
 DRY_RUN_SUMMARY_JSON="$TMP_DIR/summary_dry_run.json"
 TOGGLE_SUMMARY_JSON="$TMP_DIR/summary_toggle.json"
+GATE_FAIL_SUMMARY_JSON="$TMP_DIR/summary_gate_fail.json"
 FAIL_SUMMARY_JSON="$TMP_DIR/summary_fail.json"
 SUCCESS_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_success.json"
 DRY_RUN_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_dry_run.json"
 TOGGLE_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_toggle.json"
+GATE_FAIL_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_gate_fail.json"
 FAIL_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_fail.json"
 
 STAGE_ENV_NAMES=(
@@ -48,6 +52,7 @@ STAGE_ENV_NAMES=(
   "BLOCKCHAIN_FASTLANE_CI_PHASE6_COSMOS_L1_BUILD_TESTNET_SCRIPT"
   "BLOCKCHAIN_FASTLANE_CI_PHASE6_COSMOS_L1_CONTRACTS_SCRIPT"
   "BLOCKCHAIN_FASTLANE_CI_PHASE7_MAINNET_CUTOVER_SCRIPT"
+  "BLOCKCHAIN_FASTLANE_BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SCRIPT"
 )
 
 STAGE_IDS=(
@@ -55,6 +60,7 @@ STAGE_IDS=(
   "ci_phase6_cosmos_l1_build_testnet"
   "ci_phase6_cosmos_l1_contracts"
   "ci_phase7_mainnet_cutover"
+  "blockchain_mainnet_activation_gate"
 )
 
 TOGGLE_STAGE_IDS=(
@@ -214,7 +220,11 @@ if ! jq -e '
   and .inputs.run_ci_phase6_cosmos_l1_build_testnet == true
   and .inputs.run_ci_phase6_cosmos_l1_contracts == true
   and .inputs.run_ci_phase7_mainnet_cutover == true
+  and .inputs.run_blockchain_mainnet_activation_gate == true
   and (.steps | to_entries | all(.value.enabled == true and .value.status == "pass" and .value.rc == 0 and .value.command != null))
+  and .steps.blockchain_mainnet_activation_gate.enabled == true
+  and .steps.blockchain_mainnet_activation_gate.status == "pass"
+  and .steps.blockchain_mainnet_activation_gate.rc == 0
 ' "$SUCCESS_SUMMARY_JSON" >/dev/null; then
   echo "success summary missing expected contract fields"
   cat "$SUCCESS_SUMMARY_JSON"
@@ -281,6 +291,9 @@ if ! jq -e '
   and .rc == 0
   and .inputs.dry_run == true
   and (.steps | to_entries | all(.value.enabled == true and .value.status == "skip" and .value.rc == 0 and .value.reason == "dry-run"))
+  and .steps.blockchain_mainnet_activation_gate.enabled == true
+  and .steps.blockchain_mainnet_activation_gate.status == "skip"
+  and .steps.blockchain_mainnet_activation_gate.reason == "dry-run"
 ' "$DRY_RUN_SUMMARY_JSON" >/dev/null; then
   echo "dry-run summary missing expected skip accounting"
   cat "$DRY_RUN_SUMMARY_JSON"
@@ -307,7 +320,8 @@ BLOCKCHAIN_FASTLANE_CANONICAL_SUMMARY_JSON="$TOGGLE_CANONICAL_SUMMARY_JSON" \
   --summary-json "$TOGGLE_SUMMARY_JSON" \
   --print-summary-json 0 \
   --run-ci-phase5-settlement-layer 0 \
-  --run-ci-phase6-cosmos-l1-contracts 0 >"$TOGGLE_LOG" 2>&1
+  --run-ci-phase6-cosmos-l1-contracts 0 \
+  --run-blockchain-mainnet-activation-gate 0 >"$TOGGLE_LOG" 2>&1
 
 assert_stage_order "$CAPTURE" "${TOGGLE_STAGE_IDS[@]}"
 
@@ -333,6 +347,10 @@ if ! jq -e '
   and .inputs.run_ci_phase7_mainnet_cutover == true
   and .steps.ci_phase7_mainnet_cutover.enabled == true
   and .steps.ci_phase7_mainnet_cutover.status == "pass"
+  and .inputs.run_blockchain_mainnet_activation_gate == false
+  and .steps.blockchain_mainnet_activation_gate.enabled == false
+  and .steps.blockchain_mainnet_activation_gate.status == "skip"
+  and .steps.blockchain_mainnet_activation_gate.reason == "disabled"
 ' "$TOGGLE_SUMMARY_JSON" >/dev/null; then
   echo "toggle summary missing expected disabled/enabled fields"
   cat "$TOGGLE_SUMMARY_JSON"
@@ -340,12 +358,61 @@ if ! jq -e '
 fi
 assert_canonical_summary_artifact "$TOGGLE_SUMMARY_JSON" "$TOGGLE_CANONICAL_SUMMARY_JSON" "$TOGGLE_LOG"
 
+# activation gate failure semantics: a failing gate should be reflected in the wrapper rc.
+echo "[blockchain-fastlane] activation gate failure propagation"
+: >"$CAPTURE"
+set +e
+BLOCKCHAIN_FASTLANE_CAPTURE_FILE="$CAPTURE" \
+BLOCKCHAIN_FASTLANE_FAIL_MATRIX="blockchain_mainnet_activation_gate=61" \
+BLOCKCHAIN_FASTLANE_CANONICAL_SUMMARY_JSON="$GATE_FAIL_CANONICAL_SUMMARY_JSON" \
+"$GATE_SCRIPT" \
+  --reports-dir "$GATE_FAIL_REPORTS_DIR" \
+  --summary-json "$GATE_FAIL_SUMMARY_JSON" \
+  --print-summary-json 0 >"$GATE_FAIL_LOG" 2>&1
+gate_fail_rc=$?
+set -e
+
+if [[ "$gate_fail_rc" -ne 61 ]]; then
+  echo "expected activation gate fail rc=61, got rc=$gate_fail_rc"
+  cat "$GATE_FAIL_LOG"
+  exit 1
+fi
+
+assert_stage_order "$CAPTURE" "${STAGE_IDS[@]}"
+
+if [[ ! -f "$GATE_FAIL_SUMMARY_JSON" ]]; then
+  echo "missing gate-fail summary json: $GATE_FAIL_SUMMARY_JSON"
+  cat "$GATE_FAIL_LOG"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 61
+  and .inputs.run_blockchain_mainnet_activation_gate == true
+  and .steps.blockchain_mainnet_activation_gate.status == "fail"
+  and .steps.blockchain_mainnet_activation_gate.rc == 61
+  and .steps.ci_phase5_settlement_layer.status == "pass"
+  and .steps.ci_phase6_cosmos_l1_build_testnet.status == "pass"
+  and .steps.ci_phase6_cosmos_l1_contracts.status == "pass"
+  and .steps.ci_phase7_mainnet_cutover.status == "pass"
+' "$GATE_FAIL_SUMMARY_JSON" >/dev/null; then
+  echo "gate-fail summary missing expected activation-gate accounting"
+  cat "$GATE_FAIL_SUMMARY_JSON"
+  exit 1
+fi
+if ! grep -Fq -- '[blockchain-fastlane] status=fail rc=61 dry_run=0' "$GATE_FAIL_LOG"; then
+  echo "gate-fail log missing final fail status line"
+  cat "$GATE_FAIL_LOG"
+  exit 1
+fi
+assert_canonical_summary_artifact "$GATE_FAIL_SUMMARY_JSON" "$GATE_FAIL_CANONICAL_SUMMARY_JSON" "$GATE_FAIL_LOG"
+
 # failure propagation semantics: first failing stage rc becomes wrapper exit rc.
 echo "[blockchain-fastlane] first-failure rc propagation"
 : >"$CAPTURE"
 set +e
 BLOCKCHAIN_FASTLANE_CAPTURE_FILE="$CAPTURE" \
-BLOCKCHAIN_FASTLANE_FAIL_MATRIX="ci_phase5_settlement_layer=19,ci_phase6_cosmos_l1_build_testnet=23,ci_phase6_cosmos_l1_contracts=41,ci_phase7_mainnet_cutover=53" \
+BLOCKCHAIN_FASTLANE_FAIL_MATRIX="ci_phase5_settlement_layer=19,ci_phase6_cosmos_l1_build_testnet=23,ci_phase6_cosmos_l1_contracts=41,ci_phase7_mainnet_cutover=53,blockchain_mainnet_activation_gate=59" \
 BLOCKCHAIN_FASTLANE_CANONICAL_SUMMARY_JSON="$FAIL_CANONICAL_SUMMARY_JSON" \
 "$GATE_SCRIPT" \
   --reports-dir "$FAIL_REPORTS_DIR" \
@@ -379,6 +446,8 @@ if ! jq -e '
   and .steps.ci_phase6_cosmos_l1_contracts.rc == 41
   and .steps.ci_phase7_mainnet_cutover.status == "fail"
   and .steps.ci_phase7_mainnet_cutover.rc == 53
+  and .steps.blockchain_mainnet_activation_gate.status == "fail"
+  and .steps.blockchain_mainnet_activation_gate.rc == 59
 ' "$FAIL_SUMMARY_JSON" >/dev/null; then
   echo "fail summary missing expected first-failure accounting"
   cat "$FAIL_SUMMARY_JSON"

@@ -33,6 +33,8 @@ phase5_summary_report_script="scripts/phase5_settlement_layer_summary_report.sh"
 phase5_summary_report_integration_script="scripts/integration_phase5_settlement_layer_summary_report.sh"
 blockchain_fastlane_script="scripts/blockchain_fastlane.sh"
 blockchain_fastlane_integration_script="scripts/integration_blockchain_fastlane.sh"
+blockchain_mainnet_activation_gate_script="scripts/blockchain_mainnet_activation_gate.sh"
+blockchain_mainnet_activation_gate_integration_script="scripts/integration_blockchain_mainnet_activation_gate.sh"
 ci_local_script="scripts/ci_local.sh"
 easy_node_script="scripts/easy_node.sh"
 easy_node_blockchain_gate_wrappers_integration_script="scripts/integration_easy_node_blockchain_gate_wrappers.sh"
@@ -208,6 +210,34 @@ check_phase7_comet_forwarding_surface() {
     echo "$label must include comet signal forwarding for phase7 handoff dry-run coverage"
     exit 1
   fi
+}
+
+check_blockchain_fastlane_activation_gate_surface() {
+  local file_path="$1"
+  local label="$2"
+
+  for token in \
+    "scripts/blockchain_fastlane.sh" \
+    "scripts/integration_blockchain_fastlane.sh" \
+    "./scripts/easy_node.sh blockchain-fastlane" \
+    "mainnet activation gate" \
+    "scripts/blockchain_mainnet_activation_gate.sh" \
+    "scripts/integration_blockchain_mainnet_activation_gate.sh" \
+    "--blockchain-mainnet-activation-gate-summary-json" \
+    "blockchain_track.mainnet_activation_gate" \
+    "fail-soft when the summary is missing or invalid" \
+    "fail-closed control-plane wiring"
+  do
+    if [[ "$token" == --* ]]; then
+      if ! rg -Fq -- "$token" "$file_path"; then
+        echo "$label must document blockchain fastlane activation-gate contract token: $token"
+        exit 1
+      fi
+    elif ! rg -Fq "$token" "$file_path"; then
+      echo "$label must document blockchain fastlane activation-gate contract token: $token"
+      exit 1
+    fi
+  done
 }
 
 check_mainnet_activation_gate_surface() {
@@ -3267,12 +3297,11 @@ for blockchain_fastlane_doc in "$full_plan" "$product_roadmap"; do
   if [[ "$blockchain_fastlane_doc" == "$full_plan" ]]; then
     doc_label="full execution plan"
   fi
-  if ! rg -Fq "scripts/blockchain_fastlane.sh" "$blockchain_fastlane_doc"; then
-    echo "${doc_label} must document scripts/blockchain_fastlane.sh"
-    exit 1
-  fi
-  if ! rg -Fq "scripts/integration_blockchain_fastlane.sh" "$blockchain_fastlane_doc"; then
-    echo "${doc_label} must document scripts/integration_blockchain_fastlane.sh"
+  check_blockchain_fastlane_activation_gate_surface "$blockchain_fastlane_doc" "$doc_label"
+done
+for f in "$blockchain_mainnet_activation_gate_script" "$blockchain_mainnet_activation_gate_integration_script"; do
+  if [[ ! -f "$f" ]]; then
+    echo "missing required file: $f"
     exit 1
   fi
 done
