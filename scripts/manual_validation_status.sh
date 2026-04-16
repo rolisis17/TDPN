@@ -854,6 +854,35 @@ append_profile_gate_subject_placeholder() {
   printf '%s --campaign-subject INVITE_KEY' "$command_string"
 }
 
+profile_gate_command_uses_subject_placeholder_01() {
+  local command_string="$1"
+  if [[ -z "$command_string" ]]; then
+    printf '0'
+    return
+  fi
+  if [[ "$command_string" != *"profile-compare-campaign-signoff"* && "$command_string" != *"profile-default-gate-run"* ]]; then
+    printf '0'
+    return
+  fi
+  if [[ "$command_string" == *"--campaign-subject INVITE_KEY"* || "$command_string" == *"--campaign-subject=INVITE_KEY"* ]]; then
+    printf '1'
+    return
+  fi
+  if [[ "$command_string" == *"--campaign-subject CAMPAIGN_SUBJECT"* || "$command_string" == *"--campaign-subject=CAMPAIGN_SUBJECT"* ]]; then
+    printf '1'
+    return
+  fi
+  if [[ "$command_string" == *"--subject INVITE_KEY"* || "$command_string" == *"--subject=INVITE_KEY"* ]]; then
+    printf '1'
+    return
+  fi
+  if [[ "$command_string" == *"--subject CAMPAIGN_SUBJECT"* || "$command_string" == *"--subject=CAMPAIGN_SUBJECT"* ]]; then
+    printf '1'
+    return
+  fi
+  printf '0'
+}
+
 build_profile_default_gate_json() {
   local signoff_summary_json="$1"
   local docker_rehearsal_check_json="${2:-}"
@@ -938,10 +967,10 @@ build_profile_default_gate_json() {
     printf -v reports_dir_arg '%q' "$reports_dir"
     printf -v summary_json_arg '%q' "$signoff_summary_json"
   fi
-  next_command_default="./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir $reports_dir_arg --refresh-campaign 1 --fail-on-no-go 0 --campaign-timeout-sec $campaign_timeout_sec_arg --summary-json $summary_json_arg --print-summary-json 1"
+  next_command_default="$(append_profile_gate_subject_placeholder "./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir $reports_dir_arg --refresh-campaign 1 --fail-on-no-go 0 --campaign-timeout-sec $campaign_timeout_sec_arg --summary-json $summary_json_arg --print-summary-json 1")"
   next_command_no_sudo="$next_command_default"
   next_command="$next_command_default"
-  next_command_sudo="sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir $reports_dir_arg --refresh-campaign 1 --fail-on-no-go 0 --campaign-timeout-sec $campaign_timeout_sec_arg --summary-json $summary_json_arg --print-summary-json 1"
+  next_command_sudo="$(append_profile_gate_subject_placeholder "sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir $reports_dir_arg --refresh-campaign 1 --fail-on-no-go 0 --campaign-timeout-sec $campaign_timeout_sec_arg --summary-json $summary_json_arg --print-summary-json 1")"
 
   docker_hint_json="$(build_profile_signoff_docker_hint_json "$signoff_summary_json" "$docker_rehearsal_check_json")"
   docker_hint_available="$(jq -r 'if (.available // false) then "1" else "0" end' <<<"$docker_hint_json" 2>/dev/null || echo 0)"
@@ -977,8 +1006,8 @@ build_profile_default_gate_json() {
     if [[ "$docker_hint_wrapper_ready" == "1" ]]; then
       printf -v docker_hint_directory_a_arg '%q' "$docker_hint_directory_a"
       printf -v docker_hint_directory_b_arg '%q' "$docker_hint_directory_b"
-      next_command_wrapper="./scripts/easy_node.sh profile-default-gate-run --directory-a $docker_hint_directory_a_arg --directory-b $docker_hint_directory_b_arg --reports-dir $reports_dir_arg --campaign-timeout-sec $campaign_timeout_sec_arg --summary-json $summary_json_arg --print-summary-json 1"
-      next_command_wrapper_sudo="sudo ./scripts/easy_node.sh profile-default-gate-run --directory-a $docker_hint_directory_a_arg --directory-b $docker_hint_directory_b_arg --reports-dir $reports_dir_arg --campaign-timeout-sec $campaign_timeout_sec_arg --summary-json $summary_json_arg --print-summary-json 1"
+      next_command_wrapper="$(append_profile_gate_subject_placeholder "./scripts/easy_node.sh profile-default-gate-run --directory-a $docker_hint_directory_a_arg --directory-b $docker_hint_directory_b_arg --reports-dir $reports_dir_arg --campaign-timeout-sec $campaign_timeout_sec_arg --summary-json $summary_json_arg --print-summary-json 1")"
+      next_command_wrapper_sudo="$(append_profile_gate_subject_placeholder "sudo ./scripts/easy_node.sh profile-default-gate-run --directory-a $docker_hint_directory_a_arg --directory-b $docker_hint_directory_b_arg --reports-dir $reports_dir_arg --campaign-timeout-sec $campaign_timeout_sec_arg --summary-json $summary_json_arg --print-summary-json 1")"
       if [[ -n "$docker_hint_issuer_url" ]]; then
         next_command_wrapper="$next_command_wrapper --campaign-issuer-url $docker_hint_issuer_url_arg"
         next_command_wrapper_sudo="$next_command_wrapper_sudo --campaign-issuer-url $docker_hint_issuer_url_arg"
@@ -1160,13 +1189,11 @@ build_profile_default_gate_json() {
   fi
   if [[ ( "$next_command" == *"profile-compare-campaign-signoff"* || "$next_command" == *"profile-default-gate-run"* ) && "$(profile_gate_command_needs_subject_placeholder_01 "$next_command")" == "1" ]]; then
     next_command="$(append_profile_gate_subject_placeholder "$next_command")"
-    if [[ "$status" == "pending" ]]; then
-      next_command_missing_credentials="1"
-    fi
   fi
   if [[ ( "$next_command_sudo" == *"profile-compare-campaign-signoff"* || "$next_command_sudo" == *"profile-default-gate-run"* ) && "$(profile_gate_command_needs_subject_placeholder_01 "$next_command_sudo")" == "1" ]]; then
     next_command_sudo="$(append_profile_gate_subject_placeholder "$next_command_sudo")"
   fi
+  next_command_missing_credentials="$(profile_gate_command_uses_subject_placeholder_01 "$next_command")"
   if [[ "$status" == "pending" && "$next_command_missing_credentials" == "1" ]]; then
     if [[ "$notes" != *"$subject_fallback_guidance"* ]]; then
       notes="$notes; $subject_fallback_guidance"
