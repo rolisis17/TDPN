@@ -97,8 +97,9 @@ Exit gate:
 - Easy-node exposes blockchain summary wrappers:
   - `./scripts/easy_node.sh phase5-settlement-layer-summary-report`
   - `./scripts/easy_node.sh phase6-cosmos-l1-summary-report`
-- Phase 6 CI now includes `scripts/ci_phase6_cosmos_l1_build_testnet.sh` with contract coverage from `scripts/integration_ci_phase6_cosmos_l1_build_testnet.sh` for chain scaffold/proto/query/gRPC runtime gate ordering and dry-run/first-failure accounting.
+- Phase 6 CI now includes `scripts/ci_phase6_cosmos_l1_build_testnet.sh` with contract coverage from `scripts/integration_ci_phase6_cosmos_l1_build_testnet.sh` for chain scaffold/proto/query/module-tx/gRPC runtime gate ordering and dry-run/first-failure accounting.
 - Phase 6 build/testnet CI includes `local_testnet_smoke` wired to `scripts/integration_cosmos_local_testnet_smoke.sh` for deterministic local multi-node `tdpnd` lifecycle coverage (`init -> start -> status -> stop -> status`).
+- Phase 6 build/testnet CI includes `module_tx_surface` wired to `scripts/integration_cosmos_module_tx_surface.sh` for six-module keeper/module transaction-surface coverage.
 - Phase 6 gRPC runtime smoke now includes validator/governance real-scaffold roundtrip coverage, reflected core-module query-service checks, auth-query parity, and deterministic `PreviewEpochSelection` query checks.
 - Phase 6 gRPC live smoke now validates reflected module-service parity plus live billing/rewards/slashing/sponsor/validator/governance query dispatch via grpcurl.
 - Phase 6 build/testnet CI now includes `tdpnd_grpc_auth_live_smoke` wired to `scripts/integration_cosmos_tdpnd_grpc_auth_live_smoke.sh` for auth-token gRPC live-smoke coverage across billing/rewards/slashing/sponsor/validator/governance query RPCs.

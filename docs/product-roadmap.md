@@ -208,8 +208,9 @@ Current implementation posture:
 - phase5 operator summary helper `scripts/phase5_settlement_layer_summary_report.sh` aggregates CI/check/run/handoff summaries into compact operator output plus normalized JSON, with integration contract coverage from `scripts/integration_phase5_settlement_layer_summary_report.sh`.
 - phase5 run/handoff wrappers and aggregate report propagate sponsor live-smoke posture for downstream gates/reports via `signals.issuer_sponsor_api_live_smoke_*` and consolidated `signals.issuer_sponsor_api_live_smoke`.
 - phase5 summary helper fallback discovery includes timestamped CI and handoff-run summary directories when canonical/default summary files are absent.
-- phase6 Cosmos L1 build/testnet CI scaffold now runs via `scripts/ci_phase6_cosmos_l1_build_testnet.sh` with contract checks in `scripts/integration_ci_phase6_cosmos_l1_build_testnet.sh`.
+- phase6 Cosmos L1 build/testnet CI scaffold now runs via `scripts/ci_phase6_cosmos_l1_build_testnet.sh` with contract checks in `scripts/integration_ci_phase6_cosmos_l1_build_testnet.sh`, including scaffold/proto/query/module-tx/gRPC stage ordering.
 - phase6 build/testnet CI includes `local_testnet_smoke` wired to `scripts/integration_cosmos_local_testnet_smoke.sh` for deterministic local multi-node `tdpnd` lifecycle coverage (`init -> start -> status -> stop -> status`).
+- phase6 build/testnet CI includes `module_tx_surface` wired to `scripts/integration_cosmos_module_tx_surface.sh` for six-module keeper/module transaction-surface coverage.
 - phase6 gRPC runtime smoke now includes validator/governance real-scaffold roundtrip coverage, reflected core-module query-service checks, auth-query parity, and deterministic `PreviewEpochSelection` query checks.
 - phase6 gRPC live smoke now validates reflected module-service parity plus live billing/rewards/slashing/sponsor/validator/governance query dispatch via grpcurl.
 - phase6 build/testnet CI now includes `tdpnd_grpc_auth_live_smoke` wired to `scripts/integration_cosmos_tdpnd_grpc_auth_live_smoke.sh` for auth-token gRPC live-smoke coverage across billing/rewards/slashing/sponsor/validator/governance query RPCs.

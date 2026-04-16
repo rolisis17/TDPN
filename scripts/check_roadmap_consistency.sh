@@ -254,6 +254,14 @@ if ! rg -Fq "integration_cosmos_local_testnet_smoke.sh" "$full_plan"; then
   echo "full execution plan must document phase6 local testnet smoke integration script"
   exit 1
 fi
+if ! rg -Fq "module_tx_surface" "$full_plan"; then
+  echo "full execution plan must document phase6 module_tx_surface stage"
+  exit 1
+fi
+if ! rg -Fq "integration_cosmos_module_tx_surface.sh" "$full_plan"; then
+  echo "full execution plan must document phase6 module_tx_surface integration script"
+  exit 1
+fi
 if ! rg -Fq "tdpnd_grpc_auth_live_smoke" "$full_plan"; then
   echo "full execution plan must document phase6 tdpnd_grpc_auth_live_smoke stage"
   exit 1
@@ -411,6 +419,14 @@ if ! rg -Fq "integration_cosmos_local_testnet_smoke.sh" "$product_roadmap"; then
   echo "product roadmap must document phase6 local testnet smoke integration script"
   exit 1
 fi
+if ! rg -Fq "module_tx_surface" "$product_roadmap"; then
+  echo "product roadmap must document phase6 module_tx_surface stage"
+  exit 1
+fi
+if ! rg -Fq "integration_cosmos_module_tx_surface.sh" "$product_roadmap"; then
+  echo "product roadmap must document phase6 module_tx_surface integration script"
+  exit 1
+fi
 if ! rg -Fq "tdpnd_grpc_auth_live_smoke" "$product_roadmap"; then
   echo "product roadmap must document phase6 tdpnd_grpc_auth_live_smoke stage"
   exit 1
@@ -555,6 +571,7 @@ phase6_stage_specs=(
   "proto_surface|integration_cosmos_proto_surface.sh"
   "proto_codegen_surface|integration_cosmos_proto_codegen_surface.sh"
   "query_surface|integration_cosmos_query_surface.sh"
+  "module_tx_surface|integration_cosmos_module_tx_surface.sh"
   "grpc_app_roundtrip|integration_cosmos_grpc_app_roundtrip.sh"
   "tdpnd_grpc_runtime_smoke|integration_cosmos_tdpnd_grpc_runtime_smoke.sh"
   "tdpnd_grpc_auth_live_smoke|integration_cosmos_tdpnd_grpc_auth_live_smoke.sh"

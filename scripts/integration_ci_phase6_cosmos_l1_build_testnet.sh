@@ -50,6 +50,7 @@ STAGE_ENV_NAMES=(
   "CI_PHASE6_COSMOS_L1_PROTO_SURFACE_SCRIPT"
   "CI_PHASE6_COSMOS_L1_PROTO_CODEGEN_SURFACE_SCRIPT"
   "CI_PHASE6_COSMOS_L1_QUERY_SURFACE_SCRIPT"
+  "CI_PHASE6_COSMOS_L1_MODULE_TX_SURFACE_SCRIPT"
   "CI_PHASE6_COSMOS_L1_GRPC_APP_ROUNDTRIP_SCRIPT"
   "CI_PHASE6_COSMOS_L1_TDPND_GRPC_RUNTIME_SMOKE_SCRIPT"
   "CI_PHASE6_COSMOS_L1_TDPND_GRPC_LIVE_SMOKE_SCRIPT"
@@ -62,6 +63,7 @@ STAGE_IDS=(
   "proto_surface"
   "proto_codegen_surface"
   "query_surface"
+  "module_tx_surface"
   "grpc_app_roundtrip"
   "tdpnd_grpc_runtime_smoke"
   "tdpnd_grpc_live_smoke"
@@ -226,6 +228,7 @@ if ! jq -e '
   and .inputs.run_proto_surface == true
   and .inputs.run_proto_codegen_surface == true
   and .inputs.run_query_surface == true
+  and .inputs.run_module_tx_surface == true
   and .inputs.run_grpc_app_roundtrip == true
   and .inputs.run_tdpnd_grpc_runtime_smoke == true
   and .inputs.run_tdpnd_grpc_live_smoke == true
@@ -233,6 +236,7 @@ if ! jq -e '
   and (.steps | to_entries | all(.value.enabled == true and .value.status == "pass" and .value.rc == 0 and .value.command != null))
   and .steps.chain_scaffold.status == "pass"
   and .steps.local_testnet_smoke.status == "pass"
+  and .steps.module_tx_surface.status == "pass"
   and .steps.tdpnd_grpc_live_smoke.status == "pass"
   and .steps.tdpnd_grpc_auth_live_smoke.status == "pass"
 ' "$SUCCESS_SUMMARY_JSON" >/dev/null; then
@@ -332,6 +336,7 @@ CI_PHASE6_COSMOS_L1_BUILD_TESTNET_CANONICAL_SUMMARY_JSON="$TOGGLE_CANONICAL_SUMM
   --run-local-testnet-smoke 0 \
   --run-proto-surface 0 \
   --run-proto-codegen-surface 0 \
+  --run-module-tx-surface 0 \
   --run-tdpnd-grpc-runtime-smoke 0 \
   --run-tdpnd-grpc-live-smoke 0 \
   --run-tdpnd-grpc-auth-live-smoke 0 >"$TOGGLE_LOG" 2>&1
@@ -362,6 +367,10 @@ if ! jq -e '
   and .steps.proto_codegen_surface.enabled == false
   and .steps.proto_codegen_surface.status == "skip"
   and .steps.proto_codegen_surface.reason == "disabled"
+  and .inputs.run_module_tx_surface == false
+  and .steps.module_tx_surface.enabled == false
+  and .steps.module_tx_surface.status == "skip"
+  and .steps.module_tx_surface.reason == "disabled"
   and .inputs.run_tdpnd_grpc_runtime_smoke == false
   and .steps.tdpnd_grpc_runtime_smoke.enabled == false
   and .steps.tdpnd_grpc_runtime_smoke.status == "skip"
@@ -389,7 +398,7 @@ echo "[ci-phase6-cosmos-l1] first-failure rc propagation"
 : >"$CAPTURE"
 set +e
 CI_PHASE6_CAPTURE_FILE="$CAPTURE" \
-CI_PHASE6_FAIL_MATRIX="proto_surface=23,query_surface=41,tdpnd_grpc_live_smoke=43,tdpnd_grpc_auth_live_smoke=47" \
+CI_PHASE6_FAIL_MATRIX="proto_surface=23,query_surface=41,module_tx_surface=53,tdpnd_grpc_live_smoke=43,tdpnd_grpc_auth_live_smoke=47" \
 CI_PHASE6_COSMOS_L1_BUILD_TESTNET_CANONICAL_SUMMARY_JSON="$FAIL_CANONICAL_SUMMARY_JSON" \
 "$GATE_SCRIPT" \
   --reports-dir "$FAIL_REPORTS_DIR" \
@@ -421,6 +430,8 @@ if ! jq -e '
   and .steps.proto_surface.rc == 23
   and .steps.query_surface.status == "fail"
   and .steps.query_surface.rc == 41
+  and .steps.module_tx_surface.status == "fail"
+  and .steps.module_tx_surface.rc == 53
   and .steps.tdpnd_grpc_live_smoke.status == "fail"
   and .steps.tdpnd_grpc_live_smoke.rc == 43
   and .steps.tdpnd_grpc_auth_live_smoke.status == "fail"
