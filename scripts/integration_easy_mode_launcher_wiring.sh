@@ -560,6 +560,8 @@ check_cpp '--refresh-campaign ' "launcher wiring failed: option 77 refresh forwa
 check_cpp '--fail-on-no-go ' "launcher wiring failed: option 77 fail-on-no-go forwarding missing"
 check_cpp '--campaign-bootstrap-directory ' "launcher wiring failed: option 77 bootstrap forwarding missing"
 check_cpp '--campaign-discovery-wait-sec ' "launcher wiring failed: option 77 discovery wait forwarding missing"
+check_cpp '--subject \$\{CAMPAIGN_SUBJECT:-\$\{INVITE_KEY:-INVITE_KEY\}\}' \
+  "launcher wiring failed: option 77 subject placeholder forwarding missing"
 check_cpp '--refresh-campaign " << \(refreshCampaign \? "1" : "0"\)' \
   "launcher wiring failed: option 77 refresh forwarding expression missing"
 check_cpp '--fail-on-no-go " << \(failOnNoGo \? "1" : "0"\)' \

@@ -3229,6 +3229,8 @@ assert_line_has "$line77" '--campaign-bootstrap-directory http://198\.51\.100\.1
   "runtime wiring failed: option 77 missing --campaign-bootstrap-directory forwarding"
 assert_line_has "$line77" '--campaign-discovery-wait-sec 22' \
   "runtime wiring failed: option 77 missing --campaign-discovery-wait-sec forwarding"
+assert_line_has "$line77" '--subject INVITE_KEY' \
+  "runtime wiring failed: option 77 missing effective --subject fallback value (INVITE_KEY)"
 assert_line_has "$line77" '--campaign-start-local-stack 0' \
   "runtime wiring failed: option 77 missing fixed --campaign-start-local-stack 0"
 assert_line_has "$line77" '--summary-json \.easy-node-logs/profile_compare_campaign_docker_runtime/profile_compare_campaign_signoff_summary\.json' \
@@ -3271,6 +3273,8 @@ assert_line_has "$line77d" '--campaign-bootstrap-directory http://198\.51\.100\.
   "runtime wiring failed: option 77 default contract missing default --campaign-bootstrap-directory from host config"
 assert_line_has "$line77d" '--campaign-discovery-wait-sec 20' \
   "runtime wiring failed: option 77 default contract missing default --campaign-discovery-wait-sec 20"
+assert_line_has "$line77d" '--subject INVITE_KEY' \
+  "runtime wiring failed: option 77 default contract missing effective --subject fallback value (INVITE_KEY)"
 assert_line_has "$line77d" '--refresh-campaign 1' \
   "runtime wiring failed: option 77 default contract missing default --refresh-campaign 1"
 assert_line_has "$line77d" '--fail-on-no-go 1' \
