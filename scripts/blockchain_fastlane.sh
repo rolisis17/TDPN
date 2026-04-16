@@ -21,7 +21,8 @@ Usage:
     [--blockchain-mainnet-activation-metrics-summary-json PATH] \
     [--blockchain-mainnet-activation-metrics-source-json PATH] \
     [--run-blockchain-mainnet-activation-gate [0|1]] \
-    [--blockchain-mainnet-activation-gate-summary-json PATH]
+    [--blockchain-mainnet-activation-gate-summary-json PATH] \
+    [--phase7-mainnet-cutover-summary-report-json PATH]
 
 Purpose:
   Run blockchain CI gates in deterministic order:
@@ -158,6 +159,7 @@ blockchain_mainnet_activation_metrics_summary_json="${BLOCKCHAIN_FASTLANE_BLOCKC
 blockchain_mainnet_activation_metrics_source_jsons_csv="${BLOCKCHAIN_FASTLANE_BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_SOURCE_JSONS:-}"
 run_blockchain_mainnet_activation_gate="${BLOCKCHAIN_FASTLANE_RUN_BLOCKCHAIN_MAINNET_ACTIVATION_GATE:-1}"
 blockchain_mainnet_activation_gate_summary_json="${BLOCKCHAIN_FASTLANE_BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SUMMARY_JSON:-}"
+phase7_mainnet_cutover_summary_report_json="${BLOCKCHAIN_FASTLANE_PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_JSON:-}"
 declare -a blockchain_mainnet_activation_metrics_source_jsons=()
 
 if [[ -n "$(trim "$blockchain_mainnet_activation_metrics_source_jsons_csv")" ]]; then
@@ -262,6 +264,10 @@ while [[ $# -gt 0 ]]; do
       blockchain_mainnet_activation_gate_summary_json="${2:-}"
       shift 2
       ;;
+    --phase7-mainnet-cutover-summary-report-json)
+      phase7_mainnet_cutover_summary_report_json="${2:-}"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -359,6 +365,12 @@ fi
 if [[ -n "$blockchain_mainnet_activation_gate_summary_json" ]]; then
   blockchain_mainnet_activation_gate_summary_json="$(abs_path "$blockchain_mainnet_activation_gate_summary_json")"
 fi
+if [[ -z "$phase7_mainnet_cutover_summary_report_json" ]] && [[ "$run_ci_phase7_mainnet_cutover" == "1" || "$run_blockchain_mainnet_activation_metrics" == "1" || "$run_blockchain_mainnet_activation_gate" == "1" ]]; then
+  phase7_mainnet_cutover_summary_report_json="$ROOT_DIR/.easy-node-logs/phase7_mainnet_cutover_summary_report.json"
+fi
+if [[ -n "$phase7_mainnet_cutover_summary_report_json" ]]; then
+  phase7_mainnet_cutover_summary_report_json="$(abs_path "$phase7_mainnet_cutover_summary_report_json")"
+fi
 canonical_summary_json="$(abs_path "$canonical_summary_json")"
 
 mkdir -p "$reports_dir"
@@ -375,6 +387,53 @@ if [[ -n "$blockchain_mainnet_activation_gate_summary_json" ]]; then
 fi
 
 blockchain_mainnet_activation_metrics_source_jsons_json="$(array_to_json blockchain_mainnet_activation_metrics_source_jsons)"
+
+phase7_signal_bool_or_null() {
+  local path="$1"
+  local jq_candidates="$2"
+  local raw=""
+  if [[ ! -f "$path" ]]; then
+    printf '%s' "null"
+    return
+  fi
+  raw="$(jq -r "[${jq_candidates}] | map(select(. != null)) | .[0] | if type == \"boolean\" then tostring else \"null\" end" "$path" 2>/dev/null || echo "null")"
+  if [[ "$raw" != "true" && "$raw" != "false" ]]; then
+    raw="null"
+  fi
+  printf '%s' "$raw"
+}
+
+phase7_mainnet_cutover_summary_report_available_json="false"
+phase7_mainnet_cutover_summary_report_status_json="missing"
+phase7_mainnet_cutover_summary_report_module_tx_surface_ok_json="null"
+phase7_mainnet_cutover_summary_report_tdpnd_grpc_live_smoke_ok_json="null"
+phase7_mainnet_cutover_summary_report_tdpnd_grpc_auth_live_smoke_ok_json="null"
+phase7_mainnet_cutover_summary_report_tdpnd_comet_runtime_smoke_ok_json="null"
+phase7_mainnet_cutover_summary_report_cosmos_module_coverage_floor_ok_json="null"
+phase7_mainnet_cutover_summary_report_cosmos_keeper_coverage_floor_ok_json="null"
+phase7_mainnet_cutover_summary_report_cosmos_app_coverage_floor_ok_json="null"
+phase7_mainnet_cutover_summary_report_dual_write_parity_ok_json="null"
+phase7_mainnet_cutover_summary_report_mainnet_activation_gate_go_ok_json="null"
+
+if [[ -n "$phase7_mainnet_cutover_summary_report_json" ]]; then
+  if [[ -f "$phase7_mainnet_cutover_summary_report_json" ]]; then
+    if jq -e 'type == "object"' "$phase7_mainnet_cutover_summary_report_json" >/dev/null 2>&1; then
+      phase7_mainnet_cutover_summary_report_available_json="true"
+      phase7_mainnet_cutover_summary_report_status_json="$(jq -r 'if (.status | type) == "string" then .status else "unknown" end' "$phase7_mainnet_cutover_summary_report_json" 2>/dev/null || echo "unknown")"
+      phase7_mainnet_cutover_summary_report_module_tx_surface_ok_json="$(phase7_signal_bool_or_null "$phase7_mainnet_cutover_summary_report_json" '.signals.module_tx_surface_ok, .signals.module_tx_surface, .summaries.check.signal_snapshot.module_tx_surface_ok, .summaries.check.signal_snapshot.module_tx_surface, .summaries.run.signal_snapshot.module_tx_surface_ok, .summaries.run.signal_snapshot.module_tx_surface, .summaries.handoff_check.signal_snapshot.module_tx_surface_ok, .summaries.handoff_check.signal_snapshot.module_tx_surface, .summaries.handoff_run.signal_snapshot.module_tx_surface_ok, .summaries.handoff_run.signal_snapshot.module_tx_surface, .steps.phase7_mainnet_cutover_check.signal_snapshot.module_tx_surface_ok, .steps.phase7_mainnet_cutover_check.signal_snapshot.module_tx_surface, .handoff.module_tx_surface_ok, .handoff.module_tx_surface, .module_tx_surface_ok, .module_tx_surface')"
+      phase7_mainnet_cutover_summary_report_tdpnd_grpc_live_smoke_ok_json="$(phase7_signal_bool_or_null "$phase7_mainnet_cutover_summary_report_json" '.signals.tdpnd_grpc_live_smoke_ok, .signals.tdpnd_grpc_live_smoke, .summaries.check.signal_snapshot.tdpnd_grpc_live_smoke_ok, .summaries.check.signal_snapshot.tdpnd_grpc_live_smoke, .summaries.run.signal_snapshot.tdpnd_grpc_live_smoke_ok, .summaries.run.signal_snapshot.tdpnd_grpc_live_smoke, .summaries.handoff_check.signal_snapshot.tdpnd_grpc_live_smoke_ok, .summaries.handoff_check.signal_snapshot.tdpnd_grpc_live_smoke, .summaries.handoff_run.signal_snapshot.tdpnd_grpc_live_smoke_ok, .summaries.handoff_run.signal_snapshot.tdpnd_grpc_live_smoke, .steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_grpc_live_smoke_ok, .steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_grpc_live_smoke, .handoff.tdpnd_grpc_live_smoke_ok, .handoff.tdpnd_grpc_live_smoke, .tdpnd_grpc_live_smoke_ok, .tdpnd_grpc_live_smoke')"
+      phase7_mainnet_cutover_summary_report_tdpnd_grpc_auth_live_smoke_ok_json="$(phase7_signal_bool_or_null "$phase7_mainnet_cutover_summary_report_json" '.signals.tdpnd_grpc_auth_live_smoke_ok, .signals.tdpnd_grpc_auth_live_smoke, .summaries.check.signal_snapshot.tdpnd_grpc_auth_live_smoke_ok, .summaries.check.signal_snapshot.tdpnd_grpc_auth_live_smoke, .summaries.run.signal_snapshot.tdpnd_grpc_auth_live_smoke_ok, .summaries.run.signal_snapshot.tdpnd_grpc_auth_live_smoke, .summaries.handoff_check.signal_snapshot.tdpnd_grpc_auth_live_smoke_ok, .summaries.handoff_check.signal_snapshot.tdpnd_grpc_auth_live_smoke, .summaries.handoff_run.signal_snapshot.tdpnd_grpc_auth_live_smoke_ok, .summaries.handoff_run.signal_snapshot.tdpnd_grpc_auth_live_smoke, .steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_grpc_auth_live_smoke_ok, .steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_grpc_auth_live_smoke, .handoff.tdpnd_grpc_auth_live_smoke_ok, .handoff.tdpnd_grpc_auth_live_smoke, .tdpnd_grpc_auth_live_smoke_ok, .tdpnd_grpc_auth_live_smoke')"
+      phase7_mainnet_cutover_summary_report_tdpnd_comet_runtime_smoke_ok_json="$(phase7_signal_bool_or_null "$phase7_mainnet_cutover_summary_report_json" '.signals.tdpnd_comet_runtime_smoke_ok, .signals.tdpnd_comet_runtime_smoke, .summaries.check.signal_snapshot.tdpnd_comet_runtime_smoke_ok, .summaries.check.signal_snapshot.tdpnd_comet_runtime_smoke, .summaries.run.signal_snapshot.tdpnd_comet_runtime_smoke_ok, .summaries.run.signal_snapshot.tdpnd_comet_runtime_smoke, .summaries.handoff_check.signal_snapshot.tdpnd_comet_runtime_smoke_ok, .summaries.handoff_check.signal_snapshot.tdpnd_comet_runtime_smoke, .summaries.handoff_run.signal_snapshot.tdpnd_comet_runtime_smoke_ok, .summaries.handoff_run.signal_snapshot.tdpnd_comet_runtime_smoke, .steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_comet_runtime_smoke_ok, .steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_comet_runtime_smoke, .handoff.tdpnd_comet_runtime_smoke_ok, .handoff.tdpnd_comet_runtime_smoke, .tdpnd_comet_runtime_smoke_ok, .tdpnd_comet_runtime_smoke')"
+      phase7_mainnet_cutover_summary_report_cosmos_module_coverage_floor_ok_json="$(phase7_signal_bool_or_null "$phase7_mainnet_cutover_summary_report_json" '.signals.cosmos_module_coverage_floor_ok, .summaries.check.signal_snapshot.cosmos_module_coverage_floor_ok, .summaries.run.signal_snapshot.cosmos_module_coverage_floor_ok, .summaries.handoff_check.signal_snapshot.cosmos_module_coverage_floor_ok, .summaries.handoff_run.signal_snapshot.cosmos_module_coverage_floor_ok, .steps.phase7_mainnet_cutover_check.signal_snapshot.cosmos_module_coverage_floor_ok, .handoff.cosmos_module_coverage_floor_ok, .cosmos_module_coverage_floor_ok')"
+      phase7_mainnet_cutover_summary_report_cosmos_keeper_coverage_floor_ok_json="$(phase7_signal_bool_or_null "$phase7_mainnet_cutover_summary_report_json" '.signals.cosmos_keeper_coverage_floor_ok, .summaries.check.signal_snapshot.cosmos_keeper_coverage_floor_ok, .summaries.run.signal_snapshot.cosmos_keeper_coverage_floor_ok, .summaries.handoff_check.signal_snapshot.cosmos_keeper_coverage_floor_ok, .summaries.handoff_run.signal_snapshot.cosmos_keeper_coverage_floor_ok, .steps.phase7_mainnet_cutover_check.signal_snapshot.cosmos_keeper_coverage_floor_ok, .handoff.cosmos_keeper_coverage_floor_ok, .cosmos_keeper_coverage_floor_ok')"
+      phase7_mainnet_cutover_summary_report_cosmos_app_coverage_floor_ok_json="$(phase7_signal_bool_or_null "$phase7_mainnet_cutover_summary_report_json" '.signals.cosmos_app_coverage_floor_ok, .summaries.check.signal_snapshot.cosmos_app_coverage_floor_ok, .summaries.run.signal_snapshot.cosmos_app_coverage_floor_ok, .summaries.handoff_check.signal_snapshot.cosmos_app_coverage_floor_ok, .summaries.handoff_run.signal_snapshot.cosmos_app_coverage_floor_ok, .steps.phase7_mainnet_cutover_check.signal_snapshot.cosmos_app_coverage_floor_ok, .handoff.cosmos_app_coverage_floor_ok, .cosmos_app_coverage_floor_ok')"
+      phase7_mainnet_cutover_summary_report_dual_write_parity_ok_json="$(phase7_signal_bool_or_null "$phase7_mainnet_cutover_summary_report_json" '.signals.dual_write_parity_ok, .signals.dual_write_parity, .summaries.check.signal_snapshot.dual_write_parity_ok, .summaries.check.signal_snapshot.dual_write_parity, .summaries.run.signal_snapshot.dual_write_parity_ok, .summaries.run.signal_snapshot.dual_write_parity, .summaries.handoff_check.signal_snapshot.dual_write_parity_ok, .summaries.handoff_check.signal_snapshot.dual_write_parity, .summaries.handoff_run.signal_snapshot.dual_write_parity_ok, .summaries.handoff_run.signal_snapshot.dual_write_parity, .steps.phase7_mainnet_cutover_check.signal_snapshot.dual_write_parity_ok, .steps.phase7_mainnet_cutover_check.signal_snapshot.dual_write_parity, .handoff.dual_write_parity_ok, .handoff.dual_write_parity, .dual_write_parity_ok, .dual_write_parity')"
+      phase7_mainnet_cutover_summary_report_mainnet_activation_gate_go_ok_json="$(phase7_signal_bool_or_null "$phase7_mainnet_cutover_summary_report_json" '.signals.mainnet_activation_gate_go_ok, .signals.mainnet_activation_gate_go, .summaries.check.signal_snapshot.mainnet_activation_gate_go_ok, .summaries.check.signal_snapshot.mainnet_activation_gate_go, .summaries.run.signal_snapshot.mainnet_activation_gate_go_ok, .summaries.run.signal_snapshot.mainnet_activation_gate_go, .summaries.handoff_check.signal_snapshot.mainnet_activation_gate_go_ok, .summaries.handoff_check.signal_snapshot.mainnet_activation_gate_go, .summaries.handoff_run.signal_snapshot.mainnet_activation_gate_go_ok, .summaries.handoff_run.signal_snapshot.mainnet_activation_gate_go, .steps.phase7_mainnet_cutover_check.signal_snapshot.mainnet_activation_gate_go_ok, .steps.phase7_mainnet_cutover_check.signal_snapshot.mainnet_activation_gate_go, .handoff.mainnet_activation_gate_go_ok, .handoff.mainnet_activation_gate_go, .mainnet_activation_gate_go_ok, .mainnet_activation_gate_go')"
+    else
+      phase7_mainnet_cutover_summary_report_status_json="invalid"
+    fi
+  fi
+fi
 
 declare -A stage_status
 declare -A stage_rc
@@ -472,6 +531,41 @@ for stage_id in "${stage_ids[@]}"; do
           }'
       )"
       ;;
+    "ci_phase7_mainnet_cutover")
+      stage_artifacts_json="$(
+        jq -n \
+          --arg input_summary_json "$phase7_mainnet_cutover_summary_report_json" \
+          --argjson available "$phase7_mainnet_cutover_summary_report_available_json" \
+          --arg status "$phase7_mainnet_cutover_summary_report_status_json" \
+          --argjson module_tx_surface_ok "$phase7_mainnet_cutover_summary_report_module_tx_surface_ok_json" \
+          --argjson tdpnd_grpc_live_smoke_ok "$phase7_mainnet_cutover_summary_report_tdpnd_grpc_live_smoke_ok_json" \
+          --argjson tdpnd_grpc_auth_live_smoke_ok "$phase7_mainnet_cutover_summary_report_tdpnd_grpc_auth_live_smoke_ok_json" \
+          --argjson tdpnd_comet_runtime_smoke_ok "$phase7_mainnet_cutover_summary_report_tdpnd_comet_runtime_smoke_ok_json" \
+          --argjson cosmos_module_coverage_floor_ok "$phase7_mainnet_cutover_summary_report_cosmos_module_coverage_floor_ok_json" \
+          --argjson cosmos_keeper_coverage_floor_ok "$phase7_mainnet_cutover_summary_report_cosmos_keeper_coverage_floor_ok_json" \
+          --argjson cosmos_app_coverage_floor_ok "$phase7_mainnet_cutover_summary_report_cosmos_app_coverage_floor_ok_json" \
+          --argjson dual_write_parity_ok "$phase7_mainnet_cutover_summary_report_dual_write_parity_ok_json" \
+          --argjson mainnet_activation_gate_go_ok "$phase7_mainnet_cutover_summary_report_mainnet_activation_gate_go_ok_json" \
+          '{
+            phase7_mainnet_cutover_summary_report: {
+              input_summary_json: (if $input_summary_json == "" then null else $input_summary_json end),
+              available: $available,
+              status: $status,
+              signals: {
+                module_tx_surface_ok: $module_tx_surface_ok,
+                tdpnd_grpc_live_smoke_ok: $tdpnd_grpc_live_smoke_ok,
+                tdpnd_grpc_auth_live_smoke_ok: $tdpnd_grpc_auth_live_smoke_ok,
+                tdpnd_comet_runtime_smoke_ok: $tdpnd_comet_runtime_smoke_ok,
+                cosmos_module_coverage_floor_ok: $cosmos_module_coverage_floor_ok,
+                cosmos_keeper_coverage_floor_ok: $cosmos_keeper_coverage_floor_ok,
+                cosmos_app_coverage_floor_ok: $cosmos_app_coverage_floor_ok,
+                dual_write_parity_ok: $dual_write_parity_ok,
+                mainnet_activation_gate_go_ok: $mainnet_activation_gate_go_ok
+              }
+            }
+          }'
+      )"
+      ;;
   esac
 
   stage_entry="$(
@@ -520,6 +614,18 @@ jq -n \
   --argjson blockchain_mainnet_activation_metrics_source_jsons "$blockchain_mainnet_activation_metrics_source_jsons_json" \
   --arg run_blockchain_mainnet_activation_gate "$run_blockchain_mainnet_activation_gate" \
   --arg blockchain_mainnet_activation_gate_summary_json "$blockchain_mainnet_activation_gate_summary_json" \
+  --arg phase7_mainnet_cutover_summary_report_json "$phase7_mainnet_cutover_summary_report_json" \
+  --argjson phase7_mainnet_cutover_summary_report_available "$phase7_mainnet_cutover_summary_report_available_json" \
+  --arg phase7_mainnet_cutover_summary_report_status "$phase7_mainnet_cutover_summary_report_status_json" \
+  --argjson phase7_mainnet_cutover_summary_report_module_tx_surface_ok "$phase7_mainnet_cutover_summary_report_module_tx_surface_ok_json" \
+  --argjson phase7_mainnet_cutover_summary_report_tdpnd_grpc_live_smoke_ok "$phase7_mainnet_cutover_summary_report_tdpnd_grpc_live_smoke_ok_json" \
+  --argjson phase7_mainnet_cutover_summary_report_tdpnd_grpc_auth_live_smoke_ok "$phase7_mainnet_cutover_summary_report_tdpnd_grpc_auth_live_smoke_ok_json" \
+  --argjson phase7_mainnet_cutover_summary_report_tdpnd_comet_runtime_smoke_ok "$phase7_mainnet_cutover_summary_report_tdpnd_comet_runtime_smoke_ok_json" \
+  --argjson phase7_mainnet_cutover_summary_report_cosmos_module_coverage_floor_ok "$phase7_mainnet_cutover_summary_report_cosmos_module_coverage_floor_ok_json" \
+  --argjson phase7_mainnet_cutover_summary_report_cosmos_keeper_coverage_floor_ok "$phase7_mainnet_cutover_summary_report_cosmos_keeper_coverage_floor_ok_json" \
+  --argjson phase7_mainnet_cutover_summary_report_cosmos_app_coverage_floor_ok "$phase7_mainnet_cutover_summary_report_cosmos_app_coverage_floor_ok_json" \
+  --argjson phase7_mainnet_cutover_summary_report_dual_write_parity_ok "$phase7_mainnet_cutover_summary_report_dual_write_parity_ok_json" \
+  --argjson phase7_mainnet_cutover_summary_report_mainnet_activation_gate_go_ok "$phase7_mainnet_cutover_summary_report_mainnet_activation_gate_go_ok_json" \
   --argjson steps "$steps_json" \
   '{
     version: 1,
@@ -543,9 +649,26 @@ jq -n \
       blockchain_mainnet_activation_metrics_summary_json: (if $blockchain_mainnet_activation_metrics_summary_json == "" then null else $blockchain_mainnet_activation_metrics_summary_json end),
       blockchain_mainnet_activation_metrics_source_jsons: $blockchain_mainnet_activation_metrics_source_jsons,
       run_blockchain_mainnet_activation_gate: ($run_blockchain_mainnet_activation_gate == "1"),
-      blockchain_mainnet_activation_gate_summary_json: (if $blockchain_mainnet_activation_gate_summary_json == "" then null else $blockchain_mainnet_activation_gate_summary_json end)
+      blockchain_mainnet_activation_gate_summary_json: (if $blockchain_mainnet_activation_gate_summary_json == "" then null else $blockchain_mainnet_activation_gate_summary_json end),
+      phase7_mainnet_cutover_summary_report_json: (if $phase7_mainnet_cutover_summary_report_json == "" then null else $phase7_mainnet_cutover_summary_report_json end)
     },
     steps: $steps,
+    phase7_mainnet_cutover_summary_report: {
+      input_summary_json: (if $phase7_mainnet_cutover_summary_report_json == "" then null else $phase7_mainnet_cutover_summary_report_json end),
+      available: $phase7_mainnet_cutover_summary_report_available,
+      status: $phase7_mainnet_cutover_summary_report_status,
+      signals: {
+        module_tx_surface_ok: $phase7_mainnet_cutover_summary_report_module_tx_surface_ok,
+        tdpnd_grpc_live_smoke_ok: $phase7_mainnet_cutover_summary_report_tdpnd_grpc_live_smoke_ok,
+        tdpnd_grpc_auth_live_smoke_ok: $phase7_mainnet_cutover_summary_report_tdpnd_grpc_auth_live_smoke_ok,
+        tdpnd_comet_runtime_smoke_ok: $phase7_mainnet_cutover_summary_report_tdpnd_comet_runtime_smoke_ok,
+        cosmos_module_coverage_floor_ok: $phase7_mainnet_cutover_summary_report_cosmos_module_coverage_floor_ok,
+        cosmos_keeper_coverage_floor_ok: $phase7_mainnet_cutover_summary_report_cosmos_keeper_coverage_floor_ok,
+        cosmos_app_coverage_floor_ok: $phase7_mainnet_cutover_summary_report_cosmos_app_coverage_floor_ok,
+        dual_write_parity_ok: $phase7_mainnet_cutover_summary_report_dual_write_parity_ok,
+        mainnet_activation_gate_go_ok: $phase7_mainnet_cutover_summary_report_mainnet_activation_gate_go_ok
+      }
+    },
     artifacts: {
       reports_dir: $reports_dir,
       summary_json: $summary_json,
@@ -553,7 +676,8 @@ jq -n \
       blockchain_mainnet_activation_metrics_json: (if $blockchain_mainnet_activation_metrics_json == "" then null else $blockchain_mainnet_activation_metrics_json end),
       blockchain_mainnet_activation_metrics_summary_json: (if $blockchain_mainnet_activation_metrics_summary_json == "" then null else $blockchain_mainnet_activation_metrics_summary_json end),
       blockchain_mainnet_activation_metrics_source_jsons: $blockchain_mainnet_activation_metrics_source_jsons,
-      blockchain_mainnet_activation_gate_summary_json: (if $blockchain_mainnet_activation_gate_summary_json == "" then null else $blockchain_mainnet_activation_gate_summary_json end)
+      blockchain_mainnet_activation_gate_summary_json: (if $blockchain_mainnet_activation_gate_summary_json == "" then null else $blockchain_mainnet_activation_gate_summary_json end),
+      phase7_mainnet_cutover_summary_report_json: (if $phase7_mainnet_cutover_summary_report_json == "" then null else $phase7_mainnet_cutover_summary_report_json end)
     }
   }' >"$summary_tmp"
 mv -f "$summary_tmp" "$summary_json"

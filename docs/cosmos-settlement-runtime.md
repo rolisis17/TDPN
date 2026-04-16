@@ -178,6 +178,7 @@ Exit settlement status endpoint:
 - Phase7 handoff wrapper posture remains fail-closed with optional operator gate semantics and does not change dataplane independence.
 - Integration coverage for these gate-wrapper contracts is `scripts/integration_easy_node_blockchain_gate_wrappers.sh`; it validates phase5 + phase6 + phase7 wrappers, and wrapper posture remains control-plane only while VPN dataplane independence is unchanged.
 - Blockchain fastlane helper is `scripts/blockchain_fastlane.sh`; integration contract is `scripts/integration_blockchain_fastlane.sh`; easy-node entrypoint is `./scripts/easy_node.sh blockchain-fastlane`; this remains fail-closed control-plane wiring and preserves dataplane independence.
+- `blockchain_fastlane` summary surfacing now also includes Phase 7 summary/report runtime/readiness signals `module_tx_surface_ok`, `tdpnd_grpc_live_smoke_ok`, and `tdpnd_grpc_auth_live_smoke_ok`; optional `tdpnd_comet_runtime_smoke_ok` is preserved when present.
 - Phase7 cutover summaries remain control-plane only and preserve canonical dataplane independence during chain degradation.
 
 ## Chain gRPC Contract

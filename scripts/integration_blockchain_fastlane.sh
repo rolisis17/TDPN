@@ -27,6 +27,7 @@ SOURCE_CLI_LOG="$TMP_DIR/source_cli.log"
 SAME_PATH_LOG="$TMP_DIR/same_path.log"
 DRY_RUN_LOG="$TMP_DIR/dry_run.log"
 TOGGLE_LOG="$TMP_DIR/toggle.log"
+PHASE7_INVALID_LOG="$TMP_DIR/phase7_invalid.log"
 GATE_FAIL_LOG="$TMP_DIR/gate_fail.log"
 FAIL_LOG="$TMP_DIR/fail.log"
 
@@ -36,6 +37,7 @@ SOURCE_CLI_REPORTS_DIR="$TMP_DIR/reports_source_cli"
 SAME_PATH_REPORTS_DIR="$TMP_DIR/reports_same_path"
 DRY_RUN_REPORTS_DIR="$TMP_DIR/reports_dry_run"
 TOGGLE_REPORTS_DIR="$TMP_DIR/reports_toggle"
+PHASE7_INVALID_REPORTS_DIR="$TMP_DIR/reports_phase7_invalid"
 GATE_FAIL_REPORTS_DIR="$TMP_DIR/reports_gate_fail"
 FAIL_REPORTS_DIR="$TMP_DIR/reports_fail"
 
@@ -45,6 +47,7 @@ SOURCE_CLI_SUMMARY_JSON="$TMP_DIR/summary_source_cli.json"
 SAME_PATH_SUMMARY_JSON="$TMP_DIR/summary_same_path.json"
 DRY_RUN_SUMMARY_JSON="$TMP_DIR/summary_dry_run.json"
 TOGGLE_SUMMARY_JSON="$TMP_DIR/summary_toggle.json"
+PHASE7_INVALID_SUMMARY_JSON="$TMP_DIR/summary_phase7_invalid.json"
 GATE_FAIL_SUMMARY_JSON="$TMP_DIR/summary_gate_fail.json"
 FAIL_SUMMARY_JSON="$TMP_DIR/summary_fail.json"
 SUCCESS_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_success.json"
@@ -52,6 +55,7 @@ SOURCE_ENV_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_source_env.json"
 SOURCE_CLI_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_source_cli.json"
 DRY_RUN_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_dry_run.json"
 TOGGLE_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_toggle.json"
+PHASE7_INVALID_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_phase7_invalid.json"
 GATE_FAIL_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_gate_fail.json"
 FAIL_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_fail.json"
 SUCCESS_METRICS_JSON="$SUCCESS_REPORTS_DIR/blockchain_mainnet_activation_metrics.json"
@@ -62,6 +66,9 @@ ENV_SOURCE_JSON_A="$TMP_DIR/env_source_a.json"
 ENV_SOURCE_JSON_B="$TMP_DIR/env_source_b.json"
 CLI_SOURCE_JSON_A="$TMP_DIR/cli_source_a.json"
 CLI_SOURCE_JSON_B="$TMP_DIR/cli_source_b.json"
+PHASE7_SOURCE_JSON="$TMP_DIR/phase7_summary_source.json"
+PHASE7_MISSING_JSON="$TMP_DIR/phase7_summary_missing.json"
+PHASE7_INVALID_JSON="$TMP_DIR/phase7_summary_invalid.json"
 
 STAGE_ENV_NAMES=(
   "BLOCKCHAIN_FASTLANE_CI_PHASE5_SETTLEMENT_LAYER_SCRIPT"
@@ -296,6 +303,27 @@ assert_canonical_summary_artifact() {
   fi
 }
 
+cat >"$PHASE7_SOURCE_JSON" <<'EOF_PHASE7_SOURCE_JSON'
+{
+  "status": "pass",
+  "signals": {
+    "module_tx_surface_ok": true,
+    "tdpnd_grpc_live_smoke_ok": true,
+    "tdpnd_grpc_auth_live_smoke": false,
+    "tdpnd_comet_runtime_smoke_ok": true,
+    "cosmos_module_coverage_floor_ok": true,
+    "cosmos_keeper_coverage_floor_ok": false,
+    "cosmos_app_coverage_floor_ok": true,
+    "dual_write_parity": false,
+    "mainnet_activation_gate_go_ok": true
+  }
+}
+EOF_PHASE7_SOURCE_JSON
+cat >"$PHASE7_INVALID_JSON" <<'EOF_PHASE7_INVALID_JSON'
+{
+  "status":
+EOF_PHASE7_INVALID_JSON
+
 echo "[blockchain-fastlane] success ordering path"
 : >"$CAPTURE"
 BLOCKCHAIN_FASTLANE_CAPTURE_FILE="$CAPTURE" \
@@ -304,6 +332,7 @@ BLOCKCHAIN_FASTLANE_CANONICAL_SUMMARY_JSON="$SUCCESS_CANONICAL_SUMMARY_JSON" \
   --reports-dir "$SUCCESS_REPORTS_DIR" \
   --summary-json "$SUCCESS_SUMMARY_JSON" \
   --run-blockchain-mainnet-activation-metrics 1 \
+  --phase7-mainnet-cutover-summary-report-json "$PHASE7_SOURCE_JSON" \
   --print-summary-json 0 >"$SUCCESS_LOG" 2>&1
 
 assert_stage_order "$CAPTURE" "${STAGE_IDS[@]}"
@@ -316,7 +345,7 @@ if [[ ! -f "$SUCCESS_SUMMARY_JSON" ]]; then
   cat "$SUCCESS_LOG"
   exit 1
 fi
-if ! jq -e --arg gate_summary "$SUCCESS_GATE_SUMMARY_JSON" --arg default_source "$DEFAULT_SOURCE_JSON_PHASE5" '
+if ! jq -e --arg gate_summary "$SUCCESS_GATE_SUMMARY_JSON" --arg default_source "$DEFAULT_SOURCE_JSON_PHASE5" --arg phase7_summary "$PHASE7_SOURCE_JSON" '
   .status == "pass"
   and .rc == 0
   and .schema.id == "blockchain_fastlane_summary"
@@ -346,6 +375,25 @@ if ! jq -e --arg gate_summary "$SUCCESS_GATE_SUMMARY_JSON" --arg default_source 
   and .steps.blockchain_mainnet_activation_gate.artifacts.summary_json == $gate_summary
   and .steps.blockchain_mainnet_activation_gate.artifacts.metrics_json == .artifacts.blockchain_mainnet_activation_metrics_json
   and .artifacts.blockchain_mainnet_activation_metrics_json != null
+  and .inputs.phase7_mainnet_cutover_summary_report_json == $phase7_summary
+  and .artifacts.phase7_mainnet_cutover_summary_report_json == $phase7_summary
+  and .phase7_mainnet_cutover_summary_report.input_summary_json == $phase7_summary
+  and .phase7_mainnet_cutover_summary_report.available == true
+  and .phase7_mainnet_cutover_summary_report.status == "pass"
+  and .phase7_mainnet_cutover_summary_report.signals.module_tx_surface_ok == true
+  and .phase7_mainnet_cutover_summary_report.signals.tdpnd_grpc_live_smoke_ok == true
+  and .phase7_mainnet_cutover_summary_report.signals.tdpnd_grpc_auth_live_smoke_ok == false
+  and .phase7_mainnet_cutover_summary_report.signals.tdpnd_comet_runtime_smoke_ok == true
+  and .phase7_mainnet_cutover_summary_report.signals.cosmos_module_coverage_floor_ok == true
+  and .phase7_mainnet_cutover_summary_report.signals.cosmos_keeper_coverage_floor_ok == false
+  and .phase7_mainnet_cutover_summary_report.signals.cosmos_app_coverage_floor_ok == true
+  and .phase7_mainnet_cutover_summary_report.signals.dual_write_parity_ok == false
+  and .phase7_mainnet_cutover_summary_report.signals.mainnet_activation_gate_go_ok == true
+  and .steps.ci_phase7_mainnet_cutover.artifacts.phase7_mainnet_cutover_summary_report.input_summary_json == $phase7_summary
+  and .steps.ci_phase7_mainnet_cutover.artifacts.phase7_mainnet_cutover_summary_report.available == true
+  and .steps.ci_phase7_mainnet_cutover.artifacts.phase7_mainnet_cutover_summary_report.status == "pass"
+  and .steps.ci_phase7_mainnet_cutover.artifacts.phase7_mainnet_cutover_summary_report.signals.tdpnd_grpc_auth_live_smoke_ok == false
+  and .steps.ci_phase7_mainnet_cutover.artifacts.phase7_mainnet_cutover_summary_report.signals.dual_write_parity_ok == false
 ' "$SUCCESS_SUMMARY_JSON" >/dev/null; then
   echo "success summary missing expected contract fields"
   cat "$SUCCESS_SUMMARY_JSON"
@@ -455,6 +503,7 @@ BLOCKCHAIN_FASTLANE_CANONICAL_SUMMARY_JSON="$SAME_PATH_SUMMARY_JSON" \
 "$GATE_SCRIPT" \
   --reports-dir "$SAME_PATH_REPORTS_DIR" \
   --summary-json "$SAME_PATH_SUMMARY_JSON" \
+  --phase7-mainnet-cutover-summary-report-json "$PHASE7_MISSING_JSON" \
   --print-summary-json 0 >"$SAME_PATH_LOG" 2>&1
 
 assert_stage_order "$CAPTURE" "${STAGE_IDS_NO_METRICS[@]}"
@@ -467,7 +516,7 @@ if [[ ! -f "$SAME_PATH_SUMMARY_JSON" ]]; then
   cat "$SAME_PATH_LOG"
   exit 1
 fi
-if ! jq -e --arg gate_summary "$SAME_PATH_GATE_SUMMARY_JSON" '
+if ! jq -e --arg gate_summary "$SAME_PATH_GATE_SUMMARY_JSON" --arg phase7_missing "$PHASE7_MISSING_JSON" '
   .status == "pass"
   and .rc == 0
   and .inputs.run_blockchain_mainnet_activation_metrics == false
@@ -478,6 +527,24 @@ if ! jq -e --arg gate_summary "$SAME_PATH_GATE_SUMMARY_JSON" '
   and .artifacts.blockchain_mainnet_activation_gate_summary_json == $gate_summary
   and .steps.blockchain_mainnet_activation_gate.artifacts.summary_json == $gate_summary
   and .artifacts.summary_json == .artifacts.canonical_summary_json
+  and .inputs.phase7_mainnet_cutover_summary_report_json == $phase7_missing
+  and .artifacts.phase7_mainnet_cutover_summary_report_json == $phase7_missing
+  and .phase7_mainnet_cutover_summary_report.input_summary_json == $phase7_missing
+  and .phase7_mainnet_cutover_summary_report.available == false
+  and .phase7_mainnet_cutover_summary_report.status == "missing"
+  and .phase7_mainnet_cutover_summary_report.signals.module_tx_surface_ok == null
+  and .phase7_mainnet_cutover_summary_report.signals.tdpnd_grpc_live_smoke_ok == null
+  and .phase7_mainnet_cutover_summary_report.signals.tdpnd_grpc_auth_live_smoke_ok == null
+  and .phase7_mainnet_cutover_summary_report.signals.tdpnd_comet_runtime_smoke_ok == null
+  and .phase7_mainnet_cutover_summary_report.signals.cosmos_module_coverage_floor_ok == null
+  and .phase7_mainnet_cutover_summary_report.signals.cosmos_keeper_coverage_floor_ok == null
+  and .phase7_mainnet_cutover_summary_report.signals.cosmos_app_coverage_floor_ok == null
+  and .phase7_mainnet_cutover_summary_report.signals.dual_write_parity_ok == null
+  and .phase7_mainnet_cutover_summary_report.signals.mainnet_activation_gate_go_ok == null
+  and .steps.ci_phase7_mainnet_cutover.artifacts.phase7_mainnet_cutover_summary_report.input_summary_json == $phase7_missing
+  and .steps.ci_phase7_mainnet_cutover.artifacts.phase7_mainnet_cutover_summary_report.available == false
+  and .steps.ci_phase7_mainnet_cutover.artifacts.phase7_mainnet_cutover_summary_report.status == "missing"
+  and .steps.ci_phase7_mainnet_cutover.artifacts.phase7_mainnet_cutover_summary_report.signals.mainnet_activation_gate_go_ok == null
 ' "$SAME_PATH_SUMMARY_JSON" >/dev/null; then
   echo "same-path summary missing pass status or canonical artifact equality"
   cat "$SAME_PATH_SUMMARY_JSON"
@@ -489,6 +556,55 @@ if ! grep -Fq -- '[blockchain-fastlane] status=pass rc=0 dry_run=0' "$SAME_PATH_
   exit 1
 fi
 assert_canonical_summary_artifact "$SAME_PATH_SUMMARY_JSON" "$SAME_PATH_SUMMARY_JSON" "$SAME_PATH_LOG"
+
+echo "[blockchain-fastlane] phase7 summary invalid artifact fail-soft"
+: >"$CAPTURE"
+BLOCKCHAIN_FASTLANE_CAPTURE_FILE="$CAPTURE" \
+BLOCKCHAIN_FASTLANE_CANONICAL_SUMMARY_JSON="$PHASE7_INVALID_CANONICAL_SUMMARY_JSON" \
+"$GATE_SCRIPT" \
+  --reports-dir "$PHASE7_INVALID_REPORTS_DIR" \
+  --summary-json "$PHASE7_INVALID_SUMMARY_JSON" \
+  --phase7-mainnet-cutover-summary-report-json "$PHASE7_INVALID_JSON" \
+  --print-summary-json 0 >"$PHASE7_INVALID_LOG" 2>&1
+
+assert_stage_order "$CAPTURE" "${STAGE_IDS_NO_METRICS[@]}"
+
+if [[ ! -f "$PHASE7_INVALID_SUMMARY_JSON" ]]; then
+  echo "missing phase7-invalid summary json: $PHASE7_INVALID_SUMMARY_JSON"
+  cat "$PHASE7_INVALID_LOG"
+  exit 1
+fi
+if ! jq -e --arg phase7_invalid "$PHASE7_INVALID_JSON" '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.phase7_mainnet_cutover_summary_report_json == $phase7_invalid
+  and .artifacts.phase7_mainnet_cutover_summary_report_json == $phase7_invalid
+  and .phase7_mainnet_cutover_summary_report.input_summary_json == $phase7_invalid
+  and .phase7_mainnet_cutover_summary_report.available == false
+  and .phase7_mainnet_cutover_summary_report.status == "invalid"
+  and .phase7_mainnet_cutover_summary_report.signals.module_tx_surface_ok == null
+  and .phase7_mainnet_cutover_summary_report.signals.tdpnd_grpc_live_smoke_ok == null
+  and .phase7_mainnet_cutover_summary_report.signals.tdpnd_grpc_auth_live_smoke_ok == null
+  and .phase7_mainnet_cutover_summary_report.signals.tdpnd_comet_runtime_smoke_ok == null
+  and .phase7_mainnet_cutover_summary_report.signals.cosmos_module_coverage_floor_ok == null
+  and .phase7_mainnet_cutover_summary_report.signals.cosmos_keeper_coverage_floor_ok == null
+  and .phase7_mainnet_cutover_summary_report.signals.cosmos_app_coverage_floor_ok == null
+  and .phase7_mainnet_cutover_summary_report.signals.dual_write_parity_ok == null
+  and .phase7_mainnet_cutover_summary_report.signals.mainnet_activation_gate_go_ok == null
+  and .steps.ci_phase7_mainnet_cutover.artifacts.phase7_mainnet_cutover_summary_report.status == "invalid"
+  and .steps.ci_phase7_mainnet_cutover.artifacts.phase7_mainnet_cutover_summary_report.available == false
+  and .steps.ci_phase7_mainnet_cutover.artifacts.phase7_mainnet_cutover_summary_report.signals.mainnet_activation_gate_go_ok == null
+' "$PHASE7_INVALID_SUMMARY_JSON" >/dev/null; then
+  echo "phase7-invalid summary missing expected fail-soft accounting"
+  cat "$PHASE7_INVALID_SUMMARY_JSON"
+  exit 1
+fi
+if ! grep -Fq -- '[blockchain-fastlane] status=pass rc=0 dry_run=0' "$PHASE7_INVALID_LOG"; then
+  echo "phase7-invalid log missing final pass status line"
+  cat "$PHASE7_INVALID_LOG"
+  exit 1
+fi
+assert_canonical_summary_artifact "$PHASE7_INVALID_SUMMARY_JSON" "$PHASE7_INVALID_CANONICAL_SUMMARY_JSON" "$PHASE7_INVALID_LOG"
 
 echo "[blockchain-fastlane] dry-run skip accounting"
 : >"$CAPTURE"

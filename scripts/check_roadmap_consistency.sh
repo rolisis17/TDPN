@@ -345,6 +345,7 @@ check_phase7_mainnet_activation_gate_requirement_surface() {
 check_blockchain_fastlane_activation_gate_surface() {
   local file_path="$1"
   local label="$2"
+  local phase7_runtime_summary_signal
 
   for token in \
     "scripts/blockchain_fastlane.sh" \
@@ -381,6 +382,22 @@ check_blockchain_fastlane_activation_gate_surface() {
       exit 1
     fi
   done
+
+  for phase7_runtime_summary_signal in \
+    "module_tx_surface_ok" \
+    "tdpnd_grpc_live_smoke_ok" \
+    "tdpnd_grpc_auth_live_smoke_ok" \
+    "tdpnd_comet_runtime_smoke_ok"
+  do
+    if ! rg -Fq "$phase7_runtime_summary_signal" "$file_path"; then
+      echo "$label must document blockchain fastlane phase7 summary signal token: $phase7_runtime_summary_signal"
+      exit 1
+    fi
+  done
+  if ! rg -q -e "mainnet_activation_gate_go(_ok)?" "$file_path"; then
+    echo "$label must document blockchain fastlane phase7 summary signal token: mainnet_activation_gate_go_ok (or mainnet_activation_gate_go)"
+    exit 1
+  fi
 }
 
 check_mainnet_activation_gate_surface() {
