@@ -331,6 +331,7 @@ cat >"$PHASE7_REAL_CHECK" <<'EOF_PHASE7_REAL_CHECK'
   "signals": {
     "module_tx_surface_ok": true,
     "tdpnd_grpc_auth_live_smoke_ok": true,
+    "tdpnd_comet_runtime_smoke_ok": true,
     "rollback_path_ready": true,
     "operator_approval_ok": true
   }
@@ -352,6 +353,7 @@ cat >"$PHASE7_REAL_RUN" <<'EOF_PHASE7_REAL_RUN'
       "signal_snapshot": {
         "module_tx_surface_ok": true,
         "tdpnd_grpc_auth_live_smoke_ok": true,
+        "tdpnd_comet_runtime_smoke_ok": true,
         "dual_write_parity_ok": true,
         "rollback_path_ready": true,
         "operator_approval_ok": true
@@ -414,11 +416,13 @@ if ! jq -e \
   and .summaries.check.source_path == $expected_check
   and .summaries.check.raw_status == "pass"
   and .summaries.check.raw_rc == 0
+  and .summaries.check.signal_snapshot.tdpnd_comet_runtime_smoke_ok == true
   and .summaries.run.status == "pass"
   and .summaries.run.source_kind == "explicit"
   and .summaries.run.source_path == $expected_run
   and .summaries.run.raw_status == "pass"
   and .summaries.run.raw_rc == 0
+  and .summaries.run.signal_snapshot.tdpnd_comet_runtime_smoke_ok == true
   and .decision.pass == true
   and .artifacts.summary_json == $expected_summary
 ' "$PHASE7_REAL_AGG_SUMMARY" >/dev/null; then

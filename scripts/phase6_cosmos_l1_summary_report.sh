@@ -12,6 +12,10 @@ Usage:
     [--ci-summary-json PATH] \
     [--contracts-summary-json PATH] \
     [--suite-summary-json PATH] \
+    [--check-summary-json PATH] \
+    [--run-summary-json PATH] \
+    [--handoff-check-summary-json PATH] \
+    [--handoff-run-summary-json PATH] \
     [--summary-json PATH] \
     [--print-report [0|1]] \
     [--show-json [0|1]]
@@ -21,6 +25,10 @@ Purpose:
     - ci_phase6_cosmos_l1_build_testnet_summary
     - ci_phase6_cosmos_l1_contracts_summary
     - phase6_cosmos_l1_build_testnet_suite_summary
+    - phase6_cosmos_l1_build_testnet_check_summary
+    - phase6_cosmos_l1_build_testnet_run_summary
+    - phase6_cosmos_l1_build_testnet_handoff_check_summary
+    - phase6_cosmos_l1_build_testnet_handoff_run_summary
 
 Notes:
   - If no summary paths are explicitly provided, the helper probes default files
@@ -84,8 +92,178 @@ display_stage_name() {
     build_testnet_ci) printf '%s' "build_testnet_ci" ;;
     contracts_ci) printf '%s' "contracts_ci" ;;
     build_testnet_suite) printf '%s' "build_testnet_suite" ;;
+    build_testnet_check) printf '%s' "build_testnet_check" ;;
+    build_testnet_run) printf '%s' "build_testnet_run" ;;
+    build_testnet_handoff_check) printf '%s' "build_testnet_handoff_check" ;;
+    build_testnet_handoff_run) printf '%s' "build_testnet_handoff_run" ;;
     *) printf '%s' "${1:-unknown}" ;;
   esac
+}
+
+resolve_optional_bool_signal() {
+  local stage_id="$1"
+  local stage_status="$2"
+  local stage_path="$3"
+  local source_field="$4"
+  local source_priority_index="$5"
+  local jq_expr="$6"
+  local raw_signal=""
+
+  if [[ ! -f "$stage_path" ]]; then
+    return 1
+  fi
+  if [[ "$stage_status" == "missing" || "$stage_status" == "invalid" || "$stage_status" == "skipped" ]]; then
+    return 1
+  fi
+
+  raw_signal="$(jq -r "$jq_expr" "$stage_path" 2>/dev/null || true)"
+  case "$raw_signal" in
+    true|false|1|0)
+      printf '%s|%s|1|%s|%s|%s|%s\n' "$raw_signal" "$stage_status" "$stage_id" "$source_field" "$stage_path" "$source_priority_index"
+      return 0
+      ;;
+  esac
+
+  return 1
+}
+
+resolve_tdpnd_comet_runtime_smoke_signal() {
+  local value="null"
+  local status="missing"
+  local resolved="0"
+  local source="unresolved"
+  local source_field=""
+  local source_path=""
+  local source_priority_index="null"
+  local pair=""
+
+  pair="$(resolve_optional_bool_signal \
+    "build_testnet_handoff_check" \
+    "${stage_status[build_testnet_handoff_check]:-skipped}" \
+    "${stage_path[build_testnet_handoff_check]:-}" \
+    "handoff.tdpnd_comet_runtime_smoke_ok" \
+    "1" \
+    '.handoff.tdpnd_comet_runtime_smoke_ok')"
+  if [[ -n "$pair" ]]; then
+    value="${pair%%|*}"; pair="${pair#*|}"
+    status="${pair%%|*}"; pair="${pair#*|}"
+    resolved="${pair%%|*}"; pair="${pair#*|}"
+    source="${pair%%|*}"; pair="${pair#*|}"
+    source_field="${pair%%|*}"; pair="${pair#*|}"
+    source_path="${pair%%|*}"; source_priority_index="${pair##*|}"
+    printf '%s|%s|%s|%s|%s|%s|%s\n' "$value" "$status" "$resolved" "$source" "$source_field" "$source_path" "$source_priority_index"
+    return 0
+  fi
+
+  pair="$(resolve_optional_bool_signal \
+    "build_testnet_handoff_run" \
+    "${stage_status[build_testnet_handoff_run]:-skipped}" \
+    "${stage_path[build_testnet_handoff_run]:-}" \
+    "handoff.tdpnd_comet_runtime_smoke_ok" \
+    "2" \
+    '.handoff.tdpnd_comet_runtime_smoke_ok')"
+  if [[ -n "$pair" ]]; then
+    value="${pair%%|*}"; pair="${pair#*|}"
+    status="${pair%%|*}"; pair="${pair#*|}"
+    resolved="${pair%%|*}"; pair="${pair#*|}"
+    source="${pair%%|*}"; pair="${pair#*|}"
+    source_field="${pair%%|*}"; pair="${pair#*|}"
+    source_path="${pair%%|*}"; source_priority_index="${pair##*|}"
+    printf '%s|%s|%s|%s|%s|%s|%s\n' "$value" "$status" "$resolved" "$source" "$source_field" "$source_path" "$source_priority_index"
+    return 0
+  fi
+
+  pair="$(resolve_optional_bool_signal \
+    "build_testnet_check" \
+    "${stage_status[build_testnet_check]:-skipped}" \
+    "${stage_path[build_testnet_check]:-}" \
+    "signals.tdpnd_comet_runtime_smoke_ok" \
+    "3" \
+    '.signals.tdpnd_comet_runtime_smoke_ok')"
+  if [[ -n "$pair" ]]; then
+    value="${pair%%|*}"; pair="${pair#*|}"
+    status="${pair%%|*}"; pair="${pair#*|}"
+    resolved="${pair%%|*}"; pair="${pair#*|}"
+    source="${pair%%|*}"; pair="${pair#*|}"
+    source_field="${pair%%|*}"; pair="${pair#*|}"
+    source_path="${pair%%|*}"; source_priority_index="${pair##*|}"
+    printf '%s|%s|%s|%s|%s|%s|%s\n' "$value" "$status" "$resolved" "$source" "$source_field" "$source_path" "$source_priority_index"
+    return 0
+  fi
+
+  pair="$(resolve_optional_bool_signal \
+    "build_testnet_run" \
+    "${stage_status[build_testnet_run]:-skipped}" \
+    "${stage_path[build_testnet_run]:-}" \
+    "steps.phase6_cosmos_l1_build_testnet_check.signal_snapshot.tdpnd_comet_runtime_smoke_ok" \
+    "4" \
+    '.steps.phase6_cosmos_l1_build_testnet_check.signal_snapshot.tdpnd_comet_runtime_smoke_ok')"
+  if [[ -n "$pair" ]]; then
+    value="${pair%%|*}"; pair="${pair#*|}"
+    status="${pair%%|*}"; pair="${pair#*|}"
+    resolved="${pair%%|*}"; pair="${pair#*|}"
+    source="${pair%%|*}"; pair="${pair#*|}"
+    source_field="${pair%%|*}"; pair="${pair#*|}"
+    source_path="${pair%%|*}"; source_priority_index="${pair##*|}"
+    printf '%s|%s|%s|%s|%s|%s|%s\n' "$value" "$status" "$resolved" "$source" "$source_field" "$source_path" "$source_priority_index"
+    return 0
+  fi
+
+  pair="$(resolve_optional_bool_signal \
+    "build_testnet_ci" \
+    "${stage_status[build_testnet_ci]:-skipped}" \
+    "${stage_path[build_testnet_ci]:-}" \
+    "signals.tdpnd_comet_runtime_smoke_ok" \
+    "5" \
+    '.signals.tdpnd_comet_runtime_smoke_ok')"
+  if [[ -n "$pair" ]]; then
+    value="${pair%%|*}"; pair="${pair#*|}"
+    status="${pair%%|*}"; pair="${pair#*|}"
+    resolved="${pair%%|*}"; pair="${pair#*|}"
+    source="${pair%%|*}"; pair="${pair#*|}"
+    source_field="${pair%%|*}"; pair="${pair#*|}"
+    source_path="${pair%%|*}"; source_priority_index="${pair##*|}"
+    printf '%s|%s|%s|%s|%s|%s|%s\n' "$value" "$status" "$resolved" "$source" "$source_field" "$source_path" "$source_priority_index"
+    return 0
+  fi
+
+  pair="$(resolve_optional_bool_signal \
+    "contracts_ci" \
+    "${stage_status[contracts_ci]:-skipped}" \
+    "${stage_path[contracts_ci]:-}" \
+    "signals.tdpnd_comet_runtime_smoke_ok" \
+    "6" \
+    '.signals.tdpnd_comet_runtime_smoke_ok')"
+  if [[ -n "$pair" ]]; then
+    value="${pair%%|*}"; pair="${pair#*|}"
+    status="${pair%%|*}"; pair="${pair#*|}"
+    resolved="${pair%%|*}"; pair="${pair#*|}"
+    source="${pair%%|*}"; pair="${pair#*|}"
+    source_field="${pair%%|*}"; pair="${pair#*|}"
+    source_path="${pair%%|*}"; source_priority_index="${pair##*|}"
+    printf '%s|%s|%s|%s|%s|%s|%s\n' "$value" "$status" "$resolved" "$source" "$source_field" "$source_path" "$source_priority_index"
+    return 0
+  fi
+
+  pair="$(resolve_optional_bool_signal \
+    "build_testnet_suite" \
+    "${stage_status[build_testnet_suite]:-skipped}" \
+    "${stage_path[build_testnet_suite]:-}" \
+    "signals.tdpnd_comet_runtime_smoke_ok" \
+    "7" \
+    '.signals.tdpnd_comet_runtime_smoke_ok')"
+  if [[ -n "$pair" ]]; then
+    value="${pair%%|*}"; pair="${pair#*|}"
+    status="${pair%%|*}"; pair="${pair#*|}"
+    resolved="${pair%%|*}"; pair="${pair#*|}"
+    source="${pair%%|*}"; pair="${pair#*|}"
+    source_field="${pair%%|*}"; pair="${pair#*|}"
+    source_path="${pair%%|*}"; source_priority_index="${pair##*|}"
+    printf '%s|%s|%s|%s|%s|%s|%s\n' "$value" "$status" "$resolved" "$source" "$source_field" "$source_path" "$source_priority_index"
+    return 0
+  fi
+
+  printf '%s|%s|%s|%s|%s|%s|%s\n' "$value" "$status" "$resolved" "$source" "$source_field" "$source_path" "$source_priority_index"
 }
 
 discover_latest_stage_summary() {
@@ -140,6 +318,10 @@ reports_dir="${PHASE6_COSMOS_L1_SUMMARY_REPORT_REPORTS_DIR:-$ROOT_DIR/.easy-node
 ci_summary_json=""
 contracts_summary_json=""
 suite_summary_json=""
+check_summary_json=""
+run_summary_json=""
+handoff_check_summary_json=""
+handoff_run_summary_json=""
 summary_json="${PHASE6_COSMOS_L1_SUMMARY_REPORT_SUMMARY_JSON:-}"
 canonical_summary_json="${PHASE6_COSMOS_L1_SUMMARY_REPORT_CANONICAL_SUMMARY_JSON:-$ROOT_DIR/.easy-node-logs/phase6_cosmos_l1_summary_report.json}"
 print_report="${PHASE6_COSMOS_L1_SUMMARY_REPORT_PRINT_REPORT:-1}"
@@ -149,16 +331,28 @@ declare -A stage_configured=(
   ["build_testnet_ci"]="0"
   ["contracts_ci"]="0"
   ["build_testnet_suite"]="0"
+  ["build_testnet_check"]="0"
+  ["build_testnet_run"]="0"
+  ["build_testnet_handoff_check"]="0"
+  ["build_testnet_handoff_run"]="0"
 )
 declare -A stage_path=(
   ["build_testnet_ci"]=""
   ["contracts_ci"]=""
   ["build_testnet_suite"]=""
+  ["build_testnet_check"]=""
+  ["build_testnet_run"]=""
+  ["build_testnet_handoff_check"]=""
+  ["build_testnet_handoff_run"]=""
 )
 declare -A stage_expected_schema=(
   ["build_testnet_ci"]="ci_phase6_cosmos_l1_build_testnet_summary"
   ["contracts_ci"]="ci_phase6_cosmos_l1_contracts_summary"
   ["build_testnet_suite"]="phase6_cosmos_l1_build_testnet_suite_summary"
+  ["build_testnet_check"]="phase6_cosmos_l1_build_testnet_check_summary"
+  ["build_testnet_run"]="phase6_cosmos_l1_build_testnet_run_summary"
+  ["build_testnet_handoff_check"]="phase6_cosmos_l1_build_testnet_handoff_check_summary"
+  ["build_testnet_handoff_run"]="phase6_cosmos_l1_build_testnet_handoff_run_summary"
 )
 
 while [[ $# -gt 0 ]]; do
@@ -180,6 +374,26 @@ while [[ $# -gt 0 ]]; do
     --suite-summary-json)
       suite_summary_json="${2:-}"
       stage_configured["build_testnet_suite"]="1"
+      shift 2
+      ;;
+    --check-summary-json)
+      check_summary_json="${2:-}"
+      stage_configured["build_testnet_check"]="1"
+      shift 2
+      ;;
+    --run-summary-json)
+      run_summary_json="${2:-}"
+      stage_configured["build_testnet_run"]="1"
+      shift 2
+      ;;
+    --handoff-check-summary-json)
+      handoff_check_summary_json="${2:-}"
+      stage_configured["build_testnet_handoff_check"]="1"
+      shift 2
+      ;;
+    --handoff-run-summary-json)
+      handoff_run_summary_json="${2:-}"
+      stage_configured["build_testnet_handoff_run"]="1"
       shift 2
       ;;
     --summary-json)
@@ -223,13 +437,21 @@ reports_dir="$(abs_path "$reports_dir")"
 ci_summary_json="$(abs_path "$ci_summary_json")"
 contracts_summary_json="$(abs_path "$contracts_summary_json")"
 suite_summary_json="$(abs_path "$suite_summary_json")"
+check_summary_json="$(abs_path "$check_summary_json")"
+run_summary_json="$(abs_path "$run_summary_json")"
+handoff_check_summary_json="$(abs_path "$handoff_check_summary_json")"
+handoff_run_summary_json="$(abs_path "$handoff_run_summary_json")"
 
 stage_path["build_testnet_ci"]="$ci_summary_json"
 stage_path["contracts_ci"]="$contracts_summary_json"
 stage_path["build_testnet_suite"]="$suite_summary_json"
+stage_path["build_testnet_check"]="$check_summary_json"
+stage_path["build_testnet_run"]="$run_summary_json"
+stage_path["build_testnet_handoff_check"]="$handoff_check_summary_json"
+stage_path["build_testnet_handoff_run"]="$handoff_run_summary_json"
 
 configured_count=0
-for stage_id in build_testnet_ci contracts_ci build_testnet_suite; do
+for stage_id in build_testnet_ci contracts_ci build_testnet_suite build_testnet_check build_testnet_run build_testnet_handoff_check build_testnet_handoff_run; do
   if [[ "${stage_configured[$stage_id]}" == "1" ]]; then
     configured_count=$((configured_count + 1))
   fi
@@ -239,6 +461,10 @@ if (( configured_count == 0 )); then
   stage_configured["build_testnet_ci"]="1"
   stage_configured["contracts_ci"]="1"
   stage_configured["build_testnet_suite"]="1"
+  stage_configured["build_testnet_check"]="0"
+  stage_configured["build_testnet_run"]="0"
+  stage_configured["build_testnet_handoff_check"]="0"
+  stage_configured["build_testnet_handoff_run"]="0"
   stage_path["build_testnet_ci"]="$reports_dir/phase6_cosmos_l1_build_testnet_ci_summary.json"
   stage_path["contracts_ci"]="$reports_dir/phase6_cosmos_l1_contracts_summary.json"
   stage_path["build_testnet_suite"]="$reports_dir/phase6_cosmos_l1_build_testnet_suite_summary.json"
@@ -263,7 +489,7 @@ if (( configured_count == 0 )); then
   fi
 fi
 
-for stage_id in build_testnet_ci contracts_ci build_testnet_suite; do
+for stage_id in build_testnet_ci contracts_ci build_testnet_suite build_testnet_check build_testnet_run build_testnet_handoff_check build_testnet_handoff_run; do
   if [[ "${stage_configured[$stage_id]}" == "1" && -z "$(trim "${stage_path[$stage_id]}")" ]]; then
     echo "missing path for configured stage: $stage_id"
     exit 2
@@ -288,10 +514,18 @@ missing_count=0
 invalid_count=0
 considered_count=0
 
+comet_signal_ok="null"
+comet_signal_status="missing"
+comet_signal_resolved="0"
+comet_signal_source="unresolved"
+comet_signal_source_field=""
+comet_signal_source_path=""
+comet_signal_source_priority_index="null"
+
 declare -a reasons=()
 declare -a warnings=()
 
-for stage_id in build_testnet_ci contracts_ci build_testnet_suite; do
+for stage_id in build_testnet_ci contracts_ci build_testnet_suite build_testnet_check build_testnet_run build_testnet_handoff_check build_testnet_handoff_run; do
   configured="${stage_configured[$stage_id]}"
   path="${stage_path[$stage_id]}"
   expected_schema="${stage_expected_schema[$stage_id]}"
@@ -301,10 +535,12 @@ for stage_id in build_testnet_ci contracts_ci build_testnet_suite; do
     stage_schema_id["$stage_id"]=""
     stage_rc["$stage_id"]="null"
     stage_entry_json["$stage_id"]="$(jq -n \
+      --arg expected_schema "$expected_schema" \
       --arg path "$path" \
       '{
         configured: false,
         path: (if $path == "" then null else $path end),
+        expected_schema_id: (if $expected_schema == "" then null else $expected_schema end),
         exists: false,
         valid_json: false,
         schema_id: null,
@@ -378,6 +614,7 @@ for stage_id in build_testnet_ci contracts_ci build_testnet_suite; do
   fi
 
   stage_entry_json["$stage_id"]="$(jq -n \
+    --arg expected_schema "$expected_schema" \
     --arg configured "$configured" \
     --arg path "$path" \
     --arg exists "$exists" \
@@ -390,6 +627,7 @@ for stage_id in build_testnet_ci contracts_ci build_testnet_suite; do
     '{
       configured: ($configured == "1"),
       path: (if $path == "" then null else $path end),
+      expected_schema_id: (if $expected_schema == "" then null else $expected_schema end),
       exists: ($exists == "1"),
       valid_json: ($valid_json == "1"),
       schema_id: (if $schema_id == "" then null else $schema_id end),
@@ -400,6 +638,16 @@ for stage_id in build_testnet_ci contracts_ci build_testnet_suite; do
     }'
   )"
 done
+
+comet_signal_pair="$(resolve_tdpnd_comet_runtime_smoke_signal)"
+if [[ -n "$comet_signal_pair" ]]; then
+  comet_signal_ok="${comet_signal_pair%%|*}"; comet_signal_pair="${comet_signal_pair#*|}"
+  comet_signal_status="${comet_signal_pair%%|*}"; comet_signal_pair="${comet_signal_pair#*|}"
+  comet_signal_resolved="${comet_signal_pair%%|*}"; comet_signal_pair="${comet_signal_pair#*|}"
+  comet_signal_source="${comet_signal_pair%%|*}"; comet_signal_pair="${comet_signal_pair#*|}"
+  comet_signal_source_field="${comet_signal_pair%%|*}"; comet_signal_pair="${comet_signal_pair#*|}"
+  comet_signal_source_path="${comet_signal_pair%%|*}"; comet_signal_source_priority_index="${comet_signal_pair##*|}"
+fi
 
 overall_status="missing"
 overall_rc=1
@@ -432,11 +680,22 @@ jq -n \
   --argjson build_testnet_ci "${stage_entry_json[build_testnet_ci]}" \
   --argjson contracts_ci "${stage_entry_json[contracts_ci]}" \
   --argjson build_testnet_suite "${stage_entry_json[build_testnet_suite]}" \
+  --argjson build_testnet_check "${stage_entry_json[build_testnet_check]}" \
+  --argjson build_testnet_run "${stage_entry_json[build_testnet_run]}" \
+  --argjson build_testnet_handoff_check "${stage_entry_json[build_testnet_handoff_check]}" \
+  --argjson build_testnet_handoff_run "${stage_entry_json[build_testnet_handoff_run]}" \
   --argjson considered_count "$considered_count" \
   --argjson pass_count "$pass_count" \
   --argjson fail_count "$fail_count" \
   --argjson missing_count "$missing_count" \
   --argjson invalid_count "$invalid_count" \
+  --argjson comet_signal_ok "$comet_signal_ok" \
+  --arg comet_signal_status "$comet_signal_status" \
+  --argjson comet_signal_resolved "$comet_signal_resolved" \
+  --arg comet_signal_source "$comet_signal_source" \
+  --arg comet_signal_source_field "$comet_signal_source_field" \
+  --arg comet_signal_source_path "$comet_signal_source_path" \
+  --argjson comet_signal_source_priority_index "$comet_signal_source_priority_index" \
   '{
     version: 1,
     schema: {
@@ -450,13 +709,24 @@ jq -n \
     inputs: {
       reports_dir: $reports_dir,
       summary_json: $summary_json,
+      ci_summary_json: (if $build_testnet_ci.path == null then null else $build_testnet_ci.path end),
+      contracts_summary_json: (if $contracts_ci.path == null then null else $contracts_ci.path end),
+      suite_summary_json: (if $build_testnet_suite.path == null then null else $build_testnet_suite.path end),
+      check_summary_json: (if $build_testnet_check.path == null then null else $build_testnet_check.path end),
+      run_summary_json: (if $build_testnet_run.path == null then null else $build_testnet_run.path end),
+      handoff_check_summary_json: (if $build_testnet_handoff_check.path == null then null else $build_testnet_handoff_check.path end),
+      handoff_run_summary_json: (if $build_testnet_handoff_run.path == null then null else $build_testnet_handoff_run.path end),
       show_json: ($show_json == "1"),
       print_report: ($print_report == "1")
     },
     summaries: {
       build_testnet_ci: $build_testnet_ci,
       contracts_ci: $contracts_ci,
-      build_testnet_suite: $build_testnet_suite
+      build_testnet_suite: $build_testnet_suite,
+      build_testnet_check: $build_testnet_check,
+      build_testnet_run: $build_testnet_run,
+      build_testnet_handoff_check: $build_testnet_handoff_check,
+      build_testnet_handoff_run: $build_testnet_handoff_run
     },
     counts: {
       configured: $considered_count,
@@ -464,6 +734,33 @@ jq -n \
       fail: $fail_count,
       missing: $missing_count,
       invalid: $invalid_count
+    },
+    signals: {
+      tdpnd_comet_runtime_smoke: {
+        ok: (
+          if $comet_signal_ok == true then true
+          elif $comet_signal_ok == false then false
+          elif $comet_signal_ok == 1 then true
+          elif $comet_signal_ok == 0 then false
+          else null
+          end
+        ),
+        status: $comet_signal_status,
+        resolved: ($comet_signal_resolved == 1),
+        source: $comet_signal_source,
+        source_field: (if $comet_signal_source_field == "" then null else $comet_signal_source_field end),
+        source_path: (if $comet_signal_source_path == "" then null else $comet_signal_source_path end),
+        source_priority_index: $comet_signal_source_priority_index,
+        source_priority: [
+          "build_testnet_handoff_check",
+          "build_testnet_handoff_run",
+          "build_testnet_check",
+          "build_testnet_run",
+          "build_testnet_ci",
+          "contracts_ci",
+          "build_testnet_suite"
+        ]
+      }
     },
     decision: {
       pass: ($status == "pass"),
@@ -484,7 +781,7 @@ if [[ "$summary_json" != "$canonical_summary_json" ]]; then
 fi
 
 if [[ "$print_report" == "1" ]]; then
-  for stage_id in build_testnet_ci contracts_ci build_testnet_suite; do
+  for stage_id in build_testnet_ci contracts_ci build_testnet_suite build_testnet_check build_testnet_run build_testnet_handoff_check build_testnet_handoff_run; do
     if [[ "${stage_configured[$stage_id]}" != "1" ]]; then
       continue
     fi

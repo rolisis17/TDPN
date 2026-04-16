@@ -185,6 +185,20 @@ check_phase7_comet_signal_surface() {
   fi
 }
 
+check_phase7_summary_comet_signal_surface() {
+  local file_path="$1"
+  local label="$2"
+
+  if ! rg -Fq "signal_snapshot" "$file_path"; then
+    echo "$label must surface phase7 signal_snapshot in summary contracts"
+    exit 1
+  fi
+  if ! rg -Fq "tdpnd_comet_runtime_smoke_ok" "$file_path"; then
+    echo "$label must propagate tdpnd_comet_runtime_smoke_ok in phase7 summary contracts"
+    exit 1
+  fi
+}
+
 check_phase7_comet_forwarding_surface() {
   local file_path="$1"
   local label="$2"
@@ -502,6 +516,10 @@ if ! rg -Fq "phase7_mainnet_cutover_summary_report.sh" "$full_plan"; then
   echo "full execution plan must document phase7 mainnet cutover summary report helper script"
   exit 1
 fi
+if ! rg -Fq "Phase 7 operator summary helper preserves optional \`tdpnd_comet_runtime_smoke_ok\`" "$full_plan"; then
+  echo "full execution plan must document optional tdpnd_comet_runtime_smoke_ok in phase7 summary surfaces"
+  exit 1
+fi
 if ! rg -Fq "integration_phase7_mainnet_cutover_summary_report.sh" "$full_plan"; then
   echo "full execution plan must document phase7 mainnet cutover summary report integration contract script"
   exit 1
@@ -781,6 +799,10 @@ if ! rg -Fq "integration_ci_phase7_mainnet_cutover.sh" "$product_roadmap"; then
 fi
 if ! rg -Fq "phase7_mainnet_cutover_summary_report.sh" "$product_roadmap"; then
   echo "product roadmap must document phase7 mainnet cutover summary report helper script"
+  exit 1
+fi
+if ! rg -Fq "phase7 operator summary helper preserves optional \`tdpnd_comet_runtime_smoke_ok\`" "$product_roadmap"; then
+  echo "product roadmap must document optional tdpnd_comet_runtime_smoke_ok in phase7 summary surfaces"
   exit 1
 fi
 if ! rg -Fq "integration_phase7_mainnet_cutover_summary_report.sh" "$product_roadmap"; then
@@ -1676,6 +1698,7 @@ if ! rg -Fq "phase7_mainnet_cutover_summary_report" "$phase7_summary_report_scri
   echo "phase7 summary report helper must emit phase7 summary report schema id"
   exit 1
 fi
+check_phase7_summary_comet_signal_surface "$phase7_summary_report_script" "phase7 summary report helper"
 if ! rg -Fq "phase7_mainnet_cutover_check_summary" "$phase7_summary_report_script"; then
   echo "phase7 summary report helper must reference phase7 check summary schema"
   exit 1
@@ -1861,6 +1884,7 @@ if ! rg -Fq "phase7_mainnet_cutover_summary_report.sh" "$phase7_summary_report_i
   echo "phase7 summary report integration script must execute phase7 summary report helper"
   exit 1
 fi
+check_phase7_summary_comet_signal_surface "$phase7_summary_report_integration_script" "phase7 summary report integration script"
 if ! rg -Fq "phase7_mainnet_cutover_check_summary.json" "$phase7_summary_report_integration_script"; then
   echo "phase7 summary report integration script must validate canonical phase7 check summary artifact wiring"
   exit 1
@@ -1885,6 +1909,7 @@ if ! rg -Fq "tdpnd_grpc_auth_live_smoke_ok" "$phase7_summary_report_integration_
   echo "phase7 summary report integration script must validate tdpnd_grpc_auth_live_smoke_ok summary signal"
   exit 1
 fi
+check_phase7_summary_comet_signal_surface "$phase7_summary_report_integration_script" "phase7 summary report integration script"
 if ! rg -qi "dual[-_ ]write[-_ ]parity(_ok)?" "$phase7_summary_report_integration_script"; then
   echo "phase7 summary report integration script must validate dual-write parity summary signal"
   exit 1
@@ -3068,6 +3093,7 @@ if ! rg -Fq "phase7_mainnet_cutover_summary_report.sh" "$easy_node_blockchain_su
   echo "easy-node summary-report integration must validate phase7 summary wrapper path wiring"
   exit 1
 fi
+check_phase7_summary_comet_signal_surface "$easy_node_blockchain_summary_reports_integration_script" "easy-node summary-report integration"
 if ! rg -Fq -- "--summary-json" "$easy_node_blockchain_summary_reports_integration_script"; then
   echo "easy-node summary-report integration must validate summary-json forwarding"
   exit 1

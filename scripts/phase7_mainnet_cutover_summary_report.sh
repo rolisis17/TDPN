@@ -29,6 +29,9 @@ Notes:
     files under --reports-dir and then falls back to timestamped directories.
   - If one or more summary paths are explicitly provided, only those are
     evaluated.
+  - Optional input signals are preserved as-is in the combined output, including
+    `tdpnd_comet_runtime_smoke_ok` when the underlying phase7 summaries expose
+    it.
   - Exit codes:
       0: pass (at least one configured summary passed and none failed/invalid)
       1: fail or missing-only
@@ -347,6 +350,7 @@ for stage_id in "${stage_ids[@]}"; do
         schema_valid: false,
         raw_status: null,
         raw_rc: null,
+        signal_snapshot: null,
         status: "skipped"
       }'
     )"
@@ -361,12 +365,27 @@ for stage_id in "${stage_ids[@]}"; do
   raw_status=""
   raw_rc=""
   status="missing"
+  signal_snapshot_json="null"
 
   if [[ -f "$source_path" ]]; then
     exists="1"
   fi
   if [[ "$exists" == "1" ]] && jq -e . "$source_path" >/dev/null 2>&1; then
     valid_json="1"
+    case "$stage_id" in
+      check)
+        signal_snapshot_json="$(jq -c '.signals // null' "$source_path" 2>/dev/null || true)"
+        ;;
+      run)
+        signal_snapshot_json="$(jq -c '.steps.phase7_mainnet_cutover_check.signal_snapshot // null' "$source_path" 2>/dev/null || true)"
+        ;;
+      handoff_check|handoff_run)
+        signal_snapshot_json="$(jq -c '.handoff // null' "$source_path" 2>/dev/null || true)"
+        ;;
+    esac
+    if [[ -z "$signal_snapshot_json" ]]; then
+      signal_snapshot_json="null"
+    fi
   fi
 
   if [[ "$exists" != "1" ]]; then
@@ -422,6 +441,7 @@ for stage_id in "${stage_ids[@]}"; do
     --arg schema_valid "$schema_valid" \
     --arg raw_status "$raw_status" \
     --arg raw_rc "$raw_rc" \
+    --argjson signal_snapshot "$signal_snapshot_json" \
     --arg status "$status" \
     '{
       configured: ($configured == "1"),
@@ -433,6 +453,7 @@ for stage_id in "${stage_ids[@]}"; do
       schema_valid: ($schema_valid == "1"),
       raw_status: (if $raw_status == "" then null else $raw_status end),
       raw_rc: (if ($raw_rc | test("^-?[0-9]+$")) then ($raw_rc | tonumber) else null end),
+      signal_snapshot: $signal_snapshot,
       status: $status
     }'
   )"

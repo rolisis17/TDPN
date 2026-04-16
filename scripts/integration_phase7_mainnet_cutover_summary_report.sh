@@ -70,6 +70,7 @@ cat >"$PASS_CHECK" <<'EOF_PASS_CHECK'
   "signals": {
     "module_tx_surface_ok": true,
     "tdpnd_grpc_auth_live_smoke_ok": true,
+    "tdpnd_comet_runtime_smoke_ok": true,
     "rollback_path_ready": true,
     "operator_approval_ok": true
   }
@@ -91,6 +92,7 @@ cat >"$PASS_RUN" <<'EOF_PASS_RUN'
       "signal_snapshot": {
         "module_tx_surface_ok": true,
         "tdpnd_grpc_auth_live_smoke_ok": true,
+        "tdpnd_comet_runtime_smoke_ok": true,
         "dual_write_parity_ok": true,
         "rollback_path_ready": true,
         "operator_approval_ok": true
@@ -113,6 +115,7 @@ cat >"$PASS_HANDOFF_CHECK" <<'EOF_PASS_HANDOFF_CHECK'
   "handoff": {
     "module_tx_surface_ok": true,
     "tdpnd_grpc_auth_live_smoke_ok": true,
+    "tdpnd_comet_runtime_smoke_ok": true,
     "dual_write_parity_ok": true,
     "rollback_path_ready": true,
     "operator_approval_ok": true
@@ -133,6 +136,7 @@ cat >"$PASS_HANDOFF_RUN" <<'EOF_PASS_HANDOFF_RUN'
   "handoff": {
     "module_tx_surface_ok": true,
     "tdpnd_grpc_auth_live_smoke_ok": true,
+    "tdpnd_comet_runtime_smoke_ok": true,
     "dual_write_parity_ok": true,
     "rollback_path_ready": true,
     "operator_approval_ok": true
@@ -187,12 +191,16 @@ if ! jq -e \
   and .counts.invalid == 0
   and .summaries.check.status == "pass"
   and .summaries.check.source_kind == "explicit"
+  and .summaries.check.signal_snapshot.tdpnd_comet_runtime_smoke_ok == true
   and .summaries.run.status == "pass"
   and .summaries.run.source_kind == "explicit"
+  and .summaries.run.signal_snapshot.tdpnd_comet_runtime_smoke_ok == true
   and .summaries.handoff_check.status == "pass"
   and .summaries.handoff_check.source_kind == "explicit"
+  and .summaries.handoff_check.signal_snapshot.tdpnd_comet_runtime_smoke_ok == true
   and .summaries.handoff_run.status == "pass"
   and .summaries.handoff_run.source_kind == "explicit"
+  and .summaries.handoff_run.signal_snapshot.tdpnd_comet_runtime_smoke_ok == true
   and .artifacts.summary_json == $expected_summary
   and .artifacts.canonical_summary_json == $expected_canonical
 ' "$PASS_REPORT_JSON" >/dev/null; then
