@@ -873,6 +873,48 @@ if ! jq -e --arg src "$PHASE7_MAINNET_CUTOVER_CHECK_SUMMARY_JSON" '
   exit 1
 fi
 
+echo "[roadmap-progress-report] blockchain mainnet activation gate phase7 NO-GO signal fallback path"
+PHASE7_MAINNET_CUTOVER_CHECK_NO_GO_SUMMARY_JSON="$TMP_DIR/phase7_mainnet_cutover_check_no_go_summary.json"
+jq '
+  .signals.mainnet_activation_gate_go = false
+  | .signals.mainnet_activation_gate_go_ok = false
+  | .handoff.mainnet_activation_gate_go = false
+  | .handoff.mainnet_activation_gate_go_ok = false
+  | .mainnet_activation_gate_go = false
+  | .mainnet_activation_gate_go_ok = false
+' "$PHASE7_MAINNET_CUTOVER_CHECK_SUMMARY_JSON" >"$PHASE7_MAINNET_CUTOVER_CHECK_NO_GO_SUMMARY_JSON"
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$MINIMAL_MANUAL_SUMMARY_JSON" \
+  --phase7-mainnet-cutover-summary-json "$PHASE7_MAINNET_CUTOVER_CHECK_NO_GO_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_mainnet_activation_gate_phase7_signal_no_go_fallback_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_mainnet_activation_gate_phase7_signal_no_go_fallback_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_phase7_signal_no_go_fallback.log 2>&1; then
+  echo "expected success when mainnet activation gate NO-GO is derived from phase7 signal"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_phase7_signal_no_go_fallback.log
+  exit 1
+fi
+if ! jq -e --arg src "$PHASE7_MAINNET_CUTOVER_CHECK_NO_GO_SUMMARY_JSON" '
+  .blockchain_track.phase7_mainnet_cutover_summary_report.available == true
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.mainnet_activation_gate_go_ok == false
+  and .blockchain_track.mainnet_activation_gate.available == true
+  and .blockchain_track.mainnet_activation_gate.status == "no-go"
+  and .blockchain_track.mainnet_activation_gate.decision == "NO-GO"
+  and .blockchain_track.mainnet_activation_gate.go == false
+  and .blockchain_track.mainnet_activation_gate.no_go == true
+  and ((.blockchain_track.mainnet_activation_gate.reasons // []) | index("derived from phase7 mainnet_activation_gate_go signal=false")) != null
+  and .blockchain_track.mainnet_activation_gate.input_summary_json == $src
+  and .blockchain_track.mainnet_activation_gate.source_summary_json == $src
+  and .blockchain_track.mainnet_activation_gate.source_summary_kind == "phase7-mainnet-cutover-signal"
+  and ((.blockchain_track.mainnet_activation_gate.source_paths // []) | index($src)) != null
+' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_phase7_signal_no_go_fallback_summary.json" >/dev/null; then
+  echo "phase7 NO-GO signal fallback gate summary missing expected fields"
+  cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_phase7_signal_no_go_fallback_summary.json"
+  exit 1
+fi
+
 echo "[roadmap-progress-report] blockchain mainnet activation gate invalid summary path"
 if ! run_roadmap_progress_report \
   --refresh-manual-validation 0 \

@@ -2176,6 +2176,10 @@ if ! rg -Fq "blockchain mainnet activation gate phase7 signal fallback path" "$r
   echo "roadmap progress report integration script must validate the phase7-signal fallback path for mainnet activation gate"
   exit 1
 fi
+if ! rg -Fq "blockchain mainnet activation gate phase7 NO-GO signal fallback path" "$roadmap_integration_script"; then
+  echo "roadmap progress report integration script must validate the phase7 NO-GO signal fallback path for mainnet activation gate"
+  exit 1
+fi
 if ! rg -Fq '.blockchain_track.mainnet_activation_gate.source_summary_kind == "phase7-mainnet-cutover-signal"' "$roadmap_integration_script"; then
   echo "roadmap progress report integration script must validate phase7-signal source_summary_kind for mainnet activation gate fallback"
   exit 1
