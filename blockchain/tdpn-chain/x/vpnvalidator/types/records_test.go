@@ -91,6 +91,16 @@ func TestValidatorStatusRecordValidateBasic(t *testing.T) {
 			},
 		},
 		{
+			name: "valid with sha256 evidence ref and surrounding whitespace",
+			record: ValidatorStatusRecord{
+				StatusID:        base.StatusID,
+				ValidatorID:     base.ValidatorID,
+				LifecycleStatus: base.LifecycleStatus,
+				EvidenceHeight:  base.EvidenceHeight,
+				EvidenceRef:     " \n" + validSHA256Lower + "\t ",
+			},
+		},
+		{
 			name: "valid with object evidence ref",
 			record: ValidatorStatusRecord{
 				StatusID:        base.StatusID,
@@ -98,6 +108,16 @@ func TestValidatorStatusRecordValidateBasic(t *testing.T) {
 				LifecycleStatus: base.LifecycleStatus,
 				EvidenceHeight:  base.EvidenceHeight,
 				EvidenceRef:     "obj://validator/status-1",
+			},
+		},
+		{
+			name: "valid with object evidence ref and surrounding whitespace",
+			record: ValidatorStatusRecord{
+				StatusID:        base.StatusID,
+				ValidatorID:     base.ValidatorID,
+				LifecycleStatus: base.LifecycleStatus,
+				EvidenceHeight:  base.EvidenceHeight,
+				EvidenceRef:     "  obj://validator/status-1  ",
 			},
 		},
 		{

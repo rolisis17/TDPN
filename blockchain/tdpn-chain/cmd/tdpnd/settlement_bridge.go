@@ -741,6 +741,11 @@ func (h *settlementBridgeHandler) handleSlashEvidence(w http.ResponseWriter, r *
 		writeJSON(w, http.StatusBadRequest, bridgeEnvelope{OK: false, Error: err.Error()})
 		return
 	}
+	proofHash := strings.TrimSpace(payload.EvidenceRef)
+	if err := validateBridgeSlashEvidenceRef(proofHash); err != nil {
+		writeJSON(w, http.StatusBadRequest, bridgeEnvelope{OK: false, Error: err.Error()})
+		return
+	}
 
 	resp, err := h.scaffold.SlashingMsgServer().SubmitEvidence(r.Context(), app.SlashingSubmitEvidenceRequest{
 		Record: slashingtypes.SlashEvidence{
@@ -748,7 +753,7 @@ func (h *settlementBridgeHandler) handleSlashEvidence(w http.ResponseWriter, r *
 			SessionID:       payload.SessionID,
 			ProviderID:      payload.SubjectID,
 			Kind:            slashingtypes.EvidenceKindObjective,
-			ProofHash:       strings.TrimSpace(payload.EvidenceRef),
+			ProofHash:       proofHash,
 			SubmittedAtUnix: unixOrZero(payload.ObservedAt),
 			Status:          mapReconciliationStatus(payload.Status, chaintypes.ReconciliationSubmitted),
 		},
@@ -926,6 +931,10 @@ func (h *settlementBridgeHandler) handleValidatorStatusRecords(w http.ResponseWr
 
 	var payload settlementValidatorStatusPayload
 	if err := decodeJSON(r, &payload); err != nil {
+		writeJSON(w, http.StatusBadRequest, bridgeEnvelope{OK: false, Error: err.Error()})
+		return
+	}
+	if err := validateBridgeValidatorStatusEvidenceRef(payload.EvidenceRef); err != nil {
 		writeJSON(w, http.StatusBadRequest, bridgeEnvelope{OK: false, Error: err.Error()})
 		return
 	}
@@ -1290,6 +1299,23 @@ func normalizeEpochSelectionResult(result validatortypes.EpochSelectionResult) v
 		result.RotatingSeats = []validatortypes.EpochValidatorCandidate{}
 	}
 	return result
+}
+
+func validateBridgeSlashEvidenceRef(proofHash string) error {
+	return (slashingtypes.SlashEvidence{
+		EvidenceID: "bridge-validation",
+		Kind:       slashingtypes.EvidenceKindObjective,
+		ProofHash:  proofHash,
+	}).ValidateBasic()
+}
+
+func validateBridgeValidatorStatusEvidenceRef(evidenceRef string) error {
+	return (validatortypes.ValidatorStatusRecord{
+		StatusID:        "bridge-validation",
+		ValidatorID:     "bridge-validation",
+		LifecycleStatus: validatortypes.ValidatorLifecycleActive,
+		EvidenceRef:     evidenceRef,
+	}).ValidateBasic()
 }
 
 func decodeJSON(r *http.Request, out any) error {

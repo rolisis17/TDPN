@@ -378,20 +378,124 @@ func TestRunTDPNDSettlementHTTPSlashEvidenceRejectsInvalidObjectiveRef(t *testin
 	baseURL := "http://" + httpListener.Addr().String()
 	waitForHTTPReady(t, baseURL+"/health")
 
-	status, payload := doJSONRequest(
-		t,
-		http.MethodPost,
-		baseURL+"/x/vpnslashing/evidence",
-		`{"EvidenceID":"ev-invalid-ref-1","SubjectID":"provider-invalid-ref-1","SessionID":"sess-invalid-ref-1","ViolationType":"double-sign","EvidenceRef":"proof-invalid-ref-1","ObservedAt":"2026-01-01T00:00:00Z"}`,
-		nil,
-	)
-	if status != http.StatusBadRequest {
-		t.Fatalf("expected invalid evidence_ref to return 400, got %d payload=%v", status, payload)
+	cases := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "invalid prefix",
+			body: `{"EvidenceID":"ev-invalid-ref-1","SubjectID":"provider-invalid-ref-1","SessionID":"sess-invalid-ref-1","ViolationType":"double-sign","EvidenceRef":"proof-invalid-ref-1","ObservedAt":"2026-01-01T00:00:00Z"}`,
+		},
+		{
+			name: "short sha256",
+			body: `{"EvidenceID":"ev-invalid-ref-short-sha","SubjectID":"provider-invalid-ref-1","SessionID":"sess-invalid-ref-1","ViolationType":"double-sign","EvidenceRef":"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde","ObservedAt":"2026-01-01T00:00:00Z"}`,
+		},
+		{
+			name: "object path contains whitespace",
+			body: `{"EvidenceID":"ev-invalid-ref-obj-space","SubjectID":"provider-invalid-ref-1","SessionID":"sess-invalid-ref-1","ViolationType":"double-sign","EvidenceRef":"obj://bucket/key with-space","ObservedAt":"2026-01-01T00:00:00Z"}`,
+		},
 	}
 
-	errorText, _ := payload["error"].(string)
-	if !strings.Contains(errorText, "proof hash must use objective format") {
-		t.Fatalf("expected invalid format error, got payload=%v", payload)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			status, payload := doJSONRequest(
+				t,
+				http.MethodPost,
+				baseURL+"/x/vpnslashing/evidence",
+				tc.body,
+				nil,
+			)
+			if status != http.StatusBadRequest {
+				t.Fatalf("expected invalid evidence_ref to return 400, got %d payload=%v", status, payload)
+			}
+
+			errorText, _ := payload["error"].(string)
+			if !strings.Contains(errorText, "proof hash must use objective format") {
+				t.Fatalf("expected invalid format error, got payload=%v", payload)
+			}
+		})
+	}
+
+	cancel()
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("expected clean shutdown, got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for runtime shutdown")
+	}
+}
+
+func TestRunTDPNDSettlementHTTPValidatorStatusRejectsInvalidObjectiveEvidenceRef(t *testing.T) {
+	httpListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen http: %v", err)
+	}
+	defer httpListener.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runDone := make(chan error, 1)
+	go func() {
+		runDone <- runTDPND(
+			ctx,
+			[]string{"--settlement-http-listen", "settlement-invalid-validator-status-ref-test"},
+			nil,
+			func() chainScaffold { return app.NewChainScaffold() },
+			runtimeDeps{
+				Listen: func(_, _ string) (net.Listener, error) {
+					return nil, errors.New("grpc listener should not be used")
+				},
+				ListenHTTP: func(_, address string) (net.Listener, error) {
+					if address != "settlement-invalid-validator-status-ref-test" {
+						return nil, errors.New("unexpected settlement listen address")
+					}
+					return httpListener, nil
+				},
+				NewGRPCServer: func(opts ...grpc.ServerOption) grpcRuntimeServer {
+					return grpc.NewServer(opts...)
+				},
+			},
+		)
+	}()
+
+	baseURL := "http://" + httpListener.Addr().String()
+	waitForHTTPReady(t, baseURL+"/health")
+
+	cases := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "short sha256",
+			body: `{"StatusID":"status-invalid-ref-short-sha","ValidatorID":"val-invalid-ref-1","ConsensusAddress":"cons-invalid-ref-1","LifecycleStatus":"active","EvidenceHeight":9,"EvidenceRef":"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde","RecordedAt":"2026-01-01T00:00:01Z","Status":"submitted"}`,
+		},
+		{
+			name: "object path contains whitespace",
+			body: `{"StatusID":"status-invalid-ref-obj-space","ValidatorID":"val-invalid-ref-1","ConsensusAddress":"cons-invalid-ref-1","LifecycleStatus":"active","EvidenceHeight":9,"EvidenceRef":"obj://validator/status with-space","RecordedAt":"2026-01-01T00:00:01Z","Status":"submitted"}`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			status, payload := doJSONRequest(
+				t,
+				http.MethodPost,
+				baseURL+"/x/vpnvalidator/status-records",
+				tc.body,
+				nil,
+			)
+			if status != http.StatusBadRequest {
+				t.Fatalf("expected invalid evidence_ref to return 400, got %d payload=%v", status, payload)
+			}
+
+			errorText, _ := payload["error"].(string)
+			if !strings.Contains(errorText, "evidence ref must use objective format") {
+				t.Fatalf("expected invalid format error, got payload=%v", payload)
+			}
+		})
 	}
 
 	cancel()

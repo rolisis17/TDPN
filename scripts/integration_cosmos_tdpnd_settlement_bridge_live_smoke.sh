@@ -332,6 +332,14 @@ post_expect_status "${BASE_URL}/x/vpngovernance/audit-actions" '{"ActionID":"act
 
 post_expect_status "${BASE_URL}/x/vpnslashing/evidence" '{"EvidenceID":"ev-invalid-ref-1","SubjectID":"provider-1","SessionID":"sess-1","ViolationType":"double-sign","EvidenceRef":"proof-invalid-ref-1","ObservedAt":"2026-01-01T00:00:00Z"}' "400" "${TOKEN}"
 grep -q 'objective format' "${RESP_FILE}"
+post_expect_status "${BASE_URL}/x/vpnslashing/evidence" '{"EvidenceID":"ev-invalid-ref-short-sha","SubjectID":"provider-1","SessionID":"sess-1","ViolationType":"double-sign","EvidenceRef":"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde","ObservedAt":"2026-01-01T00:00:00Z"}' "400" "${TOKEN}"
+grep -q 'objective format' "${RESP_FILE}"
+post_expect_status "${BASE_URL}/x/vpnslashing/evidence" '{"EvidenceID":"ev-invalid-ref-obj-space","SubjectID":"provider-1","SessionID":"sess-1","ViolationType":"double-sign","EvidenceRef":"obj://bucket/key with-space","ObservedAt":"2026-01-01T00:00:00Z"}' "400" "${TOKEN}"
+grep -q 'objective format' "${RESP_FILE}"
+post_expect_status "${BASE_URL}/x/vpnvalidator/status-records" '{"StatusID":"status-invalid-ref-short-sha","ValidatorID":"val-unauth-1","ConsensusAddress":"cons-unauth-1","LifecycleStatus":"active","EvidenceHeight":5,"EvidenceRef":"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde","RecordedAt":"2026-01-01T00:00:00Z","Status":"submitted"}' "400" "${TOKEN}"
+grep -q 'objective format' "${RESP_FILE}"
+post_expect_status "${BASE_URL}/x/vpnvalidator/status-records" '{"StatusID":"status-invalid-ref-obj-space","ValidatorID":"val-unauth-1","ConsensusAddress":"cons-unauth-1","LifecycleStatus":"active","EvidenceHeight":5,"EvidenceRef":"obj://validator/status with-space","RecordedAt":"2026-01-01T00:00:00Z","Status":"submitted"}' "400" "${TOKEN}"
+grep -q 'objective format' "${RESP_FILE}"
 
 post_expect_status "${BASE_URL}/x/vpnbilling/settlements" '{"SettlementID":"set-live-1","ReservationID":"bill-res-live-1","SessionID":"sess-live-1","SubjectID":"subject-live-1","ChargedMicros":250,"Currency":"TDPNC","SettledAt":"2026-01-01T00:00:00Z"}' "200" "${TOKEN}"
 grep -q '"ok"[[:space:]]*:[[:space:]]*true' "${RESP_FILE}"

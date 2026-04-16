@@ -734,67 +734,234 @@ func TestCosmosAdapterSignedTxModeRetriesFailures(t *testing.T) {
 	}
 }
 
-func TestCosmosAdapterRejectsInvalidObjectiveSlashEvidenceBeforeEnqueue(t *testing.T) {
-	var attempts int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&attempts, 1)
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer srv.Close()
+func TestCosmosAdapterSubmitSlashEvidenceNormalizesObjectiveFieldsBeforeEnqueue(t *testing.T) {
+	t.Run("trims_obj_ref", func(t *testing.T) {
+		type seenRequest struct {
+			path string
+			key  string
+			body []byte
+		}
+		seenCh := make(chan seenRequest, 1)
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			body, _ := io.ReadAll(r.Body)
+			seenCh <- seenRequest{
+				path: r.URL.Path,
+				key:  r.Header.Get("Idempotency-Key"),
+				body: body,
+			}
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer srv.Close()
 
-	adapter, err := NewCosmosAdapter(CosmosAdapterConfig{
-		Endpoint:    srv.URL,
-		QueueSize:   4,
-		MaxRetries:  1,
-		BaseBackoff: 5 * time.Millisecond,
+		adapter, err := NewCosmosAdapter(CosmosAdapterConfig{
+			Endpoint:    srv.URL,
+			QueueSize:   4,
+			MaxRetries:  1,
+			BaseBackoff: 5 * time.Millisecond,
+		})
+		if err != nil {
+			t.Fatalf("NewCosmosAdapter: %v", err)
+		}
+		defer adapter.Close()
+
+		ref, err := adapter.SubmitSlashEvidence(context.Background(), SlashEvidence{
+			EvidenceID:    "ev-normalize-obj-1",
+			SubjectID:     "subject-1",
+			SessionID:     "sess-1",
+			ViolationType: "  DOUBLE-SIGN  ",
+			EvidenceRef:   "  obj://validator/double-sign/block-12 \t",
+			SlashMicros:   1000,
+			Currency:      "USD",
+		})
+		if err != nil {
+			t.Fatalf("SubmitSlashEvidence: %v", err)
+		}
+		if ref != "slash:ev-normalize-obj-1" {
+			t.Fatalf("unexpected ref id %q", ref)
+		}
+
+		select {
+		case got := <-seenCh:
+			if got.path != "/x/vpnslashing/evidence" {
+				t.Fatalf("unexpected path %q", got.path)
+			}
+			if got.key != "slash:ev-normalize-obj-1" {
+				t.Fatalf("unexpected idempotency key %q", got.key)
+			}
+			var payload SlashEvidence
+			if err := json.Unmarshal(got.body, &payload); err != nil {
+				t.Fatalf("unmarshal slash evidence payload: %v", err)
+			}
+			if payload.ViolationType != "double-sign" {
+				t.Fatalf("expected normalized violation type, got %q", payload.ViolationType)
+			}
+			if payload.EvidenceRef != "obj://validator/double-sign/block-12" {
+				t.Fatalf("expected trimmed evidence ref, got %q", payload.EvidenceRef)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for slash evidence submit")
+		}
 	})
-	if err != nil {
-		t.Fatalf("NewCosmosAdapter: %v", err)
-	}
-	defer adapter.Close()
 
-	for _, tc := range []struct {
-		name          string
-		violationType string
-		evidenceRef   string
-		errContains   string
+	t.Run("accepts_mixed_case_sha256_hex", func(t *testing.T) {
+		type seenRequest struct {
+			body []byte
+		}
+		seenCh := make(chan seenRequest, 1)
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			body, _ := io.ReadAll(r.Body)
+			seenCh <- seenRequest{body: body}
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer srv.Close()
+
+		adapter, err := NewCosmosAdapter(CosmosAdapterConfig{
+			Endpoint:    srv.URL,
+			QueueSize:   4,
+			MaxRetries:  1,
+			BaseBackoff: 5 * time.Millisecond,
+		})
+		if err != nil {
+			t.Fatalf("NewCosmosAdapter: %v", err)
+		}
+		defer adapter.Close()
+
+		const mixedCaseDigest = "6Ca13D52CA70c883E0f0Bb101E425a89E8624dE51dB2d2392593aF6A84118090"
+		_, err = adapter.SubmitSlashEvidence(context.Background(), SlashEvidence{
+			EvidenceID:    "ev-normalize-sha-1",
+			SubjectID:     "subject-1",
+			SessionID:     "sess-1",
+			ViolationType: "double-sign",
+			EvidenceRef:   "  sha256:" + mixedCaseDigest + "\n",
+			SlashMicros:   1000,
+			Currency:      "USD",
+		})
+		if err != nil {
+			t.Fatalf("SubmitSlashEvidence: %v", err)
+		}
+
+		select {
+		case got := <-seenCh:
+			var payload SlashEvidence
+			if err := json.Unmarshal(got.body, &payload); err != nil {
+				t.Fatalf("unmarshal slash evidence payload: %v", err)
+			}
+			if payload.EvidenceRef != "sha256:"+mixedCaseDigest {
+				t.Fatalf("expected mixed-case digest to remain intact after trim, got %q", payload.EvidenceRef)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for slash evidence submit")
+		}
+	})
+}
+
+func TestCosmosAdapterRejectsInvalidObjectiveSlashEvidenceBeforeEnqueue(t *testing.T) {
+	for _, mode := range []struct {
+		name string
+		cfg  CosmosAdapterConfig
 	}{
 		{
-			name:          "invalid violation type",
-			violationType: "subjective-abuse",
-			evidenceRef:   "sha256:6ca13d52ca70c883e0f0bb101e425a89e8624de51db2d2392593af6a84118090",
-			errContains:   "requires objective violation_type",
+			name: "http_mode",
+			cfg: CosmosAdapterConfig{
+				QueueSize:   4,
+				MaxRetries:  1,
+				BaseBackoff: 5 * time.Millisecond,
+			},
 		},
 		{
-			name:          "invalid objective evidence ref",
-			violationType: "double-sign",
-			evidenceRef:   "sha256:abc123",
-			errContains:   "requires objective evidence_ref",
+			name: "signed_tx_mode",
+			cfg: CosmosAdapterConfig{
+				QueueSize:      4,
+				MaxRetries:     1,
+				BaseBackoff:    5 * time.Millisecond,
+				SubmitMode:     CosmosSubmitModeSignedTx,
+				SignedTxSigner: "signer-invalid-evidence",
+				SignedTxSecret: "test-secret",
+			},
 		},
 	} {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			_, err := adapter.SubmitSlashEvidence(context.Background(), SlashEvidence{
-				EvidenceID:    "ev-invalid-1",
-				SubjectID:     "subject-1",
-				SessionID:     "sess-1",
-				ViolationType: tc.violationType,
-				EvidenceRef:   tc.evidenceRef,
-				SlashMicros:   1000,
-				Currency:      "USD",
-			})
-			if err == nil {
-				t.Fatalf("expected error for %s", tc.name)
+		mode := mode
+		t.Run(mode.name, func(t *testing.T) {
+			var attempts int32
+			attemptCh := make(chan struct{}, 1)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				atomic.AddInt32(&attempts, 1)
+				select {
+				case attemptCh <- struct{}{}:
+				default:
+				}
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer srv.Close()
+
+			cfg := mode.cfg
+			cfg.Endpoint = srv.URL
+			adapter, err := NewCosmosAdapter(cfg)
+			if err != nil {
+				t.Fatalf("NewCosmosAdapter: %v", err)
 			}
-			if !strings.Contains(err.Error(), tc.errContains) {
-				t.Fatalf("expected error to contain %q, got %v", tc.errContains, err)
+			defer adapter.Close()
+
+			for _, tc := range []struct {
+				name          string
+				violationType string
+				evidenceRef   string
+				errContains   string
+			}{
+				{
+					name:          "invalid_violation_type",
+					violationType: "subjective-abuse",
+					evidenceRef:   "sha256:6ca13d52ca70c883e0f0bb101e425a89e8624de51db2d2392593af6a84118090",
+					errContains:   "requires objective violation_type",
+				},
+				{
+					name:          "invalid_sha_ref",
+					violationType: "double-sign",
+					evidenceRef:   "sha256:abc123",
+					errContains:   "requires objective evidence_ref",
+				},
+				{
+					name:          "empty_ref_after_trim",
+					violationType: "double-sign",
+					evidenceRef:   " \t\n",
+					errContains:   "requires objective evidence_ref",
+				},
+				{
+					name:          "obj_ref_contains_internal_whitespace",
+					violationType: "double-sign",
+					evidenceRef:   "obj://validator/double-sign/block 12",
+					errContains:   "requires objective evidence_ref",
+				},
+			} {
+				tc := tc
+				t.Run(tc.name, func(t *testing.T) {
+					_, err := adapter.SubmitSlashEvidence(context.Background(), SlashEvidence{
+						EvidenceID:    "ev-invalid-1",
+						SubjectID:     "subject-1",
+						SessionID:     "sess-1",
+						ViolationType: tc.violationType,
+						EvidenceRef:   tc.evidenceRef,
+						SlashMicros:   1000,
+						Currency:      "USD",
+					})
+					if err == nil {
+						t.Fatalf("expected error for %s", tc.name)
+					}
+					if !strings.Contains(err.Error(), tc.errContains) {
+						t.Fatalf("expected error to contain %q, got %v", tc.errContains, err)
+					}
+				})
+			}
+
+			select {
+			case <-attemptCh:
+				t.Fatalf("expected no network attempts for invalid slash evidence")
+			case <-time.After(200 * time.Millisecond):
+			}
+			if got := atomic.LoadInt32(&attempts); got != 0 {
+				t.Fatalf("expected no network attempts for invalid slash evidence, got %d", got)
 			}
 		})
-	}
-
-	time.Sleep(100 * time.Millisecond)
-	if got := atomic.LoadInt32(&attempts); got != 0 {
-		t.Fatalf("expected no network attempts for invalid slash evidence, got %d", got)
 	}
 }
 

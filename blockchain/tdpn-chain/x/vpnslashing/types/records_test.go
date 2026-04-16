@@ -27,8 +27,16 @@ func TestSlashEvidenceValidateBasic(t *testing.T) {
 			record: SlashEvidence{EvidenceID: base.EvidenceID, Kind: base.Kind, ProofHash: validSHA256Upper},
 		},
 		{
+			name:   "valid sha256 with surrounding whitespace",
+			record: SlashEvidence{EvidenceID: base.EvidenceID, Kind: base.Kind, ProofHash: " \n" + validSHA256Lower + "\t "},
+		},
+		{
 			name:   "valid object uri",
 			record: SlashEvidence{EvidenceID: base.EvidenceID, Kind: base.Kind, ProofHash: "obj://bucket/key"},
+		},
+		{
+			name:   "valid object uri with surrounding whitespace",
+			record: SlashEvidence{EvidenceID: base.EvidenceID, Kind: base.Kind, ProofHash: "  obj://bucket/key  "},
 		},
 		{
 			name:   "valid object uri nested path edge",
