@@ -2200,6 +2200,22 @@ if ! rg -Fq "Default decision remains **NO-GO**" "$bootstrap_validator_doc"; the
   echo "blockchain bootstrap validator plan must preserve the default NO-GO posture"
   exit 1
 fi
+if ! rg -Fq "scripts/blockchain_mainnet_activation_metrics.sh" "$bootstrap_validator_doc"; then
+  echo "blockchain bootstrap validator plan must document the blockchain_mainnet_activation_metrics helper"
+  exit 1
+fi
+if ! rg -Fq "scripts/integration_blockchain_mainnet_activation_metrics.sh" "$bootstrap_validator_doc"; then
+  echo "blockchain bootstrap validator plan must document integration coverage for blockchain_mainnet_activation_metrics"
+  exit 1
+fi
+if ! rg -Fq "scripts/blockchain_fastlane.sh" "$bootstrap_validator_doc"; then
+  echo "blockchain bootstrap validator plan must document the blockchain_fastlane helper path"
+  exit 1
+fi
+if ! rg -Fq "scripts/integration_blockchain_fastlane.sh" "$bootstrap_validator_doc"; then
+  echo "blockchain bootstrap validator plan must document integration coverage for blockchain_fastlane"
+  exit 1
+fi
 
 if ! rg -q "Canonical source of truth" "$product_roadmap"; then
   echo "product roadmap must declare canonical source alignment"
@@ -3509,6 +3525,22 @@ for f in "$blockchain_mainnet_activation_gate_script" "$blockchain_mainnet_activ
     exit 1
   fi
 done
+if ! rg -Fq "measurement_window_weeks" "$blockchain_mainnet_activation_gate_script"; then
+  echo "blockchain mainnet activation gate helper must enforce measurement_window_weeks metric gate"
+  exit 1
+fi
+if ! rg -Fq "Readiness window - Measurement coverage" "$blockchain_mainnet_activation_gate_script"; then
+  echo "blockchain mainnet activation gate helper must expose readiness-window measurement gate title"
+  exit 1
+fi
+if ! rg -Fq "NO-GO measurement window too short" "$blockchain_mainnet_activation_gate_integration_script"; then
+  echo "integration blockchain mainnet activation gate script must validate short measurement-window NO-GO path"
+  exit 1
+fi
+if ! rg -Fq "NO-GO measurement window missing-or-invalid" "$blockchain_mainnet_activation_gate_integration_script"; then
+  echo "integration blockchain mainnet activation gate script must validate missing/invalid measurement-window NO-GO path"
+  exit 1
+fi
 if ! rg -Fq "blockchain_fastlane_summary" "$blockchain_fastlane_script"; then
   echo "blockchain fastlane script must emit blockchain_fastlane_summary schema id"
   exit 1
@@ -3540,6 +3572,10 @@ if ! rg -Fq -- "--source-json" "$blockchain_fastlane_script"; then
   echo "blockchain fastlane script must forward metrics-source artifacts via --source-json stage args"
   exit 1
 fi
+if ! rg -Fq -- "--fail-close" "$blockchain_fastlane_script"; then
+  echo "blockchain fastlane script must forward activation gate fail-close policy"
+  exit 1
+fi
 if ! rg -Fq "BLOCKCHAIN_FASTLANE_BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SUMMARY_JSON" "$blockchain_fastlane_script"; then
   echo "blockchain fastlane script must expose BLOCKCHAIN_FASTLANE_BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SUMMARY_JSON deterministic gate summary env input"
   exit 1
@@ -3554,6 +3590,18 @@ if ! rg -Fq "artifacts.blockchain_mainnet_activation_metrics_source_jsons" "$blo
 fi
 if ! rg -Fq -- "--source-json" "$blockchain_fastlane_integration_script"; then
   echo "integration blockchain fastlane script must validate metrics-source forwarding via --source-json"
+  exit 1
+fi
+if ! rg -Fq "metrics source-json env-only ingestion" "$blockchain_fastlane_integration_script"; then
+  echo "integration blockchain fastlane script must validate metrics source-json env-only ingestion"
+  exit 1
+fi
+if ! rg -Fq "metrics source-json repeated cli forwarding" "$blockchain_fastlane_integration_script"; then
+  echo "integration blockchain fastlane script must validate repeated metrics source-json cli forwarding"
+  exit 1
+fi
+if ! rg -Fq -- "--fail-close" "$blockchain_fastlane_integration_script"; then
+  echo "integration blockchain fastlane script must validate activation gate fail-close forwarding"
   exit 1
 fi
 if ! rg -Fq "inputs.blockchain_mainnet_activation_gate_summary_json" "$blockchain_fastlane_integration_script"; then

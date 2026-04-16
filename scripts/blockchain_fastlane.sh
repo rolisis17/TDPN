@@ -109,7 +109,7 @@ append_unique_abs_path() {
 
 append_csv_abs_paths_unique() {
   local csv="${1:-}"
-  local -n arr_ref=$2
+  local target_arr_name="$2"
   local old_ifs="$IFS"
   local part=""
   local parts=()
@@ -117,7 +117,7 @@ append_csv_abs_paths_unique() {
   read -r -a parts <<<"$csv"
   IFS="$old_ifs"
   for part in "${parts[@]}"; do
-    append_unique_abs_path arr_ref "$part"
+    append_unique_abs_path "$target_arr_name" "$part"
   done
 }
 
@@ -413,6 +413,7 @@ for stage_id in "${stage_ids[@]}"; do
       if [[ -n "$blockchain_mainnet_activation_gate_summary_json" ]]; then
         stage_args+=(--summary-json "$blockchain_mainnet_activation_gate_summary_json")
       fi
+      stage_args+=(--fail-close 1)
       ;;
   esac
 

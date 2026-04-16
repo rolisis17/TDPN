@@ -22,17 +22,23 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 
 GO_METRICS="$TMP_DIR/metrics_go.json"
 NO_GO_METRICS="$TMP_DIR/metrics_no_go.json"
+WINDOW_SHORT_METRICS="$TMP_DIR/metrics_window_short.json"
+WINDOW_INVALID_METRICS="$TMP_DIR/metrics_window_invalid.json"
 INVALID_METRICS="$TMP_DIR/metrics_invalid.json"
 MISSING_METRICS="$TMP_DIR/does_not_exist.json"
 
 GO_SUMMARY="$TMP_DIR/summary_go.json"
 NO_GO_SUMMARY="$TMP_DIR/summary_no_go.json"
+WINDOW_SHORT_SUMMARY="$TMP_DIR/summary_window_short.json"
+WINDOW_INVALID_SUMMARY="$TMP_DIR/summary_window_invalid.json"
 MISSING_SUMMARY="$TMP_DIR/summary_missing.json"
 INVALID_SUMMARY="$TMP_DIR/summary_invalid.json"
 FAIL_CLOSE_SUMMARY="$TMP_DIR/summary_fail_close.json"
 
 GO_LOG="$TMP_DIR/go.log"
 NO_GO_LOG="$TMP_DIR/no_go.log"
+WINDOW_SHORT_LOG="$TMP_DIR/window_short.log"
+WINDOW_INVALID_LOG="$TMP_DIR/window_invalid.log"
 MISSING_LOG="$TMP_DIR/missing.log"
 INVALID_LOG="$TMP_DIR/invalid.log"
 FAIL_CLOSE_LOG="$TMP_DIR/fail_close.log"
@@ -77,6 +83,46 @@ cat >"$NO_GO_METRICS" <<'EOF_NO_GO'
 }
 EOF_NO_GO
 
+cat >"$WINDOW_SHORT_METRICS" <<'EOF_WINDOW_SHORT'
+{
+  "measurement_window_weeks": 11,
+  "vpn_connect_session_success_slo_pct": 99.8,
+  "vpn_recovery_mttr_p95_minutes": 18,
+  "paying_users_3mo_min": 1250,
+  "paid_sessions_per_day_30d_avg": 15000,
+  "validator_candidate_depth": 40,
+  "validator_independent_operators": 14,
+  "validator_max_operator_seat_share_pct": 18,
+  "validator_max_asn_provider_seat_share_pct": 22,
+  "validator_region_count": 4,
+  "validator_country_count": 8,
+  "manual_sanctions_reversed_pct_90d": 4.5,
+  "abuse_report_to_decision_p95_hours": 12,
+  "subsidy_runway_months": 14,
+  "contribution_margin_3mo": 1.25
+}
+EOF_WINDOW_SHORT
+
+cat >"$WINDOW_INVALID_METRICS" <<'EOF_WINDOW_INVALID'
+{
+  "measurement_window_weeks": "invalid",
+  "vpn_connect_session_success_slo_pct": 99.8,
+  "vpn_recovery_mttr_p95_minutes": 18,
+  "paying_users_3mo_min": 1250,
+  "paid_sessions_per_day_30d_avg": 15000,
+  "validator_candidate_depth": 40,
+  "validator_independent_operators": 14,
+  "validator_max_operator_seat_share_pct": 18,
+  "validator_max_asn_provider_seat_share_pct": 22,
+  "validator_region_count": 4,
+  "validator_country_count": 8,
+  "manual_sanctions_reversed_pct_90d": 4.5,
+  "abuse_report_to_decision_p95_hours": 12,
+  "subsidy_runway_months": 14,
+  "contribution_margin_3mo": 1.25
+}
+EOF_WINDOW_INVALID
+
 cat >"$INVALID_METRICS" <<'EOF_INVALID'
 {
   "measurement_window_weeks": 12,
@@ -94,13 +140,13 @@ jq -e --arg metrics_path "$GO_METRICS" '
   and .status == "go"
   and .rc == 0
   and .exit_code == 0
-  and .counts.required == 12
-  and .counts.evaluated == 12
-  and .counts.pass == 12
+  and .counts.required == 13
+  and .counts.evaluated == 13
+  and .counts.pass == 13
   and .counts.fail == 0
   and (.failed_gate_ids | length) == 0
   and (.failed_reasons | length) == 0
-  and (.gates | length) == 12
+  and (.gates | length) == 13
   and .input.state == "available"
   and .input.valid == true
   and (.reasons | length) == 0
@@ -123,9 +169,9 @@ jq -e --arg metrics_path "$NO_GO_METRICS" '
   and .status == "no-go"
   and .rc == 1
   and .exit_code == 0
-  and .counts.required == 12
-  and .counts.evaluated == 12
-  and .counts.pass < 12
+  and .counts.required == 13
+  and .counts.evaluated == 13
+  and .counts.pass < 13
   and .counts.fail > 0
   and (.failed_gate_ids | length) > 0
   and (.failed_reasons | length) > 0
@@ -139,6 +185,60 @@ jq -e --arg metrics_path "$NO_GO_METRICS" '
 if ! grep -Fq '[blockchain-mainnet-activation-gate] decision=NO-GO' "$NO_GO_LOG"; then
   echo "expected NO-GO decision log line"
   cat "$NO_GO_LOG"
+  exit 1
+fi
+
+echo "[blockchain-mainnet-activation-gate] NO-GO measurement window too short"
+"$SCRIPT_UNDER_TEST" \
+  --metrics-json "$WINDOW_SHORT_METRICS" \
+  --summary-json "$WINDOW_SHORT_SUMMARY" \
+  --print-summary-json 0 >"$WINDOW_SHORT_LOG" 2>&1
+
+jq -e --arg metrics_path "$WINDOW_SHORT_METRICS" '
+  .decision == "NO-GO"
+  and .status == "no-go"
+  and .rc == 1
+  and .exit_code == 0
+  and .counts.required == 13
+  and .counts.evaluated == 13
+  and .counts.pass == 12
+  and .counts.fail == 1
+  and .failed_gate_ids == ["measurement_window_weeks"]
+  and (.failed_reasons | length) == 1
+  and ((.failed_reasons | index("measurement_window_weeks=11 does not satisfy >= 12")) != null)
+  and ((.reasons | index("measurement_window_weeks=11 does not satisfy >= 12")) != null)
+  and (.source_paths | index($metrics_path)) != null
+' "$WINDOW_SHORT_SUMMARY" >/dev/null
+if ! grep -Fq '[blockchain-mainnet-activation-gate] decision=NO-GO' "$WINDOW_SHORT_LOG"; then
+  echo "expected measurement-window short NO-GO decision log line"
+  cat "$WINDOW_SHORT_LOG"
+  exit 1
+fi
+
+echo "[blockchain-mainnet-activation-gate] NO-GO measurement window missing-or-invalid"
+"$SCRIPT_UNDER_TEST" \
+  --metrics-json "$WINDOW_INVALID_METRICS" \
+  --summary-json "$WINDOW_INVALID_SUMMARY" \
+  --print-summary-json 0 >"$WINDOW_INVALID_LOG" 2>&1
+
+jq -e --arg metrics_path "$WINDOW_INVALID_METRICS" '
+  .decision == "NO-GO"
+  and .status == "no-go"
+  and .rc == 1
+  and .exit_code == 0
+  and .counts.required == 13
+  and .counts.evaluated == 13
+  and .counts.pass == 12
+  and .counts.fail == 1
+  and .failed_gate_ids == ["measurement_window_weeks"]
+  and (.failed_reasons | length) == 1
+  and ((.failed_reasons | index("missing or invalid metric: measurement_window_weeks")) != null)
+  and ((.reasons | index("missing or invalid metric: measurement_window_weeks")) != null)
+  and (.source_paths | index($metrics_path)) != null
+' "$WINDOW_INVALID_SUMMARY" >/dev/null
+if ! grep -Fq '[blockchain-mainnet-activation-gate] decision=NO-GO' "$WINDOW_INVALID_LOG"; then
+  echo "expected measurement-window invalid NO-GO decision log line"
+  cat "$WINDOW_INVALID_LOG"
   exit 1
 fi
 

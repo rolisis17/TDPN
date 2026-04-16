@@ -22,6 +22,8 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 
 CAPTURE="$TMP_DIR/stage_calls.tsv"
 SUCCESS_LOG="$TMP_DIR/success.log"
+SOURCE_ENV_LOG="$TMP_DIR/source_env.log"
+SOURCE_CLI_LOG="$TMP_DIR/source_cli.log"
 SAME_PATH_LOG="$TMP_DIR/same_path.log"
 DRY_RUN_LOG="$TMP_DIR/dry_run.log"
 TOGGLE_LOG="$TMP_DIR/toggle.log"
@@ -29,6 +31,8 @@ GATE_FAIL_LOG="$TMP_DIR/gate_fail.log"
 FAIL_LOG="$TMP_DIR/fail.log"
 
 SUCCESS_REPORTS_DIR="$TMP_DIR/reports_success"
+SOURCE_ENV_REPORTS_DIR="$TMP_DIR/reports_source_env"
+SOURCE_CLI_REPORTS_DIR="$TMP_DIR/reports_source_cli"
 SAME_PATH_REPORTS_DIR="$TMP_DIR/reports_same_path"
 DRY_RUN_REPORTS_DIR="$TMP_DIR/reports_dry_run"
 TOGGLE_REPORTS_DIR="$TMP_DIR/reports_toggle"
@@ -36,12 +40,16 @@ GATE_FAIL_REPORTS_DIR="$TMP_DIR/reports_gate_fail"
 FAIL_REPORTS_DIR="$TMP_DIR/reports_fail"
 
 SUCCESS_SUMMARY_JSON="$TMP_DIR/summary_success.json"
+SOURCE_ENV_SUMMARY_JSON="$TMP_DIR/summary_source_env.json"
+SOURCE_CLI_SUMMARY_JSON="$TMP_DIR/summary_source_cli.json"
 SAME_PATH_SUMMARY_JSON="$TMP_DIR/summary_same_path.json"
 DRY_RUN_SUMMARY_JSON="$TMP_DIR/summary_dry_run.json"
 TOGGLE_SUMMARY_JSON="$TMP_DIR/summary_toggle.json"
 GATE_FAIL_SUMMARY_JSON="$TMP_DIR/summary_gate_fail.json"
 FAIL_SUMMARY_JSON="$TMP_DIR/summary_fail.json"
 SUCCESS_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_success.json"
+SOURCE_ENV_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_source_env.json"
+SOURCE_CLI_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_source_cli.json"
 DRY_RUN_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_dry_run.json"
 TOGGLE_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_toggle.json"
 GATE_FAIL_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_gate_fail.json"
@@ -50,6 +58,10 @@ SUCCESS_METRICS_JSON="$SUCCESS_REPORTS_DIR/blockchain_mainnet_activation_metrics
 SUCCESS_GATE_SUMMARY_JSON="$SUCCESS_REPORTS_DIR/blockchain_mainnet_activation_gate_summary.json"
 SAME_PATH_GATE_SUMMARY_JSON="$SAME_PATH_REPORTS_DIR/blockchain_mainnet_activation_gate_summary.json"
 DEFAULT_SOURCE_JSON_PHASE5="$ROOT_DIR/.easy-node-logs/phase5_settlement_layer_handoff_check_summary.json"
+ENV_SOURCE_JSON_A="$TMP_DIR/env_source_a.json"
+ENV_SOURCE_JSON_B="$TMP_DIR/env_source_b.json"
+CLI_SOURCE_JSON_A="$TMP_DIR/cli_source_a.json"
+CLI_SOURCE_JSON_B="$TMP_DIR/cli_source_b.json"
 
 STAGE_ENV_NAMES=(
   "BLOCKCHAIN_FASTLANE_CI_PHASE5_SETTLEMENT_LAYER_SCRIPT"
@@ -190,6 +202,60 @@ assert_stage_invocation_contains() {
   done
 }
 
+assert_stage_invocation_not_contains() {
+  local capture_file="$1"
+  local stage_id="$2"
+  shift 2
+  local line needle
+
+  line="$(awk -F $'\t' -v stage="$stage_id" '$1 == stage { print; exit }' "$capture_file")"
+  if [[ -z "$line" ]]; then
+    echo "missing stage invocation for $stage_id"
+    cat "$capture_file"
+    exit 1
+  fi
+
+  for needle in "$@"; do
+    if [[ "$line" == *$'\t'"$needle"* ]]; then
+      echo "stage invocation for $stage_id unexpectedly contains token: $needle"
+      cat "$capture_file"
+      exit 1
+    fi
+  done
+}
+
+assert_stage_invocation_token_count() {
+  local capture_file="$1"
+  local stage_id="$2"
+  local token="$3"
+  local expected_count="$4"
+  local line actual_count
+
+  line="$(awk -F $'\t' -v stage="$stage_id" '$1 == stage { print; exit }' "$capture_file")"
+  if [[ -z "$line" ]]; then
+    echo "missing stage invocation for $stage_id"
+    cat "$capture_file"
+    exit 1
+  fi
+
+  actual_count="$(awk -F $'\t' -v stage="$stage_id" -v token="$token" '
+    $1 == stage {
+      count = 0
+      for (i = 2; i <= NF; i++) {
+        if ($i == token) count++
+      }
+      print count
+      exit
+    }
+  ' "$capture_file")"
+
+  if [[ "$actual_count" != "$expected_count" ]]; then
+    echo "stage invocation token count mismatch for $stage_id token=$token expected=$expected_count got=$actual_count"
+    cat "$capture_file"
+    exit 1
+  fi
+}
+
 assert_capture_empty() {
   local capture_file="$1"
   if [[ -s "$capture_file" ]]; then
@@ -292,6 +358,96 @@ if ! grep -Fq -- '[blockchain-fastlane] status=pass rc=0 dry_run=0' "$SUCCESS_LO
 fi
 assert_canonical_summary_artifact "$SUCCESS_SUMMARY_JSON" "$SUCCESS_CANONICAL_SUMMARY_JSON" "$SUCCESS_LOG"
 
+cat >"$ENV_SOURCE_JSON_A" <<'EOF_ENV_SOURCE_JSON_A'
+{"paying_users_3mo_min": 1001}
+EOF_ENV_SOURCE_JSON_A
+cat >"$ENV_SOURCE_JSON_B" <<'EOF_ENV_SOURCE_JSON_B'
+{"subsidy_runway_months": 12}
+EOF_ENV_SOURCE_JSON_B
+cat >"$CLI_SOURCE_JSON_A" <<'EOF_CLI_SOURCE_JSON_A'
+{"validator_candidate_depth": 30}
+EOF_CLI_SOURCE_JSON_A
+cat >"$CLI_SOURCE_JSON_B" <<'EOF_CLI_SOURCE_JSON_B'
+{"validator_country_count": 8}
+EOF_CLI_SOURCE_JSON_B
+
+echo "[blockchain-fastlane] metrics source-json env-only ingestion"
+: >"$CAPTURE"
+BLOCKCHAIN_FASTLANE_CAPTURE_FILE="$CAPTURE" \
+BLOCKCHAIN_FASTLANE_CANONICAL_SUMMARY_JSON="$SOURCE_ENV_CANONICAL_SUMMARY_JSON" \
+BLOCKCHAIN_FASTLANE_BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_SOURCE_JSONS="$ENV_SOURCE_JSON_A,$ENV_SOURCE_JSON_B,$ENV_SOURCE_JSON_A" \
+"$GATE_SCRIPT" \
+  --reports-dir "$SOURCE_ENV_REPORTS_DIR" \
+  --summary-json "$SOURCE_ENV_SUMMARY_JSON" \
+  --run-blockchain-mainnet-activation-metrics 1 \
+  --print-summary-json 0 >"$SOURCE_ENV_LOG" 2>&1
+
+assert_stage_order "$CAPTURE" "${STAGE_IDS[@]}"
+assert_stage_invocation_contains "$CAPTURE" "blockchain_mainnet_activation_metrics" "--source-json" "$ENV_SOURCE_JSON_A" "--source-json" "$ENV_SOURCE_JSON_B"
+assert_stage_invocation_token_count "$CAPTURE" "blockchain_mainnet_activation_metrics" "--source-json" 2
+assert_stage_invocation_not_contains "$CAPTURE" "blockchain_mainnet_activation_metrics" "$DEFAULT_SOURCE_JSON_PHASE5"
+assert_stage_invocation_contains "$CAPTURE" "blockchain_mainnet_activation_gate" "--fail-close" "1"
+assert_stage_invocation_token_count "$CAPTURE" "blockchain_mainnet_activation_gate" "--fail-close" 1
+
+if [[ ! -f "$SOURCE_ENV_SUMMARY_JSON" ]]; then
+  echo "missing source-env summary json: $SOURCE_ENV_SUMMARY_JSON"
+  cat "$SOURCE_ENV_LOG"
+  exit 1
+fi
+if ! jq -e --arg a "$ENV_SOURCE_JSON_A" --arg b "$ENV_SOURCE_JSON_B" --arg d "$DEFAULT_SOURCE_JSON_PHASE5" '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.blockchain_mainnet_activation_metrics_source_jsons == [$a, $b]
+  and .artifacts.blockchain_mainnet_activation_metrics_source_jsons == [$a, $b]
+  and .steps.blockchain_mainnet_activation_metrics.artifacts.source_jsons == [$a, $b]
+  and ((.inputs.blockchain_mainnet_activation_metrics_source_jsons | index($d)) == null)
+' "$SOURCE_ENV_SUMMARY_JSON" >/dev/null; then
+  echo "source-env summary missing expected source-json ingestion contract"
+  cat "$SOURCE_ENV_SUMMARY_JSON"
+  exit 1
+fi
+assert_canonical_summary_artifact "$SOURCE_ENV_SUMMARY_JSON" "$SOURCE_ENV_CANONICAL_SUMMARY_JSON" "$SOURCE_ENV_LOG"
+
+echo "[blockchain-fastlane] metrics source-json repeated cli forwarding"
+: >"$CAPTURE"
+BLOCKCHAIN_FASTLANE_CAPTURE_FILE="$CAPTURE" \
+BLOCKCHAIN_FASTLANE_CANONICAL_SUMMARY_JSON="$SOURCE_CLI_CANONICAL_SUMMARY_JSON" \
+BLOCKCHAIN_FASTLANE_BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_SOURCE_JSONS="" \
+"$GATE_SCRIPT" \
+  --reports-dir "$SOURCE_CLI_REPORTS_DIR" \
+  --summary-json "$SOURCE_CLI_SUMMARY_JSON" \
+  --run-blockchain-mainnet-activation-metrics 1 \
+  --blockchain-mainnet-activation-metrics-source-json "$CLI_SOURCE_JSON_B" \
+  --blockchain-mainnet-activation-metrics-source-json "$CLI_SOURCE_JSON_A" \
+  --blockchain-mainnet-activation-metrics-source-json "$CLI_SOURCE_JSON_B" \
+  --print-summary-json 0 >"$SOURCE_CLI_LOG" 2>&1
+
+assert_stage_order "$CAPTURE" "${STAGE_IDS[@]}"
+assert_stage_invocation_contains "$CAPTURE" "blockchain_mainnet_activation_metrics" "--source-json" "$CLI_SOURCE_JSON_B" "--source-json" "$CLI_SOURCE_JSON_A"
+assert_stage_invocation_token_count "$CAPTURE" "blockchain_mainnet_activation_metrics" "--source-json" 2
+assert_stage_invocation_not_contains "$CAPTURE" "blockchain_mainnet_activation_metrics" "$DEFAULT_SOURCE_JSON_PHASE5"
+assert_stage_invocation_contains "$CAPTURE" "blockchain_mainnet_activation_gate" "--fail-close" "1"
+assert_stage_invocation_token_count "$CAPTURE" "blockchain_mainnet_activation_gate" "--fail-close" 1
+
+if [[ ! -f "$SOURCE_CLI_SUMMARY_JSON" ]]; then
+  echo "missing source-cli summary json: $SOURCE_CLI_SUMMARY_JSON"
+  cat "$SOURCE_CLI_LOG"
+  exit 1
+fi
+if ! jq -e --arg a "$CLI_SOURCE_JSON_A" --arg b "$CLI_SOURCE_JSON_B" --arg d "$DEFAULT_SOURCE_JSON_PHASE5" '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.blockchain_mainnet_activation_metrics_source_jsons == [$b, $a]
+  and .artifacts.blockchain_mainnet_activation_metrics_source_jsons == [$b, $a]
+  and .steps.blockchain_mainnet_activation_metrics.artifacts.source_jsons == [$b, $a]
+  and ((.inputs.blockchain_mainnet_activation_metrics_source_jsons | index($d)) == null)
+' "$SOURCE_CLI_SUMMARY_JSON" >/dev/null; then
+  echo "source-cli summary missing expected repeated forwarding + dedupe contract"
+  cat "$SOURCE_CLI_SUMMARY_JSON"
+  exit 1
+fi
+assert_canonical_summary_artifact "$SOURCE_CLI_SUMMARY_JSON" "$SOURCE_CLI_CANONICAL_SUMMARY_JSON" "$SOURCE_CLI_LOG"
+
 echo "[blockchain-fastlane] canonical summary same-path"
 : >"$CAPTURE"
 BLOCKCHAIN_FASTLANE_CAPTURE_FILE="$CAPTURE" \
@@ -303,6 +459,8 @@ BLOCKCHAIN_FASTLANE_CANONICAL_SUMMARY_JSON="$SAME_PATH_SUMMARY_JSON" \
 
 assert_stage_order "$CAPTURE" "${STAGE_IDS_NO_METRICS[@]}"
 assert_stage_invocation_contains "$CAPTURE" "blockchain_mainnet_activation_gate" "--summary-json" "$SAME_PATH_GATE_SUMMARY_JSON"
+assert_stage_invocation_contains "$CAPTURE" "blockchain_mainnet_activation_gate" "--fail-close" "1"
+assert_stage_invocation_token_count "$CAPTURE" "blockchain_mainnet_activation_gate" "--fail-close" 1
 
 if [[ ! -f "$SAME_PATH_SUMMARY_JSON" ]]; then
   echo "missing same-path summary json: $SAME_PATH_SUMMARY_JSON"
@@ -452,6 +610,8 @@ if [[ "$gate_fail_rc" -ne 61 ]]; then
 fi
 
 assert_stage_order "$CAPTURE" "${STAGE_IDS[@]}"
+assert_stage_invocation_contains "$CAPTURE" "blockchain_mainnet_activation_gate" "--fail-close" "1"
+assert_stage_invocation_token_count "$CAPTURE" "blockchain_mainnet_activation_gate" "--fail-close" 1
 
 if [[ ! -f "$GATE_FAIL_SUMMARY_JSON" ]]; then
   echo "missing gate-fail summary json: $GATE_FAIL_SUMMARY_JSON"

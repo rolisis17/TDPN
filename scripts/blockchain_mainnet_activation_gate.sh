@@ -329,6 +329,7 @@ status="no-go"
 summary_rc="1"
 exit_code="0"
 measurement_window_weeks="null"
+required_gate_count=13
 
 if [[ "$input_valid" != "1" ]]; then
   failed_gate_ids+=("metrics_input")
@@ -352,7 +353,7 @@ if [[ "$input_valid" != "1" ]]; then
     --arg input_reason "$input_reason" \
     --argjson input_valid "$input_valid" \
     --argjson measurement_window_weeks "$measurement_window_weeks" \
-    --argjson counts "$(jq -n '{required: 12, evaluated: 0, pass: 0, fail: 0}')" \
+    --argjson counts "$(jq -n --argjson required "$required_gate_count" '{required: $required, evaluated: 0, pass: 0, fail: 0}')" \
     --argjson failed_gate_ids "$failed_gate_ids_json" \
     --argjson failed_reasons "$failed_reasons_json" \
     --argjson reasons "$failed_reasons_json" \
@@ -391,6 +392,7 @@ else
     measurement_window_weeks="null"
   fi
 
+  gate_json_entries+=("$(evaluate_single_gate "$metrics_json" "measurement_window_weeks" "Readiness window - Measurement coverage" "Readiness window" "measurement_window_weeks" ">=" "12" "weeks")")
   gate_json_entries+=("$(evaluate_single_gate "$metrics_json" "vpn_connect_session_success_slo" "VPN reliability - Connect/session success SLO" "VPN reliability" "vpn_connect_session_success_slo_pct" ">=" "99.5" "percent")")
   gate_json_entries+=("$(evaluate_single_gate "$metrics_json" "vpn_recovery_mttr_p95" "VPN reliability - Recovery SLO" "VPN reliability" "vpn_recovery_mttr_p95_minutes" "<=" "30" "minutes")")
   gate_json_entries+=("$(evaluate_single_gate "$metrics_json" "paying_users_3mo_min" "Demand - Paying users" "Demand" "paying_users_3mo_min" ">=" "1000" "clients")")
@@ -486,7 +488,7 @@ else
   fi
 
   counts_json="$(jq -n \
-    --argjson required 12 \
+    --argjson required "$required_gate_count" \
     --argjson evaluated "$(jq 'length' <<<"$gates_json")" \
     --argjson pass "$pass_count" \
     --argjson fail "$fail_count" \

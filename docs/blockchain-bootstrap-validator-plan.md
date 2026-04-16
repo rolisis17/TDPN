@@ -157,6 +157,8 @@ Decision policy:
 
 Automation:
 
+- `scripts/blockchain_mainnet_activation_metrics.sh` produces deterministic activation metrics JSON from explicit inputs plus optional source artifacts; `scripts/integration_blockchain_mainnet_activation_metrics.sh` covers complete/partial coverage and source artifact precedence.
+- `scripts/blockchain_fastlane.sh` is the blockchain helper path for phase5 + phase6 + phase7 + activation helpers, and `scripts/integration_blockchain_fastlane.sh` covers ordering, dry-run/toggle behavior, and failure propagation.
 - `scripts/blockchain_mainnet_activation_gate.sh` evaluates the metrics gate from a bootstrap metrics JSON file and emits one summary JSON with the final GO/NO-GO decision.
 - `scripts/integration_blockchain_mainnet_activation_gate.sh` covers the GO path, NO-GO path, missing/invalid input handling, and fail-close behavior.
 - Canonical metrics fields consumed by the helper:
