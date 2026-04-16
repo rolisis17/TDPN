@@ -57,6 +57,8 @@ Notes:
     (--refresh-campaign 0).
   - --subject is a legacy alias of --campaign-subject.
   - --anon-cred remains an alias of --campaign-anon-cred.
+  - In invite-key workflows, prefer --campaign-subject (or --subject) with an
+    actual invite key value instead of placeholder text.
   - If no subject flag is provided, subject falls back to env:
     CAMPAIGN_SUBJECT (preferred) then INVITE_KEY.
   - Single-instance lock is enabled by default per reports-dir; bypass only when

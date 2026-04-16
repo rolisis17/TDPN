@@ -236,9 +236,46 @@ if ! rg -q -- '--subject inv-alias-test' "$SIGNOFF_CAPTURE"; then
   cat "$SIGNOFF_CAPTURE"
   exit 1
 fi
-if ! jq -e '.status == "ok" and .final_rc == 0 and .inputs.campaign_refresh_overrides.subject_configured == true and .inputs.campaign_refresh_overrides.anon_cred_configured == false' "$ALIAS_SUMMARY" >/dev/null 2>&1; then
+if ! jq -e '.status == "ok" and .final_rc == 0 and .inputs.campaign_refresh_overrides.subject_source == "explicit" and .inputs.campaign_refresh_overrides.subject_configured == true and .inputs.campaign_refresh_overrides.anon_cred_configured == false and .inputs.campaign_refresh_overrides_effective.subject_configured == true and .inputs.campaign_refresh_overrides_effective.anon_cred_configured == false' "$ALIAS_SUMMARY" >/dev/null 2>&1; then
   echo "alias forwarding summary JSON missing expected fields"
   cat "$ALIAS_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-compare-campaign-signoff] anon-cred alias forwarding works"
+: >"$SIGNOFF_CAPTURE"
+ANON_CRED_ALIAS_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_anon_cred_alias_summary.json"
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_COMPARE_CAMPAIGN_SCRIPT="$FAKE_CAMPAIGN" \
+PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT="$FAKE_CHECK" \
+FAKE_CAMPAIGN_RC=0 \
+FAKE_CHECK_RC=0 \
+FAKE_CHECK_DECISION=GO \
+./scripts/profile_compare_campaign_signoff.sh \
+  --reports-dir "$TMP_DIR/reports_anon_cred_alias" \
+  --refresh-campaign 1 \
+  --campaign-execution-mode docker \
+  --anon-cred "anon-cred-alias-test" \
+  --summary-json "$ANON_CRED_ALIAS_SUMMARY" >/tmp/integration_profile_compare_campaign_signoff_anon_cred_alias.log 2>&1
+
+if ! rg -q '\[profile-compare-campaign-signoff\] status=ok final_rc=0 decision=GO' /tmp/integration_profile_compare_campaign_signoff_anon_cred_alias.log; then
+  echo "expected anon-cred alias forwarding status line not found"
+  cat /tmp/integration_profile_compare_campaign_signoff_anon_cred_alias.log
+  exit 1
+fi
+if ! rg -q -- '--anon-cred anon-cred-alias-test' "$SIGNOFF_CAPTURE"; then
+  echo "expected alias anon-cred forwarding flag missing"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+if rg -q -- '--subject ' "$SIGNOFF_CAPTURE"; then
+  echo "unexpected subject forwarding when anon-cred alias is supplied"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+if ! jq -e '.status == "ok" and .final_rc == 0 and .inputs.campaign_refresh_overrides.subject_source == null and .inputs.campaign_refresh_overrides.subject_configured == false and .inputs.campaign_refresh_overrides.anon_cred_configured == true and .inputs.campaign_refresh_overrides_effective.subject_configured == false and .inputs.campaign_refresh_overrides_effective.anon_cred_configured == true' "$ANON_CRED_ALIAS_SUMMARY" >/dev/null 2>&1; then
+  echo "anon-cred alias summary JSON missing expected fields"
+  cat "$ANON_CRED_ALIAS_SUMMARY"
   exit 1
 fi
 

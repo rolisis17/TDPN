@@ -8,14 +8,14 @@ usage() {
   cat <<'USAGE'
 Usage:
   ./scripts/profile_default_gate_run.sh \
-    --directory-a HOST_OR_URL \
-    --directory-b HOST_OR_URL \
+    [--directory-a HOST_OR_URL | --host-a HOST_OR_URL] \
+    [--directory-b HOST_OR_URL | --host-b HOST_OR_URL] \
     [--directory-a-port N] \
     [--directory-b-port N] \
     [--endpoint-wait-timeout-sec N] \
     [--endpoint-wait-interval-sec N] \
     [--endpoint-connect-timeout-sec N] \
-    [--campaign-subject ID | --subject ID] \
+    [--campaign-subject INVITE_KEY | --subject INVITE_KEY] \
     [profile-compare-campaign-signoff args...]
 
 Purpose:
@@ -23,10 +23,15 @@ Purpose:
   endpoint wait-retry preflight for A/B directory URLs.
 
 Notes:
+  - --host-a/--host-b are aliases for --directory-a/--directory-b.
   - --directory-a/--directory-b accept hostnames, host:port, or full http(s) URLs.
   - Host-style inputs are normalized to http://HOST:PORT (default port 8081).
-  - Subject fallback order when not provided via CLI:
-    CAMPAIGN_SUBJECT, then INVITE_KEY.
+  - This helper requires invite-key subject mode; passthrough anon-cred flags
+    (--campaign-anon-cred/--anon-cred) are rejected.
+  - Subject fallback order when CLI subject is omitted:
+    CAMPAIGN_SUBJECT env, INVITE_KEY env, CAMPAIGN_SUBJECT file, INVITE_KEY file.
+  - Env-file fallback default: $ROOT_DIR/deploy/.env.easy.client
+    (override via PROFILE_DEFAULT_GATE_RUN_ENV_CLIENT_FILE).
   - This wrapper defaults signoff refresh mode to roadmap docker defaults:
     --refresh-campaign 1
     --campaign-execution-mode docker
@@ -47,6 +52,56 @@ trim() {
   value="${value#"${value%%[![:space:]]*}"}"
   value="${value%"${value##*[![:space:]]}"}"
   printf '%s' "$value"
+}
+
+strip_optional_wrapping_quotes() {
+  local value="$1"
+  local first_char="" last_char=""
+
+  if (( ${#value} < 2 )); then
+    printf '%s' "$value"
+    return
+  fi
+
+  first_char="${value:0:1}"
+  last_char="${value: -1}"
+  if [[ "$first_char" == '"' && "$last_char" == '"' ]]; then
+    value="${value:1:${#value}-2}"
+  elif [[ "$first_char" == "'" && "$last_char" == "'" ]]; then
+    value="${value:1:${#value}-2}"
+  fi
+
+  printf '%s' "$value"
+}
+
+read_env_key_from_file() {
+  local env_file="$1"
+  local key="$2"
+  local line value
+
+  env_file="$(trim "$env_file")"
+  if [[ -z "$env_file" || ! -f "$env_file" ]]; then
+    printf '%s' ""
+    return 0
+  fi
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="$(trim "$line")"
+    if [[ -z "$line" || "$line" == \#* ]]; then
+      continue
+    fi
+    if [[ "$line" == export[[:space:]]* ]]; then
+      line="$(trim "${line#export}")"
+    fi
+    if [[ "$line" =~ ^${key}[[:space:]]*=(.*)$ ]]; then
+      value="$(trim "${BASH_REMATCH[1]}")"
+      value="$(strip_optional_wrapping_quotes "$value")"
+      printf '%s' "$value"
+      return 0
+    fi
+  done <"$env_file"
+
+  printf '%s' ""
 }
 
 abs_path() {
@@ -244,6 +299,7 @@ directory_b_port="${PROFILE_DEFAULT_GATE_DIRECTORY_B_PORT:-8081}"
 endpoint_wait_timeout_sec="${PROFILE_DEFAULT_GATE_WAIT_TIMEOUT_SEC:-45}"
 endpoint_wait_interval_sec="${PROFILE_DEFAULT_GATE_WAIT_INTERVAL_SEC:-2}"
 endpoint_connect_timeout_sec="${PROFILE_DEFAULT_GATE_WAIT_CONNECT_TIMEOUT_SEC:-3}"
+env_client_file="${PROFILE_DEFAULT_GATE_RUN_ENV_CLIENT_FILE:-$ROOT_DIR/deploy/.env.easy.client}"
 
 campaign_subject_cli=""
 subject_alias_cli=""
@@ -370,23 +426,42 @@ fi
 
 campaign_subject_effective=""
 subject_source=""
+campaign_subject_env=""
+invite_key_env=""
+campaign_subject_file=""
+invite_key_file=""
 if [[ -n "$campaign_subject_cli" ]]; then
   campaign_subject_effective="$campaign_subject_cli"
   subject_source="explicit:--campaign-subject"
 elif [[ -n "$subject_alias_cli" ]]; then
   campaign_subject_effective="$subject_alias_cli"
   subject_source="explicit:--subject"
-elif [[ -n "${CAMPAIGN_SUBJECT:-}" ]]; then
-  campaign_subject_effective="$(trim "${CAMPAIGN_SUBJECT:-}")"
-  subject_source="env:CAMPAIGN_SUBJECT"
-elif [[ -n "${INVITE_KEY:-}" ]]; then
-  campaign_subject_effective="$(trim "${INVITE_KEY:-}")"
-  subject_source="env:INVITE_KEY"
+else
+  campaign_subject_env="$(trim "${CAMPAIGN_SUBJECT:-}")"
+  invite_key_env="$(trim "${INVITE_KEY:-}")"
+  campaign_subject_file="$(trim "$(read_env_key_from_file "$env_client_file" "CAMPAIGN_SUBJECT")")"
+  invite_key_file="$(trim "$(read_env_key_from_file "$env_client_file" "INVITE_KEY")")"
+
+  if [[ -n "$campaign_subject_env" ]]; then
+    campaign_subject_effective="$campaign_subject_env"
+    subject_source="env:CAMPAIGN_SUBJECT"
+  elif [[ -n "$invite_key_env" ]]; then
+    campaign_subject_effective="$invite_key_env"
+    subject_source="env:INVITE_KEY"
+  elif [[ -n "$campaign_subject_file" ]]; then
+    campaign_subject_effective="$campaign_subject_file"
+    subject_source="file:CAMPAIGN_SUBJECT"
+  elif [[ -n "$invite_key_file" ]]; then
+    campaign_subject_effective="$invite_key_file"
+    subject_source="file:INVITE_KEY"
+  fi
 fi
 
 if [[ -z "$campaign_subject_effective" ]]; then
   echo "profile-default-gate-run failed: missing invite key subject"
-  echo "provide --campaign-subject/--subject, or set CAMPAIGN_SUBJECT (preferred) or INVITE_KEY"
+  echo "provide --campaign-subject/--subject, or set CAMPAIGN_SUBJECT/INVITE_KEY"
+  echo "or define CAMPAIGN_SUBJECT/INVITE_KEY in $env_client_file"
+  echo "override env file path via PROFILE_DEFAULT_GATE_RUN_ENV_CLIENT_FILE"
   exit 2
 fi
 

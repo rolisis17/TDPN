@@ -1832,6 +1832,206 @@ resolve_phase5_bool_with_fallback() {
   fi
 }
 
+phase5_settlement_adapter_roundtrip_status_from_summary() {
+  local path="$1"
+  if [[ "$(json_file_valid_01 "$path")" != "1" ]]; then
+    printf '%s' ""
+    return
+  fi
+  jq -r '
+    if (.settlement_adapter_roundtrip_status | type) == "string" then .settlement_adapter_roundtrip_status
+    elif (.summary.settlement_adapter_roundtrip_status | type) == "string" then .summary.settlement_adapter_roundtrip_status
+    elif (.handoff.settlement_adapter_roundtrip_status | type) == "string" then .handoff.settlement_adapter_roundtrip_status
+    elif (.signals.settlement_adapter_roundtrip_status | type) == "string" then .signals.settlement_adapter_roundtrip_status
+    elif (.phase5_settlement_layer_handoff.settlement_adapter_roundtrip_status | type) == "string" then .phase5_settlement_layer_handoff.settlement_adapter_roundtrip_status
+    elif (.vpn_track.phase5_settlement_layer_handoff.settlement_adapter_roundtrip_status | type) == "string" then .vpn_track.phase5_settlement_layer_handoff.settlement_adapter_roundtrip_status
+    elif (.steps.settlement_adapter_roundtrip.status | type) == "string" then .steps.settlement_adapter_roundtrip.status
+    elif (.steps.adapter_roundtrip.status | type) == "string" then .steps.adapter_roundtrip.status
+    elif (.stages.settlement_adapter_roundtrip.status | type) == "string" then .stages.settlement_adapter_roundtrip.status
+    elif (.stages.adapter_roundtrip.status | type) == "string" then .stages.adapter_roundtrip.status
+    else empty end
+  ' "$path" 2>/dev/null || true
+}
+
+phase5_settlement_adapter_roundtrip_ok_from_summary() {
+  local path="$1"
+  if [[ "$(json_file_valid_01 "$path")" != "1" ]]; then
+    printf '%s' "null"
+    return
+  fi
+  resolve_phase5_bool_with_fallback \
+    "$path" \
+    'if (.settlement_adapter_roundtrip_ok | type) == "boolean" then .settlement_adapter_roundtrip_ok
+      elif (.summary.settlement_adapter_roundtrip_ok | type) == "boolean" then .summary.settlement_adapter_roundtrip_ok
+      elif (.handoff.settlement_adapter_roundtrip_ok | type) == "boolean" then .handoff.settlement_adapter_roundtrip_ok
+      elif (.signals.settlement_adapter_roundtrip_ok | type) == "boolean" then .signals.settlement_adapter_roundtrip_ok
+      elif (.signals.settlement_adapter_roundtrip | type) == "boolean" then .signals.settlement_adapter_roundtrip
+      elif (.phase5_settlement_layer_handoff.settlement_adapter_roundtrip_ok | type) == "boolean" then .phase5_settlement_layer_handoff.settlement_adapter_roundtrip_ok
+      elif (.vpn_track.phase5_settlement_layer_handoff.settlement_adapter_roundtrip_ok | type) == "boolean" then .vpn_track.phase5_settlement_layer_handoff.settlement_adapter_roundtrip_ok
+      else empty end' \
+    'if (.stages.settlement_adapter_roundtrip.ok | type) == "boolean" then .stages.settlement_adapter_roundtrip.ok
+      elif (.stages.adapter_roundtrip.ok | type) == "boolean" then .stages.adapter_roundtrip.ok
+      else
+        ((.steps.settlement_adapter_roundtrip.status // .steps.adapter_roundtrip.status // .stages.settlement_adapter_roundtrip.status // .stages.adapter_roundtrip.status // "") | ascii_downcase) as $s
+        | if $s == "pass" then true
+          elif $s == "fail" then false
+          else empty end
+      end'
+}
+
+phase5_linked_summary_candidates_from_source() {
+  local path="$1"
+  if [[ "$(json_file_valid_01 "$path")" != "1" ]]; then
+    return
+  fi
+  jq -r '
+    [
+      .inputs.phase5_run_summary_json,
+      .inputs.phase4_run_summary_json,
+      .artifacts.phase5_run_summary_json,
+      .artifacts.run_summary_json,
+      .artifacts.handoff_summary_json,
+      .artifacts.handoff_check_summary_json,
+      .inputs.phase5_check_summary_json,
+      .steps.phase5_settlement_layer_check.artifacts.summary_json,
+      .artifacts.phase5_check_summary_json,
+      .artifacts.check_summary_json,
+      .inputs.ci_phase5_summary_json,
+      .steps.ci_phase5_settlement_layer.artifacts.summary_json,
+      .artifacts.ci_phase5_summary_json,
+      .artifacts.ci_summary_json
+    ]
+    | .[]
+    | select(type == "string" and length > 0)
+  ' "$path" 2>/dev/null || true
+}
+
+phase5_settlement_adapter_roundtrip_status_from_summary_chain() {
+  local start_path
+  start_path="$(abs_path "$1")"
+  local queue_nl=""
+  local seen_nl=$'\n'
+  local candidate=""
+  local linked=""
+  local value=""
+  local loops=0
+  local max_loops=64
+
+  if [[ -z "$start_path" ]]; then
+    printf '%s' ""
+    return
+  fi
+  queue_nl+="$start_path"$'\n'
+
+  while [[ -n "$queue_nl" ]] && (( loops < max_loops )); do
+    loops=$((loops + 1))
+    candidate="${queue_nl%%$'\n'*}"
+    if [[ "$queue_nl" == *$'\n'* ]]; then
+      queue_nl="${queue_nl#*$'\n'}"
+    else
+      queue_nl=""
+    fi
+    if [[ -z "$candidate" ]]; then
+      continue
+    fi
+    candidate="$(abs_path "$candidate")"
+    if [[ -z "$candidate" ]]; then
+      continue
+    fi
+    if [[ "$seen_nl" == *$'\n'"$candidate"$'\n'* ]]; then
+      continue
+    fi
+    seen_nl+="$candidate"$'\n'
+    if [[ "$(json_file_valid_01 "$candidate")" != "1" ]]; then
+      continue
+    fi
+    value="$(phase5_settlement_adapter_roundtrip_status_from_summary "$candidate")"
+    if [[ -n "$value" ]]; then
+      printf '%s' "$value"
+      return
+    fi
+    while IFS= read -r linked; do
+      if [[ -z "$linked" ]]; then
+        continue
+      fi
+      linked="$(resolve_path_with_base "$linked" "$candidate")"
+      linked="$(abs_path "$linked")"
+      if [[ -z "$linked" ]]; then
+        continue
+      fi
+      if [[ "$seen_nl" == *$'\n'"$linked"$'\n'* ]]; then
+        continue
+      fi
+      queue_nl+="$linked"$'\n'
+    done < <(phase5_linked_summary_candidates_from_source "$candidate")
+  done
+
+  printf '%s' ""
+}
+
+phase5_settlement_adapter_roundtrip_ok_from_summary_chain() {
+  local start_path
+  start_path="$(abs_path "$1")"
+  local queue_nl=""
+  local seen_nl=$'\n'
+  local candidate=""
+  local linked=""
+  local value=""
+  local loops=0
+  local max_loops=64
+
+  if [[ -z "$start_path" ]]; then
+    printf '%s' "null"
+    return
+  fi
+  queue_nl+="$start_path"$'\n'
+
+  while [[ -n "$queue_nl" ]] && (( loops < max_loops )); do
+    loops=$((loops + 1))
+    candidate="${queue_nl%%$'\n'*}"
+    if [[ "$queue_nl" == *$'\n'* ]]; then
+      queue_nl="${queue_nl#*$'\n'}"
+    else
+      queue_nl=""
+    fi
+    if [[ -z "$candidate" ]]; then
+      continue
+    fi
+    candidate="$(abs_path "$candidate")"
+    if [[ -z "$candidate" ]]; then
+      continue
+    fi
+    if [[ "$seen_nl" == *$'\n'"$candidate"$'\n'* ]]; then
+      continue
+    fi
+    seen_nl+="$candidate"$'\n'
+    if [[ "$(json_file_valid_01 "$candidate")" != "1" ]]; then
+      continue
+    fi
+    value="$(phase5_settlement_adapter_roundtrip_ok_from_summary "$candidate")"
+    if [[ "$value" == "true" || "$value" == "false" ]]; then
+      printf '%s' "$value"
+      return
+    fi
+    while IFS= read -r linked; do
+      if [[ -z "$linked" ]]; then
+        continue
+      fi
+      linked="$(resolve_path_with_base "$linked" "$candidate")"
+      linked="$(abs_path "$linked")"
+      if [[ -z "$linked" ]]; then
+        continue
+      fi
+      if [[ "$seen_nl" == *$'\n'"$linked"$'\n'* ]]; then
+        continue
+      fi
+      queue_nl+="$linked"$'\n'
+    done < <(phase5_linked_summary_candidates_from_source "$candidate")
+  done
+
+  printf '%s' "null"
+}
+
 phase5_best_signal_source_summary_json() {
   local preferred_path="$1"
   local signal="$2"
@@ -1888,10 +2088,21 @@ phase5_best_signal_source_summary_json() {
     candidate_value=""
     case "$signal_kind" in
       bool)
-        candidate_value="$(candidate_bool_signal_value_or_empty "$candidate_abs" "$signal")"
+        if [[ "$signal" == "settlement_adapter_roundtrip_ok" ]]; then
+          candidate_value="$(phase5_settlement_adapter_roundtrip_ok_from_summary_chain "$candidate_abs")"
+          if [[ "$candidate_value" == "null" ]]; then
+            candidate_value=""
+          fi
+        else
+          candidate_value="$(candidate_bool_signal_value_or_empty "$candidate_abs" "$signal")"
+        fi
         ;;
       string)
-        candidate_value="$(candidate_string_signal_value_or_empty "$candidate_abs" "$signal")"
+        if [[ "$signal" == "settlement_adapter_roundtrip_status" ]]; then
+          candidate_value="$(phase5_settlement_adapter_roundtrip_status_from_summary_chain "$candidate_abs")"
+        else
+          candidate_value="$(candidate_string_signal_value_or_empty "$candidate_abs" "$signal")"
+        fi
         ;;
       *)
         continue
@@ -1974,7 +2185,11 @@ phase5_best_string_signal_from_available() {
     printf '%s' ""
     return
   fi
-  value="$(candidate_string_signal_value_or_empty "$source_path" "$signal")"
+  if [[ "$signal" == "settlement_adapter_roundtrip_status" ]]; then
+    value="$(phase5_settlement_adapter_roundtrip_status_from_summary_chain "$source_path")"
+  else
+    value="$(candidate_string_signal_value_or_empty "$source_path" "$signal")"
+  fi
   printf '%s' "$value"
 }
 
@@ -1988,7 +2203,11 @@ phase5_best_bool_signal_from_available() {
     printf '%s' "null"
     return
   fi
-  value="$(candidate_bool_signal_value_or_empty "$source_path" "$signal")"
+  if [[ "$signal" == "settlement_adapter_roundtrip_ok" ]]; then
+    value="$(phase5_settlement_adapter_roundtrip_ok_from_summary_chain "$source_path")"
+  else
+    value="$(candidate_bool_signal_value_or_empty "$source_path" "$signal")"
+  fi
   if [[ -n "$value" ]]; then
     printf '%s' "$value"
   else
@@ -4020,37 +4239,14 @@ if [[ -n "$phase5_settlement_layer_summary_json" ]]; then
                     else empty end
                 end
             end')"
-      phase5_settlement_layer_handoff_settlement_adapter_roundtrip_status_json="$(jq -r '
-        if (.settlement_adapter_roundtrip_status | type) == "string" then .settlement_adapter_roundtrip_status
-        elif (.summary.settlement_adapter_roundtrip_status | type) == "string" then .summary.settlement_adapter_roundtrip_status
-        elif (.handoff.settlement_adapter_roundtrip_status | type) == "string" then .handoff.settlement_adapter_roundtrip_status
-        elif (.signals.settlement_adapter_roundtrip_status | type) == "string" then .signals.settlement_adapter_roundtrip_status
-        elif (.phase5_settlement_layer_handoff.settlement_adapter_roundtrip_status | type) == "string" then .phase5_settlement_layer_handoff.settlement_adapter_roundtrip_status
-        elif (.vpn_track.phase5_settlement_layer_handoff.settlement_adapter_roundtrip_status | type) == "string" then .vpn_track.phase5_settlement_layer_handoff.settlement_adapter_roundtrip_status
-        elif (.steps.settlement_adapter_roundtrip.status | type) == "string" then .steps.settlement_adapter_roundtrip.status
-        elif (.steps.adapter_roundtrip.status | type) == "string" then .steps.adapter_roundtrip.status
-        elif (.stages.settlement_adapter_roundtrip.status | type) == "string" then .stages.settlement_adapter_roundtrip.status
-        elif (.stages.adapter_roundtrip.status | type) == "string" then .stages.adapter_roundtrip.status
-        else empty end
-      ' "$phase5_settlement_layer_handoff_source_summary_json" 2>/dev/null || true)"
-      phase5_settlement_layer_handoff_settlement_adapter_roundtrip_ok_json="$(resolve_phase5_bool_with_fallback \
-        "$phase5_settlement_layer_handoff_source_summary_json" \
-        'if (.settlement_adapter_roundtrip_ok | type) == "boolean" then .settlement_adapter_roundtrip_ok
-          elif (.summary.settlement_adapter_roundtrip_ok | type) == "boolean" then .summary.settlement_adapter_roundtrip_ok
-          elif (.handoff.settlement_adapter_roundtrip_ok | type) == "boolean" then .handoff.settlement_adapter_roundtrip_ok
-          elif (.signals.settlement_adapter_roundtrip_ok | type) == "boolean" then .signals.settlement_adapter_roundtrip_ok
-          elif (.signals.settlement_adapter_roundtrip | type) == "boolean" then .signals.settlement_adapter_roundtrip
-          elif (.phase5_settlement_layer_handoff.settlement_adapter_roundtrip_ok | type) == "boolean" then .phase5_settlement_layer_handoff.settlement_adapter_roundtrip_ok
-          elif (.vpn_track.phase5_settlement_layer_handoff.settlement_adapter_roundtrip_ok | type) == "boolean" then .vpn_track.phase5_settlement_layer_handoff.settlement_adapter_roundtrip_ok
-          else empty end' \
-        'if (.stages.settlement_adapter_roundtrip.ok | type) == "boolean" then .stages.settlement_adapter_roundtrip.ok
-          elif (.stages.adapter_roundtrip.ok | type) == "boolean" then .stages.adapter_roundtrip.ok
-          else
-            ((.steps.settlement_adapter_roundtrip.status // .steps.adapter_roundtrip.status // .stages.settlement_adapter_roundtrip.status // .stages.adapter_roundtrip.status // "") | ascii_downcase) as $s
-            | if $s == "pass" then true
-              elif $s == "fail" then false
-              else empty end
-          end')"
+      phase5_settlement_layer_handoff_settlement_adapter_roundtrip_status_json="$(phase5_settlement_adapter_roundtrip_status_from_summary_chain "$phase5_settlement_layer_handoff_source_summary_json")"
+      phase5_settlement_layer_handoff_settlement_adapter_roundtrip_ok_json="$(phase5_settlement_adapter_roundtrip_ok_from_summary_chain "$phase5_settlement_layer_handoff_source_summary_json")"
+      if [[ -z "$phase5_settlement_layer_handoff_settlement_adapter_roundtrip_status_json" ]]; then
+        phase5_settlement_layer_handoff_settlement_adapter_roundtrip_status_json="$(phase5_settlement_adapter_roundtrip_status_from_summary_chain "$phase5_settlement_layer_summary_json")"
+      fi
+      if [[ "$phase5_settlement_layer_handoff_settlement_adapter_roundtrip_ok_json" == "null" ]]; then
+        phase5_settlement_layer_handoff_settlement_adapter_roundtrip_ok_json="$(phase5_settlement_adapter_roundtrip_ok_from_summary_chain "$phase5_settlement_layer_summary_json")"
+      fi
       if [[ -z "$phase5_settlement_layer_handoff_settlement_adapter_roundtrip_status_json" || "$phase5_settlement_layer_handoff_settlement_adapter_roundtrip_ok_json" == "null" ]]; then
         phase5_run_summary_chain_json=""
         phase5_run_summary_chain_json="$(jq -r '
@@ -4902,7 +5098,7 @@ if [[ "$blockchain_mainnet_activation_gate_source_summary_kind" != "" ]] \
   && [[ "$blockchain_mainnet_activation_gate_no_go_json" == "true" || "$blockchain_mainnet_activation_gate_decision_json" == "NO-GO" ]] \
   && [[ "$blockchain_mainnet_activation_missing_metrics_reasons_match_json" == "true" ]]; then
   blockchain_mainnet_activation_missing_metrics_action_available_json="true"
-  blockchain_mainnet_activation_missing_metrics_action_id="blockchain_mainnet_activation_missing_metrics_no_go"
+  blockchain_mainnet_activation_missing_metrics_action_id="blockchain_mainnet_activation_missing_metrics"
   blockchain_mainnet_activation_missing_metrics_action_reason="mainnet activation gate is NO-GO because required metrics evidence is missing/invalid; normalize operator metrics input and rerun gate bundle."
   blockchain_mainnet_activation_missing_metrics_action_normalize_command="./scripts/easy_node.sh blockchain-mainnet-activation-metrics-input --input-json $blockchain_mainnet_activation_missing_metrics_action_operator_input_json_for_command --summary-json .easy-node-logs/blockchain_mainnet_activation_metrics_input_summary.json --canonical-summary-json .easy-node-logs/blockchain_mainnet_activation_metrics_input.json --print-summary-json 1"
   blockchain_mainnet_activation_missing_metrics_action_rerun_bundle_command="./scripts/easy_node.sh blockchain-gate-bundle --blockchain-mainnet-activation-metrics-input-json $blockchain_mainnet_activation_missing_metrics_action_operator_input_json_for_command --summary-json .easy-node-logs/blockchain_gate_bundle_latest_summary.json --canonical-summary-json .easy-node-logs/blockchain_gate_bundle_summary.json --print-summary-json 1"
@@ -5283,6 +5479,14 @@ integration_roadmap_progress_report_script_exists_json="false"
 if [[ -f "$ROOT_DIR/scripts/integration_roadmap_progress_report.sh" ]]; then
   integration_roadmap_progress_report_script_exists_json="true"
 fi
+integration_roadmap_next_actions_run_script_exists_json="false"
+if [[ -f "$ROOT_DIR/scripts/integration_roadmap_next_actions_run.sh" ]]; then
+  integration_roadmap_next_actions_run_script_exists_json="true"
+fi
+integration_easy_node_roadmap_next_actions_run_script_exists_json="false"
+if [[ -f "$ROOT_DIR/scripts/integration_easy_node_roadmap_next_actions_run.sh" ]]; then
+  integration_easy_node_roadmap_next_actions_run_script_exists_json="true"
+fi
 
 non_blockchain_actionable_no_sudo_or_github_json="$(
   jq -n \
@@ -5308,6 +5512,8 @@ non_blockchain_actionable_no_sudo_or_github_json="$(
     --argjson integration_phase1_resilience_handoff_run_script_exists "$integration_phase1_resilience_handoff_run_script_exists_json" \
     --argjson integration_roadmap_progress_resilience_handoff_script_exists "$integration_roadmap_progress_resilience_handoff_script_exists_json" \
     --argjson integration_roadmap_progress_report_script_exists "$integration_roadmap_progress_report_script_exists_json" \
+    --argjson integration_roadmap_next_actions_run_script_exists "$integration_roadmap_next_actions_run_script_exists_json" \
+    --argjson integration_easy_node_roadmap_next_actions_run_script_exists "$integration_easy_node_roadmap_next_actions_run_script_exists_json" \
     --argjson phase1_completed "$( [[ "$phase1_needs_attention_json" == "false" ]] && printf 'true' || printf 'false' )" \
     --argjson phase2_completed "$( [[ "$phase2_needs_attention_json" == "false" ]] && printf 'true' || printf 'false' )" \
     --argjson phase3_completed "$( [[ "$phase3_needs_attention_json" == "false" ]] && printf 'true' || printf 'false' )" \
@@ -5371,6 +5577,18 @@ non_blockchain_actionable_no_sudo_or_github_json="$(
         label: "Roadmap report contract",
         command: "bash ./scripts/integration_roadmap_progress_report.sh",
         reason: "validates roadmap summary/report contract end-to-end"
+      } else empty end),
+      (if $integration_roadmap_next_actions_run_script_exists then {
+        id: "integration_roadmap_next_actions_run",
+        label: "Roadmap next-actions run contract",
+        command: "bash ./scripts/integration_roadmap_next_actions_run.sh",
+        reason: "validates roadmap next-actions runner contract"
+      } else empty end),
+      (if $integration_easy_node_roadmap_next_actions_run_script_exists then {
+        id: "integration_easy_node_roadmap_next_actions_run",
+        label: "Easy-node roadmap next-actions contract",
+        command: "bash ./scripts/integration_easy_node_roadmap_next_actions_run.sh",
+        reason: "validates easy_node roadmap next-actions wrapper contract"
       } else empty end)
     ]'
 )"

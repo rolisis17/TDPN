@@ -200,6 +200,43 @@ assert_contains "$success_line_sp" "--fail-on-no-go 0" "missing optional fail-on
 assert_contains "$success_line_sp" "--custom-flag custom value" "missing passthrough forwarding"
 assert_contains "$success_line_sp" "--summary-json $SUCCESS_SUMMARY" "missing explicit summary-json forwarding"
 
+echo "[profile-default-gate-run] env file subject fallback forwards campaign subject"
+: >"$SIGNOFF_CAPTURE"
+FILE_FALLBACK_LOG="$TMP_DIR/profile_default_gate_run_file_subject.log"
+FILE_FALLBACK_ENV="$TMP_DIR/profile_default_gate_run.env.easy.client"
+cat >"$FILE_FALLBACK_ENV" <<'EOF_FILE_FALLBACK_ENV'
+CAMPAIGN_SUBJECT=inv-file-campaign-subject
+INVITE_KEY=inv-file-invite-key
+EOF_FILE_FALLBACK_ENV
+set +e
+PATH="$TMP_BIN:$PATH" \
+PROFILE_DEFAULT_GATE_RUN_SIGNOFF_SCRIPT="$FAKE_SIGNOFF" \
+PROFILE_DEFAULT_GATE_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_COUNTER_FILE="$TMP_DIR/curl_counter_file_subject.txt" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_FAIL_ATTEMPTS=0 \
+PROFILE_DEFAULT_GATE_RUN_ENV_CLIENT_FILE="$FILE_FALLBACK_ENV" \
+CAMPAIGN_SUBJECT="" \
+INVITE_KEY="" \
+"$SCRIPT_UNDER_TEST" \
+  --host-a "dir-a.test" \
+  --host-b "dir-b.test" >"$FILE_FALLBACK_LOG" 2>&1
+file_fallback_rc=$?
+set -e
+if [[ "$file_fallback_rc" -ne 0 ]]; then
+  echo "expected file-fallback path rc=0, got rc=$file_fallback_rc"
+  cat "$FILE_FALLBACK_LOG"
+  exit 1
+fi
+file_fallback_line="$(sed -n '1p' "$SIGNOFF_CAPTURE" || true)"
+if [[ -z "$file_fallback_line" ]]; then
+  echo "missing captured signoff invocation in file-fallback path"
+  cat "$FILE_FALLBACK_LOG"
+  exit 1
+fi
+file_fallback_line_sp="${file_fallback_line//$'\t'/ }"
+assert_contains "$file_fallback_line_sp" "--campaign-subject inv-file-campaign-subject" "missing forwarded file-derived campaign subject"
+assert_file_contains "$FILE_FALLBACK_LOG" "subject_source=file:CAMPAIGN_SUBJECT" "missing file-derived subject source marker"
+
 echo "[profile-default-gate-run] missing subject fails clearly"
 : >"$SIGNOFF_CAPTURE"
 MISSING_SUBJECT_LOG="$TMP_DIR/profile_default_gate_run_missing_subject.log"
@@ -209,6 +246,7 @@ PROFILE_DEFAULT_GATE_RUN_SIGNOFF_SCRIPT="$FAKE_SIGNOFF" \
 PROFILE_DEFAULT_GATE_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
 PROFILE_DEFAULT_GATE_FAKE_CURL_COUNTER_FILE="$TMP_DIR/curl_counter_missing_subject.txt" \
 PROFILE_DEFAULT_GATE_FAKE_CURL_FAIL_ATTEMPTS=0 \
+PROFILE_DEFAULT_GATE_RUN_ENV_CLIENT_FILE="$TMP_DIR/profile_default_gate_run_no_file_fallback.env" \
 CAMPAIGN_SUBJECT="" \
 INVITE_KEY="" \
 "$SCRIPT_UNDER_TEST" \
