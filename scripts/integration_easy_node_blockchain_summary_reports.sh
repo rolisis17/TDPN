@@ -201,6 +201,48 @@ assert_phase7_capture() {
   fi
 }
 
+assert_canonical_artifact_hygiene() {
+  local summary_json="$1"
+  local expected_canonical_path="$2"
+  local label="$3"
+  local canonical_path=""
+
+  canonical_path="$(jq -r '.artifacts.canonical_summary_json // empty' "$summary_json" 2>/dev/null || true)"
+  if [[ -z "$canonical_path" ]]; then
+    echo "$label missing artifacts.canonical_summary_json"
+    cat "$summary_json"
+    exit 1
+  fi
+  if [[ "$canonical_path" != "$expected_canonical_path" ]]; then
+    echo "$label canonical_summary_json mismatch"
+    echo "expected: $expected_canonical_path"
+    echo "actual:   $canonical_path"
+    cat "$summary_json"
+    exit 1
+  fi
+  case "$canonical_path" in
+    "$TMP_DIR"/*) ;;
+    *)
+      echo "$label canonical_summary_json is outside TMP_DIR"
+      echo "TMP_DIR: $TMP_DIR"
+      echo "path:    $canonical_path"
+      cat "$summary_json"
+      exit 1
+      ;;
+  esac
+  if [[ "$canonical_path" == *".easy-node-logs"* ]]; then
+    echo "$label canonical_summary_json must not point to .easy-node-logs"
+    echo "path: $canonical_path"
+    cat "$summary_json"
+    exit 1
+  fi
+  if [[ ! -f "$canonical_path" ]]; then
+    echo "$label canonical_summary_json file missing: $canonical_path"
+    cat "$summary_json"
+    exit 1
+  fi
+}
+
 PHASE5_REPORTS_DIR="$TMP_DIR/reports phase5"
 PHASE5_SUMMARY_JSON="$TMP_DIR/summary phase5.json"
 PHASE5_SAMPLE_VALUE="alpha beta"
@@ -257,9 +299,15 @@ if [[ ! -x "$PHASE5_REAL_SUMMARY_SCRIPT" ]]; then
   echo "missing executable phase5 summary report script: $PHASE5_REAL_SUMMARY_SCRIPT"
   exit 2
 fi
+ROADMAP_PROGRESS_SCRIPT="${ROADMAP_PROGRESS_REPORT_SCRIPT_UNDER_TEST:-$ROOT_DIR/scripts/roadmap_progress_report.sh}"
+if [[ ! -x "$ROADMAP_PROGRESS_SCRIPT" ]]; then
+  echo "missing executable roadmap progress report script: $ROADMAP_PROGRESS_SCRIPT"
+  exit 2
+fi
 
-PHASE5_REAL_HANDOFF_CHECK="$TMP_DIR/phase5_handoff_check_with_sponsor.json"
+PHASE5_REAL_HANDOFF_CHECK="$TMP_DIR/phase5_handoff_check_with_sponsor_and_settlement_status.json"
 PHASE5_REAL_AGG_SUMMARY="$TMP_DIR/phase5_aggregated_summary.json"
+PHASE5_REAL_CANONICAL_SUMMARY="$TMP_DIR/phase5_aggregated_canonical_summary.json"
 PHASE5_REAL_LOG="$TMP_DIR/phase5_aggregated.log"
 
 cat >"$PHASE5_REAL_HANDOFF_CHECK" <<'EOF_PHASE5_REAL_HANDOFF_CHECK'
@@ -279,6 +327,9 @@ cat >"$PHASE5_REAL_HANDOFF_CHECK" <<'EOF_PHASE5_REAL_HANDOFF_CHECK'
     "issuer_sponsor_api_live_smoke": {
       "status": "pass"
     },
+    "issuer_settlement_status_live_smoke": {
+      "status": "pass"
+    },
     "issuer_admin_blockchain_handlers_coverage": {
       "status": "pass"
     }
@@ -287,6 +338,7 @@ cat >"$PHASE5_REAL_HANDOFF_CHECK" <<'EOF_PHASE5_REAL_HANDOFF_CHECK'
 EOF_PHASE5_REAL_HANDOFF_CHECK
 
 PHASE5_SETTLEMENT_LAYER_SUMMARY_REPORT_SCRIPT="$PHASE5_REAL_SUMMARY_SCRIPT" \
+PHASE5_SETTLEMENT_LAYER_SUMMARY_REPORT_CANONICAL_SUMMARY_JSON="$PHASE5_REAL_CANONICAL_SUMMARY" \
 bash "$SCRIPT_UNDER_TEST" \
   phase5-settlement-layer-summary-report \
   --handoff-check-summary-json "$PHASE5_REAL_HANDOFF_CHECK" \
@@ -310,6 +362,10 @@ if ! jq -e '
   and .signals.issuer_sponsor_api_live_smoke.ok == true
   and .signals.issuer_sponsor_api_live_smoke.resolved == true
   and .signals.issuer_sponsor_api_live_smoke.source == "phase5_settlement_layer_handoff_check_summary"
+  and .signals.issuer_settlement_status_live_smoke.status == "pass"
+  and .signals.issuer_settlement_status_live_smoke.ok == true
+  and .signals.issuer_settlement_status_live_smoke.resolved == true
+  and .signals.issuer_settlement_status_live_smoke.source == "phase5_settlement_layer_handoff_check_summary"
   and (
     if (.signals | has("issuer_admin_blockchain_handlers_coverage")) then
       .signals.issuer_admin_blockchain_handlers_coverage.status == "pass"
@@ -319,9 +375,96 @@ if ! jq -e '
     else true end
   )
 ' "$PHASE5_REAL_AGG_SUMMARY" >/dev/null; then
-  echo "phase5 aggregated summary missing sponsor live-smoke signal/health contract fields"
+  echo "phase5 aggregated summary missing sponsor/settlement-status live-smoke signal/health contract fields"
   cat "$PHASE5_REAL_AGG_SUMMARY"
   cat "$PHASE5_REAL_LOG"
+  exit 1
+fi
+assert_canonical_artifact_hygiene "$PHASE5_REAL_AGG_SUMMARY" "$PHASE5_REAL_CANONICAL_SUMMARY" "phase5 aggregated summary"
+
+PHASE5_ROADMAP_SOURCE="$TMP_DIR/phase5_summary_with_adapter_roundtrip_signal.json"
+ROADMAP_MANUAL_VALIDATION_SUMMARY="$TMP_DIR/manual_validation_summary_minimal.json"
+ROADMAP_PHASE5_SUMMARY_JSON="$TMP_DIR/roadmap_phase5_adapter_roundtrip_summary.json"
+ROADMAP_PHASE5_REPORT_MD="$TMP_DIR/roadmap_phase5_adapter_roundtrip_report.md"
+ROADMAP_PHASE5_LOG="$TMP_DIR/roadmap_phase5_adapter_roundtrip.log"
+
+cat >"$PHASE5_ROADMAP_SOURCE" <<'EOF_PHASE5_ROADMAP_SOURCE'
+{
+  "version": 1,
+  "schema": {
+    "id": "phase5_settlement_layer_handoff_check_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "pass",
+  "rc": 0,
+  "signals": {
+    "settlement_adapter_roundtrip_status": "pass",
+    "settlement_adapter_roundtrip_ok": true
+  }
+}
+EOF_PHASE5_ROADMAP_SOURCE
+
+cat >"$ROADMAP_MANUAL_VALIDATION_SUMMARY" <<'EOF_ROADMAP_MANUAL_VALIDATION_SUMMARY'
+{
+  "schema": {
+    "id": "manual_validation_readiness_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "summary": {},
+  "report": {
+    "readiness_status": "BLOCKED_LOCAL"
+  }
+}
+EOF_ROADMAP_MANUAL_VALIDATION_SUMMARY
+
+EASY_NODE_LOG_DIR="$TMP_DIR" \
+ROADMAP_PROGRESS_LOG_DIR="$TMP_DIR" \
+ROADMAP_PROGRESS_LOGS_ROOT="$TMP_DIR" \
+bash "$ROADMAP_PROGRESS_SCRIPT" \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$ROADMAP_MANUAL_VALIDATION_SUMMARY" \
+  --phase5-settlement-layer-summary-json "$PHASE5_ROADMAP_SOURCE" \
+  --summary-json "$ROADMAP_PHASE5_SUMMARY_JSON" \
+  --report-md "$ROADMAP_PHASE5_REPORT_MD" \
+  --print-report 0 \
+  --print-summary-json 0 >"$ROADMAP_PHASE5_LOG" 2>&1
+
+if [[ ! -f "$ROADMAP_PHASE5_SUMMARY_JSON" ]]; then
+  echo "missing roadmap summary output for phase5 adapter roundtrip signal fixture"
+  cat "$ROADMAP_PHASE5_LOG"
+  exit 1
+fi
+if ! jq -e --arg expected_source "$PHASE5_ROADMAP_SOURCE" '
+  .vpn_track.phase5_settlement_layer_handoff.available == true
+  and .vpn_track.phase5_settlement_layer_handoff.source_summary_json == $expected_source
+  and .vpn_track.phase5_settlement_layer_handoff.settlement_adapter_roundtrip_status == "pass"
+  and .vpn_track.phase5_settlement_layer_handoff.settlement_adapter_roundtrip_ok == true
+' "$ROADMAP_PHASE5_SUMMARY_JSON" >/dev/null; then
+  echo "roadmap summary missing phase5 settlement_adapter_roundtrip status/ok contract fields from phase5 artifact signal fixture"
+  cat "$ROADMAP_PHASE5_SUMMARY_JSON"
+  cat "$ROADMAP_PHASE5_LOG"
+  exit 1
+fi
+
+if [[ ! -f "$ROADMAP_PHASE5_REPORT_MD" ]]; then
+  echo "missing roadmap markdown report output for phase5 adapter roundtrip signal fixture"
+  cat "$ROADMAP_PHASE5_LOG"
+  exit 1
+fi
+ROADMAP_PHASE5_REPORT_TEXT="$(cat "$ROADMAP_PHASE5_REPORT_MD")"
+if [[ "$ROADMAP_PHASE5_REPORT_TEXT" != *"Phase-5 settlement_adapter_roundtrip_status: pass"* ]]; then
+  echo "roadmap markdown report missing phase5 settlement_adapter_roundtrip_status line"
+  cat "$ROADMAP_PHASE5_REPORT_MD"
+  cat "$ROADMAP_PHASE5_LOG"
+  exit 1
+fi
+if [[ "$ROADMAP_PHASE5_REPORT_TEXT" != *"Phase-5 settlement_adapter_roundtrip_ok: true"* ]]; then
+  echo "roadmap markdown report missing phase5 settlement_adapter_roundtrip_ok line"
+  cat "$ROADMAP_PHASE5_REPORT_MD"
+  cat "$ROADMAP_PHASE5_LOG"
   exit 1
 fi
 
@@ -334,6 +477,7 @@ fi
 PHASE7_REAL_CHECK="$TMP_DIR/phase7_check_with_signals.json"
 PHASE7_REAL_RUN="$TMP_DIR/phase7_run_with_signals.json"
 PHASE7_REAL_AGG_SUMMARY="$TMP_DIR/phase7_aggregated_summary.json"
+PHASE7_REAL_CANONICAL_SUMMARY="$TMP_DIR/phase7_aggregated_canonical_summary.json"
 PHASE7_REAL_LOG="$TMP_DIR/phase7_aggregated.log"
 
 cat >"$PHASE7_REAL_CHECK" <<'EOF_PHASE7_REAL_CHECK'
@@ -410,6 +554,7 @@ if ! jq -e '
 fi
 
 PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_SCRIPT="$PHASE7_REAL_SUMMARY_SCRIPT" \
+PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_CANONICAL_SUMMARY_JSON="$PHASE7_REAL_CANONICAL_SUMMARY" \
 bash "$SCRIPT_UNDER_TEST" \
   phase7-mainnet-cutover-summary-report \
   --check-summary-json "$PHASE7_REAL_CHECK" \
@@ -465,5 +610,6 @@ if ! jq -e \
   cat "$PHASE7_REAL_LOG"
   exit 1
 fi
+assert_canonical_artifact_hygiene "$PHASE7_REAL_AGG_SUMMARY" "$PHASE7_REAL_CANONICAL_SUMMARY" "phase7 aggregated summary"
 
 echo "easy-node blockchain summary-report wrapper integration ok"

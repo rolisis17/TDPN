@@ -16,22 +16,27 @@ Usage:
     [--template-output-json PATH] \
     [--template-canonical-output-json PATH] \
     [--template-include-example-values [0|1]] \
+    [--missing-input-template-output-json PATH] \
+    [--missing-input-template-canonical-output-json PATH] \
+    [--missing-input-template-include-example-values [0|1]] \
     [--checklist-output-json PATH] \
     [--checklist-output-md PATH]
 
 Purpose:
   Generate operator-ready blockchain mainnet activation artifacts in one run:
     1) metrics input template artifact
-    2) optional missing-metrics checklist when metrics summary is available
+    2) optional missing-only metrics input template when metrics summary is available
+    3) optional missing-metrics checklist when metrics summary is available
 
 Execution:
   1) scripts/blockchain_mainnet_activation_metrics_input_template.sh
-  2) scripts/blockchain_mainnet_activation_metrics_missing_checklist.sh (optional)
+  2) scripts/blockchain_mainnet_activation_metrics_missing_input_template.sh (optional)
+  3) scripts/blockchain_mainnet_activation_metrics_missing_checklist.sh (optional)
 
 Notes:
-  - Checklist stage runs only when --metrics-summary-json is provided and the
-    file exists at execution time.
-  - Missing metrics summary is fail-soft: checklist stage is skipped and pack
+  - Missing input template + checklist stages run only when
+    --metrics-summary-json is provided and the file exists at execution time.
+  - Missing metrics summary is fail-soft: optional stages are skipped and pack
     still exits 0 when no runtime stage failure occurs.
 USAGE
 }
@@ -142,11 +147,15 @@ metrics_summary_json="${BLOCKCHAIN_MAINNET_ACTIVATION_OPERATOR_PACK_METRICS_SUMM
 template_output_json="${BLOCKCHAIN_MAINNET_ACTIVATION_OPERATOR_PACK_TEMPLATE_OUTPUT_JSON:-}"
 template_canonical_output_json="${BLOCKCHAIN_MAINNET_ACTIVATION_OPERATOR_PACK_TEMPLATE_CANONICAL_OUTPUT_JSON:-}"
 template_include_example_values="${BLOCKCHAIN_MAINNET_ACTIVATION_OPERATOR_PACK_TEMPLATE_INCLUDE_EXAMPLE_VALUES:-0}"
+missing_input_template_output_json="${BLOCKCHAIN_MAINNET_ACTIVATION_OPERATOR_PACK_MISSING_INPUT_TEMPLATE_OUTPUT_JSON:-}"
+missing_input_template_canonical_output_json="${BLOCKCHAIN_MAINNET_ACTIVATION_OPERATOR_PACK_MISSING_INPUT_TEMPLATE_CANONICAL_OUTPUT_JSON:-}"
+missing_input_template_include_example_values="${BLOCKCHAIN_MAINNET_ACTIVATION_OPERATOR_PACK_MISSING_INPUT_TEMPLATE_INCLUDE_EXAMPLE_VALUES:-0}"
 
 checklist_output_json="${BLOCKCHAIN_MAINNET_ACTIVATION_OPERATOR_PACK_CHECKLIST_OUTPUT_JSON:-}"
 checklist_output_md="${BLOCKCHAIN_MAINNET_ACTIVATION_OPERATOR_PACK_CHECKLIST_OUTPUT_MD:-}"
 
 template_script="${BLOCKCHAIN_MAINNET_ACTIVATION_OPERATOR_PACK_TEMPLATE_SCRIPT:-$ROOT_DIR/scripts/blockchain_mainnet_activation_metrics_input_template.sh}"
+missing_input_template_script="${BLOCKCHAIN_MAINNET_ACTIVATION_OPERATOR_PACK_MISSING_INPUT_TEMPLATE_SCRIPT:-$ROOT_DIR/scripts/blockchain_mainnet_activation_metrics_missing_input_template.sh}"
 checklist_script="${BLOCKCHAIN_MAINNET_ACTIVATION_OPERATOR_PACK_CHECKLIST_SCRIPT:-$ROOT_DIR/scripts/blockchain_mainnet_activation_metrics_missing_checklist.sh}"
 
 while [[ $# -gt 0 ]]; do
@@ -199,6 +208,25 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --missing-input-template-output-json)
+      path_arg_or_die "--missing-input-template-output-json" "${2:-}"
+      missing_input_template_output_json="${2:-}"
+      shift 2
+      ;;
+    --missing-input-template-canonical-output-json)
+      path_arg_or_die "--missing-input-template-canonical-output-json" "${2:-}"
+      missing_input_template_canonical_output_json="${2:-}"
+      shift 2
+      ;;
+    --missing-input-template-include-example-values)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        missing_input_template_include_example_values="${2:-}"
+        shift 2
+      else
+        missing_input_template_include_example_values="1"
+        shift
+      fi
+      ;;
     --checklist-output-json)
       path_arg_or_die "--checklist-output-json" "${2:-}"
       checklist_output_json="${2:-}"
@@ -223,6 +251,7 @@ done
 
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
 bool_arg_or_die "--template-include-example-values" "$template_include_example_values"
+bool_arg_or_die "--missing-input-template-include-example-values" "$missing_input_template_include_example_values"
 path_arg_or_die "--reports-dir" "$reports_dir"
 path_arg_or_die "--canonical-summary-json" "$canonical_summary_json"
 
@@ -235,6 +264,12 @@ fi
 if [[ -n "$(trim "$template_canonical_output_json")" ]]; then
   path_arg_or_die "--template-canonical-output-json" "$template_canonical_output_json"
 fi
+if [[ -n "$(trim "$missing_input_template_output_json")" ]]; then
+  path_arg_or_die "--missing-input-template-output-json" "$missing_input_template_output_json"
+fi
+if [[ -n "$(trim "$missing_input_template_canonical_output_json")" ]]; then
+  path_arg_or_die "--missing-input-template-canonical-output-json" "$missing_input_template_canonical_output_json"
+fi
 if [[ -n "$(trim "$checklist_output_json")" ]]; then
   path_arg_or_die "--checklist-output-json" "$checklist_output_json"
 fi
@@ -244,6 +279,10 @@ fi
 
 if [[ ! -f "$template_script" ]]; then
   echo "missing stage script: $template_script"
+  exit 2
+fi
+if [[ ! -f "$missing_input_template_script" ]]; then
+  echo "missing stage script: $missing_input_template_script"
   exit 2
 fi
 if [[ ! -f "$checklist_script" ]]; then
@@ -269,6 +308,16 @@ if [[ -z "$(trim "$template_canonical_output_json")" ]]; then
 fi
 template_canonical_output_json="$(abs_path "$template_canonical_output_json")"
 
+if [[ -z "$(trim "$missing_input_template_output_json")" ]]; then
+  missing_input_template_output_json="$reports_dir/blockchain_mainnet_activation_metrics_missing_input_template.json"
+fi
+missing_input_template_output_json="$(abs_path "$missing_input_template_output_json")"
+
+if [[ -z "$(trim "$missing_input_template_canonical_output_json")" ]]; then
+  missing_input_template_canonical_output_json="$reports_dir/blockchain_mainnet_activation_metrics_missing_input_template.canonical.json"
+fi
+missing_input_template_canonical_output_json="$(abs_path "$missing_input_template_canonical_output_json")"
+
 if [[ -z "$(trim "$checklist_output_json")" ]]; then
   checklist_output_json="$reports_dir/blockchain_mainnet_activation_metrics_missing_checklist.json"
 fi
@@ -288,10 +337,12 @@ mkdir -p "$(dirname "$summary_json")"
 mkdir -p "$(dirname "$canonical_summary_json")"
 mkdir -p "$(dirname "$template_output_json")"
 mkdir -p "$(dirname "$template_canonical_output_json")"
+mkdir -p "$(dirname "$missing_input_template_output_json")"
+mkdir -p "$(dirname "$missing_input_template_canonical_output_json")"
 mkdir -p "$(dirname "$checklist_output_json")"
 mkdir -p "$(dirname "$checklist_output_md")"
 
-step_ids=("metrics_input_template" "metrics_missing_checklist")
+step_ids=("metrics_input_template" "metrics_missing_input_template" "metrics_missing_checklist")
 
 declare -A step_status=()
 declare -A step_rc=()
@@ -311,6 +362,8 @@ done
 
 metrics_summary_provided="0"
 metrics_summary_exists="0"
+missing_input_template_enabled="0"
+missing_input_template_skipped_reason=""
 checklist_enabled="0"
 checklist_skipped_reason=""
 
@@ -321,7 +374,18 @@ if [[ "$metrics_summary_provided" == "1" && -f "$metrics_summary_json" ]]; then
   metrics_summary_exists="1"
 fi
 if [[ "$metrics_summary_provided" == "1" && "$metrics_summary_exists" == "1" ]]; then
+  missing_input_template_enabled="1"
   checklist_enabled="1"
+fi
+
+if [[ "$missing_input_template_enabled" == "0" ]]; then
+  step_status["metrics_missing_input_template"]="skipped"
+  if [[ "$metrics_summary_provided" == "0" ]]; then
+    missing_input_template_skipped_reason="metrics-summary-json-not-provided"
+  else
+    missing_input_template_skipped_reason="metrics-summary-json-missing-file"
+  fi
+  step_note["metrics_missing_input_template"]="$missing_input_template_skipped_reason"
 fi
 
 if [[ "$checklist_enabled" == "0" ]]; then
@@ -346,7 +410,23 @@ template_cmd=(
 )
 run_step "metrics_input_template" "${template_cmd[@]}"
 
-if [[ "${step_status[metrics_input_template]}" == "pass" && "$checklist_enabled" == "1" ]]; then
+if [[ "${step_status[metrics_input_template]}" == "pass" && "$missing_input_template_enabled" == "1" ]]; then
+  missing_input_template_cmd=(
+    bash "$missing_input_template_script"
+    --metrics-summary-json "$metrics_summary_json"
+    --output-json "$missing_input_template_output_json"
+    --canonical-output-json "$missing_input_template_canonical_output_json"
+    --include-example-values "$missing_input_template_include_example_values"
+    --print-output-json 0
+  )
+  run_step "metrics_missing_input_template" "${missing_input_template_cmd[@]}"
+elif [[ "${step_status[metrics_input_template]}" != "pass" ]]; then
+  step_status["metrics_missing_input_template"]="skipped"
+  missing_input_template_skipped_reason="template-step-failed"
+  step_note["metrics_missing_input_template"]="$missing_input_template_skipped_reason"
+fi
+
+if [[ "${step_status[metrics_input_template]}" == "pass" && "${step_status[metrics_missing_input_template]}" == "pass" && "$checklist_enabled" == "1" ]]; then
   checklist_cmd=(
     bash "$checklist_script"
     --metrics-summary-json "$metrics_summary_json"
@@ -358,6 +438,10 @@ if [[ "${step_status[metrics_input_template]}" == "pass" && "$checklist_enabled"
 elif [[ "${step_status[metrics_input_template]}" != "pass" ]]; then
   step_status["metrics_missing_checklist"]="skipped"
   checklist_skipped_reason="template-step-failed"
+  step_note["metrics_missing_checklist"]="$checklist_skipped_reason"
+elif [[ "$checklist_enabled" == "1" && "${step_status[metrics_missing_input_template]}" != "pass" ]]; then
+  step_status["metrics_missing_checklist"]="skipped"
+  checklist_skipped_reason="missing-input-template-step-failed"
   step_note["metrics_missing_checklist"]="$checklist_skipped_reason"
 fi
 
@@ -403,14 +487,20 @@ jq -n \
   --arg metrics_summary_json "$metrics_summary_json" \
   --arg template_output_json "$template_output_json" \
   --arg template_canonical_output_json "$template_canonical_output_json" \
+  --arg missing_input_template_output_json "$missing_input_template_output_json" \
+  --arg missing_input_template_canonical_output_json "$missing_input_template_canonical_output_json" \
   --arg checklist_output_json "$checklist_output_json" \
   --arg checklist_output_md "$checklist_output_md" \
   --arg template_script "$template_script" \
+  --arg missing_input_template_script "$missing_input_template_script" \
   --arg checklist_script "$checklist_script" \
   --argjson print_summary_json "$( [[ "$print_summary_json" == "1" ]] && echo true || echo false )" \
   --argjson template_include_example_values "$( [[ "$template_include_example_values" == "1" ]] && echo true || echo false )" \
+  --argjson missing_input_template_include_example_values "$( [[ "$missing_input_template_include_example_values" == "1" ]] && echo true || echo false )" \
   --argjson metrics_summary_provided "$( [[ "$metrics_summary_provided" == "1" ]] && echo true || echo false )" \
   --argjson metrics_summary_exists "$( [[ "$metrics_summary_exists" == "1" ]] && echo true || echo false )" \
+  --argjson missing_input_template_enabled "$( [[ "$missing_input_template_enabled" == "1" ]] && echo true || echo false )" \
+  --arg missing_input_template_skipped_reason "$missing_input_template_skipped_reason" \
   --argjson checklist_enabled "$( [[ "$checklist_enabled" == "1" ]] && echo true || echo false )" \
   --arg checklist_skipped_reason "$checklist_skipped_reason" \
   --argjson duration_sec "$run_duration_sec" \
@@ -422,6 +512,12 @@ jq -n \
   --arg template_started_at "${step_started_at[metrics_input_template]}" \
   --arg template_completed_at "${step_completed_at[metrics_input_template]}" \
   --arg template_note "${step_note[metrics_input_template]}" \
+  --arg missing_input_template_status "${step_status[metrics_missing_input_template]}" \
+  --argjson missing_input_template_rc "${step_rc[metrics_missing_input_template]}" \
+  --arg missing_input_template_command "${step_command[metrics_missing_input_template]}" \
+  --arg missing_input_template_started_at "${step_started_at[metrics_missing_input_template]}" \
+  --arg missing_input_template_completed_at "${step_completed_at[metrics_missing_input_template]}" \
+  --arg missing_input_template_note "${step_note[metrics_missing_input_template]}" \
   --arg checklist_status "${step_status[metrics_missing_checklist]}" \
   --argjson checklist_rc "${step_rc[metrics_missing_checklist]}" \
   --arg checklist_command "${step_command[metrics_missing_checklist]}" \
@@ -447,9 +543,12 @@ jq -n \
     inputs: {
       print_summary_json: $print_summary_json,
       template_include_example_values: $template_include_example_values,
+      missing_input_template_include_example_values: $missing_input_template_include_example_values,
       metrics_summary_json: (if $metrics_summary_json == "" then null else $metrics_summary_json end),
       metrics_summary_provided: $metrics_summary_provided,
-      metrics_summary_exists: $metrics_summary_exists
+      metrics_summary_exists: $metrics_summary_exists,
+      missing_input_template_output_json: $missing_input_template_output_json,
+      missing_input_template_canonical_output_json: $missing_input_template_canonical_output_json
     },
     steps: {
       metrics_input_template: {
@@ -462,6 +561,25 @@ jq -n \
         artifacts: {
           output_json: $template_output_json,
           canonical_output_json: $template_canonical_output_json
+        }
+      },
+      metrics_missing_input_template: {
+        enabled: $missing_input_template_enabled,
+        status: $missing_input_template_status,
+        rc: $missing_input_template_rc,
+        command: (if $missing_input_template_command == "" then null else $missing_input_template_command end),
+        started_at: (if $missing_input_template_started_at == "" then null else $missing_input_template_started_at end),
+        completed_at: (if $missing_input_template_completed_at == "" then null else $missing_input_template_completed_at end),
+        note: (if $missing_input_template_note == "" then null else $missing_input_template_note end),
+        skipped_reason: (if $missing_input_template_skipped_reason == "" then null else $missing_input_template_skipped_reason end),
+        input: {
+          metrics_summary_json: (if $metrics_summary_json == "" then null else $metrics_summary_json end),
+          metrics_summary_provided: $metrics_summary_provided,
+          metrics_summary_exists: $metrics_summary_exists
+        },
+        artifacts: {
+          output_json: (if $missing_input_template_enabled then $missing_input_template_output_json else null end),
+          canonical_output_json: (if $missing_input_template_enabled then $missing_input_template_canonical_output_json else null end)
         }
       },
       metrics_missing_checklist: {
@@ -491,11 +609,14 @@ jq -n \
       metrics_summary_json: (if $metrics_summary_json == "" then null else $metrics_summary_json end),
       template_output_json: $template_output_json,
       template_canonical_output_json: $template_canonical_output_json,
+      missing_input_template_output_json: (if $missing_input_template_enabled then $missing_input_template_output_json else null end),
+      missing_input_template_canonical_output_json: (if $missing_input_template_enabled then $missing_input_template_canonical_output_json else null end),
       checklist_output_json: (if $checklist_enabled then $checklist_output_json else null end),
       checklist_output_md: (if $checklist_enabled then $checklist_output_md else null end)
     },
     scripts: {
       metrics_input_template: $template_script,
+      metrics_missing_input_template: $missing_input_template_script,
       metrics_missing_checklist: $checklist_script
     }
   }

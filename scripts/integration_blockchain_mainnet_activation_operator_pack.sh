@@ -29,12 +29,16 @@ TEMPLATE_ONLY_SUMMARY_JSON="$TMP_DIR/template_only_summary.json"
 TEMPLATE_ONLY_CANONICAL_SUMMARY_JSON="$TMP_DIR/template_only_summary_canonical.json"
 TEMPLATE_ONLY_TEMPLATE_OUTPUT_JSON="$TEMPLATE_ONLY_REPORTS_DIR/blockchain_mainnet_activation_metrics_input_template.json"
 TEMPLATE_ONLY_TEMPLATE_CANONICAL_JSON="$TEMPLATE_ONLY_REPORTS_DIR/blockchain_mainnet_activation_metrics_input_template.canonical.json"
+TEMPLATE_ONLY_MISSING_TEMPLATE_OUTPUT_JSON="$TEMPLATE_ONLY_REPORTS_DIR/blockchain_mainnet_activation_metrics_missing_input_template.json"
+TEMPLATE_ONLY_MISSING_TEMPLATE_CANONICAL_JSON="$TEMPLATE_ONLY_REPORTS_DIR/blockchain_mainnet_activation_metrics_missing_input_template.canonical.json"
 TEMPLATE_ONLY_LOG="$TMP_DIR/template_only.log"
 
 WITH_METRICS_REPORTS_DIR="$TMP_DIR/reports_with_metrics"
 WITH_METRICS_SUMMARY_JSON="$TMP_DIR/with_metrics_summary.json"
 WITH_METRICS_CANONICAL_SUMMARY_JSON="$TMP_DIR/with_metrics_summary_canonical.json"
 WITH_METRICS_INPUT_SUMMARY_JSON="$TMP_DIR/metrics_summary_input.json"
+WITH_METRICS_MISSING_TEMPLATE_OUTPUT_JSON="$TMP_DIR/with_metrics_missing_input_template.json"
+WITH_METRICS_MISSING_TEMPLATE_CANONICAL_JSON="$TMP_DIR/with_metrics_missing_input_template.canonical.json"
 WITH_METRICS_CHECKLIST_OUTPUT_JSON="$TMP_DIR/with_metrics_checklist.json"
 WITH_METRICS_CHECKLIST_OUTPUT_MD="$TMP_DIR/with_metrics_checklist.md"
 WITH_METRICS_LOG="$TMP_DIR/with_metrics.log"
@@ -43,6 +47,8 @@ MISSING_METRICS_REPORTS_DIR="$TMP_DIR/reports_missing_metrics"
 MISSING_METRICS_SUMMARY_JSON="$TMP_DIR/missing_metrics_summary.json"
 MISSING_METRICS_CANONICAL_SUMMARY_JSON="$TMP_DIR/missing_metrics_summary_canonical.json"
 MISSING_METRICS_INPUT_SUMMARY_JSON="$TMP_DIR/does_not_exist_metrics_summary.json"
+MISSING_METRICS_MISSING_TEMPLATE_OUTPUT_JSON="$TMP_DIR/missing_metrics_missing_input_template_should_not_exist.json"
+MISSING_METRICS_MISSING_TEMPLATE_CANONICAL_JSON="$TMP_DIR/missing_metrics_missing_input_template_should_not_exist.canonical.json"
 MISSING_METRICS_CHECKLIST_OUTPUT_JSON="$TMP_DIR/missing_metrics_checklist_should_not_exist.json"
 MISSING_METRICS_CHECKLIST_OUTPUT_MD="$TMP_DIR/missing_metrics_checklist_should_not_exist.md"
 MISSING_METRICS_LOG="$TMP_DIR/missing_metrics.log"
@@ -139,6 +145,113 @@ fi
 exit 0
 EOF_FAKE_TEMPLATE
 chmod +x "$FAKE_TEMPLATE"
+
+FAKE_MISSING_TEMPLATE="$TMP_DIR/fake_missing_input_template.sh"
+cat >"$FAKE_MISSING_TEMPLATE" <<'EOF_FAKE_MISSING_TEMPLATE'
+#!/usr/bin/env bash
+set -euo pipefail
+
+capture="${BLOCKCHAIN_MAINNET_ACTIVATION_OPERATOR_PACK_CAPTURE_FILE:?}"
+all_args=("$@")
+{
+  printf '%s' "missing_template"
+  for arg in "${all_args[@]}"; do
+    printf '\t%s' "$arg"
+  done
+  printf '\n'
+} >>"$capture"
+
+metrics_summary_json=""
+output_json=""
+canonical_output_json=""
+include_example_values="0"
+print_output_json="0"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --metrics-summary-json)
+      metrics_summary_json="${2:-}"
+      shift 2
+      ;;
+    --output-json)
+      output_json="${2:-}"
+      shift 2
+      ;;
+    --canonical-output-json)
+      canonical_output_json="${2:-}"
+      shift 2
+      ;;
+    --include-example-values)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        include_example_values="${2:-}"
+        shift 2
+      else
+        include_example_values="1"
+        shift
+      fi
+      ;;
+    --print-output-json)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        print_output_json="${2:-}"
+        shift 2
+      else
+        print_output_json="1"
+        shift
+      fi
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
+if [[ -z "$metrics_summary_json" || -z "$output_json" || -z "$canonical_output_json" ]]; then
+  echo "fake missing-input-template missing required args"
+  exit 7
+fi
+
+if [[ ! -f "$metrics_summary_json" ]]; then
+  echo "fake missing-input-template input metrics summary missing: $metrics_summary_json"
+  exit 8
+fi
+
+mkdir -p "$(dirname "$output_json")" "$(dirname "$canonical_output_json")"
+
+jq -n \
+  --arg metrics_summary_json "$metrics_summary_json" \
+  --arg output_json "$output_json" \
+  --arg canonical_output_json "$canonical_output_json" \
+  --argjson include_example_values "$( [[ "$include_example_values" == "1" ]] && echo true || echo false )" \
+  '{
+    schema: {id: "fake_blockchain_mainnet_activation_metrics_missing_input_template", version: "1.0.0"},
+    status: "ok",
+    include_example_values: $include_example_values,
+    input: {
+      metrics_summary_json: $metrics_summary_json
+    },
+    artifacts: {
+      output_json: $output_json,
+      canonical_output_json: $canonical_output_json
+    }
+  }' >"$output_json"
+
+if [[ "$canonical_output_json" == "$output_json" ]]; then
+  :
+else
+  cp -f "$output_json" "$canonical_output_json"
+fi
+
+if [[ "$print_output_json" == "1" ]]; then
+  cat "$output_json"
+fi
+
+missing_template_rc="${BLOCKCHAIN_MAINNET_ACTIVATION_OPERATOR_PACK_FAKE_MISSING_INPUT_TEMPLATE_RC:-0}"
+if [[ "$missing_template_rc" =~ ^-?[0-9]+$ ]]; then
+  exit "$missing_template_rc"
+fi
+exit 0
+EOF_FAKE_MISSING_TEMPLATE
+chmod +x "$FAKE_MISSING_TEMPLATE"
 
 FAKE_CHECKLIST="$TMP_DIR/fake_checklist.sh"
 cat >"$FAKE_CHECKLIST" <<'EOF_FAKE_CHECKLIST'
@@ -287,6 +400,7 @@ assert_stage_invocation_contains() {
 run_pack() {
   BLOCKCHAIN_MAINNET_ACTIVATION_OPERATOR_PACK_CAPTURE_FILE="$CAPTURE" \
   BLOCKCHAIN_MAINNET_ACTIVATION_OPERATOR_PACK_TEMPLATE_SCRIPT="$FAKE_TEMPLATE" \
+  BLOCKCHAIN_MAINNET_ACTIVATION_OPERATOR_PACK_MISSING_INPUT_TEMPLATE_SCRIPT="$FAKE_MISSING_TEMPLATE" \
   BLOCKCHAIN_MAINNET_ACTIVATION_OPERATOR_PACK_CHECKLIST_SCRIPT="$FAKE_CHECKLIST" \
   "$SCRIPT_UNDER_TEST" "$@"
 }
@@ -305,6 +419,11 @@ if ! grep -Fq -- "--metrics-summary-json" "$HELP_LOG"; then
 fi
 if ! grep -Fq -- "--template-output-json" "$HELP_LOG"; then
   echo "help output missing --template-output-json"
+  cat "$HELP_LOG"
+  exit 1
+fi
+if ! grep -Fq -- "--missing-input-template-output-json" "$HELP_LOG"; then
+  echo "help output missing --missing-input-template-output-json"
   cat "$HELP_LOG"
   exit 1
 fi
@@ -347,6 +466,8 @@ if ! jq -e \
   --arg canonical_summary_json "$TEMPLATE_ONLY_CANONICAL_SUMMARY_JSON" \
   --arg template_output_json "$TEMPLATE_ONLY_TEMPLATE_OUTPUT_JSON" \
   --arg template_canonical_output_json "$TEMPLATE_ONLY_TEMPLATE_CANONICAL_JSON" \
+  --arg missing_input_template_output_json "$TEMPLATE_ONLY_MISSING_TEMPLATE_OUTPUT_JSON" \
+  --arg missing_input_template_canonical_output_json "$TEMPLATE_ONLY_MISSING_TEMPLATE_CANONICAL_JSON" \
   '
   .schema.id == "blockchain_mainnet_activation_operator_pack_summary"
   and .status == "pass"
@@ -354,8 +475,16 @@ if ! jq -e \
   and .inputs.metrics_summary_provided == false
   and .inputs.metrics_summary_exists == false
   and .inputs.metrics_summary_json == null
+  and .inputs.missing_input_template_include_example_values == false
+  and .inputs.missing_input_template_output_json == $missing_input_template_output_json
+  and .inputs.missing_input_template_canonical_output_json == $missing_input_template_canonical_output_json
   and .steps.metrics_input_template.status == "pass"
   and .steps.metrics_input_template.rc == 0
+  and .steps.metrics_missing_input_template.enabled == false
+  and .steps.metrics_missing_input_template.status == "skipped"
+  and .steps.metrics_missing_input_template.skipped_reason == "metrics-summary-json-not-provided"
+  and .steps.metrics_missing_input_template.artifacts.output_json == null
+  and .steps.metrics_missing_input_template.artifacts.canonical_output_json == null
   and .steps.metrics_missing_checklist.enabled == false
   and .steps.metrics_missing_checklist.status == "skipped"
   and .steps.metrics_missing_checklist.skipped_reason == "metrics-summary-json-not-provided"
@@ -366,6 +495,8 @@ if ! jq -e \
   and .artifacts.canonical_summary_json == $canonical_summary_json
   and .artifacts.template_output_json == $template_output_json
   and .artifacts.template_canonical_output_json == $template_canonical_output_json
+  and .artifacts.missing_input_template_output_json == null
+  and .artifacts.missing_input_template_canonical_output_json == null
   and .artifacts.checklist_output_json == null
   and .artifacts.checklist_output_md == null
   ' "$TEMPLATE_ONLY_SUMMARY_JSON" >/dev/null; then
@@ -387,7 +518,7 @@ cat >"$WITH_METRICS_INPUT_SUMMARY_JSON" <<'EOF_WITH_METRICS_INPUT_SUMMARY'
 {
   "schema": {"id": "blockchain_mainnet_activation_metrics_summary", "version": "1.0.0"},
   "status": "partial",
-  "required_missing_metrics": ["paying_users_3mo_min"]
+  "required_missing_metrics": ["paying_users_3mo_min", "measurement_window_weeks"]
 }
 EOF_WITH_METRICS_INPUT_SUMMARY
 
@@ -397,6 +528,9 @@ if ! run_pack \
   --summary-json "$WITH_METRICS_SUMMARY_JSON" \
   --canonical-summary-json "$WITH_METRICS_CANONICAL_SUMMARY_JSON" \
   --metrics-summary-json "$WITH_METRICS_INPUT_SUMMARY_JSON" \
+  --missing-input-template-output-json "$WITH_METRICS_MISSING_TEMPLATE_OUTPUT_JSON" \
+  --missing-input-template-canonical-output-json "$WITH_METRICS_MISSING_TEMPLATE_CANONICAL_JSON" \
+  --missing-input-template-include-example-values 1 \
   --checklist-output-json "$WITH_METRICS_CHECKLIST_OUTPUT_JSON" \
   --checklist-output-md "$WITH_METRICS_CHECKLIST_OUTPUT_MD" \
   --print-summary-json 0 >"$WITH_METRICS_LOG" 2>&1; then
@@ -405,14 +539,20 @@ if ! run_pack \
   exit 1
 fi
 
-assert_stage_order "$CAPTURE" "template" "checklist"
+assert_stage_order "$CAPTURE" "template" "missing_template" "checklist"
+assert_stage_invocation_contains "$CAPTURE" "missing_template" \
+  "--metrics-summary-json" "$WITH_METRICS_INPUT_SUMMARY_JSON" \
+  "--output-json" "$WITH_METRICS_MISSING_TEMPLATE_OUTPUT_JSON" \
+  "--canonical-output-json" "$WITH_METRICS_MISSING_TEMPLATE_CANONICAL_JSON" \
+  "--include-example-values" "1" \
+  "--print-output-json" "0"
 assert_stage_invocation_contains "$CAPTURE" "checklist" \
   "--metrics-summary-json" "$WITH_METRICS_INPUT_SUMMARY_JSON" \
   "--output-json" "$WITH_METRICS_CHECKLIST_OUTPUT_JSON" \
   "--output-md" "$WITH_METRICS_CHECKLIST_OUTPUT_MD"
 
-if [[ ! -f "$WITH_METRICS_CHECKLIST_OUTPUT_JSON" || ! -f "$WITH_METRICS_CHECKLIST_OUTPUT_MD" ]]; then
-  echo "with-metrics run missing checklist artifacts"
+if [[ ! -f "$WITH_METRICS_MISSING_TEMPLATE_OUTPUT_JSON" || ! -f "$WITH_METRICS_MISSING_TEMPLATE_CANONICAL_JSON" || ! -f "$WITH_METRICS_CHECKLIST_OUTPUT_JSON" || ! -f "$WITH_METRICS_CHECKLIST_OUTPUT_MD" ]]; then
+  echo "with-metrics run missing expected artifacts"
   ls -la "$TMP_DIR"
   cat "$WITH_METRICS_LOG"
   exit 1
@@ -420,6 +560,8 @@ fi
 
 if ! jq -e \
   --arg metrics_summary_json "$WITH_METRICS_INPUT_SUMMARY_JSON" \
+  --arg missing_input_template_output_json "$WITH_METRICS_MISSING_TEMPLATE_OUTPUT_JSON" \
+  --arg missing_input_template_canonical_output_json "$WITH_METRICS_MISSING_TEMPLATE_CANONICAL_JSON" \
   --arg checklist_output_json "$WITH_METRICS_CHECKLIST_OUTPUT_JSON" \
   --arg checklist_output_md "$WITH_METRICS_CHECKLIST_OUTPUT_MD" \
   '
@@ -428,6 +570,17 @@ if ! jq -e \
   and .inputs.metrics_summary_provided == true
   and .inputs.metrics_summary_exists == true
   and .inputs.metrics_summary_json == $metrics_summary_json
+  and .inputs.missing_input_template_include_example_values == true
+  and .inputs.missing_input_template_output_json == $missing_input_template_output_json
+  and .inputs.missing_input_template_canonical_output_json == $missing_input_template_canonical_output_json
+  and .steps.metrics_missing_input_template.enabled == true
+  and .steps.metrics_missing_input_template.status == "pass"
+  and .steps.metrics_missing_input_template.rc == 0
+  and .steps.metrics_missing_input_template.skipped_reason == null
+  and .steps.metrics_missing_input_template.input.metrics_summary_json == $metrics_summary_json
+  and .steps.metrics_missing_input_template.input.metrics_summary_exists == true
+  and .steps.metrics_missing_input_template.artifacts.output_json == $missing_input_template_output_json
+  and .steps.metrics_missing_input_template.artifacts.canonical_output_json == $missing_input_template_canonical_output_json
   and .steps.metrics_missing_checklist.enabled == true
   and .steps.metrics_missing_checklist.status == "pass"
   and .steps.metrics_missing_checklist.rc == 0
@@ -436,6 +589,8 @@ if ! jq -e \
   and .steps.metrics_missing_checklist.input.metrics_summary_exists == true
   and .steps.metrics_missing_checklist.artifacts.output_json == $checklist_output_json
   and .steps.metrics_missing_checklist.artifacts.output_md == $checklist_output_md
+  and .artifacts.missing_input_template_output_json == $missing_input_template_output_json
+  and .artifacts.missing_input_template_canonical_output_json == $missing_input_template_canonical_output_json
   and .artifacts.checklist_output_json == $checklist_output_json
   and .artifacts.checklist_output_md == $checklist_output_md
   ' "$WITH_METRICS_SUMMARY_JSON" >/dev/null; then
@@ -454,6 +609,15 @@ if ! jq -e \
   exit 1
 fi
 
+if ! jq -e \
+  --arg metrics_summary_json "$WITH_METRICS_INPUT_SUMMARY_JSON" \
+  '.input.metrics_summary_json == $metrics_summary_json and .status == "ok"' \
+  "$WITH_METRICS_MISSING_TEMPLATE_OUTPUT_JSON" >/dev/null; then
+  echo "with-metrics missing-input-template output contract mismatch"
+  cat "$WITH_METRICS_MISSING_TEMPLATE_OUTPUT_JSON"
+  exit 1
+fi
+
 if ! cmp -s "$WITH_METRICS_SUMMARY_JSON" "$WITH_METRICS_CANONICAL_SUMMARY_JSON"; then
   echo "with-metrics canonical summary does not match summary"
   cat "$WITH_METRICS_SUMMARY_JSON"
@@ -468,6 +632,8 @@ if ! run_pack \
   --summary-json "$MISSING_METRICS_SUMMARY_JSON" \
   --canonical-summary-json "$MISSING_METRICS_CANONICAL_SUMMARY_JSON" \
   --metrics-summary-json "$MISSING_METRICS_INPUT_SUMMARY_JSON" \
+  --missing-input-template-output-json "$MISSING_METRICS_MISSING_TEMPLATE_OUTPUT_JSON" \
+  --missing-input-template-canonical-output-json "$MISSING_METRICS_MISSING_TEMPLATE_CANONICAL_JSON" \
   --checklist-output-json "$MISSING_METRICS_CHECKLIST_OUTPUT_JSON" \
   --checklist-output-md "$MISSING_METRICS_CHECKLIST_OUTPUT_MD" \
   --print-summary-json 0 >"$MISSING_METRICS_LOG" 2>&1; then
@@ -477,8 +643,8 @@ if ! run_pack \
 fi
 
 assert_stage_order "$CAPTURE" "template"
-if [[ -f "$MISSING_METRICS_CHECKLIST_OUTPUT_JSON" || -f "$MISSING_METRICS_CHECKLIST_OUTPUT_MD" ]]; then
-  echo "missing-metrics run should skip checklist and not create checklist artifacts"
+if [[ -f "$MISSING_METRICS_MISSING_TEMPLATE_OUTPUT_JSON" || -f "$MISSING_METRICS_MISSING_TEMPLATE_CANONICAL_JSON" || -f "$MISSING_METRICS_CHECKLIST_OUTPUT_JSON" || -f "$MISSING_METRICS_CHECKLIST_OUTPUT_MD" ]]; then
+  echo "missing-metrics run should skip optional stages and not create optional artifacts"
   ls -la "$TMP_DIR"
   cat "$MISSING_METRICS_LOG"
   exit 1
@@ -486,18 +652,29 @@ fi
 
 if ! jq -e \
   --arg metrics_summary_json "$MISSING_METRICS_INPUT_SUMMARY_JSON" \
+  --arg missing_input_template_output_json "$MISSING_METRICS_MISSING_TEMPLATE_OUTPUT_JSON" \
+  --arg missing_input_template_canonical_output_json "$MISSING_METRICS_MISSING_TEMPLATE_CANONICAL_JSON" \
   '
   .status == "pass"
   and .rc == 0
   and .inputs.metrics_summary_provided == true
   and .inputs.metrics_summary_exists == false
   and .inputs.metrics_summary_json == $metrics_summary_json
+  and .inputs.missing_input_template_output_json == $missing_input_template_output_json
+  and .inputs.missing_input_template_canonical_output_json == $missing_input_template_canonical_output_json
   and .steps.metrics_input_template.status == "pass"
+  and .steps.metrics_missing_input_template.enabled == false
+  and .steps.metrics_missing_input_template.status == "skipped"
+  and .steps.metrics_missing_input_template.skipped_reason == "metrics-summary-json-missing-file"
+  and .steps.metrics_missing_input_template.artifacts.output_json == null
+  and .steps.metrics_missing_input_template.artifacts.canonical_output_json == null
   and .steps.metrics_missing_checklist.enabled == false
   and .steps.metrics_missing_checklist.status == "skipped"
   and .steps.metrics_missing_checklist.skipped_reason == "metrics-summary-json-missing-file"
   and .steps.metrics_missing_checklist.artifacts.output_json == null
   and .steps.metrics_missing_checklist.artifacts.output_md == null
+  and .artifacts.missing_input_template_output_json == null
+  and .artifacts.missing_input_template_canonical_output_json == null
   and .artifacts.checklist_output_json == null
   and .artifacts.checklist_output_md == null
   ' "$MISSING_METRICS_SUMMARY_JSON" >/dev/null; then

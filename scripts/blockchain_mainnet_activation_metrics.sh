@@ -216,6 +216,7 @@ metric_keys=(
 )
 
 required_metric_keys=(
+  measurement_window_weeks
   vpn_connect_session_success_slo_pct
   vpn_recovery_mttr_p95_minutes
   paying_users_3mo_min
@@ -233,7 +234,6 @@ required_metric_keys=(
 )
 
 optional_metric_keys=(
-  measurement_window_weeks
 )
 
 declare -A known_metric=()

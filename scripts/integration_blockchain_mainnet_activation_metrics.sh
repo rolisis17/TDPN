@@ -96,8 +96,8 @@ if ! jq -e \
   and .status == "complete"
   and .rc == 0
   and .ready_for_gate == true
-  and .counts.required == 14
-  and .counts.provided == 14
+  and .counts.required == 15
+  and .counts.provided == 15
   and .counts.missing == 0
   and .counts.invalid == 0
   and (.required_missing_metrics | length) == 0
@@ -174,10 +174,11 @@ if ! jq -e \
   .status == "partial"
   and .rc == 0
   and .ready_for_gate == false
-  and .counts.required == 14
+  and .counts.required == 15
   and .counts.provided == 1
-  and .counts.missing == 13
+  and .counts.missing == 14
   and .counts.invalid == 1
+  and ((.required_missing_metrics // []) | index("measurement_window_weeks")) != null
   and ((.required_missing_metrics // []) | index("vpn_connect_session_success_slo_pct")) != null
   and ((.required_missing_metrics // []) | index("validator_candidate_depth")) != null
   and ((.required_provided_metrics // []) | index("paying_users_3mo_min")) != null
@@ -285,8 +286,8 @@ if ! jq -e \
   .status == "complete"
   and .rc == 0
   and .ready_for_gate == true
-  and .counts.required == 14
-  and .counts.provided == 14
+  and .counts.required == 15
+  and .counts.provided == 15
   and .counts.missing == 0
   and .counts.invalid == 0
   and .measurement_window_weeks == 12
@@ -377,8 +378,8 @@ if ! jq -e \
   .status == "complete"
   and .rc == 0
   and .ready_for_gate == true
-  and .counts.required == 14
-  and .counts.provided == 14
+  and .counts.required == 15
+  and .counts.provided == 15
   and .counts.missing == 0
   and .counts.invalid == 0
   and .paying_users_3mo_min == 1100
