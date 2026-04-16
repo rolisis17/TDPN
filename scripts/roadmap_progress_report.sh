@@ -1235,7 +1235,7 @@ phase5_settlement_layer_summary_completeness_score() {
   local path="$1"
   local score=0
   local signal=""
-  for signal in settlement_failsoft_ok settlement_acceptance_ok settlement_bridge_smoke_ok settlement_state_persistence_ok settlement_adapter_roundtrip_ok issuer_sponsor_api_live_smoke_ok; do
+  for signal in settlement_failsoft_ok settlement_acceptance_ok settlement_bridge_smoke_ok settlement_state_persistence_ok settlement_adapter_roundtrip_ok issuer_sponsor_api_live_smoke_ok issuer_settlement_status_live_smoke_ok; do
     if [[ "$(candidate_bool_signal_present_01 "$path" "$signal")" == "1" ]]; then
       score=$((score + 1))
     fi
@@ -1252,7 +1252,7 @@ phase5_settlement_layer_summary_quality_score() {
     printf '%s' "0"
     return
   fi
-  for signal in settlement_failsoft_ok settlement_acceptance_ok settlement_bridge_smoke_ok settlement_state_persistence_ok settlement_adapter_roundtrip_ok issuer_sponsor_api_live_smoke_ok; do
+  for signal in settlement_failsoft_ok settlement_acceptance_ok settlement_bridge_smoke_ok settlement_state_persistence_ok settlement_adapter_roundtrip_ok issuer_sponsor_api_live_smoke_ok issuer_settlement_status_live_smoke_ok; do
     value="$(candidate_bool_signal_value_or_empty "$path" "$signal")"
     case "$value" in
       true)
@@ -1290,6 +1290,15 @@ phase5_settlement_layer_summary_quality_score() {
       score=$((score - 2))
       ;;
   esac
+  value="$(candidate_string_signal_value_or_empty "$path" "issuer_settlement_status_live_smoke_status")"
+  case "${value,,}" in
+    pass|ok|success)
+      score=$((score + 2))
+      ;;
+    fail|failed|error|invalid|degraded)
+      score=$((score - 2))
+      ;;
+  esac
   printf '%s' "$score"
 }
 
@@ -1308,7 +1317,7 @@ phase5_settlement_layer_summary_obviously_degraded_01() {
       return
       ;;
   esac
-  for signal in settlement_failsoft_ok settlement_acceptance_ok settlement_bridge_smoke_ok settlement_state_persistence_ok settlement_adapter_roundtrip_ok issuer_sponsor_api_live_smoke_ok; do
+  for signal in settlement_failsoft_ok settlement_acceptance_ok settlement_bridge_smoke_ok settlement_state_persistence_ok settlement_adapter_roundtrip_ok issuer_sponsor_api_live_smoke_ok issuer_settlement_status_live_smoke_ok; do
     value="$(candidate_bool_signal_value_or_empty "$path" "$signal")"
     if [[ "$value" == "false" ]]; then
       printf '%s' "1"
@@ -1323,6 +1332,13 @@ phase5_settlement_layer_summary_obviously_degraded_01() {
       ;;
   esac
   value="$(candidate_string_signal_value_or_empty "$path" "issuer_sponsor_api_live_smoke_status")"
+  case "${value,,}" in
+    fail|failed|error|invalid|degraded)
+      printf '%s' "1"
+      return
+      ;;
+  esac
+  value="$(candidate_string_signal_value_or_empty "$path" "issuer_settlement_status_live_smoke_status")"
   case "${value,,}" in
     fail|failed|error|invalid|degraded)
       printf '%s' "1"
@@ -3680,6 +3696,8 @@ phase5_settlement_layer_handoff_settlement_adapter_roundtrip_status_json=""
 phase5_settlement_layer_handoff_settlement_adapter_roundtrip_ok_json="null"
 phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_status_json=""
 phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_ok_json="null"
+phase5_settlement_layer_handoff_issuer_settlement_status_live_smoke_status_json=""
+phase5_settlement_layer_handoff_issuer_settlement_status_live_smoke_ok_json="null"
 if [[ -n "$phase5_settlement_layer_summary_json" ]]; then
   phase5_settlement_layer_handoff_input_summary_json="$phase5_settlement_layer_summary_json"
   if [[ "$(phase5_settlement_layer_summary_usable_01 "$phase5_settlement_layer_summary_json")" == "1" ]]; then
@@ -3939,6 +3957,52 @@ if [[ -n "$phase5_settlement_layer_summary_json" ]]; then
             ;;
           fail)
             phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_ok_json="false"
+            ;;
+        esac
+      fi
+      phase5_settlement_layer_handoff_issuer_settlement_status_live_smoke_status_json="$(jq -r '
+        if (.issuer_settlement_status_live_smoke_status | type) == "string" then .issuer_settlement_status_live_smoke_status
+        elif (.summary.issuer_settlement_status_live_smoke_status | type) == "string" then .summary.issuer_settlement_status_live_smoke_status
+        elif (.handoff.issuer_settlement_status_live_smoke_status | type) == "string" then .handoff.issuer_settlement_status_live_smoke_status
+        elif (.signals.issuer_settlement_status_live_smoke_status | type) == "string" then .signals.issuer_settlement_status_live_smoke_status
+        elif (.phase5_settlement_layer_handoff.issuer_settlement_status_live_smoke_status | type) == "string" then .phase5_settlement_layer_handoff.issuer_settlement_status_live_smoke_status
+        elif (.vpn_track.phase5_settlement_layer_handoff.issuer_settlement_status_live_smoke_status | type) == "string" then .vpn_track.phase5_settlement_layer_handoff.issuer_settlement_status_live_smoke_status
+        elif (.steps.issuer_settlement_status_live_smoke.status | type) == "string" then .steps.issuer_settlement_status_live_smoke.status
+        elif (.stages.issuer_settlement_status_live_smoke.status | type) == "string" then .stages.issuer_settlement_status_live_smoke.status
+        else empty end
+      ' "$phase5_settlement_layer_handoff_source_summary_json" 2>/dev/null || true)"
+      phase5_settlement_layer_handoff_issuer_settlement_status_live_smoke_ok_json="$(resolve_phase5_bool_with_fallback \
+        "$phase5_settlement_layer_handoff_source_summary_json" \
+        'if (.issuer_settlement_status_live_smoke_ok | type) == "boolean" then .issuer_settlement_status_live_smoke_ok
+          elif (.summary.issuer_settlement_status_live_smoke_ok | type) == "boolean" then .summary.issuer_settlement_status_live_smoke_ok
+          elif (.handoff.issuer_settlement_status_live_smoke_ok | type) == "boolean" then .handoff.issuer_settlement_status_live_smoke_ok
+          elif (.signals.issuer_settlement_status_live_smoke_ok | type) == "boolean" then .signals.issuer_settlement_status_live_smoke_ok
+          elif (.signals.issuer_settlement_status_live_smoke | type) == "boolean" then .signals.issuer_settlement_status_live_smoke
+          elif (.phase5_settlement_layer_handoff.issuer_settlement_status_live_smoke_ok | type) == "boolean" then .phase5_settlement_layer_handoff.issuer_settlement_status_live_smoke_ok
+          elif (.vpn_track.phase5_settlement_layer_handoff.issuer_settlement_status_live_smoke_ok | type) == "boolean" then .vpn_track.phase5_settlement_layer_handoff.issuer_settlement_status_live_smoke_ok
+          else empty end' \
+        'if (.stages.issuer_settlement_status_live_smoke.ok | type) == "boolean" then .stages.issuer_settlement_status_live_smoke.ok
+          else
+            ((if (.issuer_settlement_status_live_smoke_status | type) == "string" then .issuer_settlement_status_live_smoke_status
+              elif (.summary.issuer_settlement_status_live_smoke_status | type) == "string" then .summary.issuer_settlement_status_live_smoke_status
+              elif (.handoff.issuer_settlement_status_live_smoke_status | type) == "string" then .handoff.issuer_settlement_status_live_smoke_status
+              elif (.signals.issuer_settlement_status_live_smoke_status | type) == "string" then .signals.issuer_settlement_status_live_smoke_status
+              elif (.phase5_settlement_layer_handoff.issuer_settlement_status_live_smoke_status | type) == "string" then .phase5_settlement_layer_handoff.issuer_settlement_status_live_smoke_status
+              elif (.vpn_track.phase5_settlement_layer_handoff.issuer_settlement_status_live_smoke_status | type) == "string" then .vpn_track.phase5_settlement_layer_handoff.issuer_settlement_status_live_smoke_status
+              elif (.steps.issuer_settlement_status_live_smoke.status | type) == "string" then .steps.issuer_settlement_status_live_smoke.status
+              elif (.stages.issuer_settlement_status_live_smoke.status | type) == "string" then .stages.issuer_settlement_status_live_smoke.status
+              else "" end) | ascii_downcase) as $s
+            | if $s == "pass" then true
+              elif $s == "fail" then false
+              else empty end
+          end')"
+      if [[ "$phase5_settlement_layer_handoff_issuer_settlement_status_live_smoke_ok_json" == "null" ]]; then
+        case "${phase5_settlement_layer_handoff_issuer_settlement_status_live_smoke_status_json,,}" in
+          pass)
+            phase5_settlement_layer_handoff_issuer_settlement_status_live_smoke_ok_json="true"
+            ;;
+          fail)
+            phase5_settlement_layer_handoff_issuer_settlement_status_live_smoke_ok_json="false"
             ;;
         esac
       fi
@@ -5183,6 +5247,8 @@ summary_payload="$(jq -n \
   --argjson phase5_settlement_layer_handoff_settlement_adapter_roundtrip_ok "$phase5_settlement_layer_handoff_settlement_adapter_roundtrip_ok_json" \
   --arg phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_status "$phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_status_json" \
   --argjson phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_ok "$phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_ok_json" \
+  --arg phase5_settlement_layer_handoff_issuer_settlement_status_live_smoke_status "$phase5_settlement_layer_handoff_issuer_settlement_status_live_smoke_status_json" \
+  --argjson phase5_settlement_layer_handoff_issuer_settlement_status_live_smoke_ok "$phase5_settlement_layer_handoff_issuer_settlement_status_live_smoke_ok_json" \
   --argjson phase6_cosmos_l1_handoff_available "$phase6_cosmos_l1_handoff_available_json" \
   --arg phase6_cosmos_l1_handoff_input_summary_json "$phase6_cosmos_l1_handoff_input_summary_json" \
   --arg phase6_cosmos_l1_handoff_source_summary_json "$phase6_cosmos_l1_handoff_source_summary_json" \
@@ -5405,7 +5471,9 @@ summary_payload="$(jq -n \
         settlement_adapter_roundtrip_status: (if $phase5_settlement_layer_handoff_settlement_adapter_roundtrip_status == "" then null else $phase5_settlement_layer_handoff_settlement_adapter_roundtrip_status end),
         settlement_adapter_roundtrip_ok: $phase5_settlement_layer_handoff_settlement_adapter_roundtrip_ok,
         issuer_sponsor_api_live_smoke_status: (if $phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_status == "" then null else $phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_status end),
-        issuer_sponsor_api_live_smoke_ok: $phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_ok
+        issuer_sponsor_api_live_smoke_ok: $phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_ok,
+        issuer_settlement_status_live_smoke_status: (if $phase5_settlement_layer_handoff_issuer_settlement_status_live_smoke_status == "" then null else $phase5_settlement_layer_handoff_issuer_settlement_status_live_smoke_status end),
+        issuer_settlement_status_live_smoke_ok: $phase5_settlement_layer_handoff_issuer_settlement_status_live_smoke_ok
       },
       resilience_handoff: {
         available: $resilience_handoff_available,
@@ -5676,6 +5744,8 @@ cat >"$report_tmp" <<EOF_MD
 - Phase-5 settlement_adapter_roundtrip_ok: $(jq -r '.vpn_track.phase5_settlement_layer_handoff.settlement_adapter_roundtrip_ok | if . == null then "null" else tostring end' "$summary_json")
 - Phase-5 issuer_sponsor_api_live_smoke_status: $(jq -r '.vpn_track.phase5_settlement_layer_handoff.issuer_sponsor_api_live_smoke_status // "null"' "$summary_json")
 - Phase-5 issuer_sponsor_api_live_smoke_ok: $(jq -r '.vpn_track.phase5_settlement_layer_handoff.issuer_sponsor_api_live_smoke_ok | if . == null then "null" else tostring end' "$summary_json")
+- Phase-5 issuer_settlement_status_live_smoke_status: $(jq -r '.vpn_track.phase5_settlement_layer_handoff.issuer_settlement_status_live_smoke_status // "null"' "$summary_json")
+- Phase-5 issuer_settlement_status_live_smoke_ok: $(jq -r '.vpn_track.phase5_settlement_layer_handoff.issuer_settlement_status_live_smoke_ok | if . == null then "null" else tostring end' "$summary_json")
 - Resilience handoff available: $(jq -r '.vpn_track.resilience_handoff.available' "$summary_json")
 - Resilience handoff source: $(jq -r '.vpn_track.resilience_handoff.source_summary_json // "none"' "$summary_json")
 - profile_matrix_stable: $(jq -r '.vpn_track.resilience_handoff.profile_matrix_stable | if . == null then "null" else tostring end' "$summary_json")
@@ -5829,6 +5899,7 @@ echo "[roadmap-progress-report] phase5_settlement_layer_handoff_available=$phase
 echo "[roadmap-progress-report] phase5_settlement_layer_handoff_settlement_failsoft_ok=$phase5_settlement_layer_handoff_settlement_failsoft_ok_json settlement_acceptance_ok=$phase5_settlement_layer_handoff_settlement_acceptance_ok_json settlement_bridge_smoke_ok=$phase5_settlement_layer_handoff_settlement_bridge_smoke_ok_json settlement_state_persistence_ok=$phase5_settlement_layer_handoff_settlement_state_persistence_ok_json"
 echo "[roadmap-progress-report] phase5_settlement_layer_handoff_settlement_adapter_roundtrip_status=${phase5_settlement_layer_handoff_settlement_adapter_roundtrip_status_json:-null} settlement_adapter_roundtrip_ok=$phase5_settlement_layer_handoff_settlement_adapter_roundtrip_ok_json"
 echo "[roadmap-progress-report] phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_status=${phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_status_json:-null} issuer_sponsor_api_live_smoke_ok=$phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_ok_json"
+echo "[roadmap-progress-report] phase5_settlement_layer_handoff_issuer_settlement_status_live_smoke_status=${phase5_settlement_layer_handoff_issuer_settlement_status_live_smoke_status_json:-null} issuer_settlement_status_live_smoke_ok=$phase5_settlement_layer_handoff_issuer_settlement_status_live_smoke_ok_json"
 echo "[roadmap-progress-report] phase6_cosmos_l1_handoff_available=$phase6_cosmos_l1_handoff_available_json source_summary_json=${phase6_cosmos_l1_handoff_source_summary_json:-} source_kind=${phase6_cosmos_l1_handoff_source_summary_kind:-}"
 echo "[roadmap-progress-report] phase6_cosmos_l1_handoff_status=$phase6_cosmos_l1_handoff_status_json rc=$phase6_cosmos_l1_handoff_rc_json run_pipeline_ok=$phase6_cosmos_l1_handoff_run_pipeline_ok_json module_tx_surface_ok=$phase6_cosmos_l1_handoff_module_tx_surface_ok_json tdpnd_grpc_runtime_smoke_ok=$phase6_cosmos_l1_handoff_tdpnd_grpc_runtime_smoke_ok_json tdpnd_grpc_live_smoke_ok=$phase6_cosmos_l1_handoff_tdpnd_grpc_live_smoke_ok_json tdpnd_grpc_auth_live_smoke_ok=$phase6_cosmos_l1_handoff_tdpnd_grpc_auth_live_smoke_ok_json tdpnd_comet_runtime_smoke_ok=$phase6_cosmos_l1_handoff_tdpnd_comet_runtime_smoke_ok_json"
 echo "[roadmap-progress-report] phase7_mainnet_cutover_summary_available=$phase7_mainnet_cutover_summary_available_json source_summary_json=${phase7_mainnet_cutover_summary_source_summary_json:-} source_kind=${phase7_mainnet_cutover_summary_source_summary_kind:-}"

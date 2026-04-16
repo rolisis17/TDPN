@@ -967,6 +967,11 @@ if ! rg -q '\[manual-validation-status\] profile_default_gate_next_command=sudo 
   cat $PROFILE_BLOCKED_LOG
   exit 1
 fi
+if ! rg -q '\[manual-validation-status\] profile_default_gate_next_command=.*--campaign-timeout-sec 1200' $PROFILE_BLOCKED_LOG; then
+  echo "profile-blocked status missing profile-default gate campaign-timeout flag"
+  cat $PROFILE_BLOCKED_LOG
+  exit 1
+fi
 profile_blocked_json="$(awk '/^\[manual-validation-status\] summary_json_payload:/{flag=1; next} flag{print}' $PROFILE_BLOCKED_LOG)"
 if [[ -z "$profile_blocked_json" ]]; then
   echo "profile-blocked status missing JSON payload"
@@ -980,6 +985,7 @@ if ! printf '%s\n' "$profile_blocked_json" | jq -e '
   and .summary.profile_default_gate.failure_stage == "campaign"
   and .summary.profile_default_gate.non_root_refresh_blocked == true
   and (.summary.profile_default_gate.next_command | startswith("sudo ./scripts/easy_node.sh profile-compare-campaign-signoff"))
+  and (.summary.profile_default_gate.next_command | contains("--campaign-timeout-sec 1200"))
   and (.summary.profile_default_gate.next_command | contains("--summary-json '"$PROFILE_SIGNOFF_SUMMARY_JSON"'"))
 ' >/dev/null; then
   echo "profile-blocked status JSON missing expected profile_default_gate fields"
@@ -1029,6 +1035,7 @@ if ! printf '%s\n' "$profile_stale_json" | jq -e '
   and .summary.profile_default_gate.stale_non_refreshed == true
   and .summary.profile_default_gate.refresh_campaign == false
   and (.summary.profile_default_gate.next_command | startswith("sudo ./scripts/easy_node.sh profile-compare-campaign-signoff"))
+  and (.summary.profile_default_gate.next_command | contains("--campaign-timeout-sec 1200"))
   and (.summary.profile_default_gate.next_command | contains("--summary-json '"$PROFILE_SIGNOFF_SUMMARY_JSON"'"))
 ' >/dev/null; then
   echo "profile-stale status JSON missing expected stale profile_default_gate fields"
@@ -1113,6 +1120,7 @@ if ! printf '%s\n' "$profile_no_go_insufficient_json" | jq -e '
   and .summary.profile_default_gate.next_command_source == "sudo_required_diagnostics_root_required"
   and .summary.profile_default_gate.next_command_sudo_only_reason == "diagnostics_root_required"
   and (.summary.profile_default_gate.next_command | startswith("sudo ./scripts/easy_node.sh profile-compare-campaign-signoff"))
+  and (.summary.profile_default_gate.next_command | contains("--campaign-timeout-sec 1200"))
 ' >/dev/null; then
   echo "profile-no-go-insufficient status JSON missing expected pending mapping fields"
   printf '%s\n' "$profile_no_go_insufficient_json"
@@ -1186,10 +1194,12 @@ if ! printf '%s\n' "$profile_no_go_insufficient_json" | jq -e --arg matrix "$PRO
   and (.summary.profile_default_gate.next_command | contains("--campaign-directory-urls"))
   and (.summary.profile_default_gate.next_command | contains("18081"))
   and (.summary.profile_default_gate.next_command | contains("28081"))
+  and (.summary.profile_default_gate.next_command | contains("--campaign-timeout-sec 1200"))
   and (.summary.profile_default_gate.next_command | contains("--campaign-issuer-url http://127.0.0.1:18082"))
   and (.summary.profile_default_gate.next_command | contains("--campaign-entry-url http://127.0.0.1:18083"))
   and (.summary.profile_default_gate.next_command | contains("--campaign-exit-url http://127.0.0.1:18084"))
   and (.summary.profile_default_gate.next_command_sudo | startswith("sudo ./scripts/easy_node.sh profile-compare-campaign-signoff"))
+  and (.summary.profile_default_gate.next_command_sudo | contains("--campaign-timeout-sec 1200"))
   and (.summary.profile_default_gate.next_command_source | test("docker"))
   and .summary.profile_default_gate.next_command_sudo_only_reason == null
   and .summary.profile_default_gate.docker_rehearsal_hint_available == true
@@ -1246,6 +1256,7 @@ if ! printf '%s\n' "$profile_no_go_insufficient_json" | jq -e '
   and .summary.profile_default_gate.insufficient_evidence == true
   and .summary.profile_default_gate.diagnostics_root_required == true
   and (.summary.profile_default_gate.next_command | startswith("sudo ./scripts/easy_node.sh profile-compare-campaign-signoff"))
+  and (.summary.profile_default_gate.next_command | contains("--campaign-timeout-sec 1200"))
   and .summary.profile_default_gate.next_command_source == "sudo_required_diagnostics_root_required_docker_start_local_stack_1"
   and .summary.profile_default_gate.next_command_sudo_only_reason == "diagnostics_root_required_docker_start_local_stack_1"
   and (.summary.profile_default_gate.notes | contains("docker hint requires --campaign-start-local-stack 1"))
@@ -1336,7 +1347,9 @@ if ! printf '%s\n' "$profile_invalid_summary_json" | jq -e '
     or
     (.summary.profile_default_gate.next_command | startswith("sudo ./scripts/easy_node.sh profile-compare-campaign-signoff"))
   )
+  and (.summary.profile_default_gate.next_command | contains("--campaign-timeout-sec 1200"))
   and (.summary.profile_default_gate.next_command_sudo | startswith("sudo ./scripts/easy_node.sh profile-compare-campaign-signoff"))
+  and (.summary.profile_default_gate.next_command_sudo | contains("--campaign-timeout-sec 1200"))
   and (.summary.profile_default_gate.next_command | contains("--summary-json '"$PROFILE_SIGNOFF_SUMMARY_JSON"'"))
 ' >/dev/null; then
   echo "profile-invalid-summary status JSON missing expected profile_default_gate fields"

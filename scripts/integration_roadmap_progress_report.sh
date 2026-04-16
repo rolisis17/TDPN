@@ -310,6 +310,9 @@ cat >"$PHASE5_SETTLEMENT_LAYER_SUMMARY_JSON" <<'EOF_PHASE5_SUMMARY'
   "steps": {
     "issuer_sponsor_api_live_smoke": {
       "status": "pass"
+    },
+    "issuer_settlement_status_live_smoke": {
+      "status": "pass"
     }
   }
 }
@@ -770,6 +773,8 @@ if ! jq -e '
   and (.refresh.single_machine_prod_readiness.duration_sec >= 0)
   and .vpn_track.phase5_settlement_layer_handoff.issuer_sponsor_api_live_smoke_status == "pass"
   and .vpn_track.phase5_settlement_layer_handoff.issuer_sponsor_api_live_smoke_ok == true
+  and .vpn_track.phase5_settlement_layer_handoff.issuer_settlement_status_live_smoke_status == "pass"
+  and .vpn_track.phase5_settlement_layer_handoff.issuer_settlement_status_live_smoke_ok == true
   and .artifacts.phase0_summary_json == "'"$PHASE0_SUMMARY_JSON"'"
   and .artifacts.manual_validation_summary_json == "'"$TEST_LOG_DIR/manual_validation_readiness_summary.json"'"
   and .artifacts.manual_validation_report_md == "'"$TEST_LOG_DIR/manual_validation_readiness_report.md"'"
@@ -902,6 +907,16 @@ if ! rg -q 'Phase-5 issuer_sponsor_api_live_smoke_status: pass' "$REPORT_MD"; th
 fi
 if ! rg -q 'Phase-5 issuer_sponsor_api_live_smoke_ok: true' "$REPORT_MD"; then
   echo "report markdown missing phase5 issuer_sponsor_api_live_smoke_ok line"
+  cat "$REPORT_MD"
+  exit 1
+fi
+if ! rg -q 'Phase-5 issuer_settlement_status_live_smoke_status: pass' "$REPORT_MD"; then
+  echo "report markdown missing phase5 issuer_settlement_status_live_smoke_status line"
+  cat "$REPORT_MD"
+  exit 1
+fi
+if ! rg -q 'Phase-5 issuer_settlement_status_live_smoke_ok: true' "$REPORT_MD"; then
+  echo "report markdown missing phase5 issuer_settlement_status_live_smoke_ok line"
   cat "$REPORT_MD"
   exit 1
 fi
@@ -1557,6 +1572,11 @@ fi
 
 if ! rg -q '\[roadmap-progress-report\] phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_status=pass issuer_sponsor_api_live_smoke_ok=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
   echo "expected phase5 issuer sponsor debug line in success path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log
+  exit 1
+fi
+if ! rg -q '\[roadmap-progress-report\] phase5_settlement_layer_handoff_issuer_settlement_status_live_smoke_status=pass issuer_settlement_status_live_smoke_ok=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
+  echo "expected phase5 issuer settlement status debug line in success path"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log
   exit 1
 fi
@@ -3074,7 +3094,9 @@ cat >"$AUTO_PHASE5_GOOD_JSON" <<'EOF_AUTO_PHASE5_GOOD'
   "settlement_adapter_roundtrip_ok": true,
   "settlement_adapter_roundtrip_status": "pass",
   "issuer_sponsor_api_live_smoke_ok": true,
-  "issuer_sponsor_api_live_smoke_status": "pass"
+  "issuer_sponsor_api_live_smoke_status": "pass",
+  "issuer_settlement_status_live_smoke_ok": true,
+  "issuer_settlement_status_live_smoke_status": "pass"
 }
 EOF_AUTO_PHASE5_GOOD
 touch -t 202601010101 "$AUTO_PHASE5_GOOD_JSON"
@@ -3095,7 +3117,9 @@ cat >"$AUTO_PHASE5_CLOBBERED_JSON" <<'EOF_AUTO_PHASE5_CLOBBERED'
   "settlement_adapter_roundtrip_ok": false,
   "settlement_adapter_roundtrip_status": "fail",
   "issuer_sponsor_api_live_smoke_ok": false,
-  "issuer_sponsor_api_live_smoke_status": "fail"
+  "issuer_sponsor_api_live_smoke_status": "fail",
+  "issuer_settlement_status_live_smoke_ok": false,
+  "issuer_settlement_status_live_smoke_status": "fail"
 }
 EOF_AUTO_PHASE5_CLOBBERED
 touch -t 202601020202 "$AUTO_PHASE5_CLOBBERED_JSON"
@@ -3117,7 +3141,9 @@ cat >"$AUTO_PHASE5_DRY_RUN_JSON" <<'EOF_AUTO_PHASE5_DRY_RUN'
   "settlement_adapter_roundtrip_ok": true,
   "settlement_adapter_roundtrip_status": "pass",
   "issuer_sponsor_api_live_smoke_ok": true,
-  "issuer_sponsor_api_live_smoke_status": "pass"
+  "issuer_sponsor_api_live_smoke_status": "pass",
+  "issuer_settlement_status_live_smoke_ok": true,
+  "issuer_settlement_status_live_smoke_status": "pass"
 }
 EOF_AUTO_PHASE5_DRY_RUN
 touch -t 202601030303 "$AUTO_PHASE5_DRY_RUN_JSON"
@@ -3148,6 +3174,7 @@ if ! jq -e --arg src "$AUTO_PHASE5_GOOD_JSON" '
   and .vpn_track.phase5_settlement_layer_handoff.settlement_state_persistence_ok == true
   and .vpn_track.phase5_settlement_layer_handoff.settlement_adapter_roundtrip_ok == true
   and .vpn_track.phase5_settlement_layer_handoff.issuer_sponsor_api_live_smoke_ok == true
+  and .vpn_track.phase5_settlement_layer_handoff.issuer_settlement_status_live_smoke_ok == true
   and .artifacts.phase5_settlement_layer_summary_json == $src
 ' "$TMP_DIR/roadmap_progress_auto_phase5_summary.json" >/dev/null; then
   echo "auto phase5 source selection summary mismatch"

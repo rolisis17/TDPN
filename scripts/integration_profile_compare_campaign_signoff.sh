@@ -464,6 +464,107 @@ if ! jq -e '.status == "ok" and .final_rc == 0 and .inputs.refresh_campaign == t
   exit 1
 fi
 
+echo "[profile-compare-campaign-signoff] remote endpoint preflight fail-closes campaign stage"
+: >"$SIGNOFF_CAPTURE"
+PREFLIGHT_FAIL_REPORTS_DIR="$TMP_DIR/reports_preflight_fail"
+PREFLIGHT_FAIL_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_preflight_fail.json"
+mkdir -p "$PREFLIGHT_FAIL_REPORTS_DIR"
+cat >"$PREFLIGHT_FAIL_REPORTS_DIR/profile_compare_campaign_check_summary.json" <<'JSON'
+{
+  "decision": "GO",
+  "observed": {
+    "recommended_profile": "balanced",
+    "support_rate_pct": 94,
+    "trend_source": "stale_prior_run"
+  }
+}
+JSON
+PREFLIGHT_FAKE_BIN="$TMP_DIR/preflight_fake_bin"
+mkdir -p "$PREFLIGHT_FAKE_BIN"
+cat >"$PREFLIGHT_FAKE_BIN/curl" <<'EOF_FAKE_CURL'
+#!/usr/bin/env bash
+set -euo pipefail
+echo "curl: (7) failed to connect to endpoint" >&2
+exit 7
+EOF_FAKE_CURL
+chmod +x "$PREFLIGHT_FAKE_BIN/curl"
+set +e
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_COMPARE_CAMPAIGN_SCRIPT="$FAKE_CAMPAIGN" \
+PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT="$FAKE_CHECK" \
+PATH="$PREFLIGHT_FAKE_BIN:$PATH" \
+FAKE_CAMPAIGN_RC=0 \
+FAKE_CHECK_RC=0 \
+./scripts/profile_compare_campaign_signoff.sh \
+  --reports-dir "$PREFLIGHT_FAIL_REPORTS_DIR" \
+  --refresh-campaign 1 \
+  --campaign-execution-mode docker \
+  --campaign-endpoint-preflight-timeout-sec 1 \
+  --campaign-directory-urls "http://198.51.100.42:18081,http://198.51.100.43:28081" \
+  --campaign-bootstrap-directory "http://198.51.100.42:18081" \
+  --campaign-issuer-url "http://198.51.100.42:18082" \
+  --campaign-entry-url "http://198.51.100.42:18083" \
+  --campaign-exit-url "http://198.51.100.42:18084" \
+  --summary-json "$PREFLIGHT_FAIL_SUMMARY" >/tmp/integration_profile_compare_campaign_signoff_preflight_fail.log 2>&1
+rc_preflight_fail=$?
+set -e
+if [[ "$rc_preflight_fail" -eq 0 ]]; then
+  echo "expected non-zero rc when remote endpoint preflight fails"
+  cat /tmp/integration_profile_compare_campaign_signoff_preflight_fail.log
+  exit 1
+fi
+if ! rg -q 'campaign endpoint preflight failed reason=' /tmp/integration_profile_compare_campaign_signoff_preflight_fail.log; then
+  echo "expected endpoint preflight failure trace line not found"
+  cat /tmp/integration_profile_compare_campaign_signoff_preflight_fail.log
+  exit 1
+fi
+if [[ "$(wc -l < "$SIGNOFF_CAPTURE")" -ne 0 ]]; then
+  echo "preflight-fail path should not run campaign/check scripts"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+if ! jq -e '.status == "fail" and .failure_stage == "campaign" and .decision.decision == "NO-GO" and .decision.context == "synthetic_campaign_failure" and .decision.from_campaign_check_summary == false and .decision.diagnostics.source_schema == "synthetic_stage_failure" and .decision.diagnostics.likely_primary_failure == "endpoint_unreachable" and .decision.diagnostics.aggregated_diagnostics.endpoint_unreachable_failures >= 1 and .decision.next_operator_action == "Verify directory/issuer/entry/exit endpoints are reachable, then rerun signoff" and .inputs.campaign_endpoint_preflight.enabled == true and .inputs.campaign_endpoint_preflight.attempted == true and .inputs.campaign_endpoint_preflight.status == "fail" and .inputs.campaign_endpoint_preflight.timeout_sec == 1 and .inputs.campaign_endpoint_preflight.remote_http_endpoints >= 1 and .inputs.campaign_endpoint_preflight.failed_endpoints_count >= 1 and .stages.campaign.preflight.status == "fail" and .stages.campaign_check.attempted == false' "$PREFLIGHT_FAIL_SUMMARY" >/dev/null 2>&1; then
+  echo "preflight-fail summary JSON missing expected fields"
+  cat "$PREFLIGHT_FAIL_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-compare-campaign-signoff] endpoint preflight can be disabled"
+: >"$SIGNOFF_CAPTURE"
+PREFLIGHT_DISABLED_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_preflight_disabled.json"
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_COMPARE_CAMPAIGN_SCRIPT="$FAKE_CAMPAIGN" \
+PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT="$FAKE_CHECK" \
+FAKE_CAMPAIGN_RC=0 \
+FAKE_CHECK_RC=0 \
+FAKE_CHECK_DECISION=GO \
+./scripts/profile_compare_campaign_signoff.sh \
+  --reports-dir "$TMP_DIR/reports_preflight_disabled" \
+  --refresh-campaign 1 \
+  --campaign-execution-mode docker \
+  --campaign-endpoint-preflight-timeout-sec 0 \
+  --campaign-directory-urls "http://198.51.100.42:18081,http://198.51.100.43:28081" \
+  --campaign-bootstrap-directory "http://198.51.100.42:18081" \
+  --campaign-issuer-url "http://198.51.100.42:18082" \
+  --campaign-entry-url "http://198.51.100.42:18083" \
+  --campaign-exit-url "http://198.51.100.42:18084" \
+  --summary-json "$PREFLIGHT_DISABLED_SUMMARY" >/tmp/integration_profile_compare_campaign_signoff_preflight_disabled.log 2>&1
+if ! rg -q '\[profile-compare-campaign-signoff\] status=ok final_rc=0 decision=GO' /tmp/integration_profile_compare_campaign_signoff_preflight_disabled.log; then
+  echo "expected preflight-disabled success status line not found"
+  cat /tmp/integration_profile_compare_campaign_signoff_preflight_disabled.log
+  exit 1
+fi
+if [[ "$(wc -l < "$SIGNOFF_CAPTURE")" -ne 2 ]]; then
+  echo "preflight-disabled path should run campaign and check stages"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+if ! jq -e '.status == "ok" and .final_rc == 0 and .inputs.campaign_endpoint_preflight.enabled == false and .inputs.campaign_endpoint_preflight.attempted == false and .inputs.campaign_endpoint_preflight.status == "skip" and .inputs.campaign_endpoint_preflight.timeout_sec == 0 and .inputs.campaign_endpoint_preflight.skipped_reason == "endpoint preflight disabled" and .stages.campaign.preflight.status == "skip" and .stages.campaign.preflight.skipped_reason == "endpoint preflight disabled" and .stages.campaign.status == "pass" and .stages.campaign_check.status == "pass"' "$PREFLIGHT_DISABLED_SUMMARY" >/dev/null 2>&1; then
+  echo "preflight-disabled summary JSON missing expected fields"
+  cat "$PREFLIGHT_DISABLED_SUMMARY"
+  exit 1
+fi
+
 echo "[profile-compare-campaign-signoff] automatic docker fallback when local refresh is root-blocked"
 : >"$SIGNOFF_CAPTURE"
 AUTO_FALLBACK_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_auto_fallback.json"

@@ -41,6 +41,7 @@ Usage:
     [--subject ID | --anon-cred TOKEN] \
     [--campaign-start-local-stack auto|0|1] \
     [--campaign-timeout-sec N] \
+    [--campaign-endpoint-preflight-timeout-sec N] \
     [--summary-json PATH] \
     [--show-json [0|1]] \
     [--print-summary-json [0|1]]
@@ -60,8 +61,12 @@ Notes:
     PROFILE_COMPARE_CAMPAIGN_SIGNOFF_ALLOW_CONCURRENT=1).
   - Signoff emits periodic heartbeat lines while campaign refresh is running.
   - --campaign-timeout-sec defaults to 0 (disabled / preserve existing behavior).
+  - --campaign-endpoint-preflight-timeout-sec defaults to 4s per remote endpoint;
+    set to 0 to disable preflight and preserve legacy refresh behavior.
   - When refresh inputs point at remote/bootstrap endpoints, the signoff step
     prefers a docker-style refresh to avoid local root-only bootstrap failures.
+  - Remote endpoint preflight fail-closes campaign stage before refresh command
+    execution and emits endpoint-unreachable synthetic diagnostics.
   - Keep --allow-summary-overwrite 0 in normal operation to avoid output
     path collisions across campaign/check/signoff artifacts.
 USAGE
@@ -173,6 +178,212 @@ redact_sensitive_cmd_line() {
   printf '%s' "$line"
 }
 
+json_endpoint_records_from_lines() {
+  if [[ $# -eq 0 ]]; then
+    printf '%s' "[]"
+    return
+  fi
+  printf '%s\n' "$@" | jq -R 'select(length > 0) | split("\t") | {
+    label: .[0],
+    url: .[1],
+    host: (if ((.[2] // "") == "") then null else .[2] end)
+  }' | jq -s .
+}
+
+json_endpoint_failures_from_lines() {
+  if [[ $# -eq 0 ]]; then
+    printf '%s' "[]"
+    return
+  fi
+  printf '%s\n' "$@" | jq -R 'select(length > 0) | split("\t") | {
+    label: .[0],
+    url: .[1],
+    host: (if ((.[2] // "") == "") then null else .[2] end),
+    error: (if ((.[3] // "") == "") then null else .[3] end)
+  }' | jq -s .
+}
+
+extract_url_host() {
+  local url="$1"
+  local remainder host_port host=""
+
+  if [[ ! "$url" =~ ^https?:// ]]; then
+    printf '%s' ""
+    return
+  fi
+
+  remainder="${url#*://}"
+  remainder="${remainder%%/*}"
+  host_port="${remainder##*@}"
+
+  if [[ "$host_port" == \[* ]]; then
+    if [[ "$host_port" =~ ^(\[[^]]+\]) ]]; then
+      host="${BASH_REMATCH[1]}"
+    else
+      host="$host_port"
+    fi
+  else
+    host="${host_port%%:*}"
+  fi
+
+  printf '%s' "$host"
+}
+
+is_local_host() {
+  local host="$1"
+  local normalized
+  normalized="$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')"
+  normalized="${normalized#[}"
+  normalized="${normalized%]}"
+
+  case "$normalized" in
+    ""|localhost|ip6-localhost|::1|::|0.0.0.0)
+      return 0
+      ;;
+  esac
+  if [[ "$normalized" == 127.* ]]; then
+    return 0
+  fi
+  return 1
+}
+
+run_campaign_endpoint_preflight() {
+  local log_path="$1"
+  local -a candidate_records=()
+  local -a remote_records=()
+  local -a failed_records=()
+  local -a directory_urls=()
+  local label endpoint endpoint_url host rc err_file err_text idx
+
+  campaign_preflight_attempted="0"
+  campaign_preflight_status="skip"
+  campaign_preflight_skipped_reason=""
+  campaign_preflight_failure_reason=""
+  campaign_preflight_total_endpoints="0"
+  campaign_preflight_remote_endpoints="0"
+  campaign_preflight_failed_count="0"
+  campaign_preflight_candidate_endpoints_json='[]'
+  campaign_preflight_remote_endpoints_json='[]'
+  campaign_preflight_failed_endpoints_json='[]'
+
+  : >"$log_path"
+
+  add_candidate_endpoint() {
+    local endpoint_label="$1"
+    local endpoint_url
+    endpoint_url="$(trim "${2:-}")"
+    if [[ -z "$endpoint_url" ]]; then
+      return
+    fi
+    if [[ ! "$endpoint_url" =~ ^https?:// ]]; then
+      return
+    fi
+    local endpoint_host
+    endpoint_host="$(extract_url_host "$endpoint_url")"
+    candidate_records+=("${endpoint_label}"$'\t'"${endpoint_url}"$'\t'"${endpoint_host}")
+  }
+
+  if [[ -n "$campaign_directory_urls_effective" ]]; then
+    IFS=',' read -r -a directory_urls <<<"$campaign_directory_urls_effective"
+    idx=0
+    for endpoint in "${directory_urls[@]}"; do
+      add_candidate_endpoint "directory[$idx]" "$endpoint"
+      idx=$((idx + 1))
+    done
+  fi
+  add_candidate_endpoint "bootstrap" "$campaign_bootstrap_directory_effective"
+  add_candidate_endpoint "issuer" "$campaign_issuer_url_effective"
+  add_candidate_endpoint "entry" "$campaign_entry_url_effective"
+  add_candidate_endpoint "exit" "$campaign_exit_url_effective"
+
+  campaign_preflight_total_endpoints="${#candidate_records[@]}"
+  campaign_preflight_candidate_endpoints_json="$(json_endpoint_records_from_lines "${candidate_records[@]}")"
+
+  if [[ "${#candidate_records[@]}" -eq 0 ]]; then
+    campaign_preflight_status="skip"
+    campaign_preflight_skipped_reason="no http endpoints configured"
+    return 0
+  fi
+
+  for endpoint in "${candidate_records[@]}"; do
+    IFS=$'\t' read -r label endpoint_url host <<<"$endpoint"
+    if ! is_local_host "$host"; then
+      remote_records+=("$endpoint")
+    fi
+  done
+
+  campaign_preflight_remote_endpoints="${#remote_records[@]}"
+  campaign_preflight_remote_endpoints_json="$(json_endpoint_records_from_lines "${remote_records[@]}")"
+
+  if [[ "${#remote_records[@]}" -eq 0 ]]; then
+    campaign_preflight_status="skip"
+    campaign_preflight_skipped_reason="no remote http endpoints configured"
+    return 0
+  fi
+
+  campaign_preflight_attempted="1"
+
+  if ! command -v curl >/dev/null 2>&1; then
+    campaign_preflight_status="fail"
+    campaign_preflight_failed_count="1"
+    campaign_preflight_failure_reason="endpoint preflight failed: curl command not available"
+    campaign_preflight_failed_endpoints_json='[{"label":"runtime","url":null,"host":null,"error":"curl command not available"}]'
+    printf '[profile-compare-campaign-signoff] %s campaign endpoint preflight failed reason=%s\n' \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      "$campaign_preflight_failure_reason" >>"$log_path"
+    return 127
+  fi
+
+  for endpoint in "${remote_records[@]}"; do
+    IFS=$'\t' read -r label endpoint_url host <<<"$endpoint"
+    printf '[profile-compare-campaign-signoff] %s campaign endpoint preflight checking label=%s url=%s timeout_sec=%s\n' \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      "$label" \
+      "$endpoint_url" \
+      "$campaign_endpoint_preflight_timeout_sec" >>"$log_path"
+    err_file="$(mktemp "$log_dir/profile_compare_campaign_signoff_${run_stamp}_preflight_err.XXXXXX")"
+    if curl --silent --show-error --insecure \
+      --noproxy '*' \
+      --connect-timeout "$campaign_endpoint_preflight_timeout_sec" \
+      --max-time "$campaign_endpoint_preflight_timeout_sec" \
+      --output /dev/null \
+      "$endpoint_url" > /dev/null 2>"$err_file"; then
+      printf '[profile-compare-campaign-signoff] %s campaign endpoint preflight pass label=%s url=%s\n' \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        "$label" \
+        "$endpoint_url" >>"$log_path"
+      rm -f "$err_file"
+      continue
+    else
+      rc=$?
+    fi
+
+    err_text="$(tr '\n' ' ' <"$err_file" | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//')"
+    rm -f "$err_file"
+    if [[ -z "$err_text" ]]; then
+      err_text="curl rc=$rc"
+    else
+      err_text="curl rc=$rc: $err_text"
+    fi
+    failed_records+=("${label}"$'\t'"${endpoint_url}"$'\t'"${host}"$'\t'"${err_text}")
+    campaign_preflight_status="fail"
+    campaign_preflight_failed_count="${#failed_records[@]}"
+    campaign_preflight_failed_endpoints_json="$(json_endpoint_failures_from_lines "${failed_records[@]}")"
+    campaign_preflight_failure_reason="endpoint preflight failed for ${label} (${endpoint_url}): ${err_text}"
+    printf '[profile-compare-campaign-signoff] %s campaign endpoint preflight fail label=%s url=%s error=%s\n' \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      "$label" \
+      "$endpoint_url" \
+      "$err_text" >>"$log_path"
+    return "$rc"
+  done
+
+  campaign_preflight_status="pass"
+  campaign_preflight_failed_count="0"
+  campaign_preflight_failed_endpoints_json='[]'
+  return 0
+}
+
 run_campaign_refresh_monitored() {
   local attempt_label="$1"
   local log_path="$2"
@@ -264,6 +475,7 @@ show_json="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_SHOW_JSON:-0}"
 print_summary_json="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_PRINT_SUMMARY_JSON:-0}"
 campaign_timeout_sec="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_TIMEOUT_SEC:-0}"
 campaign_heartbeat_interval_sec="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_HEARTBEAT_INTERVAL_SEC:-15}"
+campaign_endpoint_preflight_timeout_sec="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_ENDPOINT_PREFLIGHT_TIMEOUT_SEC:-4}"
 
 require_status_pass="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REQUIRE_STATUS_PASS:-}"
 require_trend_status_pass="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REQUIRE_TREND_STATUS_PASS:-}"
@@ -455,6 +667,10 @@ while [[ $# -gt 0 ]]; do
       campaign_timeout_sec="${2:-}"
       shift 2
       ;;
+    --campaign-endpoint-preflight-timeout-sec)
+      campaign_endpoint_preflight_timeout_sec="${2:-}"
+      shift 2
+      ;;
     --summary-json)
       summary_json="${2:-}"
       shift 2
@@ -520,6 +736,10 @@ if [[ -n "$campaign_discovery_wait_sec" && ! "$campaign_discovery_wait_sec" =~ ^
 fi
 if [[ -n "$campaign_timeout_sec" && ! "$campaign_timeout_sec" =~ ^[0-9]+$ ]]; then
   echo "--campaign-timeout-sec must be a non-negative integer"
+  exit 2
+fi
+if [[ -n "$campaign_endpoint_preflight_timeout_sec" && ! "$campaign_endpoint_preflight_timeout_sec" =~ ^[0-9]+$ ]]; then
+  echo "--campaign-endpoint-preflight-timeout-sec must be a non-negative integer"
   exit 2
 fi
 if [[ -n "$campaign_heartbeat_interval_sec" && ! "$campaign_heartbeat_interval_sec" =~ ^[0-9]+$ ]]; then
@@ -699,6 +919,7 @@ mkdir -p "$log_dir"
 campaign_log_initial="$log_dir/profile_compare_campaign_signoff_${run_stamp}_campaign.log"
 campaign_log_fallback="$log_dir/profile_compare_campaign_signoff_${run_stamp}_campaign_fallback.log"
 campaign_log_effective="$campaign_log_initial"
+campaign_preflight_log="$log_dir/profile_compare_campaign_signoff_${run_stamp}_campaign_preflight.log"
 check_log="$log_dir/profile_compare_campaign_signoff_${run_stamp}_campaign_check.log"
 
 campaign_attempted=0
@@ -723,6 +944,20 @@ campaign_fallback_initial_start_local_stack=""
 campaign_fallback_initial_rc="0"
 campaign_fallback_effective_mode=""
 campaign_fallback_effective_start_local_stack=""
+campaign_stage_primary_failure=""
+campaign_stage_primary_failure_count="0"
+
+campaign_preflight_enabled="0"
+campaign_preflight_attempted="0"
+campaign_preflight_status="skip"
+campaign_preflight_skipped_reason=""
+campaign_preflight_failure_reason=""
+campaign_preflight_total_endpoints="0"
+campaign_preflight_remote_endpoints="0"
+campaign_preflight_failed_count="0"
+campaign_preflight_candidate_endpoints_json='[]'
+campaign_preflight_remote_endpoints_json='[]'
+campaign_preflight_failed_endpoints_json='[]'
 
 check_attempted=0
 check_status="skip"
@@ -780,51 +1015,94 @@ campaign_cmd_line_effective="$campaign_cmd_line"
 
 if [[ "$refresh_campaign" == "1" ]]; then
   campaign_attempted=1
-  if run_campaign_refresh_monitored "initial" "$campaign_log_initial" "${campaign_cmd[@]}"; then
-    campaign_status="pass"
-    campaign_rc=0
-    campaign_log_effective="$campaign_log_initial"
-  else
-    campaign_rc=$?
-    campaign_status="fail"
-    campaign_log_effective="$campaign_log_initial"
-
-    if [[ -z "$campaign_execution_mode" && "${campaign_execution_mode_effective:-local}" == "local" ]]; then
-      campaign_fallback_eligible="1"
-      campaign_fallback_reason="$(detect_local_stack_block_reason "$campaign_log_initial")"
-      if [[ -n "$campaign_fallback_reason" ]]; then
-        campaign_fallback_attempted="1"
-        campaign_fallback_triggered="1"
-        campaign_fallback_initial_mode="${campaign_execution_mode_effective:-local}"
-        campaign_fallback_initial_start_local_stack="${campaign_start_local_stack_effective:-auto}"
-        campaign_fallback_initial_rc="$campaign_rc"
-
-        campaign_execution_mode_effective="docker"
-        if [[ -z "$campaign_start_local_stack_effective" || "$campaign_start_local_stack_effective" == "auto" ]]; then
-          campaign_start_local_stack_effective="0"
-        fi
-        campaign_fallback_effective_mode="$campaign_execution_mode_effective"
-        campaign_fallback_effective_start_local_stack="${campaign_start_local_stack_effective:-auto}"
-
-        build_campaign_cmd
-        campaign_cmd_line_fallback="$campaign_cmd_line"
-        campaign_cmd_line_effective="$campaign_cmd_line"
-        campaign_log_effective="$campaign_log_fallback"
-
-        if run_campaign_refresh_monitored "fallback" "$campaign_log_fallback" "${campaign_cmd[@]}"; then
-          campaign_status="pass"
-          campaign_rc=0
-        else
-          campaign_rc=$?
-          campaign_status="fail"
-        fi
+  if (( campaign_endpoint_preflight_timeout_sec > 0 )); then
+    campaign_preflight_enabled="1"
+    echo "[profile-compare-campaign-signoff] $(date -u +%Y-%m-%dT%H:%M:%SZ) campaign endpoint preflight enabled timeout_sec=$campaign_endpoint_preflight_timeout_sec log=$campaign_preflight_log"
+    if run_campaign_endpoint_preflight "$campaign_preflight_log"; then
+      echo "[profile-compare-campaign-signoff] $(date -u +%Y-%m-%dT%H:%M:%SZ) campaign endpoint preflight result status=$campaign_preflight_status attempted=$campaign_preflight_attempted remote_endpoints=$campaign_preflight_remote_endpoints failed_endpoints=$campaign_preflight_failed_count"
+    else
+      campaign_rc=$?
+      campaign_status="fail"
+      campaign_log_effective="$campaign_preflight_log"
+      if [[ -n "$campaign_preflight_failure_reason" ]]; then
+        campaign_failure_reason="$campaign_preflight_failure_reason"
+      elif [[ -z "$campaign_failure_reason" ]]; then
+        campaign_failure_reason="campaign endpoint preflight failed"
       fi
-    fi
-
-    if [[ "$campaign_status" != "pass" ]]; then
+      campaign_stage_primary_failure="endpoint_unreachable"
+      if [[ "$campaign_preflight_failed_count" =~ ^[0-9]+$ ]] && (( campaign_preflight_failed_count > 0 )); then
+        campaign_stage_primary_failure_count="$campaign_preflight_failed_count"
+      else
+        campaign_stage_primary_failure_count="1"
+      fi
       status="fail"
       final_rc="$campaign_rc"
       failure_stage="campaign"
+      echo "[profile-compare-campaign-signoff] $(date -u +%Y-%m-%dT%H:%M:%SZ) campaign endpoint preflight failed reason=$campaign_failure_reason log=$campaign_preflight_log"
+    fi
+  else
+    campaign_preflight_enabled="0"
+    campaign_preflight_status="skip"
+    campaign_preflight_skipped_reason="endpoint preflight disabled"
+  fi
+
+  if [[ -z "$failure_stage" ]]; then
+    if run_campaign_refresh_monitored "initial" "$campaign_log_initial" "${campaign_cmd[@]}"; then
+      campaign_status="pass"
+      campaign_rc=0
+      campaign_log_effective="$campaign_log_initial"
+    else
+      campaign_rc=$?
+      campaign_status="fail"
+      campaign_log_effective="$campaign_log_initial"
+
+      if [[ -z "$campaign_execution_mode" && "${campaign_execution_mode_effective:-local}" == "local" ]]; then
+        campaign_fallback_eligible="1"
+        campaign_fallback_reason="$(detect_local_stack_block_reason "$campaign_log_initial")"
+        if [[ -n "$campaign_fallback_reason" ]]; then
+          campaign_fallback_attempted="1"
+          campaign_fallback_triggered="1"
+          campaign_fallback_initial_mode="${campaign_execution_mode_effective:-local}"
+          campaign_fallback_initial_start_local_stack="${campaign_start_local_stack_effective:-auto}"
+          campaign_fallback_initial_rc="$campaign_rc"
+
+          campaign_execution_mode_effective="docker"
+          if [[ -z "$campaign_start_local_stack_effective" || "$campaign_start_local_stack_effective" == "auto" ]]; then
+            campaign_start_local_stack_effective="0"
+          fi
+          campaign_fallback_effective_mode="$campaign_execution_mode_effective"
+          campaign_fallback_effective_start_local_stack="${campaign_start_local_stack_effective:-auto}"
+
+          build_campaign_cmd
+          campaign_cmd_line_fallback="$campaign_cmd_line"
+          campaign_cmd_line_effective="$campaign_cmd_line"
+          campaign_log_effective="$campaign_log_fallback"
+
+          if run_campaign_refresh_monitored "fallback" "$campaign_log_fallback" "${campaign_cmd[@]}"; then
+            campaign_status="pass"
+            campaign_rc=0
+          else
+            campaign_rc=$?
+            campaign_status="fail"
+          fi
+        fi
+      fi
+
+      if [[ "$campaign_status" != "pass" ]]; then
+        if [[ -z "$campaign_stage_primary_failure" ]]; then
+          if [[ "$campaign_timeout_triggered" == "1" ]]; then
+            campaign_stage_primary_failure="campaign_timeout"
+          else
+            campaign_stage_primary_failure="campaign_failure"
+          fi
+        fi
+        if [[ "$campaign_stage_primary_failure_count" == "0" ]]; then
+          campaign_stage_primary_failure_count="1"
+        fi
+        status="fail"
+        final_rc="$campaign_rc"
+        failure_stage="campaign"
+      fi
     fi
   fi
 else
@@ -1015,9 +1293,14 @@ if ! is_non_negative_decimal "$support_rate_pct"; then
   support_rate_pct="0"
 fi
 if [[ "$failure_stage" == "campaign" ]]; then
-  synthetic_failure_kind="campaign_failure"
-  if [[ "$campaign_timeout_triggered" == "1" ]]; then
-    synthetic_failure_kind="campaign_timeout"
+  synthetic_failure_kind="${campaign_stage_primary_failure:-campaign_failure}"
+  synthetic_endpoint_unreachable_failures=0
+  if [[ "$synthetic_failure_kind" == "endpoint_unreachable" ]]; then
+    if [[ "$campaign_stage_primary_failure_count" =~ ^[0-9]+$ ]] && (( campaign_stage_primary_failure_count > 0 )); then
+      synthetic_endpoint_unreachable_failures="$campaign_stage_primary_failure_count"
+    else
+      synthetic_endpoint_unreachable_failures=1
+    fi
   fi
   decision="NO-GO"
   decision_context="synthetic_campaign_failure"
@@ -1032,13 +1315,20 @@ if [[ "$failure_stage" == "campaign" ]]; then
   else
     decision_reason="campaign stage failed before campaign-check"
   fi
-  if [[ "$campaign_timeout_triggered" == "1" ]]; then
-    next_operator_action="Investigate campaign timeout, verify endpoint availability, and rerun signoff"
-  else
-    next_operator_action="Inspect campaign log and rerun signoff after fixing campaign-stage failure"
-  fi
+  case "$synthetic_failure_kind" in
+    campaign_timeout)
+      next_operator_action="Investigate campaign timeout, verify endpoint availability, and rerun signoff"
+      ;;
+    endpoint_unreachable)
+      next_operator_action="Verify directory/issuer/entry/exit endpoints are reachable, then rerun signoff"
+      ;;
+    *)
+      next_operator_action="Inspect campaign log and rerun signoff after fixing campaign-stage failure"
+      ;;
+  esac
   decision_diagnostics_json="$(jq -nc \
     --arg synthetic_failure_kind "$synthetic_failure_kind" \
+    --argjson endpoint_unreachable_failures "$synthetic_endpoint_unreachable_failures" \
     --arg operator_hint "$next_operator_action" \
     '{
       source_schema: "synthetic_stage_failure",
@@ -1049,7 +1339,7 @@ if [[ "$failure_stage" == "campaign" ]]; then
         unknown_exit_failures: 0,
         directory_trust_failures: 0,
         root_required_failures: 0,
-        endpoint_unreachable_failures: 0
+        endpoint_unreachable_failures: $endpoint_unreachable_failures
       },
       likely_primary_failure: $synthetic_failure_kind,
       operator_hint: $operator_hint
@@ -1093,6 +1383,7 @@ jq -n \
   --arg campaign_log_initial "$campaign_log_initial" \
   --arg campaign_log_fallback "$campaign_log_fallback" \
   --arg campaign_log_effective "$campaign_log_effective" \
+  --arg campaign_preflight_log "$campaign_preflight_log" \
   --arg check_log "$check_log" \
   --arg campaign_cmd_initial "$campaign_cmd_line_initial" \
   --arg campaign_cmd_fallback "$campaign_cmd_line_fallback" \
@@ -1145,7 +1436,19 @@ jq -n \
   --arg campaign_start_local_stack "$campaign_start_local_stack" \
   --arg campaign_start_local_stack_effective "$campaign_start_local_stack_effective" \
   --arg campaign_timeout_sec "$campaign_timeout_sec" \
+  --arg campaign_endpoint_preflight_timeout_sec "$campaign_endpoint_preflight_timeout_sec" \
   --arg campaign_heartbeat_interval_sec "$campaign_heartbeat_interval_sec" \
+  --arg campaign_preflight_enabled "$campaign_preflight_enabled" \
+  --arg campaign_preflight_attempted "$campaign_preflight_attempted" \
+  --arg campaign_preflight_status "$campaign_preflight_status" \
+  --arg campaign_preflight_skipped_reason "$campaign_preflight_skipped_reason" \
+  --arg campaign_preflight_failure_reason "$campaign_preflight_failure_reason" \
+  --arg campaign_preflight_total_endpoints "$campaign_preflight_total_endpoints" \
+  --arg campaign_preflight_remote_endpoints "$campaign_preflight_remote_endpoints" \
+  --arg campaign_preflight_failed_count "$campaign_preflight_failed_count" \
+  --argjson campaign_preflight_candidate_endpoints "$campaign_preflight_candidate_endpoints_json" \
+  --argjson campaign_preflight_remote_endpoints_list "$campaign_preflight_remote_endpoints_json" \
+  --argjson campaign_preflight_failed_endpoints "$campaign_preflight_failed_endpoints_json" \
   --arg campaign_fallback_eligible "$campaign_fallback_eligible" \
   --arg campaign_fallback_attempted "$campaign_fallback_attempted" \
   --arg campaign_fallback_triggered "$campaign_fallback_triggered" \
@@ -1225,6 +1528,21 @@ jq -n \
         timeout_sec: ($campaign_timeout_sec | tonumber),
         heartbeat_interval_sec: ($campaign_heartbeat_interval_sec | tonumber)
       },
+      campaign_endpoint_preflight: {
+        enabled: ($campaign_preflight_enabled == "1"),
+        attempted: ($campaign_preflight_attempted == "1"),
+        status: $campaign_preflight_status,
+        timeout_sec: ($campaign_endpoint_preflight_timeout_sec | tonumber),
+        total_http_endpoints: ($campaign_preflight_total_endpoints | tonumber),
+        remote_http_endpoints: ($campaign_preflight_remote_endpoints | tonumber),
+        failed_endpoints_count: ($campaign_preflight_failed_count | tonumber),
+        skipped_reason: (if $campaign_preflight_skipped_reason == "" then null else $campaign_preflight_skipped_reason end),
+        failure_reason: (if $campaign_preflight_failure_reason == "" then null else $campaign_preflight_failure_reason end),
+        log: $campaign_preflight_log,
+        candidate_endpoints: $campaign_preflight_candidate_endpoints,
+        remote_endpoints: $campaign_preflight_remote_endpoints_list,
+        failed_endpoints: $campaign_preflight_failed_endpoints
+      },
       campaign_refresh_fallback: {
         eligible: ($campaign_fallback_eligible == "1"),
         attempted: ($campaign_fallback_attempted == "1"),
@@ -1249,6 +1567,17 @@ jq -n \
         duration_sec: ($campaign_duration_sec | tonumber),
         heartbeat_count: ($campaign_heartbeat_count | tonumber),
         failure_reason: (if $campaign_failure_reason == "" then null else $campaign_failure_reason end),
+        preflight: {
+          enabled: ($campaign_preflight_enabled == "1"),
+          attempted: ($campaign_preflight_attempted == "1"),
+          status: $campaign_preflight_status,
+          timeout_sec: ($campaign_endpoint_preflight_timeout_sec | tonumber),
+          failed_endpoints_count: ($campaign_preflight_failed_count | tonumber),
+          skipped_reason: (if $campaign_preflight_skipped_reason == "" then null else $campaign_preflight_skipped_reason end),
+          failure_reason: (if $campaign_preflight_failure_reason == "" then null else $campaign_preflight_failure_reason end),
+          log: $campaign_preflight_log,
+          failed_endpoints: $campaign_preflight_failed_endpoints
+        },
         initial_command: $campaign_cmd_initial,
         initial_log: $campaign_log_initial,
         fallback_command: (if $campaign_cmd_fallback == "" then null else $campaign_cmd_fallback end),

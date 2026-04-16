@@ -824,6 +824,8 @@ build_profile_default_gate_json() {
   local signoff_summary_json="$1"
   local docker_rehearsal_check_json="${2:-}"
   local default_signoff_summary_json="$ROOT_DIR/.easy-node-logs/profile_compare_campaign_signoff_summary.json"
+  local campaign_timeout_sec_default="${MANUAL_VALIDATION_PROFILE_DEFAULT_GATE_CAMPAIGN_TIMEOUT_SEC:-1200}"
+  local campaign_timeout_sec_arg=""
   local reports_dir=""
   local reports_dir_arg=""
   local summary_json_arg=""
@@ -880,6 +882,11 @@ build_profile_default_gate_json() {
   local docker_hint_start_local_stack_arg=""
   local docker_hint_requires_local_stack_root="0"
 
+  if [[ ! "$campaign_timeout_sec_default" =~ ^[0-9]+$ ]]; then
+    campaign_timeout_sec_default="1200"
+  fi
+  printf -v campaign_timeout_sec_arg '%q' "$campaign_timeout_sec_default"
+
   reports_dir="$(dirname "$signoff_summary_json")"
   if [[ "$signoff_summary_json" == "$default_signoff_summary_json" ]]; then
     reports_dir_arg=".easy-node-logs"
@@ -888,10 +895,10 @@ build_profile_default_gate_json() {
     printf -v reports_dir_arg '%q' "$reports_dir"
     printf -v summary_json_arg '%q' "$signoff_summary_json"
   fi
-  next_command_default="./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir $reports_dir_arg --refresh-campaign 1 --fail-on-no-go 0 --summary-json $summary_json_arg --print-summary-json 1"
+  next_command_default="./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir $reports_dir_arg --refresh-campaign 1 --fail-on-no-go 0 --campaign-timeout-sec $campaign_timeout_sec_arg --summary-json $summary_json_arg --print-summary-json 1"
   next_command_no_sudo="$next_command_default"
   next_command="$next_command_default"
-  next_command_sudo="sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir $reports_dir_arg --refresh-campaign 1 --fail-on-no-go 0 --summary-json $summary_json_arg --print-summary-json 1"
+  next_command_sudo="sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir $reports_dir_arg --refresh-campaign 1 --fail-on-no-go 0 --campaign-timeout-sec $campaign_timeout_sec_arg --summary-json $summary_json_arg --print-summary-json 1"
 
   docker_hint_json="$(build_profile_signoff_docker_hint_json "$signoff_summary_json" "$docker_rehearsal_check_json")"
   docker_hint_available="$(jq -r 'if (.available // false) then "1" else "0" end' <<<"$docker_hint_json" 2>/dev/null || echo 0)"
