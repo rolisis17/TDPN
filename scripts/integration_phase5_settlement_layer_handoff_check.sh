@@ -55,6 +55,36 @@ FAIL_CANONICAL="$TMP_DIR/fail_canonical_summary.json"
 MISSING_OUTPUT="$TMP_DIR/missing_output.json"
 MISSING_LOG="$TMP_DIR/missing.log"
 
+# Isolation default: keep canonical handoff-check artifacts scoped to tmp
+# unless a test case intentionally overrides the path.
+DEFAULT_CANONICAL="$TMP_DIR/default_canonical_summary.json"
+export PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_CANONICAL_SUMMARY_JSON="$DEFAULT_CANONICAL"
+
+assert_default_canonical() {
+  local summary_json="$1"
+  local log_file="$2"
+  local label="$3"
+
+  if [[ ! -f "$DEFAULT_CANONICAL" ]]; then
+    echo "$label: missing default canonical summary: $DEFAULT_CANONICAL"
+    cat "$log_file"
+    exit 1
+  fi
+  if ! jq -e --arg expected_canonical "$DEFAULT_CANONICAL" '.artifacts.canonical_summary_json == $expected_canonical' "$summary_json" >/dev/null; then
+    echo "$label: summary did not use isolated default canonical path"
+    cat "$summary_json"
+    cat "$log_file"
+    exit 1
+  fi
+  if ! cmp -s "$summary_json" "$DEFAULT_CANONICAL"; then
+    echo "$label: default canonical summary diverges from run summary"
+    cat "$summary_json"
+    cat "$DEFAULT_CANONICAL"
+    cat "$log_file"
+    exit 1
+  fi
+}
+
 cat >"$PASS_ROADMAP" <<'EOF_PASS_ROADMAP'
 {
   "version": 1,
@@ -190,6 +220,7 @@ if ! jq -e '
   cat "$LEGACY_ALIAS_LOG"
   exit 1
 fi
+assert_default_canonical "$LEGACY_ALIAS_OUTPUT" "$LEGACY_ALIAS_LOG" "legacy run summary alias path"
 
 cat >"$ENV_ROADMAP" <<'EOF_ENV_ROADMAP'
 {
@@ -229,6 +260,7 @@ if ! jq -e '
   cat "$ENV_CANONICAL_LOG"
   exit 1
 fi
+assert_default_canonical "$ENV_CANONICAL_OUTPUT" "$ENV_CANONICAL_LOG" "canonical-env toggle path"
 
 echo "[phase5-settlement-layer-handoff-check] legacy env-var compatibility path"
 PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_REQUIRE_SETTLEMENT_ACCEPTANCE_OK= \
@@ -251,6 +283,7 @@ if ! jq -e '
   cat "$ENV_LEGACY_LOG"
   exit 1
 fi
+assert_default_canonical "$ENV_LEGACY_OUTPUT" "$ENV_LEGACY_LOG" "legacy-env compatibility path"
 
 cat >"$FALLBACK_CHECK" <<'EOF_FALLBACK_CHECK'
 {
@@ -347,6 +380,7 @@ if ! jq -e '
   cat "$FALLBACK_LOG"
   exit 1
 fi
+assert_default_canonical "$FALLBACK_OUTPUT" "$FALLBACK_LOG" "nested check fallback path"
 
 cat >"$UNRESOLVED_RUN" <<'EOF_UNRESOLVED_RUN'
 {
@@ -547,6 +581,7 @@ if ! jq -e '
   cat "$MISSING_LOG"
   exit 1
 fi
+assert_default_canonical "$MISSING_OUTPUT" "$MISSING_LOG" "missing run summary fail-close path"
 if ! grep -q '"schema"' "$MISSING_LOG"; then
   echo "--show-json 1 did not print summary payload"
   cat "$MISSING_LOG"

@@ -53,6 +53,36 @@ FALLBACK_HANDOFF_RUN_OLD_DIR="$FALLBACK_REPORTS_DIR/phase5_settlement_layer_hand
 FALLBACK_HANDOFF_RUN_NEW_DIR="$FALLBACK_REPORTS_DIR/phase5_settlement_layer_handoff_run_20260416_170700"
 FALLBACK_HANDOFF_CHECK_FROM_HANDOFF_RUN="$FALLBACK_HANDOFF_RUN_NEW_DIR/phase5_settlement_layer_handoff_check_fallback.json"
 
+# Isolation default: prevent fail/missing/fallback paths from clobbering
+# canonical summary artifacts under repository .easy-node-logs.
+DEFAULT_CANONICAL_REPORT_JSON="$TMP_DIR/default_canonical_report.json"
+export PHASE5_SETTLEMENT_LAYER_SUMMARY_REPORT_CANONICAL_SUMMARY_JSON="$DEFAULT_CANONICAL_REPORT_JSON"
+
+assert_default_canonical_report() {
+  local summary_json="$1"
+  local log_file="$2"
+  local label="$3"
+
+  if [[ ! -f "$DEFAULT_CANONICAL_REPORT_JSON" ]]; then
+    echo "$label: missing default canonical report: $DEFAULT_CANONICAL_REPORT_JSON"
+    cat "$log_file"
+    exit 1
+  fi
+  if ! jq -e --arg expected_canonical "$DEFAULT_CANONICAL_REPORT_JSON" '.artifacts.canonical_summary_json == $expected_canonical' "$summary_json" >/dev/null; then
+    echo "$label: summary report did not use isolated default canonical path"
+    cat "$summary_json"
+    cat "$log_file"
+    exit 1
+  fi
+  if ! cmp -s "$summary_json" "$DEFAULT_CANONICAL_REPORT_JSON"; then
+    echo "$label: default canonical report diverges from run summary report"
+    cat "$summary_json"
+    cat "$DEFAULT_CANONICAL_REPORT_JSON"
+    cat "$log_file"
+    exit 1
+  fi
+}
+
 cat >"$PASS_CI" <<'EOF_PASS_CI'
 {
   "version": 1,
@@ -330,6 +360,7 @@ if ! jq -e '
   cat "$FAIL_LOG"
   exit 1
 fi
+assert_default_canonical_report "$FAIL_REPORT_JSON" "$FAIL_LOG" "fail path"
 
 echo "[phase5-settlement-summary-report] missing-input path"
 set +e
@@ -380,6 +411,7 @@ if ! jq -e '
   cat "$MISSING_LOG"
   exit 1
 fi
+assert_default_canonical_report "$MISSING_REPORT_JSON" "$MISSING_LOG" "missing-input path"
 
 mkdir -p "$FALLBACK_REPORTS_DIR"
 mkdir -p "$FALLBACK_CI_OLD_DIR" "$FALLBACK_CI_NEW_DIR" "$FALLBACK_HANDOFF_RUN_OLD_DIR" "$FALLBACK_HANDOFF_RUN_NEW_DIR"
@@ -553,5 +585,6 @@ if ! jq -e \
   cat "$FALLBACK_LOG"
   exit 1
 fi
+assert_default_canonical_report "$FALLBACK_REPORT_JSON" "$FALLBACK_LOG" "fallback discovery path"
 
 echo "phase5 settlement layer summary report integration ok"

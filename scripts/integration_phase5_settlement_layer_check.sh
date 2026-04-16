@@ -58,6 +58,36 @@ ENV_LEGACY_LOG="$TMP_DIR/env_legacy.log"
 LEGACY_ALIAS_LOG="$TMP_DIR/legacy_alias.log"
 MISSING_LOG="$TMP_DIR/missing.log"
 
+# Isolation default: prevent any invocation path from writing canonical
+# artifacts into repository-level .easy-node-logs.
+DEFAULT_CANONICAL="$TMP_DIR/default_canonical_summary.json"
+export PHASE5_SETTLEMENT_LAYER_CHECK_CANONICAL_SUMMARY_JSON="$DEFAULT_CANONICAL"
+
+assert_default_canonical() {
+  local summary_json="$1"
+  local log_file="$2"
+  local label="$3"
+
+  if [[ ! -f "$DEFAULT_CANONICAL" ]]; then
+    echo "$label: missing default canonical summary: $DEFAULT_CANONICAL"
+    cat "$log_file"
+    exit 1
+  fi
+  if ! jq -e --arg expected_canonical "$DEFAULT_CANONICAL" '.artifacts.canonical_summary_json == $expected_canonical' "$summary_json" >/dev/null; then
+    echo "$label: summary did not use isolated default canonical path"
+    cat "$summary_json"
+    cat "$log_file"
+    exit 1
+  fi
+  if ! cmp -s "$summary_json" "$DEFAULT_CANONICAL"; then
+    echo "$label: default canonical summary diverges from run summary"
+    cat "$summary_json"
+    cat "$DEFAULT_CANONICAL"
+    cat "$log_file"
+    exit 1
+  fi
+}
+
 cat >"$PASS_SUMMARY" <<'EOF_PASS'
 {
   "version": 1,
@@ -456,6 +486,7 @@ if ! jq -e '
   cat "$ENV_CANONICAL_LOG"
   exit 1
 fi
+assert_default_canonical "$ENV_CANONICAL_OUTPUT" "$ENV_CANONICAL_LOG" "canonical-env toggle path"
 
 echo "[phase5-settlement-layer-check] legacy env-var compatibility path"
 PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_SETTLEMENT_ACCEPTANCE_OK= \
@@ -477,6 +508,7 @@ if ! jq -e '
   cat "$ENV_LEGACY_LOG"
   exit 1
 fi
+assert_default_canonical "$ENV_LEGACY_OUTPUT" "$ENV_LEGACY_LOG" "legacy-env compatibility path"
 
 echo "[phase5-settlement-layer-check] legacy alias compatibility path"
 "$SCRIPT_UNDER_TEST" \
@@ -497,6 +529,7 @@ if ! jq -e '
   cat "$LEGACY_ALIAS_LOG"
   exit 1
 fi
+assert_default_canonical "$LEGACY_ALIAS_OUTPUT" "$LEGACY_ALIAS_LOG" "legacy alias compatibility path"
 
 echo "[phase5-settlement-layer-check] dual-asset compatibility alias path"
 "$SCRIPT_UNDER_TEST" \
@@ -517,6 +550,7 @@ if ! jq -e '
   cat "$LEGACY_ALIAS_LOG"
   exit 1
 fi
+assert_default_canonical "$LEGACY_ALIAS_OUTPUT" "$LEGACY_ALIAS_LOG" "dual-asset alias compatibility path"
 
 echo "[phase5-settlement-layer-check] missing-summary show-json path"
 set +e
@@ -542,6 +576,7 @@ if ! jq -e '
   cat "$MISSING_LOG"
   exit 1
 fi
+assert_default_canonical "$MISSING_OUTPUT" "$MISSING_LOG" "missing-summary fail-close path"
 if ! grep -q '"schema"' "$MISSING_LOG"; then
   echo "--show-json 1 did not print summary payload"
   cat "$MISSING_LOG"

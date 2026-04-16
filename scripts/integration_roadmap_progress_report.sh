@@ -12,7 +12,112 @@ for cmd in jq mktemp rg chmod mkdir touch; do
 done
 
 TMP_DIR="$(mktemp -d)"
-trap 'rm -rf "$TMP_DIR"' EXIT
+CANONICAL_LOG_DIR="$ROOT_DIR/.easy-node-logs"
+CANONICAL_LOG_DIR_EXISTED="0"
+if [[ -d "$CANONICAL_LOG_DIR" ]]; then
+  CANONICAL_LOG_DIR_EXISTED="1"
+fi
+CANONICAL_SNAPSHOT_DIR="$TMP_DIR/canonical_easy_node_logs_snapshot"
+CANONICAL_SNAPSHOT_MANIFEST="$CANONICAL_SNAPSHOT_DIR/manifest.txt"
+
+CANONICAL_SUMMARY_GLOBS=(
+  "$CANONICAL_LOG_DIR/roadmap_progress_summary.json"
+  "$CANONICAL_LOG_DIR/roadmap_progress_report.md"
+  "$CANONICAL_LOG_DIR/manual_validation_readiness_summary.json"
+  "$CANONICAL_LOG_DIR/manual_validation_readiness_report.md"
+  "$CANONICAL_LOG_DIR/profile_compare_campaign_signoff_summary.json"
+  "$CANONICAL_LOG_DIR/single_machine_prod_readiness_latest.json"
+  "$CANONICAL_LOG_DIR/phase5_settlement_layer*_summary.json"
+  "$CANONICAL_LOG_DIR/phase6_cosmos_l1*_summary.json"
+  "$CANONICAL_LOG_DIR/ci_phase6_cosmos_l1*_summary.json"
+  "$CANONICAL_LOG_DIR/phase7_mainnet_cutover*_summary.json"
+  "$CANONICAL_LOG_DIR/phase5_settlement_layer_*"
+  "$CANONICAL_LOG_DIR/phase6_cosmos_l1_build_testnet_*"
+  "$CANONICAL_LOG_DIR/phase7_mainnet_cutover_*"
+)
+
+snapshot_canonical_summary_artifacts() {
+  local rel=""
+  local path=""
+  mkdir -p "$CANONICAL_SNAPSHOT_DIR"
+  : >"$CANONICAL_SNAPSHOT_MANIFEST"
+
+  local -A seen_paths=()
+  shopt -s nullglob
+  for pattern in "${CANONICAL_SUMMARY_GLOBS[@]}"; do
+    for path in $pattern; do
+      if [[ -n "${seen_paths[$path]+x}" ]]; then
+        continue
+      fi
+      seen_paths["$path"]=1
+      if [[ ! -e "$path" ]]; then
+        continue
+      fi
+
+      rel="${path#"$ROOT_DIR"/}"
+      if [[ "$rel" == "$path" ]]; then
+        continue
+      fi
+      printf '%s\n' "$rel" >>"$CANONICAL_SNAPSHOT_MANIFEST"
+      mkdir -p "$CANONICAL_SNAPSHOT_DIR/$(dirname "$rel")"
+      if [[ -d "$path" ]]; then
+        cp -a "$path" "$CANONICAL_SNAPSHOT_DIR/$rel"
+      else
+        cp -p "$path" "$CANONICAL_SNAPSHOT_DIR/$rel"
+      fi
+    done
+  done
+  shopt -u nullglob
+}
+
+restore_canonical_summary_artifacts() {
+  local rel=""
+  local path=""
+  local snapshot_path=""
+
+  shopt -s nullglob
+  for pattern in "${CANONICAL_SUMMARY_GLOBS[@]}"; do
+    for path in $pattern; do
+      if [[ -e "$path" ]]; then
+        rm -rf "$path"
+      fi
+    done
+  done
+  shopt -u nullglob
+
+  if [[ -f "$CANONICAL_SNAPSHOT_MANIFEST" ]]; then
+    while IFS= read -r rel; do
+      if [[ -z "$rel" ]]; then
+        continue
+      fi
+      path="$ROOT_DIR/$rel"
+      snapshot_path="$CANONICAL_SNAPSHOT_DIR/$rel"
+      mkdir -p "$(dirname "$path")"
+      if [[ -d "$snapshot_path" ]]; then
+        cp -a "$snapshot_path" "$path"
+      else
+        cp -p "$snapshot_path" "$path"
+      fi
+    done <"$CANONICAL_SNAPSHOT_MANIFEST"
+  fi
+
+  if [[ "$CANONICAL_LOG_DIR_EXISTED" == "0" ]] && [[ -d "$CANONICAL_LOG_DIR" ]]; then
+    rmdir "$CANONICAL_LOG_DIR" >/dev/null 2>&1 || true
+  fi
+}
+
+cleanup_integration_artifacts() {
+  restore_canonical_summary_artifacts
+  rm -rf "$TMP_DIR"
+}
+trap 'cleanup_integration_artifacts' EXIT
+snapshot_canonical_summary_artifacts
+
+TEST_LOG_DIR="$TMP_DIR/easy-node-logs"
+TEST_STATE_DIR="$TMP_DIR/manual-validation-state"
+mkdir -p "$TEST_LOG_DIR" "$TEST_STATE_DIR"
+export EASY_NODE_LOG_DIR="$TEST_LOG_DIR"
+export EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$TEST_STATE_DIR"
 
 CAPTURE="$TMP_DIR/capture.log"
 SINGLE_MACHINE_SUMMARY_JSON="$TMP_DIR/single_machine_prod_readiness_latest.json"
@@ -1842,6 +1947,112 @@ if ! jq -e --arg src "$AUTO_RESILIENCE_NEW_JSON" '
 ' "$TMP_DIR/roadmap_progress_auto_resilience_summary.json" >/dev/null; then
   echo "auto resilience source selection summary mismatch"
   cat "$TMP_DIR/roadmap_progress_auto_resilience_summary.json"
+  exit 1
+fi
+
+: >"$CAPTURE"
+
+echo "[roadmap-progress-report] phase5 auto-source selection avoids degraded clobbered summaries"
+AUTO_PHASE5_LOGS_ROOT="$TMP_DIR/auto_phase5_logs_root"
+AUTO_PHASE5_GOOD_DIR="$AUTO_PHASE5_LOGS_ROOT/healthy_older"
+AUTO_PHASE5_CLOBBERED_DIR="$AUTO_PHASE5_LOGS_ROOT/clobbered_newer"
+AUTO_PHASE5_DRY_RUN_DIR="$AUTO_PHASE5_LOGS_ROOT/dry_run_newest"
+mkdir -p "$AUTO_PHASE5_GOOD_DIR" "$AUTO_PHASE5_CLOBBERED_DIR" "$AUTO_PHASE5_DRY_RUN_DIR"
+
+AUTO_PHASE5_GOOD_JSON="$AUTO_PHASE5_GOOD_DIR/phase5_settlement_layer_handoff_check_summary.json"
+cat >"$AUTO_PHASE5_GOOD_JSON" <<'EOF_AUTO_PHASE5_GOOD'
+{
+  "schema": {
+    "id": "phase5_settlement_layer_handoff_check_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "pass",
+  "settlement_failsoft_ok": true,
+  "settlement_acceptance_ok": true,
+  "settlement_bridge_smoke_ok": true,
+  "settlement_state_persistence_ok": true,
+  "settlement_adapter_roundtrip_ok": true,
+  "settlement_adapter_roundtrip_status": "pass",
+  "issuer_sponsor_api_live_smoke_ok": true,
+  "issuer_sponsor_api_live_smoke_status": "pass"
+}
+EOF_AUTO_PHASE5_GOOD
+touch -t 202601010101 "$AUTO_PHASE5_GOOD_JSON"
+
+AUTO_PHASE5_CLOBBERED_JSON="$AUTO_PHASE5_CLOBBERED_DIR/phase5_settlement_layer_handoff_check_summary.json"
+cat >"$AUTO_PHASE5_CLOBBERED_JSON" <<'EOF_AUTO_PHASE5_CLOBBERED'
+{
+  "schema": {
+    "id": "phase5_settlement_layer_handoff_check_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "fail",
+  "settlement_failsoft_ok": false,
+  "settlement_acceptance_ok": false,
+  "settlement_bridge_smoke_ok": false,
+  "settlement_state_persistence_ok": false,
+  "settlement_adapter_roundtrip_ok": false,
+  "settlement_adapter_roundtrip_status": "fail",
+  "issuer_sponsor_api_live_smoke_ok": false,
+  "issuer_sponsor_api_live_smoke_status": "fail"
+}
+EOF_AUTO_PHASE5_CLOBBERED
+touch -t 202601020202 "$AUTO_PHASE5_CLOBBERED_JSON"
+
+AUTO_PHASE5_DRY_RUN_JSON="$AUTO_PHASE5_DRY_RUN_DIR/phase5_settlement_layer_handoff_check_summary.json"
+cat >"$AUTO_PHASE5_DRY_RUN_JSON" <<'EOF_AUTO_PHASE5_DRY_RUN'
+{
+  "schema": {
+    "id": "phase5_settlement_layer_handoff_check_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "pass",
+  "dry_run": true,
+  "settlement_failsoft_ok": true,
+  "settlement_acceptance_ok": true,
+  "settlement_bridge_smoke_ok": true,
+  "settlement_state_persistence_ok": true,
+  "settlement_adapter_roundtrip_ok": true,
+  "settlement_adapter_roundtrip_status": "pass",
+  "issuer_sponsor_api_live_smoke_ok": true,
+  "issuer_sponsor_api_live_smoke_status": "pass"
+}
+EOF_AUTO_PHASE5_DRY_RUN
+touch -t 202601030303 "$AUTO_PHASE5_DRY_RUN_JSON"
+
+if ! ROADMAP_PROGRESS_LOGS_ROOT="$AUTO_PHASE5_LOGS_ROOT" \
+  run_roadmap_progress_report \
+    --refresh-manual-validation 0 \
+    --refresh-single-machine-readiness 0 \
+    --manual-validation-summary-json "$MINIMAL_MANUAL_SUMMARY_JSON" \
+    --phase5-settlement-layer-summary-json "" \
+    --summary-json "$TMP_DIR/roadmap_progress_auto_phase5_summary.json" \
+    --report-md "$TMP_DIR/roadmap_progress_auto_phase5_report.md" \
+    --print-report 0 \
+    --print-summary-json 0 >/tmp/integration_roadmap_progress_report_auto_phase5.log 2>&1; then
+  echo "expected success for auto phase5 source selection path"
+  cat /tmp/integration_roadmap_progress_report_auto_phase5.log
+  exit 1
+fi
+if ! jq -e --arg src "$AUTO_PHASE5_GOOD_JSON" '
+  .status == "warn"
+  and .rc == 0
+  and .vpn_track.phase5_settlement_layer_handoff.available == true
+  and .vpn_track.phase5_settlement_layer_handoff.source_summary_json == $src
+  and .vpn_track.phase5_settlement_layer_handoff.status == "pass"
+  and .vpn_track.phase5_settlement_layer_handoff.settlement_failsoft_ok == true
+  and .vpn_track.phase5_settlement_layer_handoff.settlement_acceptance_ok == true
+  and .vpn_track.phase5_settlement_layer_handoff.settlement_bridge_smoke_ok == true
+  and .vpn_track.phase5_settlement_layer_handoff.settlement_state_persistence_ok == true
+  and .vpn_track.phase5_settlement_layer_handoff.settlement_adapter_roundtrip_ok == true
+  and .vpn_track.phase5_settlement_layer_handoff.issuer_sponsor_api_live_smoke_ok == true
+  and .artifacts.phase5_settlement_layer_summary_json == $src
+' "$TMP_DIR/roadmap_progress_auto_phase5_summary.json" >/dev/null; then
+  echo "auto phase5 source selection summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_auto_phase5_summary.json"
   exit 1
 fi
 

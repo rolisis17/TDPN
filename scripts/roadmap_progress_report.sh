@@ -277,6 +277,63 @@ profile_default_gate_status_from_signoff_summary() {
   esac
 }
 
+resolve_profile_default_gate_signoff_status() {
+  local explicit_path="$1"
+  local manual_summary_path="$2"
+  local candidate=""
+  local candidate_abs=""
+  local status=""
+  local fallback_status=""
+  local fallback_path=""
+  local seen_paths_nl=$'\n'
+  local -a candidates=()
+  if [[ -n "$explicit_path" ]]; then
+    candidates+=("$explicit_path")
+  fi
+  if [[ "$(json_file_valid_01 "$manual_summary_path")" == "1" ]]; then
+    while IFS= read -r candidate; do
+      if [[ -n "$candidate" ]]; then
+        candidates+=("$candidate")
+      fi
+    done < <(jq -r '
+      [
+        (.summary.profile_default_gate.signoff_summary_json // ""),
+        (.summary.profile_default_gate.summary_json // ""),
+        (.summary.profile_default_gate.source_summary_json // ""),
+        (.summary.profile_default_gate.artifacts.signoff_summary_json // ""),
+        (.artifacts.profile_compare_signoff_summary_json // "")
+      ]
+      | .[]
+      | strings
+      | select(length > 0)
+    ' "$manual_summary_path" 2>/dev/null || true)
+  fi
+  for candidate in "${candidates[@]}"; do
+    candidate_abs="$(abs_path "$candidate")"
+    if [[ -z "$candidate_abs" ]]; then
+      continue
+    fi
+    if [[ "$seen_paths_nl" == *$'\n'"$candidate_abs"$'\n'* ]]; then
+      continue
+    fi
+    seen_paths_nl+="$candidate_abs"$'\n'
+    status="$(profile_default_gate_status_from_signoff_summary "$candidate_abs")"
+    case "$status" in
+      pass|warn|fail)
+        printf '%s\x1f%s' "$status" "$candidate_abs"
+        return
+        ;;
+      pending|skip)
+        if [[ -z "$fallback_status" ]]; then
+          fallback_status="$status"
+          fallback_path="$candidate_abs"
+        fi
+        ;;
+    esac
+  done
+  printf '%s\x1f%s' "$fallback_status" "$fallback_path"
+}
+
 resilience_summary_usable_01() {
   local path="$1"
   if [[ ! -f "$path" ]]; then
@@ -821,40 +878,92 @@ resolve_phase1_string_with_source_chain() {
   printf '%s' ""
 }
 
+candidate_bool_signal_value_or_empty() {
+  local path="$1"
+  local signal="$2"
+  local value=""
+  if [[ "$(json_file_valid_01 "$path")" != "1" ]]; then
+    printf '%s' ""
+    return
+  fi
+  value="$(jq -r --arg signal "$signal" '
+    if (.[$signal] | type) == "boolean" then .[$signal]
+    elif (.summary[$signal] | type) == "boolean" then .summary[$signal]
+    elif (.handoff[$signal] | type) == "boolean" then .handoff[$signal]
+    elif (.signals[$signal] | type) == "boolean" then .signals[$signal]
+    elif (.automation[$signal] | type) == "boolean" then .automation[$signal]
+    elif (.phase1_resilience_handoff[$signal] | type) == "boolean" then .phase1_resilience_handoff[$signal]
+    elif (.phase2_linux_prod_candidate_handoff[$signal] | type) == "boolean" then .phase2_linux_prod_candidate_handoff[$signal]
+    elif (.phase3_windows_client_beta_handoff[$signal] | type) == "boolean" then .phase3_windows_client_beta_handoff[$signal]
+    elif (.phase4_windows_full_parity_handoff[$signal] | type) == "boolean" then .phase4_windows_full_parity_handoff[$signal]
+    elif (.phase5_settlement_layer_handoff[$signal] | type) == "boolean" then .phase5_settlement_layer_handoff[$signal]
+    elif (.phase6_cosmos_l1_handoff[$signal] | type) == "boolean" then .phase6_cosmos_l1_handoff[$signal]
+    elif (.vpn_track.phase1_resilience_handoff[$signal] | type) == "boolean" then .vpn_track.phase1_resilience_handoff[$signal]
+    elif (.vpn_track.phase2_linux_prod_candidate_handoff[$signal] | type) == "boolean" then .vpn_track.phase2_linux_prod_candidate_handoff[$signal]
+    elif (.vpn_track.phase3_windows_client_beta_handoff[$signal] | type) == "boolean" then .vpn_track.phase3_windows_client_beta_handoff[$signal]
+    elif (.vpn_track.phase4_windows_full_parity_handoff[$signal] | type) == "boolean" then .vpn_track.phase4_windows_full_parity_handoff[$signal]
+    elif (.vpn_track.phase5_settlement_layer_handoff[$signal] | type) == "boolean" then .vpn_track.phase5_settlement_layer_handoff[$signal]
+    elif (.vpn_track.phase6_cosmos_l1_handoff[$signal] | type) == "boolean" then .vpn_track.phase6_cosmos_l1_handoff[$signal]
+    elif (.blockchain_track.phase6_cosmos_l1_handoff[$signal] | type) == "boolean" then .blockchain_track.phase6_cosmos_l1_handoff[$signal]
+    else empty
+    end
+  ' "$path" 2>/dev/null || true)"
+  case "$value" in
+    true|false)
+      printf '%s' "$value"
+      ;;
+    *)
+      printf '%s' ""
+      ;;
+  esac
+}
+
 candidate_bool_signal_present_01() {
   local path="$1"
   local signal="$2"
-  if [[ "$(json_file_valid_01 "$path")" != "1" ]]; then
-    printf '%s' "0"
-    return
-  fi
-  if jq -e --arg signal "$signal" '
-    (
-      if (.[$signal] | type) == "boolean" then .[$signal]
-      elif (.summary[$signal] | type) == "boolean" then .summary[$signal]
-      elif (.handoff[$signal] | type) == "boolean" then .handoff[$signal]
-      elif (.signals[$signal] | type) == "boolean" then .signals[$signal]
-      elif (.automation[$signal] | type) == "boolean" then .automation[$signal]
-      elif (.phase1_resilience_handoff[$signal] | type) == "boolean" then .phase1_resilience_handoff[$signal]
-      elif (.phase2_linux_prod_candidate_handoff[$signal] | type) == "boolean" then .phase2_linux_prod_candidate_handoff[$signal]
-      elif (.phase3_windows_client_beta_handoff[$signal] | type) == "boolean" then .phase3_windows_client_beta_handoff[$signal]
-      elif (.phase4_windows_full_parity_handoff[$signal] | type) == "boolean" then .phase4_windows_full_parity_handoff[$signal]
-      elif (.phase5_settlement_layer_handoff[$signal] | type) == "boolean" then .phase5_settlement_layer_handoff[$signal]
-      elif (.phase6_cosmos_l1_handoff[$signal] | type) == "boolean" then .phase6_cosmos_l1_handoff[$signal]
-      elif (.vpn_track.phase1_resilience_handoff[$signal] | type) == "boolean" then .vpn_track.phase1_resilience_handoff[$signal]
-      elif (.vpn_track.phase2_linux_prod_candidate_handoff[$signal] | type) == "boolean" then .vpn_track.phase2_linux_prod_candidate_handoff[$signal]
-      elif (.vpn_track.phase3_windows_client_beta_handoff[$signal] | type) == "boolean" then .vpn_track.phase3_windows_client_beta_handoff[$signal]
-      elif (.vpn_track.phase4_windows_full_parity_handoff[$signal] | type) == "boolean" then .vpn_track.phase4_windows_full_parity_handoff[$signal]
-      elif (.vpn_track.phase5_settlement_layer_handoff[$signal] | type) == "boolean" then .vpn_track.phase5_settlement_layer_handoff[$signal]
-      elif (.vpn_track.phase6_cosmos_l1_handoff[$signal] | type) == "boolean" then .vpn_track.phase6_cosmos_l1_handoff[$signal]
-      elif (.blockchain_track.phase6_cosmos_l1_handoff[$signal] | type) == "boolean" then .blockchain_track.phase6_cosmos_l1_handoff[$signal]
-      else empty
-      end
-    ) | type == "boolean"
-  ' "$path" >/dev/null 2>&1; then
+  local value=""
+  value="$(candidate_bool_signal_value_or_empty "$path" "$signal")"
+  if [[ "$value" == "true" || "$value" == "false" ]]; then
     printf '%s' "1"
   else
     printf '%s' "0"
+  fi
+}
+
+candidate_string_signal_value_or_empty() {
+  local path="$1"
+  local signal="$2"
+  local value=""
+  if [[ "$(json_file_valid_01 "$path")" != "1" ]]; then
+    printf '%s' ""
+    return
+  fi
+  value="$(jq -r --arg signal "$signal" '
+    if (.[$signal] | type) == "string" then .[$signal]
+    elif (.summary[$signal] | type) == "string" then .summary[$signal]
+    elif (.handoff[$signal] | type) == "string" then .handoff[$signal]
+    elif (.signals[$signal] | type) == "string" then .signals[$signal]
+    elif (.automation[$signal] | type) == "string" then .automation[$signal]
+    elif (.phase1_resilience_handoff[$signal] | type) == "string" then .phase1_resilience_handoff[$signal]
+    elif (.phase2_linux_prod_candidate_handoff[$signal] | type) == "string" then .phase2_linux_prod_candidate_handoff[$signal]
+    elif (.phase3_windows_client_beta_handoff[$signal] | type) == "string" then .phase3_windows_client_beta_handoff[$signal]
+    elif (.phase4_windows_full_parity_handoff[$signal] | type) == "string" then .phase4_windows_full_parity_handoff[$signal]
+    elif (.phase5_settlement_layer_handoff[$signal] | type) == "string" then .phase5_settlement_layer_handoff[$signal]
+    elif (.phase6_cosmos_l1_handoff[$signal] | type) == "string" then .phase6_cosmos_l1_handoff[$signal]
+    elif (.vpn_track.phase1_resilience_handoff[$signal] | type) == "string" then .vpn_track.phase1_resilience_handoff[$signal]
+    elif (.vpn_track.phase2_linux_prod_candidate_handoff[$signal] | type) == "string" then .vpn_track.phase2_linux_prod_candidate_handoff[$signal]
+    elif (.vpn_track.phase3_windows_client_beta_handoff[$signal] | type) == "string" then .vpn_track.phase3_windows_client_beta_handoff[$signal]
+    elif (.vpn_track.phase4_windows_full_parity_handoff[$signal] | type) == "string" then .vpn_track.phase4_windows_full_parity_handoff[$signal]
+    elif (.vpn_track.phase5_settlement_layer_handoff[$signal] | type) == "string" then .vpn_track.phase5_settlement_layer_handoff[$signal]
+    elif (.vpn_track.phase6_cosmos_l1_handoff[$signal] | type) == "string" then .vpn_track.phase6_cosmos_l1_handoff[$signal]
+    elif (.blockchain_track.phase6_cosmos_l1_handoff[$signal] | type) == "string" then .blockchain_track.phase6_cosmos_l1_handoff[$signal]
+    else empty
+    end
+  ' "$path" 2>/dev/null || true)"
+  if [[ -n "$value" && "$value" != "null" ]]; then
+    printf '%s' "$value"
+  else
+    printf '%s' ""
   fi
 }
 
@@ -1015,6 +1124,95 @@ phase5_settlement_layer_summary_completeness_score() {
     fi
   done
   printf '%s' "$score"
+}
+
+phase5_settlement_layer_summary_quality_score() {
+  local path="$1"
+  local score=0
+  local signal=""
+  local value=""
+  if [[ "$(json_file_valid_01 "$path")" != "1" ]]; then
+    printf '%s' "0"
+    return
+  fi
+  for signal in settlement_failsoft_ok settlement_acceptance_ok settlement_bridge_smoke_ok settlement_state_persistence_ok settlement_adapter_roundtrip_ok issuer_sponsor_api_live_smoke_ok; do
+    value="$(candidate_bool_signal_value_or_empty "$path" "$signal")"
+    case "$value" in
+      true)
+        score=$((score + 2))
+        ;;
+      false)
+        score=$((score - 3))
+        ;;
+    esac
+  done
+  value="$(candidate_string_signal_value_or_empty "$path" "status")"
+  case "${value,,}" in
+    pass|ok|success)
+      score=$((score + 3))
+      ;;
+    fail|failed|error|invalid|degraded)
+      score=$((score - 3))
+      ;;
+  esac
+  value="$(candidate_string_signal_value_or_empty "$path" "settlement_adapter_roundtrip_status")"
+  case "${value,,}" in
+    pass|ok|success)
+      score=$((score + 2))
+      ;;
+    fail|failed|error|invalid|degraded)
+      score=$((score - 2))
+      ;;
+  esac
+  value="$(candidate_string_signal_value_or_empty "$path" "issuer_sponsor_api_live_smoke_status")"
+  case "${value,,}" in
+    pass|ok|success)
+      score=$((score + 2))
+      ;;
+    fail|failed|error|invalid|degraded)
+      score=$((score - 2))
+      ;;
+  esac
+  printf '%s' "$score"
+}
+
+phase5_settlement_layer_summary_obviously_degraded_01() {
+  local path="$1"
+  local signal=""
+  local value=""
+  if [[ "$(json_file_valid_01 "$path")" != "1" ]]; then
+    printf '%s' "0"
+    return
+  fi
+  value="$(candidate_string_signal_value_or_empty "$path" "status")"
+  case "${value,,}" in
+    fail|failed|error|invalid|degraded)
+      printf '%s' "1"
+      return
+      ;;
+  esac
+  for signal in settlement_failsoft_ok settlement_acceptance_ok settlement_bridge_smoke_ok settlement_state_persistence_ok settlement_adapter_roundtrip_ok issuer_sponsor_api_live_smoke_ok; do
+    value="$(candidate_bool_signal_value_or_empty "$path" "$signal")"
+    if [[ "$value" == "false" ]]; then
+      printf '%s' "1"
+      return
+    fi
+  done
+  value="$(candidate_string_signal_value_or_empty "$path" "settlement_adapter_roundtrip_status")"
+  case "${value,,}" in
+    fail|failed|error|invalid|degraded)
+      printf '%s' "1"
+      return
+      ;;
+  esac
+  value="$(candidate_string_signal_value_or_empty "$path" "issuer_sponsor_api_live_smoke_status")"
+  case "${value,,}" in
+    fail|failed|error|invalid|degraded)
+      printf '%s' "1"
+      return
+      ;;
+  esac
+  printf '%s' "0"
 }
 
 phase2_linux_prod_candidate_summary_usable_01() {
@@ -1393,15 +1591,20 @@ phase5_settlement_layer_summary_usable_01() {
 }
 
 find_latest_phase5_settlement_layer_summary_json() {
-  local logs_root="$ROOT_DIR/.easy-node-logs"
+  local logs_root
   local candidate=""
   local candidate_mtime=0
   local candidate_score=0
   local candidate_non_dry=1
+  local candidate_non_degraded=1
+  local candidate_quality=0
   local best_path=""
   local best_mtime=-1
   local best_score=-1
   local best_non_dry=-1
+  local best_non_degraded=-1
+  local best_quality=-999999
+  logs_root="$(roadmap_resilience_logs_root)"
   if [[ ! -d "$logs_root" ]]; then
     printf '%s' ""
     return
@@ -1418,6 +1621,14 @@ find_latest_phase5_settlement_layer_summary_json() {
     if [[ "$(summary_effective_dry_run_01 "$candidate")" == "1" ]]; then
       candidate_non_dry=0
     fi
+    candidate_non_degraded=1
+    if [[ "$(phase5_settlement_layer_summary_obviously_degraded_01 "$candidate")" == "1" ]]; then
+      candidate_non_degraded=0
+    fi
+    candidate_quality="$(phase5_settlement_layer_summary_quality_score "$candidate")"
+    if ! [[ "$candidate_quality" =~ ^-?[0-9]+$ ]]; then
+      candidate_quality=0
+    fi
     candidate_mtime="$(file_mtime_epoch "$candidate")"
     if ! [[ "$candidate_mtime" =~ ^[0-9]+$ ]]; then
       candidate_mtime=0
@@ -1425,20 +1636,37 @@ find_latest_phase5_settlement_layer_summary_json() {
     if (( candidate_score > best_score )); then
       best_score="$candidate_score"
       best_non_dry="$candidate_non_dry"
+      best_non_degraded="$candidate_non_degraded"
+      best_quality="$candidate_quality"
       best_mtime="$candidate_mtime"
       best_path="$candidate"
     elif (( candidate_score == best_score )); then
       if (( candidate_non_dry > best_non_dry )); then
         best_non_dry="$candidate_non_dry"
+        best_non_degraded="$candidate_non_degraded"
+        best_quality="$candidate_quality"
         best_mtime="$candidate_mtime"
         best_path="$candidate"
       elif (( candidate_non_dry == best_non_dry )); then
-        if (( candidate_mtime > best_mtime )); then
+        if (( candidate_non_degraded > best_non_degraded )); then
+          best_non_degraded="$candidate_non_degraded"
+          best_quality="$candidate_quality"
           best_mtime="$candidate_mtime"
           best_path="$candidate"
-        elif (( candidate_mtime == best_mtime )) && [[ "$candidate" > "$best_path" ]]; then
-          # Deterministic tie-break when score/dryness/mtime are equal.
-          best_path="$candidate"
+        elif (( candidate_non_degraded == best_non_degraded )); then
+          if (( candidate_quality > best_quality )); then
+            best_quality="$candidate_quality"
+            best_mtime="$candidate_mtime"
+            best_path="$candidate"
+          elif (( candidate_quality == best_quality )); then
+            if (( candidate_mtime > best_mtime )); then
+              best_mtime="$candidate_mtime"
+              best_path="$candidate"
+            elif (( candidate_mtime == best_mtime )) && [[ "$candidate" > "$best_path" ]]; then
+              # Deterministic tie-break when score/dryness/degradation/quality/mtime are equal.
+              best_path="$candidate"
+            fi
+          fi
         fi
       fi
     fi
@@ -3343,6 +3571,65 @@ if [[ -n "$phase5_settlement_layer_summary_json" ]]; then
               elif $s == "fail" then false
               else empty end
           end')"
+      if [[ -z "$phase5_settlement_layer_handoff_settlement_adapter_roundtrip_status_json" || "$phase5_settlement_layer_handoff_settlement_adapter_roundtrip_ok_json" == "null" ]]; then
+        phase5_run_summary_chain_json=""
+        phase5_run_summary_chain_json="$(jq -r '
+          if (.schema.id // "") == "phase5_settlement_layer_run_summary" then input_filename
+          elif (.schema.id // "") == "phase5_settlement_layer_handoff_run_summary" then (.inputs.phase5_run_summary_json // .artifacts.phase5_run_summary_json // "")
+          elif (.inputs.phase5_run_summary_json | type) == "string" then .inputs.phase5_run_summary_json
+          elif (.inputs.phase4_run_summary_json | type) == "string" then .inputs.phase4_run_summary_json
+          elif (.artifacts.phase5_run_summary_json | type) == "string" then .artifacts.phase5_run_summary_json
+          elif (.artifacts.run_summary_json | type) == "string" then .artifacts.run_summary_json
+          else "" end
+        ' "$phase5_settlement_layer_handoff_source_summary_json" 2>/dev/null || true)"
+        if [[ -n "$phase5_run_summary_chain_json" ]]; then
+          phase5_run_summary_chain_json="$(resolve_path_with_base "$phase5_run_summary_chain_json" "$phase5_settlement_layer_handoff_source_summary_json")"
+          if [[ "$(json_file_valid_01 "$phase5_run_summary_chain_json")" == "1" ]]; then
+            phase5_ci_summary_chain_json=""
+            phase5_ci_summary_chain_json="$(jq -r '
+              if (.inputs.ci_phase5_summary_json | type) == "string" then .inputs.ci_phase5_summary_json
+              elif (.steps.ci_phase5_settlement_layer.artifacts.summary_json | type) == "string" then .steps.ci_phase5_settlement_layer.artifacts.summary_json
+              elif (.artifacts.ci_phase5_summary_json | type) == "string" then .artifacts.ci_phase5_summary_json
+              elif (.artifacts.ci_summary_json | type) == "string" then .artifacts.ci_summary_json
+              else "" end
+            ' "$phase5_run_summary_chain_json" 2>/dev/null || true)"
+            if [[ -n "$phase5_ci_summary_chain_json" ]]; then
+              phase5_ci_summary_chain_json="$(resolve_path_with_base "$phase5_ci_summary_chain_json" "$phase5_run_summary_chain_json")"
+              if [[ "$(json_file_valid_01 "$phase5_ci_summary_chain_json")" == "1" ]]; then
+                if [[ -z "$phase5_settlement_layer_handoff_settlement_adapter_roundtrip_status_json" ]]; then
+                  phase5_settlement_layer_handoff_settlement_adapter_roundtrip_status_json="$(jq -r '
+                    if (.settlement_adapter_roundtrip_status | type) == "string" then .settlement_adapter_roundtrip_status
+                    elif (.summary.settlement_adapter_roundtrip_status | type) == "string" then .summary.settlement_adapter_roundtrip_status
+                    elif (.signals.settlement_adapter_roundtrip_status | type) == "string" then .signals.settlement_adapter_roundtrip_status
+                    elif (.steps.settlement_adapter_roundtrip.status | type) == "string" then .steps.settlement_adapter_roundtrip.status
+                    elif (.steps.adapter_roundtrip.status | type) == "string" then .steps.adapter_roundtrip.status
+                    elif (.stages.settlement_adapter_roundtrip.status | type) == "string" then .stages.settlement_adapter_roundtrip.status
+                    elif (.stages.adapter_roundtrip.status | type) == "string" then .stages.adapter_roundtrip.status
+                    else empty end
+                  ' "$phase5_ci_summary_chain_json" 2>/dev/null || true)"
+                fi
+                if [[ "$phase5_settlement_layer_handoff_settlement_adapter_roundtrip_ok_json" == "null" ]]; then
+                  phase5_settlement_layer_handoff_settlement_adapter_roundtrip_ok_json="$(resolve_phase5_bool_with_fallback \
+                    "$phase5_ci_summary_chain_json" \
+                    'if (.settlement_adapter_roundtrip_ok | type) == "boolean" then .settlement_adapter_roundtrip_ok
+                      elif (.summary.settlement_adapter_roundtrip_ok | type) == "boolean" then .summary.settlement_adapter_roundtrip_ok
+                      elif (.signals.settlement_adapter_roundtrip_ok | type) == "boolean" then .signals.settlement_adapter_roundtrip_ok
+                      elif (.signals.settlement_adapter_roundtrip | type) == "boolean" then .signals.settlement_adapter_roundtrip
+                      else empty end' \
+                    'if (.stages.settlement_adapter_roundtrip.ok | type) == "boolean" then .stages.settlement_adapter_roundtrip.ok
+                      elif (.stages.adapter_roundtrip.ok | type) == "boolean" then .stages.adapter_roundtrip.ok
+                      else
+                        ((.steps.settlement_adapter_roundtrip.status // .steps.adapter_roundtrip.status // .stages.settlement_adapter_roundtrip.status // .stages.adapter_roundtrip.status // "") | ascii_downcase) as $s
+                        | if $s == "pass" then true
+                          elif $s == "fail" then false
+                          else empty end
+                      end')"
+                fi
+              fi
+            fi
+          fi
+        fi
+      fi
       phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_status_json="$(jq -r '
         if (.issuer_sponsor_api_live_smoke_status | type) == "string" then .issuer_sponsor_api_live_smoke_status
         elif (.summary.issuer_sponsor_api_live_smoke_status | type) == "string" then .summary.issuer_sponsor_api_live_smoke_status
@@ -3862,9 +4149,17 @@ if [[ "$single_machine_ready_json" == "true" && "$docker_rehearsal_ready_json" =
 fi
 
 profile_default_gate_status="$(jq -r '.summary.profile_default_gate.status // "pending"' "$manual_validation_summary_json")"
-profile_default_gate_signoff_status="$(profile_default_gate_status_from_signoff_summary "$profile_compare_signoff_summary_json")"
+profile_default_gate_signoff_resolution="$(resolve_profile_default_gate_signoff_status "$profile_compare_signoff_summary_json" "$manual_validation_summary_json")"
+profile_default_gate_signoff_status="${profile_default_gate_signoff_resolution%%$'\x1f'*}"
+profile_default_gate_signoff_source=""
+if [[ "$profile_default_gate_signoff_resolution" == *$'\x1f'* ]]; then
+  profile_default_gate_signoff_source="${profile_default_gate_signoff_resolution#*$'\x1f'}"
+fi
 if [[ -n "$profile_default_gate_signoff_status" ]]; then
   profile_default_gate_status="$profile_default_gate_signoff_status"
+  if [[ -n "$profile_default_gate_signoff_source" ]]; then
+    profile_compare_signoff_summary_json="$profile_default_gate_signoff_source"
+  fi
 fi
 profile_default_gate_needs_attention_json="true"
 if [[ "$profile_default_gate_status" == "pass" || "$profile_default_gate_status" == "skip" ]]; then

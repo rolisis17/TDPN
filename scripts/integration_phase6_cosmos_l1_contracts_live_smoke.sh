@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-for cmd in bash jq mktemp; do
+for cmd in bash jq mktemp cmp cat; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "missing required command: $cmd"
     exit 2
@@ -21,14 +21,17 @@ TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 SUMMARY_JSON="$TMP_DIR/ci_phase6_cosmos_l1_contracts_summary.json"
+CANONICAL_SUMMARY_JSON="$TMP_DIR/ci_phase6_cosmos_l1_contracts_canonical_summary.json"
 TIMEOUT_SECONDS="${PHASE6_COSMOS_L1_CONTRACTS_LIVE_SMOKE_TIMEOUT_SECONDS:-240}"
 
 if command -v timeout >/dev/null 2>&1; then
   timeout "${TIMEOUT_SECONDS}s" \
+    env CI_PHASE6_COSMOS_L1_CONTRACTS_CANONICAL_SUMMARY_JSON="$CANONICAL_SUMMARY_JSON" \
     "$GATE_SCRIPT" \
       --print-summary-json 0 \
       --summary-json "$SUMMARY_JSON"
 else
+  CI_PHASE6_COSMOS_L1_CONTRACTS_CANONICAL_SUMMARY_JSON="$CANONICAL_SUMMARY_JSON" \
   "$GATE_SCRIPT" \
     --print-summary-json 0 \
     --summary-json "$SUMMARY_JSON"
@@ -38,8 +41,18 @@ if [[ ! -s "$SUMMARY_JSON" ]]; then
   echo "missing or empty summary json: $SUMMARY_JSON"
   exit 1
 fi
+if [[ ! -s "$CANONICAL_SUMMARY_JSON" ]]; then
+  echo "missing or empty canonical summary json: $CANONICAL_SUMMARY_JSON"
+  exit 1
+fi
+if ! cmp -s "$SUMMARY_JSON" "$CANONICAL_SUMMARY_JSON"; then
+  echo "summary json and canonical summary json differ"
+  cat "$SUMMARY_JSON"
+  cat "$CANONICAL_SUMMARY_JSON"
+  exit 1
+fi
 
-if ! jq -e '
+if ! jq -e --arg summary "$SUMMARY_JSON" --arg canonical "$CANONICAL_SUMMARY_JSON" '
   .version == 1
   and .schema.id == "ci_phase6_cosmos_l1_contracts_summary"
   and (.schema.major | type) == "number"
@@ -76,6 +89,8 @@ if ! jq -e '
   and .steps.phase6_cosmos_l1_build_testnet_handoff_run.rc == 0
   and .steps.phase6_cosmos_l1_build_testnet_suite.rc == 0
   and .steps.phase6_cosmos_l1_contracts_live_smoke.rc == 0
+  and .artifacts.summary_json == $summary
+  and .artifacts.canonical_summary_json == $canonical
   and (
     (
       .inputs.run_phase6_cosmos_l1_contracts_live_smoke == false
