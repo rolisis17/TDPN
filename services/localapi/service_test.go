@@ -111,6 +111,10 @@ esac
 }
 
 func callJSONHandler(t *testing.T, h http.HandlerFunc, method, path, body string) (int, map[string]any) {
+	return callJSONHandlerWithHeaders(t, h, method, path, body, nil)
+}
+
+func callJSONHandlerWithHeaders(t *testing.T, h http.HandlerFunc, method, path, body string, headers map[string]string) (int, map[string]any) {
 	t.Helper()
 
 	var reader io.Reader
@@ -120,6 +124,9 @@ func callJSONHandler(t *testing.T, h http.HandlerFunc, method, path, body string
 	req := httptest.NewRequest(method, path, reader)
 	if body != "" {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	for key, value := range headers {
+		req.Header.Set(key, value)
 	}
 	rr := httptest.NewRecorder()
 	h(rr, req)
@@ -229,6 +236,7 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		t.Setenv("LOCAL_CONTROL_API_SCRIPT", "")
 		t.Setenv("LOCAL_CONTROL_API_COMMAND_TIMEOUT_SEC", "")
 		t.Setenv("LOCAL_CONTROL_API_ALLOW_UPDATE", "")
+		t.Setenv("LOCAL_CONTROL_API_AUTH_TOKEN", "")
 
 		s := New()
 		if s.addr != defaultAddr {
@@ -246,6 +254,9 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		if s.allowUpdate {
 			t.Fatalf("allowUpdate=%t want=false", s.allowUpdate)
 		}
+		if s.authToken != "" {
+			t.Fatalf("authToken=%q want empty", s.authToken)
+		}
 	})
 
 	t.Run("overrides and timeout validation", func(t *testing.T) {
@@ -254,6 +265,7 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		t.Setenv("LOCAL_CONTROL_API_RUNNER", " bash ")
 		t.Setenv("LOCAL_CONTROL_API_COMMAND_TIMEOUT_SEC", "240")
 		t.Setenv("LOCAL_CONTROL_API_ALLOW_UPDATE", "1")
+		t.Setenv("LOCAL_CONTROL_API_AUTH_TOKEN", " local-secret ")
 
 		s := New()
 		if s.addr != "0.0.0.0:9999" {
@@ -270,6 +282,9 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		}
 		if !s.allowUpdate {
 			t.Fatalf("allowUpdate=%t want=true", s.allowUpdate)
+		}
+		if s.authToken != "local-secret" {
+			t.Fatalf("authToken=%q want=%q", s.authToken, "local-secret")
 		}
 
 		t.Setenv("LOCAL_CONTROL_API_COMMAND_TIMEOUT_SEC", "4")
@@ -485,6 +500,10 @@ func TestHandleConnectFailuresAndValidation(t *testing.T) {
 		if code != http.StatusBadRequest {
 			t.Fatalf("invalid json status=%d want=%d", code, http.StatusBadRequest)
 		}
+		code, _ = callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{"bootstrap_directory":"http://dir.example:8081","invite_key":"inv"}{"extra":1}`)
+		if code != http.StatusBadRequest {
+			t.Fatalf("trailing json status=%d want=%d", code, http.StatusBadRequest)
+		}
 
 		if cmds := readCommandLog(t, logPath); len(cmds) != 0 {
 			t.Fatalf("validation failures should not execute commands, got=%v", cmds)
@@ -559,6 +578,10 @@ func TestHandleSetProfileNormalizationAndValidation(t *testing.T) {
 	if code != http.StatusBadRequest {
 		t.Fatalf("invalid profile status=%d want=%d", code, http.StatusBadRequest)
 	}
+	code, _ = callJSONHandler(t, svc2.handleSetProfile, http.MethodPost, "/v1/set_profile", `{"path_profile":"2hop"}{"extra":1}`)
+	if code != http.StatusBadRequest {
+		t.Fatalf("trailing json status=%d want=%d", code, http.StatusBadRequest)
+	}
 	if cmds = readCommandLog(t, logPath2); len(cmds) != 0 {
 		t.Fatalf("invalid set_profile should not execute commands, got=%v", cmds)
 	}
@@ -598,6 +621,21 @@ func TestHandleUpdateGateAndForwarding(t *testing.T) {
 		mustFlagValue(t, cmds[0], "--remote", "upstream")
 		mustFlagValue(t, cmds[0], "--branch", "release/v1")
 		mustFlagValue(t, cmds[0], "--allow-dirty", "0")
+	})
+
+	t.Run("invalid json rejected", func(t *testing.T) {
+		svc, logPath := newFakeService(t, true)
+		code, payload := callJSONHandler(t, svc.handleUpdate, http.MethodPost, "/v1/update", `{bad`)
+		if code != http.StatusBadRequest {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+		code, payload = callJSONHandler(t, svc.handleUpdate, http.MethodPost, "/v1/update", `{"remote":"origin"}{"extra":1}`)
+		if code != http.StatusBadRequest {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+		if cmds := readCommandLog(t, logPath); len(cmds) != 0 {
+			t.Fatalf("invalid update should not execute commands, got=%v", cmds)
+		}
 	})
 }
 
@@ -680,6 +718,324 @@ func TestDiagnosticsAndDisconnectBasicCoverage(t *testing.T) {
 	})
 }
 
+func TestServiceLifecycleMethodGuards(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+
+	tests := []struct {
+		name    string
+		handler http.HandlerFunc
+		method  string
+		target  string
+	}{
+		{name: "service_status", handler: svc.handleServiceStatus, method: http.MethodPost, target: "/v1/service/status"},
+		{name: "service_start", handler: svc.handleServiceStart, method: http.MethodGet, target: "/v1/service/start"},
+		{name: "service_stop", handler: svc.handleServiceStop, method: http.MethodGet, target: "/v1/service/stop"},
+		{name: "service_restart", handler: svc.handleServiceRestart, method: http.MethodGet, target: "/v1/service/restart"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			code, payload := callJSONHandler(t, tc.handler, tc.method, tc.target, "")
+			if code != http.StatusMethodNotAllowed {
+				t.Fatalf("status=%d body=%v", code, payload)
+			}
+		})
+	}
+}
+
+func TestHandleServiceStatusContract(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.serviceStatus = "echo service-running"
+	svc.serviceStart = "echo service-start"
+	svc.serviceRestart = "echo service-restart"
+
+	code, payload := callJSONHandler(t, svc.handleServiceStatus, http.MethodGet, "/v1/service/status", "")
+	if code != http.StatusOK {
+		t.Fatalf("status=%d body=%v", code, payload)
+	}
+
+	serviceMap, ok := payload["service"].(map[string]any)
+	if !ok {
+		t.Fatalf("service payload missing map: %v", payload)
+	}
+	if supported, _ := serviceMap["supported"].(bool); !supported {
+		t.Fatalf("service.supported=%v want=true", serviceMap["supported"])
+	}
+
+	commandsMap, ok := serviceMap["commands"].(map[string]any)
+	if !ok {
+		t.Fatalf("service.commands missing map: %v", serviceMap)
+	}
+	if got, _ := commandsMap["status_configured"].(bool); !got {
+		t.Fatalf("status_configured=%v want=true", commandsMap["status_configured"])
+	}
+	if got, _ := commandsMap["start_configured"].(bool); !got {
+		t.Fatalf("start_configured=%v want=true", commandsMap["start_configured"])
+	}
+	if got, _ := commandsMap["stop_configured"].(bool); got {
+		t.Fatalf("stop_configured=%v want=false", commandsMap["stop_configured"])
+	}
+	if got, _ := commandsMap["restart_configured"].(bool); !got {
+		t.Fatalf("restart_configured=%v want=true", commandsMap["restart_configured"])
+	}
+
+	statusMap, ok := serviceMap["status"].(map[string]any)
+	if !ok {
+		t.Fatalf("service.status missing map: %v", serviceMap)
+	}
+	if got, _ := statusMap["ok"].(bool); !got {
+		t.Fatalf("service.status.ok=%v want=true", statusMap["ok"])
+	}
+	if got, _ := statusMap["output"].(string); got != "service-running" {
+		t.Fatalf("service.status.output=%q want=service-running", got)
+	}
+	if got, _ := statusMap["rc"].(float64); int(got) != 0 {
+		t.Fatalf("service.status.rc=%v want=0", statusMap["rc"])
+	}
+	if _, exists := serviceMap["status_error"]; exists {
+		t.Fatalf("service.status_error should be absent on success: %v", serviceMap["status_error"])
+	}
+}
+
+func TestServiceLifecycleMutationNotImplementedWhenUnset(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+
+	tests := []struct {
+		name    string
+		handler http.HandlerFunc
+		target  string
+		wantErr string
+	}{
+		{
+			name:    "start_unset",
+			handler: svc.handleServiceStart,
+			target:  "/v1/service/start",
+			wantErr: "service start not configured (set LOCAL_CONTROL_API_SERVICE_START_COMMAND)",
+		},
+		{
+			name:    "stop_unset",
+			handler: svc.handleServiceStop,
+			target:  "/v1/service/stop",
+			wantErr: "service stop not configured (set LOCAL_CONTROL_API_SERVICE_STOP_COMMAND)",
+		},
+		{
+			name:    "restart_unset",
+			handler: svc.handleServiceRestart,
+			target:  "/v1/service/restart",
+			wantErr: "service restart not configured (set LOCAL_CONTROL_API_SERVICE_RESTART_COMMAND)",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			code, payload := callJSONHandler(t, tc.handler, http.MethodPost, tc.target, "")
+			if code != http.StatusNotImplemented {
+				t.Fatalf("status=%d body=%v", code, payload)
+			}
+			if got, _ := payload["error"].(string); got != tc.wantErr {
+				t.Fatalf("error=%q want=%q", got, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestServiceLifecycleMutationSuccess(t *testing.T) {
+	tests := []struct {
+		name      string
+		handlerFn func(*Service) http.HandlerFunc
+		target    string
+		action    string
+		command   string
+	}{
+		{
+			name:      "start_success",
+			handlerFn: func(s *Service) http.HandlerFunc { return s.handleServiceStart },
+			target:    "/v1/service/start",
+			action:    "start",
+			command:   "echo service-started",
+		},
+		{
+			name:      "stop_success",
+			handlerFn: func(s *Service) http.HandlerFunc { return s.handleServiceStop },
+			target:    "/v1/service/stop",
+			action:    "stop",
+			command:   "echo service-stopped",
+		},
+		{
+			name:      "restart_success",
+			handlerFn: func(s *Service) http.HandlerFunc { return s.handleServiceRestart },
+			target:    "/v1/service/restart",
+			action:    "restart",
+			command:   "echo service-restarted",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, _ := newFakeService(t, false)
+			switch tc.action {
+			case "start":
+				svc.serviceStart = tc.command
+			case "stop":
+				svc.serviceStop = tc.command
+			case "restart":
+				svc.serviceRestart = tc.command
+			default:
+				t.Fatalf("unknown action %q", tc.action)
+			}
+
+			code, payload := callJSONHandler(t, tc.handlerFn(svc), http.MethodPost, tc.target, "")
+			if code != http.StatusOK {
+				t.Fatalf("status=%d body=%v", code, payload)
+			}
+			if got, _ := payload["action"].(string); got != tc.action {
+				t.Fatalf("action=%q want=%q", got, tc.action)
+			}
+			if got, _ := payload["rc"].(float64); int(got) != 0 {
+				t.Fatalf("rc=%v want=0", payload["rc"])
+			}
+			if got, _ := payload["output"].(string); got == "" {
+				t.Fatalf("output should not be empty: %v", payload)
+			}
+		})
+	}
+}
+
+func TestServiceLifecycleMutationFailureReturnsBadGateway(t *testing.T) {
+	tests := []struct {
+		name      string
+		handlerFn func(*Service) http.HandlerFunc
+		target    string
+		action    string
+		command   string
+	}{
+		{
+			name:      "start_failure",
+			handlerFn: func(s *Service) http.HandlerFunc { return s.handleServiceStart },
+			target:    "/v1/service/start",
+			action:    "start",
+			command:   "echo start-failed && exit 23",
+		},
+		{
+			name:      "stop_failure",
+			handlerFn: func(s *Service) http.HandlerFunc { return s.handleServiceStop },
+			target:    "/v1/service/stop",
+			action:    "stop",
+			command:   "echo stop-failed && exit 24",
+		},
+		{
+			name:      "restart_failure",
+			handlerFn: func(s *Service) http.HandlerFunc { return s.handleServiceRestart },
+			target:    "/v1/service/restart",
+			action:    "restart",
+			command:   "echo restart-failed && exit 25",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, _ := newFakeService(t, false)
+			switch tc.action {
+			case "start":
+				svc.serviceStart = tc.command
+			case "stop":
+				svc.serviceStop = tc.command
+			case "restart":
+				svc.serviceRestart = tc.command
+			default:
+				t.Fatalf("unknown action %q", tc.action)
+			}
+
+			code, payload := callJSONHandler(t, tc.handlerFn(svc), http.MethodPost, tc.target, "")
+			if code != http.StatusBadGateway {
+				t.Fatalf("status=%d body=%v", code, payload)
+			}
+			if got, _ := payload["action"].(string); got != tc.action {
+				t.Fatalf("action=%q want=%q", got, tc.action)
+			}
+			if got, _ := payload["error"].(string); got != "service "+tc.action+" command failed" {
+				t.Fatalf("error=%q want=%q", got, "service "+tc.action+" command failed")
+			}
+			if got, _ := payload["rc"].(float64); int(got) <= 0 {
+				t.Fatalf("rc=%v want positive exit code", payload["rc"])
+			}
+			if got, _ := payload["output"].(string); !strings.Contains(got, tc.action+"-failed") {
+				t.Fatalf("output=%q want action failure marker", got)
+			}
+		})
+	}
+}
+
+func TestServiceLifecycleMutationAuthRequired(t *testing.T) {
+	t.Run("non-loopback requires configured token for lifecycle handlers", func(t *testing.T) {
+		svc, _ := newFakeService(t, false)
+		svc.addr = "0.0.0.0:8095"
+		svc.serviceStart = "echo start-ok"
+		svc.serviceStop = "echo stop-ok"
+		svc.serviceRestart = "echo restart-ok"
+
+		tests := []struct {
+			name    string
+			handler http.HandlerFunc
+			target  string
+		}{
+			{name: "start", handler: svc.handleServiceStart, target: "/v1/service/start"},
+			{name: "stop", handler: svc.handleServiceStop, target: "/v1/service/stop"},
+			{name: "restart", handler: svc.handleServiceRestart, target: "/v1/service/restart"},
+		}
+		for _, tc := range tests {
+			t.Run(tc.name, func(t *testing.T) {
+				code, payload := callJSONHandler(t, tc.handler, http.MethodPost, tc.target, "")
+				if code != http.StatusUnauthorized {
+					t.Fatalf("status=%d body=%v", code, payload)
+				}
+				if got, _ := payload["error"].(string); got != "local api auth token not configured" {
+					t.Fatalf("error=%q want=local api auth token not configured", got)
+				}
+			})
+		}
+	})
+
+	t.Run("valid bearer token allows lifecycle handlers", func(t *testing.T) {
+		svc, _ := newFakeService(t, false)
+		svc.addr = "0.0.0.0:8095"
+		svc.authToken = "service-secret"
+		svc.serviceStart = "echo start-ok"
+		svc.serviceStop = "echo stop-ok"
+		svc.serviceRestart = "echo restart-ok"
+
+		tests := []struct {
+			name    string
+			handler http.HandlerFunc
+			target  string
+			action  string
+		}{
+			{name: "start", handler: svc.handleServiceStart, target: "/v1/service/start", action: "start"},
+			{name: "stop", handler: svc.handleServiceStop, target: "/v1/service/stop", action: "stop"},
+			{name: "restart", handler: svc.handleServiceRestart, target: "/v1/service/restart", action: "restart"},
+		}
+		for _, tc := range tests {
+			t.Run(tc.name, func(t *testing.T) {
+				code, payload := callJSONHandler(t, tc.handler, http.MethodPost, tc.target, "")
+				if code != http.StatusUnauthorized {
+					t.Fatalf("missing token status=%d body=%v", code, payload)
+				}
+				if got, _ := payload["error"].(string); got != "unauthorized" {
+					t.Fatalf("error=%q want=unauthorized", got)
+				}
+
+				code, payload = callJSONHandlerWithHeaders(t, tc.handler, http.MethodPost, tc.target, "", map[string]string{
+					"Authorization": "Bearer service-secret",
+				})
+				if code != http.StatusOK {
+					t.Fatalf("status=%d body=%v", code, payload)
+				}
+				if got, _ := payload["action"].(string); got != tc.action {
+					t.Fatalf("action=%q want=%q", got, tc.action)
+				}
+			})
+		}
+	})
+}
+
 func TestMethodGuards(t *testing.T) {
 	svc, _ := newFakeService(t, false)
 
@@ -702,6 +1058,157 @@ func TestMethodGuards(t *testing.T) {
 			code, payload := callJSONHandler(t, tc.handler, tc.method, tc.target, "")
 			if code != http.StatusMethodNotAllowed {
 				t.Fatalf("status=%d body=%v", code, payload)
+			}
+		})
+	}
+}
+
+func TestMutationAuthGuard(t *testing.T) {
+	t.Run("loopback without token keeps developer ux", func(t *testing.T) {
+		svc, _ := newFakeService(t, false)
+		code, payload := callJSONHandler(t, svc.handleDisconnect, http.MethodPost, "/v1/disconnect", "")
+		if code != http.StatusOK {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+	})
+
+	t.Run("non-loopback requires configured token", func(t *testing.T) {
+		svc, _ := newFakeService(t, false)
+		svc.addr = "0.0.0.0:8095"
+
+		code, payload := callJSONHandler(t, svc.handleDisconnect, http.MethodPost, "/v1/disconnect", "")
+		if code != http.StatusUnauthorized {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+		if got, _ := payload["error"].(string); got != "local api auth token not configured" {
+			t.Fatalf("error=%q want=local api auth token not configured", got)
+		}
+	})
+
+	t.Run("non-loopback returns 401 for every mutating endpoint when token is unset", func(t *testing.T) {
+		svc, _ := newFakeService(t, false)
+		svc.addr = "0.0.0.0:8095"
+
+		cases := []struct {
+			name    string
+			handler http.HandlerFunc
+			path    string
+			body    string
+		}{
+			{name: "connect", handler: svc.handleConnect, path: "/v1/connect", body: `{"bootstrap_directory":"http://dir.example:8081","invite_key":"inv"}`},
+			{name: "disconnect", handler: svc.handleDisconnect, path: "/v1/disconnect", body: ""},
+			{name: "set_profile", handler: svc.handleSetProfile, path: "/v1/set_profile", body: `{"path_profile":"2hop"}`},
+			{name: "update", handler: svc.handleUpdate, path: "/v1/update", body: `{}`},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				code, payload := callJSONHandler(t, tc.handler, http.MethodPost, tc.path, tc.body)
+				if code != http.StatusUnauthorized {
+					t.Fatalf("status=%d body=%v", code, payload)
+				}
+				if got, _ := payload["error"].(string); got != "local api auth token not configured" {
+					t.Fatalf("error=%q want=local api auth token not configured", got)
+				}
+			})
+		}
+	})
+
+	t.Run("non-loopback rejects missing or invalid bearer token", func(t *testing.T) {
+		svc, _ := newFakeService(t, false)
+		svc.addr = "0.0.0.0:8095"
+		svc.authToken = "secret-token"
+
+		code, payload := callJSONHandler(t, svc.handleDisconnect, http.MethodPost, "/v1/disconnect", "")
+		if code != http.StatusUnauthorized {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+		if got, _ := payload["error"].(string); got != "unauthorized" {
+			t.Fatalf("error=%q want=unauthorized", got)
+		}
+
+		code, payload = callJSONHandlerWithHeaders(t, svc.handleDisconnect, http.MethodPost, "/v1/disconnect", "", map[string]string{
+			"Authorization": "Bearer wrong-token",
+		})
+		if code != http.StatusUnauthorized {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+	})
+
+	t.Run("non-loopback accepts valid bearer token on mutating endpoints", func(t *testing.T) {
+		svc, _ := newFakeService(t, true)
+		svc.addr = "0.0.0.0:8095"
+		svc.authToken = "secret-token"
+
+		code, payload := callJSONHandlerWithHeaders(t, svc.handleDisconnect, http.MethodPost, "/v1/disconnect", "", map[string]string{
+			"Authorization": "Bearer secret-token",
+		})
+		if code != http.StatusOK {
+			t.Fatalf("disconnect status=%d body=%v", code, payload)
+		}
+
+		code, payload = callJSONHandlerWithHeaders(t, svc.handleSetProfile, http.MethodPost, "/v1/set_profile", `{"path_profile":"2hop"}`, map[string]string{
+			"Authorization": "Bearer secret-token",
+		})
+		if code != http.StatusOK {
+			t.Fatalf("set_profile status=%d body=%v", code, payload)
+		}
+
+		code, payload = callJSONHandlerWithHeaders(t, svc.handleUpdate, http.MethodPost, "/v1/update", `{}`, map[string]string{
+			"Authorization": "Bearer secret-token",
+		})
+		if code != http.StatusOK {
+			t.Fatalf("update status=%d body=%v", code, payload)
+		}
+	})
+
+	t.Run("loopback requires auth when token configured", func(t *testing.T) {
+		svc, _ := newFakeService(t, false)
+		svc.authToken = "loopback-secret"
+
+		code, payload := callJSONHandler(t, svc.handleDisconnect, http.MethodPost, "/v1/disconnect", "")
+		if code != http.StatusUnauthorized {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+		if got, _ := payload["error"].(string); got != "unauthorized" {
+			t.Fatalf("error=%q want=unauthorized", got)
+		}
+
+		code, payload = callJSONHandlerWithHeaders(t, svc.handleDisconnect, http.MethodPost, "/v1/disconnect", "", map[string]string{
+			"Authorization": "Bearer loopback-secret",
+		})
+		if code != http.StatusOK {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+	})
+
+	t.Run("read-only endpoints stay open when auth token is configured", func(t *testing.T) {
+		svc, _ := newFakeService(t, false)
+		svc.authToken = "readonly-secret"
+
+		code, payload := callJSONHandler(t, svc.handleHealth, http.MethodGet, "/v1/health", "")
+		if code != http.StatusOK {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+	})
+}
+
+func TestParseBearerToken(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "empty", raw: "", want: ""},
+		{name: "valid bearer", raw: "Bearer abc123", want: "abc123"},
+		{name: "valid lowercase", raw: "bearer token-1", want: "token-1"},
+		{name: "missing token", raw: "Bearer", want: ""},
+		{name: "wrong scheme", raw: "Basic abc", want: ""},
+		{name: "extra fields", raw: "Bearer a b", want: ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := parseBearerToken(tc.raw); got != tc.want {
+				t.Fatalf("parseBearerToken(%q)=%q want=%q", tc.raw, got, tc.want)
 			}
 		})
 	}
