@@ -30,8 +30,8 @@ Notes:
   - If one or more summary paths are explicitly provided, only those are
     evaluated.
   - Optional input signals are preserved as-is in the combined output, including
-    `tdpnd_comet_runtime_smoke_ok` when the underlying phase7 summaries expose
-    it.
+    `tdpnd_comet_runtime_smoke_ok` and `mainnet_activation_gate_go` when the
+    underlying phase7 summaries expose them.
   - Exit codes:
       0: pass (at least one configured summary passed and none failed/invalid)
       1: fail or missing-only
@@ -374,13 +374,13 @@ for stage_id in "${stage_ids[@]}"; do
     valid_json="1"
     case "$stage_id" in
       check)
-        signal_snapshot_json="$(jq -c '.signals // null' "$source_path" 2>/dev/null || true)"
+        signal_snapshot_json="$(jq -c '.signals // .handoff // null' "$source_path" 2>/dev/null || true)"
         ;;
       run)
-        signal_snapshot_json="$(jq -c '.steps.phase7_mainnet_cutover_check.signal_snapshot // null' "$source_path" 2>/dev/null || true)"
+        signal_snapshot_json="$(jq -c '.steps.phase7_mainnet_cutover_check.signal_snapshot // .signals // .handoff // null' "$source_path" 2>/dev/null || true)"
         ;;
       handoff_check|handoff_run)
-        signal_snapshot_json="$(jq -c '.handoff // null' "$source_path" 2>/dev/null || true)"
+        signal_snapshot_json="$(jq -c '.handoff // .signals // null' "$source_path" 2>/dev/null || true)"
         ;;
     esac
     if [[ -z "$signal_snapshot_json" ]]; then

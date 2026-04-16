@@ -27,6 +27,7 @@ ROADMAP_PROGRESS_MISSING_PHASE3_SUMMARY_JSON="$TMP_DIR/missing_phase3_summary.js
 ROADMAP_PROGRESS_MISSING_PHASE4_SUMMARY_JSON="$TMP_DIR/missing_phase4_summary.json"
 ROADMAP_PROGRESS_MISSING_PHASE5_SUMMARY_JSON="$TMP_DIR/missing_phase5_summary.json"
 ROADMAP_PROGRESS_MISSING_PHASE6_SUMMARY_JSON="$TMP_DIR/missing_phase6_summary.json"
+ROADMAP_PROGRESS_MISSING_PHASE7_SUMMARY_JSON="$TMP_DIR/missing_phase7_summary.json"
 ROADMAP_PROGRESS_MISSING_BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SUMMARY_JSON="$TMP_DIR/missing_blockchain_mainnet_activation_gate_summary.json"
 
 run_roadmap_progress_report() {
@@ -38,6 +39,7 @@ run_roadmap_progress_report() {
     --phase4-windows-full-parity-summary-json "$ROADMAP_PROGRESS_MISSING_PHASE4_SUMMARY_JSON" \
     --phase5-settlement-layer-summary-json "$ROADMAP_PROGRESS_MISSING_PHASE5_SUMMARY_JSON" \
     --phase6-cosmos-l1-summary-json "$ROADMAP_PROGRESS_MISSING_PHASE6_SUMMARY_JSON" \
+    --phase7-mainnet-cutover-summary-json "$ROADMAP_PROGRESS_MISSING_PHASE7_SUMMARY_JSON" \
     "$@"
 }
 
@@ -365,13 +367,15 @@ cat >"$PHASE7_MAINNET_CUTOVER_CHECK_SUMMARY_JSON" <<'EOF_PHASE7_CHECK_SUMMARY'
     "check": true,
     "run": true,
     "handoff_check": true,
-    "handoff_run": true
+    "handoff_run": true,
+    "mainnet_activation_gate_go": true
   },
   "handoff": {
     "check": true,
     "run": true,
     "handoff_check": true,
-    "handoff_run": true
+    "handoff_run": true,
+    "mainnet_activation_gate_go": true
   }
 }
 EOF_PHASE7_CHECK_SUMMARY
@@ -395,7 +399,8 @@ cat >"$PHASE7_MAINNET_CUTOVER_RUN_SUMMARY_JSON" <<'EOF_PHASE7_RUN_SUMMARY'
         "check": true,
         "run": true,
         "handoff_check": true,
-        "handoff_run": true
+        "handoff_run": true,
+        "mainnet_activation_gate_go": true
       }
     }
   },
@@ -403,13 +408,15 @@ cat >"$PHASE7_MAINNET_CUTOVER_RUN_SUMMARY_JSON" <<'EOF_PHASE7_RUN_SUMMARY'
     "check": true,
     "run": true,
     "handoff_check": true,
-    "handoff_run": true
+    "handoff_run": true,
+    "mainnet_activation_gate_go": true
   },
   "handoff": {
     "check": true,
     "run": true,
     "handoff_check": true,
-    "handoff_run": true
+    "handoff_run": true,
+    "mainnet_activation_gate_go": true
   }
 }
 EOF_PHASE7_RUN_SUMMARY
@@ -427,13 +434,15 @@ cat >"$PHASE7_MAINNET_CUTOVER_HANDOFF_CHECK_SUMMARY_JSON" <<'EOF_PHASE7_HANDOFF_
     "check": true,
     "run": true,
     "handoff_check": true,
-    "handoff_run": true
+    "handoff_run": true,
+    "mainnet_activation_gate_go": true
   },
   "signals": {
     "check": true,
     "run": true,
     "handoff_check": true,
-    "handoff_run": true
+    "handoff_run": true,
+    "mainnet_activation_gate_go": true
   },
   "decision": {
     "pass": true,
@@ -491,6 +500,9 @@ cat >"$PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_JSON" <<'EOF_PHASE7_SUMMARY_REPORT'
       "schema_valid": true,
       "raw_status": "pass",
       "raw_rc": 0,
+      "signal_snapshot": {
+        "mainnet_activation_gate_go": true
+      },
       "status": "pass"
     },
     "run": {
@@ -501,6 +513,9 @@ cat >"$PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_JSON" <<'EOF_PHASE7_SUMMARY_REPORT'
       "schema_valid": true,
       "raw_status": "pass",
       "raw_rc": 0,
+      "signal_snapshot": {
+        "mainnet_activation_gate_go": true
+      },
       "status": "pass"
     },
     "handoff_check": {
@@ -511,6 +526,9 @@ cat >"$PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_JSON" <<'EOF_PHASE7_SUMMARY_REPORT'
       "schema_valid": true,
       "raw_status": "pass",
       "raw_rc": 0,
+      "signal_snapshot": {
+        "mainnet_activation_gate_go": true
+      },
       "status": "pass"
     },
     "handoff_run": {
@@ -521,6 +539,9 @@ cat >"$PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_JSON" <<'EOF_PHASE7_SUMMARY_REPORT'
       "schema_valid": true,
       "raw_status": "pass",
       "raw_rc": 0,
+      "signal_snapshot": {
+        "mainnet_activation_gate_go": true
+      },
       "status": "pass"
     }
   }
@@ -564,6 +585,8 @@ EOF_BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SUMMARY
 
 BLOCKCHAIN_MAINNET_ACTIVATION_GATE_INVALID_SUMMARY_JSON="$TMP_DIR/blockchain_mainnet_activation_gate_invalid_summary.json"
 printf '{"version":1,' >"$BLOCKCHAIN_MAINNET_ACTIVATION_GATE_INVALID_SUMMARY_JSON"
+PHASE7_MAINNET_CUTOVER_INVALID_SUMMARY_REPORT_JSON="$TMP_DIR/phase7_mainnet_cutover_invalid_summary_report.json"
+printf '{"version":1,' >"$PHASE7_MAINNET_CUTOVER_INVALID_SUMMARY_REPORT_JSON"
 
 FAKE_ROADMAP_CAPTURE_FILE="$CAPTURE" \
 ROADMAP_PROGRESS_MANUAL_VALIDATION_REPORT_SCRIPT="$FAKE_MANUAL" \
@@ -573,6 +596,7 @@ run_roadmap_progress_report \
   --refresh-single-machine-readiness 0 \
   --phase0-summary-json "$PHASE0_SUMMARY_JSON" \
   --phase5-settlement-layer-summary-json "$PHASE5_SETTLEMENT_LAYER_SUMMARY_JSON" \
+  --phase7-mainnet-cutover-summary-json "$PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_JSON" \
   --blockchain-mainnet-activation-gate-summary-json "$BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SUMMARY_JSON" \
   --single-machine-summary-json "$SINGLE_MACHINE_SUMMARY_JSON" \
   --summary-json "$SUMMARY_JSON" \
@@ -611,6 +635,9 @@ if ! jq -e '
   and .blockchain_track.status == "parallel-cosmos-build"
   and .blockchain_track.policy == "canonical execution plan: docs/full-execution-plan-2026-2027.md"
   and (.blockchain_track.recommendation | contains("Cosmos-first blockchain track"))
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.available == true
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.status == "pass"
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.mainnet_activation_gate_go_ok == true
   and (.next_actions | length) >= 1
   and (.next_actions[0].id // "") == "machine_c_vpn_smoke"
   and (.next_actions[1].id // "") == "profile_default_gate"
@@ -747,6 +774,11 @@ if [[ "$PHASE7_OUTPUT_PRESENT" == "1" ]]; then
     exit 1
   fi
 fi
+if ! rg -q 'Phase-7 mainnet cutover mainnet_activation_gate_go_ok: true' "$REPORT_MD"; then
+  echo "report markdown missing phase7 mainnet_activation_gate_go_ok line"
+  cat "$REPORT_MD"
+  exit 1
+fi
 if ! rg -q 'Mainnet activation gate|mainnet_activation_gate' "$REPORT_MD"; then
   echo "report markdown missing mainnet activation gate line"
   cat "$REPORT_MD"
@@ -762,6 +794,7 @@ if ! run_roadmap_progress_report \
   --refresh-manual-validation 0 \
   --refresh-single-machine-readiness 0 \
   --manual-validation-summary-json "$MINIMAL_MANUAL_SUMMARY_JSON" \
+  --phase7-mainnet-cutover-summary-json "" \
   --blockchain-mainnet-activation-gate-summary-json "$ROADMAP_PROGRESS_MISSING_BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SUMMARY_JSON" \
   --summary-json "$TMP_DIR/roadmap_progress_mainnet_activation_gate_missing_summary.json" \
   --report-md "$TMP_DIR/roadmap_progress_mainnet_activation_gate_missing_report.md" \
@@ -772,6 +805,10 @@ if ! run_roadmap_progress_report \
   exit 1
 fi
 if ! jq -e '
+  .blockchain_track.phase7_mainnet_cutover_summary_report.available == false
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.status == "missing"
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.mainnet_activation_gate_go_ok == null
+  and
   .blockchain_track.mainnet_activation_gate.available == false
   and .blockchain_track.mainnet_activation_gate.status == "missing"
   and .blockchain_track.mainnet_activation_gate.decision == null
@@ -792,6 +829,7 @@ if ! run_roadmap_progress_report \
   --refresh-manual-validation 0 \
   --refresh-single-machine-readiness 0 \
   --manual-validation-summary-json "$MINIMAL_MANUAL_SUMMARY_JSON" \
+  --phase7-mainnet-cutover-summary-json "$PHASE7_MAINNET_CUTOVER_INVALID_SUMMARY_REPORT_JSON" \
   --blockchain-mainnet-activation-gate-summary-json "$BLOCKCHAIN_MAINNET_ACTIVATION_GATE_INVALID_SUMMARY_JSON" \
   --summary-json "$TMP_DIR/roadmap_progress_mainnet_activation_gate_invalid_summary.json" \
   --report-md "$TMP_DIR/roadmap_progress_mainnet_activation_gate_invalid_report.md" \
@@ -802,6 +840,10 @@ if ! run_roadmap_progress_report \
   exit 1
 fi
 if ! jq -e '
+  .blockchain_track.phase7_mainnet_cutover_summary_report.available == false
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.status == "invalid"
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.mainnet_activation_gate_go_ok == null
+  and
   .blockchain_track.mainnet_activation_gate.available == false
   and .blockchain_track.mainnet_activation_gate.status == "invalid"
   and .blockchain_track.mainnet_activation_gate.decision == null
@@ -1071,6 +1113,104 @@ if ! jq -e '
 ' "$TMP_DIR/roadmap_progress_optional_fallback_summary.json" >/dev/null; then
   echo "optional gate command fallback summary JSON missing expected commands"
   cat "$TMP_DIR/roadmap_progress_optional_fallback_summary.json"
+  exit 1
+fi
+
+: >"$CAPTURE"
+
+echo "[roadmap-progress-report] profile default gate derives warn from NO-GO signoff summary"
+PROFILE_DEFAULT_GATE_SIGNOFF_NO_GO_JSON="$TMP_DIR/profile_compare_campaign_signoff_no_go.json"
+cat >"$PROFILE_DEFAULT_GATE_SIGNOFF_NO_GO_JSON" <<'EOF_PROFILE_DEFAULT_GATE_SIGNOFF_NO_GO'
+{
+  "version": 1,
+  "status": "ok",
+  "final_rc": 0,
+  "decision": {
+    "decision": "NO-GO",
+    "go": false,
+    "recommended_profile": "balanced"
+  }
+}
+EOF_PROFILE_DEFAULT_GATE_SIGNOFF_NO_GO
+
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$OPTIONAL_FALLBACK_MANUAL_SUMMARY_JSON" \
+  --profile-compare-signoff-summary-json "$PROFILE_DEFAULT_GATE_SIGNOFF_NO_GO_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_profile_default_gate_no_go_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_profile_default_gate_no_go_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >/tmp/integration_roadmap_progress_report_profile_default_gate_no_go.log 2>&1; then
+  echo "expected success when profile default gate signoff summary reports NO-GO"
+  cat /tmp/integration_roadmap_progress_report_profile_default_gate_no_go.log
+  exit 1
+fi
+if ! jq -e --arg src "$PROFILE_DEFAULT_GATE_SIGNOFF_NO_GO_JSON" '
+  .vpn_track.optional_gate_status.profile_default_gate == "warn"
+  and .artifacts.profile_compare_signoff_summary_json == $src
+' "$TMP_DIR/roadmap_progress_profile_default_gate_no_go_summary.json" >/dev/null; then
+  echo "NO-GO profile default gate summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_profile_default_gate_no_go_summary.json"
+  exit 1
+fi
+
+: >"$CAPTURE"
+
+echo "[roadmap-progress-report] profile default gate derives pending from pending signoff summary"
+PROFILE_DEFAULT_GATE_SIGNOFF_PENDING_JSON="$TMP_DIR/profile_compare_campaign_signoff_pending.json"
+cat >"$PROFILE_DEFAULT_GATE_SIGNOFF_PENDING_JSON" <<'EOF_PROFILE_DEFAULT_GATE_SIGNOFF_PENDING'
+{
+  "version": 1,
+  "status": "pending",
+  "final_rc": 0
+}
+EOF_PROFILE_DEFAULT_GATE_SIGNOFF_PENDING
+
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$OPTIONAL_FALLBACK_MANUAL_SUMMARY_JSON" \
+  --profile-compare-signoff-summary-json "$PROFILE_DEFAULT_GATE_SIGNOFF_PENDING_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_profile_default_gate_pending_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_profile_default_gate_pending_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >/tmp/integration_roadmap_progress_report_profile_default_gate_pending.log 2>&1; then
+  echo "expected success when profile default gate signoff summary is pending"
+  cat /tmp/integration_roadmap_progress_report_profile_default_gate_pending.log
+  exit 1
+fi
+if ! jq -e --arg src "$PROFILE_DEFAULT_GATE_SIGNOFF_PENDING_JSON" '
+  .vpn_track.optional_gate_status.profile_default_gate == "pending"
+  and .artifacts.profile_compare_signoff_summary_json == $src
+' "$TMP_DIR/roadmap_progress_profile_default_gate_pending_summary.json" >/dev/null; then
+  echo "pending profile default gate summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_profile_default_gate_pending_summary.json"
+  exit 1
+fi
+
+: >"$CAPTURE"
+
+echo "[roadmap-progress-report] profile default gate falls back to pending when signoff summary is missing"
+MISSING_PROFILE_DEFAULT_GATE_SIGNOFF_JSON="$TMP_DIR/missing_profile_compare_campaign_signoff_summary.json"
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$OPTIONAL_FALLBACK_MANUAL_SUMMARY_JSON" \
+  --profile-compare-signoff-summary-json "$MISSING_PROFILE_DEFAULT_GATE_SIGNOFF_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_profile_default_gate_missing_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_profile_default_gate_missing_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >/tmp/integration_roadmap_progress_report_profile_default_gate_missing.log 2>&1; then
+  echo "expected success when profile default gate signoff summary is missing"
+  cat /tmp/integration_roadmap_progress_report_profile_default_gate_missing.log
+  exit 1
+fi
+if ! jq -e '
+  .vpn_track.optional_gate_status.profile_default_gate == "pending"
+' "$TMP_DIR/roadmap_progress_profile_default_gate_missing_summary.json" >/dev/null; then
+  echo "missing profile default gate fallback summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_profile_default_gate_missing_summary.json"
   exit 1
 fi
 

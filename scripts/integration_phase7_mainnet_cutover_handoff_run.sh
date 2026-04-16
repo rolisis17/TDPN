@@ -92,6 +92,7 @@ cat >"$check_summary" <<'EOF_CHECK'
     "tdpnd_grpc_live_smoke_ok": true,
     "tdpnd_grpc_auth_live_smoke_ok": true,
     "tdpnd_comet_runtime_smoke_ok": true,
+    "mainnet_activation_gate_go": true,
     "dual_write_parity_ok": true,
     "rollback_path_ready": true,
     "operator_approval_ok": true
@@ -129,6 +130,7 @@ if [[ -n "$summary_json" && "${FAKE_PHASE7_RUN_OMIT_SUMMARY:-0}" != "1" ]]; then
         "tdpnd_grpc_live_smoke_ok": true,
         "tdpnd_grpc_auth_live_smoke_ok": true,
         "tdpnd_comet_runtime_smoke_ok": true,
+        "mainnet_activation_gate_go": true,
         "dual_write_parity_ok": true,
         "rollback_path_ready": true,
         "operator_approval_ok": true
@@ -204,6 +206,7 @@ if [[ -n "$summary_json" && "${FAKE_PHASE7_HANDOFF_OMIT_SUMMARY:-0}" != "1" ]]; 
     "tdpnd_grpc_live_smoke_ok": true,
     "tdpnd_grpc_auth_live_smoke_ok": true,
     "tdpnd_comet_runtime_smoke_ok": true,
+    "mainnet_activation_gate_go": true,
     "dual_write_parity_ok": true,
     "rollback_path_ready": true,
     "operator_approval_ok": true
@@ -277,6 +280,7 @@ bash "$RUNNER" \
   --print-summary-json 0 \
   --run-alpha 7 \
   --handoff-require-run-pipeline-ok 1 \
+  --handoff-require-mainnet-activation-gate-go 1 \
   --handoff-require-tdpnd-comet-runtime-smoke-ok 1 >"$PASS_LOG" 2>&1
 
 assert_two_stage_invocations "$CAPTURE"
@@ -294,6 +298,11 @@ if [[ "$handoff_line" != *"--phase7-run-summary-json $TMP_DIR/pass_run_summary.j
 fi
 if [[ "$handoff_line" != *"--require-run-pipeline-ok 1"* || "$handoff_line" != *"--show-json 0"* ]]; then
   echo "pass path handoff defaults mismatch"
+  echo "$handoff_line"
+  exit 1
+fi
+if [[ "$handoff_line" != *"--require-mainnet-activation-gate-go 1"* ]]; then
+  echo "pass path mainnet activation forwarding mismatch"
   echo "$handoff_line"
   exit 1
 fi
@@ -320,6 +329,7 @@ if ! jq -e --arg run_summary "$TMP_DIR/pass_run_summary.json" --arg handoff_summ
   and .steps.phase7_mainnet_cutover_handoff_check.artifacts.summary_json == $handoff_summary
   and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.module_tx_surface_ok == true
   and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.tdpnd_grpc_auth_live_smoke_ok == true
+  and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.mainnet_activation_gate_go == true
   and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.dual_write_parity_ok == true
   and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.rollback_path_ready == true
   and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.operator_approval_ok == true
@@ -330,6 +340,11 @@ if ! jq -e --arg run_summary "$TMP_DIR/pass_run_summary.json" --arg handoff_summ
 fi
 if ! jq -e '.handoff.tdpnd_comet_runtime_smoke_ok == true' "$TMP_DIR/pass_handoff_summary.json" >/dev/null; then
   echo "pass path handoff fixture missing comet smoke signal"
+  cat "$TMP_DIR/pass_handoff_summary.json"
+  exit 1
+fi
+if ! jq -e '.handoff.mainnet_activation_gate_go == true' "$TMP_DIR/pass_handoff_summary.json" >/dev/null; then
+  echo "pass path handoff fixture missing mainnet activation signal"
   cat "$TMP_DIR/pass_handoff_summary.json"
   exit 1
 fi
@@ -366,6 +381,11 @@ if [[ "$handoff_line" != *"--require-run-pipeline-ok 0"* || "$handoff_line" != *
   echo "$handoff_line"
   exit 1
 fi
+if [[ "$handoff_line" != *"--require-mainnet-activation-gate-go 0"* ]]; then
+  echo "dry-run mainnet activation relax forwarding mismatch"
+  echo "$handoff_line"
+  exit 1
+fi
 if [[ "$handoff_line" != *"--require-module-tx-surface-ok 1"* ]]; then
   echo "dry-run explicit module-tx override mismatch"
   echo "$handoff_line"
@@ -394,6 +414,7 @@ if ! jq -e '
   and .steps.phase7_mainnet_cutover_handoff_check.contract_valid == true
   and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.module_tx_surface_ok == true
   and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.tdpnd_grpc_auth_live_smoke_ok == true
+  and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.mainnet_activation_gate_go == true
   and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.dual_write_parity_ok == true
 ' "$DRY_SUMMARY" >/dev/null; then
   echo "dry-run summary mismatch"
@@ -402,6 +423,11 @@ if ! jq -e '
 fi
 if ! jq -e '.handoff.tdpnd_comet_runtime_smoke_ok == true' "$TMP_DIR/dry_handoff_summary.json" >/dev/null; then
   echo "dry-run handoff fixture missing comet smoke signal"
+  cat "$TMP_DIR/dry_handoff_summary.json"
+  exit 1
+fi
+if ! jq -e '.handoff.mainnet_activation_gate_go == true' "$TMP_DIR/dry_handoff_summary.json" >/dev/null; then
+  echo "dry-run handoff fixture missing mainnet activation signal"
   cat "$TMP_DIR/dry_handoff_summary.json"
   exit 1
 fi
@@ -522,6 +548,7 @@ if ! jq -e '
   and (.steps.phase7_mainnet_cutover_handoff_check.contract_error | type) == "string"
   and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.module_tx_surface_ok == null
   and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.tdpnd_grpc_auth_live_smoke_ok == null
+  and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.mainnet_activation_gate_go == null
   and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.dual_write_parity_ok == null
 ' "$INVALID_HANDOFF_SUMMARY" >/dev/null; then
   echo "invalid-handoff-summary wrapper summary mismatch"

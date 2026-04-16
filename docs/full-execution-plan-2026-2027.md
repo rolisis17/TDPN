@@ -68,6 +68,8 @@ Exit gate:
 - progressive migration with rollback path to chain-assisted mode
 - gate cutover on phase6 readiness signals and explicit dual-write parity confirmation
 - require rollback path readiness before promotion; keep an optional operator approval gate for final release decisions
+- phase7 check/run/handoff-check/handoff-run signal snapshots include `mainnet_activation_gate_go` for validator-policy gate visibility.
+- `mainnet_activation_gate_go` enforcement remains optional by default and is only required when operators explicitly enable the handoff requirement toggle.
 - `scripts/phase7_mainnet_cutover_check.sh` + `scripts/integration_phase7_mainnet_cutover_check.sh`
 - `scripts/phase7_mainnet_cutover_run.sh` + `scripts/integration_phase7_mainnet_cutover_run.sh`
 - `scripts/phase7_mainnet_cutover_handoff_check.sh` + `scripts/integration_phase7_mainnet_cutover_handoff_check.sh`
@@ -137,6 +139,7 @@ Exit gate:
 - Phase 7 mainnet cutover CI wrapper is `scripts/ci_phase7_mainnet_cutover.sh`, with contract coverage from `scripts/integration_ci_phase7_mainnet_cutover.sh` for fail-closed stage ordering across check/run/handoff-check/handoff-run and first-failure RC propagation.
 - Phase 7 operator summary helper is `scripts/phase7_mainnet_cutover_summary_report.sh`, with integration coverage from `scripts/integration_phase7_mainnet_cutover_summary_report.sh`, and it aggregates check/run/handoff-check/handoff-run summary artifacts into canonical operator output.
 - Phase 7 operator summary helper preserves optional `tdpnd_comet_runtime_smoke_ok` in the run signal snapshot, so Comet-mode validation can be surfaced when available without making it a hard requirement.
+- Phase 7 cutover/handoff signal snapshots include `mainnet_activation_gate_go`; this requirement remains optional by default and is enabled only when operators explicitly require it for handoff readiness.
 - Phase 7 cutover wrappers emit canonical summary artifacts consumed by the summary helper, including `phase7_mainnet_cutover_check_summary.json`, `phase7_mainnet_cutover_run_summary.json`, `phase7_mainnet_cutover_handoff_check_summary.json`, and `phase7_mainnet_cutover_handoff_run_summary.json`.
 - Phase 7 handoff wrappers are fail-closed readiness gates that preserve the optional operator approval gate before promotion.
 - Easy-node exposes Phase 7 summary wrapper `./scripts/easy_node.sh phase7-mainnet-cutover-summary-report`, backed by canonical check/run/handoff-check/handoff-run summary artifacts.

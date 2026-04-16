@@ -71,6 +71,7 @@ cat >"$PASS_CHECK" <<'EOF_PASS_CHECK'
     "module_tx_surface_ok": true,
     "tdpnd_grpc_auth_live_smoke_ok": true,
     "tdpnd_comet_runtime_smoke_ok": true,
+    "mainnet_activation_gate_go": true,
     "rollback_path_ready": true,
     "operator_approval_ok": true
   }
@@ -93,6 +94,7 @@ cat >"$PASS_RUN" <<'EOF_PASS_RUN'
         "module_tx_surface_ok": true,
         "tdpnd_grpc_auth_live_smoke_ok": true,
         "tdpnd_comet_runtime_smoke_ok": true,
+        "mainnet_activation_gate_go": true,
         "dual_write_parity_ok": true,
         "rollback_path_ready": true,
         "operator_approval_ok": true
@@ -116,6 +118,7 @@ cat >"$PASS_HANDOFF_CHECK" <<'EOF_PASS_HANDOFF_CHECK'
     "module_tx_surface_ok": true,
     "tdpnd_grpc_auth_live_smoke_ok": true,
     "tdpnd_comet_runtime_smoke_ok": true,
+    "mainnet_activation_gate_go": true,
     "dual_write_parity_ok": true,
     "rollback_path_ready": true,
     "operator_approval_ok": true
@@ -137,6 +140,7 @@ cat >"$PASS_HANDOFF_RUN" <<'EOF_PASS_HANDOFF_RUN'
     "module_tx_surface_ok": true,
     "tdpnd_grpc_auth_live_smoke_ok": true,
     "tdpnd_comet_runtime_smoke_ok": true,
+    "mainnet_activation_gate_go": true,
     "dual_write_parity_ok": true,
     "rollback_path_ready": true,
     "operator_approval_ok": true
@@ -148,6 +152,7 @@ echo "[phase7-mainnet-cutover-summary-report] pass path"
 if ! jq -e '
   .signals.module_tx_surface_ok == true
   and .signals.tdpnd_grpc_auth_live_smoke_ok == true
+  and .signals.mainnet_activation_gate_go == true
   and .signals.rollback_path_ready == true
   and .signals.operator_approval_ok == true
 ' "$PASS_CHECK" >/dev/null; then
@@ -158,12 +163,23 @@ fi
 if ! jq -e '
   .steps.phase7_mainnet_cutover_check.signal_snapshot.module_tx_surface_ok == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_grpc_auth_live_smoke_ok == true
+  and .steps.phase7_mainnet_cutover_check.signal_snapshot.mainnet_activation_gate_go == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.dual_write_parity_ok == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.rollback_path_ready == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.operator_approval_ok == true
 ' "$PASS_RUN" >/dev/null; then
   echo "pass run fixture missing required phase7 signal snapshot assertions"
   cat "$PASS_RUN"
+  exit 1
+fi
+if ! jq -e '.handoff.mainnet_activation_gate_go == true' "$PASS_HANDOFF_CHECK" >/dev/null; then
+  echo "pass handoff-check fixture missing required mainnet activation gate signal assertion"
+  cat "$PASS_HANDOFF_CHECK"
+  exit 1
+fi
+if ! jq -e '.handoff.mainnet_activation_gate_go == true' "$PASS_HANDOFF_RUN" >/dev/null; then
+  echo "pass handoff-run fixture missing required mainnet activation gate signal assertion"
+  cat "$PASS_HANDOFF_RUN"
   exit 1
 fi
 PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_CANONICAL_SUMMARY_JSON="$PASS_CANONICAL_REPORT_JSON" \
@@ -192,15 +208,19 @@ if ! jq -e \
   and .summaries.check.status == "pass"
   and .summaries.check.source_kind == "explicit"
   and .summaries.check.signal_snapshot.tdpnd_comet_runtime_smoke_ok == true
+  and .summaries.check.signal_snapshot.mainnet_activation_gate_go == true
   and .summaries.run.status == "pass"
   and .summaries.run.source_kind == "explicit"
   and .summaries.run.signal_snapshot.tdpnd_comet_runtime_smoke_ok == true
+  and .summaries.run.signal_snapshot.mainnet_activation_gate_go == true
   and .summaries.handoff_check.status == "pass"
   and .summaries.handoff_check.source_kind == "explicit"
   and .summaries.handoff_check.signal_snapshot.tdpnd_comet_runtime_smoke_ok == true
+  and .summaries.handoff_check.signal_snapshot.mainnet_activation_gate_go == true
   and .summaries.handoff_run.status == "pass"
   and .summaries.handoff_run.source_kind == "explicit"
   and .summaries.handoff_run.signal_snapshot.tdpnd_comet_runtime_smoke_ok == true
+  and .summaries.handoff_run.signal_snapshot.mainnet_activation_gate_go == true
   and .artifacts.summary_json == $expected_summary
   and .artifacts.canonical_summary_json == $expected_canonical
 ' "$PASS_REPORT_JSON" >/dev/null; then
@@ -256,6 +276,10 @@ if ! jq -e \
   and .artifacts.summary_json == $expected_same_path
   and .artifacts.canonical_summary_json == $expected_same_path
   and .artifacts.summary_json == .artifacts.canonical_summary_json
+  and .summaries.check.signal_snapshot.mainnet_activation_gate_go == true
+  and .summaries.run.signal_snapshot.mainnet_activation_gate_go == true
+  and .summaries.handoff_check.signal_snapshot.mainnet_activation_gate_go == true
+  and .summaries.handoff_run.signal_snapshot.mainnet_activation_gate_go == true
   and .summaries.handoff_check.status == "pass"
   and .summaries.handoff_run.status == "pass"
 ' "$PASS_SAME_PATH_REPORT_JSON" >/dev/null; then

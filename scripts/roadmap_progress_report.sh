@@ -237,6 +237,46 @@ json_bool_value_or_empty() {
   esac
 }
 
+profile_default_gate_status_from_signoff_summary() {
+  local path="$1"
+  local status=""
+  if [[ -f "$path" ]] && jq -e . "$path" >/dev/null 2>&1; then
+    status="$(
+      jq -r '
+        ((.status // "") | ascii_downcase) as $summary_status
+        | (if (.decision.go | type) == "boolean" then (.decision.go | tostring) else "" end) as $go
+        | ((.decision.decision // "") | ascii_upcase | gsub("[[:space:]_-]"; "")) as $decision
+        | if $summary_status == "ok" then
+            if $go == "true" or $decision == "GO" then "pass"
+            elif $go == "false" or $decision == "NOGO" then "warn"
+            else "warn"
+            end
+          elif $summary_status == "fail" then
+            if $go == "false" or $decision == "NOGO" then "warn"
+            else "fail"
+            end
+          elif $summary_status == "pass" then
+            "pass"
+          elif $summary_status == "warn" then
+            "warn"
+          elif $summary_status == "skip" then
+            "pending"
+          else
+            "pending"
+          end
+      ' "$path" 2>/dev/null || true
+    )"
+  fi
+  case "$status" in
+    pass|warn|fail|pending|skip)
+      printf '%s' "$status"
+      ;;
+    *)
+      printf '%s' ""
+      ;;
+  esac
+}
+
 resilience_summary_usable_01() {
   local path="$1"
   if [[ ! -f "$path" ]]; then
@@ -3581,6 +3621,7 @@ phase7_mainnet_cutover_summary_check_ok_json="null"
 phase7_mainnet_cutover_summary_run_ok_json="null"
 phase7_mainnet_cutover_summary_handoff_check_ok_json="null"
 phase7_mainnet_cutover_summary_handoff_run_ok_json="null"
+phase7_mainnet_cutover_summary_mainnet_activation_gate_go_ok_json="null"
 if [[ -n "$phase7_mainnet_cutover_summary_json" ]]; then
   phase7_mainnet_cutover_summary_input_summary_json="$phase7_mainnet_cutover_summary_json"
   if [[ "$(phase7_mainnet_cutover_summary_usable_01 "$phase7_mainnet_cutover_summary_json")" == "1" ]]; then
@@ -3651,6 +3692,25 @@ if [[ -n "$phase7_mainnet_cutover_summary_json" ]]; then
           elif (.status | type) == "string" then
             ((.status // "") | ascii_downcase) as $s
             | if $s == "pass" then true elif $s == "fail" then false else empty end
+          else empty end')"
+      phase7_mainnet_cutover_summary_mainnet_activation_gate_go_ok_json="$(phase7_mainnet_cutover_bool_value_or_null \
+        "$phase7_mainnet_cutover_summary_source_summary_json" \
+        'if (.summaries.check.signal_snapshot.mainnet_activation_gate_go_ok | type) == "boolean" then .summaries.check.signal_snapshot.mainnet_activation_gate_go_ok
+          elif (.summaries.check.signal_snapshot.mainnet_activation_gate_go | type) == "boolean" then .summaries.check.signal_snapshot.mainnet_activation_gate_go
+          elif (.summaries.run.signal_snapshot.mainnet_activation_gate_go_ok | type) == "boolean" then .summaries.run.signal_snapshot.mainnet_activation_gate_go_ok
+          elif (.summaries.run.signal_snapshot.mainnet_activation_gate_go | type) == "boolean" then .summaries.run.signal_snapshot.mainnet_activation_gate_go
+          elif (.summaries.handoff_check.signal_snapshot.mainnet_activation_gate_go_ok | type) == "boolean" then .summaries.handoff_check.signal_snapshot.mainnet_activation_gate_go_ok
+          elif (.summaries.handoff_check.signal_snapshot.mainnet_activation_gate_go | type) == "boolean" then .summaries.handoff_check.signal_snapshot.mainnet_activation_gate_go
+          elif (.summaries.handoff_run.signal_snapshot.mainnet_activation_gate_go_ok | type) == "boolean" then .summaries.handoff_run.signal_snapshot.mainnet_activation_gate_go_ok
+          elif (.summaries.handoff_run.signal_snapshot.mainnet_activation_gate_go | type) == "boolean" then .summaries.handoff_run.signal_snapshot.mainnet_activation_gate_go
+          elif (.steps.phase7_mainnet_cutover_check.signal_snapshot.mainnet_activation_gate_go_ok | type) == "boolean" then .steps.phase7_mainnet_cutover_check.signal_snapshot.mainnet_activation_gate_go_ok
+          elif (.steps.phase7_mainnet_cutover_check.signal_snapshot.mainnet_activation_gate_go | type) == "boolean" then .steps.phase7_mainnet_cutover_check.signal_snapshot.mainnet_activation_gate_go
+          elif (.handoff.mainnet_activation_gate_go_ok | type) == "boolean" then .handoff.mainnet_activation_gate_go_ok
+          elif (.handoff.mainnet_activation_gate_go | type) == "boolean" then .handoff.mainnet_activation_gate_go
+          elif (.signals.mainnet_activation_gate_go_ok | type) == "boolean" then .signals.mainnet_activation_gate_go_ok
+          elif (.signals.mainnet_activation_gate_go | type) == "boolean" then .signals.mainnet_activation_gate_go
+          elif (.mainnet_activation_gate_go_ok | type) == "boolean" then .mainnet_activation_gate_go_ok
+          elif (.mainnet_activation_gate_go | type) == "boolean" then .mainnet_activation_gate_go
           else empty end')"
     fi
   else
@@ -3802,6 +3862,14 @@ if [[ "$single_machine_ready_json" == "true" && "$docker_rehearsal_ready_json" =
 fi
 
 profile_default_gate_status="$(jq -r '.summary.profile_default_gate.status // "pending"' "$manual_validation_summary_json")"
+profile_default_gate_signoff_status="$(profile_default_gate_status_from_signoff_summary "$profile_compare_signoff_summary_json")"
+if [[ -n "$profile_default_gate_signoff_status" ]]; then
+  profile_default_gate_status="$profile_default_gate_signoff_status"
+fi
+profile_default_gate_needs_attention_json="true"
+if [[ "$profile_default_gate_status" == "pass" || "$profile_default_gate_status" == "skip" ]]; then
+  profile_default_gate_needs_attention_json="false"
+fi
 docker_rehearsal_status="$(jq -r '.summary.docker_rehearsal_gate.status // "pending"' "$manual_validation_summary_json")"
 real_wg_privileged_status="$(jq -r '.summary.real_wg_privileged_gate.status // "pending"' "$manual_validation_summary_json")"
 
@@ -4047,7 +4115,7 @@ non_blockchain_actionable_no_sudo_or_github_json="$(
 non_blockchain_recommended_gate_id="$(printf '%s\n' "$non_blockchain_actionable_no_sudo_or_github_json" | jq -r 'if length > 0 then .[0].id else "" end')"
 non_blockchain_actionable_no_sudo_or_github_count="$(printf '%s\n' "$non_blockchain_actionable_no_sudo_or_github_json" | jq -r 'length')"
 
-next_actions_json="$(jq -c --arg next_action_check_id "$next_action_check_id" --arg next_action_label "$next_action_label" --arg next_action_command "$next_action_command" '
+next_actions_json="$(jq -c --arg next_action_check_id "$next_action_check_id" --arg next_action_label "$next_action_label" --arg next_action_command "$next_action_command" --argjson profile_default_gate_needs_attention "$profile_default_gate_needs_attention_json" '
   def unique_commands_preserve_order:
     reduce .[] as $item (
       [];
@@ -4066,7 +4134,7 @@ next_actions_json="$(jq -c --arg next_action_check_id "$next_action_check_id" --
       command: $next_action_command,
       reason: "primary roadmap gate"
     } else empty end),
-    (if ((.summary.profile_default_gate.status // "pending") != "pass" and (.summary.profile_default_gate.status // "pending") != "skip" and ((.summary.profile_default_gate.next_command // .summary.profile_default_gate.command // "") != "")) then {
+    (if ($profile_default_gate_needs_attention == true and ((.summary.profile_default_gate.next_command // .summary.profile_default_gate.command // "") != "")) then {
       id: "profile_default_gate",
       label: "Profile default decision gate",
       command: (.summary.profile_default_gate.next_command // .summary.profile_default_gate.command // ""),
@@ -4229,6 +4297,7 @@ summary_payload="$(jq -n \
   --argjson phase7_mainnet_cutover_summary_run_ok "$phase7_mainnet_cutover_summary_run_ok_json" \
   --argjson phase7_mainnet_cutover_summary_handoff_check_ok "$phase7_mainnet_cutover_summary_handoff_check_ok_json" \
   --argjson phase7_mainnet_cutover_summary_handoff_run_ok "$phase7_mainnet_cutover_summary_handoff_run_ok_json" \
+  --argjson phase7_mainnet_cutover_summary_mainnet_activation_gate_go_ok "$phase7_mainnet_cutover_summary_mainnet_activation_gate_go_ok_json" \
   --argjson blockchain_mainnet_activation_gate_available "$blockchain_mainnet_activation_gate_available_json" \
   --arg blockchain_mainnet_activation_gate_input_summary_json "$blockchain_mainnet_activation_gate_input_summary_json" \
   --arg blockchain_mainnet_activation_gate_source_summary_json "$blockchain_mainnet_activation_gate_source_summary_json" \
@@ -4274,6 +4343,7 @@ summary_payload="$(jq -n \
   --arg refresh_single_machine_non_blocking_reason "$single_machine_refresh_non_blocking_reason" \
   --arg manual_validation_summary_json "$manual_validation_summary_json" \
   --arg manual_validation_report_md "$manual_validation_report_md" \
+  --arg profile_compare_signoff_summary_json "$profile_compare_signoff_summary_json" \
   --arg single_machine_summary_json "$single_machine_summary_json" \
   --arg summary_json_path "$summary_json" \
   --arg report_md_path "$report_md" \
@@ -4445,7 +4515,8 @@ summary_payload="$(jq -n \
         check_ok: $phase7_mainnet_cutover_summary_check_ok,
         run_ok: $phase7_mainnet_cutover_summary_run_ok,
         handoff_check_ok: $phase7_mainnet_cutover_summary_handoff_check_ok,
-        handoff_run_ok: $phase7_mainnet_cutover_summary_handoff_run_ok
+        handoff_run_ok: $phase7_mainnet_cutover_summary_handoff_run_ok,
+        mainnet_activation_gate_go_ok: $phase7_mainnet_cutover_summary_mainnet_activation_gate_go_ok
       },
       mainnet_activation_gate: {
         available: $blockchain_mainnet_activation_gate_available,
@@ -4490,6 +4561,7 @@ summary_payload="$(jq -n \
     artifacts: {
       manual_validation_summary_json: $manual_validation_summary_json,
       manual_validation_report_md: $manual_validation_report_md,
+      profile_compare_signoff_summary_json: (if $profile_compare_signoff_summary_json == "" then null else $profile_compare_signoff_summary_json end),
       single_machine_summary_json: $single_machine_summary_json,
       phase0_summary_json: (if $phase0_product_surface_source_summary_json == "" then $phase0_product_surface_input_summary_json else $phase0_product_surface_source_summary_json end),
       phase1_resilience_handoff_summary_json: (if $phase1_resilience_handoff_source_summary_json == "" then null else $phase1_resilience_handoff_source_summary_json end),
@@ -4651,6 +4723,7 @@ $pending_real_host_checks_md
 - Phase-7 mainnet cutover run_ok: $(jq -r '.blockchain_track.phase7_mainnet_cutover_summary_report.run_ok | if . == null then "null" else tostring end' "$summary_json")
 - Phase-7 mainnet cutover handoff_check_ok: $(jq -r '.blockchain_track.phase7_mainnet_cutover_summary_report.handoff_check_ok | if . == null then "null" else tostring end' "$summary_json")
 - Phase-7 mainnet cutover handoff_run_ok: $(jq -r '.blockchain_track.phase7_mainnet_cutover_summary_report.handoff_run_ok | if . == null then "null" else tostring end' "$summary_json")
+- Phase-7 mainnet cutover mainnet_activation_gate_go_ok: $(jq -r '.blockchain_track.phase7_mainnet_cutover_summary_report.mainnet_activation_gate_go_ok | if . == null then "null" else tostring end' "$summary_json")
 - Mainnet activation gate available: $(jq -r '.blockchain_track.mainnet_activation_gate.available' "$summary_json")
 - Mainnet activation gate input: $(jq -r '.blockchain_track.mainnet_activation_gate.input_summary_json // "none"' "$summary_json")
 - Mainnet activation gate source: $(jq -r '.blockchain_track.mainnet_activation_gate.source_summary_json // "none"' "$summary_json")
@@ -4728,7 +4801,7 @@ echo "[roadmap-progress-report] phase5_settlement_layer_handoff_issuer_sponsor_a
 echo "[roadmap-progress-report] phase6_cosmos_l1_handoff_available=$phase6_cosmos_l1_handoff_available_json source_summary_json=${phase6_cosmos_l1_handoff_source_summary_json:-} source_kind=${phase6_cosmos_l1_handoff_source_summary_kind:-}"
 echo "[roadmap-progress-report] phase6_cosmos_l1_handoff_status=$phase6_cosmos_l1_handoff_status_json rc=$phase6_cosmos_l1_handoff_rc_json run_pipeline_ok=$phase6_cosmos_l1_handoff_run_pipeline_ok_json module_tx_surface_ok=$phase6_cosmos_l1_handoff_module_tx_surface_ok_json tdpnd_grpc_runtime_smoke_ok=$phase6_cosmos_l1_handoff_tdpnd_grpc_runtime_smoke_ok_json tdpnd_grpc_live_smoke_ok=$phase6_cosmos_l1_handoff_tdpnd_grpc_live_smoke_ok_json tdpnd_grpc_auth_live_smoke_ok=$phase6_cosmos_l1_handoff_tdpnd_grpc_auth_live_smoke_ok_json tdpnd_comet_runtime_smoke_ok=$phase6_cosmos_l1_handoff_tdpnd_comet_runtime_smoke_ok_json"
 echo "[roadmap-progress-report] phase7_mainnet_cutover_summary_available=$phase7_mainnet_cutover_summary_available_json source_summary_json=${phase7_mainnet_cutover_summary_source_summary_json:-} source_kind=${phase7_mainnet_cutover_summary_source_summary_kind:-}"
-echo "[roadmap-progress-report] phase7_mainnet_cutover_summary_status=$phase7_mainnet_cutover_summary_status_json rc=$phase7_mainnet_cutover_summary_rc_json check_ok=$phase7_mainnet_cutover_summary_check_ok_json run_ok=$phase7_mainnet_cutover_summary_run_ok_json handoff_check_ok=$phase7_mainnet_cutover_summary_handoff_check_ok_json handoff_run_ok=$phase7_mainnet_cutover_summary_handoff_run_ok_json"
+echo "[roadmap-progress-report] phase7_mainnet_cutover_summary_status=$phase7_mainnet_cutover_summary_status_json rc=$phase7_mainnet_cutover_summary_rc_json check_ok=$phase7_mainnet_cutover_summary_check_ok_json run_ok=$phase7_mainnet_cutover_summary_run_ok_json handoff_check_ok=$phase7_mainnet_cutover_summary_handoff_check_ok_json handoff_run_ok=$phase7_mainnet_cutover_summary_handoff_run_ok_json mainnet_activation_gate_go_ok=$phase7_mainnet_cutover_summary_mainnet_activation_gate_go_ok_json"
 echo "[roadmap-progress-report] mainnet_activation_gate_available=$blockchain_mainnet_activation_gate_available_json source_summary_json=${blockchain_mainnet_activation_gate_source_summary_json:-} source_kind=${blockchain_mainnet_activation_gate_source_summary_kind:-} status=$blockchain_mainnet_activation_gate_status_json decision=${blockchain_mainnet_activation_gate_decision_json:-} go=$blockchain_mainnet_activation_gate_go_json no_go=$blockchain_mainnet_activation_gate_no_go_json"
 echo "[roadmap-progress-report] resilience_handoff_available=$resilience_handoff_available_json source_summary_json=${resilience_handoff_source_summary_json:-}"
 echo "[roadmap-progress-report] profile_matrix_stable=$resilience_profile_matrix_stable_json peer_loss_recovery_ok=$resilience_peer_loss_recovery_ok_json session_churn_guard_ok=$resilience_session_churn_guard_ok_json"

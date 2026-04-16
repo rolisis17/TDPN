@@ -52,6 +52,26 @@ OP_REQUIRED_FALSE_OUTPUT="$TMP_DIR/operator_required_false_output.json"
 OP_REQUIRED_FALSE_LOG="$TMP_DIR/operator_required_false.log"
 OP_REQUIRED_FALSE_CANONICAL="$TMP_DIR/operator_required_false_canonical_summary.json"
 
+ACTIVATION_GATE_GO_SUMMARY="$TMP_DIR/mainnet_activation_gate_go.json"
+ACTIVATION_GATE_STATUS_FAIL_SUMMARY="$TMP_DIR/mainnet_activation_gate_status_fail.json"
+ACTIVATION_GATE_DECISION_NO_GO_SUMMARY="$TMP_DIR/mainnet_activation_gate_decision_no_go.json"
+
+ACTIVATION_REQUIRED_GO_OUTPUT="$TMP_DIR/activation_required_go_output.json"
+ACTIVATION_REQUIRED_GO_LOG="$TMP_DIR/activation_required_go.log"
+ACTIVATION_REQUIRED_GO_CANONICAL="$TMP_DIR/activation_required_go_canonical_summary.json"
+
+ACTIVATION_REQUIRED_STATUS_FAIL_OUTPUT="$TMP_DIR/activation_required_status_fail_output.json"
+ACTIVATION_REQUIRED_STATUS_FAIL_LOG="$TMP_DIR/activation_required_status_fail.log"
+ACTIVATION_REQUIRED_STATUS_FAIL_CANONICAL="$TMP_DIR/activation_required_status_fail_canonical_summary.json"
+
+ACTIVATION_REQUIRED_MISSING_OUTPUT="$TMP_DIR/activation_required_missing_output.json"
+ACTIVATION_REQUIRED_MISSING_LOG="$TMP_DIR/activation_required_missing.log"
+ACTIVATION_REQUIRED_MISSING_CANONICAL="$TMP_DIR/activation_required_missing_canonical_summary.json"
+
+ACTIVATION_REQUIRED_FALSE_OUTPUT="$TMP_DIR/activation_required_false_output.json"
+ACTIVATION_REQUIRED_FALSE_LOG="$TMP_DIR/activation_required_false.log"
+ACTIVATION_REQUIRED_FALSE_CANONICAL="$TMP_DIR/activation_required_false_canonical_summary.json"
+
 cat >"$PASS_HANDOFF" <<'EOF_PASS_HANDOFF'
 {
   "version": 1,
@@ -128,6 +148,44 @@ cat >"$DUAL_STAGE_CONTRACTS" <<'EOF_DUAL_STAGE_CONTRACTS'
 }
 EOF_DUAL_STAGE_CONTRACTS
 
+cat >"$ACTIVATION_GATE_GO_SUMMARY" <<'EOF_ACTIVATION_GATE_GO_SUMMARY'
+{
+  "version": 1,
+  "schema": {
+    "id": "blockchain_mainnet_activation_gate_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "decision": "GO",
+  "status": "go",
+  "go": true
+}
+EOF_ACTIVATION_GATE_GO_SUMMARY
+
+cat >"$ACTIVATION_GATE_STATUS_FAIL_SUMMARY" <<'EOF_ACTIVATION_GATE_STATUS_FAIL_SUMMARY'
+{
+  "version": 1,
+  "schema": {
+    "id": "blockchain_mainnet_activation_gate_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "fail"
+}
+EOF_ACTIVATION_GATE_STATUS_FAIL_SUMMARY
+
+cat >"$ACTIVATION_GATE_DECISION_NO_GO_SUMMARY" <<'EOF_ACTIVATION_GATE_DECISION_NO_GO_SUMMARY'
+{
+  "version": 1,
+  "schema": {
+    "id": "blockchain_mainnet_activation_gate_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "decision": "NO-GO"
+}
+EOF_ACTIVATION_GATE_DECISION_NO_GO_SUMMARY
+
 echo "[phase7-mainnet-cutover-check] pass path"
 PHASE7_MAINNET_CUTOVER_CHECK_CANONICAL_SUMMARY_JSON="$PASS_CANONICAL" \
 "$SCRIPT_UNDER_TEST" \
@@ -159,6 +217,7 @@ if ! jq -e '
   and .policy.require_tdpnd_grpc_auth_live_smoke_ok == true
   and .policy.require_tdpnd_comet_runtime_smoke_ok == false
   and .policy.require_dual_write_parity_ok == true
+  and .policy.require_mainnet_activation_gate_go == false
   and .policy.require_rollback_path_ready == true
   and .policy.require_operator_approval_ok == false
   and .signals.run_pipeline_ok == true
@@ -168,6 +227,8 @@ if ! jq -e '
   and .signals.tdpnd_grpc_auth_live_smoke_ok == true
   and .signals.tdpnd_comet_runtime_smoke_ok == true
   and .signals.dual_write_parity_ok == true
+  and .signals.mainnet_activation_gate_go == null
+  and .stages.mainnet_activation_gate.status == "missing"
   and .signals.rollback_path_ready == true
   and .signals.operator_approval_ok == true
 ' --arg expected_canonical "$PASS_CANONICAL" "$PASS_OUTPUT" >/dev/null; then
@@ -254,6 +315,127 @@ if ! jq -e '
   echo "dual-write fallback summary mismatch"
   cat "$DUAL_OUTPUT"
   cat "$DUAL_LOG"
+  exit 1
+fi
+
+echo "[phase7-mainnet-cutover-check] mainnet activation gate GO when required"
+PHASE7_MAINNET_CUTOVER_CHECK_CANONICAL_SUMMARY_JSON="$ACTIVATION_REQUIRED_GO_CANONICAL" \
+"$SCRIPT_UNDER_TEST" \
+  --phase6-handoff-summary-json "$PASS_HANDOFF" \
+  --phase6-contracts-summary-json "$PASS_CONTRACTS" \
+  --mainnet-activation-gate-summary-json "$ACTIVATION_GATE_GO_SUMMARY" \
+  --require-mainnet-activation-gate-go 1 \
+  --rollback-path-ready 1 \
+  --summary-json "$ACTIVATION_REQUIRED_GO_OUTPUT" \
+  --show-json 0 >"$ACTIVATION_REQUIRED_GO_LOG" 2>&1
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .policy.require_mainnet_activation_gate_go == true
+  and .inputs.usable.mainnet_activation_gate_summary_json == true
+  and .signals.mainnet_activation_gate_go == true
+  and .stages.mainnet_activation_gate.status == "pass"
+  and .stages.mainnet_activation_gate.ok == true
+' "$ACTIVATION_REQUIRED_GO_OUTPUT" >/dev/null; then
+  echo "activation-required-go summary mismatch"
+  cat "$ACTIVATION_REQUIRED_GO_OUTPUT"
+  cat "$ACTIVATION_REQUIRED_GO_LOG"
+  exit 1
+fi
+
+echo "[phase7-mainnet-cutover-check] mainnet activation gate fail status when required"
+set +e
+PHASE7_MAINNET_CUTOVER_CHECK_CANONICAL_SUMMARY_JSON="$ACTIVATION_REQUIRED_STATUS_FAIL_CANONICAL" \
+"$SCRIPT_UNDER_TEST" \
+  --phase6-handoff-summary-json "$PASS_HANDOFF" \
+  --phase6-contracts-summary-json "$PASS_CONTRACTS" \
+  --mainnet-activation-gate-summary-json "$ACTIVATION_GATE_STATUS_FAIL_SUMMARY" \
+  --require-mainnet-activation-gate-go 1 \
+  --rollback-path-ready 1 \
+  --summary-json "$ACTIVATION_REQUIRED_STATUS_FAIL_OUTPUT" \
+  --show-json 0 >"$ACTIVATION_REQUIRED_STATUS_FAIL_LOG" 2>&1
+activation_fail_status_rc=$?
+set -e
+if [[ "$activation_fail_status_rc" -ne 1 ]]; then
+  echo "expected rc=1 when activation gate required signal resolves false from status=fail, got rc=$activation_fail_status_rc"
+  cat "$ACTIVATION_REQUIRED_STATUS_FAIL_LOG"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .policy.require_mainnet_activation_gate_go == true
+  and .signals.mainnet_activation_gate_go == false
+  and .stages.mainnet_activation_gate.status == "fail"
+  and ((.decision.reasons // []) | any(test("mainnet_activation_gate_go is false")))
+' "$ACTIVATION_REQUIRED_STATUS_FAIL_OUTPUT" >/dev/null; then
+  echo "activation-required-status-fail summary mismatch"
+  cat "$ACTIVATION_REQUIRED_STATUS_FAIL_OUTPUT"
+  cat "$ACTIVATION_REQUIRED_STATUS_FAIL_LOG"
+  exit 1
+fi
+
+echo "[phase7-mainnet-cutover-check] mainnet activation gate required but missing"
+set +e
+PHASE7_MAINNET_CUTOVER_CHECK_CANONICAL_SUMMARY_JSON="$ACTIVATION_REQUIRED_MISSING_CANONICAL" \
+"$SCRIPT_UNDER_TEST" \
+  --phase6-handoff-summary-json "$PASS_HANDOFF" \
+  --phase6-contracts-summary-json "$PASS_CONTRACTS" \
+  --require-mainnet-activation-gate-go 1 \
+  --rollback-path-ready 1 \
+  --summary-json "$ACTIVATION_REQUIRED_MISSING_OUTPUT" \
+  --show-json 0 >"$ACTIVATION_REQUIRED_MISSING_LOG" 2>&1
+activation_missing_rc=$?
+set -e
+if [[ "$activation_missing_rc" -ne 1 ]]; then
+  echo "expected rc=1 when activation gate signal is required but missing, got rc=$activation_missing_rc"
+  cat "$ACTIVATION_REQUIRED_MISSING_LOG"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .policy.require_mainnet_activation_gate_go == true
+  and .signals.mainnet_activation_gate_go == null
+  and .stages.mainnet_activation_gate.status == "missing"
+  and ((.decision.reasons // []) | any(test("mainnet_activation_gate_go unresolved")))
+' "$ACTIVATION_REQUIRED_MISSING_OUTPUT" >/dev/null; then
+  echo "activation-required-missing summary mismatch"
+  cat "$ACTIVATION_REQUIRED_MISSING_OUTPUT"
+  cat "$ACTIVATION_REQUIRED_MISSING_LOG"
+  exit 1
+fi
+
+echo "[phase7-mainnet-cutover-check] mainnet activation gate required and NO-GO decision"
+set +e
+PHASE7_MAINNET_CUTOVER_CHECK_CANONICAL_SUMMARY_JSON="$ACTIVATION_REQUIRED_FALSE_CANONICAL" \
+"$SCRIPT_UNDER_TEST" \
+  --phase6-handoff-summary-json "$PASS_HANDOFF" \
+  --phase6-contracts-summary-json "$PASS_CONTRACTS" \
+  --mainnet-activation-gate-summary-json "$ACTIVATION_GATE_DECISION_NO_GO_SUMMARY" \
+  --require-mainnet-activation-gate-go 1 \
+  --rollback-path-ready 1 \
+  --summary-json "$ACTIVATION_REQUIRED_FALSE_OUTPUT" \
+  --show-json 0 >"$ACTIVATION_REQUIRED_FALSE_LOG" 2>&1
+activation_false_rc=$?
+set -e
+if [[ "$activation_false_rc" -ne 1 ]]; then
+  echo "expected rc=1 when activation gate required signal resolves false from decision=NO-GO, got rc=$activation_false_rc"
+  cat "$ACTIVATION_REQUIRED_FALSE_LOG"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .policy.require_mainnet_activation_gate_go == true
+  and .signals.mainnet_activation_gate_go == false
+  and .stages.mainnet_activation_gate.status == "fail"
+  and ((.decision.reasons // []) | any(test("mainnet_activation_gate_go is false")))
+' "$ACTIVATION_REQUIRED_FALSE_OUTPUT" >/dev/null; then
+  echo "activation-required-false summary mismatch"
+  cat "$ACTIVATION_REQUIRED_FALSE_OUTPUT"
+  cat "$ACTIVATION_REQUIRED_FALSE_LOG"
   exit 1
 fi
 

@@ -212,6 +212,44 @@ check_phase7_comet_forwarding_surface() {
   fi
 }
 
+check_phase7_mainnet_activation_gate_doc_surface() {
+  local file_path="$1"
+  local label="$2"
+
+  if ! rg -Fq "mainnet_activation_gate_go" "$file_path"; then
+    echo "$label must document phase7 mainnet_activation_gate_go signal surfacing"
+    exit 1
+  fi
+  if ! rg -Fq "check/run/handoff-check/handoff-run" "$file_path"; then
+    echo "$label must scope mainnet_activation_gate_go to phase7 check/run/handoff-check/handoff-run contexts"
+    exit 1
+  fi
+  if ! rg -Fq "optional by default" "$file_path"; then
+    echo "$label must document that mainnet_activation_gate_go enforcement is optional by default"
+    exit 1
+  fi
+}
+
+check_phase7_mainnet_activation_gate_signal_surface() {
+  local file_path="$1"
+  local label="$2"
+
+  if ! rg -Fq "mainnet_activation_gate_go" "$file_path"; then
+    echo "$label must reference mainnet_activation_gate_go in phase7 signal surfaces"
+    exit 1
+  fi
+}
+
+check_phase7_mainnet_activation_gate_requirement_surface() {
+  local file_path="$1"
+  local label="$2"
+
+  if ! rg -Fq -- "--require-mainnet-activation-gate-go" "$file_path"; then
+    echo "$label must expose --require-mainnet-activation-gate-go in phase7 handoff requirement surfaces"
+    exit 1
+  fi
+}
+
 check_blockchain_fastlane_activation_gate_surface() {
   local file_path="$1"
   local label="$2"
@@ -294,7 +332,7 @@ check_mainnet_activation_gate_surface() {
   fi
 }
 
-for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$roadmap_integration_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$chain_readme" "$chain_scaffold_file" "$chain_grpc_registry_file" "$chain_grpc_registry_test_file" "$chain_settlement_bridge_file" "$chain_runtime_test_file" "$settlement_mapping_doc" "$blockchain_sponsor_quickstart_doc" "$phase5_ci_script" "$phase5_integration_script" "$phase5_check_script" "$phase5_run_script" "$phase5_handoff_check_script" "$phase5_handoff_run_script" "$phase5_check_integration_script" "$phase5_run_integration_script" "$phase5_handoff_check_integration_script" "$phase5_handoff_run_integration_script" "$phase5_summary_report_script" "$phase5_summary_report_integration_script" "$blockchain_fastlane_script" "$blockchain_fastlane_integration_script" "$ci_local_script" "$easy_node_script" "$easy_node_blockchain_gate_wrappers_integration_script" "$easy_node_blockchain_summary_reports_integration_script" "$phase6_ci_script" "$phase6_integration_script" "$phase6_contracts_ci_script" "$phase6_contracts_integration_script" "$phase6_contracts_live_smoke_script" "$phase6_grpc_app_roundtrip_script" "$phase6_grpc_runtime_smoke_script" "$phase6_grpc_live_smoke_script" "$phase6_grpc_auth_live_smoke_script" "$phase6_settlement_bridge_smoke_script" "$phase6_settlement_bridge_live_smoke_script" "$phase6_query_surface_script" "$phase6_module_tx_surface_script" "$phase6_proto_surface_script" "$phase6_proto_grpc_surface_script" "$phase6_proto_codegen_surface_script" "$phase6_module_coverage_floor_script" "$phase6_keeper_coverage_floor_script" "$phase6_dual_write_parity_script" "$phase6_check_script" "$phase6_run_script" "$phase6_check_integration_script" "$phase6_run_integration_script" "$phase6_suite_script" "$phase6_suite_integration_script" "$phase6_summary_report_script" "$phase6_summary_report_integration_script" "$phase7_check_script" "$phase7_check_integration_script" "$phase7_run_script" "$phase7_run_integration_script" "$phase7_ci_script" "$phase7_ci_integration_script" "$phase7_summary_report_script" "$phase7_summary_report_integration_script"; do
+for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$roadmap_integration_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$chain_readme" "$chain_scaffold_file" "$chain_grpc_registry_file" "$chain_grpc_registry_test_file" "$chain_settlement_bridge_file" "$chain_runtime_test_file" "$settlement_mapping_doc" "$blockchain_sponsor_quickstart_doc" "$phase5_ci_script" "$phase5_integration_script" "$phase5_check_script" "$phase5_run_script" "$phase5_handoff_check_script" "$phase5_handoff_run_script" "$phase5_check_integration_script" "$phase5_run_integration_script" "$phase5_handoff_check_integration_script" "$phase5_handoff_run_integration_script" "$phase5_summary_report_script" "$phase5_summary_report_integration_script" "$blockchain_fastlane_script" "$blockchain_fastlane_integration_script" "$ci_local_script" "$easy_node_script" "$easy_node_blockchain_gate_wrappers_integration_script" "$easy_node_blockchain_summary_reports_integration_script" "$phase6_ci_script" "$phase6_integration_script" "$phase6_contracts_ci_script" "$phase6_contracts_integration_script" "$phase6_contracts_live_smoke_script" "$phase6_grpc_app_roundtrip_script" "$phase6_grpc_runtime_smoke_script" "$phase6_grpc_live_smoke_script" "$phase6_grpc_auth_live_smoke_script" "$phase6_settlement_bridge_smoke_script" "$phase6_settlement_bridge_live_smoke_script" "$phase6_query_surface_script" "$phase6_module_tx_surface_script" "$phase6_proto_surface_script" "$phase6_proto_grpc_surface_script" "$phase6_proto_codegen_surface_script" "$phase6_module_coverage_floor_script" "$phase6_keeper_coverage_floor_script" "$phase6_dual_write_parity_script" "$phase6_check_script" "$phase6_run_script" "$phase6_check_integration_script" "$phase6_run_integration_script" "$phase6_suite_script" "$phase6_suite_integration_script" "$phase6_summary_report_script" "$phase6_summary_report_integration_script" "$phase7_check_script" "$phase7_check_integration_script" "$phase7_run_script" "$phase7_run_integration_script" "$phase7_handoff_check_script" "$phase7_handoff_check_integration_script" "$phase7_handoff_run_script" "$phase7_handoff_run_integration_script" "$phase7_ci_script" "$phase7_ci_integration_script" "$phase7_summary_report_script" "$phase7_summary_report_integration_script"; do
   if [[ ! -f "$f" ]]; then
     echo "missing required file: $f"
     exit 1
@@ -705,6 +743,8 @@ check_phase7_roadmap_surface_docs "$product_roadmap" "product roadmap"
 check_phase7_roadmap_surface_docs "$cosmos_runtime_doc" "cosmos settlement runtime doc"
 check_phase7_comet_signal_surface "$full_plan" "full execution plan"
 check_phase7_comet_signal_surface "$product_roadmap" "product roadmap"
+check_phase7_mainnet_activation_gate_doc_surface "$full_plan" "full execution plan"
+check_phase7_mainnet_activation_gate_doc_surface "$product_roadmap" "product roadmap"
 if ! rg -qi "confirmation lifecycle" "$full_plan"; then
   echo "full execution plan must document settlement confirmation lifecycle posture"
   exit 1
@@ -1892,6 +1932,16 @@ check_phase7_comet_signal_surface "$phase7_run_integration_script" "phase7 run i
 check_phase7_comet_signal_surface "$phase7_handoff_check_integration_script" "phase7 handoff-check integration script"
 check_phase7_comet_signal_surface "$phase7_handoff_run_integration_script" "phase7 handoff-run integration script"
 check_phase7_comet_forwarding_surface "$phase7_handoff_run_integration_script" "phase7 handoff-run integration script"
+check_phase7_mainnet_activation_gate_signal_surface "$phase7_run_script" "phase7 run wrapper script"
+check_phase7_mainnet_activation_gate_signal_surface "$phase7_run_integration_script" "phase7 run integration script"
+check_phase7_mainnet_activation_gate_signal_surface "$phase7_handoff_check_script" "phase7 handoff-check wrapper script"
+check_phase7_mainnet_activation_gate_signal_surface "$phase7_handoff_check_integration_script" "phase7 handoff-check integration script"
+check_phase7_mainnet_activation_gate_signal_surface "$phase7_handoff_run_script" "phase7 handoff-run wrapper script"
+check_phase7_mainnet_activation_gate_signal_surface "$phase7_handoff_run_integration_script" "phase7 handoff-run integration script"
+check_phase7_mainnet_activation_gate_requirement_surface "$phase7_handoff_check_script" "phase7 handoff-check wrapper script"
+check_phase7_mainnet_activation_gate_requirement_surface "$phase7_handoff_check_integration_script" "phase7 handoff-check integration script"
+check_phase7_mainnet_activation_gate_requirement_surface "$phase7_handoff_run_script" "phase7 handoff-run wrapper script"
+check_phase7_mainnet_activation_gate_requirement_surface "$phase7_handoff_run_integration_script" "phase7 handoff-run integration script"
 if ! rg -Fq "phase7_mainnet_cutover_check.sh" "$phase7_check_integration_script"; then
   echo "phase7 check integration script must execute phase7 check wrapper"
   exit 1

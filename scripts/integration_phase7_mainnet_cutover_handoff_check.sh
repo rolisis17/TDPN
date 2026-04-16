@@ -66,6 +66,7 @@ cat >"$PASS_RUN" <<'EOF_PASS_RUN'
         "tdpnd_grpc_live_smoke_ok": true,
         "tdpnd_grpc_auth_live_smoke_ok": true,
         "tdpnd_comet_runtime_smoke_ok": true,
+        "mainnet_activation_gate_go": true,
         "dual_write_parity_ok": true,
         "rollback_path_ready": true,
         "operator_approval_ok": true
@@ -91,6 +92,7 @@ cat >"$PASS_CHECK" <<'EOF_PASS_CHECK'
     "tdpnd_grpc_live_smoke_ok": true,
     "tdpnd_grpc_auth_live_smoke_ok": true,
     "tdpnd_comet_runtime_smoke_ok": true,
+    "mainnet_activation_gate_go": true,
     "dual_write_parity_ok": true,
     "rollback_path_ready": true,
     "operator_approval_ok": true
@@ -141,6 +143,7 @@ cat >"$FAIL_RUN" <<'EOF_FAIL_RUN'
         "tdpnd_grpc_live_smoke_ok": true,
         "tdpnd_grpc_auth_live_smoke_ok": false,
         "tdpnd_comet_runtime_smoke_ok": false,
+        "mainnet_activation_gate_go": false,
         "dual_write_parity_ok": true,
         "rollback_path_ready": true,
         "operator_approval_ok": true
@@ -174,6 +177,7 @@ if ! jq -e '
   and .handoff.summary_report_ok == true
   and .handoff.module_tx_surface_ok == true
   and .handoff.tdpnd_grpc_auth_live_smoke_ok == true
+  and .handoff.mainnet_activation_gate_go == true
   and .handoff.dual_write_parity_ok == true
   and .handoff.rollback_path_ready == true
   and .handoff.operator_approval_ok == true
@@ -209,6 +213,7 @@ PHASE7_MAINNET_CUTOVER_HANDOFF_CHECK_CANONICAL_SUMMARY_JSON="$FAIL_CANONICAL" \
 bash "$SCRIPT_UNDER_TEST" \
   --phase7-run-summary-json "$FAIL_RUN" \
   --phase7-summary-report-json "$PASS_REPORT" \
+  --require-mainnet-activation-gate-go 1 \
   --summary-json "$FAIL_OUTPUT" \
   --show-json 0 >"$FAIL_LOG" 2>&1
 fail_rc=$?
@@ -221,8 +226,11 @@ fi
 if ! jq -e '
   .status == "fail"
   and .rc == 1
+  and .handoff.mainnet_activation_gate_go == false
+  and .handoff.mainnet_activation_gate_go_status == "fail"
   and .handoff.tdpnd_grpc_auth_live_smoke_ok == false
   and .handoff.tdpnd_grpc_auth_live_smoke_status == "fail"
+  and ((.decision.reasons // []) | any(test("mainnet_activation_gate_go is false")))
   and ((.decision.reasons // []) | any(test("tdpnd_grpc_auth_live_smoke_ok is false")))
 ' "$FAIL_OUTPUT" >/dev/null; then
   echo "fail-path summary mismatch"
@@ -254,12 +262,16 @@ bash "$SCRIPT_UNDER_TEST" \
   --phase7-summary-report-json "$PASS_REPORT" \
   --summary-json "$RELAXED_OUTPUT" \
   --require-tdpnd-grpc-auth-live-smoke-ok 0 \
+  --require-mainnet-activation-gate-go 0 \
   --show-json 0 >"$RELAXED_LOG" 2>&1
 
 if ! jq -e '
   .status == "pass"
   and .rc == 0
   and .inputs.requirements.tdpnd_grpc_auth_live_smoke_ok == false
+  and .inputs.requirements.mainnet_activation_gate_go == false
+  and .handoff.mainnet_activation_gate_go == false
+  and .handoff.mainnet_activation_gate_go_status == "fail"
   and .handoff.tdpnd_grpc_auth_live_smoke_ok == false
   and .handoff.tdpnd_grpc_auth_live_smoke_status == "fail"
 ' "$RELAXED_OUTPUT" >/dev/null; then
