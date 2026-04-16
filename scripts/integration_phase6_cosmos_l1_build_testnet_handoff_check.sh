@@ -53,6 +53,7 @@ cat >"$PASS_CHECK" <<'EOF_PASS_CHECK'
     "proto_surface_ok": true,
     "proto_codegen_surface_ok": true,
     "query_surface_ok": true,
+    "module_tx_surface_ok": true,
     "grpc_app_roundtrip_ok": true,
     "tdpnd_grpc_runtime_smoke_ok": true,
     "tdpnd_grpc_live_smoke_ok": true,
@@ -120,6 +121,7 @@ if ! jq -e '
   and .handoff.proto_surface_ok == true
   and .handoff.proto_codegen_surface_ok == true
   and .handoff.query_surface_ok == true
+  and .handoff.module_tx_surface_ok == true
   and .handoff.grpc_app_roundtrip_ok == true
   and .handoff.tdpnd_grpc_runtime_smoke_ok == true
   and .handoff.tdpnd_grpc_live_smoke_ok == true
@@ -152,6 +154,7 @@ cat >"$FAIL_CHECK" <<'EOF_FAIL_CHECK'
     "proto_surface_ok": true,
     "proto_codegen_surface_ok": true,
     "query_surface_ok": true,
+    "module_tx_surface_ok": true,
     "grpc_app_roundtrip_ok": true,
     "tdpnd_grpc_runtime_smoke_ok": true,
     "tdpnd_grpc_live_smoke_ok": true,
@@ -246,6 +249,7 @@ cat >"$RELAXED_CHECK" <<'EOF_RELAXED_CHECK'
     "proto_surface_ok": true,
     "proto_codegen_surface_ok": true,
     "query_surface_ok": true,
+    "module_tx_surface_ok": false,
     "grpc_app_roundtrip_ok": true,
     "tdpnd_grpc_runtime_smoke_ok": true,
     "tdpnd_grpc_live_smoke_ok": false,
@@ -289,6 +293,7 @@ PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_CHECK_CANONICAL_SUMMARY_JSON="$RELAXED_CA
 "$SCRIPT_UNDER_TEST" \
   --phase6-run-summary-json "$RELAXED_RUN" \
   --summary-json "$RELAXED_OUTPUT" \
+  --require-module-tx-surface-ok 0 \
   --require-tdpnd-grpc-live-smoke-ok 0 \
   --require-tdpnd-auth-live-smoke-ok 0 \
   --show-json 0 >"$RELAXED_LOG" 2>&1
@@ -302,8 +307,11 @@ if ! jq -e '
   .status == "pass"
   and .rc == 0
   and .artifacts.canonical_summary_json == $expected_canonical
+  and .inputs.requirements.module_tx_surface_ok == false
   and .inputs.requirements.tdpnd_grpc_live_smoke_ok == false
   and .inputs.requirements.tdpnd_grpc_auth_live_smoke_ok == false
+  and .handoff.module_tx_surface_ok == false
+  and .handoff.module_tx_surface_status == "fail"
   and .handoff.tdpnd_grpc_live_smoke_ok == false
   and .handoff.tdpnd_grpc_live_smoke_status == "fail"
   and .handoff.tdpnd_grpc_auth_live_smoke_ok == false

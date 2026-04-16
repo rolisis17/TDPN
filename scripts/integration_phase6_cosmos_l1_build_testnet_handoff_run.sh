@@ -23,10 +23,12 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 CAPTURE="$TMP_DIR/capture.tsv"
 PASS_STDOUT="$TMP_DIR/pass.stdout"
 DRY_STDOUT="$TMP_DIR/dry.stdout"
+DRY_OVERRIDE_STDOUT="$TMP_DIR/dry_override.stdout"
 RUN_FAIL_STDOUT="$TMP_DIR/run_fail.stdout"
 HANDOFF_FAIL_STDOUT="$TMP_DIR/handoff_fail.stdout"
 PASS_CANONICAL_SUMMARY="$TMP_DIR/pass_wrapper_canonical.json"
 DRY_CANONICAL_SUMMARY="$TMP_DIR/dry_wrapper_canonical.json"
+DRY_OVERRIDE_CANONICAL_SUMMARY="$TMP_DIR/dry_override_wrapper_canonical.json"
 RUN_FAIL_CANONICAL_SUMMARY="$TMP_DIR/run_fail_wrapper_canonical.json"
 HANDOFF_FAIL_CANONICAL_SUMMARY="$TMP_DIR/handoff_fail_wrapper_canonical.json"
 
@@ -82,6 +84,7 @@ cat >"$check_summary" <<'EOF_CHECK'
     "proto_surface_ok": true,
     "proto_codegen_surface_ok": true,
     "query_surface_ok": true,
+    "module_tx_surface_ok": true,
     "grpc_app_roundtrip_ok": true,
     "tdpnd_grpc_runtime_smoke_ok": true,
     "tdpnd_grpc_live_smoke_ok": true,
@@ -101,6 +104,7 @@ cat >"$roadmap_summary" <<'EOF_ROADMAP'
       "proto_surface_ok": true,
       "proto_codegen_surface_ok": true,
       "query_surface_ok": true,
+      "module_tx_surface_ok": true,
       "grpc_app_roundtrip_ok": true,
       "tdpnd_grpc_runtime_smoke_ok": true,
       "tdpnd_grpc_live_smoke_ok": true,
@@ -202,6 +206,7 @@ if [[ -n "$summary_json" && "${FAKE_HANDOFF_OMIT_SUMMARY:-0}" != "1" ]]; then
     "proto_surface_ok": true,
     "proto_codegen_surface_ok": true,
     "query_surface_ok": true,
+    "module_tx_surface_ok": true,
     "grpc_app_roundtrip_ok": true,
     "tdpnd_grpc_runtime_smoke_ok": true,
     "tdpnd_grpc_live_smoke_ok": true,
@@ -329,6 +334,11 @@ if [[ "$handoff_line" != *"--require-run-pipeline-ok 0"* || "$handoff_line" != *
   echo "$handoff_line"
   exit 1
 fi
+if [[ "$handoff_line" != *"--require-module-tx-surface-ok 0"* ]]; then
+  echo "dry-run module-tx relax mismatch"
+  echo "$handoff_line"
+  exit 1
+fi
 if [[ "$handoff_line" == *"--dry-run 1"* ]]; then
   echo "dry-run should not leak to handoff checker"
   echo "$handoff_line"
@@ -343,6 +353,44 @@ if ! jq -e '
 ' "$DRY_WRAPPER_SUMMARY" >/dev/null; then
   echo "dry-run wrapper summary mismatch"
   cat "$DRY_WRAPPER_SUMMARY"
+  exit 1
+fi
+
+echo "[phase6-cosmos-l1-build-testnet-handoff-run] dry-run explicit module-tx override is preserved"
+: >"$CAPTURE"
+DRY_OVERRIDE_WRAPPER_SUMMARY="$TMP_DIR/dry_override_wrapper.json"
+PHASE6_HANDOFF_RUN_CAPTURE_FILE="$CAPTURE" \
+PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_RUN_RUN_SCRIPT="$FAKE_RUN" \
+PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_RUN_HANDOFF_CHECK_SCRIPT="$FAKE_HANDOFF" \
+PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_RUN_CANONICAL_SUMMARY_JSON="$DRY_OVERRIDE_CANONICAL_SUMMARY" \
+bash "$RUNNER" \
+  --reports-dir "$TMP_DIR/reports_dry_override" \
+  --run-summary-json "$TMP_DIR/dry_override_run_summary.json" \
+  --handoff-summary-json "$TMP_DIR/dry_override_handoff_summary.json" \
+  --summary-json "$DRY_OVERRIDE_WRAPPER_SUMMARY" \
+  --dry-run 1 \
+  --print-summary-json 0 \
+  --handoff-require-module-tx-surface-ok 1 >"$DRY_OVERRIDE_STDOUT" 2>&1
+
+handoff_line="$(grep '^handoff	' "$CAPTURE" | tail -n 1 || true)"
+if [[ "$handoff_line" != *"--require-module-tx-surface-ok 1"* ]]; then
+  echo "dry-run explicit module-tx override forwarding mismatch"
+  echo "$handoff_line"
+  exit 1
+fi
+if [[ "$handoff_line" == *"--require-module-tx-surface-ok 0"* ]]; then
+  echo "dry-run explicit module-tx override was unexpectedly relaxed"
+  echo "$handoff_line"
+  exit 1
+fi
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.dry_run == true
+  and .steps.phase6_cosmos_l1_build_testnet_handoff_check.contract_valid == true
+' "$DRY_OVERRIDE_WRAPPER_SUMMARY" >/dev/null; then
+  echo "dry-run explicit module-tx override summary mismatch"
+  cat "$DRY_OVERRIDE_WRAPPER_SUMMARY"
   exit 1
 fi
 

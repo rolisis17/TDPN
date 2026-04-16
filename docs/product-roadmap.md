@@ -220,8 +220,8 @@ Current implementation posture:
 - phase6 canonical top-level suite wrapper is `scripts/phase6_cosmos_l1_build_testnet_suite.sh` with contract checks in `scripts/integration_phase6_cosmos_l1_build_testnet_suite.sh`.
 - phase6 readiness wrappers are available as `scripts/phase6_cosmos_l1_build_testnet_check.sh` and `scripts/phase6_cosmos_l1_build_testnet_run.sh` (integration-covered).
 - phase6 handoff wrappers are available as `scripts/phase6_cosmos_l1_build_testnet_handoff_check.sh` and `scripts/phase6_cosmos_l1_build_testnet_handoff_run.sh` (integration-covered).
-- phase6 readiness/handoff checker surfaces include `tdpnd_grpc_auth_live_smoke_ok` in addition to existing `tdpnd_grpc_runtime_smoke_ok` and `tdpnd_grpc_live_smoke_ok` signals.
-- phase6 run/handoff-run dry-run relaxation also covers `tdpnd_grpc_auth_live_smoke_ok` by default unless explicitly required by wrapper inputs.
+- phase6 readiness/handoff checker surfaces include `module_tx_surface_ok` and `tdpnd_grpc_auth_live_smoke_ok` in addition to existing `tdpnd_grpc_runtime_smoke_ok` and `tdpnd_grpc_live_smoke_ok` signals.
+- phase6 run/handoff-run dry-run relaxation also covers `module_tx_surface_ok` and `tdpnd_grpc_auth_live_smoke_ok` by default unless explicitly required by wrapper inputs.
 - phase6 operator summary helper `scripts/phase6_cosmos_l1_summary_report.sh` aggregates CI/contracts/suite summary artifacts into compact operator lines plus normalized JSON output, with integration coverage from `scripts/integration_phase6_cosmos_l1_summary_report.sh`.
 - phase6 build/testnet/contracts/check/run/handoff/suite wrappers now emit canonical summary artifacts under `.easy-node-logs/phase6_cosmos_l1_*_summary.json` in addition to per-run reports.
 - phase6 summary helper fallback discovery now includes CI/contracts/suite timestamped summary directories when canonical/default summary files are absent.

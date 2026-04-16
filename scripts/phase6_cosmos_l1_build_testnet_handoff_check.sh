@@ -15,6 +15,7 @@ Usage:
     [--require-proto-surface-ok [0|1]] \
     [--require-proto-codegen-surface-ok [0|1]] \
     [--require-query-surface-ok [0|1]] \
+    [--require-module-tx-surface-ok [0|1]] \
     [--require-grpc-app-roundtrip-ok [0|1]] \
     [--require-tdpnd-grpc-runtime-smoke-ok [0|1]] \
     [--require-tdpnd-grpc-live-smoke-ok [0|1]] \
@@ -221,6 +222,7 @@ require_chain_scaffold_ok="${PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_CHECK_REQUIR
 require_proto_surface_ok="${PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_CHECK_REQUIRE_PROTO_SURFACE_OK:-1}"
 require_proto_codegen_surface_ok="${PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_CHECK_REQUIRE_PROTO_CODEGEN_SURFACE_OK:-1}"
 require_query_surface_ok="${PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_CHECK_REQUIRE_QUERY_SURFACE_OK:-1}"
+require_module_tx_surface_ok="${PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_CHECK_REQUIRE_MODULE_TX_SURFACE_OK:-1}"
 require_grpc_app_roundtrip_ok="${PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_CHECK_REQUIRE_GRPC_APP_ROUNDTRIP_OK:-1}"
 require_tdpnd_grpc_runtime_smoke_ok="${PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_CHECK_REQUIRE_TDPND_GRPC_RUNTIME_SMOKE_OK:-${PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_CHECK_REQUIRE_TDPND_RUNTIME_SMOKE_OK:-1}}"
 require_tdpnd_grpc_live_smoke_ok="${PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_CHECK_REQUIRE_TDPND_GRPC_LIVE_SMOKE_OK:-${PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_CHECK_REQUIRE_TDPND_LIVE_SMOKE_OK:-1}}"
@@ -235,6 +237,7 @@ while [[ $# -gt 0 ]]; do
     --require-proto-surface-ok) require_proto_surface_ok="${2:-1}"; shift $(( $#>=2 ? 2 : 1 )) ;;
     --require-proto-codegen-surface-ok) require_proto_codegen_surface_ok="${2:-1}"; shift $(( $#>=2 ? 2 : 1 )) ;;
     --require-query-surface-ok) require_query_surface_ok="${2:-1}"; shift $(( $#>=2 ? 2 : 1 )) ;;
+    --require-module-tx-surface-ok) require_module_tx_surface_ok="${2:-1}"; shift $(( $#>=2 ? 2 : 1 )) ;;
     --require-grpc-app-roundtrip-ok) require_grpc_app_roundtrip_ok="${2:-1}"; shift $(( $#>=2 ? 2 : 1 )) ;;
     --require-tdpnd-grpc-runtime-smoke-ok|--require-tdpnd-runtime-smoke-ok) require_tdpnd_grpc_runtime_smoke_ok="${2:-1}"; shift $(( $#>=2 ? 2 : 1 )) ;;
     --require-tdpnd-grpc-live-smoke-ok|--require-tdpnd-live-smoke-ok) require_tdpnd_grpc_live_smoke_ok="${2:-1}"; shift $(( $#>=2 ? 2 : 1 )) ;;
@@ -251,6 +254,7 @@ bool_arg_or_die "--require-chain-scaffold-ok" "$require_chain_scaffold_ok"
 bool_arg_or_die "--require-proto-surface-ok" "$require_proto_surface_ok"
 bool_arg_or_die "--require-proto-codegen-surface-ok" "$require_proto_codegen_surface_ok"
 bool_arg_or_die "--require-query-surface-ok" "$require_query_surface_ok"
+bool_arg_or_die "--require-module-tx-surface-ok" "$require_module_tx_surface_ok"
 bool_arg_or_die "--require-grpc-app-roundtrip-ok" "$require_grpc_app_roundtrip_ok"
 bool_arg_or_die "--require-tdpnd-grpc-runtime-smoke-ok" "$require_tdpnd_grpc_runtime_smoke_ok"
 bool_arg_or_die "--require-tdpnd-grpc-live-smoke-ok" "$require_tdpnd_grpc_live_smoke_ok"
@@ -308,6 +312,7 @@ chain_scaffold_pair="$(resolve_handoff_bool "chain_scaffold_ok" "chain_scaffold"
 proto_surface_pair="$(resolve_handoff_bool "proto_surface_ok" "proto_surface" "$resolved_check_summary_json" "$phase6_check_summary_usable")"
 proto_codegen_surface_pair="$(resolve_handoff_bool "proto_codegen_surface_ok" "proto_codegen_surface" "$resolved_check_summary_json" "$phase6_check_summary_usable")"
 query_surface_pair="$(resolve_handoff_bool "query_surface_ok" "query_surface" "$resolved_check_summary_json" "$phase6_check_summary_usable")"
+module_tx_surface_pair="$(resolve_handoff_bool "module_tx_surface_ok" "module_tx_surface" "$resolved_check_summary_json" "$phase6_check_summary_usable")"
 grpc_app_roundtrip_pair="$(resolve_handoff_bool "grpc_app_roundtrip_ok" "grpc_app_roundtrip" "$resolved_check_summary_json" "$phase6_check_summary_usable")"
 tdpnd_grpc_runtime_smoke_pair="$(resolve_handoff_bool "tdpnd_grpc_runtime_smoke_ok" "tdpnd_grpc_runtime_smoke" "$resolved_check_summary_json" "$phase6_check_summary_usable")"
 tdpnd_grpc_live_smoke_pair="$(resolve_handoff_bool "tdpnd_grpc_live_smoke_ok" "tdpnd_grpc_live_smoke" "$resolved_check_summary_json" "$phase6_check_summary_usable")"
@@ -325,6 +330,9 @@ proto_codegen_surface_source="${proto_codegen_surface_pair%%|*}"; proto_codegen_
 query_surface_ok="${query_surface_pair%%|*}"; query_surface_pair="${query_surface_pair#*|}"
 query_surface_status="${query_surface_pair%%|*}"; query_surface_pair="${query_surface_pair#*|}"
 query_surface_source="${query_surface_pair%%|*}"; query_surface_resolved="${query_surface_pair##*|}"
+module_tx_surface_ok="${module_tx_surface_pair%%|*}"; module_tx_surface_pair="${module_tx_surface_pair#*|}"
+module_tx_surface_status="${module_tx_surface_pair%%|*}"; module_tx_surface_pair="${module_tx_surface_pair#*|}"
+module_tx_surface_source="${module_tx_surface_pair%%|*}"; module_tx_surface_resolved="${module_tx_surface_pair##*|}"
 grpc_app_roundtrip_ok="${grpc_app_roundtrip_pair%%|*}"; grpc_app_roundtrip_pair="${grpc_app_roundtrip_pair#*|}"
 grpc_app_roundtrip_status="${grpc_app_roundtrip_pair%%|*}"; grpc_app_roundtrip_pair="${grpc_app_roundtrip_pair#*|}"
 grpc_app_roundtrip_source="${grpc_app_roundtrip_pair%%|*}"; grpc_app_roundtrip_resolved="${grpc_app_roundtrip_pair##*|}"
@@ -349,6 +357,7 @@ check_required_signal "$require_chain_scaffold_ok" "$chain_scaffold_ok" "$chain_
 check_required_signal "$require_proto_surface_ok" "$proto_surface_ok" "$proto_surface_status" "proto_surface_ok"
 check_required_signal "$require_proto_codegen_surface_ok" "$proto_codegen_surface_ok" "$proto_codegen_surface_status" "proto_codegen_surface_ok"
 check_required_signal "$require_query_surface_ok" "$query_surface_ok" "$query_surface_status" "query_surface_ok"
+check_required_signal "$require_module_tx_surface_ok" "$module_tx_surface_ok" "$module_tx_surface_status" "module_tx_surface_ok"
 check_required_signal "$require_grpc_app_roundtrip_ok" "$grpc_app_roundtrip_ok" "$grpc_app_roundtrip_status" "grpc_app_roundtrip_ok"
 check_required_signal "$require_tdpnd_grpc_runtime_smoke_ok" "$tdpnd_grpc_runtime_smoke_ok" "$tdpnd_grpc_runtime_smoke_status" "tdpnd_grpc_runtime_smoke_ok"
 check_required_signal "$require_tdpnd_grpc_live_smoke_ok" "$tdpnd_grpc_live_smoke_ok" "$tdpnd_grpc_live_smoke_status" "tdpnd_grpc_live_smoke_ok"
@@ -375,6 +384,7 @@ jq -n \
   --argjson require_proto_surface_ok "$require_proto_surface_ok" \
   --argjson require_proto_codegen_surface_ok "$require_proto_codegen_surface_ok" \
   --argjson require_query_surface_ok "$require_query_surface_ok" \
+  --argjson require_module_tx_surface_ok "$require_module_tx_surface_ok" \
   --argjson require_grpc_app_roundtrip_ok "$require_grpc_app_roundtrip_ok" \
   --argjson require_tdpnd_grpc_runtime_smoke_ok "$require_tdpnd_grpc_runtime_smoke_ok" \
   --argjson require_tdpnd_grpc_live_smoke_ok "$require_tdpnd_grpc_live_smoke_ok" \
@@ -388,6 +398,7 @@ jq -n \
   --argjson proto_surface_ok "$proto_surface_ok" --arg proto_surface_status "$proto_surface_status" --argjson proto_surface_resolved "$proto_surface_resolved" --arg proto_surface_source "$proto_surface_source" \
   --argjson proto_codegen_surface_ok "$proto_codegen_surface_ok" --arg proto_codegen_surface_status "$proto_codegen_surface_status" --argjson proto_codegen_surface_resolved "$proto_codegen_surface_resolved" --arg proto_codegen_surface_source "$proto_codegen_surface_source" \
   --argjson query_surface_ok "$query_surface_ok" --arg query_surface_status "$query_surface_status" --argjson query_surface_resolved "$query_surface_resolved" --arg query_surface_source "$query_surface_source" \
+  --argjson module_tx_surface_ok "$module_tx_surface_ok" --arg module_tx_surface_status "$module_tx_surface_status" --argjson module_tx_surface_resolved "$module_tx_surface_resolved" --arg module_tx_surface_source "$module_tx_surface_source" \
   --argjson grpc_app_roundtrip_ok "$grpc_app_roundtrip_ok" --arg grpc_app_roundtrip_status "$grpc_app_roundtrip_status" --argjson grpc_app_roundtrip_resolved "$grpc_app_roundtrip_resolved" --arg grpc_app_roundtrip_source "$grpc_app_roundtrip_source" \
   --argjson tdpnd_grpc_runtime_smoke_ok "$tdpnd_grpc_runtime_smoke_ok" --arg tdpnd_grpc_runtime_smoke_status "$tdpnd_grpc_runtime_smoke_status" --argjson tdpnd_grpc_runtime_smoke_resolved "$tdpnd_grpc_runtime_smoke_resolved" --arg tdpnd_grpc_runtime_smoke_source "$tdpnd_grpc_runtime_smoke_source" \
   --argjson tdpnd_grpc_live_smoke_ok "$tdpnd_grpc_live_smoke_ok" --arg tdpnd_grpc_live_smoke_status "$tdpnd_grpc_live_smoke_status" --argjson tdpnd_grpc_live_smoke_resolved "$tdpnd_grpc_live_smoke_resolved" --arg tdpnd_grpc_live_smoke_source "$tdpnd_grpc_live_smoke_source" \
@@ -411,6 +422,7 @@ jq -n \
         proto_surface_ok: ($require_proto_surface_ok == 1),
         proto_codegen_surface_ok: ($require_proto_codegen_surface_ok == 1),
         query_surface_ok: ($require_query_surface_ok == 1),
+        module_tx_surface_ok: ($require_module_tx_surface_ok == 1),
         grpc_app_roundtrip_ok: ($require_grpc_app_roundtrip_ok == 1),
         tdpnd_grpc_runtime_smoke_ok: ($require_tdpnd_grpc_runtime_smoke_ok == 1),
         tdpnd_grpc_live_smoke_ok: ($require_tdpnd_grpc_live_smoke_ok == 1),
@@ -438,6 +450,9 @@ jq -n \
       query_surface_ok: $query_surface_ok,
       query_surface_status: $query_surface_status,
       query_surface_resolved: ($query_surface_resolved == 1),
+      module_tx_surface_ok: $module_tx_surface_ok,
+      module_tx_surface_status: $module_tx_surface_status,
+      module_tx_surface_resolved: ($module_tx_surface_resolved == 1),
       grpc_app_roundtrip_ok: $grpc_app_roundtrip_ok,
       grpc_app_roundtrip_status: $grpc_app_roundtrip_status,
       grpc_app_roundtrip_resolved: ($grpc_app_roundtrip_resolved == 1),
@@ -456,6 +471,7 @@ jq -n \
         proto_surface_ok: $proto_surface_source,
         proto_codegen_surface_ok: $proto_codegen_surface_source,
         query_surface_ok: $query_surface_source,
+        module_tx_surface_ok: $module_tx_surface_source,
         grpc_app_roundtrip_ok: $grpc_app_roundtrip_source,
         tdpnd_grpc_runtime_smoke_ok: $tdpnd_grpc_runtime_smoke_source,
         tdpnd_grpc_live_smoke_ok: $tdpnd_grpc_live_smoke_source,

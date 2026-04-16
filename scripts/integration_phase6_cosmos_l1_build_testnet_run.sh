@@ -23,15 +23,18 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 CAPTURE="$TMP_DIR/stage_capture.tsv"
 SUCCESS_LOG="$TMP_DIR/success.log"
 DRY_RUN_LOG="$TMP_DIR/dry_run.log"
+DRY_RUN_EXPLICIT_LOG="$TMP_DIR/dry_run_explicit.log"
 CI_FAIL_LOG="$TMP_DIR/ci_fail.log"
 CHECK_FAIL_LOG="$TMP_DIR/check_fail.log"
 
 SUCCESS_RUN_SUMMARY="$TMP_DIR/run_success.json"
 DRY_RUN_RUN_SUMMARY="$TMP_DIR/run_dry.json"
+DRY_RUN_EXPLICIT_RUN_SUMMARY="$TMP_DIR/run_dry_explicit.json"
 CI_FAIL_RUN_SUMMARY="$TMP_DIR/run_ci_fail.json"
 CHECK_FAIL_RUN_SUMMARY="$TMP_DIR/run_check_fail.json"
 SUCCESS_CANONICAL_SUMMARY="$TMP_DIR/canonical_run_success.json"
 DRY_RUN_CANONICAL_SUMMARY="$TMP_DIR/canonical_run_dry.json"
+DRY_RUN_EXPLICIT_CANONICAL_SUMMARY="$TMP_DIR/canonical_run_dry_explicit.json"
 CI_FAIL_CANONICAL_SUMMARY="$TMP_DIR/canonical_run_ci_fail.json"
 CHECK_FAIL_CANONICAL_SUMMARY="$TMP_DIR/canonical_run_check_fail.json"
 
@@ -285,7 +288,7 @@ if [[ "$check_line" != *"--require-chain-scaffold-ok 1"* ]]; then
   echo "$check_line"
   exit 1
 fi
-if [[ "$check_line" != *"--require-proto-surface-ok 0"* || "$check_line" != *"--require-proto-codegen-surface-ok 0"* || "$check_line" != *"--require-query-surface-ok 0"* || "$check_line" != *"--require-grpc-app-roundtrip-ok 0"* || "$check_line" != *"--require-tdpnd-grpc-runtime-smoke-ok 0"* || "$check_line" != *"--require-tdpnd-grpc-live-smoke-ok 0"* || "$check_line" != *"--require-tdpnd-grpc-auth-live-smoke-ok 0"* ]]; then
+if [[ "$check_line" != *"--require-proto-surface-ok 0"* || "$check_line" != *"--require-proto-codegen-surface-ok 0"* || "$check_line" != *"--require-query-surface-ok 0"* || "$check_line" != *"--require-module-tx-surface-ok 0"* || "$check_line" != *"--require-grpc-app-roundtrip-ok 0"* || "$check_line" != *"--require-tdpnd-grpc-runtime-smoke-ok 0"* || "$check_line" != *"--require-tdpnd-grpc-live-smoke-ok 0"* || "$check_line" != *"--require-tdpnd-grpc-auth-live-smoke-ok 0"* ]]; then
   echo "dry-run default requirement relax forwarding mismatch"
   echo "$check_line"
   exit 1
@@ -318,6 +321,54 @@ if ! jq -e '
   exit 1
 fi
 assert_canonical_summary_artifact "$DRY_RUN_RUN_SUMMARY" "$DRY_RUN_CANONICAL_SUMMARY" "$DRY_RUN_LOG"
+
+echo "[phase6-cosmos-l1-run] dry-run explicit module requirement forwarding"
+: >"$CAPTURE"
+PHASE6_COSMOS_L1_BUILD_TESTNET_RUN_CAPTURE_FILE="$CAPTURE" \
+PHASE6_COSMOS_L1_BUILD_TESTNET_RUN_CI_SCRIPT="$FAKE_CI" \
+PHASE6_COSMOS_L1_BUILD_TESTNET_RUN_CHECK_SCRIPT="$FAKE_CHECK" \
+PHASE6_COSMOS_L1_BUILD_TESTNET_RUN_CANONICAL_SUMMARY_JSON="$DRY_RUN_EXPLICIT_CANONICAL_SUMMARY" \
+bash "$RUNNER" \
+  --reports-dir "$TMP_DIR/reports_dry_explicit" \
+  --ci-summary-json "$TMP_DIR/ci_dry_explicit_summary.json" \
+  --check-summary-json "$TMP_DIR/check_dry_explicit_summary.json" \
+  --summary-json "$DRY_RUN_EXPLICIT_RUN_SUMMARY" \
+  --dry-run 1 \
+  --print-summary-json 0 \
+  --check-require-module-tx-surface-ok 1 \
+  --check-show-json 0 >"$DRY_RUN_EXPLICIT_LOG" 2>&1
+
+assert_ci_then_check_order "$CAPTURE"
+
+check_line="$(grep '^check	' "$CAPTURE" | tail -n 1 || true)"
+if [[ "$check_line" != *"--require-module-tx-surface-ok 1"* ]]; then
+  echo "explicit module checker requirement forwarding mismatch"
+  echo "$check_line"
+  exit 1
+fi
+if [[ "$check_line" == *"--require-module-tx-surface-ok 0"* ]]; then
+  echo "explicit module checker requirement was overridden by dry-run relax logic"
+  echo "$check_line"
+  exit 1
+fi
+
+if [[ ! -f "$DRY_RUN_EXPLICIT_RUN_SUMMARY" ]]; then
+  echo "missing explicit dry-run combined summary JSON: $DRY_RUN_EXPLICIT_RUN_SUMMARY"
+  cat "$DRY_RUN_EXPLICIT_LOG"
+  exit 1
+fi
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.dry_run == true
+  and .steps.ci_phase6_cosmos_l1_build_testnet.contract_valid == true
+  and .steps.phase6_cosmos_l1_build_testnet_check.contract_valid == true
+' "$DRY_RUN_EXPLICIT_RUN_SUMMARY" >/dev/null; then
+  echo "explicit dry-run combined summary contract mismatch"
+  cat "$DRY_RUN_EXPLICIT_RUN_SUMMARY"
+  exit 1
+fi
+assert_canonical_summary_artifact "$DRY_RUN_EXPLICIT_RUN_SUMMARY" "$DRY_RUN_EXPLICIT_CANONICAL_SUMMARY" "$DRY_RUN_EXPLICIT_LOG"
 
 echo "[phase6-cosmos-l1-run] ci-failure propagation"
 : >"$CAPTURE"

@@ -13,6 +13,7 @@ Usage:
     [--require-proto-surface-ok [0|1]] \
     [--require-proto-codegen-surface-ok [0|1]] \
     [--require-query-surface-ok [0|1]] \
+    [--require-module-tx-surface-ok [0|1]] \
     [--require-grpc-app-roundtrip-ok [0|1]] \
     [--require-tdpnd-grpc-runtime-smoke-ok [0|1]] \
     [--require-tdpnd-grpc-live-smoke-ok [0|1]] \
@@ -27,6 +28,7 @@ Purpose:
     - proto_surface_ok
     - proto_codegen_surface_ok
     - query_surface_ok
+    - module_tx_surface_ok
     - grpc_app_roundtrip_ok
     - tdpnd_grpc_runtime_smoke_ok
     - tdpnd_grpc_live_smoke_ok
@@ -168,6 +170,7 @@ require_chain_scaffold_ok="${PHASE6_COSMOS_L1_BUILD_TESTNET_CHECK_REQUIRE_CHAIN_
 require_proto_surface_ok="${PHASE6_COSMOS_L1_BUILD_TESTNET_CHECK_REQUIRE_PROTO_SURFACE_OK:-1}"
 require_proto_codegen_surface_ok="${PHASE6_COSMOS_L1_BUILD_TESTNET_CHECK_REQUIRE_PROTO_CODEGEN_SURFACE_OK:-1}"
 require_query_surface_ok="${PHASE6_COSMOS_L1_BUILD_TESTNET_CHECK_REQUIRE_QUERY_SURFACE_OK:-1}"
+require_module_tx_surface_ok="${PHASE6_COSMOS_L1_BUILD_TESTNET_CHECK_REQUIRE_MODULE_TX_SURFACE_OK:-1}"
 require_grpc_app_roundtrip_ok="${PHASE6_COSMOS_L1_BUILD_TESTNET_CHECK_REQUIRE_GRPC_APP_ROUNDTRIP_OK:-1}"
 require_tdpnd_grpc_runtime_smoke_ok="${PHASE6_COSMOS_L1_BUILD_TESTNET_CHECK_REQUIRE_TDPND_GRPC_RUNTIME_SMOKE_OK:-${PHASE6_COSMOS_L1_BUILD_TESTNET_CHECK_REQUIRE_TDPND_RUNTIME_SMOKE_OK:-1}}"
 require_tdpnd_grpc_live_smoke_ok="${PHASE6_COSMOS_L1_BUILD_TESTNET_CHECK_REQUIRE_TDPND_GRPC_LIVE_SMOKE_OK:-${PHASE6_COSMOS_L1_BUILD_TESTNET_CHECK_REQUIRE_TDPND_LIVE_SMOKE_OK:-1}}"
@@ -212,6 +215,15 @@ while [[ $# -gt 0 ]]; do
         shift 2
       else
         require_query_surface_ok="1"
+        shift
+      fi
+      ;;
+    --require-module-tx-surface-ok)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_module_tx_surface_ok="${2:-}"
+        shift 2
+      else
+        require_module_tx_surface_ok="1"
         shift
       fi
       ;;
@@ -280,6 +292,7 @@ bool_arg_or_die "--require-chain-scaffold-ok" "$require_chain_scaffold_ok"
 bool_arg_or_die "--require-proto-surface-ok" "$require_proto_surface_ok"
 bool_arg_or_die "--require-proto-codegen-surface-ok" "$require_proto_codegen_surface_ok"
 bool_arg_or_die "--require-query-surface-ok" "$require_query_surface_ok"
+bool_arg_or_die "--require-module-tx-surface-ok" "$require_module_tx_surface_ok"
 bool_arg_or_die "--require-grpc-app-roundtrip-ok" "$require_grpc_app_roundtrip_ok"
 bool_arg_or_die "--require-tdpnd-grpc-runtime-smoke-ok" "$require_tdpnd_grpc_runtime_smoke_ok"
 bool_arg_or_die "--require-tdpnd-grpc-live-smoke-ok" "$require_tdpnd_grpc_live_smoke_ok"
@@ -297,6 +310,7 @@ stage_ids=(
   "proto_surface"
   "proto_codegen_surface"
   "query_surface"
+  "module_tx_surface"
   "grpc_app_roundtrip"
   "tdpnd_grpc_runtime_smoke"
   "tdpnd_grpc_live_smoke"
@@ -308,6 +322,7 @@ declare -A stage_require=(
   ["proto_surface"]="$require_proto_surface_ok"
   ["proto_codegen_surface"]="$require_proto_codegen_surface_ok"
   ["query_surface"]="$require_query_surface_ok"
+  ["module_tx_surface"]="$require_module_tx_surface_ok"
   ["grpc_app_roundtrip"]="$require_grpc_app_roundtrip_ok"
   ["tdpnd_grpc_runtime_smoke"]="$require_tdpnd_grpc_runtime_smoke_ok"
   ["tdpnd_grpc_live_smoke"]="$require_tdpnd_grpc_live_smoke_ok"

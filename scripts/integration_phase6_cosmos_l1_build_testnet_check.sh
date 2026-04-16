@@ -50,6 +50,7 @@ cat >"$PASS_SUMMARY" <<'EOF_PASS'
     "proto_surface": { "status": "pass" },
     "proto_codegen_surface": { "status": "pass" },
     "query_surface": { "status": "pass" },
+    "module_tx_surface": { "status": "pass" },
     "grpc_app_roundtrip": { "status": "pass" },
     "tdpnd_grpc_runtime_smoke": { "status": "pass" },
     "tdpnd_grpc_live_smoke": { "status": "pass" },
@@ -73,10 +74,11 @@ cat >"$FAIL_SUMMARY" <<'EOF_FAIL'
     "proto_surface": { "status": "pass" },
     "proto_codegen_surface": { "status": "pass" },
     "query_surface": { "status": "pass" },
+    "module_tx_surface": { "status": "fail" },
     "grpc_app_roundtrip": { "status": "pass" },
     "tdpnd_grpc_runtime_smoke": { "status": "pass" },
     "tdpnd_grpc_live_smoke": { "status": "pass" },
-    "tdpnd_grpc_auth_live_smoke": { "status": "fail" }
+    "tdpnd_grpc_auth_live_smoke": { "status": "pass" }
   }
 }
 EOF_FAIL
@@ -96,10 +98,11 @@ cat >"$RELAXED_SUMMARY" <<'EOF_RELAXED'
     "proto_surface": { "status": "pass" },
     "proto_codegen_surface": { "status": "pass" },
     "query_surface": { "status": "pass" },
+    "module_tx_surface": { "status": "fail" },
     "grpc_app_roundtrip": { "status": "pass" },
     "tdpnd_grpc_runtime_smoke": { "status": "pass" },
     "tdpnd_grpc_live_smoke": { "status": "pass" },
-    "tdpnd_grpc_auth_live_smoke": { "status": "fail" }
+    "tdpnd_grpc_auth_live_smoke": { "status": "pass" }
   }
 }
 EOF_RELAXED
@@ -127,6 +130,7 @@ if ! jq -e '
   and .policy.require_proto_surface_ok == true
   and .policy.require_proto_codegen_surface_ok == true
   and .policy.require_query_surface_ok == true
+  and .policy.require_module_tx_surface_ok == true
   and .policy.require_grpc_app_roundtrip_ok == true
   and .policy.require_tdpnd_grpc_runtime_smoke_ok == true
   and .policy.require_tdpnd_grpc_live_smoke_ok == true
@@ -135,6 +139,7 @@ if ! jq -e '
   and .signals.proto_surface_ok == true
   and .signals.proto_codegen_surface_ok == true
   and .signals.query_surface_ok == true
+  and .signals.module_tx_surface_ok == true
   and .signals.grpc_app_roundtrip_ok == true
   and .signals.tdpnd_grpc_runtime_smoke_ok == true
   and .signals.tdpnd_grpc_live_smoke_ok == true
@@ -175,9 +180,9 @@ if ! jq -e '
   .status == "fail"
   and .rc == 1
   and .artifacts.canonical_summary_json == $expected_canonical
-  and .signals.tdpnd_grpc_auth_live_smoke_ok == false
-  and .stages.tdpnd_grpc_auth_live_smoke.status == "fail"
-  and ((.decision.reasons // []) | any(test("tdpnd_grpc_auth_live_smoke_ok is false")))
+  and .signals.module_tx_surface_ok == false
+  and .stages.module_tx_surface.status == "fail"
+  and ((.decision.reasons // []) | any(test("module_tx_surface_ok is false")))
 ' --arg expected_canonical "$FAIL_CANONICAL" "$FAIL_OUTPUT" >/dev/null; then
   echo "fail-path summary contract mismatch"
   cat "$FAIL_OUTPUT"
@@ -196,7 +201,7 @@ PHASE6_COSMOS_L1_BUILD_TESTNET_CHECK_CANONICAL_SUMMARY_JSON="$RELAXED_CANONICAL"
 "$SCRIPT_UNDER_TEST" \
   --ci-phase6-summary-json "$RELAXED_SUMMARY" \
   --summary-json "$RELAXED_OUTPUT" \
-  --require-tdpnd-grpc-auth-live-smoke-ok 0 \
+  --require-module-tx-surface-ok 0 \
   --show-json 0 >"$RELAXED_LOG" 2>&1
 
 if [[ ! -f "$RELAXED_CANONICAL" ]]; then
@@ -208,9 +213,9 @@ if ! jq -e '
   .status == "pass"
   and .rc == 0
   and .artifacts.canonical_summary_json == $expected_canonical
-  and .policy.require_tdpnd_grpc_auth_live_smoke_ok == false
-  and .signals.tdpnd_grpc_auth_live_smoke_ok == false
-  and .stages.tdpnd_grpc_auth_live_smoke.status == "fail"
+  and .policy.require_module_tx_surface_ok == false
+  and .signals.module_tx_surface_ok == false
+  and .stages.module_tx_surface.status == "fail"
 ' --arg expected_canonical "$RELAXED_CANONICAL" "$RELAXED_OUTPUT" >/dev/null; then
   echo "relaxed-toggle summary contract mismatch"
   cat "$RELAXED_OUTPUT"

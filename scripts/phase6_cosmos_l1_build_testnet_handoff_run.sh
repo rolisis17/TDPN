@@ -448,6 +448,9 @@ if [[ "$dry_run" == "1" ]]; then
   if ! array_has_arg "--require-query-surface-ok" "${handoff_cmd[@]:1}"; then
     handoff_cmd+=(--require-query-surface-ok 0)
   fi
+  if ! array_has_arg "--require-module-tx-surface-ok" "${handoff_cmd[@]:1}"; then
+    handoff_cmd+=(--require-module-tx-surface-ok 0)
+  fi
   if ! array_has_arg "--require-grpc-app-roundtrip-ok" "${handoff_cmd[@]:1}"; then
     handoff_cmd+=(--require-grpc-app-roundtrip-ok 0)
   fi

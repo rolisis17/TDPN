@@ -342,6 +342,9 @@ if [[ "$dry_run" == "1" ]]; then
   if ! array_has_arg "--require-query-surface-ok" "${check_command_args[@]:1}"; then
     check_command_args+=(--require-query-surface-ok 0)
   fi
+  if ! array_has_arg "--require-module-tx-surface-ok" "${check_command_args[@]:1}"; then
+    check_command_args+=(--require-module-tx-surface-ok 0)
+  fi
   if ! array_has_arg "--require-grpc-app-roundtrip-ok" "${check_command_args[@]:1}"; then
     check_command_args+=(--require-grpc-app-roundtrip-ok 0)
   fi

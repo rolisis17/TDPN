@@ -388,9 +388,14 @@ if ! rg -Fq "tdpnd_grpc_auth_live_smoke_ok" "$full_plan"; then
   echo "full execution plan must document phase6 readiness/handoff tdpnd_grpc_auth_live_smoke_ok signal"
   exit 1
 fi
+if ! rg -Fq "module_tx_surface_ok" "$full_plan"; then
+  echo "full execution plan must document phase6 readiness/handoff module_tx_surface_ok signal"
+  exit 1
+fi
 if ! rg -Fq "run/handoff-run dry-run relaxation" "$full_plan" \
+  || ! rg -Fq "module_tx_surface_ok" "$full_plan" \
   || ! rg -Fq "tdpnd_grpc_auth_live_smoke_ok" "$full_plan"; then
-  echo "full execution plan must document phase6 run/handoff-run dry-run auth-live relaxation posture"
+  echo "full execution plan must document phase6 run/handoff-run dry-run module-tx/auth-live relaxation posture"
   exit 1
 fi
 if ! rg -qi "confirmation lifecycle" "$full_plan"; then
@@ -559,9 +564,14 @@ if ! rg -Fq "tdpnd_grpc_auth_live_smoke_ok" "$product_roadmap"; then
   echo "product roadmap must document phase6 readiness/handoff tdpnd_grpc_auth_live_smoke_ok signal"
   exit 1
 fi
+if ! rg -Fq "module_tx_surface_ok" "$product_roadmap"; then
+  echo "product roadmap must document phase6 readiness/handoff module_tx_surface_ok signal"
+  exit 1
+fi
 if ! rg -Fq "run/handoff-run dry-run relaxation" "$product_roadmap" \
+  || ! rg -Fq "module_tx_surface_ok" "$product_roadmap" \
   || ! rg -Fq "tdpnd_grpc_auth_live_smoke_ok" "$product_roadmap"; then
-  echo "product roadmap must document phase6 run/handoff-run dry-run auth-live relaxation posture"
+  echo "product roadmap must document phase6 run/handoff-run dry-run module-tx/auth-live relaxation posture"
   exit 1
 fi
 
@@ -1025,6 +1035,10 @@ if ! rg -Fq "require-tdpnd-grpc-auth-live-smoke-ok" "$phase6_run_script"; then
   echo "phase6 run wrapper must forward/handle tdpnd_grpc_auth_live_smoke requirement"
   exit 1
 fi
+if ! rg -Fq "require-module-tx-surface-ok" "$phase6_run_script"; then
+  echo "phase6 run wrapper must forward/handle module_tx_surface requirement"
+  exit 1
+fi
 if ! rg -Fq "PHASE6_COSMOS_L1_BUILD_TESTNET_RUN_CANONICAL_SUMMARY_JSON" "$phase6_run_script"; then
   echo "phase6 run wrapper must expose canonical summary artifact override env"
   exit 1
@@ -1039,6 +1053,10 @@ if ! rg -Fq "phase6_cosmos_l1_build_testnet_check_summary" "$phase6_check_script
 fi
 if ! rg -Fq "tdpnd_grpc_auth_live_smoke" "$phase6_check_script"; then
   echo "phase6 check wrapper must include tdpnd_grpc_auth_live_smoke readiness signal"
+  exit 1
+fi
+if ! rg -Fq "module_tx_surface" "$phase6_check_script"; then
+  echo "phase6 check wrapper must include module_tx_surface readiness signal"
   exit 1
 fi
 if ! rg -Fq "PHASE6_COSMOS_L1_BUILD_TESTNET_CHECK_CANONICAL_SUMMARY_JSON" "$phase6_check_script"; then
@@ -1089,6 +1107,10 @@ if ! rg -Fq "require-tdpnd-grpc-auth-live-smoke-ok" "$phase6_handoff_run_script"
   echo "phase6 handoff-run wrapper must forward/handle tdpnd_grpc_auth_live_smoke requirement"
   exit 1
 fi
+if ! rg -Fq "require-module-tx-surface-ok" "$phase6_handoff_run_script"; then
+  echo "phase6 handoff-run wrapper must forward/handle module_tx_surface requirement"
+  exit 1
+fi
 if ! rg -Fq "PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_RUN_CANONICAL_SUMMARY_JSON" "$phase6_handoff_run_script"; then
   echo "phase6 handoff-run wrapper must expose canonical summary artifact override env"
   exit 1
@@ -1103,6 +1125,10 @@ if ! rg -Fq "phase6_cosmos_l1_build_testnet_handoff_check_summary" "$phase6_hand
 fi
 if ! rg -Fq "tdpnd_grpc_auth_live_smoke" "$phase6_handoff_check_script"; then
   echo "phase6 handoff-check wrapper must include tdpnd_grpc_auth_live_smoke readiness signal"
+  exit 1
+fi
+if ! rg -Fq "module_tx_surface" "$phase6_handoff_check_script"; then
+  echo "phase6 handoff-check wrapper must include module_tx_surface readiness signal"
   exit 1
 fi
 if ! rg -Fq "PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_CHECK_CANONICAL_SUMMARY_JSON" "$phase6_handoff_check_script"; then
@@ -1126,6 +1152,11 @@ if ! rg -Fq "require-tdpnd-grpc-auth-live-smoke-ok" "$phase6_run_integration_scr
   echo "phase6 run integration must validate tdpnd_grpc_auth_live_smoke requirement forwarding/handling"
   exit 1
 fi
+if ! rg -Fq "require-module-tx-surface-ok" "$phase6_run_integration_script" \
+  && ! rg -Fq "module_tx_surface" "$phase6_run_integration_script"; then
+  echo "phase6 run integration must validate module_tx_surface requirement forwarding/handling"
+  exit 1
+fi
 if ! rg -Fq "canonical_summary_json" "$phase6_run_integration_script"; then
   echo "phase6 run integration must validate canonical summary artifact wiring"
   exit 1
@@ -1140,6 +1171,10 @@ if ! rg -Fq "fail-closed path" "$phase6_check_integration_script"; then
 fi
 if ! rg -Fq "tdpnd_grpc_auth_live_smoke" "$phase6_check_integration_script"; then
   echo "phase6 check integration must validate tdpnd_grpc_auth_live_smoke readiness signal"
+  exit 1
+fi
+if ! rg -Fq "module_tx_surface" "$phase6_check_integration_script"; then
+  echo "phase6 check integration must validate module_tx_surface readiness signal"
   exit 1
 fi
 if ! rg -Fq "canonical_summary_json" "$phase6_check_integration_script"; then
@@ -1175,6 +1210,11 @@ if ! rg -Fq "require-tdpnd-grpc-auth-live-smoke-ok" "$phase6_handoff_run_integra
   echo "phase6 handoff-run integration must validate tdpnd_grpc_auth_live_smoke requirement forwarding/handling"
   exit 1
 fi
+if ! rg -Fq "require-module-tx-surface-ok" "$phase6_handoff_run_integration_script" \
+  && ! rg -Fq "module_tx_surface" "$phase6_handoff_run_integration_script"; then
+  echo "phase6 handoff-run integration must validate module_tx_surface requirement forwarding/handling"
+  exit 1
+fi
 if ! rg -Fq "canonical_summary_json" "$phase6_handoff_run_integration_script"; then
   echo "phase6 handoff-run integration must validate canonical summary artifact wiring"
   exit 1
@@ -1189,6 +1229,10 @@ if ! rg -Fq "fail-closed path" "$phase6_handoff_check_integration_script"; then
 fi
 if ! rg -Fq "tdpnd_grpc_auth_live_smoke" "$phase6_handoff_check_integration_script"; then
   echo "phase6 handoff-check integration must validate tdpnd_grpc_auth_live_smoke readiness signal"
+  exit 1
+fi
+if ! rg -Fq "module_tx_surface" "$phase6_handoff_check_integration_script"; then
+  echo "phase6 handoff-check integration must validate module_tx_surface readiness signal"
   exit 1
 fi
 if ! rg -Fq "canonical_summary_json" "$phase6_handoff_check_integration_script"; then
