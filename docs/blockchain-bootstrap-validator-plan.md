@@ -155,6 +155,27 @@ Decision policy:
 - All gates met => GO for production activation.
 - If GO is achieved, run a separate security and readiness review before broad validator expansion.
 
+Automation:
+
+- `scripts/blockchain_mainnet_activation_gate.sh` evaluates the metrics gate from a bootstrap metrics JSON file and emits one summary JSON with the final GO/NO-GO decision.
+- `scripts/integration_blockchain_mainnet_activation_gate.sh` covers the GO path, NO-GO path, missing/invalid input handling, and fail-close behavior.
+- Canonical metrics fields consumed by the helper:
+  - `measurement_window_weeks`
+  - `vpn_connect_session_success_slo_pct`
+  - `vpn_recovery_mttr_p95_minutes`
+  - `paying_users_3mo_min`
+  - `paid_sessions_per_day_30d_avg`
+  - `validator_candidate_depth`
+  - `validator_independent_operators`
+  - `validator_max_operator_seat_share_pct`
+  - `validator_max_asn_provider_seat_share_pct`
+  - `validator_region_count`
+  - `validator_country_count`
+  - `manual_sanctions_reversed_pct_90d`
+  - `abuse_report_to_decision_p95_hours`
+  - `subsidy_runway_months`
+  - `contribution_margin_3mo`
+
 Evidence artifacts to use for this gate:
 
 - `prod-pilot-cohort` summaries/trend/alert artifacts.

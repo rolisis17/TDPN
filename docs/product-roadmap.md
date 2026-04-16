@@ -9,8 +9,8 @@ Canonical source of truth for cross-track sequencing:
 ## Decision Log (March 17, 2026)
 
 We agreed to simplify the operator and user experience while keeping strong test coverage:
-- move from "many user-facing flags" to a profile-first interface (`Speed`, `Balanced`, `Private`)
-- keep advanced flags available behind an explicit expert/diagnostics path, not in the default flow
+- move from "many user-facing flags" to a minimal profile-first simple mode (`Speed`, `Balanced`, `Private`)
+- keep advanced flags available behind an explicit expert/diagnostics path, not in the default simple flow
 - keep `Balanced` as default for public guidance
 - keep 2-hop as the default architecture for privacy baseline
 - add a latency-tuned `Speed` profile first on top of the current 2-hop path
@@ -19,7 +19,7 @@ We agreed to simplify the operator and user experience while keeping strong test
 
 Next 5 roadmap execution steps:
 1. Freeze a minimal public CLI/UI contract around profiles.
-2. Route advanced policy switches into internal defaults and expert mode.
+2. Route advanced policy switches into internal defaults and expert-only help, not the simple path.
 3. Ship and benchmark `Speed` (2-hop latency-tuned).
 4. Implement experimental `speed-1hop` with clear safety/privacy labeling.
 5. Run comparative pilot metrics and decide default behavior from results.
@@ -97,7 +97,7 @@ Status update (March 24, 2026):
 Strictly necessary vs optional (current project posture):
 - strictly necessary for daily operation: start server, connect client, preflight checks, status/down, invite generation on authority, and one repeatable automated signoff path
 - optional/expert (keep but do not make default): deep chaos/fault matrices, policy override flags, manual artifact-level campaign checks, and one-off diagnostics toggles
-- policy for UI and scripts: if a setting is rarely changed in healthy operation, it should be auto-defaulted and moved behind expert/custom mode
+- policy for UI and scripts: if a setting is rarely changed in healthy operation, it should be auto-defaulted, kept out of simple mode, and labeled as expert/custom
 
 ## Phase 1: Stable Linux Beta (Current Priority)
 
@@ -233,11 +233,13 @@ Current implementation posture:
 - phase7 mainnet cutover CI wrapper is `scripts/ci_phase7_mainnet_cutover.sh`, with contract coverage in `scripts/integration_ci_phase7_mainnet_cutover.sh` for fail-closed stage ordering across check/run/handoff-check/handoff-run and first-failure RC propagation.
 - phase7 operator summary helper is `scripts/phase7_mainnet_cutover_summary_report.sh`, with integration coverage in `scripts/integration_phase7_mainnet_cutover_summary_report.sh`, and it aggregates check/run/handoff-check/handoff-run artifacts.
 - phase7 operator summary helper preserves optional `tdpnd_comet_runtime_smoke_ok` in the run signal snapshot, so Comet-mode validation can be surfaced when available without making it a hard requirement.
+- `scripts/roadmap_progress_report.sh` accepts optional `--blockchain-mainnet-activation-gate-summary-json` and surfaces `blockchain_track.mainnet_activation_gate` with available/status/decision/go/no_go/reasons/source_paths, staying fail-soft when the summary is missing or invalid.
 - phase7 cutover wrappers emit canonical summary artifacts consumed by the summary helper, including `phase7_mainnet_cutover_check_summary.json`, `phase7_mainnet_cutover_run_summary.json`, `phase7_mainnet_cutover_handoff_check_summary.json`, and `phase7_mainnet_cutover_handoff_run_summary.json`.
 - phase7 cutover CI/check/run/handoff-check/handoff-run wrappers feed canonical `.easy-node-logs` summary artifacts consumed by `scripts/phase7_mainnet_cutover_summary_report.sh`.
 - phase7 mainnet cutover safety posture requires phase6 readiness signals, dual-write parity confirmation, rollback path readiness, and an optional operator approval gate before promotion.
 - phase7 handoff wrappers stay fail-closed for cutover readiness and keep optional operator approval semantics unchanged.
 - phase7 cutover keeps VPN dataplane independent from chain liveness; chain-side write degradation remains deferred/reconciled and must not block forwarding.
+- Mainnet activation gate reporting stays aligned with the `Mainnet Activation Go/No-Go Metrics Gate` in `docs/blockchain-bootstrap-validator-plan.md`: the canonical validator-policy summary can be ingested through `scripts/roadmap_progress_report.sh`, and the default production decision remains NO-GO until the full gate window is met.
 - settlement bridge live process smoke now validates auth enforcement, write acceptance, and billing/rewards/sponsor/slashing/validator/governance GET by-id plus list query behavior in auth-enabled runtime mode.
 - easy-node exposes blockchain summary wrappers:
   - `./scripts/easy_node.sh phase5-settlement-layer-summary-report`

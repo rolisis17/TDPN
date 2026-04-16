@@ -25,6 +25,7 @@ Usage:
     [--phase5-settlement-layer-summary-json PATH] \
     [--phase6-cosmos-l1-summary-json PATH] \
     [--phase7-mainnet-cutover-summary-json PATH] \
+    [--blockchain-mainnet-activation-gate-summary-json PATH] \
     [--summary-json PATH] \
     [--report-md PATH] \
     [--print-report [0|1]] \
@@ -1597,6 +1598,119 @@ phase7_mainnet_cutover_bool_value_or_null() {
   esac
 }
 
+blockchain_mainnet_activation_gate_summary_kind_from_source() {
+  local path="$1"
+  local schema_id=""
+  local file_name=""
+  if [[ -f "$path" ]]; then
+    schema_id="$(jq -r '.schema.id // ""' "$path" 2>/dev/null || true)"
+  fi
+  case "$schema_id" in
+    blockchain_mainnet_activation_gate_summary) printf '%s' "mainnet-activation-gate-summary"; return ;;
+    mainnet_activation_gate_summary) printf '%s' "mainnet-activation-gate-summary"; return ;;
+    mainnet_activation_gate_gate_summary) printf '%s' "mainnet-activation-gate-summary"; return ;;
+  esac
+  file_name="$(basename "$path")"
+  case "$file_name" in
+    blockchain_mainnet_activation_gate_summary.json) printf '%s' "mainnet-activation-gate-summary" ;;
+    mainnet_activation_gate_summary.json) printf '%s' "mainnet-activation-gate-summary" ;;
+    *activation*gate*summary*.json) printf '%s' "mainnet-activation-gate-summary" ;;
+    *) printf '%s' "unknown" ;;
+  esac
+}
+
+blockchain_mainnet_activation_gate_summary_normalize_json() {
+  local path="$1"
+  if [[ ! -f "$path" ]]; then
+    jq -n '{
+      available: false,
+      status: "missing",
+      decision: null,
+      go: null,
+      no_go: null,
+      reasons: [],
+      source_paths: []
+    }'
+    return
+  fi
+  if [[ "$(json_file_valid_01 "$path")" != "1" ]]; then
+    jq -n '{
+      available: false,
+      status: "invalid",
+      decision: null,
+      go: null,
+      no_go: null,
+      reasons: [],
+      source_paths: []
+    }'
+    return
+  fi
+  jq -c '
+    def string_array_from($items):
+      [$items[]?]
+      | map(if type == "array" then .[] else . end)
+      | map(select(type == "string" and . != ""))
+      | unique;
+    def decision_from_string($value):
+      ($value | ascii_downcase) as $s
+      | if $s == "go" or $s == "pass" or $s == "yes" or $s == "allow" or $s == "approved" or $s == "ready" then "GO"
+        elif $s == "no-go" or $s == "nogo" or $s == "fail" or $s == "block" or $s == "blocked" or $s == "reject" then "NO-GO"
+        else null end;
+    def decision_text:
+      if (.decision | type) == "object" then
+        if (.decision.go | type) == "boolean" then (if .decision.go then "GO" else "NO-GO" end)
+        elif (.decision.pass | type) == "boolean" then (if .decision.pass then "GO" else "NO-GO" end)
+        elif (.decision.no_go | type) == "boolean" then (if .decision.no_go then "NO-GO" else "GO" end)
+        else decision_from_string(.decision.decision // .decision.outcome // .decision.value // .decision.status // empty) end
+      elif (.decision | type) == "string" then decision_from_string(.decision)
+      elif (.decision | type) == "boolean" then (if .decision then "GO" else "NO-GO" end)
+      elif (.status | type) == "string" then decision_from_string(.status)
+      else null end;
+    def go_bool:
+      if (.decision | type) == "object" then
+        if (.decision.go | type) == "boolean" then .decision.go
+        elif (.decision.pass | type) == "boolean" then .decision.pass
+        elif (.decision.no_go | type) == "boolean" then (if .decision.no_go then false else true end)
+        else (decision_text | if . == "GO" then true elif . == "NO-GO" then false else null end) end
+      elif (.go | type) == "boolean" then .go
+      elif (.no_go | type) == "boolean" then (if .no_go then false else true end)
+      elif (.decision | type) == "boolean" then .decision
+      else (decision_text | if . == "GO" then true elif . == "NO-GO" then false else null end) end;
+    def no_go_bool:
+      if (.decision | type) == "object" then
+        if (.decision.no_go | type) == "boolean" then .decision.no_go
+        elif (.decision.go | type) == "boolean" then (if .decision.go then false else true end)
+        elif (.decision.pass | type) == "boolean" then (if .decision.pass then false else true end)
+        else (go_bool | if . == null then null else (not) end) end
+      elif (.no_go | type) == "boolean" then .no_go
+      elif (.go | type) == "boolean" then (if .go then false else true end)
+      else (go_bool | if . == null then null else (not) end) end;
+    {
+      available: true,
+      status: (if (.status | type) == "string" and .status != "" then .status else "unknown" end),
+      decision: decision_text,
+      go: go_bool,
+      no_go: no_go_bool,
+      reasons: string_array_from([
+        (if (.decision | type) == "object" then (.decision.reasons // []) else [] end),
+        (.reasons // []),
+        (if (.decision | type) == "object" then (.decision.reason // []) else [] end),
+        (.go_reasons // []),
+        (.no_go_reasons // []),
+        (if (.decision | type) == "object" then (.decision.notes // []) else [] end)
+      ]),
+      source_paths: string_array_from([
+        (.source_paths // []),
+        (.evidence_paths // []),
+        (if (.artifacts | type) == "object" then (.artifacts.source_paths // []) else [] end),
+        (if (.artifacts | type) == "object" then (.artifacts.evidence_paths // []) else [] end),
+        (if (.decision | type) == "object" then (.decision.source_paths // []) else [] end),
+        (if (.decision | type) == "object" then (.decision.evidence_paths // []) else [] end)
+      ])
+    }
+  ' "$path"
+}
+
 phase6_cosmos_l1_linked_summary_candidates() {
   local source_path="$1"
   local emitted=""
@@ -1926,6 +2040,8 @@ phase5_settlement_layer_summary_json="${ROADMAP_PROGRESS_PHASE5_SETTLEMENT_LAYER
 phase6_cosmos_l1_summary_json="${ROADMAP_PROGRESS_PHASE6_COSMOS_L1_SUMMARY_JSON:-}"
 phase7_mainnet_cutover_summary_json="${ROADMAP_PROGRESS_PHASE7_MAINNET_CUTOVER_SUMMARY_JSON:-$ROOT_DIR/.easy-node-logs/phase7_mainnet_cutover_summary_report.json}"
 phase7_mainnet_cutover_summary_json="$(abs_path "$phase7_mainnet_cutover_summary_json")"
+blockchain_mainnet_activation_gate_summary_json="${ROADMAP_PROGRESS_BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SUMMARY_JSON:-}"
+blockchain_mainnet_activation_gate_summary_json="$(abs_path "$blockchain_mainnet_activation_gate_summary_json")"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -2004,14 +2120,18 @@ while [[ $# -gt 0 ]]; do
       phase6_cosmos_l1_summary_json="$(abs_path "${2:-}")"
       shift 2
       ;;
-    --phase7-mainnet-cutover-summary-json)
-      phase7_mainnet_cutover_summary_json="$(abs_path "${2:-}")"
-      shift 2
-      ;;
-    --summary-json)
-      summary_json="$(abs_path "${2:-}")"
-      shift 2
-      ;;
+      --phase7-mainnet-cutover-summary-json)
+        phase7_mainnet_cutover_summary_json="$(abs_path "${2:-}")"
+        shift 2
+        ;;
+      --blockchain-mainnet-activation-gate-summary-json)
+        blockchain_mainnet_activation_gate_summary_json="$(abs_path "${2:-}")"
+        shift 2
+        ;;
+      --summary-json)
+        summary_json="$(abs_path "${2:-}")"
+        shift 2
+        ;;
     --report-md)
       report_md="$(abs_path "${2:-}")"
       shift 2
@@ -3538,6 +3658,36 @@ if [[ -n "$phase7_mainnet_cutover_summary_json" ]]; then
   fi
 fi
 
+blockchain_mainnet_activation_gate_available_json="false"
+blockchain_mainnet_activation_gate_input_summary_json=""
+blockchain_mainnet_activation_gate_source_summary_json=""
+blockchain_mainnet_activation_gate_source_summary_kind=""
+blockchain_mainnet_activation_gate_status_json="missing"
+blockchain_mainnet_activation_gate_decision_json=""
+blockchain_mainnet_activation_gate_go_json="null"
+blockchain_mainnet_activation_gate_no_go_json="null"
+blockchain_mainnet_activation_gate_reasons_json="[]"
+blockchain_mainnet_activation_gate_source_paths_json="[]"
+if [[ -n "$blockchain_mainnet_activation_gate_summary_json" ]]; then
+  blockchain_mainnet_activation_gate_input_summary_json="$blockchain_mainnet_activation_gate_summary_json"
+  if [[ -f "$blockchain_mainnet_activation_gate_summary_json" ]]; then
+    if [[ "$(json_file_valid_01 "$blockchain_mainnet_activation_gate_summary_json")" == "1" ]]; then
+      blockchain_mainnet_activation_gate_source_summary_json="$(abs_path "$blockchain_mainnet_activation_gate_summary_json")"
+      blockchain_mainnet_activation_gate_source_summary_kind="$(blockchain_mainnet_activation_gate_summary_kind_from_source "$blockchain_mainnet_activation_gate_summary_json")"
+      blockchain_mainnet_activation_gate_summary_payload_json="$(blockchain_mainnet_activation_gate_summary_normalize_json "$blockchain_mainnet_activation_gate_summary_json")"
+      blockchain_mainnet_activation_gate_available_json="$(jq -r '.available // false' <<<"$blockchain_mainnet_activation_gate_summary_payload_json" 2>/dev/null || echo false)"
+      blockchain_mainnet_activation_gate_status_json="$(jq -r '.status // "unknown"' <<<"$blockchain_mainnet_activation_gate_summary_payload_json" 2>/dev/null || echo "unknown")"
+      blockchain_mainnet_activation_gate_decision_json="$(jq -r '.decision // empty' <<<"$blockchain_mainnet_activation_gate_summary_payload_json" 2>/dev/null || true)"
+      blockchain_mainnet_activation_gate_go_json="$(jq -r 'if .go == null then "null" else (.go | tostring) end' <<<"$blockchain_mainnet_activation_gate_summary_payload_json" 2>/dev/null || echo "null")"
+      blockchain_mainnet_activation_gate_no_go_json="$(jq -r 'if .no_go == null then "null" else (.no_go | tostring) end' <<<"$blockchain_mainnet_activation_gate_summary_payload_json" 2>/dev/null || echo "null")"
+      blockchain_mainnet_activation_gate_reasons_json="$(jq -c '.reasons // []' <<<"$blockchain_mainnet_activation_gate_summary_payload_json" 2>/dev/null || echo '[]')"
+      blockchain_mainnet_activation_gate_source_paths_json="$(jq -c '.source_paths // []' <<<"$blockchain_mainnet_activation_gate_summary_payload_json" 2>/dev/null || echo '[]')"
+    else
+      blockchain_mainnet_activation_gate_status_json="invalid"
+    fi
+  fi
+fi
+
 readiness_status="$(jq -r '.report.readiness_status // "UNKNOWN"' "$manual_validation_summary_json")"
 roadmap_stage="$(jq -r '.summary.roadmap_stage // "UNKNOWN"' "$manual_validation_summary_json")"
 single_machine_ready_json="$(jq -r '.summary.single_machine_ready // false' "$manual_validation_summary_json")"
@@ -4079,6 +4229,16 @@ summary_payload="$(jq -n \
   --argjson phase7_mainnet_cutover_summary_run_ok "$phase7_mainnet_cutover_summary_run_ok_json" \
   --argjson phase7_mainnet_cutover_summary_handoff_check_ok "$phase7_mainnet_cutover_summary_handoff_check_ok_json" \
   --argjson phase7_mainnet_cutover_summary_handoff_run_ok "$phase7_mainnet_cutover_summary_handoff_run_ok_json" \
+  --argjson blockchain_mainnet_activation_gate_available "$blockchain_mainnet_activation_gate_available_json" \
+  --arg blockchain_mainnet_activation_gate_input_summary_json "$blockchain_mainnet_activation_gate_input_summary_json" \
+  --arg blockchain_mainnet_activation_gate_source_summary_json "$blockchain_mainnet_activation_gate_source_summary_json" \
+  --arg blockchain_mainnet_activation_gate_source_summary_kind "$blockchain_mainnet_activation_gate_source_summary_kind" \
+  --arg blockchain_mainnet_activation_gate_status "$blockchain_mainnet_activation_gate_status_json" \
+  --arg blockchain_mainnet_activation_gate_decision_json "$blockchain_mainnet_activation_gate_decision_json" \
+  --argjson blockchain_mainnet_activation_gate_go "$blockchain_mainnet_activation_gate_go_json" \
+  --argjson blockchain_mainnet_activation_gate_no_go "$blockchain_mainnet_activation_gate_no_go_json" \
+  --argjson blockchain_mainnet_activation_gate_reasons "$blockchain_mainnet_activation_gate_reasons_json" \
+  --argjson blockchain_mainnet_activation_gate_source_paths "$blockchain_mainnet_activation_gate_source_paths_json" \
   --arg profile_default_gate_status "$profile_default_gate_status" \
   --arg docker_rehearsal_status "$docker_rehearsal_status" \
   --arg real_wg_privileged_status "$real_wg_privileged_status" \
@@ -4286,6 +4446,18 @@ summary_payload="$(jq -n \
         run_ok: $phase7_mainnet_cutover_summary_run_ok,
         handoff_check_ok: $phase7_mainnet_cutover_summary_handoff_check_ok,
         handoff_run_ok: $phase7_mainnet_cutover_summary_handoff_run_ok
+      },
+      mainnet_activation_gate: {
+        available: $blockchain_mainnet_activation_gate_available,
+        input_summary_json: (if $blockchain_mainnet_activation_gate_input_summary_json == "" then null else $blockchain_mainnet_activation_gate_input_summary_json end),
+        source_summary_json: (if $blockchain_mainnet_activation_gate_source_summary_json == "" then null else $blockchain_mainnet_activation_gate_source_summary_json end),
+        source_summary_kind: (if $blockchain_mainnet_activation_gate_source_summary_kind == "" then null else $blockchain_mainnet_activation_gate_source_summary_kind end),
+        status: $blockchain_mainnet_activation_gate_status,
+        decision: (if $blockchain_mainnet_activation_gate_decision_json == "" then null else $blockchain_mainnet_activation_gate_decision_json end),
+        go: $blockchain_mainnet_activation_gate_go,
+        no_go: $blockchain_mainnet_activation_gate_no_go,
+        reasons: $blockchain_mainnet_activation_gate_reasons,
+        source_paths: $blockchain_mainnet_activation_gate_source_paths
       }
     },
     refresh: {
@@ -4479,6 +4651,16 @@ $pending_real_host_checks_md
 - Phase-7 mainnet cutover run_ok: $(jq -r '.blockchain_track.phase7_mainnet_cutover_summary_report.run_ok | if . == null then "null" else tostring end' "$summary_json")
 - Phase-7 mainnet cutover handoff_check_ok: $(jq -r '.blockchain_track.phase7_mainnet_cutover_summary_report.handoff_check_ok | if . == null then "null" else tostring end' "$summary_json")
 - Phase-7 mainnet cutover handoff_run_ok: $(jq -r '.blockchain_track.phase7_mainnet_cutover_summary_report.handoff_run_ok | if . == null then "null" else tostring end' "$summary_json")
+- Mainnet activation gate available: $(jq -r '.blockchain_track.mainnet_activation_gate.available' "$summary_json")
+- Mainnet activation gate input: $(jq -r '.blockchain_track.mainnet_activation_gate.input_summary_json // "none"' "$summary_json")
+- Mainnet activation gate source: $(jq -r '.blockchain_track.mainnet_activation_gate.source_summary_json // "none"' "$summary_json")
+- Mainnet activation gate source kind: $(jq -r '.blockchain_track.mainnet_activation_gate.source_summary_kind // "none"' "$summary_json")
+- Mainnet activation gate status: $(jq -r '.blockchain_track.mainnet_activation_gate.status // "missing"' "$summary_json")
+- Mainnet activation gate decision: $(jq -r '.blockchain_track.mainnet_activation_gate.decision // "null"' "$summary_json")
+- Mainnet activation gate go: $(jq -r '.blockchain_track.mainnet_activation_gate.go | if . == null then "null" else tostring end' "$summary_json")
+- Mainnet activation gate no_go: $(jq -r '.blockchain_track.mainnet_activation_gate.no_go | if . == null then "null" else tostring end' "$summary_json")
+- Mainnet activation gate reasons: $(jq -r '.blockchain_track.mainnet_activation_gate.reasons | if length == 0 then "none" else join("; ") end' "$summary_json")
+- Mainnet activation gate source paths: $(jq -r '.blockchain_track.mainnet_activation_gate.source_paths | if length == 0 then "none" else join(", ") end' "$summary_json")
 
 ## Next Actions
 
@@ -4547,6 +4729,7 @@ echo "[roadmap-progress-report] phase6_cosmos_l1_handoff_available=$phase6_cosmo
 echo "[roadmap-progress-report] phase6_cosmos_l1_handoff_status=$phase6_cosmos_l1_handoff_status_json rc=$phase6_cosmos_l1_handoff_rc_json run_pipeline_ok=$phase6_cosmos_l1_handoff_run_pipeline_ok_json module_tx_surface_ok=$phase6_cosmos_l1_handoff_module_tx_surface_ok_json tdpnd_grpc_runtime_smoke_ok=$phase6_cosmos_l1_handoff_tdpnd_grpc_runtime_smoke_ok_json tdpnd_grpc_live_smoke_ok=$phase6_cosmos_l1_handoff_tdpnd_grpc_live_smoke_ok_json tdpnd_grpc_auth_live_smoke_ok=$phase6_cosmos_l1_handoff_tdpnd_grpc_auth_live_smoke_ok_json tdpnd_comet_runtime_smoke_ok=$phase6_cosmos_l1_handoff_tdpnd_comet_runtime_smoke_ok_json"
 echo "[roadmap-progress-report] phase7_mainnet_cutover_summary_available=$phase7_mainnet_cutover_summary_available_json source_summary_json=${phase7_mainnet_cutover_summary_source_summary_json:-} source_kind=${phase7_mainnet_cutover_summary_source_summary_kind:-}"
 echo "[roadmap-progress-report] phase7_mainnet_cutover_summary_status=$phase7_mainnet_cutover_summary_status_json rc=$phase7_mainnet_cutover_summary_rc_json check_ok=$phase7_mainnet_cutover_summary_check_ok_json run_ok=$phase7_mainnet_cutover_summary_run_ok_json handoff_check_ok=$phase7_mainnet_cutover_summary_handoff_check_ok_json handoff_run_ok=$phase7_mainnet_cutover_summary_handoff_run_ok_json"
+echo "[roadmap-progress-report] mainnet_activation_gate_available=$blockchain_mainnet_activation_gate_available_json source_summary_json=${blockchain_mainnet_activation_gate_source_summary_json:-} source_kind=${blockchain_mainnet_activation_gate_source_summary_kind:-} status=$blockchain_mainnet_activation_gate_status_json decision=${blockchain_mainnet_activation_gate_decision_json:-} go=$blockchain_mainnet_activation_gate_go_json no_go=$blockchain_mainnet_activation_gate_no_go_json"
 echo "[roadmap-progress-report] resilience_handoff_available=$resilience_handoff_available_json source_summary_json=${resilience_handoff_source_summary_json:-}"
 echo "[roadmap-progress-report] profile_matrix_stable=$resilience_profile_matrix_stable_json peer_loss_recovery_ok=$resilience_peer_loss_recovery_ok_json session_churn_guard_ok=$resilience_session_churn_guard_ok_json"
 echo "[roadmap-progress-report] summary_json=$summary_json"

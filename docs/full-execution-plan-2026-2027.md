@@ -17,13 +17,13 @@ Canonical status:
 ## Phase Map
 
 ### Phase 0 (in progress): Product Surface Simplification
-- Keep simple launcher flows minimal (profile + required connection fields).
-- Route non-essential switches into expert mode.
+- Keep simple launcher flows minimal (profile + required connection fields) and document advanced flags separately.
+- Route non-essential switches into expert mode, not the simple path.
 - Use one versioned config contract: `deploy/config/easy_mode_config_v1.conf`.
 - Add local app-control API foundation for desktop integration (`--local-api` role).
 
 Exit gate:
-- simple client/server flows <= 6 prompts each
+- simple client/server flows <= 6 prompts each, with expert flags kept out of the default simple flow
 - `<=6` prompt-budget contract is now guarded by automated launcher wiring/runtime integration checks.
 - core launcher/script integrations remain green
 
@@ -74,6 +74,7 @@ Exit gate:
 - `scripts/phase7_mainnet_cutover_handoff_run.sh` + `scripts/integration_phase7_mainnet_cutover_handoff_run.sh`
 - `scripts/ci_phase7_mainnet_cutover.sh` + `scripts/integration_ci_phase7_mainnet_cutover.sh`
 - `scripts/phase7_mainnet_cutover_summary_report.sh` + `scripts/integration_phase7_mainnet_cutover_summary_report.sh`
+- `scripts/roadmap_progress_report.sh` accepts optional `--blockchain-mainnet-activation-gate-summary-json` and surfaces `blockchain_track.mainnet_activation_gate` with available/status/decision/go/no_go/reasons/source_paths, staying fail-soft when the summary is missing or invalid.
 - VPN dataplane remains independent from chain liveness during and after cutover.
 
 ## Cosmos Execution Update (April 16, 2026)
@@ -88,6 +89,7 @@ Exit gate:
 - `vpngovernance` gRPC contracts now include audit-action RPC/query surfaces (`RecordAuditAction`, `GovernanceAuditAction`, `ListGovernanceAuditActions`) for bootstrap governance audit trails.
 - `vpnvalidator` gRPC contracts now include `PreviewEpochSelection` query for deterministic epoch-selection previews from policy + candidate inputs.
 - Settlement bridge now includes read/query `GET` endpoints (list + by-id) and write `POST` endpoints across billing/rewards/sponsor/slashing plus validator/governance modules, with bearer auth applied to `POST` only when configured.
+- Mainnet activation gate reporting stays aligned with the `Mainnet Activation Go/No-Go Metrics Gate` in `docs/blockchain-bootstrap-validator-plan.md`: the canonical validator-policy summary can be ingested through `scripts/roadmap_progress_report.sh`, and the default production decision remains NO-GO until the full gate window is met.
 - CI/local integration now includes `scripts/integration_cosmos_tdpnd_state_dir_persistence.sh` for state-dir wiring and reopen-persistence verification.
 - Phase 5 CI now includes the `settlement_adapter_roundtrip` gate backed by `scripts/integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh` to verify end-to-end adapter -> `tdpnd` bridge submissions before promotion.
 - Phase 5 CI includes `settlement_shadow_env` running `scripts/integration_cosmos_settlement_shadow_env.sh` to validate shadow adapter env wiring and fail-open behavior.

@@ -27,6 +27,7 @@ ROADMAP_PROGRESS_MISSING_PHASE3_SUMMARY_JSON="$TMP_DIR/missing_phase3_summary.js
 ROADMAP_PROGRESS_MISSING_PHASE4_SUMMARY_JSON="$TMP_DIR/missing_phase4_summary.json"
 ROADMAP_PROGRESS_MISSING_PHASE5_SUMMARY_JSON="$TMP_DIR/missing_phase5_summary.json"
 ROADMAP_PROGRESS_MISSING_PHASE6_SUMMARY_JSON="$TMP_DIR/missing_phase6_summary.json"
+ROADMAP_PROGRESS_MISSING_BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SUMMARY_JSON="$TMP_DIR/missing_blockchain_mainnet_activation_gate_summary.json"
 
 run_roadmap_progress_report() {
   ./scripts/roadmap_progress_report.sh \
@@ -530,6 +531,40 @@ cp "$PHASE7_MAINNET_CUTOVER_RUN_SUMMARY_JSON" "$ROADMAP_PROGRESS_TEST_LOGS_ROOT/
 cp "$PHASE7_MAINNET_CUTOVER_HANDOFF_CHECK_SUMMARY_JSON" "$ROADMAP_PROGRESS_TEST_LOGS_ROOT/phase7_mainnet_cutover_handoff_check_summary.json"
 cp "$PHASE7_MAINNET_CUTOVER_HANDOFF_RUN_SUMMARY_JSON" "$ROADMAP_PROGRESS_TEST_LOGS_ROOT/phase7_mainnet_cutover_handoff_run_summary.json"
 cp "$PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_JSON" "$ROADMAP_PROGRESS_TEST_LOGS_ROOT/phase7_mainnet_cutover_summary_report.json"
+
+BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SUMMARY_JSON="$TMP_DIR/blockchain_mainnet_activation_gate_summary.json"
+cat >"$BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SUMMARY_JSON" <<'EOF_BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SUMMARY'
+{
+  "version": 1,
+  "schema": {
+    "id": "mainnet_activation_gate_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "NO-GO",
+  "decision": {
+    "pass": false,
+    "go": false,
+    "no_go": true,
+    "reasons": [
+      "12-week measurement window is still in progress",
+      "validator and economics thresholds remain below go/no-go policy"
+    ]
+  },
+  "reasons": [
+    "12-week measurement window is still in progress",
+    "validator and economics thresholds remain below go/no-go policy"
+  ],
+  "source_paths": [
+    "./docs/blockchain-bootstrap-validator-plan.md",
+    "./artifacts/blockchain/mainnet-activation-gate/validator-inventory.csv"
+  ]
+}
+EOF_BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SUMMARY
+
+BLOCKCHAIN_MAINNET_ACTIVATION_GATE_INVALID_SUMMARY_JSON="$TMP_DIR/blockchain_mainnet_activation_gate_invalid_summary.json"
+printf '{"version":1,' >"$BLOCKCHAIN_MAINNET_ACTIVATION_GATE_INVALID_SUMMARY_JSON"
+
 FAKE_ROADMAP_CAPTURE_FILE="$CAPTURE" \
 ROADMAP_PROGRESS_MANUAL_VALIDATION_REPORT_SCRIPT="$FAKE_MANUAL" \
 ROADMAP_PROGRESS_SINGLE_MACHINE_SCRIPT="$FAKE_SINGLE" \
@@ -538,6 +573,7 @@ run_roadmap_progress_report \
   --refresh-single-machine-readiness 0 \
   --phase0-summary-json "$PHASE0_SUMMARY_JSON" \
   --phase5-settlement-layer-summary-json "$PHASE5_SETTLEMENT_LAYER_SUMMARY_JSON" \
+  --blockchain-mainnet-activation-gate-summary-json "$BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SUMMARY_JSON" \
   --single-machine-summary-json "$SINGLE_MACHINE_SUMMARY_JSON" \
   --summary-json "$SUMMARY_JSON" \
   --report-md "$REPORT_MD" \
@@ -637,6 +673,21 @@ if [[ "$PHASE7_OUTPUT_PRESENT" == "1" ]]; then
     exit 1
   fi
 fi
+if ! jq -e '
+  .blockchain_track.mainnet_activation_gate.available == true
+  and .blockchain_track.mainnet_activation_gate.status == "NO-GO"
+  and .blockchain_track.mainnet_activation_gate.decision == "NO-GO"
+  and .blockchain_track.mainnet_activation_gate.go == false
+  and .blockchain_track.mainnet_activation_gate.no_go == true
+  and (.blockchain_track.mainnet_activation_gate.reasons | length) == 2
+  and (.blockchain_track.mainnet_activation_gate.source_paths | length) == 2
+  and .blockchain_track.mainnet_activation_gate.source_summary_json == "'"$BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SUMMARY_JSON"'"
+  and .blockchain_track.mainnet_activation_gate.source_summary_kind == "mainnet-activation-gate-summary"
+' "$SUMMARY_JSON" >/dev/null; then
+  echo "summary JSON missing expected mainnet activation gate fields"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
 if ! rg -q '\[roadmap-progress-report\] refresh_step=manual_validation_report status=running' /tmp/integration_roadmap_progress_report_ok.log; then
   echo "expected manual refresh running heartbeat line"
   cat /tmp/integration_roadmap_progress_report_ok.log
@@ -696,6 +747,76 @@ if [[ "$PHASE7_OUTPUT_PRESENT" == "1" ]]; then
     exit 1
   fi
 fi
+if ! rg -q 'Mainnet activation gate|mainnet_activation_gate' "$REPORT_MD"; then
+  echo "report markdown missing mainnet activation gate line"
+  cat "$REPORT_MD"
+  exit 1
+fi
+
+echo "[roadmap-progress-report] blockchain mainnet activation gate missing summary path"
+MINIMAL_MANUAL_SUMMARY_JSON="$TMP_DIR/manual_validation_minimal_summary_for_gate_tests.json"
+cat >"$MINIMAL_MANUAL_SUMMARY_JSON" <<'EOF_MINIMAL_SUMMARY_GATE'
+{"version":1,"summary":{"next_action_check_id":"machine_c_vpn_smoke"},"report":{"readiness_status":"NOT_READY"}}
+EOF_MINIMAL_SUMMARY_GATE
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$MINIMAL_MANUAL_SUMMARY_JSON" \
+  --blockchain-mainnet-activation-gate-summary-json "$ROADMAP_PROGRESS_MISSING_BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_mainnet_activation_gate_missing_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_mainnet_activation_gate_missing_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >/tmp/integration_roadmap_progress_report_mainnet_activation_gate_missing.log 2>&1; then
+  echo "expected success when mainnet activation gate summary is missing"
+  cat /tmp/integration_roadmap_progress_report_mainnet_activation_gate_missing.log
+  exit 1
+fi
+if ! jq -e '
+  .blockchain_track.mainnet_activation_gate.available == false
+  and .blockchain_track.mainnet_activation_gate.status == "missing"
+  and .blockchain_track.mainnet_activation_gate.decision == null
+  and .blockchain_track.mainnet_activation_gate.go == null
+  and .blockchain_track.mainnet_activation_gate.no_go == null
+  and (.blockchain_track.mainnet_activation_gate.reasons | length) == 0
+  and (.blockchain_track.mainnet_activation_gate.source_paths | length) == 0
+  and .blockchain_track.mainnet_activation_gate.input_summary_json == "'"$ROADMAP_PROGRESS_MISSING_BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SUMMARY_JSON"'"
+  and .blockchain_track.mainnet_activation_gate.source_summary_json == null
+' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_missing_summary.json" >/dev/null; then
+  echo "missing gate summary JSON missing expected fallback fields"
+  cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_missing_summary.json"
+  exit 1
+fi
+
+echo "[roadmap-progress-report] blockchain mainnet activation gate invalid summary path"
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$MINIMAL_MANUAL_SUMMARY_JSON" \
+  --blockchain-mainnet-activation-gate-summary-json "$BLOCKCHAIN_MAINNET_ACTIVATION_GATE_INVALID_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_mainnet_activation_gate_invalid_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_mainnet_activation_gate_invalid_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >/tmp/integration_roadmap_progress_report_mainnet_activation_gate_invalid.log 2>&1; then
+  echo "expected success when mainnet activation gate summary is invalid"
+  cat /tmp/integration_roadmap_progress_report_mainnet_activation_gate_invalid.log
+  exit 1
+fi
+if ! jq -e '
+  .blockchain_track.mainnet_activation_gate.available == false
+  and .blockchain_track.mainnet_activation_gate.status == "invalid"
+  and .blockchain_track.mainnet_activation_gate.decision == null
+  and .blockchain_track.mainnet_activation_gate.go == null
+  and .blockchain_track.mainnet_activation_gate.no_go == null
+  and (.blockchain_track.mainnet_activation_gate.reasons | length) == 0
+  and (.blockchain_track.mainnet_activation_gate.source_paths | length) == 0
+  and .blockchain_track.mainnet_activation_gate.input_summary_json == "'"$BLOCKCHAIN_MAINNET_ACTIVATION_GATE_INVALID_SUMMARY_JSON"'"
+  and .blockchain_track.mainnet_activation_gate.source_summary_json == null
+' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_invalid_summary.json" >/dev/null; then
+  echo "invalid gate summary JSON missing expected fallback fields"
+  cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_invalid_summary.json"
+  exit 1
+fi
+
 if ! rg -q '\[roadmap-progress-report\] phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_status=pass issuer_sponsor_api_live_smoke_ok=true' /tmp/integration_roadmap_progress_report_ok.log; then
   echo "expected phase5 issuer sponsor debug line in success path"
   cat /tmp/integration_roadmap_progress_report_ok.log

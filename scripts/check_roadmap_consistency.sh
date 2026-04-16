@@ -210,6 +210,60 @@ check_phase7_comet_forwarding_surface() {
   fi
 }
 
+check_mainnet_activation_gate_surface() {
+  local file_path="$1"
+  local label="$2"
+
+  if ! rg -Fq -- "--blockchain-mainnet-activation-gate-summary-json" "$file_path"; then
+    echo "$label must accept --blockchain-mainnet-activation-gate-summary-json for the blockchain mainnet activation gate surface"
+    exit 1
+  fi
+  if ! rg -Fq "blockchain_track.mainnet_activation_gate" "$file_path"; then
+    echo "$label must surface blockchain_track.mainnet_activation_gate in the roadmap progress report JSON surface"
+    exit 1
+  fi
+  if ! rg -Fq ".blockchain_track.mainnet_activation_gate.available" "$file_path"; then
+    echo "$label must expose blockchain_track.mainnet_activation_gate.available in the roadmap progress report JSON surface"
+    exit 1
+  fi
+  if ! rg -Fq ".blockchain_track.mainnet_activation_gate.input_summary_json" "$file_path"; then
+    echo "$label must expose blockchain_track.mainnet_activation_gate.input_summary_json in the roadmap progress report JSON surface"
+    exit 1
+  fi
+  if ! rg -Fq ".blockchain_track.mainnet_activation_gate.source_summary_json" "$file_path"; then
+    echo "$label must expose blockchain_track.mainnet_activation_gate.source_summary_json in the roadmap progress report JSON surface"
+    exit 1
+  fi
+  if ! rg -Fq ".blockchain_track.mainnet_activation_gate.source_summary_kind" "$file_path"; then
+    echo "$label must expose blockchain_track.mainnet_activation_gate.source_summary_kind in the roadmap progress report JSON surface"
+    exit 1
+  fi
+  if ! rg -Fq ".blockchain_track.mainnet_activation_gate.status" "$file_path"; then
+    echo "$label must expose blockchain_track.mainnet_activation_gate.status in the roadmap progress report JSON surface"
+    exit 1
+  fi
+  if ! rg -Fq ".blockchain_track.mainnet_activation_gate.decision" "$file_path"; then
+    echo "$label must expose blockchain_track.mainnet_activation_gate.decision in the roadmap progress report JSON surface"
+    exit 1
+  fi
+  if ! rg -Fq ".blockchain_track.mainnet_activation_gate.go" "$file_path"; then
+    echo "$label must expose blockchain_track.mainnet_activation_gate.go in the roadmap progress report JSON surface"
+    exit 1
+  fi
+  if ! rg -Fq ".blockchain_track.mainnet_activation_gate.no_go" "$file_path"; then
+    echo "$label must expose blockchain_track.mainnet_activation_gate.no_go in the roadmap progress report JSON surface"
+    exit 1
+  fi
+  if ! rg -Fq ".blockchain_track.mainnet_activation_gate.reasons" "$file_path"; then
+    echo "$label must expose blockchain_track.mainnet_activation_gate.reasons in the roadmap progress report JSON surface"
+    exit 1
+  fi
+  if ! rg -Fq ".blockchain_track.mainnet_activation_gate.source_paths" "$file_path"; then
+    echo "$label must expose blockchain_track.mainnet_activation_gate.source_paths in the roadmap progress report JSON surface"
+    exit 1
+  fi
+}
+
 for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$roadmap_integration_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$chain_readme" "$chain_scaffold_file" "$chain_grpc_registry_file" "$chain_grpc_registry_test_file" "$chain_settlement_bridge_file" "$chain_runtime_test_file" "$settlement_mapping_doc" "$blockchain_sponsor_quickstart_doc" "$phase5_ci_script" "$phase5_integration_script" "$phase5_check_script" "$phase5_run_script" "$phase5_handoff_check_script" "$phase5_handoff_run_script" "$phase5_check_integration_script" "$phase5_run_integration_script" "$phase5_handoff_check_integration_script" "$phase5_handoff_run_integration_script" "$phase5_summary_report_script" "$phase5_summary_report_integration_script" "$blockchain_fastlane_script" "$blockchain_fastlane_integration_script" "$ci_local_script" "$easy_node_script" "$easy_node_blockchain_gate_wrappers_integration_script" "$easy_node_blockchain_summary_reports_integration_script" "$phase6_ci_script" "$phase6_integration_script" "$phase6_contracts_ci_script" "$phase6_contracts_integration_script" "$phase6_contracts_live_smoke_script" "$phase6_grpc_app_roundtrip_script" "$phase6_grpc_runtime_smoke_script" "$phase6_grpc_live_smoke_script" "$phase6_grpc_auth_live_smoke_script" "$phase6_settlement_bridge_smoke_script" "$phase6_settlement_bridge_live_smoke_script" "$phase6_query_surface_script" "$phase6_module_tx_surface_script" "$phase6_proto_surface_script" "$phase6_proto_grpc_surface_script" "$phase6_proto_codegen_surface_script" "$phase6_module_coverage_floor_script" "$phase6_keeper_coverage_floor_script" "$phase6_dual_write_parity_script" "$phase6_check_script" "$phase6_run_script" "$phase6_check_integration_script" "$phase6_run_integration_script" "$phase6_suite_script" "$phase6_suite_integration_script" "$phase6_summary_report_script" "$phase6_summary_report_integration_script" "$phase7_check_script" "$phase7_check_integration_script" "$phase7_run_script" "$phase7_run_integration_script" "$phase7_ci_script" "$phase7_ci_integration_script" "$phase7_summary_report_script" "$phase7_summary_report_integration_script"; do
   if [[ ! -f "$f" ]]; then
     echo "missing required file: $f"
@@ -524,6 +578,18 @@ if ! rg -Fq "integration_phase7_mainnet_cutover_summary_report.sh" "$full_plan";
   echo "full execution plan must document phase7 mainnet cutover summary report integration contract script"
   exit 1
 fi
+if ! rg -Fq -- "--blockchain-mainnet-activation-gate-summary-json" "$full_plan"; then
+  echo "full execution plan must document the blockchain mainnet activation gate summary input surface"
+  exit 1
+fi
+if ! rg -Fq "blockchain_track.mainnet_activation_gate" "$full_plan"; then
+  echo "full execution plan must document blockchain_track.mainnet_activation_gate summary surface"
+  exit 1
+fi
+if ! rg -Fq "Mainnet Activation Go/No-Go Metrics Gate" "$full_plan"; then
+  echo "full execution plan must reference the blockchain mainnet activation gate policy"
+  exit 1
+fi
 if ! rg -Fq "phase7_mainnet_cutover_handoff_check_summary.json" "$full_plan"; then
   echo "full execution plan must document phase7 handoff-check summary artifact"
   exit 1
@@ -807,6 +873,18 @@ if ! rg -Fq "phase7 operator summary helper preserves optional \`tdpnd_comet_run
 fi
 if ! rg -Fq "integration_phase7_mainnet_cutover_summary_report.sh" "$product_roadmap"; then
   echo "product roadmap must document phase7 mainnet cutover summary report integration contract script"
+  exit 1
+fi
+if ! rg -Fq -- "--blockchain-mainnet-activation-gate-summary-json" "$product_roadmap"; then
+  echo "product roadmap must document the blockchain mainnet activation gate summary input surface"
+  exit 1
+fi
+if ! rg -Fq "blockchain_track.mainnet_activation_gate" "$product_roadmap"; then
+  echo "product roadmap must document blockchain_track.mainnet_activation_gate summary surface"
+  exit 1
+fi
+if ! rg -Fq "Mainnet Activation Go/No-Go Metrics Gate" "$product_roadmap"; then
+  echo "product roadmap must reference the blockchain mainnet activation gate policy"
   exit 1
 fi
 if ! rg -Fq "phase7_mainnet_cutover_handoff_check_summary.json" "$product_roadmap"; then
@@ -1924,6 +2002,28 @@ if ! rg -qi "operator(_approval)?(_gate)?(_ok)?|approval gate|require-operator-a
 fi
 if ! rg -Fq "canonical_summary_json" "$phase7_summary_report_integration_script"; then
   echo "phase7 summary report integration script must validate canonical summary artifact wiring"
+  exit 1
+fi
+check_mainnet_activation_gate_surface "$roadmap_script" "roadmap progress report helper"
+check_mainnet_activation_gate_surface "$roadmap_integration_script" "roadmap progress report integration script"
+if ! rg -Fq '.blockchain_track.mainnet_activation_gate.available == true' "$roadmap_integration_script"; then
+  echo "roadmap progress report integration script must validate the available mainnet activation gate path"
+  exit 1
+fi
+if ! rg -Fq '.blockchain_track.mainnet_activation_gate.status == "missing"' "$roadmap_integration_script"; then
+  echo "roadmap progress report integration script must validate the missing mainnet activation gate path"
+  exit 1
+fi
+if ! rg -Fq '.blockchain_track.mainnet_activation_gate.status == "invalid"' "$roadmap_integration_script"; then
+  echo "roadmap progress report integration script must validate the invalid mainnet activation gate path"
+  exit 1
+fi
+if ! rg -Fq "Mainnet Activation Go/No-Go Metrics Gate" "$bootstrap_validator_doc"; then
+  echo "blockchain bootstrap validator plan must document the mainnet activation go/no-go metrics gate"
+  exit 1
+fi
+if ! rg -Fq "Default decision remains **NO-GO**" "$bootstrap_validator_doc"; then
+  echo "blockchain bootstrap validator plan must preserve the default NO-GO posture"
   exit 1
 fi
 
