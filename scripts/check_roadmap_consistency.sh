@@ -43,6 +43,8 @@ phase6_grpc_live_smoke_script="scripts/integration_cosmos_tdpnd_grpc_live_smoke.
 phase6_grpc_auth_live_smoke_script="scripts/integration_cosmos_tdpnd_grpc_auth_live_smoke.sh"
 phase6_settlement_bridge_smoke_script="scripts/integration_cosmos_tdpnd_settlement_bridge_smoke.sh"
 phase6_settlement_bridge_live_smoke_script="scripts/integration_cosmos_tdpnd_settlement_bridge_live_smoke.sh"
+phase6_query_surface_script="scripts/integration_cosmos_query_surface.sh"
+phase6_module_tx_surface_script="scripts/integration_cosmos_module_tx_surface.sh"
 phase6_proto_surface_script="scripts/integration_cosmos_proto_surface.sh"
 phase6_proto_grpc_surface_script="scripts/integration_cosmos_proto_grpc_surface.sh"
 phase6_proto_codegen_surface_script="scripts/integration_cosmos_proto_codegen_surface.sh"
@@ -110,9 +112,41 @@ check_confirmation_interface_wording() {
   fi
 }
 
-for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$chain_readme" "$chain_scaffold_file" "$chain_grpc_registry_file" "$chain_grpc_registry_test_file" "$chain_settlement_bridge_file" "$chain_runtime_test_file" "$settlement_mapping_doc" "$blockchain_sponsor_quickstart_doc" "$phase5_ci_script" "$phase5_integration_script" "$phase5_check_script" "$phase5_run_script" "$phase5_handoff_check_script" "$phase5_handoff_run_script" "$phase5_check_integration_script" "$phase5_run_integration_script" "$phase5_handoff_check_integration_script" "$phase5_handoff_run_integration_script" "$phase5_summary_report_script" "$phase5_summary_report_integration_script" "$ci_local_script" "$easy_node_blockchain_summary_reports_integration_script" "$phase6_ci_script" "$phase6_integration_script" "$phase6_contracts_ci_script" "$phase6_contracts_integration_script" "$phase6_contracts_live_smoke_script" "$phase6_grpc_app_roundtrip_script" "$phase6_grpc_runtime_smoke_script" "$phase6_grpc_live_smoke_script" "$phase6_grpc_auth_live_smoke_script" "$phase6_settlement_bridge_smoke_script" "$phase6_settlement_bridge_live_smoke_script" "$phase6_proto_surface_script" "$phase6_proto_grpc_surface_script" "$phase6_proto_codegen_surface_script" "$phase6_module_coverage_floor_script" "$phase6_keeper_coverage_floor_script" "$phase6_dual_write_parity_script" "$phase6_check_script" "$phase6_run_script" "$phase6_check_integration_script" "$phase6_run_integration_script" "$phase6_suite_script" "$phase6_suite_integration_script" "$phase6_handoff_check_script" "$phase6_handoff_run_script" "$phase6_handoff_check_integration_script" "$phase6_handoff_run_integration_script" "$phase6_summary_report_script" "$phase6_summary_report_integration_script"; do
+for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$chain_readme" "$chain_scaffold_file" "$chain_grpc_registry_file" "$chain_grpc_registry_test_file" "$chain_settlement_bridge_file" "$chain_runtime_test_file" "$settlement_mapping_doc" "$blockchain_sponsor_quickstart_doc" "$phase5_ci_script" "$phase5_integration_script" "$phase5_check_script" "$phase5_run_script" "$phase5_handoff_check_script" "$phase5_handoff_run_script" "$phase5_check_integration_script" "$phase5_run_integration_script" "$phase5_handoff_check_integration_script" "$phase5_handoff_run_integration_script" "$phase5_summary_report_script" "$phase5_summary_report_integration_script" "$ci_local_script" "$easy_node_blockchain_summary_reports_integration_script" "$phase6_ci_script" "$phase6_integration_script" "$phase6_contracts_ci_script" "$phase6_contracts_integration_script" "$phase6_contracts_live_smoke_script" "$phase6_grpc_app_roundtrip_script" "$phase6_grpc_runtime_smoke_script" "$phase6_grpc_live_smoke_script" "$phase6_grpc_auth_live_smoke_script" "$phase6_settlement_bridge_smoke_script" "$phase6_settlement_bridge_live_smoke_script" "$phase6_query_surface_script" "$phase6_module_tx_surface_script" "$phase6_proto_surface_script" "$phase6_proto_grpc_surface_script" "$phase6_proto_codegen_surface_script" "$phase6_module_coverage_floor_script" "$phase6_keeper_coverage_floor_script" "$phase6_dual_write_parity_script" "$phase6_check_script" "$phase6_run_script" "$phase6_check_integration_script" "$phase6_run_integration_script" "$phase6_suite_script" "$phase6_suite_integration_script" "$phase6_handoff_check_script" "$phase6_handoff_run_script" "$phase6_handoff_check_integration_script" "$phase6_handoff_run_integration_script" "$phase6_summary_report_script" "$phase6_summary_report_integration_script"; do
   if [[ ! -f "$f" ]]; then
     echo "missing required file: $f"
+    exit 1
+  fi
+done
+for query_surface_contract in \
+  "./x/vpnbilling/module" \
+  "./x/vpnrewards/module" \
+  "./x/vpnslashing/module" \
+  "./x/vpnsponsor/module" \
+  "./x/vpnvalidator/module" \
+  "./x/vpngovernance/module"
+do
+  if ! rg -Fq "$query_surface_contract" "$phase6_query_surface_script"; then
+    echo "phase6 query surface script must include six-module query test contract: $query_surface_contract"
+    exit 1
+  fi
+done
+for module_tx_surface_contract in \
+  "./x/vpnbilling/keeper" \
+  "./x/vpnrewards/keeper" \
+  "./x/vpnslashing/keeper" \
+  "./x/vpnsponsor/keeper" \
+  "./x/vpnvalidator/keeper" \
+  "./x/vpngovernance/keeper" \
+  "./x/vpnbilling/module" \
+  "./x/vpnrewards/module" \
+  "./x/vpnslashing/module" \
+  "./x/vpnsponsor/module" \
+  "./x/vpnvalidator/module" \
+  "./x/vpngovernance/module"
+do
+  if ! rg -Fq "$module_tx_surface_contract" "$phase6_module_tx_surface_script"; then
+    echo "phase6 module tx surface script must include six-module tx contract: $module_tx_surface_contract"
     exit 1
   fi
 done
@@ -648,6 +682,7 @@ for live_grpc_method in \
   "tdpn.vpnsponsor.v1.Query/ListDelegatedSessionCredits" \
   "tdpn.vpnvalidator.v1.Query/ListValidatorEligibilities" \
   "tdpn.vpnvalidator.v1.Query/ListValidatorStatusRecords" \
+  "tdpn.vpnvalidator.v1.Query/PreviewEpochSelection" \
   "tdpn.vpngovernance.v1.Query/ListGovernancePolicies" \
   "tdpn.vpngovernance.v1.Query/ListGovernanceDecisions" \
   "tdpn.vpngovernance.v1.Query/ListGovernanceAuditActions"
@@ -927,6 +962,7 @@ for grpc_auth_rpc_contract in \
   "tdpn.vpnsponsor.v1.Query/ListDelegatedSessionCredits" \
   "tdpn.vpnvalidator.v1.Query/ListValidatorEligibilities" \
   "tdpn.vpnvalidator.v1.Query/ListValidatorStatusRecords" \
+  "tdpn.vpnvalidator.v1.Query/PreviewEpochSelection" \
   "tdpn.vpngovernance.v1.Query/ListGovernancePolicies" \
   "tdpn.vpngovernance.v1.Query/ListGovernanceDecisions" \
   "tdpn.vpngovernance.v1.Query/ListGovernanceAuditActions"
@@ -1217,6 +1253,18 @@ if ! rg -q "Parallel Track: Cosmos L1 Settlement and Governance Foundation" "$pr
   exit 1
 fi
 
+if ! rg -Fq "no sidecar chain pivot" "$full_plan"; then
+  echo "full execution plan must document Cosmos-first no sidecar chain pivot decision"
+  exit 1
+fi
+if rg -Fq "validator eligibility/governance/reward modules" "$full_plan"; then
+  echo "full execution plan must not contain stale three-module phase6 summary wording"
+  exit 1
+fi
+if rg -qi "sidecar recommendation" "$full_plan"; then
+  echo "full execution plan should not contain legacy sidecar recommendation wording"
+  exit 1
+fi
 if rg -qi "sidecar recommendation" "$product_roadmap"; then
   echo "product roadmap should not contain legacy sidecar recommendation wording"
   exit 1

@@ -9,6 +9,7 @@ export GOCACHE="${GOCACHE:-$ROOT_DIR/.gocache}"
 
 LOG_FILE="$(mktemp -t tdpnd-grpc-live-smoke.XXXXXX.log)"
 TDPND_PID=""
+PREVIEW_EPOCH_SELECTION_PAYLOAD='{"policy":{"epoch":99,"stable_seat_count":1,"rotating_seat_count":0,"min_stake":1,"min_stake_age_epochs":1,"min_health_score":1,"min_resource_headroom":1},"candidates":[{"validator_id":"validator-live-smoke-1","operator_id":"operator-live-smoke-1","asn":"64512","region":"au-west","stake":100,"stake_age_epochs":10,"health_score":100,"resource_headroom":100,"score":100,"stable_seat_preferred":true}]}'
 
 signal_runtime() {
   local sig="$1"
@@ -124,11 +125,12 @@ assert_grpc_query_dispatch() {
   local port="$1"
   local method="$2"
   local expected_field="$3"
+  local payload="${4:-{}}"
   local output
   local rc
 
   set +e
-  output="$(grpcurl -plaintext -max-time 2 -d '{}' "127.0.0.1:${port}" "${method}" 2>&1)"
+  output="$(grpcurl -plaintext -max-time 2 -d "${payload}" "127.0.0.1:${port}" "${method}" 2>&1)"
   rc=$?
   set -e
   if (( rc != 0 )); then
@@ -179,6 +181,7 @@ if command -v grpcurl >/dev/null 2>&1; then
   assert_grpc_query_dispatch "${PORT}" "tdpn.vpnsponsor.v1.Query/ListDelegatedSessionCredits" "delegations"
   assert_grpc_query_dispatch "${PORT}" "tdpn.vpnvalidator.v1.Query/ListValidatorEligibilities" "eligibilities"
   assert_grpc_query_dispatch "${PORT}" "tdpn.vpnvalidator.v1.Query/ListValidatorStatusRecords" "records"
+  assert_grpc_query_dispatch "${PORT}" "tdpn.vpnvalidator.v1.Query/PreviewEpochSelection" "result" "${PREVIEW_EPOCH_SELECTION_PAYLOAD}"
   assert_grpc_query_dispatch "${PORT}" "tdpn.vpngovernance.v1.Query/ListGovernancePolicies" "policies"
   assert_grpc_query_dispatch "${PORT}" "tdpn.vpngovernance.v1.Query/ListGovernanceDecisions" "decisions"
   assert_grpc_query_dispatch "${PORT}" "tdpn.vpngovernance.v1.Query/ListGovernanceAuditActions" "actions"

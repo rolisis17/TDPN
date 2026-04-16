@@ -20,9 +20,9 @@ import (
 
 	"github.com/tdpn/tdpn-chain/app"
 	vpnbillingpb "github.com/tdpn/tdpn-chain/proto/gen/go/tdpn/vpnbilling/v1"
+	vpngovernancepb "github.com/tdpn/tdpn-chain/proto/gen/go/tdpn/vpngovernance/v1"
 	vpnrewardspb "github.com/tdpn/tdpn-chain/proto/gen/go/tdpn/vpnrewards/v1"
 	vpnslashingpb "github.com/tdpn/tdpn-chain/proto/gen/go/tdpn/vpnslashing/v1"
-	vpngovernancepb "github.com/tdpn/tdpn-chain/proto/gen/go/tdpn/vpngovernance/v1"
 	vpnsponsorpb "github.com/tdpn/tdpn-chain/proto/gen/go/tdpn/vpnsponsor/v1"
 	vpnvalidatorpb "github.com/tdpn/tdpn-chain/proto/gen/go/tdpn/vpnvalidator/v1"
 	"google.golang.org/grpc"
@@ -807,6 +807,34 @@ func TestRunTDPNDGRPCModeAuthEnforcementAndHealth(t *testing.T) {
 	})
 	assertQueryAuthParity("vpnvalidator/ListValidatorStatusRecords", func(callCtx context.Context) error {
 		_, callErr := validatorQuery.ListValidatorStatusRecords(callCtx, &vpnvalidatorpb.QueryListValidatorStatusRecordsRequest{})
+		return callErr
+	})
+	assertQueryAuthParity("vpnvalidator/PreviewEpochSelection", func(callCtx context.Context) error {
+		_, callErr := validatorQuery.PreviewEpochSelection(callCtx, &vpnvalidatorpb.QueryPreviewEpochSelectionRequest{
+			Policy: &vpnvalidatorpb.EpochSelectionPolicy{
+				Epoch:               99,
+				StableSeatCount:     1,
+				RotatingSeatCount:   0,
+				MinStake:            1,
+				MinStakeAgeEpochs:   1,
+				MinHealthScore:      1,
+				MinResourceHeadroom: 1,
+			},
+			Candidates: []*vpnvalidatorpb.EpochValidatorCandidate{
+				{
+					ValidatorId:         "validator-auth-preview-1",
+					OperatorId:          "operator-auth-preview-1",
+					Asn:                 "64512",
+					Region:              "au-west",
+					Stake:               100,
+					StakeAgeEpochs:      10,
+					HealthScore:         100,
+					ResourceHeadroom:    100,
+					Score:               100,
+					StableSeatPreferred: true,
+				},
+			},
+		})
 		return callErr
 	})
 	assertQueryAuthParity("vpngovernance/ListGovernancePolicies", func(callCtx context.Context) error {

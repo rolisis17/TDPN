@@ -17,6 +17,10 @@ export GOCACHE="${GOCACHE:-$ROOT_DIR/.gocache}"
   timeout 30s go test ./x/vpnslashing/module -count=1
   timeout 30s go test ./x/vpnsponsor/keeper -count=1
   timeout 30s go test ./x/vpnsponsor/module -count=1
+  timeout 30s go test ./x/vpnvalidator/keeper -count=1
+  timeout 30s go test ./x/vpnvalidator/module -count=1
+  timeout 30s go test ./x/vpngovernance/keeper -count=1
+  timeout 30s go test ./x/vpngovernance/module -count=1
 )
 
 echo "cosmos module tx surface integration check ok"

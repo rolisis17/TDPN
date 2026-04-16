@@ -60,7 +60,7 @@ Exit gate:
 - keep dataplane independent from settlement liveness
 
 ### Phase 6: Cosmos SDK + CometBFT L1 Build/Testnet
-- validator eligibility/governance/reward modules
+- Cosmos-first L1 execution (no sidecar chain pivot), with module scaffold/coverage for `vpnbilling`, `vpnrewards`, `vpnslashing`, `vpnsponsor`, `vpnvalidator`, and `vpngovernance`
 - dual-write reconciliation before cutover
 - settlement dual-write scaffold uses optional shadow adapter mirroring (best-effort, non-blocking) while primary fail-soft semantics remain canonical.
 

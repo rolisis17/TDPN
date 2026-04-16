@@ -19,6 +19,7 @@ fi
 LOG_FILE="$(mktemp -t tdpnd-grpc-auth-live-smoke.XXXXXX.log)"
 TDPND_PID=""
 AUTH_TOKEN="${TDPND_GRPC_AUTH_LIVE_SMOKE_TOKEN:-tdpn-live-smoke-token}"
+PREVIEW_EPOCH_SELECTION_PAYLOAD='{"policy":{"epoch":99,"stable_seat_count":1,"rotating_seat_count":0,"min_stake":1,"min_stake_age_epochs":1,"min_health_score":1,"min_resource_headroom":1},"candidates":[{"validator_id":"validator-auth-smoke-1","operator_id":"operator-auth-smoke-1","asn":"64512","region":"au-west","stake":100,"stake_age_epochs":10,"health_score":100,"resource_headroom":100,"score":100,"stable_seat_preferred":true}]}'
 MODULE_QUERY_CHECKS=(
   "tdpn.vpnbilling.v1.Query/ListCreditReservations|reservations"
   "tdpn.vpnbilling.v1.Query/ListSettlementRecords|settlements"
@@ -30,6 +31,7 @@ MODULE_QUERY_CHECKS=(
   "tdpn.vpnsponsor.v1.Query/ListDelegatedSessionCredits|delegations"
   "tdpn.vpnvalidator.v1.Query/ListValidatorEligibilities|eligibilities"
   "tdpn.vpnvalidator.v1.Query/ListValidatorStatusRecords|records"
+  "tdpn.vpnvalidator.v1.Query/PreviewEpochSelection|result|${PREVIEW_EPOCH_SELECTION_PAYLOAD}"
   "tdpn.vpngovernance.v1.Query/ListGovernancePolicies|policies"
   "tdpn.vpngovernance.v1.Query/ListGovernanceDecisions|decisions"
   "tdpn.vpngovernance.v1.Query/ListGovernanceAuditActions|actions"
@@ -131,10 +133,11 @@ fi
 
 # 2) Query RPCs must fail without auth token and succeed with token.
 for module_spec in "${MODULE_QUERY_CHECKS[@]}"; do
-  IFS='|' read -r module_rpc expected_field <<<"${module_spec}"
+  IFS='|' read -r module_rpc expected_field request_payload <<<"${module_spec}"
+  request_payload="${request_payload:-{}}"
 
   set +e
-  unauth_output="$(grpcurl -plaintext -max-time 2 -d '{}' "127.0.0.1:${PORT}" "${module_rpc}" 2>&1)"
+  unauth_output="$(grpcurl -plaintext -max-time 2 -d "${request_payload}" "127.0.0.1:${PORT}" "${module_rpc}" 2>&1)"
   unauth_rc=$?
   set -e
   if (( unauth_rc == 0 )); then
@@ -153,7 +156,7 @@ for module_spec in "${MODULE_QUERY_CHECKS[@]}"; do
   fi
 
   set +e
-  auth_output="$(grpcurl -plaintext -max-time 2 -H "authorization: Bearer ${AUTH_TOKEN}" -d '{}' "127.0.0.1:${PORT}" "${module_rpc}" 2>&1)"
+  auth_output="$(grpcurl -plaintext -max-time 2 -H "authorization: Bearer ${AUTH_TOKEN}" -d "${request_payload}" "127.0.0.1:${PORT}" "${module_rpc}" 2>&1)"
   auth_rc=$?
   set -e
   if (( auth_rc != 0 )); then
