@@ -374,13 +374,13 @@ for stage_id in "${stage_ids[@]}"; do
     valid_json="1"
     case "$stage_id" in
       check)
-        signal_snapshot_json="$(jq -c '.signals // .handoff // null' "$source_path" 2>/dev/null || true)"
+        signal_snapshot_json="$(jq -c '.signal_snapshot // .handoff // .signals // null' "$source_path" 2>/dev/null || true)"
         ;;
       run)
-        signal_snapshot_json="$(jq -c '.steps.phase7_mainnet_cutover_check.signal_snapshot // .signals // .handoff // null' "$source_path" 2>/dev/null || true)"
+        signal_snapshot_json="$(jq -c '.steps.phase7_mainnet_cutover_check.signal_snapshot // .signal_snapshot // .signals // .handoff // null' "$source_path" 2>/dev/null || true)"
         ;;
       handoff_check|handoff_run)
-        signal_snapshot_json="$(jq -c '.handoff // .signals // null' "$source_path" 2>/dev/null || true)"
+        signal_snapshot_json="$(jq -c '.handoff // .signals // .signal_snapshot // null' "$source_path" 2>/dev/null || true)"
         ;;
     esac
     if [[ -z "$signal_snapshot_json" ]]; then
@@ -496,7 +496,33 @@ jq -n \
   --argjson fail_count "$fail_count" \
   --argjson missing_count "$missing_count" \
   --argjson invalid_count "$invalid_count" \
-  '{
+  '
+  def normalize_signal_bool:
+    if . == null then null
+    elif (type == "boolean") then .
+    elif (type == "number") then (. != 0)
+    elif (type == "string") then
+      ((ascii_downcase | gsub("[[:space:]_]"; "")) as $v
+      | if ($v == "true" or $v == "1" or $v == "ok" or $v == "pass" or $v == "passed" or $v == "success" or $v == "succeeded" or $v == "go") then true
+        elif ($v == "false" or $v == "0" or $v == "fail" or $v == "failed" or $v == "error" or $v == "blocked" or $v == "skip" or $v == "skipped" or $v == "warn" or $v == "warning" or $v == "nogo" or $v == "no-go") then false
+        else null
+        end)
+    else null
+    end;
+  def resolve_signal_by_stage_priority($stages; $keys):
+    reduce $stages[] as $stage (null;
+      if . != null then .
+      elif ($stage | type) != "object" then null
+      else (
+        reduce $keys[] as $key (null;
+          if . != null then .
+          else (($stage.signal_snapshot[$key] // null) | normalize_signal_bool)
+          end
+        )
+      )
+      end
+    );
+  {
     version: 1,
     schema: {
       id: "phase7_mainnet_cutover_summary_report",
@@ -517,6 +543,14 @@ jq -n \
       run: $run,
       handoff_check: $handoff_check,
       handoff_run: $handoff_run
+    },
+    signals: {
+      cosmos_module_coverage_floor_ok: resolve_signal_by_stage_priority([$check, $run, $handoff_check, $handoff_run]; ["cosmos_module_coverage_floor_ok", "cosmos_module_coverage_floor"]),
+      cosmos_keeper_coverage_floor_ok: resolve_signal_by_stage_priority([$check, $run, $handoff_check, $handoff_run]; ["cosmos_keeper_coverage_floor_ok", "cosmos_keeper_coverage_floor"]),
+      cosmos_app_coverage_floor_ok: resolve_signal_by_stage_priority([$check, $run, $handoff_check, $handoff_run]; ["cosmos_app_coverage_floor_ok", "cosmos_app_coverage_floor"]),
+      dual_write_parity_ok: resolve_signal_by_stage_priority([$check, $run, $handoff_check, $handoff_run]; ["dual_write_parity_ok", "dual_write_parity"]),
+      mainnet_activation_gate_go_ok: resolve_signal_by_stage_priority([$check, $run, $handoff_check, $handoff_run]; ["mainnet_activation_gate_go_ok", "mainnet_activation_gate_go"]),
+      tdpnd_comet_runtime_smoke_ok: resolve_signal_by_stage_priority([$check, $run, $handoff_check, $handoff_run]; ["tdpnd_comet_runtime_smoke_ok", "tdpnd_comet_runtime_smoke"])
     },
     counts: {
       configured: $considered_count,
