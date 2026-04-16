@@ -284,6 +284,23 @@ check_phase7_summary_coverage_signal_doc_surface() {
   done
 }
 
+check_phase7_summary_runtime_signal_doc_surface() {
+  local file_path="$1"
+  local label="$2"
+
+  for token in \
+    "phase7_mainnet_cutover_summary_report.sh" \
+    "module_tx_surface_ok" \
+    "tdpnd_grpc_live_smoke_ok" \
+    "tdpnd_grpc_auth_live_smoke_ok"
+  do
+    if ! rg -Fq "$token" "$file_path"; then
+      echo "$label must document phase7 summary/runtime signal surfacing token: $token"
+      exit 1
+    fi
+  done
+}
+
 check_phase7_roadmap_summary_coverage_signal_surface() {
   local file_path="$1"
   local label="$2"
@@ -758,7 +775,8 @@ if ! rg -Fq "phase7_mainnet_cutover_summary_report.sh" "$full_plan"; then
   echo "full execution plan must document phase7 mainnet cutover summary report helper script"
   exit 1
 fi
-if ! rg -Fq "Phase 7 operator summary helper preserves optional \`tdpnd_comet_runtime_smoke_ok\`" "$full_plan"; then
+if ! rg -Fq "tdpnd_comet_runtime_smoke_ok" "$full_plan" \
+  || ! rg -qi "optional|preserved when available|without making it a hard requirement" "$full_plan"; then
   echo "full execution plan must document optional tdpnd_comet_runtime_smoke_ok in phase7 summary surfaces"
   exit 1
 fi
@@ -864,6 +882,8 @@ check_phase7_roadmap_surface_docs "$cosmos_runtime_doc" "cosmos settlement runti
 check_phase7_summary_coverage_signal_doc_surface "$full_plan" "full execution plan"
 check_phase7_summary_coverage_signal_doc_surface "$product_roadmap" "product roadmap"
 check_phase7_summary_coverage_signal_doc_surface "$cosmos_runtime_doc" "cosmos settlement runtime doc"
+check_phase7_summary_runtime_signal_doc_surface "$full_plan" "full execution plan"
+check_phase7_summary_runtime_signal_doc_surface "$product_roadmap" "product roadmap"
 check_phase7_roadmap_summary_coverage_signal_surface "$roadmap_script" "roadmap progress report helper"
 check_phase7_roadmap_summary_coverage_signal_surface "$roadmap_integration_script" "roadmap progress report integration script"
 check_phase7_comet_signal_surface "$full_plan" "full execution plan"
@@ -1081,7 +1101,8 @@ if ! rg -Fq "phase7_mainnet_cutover_summary_report.sh" "$product_roadmap"; then
   echo "product roadmap must document phase7 mainnet cutover summary report helper script"
   exit 1
 fi
-if ! rg -Fq "phase7 operator summary helper preserves optional \`tdpnd_comet_runtime_smoke_ok\`" "$product_roadmap"; then
+if ! rg -Fq "tdpnd_comet_runtime_smoke_ok" "$product_roadmap" \
+  || ! rg -qi "optional|preserved when available|without making it a hard requirement" "$product_roadmap"; then
   echo "product roadmap must document optional tdpnd_comet_runtime_smoke_ok in phase7 summary surfaces"
   exit 1
 fi
@@ -3836,6 +3857,16 @@ if ! rg -Fq "phase7_mainnet_cutover_summary_report.sh" "$easy_node_blockchain_su
   exit 1
 fi
 check_phase7_summary_comet_signal_surface "$easy_node_blockchain_summary_reports_integration_script" "easy-node summary-report integration"
+for phase7_runtime_summary_signal in \
+  "module_tx_surface_ok" \
+  "tdpnd_grpc_live_smoke_ok" \
+  "tdpnd_grpc_auth_live_smoke_ok"
+do
+  if ! rg -Fq "$phase7_runtime_summary_signal" "$easy_node_blockchain_summary_reports_integration_script"; then
+    echo "easy-node summary-report integration must validate phase7 runtime summary signal: $phase7_runtime_summary_signal"
+    exit 1
+  fi
+done
 if ! rg -Fq -- "--summary-json" "$easy_node_blockchain_summary_reports_integration_script"; then
   echo "easy-node summary-report integration must validate summary-json forwarding"
   exit 1
