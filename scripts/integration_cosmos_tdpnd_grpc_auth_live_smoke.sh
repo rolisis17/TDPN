@@ -21,12 +21,18 @@ TDPND_PID=""
 AUTH_TOKEN="${TDPND_GRPC_AUTH_LIVE_SMOKE_TOKEN:-tdpn-live-smoke-token}"
 MODULE_QUERY_CHECKS=(
   "tdpn.vpnbilling.v1.Query/ListCreditReservations|reservations"
+  "tdpn.vpnbilling.v1.Query/ListSettlementRecords|settlements"
   "tdpn.vpnrewards.v1.Query/ListRewardAccruals|accruals"
+  "tdpn.vpnrewards.v1.Query/ListDistributionRecords|distributions"
   "tdpn.vpnslashing.v1.Query/ListSlashEvidence|evidence"
   "tdpn.vpnslashing.v1.Query/ListPenaltyDecisions|penalties"
   "tdpn.vpnsponsor.v1.Query/ListSponsorAuthorizations|authorizations"
+  "tdpn.vpnsponsor.v1.Query/ListDelegatedSessionCredits|delegations"
   "tdpn.vpnvalidator.v1.Query/ListValidatorEligibilities|eligibilities"
+  "tdpn.vpnvalidator.v1.Query/ListValidatorStatusRecords|records"
   "tdpn.vpngovernance.v1.Query/ListGovernancePolicies|policies"
+  "tdpn.vpngovernance.v1.Query/ListGovernanceDecisions|decisions"
+  "tdpn.vpngovernance.v1.Query/ListGovernanceAuditActions|actions"
 )
 
 signal_runtime() {

@@ -773,8 +773,16 @@ func TestRunTDPNDGRPCModeAuthEnforcementAndHealth(t *testing.T) {
 		_, callErr := billingQuery.ListCreditReservations(callCtx, &vpnbillingpb.QueryListCreditReservationsRequest{})
 		return callErr
 	})
+	assertQueryAuthParity("vpnbilling/ListSettlementRecords", func(callCtx context.Context) error {
+		_, callErr := billingQuery.ListSettlementRecords(callCtx, &vpnbillingpb.QueryListSettlementRecordsRequest{})
+		return callErr
+	})
 	assertQueryAuthParity("vpnrewards/ListRewardAccruals", func(callCtx context.Context) error {
 		_, callErr := rewardsQuery.ListRewardAccruals(callCtx, &vpnrewardspb.QueryListRewardAccrualsRequest{})
+		return callErr
+	})
+	assertQueryAuthParity("vpnrewards/ListDistributionRecords", func(callCtx context.Context) error {
+		_, callErr := rewardsQuery.ListDistributionRecords(callCtx, &vpnrewardspb.QueryListDistributionRecordsRequest{})
 		return callErr
 	})
 	assertQueryAuthParity("vpnslashing/ListSlashEvidence", func(callCtx context.Context) error {
@@ -789,12 +797,28 @@ func TestRunTDPNDGRPCModeAuthEnforcementAndHealth(t *testing.T) {
 		_, callErr := sponsorQuery.ListSponsorAuthorizations(callCtx, &vpnsponsorpb.QueryListSponsorAuthorizationsRequest{})
 		return callErr
 	})
+	assertQueryAuthParity("vpnsponsor/ListDelegatedSessionCredits", func(callCtx context.Context) error {
+		_, callErr := sponsorQuery.ListDelegatedSessionCredits(callCtx, &vpnsponsorpb.QueryListDelegatedSessionCreditsRequest{})
+		return callErr
+	})
 	assertQueryAuthParity("vpnvalidator/ListValidatorEligibilities", func(callCtx context.Context) error {
 		_, callErr := validatorQuery.ListValidatorEligibilities(callCtx, &vpnvalidatorpb.QueryListValidatorEligibilitiesRequest{})
 		return callErr
 	})
+	assertQueryAuthParity("vpnvalidator/ListValidatorStatusRecords", func(callCtx context.Context) error {
+		_, callErr := validatorQuery.ListValidatorStatusRecords(callCtx, &vpnvalidatorpb.QueryListValidatorStatusRecordsRequest{})
+		return callErr
+	})
 	assertQueryAuthParity("vpngovernance/ListGovernancePolicies", func(callCtx context.Context) error {
 		_, callErr := governanceQuery.ListGovernancePolicies(callCtx, &vpngovernancepb.QueryListGovernancePoliciesRequest{})
+		return callErr
+	})
+	assertQueryAuthParity("vpngovernance/ListGovernanceDecisions", func(callCtx context.Context) error {
+		_, callErr := governanceQuery.ListGovernanceDecisions(callCtx, &vpngovernancepb.QueryListGovernanceDecisionsRequest{})
+		return callErr
+	})
+	assertQueryAuthParity("vpngovernance/ListGovernanceAuditActions", func(callCtx context.Context) error {
+		_, callErr := governanceQuery.ListGovernanceAuditActions(callCtx, &vpngovernancepb.QueryListGovernanceAuditActionsRequest{})
 		return callErr
 	})
 

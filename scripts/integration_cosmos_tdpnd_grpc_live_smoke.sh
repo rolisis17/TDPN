@@ -170,12 +170,18 @@ if command -v grpcurl >/dev/null 2>&1; then
   assert_grpc_services_include "${SERVICES}" "tdpn.vpnvalidator.v1.Query"
   assert_grpc_services_include "${SERVICES}" "tdpn.vpngovernance.v1.Query"
   assert_grpc_query_dispatch "${PORT}" "tdpn.vpnbilling.v1.Query/ListCreditReservations" "reservations"
+  assert_grpc_query_dispatch "${PORT}" "tdpn.vpnbilling.v1.Query/ListSettlementRecords" "settlements"
   assert_grpc_query_dispatch "${PORT}" "tdpn.vpnrewards.v1.Query/ListRewardAccruals" "accruals"
+  assert_grpc_query_dispatch "${PORT}" "tdpn.vpnrewards.v1.Query/ListDistributionRecords" "distributions"
   assert_grpc_query_dispatch "${PORT}" "tdpn.vpnslashing.v1.Query/ListSlashEvidence" "evidence"
   assert_grpc_query_dispatch "${PORT}" "tdpn.vpnslashing.v1.Query/ListPenaltyDecisions" "penalties"
   assert_grpc_query_dispatch "${PORT}" "tdpn.vpnsponsor.v1.Query/ListSponsorAuthorizations" "authorizations"
+  assert_grpc_query_dispatch "${PORT}" "tdpn.vpnsponsor.v1.Query/ListDelegatedSessionCredits" "delegations"
   assert_grpc_query_dispatch "${PORT}" "tdpn.vpnvalidator.v1.Query/ListValidatorEligibilities" "eligibilities"
+  assert_grpc_query_dispatch "${PORT}" "tdpn.vpnvalidator.v1.Query/ListValidatorStatusRecords" "records"
   assert_grpc_query_dispatch "${PORT}" "tdpn.vpngovernance.v1.Query/ListGovernancePolicies" "policies"
+  assert_grpc_query_dispatch "${PORT}" "tdpn.vpngovernance.v1.Query/ListGovernanceDecisions" "decisions"
+  assert_grpc_query_dispatch "${PORT}" "tdpn.vpngovernance.v1.Query/ListGovernanceAuditActions" "actions"
 else
   wait_for_tcp_ready "${PORT}"
   sleep 0.15

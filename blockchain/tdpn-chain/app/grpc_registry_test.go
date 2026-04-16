@@ -112,6 +112,38 @@ func TestRegisterGRPCServicesBillingAndSponsorRoundTrip(t *testing.T) {
 		t.Fatalf("expected at least one reservation in list")
 	}
 
+	finalizeResp, err := billingMsg.FinalizeUsage(ctx, &vpnbillingpb.MsgFinalizeUsageRequest{
+		Settlement: &vpnbillingpb.SettlementRecord{
+			SettlementId:  "set-grpc-1",
+			ReservationId: "res-grpc-1",
+			SessionId:     "sess-grpc-1",
+			BilledAmount:  750,
+			UsageBytes:    2048,
+			AssetDenom:    "utdpn",
+		},
+	})
+	if err != nil {
+		t.Fatalf("finalize usage: %v", err)
+	}
+	if finalizeResp.GetSettlement() == nil || finalizeResp.GetSettlement().GetSettlementId() != "set-grpc-1" {
+		t.Fatalf("expected finalized settlement set-grpc-1, got %+v", finalizeResp.GetSettlement())
+	}
+
+	settlementList, err := billingQuery.ListSettlementRecords(ctx, &vpnbillingpb.QueryListSettlementRecordsRequest{})
+	if err != nil {
+		t.Fatalf("list settlements: %v", err)
+	}
+	foundSettlement := false
+	for _, item := range settlementList.GetSettlements() {
+		if item.GetSettlementId() == "set-grpc-1" {
+			foundSettlement = true
+			break
+		}
+	}
+	if !foundSettlement {
+		t.Fatalf("expected settlement set-grpc-1 in list")
+	}
+
 	rewardsQuery := vpnrewardspb.NewQueryClient(conn)
 	if _, err := rewardsQuery.ListRewardAccruals(ctx, &vpnrewardspb.QueryListRewardAccrualsRequest{}); err != nil {
 		t.Fatalf("rewards list accruals: %v", err)
@@ -167,6 +199,21 @@ func TestRegisterGRPCServicesBillingAndSponsorRoundTrip(t *testing.T) {
 	}
 	if delegationResp.GetDelegation().GetAuthorizationId() != "auth-grpc-1" {
 		t.Fatalf("expected authorization id auth-grpc-1, got %q", delegationResp.GetDelegation().GetAuthorizationId())
+	}
+
+	delegationList, err := sponsorQuery.ListDelegatedSessionCredits(ctx, &vpnsponsorpb.QueryListDelegatedSessionCreditsRequest{})
+	if err != nil {
+		t.Fatalf("list delegated session credits: %v", err)
+	}
+	foundDelegation := false
+	for _, item := range delegationList.GetDelegations() {
+		if item.GetReservationId() == "res-delegate-grpc-1" {
+			foundDelegation = true
+			break
+		}
+	}
+	if !foundDelegation {
+		t.Fatalf("expected delegated session credit res-delegate-grpc-1 in list")
 	}
 }
 

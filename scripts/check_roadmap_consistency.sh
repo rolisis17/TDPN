@@ -560,9 +560,14 @@ if ! rg -Fq "PreviewEpochSelection" "$chain_grpc_registry_test_file"; then
   exit 1
 fi
 for app_roundtrip_contract in \
+  "ListSettlementRecords" \
+  "ListDistributionRecords" \
+  "ListDelegatedSessionCredits" \
+  "ListValidatorStatusRecords" \
+  "ListGovernanceDecisions" \
+  "ListGovernanceAuditActions" \
   "ListRewardAccruals" \
   "ListSlashEvidence" \
-  "ListDistributionRecords" \
   "ListPenaltyDecisions"
 do
   if ! rg -Fq "$app_roundtrip_contract" "$chain_grpc_registry_test_file"; then
@@ -587,6 +592,12 @@ if ! rg -Fq "TestRunTDPNDGRPCModeReflectionIncludesCoreModuleQueries" "$chain_ru
   exit 1
 fi
 for runtime_grpc_contract in \
+  "ListSettlementRecords" \
+  "ListDistributionRecords" \
+  "ListDelegatedSessionCredits" \
+  "ListValidatorStatusRecords" \
+  "ListGovernanceDecisions" \
+  "ListGovernanceAuditActions" \
   "ListRewardAccruals" \
   "ListSlashEvidence" \
   "ListPenaltyDecisions" \
@@ -628,12 +639,18 @@ do
 done
 for live_grpc_method in \
   "tdpn.vpnbilling.v1.Query/ListCreditReservations" \
+  "tdpn.vpnbilling.v1.Query/ListSettlementRecords" \
   "tdpn.vpnrewards.v1.Query/ListRewardAccruals" \
+  "tdpn.vpnrewards.v1.Query/ListDistributionRecords" \
   "tdpn.vpnslashing.v1.Query/ListSlashEvidence" \
   "tdpn.vpnslashing.v1.Query/ListPenaltyDecisions" \
   "tdpn.vpnsponsor.v1.Query/ListSponsorAuthorizations" \
+  "tdpn.vpnsponsor.v1.Query/ListDelegatedSessionCredits" \
   "tdpn.vpnvalidator.v1.Query/ListValidatorEligibilities" \
-  "tdpn.vpngovernance.v1.Query/ListGovernancePolicies"
+  "tdpn.vpnvalidator.v1.Query/ListValidatorStatusRecords" \
+  "tdpn.vpngovernance.v1.Query/ListGovernancePolicies" \
+  "tdpn.vpngovernance.v1.Query/ListGovernanceDecisions" \
+  "tdpn.vpngovernance.v1.Query/ListGovernanceAuditActions"
 do
   if ! rg -Fq "$live_grpc_method" "$phase6_grpc_live_smoke_script"; then
     echo "phase6 grpc live-smoke script must validate live query dispatch method: $live_grpc_method"
@@ -901,12 +918,18 @@ do
 done
 for grpc_auth_rpc_contract in \
   "tdpn.vpnbilling.v1.Query/ListCreditReservations" \
+  "tdpn.vpnbilling.v1.Query/ListSettlementRecords" \
   "tdpn.vpnrewards.v1.Query/ListRewardAccruals" \
+  "tdpn.vpnrewards.v1.Query/ListDistributionRecords" \
   "tdpn.vpnslashing.v1.Query/ListSlashEvidence" \
   "tdpn.vpnslashing.v1.Query/ListPenaltyDecisions" \
   "tdpn.vpnsponsor.v1.Query/ListSponsorAuthorizations" \
+  "tdpn.vpnsponsor.v1.Query/ListDelegatedSessionCredits" \
   "tdpn.vpnvalidator.v1.Query/ListValidatorEligibilities" \
-  "tdpn.vpngovernance.v1.Query/ListGovernancePolicies"
+  "tdpn.vpnvalidator.v1.Query/ListValidatorStatusRecords" \
+  "tdpn.vpngovernance.v1.Query/ListGovernancePolicies" \
+  "tdpn.vpngovernance.v1.Query/ListGovernanceDecisions" \
+  "tdpn.vpngovernance.v1.Query/ListGovernanceAuditActions"
 do
   if ! rg -Fq "$grpc_auth_rpc_contract" "$phase6_grpc_auth_live_smoke_script"; then
     echo "phase6 grpc auth live-smoke script must include module auth contract RPC: $grpc_auth_rpc_contract"
