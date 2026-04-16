@@ -127,6 +127,25 @@ command_has_profile_subject_or_anon_arg() {
   return 1
 }
 
+command_has_profile_subject_placeholder_invite_key() {
+  local command_text="${1:-}"
+  [[ "$command_text" =~ (^|[[:space:]])--campaign-subject([[:space:]=]+)INVITE_KEY([[:space:]]|$) ]] && return 0
+  [[ "$command_text" =~ (^|[[:space:]])--subject([[:space:]=]+)INVITE_KEY([[:space:]]|$) ]] && return 0
+  return 1
+}
+
+command_replace_profile_subject_placeholder() {
+  local command_text="${1:-}"
+  local subject_value="${2:-}"
+  local escaped_subject
+  escaped_subject="$(printf '%q' "$subject_value")"
+  command_text="${command_text//--campaign-subject INVITE_KEY/--campaign-subject ${escaped_subject}}"
+  command_text="${command_text//--subject INVITE_KEY/--subject ${escaped_subject}}"
+  command_text="${command_text//--campaign-subject=INVITE_KEY/--campaign-subject=${escaped_subject}}"
+  command_text="${command_text//--subject=INVITE_KEY/--subject=${escaped_subject}}"
+  printf '%s' "$command_text"
+}
+
 log_has_failure_kind_marker() {
   local log_path="${1:-}"
   local marker="${2:-}"
@@ -409,7 +428,9 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
   if [[ "$action_id" == "profile_default_gate" \
      && -n "$profile_default_gate_subject" \
      && -n "$action_command" ]]; then
-    if ! command_has_profile_subject_or_anon_arg "$action_command"; then
+    if command_has_profile_subject_placeholder_invite_key "$action_command"; then
+      action_command="$(command_replace_profile_subject_placeholder "$action_command" "$profile_default_gate_subject")"
+    elif ! command_has_profile_subject_or_anon_arg "$action_command"; then
       action_command="$action_command --campaign-subject $(printf '%q' "$profile_default_gate_subject")"
     fi
   fi

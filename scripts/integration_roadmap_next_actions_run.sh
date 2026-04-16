@@ -255,6 +255,15 @@ JSON
 }
 JSON
     ;;
+  profile_placeholder_subject_easy_node)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"profile_default_gate","label":"Profile default decision gate","command":"bash \"$FAKE_EASY_NODE\" profile-default-gate-run --reports-dir /tmp/fake_profile_reports --subject INVITE_KEY","reason":"test-precondition-placeholder-override"}
+  ]
+}
+JSON
+    ;;
   profile_unreachable_marker)
     cat >"$summary_json" <<JSON
 {
@@ -540,6 +549,45 @@ if ! jq -e '
 fi
 if ! grep -E -- '--campaign-subject[[:space:]]+inv-override-subject([[:space:]]|$)' "$FAKE_EASY_NODE_CAPTURE" >/dev/null; then
   echo "profile subject override command capture missing appended --campaign-subject"
+  cat "$FAKE_EASY_NODE_CAPTURE"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] profile subject override replaces INVITE_KEY placeholder subject"
+SUMMARY_PROFILE_PLACEHOLDER_OVERRIDE="$TMP_DIR/summary_profile_placeholder_override.json"
+REPORTS_PROFILE_PLACEHOLDER_OVERRIDE="$TMP_DIR/reports_profile_placeholder_override"
+: >"$FAKE_EASY_NODE_CAPTURE"
+ROADMAP_NEXT_ACTIONS_SCENARIO=profile_placeholder_subject_easy_node \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" MISSING_SUBJECT_PROFILE="$MISSING_SUBJECT_PROFILE" FAKE_EASY_NODE="$FAKE_EASY_NODE" FAKE_EASY_NODE_CAPTURE="$FAKE_EASY_NODE_CAPTURE" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_PROFILE_PLACEHOLDER_OVERRIDE" \
+  --summary-json "$SUMMARY_PROFILE_PLACEHOLDER_OVERRIDE" \
+  --profile-default-gate-subject inv-placeholder-replaced \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.profile_default_gate_subject == "inv-placeholder-replaced"
+  and ((.actions // []) | length == 1)
+  and .actions[0].id == "profile_default_gate"
+  and .actions[0].status == "pass"
+  and ((.actions[0].command // "") | contains("--subject inv-placeholder-replaced"))
+  and (((.actions[0].command // "") | contains("INVITE_KEY")) | not)
+  and (((.actions[0].command // "") | contains("--campaign-subject")) | not)
+' "$SUMMARY_PROFILE_PLACEHOLDER_OVERRIDE" >/dev/null; then
+  echo "profile placeholder override summary mismatch"
+  cat "$SUMMARY_PROFILE_PLACEHOLDER_OVERRIDE"
+  exit 1
+fi
+if ! grep -E -- '--subject[[:space:]]+inv-placeholder-replaced([[:space:]]|$)' "$FAKE_EASY_NODE_CAPTURE" >/dev/null; then
+  echo "profile placeholder override command capture missing replaced --subject"
+  cat "$FAKE_EASY_NODE_CAPTURE"
+  exit 1
+fi
+if grep -E -- 'INVITE_KEY' "$FAKE_EASY_NODE_CAPTURE" >/dev/null; then
+  echo "profile placeholder override command capture still contains INVITE_KEY"
   cat "$FAKE_EASY_NODE_CAPTURE"
   exit 1
 fi

@@ -450,6 +450,52 @@ resolve_profile_default_gate_signoff_status() {
   printf '%s\x1f%s' "$fallback_status" "$fallback_path"
 }
 
+profile_default_gate_command_supports_subject_placeholder_01() {
+  local cmd
+  cmd="$(trim "${1:-}")"
+  if [[ -z "$cmd" ]]; then
+    printf '0'
+    return
+  fi
+  if [[ "$cmd" =~ ^(sudo[[:space:]]+)?\./scripts/easy_node\.sh[[:space:]]+(profile-default-gate-run|profile-compare-campaign-signoff)([[:space:]]|$) ]]; then
+    printf '1'
+  else
+    printf '0'
+  fi
+}
+
+profile_default_gate_command_has_credential_args_01() {
+  local cmd
+  cmd="$(trim "${1:-}")"
+  if [[ -z "$cmd" ]]; then
+    printf '0'
+    return
+  fi
+  if [[ "$cmd" =~ (^|[[:space:]])(--campaign-subject|--subject|--campaign-anon-cred|--anon-cred)([[:space:]=]|$) ]]; then
+    printf '1'
+  else
+    printf '0'
+  fi
+}
+
+profile_default_gate_command_with_subject_placeholder() {
+  local cmd
+  cmd="$(trim "${1:-}")"
+  if [[ -z "$cmd" ]]; then
+    printf '%s' ""
+    return
+  fi
+  if [[ "$(profile_default_gate_command_supports_subject_placeholder_01 "$cmd")" != "1" ]]; then
+    printf '%s' "$cmd"
+    return
+  fi
+  if [[ "$(profile_default_gate_command_has_credential_args_01 "$cmd")" == "1" ]]; then
+    printf '%s' "$cmd"
+    return
+  fi
+  printf '%s --subject INVITE_KEY' "$cmd"
+}
+
 resilience_summary_usable_01() {
   local path="$1"
   if [[ ! -f "$path" ]]; then
@@ -5324,6 +5370,8 @@ if [[ -n "$profile_default_gate_signoff_status" ]]; then
     profile_compare_signoff_summary_json="$profile_default_gate_summary_json_manual"
   fi
 fi
+profile_default_gate_next_command="$(profile_default_gate_command_with_subject_placeholder "$profile_default_gate_next_command")"
+profile_default_gate_next_command_sudo="$(profile_default_gate_command_with_subject_placeholder "$profile_default_gate_next_command_sudo")"
 profile_default_gate_needs_attention_json="true"
 if [[ "$profile_default_gate_status" == "pass" || "$profile_default_gate_status" == "skip" ]]; then
   profile_default_gate_needs_attention_json="false"
@@ -5595,7 +5643,7 @@ non_blockchain_actionable_no_sudo_or_github_json="$(
 non_blockchain_recommended_gate_id="$(printf '%s\n' "$non_blockchain_actionable_no_sudo_or_github_json" | jq -r 'if length > 0 then .[0].id else "" end')"
 non_blockchain_actionable_no_sudo_or_github_count="$(printf '%s\n' "$non_blockchain_actionable_no_sudo_or_github_json" | jq -r 'length')"
 
-next_actions_json="$(jq -c --arg next_action_check_id "$next_action_check_id" --arg next_action_label "$next_action_label" --arg next_action_command "$next_action_command" --argjson profile_default_gate_needs_attention "$profile_default_gate_needs_attention_json" --argjson blockchain_mainnet_activation_missing_metrics_action_available "$blockchain_mainnet_activation_missing_metrics_action_available_json" --arg blockchain_mainnet_activation_missing_metrics_action_reason "$blockchain_mainnet_activation_missing_metrics_action_reason" --arg blockchain_mainnet_activation_missing_metrics_action_operator_pack_command "$blockchain_mainnet_activation_missing_metrics_action_operator_pack_command" '
+next_actions_json="$(jq -c --arg next_action_check_id "$next_action_check_id" --arg next_action_label "$next_action_label" --arg next_action_command "$next_action_command" --argjson profile_default_gate_needs_attention "$profile_default_gate_needs_attention_json" --arg profile_default_gate_next_command "$profile_default_gate_next_command" --argjson blockchain_mainnet_activation_missing_metrics_action_available "$blockchain_mainnet_activation_missing_metrics_action_available_json" --arg blockchain_mainnet_activation_missing_metrics_action_reason "$blockchain_mainnet_activation_missing_metrics_action_reason" --arg blockchain_mainnet_activation_missing_metrics_action_operator_pack_command "$blockchain_mainnet_activation_missing_metrics_action_operator_pack_command" '
   def unique_commands_preserve_order:
     reduce .[] as $item (
       [];
@@ -5614,10 +5662,10 @@ next_actions_json="$(jq -c --arg next_action_check_id "$next_action_check_id" --
       command: $next_action_command,
       reason: "primary roadmap gate"
     } else empty end),
-    (if ($profile_default_gate_needs_attention == true and ((.summary.profile_default_gate.next_command // .summary.profile_default_gate.command // .summary.profile_default_gate.next_command_sudo // "") != "")) then {
+    (if ($profile_default_gate_needs_attention == true and ($profile_default_gate_next_command // "") != "") then {
       id: "profile_default_gate",
       label: "Profile default decision gate",
-      command: (.summary.profile_default_gate.next_command // .summary.profile_default_gate.command // .summary.profile_default_gate.next_command_sudo // ""),
+      command: $profile_default_gate_next_command,
       reason: "non-blocking profile default decision"
     } else empty end),
     (if ($blockchain_mainnet_activation_missing_metrics_action_available == true and ($blockchain_mainnet_activation_missing_metrics_action_operator_pack_command // "") != "") then {

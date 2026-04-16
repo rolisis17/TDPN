@@ -1379,7 +1379,7 @@ if ! jq -e --arg src "$AUTO_MAINNET_GATE_SUMMARY_JSON" '
   and ((.blockchain_track.mainnet_activation_gate.reasons // []) | index("missing or invalid metric: measurement_window_weeks")) != null
   and ((.blockchain_track.mainnet_activation_gate.source_paths // []) | index("metrics_input")) != null
   and .blockchain_track.mainnet_activation_missing_metrics_action.available == true
-  and .blockchain_track.mainnet_activation_missing_metrics_action.id == "blockchain_mainnet_activation_missing_metrics_no_go"
+  and .blockchain_track.mainnet_activation_missing_metrics_action.id == "blockchain_mainnet_activation_missing_metrics"
   and ((.blockchain_track.mainnet_activation_missing_metrics_action.reason // "") | contains("required metrics evidence is missing/invalid"))
   and ((.blockchain_track.mainnet_activation_missing_metrics_action.normalize_command // "") | startswith("./scripts/easy_node.sh blockchain-mainnet-activation-metrics-input "))
   and ((.blockchain_track.mainnet_activation_missing_metrics_action.normalize_command // "") | contains("--input-json .easy-node-logs/blockchain_mainnet_activation_metrics_input.operator.json"))
@@ -2327,6 +2327,85 @@ if ! jq -e '
 ' "$TMP_DIR/roadmap_progress_optional_profile_hint_summary.json" >/dev/null; then
   echo "optional profile-hint summary JSON missing expected profile_default_gate guidance fields"
   cat "$TMP_DIR/roadmap_progress_optional_profile_hint_summary.json"
+  exit 1
+fi
+
+: >"$CAPTURE"
+
+echo "[roadmap-progress-report] profile default gate appends subject placeholder when credential args are missing"
+PROFILE_DEFAULT_GATE_SUBJECT_PLACEHOLDER_SUMMARY_JSON="$TMP_DIR/manual_validation_profile_default_subject_placeholder_summary.json"
+cat >"$PROFILE_DEFAULT_GATE_SUBJECT_PLACEHOLDER_SUMMARY_JSON" <<'EOF_PROFILE_DEFAULT_GATE_SUBJECT_PLACEHOLDER_SUMMARY'
+{
+  "version": 1,
+  "checks": [
+    {
+      "check_id": "runtime_hygiene",
+      "label": "Runtime hygiene doctor",
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh runtime-doctor --show-json 1"
+    },
+    {
+      "check_id": "wg_only_stack_selftest",
+      "label": "WG-only stack selftest",
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh wg-only-stack-selftest-record --strict-beta 1 --print-summary-json 1"
+    }
+  ],
+  "summary": {
+    "next_action_check_id": "",
+    "next_action_command": "",
+    "roadmap_stage": "READY_FOR_MACHINE_C_SMOKE",
+    "single_machine_ready": true,
+    "blocking_check_ids": [],
+    "optional_check_ids": ["three_machine_docker_readiness", "real_wg_privileged_matrix"],
+    "profile_default_gate": {
+      "status": "pending",
+      "notes": "profile compare campaign signoff decision is NO-GO but campaign-check evidence is insufficient/unstable; rerun with refresh-campaign=1",
+      "decision": "NO-GO",
+      "recommended_profile": "balanced",
+      "next_command": "./scripts/easy_node.sh profile-default-gate-run --reports-dir .easy-node-logs --directory-a http://127.0.0.1:18081 --directory-b http://127.0.0.1:28081 --campaign-issuer-url http://127.0.0.1:18082 --campaign-entry-url http://127.0.0.1:18083 --campaign-exit-url http://127.0.0.1:18084 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1",
+      "next_command_sudo": "sudo ./scripts/easy_node.sh profile-default-gate-run --reports-dir .easy-node-logs --directory-a http://127.0.0.1:18081 --directory-b http://127.0.0.1:28081 --campaign-issuer-url http://127.0.0.1:18082 --campaign-entry-url http://127.0.0.1:18083 --campaign-exit-url http://127.0.0.1:18084 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1",
+      "next_command_source": "docker_rehearsal_artifacts",
+      "docker_rehearsal_hint_available": true
+    },
+    "docker_rehearsal_gate": {
+      "status": "pass",
+      "command": "./scripts/easy_node.sh three-machine-docker-readiness-record --path-profile balanced --soak-rounds 6 --soak-pause-sec 3 --print-summary-json 1"
+    },
+    "real_wg_privileged_gate": {
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh real-wg-privileged-matrix-record --print-summary-json 1"
+    }
+  },
+  "report": {
+    "readiness_status": "NOT_READY"
+  }
+}
+EOF_PROFILE_DEFAULT_GATE_SUBJECT_PLACEHOLDER_SUMMARY
+
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$PROFILE_DEFAULT_GATE_SUBJECT_PLACEHOLDER_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_profile_default_subject_placeholder_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_profile_default_subject_placeholder_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_subject_placeholder.log 2>&1; then
+  echo "expected success when profile default gate command requires subject placeholder normalization"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_subject_placeholder.log
+  exit 1
+fi
+if ! jq -e '
+  def is_profile_gate_non_sudo_cmd($cmd):
+    (($cmd // "") | test("^\\./scripts/easy_node\\.sh (profile-default-gate-run|profile-compare-campaign-signoff)( |$)"));
+  def has_subject_placeholder($cmd):
+    (($cmd // "") | test("(^| )--subject INVITE_KEY( |$)"));
+  ((.next_actions // []) | any(.id == "profile_default_gate" and is_profile_gate_non_sudo_cmd(.command) and has_subject_placeholder(.command)))
+  and has_subject_placeholder(.vpn_track.profile_default_gate.next_command)
+  and has_subject_placeholder(.vpn_track.profile_default_gate.next_command_sudo)
+' "$TMP_DIR/roadmap_progress_profile_default_subject_placeholder_summary.json" >/dev/null; then
+  echo "profile default subject placeholder summary JSON missing expected INVITE_KEY placeholder command normalization"
+  cat "$TMP_DIR/roadmap_progress_profile_default_subject_placeholder_summary.json"
   exit 1
 fi
 
@@ -3422,8 +3501,11 @@ cat >"$FALLBACK_PHASE5_RICH_JSON" <<'EOF_FALLBACK_PHASE5_RICH'
   "settlement_acceptance_ok": true,
   "settlement_bridge_smoke_ok": true,
   "settlement_state_persistence_ok": true,
-  "settlement_adapter_roundtrip_status": "pass",
-  "settlement_adapter_roundtrip_ok": true,
+  "stages": {
+    "settlement_adapter_roundtrip": {
+      "status": "pass"
+    }
+  },
   "issuer_sponsor_api_live_smoke_status": "pass",
   "issuer_sponsor_api_live_smoke_ok": true,
   "issuer_settlement_status_live_smoke_status": "pass",
