@@ -820,6 +820,40 @@ profile_signoff_insufficient_evidence_01() {
   printf '%s' "$insufficient_evidence"
 }
 
+profile_gate_command_needs_subject_placeholder_01() {
+  local command_string="$1"
+  if [[ -z "$command_string" ]]; then
+    printf '0'
+    return
+  fi
+  if [[ "$command_string" == *"--campaign-subject "* || "$command_string" == *"--campaign-subject="* ]]; then
+    printf '0'
+    return
+  fi
+  if [[ "$command_string" == *"--subject "* || "$command_string" == *"--subject="* ]]; then
+    printf '0'
+    return
+  fi
+  if [[ "$command_string" == *"--campaign-anon-cred "* || "$command_string" == *"--campaign-anon-cred="* ]]; then
+    printf '0'
+    return
+  fi
+  if [[ "$command_string" == *"--anon-cred "* || "$command_string" == *"--anon-cred="* ]]; then
+    printf '0'
+    return
+  fi
+  printf '1'
+}
+
+append_profile_gate_subject_placeholder() {
+  local command_string="$1"
+  if [[ "$(profile_gate_command_needs_subject_placeholder_01 "$command_string")" != "1" ]]; then
+    printf '%s' "$command_string"
+    return
+  fi
+  printf '%s --campaign-subject INVITE_KEY' "$command_string"
+}
+
 build_profile_default_gate_json() {
   local signoff_summary_json="$1"
   local docker_rehearsal_check_json="${2:-}"
@@ -838,6 +872,7 @@ build_profile_default_gate_json() {
   local next_command_sudo=""
   local next_command_source="default_non_sudo"
   local next_command_sudo_only_reason=""
+  local next_command_missing_credentials="0"
   local subject_fallback_guidance="subject fallback when --subject is omitted: CAMPAIGN_SUBJECT (preferred), INVITE_KEY fallback"
   local available="0"
   local valid_json="0"
@@ -1123,7 +1158,16 @@ build_profile_default_gate_json() {
       fi
     fi
   fi
-  if [[ "$status" == "pending" && ( "$next_command" == *"profile-compare-campaign-signoff"* || "$next_command" == *"profile-default-gate-run"* ) && "$next_command" != *"--subject "* && "$next_command" != *"--campaign-subject "* ]]; then
+  if [[ ( "$next_command" == *"profile-compare-campaign-signoff"* || "$next_command" == *"profile-default-gate-run"* ) && "$(profile_gate_command_needs_subject_placeholder_01 "$next_command")" == "1" ]]; then
+    next_command="$(append_profile_gate_subject_placeholder "$next_command")"
+    if [[ "$status" == "pending" ]]; then
+      next_command_missing_credentials="1"
+    fi
+  fi
+  if [[ ( "$next_command_sudo" == *"profile-compare-campaign-signoff"* || "$next_command_sudo" == *"profile-default-gate-run"* ) && "$(profile_gate_command_needs_subject_placeholder_01 "$next_command_sudo")" == "1" ]]; then
+    next_command_sudo="$(append_profile_gate_subject_placeholder "$next_command_sudo")"
+  fi
+  if [[ "$status" == "pending" && "$next_command_missing_credentials" == "1" ]]; then
     if [[ "$notes" != *"$subject_fallback_guidance"* ]]; then
       notes="$notes; $subject_fallback_guidance"
     fi

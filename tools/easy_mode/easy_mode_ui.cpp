@@ -5012,6 +5012,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --campaign-execution-mode docker"
           << " --campaign-bootstrap-directory " << shellEscape(bootstrapDir)
           << " --campaign-discovery-wait-sec " << shellEscape(discoveryWaitSec)
+          << " --subject ${CAMPAIGN_SUBJECT:-${INVITE_KEY:-INVITE_KEY}}"
           << " --campaign-start-local-stack 0"
           << " --print-summary-json " << (printSummaryJson ? "1" : "0")
           << " --show-json " << (showJson ? "1" : "0");

@@ -614,6 +614,8 @@ if ! printf '%s\n' "$profile_blocked_report_json" | jq -e '
   and .summary.profile_default_gate.failure_stage == "campaign"
   and .summary.profile_default_gate.non_root_refresh_blocked == true
   and (.summary.profile_default_gate.next_command | startswith("sudo ./scripts/easy_node.sh profile-compare-campaign-signoff"))
+  and (.summary.profile_default_gate.next_command | contains("--campaign-subject INVITE_KEY"))
+  and ((.summary.profile_default_gate.next_command | split("--campaign-subject") | length) == 2)
   and (.summary.profile_default_gate.next_command | contains("--summary-json '"$PROFILE_SIGNOFF_SUMMARY_JSON"'"))
 ' >/dev/null; then
   echo "manual validation report profile-blocked JSON missing expected profile_default_gate fields"
@@ -666,6 +668,8 @@ if ! printf '%s\n' "$profile_stale_report_json" | jq -e '
   and .summary.profile_default_gate.stale_non_refreshed == true
   and .summary.profile_default_gate.refresh_campaign == false
   and (.summary.profile_default_gate.next_command | startswith("sudo ./scripts/easy_node.sh profile-compare-campaign-signoff"))
+  and (.summary.profile_default_gate.next_command | contains("--campaign-subject INVITE_KEY"))
+  and ((.summary.profile_default_gate.next_command | split("--campaign-subject") | length) == 2)
   and (.summary.profile_default_gate.next_command | contains("--summary-json '"$PROFILE_SIGNOFF_SUMMARY_JSON"'"))
 ' >/dev/null; then
   echo "manual validation report profile-stale JSON missing expected profile_default_gate fields"
@@ -762,7 +766,7 @@ RUNTIME_DOCTOR_SCRIPT="$FAKE_DOCTOR" \
   --print-report 0 \
   --print-summary-json 1 >$PROFILE_NO_GO_INSUFFICIENT_REPORT_LOG
 
-if ! rg -q '\[manual-validation-report\] profile_default_gate_next_command_sudo=sudo \./scripts/easy_node\.sh profile-compare-campaign-signoff' $PROFILE_NO_GO_INSUFFICIENT_REPORT_LOG; then
+if ! rg -q '\[manual-validation-report\] profile_default_gate_next_command_sudo=sudo \./scripts/easy_node\.sh profile-default-gate-run' $PROFILE_NO_GO_INSUFFICIENT_REPORT_LOG; then
   echo "manual validation report no-go-insufficient run missing profile_default_gate_next_command_sudo line"
   cat $PROFILE_NO_GO_INSUFFICIENT_REPORT_LOG
   exit 1
@@ -777,13 +781,29 @@ if ! printf '%s\n' "$profile_no_go_insufficient_report_json" | jq -e --arg matri
   .summary.profile_default_gate.status == "pending"
   and .summary.profile_default_gate.insufficient_evidence == true
   and .summary.profile_default_gate.docker_rehearsal_hint_available == true
-  and (.summary.profile_default_gate.next_command | startswith("./scripts/easy_node.sh profile-compare-campaign-signoff"))
-  and (.summary.profile_default_gate.next_command | contains("--campaign-execution-mode docker"))
-  and (.summary.profile_default_gate.next_command | contains("--campaign-start-local-stack 0"))
-  and (.summary.profile_default_gate.next_command | contains("--campaign-directory-urls"))
+  and (.summary.profile_default_gate.next_command | startswith("./scripts/easy_node.sh profile-default-gate-run"))
+  and (.summary.profile_default_gate.next_command | contains("--campaign-execution-mode docker") | not)
+  and (.summary.profile_default_gate.next_command | contains("--campaign-start-local-stack") | not)
+  and (.summary.profile_default_gate.next_command | contains("--campaign-directory-urls") | not)
+  and (.summary.profile_default_gate.next_command | contains("--refresh-campaign") | not)
+  and (.summary.profile_default_gate.next_command | contains("--fail-on-no-go") | not)
   and (.summary.profile_default_gate.next_command | contains("18081"))
   and (.summary.profile_default_gate.next_command | contains("28081"))
-  and (.summary.profile_default_gate.next_command_sudo | startswith("sudo ./scripts/easy_node.sh profile-compare-campaign-signoff"))
+  and (.summary.profile_default_gate.next_command | contains("--campaign-timeout-sec 1200"))
+  and (.summary.profile_default_gate.next_command | contains("--campaign-issuer-url http://127.0.0.1:18082"))
+  and (.summary.profile_default_gate.next_command | contains("--campaign-entry-url http://127.0.0.1:18083"))
+  and (.summary.profile_default_gate.next_command | contains("--campaign-exit-url http://127.0.0.1:18084"))
+  and (.summary.profile_default_gate.next_command | contains("--campaign-subject INVITE_KEY"))
+  and ((.summary.profile_default_gate.next_command | split("--campaign-subject") | length) == 2)
+  and (.summary.profile_default_gate.next_command_sudo | startswith("sudo ./scripts/easy_node.sh profile-default-gate-run"))
+  and (.summary.profile_default_gate.next_command_sudo | contains("--campaign-execution-mode docker") | not)
+  and (.summary.profile_default_gate.next_command_sudo | contains("--campaign-start-local-stack") | not)
+  and (.summary.profile_default_gate.next_command_sudo | contains("--campaign-directory-urls") | not)
+  and (.summary.profile_default_gate.next_command_sudo | contains("--refresh-campaign") | not)
+  and (.summary.profile_default_gate.next_command_sudo | contains("--fail-on-no-go") | not)
+  and (.summary.profile_default_gate.next_command_sudo | contains("--campaign-timeout-sec 1200"))
+  and (.summary.profile_default_gate.next_command_sudo | contains("--campaign-subject INVITE_KEY"))
+  and ((.summary.profile_default_gate.next_command_sudo | split("--campaign-subject") | length) == 2)
   and (.summary.profile_default_gate.next_command_source | test("docker"))
   and .summary.profile_default_gate.artifacts.docker_rehearsal_matrix_summary_json == $matrix
   and .summary.profile_default_gate.artifacts.docker_rehearsal_profile_summary_json == $profile
@@ -821,11 +841,21 @@ if ! printf '%s\n' "$profile_invalid_summary_report_json" | jq -e '
   and .summary.profile_default_gate.valid_json == false
   and (.summary.profile_default_gate.notes | contains("summary JSON is invalid"))
   and (
-    (.summary.profile_default_gate.next_command | startswith("./scripts/easy_node.sh profile-compare-campaign-signoff"))
+    (.summary.profile_default_gate.next_command | startswith("./scripts/easy_node.sh profile-default-gate-run"))
     or
-    (.summary.profile_default_gate.next_command | startswith("sudo ./scripts/easy_node.sh profile-compare-campaign-signoff"))
+    (.summary.profile_default_gate.next_command | startswith("sudo ./scripts/easy_node.sh profile-default-gate-run"))
   )
-  and (.summary.profile_default_gate.next_command_sudo | startswith("sudo ./scripts/easy_node.sh profile-compare-campaign-signoff"))
+  and (.summary.profile_default_gate.next_command | contains("--directory-a http://127.0.0.1:18081"))
+  and (.summary.profile_default_gate.next_command | contains("--directory-b http://127.0.0.1:28081"))
+  and (.summary.profile_default_gate.next_command | contains("--campaign-timeout-sec 1200"))
+  and (.summary.profile_default_gate.next_command | contains("--campaign-subject INVITE_KEY"))
+  and ((.summary.profile_default_gate.next_command | split("--campaign-subject") | length) == 2)
+  and (.summary.profile_default_gate.next_command_sudo | startswith("sudo ./scripts/easy_node.sh profile-default-gate-run"))
+  and (.summary.profile_default_gate.next_command_sudo | contains("--directory-a http://127.0.0.1:18081"))
+  and (.summary.profile_default_gate.next_command_sudo | contains("--directory-b http://127.0.0.1:28081"))
+  and (.summary.profile_default_gate.next_command_sudo | contains("--campaign-timeout-sec 1200"))
+  and (.summary.profile_default_gate.next_command_sudo | contains("--campaign-subject INVITE_KEY"))
+  and ((.summary.profile_default_gate.next_command_sudo | split("--campaign-subject") | length) == 2)
   and (.summary.profile_default_gate.next_command | contains("--summary-json '"$PROFILE_SIGNOFF_SUMMARY_JSON"'"))
 ' >/dev/null; then
   echo "manual validation report profile-invalid-summary JSON missing expected profile_default_gate fields"
@@ -943,6 +973,10 @@ EOF_STATUS_TIMEOUT
     and .summary.next_action_check_id == "manual_validation_status_timeout"
     and .summary.local_gate.next_check_id == "manual_validation_status_timeout"
     and .summary.roadmap_stage == "BLOCKED_LOCAL"
+    and (.summary.profile_default_gate.next_command | contains("--campaign-subject INVITE_KEY"))
+    and ((.summary.profile_default_gate.next_command | split("--campaign-subject") | length) == 2)
+    and (.summary.profile_default_gate.next_command_sudo | contains("--campaign-subject INVITE_KEY"))
+    and ((.summary.profile_default_gate.next_command_sudo | split("--campaign-subject") | length) == 2)
     and ((.runtime_doctor.findings[0].code // "") == "manual_validation_status_timeout")
   ' "$TMP_DIR/timeout_status_summary.json" >/dev/null; then
     echo "manual validation report timeout run JSON missing expected timeout fallback fields"
