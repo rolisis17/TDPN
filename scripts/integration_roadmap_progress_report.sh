@@ -513,7 +513,10 @@ cat >"$PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_JSON" <<'EOF_PHASE7_SUMMARY_REPORT'
   "status": "pass",
   "rc": 0,
   "signals": {
-    "tdpnd_grpc_live_smoke_ok": true
+    "tdpnd_grpc_live_smoke_ok": true,
+    "module_tx_surface_ok": true,
+    "tdpnd_grpc_auth_live_smoke_ok": true,
+    "tdpnd_comet_runtime_smoke_ok": true
   },
   "summaries": {
     "check": {
@@ -527,6 +530,9 @@ cat >"$PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_JSON" <<'EOF_PHASE7_SUMMARY_REPORT'
       "signal_snapshot": {
         "mainnet_activation_gate_go": true,
         "tdpnd_grpc_live_smoke_ok": true,
+        "module_tx_surface_ok": true,
+        "tdpnd_grpc_auth_live_smoke_ok": true,
+        "tdpnd_comet_runtime_smoke_ok": true,
         "cosmos_module_coverage_floor_ok": true,
         "cosmos_keeper_coverage_floor_ok": true,
         "cosmos_app_coverage_floor_ok": true,
@@ -545,6 +551,9 @@ cat >"$PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_JSON" <<'EOF_PHASE7_SUMMARY_REPORT'
       "signal_snapshot": {
         "mainnet_activation_gate_go": true,
         "tdpnd_grpc_live_smoke_ok": true,
+        "module_tx_surface_ok": true,
+        "tdpnd_grpc_auth_live_smoke_ok": true,
+        "tdpnd_comet_runtime_smoke_ok": true,
         "cosmos_module_coverage_floor_ok": true,
         "cosmos_keeper_coverage_floor_ok": true,
         "cosmos_app_coverage_floor_ok": true,
@@ -563,6 +572,9 @@ cat >"$PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_JSON" <<'EOF_PHASE7_SUMMARY_REPORT'
       "signal_snapshot": {
         "mainnet_activation_gate_go": true,
         "tdpnd_grpc_live_smoke_ok": true,
+        "module_tx_surface_ok": true,
+        "tdpnd_grpc_auth_live_smoke_ok": true,
+        "tdpnd_comet_runtime_smoke_ok": true,
         "cosmos_module_coverage_floor_ok": true,
         "cosmos_keeper_coverage_floor_ok": true,
         "cosmos_app_coverage_floor_ok": true,
@@ -581,6 +593,9 @@ cat >"$PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_JSON" <<'EOF_PHASE7_SUMMARY_REPORT'
       "signal_snapshot": {
         "mainnet_activation_gate_go": true,
         "tdpnd_grpc_live_smoke_ok": true,
+        "module_tx_surface_ok": true,
+        "tdpnd_grpc_auth_live_smoke_ok": true,
+        "tdpnd_comet_runtime_smoke_ok": true,
         "cosmos_module_coverage_floor_ok": true,
         "cosmos_keeper_coverage_floor_ok": true,
         "cosmos_app_coverage_floor_ok": true,
@@ -683,6 +698,9 @@ if ! jq -e '
   and .blockchain_track.phase7_mainnet_cutover_summary_report.status == "pass"
   and .blockchain_track.phase7_mainnet_cutover_summary_report.mainnet_activation_gate_go_ok == true
   and .blockchain_track.phase7_mainnet_cutover_summary_report.tdpnd_grpc_live_smoke_ok == true
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.module_tx_surface_ok == true
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.tdpnd_grpc_auth_live_smoke_ok == true
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.tdpnd_comet_runtime_smoke_ok == true
   and .blockchain_track.phase7_mainnet_cutover_summary_report.cosmos_module_coverage_floor_ok == true
   and .blockchain_track.phase7_mainnet_cutover_summary_report.cosmos_keeper_coverage_floor_ok == true
   and .blockchain_track.phase7_mainnet_cutover_summary_report.cosmos_app_coverage_floor_ok == true
@@ -835,6 +853,21 @@ if ! rg -q 'Phase-7 mainnet cutover tdpnd_grpc_live_smoke_ok: true' "$REPORT_MD"
   cat "$REPORT_MD"
   exit 1
 fi
+if ! rg -q 'Phase-7 mainnet cutover module_tx_surface_ok: true' "$REPORT_MD"; then
+  echo "report markdown missing phase7 module_tx_surface_ok line"
+  cat "$REPORT_MD"
+  exit 1
+fi
+if ! rg -q 'Phase-7 mainnet cutover tdpnd_grpc_auth_live_smoke_ok: true' "$REPORT_MD"; then
+  echo "report markdown missing phase7 tdpnd_grpc_auth_live_smoke_ok line"
+  cat "$REPORT_MD"
+  exit 1
+fi
+if ! rg -q 'Phase-7 mainnet cutover tdpnd_comet_runtime_smoke_ok: true' "$REPORT_MD"; then
+  echo "report markdown missing phase7 tdpnd_comet_runtime_smoke_ok line"
+  cat "$REPORT_MD"
+  exit 1
+fi
 if ! rg -q 'Phase-7 mainnet cutover cosmos_module_coverage_floor_ok: true' "$REPORT_MD"; then
   echo "report markdown missing phase7 cosmos_module_coverage_floor_ok line"
   cat "$REPORT_MD"
@@ -885,6 +918,9 @@ if ! jq -e '
   and .blockchain_track.phase7_mainnet_cutover_summary_report.status == "missing"
   and .blockchain_track.phase7_mainnet_cutover_summary_report.mainnet_activation_gate_go_ok == null
   and .blockchain_track.phase7_mainnet_cutover_summary_report.tdpnd_grpc_live_smoke_ok == null
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.module_tx_surface_ok == null
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.tdpnd_grpc_auth_live_smoke_ok == null
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.tdpnd_comet_runtime_smoke_ok == null
   and .blockchain_track.phase7_mainnet_cutover_summary_report.cosmos_module_coverage_floor_ok == null
   and .blockchain_track.phase7_mainnet_cutover_summary_report.cosmos_keeper_coverage_floor_ok == null
   and .blockchain_track.phase7_mainnet_cutover_summary_report.cosmos_app_coverage_floor_ok == null
@@ -923,6 +959,9 @@ if ! jq -e --arg src "$PHASE7_MAINNET_CUTOVER_CHECK_SUMMARY_JSON" '
   .blockchain_track.phase7_mainnet_cutover_summary_report.available == true
   and .blockchain_track.phase7_mainnet_cutover_summary_report.mainnet_activation_gate_go_ok == true
   and .blockchain_track.phase7_mainnet_cutover_summary_report.tdpnd_grpc_live_smoke_ok == null
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.module_tx_surface_ok == null
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.tdpnd_grpc_auth_live_smoke_ok == null
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.tdpnd_comet_runtime_smoke_ok == null
   and .blockchain_track.phase7_mainnet_cutover_summary_report.cosmos_module_coverage_floor_ok == null
   and .blockchain_track.phase7_mainnet_cutover_summary_report.cosmos_keeper_coverage_floor_ok == null
   and .blockchain_track.phase7_mainnet_cutover_summary_report.cosmos_app_coverage_floor_ok == null
@@ -970,6 +1009,9 @@ if ! jq -e --arg src "$PHASE7_MAINNET_CUTOVER_CHECK_NO_GO_SUMMARY_JSON" '
   .blockchain_track.phase7_mainnet_cutover_summary_report.available == true
   and .blockchain_track.phase7_mainnet_cutover_summary_report.mainnet_activation_gate_go_ok == false
   and .blockchain_track.phase7_mainnet_cutover_summary_report.tdpnd_grpc_live_smoke_ok == null
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.module_tx_surface_ok == null
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.tdpnd_grpc_auth_live_smoke_ok == null
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.tdpnd_comet_runtime_smoke_ok == null
   and .blockchain_track.phase7_mainnet_cutover_summary_report.cosmos_module_coverage_floor_ok == null
   and .blockchain_track.phase7_mainnet_cutover_summary_report.cosmos_keeper_coverage_floor_ok == null
   and .blockchain_track.phase7_mainnet_cutover_summary_report.cosmos_app_coverage_floor_ok == null
@@ -1010,6 +1052,9 @@ if ! jq -e '
   and .blockchain_track.phase7_mainnet_cutover_summary_report.status == "invalid"
   and .blockchain_track.phase7_mainnet_cutover_summary_report.mainnet_activation_gate_go_ok == null
   and .blockchain_track.phase7_mainnet_cutover_summary_report.tdpnd_grpc_live_smoke_ok == null
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.module_tx_surface_ok == null
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.tdpnd_grpc_auth_live_smoke_ok == null
+  and .blockchain_track.phase7_mainnet_cutover_summary_report.tdpnd_comet_runtime_smoke_ok == null
   and .blockchain_track.phase7_mainnet_cutover_summary_report.cosmos_module_coverage_floor_ok == null
   and .blockchain_track.phase7_mainnet_cutover_summary_report.cosmos_keeper_coverage_floor_ok == null
   and .blockchain_track.phase7_mainnet_cutover_summary_report.cosmos_app_coverage_floor_ok == null

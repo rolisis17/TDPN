@@ -2349,18 +2349,25 @@ do
     exit 1
   fi
 done
-if ! rg -Fq ".blockchain_track.phase7_mainnet_cutover_summary_report.tdpnd_grpc_live_smoke_ok" "$roadmap_script"; then
-  echo "roadmap progress report helper must surface phase7 summary signal under blockchain_track.phase7_mainnet_cutover_summary_report: tdpnd_grpc_live_smoke_ok"
-  exit 1
-fi
-if ! rg -Fq ".blockchain_track.phase7_mainnet_cutover_summary_report.tdpnd_grpc_live_smoke_ok" "$roadmap_integration_script"; then
-  echo "roadmap progress report integration script must validate phase7 summary signal under blockchain_track.phase7_mainnet_cutover_summary_report: tdpnd_grpc_live_smoke_ok"
-  exit 1
-fi
-if ! rg -Fq "Phase-7 mainnet cutover tdpnd_grpc_live_smoke_ok" "$roadmap_script"; then
-  echo "roadmap progress report helper markdown summary must print phase7 summary signal line: tdpnd_grpc_live_smoke_ok"
-  exit 1
-fi
+for phase7_summary_runtime_signal in \
+  "module_tx_surface_ok" \
+  "tdpnd_grpc_live_smoke_ok" \
+  "tdpnd_grpc_auth_live_smoke_ok" \
+  "tdpnd_comet_runtime_smoke_ok"
+do
+  if ! rg -Fq ".blockchain_track.phase7_mainnet_cutover_summary_report.${phase7_summary_runtime_signal}" "$roadmap_script"; then
+    echo "roadmap progress report helper must surface phase7 summary signal under blockchain_track.phase7_mainnet_cutover_summary_report: ${phase7_summary_runtime_signal}"
+    exit 1
+  fi
+  if ! rg -Fq ".blockchain_track.phase7_mainnet_cutover_summary_report.${phase7_summary_runtime_signal}" "$roadmap_integration_script"; then
+    echo "roadmap progress report integration script must validate phase7 summary signal under blockchain_track.phase7_mainnet_cutover_summary_report: ${phase7_summary_runtime_signal}"
+    exit 1
+  fi
+  if ! rg -Fq "Phase-7 mainnet cutover ${phase7_summary_runtime_signal}" "$roadmap_script"; then
+    echo "roadmap progress report helper markdown summary must print phase7 summary signal line: ${phase7_summary_runtime_signal}"
+    exit 1
+  fi
+done
 if ! rg -Fq "ROADMAP_PROGRESS_LOG_DIR" "$roadmap_script"; then
   echo "roadmap progress report helper must expose ROADMAP_PROGRESS_LOG_DIR log-root override for deterministic isolated runs"
   exit 1

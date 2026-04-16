@@ -4074,6 +4074,9 @@ phase7_mainnet_cutover_summary_handoff_check_ok_json="null"
 phase7_mainnet_cutover_summary_handoff_run_ok_json="null"
 phase7_mainnet_cutover_summary_mainnet_activation_gate_go_ok_json="null"
 phase7_mainnet_cutover_summary_tdpnd_grpc_live_smoke_ok_json="null"
+phase7_mainnet_cutover_summary_module_tx_surface_ok_json="null"
+phase7_mainnet_cutover_summary_tdpnd_grpc_auth_live_smoke_ok_json="null"
+phase7_mainnet_cutover_summary_tdpnd_comet_runtime_smoke_ok_json="null"
 phase7_mainnet_cutover_summary_cosmos_module_coverage_floor_ok_json="null"
 phase7_mainnet_cutover_summary_cosmos_keeper_coverage_floor_ok_json="null"
 phase7_mainnet_cutover_summary_cosmos_app_coverage_floor_ok_json="null"
@@ -4186,6 +4189,63 @@ if [[ -n "$phase7_mainnet_cutover_summary_json" ]]; then
           elif (.handoff.tdpnd_grpc_live_smoke | type) == "boolean" then .handoff.tdpnd_grpc_live_smoke
           elif (.tdpnd_grpc_live_smoke_ok | type) == "boolean" then .tdpnd_grpc_live_smoke_ok
           elif (.tdpnd_grpc_live_smoke | type) == "boolean" then .tdpnd_grpc_live_smoke
+          else empty end')"
+      phase7_mainnet_cutover_summary_module_tx_surface_ok_json="$(phase7_mainnet_cutover_bool_value_or_null \
+        "$phase7_mainnet_cutover_summary_source_summary_json" \
+        'if (.signals.module_tx_surface_ok | type) == "boolean" then .signals.module_tx_surface_ok
+          elif (.signals.module_tx_surface | type) == "boolean" then .signals.module_tx_surface
+          elif (.summaries.check.signal_snapshot.module_tx_surface_ok | type) == "boolean" then .summaries.check.signal_snapshot.module_tx_surface_ok
+          elif (.summaries.check.signal_snapshot.module_tx_surface | type) == "boolean" then .summaries.check.signal_snapshot.module_tx_surface
+          elif (.summaries.run.signal_snapshot.module_tx_surface_ok | type) == "boolean" then .summaries.run.signal_snapshot.module_tx_surface_ok
+          elif (.summaries.run.signal_snapshot.module_tx_surface | type) == "boolean" then .summaries.run.signal_snapshot.module_tx_surface
+          elif (.summaries.handoff_check.signal_snapshot.module_tx_surface_ok | type) == "boolean" then .summaries.handoff_check.signal_snapshot.module_tx_surface_ok
+          elif (.summaries.handoff_check.signal_snapshot.module_tx_surface | type) == "boolean" then .summaries.handoff_check.signal_snapshot.module_tx_surface
+          elif (.summaries.handoff_run.signal_snapshot.module_tx_surface_ok | type) == "boolean" then .summaries.handoff_run.signal_snapshot.module_tx_surface_ok
+          elif (.summaries.handoff_run.signal_snapshot.module_tx_surface | type) == "boolean" then .summaries.handoff_run.signal_snapshot.module_tx_surface
+          elif (.steps.phase7_mainnet_cutover_check.signal_snapshot.module_tx_surface_ok | type) == "boolean" then .steps.phase7_mainnet_cutover_check.signal_snapshot.module_tx_surface_ok
+          elif (.steps.phase7_mainnet_cutover_check.signal_snapshot.module_tx_surface | type) == "boolean" then .steps.phase7_mainnet_cutover_check.signal_snapshot.module_tx_surface
+          elif (.handoff.module_tx_surface_ok | type) == "boolean" then .handoff.module_tx_surface_ok
+          elif (.handoff.module_tx_surface | type) == "boolean" then .handoff.module_tx_surface
+          elif (.module_tx_surface_ok | type) == "boolean" then .module_tx_surface_ok
+          elif (.module_tx_surface | type) == "boolean" then .module_tx_surface
+          else empty end')"
+      phase7_mainnet_cutover_summary_tdpnd_grpc_auth_live_smoke_ok_json="$(phase7_mainnet_cutover_bool_value_or_null \
+        "$phase7_mainnet_cutover_summary_source_summary_json" \
+        'if (.signals.tdpnd_grpc_auth_live_smoke_ok | type) == "boolean" then .signals.tdpnd_grpc_auth_live_smoke_ok
+          elif (.signals.tdpnd_grpc_auth_live_smoke | type) == "boolean" then .signals.tdpnd_grpc_auth_live_smoke
+          elif (.summaries.check.signal_snapshot.tdpnd_grpc_auth_live_smoke_ok | type) == "boolean" then .summaries.check.signal_snapshot.tdpnd_grpc_auth_live_smoke_ok
+          elif (.summaries.check.signal_snapshot.tdpnd_grpc_auth_live_smoke | type) == "boolean" then .summaries.check.signal_snapshot.tdpnd_grpc_auth_live_smoke
+          elif (.summaries.run.signal_snapshot.tdpnd_grpc_auth_live_smoke_ok | type) == "boolean" then .summaries.run.signal_snapshot.tdpnd_grpc_auth_live_smoke_ok
+          elif (.summaries.run.signal_snapshot.tdpnd_grpc_auth_live_smoke | type) == "boolean" then .summaries.run.signal_snapshot.tdpnd_grpc_auth_live_smoke
+          elif (.summaries.handoff_check.signal_snapshot.tdpnd_grpc_auth_live_smoke_ok | type) == "boolean" then .summaries.handoff_check.signal_snapshot.tdpnd_grpc_auth_live_smoke_ok
+          elif (.summaries.handoff_check.signal_snapshot.tdpnd_grpc_auth_live_smoke | type) == "boolean" then .summaries.handoff_check.signal_snapshot.tdpnd_grpc_auth_live_smoke
+          elif (.summaries.handoff_run.signal_snapshot.tdpnd_grpc_auth_live_smoke_ok | type) == "boolean" then .summaries.handoff_run.signal_snapshot.tdpnd_grpc_auth_live_smoke_ok
+          elif (.summaries.handoff_run.signal_snapshot.tdpnd_grpc_auth_live_smoke | type) == "boolean" then .summaries.handoff_run.signal_snapshot.tdpnd_grpc_auth_live_smoke
+          elif (.steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_grpc_auth_live_smoke_ok | type) == "boolean" then .steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_grpc_auth_live_smoke_ok
+          elif (.steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_grpc_auth_live_smoke | type) == "boolean" then .steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_grpc_auth_live_smoke
+          elif (.handoff.tdpnd_grpc_auth_live_smoke_ok | type) == "boolean" then .handoff.tdpnd_grpc_auth_live_smoke_ok
+          elif (.handoff.tdpnd_grpc_auth_live_smoke | type) == "boolean" then .handoff.tdpnd_grpc_auth_live_smoke
+          elif (.tdpnd_grpc_auth_live_smoke_ok | type) == "boolean" then .tdpnd_grpc_auth_live_smoke_ok
+          elif (.tdpnd_grpc_auth_live_smoke | type) == "boolean" then .tdpnd_grpc_auth_live_smoke
+          else empty end')"
+      phase7_mainnet_cutover_summary_tdpnd_comet_runtime_smoke_ok_json="$(phase7_mainnet_cutover_bool_value_or_null \
+        "$phase7_mainnet_cutover_summary_source_summary_json" \
+        'if (.signals.tdpnd_comet_runtime_smoke_ok | type) == "boolean" then .signals.tdpnd_comet_runtime_smoke_ok
+          elif (.signals.tdpnd_comet_runtime_smoke | type) == "boolean" then .signals.tdpnd_comet_runtime_smoke
+          elif (.summaries.check.signal_snapshot.tdpnd_comet_runtime_smoke_ok | type) == "boolean" then .summaries.check.signal_snapshot.tdpnd_comet_runtime_smoke_ok
+          elif (.summaries.check.signal_snapshot.tdpnd_comet_runtime_smoke | type) == "boolean" then .summaries.check.signal_snapshot.tdpnd_comet_runtime_smoke
+          elif (.summaries.run.signal_snapshot.tdpnd_comet_runtime_smoke_ok | type) == "boolean" then .summaries.run.signal_snapshot.tdpnd_comet_runtime_smoke_ok
+          elif (.summaries.run.signal_snapshot.tdpnd_comet_runtime_smoke | type) == "boolean" then .summaries.run.signal_snapshot.tdpnd_comet_runtime_smoke
+          elif (.summaries.handoff_check.signal_snapshot.tdpnd_comet_runtime_smoke_ok | type) == "boolean" then .summaries.handoff_check.signal_snapshot.tdpnd_comet_runtime_smoke_ok
+          elif (.summaries.handoff_check.signal_snapshot.tdpnd_comet_runtime_smoke | type) == "boolean" then .summaries.handoff_check.signal_snapshot.tdpnd_comet_runtime_smoke
+          elif (.summaries.handoff_run.signal_snapshot.tdpnd_comet_runtime_smoke_ok | type) == "boolean" then .summaries.handoff_run.signal_snapshot.tdpnd_comet_runtime_smoke_ok
+          elif (.summaries.handoff_run.signal_snapshot.tdpnd_comet_runtime_smoke | type) == "boolean" then .summaries.handoff_run.signal_snapshot.tdpnd_comet_runtime_smoke
+          elif (.steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_comet_runtime_smoke_ok | type) == "boolean" then .steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_comet_runtime_smoke_ok
+          elif (.steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_comet_runtime_smoke | type) == "boolean" then .steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_comet_runtime_smoke
+          elif (.handoff.tdpnd_comet_runtime_smoke_ok | type) == "boolean" then .handoff.tdpnd_comet_runtime_smoke_ok
+          elif (.handoff.tdpnd_comet_runtime_smoke | type) == "boolean" then .handoff.tdpnd_comet_runtime_smoke
+          elif (.tdpnd_comet_runtime_smoke_ok | type) == "boolean" then .tdpnd_comet_runtime_smoke_ok
+          elif (.tdpnd_comet_runtime_smoke | type) == "boolean" then .tdpnd_comet_runtime_smoke
           else empty end')"
       phase7_mainnet_cutover_summary_cosmos_module_coverage_floor_ok_json="$(phase7_mainnet_cutover_bool_value_or_null \
         "$phase7_mainnet_cutover_summary_source_summary_json" \
@@ -4912,6 +4972,9 @@ summary_payload="$(jq -n \
   --argjson phase7_mainnet_cutover_summary_handoff_run_ok "$phase7_mainnet_cutover_summary_handoff_run_ok_json" \
   --argjson phase7_mainnet_cutover_summary_mainnet_activation_gate_go_ok "$phase7_mainnet_cutover_summary_mainnet_activation_gate_go_ok_json" \
   --argjson phase7_mainnet_cutover_summary_tdpnd_grpc_live_smoke_ok "$phase7_mainnet_cutover_summary_tdpnd_grpc_live_smoke_ok_json" \
+  --argjson phase7_mainnet_cutover_summary_module_tx_surface_ok "$phase7_mainnet_cutover_summary_module_tx_surface_ok_json" \
+  --argjson phase7_mainnet_cutover_summary_tdpnd_grpc_auth_live_smoke_ok "$phase7_mainnet_cutover_summary_tdpnd_grpc_auth_live_smoke_ok_json" \
+  --argjson phase7_mainnet_cutover_summary_tdpnd_comet_runtime_smoke_ok "$phase7_mainnet_cutover_summary_tdpnd_comet_runtime_smoke_ok_json" \
   --argjson phase7_mainnet_cutover_summary_cosmos_module_coverage_floor_ok "$phase7_mainnet_cutover_summary_cosmos_module_coverage_floor_ok_json" \
   --argjson phase7_mainnet_cutover_summary_cosmos_keeper_coverage_floor_ok "$phase7_mainnet_cutover_summary_cosmos_keeper_coverage_floor_ok_json" \
   --argjson phase7_mainnet_cutover_summary_cosmos_app_coverage_floor_ok "$phase7_mainnet_cutover_summary_cosmos_app_coverage_floor_ok_json" \
@@ -5163,6 +5226,9 @@ summary_payload="$(jq -n \
         handoff_run_ok: $phase7_mainnet_cutover_summary_handoff_run_ok,
         mainnet_activation_gate_go_ok: $phase7_mainnet_cutover_summary_mainnet_activation_gate_go_ok,
         tdpnd_grpc_live_smoke_ok: $phase7_mainnet_cutover_summary_tdpnd_grpc_live_smoke_ok,
+        module_tx_surface_ok: $phase7_mainnet_cutover_summary_module_tx_surface_ok,
+        tdpnd_grpc_auth_live_smoke_ok: $phase7_mainnet_cutover_summary_tdpnd_grpc_auth_live_smoke_ok,
+        tdpnd_comet_runtime_smoke_ok: $phase7_mainnet_cutover_summary_tdpnd_comet_runtime_smoke_ok,
         cosmos_module_coverage_floor_ok: $phase7_mainnet_cutover_summary_cosmos_module_coverage_floor_ok,
         cosmos_keeper_coverage_floor_ok: $phase7_mainnet_cutover_summary_cosmos_keeper_coverage_floor_ok,
         cosmos_app_coverage_floor_ok: $phase7_mainnet_cutover_summary_cosmos_app_coverage_floor_ok,
@@ -5383,6 +5449,9 @@ $pending_real_host_checks_md
 - Phase-7 mainnet cutover handoff_run_ok: $(jq -r '.blockchain_track.phase7_mainnet_cutover_summary_report.handoff_run_ok | if . == null then "null" else tostring end' "$summary_json")
 - Phase-7 mainnet cutover mainnet_activation_gate_go_ok: $(jq -r '.blockchain_track.phase7_mainnet_cutover_summary_report.mainnet_activation_gate_go_ok | if . == null then "null" else tostring end' "$summary_json")
 - Phase-7 mainnet cutover tdpnd_grpc_live_smoke_ok: $(jq -r '.blockchain_track.phase7_mainnet_cutover_summary_report.tdpnd_grpc_live_smoke_ok | if . == null then "null" else tostring end' "$summary_json")
+- Phase-7 mainnet cutover module_tx_surface_ok: $(jq -r '.blockchain_track.phase7_mainnet_cutover_summary_report.module_tx_surface_ok | if . == null then "null" else tostring end' "$summary_json")
+- Phase-7 mainnet cutover tdpnd_grpc_auth_live_smoke_ok: $(jq -r '.blockchain_track.phase7_mainnet_cutover_summary_report.tdpnd_grpc_auth_live_smoke_ok | if . == null then "null" else tostring end' "$summary_json")
+- Phase-7 mainnet cutover tdpnd_comet_runtime_smoke_ok: $(jq -r '.blockchain_track.phase7_mainnet_cutover_summary_report.tdpnd_comet_runtime_smoke_ok | if . == null then "null" else tostring end' "$summary_json")
 - Phase-7 mainnet cutover cosmos_module_coverage_floor_ok: $(jq -r '.blockchain_track.phase7_mainnet_cutover_summary_report.cosmos_module_coverage_floor_ok | if . == null then "null" else tostring end' "$summary_json")
 - Phase-7 mainnet cutover cosmos_keeper_coverage_floor_ok: $(jq -r '.blockchain_track.phase7_mainnet_cutover_summary_report.cosmos_keeper_coverage_floor_ok | if . == null then "null" else tostring end' "$summary_json")
 - Phase-7 mainnet cutover cosmos_app_coverage_floor_ok: $(jq -r '.blockchain_track.phase7_mainnet_cutover_summary_report.cosmos_app_coverage_floor_ok | if . == null then "null" else tostring end' "$summary_json")
@@ -5464,7 +5533,7 @@ echo "[roadmap-progress-report] phase5_settlement_layer_handoff_issuer_sponsor_a
 echo "[roadmap-progress-report] phase6_cosmos_l1_handoff_available=$phase6_cosmos_l1_handoff_available_json source_summary_json=${phase6_cosmos_l1_handoff_source_summary_json:-} source_kind=${phase6_cosmos_l1_handoff_source_summary_kind:-}"
 echo "[roadmap-progress-report] phase6_cosmos_l1_handoff_status=$phase6_cosmos_l1_handoff_status_json rc=$phase6_cosmos_l1_handoff_rc_json run_pipeline_ok=$phase6_cosmos_l1_handoff_run_pipeline_ok_json module_tx_surface_ok=$phase6_cosmos_l1_handoff_module_tx_surface_ok_json tdpnd_grpc_runtime_smoke_ok=$phase6_cosmos_l1_handoff_tdpnd_grpc_runtime_smoke_ok_json tdpnd_grpc_live_smoke_ok=$phase6_cosmos_l1_handoff_tdpnd_grpc_live_smoke_ok_json tdpnd_grpc_auth_live_smoke_ok=$phase6_cosmos_l1_handoff_tdpnd_grpc_auth_live_smoke_ok_json tdpnd_comet_runtime_smoke_ok=$phase6_cosmos_l1_handoff_tdpnd_comet_runtime_smoke_ok_json"
 echo "[roadmap-progress-report] phase7_mainnet_cutover_summary_available=$phase7_mainnet_cutover_summary_available_json source_summary_json=${phase7_mainnet_cutover_summary_source_summary_json:-} source_kind=${phase7_mainnet_cutover_summary_source_summary_kind:-}"
-echo "[roadmap-progress-report] phase7_mainnet_cutover_summary_status=$phase7_mainnet_cutover_summary_status_json rc=$phase7_mainnet_cutover_summary_rc_json check_ok=$phase7_mainnet_cutover_summary_check_ok_json run_ok=$phase7_mainnet_cutover_summary_run_ok_json handoff_check_ok=$phase7_mainnet_cutover_summary_handoff_check_ok_json handoff_run_ok=$phase7_mainnet_cutover_summary_handoff_run_ok_json mainnet_activation_gate_go_ok=$phase7_mainnet_cutover_summary_mainnet_activation_gate_go_ok_json tdpnd_grpc_live_smoke_ok=$phase7_mainnet_cutover_summary_tdpnd_grpc_live_smoke_ok_json cosmos_module_coverage_floor_ok=$phase7_mainnet_cutover_summary_cosmos_module_coverage_floor_ok_json cosmos_keeper_coverage_floor_ok=$phase7_mainnet_cutover_summary_cosmos_keeper_coverage_floor_ok_json cosmos_app_coverage_floor_ok=$phase7_mainnet_cutover_summary_cosmos_app_coverage_floor_ok_json dual_write_parity_ok=$phase7_mainnet_cutover_summary_dual_write_parity_ok_json"
+echo "[roadmap-progress-report] phase7_mainnet_cutover_summary_status=$phase7_mainnet_cutover_summary_status_json rc=$phase7_mainnet_cutover_summary_rc_json check_ok=$phase7_mainnet_cutover_summary_check_ok_json run_ok=$phase7_mainnet_cutover_summary_run_ok_json handoff_check_ok=$phase7_mainnet_cutover_summary_handoff_check_ok_json handoff_run_ok=$phase7_mainnet_cutover_summary_handoff_run_ok_json mainnet_activation_gate_go_ok=$phase7_mainnet_cutover_summary_mainnet_activation_gate_go_ok_json tdpnd_grpc_live_smoke_ok=$phase7_mainnet_cutover_summary_tdpnd_grpc_live_smoke_ok_json module_tx_surface_ok=$phase7_mainnet_cutover_summary_module_tx_surface_ok_json tdpnd_grpc_auth_live_smoke_ok=$phase7_mainnet_cutover_summary_tdpnd_grpc_auth_live_smoke_ok_json tdpnd_comet_runtime_smoke_ok=$phase7_mainnet_cutover_summary_tdpnd_comet_runtime_smoke_ok_json cosmos_module_coverage_floor_ok=$phase7_mainnet_cutover_summary_cosmos_module_coverage_floor_ok_json cosmos_keeper_coverage_floor_ok=$phase7_mainnet_cutover_summary_cosmos_keeper_coverage_floor_ok_json cosmos_app_coverage_floor_ok=$phase7_mainnet_cutover_summary_cosmos_app_coverage_floor_ok_json dual_write_parity_ok=$phase7_mainnet_cutover_summary_dual_write_parity_ok_json"
 echo "[roadmap-progress-report] mainnet_activation_gate_available=$blockchain_mainnet_activation_gate_available_json source_summary_json=${blockchain_mainnet_activation_gate_source_summary_json:-} source_kind=${blockchain_mainnet_activation_gate_source_summary_kind:-} status=$blockchain_mainnet_activation_gate_status_json decision=${blockchain_mainnet_activation_gate_decision_json:-} go=$blockchain_mainnet_activation_gate_go_json no_go=$blockchain_mainnet_activation_gate_no_go_json"
 echo "[roadmap-progress-report] profile_default_gate_status=$profile_default_gate_status next_command=${profile_default_gate_next_command:-} next_command_sudo=${profile_default_gate_next_command_sudo:-} next_command_source=${profile_default_gate_next_command_source:-}"
 echo "[roadmap-progress-report] profile_default_gate_docker_hint_available=$profile_default_gate_docker_hint_available_json docker_hint_source=${profile_default_gate_docker_hint_source:-} campaign_check_summary_resolved=${profile_default_gate_campaign_check_summary_json_resolved:-} docker_matrix_summary_json=${profile_default_gate_docker_matrix_summary_json:-} docker_profile_summary_json=${profile_default_gate_docker_profile_summary_json:-}"
