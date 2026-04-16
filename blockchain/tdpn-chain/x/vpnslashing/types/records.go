@@ -3,6 +3,7 @@ package types
 import (
 	"errors"
 	"strings"
+	"unicode"
 
 	chaintypes "github.com/tdpn/tdpn-chain/types"
 )
@@ -67,12 +68,35 @@ func isObjectiveProofFormat(proof string) bool {
 		sha256Prefix = "sha256:"
 		objectPrefix = "obj://"
 	)
+	proof = strings.TrimSpace(proof)
 
 	if strings.HasPrefix(proof, sha256Prefix) {
-		return strings.TrimSpace(strings.TrimPrefix(proof, sha256Prefix)) != ""
+		hash := strings.TrimPrefix(proof, sha256Prefix)
+		return isValidSHA256Hex(hash)
 	}
 	if strings.HasPrefix(proof, objectPrefix) {
-		return strings.TrimSpace(strings.TrimPrefix(proof, objectPrefix)) != ""
+		path := strings.TrimPrefix(proof, objectPrefix)
+		if path == "" {
+			return false
+		}
+		for _, r := range path {
+			if unicode.IsSpace(r) {
+				return false
+			}
+		}
+		return true
 	}
 	return false
+}
+
+func isValidSHA256Hex(hash string) bool {
+	if len(hash) != 64 {
+		return false
+	}
+	for _, r := range hash {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') && (r < 'A' || r > 'F') {
+			return false
+		}
+	}
+	return true
 }

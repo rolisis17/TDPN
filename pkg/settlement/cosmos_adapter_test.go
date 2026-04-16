@@ -715,7 +715,7 @@ func TestCosmosAdapterSignedTxModeRetriesFailures(t *testing.T) {
 		SubjectID:     "subject-1",
 		SessionID:     "sess-1",
 		ViolationType: "double-sign",
-		EvidenceRef:   "ref-1",
+		EvidenceRef:   "sha256:7f39f8317fbdb1988ef4c628eba02591d8cc0f0f67d330f140edca76163ffbee",
 		SlashMicros:   1000,
 		Currency:      "USD",
 	}); err != nil {
@@ -775,7 +775,7 @@ func TestCosmosAdapterSignedTxModeDoesNotRetryNonRetryable4xx(t *testing.T) {
 		SubjectID:     "subject-1",
 		SessionID:     "sess-1",
 		ViolationType: "double-sign",
-		EvidenceRef:   "sha256:abc123",
+		EvidenceRef:   "sha256:6ca13d52ca70c883e0f0bb101e425a89e8624de51db2d2392593af6a84118090",
 		SlashMicros:   500,
 		Currency:      "USD",
 	}); err != nil {

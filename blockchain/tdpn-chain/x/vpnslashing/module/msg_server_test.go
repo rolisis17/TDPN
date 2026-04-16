@@ -19,7 +19,7 @@ func TestMsgServerSubmitSlashEvidenceHappyPath(t *testing.T) {
 		Evidence: types.SlashEvidence{
 			EvidenceID: "evidence-msg-1",
 			Kind:       types.EvidenceKindObjective,
-			ProofHash:  "sha256:proof-msg-1",
+			ProofHash:  testSHAProof("proof-msg-1"),
 		},
 	}
 
@@ -48,7 +48,7 @@ func TestMsgServerSubmitSlashEvidenceIdempotentReplay(t *testing.T) {
 		Evidence: types.SlashEvidence{
 			EvidenceID: "evidence-msg-2",
 			Kind:       types.EvidenceKindObjective,
-			ProofHash:  "sha256:proof-msg-2",
+			ProofHash:  testSHAProof("proof-msg-2"),
 		},
 	}
 	if _, err := server.SubmitSlashEvidence(req); err != nil {
@@ -77,7 +77,7 @@ func TestMsgServerSubmitSlashEvidenceConflictPropagation(t *testing.T) {
 		Evidence: types.SlashEvidence{
 			EvidenceID: "evidence-msg-3",
 			Kind:       types.EvidenceKindObjective,
-			ProofHash:  "sha256:proof-msg-3",
+			ProofHash:  testSHAProof("proof-msg-3"),
 		},
 	}
 	if _, err := server.SubmitSlashEvidence(base); err != nil {
@@ -85,7 +85,7 @@ func TestMsgServerSubmitSlashEvidenceConflictPropagation(t *testing.T) {
 	}
 
 	conflict := base
-	conflict.Evidence.ProofHash = "sha256:proof-msg-3-b"
+	conflict.Evidence.ProofHash = testSHAProof("proof-msg-3-b")
 	resp, err := server.SubmitSlashEvidence(conflict)
 	if err == nil {
 		t.Fatal("expected evidence conflict error")
@@ -111,7 +111,7 @@ func TestMsgServerSubmitSlashEvidenceInvalidPropagation(t *testing.T) {
 		Evidence: types.SlashEvidence{
 			EvidenceID: "",
 			Kind:       types.EvidenceKindObjective,
-			ProofHash:  "sha256:proof-msg-invalid",
+			ProofHash:  testSHAProof("proof-msg-invalid"),
 		},
 	})
 	if err == nil {
@@ -220,7 +220,7 @@ func TestMsgServerSubmitSlashEvidenceReplayThenConflictOnProofHashChange(t *test
 	}
 
 	conflict := base
-	conflict.Evidence.ProofHash = "sha256:replay-conflict-updated"
+	conflict.Evidence.ProofHash = testSHAProof("replay-conflict-updated")
 	conflictResp, err := server.SubmitSlashEvidence(conflict)
 	if err == nil {
 		t.Fatal("expected evidence conflict error")
@@ -246,7 +246,7 @@ func TestMsgServerApplyPenaltyHappyPath(t *testing.T) {
 		Evidence: types.SlashEvidence{
 			EvidenceID: "evidence-msg-4",
 			Kind:       types.EvidenceKindObjective,
-			ProofHash:  "sha256:proof-msg-4",
+			ProofHash:  testSHAProof("proof-msg-4"),
 		},
 	}); err != nil {
 		t.Fatalf("submit evidence failed: %v", err)
@@ -283,7 +283,7 @@ func TestMsgServerApplyPenaltyIdempotentReplay(t *testing.T) {
 		Evidence: types.SlashEvidence{
 			EvidenceID: "evidence-msg-5",
 			Kind:       types.EvidenceKindObjective,
-			ProofHash:  "sha256:proof-msg-5",
+			ProofHash:  testSHAProof("proof-msg-5"),
 		},
 	}); err != nil {
 		t.Fatalf("submit evidence failed: %v", err)
@@ -322,7 +322,7 @@ func TestMsgServerApplyPenaltyRejectsSecondPenaltyForSameEvidence(t *testing.T) 
 		Evidence: types.SlashEvidence{
 			EvidenceID: "evidence-msg-5b",
 			Kind:       types.EvidenceKindObjective,
-			ProofHash:  "sha256:proof-msg-5b",
+			ProofHash:  testSHAProof("proof-msg-5b"),
 		},
 	}); err != nil {
 		t.Fatalf("submit evidence failed: %v", err)
@@ -374,7 +374,7 @@ func TestMsgServerApplyPenaltyConflictPropagation(t *testing.T) {
 		Evidence: types.SlashEvidence{
 			EvidenceID: "evidence-msg-6",
 			Kind:       types.EvidenceKindObjective,
-			ProofHash:  "sha256:proof-msg-6",
+			ProofHash:  testSHAProof("proof-msg-6"),
 		},
 	}); err != nil {
 		t.Fatalf("submit evidence failed: %v", err)
@@ -460,7 +460,7 @@ func TestMsgServerNilKeeper(t *testing.T) {
 		Evidence: types.SlashEvidence{
 			EvidenceID: "evidence-msg-nil",
 			Kind:       types.EvidenceKindObjective,
-			ProofHash:  "sha256:proof-msg-nil",
+			ProofHash:  testSHAProof("proof-msg-nil"),
 		},
 	})
 	if !errors.Is(evidenceErr, ErrNilKeeper) {

@@ -323,9 +323,9 @@ wait_for_health_ready "${BASE_URL}/health"
 post_expect_status "${BASE_URL}/x/vpnbilling/settlements" '{"SettlementID":"set-unauth-1","ReservationID":"bill-res-unauth-1","SessionID":"sess-unauth-1","SubjectID":"subject-unauth-1","ChargedMicros":250,"Currency":"TDPNC","SettledAt":"2026-01-01T00:00:00Z"}' "401"
 post_expect_status "${BASE_URL}/x/vpnrewards/issues" '{"RewardID":"reward-unauth-1","ProviderSubjectID":"provider-unauth-1","SessionID":"sess-unauth-1","RewardMicros":100,"Currency":"TDPNC","IssuedAt":"2026-01-01T00:00:00Z"}' "401"
 post_expect_status "${BASE_URL}/x/vpnsponsor/reservations" '{"ReservationID":"res-unauth-1","SponsorID":"sponsor-unauth-1","SubjectID":"app-unauth-1","SessionID":"sess-unauth-1","AmountMicros":500,"Currency":"TDPNC","CreatedAt":"2026-01-01T00:00:00Z","ExpiresAt":"2026-12-31T00:00:00Z"}' "401"
-post_expect_status "${BASE_URL}/x/vpnslashing/evidence" '{"EvidenceID":"ev-unauth-1","SubjectID":"provider-1","SessionID":"sess-1","ViolationType":"double-sign","EvidenceRef":"sha256:abc","ObservedAt":"2026-01-01T00:00:00Z"}' "401"
+post_expect_status "${BASE_URL}/x/vpnslashing/evidence" '{"EvidenceID":"ev-unauth-1","SubjectID":"provider-1","SessionID":"sess-1","ViolationType":"double-sign","EvidenceRef":"sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad","ObservedAt":"2026-01-01T00:00:00Z"}' "401"
 post_expect_status "${BASE_URL}/x/vpnvalidator/eligibilities" '{"ValidatorID":"val-unauth-1","OperatorAddress":"op-unauth-1","Eligible":true,"PolicyReason":"auth smoke","UpdatedAt":"2026-01-01T00:00:00Z","Status":"submitted"}' "401"
-post_expect_status "${BASE_URL}/x/vpnvalidator/status-records" '{"StatusID":"status-unauth-1","ValidatorID":"val-unauth-1","ConsensusAddress":"cons-unauth-1","LifecycleStatus":"active","EvidenceHeight":5,"EvidenceRef":"sha256:status-unauth-1","RecordedAt":"2026-01-01T00:00:00Z","Status":"submitted"}' "401"
+post_expect_status "${BASE_URL}/x/vpnvalidator/status-records" '{"StatusID":"status-unauth-1","ValidatorID":"val-unauth-1","ConsensusAddress":"cons-unauth-1","LifecycleStatus":"active","EvidenceHeight":5,"EvidenceRef":"sha256:ea30d9de50b2769225f23768fa2b7f58d3fd014d31b95fa87fbef67c3fa1da59","RecordedAt":"2026-01-01T00:00:00Z","Status":"submitted"}' "401"
 post_expect_status "${BASE_URL}/x/vpngovernance/policies" '{"PolicyID":"policy-unauth-1","Title":"unauth-policy","Description":"auth smoke policy","Version":1,"ActivatedAt":"2026-01-01T00:00:00Z","Status":"submitted"}' "401"
 post_expect_status "${BASE_URL}/x/vpngovernance/decisions" '{"DecisionID":"decision-unauth-1","PolicyID":"policy-unauth-1","ProposalID":"proposal-unauth-1","Outcome":"approve","Decider":"bootstrap-multisig","Reason":"auth smoke decision","DecidedAt":"2026-01-01T00:00:00Z","Status":"submitted"}' "401"
 post_expect_status "${BASE_URL}/x/vpngovernance/audit-actions" '{"ActionID":"action-unauth-1","Action":"policy.unauth","Actor":"bootstrap-multisig","Reason":"auth smoke audit","EvidencePointer":"obj://audit/action-unauth-1","Timestamp":"2026-01-01T00:00:00Z"}' "401"
@@ -342,7 +342,7 @@ grep -q '"ok"[[:space:]]*:[[:space:]]*true' "${RESP_FILE}"
 post_expect_status "${BASE_URL}/x/vpnsponsor/reservations" '{"ReservationID":"res-live-1","SponsorID":"sponsor-live-1","SubjectID":"app-live-1","SessionID":"sess-live-1","AmountMicros":500,"Currency":"TDPNC","CreatedAt":"2026-01-01T00:00:00Z","ExpiresAt":"2026-12-31T00:00:00Z"}' "200" "${TOKEN}"
 grep -q '"ok"[[:space:]]*:[[:space:]]*true' "${RESP_FILE}"
 
-post_expect_status "${BASE_URL}/x/vpnslashing/evidence" '{"EvidenceID":"ev-live-1","SubjectID":"provider-live-1","SessionID":"sess-live-1","ViolationType":"double-sign","EvidenceRef":"sha256:abc123","ObservedAt":"2026-01-01T00:00:00Z"}' "200" "${TOKEN}"
+post_expect_status "${BASE_URL}/x/vpnslashing/evidence" '{"EvidenceID":"ev-live-1","SubjectID":"provider-live-1","SessionID":"sess-live-1","ViolationType":"double-sign","EvidenceRef":"sha256:6ca13d52ca70c883e0f0bb101e425a89e8624de51db2d2392593af6a84118090","ObservedAt":"2026-01-01T00:00:00Z"}' "200" "${TOKEN}"
 grep -q '"ok"[[:space:]]*:[[:space:]]*true' "${RESP_FILE}"
 
 (
@@ -362,7 +362,7 @@ GRPC_PREVIEW_HELPER_FILE=""
 post_expect_status "${BASE_URL}/x/vpnvalidator/eligibilities" '{"ValidatorID":"val-live-1","OperatorAddress":"op-live-1","Eligible":true,"PolicyReason":"bootstrap policy","UpdatedAt":"2026-01-01T00:00:00Z","Status":"confirmed"}' "200" "${TOKEN}"
 grep -q '"ok"[[:space:]]*:[[:space:]]*true' "${RESP_FILE}"
 
-post_expect_status "${BASE_URL}/x/vpnvalidator/status-records" '{"StatusID":"status-live-1","ValidatorID":"val-live-1","ConsensusAddress":"cons-live-1","LifecycleStatus":"active","EvidenceHeight":7,"EvidenceRef":"sha256:status-live-1","RecordedAt":"2026-01-01T00:00:01Z","Status":"submitted"}' "200" "${TOKEN}"
+post_expect_status "${BASE_URL}/x/vpnvalidator/status-records" '{"StatusID":"status-live-1","ValidatorID":"val-live-1","ConsensusAddress":"cons-live-1","LifecycleStatus":"active","EvidenceHeight":7,"EvidenceRef":"sha256:581690e6640665abd76f2545c1b8c0a864548cb4074f83be5dc0c8ce742a2677","RecordedAt":"2026-01-01T00:00:01Z","Status":"submitted"}' "200" "${TOKEN}"
 grep -q '"ok"[[:space:]]*:[[:space:]]*true' "${RESP_FILE}"
 
 post_expect_status "${BASE_URL}/x/vpngovernance/policies" '{"PolicyID":"policy-live-1","Title":"policy-live-title","Description":"policy-live-description","Version":1,"ActivatedAt":"2026-01-01T00:00:00Z","Status":"submitted"}' "200" "${TOKEN}"
@@ -481,7 +481,7 @@ grep -q '"actions"' "${RESP_FILE}"
 grep -q '"ActionID"[[:space:]]*:[[:space:]]*"action-live-1"' "${RESP_FILE}"
 
 # Replay/id behavior check: duplicate write should surface replay=true and preserve id.
-post_expect_status "${BASE_URL}/x/vpnvalidator/status-records" '{"StatusID":"status-live-1","ValidatorID":"val-live-1","ConsensusAddress":"cons-live-1","LifecycleStatus":"active","EvidenceHeight":7,"EvidenceRef":"sha256:status-live-1","RecordedAt":"2026-01-01T00:00:01Z","Status":"submitted"}' "200" "${TOKEN}"
+post_expect_status "${BASE_URL}/x/vpnvalidator/status-records" '{"StatusID":"status-live-1","ValidatorID":"val-live-1","ConsensusAddress":"cons-live-1","LifecycleStatus":"active","EvidenceHeight":7,"EvidenceRef":"sha256:581690e6640665abd76f2545c1b8c0a864548cb4074f83be5dc0c8ce742a2677","RecordedAt":"2026-01-01T00:00:01Z","Status":"submitted"}' "200" "${TOKEN}"
 grep -q '"ok"[[:space:]]*:[[:space:]]*true' "${RESP_FILE}"
 grep -q '"replay"[[:space:]]*:[[:space:]]*true' "${RESP_FILE}"
 grep -q '"id"[[:space:]]*:[[:space:]]*"status-live-1"' "${RESP_FILE}"

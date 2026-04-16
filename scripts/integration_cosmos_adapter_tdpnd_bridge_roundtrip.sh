@@ -205,7 +205,7 @@ func main() {
 		SubjectID:     "provider-adapter-1",
 		SessionID:     sessionID,
 		ViolationType: "double-sign",
-		EvidenceRef:   "sha256:adapterevidence",
+		EvidenceRef:   "sha256:2935ad7b7d9dec338fd099d83ddcfc1a53c3fc35929197eeb6826db0aa4c684e",
 		SlashMicros:   0,
 		Currency:      "TDPNC",
 		ObservedAt:    time.Now().UTC(),

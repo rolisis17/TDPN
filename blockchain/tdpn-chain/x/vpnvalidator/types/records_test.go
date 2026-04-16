@@ -52,6 +52,11 @@ func TestValidatorEligibilityValidateBasic(t *testing.T) {
 func TestValidatorStatusRecordValidateBasic(t *testing.T) {
 	t.Parallel()
 
+	const (
+		validSHA256Lower = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+		validSHA256Upper = "sha256:ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789"
+	)
+
 	base := ValidatorStatusRecord{
 		StatusID:        "status-1",
 		ValidatorID:     "val-1",
@@ -64,7 +69,37 @@ func TestValidatorStatusRecordValidateBasic(t *testing.T) {
 		record  ValidatorStatusRecord
 		wantErr string
 	}{
-		{name: "valid", record: base},
+		{name: "valid with omitted evidence ref", record: base},
+		{
+			name: "valid with sha256 evidence ref",
+			record: ValidatorStatusRecord{
+				StatusID:        base.StatusID,
+				ValidatorID:     base.ValidatorID,
+				LifecycleStatus: base.LifecycleStatus,
+				EvidenceHeight:  base.EvidenceHeight,
+				EvidenceRef:     validSHA256Lower,
+			},
+		},
+		{
+			name: "valid with uppercase sha256 evidence ref",
+			record: ValidatorStatusRecord{
+				StatusID:        base.StatusID,
+				ValidatorID:     base.ValidatorID,
+				LifecycleStatus: base.LifecycleStatus,
+				EvidenceHeight:  base.EvidenceHeight,
+				EvidenceRef:     validSHA256Upper,
+			},
+		},
+		{
+			name: "valid with object evidence ref",
+			record: ValidatorStatusRecord{
+				StatusID:        base.StatusID,
+				ValidatorID:     base.ValidatorID,
+				LifecycleStatus: base.LifecycleStatus,
+				EvidenceHeight:  base.EvidenceHeight,
+				EvidenceRef:     "obj://validator/status-1",
+			},
+		},
 		{
 			name:    "missing status id",
 			record:  ValidatorStatusRecord{ValidatorID: base.ValidatorID, LifecycleStatus: base.LifecycleStatus, EvidenceHeight: base.EvidenceHeight},
@@ -89,6 +124,72 @@ func TestValidatorStatusRecordValidateBasic(t *testing.T) {
 			name:    "negative evidence height",
 			record:  ValidatorStatusRecord{StatusID: base.StatusID, ValidatorID: base.ValidatorID, LifecycleStatus: base.LifecycleStatus, EvidenceHeight: -1},
 			wantErr: "evidence height cannot be negative",
+		},
+		{
+			name: "invalid evidence ref wrong prefix",
+			record: ValidatorStatusRecord{
+				StatusID:        base.StatusID,
+				ValidatorID:     base.ValidatorID,
+				LifecycleStatus: base.LifecycleStatus,
+				EvidenceHeight:  base.EvidenceHeight,
+				EvidenceRef:     "sha-256:proof",
+			},
+			wantErr: "evidence ref must use objective format (sha256:<value> or obj://<value>)",
+		},
+		{
+			name: "invalid evidence ref whitespace only",
+			record: ValidatorStatusRecord{
+				StatusID:        base.StatusID,
+				ValidatorID:     base.ValidatorID,
+				LifecycleStatus: base.LifecycleStatus,
+				EvidenceHeight:  base.EvidenceHeight,
+				EvidenceRef:     " \t ",
+			},
+			wantErr: "evidence ref must use objective format (sha256:<value> or obj://<value>)",
+		},
+		{
+			name: "invalid evidence ref sha256 too short",
+			record: ValidatorStatusRecord{
+				StatusID:        base.StatusID,
+				ValidatorID:     base.ValidatorID,
+				LifecycleStatus: base.LifecycleStatus,
+				EvidenceHeight:  base.EvidenceHeight,
+				EvidenceRef:     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde",
+			},
+			wantErr: "evidence ref must use objective format (sha256:<value> or obj://<value>)",
+		},
+		{
+			name: "invalid evidence ref sha256 non hex",
+			record: ValidatorStatusRecord{
+				StatusID:        base.StatusID,
+				ValidatorID:     base.ValidatorID,
+				LifecycleStatus: base.LifecycleStatus,
+				EvidenceHeight:  base.EvidenceHeight,
+				EvidenceRef:     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdeg",
+			},
+			wantErr: "evidence ref must use objective format (sha256:<value> or obj://<value>)",
+		},
+		{
+			name: "invalid evidence ref object empty path",
+			record: ValidatorStatusRecord{
+				StatusID:        base.StatusID,
+				ValidatorID:     base.ValidatorID,
+				LifecycleStatus: base.LifecycleStatus,
+				EvidenceHeight:  base.EvidenceHeight,
+				EvidenceRef:     "obj://",
+			},
+			wantErr: "evidence ref must use objective format (sha256:<value> or obj://<value>)",
+		},
+		{
+			name: "invalid evidence ref object path contains whitespace",
+			record: ValidatorStatusRecord{
+				StatusID:        base.StatusID,
+				ValidatorID:     base.ValidatorID,
+				LifecycleStatus: base.LifecycleStatus,
+				EvidenceHeight:  base.EvidenceHeight,
+				EvidenceRef:     "obj://validator/status with-space",
+			},
+			wantErr: "evidence ref must use objective format (sha256:<value> or obj://<value>)",
 		},
 	}
 

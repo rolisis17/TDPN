@@ -341,7 +341,7 @@ func main() {
 		SubjectID:     "provider-signed-tx-1",
 		SessionID:     sessionID,
 		ViolationType: "double-sign",
-		EvidenceRef:   "sha256:signedtxevidence",
+		EvidenceRef:   "sha256:445c7d70c1d8751f5afd8ae43c764b3fc401dbd4274b1c680be7c00206b612ce",
 		SlashMicros:   0,
 		Currency:      "TDPNC",
 		ObservedAt:    time.Now().UTC(),

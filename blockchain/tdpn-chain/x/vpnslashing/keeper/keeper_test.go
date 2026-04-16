@@ -21,7 +21,7 @@ func TestKeeperEvidenceUpsertAndGet(t *testing.T) {
 	initial := types.SlashEvidence{
 		EvidenceID: "evidence-1",
 		Kind:       types.EvidenceKindObjective,
-		ProofHash:  "sha256:proof-1",
+		ProofHash:  testSHAProof("proof-1"),
 	}
 	k.UpsertEvidence(initial)
 
@@ -34,7 +34,7 @@ func TestKeeperEvidenceUpsertAndGet(t *testing.T) {
 	}
 
 	updated := initial
-	updated.ProofHash = "sha256:proof-2"
+	updated.ProofHash = testSHAProof("proof-2")
 	k.UpsertEvidence(updated)
 
 	got, ok = k.GetEvidence(initial.EvidenceID)
@@ -90,17 +90,17 @@ func TestKeeperListEvidenceDeterministicOrderByID(t *testing.T) {
 	k.UpsertEvidence(types.SlashEvidence{
 		EvidenceID: "evidence-c",
 		Kind:       types.EvidenceKindObjective,
-		ProofHash:  "sha256:proof-c",
+		ProofHash:  testSHAProof("proof-c"),
 	})
 	k.UpsertEvidence(types.SlashEvidence{
 		EvidenceID: "evidence-a",
 		Kind:       types.EvidenceKindObjective,
-		ProofHash:  "sha256:proof-a",
+		ProofHash:  testSHAProof("proof-a"),
 	})
 	k.UpsertEvidence(types.SlashEvidence{
 		EvidenceID: "evidence-b",
 		Kind:       types.EvidenceKindObjective,
-		ProofHash:  "sha256:proof-b",
+		ProofHash:  testSHAProof("proof-b"),
 	})
 
 	list := k.ListEvidence()
@@ -151,7 +151,7 @@ func TestSubmitEvidenceDefaultsAndGet(t *testing.T) {
 	record, err := k.SubmitEvidence(types.SlashEvidence{
 		EvidenceID: "evidence-submit-1",
 		Kind:       types.EvidenceKindObjective,
-		ProofHash:  "sha256:proof-submit-1",
+		ProofHash:  testSHAProof("proof-submit-1"),
 	})
 	if err != nil {
 		t.Fatalf("expected submit evidence to succeed, got %v", err)
@@ -176,7 +176,7 @@ func TestSubmitEvidenceIdempotentReplay(t *testing.T) {
 	base := types.SlashEvidence{
 		EvidenceID: "evidence-submit-2",
 		Kind:       types.EvidenceKindObjective,
-		ProofHash:  "sha256:proof-submit-2",
+		ProofHash:  testSHAProof("proof-submit-2"),
 	}
 
 	first, err := k.SubmitEvidence(base)
@@ -199,14 +199,14 @@ func TestSubmitEvidenceConflict(t *testing.T) {
 	base := types.SlashEvidence{
 		EvidenceID: "evidence-submit-3",
 		Kind:       types.EvidenceKindObjective,
-		ProofHash:  "sha256:proof-a",
+		ProofHash:  testSHAProof("proof-a"),
 	}
 	if _, err := k.SubmitEvidence(base); err != nil {
 		t.Fatalf("seed evidence failed: %v", err)
 	}
 
 	conflict := base
-	conflict.ProofHash = "sha256:proof-b"
+	conflict.ProofHash = testSHAProof("proof-b")
 	_, err := k.SubmitEvidence(conflict)
 	if err == nil {
 		t.Fatal("expected conflicting submit to fail")
@@ -222,7 +222,7 @@ func TestSubmitEvidenceInvalid(t *testing.T) {
 	k := NewKeeper()
 	_, err := k.SubmitEvidence(types.SlashEvidence{
 		Kind:      types.EvidenceKindObjective,
-		ProofHash: "sha256:proof-invalid",
+		ProofHash: testSHAProof("proof-invalid"),
 	})
 	if err == nil {
 		t.Fatal("expected invalid evidence to fail")
@@ -298,7 +298,7 @@ func TestSubmitEvidenceReplayThenConflictOnProofHashChange(t *testing.T) {
 	}
 
 	conflict := base
-	conflict.ProofHash = "sha256:replay-conflict-updated"
+	conflict.ProofHash = testSHAProof("replay-conflict-updated")
 	_, err = k.SubmitEvidence(conflict)
 	if err == nil {
 		t.Fatal("expected proof hash change conflict")
@@ -315,7 +315,7 @@ func TestApplyPenaltyDefaultsAndEvidenceAdvance(t *testing.T) {
 	seed, err := k.SubmitEvidence(types.SlashEvidence{
 		EvidenceID: "evidence-penalty-1",
 		Kind:       types.EvidenceKindObjective,
-		ProofHash:  "sha256:proof-penalty-1",
+		ProofHash:  testSHAProof("proof-penalty-1"),
 		Status:     chaintypes.ReconciliationPending,
 	})
 	if err != nil {
@@ -353,7 +353,7 @@ func TestApplyPenaltyIdempotentReplay(t *testing.T) {
 	evidence, err := k.SubmitEvidence(types.SlashEvidence{
 		EvidenceID: "evidence-penalty-2",
 		Kind:       types.EvidenceKindObjective,
-		ProofHash:  "sha256:proof-penalty-2",
+		ProofHash:  testSHAProof("proof-penalty-2"),
 	})
 	if err != nil {
 		t.Fatalf("seed evidence failed: %v", err)
@@ -385,7 +385,7 @@ func TestApplyPenaltyRejectsSecondPenaltyForSameEvidence(t *testing.T) {
 	evidence, err := k.SubmitEvidence(types.SlashEvidence{
 		EvidenceID: "evidence-penalty-2b",
 		Kind:       types.EvidenceKindObjective,
-		ProofHash:  "sha256:proof-penalty-2b",
+		ProofHash:  testSHAProof("proof-penalty-2b"),
 	})
 	if err != nil {
 		t.Fatalf("seed evidence failed: %v", err)
@@ -429,7 +429,7 @@ func TestApplyPenaltyConflict(t *testing.T) {
 	evidence, err := k.SubmitEvidence(types.SlashEvidence{
 		EvidenceID: "evidence-penalty-3",
 		Kind:       types.EvidenceKindObjective,
-		ProofHash:  "sha256:proof-penalty-3",
+		ProofHash:  testSHAProof("proof-penalty-3"),
 	})
 	if err != nil {
 		t.Fatalf("seed evidence failed: %v", err)

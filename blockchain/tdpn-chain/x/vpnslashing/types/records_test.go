@@ -5,10 +5,15 @@ import "testing"
 func TestSlashEvidenceValidateBasic(t *testing.T) {
 	t.Parallel()
 
+	const (
+		validSHA256Lower = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+		validSHA256Upper = "sha256:ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789"
+	)
+
 	base := SlashEvidence{
 		EvidenceID: "evidence-1",
 		Kind:       EvidenceKindObjective,
-		ProofHash:  "sha256:proof-hash",
+		ProofHash:  validSHA256Lower,
 	}
 
 	tests := []struct {
@@ -16,10 +21,10 @@ func TestSlashEvidenceValidateBasic(t *testing.T) {
 		record  SlashEvidence
 		wantErr string
 	}{
-		{name: "valid sha256", record: base},
+		{name: "valid sha256 lowercase", record: base},
 		{
-			name:   "valid sha256 payload edge separators",
-			record: SlashEvidence{EvidenceID: base.EvidenceID, Kind: base.Kind, ProofHash: "sha256:proof:segment@v1"},
+			name:   "valid sha256 uppercase",
+			record: SlashEvidence{EvidenceID: base.EvidenceID, Kind: base.Kind, ProofHash: validSHA256Upper},
 		},
 		{
 			name:   "valid object uri",
@@ -75,6 +80,21 @@ func TestSlashEvidenceValidateBasic(t *testing.T) {
 			wantErr: "proof hash must use objective format (sha256:<value> or obj://<value>)",
 		},
 		{
+			name:    "invalid sha256 too short",
+			record:  SlashEvidence{EvidenceID: base.EvidenceID, Kind: base.Kind, ProofHash: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde"},
+			wantErr: "proof hash must use objective format (sha256:<value> or obj://<value>)",
+		},
+		{
+			name:    "invalid sha256 too long",
+			record:  SlashEvidence{EvidenceID: base.EvidenceID, Kind: base.Kind, ProofHash: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0"},
+			wantErr: "proof hash must use objective format (sha256:<value> or obj://<value>)",
+		},
+		{
+			name:    "invalid sha256 non hex character",
+			record:  SlashEvidence{EvidenceID: base.EvidenceID, Kind: base.Kind, ProofHash: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdeg"},
+			wantErr: "proof hash must use objective format (sha256:<value> or obj://<value>)",
+		},
+		{
 			name:    "invalid sha256 empty suffix",
 			record:  SlashEvidence{EvidenceID: base.EvidenceID, Kind: base.Kind, ProofHash: "sha256:"},
 			wantErr: "proof hash must use objective format (sha256:<value> or obj://<value>)",
@@ -85,6 +105,11 @@ func TestSlashEvidenceValidateBasic(t *testing.T) {
 			wantErr: "proof hash must use objective format (sha256:<value> or obj://<value>)",
 		},
 		{
+			name:    "invalid sha256 includes internal whitespace",
+			record:  SlashEvidence{EvidenceID: base.EvidenceID, Kind: base.Kind, ProofHash: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde "},
+			wantErr: "proof hash must use objective format (sha256:<value> or obj://<value>)",
+		},
+		{
 			name:    "invalid object uri empty suffix",
 			record:  SlashEvidence{EvidenceID: base.EvidenceID, Kind: base.Kind, ProofHash: "obj://"},
 			wantErr: "proof hash must use objective format (sha256:<value> or obj://<value>)",
@@ -92,6 +117,16 @@ func TestSlashEvidenceValidateBasic(t *testing.T) {
 		{
 			name:    "invalid object uri whitespace only suffix",
 			record:  SlashEvidence{EvidenceID: base.EvidenceID, Kind: base.Kind, ProofHash: "obj://   \t"},
+			wantErr: "proof hash must use objective format (sha256:<value> or obj://<value>)",
+		},
+		{
+			name:    "invalid object uri whitespace in path",
+			record:  SlashEvidence{EvidenceID: base.EvidenceID, Kind: base.Kind, ProofHash: "obj://bucket/key with-space"},
+			wantErr: "proof hash must use objective format (sha256:<value> or obj://<value>)",
+		},
+		{
+			name:    "invalid object uri tab in path",
+			record:  SlashEvidence{EvidenceID: base.EvidenceID, Kind: base.Kind, ProofHash: "obj://bucket/\tkey"},
 			wantErr: "proof hash must use objective format (sha256:<value> or obj://<value>)",
 		},
 	}

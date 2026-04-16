@@ -257,6 +257,15 @@ func (a *CosmosAdapter) SubmitSponsorReservation(_ context.Context, reservation 
 }
 
 func (a *CosmosAdapter) SubmitSlashEvidence(_ context.Context, evidence SlashEvidence) (string, error) {
+	evidence.ViolationType = strings.ToLower(strings.TrimSpace(evidence.ViolationType))
+	evidence.EvidenceRef = strings.TrimSpace(evidence.EvidenceRef)
+	if !isObjectiveViolationType(evidence.ViolationType) {
+		return "", fmt.Errorf("submit slash evidence requires objective violation_type")
+	}
+	if !isObjectiveEvidenceRef(evidence.EvidenceRef) {
+		return "", fmt.Errorf("submit slash evidence requires objective evidence_ref (obj://... or sha256:...)")
+	}
+
 	id := cosmosID("slash", evidence.EvidenceID, evidence.SubjectID)
 	return id, a.enqueue(cosmosQueuedOperation{
 		path:           "/x/vpnslashing/evidence",

@@ -18,7 +18,7 @@ func TestKVStoreUpsertGetList(t *testing.T) {
 		SessionID:  "sess-1",
 		ProviderID: "provider-1",
 		Kind:       types.EvidenceKindObjective,
-		ProofHash:  "sha256:proof-1",
+		ProofHash:  testSHAProof("proof-1"),
 		Status:     chaintypes.ReconciliationPending,
 	}
 	store.UpsertEvidence(evidence)
@@ -85,7 +85,7 @@ func TestKVStoreInvalidPayloadsAreSafeOnGetAndList(t *testing.T) {
 		SessionID:  "sess-good",
 		ProviderID: "provider-good",
 		Kind:       types.EvidenceKindObjective,
-		ProofHash:  "sha256:proof-good",
+		ProofHash:  testSHAProof("proof-good"),
 		Status:     chaintypes.ReconciliationSubmitted,
 	}
 	goodPenalty := types.PenaltyDecision{
@@ -123,7 +123,7 @@ func TestNewKVStoreNilFallbackAndPrefixIsolation(t *testing.T) {
 		EvidenceID: "evidence-fallback",
 		ProviderID: "provider-fallback",
 		Kind:       types.EvidenceKindObjective,
-		ProofHash:  "sha256:proof-fallback",
+		ProofHash:  testSHAProof("proof-fallback"),
 		Status:     chaintypes.ReconciliationPending,
 	}
 	penalty := types.PenaltyDecision{

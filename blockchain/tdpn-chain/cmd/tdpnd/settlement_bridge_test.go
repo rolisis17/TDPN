@@ -141,7 +141,7 @@ func TestRunTDPNDSettlementHTTPAuthRequiredOnPOST(t *testing.T) {
 		t.Fatalf("expected health status 200 with auth enabled, got %d", healthResp.StatusCode)
 	}
 
-	payload := []byte(`{"EvidenceID":"ev-auth-1","SubjectID":"provider-auth-1","SessionID":"sess-auth-1","EvidenceRef":"sha256:proof-auth-1","ObservedAt":"2026-01-01T00:00:00Z"}`)
+	payload := []byte(`{"EvidenceID":"ev-auth-1","SubjectID":"provider-auth-1","SessionID":"sess-auth-1","EvidenceRef":"sha256:dcae4c8808ecbf9c1374201b09c7706b90df20b57e0aaf25e36a1053a421ea8a","ObservedAt":"2026-01-01T00:00:00Z"}`)
 	unauthResp, err := http.Post(baseURL+"/x/vpnslashing/evidence", "application/json", bytes.NewReader(payload))
 	if err != nil {
 		t.Fatalf("unauth post failed: %v", err)
@@ -269,7 +269,7 @@ func TestRunTDPNDSettlementHTTPAuthContractGETOpenPOSTBearerRequired(t *testing.
 		{
 			name:      "slashing",
 			postPath:  "/x/vpnslashing/evidence",
-			postBody:  `{"EvidenceID":"ev-auth-contract-1","SubjectID":"provider-auth-contract-1","SessionID":"sess-auth-contract-1","ViolationType":"objective","EvidenceRef":"sha256:proof-auth-contract-1","ObservedAt":"2026-01-01T00:00:00Z"}`,
+			postBody:  `{"EvidenceID":"ev-auth-contract-1","SubjectID":"provider-auth-contract-1","SessionID":"sess-auth-contract-1","ViolationType":"objective","EvidenceRef":"sha256:688aac5bfff82af2d92ef98edb1a7d98e963b9ed60d96cf66145d29cec3a1d28","ObservedAt":"2026-01-01T00:00:00Z"}`,
 			verifyGET: "/x/vpnslashing/evidence/ev-auth-contract-1",
 		},
 		{
@@ -281,7 +281,7 @@ func TestRunTDPNDSettlementHTTPAuthContractGETOpenPOSTBearerRequired(t *testing.
 		{
 			name:      "validator-status",
 			postPath:  "/x/vpnvalidator/status-records",
-			postBody:  `{"StatusID":"status-auth-contract-1","ValidatorID":"val-auth-contract-1","ConsensusAddress":"cons-auth-contract-1","LifecycleStatus":"active","EvidenceHeight":123,"EvidenceRef":"sha256:status-auth-contract-1","RecordedAt":"2026-01-01T00:00:01Z","Status":"submitted"}`,
+			postBody:  `{"StatusID":"status-auth-contract-1","ValidatorID":"val-auth-contract-1","ConsensusAddress":"cons-auth-contract-1","LifecycleStatus":"active","EvidenceHeight":123,"EvidenceRef":"sha256:762cf93d891338985757d904c8cb5abbf5b8834c16aa526f807c45e3377efdde","RecordedAt":"2026-01-01T00:00:01Z","Status":"submitted"}`,
 			verifyGET: "/x/vpnvalidator/status-records/status-auth-contract-1",
 		},
 		{
@@ -478,7 +478,7 @@ func TestRunTDPNDSettlementHTTPHappyPathPerEndpoint(t *testing.T) {
 		},
 		{
 			path:      "/x/vpnslashing/evidence",
-			body:      `{"EvidenceID":"ev-http-1","SubjectID":"provider-http-1","SessionID":"sess-http-1","ViolationType":"objective","EvidenceRef":"sha256:proof-http-1","ObservedAt":"2026-01-01T00:00:00Z"}`,
+			body:      `{"EvidenceID":"ev-http-1","SubjectID":"provider-http-1","SessionID":"sess-http-1","ViolationType":"objective","EvidenceRef":"sha256:d15cf66aff24713d226c1cfc45c9056acdb396b8e24da71c57d1e5a34efd2d08","ObservedAt":"2026-01-01T00:00:00Z"}`,
 			verifyGET: "/x/vpnslashing/evidence/ev-http-1",
 			objectKey: "evidence",
 			idField:   "EvidenceID",
@@ -494,7 +494,7 @@ func TestRunTDPNDSettlementHTTPHappyPathPerEndpoint(t *testing.T) {
 		},
 		{
 			path:      "/x/vpnvalidator/status-records",
-			body:      `{"StatusID":"status-http-1","ValidatorID":"val-http-1","ConsensusAddress":"cons-http-1","LifecycleStatus":"active","EvidenceHeight":7,"EvidenceRef":"sha256:status-http-1","RecordedAt":"2026-01-01T00:00:01Z","Status":"submitted"}`,
+			body:      `{"StatusID":"status-http-1","ValidatorID":"val-http-1","ConsensusAddress":"cons-http-1","LifecycleStatus":"active","EvidenceHeight":7,"EvidenceRef":"sha256:afb8c2cf33cde95de5436ea939cae4a1a45c9c64938524ec7bb3d850a0b59497","RecordedAt":"2026-01-01T00:00:01Z","Status":"submitted"}`,
 			verifyGET: "/x/vpnvalidator/status-records/status-http-1",
 			objectKey: "status",
 			idField:   "StatusID",
@@ -620,7 +620,7 @@ func TestRunTDPNDSettlementHTTPValidatorGovernanceWriteMethodContract(t *testing
 		{
 			name:      "validator-status",
 			path:      "/x/vpnvalidator/status-records",
-			postBody:  `{"StatusID":"status-method-1","ValidatorID":"val-method-1","ConsensusAddress":"cons-method-1","LifecycleStatus":"active","EvidenceHeight":9,"EvidenceRef":"sha256:status-method-1","RecordedAt":"2026-01-01T00:00:01Z","Status":"submitted"}`,
+			postBody:  `{"StatusID":"status-method-1","ValidatorID":"val-method-1","ConsensusAddress":"cons-method-1","LifecycleStatus":"active","EvidenceHeight":9,"EvidenceRef":"sha256:522e9fc34dbba0963cd8af8f4194114f4e5badaf138b95477bed0a3bbd5fd6ad","RecordedAt":"2026-01-01T00:00:01Z","Status":"submitted"}`,
 			verifyGET: "/x/vpnvalidator/status-records/status-method-1",
 			objectKey: "status",
 			idField:   "StatusID",
@@ -974,7 +974,7 @@ func TestRunTDPNDSettlementHTTPQueryHappyPathAndLists(t *testing.T) {
 		},
 		{
 			path: "/x/vpnslashing/evidence",
-			body: `{"EvidenceID":"ev-query-1","SubjectID":"provider-query-1","SessionID":"sess-query-1","ViolationType":"objective","EvidenceRef":"sha256:proof-query-1","ObservedAt":"2026-01-01T00:00:00Z"}`,
+			body: `{"EvidenceID":"ev-query-1","SubjectID":"provider-query-1","SessionID":"sess-query-1","ViolationType":"objective","EvidenceRef":"sha256:98c28e7336b1709232b3cf6d5a5af8c4d0a779fe32360f37d8a1c832f03e5cbf","ObservedAt":"2026-01-01T00:00:00Z"}`,
 		},
 	}
 
@@ -1015,7 +1015,7 @@ func TestRunTDPNDSettlementHTTPQueryHappyPathAndLists(t *testing.T) {
 			ValidatorID:     "val-query-1",
 			LifecycleStatus: validatortypes.ValidatorLifecycleActive,
 			EvidenceHeight:  99,
-			EvidenceRef:     "sha256:status-query-1",
+			EvidenceRef:     "sha256:ce1ad56555311a8b138899bc99700d80aa1b55950daeab84a859a0c9f5fca6db",
 		},
 	}); err != nil {
 		t.Fatalf("record validator status seed: %v", err)
@@ -1270,7 +1270,7 @@ func TestRunTDPNDSettlementHTTPGETQueriesRemainOpenWithAuth(t *testing.T) {
 		},
 		{
 			path: "/x/vpnslashing/evidence",
-			body: `{"EvidenceID":"ev-auth-open-1","SubjectID":"provider-auth-open-1","SessionID":"sess-auth-open-1","ViolationType":"objective","EvidenceRef":"sha256:proof-auth-open-1","ObservedAt":"2026-01-01T00:00:00Z"}`,
+			body: `{"EvidenceID":"ev-auth-open-1","SubjectID":"provider-auth-open-1","SessionID":"sess-auth-open-1","ViolationType":"objective","EvidenceRef":"sha256:9bbf13c7bdf221673b5d927e27af94491bef49ed1f623c05e2e9206ea0f21934","ObservedAt":"2026-01-01T00:00:00Z"}`,
 		},
 		{
 			path: "/x/vpnvalidator/eligibilities",
@@ -1278,7 +1278,7 @@ func TestRunTDPNDSettlementHTTPGETQueriesRemainOpenWithAuth(t *testing.T) {
 		},
 		{
 			path: "/x/vpnvalidator/status-records",
-			body: `{"StatusID":"status-auth-open-1","ValidatorID":"val-auth-open-1","ConsensusAddress":"cons-auth-open-1","LifecycleStatus":"active","EvidenceHeight":99,"EvidenceRef":"sha256:status-auth-open-1","RecordedAt":"2026-01-01T00:00:01Z","Status":"submitted"}`,
+			body: `{"StatusID":"status-auth-open-1","ValidatorID":"val-auth-open-1","ConsensusAddress":"cons-auth-open-1","LifecycleStatus":"active","EvidenceHeight":99,"EvidenceRef":"sha256:0550eb9cd962ce3f3362e46ba082d65e6c8708386b4acc14ab4ead4915c78fe8","RecordedAt":"2026-01-01T00:00:01Z","Status":"submitted"}`,
 		},
 		{
 			path: "/x/vpngovernance/policies",

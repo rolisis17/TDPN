@@ -21,7 +21,7 @@ func TestGRPCMsgAdapterSubmitEvidenceAndRecordPenalty(t *testing.T) {
 		Evidence: &pb.SlashEvidence{
 			EvidenceId: "evidence-grpc-1",
 			Kind:       modtypes.EvidenceKindObjective,
-			ProofHash:  "sha256:proof-grpc-1",
+			ProofHash:  testSHAProof("proof-grpc-1"),
 		},
 	})
 	if err != nil {
@@ -102,12 +102,12 @@ func TestGRPCQueryAdapterListMethods(t *testing.T) {
 	k.UpsertEvidence(modtypes.SlashEvidence{
 		EvidenceID: "evidence-b",
 		Kind:       modtypes.EvidenceKindObjective,
-		ProofHash:  "sha256:proof-b",
+		ProofHash:  testSHAProof("proof-b"),
 	})
 	k.UpsertEvidence(modtypes.SlashEvidence{
 		EvidenceID: "evidence-a",
 		Kind:       modtypes.EvidenceKindObjective,
-		ProofHash:  "sha256:proof-a",
+		ProofHash:  testSHAProof("proof-a"),
 	})
 	k.UpsertPenalty(modtypes.PenaltyDecision{
 		PenaltyID:       "penalty-b",
