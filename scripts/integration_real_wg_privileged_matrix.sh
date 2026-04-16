@@ -49,14 +49,17 @@ run_profile() {
   local name="$1"
   shift
   local out="/tmp/integration_real_wg_matrix_${name}.log"
+  local trust_file="/tmp/integration_real_wg_matrix_${name}_trusted_keys.txt"
   rm -f "$out"
+  rm -f "$trust_file"
   local directory_addr=""
   directory_addr="$(extract_directory_addr "$@" || true)"
   reset_profile_trust_pin "$directory_addr"
   echo "[real-wg-matrix] running profile=${name}"
   if ! env \
     EASY_NODE_CLIENT_VPN_TRUST_SCOPE=scoped \
-    DIRECTORY_TRUSTED_KEYS_FILE= \
+    DIRECTORY_TRUSTED_KEYS_FILE="$trust_file" \
+    DIRECTORY_TRUST_TOFU=1 \
     "$@" ./scripts/integration_real_wg_privileged.sh >"$out" 2>&1; then
     echo "[real-wg-matrix] profile=${name} failed"
     cat "$out"
