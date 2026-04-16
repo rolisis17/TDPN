@@ -399,6 +399,12 @@ if ! rg -Fq "run/handoff-run dry-run relaxation" "$full_plan" \
   echo "full execution plan must document phase6 run/handoff-run dry-run module-tx/auth-live relaxation posture"
   exit 1
 fi
+if ! rg -Fq "roadmap_progress_report.sh" "$full_plan" \
+  || ! rg -Fq "phase6_cosmos_l1_handoff" "$full_plan" \
+  || ! rg -Fq "integration_roadmap_progress_report.sh" "$full_plan"; then
+  echo "full execution plan must document roadmap progress phase6 handoff signal surfacing contract"
+  exit 1
+fi
 if ! rg -qi "confirmation lifecycle" "$full_plan"; then
   echo "full execution plan must document settlement confirmation lifecycle posture"
   exit 1
@@ -573,6 +579,12 @@ if ! rg -Fq "run/handoff-run dry-run relaxation" "$product_roadmap" \
   || ! rg -Fq "module_tx_surface_ok" "$product_roadmap" \
   || ! rg -Fq "tdpnd_grpc_auth_live_smoke_ok" "$product_roadmap"; then
   echo "product roadmap must document phase6 run/handoff-run dry-run module-tx/auth-live relaxation posture"
+  exit 1
+fi
+if ! rg -Fq "roadmap_progress_report.sh" "$product_roadmap" \
+  || ! rg -Fq "phase6_cosmos_l1_handoff" "$product_roadmap" \
+  || ! rg -Fq "integration_roadmap_progress_report.sh" "$product_roadmap"; then
+  echo "product roadmap must document roadmap progress phase6 handoff signal surfacing contract"
   exit 1
 fi
 
