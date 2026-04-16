@@ -241,6 +241,8 @@ Usage:
   ./scripts/easy_node.sh vpn-rc-resilience-path [--docker-profile-matrix-timeout-sec N] [--rc-matrix-path-timeout-sec N] [vpn_rc_resilience_path args...]
   ./scripts/easy_node.sh vpn-non-blockchain-fastlane [--parallel [0|1]] [vpn_non_blockchain_fastlane args...]
   ./scripts/easy_node.sh blockchain-fastlane [blockchain_fastlane args...]
+  ./scripts/easy_node.sh blockchain-mainnet-activation-metrics [blockchain_mainnet_activation_metrics args...]
+  ./scripts/easy_node.sh blockchain-mainnet-activation-gate [blockchain_mainnet_activation_gate args...]
   ./scripts/easy_node.sh roadmap-non-blockchain-actionable-run [--recommended-only [0|1]] [--max-actions N] [--action-timeout-sec N] [roadmap_non_blockchain_actionable_run args...]
   ./scripts/easy_node.sh ci-phase0 [ci_phase0 args...]
   ./scripts/easy_node.sh ci-phase1-resilience [--three-machine-docker-profile-matrix-timeout-sec N] [--profile-compare-docker-matrix-timeout-sec N] [--three-machine-docker-profile-matrix-record-timeout-sec N] [--vpn-rc-matrix-path-timeout-sec N] [--vpn-rc-resilience-path-timeout-sec N] [--session-churn-guard-timeout-sec N] [--3hop-runtime-integration-timeout-sec N] [ci_phase1_resilience args...]
@@ -362,6 +364,8 @@ Usage:
   ./scripts/easy_node.sh vpn-rc-resilience-path [--docker-profile-matrix-timeout-sec N] [--rc-matrix-path-timeout-sec N] [vpn_rc_resilience_path args...]
   ./scripts/easy_node.sh vpn-non-blockchain-fastlane [--parallel [0|1]] [vpn_non_blockchain_fastlane args...]
   ./scripts/easy_node.sh blockchain-fastlane [blockchain_fastlane args...]
+  ./scripts/easy_node.sh blockchain-mainnet-activation-metrics [blockchain_mainnet_activation_metrics args...]
+  ./scripts/easy_node.sh blockchain-mainnet-activation-gate [blockchain_mainnet_activation_gate args...]
   ./scripts/easy_node.sh roadmap-non-blockchain-actionable-run [--recommended-only [0|1]] [--max-actions N] [--action-timeout-sec N] [roadmap_non_blockchain_actionable_run args...]
   ./scripts/easy_node.sh ci-phase0 [ci_phase0 args...]
   ./scripts/easy_node.sh ci-phase1-resilience [--three-machine-docker-profile-matrix-timeout-sec N] [--profile-compare-docker-matrix-timeout-sec N] [--three-machine-docker-profile-matrix-record-timeout-sec N] [--vpn-rc-matrix-path-timeout-sec N] [--vpn-rc-resilience-path-timeout-sec N] [--session-churn-guard-timeout-sec N] [--3hop-runtime-integration-timeout-sec N] [ci_phase1_resilience args...]
@@ -504,6 +508,8 @@ Notes:
   - vpn-rc-resilience-path wraps the VPN RC resilience helper path, forwards timeout controls (`--docker-profile-matrix-timeout-sec`, `--rc-matrix-path-timeout-sec`), and preserves pass-through args.
   - vpn-non-blockchain-fastlane wraps the non-blockchain acceleration helper path, forwards `--parallel [0|1]`, and preserves pass-through args.
   - blockchain-fastlane wraps the blockchain acceleration helper path and preserves pass-through args.
+  - blockchain-mainnet-activation-metrics wraps the blockchain mainnet activation metrics producer helper path and preserves pass-through args.
+  - blockchain-mainnet-activation-gate wraps the blockchain mainnet activation gate helper path and preserves pass-through args.
   - roadmap-non-blockchain-actionable-run resolves and runs the current roadmap no-sudo/no-GitHub actionable gate list in one command (supports `--recommended-only 1`, `--max-actions N`, and per-action timeout via `--action-timeout-sec N`).
   - ci-phase0 runs the fast Phase-0 simplification gate (launcher wiring/runtime + config-v1 + local API contract checks) with fail-fast behavior.
   - ci-phase1-resilience runs the Phase-1 resilience gate (route profile + peer churn + lifecycle stability checks), forwards per-stage timeout controls (`--*-timeout-sec`), and keeps fail-fast behavior.
@@ -8023,6 +8029,24 @@ blockchain_fastlane() {
   "$fastlane_script" "$@"
 }
 
+blockchain_mainnet_activation_metrics() {
+  local metrics_script="${BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_SCRIPT:-$ROOT_DIR/scripts/blockchain_mainnet_activation_metrics.sh}"
+  if [[ ! -x "$metrics_script" ]]; then
+    echo "missing helper script: $metrics_script"
+    exit 2
+  fi
+  "$metrics_script" "$@"
+}
+
+blockchain_mainnet_activation_gate() {
+  local gate_script="${BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SCRIPT:-$ROOT_DIR/scripts/blockchain_mainnet_activation_gate.sh}"
+  if [[ ! -x "$gate_script" ]]; then
+    echo "missing helper script: $gate_script"
+    exit 2
+  fi
+  "$gate_script" "$@"
+}
+
 roadmap_non_blockchain_actionable_run() {
   local script="${ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_SCRIPT:-$ROOT_DIR/scripts/roadmap_non_blockchain_actionable_run.sh}"
   "$script" "$@"
@@ -14497,6 +14521,14 @@ main() {
     blockchain-fastlane)
       shift
       blockchain_fastlane "$@"
+      ;;
+    blockchain-mainnet-activation-metrics)
+      shift
+      blockchain_mainnet_activation_metrics "$@"
+      ;;
+    blockchain-mainnet-activation-gate)
+      shift
+      blockchain_mainnet_activation_gate "$@"
       ;;
     roadmap-non-blockchain-actionable-run)
       shift

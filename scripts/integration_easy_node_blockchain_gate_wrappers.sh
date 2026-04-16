@@ -118,6 +118,8 @@ assert_forwarded_args() {
 
 COMMANDS=(
   "blockchain-fastlane"
+  "blockchain-mainnet-activation-metrics"
+  "blockchain-mainnet-activation-gate"
   "ci-phase5-settlement-layer"
   "phase5-settlement-layer-check"
   "phase5-settlement-layer-run"
@@ -139,6 +141,8 @@ COMMANDS=(
 
 ENV_OVERRIDES=(
   "BLOCKCHAIN_FASTLANE_SCRIPT"
+  "BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_SCRIPT"
+  "BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SCRIPT"
   "CI_PHASE5_SETTLEMENT_LAYER_SCRIPT"
   "PHASE5_SETTLEMENT_LAYER_CHECK_SCRIPT"
   "PHASE5_SETTLEMENT_LAYER_RUN_SCRIPT"
