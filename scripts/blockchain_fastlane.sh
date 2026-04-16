@@ -19,7 +19,8 @@ Usage:
     [--run-blockchain-mainnet-activation-metrics [0|1]] \
     [--blockchain-mainnet-activation-metrics-json PATH] \
     [--blockchain-mainnet-activation-metrics-summary-json PATH] \
-    [--run-blockchain-mainnet-activation-gate [0|1]]
+    [--run-blockchain-mainnet-activation-gate [0|1]] \
+    [--blockchain-mainnet-activation-gate-summary-json PATH]
 
 Purpose:
   Run blockchain CI gates in deterministic order:
@@ -115,6 +116,7 @@ run_blockchain_mainnet_activation_metrics="${BLOCKCHAIN_FASTLANE_RUN_BLOCKCHAIN_
 blockchain_mainnet_activation_metrics_json="${BLOCKCHAIN_FASTLANE_BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_JSON:-}"
 blockchain_mainnet_activation_metrics_summary_json="${BLOCKCHAIN_FASTLANE_BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_SUMMARY_JSON:-}"
 run_blockchain_mainnet_activation_gate="${BLOCKCHAIN_FASTLANE_RUN_BLOCKCHAIN_MAINNET_ACTIVATION_GATE:-1}"
+blockchain_mainnet_activation_gate_summary_json="${BLOCKCHAIN_FASTLANE_BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SUMMARY_JSON:-}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -206,6 +208,10 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --blockchain-mainnet-activation-gate-summary-json)
+      blockchain_mainnet_activation_gate_summary_json="${2:-}"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -291,6 +297,12 @@ fi
 if [[ -n "$blockchain_mainnet_activation_metrics_summary_json" ]]; then
   blockchain_mainnet_activation_metrics_summary_json="$(abs_path "$blockchain_mainnet_activation_metrics_summary_json")"
 fi
+if [[ -z "$blockchain_mainnet_activation_gate_summary_json" && "$run_blockchain_mainnet_activation_gate" == "1" ]]; then
+  blockchain_mainnet_activation_gate_summary_json="$reports_dir/blockchain_mainnet_activation_gate_summary.json"
+fi
+if [[ -n "$blockchain_mainnet_activation_gate_summary_json" ]]; then
+  blockchain_mainnet_activation_gate_summary_json="$(abs_path "$blockchain_mainnet_activation_gate_summary_json")"
+fi
 canonical_summary_json="$(abs_path "$canonical_summary_json")"
 
 mkdir -p "$reports_dir"
@@ -301,6 +313,9 @@ if [[ -n "$blockchain_mainnet_activation_metrics_json" ]]; then
 fi
 if [[ -n "$blockchain_mainnet_activation_metrics_summary_json" ]]; then
   mkdir -p "$(dirname "$blockchain_mainnet_activation_metrics_summary_json")"
+fi
+if [[ -n "$blockchain_mainnet_activation_gate_summary_json" ]]; then
+  mkdir -p "$(dirname "$blockchain_mainnet_activation_gate_summary_json")"
 fi
 
 declare -A stage_status
@@ -333,6 +348,9 @@ for stage_id in "${stage_ids[@]}"; do
     "blockchain_mainnet_activation_gate")
       if [[ -n "$blockchain_mainnet_activation_metrics_json" ]]; then
         stage_args+=(--metrics-json "$blockchain_mainnet_activation_metrics_json")
+      fi
+      if [[ -n "$blockchain_mainnet_activation_gate_summary_json" ]]; then
+        stage_args+=(--summary-json "$blockchain_mainnet_activation_gate_summary_json")
       fi
       ;;
   esac
@@ -383,8 +401,10 @@ for stage_id in "${stage_ids[@]}"; do
       stage_artifacts_json="$(
         jq -n \
           --arg metrics_json "$blockchain_mainnet_activation_metrics_json" \
+          --arg summary_json "$blockchain_mainnet_activation_gate_summary_json" \
           '{
-            metrics_json: (if $metrics_json == "" then null else $metrics_json end)
+            metrics_json: (if $metrics_json == "" then null else $metrics_json end),
+            summary_json: (if $summary_json == "" then null else $summary_json end)
           }'
       )"
       ;;
@@ -434,6 +454,7 @@ jq -n \
   --arg blockchain_mainnet_activation_metrics_json "$blockchain_mainnet_activation_metrics_json" \
   --arg blockchain_mainnet_activation_metrics_summary_json "$blockchain_mainnet_activation_metrics_summary_json" \
   --arg run_blockchain_mainnet_activation_gate "$run_blockchain_mainnet_activation_gate" \
+  --arg blockchain_mainnet_activation_gate_summary_json "$blockchain_mainnet_activation_gate_summary_json" \
   --argjson steps "$steps_json" \
   '{
     version: 1,
@@ -455,7 +476,8 @@ jq -n \
       run_blockchain_mainnet_activation_metrics: ($run_blockchain_mainnet_activation_metrics == "1"),
       blockchain_mainnet_activation_metrics_json: (if $blockchain_mainnet_activation_metrics_json == "" then null else $blockchain_mainnet_activation_metrics_json end),
       blockchain_mainnet_activation_metrics_summary_json: (if $blockchain_mainnet_activation_metrics_summary_json == "" then null else $blockchain_mainnet_activation_metrics_summary_json end),
-      run_blockchain_mainnet_activation_gate: ($run_blockchain_mainnet_activation_gate == "1")
+      run_blockchain_mainnet_activation_gate: ($run_blockchain_mainnet_activation_gate == "1"),
+      blockchain_mainnet_activation_gate_summary_json: (if $blockchain_mainnet_activation_gate_summary_json == "" then null else $blockchain_mainnet_activation_gate_summary_json end)
     },
     steps: $steps,
     artifacts: {
@@ -463,7 +485,8 @@ jq -n \
       summary_json: $summary_json,
       canonical_summary_json: $canonical_summary_json,
       blockchain_mainnet_activation_metrics_json: (if $blockchain_mainnet_activation_metrics_json == "" then null else $blockchain_mainnet_activation_metrics_json end),
-      blockchain_mainnet_activation_metrics_summary_json: (if $blockchain_mainnet_activation_metrics_summary_json == "" then null else $blockchain_mainnet_activation_metrics_summary_json end)
+      blockchain_mainnet_activation_metrics_summary_json: (if $blockchain_mainnet_activation_metrics_summary_json == "" then null else $blockchain_mainnet_activation_metrics_summary_json end),
+      blockchain_mainnet_activation_gate_summary_json: (if $blockchain_mainnet_activation_gate_summary_json == "" then null else $blockchain_mainnet_activation_gate_summary_json end)
     }
   }' >"$summary_tmp"
 mv -f "$summary_tmp" "$summary_json"

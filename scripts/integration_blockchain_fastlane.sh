@@ -47,6 +47,8 @@ TOGGLE_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_toggle.json"
 GATE_FAIL_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_gate_fail.json"
 FAIL_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_fail.json"
 SUCCESS_METRICS_JSON="$SUCCESS_REPORTS_DIR/blockchain_mainnet_activation_metrics.json"
+SUCCESS_GATE_SUMMARY_JSON="$SUCCESS_REPORTS_DIR/blockchain_mainnet_activation_gate_summary.json"
+SAME_PATH_GATE_SUMMARY_JSON="$SAME_PATH_REPORTS_DIR/blockchain_mainnet_activation_gate_summary.json"
 
 STAGE_ENV_NAMES=(
   "BLOCKCHAIN_FASTLANE_CI_PHASE5_SETTLEMENT_LAYER_SCRIPT"
@@ -239,13 +241,14 @@ BLOCKCHAIN_FASTLANE_CANONICAL_SUMMARY_JSON="$SUCCESS_CANONICAL_SUMMARY_JSON" \
 
 assert_stage_order "$CAPTURE" "${STAGE_IDS[@]}"
 assert_stage_invocation_contains "$CAPTURE" "blockchain_mainnet_activation_gate" "--metrics-json" "$SUCCESS_METRICS_JSON"
+assert_stage_invocation_contains "$CAPTURE" "blockchain_mainnet_activation_gate" "--summary-json" "$SUCCESS_GATE_SUMMARY_JSON"
 
 if [[ ! -f "$SUCCESS_SUMMARY_JSON" ]]; then
   echo "missing success summary json: $SUCCESS_SUMMARY_JSON"
   cat "$SUCCESS_LOG"
   exit 1
 fi
-if ! jq -e '
+if ! jq -e --arg gate_summary "$SUCCESS_GATE_SUMMARY_JSON" '
   .status == "pass"
   and .rc == 0
   and .schema.id == "blockchain_fastlane_summary"
@@ -265,6 +268,9 @@ if ! jq -e '
   and .steps.blockchain_mainnet_activation_gate.enabled == true
   and .steps.blockchain_mainnet_activation_gate.status == "pass"
   and .steps.blockchain_mainnet_activation_gate.rc == 0
+  and .inputs.blockchain_mainnet_activation_gate_summary_json == $gate_summary
+  and .artifacts.blockchain_mainnet_activation_gate_summary_json == $gate_summary
+  and .steps.blockchain_mainnet_activation_gate.artifacts.summary_json == $gate_summary
   and .steps.blockchain_mainnet_activation_gate.artifacts.metrics_json == .artifacts.blockchain_mainnet_activation_metrics_json
   and .artifacts.blockchain_mainnet_activation_metrics_json != null
 ' "$SUCCESS_SUMMARY_JSON" >/dev/null; then
@@ -289,19 +295,23 @@ BLOCKCHAIN_FASTLANE_CANONICAL_SUMMARY_JSON="$SAME_PATH_SUMMARY_JSON" \
   --print-summary-json 0 >"$SAME_PATH_LOG" 2>&1
 
 assert_stage_order "$CAPTURE" "${STAGE_IDS_NO_METRICS[@]}"
+assert_stage_invocation_contains "$CAPTURE" "blockchain_mainnet_activation_gate" "--summary-json" "$SAME_PATH_GATE_SUMMARY_JSON"
 
 if [[ ! -f "$SAME_PATH_SUMMARY_JSON" ]]; then
   echo "missing same-path summary json: $SAME_PATH_SUMMARY_JSON"
   cat "$SAME_PATH_LOG"
   exit 1
 fi
-if ! jq -e '
+if ! jq -e --arg gate_summary "$SAME_PATH_GATE_SUMMARY_JSON" '
   .status == "pass"
   and .rc == 0
   and .inputs.run_blockchain_mainnet_activation_metrics == false
   and .steps.blockchain_mainnet_activation_metrics.enabled == false
   and .steps.blockchain_mainnet_activation_metrics.status == "skip"
   and .steps.blockchain_mainnet_activation_metrics.reason == "disabled"
+  and .inputs.blockchain_mainnet_activation_gate_summary_json == $gate_summary
+  and .artifacts.blockchain_mainnet_activation_gate_summary_json == $gate_summary
+  and .steps.blockchain_mainnet_activation_gate.artifacts.summary_json == $gate_summary
   and .artifacts.summary_json == .artifacts.canonical_summary_json
 ' "$SAME_PATH_SUMMARY_JSON" >/dev/null; then
   echo "same-path summary missing pass status or canonical artifact equality"

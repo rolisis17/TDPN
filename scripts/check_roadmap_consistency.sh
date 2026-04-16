@@ -269,6 +269,9 @@ check_blockchain_fastlane_activation_gate_surface() {
     "scripts/blockchain_mainnet_activation_gate.sh" \
     "scripts/integration_blockchain_mainnet_activation_gate.sh" \
     "--blockchain-mainnet-activation-gate-summary-json" \
+    "BLOCKCHAIN_FASTLANE_BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SUMMARY_JSON" \
+    "inputs.blockchain_mainnet_activation_gate_summary_json" \
+    "artifacts.blockchain_mainnet_activation_gate_summary_json" \
     "blockchain_track.mainnet_activation_gate" \
     "fail-soft when the summary is missing or invalid" \
     "fail-closed control-plane wiring"
@@ -3485,6 +3488,22 @@ do
     exit 1
   fi
 done
+if ! rg -Fq -- "--blockchain-mainnet-activation-gate-summary-json" "$blockchain_fastlane_script"; then
+  echo "blockchain fastlane script must expose --blockchain-mainnet-activation-gate-summary-json deterministic gate summary input"
+  exit 1
+fi
+if ! rg -Fq "BLOCKCHAIN_FASTLANE_BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SUMMARY_JSON" "$blockchain_fastlane_script"; then
+  echo "blockchain fastlane script must expose BLOCKCHAIN_FASTLANE_BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SUMMARY_JSON deterministic gate summary env input"
+  exit 1
+fi
+if ! rg -Fq "inputs.blockchain_mainnet_activation_gate_summary_json" "$blockchain_fastlane_integration_script"; then
+  echo "integration blockchain fastlane script must validate inputs.blockchain_mainnet_activation_gate_summary_json contract"
+  exit 1
+fi
+if ! rg -Fq "artifacts.blockchain_mainnet_activation_gate_summary_json" "$blockchain_fastlane_integration_script"; then
+  echo "integration blockchain fastlane script must validate artifacts.blockchain_mainnet_activation_gate_summary_json contract"
+  exit 1
+fi
 if ! rg -Fq "ordering" "$blockchain_fastlane_integration_script"; then
   echo "integration blockchain fastlane script must validate ordering semantics"
   exit 1
