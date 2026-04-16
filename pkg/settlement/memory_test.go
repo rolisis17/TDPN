@@ -61,6 +61,18 @@ func (e *fakeErr) Error() string {
 	return e.msg
 }
 
+func testSHA256Ref(seed string) string {
+	const alphabet = "0123456789abcdef"
+	if seed == "" {
+		seed = "seed"
+	}
+	out := make([]byte, 64)
+	for i := 0; i < len(out); i++ {
+		out[i] = alphabet[int(seed[i%len(seed)])%len(alphabet)]
+	}
+	return "sha256:" + string(out)
+}
+
 type switchableAdapter struct {
 	mu                 sync.Mutex
 	fail               bool
@@ -884,7 +896,7 @@ func TestMemoryServiceReconcileMarksSubmittedAsConfirmedWhenQueryable(t *testing
 		SubjectID:     "provider-confirm-1",
 		SessionID:     "sess-confirm-1",
 		ViolationType: "double-sign",
-		EvidenceRef:   "sha256:abcd1234",
+		EvidenceRef:   testSHA256Ref("ev-confirm-1"),
 		SlashMicros:   11,
 		Currency:      "TDPNC",
 	}); err != nil {
@@ -982,7 +994,7 @@ func setupSubmittedConfirmationRecords(t *testing.T, s *MemoryService, suffix st
 		SubjectID:     "provider-" + suffix,
 		SessionID:     sessionID,
 		ViolationType: "double-sign",
-		EvidenceRef:   "sha256:" + suffix,
+		EvidenceRef:   testSHA256Ref(suffix),
 		SlashMicros:   11,
 		Currency:      "TDPNC",
 	})
@@ -1636,6 +1648,24 @@ func TestMemoryServiceSubmitSlashEvidenceRequiresObjectiveSchema(t *testing.T) {
 		t.Fatalf("expected non-objective evidence ref to fail")
 	}
 	if _, err := s.SubmitSlashEvidence(ctx, SlashEvidence{
+		EvidenceID:    "ev-bad-3",
+		SubjectID:     "provider-1",
+		ViolationType: "double-sign",
+		EvidenceRef:   "sha256:abcd1234",
+		SlashMicros:   1,
+	}); err == nil {
+		t.Fatalf("expected short sha256 evidence ref to fail")
+	}
+	if _, err := s.SubmitSlashEvidence(ctx, SlashEvidence{
+		EvidenceID:    "ev-bad-4",
+		SubjectID:     "provider-1",
+		ViolationType: "double-sign",
+		EvidenceRef:   "sha256:gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg",
+		SlashMicros:   1,
+	}); err == nil {
+		t.Fatalf("expected non-hex sha256 evidence ref to fail")
+	}
+	if _, err := s.SubmitSlashEvidence(ctx, SlashEvidence{
 		EvidenceID:    "ev-good-1",
 		SubjectID:     "provider-1",
 		ViolationType: "double-sign",
@@ -1643,5 +1673,14 @@ func TestMemoryServiceSubmitSlashEvidenceRequiresObjectiveSchema(t *testing.T) {
 		SlashMicros:   1,
 	}); err != nil {
 		t.Fatalf("expected objective slash evidence to pass: %v", err)
+	}
+	if _, err := s.SubmitSlashEvidence(ctx, SlashEvidence{
+		EvidenceID:    "ev-good-2",
+		SubjectID:     "provider-1",
+		ViolationType: "double-sign",
+		EvidenceRef:   testSHA256Ref("ev-good-2"),
+		SlashMicros:   1,
+	}); err != nil {
+		t.Fatalf("expected sha256 objective slash evidence to pass: %v", err)
 	}
 }

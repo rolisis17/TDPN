@@ -1236,7 +1236,33 @@ func isObjectiveEvidenceRef(ref string) bool {
 	if ref == "" {
 		return false
 	}
-	return strings.HasPrefix(ref, "obj://") || strings.HasPrefix(ref, "sha256:")
+	if strings.HasPrefix(ref, "obj://") {
+		path := strings.TrimSpace(strings.TrimPrefix(ref, "obj://"))
+		if path == "" {
+			return false
+		}
+		if strings.ContainsAny(path, " \t\r\n") {
+			return false
+		}
+		return true
+	}
+	if !strings.HasPrefix(ref, "sha256:") {
+		return false
+	}
+	sum := strings.TrimPrefix(ref, "sha256:")
+	if len(sum) != 64 {
+		return false
+	}
+	for _, ch := range sum {
+		switch {
+		case ch >= '0' && ch <= '9':
+		case ch >= 'a' && ch <= 'f':
+		case ch >= 'A' && ch <= 'F':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func (s *MemoryService) dumpSettledSessionIDs() []string {
