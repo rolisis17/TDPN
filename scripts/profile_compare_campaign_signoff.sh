@@ -55,7 +55,8 @@ Notes:
   - Default behavior refreshes campaign artifacts first (--refresh-campaign 1).
   - Reuse of an existing campaign summary happens only when refresh is disabled
     (--refresh-campaign 0).
-  - --subject/--anon-cred are aliases of --campaign-subject/--campaign-anon-cred.
+  - --subject is a legacy alias of --campaign-subject.
+  - --anon-cred remains an alias of --campaign-anon-cred.
   - Single-instance lock is enabled by default per reports-dir; bypass only when
     intentionally running concurrent signoff with --allow-concurrent 1 (or
     PROFILE_COMPARE_CAMPAIGN_SIGNOFF_ALLOW_CONCURRENT=1).

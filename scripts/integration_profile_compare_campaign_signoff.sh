@@ -304,6 +304,27 @@ if ! rg -q 'use either --campaign-subject or --campaign-anon-cred, not both' /tm
   exit 1
 fi
 
+echo "[profile-compare-campaign-signoff] legacy --subject preserves subject/anon-cred mutual exclusion"
+set +e
+./scripts/profile_compare_campaign_signoff.sh \
+  --reports-dir "$TMP_DIR/reports_mutual_exclusion_subject_alias" \
+  --refresh-campaign 1 \
+  --subject inv-a \
+  --campaign-anon-cred cred-b \
+  --summary-json "$TMP_DIR/profile_compare_campaign_signoff_mutual_exclusion_subject_alias.json" >/tmp/integration_profile_compare_campaign_signoff_mutual_exclusion_subject_alias.log 2>&1
+rc_mutual_exclusion_subject_alias=$?
+set -e
+if [[ "$rc_mutual_exclusion_subject_alias" -ne 2 ]]; then
+  echo "expected rc=2 when --subject and --campaign-anon-cred are both set"
+  cat /tmp/integration_profile_compare_campaign_signoff_mutual_exclusion_subject_alias.log
+  exit 1
+fi
+if ! rg -q 'use either --campaign-subject or --campaign-anon-cred, not both' /tmp/integration_profile_compare_campaign_signoff_mutual_exclusion_subject_alias.log; then
+  echo "expected subject alias mutual exclusion error message missing"
+  cat /tmp/integration_profile_compare_campaign_signoff_mutual_exclusion_subject_alias.log
+  exit 1
+fi
+
 echo "[profile-compare-campaign-signoff] reuse existing campaign summary without refresh"
 : >"$SIGNOFF_CAPTURE"
 REUSE_REPORTS_DIR="$TMP_DIR/reports_reuse"
