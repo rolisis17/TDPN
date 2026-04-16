@@ -942,8 +942,20 @@ build_profile_default_gate_json() {
     if [[ "$docker_hint_wrapper_ready" == "1" ]]; then
       printf -v docker_hint_directory_a_arg '%q' "$docker_hint_directory_a"
       printf -v docker_hint_directory_b_arg '%q' "$docker_hint_directory_b"
-      next_command_wrapper="./scripts/easy_node.sh profile-default-gate-run --directory-a $docker_hint_directory_a_arg --directory-b $docker_hint_directory_b_arg --reports-dir $reports_dir_arg --refresh-campaign 1 --fail-on-no-go 0 --campaign-timeout-sec $campaign_timeout_sec_arg --summary-json $summary_json_arg --print-summary-json 1 --campaign-execution-mode $docker_hint_execution_mode_arg --campaign-start-local-stack $docker_hint_start_local_stack_arg --campaign-directory-urls $docker_hint_directory_urls_arg --campaign-issuer-url $docker_hint_issuer_url_arg --campaign-entry-url $docker_hint_entry_url_arg --campaign-exit-url $docker_hint_exit_url_arg"
-      next_command_wrapper_sudo="sudo ./scripts/easy_node.sh profile-default-gate-run --directory-a $docker_hint_directory_a_arg --directory-b $docker_hint_directory_b_arg --reports-dir $reports_dir_arg --refresh-campaign 1 --fail-on-no-go 0 --campaign-timeout-sec $campaign_timeout_sec_arg --summary-json $summary_json_arg --print-summary-json 1 --campaign-execution-mode $docker_hint_execution_mode_arg --campaign-start-local-stack $docker_hint_start_local_stack_arg --campaign-directory-urls $docker_hint_directory_urls_arg --campaign-issuer-url $docker_hint_issuer_url_arg --campaign-entry-url $docker_hint_entry_url_arg --campaign-exit-url $docker_hint_exit_url_arg"
+      next_command_wrapper="./scripts/easy_node.sh profile-default-gate-run --directory-a $docker_hint_directory_a_arg --directory-b $docker_hint_directory_b_arg --reports-dir $reports_dir_arg --campaign-timeout-sec $campaign_timeout_sec_arg --summary-json $summary_json_arg --print-summary-json 1"
+      next_command_wrapper_sudo="sudo ./scripts/easy_node.sh profile-default-gate-run --directory-a $docker_hint_directory_a_arg --directory-b $docker_hint_directory_b_arg --reports-dir $reports_dir_arg --campaign-timeout-sec $campaign_timeout_sec_arg --summary-json $summary_json_arg --print-summary-json 1"
+      if [[ -n "$docker_hint_issuer_url" ]]; then
+        next_command_wrapper="$next_command_wrapper --campaign-issuer-url $docker_hint_issuer_url_arg"
+        next_command_wrapper_sudo="$next_command_wrapper_sudo --campaign-issuer-url $docker_hint_issuer_url_arg"
+      fi
+      if [[ -n "$docker_hint_entry_url" ]]; then
+        next_command_wrapper="$next_command_wrapper --campaign-entry-url $docker_hint_entry_url_arg"
+        next_command_wrapper_sudo="$next_command_wrapper_sudo --campaign-entry-url $docker_hint_entry_url_arg"
+      fi
+      if [[ -n "$docker_hint_exit_url" ]]; then
+        next_command_wrapper="$next_command_wrapper --campaign-exit-url $docker_hint_exit_url_arg"
+        next_command_wrapper_sudo="$next_command_wrapper_sudo --campaign-exit-url $docker_hint_exit_url_arg"
+      fi
       next_command_docker="$next_command_wrapper"
       next_command_sudo="$next_command_wrapper_sudo"
     else

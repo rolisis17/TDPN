@@ -767,6 +767,7 @@ if ! jq -e '
   and (.next_actions[1].id // "") == "profile_default_gate"
   and (((.next_actions // []) | any(.id == "three_machine_docker_readiness")) | not)
   and (((.next_actions // []) | any(.id == "real_wg_privileged_matrix")) | not)
+  and (((.next_actions // []) | any(.id == "blockchain_mainnet_activation_missing_metrics")) | not)
   and .refresh.manual_validation_report.status == "pass"
   and .refresh.manual_validation_report.timed_out == false
   and .refresh.manual_validation_report.summary_valid_after_run == true
@@ -1364,7 +1365,9 @@ if ! run_roadmap_progress_report \
   exit 1
 fi
 if ! jq -e --arg src "$AUTO_MAINNET_GATE_SUMMARY_JSON" '
-  .blockchain_track.mainnet_activation_gate.available == true
+  (.blockchain_track.mainnet_activation_missing_metrics_action.operator_pack_command // "") as $operator_pack_command
+  | (.blockchain_track.mainnet_activation_missing_metrics_action.reason // "") as $missing_metrics_reason
+  | .blockchain_track.mainnet_activation_gate.available == true
   and .blockchain_track.mainnet_activation_gate.status == "no-go"
   and .blockchain_track.mainnet_activation_gate.decision == "NO-GO"
   and .blockchain_track.mainnet_activation_gate.go == false
@@ -1395,6 +1398,12 @@ if ! jq -e --arg src "$AUTO_MAINNET_GATE_SUMMARY_JSON" '
   and ((.blockchain_track.mainnet_activation_missing_metrics_action.cycle_command // "") | contains("--input-json <operator-metrics-input.json>"))
   and ((.blockchain_track.mainnet_activation_missing_metrics_action.seeded_cycle_command // "") | startswith("./scripts/easy_node.sh blockchain-mainnet-activation-gate-cycle-seeded "))
   and ((.blockchain_track.mainnet_activation_missing_metrics_action.seeded_cycle_command // "") | contains("--refresh-roadmap 1"))
+  and ((.next_actions // []) | any(
+    .id == "blockchain_mainnet_activation_missing_metrics"
+    and .label == "Blockchain missing-metrics operator pack"
+    and .command == $operator_pack_command
+    and .reason == $missing_metrics_reason
+  ))
 ' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_summary.json" >/dev/null; then
   echo "auto-discovered gate summary JSON missing expected fields"
   cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_summary.json"

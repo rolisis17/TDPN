@@ -5375,7 +5375,7 @@ non_blockchain_actionable_no_sudo_or_github_json="$(
 non_blockchain_recommended_gate_id="$(printf '%s\n' "$non_blockchain_actionable_no_sudo_or_github_json" | jq -r 'if length > 0 then .[0].id else "" end')"
 non_blockchain_actionable_no_sudo_or_github_count="$(printf '%s\n' "$non_blockchain_actionable_no_sudo_or_github_json" | jq -r 'length')"
 
-next_actions_json="$(jq -c --arg next_action_check_id "$next_action_check_id" --arg next_action_label "$next_action_label" --arg next_action_command "$next_action_command" --argjson profile_default_gate_needs_attention "$profile_default_gate_needs_attention_json" '
+next_actions_json="$(jq -c --arg next_action_check_id "$next_action_check_id" --arg next_action_label "$next_action_label" --arg next_action_command "$next_action_command" --argjson profile_default_gate_needs_attention "$profile_default_gate_needs_attention_json" --argjson blockchain_mainnet_activation_missing_metrics_action_available "$blockchain_mainnet_activation_missing_metrics_action_available_json" --arg blockchain_mainnet_activation_missing_metrics_action_reason "$blockchain_mainnet_activation_missing_metrics_action_reason" --arg blockchain_mainnet_activation_missing_metrics_action_operator_pack_command "$blockchain_mainnet_activation_missing_metrics_action_operator_pack_command" '
   def unique_commands_preserve_order:
     reduce .[] as $item (
       [];
@@ -5399,6 +5399,12 @@ next_actions_json="$(jq -c --arg next_action_check_id "$next_action_check_id" --
       label: "Profile default decision gate",
       command: (.summary.profile_default_gate.next_command // .summary.profile_default_gate.command // .summary.profile_default_gate.next_command_sudo // ""),
       reason: "non-blocking profile default decision"
+    } else empty end),
+    (if ($blockchain_mainnet_activation_missing_metrics_action_available == true and ($blockchain_mainnet_activation_missing_metrics_action_operator_pack_command // "") != "") then {
+      id: "blockchain_mainnet_activation_missing_metrics",
+      label: "Blockchain missing-metrics operator pack",
+      command: $blockchain_mainnet_activation_missing_metrics_action_operator_pack_command,
+      reason: (if ($blockchain_mainnet_activation_missing_metrics_action_reason // "") != "" then $blockchain_mainnet_activation_missing_metrics_action_reason else "mainnet activation metrics evidence is missing/invalid; run the operator pack" end)
     } else empty end),
     (if ((.summary.docker_rehearsal_gate.status // "pending") != "pass" and (.summary.docker_rehearsal_gate.status // "pending") != "skip" and ((.summary.docker_rehearsal_gate.next_command // .summary.docker_rehearsal_gate.command // "") != "")) then {
       id: "three_machine_docker_readiness",
