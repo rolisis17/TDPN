@@ -884,6 +884,7 @@ check_phase7_summary_coverage_signal_doc_surface "$product_roadmap" "product roa
 check_phase7_summary_coverage_signal_doc_surface "$cosmos_runtime_doc" "cosmos settlement runtime doc"
 check_phase7_summary_runtime_signal_doc_surface "$full_plan" "full execution plan"
 check_phase7_summary_runtime_signal_doc_surface "$product_roadmap" "product roadmap"
+check_phase7_summary_runtime_signal_doc_surface "$cosmos_runtime_doc" "cosmos settlement runtime doc"
 check_phase7_roadmap_summary_coverage_signal_surface "$roadmap_script" "roadmap progress report helper"
 check_phase7_roadmap_summary_coverage_signal_surface "$roadmap_integration_script" "roadmap progress report integration script"
 check_phase7_comet_signal_surface "$full_plan" "full execution plan"
