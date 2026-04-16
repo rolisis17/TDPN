@@ -27,6 +27,7 @@ SOURCE_CLI_LOG="$TMP_DIR/source_cli.log"
 SAME_PATH_LOG="$TMP_DIR/same_path.log"
 DRY_RUN_LOG="$TMP_DIR/dry_run.log"
 TOGGLE_LOG="$TMP_DIR/toggle.log"
+PHASE7_ENV_LOG="$TMP_DIR/phase7_env.log"
 PHASE7_INVALID_LOG="$TMP_DIR/phase7_invalid.log"
 GATE_FAIL_LOG="$TMP_DIR/gate_fail.log"
 FAIL_LOG="$TMP_DIR/fail.log"
@@ -37,6 +38,7 @@ SOURCE_CLI_REPORTS_DIR="$TMP_DIR/reports_source_cli"
 SAME_PATH_REPORTS_DIR="$TMP_DIR/reports_same_path"
 DRY_RUN_REPORTS_DIR="$TMP_DIR/reports_dry_run"
 TOGGLE_REPORTS_DIR="$TMP_DIR/reports_toggle"
+PHASE7_ENV_REPORTS_DIR="$TMP_DIR/reports_phase7_env"
 PHASE7_INVALID_REPORTS_DIR="$TMP_DIR/reports_phase7_invalid"
 GATE_FAIL_REPORTS_DIR="$TMP_DIR/reports_gate_fail"
 FAIL_REPORTS_DIR="$TMP_DIR/reports_fail"
@@ -47,6 +49,7 @@ SOURCE_CLI_SUMMARY_JSON="$TMP_DIR/summary_source_cli.json"
 SAME_PATH_SUMMARY_JSON="$TMP_DIR/summary_same_path.json"
 DRY_RUN_SUMMARY_JSON="$TMP_DIR/summary_dry_run.json"
 TOGGLE_SUMMARY_JSON="$TMP_DIR/summary_toggle.json"
+PHASE7_ENV_SUMMARY_JSON="$TMP_DIR/summary_phase7_env.json"
 PHASE7_INVALID_SUMMARY_JSON="$TMP_DIR/summary_phase7_invalid.json"
 GATE_FAIL_SUMMARY_JSON="$TMP_DIR/summary_gate_fail.json"
 FAIL_SUMMARY_JSON="$TMP_DIR/summary_fail.json"
@@ -55,6 +58,7 @@ SOURCE_ENV_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_source_env.json"
 SOURCE_CLI_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_source_cli.json"
 DRY_RUN_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_dry_run.json"
 TOGGLE_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_toggle.json"
+PHASE7_ENV_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_phase7_env.json"
 PHASE7_INVALID_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_phase7_invalid.json"
 GATE_FAIL_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_gate_fail.json"
 FAIL_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_fail.json"
@@ -69,6 +73,7 @@ CLI_SOURCE_JSON_B="$TMP_DIR/cli_source_b.json"
 PHASE7_SOURCE_JSON="$TMP_DIR/phase7_summary_source.json"
 PHASE7_MISSING_JSON="$TMP_DIR/phase7_summary_missing.json"
 PHASE7_INVALID_JSON="$TMP_DIR/phase7_summary_invalid.json"
+PHASE7_ENV_OVERRIDE_JSON="$TMP_DIR/phase7_summary_env_override.json"
 
 STAGE_ENV_NAMES=(
   "BLOCKCHAIN_FASTLANE_CI_PHASE5_SETTLEMENT_LAYER_SCRIPT"
@@ -328,6 +333,7 @@ echo "[blockchain-fastlane] success ordering path"
 : >"$CAPTURE"
 BLOCKCHAIN_FASTLANE_CAPTURE_FILE="$CAPTURE" \
 BLOCKCHAIN_FASTLANE_CANONICAL_SUMMARY_JSON="$SUCCESS_CANONICAL_SUMMARY_JSON" \
+BLOCKCHAIN_FASTLANE_PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_JSON="$PHASE7_ENV_OVERRIDE_JSON" \
 "$GATE_SCRIPT" \
   --reports-dir "$SUCCESS_REPORTS_DIR" \
   --summary-json "$SUCCESS_SUMMARY_JSON" \
@@ -345,7 +351,7 @@ if [[ ! -f "$SUCCESS_SUMMARY_JSON" ]]; then
   cat "$SUCCESS_LOG"
   exit 1
 fi
-if ! jq -e --arg gate_summary "$SUCCESS_GATE_SUMMARY_JSON" --arg default_source "$DEFAULT_SOURCE_JSON_PHASE5" --arg phase7_summary "$PHASE7_SOURCE_JSON" '
+if ! jq -e --arg gate_summary "$SUCCESS_GATE_SUMMARY_JSON" --arg default_source "$DEFAULT_SOURCE_JSON_PHASE5" --arg phase7_summary "$PHASE7_SOURCE_JSON" --arg phase7_env_override "$PHASE7_ENV_OVERRIDE_JSON" '
   .status == "pass"
   and .rc == 0
   and .schema.id == "blockchain_fastlane_summary"
@@ -376,7 +382,9 @@ if ! jq -e --arg gate_summary "$SUCCESS_GATE_SUMMARY_JSON" --arg default_source 
   and .steps.blockchain_mainnet_activation_gate.artifacts.metrics_json == .artifacts.blockchain_mainnet_activation_metrics_json
   and .artifacts.blockchain_mainnet_activation_metrics_json != null
   and .inputs.phase7_mainnet_cutover_summary_report_json == $phase7_summary
+  and .inputs.phase7_mainnet_cutover_summary_report_json != $phase7_env_override
   and .artifacts.phase7_mainnet_cutover_summary_report_json == $phase7_summary
+  and .artifacts.phase7_mainnet_cutover_summary_report_json != $phase7_env_override
   and .phase7_mainnet_cutover_summary_report.input_summary_json == $phase7_summary
   and .phase7_mainnet_cutover_summary_report.available == true
   and .phase7_mainnet_cutover_summary_report.status == "pass"
@@ -405,6 +413,44 @@ if ! grep -Fq -- '[blockchain-fastlane] status=pass rc=0 dry_run=0' "$SUCCESS_LO
   exit 1
 fi
 assert_canonical_summary_artifact "$SUCCESS_SUMMARY_JSON" "$SUCCESS_CANONICAL_SUMMARY_JSON" "$SUCCESS_LOG"
+
+echo "[blockchain-fastlane] phase7 summary env input ingestion"
+: >"$CAPTURE"
+BLOCKCHAIN_FASTLANE_CAPTURE_FILE="$CAPTURE" \
+BLOCKCHAIN_FASTLANE_CANONICAL_SUMMARY_JSON="$PHASE7_ENV_CANONICAL_SUMMARY_JSON" \
+BLOCKCHAIN_FASTLANE_PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_JSON="$PHASE7_SOURCE_JSON" \
+"$GATE_SCRIPT" \
+  --reports-dir "$PHASE7_ENV_REPORTS_DIR" \
+  --summary-json "$PHASE7_ENV_SUMMARY_JSON" \
+  --print-summary-json 0 >"$PHASE7_ENV_LOG" 2>&1
+
+assert_stage_order "$CAPTURE" "${STAGE_IDS_NO_METRICS[@]}"
+
+if [[ ! -f "$PHASE7_ENV_SUMMARY_JSON" ]]; then
+  echo "missing phase7-env summary json: $PHASE7_ENV_SUMMARY_JSON"
+  cat "$PHASE7_ENV_LOG"
+  exit 1
+fi
+if ! jq -e --arg phase7_summary "$PHASE7_SOURCE_JSON" '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.phase7_mainnet_cutover_summary_report_json == $phase7_summary
+  and .artifacts.phase7_mainnet_cutover_summary_report_json == $phase7_summary
+  and .phase7_mainnet_cutover_summary_report.input_summary_json == $phase7_summary
+  and .phase7_mainnet_cutover_summary_report.available == true
+  and .phase7_mainnet_cutover_summary_report.status == "pass"
+  and .phase7_mainnet_cutover_summary_report.signals.tdpnd_grpc_auth_live_smoke_ok == false
+  and .phase7_mainnet_cutover_summary_report.signals.dual_write_parity_ok == false
+  and .steps.ci_phase7_mainnet_cutover.artifacts.phase7_mainnet_cutover_summary_report.input_summary_json == $phase7_summary
+  and .steps.ci_phase7_mainnet_cutover.artifacts.phase7_mainnet_cutover_summary_report.available == true
+  and .steps.ci_phase7_mainnet_cutover.artifacts.phase7_mainnet_cutover_summary_report.status == "pass"
+  and .steps.ci_phase7_mainnet_cutover.artifacts.phase7_mainnet_cutover_summary_report.signals.mainnet_activation_gate_go_ok == true
+' "$PHASE7_ENV_SUMMARY_JSON" >/dev/null; then
+  echo "phase7-env summary missing expected env ingestion contract"
+  cat "$PHASE7_ENV_SUMMARY_JSON"
+  exit 1
+fi
+assert_canonical_summary_artifact "$PHASE7_ENV_SUMMARY_JSON" "$PHASE7_ENV_CANONICAL_SUMMARY_JSON" "$PHASE7_ENV_LOG"
 
 cat >"$ENV_SOURCE_JSON_A" <<'EOF_ENV_SOURCE_JSON_A'
 {"paying_users_3mo_min": 1001}

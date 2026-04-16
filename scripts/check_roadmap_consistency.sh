@@ -4009,8 +4009,16 @@ if ! rg -Fq -- "--blockchain-mainnet-activation-metrics-source-json" "$blockchai
   echo "blockchain fastlane script must expose --blockchain-mainnet-activation-metrics-source-json deterministic metrics-source input"
   exit 1
 fi
+if ! rg -Fq -- "--phase7-mainnet-cutover-summary-report-json" "$blockchain_fastlane_script"; then
+  echo "blockchain fastlane script must expose --phase7-mainnet-cutover-summary-report-json deterministic phase7 summary input"
+  exit 1
+fi
 if ! rg -Fq "BLOCKCHAIN_FASTLANE_BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_SOURCE_JSONS" "$blockchain_fastlane_script"; then
   echo "blockchain fastlane script must expose BLOCKCHAIN_FASTLANE_BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_SOURCE_JSONS deterministic metrics-source env input"
+  exit 1
+fi
+if ! rg -Fq "BLOCKCHAIN_FASTLANE_PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_JSON" "$blockchain_fastlane_script"; then
+  echo "blockchain fastlane script must expose BLOCKCHAIN_FASTLANE_PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_JSON deterministic phase7 summary env input"
   exit 1
 fi
 if ! rg -Fq -- "--source-json" "$blockchain_fastlane_script"; then
@@ -4029,8 +4037,16 @@ if ! rg -Fq "inputs.blockchain_mainnet_activation_metrics_source_jsons" "$blockc
   echo "integration blockchain fastlane script must validate inputs.blockchain_mainnet_activation_metrics_source_jsons contract"
   exit 1
 fi
+if ! rg -Fq "inputs.phase7_mainnet_cutover_summary_report_json" "$blockchain_fastlane_integration_script"; then
+  echo "integration blockchain fastlane script must validate inputs.phase7_mainnet_cutover_summary_report_json contract"
+  exit 1
+fi
 if ! rg -Fq "artifacts.blockchain_mainnet_activation_metrics_source_jsons" "$blockchain_fastlane_integration_script"; then
   echo "integration blockchain fastlane script must validate artifacts.blockchain_mainnet_activation_metrics_source_jsons contract"
+  exit 1
+fi
+if ! rg -Fq "artifacts.phase7_mainnet_cutover_summary_report_json" "$blockchain_fastlane_integration_script"; then
+  echo "integration blockchain fastlane script must validate artifacts.phase7_mainnet_cutover_summary_report_json contract"
   exit 1
 fi
 if ! rg -Fq -- "--source-json" "$blockchain_fastlane_integration_script"; then
