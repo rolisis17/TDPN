@@ -1344,7 +1344,8 @@ cat >"$AUTO_MAINNET_GATE_SUMMARY_JSON" <<'EOF_AUTO_MAINNET_GATE'
   "go": false,
   "no_go": true,
   "reasons": [
-    "missing or invalid metric: paying_users_3mo_min"
+    "missing or invalid metric: paying_users_3mo_min",
+    "missing or invalid metric: measurement_window_weeks"
   ],
   "source_paths": [
     "metrics_input"
@@ -1375,27 +1376,28 @@ if ! jq -e --arg src "$AUTO_MAINNET_GATE_SUMMARY_JSON" '
   and .blockchain_track.mainnet_activation_gate.input_summary_json == $src
   and .blockchain_track.mainnet_activation_gate.source_summary_json == $src
   and ((.blockchain_track.mainnet_activation_gate.reasons // []) | index("missing or invalid metric: paying_users_3mo_min")) != null
+  and ((.blockchain_track.mainnet_activation_gate.reasons // []) | index("missing or invalid metric: measurement_window_weeks")) != null
   and ((.blockchain_track.mainnet_activation_gate.source_paths // []) | index("metrics_input")) != null
   and .blockchain_track.mainnet_activation_missing_metrics_action.available == true
   and .blockchain_track.mainnet_activation_missing_metrics_action.id == "blockchain_mainnet_activation_missing_metrics_no_go"
   and ((.blockchain_track.mainnet_activation_missing_metrics_action.reason // "") | contains("required metrics evidence is missing/invalid"))
   and ((.blockchain_track.mainnet_activation_missing_metrics_action.normalize_command // "") | startswith("./scripts/easy_node.sh blockchain-mainnet-activation-metrics-input "))
-  and ((.blockchain_track.mainnet_activation_missing_metrics_action.normalize_command // "") | contains("--input-json <operator-metrics-input.json>"))
+  and ((.blockchain_track.mainnet_activation_missing_metrics_action.normalize_command // "") | contains("--input-json .easy-node-logs/blockchain_mainnet_activation_metrics_input.operator.json"))
   and ((.blockchain_track.mainnet_activation_missing_metrics_action.rerun_bundle_command // "") | startswith("./scripts/easy_node.sh blockchain-gate-bundle "))
-  and ((.blockchain_track.mainnet_activation_missing_metrics_action.rerun_bundle_command // "") | contains("--blockchain-mainnet-activation-metrics-input-json <operator-metrics-input.json>"))
+  and ((.blockchain_track.mainnet_activation_missing_metrics_action.rerun_bundle_command // "") | contains("--blockchain-mainnet-activation-metrics-input-json .easy-node-logs/blockchain_mainnet_activation_metrics_input.operator.json"))
   and ((.blockchain_track.mainnet_activation_missing_metrics_action.checklist_command // "") | startswith("./scripts/easy_node.sh blockchain-mainnet-activation-metrics-missing-checklist "))
   and ((.blockchain_track.mainnet_activation_missing_metrics_action.checklist_command // "") | contains("--metrics-summary-json .easy-node-logs/blockchain_gate_bundle_summary.json"))
   and ((.blockchain_track.mainnet_activation_missing_metrics_action.missing_input_template_command // "") | startswith("./scripts/easy_node.sh blockchain-mainnet-activation-metrics-missing-input-template "))
   and ((.blockchain_track.mainnet_activation_missing_metrics_action.missing_input_template_command // "") | contains("--metrics-summary-json .easy-node-logs/blockchain_gate_bundle_summary.json"))
   and ((.blockchain_track.mainnet_activation_missing_metrics_action.template_command // "") | startswith("./scripts/easy_node.sh blockchain-mainnet-activation-metrics-input-template "))
-  and ((.blockchain_track.mainnet_activation_missing_metrics_action.template_command // "") | contains("--output-json <operator-metrics-input.template.json>"))
+  and ((.blockchain_track.mainnet_activation_missing_metrics_action.template_command // "") | contains("--output-json .easy-node-logs/blockchain_mainnet_activation_metrics_input.template.json"))
   and ((.blockchain_track.mainnet_activation_missing_metrics_action.operator_pack_command // "") | startswith("./scripts/easy_node.sh blockchain-mainnet-activation-operator-pack "))
   and ((.blockchain_track.mainnet_activation_missing_metrics_action.operator_pack_command // "") | contains("--metrics-summary-json .easy-node-logs/blockchain_gate_bundle_summary.json"))
-  and ((.blockchain_track.mainnet_activation_missing_metrics_action.operator_pack_command // "") | contains("--template-output-json <operator-metrics-input.template.json>"))
+  and ((.blockchain_track.mainnet_activation_missing_metrics_action.operator_pack_command // "") | contains("--template-output-json .easy-node-logs/blockchain_mainnet_activation_metrics_input.template.json"))
   and ((.blockchain_track.mainnet_activation_missing_metrics_action.operator_pack_command // "") | contains("--missing-input-template-output-json .easy-node-logs/blockchain_mainnet_activation_metrics_missing_input_template.json"))
   and ((.blockchain_track.mainnet_activation_missing_metrics_action.operator_pack_command // "") | contains("--missing-input-template-canonical-output-json .easy-node-logs/blockchain_mainnet_activation_metrics_missing_input_template.canonical.json"))
   and ((.blockchain_track.mainnet_activation_missing_metrics_action.cycle_command // "") | startswith("./scripts/easy_node.sh blockchain-mainnet-activation-gate-cycle "))
-  and ((.blockchain_track.mainnet_activation_missing_metrics_action.cycle_command // "") | contains("--input-json <operator-metrics-input.json>"))
+  and ((.blockchain_track.mainnet_activation_missing_metrics_action.cycle_command // "") | contains("--input-json .easy-node-logs/blockchain_mainnet_activation_metrics_input.operator.json"))
   and ((.blockchain_track.mainnet_activation_missing_metrics_action.seeded_cycle_command // "") | startswith("./scripts/easy_node.sh blockchain-mainnet-activation-gate-cycle-seeded "))
   and ((.blockchain_track.mainnet_activation_missing_metrics_action.seeded_cycle_command // "") | contains("--refresh-roadmap 1"))
   and ((.next_actions // []) | any(
@@ -1414,12 +1416,12 @@ if ! rg -q 'Mainnet activation missing-metrics action available: true' "$TMP_DIR
   cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"
   exit 1
 fi
-if ! rg -q 'blockchain-mainnet-activation-metrics-input --input-json <operator-metrics-input.json>' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"; then
+if ! rg -q 'blockchain-mainnet-activation-metrics-input --input-json .easy-node-logs/blockchain_mainnet_activation_metrics_input.operator.json' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"; then
   echo "auto-discovered report missing metrics-input normalization command"
   cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"
   exit 1
 fi
-if ! rg -q 'blockchain-gate-bundle --blockchain-mainnet-activation-metrics-input-json <operator-metrics-input.json>' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"; then
+if ! rg -q 'blockchain-gate-bundle --blockchain-mainnet-activation-metrics-input-json .easy-node-logs/blockchain_mainnet_activation_metrics_input.operator.json' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"; then
   echo "auto-discovered report missing gate-bundle rerun command"
   cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"
   exit 1
@@ -1434,7 +1436,7 @@ if ! rg -q 'blockchain-mainnet-activation-metrics-missing-input-template --metri
   cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"
   exit 1
 fi
-if ! rg -q 'blockchain-mainnet-activation-metrics-input-template --output-json <operator-metrics-input.template.json>' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"; then
+if ! rg -q 'blockchain-mainnet-activation-metrics-input-template --output-json .easy-node-logs/blockchain_mainnet_activation_metrics_input.template.json' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"; then
   echo "auto-discovered report missing metrics-input template command"
   cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"
   exit 1
@@ -1454,7 +1456,7 @@ if ! rg -q 'blockchain-mainnet-activation-operator-pack .* --missing-input-templ
   cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"
   exit 1
 fi
-if ! rg -q 'blockchain-mainnet-activation-gate-cycle --input-json <operator-metrics-input.json>' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"; then
+if ! rg -q 'blockchain-mainnet-activation-gate-cycle --input-json .easy-node-logs/blockchain_mainnet_activation_metrics_input.operator.json' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"; then
   echo "auto-discovered report missing one-command gate cycle command"
   cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"
   exit 1
