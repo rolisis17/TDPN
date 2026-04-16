@@ -312,6 +312,58 @@ func TestMsgServerApplyPenaltyIdempotentReplay(t *testing.T) {
 	}
 }
 
+func TestMsgServerApplyPenaltyRejectsSecondPenaltyForSameEvidence(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	server := NewMsgServer(&k)
+
+	if _, err := server.SubmitSlashEvidence(SubmitSlashEvidenceRequest{
+		Evidence: types.SlashEvidence{
+			EvidenceID: "evidence-msg-5b",
+			Kind:       types.EvidenceKindObjective,
+			ProofHash:  "sha256:proof-msg-5b",
+		},
+	}); err != nil {
+		t.Fatalf("submit evidence failed: %v", err)
+	}
+
+	first := ApplyPenaltyRequest{
+		Penalty: types.PenaltyDecision{
+			PenaltyID:       "penalty-msg-5b-a",
+			EvidenceID:      "evidence-msg-5b",
+			SlashBasisPoint: 45,
+		},
+	}
+	if _, err := server.ApplyPenalty(first); err != nil {
+		t.Fatalf("first apply failed: %v", err)
+	}
+
+	second := ApplyPenaltyRequest{
+		Penalty: types.PenaltyDecision{
+			PenaltyID:       "penalty-msg-5b-b",
+			EvidenceID:      "evidence-msg-5b",
+			SlashBasisPoint: 46,
+		},
+	}
+	resp, err := server.ApplyPenalty(second)
+	if err == nil {
+		t.Fatal("expected second penalty on same evidence to fail")
+	}
+	if !errors.Is(err, ErrPenaltyConflict) {
+		t.Fatalf("expected ErrPenaltyConflict, got %v", err)
+	}
+	if !resp.Existed {
+		t.Fatal("expected existed=true for second penalty conflict")
+	}
+	if resp.Idempotent {
+		t.Fatal("expected idempotent=false for second penalty conflict")
+	}
+	if len(k.ListPenalties()) != 1 {
+		t.Fatalf("expected only one penalty to be stored, got %d", len(k.ListPenalties()))
+	}
+}
+
 func TestMsgServerApplyPenaltyConflictPropagation(t *testing.T) {
 	t.Parallel()
 

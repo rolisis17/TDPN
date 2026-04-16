@@ -109,6 +109,10 @@ func (k *Keeper) ApplyPenalty(record types.PenaltyDecision) (types.PenaltyDecisi
 		return normalizedExisting, nil
 	}
 
+	if conflictingPenalty, ok := k.findPenaltyForEvidenceLocked(normalized.EvidenceID); ok {
+		return types.PenaltyDecision{}, penaltyEvidenceConflictError(normalized.EvidenceID, conflictingPenalty.PenaltyID)
+	}
+
 	k.store.UpsertPenalty(normalized)
 	k.advanceEvidenceForPenaltyLocked(normalized.EvidenceID)
 	return normalized, nil
@@ -142,6 +146,16 @@ func (k *Keeper) advanceEvidenceForPenaltyLocked(evidenceID string) {
 		normalized.Status = chaintypes.ReconciliationConfirmed
 	}
 	k.store.UpsertEvidence(normalized)
+}
+
+func (k *Keeper) findPenaltyForEvidenceLocked(evidenceID string) (types.PenaltyDecision, bool) {
+	for _, penalty := range k.store.ListPenalties() {
+		normalized := normalizePenalty(penalty)
+		if normalized.EvidenceID == evidenceID {
+			return normalized, true
+		}
+	}
+	return types.PenaltyDecision{}, false
 }
 
 func normalizeEvidence(record types.SlashEvidence) types.SlashEvidence {
@@ -183,4 +197,8 @@ func conflictError(kind string, id string) error {
 
 func missingEvidenceError(evidenceID string) error {
 	return fmt.Errorf("evidence %q not found", evidenceID)
+}
+
+func penaltyEvidenceConflictError(evidenceID string, existingPenaltyID string) error {
+	return fmt.Errorf("evidence %q already has penalty %q", evidenceID, existingPenaltyID)
 }

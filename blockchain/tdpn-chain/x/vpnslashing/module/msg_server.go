@@ -81,15 +81,28 @@ func (s MsgServer) ApplyPenalty(req ApplyPenaltyRequest) (ApplyPenaltyResponse, 
 		return ApplyPenaltyResponse{}, ErrNilKeeper
 	}
 
+	if err := req.Penalty.ValidateBasic(); err != nil {
+		return ApplyPenaltyResponse{}, fmt.Errorf("%w: %v", ErrInvalidPenalty, err)
+	}
+
 	existed := false
 	if req.Penalty.PenaltyID != "" {
 		_, existed = s.keeper.GetPenalty(req.Penalty.PenaltyID)
 	}
 
+	evidencePenaltyExists, samePenaltyID, evidencePenaltyConflict := s.penaltyForEvidence(req.Penalty.EvidenceID, req.Penalty.PenaltyID)
+	if evidencePenaltyConflict || (evidencePenaltyExists && !samePenaltyID) {
+		return ApplyPenaltyResponse{
+			Penalty:    req.Penalty,
+			Existed:    true,
+			Idempotent: false,
+		}, fmt.Errorf("%w: evidence %q already has a penalty", ErrPenaltyConflict, req.Penalty.EvidenceID)
+	}
+
 	record, err := s.keeper.ApplyPenalty(req.Penalty)
 	resp := ApplyPenaltyResponse{
 		Penalty:    record,
-		Existed:    existed,
+		Existed:    existed || evidencePenaltyExists,
 		Idempotent: existed && err == nil,
 	}
 	if err != nil {
@@ -102,4 +115,24 @@ func (s MsgServer) ApplyPenalty(req ApplyPenaltyRequest) (ApplyPenaltyResponse, 
 		return resp, fmt.Errorf("%w: %v", ErrInvalidPenalty, err)
 	}
 	return resp, nil
+}
+
+func (s MsgServer) penaltyForEvidence(evidenceID string, penaltyID string) (bool, bool, bool) {
+	if s.keeper == nil || evidenceID == "" {
+		return false, false, false
+	}
+
+	found := false
+	samePenaltyID := false
+	for _, penalty := range s.keeper.ListPenalties() {
+		if penalty.EvidenceID != evidenceID {
+			continue
+		}
+		found = true
+		if penalty.PenaltyID == penaltyID {
+			samePenaltyID = true
+		}
+	}
+
+	return found, samePenaltyID, found && !samePenaltyID
 }

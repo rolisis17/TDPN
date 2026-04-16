@@ -378,6 +378,50 @@ func TestApplyPenaltyIdempotentReplay(t *testing.T) {
 	}
 }
 
+func TestApplyPenaltyRejectsSecondPenaltyForSameEvidence(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	evidence, err := k.SubmitEvidence(types.SlashEvidence{
+		EvidenceID: "evidence-penalty-2b",
+		Kind:       types.EvidenceKindObjective,
+		ProofHash:  "sha256:proof-penalty-2b",
+	})
+	if err != nil {
+		t.Fatalf("seed evidence failed: %v", err)
+	}
+
+	first := types.PenaltyDecision{
+		PenaltyID:       "penalty-apply-2b-a",
+		EvidenceID:      evidence.EvidenceID,
+		SlashBasisPoint: 60,
+	}
+	if _, err := k.ApplyPenalty(first); err != nil {
+		t.Fatalf("first apply failed: %v", err)
+	}
+
+	second := types.PenaltyDecision{
+		PenaltyID:       "penalty-apply-2b-b",
+		EvidenceID:      evidence.EvidenceID,
+		SlashBasisPoint: 60,
+	}
+	_, err = k.ApplyPenalty(second)
+	if err == nil {
+		t.Fatal("expected second penalty on same evidence to fail")
+	}
+	if !strings.Contains(err.Error(), "already has penalty") {
+		t.Fatalf("expected evidence conflict error, got %v", err)
+	}
+
+	penalties := k.ListPenalties()
+	if len(penalties) != 1 {
+		t.Fatalf("expected only one penalty to be stored, got %d", len(penalties))
+	}
+	if penalties[0].PenaltyID != first.PenaltyID {
+		t.Fatalf("expected stored penalty %q, got %q", first.PenaltyID, penalties[0].PenaltyID)
+	}
+}
+
 func TestApplyPenaltyConflict(t *testing.T) {
 	t.Parallel()
 
