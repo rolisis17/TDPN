@@ -964,6 +964,57 @@ if ! jq -e '
   exit 1
 fi
 
+echo "[roadmap-progress-report] blockchain mainnet activation gate auto-discovery path"
+AUTO_MAINNET_GATE_SUMMARY_JSON="$ROADMAP_PROGRESS_TEST_LOGS_ROOT/blockchain_mainnet_activation_gate_summary.json"
+cat >"$AUTO_MAINNET_GATE_SUMMARY_JSON" <<'EOF_AUTO_MAINNET_GATE'
+{
+  "version": 1,
+  "schema": {
+    "id": "blockchain_mainnet_activation_gate_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "no-go",
+  "decision": "NO-GO",
+  "go": false,
+  "no_go": true,
+  "reasons": [
+    "missing required metrics JSON path"
+  ],
+  "source_paths": [
+    "metrics_input"
+  ]
+}
+EOF_AUTO_MAINNET_GATE
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$MINIMAL_MANUAL_SUMMARY_JSON" \
+  --phase7-mainnet-cutover-summary-json "" \
+  --summary-json "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >/tmp/integration_roadmap_progress_report_mainnet_activation_gate_auto.log 2>&1; then
+  echo "expected success when mainnet activation gate summary is auto-discovered"
+  cat /tmp/integration_roadmap_progress_report_mainnet_activation_gate_auto.log
+  exit 1
+fi
+if ! jq -e --arg src "$AUTO_MAINNET_GATE_SUMMARY_JSON" '
+  .blockchain_track.mainnet_activation_gate.available == true
+  and .blockchain_track.mainnet_activation_gate.status == "no-go"
+  and .blockchain_track.mainnet_activation_gate.decision == "NO-GO"
+  and .blockchain_track.mainnet_activation_gate.go == false
+  and .blockchain_track.mainnet_activation_gate.no_go == true
+  and .blockchain_track.mainnet_activation_gate.input_summary_json == $src
+  and .blockchain_track.mainnet_activation_gate.source_summary_json == $src
+  and ((.blockchain_track.mainnet_activation_gate.reasons // []) | index("missing required metrics JSON path")) != null
+  and ((.blockchain_track.mainnet_activation_gate.source_paths // []) | index("metrics_input")) != null
+' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_summary.json" >/dev/null; then
+  echo "auto-discovered gate summary JSON missing expected fields"
+  cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_summary.json"
+  exit 1
+fi
+
 if ! rg -q '\[roadmap-progress-report\] phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_status=pass issuer_sponsor_api_live_smoke_ok=true' /tmp/integration_roadmap_progress_report_ok.log; then
   echo "expected phase5 issuer sponsor debug line in success path"
   cat /tmp/integration_roadmap_progress_report_ok.log

@@ -1887,6 +1887,39 @@ blockchain_mainnet_activation_gate_summary_kind_from_source() {
   esac
 }
 
+find_latest_blockchain_mainnet_activation_gate_summary_json() {
+  local logs_root
+  local candidate=""
+  local candidate_mtime=0
+  local best_path=""
+  local best_mtime=-1
+  logs_root="$(roadmap_resilience_logs_root)"
+  if [[ ! -d "$logs_root" ]]; then
+    printf '%s' ""
+    return
+  fi
+  while IFS= read -r -d '' candidate; do
+    if [[ "$(json_file_valid_01 "$candidate")" != "1" ]]; then
+      continue
+    fi
+    candidate_mtime="$(file_mtime_epoch "$candidate")"
+    if ! [[ "$candidate_mtime" =~ ^[0-9]+$ ]]; then
+      candidate_mtime=0
+    fi
+    if (( candidate_mtime > best_mtime )); then
+      best_mtime="$candidate_mtime"
+      best_path="$candidate"
+    elif (( candidate_mtime == best_mtime )) && [[ "$candidate" > "$best_path" ]]; then
+      best_path="$candidate"
+    fi
+  done < <(find "$logs_root" -type f \
+    \( -name 'blockchain_mainnet_activation_gate_summary.json' \
+       -o -name 'mainnet_activation_gate_summary.json' \
+       -o -name '*activation*gate*summary*.json' \) \
+    -print0 2>/dev/null || true)
+  printf '%s' "$best_path"
+}
+
 blockchain_mainnet_activation_gate_summary_normalize_json() {
   local path="$1"
   if [[ ! -f "$path" ]]; then
@@ -4015,6 +4048,9 @@ blockchain_mainnet_activation_gate_go_json="null"
 blockchain_mainnet_activation_gate_no_go_json="null"
 blockchain_mainnet_activation_gate_reasons_json="[]"
 blockchain_mainnet_activation_gate_source_paths_json="[]"
+if [[ -z "$blockchain_mainnet_activation_gate_summary_json" ]]; then
+  blockchain_mainnet_activation_gate_summary_json="$(find_latest_blockchain_mainnet_activation_gate_summary_json)"
+fi
 if [[ -n "$blockchain_mainnet_activation_gate_summary_json" ]]; then
   blockchain_mainnet_activation_gate_input_summary_json="$blockchain_mainnet_activation_gate_summary_json"
   if [[ -f "$blockchain_mainnet_activation_gate_summary_json" ]]; then
