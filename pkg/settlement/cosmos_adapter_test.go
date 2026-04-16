@@ -734,6 +734,70 @@ func TestCosmosAdapterSignedTxModeRetriesFailures(t *testing.T) {
 	}
 }
 
+func TestCosmosAdapterRejectsInvalidObjectiveSlashEvidenceBeforeEnqueue(t *testing.T) {
+	var attempts int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&attempts, 1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	adapter, err := NewCosmosAdapter(CosmosAdapterConfig{
+		Endpoint:    srv.URL,
+		QueueSize:   4,
+		MaxRetries:  1,
+		BaseBackoff: 5 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("NewCosmosAdapter: %v", err)
+	}
+	defer adapter.Close()
+
+	for _, tc := range []struct {
+		name          string
+		violationType string
+		evidenceRef   string
+		errContains   string
+	}{
+		{
+			name:          "invalid violation type",
+			violationType: "subjective-abuse",
+			evidenceRef:   "sha256:6ca13d52ca70c883e0f0bb101e425a89e8624de51db2d2392593af6a84118090",
+			errContains:   "requires objective violation_type",
+		},
+		{
+			name:          "invalid objective evidence ref",
+			violationType: "double-sign",
+			evidenceRef:   "sha256:abc123",
+			errContains:   "requires objective evidence_ref",
+		},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := adapter.SubmitSlashEvidence(context.Background(), SlashEvidence{
+				EvidenceID:    "ev-invalid-1",
+				SubjectID:     "subject-1",
+				SessionID:     "sess-1",
+				ViolationType: tc.violationType,
+				EvidenceRef:   tc.evidenceRef,
+				SlashMicros:   1000,
+				Currency:      "USD",
+			})
+			if err == nil {
+				t.Fatalf("expected error for %s", tc.name)
+			}
+			if !strings.Contains(err.Error(), tc.errContains) {
+				t.Fatalf("expected error to contain %q, got %v", tc.errContains, err)
+			}
+		})
+	}
+
+	time.Sleep(100 * time.Millisecond)
+	if got := atomic.LoadInt32(&attempts); got != 0 {
+		t.Fatalf("expected no network attempts for invalid slash evidence, got %d", got)
+	}
+}
+
 func TestCosmosAdapterSignedTxModeDoesNotRetryNonRetryable4xx(t *testing.T) {
 	var attempts int32
 	firstAttemptCh := make(chan struct{}, 1)
