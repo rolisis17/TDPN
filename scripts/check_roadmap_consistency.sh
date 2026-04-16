@@ -7,6 +7,7 @@ cd "$ROOT_DIR"
 full_plan="docs/full-execution-plan-2026-2027.md"
 product_roadmap="docs/product-roadmap.md"
 roadmap_script="scripts/roadmap_progress_report.sh"
+roadmap_integration_script="scripts/integration_roadmap_progress_report.sh"
 bootstrap_validator_doc="docs/blockchain-bootstrap-validator-plan.md"
 cosmos_runtime_doc="docs/cosmos-settlement-runtime.md"
 chain_readme="blockchain/tdpn-chain/README.md"
@@ -112,7 +113,7 @@ check_confirmation_interface_wording() {
   fi
 }
 
-for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$chain_readme" "$chain_scaffold_file" "$chain_grpc_registry_file" "$chain_grpc_registry_test_file" "$chain_settlement_bridge_file" "$chain_runtime_test_file" "$settlement_mapping_doc" "$blockchain_sponsor_quickstart_doc" "$phase5_ci_script" "$phase5_integration_script" "$phase5_check_script" "$phase5_run_script" "$phase5_handoff_check_script" "$phase5_handoff_run_script" "$phase5_check_integration_script" "$phase5_run_integration_script" "$phase5_handoff_check_integration_script" "$phase5_handoff_run_integration_script" "$phase5_summary_report_script" "$phase5_summary_report_integration_script" "$ci_local_script" "$easy_node_blockchain_summary_reports_integration_script" "$phase6_ci_script" "$phase6_integration_script" "$phase6_contracts_ci_script" "$phase6_contracts_integration_script" "$phase6_contracts_live_smoke_script" "$phase6_grpc_app_roundtrip_script" "$phase6_grpc_runtime_smoke_script" "$phase6_grpc_live_smoke_script" "$phase6_grpc_auth_live_smoke_script" "$phase6_settlement_bridge_smoke_script" "$phase6_settlement_bridge_live_smoke_script" "$phase6_query_surface_script" "$phase6_module_tx_surface_script" "$phase6_proto_surface_script" "$phase6_proto_grpc_surface_script" "$phase6_proto_codegen_surface_script" "$phase6_module_coverage_floor_script" "$phase6_keeper_coverage_floor_script" "$phase6_dual_write_parity_script" "$phase6_check_script" "$phase6_run_script" "$phase6_check_integration_script" "$phase6_run_integration_script" "$phase6_suite_script" "$phase6_suite_integration_script" "$phase6_handoff_check_script" "$phase6_handoff_run_script" "$phase6_handoff_check_integration_script" "$phase6_handoff_run_integration_script" "$phase6_summary_report_script" "$phase6_summary_report_integration_script"; do
+for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$roadmap_integration_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$chain_readme" "$chain_scaffold_file" "$chain_grpc_registry_file" "$chain_grpc_registry_test_file" "$chain_settlement_bridge_file" "$chain_runtime_test_file" "$settlement_mapping_doc" "$blockchain_sponsor_quickstart_doc" "$phase5_ci_script" "$phase5_integration_script" "$phase5_check_script" "$phase5_run_script" "$phase5_handoff_check_script" "$phase5_handoff_run_script" "$phase5_check_integration_script" "$phase5_run_integration_script" "$phase5_handoff_check_integration_script" "$phase5_handoff_run_integration_script" "$phase5_summary_report_script" "$phase5_summary_report_integration_script" "$ci_local_script" "$easy_node_blockchain_summary_reports_integration_script" "$phase6_ci_script" "$phase6_integration_script" "$phase6_contracts_ci_script" "$phase6_contracts_integration_script" "$phase6_contracts_live_smoke_script" "$phase6_grpc_app_roundtrip_script" "$phase6_grpc_runtime_smoke_script" "$phase6_grpc_live_smoke_script" "$phase6_grpc_auth_live_smoke_script" "$phase6_settlement_bridge_smoke_script" "$phase6_settlement_bridge_live_smoke_script" "$phase6_query_surface_script" "$phase6_module_tx_surface_script" "$phase6_proto_surface_script" "$phase6_proto_grpc_surface_script" "$phase6_proto_codegen_surface_script" "$phase6_module_coverage_floor_script" "$phase6_keeper_coverage_floor_script" "$phase6_dual_write_parity_script" "$phase6_check_script" "$phase6_run_script" "$phase6_check_integration_script" "$phase6_run_integration_script" "$phase6_suite_script" "$phase6_suite_integration_script" "$phase6_handoff_check_script" "$phase6_handoff_run_script" "$phase6_handoff_check_integration_script" "$phase6_handoff_run_integration_script" "$phase6_summary_report_script" "$phase6_summary_report_integration_script"; do
   if [[ ! -f "$f" ]]; then
     echo "missing required file: $f"
     exit 1
@@ -1377,6 +1378,46 @@ if rg -qi "sidecar recommendation" "$roadmap_script"; then
 fi
 if ! rg -Fq "state-dir-capable file-backed module stores" "$roadmap_script"; then
   echo "roadmap_progress_report.sh must include state-dir-capable runtime recommendation wording"
+  exit 1
+fi
+if ! rg -q -e "--phase6-cosmos-l1-summary-json" -e "phase6_cosmos_l1_[a-z_]*summary_json" "$roadmap_script"; then
+  echo "roadmap_progress_report.sh must include phase6-cosmos-l1 summary argument/variable wiring"
+  exit 1
+fi
+if ! rg -Fq "phase6_cosmos_l1_handoff" "$roadmap_script"; then
+  echo "roadmap_progress_report.sh must include phase6_cosmos_l1_handoff summary surface"
+  exit 1
+fi
+if ! rg -Fq ".blockchain_track.phase6_cosmos_l1_handoff.module_tx_surface_ok" "$roadmap_script"; then
+  echo "roadmap_progress_report.sh must surface phase6 module_tx_surface_ok in output paths"
+  exit 1
+fi
+if ! rg -Fq ".blockchain_track.phase6_cosmos_l1_handoff.tdpnd_grpc_auth_live_smoke_ok" "$roadmap_script"; then
+  echo "roadmap_progress_report.sh must surface phase6 tdpnd_grpc_auth_live_smoke_ok in output paths"
+  exit 1
+fi
+if ! rg -Fq ".artifacts.phase6_cosmos_l1_summary_json" "$roadmap_script"; then
+  echo "roadmap_progress_report.sh must include phase6 artifact reference field"
+  exit 1
+fi
+if ! rg -q -e "PHASE6_COSMOS_L1_SUMMARY_JSON" -e "--phase6-cosmos-l1-summary-json" "$roadmap_integration_script"; then
+  echo "integration_roadmap_progress_report.sh must wire phase6 summary fixture/argument"
+  exit 1
+fi
+if ! rg -Fq ".blockchain_track.phase6_cosmos_l1_handoff" "$roadmap_integration_script"; then
+  echo "integration_roadmap_progress_report.sh must validate phase6_cosmos_l1_handoff summary surface"
+  exit 1
+fi
+if ! rg -Fq ".blockchain_track.phase6_cosmos_l1_handoff.module_tx_surface_ok" "$roadmap_integration_script"; then
+  echo "integration_roadmap_progress_report.sh must validate phase6 module_tx_surface_ok summary signal"
+  exit 1
+fi
+if ! rg -Fq ".blockchain_track.phase6_cosmos_l1_handoff.tdpnd_grpc_auth_live_smoke_ok" "$roadmap_integration_script"; then
+  echo "integration_roadmap_progress_report.sh must validate phase6 tdpnd_grpc_auth_live_smoke_ok summary signal"
+  exit 1
+fi
+if ! rg -Fq ".artifacts.phase6_cosmos_l1_summary_json" "$roadmap_integration_script"; then
+  echo "integration_roadmap_progress_report.sh must validate phase6 artifact reference field"
   exit 1
 fi
 
