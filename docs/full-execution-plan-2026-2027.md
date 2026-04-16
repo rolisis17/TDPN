@@ -106,6 +106,7 @@ Operator note (April 16, 2026 non-blockchain hardening):
 - Phase 5 CI also includes `settlement_adapter_signed_tx_roundtrip` backed by `scripts/integration_cosmos_adapter_tdpnd_signed_tx_roundtrip.sh` to validate signed-tx adapter relay into `tdpnd` bridge writes before promotion.
 - Phase 5 CI also includes `settlement_dual_asset_parity` backed by `scripts/integration_cosmos_settlement_dual_asset_parity.sh` to validate stable/native pricing parity for equivalent session entitlement.
 - Phase 5 CI also includes `issuer_sponsor_api_live_smoke` backed by `scripts/integration_issuer_sponsor_api_live_smoke.sh` to validate sponsor API happy path (`quote -> reserve -> token -> status`) with no end-user wallet signing in the happy path.
+- Phase 5 CI also includes `issuer_admin_blockchain_handlers_coverage` backed by `scripts/integration_issuer_admin_blockchain_handlers_coverage_floor.sh` to validate issuer admin blockchain handler coverage floor for `upsert/promote/reputation/bond/recompute/get-subject/anon issue+revoke/audit/revoke-token`.
 - Phase 5 CI/check/run/handoff wrappers now emit canonical summary artifacts under `.easy-node-logs`; these are the helper input contracts for `scripts/phase5_settlement_layer_summary_report.sh`:
   - `phase5_settlement_layer_ci_summary.json`
   - `phase5_settlement_layer_check_summary.json`

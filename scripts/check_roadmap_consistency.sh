@@ -32,6 +32,7 @@ phase5_handoff_check_integration_script="scripts/integration_phase5_settlement_l
 phase5_handoff_run_integration_script="scripts/integration_phase5_settlement_layer_handoff_run.sh"
 phase5_summary_report_script="scripts/phase5_settlement_layer_summary_report.sh"
 phase5_summary_report_integration_script="scripts/integration_phase5_settlement_layer_summary_report.sh"
+phase5_issuer_admin_blockchain_handlers_coverage_script="scripts/integration_issuer_admin_blockchain_handlers_coverage_floor.sh"
 blockchain_fastlane_script="scripts/blockchain_fastlane.sh"
 blockchain_fastlane_integration_script="scripts/integration_blockchain_fastlane.sh"
 blockchain_mainnet_activation_metrics_integration_script="scripts/integration_blockchain_mainnet_activation_metrics.sh"
@@ -483,6 +484,14 @@ if ! rg -Fq "issuer_sponsor_api_live_smoke" "$full_plan"; then
 fi
 if ! rg -Fq "integration_issuer_sponsor_api_live_smoke.sh" "$full_plan"; then
   echo "full execution plan must document issuer_sponsor_api_live_smoke integration script"
+  exit 1
+fi
+if ! rg -Fq "issuer_admin_blockchain_handlers_coverage" "$full_plan"; then
+  echo "full execution plan must document issuer_admin_blockchain_handlers_coverage gate posture"
+  exit 1
+fi
+if ! rg -Fq "integration_issuer_admin_blockchain_handlers_coverage_floor.sh" "$full_plan"; then
+  echo "full execution plan must document issuer_admin_blockchain_handlers_coverage integration script"
   exit 1
 fi
 if ! rg -Fq "ci_phase6_cosmos_l1_build_testnet.sh" "$full_plan"; then
@@ -2519,6 +2528,14 @@ if ! rg -Fq "integration_issuer_sponsor_api_live_smoke.sh" "$cosmos_runtime_doc"
   echo "cosmos settlement runtime guide must document issuer_sponsor_api_live_smoke integration script"
   exit 1
 fi
+if ! rg -Fq "issuer_admin_blockchain_handlers_coverage" "$cosmos_runtime_doc"; then
+  echo "cosmos settlement runtime guide must document issuer_admin_blockchain_handlers_coverage phase5 stage"
+  exit 1
+fi
+if ! rg -Fq "integration_issuer_admin_blockchain_handlers_coverage_floor.sh" "$cosmos_runtime_doc"; then
+  echo "cosmos settlement runtime guide must document issuer_admin_blockchain_handlers_coverage integration script"
+  exit 1
+fi
 if ! rg -Fq "blockchain-app-sponsorship-quickstart.md" "$cosmos_runtime_doc"; then
   echo "cosmos settlement runtime guide must link blockchain sponsor quickstart"
   exit 1
@@ -2638,6 +2655,14 @@ if ! rg -Fq "issuer_sponsor_api_live_smoke" "$chain_readme"; then
 fi
 if ! rg -Fq "integration_issuer_sponsor_api_live_smoke.sh" "$chain_readme"; then
   echo "chain README must document issuer_sponsor_api_live_smoke integration script"
+  exit 1
+fi
+if ! rg -Fq "issuer_admin_blockchain_handlers_coverage" "$chain_readme"; then
+  echo "chain README must document issuer_admin_blockchain_handlers_coverage phase5 stage"
+  exit 1
+fi
+if ! rg -Fq "integration_issuer_admin_blockchain_handlers_coverage_floor.sh" "$chain_readme"; then
+  echo "chain README must document issuer_admin_blockchain_handlers_coverage integration script"
   exit 1
 fi
 if rg -Fq "Storage remains an in-memory placeholder; Cosmos SDK KV store integration is still pending." "$chain_readme"; then
@@ -2932,6 +2957,14 @@ if ! rg -Fq "integration_issuer_sponsor_api_live_smoke.sh" "$phase5_ci_script"; 
   echo "phase5 ci script must wire integration_issuer_sponsor_api_live_smoke.sh"
   exit 1
 fi
+if ! rg -Fq "issuer_admin_blockchain_handlers_coverage" "$phase5_ci_script"; then
+  echo "phase5 ci script must include issuer_admin_blockchain_handlers_coverage stage"
+  exit 1
+fi
+if ! rg -Fq "integration_issuer_admin_blockchain_handlers_coverage_floor.sh" "$phase5_ci_script"; then
+  echo "phase5 ci script must wire integration_issuer_admin_blockchain_handlers_coverage_floor.sh"
+  exit 1
+fi
 if [[ ! -f "$ROOT_DIR/scripts/integration_cosmos_settlement_shadow_env.sh" ]]; then
   echo "missing required script: scripts/integration_cosmos_settlement_shadow_env.sh"
   exit 1
@@ -2946,6 +2979,10 @@ if [[ ! -f "$ROOT_DIR/scripts/integration_cosmos_settlement_dual_asset_parity.sh
 fi
 if [[ ! -f "$ROOT_DIR/scripts/integration_issuer_sponsor_api_live_smoke.sh" ]]; then
   echo "missing required script: scripts/integration_issuer_sponsor_api_live_smoke.sh"
+  exit 1
+fi
+if [[ ! -f "$ROOT_DIR/$phase5_issuer_admin_blockchain_handlers_coverage_script" ]]; then
+  echo "missing required script: $phase5_issuer_admin_blockchain_handlers_coverage_script"
   exit 1
 fi
 if ! rg -Fq "[issuer-sponsor-live-smoke] payment-proof happy path token issuance" "$ROOT_DIR/scripts/integration_issuer_sponsor_api_live_smoke.sh"; then
@@ -3000,6 +3037,15 @@ if ! rg -Fq "issuer_sponsor_api_live_smoke" "$phase5_integration_script"; then
   echo "phase5 ci integration script must validate issuer_sponsor_api_live_smoke stage"
   exit 1
 fi
+if ! rg -Fq "issuer_admin_blockchain_handlers_coverage" "$phase5_integration_script"; then
+  echo "phase5 ci integration script must validate issuer_admin_blockchain_handlers_coverage stage"
+  exit 1
+fi
+if ! rg -Fq "integration_issuer_admin_blockchain_handlers_coverage_floor.sh" "$phase5_integration_script" \
+  && ! rg -Fq "CI_PHASE5_SETTLEMENT_LAYER_ISSUER_ADMIN_BLOCKCHAIN_HANDLERS_COVERAGE_SCRIPT" "$phase5_integration_script"; then
+  echo "phase5 ci integration script must validate issuer_admin_blockchain_handlers_coverage stage wiring"
+  exit 1
+fi
 if ! rg -Fq "settlement_dual_asset_parity.status == \"pass\"" "$phase5_integration_script"; then
   echo "phase5 ci integration script must validate settlement_dual_asset_parity pass accounting"
   exit 1
@@ -3022,6 +3068,18 @@ if ! rg -Fq "issuer_sponsor_api_live_smoke.status == \"skip\"" "$phase5_integrat
 fi
 if ! rg -Fq "issuer_sponsor_api_live_smoke.status == \"fail\"" "$phase5_integration_script"; then
   echo "phase5 ci integration script must validate issuer_sponsor_api_live_smoke fail accounting"
+  exit 1
+fi
+if ! rg -Fq "issuer_admin_blockchain_handlers_coverage.status == \"pass\"" "$phase5_integration_script"; then
+  echo "phase5 ci integration script must validate issuer_admin_blockchain_handlers_coverage pass accounting"
+  exit 1
+fi
+if ! rg -Fq "issuer_admin_blockchain_handlers_coverage.status == \"skip\"" "$phase5_integration_script"; then
+  echo "phase5 ci integration script must validate issuer_admin_blockchain_handlers_coverage skip accounting"
+  exit 1
+fi
+if ! rg -Fq "issuer_admin_blockchain_handlers_coverage.status == \"fail\"" "$phase5_integration_script"; then
+  echo "phase5 ci integration script must validate issuer_admin_blockchain_handlers_coverage fail accounting"
   exit 1
 fi
 if ! rg -Fq "CI_PHASE5_SETTLEMENT_LAYER_CANONICAL_SUMMARY_JSON" "$phase5_ci_script"; then
@@ -3668,6 +3726,7 @@ phase5_blockchain_gate_specs=(
   "settlement_shadow_status_surface|scripts/integration_cosmos_settlement_shadow_status_surface.sh"
   "settlement_dual_asset_parity|scripts/integration_cosmos_settlement_dual_asset_parity.sh"
   "issuer_sponsor_api_live_smoke|scripts/integration_issuer_sponsor_api_live_smoke.sh"
+  "issuer_admin_blockchain_handlers_coverage|scripts/integration_issuer_admin_blockchain_handlers_coverage_floor.sh"
 )
 for gate_spec in "${phase5_blockchain_gate_specs[@]}"; do
   gate_stage="${gate_spec%%|*}"

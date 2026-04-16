@@ -216,6 +216,7 @@ Current implementation posture:
   - `settlement_shadow_status_surface` -> `scripts/integration_cosmos_settlement_shadow_status_surface.sh`
   - `settlement_dual_asset_parity` -> `scripts/integration_cosmos_settlement_dual_asset_parity.sh`
   - `issuer_sponsor_api_live_smoke` -> `scripts/integration_issuer_sponsor_api_live_smoke.sh` (validates sponsor `quote -> reserve -> token -> status` happy path with no end-user wallet signing)
+  - `issuer_admin_blockchain_handlers_coverage` -> `scripts/integration_issuer_admin_blockchain_handlers_coverage_floor.sh` (validates issuer admin blockchain handler coverage floor for `upsert/promote/reputation/bond/recompute/get-subject/anon issue+revoke/audit/revoke-token`)
 - phase5 settlement CI/check/run/handoff wrappers now emit canonical summary artifacts under `.easy-node-logs`; these are the helper input contracts for `scripts/phase5_settlement_layer_summary_report.sh`:
   - `phase5_settlement_layer_ci_summary.json`
   - `phase5_settlement_layer_check_summary.json`
