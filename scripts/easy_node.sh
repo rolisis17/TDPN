@@ -234,7 +234,7 @@ Usage:
   ./scripts/easy_node.sh manual-validation-backlog
   ./scripts/easy_node.sh config-v1-show [--path PATH]
   ./scripts/easy_node.sh config-v1-init [--path PATH] [--force [0|1]]
-  ./scripts/easy_node.sh local-api-session [--api-addr HOST:PORT] [--config PATH] [--config-v1-path PATH] [--dry-run [0|1]]
+  ./scripts/easy_node.sh local-api-session [--api-addr HOST:PORT] [--config PATH] [--config-v1-path PATH] [--service-status-command CMD] [--service-start-command CMD] [--service-stop-command CMD] [--service-restart-command CMD] [--dry-run [0|1]]
   ./scripts/easy_node.sh profile-compare-docker-matrix [--dry-run [0|1]] [profile-compare-campaign args...]
   ./scripts/easy_node.sh profile-default-gate-run [--directory-a HOST_OR_URL|--host-a HOST_OR_URL] [--directory-b HOST_OR_URL|--host-b HOST_OR_URL] [--campaign-subject INVITE_KEY|--subject INVITE_KEY] [profile-compare-campaign-signoff args...]
   ./scripts/easy_node.sh vpn-rc-matrix-path [--reports-dir DIR] [--print-report [0|1]] [--print-summary-json [0|1]]
@@ -357,7 +357,7 @@ Usage:
   ./scripts/easy_node.sh config-v1-show [--path PATH]
   ./scripts/easy_node.sh config-v1-init [--path PATH] [--force [0|1]]
   ./scripts/easy_node.sh config-v1-set-profile --path-profile 1hop|2hop|3hop [--path PATH]
-  ./scripts/easy_node.sh local-api-session [--api-addr HOST:PORT] [--config PATH] [--config-v1-path PATH] [--script-path PATH] [--allow-update [0|1]] [--command-timeout-sec N] [--connect-path-profile-default 1hop|2hop|3hop] [--connect-interface-default IFACE] [--connect-run-preflight-default [0|1]] [--connect-prod-profile-default auto|0|1] [--dry-run [0|1]]
+  ./scripts/easy_node.sh local-api-session [--api-addr HOST:PORT] [--config PATH] [--config-v1-path PATH] [--script-path PATH] [--allow-update [0|1]] [--command-timeout-sec N] [--service-status-command CMD] [--service-start-command CMD] [--service-stop-command CMD] [--service-restart-command CMD] [--connect-path-profile-default 1hop|2hop|3hop] [--connect-interface-default IFACE] [--connect-run-preflight-default [0|1]] [--connect-prod-profile-default auto|0|1] [--dry-run [0|1]]
   ./scripts/easy_node.sh client-vpn-logs [--follow [0|1]] [--tail N]
   ./scripts/easy_node.sh client-vpn-session [client-vpn-up args...] [--cleanup-all [0|1]]
   ./scripts/easy_node.sh simple-client-vpn-session [--bootstrap-directory URL] [--discovery-wait-sec N] [--subject ID] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--beta-profile [0|1]] [--prod-profile [0|1]] [--interface IFACE] [--ready-timeout-sec N]
@@ -597,7 +597,7 @@ Notes:
   - phase7-mainnet-cutover-handoff-run wraps the Phase-7 mainnet cutover handoff run helper script with pass-through args.
   - phase7-mainnet-cutover-summary-report wraps the Phase-7 mainnet cutover summary-report helper script with pass-through args.
   - manual-validation-backlog prints the deferred real-host validation list so we can resume manual testing cleanly later.
-  - local-api-session launches `go run ./cmd/node --local-api`, wires config-v1 simple client defaults into local control API connect defaults, and supports deterministic dry-run output.
+  - local-api-session launches `go run ./cmd/node --local-api`, wires config-v1 simple client defaults into local control API connect defaults, supports optional service lifecycle command overrides, and supports deterministic dry-run output.
   - single-machine-prod-readiness runs all production-grade checks feasible on one host (ci_local, beta_preflight, deep_test_suite, runtime-fix-record, optional dockerized 3-machine rehearsal, optional profile-compare campaign signoff, optional pre-real-host-readiness, optional Linux root real-WG matrix receipt refresh), then reports exactly which remaining blockers require machine-C/3-machine execution; in auto mode it bootstraps missing profile-compare campaign artifacts, preferring docker rehearsal endpoints when available.
   - manual-validation-status combines live runtime-doctor output with recorded manual real-host validation receipts, points at the latest failed incident handoff when a recorded smoke/signoff run captured one, and now exposes staged roadmap progress (`BLOCKED_LOCAL`, `READY_FOR_MACHINE_C_SMOKE`, `READY_FOR_3_MACHINE_PROD_SIGNOFF`, `PRODUCTION_SIGNOFF_COMPLETE`).
   - manual-validation-report turns that readiness state into one shareable markdown + JSON handoff artifact, includes the same staged roadmap signal for single-machine operators, and can fail-close with --fail-on-not-ready=1.
@@ -12201,6 +12201,10 @@ local_api_session() {
   local script_path="${LOCAL_CONTROL_API_SCRIPT:-$ROOT_DIR/scripts/easy_node.sh}"
   local allow_update="${LOCAL_CONTROL_API_ALLOW_UPDATE:-0}"
   local command_timeout_sec="${LOCAL_CONTROL_API_COMMAND_TIMEOUT_SEC:-120}"
+  local service_status_command="${LOCAL_CONTROL_API_SERVICE_STATUS_COMMAND:-}"
+  local service_start_command="${LOCAL_CONTROL_API_SERVICE_START_COMMAND:-}"
+  local service_stop_command="${LOCAL_CONTROL_API_SERVICE_STOP_COMMAND:-}"
+  local service_restart_command="${LOCAL_CONTROL_API_SERVICE_RESTART_COMMAND:-}"
   local connect_path_profile_default=""
   local connect_interface_default=""
   local connect_run_preflight_default=""
@@ -12256,6 +12260,38 @@ local_api_session() {
           exit 2
         fi
         command_timeout_sec="$2"
+        shift 2
+        ;;
+      --service-status-command)
+        if [[ $# -lt 2 ]]; then
+          echo "local-api-session requires --service-status-command CMD"
+          exit 2
+        fi
+        service_status_command="$2"
+        shift 2
+        ;;
+      --service-start-command)
+        if [[ $# -lt 2 ]]; then
+          echo "local-api-session requires --service-start-command CMD"
+          exit 2
+        fi
+        service_start_command="$2"
+        shift 2
+        ;;
+      --service-stop-command)
+        if [[ $# -lt 2 ]]; then
+          echo "local-api-session requires --service-stop-command CMD"
+          exit 2
+        fi
+        service_stop_command="$2"
+        shift 2
+        ;;
+      --service-restart-command)
+        if [[ $# -lt 2 ]]; then
+          echo "local-api-session requires --service-restart-command CMD"
+          exit 2
+        fi
+        service_restart_command="$2"
         shift 2
         ;;
       --connect-path-profile-default)
@@ -12364,6 +12400,10 @@ local_api_session() {
   export LOCAL_CONTROL_API_SCRIPT="$script_path"
   export LOCAL_CONTROL_API_ALLOW_UPDATE="$allow_update"
   export LOCAL_CONTROL_API_COMMAND_TIMEOUT_SEC="$command_timeout_sec"
+  export LOCAL_CONTROL_API_SERVICE_STATUS_COMMAND="$service_status_command"
+  export LOCAL_CONTROL_API_SERVICE_START_COMMAND="$service_start_command"
+  export LOCAL_CONTROL_API_SERVICE_STOP_COMMAND="$service_stop_command"
+  export LOCAL_CONTROL_API_SERVICE_RESTART_COMMAND="$service_restart_command"
   export EASY_NODE_CONFIG_V1_FILE="$config_v1_path"
 
   local_api_session_apply_config_v1_defaults "$config_v1_path"
@@ -12402,6 +12442,10 @@ local_api_session() {
   echo "  config_v1_path: ${config_v1_path:-none} (${config_v1_status})"
   echo "  command_timeout_sec: $LOCAL_CONTROL_API_COMMAND_TIMEOUT_SEC"
   echo "  allow_update: $LOCAL_CONTROL_API_ALLOW_UPDATE"
+  echo "  service_status_command: ${LOCAL_CONTROL_API_SERVICE_STATUS_COMMAND:-none}"
+  echo "  service_start_command: ${LOCAL_CONTROL_API_SERVICE_START_COMMAND:-none}"
+  echo "  service_stop_command: ${LOCAL_CONTROL_API_SERVICE_STOP_COMMAND:-none}"
+  echo "  service_restart_command: ${LOCAL_CONTROL_API_SERVICE_RESTART_COMMAND:-none}"
   echo "  connect_path_profile_default: ${LOCAL_CONTROL_API_CONNECT_PATH_PROFILE:-2hop}"
   echo "  connect_interface_default: ${LOCAL_CONTROL_API_CONNECT_INTERFACE:-wgvpn0}"
   echo "  connect_run_preflight_default: ${LOCAL_CONTROL_API_CONNECT_RUN_PREFLIGHT:-1}"

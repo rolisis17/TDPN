@@ -245,4 +245,48 @@ assert_line_has "$up_b_call" $'\t--install-route\t0' "case B missing 1hop instal
 
 stop_local_api
 
+echo "[local-api-config-defaults] local-api-session dry-run surfaces service lifecycle command overrides"
+session_dry_run_output="$(./scripts/easy_node.sh local-api-session \
+  --config-v1-path "$CFG_A" \
+  --script-path "$FAKE_SCRIPT" \
+  --service-status-command "systemctl status tdpn-local-api" \
+  --service-start-command "systemctl start tdpn-local-api" \
+  --service-stop-command "systemctl stop tdpn-local-api" \
+  --service-restart-command "systemctl restart tdpn-local-api" \
+  --dry-run 1 2>&1)"
+
+for expected in \
+  "service_status_command: systemctl status tdpn-local-api" \
+  "service_start_command: systemctl start tdpn-local-api" \
+  "service_stop_command: systemctl stop tdpn-local-api" \
+  "service_restart_command: systemctl restart tdpn-local-api"; do
+  if ! printf '%s\n' "$session_dry_run_output" | grep -F -- "$expected" >/dev/null 2>&1; then
+    echo "local-api-session dry-run missing expected service lifecycle override line: $expected"
+    printf '%s\n' "$session_dry_run_output"
+    exit 1
+  fi
+done
+
+echo "[local-api-config-defaults] local-api-session dry-run surfaces service lifecycle command env pass-through"
+session_env_dry_run_output="$(LOCAL_CONTROL_API_SERVICE_STATUS_COMMAND='svcctl status local-api' \
+  LOCAL_CONTROL_API_SERVICE_START_COMMAND='svcctl start local-api' \
+  LOCAL_CONTROL_API_SERVICE_STOP_COMMAND='svcctl stop local-api' \
+  LOCAL_CONTROL_API_SERVICE_RESTART_COMMAND='svcctl restart local-api' \
+  ./scripts/easy_node.sh local-api-session \
+    --config-v1-path "$CFG_A" \
+    --script-path "$FAKE_SCRIPT" \
+    --dry-run 1 2>&1)"
+
+for expected in \
+  "service_status_command: svcctl status local-api" \
+  "service_start_command: svcctl start local-api" \
+  "service_stop_command: svcctl stop local-api" \
+  "service_restart_command: svcctl restart local-api"; do
+  if ! printf '%s\n' "$session_env_dry_run_output" | grep -F -- "$expected" >/dev/null 2>&1; then
+    echo "local-api-session dry-run missing expected service lifecycle env line: $expected"
+    printf '%s\n' "$session_env_dry_run_output"
+    exit 1
+  fi
+done
+
 echo "local API config defaults integration check ok"
