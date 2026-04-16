@@ -31,6 +31,18 @@ for path in "${REQUIRED_FILES[@]}"; do
 done
 echo "[desktop-scaffold] required files exist"
 
+RELEASE_SCAFFOLD_FILES=(
+  "scripts/windows/desktop_release_bundle.ps1"
+  "scripts/windows/desktop_release_bundle.cmd"
+)
+for path in "${RELEASE_SCAFFOLD_FILES[@]}"; do
+  if [[ ! -f "$path" ]]; then
+    echo "desktop scaffold contract failed: missing release scaffold script: $path"
+    exit 1
+  fi
+done
+echo "[desktop-scaffold] release scaffold scripts exist"
+
 JSON_FILES=(
   "apps/desktop/package.json"
   "apps/desktop/src-tauri/tauri.conf.json"
@@ -88,6 +100,71 @@ if [[ ! -s "$TMP_DIR/rust_handler_controls.txt" ]]; then
   exit 1
 fi
 
+extract_service_lifecycle_controls() {
+  local source_file="$1"
+  local output_file="$2"
+  awk -F'_' '
+    BEGIN {
+      verbs["install"] = 1
+      verbs["uninstall"] = 1
+      verbs["start"] = 1
+      verbs["stop"] = 1
+      verbs["restart"] = 1
+      verbs["status"] = 1
+      verbs["enable"] = 1
+      verbs["disable"] = 1
+      verbs["reload"] = 1
+    }
+    /^control_[a-z0-9_]+$/ {
+      has_service_scope = 0
+      has_lifecycle_verb = 0
+      for (i = 2; i <= NF; i++) {
+        if ($i == "service" || $i == "daemon") {
+          has_service_scope = 1
+        }
+        if ($i in verbs) {
+          has_lifecycle_verb = 1
+        }
+      }
+      if (has_service_scope && has_lifecycle_verb) {
+        print $0
+      }
+    }
+  ' "$source_file" | sort -u >"$output_file"
+}
+
+extract_service_lifecycle_controls "$TMP_DIR/js_controls.txt" "$TMP_DIR/js_service_lifecycle_controls.txt"
+extract_service_lifecycle_controls "$TMP_DIR/rust_fn_controls.txt" "$TMP_DIR/rust_fn_service_lifecycle_controls.txt"
+extract_service_lifecycle_controls "$TMP_DIR/rust_handler_controls.txt" "$TMP_DIR/rust_handler_service_lifecycle_controls.txt"
+cat \
+  "$TMP_DIR/js_service_lifecycle_controls.txt" \
+  "$TMP_DIR/rust_fn_service_lifecycle_controls.txt" \
+  "$TMP_DIR/rust_handler_service_lifecycle_controls.txt" \
+  | sort -u >"$TMP_DIR/combined_service_lifecycle_controls.txt"
+
+if [[ -s "$TMP_DIR/combined_service_lifecycle_controls.txt" ]]; then
+  if ! diff -u "$TMP_DIR/js_service_lifecycle_controls.txt" "$TMP_DIR/rust_fn_service_lifecycle_controls.txt" >/dev/null; then
+    echo "desktop scaffold contract failed: JS/Rust service lifecycle control_* command set mismatch"
+    echo "--- js service lifecycle controls"
+    cat "$TMP_DIR/js_service_lifecycle_controls.txt"
+    echo "--- rust function service lifecycle controls"
+    cat "$TMP_DIR/rust_fn_service_lifecycle_controls.txt"
+    exit 1
+  fi
+
+  if ! diff -u "$TMP_DIR/rust_fn_service_lifecycle_controls.txt" "$TMP_DIR/rust_handler_service_lifecycle_controls.txt" >/dev/null; then
+    echo "desktop scaffold contract failed: Rust service lifecycle control_* functions are not aligned with generate_handler registration"
+    echo "--- rust function service lifecycle controls"
+    cat "$TMP_DIR/rust_fn_service_lifecycle_controls.txt"
+    echo "--- rust handler service lifecycle controls"
+    cat "$TMP_DIR/rust_handler_service_lifecycle_controls.txt"
+    exit 1
+  fi
+  echo "[desktop-scaffold] service lifecycle control_* command names align across JS and Rust bridge"
+else
+  echo "[desktop-scaffold] service lifecycle control_* commands not present; lifecycle alignment check skipped"
+fi
+
 if ! diff -u "$TMP_DIR/js_controls.txt" "$TMP_DIR/rust_fn_controls.txt" >/dev/null; then
   echo "desktop scaffold contract failed: JS invoke control_* command set does not match Rust bridge function set"
   echo "--- js controls"
@@ -114,6 +191,14 @@ if ! rg -qi -- 'scaffold' "$README_FILE"; then
 fi
 if ! rg -qi -- 'not production-ready|intentionally lightweight|does not include yet' "$README_FILE"; then
   echo "desktop scaffold contract failed: README must clearly communicate non-production scaffold nature"
+  exit 1
+fi
+if ! rg -qi -- 'update[[:space:]-]*channel' "$README_FILE"; then
+  echo "desktop scaffold contract failed: README must mention update channel behavior"
+  exit 1
+fi
+if ! rg -q -- 'TDPN_[A-Z0-9_]*UPDATE[A-Z0-9_]*CHANNEL[A-Z0-9_]*' "$README_FILE"; then
+  echo "desktop scaffold contract failed: README must document update channel env knobs (for example TDPN_*UPDATE*CHANNEL*)"
   exit 1
 fi
 echo "[desktop-scaffold] README states scaffold/non-production intent"

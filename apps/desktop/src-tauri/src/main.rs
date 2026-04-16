@@ -13,6 +13,12 @@ struct AppState {
 struct ControlConfig {
     base_url: String,
     timeout_sec: u64,
+    allow_remote: bool,
+    auth_bearer_configured: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    update_channel: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    update_feed_url: Option<String>,
 }
 
 #[tauri::command]
@@ -21,7 +27,18 @@ fn control_config(state: State<'_, AppState>) -> ControlConfig {
     ControlConfig {
         base_url: cfg.base_url.clone(),
         timeout_sec: cfg.timeout_sec,
+        allow_remote: cfg.allow_remote,
+        auth_bearer_configured: cfg.auth_bearer.is_some(),
+        update_channel: optional_env("TDPN_DESKTOP_UPDATE_CHANNEL"),
+        update_feed_url: optional_env("TDPN_DESKTOP_UPDATE_FEED_URL"),
     }
+}
+
+fn optional_env(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
 }
 
 #[tauri::command]
@@ -61,8 +78,29 @@ async fn control_update(state: State<'_, AppState>) -> Result<Value, String> {
     state.local_api.post_empty("/v1/update").await
 }
 
+#[tauri::command]
+async fn control_service_status(state: State<'_, AppState>) -> Result<Value, String> {
+    state.local_api.get_json("/v1/service/status").await
+}
+
+#[tauri::command]
+async fn control_service_start(state: State<'_, AppState>) -> Result<Value, String> {
+    state.local_api.post_empty("/v1/service/start").await
+}
+
+#[tauri::command]
+async fn control_service_stop(state: State<'_, AppState>) -> Result<Value, String> {
+    state.local_api.post_empty("/v1/service/stop").await
+}
+
+#[tauri::command]
+async fn control_service_restart(state: State<'_, AppState>) -> Result<Value, String> {
+    state.local_api.post_empty("/v1/service/restart").await
+}
+
 fn main() {
-    let local_api_config = LocalApiConfig::from_env();
+    let local_api_config = LocalApiConfig::from_env()
+        .expect("failed to load local daemon API configuration from environment");
     let local_api = LocalApiClient::new(local_api_config)
         .expect("failed to initialize local daemon API client");
 
@@ -76,7 +114,11 @@ fn main() {
             control_connect,
             control_disconnect,
             control_set_profile,
-            control_update
+            control_update,
+            control_service_status,
+            control_service_start,
+            control_service_stop,
+            control_service_restart
         ])
         .run(tauri::generate_context!())
         .expect("error while running TDPN desktop scaffold");

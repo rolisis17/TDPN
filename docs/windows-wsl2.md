@@ -68,7 +68,40 @@ Or directly in WSL shell:
 ./bin/privacynode-easy
 ```
 
-## 4) 3-machine beta test
+## 4) Desktop release bundle scaffold (Windows-native, non-production)
+
+This flow is scaffold-only. It is not a production signing/release pipeline.
+
+Update channel env:
+- `TDPN_DESKTOP_UPDATE_CHANNEL=stable|beta|canary` (default in script: `stable`)
+
+Optional update feed URL env:
+- `TDPN_DESKTOP_UPDATE_FEED_URL=https://updates.example.invalid/tdpn/beta.json`
+
+Run from repository root in PowerShell:
+
+```powershell
+./scripts/windows/desktop_release_bundle.ps1 -Channel beta
+```
+
+From `cmd.exe`:
+
+```cmd
+scripts\windows\desktop_release_bundle.cmd -Channel beta
+```
+
+Optional scaffold signing placeholders:
+- `-SigningIdentity`
+- `-SigningCertPath`
+- `-SigningCertPassword`
+
+Pass extra Tauri build arguments after `--`:
+
+```powershell
+./scripts/windows/desktop_release_bundle.ps1 -Channel canary -- --bundles nsis
+```
+
+## 5) 3-machine beta test
 
 Use the same flow documented in `docs/easy-3-machine-test.md`.
 
@@ -89,7 +122,7 @@ Important for WSL/docker client runs:
 - do not use `127.0.0.1` / `localhost` for remote machines in `client-test`
 - use reachable IP/DNS for machine A/B endpoints
 
-## 5) Troubleshooting
+## 6) Troubleshooting
 
 `docker daemon not reachable` in WSL:
 - ensure Docker Desktop is running

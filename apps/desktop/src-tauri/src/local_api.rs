@@ -1,15 +1,18 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::net::IpAddr;
 use std::time::Duration;
 
 #[derive(Clone, Debug)]
 pub struct LocalApiConfig {
     pub base_url: String,
     pub timeout_sec: u64,
+    pub allow_remote: bool,
+    pub auth_bearer: Option<String>,
 }
 
 impl LocalApiConfig {
-    pub fn from_env() -> Self {
+    pub fn from_env() -> Result<Self, String> {
         let base_url = std::env::var("TDPN_LOCAL_API_BASE_URL")
             .ok()
             .map(|v| v.trim().trim_end_matches('/').to_string())
@@ -22,10 +25,50 @@ impl LocalApiConfig {
             .filter(|v| *v > 0)
             .unwrap_or(20);
 
-        Self {
+        let allow_remote = std::env::var("TDPN_LOCAL_API_ALLOW_REMOTE")
+            .ok()
+            .map(|v| v.trim() == "1")
+            .unwrap_or(false);
+
+        let parsed = reqwest::Url::parse(&base_url).map_err(|e| {
+            format!(
+                "invalid TDPN_LOCAL_API_BASE_URL '{base_url}': {e} (expected absolute URL like http://127.0.0.1:8095)"
+            )
+        })?;
+
+        match parsed.scheme() {
+            "http" | "https" => {}
+            scheme => {
+                return Err(format!(
+                    "invalid TDPN_LOCAL_API_BASE_URL '{base_url}': unsupported scheme '{scheme}' (allowed: http, https)"
+                ));
+            }
+        }
+
+        if parsed.host_str().is_none() {
+            return Err(format!(
+                "invalid TDPN_LOCAL_API_BASE_URL '{base_url}': missing host"
+            ));
+        }
+
+        if !allow_remote && !is_loopback_host(&parsed) {
+            let host = parsed.host_str().unwrap_or("<missing-host>");
+            return Err(format!(
+                "TDPN_LOCAL_API_BASE_URL host '{host}' is not loopback; set TDPN_LOCAL_API_ALLOW_REMOTE=1 to allow remote hosts"
+            ));
+        }
+
+        let auth_bearer = std::env::var("TDPN_LOCAL_API_AUTH_BEARER")
+            .ok()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty());
+
+        Ok(Self {
             base_url,
             timeout_sec,
-        }
+            allow_remote,
+            auth_bearer,
+        })
     }
 
     fn endpoint(&self, path: &str) -> String {
@@ -57,9 +100,9 @@ impl LocalApiClient {
     }
 
     pub async fn get_json(&self, path: &str) -> Result<Value, String> {
+        let request = self.client.get(self.config.endpoint(path));
         let response = self
-            .client
-            .get(self.config.endpoint(path))
+            .with_optional_auth(request)
             .send()
             .await
             .map_err(|e| format!("GET {path} failed: {e}"))?;
@@ -67,10 +110,9 @@ impl LocalApiClient {
     }
 
     pub async fn post_json<T: Serialize + ?Sized>(&self, path: &str, payload: &T) -> Result<Value, String> {
+        let request = self.client.post(self.config.endpoint(path)).json(payload);
         let response = self
-            .client
-            .post(self.config.endpoint(path))
-            .json(payload)
+            .with_optional_auth(request)
             .send()
             .await
             .map_err(|e| format!("POST {path} failed: {e}"))?;
@@ -79,6 +121,14 @@ impl LocalApiClient {
 
     pub async fn post_empty(&self, path: &str) -> Result<Value, String> {
         self.post_json(path, &json!({})).await
+    }
+
+    fn with_optional_auth(&self, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        if let Some(token) = self.config.auth_bearer.as_deref() {
+            request.bearer_auth(token)
+        } else {
+            request
+        }
     }
 
     async fn parse_response(&self, path: &str, response: reqwest::Response) -> Result<Value, String> {
@@ -107,6 +157,19 @@ impl LocalApiClient {
             Ok(value) => Ok(value),
             Err(_) => Ok(json!({ "raw": body })),
         }
+    }
+}
+
+fn is_loopback_host(url: &reqwest::Url) -> bool {
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    match host.parse::<IpAddr>() {
+        Ok(ip) => ip.is_loopback(),
+        Err(_) => false,
     }
 }
 

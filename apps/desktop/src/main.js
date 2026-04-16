@@ -10,6 +10,7 @@ function byId(id) {
 
 const outputEl = byId("output");
 const apiBaseEl = byId("api_base");
+const apiHintsEl = byId("api_hints");
 
 function print(label, payload) {
   const text = typeof payload === "string" ? payload : JSON.stringify(payload, null, 2);
@@ -22,6 +23,96 @@ function numberOrUndefined(value) {
     return n;
   }
   return undefined;
+}
+
+function firstDefined(...values) {
+  for (const value of values) {
+    if (value !== undefined && value !== null) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function readConfigBoolean(cfg, candidates) {
+  const raw = firstDefined(...candidates.map((key) => cfg[key]));
+  if (typeof raw === "boolean") {
+    return raw;
+  }
+  if (typeof raw === "number") {
+    return raw !== 0;
+  }
+  if (typeof raw === "string") {
+    const normalized = raw.trim().toLowerCase();
+    if (normalized === "1" || normalized === "true" || normalized === "yes") {
+      return true;
+    }
+    if (normalized === "0" || normalized === "false" || normalized === "no") {
+      return false;
+    }
+  }
+  return undefined;
+}
+
+function readConfigString(cfg, candidates) {
+  const raw = firstDefined(...candidates.map((key) => cfg[key]));
+  if (typeof raw === "string") {
+    const value = raw.trim();
+    if (value) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function formatConfigMeta(cfg) {
+  const baseUrl = readConfigString(cfg, ["base_url", "api_base_url", "api_url"]) || "unknown";
+  const timeout = numberOrUndefined(firstDefined(cfg.timeout_sec, cfg.timeoutSeconds, cfg.api_timeout_sec));
+
+  const authConfigured = readConfigBoolean(cfg, [
+    "auth_bearer_configured",
+    "auth_configured",
+    "authConfigured",
+    "api_auth_configured",
+    "hardening_auth_configured"
+  ]);
+  const remoteAllowed = readConfigBoolean(cfg, [
+    "remote_allowed",
+    "remoteAllowed",
+    "allow_remote",
+    "hardening_remote_allowed"
+  ]);
+  const updateChannel = readConfigString(cfg, [
+    "update_channel",
+    "updateChannel",
+    "channel",
+    "release_channel"
+  ]);
+  const updateFeedUrl = readConfigString(cfg, [
+    "update_feed_url",
+    "updateFeedUrl",
+    "feed_url",
+    "update_url"
+  ]);
+
+  const hints = [];
+  if (authConfigured !== undefined) {
+    hints.push(authConfigured ? "auth configured" : "auth not configured");
+  }
+  if (remoteAllowed !== undefined) {
+    hints.push(remoteAllowed ? "remote allowed" : "remote local-only");
+  }
+  if (updateChannel) {
+    hints.push(`channel: ${updateChannel}`);
+  }
+  if (updateFeedUrl) {
+    hints.push(`feed: ${updateFeedUrl}`);
+  }
+
+  return {
+    apiLine: timeout ? `API: ${baseUrl} (timeout: ${timeout}s)` : `API: ${baseUrl}`,
+    hintLine: hints.length ? `Hardening/Update: ${hints.join(" · ")}` : ""
+  };
 }
 
 function readConnectPayload() {
@@ -84,12 +175,31 @@ byId("update_btn").addEventListener("click", async () => {
   await call("update", "control_update");
 });
 
+byId("service_status_btn").addEventListener("click", async () => {
+  await call("service_status", "control_service_status");
+});
+
+byId("service_start_btn").addEventListener("click", async () => {
+  await call("service_start", "control_service_start");
+});
+
+byId("service_stop_btn").addEventListener("click", async () => {
+  await call("service_stop", "control_service_stop");
+});
+
+byId("service_restart_btn").addEventListener("click", async () => {
+  await call("service_restart", "control_service_restart");
+});
+
 async function init() {
   try {
     const cfg = await invoke("control_config");
-    apiBaseEl.textContent = `API: ${cfg.base_url} (timeout: ${cfg.timeout_sec}s)`;
+    const meta = formatConfigMeta(cfg || {});
+    apiBaseEl.textContent = meta.apiLine;
+    apiHintsEl.textContent = meta.hintLine;
   } catch (err) {
     apiBaseEl.textContent = "API: unavailable";
+    apiHintsEl.textContent = "";
     print("init (error)", err);
   }
 }
