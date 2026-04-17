@@ -219,6 +219,30 @@ assert_file_contains "$SUCCESS_LOG" "progress_summary_json=$SUCCESS_SUMMARY" "mi
 assert_file_contains "$SUCCESS_LOG" "signoff-heartbeat interval_sec=60" "missing signoff heartbeat marker"
 assert_file_contains "$SUCCESS_LOG" "signoff-finish rc=0" "missing signoff completion marker"
 
+echo "[profile-default-gate-run] CLI heartbeat override supersedes env default"
+: >"$SIGNOFF_CAPTURE"
+HEARTBEAT_OVERRIDE_LOG="$TMP_DIR/profile_default_gate_run_heartbeat_override.log"
+set +e
+PATH="$TMP_BIN:$PATH" \
+PROFILE_DEFAULT_GATE_RUN_SIGNOFF_SCRIPT="$FAKE_SIGNOFF" \
+PROFILE_DEFAULT_GATE_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_COUNTER_FILE="$TMP_DIR/curl_counter_heartbeat_override.txt" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_FAIL_ATTEMPTS=0 \
+PROFILE_DEFAULT_GATE_RUN_HEARTBEAT_INTERVAL_SEC=99 \
+CAMPAIGN_SUBJECT="inv-heartbeat-override" \
+"$SCRIPT_UNDER_TEST" \
+  --host-a "dir-a.test" \
+  --host-b "dir-b.test" \
+  --heartbeat-interval-sec=7 >"$HEARTBEAT_OVERRIDE_LOG" 2>&1
+heartbeat_override_rc=$?
+set -e
+if [[ "$heartbeat_override_rc" -ne 0 ]]; then
+  echo "expected heartbeat override path rc=0, got rc=$heartbeat_override_rc"
+  cat "$HEARTBEAT_OVERRIDE_LOG"
+  exit 1
+fi
+assert_file_contains "$HEARTBEAT_OVERRIDE_LOG" "signoff-heartbeat interval_sec=7" "missing explicit CLI heartbeat override marker"
+
 echo "[profile-default-gate-run] env file subject fallback forwards campaign subject"
 : >"$SIGNOFF_CAPTURE"
 FILE_FALLBACK_LOG="$TMP_DIR/profile_default_gate_run_file_subject.log"
@@ -569,6 +593,37 @@ assert_contains "$live_wrapper_line_sp" "--campaign-timeout-sec 777" "missing li
 assert_contains "$live_wrapper_line_sp" "--summary-json $TMP_DIR/easy_node_live_wrapper_summary.json" "missing live forwarded --summary-json"
 assert_contains "$live_wrapper_line_sp" "--print-summary-json 1" "missing live forwarded --print-summary-json"
 assert_contains "$live_wrapper_line_sp" "--omega 10 value" "missing live forwarded passthrough args"
+
+echo "[profile-default-gate-live] equals-form args parse and forward correctly"
+: >"$WRAPPER_CAPTURE"
+EASY_NODE_LIVE_EQUALS_FORWARD_LOG="$TMP_DIR/easy_node_profile_default_gate_live_equals_forward.log"
+PROFILE_DEFAULT_GATE_WRAPPER_CAPTURE_FILE="$WRAPPER_CAPTURE" \
+PROFILE_DEFAULT_GATE_RUN_SCRIPT="$FAKE_WRAPPER" \
+bash "$EASY_NODE_SCRIPT_UNDER_TEST" profile-default-gate-live \
+  --host-a=wrapper-live-eq-a.test \
+  --host-b=wrapper-live-eq-b.test \
+  --key=inv-live-equals-wrapper \
+  --reports-dir="$TMP_DIR/live_reports_equals" \
+  --campaign-timeout-sec=778 \
+  --heartbeat-interval-sec=9 \
+  --summary-json="$TMP_DIR/easy_node_live_wrapper_equals_summary.json" \
+  --print-summary-json=0 >"$EASY_NODE_LIVE_EQUALS_FORWARD_LOG" 2>&1
+
+live_equals_wrapper_line="$(sed -n '1p' "$WRAPPER_CAPTURE" || true)"
+if [[ -z "$live_equals_wrapper_line" ]]; then
+  echo "missing easy_node live equals-form wrapper forwarding capture"
+  cat "$EASY_NODE_LIVE_EQUALS_FORWARD_LOG"
+  exit 1
+fi
+live_equals_wrapper_line_sp="${live_equals_wrapper_line//$'\t'/ }"
+assert_contains "$live_equals_wrapper_line_sp" "--directory-a http://wrapper-live-eq-a.test:8081" "missing equals live forwarded --directory-a"
+assert_contains "$live_equals_wrapper_line_sp" "--directory-b http://wrapper-live-eq-b.test:8081" "missing equals live forwarded --directory-b"
+assert_contains "$live_equals_wrapper_line_sp" "--campaign-subject inv-live-equals-wrapper" "missing equals live forwarded --campaign-subject"
+assert_contains "$live_equals_wrapper_line_sp" "--reports-dir $TMP_DIR/live_reports_equals" "missing equals live forwarded --reports-dir"
+assert_contains "$live_equals_wrapper_line_sp" "--campaign-timeout-sec 778" "missing equals live forwarded --campaign-timeout-sec"
+assert_contains "$live_equals_wrapper_line_sp" "--heartbeat-interval-sec 9" "missing equals live forwarded --heartbeat-interval-sec"
+assert_contains "$live_equals_wrapper_line_sp" "--summary-json $TMP_DIR/easy_node_live_wrapper_equals_summary.json" "missing equals live forwarded --summary-json"
+assert_contains "$live_equals_wrapper_line_sp" "--print-summary-json 0" "missing equals live forwarded --print-summary-json"
 
 echo "[profile-default-gate-live] missing env/subject fails clearly"
 : >"$WRAPPER_CAPTURE"

@@ -236,8 +236,8 @@ Usage:
   ./scripts/easy_node.sh config-v1-init [--path PATH] [--force [0|1]]
   ./scripts/easy_node.sh local-api-session [--api-addr HOST:PORT] [--config PATH] [--config-v1-path PATH] [--service-status-command CMD] [--service-start-command CMD] [--service-stop-command CMD] [--service-restart-command CMD] [--dry-run [0|1]]
   ./scripts/easy_node.sh profile-compare-docker-matrix [--dry-run [0|1]] [profile-compare-campaign args...]
-  ./scripts/easy_node.sh profile-default-gate-run [--directory-a HOST_OR_URL|--host-a HOST_OR_URL] [--directory-b HOST_OR_URL|--host-b HOST_OR_URL] [--campaign-subject INVITE_KEY|--subject INVITE_KEY] [profile-compare-campaign-signoff args...]
-  ./scripts/easy_node.sh profile-default-gate-live [--host-a HOST|--directory-a HOST_OR_URL] [--host-b HOST|--directory-b HOST_OR_URL] [--campaign-subject INVITE_KEY|--subject INVITE_KEY|--key INVITE_KEY] [profile-default-gate-run args...]
+  ./scripts/easy_node.sh profile-default-gate-run [--directory-a HOST_OR_URL|--host-a HOST_OR_URL] [--directory-b HOST_OR_URL|--host-b HOST_OR_URL] [--campaign-subject INVITE_KEY|--subject INVITE_KEY] [--heartbeat-interval-sec N] [profile-compare-campaign-signoff args...]
+  ./scripts/easy_node.sh profile-default-gate-live [--host-a HOST|--directory-a HOST_OR_URL] [--host-b HOST|--directory-b HOST_OR_URL] [--campaign-subject INVITE_KEY|--subject INVITE_KEY|--key INVITE_KEY] [--heartbeat-interval-sec N] [profile-default-gate-run args...]
   ./scripts/easy_node.sh vpn-rc-matrix-path [--reports-dir DIR] [--print-report [0|1]] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh vpn-rc-standard-path [--print-report [0|1]] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh vpn-rc-resilience-path [--docker-profile-matrix-timeout-sec N] [--rc-matrix-path-timeout-sec N] [vpn_rc_resilience_path args...]
@@ -348,8 +348,8 @@ Usage:
   ./scripts/easy_node.sh profile-compare-docker-matrix [--dry-run [0|1]] [profile-compare-campaign args...]
   ./scripts/easy_node.sh profile-compare-campaign-check [--campaign-summary-json PATH] [--trend-summary-json PATH] [--reports-dir DIR] [--require-status-pass [0|1]] [--require-trend-status-pass [0|1]] [--require-min-runs-total N] [--require-max-runs-fail N] [--require-max-runs-warn N] [--require-min-runs-with-summary N] [--require-recommendation-support-rate-pct N] [--require-recommended-profile PROFILE] [--allow-recommended-profiles CSV] [--disallow-experimental-default [0|1]] [--require-trend-source CSV] [--fail-on-no-go [0|1]] [--summary-json PATH] [--show-json [0|1]] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh profile-compare-campaign-signoff [--reports-dir DIR] [--campaign-summary-json PATH] [--campaign-report-md PATH] [--campaign-check-summary-json PATH] [--refresh-campaign [0|1]] [--fail-on-no-go [0|1]] [--allow-concurrent [0|1]] [--allow-summary-overwrite [0|1]] [--require-status-pass [0|1]] [--require-trend-status-pass [0|1]] [--require-min-runs-total N] [--require-max-runs-fail N] [--require-max-runs-warn N] [--require-min-runs-with-summary N] [--require-recommendation-support-rate-pct N] [--require-recommended-profile PROFILE] [--allow-recommended-profiles CSV] [--disallow-experimental-default [0|1]] [--require-trend-source CSV] [--campaign-execution-mode docker|local] [--campaign-directory-urls URL[,URL...]] [--campaign-bootstrap-directory URL] [--campaign-discovery-wait-sec N] [--campaign-issuer-url URL] [--campaign-entry-url URL] [--campaign-exit-url URL] [--campaign-subject ID|--campaign-anon-cred TOKEN] [--subject ID (alias for --campaign-subject)|--anon-cred TOKEN (alias for --campaign-anon-cred)] [--campaign-start-local-stack auto|0|1] [--campaign-timeout-sec N] [--campaign-endpoint-preflight-timeout-sec N] [--summary-json PATH] [--show-json [0|1]] [--print-summary-json [0|1]]
-  ./scripts/easy_node.sh profile-default-gate-run [--directory-a HOST_OR_URL|--host-a HOST_OR_URL] [--directory-b HOST_OR_URL|--host-b HOST_OR_URL] [--directory-a-port N] [--directory-b-port N] [--endpoint-wait-timeout-sec N] [--endpoint-wait-interval-sec N] [--endpoint-connect-timeout-sec N] [--campaign-subject INVITE_KEY|--subject INVITE_KEY] [profile-compare-campaign-signoff args...]
-  ./scripts/easy_node.sh profile-default-gate-live [--host-a HOST|--directory-a HOST_OR_URL] [--host-b HOST|--directory-b HOST_OR_URL] [--campaign-subject INVITE_KEY|--subject INVITE_KEY|--key INVITE_KEY] [--reports-dir DIR] [--campaign-timeout-sec N] [--summary-json PATH] [--print-summary-json [0|1]] [profile-default-gate-run args...]
+  ./scripts/easy_node.sh profile-default-gate-run [--directory-a HOST_OR_URL|--host-a HOST_OR_URL] [--directory-b HOST_OR_URL|--host-b HOST_OR_URL] [--directory-a-port N] [--directory-b-port N] [--endpoint-wait-timeout-sec N] [--endpoint-wait-interval-sec N] [--endpoint-connect-timeout-sec N] [--campaign-subject INVITE_KEY|--subject INVITE_KEY] [--heartbeat-interval-sec N] [profile-compare-campaign-signoff args...]
+  ./scripts/easy_node.sh profile-default-gate-live [--host-a HOST|--directory-a HOST_OR_URL] [--host-b HOST|--directory-b HOST_OR_URL] [--campaign-subject INVITE_KEY|--subject INVITE_KEY|--key INVITE_KEY] [--reports-dir DIR] [--campaign-timeout-sec N] [--heartbeat-interval-sec N] [--summary-json PATH] [--print-summary-json [0|1]] [profile-default-gate-run args...]
   ./scripts/easy_node.sh client-vpn-preflight [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--issuer-url URL] [--issuer-urls URL[,URL...]] [--entry-url URL] [--exit-url URL] [--prod-profile [0|1]] [--interface IFACE] [--timeout-sec N] [--require-root [0|1]] [--operator-floor-check [0|1]] [--operator-min-operators N] [--operator-min-entry-operators N] [--operator-min-exit-operators N] [--middle-relay-check [0|1]] [--middle-relay-min-operators N] [--middle-relay-require-distinct [0|1]] [--issuer-quorum-check [0|1]] [--issuer-min-operators N] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH]
   ./scripts/easy_node.sh simple-client-vpn-preflight [--bootstrap-directory URL] [--discovery-wait-sec N] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--prod-profile [0|1]] [--interface IFACE]
   ./scripts/easy_node.sh client-vpn-up [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-urls URL[,URL...]] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--exit-country CC] [--exit-region REGION] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--beta-profile [0|1]] [--prod-profile [0|1]] [--operator-floor-check [0|1]] [--operator-min-operators N] [--operator-min-entry-operators N] [--operator-min-exit-operators N] [--issuer-quorum-check [0|1]] [--issuer-min-operators N] [--interface IFACE] [--proxy-addr HOST:PORT] [--private-key-file PATH] [--allowed-ips CIDR] [--install-route [0|1]] [--startup-sync-timeout-sec N] [--session-reuse [0|1]] [--allow-session-churn [0|1]] [--ready-timeout-sec N] [--force-restart [0|1]] [--foreground [0|1]] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH] [--log-file PATH]
@@ -8747,6 +8747,7 @@ profile_default_gate_live() {
   local campaign_subject="${INVITE_KEY:-}"
   local reports_dir=".easy-node-logs"
   local campaign_timeout_sec="1200"
+  local heartbeat_interval_sec=""
   local summary_json=".easy-node-logs/profile_compare_campaign_signoff_summary.json"
   local print_summary_json="1"
   local -a passthrough=()
@@ -8761,6 +8762,10 @@ profile_default_gate_live() {
         raw_host_a="$2"
         shift 2
         ;;
+      --host-a=*|--a-host=*|--directory-a=*)
+        raw_host_a="${1#*=}"
+        shift
+        ;;
       --host-b|--b-host|--directory-b)
         if [[ $# -lt 2 ]]; then
           echo "profile-default-gate-live requires --host-b HOST"
@@ -8768,6 +8773,10 @@ profile_default_gate_live() {
         fi
         raw_host_b="$2"
         shift 2
+        ;;
+      --host-b=*|--b-host=*|--directory-b=*)
+        raw_host_b="${1#*=}"
+        shift
         ;;
       --campaign-subject|--subject|--key|--invite-key)
         if [[ $# -lt 2 ]]; then
@@ -8777,6 +8786,10 @@ profile_default_gate_live() {
         campaign_subject="$2"
         shift 2
         ;;
+      --campaign-subject=*|--subject=*|--key=*|--invite-key=*)
+        campaign_subject="${1#*=}"
+        shift
+        ;;
       --reports-dir)
         if [[ $# -lt 2 ]]; then
           echo "profile-default-gate-live requires --reports-dir DIR"
@@ -8784,6 +8797,10 @@ profile_default_gate_live() {
         fi
         reports_dir="$2"
         shift 2
+        ;;
+      --reports-dir=*)
+        reports_dir="${1#*=}"
+        shift
         ;;
       --campaign-timeout-sec)
         if [[ $# -lt 2 ]]; then
@@ -8793,6 +8810,22 @@ profile_default_gate_live() {
         campaign_timeout_sec="$2"
         shift 2
         ;;
+      --campaign-timeout-sec=*)
+        campaign_timeout_sec="${1#*=}"
+        shift
+        ;;
+      --heartbeat-interval-sec)
+        if [[ $# -lt 2 ]]; then
+          echo "profile-default-gate-live requires --heartbeat-interval-sec N"
+          exit 2
+        fi
+        heartbeat_interval_sec="$2"
+        shift 2
+        ;;
+      --heartbeat-interval-sec=*)
+        heartbeat_interval_sec="${1#*=}"
+        shift
+        ;;
       --summary-json)
         if [[ $# -lt 2 ]]; then
           echo "profile-default-gate-live requires --summary-json PATH"
@@ -8800,6 +8833,10 @@ profile_default_gate_live() {
         fi
         summary_json="$2"
         shift 2
+        ;;
+      --summary-json=*)
+        summary_json="${1#*=}"
+        shift
         ;;
       --print-summary-json)
         if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
@@ -8809,6 +8846,17 @@ profile_default_gate_live() {
           print_summary_json="1"
           shift
         fi
+        ;;
+      --print-summary-json=*)
+        case "${1#*=}" in
+          0|1)
+            print_summary_json="${1#*=}"
+            ;;
+          *)
+            print_summary_json="1"
+            ;;
+        esac
+        shift
         ;;
       -h|--help|help)
         usage || true
@@ -8865,7 +8913,7 @@ profile_default_gate_live() {
   echo "  reports_dir: $reports_dir"
   echo "  summary_json: $summary_json"
 
-  profile_default_gate_run \
+  local -a run_args=(
     --directory-a "$directory_a" \
     --directory-b "$directory_b" \
     --campaign-bootstrap-directory "$directory_a" \
@@ -8876,8 +8924,14 @@ profile_default_gate_live() {
     --reports-dir "$reports_dir" \
     --campaign-timeout-sec "$campaign_timeout_sec" \
     --summary-json "$summary_json" \
-    --print-summary-json "$print_summary_json" \
-    "${passthrough[@]}"
+    --print-summary-json "$print_summary_json"
+  )
+  if [[ -n "$heartbeat_interval_sec" ]]; then
+    run_args+=(--heartbeat-interval-sec "$heartbeat_interval_sec")
+  fi
+  run_args+=("${passthrough[@]}")
+
+  profile_default_gate_run "${run_args[@]}"
 }
 
 manual_validation_report() {

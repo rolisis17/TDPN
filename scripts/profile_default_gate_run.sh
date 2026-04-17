@@ -15,6 +15,7 @@ Usage:
     [--endpoint-wait-timeout-sec N] \
     [--endpoint-wait-interval-sec N] \
     [--endpoint-connect-timeout-sec N] \
+    [--heartbeat-interval-sec N] \
     [--campaign-subject INVITE_KEY | --subject INVITE_KEY | --key INVITE_KEY | --invite-key INVITE_KEY] \
     [profile-compare-campaign-signoff args...]
 
@@ -319,6 +320,7 @@ endpoint_connect_timeout_sec="${PROFILE_DEFAULT_GATE_WAIT_CONNECT_TIMEOUT_SEC:-3
 env_client_file="${PROFILE_DEFAULT_GATE_RUN_ENV_CLIENT_FILE:-$ROOT_DIR/deploy/.env.easy.client}"
 campaign_timeout_default_sec="${PROFILE_DEFAULT_GATE_RUN_CAMPAIGN_TIMEOUT_SEC:-1200}"
 heartbeat_interval_sec_raw="${PROFILE_DEFAULT_GATE_RUN_HEARTBEAT_INTERVAL_SEC:-60}"
+heartbeat_interval_sec_cli=""
 
 campaign_subject_cli=""
 subject_alias_cli=""
@@ -363,6 +365,15 @@ while [[ $# -gt 0 ]]; do
       require_value_or_die "$1" "$#"
       endpoint_connect_timeout_sec="${2:-}"
       shift 2
+      ;;
+    --heartbeat-interval-sec)
+      require_value_or_die "$1" "$#"
+      heartbeat_interval_sec_cli="${2:-}"
+      shift 2
+      ;;
+    --heartbeat-interval-sec=*)
+      heartbeat_interval_sec_cli="${1#--heartbeat-interval-sec=}"
+      shift
       ;;
     --campaign-subject)
       require_value_or_die "$1" "$#"
@@ -459,9 +470,19 @@ campaign_subject_cli="$(trim "$campaign_subject_cli")"
 subject_alias_cli="$(trim "$subject_alias_cli")"
 key_alias_cli="$(trim "$key_alias_cli")"
 invite_key_alias_cli="$(trim "$invite_key_alias_cli")"
-heartbeat_interval_sec="$(trim "$heartbeat_interval_sec_raw")"
-if ! [[ "$heartbeat_interval_sec" =~ ^[0-9]+$ ]] || (( heartbeat_interval_sec < 1 )); then
-  heartbeat_interval_sec=60
+heartbeat_interval_sec_cli="$(trim "$heartbeat_interval_sec_cli")"
+if [[ -n "$heartbeat_interval_sec_cli" ]]; then
+  int_arg_or_die "--heartbeat-interval-sec" "$heartbeat_interval_sec_cli"
+  if (( heartbeat_interval_sec_cli < 1 )); then
+    echo "--heartbeat-interval-sec must be >= 1"
+    exit 2
+  fi
+  heartbeat_interval_sec="$heartbeat_interval_sec_cli"
+else
+  heartbeat_interval_sec="$(trim "$heartbeat_interval_sec_raw")"
+  if ! [[ "$heartbeat_interval_sec" =~ ^[0-9]+$ ]] || (( heartbeat_interval_sec < 1 )); then
+    heartbeat_interval_sec=60
+  fi
 fi
 
 subject_reference=""
