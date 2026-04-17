@@ -318,6 +318,7 @@ endpoint_wait_interval_sec="${PROFILE_DEFAULT_GATE_WAIT_INTERVAL_SEC:-2}"
 endpoint_connect_timeout_sec="${PROFILE_DEFAULT_GATE_WAIT_CONNECT_TIMEOUT_SEC:-3}"
 env_client_file="${PROFILE_DEFAULT_GATE_RUN_ENV_CLIENT_FILE:-$ROOT_DIR/deploy/.env.easy.client}"
 campaign_timeout_default_sec="${PROFILE_DEFAULT_GATE_RUN_CAMPAIGN_TIMEOUT_SEC:-1200}"
+heartbeat_interval_sec_raw="${PROFILE_DEFAULT_GATE_RUN_HEARTBEAT_INTERVAL_SEC:-60}"
 
 campaign_subject_cli=""
 subject_alias_cli=""
@@ -458,6 +459,10 @@ campaign_subject_cli="$(trim "$campaign_subject_cli")"
 subject_alias_cli="$(trim "$subject_alias_cli")"
 key_alias_cli="$(trim "$key_alias_cli")"
 invite_key_alias_cli="$(trim "$invite_key_alias_cli")"
+heartbeat_interval_sec="$(trim "$heartbeat_interval_sec_raw")"
+if ! [[ "$heartbeat_interval_sec" =~ ^[0-9]+$ ]] || (( heartbeat_interval_sec < 1 )); then
+  heartbeat_interval_sec=60
+fi
 
 subject_reference=""
 subject_conflict=false
@@ -672,11 +677,31 @@ else
   fi
 fi
 
+echo "[profile-default-gate-run] $(timestamp_utc) campaign-visibility expected_duration_sec=$campaign_timeout_effective progress_reports_dir=$reports_dir_effective progress_summary_json=$summary_json_effective"
+echo "[profile-default-gate-run] $(timestamp_utc) signoff-heartbeat interval_sec=$heartbeat_interval_sec"
 echo "[profile-default-gate-run] $(timestamp_utc) invoking profile-compare-campaign-signoff"
+signoff_start_epoch="$(date +%s)"
+heartbeat_pid=""
+(
+  while true; do
+    sleep "$heartbeat_interval_sec"
+    now_epoch="$(date +%s)"
+    elapsed_sec=$((now_epoch - signoff_start_epoch))
+    echo "[profile-default-gate-run] $(timestamp_utc) signoff-progress elapsed_sec=$elapsed_sec progress_reports_dir=$reports_dir_effective progress_summary_json=$summary_json_effective"
+  done
+) &
+heartbeat_pid="$!"
 set +e
 "$signoff_script" "${signoff_passthrough[@]}"
 signoff_rc=$?
 set -e
+if [[ -n "$heartbeat_pid" ]]; then
+  kill "$heartbeat_pid" >/dev/null 2>&1 || true
+  wait "$heartbeat_pid" >/dev/null 2>&1 || true
+fi
+signoff_end_epoch="$(date +%s)"
+signoff_elapsed_sec=$((signoff_end_epoch - signoff_start_epoch))
+echo "[profile-default-gate-run] $(timestamp_utc) signoff-finish rc=$signoff_rc elapsed_sec=$signoff_elapsed_sec progress_summary_json=$summary_json_effective"
 
 if [[ "$signoff_rc" -eq 0 ]]; then
   echo "[profile-default-gate-run] $(timestamp_utc) status=ok rc=0 summary_json=$summary_json_effective"

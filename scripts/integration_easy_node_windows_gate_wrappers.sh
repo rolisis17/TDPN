@@ -21,8 +21,11 @@ TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 CAPTURE="$TMP_DIR/capture.tsv"
-PHASE3_FAKE="$TMP_DIR/fake_phase3_windows_client_beta_check.sh"
-PHASE4_FAKE="$TMP_DIR/fake_phase4_windows_full_parity_handoff_check.sh"
+PHASE3_CHECK_FAKE="$TMP_DIR/fake_phase3_windows_client_beta_check.sh"
+PHASE3_RUN_FAKE="$TMP_DIR/fake_phase3_windows_client_beta_run.sh"
+PHASE4_CHECK_FAKE="$TMP_DIR/fake_phase4_windows_full_parity_check.sh"
+PHASE4_RUN_FAKE="$TMP_DIR/fake_phase4_windows_full_parity_run.sh"
+PHASE4_HANDOFF_CHECK_FAKE="$TMP_DIR/fake_phase4_windows_full_parity_handoff_check.sh"
 
 create_fake_wrapper_script() {
   local target_script="$1"
@@ -138,8 +141,11 @@ run_and_assert_wrapper() {
   : >"$CAPTURE"
 
   env EASY_NODE_WINDOWS_GATE_CAPTURE_FILE="$CAPTURE" \
-    PHASE3_WINDOWS_CLIENT_BETA_CHECK_SCRIPT="$PHASE3_FAKE" \
-    PHASE4_WINDOWS_FULL_PARITY_HANDOFF_CHECK_SCRIPT="$PHASE4_FAKE" \
+    PHASE3_WINDOWS_CLIENT_BETA_CHECK_SCRIPT="$PHASE3_CHECK_FAKE" \
+    PHASE3_WINDOWS_CLIENT_BETA_RUN_SCRIPT="$PHASE3_RUN_FAKE" \
+    PHASE4_WINDOWS_FULL_PARITY_CHECK_SCRIPT="$PHASE4_CHECK_FAKE" \
+    PHASE4_WINDOWS_FULL_PARITY_RUN_SCRIPT="$PHASE4_RUN_FAKE" \
+    PHASE4_WINDOWS_FULL_PARITY_HANDOFF_CHECK_SCRIPT="$PHASE4_HANDOFF_CHECK_FAKE" \
     bash "$SCRIPT_UNDER_TEST" \
       "$command_name" \
       --reports-dir "$reports_dir" \
@@ -158,24 +164,57 @@ run_and_assert_wrapper() {
 }
 
 assert_text_present "$SCRIPT_UNDER_TEST" "phase3-windows-client-beta-check"
+assert_text_present "$SCRIPT_UNDER_TEST" "phase3-windows-client-beta-run"
+assert_text_present "$SCRIPT_UNDER_TEST" "phase4-windows-full-parity-check"
+assert_text_present "$SCRIPT_UNDER_TEST" "phase4-windows-full-parity-run"
 assert_text_present "$SCRIPT_UNDER_TEST" "phase4-windows-full-parity-handoff-check"
 assert_text_present "$SCRIPT_UNDER_TEST" "PHASE3_WINDOWS_CLIENT_BETA_CHECK_SCRIPT"
+assert_text_present "$SCRIPT_UNDER_TEST" "PHASE3_WINDOWS_CLIENT_BETA_RUN_SCRIPT"
+assert_text_present "$SCRIPT_UNDER_TEST" "PHASE4_WINDOWS_FULL_PARITY_CHECK_SCRIPT"
+assert_text_present "$SCRIPT_UNDER_TEST" "PHASE4_WINDOWS_FULL_PARITY_RUN_SCRIPT"
 assert_text_present "$SCRIPT_UNDER_TEST" "PHASE4_WINDOWS_FULL_PARITY_HANDOFF_CHECK_SCRIPT"
 
-create_fake_wrapper_script "$PHASE3_FAKE" "phase3"
-create_fake_wrapper_script "$PHASE4_FAKE" "phase4"
+create_fake_wrapper_script "$PHASE3_CHECK_FAKE" "phase3_check"
+create_fake_wrapper_script "$PHASE3_RUN_FAKE" "phase3_run"
+create_fake_wrapper_script "$PHASE4_CHECK_FAKE" "phase4_check"
+create_fake_wrapper_script "$PHASE4_RUN_FAKE" "phase4_run"
+create_fake_wrapper_script "$PHASE4_HANDOFF_CHECK_FAKE" "phase4_handoff_check"
 
 run_and_assert_wrapper \
   "phase3-windows-client-beta-check" \
-  "phase3" \
+  "phase3_check" \
   "$TMP_DIR/reports phase3" \
   "$TMP_DIR/summary phase3.json" \
   "--sample-arg" \
   "sample value phase3"
 
 run_and_assert_wrapper \
+  "phase3-windows-client-beta-run" \
+  "phase3_run" \
+  "$TMP_DIR/reports phase3 run" \
+  "$TMP_DIR/summary phase3 run.json" \
+  "--sample-arg" \
+  "sample value phase3 run"
+
+run_and_assert_wrapper \
+  "phase4-windows-full-parity-check" \
+  "phase4_check" \
+  "$TMP_DIR/reports phase4 check" \
+  "$TMP_DIR/summary phase4 check.json" \
+  "--sample-arg" \
+  "sample value phase4 check"
+
+run_and_assert_wrapper \
+  "phase4-windows-full-parity-run" \
+  "phase4_run" \
+  "$TMP_DIR/reports phase4 run" \
+  "$TMP_DIR/summary phase4 run.json" \
+  "--sample-arg" \
+  "sample value phase4 run"
+
+run_and_assert_wrapper \
   "phase4-windows-full-parity-handoff-check" \
-  "phase4" \
+  "phase4_handoff_check" \
   "$TMP_DIR/reports phase4" \
   "$TMP_DIR/summary phase4.json" \
   "--sample-arg" \

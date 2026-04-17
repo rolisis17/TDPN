@@ -58,6 +58,7 @@ Notes:
   - --subject is a legacy alias of --campaign-subject.
   - --key and --invite-key are aliases of --campaign-subject.
   - --anon-cred remains an alias of --campaign-anon-cred.
+  - Subject/anon alias flags accept both `--flag value` and `--flag=value`.
   - In invite-key workflows, prefer --campaign-subject (or --subject/--key/
     --invite-key) with an actual invite key value instead of placeholder text.
   - If no subject flag is provided, subject falls back to env:
@@ -684,28 +685,56 @@ while [[ $# -gt 0 ]]; do
       campaign_subject_cli_provided="1"
       shift 2
       ;;
+    --campaign-subject=*)
+      campaign_subject="${1#--campaign-subject=}"
+      campaign_subject_cli_provided="1"
+      shift
+      ;;
     --campaign-anon-cred)
       campaign_anon_cred="${2:-}"
       shift 2
+      ;;
+    --campaign-anon-cred=*)
+      campaign_anon_cred="${1#--campaign-anon-cred=}"
+      shift
       ;;
     --subject)
       set_subject_alias_or_die "--subject" "${2:-}"
       campaign_subject_cli_provided="1"
       shift 2
       ;;
+    --subject=*)
+      set_subject_alias_or_die "--subject" "${1#--subject=}"
+      campaign_subject_cli_provided="1"
+      shift
+      ;;
     --key)
       set_subject_alias_or_die "--key" "${2:-}"
       campaign_subject_cli_provided="1"
       shift 2
+      ;;
+    --key=*)
+      set_subject_alias_or_die "--key" "${1#--key=}"
+      campaign_subject_cli_provided="1"
+      shift
       ;;
     --invite-key)
       set_subject_alias_or_die "--invite-key" "${2:-}"
       campaign_subject_cli_provided="1"
       shift 2
       ;;
+    --invite-key=*)
+      set_subject_alias_or_die "--invite-key" "${1#--invite-key=}"
+      campaign_subject_cli_provided="1"
+      shift
+      ;;
     --anon-cred)
       anon_cred_alias="${2:-}"
       shift 2
+      ;;
+    --anon-cred=*)
+      anon_cred_alias="${1#--anon-cred=}"
+      shift
       ;;
     --campaign-start-local-stack)
       campaign_start_local_stack="${2:-}"

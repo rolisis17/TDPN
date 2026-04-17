@@ -242,6 +242,38 @@ if ! jq -e '.status == "ok" and .final_rc == 0 and .inputs.campaign_refresh_over
   exit 1
 fi
 
+echo "[profile-compare-campaign-signoff] --subject= alias forwarding works"
+: >"$SIGNOFF_CAPTURE"
+ALIAS_EQUALS_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_alias_equals_summary.json"
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_COMPARE_CAMPAIGN_SCRIPT="$FAKE_CAMPAIGN" \
+PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT="$FAKE_CHECK" \
+FAKE_CAMPAIGN_RC=0 \
+FAKE_CHECK_RC=0 \
+FAKE_CHECK_DECISION=GO \
+./scripts/profile_compare_campaign_signoff.sh \
+  --reports-dir "$TMP_DIR/reports_alias_equals" \
+  --refresh-campaign 1 \
+  --campaign-execution-mode docker \
+  --subject="inv-alias-equals-test" \
+  --summary-json "$ALIAS_EQUALS_SUMMARY" >/tmp/integration_profile_compare_campaign_signoff_alias_equals.log 2>&1
+
+if ! rg -q '\[profile-compare-campaign-signoff\] status=ok final_rc=0 decision=GO' /tmp/integration_profile_compare_campaign_signoff_alias_equals.log; then
+  echo "expected --subject= alias forwarding status line not found"
+  cat /tmp/integration_profile_compare_campaign_signoff_alias_equals.log
+  exit 1
+fi
+if ! rg -q -- '--subject inv-alias-equals-test' "$SIGNOFF_CAPTURE"; then
+  echo "expected --subject= alias subject forwarding flag missing"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+if ! jq -e '.status == "ok" and .final_rc == 0 and .inputs.campaign_refresh_overrides.subject_source == "explicit" and .inputs.campaign_refresh_overrides.subject_configured == true and .inputs.campaign_refresh_overrides.anon_cred_configured == false and .inputs.campaign_refresh_overrides_effective.subject_configured == true and .inputs.campaign_refresh_overrides_effective.anon_cred_configured == false' "$ALIAS_EQUALS_SUMMARY" >/dev/null 2>&1; then
+  echo "--subject= alias forwarding summary JSON missing expected fields"
+  cat "$ALIAS_EQUALS_SUMMARY"
+  exit 1
+fi
+
 echo "[profile-compare-campaign-signoff] --key alias forwarding works"
 : >"$SIGNOFF_CAPTURE"
 KEY_ALIAS_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_key_alias_summary.json"
@@ -350,6 +382,43 @@ fi
 if ! jq -e '.status == "ok" and .final_rc == 0 and .inputs.campaign_refresh_overrides.subject_source == null and .inputs.campaign_refresh_overrides.subject_configured == false and .inputs.campaign_refresh_overrides.anon_cred_configured == true and .inputs.campaign_refresh_overrides_effective.subject_configured == false and .inputs.campaign_refresh_overrides_effective.anon_cred_configured == true' "$ANON_CRED_ALIAS_SUMMARY" >/dev/null 2>&1; then
   echo "anon-cred alias summary JSON missing expected fields"
   cat "$ANON_CRED_ALIAS_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-compare-campaign-signoff] --anon-cred= alias forwarding works"
+: >"$SIGNOFF_CAPTURE"
+ANON_CRED_ALIAS_EQUALS_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_anon_cred_alias_equals_summary.json"
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_COMPARE_CAMPAIGN_SCRIPT="$FAKE_CAMPAIGN" \
+PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT="$FAKE_CHECK" \
+FAKE_CAMPAIGN_RC=0 \
+FAKE_CHECK_RC=0 \
+FAKE_CHECK_DECISION=GO \
+./scripts/profile_compare_campaign_signoff.sh \
+  --reports-dir "$TMP_DIR/reports_anon_cred_alias_equals" \
+  --refresh-campaign 1 \
+  --campaign-execution-mode docker \
+  --anon-cred="anon-cred-alias-equals-test" \
+  --summary-json "$ANON_CRED_ALIAS_EQUALS_SUMMARY" >/tmp/integration_profile_compare_campaign_signoff_anon_cred_alias_equals.log 2>&1
+
+if ! rg -q '\[profile-compare-campaign-signoff\] status=ok final_rc=0 decision=GO' /tmp/integration_profile_compare_campaign_signoff_anon_cred_alias_equals.log; then
+  echo "expected --anon-cred= alias forwarding status line not found"
+  cat /tmp/integration_profile_compare_campaign_signoff_anon_cred_alias_equals.log
+  exit 1
+fi
+if ! rg -q -- '--anon-cred anon-cred-alias-equals-test' "$SIGNOFF_CAPTURE"; then
+  echo "expected --anon-cred= alias forwarding flag missing"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+if rg -q -- '--subject ' "$SIGNOFF_CAPTURE"; then
+  echo "unexpected subject forwarding when --anon-cred= alias is supplied"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+if ! jq -e '.status == "ok" and .final_rc == 0 and .inputs.campaign_refresh_overrides.subject_source == null and .inputs.campaign_refresh_overrides.subject_configured == false and .inputs.campaign_refresh_overrides.anon_cred_configured == true and .inputs.campaign_refresh_overrides_effective.subject_configured == false and .inputs.campaign_refresh_overrides_effective.anon_cred_configured == true' "$ANON_CRED_ALIAS_EQUALS_SUMMARY" >/dev/null 2>&1; then
+  echo "--anon-cred= alias summary JSON missing expected fields"
+  cat "$ANON_CRED_ALIAS_EQUALS_SUMMARY"
   exit 1
 fi
 
@@ -519,6 +588,27 @@ if ! rg -q 'conflicting subject values: --subject and --campaign-subject must ma
   exit 1
 fi
 
+echo "[profile-compare-campaign-signoff] conflicting --subject= and --campaign-subject fail clearly"
+set +e
+./scripts/profile_compare_campaign_signoff.sh \
+  --reports-dir "$TMP_DIR/reports_conflict_subject_equals" \
+  --refresh-campaign 1 \
+  --subject=inv-alias-equals-a \
+  --campaign-subject inv-alias-equals-b \
+  --summary-json "$TMP_DIR/profile_compare_campaign_signoff_conflict_subject_equals.json" >/tmp/integration_profile_compare_campaign_signoff_conflict_subject_equals.log 2>&1
+rc_conflict_subject_equals=$?
+set -e
+if [[ "$rc_conflict_subject_equals" -ne 2 ]]; then
+  echo "expected rc=2 when --subject= conflicts with --campaign-subject"
+  cat /tmp/integration_profile_compare_campaign_signoff_conflict_subject_equals.log
+  exit 1
+fi
+if ! rg -q 'conflicting subject values: --subject and --campaign-subject must match when both are provided' /tmp/integration_profile_compare_campaign_signoff_conflict_subject_equals.log; then
+  echo "expected --subject= conflict error message missing"
+  cat /tmp/integration_profile_compare_campaign_signoff_conflict_subject_equals.log
+  exit 1
+fi
+
 echo "[profile-compare-campaign-signoff] conflicting --key and --campaign-subject fail clearly"
 set +e
 ./scripts/profile_compare_campaign_signoff.sh \
@@ -578,6 +668,27 @@ fi
 if ! rg -q 'conflicting anon credential values: --anon-cred and --campaign-anon-cred must match when both are provided' /tmp/integration_profile_compare_campaign_signoff_conflict_anon.log; then
   echo "expected anon-cred conflict error message missing"
   cat /tmp/integration_profile_compare_campaign_signoff_conflict_anon.log
+  exit 1
+fi
+
+echo "[profile-compare-campaign-signoff] conflicting --anon-cred= and --campaign-anon-cred fail clearly"
+set +e
+./scripts/profile_compare_campaign_signoff.sh \
+  --reports-dir "$TMP_DIR/reports_conflict_anon_equals" \
+  --refresh-campaign 1 \
+  --anon-cred=anon-equals-a \
+  --campaign-anon-cred anon-equals-b \
+  --summary-json "$TMP_DIR/profile_compare_campaign_signoff_conflict_anon_equals.json" >/tmp/integration_profile_compare_campaign_signoff_conflict_anon_equals.log 2>&1
+rc_conflict_anon_equals=$?
+set -e
+if [[ "$rc_conflict_anon_equals" -ne 2 ]]; then
+  echo "expected rc=2 when --anon-cred= conflicts with --campaign-anon-cred"
+  cat /tmp/integration_profile_compare_campaign_signoff_conflict_anon_equals.log
+  exit 1
+fi
+if ! rg -q 'conflicting anon credential values: --anon-cred and --campaign-anon-cred must match when both are provided' /tmp/integration_profile_compare_campaign_signoff_conflict_anon_equals.log; then
+  echo "expected --anon-cred= conflict error message missing"
+  cat /tmp/integration_profile_compare_campaign_signoff_conflict_anon_equals.log
   exit 1
 fi
 

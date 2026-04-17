@@ -213,6 +213,11 @@ assert_contains "$success_line_sp" "--campaign-timeout-sec 1200" "missing defaul
 assert_contains "$success_line_sp" "--custom-flag custom value" "missing passthrough forwarding"
 assert_contains "$success_line_sp" "--summary-json $SUCCESS_SUMMARY" "missing explicit summary-json forwarding"
 assert_file_contains "$SUCCESS_LOG" "campaign_timeout_sec=1200" "missing campaign-timeout start marker"
+assert_file_contains "$SUCCESS_LOG" "campaign-visibility expected_duration_sec=1200" "missing campaign visibility duration marker"
+assert_file_contains "$SUCCESS_LOG" "progress_reports_dir=$ROOT_DIR/.easy-node-logs" "missing campaign visibility reports-dir marker"
+assert_file_contains "$SUCCESS_LOG" "progress_summary_json=$SUCCESS_SUMMARY" "missing campaign visibility summary-json marker"
+assert_file_contains "$SUCCESS_LOG" "signoff-heartbeat interval_sec=60" "missing signoff heartbeat marker"
+assert_file_contains "$SUCCESS_LOG" "signoff-finish rc=0" "missing signoff completion marker"
 
 echo "[profile-default-gate-run] env file subject fallback forwards campaign subject"
 : >"$SIGNOFF_CAPTURE"
