@@ -245,6 +245,7 @@ Usage:
   ./scripts/easy_node.sh blockchain-fastlane [blockchain_fastlane args...]
   ./scripts/easy_node.sh blockchain-gate-bundle [blockchain_gate_bundle args...]
   ./scripts/easy_node.sh ci-blockchain-parallel-sweep [ci_blockchain_parallel_sweep args...]
+  ./scripts/easy_node.sh blockchain-mainnet-activation-metrics-prefill [blockchain_mainnet_activation_metrics_prefill args...]
   ./scripts/easy_node.sh blockchain-mainnet-activation-metrics-input [blockchain_mainnet_activation_metrics_input args...]
   ./scripts/easy_node.sh blockchain-mainnet-activation-metrics-missing-checklist [blockchain_mainnet_activation_metrics_missing_checklist args...]
   ./scripts/easy_node.sh blockchain-mainnet-activation-metrics-missing-input-template [blockchain_mainnet_activation_metrics_missing_input_template args...]
@@ -385,6 +386,7 @@ Usage:
   ./scripts/easy_node.sh blockchain-fastlane [blockchain_fastlane args...]
   ./scripts/easy_node.sh blockchain-gate-bundle [blockchain_gate_bundle args...]
   ./scripts/easy_node.sh ci-blockchain-parallel-sweep [ci_blockchain_parallel_sweep args...]
+  ./scripts/easy_node.sh blockchain-mainnet-activation-metrics-prefill [blockchain_mainnet_activation_metrics_prefill args...]
   ./scripts/easy_node.sh blockchain-mainnet-activation-metrics-input [blockchain_mainnet_activation_metrics_input args...]
   ./scripts/easy_node.sh blockchain-mainnet-activation-metrics-missing-checklist [blockchain_mainnet_activation_metrics_missing_checklist args...]
   ./scripts/easy_node.sh blockchain-mainnet-activation-metrics-missing-input-template [blockchain_mainnet_activation_metrics_missing_input_template args...]
@@ -546,6 +548,7 @@ Notes:
   - blockchain-fastlane wraps the blockchain acceleration helper path and preserves pass-through args.
   - blockchain-gate-bundle wraps the blockchain gate bundle helper path and preserves pass-through args.
   - ci-blockchain-parallel-sweep wraps the blockchain parallel sweep helper path and preserves pass-through args.
+  - blockchain-mainnet-activation-metrics-prefill wraps the blockchain metrics prefill helper path and preserves pass-through args.
   - blockchain-mainnet-activation-metrics-input wraps the blockchain metrics evidence normalizer helper path and preserves pass-through args.
   - blockchain-mainnet-activation-metrics-missing-checklist wraps the blockchain missing-metrics checklist helper path and preserves pass-through args.
   - blockchain-mainnet-activation-metrics-missing-input-template wraps the blockchain missing-input-template helper path and preserves pass-through args.
@@ -8269,6 +8272,15 @@ blockchain_mainnet_activation_metrics_input() {
   "$metrics_input_script" "$@"
 }
 
+blockchain_mainnet_activation_metrics_prefill() {
+  local metrics_prefill_script="${BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_PREFILL_SCRIPT:-$ROOT_DIR/scripts/blockchain_mainnet_activation_metrics_prefill.sh}"
+  if [[ ! -x "$metrics_prefill_script" ]]; then
+    echo "missing helper script: $metrics_prefill_script"
+    exit 2
+  fi
+  "$metrics_prefill_script" "$@"
+}
+
 blockchain_mainnet_activation_metrics_missing_checklist() {
   local metrics_missing_checklist_script="${BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_MISSING_CHECKLIST_SCRIPT:-$ROOT_DIR/scripts/blockchain_mainnet_activation_metrics_missing_checklist.sh}"
   if [[ ! -x "$metrics_missing_checklist_script" ]]; then
@@ -15237,6 +15249,10 @@ main() {
     ci-blockchain-parallel-sweep)
       shift
       ci_blockchain_parallel_sweep "$@"
+      ;;
+    blockchain-mainnet-activation-metrics-prefill)
+      shift
+      blockchain_mainnet_activation_metrics_prefill "$@"
       ;;
     blockchain-mainnet-activation-metrics-input)
       shift
