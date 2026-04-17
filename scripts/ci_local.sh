@@ -99,6 +99,18 @@ echo "[ci] roadmap progress phase-5 handoff integration"
 echo "[ci] roadmap consistency integration"
 bash ./scripts/integration_roadmap_consistency.sh
 
+echo "[ci] roadmap next actions run integration"
+./scripts/integration_roadmap_next_actions_run.sh
+
+echo "[ci] easy-node roadmap next actions run integration"
+./scripts/integration_easy_node_roadmap_next_actions_run.sh
+
+echo "[ci] roadmap non-blockchain actionable run integration"
+./scripts/integration_roadmap_non_blockchain_actionable_run.sh
+
+echo "[ci] easy-node roadmap non-blockchain actionable run integration"
+./scripts/integration_easy_node_roadmap_non_blockchain_actionable_run.sh
+
 echo "[ci] pre-real-host readiness integration"
 ./scripts/integration_pre_real_host_readiness.sh
 
@@ -426,6 +438,9 @@ echo "[ci] profile compare campaign check integration"
 
 echo "[ci] profile compare campaign signoff integration"
 ./scripts/integration_profile_compare_campaign_signoff.sh
+
+echo "[ci] profile default gate run integration"
+./scripts/integration_profile_default_gate_run.sh
 
 echo "[ci] incident snapshot integration"
 ./scripts/integration_incident_snapshot.sh

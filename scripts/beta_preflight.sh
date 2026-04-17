@@ -38,6 +38,10 @@ run_step "roadmap progress phase-2 handoff" ./scripts/integration_roadmap_progre
 run_step "roadmap progress phase-3 handoff" ./scripts/integration_roadmap_progress_phase3_handoff.sh
 run_step "roadmap progress phase-4 handoff" ./scripts/integration_roadmap_progress_phase4_handoff.sh
 run_step "roadmap progress phase-5 handoff" ./scripts/integration_roadmap_progress_phase5_handoff.sh
+run_step "roadmap next actions run integration" ./scripts/integration_roadmap_next_actions_run.sh
+run_step "easy-node roadmap next actions run integration" ./scripts/integration_easy_node_roadmap_next_actions_run.sh
+run_step "roadmap non-blockchain actionable run integration" ./scripts/integration_roadmap_non_blockchain_actionable_run.sh
+run_step "easy-node roadmap non-blockchain actionable run integration" ./scripts/integration_easy_node_roadmap_non_blockchain_actionable_run.sh
 run_step "pre-real-host readiness" ./scripts/integration_pre_real_host_readiness.sh
 run_step "runtime fix" ./scripts/integration_runtime_fix.sh
 run_step "runtime fix record" ./scripts/integration_runtime_fix_record.sh
@@ -63,6 +67,7 @@ run_step "profile compare campaign integration" ./scripts/integration_profile_co
 run_step "profile compare docker matrix integration" ./scripts/integration_profile_compare_docker_matrix.sh
 run_step "profile compare campaign check integration" ./scripts/integration_profile_compare_campaign_check.sh
 run_step "profile compare campaign signoff integration" ./scripts/integration_profile_compare_campaign_signoff.sh
+run_step "profile default gate run integration" ./scripts/integration_profile_default_gate_run.sh
 run_step "vpn-rc matrix path integration" ./scripts/integration_vpn_rc_matrix_path.sh
 run_step "vpn-rc resilience path integration" ./scripts/integration_vpn_rc_resilience_path.sh
 run_step "vpn non-blockchain fastlane integration" ./scripts/integration_vpn_non_blockchain_fastlane.sh
