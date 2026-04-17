@@ -33,11 +33,13 @@ Notes:
     CAMPAIGN_SUBJECT env, INVITE_KEY env, CAMPAIGN_SUBJECT file, INVITE_KEY file.
   - Env-file fallback default: $ROOT_DIR/deploy/.env.easy.client
     (override via PROFILE_DEFAULT_GATE_RUN_ENV_CLIENT_FILE).
+  - Invite subject placeholders (for example literal INVITE_KEY) fail fast.
   - This wrapper defaults signoff refresh mode to roadmap docker defaults:
     --refresh-campaign 1
     --campaign-execution-mode docker
     --campaign-start-local-stack 0
     --fail-on-no-go 0
+    --campaign-timeout-sec 1200
 USAGE
 }
 
@@ -73,6 +75,19 @@ strip_optional_wrapping_quotes() {
   fi
 
   printf '%s' "$value"
+}
+
+invite_subject_looks_placeholder_01() {
+  local value normalized
+  value="$(trim "${1:-}")"
+  value="$(strip_optional_wrapping_quotes "$value")"
+  normalized="$(printf '%s' "$value" | tr '[:lower:]' '[:upper:]')"
+  case "$normalized" in
+    INVITE_KEY|\$\{INVITE_KEY\}|\$INVITE_KEY|"<INVITE_KEY>"|"{{INVITE_KEY}}"|YOUR_INVITE_KEY|REPLACE_WITH_INVITE_KEY)
+      return 0
+      ;;
+  esac
+  return 1
 }
 
 read_env_key_from_file() {
@@ -302,6 +317,7 @@ endpoint_wait_timeout_sec="${PROFILE_DEFAULT_GATE_WAIT_TIMEOUT_SEC:-45}"
 endpoint_wait_interval_sec="${PROFILE_DEFAULT_GATE_WAIT_INTERVAL_SEC:-2}"
 endpoint_connect_timeout_sec="${PROFILE_DEFAULT_GATE_WAIT_CONNECT_TIMEOUT_SEC:-3}"
 env_client_file="${PROFILE_DEFAULT_GATE_RUN_ENV_CLIENT_FILE:-$ROOT_DIR/deploy/.env.easy.client}"
+campaign_timeout_default_sec="${PROFILE_DEFAULT_GATE_RUN_CAMPAIGN_TIMEOUT_SEC:-1200}"
 
 campaign_subject_cli=""
 subject_alias_cli=""
@@ -415,6 +431,7 @@ int_arg_or_die "--directory-b-port" "$directory_b_port"
 int_arg_or_die "--endpoint-wait-timeout-sec" "$endpoint_wait_timeout_sec"
 int_arg_or_die "--endpoint-wait-interval-sec" "$endpoint_wait_interval_sec"
 int_arg_or_die "--endpoint-connect-timeout-sec" "$endpoint_connect_timeout_sec"
+int_arg_or_die "PROFILE_DEFAULT_GATE_RUN_CAMPAIGN_TIMEOUT_SEC" "$campaign_timeout_default_sec"
 
 if (( directory_a_port < 1 || directory_a_port > 65535 )); then
   echo "--directory-a-port must be in range 1..65535"
@@ -430,6 +447,10 @@ if (( endpoint_wait_interval_sec < 1 )); then
 fi
 if (( endpoint_connect_timeout_sec < 1 )); then
   echo "--endpoint-connect-timeout-sec must be >= 1"
+  exit 2
+fi
+if (( campaign_timeout_default_sec < 1 )); then
+  echo "PROFILE_DEFAULT_GATE_RUN_CAMPAIGN_TIMEOUT_SEC must be >= 1"
   exit 2
 fi
 
@@ -512,6 +533,12 @@ if [[ -z "$campaign_subject_effective" ]]; then
   echo "provide --campaign-subject/--subject/--key/--invite-key, or set CAMPAIGN_SUBJECT/INVITE_KEY"
   echo "or define CAMPAIGN_SUBJECT/INVITE_KEY in $env_client_file"
   echo "override env file path via PROFILE_DEFAULT_GATE_RUN_ENV_CLIENT_FILE"
+  exit 2
+fi
+if invite_subject_looks_placeholder_01 "$campaign_subject_effective"; then
+  echo "[profile-default-gate-run] $(timestamp_utc) failure_kind=missing_invite_subject_precondition reason=placeholder_subject"
+  echo "profile-default-gate-run failed: invite key subject appears to be placeholder text ($campaign_subject_effective)"
+  echo "provide a real invite key via --campaign-subject/--subject/--key/--invite-key, or set CAMPAIGN_SUBJECT/INVITE_KEY"
   exit 2
 fi
 
@@ -598,8 +625,22 @@ fi
 if ! array_has_arg_or_equals_prefix "--fail-on-no-go" "${signoff_passthrough[@]}"; then
   signoff_passthrough+=(--fail-on-no-go 0)
 fi
+if ! array_has_arg_or_equals_prefix "--campaign-timeout-sec" "${signoff_passthrough[@]}"; then
+  signoff_passthrough+=(--campaign-timeout-sec "$campaign_timeout_default_sec")
+fi
 if ! array_has_arg_or_equals_prefix "--print-summary-json" "${signoff_passthrough[@]}"; then
   signoff_passthrough+=(--print-summary-json 0)
+fi
+campaign_timeout_effective="$(extract_flag_value --campaign-timeout-sec "${signoff_passthrough[@]}")"
+campaign_timeout_effective="$(trim "$campaign_timeout_effective")"
+if [[ -z "$campaign_timeout_effective" ]]; then
+  echo "profile-default-gate-run failed: --campaign-timeout-sec requires a value"
+  exit 2
+fi
+int_arg_or_die "--campaign-timeout-sec" "$campaign_timeout_effective"
+if (( campaign_timeout_effective < 0 )); then
+  echo "--campaign-timeout-sec must be >= 0"
+  exit 2
 fi
 
 reports_dir_effective="$(extract_flag_value --reports-dir "${signoff_passthrough[@]}")"
@@ -617,7 +658,7 @@ else
   summary_json_effective="$reports_dir_effective/profile_compare_campaign_signoff_summary.json"
 fi
 
-echo "[profile-default-gate-run] $(timestamp_utc) start subject_source=$subject_source directory_urls=$campaign_directory_urls_effective"
+echo "[profile-default-gate-run] $(timestamp_utc) start subject_source=$subject_source directory_urls=$campaign_directory_urls_effective campaign_timeout_sec=$campaign_timeout_effective"
 echo "[profile-default-gate-run] $(timestamp_utc) summary_json=$summary_json_effective"
 
 if ! wait_for_directory_endpoint "directory_a" "$directory_a_url"; then

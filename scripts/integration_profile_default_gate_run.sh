@@ -209,8 +209,10 @@ assert_contains "$success_line_sp" "--refresh-campaign 1" "missing default refre
 assert_contains "$success_line_sp" "--campaign-execution-mode docker" "missing docker execution mode default"
 assert_contains "$success_line_sp" "--campaign-start-local-stack 0" "missing start-local-stack default"
 assert_contains "$success_line_sp" "--fail-on-no-go 0" "missing optional fail-on-no-go default"
+assert_contains "$success_line_sp" "--campaign-timeout-sec 1200" "missing default campaign timeout forwarding"
 assert_contains "$success_line_sp" "--custom-flag custom value" "missing passthrough forwarding"
 assert_contains "$success_line_sp" "--summary-json $SUCCESS_SUMMARY" "missing explicit summary-json forwarding"
+assert_file_contains "$SUCCESS_LOG" "campaign_timeout_sec=1200" "missing campaign-timeout start marker"
 
 echo "[profile-default-gate-run] env file subject fallback forwards campaign subject"
 : >"$SIGNOFF_CAPTURE"
@@ -401,6 +403,36 @@ assert_file_contains "$MISSING_SUBJECT_LOG" "missing invite key subject" "missin
 assert_file_contains "$MISSING_SUBJECT_LOG" "failure_kind=missing_invite_subject_precondition" "missing stable missing-subject failure marker"
 if [[ -s "$SIGNOFF_CAPTURE" ]]; then
   echo "missing-subject path should not invoke signoff"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+
+echo "[profile-default-gate-run] placeholder subject fails fast before endpoint wait"
+: >"$SIGNOFF_CAPTURE"
+PLACEHOLDER_SUBJECT_LOG="$TMP_DIR/profile_default_gate_run_placeholder_subject.log"
+set +e
+PATH="$TMP_BIN:$PATH" \
+PROFILE_DEFAULT_GATE_RUN_SIGNOFF_SCRIPT="$FAKE_SIGNOFF" \
+PROFILE_DEFAULT_GATE_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_COUNTER_FILE="$TMP_DIR/curl_counter_placeholder_subject.txt" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_FAIL_ATTEMPTS=0 \
+CAMPAIGN_SUBJECT="" \
+INVITE_KEY="" \
+"$SCRIPT_UNDER_TEST" \
+  --host-a "dir-a.test" \
+  --host-b "dir-b.test" \
+  --subject "INVITE_KEY" >"$PLACEHOLDER_SUBJECT_LOG" 2>&1
+placeholder_subject_rc=$?
+set -e
+if [[ "$placeholder_subject_rc" -ne 2 ]]; then
+  echo "expected placeholder-subject path rc=2, got rc=$placeholder_subject_rc"
+  cat "$PLACEHOLDER_SUBJECT_LOG"
+  exit 1
+fi
+assert_file_contains "$PLACEHOLDER_SUBJECT_LOG" "failure_kind=missing_invite_subject_precondition reason=placeholder_subject" "missing placeholder-subject failure marker"
+assert_file_contains "$PLACEHOLDER_SUBJECT_LOG" "invite key subject appears to be placeholder text" "missing placeholder-subject rejection text"
+if [[ -s "$SIGNOFF_CAPTURE" ]]; then
+  echo "placeholder-subject path should not invoke signoff"
   cat "$SIGNOFF_CAPTURE"
   exit 1
 fi

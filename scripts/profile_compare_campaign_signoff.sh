@@ -92,6 +92,18 @@ trim() {
   printf '%s' "$value"
 }
 
+invite_subject_looks_placeholder_01() {
+  local value normalized
+  value="$(trim "${1:-}")"
+  normalized="$(printf '%s' "$value" | tr '[:lower:]' '[:upper:]')"
+  case "$normalized" in
+    INVITE_KEY|\$\{INVITE_KEY\}|\$INVITE_KEY|"<INVITE_KEY>"|"{{INVITE_KEY}}"|YOUR_INVITE_KEY|REPLACE_WITH_INVITE_KEY)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
 abs_path() {
   local path
   path="$(trim "${1:-}")"
@@ -828,6 +840,12 @@ if [[ -z "$campaign_subject" && -z "$campaign_anon_cred" && "$campaign_subject_c
 fi
 if [[ -n "$campaign_subject" && -z "$campaign_subject_source" ]]; then
   campaign_subject_source="explicit"
+fi
+if [[ -n "$campaign_subject" ]] && invite_subject_looks_placeholder_01 "$campaign_subject"; then
+  echo "[profile-compare-campaign-signoff] failure_kind=missing_invite_subject_precondition reason=placeholder_subject"
+  echo "profile-compare-campaign-signoff failed: campaign subject appears to be placeholder text ($campaign_subject)"
+  echo "provide a real invite key via --campaign-subject/--subject/--key/--invite-key, or set CAMPAIGN_SUBJECT/INVITE_KEY"
+  exit 2
 fi
 if [[ -n "$campaign_subject" && -n "$campaign_anon_cred" ]]; then
   echo "use either --campaign-subject or --campaign-anon-cred, not both"

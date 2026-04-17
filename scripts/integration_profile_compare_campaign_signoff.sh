@@ -462,6 +462,42 @@ if ! jq -e '.inputs.campaign_refresh_overrides.subject_source == "explicit" and 
   exit 1
 fi
 
+echo "[profile-compare-campaign-signoff] placeholder subject fails fast before campaign/check stages"
+: >"$SIGNOFF_CAPTURE"
+PLACEHOLDER_SUBJECT_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_placeholder_subject_summary.json"
+set +e
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_COMPARE_CAMPAIGN_SCRIPT="$FAKE_CAMPAIGN" \
+PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT="$FAKE_CHECK" \
+FAKE_CAMPAIGN_RC=0 \
+FAKE_CHECK_RC=0 \
+./scripts/profile_compare_campaign_signoff.sh \
+  --reports-dir "$TMP_DIR/reports_placeholder_subject" \
+  --refresh-campaign 1 \
+  --subject INVITE_KEY \
+  --summary-json "$PLACEHOLDER_SUBJECT_SUMMARY" >/tmp/integration_profile_compare_campaign_signoff_placeholder_subject.log 2>&1
+rc_placeholder_subject=$?
+set -e
+if [[ "$rc_placeholder_subject" -ne 2 ]]; then
+  echo "expected rc=2 for placeholder subject precondition"
+  cat /tmp/integration_profile_compare_campaign_signoff_placeholder_subject.log
+  exit 1
+fi
+for expected in \
+  'failure_kind=missing_invite_subject_precondition reason=placeholder_subject' \
+  'campaign subject appears to be placeholder text (INVITE_KEY)'; do
+  if ! grep -F -- "$expected" /tmp/integration_profile_compare_campaign_signoff_placeholder_subject.log >/dev/null; then
+    echo "expected placeholder-subject precondition output missing: $expected"
+    cat /tmp/integration_profile_compare_campaign_signoff_placeholder_subject.log
+    exit 1
+  fi
+done
+if [[ -s "$SIGNOFF_CAPTURE" ]]; then
+  echo "placeholder-subject path should not run campaign/check scripts"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+
 echo "[profile-compare-campaign-signoff] conflicting alias and campaign-prefixed values fail clearly"
 set +e
 ./scripts/profile_compare_campaign_signoff.sh \
