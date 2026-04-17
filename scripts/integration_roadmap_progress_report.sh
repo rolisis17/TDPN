@@ -2733,6 +2733,47 @@ fi
 
 : >"$CAPTURE"
 
+echo "[roadmap-progress-report] profile default docker source prefers live wrapper when A_HOST/B_HOST are set"
+if ! A_HOST="100.113.245.61" B_HOST="100.64.244.24" \
+  run_roadmap_progress_report \
+    --refresh-manual-validation 0 \
+    --refresh-single-machine-readiness 0 \
+    --manual-validation-summary-json "$PROFILE_DEFAULT_GATE_MANUAL_DOCKER_SUMMARY_JSON" \
+    --summary-json "$TMP_DIR/roadmap_progress_profile_default_docker_source_live_wrapper_summary.json" \
+    --report-md "$TMP_DIR/roadmap_progress_profile_default_docker_source_live_wrapper_report.md" \
+    --print-report 0 \
+    --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_docker_source_live_wrapper.log 2>&1; then
+  echo "expected success when docker profile-default hint is converted to live wrapper under A_HOST/B_HOST"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_docker_source_live_wrapper.log
+  exit 1
+fi
+if ! jq -e '
+  def is_profile_gate_live_non_sudo_cmd($cmd):
+    (($cmd // "") | test("^\\./scripts/easy_node\\.sh profile-default-gate-live( |$)"));
+  def is_profile_gate_live_sudo_cmd($cmd):
+    (($cmd // "") | test("^sudo \\./scripts/easy_node\\.sh profile-default-gate-live( |$)"));
+  def has_hosts($cmd):
+    (($cmd // "") | test("(^| )--host-a 100\\.113\\.245\\.61( |$)"))
+    and (($cmd // "") | test("(^| )--host-b 100\\.64\\.244\\.24( |$)"));
+  def has_subject_placeholder($cmd):
+    (($cmd // "") | test("(^| )--subject INVITE_KEY( |$)"));
+  ((.next_actions // []) | any(.id == "profile_default_gate" and is_profile_gate_live_non_sudo_cmd(.command) and has_hosts(.command)))
+  and (.vpn_track.optional_gate_status.profile_default_gate == "pending")
+  and ((.vpn_track.profile_default_gate.next_command_source // "") == "docker_rehearsal_artifacts")
+  and is_profile_gate_live_non_sudo_cmd(.vpn_track.profile_default_gate.next_command)
+  and is_profile_gate_live_sudo_cmd(.vpn_track.profile_default_gate.next_command_sudo)
+  and has_hosts(.vpn_track.profile_default_gate.next_command)
+  and has_hosts(.vpn_track.profile_default_gate.next_command_sudo)
+  and has_subject_placeholder(.vpn_track.profile_default_gate.next_command)
+  and has_subject_placeholder(.vpn_track.profile_default_gate.next_command_sudo)
+' "$TMP_DIR/roadmap_progress_profile_default_docker_source_live_wrapper_summary.json" >/dev/null; then
+  echo "profile default docker-source live-wrapper summary JSON missing expected host-aware conversion fields"
+  cat "$TMP_DIR/roadmap_progress_profile_default_docker_source_live_wrapper_summary.json"
+  exit 1
+fi
+
+: >"$CAPTURE"
+
 echo "[roadmap-progress-report] profile default gate derives warn from NO-GO signoff summary"
 PROFILE_DEFAULT_GATE_SIGNOFF_NO_GO_JSON="$TMP_DIR/profile_compare_campaign_signoff_no_go.json"
 cat >"$PROFILE_DEFAULT_GATE_SIGNOFF_NO_GO_JSON" <<'EOF_PROFILE_DEFAULT_GATE_SIGNOFF_NO_GO'

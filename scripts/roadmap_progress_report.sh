@@ -496,6 +496,116 @@ profile_default_gate_command_with_subject_placeholder() {
   printf '%s --subject INVITE_KEY' "$cmd"
 }
 
+profile_default_gate_extract_arg_value_from_cmd() {
+  local cmd
+  local opt
+  local value=""
+  cmd="$(trim "${1:-}")"
+  opt="${2:-}"
+  if [[ -z "$cmd" || -z "$opt" ]]; then
+    printf '%s' ""
+    return
+  fi
+  if [[ "$cmd" =~ (^|[[:space:]])${opt}[[:space:]]+([^[:space:]]+) ]]; then
+    value="${BASH_REMATCH[2]}"
+    printf '%s' "$value"
+    return
+  fi
+  if [[ "$cmd" =~ (^|[[:space:]])${opt}=([^[:space:]]+) ]]; then
+    value="${BASH_REMATCH[2]}"
+    printf '%s' "$value"
+    return
+  fi
+  printf '%s' ""
+}
+
+profile_default_gate_command_is_localhost_profile_default_run_01() {
+  local cmd
+  cmd="$(trim "${1:-}")"
+  if [[ -z "$cmd" ]]; then
+    printf '%s' "0"
+    return
+  fi
+  if [[ ! "$cmd" =~ ^(sudo[[:space:]]+)?\./scripts/easy_node\.sh[[:space:]]+profile-default-gate-run([[:space:]]|$) ]]; then
+    printf '%s' "0"
+    return
+  fi
+  if [[ "$cmd" =~ (^|[[:space:]])--directory-a([[:space:]]+|=)https?://127\.0\.0\.1:[0-9]+([[:space:]]|$) \
+     && "$cmd" =~ (^|[[:space:]])--directory-b([[:space:]]+|=)https?://127\.0\.0\.1:[0-9]+([[:space:]]|$) ]]; then
+    printf '%s' "1"
+  else
+    printf '%s' "0"
+  fi
+}
+
+profile_default_gate_command_localhost_run_to_live_wrapper() {
+  local cmd
+  local host_a
+  local host_b
+  local cmd_source
+  local sudo_prefix=""
+  local reports_dir=""
+  local summary_json=""
+  local print_summary_json=""
+  local campaign_timeout_sec=""
+  local credential_flag=""
+  local credential_value=""
+  local supported_credential_flags=("--campaign-subject" "--subject" "--key" "--invite-key")
+  local flag=""
+  local rebuilt=""
+  cmd="$(trim "${1:-}")"
+  host_a="$(trim "${2:-}")"
+  host_b="$(trim "${3:-}")"
+  cmd_source="$(trim "${4:-}")"
+  if [[ -z "$cmd" ]]; then
+    printf '%s' ""
+    return
+  fi
+  if [[ -z "$host_a" || -z "$host_b" ]]; then
+    printf '%s' "$cmd"
+    return
+  fi
+  if [[ "${cmd_source,,}" != *docker* ]]; then
+    printf '%s' "$cmd"
+    return
+  fi
+  if [[ "$(profile_default_gate_command_is_localhost_profile_default_run_01 "$cmd")" != "1" ]]; then
+    printf '%s' "$cmd"
+    return
+  fi
+  if [[ "$cmd" =~ ^sudo[[:space:]]+ ]]; then
+    sudo_prefix="sudo "
+  fi
+  reports_dir="$(profile_default_gate_extract_arg_value_from_cmd "$cmd" "--reports-dir")"
+  summary_json="$(profile_default_gate_extract_arg_value_from_cmd "$cmd" "--summary-json")"
+  print_summary_json="$(profile_default_gate_extract_arg_value_from_cmd "$cmd" "--print-summary-json")"
+  campaign_timeout_sec="$(profile_default_gate_extract_arg_value_from_cmd "$cmd" "--campaign-timeout-sec")"
+  for flag in "${supported_credential_flags[@]}"; do
+    credential_value="$(profile_default_gate_extract_arg_value_from_cmd "$cmd" "$flag")"
+    if [[ -n "$credential_value" ]]; then
+      credential_flag="$flag"
+      break
+    fi
+  done
+  rebuilt="${sudo_prefix}./scripts/easy_node.sh profile-default-gate-live --host-a ${host_a} --host-b ${host_b}"
+  if [[ -n "$reports_dir" ]]; then
+    rebuilt+=" --reports-dir ${reports_dir}"
+  fi
+  if [[ -n "$campaign_timeout_sec" ]]; then
+    rebuilt+=" --campaign-timeout-sec ${campaign_timeout_sec}"
+  fi
+  if [[ -n "$summary_json" ]]; then
+    rebuilt+=" --summary-json ${summary_json}"
+  fi
+  if [[ -n "$print_summary_json" ]]; then
+    rebuilt+=" --print-summary-json ${print_summary_json}"
+  fi
+  if [[ -n "$credential_flag" && -n "$credential_value" ]]; then
+    rebuilt+=" ${credential_flag} ${credential_value}"
+  fi
+  printf '%s' "$rebuilt"
+}
+
 resilience_summary_usable_01() {
   local path="$1"
   if [[ ! -f "$path" ]]; then
@@ -5370,6 +5480,20 @@ if [[ -n "$profile_default_gate_signoff_status" ]]; then
     profile_compare_signoff_summary_json="$profile_default_gate_summary_json_manual"
   fi
 fi
+profile_default_gate_next_command="$(
+  profile_default_gate_command_localhost_run_to_live_wrapper \
+    "$profile_default_gate_next_command" \
+    "${A_HOST:-}" \
+    "${B_HOST:-}" \
+    "$profile_default_gate_next_command_source"
+)"
+profile_default_gate_next_command_sudo="$(
+  profile_default_gate_command_localhost_run_to_live_wrapper \
+    "$profile_default_gate_next_command_sudo" \
+    "${A_HOST:-}" \
+    "${B_HOST:-}" \
+    "$profile_default_gate_next_command_source"
+)"
 profile_default_gate_next_command="$(profile_default_gate_command_with_subject_placeholder "$profile_default_gate_next_command")"
 profile_default_gate_next_command_sudo="$(profile_default_gate_command_with_subject_placeholder "$profile_default_gate_next_command_sudo")"
 profile_default_gate_needs_attention_json="true"
