@@ -457,7 +457,7 @@ profile_default_gate_command_supports_subject_placeholder_01() {
     printf '0'
     return
   fi
-  if [[ "$cmd" =~ ^(sudo[[:space:]]+)?\./scripts/easy_node\.sh[[:space:]]+(profile-default-gate-run|profile-compare-campaign-signoff)([[:space:]]|$) ]]; then
+  if [[ "$cmd" =~ ^(sudo[[:space:]]+)?\./scripts/easy_node\.sh[[:space:]]+(profile-default-gate-live|profile-default-gate-run|profile-compare-campaign-signoff)([[:space:]]|$) ]]; then
     printf '1'
   else
     printf '0'
@@ -471,7 +471,7 @@ profile_default_gate_command_has_credential_args_01() {
     printf '0'
     return
   fi
-  if [[ "$cmd" =~ (^|[[:space:]])(--campaign-subject|--subject|--campaign-anon-cred|--anon-cred)([[:space:]=]|$) ]]; then
+  if [[ "$cmd" =~ (^|[[:space:]])(--campaign-subject|--subject|--key|--invite-key|--campaign-anon-cred|--anon-cred)([[:space:]=]|$) ]]; then
     printf '1'
   else
     printf '0'

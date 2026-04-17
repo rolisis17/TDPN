@@ -2409,6 +2409,164 @@ if ! jq -e '
   exit 1
 fi
 
+echo "[roadmap-progress-report] profile default gate live wrapper appends subject placeholder when key is missing"
+PROFILE_DEFAULT_GATE_LIVE_PLACEHOLDER_SUMMARY_JSON="$TMP_DIR/manual_validation_profile_default_live_placeholder_summary.json"
+cat >"$PROFILE_DEFAULT_GATE_LIVE_PLACEHOLDER_SUMMARY_JSON" <<'EOF_PROFILE_DEFAULT_GATE_LIVE_PLACEHOLDER_SUMMARY'
+{
+  "version": 1,
+  "checks": [
+    {
+      "check_id": "runtime_hygiene",
+      "label": "Runtime hygiene doctor",
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh runtime-doctor --show-json 1"
+    },
+    {
+      "check_id": "wg_only_stack_selftest",
+      "label": "WG-only stack selftest",
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh wg-only-stack-selftest-record --strict-beta 1 --print-summary-json 1"
+    }
+  ],
+  "summary": {
+    "next_action_check_id": "",
+    "next_action_command": "",
+    "roadmap_stage": "READY_FOR_MACHINE_C_SMOKE",
+    "single_machine_ready": true,
+    "blocking_check_ids": [],
+    "optional_check_ids": ["three_machine_docker_readiness", "real_wg_privileged_matrix"],
+    "profile_default_gate": {
+      "status": "pending",
+      "notes": "live wrapper command should gain subject placeholder when missing",
+      "decision": "NO-GO",
+      "recommended_profile": "balanced",
+      "next_command": "./scripts/easy_node.sh profile-default-gate-live --host-a 100.113.245.61 --host-b 100.64.244.24 --reports-dir .easy-node-logs --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1",
+      "next_command_sudo": "sudo ./scripts/easy_node.sh profile-default-gate-live --host-a 100.113.245.61 --host-b 100.64.244.24 --reports-dir .easy-node-logs --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1",
+      "next_command_source": "default_non_sudo",
+      "docker_rehearsal_hint_available": false
+    },
+    "docker_rehearsal_gate": {
+      "status": "pass",
+      "command": "./scripts/easy_node.sh three-machine-docker-readiness-record --path-profile balanced --soak-rounds 6 --soak-pause-sec 3 --print-summary-json 1"
+    },
+    "real_wg_privileged_gate": {
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh real-wg-privileged-matrix-record --print-summary-json 1"
+    }
+  },
+  "report": {
+    "readiness_status": "NOT_READY"
+  }
+}
+EOF_PROFILE_DEFAULT_GATE_LIVE_PLACEHOLDER_SUMMARY
+
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$PROFILE_DEFAULT_GATE_LIVE_PLACEHOLDER_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_profile_default_live_placeholder_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_profile_default_live_placeholder_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_live_placeholder.log 2>&1; then
+  echo "expected success when profile default live wrapper command requires subject placeholder normalization"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_live_placeholder.log
+  exit 1
+fi
+if ! jq -e '
+  def is_profile_gate_live_non_sudo_cmd($cmd):
+    (($cmd // "") | test("^\\./scripts/easy_node\\.sh profile-default-gate-live( |$)"));
+  def is_profile_gate_live_sudo_cmd($cmd):
+    (($cmd // "") | test("^sudo \\./scripts/easy_node\\.sh profile-default-gate-live( |$)"));
+  def has_subject_placeholder($cmd):
+    (($cmd // "") | test("(^| )--subject INVITE_KEY( |$)"));
+  ((.next_actions // []) | any(.id == "profile_default_gate" and is_profile_gate_live_non_sudo_cmd(.command) and has_subject_placeholder(.command)))
+  and has_subject_placeholder(.vpn_track.profile_default_gate.next_command)
+  and has_subject_placeholder(.vpn_track.profile_default_gate.next_command_sudo)
+  and is_profile_gate_live_sudo_cmd(.vpn_track.profile_default_gate.next_command_sudo)
+' "$TMP_DIR/roadmap_progress_profile_default_live_placeholder_summary.json" >/dev/null; then
+  echo "profile default live wrapper summary JSON missing expected INVITE_KEY placeholder command normalization"
+  cat "$TMP_DIR/roadmap_progress_profile_default_live_placeholder_summary.json"
+  exit 1
+fi
+
+echo "[roadmap-progress-report] profile default gate live wrapper preserves explicit --key credentials without adding --subject"
+PROFILE_DEFAULT_GATE_LIVE_KEYED_SUMMARY_JSON="$TMP_DIR/manual_validation_profile_default_live_keyed_summary.json"
+cat >"$PROFILE_DEFAULT_GATE_LIVE_KEYED_SUMMARY_JSON" <<'EOF_PROFILE_DEFAULT_GATE_LIVE_KEYED_SUMMARY'
+{
+  "version": 1,
+  "checks": [
+    {
+      "check_id": "runtime_hygiene",
+      "label": "Runtime hygiene doctor",
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh runtime-doctor --show-json 1"
+    },
+    {
+      "check_id": "wg_only_stack_selftest",
+      "label": "WG-only stack selftest",
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh wg-only-stack-selftest-record --strict-beta 1 --print-summary-json 1"
+    }
+  ],
+  "summary": {
+    "next_action_check_id": "",
+    "next_action_command": "",
+    "roadmap_stage": "READY_FOR_MACHINE_C_SMOKE",
+    "single_machine_ready": true,
+    "blocking_check_ids": [],
+    "optional_check_ids": ["three_machine_docker_readiness", "real_wg_privileged_matrix"],
+    "profile_default_gate": {
+      "status": "pending",
+      "notes": "live wrapper command should keep explicit --key credential",
+      "decision": "NO-GO",
+      "recommended_profile": "balanced",
+      "next_command": "./scripts/easy_node.sh profile-default-gate-live --host-a 100.113.245.61 --host-b 100.64.244.24 --key INVITE_KEY --reports-dir .easy-node-logs --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1",
+      "next_command_sudo": "sudo ./scripts/easy_node.sh profile-default-gate-live --host-a 100.113.245.61 --host-b 100.64.244.24 --key INVITE_KEY --reports-dir .easy-node-logs --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1",
+      "next_command_source": "default_non_sudo",
+      "docker_rehearsal_hint_available": false
+    },
+    "docker_rehearsal_gate": {
+      "status": "pass",
+      "command": "./scripts/easy_node.sh three-machine-docker-readiness-record --path-profile balanced --soak-rounds 6 --soak-pause-sec 3 --print-summary-json 1"
+    },
+    "real_wg_privileged_gate": {
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh real-wg-privileged-matrix-record --print-summary-json 1"
+    }
+  },
+  "report": {
+    "readiness_status": "NOT_READY"
+  }
+}
+EOF_PROFILE_DEFAULT_GATE_LIVE_KEYED_SUMMARY
+
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$PROFILE_DEFAULT_GATE_LIVE_KEYED_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_profile_default_live_keyed_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_profile_default_live_keyed_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_live_keyed.log 2>&1; then
+  echo "expected success when profile default live wrapper command already includes --key credential"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_live_keyed.log
+  exit 1
+fi
+if ! jq -e '
+  def has_key_placeholder($cmd):
+    (($cmd // "") | test("(^| )--key INVITE_KEY( |$)"));
+  def has_subject_placeholder($cmd):
+    (($cmd // "") | test("(^| )--subject INVITE_KEY( |$)"));
+  has_key_placeholder(.vpn_track.profile_default_gate.next_command)
+  and has_key_placeholder(.vpn_track.profile_default_gate.next_command_sudo)
+  and ((has_subject_placeholder(.vpn_track.profile_default_gate.next_command)) | not)
+  and ((has_subject_placeholder(.vpn_track.profile_default_gate.next_command_sudo)) | not)
+' "$TMP_DIR/roadmap_progress_profile_default_live_keyed_summary.json" >/dev/null; then
+  echo "profile default live wrapper keyed summary JSON unexpectedly rewrote --key credentials"
+  cat "$TMP_DIR/roadmap_progress_profile_default_live_keyed_summary.json"
+  exit 1
+fi
+
 : >"$CAPTURE"
 
 echo "[roadmap-progress-report] profile default gate preserves sudo-required command-source from manual summary"

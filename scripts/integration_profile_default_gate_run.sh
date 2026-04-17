@@ -356,4 +356,67 @@ assert_contains "$wrapper_line_sp" "--subject inv-wrapper" "missing forwarded --
 assert_contains "$wrapper_line_sp" "--summary-json $TMP_DIR/easy_node_wrapper_summary.json" "missing forwarded --summary-json"
 assert_contains "$wrapper_line_sp" "--omega 9 value" "missing forwarded passthrough args"
 
+echo "[profile-default-gate-live] easy_node env wrapper command presence and forwarding"
+if ! grep -F -- "profile-default-gate-live" "$EASY_NODE_SCRIPT_UNDER_TEST" >/dev/null 2>&1; then
+  echo "missing profile-default-gate-live command text in easy_node wrapper"
+  exit 1
+fi
+
+: >"$WRAPPER_CAPTURE"
+EASY_NODE_LIVE_FORWARD_LOG="$TMP_DIR/easy_node_profile_default_gate_live_forward.log"
+PROFILE_DEFAULT_GATE_WRAPPER_CAPTURE_FILE="$WRAPPER_CAPTURE" \
+PROFILE_DEFAULT_GATE_RUN_SCRIPT="$FAKE_WRAPPER" \
+A_HOST="wrapper-live-a.test" \
+B_HOST="wrapper-live-b.test" \
+INVITE_KEY="inv-live-wrapper" \
+bash "$EASY_NODE_SCRIPT_UNDER_TEST" profile-default-gate-live \
+  --reports-dir "$TMP_DIR/live_reports" \
+  --campaign-timeout-sec 777 \
+  --summary-json "$TMP_DIR/easy_node_live_wrapper_summary.json" \
+  --omega "10 value" >"$EASY_NODE_LIVE_FORWARD_LOG" 2>&1
+
+live_wrapper_line="$(sed -n '1p' "$WRAPPER_CAPTURE" || true)"
+if [[ -z "$live_wrapper_line" ]]; then
+  echo "missing easy_node live wrapper forwarding capture"
+  cat "$EASY_NODE_LIVE_FORWARD_LOG"
+  exit 1
+fi
+live_wrapper_line_sp="${live_wrapper_line//$'\t'/ }"
+assert_contains "$live_wrapper_line_sp" "--directory-a http://wrapper-live-a.test:8081" "missing live forwarded --directory-a"
+assert_contains "$live_wrapper_line_sp" "--directory-b http://wrapper-live-b.test:8081" "missing live forwarded --directory-b"
+assert_contains "$live_wrapper_line_sp" "--campaign-bootstrap-directory http://wrapper-live-a.test:8081" "missing live forwarded --campaign-bootstrap-directory"
+assert_contains "$live_wrapper_line_sp" "--campaign-issuer-url http://wrapper-live-a.test:8082" "missing live forwarded --campaign-issuer-url"
+assert_contains "$live_wrapper_line_sp" "--campaign-entry-url http://wrapper-live-a.test:8083" "missing live forwarded --campaign-entry-url"
+assert_contains "$live_wrapper_line_sp" "--campaign-exit-url http://wrapper-live-a.test:8084" "missing live forwarded --campaign-exit-url"
+assert_contains "$live_wrapper_line_sp" "--campaign-subject inv-live-wrapper" "missing live forwarded --campaign-subject"
+assert_contains "$live_wrapper_line_sp" "--reports-dir $TMP_DIR/live_reports" "missing live forwarded --reports-dir"
+assert_contains "$live_wrapper_line_sp" "--campaign-timeout-sec 777" "missing live forwarded --campaign-timeout-sec"
+assert_contains "$live_wrapper_line_sp" "--summary-json $TMP_DIR/easy_node_live_wrapper_summary.json" "missing live forwarded --summary-json"
+assert_contains "$live_wrapper_line_sp" "--print-summary-json 1" "missing live forwarded --print-summary-json"
+assert_contains "$live_wrapper_line_sp" "--omega 10 value" "missing live forwarded passthrough args"
+
+echo "[profile-default-gate-live] missing env/subject fails clearly"
+: >"$WRAPPER_CAPTURE"
+LIVE_MISSING_LOG="$TMP_DIR/easy_node_profile_default_gate_live_missing.log"
+set +e
+PROFILE_DEFAULT_GATE_WRAPPER_CAPTURE_FILE="$WRAPPER_CAPTURE" \
+PROFILE_DEFAULT_GATE_RUN_SCRIPT="$FAKE_WRAPPER" \
+A_HOST="" \
+B_HOST="" \
+INVITE_KEY="" \
+bash "$EASY_NODE_SCRIPT_UNDER_TEST" profile-default-gate-live >"$LIVE_MISSING_LOG" 2>&1
+live_missing_rc=$?
+set -e
+if [[ "$live_missing_rc" -ne 2 ]]; then
+  echo "expected profile-default-gate-live missing-env path rc=2, got rc=$live_missing_rc"
+  cat "$LIVE_MISSING_LOG"
+  exit 1
+fi
+assert_file_contains "$LIVE_MISSING_LOG" "requires host A (set --host-a or A_HOST)" "missing profile-default-gate-live missing-host-A error"
+if [[ -s "$WRAPPER_CAPTURE" ]]; then
+  echo "profile-default-gate-live missing-env path should not invoke wrapper"
+  cat "$WRAPPER_CAPTURE"
+  exit 1
+fi
+
 echo "profile default gate run integration ok"
