@@ -23,6 +23,7 @@ SLOW1="$TMP_DIR/slow_action_1.sh"
 SLOW2="$TMP_DIR/slow_action_2.sh"
 UNREACHABLE_PROFILE="$TMP_DIR/profile_unreachable.sh"
 MISSING_SUBJECT_PROFILE="$TMP_DIR/profile_missing_subject.sh"
+MISSING_SUBJECT_PROFILE_LIVE="$TMP_DIR/profile_missing_subject_live.sh"
 UNREACHABLE_PROFILE_MARKER="$TMP_DIR/profile_unreachable_marker.sh"
 MISSING_SUBJECT_PROFILE_MARKER="$TMP_DIR/profile_missing_subject_marker.sh"
 FAKE_EASY_NODE="$TMP_DIR/fake_easy_node.sh"
@@ -94,6 +95,14 @@ exit 2
 EOF_MISSING_SUBJECT_PROFILE
 chmod +x "$MISSING_SUBJECT_PROFILE"
 
+cat >"$MISSING_SUBJECT_PROFILE_LIVE" <<'EOF_MISSING_SUBJECT_PROFILE_LIVE'
+#!/usr/bin/env bash
+set -euo pipefail
+echo "profile-default-gate-live requires invite subject (set --campaign-subject/--subject/--key or INVITE_KEY)"
+exit 2
+EOF_MISSING_SUBJECT_PROFILE_LIVE
+chmod +x "$MISSING_SUBJECT_PROFILE_LIVE"
+
 cat >"$UNREACHABLE_PROFILE_MARKER" <<'EOF_UNREACHABLE_PROFILE_MARKER'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -118,7 +127,7 @@ set -euo pipefail
 if [[ -n "${FAKE_EASY_NODE_CAPTURE:-}" ]]; then
   printf '%s\n' "$*" >>"$FAKE_EASY_NODE_CAPTURE"
 fi
-if [[ "$*" == *"--campaign-subject"* || "$*" == *"--subject"* || "$*" == *"--campaign-anon-cred"* || "$*" == *"--anon-cred"* ]]; then
+if [[ "$*" == *"--campaign-subject"* || "$*" == *"--subject"* || "$*" == *"--key"* || "$*" == *"--invite-key"* || "$*" == *"--campaign-anon-cred"* || "$*" == *"--anon-cred"* ]]; then
   echo "fake easy_node profile-default-gate-run ok"
   exit 0
 fi
@@ -237,6 +246,15 @@ JSON
 }
 JSON
     ;;
+  profile_missing_subject_live)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"profile_default_gate","label":"Profile default decision gate","command":"bash \"$MISSING_SUBJECT_PROFILE_LIVE\"","reason":"test-precondition-live"}
+  ]
+}
+JSON
+    ;;
   profile_missing_subject_marker)
     cat >"$summary_json" <<JSON
 {
@@ -260,6 +278,24 @@ JSON
 {
   "next_actions": [
     {"id":"profile_default_gate","label":"Profile default decision gate","command":"bash \"$FAKE_EASY_NODE\" profile-default-gate-run --reports-dir /tmp/fake_profile_reports --subject INVITE_KEY","reason":"test-precondition-placeholder-override"}
+  ]
+}
+JSON
+    ;;
+  profile_placeholder_key_easy_node)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"profile_default_gate","label":"Profile default decision gate","command":"bash \"$FAKE_EASY_NODE\" profile-default-gate-live --reports-dir /tmp/fake_profile_reports --key INVITE_KEY","reason":"test-precondition-placeholder-key-override"}
+  ]
+}
+JSON
+    ;;
+  profile_existing_key_easy_node)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"profile_default_gate","label":"Profile default decision gate","command":"bash \"$FAKE_EASY_NODE\" profile-default-gate-live --reports-dir /tmp/fake_profile_reports --key inv-existing-key","reason":"test-precondition-existing-key"}
   ]
 }
 JSON
@@ -592,6 +628,88 @@ if grep -E -- 'INVITE_KEY' "$FAKE_EASY_NODE_CAPTURE" >/dev/null; then
   exit 1
 fi
 
+echo "[roadmap-next-actions-run] profile subject override replaces INVITE_KEY placeholder key"
+SUMMARY_PROFILE_PLACEHOLDER_KEY_OVERRIDE="$TMP_DIR/summary_profile_placeholder_key_override.json"
+REPORTS_PROFILE_PLACEHOLDER_KEY_OVERRIDE="$TMP_DIR/reports_profile_placeholder_key_override"
+: >"$FAKE_EASY_NODE_CAPTURE"
+ROADMAP_NEXT_ACTIONS_SCENARIO=profile_placeholder_key_easy_node \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" MISSING_SUBJECT_PROFILE="$MISSING_SUBJECT_PROFILE" FAKE_EASY_NODE="$FAKE_EASY_NODE" FAKE_EASY_NODE_CAPTURE="$FAKE_EASY_NODE_CAPTURE" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_PROFILE_PLACEHOLDER_KEY_OVERRIDE" \
+  --summary-json "$SUMMARY_PROFILE_PLACEHOLDER_KEY_OVERRIDE" \
+  --profile-default-gate-subject inv-key-placeholder-replaced \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.profile_default_gate_subject == "inv-key-placeholder-replaced"
+  and ((.actions // []) | length == 1)
+  and .actions[0].id == "profile_default_gate"
+  and .actions[0].status == "pass"
+  and ((.actions[0].command // "") | contains("--key inv-key-placeholder-replaced"))
+  and (((.actions[0].command // "") | contains("INVITE_KEY")) | not)
+  and (((.actions[0].command // "") | contains("--campaign-subject")) | not)
+' "$SUMMARY_PROFILE_PLACEHOLDER_KEY_OVERRIDE" >/dev/null; then
+  echo "profile placeholder key override summary mismatch"
+  cat "$SUMMARY_PROFILE_PLACEHOLDER_KEY_OVERRIDE"
+  exit 1
+fi
+if ! grep -E -- '--key[[:space:]]+inv-key-placeholder-replaced([[:space:]]|$)' "$FAKE_EASY_NODE_CAPTURE" >/dev/null; then
+  echo "profile placeholder key override command capture missing replaced --key"
+  cat "$FAKE_EASY_NODE_CAPTURE"
+  exit 1
+fi
+if grep -E -- '--campaign-subject' "$FAKE_EASY_NODE_CAPTURE" >/dev/null; then
+  echo "profile placeholder key override command capture should not append --campaign-subject"
+  cat "$FAKE_EASY_NODE_CAPTURE"
+  exit 1
+fi
+if grep -E -- 'INVITE_KEY' "$FAKE_EASY_NODE_CAPTURE" >/dev/null; then
+  echo "profile placeholder key override command capture still contains INVITE_KEY"
+  cat "$FAKE_EASY_NODE_CAPTURE"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] profile key present avoids duplicate subject append"
+SUMMARY_PROFILE_EXISTING_KEY_NO_DUP="$TMP_DIR/summary_profile_existing_key_no_dup.json"
+REPORTS_PROFILE_EXISTING_KEY_NO_DUP="$TMP_DIR/reports_profile_existing_key_no_dup"
+: >"$FAKE_EASY_NODE_CAPTURE"
+ROADMAP_NEXT_ACTIONS_SCENARIO=profile_existing_key_easy_node \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" MISSING_SUBJECT_PROFILE="$MISSING_SUBJECT_PROFILE" FAKE_EASY_NODE="$FAKE_EASY_NODE" FAKE_EASY_NODE_CAPTURE="$FAKE_EASY_NODE_CAPTURE" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_PROFILE_EXISTING_KEY_NO_DUP" \
+  --summary-json "$SUMMARY_PROFILE_EXISTING_KEY_NO_DUP" \
+  --profile-default-gate-subject inv-should-not-append \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.profile_default_gate_subject == "inv-should-not-append"
+  and ((.actions // []) | length == 1)
+  and .actions[0].id == "profile_default_gate"
+  and .actions[0].status == "pass"
+  and ((.actions[0].command // "") | contains("--key inv-existing-key"))
+  and (((.actions[0].command // "") | contains("--campaign-subject")) | not)
+' "$SUMMARY_PROFILE_EXISTING_KEY_NO_DUP" >/dev/null; then
+  echo "profile existing key no-dup summary mismatch"
+  cat "$SUMMARY_PROFILE_EXISTING_KEY_NO_DUP"
+  exit 1
+fi
+if ! grep -E -- '--key[[:space:]]+inv-existing-key([[:space:]]|$)' "$FAKE_EASY_NODE_CAPTURE" >/dev/null; then
+  echo "profile existing key no-dup command capture missing original --key value"
+  cat "$FAKE_EASY_NODE_CAPTURE"
+  exit 1
+fi
+if grep -E -- '--campaign-subject' "$FAKE_EASY_NODE_CAPTURE" >/dev/null; then
+  echo "profile existing key no-dup command capture unexpectedly appended --campaign-subject"
+  cat "$FAKE_EASY_NODE_CAPTURE"
+  exit 1
+fi
+
 echo "[roadmap-next-actions-run] profile default timeout env override path"
 SUMMARY_PROFILE_TIMEOUT_OVERRIDE="$TMP_DIR/summary_profile_timeout_override.json"
 REPORTS_PROFILE_TIMEOUT_OVERRIDE="$TMP_DIR/reports_profile_timeout_override"
@@ -651,6 +769,39 @@ if ! jq -e '
 ' "$SUMMARY_PROFILE_PRECONDITION_SOFT_FAIL" >/dev/null; then
   echo "profile missing-subject soft-fail summary mismatch"
   cat "$SUMMARY_PROFILE_PRECONDITION_SOFT_FAIL"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] profile missing-subject live-wrapper soft-fail path"
+SUMMARY_PROFILE_PRECONDITION_LIVE_SOFT_FAIL="$TMP_DIR/summary_profile_precondition_live_soft_fail.json"
+REPORTS_PROFILE_PRECONDITION_LIVE_SOFT_FAIL="$TMP_DIR/reports_profile_precondition_live_soft_fail"
+ROADMAP_NEXT_ACTIONS_SCENARIO=profile_missing_subject_live \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" MISSING_SUBJECT_PROFILE_LIVE="$MISSING_SUBJECT_PROFILE_LIVE" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_PROFILE_PRECONDITION_LIVE_SOFT_FAIL" \
+  --summary-json "$SUMMARY_PROFILE_PRECONDITION_LIVE_SOFT_FAIL" \
+  --allow-profile-default-gate-unreachable 1 \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.allow_profile_default_gate_unreachable == true
+  and .summary.actions_executed == 1
+  and .summary.pass == 1
+  and .summary.fail == 0
+  and .summary.soft_failed == 1
+  and ((.actions // []) | length == 1)
+  and .actions[0].id == "profile_default_gate"
+  and .actions[0].status == "pass"
+  and .actions[0].rc == 0
+  and .actions[0].command_rc == 2
+  and .actions[0].failure_kind == "soft_failed_profile_default_gate_precondition"
+  and .actions[0].soft_failed == true
+' "$SUMMARY_PROFILE_PRECONDITION_LIVE_SOFT_FAIL" >/dev/null; then
+  echo "profile missing-subject live-wrapper soft-fail summary mismatch"
+  cat "$SUMMARY_PROFILE_PRECONDITION_LIVE_SOFT_FAIL"
   exit 1
 fi
 

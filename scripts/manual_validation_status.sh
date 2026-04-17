@@ -834,6 +834,14 @@ profile_gate_command_needs_subject_placeholder_01() {
     printf '0'
     return
   fi
+  if [[ "$command_string" == *"--key "* || "$command_string" == *"--key="* ]]; then
+    printf '0'
+    return
+  fi
+  if [[ "$command_string" == *"--invite-key "* || "$command_string" == *"--invite-key="* ]]; then
+    printf '0'
+    return
+  fi
   if [[ "$command_string" == *"--campaign-anon-cred "* || "$command_string" == *"--campaign-anon-cred="* ]]; then
     printf '0'
     return
@@ -860,7 +868,7 @@ profile_gate_command_uses_subject_placeholder_01() {
     printf '0'
     return
   fi
-  if [[ "$command_string" != *"profile-compare-campaign-signoff"* && "$command_string" != *"profile-default-gate-run"* ]]; then
+  if [[ "$command_string" != *"profile-compare-campaign-signoff"* && "$command_string" != *"profile-default-gate-run"* && "$command_string" != *"profile-default-gate-live"* ]]; then
     printf '0'
     return
   fi
@@ -877,6 +885,22 @@ profile_gate_command_uses_subject_placeholder_01() {
     return
   fi
   if [[ "$command_string" == *"--subject CAMPAIGN_SUBJECT"* || "$command_string" == *"--subject=CAMPAIGN_SUBJECT"* ]]; then
+    printf '1'
+    return
+  fi
+  if [[ "$command_string" == *"--key INVITE_KEY"* || "$command_string" == *"--key=INVITE_KEY"* ]]; then
+    printf '1'
+    return
+  fi
+  if [[ "$command_string" == *"--key CAMPAIGN_SUBJECT"* || "$command_string" == *"--key=CAMPAIGN_SUBJECT"* ]]; then
+    printf '1'
+    return
+  fi
+  if [[ "$command_string" == *"--invite-key INVITE_KEY"* || "$command_string" == *"--invite-key=INVITE_KEY"* ]]; then
+    printf '1'
+    return
+  fi
+  if [[ "$command_string" == *"--invite-key CAMPAIGN_SUBJECT"* || "$command_string" == *"--invite-key=CAMPAIGN_SUBJECT"* ]]; then
     printf '1'
     return
   fi
@@ -1187,10 +1211,10 @@ build_profile_default_gate_json() {
       fi
     fi
   fi
-  if [[ ( "$next_command" == *"profile-compare-campaign-signoff"* || "$next_command" == *"profile-default-gate-run"* ) && "$(profile_gate_command_needs_subject_placeholder_01 "$next_command")" == "1" ]]; then
+  if [[ ( "$next_command" == *"profile-compare-campaign-signoff"* || "$next_command" == *"profile-default-gate-run"* || "$next_command" == *"profile-default-gate-live"* ) && "$(profile_gate_command_needs_subject_placeholder_01 "$next_command")" == "1" ]]; then
     next_command="$(append_profile_gate_subject_placeholder "$next_command")"
   fi
-  if [[ ( "$next_command_sudo" == *"profile-compare-campaign-signoff"* || "$next_command_sudo" == *"profile-default-gate-run"* ) && "$(profile_gate_command_needs_subject_placeholder_01 "$next_command_sudo")" == "1" ]]; then
+  if [[ ( "$next_command_sudo" == *"profile-compare-campaign-signoff"* || "$next_command_sudo" == *"profile-default-gate-run"* || "$next_command_sudo" == *"profile-default-gate-live"* ) && "$(profile_gate_command_needs_subject_placeholder_01 "$next_command_sudo")" == "1" ]]; then
     next_command_sudo="$(append_profile_gate_subject_placeholder "$next_command_sudo")"
   fi
   next_command_missing_credentials="$(profile_gate_command_uses_subject_placeholder_01 "$next_command")"

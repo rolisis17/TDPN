@@ -122,6 +122,8 @@ command_has_profile_subject_or_anon_arg() {
   local command_text="${1:-}"
   [[ "$command_text" =~ (^|[[:space:]])--campaign-subject([[:space:]=]|$) ]] && return 0
   [[ "$command_text" =~ (^|[[:space:]])--subject([[:space:]=]|$) ]] && return 0
+  [[ "$command_text" =~ (^|[[:space:]])--key([[:space:]=]|$) ]] && return 0
+  [[ "$command_text" =~ (^|[[:space:]])--invite-key([[:space:]=]|$) ]] && return 0
   [[ "$command_text" =~ (^|[[:space:]])--campaign-anon-cred([[:space:]=]|$) ]] && return 0
   [[ "$command_text" =~ (^|[[:space:]])--anon-cred([[:space:]=]|$) ]] && return 0
   return 1
@@ -131,6 +133,8 @@ command_has_profile_subject_placeholder_invite_key() {
   local command_text="${1:-}"
   [[ "$command_text" =~ (^|[[:space:]])--campaign-subject([[:space:]=]+)INVITE_KEY([[:space:]]|$) ]] && return 0
   [[ "$command_text" =~ (^|[[:space:]])--subject([[:space:]=]+)INVITE_KEY([[:space:]]|$) ]] && return 0
+  [[ "$command_text" =~ (^|[[:space:]])--key([[:space:]=]+)INVITE_KEY([[:space:]]|$) ]] && return 0
+  [[ "$command_text" =~ (^|[[:space:]])--invite-key([[:space:]=]+)INVITE_KEY([[:space:]]|$) ]] && return 0
   return 1
 }
 
@@ -141,8 +145,12 @@ command_replace_profile_subject_placeholder() {
   escaped_subject="$(printf '%q' "$subject_value")"
   command_text="${command_text//--campaign-subject INVITE_KEY/--campaign-subject ${escaped_subject}}"
   command_text="${command_text//--subject INVITE_KEY/--subject ${escaped_subject}}"
+  command_text="${command_text//--key INVITE_KEY/--key ${escaped_subject}}"
+  command_text="${command_text//--invite-key INVITE_KEY/--invite-key ${escaped_subject}}"
   command_text="${command_text//--campaign-subject=INVITE_KEY/--campaign-subject=${escaped_subject}}"
   command_text="${command_text//--subject=INVITE_KEY/--subject=${escaped_subject}}"
+  command_text="${command_text//--key=INVITE_KEY/--key=${escaped_subject}}"
+  command_text="${command_text//--invite-key=INVITE_KEY/--invite-key=${escaped_subject}}"
   printf '%s' "$command_text"
 }
 
@@ -704,7 +712,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
       action_failure_kind="soft_failed_unreachable_profile_default_gate"
       action_notes="soft-failed unreachable profile_default_gate (allow flag enabled)"
       action_soft_failed="true"
-    elif [[ -f "$action_log" ]] && grep -E -q 'profile-default-gate-run failed:[[:space:]]*missing invite key subject|provide[[:space:]]+--campaign-subject/--subject' "$action_log"; then
+    elif [[ -f "$action_log" ]] && grep -E -q 'profile-default-gate-run failed:[[:space:]]*missing invite key subject|provide[[:space:]]+--campaign-subject/--subject|profile-default-gate-live requires --campaign-subject INVITE_KEY|profile-default-gate-live requires invite subject' "$action_log"; then
       action_status="pass"
       action_rc=0
       action_failure_kind="soft_failed_profile_default_gate_precondition"
