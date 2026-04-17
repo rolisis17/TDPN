@@ -8653,11 +8653,31 @@ profile_compare_campaign_check() {
 profile_compare_campaign_signoff() {
   local campaign_signoff_script="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_SCRIPT:-$ROOT_DIR/scripts/profile_compare_campaign_signoff.sh}"
   local -a forwarded=()
+  local subject_alias_value=""
+  local campaign_subject_value=""
+  local anon_alias_value=""
+  local campaign_anon_value=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      --campaign-subject)
+        forwarded+=("$1")
+        if [[ $# -ge 2 ]]; then
+          campaign_subject_value="${2:-}"
+          forwarded+=("$2")
+          shift 2
+        else
+          shift
+        fi
+        ;;
+      --campaign-subject=*)
+        campaign_subject_value="${1#--campaign-subject=}"
+        forwarded+=("$1")
+        shift
+        ;;
       --subject)
         forwarded+=(--campaign-subject)
         if [[ $# -ge 2 ]]; then
+          subject_alias_value="${2:-}"
           forwarded+=("$2")
           shift 2
         else
@@ -8665,12 +8685,29 @@ profile_compare_campaign_signoff() {
         fi
         ;;
       --subject=*)
+        subject_alias_value="${1#--subject=}"
         forwarded+=(--campaign-subject "${1#--subject=}")
+        shift
+        ;;
+      --campaign-anon-cred)
+        forwarded+=("$1")
+        if [[ $# -ge 2 ]]; then
+          campaign_anon_value="${2:-}"
+          forwarded+=("$2")
+          shift 2
+        else
+          shift
+        fi
+        ;;
+      --campaign-anon-cred=*)
+        campaign_anon_value="${1#--campaign-anon-cred=}"
+        forwarded+=("$1")
         shift
         ;;
       --anon-cred)
         forwarded+=(--campaign-anon-cred)
         if [[ $# -ge 2 ]]; then
+          anon_alias_value="${2:-}"
           forwarded+=("$2")
           shift 2
         else
@@ -8678,6 +8715,7 @@ profile_compare_campaign_signoff() {
         fi
         ;;
       --anon-cred=*)
+        anon_alias_value="${1#--anon-cred=}"
         forwarded+=(--campaign-anon-cred "${1#--anon-cred=}")
         shift
         ;;
@@ -8687,6 +8725,14 @@ profile_compare_campaign_signoff() {
         ;;
     esac
   done
+  if [[ -n "$subject_alias_value" && -n "$campaign_subject_value" && "$subject_alias_value" != "$campaign_subject_value" ]]; then
+    echo "conflicting subject values: --subject and --campaign-subject must match when both are provided"
+    exit 2
+  fi
+  if [[ -n "$anon_alias_value" && -n "$campaign_anon_value" && "$anon_alias_value" != "$campaign_anon_value" ]]; then
+    echo "conflicting anon credential values: --anon-cred and --campaign-anon-cred must match when both are provided"
+    exit 2
+  fi
   "$campaign_signoff_script" "${forwarded[@]}"
 }
 

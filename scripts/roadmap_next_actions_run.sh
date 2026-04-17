@@ -154,6 +154,116 @@ command_replace_profile_subject_placeholder() {
   printf '%s' "$command_text"
 }
 
+profile_default_gate_extract_arg_value_from_cmd() {
+  local cmd
+  local opt
+  local value=""
+  cmd="$(trim "${1:-}")"
+  opt="${2:-}"
+  if [[ -z "$cmd" || -z "$opt" ]]; then
+    printf '%s' ""
+    return
+  fi
+  if [[ "$cmd" =~ (^|[[:space:]])${opt}[[:space:]]+([^[:space:]]+) ]]; then
+    value="${BASH_REMATCH[2]}"
+    printf '%s' "$value"
+    return
+  fi
+  if [[ "$cmd" =~ (^|[[:space:]])${opt}=([^[:space:]]+) ]]; then
+    value="${BASH_REMATCH[2]}"
+    printf '%s' "$value"
+    return
+  fi
+  printf '%s' ""
+}
+
+profile_default_gate_command_is_localhost_profile_default_run_01() {
+  local cmd
+  cmd="$(trim "${1:-}")"
+  if [[ -z "$cmd" ]]; then
+    printf '%s' "0"
+    return
+  fi
+  if [[ ! "$cmd" =~ (^|[[:space:]])profile-default-gate-run([[:space:]]|$) ]]; then
+    printf '%s' "0"
+    return
+  fi
+  if [[ "$cmd" =~ (^|[[:space:]])--directory-a([[:space:]]+|=)https?://127\.0\.0\.1:[0-9]+([[:space:]]|$) \
+     && "$cmd" =~ (^|[[:space:]])--directory-b([[:space:]]+|=)https?://127\.0\.0\.1:[0-9]+([[:space:]]|$) ]]; then
+    printf '%s' "1"
+  else
+    printf '%s' "0"
+  fi
+}
+
+profile_default_gate_command_localhost_run_to_live_wrapper() {
+  local cmd
+  local host_a
+  local host_b
+  local reports_dir=""
+  local summary_json=""
+  local print_summary_json=""
+  local campaign_timeout_sec=""
+  local credential_flag=""
+  local credential_value=""
+  local supported_credential_flags=("--campaign-subject" "--subject" "--key" "--invite-key")
+  local flag=""
+  local rebuilt=""
+  cmd="$(trim "${1:-}")"
+  host_a="$(trim "${2:-}")"
+  host_b="$(trim "${3:-}")"
+  if [[ -z "$cmd" ]]; then
+    printf '%s' ""
+    return
+  fi
+  if [[ -z "$host_a" || -z "$host_b" ]]; then
+    printf '%s' "$cmd"
+    return
+  fi
+  if [[ "$(profile_default_gate_command_is_localhost_profile_default_run_01 "$cmd")" != "1" ]]; then
+    printf '%s' "$cmd"
+    return
+  fi
+  reports_dir="$(profile_default_gate_extract_arg_value_from_cmd "$cmd" "--reports-dir")"
+  summary_json="$(profile_default_gate_extract_arg_value_from_cmd "$cmd" "--summary-json")"
+  print_summary_json="$(profile_default_gate_extract_arg_value_from_cmd "$cmd" "--print-summary-json")"
+  campaign_timeout_sec="$(profile_default_gate_extract_arg_value_from_cmd "$cmd" "--campaign-timeout-sec")"
+  for flag in "${supported_credential_flags[@]}"; do
+    credential_value="$(profile_default_gate_extract_arg_value_from_cmd "$cmd" "$flag")"
+    if [[ -n "$credential_value" ]]; then
+      credential_flag="$flag"
+      break
+    fi
+  done
+  rebuilt="${cmd/profile-default-gate-run/profile-default-gate-live}"
+  rebuilt="$(printf '%s' "$rebuilt" | sed -E 's@(--directory-a[[:space:]]+|--directory-a=)https?://127\.0\.0\.1:[0-9]+@\1'"${host_a}"'@g')"
+  rebuilt="$(printf '%s' "$rebuilt" | sed -E 's@(--directory-b[[:space:]]+|--directory-b=)https?://127\.0\.0\.1:[0-9]+@\1'"${host_b}"'@g')"
+  rebuilt="$(printf '%s' "$rebuilt" | sed -E 's@(^|[[:space:]])--host-a([[:space:]]+|=)[^[:space:]]+@\1--host-a\2'"${host_a}"'@g')"
+  rebuilt="$(printf '%s' "$rebuilt" | sed -E 's@(^|[[:space:]])--host-b([[:space:]]+|=)[^[:space:]]+@\1--host-b\2'"${host_b}"'@g')"
+  if [[ ! "$rebuilt" =~ (^|[[:space:]])--host-a([[:space:]=]|$) ]]; then
+    rebuilt="${rebuilt} --host-a ${host_a}"
+  fi
+  if [[ ! "$rebuilt" =~ (^|[[:space:]])--host-b([[:space:]=]|$) ]]; then
+    rebuilt="${rebuilt} --host-b ${host_b}"
+  fi
+  if [[ -n "$reports_dir" ]]; then
+    rebuilt="$(printf '%s' "$rebuilt" | sed -E 's@(^|[[:space:]])--reports-dir([[:space:]]+|=)[^[:space:]]+@\1--reports-dir\2'"${reports_dir}"'@g')"
+  fi
+  if [[ -n "$campaign_timeout_sec" ]]; then
+    rebuilt="$(printf '%s' "$rebuilt" | sed -E 's@(^|[[:space:]])--campaign-timeout-sec([[:space:]]+|=)[^[:space:]]+@\1--campaign-timeout-sec\2'"${campaign_timeout_sec}"'@g')"
+  fi
+  if [[ -n "$summary_json" ]]; then
+    rebuilt="$(printf '%s' "$rebuilt" | sed -E 's@(^|[[:space:]])--summary-json([[:space:]]+|=)[^[:space:]]+@\1--summary-json\2'"${summary_json}"'@g')"
+  fi
+  if [[ -n "$print_summary_json" ]]; then
+    rebuilt="$(printf '%s' "$rebuilt" | sed -E 's@(^|[[:space:]])--print-summary-json([[:space:]]+|=)[^[:space:]]+@\1--print-summary-json\2'"${print_summary_json}"'@g')"
+  fi
+  if [[ -n "$credential_flag" && -n "$credential_value" ]]; then
+    rebuilt="$(printf '%s' "$rebuilt" | sed -E 's@(^|[[:space:]])(--campaign-subject|--subject|--key|--invite-key)([[:space:]]+|=)[^[:space:]]+@\1'"${credential_flag}"'\3'"${credential_value}"'@')"
+  fi
+  printf '%s' "$rebuilt"
+}
+
 log_has_failure_kind_marker() {
   local log_path="${1:-}"
   local marker="${2:-}"
@@ -432,6 +542,14 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
   action_timeout_sec_effective="$action_timeout_sec"
   if [[ "$action_id" == "profile_default_gate" && "$action_timeout_sec" == "0" ]]; then
     action_timeout_sec_effective="$profile_default_gate_default_timeout_sec"
+  fi
+  if [[ "$action_id" == "profile_default_gate" ]]; then
+    action_command="$(
+      profile_default_gate_command_localhost_run_to_live_wrapper \
+        "$action_command" \
+        "${A_HOST:-}" \
+        "${B_HOST:-}"
+    )"
   fi
   if [[ "$action_id" == "profile_default_gate" \
      && -n "$profile_default_gate_subject" \

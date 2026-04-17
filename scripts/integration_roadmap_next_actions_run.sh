@@ -300,6 +300,15 @@ JSON
 }
 JSON
     ;;
+  profile_localhost_run_easy_node)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"profile_default_gate","label":"Profile default decision gate","command":"bash \"$FAKE_EASY_NODE\" profile-default-gate-run --directory-a http://127.0.0.1:18081 --directory-b http://127.0.0.1:28081 --reports-dir /tmp/fake_profile_reports --campaign-timeout-sec 180 --summary-json /tmp/fake_profile_summary.json --print-summary-json 1 --subject INVITE_KEY","reason":"test-localhost-live-conversion"}
+  ]
+}
+JSON
+    ;;
   profile_unreachable_marker)
     cat >"$summary_json" <<JSON
 {
@@ -706,6 +715,58 @@ if ! grep -E -- '--key[[:space:]]+inv-existing-key([[:space:]]|$)' "$FAKE_EASY_N
 fi
 if grep -E -- '--campaign-subject' "$FAKE_EASY_NODE_CAPTURE" >/dev/null; then
   echo "profile existing key no-dup command capture unexpectedly appended --campaign-subject"
+  cat "$FAKE_EASY_NODE_CAPTURE"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] profile localhost run converts to live wrapper when A_HOST/B_HOST are set"
+SUMMARY_PROFILE_LOCALHOST_TO_LIVE="$TMP_DIR/summary_profile_localhost_to_live.json"
+REPORTS_PROFILE_LOCALHOST_TO_LIVE="$TMP_DIR/reports_profile_localhost_to_live"
+: >"$FAKE_EASY_NODE_CAPTURE"
+A_HOST=100.113.245.61 B_HOST=100.64.244.24 \
+ROADMAP_NEXT_ACTIONS_SCENARIO=profile_localhost_run_easy_node \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" MISSING_SUBJECT_PROFILE="$MISSING_SUBJECT_PROFILE" FAKE_EASY_NODE="$FAKE_EASY_NODE" FAKE_EASY_NODE_CAPTURE="$FAKE_EASY_NODE_CAPTURE" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_PROFILE_LOCALHOST_TO_LIVE" \
+  --summary-json "$SUMMARY_PROFILE_LOCALHOST_TO_LIVE" \
+  --profile-default-gate-subject inv-live-converted \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.profile_default_gate_subject == "inv-live-converted"
+  and ((.actions // []) | length == 1)
+  and .actions[0].id == "profile_default_gate"
+  and .actions[0].status == "pass"
+  and ((.actions[0].command // "") | contains("profile-default-gate-live"))
+  and ((.actions[0].command // "") | contains("--host-a 100.113.245.61"))
+  and ((.actions[0].command // "") | contains("--host-b 100.64.244.24"))
+  and ((.actions[0].command // "") | contains("--subject inv-live-converted"))
+  and (((.actions[0].command // "") | contains("127.0.0.1")) | not)
+' "$SUMMARY_PROFILE_LOCALHOST_TO_LIVE" >/dev/null; then
+  echo "profile localhost-to-live conversion summary mismatch"
+  cat "$SUMMARY_PROFILE_LOCALHOST_TO_LIVE"
+  exit 1
+fi
+if ! grep -E -- 'profile-default-gate-live' "$FAKE_EASY_NODE_CAPTURE" >/dev/null; then
+  echo "profile localhost-to-live conversion command capture missing live wrapper command"
+  cat "$FAKE_EASY_NODE_CAPTURE"
+  exit 1
+fi
+if ! grep -E -- '--host-a[[:space:]]+100\.113\.245\.61([[:space:]]|$)' "$FAKE_EASY_NODE_CAPTURE" >/dev/null; then
+  echo "profile localhost-to-live conversion command capture missing --host-a"
+  cat "$FAKE_EASY_NODE_CAPTURE"
+  exit 1
+fi
+if ! grep -E -- '--host-b[[:space:]]+100\.64\.244\.24([[:space:]]|$)' "$FAKE_EASY_NODE_CAPTURE" >/dev/null; then
+  echo "profile localhost-to-live conversion command capture missing --host-b"
+  cat "$FAKE_EASY_NODE_CAPTURE"
+  exit 1
+fi
+if grep -E -- '127\.0\.0\.1' "$FAKE_EASY_NODE_CAPTURE" >/dev/null; then
+  echo "profile localhost-to-live conversion command capture still contains localhost endpoints"
   cat "$FAKE_EASY_NODE_CAPTURE"
   exit 1
 fi

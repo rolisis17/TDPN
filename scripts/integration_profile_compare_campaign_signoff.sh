@@ -1501,4 +1501,52 @@ if grep -F -- '--subject inv-forward-alias' <<<"$alias_forward_line" >/dev/null 
   exit 1
 fi
 
+echo "[profile-compare-campaign-signoff] easy_node alias/campaign-subject conflict fails clearly"
+set +e
+FORWARD_CAPTURE_FILE="$FORWARD_CAPTURE" \
+PROFILE_COMPARE_CAMPAIGN_SIGNOFF_SCRIPT="$FAKE_FORWARD" \
+./scripts/easy_node.sh profile-compare-campaign-signoff \
+  --reports-dir /tmp/reports-conflict-subject \
+  --refresh-campaign 1 \
+  --subject inv-alias-a \
+  --campaign-subject inv-campaign-b \
+  --summary-json /tmp/signoff-conflict-subject.json \
+  --print-summary-json 1 >/tmp/integration_profile_compare_campaign_signoff_easy_node_conflict_subject.log 2>&1
+easy_node_conflict_subject_rc=$?
+set -e
+if [[ "$easy_node_conflict_subject_rc" -ne 2 ]]; then
+  echo "expected rc=2 when easy_node --subject conflicts with --campaign-subject"
+  cat /tmp/integration_profile_compare_campaign_signoff_easy_node_conflict_subject.log
+  exit 1
+fi
+if ! rg -q 'conflicting subject values: --subject and --campaign-subject must match when both are provided' /tmp/integration_profile_compare_campaign_signoff_easy_node_conflict_subject.log; then
+  echo "expected easy_node subject conflict message missing"
+  cat /tmp/integration_profile_compare_campaign_signoff_easy_node_conflict_subject.log
+  exit 1
+fi
+
+echo "[profile-compare-campaign-signoff] easy_node alias/campaign-anon-cred conflict fails clearly"
+set +e
+FORWARD_CAPTURE_FILE="$FORWARD_CAPTURE" \
+PROFILE_COMPARE_CAMPAIGN_SIGNOFF_SCRIPT="$FAKE_FORWARD" \
+./scripts/easy_node.sh profile-compare-campaign-signoff \
+  --reports-dir /tmp/reports-conflict-anon \
+  --refresh-campaign 1 \
+  --anon-cred anon-a \
+  --campaign-anon-cred anon-b \
+  --summary-json /tmp/signoff-conflict-anon.json \
+  --print-summary-json 1 >/tmp/integration_profile_compare_campaign_signoff_easy_node_conflict_anon.log 2>&1
+easy_node_conflict_anon_rc=$?
+set -e
+if [[ "$easy_node_conflict_anon_rc" -ne 2 ]]; then
+  echo "expected rc=2 when easy_node --anon-cred conflicts with --campaign-anon-cred"
+  cat /tmp/integration_profile_compare_campaign_signoff_easy_node_conflict_anon.log
+  exit 1
+fi
+if ! rg -q 'conflicting anon credential values: --anon-cred and --campaign-anon-cred must match when both are provided' /tmp/integration_profile_compare_campaign_signoff_easy_node_conflict_anon.log; then
+  echo "expected easy_node anon conflict message missing"
+  cat /tmp/integration_profile_compare_campaign_signoff_easy_node_conflict_anon.log
+  exit 1
+fi
+
 echo "profile compare campaign signoff integration check ok"
