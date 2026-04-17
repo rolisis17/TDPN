@@ -3,6 +3,7 @@ package module
 import (
 	"context"
 	"errors"
+	"time"
 
 	sponsorpb "github.com/tdpn/tdpn-chain/proto/gen/go/tdpn/vpnsponsor/v1"
 	chaintypes "github.com/tdpn/tdpn-chain/types"
@@ -38,9 +39,16 @@ func (a *GRPCMsgServerAdapter) CreateAuthorization(_ context.Context, req *spons
 	}, nil
 }
 
-func (a *GRPCMsgServerAdapter) DelegateSessionCredit(_ context.Context, req *sponsorpb.MsgDelegateSessionCreditRequest) (*sponsorpb.MsgDelegateSessionCreditResponse, error) {
+func (a *GRPCMsgServerAdapter) DelegateSessionCredit(ctx context.Context, req *sponsorpb.MsgDelegateSessionCreditRequest) (*sponsorpb.MsgDelegateSessionCreditResponse, error) {
+	currentTimeUnix := CurrentTimeUnixFromContext(ctx)
+	if currentTimeUnix <= 0 {
+		// gRPC client context values do not propagate over the transport; use server time when unset.
+		currentTimeUnix = time.Now().Unix()
+	}
+
 	resp, err := a.server.DelegateCredit(DelegateCreditRequest{
-		Delegation: fromProtoDelegation(req.GetDelegation()),
+		Delegation:      fromProtoDelegation(req.GetDelegation()),
+		CurrentTimeUnix: currentTimeUnix,
 	})
 	if err != nil {
 		return nil, err

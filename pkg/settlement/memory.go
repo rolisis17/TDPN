@@ -379,9 +379,19 @@ func (s *MemoryService) SettleSession(ctx context.Context, sessionID string) (Se
 	subjectID := reservation.SubjectID
 	totalBytes := int64(0)
 	for _, rec := range records {
-		totalBytes += rec.BytesIngress + rec.BytesEgress
+		recordBytes, err := checkedAddInt64(rec.BytesIngress, rec.BytesEgress)
+		if err != nil {
+			return SessionSettlement{}, fmt.Errorf("usage byte counters overflow for session %s", sessionID)
+		}
+		totalBytes, err = checkedAddInt64(totalBytes, recordBytes)
+		if err != nil {
+			return SessionSettlement{}, fmt.Errorf("usage byte counters overflow for session %s", sessionID)
+		}
 	}
-	chargeBase := priceMicrosForBytes(totalBytes, price)
+	chargeBase, err := priceMicrosForBytes(totalBytes, price)
+	if err != nil {
+		return SessionSettlement{}, err
+	}
 	if !hasRate {
 		return SessionSettlement{}, fmt.Errorf("unsupported settlement currency: %s", currency)
 	}
@@ -1179,12 +1189,54 @@ func (s *MemoryService) applyDeferredOperationStatusLocked(op deferredAdapterOpe
 	}
 }
 
-func priceMicrosForBytes(bytes int64, pricePerMiBMicros int64) int64 {
-	if bytes <= 0 {
-		return 0
+func priceMicrosForBytes(bytes int64, pricePerMiBMicros int64) (int64, error) {
+	if bytes <= 0 || pricePerMiBMicros <= 0 {
+		return 0, nil
 	}
 	const mebibyte = int64(1024 * 1024)
-	return (bytes * pricePerMiBMicros) / mebibyte
+
+	wholeMiB := bytes / mebibyte
+	remainderBytes := bytes % mebibyte
+
+	wholeCharge, err := checkedMulInt64(wholeMiB, pricePerMiBMicros)
+	if err != nil {
+		return 0, fmt.Errorf("settlement charge overflow")
+	}
+	remainderProduct, err := checkedMulInt64(remainderBytes, pricePerMiBMicros)
+	if err != nil {
+		return 0, fmt.Errorf("settlement charge overflow")
+	}
+	remainderCharge := remainderProduct / mebibyte
+
+	charge, err := checkedAddInt64(wholeCharge, remainderCharge)
+	if err != nil {
+		return 0, fmt.Errorf("settlement charge overflow")
+	}
+	return charge, nil
+}
+
+func checkedAddInt64(a int64, b int64) (int64, error) {
+	if b > 0 && a > math.MaxInt64-b {
+		return 0, fmt.Errorf("int64 overflow")
+	}
+	if b < 0 && a < math.MinInt64-b {
+		return 0, fmt.Errorf("int64 overflow")
+	}
+	return a + b, nil
+}
+
+func checkedMulInt64(a int64, b int64) (int64, error) {
+	if a == 0 || b == 0 {
+		return 0, nil
+	}
+	if (a == -1 && b == math.MinInt64) || (b == -1 && a == math.MinInt64) {
+		return 0, fmt.Errorf("int64 overflow")
+	}
+	product := a * b
+	if product/a != b {
+		return 0, fmt.Errorf("int64 overflow")
+	}
+	return product, nil
 }
 
 func normalizeCurrencyCode(raw string) string {

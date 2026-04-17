@@ -338,10 +338,83 @@ func TestBuildEasyNodeCommandWithPlatform(t *testing.T) {
 		}
 	})
 
-	t.Run("windows sh defaults to bash", func(t *testing.T) {
-		cmdName, cmdArgs := buildEasyNodeCommandWithPlatform(`C:\tdpn\easy_node.sh`, []string{"client-vpn-status"}, "windows", "")
+	t.Run("windows sh defaults to bash when no git-bash candidate is available", func(t *testing.T) {
+		cmdName, cmdArgs := buildEasyNodeCommandWithPlatformWithLookup(
+			`C:\tdpn\easy_node.sh`,
+			[]string{"client-vpn-status"},
+			"windows",
+			"",
+			func(string) string { return "" },
+			func(string) bool { return false },
+		)
 		if cmdName != "bash" {
 			t.Fatalf("cmdName=%q", cmdName)
+		}
+		want := []string{`C:\tdpn\easy_node.sh`, "client-vpn-status"}
+		if strings.Join(cmdArgs, "\t") != strings.Join(want, "\t") {
+			t.Fatalf("cmdArgs=%v want=%v", cmdArgs, want)
+		}
+	})
+
+	t.Run("windows sh prefers git-bash candidates by default", func(t *testing.T) {
+		gitBashPath := `C:\Program Files\Git\bin\bash.exe`
+		cmdName, cmdArgs := buildEasyNodeCommandWithPlatformWithLookup(
+			`C:\tdpn\easy_node.sh`,
+			[]string{"client-vpn-status"},
+			"windows",
+			"",
+			func(string) string { return "" },
+			func(path string) bool { return path == gitBashPath },
+		)
+		if cmdName != gitBashPath {
+			t.Fatalf("cmdName=%q want=%q", cmdName, gitBashPath)
+		}
+		want := []string{`C:\tdpn\easy_node.sh`, "client-vpn-status"}
+		if strings.Join(cmdArgs, "\t") != strings.Join(want, "\t") {
+			t.Fatalf("cmdArgs=%v want=%v", cmdArgs, want)
+		}
+	})
+
+	t.Run("windows sh honors explicit git-bash path override", func(t *testing.T) {
+		override := `D:\portable\git\bin\bash.exe`
+		cmdName, cmdArgs := buildEasyNodeCommandWithPlatformWithLookup(
+			`C:\tdpn\easy_node.sh`,
+			[]string{"client-vpn-status"},
+			"windows",
+			"",
+			func(name string) string {
+				if name == "LOCAL_CONTROL_API_GIT_BASH_PATH" {
+					return override
+				}
+				return ""
+			},
+			func(string) bool { return false },
+		)
+		if cmdName != override {
+			t.Fatalf("cmdName=%q want=%q", cmdName, override)
+		}
+		want := []string{`C:\tdpn\easy_node.sh`, "client-vpn-status"}
+		if strings.Join(cmdArgs, "\t") != strings.Join(want, "\t") {
+			t.Fatalf("cmdArgs=%v want=%v", cmdArgs, want)
+		}
+	})
+
+	t.Run("windows sh can disable git-bash preference", func(t *testing.T) {
+		cmdName, cmdArgs := buildEasyNodeCommandWithPlatformWithLookup(
+			`C:\tdpn\easy_node.sh`,
+			[]string{"client-vpn-status"},
+			"windows",
+			"",
+			func(name string) string {
+				if name == "LOCAL_CONTROL_API_PREFER_GIT_BASH" {
+					return "0"
+				}
+				return ""
+			},
+			func(string) bool { return true },
+		)
+		if cmdName != "bash" {
+			t.Fatalf("cmdName=%q want=bash", cmdName)
 		}
 		want := []string{`C:\tdpn\easy_node.sh`, "client-vpn-status"}
 		if strings.Join(cmdArgs, "\t") != strings.Join(want, "\t") {

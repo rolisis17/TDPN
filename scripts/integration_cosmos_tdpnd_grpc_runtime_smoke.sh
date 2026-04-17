@@ -9,7 +9,7 @@ export GOCACHE="${GOCACHE:-$ROOT_DIR/.gocache}"
 
 (
   cd blockchain/tdpn-chain
-  timeout 60s go test ./cmd/tdpnd -count=1 -run '^(TestRunTDPNDGRPCModeInvalidTLSFlagCombinations|TestRunTDPNDGRPCModeListenError|TestRunTDPNDGRPCModeRegisterErrorClosesListener|TestRunTDPNDGRPCModeGracefulShutdownOnContextCancel|TestRunTDPNDGRPCModeRegistersHealthAndReflection|TestRunTDPNDGRPCModeReflectionIncludesCoreModuleQueries|TestRunTDPNDGRPCModeAuthEnforcementAndHealth|TestRunTDPNDGRPCModeRealScaffoldValidatorAndGovernanceRoundTrip|TestRunTDPNDGRPCModeProcessRuntimeSmoke|TestRunTDPNDGRPCMode.*Process.*|TestRunTDPNDGRPCMode.*TLS.*)$'
+  timeout 60s go test ./cmd/tdpnd -count=1 -run '^(TestRunTDPNDGRPCModeInvalidTLSFlagCombinations|TestRunTDPNDGRPCModeListenError|TestRunTDPNDGRPCModeRegisterErrorClosesListener|TestRunTDPNDGRPCModeGracefulShutdownOnContextCancel|TestRunTDPNDGRPCModeRegistersHealthAndReflection|TestRunTDPNDGRPCModeReflectionIncludesCoreModuleQueries|TestRunTDPNDGRPCModeAuth.*|TestRunTDPNDGRPCModeRealScaffoldBillingAndSponsorRoundTrip|TestRunTDPNDGRPCModeRealScaffoldValidatorAndGovernanceRoundTrip|TestRunTDPNDGRPCModeProcessRuntimeSmoke|TestRunTDPNDGRPCMode.*Process.*|TestRunTDPNDGRPCMode.*TLS.*)$'
 )
 
 echo "cosmos tdpnd grpc runtime smoke integration check ok"

@@ -353,6 +353,7 @@ func TestMsgServerDelegateCreditLinkageMismatchPropagation(t *testing.T) {
 func TestMsgServerDelegateCreditExpiredAuthorizationPropagation(t *testing.T) {
 	t.Parallel()
 
+	nowUnix := time.Now().Unix()
 	k := keeper.NewKeeper()
 	server := NewMsgServer(&k)
 
@@ -362,7 +363,7 @@ func TestMsgServerDelegateCreditExpiredAuthorizationPropagation(t *testing.T) {
 			SponsorID:       "sponsor-expired",
 			AppID:           "app-expired",
 			MaxCredits:      50,
-			ExpiresAtUnix:   time.Now().Unix() - 1,
+			ExpiresAtUnix:   nowUnix - 1,
 		},
 	})
 	if err != nil {
@@ -378,6 +379,7 @@ func TestMsgServerDelegateCreditExpiredAuthorizationPropagation(t *testing.T) {
 			SessionID:       "sess-expired",
 			Credits:         10,
 		},
+		CurrentTimeUnix: nowUnix,
 	})
 	if err == nil {
 		t.Fatal("expected expired authorization error")

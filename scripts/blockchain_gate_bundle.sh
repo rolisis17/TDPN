@@ -41,9 +41,10 @@ Purpose:
   summaries even when gate decisions are NO-GO.
 
 Execution order:
-  1) scripts/blockchain_mainnet_activation_metrics.sh
-  2) scripts/blockchain_mainnet_activation_gate.sh --fail-close 0
-  3) scripts/blockchain_bootstrap_graduation_gate.sh --fail-close 0
+  1) scripts/integration_blockchain_cosmos_only_guardrail.sh
+  2) scripts/blockchain_mainnet_activation_metrics.sh
+  3) scripts/blockchain_mainnet_activation_gate.sh --fail-close 0
+  4) scripts/blockchain_bootstrap_graduation_gate.sh --fail-close 0
 
 Notes:
   - Metrics flags and repeatable --source-json are forwarded to step (1).
@@ -134,6 +135,23 @@ array_to_json() {
     return
   fi
   printf '%s\n' "${arr_ref[@]}" | jq -R 'select(length > 0)' | jq -s .
+}
+
+validate_source_jsons_or_die() {
+  local source_json=""
+  for source_json in "$@"; do
+    if [[ -z "$source_json" ]]; then
+      continue
+    fi
+    if [[ ! -f "$source_json" ]]; then
+      echo "source json does not exist: $source_json"
+      exit 2
+    fi
+    if ! jq -e . "$source_json" >/dev/null 2>&1; then
+      echo "source json is invalid JSON: $source_json"
+      exit 2
+    fi
+  done
 }
 
 append_unique_abs_path() {
@@ -265,6 +283,7 @@ metrics_script="${BLOCKCHAIN_GATE_BUNDLE_METRICS_SCRIPT:-$ROOT_DIR/scripts/block
 metrics_input_script="${BLOCKCHAIN_GATE_BUNDLE_BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_INPUT_SCRIPT:-$ROOT_DIR/scripts/blockchain_mainnet_activation_metrics_input.sh}"
 activation_gate_script="${BLOCKCHAIN_GATE_BUNDLE_ACTIVATION_GATE_SCRIPT:-$ROOT_DIR/scripts/blockchain_mainnet_activation_gate.sh}"
 bootstrap_gate_script="${BLOCKCHAIN_GATE_BUNDLE_BOOTSTRAP_GATE_SCRIPT:-$ROOT_DIR/scripts/blockchain_bootstrap_graduation_gate.sh}"
+cosmos_only_guardrail_script="${BLOCKCHAIN_GATE_BUNDLE_COSMOS_ONLY_GUARDRAIL_SCRIPT:-$ROOT_DIR/scripts/integration_blockchain_cosmos_only_guardrail.sh}"
 
 declare -a source_jsons=()
 declare -a metrics_passthrough_args=()
@@ -357,6 +376,10 @@ while [[ $# -gt 0 ]]; do
 done
 
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
+if [[ ! -x "$cosmos_only_guardrail_script" ]]; then
+  echo "missing executable stage script: $cosmos_only_guardrail_script"
+  exit 2
+fi
 if [[ -n "$(trim "$blockchain_mainnet_activation_metrics_input_json")" && ! -x "$metrics_input_script" ]]; then
   echo "missing executable stage script: $metrics_input_script"
   exit 2
@@ -417,7 +440,12 @@ if [[ -n "$blockchain_mainnet_activation_metrics_input_canonical_json" ]]; then
   mkdir -p "$(dirname "$blockchain_mainnet_activation_metrics_input_canonical_json")"
 fi
 
+if ((${#source_jsons[@]} > 0)); then
+  validate_source_jsons_or_die "${source_jsons[@]}"
+fi
+
 step_ids=(
+  "cosmos_only_guardrail"
   "metrics"
   "mainnet_activation_gate"
   "bootstrap_graduation_gate"
@@ -490,9 +518,18 @@ bootstrap_cmd=(
   --print-summary-json 0
 )
 
-run_step "metrics" "${metrics_cmd[@]}"
-run_step "mainnet_activation_gate" "${activation_cmd[@]}"
-run_step "bootstrap_graduation_gate" "${bootstrap_cmd[@]}"
+cosmos_only_guardrail_cmd=(
+  bash "$cosmos_only_guardrail_script"
+)
+
+run_step "cosmos_only_guardrail" "${cosmos_only_guardrail_cmd[@]}"
+if [[ "${step_status[cosmos_only_guardrail]}" == "pass" ]]; then
+  run_step "metrics" "${metrics_cmd[@]}"
+  run_step "mainnet_activation_gate" "${activation_cmd[@]}"
+  run_step "bootstrap_graduation_gate" "${bootstrap_cmd[@]}"
+else
+  echo "[blockchain-gate-bundle] step=cosmos_only_guardrail status=fail-closed rc=${step_rc[cosmos_only_guardrail]} -- skipping downstream stages"
+fi
 
 run_completed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 run_completed_epoch="$(date -u +%s)"
@@ -571,6 +608,12 @@ jq -n \
   --argjson metrics_ready_for_gate "$metrics_ready_for_gate_json" \
   --arg activation_decision "$activation_decision" \
   --arg bootstrap_decision "$bootstrap_decision" \
+  --arg cosmos_only_guardrail_script "$cosmos_only_guardrail_script" \
+  --arg cosmos_only_guardrail_status "${step_status[cosmos_only_guardrail]}" \
+  --argjson cosmos_only_guardrail_rc "${step_rc[cosmos_only_guardrail]}" \
+  --arg cosmos_only_guardrail_command "${step_command[cosmos_only_guardrail]}" \
+  --arg cosmos_only_guardrail_started_at "${step_started_at[cosmos_only_guardrail]}" \
+  --arg cosmos_only_guardrail_completed_at "${step_completed_at[cosmos_only_guardrail]}" \
   --arg metrics_status "${step_status[metrics]}" \
   --argjson metrics_rc "${step_rc[metrics]}" \
   --arg metrics_command "${step_command[metrics]}" \
@@ -612,6 +655,16 @@ jq -n \
       metrics_passthrough_args: $metrics_passthrough_args
     },
     steps: {
+      cosmos_only_guardrail: {
+        status: $cosmos_only_guardrail_status,
+        rc: $cosmos_only_guardrail_rc,
+        command: $cosmos_only_guardrail_command,
+        started_at: (if $cosmos_only_guardrail_started_at == "" then null else $cosmos_only_guardrail_started_at end),
+        completed_at: (if $cosmos_only_guardrail_completed_at == "" then null else $cosmos_only_guardrail_completed_at end),
+        artifacts: {
+          script: $cosmos_only_guardrail_script
+        }
+      },
       metrics: {
         status: $metrics_status,
         rc: $metrics_rc,

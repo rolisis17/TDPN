@@ -19,6 +19,7 @@ Usage:
     [--require-tdpnd-grpc-auth-live-smoke-ok [0|1]] \
     [--require-tdpnd-comet-runtime-smoke-ok [0|1]] \
     [--require-mainnet-activation-gate-go [0|1]] \
+    [--require-bootstrap-governance-graduation-gate-go [0|1]] \
     [--require-dual-write-parity-ok [0|1]] \
     [--require-cosmos-module-coverage-floor-ok [0|1]] \
     [--require-cosmos-keeper-coverage-floor-ok [0|1]] \
@@ -41,6 +42,7 @@ Resolved handoff signals:
   - tdpnd_grpc_auth_live_smoke_ok
   - tdpnd_comet_runtime_smoke_ok
   - mainnet_activation_gate_go
+  - bootstrap_governance_graduation_gate_go
   - dual_write_parity_ok
   - cosmos_module_coverage_floor_ok
   - cosmos_keeper_coverage_floor_ok
@@ -326,6 +328,7 @@ require_tdpnd_grpc_live_smoke_ok="${PHASE7_MAINNET_CUTOVER_HANDOFF_CHECK_REQUIRE
 require_tdpnd_grpc_auth_live_smoke_ok="${PHASE7_MAINNET_CUTOVER_HANDOFF_CHECK_REQUIRE_TDPND_GRPC_AUTH_LIVE_SMOKE_OK:-1}"
 require_tdpnd_comet_runtime_smoke_ok="${PHASE7_MAINNET_CUTOVER_HANDOFF_CHECK_REQUIRE_TDPND_COMET_RUNTIME_SMOKE_OK:-${PHASE7_MAINNET_CUTOVER_HANDOFF_CHECK_REQUIRE_TDPND_COMET_SMOKE_OK:-0}}"
 require_mainnet_activation_gate_go="${PHASE7_MAINNET_CUTOVER_HANDOFF_CHECK_REQUIRE_MAINNET_ACTIVATION_GATE_GO:-0}"
+require_bootstrap_governance_graduation_gate_go="${PHASE7_MAINNET_CUTOVER_HANDOFF_CHECK_REQUIRE_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_GO:-0}"
 require_dual_write_parity_ok="${PHASE7_MAINNET_CUTOVER_HANDOFF_CHECK_REQUIRE_DUAL_WRITE_PARITY_OK:-1}"
 require_cosmos_module_coverage_floor_ok="${PHASE7_MAINNET_CUTOVER_HANDOFF_CHECK_REQUIRE_COSMOS_MODULE_COVERAGE_FLOOR_OK:-1}"
 require_cosmos_keeper_coverage_floor_ok="${PHASE7_MAINNET_CUTOVER_HANDOFF_CHECK_REQUIRE_COSMOS_KEEPER_COVERAGE_FLOOR_OK:-1}"
@@ -419,6 +422,15 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --require-bootstrap-governance-graduation-gate-go)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_bootstrap_governance_graduation_gate_go="${2:-}"
+        shift 2
+      else
+        require_bootstrap_governance_graduation_gate_go="1"
+        shift
+      fi
+      ;;
     --require-dual-write-parity-ok)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         require_dual_write_parity_ok="${2:-}"
@@ -506,6 +518,7 @@ bool_arg_or_die "--require-tdpnd-grpc-live-smoke-ok" "$require_tdpnd_grpc_live_s
 bool_arg_or_die "--require-tdpnd-grpc-auth-live-smoke-ok" "$require_tdpnd_grpc_auth_live_smoke_ok"
 bool_arg_or_die "--require-tdpnd-comet-runtime-smoke-ok" "$require_tdpnd_comet_runtime_smoke_ok"
 bool_arg_or_die "--require-mainnet-activation-gate-go" "$require_mainnet_activation_gate_go"
+bool_arg_or_die "--require-bootstrap-governance-graduation-gate-go" "$require_bootstrap_governance_graduation_gate_go"
 bool_arg_or_die "--require-dual-write-parity-ok" "$require_dual_write_parity_ok"
 bool_arg_or_die "--require-cosmos-module-coverage-floor-ok" "$require_cosmos_module_coverage_floor_ok"
 bool_arg_or_die "--require-cosmos-keeper-coverage-floor-ok" "$require_cosmos_keeper_coverage_floor_ok"
@@ -551,6 +564,7 @@ tdpnd_grpc_live_smoke_pair="$(resolve_run_signal "tdpnd_grpc_live_smoke_ok" "$ph
 tdpnd_grpc_auth_live_smoke_pair="$(resolve_run_signal "tdpnd_grpc_auth_live_smoke_ok" "$phase7_run_summary_json" "$phase7_run_summary_usable" "$phase7_check_summary_json" "$phase7_check_summary_usable")"
 tdpnd_comet_runtime_smoke_pair="$(resolve_run_signal "tdpnd_comet_runtime_smoke_ok" "$phase7_run_summary_json" "$phase7_run_summary_usable" "$phase7_check_summary_json" "$phase7_check_summary_usable")"
 mainnet_activation_gate_pair="$(resolve_run_signal "mainnet_activation_gate_go" "$phase7_run_summary_json" "$phase7_run_summary_usable" "$phase7_check_summary_json" "$phase7_check_summary_usable")"
+bootstrap_governance_graduation_gate_pair="$(resolve_run_signal "bootstrap_governance_graduation_gate_go" "$phase7_run_summary_json" "$phase7_run_summary_usable" "$phase7_check_summary_json" "$phase7_check_summary_usable")"
 dual_write_parity_pair="$(resolve_run_signal "dual_write_parity_ok" "$phase7_run_summary_json" "$phase7_run_summary_usable" "$phase7_check_summary_json" "$phase7_check_summary_usable")"
 cosmos_module_coverage_floor_pair="$(resolve_run_signal "cosmos_module_coverage_floor_ok" "$phase7_run_summary_json" "$phase7_run_summary_usable" "$phase7_check_summary_json" "$phase7_check_summary_usable")"
 cosmos_keeper_coverage_floor_pair="$(resolve_run_signal "cosmos_keeper_coverage_floor_ok" "$phase7_run_summary_json" "$phase7_run_summary_usable" "$phase7_check_summary_json" "$phase7_check_summary_usable")"
@@ -591,6 +605,10 @@ mainnet_activation_gate_ok="${mainnet_activation_gate_pair%%|*}"; mainnet_activa
 mainnet_activation_gate_status="${mainnet_activation_gate_pair%%|*}"; mainnet_activation_gate_pair="${mainnet_activation_gate_pair#*|}"
 mainnet_activation_gate_source="${mainnet_activation_gate_pair%%|*}"; mainnet_activation_gate_resolved="${mainnet_activation_gate_pair##*|}"
 
+bootstrap_governance_graduation_gate_ok="${bootstrap_governance_graduation_gate_pair%%|*}"; bootstrap_governance_graduation_gate_pair="${bootstrap_governance_graduation_gate_pair#*|}"
+bootstrap_governance_graduation_gate_status="${bootstrap_governance_graduation_gate_pair%%|*}"; bootstrap_governance_graduation_gate_pair="${bootstrap_governance_graduation_gate_pair#*|}"
+bootstrap_governance_graduation_gate_source="${bootstrap_governance_graduation_gate_pair%%|*}"; bootstrap_governance_graduation_gate_resolved="${bootstrap_governance_graduation_gate_pair##*|}"
+
 dual_write_parity_ok="${dual_write_parity_pair%%|*}"; dual_write_parity_pair="${dual_write_parity_pair#*|}"
 dual_write_parity_status="${dual_write_parity_pair%%|*}"; dual_write_parity_pair="${dual_write_parity_pair#*|}"
 dual_write_parity_source="${dual_write_parity_pair%%|*}"; dual_write_parity_resolved="${dual_write_parity_pair##*|}"
@@ -623,6 +641,7 @@ check_required_signal "$require_tdpnd_grpc_live_smoke_ok" "$tdpnd_grpc_live_smok
 check_required_signal "$require_tdpnd_grpc_auth_live_smoke_ok" "$tdpnd_grpc_auth_live_smoke_ok" "$tdpnd_grpc_auth_live_smoke_status" "tdpnd_grpc_auth_live_smoke_ok" reasons
 check_required_signal "$require_tdpnd_comet_runtime_smoke_ok" "$tdpnd_comet_runtime_smoke_ok" "$tdpnd_comet_runtime_smoke_status" "tdpnd_comet_runtime_smoke_ok" reasons
 check_required_signal "$require_mainnet_activation_gate_go" "$mainnet_activation_gate_ok" "$mainnet_activation_gate_status" "mainnet_activation_gate_go" reasons
+check_required_signal "$require_bootstrap_governance_graduation_gate_go" "$bootstrap_governance_graduation_gate_ok" "$bootstrap_governance_graduation_gate_status" "bootstrap_governance_graduation_gate_go" reasons
 check_required_signal "$require_dual_write_parity_ok" "$dual_write_parity_ok" "$dual_write_parity_status" "dual_write_parity_ok" reasons
 check_required_signal "$require_cosmos_module_coverage_floor_ok" "$cosmos_module_coverage_floor_ok" "$cosmos_module_coverage_floor_status" "cosmos_module_coverage_floor_ok" reasons
 check_required_signal "$require_cosmos_keeper_coverage_floor_ok" "$cosmos_keeper_coverage_floor_ok" "$cosmos_keeper_coverage_floor_status" "cosmos_keeper_coverage_floor_ok" reasons
@@ -668,6 +687,7 @@ jq -n \
   --argjson require_tdpnd_grpc_auth_live_smoke_ok "$require_tdpnd_grpc_auth_live_smoke_ok" \
   --argjson require_tdpnd_comet_runtime_smoke_ok "$require_tdpnd_comet_runtime_smoke_ok" \
   --argjson require_mainnet_activation_gate_go "$require_mainnet_activation_gate_go" \
+  --argjson require_bootstrap_governance_graduation_gate_go "$require_bootstrap_governance_graduation_gate_go" \
   --argjson require_dual_write_parity_ok "$require_dual_write_parity_ok" \
   --argjson require_cosmos_module_coverage_floor_ok "$require_cosmos_module_coverage_floor_ok" \
   --argjson require_cosmos_keeper_coverage_floor_ok "$require_cosmos_keeper_coverage_floor_ok" \
@@ -682,6 +702,7 @@ jq -n \
   --argjson tdpnd_grpc_auth_live_smoke_ok "$tdpnd_grpc_auth_live_smoke_ok" \
   --argjson tdpnd_comet_runtime_smoke_ok "$tdpnd_comet_runtime_smoke_ok" \
   --argjson mainnet_activation_gate_ok "$mainnet_activation_gate_ok" \
+  --argjson bootstrap_governance_graduation_gate_ok "$bootstrap_governance_graduation_gate_ok" \
   --argjson dual_write_parity_ok "$dual_write_parity_ok" \
   --argjson cosmos_module_coverage_floor_ok "$cosmos_module_coverage_floor_ok" \
   --argjson cosmos_keeper_coverage_floor_ok "$cosmos_keeper_coverage_floor_ok" \
@@ -696,6 +717,7 @@ jq -n \
   --arg tdpnd_grpc_auth_live_smoke_status "$tdpnd_grpc_auth_live_smoke_status" \
   --arg tdpnd_comet_runtime_smoke_status "$tdpnd_comet_runtime_smoke_status" \
   --arg mainnet_activation_gate_status "$mainnet_activation_gate_status" \
+  --arg bootstrap_governance_graduation_gate_status "$bootstrap_governance_graduation_gate_status" \
   --arg dual_write_parity_status "$dual_write_parity_status" \
   --arg cosmos_module_coverage_floor_status "$cosmos_module_coverage_floor_status" \
   --arg cosmos_keeper_coverage_floor_status "$cosmos_keeper_coverage_floor_status" \
@@ -710,6 +732,7 @@ jq -n \
   --argjson tdpnd_grpc_auth_live_smoke_resolved "$tdpnd_grpc_auth_live_smoke_resolved" \
   --argjson tdpnd_comet_runtime_smoke_resolved "$tdpnd_comet_runtime_smoke_resolved" \
   --argjson mainnet_activation_gate_resolved "$mainnet_activation_gate_resolved" \
+  --argjson bootstrap_governance_graduation_gate_resolved "$bootstrap_governance_graduation_gate_resolved" \
   --argjson dual_write_parity_resolved "$dual_write_parity_resolved" \
   --argjson cosmos_module_coverage_floor_resolved "$cosmos_module_coverage_floor_resolved" \
   --argjson cosmos_keeper_coverage_floor_resolved "$cosmos_keeper_coverage_floor_resolved" \
@@ -726,6 +749,7 @@ jq -n \
   --arg tdpnd_grpc_auth_live_smoke_source "$tdpnd_grpc_auth_live_smoke_source" \
   --arg tdpnd_comet_runtime_smoke_source "$tdpnd_comet_runtime_smoke_source" \
   --arg mainnet_activation_gate_source "$mainnet_activation_gate_source" \
+  --arg bootstrap_governance_graduation_gate_source "$bootstrap_governance_graduation_gate_source" \
   --arg dual_write_parity_source "$dual_write_parity_source" \
   --arg cosmos_module_coverage_floor_source "$cosmos_module_coverage_floor_source" \
   --arg cosmos_keeper_coverage_floor_source "$cosmos_keeper_coverage_floor_source" \
@@ -773,6 +797,7 @@ jq -n \
         tdpnd_grpc_auth_live_smoke_ok: ($require_tdpnd_grpc_auth_live_smoke_ok == 1),
         tdpnd_comet_runtime_smoke_ok: ($require_tdpnd_comet_runtime_smoke_ok == 1),
         mainnet_activation_gate_go: ($require_mainnet_activation_gate_go == 1),
+        bootstrap_governance_graduation_gate_go: ($require_bootstrap_governance_graduation_gate_go == 1),
         dual_write_parity_ok: ($require_dual_write_parity_ok == 1),
         cosmos_module_coverage_floor_ok: ($require_cosmos_module_coverage_floor_ok == 1),
         cosmos_keeper_coverage_floor_ok: ($require_cosmos_keeper_coverage_floor_ok == 1),
@@ -808,6 +833,9 @@ jq -n \
       mainnet_activation_gate_go: $mainnet_activation_gate_ok,
       mainnet_activation_gate_go_status: $mainnet_activation_gate_status,
       mainnet_activation_gate_go_resolved: ($mainnet_activation_gate_resolved == 1),
+      bootstrap_governance_graduation_gate_go: $bootstrap_governance_graduation_gate_ok,
+      bootstrap_governance_graduation_gate_go_status: $bootstrap_governance_graduation_gate_status,
+      bootstrap_governance_graduation_gate_go_resolved: ($bootstrap_governance_graduation_gate_resolved == 1),
       dual_write_parity_ok: $dual_write_parity_ok,
       dual_write_parity_status: $dual_write_parity_status,
       dual_write_parity_resolved: ($dual_write_parity_resolved == 1),
@@ -835,6 +863,7 @@ jq -n \
         tdpnd_grpc_auth_live_smoke_ok: $tdpnd_grpc_auth_live_smoke_source,
         tdpnd_comet_runtime_smoke_ok: $tdpnd_comet_runtime_smoke_source,
         mainnet_activation_gate_go: $mainnet_activation_gate_source,
+        bootstrap_governance_graduation_gate_go: $bootstrap_governance_graduation_gate_source,
         dual_write_parity_ok: $dual_write_parity_source,
         cosmos_module_coverage_floor_ok: $cosmos_module_coverage_floor_source,
         cosmos_keeper_coverage_floor_ok: $cosmos_keeper_coverage_floor_source,

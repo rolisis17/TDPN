@@ -1,6 +1,10 @@
 package types
 
-import "testing"
+import (
+	"testing"
+
+	chaintypes "github.com/tdpn/tdpn-chain/types"
+)
 
 func TestGovernancePolicyValidateBasic(t *testing.T) {
 	t.Parallel()
@@ -197,6 +201,151 @@ func TestGovernanceAuditActionValidateBasic(t *testing.T) {
 				if err.Error() != tc.wantErr {
 					t.Fatalf("expected error %q, got %q", tc.wantErr, err.Error())
 				}
+			}
+		})
+	}
+}
+
+func TestGovernancePolicyCanonicalize(t *testing.T) {
+	t.Parallel()
+
+	record := GovernancePolicy{
+		PolicyID:        "  PoLiCy-1  ",
+		Title:           "  Keep Title Spacing  ",
+		Description:     "  Keep Description Spacing  ",
+		Version:         1,
+		ActivatedAtUnix: 4102444800,
+		Status:          " SuBmItTeD ",
+	}
+
+	got := record.Canonicalize()
+	if got.PolicyID != "policy-1" {
+		t.Fatalf("expected canonical policy id %q, got %q", "policy-1", got.PolicyID)
+	}
+	if got.Status != "submitted" {
+		t.Fatalf("expected canonical status %q, got %q", "submitted", got.Status)
+	}
+	if got.Title != record.Title {
+		t.Fatalf("expected title to be preserved, got %q vs %q", got.Title, record.Title)
+	}
+	if got.Description != record.Description {
+		t.Fatalf("expected description to be preserved, got %q vs %q", got.Description, record.Description)
+	}
+}
+
+func TestGovernanceDecisionCanonicalize(t *testing.T) {
+	t.Parallel()
+
+	record := GovernanceDecision{
+		DecisionID:    "  DeCiSiOn-1  ",
+		PolicyID:      "  PoLiCy-1  ",
+		ProposalID:    "  PrOpOsAl-1  ",
+		Outcome:       "  ApPrOvE  ",
+		Decider:       "  CoUnCiL-MuLtIsIg  ",
+		Reason:        "  Preserve Reason Spacing  ",
+		DecidedAtUnix: 4102444800,
+		Status:        " PeNdInG ",
+	}
+
+	got := record.Canonicalize()
+	if got.DecisionID != "decision-1" {
+		t.Fatalf("expected canonical decision id %q, got %q", "decision-1", got.DecisionID)
+	}
+	if got.PolicyID != "policy-1" {
+		t.Fatalf("expected canonical policy id %q, got %q", "policy-1", got.PolicyID)
+	}
+	if got.ProposalID != "proposal-1" {
+		t.Fatalf("expected canonical proposal id %q, got %q", "proposal-1", got.ProposalID)
+	}
+	if got.Outcome != DecisionOutcomeApprove {
+		t.Fatalf("expected canonical outcome %q, got %q", DecisionOutcomeApprove, got.Outcome)
+	}
+	if got.Decider != "council-multisig" {
+		t.Fatalf("expected canonical decider %q, got %q", "council-multisig", got.Decider)
+	}
+	if got.Status != "pending" {
+		t.Fatalf("expected canonical status %q, got %q", "pending", got.Status)
+	}
+	if got.Reason != record.Reason {
+		t.Fatalf("expected reason to be preserved, got %q vs %q", got.Reason, record.Reason)
+	}
+}
+
+func TestGovernanceAuditActionCanonicalize(t *testing.T) {
+	t.Parallel()
+
+	record := GovernanceAuditAction{
+		ActionID:        "  AuDiT-1  ",
+		Action:          "  AdMiN_AlLoW_VaLiDaToR  ",
+		Actor:           "  BoOtStRaP-AdMiN  ",
+		Reason:          "  Preserve Reason Spacing  ",
+		EvidencePointer: "  ipfs://Evidence/Audit-1  ",
+		TimestampUnix:   4102444800,
+	}
+
+	got := record.Canonicalize()
+	if got.ActionID != "audit-1" {
+		t.Fatalf("expected canonical action id %q, got %q", "audit-1", got.ActionID)
+	}
+	if got.Action != "admin_allow_validator" {
+		t.Fatalf("expected canonical action %q, got %q", "admin_allow_validator", got.Action)
+	}
+	if got.Actor != "bootstrap-admin" {
+		t.Fatalf("expected canonical actor %q, got %q", "bootstrap-admin", got.Actor)
+	}
+	if got.EvidencePointer != "ipfs://Evidence/Audit-1" {
+		t.Fatalf("expected evidence pointer trimming only, got %q", got.EvidencePointer)
+	}
+	if got.Reason != record.Reason {
+		t.Fatalf("expected reason to be preserved, got %q vs %q", got.Reason, record.Reason)
+	}
+}
+
+func TestGovernanceCanonicalizeRetainsTerminalLifecycleStatuses(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		in   chaintypes.ReconciliationStatus
+		want chaintypes.ReconciliationStatus
+	}{
+		{
+			name: "confirmed",
+			in:   " CONFIRMED ",
+			want: chaintypes.ReconciliationConfirmed,
+		},
+		{
+			name: "failed",
+			in:   " FAILED ",
+			want: chaintypes.ReconciliationFailed,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run("policy-"+tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := GovernancePolicy{
+				PolicyID: "policy-terminal-1",
+				Status:   tc.in,
+			}.Canonicalize()
+			if got.Status != tc.want {
+				t.Fatalf("expected policy status %q, got %q", tc.want, got.Status)
+			}
+		})
+
+		t.Run("decision-"+tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := GovernanceDecision{
+				DecisionID: "decision-terminal-1",
+				PolicyID:   "policy-terminal-1",
+				ProposalID: "proposal-terminal-1",
+				Outcome:    DecisionOutcomeApprove,
+				Decider:    "bootstrap-council",
+				Status:     tc.in,
+			}.Canonicalize()
+			if got.Status != tc.want {
+				t.Fatalf("expected decision status %q, got %q", tc.want, got.Status)
 			}
 		})
 	}

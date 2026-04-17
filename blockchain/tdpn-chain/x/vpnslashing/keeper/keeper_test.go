@@ -19,9 +19,10 @@ func TestKeeperEvidenceUpsertAndGet(t *testing.T) {
 	}
 
 	initial := types.SlashEvidence{
-		EvidenceID: "evidence-1",
-		Kind:       types.EvidenceKindObjective,
-		ProofHash:  testSHAProof("proof-1"),
+		EvidenceID:    "evidence-1",
+		Kind:          types.EvidenceKindObjective,
+		ProofHash:     testSHAProof("proof-1"),
+		ViolationType: "  DOUBLE-SIGN ",
 	}
 	k.UpsertEvidence(initial)
 
@@ -31,6 +32,9 @@ func TestKeeperEvidenceUpsertAndGet(t *testing.T) {
 	}
 	if got.ProofHash != initial.ProofHash {
 		t.Fatalf("expected proof hash %q, got %q", initial.ProofHash, got.ProofHash)
+	}
+	if got.ViolationType != "double-sign" {
+		t.Fatalf("expected canonical violation type %q, got %q", "double-sign", got.ViolationType)
 	}
 
 	updated := initial
@@ -216,6 +220,69 @@ func TestSubmitEvidenceConflict(t *testing.T) {
 	}
 }
 
+func TestSubmitEvidenceConflictOnViolationTypeChange(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	base := types.SlashEvidence{
+		EvidenceID:    "evidence-submit-violation-type-conflict",
+		Kind:          types.EvidenceKindObjective,
+		ProofHash:     testSHAProof("proof-violation-type-a"),
+		ViolationType: "double-sign",
+	}
+	if _, err := k.SubmitEvidence(base); err != nil {
+		t.Fatalf("seed evidence failed: %v", err)
+	}
+
+	conflict := base
+	conflict.ViolationType = "downtime-proof"
+	_, err := k.SubmitEvidence(conflict)
+	if err == nil {
+		t.Fatal("expected conflicting submit to fail")
+	}
+	if !strings.Contains(err.Error(), "conflicting fields") {
+		t.Fatalf("expected conflict error, got %v", err)
+	}
+}
+
+func TestSubmitEvidenceCanonicalizesViolationTypeAndEquivalentReplay(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	base := types.SlashEvidence{
+		EvidenceID:    "evidence-submit-violation-type-canonical",
+		Kind:          types.EvidenceKindObjective,
+		ProofHash:     testSHAProof("proof-violation-type-canonical"),
+		ViolationType: "  SESSION-REPLAY-PROOF \n",
+	}
+
+	first, err := k.SubmitEvidence(base)
+	if err != nil {
+		t.Fatalf("first submit failed: %v", err)
+	}
+	if first.ViolationType != "session-replay-proof" {
+		t.Fatalf("expected canonical violation type %q, got %q", "session-replay-proof", first.ViolationType)
+	}
+
+	stored, ok := k.GetEvidence(base.EvidenceID)
+	if !ok {
+		t.Fatalf("expected stored evidence %q", base.EvidenceID)
+	}
+	if stored.ViolationType != "session-replay-proof" {
+		t.Fatalf("expected stored canonical violation type %q, got %q", "session-replay-proof", stored.ViolationType)
+	}
+
+	replay := base
+	replay.ViolationType = "\tsession-replay-proof  "
+	second, err := k.SubmitEvidence(replay)
+	if err != nil {
+		t.Fatalf("equivalent replay submit failed: %v", err)
+	}
+	if second != first {
+		t.Fatalf("expected equivalent replay to be idempotent, first=%+v second=%+v", first, second)
+	}
+}
+
 func TestSubmitEvidenceInvalid(t *testing.T) {
 	t.Parallel()
 
@@ -226,6 +293,28 @@ func TestSubmitEvidenceInvalid(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected invalid evidence to fail")
+	}
+}
+
+func TestSubmitEvidenceInvalidViolationType(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	evidenceID := "evidence-invalid-violation-type"
+	_, err := k.SubmitEvidence(types.SlashEvidence{
+		EvidenceID:    evidenceID,
+		Kind:          types.EvidenceKindObjective,
+		ProofHash:     testSHAProof("proof-invalid-violation-type"),
+		ViolationType: "manual-review-only",
+	})
+	if err == nil {
+		t.Fatal("expected invalid violation type to fail")
+	}
+	if !strings.Contains(err.Error(), "violation type must be one of") {
+		t.Fatalf("expected violation type validation error, got %v", err)
+	}
+	if _, ok := k.GetEvidence(evidenceID); ok {
+		t.Fatalf("expected invalid evidence %q to not be stored", evidenceID)
 	}
 }
 

@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -111,6 +113,127 @@ func TestCosmosAdapterHealthPaths(t *testing.T) {
 		if !strings.Contains(err.Error(), "transport unavailable") {
 			t.Fatalf("unexpected health transport error: %v", err)
 		}
+	})
+}
+
+func TestCosmosAdapterUsesBearerAuthAcrossModes(t *testing.T) {
+	const (
+		token              = "adapter-auth-token"
+		expectedAuthHeader = "Bearer " + token
+		rewardID           = "rew-auth-1"
+		rewardQueryPath    = "/x/vpnrewards/distributions/dist:" + rewardID
+	)
+
+	runMode := func(t *testing.T, cfg CosmosAdapterConfig, expectedSubmitPath string) {
+		t.Helper()
+
+		healthAuthCh := make(chan string, 1)
+		submitAuthCh := make(chan string, 1)
+		queryAuthCh := make(chan string, 1)
+
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			authHeader := r.Header.Get("Authorization")
+			if authHeader != expectedAuthHeader {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			switch {
+			case r.Method == http.MethodGet && r.URL.Path == "/health":
+				select {
+				case healthAuthCh <- authHeader:
+				default:
+				}
+				w.WriteHeader(http.StatusOK)
+			case r.Method == http.MethodPost && r.URL.Path == expectedSubmitPath:
+				select {
+				case submitAuthCh <- authHeader:
+				default:
+				}
+				w.WriteHeader(http.StatusOK)
+			case r.Method == http.MethodGet && r.URL.Path == rewardQueryPath:
+				select {
+				case queryAuthCh <- authHeader:
+				default:
+				}
+				w.WriteHeader(http.StatusOK)
+			default:
+				w.WriteHeader(http.StatusNotFound)
+			}
+		}))
+		defer srv.Close()
+
+		cfg.Endpoint = srv.URL
+		cfg.APIKey = token
+		adapter, err := NewCosmosAdapter(cfg)
+		if err != nil {
+			t.Fatalf("NewCosmosAdapter: %v", err)
+		}
+		defer adapter.Close()
+
+		if err := adapter.Health(context.Background()); err != nil {
+			t.Fatalf("Health expected nil error, got %v", err)
+		}
+		select {
+		case got := <-healthAuthCh:
+			if got != expectedAuthHeader {
+				t.Fatalf("health auth mismatch: got %q", got)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for health auth assertion")
+		}
+
+		if _, err := adapter.SubmitRewardIssue(context.Background(), RewardIssue{
+			RewardID:          rewardID,
+			ProviderSubjectID: "provider-auth-1",
+			SessionID:         "sess-auth-1",
+			RewardMicros:      100,
+			Currency:          "USD",
+		}); err != nil {
+			t.Fatalf("SubmitRewardIssue: %v", err)
+		}
+		select {
+		case got := <-submitAuthCh:
+			if got != expectedAuthHeader {
+				t.Fatalf("submit auth mismatch: got %q", got)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for submit auth assertion")
+		}
+
+		ok, err := adapter.HasRewardIssue(context.Background(), rewardID)
+		if err != nil {
+			t.Fatalf("HasRewardIssue expected nil error, got %v", err)
+		}
+		if !ok {
+			t.Fatalf("HasRewardIssue expected true")
+		}
+		select {
+		case got := <-queryAuthCh:
+			if got != expectedAuthHeader {
+				t.Fatalf("query auth mismatch: got %q", got)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for query auth assertion")
+		}
+	}
+
+	t.Run("http_mode", func(t *testing.T) {
+		runMode(t, CosmosAdapterConfig{
+			QueueSize:   8,
+			MaxRetries:  1,
+			BaseBackoff: 5 * time.Millisecond,
+		}, "/x/vpnrewards/issues")
+	})
+
+	t.Run("signed_tx_mode", func(t *testing.T) {
+		runMode(t, CosmosAdapterConfig{
+			QueueSize:      8,
+			MaxRetries:     1,
+			BaseBackoff:    5 * time.Millisecond,
+			SubmitMode:     CosmosSubmitModeSignedTx,
+			SignedTxSigner: "auth-signer-1",
+			SignedTxSecret: "auth-secret-1",
+		}, "/cosmos/tx/v1beta1/txs")
 	})
 }
 
@@ -256,6 +379,174 @@ func TestCosmosAdapterSubmitsSettlementWithIdempotencyKey(t *testing.T) {
 	}
 }
 
+func TestCosmosAdapterBridgePayloadsUseStrictCompatibleShapes(t *testing.T) {
+	type settlementPayload struct {
+		SettlementID  string    `json:"SettlementID"`
+		SessionID     string    `json:"SessionID"`
+		SubjectID     string    `json:"SubjectID"`
+		ChargedMicros int64     `json:"ChargedMicros"`
+		Currency      string    `json:"Currency"`
+		SettledAt     time.Time `json:"SettledAt"`
+		Status        string    `json:"Status"`
+	}
+	type rewardPayload struct {
+		RewardID          string    `json:"RewardID"`
+		ProviderSubjectID string    `json:"ProviderSubjectID"`
+		SessionID         string    `json:"SessionID"`
+		RewardMicros      int64     `json:"RewardMicros"`
+		Currency          string    `json:"Currency"`
+		IssuedAt          time.Time `json:"IssuedAt"`
+		Status            string    `json:"Status"`
+	}
+	type sponsorPayload struct {
+		ReservationID string    `json:"ReservationID"`
+		SponsorID     string    `json:"SponsorID"`
+		SubjectID     string    `json:"SubjectID"`
+		SessionID     string    `json:"SessionID"`
+		AmountMicros  int64     `json:"AmountMicros"`
+		Currency      string    `json:"Currency"`
+		CreatedAt     time.Time `json:"CreatedAt"`
+		ExpiresAt     time.Time `json:"ExpiresAt"`
+		Status        string    `json:"Status"`
+	}
+	type slashPayload struct {
+		EvidenceID    string    `json:"EvidenceID"`
+		SubjectID     string    `json:"SubjectID"`
+		SessionID     string    `json:"SessionID"`
+		ViolationType string    `json:"ViolationType"`
+		EvidenceRef   string    `json:"EvidenceRef"`
+		ObservedAt    time.Time `json:"ObservedAt"`
+		Status        string    `json:"Status"`
+	}
+
+	seenCh := make(chan string, 8)
+	decodeErrCh := make(chan error, 8)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		decoder := json.NewDecoder(r.Body)
+		decoder.DisallowUnknownFields()
+		var err error
+		switch r.URL.Path {
+		case "/x/vpnbilling/settlements":
+			var payload settlementPayload
+			err = decoder.Decode(&payload)
+		case "/x/vpnrewards/issues":
+			var payload rewardPayload
+			err = decoder.Decode(&payload)
+		case "/x/vpnsponsor/reservations":
+			var payload sponsorPayload
+			err = decoder.Decode(&payload)
+		case "/x/vpnslashing/evidence":
+			var payload slashPayload
+			err = decoder.Decode(&payload)
+		default:
+			err = fmt.Errorf("unexpected path %q", r.URL.Path)
+		}
+		if err == nil {
+			var trailing json.RawMessage
+			if decodeTrailingErr := decoder.Decode(&trailing); decodeTrailingErr != nil && !errors.Is(decodeTrailingErr, io.EOF) {
+				err = fmt.Errorf("trailing decode error: %w", decodeTrailingErr)
+			}
+		}
+		if err != nil {
+			select {
+			case decodeErrCh <- err:
+			default:
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		select {
+		case seenCh <- r.URL.Path:
+		default:
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	adapter, err := NewCosmosAdapter(CosmosAdapterConfig{
+		Endpoint:    srv.URL,
+		QueueSize:   8,
+		MaxRetries:  1,
+		BaseBackoff: 5 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("NewCosmosAdapter: %v", err)
+	}
+	defer adapter.Close()
+
+	now := time.Now().UTC()
+	if _, err := adapter.SubmitSessionSettlement(context.Background(), SessionSettlement{
+		SettlementID:  "set-shape-1",
+		SessionID:     "sess-shape-1",
+		SubjectID:     "subject-shape-1",
+		ChargedMicros: 101,
+		Currency:      "TDPNC",
+		SettledAt:     now,
+		Status:        OperationStatusSubmitted,
+	}); err != nil {
+		t.Fatalf("SubmitSessionSettlement: %v", err)
+	}
+	if _, err := adapter.SubmitRewardIssue(context.Background(), RewardIssue{
+		RewardID:          "rew-shape-1",
+		ProviderSubjectID: "provider-shape-1",
+		SessionID:         "sess-shape-1",
+		RewardMicros:      17,
+		Currency:          "TDPNC",
+		IssuedAt:          now,
+		Status:            OperationStatusSubmitted,
+	}); err != nil {
+		t.Fatalf("SubmitRewardIssue: %v", err)
+	}
+	if _, err := adapter.SubmitSponsorReservation(context.Background(), SponsorCreditReservation{
+		ReservationID: "res-shape-1",
+		SponsorID:     "sponsor-shape-1",
+		SubjectID:     "app-shape-1",
+		SessionID:     "sess-shape-2",
+		AmountMicros:  42,
+		Currency:      "TDPNC",
+		CreatedAt:     now,
+		ExpiresAt:     now.Add(time.Minute),
+		Status:        OperationStatusPending,
+	}); err != nil {
+		t.Fatalf("SubmitSponsorReservation: %v", err)
+	}
+	if _, err := adapter.SubmitSlashEvidence(context.Background(), SlashEvidence{
+		EvidenceID:    "evidence-shape-1",
+		SubjectID:     "provider-shape-1",
+		SessionID:     "sess-shape-1",
+		ViolationType: "double-sign",
+		EvidenceRef:   "sha256:2935ad7b7d9dec338fd099d83ddcfc1a53c3fc35929197eeb6826db0aa4c684e",
+		ObservedAt:    now,
+		Status:        OperationStatusSubmitted,
+	}); err != nil {
+		t.Fatalf("SubmitSlashEvidence: %v", err)
+	}
+
+	expectedPaths := map[string]bool{
+		"/x/vpnbilling/settlements":  true,
+		"/x/vpnrewards/issues":       true,
+		"/x/vpnsponsor/reservations": true,
+		"/x/vpnslashing/evidence":    true,
+	}
+	seen := map[string]bool{}
+	deadline := time.After(2 * time.Second)
+	for len(seen) < len(expectedPaths) {
+		select {
+		case err := <-decodeErrCh:
+			t.Fatalf("strict payload decode failed: %v", err)
+		case path := <-seenCh:
+			seen[path] = true
+		case <-deadline:
+			t.Fatalf("timed out waiting for strict payload submits (seen=%v)", seen)
+		}
+	}
+	for path := range expectedPaths {
+		if !seen[path] {
+			t.Fatalf("missing expected submitted path %q (seen=%v)", path, seen)
+		}
+	}
+}
+
 func TestCosmosAdapterRetriesTransientFailure(t *testing.T) {
 	var attempts int32
 	doneCh := make(chan struct{}, 1)
@@ -359,6 +650,127 @@ func TestCosmosAdapterDoesNotRetryNonRetryable4xx(t *testing.T) {
 
 	if got := atomic.LoadInt32(&attempts); got != 1 {
 		t.Fatalf("expected exactly one attempt, got %d", got)
+	}
+}
+
+func TestCosmosAdapterNonRetryableFailuresBecomeDeferredNonReplayable(t *testing.T) {
+	var attempts int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/x/vpnrewards/issues" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		atomic.AddInt32(&attempts, 1)
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer srv.Close()
+
+	adapter, err := NewCosmosAdapter(CosmosAdapterConfig{
+		Endpoint:    srv.URL,
+		QueueSize:   8,
+		MaxRetries:  3,
+		BaseBackoff: 10 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("NewCosmosAdapter: %v", err)
+	}
+	defer adapter.Close()
+
+	if _, err := adapter.SubmitRewardIssue(context.Background(), RewardIssue{
+		RewardID:          "rew-nonretry-deferred-1",
+		ProviderSubjectID: "provider-nonretry-deferred-1",
+		SessionID:         "sess-nonretry-deferred-1",
+		RewardMicros:      100,
+		Currency:          "TDPNC",
+	}); err != nil {
+		t.Fatalf("SubmitRewardIssue: %v", err)
+	}
+
+	waitForCondition(t, 2*time.Second, func() bool {
+		return adapter.deferredOperationCount() == 1
+	}, "non-retryable deferred entry")
+
+	entry, ok := adapter.deferredOperationByID("reward:rew-nonretry-deferred-1")
+	if !ok {
+		t.Fatalf("expected deferred entry for reward:rew-nonretry-deferred-1")
+	}
+	if entry.replayable {
+		t.Fatalf("expected non-retryable deferred entry to be non-replayable")
+	}
+	if entry.attempts != 1 {
+		t.Fatalf("expected one attempt for non-retryable 4xx, got %d", entry.attempts)
+	}
+	if !strings.Contains(entry.lastError, "status 400") {
+		t.Fatalf("expected deferred last error to include status 400, got %q", entry.lastError)
+	}
+
+	attemptsAfterDefer := atomic.LoadInt32(&attempts)
+	time.Sleep(120 * time.Millisecond)
+	if got := atomic.LoadInt32(&attempts); got != attemptsAfterDefer {
+		t.Fatalf("expected no replay attempts for non-replayable deferred entry, got %d->%d", attemptsAfterDefer, got)
+	}
+	if got := adapter.deferredOperationCount(); got != 1 {
+		t.Fatalf("expected deferred entry to remain queued for manual intervention, got count=%d", got)
+	}
+}
+
+func TestCosmosAdapterReplayableDeferredBecomesNonReplayableAfterReplay4xx(t *testing.T) {
+	var attempts int32
+	var replayPhase atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/x/vpnrewards/issues" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		atomic.AddInt32(&attempts, 1)
+		if replayPhase.Load() {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+
+	adapter, err := NewCosmosAdapter(CosmosAdapterConfig{
+		Endpoint:    srv.URL,
+		QueueSize:   8,
+		MaxRetries:  0,
+		BaseBackoff: 10 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("NewCosmosAdapter: %v", err)
+	}
+	defer adapter.Close()
+
+	if _, err := adapter.SubmitRewardIssue(context.Background(), RewardIssue{
+		RewardID:          "rew-replay-switch-1",
+		ProviderSubjectID: "provider-replay-switch-1",
+		SessionID:         "sess-replay-switch-1",
+		RewardMicros:      100,
+		Currency:          "TDPNC",
+	}); err != nil {
+		t.Fatalf("SubmitRewardIssue: %v", err)
+	}
+
+	waitForCondition(t, 2*time.Second, func() bool {
+		entry, ok := adapter.deferredOperationByID("reward:rew-replay-switch-1")
+		return ok && entry.replayable && entry.attempts >= 1 && strings.Contains(entry.lastError, "status 503")
+	}, "retryable deferred entry to appear after initial 503")
+
+	replayPhase.Store(true)
+
+	waitForCondition(t, 2*time.Second, func() bool {
+		entry, ok := adapter.deferredOperationByID("reward:rew-replay-switch-1")
+		return ok && !entry.replayable && entry.attempts >= 2 && strings.Contains(entry.lastError, "status 400")
+	}, "deferred replay to switch operation into non-replayable 4xx state")
+
+	attemptsAfterFreeze := atomic.LoadInt32(&attempts)
+	time.Sleep(120 * time.Millisecond)
+	if got := atomic.LoadInt32(&attempts); got != attemptsAfterFreeze {
+		t.Fatalf("expected no replay attempts after non-retryable replay result, got %d->%d", attemptsAfterFreeze, got)
+	}
+	if got := adapter.deferredOperationCount(); got != 1 {
+		t.Fatalf("expected deferred backlog entry to remain for manual intervention, got count=%d", got)
 	}
 }
 
@@ -1338,5 +1750,105 @@ func TestCosmosAdapterCloseDrainsBacklogToDeferred(t *testing.T) {
 		RewardMicros:      300,
 	}); err == nil {
 		t.Fatalf("expected submit after close to fail")
+	}
+}
+
+func TestCosmosAdapterCloseDoesNotDropAcceptedConcurrentSubmissions(t *testing.T) {
+	startedCh := make(chan string, 1)
+	releaseCh := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/x/vpnrewards/issues" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		select {
+		case startedCh <- r.Header.Get("Idempotency-Key"):
+		default:
+		}
+		select {
+		case <-releaseCh:
+			w.WriteHeader(http.StatusOK)
+		case <-r.Context().Done():
+			return
+		}
+	}))
+	defer srv.Close()
+
+	adapter, err := NewCosmosAdapter(CosmosAdapterConfig{
+		Endpoint:    srv.URL,
+		QueueSize:   256,
+		MaxRetries:  0,
+		BaseBackoff: 10 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("NewCosmosAdapter: %v", err)
+	}
+
+	seedID, err := adapter.SubmitRewardIssue(context.Background(), RewardIssue{
+		RewardID:          "rew-race-seed",
+		ProviderSubjectID: "provider-race-seed",
+		SessionID:         "sess-race-seed",
+		RewardMicros:      100,
+	})
+	if err != nil {
+		t.Fatalf("SubmitRewardIssue seed: %v", err)
+	}
+
+	select {
+	case <-startedCh:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for seed queued submit to start")
+	}
+
+	acceptedIDs := map[string]struct{}{seedID: struct{}{}}
+	var acceptedMu sync.Mutex
+
+	startCh := make(chan struct{})
+	closeDone := make(chan struct{})
+	go func() {
+		<-startCh
+		adapter.Close()
+		close(closeDone)
+	}()
+
+	const concurrentSubmits = 128
+	var wg sync.WaitGroup
+	for i := 0; i < concurrentSubmits; i++ {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-startCh
+			rewardID := fmt.Sprintf("rew-race-%03d", i)
+			id, submitErr := adapter.SubmitRewardIssue(context.Background(), RewardIssue{
+				RewardID:          rewardID,
+				ProviderSubjectID: "provider-" + rewardID,
+				SessionID:         "sess-" + rewardID,
+				RewardMicros:      100,
+			})
+			if submitErr == nil {
+				acceptedMu.Lock()
+				acceptedIDs[id] = struct{}{}
+				acceptedMu.Unlock()
+			}
+		}()
+	}
+
+	close(startCh)
+	wg.Wait()
+	close(releaseCh)
+
+	select {
+	case <-closeDone:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for adapter close")
+	}
+
+	acceptedMu.Lock()
+	defer acceptedMu.Unlock()
+	for id := range acceptedIDs {
+		if _, ok := adapter.deferredOperationByID(id); !ok {
+			t.Fatalf("accepted idempotency key missing from deferred backlog after close: %s", id)
+		}
 	}
 }

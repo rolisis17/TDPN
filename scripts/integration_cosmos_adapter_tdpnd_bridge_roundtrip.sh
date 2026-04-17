@@ -10,6 +10,12 @@ export GOCACHE="${GOCACHE:-$ROOT_DIR/.gocache}"
 LOG_FILE="$(mktemp -t tdpnd-adapter-roundtrip.XXXXXX.log)"
 GO_PROG_FILE="$(mktemp -t tdpnd-adapter-roundtrip.XXXXXX.go)"
 TDPND_PID=""
+STARTUP_MAX_ATTEMPTS="${COSMOS_ADAPTER_TDPND_BRIDGE_STARTUP_MAX_ATTEMPTS:-5}"
+
+if ! [[ "${STARTUP_MAX_ATTEMPTS}" =~ ^[0-9]+$ ]] || [[ "${STARTUP_MAX_ATTEMPTS}" -lt 1 ]]; then
+  echo "COSMOS_ADAPTER_TDPND_BRIDGE_STARTUP_MAX_ATTEMPTS must be an integer >= 1"
+  exit 2
+fi
 
 signal_runtime() {
   local sig="$1"
@@ -83,21 +89,60 @@ wait_for_health_ready() {
   return 1
 }
 
-PORT="$(pick_port)"
-if [[ -z "${PORT}" ]]; then
-  echo "failed to allocate adapter roundtrip port"
+TOKEN="adapter-roundtrip-token"
+ENDPOINT=""
+bind_retry_log_match() {
+  grep -Eqi 'address already in use|bind: address already in use|failed to listen on .*address already in use' "${LOG_FILE}" 2>/dev/null
+}
+
+launch_runtime() {
+  local port="$1"
+  (
+    cd blockchain/tdpn-chain
+    go run ./cmd/tdpnd --settlement-http-listen "127.0.0.1:${port}" --settlement-http-auth-token "${TOKEN}"
+  ) >"${LOG_FILE}" 2>&1 &
+  TDPND_PID=$!
+  ENDPOINT="http://127.0.0.1:${port}"
+}
+
+runtime_started="0"
+for attempt in $(seq 1 "${STARTUP_MAX_ATTEMPTS}"); do
+  PORT="$(pick_port)"
+  if [[ -z "${PORT}" ]]; then
+    echo "failed to allocate adapter roundtrip port"
+    exit 1
+  fi
+  : >"${LOG_FILE}"
+  launch_runtime "${PORT}"
+  if wait_for_health_ready "${ENDPOINT}/health"; then
+    runtime_started="1"
+    break
+  fi
+  if [[ "${attempt}" -lt "${STARTUP_MAX_ATTEMPTS}" ]] && bind_retry_log_match; then
+    if kill -0 "${TDPND_PID}" 2>/dev/null; then
+      signal_runtime INT
+      wait_for_runtime_exit 20 || true
+      if kill -0 "${TDPND_PID}" 2>/dev/null; then
+        signal_runtime TERM
+        wait_for_runtime_exit 20 || true
+      fi
+      if kill -0 "${TDPND_PID}" 2>/dev/null; then
+        signal_runtime KILL
+        wait_for_runtime_exit 20 || true
+      fi
+      wait "${TDPND_PID}" 2>/dev/null || true
+    fi
+    TDPND_PID=""
+    continue
+  fi
+  break
+done
+
+if [[ "${runtime_started}" != "1" ]]; then
+  echo "failed to start adapter roundtrip runtime after ${STARTUP_MAX_ATTEMPTS} attempts"
+  cat "${LOG_FILE}"
   exit 1
 fi
-TOKEN="adapter-roundtrip-token"
-ENDPOINT="http://127.0.0.1:${PORT}"
-
-(
-  cd blockchain/tdpn-chain
-  go run ./cmd/tdpnd --settlement-http-listen "127.0.0.1:${PORT}" --settlement-http-auth-token "${TOKEN}"
-) >"${LOG_FILE}" 2>&1 &
-TDPND_PID=$!
-
-wait_for_health_ready "${ENDPOINT}/health"
 
 cat >"${GO_PROG_FILE}" <<'GO'
 package main
@@ -242,6 +287,8 @@ func main() {
 GO
 
 COSMOS_BRIDGE_URL="${ENDPOINT}" COSMOS_BRIDGE_TOKEN="${TOKEN}" go run "${GO_PROG_FILE}"
+
+curl -sS -m 4 "${ENDPOINT}/x/vpnslashing/evidence/evidence-adapter-1" | grep -q '"ViolationType"[[:space:]]*:[[:space:]]*"double-sign"'
 
 signal_runtime INT
 if ! wait_for_runtime_exit 30; then

@@ -30,18 +30,19 @@ func NewKeeperWithStore(store KeeperStore) Keeper {
 }
 
 func (k *Keeper) UpsertAccrual(record types.RewardAccrual) {
+	normalized := normalizeAccrual(record)
+
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	k.store.UpsertAccrual(record)
+	k.store.UpsertAccrual(normalized)
 }
 
 // CreateAccrual inserts an accrual with idempotency semantics keyed by AccrualID.
 func (k *Keeper) CreateAccrual(record types.RewardAccrual) (types.RewardAccrual, error) {
-	if err := record.ValidateBasic(); err != nil {
+	normalized := normalizeAccrual(record)
+	if err := normalized.ValidateBasic(); err != nil {
 		return types.RewardAccrual{}, err
 	}
-
-	normalized := normalizeAccrual(record)
 
 	k.mu.Lock()
 	defer k.mu.Unlock()
@@ -62,9 +63,16 @@ func (k *Keeper) CreateAccrual(record types.RewardAccrual) (types.RewardAccrual,
 }
 
 func (k *Keeper) GetAccrual(accrualID string) (types.RewardAccrual, bool) {
+	normalizedID := normalizeAccrual(types.RewardAccrual{AccrualID: accrualID}).AccrualID
+
 	k.mu.RLock()
 	defer k.mu.RUnlock()
-	return k.store.GetAccrual(accrualID)
+
+	record, ok := k.store.GetAccrual(normalizedID)
+	if !ok {
+		return types.RewardAccrual{}, false
+	}
+	return normalizeAccrual(record), true
 }
 
 // ListAccruals returns all accrual records ordered by accrual ID ascending.
@@ -73,6 +81,9 @@ func (k *Keeper) ListAccruals() []types.RewardAccrual {
 	defer k.mu.RUnlock()
 
 	records := k.store.ListAccruals()
+	for i := range records {
+		records[i] = normalizeAccrual(records[i])
+	}
 	sort.Slice(records, func(i, j int) bool {
 		return records[i].AccrualID < records[j].AccrualID
 	})
@@ -80,18 +91,19 @@ func (k *Keeper) ListAccruals() []types.RewardAccrual {
 }
 
 func (k *Keeper) UpsertDistribution(record types.DistributionRecord) {
+	normalized := normalizeDistribution(record)
+
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	k.store.UpsertDistribution(record)
+	k.store.UpsertDistribution(normalized)
 }
 
 // RecordDistribution inserts a distribution with idempotency semantics keyed by DistributionID.
 func (k *Keeper) RecordDistribution(record types.DistributionRecord) (types.DistributionRecord, error) {
-	if err := record.ValidateBasic(); err != nil {
+	normalized := normalizeDistribution(record)
+	if err := normalized.ValidateBasic(); err != nil {
 		return types.DistributionRecord{}, err
 	}
-
-	normalized := normalizeDistribution(record)
 
 	k.mu.Lock()
 	defer k.mu.Unlock()
@@ -121,9 +133,16 @@ func (k *Keeper) RecordDistribution(record types.DistributionRecord) (types.Dist
 }
 
 func (k *Keeper) GetDistribution(distributionID string) (types.DistributionRecord, bool) {
+	normalizedID := normalizeDistribution(types.DistributionRecord{DistributionID: distributionID}).DistributionID
+
 	k.mu.RLock()
 	defer k.mu.RUnlock()
-	return k.store.GetDistribution(distributionID)
+
+	record, ok := k.store.GetDistribution(normalizedID)
+	if !ok {
+		return types.DistributionRecord{}, false
+	}
+	return normalizeDistribution(record), true
 }
 
 // ListDistributions returns all distribution records ordered by distribution ID ascending.
@@ -132,6 +151,9 @@ func (k *Keeper) ListDistributions() []types.DistributionRecord {
 	defer k.mu.RUnlock()
 
 	records := k.store.ListDistributions()
+	for i := range records {
+		records[i] = normalizeDistribution(records[i])
+	}
 	sort.Slice(records, func(i, j int) bool {
 		return records[i].DistributionID < records[j].DistributionID
 	})
@@ -155,17 +177,19 @@ func (k *Keeper) advanceAccrualForDistributionLocked(accrualID string) {
 }
 
 func normalizeAccrual(record types.RewardAccrual) types.RewardAccrual {
-	if record.OperationState == "" {
-		record.OperationState = chaintypes.ReconciliationPending
+	normalized := record.Canonicalize()
+	if normalized.OperationState == "" {
+		normalized.OperationState = chaintypes.ReconciliationPending
 	}
-	return record
+	return normalized
 }
 
 func normalizeDistribution(record types.DistributionRecord) types.DistributionRecord {
-	if record.Status == "" {
-		record.Status = chaintypes.ReconciliationSubmitted
+	normalized := record.Canonicalize()
+	if normalized.Status == "" {
+		normalized.Status = chaintypes.ReconciliationSubmitted
 	}
-	return record
+	return normalized
 }
 
 func accrualRecordsEqual(a, b types.RewardAccrual) bool {

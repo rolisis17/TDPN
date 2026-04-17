@@ -1,6 +1,10 @@
 package types
 
-import "testing"
+import (
+	"testing"
+
+	chaintypes "github.com/tdpn/tdpn-chain/types"
+)
 
 func TestSlashEvidenceValidateBasic(t *testing.T) {
 	t.Parallel()
@@ -206,6 +210,99 @@ func TestPenaltyDecisionValidateBasic(t *testing.T) {
 				if err.Error() != tc.wantErr {
 					t.Fatalf("expected error %q, got %q", tc.wantErr, err.Error())
 				}
+			}
+		})
+	}
+}
+
+func TestSlashEvidenceValidateBasicViolationType(t *testing.T) {
+	t.Parallel()
+
+	base := SlashEvidence{
+		EvidenceID: "evidence-violation-type-1",
+		Kind:       EvidenceKindObjective,
+		ProofHash:  "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+	}
+
+	t.Run("empty violation type accepted for backward compatibility", func(t *testing.T) {
+		t.Parallel()
+		record := base
+		record.ViolationType = ""
+		if err := record.ValidateBasic(); err != nil {
+			t.Fatalf("expected empty violation type to be accepted, got %v", err)
+		}
+	})
+
+	t.Run("whitespace-only violation type accepted for backward compatibility", func(t *testing.T) {
+		t.Parallel()
+		record := base
+		record.ViolationType = "  \n\t "
+		if err := record.ValidateBasic(); err != nil {
+			t.Fatalf("expected whitespace-only violation type to be accepted, got %v", err)
+		}
+	})
+
+	accepted := []string{
+		"double-sign",
+		"downtime-proof",
+		"invalid-settlement-proof",
+		"session-replay-proof",
+		"sponsor-overdraft-proof",
+		"  DOUBLE-SIGN  ",
+		"\nDowntime-Proof\t",
+		" Invalid-Settlement-Proof ",
+		"\tsession-replay-proof",
+		"  sponsor-overdraft-proof\n",
+	}
+	for _, violationType := range accepted {
+		violationType := violationType
+		t.Run("accepted objective violation type "+violationType, func(t *testing.T) {
+			t.Parallel()
+			record := base
+			record.ViolationType = violationType
+			if err := record.ValidateBasic(); err != nil {
+				t.Fatalf("expected violation type %q to be accepted, got %v", violationType, err)
+			}
+		})
+	}
+
+	t.Run("rejected non-objective violation type", func(t *testing.T) {
+		t.Parallel()
+		record := base
+		record.ViolationType = "manual-review-only"
+		err := record.ValidateBasic()
+		if err == nil {
+			t.Fatal("expected non-objective violation type to fail")
+		}
+		if err.Error() != "violation type must be one of: double-sign, downtime-proof, invalid-settlement-proof, session-replay-proof, sponsor-overdraft-proof" {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+}
+
+func TestSlashEvidenceValidateBasicAllowsTerminalLifecycleStatuses(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		status chaintypes.ReconciliationStatus
+	}{
+		{name: "confirmed", status: chaintypes.ReconciliationConfirmed},
+		{name: "failed", status: chaintypes.ReconciliationFailed},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			record := SlashEvidence{
+				EvidenceID: "evidence-status-" + tc.name,
+				Kind:       EvidenceKindObjective,
+				ProofHash:  "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+				Status:     tc.status,
+			}
+			if err := record.ValidateBasic(); err != nil {
+				t.Fatalf("expected status %q to remain compatible with objective evidence validation, got %v", tc.status, err)
 			}
 		})
 	}

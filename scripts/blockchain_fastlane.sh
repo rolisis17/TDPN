@@ -17,25 +17,50 @@ Usage:
     [--run-ci-phase6-cosmos-l1-contracts [0|1]] \
     [--run-ci-phase7-mainnet-cutover [0|1]] \
     [--run-blockchain-mainnet-activation-metrics [0|1]] \
+    [--blockchain-mainnet-activation-metrics-input-json PATH] \
+    [--blockchain-mainnet-activation-metrics-input-summary-json PATH] \
+    [--blockchain-mainnet-activation-metrics-input-canonical-json PATH] \
     [--blockchain-mainnet-activation-metrics-json PATH] \
     [--blockchain-mainnet-activation-metrics-summary-json PATH] \
     [--blockchain-mainnet-activation-metrics-source-json PATH] \
+    [--run-blockchain-mainnet-activation-operator-pack [0|1]] \
+    [--blockchain-mainnet-activation-operator-pack-summary-json PATH] \
     [--run-blockchain-mainnet-activation-gate [0|1]] \
     [--blockchain-mainnet-activation-gate-summary-json PATH] \
+    [--run-blockchain-bootstrap-governance-graduation-gate [0|1]] \
+    [--blockchain-bootstrap-governance-graduation-gate-summary-json PATH] \
     [--phase7-mainnet-cutover-summary-report-json PATH]
 
-Purpose:
+  Purpose:
   Run blockchain CI gates in deterministic order:
     1) scripts/ci_phase5_settlement_layer.sh
     2) scripts/ci_phase6_cosmos_l1_build_testnet.sh
     3) scripts/ci_phase6_cosmos_l1_contracts.sh
-    4) scripts/ci_phase7_mainnet_cutover.sh
-    5) scripts/blockchain_mainnet_activation_metrics.sh
-    6) scripts/blockchain_mainnet_activation_gate.sh
+    4) scripts/integration_slash_violation_type_contract_consistency.sh
+    5) scripts/integration_cosmos_record_normalization_contract_consistency.sh
+    6) scripts/integration_blockchain_cosmos_only_guardrail.sh
+    7) scripts/ci_phase7_mainnet_cutover.sh
+    8) scripts/blockchain_mainnet_activation_metrics.sh
+    9) scripts/blockchain_mainnet_activation_operator_pack.sh
+    10) scripts/blockchain_mainnet_activation_gate.sh
+    11) scripts/blockchain_bootstrap_graduation_gate.sh
 
 Dry-run mode:
   --dry-run 1 skips stage execution, records deterministic skip accounting,
   and still emits the runner summary JSON.
+
+Metrics input normalization:
+  --blockchain-mainnet-activation-metrics-input-json PATH optionally runs
+  scripts/blockchain_mainnet_activation_metrics_input.sh before metrics/gate
+  stages and injects the normalized canonical output as an additional source
+  artifact when metrics stage is enabled.
+
+Helper discoverability:
+  - Author canonical input with scripts/blockchain_mainnet_activation_metrics_input_template.sh
+    (easy-node: ./scripts/easy_node.sh blockchain-mainnet-activation-metrics-input-template).
+  - Run normalize + metrics + gates + optional roadmap refresh in one command with
+    scripts/blockchain_mainnet_activation_gate_cycle.sh
+    (easy-node: ./scripts/easy_node.sh blockchain-mainnet-activation-gate-cycle).
 USAGE
 }
 
@@ -170,15 +195,28 @@ run_ci_phase6_cosmos_l1_build_testnet="${BLOCKCHAIN_FASTLANE_RUN_CI_PHASE6_COSMO
 run_ci_phase6_cosmos_l1_contracts="${BLOCKCHAIN_FASTLANE_RUN_CI_PHASE6_COSMOS_L1_CONTRACTS:-1}"
 run_ci_phase7_mainnet_cutover="${BLOCKCHAIN_FASTLANE_RUN_CI_PHASE7_MAINNET_CUTOVER:-1}"
 run_blockchain_mainnet_activation_metrics="${BLOCKCHAIN_FASTLANE_RUN_BLOCKCHAIN_MAINNET_ACTIVATION_METRICS:-0}"
+blockchain_mainnet_activation_metrics_input_json="${BLOCKCHAIN_FASTLANE_BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_INPUT_JSON:-}"
+blockchain_mainnet_activation_metrics_input_summary_json="${BLOCKCHAIN_FASTLANE_BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_INPUT_SUMMARY_JSON:-}"
+blockchain_mainnet_activation_metrics_input_canonical_json="${BLOCKCHAIN_FASTLANE_BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_INPUT_CANONICAL_JSON:-}"
 blockchain_mainnet_activation_metrics_json="${BLOCKCHAIN_FASTLANE_BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_JSON:-}"
 blockchain_mainnet_activation_metrics_summary_json="${BLOCKCHAIN_FASTLANE_BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_SUMMARY_JSON:-}"
 blockchain_mainnet_activation_metrics_source_jsons_csv="${BLOCKCHAIN_FASTLANE_BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_SOURCE_JSONS:-}"
+blockchain_mainnet_activation_metrics_source_jsons_explicit=0
+run_blockchain_mainnet_activation_operator_pack="${BLOCKCHAIN_FASTLANE_RUN_BLOCKCHAIN_MAINNET_ACTIVATION_OPERATOR_PACK:-0}"
+blockchain_mainnet_activation_operator_pack_summary_json="${BLOCKCHAIN_FASTLANE_BLOCKCHAIN_MAINNET_ACTIVATION_OPERATOR_PACK_SUMMARY_JSON:-}"
 run_blockchain_mainnet_activation_gate="${BLOCKCHAIN_FASTLANE_RUN_BLOCKCHAIN_MAINNET_ACTIVATION_GATE:-1}"
+run_blockchain_mainnet_activation_gate_explicit=0
+if [[ -n "${BLOCKCHAIN_FASTLANE_RUN_BLOCKCHAIN_MAINNET_ACTIVATION_GATE+x}" ]]; then
+  run_blockchain_mainnet_activation_gate_explicit=1
+fi
 blockchain_mainnet_activation_gate_summary_json="${BLOCKCHAIN_FASTLANE_BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SUMMARY_JSON:-}"
+run_blockchain_bootstrap_governance_graduation_gate="${BLOCKCHAIN_FASTLANE_RUN_BLOCKCHAIN_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE:-0}"
+blockchain_bootstrap_governance_graduation_gate_summary_json="${BLOCKCHAIN_FASTLANE_BLOCKCHAIN_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_SUMMARY_JSON:-}"
 phase7_mainnet_cutover_summary_report_json="${BLOCKCHAIN_FASTLANE_PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_JSON:-}"
 declare -a blockchain_mainnet_activation_metrics_source_jsons=()
 
 if [[ -n "$(trim "$blockchain_mainnet_activation_metrics_source_jsons_csv")" ]]; then
+  blockchain_mainnet_activation_metrics_source_jsons_explicit=1
   append_csv_abs_paths_unique "$blockchain_mainnet_activation_metrics_source_jsons_csv" blockchain_mainnet_activation_metrics_source_jsons
 fi
 
@@ -257,6 +295,21 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --blockchain-mainnet-activation-metrics-input-json)
+      path_arg_or_die "--blockchain-mainnet-activation-metrics-input-json" "${2:-}"
+      blockchain_mainnet_activation_metrics_input_json="${2:-}"
+      shift 2
+      ;;
+    --blockchain-mainnet-activation-metrics-input-summary-json)
+      path_arg_or_die "--blockchain-mainnet-activation-metrics-input-summary-json" "${2:-}"
+      blockchain_mainnet_activation_metrics_input_summary_json="${2:-}"
+      shift 2
+      ;;
+    --blockchain-mainnet-activation-metrics-input-canonical-json)
+      path_arg_or_die "--blockchain-mainnet-activation-metrics-input-canonical-json" "${2:-}"
+      blockchain_mainnet_activation_metrics_input_canonical_json="${2:-}"
+      shift 2
+      ;;
     --blockchain-mainnet-activation-metrics-json)
       path_arg_or_die "--blockchain-mainnet-activation-metrics-json" "${2:-}"
       blockchain_mainnet_activation_metrics_json="${2:-}"
@@ -269,10 +322,26 @@ while [[ $# -gt 0 ]]; do
       ;;
     --blockchain-mainnet-activation-metrics-source-json)
       path_arg_or_die "--blockchain-mainnet-activation-metrics-source-json" "${2:-}"
+      blockchain_mainnet_activation_metrics_source_jsons_explicit=1
       append_unique_abs_path blockchain_mainnet_activation_metrics_source_jsons "${2:-}"
       shift 2
       ;;
+    --run-blockchain-mainnet-activation-operator-pack)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        run_blockchain_mainnet_activation_operator_pack="${2:-}"
+        shift 2
+      else
+        run_blockchain_mainnet_activation_operator_pack="1"
+        shift
+      fi
+      ;;
+    --blockchain-mainnet-activation-operator-pack-summary-json)
+      path_arg_or_die "--blockchain-mainnet-activation-operator-pack-summary-json" "${2:-}"
+      blockchain_mainnet_activation_operator_pack_summary_json="${2:-}"
+      shift 2
+      ;;
     --run-blockchain-mainnet-activation-gate)
+      run_blockchain_mainnet_activation_gate_explicit=1
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         run_blockchain_mainnet_activation_gate="${2:-}"
         shift 2
@@ -284,6 +353,20 @@ while [[ $# -gt 0 ]]; do
     --blockchain-mainnet-activation-gate-summary-json)
       path_arg_or_die "--blockchain-mainnet-activation-gate-summary-json" "${2:-}"
       blockchain_mainnet_activation_gate_summary_json="${2:-}"
+      shift 2
+      ;;
+    --run-blockchain-bootstrap-governance-graduation-gate)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        run_blockchain_bootstrap_governance_graduation_gate="${2:-}"
+        shift 2
+      else
+        run_blockchain_bootstrap_governance_graduation_gate="1"
+        shift
+      fi
+      ;;
+    --blockchain-bootstrap-governance-graduation-gate-summary-json)
+      path_arg_or_die "--blockchain-bootstrap-governance-graduation-gate-summary-json" "${2:-}"
+      blockchain_bootstrap_governance_graduation_gate_summary_json="${2:-}"
       shift 2
       ;;
     --phase7-mainnet-cutover-summary-report-json)
@@ -310,41 +393,72 @@ bool_arg_or_die "--run-ci-phase6-cosmos-l1-build-testnet" "$run_ci_phase6_cosmos
 bool_arg_or_die "--run-ci-phase6-cosmos-l1-contracts" "$run_ci_phase6_cosmos_l1_contracts"
 bool_arg_or_die "--run-ci-phase7-mainnet-cutover" "$run_ci_phase7_mainnet_cutover"
 bool_arg_or_die "--run-blockchain-mainnet-activation-metrics" "$run_blockchain_mainnet_activation_metrics"
+bool_arg_or_die "--run-blockchain-mainnet-activation-operator-pack" "$run_blockchain_mainnet_activation_operator_pack"
 bool_arg_or_die "--run-blockchain-mainnet-activation-gate" "$run_blockchain_mainnet_activation_gate"
+bool_arg_or_die "--run-blockchain-bootstrap-governance-graduation-gate" "$run_blockchain_bootstrap_governance_graduation_gate"
 
 ci_phase5_settlement_layer_script="${BLOCKCHAIN_FASTLANE_CI_PHASE5_SETTLEMENT_LAYER_SCRIPT:-$ROOT_DIR/scripts/ci_phase5_settlement_layer.sh}"
 ci_phase6_cosmos_l1_build_testnet_script="${BLOCKCHAIN_FASTLANE_CI_PHASE6_COSMOS_L1_BUILD_TESTNET_SCRIPT:-$ROOT_DIR/scripts/ci_phase6_cosmos_l1_build_testnet.sh}"
 ci_phase6_cosmos_l1_contracts_script="${BLOCKCHAIN_FASTLANE_CI_PHASE6_COSMOS_L1_CONTRACTS_SCRIPT:-$ROOT_DIR/scripts/ci_phase6_cosmos_l1_contracts.sh}"
+integration_slash_violation_type_contract_consistency_script="${BLOCKCHAIN_FASTLANE_INTEGRATION_SLASH_VIOLATION_TYPE_CONTRACT_CONSISTENCY_SCRIPT:-$ROOT_DIR/scripts/integration_slash_violation_type_contract_consistency.sh}"
+integration_cosmos_record_normalization_contract_consistency_script="${BLOCKCHAIN_FASTLANE_INTEGRATION_COSMOS_RECORD_NORMALIZATION_CONTRACT_CONSISTENCY_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_record_normalization_contract_consistency.sh}"
+integration_blockchain_cosmos_only_guardrail_script="${BLOCKCHAIN_FASTLANE_INTEGRATION_BLOCKCHAIN_COSMOS_ONLY_GUARDRAIL_SCRIPT:-$ROOT_DIR/scripts/integration_blockchain_cosmos_only_guardrail.sh}"
 ci_phase7_mainnet_cutover_script="${BLOCKCHAIN_FASTLANE_CI_PHASE7_MAINNET_CUTOVER_SCRIPT:-$ROOT_DIR/scripts/ci_phase7_mainnet_cutover.sh}"
 blockchain_mainnet_activation_metrics_script="${BLOCKCHAIN_FASTLANE_BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_SCRIPT:-$ROOT_DIR/scripts/blockchain_mainnet_activation_metrics.sh}"
+blockchain_mainnet_activation_metrics_input_script="${BLOCKCHAIN_FASTLANE_BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_INPUT_SCRIPT:-$ROOT_DIR/scripts/blockchain_mainnet_activation_metrics_input.sh}"
+blockchain_mainnet_activation_operator_pack_script="${BLOCKCHAIN_FASTLANE_BLOCKCHAIN_MAINNET_ACTIVATION_OPERATOR_PACK_SCRIPT:-$ROOT_DIR/scripts/blockchain_mainnet_activation_operator_pack.sh}"
 blockchain_mainnet_activation_gate_script="${BLOCKCHAIN_FASTLANE_BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SCRIPT:-$ROOT_DIR/scripts/blockchain_mainnet_activation_gate.sh}"
+blockchain_bootstrap_governance_graduation_gate_script="${BLOCKCHAIN_FASTLANE_BLOCKCHAIN_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_SCRIPT:-$ROOT_DIR/scripts/blockchain_bootstrap_graduation_gate.sh}"
 
 stage_ids=(
   "ci_phase5_settlement_layer"
   "ci_phase6_cosmos_l1_build_testnet"
   "ci_phase6_cosmos_l1_contracts"
+  "integration_slash_violation_type_contract_consistency"
+  "integration_cosmos_record_normalization_contract_consistency"
+  "integration_blockchain_cosmos_only_guardrail"
   "ci_phase7_mainnet_cutover"
   "blockchain_mainnet_activation_metrics"
+  "blockchain_mainnet_activation_operator_pack"
   "blockchain_mainnet_activation_gate"
+  "blockchain_bootstrap_governance_graduation_gate"
 )
 
 declare -A stage_script=(
   ["ci_phase5_settlement_layer"]="$ci_phase5_settlement_layer_script"
   ["ci_phase6_cosmos_l1_build_testnet"]="$ci_phase6_cosmos_l1_build_testnet_script"
   ["ci_phase6_cosmos_l1_contracts"]="$ci_phase6_cosmos_l1_contracts_script"
+  ["integration_slash_violation_type_contract_consistency"]="$integration_slash_violation_type_contract_consistency_script"
+  ["integration_cosmos_record_normalization_contract_consistency"]="$integration_cosmos_record_normalization_contract_consistency_script"
+  ["integration_blockchain_cosmos_only_guardrail"]="$integration_blockchain_cosmos_only_guardrail_script"
   ["ci_phase7_mainnet_cutover"]="$ci_phase7_mainnet_cutover_script"
   ["blockchain_mainnet_activation_metrics"]="$blockchain_mainnet_activation_metrics_script"
+  ["blockchain_mainnet_activation_operator_pack"]="$blockchain_mainnet_activation_operator_pack_script"
   ["blockchain_mainnet_activation_gate"]="$blockchain_mainnet_activation_gate_script"
+  ["blockchain_bootstrap_governance_graduation_gate"]="$blockchain_bootstrap_governance_graduation_gate_script"
 )
 
 declare -A stage_enabled=(
   ["ci_phase5_settlement_layer"]="$run_ci_phase5_settlement_layer"
   ["ci_phase6_cosmos_l1_build_testnet"]="$run_ci_phase6_cosmos_l1_build_testnet"
   ["ci_phase6_cosmos_l1_contracts"]="$run_ci_phase6_cosmos_l1_contracts"
+  ["integration_slash_violation_type_contract_consistency"]="1"
+  ["integration_cosmos_record_normalization_contract_consistency"]="1"
+  ["integration_blockchain_cosmos_only_guardrail"]="1"
   ["ci_phase7_mainnet_cutover"]="$run_ci_phase7_mainnet_cutover"
   ["blockchain_mainnet_activation_metrics"]="$run_blockchain_mainnet_activation_metrics"
+  ["blockchain_mainnet_activation_operator_pack"]="$run_blockchain_mainnet_activation_operator_pack"
   ["blockchain_mainnet_activation_gate"]="$run_blockchain_mainnet_activation_gate"
+  ["blockchain_bootstrap_governance_graduation_gate"]="$run_blockchain_bootstrap_governance_graduation_gate"
 )
+
+should_run_blockchain_mainnet_activation_metrics_input=0
+if [[ -n "$(trim "$blockchain_mainnet_activation_metrics_input_json")" ]] && [[ "$run_blockchain_mainnet_activation_metrics" == "1" || "$run_blockchain_mainnet_activation_gate" == "1" || "$run_blockchain_bootstrap_governance_graduation_gate" == "1" ]]; then
+  should_run_blockchain_mainnet_activation_metrics_input=1
+fi
+blockchain_mainnet_activation_metrics_input_normalized_this_run=0
+blockchain_activation_gate_metrics_json=""
+blockchain_activation_gate_metrics_source=""
 
 for stage_id in "${stage_ids[@]}"; do
   if [[ "${stage_enabled[$stage_id]}" == "1" && ! -x "${stage_script[$stage_id]}" ]]; then
@@ -352,6 +466,10 @@ for stage_id in "${stage_ids[@]}"; do
     exit 2
   fi
 done
+if [[ "$should_run_blockchain_mainnet_activation_metrics_input" == "1" && ! -x "$blockchain_mainnet_activation_metrics_input_script" ]]; then
+  echo "missing executable stage script: $blockchain_mainnet_activation_metrics_input_script"
+  exit 2
+fi
 
 run_stamp="$(date -u +%Y%m%d_%H%M%S)"
 if [[ -z "$reports_dir" ]]; then
@@ -373,6 +491,24 @@ fi
 if [[ -z "$blockchain_mainnet_activation_metrics_json" && "$run_blockchain_mainnet_activation_metrics" == "1" ]]; then
   blockchain_mainnet_activation_metrics_json="$reports_dir/blockchain_mainnet_activation_metrics.json"
 fi
+if [[ -n "$blockchain_mainnet_activation_metrics_input_json" ]]; then
+  path_arg_or_die "--blockchain-mainnet-activation-metrics-input-json" "$blockchain_mainnet_activation_metrics_input_json"
+  blockchain_mainnet_activation_metrics_input_json="$(abs_path "$blockchain_mainnet_activation_metrics_input_json")"
+fi
+if [[ -z "$blockchain_mainnet_activation_metrics_input_summary_json" && -n "$blockchain_mainnet_activation_metrics_input_json" ]]; then
+  blockchain_mainnet_activation_metrics_input_summary_json="$reports_dir/blockchain_mainnet_activation_metrics_input_summary.json"
+fi
+if [[ -n "$blockchain_mainnet_activation_metrics_input_summary_json" ]]; then
+  path_arg_or_die "--blockchain-mainnet-activation-metrics-input-summary-json" "$blockchain_mainnet_activation_metrics_input_summary_json"
+  blockchain_mainnet_activation_metrics_input_summary_json="$(abs_path "$blockchain_mainnet_activation_metrics_input_summary_json")"
+fi
+if [[ -z "$blockchain_mainnet_activation_metrics_input_canonical_json" && -n "$blockchain_mainnet_activation_metrics_input_json" ]]; then
+  blockchain_mainnet_activation_metrics_input_canonical_json="$reports_dir/blockchain_mainnet_activation_metrics_input.json"
+fi
+if [[ -n "$blockchain_mainnet_activation_metrics_input_canonical_json" ]]; then
+  path_arg_or_die "--blockchain-mainnet-activation-metrics-input-canonical-json" "$blockchain_mainnet_activation_metrics_input_canonical_json"
+  blockchain_mainnet_activation_metrics_input_canonical_json="$(abs_path "$blockchain_mainnet_activation_metrics_input_canonical_json")"
+fi
 if [[ -n "$blockchain_mainnet_activation_metrics_json" ]]; then
   path_arg_or_die "--blockchain-mainnet-activation-metrics-json" "$blockchain_mainnet_activation_metrics_json"
   blockchain_mainnet_activation_metrics_json="$(abs_path "$blockchain_mainnet_activation_metrics_json")"
@@ -384,7 +520,57 @@ if [[ -n "$blockchain_mainnet_activation_metrics_summary_json" ]]; then
   path_arg_or_die "--blockchain-mainnet-activation-metrics-summary-json" "$blockchain_mainnet_activation_metrics_summary_json"
   blockchain_mainnet_activation_metrics_summary_json="$(abs_path "$blockchain_mainnet_activation_metrics_summary_json")"
 fi
-if [[ "$run_blockchain_mainnet_activation_metrics" == "1" && ${#blockchain_mainnet_activation_metrics_source_jsons[@]} -eq 0 ]]; then
+if [[ "$should_run_blockchain_mainnet_activation_metrics_input" == "1" ]]; then
+  metrics_input_cmd=(
+    "$blockchain_mainnet_activation_metrics_input_script"
+    --input-json "$blockchain_mainnet_activation_metrics_input_json"
+    --summary-json "$blockchain_mainnet_activation_metrics_input_summary_json"
+    --canonical-summary-json "$blockchain_mainnet_activation_metrics_input_canonical_json"
+    --print-summary-json 0
+  )
+  echo "[blockchain-fastlane] step=blockchain_mainnet_activation_metrics_input status=running"
+  if "${metrics_input_cmd[@]}"; then
+    echo "[blockchain-fastlane] step=blockchain_mainnet_activation_metrics_input status=pass rc=0"
+  else
+    metrics_input_rc=$?
+    echo "[blockchain-fastlane] step=blockchain_mainnet_activation_metrics_input status=fail rc=${metrics_input_rc}"
+    exit "$metrics_input_rc"
+  fi
+  blockchain_mainnet_activation_metrics_input_normalized_this_run=1
+  if [[ "$run_blockchain_mainnet_activation_metrics" == "1" ]]; then
+    append_unique_abs_path blockchain_mainnet_activation_metrics_source_jsons "$blockchain_mainnet_activation_metrics_input_canonical_json"
+  fi
+fi
+blockchain_activation_gate_metrics_json="$blockchain_mainnet_activation_metrics_json"
+if [[ -n "$blockchain_activation_gate_metrics_json" ]]; then
+  blockchain_activation_gate_metrics_source="activation_metrics_json"
+elif [[ "$blockchain_mainnet_activation_metrics_input_normalized_this_run" == "1" ]]; then
+  blockchain_activation_gate_metrics_json="$blockchain_mainnet_activation_metrics_input_canonical_json"
+  blockchain_activation_gate_metrics_source="metrics_input_canonical_json"
+fi
+blockchain_mainnet_activation_gate_missing_metrics_prereq=0
+if [[ "$run_blockchain_mainnet_activation_gate" == "1" && "$run_blockchain_mainnet_activation_gate_explicit" != "1" && -z "$blockchain_activation_gate_metrics_json" ]]; then
+  blockchain_mainnet_activation_gate_missing_metrics_prereq=1
+fi
+
+blockchain_mainnet_activation_operator_pack_reports_dir=""
+blockchain_mainnet_activation_operator_pack_canonical_summary_json=""
+if [[ "$run_blockchain_mainnet_activation_operator_pack" == "1" ]]; then
+  blockchain_mainnet_activation_operator_pack_reports_dir="$reports_dir/blockchain_mainnet_activation_operator_pack"
+  blockchain_mainnet_activation_operator_pack_canonical_summary_json="$reports_dir/blockchain_mainnet_activation_operator_pack_summary.json"
+  if [[ -z "$blockchain_mainnet_activation_operator_pack_summary_json" ]]; then
+    blockchain_mainnet_activation_operator_pack_summary_json="$blockchain_mainnet_activation_operator_pack_canonical_summary_json"
+  fi
+fi
+if [[ -n "$blockchain_mainnet_activation_operator_pack_summary_json" ]]; then
+  path_arg_or_die "--blockchain-mainnet-activation-operator-pack-summary-json" "$blockchain_mainnet_activation_operator_pack_summary_json"
+  blockchain_mainnet_activation_operator_pack_summary_json="$(abs_path "$blockchain_mainnet_activation_operator_pack_summary_json")"
+fi
+if [[ -n "$blockchain_mainnet_activation_operator_pack_canonical_summary_json" ]]; then
+  blockchain_mainnet_activation_operator_pack_canonical_summary_json="$(abs_path "$blockchain_mainnet_activation_operator_pack_canonical_summary_json")"
+fi
+
+if [[ "$run_blockchain_mainnet_activation_metrics" == "1" && "$blockchain_mainnet_activation_metrics_source_jsons_explicit" == "0" ]]; then
   append_unique_abs_path blockchain_mainnet_activation_metrics_source_jsons "$ROOT_DIR/.easy-node-logs/phase5_settlement_layer_handoff_check_summary.json"
   append_unique_abs_path blockchain_mainnet_activation_metrics_source_jsons "$ROOT_DIR/.easy-node-logs/phase6_cosmos_l1_build_testnet_handoff_check_summary.json"
   append_unique_abs_path blockchain_mainnet_activation_metrics_source_jsons "$ROOT_DIR/.easy-node-logs/phase7_mainnet_cutover_summary_report.json"
@@ -396,6 +582,13 @@ fi
 if [[ -n "$blockchain_mainnet_activation_gate_summary_json" ]]; then
   path_arg_or_die "--blockchain-mainnet-activation-gate-summary-json" "$blockchain_mainnet_activation_gate_summary_json"
   blockchain_mainnet_activation_gate_summary_json="$(abs_path "$blockchain_mainnet_activation_gate_summary_json")"
+fi
+if [[ -z "$blockchain_bootstrap_governance_graduation_gate_summary_json" && "$run_blockchain_bootstrap_governance_graduation_gate" == "1" ]]; then
+  blockchain_bootstrap_governance_graduation_gate_summary_json="$reports_dir/blockchain_bootstrap_governance_graduation_gate_summary.json"
+fi
+if [[ -n "$blockchain_bootstrap_governance_graduation_gate_summary_json" ]]; then
+  path_arg_or_die "--blockchain-bootstrap-governance-graduation-gate-summary-json" "$blockchain_bootstrap_governance_graduation_gate_summary_json"
+  blockchain_bootstrap_governance_graduation_gate_summary_json="$(abs_path "$blockchain_bootstrap_governance_graduation_gate_summary_json")"
 fi
 if [[ -z "$phase7_mainnet_cutover_summary_report_json" ]] && [[ "$run_ci_phase7_mainnet_cutover" == "1" || "$run_blockchain_mainnet_activation_metrics" == "1" || "$run_blockchain_mainnet_activation_gate" == "1" ]]; then
   # Prefer the current fastlane reports_dir artifact when Phase-7 is running so
@@ -422,8 +615,20 @@ fi
 if [[ -n "$blockchain_mainnet_activation_metrics_summary_json" ]]; then
   mkdir -p "$(dirname "$blockchain_mainnet_activation_metrics_summary_json")"
 fi
+if [[ -n "$blockchain_mainnet_activation_operator_pack_summary_json" ]]; then
+  mkdir -p "$(dirname "$blockchain_mainnet_activation_operator_pack_summary_json")"
+fi
+if [[ -n "$blockchain_mainnet_activation_operator_pack_canonical_summary_json" ]]; then
+  mkdir -p "$(dirname "$blockchain_mainnet_activation_operator_pack_canonical_summary_json")"
+fi
+if [[ -n "$blockchain_mainnet_activation_operator_pack_reports_dir" ]]; then
+  mkdir -p "$blockchain_mainnet_activation_operator_pack_reports_dir"
+fi
 if [[ -n "$blockchain_mainnet_activation_gate_summary_json" ]]; then
   mkdir -p "$(dirname "$blockchain_mainnet_activation_gate_summary_json")"
+fi
+if [[ -n "$blockchain_bootstrap_governance_graduation_gate_summary_json" ]]; then
+  mkdir -p "$(dirname "$blockchain_bootstrap_governance_graduation_gate_summary_json")"
 fi
 
 blockchain_mainnet_activation_metrics_source_jsons_json="$(array_to_json blockchain_mainnet_activation_metrics_source_jsons)"
@@ -454,6 +659,7 @@ phase7_mainnet_cutover_summary_report_cosmos_keeper_coverage_floor_ok_json="null
 phase7_mainnet_cutover_summary_report_cosmos_app_coverage_floor_ok_json="null"
 phase7_mainnet_cutover_summary_report_dual_write_parity_ok_json="null"
 phase7_mainnet_cutover_summary_report_mainnet_activation_gate_go_ok_json="null"
+phase7_mainnet_cutover_summary_report_bootstrap_governance_graduation_gate_go_ok_json="null"
 
 if [[ -n "$phase7_mainnet_cutover_summary_report_json" ]]; then
   if [[ -f "$phase7_mainnet_cutover_summary_report_json" ]]; then
@@ -469,6 +675,7 @@ if [[ -n "$phase7_mainnet_cutover_summary_report_json" ]]; then
       phase7_mainnet_cutover_summary_report_cosmos_app_coverage_floor_ok_json="$(phase7_signal_bool_or_null "$phase7_mainnet_cutover_summary_report_json" '.signals.cosmos_app_coverage_floor_ok, .summaries.check.signal_snapshot.cosmos_app_coverage_floor_ok, .summaries.run.signal_snapshot.cosmos_app_coverage_floor_ok, .summaries.handoff_check.signal_snapshot.cosmos_app_coverage_floor_ok, .summaries.handoff_run.signal_snapshot.cosmos_app_coverage_floor_ok, .steps.phase7_mainnet_cutover_check.signal_snapshot.cosmos_app_coverage_floor_ok, .handoff.cosmos_app_coverage_floor_ok, .cosmos_app_coverage_floor_ok')"
       phase7_mainnet_cutover_summary_report_dual_write_parity_ok_json="$(phase7_signal_bool_or_null "$phase7_mainnet_cutover_summary_report_json" '.signals.dual_write_parity_ok, .signals.dual_write_parity, .summaries.check.signal_snapshot.dual_write_parity_ok, .summaries.check.signal_snapshot.dual_write_parity, .summaries.run.signal_snapshot.dual_write_parity_ok, .summaries.run.signal_snapshot.dual_write_parity, .summaries.handoff_check.signal_snapshot.dual_write_parity_ok, .summaries.handoff_check.signal_snapshot.dual_write_parity, .summaries.handoff_run.signal_snapshot.dual_write_parity_ok, .summaries.handoff_run.signal_snapshot.dual_write_parity, .steps.phase7_mainnet_cutover_check.signal_snapshot.dual_write_parity_ok, .steps.phase7_mainnet_cutover_check.signal_snapshot.dual_write_parity, .handoff.dual_write_parity_ok, .handoff.dual_write_parity, .dual_write_parity_ok, .dual_write_parity')"
       phase7_mainnet_cutover_summary_report_mainnet_activation_gate_go_ok_json="$(phase7_signal_bool_or_null "$phase7_mainnet_cutover_summary_report_json" '.signals.mainnet_activation_gate_go_ok, .signals.mainnet_activation_gate_go, .summaries.check.signal_snapshot.mainnet_activation_gate_go_ok, .summaries.check.signal_snapshot.mainnet_activation_gate_go, .summaries.run.signal_snapshot.mainnet_activation_gate_go_ok, .summaries.run.signal_snapshot.mainnet_activation_gate_go, .summaries.handoff_check.signal_snapshot.mainnet_activation_gate_go_ok, .summaries.handoff_check.signal_snapshot.mainnet_activation_gate_go, .summaries.handoff_run.signal_snapshot.mainnet_activation_gate_go_ok, .summaries.handoff_run.signal_snapshot.mainnet_activation_gate_go, .steps.phase7_mainnet_cutover_check.signal_snapshot.mainnet_activation_gate_go_ok, .steps.phase7_mainnet_cutover_check.signal_snapshot.mainnet_activation_gate_go, .handoff.mainnet_activation_gate_go_ok, .handoff.mainnet_activation_gate_go, .mainnet_activation_gate_go_ok, .mainnet_activation_gate_go')"
+      phase7_mainnet_cutover_summary_report_bootstrap_governance_graduation_gate_go_ok_json="$(phase7_signal_bool_or_null "$phase7_mainnet_cutover_summary_report_json" '.signals.bootstrap_governance_graduation_gate_go_ok, .signals.bootstrap_governance_graduation_gate_go, .summaries.check.signal_snapshot.bootstrap_governance_graduation_gate_go_ok, .summaries.check.signal_snapshot.bootstrap_governance_graduation_gate_go, .summaries.run.signal_snapshot.bootstrap_governance_graduation_gate_go_ok, .summaries.run.signal_snapshot.bootstrap_governance_graduation_gate_go, .summaries.handoff_check.signal_snapshot.bootstrap_governance_graduation_gate_go_ok, .summaries.handoff_check.signal_snapshot.bootstrap_governance_graduation_gate_go, .summaries.handoff_run.signal_snapshot.bootstrap_governance_graduation_gate_go_ok, .summaries.handoff_run.signal_snapshot.bootstrap_governance_graduation_gate_go, .steps.phase7_mainnet_cutover_check.signal_snapshot.bootstrap_governance_graduation_gate_go_ok, .steps.phase7_mainnet_cutover_check.signal_snapshot.bootstrap_governance_graduation_gate_go, .handoff.bootstrap_governance_graduation_gate_go_ok, .handoff.bootstrap_governance_graduation_gate_go, .bootstrap_governance_graduation_gate_go_ok, .bootstrap_governance_graduation_gate_go')"
     else
       phase7_mainnet_cutover_summary_report_status_json="invalid"
     fi
@@ -494,23 +701,47 @@ for stage_id in "${stage_ids[@]}"; do
 
   case "$stage_id" in
     "blockchain_mainnet_activation_metrics")
-      if [[ -n "$blockchain_mainnet_activation_metrics_json" ]]; then
-        stage_args+=(--metrics-json "$blockchain_mainnet_activation_metrics_json")
-      fi
       if [[ -n "$blockchain_mainnet_activation_metrics_summary_json" ]]; then
         stage_args+=(--summary-json "$blockchain_mainnet_activation_metrics_summary_json")
+      fi
+      if [[ -n "$blockchain_mainnet_activation_metrics_json" ]]; then
+        stage_args+=(--canonical-metrics-json "$blockchain_mainnet_activation_metrics_json")
       fi
       for source_json in "${blockchain_mainnet_activation_metrics_source_jsons[@]}"; do
         stage_args+=(--source-json "$source_json")
       done
       stage_args+=(--print-summary-json 0)
       ;;
+    "blockchain_mainnet_activation_operator_pack")
+      if [[ -n "$blockchain_mainnet_activation_operator_pack_reports_dir" ]]; then
+        stage_args+=(--reports-dir "$blockchain_mainnet_activation_operator_pack_reports_dir")
+      fi
+      if [[ -n "$blockchain_mainnet_activation_operator_pack_summary_json" ]]; then
+        stage_args+=(--summary-json "$blockchain_mainnet_activation_operator_pack_summary_json")
+      fi
+      if [[ -n "$blockchain_mainnet_activation_operator_pack_canonical_summary_json" && "$blockchain_mainnet_activation_operator_pack_canonical_summary_json" != "$blockchain_mainnet_activation_operator_pack_summary_json" ]]; then
+        stage_args+=(--canonical-summary-json "$blockchain_mainnet_activation_operator_pack_canonical_summary_json")
+      fi
+      if [[ -n "$blockchain_mainnet_activation_metrics_summary_json" ]]; then
+        stage_args+=(--metrics-summary-json "$blockchain_mainnet_activation_metrics_summary_json")
+      fi
+      stage_args+=(--print-summary-json 0)
+      ;;
     "blockchain_mainnet_activation_gate")
-      if [[ -n "$blockchain_mainnet_activation_metrics_json" ]]; then
-        stage_args+=(--metrics-json "$blockchain_mainnet_activation_metrics_json")
+      if [[ -n "$blockchain_activation_gate_metrics_json" ]]; then
+        stage_args+=(--metrics-json "$blockchain_activation_gate_metrics_json")
       fi
       if [[ -n "$blockchain_mainnet_activation_gate_summary_json" ]]; then
         stage_args+=(--summary-json "$blockchain_mainnet_activation_gate_summary_json")
+      fi
+      stage_args+=(--fail-close 1)
+      ;;
+    "blockchain_bootstrap_governance_graduation_gate")
+      if [[ -n "$blockchain_activation_gate_metrics_json" ]]; then
+        stage_args+=(--metrics-json "$blockchain_activation_gate_metrics_json")
+      fi
+      if [[ -n "$blockchain_bootstrap_governance_graduation_gate_summary_json" ]]; then
+        stage_args+=(--summary-json "$blockchain_bootstrap_governance_graduation_gate_summary_json")
       fi
       stage_args+=(--fail-close 1)
       ;;
@@ -521,6 +752,9 @@ for stage_id in "${stage_ids[@]}"; do
     if [[ "$dry_run" == "1" ]]; then
       stage_reason["$stage_id"]="dry-run"
       echo "[blockchain-fastlane] step=${stage_id} status=skip reason=dry-run"
+    elif [[ "$stage_id" == "blockchain_mainnet_activation_gate" && "$blockchain_mainnet_activation_gate_missing_metrics_prereq" == "1" ]]; then
+      stage_reason["$stage_id"]="missing_metrics_prereq"
+      echo "[blockchain-fastlane] step=${stage_id} status=skip reason=missing_metrics_prereq"
     elif run_step "$stage_id" "${stage_args[@]}"; then
       stage_status["$stage_id"]="pass"
       stage_rc["$stage_id"]=0
@@ -550,10 +784,16 @@ for stage_id in "${stage_ids[@]}"; do
     "blockchain_mainnet_activation_metrics")
       stage_artifacts_json="$(
         jq -n \
+          --arg metrics_input_json "$blockchain_mainnet_activation_metrics_input_json" \
+          --arg metrics_input_summary_json "$blockchain_mainnet_activation_metrics_input_summary_json" \
+          --arg metrics_input_canonical_json "$blockchain_mainnet_activation_metrics_input_canonical_json" \
           --arg metrics_json "$blockchain_mainnet_activation_metrics_json" \
           --arg summary_json "$blockchain_mainnet_activation_metrics_summary_json" \
           --argjson source_jsons "$blockchain_mainnet_activation_metrics_source_jsons_json" \
           '{
+            metrics_input_json: (if $metrics_input_json == "" then null else $metrics_input_json end),
+            metrics_input_summary_json: (if $metrics_input_summary_json == "" then null else $metrics_input_summary_json end),
+            metrics_input_canonical_json: (if $metrics_input_canonical_json == "" then null else $metrics_input_canonical_json end),
             metrics_json: (if $metrics_json == "" then null else $metrics_json end),
             summary_json: (if $summary_json == "" then null else $summary_json end),
             source_jsons: $source_jsons
@@ -563,10 +803,40 @@ for stage_id in "${stage_ids[@]}"; do
     "blockchain_mainnet_activation_gate")
       stage_artifacts_json="$(
         jq -n \
-          --arg metrics_json "$blockchain_mainnet_activation_metrics_json" \
+          --arg metrics_json "$blockchain_activation_gate_metrics_json" \
+          --arg metrics_source "$blockchain_activation_gate_metrics_source" \
           --arg summary_json "$blockchain_mainnet_activation_gate_summary_json" \
           '{
             metrics_json: (if $metrics_json == "" then null else $metrics_json end),
+            metrics_source: (if $metrics_source == "" then null else $metrics_source end),
+            summary_json: (if $summary_json == "" then null else $summary_json end)
+          }'
+      )"
+      ;;
+    "blockchain_mainnet_activation_operator_pack")
+      stage_artifacts_json="$(
+        jq -n \
+          --arg reports_dir "$blockchain_mainnet_activation_operator_pack_reports_dir" \
+          --arg summary_json "$blockchain_mainnet_activation_operator_pack_summary_json" \
+          --arg canonical_summary_json "$blockchain_mainnet_activation_operator_pack_canonical_summary_json" \
+          --arg metrics_summary_json "$blockchain_mainnet_activation_metrics_summary_json" \
+          '{
+            reports_dir: (if $reports_dir == "" then null else $reports_dir end),
+            summary_json: (if $summary_json == "" then null else $summary_json end),
+            canonical_summary_json: (if $canonical_summary_json == "" then null else $canonical_summary_json end),
+            metrics_summary_json: (if $metrics_summary_json == "" then null else $metrics_summary_json end)
+          }'
+      )"
+      ;;
+    "blockchain_bootstrap_governance_graduation_gate")
+      stage_artifacts_json="$(
+        jq -n \
+          --arg metrics_json "$blockchain_activation_gate_metrics_json" \
+          --arg metrics_source "$blockchain_activation_gate_metrics_source" \
+          --arg summary_json "$blockchain_bootstrap_governance_graduation_gate_summary_json" \
+          '{
+            metrics_json: (if $metrics_json == "" then null else $metrics_json end),
+            metrics_source: (if $metrics_source == "" then null else $metrics_source end),
             summary_json: (if $summary_json == "" then null else $summary_json end)
           }'
       )"
@@ -586,6 +856,7 @@ for stage_id in "${stage_ids[@]}"; do
           --argjson cosmos_app_coverage_floor_ok "$phase7_mainnet_cutover_summary_report_cosmos_app_coverage_floor_ok_json" \
           --argjson dual_write_parity_ok "$phase7_mainnet_cutover_summary_report_dual_write_parity_ok_json" \
           --argjson mainnet_activation_gate_go_ok "$phase7_mainnet_cutover_summary_report_mainnet_activation_gate_go_ok_json" \
+          --argjson bootstrap_governance_graduation_gate_go_ok "$phase7_mainnet_cutover_summary_report_bootstrap_governance_graduation_gate_go_ok_json" \
           '{
             phase7_mainnet_cutover_summary_report: {
               input_summary_json: (if $input_summary_json == "" then null else $input_summary_json end),
@@ -600,7 +871,8 @@ for stage_id in "${stage_ids[@]}"; do
                 cosmos_keeper_coverage_floor_ok: $cosmos_keeper_coverage_floor_ok,
                 cosmos_app_coverage_floor_ok: $cosmos_app_coverage_floor_ok,
                 dual_write_parity_ok: $dual_write_parity_ok,
-                mainnet_activation_gate_go_ok: $mainnet_activation_gate_go_ok
+                mainnet_activation_gate_go_ok: $mainnet_activation_gate_go_ok,
+                bootstrap_governance_graduation_gate_go_ok: $bootstrap_governance_graduation_gate_go_ok
               }
             }
           }'
@@ -649,11 +921,21 @@ jq -n \
   --arg run_ci_phase6_cosmos_l1_contracts "$run_ci_phase6_cosmos_l1_contracts" \
   --arg run_ci_phase7_mainnet_cutover "$run_ci_phase7_mainnet_cutover" \
   --arg run_blockchain_mainnet_activation_metrics "$run_blockchain_mainnet_activation_metrics" \
+  --arg blockchain_mainnet_activation_metrics_input_json "$blockchain_mainnet_activation_metrics_input_json" \
+  --arg blockchain_mainnet_activation_metrics_input_summary_json "$blockchain_mainnet_activation_metrics_input_summary_json" \
+  --arg blockchain_mainnet_activation_metrics_input_canonical_json "$blockchain_mainnet_activation_metrics_input_canonical_json" \
   --arg blockchain_mainnet_activation_metrics_json "$blockchain_mainnet_activation_metrics_json" \
   --arg blockchain_mainnet_activation_metrics_summary_json "$blockchain_mainnet_activation_metrics_summary_json" \
   --argjson blockchain_mainnet_activation_metrics_source_jsons "$blockchain_mainnet_activation_metrics_source_jsons_json" \
+  --arg run_blockchain_mainnet_activation_operator_pack "$run_blockchain_mainnet_activation_operator_pack" \
+  --arg blockchain_mainnet_activation_operator_pack_summary_json "$blockchain_mainnet_activation_operator_pack_summary_json" \
+  --arg blockchain_mainnet_activation_operator_pack_canonical_summary_json "$blockchain_mainnet_activation_operator_pack_canonical_summary_json" \
+  --arg blockchain_mainnet_activation_gate_metrics_json "$blockchain_activation_gate_metrics_json" \
+  --arg blockchain_mainnet_activation_gate_metrics_source "$blockchain_activation_gate_metrics_source" \
   --arg run_blockchain_mainnet_activation_gate "$run_blockchain_mainnet_activation_gate" \
   --arg blockchain_mainnet_activation_gate_summary_json "$blockchain_mainnet_activation_gate_summary_json" \
+  --arg run_blockchain_bootstrap_governance_graduation_gate "$run_blockchain_bootstrap_governance_graduation_gate" \
+  --arg blockchain_bootstrap_governance_graduation_gate_summary_json "$blockchain_bootstrap_governance_graduation_gate_summary_json" \
   --arg phase7_mainnet_cutover_summary_report_json "$phase7_mainnet_cutover_summary_report_json" \
   --argjson phase7_mainnet_cutover_summary_report_available "$phase7_mainnet_cutover_summary_report_available_json" \
   --arg phase7_mainnet_cutover_summary_report_status "$phase7_mainnet_cutover_summary_report_status_json" \
@@ -666,6 +948,7 @@ jq -n \
   --argjson phase7_mainnet_cutover_summary_report_cosmos_app_coverage_floor_ok "$phase7_mainnet_cutover_summary_report_cosmos_app_coverage_floor_ok_json" \
   --argjson phase7_mainnet_cutover_summary_report_dual_write_parity_ok "$phase7_mainnet_cutover_summary_report_dual_write_parity_ok_json" \
   --argjson phase7_mainnet_cutover_summary_report_mainnet_activation_gate_go_ok "$phase7_mainnet_cutover_summary_report_mainnet_activation_gate_go_ok_json" \
+  --argjson phase7_mainnet_cutover_summary_report_bootstrap_governance_graduation_gate_go_ok "$phase7_mainnet_cutover_summary_report_bootstrap_governance_graduation_gate_go_ok_json" \
   --argjson steps "$steps_json" \
   '{
     version: 1,
@@ -685,11 +968,21 @@ jq -n \
       run_ci_phase6_cosmos_l1_contracts: ($run_ci_phase6_cosmos_l1_contracts == "1"),
       run_ci_phase7_mainnet_cutover: ($run_ci_phase7_mainnet_cutover == "1"),
       run_blockchain_mainnet_activation_metrics: ($run_blockchain_mainnet_activation_metrics == "1"),
+      blockchain_mainnet_activation_metrics_input_json: (if $blockchain_mainnet_activation_metrics_input_json == "" then null else $blockchain_mainnet_activation_metrics_input_json end),
+      blockchain_mainnet_activation_metrics_input_summary_json: (if $blockchain_mainnet_activation_metrics_input_summary_json == "" then null else $blockchain_mainnet_activation_metrics_input_summary_json end),
+      blockchain_mainnet_activation_metrics_input_canonical_json: (if $blockchain_mainnet_activation_metrics_input_canonical_json == "" then null else $blockchain_mainnet_activation_metrics_input_canonical_json end),
       blockchain_mainnet_activation_metrics_json: (if $blockchain_mainnet_activation_metrics_json == "" then null else $blockchain_mainnet_activation_metrics_json end),
       blockchain_mainnet_activation_metrics_summary_json: (if $blockchain_mainnet_activation_metrics_summary_json == "" then null else $blockchain_mainnet_activation_metrics_summary_json end),
       blockchain_mainnet_activation_metrics_source_jsons: $blockchain_mainnet_activation_metrics_source_jsons,
+      run_blockchain_mainnet_activation_operator_pack: ($run_blockchain_mainnet_activation_operator_pack == "1"),
+      blockchain_mainnet_activation_operator_pack_summary_json: (if $blockchain_mainnet_activation_operator_pack_summary_json == "" then null else $blockchain_mainnet_activation_operator_pack_summary_json end),
+      blockchain_mainnet_activation_operator_pack_canonical_summary_json: (if $blockchain_mainnet_activation_operator_pack_canonical_summary_json == "" then null else $blockchain_mainnet_activation_operator_pack_canonical_summary_json end),
+      blockchain_mainnet_activation_gate_metrics_json: (if $blockchain_mainnet_activation_gate_metrics_json == "" then null else $blockchain_mainnet_activation_gate_metrics_json end),
+      blockchain_mainnet_activation_gate_metrics_source: (if $blockchain_mainnet_activation_gate_metrics_source == "" then null else $blockchain_mainnet_activation_gate_metrics_source end),
       run_blockchain_mainnet_activation_gate: ($run_blockchain_mainnet_activation_gate == "1"),
       blockchain_mainnet_activation_gate_summary_json: (if $blockchain_mainnet_activation_gate_summary_json == "" then null else $blockchain_mainnet_activation_gate_summary_json end),
+      run_blockchain_bootstrap_governance_graduation_gate: ($run_blockchain_bootstrap_governance_graduation_gate == "1"),
+      blockchain_bootstrap_governance_graduation_gate_summary_json: (if $blockchain_bootstrap_governance_graduation_gate_summary_json == "" then null else $blockchain_bootstrap_governance_graduation_gate_summary_json end),
       phase7_mainnet_cutover_summary_report_json: (if $phase7_mainnet_cutover_summary_report_json == "" then null else $phase7_mainnet_cutover_summary_report_json end)
     },
     steps: $steps,
@@ -706,17 +999,26 @@ jq -n \
         cosmos_keeper_coverage_floor_ok: $phase7_mainnet_cutover_summary_report_cosmos_keeper_coverage_floor_ok,
         cosmos_app_coverage_floor_ok: $phase7_mainnet_cutover_summary_report_cosmos_app_coverage_floor_ok,
         dual_write_parity_ok: $phase7_mainnet_cutover_summary_report_dual_write_parity_ok,
-        mainnet_activation_gate_go_ok: $phase7_mainnet_cutover_summary_report_mainnet_activation_gate_go_ok
+        mainnet_activation_gate_go_ok: $phase7_mainnet_cutover_summary_report_mainnet_activation_gate_go_ok,
+        bootstrap_governance_graduation_gate_go_ok: $phase7_mainnet_cutover_summary_report_bootstrap_governance_graduation_gate_go_ok
       }
     },
     artifacts: {
       reports_dir: $reports_dir,
       summary_json: $summary_json,
       canonical_summary_json: $canonical_summary_json,
+      blockchain_mainnet_activation_metrics_input_json: (if $blockchain_mainnet_activation_metrics_input_json == "" then null else $blockchain_mainnet_activation_metrics_input_json end),
+      blockchain_mainnet_activation_metrics_input_summary_json: (if $blockchain_mainnet_activation_metrics_input_summary_json == "" then null else $blockchain_mainnet_activation_metrics_input_summary_json end),
+      blockchain_mainnet_activation_metrics_input_canonical_json: (if $blockchain_mainnet_activation_metrics_input_canonical_json == "" then null else $blockchain_mainnet_activation_metrics_input_canonical_json end),
       blockchain_mainnet_activation_metrics_json: (if $blockchain_mainnet_activation_metrics_json == "" then null else $blockchain_mainnet_activation_metrics_json end),
       blockchain_mainnet_activation_metrics_summary_json: (if $blockchain_mainnet_activation_metrics_summary_json == "" then null else $blockchain_mainnet_activation_metrics_summary_json end),
       blockchain_mainnet_activation_metrics_source_jsons: $blockchain_mainnet_activation_metrics_source_jsons,
+      blockchain_mainnet_activation_operator_pack_summary_json: (if $blockchain_mainnet_activation_operator_pack_summary_json == "" then null else $blockchain_mainnet_activation_operator_pack_summary_json end),
+      blockchain_mainnet_activation_operator_pack_canonical_summary_json: (if $blockchain_mainnet_activation_operator_pack_canonical_summary_json == "" then null else $blockchain_mainnet_activation_operator_pack_canonical_summary_json end),
+      blockchain_mainnet_activation_gate_metrics_json: (if $blockchain_mainnet_activation_gate_metrics_json == "" then null else $blockchain_mainnet_activation_gate_metrics_json end),
+      blockchain_mainnet_activation_gate_metrics_source: (if $blockchain_mainnet_activation_gate_metrics_source == "" then null else $blockchain_mainnet_activation_gate_metrics_source end),
       blockchain_mainnet_activation_gate_summary_json: (if $blockchain_mainnet_activation_gate_summary_json == "" then null else $blockchain_mainnet_activation_gate_summary_json end),
+      blockchain_bootstrap_governance_graduation_gate_summary_json: (if $blockchain_bootstrap_governance_graduation_gate_summary_json == "" then null else $blockchain_bootstrap_governance_graduation_gate_summary_json end),
       phase7_mainnet_cutover_summary_report_json: (if $phase7_mainnet_cutover_summary_report_json == "" then null else $phase7_mainnet_cutover_summary_report_json end)
     }
   }' >"$summary_tmp"

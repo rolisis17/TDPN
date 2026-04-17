@@ -583,6 +583,16 @@ if ! grep -Fq -- "--operator-pack-summary-json" "$HELP_LOG"; then
   cat "$HELP_LOG"
   exit 1
 fi
+if ! grep -Fq -- "--print-summary-json" "$HELP_LOG"; then
+  echo "help output missing --print-summary-json"
+  cat "$HELP_LOG"
+  exit 1
+fi
+if ! grep -Fq -- "--print-output-json" "$HELP_LOG"; then
+  echo "help output missing --print-output-json alias"
+  cat "$HELP_LOG"
+  exit 1
+fi
 
 echo "[blockchain-mainnet-activation-real-evidence] success path"
 : >"$CAPTURE"
@@ -592,7 +602,7 @@ if ! run_helper \
   --summary-json "$SUCCESS_SUMMARY_JSON" \
   --canonical-summary-json "$SUCCESS_CANONICAL_SUMMARY_JSON" \
   --refresh-roadmap 0 \
-  --print-summary-json 0 >"$SUCCESS_LOG" 2>&1; then
+  --print-output-json 0 >"$SUCCESS_LOG" 2>&1; then
   echo "success path must exit 0"
   cat "$SUCCESS_LOG"
   exit 1

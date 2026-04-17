@@ -1,6 +1,10 @@
 package types
 
-import "testing"
+import (
+	"testing"
+
+	chaintypes "github.com/tdpn/tdpn-chain/types"
+)
 
 func TestValidatorEligibilityValidateBasic(t *testing.T) {
 	t.Parallel()
@@ -121,6 +125,15 @@ func TestValidatorStatusRecordValidateBasic(t *testing.T) {
 			},
 		},
 		{
+			name: "valid with uppercase lifecycle status and surrounding whitespace",
+			record: ValidatorStatusRecord{
+				StatusID:        base.StatusID,
+				ValidatorID:     base.ValidatorID,
+				LifecycleStatus: "  ACTIVE  ",
+				EvidenceHeight:  base.EvidenceHeight,
+			},
+		},
+		{
 			name:    "missing status id",
 			record:  ValidatorStatusRecord{ValidatorID: base.ValidatorID, LifecycleStatus: base.LifecycleStatus, EvidenceHeight: base.EvidenceHeight},
 			wantErr: "status id is required",
@@ -228,6 +241,137 @@ func TestValidatorStatusRecordValidateBasic(t *testing.T) {
 				if err.Error() != tc.wantErr {
 					t.Fatalf("expected error %q, got %q", tc.wantErr, err.Error())
 				}
+			}
+		})
+	}
+}
+
+func TestValidatorEligibilityCanonicalize(t *testing.T) {
+	t.Parallel()
+
+	record := ValidatorEligibility{
+		ValidatorID:     "  Val-1  ",
+		OperatorAddress: "  TDPNVALOPER1ABC  ",
+		PolicyReason:    "  policy override  ",
+		Status:          chaintypes.ReconciliationStatus("  PENDING  "),
+	}
+
+	got := record.Canonicalize()
+	if got.ValidatorID != "val-1" {
+		t.Fatalf("expected validator id val-1, got %q", got.ValidatorID)
+	}
+	if got.OperatorAddress != "tdpnvaloper1abc" {
+		t.Fatalf("expected operator address tdpnvaloper1abc, got %q", got.OperatorAddress)
+	}
+	if got.PolicyReason != "policy override" {
+		t.Fatalf("expected trimmed policy reason, got %q", got.PolicyReason)
+	}
+	if got.Status != chaintypes.ReconciliationPending {
+		t.Fatalf("expected status pending, got %q", got.Status)
+	}
+}
+
+func TestValidatorStatusRecordCanonicalize(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name            string
+		record          ValidatorStatusRecord
+		wantEvidenceRef string
+	}{
+		{
+			name: "canonicalizes sha256 evidence ref and lowercase identity fields",
+			record: ValidatorStatusRecord{
+				StatusID:         "  STATUS-1  ",
+				ValidatorID:      "  VAL-1  ",
+				ConsensusAddress: "  TDPNVALCONS1ABC  ",
+				LifecycleStatus:  "  JAILED ",
+				EvidenceRef:      "  SHA256:ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789  ",
+				Status:           chaintypes.ReconciliationStatus("  SUBMITTED "),
+			},
+			wantEvidenceRef: "sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+		},
+		{
+			name: "preserves object evidence path case while canonicalizing prefix and surrounding whitespace",
+			record: ValidatorStatusRecord{
+				EvidenceRef: "  OBJ://Validator/Status-A  ",
+			},
+			wantEvidenceRef: "obj://Validator/Status-A",
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := tc.record.Canonicalize()
+			if tc.record.StatusID != "" && got.StatusID != "status-1" {
+				t.Fatalf("expected status id status-1, got %q", got.StatusID)
+			}
+			if tc.record.ValidatorID != "" && got.ValidatorID != "val-1" {
+				t.Fatalf("expected validator id val-1, got %q", got.ValidatorID)
+			}
+			if tc.record.ConsensusAddress != "" && got.ConsensusAddress != "tdpnvalcons1abc" {
+				t.Fatalf("expected consensus address tdpnvalcons1abc, got %q", got.ConsensusAddress)
+			}
+			if tc.record.LifecycleStatus != "" && got.LifecycleStatus != ValidatorLifecycleJailed {
+				t.Fatalf("expected lifecycle status jailed, got %q", got.LifecycleStatus)
+			}
+			if got.EvidenceRef != tc.wantEvidenceRef {
+				t.Fatalf("expected evidence ref %q, got %q", tc.wantEvidenceRef, got.EvidenceRef)
+			}
+			if tc.record.Status != "" && got.Status != chaintypes.ReconciliationSubmitted {
+				t.Fatalf("expected status submitted, got %q", got.Status)
+			}
+		})
+	}
+}
+
+func TestValidatorCanonicalizeRetainsTerminalLifecycleStatuses(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		in   chaintypes.ReconciliationStatus
+		want chaintypes.ReconciliationStatus
+	}{
+		{
+			name: "confirmed",
+			in:   " CONFIRMED ",
+			want: chaintypes.ReconciliationConfirmed,
+		},
+		{
+			name: "failed",
+			in:   " FAILED ",
+			want: chaintypes.ReconciliationFailed,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run("eligibility-"+tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := ValidatorEligibility{
+				ValidatorID:     "val-terminal-1",
+				OperatorAddress: "tdpnvaloper1terminal",
+				Status:          tc.in,
+			}.Canonicalize()
+			if got.Status != tc.want {
+				t.Fatalf("expected eligibility status %q, got %q", tc.want, got.Status)
+			}
+		})
+
+		t.Run("status-record-"+tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := ValidatorStatusRecord{
+				StatusID:        "status-terminal-1",
+				ValidatorID:     "val-terminal-1",
+				LifecycleStatus: ValidatorLifecycleActive,
+				Status:          tc.in,
+			}.Canonicalize()
+			if got.Status != tc.want {
+				t.Fatalf("expected status record reconciliation status %q, got %q", tc.want, got.Status)
 			}
 		})
 	}

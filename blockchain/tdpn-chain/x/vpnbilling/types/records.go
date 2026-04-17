@@ -2,6 +2,7 @@ package types
 
 import (
 	"errors"
+	"strings"
 
 	chaintypes "github.com/tdpn/tdpn-chain/types"
 )
@@ -29,7 +30,26 @@ type SettlementRecord struct {
 	OperationState chaintypes.ReconciliationStatus
 }
 
+// Canonicalize trims and lower-cases id/session/sponsor/denom fields.
+func (r CreditReservation) Canonicalize() CreditReservation {
+	r.ReservationID = canonicalToken(r.ReservationID)
+	r.SponsorID = canonicalToken(r.SponsorID)
+	r.SessionID = canonicalToken(r.SessionID)
+	r.AssetDenom = canonicalToken(r.AssetDenom)
+	return r
+}
+
+// Canonicalize trims and lower-cases id/session/denom fields.
+func (r SettlementRecord) Canonicalize() SettlementRecord {
+	r.SettlementID = canonicalToken(r.SettlementID)
+	r.ReservationID = canonicalToken(r.ReservationID)
+	r.SessionID = canonicalToken(r.SessionID)
+	r.AssetDenom = canonicalToken(r.AssetDenom)
+	return r
+}
+
 func (r CreditReservation) ValidateBasic() error {
+	r = r.Canonicalize()
 	if r.ReservationID == "" {
 		return errors.New("reservation id is required")
 	}
@@ -43,6 +63,7 @@ func (r CreditReservation) ValidateBasic() error {
 }
 
 func (r SettlementRecord) ValidateBasic() error {
+	r = r.Canonicalize()
 	if r.SettlementID == "" {
 		return errors.New("settlement id is required")
 	}
@@ -53,4 +74,8 @@ func (r SettlementRecord) ValidateBasic() error {
 		return errors.New("billed amount cannot be negative")
 	}
 	return nil
+}
+
+func canonicalToken(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
 }

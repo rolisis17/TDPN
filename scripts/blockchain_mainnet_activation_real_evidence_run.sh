@@ -23,7 +23,8 @@ Usage:
     [--operator-pack-summary-json PATH] \
     [--operator-pack-canonical-summary-json PATH] \
     [--refresh-roadmap [0|1]] \
-    [--print-summary-json [0|1]]
+    [--print-summary-json [0|1]] \
+    [--print-output-json [0|1]]
 
 Purpose:
   Run one deterministic, operator-friendly blockchain activation evidence flow
@@ -263,7 +264,7 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
-    --print-summary-json)
+    --print-summary-json|--print-output-json)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         print_summary_json="${2:-}"
         shift 2

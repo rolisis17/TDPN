@@ -3,7 +3,9 @@ package module
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	sponsorpb "github.com/tdpn/tdpn-chain/proto/gen/go/tdpn/vpnsponsor/v1"
 	chaintypes "github.com/tdpn/tdpn-chain/types"
@@ -100,7 +102,8 @@ func TestGRPCMsgServerAdapterDelegateSessionCredit(t *testing.T) {
 		t.Fatalf("expected create authorization success, got %v", err)
 	}
 
-	resp, err := adapter.DelegateSessionCredit(context.Background(), &sponsorpb.MsgDelegateSessionCreditRequest{
+	ctx := WithCurrentTimeUnix(context.Background(), 4102444700)
+	resp, err := adapter.DelegateSessionCredit(ctx, &sponsorpb.MsgDelegateSessionCreditRequest{
 		Delegation: &sponsorpb.DelegatedSessionCredit{
 			ReservationId:   "res-1",
 			AuthorizationId: "auth-1",
@@ -127,6 +130,251 @@ func TestGRPCMsgServerAdapterDelegateSessionCredit(t *testing.T) {
 	}
 	if stored.AuthorizationID != "auth-1" {
 		t.Fatalf("expected persisted authorization id auth-1, got %q", stored.AuthorizationID)
+	}
+}
+
+func TestGRPCMsgServerAdapterDelegateSessionCreditFallsBackToServerTime(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	adapter := NewGRPCMsgServerAdapter(&k)
+
+	_, err := adapter.CreateAuthorization(context.Background(), &sponsorpb.MsgCreateAuthorizationRequest{
+		Authorization: &sponsorpb.SponsorAuthorization{
+			AuthorizationId: "auth-fallback-1",
+			SponsorId:       "sponsor-fallback-1",
+			AppId:           "app-fallback-1",
+			MaxCredits:      100,
+			ExpiresAtUnix:   time.Now().Add(time.Hour).Unix(),
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected create authorization success, got %v", err)
+	}
+
+	resp, err := adapter.DelegateSessionCredit(context.Background(), &sponsorpb.MsgDelegateSessionCreditRequest{
+		Delegation: &sponsorpb.DelegatedSessionCredit{
+			ReservationId:   "res-fallback-1",
+			AuthorizationId: "auth-fallback-1",
+			SponsorId:       "sponsor-fallback-1",
+			AppId:           "app-fallback-1",
+			EndUserId:       "user-fallback-1",
+			SessionId:       "sess-fallback-1",
+			Credits:         10,
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected delegate session credit success with server-time fallback, got %v", err)
+	}
+	if resp.GetDelegation() == nil {
+		t.Fatal("expected delegation in response")
+	}
+}
+
+func TestGRPCMsgServerAdapterDelegateSessionCreditExpiryBoundaryUsesCurrentTimeFromContext(t *testing.T) {
+	t.Parallel()
+
+	const expiryUnix int64 = 4102444800
+
+	k := keeper.NewKeeper()
+	adapter := NewGRPCMsgServerAdapter(&k)
+
+	_, err := adapter.CreateAuthorization(context.Background(), &sponsorpb.MsgCreateAuthorizationRequest{
+		Authorization: &sponsorpb.SponsorAuthorization{
+			AuthorizationId: "auth-expiry-boundary-1",
+			SponsorId:       "sponsor-expiry-boundary-1",
+			AppId:           "app-expiry-boundary-1",
+			MaxCredits:      100,
+			ExpiresAtUnix:   expiryUnix,
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected create authorization success, got %v", err)
+	}
+
+	_, beforeExpiryErr := adapter.DelegateSessionCredit(WithCurrentTimeUnix(context.Background(), expiryUnix-1), &sponsorpb.MsgDelegateSessionCreditRequest{
+		Delegation: &sponsorpb.DelegatedSessionCredit{
+			ReservationId:   "res-expiry-boundary-before",
+			AuthorizationId: "auth-expiry-boundary-1",
+			SponsorId:       "sponsor-expiry-boundary-1",
+			AppId:           "app-expiry-boundary-1",
+			EndUserId:       "user-expiry-boundary",
+			SessionId:       "sess-expiry-boundary-before",
+			Credits:         10,
+		},
+	})
+	if beforeExpiryErr != nil {
+		t.Fatalf("expected delegation success before expiry boundary, got %v", beforeExpiryErr)
+	}
+	if _, ok := k.GetDelegation("res-expiry-boundary-before"); !ok {
+		t.Fatal("expected pre-expiry delegation to be persisted")
+	}
+
+	_, atExpiryErr := adapter.DelegateSessionCredit(WithCurrentTimeUnix(context.Background(), expiryUnix), &sponsorpb.MsgDelegateSessionCreditRequest{
+		Delegation: &sponsorpb.DelegatedSessionCredit{
+			ReservationId:   "res-expiry-boundary-at",
+			AuthorizationId: "auth-expiry-boundary-1",
+			SponsorId:       "sponsor-expiry-boundary-1",
+			AppId:           "app-expiry-boundary-1",
+			EndUserId:       "user-expiry-boundary",
+			SessionId:       "sess-expiry-boundary-at",
+			Credits:         10,
+		},
+	})
+	if atExpiryErr == nil {
+		t.Fatal("expected expired authorization error at expiry boundary")
+	}
+	if !errors.Is(atExpiryErr, ErrInvalidDelegation) {
+		t.Fatalf("expected ErrInvalidDelegation at expiry boundary, got %v", atExpiryErr)
+	}
+	if !strings.Contains(atExpiryErr.Error(), "expired") {
+		t.Fatalf("expected expired details at expiry boundary, got %v", atExpiryErr)
+	}
+	if _, ok := k.GetDelegation("res-expiry-boundary-at"); ok {
+		t.Fatal("did not expect at-expiry delegation to be persisted")
+	}
+}
+
+func TestGRPCAdaptersCanonicalizeAuthorizationWriteAndMixedCaseQuery(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	msgAdapter := NewGRPCMsgServerAdapter(&k)
+	queryAdapter := NewGRPCQueryServerAdapter(&k)
+
+	createResp, err := msgAdapter.CreateAuthorization(context.Background(), &sponsorpb.MsgCreateAuthorizationRequest{
+		Authorization: &sponsorpb.SponsorAuthorization{
+			AuthorizationId: "  AUTH-CANON-1  ",
+			SponsorId:       "  SPONSOR-CANON-1  ",
+			AppId:           "  APP-CANON-1  ",
+			MaxCredits:      100,
+			ExpiresAtUnix:   4102444800,
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected create authorization success, got %v", err)
+	}
+	if createResp.GetAuthorization() == nil {
+		t.Fatal("expected authorization in create response")
+	}
+	if createResp.GetAuthorization().GetAuthorizationId() != "auth-canon-1" {
+		t.Fatalf("expected canonical authorization_id auth-canon-1, got %q", createResp.GetAuthorization().GetAuthorizationId())
+	}
+	if createResp.GetAuthorization().GetSponsorId() != "sponsor-canon-1" {
+		t.Fatalf("expected canonical sponsor_id sponsor-canon-1, got %q", createResp.GetAuthorization().GetSponsorId())
+	}
+	if createResp.GetAuthorization().GetAppId() != "app-canon-1" {
+		t.Fatalf("expected canonical app_id app-canon-1, got %q", createResp.GetAuthorization().GetAppId())
+	}
+
+	queryResp, err := queryAdapter.SponsorAuthorization(context.Background(), &sponsorpb.QuerySponsorAuthorizationRequest{
+		AuthorizationId: "  AuTh-CaNoN-1  ",
+	})
+	if err != nil {
+		t.Fatalf("expected authorization query success, got %v", err)
+	}
+	if !queryResp.GetFound() {
+		t.Fatal("expected found=true for canonicalized mixed-case authorization query")
+	}
+	if queryResp.GetAuthorization() == nil {
+		t.Fatal("expected authorization in query response")
+	}
+	if queryResp.GetAuthorization().GetAuthorizationId() != "auth-canon-1" {
+		t.Fatalf("expected canonical queried authorization_id auth-canon-1, got %q", queryResp.GetAuthorization().GetAuthorizationId())
+	}
+	if queryResp.GetAuthorization().GetSponsorId() != "sponsor-canon-1" {
+		t.Fatalf("expected canonical queried sponsor_id sponsor-canon-1, got %q", queryResp.GetAuthorization().GetSponsorId())
+	}
+	if queryResp.GetAuthorization().GetAppId() != "app-canon-1" {
+		t.Fatalf("expected canonical queried app_id app-canon-1, got %q", queryResp.GetAuthorization().GetAppId())
+	}
+}
+
+func TestGRPCAdaptersCanonicalizeDelegationWriteAndMixedCaseQuery(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	msgAdapter := NewGRPCMsgServerAdapter(&k)
+	queryAdapter := NewGRPCQueryServerAdapter(&k)
+
+	_, err := msgAdapter.CreateAuthorization(context.Background(), &sponsorpb.MsgCreateAuthorizationRequest{
+		Authorization: &sponsorpb.SponsorAuthorization{
+			AuthorizationId: "  AUTH-CANON-2  ",
+			SponsorId:       "  SPONSOR-CANON-2  ",
+			AppId:           "  APP-CANON-2  ",
+			MaxCredits:      100,
+			ExpiresAtUnix:   4102444800,
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected create authorization success, got %v", err)
+	}
+
+	delegateResp, err := msgAdapter.DelegateSessionCredit(WithCurrentTimeUnix(context.Background(), 4102444700), &sponsorpb.MsgDelegateSessionCreditRequest{
+		Delegation: &sponsorpb.DelegatedSessionCredit{
+			ReservationId:   "  RES-CANON-2  ",
+			AuthorizationId: "  AUTH-CANON-2  ",
+			SponsorId:       "  SPONSOR-CANON-2  ",
+			AppId:           "  APP-CANON-2  ",
+			EndUserId:       "  EndUser-MiXeD-2  ",
+			SessionId:       "  SessIoN-MiXeD-2  ",
+			Credits:         10,
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected delegate session credit success, got %v", err)
+	}
+	if delegateResp.GetDelegation() == nil {
+		t.Fatal("expected delegation in delegate response")
+	}
+	if delegateResp.GetDelegation().GetReservationId() != "res-canon-2" {
+		t.Fatalf("expected canonical reservation_id res-canon-2, got %q", delegateResp.GetDelegation().GetReservationId())
+	}
+	if delegateResp.GetDelegation().GetAuthorizationId() != "auth-canon-2" {
+		t.Fatalf("expected canonical authorization_id auth-canon-2, got %q", delegateResp.GetDelegation().GetAuthorizationId())
+	}
+	if delegateResp.GetDelegation().GetSponsorId() != "sponsor-canon-2" {
+		t.Fatalf("expected canonical sponsor_id sponsor-canon-2, got %q", delegateResp.GetDelegation().GetSponsorId())
+	}
+	if delegateResp.GetDelegation().GetAppId() != "app-canon-2" {
+		t.Fatalf("expected canonical app_id app-canon-2, got %q", delegateResp.GetDelegation().GetAppId())
+	}
+	if delegateResp.GetDelegation().GetEndUserId() != "EndUser-MiXeD-2" {
+		t.Fatalf("expected trim-only end_user_id EndUser-MiXeD-2, got %q", delegateResp.GetDelegation().GetEndUserId())
+	}
+	if delegateResp.GetDelegation().GetSessionId() != "SessIoN-MiXeD-2" {
+		t.Fatalf("expected trim-only session_id SessIoN-MiXeD-2, got %q", delegateResp.GetDelegation().GetSessionId())
+	}
+
+	queryResp, err := queryAdapter.DelegatedSessionCredit(context.Background(), &sponsorpb.QueryDelegatedSessionCreditRequest{
+		ReservationId: "  ReS-CaNoN-2  ",
+	})
+	if err != nil {
+		t.Fatalf("expected delegation query success, got %v", err)
+	}
+	if !queryResp.GetFound() {
+		t.Fatal("expected found=true for canonicalized mixed-case delegation query")
+	}
+	if queryResp.GetDelegation() == nil {
+		t.Fatal("expected delegation in query response")
+	}
+	if queryResp.GetDelegation().GetReservationId() != "res-canon-2" {
+		t.Fatalf("expected canonical queried reservation_id res-canon-2, got %q", queryResp.GetDelegation().GetReservationId())
+	}
+	if queryResp.GetDelegation().GetAuthorizationId() != "auth-canon-2" {
+		t.Fatalf("expected canonical queried authorization_id auth-canon-2, got %q", queryResp.GetDelegation().GetAuthorizationId())
+	}
+	if queryResp.GetDelegation().GetSponsorId() != "sponsor-canon-2" {
+		t.Fatalf("expected canonical queried sponsor_id sponsor-canon-2, got %q", queryResp.GetDelegation().GetSponsorId())
+	}
+	if queryResp.GetDelegation().GetAppId() != "app-canon-2" {
+		t.Fatalf("expected canonical queried app_id app-canon-2, got %q", queryResp.GetDelegation().GetAppId())
+	}
+	if queryResp.GetDelegation().GetEndUserId() != "EndUser-MiXeD-2" {
+		t.Fatalf("expected trim-only queried end_user_id EndUser-MiXeD-2, got %q", queryResp.GetDelegation().GetEndUserId())
+	}
+	if queryResp.GetDelegation().GetSessionId() != "SessIoN-MiXeD-2" {
+		t.Fatalf("expected trim-only queried session_id SessIoN-MiXeD-2, got %q", queryResp.GetDelegation().GetSessionId())
 	}
 }
 

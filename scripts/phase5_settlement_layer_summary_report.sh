@@ -331,6 +331,414 @@ resolve_sponsor_from_ci_summary() {
   return 0
 }
 
+resolve_sponsor_vpn_session_from_handoff_or_check_summary() {
+  local summary_path="${1:-}"
+  if [[ "$(json_file_valid_01 "$summary_path")" != "1" ]]; then
+    return 1
+  fi
+
+  local value=""
+  local status=""
+  local source_field=""
+  local status_text=""
+
+  value="$(json_bool_or_empty "$summary_path" '
+    if (.handoff.issuer_sponsor_vpn_session_live_smoke_ok | type) == "boolean" then .handoff.issuer_sponsor_vpn_session_live_smoke_ok
+    elif (.signals.issuer_sponsor_vpn_session_live_smoke_ok | type) == "boolean" then .signals.issuer_sponsor_vpn_session_live_smoke_ok
+    elif (.stages.issuer_sponsor_vpn_session_live_smoke.ok | type) == "boolean" then .stages.issuer_sponsor_vpn_session_live_smoke.ok
+    elif (.phase5_settlement_layer_handoff.issuer_sponsor_vpn_session_live_smoke_ok | type) == "boolean" then .phase5_settlement_layer_handoff.issuer_sponsor_vpn_session_live_smoke_ok
+    elif (.vpn_track.phase5_settlement_layer_handoff.issuer_sponsor_vpn_session_live_smoke_ok | type) == "boolean" then .vpn_track.phase5_settlement_layer_handoff.issuer_sponsor_vpn_session_live_smoke_ok
+    else empty
+    end
+  ')"
+  if [[ -n "$value" ]]; then
+    source_field="$(json_text_or_empty "$summary_path" '
+      if (.handoff.issuer_sponsor_vpn_session_live_smoke_ok | type) == "boolean" then "handoff.issuer_sponsor_vpn_session_live_smoke_ok"
+      elif (.signals.issuer_sponsor_vpn_session_live_smoke_ok | type) == "boolean" then "signals.issuer_sponsor_vpn_session_live_smoke_ok"
+      elif (.stages.issuer_sponsor_vpn_session_live_smoke.ok | type) == "boolean" then "stages.issuer_sponsor_vpn_session_live_smoke.ok"
+      elif (.phase5_settlement_layer_handoff.issuer_sponsor_vpn_session_live_smoke_ok | type) == "boolean" then "phase5_settlement_layer_handoff.issuer_sponsor_vpn_session_live_smoke_ok"
+      elif (.vpn_track.phase5_settlement_layer_handoff.issuer_sponsor_vpn_session_live_smoke_ok | type) == "boolean" then "vpn_track.phase5_settlement_layer_handoff.issuer_sponsor_vpn_session_live_smoke_ok"
+      else empty
+      end
+    ')"
+    if [[ "$value" == "true" ]]; then
+      status="pass"
+    else
+      status="fail"
+    fi
+    printf '%s|%s|%s\n' "$value" "$status" "$source_field"
+    return 0
+  fi
+
+  status_text="$(json_text_or_empty "$summary_path" '
+    if (.handoff.issuer_sponsor_vpn_session_live_smoke_status | type) == "string" then .handoff.issuer_sponsor_vpn_session_live_smoke_status
+    elif (.stages.issuer_sponsor_vpn_session_live_smoke.status | type) == "string" then .stages.issuer_sponsor_vpn_session_live_smoke.status
+    elif (.steps.issuer_sponsor_vpn_session_live_smoke.status | type) == "string" then .steps.issuer_sponsor_vpn_session_live_smoke.status
+    else empty
+    end
+  ')"
+  case "${status_text,,}" in
+    pass)
+      value="true"
+      status="pass"
+      ;;
+    fail)
+      value="false"
+      status="fail"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  source_field="$(json_text_or_empty "$summary_path" '
+    if (.handoff.issuer_sponsor_vpn_session_live_smoke_status | type) == "string" then "handoff.issuer_sponsor_vpn_session_live_smoke_status"
+    elif (.stages.issuer_sponsor_vpn_session_live_smoke.status | type) == "string" then "stages.issuer_sponsor_vpn_session_live_smoke.status"
+    elif (.steps.issuer_sponsor_vpn_session_live_smoke.status | type) == "string" then "steps.issuer_sponsor_vpn_session_live_smoke.status"
+    else empty
+    end
+  ')"
+
+  printf '%s|%s|%s\n' "$value" "$status" "$source_field"
+  return 0
+}
+
+resolve_sponsor_vpn_session_from_ci_summary() {
+  local summary_path="${1:-}"
+  if [[ "$(json_file_valid_01 "$summary_path")" != "1" ]]; then
+    return 1
+  fi
+
+  local value=""
+  local status=""
+  local source_field=""
+  local status_text=""
+
+  value="$(json_bool_or_empty "$summary_path" '
+    if (.signals.issuer_sponsor_vpn_session_live_smoke_ok | type) == "boolean" then .signals.issuer_sponsor_vpn_session_live_smoke_ok
+    elif (.steps.issuer_sponsor_vpn_session_live_smoke.ok | type) == "boolean" then .steps.issuer_sponsor_vpn_session_live_smoke.ok
+    else empty
+    end
+  ')"
+  if [[ -n "$value" ]]; then
+    source_field="$(json_text_or_empty "$summary_path" '
+      if (.signals.issuer_sponsor_vpn_session_live_smoke_ok | type) == "boolean" then "signals.issuer_sponsor_vpn_session_live_smoke_ok"
+      elif (.steps.issuer_sponsor_vpn_session_live_smoke.ok | type) == "boolean" then "steps.issuer_sponsor_vpn_session_live_smoke.ok"
+      else empty
+      end
+    ')"
+    if [[ "$value" == "true" ]]; then
+      status="pass"
+    else
+      status="fail"
+    fi
+    printf '%s|%s|%s\n' "$value" "$status" "$source_field"
+    return 0
+  fi
+
+  status_text="$(json_text_or_empty "$summary_path" '
+    if (.steps.issuer_sponsor_vpn_session_live_smoke.status | type) == "string" then .steps.issuer_sponsor_vpn_session_live_smoke.status
+    elif (.stages.issuer_sponsor_vpn_session_live_smoke.status | type) == "string" then .stages.issuer_sponsor_vpn_session_live_smoke.status
+    else empty
+    end
+  ')"
+  case "${status_text,,}" in
+    pass)
+      value="true"
+      status="pass"
+      ;;
+    fail)
+      value="false"
+      status="fail"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  source_field="$(json_text_or_empty "$summary_path" '
+    if (.steps.issuer_sponsor_vpn_session_live_smoke.status | type) == "string" then "steps.issuer_sponsor_vpn_session_live_smoke.status"
+    elif (.stages.issuer_sponsor_vpn_session_live_smoke.status | type) == "string" then "stages.issuer_sponsor_vpn_session_live_smoke.status"
+    else empty
+    end
+  ')"
+
+  printf '%s|%s|%s\n' "$value" "$status" "$source_field"
+  return 0
+}
+
+resolve_issuer_settlement_status_from_handoff_or_check_summary() {
+  local summary_path="${1:-}"
+  if [[ "$(json_file_valid_01 "$summary_path")" != "1" ]]; then
+    return 1
+  fi
+
+  local value=""
+  local status=""
+  local source_field=""
+  local status_text=""
+
+  value="$(json_bool_or_empty "$summary_path" '
+    if (.handoff.issuer_settlement_status_live_smoke_ok | type) == "boolean" then .handoff.issuer_settlement_status_live_smoke_ok
+    elif (.signals.issuer_settlement_status_live_smoke_ok | type) == "boolean" then .signals.issuer_settlement_status_live_smoke_ok
+    elif (.stages.issuer_settlement_status_live_smoke.ok | type) == "boolean" then .stages.issuer_settlement_status_live_smoke.ok
+    elif (.phase5_settlement_layer_handoff.issuer_settlement_status_live_smoke_ok | type) == "boolean" then .phase5_settlement_layer_handoff.issuer_settlement_status_live_smoke_ok
+    elif (.vpn_track.phase5_settlement_layer_handoff.issuer_settlement_status_live_smoke_ok | type) == "boolean" then .vpn_track.phase5_settlement_layer_handoff.issuer_settlement_status_live_smoke_ok
+    else empty
+    end
+  ')"
+  if [[ -n "$value" ]]; then
+    source_field="$(json_text_or_empty "$summary_path" '
+      if (.handoff.issuer_settlement_status_live_smoke_ok | type) == "boolean" then "handoff.issuer_settlement_status_live_smoke_ok"
+      elif (.signals.issuer_settlement_status_live_smoke_ok | type) == "boolean" then "signals.issuer_settlement_status_live_smoke_ok"
+      elif (.stages.issuer_settlement_status_live_smoke.ok | type) == "boolean" then "stages.issuer_settlement_status_live_smoke.ok"
+      elif (.phase5_settlement_layer_handoff.issuer_settlement_status_live_smoke_ok | type) == "boolean" then "phase5_settlement_layer_handoff.issuer_settlement_status_live_smoke_ok"
+      elif (.vpn_track.phase5_settlement_layer_handoff.issuer_settlement_status_live_smoke_ok | type) == "boolean" then "vpn_track.phase5_settlement_layer_handoff.issuer_settlement_status_live_smoke_ok"
+      else empty
+      end
+    ')"
+    if [[ "$value" == "true" ]]; then
+      status="pass"
+    else
+      status="fail"
+    fi
+    printf '%s|%s|%s\n' "$value" "$status" "$source_field"
+    return 0
+  fi
+
+  status_text="$(json_text_or_empty "$summary_path" '
+    if (.handoff.issuer_settlement_status_live_smoke_status | type) == "string" then .handoff.issuer_settlement_status_live_smoke_status
+    elif (.stages.issuer_settlement_status_live_smoke.status | type) == "string" then .stages.issuer_settlement_status_live_smoke.status
+    elif (.steps.issuer_settlement_status_live_smoke.status | type) == "string" then .steps.issuer_settlement_status_live_smoke.status
+    else empty
+    end
+  ')"
+  case "${status_text,,}" in
+    pass)
+      value="true"
+      status="pass"
+      ;;
+    fail)
+      value="false"
+      status="fail"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  source_field="$(json_text_or_empty "$summary_path" '
+    if (.handoff.issuer_settlement_status_live_smoke_status | type) == "string" then "handoff.issuer_settlement_status_live_smoke_status"
+    elif (.stages.issuer_settlement_status_live_smoke.status | type) == "string" then "stages.issuer_settlement_status_live_smoke.status"
+    elif (.steps.issuer_settlement_status_live_smoke.status | type) == "string" then "steps.issuer_settlement_status_live_smoke.status"
+    else empty
+    end
+  ')"
+
+  printf '%s|%s|%s\n' "$value" "$status" "$source_field"
+  return 0
+}
+
+resolve_issuer_settlement_status_from_ci_summary() {
+  local summary_path="${1:-}"
+  if [[ "$(json_file_valid_01 "$summary_path")" != "1" ]]; then
+    return 1
+  fi
+
+  local value=""
+  local status=""
+  local source_field=""
+  local status_text=""
+
+  value="$(json_bool_or_empty "$summary_path" '
+    if (.signals.issuer_settlement_status_live_smoke_ok | type) == "boolean" then .signals.issuer_settlement_status_live_smoke_ok
+    elif (.steps.issuer_settlement_status_live_smoke.ok | type) == "boolean" then .steps.issuer_settlement_status_live_smoke.ok
+    else empty
+    end
+  ')"
+  if [[ -n "$value" ]]; then
+    source_field="$(json_text_or_empty "$summary_path" '
+      if (.signals.issuer_settlement_status_live_smoke_ok | type) == "boolean" then "signals.issuer_settlement_status_live_smoke_ok"
+      elif (.steps.issuer_settlement_status_live_smoke.ok | type) == "boolean" then "steps.issuer_settlement_status_live_smoke.ok"
+      else empty
+      end
+    ')"
+    if [[ "$value" == "true" ]]; then
+      status="pass"
+    else
+      status="fail"
+    fi
+    printf '%s|%s|%s\n' "$value" "$status" "$source_field"
+    return 0
+  fi
+
+  status_text="$(json_text_or_empty "$summary_path" '
+    if (.steps.issuer_settlement_status_live_smoke.status | type) == "string" then .steps.issuer_settlement_status_live_smoke.status
+    elif (.stages.issuer_settlement_status_live_smoke.status | type) == "string" then .stages.issuer_settlement_status_live_smoke.status
+    else empty
+    end
+  ')"
+  case "${status_text,,}" in
+    pass)
+      value="true"
+      status="pass"
+      ;;
+    fail)
+      value="false"
+      status="fail"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  source_field="$(json_text_or_empty "$summary_path" '
+    if (.steps.issuer_settlement_status_live_smoke.status | type) == "string" then "steps.issuer_settlement_status_live_smoke.status"
+    elif (.stages.issuer_settlement_status_live_smoke.status | type) == "string" then "stages.issuer_settlement_status_live_smoke.status"
+    else empty
+    end
+  ')"
+
+  printf '%s|%s|%s\n' "$value" "$status" "$source_field"
+  return 0
+}
+
+resolve_exit_settlement_status_from_handoff_or_check_summary() {
+  local summary_path="${1:-}"
+  if [[ "$(json_file_valid_01 "$summary_path")" != "1" ]]; then
+    return 1
+  fi
+
+  local value=""
+  local status=""
+  local source_field=""
+  local status_text=""
+
+  value="$(json_bool_or_empty "$summary_path" '
+    if (.handoff.exit_settlement_status_live_smoke_ok | type) == "boolean" then .handoff.exit_settlement_status_live_smoke_ok
+    elif (.signals.exit_settlement_status_live_smoke_ok | type) == "boolean" then .signals.exit_settlement_status_live_smoke_ok
+    elif (.stages.exit_settlement_status_live_smoke.ok | type) == "boolean" then .stages.exit_settlement_status_live_smoke.ok
+    elif (.phase5_settlement_layer_handoff.exit_settlement_status_live_smoke_ok | type) == "boolean" then .phase5_settlement_layer_handoff.exit_settlement_status_live_smoke_ok
+    elif (.vpn_track.phase5_settlement_layer_handoff.exit_settlement_status_live_smoke_ok | type) == "boolean" then .vpn_track.phase5_settlement_layer_handoff.exit_settlement_status_live_smoke_ok
+    else empty
+    end
+  ')"
+  if [[ -n "$value" ]]; then
+    source_field="$(json_text_or_empty "$summary_path" '
+      if (.handoff.exit_settlement_status_live_smoke_ok | type) == "boolean" then "handoff.exit_settlement_status_live_smoke_ok"
+      elif (.signals.exit_settlement_status_live_smoke_ok | type) == "boolean" then "signals.exit_settlement_status_live_smoke_ok"
+      elif (.stages.exit_settlement_status_live_smoke.ok | type) == "boolean" then "stages.exit_settlement_status_live_smoke.ok"
+      elif (.phase5_settlement_layer_handoff.exit_settlement_status_live_smoke_ok | type) == "boolean" then "phase5_settlement_layer_handoff.exit_settlement_status_live_smoke_ok"
+      elif (.vpn_track.phase5_settlement_layer_handoff.exit_settlement_status_live_smoke_ok | type) == "boolean" then "vpn_track.phase5_settlement_layer_handoff.exit_settlement_status_live_smoke_ok"
+      else empty
+      end
+    ')"
+    if [[ "$value" == "true" ]]; then
+      status="pass"
+    else
+      status="fail"
+    fi
+    printf '%s|%s|%s\n' "$value" "$status" "$source_field"
+    return 0
+  fi
+
+  status_text="$(json_text_or_empty "$summary_path" '
+    if (.handoff.exit_settlement_status_live_smoke_status | type) == "string" then .handoff.exit_settlement_status_live_smoke_status
+    elif (.stages.exit_settlement_status_live_smoke.status | type) == "string" then .stages.exit_settlement_status_live_smoke.status
+    elif (.steps.exit_settlement_status_live_smoke.status | type) == "string" then .steps.exit_settlement_status_live_smoke.status
+    else empty
+    end
+  ')"
+  case "${status_text,,}" in
+    pass)
+      value="true"
+      status="pass"
+      ;;
+    fail)
+      value="false"
+      status="fail"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  source_field="$(json_text_or_empty "$summary_path" '
+    if (.handoff.exit_settlement_status_live_smoke_status | type) == "string" then "handoff.exit_settlement_status_live_smoke_status"
+    elif (.stages.exit_settlement_status_live_smoke.status | type) == "string" then "stages.exit_settlement_status_live_smoke.status"
+    elif (.steps.exit_settlement_status_live_smoke.status | type) == "string" then "steps.exit_settlement_status_live_smoke.status"
+    else empty
+    end
+  ')"
+
+  printf '%s|%s|%s\n' "$value" "$status" "$source_field"
+  return 0
+}
+
+resolve_exit_settlement_status_from_ci_summary() {
+  local summary_path="${1:-}"
+  if [[ "$(json_file_valid_01 "$summary_path")" != "1" ]]; then
+    return 1
+  fi
+
+  local value=""
+  local status=""
+  local source_field=""
+  local status_text=""
+
+  value="$(json_bool_or_empty "$summary_path" '
+    if (.signals.exit_settlement_status_live_smoke_ok | type) == "boolean" then .signals.exit_settlement_status_live_smoke_ok
+    elif (.steps.exit_settlement_status_live_smoke.ok | type) == "boolean" then .steps.exit_settlement_status_live_smoke.ok
+    else empty
+    end
+  ')"
+  if [[ -n "$value" ]]; then
+    source_field="$(json_text_or_empty "$summary_path" '
+      if (.signals.exit_settlement_status_live_smoke_ok | type) == "boolean" then "signals.exit_settlement_status_live_smoke_ok"
+      elif (.steps.exit_settlement_status_live_smoke.ok | type) == "boolean" then "steps.exit_settlement_status_live_smoke.ok"
+      else empty
+      end
+    ')"
+    if [[ "$value" == "true" ]]; then
+      status="pass"
+    else
+      status="fail"
+    fi
+    printf '%s|%s|%s\n' "$value" "$status" "$source_field"
+    return 0
+  fi
+
+  status_text="$(json_text_or_empty "$summary_path" '
+    if (.steps.exit_settlement_status_live_smoke.status | type) == "string" then .steps.exit_settlement_status_live_smoke.status
+    elif (.stages.exit_settlement_status_live_smoke.status | type) == "string" then .stages.exit_settlement_status_live_smoke.status
+    else empty
+    end
+  ')"
+  case "${status_text,,}" in
+    pass)
+      value="true"
+      status="pass"
+      ;;
+    fail)
+      value="false"
+      status="fail"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  source_field="$(json_text_or_empty "$summary_path" '
+    if (.steps.exit_settlement_status_live_smoke.status | type) == "string" then "steps.exit_settlement_status_live_smoke.status"
+    elif (.stages.exit_settlement_status_live_smoke.status | type) == "string" then "stages.exit_settlement_status_live_smoke.status"
+    else empty
+    end
+  ')"
+
+  printf '%s|%s|%s\n' "$value" "$status" "$source_field"
+  return 0
+}
+
 resolve_dual_asset_from_handoff_or_check_summary() {
   local summary_path="${1:-}"
   if [[ "$(json_file_valid_01 "$summary_path")" != "1" ]]; then
@@ -459,6 +867,474 @@ resolve_dual_asset_from_ci_summary() {
   source_field="$(json_text_or_empty "$summary_path" '
     if (.steps.settlement_dual_asset_parity.status | type) == "string" then "steps.settlement_dual_asset_parity.status"
     elif (.stages.settlement_dual_asset_parity.status | type) == "string" then "stages.settlement_dual_asset_parity.status"
+    else empty
+    end
+  ')"
+
+  printf '%s|%s|%s\n' "$value" "$status" "$source_field"
+  return 0
+}
+
+resolve_settlement_adapter_signed_tx_roundtrip_from_handoff_or_check_summary() {
+  local summary_path="${1:-}"
+  if [[ "$(json_file_valid_01 "$summary_path")" != "1" ]]; then
+    return 1
+  fi
+
+  local value=""
+  local status=""
+  local source_field=""
+  local status_text=""
+
+  value="$(json_bool_or_empty "$summary_path" '
+    if (.handoff.settlement_adapter_signed_tx_roundtrip_ok | type) == "boolean" then .handoff.settlement_adapter_signed_tx_roundtrip_ok
+    elif (.signals.settlement_adapter_signed_tx_roundtrip_ok | type) == "boolean" then .signals.settlement_adapter_signed_tx_roundtrip_ok
+    elif (.signals.settlement_adapter_signed_tx_roundtrip | type) == "boolean" then .signals.settlement_adapter_signed_tx_roundtrip
+    elif (.stages.settlement_adapter_signed_tx_roundtrip.ok | type) == "boolean" then .stages.settlement_adapter_signed_tx_roundtrip.ok
+    elif (.steps.settlement_adapter_signed_tx_roundtrip.ok | type) == "boolean" then .steps.settlement_adapter_signed_tx_roundtrip.ok
+    elif (.phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_ok | type) == "boolean" then .phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_ok
+    elif (.vpn_track.phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_ok | type) == "boolean" then .vpn_track.phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_ok
+    else empty
+    end
+  ')"
+  if [[ -n "$value" ]]; then
+    source_field="$(json_text_or_empty "$summary_path" '
+      if (.handoff.settlement_adapter_signed_tx_roundtrip_ok | type) == "boolean" then "handoff.settlement_adapter_signed_tx_roundtrip_ok"
+      elif (.signals.settlement_adapter_signed_tx_roundtrip_ok | type) == "boolean" then "signals.settlement_adapter_signed_tx_roundtrip_ok"
+      elif (.signals.settlement_adapter_signed_tx_roundtrip | type) == "boolean" then "signals.settlement_adapter_signed_tx_roundtrip"
+      elif (.stages.settlement_adapter_signed_tx_roundtrip.ok | type) == "boolean" then "stages.settlement_adapter_signed_tx_roundtrip.ok"
+      elif (.steps.settlement_adapter_signed_tx_roundtrip.ok | type) == "boolean" then "steps.settlement_adapter_signed_tx_roundtrip.ok"
+      elif (.phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_ok | type) == "boolean" then "phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_ok"
+      elif (.vpn_track.phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_ok | type) == "boolean" then "vpn_track.phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_ok"
+      else empty
+      end
+    ')"
+    if [[ "$value" == "true" ]]; then
+      status="pass"
+    else
+      status="fail"
+    fi
+    printf '%s|%s|%s\n' "$value" "$status" "$source_field"
+    return 0
+  fi
+
+  status_text="$(json_text_or_empty "$summary_path" '
+    if (.handoff.settlement_adapter_signed_tx_roundtrip_status | type) == "string" then .handoff.settlement_adapter_signed_tx_roundtrip_status
+    elif (.signals.settlement_adapter_signed_tx_roundtrip_status | type) == "string" then .signals.settlement_adapter_signed_tx_roundtrip_status
+    elif (.signals.settlement_adapter_signed_tx_roundtrip.status | type) == "string" then .signals.settlement_adapter_signed_tx_roundtrip.status
+    elif (.stages.settlement_adapter_signed_tx_roundtrip.status | type) == "string" then .stages.settlement_adapter_signed_tx_roundtrip.status
+    elif (.steps.settlement_adapter_signed_tx_roundtrip.status | type) == "string" then .steps.settlement_adapter_signed_tx_roundtrip.status
+    elif (.phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_status | type) == "string" then .phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_status
+    elif (.vpn_track.phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_status | type) == "string" then .vpn_track.phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_status
+    else empty
+    end
+  ')"
+  case "${status_text,,}" in
+    pass)
+      value="true"
+      status="pass"
+      ;;
+    fail)
+      value="false"
+      status="fail"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  source_field="$(json_text_or_empty "$summary_path" '
+    if (.handoff.settlement_adapter_signed_tx_roundtrip_status | type) == "string" then "handoff.settlement_adapter_signed_tx_roundtrip_status"
+    elif (.signals.settlement_adapter_signed_tx_roundtrip_status | type) == "string" then "signals.settlement_adapter_signed_tx_roundtrip_status"
+    elif (.signals.settlement_adapter_signed_tx_roundtrip.status | type) == "string" then "signals.settlement_adapter_signed_tx_roundtrip.status"
+    elif (.stages.settlement_adapter_signed_tx_roundtrip.status | type) == "string" then "stages.settlement_adapter_signed_tx_roundtrip.status"
+    elif (.steps.settlement_adapter_signed_tx_roundtrip.status | type) == "string" then "steps.settlement_adapter_signed_tx_roundtrip.status"
+    elif (.phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_status | type) == "string" then "phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_status"
+    elif (.vpn_track.phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_status | type) == "string" then "vpn_track.phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_status"
+    else empty
+    end
+  ')"
+
+  printf '%s|%s|%s\n' "$value" "$status" "$source_field"
+  return 0
+}
+
+resolve_settlement_adapter_signed_tx_roundtrip_from_ci_summary() {
+  local summary_path="${1:-}"
+  if [[ "$(json_file_valid_01 "$summary_path")" != "1" ]]; then
+    return 1
+  fi
+
+  local value=""
+  local status=""
+  local source_field=""
+  local status_text=""
+
+  value="$(json_bool_or_empty "$summary_path" '
+    if (.signals.settlement_adapter_signed_tx_roundtrip_ok | type) == "boolean" then .signals.settlement_adapter_signed_tx_roundtrip_ok
+    elif (.signals.settlement_adapter_signed_tx_roundtrip | type) == "boolean" then .signals.settlement_adapter_signed_tx_roundtrip
+    elif (.steps.settlement_adapter_signed_tx_roundtrip.ok | type) == "boolean" then .steps.settlement_adapter_signed_tx_roundtrip.ok
+    elif (.stages.settlement_adapter_signed_tx_roundtrip.ok | type) == "boolean" then .stages.settlement_adapter_signed_tx_roundtrip.ok
+    else empty
+    end
+  ')"
+  if [[ -n "$value" ]]; then
+    source_field="$(json_text_or_empty "$summary_path" '
+      if (.signals.settlement_adapter_signed_tx_roundtrip_ok | type) == "boolean" then "signals.settlement_adapter_signed_tx_roundtrip_ok"
+      elif (.signals.settlement_adapter_signed_tx_roundtrip | type) == "boolean" then "signals.settlement_adapter_signed_tx_roundtrip"
+      elif (.steps.settlement_adapter_signed_tx_roundtrip.ok | type) == "boolean" then "steps.settlement_adapter_signed_tx_roundtrip.ok"
+      elif (.stages.settlement_adapter_signed_tx_roundtrip.ok | type) == "boolean" then "stages.settlement_adapter_signed_tx_roundtrip.ok"
+      else empty
+      end
+    ')"
+    if [[ "$value" == "true" ]]; then
+      status="pass"
+    else
+      status="fail"
+    fi
+    printf '%s|%s|%s\n' "$value" "$status" "$source_field"
+    return 0
+  fi
+
+  status_text="$(json_text_or_empty "$summary_path" '
+    if (.signals.settlement_adapter_signed_tx_roundtrip_status | type) == "string" then .signals.settlement_adapter_signed_tx_roundtrip_status
+    elif (.signals.settlement_adapter_signed_tx_roundtrip.status | type) == "string" then .signals.settlement_adapter_signed_tx_roundtrip.status
+    elif (.steps.settlement_adapter_signed_tx_roundtrip.status | type) == "string" then .steps.settlement_adapter_signed_tx_roundtrip.status
+    elif (.stages.settlement_adapter_signed_tx_roundtrip.status | type) == "string" then .stages.settlement_adapter_signed_tx_roundtrip.status
+    else empty
+    end
+  ')"
+  case "${status_text,,}" in
+    pass)
+      value="true"
+      status="pass"
+      ;;
+    fail)
+      value="false"
+      status="fail"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  source_field="$(json_text_or_empty "$summary_path" '
+    if (.signals.settlement_adapter_signed_tx_roundtrip_status | type) == "string" then "signals.settlement_adapter_signed_tx_roundtrip_status"
+    elif (.signals.settlement_adapter_signed_tx_roundtrip.status | type) == "string" then "signals.settlement_adapter_signed_tx_roundtrip.status"
+    elif (.steps.settlement_adapter_signed_tx_roundtrip.status | type) == "string" then "steps.settlement_adapter_signed_tx_roundtrip.status"
+    elif (.stages.settlement_adapter_signed_tx_roundtrip.status | type) == "string" then "stages.settlement_adapter_signed_tx_roundtrip.status"
+    else empty
+    end
+  ')"
+
+  printf '%s|%s|%s\n' "$value" "$status" "$source_field"
+  return 0
+}
+
+resolve_settlement_shadow_env_from_handoff_or_check_summary() {
+  local summary_path="${1:-}"
+  if [[ "$(json_file_valid_01 "$summary_path")" != "1" ]]; then
+    return 1
+  fi
+
+  local value=""
+  local status=""
+  local source_field=""
+  local status_text=""
+
+  value="$(json_bool_or_empty "$summary_path" '
+    if (.handoff.settlement_shadow_env_ok | type) == "boolean" then .handoff.settlement_shadow_env_ok
+    elif (.signals.settlement_shadow_env_ok | type) == "boolean" then .signals.settlement_shadow_env_ok
+    elif (.signals.settlement_shadow_env | type) == "boolean" then .signals.settlement_shadow_env
+    elif (.stages.settlement_shadow_env.ok | type) == "boolean" then .stages.settlement_shadow_env.ok
+    elif (.steps.settlement_shadow_env.ok | type) == "boolean" then .steps.settlement_shadow_env.ok
+    elif (.phase5_settlement_layer_handoff.settlement_shadow_env_ok | type) == "boolean" then .phase5_settlement_layer_handoff.settlement_shadow_env_ok
+    elif (.vpn_track.phase5_settlement_layer_handoff.settlement_shadow_env_ok | type) == "boolean" then .vpn_track.phase5_settlement_layer_handoff.settlement_shadow_env_ok
+    else empty
+    end
+  ')"
+  if [[ -n "$value" ]]; then
+    source_field="$(json_text_or_empty "$summary_path" '
+      if (.handoff.settlement_shadow_env_ok | type) == "boolean" then "handoff.settlement_shadow_env_ok"
+      elif (.signals.settlement_shadow_env_ok | type) == "boolean" then "signals.settlement_shadow_env_ok"
+      elif (.signals.settlement_shadow_env | type) == "boolean" then "signals.settlement_shadow_env"
+      elif (.stages.settlement_shadow_env.ok | type) == "boolean" then "stages.settlement_shadow_env.ok"
+      elif (.steps.settlement_shadow_env.ok | type) == "boolean" then "steps.settlement_shadow_env.ok"
+      elif (.phase5_settlement_layer_handoff.settlement_shadow_env_ok | type) == "boolean" then "phase5_settlement_layer_handoff.settlement_shadow_env_ok"
+      elif (.vpn_track.phase5_settlement_layer_handoff.settlement_shadow_env_ok | type) == "boolean" then "vpn_track.phase5_settlement_layer_handoff.settlement_shadow_env_ok"
+      else empty
+      end
+    ')"
+    if [[ "$value" == "true" ]]; then
+      status="pass"
+    else
+      status="fail"
+    fi
+    printf '%s|%s|%s\n' "$value" "$status" "$source_field"
+    return 0
+  fi
+
+  status_text="$(json_text_or_empty "$summary_path" '
+    if (.handoff.settlement_shadow_env_status | type) == "string" then .handoff.settlement_shadow_env_status
+    elif (.signals.settlement_shadow_env_status | type) == "string" then .signals.settlement_shadow_env_status
+    elif (.signals.settlement_shadow_env.status | type) == "string" then .signals.settlement_shadow_env.status
+    elif (.stages.settlement_shadow_env.status | type) == "string" then .stages.settlement_shadow_env.status
+    elif (.steps.settlement_shadow_env.status | type) == "string" then .steps.settlement_shadow_env.status
+    elif (.phase5_settlement_layer_handoff.settlement_shadow_env_status | type) == "string" then .phase5_settlement_layer_handoff.settlement_shadow_env_status
+    elif (.vpn_track.phase5_settlement_layer_handoff.settlement_shadow_env_status | type) == "string" then .vpn_track.phase5_settlement_layer_handoff.settlement_shadow_env_status
+    else empty
+    end
+  ')"
+  case "${status_text,,}" in
+    pass)
+      value="true"
+      status="pass"
+      ;;
+    fail)
+      value="false"
+      status="fail"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  source_field="$(json_text_or_empty "$summary_path" '
+    if (.handoff.settlement_shadow_env_status | type) == "string" then "handoff.settlement_shadow_env_status"
+    elif (.signals.settlement_shadow_env_status | type) == "string" then "signals.settlement_shadow_env_status"
+    elif (.signals.settlement_shadow_env.status | type) == "string" then "signals.settlement_shadow_env.status"
+    elif (.stages.settlement_shadow_env.status | type) == "string" then "stages.settlement_shadow_env.status"
+    elif (.steps.settlement_shadow_env.status | type) == "string" then "steps.settlement_shadow_env.status"
+    elif (.phase5_settlement_layer_handoff.settlement_shadow_env_status | type) == "string" then "phase5_settlement_layer_handoff.settlement_shadow_env_status"
+    elif (.vpn_track.phase5_settlement_layer_handoff.settlement_shadow_env_status | type) == "string" then "vpn_track.phase5_settlement_layer_handoff.settlement_shadow_env_status"
+    else empty
+    end
+  ')"
+
+  printf '%s|%s|%s\n' "$value" "$status" "$source_field"
+  return 0
+}
+
+resolve_settlement_shadow_env_from_ci_summary() {
+  local summary_path="${1:-}"
+  if [[ "$(json_file_valid_01 "$summary_path")" != "1" ]]; then
+    return 1
+  fi
+
+  local value=""
+  local status=""
+  local source_field=""
+  local status_text=""
+
+  value="$(json_bool_or_empty "$summary_path" '
+    if (.signals.settlement_shadow_env_ok | type) == "boolean" then .signals.settlement_shadow_env_ok
+    elif (.signals.settlement_shadow_env | type) == "boolean" then .signals.settlement_shadow_env
+    elif (.steps.settlement_shadow_env.ok | type) == "boolean" then .steps.settlement_shadow_env.ok
+    elif (.stages.settlement_shadow_env.ok | type) == "boolean" then .stages.settlement_shadow_env.ok
+    else empty
+    end
+  ')"
+  if [[ -n "$value" ]]; then
+    source_field="$(json_text_or_empty "$summary_path" '
+      if (.signals.settlement_shadow_env_ok | type) == "boolean" then "signals.settlement_shadow_env_ok"
+      elif (.signals.settlement_shadow_env | type) == "boolean" then "signals.settlement_shadow_env"
+      elif (.steps.settlement_shadow_env.ok | type) == "boolean" then "steps.settlement_shadow_env.ok"
+      elif (.stages.settlement_shadow_env.ok | type) == "boolean" then "stages.settlement_shadow_env.ok"
+      else empty
+      end
+    ')"
+    if [[ "$value" == "true" ]]; then
+      status="pass"
+    else
+      status="fail"
+    fi
+    printf '%s|%s|%s\n' "$value" "$status" "$source_field"
+    return 0
+  fi
+
+  status_text="$(json_text_or_empty "$summary_path" '
+    if (.signals.settlement_shadow_env_status | type) == "string" then .signals.settlement_shadow_env_status
+    elif (.signals.settlement_shadow_env.status | type) == "string" then .signals.settlement_shadow_env.status
+    elif (.steps.settlement_shadow_env.status | type) == "string" then .steps.settlement_shadow_env.status
+    elif (.stages.settlement_shadow_env.status | type) == "string" then .stages.settlement_shadow_env.status
+    else empty
+    end
+  ')"
+  case "${status_text,,}" in
+    pass)
+      value="true"
+      status="pass"
+      ;;
+    fail)
+      value="false"
+      status="fail"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  source_field="$(json_text_or_empty "$summary_path" '
+    if (.signals.settlement_shadow_env_status | type) == "string" then "signals.settlement_shadow_env_status"
+    elif (.signals.settlement_shadow_env.status | type) == "string" then "signals.settlement_shadow_env.status"
+    elif (.steps.settlement_shadow_env.status | type) == "string" then "steps.settlement_shadow_env.status"
+    elif (.stages.settlement_shadow_env.status | type) == "string" then "stages.settlement_shadow_env.status"
+    else empty
+    end
+  ')"
+
+  printf '%s|%s|%s\n' "$value" "$status" "$source_field"
+  return 0
+}
+
+resolve_settlement_shadow_status_surface_from_handoff_or_check_summary() {
+  local summary_path="${1:-}"
+  if [[ "$(json_file_valid_01 "$summary_path")" != "1" ]]; then
+    return 1
+  fi
+
+  local value=""
+  local status=""
+  local source_field=""
+  local status_text=""
+
+  value="$(json_bool_or_empty "$summary_path" '
+    if (.handoff.settlement_shadow_status_surface_ok | type) == "boolean" then .handoff.settlement_shadow_status_surface_ok
+    elif (.signals.settlement_shadow_status_surface_ok | type) == "boolean" then .signals.settlement_shadow_status_surface_ok
+    elif (.signals.settlement_shadow_status_surface | type) == "boolean" then .signals.settlement_shadow_status_surface
+    elif (.stages.settlement_shadow_status_surface.ok | type) == "boolean" then .stages.settlement_shadow_status_surface.ok
+    elif (.steps.settlement_shadow_status_surface.ok | type) == "boolean" then .steps.settlement_shadow_status_surface.ok
+    elif (.phase5_settlement_layer_handoff.settlement_shadow_status_surface_ok | type) == "boolean" then .phase5_settlement_layer_handoff.settlement_shadow_status_surface_ok
+    elif (.vpn_track.phase5_settlement_layer_handoff.settlement_shadow_status_surface_ok | type) == "boolean" then .vpn_track.phase5_settlement_layer_handoff.settlement_shadow_status_surface_ok
+    else empty
+    end
+  ')"
+  if [[ -n "$value" ]]; then
+    source_field="$(json_text_or_empty "$summary_path" '
+      if (.handoff.settlement_shadow_status_surface_ok | type) == "boolean" then "handoff.settlement_shadow_status_surface_ok"
+      elif (.signals.settlement_shadow_status_surface_ok | type) == "boolean" then "signals.settlement_shadow_status_surface_ok"
+      elif (.signals.settlement_shadow_status_surface | type) == "boolean" then "signals.settlement_shadow_status_surface"
+      elif (.stages.settlement_shadow_status_surface.ok | type) == "boolean" then "stages.settlement_shadow_status_surface.ok"
+      elif (.steps.settlement_shadow_status_surface.ok | type) == "boolean" then "steps.settlement_shadow_status_surface.ok"
+      elif (.phase5_settlement_layer_handoff.settlement_shadow_status_surface_ok | type) == "boolean" then "phase5_settlement_layer_handoff.settlement_shadow_status_surface_ok"
+      elif (.vpn_track.phase5_settlement_layer_handoff.settlement_shadow_status_surface_ok | type) == "boolean" then "vpn_track.phase5_settlement_layer_handoff.settlement_shadow_status_surface_ok"
+      else empty
+      end
+    ')"
+    if [[ "$value" == "true" ]]; then
+      status="pass"
+    else
+      status="fail"
+    fi
+    printf '%s|%s|%s\n' "$value" "$status" "$source_field"
+    return 0
+  fi
+
+  status_text="$(json_text_or_empty "$summary_path" '
+    if (.handoff.settlement_shadow_status_surface_status | type) == "string" then .handoff.settlement_shadow_status_surface_status
+    elif (.signals.settlement_shadow_status_surface_status | type) == "string" then .signals.settlement_shadow_status_surface_status
+    elif (.signals.settlement_shadow_status_surface.status | type) == "string" then .signals.settlement_shadow_status_surface.status
+    elif (.stages.settlement_shadow_status_surface.status | type) == "string" then .stages.settlement_shadow_status_surface.status
+    elif (.steps.settlement_shadow_status_surface.status | type) == "string" then .steps.settlement_shadow_status_surface.status
+    elif (.phase5_settlement_layer_handoff.settlement_shadow_status_surface_status | type) == "string" then .phase5_settlement_layer_handoff.settlement_shadow_status_surface_status
+    elif (.vpn_track.phase5_settlement_layer_handoff.settlement_shadow_status_surface_status | type) == "string" then .vpn_track.phase5_settlement_layer_handoff.settlement_shadow_status_surface_status
+    else empty
+    end
+  ')"
+  case "${status_text,,}" in
+    pass)
+      value="true"
+      status="pass"
+      ;;
+    fail)
+      value="false"
+      status="fail"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  source_field="$(json_text_or_empty "$summary_path" '
+    if (.handoff.settlement_shadow_status_surface_status | type) == "string" then "handoff.settlement_shadow_status_surface_status"
+    elif (.signals.settlement_shadow_status_surface_status | type) == "string" then "signals.settlement_shadow_status_surface_status"
+    elif (.signals.settlement_shadow_status_surface.status | type) == "string" then "signals.settlement_shadow_status_surface.status"
+    elif (.stages.settlement_shadow_status_surface.status | type) == "string" then "stages.settlement_shadow_status_surface.status"
+    elif (.steps.settlement_shadow_status_surface.status | type) == "string" then "steps.settlement_shadow_status_surface.status"
+    elif (.phase5_settlement_layer_handoff.settlement_shadow_status_surface_status | type) == "string" then "phase5_settlement_layer_handoff.settlement_shadow_status_surface_status"
+    elif (.vpn_track.phase5_settlement_layer_handoff.settlement_shadow_status_surface_status | type) == "string" then "vpn_track.phase5_settlement_layer_handoff.settlement_shadow_status_surface_status"
+    else empty
+    end
+  ')"
+
+  printf '%s|%s|%s\n' "$value" "$status" "$source_field"
+  return 0
+}
+
+resolve_settlement_shadow_status_surface_from_ci_summary() {
+  local summary_path="${1:-}"
+  if [[ "$(json_file_valid_01 "$summary_path")" != "1" ]]; then
+    return 1
+  fi
+
+  local value=""
+  local status=""
+  local source_field=""
+  local status_text=""
+
+  value="$(json_bool_or_empty "$summary_path" '
+    if (.signals.settlement_shadow_status_surface_ok | type) == "boolean" then .signals.settlement_shadow_status_surface_ok
+    elif (.signals.settlement_shadow_status_surface | type) == "boolean" then .signals.settlement_shadow_status_surface
+    elif (.steps.settlement_shadow_status_surface.ok | type) == "boolean" then .steps.settlement_shadow_status_surface.ok
+    elif (.stages.settlement_shadow_status_surface.ok | type) == "boolean" then .stages.settlement_shadow_status_surface.ok
+    else empty
+    end
+  ')"
+  if [[ -n "$value" ]]; then
+    source_field="$(json_text_or_empty "$summary_path" '
+      if (.signals.settlement_shadow_status_surface_ok | type) == "boolean" then "signals.settlement_shadow_status_surface_ok"
+      elif (.signals.settlement_shadow_status_surface | type) == "boolean" then "signals.settlement_shadow_status_surface"
+      elif (.steps.settlement_shadow_status_surface.ok | type) == "boolean" then "steps.settlement_shadow_status_surface.ok"
+      elif (.stages.settlement_shadow_status_surface.ok | type) == "boolean" then "stages.settlement_shadow_status_surface.ok"
+      else empty
+      end
+    ')"
+    if [[ "$value" == "true" ]]; then
+      status="pass"
+    else
+      status="fail"
+    fi
+    printf '%s|%s|%s\n' "$value" "$status" "$source_field"
+    return 0
+  fi
+
+  status_text="$(json_text_or_empty "$summary_path" '
+    if (.signals.settlement_shadow_status_surface_status | type) == "string" then .signals.settlement_shadow_status_surface_status
+    elif (.signals.settlement_shadow_status_surface.status | type) == "string" then .signals.settlement_shadow_status_surface.status
+    elif (.steps.settlement_shadow_status_surface.status | type) == "string" then .steps.settlement_shadow_status_surface.status
+    elif (.stages.settlement_shadow_status_surface.status | type) == "string" then .stages.settlement_shadow_status_surface.status
+    else empty
+    end
+  ')"
+  case "${status_text,,}" in
+    pass)
+      value="true"
+      status="pass"
+      ;;
+    fail)
+      value="false"
+      status="fail"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  source_field="$(json_text_or_empty "$summary_path" '
+    if (.signals.settlement_shadow_status_surface_status | type) == "string" then "signals.settlement_shadow_status_surface_status"
+    elif (.signals.settlement_shadow_status_surface.status | type) == "string" then "signals.settlement_shadow_status_surface.status"
+    elif (.steps.settlement_shadow_status_surface.status | type) == "string" then "steps.settlement_shadow_status_surface.status"
+    elif (.stages.settlement_shadow_status_surface.status | type) == "string" then "stages.settlement_shadow_status_surface.status"
     else empty
     end
   ')"
@@ -755,6 +1631,230 @@ resolve_sponsor_live_smoke_signal() {
   printf '%s|%s|0|unresolved|||0|null\n' "null" "missing"
 }
 
+resolve_sponsor_vpn_session_live_smoke_signal() {
+  local handoff_check_summary_path="${1:-}"
+  local handoff_run_summary_path="${2:-}"
+  local check_summary_path="${3:-}"
+  local run_summary_path="${4:-}"
+  local ci_summary_path="${5:-}"
+
+  local parsed=""
+  local value=""
+  local status=""
+  local source_field=""
+  local fallback_path=""
+
+  parsed="$(resolve_sponsor_vpn_session_from_handoff_or_check_summary "$handoff_check_summary_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|phase5_settlement_layer_handoff_check_summary|%s|%s|0|1\n' "$value" "$status" "$source_field" "$handoff_check_summary_path"
+    return
+  fi
+
+  fallback_path="$(resolve_artifact_summary_path "$handoff_run_summary_path" '.steps.phase5_settlement_layer_handoff_check.artifacts.summary_json // .artifacts.handoff_summary_json // empty')"
+  parsed="$(resolve_sponsor_vpn_session_from_handoff_or_check_summary "$fallback_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|phase5_settlement_layer_handoff_run_summary.artifacts.handoff_summary_json|%s|%s|1|2\n' "$value" "$status" "$source_field" "$fallback_path"
+    return
+  fi
+
+  parsed="$(resolve_sponsor_vpn_session_from_handoff_or_check_summary "$check_summary_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|phase5_settlement_layer_check_summary|%s|%s|0|3\n' "$value" "$status" "$source_field" "$check_summary_path"
+    return
+  fi
+
+  fallback_path="$(resolve_artifact_summary_path "$run_summary_path" '.steps.phase5_settlement_layer_check.artifacts.summary_json // .artifacts.check_summary_json // empty')"
+  parsed="$(resolve_sponsor_vpn_session_from_handoff_or_check_summary "$fallback_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|phase5_settlement_layer_run_summary.artifacts.check_summary_json|%s|%s|1|4\n' "$value" "$status" "$source_field" "$fallback_path"
+    return
+  fi
+
+  parsed="$(resolve_sponsor_vpn_session_from_ci_summary "$ci_summary_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|ci_phase5_settlement_layer_summary|%s|%s|0|5\n' "$value" "$status" "$source_field" "$ci_summary_path"
+    return
+  fi
+
+  printf '%s|%s|0|unresolved|||0|null\n' "null" "missing"
+}
+
+resolve_issuer_settlement_status_live_smoke_signal() {
+  local handoff_check_summary_path="${1:-}"
+  local handoff_run_summary_path="${2:-}"
+  local check_summary_path="${3:-}"
+  local run_summary_path="${4:-}"
+  local ci_summary_path="${5:-}"
+
+  local parsed=""
+  local value=""
+  local status=""
+  local source_field=""
+  local fallback_path=""
+
+  parsed="$(resolve_issuer_settlement_status_from_handoff_or_check_summary "$handoff_check_summary_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|phase5_settlement_layer_handoff_check_summary|%s|%s|0|1\n' "$value" "$status" "$source_field" "$handoff_check_summary_path"
+    return
+  fi
+
+  fallback_path="$(resolve_artifact_summary_path "$handoff_run_summary_path" '.steps.phase5_settlement_layer_handoff_check.artifacts.summary_json // .artifacts.handoff_summary_json // empty')"
+  parsed="$(resolve_issuer_settlement_status_from_handoff_or_check_summary "$fallback_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|phase5_settlement_layer_handoff_run_summary.artifacts.handoff_summary_json|%s|%s|1|2\n' "$value" "$status" "$source_field" "$fallback_path"
+    return
+  fi
+
+  parsed="$(resolve_issuer_settlement_status_from_handoff_or_check_summary "$run_summary_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|phase5_settlement_layer_run_summary|%s|%s|0|3\n' "$value" "$status" "$source_field" "$run_summary_path"
+    return
+  fi
+
+  fallback_path="$(resolve_artifact_summary_path "$run_summary_path" '.steps.ci_phase5_settlement_layer.artifacts.summary_json // .artifacts.ci_summary_json // empty')"
+  parsed="$(resolve_issuer_settlement_status_from_ci_summary "$fallback_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|phase5_settlement_layer_run_summary.artifacts.ci_summary_json|%s|%s|1|4\n' "$value" "$status" "$source_field" "$fallback_path"
+    return
+  fi
+
+  parsed="$(resolve_issuer_settlement_status_from_ci_summary "$ci_summary_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|ci_phase5_settlement_layer_summary|%s|%s|0|5\n' "$value" "$status" "$source_field" "$ci_summary_path"
+    return
+  fi
+
+  parsed="$(resolve_issuer_settlement_status_from_handoff_or_check_summary "$check_summary_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|phase5_settlement_layer_check_summary|%s|%s|0|6\n' "$value" "$status" "$source_field" "$check_summary_path"
+    return
+  fi
+
+  printf '%s|%s|0|unresolved|||0|null\n' "null" "missing"
+}
+
+resolve_exit_settlement_status_live_smoke_signal() {
+  local handoff_check_summary_path="${1:-}"
+  local handoff_run_summary_path="${2:-}"
+  local check_summary_path="${3:-}"
+  local run_summary_path="${4:-}"
+  local ci_summary_path="${5:-}"
+
+  local parsed=""
+  local value=""
+  local status=""
+  local source_field=""
+  local fallback_path=""
+
+  parsed="$(resolve_exit_settlement_status_from_handoff_or_check_summary "$handoff_check_summary_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|phase5_settlement_layer_handoff_check_summary|%s|%s|0|1\n' "$value" "$status" "$source_field" "$handoff_check_summary_path"
+    return
+  fi
+
+  fallback_path="$(resolve_artifact_summary_path "$handoff_run_summary_path" '.steps.phase5_settlement_layer_handoff_check.artifacts.summary_json // .artifacts.handoff_summary_json // empty')"
+  parsed="$(resolve_exit_settlement_status_from_handoff_or_check_summary "$fallback_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|phase5_settlement_layer_handoff_run_summary.artifacts.handoff_summary_json|%s|%s|1|2\n' "$value" "$status" "$source_field" "$fallback_path"
+    return
+  fi
+
+  parsed="$(resolve_exit_settlement_status_from_handoff_or_check_summary "$run_summary_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|phase5_settlement_layer_run_summary|%s|%s|0|3\n' "$value" "$status" "$source_field" "$run_summary_path"
+    return
+  fi
+
+  fallback_path="$(resolve_artifact_summary_path "$run_summary_path" '.steps.ci_phase5_settlement_layer.artifacts.summary_json // .artifacts.ci_summary_json // empty')"
+  parsed="$(resolve_exit_settlement_status_from_ci_summary "$fallback_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|phase5_settlement_layer_run_summary.artifacts.ci_summary_json|%s|%s|1|4\n' "$value" "$status" "$source_field" "$fallback_path"
+    return
+  fi
+
+  parsed="$(resolve_exit_settlement_status_from_ci_summary "$ci_summary_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|ci_phase5_settlement_layer_summary|%s|%s|0|5\n' "$value" "$status" "$source_field" "$ci_summary_path"
+    return
+  fi
+
+  parsed="$(resolve_exit_settlement_status_from_handoff_or_check_summary "$check_summary_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|phase5_settlement_layer_check_summary|%s|%s|0|6\n' "$value" "$status" "$source_field" "$check_summary_path"
+    return
+  fi
+
+  printf '%s|%s|0|unresolved|||0|null\n' "null" "missing"
+}
+
 resolve_dual_asset_parity_signal() {
   local handoff_check_summary_path="${1:-}"
   local handoff_run_summary_path="${2:-}"
@@ -817,6 +1917,240 @@ resolve_dual_asset_parity_signal() {
     status="${parsed%%|*}"
     source_field="${parsed#*|}"
     printf '%s|%s|1|ci_phase5_settlement_layer_summary|%s|%s|0|5\n' "$value" "$status" "$source_field" "$ci_summary_path"
+    return
+  fi
+
+  printf '%s|%s|0|unresolved|||0|null\n' "null" "missing"
+}
+
+resolve_settlement_adapter_signed_tx_roundtrip_signal() {
+  local handoff_check_summary_path="${1:-}"
+  local handoff_run_summary_path="${2:-}"
+  local check_summary_path="${3:-}"
+  local run_summary_path="${4:-}"
+  local ci_summary_path="${5:-}"
+
+  local parsed=""
+  local value=""
+  local status=""
+  local source_field=""
+  local fallback_path=""
+
+  parsed="$(resolve_settlement_adapter_signed_tx_roundtrip_from_handoff_or_check_summary "$handoff_check_summary_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|phase5_settlement_layer_handoff_check_summary|%s|%s|0|1\n' "$value" "$status" "$source_field" "$handoff_check_summary_path"
+    return
+  fi
+
+  fallback_path="$(resolve_artifact_summary_path "$handoff_run_summary_path" '.steps.phase5_settlement_layer_handoff_check.artifacts.summary_json // .artifacts.handoff_summary_json // empty')"
+  parsed="$(resolve_settlement_adapter_signed_tx_roundtrip_from_handoff_or_check_summary "$fallback_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|phase5_settlement_layer_handoff_run_summary.artifacts.handoff_summary_json|%s|%s|1|2\n' "$value" "$status" "$source_field" "$fallback_path"
+    return
+  fi
+
+  parsed="$(resolve_settlement_adapter_signed_tx_roundtrip_from_handoff_or_check_summary "$run_summary_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|phase5_settlement_layer_run_summary|%s|%s|0|3\n' "$value" "$status" "$source_field" "$run_summary_path"
+    return
+  fi
+
+  fallback_path="$(resolve_artifact_summary_path "$run_summary_path" '.steps.ci_phase5_settlement_layer.artifacts.summary_json // .artifacts.ci_summary_json // empty')"
+  parsed="$(resolve_settlement_adapter_signed_tx_roundtrip_from_ci_summary "$fallback_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|phase5_settlement_layer_run_summary.artifacts.ci_summary_json|%s|%s|1|4\n' "$value" "$status" "$source_field" "$fallback_path"
+    return
+  fi
+
+  parsed="$(resolve_settlement_adapter_signed_tx_roundtrip_from_ci_summary "$ci_summary_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|ci_phase5_settlement_layer_summary|%s|%s|0|5\n' "$value" "$status" "$source_field" "$ci_summary_path"
+    return
+  fi
+
+  parsed="$(resolve_settlement_adapter_signed_tx_roundtrip_from_handoff_or_check_summary "$check_summary_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|phase5_settlement_layer_check_summary|%s|%s|0|6\n' "$value" "$status" "$source_field" "$check_summary_path"
+    return
+  fi
+
+  printf '%s|%s|0|unresolved|||0|null\n' "null" "missing"
+}
+
+resolve_settlement_shadow_env_signal() {
+  local handoff_check_summary_path="${1:-}"
+  local handoff_run_summary_path="${2:-}"
+  local check_summary_path="${3:-}"
+  local run_summary_path="${4:-}"
+  local ci_summary_path="${5:-}"
+
+  local parsed=""
+  local value=""
+  local status=""
+  local source_field=""
+  local fallback_path=""
+
+  parsed="$(resolve_settlement_shadow_env_from_handoff_or_check_summary "$handoff_check_summary_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|phase5_settlement_layer_handoff_check_summary|%s|%s|0|1\n' "$value" "$status" "$source_field" "$handoff_check_summary_path"
+    return
+  fi
+
+  fallback_path="$(resolve_artifact_summary_path "$handoff_run_summary_path" '.steps.phase5_settlement_layer_handoff_check.artifacts.summary_json // .artifacts.handoff_summary_json // empty')"
+  parsed="$(resolve_settlement_shadow_env_from_handoff_or_check_summary "$fallback_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|phase5_settlement_layer_handoff_run_summary.artifacts.handoff_summary_json|%s|%s|1|2\n' "$value" "$status" "$source_field" "$fallback_path"
+    return
+  fi
+
+  parsed="$(resolve_settlement_shadow_env_from_handoff_or_check_summary "$run_summary_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|phase5_settlement_layer_run_summary|%s|%s|0|3\n' "$value" "$status" "$source_field" "$run_summary_path"
+    return
+  fi
+
+  fallback_path="$(resolve_artifact_summary_path "$run_summary_path" '.steps.ci_phase5_settlement_layer.artifacts.summary_json // .artifacts.ci_summary_json // empty')"
+  parsed="$(resolve_settlement_shadow_env_from_ci_summary "$fallback_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|phase5_settlement_layer_run_summary.artifacts.ci_summary_json|%s|%s|1|4\n' "$value" "$status" "$source_field" "$fallback_path"
+    return
+  fi
+
+  parsed="$(resolve_settlement_shadow_env_from_ci_summary "$ci_summary_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|ci_phase5_settlement_layer_summary|%s|%s|0|5\n' "$value" "$status" "$source_field" "$ci_summary_path"
+    return
+  fi
+
+  parsed="$(resolve_settlement_shadow_env_from_handoff_or_check_summary "$check_summary_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|phase5_settlement_layer_check_summary|%s|%s|0|6\n' "$value" "$status" "$source_field" "$check_summary_path"
+    return
+  fi
+
+  printf '%s|%s|0|unresolved|||0|null\n' "null" "missing"
+}
+
+resolve_settlement_shadow_status_surface_signal() {
+  local handoff_check_summary_path="${1:-}"
+  local handoff_run_summary_path="${2:-}"
+  local check_summary_path="${3:-}"
+  local run_summary_path="${4:-}"
+  local ci_summary_path="${5:-}"
+
+  local parsed=""
+  local value=""
+  local status=""
+  local source_field=""
+  local fallback_path=""
+
+  parsed="$(resolve_settlement_shadow_status_surface_from_handoff_or_check_summary "$handoff_check_summary_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|phase5_settlement_layer_handoff_check_summary|%s|%s|0|1\n' "$value" "$status" "$source_field" "$handoff_check_summary_path"
+    return
+  fi
+
+  fallback_path="$(resolve_artifact_summary_path "$handoff_run_summary_path" '.steps.phase5_settlement_layer_handoff_check.artifacts.summary_json // .artifacts.handoff_summary_json // empty')"
+  parsed="$(resolve_settlement_shadow_status_surface_from_handoff_or_check_summary "$fallback_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|phase5_settlement_layer_handoff_run_summary.artifacts.handoff_summary_json|%s|%s|1|2\n' "$value" "$status" "$source_field" "$fallback_path"
+    return
+  fi
+
+  parsed="$(resolve_settlement_shadow_status_surface_from_handoff_or_check_summary "$run_summary_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|phase5_settlement_layer_run_summary|%s|%s|0|3\n' "$value" "$status" "$source_field" "$run_summary_path"
+    return
+  fi
+
+  fallback_path="$(resolve_artifact_summary_path "$run_summary_path" '.steps.ci_phase5_settlement_layer.artifacts.summary_json // .artifacts.ci_summary_json // empty')"
+  parsed="$(resolve_settlement_shadow_status_surface_from_ci_summary "$fallback_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|phase5_settlement_layer_run_summary.artifacts.ci_summary_json|%s|%s|1|4\n' "$value" "$status" "$source_field" "$fallback_path"
+    return
+  fi
+
+  parsed="$(resolve_settlement_shadow_status_surface_from_ci_summary "$ci_summary_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|ci_phase5_settlement_layer_summary|%s|%s|0|5\n' "$value" "$status" "$source_field" "$ci_summary_path"
+    return
+  fi
+
+  parsed="$(resolve_settlement_shadow_status_surface_from_handoff_or_check_summary "$check_summary_path" || true)"
+  if [[ -n "$parsed" ]]; then
+    value="${parsed%%|*}"
+    parsed="${parsed#*|}"
+    status="${parsed%%|*}"
+    source_field="${parsed#*|}"
+    printf '%s|%s|1|phase5_settlement_layer_check_summary|%s|%s|0|6\n' "$value" "$status" "$source_field" "$check_summary_path"
     return
   fi
 
@@ -1028,6 +2362,22 @@ sponsor_signal_source_field=""
 sponsor_signal_source_path=""
 sponsor_signal_source_fallback="0"
 sponsor_signal_source_priority_index="null"
+sponsor_vpn_session_signal_ok="null"
+sponsor_vpn_session_signal_status="missing"
+sponsor_vpn_session_signal_resolved="0"
+sponsor_vpn_session_signal_source="unresolved"
+sponsor_vpn_session_signal_source_field=""
+sponsor_vpn_session_signal_source_path=""
+sponsor_vpn_session_signal_source_fallback="0"
+sponsor_vpn_session_signal_source_priority_index="null"
+issuer_settlement_status_signal_ok="null"
+issuer_settlement_status_signal_status="missing"
+issuer_settlement_status_signal_resolved="0"
+issuer_settlement_status_signal_source="unresolved"
+issuer_settlement_status_signal_source_field=""
+issuer_settlement_status_signal_source_path=""
+issuer_settlement_status_signal_source_fallback="0"
+issuer_settlement_status_signal_source_priority_index="null"
 dual_asset_signal_ok="null"
 dual_asset_signal_status="missing"
 dual_asset_signal_resolved="0"
@@ -1191,6 +2541,72 @@ sponsor_signal_pair="${sponsor_signal_pair#*|}"
 sponsor_signal_source_fallback="${sponsor_signal_pair%%|*}"
 sponsor_signal_source_priority_index="${sponsor_signal_pair##*|}"
 
+sponsor_vpn_session_signal_pair="$(resolve_sponsor_vpn_session_live_smoke_signal \
+  "${stage_path[phase5_settlement_layer_handoff_check]}" \
+  "${stage_path[phase5_settlement_layer_handoff_run]}" \
+  "${stage_path[phase5_settlement_layer_check]}" \
+  "${stage_path[phase5_settlement_layer_run]}" \
+  "${stage_path[ci_phase5_settlement_layer]}" \
+)"
+sponsor_vpn_session_signal_ok="${sponsor_vpn_session_signal_pair%%|*}"
+sponsor_vpn_session_signal_pair="${sponsor_vpn_session_signal_pair#*|}"
+sponsor_vpn_session_signal_status="${sponsor_vpn_session_signal_pair%%|*}"
+sponsor_vpn_session_signal_pair="${sponsor_vpn_session_signal_pair#*|}"
+sponsor_vpn_session_signal_resolved="${sponsor_vpn_session_signal_pair%%|*}"
+sponsor_vpn_session_signal_pair="${sponsor_vpn_session_signal_pair#*|}"
+sponsor_vpn_session_signal_source="${sponsor_vpn_session_signal_pair%%|*}"
+sponsor_vpn_session_signal_pair="${sponsor_vpn_session_signal_pair#*|}"
+sponsor_vpn_session_signal_source_field="${sponsor_vpn_session_signal_pair%%|*}"
+sponsor_vpn_session_signal_pair="${sponsor_vpn_session_signal_pair#*|}"
+sponsor_vpn_session_signal_source_path="${sponsor_vpn_session_signal_pair%%|*}"
+sponsor_vpn_session_signal_pair="${sponsor_vpn_session_signal_pair#*|}"
+sponsor_vpn_session_signal_source_fallback="${sponsor_vpn_session_signal_pair%%|*}"
+sponsor_vpn_session_signal_source_priority_index="${sponsor_vpn_session_signal_pair##*|}"
+
+issuer_settlement_status_signal_pair="$(resolve_issuer_settlement_status_live_smoke_signal \
+  "${stage_path[phase5_settlement_layer_handoff_check]}" \
+  "${stage_path[phase5_settlement_layer_handoff_run]}" \
+  "${stage_path[phase5_settlement_layer_check]}" \
+  "${stage_path[phase5_settlement_layer_run]}" \
+  "${stage_path[ci_phase5_settlement_layer]}" \
+)"
+issuer_settlement_status_signal_ok="${issuer_settlement_status_signal_pair%%|*}"
+issuer_settlement_status_signal_pair="${issuer_settlement_status_signal_pair#*|}"
+issuer_settlement_status_signal_status="${issuer_settlement_status_signal_pair%%|*}"
+issuer_settlement_status_signal_pair="${issuer_settlement_status_signal_pair#*|}"
+issuer_settlement_status_signal_resolved="${issuer_settlement_status_signal_pair%%|*}"
+issuer_settlement_status_signal_pair="${issuer_settlement_status_signal_pair#*|}"
+issuer_settlement_status_signal_source="${issuer_settlement_status_signal_pair%%|*}"
+issuer_settlement_status_signal_pair="${issuer_settlement_status_signal_pair#*|}"
+issuer_settlement_status_signal_source_field="${issuer_settlement_status_signal_pair%%|*}"
+issuer_settlement_status_signal_pair="${issuer_settlement_status_signal_pair#*|}"
+issuer_settlement_status_signal_source_path="${issuer_settlement_status_signal_pair%%|*}"
+issuer_settlement_status_signal_pair="${issuer_settlement_status_signal_pair#*|}"
+issuer_settlement_status_signal_source_fallback="${issuer_settlement_status_signal_pair%%|*}"
+issuer_settlement_status_signal_source_priority_index="${issuer_settlement_status_signal_pair##*|}"
+
+exit_settlement_status_signal_pair="$(resolve_exit_settlement_status_live_smoke_signal \
+  "${stage_path[phase5_settlement_layer_handoff_check]}" \
+  "${stage_path[phase5_settlement_layer_handoff_run]}" \
+  "${stage_path[phase5_settlement_layer_check]}" \
+  "${stage_path[phase5_settlement_layer_run]}" \
+  "${stage_path[ci_phase5_settlement_layer]}" \
+)"
+exit_settlement_status_signal_ok="${exit_settlement_status_signal_pair%%|*}"
+exit_settlement_status_signal_pair="${exit_settlement_status_signal_pair#*|}"
+exit_settlement_status_signal_status="${exit_settlement_status_signal_pair%%|*}"
+exit_settlement_status_signal_pair="${exit_settlement_status_signal_pair#*|}"
+exit_settlement_status_signal_resolved="${exit_settlement_status_signal_pair%%|*}"
+exit_settlement_status_signal_pair="${exit_settlement_status_signal_pair#*|}"
+exit_settlement_status_signal_source="${exit_settlement_status_signal_pair%%|*}"
+exit_settlement_status_signal_pair="${exit_settlement_status_signal_pair#*|}"
+exit_settlement_status_signal_source_field="${exit_settlement_status_signal_pair%%|*}"
+exit_settlement_status_signal_pair="${exit_settlement_status_signal_pair#*|}"
+exit_settlement_status_signal_source_path="${exit_settlement_status_signal_pair%%|*}"
+exit_settlement_status_signal_pair="${exit_settlement_status_signal_pair#*|}"
+exit_settlement_status_signal_source_fallback="${exit_settlement_status_signal_pair%%|*}"
+exit_settlement_status_signal_source_priority_index="${exit_settlement_status_signal_pair##*|}"
+
 dual_asset_signal_pair="$(resolve_dual_asset_parity_signal \
   "${stage_path[phase5_settlement_layer_handoff_check]}" \
   "${stage_path[phase5_settlement_layer_handoff_run]}" \
@@ -1212,6 +2628,72 @@ dual_asset_signal_source_path="${dual_asset_signal_pair%%|*}"
 dual_asset_signal_pair="${dual_asset_signal_pair#*|}"
 dual_asset_signal_source_fallback="${dual_asset_signal_pair%%|*}"
 dual_asset_signal_source_priority_index="${dual_asset_signal_pair##*|}"
+
+adapter_signed_tx_roundtrip_signal_pair="$(resolve_settlement_adapter_signed_tx_roundtrip_signal \
+  "${stage_path[phase5_settlement_layer_handoff_check]}" \
+  "${stage_path[phase5_settlement_layer_handoff_run]}" \
+  "${stage_path[phase5_settlement_layer_check]}" \
+  "${stage_path[phase5_settlement_layer_run]}" \
+  "${stage_path[ci_phase5_settlement_layer]}" \
+)"
+adapter_signed_tx_roundtrip_signal_ok="${adapter_signed_tx_roundtrip_signal_pair%%|*}"
+adapter_signed_tx_roundtrip_signal_pair="${adapter_signed_tx_roundtrip_signal_pair#*|}"
+adapter_signed_tx_roundtrip_signal_status="${adapter_signed_tx_roundtrip_signal_pair%%|*}"
+adapter_signed_tx_roundtrip_signal_pair="${adapter_signed_tx_roundtrip_signal_pair#*|}"
+adapter_signed_tx_roundtrip_signal_resolved="${adapter_signed_tx_roundtrip_signal_pair%%|*}"
+adapter_signed_tx_roundtrip_signal_pair="${adapter_signed_tx_roundtrip_signal_pair#*|}"
+adapter_signed_tx_roundtrip_signal_source="${adapter_signed_tx_roundtrip_signal_pair%%|*}"
+adapter_signed_tx_roundtrip_signal_pair="${adapter_signed_tx_roundtrip_signal_pair#*|}"
+adapter_signed_tx_roundtrip_signal_source_field="${adapter_signed_tx_roundtrip_signal_pair%%|*}"
+adapter_signed_tx_roundtrip_signal_pair="${adapter_signed_tx_roundtrip_signal_pair#*|}"
+adapter_signed_tx_roundtrip_signal_source_path="${adapter_signed_tx_roundtrip_signal_pair%%|*}"
+adapter_signed_tx_roundtrip_signal_pair="${adapter_signed_tx_roundtrip_signal_pair#*|}"
+adapter_signed_tx_roundtrip_signal_source_fallback="${adapter_signed_tx_roundtrip_signal_pair%%|*}"
+adapter_signed_tx_roundtrip_signal_source_priority_index="${adapter_signed_tx_roundtrip_signal_pair##*|}"
+
+shadow_env_signal_pair="$(resolve_settlement_shadow_env_signal \
+  "${stage_path[phase5_settlement_layer_handoff_check]}" \
+  "${stage_path[phase5_settlement_layer_handoff_run]}" \
+  "${stage_path[phase5_settlement_layer_check]}" \
+  "${stage_path[phase5_settlement_layer_run]}" \
+  "${stage_path[ci_phase5_settlement_layer]}" \
+)"
+shadow_env_signal_ok="${shadow_env_signal_pair%%|*}"
+shadow_env_signal_pair="${shadow_env_signal_pair#*|}"
+shadow_env_signal_status="${shadow_env_signal_pair%%|*}"
+shadow_env_signal_pair="${shadow_env_signal_pair#*|}"
+shadow_env_signal_resolved="${shadow_env_signal_pair%%|*}"
+shadow_env_signal_pair="${shadow_env_signal_pair#*|}"
+shadow_env_signal_source="${shadow_env_signal_pair%%|*}"
+shadow_env_signal_pair="${shadow_env_signal_pair#*|}"
+shadow_env_signal_source_field="${shadow_env_signal_pair%%|*}"
+shadow_env_signal_pair="${shadow_env_signal_pair#*|}"
+shadow_env_signal_source_path="${shadow_env_signal_pair%%|*}"
+shadow_env_signal_pair="${shadow_env_signal_pair#*|}"
+shadow_env_signal_source_fallback="${shadow_env_signal_pair%%|*}"
+shadow_env_signal_source_priority_index="${shadow_env_signal_pair##*|}"
+
+shadow_status_surface_signal_pair="$(resolve_settlement_shadow_status_surface_signal \
+  "${stage_path[phase5_settlement_layer_handoff_check]}" \
+  "${stage_path[phase5_settlement_layer_handoff_run]}" \
+  "${stage_path[phase5_settlement_layer_check]}" \
+  "${stage_path[phase5_settlement_layer_run]}" \
+  "${stage_path[ci_phase5_settlement_layer]}" \
+)"
+shadow_status_surface_signal_ok="${shadow_status_surface_signal_pair%%|*}"
+shadow_status_surface_signal_pair="${shadow_status_surface_signal_pair#*|}"
+shadow_status_surface_signal_status="${shadow_status_surface_signal_pair%%|*}"
+shadow_status_surface_signal_pair="${shadow_status_surface_signal_pair#*|}"
+shadow_status_surface_signal_resolved="${shadow_status_surface_signal_pair%%|*}"
+shadow_status_surface_signal_pair="${shadow_status_surface_signal_pair#*|}"
+shadow_status_surface_signal_source="${shadow_status_surface_signal_pair%%|*}"
+shadow_status_surface_signal_pair="${shadow_status_surface_signal_pair#*|}"
+shadow_status_surface_signal_source_field="${shadow_status_surface_signal_pair%%|*}"
+shadow_status_surface_signal_pair="${shadow_status_surface_signal_pair#*|}"
+shadow_status_surface_signal_source_path="${shadow_status_surface_signal_pair%%|*}"
+shadow_status_surface_signal_pair="${shadow_status_surface_signal_pair#*|}"
+shadow_status_surface_signal_source_fallback="${shadow_status_surface_signal_pair%%|*}"
+shadow_status_surface_signal_source_priority_index="${shadow_status_surface_signal_pair##*|}"
 
 issuer_admin_coverage_signal_pair="$(resolve_issuer_admin_coverage_signal \
   "${stage_path[phase5_settlement_layer_handoff_check]}" \
@@ -1280,6 +2762,30 @@ jq -n \
   --arg sponsor_signal_source_path "$sponsor_signal_source_path" \
   --arg sponsor_signal_source_fallback "$sponsor_signal_source_fallback" \
   --arg sponsor_signal_source_priority_index "$sponsor_signal_source_priority_index" \
+  --arg sponsor_vpn_session_signal_ok "$sponsor_vpn_session_signal_ok" \
+  --arg sponsor_vpn_session_signal_status "$sponsor_vpn_session_signal_status" \
+  --arg sponsor_vpn_session_signal_resolved "$sponsor_vpn_session_signal_resolved" \
+  --arg sponsor_vpn_session_signal_source "$sponsor_vpn_session_signal_source" \
+  --arg sponsor_vpn_session_signal_source_field "$sponsor_vpn_session_signal_source_field" \
+  --arg sponsor_vpn_session_signal_source_path "$sponsor_vpn_session_signal_source_path" \
+  --arg sponsor_vpn_session_signal_source_fallback "$sponsor_vpn_session_signal_source_fallback" \
+  --arg sponsor_vpn_session_signal_source_priority_index "$sponsor_vpn_session_signal_source_priority_index" \
+  --arg issuer_settlement_status_signal_ok "$issuer_settlement_status_signal_ok" \
+  --arg issuer_settlement_status_signal_status "$issuer_settlement_status_signal_status" \
+  --arg issuer_settlement_status_signal_resolved "$issuer_settlement_status_signal_resolved" \
+  --arg issuer_settlement_status_signal_source "$issuer_settlement_status_signal_source" \
+  --arg issuer_settlement_status_signal_source_field "$issuer_settlement_status_signal_source_field" \
+  --arg issuer_settlement_status_signal_source_path "$issuer_settlement_status_signal_source_path" \
+  --arg issuer_settlement_status_signal_source_fallback "$issuer_settlement_status_signal_source_fallback" \
+  --arg issuer_settlement_status_signal_source_priority_index "$issuer_settlement_status_signal_source_priority_index" \
+  --arg exit_settlement_status_signal_ok "$exit_settlement_status_signal_ok" \
+  --arg exit_settlement_status_signal_status "$exit_settlement_status_signal_status" \
+  --arg exit_settlement_status_signal_resolved "$exit_settlement_status_signal_resolved" \
+  --arg exit_settlement_status_signal_source "$exit_settlement_status_signal_source" \
+  --arg exit_settlement_status_signal_source_field "$exit_settlement_status_signal_source_field" \
+  --arg exit_settlement_status_signal_source_path "$exit_settlement_status_signal_source_path" \
+  --arg exit_settlement_status_signal_source_fallback "$exit_settlement_status_signal_source_fallback" \
+  --arg exit_settlement_status_signal_source_priority_index "$exit_settlement_status_signal_source_priority_index" \
   --arg dual_asset_signal_ok "$dual_asset_signal_ok" \
   --arg dual_asset_signal_status "$dual_asset_signal_status" \
   --arg dual_asset_signal_resolved "$dual_asset_signal_resolved" \
@@ -1288,6 +2794,30 @@ jq -n \
   --arg dual_asset_signal_source_path "$dual_asset_signal_source_path" \
   --arg dual_asset_signal_source_fallback "$dual_asset_signal_source_fallback" \
   --arg dual_asset_signal_source_priority_index "$dual_asset_signal_source_priority_index" \
+  --arg adapter_signed_tx_roundtrip_signal_ok "$adapter_signed_tx_roundtrip_signal_ok" \
+  --arg adapter_signed_tx_roundtrip_signal_status "$adapter_signed_tx_roundtrip_signal_status" \
+  --arg adapter_signed_tx_roundtrip_signal_resolved "$adapter_signed_tx_roundtrip_signal_resolved" \
+  --arg adapter_signed_tx_roundtrip_signal_source "$adapter_signed_tx_roundtrip_signal_source" \
+  --arg adapter_signed_tx_roundtrip_signal_source_field "$adapter_signed_tx_roundtrip_signal_source_field" \
+  --arg adapter_signed_tx_roundtrip_signal_source_path "$adapter_signed_tx_roundtrip_signal_source_path" \
+  --arg adapter_signed_tx_roundtrip_signal_source_fallback "$adapter_signed_tx_roundtrip_signal_source_fallback" \
+  --arg adapter_signed_tx_roundtrip_signal_source_priority_index "$adapter_signed_tx_roundtrip_signal_source_priority_index" \
+  --arg shadow_env_signal_ok "$shadow_env_signal_ok" \
+  --arg shadow_env_signal_status "$shadow_env_signal_status" \
+  --arg shadow_env_signal_resolved "$shadow_env_signal_resolved" \
+  --arg shadow_env_signal_source "$shadow_env_signal_source" \
+  --arg shadow_env_signal_source_field "$shadow_env_signal_source_field" \
+  --arg shadow_env_signal_source_path "$shadow_env_signal_source_path" \
+  --arg shadow_env_signal_source_fallback "$shadow_env_signal_source_fallback" \
+  --arg shadow_env_signal_source_priority_index "$shadow_env_signal_source_priority_index" \
+  --arg shadow_status_surface_signal_ok "$shadow_status_surface_signal_ok" \
+  --arg shadow_status_surface_signal_status "$shadow_status_surface_signal_status" \
+  --arg shadow_status_surface_signal_resolved "$shadow_status_surface_signal_resolved" \
+  --arg shadow_status_surface_signal_source "$shadow_status_surface_signal_source" \
+  --arg shadow_status_surface_signal_source_field "$shadow_status_surface_signal_source_field" \
+  --arg shadow_status_surface_signal_source_path "$shadow_status_surface_signal_source_path" \
+  --arg shadow_status_surface_signal_source_fallback "$shadow_status_surface_signal_source_fallback" \
+  --arg shadow_status_surface_signal_source_priority_index "$shadow_status_surface_signal_source_priority_index" \
   --arg issuer_admin_coverage_signal_ok "$issuer_admin_coverage_signal_ok" \
   --arg issuer_admin_coverage_signal_status "$issuer_admin_coverage_signal_status" \
   --arg issuer_admin_coverage_signal_resolved "$issuer_admin_coverage_signal_resolved" \
@@ -1352,6 +2882,86 @@ jq -n \
           "ci_phase5_settlement_layer_summary"
         ]
       },
+      issuer_sponsor_vpn_session_live_smoke: {
+        ok: (
+          if $sponsor_vpn_session_signal_ok == "true" then true
+          elif $sponsor_vpn_session_signal_ok == "false" then false
+          else null
+          end
+        ),
+        status: $sponsor_vpn_session_signal_status,
+        resolved: ($sponsor_vpn_session_signal_resolved == "1"),
+        source: $sponsor_vpn_session_signal_source,
+        source_field: (if $sponsor_vpn_session_signal_source_field == "" then null else $sponsor_vpn_session_signal_source_field end),
+        source_path: (if $sponsor_vpn_session_signal_source_path == "" then null else $sponsor_vpn_session_signal_source_path end),
+        fallback: ($sponsor_vpn_session_signal_source_fallback == "1"),
+        source_priority_index: (
+          if ($sponsor_vpn_session_signal_source_priority_index | test("^[0-9]+$")) then ($sponsor_vpn_session_signal_source_priority_index | tonumber)
+          else null
+          end
+        ),
+        source_priority: [
+          "phase5_settlement_layer_handoff_check_summary",
+          "phase5_settlement_layer_handoff_run_summary.artifacts.handoff_summary_json",
+          "phase5_settlement_layer_check_summary",
+          "phase5_settlement_layer_run_summary.artifacts.check_summary_json",
+          "ci_phase5_settlement_layer_summary"
+        ]
+      },
+      issuer_settlement_status_live_smoke: {
+        ok: (
+          if $issuer_settlement_status_signal_ok == "true" then true
+          elif $issuer_settlement_status_signal_ok == "false" then false
+          else null
+          end
+        ),
+        status: $issuer_settlement_status_signal_status,
+        resolved: ($issuer_settlement_status_signal_resolved == "1"),
+        source: $issuer_settlement_status_signal_source,
+        source_field: (if $issuer_settlement_status_signal_source_field == "" then null else $issuer_settlement_status_signal_source_field end),
+        source_path: (if $issuer_settlement_status_signal_source_path == "" then null else $issuer_settlement_status_signal_source_path end),
+        fallback: ($issuer_settlement_status_signal_source_fallback == "1"),
+        source_priority_index: (
+          if ($issuer_settlement_status_signal_source_priority_index | test("^[0-9]+$")) then ($issuer_settlement_status_signal_source_priority_index | tonumber)
+          else null
+          end
+        ),
+        source_priority: [
+          "phase5_settlement_layer_handoff_check_summary",
+          "phase5_settlement_layer_handoff_run_summary.artifacts.handoff_summary_json",
+          "phase5_settlement_layer_run_summary",
+          "phase5_settlement_layer_run_summary.artifacts.ci_summary_json",
+          "ci_phase5_settlement_layer_summary",
+          "phase5_settlement_layer_check_summary"
+        ]
+      },
+      exit_settlement_status_live_smoke: {
+        ok: (
+          if $exit_settlement_status_signal_ok == "true" then true
+          elif $exit_settlement_status_signal_ok == "false" then false
+          else null
+          end
+        ),
+        status: $exit_settlement_status_signal_status,
+        resolved: ($exit_settlement_status_signal_resolved == "1"),
+        source: $exit_settlement_status_signal_source,
+        source_field: (if $exit_settlement_status_signal_source_field == "" then null else $exit_settlement_status_signal_source_field end),
+        source_path: (if $exit_settlement_status_signal_source_path == "" then null else $exit_settlement_status_signal_source_path end),
+        fallback: ($exit_settlement_status_signal_source_fallback == "1"),
+        source_priority_index: (
+          if ($exit_settlement_status_signal_source_priority_index | test("^[0-9]+$")) then ($exit_settlement_status_signal_source_priority_index | tonumber)
+          else null
+          end
+        ),
+        source_priority: [
+          "phase5_settlement_layer_handoff_check_summary",
+          "phase5_settlement_layer_handoff_run_summary.artifacts.handoff_summary_json",
+          "phase5_settlement_layer_run_summary",
+          "phase5_settlement_layer_run_summary.artifacts.ci_summary_json",
+          "ci_phase5_settlement_layer_summary",
+          "phase5_settlement_layer_check_summary"
+        ]
+      },
       settlement_dual_asset_parity: {
         ok: (
           if $dual_asset_signal_ok == "true" then true
@@ -1376,6 +2986,87 @@ jq -n \
           "phase5_settlement_layer_check_summary",
           "phase5_settlement_layer_run_summary.artifacts.check_summary_json",
           "ci_phase5_settlement_layer_summary"
+        ]
+      },
+      settlement_adapter_signed_tx_roundtrip: {
+        ok: (
+          if $adapter_signed_tx_roundtrip_signal_ok == "true" then true
+          elif $adapter_signed_tx_roundtrip_signal_ok == "false" then false
+          else null
+          end
+        ),
+        status: $adapter_signed_tx_roundtrip_signal_status,
+        resolved: ($adapter_signed_tx_roundtrip_signal_resolved == "1"),
+        source: $adapter_signed_tx_roundtrip_signal_source,
+        source_field: (if $adapter_signed_tx_roundtrip_signal_source_field == "" then null else $adapter_signed_tx_roundtrip_signal_source_field end),
+        source_path: (if $adapter_signed_tx_roundtrip_signal_source_path == "" then null else $adapter_signed_tx_roundtrip_signal_source_path end),
+        fallback: ($adapter_signed_tx_roundtrip_signal_source_fallback == "1"),
+        source_priority_index: (
+          if ($adapter_signed_tx_roundtrip_signal_source_priority_index | test("^[0-9]+$")) then ($adapter_signed_tx_roundtrip_signal_source_priority_index | tonumber)
+          else null
+          end
+        ),
+        source_priority: [
+          "phase5_settlement_layer_handoff_check_summary",
+          "phase5_settlement_layer_handoff_run_summary.artifacts.handoff_summary_json",
+          "phase5_settlement_layer_run_summary",
+          "phase5_settlement_layer_run_summary.artifacts.ci_summary_json",
+          "ci_phase5_settlement_layer_summary",
+          "phase5_settlement_layer_check_summary"
+        ]
+      },
+      settlement_shadow_env: {
+        ok: (
+          if $shadow_env_signal_ok == "true" then true
+          elif $shadow_env_signal_ok == "false" then false
+          else null
+          end
+        ),
+        status: $shadow_env_signal_status,
+        resolved: ($shadow_env_signal_resolved == "1"),
+        source: $shadow_env_signal_source,
+        source_field: (if $shadow_env_signal_source_field == "" then null else $shadow_env_signal_source_field end),
+        source_path: (if $shadow_env_signal_source_path == "" then null else $shadow_env_signal_source_path end),
+        fallback: ($shadow_env_signal_source_fallback == "1"),
+        source_priority_index: (
+          if ($shadow_env_signal_source_priority_index | test("^[0-9]+$")) then ($shadow_env_signal_source_priority_index | tonumber)
+          else null
+          end
+        ),
+        source_priority: [
+          "phase5_settlement_layer_handoff_check_summary",
+          "phase5_settlement_layer_handoff_run_summary.artifacts.handoff_summary_json",
+          "phase5_settlement_layer_run_summary",
+          "phase5_settlement_layer_run_summary.artifacts.ci_summary_json",
+          "ci_phase5_settlement_layer_summary",
+          "phase5_settlement_layer_check_summary"
+        ]
+      },
+      settlement_shadow_status_surface: {
+        ok: (
+          if $shadow_status_surface_signal_ok == "true" then true
+          elif $shadow_status_surface_signal_ok == "false" then false
+          else null
+          end
+        ),
+        status: $shadow_status_surface_signal_status,
+        resolved: ($shadow_status_surface_signal_resolved == "1"),
+        source: $shadow_status_surface_signal_source,
+        source_field: (if $shadow_status_surface_signal_source_field == "" then null else $shadow_status_surface_signal_source_field end),
+        source_path: (if $shadow_status_surface_signal_source_path == "" then null else $shadow_status_surface_signal_source_path end),
+        fallback: ($shadow_status_surface_signal_source_fallback == "1"),
+        source_priority_index: (
+          if ($shadow_status_surface_signal_source_priority_index | test("^[0-9]+$")) then ($shadow_status_surface_signal_source_priority_index | tonumber)
+          else null
+          end
+        ),
+        source_priority: [
+          "phase5_settlement_layer_handoff_check_summary",
+          "phase5_settlement_layer_handoff_run_summary.artifacts.handoff_summary_json",
+          "phase5_settlement_layer_run_summary",
+          "phase5_settlement_layer_run_summary.artifacts.ci_summary_json",
+          "ci_phase5_settlement_layer_summary",
+          "phase5_settlement_layer_check_summary"
         ]
       },
       issuer_admin_blockchain_handlers_coverage: {
@@ -1443,7 +3134,13 @@ for stage_id in \
 done
 echo "[phase5-summary] overall: status=${overall_status} pass=${pass_count} fail=${fail_count} missing=${missing_count} invalid=${invalid_count}"
 echo "[phase5-summary] issuer_sponsor_api_live_smoke: status=${sponsor_signal_status} ok=${sponsor_signal_ok} source=${sponsor_signal_source} fallback=${sponsor_signal_source_fallback} path=${sponsor_signal_source_path:-n/a}"
+echo "[phase5-summary] issuer_sponsor_vpn_session_live_smoke: status=${sponsor_vpn_session_signal_status} ok=${sponsor_vpn_session_signal_ok} source=${sponsor_vpn_session_signal_source} fallback=${sponsor_vpn_session_signal_source_fallback} path=${sponsor_vpn_session_signal_source_path:-n/a}"
+echo "[phase5-summary] issuer_settlement_status_live_smoke: status=${issuer_settlement_status_signal_status} ok=${issuer_settlement_status_signal_ok} source=${issuer_settlement_status_signal_source} fallback=${issuer_settlement_status_signal_source_fallback} path=${issuer_settlement_status_signal_source_path:-n/a}"
+echo "[phase5-summary] exit_settlement_status_live_smoke: status=${exit_settlement_status_signal_status} ok=${exit_settlement_status_signal_ok} source=${exit_settlement_status_signal_source} fallback=${exit_settlement_status_signal_source_fallback} path=${exit_settlement_status_signal_source_path:-n/a}"
 echo "[phase5-summary] settlement_dual_asset_parity: status=${dual_asset_signal_status} ok=${dual_asset_signal_ok} source=${dual_asset_signal_source} fallback=${dual_asset_signal_source_fallback} path=${dual_asset_signal_source_path:-n/a}"
+echo "[phase5-summary] settlement_adapter_signed_tx_roundtrip: status=${adapter_signed_tx_roundtrip_signal_status} ok=${adapter_signed_tx_roundtrip_signal_ok} source=${adapter_signed_tx_roundtrip_signal_source} fallback=${adapter_signed_tx_roundtrip_signal_source_fallback} path=${adapter_signed_tx_roundtrip_signal_source_path:-n/a}"
+echo "[phase5-summary] settlement_shadow_env: status=${shadow_env_signal_status} ok=${shadow_env_signal_ok} source=${shadow_env_signal_source} fallback=${shadow_env_signal_source_fallback} path=${shadow_env_signal_source_path:-n/a}"
+echo "[phase5-summary] settlement_shadow_status_surface: status=${shadow_status_surface_signal_status} ok=${shadow_status_surface_signal_ok} source=${shadow_status_surface_signal_source} fallback=${shadow_status_surface_signal_source_fallback} path=${shadow_status_surface_signal_source_path:-n/a}"
 echo "[phase5-summary] issuer_admin_blockchain_handlers_coverage: status=${issuer_admin_coverage_signal_status} ok=${issuer_admin_coverage_signal_ok} source=${issuer_admin_coverage_signal_source} fallback=${issuer_admin_coverage_signal_source_fallback} path=${issuer_admin_coverage_signal_source_path:-n/a}"
 echo "[phase5-summary] summary_json=${summary_json}"
 echo "[phase5-summary] canonical_summary_json=${canonical_summary_json}"

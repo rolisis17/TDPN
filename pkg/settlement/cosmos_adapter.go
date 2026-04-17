@@ -71,6 +71,48 @@ type cosmosQueuedOperation struct {
 	idempotencyKey string
 }
 
+type cosmosSessionSettlementPayload struct {
+	SettlementID  string    `json:"SettlementID"`
+	SessionID     string    `json:"SessionID"`
+	SubjectID     string    `json:"SubjectID"`
+	ChargedMicros int64     `json:"ChargedMicros"`
+	Currency      string    `json:"Currency"`
+	SettledAt     time.Time `json:"SettledAt"`
+	Status        string    `json:"Status"`
+}
+
+type cosmosRewardIssuePayload struct {
+	RewardID          string    `json:"RewardID"`
+	ProviderSubjectID string    `json:"ProviderSubjectID"`
+	SessionID         string    `json:"SessionID"`
+	RewardMicros      int64     `json:"RewardMicros"`
+	Currency          string    `json:"Currency"`
+	IssuedAt          time.Time `json:"IssuedAt"`
+	Status            string    `json:"Status"`
+}
+
+type cosmosSponsorReservationPayload struct {
+	ReservationID string    `json:"ReservationID"`
+	SponsorID     string    `json:"SponsorID"`
+	SubjectID     string    `json:"SubjectID"`
+	SessionID     string    `json:"SessionID"`
+	AmountMicros  int64     `json:"AmountMicros"`
+	Currency      string    `json:"Currency"`
+	CreatedAt     time.Time `json:"CreatedAt"`
+	ExpiresAt     time.Time `json:"ExpiresAt"`
+	Status        string    `json:"Status"`
+}
+
+type cosmosSlashEvidencePayload struct {
+	EvidenceID    string    `json:"EvidenceID"`
+	SubjectID     string    `json:"SubjectID"`
+	SessionID     string    `json:"SessionID"`
+	ViolationType string    `json:"ViolationType"`
+	EvidenceRef   string    `json:"EvidenceRef"`
+	ObservedAt    time.Time `json:"ObservedAt"`
+	Status        string    `json:"Status"`
+}
+
 type cosmosDeferredOperation struct {
 	operation     cosmosQueuedOperation
 	deferredAt    time.Time
@@ -232,8 +274,16 @@ func NewCosmosAdapter(cfg CosmosAdapterConfig) (*CosmosAdapter, error) {
 func (a *CosmosAdapter) SubmitSessionSettlement(_ context.Context, settlement SessionSettlement) (string, error) {
 	id := cosmosID("settlement", settlement.SettlementID, settlement.SessionID)
 	return id, a.enqueue(cosmosQueuedOperation{
-		path:           "/x/vpnbilling/settlements",
-		payload:        settlement,
+		path: "/x/vpnbilling/settlements",
+		payload: cosmosSessionSettlementPayload{
+			SettlementID:  settlement.SettlementID,
+			SessionID:     settlement.SessionID,
+			SubjectID:     settlement.SubjectID,
+			ChargedMicros: settlement.ChargedMicros,
+			Currency:      settlement.Currency,
+			SettledAt:     settlement.SettledAt,
+			Status:        cosmosStatusValue(settlement.Status, OperationStatusSubmitted),
+		},
 		idempotencyKey: id,
 	})
 }
@@ -241,8 +291,16 @@ func (a *CosmosAdapter) SubmitSessionSettlement(_ context.Context, settlement Se
 func (a *CosmosAdapter) SubmitRewardIssue(_ context.Context, reward RewardIssue) (string, error) {
 	id := cosmosID("reward", reward.RewardID, reward.SessionID)
 	return id, a.enqueue(cosmosQueuedOperation{
-		path:           "/x/vpnrewards/issues",
-		payload:        reward,
+		path: "/x/vpnrewards/issues",
+		payload: cosmosRewardIssuePayload{
+			RewardID:          reward.RewardID,
+			ProviderSubjectID: reward.ProviderSubjectID,
+			SessionID:         reward.SessionID,
+			RewardMicros:      reward.RewardMicros,
+			Currency:          reward.Currency,
+			IssuedAt:          reward.IssuedAt,
+			Status:            cosmosStatusValue(reward.Status, OperationStatusSubmitted),
+		},
 		idempotencyKey: id,
 	})
 }
@@ -250,8 +308,18 @@ func (a *CosmosAdapter) SubmitRewardIssue(_ context.Context, reward RewardIssue)
 func (a *CosmosAdapter) SubmitSponsorReservation(_ context.Context, reservation SponsorCreditReservation) (string, error) {
 	id := cosmosID("sponsor-reservation", reservation.ReservationID, reservation.SessionID)
 	return id, a.enqueue(cosmosQueuedOperation{
-		path:           "/x/vpnsponsor/reservations",
-		payload:        reservation,
+		path: "/x/vpnsponsor/reservations",
+		payload: cosmosSponsorReservationPayload{
+			ReservationID: reservation.ReservationID,
+			SponsorID:     reservation.SponsorID,
+			SubjectID:     reservation.SubjectID,
+			SessionID:     reservation.SessionID,
+			AmountMicros:  reservation.AmountMicros,
+			Currency:      reservation.Currency,
+			CreatedAt:     reservation.CreatedAt,
+			ExpiresAt:     reservation.ExpiresAt,
+			Status:        cosmosStatusValue(reservation.Status, OperationStatusPending),
+		},
 		idempotencyKey: id,
 	})
 }
@@ -268,8 +336,16 @@ func (a *CosmosAdapter) SubmitSlashEvidence(_ context.Context, evidence SlashEvi
 
 	id := cosmosID("slash", evidence.EvidenceID, evidence.SubjectID)
 	return id, a.enqueue(cosmosQueuedOperation{
-		path:           "/x/vpnslashing/evidence",
-		payload:        evidence,
+		path: "/x/vpnslashing/evidence",
+		payload: cosmosSlashEvidencePayload{
+			EvidenceID:    evidence.EvidenceID,
+			SubjectID:     evidence.SubjectID,
+			SessionID:     evidence.SessionID,
+			ViolationType: evidence.ViolationType,
+			EvidenceRef:   evidence.EvidenceRef,
+			ObservedAt:    evidence.ObservedAt,
+			Status:        cosmosStatusValue(evidence.Status, OperationStatusSubmitted),
+		},
 		idempotencyKey: id,
 	})
 }
@@ -339,9 +415,8 @@ func (a *CosmosAdapter) Close() {
 
 func (a *CosmosAdapter) enqueue(op cosmosQueuedOperation) error {
 	a.stateMu.Lock()
-	closed := a.closed
-	a.stateMu.Unlock()
-	if closed {
+	defer a.stateMu.Unlock()
+	if a.closed {
 		return fmt.Errorf("cosmos adapter closed")
 	}
 	select {
@@ -661,4 +736,15 @@ func cosmosID(prefix string, id string, fallback string) string {
 		id = fmt.Sprintf("t-%d", time.Now().UnixNano())
 	}
 	return prefix + ":" + id
+}
+
+func cosmosStatusValue(status OperationStatus, fallback OperationStatus) string {
+	value := strings.TrimSpace(string(status))
+	if value == "" {
+		value = strings.TrimSpace(string(fallback))
+	}
+	if value == "" {
+		value = strings.TrimSpace(string(OperationStatusSubmitted))
+	}
+	return value
 }

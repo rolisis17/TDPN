@@ -22,6 +22,7 @@ FAIL2="$TMP_DIR/fail_action_2.sh"
 SLOW1="$TMP_DIR/slow_action_1.sh"
 SLOW2="$TMP_DIR/slow_action_2.sh"
 PREFILL="$TMP_DIR/prefill_action_1.sh"
+REFRESH="$TMP_DIR/refresh_action_1.sh"
 
 cat >"$PASS1" <<'EOF_PASS1'
 #!/usr/bin/env bash
@@ -43,6 +44,13 @@ set -euo pipefail
 echo "prefill action 1"
 EOF_PREFILL
 chmod +x "$PREFILL"
+
+cat >"$REFRESH" <<'EOF_REFRESH'
+#!/usr/bin/env bash
+set -euo pipefail
+echo "refresh action 1"
+EOF_REFRESH
+chmod +x "$REFRESH"
 
 cat >"$FAIL1" <<'EOF_FAIL1'
 #!/usr/bin/env bash
@@ -120,9 +128,41 @@ case "$scenario" in
 }
 JSON
     ;;
+  refresh_evidence)
+    cat >"$summary_json" <<JSON
+{
+  "blockchain_track": {
+    "mainnet_activation_missing_metrics_action": {
+      "id": "blockchain_mainnet_activation_refresh_evidence"
+    }
+  },
+  "next_actions": [
+    {"id":"integration_ci_phase1_resilience","label":"Non-blockchain control","command":"bash \"$PASS1\"","reason":"ignore"},
+    {"id":"blockchain_mainnet_activation_refresh_evidence","label":"Blockchain refresh evidence","command":"ROADMAP_MISSING_METRICS_FLOW=stale-evidence bash \"$REFRESH\"","reason":"test"}
+  ]
+}
+JSON
+    ;;
   pass_no_recommended_id)
     cat >"$summary_json" <<JSON
 {
+  "next_actions": [
+    {"id":"blockchain_pass_1","label":"Blockchain pass 1","command":"bash \"$PASS1\"","reason":"test"},
+    {"id":"integration_ci_phase1_resilience","label":"Non-blockchain control","command":"bash \"$PASS2\"","reason":"ignore"},
+    {"id":"blockchain_mainnet_activation_missing_metrics_prefill","label":"Blockchain missing-metrics prefill","command":"bash \"$PREFILL\"","reason":"test"},
+    {"id":"blockchain_pass_2","label":"Blockchain pass 2","command":"ROADMAP_MISSING_METRICS_FLOW=operator-pack bash \"$PASS2\"","reason":"test"}
+  ]
+}
+JSON
+    ;;
+  pass_recommended_id_not_selected)
+    cat >"$summary_json" <<JSON
+{
+  "blockchain_track": {
+    "mainnet_activation_missing_metrics_action": {
+      "id": "blockchain_not_selected"
+    }
+  },
   "next_actions": [
     {"id":"blockchain_pass_1","label":"Blockchain pass 1","command":"bash \"$PASS1\"","reason":"test"},
     {"id":"integration_ci_phase1_resilience","label":"Non-blockchain control","command":"bash \"$PASS2\"","reason":"ignore"},
@@ -251,6 +291,39 @@ if ! jq -e '
   exit 1
 fi
 
+echo "[roadmap-blockchain-actionable-run] refresh-evidence path"
+SUMMARY_REFRESH="$TMP_DIR/summary_refresh.json"
+REPORTS_REFRESH="$TMP_DIR/reports_refresh"
+ROADMAP_BLOCKCHAIN_ACTIONABLE_SCENARIO=refresh_evidence \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
+PREFILL="$PREFILL" REFRESH="$REFRESH" \
+ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_blockchain_actionable_run.sh \
+  --reports-dir "$REPORTS_REFRESH" \
+  --summary-json "$SUMMARY_REFRESH" \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .roadmap.generated_this_run == true
+  and .roadmap.recommended_gate_id == "blockchain_mainnet_activation_refresh_evidence"
+  and .roadmap.actions_selected_count == 1
+  and .roadmap.selected_action_ids == ["blockchain_mainnet_activation_refresh_evidence"]
+  and .summary.actions_executed == 1
+  and .summary.pass == 1
+  and .summary.fail == 0
+  and .summary.timed_out == 0
+  and ((.actions // []) | length == 1)
+  and .actions[0].id == "blockchain_mainnet_activation_refresh_evidence"
+  and .actions[0].status == "pass"
+  and ((.actions[0].command // "") | test("stale-evidence"))
+' "$SUMMARY_REFRESH" >/dev/null; then
+  echo "refresh-evidence path summary mismatch"
+  cat "$SUMMARY_REFRESH"
+  exit 1
+fi
+
 echo "[roadmap-blockchain-actionable-run] max-actions truncation path"
 SUMMARY_MAX="$TMP_DIR/summary_max.json"
 REPORTS_MAX="$TMP_DIR/reports_max"
@@ -312,7 +385,7 @@ if ! jq -e '
   exit 1
 fi
 
-echo "[roadmap-blockchain-actionable-run] recommended-only fallback path"
+echo "[roadmap-blockchain-actionable-run] recommended-only strict no-id path"
 SUMMARY_RECOMMENDED_FALLBACK="$TMP_DIR/summary_recommended_fallback.json"
 REPORTS_RECOMMENDED_FALLBACK="$TMP_DIR/reports_recommended_fallback"
 RECOMMENDED_FALLBACK_LOG="$TMP_DIR/recommended_fallback.log"
@@ -326,8 +399,8 @@ bash ./scripts/roadmap_blockchain_actionable_run.sh \
   --recommended-only 1 \
   --print-summary-json 0 >"$RECOMMENDED_FALLBACK_LOG" 2>&1
 
-if ! grep -F -- "recommended-only requested but no recommended gate id was provided; falling back to full selected blockchain action list" "$RECOMMENDED_FALLBACK_LOG" >/dev/null; then
-  echo "recommended-only fallback log line missing"
+if ! grep -F -- "recommended-only strict mode: no actions selected; reason=missing_recommended_id" "$RECOMMENDED_FALLBACK_LOG" >/dev/null; then
+  echo "recommended-only strict no-id log line missing"
   cat "$RECOMMENDED_FALLBACK_LOG"
   exit 1
 fi
@@ -336,18 +409,55 @@ if ! jq -e '
   and .rc == 0
   and .inputs.recommended_only == true
   and .roadmap.recommended_gate_id == null
-  and .roadmap.actions_selected_count == 3
-  and .roadmap.selected_action_ids == ["blockchain_pass_1","blockchain_mainnet_activation_missing_metrics_prefill","blockchain_pass_2"]
-  and .summary.actions_executed == 3
-  and .summary.pass == 3
+  and .roadmap.recommended_only_selection_state == "missing_recommended_id"
+  and .roadmap.recommended_only_selection_reason == "no recommended gate id was provided"
+  and .roadmap.actions_selected_count == 0
+  and .roadmap.selected_action_ids == []
+  and .summary.actions_executed == 0
+  and .summary.pass == 0
   and .summary.fail == 0
-  and ((.actions // []) | length == 3)
-  and .actions[1].id == "blockchain_mainnet_activation_missing_metrics_prefill"
-  and .actions[1].status == "pass"
-  and ((.actions // []) | any((.id == "blockchain_pass_2") and (((.command // "") | test("real-evidence|operator-pack")))))
+  and ((.actions // []) | length == 0)
 ' "$SUMMARY_RECOMMENDED_FALLBACK" >/dev/null; then
-  echo "recommended-only fallback summary mismatch"
+  echo "recommended-only strict no-id summary mismatch"
   cat "$SUMMARY_RECOMMENDED_FALLBACK"
+  exit 1
+fi
+
+echo "[roadmap-blockchain-actionable-run] recommended-only strict missing-selected-id path"
+SUMMARY_RECOMMENDED_NOT_SELECTED="$TMP_DIR/summary_recommended_not_selected.json"
+REPORTS_RECOMMENDED_NOT_SELECTED="$TMP_DIR/reports_recommended_not_selected"
+RECOMMENDED_NOT_SELECTED_LOG="$TMP_DIR/recommended_not_selected.log"
+ROADMAP_BLOCKCHAIN_ACTIONABLE_SCENARIO=pass_recommended_id_not_selected \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
+PREFILL="$PREFILL" \
+ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_blockchain_actionable_run.sh \
+  --reports-dir "$REPORTS_RECOMMENDED_NOT_SELECTED" \
+  --summary-json "$SUMMARY_RECOMMENDED_NOT_SELECTED" \
+  --recommended-only 1 \
+  --print-summary-json 0 >"$RECOMMENDED_NOT_SELECTED_LOG" 2>&1
+
+if ! grep -F -- "recommended-only strict mode: no actions selected; reason=recommended_id_not_selected recommended_gate_id=blockchain_not_selected" "$RECOMMENDED_NOT_SELECTED_LOG" >/dev/null; then
+  echo "recommended-only strict missing-selected-id log line missing"
+  cat "$RECOMMENDED_NOT_SELECTED_LOG"
+  exit 1
+fi
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.recommended_only == true
+  and .roadmap.recommended_gate_id == "blockchain_not_selected"
+  and .roadmap.recommended_only_selection_state == "recommended_id_not_selected"
+  and .roadmap.recommended_only_selection_reason == "recommended gate id '\''blockchain_not_selected'\'' was not present in selected blockchain actions"
+  and .roadmap.actions_selected_count == 0
+  and .roadmap.selected_action_ids == []
+  and .summary.actions_executed == 0
+  and .summary.pass == 0
+  and .summary.fail == 0
+  and ((.actions // []) | length == 0)
+' "$SUMMARY_RECOMMENDED_NOT_SELECTED" >/dev/null; then
+  echo "recommended-only strict missing-selected-id summary mismatch"
+  cat "$SUMMARY_RECOMMENDED_NOT_SELECTED"
   exit 1
 fi
 

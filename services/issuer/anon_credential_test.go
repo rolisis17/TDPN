@@ -6,12 +6,52 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"privacynode/pkg/crypto"
 	"privacynode/pkg/proto"
 )
+
+func TestHandleIssueTokenRejectsMalformedJSONShapes(t *testing.T) {
+	s := newSponsorTestService(t)
+	popPubKey := sponsorTestPopPubKey(t)
+
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "unknown field",
+			body: `{"tier":1,"subject":"client-1","token_type":"client_access","pop_pub_key":"` + popPubKey + `","unexpected":"value"}`,
+		},
+		{
+			name: "trailing json",
+			body: `{"tier":1,"subject":"client-1","token_type":"client_access","pop_pub_key":"` + popPubKey + `"} {"jti":"other"}`,
+		},
+		{
+			name: "oversized body",
+			body: `{"tier":1,"subject":"` + strings.Repeat("a", 70*1024) + `","token_type":"client_access","pop_pub_key":"` + popPubKey + `"}`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/v1/token", bytes.NewReader([]byte(tc.body)))
+			rr := httptest.NewRecorder()
+
+			s.handleIssueToken(rr, req)
+
+			if rr.Code != http.StatusBadRequest {
+				t.Fatalf("expected status %d, got %d body=%s", http.StatusBadRequest, rr.Code, rr.Body.String())
+			}
+			if !strings.Contains(rr.Body.String(), "invalid json") {
+				t.Fatalf("expected invalid json error, got body=%s", rr.Body.String())
+			}
+		})
+	}
+}
 
 func TestHandleIssueTokenWithAnonymousCredential(t *testing.T) {
 	pub, priv, err := crypto.GenerateEd25519Keypair()

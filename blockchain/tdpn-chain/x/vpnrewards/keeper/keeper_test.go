@@ -411,3 +411,217 @@ func TestKeeperRecordDistributionAdvancesAccrualState(t *testing.T) {
 		})
 	}
 }
+
+func TestKeeperCreateAccrualCanonicalCreateReplayGetAndList(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+
+	created, err := k.CreateAccrual(types.RewardAccrual{
+		AccrualID:      "  ACC-Canon-1 ",
+		SessionID:      " Session-Canon-1 ",
+		ProviderID:     " Provider-Canon-1 ",
+		AssetDenom:     " UUSDC ",
+		Amount:         35,
+		OperationState: " PENDING ",
+	})
+	if err != nil {
+		t.Fatalf("CreateAccrual returned unexpected error: %v", err)
+	}
+	if created.AccrualID != "acc-canon-1" {
+		t.Fatalf("expected canonical accrual id, got %q", created.AccrualID)
+	}
+	if created.SessionID != "session-canon-1" {
+		t.Fatalf("expected canonical session id, got %q", created.SessionID)
+	}
+	if created.ProviderID != "provider-canon-1" {
+		t.Fatalf("expected canonical provider id, got %q", created.ProviderID)
+	}
+	if created.AssetDenom != "uusdc" {
+		t.Fatalf("expected canonical asset denom, got %q", created.AssetDenom)
+	}
+	if created.OperationState != chaintypes.ReconciliationPending {
+		t.Fatalf("expected canonical operation state %q, got %q", chaintypes.ReconciliationPending, created.OperationState)
+	}
+
+	replayed, err := k.CreateAccrual(types.RewardAccrual{
+		AccrualID:      "acc-canon-1",
+		SessionID:      "SESSION-CANON-1",
+		ProviderID:     "provider-canon-1",
+		AssetDenom:     "uusdc",
+		Amount:         35,
+		OperationState: "pending",
+	})
+	if err != nil {
+		t.Fatalf("CreateAccrual replay returned unexpected error: %v", err)
+	}
+	if replayed != created {
+		t.Fatalf("expected replay result %+v to equal created %+v", replayed, created)
+	}
+
+	fromGet, ok := k.GetAccrual("  ACC-CANON-1 ")
+	if !ok {
+		t.Fatal("expected canonicalized get to find accrual")
+	}
+	if fromGet != created {
+		t.Fatalf("expected canonicalized get result %+v to equal created %+v", fromGet, created)
+	}
+
+	listed := k.ListAccruals()
+	if len(listed) != 1 {
+		t.Fatalf("expected 1 accrual in list, got %d", len(listed))
+	}
+	if listed[0] != created {
+		t.Fatalf("expected listed accrual %+v, got %+v", created, listed[0])
+	}
+}
+
+func TestKeeperCreateAccrualCanonicalConflictSemantics(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+
+	if _, err := k.CreateAccrual(types.RewardAccrual{
+		AccrualID:  " Acc-Conflict-1 ",
+		SessionID:  "Sess-Conflict-1",
+		ProviderID: "Provider-Conflict-1",
+		AssetDenom: "UUSDC",
+		Amount:     40,
+	}); err != nil {
+		t.Fatalf("CreateAccrual returned unexpected error: %v", err)
+	}
+
+	_, err := k.CreateAccrual(types.RewardAccrual{
+		AccrualID:  "acc-conflict-1",
+		SessionID:  "sess-conflict-1",
+		ProviderID: "provider-conflict-1",
+		AssetDenom: "uusdc",
+		Amount:     40,
+	})
+	if err != nil {
+		t.Fatalf("expected canonical-equivalent replay to be idempotent, got %v", err)
+	}
+
+	_, err = k.CreateAccrual(types.RewardAccrual{
+		AccrualID:  "  ACC-CONFLICT-1 ",
+		SessionID:  "sess-conflict-1",
+		ProviderID: "provider-conflict-1",
+		AssetDenom: "uatom",
+		Amount:     40,
+	})
+	if err == nil {
+		t.Fatal("expected conflict error for canonical ID collision with different canonical payload")
+	}
+	if !strings.Contains(err.Error(), "conflicting fields") {
+		t.Fatalf("expected conflict error message, got %v", err)
+	}
+}
+
+func TestKeeperRecordDistributionCanonicalCreateReplayGetAndList(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+
+	accrual, err := k.CreateAccrual(types.RewardAccrual{
+		AccrualID:  " ACC-CANON-DIST-1 ",
+		SessionID:  "sess-canon-dist-1",
+		ProviderID: "provider-canon-dist-1",
+		Amount:     50,
+	})
+	if err != nil {
+		t.Fatalf("CreateAccrual returned unexpected error: %v", err)
+	}
+
+	recorded, err := k.RecordDistribution(types.DistributionRecord{
+		DistributionID: " DIST-CANON-1 ",
+		AccrualID:      " ACC-CANON-DIST-1 ",
+		PayoutRef:      "payout-canon-1",
+		Status:         " SUBMITTED ",
+	})
+	if err != nil {
+		t.Fatalf("RecordDistribution returned unexpected error: %v", err)
+	}
+	if recorded.DistributionID != "dist-canon-1" {
+		t.Fatalf("expected canonical distribution id, got %q", recorded.DistributionID)
+	}
+	if recorded.AccrualID != accrual.AccrualID {
+		t.Fatalf("expected canonical accrual id %q, got %q", accrual.AccrualID, recorded.AccrualID)
+	}
+	if recorded.Status != chaintypes.ReconciliationSubmitted {
+		t.Fatalf("expected canonical status %q, got %q", chaintypes.ReconciliationSubmitted, recorded.Status)
+	}
+
+	replayed, err := k.RecordDistribution(types.DistributionRecord{
+		DistributionID: "dist-canon-1",
+		AccrualID:      "acc-canon-dist-1",
+		PayoutRef:      "payout-canon-1",
+		Status:         "submitted",
+	})
+	if err != nil {
+		t.Fatalf("RecordDistribution replay returned unexpected error: %v", err)
+	}
+	if replayed != recorded {
+		t.Fatalf("expected replayed distribution %+v to equal recorded %+v", replayed, recorded)
+	}
+
+	fromGet, ok := k.GetDistribution(" Dist-Canon-1 ")
+	if !ok {
+		t.Fatal("expected canonicalized get to find distribution")
+	}
+	if fromGet != recorded {
+		t.Fatalf("expected canonicalized get distribution %+v, got %+v", recorded, fromGet)
+	}
+
+	listed := k.ListDistributions()
+	if len(listed) != 1 {
+		t.Fatalf("expected 1 distribution in list, got %d", len(listed))
+	}
+	if listed[0] != recorded {
+		t.Fatalf("expected listed distribution %+v, got %+v", recorded, listed[0])
+	}
+}
+
+func TestKeeperRecordDistributionCanonicalConflictSemantics(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+
+	if _, err := k.CreateAccrual(types.RewardAccrual{
+		AccrualID:  "acc-conflict-dist-1",
+		SessionID:  "sess-conflict-dist-1",
+		ProviderID: "provider-conflict-dist-1",
+		Amount:     15,
+	}); err != nil {
+		t.Fatalf("CreateAccrual returned unexpected error: %v", err)
+	}
+
+	if _, err := k.RecordDistribution(types.DistributionRecord{
+		DistributionID: " Dist-Conflict-1 ",
+		AccrualID:      " ACC-CONFLICT-DIST-1 ",
+		PayoutRef:      "payout-conflict-1",
+	}); err != nil {
+		t.Fatalf("RecordDistribution returned unexpected error: %v", err)
+	}
+
+	_, err := k.RecordDistribution(types.DistributionRecord{
+		DistributionID: "dist-conflict-1",
+		AccrualID:      "acc-conflict-dist-1",
+		PayoutRef:      "payout-conflict-1",
+		Status:         "submitted",
+	})
+	if err != nil {
+		t.Fatalf("expected canonical-equivalent replay to be idempotent, got %v", err)
+	}
+
+	_, err = k.RecordDistribution(types.DistributionRecord{
+		DistributionID: " DIST-CONFLICT-1 ",
+		AccrualID:      " acc-conflict-dist-1 ",
+		PayoutRef:      "payout-conflict-2",
+	})
+	if err == nil {
+		t.Fatal("expected conflict error for canonical distribution ID collision with different payload")
+	}
+	if !strings.Contains(err.Error(), "conflicting fields") {
+		t.Fatalf("expected conflict error message, got %v", err)
+	}
+}

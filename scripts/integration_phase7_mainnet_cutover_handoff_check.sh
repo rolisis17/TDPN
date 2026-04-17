@@ -38,11 +38,59 @@ RELAXED_LOG="$TMP_DIR/relaxed.log"
 
 MISSING_REPORT_PATH="$TMP_DIR/missing_report.json"
 MISSING_REPORT_OUTPUT="$TMP_DIR/output_missing_report.json"
+MISSING_REPORT_CANONICAL="$TMP_DIR/output_missing_report_canonical.json"
 MISSING_REPORT_LOG="$TMP_DIR/missing_report.log"
 
 MISSING_REPORT_RELAXED_OUTPUT="$TMP_DIR/output_missing_report_relaxed.json"
 MISSING_REPORT_RELAXED_CANONICAL="$TMP_DIR/output_missing_report_relaxed_canonical.json"
 MISSING_REPORT_RELAXED_LOG="$TMP_DIR/missing_report_relaxed.log"
+
+BOOTSTRAP_REQUIRED_PASS_OUTPUT="$TMP_DIR/output_bootstrap_required_pass.json"
+BOOTSTRAP_REQUIRED_PASS_CANONICAL="$TMP_DIR/output_bootstrap_required_pass_canonical.json"
+BOOTSTRAP_REQUIRED_PASS_LOG="$TMP_DIR/bootstrap_required_pass.log"
+
+BOOTSTRAP_REQUIRED_FAIL_OUTPUT="$TMP_DIR/output_bootstrap_required_fail.json"
+BOOTSTRAP_REQUIRED_FAIL_CANONICAL="$TMP_DIR/output_bootstrap_required_fail_canonical.json"
+BOOTSTRAP_REQUIRED_FAIL_LOG="$TMP_DIR/bootstrap_required_fail.log"
+
+BOOTSTRAP_REQUIRED_MISSING_RUN="$TMP_DIR/run_missing_bootstrap.json"
+BOOTSTRAP_REQUIRED_MISSING_CHECK="$TMP_DIR/check_missing_bootstrap.json"
+BOOTSTRAP_REQUIRED_MISSING_OUTPUT="$TMP_DIR/output_bootstrap_required_missing.json"
+BOOTSTRAP_REQUIRED_MISSING_CANONICAL="$TMP_DIR/output_bootstrap_required_missing_canonical.json"
+BOOTSTRAP_REQUIRED_MISSING_LOG="$TMP_DIR/bootstrap_required_missing.log"
+
+BOOTSTRAP_RELAXED_MISSING_OUTPUT="$TMP_DIR/output_bootstrap_relaxed_missing.json"
+BOOTSTRAP_RELAXED_MISSING_CANONICAL="$TMP_DIR/output_bootstrap_relaxed_missing_canonical.json"
+BOOTSTRAP_RELAXED_MISSING_LOG="$TMP_DIR/bootstrap_relaxed_missing.log"
+
+assert_canonical_path_hygiene() {
+  local summary_json="${1:?summary json required}"
+  local expected_canonical="${2:?expected canonical path required}"
+  local label="${3:?label required}"
+
+  if [[ "$expected_canonical" != "$TMP_DIR/"* ]]; then
+    echo "$label canonical path is not under TMP_DIR: $expected_canonical"
+    cat "$summary_json"
+    exit 1
+  fi
+  if [[ "$expected_canonical" == *".easy-node-logs"* ]]; then
+    echo "$label canonical path unexpectedly points to .easy-node-logs: $expected_canonical"
+    cat "$summary_json"
+    exit 1
+  fi
+  if ! jq -e \
+    --arg expected "$expected_canonical" \
+    --arg tmp_prefix "$TMP_DIR/" \
+    '
+    .artifacts.canonical_summary_json == $expected
+    and (.artifacts.canonical_summary_json | startswith($tmp_prefix))
+    and ((.artifacts.canonical_summary_json | contains(".easy-node-logs")) | not)
+  ' "$summary_json" >/dev/null; then
+    echo "$label canonical summary artifact path hygiene check failed"
+    cat "$summary_json"
+    exit 1
+  fi
+}
 
 cat >"$PASS_RUN" <<'EOF_PASS_RUN'
 {
@@ -67,6 +115,7 @@ cat >"$PASS_RUN" <<'EOF_PASS_RUN'
         "tdpnd_grpc_auth_live_smoke_ok": true,
         "tdpnd_comet_runtime_smoke_ok": true,
         "mainnet_activation_gate_go": true,
+        "bootstrap_governance_graduation_gate_go": true,
         "dual_write_parity_ok": true,
         "cosmos_module_coverage_floor_ok": true,
         "cosmos_keeper_coverage_floor_ok": true,
@@ -96,6 +145,7 @@ cat >"$PASS_CHECK" <<'EOF_PASS_CHECK'
     "tdpnd_grpc_auth_live_smoke_ok": true,
     "tdpnd_comet_runtime_smoke_ok": true,
     "mainnet_activation_gate_go": true,
+    "bootstrap_governance_graduation_gate_go": true,
     "dual_write_parity_ok": true,
     "cosmos_module_coverage_floor_ok": true,
     "cosmos_keeper_coverage_floor_ok": true,
@@ -150,6 +200,7 @@ cat >"$FAIL_RUN" <<'EOF_FAIL_RUN'
         "tdpnd_grpc_auth_live_smoke_ok": false,
         "tdpnd_comet_runtime_smoke_ok": false,
         "mainnet_activation_gate_go": false,
+        "bootstrap_governance_graduation_gate_go": false,
         "dual_write_parity_ok": true,
         "cosmos_module_coverage_floor_ok": false,
         "cosmos_keeper_coverage_floor_ok": false,
@@ -191,12 +242,16 @@ if ! jq -e '
   and .handoff.cosmos_keeper_coverage_floor_ok == true
   and .handoff.cosmos_app_coverage_floor_ok == true
   and .handoff.mainnet_activation_gate_go == true
+  and .handoff.bootstrap_governance_graduation_gate_go == true
+  and .handoff.bootstrap_governance_graduation_gate_go_status == "pass"
   and .handoff.dual_write_parity_ok == true
   and .handoff.rollback_path_ready == true
   and .handoff.operator_approval_ok == true
+  and .inputs.requirements.bootstrap_governance_graduation_gate_go == false
   and .inputs.requirements.cosmos_module_coverage_floor_ok == true
   and .inputs.requirements.cosmos_keeper_coverage_floor_ok == true
   and .inputs.requirements.cosmos_app_coverage_floor_ok == true
+  and .handoff.sources.bootstrap_governance_graduation_gate_go == "phase7_run_summary.steps.phase7_mainnet_cutover_check.signal_snapshot.bootstrap_governance_graduation_gate_go"
   and .inputs.provided.phase7_check_summary_json == true
   and .inputs.usable.phase7_check_summary_json == true
   and .artifacts.canonical_summary_json == $expected_canonical
@@ -213,6 +268,16 @@ if ! jq -e '.steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_comet_runt
 fi
 if ! jq -e '.signals.tdpnd_comet_runtime_smoke_ok == true' "$PASS_CHECK" >/dev/null; then
   echo "pass-path check fixture missing comet smoke signal"
+  cat "$PASS_CHECK"
+  exit 1
+fi
+if ! jq -e '.steps.phase7_mainnet_cutover_check.signal_snapshot.bootstrap_governance_graduation_gate_go == true' "$PASS_RUN" >/dev/null; then
+  echo "pass-path run fixture missing bootstrap governance graduation gate signal"
+  cat "$PASS_RUN"
+  exit 1
+fi
+if ! jq -e '.signals.bootstrap_governance_graduation_gate_go == true' "$PASS_CHECK" >/dev/null; then
+  echo "pass-path check fixture missing bootstrap governance graduation gate signal"
   cat "$PASS_CHECK"
   exit 1
 fi
@@ -242,6 +307,7 @@ if ! cmp -s "$PASS_OUTPUT" "$PASS_CANONICAL"; then
   cat "$PASS_CANONICAL"
   exit 1
 fi
+assert_canonical_path_hygiene "$PASS_OUTPUT" "$PASS_CANONICAL" "pass-path"
 
 echo "[phase7-mainnet-cutover-handoff-check] fail-closed signal path"
 set +e
@@ -265,6 +331,8 @@ if ! jq -e '
   and .rc == 1
   and .handoff.mainnet_activation_gate_go == false
   and .handoff.mainnet_activation_gate_go_status == "fail"
+  and .handoff.bootstrap_governance_graduation_gate_go == false
+  and .handoff.bootstrap_governance_graduation_gate_go_status == "fail"
   and .handoff.tdpnd_grpc_live_smoke_ok == true
   and .handoff.tdpnd_grpc_live_smoke_status == "pass"
   and .handoff.tdpnd_grpc_auth_live_smoke_ok == false
@@ -289,6 +357,11 @@ if ! jq -e '.steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_comet_runt
   cat "$FAIL_RUN"
   exit 1
 fi
+if ! jq -e '.steps.phase7_mainnet_cutover_check.signal_snapshot.bootstrap_governance_graduation_gate_go == false' "$FAIL_RUN" >/dev/null; then
+  echo "fail-path run fixture missing bootstrap governance graduation gate signal"
+  cat "$FAIL_RUN"
+  exit 1
+fi
 if [[ ! -f "$FAIL_CANONICAL" ]]; then
   echo "missing canonical summary on fail path: $FAIL_CANONICAL"
   cat "$FAIL_LOG"
@@ -300,6 +373,7 @@ if ! cmp -s "$FAIL_OUTPUT" "$FAIL_CANONICAL"; then
   cat "$FAIL_CANONICAL"
   exit 1
 fi
+assert_canonical_path_hygiene "$FAIL_OUTPUT" "$FAIL_CANONICAL" "fail-path"
 
 echo "[phase7-mainnet-cutover-handoff-check] relaxed requirement toggle path"
 PHASE7_MAINNET_CUTOVER_HANDOFF_CHECK_CANONICAL_SUMMARY_JSON="$RELAXED_CANONICAL" \
@@ -322,6 +396,7 @@ if ! jq -e '
   and .inputs.requirements.cosmos_app_coverage_floor_ok == false
   and .inputs.requirements.tdpnd_grpc_auth_live_smoke_ok == false
   and .inputs.requirements.mainnet_activation_gate_go == false
+  and .inputs.requirements.bootstrap_governance_graduation_gate_go == false
   and .handoff.cosmos_module_coverage_floor_ok == false
   and .handoff.cosmos_module_coverage_floor_status == "fail"
   and .handoff.cosmos_keeper_coverage_floor_ok == false
@@ -330,6 +405,8 @@ if ! jq -e '
   and .handoff.cosmos_app_coverage_floor_status == "fail"
   and .handoff.mainnet_activation_gate_go == false
   and .handoff.mainnet_activation_gate_go_status == "fail"
+  and .handoff.bootstrap_governance_graduation_gate_go == false
+  and .handoff.bootstrap_governance_graduation_gate_go_status == "fail"
   and .handoff.tdpnd_grpc_live_smoke_ok == true
   and .handoff.tdpnd_grpc_live_smoke_status == "pass"
   and .handoff.tdpnd_grpc_auth_live_smoke_ok == false
@@ -351,9 +428,177 @@ if ! cmp -s "$RELAXED_OUTPUT" "$RELAXED_CANONICAL"; then
   cat "$RELAXED_CANONICAL"
   exit 1
 fi
+assert_canonical_path_hygiene "$RELAXED_OUTPUT" "$RELAXED_CANONICAL" "relaxed-path"
+
+echo "[phase7-mainnet-cutover-handoff-check] bootstrap governance graduation required pass path"
+PHASE7_MAINNET_CUTOVER_HANDOFF_CHECK_CANONICAL_SUMMARY_JSON="$BOOTSTRAP_REQUIRED_PASS_CANONICAL" \
+bash "$SCRIPT_UNDER_TEST" \
+  --phase7-run-summary-json "$PASS_RUN" \
+  --phase7-check-summary-json "$PASS_CHECK" \
+  --phase7-summary-report-json "$PASS_REPORT" \
+  --summary-json "$BOOTSTRAP_REQUIRED_PASS_OUTPUT" \
+  --require-bootstrap-governance-graduation-gate-go 1 \
+  --show-json 0 >"$BOOTSTRAP_REQUIRED_PASS_LOG" 2>&1
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.requirements.bootstrap_governance_graduation_gate_go == true
+  and .handoff.bootstrap_governance_graduation_gate_go == true
+  and .handoff.bootstrap_governance_graduation_gate_go_status == "pass"
+  and .handoff.bootstrap_governance_graduation_gate_go_resolved == true
+  and .handoff.sources.bootstrap_governance_graduation_gate_go == "phase7_run_summary.steps.phase7_mainnet_cutover_check.signal_snapshot.bootstrap_governance_graduation_gate_go"
+' "$BOOTSTRAP_REQUIRED_PASS_OUTPUT" >/dev/null; then
+  echo "bootstrap-required-pass summary mismatch"
+  cat "$BOOTSTRAP_REQUIRED_PASS_OUTPUT"
+  cat "$BOOTSTRAP_REQUIRED_PASS_LOG"
+  exit 1
+fi
+if [[ ! -f "$BOOTSTRAP_REQUIRED_PASS_CANONICAL" ]]; then
+  echo "missing canonical summary on bootstrap-required-pass path: $BOOTSTRAP_REQUIRED_PASS_CANONICAL"
+  cat "$BOOTSTRAP_REQUIRED_PASS_LOG"
+  exit 1
+fi
+if ! cmp -s "$BOOTSTRAP_REQUIRED_PASS_OUTPUT" "$BOOTSTRAP_REQUIRED_PASS_CANONICAL"; then
+  echo "bootstrap-required-pass canonical summary diverges from run summary"
+  cat "$BOOTSTRAP_REQUIRED_PASS_OUTPUT"
+  cat "$BOOTSTRAP_REQUIRED_PASS_CANONICAL"
+  exit 1
+fi
+assert_canonical_path_hygiene "$BOOTSTRAP_REQUIRED_PASS_OUTPUT" "$BOOTSTRAP_REQUIRED_PASS_CANONICAL" "bootstrap-required-pass"
+
+echo "[phase7-mainnet-cutover-handoff-check] bootstrap governance graduation required fail path"
+set +e
+PHASE7_MAINNET_CUTOVER_HANDOFF_CHECK_CANONICAL_SUMMARY_JSON="$BOOTSTRAP_REQUIRED_FAIL_CANONICAL" \
+bash "$SCRIPT_UNDER_TEST" \
+  --phase7-run-summary-json "$FAIL_RUN" \
+  --phase7-summary-report-json "$PASS_REPORT" \
+  --summary-json "$BOOTSTRAP_REQUIRED_FAIL_OUTPUT" \
+  --require-bootstrap-governance-graduation-gate-go 1 \
+  --require-tdpnd-grpc-auth-live-smoke-ok 0 \
+  --require-cosmos-module-coverage-floor-ok 0 \
+  --require-cosmos-keeper-coverage-floor-ok 0 \
+  --require-cosmos-app-coverage-floor-ok 0 \
+  --show-json 0 >"$BOOTSTRAP_REQUIRED_FAIL_LOG" 2>&1
+bootstrap_required_fail_rc=$?
+set -e
+if [[ "$bootstrap_required_fail_rc" -ne 1 ]]; then
+  echo "expected rc=1 for bootstrap-required-fail path, got rc=$bootstrap_required_fail_rc"
+  cat "$BOOTSTRAP_REQUIRED_FAIL_LOG"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .inputs.requirements.bootstrap_governance_graduation_gate_go == true
+  and .handoff.bootstrap_governance_graduation_gate_go == false
+  and .handoff.bootstrap_governance_graduation_gate_go_status == "fail"
+  and ((.decision.reasons // []) | any(test("bootstrap_governance_graduation_gate_go is false")))
+' "$BOOTSTRAP_REQUIRED_FAIL_OUTPUT" >/dev/null; then
+  echo "bootstrap-required-fail summary mismatch"
+  cat "$BOOTSTRAP_REQUIRED_FAIL_OUTPUT"
+  cat "$BOOTSTRAP_REQUIRED_FAIL_LOG"
+  exit 1
+fi
+if [[ ! -f "$BOOTSTRAP_REQUIRED_FAIL_CANONICAL" ]]; then
+  echo "missing canonical summary on bootstrap-required-fail path: $BOOTSTRAP_REQUIRED_FAIL_CANONICAL"
+  cat "$BOOTSTRAP_REQUIRED_FAIL_LOG"
+  exit 1
+fi
+if ! cmp -s "$BOOTSTRAP_REQUIRED_FAIL_OUTPUT" "$BOOTSTRAP_REQUIRED_FAIL_CANONICAL"; then
+  echo "bootstrap-required-fail canonical summary diverges from run summary"
+  cat "$BOOTSTRAP_REQUIRED_FAIL_OUTPUT"
+  cat "$BOOTSTRAP_REQUIRED_FAIL_CANONICAL"
+  exit 1
+fi
+assert_canonical_path_hygiene "$BOOTSTRAP_REQUIRED_FAIL_OUTPUT" "$BOOTSTRAP_REQUIRED_FAIL_CANONICAL" "bootstrap-required-fail"
+
+jq 'del(.steps.phase7_mainnet_cutover_check.signal_snapshot.bootstrap_governance_graduation_gate_go)' "$PASS_RUN" >"$BOOTSTRAP_REQUIRED_MISSING_RUN"
+jq 'del(.signals.bootstrap_governance_graduation_gate_go)' "$PASS_CHECK" >"$BOOTSTRAP_REQUIRED_MISSING_CHECK"
+
+echo "[phase7-mainnet-cutover-handoff-check] bootstrap governance graduation required missing path"
+set +e
+PHASE7_MAINNET_CUTOVER_HANDOFF_CHECK_CANONICAL_SUMMARY_JSON="$BOOTSTRAP_REQUIRED_MISSING_CANONICAL" \
+bash "$SCRIPT_UNDER_TEST" \
+  --phase7-run-summary-json "$BOOTSTRAP_REQUIRED_MISSING_RUN" \
+  --phase7-check-summary-json "$BOOTSTRAP_REQUIRED_MISSING_CHECK" \
+  --phase7-summary-report-json "$PASS_REPORT" \
+  --summary-json "$BOOTSTRAP_REQUIRED_MISSING_OUTPUT" \
+  --require-bootstrap-governance-graduation-gate-go 1 \
+  --show-json 0 >"$BOOTSTRAP_REQUIRED_MISSING_LOG" 2>&1
+bootstrap_required_missing_rc=$?
+set -e
+if [[ "$bootstrap_required_missing_rc" -ne 1 ]]; then
+  echo "expected rc=1 for bootstrap-required-missing path, got rc=$bootstrap_required_missing_rc"
+  cat "$BOOTSTRAP_REQUIRED_MISSING_LOG"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .inputs.requirements.bootstrap_governance_graduation_gate_go == true
+  and .handoff.bootstrap_governance_graduation_gate_go_status == "missing"
+  and .handoff.bootstrap_governance_graduation_gate_go_resolved == false
+  and .handoff.sources.bootstrap_governance_graduation_gate_go == "unresolved"
+  and ((.decision.reasons // []) | any(test("bootstrap_governance_graduation_gate_go unresolved")))
+' "$BOOTSTRAP_REQUIRED_MISSING_OUTPUT" >/dev/null; then
+  echo "bootstrap-required-missing summary mismatch"
+  cat "$BOOTSTRAP_REQUIRED_MISSING_OUTPUT"
+  cat "$BOOTSTRAP_REQUIRED_MISSING_LOG"
+  exit 1
+fi
+if [[ ! -f "$BOOTSTRAP_REQUIRED_MISSING_CANONICAL" ]]; then
+  echo "missing canonical summary on bootstrap-required-missing path: $BOOTSTRAP_REQUIRED_MISSING_CANONICAL"
+  cat "$BOOTSTRAP_REQUIRED_MISSING_LOG"
+  exit 1
+fi
+if ! cmp -s "$BOOTSTRAP_REQUIRED_MISSING_OUTPUT" "$BOOTSTRAP_REQUIRED_MISSING_CANONICAL"; then
+  echo "bootstrap-required-missing canonical summary diverges from run summary"
+  cat "$BOOTSTRAP_REQUIRED_MISSING_OUTPUT"
+  cat "$BOOTSTRAP_REQUIRED_MISSING_CANONICAL"
+  exit 1
+fi
+assert_canonical_path_hygiene "$BOOTSTRAP_REQUIRED_MISSING_OUTPUT" "$BOOTSTRAP_REQUIRED_MISSING_CANONICAL" "bootstrap-required-missing"
+
+echo "[phase7-mainnet-cutover-handoff-check] bootstrap governance graduation relaxed missing path"
+PHASE7_MAINNET_CUTOVER_HANDOFF_CHECK_CANONICAL_SUMMARY_JSON="$BOOTSTRAP_RELAXED_MISSING_CANONICAL" \
+bash "$SCRIPT_UNDER_TEST" \
+  --phase7-run-summary-json "$BOOTSTRAP_REQUIRED_MISSING_RUN" \
+  --phase7-check-summary-json "$BOOTSTRAP_REQUIRED_MISSING_CHECK" \
+  --phase7-summary-report-json "$PASS_REPORT" \
+  --summary-json "$BOOTSTRAP_RELAXED_MISSING_OUTPUT" \
+  --require-bootstrap-governance-graduation-gate-go 0 \
+  --show-json 0 >"$BOOTSTRAP_RELAXED_MISSING_LOG" 2>&1
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.requirements.bootstrap_governance_graduation_gate_go == false
+  and .handoff.bootstrap_governance_graduation_gate_go_status == "missing"
+  and .handoff.bootstrap_governance_graduation_gate_go_resolved == false
+  and .handoff.sources.bootstrap_governance_graduation_gate_go == "unresolved"
+' "$BOOTSTRAP_RELAXED_MISSING_OUTPUT" >/dev/null; then
+  echo "bootstrap-relaxed-missing summary mismatch"
+  cat "$BOOTSTRAP_RELAXED_MISSING_OUTPUT"
+  cat "$BOOTSTRAP_RELAXED_MISSING_LOG"
+  exit 1
+fi
+if [[ ! -f "$BOOTSTRAP_RELAXED_MISSING_CANONICAL" ]]; then
+  echo "missing canonical summary on bootstrap-relaxed-missing path: $BOOTSTRAP_RELAXED_MISSING_CANONICAL"
+  cat "$BOOTSTRAP_RELAXED_MISSING_LOG"
+  exit 1
+fi
+if ! cmp -s "$BOOTSTRAP_RELAXED_MISSING_OUTPUT" "$BOOTSTRAP_RELAXED_MISSING_CANONICAL"; then
+  echo "bootstrap-relaxed-missing canonical summary diverges from run summary"
+  cat "$BOOTSTRAP_RELAXED_MISSING_OUTPUT"
+  cat "$BOOTSTRAP_RELAXED_MISSING_CANONICAL"
+  exit 1
+fi
+assert_canonical_path_hygiene "$BOOTSTRAP_RELAXED_MISSING_OUTPUT" "$BOOTSTRAP_RELAXED_MISSING_CANONICAL" "bootstrap-relaxed-missing"
 
 echo "[phase7-mainnet-cutover-handoff-check] missing summary-report path"
 set +e
+PHASE7_MAINNET_CUTOVER_HANDOFF_CHECK_CANONICAL_SUMMARY_JSON="$MISSING_REPORT_CANONICAL" \
 bash "$SCRIPT_UNDER_TEST" \
   --phase7-run-summary-json "$PASS_RUN" \
   --phase7-summary-report-json "$MISSING_REPORT_PATH" \
@@ -377,6 +622,18 @@ if ! jq -e '
   cat "$MISSING_REPORT_LOG"
   exit 1
 fi
+if [[ ! -f "$MISSING_REPORT_CANONICAL" ]]; then
+  echo "missing canonical summary on missing-report path: $MISSING_REPORT_CANONICAL"
+  cat "$MISSING_REPORT_LOG"
+  exit 1
+fi
+if ! cmp -s "$MISSING_REPORT_OUTPUT" "$MISSING_REPORT_CANONICAL"; then
+  echo "missing-report canonical summary diverges from run summary"
+  cat "$MISSING_REPORT_OUTPUT"
+  cat "$MISSING_REPORT_CANONICAL"
+  exit 1
+fi
+assert_canonical_path_hygiene "$MISSING_REPORT_OUTPUT" "$MISSING_REPORT_CANONICAL" "missing-report"
 
 echo "[phase7-mainnet-cutover-handoff-check] missing summary-report relaxed requirement path"
 PHASE7_MAINNET_CUTOVER_HANDOFF_CHECK_CANONICAL_SUMMARY_JSON="$MISSING_REPORT_RELAXED_CANONICAL" \
@@ -409,5 +666,6 @@ if ! cmp -s "$MISSING_REPORT_RELAXED_OUTPUT" "$MISSING_REPORT_RELAXED_CANONICAL"
   cat "$MISSING_REPORT_RELAXED_CANONICAL"
   exit 1
 fi
+assert_canonical_path_hygiene "$MISSING_REPORT_RELAXED_OUTPUT" "$MISSING_REPORT_RELAXED_CANONICAL" "missing-report-relaxed"
 
 echo "phase7 mainnet cutover handoff check integration ok"

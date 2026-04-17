@@ -293,20 +293,26 @@ fi
 selected_actions_json="$(jq -c '[ (.next_actions // [])[] | select((.id // "") | startswith("blockchain_")) | select(((.command // "") | tostring | length) > 0) ]' "$roadmap_summary_json")"
 recommended_id="$(jq -r '.blockchain_track.mainnet_activation_missing_metrics_action.id // ""' "$roadmap_summary_json")"
 recommended_id_matches_selected="0"
+recommended_only_selection_state="disabled"
+recommended_only_selection_reason=""
 if [[ -n "$recommended_id" ]] && printf '%s\n' "$selected_actions_json" | jq -e --arg rid "$recommended_id" 'any(.[]; (.id // "") == $rid)' >/dev/null; then
   recommended_id_matches_selected="1"
 fi
-if [[ "$recommended_only" == "1" && -n "$recommended_id" && "$recommended_id_matches_selected" == "1" ]]; then
-  selected_actions_json="$(printf '%s\n' "$selected_actions_json" | jq -c --arg rid "$recommended_id" '[.[] | select((.id // "") == $rid)]')"
-elif [[ "$recommended_only" == "1" && -n "$recommended_id" ]]; then
-  fallback_recommended_id="$(printf '%s\n' "$selected_actions_json" | jq -r 'if length > 0 then (. [0].id // "") else "" end')"
-  if [[ -n "$fallback_recommended_id" ]]; then
-    echo "[roadmap-blockchain-actionable-run] recommended-only requested and recommended gate id '$recommended_id' was not present in selected blockchain actions; using first selected action id '$fallback_recommended_id'"
-    recommended_id="$fallback_recommended_id"
+if [[ "$recommended_only" == "1" ]]; then
+  if [[ -n "$recommended_id" && "$recommended_id_matches_selected" == "1" ]]; then
+    recommended_only_selection_state="selected_recommended_action"
     selected_actions_json="$(printf '%s\n' "$selected_actions_json" | jq -c --arg rid "$recommended_id" '[.[] | select((.id // "") == $rid)]')"
+  elif [[ -n "$recommended_id" ]]; then
+    recommended_only_selection_state="recommended_id_not_selected"
+    recommended_only_selection_reason="recommended gate id '$recommended_id' was not present in selected blockchain actions"
+    selected_actions_json="[]"
+    echo "[roadmap-blockchain-actionable-run] recommended-only strict mode: no actions selected; reason=$recommended_only_selection_state recommended_gate_id=$recommended_id"
+  else
+    recommended_only_selection_state="missing_recommended_id"
+    recommended_only_selection_reason="no recommended gate id was provided"
+    selected_actions_json="[]"
+    echo "[roadmap-blockchain-actionable-run] recommended-only strict mode: no actions selected; reason=$recommended_only_selection_state"
   fi
-elif [[ "$recommended_only" == "1" ]]; then
-  echo "[roadmap-blockchain-actionable-run] recommended-only requested but no recommended gate id was provided; falling back to full selected blockchain action list"
 fi
 if (( max_actions > 0 )); then
   selected_actions_json="$(printf '%s\n' "$selected_actions_json" | jq -c --argjson max_actions "$max_actions" '.[:$max_actions]')"
@@ -645,6 +651,8 @@ jq -n \
   --arg roadmap_report_md "$roadmap_report_md" \
   --arg roadmap_log "$roadmap_log" \
   --arg recommended_id "$recommended_id" \
+  --arg recommended_only_selection_state "$recommended_only_selection_state" \
+  --arg recommended_only_selection_reason "$recommended_only_selection_reason" \
   --argjson ran_roadmap_report "$ran_roadmap_report" \
   --argjson refresh_manual_validation "$refresh_manual_validation" \
   --argjson refresh_single_machine_readiness "$refresh_single_machine_readiness" \
@@ -677,6 +685,8 @@ jq -n \
     roadmap: {
       generated_this_run: ($ran_roadmap_report == 1),
       recommended_gate_id: (if $recommended_id == "" then null else $recommended_id end),
+      recommended_only_selection_state: $recommended_only_selection_state,
+      recommended_only_selection_reason: (if $recommended_only_selection_reason == "" then null else $recommended_only_selection_reason end),
       actions_selected_count: $actions_count,
       selected_action_ids: $selected_action_ids
     },

@@ -11,7 +11,8 @@ Usage:
     --metrics-summary-json PATH \
     [--output-json PATH] \
     [--output-md PATH] \
-    [--print-output-json [0|1]]
+    [--print-output-json [0|1]] \
+    [--print-summary-json [0|1]]
 
 Purpose:
   Emit a deterministic checklist of still-missing required mainnet activation
@@ -127,7 +128,7 @@ while [[ $# -gt 0 ]]; do
       output_md="${2:-}"
       shift 2
       ;;
-    --print-output-json)
+    --print-output-json|--print-summary-json)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         print_output_json="${2:-}"
         shift 2
@@ -159,7 +160,7 @@ path_arg_or_die "--output-json" "$output_json"
 if [[ -n "$(trim "$output_md")" ]]; then
   path_arg_or_die "--output-md" "$output_md"
 fi
-bool_arg_or_die "--print-output-json" "$print_output_json"
+bool_arg_or_die "--print-{output|summary}-json" "$print_output_json"
 
 metrics_summary_json="$(abs_path "$metrics_summary_json")"
 output_json="$(abs_path "$output_json")"

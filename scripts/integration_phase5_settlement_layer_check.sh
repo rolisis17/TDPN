@@ -24,7 +24,14 @@ PASS_SUMMARY="$TMP_DIR/ci_phase5_pass.json"
 FAIL_SUMMARY="$TMP_DIR/ci_phase5_fail.json"
 RELAXED_SUMMARY="$TMP_DIR/ci_phase5_relaxed.json"
 DUAL_FAIL_SUMMARY="$TMP_DIR/ci_phase5_dual_fail.json"
+ADAPTER_ROUNDTRIP_FAIL_SUMMARY="$TMP_DIR/ci_phase5_adapter_roundtrip_fail.json"
+ADAPTER_SIGNED_TX_ROUNDTRIP_FAIL_SUMMARY="$TMP_DIR/ci_phase5_adapter_signed_tx_roundtrip_fail.json"
+SHADOW_ENV_FAIL_SUMMARY="$TMP_DIR/ci_phase5_shadow_env_fail.json"
+SHADOW_STATUS_SURFACE_FAIL_SUMMARY="$TMP_DIR/ci_phase5_shadow_status_surface_fail.json"
 SPONSOR_FAIL_SUMMARY="$TMP_DIR/ci_phase5_sponsor_fail.json"
+SPONSOR_VPN_SESSION_FAIL_SUMMARY="$TMP_DIR/ci_phase5_sponsor_vpn_session_fail.json"
+ISSUER_SETTLEMENT_STATUS_FAIL_SUMMARY="$TMP_DIR/ci_phase5_issuer_settlement_status_fail.json"
+EXIT_SETTLEMENT_STATUS_FAIL_SUMMARY="$TMP_DIR/ci_phase5_exit_settlement_status_fail.json"
 ADMIN_FAIL_SUMMARY="$TMP_DIR/ci_phase5_admin_fail.json"
 MISSING_SUMMARY="$TMP_DIR/ci_phase5_missing.json"
 
@@ -33,8 +40,22 @@ FAIL_OUTPUT="$TMP_DIR/fail_output.json"
 RELAXED_OUTPUT="$TMP_DIR/relaxed_output.json"
 DUAL_FAIL_OUTPUT="$TMP_DIR/dual_fail_output.json"
 DUAL_RELAXED_OUTPUT="$TMP_DIR/dual_relaxed_output.json"
+ADAPTER_ROUNDTRIP_FAIL_OUTPUT="$TMP_DIR/adapter_roundtrip_fail_output.json"
+ADAPTER_ROUNDTRIP_RELAXED_OUTPUT="$TMP_DIR/adapter_roundtrip_relaxed_output.json"
+ADAPTER_SIGNED_TX_ROUNDTRIP_FAIL_OUTPUT="$TMP_DIR/adapter_signed_tx_roundtrip_fail_output.json"
+ADAPTER_SIGNED_TX_ROUNDTRIP_RELAXED_OUTPUT="$TMP_DIR/adapter_signed_tx_roundtrip_relaxed_output.json"
+SHADOW_ENV_FAIL_OUTPUT="$TMP_DIR/shadow_env_fail_output.json"
+SHADOW_ENV_RELAXED_OUTPUT="$TMP_DIR/shadow_env_relaxed_output.json"
+SHADOW_STATUS_SURFACE_FAIL_OUTPUT="$TMP_DIR/shadow_status_surface_fail_output.json"
+SHADOW_STATUS_SURFACE_RELAXED_OUTPUT="$TMP_DIR/shadow_status_surface_relaxed_output.json"
 SPONSOR_FAIL_OUTPUT="$TMP_DIR/sponsor_fail_output.json"
 SPONSOR_RELAXED_OUTPUT="$TMP_DIR/sponsor_relaxed_output.json"
+SPONSOR_VPN_SESSION_FAIL_OUTPUT="$TMP_DIR/sponsor_vpn_session_fail_output.json"
+SPONSOR_VPN_SESSION_RELAXED_OUTPUT="$TMP_DIR/sponsor_vpn_session_relaxed_output.json"
+ISSUER_SETTLEMENT_STATUS_FAIL_OUTPUT="$TMP_DIR/issuer_settlement_status_fail_output.json"
+ISSUER_SETTLEMENT_STATUS_RELAXED_OUTPUT="$TMP_DIR/issuer_settlement_status_relaxed_output.json"
+EXIT_SETTLEMENT_STATUS_FAIL_OUTPUT="$TMP_DIR/exit_settlement_status_fail_output.json"
+EXIT_SETTLEMENT_STATUS_RELAXED_OUTPUT="$TMP_DIR/exit_settlement_status_relaxed_output.json"
 ADMIN_FAIL_OUTPUT="$TMP_DIR/admin_fail_output.json"
 ADMIN_RELAXED_OUTPUT="$TMP_DIR/admin_relaxed_output.json"
 PASS_CANONICAL="$TMP_DIR/pass_canonical_summary.json"
@@ -42,8 +63,22 @@ FAIL_CANONICAL="$TMP_DIR/fail_canonical_summary.json"
 RELAXED_CANONICAL="$TMP_DIR/relaxed_canonical_summary.json"
 DUAL_FAIL_CANONICAL="$TMP_DIR/dual_fail_canonical_summary.json"
 DUAL_RELAXED_CANONICAL="$TMP_DIR/dual_relaxed_canonical_summary.json"
+ADAPTER_ROUNDTRIP_FAIL_CANONICAL="$TMP_DIR/adapter_roundtrip_fail_canonical_summary.json"
+ADAPTER_ROUNDTRIP_RELAXED_CANONICAL="$TMP_DIR/adapter_roundtrip_relaxed_canonical_summary.json"
+ADAPTER_SIGNED_TX_ROUNDTRIP_FAIL_CANONICAL="$TMP_DIR/adapter_signed_tx_roundtrip_fail_canonical_summary.json"
+ADAPTER_SIGNED_TX_ROUNDTRIP_RELAXED_CANONICAL="$TMP_DIR/adapter_signed_tx_roundtrip_relaxed_canonical_summary.json"
+SHADOW_ENV_FAIL_CANONICAL="$TMP_DIR/shadow_env_fail_canonical_summary.json"
+SHADOW_ENV_RELAXED_CANONICAL="$TMP_DIR/shadow_env_relaxed_canonical_summary.json"
+SHADOW_STATUS_SURFACE_FAIL_CANONICAL="$TMP_DIR/shadow_status_surface_fail_canonical_summary.json"
+SHADOW_STATUS_SURFACE_RELAXED_CANONICAL="$TMP_DIR/shadow_status_surface_relaxed_canonical_summary.json"
 SPONSOR_FAIL_CANONICAL="$TMP_DIR/sponsor_fail_canonical_summary.json"
 SPONSOR_RELAXED_CANONICAL="$TMP_DIR/sponsor_relaxed_canonical_summary.json"
+SPONSOR_VPN_SESSION_FAIL_CANONICAL="$TMP_DIR/sponsor_vpn_session_fail_canonical_summary.json"
+SPONSOR_VPN_SESSION_RELAXED_CANONICAL="$TMP_DIR/sponsor_vpn_session_relaxed_canonical_summary.json"
+ISSUER_SETTLEMENT_STATUS_FAIL_CANONICAL="$TMP_DIR/issuer_settlement_status_fail_canonical_summary.json"
+ISSUER_SETTLEMENT_STATUS_RELAXED_CANONICAL="$TMP_DIR/issuer_settlement_status_relaxed_canonical_summary.json"
+EXIT_SETTLEMENT_STATUS_FAIL_CANONICAL="$TMP_DIR/exit_settlement_status_fail_canonical_summary.json"
+EXIT_SETTLEMENT_STATUS_RELAXED_CANONICAL="$TMP_DIR/exit_settlement_status_relaxed_canonical_summary.json"
 ADMIN_FAIL_CANONICAL="$TMP_DIR/admin_fail_canonical_summary.json"
 ADMIN_RELAXED_CANONICAL="$TMP_DIR/admin_relaxed_canonical_summary.json"
 ENV_CANONICAL_OUTPUT="$TMP_DIR/env_canonical_output.json"
@@ -56,8 +91,22 @@ FAIL_LOG="$TMP_DIR/fail.log"
 RELAXED_LOG="$TMP_DIR/relaxed.log"
 DUAL_FAIL_LOG="$TMP_DIR/dual_fail.log"
 DUAL_RELAXED_LOG="$TMP_DIR/dual_relaxed.log"
+ADAPTER_ROUNDTRIP_FAIL_LOG="$TMP_DIR/adapter_roundtrip_fail.log"
+ADAPTER_ROUNDTRIP_RELAXED_LOG="$TMP_DIR/adapter_roundtrip_relaxed.log"
+ADAPTER_SIGNED_TX_ROUNDTRIP_FAIL_LOG="$TMP_DIR/adapter_signed_tx_roundtrip_fail.log"
+ADAPTER_SIGNED_TX_ROUNDTRIP_RELAXED_LOG="$TMP_DIR/adapter_signed_tx_roundtrip_relaxed.log"
+SHADOW_ENV_FAIL_LOG="$TMP_DIR/shadow_env_fail.log"
+SHADOW_ENV_RELAXED_LOG="$TMP_DIR/shadow_env_relaxed.log"
+SHADOW_STATUS_SURFACE_FAIL_LOG="$TMP_DIR/shadow_status_surface_fail.log"
+SHADOW_STATUS_SURFACE_RELAXED_LOG="$TMP_DIR/shadow_status_surface_relaxed.log"
 SPONSOR_FAIL_LOG="$TMP_DIR/sponsor_fail.log"
 SPONSOR_RELAXED_LOG="$TMP_DIR/sponsor_relaxed.log"
+SPONSOR_VPN_SESSION_FAIL_LOG="$TMP_DIR/sponsor_vpn_session_fail.log"
+SPONSOR_VPN_SESSION_RELAXED_LOG="$TMP_DIR/sponsor_vpn_session_relaxed.log"
+ISSUER_SETTLEMENT_STATUS_FAIL_LOG="$TMP_DIR/issuer_settlement_status_fail.log"
+ISSUER_SETTLEMENT_STATUS_RELAXED_LOG="$TMP_DIR/issuer_settlement_status_relaxed.log"
+EXIT_SETTLEMENT_STATUS_FAIL_LOG="$TMP_DIR/exit_settlement_status_fail.log"
+EXIT_SETTLEMENT_STATUS_RELAXED_LOG="$TMP_DIR/exit_settlement_status_relaxed.log"
 ADMIN_FAIL_LOG="$TMP_DIR/admin_fail.log"
 ADMIN_RELAXED_LOG="$TMP_DIR/admin_relaxed.log"
 ENV_CANONICAL_LOG="$TMP_DIR/env_canonical.log"
@@ -118,10 +167,28 @@ cat >"$PASS_SUMMARY" <<'EOF_PASS'
     "settlement_state_persistence": {
       "status": "pass"
     },
+    "settlement_adapter_signed_tx_roundtrip": {
+      "status": "pass"
+    },
+    "settlement_shadow_env": {
+      "status": "pass"
+    },
+    "settlement_shadow_status_surface": {
+      "status": "pass"
+    },
     "settlement_dual_asset_parity": {
       "status": "pass"
     },
     "issuer_sponsor_api_live_smoke": {
+      "status": "pass"
+    },
+        "issuer_sponsor_vpn_session_live_smoke": {
+      "status": "pass"
+    },
+"issuer_settlement_status_live_smoke": {
+      "status": "pass"
+    },
+    "exit_settlement_status_live_smoke": {
       "status": "pass"
     },
     "issuer_admin_blockchain_handlers_coverage": {
@@ -154,10 +221,28 @@ cat >"$FAIL_SUMMARY" <<'EOF_FAIL'
     "settlement_state_persistence": {
       "status": "pass"
     },
+    "settlement_adapter_signed_tx_roundtrip": {
+      "status": "pass"
+    },
+    "settlement_shadow_env": {
+      "status": "pass"
+    },
+    "settlement_shadow_status_surface": {
+      "status": "pass"
+    },
     "settlement_dual_asset_parity": {
       "status": "pass"
     },
     "issuer_sponsor_api_live_smoke": {
+      "status": "pass"
+    },
+        "issuer_sponsor_vpn_session_live_smoke": {
+      "status": "pass"
+    },
+"issuer_settlement_status_live_smoke": {
+      "status": "pass"
+    },
+    "exit_settlement_status_live_smoke": {
       "status": "pass"
     },
     "issuer_admin_blockchain_handlers_coverage": {
@@ -190,10 +275,28 @@ cat >"$RELAXED_SUMMARY" <<'EOF_RELAXED'
     "settlement_state_persistence": {
       "status": "pass"
     },
+    "settlement_adapter_signed_tx_roundtrip": {
+      "status": "pass"
+    },
+    "settlement_shadow_env": {
+      "status": "pass"
+    },
+    "settlement_shadow_status_surface": {
+      "status": "pass"
+    },
     "settlement_dual_asset_parity": {
       "status": "pass"
     },
     "issuer_sponsor_api_live_smoke": {
+      "status": "pass"
+    },
+        "issuer_sponsor_vpn_session_live_smoke": {
+      "status": "pass"
+    },
+"issuer_settlement_status_live_smoke": {
+      "status": "pass"
+    },
+    "exit_settlement_status_live_smoke": {
       "status": "pass"
     },
     "issuer_admin_blockchain_handlers_coverage": {
@@ -226,11 +329,29 @@ cat >"$SPONSOR_FAIL_SUMMARY" <<'EOF_SPONSOR_FAIL'
     "settlement_state_persistence": {
       "status": "pass"
     },
+    "settlement_adapter_signed_tx_roundtrip": {
+      "status": "pass"
+    },
+    "settlement_shadow_env": {
+      "status": "pass"
+    },
+    "settlement_shadow_status_surface": {
+      "status": "pass"
+    },
     "settlement_dual_asset_parity": {
       "status": "pass"
     },
     "issuer_sponsor_api_live_smoke": {
       "status": "fail"
+    },
+        "issuer_sponsor_vpn_session_live_smoke": {
+      "status": "pass"
+    },
+"issuer_settlement_status_live_smoke": {
+      "status": "pass"
+    },
+    "exit_settlement_status_live_smoke": {
+      "status": "pass"
     },
     "issuer_admin_blockchain_handlers_coverage": {
       "status": "pass"
@@ -238,6 +359,168 @@ cat >"$SPONSOR_FAIL_SUMMARY" <<'EOF_SPONSOR_FAIL'
   }
 }
 EOF_SPONSOR_FAIL
+
+cat >"$SPONSOR_VPN_SESSION_FAIL_SUMMARY" <<'EOF_SPONSOR_VPN_SESSION_FAIL'
+{
+  "version": 1,
+  "schema": {
+    "id": "ci_phase5_settlement_layer_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "pass",
+  "rc": 0,
+  "steps": {
+    "settlement_failsoft": {
+      "status": "pass"
+    },
+    "settlement_acceptance": {
+      "status": "pass"
+    },
+    "settlement_bridge_smoke": {
+      "status": "pass"
+    },
+    "settlement_state_persistence": {
+      "status": "pass"
+    },
+    "settlement_adapter_signed_tx_roundtrip": {
+      "status": "pass"
+    },
+    "settlement_shadow_env": {
+      "status": "pass"
+    },
+    "settlement_shadow_status_surface": {
+      "status": "pass"
+    },
+    "settlement_dual_asset_parity": {
+      "status": "pass"
+    },
+    "issuer_sponsor_api_live_smoke": {
+      "status": "pass"
+    },
+    "issuer_sponsor_vpn_session_live_smoke": {
+      "status": "fail"
+    },
+    "issuer_settlement_status_live_smoke": {
+      "status": "pass"
+    },
+    "exit_settlement_status_live_smoke": {
+      "status": "pass"
+    },
+    "issuer_admin_blockchain_handlers_coverage": {
+      "status": "pass"
+    }
+  }
+}
+EOF_SPONSOR_VPN_SESSION_FAIL
+
+cat >"$ISSUER_SETTLEMENT_STATUS_FAIL_SUMMARY" <<'EOF_ISSUER_SETTLEMENT_STATUS_FAIL'
+{
+  "version": 1,
+  "schema": {
+    "id": "ci_phase5_settlement_layer_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "pass",
+  "rc": 0,
+  "steps": {
+    "settlement_failsoft": {
+      "status": "pass"
+    },
+    "settlement_acceptance": {
+      "status": "pass"
+    },
+    "settlement_bridge_smoke": {
+      "status": "pass"
+    },
+    "settlement_state_persistence": {
+      "status": "pass"
+    },
+    "settlement_adapter_signed_tx_roundtrip": {
+      "status": "pass"
+    },
+    "settlement_shadow_env": {
+      "status": "pass"
+    },
+    "settlement_shadow_status_surface": {
+      "status": "pass"
+    },
+    "settlement_dual_asset_parity": {
+      "status": "pass"
+    },
+    "issuer_sponsor_api_live_smoke": {
+      "status": "pass"
+    },
+        "issuer_sponsor_vpn_session_live_smoke": {
+      "status": "pass"
+    },
+"issuer_settlement_status_live_smoke": {
+      "status": "fail"
+    },
+    "exit_settlement_status_live_smoke": {
+      "status": "pass"
+    },
+    "issuer_admin_blockchain_handlers_coverage": {
+      "status": "pass"
+    }
+  }
+}
+EOF_ISSUER_SETTLEMENT_STATUS_FAIL
+
+cat >"$EXIT_SETTLEMENT_STATUS_FAIL_SUMMARY" <<'EOF_EXIT_SETTLEMENT_STATUS_FAIL'
+{
+  "version": 1,
+  "schema": {
+    "id": "ci_phase5_settlement_layer_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "pass",
+  "rc": 0,
+  "steps": {
+    "settlement_failsoft": {
+      "status": "pass"
+    },
+    "settlement_acceptance": {
+      "status": "pass"
+    },
+    "settlement_bridge_smoke": {
+      "status": "pass"
+    },
+    "settlement_state_persistence": {
+      "status": "pass"
+    },
+    "settlement_adapter_signed_tx_roundtrip": {
+      "status": "pass"
+    },
+    "settlement_shadow_env": {
+      "status": "pass"
+    },
+    "settlement_shadow_status_surface": {
+      "status": "pass"
+    },
+    "settlement_dual_asset_parity": {
+      "status": "pass"
+    },
+    "issuer_sponsor_api_live_smoke": {
+      "status": "pass"
+    },
+        "issuer_sponsor_vpn_session_live_smoke": {
+      "status": "pass"
+    },
+"issuer_settlement_status_live_smoke": {
+      "status": "pass"
+    },
+    "exit_settlement_status_live_smoke": {
+      "status": "fail"
+    },
+    "issuer_admin_blockchain_handlers_coverage": {
+      "status": "pass"
+    }
+  }
+}
+EOF_EXIT_SETTLEMENT_STATUS_FAIL
 
 cat >"$DUAL_FAIL_SUMMARY" <<'EOF_DUAL_FAIL'
 {
@@ -262,10 +545,28 @@ cat >"$DUAL_FAIL_SUMMARY" <<'EOF_DUAL_FAIL'
     "settlement_state_persistence": {
       "status": "pass"
     },
+    "settlement_adapter_signed_tx_roundtrip": {
+      "status": "pass"
+    },
+    "settlement_shadow_env": {
+      "status": "pass"
+    },
+    "settlement_shadow_status_surface": {
+      "status": "pass"
+    },
     "settlement_dual_asset_parity": {
       "status": "fail"
     },
     "issuer_sponsor_api_live_smoke": {
+      "status": "pass"
+    },
+        "issuer_sponsor_vpn_session_live_smoke": {
+      "status": "pass"
+    },
+"issuer_settlement_status_live_smoke": {
+      "status": "pass"
+    },
+    "exit_settlement_status_live_smoke": {
       "status": "pass"
     },
     "issuer_admin_blockchain_handlers_coverage": {
@@ -274,6 +575,234 @@ cat >"$DUAL_FAIL_SUMMARY" <<'EOF_DUAL_FAIL'
   }
 }
 EOF_DUAL_FAIL
+
+cat >"$ADAPTER_ROUNDTRIP_FAIL_SUMMARY" <<'EOF_ADAPTER_ROUNDTRIP_FAIL'
+{
+  "version": 1,
+  "schema": {
+    "id": "ci_phase5_settlement_layer_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "pass",
+  "rc": 0,
+  "steps": {
+    "settlement_failsoft": {
+      "status": "pass"
+    },
+    "settlement_acceptance": {
+      "status": "pass"
+    },
+    "settlement_bridge_smoke": {
+      "status": "pass"
+    },
+    "settlement_adapter_roundtrip": {
+      "status": "fail"
+    },
+    "settlement_adapter_signed_tx_roundtrip": {
+      "status": "pass"
+    },
+    "settlement_shadow_env": {
+      "status": "pass"
+    },
+    "settlement_shadow_status_surface": {
+      "status": "pass"
+    },
+    "settlement_state_persistence": {
+      "status": "pass"
+    },
+    "settlement_dual_asset_parity": {
+      "status": "pass"
+    },
+    "issuer_sponsor_api_live_smoke": {
+      "status": "pass"
+    },
+        "issuer_sponsor_vpn_session_live_smoke": {
+      "status": "pass"
+    },
+"issuer_settlement_status_live_smoke": {
+      "status": "pass"
+    },
+    "exit_settlement_status_live_smoke": {
+      "status": "pass"
+    },
+    "issuer_admin_blockchain_handlers_coverage": {
+      "status": "pass"
+    }
+  }
+}
+EOF_ADAPTER_ROUNDTRIP_FAIL
+
+cat >"$ADAPTER_SIGNED_TX_ROUNDTRIP_FAIL_SUMMARY" <<'EOF_ADAPTER_SIGNED_TX_ROUNDTRIP_FAIL'
+{
+  "version": 1,
+  "schema": {
+    "id": "ci_phase5_settlement_layer_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "pass",
+  "rc": 0,
+  "steps": {
+    "settlement_failsoft": {
+      "status": "pass"
+    },
+    "settlement_acceptance": {
+      "status": "pass"
+    },
+    "settlement_bridge_smoke": {
+      "status": "pass"
+    },
+    "settlement_adapter_roundtrip": {
+      "status": "pass"
+    },
+    "settlement_adapter_signed_tx_roundtrip": {
+      "status": "fail"
+    },
+    "settlement_shadow_env": {
+      "status": "pass"
+    },
+    "settlement_shadow_status_surface": {
+      "status": "pass"
+    },
+    "settlement_state_persistence": {
+      "status": "pass"
+    },
+    "settlement_dual_asset_parity": {
+      "status": "pass"
+    },
+    "issuer_sponsor_api_live_smoke": {
+      "status": "pass"
+    },
+        "issuer_sponsor_vpn_session_live_smoke": {
+      "status": "pass"
+    },
+"issuer_settlement_status_live_smoke": {
+      "status": "pass"
+    },
+    "exit_settlement_status_live_smoke": {
+      "status": "pass"
+    },
+    "issuer_admin_blockchain_handlers_coverage": {
+      "status": "pass"
+    }
+  }
+}
+EOF_ADAPTER_SIGNED_TX_ROUNDTRIP_FAIL
+
+cat >"$SHADOW_ENV_FAIL_SUMMARY" <<'EOF_SHADOW_ENV_FAIL'
+{
+  "version": 1,
+  "schema": {
+    "id": "ci_phase5_settlement_layer_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "pass",
+  "rc": 0,
+  "steps": {
+    "settlement_failsoft": {
+      "status": "pass"
+    },
+    "settlement_acceptance": {
+      "status": "pass"
+    },
+    "settlement_bridge_smoke": {
+      "status": "pass"
+    },
+    "settlement_adapter_roundtrip": {
+      "status": "pass"
+    },
+    "settlement_adapter_signed_tx_roundtrip": {
+      "status": "pass"
+    },
+    "settlement_shadow_env": {
+      "status": "fail"
+    },
+    "settlement_shadow_status_surface": {
+      "status": "pass"
+    },
+    "settlement_state_persistence": {
+      "status": "pass"
+    },
+    "settlement_dual_asset_parity": {
+      "status": "pass"
+    },
+    "issuer_sponsor_api_live_smoke": {
+      "status": "pass"
+    },
+        "issuer_sponsor_vpn_session_live_smoke": {
+      "status": "pass"
+    },
+"issuer_settlement_status_live_smoke": {
+      "status": "pass"
+    },
+    "exit_settlement_status_live_smoke": {
+      "status": "pass"
+    },
+    "issuer_admin_blockchain_handlers_coverage": {
+      "status": "pass"
+    }
+  }
+}
+EOF_SHADOW_ENV_FAIL
+
+cat >"$SHADOW_STATUS_SURFACE_FAIL_SUMMARY" <<'EOF_SHADOW_STATUS_SURFACE_FAIL'
+{
+  "version": 1,
+  "schema": {
+    "id": "ci_phase5_settlement_layer_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "pass",
+  "rc": 0,
+  "steps": {
+    "settlement_failsoft": {
+      "status": "pass"
+    },
+    "settlement_acceptance": {
+      "status": "pass"
+    },
+    "settlement_bridge_smoke": {
+      "status": "pass"
+    },
+    "settlement_adapter_roundtrip": {
+      "status": "pass"
+    },
+    "settlement_adapter_signed_tx_roundtrip": {
+      "status": "pass"
+    },
+    "settlement_shadow_env": {
+      "status": "pass"
+    },
+    "settlement_shadow_status_surface": {
+      "status": "fail"
+    },
+    "settlement_state_persistence": {
+      "status": "pass"
+    },
+    "settlement_dual_asset_parity": {
+      "status": "pass"
+    },
+    "issuer_sponsor_api_live_smoke": {
+      "status": "pass"
+    },
+        "issuer_sponsor_vpn_session_live_smoke": {
+      "status": "pass"
+    },
+"issuer_settlement_status_live_smoke": {
+      "status": "pass"
+    },
+    "exit_settlement_status_live_smoke": {
+      "status": "pass"
+    },
+    "issuer_admin_blockchain_handlers_coverage": {
+      "status": "pass"
+    }
+  }
+}
+EOF_SHADOW_STATUS_SURFACE_FAIL
 
 cat >"$ADMIN_FAIL_SUMMARY" <<'EOF_ADMIN_FAIL'
 {
@@ -298,10 +827,28 @@ cat >"$ADMIN_FAIL_SUMMARY" <<'EOF_ADMIN_FAIL'
     "settlement_state_persistence": {
       "status": "pass"
     },
+    "settlement_adapter_signed_tx_roundtrip": {
+      "status": "pass"
+    },
+    "settlement_shadow_env": {
+      "status": "pass"
+    },
+    "settlement_shadow_status_surface": {
+      "status": "pass"
+    },
     "settlement_dual_asset_parity": {
       "status": "pass"
     },
     "issuer_sponsor_api_live_smoke": {
+      "status": "pass"
+    },
+        "issuer_sponsor_vpn_session_live_smoke": {
+      "status": "pass"
+    },
+"issuer_settlement_status_live_smoke": {
+      "status": "pass"
+    },
+    "exit_settlement_status_live_smoke": {
       "status": "pass"
     },
     "issuer_admin_blockchain_handlers_coverage": {
@@ -333,15 +880,50 @@ if ! jq -e '
   and .policy.require_settlement_failsoft_ok == true
   and .policy.require_settlement_acceptance_ok == true
   and .policy.require_settlement_bridge_smoke_ok == true
+  and .policy.require_settlement_adapter_roundtrip_ok == true
+  and .policy.require_settlement_adapter_signed_tx_roundtrip_ok == true
+  and .policy.require_settlement_shadow_env_ok == true
+  and .policy.require_settlement_shadow_status_surface_ok == true
   and .policy.require_settlement_state_persistence_ok == true
   and .policy.require_settlement_dual_asset_parity_ok == true
   and .policy.require_issuer_sponsor_api_live_smoke_ok == true
+  and .policy.require_issuer_sponsor_vpn_session_live_smoke_ok == true
+  and .policy.require_issuer_settlement_status_live_smoke_ok == true
+  and .policy.require_exit_settlement_status_live_smoke_ok == true
   and .signals.settlement_failsoft_ok == true
   and .signals.settlement_acceptance_ok == true
   and .signals.settlement_bridge_smoke_ok == true
+  and .signals.settlement_adapter_roundtrip_ok == true
+  and .signals.settlement_adapter_roundtrip_status == "pass"
+  and .signals.settlement_adapter_roundtrip_resolved == true
+  and .signals.settlement_adapter_signed_tx_roundtrip_ok == true
+  and .signals.settlement_adapter_signed_tx_roundtrip_status == "pass"
+  and .signals.settlement_adapter_signed_tx_roundtrip_resolved == true
+  and .signals.settlement_shadow_env_ok == true
+  and .signals.settlement_shadow_env_status == "pass"
+  and .signals.settlement_shadow_env_resolved == true
+  and .signals.settlement_shadow_status_surface_ok == true
+  and .signals.settlement_shadow_status_surface_status == "pass"
+  and .signals.settlement_shadow_status_surface_resolved == true
   and .signals.settlement_state_persistence_ok == true
   and .signals.settlement_dual_asset_parity_ok == true
   and .signals.issuer_sponsor_api_live_smoke_ok == true
+  and .signals.issuer_sponsor_vpn_session_live_smoke_ok == true
+  and .signals.issuer_sponsor_vpn_session_live_smoke_status == "pass"
+  and .signals.issuer_sponsor_vpn_session_live_smoke_resolved == true
+  and .signals.issuer_settlement_status_live_smoke_ok == true
+  and .signals.issuer_settlement_status_live_smoke_status == "pass"
+  and .signals.issuer_settlement_status_live_smoke_resolved == true
+  and .signals.exit_settlement_status_live_smoke_ok == true
+  and .signals.exit_settlement_status_live_smoke_status == "pass"
+  and .signals.exit_settlement_status_live_smoke_resolved == true
+  and .stages.settlement_adapter_roundtrip.status == "pass"
+  and .stages.settlement_adapter_signed_tx_roundtrip.status == "pass"
+  and .stages.settlement_shadow_env.status == "pass"
+  and .stages.settlement_shadow_status_surface.status == "pass"
+  and .stages.issuer_sponsor_vpn_session_live_smoke.status == "pass"
+  and .stages.issuer_settlement_status_live_smoke.status == "pass"
+  and .stages.exit_settlement_status_live_smoke.status == "pass"
   and (
     if (.signals | has("issuer_admin_blockchain_handlers_coverage_ok")) then
       .policy.require_issuer_admin_blockchain_handlers_coverage_ok == true
@@ -570,6 +1152,218 @@ if ! jq -e '
   exit 1
 fi
 
+echo "[phase5-settlement-layer-check] fail-closed path on settlement adapter roundtrip failure"
+set +e
+PHASE5_SETTLEMENT_LAYER_CHECK_CANONICAL_SUMMARY_JSON="$ADAPTER_ROUNDTRIP_FAIL_CANONICAL" \
+"$SCRIPT_UNDER_TEST" \
+  --ci-phase5-summary-json "$ADAPTER_ROUNDTRIP_FAIL_SUMMARY" \
+  --summary-json "$ADAPTER_ROUNDTRIP_FAIL_OUTPUT" \
+  --show-json 0 >"$ADAPTER_ROUNDTRIP_FAIL_LOG" 2>&1
+adapter_roundtrip_fail_rc=$?
+set -e
+if [[ "$adapter_roundtrip_fail_rc" -ne 1 ]]; then
+  echo "expected rc=1 for adapter-roundtrip fail-closed path, got rc=$adapter_roundtrip_fail_rc"
+  cat "$ADAPTER_ROUNDTRIP_FAIL_LOG"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .policy.require_settlement_adapter_roundtrip_ok == true
+  and .signals.settlement_adapter_roundtrip_ok == false
+  and .signals.settlement_adapter_roundtrip_status == "fail"
+  and .signals.settlement_adapter_roundtrip_resolved == true
+  and .stages.settlement_adapter_roundtrip.status == "fail"
+  and ((.decision.reasons // []) | any(test("settlement_adapter_roundtrip_ok is false")))
+' "$ADAPTER_ROUNDTRIP_FAIL_OUTPUT" >/dev/null; then
+  echo "adapter-roundtrip fail-path summary mismatch"
+  cat "$ADAPTER_ROUNDTRIP_FAIL_OUTPUT"
+  cat "$ADAPTER_ROUNDTRIP_FAIL_LOG"
+  exit 1
+fi
+
+echo "[phase5-settlement-layer-check] settlement adapter roundtrip policy toggle path"
+PHASE5_SETTLEMENT_LAYER_CHECK_CANONICAL_SUMMARY_JSON="$ADAPTER_ROUNDTRIP_RELAXED_CANONICAL" \
+"$SCRIPT_UNDER_TEST" \
+  --ci-phase5-summary-json "$ADAPTER_ROUNDTRIP_FAIL_SUMMARY" \
+  --summary-json "$ADAPTER_ROUNDTRIP_RELAXED_OUTPUT" \
+  --require-settlement-adapter-roundtrip-ok 0 \
+  --show-json 0 >"$ADAPTER_ROUNDTRIP_RELAXED_LOG" 2>&1
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .policy.require_settlement_adapter_roundtrip_ok == false
+  and .signals.settlement_adapter_roundtrip_ok == false
+  and .signals.settlement_adapter_roundtrip_status == "fail"
+  and .signals.settlement_adapter_roundtrip_resolved == true
+  and .stages.settlement_adapter_roundtrip.status == "fail"
+' "$ADAPTER_ROUNDTRIP_RELAXED_OUTPUT" >/dev/null; then
+  echo "adapter-roundtrip relaxed-policy summary mismatch"
+  cat "$ADAPTER_ROUNDTRIP_RELAXED_OUTPUT"
+  cat "$ADAPTER_ROUNDTRIP_RELAXED_LOG"
+  exit 1
+fi
+
+echo "[phase5-settlement-layer-check] fail-closed path on settlement adapter signed-tx roundtrip failure"
+set +e
+PHASE5_SETTLEMENT_LAYER_CHECK_CANONICAL_SUMMARY_JSON="$ADAPTER_SIGNED_TX_ROUNDTRIP_FAIL_CANONICAL" \
+"$SCRIPT_UNDER_TEST" \
+  --ci-phase5-summary-json "$ADAPTER_SIGNED_TX_ROUNDTRIP_FAIL_SUMMARY" \
+  --summary-json "$ADAPTER_SIGNED_TX_ROUNDTRIP_FAIL_OUTPUT" \
+  --show-json 0 >"$ADAPTER_SIGNED_TX_ROUNDTRIP_FAIL_LOG" 2>&1
+adapter_signed_tx_roundtrip_fail_rc=$?
+set -e
+if [[ "$adapter_signed_tx_roundtrip_fail_rc" -ne 1 ]]; then
+  echo "expected rc=1 for adapter-signed-tx-roundtrip fail-closed path, got rc=$adapter_signed_tx_roundtrip_fail_rc"
+  cat "$ADAPTER_SIGNED_TX_ROUNDTRIP_FAIL_LOG"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .policy.require_settlement_adapter_signed_tx_roundtrip_ok == true
+  and .signals.settlement_adapter_signed_tx_roundtrip_ok == false
+  and .signals.settlement_adapter_signed_tx_roundtrip_status == "fail"
+  and .signals.settlement_adapter_signed_tx_roundtrip_resolved == true
+  and .stages.settlement_adapter_signed_tx_roundtrip.status == "fail"
+  and ((.decision.reasons // []) | any(test("settlement_adapter_signed_tx_roundtrip_ok is false")))
+' "$ADAPTER_SIGNED_TX_ROUNDTRIP_FAIL_OUTPUT" >/dev/null; then
+  echo "adapter-signed-tx-roundtrip fail-path summary mismatch"
+  cat "$ADAPTER_SIGNED_TX_ROUNDTRIP_FAIL_OUTPUT"
+  cat "$ADAPTER_SIGNED_TX_ROUNDTRIP_FAIL_LOG"
+  exit 1
+fi
+
+echo "[phase5-settlement-layer-check] settlement adapter signed-tx roundtrip policy toggle path"
+PHASE5_SETTLEMENT_LAYER_CHECK_CANONICAL_SUMMARY_JSON="$ADAPTER_SIGNED_TX_ROUNDTRIP_RELAXED_CANONICAL" \
+"$SCRIPT_UNDER_TEST" \
+  --ci-phase5-summary-json "$ADAPTER_SIGNED_TX_ROUNDTRIP_FAIL_SUMMARY" \
+  --summary-json "$ADAPTER_SIGNED_TX_ROUNDTRIP_RELAXED_OUTPUT" \
+  --require-settlement-adapter-signed-tx-roundtrip-ok 0 \
+  --show-json 0 >"$ADAPTER_SIGNED_TX_ROUNDTRIP_RELAXED_LOG" 2>&1
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .policy.require_settlement_adapter_signed_tx_roundtrip_ok == false
+  and .signals.settlement_adapter_signed_tx_roundtrip_ok == false
+  and .signals.settlement_adapter_signed_tx_roundtrip_status == "fail"
+  and .signals.settlement_adapter_signed_tx_roundtrip_resolved == true
+  and .stages.settlement_adapter_signed_tx_roundtrip.status == "fail"
+' "$ADAPTER_SIGNED_TX_ROUNDTRIP_RELAXED_OUTPUT" >/dev/null; then
+  echo "adapter-signed-tx-roundtrip relaxed-policy summary mismatch"
+  cat "$ADAPTER_SIGNED_TX_ROUNDTRIP_RELAXED_OUTPUT"
+  cat "$ADAPTER_SIGNED_TX_ROUNDTRIP_RELAXED_LOG"
+  exit 1
+fi
+
+echo "[phase5-settlement-layer-check] fail-closed path on settlement shadow env failure"
+set +e
+PHASE5_SETTLEMENT_LAYER_CHECK_CANONICAL_SUMMARY_JSON="$SHADOW_ENV_FAIL_CANONICAL" \
+"$SCRIPT_UNDER_TEST" \
+  --ci-phase5-summary-json "$SHADOW_ENV_FAIL_SUMMARY" \
+  --summary-json "$SHADOW_ENV_FAIL_OUTPUT" \
+  --show-json 0 >"$SHADOW_ENV_FAIL_LOG" 2>&1
+shadow_env_fail_rc=$?
+set -e
+if [[ "$shadow_env_fail_rc" -ne 1 ]]; then
+  echo "expected rc=1 for shadow-env fail-closed path, got rc=$shadow_env_fail_rc"
+  cat "$SHADOW_ENV_FAIL_LOG"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .policy.require_settlement_shadow_env_ok == true
+  and .signals.settlement_shadow_env_ok == false
+  and .signals.settlement_shadow_env_status == "fail"
+  and .signals.settlement_shadow_env_resolved == true
+  and .stages.settlement_shadow_env.status == "fail"
+  and ((.decision.reasons // []) | any(test("settlement_shadow_env_ok is false")))
+' "$SHADOW_ENV_FAIL_OUTPUT" >/dev/null; then
+  echo "shadow-env fail-path summary mismatch"
+  cat "$SHADOW_ENV_FAIL_OUTPUT"
+  cat "$SHADOW_ENV_FAIL_LOG"
+  exit 1
+fi
+
+echo "[phase5-settlement-layer-check] settlement shadow env policy toggle path"
+PHASE5_SETTLEMENT_LAYER_CHECK_CANONICAL_SUMMARY_JSON="$SHADOW_ENV_RELAXED_CANONICAL" \
+"$SCRIPT_UNDER_TEST" \
+  --ci-phase5-summary-json "$SHADOW_ENV_FAIL_SUMMARY" \
+  --summary-json "$SHADOW_ENV_RELAXED_OUTPUT" \
+  --require-settlement-shadow-env-ok 0 \
+  --show-json 0 >"$SHADOW_ENV_RELAXED_LOG" 2>&1
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .policy.require_settlement_shadow_env_ok == false
+  and .signals.settlement_shadow_env_ok == false
+  and .signals.settlement_shadow_env_status == "fail"
+  and .signals.settlement_shadow_env_resolved == true
+  and .stages.settlement_shadow_env.status == "fail"
+' "$SHADOW_ENV_RELAXED_OUTPUT" >/dev/null; then
+  echo "shadow-env relaxed-policy summary mismatch"
+  cat "$SHADOW_ENV_RELAXED_OUTPUT"
+  cat "$SHADOW_ENV_RELAXED_LOG"
+  exit 1
+fi
+
+echo "[phase5-settlement-layer-check] fail-closed path on settlement shadow status surface failure"
+set +e
+PHASE5_SETTLEMENT_LAYER_CHECK_CANONICAL_SUMMARY_JSON="$SHADOW_STATUS_SURFACE_FAIL_CANONICAL" \
+"$SCRIPT_UNDER_TEST" \
+  --ci-phase5-summary-json "$SHADOW_STATUS_SURFACE_FAIL_SUMMARY" \
+  --summary-json "$SHADOW_STATUS_SURFACE_FAIL_OUTPUT" \
+  --show-json 0 >"$SHADOW_STATUS_SURFACE_FAIL_LOG" 2>&1
+shadow_status_surface_fail_rc=$?
+set -e
+if [[ "$shadow_status_surface_fail_rc" -ne 1 ]]; then
+  echo "expected rc=1 for shadow-status-surface fail-closed path, got rc=$shadow_status_surface_fail_rc"
+  cat "$SHADOW_STATUS_SURFACE_FAIL_LOG"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .policy.require_settlement_shadow_status_surface_ok == true
+  and .signals.settlement_shadow_status_surface_ok == false
+  and .signals.settlement_shadow_status_surface_status == "fail"
+  and .signals.settlement_shadow_status_surface_resolved == true
+  and .stages.settlement_shadow_status_surface.status == "fail"
+  and ((.decision.reasons // []) | any(test("settlement_shadow_status_surface_ok is false")))
+' "$SHADOW_STATUS_SURFACE_FAIL_OUTPUT" >/dev/null; then
+  echo "shadow-status-surface fail-path summary mismatch"
+  cat "$SHADOW_STATUS_SURFACE_FAIL_OUTPUT"
+  cat "$SHADOW_STATUS_SURFACE_FAIL_LOG"
+  exit 1
+fi
+
+echo "[phase5-settlement-layer-check] settlement shadow status surface policy toggle path"
+PHASE5_SETTLEMENT_LAYER_CHECK_CANONICAL_SUMMARY_JSON="$SHADOW_STATUS_SURFACE_RELAXED_CANONICAL" \
+"$SCRIPT_UNDER_TEST" \
+  --ci-phase5-summary-json "$SHADOW_STATUS_SURFACE_FAIL_SUMMARY" \
+  --summary-json "$SHADOW_STATUS_SURFACE_RELAXED_OUTPUT" \
+  --require-settlement-shadow-status-surface-ok 0 \
+  --show-json 0 >"$SHADOW_STATUS_SURFACE_RELAXED_LOG" 2>&1
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .policy.require_settlement_shadow_status_surface_ok == false
+  and .signals.settlement_shadow_status_surface_ok == false
+  and .signals.settlement_shadow_status_surface_status == "fail"
+  and .signals.settlement_shadow_status_surface_resolved == true
+  and .stages.settlement_shadow_status_surface.status == "fail"
+' "$SHADOW_STATUS_SURFACE_RELAXED_OUTPUT" >/dev/null; then
+  echo "shadow-status-surface relaxed-policy summary mismatch"
+  cat "$SHADOW_STATUS_SURFACE_RELAXED_OUTPUT"
+  cat "$SHADOW_STATUS_SURFACE_RELAXED_LOG"
+  exit 1
+fi
+
 echo "[phase5-settlement-layer-check] fail-closed path on sponsor live-smoke failure"
 set +e
 PHASE5_SETTLEMENT_LAYER_CHECK_CANONICAL_SUMMARY_JSON="$SPONSOR_FAIL_CANONICAL" \
@@ -616,6 +1410,221 @@ if ! jq -e '
   echo "sponsor relaxed-policy summary mismatch"
   cat "$SPONSOR_RELAXED_OUTPUT"
   cat "$SPONSOR_RELAXED_LOG"
+  exit 1
+fi
+
+echo "[phase5-settlement-layer-check] fail-closed path on sponsor VPN-session live-smoke failure"
+set +e
+PHASE5_SETTLEMENT_LAYER_CHECK_CANONICAL_SUMMARY_JSON="$SPONSOR_VPN_SESSION_FAIL_CANONICAL" \
+"$SCRIPT_UNDER_TEST" \
+  --ci-phase5-summary-json "$SPONSOR_VPN_SESSION_FAIL_SUMMARY" \
+  --summary-json "$SPONSOR_VPN_SESSION_FAIL_OUTPUT" \
+  --show-json 0 >"$SPONSOR_VPN_SESSION_FAIL_LOG" 2>&1
+sponsor_vpn_session_fail_rc=$?
+set -e
+if [[ "$sponsor_vpn_session_fail_rc" -ne 1 ]]; then
+  echo "expected rc=1 for sponsor VPN-session fail-closed path, got rc=$sponsor_vpn_session_fail_rc"
+  cat "$SPONSOR_VPN_SESSION_FAIL_LOG"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .policy.require_issuer_sponsor_vpn_session_live_smoke_ok == true
+  and .signals.issuer_sponsor_vpn_session_live_smoke_ok == false
+  and .signals.issuer_sponsor_vpn_session_live_smoke_status == "fail"
+  and .signals.issuer_sponsor_vpn_session_live_smoke_resolved == true
+  and .stages.issuer_sponsor_vpn_session_live_smoke.status == "fail"
+  and ((.decision.reasons // []) | any(test("issuer_sponsor_vpn_session_live_smoke_ok is false")))
+' "$SPONSOR_VPN_SESSION_FAIL_OUTPUT" >/dev/null; then
+  echo "sponsor VPN-session fail-path summary mismatch"
+  cat "$SPONSOR_VPN_SESSION_FAIL_OUTPUT"
+  cat "$SPONSOR_VPN_SESSION_FAIL_LOG"
+  exit 1
+fi
+if ! cmp -s "$SPONSOR_VPN_SESSION_FAIL_OUTPUT" "$SPONSOR_VPN_SESSION_FAIL_CANONICAL"; then
+  echo "sponsor VPN-session fail-path canonical summary diverges from run summary"
+  cat "$SPONSOR_VPN_SESSION_FAIL_OUTPUT"
+  cat "$SPONSOR_VPN_SESSION_FAIL_CANONICAL"
+  exit 1
+fi
+
+echo "[phase5-settlement-layer-check] sponsor VPN-session policy toggle path"
+PHASE5_SETTLEMENT_LAYER_CHECK_CANONICAL_SUMMARY_JSON="$SPONSOR_VPN_SESSION_RELAXED_CANONICAL" \
+"$SCRIPT_UNDER_TEST" \
+  --ci-phase5-summary-json "$SPONSOR_VPN_SESSION_FAIL_SUMMARY" \
+  --summary-json "$SPONSOR_VPN_SESSION_RELAXED_OUTPUT" \
+  --require-issuer-sponsor-vpn-session-live-smoke-ok 0 \
+  --show-json 0 >"$SPONSOR_VPN_SESSION_RELAXED_LOG" 2>&1
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .policy.require_issuer_sponsor_vpn_session_live_smoke_ok == false
+  and .signals.issuer_sponsor_vpn_session_live_smoke_ok == false
+  and .signals.issuer_sponsor_vpn_session_live_smoke_status == "fail"
+  and .signals.issuer_sponsor_vpn_session_live_smoke_resolved == true
+  and .stages.issuer_sponsor_vpn_session_live_smoke.status == "fail"
+' "$SPONSOR_VPN_SESSION_RELAXED_OUTPUT" >/dev/null; then
+  echo "sponsor VPN-session relaxed-policy summary mismatch"
+  cat "$SPONSOR_VPN_SESSION_RELAXED_OUTPUT"
+  cat "$SPONSOR_VPN_SESSION_RELAXED_LOG"
+  exit 1
+fi
+if ! cmp -s "$SPONSOR_VPN_SESSION_RELAXED_OUTPUT" "$SPONSOR_VPN_SESSION_RELAXED_CANONICAL"; then
+  echo "sponsor VPN-session relaxed-path canonical summary diverges from run summary"
+  cat "$SPONSOR_VPN_SESSION_RELAXED_OUTPUT"
+  cat "$SPONSOR_VPN_SESSION_RELAXED_CANONICAL"
+  exit 1
+fi
+
+echo "[phase5-settlement-layer-check] fail-closed path on issuer settlement-status live-smoke failure"
+set +e
+PHASE5_SETTLEMENT_LAYER_CHECK_CANONICAL_SUMMARY_JSON="$ISSUER_SETTLEMENT_STATUS_FAIL_CANONICAL" \
+"$SCRIPT_UNDER_TEST" \
+  --ci-phase5-summary-json "$ISSUER_SETTLEMENT_STATUS_FAIL_SUMMARY" \
+  --summary-json "$ISSUER_SETTLEMENT_STATUS_FAIL_OUTPUT" \
+  --show-json 0 >"$ISSUER_SETTLEMENT_STATUS_FAIL_LOG" 2>&1
+issuer_settlement_status_fail_rc=$?
+set -e
+if [[ "$issuer_settlement_status_fail_rc" -ne 1 ]]; then
+  echo "expected rc=1 for issuer settlement-status fail-closed path, got rc=$issuer_settlement_status_fail_rc"
+  cat "$ISSUER_SETTLEMENT_STATUS_FAIL_LOG"
+  exit 1
+fi
+if [[ ! -f "$ISSUER_SETTLEMENT_STATUS_FAIL_CANONICAL" ]]; then
+  echo "missing canonical summary on issuer settlement-status fail path: $ISSUER_SETTLEMENT_STATUS_FAIL_CANONICAL"
+  cat "$ISSUER_SETTLEMENT_STATUS_FAIL_LOG"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .policy.require_issuer_settlement_status_live_smoke_ok == true
+  and .signals.issuer_settlement_status_live_smoke_ok == false
+  and .signals.issuer_settlement_status_live_smoke_status == "fail"
+  and .signals.issuer_settlement_status_live_smoke_resolved == true
+  and .stages.issuer_settlement_status_live_smoke.status == "fail"
+  and ((.decision.reasons // []) | any(test("issuer_settlement_status_live_smoke_ok is false")))
+' "$ISSUER_SETTLEMENT_STATUS_FAIL_OUTPUT" >/dev/null; then
+  echo "issuer settlement-status fail-path summary mismatch"
+  cat "$ISSUER_SETTLEMENT_STATUS_FAIL_OUTPUT"
+  cat "$ISSUER_SETTLEMENT_STATUS_FAIL_LOG"
+  exit 1
+fi
+if ! cmp -s "$ISSUER_SETTLEMENT_STATUS_FAIL_OUTPUT" "$ISSUER_SETTLEMENT_STATUS_FAIL_CANONICAL"; then
+  echo "issuer settlement-status fail-path canonical summary diverges from run summary"
+  cat "$ISSUER_SETTLEMENT_STATUS_FAIL_OUTPUT"
+  cat "$ISSUER_SETTLEMENT_STATUS_FAIL_CANONICAL"
+  exit 1
+fi
+
+echo "[phase5-settlement-layer-check] issuer settlement-status policy toggle path"
+PHASE5_SETTLEMENT_LAYER_CHECK_CANONICAL_SUMMARY_JSON="$ISSUER_SETTLEMENT_STATUS_RELAXED_CANONICAL" \
+"$SCRIPT_UNDER_TEST" \
+  --ci-phase5-summary-json "$ISSUER_SETTLEMENT_STATUS_FAIL_SUMMARY" \
+  --summary-json "$ISSUER_SETTLEMENT_STATUS_RELAXED_OUTPUT" \
+  --require-issuer-settlement-status-live-smoke-ok 0 \
+  --show-json 0 >"$ISSUER_SETTLEMENT_STATUS_RELAXED_LOG" 2>&1
+
+if [[ ! -f "$ISSUER_SETTLEMENT_STATUS_RELAXED_CANONICAL" ]]; then
+  echo "missing canonical summary on issuer settlement-status relaxed path: $ISSUER_SETTLEMENT_STATUS_RELAXED_CANONICAL"
+  cat "$ISSUER_SETTLEMENT_STATUS_RELAXED_LOG"
+  exit 1
+fi
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .policy.require_issuer_settlement_status_live_smoke_ok == false
+  and .signals.issuer_settlement_status_live_smoke_ok == false
+  and .signals.issuer_settlement_status_live_smoke_status == "fail"
+  and .signals.issuer_settlement_status_live_smoke_resolved == true
+  and .stages.issuer_settlement_status_live_smoke.status == "fail"
+' "$ISSUER_SETTLEMENT_STATUS_RELAXED_OUTPUT" >/dev/null; then
+  echo "issuer settlement-status relaxed-policy summary mismatch"
+  cat "$ISSUER_SETTLEMENT_STATUS_RELAXED_OUTPUT"
+  cat "$ISSUER_SETTLEMENT_STATUS_RELAXED_LOG"
+  exit 1
+fi
+if ! cmp -s "$ISSUER_SETTLEMENT_STATUS_RELAXED_OUTPUT" "$ISSUER_SETTLEMENT_STATUS_RELAXED_CANONICAL"; then
+  echo "issuer settlement-status relaxed-path canonical summary diverges from run summary"
+  cat "$ISSUER_SETTLEMENT_STATUS_RELAXED_OUTPUT"
+  cat "$ISSUER_SETTLEMENT_STATUS_RELAXED_CANONICAL"
+  exit 1
+fi
+
+echo "[phase5-settlement-layer-check] fail-closed path on exit settlement-status live-smoke failure"
+set +e
+PHASE5_SETTLEMENT_LAYER_CHECK_CANONICAL_SUMMARY_JSON="$EXIT_SETTLEMENT_STATUS_FAIL_CANONICAL" \
+"$SCRIPT_UNDER_TEST" \
+  --ci-phase5-summary-json "$EXIT_SETTLEMENT_STATUS_FAIL_SUMMARY" \
+  --summary-json "$EXIT_SETTLEMENT_STATUS_FAIL_OUTPUT" \
+  --show-json 0 >"$EXIT_SETTLEMENT_STATUS_FAIL_LOG" 2>&1
+exit_settlement_status_fail_rc=$?
+set -e
+if [[ "$exit_settlement_status_fail_rc" -ne 1 ]]; then
+  echo "expected rc=1 for exit settlement-status fail-closed path, got rc=$exit_settlement_status_fail_rc"
+  cat "$EXIT_SETTLEMENT_STATUS_FAIL_LOG"
+  exit 1
+fi
+if [[ ! -f "$EXIT_SETTLEMENT_STATUS_FAIL_CANONICAL" ]]; then
+  echo "missing canonical summary on exit settlement-status fail path: $EXIT_SETTLEMENT_STATUS_FAIL_CANONICAL"
+  cat "$EXIT_SETTLEMENT_STATUS_FAIL_LOG"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .policy.require_exit_settlement_status_live_smoke_ok == true
+  and .signals.exit_settlement_status_live_smoke_ok == false
+  and .signals.exit_settlement_status_live_smoke_status == "fail"
+  and .signals.exit_settlement_status_live_smoke_resolved == true
+  and .stages.exit_settlement_status_live_smoke.status == "fail"
+  and ((.decision.reasons // []) | any(test("exit_settlement_status_live_smoke_ok is false")))
+' "$EXIT_SETTLEMENT_STATUS_FAIL_OUTPUT" >/dev/null; then
+  echo "exit settlement-status fail-path summary mismatch"
+  cat "$EXIT_SETTLEMENT_STATUS_FAIL_OUTPUT"
+  cat "$EXIT_SETTLEMENT_STATUS_FAIL_LOG"
+  exit 1
+fi
+if ! cmp -s "$EXIT_SETTLEMENT_STATUS_FAIL_OUTPUT" "$EXIT_SETTLEMENT_STATUS_FAIL_CANONICAL"; then
+  echo "exit settlement-status fail-path canonical summary diverges from run summary"
+  cat "$EXIT_SETTLEMENT_STATUS_FAIL_OUTPUT"
+  cat "$EXIT_SETTLEMENT_STATUS_FAIL_CANONICAL"
+  exit 1
+fi
+
+echo "[phase5-settlement-layer-check] exit settlement-status policy toggle path"
+PHASE5_SETTLEMENT_LAYER_CHECK_CANONICAL_SUMMARY_JSON="$EXIT_SETTLEMENT_STATUS_RELAXED_CANONICAL" \
+"$SCRIPT_UNDER_TEST" \
+  --ci-phase5-summary-json "$EXIT_SETTLEMENT_STATUS_FAIL_SUMMARY" \
+  --summary-json "$EXIT_SETTLEMENT_STATUS_RELAXED_OUTPUT" \
+  --require-exit-settlement-status-live-smoke-ok 0 \
+  --show-json 0 >"$EXIT_SETTLEMENT_STATUS_RELAXED_LOG" 2>&1
+
+if [[ ! -f "$EXIT_SETTLEMENT_STATUS_RELAXED_CANONICAL" ]]; then
+  echo "missing canonical summary on exit settlement-status relaxed path: $EXIT_SETTLEMENT_STATUS_RELAXED_CANONICAL"
+  cat "$EXIT_SETTLEMENT_STATUS_RELAXED_LOG"
+  exit 1
+fi
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .policy.require_exit_settlement_status_live_smoke_ok == false
+  and .signals.exit_settlement_status_live_smoke_ok == false
+  and .signals.exit_settlement_status_live_smoke_status == "fail"
+  and .signals.exit_settlement_status_live_smoke_resolved == true
+  and .stages.exit_settlement_status_live_smoke.status == "fail"
+' "$EXIT_SETTLEMENT_STATUS_RELAXED_OUTPUT" >/dev/null; then
+  echo "exit settlement-status relaxed-policy summary mismatch"
+  cat "$EXIT_SETTLEMENT_STATUS_RELAXED_OUTPUT"
+  cat "$EXIT_SETTLEMENT_STATUS_RELAXED_LOG"
+  exit 1
+fi
+if ! cmp -s "$EXIT_SETTLEMENT_STATUS_RELAXED_OUTPUT" "$EXIT_SETTLEMENT_STATUS_RELAXED_CANONICAL"; then
+  echo "exit settlement-status relaxed-path canonical summary diverges from run summary"
+  cat "$EXIT_SETTLEMENT_STATUS_RELAXED_OUTPUT"
+  cat "$EXIT_SETTLEMENT_STATUS_RELAXED_CANONICAL"
   exit 1
 fi
 

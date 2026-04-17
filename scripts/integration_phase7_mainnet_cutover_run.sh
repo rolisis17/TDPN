@@ -26,6 +26,7 @@ DRY_LOG="$TMP_DIR/dry.log"
 DRY_EXPLICIT_LOG="$TMP_DIR/dry_explicit.log"
 FAIL_LOG="$TMP_DIR/fail.log"
 INVALID_LOG="$TMP_DIR/invalid.log"
+MISSING_LOG="$TMP_DIR/missing.log"
 RESERVED_LOG="$TMP_DIR/reserved.log"
 
 PASS_RUN_SUMMARY="$TMP_DIR/run_pass.json"
@@ -33,12 +34,14 @@ DRY_RUN_SUMMARY="$TMP_DIR/run_dry.json"
 DRY_EXPLICIT_RUN_SUMMARY="$TMP_DIR/run_dry_explicit.json"
 FAIL_RUN_SUMMARY="$TMP_DIR/run_fail.json"
 INVALID_RUN_SUMMARY="$TMP_DIR/run_invalid.json"
+MISSING_RUN_SUMMARY="$TMP_DIR/run_missing.json"
 
 PASS_CANONICAL_SUMMARY="$TMP_DIR/canonical_run_pass.json"
 DRY_CANONICAL_SUMMARY="$TMP_DIR/canonical_run_dry.json"
 DRY_EXPLICIT_CANONICAL_SUMMARY="$TMP_DIR/canonical_run_dry_explicit.json"
 FAIL_CANONICAL_SUMMARY="$TMP_DIR/canonical_run_fail.json"
 INVALID_CANONICAL_SUMMARY="$TMP_DIR/canonical_run_invalid.json"
+MISSING_CANONICAL_SUMMARY="$TMP_DIR/canonical_run_missing.json"
 
 FAKE_CHECK="$TMP_DIR/fake_phase7_mainnet_cutover_check.sh"
 cat >"$FAKE_CHECK" <<'EOF_FAKE_CHECK'
@@ -95,6 +98,7 @@ if [[ -n "$summary_json" && "${FAKE_PHASE7_CHECK_OMIT_SUMMARY:-0}" != "1" ]]; th
     "tdpnd_comet_runtime_smoke_ok": true,
     "dual_write_parity_ok": true,
     "mainnet_activation_gate_go": true,
+    "bootstrap_governance_graduation_gate_go": true,
     "cosmos_module_coverage_floor_ok": true,
     "cosmos_keeper_coverage_floor_ok": true,
     "cosmos_app_coverage_floor_ok": true,
@@ -184,6 +188,11 @@ if [[ "$check_line" != *"--show-json 0"* ]]; then
   echo "$check_line"
   exit 1
 fi
+if [[ "$check_line" != *"--rollback-path-ready 1"* ]]; then
+  echo "pass path missing default --rollback-path-ready 1 forwarding"
+  echo "$check_line"
+  exit 1
+fi
 
 if [[ ! -f "$PASS_RUN_SUMMARY" ]]; then
   echo "missing pass run summary JSON: $PASS_RUN_SUMMARY"
@@ -206,6 +215,7 @@ if ! jq -e '
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_comet_runtime_smoke_ok == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.dual_write_parity_ok == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.mainnet_activation_gate_go == true
+  and .steps.phase7_mainnet_cutover_check.signal_snapshot.bootstrap_governance_graduation_gate_go == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.cosmos_module_coverage_floor_ok == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.cosmos_keeper_coverage_floor_ok == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.cosmos_app_coverage_floor_ok == true
@@ -254,6 +264,7 @@ if ! jq -e '
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_comet_runtime_smoke_ok == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.dual_write_parity_ok == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.mainnet_activation_gate_go == true
+  and .steps.phase7_mainnet_cutover_check.signal_snapshot.bootstrap_governance_graduation_gate_go == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.cosmos_module_coverage_floor_ok == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.cosmos_keeper_coverage_floor_ok == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.cosmos_app_coverage_floor_ok == true
@@ -301,6 +312,7 @@ if ! jq -e '
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_comet_runtime_smoke_ok == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.dual_write_parity_ok == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.mainnet_activation_gate_go == true
+  and .steps.phase7_mainnet_cutover_check.signal_snapshot.bootstrap_governance_graduation_gate_go == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.cosmos_module_coverage_floor_ok == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.cosmos_keeper_coverage_floor_ok == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.cosmos_app_coverage_floor_ok == true
@@ -345,6 +357,7 @@ if ! jq -e '
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_grpc_auth_live_smoke_ok == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.dual_write_parity_ok == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.mainnet_activation_gate_go == true
+  and .steps.phase7_mainnet_cutover_check.signal_snapshot.bootstrap_governance_graduation_gate_go == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.cosmos_module_coverage_floor_ok == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.cosmos_keeper_coverage_floor_ok == true
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.cosmos_app_coverage_floor_ok == true
@@ -390,6 +403,7 @@ if ! jq -e '
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_comet_runtime_smoke_ok == null
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.dual_write_parity_ok == null
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.mainnet_activation_gate_go == null
+  and .steps.phase7_mainnet_cutover_check.signal_snapshot.bootstrap_governance_graduation_gate_go == null
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.cosmos_module_coverage_floor_ok == null
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.cosmos_keeper_coverage_floor_ok == null
   and .steps.phase7_mainnet_cutover_check.signal_snapshot.cosmos_app_coverage_floor_ok == null
@@ -399,6 +413,58 @@ if ! jq -e '
   exit 1
 fi
 assert_canonical_summary_artifact "$INVALID_RUN_SUMMARY" "$INVALID_CANONICAL_SUMMARY" "$INVALID_LOG"
+
+echo "[phase7-mainnet-cutover-run] missing child summary contract fails closed"
+: >"$CAPTURE"
+set +e
+PHASE7_MAINNET_CUTOVER_RUN_CAPTURE_FILE="$CAPTURE" \
+PHASE7_MAINNET_CUTOVER_RUN_CHECK_SCRIPT="$FAKE_CHECK" \
+PHASE7_MAINNET_CUTOVER_RUN_CANONICAL_SUMMARY_JSON="$MISSING_CANONICAL_SUMMARY" \
+FAKE_PHASE7_CHECK_OMIT_SUMMARY=1 \
+bash "$RUNNER" \
+  --reports-dir "$TMP_DIR/reports_missing" \
+  --check-summary-json "$TMP_DIR/check_missing_summary.json" \
+  --summary-json "$MISSING_RUN_SUMMARY" \
+  --print-summary-json 0 >"$MISSING_LOG" 2>&1
+missing_rc=$?
+set -e
+
+if [[ "$missing_rc" -ne 3 ]]; then
+  echo "expected wrapper rc=3 on missing child summary contract, got rc=$missing_rc"
+  cat "$MISSING_LOG"
+  exit 1
+fi
+assert_single_check_invocation "$CAPTURE"
+if [[ -f "$TMP_DIR/check_missing_summary.json" ]]; then
+  echo "missing-summary path unexpectedly produced child summary json"
+  cat "$MISSING_LOG"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 3
+  and .steps.phase7_mainnet_cutover_check.status == "fail"
+  and .steps.phase7_mainnet_cutover_check.rc == 3
+  and .steps.phase7_mainnet_cutover_check.command_rc == 0
+  and .steps.phase7_mainnet_cutover_check.contract_valid == false
+  and (.steps.phase7_mainnet_cutover_check.contract_error | type) == "string"
+  and .steps.phase7_mainnet_cutover_check.signal_snapshot.module_tx_surface_ok == null
+  and .steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_grpc_live_smoke_ok == null
+  and .steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_grpc_auth_live_smoke_ok == null
+  and .steps.phase7_mainnet_cutover_check.signal_snapshot.tdpnd_comet_runtime_smoke_ok == null
+  and .steps.phase7_mainnet_cutover_check.signal_snapshot.dual_write_parity_ok == null
+  and .steps.phase7_mainnet_cutover_check.signal_snapshot.mainnet_activation_gate_go == null
+  and .steps.phase7_mainnet_cutover_check.signal_snapshot.bootstrap_governance_graduation_gate_go == null
+  and .steps.phase7_mainnet_cutover_check.signal_snapshot.cosmos_module_coverage_floor_ok == null
+  and .steps.phase7_mainnet_cutover_check.signal_snapshot.cosmos_keeper_coverage_floor_ok == null
+  and .steps.phase7_mainnet_cutover_check.signal_snapshot.cosmos_app_coverage_floor_ok == null
+  and .steps.phase7_mainnet_cutover_check.artifacts.summary_exists == false
+' "$MISSING_RUN_SUMMARY" >/dev/null; then
+  echo "missing-child-summary run summary mismatch"
+  cat "$MISSING_RUN_SUMMARY"
+  exit 1
+fi
+assert_canonical_summary_artifact "$MISSING_RUN_SUMMARY" "$MISSING_CANONICAL_SUMMARY" "$MISSING_LOG"
 
 echo "[phase7-mainnet-cutover-run] reserved wrapper args are protected"
 set +e

@@ -32,8 +32,8 @@ Notes:
   - Optional input signals are preserved as-is in the combined output, including
     `module_tx_surface(_ok)`, `tdpnd_grpc_live_smoke(_ok)`,
     `tdpnd_grpc_auth_live_smoke(_ok)`, `tdpnd_comet_runtime_smoke_ok`, and
-    `mainnet_activation_gate_go` when the underlying phase7 summaries expose
-    them.
+    `mainnet_activation_gate_go` / `bootstrap_governance_graduation_gate_go`
+    when the underlying phase7 summaries expose them.
   - Exit codes:
       0: pass (at least one configured summary passed and none failed/invalid)
       1: fail or missing-only
@@ -374,17 +374,41 @@ for stage_id in "${stage_ids[@]}"; do
   fi
   if [[ "$exists" == "1" ]] && jq -e . "$source_path" >/dev/null 2>&1; then
     valid_json="1"
-    case "$stage_id" in
-      check)
-        signal_snapshot_json="$(jq -c '.signal_snapshot // .handoff // .signals // null' "$source_path" 2>/dev/null || true)"
-        ;;
-      run)
-        signal_snapshot_json="$(jq -c '.steps.phase7_mainnet_cutover_check.signal_snapshot // .signal_snapshot // .signals // .handoff // null' "$source_path" 2>/dev/null || true)"
-        ;;
-      handoff_check|handoff_run)
-        signal_snapshot_json="$(jq -c '.handoff // .signals // .signal_snapshot // null' "$source_path" 2>/dev/null || true)"
-        ;;
-    esac
+    signal_snapshot_json="$(
+      jq -c '
+        def obj($v): if ($v | type) == "object" then $v else {} end;
+        def top_alias:
+          {
+            module_tx_surface_ok: .module_tx_surface_ok,
+            module_tx_surface: .module_tx_surface,
+            tdpnd_grpc_live_smoke_ok: .tdpnd_grpc_live_smoke_ok,
+            tdpnd_grpc_live_smoke: .tdpnd_grpc_live_smoke,
+            tdpnd_grpc_auth_live_smoke_ok: .tdpnd_grpc_auth_live_smoke_ok,
+            tdpnd_grpc_auth_live_smoke: .tdpnd_grpc_auth_live_smoke,
+            tdpnd_comet_runtime_smoke_ok: .tdpnd_comet_runtime_smoke_ok,
+            tdpnd_comet_runtime_smoke: .tdpnd_comet_runtime_smoke,
+            cosmos_module_coverage_floor_ok: .cosmos_module_coverage_floor_ok,
+            cosmos_module_coverage_floor: .cosmos_module_coverage_floor,
+            cosmos_keeper_coverage_floor_ok: .cosmos_keeper_coverage_floor_ok,
+            cosmos_keeper_coverage_floor: .cosmos_keeper_coverage_floor,
+            cosmos_app_coverage_floor_ok: .cosmos_app_coverage_floor_ok,
+            cosmos_app_coverage_floor: .cosmos_app_coverage_floor,
+            dual_write_parity_ok: .dual_write_parity_ok,
+            dual_write_parity: .dual_write_parity,
+            mainnet_activation_gate_go_ok: .mainnet_activation_gate_go_ok,
+            mainnet_activation_gate_go: .mainnet_activation_gate_go,
+            bootstrap_governance_graduation_gate_go_ok: .bootstrap_governance_graduation_gate_go_ok,
+            bootstrap_governance_graduation_gate_go: .bootstrap_governance_graduation_gate_go
+          } | with_entries(select(.value != null));
+        (
+          obj(.signal_snapshot)
+          + obj(.handoff)
+          + obj(.signals)
+          + obj(.steps.phase7_mainnet_cutover_check.signal_snapshot)
+          + top_alias
+        )
+      ' "$source_path" 2>/dev/null || true
+    )"
     if [[ -z "$signal_snapshot_json" ]]; then
       signal_snapshot_json="null"
     fi
@@ -555,6 +579,7 @@ jq -n \
       cosmos_app_coverage_floor_ok: resolve_signal_by_stage_priority([$check, $run, $handoff_check, $handoff_run]; ["cosmos_app_coverage_floor_ok", "cosmos_app_coverage_floor"]),
       dual_write_parity_ok: resolve_signal_by_stage_priority([$check, $run, $handoff_check, $handoff_run]; ["dual_write_parity_ok", "dual_write_parity"]),
       mainnet_activation_gate_go_ok: resolve_signal_by_stage_priority([$check, $run, $handoff_check, $handoff_run]; ["mainnet_activation_gate_go_ok", "mainnet_activation_gate_go"]),
+      bootstrap_governance_graduation_gate_go_ok: resolve_signal_by_stage_priority([$check, $run, $handoff_check, $handoff_run]; ["bootstrap_governance_graduation_gate_go_ok", "bootstrap_governance_graduation_gate_go"]),
       tdpnd_comet_runtime_smoke_ok: resolve_signal_by_stage_priority([$check, $run, $handoff_check, $handoff_run]; ["tdpnd_comet_runtime_smoke_ok", "tdpnd_comet_runtime_smoke"])
     },
     counts: {

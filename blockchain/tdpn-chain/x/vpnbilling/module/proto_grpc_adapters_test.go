@@ -84,6 +84,153 @@ func TestProtoMsgServerAdapterFinalizeUsage(t *testing.T) {
 	}
 }
 
+func TestProtoGrpcAdaptersCanonicalizeReserveOnWriteAndMixedCaseQuery(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	msgAdapter := NewProtoMsgServerAdapter(&k)
+	queryAdapter := NewProtoQueryServerAdapter(&k)
+
+	reserveResp, err := msgAdapter.ReserveCredits(context.Background(), &pb.MsgReserveCreditsRequest{
+		Reservation: &pb.CreditReservation{
+			ReservationId: "  ReS-Canonical-Adapter-1  ",
+			SponsorId:     "  SpOnSoR-Canonical-Adapter-1  ",
+			SessionId:     "  SeSs-Canonical-Adapter-1  ",
+			AssetDenom:    "  UuSdC  ",
+			Amount:        125,
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected reserve success, got %v", err)
+	}
+	if reserveResp.GetReservation() == nil {
+		t.Fatal("expected reservation in reserve response")
+	}
+	if reserveResp.GetReservation().GetReservationId() != "res-canonical-adapter-1" {
+		t.Fatalf("expected canonical reservation id %q, got %q", "res-canonical-adapter-1", reserveResp.GetReservation().GetReservationId())
+	}
+	if reserveResp.GetReservation().GetSponsorId() != "sponsor-canonical-adapter-1" {
+		t.Fatalf("expected canonical sponsor id %q, got %q", "sponsor-canonical-adapter-1", reserveResp.GetReservation().GetSponsorId())
+	}
+	if reserveResp.GetReservation().GetSessionId() != "sess-canonical-adapter-1" {
+		t.Fatalf("expected canonical session id %q, got %q", "sess-canonical-adapter-1", reserveResp.GetReservation().GetSessionId())
+	}
+	if reserveResp.GetReservation().GetAssetDenom() != "uusdc" {
+		t.Fatalf("expected canonical asset denom %q, got %q", "uusdc", reserveResp.GetReservation().GetAssetDenom())
+	}
+	if reserveResp.GetReservation().GetStatus() != pb.ReconciliationStatus_RECONCILIATION_STATUS_PENDING {
+		t.Fatalf("expected pending status after canonicalized reserve, got %v", reserveResp.GetReservation().GetStatus())
+	}
+	if reserveResp.GetConflict() {
+		t.Fatal("expected conflict=false on first reserve")
+	}
+	if reserveResp.GetIdempotentReplay() {
+		t.Fatal("expected idempotent_replay=false on first reserve")
+	}
+
+	queryResp, err := queryAdapter.CreditReservation(context.Background(), &pb.QueryCreditReservationRequest{
+		ReservationId: "  RES-CANONICAL-ADAPTER-1  ",
+	})
+	if err != nil {
+		t.Fatalf("expected reservation query success, got %v", err)
+	}
+	if !queryResp.GetFound() {
+		t.Fatal("expected found=true for mixed-case reservation query")
+	}
+	if queryResp.GetReservation() == nil {
+		t.Fatal("expected reservation in query response")
+	}
+	if queryResp.GetReservation().GetReservationId() != "res-canonical-adapter-1" {
+		t.Fatalf("expected canonical reservation id %q from query, got %q", "res-canonical-adapter-1", queryResp.GetReservation().GetReservationId())
+	}
+	if queryResp.GetReservation().GetAssetDenom() != "uusdc" {
+		t.Fatalf("expected canonical asset denom %q from query, got %q", "uusdc", queryResp.GetReservation().GetAssetDenom())
+	}
+}
+
+func TestProtoGrpcAdaptersCanonicalizeFinalizeUsageOnWriteAndMixedCaseQuery(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	msgAdapter := NewProtoMsgServerAdapter(&k)
+	queryAdapter := NewProtoQueryServerAdapter(&k)
+
+	if _, err := msgAdapter.ReserveCredits(context.Background(), &pb.MsgReserveCreditsRequest{
+		Reservation: &pb.CreditReservation{
+			ReservationId: "  ReS-Finalize-Canonical-Adapter-1  ",
+			SponsorId:     "  SpOnSoR-Finalize-Canonical-Adapter-1  ",
+			SessionId:     "  SeSs-Finalize-Canonical-Adapter-1  ",
+			AssetDenom:    "  UuSdC  ",
+			Amount:        250,
+		},
+	}); err != nil {
+		t.Fatalf("reserve failed: %v", err)
+	}
+
+	finalizeResp, err := msgAdapter.FinalizeUsage(context.Background(), &pb.MsgFinalizeUsageRequest{
+		Settlement: &pb.SettlementRecord{
+			SettlementId:  "  SeT-Finalize-Canonical-Adapter-1  ",
+			ReservationId: "  RES-FINALIZE-CANONICAL-ADAPTER-1  ",
+			SessionId:     "  SeSs-Finalize-Canonical-Adapter-1  ",
+			AssetDenom:    "  UuSdC  ",
+			BilledAmount:  200,
+			UsageBytes:    4096,
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected finalize success, got %v", err)
+	}
+	if finalizeResp.GetSettlement() == nil {
+		t.Fatal("expected settlement in finalize response")
+	}
+	if finalizeResp.GetSettlement().GetSettlementId() != "set-finalize-canonical-adapter-1" {
+		t.Fatalf("expected canonical settlement id %q, got %q", "set-finalize-canonical-adapter-1", finalizeResp.GetSettlement().GetSettlementId())
+	}
+	if finalizeResp.GetSettlement().GetReservationId() != "res-finalize-canonical-adapter-1" {
+		t.Fatalf("expected canonical reservation id %q, got %q", "res-finalize-canonical-adapter-1", finalizeResp.GetSettlement().GetReservationId())
+	}
+	if finalizeResp.GetSettlement().GetSessionId() != "sess-finalize-canonical-adapter-1" {
+		t.Fatalf("expected canonical session id %q, got %q", "sess-finalize-canonical-adapter-1", finalizeResp.GetSettlement().GetSessionId())
+	}
+	if finalizeResp.GetSettlement().GetAssetDenom() != "uusdc" {
+		t.Fatalf("expected canonical asset denom %q, got %q", "uusdc", finalizeResp.GetSettlement().GetAssetDenom())
+	}
+	if finalizeResp.GetSettlement().GetOperationState() != pb.ReconciliationStatus_RECONCILIATION_STATUS_SUBMITTED {
+		t.Fatalf("expected submitted operation state after canonicalized finalize, got %v", finalizeResp.GetSettlement().GetOperationState())
+	}
+	if finalizeResp.GetConflict() {
+		t.Fatal("expected conflict=false on first finalize")
+	}
+	if finalizeResp.GetIdempotentReplay() {
+		t.Fatal("expected idempotent_replay=false on first finalize")
+	}
+
+	queryResp, err := queryAdapter.SettlementRecord(context.Background(), &pb.QuerySettlementRecordRequest{
+		SettlementId: "  SET-FINALIZE-CANONICAL-ADAPTER-1  ",
+	})
+	if err != nil {
+		t.Fatalf("expected settlement query success, got %v", err)
+	}
+	if !queryResp.GetFound() {
+		t.Fatal("expected found=true for mixed-case settlement query")
+	}
+	if queryResp.GetSettlement() == nil {
+		t.Fatal("expected settlement in query response")
+	}
+	if queryResp.GetSettlement().GetSettlementId() != "set-finalize-canonical-adapter-1" {
+		t.Fatalf("expected canonical settlement id %q from query, got %q", "set-finalize-canonical-adapter-1", queryResp.GetSettlement().GetSettlementId())
+	}
+	if queryResp.GetSettlement().GetReservationId() != "res-finalize-canonical-adapter-1" {
+		t.Fatalf("expected canonical reservation id %q from query, got %q", "res-finalize-canonical-adapter-1", queryResp.GetSettlement().GetReservationId())
+	}
+	if queryResp.GetSettlement().GetSessionId() != "sess-finalize-canonical-adapter-1" {
+		t.Fatalf("expected canonical session id %q from query, got %q", "sess-finalize-canonical-adapter-1", queryResp.GetSettlement().GetSessionId())
+	}
+	if queryResp.GetSettlement().GetAssetDenom() != "uusdc" {
+		t.Fatalf("expected canonical asset denom %q from query, got %q", "uusdc", queryResp.GetSettlement().GetAssetDenom())
+	}
+}
+
 func TestProtoMsgServerAdapterReserveCreditsConflict(t *testing.T) {
 	t.Parallel()
 

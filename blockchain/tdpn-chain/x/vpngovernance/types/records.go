@@ -45,6 +45,33 @@ type GovernanceAuditAction struct {
 	TimestampUnix   int64
 }
 
+// Canonicalize normalizes identity and enum-like fields while preserving free-text fields.
+func (p GovernancePolicy) Canonicalize() GovernancePolicy {
+	p.PolicyID = canonicalIdentifier(p.PolicyID)
+	p.Status = canonicalStatus(p.Status)
+	return p
+}
+
+// Canonicalize normalizes identity and enum-like fields while preserving free-text fields.
+func (d GovernanceDecision) Canonicalize() GovernanceDecision {
+	d.DecisionID = canonicalIdentifier(d.DecisionID)
+	d.PolicyID = canonicalIdentifier(d.PolicyID)
+	d.ProposalID = canonicalIdentifier(d.ProposalID)
+	d.Outcome = canonicalEnum(d.Outcome)
+	d.Decider = canonicalIdentifier(d.Decider)
+	d.Status = canonicalStatus(d.Status)
+	return d
+}
+
+// Canonicalize normalizes identity and enum-like fields while preserving free-text fields.
+func (a GovernanceAuditAction) Canonicalize() GovernanceAuditAction {
+	a.ActionID = canonicalIdentifier(a.ActionID)
+	a.Action = canonicalEnum(a.Action)
+	a.Actor = canonicalIdentifier(a.Actor)
+	a.EvidencePointer = strings.TrimSpace(a.EvidencePointer)
+	return a
+}
+
 func (p GovernancePolicy) ValidateBasic() error {
 	if strings.TrimSpace(p.PolicyID) == "" {
 		return errors.New("policy id is required")
@@ -112,4 +139,16 @@ func isValidDecisionOutcome(outcome string) bool {
 	default:
 		return false
 	}
+}
+
+func canonicalIdentifier(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
+func canonicalEnum(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
+func canonicalStatus(value chaintypes.ReconciliationStatus) chaintypes.ReconciliationStatus {
+	return chaintypes.ReconciliationStatus(canonicalEnum(string(value)))
 }

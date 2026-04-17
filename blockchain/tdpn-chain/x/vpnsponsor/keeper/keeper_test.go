@@ -1,6 +1,7 @@
 package keeper
 
 import (
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -126,6 +127,84 @@ func TestKeeperCreateAuthorizationDefaultsAndIdempotency(t *testing.T) {
 	}
 }
 
+func TestKeeperCreateAuthorizationCanonicalizationAndLookup(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+
+	input := types.SponsorAuthorization{
+		AuthorizationID: "  Auth-1  ",
+		SponsorID:       "  Sponsor-1  ",
+		AppID:           "  App-1  ",
+		MaxCredits:      100,
+	}
+
+	created, err := k.CreateAuthorization(input)
+	if err != nil {
+		t.Fatalf("CreateAuthorization returned unexpected error: %v", err)
+	}
+	if created.AuthorizationID != "auth-1" {
+		t.Fatalf("expected canonical authorization id %q, got %q", "auth-1", created.AuthorizationID)
+	}
+	if created.SponsorID != "sponsor-1" {
+		t.Fatalf("expected canonical sponsor id %q, got %q", "sponsor-1", created.SponsorID)
+	}
+	if created.AppID != "app-1" {
+		t.Fatalf("expected canonical app id %q, got %q", "app-1", created.AppID)
+	}
+
+	replay := types.SponsorAuthorization{
+		AuthorizationID: "AUTH-1",
+		SponsorID:       "sponsor-1",
+		AppID:           "APP-1",
+		MaxCredits:      100,
+	}
+
+	idempotent, err := k.CreateAuthorization(replay)
+	if err != nil {
+		t.Fatalf("CreateAuthorization replay returned unexpected error: %v", err)
+	}
+	if idempotent != created {
+		t.Fatalf("expected idempotent replay to match created record, got %+v vs %+v", idempotent, created)
+	}
+
+	got, ok := k.GetAuthorization("  AUTH-1  ")
+	if !ok {
+		t.Fatal("expected canonicalized authorization lookup to succeed")
+	}
+	if got != created {
+		t.Fatalf("expected canonicalized lookup to return %+v, got %+v", created, got)
+	}
+}
+
+func TestKeeperCreateAuthorizationCanonicalConflictBoundary(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+
+	if _, err := k.CreateAuthorization(types.SponsorAuthorization{
+		AuthorizationID: "Auth-1",
+		SponsorID:       "Sponsor-1",
+		AppID:           "App-1",
+		MaxCredits:      100,
+	}); err != nil {
+		t.Fatalf("CreateAuthorization returned unexpected error: %v", err)
+	}
+
+	_, err := k.CreateAuthorization(types.SponsorAuthorization{
+		AuthorizationID: " auth-1 ",
+		SponsorID:       "sponsor-2",
+		AppID:           "app-1",
+		MaxCredits:      100,
+	})
+	if err == nil {
+		t.Fatal("expected conflict error for canonical id replay with changed sponsor id")
+	}
+	if !strings.Contains(err.Error(), "conflicting fields") {
+		t.Fatalf("expected conflict error message, got: %v", err)
+	}
+}
+
 func TestKeeperCreateAuthorizationConflict(t *testing.T) {
 	t.Parallel()
 
@@ -214,6 +293,121 @@ func TestKeeperDelegateSessionCreditDefaultsAndIdempotency(t *testing.T) {
 	}
 	if idempotent != created {
 		t.Fatalf("expected explicit pending result to match created record, got %+v vs %+v", idempotent, created)
+	}
+}
+
+func TestKeeperDelegateSessionCreditCanonicalizationAndLookup(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	if _, err := k.CreateAuthorization(types.SponsorAuthorization{
+		AuthorizationID: "  Auth-1  ",
+		SponsorID:       "  Sponsor-1  ",
+		AppID:           "  App-1  ",
+		MaxCredits:      100,
+	}); err != nil {
+		t.Fatalf("CreateAuthorization returned unexpected error: %v", err)
+	}
+
+	input := types.DelegatedSessionCredit{
+		ReservationID:   "  Res-1  ",
+		AuthorizationID: "  Auth-1  ",
+		SponsorID:       "  Sponsor-1  ",
+		AppID:           "  App-1  ",
+		EndUserID:       "  User-1  ",
+		SessionID:       "  Sess-1  ",
+		Credits:         10,
+	}
+
+	created, err := k.DelegateSessionCredit(input)
+	if err != nil {
+		t.Fatalf("DelegateSessionCredit returned unexpected error: %v", err)
+	}
+	if created.ReservationID != "res-1" {
+		t.Fatalf("expected canonical reservation id %q, got %q", "res-1", created.ReservationID)
+	}
+	if created.AuthorizationID != "auth-1" {
+		t.Fatalf("expected canonical authorization id %q, got %q", "auth-1", created.AuthorizationID)
+	}
+	if created.SponsorID != "sponsor-1" {
+		t.Fatalf("expected canonical sponsor id %q, got %q", "sponsor-1", created.SponsorID)
+	}
+	if created.AppID != "app-1" {
+		t.Fatalf("expected canonical app id %q, got %q", "app-1", created.AppID)
+	}
+	if created.EndUserID != "User-1" {
+		t.Fatalf("expected trimmed end user id %q, got %q", "User-1", created.EndUserID)
+	}
+	if created.SessionID != "Sess-1" {
+		t.Fatalf("expected trimmed session id %q, got %q", "Sess-1", created.SessionID)
+	}
+
+	replay := types.DelegatedSessionCredit{
+		ReservationID:   "RES-1",
+		AuthorizationID: "auth-1",
+		SponsorID:       "sponsor-1",
+		AppID:           "APP-1",
+		EndUserID:       "User-1",
+		SessionID:       "Sess-1",
+		Credits:         10,
+	}
+
+	idempotent, err := k.DelegateSessionCredit(replay)
+	if err != nil {
+		t.Fatalf("DelegateSessionCredit replay returned unexpected error: %v", err)
+	}
+	if idempotent != created {
+		t.Fatalf("expected idempotent replay to match created record, got %+v vs %+v", idempotent, created)
+	}
+
+	got, ok := k.GetDelegation("  RES-1  ")
+	if !ok {
+		t.Fatal("expected canonicalized delegation lookup to succeed")
+	}
+	if got != created {
+		t.Fatalf("expected canonicalized lookup to return %+v, got %+v", created, got)
+	}
+}
+
+func TestKeeperDelegateSessionCreditCanonicalConflictBoundaryForSessionCase(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	if _, err := k.CreateAuthorization(types.SponsorAuthorization{
+		AuthorizationID: "auth-1",
+		SponsorID:       "sponsor-1",
+		AppID:           "app-1",
+		MaxCredits:      100,
+	}); err != nil {
+		t.Fatalf("CreateAuthorization returned unexpected error: %v", err)
+	}
+
+	if _, err := k.DelegateSessionCredit(types.DelegatedSessionCredit{
+		ReservationID:   "Res-1",
+		AuthorizationID: "Auth-1",
+		SponsorID:       "Sponsor-1",
+		AppID:           "App-1",
+		EndUserID:       "User-1",
+		SessionID:       "Sess-1",
+		Credits:         10,
+	}); err != nil {
+		t.Fatalf("DelegateSessionCredit returned unexpected error: %v", err)
+	}
+
+	_, err := k.DelegateSessionCredit(types.DelegatedSessionCredit{
+		ReservationID:   "  res-1  ",
+		AuthorizationID: " auth-1 ",
+		SponsorID:       " sponsor-1 ",
+		AppID:           " app-1 ",
+		EndUserID:       "User-1",
+		SessionID:       "sess-1",
+		Credits:         10,
+	})
+	if err == nil {
+		t.Fatal("expected conflict error for replay with case-distinct session id")
+	}
+	if !strings.Contains(err.Error(), "conflicting fields") {
+		t.Fatalf("expected conflict error message, got: %v", err)
 	}
 }
 
@@ -322,13 +516,45 @@ func TestKeeperDelegateSessionCreditAuthorizationLinkageMismatch(t *testing.T) {
 func TestKeeperDelegateSessionCreditExpiredAuthorization(t *testing.T) {
 	t.Parallel()
 
+	nowUnix := time.Now().Unix()
 	k := NewKeeper()
 	if _, err := k.CreateAuthorization(types.SponsorAuthorization{
 		AuthorizationID: "auth-1",
 		SponsorID:       "sponsor-1",
 		AppID:           "app-1",
 		MaxCredits:      100,
-		ExpiresAtUnix:   time.Now().Unix() - 1,
+		ExpiresAtUnix:   nowUnix - 1,
+	}); err != nil {
+		t.Fatalf("CreateAuthorization returned unexpected error: %v", err)
+	}
+
+	_, err := k.DelegateSessionCreditAtUnix(types.DelegatedSessionCredit{
+		ReservationID:   "res-1",
+		AuthorizationID: "auth-1",
+		SponsorID:       "sponsor-1",
+		AppID:           "app-1",
+		SessionID:       "sess-1",
+		Credits:         10,
+	}, nowUnix)
+	if err == nil {
+		t.Fatal("expected expired authorization error")
+	}
+	if !strings.Contains(err.Error(), "expired") {
+		t.Fatalf("expected expired authorization error message, got: %v", err)
+	}
+}
+
+func TestKeeperDelegateSessionCreditCurrentTimeRequiredForExpiringAuthorization(t *testing.T) {
+	t.Parallel()
+
+	nowUnix := time.Now().Unix()
+	k := NewKeeper()
+	if _, err := k.CreateAuthorization(types.SponsorAuthorization{
+		AuthorizationID: "auth-1",
+		SponsorID:       "sponsor-1",
+		AppID:           "app-1",
+		MaxCredits:      100,
+		ExpiresAtUnix:   nowUnix + 100,
 	}); err != nil {
 		t.Fatalf("CreateAuthorization returned unexpected error: %v", err)
 	}
@@ -342,10 +568,10 @@ func TestKeeperDelegateSessionCreditExpiredAuthorization(t *testing.T) {
 		Credits:         10,
 	})
 	if err == nil {
-		t.Fatal("expected expired authorization error")
+		t.Fatal("expected current unix time required error")
 	}
-	if !strings.Contains(err.Error(), "expired") {
-		t.Fatalf("expected expired authorization error message, got: %v", err)
+	if !strings.Contains(err.Error(), "current unix time is required") {
+		t.Fatalf("expected current unix time required error message, got: %v", err)
 	}
 }
 
@@ -386,6 +612,113 @@ func TestKeeperDelegateSessionCreditMaxCreditsExceeded(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "max credits exceeded") {
 		t.Fatalf("expected max credits exceeded error message, got: %v", err)
+	}
+}
+
+func TestKeeperDelegateSessionCreditOverflowSafeCreditsExceeded(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	if _, err := k.CreateAuthorization(types.SponsorAuthorization{
+		AuthorizationID: "auth-1",
+		SponsorID:       "sponsor-1",
+		AppID:           "app-1",
+		MaxCredits:      math.MaxInt64,
+	}); err != nil {
+		t.Fatalf("CreateAuthorization returned unexpected error: %v", err)
+	}
+
+	if _, err := k.DelegateSessionCredit(types.DelegatedSessionCredit{
+		ReservationID:   "res-1",
+		AuthorizationID: "auth-1",
+		SponsorID:       "sponsor-1",
+		AppID:           "app-1",
+		SessionID:       "sess-1",
+		Credits:         math.MaxInt64,
+	}); err != nil {
+		t.Fatalf("first DelegateSessionCredit returned unexpected error: %v", err)
+	}
+
+	_, err := k.DelegateSessionCredit(types.DelegatedSessionCredit{
+		ReservationID:   "res-2",
+		AuthorizationID: "auth-1",
+		SponsorID:       "sponsor-1",
+		AppID:           "app-1",
+		SessionID:       "sess-2",
+		Credits:         1,
+	})
+	if err == nil {
+		t.Fatal("expected overflow-safe max credits exceeded error")
+	}
+	if !strings.Contains(err.Error(), "max credits exceeded") {
+		t.Fatalf("expected max credits exceeded error message, got: %v", err)
+	}
+}
+
+func TestKeeperDelegateSessionCreditAtUnixExpiryPrecedesOverflowWithCanonicalBacklog(t *testing.T) {
+	t.Parallel()
+
+	nowUnix := time.Now().Unix()
+	k := NewKeeper()
+	if _, err := k.CreateAuthorization(types.SponsorAuthorization{
+		AuthorizationID: "Auth-1",
+		SponsorID:       "Sponsor-1",
+		AppID:           "App-1",
+		MaxCredits:      math.MaxInt64,
+		ExpiresAtUnix:   nowUnix + 10,
+	}); err != nil {
+		t.Fatalf("CreateAuthorization returned unexpected error: %v", err)
+	}
+
+	// Seed a legacy-style backlog entry directly in store to ensure canonicalized overflow accounting.
+	k.store.UpsertDelegation(types.DelegatedSessionCredit{
+		ReservationID:   "LEGACY-RES-1",
+		AuthorizationID: " AUTH-1 ",
+		SponsorID:       " SPONSOR-1 ",
+		AppID:           " APP-1 ",
+		SessionID:       "sess-legacy",
+		Credits:         math.MaxInt64,
+	})
+
+	_, err := k.DelegateSessionCreditAtUnix(types.DelegatedSessionCredit{
+		ReservationID:   "res-2",
+		AuthorizationID: "auth-1",
+		SponsorID:       "sponsor-1",
+		AppID:           "app-1",
+		SessionID:       "sess-2",
+		Credits:         1,
+	}, nowUnix+1)
+	if err == nil {
+		t.Fatal("expected max credits exceeded error before authorization expiry")
+	}
+	if !strings.Contains(err.Error(), "max credits exceeded") {
+		t.Fatalf("expected max credits exceeded error message, got: %v", err)
+	}
+
+	_, err = k.DelegateSessionCreditAtUnix(types.DelegatedSessionCredit{
+		ReservationID:   "res-3",
+		AuthorizationID: "auth-1",
+		SponsorID:       "sponsor-1",
+		AppID:           "app-1",
+		SessionID:       "sess-3",
+		Credits:         1,
+	}, nowUnix+10)
+	if err == nil {
+		t.Fatal("expected expired authorization error at expiry boundary")
+	}
+	if !strings.Contains(err.Error(), "expired") {
+		t.Fatalf("expected expired authorization error message, got: %v", err)
+	}
+
+	list := k.ListDelegations()
+	if len(list) != 1 {
+		t.Fatalf("expected failed delegations to leave backlog unchanged, got %d records", len(list))
+	}
+	if list[0].ReservationID != "legacy-res-1" {
+		t.Fatalf("expected canonical reservation id %q, got %q", "legacy-res-1", list[0].ReservationID)
+	}
+	if list[0].AuthorizationID != "auth-1" {
+		t.Fatalf("expected canonical authorization id %q, got %q", "auth-1", list[0].AuthorizationID)
 	}
 }
 
@@ -466,5 +799,69 @@ func TestKeeperListDelegationsDeterministicByReservationID(t *testing.T) {
 			list[1].ReservationID,
 			list[2].ReservationID,
 		)
+	}
+}
+
+func TestKeeperUpsertAuthorizationCanonicalLookupContract(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	k.UpsertAuthorization(types.SponsorAuthorization{
+		AuthorizationID: "  Auth-Legacy-1  ",
+		SponsorID:       "  Sponsor-Legacy-1  ",
+		AppID:           "  App-Legacy-1  ",
+		MaxCredits:      250,
+	})
+
+	got, ok := k.GetAuthorization("auth-legacy-1")
+	if !ok {
+		t.Fatal("expected canonical authorization lookup to succeed for upserted legacy-case id")
+	}
+	if got.AuthorizationID != "auth-legacy-1" {
+		t.Fatalf("expected canonical authorization id %q, got %q", "auth-legacy-1", got.AuthorizationID)
+	}
+	if got.SponsorID != "sponsor-legacy-1" {
+		t.Fatalf("expected canonical sponsor id %q, got %q", "sponsor-legacy-1", got.SponsorID)
+	}
+	if got.AppID != "app-legacy-1" {
+		t.Fatalf("expected canonical app id %q, got %q", "app-legacy-1", got.AppID)
+	}
+}
+
+func TestKeeperUpsertDelegationCanonicalLookupContract(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	k.UpsertDelegation(types.DelegatedSessionCredit{
+		ReservationID:   "  Res-Legacy-1  ",
+		AuthorizationID: "  Auth-Legacy-1  ",
+		SponsorID:       "  Sponsor-Legacy-1  ",
+		AppID:           "  App-Legacy-1  ",
+		EndUserID:       "  EndUser-Legacy-1  ",
+		SessionID:       "  Session-Legacy-1  ",
+		Credits:         42,
+	})
+
+	got, ok := k.GetDelegation("res-legacy-1")
+	if !ok {
+		t.Fatal("expected canonical delegation lookup to succeed for upserted legacy-case id")
+	}
+	if got.ReservationID != "res-legacy-1" {
+		t.Fatalf("expected canonical reservation id %q, got %q", "res-legacy-1", got.ReservationID)
+	}
+	if got.AuthorizationID != "auth-legacy-1" {
+		t.Fatalf("expected canonical authorization id %q, got %q", "auth-legacy-1", got.AuthorizationID)
+	}
+	if got.SponsorID != "sponsor-legacy-1" {
+		t.Fatalf("expected canonical sponsor id %q, got %q", "sponsor-legacy-1", got.SponsorID)
+	}
+	if got.AppID != "app-legacy-1" {
+		t.Fatalf("expected canonical app id %q, got %q", "app-legacy-1", got.AppID)
+	}
+	if got.EndUserID != "EndUser-Legacy-1" {
+		t.Fatalf("expected trimmed end user id %q, got %q", "EndUser-Legacy-1", got.EndUserID)
+	}
+	if got.SessionID != "Session-Legacy-1" {
+		t.Fatalf("expected trimmed session id %q, got %q", "Session-Legacy-1", got.SessionID)
 	}
 }

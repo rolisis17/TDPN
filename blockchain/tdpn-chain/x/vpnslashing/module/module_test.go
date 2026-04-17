@@ -11,7 +11,7 @@ func TestAppModuleBackwardCompatibleSurface(t *testing.T) {
 	t.Parallel()
 
 	k := keeper.NewKeeper()
-	m := NewAppModule(k)
+	m := NewAppModule(&k)
 
 	if got := m.Name(); got != types.ModuleName {
 		t.Fatalf("expected module name %q, got %q", types.ModuleName, got)

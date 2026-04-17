@@ -175,6 +175,30 @@ func TestValidateRuntimeConfigPublicBindRejectsWeakTokenAdmin(t *testing.T) {
 	}
 }
 
+func TestValidateRuntimeConfigPublicBindRejectsWeakSponsorToken(t *testing.T) {
+	s := &Service{
+		addr:            "0.0.0.0:8082",
+		adminToken:      "super-secret-admin-token",
+		adminAllowToken: true,
+		sponsorAPIToken: "dev-sponsor-token",
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected public bind rejection for weak sponsor token")
+	}
+	if !strings.Contains(err.Error(), "public bind requires strong ISSUER_SPONSOR_API_TOKEN") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestNewSponsorTokenDefaultsDisabled(t *testing.T) {
+	t.Setenv("ISSUER_SPONSOR_API_TOKEN", "")
+	s := New()
+	if strings.TrimSpace(s.sponsorAPIToken) != "" {
+		t.Fatalf("expected sponsor api token default disabled, got %q", s.sponsorAPIToken)
+	}
+}
+
 func TestValidateRuntimeConfigPublicBindRejectsLegacyKeyPath(t *testing.T) {
 	s := &Service{
 		addr:            "0.0.0.0:8082",

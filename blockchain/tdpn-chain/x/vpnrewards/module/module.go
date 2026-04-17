@@ -7,10 +7,10 @@ import (
 
 // AppModule describes vpnrewards responsibilities for future Cosmos SDK registration.
 type AppModule struct {
-	Keeper keeper.Keeper
+	Keeper *keeper.Keeper
 }
 
-func NewAppModule(k keeper.Keeper) AppModule {
+func NewAppModule(k *keeper.Keeper) AppModule {
 	return AppModule{Keeper: k}
 }
 

@@ -34,6 +34,16 @@ NO_GO_SUMMARY_JSON="$TMP_DIR/no_go_summary.json"
 NO_GO_CANONICAL_SUMMARY_JSON="$TMP_DIR/no_go_canonical_summary.json"
 NO_GO_LOG="$TMP_DIR/no_go.log"
 
+RUNTIME_FAIL_REPORTS_DIR="$TMP_DIR/reports_runtime_fail"
+RUNTIME_FAIL_SUMMARY_JSON="$TMP_DIR/runtime_fail_summary.json"
+RUNTIME_FAIL_CANONICAL_SUMMARY_JSON="$TMP_DIR/runtime_fail_canonical_summary.json"
+RUNTIME_FAIL_LOG="$TMP_DIR/runtime_fail.log"
+
+INVALID_GENERATED_AT_REPORTS_DIR="$TMP_DIR/reports_invalid_generated_at"
+INVALID_GENERATED_AT_SUMMARY_JSON="$TMP_DIR/invalid_generated_at_summary.json"
+INVALID_GENERATED_AT_CANONICAL_SUMMARY_JSON="$TMP_DIR/invalid_generated_at_canonical_summary.json"
+INVALID_GENERATED_AT_LOG="$TMP_DIR/invalid_generated_at.log"
+
 TOGGLE_INPUT_JSON="$TMP_DIR/input_toggle.json"
 TOGGLE_REPORTS_DIR="$TMP_DIR/reports_toggle"
 TOGGLE_SUMMARY_JSON="$TMP_DIR/toggle_summary.json"
@@ -319,6 +329,8 @@ else
   missing_required_metrics='["measurement_window_weeks","vpn_recovery_mttr_p95_minutes"]'
 fi
 
+generated_at="${BLOCKCHAIN_MAINNET_ACTIVATION_GATE_CYCLE_FAKE_GATE_SUMMARY_GENERATED_AT:-2026-04-17T00:00:00Z}"
+
 jq -n \
   --arg decision "$decision" \
   --arg reports_dir "$reports_dir" \
@@ -355,7 +367,9 @@ jq -n \
 jq -n \
   --arg decision "$decision" \
   --arg metrics_json "$metrics_json" \
+  --arg generated_at "$generated_at" \
   '{
+    generated_at: $generated_at,
     decision: $decision,
     status: (if $decision == "GO" then "go" else "no-go" end),
     rc: (if $decision == "GO" then 0 else 1 end),
@@ -366,7 +380,9 @@ jq -n \
 jq -n \
   --arg decision "$decision" \
   --arg metrics_json "$metrics_json" \
+  --arg generated_at "$generated_at" \
   '{
+    generated_at: $generated_at,
     decision: $decision,
     status: (if $decision == "GO" then "go" else "no-go" end),
     rc: (if $decision == "GO" then 0 else 1 end),
@@ -592,6 +608,25 @@ assert_stage_invocation_contains() {
   done
 }
 
+assert_nonempty_iso_utc_generated_at() {
+  local summary_json="$1"
+  local label="$2"
+  if [[ ! -f "$summary_json" ]]; then
+    echo "$label missing summary artifact for generated_at assertion: $summary_json"
+    exit 1
+  fi
+  if ! jq -e '
+    (.generated_at // "")
+    | (type == "string")
+    and (length > 0)
+    and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
+  ' "$summary_json" >/dev/null; then
+    echo "$label generated_at must be a non-empty ISO UTC timestamp"
+    cat "$summary_json"
+    exit 1
+  fi
+}
+
 run_cycle() {
   BLOCKCHAIN_MAINNET_ACTIVATION_GATE_CYCLE_CAPTURE_FILE="$CAPTURE" \
   BLOCKCHAIN_MAINNET_ACTIVATION_GATE_CYCLE_METRICS_INPUT_TEMPLATE_SCRIPT="$FAKE_METRICS_INPUT_TEMPLATE" \
@@ -609,7 +644,7 @@ if ! run_cycle \
   --reports-dir "$PASS_REPORTS_DIR" \
   --summary-json "$PASS_SUMMARY_JSON" \
   --canonical-summary-json "$PASS_CANONICAL_SUMMARY_JSON" \
-  --print-summary-json 0 >"$PASS_LOG" 2>&1; then
+  --print-output-json 0 >"$PASS_LOG" 2>&1; then
   echo "expected pass cycle run to exit 0"
   cat "$PASS_LOG"
   exit 1
@@ -668,6 +703,8 @@ if ! cmp -s "$PASS_SUMMARY_JSON" "$PASS_CANONICAL_SUMMARY_JSON"; then
   cat "$PASS_CANONICAL_SUMMARY_JSON"
   exit 1
 fi
+assert_nonempty_iso_utc_generated_at "$PASS_BUNDLE_ACTIVATION_SUMMARY_JSON" "pass activation gate summary"
+assert_nonempty_iso_utc_generated_at "$PASS_BUNDLE_BOOTSTRAP_SUMMARY_JSON" "pass bootstrap gate summary"
 
 if ! jq -e \
   --arg input_json "$PASS_INPUT_JSON" \
@@ -684,6 +721,12 @@ if ! jq -e \
   and .inputs.refresh_roadmap == true
   and .steps.metrics_input.status == "pass"
   and .steps.gate_bundle.status == "pass"
+  and .steps.gate_bundle.gate_summary_generated_at_contract.status == "pass"
+  and .steps.gate_bundle.gate_summary_generated_at_contract.requires_nonempty_iso_utc == true
+  and (.steps.gate_bundle.activation_summary_generated_at | type == "string")
+  and (.steps.gate_bundle.activation_summary_generated_at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))
+  and (.steps.gate_bundle.bootstrap_summary_generated_at | type == "string")
+  and (.steps.gate_bundle.bootstrap_summary_generated_at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))
   and .steps.missing_metrics_checklist.enabled == true
   and .steps.missing_metrics_checklist.status == "pass"
   and .steps.missing_metrics_checklist.checklist_status == "complete"
@@ -725,11 +768,15 @@ fi
 NO_GO_BUNDLE_METRICS_SUMMARY_JSON="$NO_GO_REPORTS_DIR/blockchain_mainnet_activation_metrics_summary.json"
 NO_GO_MISSING_CHECKLIST_JSON="$NO_GO_REPORTS_DIR/blockchain_mainnet_activation_metrics_missing_checklist.json"
 NO_GO_MISSING_CHECKLIST_MD="$NO_GO_REPORTS_DIR/blockchain_mainnet_activation_metrics_missing_checklist.md"
+NO_GO_BUNDLE_ACTIVATION_SUMMARY_JSON="$NO_GO_REPORTS_DIR/blockchain_mainnet_activation_gate_summary.json"
+NO_GO_BUNDLE_BOOTSTRAP_SUMMARY_JSON="$NO_GO_REPORTS_DIR/blockchain_bootstrap_governance_graduation_gate_summary.json"
 assert_stage_order "$CAPTURE" "metrics_input" "gate_bundle" "missing_metrics_checklist" "roadmap_refresh"
 assert_stage_invocation_contains "$CAPTURE" "missing_metrics_checklist" \
   "--metrics-summary-json" "$NO_GO_BUNDLE_METRICS_SUMMARY_JSON" \
   "--output-json" "$NO_GO_MISSING_CHECKLIST_JSON" \
   "--output-md" "$NO_GO_MISSING_CHECKLIST_MD"
+assert_nonempty_iso_utc_generated_at "$NO_GO_BUNDLE_ACTIVATION_SUMMARY_JSON" "no-go activation gate summary"
+assert_nonempty_iso_utc_generated_at "$NO_GO_BUNDLE_BOOTSTRAP_SUMMARY_JSON" "no-go bootstrap gate summary"
 
 if ! jq -e '
   .status == "pass"
@@ -737,6 +784,12 @@ if ! jq -e '
   and .decision == "NO-GO"
   and .steps.gate_bundle.status == "pass"
   and .steps.gate_bundle.decision == "NO-GO"
+  and .steps.gate_bundle.gate_summary_generated_at_contract.status == "pass"
+  and .steps.gate_bundle.gate_summary_generated_at_contract.requires_nonempty_iso_utc == true
+  and (.steps.gate_bundle.activation_summary_generated_at | type == "string")
+  and (.steps.gate_bundle.activation_summary_generated_at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))
+  and (.steps.gate_bundle.bootstrap_summary_generated_at | type == "string")
+  and (.steps.gate_bundle.bootstrap_summary_generated_at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))
   and ((.steps.gate_bundle.missing_required_metrics | index("measurement_window_weeks")) != null)
   and ((.steps.gate_bundle.missing_required_metrics | index("vpn_recovery_mttr_p95_minutes")) != null)
   and .steps.missing_metrics_checklist.status == "pass"
@@ -750,6 +803,199 @@ if ! jq -e '
   echo "logical NO-GO summary contract mismatch"
   cat "$NO_GO_SUMMARY_JSON"
   cat "$NO_GO_LOG"
+  exit 1
+fi
+
+echo "[blockchain-mainnet-activation-gate-cycle] invalid gate summary generated_at is fail-closed"
+: >"$CAPTURE"
+set +e
+BLOCKCHAIN_MAINNET_ACTIVATION_GATE_CYCLE_FAKE_GATE_SUMMARY_GENERATED_AT="not-iso-utc" \
+run_cycle \
+  --input-json "$PASS_INPUT_JSON" \
+  --reports-dir "$INVALID_GENERATED_AT_REPORTS_DIR" \
+  --summary-json "$INVALID_GENERATED_AT_SUMMARY_JSON" \
+  --canonical-summary-json "$INVALID_GENERATED_AT_CANONICAL_SUMMARY_JSON" \
+  --print-summary-json 0 >"$INVALID_GENERATED_AT_LOG" 2>&1
+invalid_generated_at_rc=$?
+set -e
+if [[ "$invalid_generated_at_rc" -ne 41 ]]; then
+  echo "expected invalid gate-summary generated_at path to return rc=41"
+  cat "$INVALID_GENERATED_AT_LOG"
+  exit 1
+fi
+
+INVALID_GENERATED_AT_MISSING_CHECKLIST_JSON="$INVALID_GENERATED_AT_REPORTS_DIR/blockchain_mainnet_activation_metrics_missing_checklist.json"
+INVALID_GENERATED_AT_MISSING_CHECKLIST_MD="$INVALID_GENERATED_AT_REPORTS_DIR/blockchain_mainnet_activation_metrics_missing_checklist.md"
+INVALID_GENERATED_AT_ROADMAP_SUMMARY_JSON="$INVALID_GENERATED_AT_REPORTS_DIR/roadmap_progress_summary.json"
+INVALID_GENERATED_AT_ROADMAP_REPORT_MD="$INVALID_GENERATED_AT_REPORTS_DIR/roadmap_progress_report.md"
+
+assert_stage_order "$CAPTURE" "metrics_input" "gate_bundle"
+if grep -Fq "missing_metrics_checklist" "$CAPTURE"; then
+  echo "missing_metrics_checklist stage should not run when gate summary generated_at contract fails"
+  cat "$CAPTURE"
+  exit 1
+fi
+if grep -Fq "roadmap_refresh" "$CAPTURE"; then
+  echo "roadmap_refresh stage should not run when gate summary generated_at contract fails"
+  cat "$CAPTURE"
+  exit 1
+fi
+
+if [[ -f "$INVALID_GENERATED_AT_MISSING_CHECKLIST_JSON" || -f "$INVALID_GENERATED_AT_MISSING_CHECKLIST_MD" || -f "$INVALID_GENERATED_AT_ROADMAP_SUMMARY_JSON" || -f "$INVALID_GENERATED_AT_ROADMAP_REPORT_MD" ]]; then
+  echo "invalid generated_at path should skip checklist/roadmap artifact generation"
+  ls -la "$INVALID_GENERATED_AT_REPORTS_DIR"
+  cat "$INVALID_GENERATED_AT_LOG"
+  exit 1
+fi
+
+if ! jq -e \
+  --arg missing_checklist_json "$INVALID_GENERATED_AT_MISSING_CHECKLIST_JSON" \
+  --arg missing_checklist_md "$INVALID_GENERATED_AT_MISSING_CHECKLIST_MD" \
+  --arg roadmap_summary_json "$INVALID_GENERATED_AT_ROADMAP_SUMMARY_JSON" \
+  --arg roadmap_report_md "$INVALID_GENERATED_AT_ROADMAP_REPORT_MD" \
+  '
+  .status == "runtime-fail"
+  and .rc == 41
+  and .decision == "UNKNOWN"
+  and .first_runtime_failure.step == "gate_bundle"
+  and .first_runtime_failure.rc == 41
+  and .steps.gate_bundle.status == "fail"
+  and .steps.gate_bundle.rc == 41
+  and .steps.gate_bundle.decision == null
+  and .steps.gate_bundle.gate_summary_generated_at_contract.status == "fail"
+  and .steps.gate_bundle.gate_summary_generated_at_contract.requires_nonempty_iso_utc == true
+  and .steps.gate_bundle.activation_summary_generated_at == "not-iso-utc"
+  and .steps.gate_bundle.bootstrap_summary_generated_at == "not-iso-utc"
+  and .steps.missing_metrics_checklist.enabled == true
+  and .steps.missing_metrics_checklist.status == "skipped"
+  and .steps.missing_metrics_checklist.checklist_status == null
+  and .steps.missing_metrics_checklist.artifacts.checklist_json == $missing_checklist_json
+  and .steps.missing_metrics_checklist.artifacts.checklist_md == $missing_checklist_md
+  and .steps.roadmap_refresh.enabled == true
+  and .steps.roadmap_refresh.status == "skipped"
+  and .steps.roadmap_refresh.artifacts.summary_json == $roadmap_summary_json
+  and .steps.roadmap_refresh.artifacts.report_md == $roadmap_report_md
+  and .artifacts.missing_metrics_checklist_json == $missing_checklist_json
+  and .artifacts.missing_metrics_checklist_md == $missing_checklist_md
+  and .artifacts.roadmap_summary_json == $roadmap_summary_json
+  and .artifacts.roadmap_report_md == $roadmap_report_md
+  ' "$INVALID_GENERATED_AT_SUMMARY_JSON" >/dev/null; then
+  echo "invalid generated_at summary contract mismatch"
+  cat "$INVALID_GENERATED_AT_SUMMARY_JSON"
+  cat "$INVALID_GENERATED_AT_LOG"
+  exit 1
+fi
+
+echo "[blockchain-mainnet-activation-gate-cycle] runtime failure still surfaces enabled checklist artifact paths"
+: >"$CAPTURE"
+set +e
+BLOCKCHAIN_MAINNET_ACTIVATION_GATE_CYCLE_FAKE_METRICS_INPUT_RC=9 \
+run_cycle \
+  --input-json "$PASS_INPUT_JSON" \
+  --reports-dir "$RUNTIME_FAIL_REPORTS_DIR" \
+  --summary-json "$RUNTIME_FAIL_SUMMARY_JSON" \
+  --canonical-summary-json "$RUNTIME_FAIL_CANONICAL_SUMMARY_JSON" \
+  --print-summary-json 0 >"$RUNTIME_FAIL_LOG" 2>&1
+runtime_fail_rc=$?
+set -e
+if [[ "$runtime_fail_rc" -ne 9 ]]; then
+  echo "expected metrics-input runtime failure path to return rc=9"
+  cat "$RUNTIME_FAIL_LOG"
+  exit 1
+fi
+
+RUNTIME_FAIL_METRICS_INPUT_SUMMARY_JSON="$RUNTIME_FAIL_REPORTS_DIR/blockchain_mainnet_activation_metrics_input_summary.json"
+RUNTIME_FAIL_METRICS_INPUT_CANONICAL_JSON="$RUNTIME_FAIL_REPORTS_DIR/blockchain_mainnet_activation_metrics_input.json"
+RUNTIME_FAIL_MISSING_CHECKLIST_JSON="$RUNTIME_FAIL_REPORTS_DIR/blockchain_mainnet_activation_metrics_missing_checklist.json"
+RUNTIME_FAIL_MISSING_CHECKLIST_MD="$RUNTIME_FAIL_REPORTS_DIR/blockchain_mainnet_activation_metrics_missing_checklist.md"
+RUNTIME_FAIL_ROADMAP_SUMMARY_JSON="$RUNTIME_FAIL_REPORTS_DIR/roadmap_progress_summary.json"
+RUNTIME_FAIL_ROADMAP_REPORT_MD="$RUNTIME_FAIL_REPORTS_DIR/roadmap_progress_report.md"
+
+assert_stage_order "$CAPTURE" "metrics_input"
+assert_stage_invocation_contains "$CAPTURE" "metrics_input" \
+  "--input-json" "$PASS_INPUT_JSON" \
+  "--summary-json" "$RUNTIME_FAIL_METRICS_INPUT_SUMMARY_JSON" \
+  "--canonical-summary-json" "$RUNTIME_FAIL_METRICS_INPUT_CANONICAL_JSON"
+if grep -Fq "gate_bundle" "$CAPTURE"; then
+  echo "gate_bundle stage should not run after metrics_input runtime failure"
+  cat "$CAPTURE"
+  exit 1
+fi
+if grep -Fq "missing_metrics_checklist" "$CAPTURE"; then
+  echo "missing_metrics_checklist stage should not run after metrics_input runtime failure"
+  cat "$CAPTURE"
+  exit 1
+fi
+if grep -Fq "roadmap_refresh" "$CAPTURE"; then
+  echo "roadmap_refresh stage should not run after metrics_input runtime failure"
+  cat "$CAPTURE"
+  exit 1
+fi
+
+if [[ ! -f "$RUNTIME_FAIL_SUMMARY_JSON" || ! -f "$RUNTIME_FAIL_CANONICAL_SUMMARY_JSON" ]]; then
+  echo "runtime-fail path missing summary artifacts"
+  ls -la "$TMP_DIR"
+  cat "$RUNTIME_FAIL_LOG"
+  exit 1
+fi
+if ! cmp -s "$RUNTIME_FAIL_SUMMARY_JSON" "$RUNTIME_FAIL_CANONICAL_SUMMARY_JSON"; then
+  echo "runtime-fail canonical summary mismatch"
+  cat "$RUNTIME_FAIL_SUMMARY_JSON"
+  cat "$RUNTIME_FAIL_CANONICAL_SUMMARY_JSON"
+  exit 1
+fi
+
+if [[ -f "$RUNTIME_FAIL_MISSING_CHECKLIST_JSON" || -f "$RUNTIME_FAIL_MISSING_CHECKLIST_MD" || -f "$RUNTIME_FAIL_ROADMAP_SUMMARY_JSON" || -f "$RUNTIME_FAIL_ROADMAP_REPORT_MD" ]]; then
+  echo "runtime-fail path should skip checklist/roadmap artifact generation"
+  ls -la "$RUNTIME_FAIL_REPORTS_DIR"
+  cat "$RUNTIME_FAIL_LOG"
+  exit 1
+fi
+
+if ! jq -e \
+  --arg input_json "$PASS_INPUT_JSON" \
+  --arg missing_checklist_json "$RUNTIME_FAIL_MISSING_CHECKLIST_JSON" \
+  --arg missing_checklist_md "$RUNTIME_FAIL_MISSING_CHECKLIST_MD" \
+  --arg roadmap_summary_json "$RUNTIME_FAIL_ROADMAP_SUMMARY_JSON" \
+  --arg roadmap_report_md "$RUNTIME_FAIL_ROADMAP_REPORT_MD" \
+  '
+  .status == "runtime-fail"
+  and .rc == 9
+  and .decision == "UNKNOWN"
+  and .first_runtime_failure.step == "metrics_input"
+  and .first_runtime_failure.rc == 9
+  and .inputs.input_json == $input_json
+  and .inputs.seed_example_input == false
+  and .inputs.emit_missing_checklist == true
+  and .inputs.refresh_roadmap == true
+  and .steps.metrics_input_template.enabled == false
+  and .steps.metrics_input_template.status == "skipped"
+  and .steps.metrics_input.status == "fail"
+  and .steps.metrics_input.rc == 9
+  and .steps.gate_bundle.status == "skipped"
+  and .steps.gate_bundle.decision == null
+  and (.steps.gate_bundle.missing_required_metrics | length) == 0
+  and .steps.missing_metrics_checklist.enabled == true
+  and .steps.missing_metrics_checklist.status == "skipped"
+  and .steps.missing_metrics_checklist.rc == 0
+  and .steps.missing_metrics_checklist.checklist_status == null
+  and .steps.missing_metrics_checklist.missing_count == 0
+  and (.steps.missing_metrics_checklist.missing_keys | length) == 0
+  and .steps.missing_metrics_checklist.artifacts.checklist_json == $missing_checklist_json
+  and .steps.missing_metrics_checklist.artifacts.checklist_md == $missing_checklist_md
+  and .steps.roadmap_refresh.enabled == true
+  and .steps.roadmap_refresh.status == "skipped"
+  and .steps.roadmap_refresh.rc == 0
+  and .steps.roadmap_refresh.artifacts.summary_json == $roadmap_summary_json
+  and .steps.roadmap_refresh.artifacts.report_md == $roadmap_report_md
+  and .artifacts.missing_metrics_checklist_json == $missing_checklist_json
+  and .artifacts.missing_metrics_checklist_md == $missing_checklist_md
+  and .artifacts.roadmap_summary_json == $roadmap_summary_json
+  and .artifacts.roadmap_report_md == $roadmap_report_md
+  ' "$RUNTIME_FAIL_SUMMARY_JSON" >/dev/null; then
+  echo "runtime-fail summary contract mismatch"
+  cat "$RUNTIME_FAIL_SUMMARY_JSON"
+  cat "$RUNTIME_FAIL_LOG"
   exit 1
 fi
 
@@ -821,6 +1067,8 @@ if ! cmp -s "$SEED_SUMMARY_JSON" "$SEED_CANONICAL_SUMMARY_JSON"; then
   cat "$SEED_CANONICAL_SUMMARY_JSON"
   exit 1
 fi
+assert_nonempty_iso_utc_generated_at "$SEED_BUNDLE_ACTIVATION_SUMMARY_JSON" "seed activation gate summary"
+assert_nonempty_iso_utc_generated_at "$SEED_BUNDLE_BOOTSTRAP_SUMMARY_JSON" "seed bootstrap gate summary"
 if ! jq -e \
   --arg reports_dir "$SEED_REPORTS_DIR" \
   --arg seeded_input_json "$SEED_INPUT_JSON" \
@@ -841,6 +1089,12 @@ if ! jq -e \
   and .steps.metrics_input_template.artifacts.seeded_input_json == $seeded_input_json
   and .steps.metrics_input.status == "pass"
   and .steps.gate_bundle.status == "pass"
+  and .steps.gate_bundle.gate_summary_generated_at_contract.status == "pass"
+  and .steps.gate_bundle.gate_summary_generated_at_contract.requires_nonempty_iso_utc == true
+  and (.steps.gate_bundle.activation_summary_generated_at | type == "string")
+  and (.steps.gate_bundle.activation_summary_generated_at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))
+  and (.steps.gate_bundle.bootstrap_summary_generated_at | type == "string")
+  and (.steps.gate_bundle.bootstrap_summary_generated_at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))
   and .steps.missing_metrics_checklist.status == "pass"
   and .steps.missing_metrics_checklist.checklist_status == "complete"
   and .steps.missing_metrics_checklist.artifacts.checklist_json == $missing_checklist_json
@@ -903,11 +1157,22 @@ if grep -Fq "roadmap_refresh" "$CAPTURE"; then
   exit 1
 fi
 
+TOGGLE_BUNDLE_ACTIVATION_SUMMARY_JSON="$TOGGLE_REPORTS_DIR/blockchain_mainnet_activation_gate_summary.json"
+TOGGLE_BUNDLE_BOOTSTRAP_SUMMARY_JSON="$TOGGLE_REPORTS_DIR/blockchain_bootstrap_governance_graduation_gate_summary.json"
+assert_nonempty_iso_utc_generated_at "$TOGGLE_BUNDLE_ACTIVATION_SUMMARY_JSON" "toggle activation gate summary"
+assert_nonempty_iso_utc_generated_at "$TOGGLE_BUNDLE_BOOTSTRAP_SUMMARY_JSON" "toggle bootstrap gate summary"
+
 if ! jq -e '
   .status == "pass"
   and .rc == 0
   and .inputs.refresh_roadmap == false
   and .inputs.emit_missing_checklist == true
+  and .steps.gate_bundle.gate_summary_generated_at_contract.status == "pass"
+  and .steps.gate_bundle.gate_summary_generated_at_contract.requires_nonempty_iso_utc == true
+  and (.steps.gate_bundle.activation_summary_generated_at | type == "string")
+  and (.steps.gate_bundle.activation_summary_generated_at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))
+  and (.steps.gate_bundle.bootstrap_summary_generated_at | type == "string")
+  and (.steps.gate_bundle.bootstrap_summary_generated_at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))
   and .steps.missing_metrics_checklist.enabled == true
   and .steps.missing_metrics_checklist.status == "pass"
   and .steps.missing_metrics_checklist.checklist_status == "complete"

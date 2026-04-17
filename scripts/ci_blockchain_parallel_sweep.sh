@@ -109,13 +109,18 @@ bash scripts/integration_cosmos_adapter_tdpnd_signed_tx_roundtrip.sh"
 
 default_lane_phase_cmd="\
 bash scripts/check_roadmap_consistency.sh && \
+bash scripts/integration_ci_blockchain_parallel_sweep.sh && \
 bash scripts/integration_roadmap_consistency.sh && \
 bash scripts/integration_roadmap_progress_report.sh && \
+bash scripts/integration_roadmap_progress_phase5_handoff.sh && \
 bash scripts/integration_roadmap_blockchain_actionable_run.sh && \
 bash scripts/integration_easy_node_roadmap_blockchain_actionable_run.sh && \
 bash scripts/integration_blockchain_bootstrap_graduation_gate.sh && \
+bash scripts/integration_blockchain_cosmos_only_guardrail.sh && \
+bash scripts/integration_easy_node_blockchain_cosmos_only_guardrail.sh && \
 bash scripts/integration_blockchain_mainnet_activation_metrics_input_template.sh && \
 bash scripts/integration_blockchain_mainnet_activation_metrics_missing_input_template.sh && \
+bash scripts/integration_blockchain_mainnet_activation_metrics_prefill.sh && \
 bash scripts/integration_blockchain_mainnet_activation_metrics_missing_checklist.sh && \
 bash scripts/integration_blockchain_mainnet_activation_operator_pack.sh && \
 bash scripts/integration_blockchain_mainnet_activation_metrics_input.sh && \
@@ -123,6 +128,9 @@ bash scripts/integration_blockchain_mainnet_activation_metrics.sh && \
 bash scripts/integration_blockchain_mainnet_activation_gate.sh && \
 bash scripts/integration_blockchain_gate_bundle.sh && \
 bash scripts/integration_blockchain_mainnet_activation_gate_cycle.sh && \
+bash scripts/integration_blockchain_mainnet_activation_real_evidence_run.sh && \
+bash scripts/integration_blockchain_staged_file_groups.sh && \
+bash scripts/integration_easy_node_blockchain_staged_file_groups.sh && \
 bash scripts/integration_blockchain_fastlane.sh && \
 bash scripts/integration_easy_node_blockchain_fastlane_cohort_quick_check_shim.sh && \
 bash scripts/integration_easy_node_blockchain_gate_wrappers.sh && \
@@ -136,6 +144,7 @@ bash scripts/integration_phase5_settlement_layer_summary_report.sh && \
 bash scripts/integration_ci_phase6_cosmos_l1_build_testnet.sh && \
 bash scripts/integration_ci_phase6_cosmos_l1_contracts.sh && \
 bash scripts/integration_slash_violation_type_contract_consistency.sh && \
+bash scripts/integration_cosmos_record_normalization_contract_consistency.sh && \
 bash scripts/integration_phase6_cosmos_l1_build_testnet_check.sh && \
 bash scripts/integration_phase6_cosmos_l1_build_testnet_run.sh && \
 bash scripts/integration_phase6_cosmos_l1_build_testnet_handoff_check.sh && \

@@ -12,6 +12,7 @@ Usage:
     [--phase6-summary-json PATH] \
     [--phase6-contracts-summary-json PATH] \
     [--mainnet-activation-gate-summary-json PATH] \
+    [--bootstrap-governance-graduation-gate-summary-json PATH] \
     [--rollback-path-ready [0|1]] \
     [--operator-approval-ok [0|1]] \
     [--require-run-pipeline-ok [0|1]] \
@@ -25,6 +26,7 @@ Usage:
     [--require-cosmos-keeper-coverage-floor-ok [0|1]] \
     [--require-cosmos-app-coverage-floor-ok [0|1]] \
     [--require-mainnet-activation-gate-go [0|1]] \
+    [--require-bootstrap-governance-graduation-gate-go [0|1]] \
     [--require-rollback-path-ready [0|1]] \
     [--require-operator-approval-ok [0|1]] \
     [--summary-json PATH] \
@@ -47,6 +49,7 @@ Resolved signals:
   - cosmos_keeper_coverage_floor_ok (contracts summary; fallback stage/step: phase6_cosmos_keeper_coverage_floor)
   - cosmos_app_coverage_floor_ok (contracts summary; fallback stage/step: phase6_cosmos_app_coverage_floor)
   - mainnet_activation_gate_go (activation gate summary; fallback order: .go boolean, .decision GO/NO-GO, .status go/no-go/pass/fail)
+  - bootstrap_governance_graduation_gate_go (bootstrap governance graduation gate summary; fallback order: .go boolean, .decision GO/NO-GO, .status go/no-go/pass/fail)
   - rollback_path_ready (manual)
   - operator_approval_ok (manual)
 
@@ -56,6 +59,7 @@ Notes:
   - Required toggles default to 1, except:
       require_tdpnd_comet_runtime_smoke_ok=0
       require_mainnet_activation_gate_go=0
+      require_bootstrap_governance_graduation_gate_go=0
       require_operator_approval_ok=0
 USAGE
 }
@@ -269,6 +273,7 @@ need_cmd mktemp
 phase6_handoff_summary_json="${PHASE7_MAINNET_CUTOVER_CHECK_PHASE6_HANDOFF_SUMMARY_JSON:-${PHASE7_MAINNET_CUTOVER_CHECK_PHASE6_SUMMARY_JSON:-$ROOT_DIR/.easy-node-logs/phase6_cosmos_l1_build_testnet_handoff_check_summary.json}}"
 phase6_contracts_summary_json="${PHASE7_MAINNET_CUTOVER_CHECK_PHASE6_CONTRACTS_SUMMARY_JSON:-}"
 mainnet_activation_gate_summary_json="${PHASE7_MAINNET_CUTOVER_CHECK_MAINNET_ACTIVATION_GATE_SUMMARY_JSON:-}"
+bootstrap_governance_graduation_gate_summary_json="${PHASE7_MAINNET_CUTOVER_CHECK_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_SUMMARY_JSON:-}"
 rollback_path_ready="${PHASE7_MAINNET_CUTOVER_CHECK_ROLLBACK_PATH_READY:-}"
 operator_approval_ok="${PHASE7_MAINNET_CUTOVER_CHECK_OPERATOR_APPROVAL_OK:-}"
 summary_json="${PHASE7_MAINNET_CUTOVER_CHECK_SUMMARY_JSON:-$ROOT_DIR/.easy-node-logs/phase7_mainnet_cutover_check_summary.json}"
@@ -286,6 +291,7 @@ require_cosmos_module_coverage_floor_ok="${PHASE7_MAINNET_CUTOVER_CHECK_REQUIRE_
 require_cosmos_keeper_coverage_floor_ok="${PHASE7_MAINNET_CUTOVER_CHECK_REQUIRE_COSMOS_KEEPER_COVERAGE_FLOOR_OK:-1}"
 require_cosmos_app_coverage_floor_ok="${PHASE7_MAINNET_CUTOVER_CHECK_REQUIRE_COSMOS_APP_COVERAGE_FLOOR_OK:-1}"
 require_mainnet_activation_gate_go="${PHASE7_MAINNET_CUTOVER_CHECK_REQUIRE_MAINNET_ACTIVATION_GATE_GO:-0}"
+require_bootstrap_governance_graduation_gate_go="${PHASE7_MAINNET_CUTOVER_CHECK_REQUIRE_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_GO:-0}"
 require_rollback_path_ready="${PHASE7_MAINNET_CUTOVER_CHECK_REQUIRE_ROLLBACK_PATH_READY:-1}"
 require_operator_approval_ok="${PHASE7_MAINNET_CUTOVER_CHECK_REQUIRE_OPERATOR_APPROVAL_OK:-0}"
 
@@ -301,6 +307,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --mainnet-activation-gate-summary-json)
       mainnet_activation_gate_summary_json="${2:-}"
+      shift 2
+      ;;
+    --bootstrap-governance-graduation-gate-summary-json)
+      bootstrap_governance_graduation_gate_summary_json="${2:-}"
       shift 2
       ;;
     --rollback-path-ready)
@@ -420,6 +430,15 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --require-bootstrap-governance-graduation-gate-go)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_bootstrap_governance_graduation_gate_go="${2:-}"
+        shift 2
+      else
+        require_bootstrap_governance_graduation_gate_go="1"
+        shift
+      fi
+      ;;
     --require-rollback-path-ready)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         require_rollback_path_ready="${2:-}"
@@ -492,6 +511,7 @@ bool_arg_or_die "--require-cosmos-module-coverage-floor-ok" "$require_cosmos_mod
 bool_arg_or_die "--require-cosmos-keeper-coverage-floor-ok" "$require_cosmos_keeper_coverage_floor_ok"
 bool_arg_or_die "--require-cosmos-app-coverage-floor-ok" "$require_cosmos_app_coverage_floor_ok"
 bool_arg_or_die "--require-mainnet-activation-gate-go" "$require_mainnet_activation_gate_go"
+bool_arg_or_die "--require-bootstrap-governance-graduation-gate-go" "$require_bootstrap_governance_graduation_gate_go"
 bool_arg_or_die "--require-rollback-path-ready" "$require_rollback_path_ready"
 bool_arg_or_die "--require-operator-approval-ok" "$require_operator_approval_ok"
 optional_bool_arg_or_die "--rollback-path-ready" "$rollback_path_ready"
@@ -501,6 +521,7 @@ bool_arg_or_die "--show-json" "$show_json"
 phase6_handoff_summary_json="$(abs_path "$phase6_handoff_summary_json")"
 phase6_contracts_summary_json="$(abs_path "$phase6_contracts_summary_json")"
 mainnet_activation_gate_summary_json="$(abs_path "$mainnet_activation_gate_summary_json")"
+bootstrap_governance_graduation_gate_summary_json="$(abs_path "$bootstrap_governance_graduation_gate_summary_json")"
 summary_json="$(abs_path "$summary_json")"
 canonical_summary_json="$(abs_path "$canonical_summary_json")"
 mkdir -p "$(dirname "$summary_json")"
@@ -518,10 +539,15 @@ mainnet_activation_gate_summary_provided="0"
 if [[ -n "$mainnet_activation_gate_summary_json" ]]; then
   mainnet_activation_gate_summary_provided="1"
 fi
+bootstrap_governance_graduation_gate_summary_provided="0"
+if [[ -n "$bootstrap_governance_graduation_gate_summary_json" ]]; then
+  bootstrap_governance_graduation_gate_summary_provided="1"
+fi
 
 phase6_handoff_summary_usable="$(json_file_valid_01 "$phase6_handoff_summary_json")"
 phase6_contracts_summary_usable="$(json_file_valid_01 "$phase6_contracts_summary_json")"
 mainnet_activation_gate_summary_usable="$(json_file_valid_01 "$mainnet_activation_gate_summary_json")"
+bootstrap_governance_graduation_gate_summary_usable="$(json_file_valid_01 "$bootstrap_governance_graduation_gate_summary_json")"
 
 generated_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 declare -a reasons=()
@@ -535,6 +561,9 @@ fi
 if [[ "$mainnet_activation_gate_summary_provided" == "1" && "$mainnet_activation_gate_summary_usable" != "1" ]]; then
   reasons+=("mainnet activation gate summary file not found or invalid JSON: $mainnet_activation_gate_summary_json")
 fi
+if [[ "$bootstrap_governance_graduation_gate_summary_provided" == "1" && "$bootstrap_governance_graduation_gate_summary_usable" != "1" ]]; then
+  reasons+=("bootstrap governance graduation gate summary file not found or invalid JSON: $bootstrap_governance_graduation_gate_summary_json")
+fi
 
 run_pipeline_pair="$(resolve_summary_bool "$phase6_handoff_summary_json" "run_pipeline_ok" "run_pipeline" "phase6_handoff_summary_json")"
 module_tx_surface_pair="$(resolve_summary_bool "$phase6_handoff_summary_json" "module_tx_surface_ok" "module_tx_surface" "phase6_handoff_summary_json")"
@@ -547,6 +576,7 @@ cosmos_module_coverage_floor_pair="$(resolve_summary_bool "$phase6_contracts_sum
 cosmos_keeper_coverage_floor_pair="$(resolve_summary_bool "$phase6_contracts_summary_json" "cosmos_keeper_coverage_floor_ok" "phase6_cosmos_keeper_coverage_floor" "phase6_contracts_summary_json")"
 cosmos_app_coverage_floor_pair="$(resolve_summary_bool "$phase6_contracts_summary_json" "cosmos_app_coverage_floor_ok" "phase6_cosmos_app_coverage_floor" "phase6_contracts_summary_json")"
 mainnet_activation_gate_go_pair="$(resolve_mainnet_activation_gate_go_pair "$mainnet_activation_gate_summary_json" "mainnet_activation_gate_summary_json")"
+bootstrap_governance_graduation_gate_go_pair="$(resolve_mainnet_activation_gate_go_pair "$bootstrap_governance_graduation_gate_summary_json" "bootstrap_governance_graduation_gate_summary_json")"
 rollback_path_ready_pair="$(resolve_manual_bool "$rollback_path_ready")"
 operator_approval_pair="$(resolve_manual_bool "$operator_approval_ok")"
 
@@ -594,6 +624,10 @@ mainnet_activation_gate_go="${mainnet_activation_gate_go_pair%%|*}"; mainnet_act
 mainnet_activation_gate_go_status="${mainnet_activation_gate_go_pair%%|*}"; mainnet_activation_gate_go_pair="${mainnet_activation_gate_go_pair#*|}"
 mainnet_activation_gate_go_resolved="${mainnet_activation_gate_go_pair%%|*}"; mainnet_activation_gate_go_source="${mainnet_activation_gate_go_pair##*|}"
 
+bootstrap_governance_graduation_gate_go="${bootstrap_governance_graduation_gate_go_pair%%|*}"; bootstrap_governance_graduation_gate_go_pair="${bootstrap_governance_graduation_gate_go_pair#*|}"
+bootstrap_governance_graduation_gate_go_status="${bootstrap_governance_graduation_gate_go_pair%%|*}"; bootstrap_governance_graduation_gate_go_pair="${bootstrap_governance_graduation_gate_go_pair#*|}"
+bootstrap_governance_graduation_gate_go_resolved="${bootstrap_governance_graduation_gate_go_pair%%|*}"; bootstrap_governance_graduation_gate_go_source="${bootstrap_governance_graduation_gate_go_pair##*|}"
+
 rollback_path_ready_value="${rollback_path_ready_pair%%|*}"; rollback_path_ready_pair="${rollback_path_ready_pair#*|}"
 rollback_path_ready_status="${rollback_path_ready_pair%%|*}"; rollback_path_ready_pair="${rollback_path_ready_pair#*|}"
 rollback_path_ready_resolved="${rollback_path_ready_pair%%|*}"; rollback_path_ready_source="${rollback_path_ready_pair##*|}"
@@ -613,6 +647,7 @@ check_required_signal "$require_cosmos_module_coverage_floor_ok" "$cosmos_module
 check_required_signal "$require_cosmos_keeper_coverage_floor_ok" "$cosmos_keeper_coverage_floor_ok" "$cosmos_keeper_coverage_floor_status" "cosmos_keeper_coverage_floor_ok" reasons
 check_required_signal "$require_cosmos_app_coverage_floor_ok" "$cosmos_app_coverage_floor_ok" "$cosmos_app_coverage_floor_status" "cosmos_app_coverage_floor_ok" reasons
 check_required_signal "$require_mainnet_activation_gate_go" "$mainnet_activation_gate_go" "$mainnet_activation_gate_go_status" "mainnet_activation_gate_go" reasons
+check_required_signal "$require_bootstrap_governance_graduation_gate_go" "$bootstrap_governance_graduation_gate_go" "$bootstrap_governance_graduation_gate_go_status" "bootstrap_governance_graduation_gate_go" reasons
 check_required_signal "$require_rollback_path_ready" "$rollback_path_ready_value" "$rollback_path_ready_status" "rollback_path_ready" reasons
 check_required_signal "$require_operator_approval_ok" "$operator_approval_value" "$operator_approval_status" "operator_approval_ok" reasons
 
@@ -636,15 +671,18 @@ jq -n \
   --arg phase6_handoff_summary_json "$phase6_handoff_summary_json" \
   --arg phase6_contracts_summary_json "$phase6_contracts_summary_json" \
   --arg mainnet_activation_gate_summary_json "$mainnet_activation_gate_summary_json" \
+  --arg bootstrap_governance_graduation_gate_summary_json "$bootstrap_governance_graduation_gate_summary_json" \
   --arg summary_json "$summary_json" \
   --arg canonical_summary_json "$canonical_summary_json" \
   --arg show_json "$show_json" \
   --argjson phase6_handoff_summary_provided "$phase6_handoff_summary_provided" \
   --argjson phase6_contracts_summary_provided "$phase6_contracts_summary_provided" \
   --argjson mainnet_activation_gate_summary_provided "$mainnet_activation_gate_summary_provided" \
+  --argjson bootstrap_governance_graduation_gate_summary_provided "$bootstrap_governance_graduation_gate_summary_provided" \
   --argjson phase6_handoff_summary_usable "$phase6_handoff_summary_usable" \
   --argjson phase6_contracts_summary_usable "$phase6_contracts_summary_usable" \
   --argjson mainnet_activation_gate_summary_usable "$mainnet_activation_gate_summary_usable" \
+  --argjson bootstrap_governance_graduation_gate_summary_usable "$bootstrap_governance_graduation_gate_summary_usable" \
   --argjson require_run_pipeline_ok "$require_run_pipeline_ok" \
   --argjson require_module_tx_surface_ok "$require_module_tx_surface_ok" \
   --argjson require_tdpnd_grpc_runtime_smoke_ok "$require_tdpnd_grpc_runtime_smoke_ok" \
@@ -656,6 +694,7 @@ jq -n \
   --argjson require_cosmos_keeper_coverage_floor_ok "$require_cosmos_keeper_coverage_floor_ok" \
   --argjson require_cosmos_app_coverage_floor_ok "$require_cosmos_app_coverage_floor_ok" \
   --argjson require_mainnet_activation_gate_go "$require_mainnet_activation_gate_go" \
+  --argjson require_bootstrap_governance_graduation_gate_go "$require_bootstrap_governance_graduation_gate_go" \
   --argjson require_rollback_path_ready "$require_rollback_path_ready" \
   --argjson require_operator_approval_ok "$require_operator_approval_ok" \
   --argjson run_pipeline_ok "$run_pipeline_ok" \
@@ -669,6 +708,7 @@ jq -n \
   --argjson cosmos_keeper_coverage_floor_ok "$cosmos_keeper_coverage_floor_ok" \
   --argjson cosmos_app_coverage_floor_ok "$cosmos_app_coverage_floor_ok" \
   --argjson mainnet_activation_gate_go "$mainnet_activation_gate_go" \
+  --argjson bootstrap_governance_graduation_gate_go "$bootstrap_governance_graduation_gate_go" \
   --argjson rollback_path_ready "$rollback_path_ready_value" \
   --argjson operator_approval_ok "$operator_approval_value" \
   --arg run_pipeline_status "$run_pipeline_status" \
@@ -682,6 +722,7 @@ jq -n \
   --arg cosmos_keeper_coverage_floor_status "$cosmos_keeper_coverage_floor_status" \
   --arg cosmos_app_coverage_floor_status "$cosmos_app_coverage_floor_status" \
   --arg mainnet_activation_gate_go_status "$mainnet_activation_gate_go_status" \
+  --arg bootstrap_governance_graduation_gate_go_status "$bootstrap_governance_graduation_gate_go_status" \
   --arg rollback_path_ready_status "$rollback_path_ready_status" \
   --arg operator_approval_status "$operator_approval_status" \
   --argjson run_pipeline_resolved "$run_pipeline_resolved" \
@@ -695,6 +736,7 @@ jq -n \
   --argjson cosmos_keeper_coverage_floor_resolved "$cosmos_keeper_coverage_floor_resolved" \
   --argjson cosmos_app_coverage_floor_resolved "$cosmos_app_coverage_floor_resolved" \
   --argjson mainnet_activation_gate_go_resolved "$mainnet_activation_gate_go_resolved" \
+  --argjson bootstrap_governance_graduation_gate_go_resolved "$bootstrap_governance_graduation_gate_go_resolved" \
   --argjson rollback_path_ready_resolved "$rollback_path_ready_resolved" \
   --argjson operator_approval_resolved "$operator_approval_resolved" \
   --arg run_pipeline_source "$run_pipeline_source" \
@@ -708,6 +750,7 @@ jq -n \
   --arg cosmos_keeper_coverage_floor_source "$cosmos_keeper_coverage_floor_source" \
   --arg cosmos_app_coverage_floor_source "$cosmos_app_coverage_floor_source" \
   --arg mainnet_activation_gate_go_source "$mainnet_activation_gate_go_source" \
+  --arg bootstrap_governance_graduation_gate_go_source "$bootstrap_governance_graduation_gate_go_source" \
   --arg rollback_path_ready_source "$rollback_path_ready_source" \
   --arg operator_approval_source "$operator_approval_source" \
   --argjson reasons "$reasons_json" \
@@ -730,17 +773,20 @@ jq -n \
       phase6_handoff_summary_json: (if $phase6_handoff_summary_json == "" then null else $phase6_handoff_summary_json end),
       phase6_contracts_summary_json: (if $phase6_contracts_summary_json == "" then null else $phase6_contracts_summary_json end),
       mainnet_activation_gate_summary_json: (if $mainnet_activation_gate_summary_json == "" then null else $mainnet_activation_gate_summary_json end),
+      bootstrap_governance_graduation_gate_summary_json: (if $bootstrap_governance_graduation_gate_summary_json == "" then null else $bootstrap_governance_graduation_gate_summary_json end),
       summary_json: $summary_json,
       show_json: ($show_json == "1"),
       provided: {
         phase6_handoff_summary_json: ($phase6_handoff_summary_provided == 1),
         phase6_contracts_summary_json: ($phase6_contracts_summary_provided == 1),
-        mainnet_activation_gate_summary_json: ($mainnet_activation_gate_summary_provided == 1)
+        mainnet_activation_gate_summary_json: ($mainnet_activation_gate_summary_provided == 1),
+        bootstrap_governance_graduation_gate_summary_json: ($bootstrap_governance_graduation_gate_summary_provided == 1)
       },
       usable: {
         phase6_handoff_summary_json: ($phase6_handoff_summary_usable == 1),
         phase6_contracts_summary_json: ($phase6_contracts_summary_usable == 1),
-        mainnet_activation_gate_summary_json: ($mainnet_activation_gate_summary_usable == 1)
+        mainnet_activation_gate_summary_json: ($mainnet_activation_gate_summary_usable == 1),
+        bootstrap_governance_graduation_gate_summary_json: ($bootstrap_governance_graduation_gate_summary_usable == 1)
       }
     },
     policy: {
@@ -755,6 +801,7 @@ jq -n \
       require_cosmos_keeper_coverage_floor_ok: ($require_cosmos_keeper_coverage_floor_ok == 1),
       require_cosmos_app_coverage_floor_ok: ($require_cosmos_app_coverage_floor_ok == 1),
       require_mainnet_activation_gate_go: ($require_mainnet_activation_gate_go == 1),
+      require_bootstrap_governance_graduation_gate_go: ($require_bootstrap_governance_graduation_gate_go == 1),
       require_rollback_path_ready: ($require_rollback_path_ready == 1),
       require_operator_approval_ok: ($require_operator_approval_ok == 1)
     },
@@ -770,6 +817,7 @@ jq -n \
       cosmos_keeper_coverage_floor_ok: $cosmos_keeper_coverage_floor_ok,
       cosmos_app_coverage_floor_ok: $cosmos_app_coverage_floor_ok,
       mainnet_activation_gate_go: $mainnet_activation_gate_go,
+      bootstrap_governance_graduation_gate_go: $bootstrap_governance_graduation_gate_go,
       rollback_path_ready: $rollback_path_ready,
       operator_approval_ok: $operator_approval_ok
     },
@@ -850,6 +898,13 @@ jq -n \
         resolved: ($mainnet_activation_gate_go_resolved == 1),
         ok: $mainnet_activation_gate_go,
         source: $mainnet_activation_gate_go_source
+      },
+      bootstrap_governance_graduation_gate: {
+        enabled: ($require_bootstrap_governance_graduation_gate_go == 1),
+        status: $bootstrap_governance_graduation_gate_go_status,
+        resolved: ($bootstrap_governance_graduation_gate_go_resolved == 1),
+        ok: $bootstrap_governance_graduation_gate_go,
+        source: $bootstrap_governance_graduation_gate_go_source
       },
       rollback_path_ready: {
         enabled: ($require_rollback_path_ready == 1),

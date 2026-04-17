@@ -28,6 +28,8 @@ Notes:
   - Wrapper-owned flags are reserved; stage pass-through uses prefixes:
       --run-...      -> forwarded to phase7_mainnet_cutover_run.sh
       --handoff-...  -> forwarded to phase7_mainnet_cutover_handoff_check.sh
+  - This wrapper defaults handoff summary-report enforcement to 0 unless
+    explicitly supplied via --handoff-require-summary-report-ok.
   - Dry-run forwards --dry-run 1 to the run stage.
     The handoff check still executes against generated summaries.
   - Dry-run relaxes handoff requirements to 0 unless explicitly supplied:
@@ -450,6 +452,9 @@ fi
 if ! array_has_arg "--show-json" "${handoff_cmd[@]:1}"; then
   handoff_cmd+=(--show-json 0)
 fi
+if ! array_has_arg "--require-summary-report-ok" "${handoff_cmd[@]:1}"; then
+  handoff_cmd+=(--require-summary-report-ok 0)
+fi
 if [[ "$dry_run" == "1" ]]; then
   if ! array_has_arg "--require-run-pipeline-ok" "${handoff_cmd[@]:1}"; then
     handoff_cmd+=(--require-run-pipeline-ok 0)
@@ -471,6 +476,9 @@ if [[ "$dry_run" == "1" ]]; then
   fi
   if ! array_has_arg "--require-mainnet-activation-gate-go" "${handoff_cmd[@]:1}"; then
     handoff_cmd+=(--require-mainnet-activation-gate-go 0)
+  fi
+  if ! array_has_arg "--require-bootstrap-governance-graduation-gate-go" "${handoff_cmd[@]:1}"; then
+    handoff_cmd+=(--require-bootstrap-governance-graduation-gate-go 0)
   fi
   if ! array_has_arg "--require-dual-write-parity-ok" "${handoff_cmd[@]:1}"; then
     handoff_cmd+=(--require-dual-write-parity-ok 0)
@@ -549,6 +557,7 @@ signal_tdpnd_grpc_live_smoke_ok="null"
 signal_tdpnd_grpc_auth_live_smoke_ok="null"
 signal_tdpnd_comet_runtime_smoke_ok="null"
 signal_mainnet_activation_gate_go="null"
+signal_bootstrap_governance_graduation_gate_go="null"
 signal_dual_write_parity_ok="null"
 signal_cosmos_module_coverage_floor_ok="null"
 signal_cosmos_keeper_coverage_floor_ok="null"
@@ -561,6 +570,7 @@ if [[ "$handoff_contract_valid" == "1" ]]; then
   signal_tdpnd_grpc_auth_live_smoke_ok="$(extract_handoff_signal_json "$handoff_summary_json" "tdpnd_grpc_auth_live_smoke_ok")"
   signal_tdpnd_comet_runtime_smoke_ok="$(extract_handoff_signal_json "$handoff_summary_json" "tdpnd_comet_runtime_smoke_ok")"
   signal_mainnet_activation_gate_go="$(extract_handoff_signal_json "$handoff_summary_json" "mainnet_activation_gate_go")"
+  signal_bootstrap_governance_graduation_gate_go="$(extract_handoff_signal_json "$handoff_summary_json" "bootstrap_governance_graduation_gate_go")"
   signal_dual_write_parity_ok="$(extract_handoff_signal_json "$handoff_summary_json" "dual_write_parity_ok")"
   signal_cosmos_module_coverage_floor_ok="$(extract_handoff_signal_json "$handoff_summary_json" "cosmos_module_coverage_floor_ok")"
   signal_cosmos_keeper_coverage_floor_ok="$(extract_handoff_signal_json "$handoff_summary_json" "cosmos_keeper_coverage_floor_ok")"
@@ -610,6 +620,7 @@ jq -n \
   --argjson signal_tdpnd_grpc_auth_live_smoke_ok "$signal_tdpnd_grpc_auth_live_smoke_ok" \
   --argjson signal_tdpnd_comet_runtime_smoke_ok "$signal_tdpnd_comet_runtime_smoke_ok" \
   --argjson signal_mainnet_activation_gate_go "$signal_mainnet_activation_gate_go" \
+  --argjson signal_bootstrap_governance_graduation_gate_go "$signal_bootstrap_governance_graduation_gate_go" \
   --argjson signal_dual_write_parity_ok "$signal_dual_write_parity_ok" \
   --argjson signal_cosmos_module_coverage_floor_ok "$signal_cosmos_module_coverage_floor_ok" \
   --argjson signal_cosmos_keeper_coverage_floor_ok "$signal_cosmos_keeper_coverage_floor_ok" \
@@ -679,6 +690,7 @@ jq -n \
           tdpnd_grpc_auth_live_smoke_ok: $signal_tdpnd_grpc_auth_live_smoke_ok,
           tdpnd_comet_runtime_smoke_ok: $signal_tdpnd_comet_runtime_smoke_ok,
           mainnet_activation_gate_go: $signal_mainnet_activation_gate_go,
+          bootstrap_governance_graduation_gate_go: $signal_bootstrap_governance_graduation_gate_go,
           dual_write_parity_ok: $signal_dual_write_parity_ok,
           cosmos_module_coverage_floor_ok: $signal_cosmos_module_coverage_floor_ok,
           cosmos_keeper_coverage_floor_ok: $signal_cosmos_keeper_coverage_floor_ok,

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -90,6 +91,46 @@ func TestIssueEndpointsValidateProvidedPaymentProofWhenGloballyOptional(t *testi
 			}
 			if !strings.Contains(rr.Body.String(), "payment proof invalid") {
 				t.Fatalf("expected payment proof invalid error, body=%s", rr.Body.String())
+			}
+		})
+	}
+}
+
+func TestHandleSponsorIssueTokenRejectsMalformedJSONShapes(t *testing.T) {
+	s := newSponsorTestService(t)
+	popPubKey := sponsorTestPopPubKey(t)
+
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "unknown field",
+			body: `{"tier":1,"subject":"client-1","token_type":"client_access","pop_pub_key":"` + popPubKey + `","unexpected":"value"}`,
+		},
+		{
+			name: "trailing json",
+			body: `{"tier":1,"subject":"client-1","token_type":"client_access","pop_pub_key":"` + popPubKey + `"} {"jti":"other"}`,
+		},
+		{
+			name: "oversized body",
+			body: `{"tier":1,"subject":"` + strings.Repeat("a", 70*1024) + `","token_type":"client_access","pop_pub_key":"` + popPubKey + `"}`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/v1/sponsor/token", bytes.NewReader([]byte(tc.body)))
+			req.Header.Set("X-Sponsor-Token", "sponsor-secret-token")
+			rr := httptest.NewRecorder()
+
+			s.handleSponsorIssueToken(rr, req)
+
+			if rr.Code != http.StatusBadRequest {
+				t.Fatalf("expected status %d, got %d body=%s", http.StatusBadRequest, rr.Code, rr.Body.String())
+			}
+			if !strings.Contains(rr.Body.String(), "invalid json") {
+				t.Fatalf("expected invalid json error, got body=%s", rr.Body.String())
 			}
 		})
 	}
@@ -247,6 +288,90 @@ func TestSponsorReserveAndIssueTokenFlow(t *testing.T) {
 	}
 	if statusResp.ConsumedAt <= 0 {
 		t.Fatalf("expected consumed reservation after token issuance: %+v", statusResp)
+	}
+}
+
+func TestSponsorReserveDeferredSubmissionStillAllowsPaymentProofTokenIssue(t *testing.T) {
+	s := newSponsorTestService(t)
+	s.settlement = settlement.NewMemoryService(settlement.WithChainAdapter(sponsorReservationFailingChainAdapter{}))
+
+	const reservationID = "sres-deferred-submit-1"
+	const sessionID = "sess-deferred-submit-1"
+	reserveReqBody, _ := json.Marshal(proto.SponsorReserveRequest{
+		ReservationID: reservationID,
+		SponsorID:     "sponsor-1",
+		Subject:       "client-1",
+		SessionID:     sessionID,
+		AmountMicros:  1000,
+	})
+	reserveReq := httptest.NewRequest(http.MethodPost, "/v1/sponsor/reserve", bytes.NewReader(reserveReqBody))
+	reserveReq.Header.Set("X-Sponsor-Token", "sponsor-secret-token")
+	reserveRR := httptest.NewRecorder()
+	s.handleSponsorReserve(reserveRR, reserveReq)
+	if reserveRR.Code != http.StatusOK {
+		t.Fatalf("reserve status=%d body=%s", reserveRR.Code, reserveRR.Body.String())
+	}
+
+	var reserveResp proto.SponsorReserveResponse
+	if err := json.Unmarshal(reserveRR.Body.Bytes(), &reserveResp); err != nil {
+		t.Fatalf("decode reserve response: %v", err)
+	}
+	if !reserveResp.Accepted || reserveResp.ReservationID != reservationID {
+		t.Fatalf("unexpected reserve response: %+v", reserveResp)
+	}
+	if reserveResp.Status != string(settlement.OperationStatusPending) {
+		t.Fatalf("expected pending reserve status under deferred adapter submission, got %q", reserveResp.Status)
+	}
+
+	tokenReqBody, _ := json.Marshal(proto.IssueTokenRequest{
+		Tier:      1,
+		Subject:   "client-1",
+		TokenType: crypto.TokenTypeClientAccess,
+		PopPubKey: sponsorTestPopPubKey(t),
+		PaymentProof: &proto.SponsorPaymentProof{
+			ReservationID: reservationID,
+			SponsorID:     "sponsor-1",
+			Subject:       "client-1",
+			SessionID:     sessionID,
+		},
+	})
+	tokenReq := httptest.NewRequest(http.MethodPost, "/v1/sponsor/token", bytes.NewReader(tokenReqBody))
+	tokenReq.Header.Set("X-Sponsor-Token", "sponsor-secret-token")
+	tokenRR := httptest.NewRecorder()
+	s.handleSponsorIssueToken(tokenRR, tokenReq)
+	if tokenRR.Code != http.StatusOK {
+		t.Fatalf("sponsor token status=%d body=%s", tokenRR.Code, tokenRR.Body.String())
+	}
+
+	var tokenResp proto.IssueTokenResponse
+	if err := json.Unmarshal(tokenRR.Body.Bytes(), &tokenResp); err != nil {
+		t.Fatalf("decode token response: %v", err)
+	}
+	if tokenResp.Token == "" || tokenResp.JTI == "" {
+		t.Fatalf("unexpected empty token response: %+v", tokenResp)
+	}
+
+	statusReq := httptest.NewRequest(http.MethodGet, "/v1/sponsor/status?reservation_id="+reservationID, nil)
+	statusReq.Header.Set("X-Sponsor-Token", "sponsor-secret-token")
+	statusRR := httptest.NewRecorder()
+	s.handleSponsorStatus(statusRR, statusReq)
+	if statusRR.Code != http.StatusOK {
+		t.Fatalf("sponsor status status=%d body=%s", statusRR.Code, statusRR.Body.String())
+	}
+	var statusResp proto.SponsorReserveResponse
+	if err := json.Unmarshal(statusRR.Body.Bytes(), &statusResp); err != nil {
+		t.Fatalf("decode status response: %v", err)
+	}
+	if statusResp.ConsumedAt <= 0 {
+		t.Fatalf("expected consumed reservation after payment-proof token issuance: %+v", statusResp)
+	}
+
+	report, err := s.settlementService().Reconcile(context.Background())
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if report.PendingAdapterOperations < 1 {
+		t.Fatalf("expected deferred adapter backlog to remain observable, got pending_adapter_operations=%d", report.PendingAdapterOperations)
 	}
 }
 
@@ -957,4 +1082,26 @@ func (p *authorizePaymentContextProbe) AuthorizePayment(ctx context.Context, pro
 		return settlement.PaymentAuthorization{}, err
 	}
 	return p.Service.AuthorizePayment(ctx, proof)
+}
+
+type sponsorReservationFailingChainAdapter struct{}
+
+func (sponsorReservationFailingChainAdapter) SubmitSessionSettlement(context.Context, settlement.SessionSettlement) (string, error) {
+	return "ok-settlement", nil
+}
+
+func (sponsorReservationFailingChainAdapter) SubmitRewardIssue(context.Context, settlement.RewardIssue) (string, error) {
+	return "ok-reward", nil
+}
+
+func (sponsorReservationFailingChainAdapter) SubmitSponsorReservation(context.Context, settlement.SponsorCreditReservation) (string, error) {
+	return "", errors.New("adapter sponsor reservation submission failed")
+}
+
+func (sponsorReservationFailingChainAdapter) SubmitSlashEvidence(context.Context, settlement.SlashEvidence) (string, error) {
+	return "ok-slash", nil
+}
+
+func (sponsorReservationFailingChainAdapter) Health(context.Context) error {
+	return nil
 }

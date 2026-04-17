@@ -25,6 +25,8 @@ VALIDATION_LOG="$TMP_DIR/validation.log"
 COMPLETE_INPUT_JSON="$TMP_DIR/complete_metrics_summary.json"
 COMPLETE_OUTPUT_JSON="$TMP_DIR/complete_checklist.json"
 COMPLETE_LOG="$TMP_DIR/complete.log"
+ALIAS_OUTPUT_JSON="$TMP_DIR/alias_checklist.json"
+ALIAS_LOG="$TMP_DIR/alias.log"
 MISSING_INPUT_JSON="$TMP_DIR/missing_metrics_from_bundle_summary.json"
 MISSING_OUTPUT_JSON="$TMP_DIR/missing_checklist.json"
 MISSING_OUTPUT_MD="$TMP_DIR/missing_checklist.md"
@@ -128,6 +130,31 @@ fi
 if ! grep -Fq '"status": "complete"' "$COMPLETE_LOG"; then
   echo "print-output-json did not emit complete JSON"
   cat "$COMPLETE_LOG"
+  exit 1
+fi
+
+echo "[blockchain-mainnet-activation-metrics-missing-checklist] --print-summary-json alias compatibility"
+set +e
+bash "$SCRIPT_UNDER_TEST" \
+  --metrics-summary-json "$COMPLETE_INPUT_JSON" \
+  --output-json "$ALIAS_OUTPUT_JSON" \
+  --print-summary-json 0 >"$ALIAS_LOG" 2>&1
+alias_rc=$?
+set -e
+if [[ "$alias_rc" -ne 0 ]]; then
+  echo "print-summary-json alias path must exit 0"
+  cat "$ALIAS_LOG"
+  exit 1
+fi
+if [[ ! -f "$ALIAS_OUTPUT_JSON" ]]; then
+  echo "alias output artifact missing"
+  cat "$ALIAS_LOG"
+  exit 1
+fi
+if ! jq -e '.status == "complete" and .counts.missing == 0' "$ALIAS_OUTPUT_JSON" >/dev/null; then
+  echo "alias output contract mismatch"
+  cat "$ALIAS_OUTPUT_JSON"
+  cat "$ALIAS_LOG"
   exit 1
 fi
 

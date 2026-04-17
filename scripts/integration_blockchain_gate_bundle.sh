@@ -37,10 +37,22 @@ PASS_LOG="$TMP_DIR/pass.log"
 NO_GO_REPORTS_DIR="$TMP_DIR/reports_no_go"
 NO_GO_SUMMARY_JSON="$TMP_DIR/summary_no_go.json"
 NO_GO_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_no_go.json"
+NO_GO_ACTIVATION_SUMMARY_JSON="$NO_GO_REPORTS_DIR/blockchain_mainnet_activation_gate_summary.json"
+NO_GO_BOOTSTRAP_SUMMARY_JSON="$NO_GO_REPORTS_DIR/blockchain_bootstrap_governance_graduation_gate_summary.json"
 NO_GO_LOG="$TMP_DIR/no_go.log"
+
+FAIL_COSMOS_REPORTS_DIR="$TMP_DIR/reports_fail_cosmos"
+FAIL_COSMOS_SUMMARY_JSON="$TMP_DIR/summary_fail_cosmos.json"
+FAIL_COSMOS_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_fail_cosmos.json"
+FAIL_COSMOS_LOG="$TMP_DIR/fail_cosmos.log"
+
+INVALID_SOURCE_REPORTS_DIR="$TMP_DIR/reports_invalid_source"
+INVALID_SOURCE_SUMMARY_JSON="$TMP_DIR/summary_invalid_source.json"
+INVALID_SOURCE_LOG="$TMP_DIR/invalid_source.log"
 
 SOURCE_A="$TMP_DIR/source_a.json"
 SOURCE_B="$TMP_DIR/source_b.json"
+SOURCE_INVALID_JSON="$TMP_DIR/source_invalid.json"
 
 cat >"$SOURCE_A" <<'EOF_SOURCE_A'
 {"from":"a"}
@@ -48,6 +60,9 @@ EOF_SOURCE_A
 cat >"$SOURCE_B" <<'EOF_SOURCE_B'
 {"from":"b"}
 EOF_SOURCE_B
+cat >"$SOURCE_INVALID_JSON" <<'EOF_SOURCE_INVALID_JSON'
+{"from":"broken"
+EOF_SOURCE_INVALID_JSON
 cat >"$PASS_METRICS_INPUT_JSON" <<'EOF_PASS_METRICS_INPUT_JSON'
 {
   "measurement_window_weeks": 12,
@@ -60,6 +75,29 @@ cat >"$PASS_METRICS_INPUT_JSON" <<'EOF_PASS_METRICS_INPUT_JSON'
   }
 }
 EOF_PASS_METRICS_INPUT_JSON
+
+FAKE_COSMOS_ONLY_GUARDRAIL="$TMP_DIR/fake_cosmos_only_guardrail.sh"
+cat >"$FAKE_COSMOS_ONLY_GUARDRAIL" <<'EOF_FAKE_COSMOS_ONLY_GUARDRAIL'
+#!/usr/bin/env bash
+set -euo pipefail
+
+capture="${BLOCKCHAIN_GATE_BUNDLE_CAPTURE_FILE:?}"
+all_args=("$@")
+{
+  printf '%s' "cosmos_only_guardrail"
+  for arg in "${all_args[@]}"; do
+    printf '\t%s' "$arg"
+  done
+  printf '\n'
+} >>"$capture"
+
+guardrail_rc="${BLOCKCHAIN_GATE_BUNDLE_FAKE_COSMOS_ONLY_GUARDRAIL_RC:-0}"
+if [[ "$guardrail_rc" =~ ^-?[0-9]+$ ]]; then
+  exit "$guardrail_rc"
+fi
+exit 0
+EOF_FAKE_COSMOS_ONLY_GUARDRAIL
+chmod +x "$FAKE_COSMOS_ONLY_GUARDRAIL"
 
 FAKE_METRICS="$TMP_DIR/fake_metrics.sh"
 cat >"$FAKE_METRICS" <<'EOF_FAKE_METRICS'
@@ -201,12 +239,15 @@ decision="${BLOCKCHAIN_GATE_BUNDLE_FAKE_ACTIVATION_DECISION:-GO}"
 if [[ "$decision" != "GO" ]]; then
   decision="NO-GO"
 fi
+generated_at="${BLOCKCHAIN_GATE_BUNDLE_FAKE_ACTIVATION_GENERATED_AT:-2026-01-01T00:00:00Z}"
 
 mkdir -p "$(dirname "$summary_json")"
 jq -n \
   --arg decision "$decision" \
+  --arg generated_at "$generated_at" \
   --arg metrics_json "$metrics_json" \
   '{
+    generated_at: $generated_at,
     decision: $decision,
     status: (if $decision == "GO" then "go" else "no-go" end),
     rc: (if $decision == "GO" then 0 else 1 end),
@@ -279,12 +320,15 @@ decision="${BLOCKCHAIN_GATE_BUNDLE_FAKE_BOOTSTRAP_DECISION:-GO}"
 if [[ "$decision" != "GO" ]]; then
   decision="NO-GO"
 fi
+generated_at="${BLOCKCHAIN_GATE_BUNDLE_FAKE_BOOTSTRAP_GENERATED_AT:-2026-01-01T00:00:00Z}"
 
 mkdir -p "$(dirname "$summary_json")"
 jq -n \
   --arg decision "$decision" \
+  --arg generated_at "$generated_at" \
   --arg metrics_json "$metrics_json" \
   '{
+    generated_at: $generated_at,
     decision: $decision,
     status: (if $decision == "GO" then "go" else "no-go" end),
     rc: (if $decision == "GO" then 0 else 1 end),
@@ -381,8 +425,29 @@ assert_stage_invocation_token_count() {
   fi
 }
 
+assert_generated_at_iso_utc() {
+  local summary_json_path="$1"
+  local label="$2"
+
+  if [[ ! -f "$summary_json_path" ]]; then
+    echo "missing $label summary artifact: $summary_json_path"
+    exit 1
+  fi
+
+  if ! jq -e '
+    (.generated_at | type) == "string"
+    and (.generated_at | length) > 0
+    and (.generated_at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))
+  ' "$summary_json_path" >/dev/null; then
+    echo "$label summary missing ISO UTC generated_at contract"
+    cat "$summary_json_path"
+    exit 1
+  fi
+}
+
 run_bundle() {
   BLOCKCHAIN_GATE_BUNDLE_CAPTURE_FILE="$CAPTURE" \
+  BLOCKCHAIN_GATE_BUNDLE_COSMOS_ONLY_GUARDRAIL_SCRIPT="$FAKE_COSMOS_ONLY_GUARDRAIL" \
   BLOCKCHAIN_GATE_BUNDLE_METRICS_SCRIPT="$FAKE_METRICS" \
   BLOCKCHAIN_GATE_BUNDLE_ACTIVATION_GATE_SCRIPT="$FAKE_ACTIVATION" \
   BLOCKCHAIN_GATE_BUNDLE_BOOTSTRAP_GATE_SCRIPT="$FAKE_BOOTSTRAP" \
@@ -410,7 +475,8 @@ if ! run_bundle \
   exit 1
 fi
 
-assert_stage_order "$CAPTURE" "metrics" "activation" "bootstrap"
+assert_stage_order "$CAPTURE" "cosmos_only_guardrail" "metrics" "activation" "bootstrap"
+assert_stage_invocation_contains "$CAPTURE" "cosmos_only_guardrail"
 assert_stage_invocation_contains "$CAPTURE" "metrics" \
   "--summary-json" "$PASS_METRICS_SUMMARY_JSON" \
   "--canonical-summary-json" "$PASS_METRICS_JSON" \
@@ -451,6 +517,7 @@ if ! jq -e \
   --arg input_canonical_json "$PASS_METRICS_INPUT_CANONICAL_JSON" \
   --arg metrics_json "$PASS_METRICS_JSON" \
   --arg metrics_summary "$PASS_METRICS_SUMMARY_JSON" \
+  --arg cosmos_only_guardrail_script "$FAKE_COSMOS_ONLY_GUARDRAIL" \
   --arg activation_summary "$PASS_ACTIVATION_SUMMARY_JSON" \
   --arg bootstrap_summary "$PASS_BOOTSTRAP_SUMMARY_JSON" \
   --arg canonical_summary "$PASS_CANONICAL_SUMMARY_JSON" \
@@ -459,6 +526,9 @@ if ! jq -e \
   and .rc == 0
   and .decision == "GO"
   and (.missing_required_metrics | length) == 0
+  and .steps.cosmos_only_guardrail.status == "pass"
+  and .steps.cosmos_only_guardrail.rc == 0
+  and .steps.cosmos_only_guardrail.artifacts.script == $cosmos_only_guardrail_script
   and .steps.metrics.status == "pass"
   and .steps.metrics.rc == 0
   and .steps.mainnet_activation_gate.decision == "GO"
@@ -491,6 +561,54 @@ if ! cmp -s "$PASS_SUMMARY_JSON" "$PASS_CANONICAL_SUMMARY_JSON"; then
   cat "$PASS_CANONICAL_SUMMARY_JSON"
   exit 1
 fi
+assert_generated_at_iso_utc "$PASS_ACTIVATION_SUMMARY_JSON" "mainnet activation gate"
+assert_generated_at_iso_utc "$PASS_BOOTSTRAP_SUMMARY_JSON" "bootstrap graduation gate"
+
+echo "[blockchain-gate-bundle] cosmos-only guardrail fail-closed"
+: >"$CAPTURE"
+set +e
+BLOCKCHAIN_GATE_BUNDLE_FAKE_COSMOS_ONLY_GUARDRAIL_RC="17" \
+run_bundle \
+  --reports-dir "$FAIL_COSMOS_REPORTS_DIR" \
+  --summary-json "$FAIL_COSMOS_SUMMARY_JSON" \
+  --canonical-summary-json "$FAIL_COSMOS_CANONICAL_SUMMARY_JSON" \
+  --print-summary-json 0 >"$FAIL_COSMOS_LOG" 2>&1
+fail_cosmos_rc=$?
+set -e
+if [[ "$fail_cosmos_rc" -ne 17 ]]; then
+  echo "expected cosmos-only guardrail failure to exit 17"
+  cat "$FAIL_COSMOS_LOG"
+  exit 1
+fi
+assert_stage_order "$CAPTURE" "cosmos_only_guardrail"
+if [[ ! -f "$FAIL_COSMOS_SUMMARY_JSON" || ! -f "$FAIL_COSMOS_CANONICAL_SUMMARY_JSON" ]]; then
+  echo "missing cosmos failure summary artifacts"
+  ls -la "$TMP_DIR"
+  cat "$FAIL_COSMOS_LOG"
+  exit 1
+fi
+if ! jq -e '
+  .status == "runtime-fail"
+  and .rc == 17
+  and .first_runtime_failure.step == "cosmos_only_guardrail"
+  and .first_runtime_failure.rc == 17
+  and .steps.cosmos_only_guardrail.status == "fail"
+  and .steps.cosmos_only_guardrail.rc == 17
+  and .steps.metrics.status == "pending"
+  and .steps.mainnet_activation_gate.status == "pending"
+  and .steps.bootstrap_graduation_gate.status == "pending"
+' "$FAIL_COSMOS_SUMMARY_JSON" >/dev/null; then
+  echo "cosmos-only guardrail failure summary contract mismatch"
+  cat "$FAIL_COSMOS_SUMMARY_JSON"
+  cat "$FAIL_COSMOS_LOG"
+  exit 1
+fi
+if ! cmp -s "$FAIL_COSMOS_SUMMARY_JSON" "$FAIL_COSMOS_CANONICAL_SUMMARY_JSON"; then
+  echo "canonical summary does not match cosmos failure summary"
+  cat "$FAIL_COSMOS_SUMMARY_JSON"
+  cat "$FAIL_COSMOS_CANONICAL_SUMMARY_JSON"
+  exit 1
+fi
 
 echo "[blockchain-gate-bundle] logical NO-GO remains exit 0"
 : >"$CAPTURE"
@@ -510,6 +628,7 @@ if [[ "$no_go_rc" -ne 0 ]]; then
   cat "$NO_GO_LOG"
   exit 1
 fi
+assert_stage_order "$CAPTURE" "cosmos_only_guardrail" "metrics" "activation" "bootstrap"
 
 if ! jq -e '
   .status == "pass"
@@ -530,6 +649,41 @@ if ! cmp -s "$NO_GO_SUMMARY_JSON" "$NO_GO_CANONICAL_SUMMARY_JSON"; then
   echo "canonical summary does not match no-go summary"
   cat "$NO_GO_SUMMARY_JSON"
   cat "$NO_GO_CANONICAL_SUMMARY_JSON"
+  exit 1
+fi
+assert_generated_at_iso_utc "$NO_GO_ACTIVATION_SUMMARY_JSON" "mainnet activation gate"
+assert_generated_at_iso_utc "$NO_GO_BOOTSTRAP_SUMMARY_JSON" "bootstrap graduation gate"
+
+echo "[blockchain-gate-bundle] invalid --source-json fails closed before stage execution"
+: >"$CAPTURE"
+set +e
+run_bundle \
+  --reports-dir "$INVALID_SOURCE_REPORTS_DIR" \
+  --summary-json "$INVALID_SOURCE_SUMMARY_JSON" \
+  --source-json "$SOURCE_INVALID_JSON" \
+  --print-summary-json 0 >"$INVALID_SOURCE_LOG" 2>&1
+invalid_source_rc=$?
+set -e
+if [[ "$invalid_source_rc" -ne 2 ]]; then
+  echo "expected invalid --source-json path to exit 2, got rc=$invalid_source_rc"
+  cat "$INVALID_SOURCE_LOG"
+  exit 1
+fi
+if ! grep -Fq "source json is invalid JSON: $SOURCE_INVALID_JSON" "$INVALID_SOURCE_LOG"; then
+  echo "invalid source-json error message mismatch"
+  cat "$INVALID_SOURCE_LOG"
+  exit 1
+fi
+if [[ -f "$INVALID_SOURCE_SUMMARY_JSON" ]]; then
+  echo "invalid source-json path should fail before summary emission"
+  cat "$INVALID_SOURCE_SUMMARY_JSON"
+  cat "$INVALID_SOURCE_LOG"
+  exit 1
+fi
+if [[ "$(wc -l <"$CAPTURE" | tr -d ' ')" != "0" ]]; then
+  echo "invalid source-json path should fail before invoking any stage"
+  cat "$CAPTURE"
+  cat "$INVALID_SOURCE_LOG"
   exit 1
 fi
 

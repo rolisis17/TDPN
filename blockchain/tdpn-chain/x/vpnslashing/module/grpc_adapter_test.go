@@ -19,9 +19,10 @@ func TestGRPCMsgAdapterSubmitEvidenceAndRecordPenalty(t *testing.T) {
 
 	evidenceResp, err := adapter.SubmitEvidence(context.Background(), &pb.MsgSubmitEvidenceRequest{
 		Evidence: &pb.SlashEvidence{
-			EvidenceId: "evidence-grpc-1",
-			Kind:       modtypes.EvidenceKindObjective,
-			ProofHash:  testSHAProof("proof-grpc-1"),
+			EvidenceId:    "evidence-grpc-1",
+			ViolationType: "double-sign",
+			Kind:          modtypes.EvidenceKindObjective,
+			ProofHash:     testSHAProof("proof-grpc-1"),
 		},
 	})
 	if err != nil {
@@ -29,6 +30,9 @@ func TestGRPCMsgAdapterSubmitEvidenceAndRecordPenalty(t *testing.T) {
 	}
 	if evidenceResp.GetEvidence().GetEvidenceId() != "evidence-grpc-1" {
 		t.Fatalf("expected evidence id %q, got %q", "evidence-grpc-1", evidenceResp.GetEvidence().GetEvidenceId())
+	}
+	if evidenceResp.GetEvidence().GetViolationType() != "double-sign" {
+		t.Fatalf("expected violation_type %q, got %q", "double-sign", evidenceResp.GetEvidence().GetViolationType())
 	}
 
 	penaltyResp, err := adapter.RecordPenalty(context.Background(), &pb.MsgRecordPenaltyRequest{
@@ -46,6 +50,63 @@ func TestGRPCMsgAdapterSubmitEvidenceAndRecordPenalty(t *testing.T) {
 	}
 	if penaltyResp.GetPenalty().GetStatus() != pb.ReconciliationStatus_RECONCILIATION_STATUS_SUBMITTED {
 		t.Fatalf("expected submitted status, got %v", penaltyResp.GetPenalty().GetStatus())
+	}
+}
+
+func TestGRPCMsgAdapterCanonicalizesViolationTypeAcrossSubmitQueryAndList(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	msgAdapter := NewGRPCMsgAdapter(NewMsgServer(&k))
+	queryAdapter := NewGRPCQueryAdapter(NewQueryServer(&k))
+
+	const evidenceID = "evidence-grpc-canonical-1"
+	const inputViolationType = "  Session-Replay-Proof  "
+	const expectedViolationType = "session-replay-proof"
+
+	evidenceResp, err := msgAdapter.SubmitEvidence(context.Background(), &pb.MsgSubmitEvidenceRequest{
+		Evidence: &pb.SlashEvidence{
+			EvidenceId:    evidenceID,
+			ViolationType: inputViolationType,
+			Kind:          modtypes.EvidenceKindObjective,
+			ProofHash:     testSHAProof("proof-grpc-canonical-1"),
+		},
+	})
+	if err != nil {
+		t.Fatalf("SubmitEvidence returned unexpected error: %v", err)
+	}
+	if got := evidenceResp.GetEvidence().GetViolationType(); got != expectedViolationType {
+		t.Fatalf("expected canonical submit violation_type %q, got %q", expectedViolationType, got)
+	}
+
+	stored, found := k.GetEvidence(evidenceID)
+	if !found {
+		t.Fatalf("expected persisted evidence %q", evidenceID)
+	}
+	if stored.ViolationType != expectedViolationType {
+		t.Fatalf("expected persisted canonical violation_type %q, got %q", expectedViolationType, stored.ViolationType)
+	}
+
+	evidenceByID, err := queryAdapter.SlashEvidence(context.Background(), &pb.QuerySlashEvidenceRequest{EvidenceId: evidenceID})
+	if err != nil {
+		t.Fatalf("SlashEvidence returned unexpected error: %v", err)
+	}
+	if !evidenceByID.GetFound() {
+		t.Fatalf("expected evidence %q to be found", evidenceID)
+	}
+	if got := evidenceByID.GetEvidence().GetViolationType(); got != expectedViolationType {
+		t.Fatalf("expected canonical query violation_type %q, got %q", expectedViolationType, got)
+	}
+
+	evidenceList, err := queryAdapter.ListSlashEvidence(context.Background(), &pb.QueryListSlashEvidenceRequest{})
+	if err != nil {
+		t.Fatalf("ListSlashEvidence returned unexpected error: %v", err)
+	}
+	if len(evidenceList.GetEvidence()) != 1 {
+		t.Fatalf("expected 1 evidence record in list, got %d", len(evidenceList.GetEvidence()))
+	}
+	if got := evidenceList.GetEvidence()[0].GetViolationType(); got != expectedViolationType {
+		t.Fatalf("expected canonical list violation_type %q, got %q", expectedViolationType, got)
 	}
 }
 
@@ -95,19 +156,45 @@ func TestGRPCQueryAdapterNotFoundMapsToFoundFalse(t *testing.T) {
 	}
 }
 
+func TestGRPCQueryAdapterSlashEvidenceRoundtripIncludesViolationType(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	k.UpsertEvidence(modtypes.SlashEvidence{
+		EvidenceID:    "evidence-query-1",
+		ViolationType: "invalid-settlement-proof",
+		Kind:          modtypes.EvidenceKindObjective,
+		ProofHash:     testSHAProof("proof-query-1"),
+	})
+
+	adapter := NewGRPCQueryAdapter(NewQueryServer(&k))
+	resp, err := adapter.SlashEvidence(context.Background(), &pb.QuerySlashEvidenceRequest{EvidenceId: "evidence-query-1"})
+	if err != nil {
+		t.Fatalf("SlashEvidence returned unexpected error: %v", err)
+	}
+	if !resp.GetFound() {
+		t.Fatal("expected found=true for existing evidence")
+	}
+	if resp.GetEvidence().GetViolationType() != "invalid-settlement-proof" {
+		t.Fatalf("expected violation_type %q, got %q", "invalid-settlement-proof", resp.GetEvidence().GetViolationType())
+	}
+}
+
 func TestGRPCQueryAdapterListMethods(t *testing.T) {
 	t.Parallel()
 
 	k := keeper.NewKeeper()
 	k.UpsertEvidence(modtypes.SlashEvidence{
-		EvidenceID: "evidence-b",
-		Kind:       modtypes.EvidenceKindObjective,
-		ProofHash:  testSHAProof("proof-b"),
+		EvidenceID:    "evidence-b",
+		ViolationType: "session-replay-proof",
+		Kind:          modtypes.EvidenceKindObjective,
+		ProofHash:     testSHAProof("proof-b"),
 	})
 	k.UpsertEvidence(modtypes.SlashEvidence{
-		EvidenceID: "evidence-a",
-		Kind:       modtypes.EvidenceKindObjective,
-		ProofHash:  testSHAProof("proof-a"),
+		EvidenceID:    "evidence-a",
+		ViolationType: "downtime-proof",
+		Kind:          modtypes.EvidenceKindObjective,
+		ProofHash:     testSHAProof("proof-a"),
 	})
 	k.UpsertPenalty(modtypes.PenaltyDecision{
 		PenaltyID:       "penalty-b",
@@ -131,6 +218,9 @@ func TestGRPCQueryAdapterListMethods(t *testing.T) {
 	}
 	if evidenceResp.GetEvidence()[0].GetEvidenceId() != "evidence-a" || evidenceResp.GetEvidence()[1].GetEvidenceId() != "evidence-b" {
 		t.Fatalf("expected sorted evidence IDs [evidence-a evidence-b], got [%s %s]", evidenceResp.GetEvidence()[0].GetEvidenceId(), evidenceResp.GetEvidence()[1].GetEvidenceId())
+	}
+	if evidenceResp.GetEvidence()[0].GetViolationType() != "downtime-proof" || evidenceResp.GetEvidence()[1].GetViolationType() != "session-replay-proof" {
+		t.Fatalf("expected sorted violation types [downtime-proof session-replay-proof], got [%s %s]", evidenceResp.GetEvidence()[0].GetViolationType(), evidenceResp.GetEvidence()[1].GetViolationType())
 	}
 
 	penaltiesResp, err := adapter.ListPenaltyDecisions(context.Background(), &pb.QueryListPenaltyDecisionsRequest{})

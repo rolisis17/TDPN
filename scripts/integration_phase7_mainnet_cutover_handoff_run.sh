@@ -27,18 +27,21 @@ DRY_LOG="$TMP_DIR/dry.log"
 RUN_FAIL_LOG="$TMP_DIR/run_fail.log"
 HANDOFF_FAIL_LOG="$TMP_DIR/handoff_fail.log"
 INVALID_HANDOFF_LOG="$TMP_DIR/invalid_handoff.log"
+MISSING_HANDOFF_LOG="$TMP_DIR/missing_handoff.log"
 
 PASS_SUMMARY="$TMP_DIR/pass_handoff_run_summary.json"
 DRY_SUMMARY="$TMP_DIR/dry_handoff_run_summary.json"
 RUN_FAIL_SUMMARY="$TMP_DIR/run_fail_handoff_run_summary.json"
 HANDOFF_FAIL_SUMMARY="$TMP_DIR/handoff_fail_handoff_run_summary.json"
 INVALID_HANDOFF_SUMMARY="$TMP_DIR/invalid_handoff_handoff_run_summary.json"
+MISSING_HANDOFF_SUMMARY="$TMP_DIR/missing_handoff_handoff_run_summary.json"
 
 PASS_CANONICAL="$TMP_DIR/pass_handoff_run_canonical.json"
 DRY_CANONICAL="$TMP_DIR/dry_handoff_run_canonical.json"
 RUN_FAIL_CANONICAL="$TMP_DIR/run_fail_handoff_run_canonical.json"
 HANDOFF_FAIL_CANONICAL="$TMP_DIR/handoff_fail_handoff_run_canonical.json"
 INVALID_HANDOFF_CANONICAL="$TMP_DIR/invalid_handoff_handoff_run_canonical.json"
+MISSING_HANDOFF_CANONICAL="$TMP_DIR/missing_handoff_handoff_run_canonical.json"
 
 FAKE_RUN="$TMP_DIR/fake_phase7_mainnet_cutover_run.sh"
 cat >"$FAKE_RUN" <<'EOF_FAKE_RUN'
@@ -93,6 +96,7 @@ cat >"$check_summary" <<'EOF_CHECK'
     "tdpnd_grpc_auth_live_smoke_ok": true,
     "tdpnd_comet_runtime_smoke_ok": true,
     "mainnet_activation_gate_go": true,
+    "bootstrap_governance_graduation_gate_go": true,
     "dual_write_parity_ok": true,
     "cosmos_module_coverage_floor_ok": true,
     "cosmos_keeper_coverage_floor_ok": true,
@@ -134,6 +138,7 @@ if [[ -n "$summary_json" && "${FAKE_PHASE7_RUN_OMIT_SUMMARY:-0}" != "1" ]]; then
         "tdpnd_grpc_auth_live_smoke_ok": true,
         "tdpnd_comet_runtime_smoke_ok": true,
         "mainnet_activation_gate_go": true,
+        "bootstrap_governance_graduation_gate_go": true,
         "dual_write_parity_ok": true,
         "cosmos_module_coverage_floor_ok": true,
         "cosmos_keeper_coverage_floor_ok": true,
@@ -213,6 +218,7 @@ if [[ -n "$summary_json" && "${FAKE_PHASE7_HANDOFF_OMIT_SUMMARY:-0}" != "1" ]]; 
     "tdpnd_grpc_auth_live_smoke_ok": true,
     "tdpnd_comet_runtime_smoke_ok": true,
     "mainnet_activation_gate_go": true,
+    "bootstrap_governance_graduation_gate_go": true,
     "dual_write_parity_ok": true,
     "cosmos_module_coverage_floor_ok": true,
     "cosmos_keeper_coverage_floor_ok": true,
@@ -291,6 +297,7 @@ bash "$RUNNER" \
   --handoff-require-run-pipeline-ok 1 \
   --handoff-require-cosmos-module-coverage-floor-ok 1 \
   --handoff-require-mainnet-activation-gate-go 1 \
+  --handoff-require-bootstrap-governance-graduation-gate-go 1 \
   --handoff-require-tdpnd-comet-runtime-smoke-ok 1 >"$PASS_LOG" 2>&1
 
 assert_two_stage_invocations "$CAPTURE"
@@ -306,7 +313,7 @@ if [[ "$handoff_line" != *"--phase7-run-summary-json $TMP_DIR/pass_run_summary.j
   echo "$handoff_line"
   exit 1
 fi
-if [[ "$handoff_line" != *"--require-run-pipeline-ok 1"* || "$handoff_line" != *"--show-json 0"* ]]; then
+if [[ "$handoff_line" != *"--require-run-pipeline-ok 1"* || "$handoff_line" != *"--show-json 0"* || "$handoff_line" != *"--require-summary-report-ok 0"* ]]; then
   echo "pass path handoff defaults mismatch"
   echo "$handoff_line"
   exit 1
@@ -318,6 +325,11 @@ if [[ "$handoff_line" != *"--require-cosmos-module-coverage-floor-ok 1"* ]]; the
 fi
 if [[ "$handoff_line" != *"--require-mainnet-activation-gate-go 1"* ]]; then
   echo "pass path mainnet activation forwarding mismatch"
+  echo "$handoff_line"
+  exit 1
+fi
+if [[ "$handoff_line" != *"--require-bootstrap-governance-graduation-gate-go 1"* ]]; then
+  echo "pass path bootstrap governance graduation forwarding mismatch"
   echo "$handoff_line"
   exit 1
 fi
@@ -346,6 +358,7 @@ if ! jq -e --arg run_summary "$TMP_DIR/pass_run_summary.json" --arg handoff_summ
   and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.tdpnd_grpc_live_smoke_ok == true
   and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.tdpnd_grpc_auth_live_smoke_ok == true
   and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.mainnet_activation_gate_go == true
+  and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.bootstrap_governance_graduation_gate_go == true
   and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.dual_write_parity_ok == true
   and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.cosmos_module_coverage_floor_ok == true
   and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.cosmos_keeper_coverage_floor_ok == true
@@ -364,6 +377,11 @@ if ! jq -e '.handoff.tdpnd_comet_runtime_smoke_ok == true' "$TMP_DIR/pass_handof
 fi
 if ! jq -e '.handoff.mainnet_activation_gate_go == true' "$TMP_DIR/pass_handoff_summary.json" >/dev/null; then
   echo "pass path handoff fixture missing mainnet activation signal"
+  cat "$TMP_DIR/pass_handoff_summary.json"
+  exit 1
+fi
+if ! jq -e '.handoff.bootstrap_governance_graduation_gate_go == true' "$TMP_DIR/pass_handoff_summary.json" >/dev/null; then
+  echo "pass path handoff fixture missing bootstrap governance graduation signal"
   cat "$TMP_DIR/pass_handoff_summary.json"
   exit 1
 fi
@@ -401,7 +419,7 @@ if [[ "$run_line" != *"--dry-run 1"* || "$run_line" != *"--theta 9"* ]]; then
   echo "$run_line"
   exit 1
 fi
-if [[ "$handoff_line" != *"--require-run-pipeline-ok 0"* || "$handoff_line" != *"--require-tdpnd-grpc-runtime-smoke-ok 0"* || "$handoff_line" != *"--require-tdpnd-grpc-live-smoke-ok 0"* || "$handoff_line" != *"--require-tdpnd-grpc-auth-live-smoke-ok 0"* || "$handoff_line" != *"--require-dual-write-parity-ok 0"* || "$handoff_line" != *"--require-operator-approval-ok 0"* || "$handoff_line" != *"--require-cosmos-keeper-coverage-floor-ok 0"* || "$handoff_line" != *"--require-cosmos-app-coverage-floor-ok 0"* ]]; then
+if [[ "$handoff_line" != *"--require-run-pipeline-ok 0"* || "$handoff_line" != *"--require-tdpnd-grpc-runtime-smoke-ok 0"* || "$handoff_line" != *"--require-tdpnd-grpc-live-smoke-ok 0"* || "$handoff_line" != *"--require-tdpnd-grpc-auth-live-smoke-ok 0"* || "$handoff_line" != *"--require-bootstrap-governance-graduation-gate-go 0"* || "$handoff_line" != *"--require-dual-write-parity-ok 0"* || "$handoff_line" != *"--require-operator-approval-ok 0"* || "$handoff_line" != *"--require-cosmos-keeper-coverage-floor-ok 0"* || "$handoff_line" != *"--require-cosmos-app-coverage-floor-ok 0"* || "$handoff_line" != *"--require-summary-report-ok 0"* ]]; then
   echo "dry-run relax forwarding mismatch"
   echo "$handoff_line"
   exit 1
@@ -446,6 +464,7 @@ if ! jq -e '
   and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.tdpnd_grpc_live_smoke_ok == true
   and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.tdpnd_grpc_auth_live_smoke_ok == true
   and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.mainnet_activation_gate_go == true
+  and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.bootstrap_governance_graduation_gate_go == true
   and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.dual_write_parity_ok == true
   and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.cosmos_module_coverage_floor_ok == true
   and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.cosmos_keeper_coverage_floor_ok == true
@@ -462,6 +481,11 @@ if ! jq -e '.handoff.tdpnd_comet_runtime_smoke_ok == true' "$TMP_DIR/dry_handoff
 fi
 if ! jq -e '.handoff.mainnet_activation_gate_go == true' "$TMP_DIR/dry_handoff_summary.json" >/dev/null; then
   echo "dry-run handoff fixture missing mainnet activation signal"
+  cat "$TMP_DIR/dry_handoff_summary.json"
+  exit 1
+fi
+if ! jq -e '.handoff.bootstrap_governance_graduation_gate_go == true' "$TMP_DIR/dry_handoff_summary.json" >/dev/null; then
+  echo "dry-run handoff fixture missing bootstrap governance graduation signal"
   cat "$TMP_DIR/dry_handoff_summary.json"
   exit 1
 fi
@@ -507,6 +531,7 @@ if ! jq -e '
   and .steps.phase7_mainnet_cutover_handoff_check.rc == 0
   and .steps.phase7_mainnet_cutover_handoff_check.command_rc == 0
   and .steps.phase7_mainnet_cutover_handoff_check.contract_valid == true
+  and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.bootstrap_governance_graduation_gate_go == true
 ' "$RUN_FAIL_SUMMARY" >/dev/null; then
   echo "run-failure summary mismatch"
   cat "$RUN_FAIL_SUMMARY"
@@ -546,6 +571,7 @@ if ! jq -e '
   and .steps.phase7_mainnet_cutover_handoff_check.rc == 19
   and .steps.phase7_mainnet_cutover_handoff_check.command_rc == 19
   and .steps.phase7_mainnet_cutover_handoff_check.contract_valid == true
+  and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.bootstrap_governance_graduation_gate_go == true
 ' "$HANDOFF_FAIL_SUMMARY" >/dev/null; then
   echo "handoff-failure summary mismatch"
   cat "$HANDOFF_FAIL_SUMMARY"
@@ -589,6 +615,7 @@ if ! jq -e '
   and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.tdpnd_grpc_live_smoke_ok == null
   and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.tdpnd_grpc_auth_live_smoke_ok == null
   and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.mainnet_activation_gate_go == null
+  and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.bootstrap_governance_graduation_gate_go == null
   and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.dual_write_parity_ok == null
   and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.cosmos_module_coverage_floor_ok == null
   and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.cosmos_keeper_coverage_floor_ok == null
@@ -599,5 +626,48 @@ if ! jq -e '
   exit 1
 fi
 assert_canonical_summary_artifact "$INVALID_HANDOFF_SUMMARY" "$INVALID_HANDOFF_CANONICAL" "$INVALID_HANDOFF_LOG"
+
+echo "[phase7-mainnet-cutover-handoff-run] missing handoff summary fails closed"
+: >"$CAPTURE"
+set +e
+PHASE7_HANDOFF_RUN_CAPTURE_FILE="$CAPTURE" \
+PHASE7_MAINNET_CUTOVER_HANDOFF_RUN_RUN_SCRIPT="$FAKE_RUN" \
+PHASE7_MAINNET_CUTOVER_HANDOFF_RUN_HANDOFF_CHECK_SCRIPT="$FAKE_HANDOFF" \
+PHASE7_MAINNET_CUTOVER_HANDOFF_RUN_CANONICAL_SUMMARY_JSON="$MISSING_HANDOFF_CANONICAL" \
+FAKE_PHASE7_HANDOFF_OMIT_SUMMARY=1 \
+bash "$RUNNER" \
+  --reports-dir "$TMP_DIR/reports_missing_handoff" \
+  --run-summary-json "$TMP_DIR/missing_handoff_run_summary.json" \
+  --handoff-summary-json "$TMP_DIR/missing_handoff_handoff_summary.json" \
+  --summary-json "$MISSING_HANDOFF_SUMMARY" \
+  --print-summary-json 0 >"$MISSING_HANDOFF_LOG" 2>&1
+missing_handoff_rc=$?
+set -e
+
+if [[ "$missing_handoff_rc" -ne 3 ]]; then
+  echo "expected wrapper rc=3 for missing handoff summary, got rc=$missing_handoff_rc"
+  cat "$MISSING_HANDOFF_LOG"
+  exit 1
+fi
+assert_two_stage_invocations "$CAPTURE"
+if ! jq -e '
+  .status == "fail"
+  and .rc == 3
+  and .steps.phase7_mainnet_cutover_run.status == "pass"
+  and .steps.phase7_mainnet_cutover_run.contract_valid == true
+  and .steps.phase7_mainnet_cutover_handoff_check.status == "fail"
+  and .steps.phase7_mainnet_cutover_handoff_check.rc == 3
+  and .steps.phase7_mainnet_cutover_handoff_check.command_rc == 0
+  and .steps.phase7_mainnet_cutover_handoff_check.contract_valid == false
+  and .steps.phase7_mainnet_cutover_handoff_check.artifacts.summary_exists == false
+  and (.steps.phase7_mainnet_cutover_handoff_check.contract_error | type) == "string"
+  and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.mainnet_activation_gate_go == null
+  and .steps.phase7_mainnet_cutover_handoff_check.signal_snapshot.bootstrap_governance_graduation_gate_go == null
+' "$MISSING_HANDOFF_SUMMARY" >/dev/null; then
+  echo "missing-handoff-summary wrapper summary mismatch"
+  cat "$MISSING_HANDOFF_SUMMARY"
+  exit 1
+fi
+assert_canonical_summary_artifact "$MISSING_HANDOFF_SUMMARY" "$MISSING_HANDOFF_CANONICAL" "$MISSING_HANDOFF_LOG"
 
 echo "phase7 mainnet cutover handoff run integration ok"

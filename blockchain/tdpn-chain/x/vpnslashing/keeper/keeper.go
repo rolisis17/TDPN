@@ -32,6 +32,7 @@ func NewKeeperWithStore(store KeeperStore) Keeper {
 func (k *Keeper) UpsertEvidence(record types.SlashEvidence) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
+	record.ViolationType = types.NormalizeViolationType(record.ViolationType)
 	k.store.UpsertEvidence(record)
 }
 
@@ -159,6 +160,7 @@ func (k *Keeper) findPenaltyForEvidenceLocked(evidenceID string) (types.PenaltyD
 }
 
 func normalizeEvidence(record types.SlashEvidence) types.SlashEvidence {
+	record.ViolationType = types.NormalizeViolationType(record.ViolationType)
 	if record.Status == "" {
 		record.Status = chaintypes.ReconciliationSubmitted
 	}
@@ -176,6 +178,7 @@ func slashEvidenceRecordsEqual(a, b types.SlashEvidence) bool {
 	return a.EvidenceID == b.EvidenceID &&
 		a.SessionID == b.SessionID &&
 		a.ProviderID == b.ProviderID &&
+		a.ViolationType == b.ViolationType &&
 		a.Kind == b.Kind &&
 		a.ProofHash == b.ProofHash &&
 		a.SubmittedAtUnix == b.SubmittedAtUnix &&

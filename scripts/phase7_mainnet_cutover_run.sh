@@ -22,6 +22,11 @@ Purpose:
 Notes:
   - Wrapper-owned flags are reserved; checker pass-through uses --check-...
   - Dry-run still runs the checker.
+  - When checker pass-through omits --phase6-contracts-summary-json, this
+    wrapper forwards .easy-node-logs/phase6_cosmos_l1_contracts_summary.json
+    when present.
+  - Wrapper defaults rollback-path-ready attestation to 1 unless explicitly
+    supplied via --check-rollback-path-ready.
   - Dry-run relaxes manual gating requirements to 0 unless explicitly set:
       --require-rollback-path-ready
       --require-operator-approval-ok
@@ -269,6 +274,7 @@ declare signal_tdpnd_grpc_auth_live_smoke_ok="null"
 declare signal_tdpnd_comet_runtime_smoke_ok="null"
 declare signal_dual_write_parity_ok="null"
 declare signal_mainnet_activation_gate_go="null"
+declare signal_bootstrap_governance_graduation_gate_go="null"
 declare signal_cosmos_module_coverage_floor_ok="null"
 declare signal_cosmos_keeper_coverage_floor_ok="null"
 declare signal_cosmos_app_coverage_floor_ok="null"
@@ -278,6 +284,14 @@ declare signal_operator_approval_ok="null"
 check_command_args=("$check_script" --summary-json "$check_summary_json")
 if ((${#check_passthrough_args[@]} > 0)); then
   check_command_args+=("${check_passthrough_args[@]}")
+fi
+default_phase6_contracts_summary_json="$ROOT_DIR/.easy-node-logs/phase6_cosmos_l1_contracts_summary.json"
+if ! array_has_arg "--phase6-contracts-summary-json" "${check_command_args[@]:1}" \
+  && [[ -f "$default_phase6_contracts_summary_json" ]]; then
+  check_command_args+=(--phase6-contracts-summary-json "$default_phase6_contracts_summary_json")
+fi
+if ! array_has_arg "--rollback-path-ready" "${check_command_args[@]:1}"; then
+  check_command_args+=(--rollback-path-ready 1)
 fi
 if ! array_has_arg "--show-json" "${check_command_args[@]:1}"; then
   check_command_args+=(--show-json 0)
@@ -308,6 +322,7 @@ if check_summary_contract_valid "$check_summary_json"; then
   signal_tdpnd_comet_runtime_smoke_ok="$(extract_check_signal_json "$check_summary_json" "tdpnd_comet_runtime_smoke_ok")"
   signal_dual_write_parity_ok="$(extract_check_signal_json "$check_summary_json" "dual_write_parity_ok")"
   signal_mainnet_activation_gate_go="$(extract_check_signal_json "$check_summary_json" "mainnet_activation_gate_go")"
+  signal_bootstrap_governance_graduation_gate_go="$(extract_check_signal_json "$check_summary_json" "bootstrap_governance_graduation_gate_go")"
   signal_cosmos_module_coverage_floor_ok="$(extract_check_signal_json "$check_summary_json" "cosmos_module_coverage_floor_ok")"
   signal_cosmos_keeper_coverage_floor_ok="$(extract_check_signal_json "$check_summary_json" "cosmos_keeper_coverage_floor_ok")"
   signal_cosmos_app_coverage_floor_ok="$(extract_check_signal_json "$check_summary_json" "cosmos_app_coverage_floor_ok")"
@@ -367,6 +382,7 @@ jq -n \
   --argjson signal_tdpnd_comet_runtime_smoke_ok "$signal_tdpnd_comet_runtime_smoke_ok" \
   --argjson signal_dual_write_parity_ok "$signal_dual_write_parity_ok" \
   --argjson signal_mainnet_activation_gate_go "$signal_mainnet_activation_gate_go" \
+  --argjson signal_bootstrap_governance_graduation_gate_go "$signal_bootstrap_governance_graduation_gate_go" \
   --argjson signal_cosmos_module_coverage_floor_ok "$signal_cosmos_module_coverage_floor_ok" \
   --argjson signal_cosmos_keeper_coverage_floor_ok "$signal_cosmos_keeper_coverage_floor_ok" \
   --argjson signal_cosmos_app_coverage_floor_ok "$signal_cosmos_app_coverage_floor_ok" \
@@ -410,6 +426,7 @@ jq -n \
           tdpnd_comet_runtime_smoke_ok: $signal_tdpnd_comet_runtime_smoke_ok,
           dual_write_parity_ok: $signal_dual_write_parity_ok,
           mainnet_activation_gate_go: $signal_mainnet_activation_gate_go,
+          bootstrap_governance_graduation_gate_go: $signal_bootstrap_governance_graduation_gate_go,
           cosmos_module_coverage_floor_ok: $signal_cosmos_module_coverage_floor_ok,
           cosmos_keeper_coverage_floor_ok: $signal_cosmos_keeper_coverage_floor_ok,
           cosmos_app_coverage_floor_ok: $signal_cosmos_app_coverage_floor_ok,

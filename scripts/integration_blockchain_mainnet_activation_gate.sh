@@ -136,23 +136,25 @@ BLOCKCHAIN_MAINNET_ACTIVATION_GATE_METRICS_JSON="$GO_METRICS" \
   --print-summary-json 1 >"$GO_LOG" 2>&1
 
 jq -e --arg metrics_path "$GO_METRICS" '
-  .decision == "GO"
-  and .status == "go"
-  and .rc == 0
-  and .exit_code == 0
-  and .counts.required == 13
-  and .counts.evaluated == 13
-  and .counts.pass == 13
-  and .counts.fail == 0
-  and (.failed_gate_ids | length) == 0
-  and (.failed_reasons | length) == 0
-  and (.gates | length) == 13
-  and .input.state == "available"
-  and .input.valid == true
-  and (.reasons | length) == 0
-  and (.source_paths | length) == 1
-  and .source_paths[0] == $metrics_path
-  and .artifacts.metrics_json == $metrics_path
+  (.generated_at | type) == "string"
+  and (.generated_at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))
+  and (.decision == "GO")
+  and (.status == "go")
+  and (.rc == 0)
+  and (.exit_code == 0)
+  and (.counts.required == 13)
+  and (.counts.evaluated == 13)
+  and (.counts.pass == 13)
+  and (.counts.fail == 0)
+  and ((.failed_gate_ids | length) == 0)
+  and ((.failed_reasons | length) == 0)
+  and ((.gates | length) == 13)
+  and (.input.state == "available")
+  and (.input.valid == true)
+  and ((.reasons | length) == 0)
+  and ((.source_paths | length) == 1)
+  and (.source_paths[0] == $metrics_path)
+  and (.artifacts.metrics_json == $metrics_path)
 ' "$GO_SUMMARY" >/dev/null
 if ! grep -Fq '"decision": "GO"' "$GO_LOG"; then
   echo "expected GO summary JSON in stdout log"
@@ -167,24 +169,26 @@ echo "[blockchain-mainnet-activation-gate] NO-GO path"
   --print-summary-json 0 >"$NO_GO_LOG" 2>&1
 
 jq -e --arg metrics_path "$NO_GO_METRICS" '
-  .decision == "NO-GO"
-  and .status == "no-go"
-  and .rc == 1
-  and .exit_code == 0
-  and .counts.required == 13
-  and .counts.evaluated == 13
-  and .counts.pass < 13
-  and .counts.fail > 0
-  and (.failed_gate_ids | length) > 0
-  and (.failed_reasons | length) > 0
-  and (.failed_gate_ids | index("vpn_recovery_mttr_p95")) != null
-  and (.failed_gate_ids | index("validator_operator_concentration")) != null
-  and (.failed_gate_ids | index("unit_economics")) != null
-  and (.reasons | length) > 0
+  (.generated_at | type) == "string"
+  and (.generated_at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))
+  and (.decision == "NO-GO")
+  and (.status == "no-go")
+  and (.rc == 1)
+  and (.exit_code == 0)
+  and (.counts.required == 13)
+  and (.counts.evaluated == 13)
+  and (.counts.pass < 13)
+  and (.counts.fail > 0)
+  and ((.failed_gate_ids | length) > 0)
+  and ((.failed_reasons | length) > 0)
+  and ((.failed_gate_ids | index("vpn_recovery_mttr_p95")) != null)
+  and ((.failed_gate_ids | index("validator_operator_concentration")) != null)
+  and ((.failed_gate_ids | index("unit_economics")) != null)
+  and ((.reasons | length) > 0)
   and ((.reasons | index("vpn_recovery_mttr_p95_minutes=34 does not satisfy <= 30")) != null)
-  and (.source_paths | length) == 1
-  and .source_paths[0] == $metrics_path
-  and .artifacts.metrics_json == $metrics_path
+  and ((.source_paths | length) == 1)
+  and (.source_paths[0] == $metrics_path)
+  and (.artifacts.metrics_json == $metrics_path)
 ' "$NO_GO_SUMMARY" >/dev/null
 if ! grep -Fq '[blockchain-mainnet-activation-gate] decision=NO-GO' "$NO_GO_LOG"; then
   echo "expected NO-GO decision log line"
@@ -199,21 +203,23 @@ echo "[blockchain-mainnet-activation-gate] NO-GO measurement window too short"
   --print-summary-json 0 >"$WINDOW_SHORT_LOG" 2>&1
 
 jq -e --arg metrics_path "$WINDOW_SHORT_METRICS" '
-  .decision == "NO-GO"
-  and .status == "no-go"
-  and .rc == 1
-  and .exit_code == 0
-  and .counts.required == 13
-  and .counts.evaluated == 13
-  and .counts.pass == 12
-  and .counts.fail == 1
-  and .failed_gate_ids == ["measurement_window_weeks"]
-  and (.failed_reasons | length) == 1
+  (.generated_at | type) == "string"
+  and (.generated_at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))
+  and (.decision == "NO-GO")
+  and (.status == "no-go")
+  and (.rc == 1)
+  and (.exit_code == 0)
+  and (.counts.required == 13)
+  and (.counts.evaluated == 13)
+  and (.counts.pass == 12)
+  and (.counts.fail == 1)
+  and (.failed_gate_ids == ["measurement_window_weeks"])
+  and ((.failed_reasons | length) == 1)
   and ((.failed_reasons | index("measurement_window_weeks=11 does not satisfy >= 12")) != null)
   and ((.reasons | index("measurement_window_weeks=11 does not satisfy >= 12")) != null)
-  and (.source_paths | length) == 1
-  and .source_paths[0] == $metrics_path
-  and .artifacts.metrics_json == $metrics_path
+  and ((.source_paths | length) == 1)
+  and (.source_paths[0] == $metrics_path)
+  and (.artifacts.metrics_json == $metrics_path)
 ' "$WINDOW_SHORT_SUMMARY" >/dev/null
 if ! grep -Fq '[blockchain-mainnet-activation-gate] decision=NO-GO' "$WINDOW_SHORT_LOG"; then
   echo "expected measurement-window short NO-GO decision log line"
@@ -228,21 +234,23 @@ echo "[blockchain-mainnet-activation-gate] NO-GO measurement window missing-or-i
   --print-summary-json 0 >"$WINDOW_INVALID_LOG" 2>&1
 
 jq -e --arg metrics_path "$WINDOW_INVALID_METRICS" '
-  .decision == "NO-GO"
-  and .status == "no-go"
-  and .rc == 1
-  and .exit_code == 0
-  and .counts.required == 13
-  and .counts.evaluated == 13
-  and .counts.pass == 12
-  and .counts.fail == 1
-  and .failed_gate_ids == ["measurement_window_weeks"]
-  and (.failed_reasons | length) == 1
+  (.generated_at | type) == "string"
+  and (.generated_at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))
+  and (.decision == "NO-GO")
+  and (.status == "no-go")
+  and (.rc == 1)
+  and (.exit_code == 0)
+  and (.counts.required == 13)
+  and (.counts.evaluated == 13)
+  and (.counts.pass == 12)
+  and (.counts.fail == 1)
+  and (.failed_gate_ids == ["measurement_window_weeks"])
+  and ((.failed_reasons | length) == 1)
   and ((.failed_reasons | index("missing or invalid metric: measurement_window_weeks")) != null)
   and ((.reasons | index("missing or invalid metric: measurement_window_weeks")) != null)
-  and (.source_paths | length) == 1
-  and .source_paths[0] == $metrics_path
-  and .artifacts.metrics_json == $metrics_path
+  and ((.source_paths | length) == 1)
+  and (.source_paths[0] == $metrics_path)
+  and (.artifacts.metrics_json == $metrics_path)
 ' "$WINDOW_INVALID_SUMMARY" >/dev/null
 if ! grep -Fq '[blockchain-mainnet-activation-gate] decision=NO-GO' "$WINDOW_INVALID_LOG"; then
   echo "expected measurement-window invalid NO-GO decision log line"
@@ -264,19 +272,21 @@ if [[ "$missing_rc" -ne 0 ]]; then
   exit 1
 fi
 jq -e --arg metrics_path "$MISSING_METRICS" '
-  .decision == "NO-GO"
-  and .status == "no-go"
-  and .rc == 1
-  and .exit_code == 0
-  and .input.state == "missing"
-  and .input.valid == false
-  and .failed_gate_ids == ["metrics_input"]
-  and (.failed_reasons | length) == 1
-  and (.reasons | length) > 0
+  (.generated_at | type) == "string"
+  and (.generated_at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))
+  and (.decision == "NO-GO")
+  and (.status == "no-go")
+  and (.rc == 1)
+  and (.exit_code == 0)
+  and (.input.state == "missing")
+  and (.input.valid == false)
+  and (.failed_gate_ids == ["metrics_input"])
+  and ((.failed_reasons | length) == 1)
+  and ((.reasons | length) > 0)
   and ((.reasons | index("metrics JSON file not found: " + $metrics_path)) != null)
-  and (.source_paths | length) == 1
-  and .source_paths[0] == $metrics_path
-  and .artifacts.metrics_json == $metrics_path
+  and ((.source_paths | length) == 1)
+  and (.source_paths[0] == $metrics_path)
+  and (.artifacts.metrics_json == $metrics_path)
 ' "$MISSING_SUMMARY" >/dev/null
 
 echo "[blockchain-mainnet-activation-gate] invalid input with fail-close"
@@ -294,18 +304,20 @@ if [[ "$invalid_rc" -eq 0 ]]; then
   exit 1
 fi
 jq -e --arg metrics_path "$INVALID_METRICS" '
-  .decision == "NO-GO"
-  and .status == "no-go"
-  and .rc == 1
-  and .exit_code == 1
-  and .input.state == "invalid"
-  and .input.valid == false
-  and .failed_gate_ids == ["metrics_input"]
-  and (.reasons | length) > 0
+  (.generated_at | type) == "string"
+  and (.generated_at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))
+  and (.decision == "NO-GO")
+  and (.status == "no-go")
+  and (.rc == 1)
+  and (.exit_code == 1)
+  and (.input.state == "invalid")
+  and (.input.valid == false)
+  and (.failed_gate_ids == ["metrics_input"])
+  and ((.reasons | length) > 0)
   and ((.reasons | index("metrics JSON is not valid JSON: " + $metrics_path)) != null)
-  and (.source_paths | length) == 1
-  and .source_paths[0] == $metrics_path
-  and .artifacts.metrics_json == $metrics_path
+  and ((.source_paths | length) == 1)
+  and (.source_paths[0] == $metrics_path)
+  and (.artifacts.metrics_json == $metrics_path)
 ' "$INVALID_SUMMARY" >/dev/null
 
 echo "[blockchain-mainnet-activation-gate] NO-GO with fail-close"
@@ -323,11 +335,13 @@ if [[ "$fail_close_rc" -eq 0 ]]; then
   exit 1
 fi
 jq -e '
-  .decision == "NO-GO"
-  and .status == "no-go"
-  and .rc == 1
-  and .exit_code == 1
-  and .counts.fail > 0
+  (.generated_at | type) == "string"
+  and (.generated_at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))
+  and (.decision == "NO-GO")
+  and (.status == "no-go")
+  and (.rc == 1)
+  and (.exit_code == 1)
+  and (.counts.fail > 0)
 ' "$FAIL_CLOSE_SUMMARY" >/dev/null
 if ! grep -Fq '[blockchain-mainnet-activation-gate] decision=NO-GO' "$FAIL_CLOSE_LOG"; then
   echo "expected fail-close NO-GO log line"

@@ -29,8 +29,11 @@ Runner behavior:
 - Linux/macOS default: execute `LOCAL_CONTROL_API_SCRIPT` directly.
 - Windows default:
   - `*.ps1` script path -> `powershell -NoProfile -ExecutionPolicy Bypass -File <script> ...`
-  - other script paths -> `bash <script> ...`
+  - other script paths -> prefer Git for Windows `bash.exe` (`C:\Program Files\Git\...`) when available, otherwise `bash <script> ...`
 - `LOCAL_CONTROL_API_RUNNER` overrides the executable and prefixes the script path as the first argument.
+- Optional Windows runner knobs:
+  - `LOCAL_CONTROL_API_GIT_BASH_PATH` to pin a Git Bash path.
+  - `LOCAL_CONTROL_API_PREFER_GIT_BASH=0` to disable Git Bash auto-preference and use `bash` resolution from `PATH`.
 
 Desktop scaffold defaults (`apps/desktop`):
 - base URL: `http://127.0.0.1:8095` (`TDPN_LOCAL_API_BASE_URL`)

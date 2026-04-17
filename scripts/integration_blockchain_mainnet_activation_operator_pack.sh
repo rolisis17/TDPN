@@ -432,6 +432,16 @@ if ! grep -Fq -- "--checklist-output-json" "$HELP_LOG"; then
   cat "$HELP_LOG"
   exit 1
 fi
+if ! grep -Fq -- "--print-summary-json" "$HELP_LOG"; then
+  echo "help output missing --print-summary-json"
+  cat "$HELP_LOG"
+  exit 1
+fi
+if ! grep -Fq -- "--print-output-json" "$HELP_LOG"; then
+  echo "help output missing --print-output-json alias"
+  cat "$HELP_LOG"
+  exit 1
+fi
 
 echo "[blockchain-mainnet-activation-operator-pack] template generation success"
 : >"$CAPTURE"
@@ -440,7 +450,7 @@ if ! run_pack \
   --summary-json "$TEMPLATE_ONLY_SUMMARY_JSON" \
   --canonical-summary-json "$TEMPLATE_ONLY_CANONICAL_SUMMARY_JSON" \
   --template-include-example-values 1 \
-  --print-summary-json 0 >"$TEMPLATE_ONLY_LOG" 2>&1; then
+  --print-output-json 0 >"$TEMPLATE_ONLY_LOG" 2>&1; then
   echo "template-only operator pack run must exit 0"
   cat "$TEMPLATE_ONLY_LOG"
   exit 1

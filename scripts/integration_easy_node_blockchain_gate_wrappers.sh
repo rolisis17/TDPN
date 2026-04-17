@@ -141,6 +141,12 @@ assert_forwarded_args() {
   fi
 }
 
+# NOTE: blockchain-staged-file-groups and blockchain-cosmos-only-guardrail
+# are intentionally excluded from this generic reports/summary forwarding
+# matrix. They have dedicated integration contracts in
+# integration_easy_node_blockchain_staged_file_groups.sh and
+# integration_easy_node_blockchain_cosmos_only_guardrail.sh, so keeping them
+# out of this list preserves existing wrapper behavior.
 COMMANDS=(
   "blockchain-fastlane"
   "blockchain-gate-bundle"
@@ -163,6 +169,7 @@ COMMANDS=(
   "phase5-settlement-layer-handoff-check"
   "phase5-settlement-layer-handoff-run"
   "issuer-sponsor-api-live-smoke"
+  "issuer-sponsor-vpn-session-live-smoke"
   "issuer-settlement-status-live-smoke"
   "ci-phase6-cosmos-l1-build-testnet"
   "ci-phase6-cosmos-l1-contracts"
@@ -200,6 +207,7 @@ ENV_OVERRIDES=(
   "PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_SCRIPT"
   "PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_SCRIPT"
   "ISSUER_SPONSOR_API_LIVE_SMOKE_SCRIPT"
+  "ISSUER_SPONSOR_VPN_SESSION_LIVE_SMOKE_SCRIPT"
   "ISSUER_SETTLEMENT_STATUS_LIVE_SMOKE_SCRIPT"
   "CI_PHASE6_COSMOS_L1_BUILD_TESTNET_SCRIPT"
   "CI_PHASE6_COSMOS_L1_CONTRACTS_SCRIPT"

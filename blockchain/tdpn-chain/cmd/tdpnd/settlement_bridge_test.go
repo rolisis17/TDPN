@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -141,7 +142,7 @@ func TestRunTDPNDSettlementHTTPAuthRequiredOnPOST(t *testing.T) {
 		t.Fatalf("expected health status 200 with auth enabled, got %d", healthResp.StatusCode)
 	}
 
-	payload := []byte(`{"EvidenceID":"ev-auth-1","SubjectID":"provider-auth-1","SessionID":"sess-auth-1","EvidenceRef":"sha256:dcae4c8808ecbf9c1374201b09c7706b90df20b57e0aaf25e36a1053a421ea8a","ObservedAt":"2026-01-01T00:00:00Z"}`)
+	payload := []byte(`{"EvidenceID":"ev-auth-1","SubjectID":"provider-auth-1","SessionID":"sess-auth-1","ViolationType":"double-sign","EvidenceRef":"sha256:dcae4c8808ecbf9c1374201b09c7706b90df20b57e0aaf25e36a1053a421ea8a","ObservedAt":"2026-01-01T00:00:00Z"}`)
 	unauthResp, err := http.Post(baseURL+"/x/vpnslashing/evidence", "application/json", bytes.NewReader(payload))
 	if err != nil {
 		t.Fatalf("unauth post failed: %v", err)
@@ -269,7 +270,7 @@ func TestRunTDPNDSettlementHTTPAuthContractGETOpenPOSTBearerRequired(t *testing.
 		{
 			name:      "slashing",
 			postPath:  "/x/vpnslashing/evidence",
-			postBody:  `{"EvidenceID":"ev-auth-contract-1","SubjectID":"provider-auth-contract-1","SessionID":"sess-auth-contract-1","ViolationType":"objective","EvidenceRef":"sha256:688aac5bfff82af2d92ef98edb1a7d98e963b9ed60d96cf66145d29cec3a1d28","ObservedAt":"2026-01-01T00:00:00Z"}`,
+			postBody:  `{"EvidenceID":"ev-auth-contract-1","SubjectID":"provider-auth-contract-1","SessionID":"sess-auth-contract-1","ViolationType":"double-sign","EvidenceRef":"sha256:688aac5bfff82af2d92ef98edb1a7d98e963b9ed60d96cf66145d29cec3a1d28","ObservedAt":"2026-01-01T00:00:00Z"}`,
 			verifyGET: "/x/vpnslashing/evidence/ev-auth-contract-1",
 		},
 		{
@@ -427,6 +428,150 @@ func TestRunTDPNDSettlementHTTPSlashEvidenceRejectsInvalidObjectiveRef(t *testin
 	}
 }
 
+func TestRunTDPNDSettlementHTTPSlashEvidenceValidatesViolationTypesAndRequiredFields(t *testing.T) {
+	httpListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen http: %v", err)
+	}
+	defer httpListener.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runDone := make(chan error, 1)
+	go func() {
+		runDone <- runTDPND(
+			ctx,
+			[]string{"--settlement-http-listen", "settlement-violation-type-test"},
+			nil,
+			func() chainScaffold { return app.NewChainScaffold() },
+			runtimeDeps{
+				Listen: func(_, _ string) (net.Listener, error) {
+					return nil, errors.New("grpc listener should not be used")
+				},
+				ListenHTTP: func(_, address string) (net.Listener, error) {
+					if address != "settlement-violation-type-test" {
+						return nil, errors.New("unexpected settlement listen address")
+					}
+					return httpListener, nil
+				},
+				NewGRPCServer: func(opts ...grpc.ServerOption) grpcRuntimeServer {
+					return grpc.NewServer(opts...)
+				},
+			},
+		)
+	}()
+
+	baseURL := "http://" + httpListener.Addr().String()
+	waitForHTTPReady(t, baseURL+"/health")
+
+	status, payload := doJSONRequest(
+		t,
+		http.MethodPost,
+		baseURL+"/x/vpnslashing/evidence",
+		`{"EvidenceID":"ev-violation-type-valid-1","SubjectID":"provider-violation-type-valid-1","SessionID":"sess-violation-type-valid-1","ViolationType":"  SESSION-REPLAY-PROOF  ","EvidenceRef":"sha256:ab2607bc705f27357f7b1dd2089fbb6f9d33af74d05574f2d2f9c1ca4f31e22c","ObservedAt":"2026-01-01T00:00:00Z"}`,
+		nil,
+	)
+	if status != http.StatusOK {
+		t.Fatalf("expected allowed violation type to return 200, got %d payload=%v", status, payload)
+	}
+	status, payload = doJSONRequest(
+		t,
+		http.MethodGet,
+		baseURL+"/x/vpnslashing/evidence/ev-violation-type-valid-1",
+		"",
+		nil,
+	)
+	if status != http.StatusOK {
+		t.Fatalf("expected slash evidence GET to return 200, got %d payload=%v", status, payload)
+	}
+	evidenceObj, ok := payload["evidence"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected evidence object in GET payload, got payload=%v", payload)
+	}
+	violationType, _ := evidenceObj["ViolationType"].(string)
+	if violationType != "session-replay-proof" {
+		t.Fatalf("expected normalized violation type %q in stored evidence, got %q", "session-replay-proof", violationType)
+	}
+
+	status, payload = doJSONRequest(
+		t,
+		http.MethodPost,
+		baseURL+"/x/vpnslashing/evidence",
+		`{"EvidenceID":"ev-violation-type-invalid-1","SubjectID":"provider-violation-type-invalid-1","SessionID":"sess-violation-type-invalid-1","ViolationType":"objective","EvidenceRef":"sha256:fe39d73ac24f4539ff3321f981523019db52fbe5931f0f5edcc26e83e136c1b8","ObservedAt":"2026-01-01T00:00:00Z"}`,
+		nil,
+	)
+	if status != http.StatusBadRequest {
+		t.Fatalf("expected invalid violation type to return 400, got %d payload=%v", status, payload)
+	}
+	errorText, _ := payload["error"].(string)
+	if !strings.Contains(errorText, bridgeObjectiveViolationTypeError) {
+		t.Fatalf("expected invalid violation type message, got payload=%v", payload)
+	}
+
+	requiredFieldCases := []struct {
+		name        string
+		body        string
+		errorSubstr string
+	}{
+		{
+			name:        "missing evidence id",
+			body:        `{"SubjectID":"provider-required-fields-1","SessionID":"sess-required-fields-1","ViolationType":"double-sign","EvidenceRef":"sha256:0dd2e95d6d937280c0f5e1f5654c0f7938c735fbb2bcb966d587a20e23757eeb","ObservedAt":"2026-01-01T00:00:00Z"}`,
+			errorSubstr: "evidence_id is required",
+		},
+		{
+			name:        "missing subject id",
+			body:        `{"EvidenceID":"ev-required-fields-2","SessionID":"sess-required-fields-2","ViolationType":"double-sign","EvidenceRef":"sha256:cb87e9274d6f6641f4f0a8b86095f978035b1af2d8fda072ebf9a6ea1df42d76","ObservedAt":"2026-01-01T00:00:00Z"}`,
+			errorSubstr: "subject_id is required",
+		},
+		{
+			name:        "missing session id",
+			body:        `{"EvidenceID":"ev-required-fields-3","SubjectID":"provider-required-fields-3","ViolationType":"double-sign","EvidenceRef":"sha256:c9dd2ccd8a8996f2fef2b51d20adcd20582c7648b8b3d2f0b4c7a95c6c45c744","ObservedAt":"2026-01-01T00:00:00Z"}`,
+			errorSubstr: "session_id is required",
+		},
+		{
+			name:        "missing violation type",
+			body:        `{"EvidenceID":"ev-required-fields-4","SubjectID":"provider-required-fields-4","SessionID":"sess-required-fields-4","EvidenceRef":"sha256:ee5417ea68cf8fd5ce62f24d75e78387880865c95e9ca05477305f18ff8db9bf","ObservedAt":"2026-01-01T00:00:00Z"}`,
+			errorSubstr: "violation_type is required",
+		},
+		{
+			name:        "missing evidence ref",
+			body:        `{"EvidenceID":"ev-required-fields-5","SubjectID":"provider-required-fields-5","SessionID":"sess-required-fields-5","ViolationType":"double-sign","ObservedAt":"2026-01-01T00:00:00Z"}`,
+			errorSubstr: "evidence_ref is required",
+		},
+	}
+
+	for _, tc := range requiredFieldCases {
+		t.Run(tc.name, func(t *testing.T) {
+			status, payload := doJSONRequest(
+				t,
+				http.MethodPost,
+				baseURL+"/x/vpnslashing/evidence",
+				tc.body,
+				nil,
+			)
+			if status != http.StatusBadRequest {
+				t.Fatalf("expected missing required fields to return 400, got %d payload=%v", status, payload)
+			}
+
+			errorText, _ := payload["error"].(string)
+			if !strings.Contains(errorText, tc.errorSubstr) {
+				t.Fatalf("expected error to contain %q, got payload=%v", tc.errorSubstr, payload)
+			}
+		})
+	}
+
+	cancel()
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("expected clean shutdown, got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for runtime shutdown")
+	}
+}
+
 func TestRunTDPNDSettlementHTTPValidatorStatusRejectsInvalidObjectiveEvidenceRef(t *testing.T) {
 	httpListener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -494,6 +639,97 @@ func TestRunTDPNDSettlementHTTPValidatorStatusRejectsInvalidObjectiveEvidenceRef
 			errorText, _ := payload["error"].(string)
 			if !strings.Contains(errorText, "evidence ref must use objective format") {
 				t.Fatalf("expected invalid format error, got payload=%v", payload)
+			}
+		})
+	}
+
+	cancel()
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("expected clean shutdown, got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for runtime shutdown")
+	}
+}
+
+func TestRunTDPNDSettlementHTTPRejectsMalformedJSONPayloads(t *testing.T) {
+	httpListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen http: %v", err)
+	}
+	defer httpListener.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runDone := make(chan error, 1)
+	go func() {
+		runDone <- runTDPND(
+			ctx,
+			[]string{"--settlement-http-listen", "settlement-json-hardening-test"},
+			nil,
+			func() chainScaffold { return app.NewChainScaffold() },
+			runtimeDeps{
+				Listen: func(_, _ string) (net.Listener, error) {
+					return nil, errors.New("grpc listener should not be used")
+				},
+				ListenHTTP: func(_, address string) (net.Listener, error) {
+					if address != "settlement-json-hardening-test" {
+						return nil, errors.New("unexpected settlement listen address")
+					}
+					return httpListener, nil
+				},
+				NewGRPCServer: func(opts ...grpc.ServerOption) grpcRuntimeServer {
+					return grpc.NewServer(opts...)
+				},
+			},
+		)
+	}()
+
+	baseURL := "http://" + httpListener.Addr().String()
+	waitForHTTPReady(t, baseURL+"/health")
+
+	oversizedBody := fmt.Sprintf(
+		`{"SettlementID":"set-json-oversized-1","ReservationID":"res-json-oversized-1","SessionID":"sess-json-oversized-1","SubjectID":"%s","ChargedMicros":1,"Currency":"uusdc","SettledAt":"2026-01-01T00:00:00Z"}`,
+		strings.Repeat("a", int(settlementBridgeMaxJSONBodyBytes)),
+	)
+	validSettlementBody := `{"SettlementID":"set-json-base-1","ReservationID":"res-json-base-1","SessionID":"sess-json-base-1","SubjectID":"subject-json-base-1","ChargedMicros":1,"Currency":"uusdc","SettledAt":"2026-01-01T00:00:00Z"}`
+
+	cases := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "unknown field rejected",
+			body: `{"SettlementID":"set-json-unknown-1","ReservationID":"res-json-unknown-1","SessionID":"sess-json-unknown-1","SubjectID":"subject-json-unknown-1","ChargedMicros":1,"Currency":"uusdc","SettledAt":"2026-01-01T00:00:00Z","Unexpected":"field"}`,
+		},
+		{
+			name: "oversized body rejected",
+			body: oversizedBody,
+		},
+		{
+			name: "trailing json token rejected",
+			body: validSettlementBody + "\n{}",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			status, payload := doJSONRequest(
+				t,
+				http.MethodPost,
+				baseURL+"/x/vpnbilling/settlements",
+				tc.body,
+				nil,
+			)
+			if status != http.StatusBadRequest {
+				t.Fatalf("expected malformed json case %q to return 400, got %d payload=%v", tc.name, status, payload)
+			}
+			errText, _ := payload["error"].(string)
+			if !strings.Contains(strings.ToLower(errText), "invalid json payload") {
+				t.Fatalf("expected malformed json case %q to include invalid JSON payload error, got payload=%v", tc.name, payload)
 			}
 		})
 	}
@@ -582,7 +818,7 @@ func TestRunTDPNDSettlementHTTPHappyPathPerEndpoint(t *testing.T) {
 		},
 		{
 			path:      "/x/vpnslashing/evidence",
-			body:      `{"EvidenceID":"ev-http-1","SubjectID":"provider-http-1","SessionID":"sess-http-1","ViolationType":"objective","EvidenceRef":"sha256:d15cf66aff24713d226c1cfc45c9056acdb396b8e24da71c57d1e5a34efd2d08","ObservedAt":"2026-01-01T00:00:00Z"}`,
+			body:      `{"EvidenceID":"ev-http-1","SubjectID":"provider-http-1","SessionID":"sess-http-1","ViolationType":"double-sign","EvidenceRef":"sha256:d15cf66aff24713d226c1cfc45c9056acdb396b8e24da71c57d1e5a34efd2d08","ObservedAt":"2026-01-01T00:00:00Z"}`,
 			verifyGET: "/x/vpnslashing/evidence/ev-http-1",
 			objectKey: "evidence",
 			idField:   "EvidenceID",
@@ -1078,7 +1314,7 @@ func TestRunTDPNDSettlementHTTPQueryHappyPathAndLists(t *testing.T) {
 		},
 		{
 			path: "/x/vpnslashing/evidence",
-			body: `{"EvidenceID":"ev-query-1","SubjectID":"provider-query-1","SessionID":"sess-query-1","ViolationType":"objective","EvidenceRef":"sha256:98c28e7336b1709232b3cf6d5a5af8c4d0a779fe32360f37d8a1c832f03e5cbf","ObservedAt":"2026-01-01T00:00:00Z"}`,
+			body: `{"EvidenceID":"ev-query-1","SubjectID":"provider-query-1","SessionID":"sess-query-1","ViolationType":"double-sign","EvidenceRef":"sha256:98c28e7336b1709232b3cf6d5a5af8c4d0a779fe32360f37d8a1c832f03e5cbf","ObservedAt":"2026-01-01T00:00:00Z"}`,
 		},
 	}
 
@@ -1102,7 +1338,7 @@ func TestRunTDPNDSettlementHTTPQueryHappyPathAndLists(t *testing.T) {
 		t.Fatalf("apply penalty seed: %v", err)
 	}
 
-	validatorMsg := validatormodule.NewMsgServer(&scaffold.ValidatorModule.Keeper)
+	validatorMsg := validatormodule.NewMsgServer(scaffold.ValidatorModule.Keeper)
 	if _, err := validatorMsg.SetValidatorEligibility(validatormodule.SetValidatorEligibilityRequest{
 		Eligibility: validatortypes.ValidatorEligibility{
 			ValidatorID:     "val-query-1",
@@ -1125,7 +1361,7 @@ func TestRunTDPNDSettlementHTTPQueryHappyPathAndLists(t *testing.T) {
 		t.Fatalf("record validator status seed: %v", err)
 	}
 
-	governanceMsg := governancemodule.NewMsgServer(&scaffold.GovernanceModule.Keeper)
+	governanceMsg := governancemodule.NewMsgServer(scaffold.GovernanceModule.Keeper)
 	if _, err := governanceMsg.CreatePolicy(governancemodule.CreatePolicyRequest{
 		Policy: governancetypes.GovernancePolicy{
 			PolicyID:        "policy-query-1",
@@ -1374,7 +1610,7 @@ func TestRunTDPNDSettlementHTTPGETQueriesRemainOpenWithAuth(t *testing.T) {
 		},
 		{
 			path: "/x/vpnslashing/evidence",
-			body: `{"EvidenceID":"ev-auth-open-1","SubjectID":"provider-auth-open-1","SessionID":"sess-auth-open-1","ViolationType":"objective","EvidenceRef":"sha256:9bbf13c7bdf221673b5d927e27af94491bef49ed1f623c05e2e9206ea0f21934","ObservedAt":"2026-01-01T00:00:00Z"}`,
+			body: `{"EvidenceID":"ev-auth-open-1","SubjectID":"provider-auth-open-1","SessionID":"sess-auth-open-1","ViolationType":"double-sign","EvidenceRef":"sha256:9bbf13c7bdf221673b5d927e27af94491bef49ed1f623c05e2e9206ea0f21934","ObservedAt":"2026-01-01T00:00:00Z"}`,
 		},
 		{
 			path: "/x/vpnvalidator/eligibilities",

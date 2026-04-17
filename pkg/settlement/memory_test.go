@@ -3,6 +3,7 @@ package settlement
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -216,6 +217,119 @@ func (a *replayConfirmingAdapter) settlementCalls() int {
 	return a.sessionSubmitCalls
 }
 
+type multiOperationReplayAdapter struct {
+	mu                 sync.Mutex
+	fail               bool
+	sessionSubmitCalls int
+	rewardSubmitCalls  int
+	sponsorSubmitCalls int
+	slashEvidenceCalls int
+}
+
+func (a *multiOperationReplayAdapter) setFail(v bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.fail = v
+}
+
+func (a *multiOperationReplayAdapter) SubmitSessionSettlement(_ context.Context, settlement SessionSettlement) (string, error) {
+	a.mu.Lock()
+	a.sessionSubmitCalls++
+	fail := a.fail
+	a.mu.Unlock()
+	if fail {
+		return "", errFakeAdapter
+	}
+	return "chain-set-" + settlement.SessionID, nil
+}
+
+func (a *multiOperationReplayAdapter) SubmitRewardIssue(_ context.Context, reward RewardIssue) (string, error) {
+	a.mu.Lock()
+	a.rewardSubmitCalls++
+	fail := a.fail
+	a.mu.Unlock()
+	if fail {
+		return "", errFakeAdapter
+	}
+	return "chain-rew-" + reward.RewardID, nil
+}
+
+func (a *multiOperationReplayAdapter) SubmitSponsorReservation(_ context.Context, reservation SponsorCreditReservation) (string, error) {
+	a.mu.Lock()
+	a.sponsorSubmitCalls++
+	fail := a.fail
+	a.mu.Unlock()
+	if fail {
+		return "", errFakeAdapter
+	}
+	return "chain-sponsor-res-" + reservation.ReservationID, nil
+}
+
+func (a *multiOperationReplayAdapter) SubmitSlashEvidence(_ context.Context, evidence SlashEvidence) (string, error) {
+	a.mu.Lock()
+	a.slashEvidenceCalls++
+	fail := a.fail
+	a.mu.Unlock()
+	if fail {
+		return "", errFakeAdapter
+	}
+	return "chain-slash-" + evidence.EvidenceID, nil
+}
+
+func (a *multiOperationReplayAdapter) Health(_ context.Context) error { return nil }
+
+func (a *multiOperationReplayAdapter) HasSessionSettlement(_ context.Context, settlementID string) (bool, error) {
+	a.mu.Lock()
+	fail := a.fail
+	a.mu.Unlock()
+	return !fail && settlementID != "", nil
+}
+
+func (a *multiOperationReplayAdapter) HasRewardIssue(_ context.Context, rewardID string) (bool, error) {
+	a.mu.Lock()
+	fail := a.fail
+	a.mu.Unlock()
+	return !fail && strings.TrimSpace(rewardID) != "", nil
+}
+
+func (a *multiOperationReplayAdapter) HasSponsorReservation(_ context.Context, reservationID string) (bool, error) {
+	a.mu.Lock()
+	fail := a.fail
+	a.mu.Unlock()
+	return !fail && strings.TrimSpace(reservationID) != "", nil
+}
+
+func (a *multiOperationReplayAdapter) HasSlashEvidence(_ context.Context, evidenceID string) (bool, error) {
+	a.mu.Lock()
+	fail := a.fail
+	a.mu.Unlock()
+	return !fail && strings.TrimSpace(evidenceID) != "", nil
+}
+
+func (a *multiOperationReplayAdapter) settlementCalls() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.sessionSubmitCalls
+}
+
+func (a *multiOperationReplayAdapter) rewardCalls() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.rewardSubmitCalls
+}
+
+func (a *multiOperationReplayAdapter) sponsorCalls() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.sponsorSubmitCalls
+}
+
+func (a *multiOperationReplayAdapter) slashCalls() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.slashEvidenceCalls
+}
+
 type confirmingAdapter struct{}
 
 func (a confirmingAdapter) SubmitSessionSettlement(_ context.Context, settlement SessionSettlement) (string, error) {
@@ -316,6 +430,64 @@ func setupDeferredSettlement(t *testing.T, s *MemoryService, sessionID string) {
 	if !settlement.AdapterDeferred {
 		t.Fatalf("expected deferred settlement for session %s", sessionID)
 	}
+}
+
+func setupDeferredNonSettlementOperations(t *testing.T, s *MemoryService, suffix string) (string, string, string, string, string) {
+	t.Helper()
+	ctx := context.Background()
+
+	sessionID := "sess-replay-" + suffix
+	rewardID := "rew-replay-" + suffix
+	reservationID := "sres-replay-" + suffix
+	evidenceID := "ev-replay-" + suffix
+	slashSubjectID := "provider-" + suffix
+
+	reward, err := s.IssueReward(ctx, RewardIssue{
+		RewardID:          rewardID,
+		ProviderSubjectID: "provider-" + suffix,
+		SessionID:         sessionID,
+		RewardMicros:      33,
+		Currency:          "TDPNC",
+	})
+	if err != nil {
+		t.Fatalf("IssueReward: %v", err)
+	}
+	if !reward.AdapterDeferred {
+		t.Fatalf("expected deferred reward for %s", rewardID)
+	}
+
+	reservation, err := s.ReserveSponsorCredits(ctx, SponsorCreditReservation{
+		ReservationID: reservationID,
+		SponsorID:     "sponsor-" + suffix,
+		SubjectID:     "client-" + suffix,
+		SessionID:     sessionID,
+		AmountMicros:  150,
+		Currency:      "TDPNC",
+	})
+	if err != nil {
+		t.Fatalf("ReserveSponsorCredits: %v", err)
+	}
+	if !reservation.AdapterDeferred {
+		t.Fatalf("expected deferred sponsor reservation for %s", reservationID)
+	}
+
+	evidence, err := s.SubmitSlashEvidence(ctx, SlashEvidence{
+		EvidenceID:    evidenceID,
+		SubjectID:     slashSubjectID,
+		SessionID:     sessionID,
+		ViolationType: "double-sign",
+		EvidenceRef:   testSHA256Ref("replay-" + suffix),
+		SlashMicros:   9,
+		Currency:      "TDPNC",
+	})
+	if err != nil {
+		t.Fatalf("SubmitSlashEvidence: %v", err)
+	}
+	if !evidence.AdapterDeferred {
+		t.Fatalf("expected deferred slash evidence for %s", evidenceID)
+	}
+
+	return sessionID, rewardID, reservationID, evidenceID, slashSubjectID
 }
 
 func setupSettledSessionForShadowTests(t *testing.T, s *MemoryService, sessionID string) SessionSettlement {
@@ -734,6 +906,112 @@ func TestMemoryServiceReconcileReplayPromotesToConfirmedWhenQuerierAvailable(t *
 	}
 	if gotCalls := adapter.settlementCalls(); gotCalls != 2 {
 		t.Fatalf("expected exactly two settlement submissions (initial fail + single replay), got %d", gotCalls)
+	}
+}
+
+func TestMemoryServiceReconcileReplayFailureRetainsBacklogAcrossNonSettlementOperations(t *testing.T) {
+	adapter := &multiOperationReplayAdapter{fail: true}
+	s := NewMemoryService(
+		WithPricePerMiBMicros(1024*1024),
+		WithChainAdapter(adapter),
+	)
+	sessionID, rewardID, reservationID, evidenceID, slashSubjectID := setupDeferredNonSettlementOperations(t, s, "non-set-fail-1")
+
+	report, err := s.Reconcile(context.Background())
+	if err != nil {
+		t.Fatalf("Reconcile with persistent adapter failure: %v", err)
+	}
+	if report.PendingAdapterOperations != 3 {
+		t.Fatalf("expected deferred backlog 3 after failed replay, got %d", report.PendingAdapterOperations)
+	}
+	if report.FailedOperations < 3 {
+		t.Fatalf("expected at least three failed operations after failed replay, got %d", report.FailedOperations)
+	}
+
+	s.mu.Lock()
+	reward := s.rewardsByID[rewardID]
+	reservation := s.sponsorReservationsByID[reservationID]
+	evidence := s.slashEvidenceByID[evidenceID]
+	rewardOp, hasRewardOp := s.deferredAdapterOps[cosmosID("reward", rewardID, sessionID)]
+	reservationOp, hasReservationOp := s.deferredAdapterOps[cosmosID("sponsor-reservation", reservationID, sessionID)]
+	evidenceOp, hasEvidenceOp := s.deferredAdapterOps[cosmosID("slash", evidenceID, slashSubjectID)]
+	s.mu.Unlock()
+
+	if reward.Status != OperationStatusFailed || !reward.AdapterDeferred || reward.AdapterSubmitted {
+		t.Fatalf("expected reward to retain failed+deferred state after failed replay")
+	}
+	if reservation.Status != OperationStatusFailed || !reservation.AdapterDeferred || reservation.AdapterSubmitted {
+		t.Fatalf("expected sponsor reservation to retain failed+deferred state after failed replay")
+	}
+	if evidence.Status != OperationStatusFailed || !evidence.AdapterDeferred || evidence.AdapterSubmitted {
+		t.Fatalf("expected slash evidence to retain failed+deferred state after failed replay")
+	}
+	if !hasRewardOp || !hasReservationOp || !hasEvidenceOp {
+		t.Fatalf("expected deferred operations to be retained for reward/sponsor/slash after failed replay")
+	}
+	if rewardOp.Attempts < 2 || reservationOp.Attempts < 2 || evidenceOp.Attempts < 2 {
+		t.Fatalf("expected deferred attempts >=2 for reward/sponsor/slash, got reward=%d sponsor=%d slash=%d",
+			rewardOp.Attempts, reservationOp.Attempts, evidenceOp.Attempts)
+	}
+	if adapter.rewardCalls() != 2 || adapter.sponsorCalls() != 2 || adapter.slashCalls() != 2 {
+		t.Fatalf("expected exactly two submissions per non-settlement op (initial fail + replay fail), got reward=%d sponsor=%d slash=%d",
+			adapter.rewardCalls(), adapter.sponsorCalls(), adapter.slashCalls())
+	}
+}
+
+func TestMemoryServiceReconcileReplayRecoveryConfirmsAcrossNonSettlementOperations(t *testing.T) {
+	adapter := &multiOperationReplayAdapter{fail: true}
+	s := NewMemoryService(
+		WithPricePerMiBMicros(1024*1024),
+		WithChainAdapter(adapter),
+	)
+	sessionID, rewardID, reservationID, evidenceID, slashSubjectID := setupDeferredNonSettlementOperations(t, s, "non-set-recover-1")
+
+	adapter.setFail(false)
+	report, err := s.Reconcile(context.Background())
+	if err != nil {
+		t.Fatalf("Reconcile after adapter recovery: %v", err)
+	}
+	if report.PendingAdapterOperations != 0 {
+		t.Fatalf("expected deferred backlog cleared after replay recovery, got %d", report.PendingAdapterOperations)
+	}
+	if report.ConfirmedOperations < 3 {
+		t.Fatalf("expected at least three confirmed operations after replay recovery, got %d", report.ConfirmedOperations)
+	}
+
+	s.mu.Lock()
+	reward := s.rewardsByID[rewardID]
+	reservation := s.sponsorReservationsByID[reservationID]
+	evidence := s.slashEvidenceByID[evidenceID]
+	_, hasRewardOp := s.deferredAdapterOps[cosmosID("reward", rewardID, sessionID)]
+	_, hasReservationOp := s.deferredAdapterOps[cosmosID("sponsor-reservation", reservationID, sessionID)]
+	_, hasEvidenceOp := s.deferredAdapterOps[cosmosID("slash", evidenceID, slashSubjectID)]
+	s.mu.Unlock()
+
+	if reward.Status != OperationStatusConfirmed || !reward.AdapterSubmitted || reward.AdapterDeferred {
+		t.Fatalf("expected reward to be confirmed with submitted adapter state after replay recovery")
+	}
+	if reservation.Status != OperationStatusConfirmed || !reservation.AdapterSubmitted || reservation.AdapterDeferred {
+		t.Fatalf("expected sponsor reservation to be confirmed with submitted adapter state after replay recovery")
+	}
+	if evidence.Status != OperationStatusConfirmed || !evidence.AdapterSubmitted || evidence.AdapterDeferred {
+		t.Fatalf("expected slash evidence to be confirmed with submitted adapter state after replay recovery")
+	}
+	if hasRewardOp || hasReservationOp || hasEvidenceOp {
+		t.Fatalf("expected replay recovery to clear deferred operations for reward/sponsor/slash")
+	}
+
+	if adapter.rewardCalls() != 2 || adapter.sponsorCalls() != 2 || adapter.slashCalls() != 2 {
+		t.Fatalf("expected exactly two submissions per non-settlement op (initial fail + single replay), got reward=%d sponsor=%d slash=%d",
+			adapter.rewardCalls(), adapter.sponsorCalls(), adapter.slashCalls())
+	}
+
+	if _, err := s.Reconcile(context.Background()); err != nil {
+		t.Fatalf("second reconcile: %v", err)
+	}
+	if adapter.rewardCalls() != 2 || adapter.sponsorCalls() != 2 || adapter.slashCalls() != 2 {
+		t.Fatalf("expected replay to be idempotent after backlog clears, got reward=%d sponsor=%d slash=%d",
+			adapter.rewardCalls(), adapter.sponsorCalls(), adapter.slashCalls())
 	}
 }
 
@@ -1270,6 +1548,104 @@ func TestMemoryServiceSponsorFlowAuthorizeIdempotent(t *testing.T) {
 	}
 }
 
+func TestMemoryServiceNonSettlementWritesAreIdempotentByRecordID(t *testing.T) {
+	adapter := &multiOperationReplayAdapter{}
+	s := NewMemoryService(WithChainAdapter(adapter))
+	ctx := context.Background()
+
+	rewardA, err := s.IssueReward(ctx, RewardIssue{
+		RewardID:          "rew-idem-1",
+		ProviderSubjectID: "provider-idem-1",
+		SessionID:         "sess-idem-1",
+		RewardMicros:      55,
+		Currency:          "TDPNC",
+	})
+	if err != nil {
+		t.Fatalf("IssueReward first: %v", err)
+	}
+	rewardB, err := s.IssueReward(ctx, RewardIssue{
+		RewardID:          "rew-idem-1",
+		ProviderSubjectID: "provider-idem-override",
+		SessionID:         "sess-idem-override",
+		RewardMicros:      99,
+		Currency:          "TDPNC",
+	})
+	if err != nil {
+		t.Fatalf("IssueReward second: %v", err)
+	}
+	if !rewardB.IdempotentReplay {
+		t.Fatalf("expected idempotent replay marker on duplicate reward write")
+	}
+	if rewardA.RewardID != rewardB.RewardID || rewardA.ProviderSubjectID != rewardB.ProviderSubjectID || rewardA.SessionID != rewardB.SessionID {
+		t.Fatalf("expected duplicate reward write to return original record identity")
+	}
+
+	reservationA, err := s.ReserveSponsorCredits(ctx, SponsorCreditReservation{
+		ReservationID: "sres-idem-1",
+		SponsorID:     "sponsor-idem-1",
+		SubjectID:     "client-idem-1",
+		SessionID:     "sess-idem-1",
+		AmountMicros:  300,
+		Currency:      "TDPNC",
+	})
+	if err != nil {
+		t.Fatalf("ReserveSponsorCredits first: %v", err)
+	}
+	reservationB, err := s.ReserveSponsorCredits(ctx, SponsorCreditReservation{
+		ReservationID: "sres-idem-1",
+		SponsorID:     "sponsor-idem-override",
+		SubjectID:     "client-idem-override",
+		SessionID:     "sess-idem-override",
+		AmountMicros:  999,
+		Currency:      "TDPNC",
+	})
+	if err != nil {
+		t.Fatalf("ReserveSponsorCredits second: %v", err)
+	}
+	if !reservationB.IdempotentReplay {
+		t.Fatalf("expected idempotent replay marker on duplicate sponsor reservation")
+	}
+	if reservationA.ReservationID != reservationB.ReservationID || reservationA.SponsorID != reservationB.SponsorID || reservationA.SubjectID != reservationB.SubjectID {
+		t.Fatalf("expected duplicate sponsor reservation write to return original record identity")
+	}
+
+	evidenceA, err := s.SubmitSlashEvidence(ctx, SlashEvidence{
+		EvidenceID:    "ev-idem-1",
+		SubjectID:     "provider-idem-1",
+		SessionID:     "sess-idem-1",
+		ViolationType: "double-sign",
+		EvidenceRef:   testSHA256Ref("slash-idem-a"),
+		SlashMicros:   17,
+		Currency:      "TDPNC",
+	})
+	if err != nil {
+		t.Fatalf("SubmitSlashEvidence first: %v", err)
+	}
+	evidenceB, err := s.SubmitSlashEvidence(ctx, SlashEvidence{
+		EvidenceID:    "ev-idem-1",
+		SubjectID:     "provider-idem-override",
+		SessionID:     "sess-idem-override",
+		ViolationType: "sponsor-overdraft-proof",
+		EvidenceRef:   testSHA256Ref("slash-idem-b"),
+		SlashMicros:   123,
+		Currency:      "TDPNC",
+	})
+	if err != nil {
+		t.Fatalf("SubmitSlashEvidence second: %v", err)
+	}
+	if !evidenceB.IdempotentReplay {
+		t.Fatalf("expected idempotent replay marker on duplicate slash evidence write")
+	}
+	if evidenceA.EvidenceID != evidenceB.EvidenceID || evidenceA.SubjectID != evidenceB.SubjectID || evidenceA.EvidenceRef != evidenceB.EvidenceRef {
+		t.Fatalf("expected duplicate slash evidence write to return original proof identity")
+	}
+
+	if adapter.rewardCalls() != 1 || adapter.sponsorCalls() != 1 || adapter.slashCalls() != 1 {
+		t.Fatalf("expected duplicate writes not to resubmit adapter operations, got reward=%d sponsor=%d slash=%d",
+			adapter.rewardCalls(), adapter.sponsorCalls(), adapter.slashCalls())
+	}
+}
+
 func TestMemoryServiceAuthorizePaymentRequiresReservationID(t *testing.T) {
 	s := NewMemoryService()
 	_, err := s.AuthorizePayment(context.Background(), PaymentProof{
@@ -1524,6 +1900,69 @@ func TestMemoryServiceSettleSessionCurrencyConversion(t *testing.T) {
 	}
 	if settlement.ChargedMicros != 2_000_000 {
 		t.Fatalf("expected converted charge 2000000, got %d", settlement.ChargedMicros)
+	}
+}
+
+func TestMemoryServiceSettleSessionRejectsUsageByteOverflow(t *testing.T) {
+	s := NewMemoryService()
+	ctx := context.Background()
+	const sessionID = "sess-overflow-bytes-1"
+
+	_, err := s.ReserveFunds(ctx, FundReservation{
+		SessionID:    sessionID,
+		SubjectID:    "client-overflow-bytes-1",
+		AmountMicros: math.MaxInt64,
+		Currency:     "TDPNC",
+	})
+	if err != nil {
+		t.Fatalf("ReserveFunds: %v", err)
+	}
+	if err := s.RecordUsage(ctx, UsageRecord{
+		SessionID:    sessionID,
+		SubjectID:    "client-overflow-bytes-1",
+		BytesIngress: math.MaxInt64,
+		BytesEgress:  1,
+	}); err != nil {
+		t.Fatalf("RecordUsage: %v", err)
+	}
+
+	_, err = s.SettleSession(ctx, sessionID)
+	if err == nil {
+		t.Fatalf("expected usage byte overflow to fail settle")
+	}
+	if !strings.Contains(err.Error(), "usage byte counters overflow") {
+		t.Fatalf("unexpected usage byte overflow error: %v", err)
+	}
+}
+
+func TestMemoryServiceSettleSessionRejectsChargeOverflow(t *testing.T) {
+	s := NewMemoryService(WithPricePerMiBMicros(math.MaxInt64))
+	ctx := context.Background()
+	const sessionID = "sess-overflow-charge-1"
+
+	_, err := s.ReserveFunds(ctx, FundReservation{
+		SessionID:    sessionID,
+		SubjectID:    "client-overflow-charge-1",
+		AmountMicros: math.MaxInt64,
+		Currency:     "TDPNC",
+	})
+	if err != nil {
+		t.Fatalf("ReserveFunds: %v", err)
+	}
+	if err := s.RecordUsage(ctx, UsageRecord{
+		SessionID:    sessionID,
+		SubjectID:    "client-overflow-charge-1",
+		BytesIngress: 2 * 1024 * 1024, // 2 MiB
+	}); err != nil {
+		t.Fatalf("RecordUsage: %v", err)
+	}
+
+	_, err = s.SettleSession(ctx, sessionID)
+	if err == nil {
+		t.Fatalf("expected settlement charge overflow to fail settle")
+	}
+	if !strings.Contains(err.Error(), "settlement charge overflow") {
+		t.Fatalf("unexpected settlement charge overflow error: %v", err)
 	}
 }
 

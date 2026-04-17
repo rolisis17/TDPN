@@ -197,6 +197,7 @@ func TestFileStorePersistsAcrossReopen(t *testing.T) {
 		EvidenceID:      "evidence-file-1",
 		SessionID:       "session-file-1",
 		ProviderID:      "provider-file-1",
+		ViolationType:   "session-replay-proof",
 		Kind:            types.EvidenceKindObjective,
 		ProofHash:       testSHAProof("proof-file-1"),
 		SubmittedAtUnix: 1700000000,
@@ -260,18 +261,20 @@ func TestFileStoreListEvidenceAndPenaltiesAcrossReopen(t *testing.T) {
 	}
 
 	evidenceA := types.SlashEvidence{
-		EvidenceID: "evidence-file-a",
-		ProviderID: "provider-a",
-		Kind:       types.EvidenceKindObjective,
-		ProofHash:  testSHAProof("proof-a"),
-		Status:     chaintypes.ReconciliationPending,
+		EvidenceID:    "evidence-file-a",
+		ProviderID:    "provider-a",
+		ViolationType: "double-sign",
+		Kind:          types.EvidenceKindObjective,
+		ProofHash:     testSHAProof("proof-a"),
+		Status:        chaintypes.ReconciliationPending,
 	}
 	evidenceB := types.SlashEvidence{
-		EvidenceID: "evidence-file-b",
-		ProviderID: "provider-b",
-		Kind:       types.EvidenceKindObjective,
-		ProofHash:  testSHAProof("proof-b"),
-		Status:     chaintypes.ReconciliationSubmitted,
+		EvidenceID:    "evidence-file-b",
+		ProviderID:    "provider-b",
+		ViolationType: "downtime-proof",
+		Kind:          types.EvidenceKindObjective,
+		ProofHash:     testSHAProof("proof-b"),
+		Status:        chaintypes.ReconciliationSubmitted,
 	}
 	penaltyA := types.PenaltyDecision{
 		PenaltyID:       "penalty-file-a",

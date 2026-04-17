@@ -17,7 +17,8 @@ Usage:
     [--summary-json PATH] \
     [--canonical-summary-json PATH] \
     [--refresh-roadmap [0|1]] \
-    [--print-summary-json [0|1]]
+    [--print-summary-json [0|1]] \
+    [--print-output-json [0|1]]
 
 Purpose:
   Run one deterministic blockchain activation-gate cycle:
@@ -76,6 +77,12 @@ bool_arg_or_die() {
     echo "$name must be 0 or 1"
     exit 2
   fi
+}
+
+is_nonempty_iso_utc() {
+  local value
+  value="$(trim "${1:-}")"
+  [[ -n "$value" && "$value" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]
 }
 
 path_arg_or_die() {
@@ -234,7 +241,7 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
-    --print-summary-json)
+    --print-summary-json|--print-output-json)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         print_summary_json="${2:-}"
         shift 2
@@ -368,6 +375,10 @@ fi
 
 run_started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 run_started_epoch="$(date -u +%s)"
+activation_summary_generated_at=""
+bootstrap_summary_generated_at=""
+gate_summary_generated_at_validation_status="skipped"
+gate_summary_generated_at_validation_rc=41
 
 if [[ "$seeded_input_active" == "1" ]]; then
   metrics_input_template_cmd=(
@@ -415,6 +426,27 @@ if [[ "${step_status[metrics_input]}" == "pass" ]]; then
   run_step "gate_bundle" "${gate_bundle_cmd[@]}"
 else
   step_status["gate_bundle"]="skipped"
+fi
+
+if [[ "${step_status[gate_bundle]}" == "pass" ]]; then
+  gate_summary_generated_at_validation_status="pass"
+  activation_summary_generated_at="$(trim "$(json_text_or_empty "$bundle_activation_summary_json" '.generated_at')")"
+  bootstrap_summary_generated_at="$(trim "$(json_text_or_empty "$bundle_bootstrap_summary_json" '.generated_at')")"
+
+  if ! is_nonempty_iso_utc "$activation_summary_generated_at"; then
+    gate_summary_generated_at_validation_status="fail"
+    echo "[blockchain-mainnet-activation-gate-cycle] step=gate_bundle status=fail reason=activation_summary_generated_at_invalid summary_json=$bundle_activation_summary_json value=${activation_summary_generated_at:-empty}"
+  fi
+  if ! is_nonempty_iso_utc "$bootstrap_summary_generated_at"; then
+    gate_summary_generated_at_validation_status="fail"
+    echo "[blockchain-mainnet-activation-gate-cycle] step=gate_bundle status=fail reason=bootstrap_summary_generated_at_invalid summary_json=$bundle_bootstrap_summary_json value=${bootstrap_summary_generated_at:-empty}"
+  fi
+
+  if [[ "$gate_summary_generated_at_validation_status" == "fail" ]]; then
+    step_status["gate_bundle"]="fail"
+    step_rc["gate_bundle"]="$gate_summary_generated_at_validation_rc"
+    echo "[blockchain-mainnet-activation-gate-cycle] step=gate_bundle status=fail rc=$gate_summary_generated_at_validation_rc reason=gate_summary_generated_at_contract"
+  fi
 fi
 
 if [[ "$emit_missing_checklist" == "1" ]]; then
@@ -543,6 +575,9 @@ jq -n \
   --arg missing_metrics_checklist_status "$missing_metrics_checklist_status" \
   --argjson missing_metrics_checklist_missing_count "$missing_metrics_checklist_missing_count_raw" \
   --argjson missing_metrics_checklist_missing_keys "$missing_metrics_checklist_missing_keys_json" \
+  --arg activation_summary_generated_at "$activation_summary_generated_at" \
+  --arg bootstrap_summary_generated_at "$bootstrap_summary_generated_at" \
+  --arg gate_summary_generated_at_validation_status "$gate_summary_generated_at_validation_status" \
   --arg metrics_input_template_status "${step_status[metrics_input_template]}" \
   --argjson metrics_input_template_rc "${step_rc[metrics_input_template]}" \
   --arg metrics_input_template_command "${step_command[metrics_input_template]}" \
@@ -579,7 +614,7 @@ jq -n \
     completed_at: $completed_at,
     duration_sec: $duration_sec,
     status: $status,
-    decision: (if $bundle_decision == "" then "UNKNOWN" else $bundle_decision end),
+    decision: (if $gate_summary_generated_at_validation_status == "fail" or $bundle_decision == "" then "UNKNOWN" else $bundle_decision end),
     rc: $rc,
     first_runtime_failure: {
       step: (if $first_runtime_failure_step == "" then null else $first_runtime_failure_step end),
@@ -623,10 +658,16 @@ jq -n \
         command: $gate_bundle_command,
         started_at: (if $gate_bundle_started_at == "" then null else $gate_bundle_started_at end),
         completed_at: (if $gate_bundle_completed_at == "" then null else $gate_bundle_completed_at end),
-        decision: (if $bundle_decision == "" then null else $bundle_decision end),
+        decision: (if $gate_summary_generated_at_validation_status == "fail" or $bundle_decision == "" then null else $bundle_decision end),
         bundle_status: (if $bundle_status == "" then null else $bundle_status end),
         bundle_rc: $bundle_rc,
         missing_required_metrics: $bundle_missing_required_metrics,
+        activation_summary_generated_at: (if $activation_summary_generated_at == "" then null else $activation_summary_generated_at end),
+        bootstrap_summary_generated_at: (if $bootstrap_summary_generated_at == "" then null else $bootstrap_summary_generated_at end),
+        gate_summary_generated_at_contract: {
+          status: $gate_summary_generated_at_validation_status,
+          requires_nonempty_iso_utc: true
+        },
         artifacts: {
           summary_json: $bundle_summary_json,
           canonical_summary_json: $bundle_canonical_summary_json,

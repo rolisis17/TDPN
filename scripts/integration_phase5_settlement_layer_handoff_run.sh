@@ -196,7 +196,13 @@ Flags:
   --require-settlement-bridge-smoke-ok [0|1]
   --require-settlement-state-persistence-ok [0|1]
   --require-settlement-dual-asset-parity-ok [0|1]
+  --require-settlement-adapter-signed-tx-roundtrip-ok [0|1]
+  --require-settlement-shadow-env-ok [0|1]
+  --require-settlement-shadow-status-surface-ok [0|1]
   --require-issuer-sponsor-api-live-smoke-ok [0|1]
+  --require-issuer-sponsor-vpn-session-live-smoke-ok [0|1]
+  --require-issuer-settlement-status-live-smoke-ok [0|1]
+  --require-exit-settlement-status-live-smoke-ok [0|1]
   --require-issuer-admin-blockchain-handlers-coverage-ok [0|1]
 EOF_HELP
   fi
@@ -213,6 +219,12 @@ printf 'handoff\t%s\n' "$*" >>"$capture"
 summary_json=""
 require_issuer_sponsor_api_live_smoke_ok="1"
 require_settlement_dual_asset_parity_ok="1"
+require_settlement_adapter_signed_tx_roundtrip_ok="1"
+require_settlement_shadow_env_ok="1"
+require_settlement_shadow_status_surface_ok="1"
+require_issuer_settlement_status_live_smoke_ok="0"
+require_exit_settlement_status_live_smoke_ok="0"
+require_issuer_sponsor_vpn_session_live_smoke_ok="1"
 require_issuer_admin_blockchain_handlers_coverage_ok="1"
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -229,12 +241,66 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --require-issuer-sponsor-vpn-session-live-smoke-ok)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_issuer_sponsor_vpn_session_live_smoke_ok="${2:-}"
+        shift 2
+      else
+        require_issuer_sponsor_vpn_session_live_smoke_ok="1"
+        shift
+      fi
+      ;;
     --require-settlement-dual-asset-parity-ok|--require-settlement-dual-asset-ok)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         require_settlement_dual_asset_parity_ok="${2:-}"
         shift 2
       else
         require_settlement_dual_asset_parity_ok="1"
+        shift
+      fi
+      ;;
+    --require-settlement-adapter-signed-tx-roundtrip-ok)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_settlement_adapter_signed_tx_roundtrip_ok="${2:-}"
+        shift 2
+      else
+        require_settlement_adapter_signed_tx_roundtrip_ok="1"
+        shift
+      fi
+      ;;
+    --require-settlement-shadow-env-ok)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_settlement_shadow_env_ok="${2:-}"
+        shift 2
+      else
+        require_settlement_shadow_env_ok="1"
+        shift
+      fi
+      ;;
+    --require-settlement-shadow-status-surface-ok)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_settlement_shadow_status_surface_ok="${2:-}"
+        shift 2
+      else
+        require_settlement_shadow_status_surface_ok="1"
+        shift
+      fi
+      ;;
+    --require-issuer-settlement-status-live-smoke-ok)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_issuer_settlement_status_live_smoke_ok="${2:-}"
+        shift 2
+      else
+        require_issuer_settlement_status_live_smoke_ok="1"
+        shift
+      fi
+      ;;
+    --require-exit-settlement-status-live-smoke-ok)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_exit_settlement_status_live_smoke_ok="${2:-}"
+        shift 2
+      else
+        require_exit_settlement_status_live_smoke_ok="1"
         shift
       fi
       ;;
@@ -284,6 +350,78 @@ case "$sponsor_mode" in
     ;;
 esac
 
+sponsor_vpn_session_mode="${FAKE_HANDOFF_ISSUER_SPONSOR_VPN_SESSION_LIVE_SMOKE_SIGNAL_MODE:-pass}"
+sponsor_vpn_session_ok_json="true"
+sponsor_vpn_session_status="pass"
+sponsor_vpn_session_resolved_json="true"
+sponsor_vpn_session_source="phase5_settlement_layer_handoff_check.signals.issuer_sponsor_vpn_session_live_smoke_ok"
+case "$sponsor_vpn_session_mode" in
+  unresolved)
+    sponsor_vpn_session_ok_json="null"
+    sponsor_vpn_session_status="missing"
+    sponsor_vpn_session_resolved_json="false"
+    sponsor_vpn_session_source="unresolved"
+    ;;
+  fail)
+    sponsor_vpn_session_ok_json="false"
+    sponsor_vpn_session_status="fail"
+    sponsor_vpn_session_resolved_json="true"
+    ;;
+  *)
+    sponsor_vpn_session_ok_json="true"
+    sponsor_vpn_session_status="pass"
+    sponsor_vpn_session_resolved_json="true"
+    ;;
+esac
+
+issuer_settlement_status_mode="${FAKE_HANDOFF_ISSUER_SETTLEMENT_STATUS_SIGNAL_MODE:-pass}"
+issuer_settlement_status_ok_json="true"
+issuer_settlement_status_status="pass"
+issuer_settlement_status_resolved_json="true"
+issuer_settlement_status_source="phase5_settlement_layer_handoff_check.signals.issuer_settlement_status_live_smoke_ok"
+case "$issuer_settlement_status_mode" in
+  unresolved)
+    issuer_settlement_status_ok_json="null"
+    issuer_settlement_status_status="missing"
+    issuer_settlement_status_resolved_json="false"
+    issuer_settlement_status_source="unresolved"
+    ;;
+  fail)
+    issuer_settlement_status_ok_json="false"
+    issuer_settlement_status_status="fail"
+    issuer_settlement_status_resolved_json="true"
+    ;;
+  *)
+    issuer_settlement_status_ok_json="true"
+    issuer_settlement_status_status="pass"
+    issuer_settlement_status_resolved_json="true"
+    ;;
+esac
+
+exit_settlement_status_mode="${FAKE_HANDOFF_EXIT_SETTLEMENT_STATUS_SIGNAL_MODE:-pass}"
+exit_settlement_status_ok_json="true"
+exit_settlement_status_status="pass"
+exit_settlement_status_resolved_json="true"
+exit_settlement_status_source="phase5_settlement_layer_handoff_check.signals.exit_settlement_status_live_smoke_ok"
+case "$exit_settlement_status_mode" in
+  unresolved)
+    exit_settlement_status_ok_json="null"
+    exit_settlement_status_status="missing"
+    exit_settlement_status_resolved_json="false"
+    exit_settlement_status_source="unresolved"
+    ;;
+  fail)
+    exit_settlement_status_ok_json="false"
+    exit_settlement_status_status="fail"
+    exit_settlement_status_resolved_json="true"
+    ;;
+  *)
+    exit_settlement_status_ok_json="true"
+    exit_settlement_status_status="pass"
+    exit_settlement_status_resolved_json="true"
+    ;;
+esac
+
 dual_asset_mode="${FAKE_HANDOFF_DUAL_ASSET_SIGNAL_MODE:-pass}"
 dual_asset_ok_json="true"
 dual_asset_status="pass"
@@ -305,6 +443,78 @@ case "$dual_asset_mode" in
     dual_asset_ok_json="true"
     dual_asset_status="pass"
     dual_asset_resolved_json="true"
+    ;;
+esac
+
+adapter_signed_tx_mode="${FAKE_HANDOFF_SETTLEMENT_ADAPTER_SIGNED_TX_ROUNDTRIP_SIGNAL_MODE:-pass}"
+adapter_signed_tx_ok_json="true"
+adapter_signed_tx_status="pass"
+adapter_signed_tx_resolved_json="true"
+adapter_signed_tx_source="phase5_settlement_layer_handoff_check.signals.settlement_adapter_signed_tx_roundtrip_ok"
+case "$adapter_signed_tx_mode" in
+  unresolved)
+    adapter_signed_tx_ok_json="null"
+    adapter_signed_tx_status="missing"
+    adapter_signed_tx_resolved_json="false"
+    adapter_signed_tx_source="unresolved"
+    ;;
+  fail)
+    adapter_signed_tx_ok_json="false"
+    adapter_signed_tx_status="fail"
+    adapter_signed_tx_resolved_json="true"
+    ;;
+  *)
+    adapter_signed_tx_ok_json="true"
+    adapter_signed_tx_status="pass"
+    adapter_signed_tx_resolved_json="true"
+    ;;
+esac
+
+shadow_env_mode="${FAKE_HANDOFF_SETTLEMENT_SHADOW_ENV_SIGNAL_MODE:-pass}"
+shadow_env_ok_json="true"
+shadow_env_status="pass"
+shadow_env_resolved_json="true"
+shadow_env_source="phase5_settlement_layer_handoff_check.signals.settlement_shadow_env_ok"
+case "$shadow_env_mode" in
+  unresolved)
+    shadow_env_ok_json="null"
+    shadow_env_status="missing"
+    shadow_env_resolved_json="false"
+    shadow_env_source="unresolved"
+    ;;
+  fail)
+    shadow_env_ok_json="false"
+    shadow_env_status="fail"
+    shadow_env_resolved_json="true"
+    ;;
+  *)
+    shadow_env_ok_json="true"
+    shadow_env_status="pass"
+    shadow_env_resolved_json="true"
+    ;;
+esac
+
+shadow_status_surface_mode="${FAKE_HANDOFF_SETTLEMENT_SHADOW_STATUS_SURFACE_SIGNAL_MODE:-pass}"
+shadow_status_surface_ok_json="true"
+shadow_status_surface_status="pass"
+shadow_status_surface_resolved_json="true"
+shadow_status_surface_source="phase5_settlement_layer_handoff_check.signals.settlement_shadow_status_surface_ok"
+case "$shadow_status_surface_mode" in
+  unresolved)
+    shadow_status_surface_ok_json="null"
+    shadow_status_surface_status="missing"
+    shadow_status_surface_resolved_json="false"
+    shadow_status_surface_source="unresolved"
+    ;;
+  fail)
+    shadow_status_surface_ok_json="false"
+    shadow_status_surface_status="fail"
+    shadow_status_surface_resolved_json="true"
+    ;;
+  *)
+    shadow_status_surface_ok_json="true"
+    shadow_status_surface_status="pass"
+    shadow_status_surface_resolved_json="true"
     ;;
 esac
 
@@ -348,7 +558,13 @@ if [[ -n "$summary_json" && "${FAKE_HANDOFF_OMIT_SUMMARY:-0}" != "1" ]]; then
   "inputs": {
     "requirements": {
       "settlement_dual_asset_parity_ok": $( [[ "$require_settlement_dual_asset_parity_ok" == "1" ]] && printf '%s' "true" || printf '%s' "false" ),
+      "settlement_adapter_signed_tx_roundtrip_ok": $( [[ "$require_settlement_adapter_signed_tx_roundtrip_ok" == "1" ]] && printf '%s' "true" || printf '%s' "false" ),
+      "settlement_shadow_env_ok": $( [[ "$require_settlement_shadow_env_ok" == "1" ]] && printf '%s' "true" || printf '%s' "false" ),
+      "settlement_shadow_status_surface_ok": $( [[ "$require_settlement_shadow_status_surface_ok" == "1" ]] && printf '%s' "true" || printf '%s' "false" ),
       "issuer_sponsor_api_live_smoke_ok": $( [[ "$require_issuer_sponsor_api_live_smoke_ok" == "1" ]] && printf '%s' "true" || printf '%s' "false" ),
+      "issuer_sponsor_vpn_session_live_smoke_ok": $( [[ "$require_issuer_sponsor_vpn_session_live_smoke_ok" == "1" ]] && printf '%s' "true" || printf '%s' "false" ),
+      "issuer_settlement_status_live_smoke_ok": $( [[ "$require_issuer_settlement_status_live_smoke_ok" == "1" ]] && printf '%s' "true" || printf '%s' "false" ),
+      "exit_settlement_status_live_smoke_ok": $( [[ "$require_exit_settlement_status_live_smoke_ok" == "1" ]] && printf '%s' "true" || printf '%s' "false" ),
       "issuer_admin_blockchain_handlers_coverage_ok": $( [[ "$require_issuer_admin_blockchain_handlers_coverage_ok" == "1" ]] && printf '%s' "true" || printf '%s' "false" )
     }
   },
@@ -361,15 +577,39 @@ if [[ -n "$summary_json" && "${FAKE_HANDOFF_OMIT_SUMMARY:-0}" != "1" ]]; then
     "settlement_dual_asset_parity_ok": $dual_asset_ok_json,
     "settlement_dual_asset_parity_status": "$dual_asset_status",
     "settlement_dual_asset_parity_resolved": $dual_asset_resolved_json,
+    "settlement_adapter_signed_tx_roundtrip_ok": $adapter_signed_tx_ok_json,
+    "settlement_adapter_signed_tx_roundtrip_status": "$adapter_signed_tx_status",
+    "settlement_adapter_signed_tx_roundtrip_resolved": $adapter_signed_tx_resolved_json,
+    "settlement_shadow_env_ok": $shadow_env_ok_json,
+    "settlement_shadow_env_status": "$shadow_env_status",
+    "settlement_shadow_env_resolved": $shadow_env_resolved_json,
+    "settlement_shadow_status_surface_ok": $shadow_status_surface_ok_json,
+    "settlement_shadow_status_surface_status": "$shadow_status_surface_status",
+    "settlement_shadow_status_surface_resolved": $shadow_status_surface_resolved_json,
     "issuer_sponsor_api_live_smoke_ok": $sponsor_ok_json,
     "issuer_sponsor_api_live_smoke_status": "$sponsor_status",
     "issuer_sponsor_api_live_smoke_resolved": $sponsor_resolved_json,
+    "issuer_sponsor_vpn_session_live_smoke_ok": $sponsor_vpn_session_ok_json,
+    "issuer_sponsor_vpn_session_live_smoke_status": "$sponsor_vpn_session_status",
+    "issuer_sponsor_vpn_session_live_smoke_resolved": $sponsor_vpn_session_resolved_json,
+    "issuer_settlement_status_live_smoke_ok": $issuer_settlement_status_ok_json,
+    "issuer_settlement_status_live_smoke_status": "$issuer_settlement_status_status",
+    "issuer_settlement_status_live_smoke_resolved": $issuer_settlement_status_resolved_json,
+    "exit_settlement_status_live_smoke_ok": $exit_settlement_status_ok_json,
+    "exit_settlement_status_live_smoke_status": "$exit_settlement_status_status",
+    "exit_settlement_status_live_smoke_resolved": $exit_settlement_status_resolved_json,
     "issuer_admin_blockchain_handlers_coverage_ok": $issuer_admin_ok_json,
     "issuer_admin_blockchain_handlers_coverage_status": "$issuer_admin_status",
     "issuer_admin_blockchain_handlers_coverage_resolved": $issuer_admin_resolved_json,
     "sources": {
       "settlement_dual_asset_parity_ok": "$dual_asset_source",
+      "settlement_adapter_signed_tx_roundtrip_ok": "$adapter_signed_tx_source",
+      "settlement_shadow_env_ok": "$shadow_env_source",
+      "settlement_shadow_status_surface_ok": "$shadow_status_surface_source",
       "issuer_sponsor_api_live_smoke_ok": "$sponsor_source",
+      "issuer_sponsor_vpn_session_live_smoke_ok": "$sponsor_vpn_session_source",
+      "issuer_settlement_status_live_smoke_ok": "$issuer_settlement_status_source",
+      "exit_settlement_status_live_smoke_ok": "$exit_settlement_status_source",
       "issuer_admin_blockchain_handlers_coverage_ok": "$issuer_admin_source"
     }
   },
@@ -465,11 +705,41 @@ if ! jq -e --arg run_summary "$TMP_DIR/pass_run_summary.json" --arg handoff_summ
   and .handoff.settlement_dual_asset_parity_required == true
   and .handoff.settlement_dual_asset_parity_resolved == true
   and .handoff.sources.settlement_dual_asset_parity_ok == "phase5_settlement_layer_handoff_check.signals.settlement_dual_asset_parity_ok"
+  and .handoff.settlement_adapter_signed_tx_roundtrip_ok == true
+  and .handoff.settlement_adapter_signed_tx_roundtrip_status == "pass"
+  and .handoff.settlement_adapter_signed_tx_roundtrip_required == true
+  and .handoff.settlement_adapter_signed_tx_roundtrip_resolved == true
+  and .handoff.sources.settlement_adapter_signed_tx_roundtrip_ok == "phase5_settlement_layer_handoff_check.signals.settlement_adapter_signed_tx_roundtrip_ok"
+  and .handoff.settlement_shadow_env_ok == true
+  and .handoff.settlement_shadow_env_status == "pass"
+  and .handoff.settlement_shadow_env_required == true
+  and .handoff.settlement_shadow_env_resolved == true
+  and .handoff.sources.settlement_shadow_env_ok == "phase5_settlement_layer_handoff_check.signals.settlement_shadow_env_ok"
+  and .handoff.settlement_shadow_status_surface_ok == true
+  and .handoff.settlement_shadow_status_surface_status == "pass"
+  and .handoff.settlement_shadow_status_surface_required == true
+  and .handoff.settlement_shadow_status_surface_resolved == true
+  and .handoff.sources.settlement_shadow_status_surface_ok == "phase5_settlement_layer_handoff_check.signals.settlement_shadow_status_surface_ok"
   and .handoff.issuer_sponsor_api_live_smoke_ok == true
   and .handoff.issuer_sponsor_api_live_smoke_status == "pass"
   and .handoff.issuer_sponsor_api_live_smoke_required == true
   and .handoff.issuer_sponsor_api_live_smoke_resolved == true
   and .handoff.sources.issuer_sponsor_api_live_smoke_ok == "phase5_settlement_layer_handoff_check.signals.issuer_sponsor_api_live_smoke_ok"
+  and .handoff.issuer_sponsor_vpn_session_live_smoke_ok == true
+  and .handoff.issuer_sponsor_vpn_session_live_smoke_status == "pass"
+  and .handoff.issuer_sponsor_vpn_session_live_smoke_required == true
+  and .handoff.issuer_sponsor_vpn_session_live_smoke_resolved == true
+  and .handoff.sources.issuer_sponsor_vpn_session_live_smoke_ok == "phase5_settlement_layer_handoff_check.signals.issuer_sponsor_vpn_session_live_smoke_ok"
+  and .handoff.issuer_settlement_status_live_smoke_ok == true
+  and .handoff.issuer_settlement_status_live_smoke_status == "pass"
+  and .handoff.issuer_settlement_status_live_smoke_required == false
+  and .handoff.issuer_settlement_status_live_smoke_resolved == true
+  and .handoff.sources.issuer_settlement_status_live_smoke_ok == "phase5_settlement_layer_handoff_check.signals.issuer_settlement_status_live_smoke_ok"
+  and .handoff.exit_settlement_status_live_smoke_ok == true
+  and .handoff.exit_settlement_status_live_smoke_status == "pass"
+  and .handoff.exit_settlement_status_live_smoke_required == false
+  and .handoff.exit_settlement_status_live_smoke_resolved == true
+  and .handoff.sources.exit_settlement_status_live_smoke_ok == "phase5_settlement_layer_handoff_check.signals.exit_settlement_status_live_smoke_ok"
   and .handoff.issuer_admin_blockchain_handlers_coverage_ok == true
   and .handoff.issuer_admin_blockchain_handlers_coverage_status == "pass"
   and .handoff.issuer_admin_blockchain_handlers_coverage_required == true
@@ -489,7 +759,13 @@ PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_RUN_SCRIPT="$FAKE_RUN" \
 PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_HANDOFF_CHECK_SCRIPT="$FAKE_HANDOFF" \
 PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_CANONICAL_SUMMARY_JSON="$DRY_CANONICAL_SUMMARY" \
 FAKE_HANDOFF_SPONSOR_SIGNAL_MODE=unresolved \
+FAKE_HANDOFF_ISSUER_SETTLEMENT_STATUS_SIGNAL_MODE=unresolved \
+FAKE_HANDOFF_EXIT_SETTLEMENT_STATUS_SIGNAL_MODE=unresolved \
 FAKE_HANDOFF_DUAL_ASSET_SIGNAL_MODE=unresolved \
+FAKE_HANDOFF_SETTLEMENT_ADAPTER_SIGNED_TX_ROUNDTRIP_SIGNAL_MODE=unresolved \
+FAKE_HANDOFF_SETTLEMENT_SHADOW_ENV_SIGNAL_MODE=unresolved \
+FAKE_HANDOFF_SETTLEMENT_SHADOW_STATUS_SURFACE_SIGNAL_MODE=unresolved \
+FAKE_HANDOFF_ISSUER_SPONSOR_VPN_SESSION_LIVE_SMOKE_SIGNAL_MODE=unresolved \
 FAKE_HANDOFF_ISSUER_ADMIN_BLOCKCHAIN_HANDLERS_COVERAGE_SIGNAL_MODE=unresolved \
 bash "$RUNNER" \
   --reports-dir "$TMP_DIR/reports_dry" \
@@ -508,7 +784,7 @@ if [[ "$run_line" != *"--dry-run 1"* || "$run_line" != *"--theta 9"* ]]; then
   echo "$run_line"
   exit 1
 fi
-if [[ "$handoff_line" != *"--require-run-pipeline-ok 0"* || "$handoff_line" != *"--require-settlement-failsoft-ok 0"* || "$handoff_line" != *"--require-windows-role-runbooks-ok 1"* || "$handoff_line" != *"--require-settlement-bridge-smoke-ok 0"* || "$handoff_line" != *"--require-settlement-state-persistence-ok 0"* || "$handoff_line" != *"--require-issuer-sponsor-api-live-smoke-ok 0"* || "$handoff_line" != *"--require-issuer-admin-blockchain-handlers-coverage-ok 0"* ]]; then
+if [[ "$handoff_line" != *"--require-run-pipeline-ok 0"* || "$handoff_line" != *"--require-settlement-failsoft-ok 0"* || "$handoff_line" != *"--require-windows-role-runbooks-ok 1"* || "$handoff_line" != *"--require-settlement-bridge-smoke-ok 0"* || "$handoff_line" != *"--require-settlement-state-persistence-ok 0"* || "$handoff_line" != *"--require-settlement-adapter-signed-tx-roundtrip-ok 0"* || "$handoff_line" != *"--require-settlement-shadow-env-ok 0"* || "$handoff_line" != *"--require-settlement-shadow-status-surface-ok 0"* || "$handoff_line" != *"--require-issuer-sponsor-api-live-smoke-ok 0"* || "$handoff_line" != *"--require-issuer-sponsor-vpn-session-live-smoke-ok 0"* || "$handoff_line" != *"--require-issuer-settlement-status-live-smoke-ok 0"* || "$handoff_line" != *"--require-exit-settlement-status-live-smoke-ok 0"* || "$handoff_line" != *"--require-issuer-admin-blockchain-handlers-coverage-ok 0"* ]]; then
   echo "dry-run handoff relax/override mismatch"
   echo "$handoff_line"
   exit 1
@@ -534,11 +810,41 @@ if ! jq -e '
   and .handoff.settlement_dual_asset_parity_required == false
   and .handoff.settlement_dual_asset_parity_resolved == false
   and .handoff.sources.settlement_dual_asset_parity_ok == "unresolved"
+  and .handoff.settlement_adapter_signed_tx_roundtrip_ok == null
+  and .handoff.settlement_adapter_signed_tx_roundtrip_status == "missing"
+  and .handoff.settlement_adapter_signed_tx_roundtrip_required == false
+  and .handoff.settlement_adapter_signed_tx_roundtrip_resolved == false
+  and .handoff.sources.settlement_adapter_signed_tx_roundtrip_ok == "unresolved"
+  and .handoff.settlement_shadow_env_ok == null
+  and .handoff.settlement_shadow_env_status == "missing"
+  and .handoff.settlement_shadow_env_required == false
+  and .handoff.settlement_shadow_env_resolved == false
+  and .handoff.sources.settlement_shadow_env_ok == "unresolved"
+  and .handoff.settlement_shadow_status_surface_ok == null
+  and .handoff.settlement_shadow_status_surface_status == "missing"
+  and .handoff.settlement_shadow_status_surface_required == false
+  and .handoff.settlement_shadow_status_surface_resolved == false
+  and .handoff.sources.settlement_shadow_status_surface_ok == "unresolved"
   and .handoff.issuer_sponsor_api_live_smoke_ok == null
   and .handoff.issuer_sponsor_api_live_smoke_status == "missing"
   and .handoff.issuer_sponsor_api_live_smoke_required == false
   and .handoff.issuer_sponsor_api_live_smoke_resolved == false
   and .handoff.sources.issuer_sponsor_api_live_smoke_ok == "unresolved"
+  and .handoff.issuer_sponsor_vpn_session_live_smoke_ok == null
+  and .handoff.issuer_sponsor_vpn_session_live_smoke_status == "missing"
+  and .handoff.issuer_sponsor_vpn_session_live_smoke_required == false
+  and .handoff.issuer_sponsor_vpn_session_live_smoke_resolved == false
+  and .handoff.sources.issuer_sponsor_vpn_session_live_smoke_ok == "unresolved"
+  and .handoff.issuer_settlement_status_live_smoke_ok == null
+  and .handoff.issuer_settlement_status_live_smoke_status == "missing"
+  and .handoff.issuer_settlement_status_live_smoke_required == false
+  and .handoff.issuer_settlement_status_live_smoke_resolved == false
+  and .handoff.sources.issuer_settlement_status_live_smoke_ok == "unresolved"
+  and .handoff.exit_settlement_status_live_smoke_ok == null
+  and .handoff.exit_settlement_status_live_smoke_status == "missing"
+  and .handoff.exit_settlement_status_live_smoke_required == false
+  and .handoff.exit_settlement_status_live_smoke_resolved == false
+  and .handoff.sources.exit_settlement_status_live_smoke_ok == "unresolved"
   and .handoff.issuer_admin_blockchain_handlers_coverage_ok == null
   and .handoff.issuer_admin_blockchain_handlers_coverage_status == "missing"
   and .handoff.issuer_admin_blockchain_handlers_coverage_required == false
@@ -580,13 +886,28 @@ if [[ "$handoff_line" != *"--require-run-pipeline-ok 0"* || "$handoff_line" != *
   echo "$handoff_line"
   exit 1
 fi
-if [[ "$handoff_line" == *"--require-settlement-failsoft-ok"* || "$handoff_line" == *"--require-settlement-acceptance-ok"* || "$handoff_line" == *"--require-settlement-bridge-smoke-ok"* || "$handoff_line" == *"--require-settlement-state-persistence-ok"* ]]; then
+if [[ "$handoff_line" == *"--require-settlement-failsoft-ok"* || "$handoff_line" == *"--require-settlement-acceptance-ok"* || "$handoff_line" == *"--require-settlement-bridge-smoke-ok"* || "$handoff_line" == *"--require-settlement-state-persistence-ok"* || "$handoff_line" == *"--require-settlement-adapter-signed-tx-roundtrip-ok"* || "$handoff_line" == *"--require-settlement-shadow-env-ok"* || "$handoff_line" == *"--require-settlement-shadow-status-surface-ok"* ]]; then
   echo "canonical handoff requirement flags leaked for legacy checker help mode"
   echo "$handoff_line"
   exit 1
 fi
 if [[ "$handoff_line" == *"--require-issuer-sponsor-api-live-smoke-ok"* ]]; then
   echo "sponsor live-smoke requirement should not be auto-injected for legacy checker help mode"
+  echo "$handoff_line"
+  exit 1
+fi
+if [[ "$handoff_line" == *"--require-issuer-sponsor-vpn-session-live-smoke-ok"* ]]; then
+  echo "sponsor vpn-session live-smoke requirement should not be auto-injected for legacy checker help mode"
+  echo "$handoff_line"
+  exit 1
+fi
+if [[ "$handoff_line" == *"--require-issuer-settlement-status-live-smoke-ok"* ]]; then
+  echo "issuer settlement-status requirement should not be auto-injected for legacy checker help mode"
+  echo "$handoff_line"
+  exit 1
+fi
+if [[ "$handoff_line" == *"--require-exit-settlement-status-live-smoke-ok"* ]]; then
+  echo "exit settlement-status requirement should not be auto-injected for legacy checker help mode"
   echo "$handoff_line"
   exit 1
 fi

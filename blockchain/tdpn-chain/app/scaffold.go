@@ -70,12 +70,12 @@ func newInMemoryChainScaffold() *ChainScaffold {
 	governanceKeeper := governancekeeper.NewKeeper()
 
 	return &ChainScaffold{
-		BillingModule:    billingmodule.NewAppModule(billingKeeper),
-		RewardsModule:    rewardsmodule.NewAppModule(rewardsKeeper),
-		SlashingModule:   slashingmodule.NewAppModule(slashingKeeper),
-		SponsorModule:    sponsormodule.NewAppModule(sponsorKeeper),
-		ValidatorModule:  validatormodule.NewAppModule(validatorKeeper),
-		GovernanceModule: governancemodule.NewAppModule(governanceKeeper),
+		BillingModule:    billingmodule.NewAppModule(&billingKeeper),
+		RewardsModule:    rewardsmodule.NewAppModule(&rewardsKeeper),
+		SlashingModule:   slashingmodule.NewAppModule(&slashingKeeper),
+		SponsorModule:    sponsormodule.NewAppModule(&sponsorKeeper),
+		ValidatorModule:  validatormodule.NewAppModule(&validatorKeeper),
+		GovernanceModule: governancemodule.NewAppModule(&governanceKeeper),
 	}
 }
 
@@ -122,12 +122,19 @@ func (s *ChainScaffold) ConfigureStateDir(stateDir string) error {
 		return fmt.Errorf("vpngovernance file store: %w", err)
 	}
 
-	s.BillingModule = billingmodule.NewAppModule(billingkeeper.NewKeeperWithStore(billingStore))
-	s.RewardsModule = rewardsmodule.NewAppModule(rewardskeeper.NewKeeperWithStore(rewardsStore))
-	s.SlashingModule = slashingmodule.NewAppModule(slashingkeeper.NewKeeperWithStore(slashingStore))
-	s.SponsorModule = sponsormodule.NewAppModule(sponsorkeeper.NewKeeperWithStore(sponsorStore))
-	s.ValidatorModule = validatormodule.NewAppModule(validatorkeeper.NewKeeperWithStore(validatorStore))
-	s.GovernanceModule = governancemodule.NewAppModule(governancekeeper.NewKeeperWithStore(governanceStore))
+	billingKeeper := billingkeeper.NewKeeperWithStore(billingStore)
+	rewardsKeeper := rewardskeeper.NewKeeperWithStore(rewardsStore)
+	slashingKeeper := slashingkeeper.NewKeeperWithStore(slashingStore)
+	sponsorKeeper := sponsorkeeper.NewKeeperWithStore(sponsorStore)
+	validatorKeeper := validatorkeeper.NewKeeperWithStore(validatorStore)
+	governanceKeeper := governancekeeper.NewKeeperWithStore(governanceStore)
+
+	s.BillingModule = billingmodule.NewAppModule(&billingKeeper)
+	s.RewardsModule = rewardsmodule.NewAppModule(&rewardsKeeper)
+	s.SlashingModule = slashingmodule.NewAppModule(&slashingKeeper)
+	s.SponsorModule = sponsormodule.NewAppModule(&sponsorKeeper)
+	s.ValidatorModule = validatormodule.NewAppModule(&validatorKeeper)
+	s.GovernanceModule = governancemodule.NewAppModule(&governanceKeeper)
 	return nil
 }
 
@@ -151,7 +158,7 @@ func (s *ChainScaffold) BillingMsgServer() BillingMsgServer {
 	if s == nil {
 		return billingMsgServer{msgServer: billingmodule.NewMsgServer(nil)}
 	}
-	return billingMsgServer{msgServer: billingmodule.NewMsgServer(&s.BillingModule.Keeper)}
+	return billingMsgServer{msgServer: billingmodule.NewMsgServer(s.BillingModule.Keeper)}
 }
 
 // RewardsMsgServer returns the phase-1 vpnrewards message server wired to scaffold state.
@@ -159,7 +166,7 @@ func (s *ChainScaffold) RewardsMsgServer() RewardsMsgServer {
 	if s == nil {
 		return rewardsMsgServer{msgServer: rewardsmodule.NewMsgServer(nil)}
 	}
-	return rewardsMsgServer{msgServer: rewardsmodule.NewMsgServer(&s.RewardsModule.Keeper)}
+	return rewardsMsgServer{msgServer: rewardsmodule.NewMsgServer(s.RewardsModule.Keeper)}
 }
 
 // SlashingMsgServer returns the phase-1 vpnslashing message server wired to scaffold state.
@@ -167,7 +174,7 @@ func (s *ChainScaffold) SlashingMsgServer() SlashingMsgServer {
 	if s == nil {
 		return slashingMsgServer{msgServer: slashingmodule.NewMsgServer(nil)}
 	}
-	return slashingMsgServer{msgServer: slashingmodule.NewMsgServer(&s.SlashingModule.Keeper)}
+	return slashingMsgServer{msgServer: slashingmodule.NewMsgServer(s.SlashingModule.Keeper)}
 }
 
 // SponsorMsgServer returns the phase-1 vpnsponsor message server wired to scaffold state.
@@ -175,7 +182,7 @@ func (s *ChainScaffold) SponsorMsgServer() SponsorMsgServer {
 	if s == nil {
 		return sponsorMsgServer{msgServer: sponsormodule.NewMsgServer(nil)}
 	}
-	return sponsorMsgServer{msgServer: sponsormodule.NewMsgServer(&s.SponsorModule.Keeper)}
+	return sponsorMsgServer{msgServer: sponsormodule.NewMsgServer(s.SponsorModule.Keeper)}
 }
 
 // ValidatorMsgServer returns vpnvalidator message operations wired to scaffold state.
@@ -183,7 +190,7 @@ func (s *ChainScaffold) ValidatorMsgServer() ValidatorMsgServer {
 	if s == nil {
 		return validatorMsgServer{msgServer: validatormodule.NewMsgServer(nil)}
 	}
-	return validatorMsgServer{msgServer: validatormodule.NewMsgServer(&s.ValidatorModule.Keeper)}
+	return validatorMsgServer{msgServer: validatormodule.NewMsgServer(s.ValidatorModule.Keeper)}
 }
 
 // GovernanceMsgServer returns vpngovernance message operations wired to scaffold state.
@@ -191,7 +198,7 @@ func (s *ChainScaffold) GovernanceMsgServer() GovernanceMsgServer {
 	if s == nil {
 		return governanceMsgServer{msgServer: governancemodule.NewMsgServer(nil)}
 	}
-	return governanceMsgServer{msgServer: governancemodule.NewMsgServer(&s.GovernanceModule.Keeper)}
+	return governanceMsgServer{msgServer: governancemodule.NewMsgServer(s.GovernanceModule.Keeper)}
 }
 
 // BillingQueryServer returns vpnbilling query operations wired to scaffold state.
@@ -199,7 +206,7 @@ func (s *ChainScaffold) BillingQueryServer() BillingQueryServer {
 	if s == nil {
 		return billingQueryServer{queryServer: billingmodule.NewQueryServer(nil)}
 	}
-	return billingQueryServer{queryServer: billingmodule.NewQueryServer(&s.BillingModule.Keeper)}
+	return billingQueryServer{queryServer: billingmodule.NewQueryServer(s.BillingModule.Keeper)}
 }
 
 // RewardsQueryServer returns vpnrewards query operations wired to scaffold state.
@@ -207,7 +214,7 @@ func (s *ChainScaffold) RewardsQueryServer() RewardsQueryServer {
 	if s == nil {
 		return rewardsQueryServer{queryServer: rewardsmodule.NewQueryServer(nil)}
 	}
-	return rewardsQueryServer{queryServer: rewardsmodule.NewQueryServer(&s.RewardsModule.Keeper)}
+	return rewardsQueryServer{queryServer: rewardsmodule.NewQueryServer(s.RewardsModule.Keeper)}
 }
 
 // SlashingQueryServer returns vpnslashing query operations wired to scaffold state.
@@ -215,7 +222,7 @@ func (s *ChainScaffold) SlashingQueryServer() SlashingQueryServer {
 	if s == nil {
 		return slashingQueryServer{queryServer: slashingmodule.NewQueryServer(nil)}
 	}
-	return slashingQueryServer{queryServer: slashingmodule.NewQueryServer(&s.SlashingModule.Keeper)}
+	return slashingQueryServer{queryServer: slashingmodule.NewQueryServer(s.SlashingModule.Keeper)}
 }
 
 // SponsorQueryServer returns vpnsponsor query operations wired to scaffold state.
@@ -223,7 +230,7 @@ func (s *ChainScaffold) SponsorQueryServer() SponsorQueryServer {
 	if s == nil {
 		return sponsorQueryServer{queryServer: sponsormodule.NewQueryServer(nil)}
 	}
-	return sponsorQueryServer{queryServer: sponsormodule.NewQueryServer(&s.SponsorModule.Keeper)}
+	return sponsorQueryServer{queryServer: sponsormodule.NewQueryServer(s.SponsorModule.Keeper)}
 }
 
 // ValidatorQueryServer returns vpnvalidator query operations wired to scaffold state.
@@ -231,7 +238,7 @@ func (s *ChainScaffold) ValidatorQueryServer() ValidatorQueryServer {
 	if s == nil {
 		return validatorQueryServer{queryServer: validatormodule.NewQueryServer(nil)}
 	}
-	return validatorQueryServer{queryServer: validatormodule.NewQueryServer(&s.ValidatorModule.Keeper)}
+	return validatorQueryServer{queryServer: validatormodule.NewQueryServer(s.ValidatorModule.Keeper)}
 }
 
 // GovernanceQueryServer returns vpngovernance query operations wired to scaffold state.
@@ -239,7 +246,7 @@ func (s *ChainScaffold) GovernanceQueryServer() GovernanceQueryServer {
 	if s == nil {
 		return governanceQueryServer{queryServer: governancemodule.NewQueryServer(nil)}
 	}
-	return governanceQueryServer{queryServer: governancemodule.NewQueryServer(&s.GovernanceModule.Keeper)}
+	return governanceQueryServer{queryServer: governancemodule.NewQueryServer(s.GovernanceModule.Keeper)}
 }
 
 func moduleNameOrDefault(value, fallback string) string {

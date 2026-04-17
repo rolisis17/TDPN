@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -390,7 +391,9 @@ func (a *tdpndCometApplication) cometModulesQuery(key string) (*abci.ResponseQue
 }
 
 func (a *tdpndCometApplication) computeAppHash(height int64) []byte {
-	summary := fmt.Sprintf("%s|%s|%s|%d|%s", a.moniker, a.homeDir, a.proxyApp, height, strings.Join(a.modules, ","))
+	modules := append([]string(nil), a.modules...)
+	sort.Strings(modules)
+	summary := fmt.Sprintf("%d|%s", height, strings.Join(modules, ","))
 	sum := sha256.Sum256([]byte(summary))
 	return sum[:]
 }

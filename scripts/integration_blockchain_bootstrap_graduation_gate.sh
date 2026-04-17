@@ -82,6 +82,8 @@ BLOCKCHAIN_BOOTSTRAP_GRADUATION_GATE_METRICS_JSON="$GO_METRICS" \
   --print-summary-json 1 >"$GO_LOG" 2>&1
 
 jq -e --arg metrics_path "$GO_METRICS" '
+  ((.generated_at // "") | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))
+  and
   .decision == "GO"
   and .status == "go"
   and .go == true
@@ -115,6 +117,8 @@ echo "[blockchain-bootstrap-graduation-gate] NO-GO path"
   --print-summary-json 0 >"$NO_GO_LOG" 2>&1
 
 jq -e --arg metrics_path "$NO_GO_METRICS" '
+  ((.generated_at // "") | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))
+  and
   .decision == "NO-GO"
   and .status == "no-go"
   and .go == false
@@ -156,6 +160,8 @@ if [[ "$missing_rc" -ne 0 ]]; then
   exit 1
 fi
 jq -e --arg metrics_path "$MISSING_METRICS" '
+  ((.generated_at // "") | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))
+  and
   .decision == "NO-GO"
   and .status == "no-go"
   and .go == false
@@ -187,6 +193,8 @@ if [[ "$invalid_rc" -eq 0 ]]; then
   exit 1
 fi
 jq -e --arg metrics_path "$INVALID_METRICS" '
+  ((.generated_at // "") | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))
+  and
   .decision == "NO-GO"
   and .status == "no-go"
   and .go == false
@@ -218,6 +226,8 @@ if [[ "$fail_close_rc" -eq 0 ]]; then
   exit 1
 fi
 jq -e '
+  ((.generated_at // "") | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))
+  and
   .decision == "NO-GO"
   and .status == "no-go"
   and .go == false

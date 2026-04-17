@@ -12,6 +12,7 @@ Usage:
     [--summary-json PATH] \
     [--canonical-summary-json PATH] \
     [--print-summary-json [0|1]] \
+    [--print-output-json [0|1]] \
     [--metrics-summary-json PATH] \
     [--template-output-json PATH] \
     [--template-canonical-output-json PATH] \
@@ -175,7 +176,7 @@ while [[ $# -gt 0 ]]; do
       canonical_summary_json="${2:-}"
       shift 2
       ;;
-    --print-summary-json)
+    --print-summary-json|--print-output-json)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         print_summary_json="${2:-}"
         shift 2

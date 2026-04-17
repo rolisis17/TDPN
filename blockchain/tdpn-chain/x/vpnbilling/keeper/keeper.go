@@ -30,18 +30,18 @@ func NewKeeperWithStore(store KeeperStore) Keeper {
 }
 
 func (k *Keeper) UpsertReservation(record types.CreditReservation) {
+	normalized := normalizeReservation(record)
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	k.store.UpsertReservation(record)
+	k.store.UpsertReservation(normalized)
 }
 
 // CreateReservation inserts a reservation with idempotency semantics keyed by ReservationID.
 func (k *Keeper) CreateReservation(record types.CreditReservation) (types.CreditReservation, error) {
-	if err := record.ValidateBasic(); err != nil {
+	normalized := normalizeReservation(record)
+	if err := normalized.ValidateBasic(); err != nil {
 		return types.CreditReservation{}, err
 	}
-
-	normalized := normalizeReservation(record)
 
 	k.mu.Lock()
 	defer k.mu.Unlock()
@@ -62,9 +62,16 @@ func (k *Keeper) CreateReservation(record types.CreditReservation) (types.Credit
 }
 
 func (k *Keeper) GetReservation(reservationID string) (types.CreditReservation, bool) {
+	normalizedReservationID := normalizeReservation(types.CreditReservation{ReservationID: reservationID}).ReservationID
+
 	k.mu.RLock()
 	defer k.mu.RUnlock()
-	return k.store.GetReservation(reservationID)
+
+	record, ok := k.store.GetReservation(normalizedReservationID)
+	if !ok {
+		return types.CreditReservation{}, false
+	}
+	return normalizeReservation(record), true
 }
 
 func (k *Keeper) ListReservations() []types.CreditReservation {
@@ -72,6 +79,9 @@ func (k *Keeper) ListReservations() []types.CreditReservation {
 	defer k.mu.RUnlock()
 
 	records := k.store.ListReservations()
+	for i := range records {
+		records[i] = normalizeReservation(records[i])
+	}
 	slices.SortFunc(records, func(a, b types.CreditReservation) int {
 		return compareByID(a.ReservationID, b.ReservationID)
 	})
@@ -79,18 +89,19 @@ func (k *Keeper) ListReservations() []types.CreditReservation {
 }
 
 func (k *Keeper) UpsertSettlement(record types.SettlementRecord) {
+	normalized := normalizeSettlement(record)
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	k.store.UpsertSettlement(record)
+	k.store.UpsertSettlement(normalized)
 }
 
 // FinalizeSettlement inserts a settlement with idempotency semantics keyed by SettlementID.
 func (k *Keeper) FinalizeSettlement(record types.SettlementRecord) (types.SettlementRecord, error) {
-	if err := record.ValidateBasic(); err != nil {
+	normalized := normalizeSettlement(record)
+	if err := normalized.ValidateBasic(); err != nil {
 		return types.SettlementRecord{}, err
 	}
 
-	normalized := normalizeSettlement(record)
 	if normalized.ReservationID == "" {
 		return types.SettlementRecord{}, reservationIDRequiredError()
 	}
@@ -131,9 +142,16 @@ func (k *Keeper) FinalizeSettlement(record types.SettlementRecord) (types.Settle
 }
 
 func (k *Keeper) GetSettlement(settlementID string) (types.SettlementRecord, bool) {
+	normalizedSettlementID := normalizeSettlement(types.SettlementRecord{SettlementID: settlementID}).SettlementID
+
 	k.mu.RLock()
 	defer k.mu.RUnlock()
-	return k.store.GetSettlement(settlementID)
+
+	record, ok := k.store.GetSettlement(normalizedSettlementID)
+	if !ok {
+		return types.SettlementRecord{}, false
+	}
+	return normalizeSettlement(record), true
 }
 
 func (k *Keeper) ListSettlements() []types.SettlementRecord {
@@ -141,6 +159,9 @@ func (k *Keeper) ListSettlements() []types.SettlementRecord {
 	defer k.mu.RUnlock()
 
 	records := k.store.ListSettlements()
+	for i := range records {
+		records[i] = normalizeSettlement(records[i])
+	}
 	slices.SortFunc(records, func(a, b types.SettlementRecord) int {
 		return compareByID(a.SettlementID, b.SettlementID)
 	})
@@ -148,10 +169,11 @@ func (k *Keeper) ListSettlements() []types.SettlementRecord {
 }
 
 func (k *Keeper) advanceReservationForSettlementLocked(reservationID string) {
-	if reservationID == "" {
+	normalizedReservationID := normalizeReservation(types.CreditReservation{ReservationID: reservationID}).ReservationID
+	if normalizedReservationID == "" {
 		return
 	}
-	reservation, ok := k.store.GetReservation(reservationID)
+	reservation, ok := k.store.GetReservation(normalizedReservationID)
 	if !ok {
 		return
 	}
@@ -164,6 +186,7 @@ func (k *Keeper) advanceReservationForSettlementLocked(reservationID string) {
 }
 
 func normalizeReservation(record types.CreditReservation) types.CreditReservation {
+	record = record.Canonicalize()
 	if record.Status == "" {
 		record.Status = chaintypes.ReconciliationPending
 	}
@@ -171,6 +194,7 @@ func normalizeReservation(record types.CreditReservation) types.CreditReservatio
 }
 
 func normalizeSettlement(record types.SettlementRecord) types.SettlementRecord {
+	record = record.Canonicalize()
 	if record.OperationState == "" {
 		record.OperationState = chaintypes.ReconciliationSubmitted
 	}

@@ -9,12 +9,17 @@ export GOCACHE="${GOCACHE:-$ROOT_DIR/.gocache}"
 
 # Sponsor happy-path coverage: reserve -> authorize -> issue token.
 timeout 30s go test ./pkg/settlement -count=1 -run '^(TestMemoryServiceSponsorFlowAuthorizeIdempotent)$'
-timeout 30s go test ./services/issuer -count=1 -run '^(TestSponsorReserveAndIssueTokenFlow|TestHandleIssueTokenRequiresPaymentProofWhenEnabled)$'
+timeout 30s go test ./pkg/settlement -count=1 -run '^(TestCosmosAdapterUsesBearerAuthAcrossModes|TestCosmosAdapterNonRetryableFailuresBecomeDeferredNonReplayable|TestCosmosAdapterReplayableDeferredBecomesNonReplayableAfterReplay4xx)$'
+timeout 30s go test ./services/issuer -count=1 -run '^(TestSponsorReserveAndIssueTokenFlow|TestHandleIssueTokenRequiresPaymentProofWhenEnabled|Test.*Sponsor.*Token.*(Deferred|FailSoft|Failsoft).*)$'
 timeout 90s ./scripts/integration_issuer_sponsor_api_live_smoke.sh
+timeout 120s ./scripts/integration_issuer_sponsor_vpn_session_live_smoke.sh
 
-# Chain-outage fail-soft coverage: defer on adapter failure, replay to submitted, then confirm lifecycle advancement.
+# Chain-outage fail-soft coverage: defer on adapter failure, replay to submitted, then confirm lifecycle advancement
+# across issuer and exit settlement-status live-smoke flows.
 timeout 30s go test ./pkg/settlement -count=1 -run '^(TestMemoryServiceAdapterDeferredOnFailure|TestMemoryServiceReconcileReplaySuccessClearsBacklog|TestMemoryServiceReconcileReplayPromotesToConfirmedWhenQuerierAvailable)$'
 timeout 30s go test ./services/exit -count=1 -run '^(TestSettlementReserveAndFinalizeWarningsDoNotBlockSessionClose|TestHandlePathCloseDeferredChainAdapterDoesNotBlockSessionClose|TestHandleSettlementStatusReconcileErrorIsFailSoft)$'
+timeout 90s ./scripts/integration_issuer_settlement_status_live_smoke.sh
+timeout 120s ./scripts/integration_exit_settlement_status_live_smoke.sh
 
 # Shadow env wiring coverage: issuer/exit mirror and fail-open shadow adapter behavior.
 timeout 60s bash ./scripts/integration_cosmos_settlement_shadow_env.sh

@@ -12,9 +12,16 @@ Usage:
     [--require-settlement-failsoft-ok [0|1]] \
     [--require-settlement-acceptance-ok [0|1]] \
     [--require-settlement-bridge-smoke-ok [0|1]] \
+    [--require-settlement-adapter-roundtrip-ok [0|1]] \
+    [--require-settlement-adapter-signed-tx-roundtrip-ok [0|1]] \
+    [--require-settlement-shadow-env-ok [0|1]] \
+    [--require-settlement-shadow-status-surface-ok [0|1]] \
     [--require-settlement-state-persistence-ok [0|1]] \
     [--require-settlement-dual-asset-parity-ok [0|1]] \
     [--require-issuer-sponsor-api-live-smoke-ok [0|1]] \
+    [--require-issuer-sponsor-vpn-session-live-smoke-ok [0|1]] \
+    [--require-issuer-settlement-status-live-smoke-ok [0|1]] \
+    [--require-exit-settlement-status-live-smoke-ok [0|1]] \
     [--require-issuer-admin-blockchain-handlers-coverage-ok [0|1]] \
     [--require-windows-server-packaging-ok [0|1]] \
     [--require-windows-role-runbooks-ok [0|1]] \
@@ -29,9 +36,16 @@ Purpose:
     - settlement_failsoft_ok
     - settlement_acceptance_ok
     - settlement_bridge_smoke_ok
+    - settlement_adapter_roundtrip_ok
+    - settlement_adapter_signed_tx_roundtrip_ok
+    - settlement_shadow_env_ok
+    - settlement_shadow_status_surface_ok
     - settlement_state_persistence_ok
     - settlement_dual_asset_parity_ok
     - issuer_sponsor_api_live_smoke_ok
+    - issuer_sponsor_vpn_session_live_smoke_ok
+    - issuer_settlement_status_live_smoke_ok
+    - exit_settlement_status_live_smoke_ok
     - issuer_admin_blockchain_handlers_coverage_ok
 
 Notes:
@@ -39,7 +53,7 @@ Notes:
   - Legacy alias --ci-phase4-summary-json is accepted for compatibility.
   - Canonical requirement flags are --require-settlement-*-ok.
   - Legacy requirement flags --require-windows-*/--require-cross-platform-*/--require-role-combination-* are accepted as aliases.
-  - Canonical env vars are PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_SETTLEMENT_*_OK plus PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_ISSUER_SPONSOR_API_LIVE_SMOKE_OK and PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_ISSUER_ADMIN_BLOCKCHAIN_HANDLERS_COVERAGE_OK, with PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_WINDOWS_*/PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_CROSS_PLATFORM_INTEROP_OK/PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_ROLE_COMBINATION_VALIDATION_OK fallback.
+  - Canonical env vars are PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_SETTLEMENT_*_OK (including *_ADAPTER_SIGNED_TX_ROUNDTRIP_OK, *_SHADOW_ENV_OK, and *_SHADOW_STATUS_SURFACE_OK) plus PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_ISSUER_SPONSOR_API_LIVE_SMOKE_OK, PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_ISSUER_SPONSOR_VPN_SESSION_LIVE_SMOKE_OK, PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_ISSUER_SETTLEMENT_STATUS_LIVE_SMOKE_OK, PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_EXIT_SETTLEMENT_STATUS_LIVE_SMOKE_OK, and PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_ISSUER_ADMIN_BLOCKCHAIN_HANDLERS_COVERAGE_OK, with PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_WINDOWS_*/PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_CROSS_PLATFORM_INTEROP_OK/PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_ROLE_COMBINATION_VALIDATION_OK fallback.
   - The checker treats unresolved or false readiness signals as failures.
   - Use --show-json 1 to print the emitted summary JSON after it is written.
 USAGE
@@ -172,6 +186,63 @@ resolve_signal_raw_or_empty() {
         elif (.steps.settlement_bridge_smoke.status? != null) then .steps.settlement_bridge_smoke.status
         else empty end'
       ;;
+    settlement_adapter_roundtrip_ok)
+      json_text_or_empty "$path" 'if (.settlement_adapter_roundtrip_ok? != null) then .settlement_adapter_roundtrip_ok
+        elif (.settlement_adapter_roundtrip_status? != null) then .settlement_adapter_roundtrip_status
+        elif (.summary.settlement_adapter_roundtrip_ok? != null) then .summary.settlement_adapter_roundtrip_ok
+        elif (.summary.settlement_adapter_roundtrip_status? != null) then .summary.settlement_adapter_roundtrip_status
+        elif (.signals.settlement_adapter_roundtrip_ok? != null) then .signals.settlement_adapter_roundtrip_ok
+        elif (.signals.settlement_adapter_roundtrip? != null) then .signals.settlement_adapter_roundtrip
+        elif (.signals.settlement_adapter_roundtrip_status? != null) then .signals.settlement_adapter_roundtrip_status
+        elif (.stages.settlement_adapter_roundtrip.ok? != null) then .stages.settlement_adapter_roundtrip.ok
+        elif (.stages.settlement_adapter_roundtrip.status? != null) then .stages.settlement_adapter_roundtrip.status
+        elif (.steps.settlement_adapter_roundtrip.status? != null) then .steps.settlement_adapter_roundtrip.status
+        elif (.settlement_bridge_smoke_ok? != null) then .settlement_bridge_smoke_ok
+        elif (.summary.settlement_bridge_smoke_ok? != null) then .summary.settlement_bridge_smoke_ok
+        elif (.signals.settlement_bridge_smoke_ok? != null) then .signals.settlement_bridge_smoke_ok
+        elif (.stages.settlement_bridge_smoke.status? != null) then .stages.settlement_bridge_smoke.status
+        elif (.steps.settlement_bridge_smoke.status? != null) then .steps.settlement_bridge_smoke.status
+        else empty end'
+      ;;
+    settlement_adapter_signed_tx_roundtrip_ok)
+      json_text_or_empty "$path" 'if (.settlement_adapter_signed_tx_roundtrip_ok? != null) then .settlement_adapter_signed_tx_roundtrip_ok
+        elif (.settlement_adapter_signed_tx_roundtrip_status? != null) then .settlement_adapter_signed_tx_roundtrip_status
+        elif (.summary.settlement_adapter_signed_tx_roundtrip_ok? != null) then .summary.settlement_adapter_signed_tx_roundtrip_ok
+        elif (.summary.settlement_adapter_signed_tx_roundtrip_status? != null) then .summary.settlement_adapter_signed_tx_roundtrip_status
+        elif (.signals.settlement_adapter_signed_tx_roundtrip_ok? != null) then .signals.settlement_adapter_signed_tx_roundtrip_ok
+        elif (.signals.settlement_adapter_signed_tx_roundtrip? != null) then .signals.settlement_adapter_signed_tx_roundtrip
+        elif (.signals.settlement_adapter_signed_tx_roundtrip_status? != null) then .signals.settlement_adapter_signed_tx_roundtrip_status
+        elif (.stages.settlement_adapter_signed_tx_roundtrip.ok? != null) then .stages.settlement_adapter_signed_tx_roundtrip.ok
+        elif (.stages.settlement_adapter_signed_tx_roundtrip.status? != null) then .stages.settlement_adapter_signed_tx_roundtrip.status
+        elif (.steps.settlement_adapter_signed_tx_roundtrip.status? != null) then .steps.settlement_adapter_signed_tx_roundtrip.status
+        else empty end'
+      ;;
+    settlement_shadow_env_ok)
+      json_text_or_empty "$path" 'if (.settlement_shadow_env_ok? != null) then .settlement_shadow_env_ok
+        elif (.settlement_shadow_env_status? != null) then .settlement_shadow_env_status
+        elif (.summary.settlement_shadow_env_ok? != null) then .summary.settlement_shadow_env_ok
+        elif (.summary.settlement_shadow_env_status? != null) then .summary.settlement_shadow_env_status
+        elif (.signals.settlement_shadow_env_ok? != null) then .signals.settlement_shadow_env_ok
+        elif (.signals.settlement_shadow_env? != null) then .signals.settlement_shadow_env
+        elif (.signals.settlement_shadow_env_status? != null) then .signals.settlement_shadow_env_status
+        elif (.stages.settlement_shadow_env.ok? != null) then .stages.settlement_shadow_env.ok
+        elif (.stages.settlement_shadow_env.status? != null) then .stages.settlement_shadow_env.status
+        elif (.steps.settlement_shadow_env.status? != null) then .steps.settlement_shadow_env.status
+        else empty end'
+      ;;
+    settlement_shadow_status_surface_ok)
+      json_text_or_empty "$path" 'if (.settlement_shadow_status_surface_ok? != null) then .settlement_shadow_status_surface_ok
+        elif (.settlement_shadow_status_surface_status? != null) then .settlement_shadow_status_surface_status
+        elif (.summary.settlement_shadow_status_surface_ok? != null) then .summary.settlement_shadow_status_surface_ok
+        elif (.summary.settlement_shadow_status_surface_status? != null) then .summary.settlement_shadow_status_surface_status
+        elif (.signals.settlement_shadow_status_surface_ok? != null) then .signals.settlement_shadow_status_surface_ok
+        elif (.signals.settlement_shadow_status_surface? != null) then .signals.settlement_shadow_status_surface
+        elif (.signals.settlement_shadow_status_surface_status? != null) then .signals.settlement_shadow_status_surface_status
+        elif (.stages.settlement_shadow_status_surface.ok? != null) then .stages.settlement_shadow_status_surface.ok
+        elif (.stages.settlement_shadow_status_surface.status? != null) then .stages.settlement_shadow_status_surface.status
+        elif (.steps.settlement_shadow_status_surface.status? != null) then .steps.settlement_shadow_status_surface.status
+        else empty end'
+      ;;
     settlement_state_persistence_ok)
       json_text_or_empty "$path" 'if (.settlement_state_persistence_ok? != null) then .settlement_state_persistence_ok
         elif (.summary.settlement_state_persistence_ok? != null) then .summary.settlement_state_persistence_ok
@@ -194,6 +265,30 @@ resolve_signal_raw_or_empty() {
         elif (.signals.issuer_sponsor_api_live_smoke_ok? != null) then .signals.issuer_sponsor_api_live_smoke_ok
         elif (.stages.issuer_sponsor_api_live_smoke.status? != null) then .stages.issuer_sponsor_api_live_smoke.status
         elif (.steps.issuer_sponsor_api_live_smoke.status? != null) then .steps.issuer_sponsor_api_live_smoke.status
+        else empty end'
+      ;;
+    issuer_sponsor_vpn_session_live_smoke_ok)
+      json_text_or_empty "$path" 'if (.issuer_sponsor_vpn_session_live_smoke_ok? != null) then .issuer_sponsor_vpn_session_live_smoke_ok
+        elif (.summary.issuer_sponsor_vpn_session_live_smoke_ok? != null) then .summary.issuer_sponsor_vpn_session_live_smoke_ok
+        elif (.signals.issuer_sponsor_vpn_session_live_smoke_ok? != null) then .signals.issuer_sponsor_vpn_session_live_smoke_ok
+        elif (.stages.issuer_sponsor_vpn_session_live_smoke.status? != null) then .stages.issuer_sponsor_vpn_session_live_smoke.status
+        elif (.steps.issuer_sponsor_vpn_session_live_smoke.status? != null) then .steps.issuer_sponsor_vpn_session_live_smoke.status
+        else empty end'
+      ;;
+    issuer_settlement_status_live_smoke_ok)
+      json_text_or_empty "$path" 'if (.issuer_settlement_status_live_smoke_ok? != null) then .issuer_settlement_status_live_smoke_ok
+        elif (.summary.issuer_settlement_status_live_smoke_ok? != null) then .summary.issuer_settlement_status_live_smoke_ok
+        elif (.signals.issuer_settlement_status_live_smoke_ok? != null) then .signals.issuer_settlement_status_live_smoke_ok
+        elif (.stages.issuer_settlement_status_live_smoke.status? != null) then .stages.issuer_settlement_status_live_smoke.status
+        elif (.steps.issuer_settlement_status_live_smoke.status? != null) then .steps.issuer_settlement_status_live_smoke.status
+        else empty end'
+      ;;
+    exit_settlement_status_live_smoke_ok)
+      json_text_or_empty "$path" 'if (.exit_settlement_status_live_smoke_ok? != null) then .exit_settlement_status_live_smoke_ok
+        elif (.summary.exit_settlement_status_live_smoke_ok? != null) then .summary.exit_settlement_status_live_smoke_ok
+        elif (.signals.exit_settlement_status_live_smoke_ok? != null) then .signals.exit_settlement_status_live_smoke_ok
+        elif (.stages.exit_settlement_status_live_smoke.status? != null) then .stages.exit_settlement_status_live_smoke.status
+        elif (.steps.exit_settlement_status_live_smoke.status? != null) then .steps.exit_settlement_status_live_smoke.status
         else empty end'
       ;;
     issuer_admin_blockchain_handlers_coverage_ok)
@@ -221,32 +316,60 @@ emit_summary_json() {
   local require_settlement_failsoft_ok="$8"
   local require_settlement_acceptance_ok="$9"
   local require_settlement_bridge_smoke_ok="${10}"
-  local require_settlement_state_persistence_ok="${11}"
-  local settlement_failsoft_status="${12}"
-  local settlement_acceptance_status="${13}"
-  local settlement_bridge_smoke_status="${14}"
-  local settlement_state_persistence_status="${15}"
-  local settlement_failsoft_ok="${16}"
-  local settlement_acceptance_ok="${17}"
-  local settlement_bridge_smoke_ok="${18}"
-  local settlement_state_persistence_ok="${19}"
-  local settlement_failsoft_resolved="${20}"
-  local settlement_acceptance_resolved="${21}"
-  local settlement_bridge_smoke_resolved="${22}"
-  local settlement_state_persistence_resolved="${23}"
-  local reasons_json="${24}"
-  local require_issuer_sponsor_api_live_smoke_ok="${25}"
-  local issuer_sponsor_api_live_smoke_status="${26}"
-  local issuer_sponsor_api_live_smoke_ok="${27}"
-  local issuer_sponsor_api_live_smoke_resolved="${28}"
-  local require_settlement_dual_asset_parity_ok="${29}"
-  local settlement_dual_asset_parity_status="${30}"
-  local settlement_dual_asset_parity_ok="${31}"
-  local settlement_dual_asset_parity_resolved="${32}"
-  local require_issuer_admin_blockchain_handlers_coverage_ok="${33}"
-  local issuer_admin_blockchain_handlers_coverage_status="${34}"
-  local issuer_admin_blockchain_handlers_coverage_ok="${35}"
-  local issuer_admin_blockchain_handlers_coverage_resolved="${36}"
+  local require_settlement_adapter_roundtrip_ok="${11}"
+  local require_settlement_state_persistence_ok="${12}"
+  local settlement_failsoft_status="${13}"
+  local settlement_acceptance_status="${14}"
+  local settlement_bridge_smoke_status="${15}"
+  local settlement_adapter_roundtrip_status="${16}"
+  local settlement_state_persistence_status="${17}"
+  local settlement_failsoft_ok="${18}"
+  local settlement_acceptance_ok="${19}"
+  local settlement_bridge_smoke_ok="${20}"
+  local settlement_adapter_roundtrip_ok="${21}"
+  local settlement_state_persistence_ok="${22}"
+  local settlement_failsoft_resolved="${23}"
+  local settlement_acceptance_resolved="${24}"
+  local settlement_bridge_smoke_resolved="${25}"
+  local settlement_adapter_roundtrip_resolved="${26}"
+  local settlement_state_persistence_resolved="${27}"
+  local reasons_json="${28}"
+  local require_issuer_sponsor_api_live_smoke_ok="${29}"
+  local issuer_sponsor_api_live_smoke_status="${30}"
+  local issuer_sponsor_api_live_smoke_ok="${31}"
+  local issuer_sponsor_api_live_smoke_resolved="${32}"
+  local require_issuer_settlement_status_live_smoke_ok="${33}"
+  local issuer_settlement_status_live_smoke_status="${34}"
+  local issuer_settlement_status_live_smoke_ok="${35}"
+  local issuer_settlement_status_live_smoke_resolved="${36}"
+  local require_exit_settlement_status_live_smoke_ok="${37}"
+  local exit_settlement_status_live_smoke_status="${38}"
+  local exit_settlement_status_live_smoke_ok="${39}"
+  local exit_settlement_status_live_smoke_resolved="${40}"
+  local require_settlement_dual_asset_parity_ok="${41}"
+  local settlement_dual_asset_parity_status="${42}"
+  local settlement_dual_asset_parity_ok="${43}"
+  local settlement_dual_asset_parity_resolved="${44}"
+  local require_issuer_admin_blockchain_handlers_coverage_ok="${45}"
+  local issuer_admin_blockchain_handlers_coverage_status="${46}"
+  local issuer_admin_blockchain_handlers_coverage_ok="${47}"
+  local issuer_admin_blockchain_handlers_coverage_resolved="${48}"
+  local require_settlement_adapter_signed_tx_roundtrip_ok="${49}"
+  local settlement_adapter_signed_tx_roundtrip_status="${50}"
+  local settlement_adapter_signed_tx_roundtrip_ok="${51}"
+  local settlement_adapter_signed_tx_roundtrip_resolved="${52}"
+  local require_settlement_shadow_env_ok="${53}"
+  local settlement_shadow_env_status="${54}"
+  local settlement_shadow_env_ok="${55}"
+  local settlement_shadow_env_resolved="${56}"
+  local require_settlement_shadow_status_surface_ok="${57}"
+  local settlement_shadow_status_surface_status="${58}"
+  local settlement_shadow_status_surface_ok="${59}"
+  local settlement_shadow_status_surface_resolved="${60}"
+  local require_issuer_sponsor_vpn_session_live_smoke_ok="${61}"
+  local issuer_sponsor_vpn_session_live_smoke_status="${62}"
+  local issuer_sponsor_vpn_session_live_smoke_ok="${63}"
+  local issuer_sponsor_vpn_session_live_smoke_resolved="${64}"
 
   local summary_tmp
   summary_tmp="$(mktemp)"
@@ -262,30 +385,58 @@ emit_summary_json() {
     --argjson require_settlement_failsoft_ok "$require_settlement_failsoft_ok" \
     --argjson require_settlement_acceptance_ok "$require_settlement_acceptance_ok" \
     --argjson require_settlement_bridge_smoke_ok "$require_settlement_bridge_smoke_ok" \
+    --argjson require_settlement_adapter_roundtrip_ok "$require_settlement_adapter_roundtrip_ok" \
     --argjson require_settlement_state_persistence_ok "$require_settlement_state_persistence_ok" \
     --argjson require_settlement_dual_asset_parity_ok "$require_settlement_dual_asset_parity_ok" \
+    --argjson require_settlement_adapter_signed_tx_roundtrip_ok "$require_settlement_adapter_signed_tx_roundtrip_ok" \
+    --argjson require_settlement_shadow_env_ok "$require_settlement_shadow_env_ok" \
+    --argjson require_settlement_shadow_status_surface_ok "$require_settlement_shadow_status_surface_ok" \
     --argjson require_issuer_sponsor_api_live_smoke_ok "$require_issuer_sponsor_api_live_smoke_ok" \
+    --argjson require_issuer_sponsor_vpn_session_live_smoke_ok "$require_issuer_sponsor_vpn_session_live_smoke_ok" \
+    --argjson require_issuer_settlement_status_live_smoke_ok "$require_issuer_settlement_status_live_smoke_ok" \
+    --argjson require_exit_settlement_status_live_smoke_ok "$require_exit_settlement_status_live_smoke_ok" \
     --argjson require_issuer_admin_blockchain_handlers_coverage_ok "$require_issuer_admin_blockchain_handlers_coverage_ok" \
     --arg settlement_failsoft_status "$settlement_failsoft_status" \
     --arg settlement_acceptance_status "$settlement_acceptance_status" \
     --arg settlement_bridge_smoke_status "$settlement_bridge_smoke_status" \
+    --arg settlement_adapter_roundtrip_status "$settlement_adapter_roundtrip_status" \
+    --arg settlement_adapter_signed_tx_roundtrip_status "$settlement_adapter_signed_tx_roundtrip_status" \
+    --arg settlement_shadow_env_status "$settlement_shadow_env_status" \
+    --arg settlement_shadow_status_surface_status "$settlement_shadow_status_surface_status" \
     --arg settlement_state_persistence_status "$settlement_state_persistence_status" \
     --arg settlement_dual_asset_parity_status "$settlement_dual_asset_parity_status" \
     --arg issuer_sponsor_api_live_smoke_status "$issuer_sponsor_api_live_smoke_status" \
+    --arg issuer_sponsor_vpn_session_live_smoke_status "$issuer_sponsor_vpn_session_live_smoke_status" \
+    --arg issuer_settlement_status_live_smoke_status "$issuer_settlement_status_live_smoke_status" \
+    --arg exit_settlement_status_live_smoke_status "$exit_settlement_status_live_smoke_status" \
     --arg issuer_admin_blockchain_handlers_coverage_status "$issuer_admin_blockchain_handlers_coverage_status" \
     --argjson settlement_failsoft_ok "$settlement_failsoft_ok" \
     --argjson settlement_acceptance_ok "$settlement_acceptance_ok" \
     --argjson settlement_bridge_smoke_ok "$settlement_bridge_smoke_ok" \
+    --argjson settlement_adapter_roundtrip_ok "$settlement_adapter_roundtrip_ok" \
+    --argjson settlement_adapter_signed_tx_roundtrip_ok "$settlement_adapter_signed_tx_roundtrip_ok" \
+    --argjson settlement_shadow_env_ok "$settlement_shadow_env_ok" \
+    --argjson settlement_shadow_status_surface_ok "$settlement_shadow_status_surface_ok" \
     --argjson settlement_state_persistence_ok "$settlement_state_persistence_ok" \
     --argjson settlement_dual_asset_parity_ok "$settlement_dual_asset_parity_ok" \
     --argjson issuer_sponsor_api_live_smoke_ok "$issuer_sponsor_api_live_smoke_ok" \
+    --argjson issuer_sponsor_vpn_session_live_smoke_ok "$issuer_sponsor_vpn_session_live_smoke_ok" \
+    --argjson issuer_settlement_status_live_smoke_ok "$issuer_settlement_status_live_smoke_ok" \
+    --argjson exit_settlement_status_live_smoke_ok "$exit_settlement_status_live_smoke_ok" \
     --argjson issuer_admin_blockchain_handlers_coverage_ok "$issuer_admin_blockchain_handlers_coverage_ok" \
     --argjson settlement_failsoft_resolved "$settlement_failsoft_resolved" \
     --argjson settlement_acceptance_resolved "$settlement_acceptance_resolved" \
     --argjson settlement_bridge_smoke_resolved "$settlement_bridge_smoke_resolved" \
+    --argjson settlement_adapter_roundtrip_resolved "$settlement_adapter_roundtrip_resolved" \
+    --argjson settlement_adapter_signed_tx_roundtrip_resolved "$settlement_adapter_signed_tx_roundtrip_resolved" \
+    --argjson settlement_shadow_env_resolved "$settlement_shadow_env_resolved" \
+    --argjson settlement_shadow_status_surface_resolved "$settlement_shadow_status_surface_resolved" \
     --argjson settlement_state_persistence_resolved "$settlement_state_persistence_resolved" \
     --argjson settlement_dual_asset_parity_resolved "$settlement_dual_asset_parity_resolved" \
     --argjson issuer_sponsor_api_live_smoke_resolved "$issuer_sponsor_api_live_smoke_resolved" \
+    --argjson issuer_sponsor_vpn_session_live_smoke_resolved "$issuer_sponsor_vpn_session_live_smoke_resolved" \
+    --argjson issuer_settlement_status_live_smoke_resolved "$issuer_settlement_status_live_smoke_resolved" \
+    --argjson exit_settlement_status_live_smoke_resolved "$exit_settlement_status_live_smoke_resolved" \
     --argjson issuer_admin_blockchain_handlers_coverage_resolved "$issuer_admin_blockchain_handlers_coverage_resolved" \
     --argjson reasons "$reasons_json" \
     '{
@@ -306,6 +457,9 @@ emit_summary_json() {
         ci_phase5_summary_json: $ci_phase5_summary_json,
         summary_json: $summary_json,
         show_json: ($show_json == "1"),
+        require_settlement_adapter_signed_tx_roundtrip_ok: ($require_settlement_adapter_signed_tx_roundtrip_ok == 1),
+        require_settlement_shadow_env_ok: ($require_settlement_shadow_env_ok == 1),
+        require_settlement_shadow_status_surface_ok: ($require_settlement_shadow_status_surface_ok == 1),
         usable: {
           ci_phase5_summary_json: ($ci_phase5_summary_usable == 1)
         }
@@ -314,9 +468,16 @@ emit_summary_json() {
         require_settlement_failsoft_ok: ($require_settlement_failsoft_ok == 1),
         require_settlement_acceptance_ok: ($require_settlement_acceptance_ok == 1),
         require_settlement_bridge_smoke_ok: ($require_settlement_bridge_smoke_ok == 1),
+        require_settlement_adapter_roundtrip_ok: ($require_settlement_adapter_roundtrip_ok == 1),
+        require_settlement_adapter_signed_tx_roundtrip_ok: ($require_settlement_adapter_signed_tx_roundtrip_ok == 1),
+        require_settlement_shadow_env_ok: ($require_settlement_shadow_env_ok == 1),
+        require_settlement_shadow_status_surface_ok: ($require_settlement_shadow_status_surface_ok == 1),
         require_settlement_state_persistence_ok: ($require_settlement_state_persistence_ok == 1),
         require_settlement_dual_asset_parity_ok: ($require_settlement_dual_asset_parity_ok == 1),
         require_issuer_sponsor_api_live_smoke_ok: ($require_issuer_sponsor_api_live_smoke_ok == 1),
+        require_issuer_sponsor_vpn_session_live_smoke_ok: ($require_issuer_sponsor_vpn_session_live_smoke_ok == 1),
+        require_issuer_settlement_status_live_smoke_ok: ($require_issuer_settlement_status_live_smoke_ok == 1),
+        require_exit_settlement_status_live_smoke_ok: ($require_exit_settlement_status_live_smoke_ok == 1),
         require_issuer_admin_blockchain_handlers_coverage_ok: ($require_issuer_admin_blockchain_handlers_coverage_ok == 1)
       },
       stages: {
@@ -338,6 +499,30 @@ emit_summary_json() {
           resolved: ($settlement_bridge_smoke_resolved == 1),
           ok: ($settlement_bridge_smoke_ok == true)
         },
+        settlement_adapter_roundtrip: {
+          enabled: ($require_settlement_adapter_roundtrip_ok == 1),
+          status: $settlement_adapter_roundtrip_status,
+          resolved: ($settlement_adapter_roundtrip_resolved == 1),
+          ok: ($settlement_adapter_roundtrip_ok == true)
+        },
+        settlement_adapter_signed_tx_roundtrip: {
+          enabled: ($require_settlement_adapter_signed_tx_roundtrip_ok == 1),
+          status: $settlement_adapter_signed_tx_roundtrip_status,
+          resolved: ($settlement_adapter_signed_tx_roundtrip_resolved == 1),
+          ok: ($settlement_adapter_signed_tx_roundtrip_ok == true)
+        },
+        settlement_shadow_env: {
+          enabled: ($require_settlement_shadow_env_ok == 1),
+          status: $settlement_shadow_env_status,
+          resolved: ($settlement_shadow_env_resolved == 1),
+          ok: ($settlement_shadow_env_ok == true)
+        },
+        settlement_shadow_status_surface: {
+          enabled: ($require_settlement_shadow_status_surface_ok == 1),
+          status: $settlement_shadow_status_surface_status,
+          resolved: ($settlement_shadow_status_surface_resolved == 1),
+          ok: ($settlement_shadow_status_surface_ok == true)
+        },
         settlement_state_persistence: {
           enabled: ($require_settlement_state_persistence_ok == 1),
           status: $settlement_state_persistence_status,
@@ -356,6 +541,24 @@ emit_summary_json() {
           resolved: ($issuer_sponsor_api_live_smoke_resolved == 1),
           ok: ($issuer_sponsor_api_live_smoke_ok == true)
         },
+        issuer_sponsor_vpn_session_live_smoke: {
+          enabled: ($require_issuer_sponsor_vpn_session_live_smoke_ok == 1),
+          status: $issuer_sponsor_vpn_session_live_smoke_status,
+          resolved: ($issuer_sponsor_vpn_session_live_smoke_resolved == 1),
+          ok: ($issuer_sponsor_vpn_session_live_smoke_ok == true)
+        },
+        issuer_settlement_status_live_smoke: {
+          enabled: ($require_issuer_settlement_status_live_smoke_ok == 1),
+          status: $issuer_settlement_status_live_smoke_status,
+          resolved: ($issuer_settlement_status_live_smoke_resolved == 1),
+          ok: ($issuer_settlement_status_live_smoke_ok == true)
+        },
+        exit_settlement_status_live_smoke: {
+          enabled: ($require_exit_settlement_status_live_smoke_ok == 1),
+          status: $exit_settlement_status_live_smoke_status,
+          resolved: ($exit_settlement_status_live_smoke_resolved == 1),
+          ok: ($exit_settlement_status_live_smoke_ok == true)
+        },
         issuer_admin_blockchain_handlers_coverage: {
           enabled: ($require_issuer_admin_blockchain_handlers_coverage_ok == 1),
           status: $issuer_admin_blockchain_handlers_coverage_status,
@@ -367,9 +570,30 @@ emit_summary_json() {
         settlement_failsoft_ok: ($settlement_failsoft_ok == true),
         settlement_acceptance_ok: ($settlement_acceptance_ok == true),
         settlement_bridge_smoke_ok: ($settlement_bridge_smoke_ok == true),
+        settlement_adapter_roundtrip_ok: ($settlement_adapter_roundtrip_ok == true),
+        settlement_adapter_roundtrip_status: $settlement_adapter_roundtrip_status,
+        settlement_adapter_roundtrip_resolved: ($settlement_adapter_roundtrip_resolved == 1),
+        settlement_adapter_signed_tx_roundtrip_ok: ($settlement_adapter_signed_tx_roundtrip_ok == true),
+        settlement_adapter_signed_tx_roundtrip_status: $settlement_adapter_signed_tx_roundtrip_status,
+        settlement_adapter_signed_tx_roundtrip_resolved: ($settlement_adapter_signed_tx_roundtrip_resolved == 1),
+        settlement_shadow_env_ok: ($settlement_shadow_env_ok == true),
+        settlement_shadow_env_status: $settlement_shadow_env_status,
+        settlement_shadow_env_resolved: ($settlement_shadow_env_resolved == 1),
+        settlement_shadow_status_surface_ok: ($settlement_shadow_status_surface_ok == true),
+        settlement_shadow_status_surface_status: $settlement_shadow_status_surface_status,
+        settlement_shadow_status_surface_resolved: ($settlement_shadow_status_surface_resolved == 1),
         settlement_state_persistence_ok: ($settlement_state_persistence_ok == true),
         settlement_dual_asset_parity_ok: ($settlement_dual_asset_parity_ok == true),
         issuer_sponsor_api_live_smoke_ok: ($issuer_sponsor_api_live_smoke_ok == true),
+        issuer_sponsor_vpn_session_live_smoke_ok: ($issuer_sponsor_vpn_session_live_smoke_ok == true),
+        issuer_sponsor_vpn_session_live_smoke_status: $issuer_sponsor_vpn_session_live_smoke_status,
+        issuer_sponsor_vpn_session_live_smoke_resolved: ($issuer_sponsor_vpn_session_live_smoke_resolved == 1),
+        issuer_settlement_status_live_smoke_ok: ($issuer_settlement_status_live_smoke_ok == true),
+        issuer_settlement_status_live_smoke_status: $issuer_settlement_status_live_smoke_status,
+        issuer_settlement_status_live_smoke_resolved: ($issuer_settlement_status_live_smoke_resolved == 1),
+        exit_settlement_status_live_smoke_ok: ($exit_settlement_status_live_smoke_ok == true),
+        exit_settlement_status_live_smoke_status: $exit_settlement_status_live_smoke_status,
+        exit_settlement_status_live_smoke_resolved: ($exit_settlement_status_live_smoke_resolved == 1),
         issuer_admin_blockchain_handlers_coverage_ok: ($issuer_admin_blockchain_handlers_coverage_ok == true),
         issuer_admin_blockchain_handlers_coverage_status: $issuer_admin_blockchain_handlers_coverage_status,
         issuer_admin_blockchain_handlers_coverage: {
@@ -406,10 +630,18 @@ show_json="${PHASE5_SETTLEMENT_LAYER_CHECK_SHOW_JSON:-0}"
 require_settlement_failsoft_ok="${PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_SETTLEMENT_FAILSOFT_OK:-${PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_WINDOWS_SERVER_PACKAGING_OK:-1}}"
 require_settlement_acceptance_ok="${PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_SETTLEMENT_ACCEPTANCE_OK:-${PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_WINDOWS_ROLE_RUNBOOKS_OK:-1}}"
 require_settlement_bridge_smoke_ok="${PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_SETTLEMENT_BRIDGE_SMOKE_OK:-${PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_CROSS_PLATFORM_INTEROP_OK:-1}}"
+require_settlement_adapter_roundtrip_ok="${PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_SETTLEMENT_ADAPTER_ROUNDTRIP_OK:-$require_settlement_bridge_smoke_ok}"
+require_settlement_adapter_signed_tx_roundtrip_ok="${PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_SETTLEMENT_ADAPTER_SIGNED_TX_ROUNDTRIP_OK:-1}"
+require_settlement_shadow_env_ok="${PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_SETTLEMENT_SHADOW_ENV_OK:-1}"
+require_settlement_shadow_status_surface_ok="${PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_SETTLEMENT_SHADOW_STATUS_SURFACE_OK:-1}"
 require_settlement_state_persistence_ok="${PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_SETTLEMENT_STATE_PERSISTENCE_OK:-${PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_ROLE_COMBINATION_VALIDATION_OK:-1}}"
 require_settlement_dual_asset_parity_ok="${PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_SETTLEMENT_DUAL_ASSET_PARITY_OK:-${PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_SETTLEMENT_DUAL_ASSET_OK:-1}}"
 require_issuer_sponsor_api_live_smoke_ok="${PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_ISSUER_SPONSOR_API_LIVE_SMOKE_OK:-1}"
+require_issuer_sponsor_vpn_session_live_smoke_ok="${PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_ISSUER_SPONSOR_VPN_SESSION_LIVE_SMOKE_OK:-1}"
+require_issuer_settlement_status_live_smoke_ok="${PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_ISSUER_SETTLEMENT_STATUS_LIVE_SMOKE_OK:-1}"
+require_exit_settlement_status_live_smoke_ok="${PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_EXIT_SETTLEMENT_STATUS_LIVE_SMOKE_OK:-1}"
 require_issuer_admin_blockchain_handlers_coverage_ok="${PHASE5_SETTLEMENT_LAYER_CHECK_REQUIRE_ISSUER_ADMIN_BLOCKCHAIN_HANDLERS_COVERAGE_OK:-1}"
+adapter_requirement_explicit=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -442,9 +674,52 @@ while [[ $# -gt 0 ]]; do
     --require-settlement-bridge-smoke-ok)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         require_settlement_bridge_smoke_ok="${2:-}"
+        if [[ "$adapter_requirement_explicit" != "1" ]]; then
+          require_settlement_adapter_roundtrip_ok="$require_settlement_bridge_smoke_ok"
+        fi
         shift 2
       else
         require_settlement_bridge_smoke_ok="1"
+        if [[ "$adapter_requirement_explicit" != "1" ]]; then
+          require_settlement_adapter_roundtrip_ok="$require_settlement_bridge_smoke_ok"
+        fi
+        shift
+      fi
+      ;;
+    --require-settlement-adapter-roundtrip-ok)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_settlement_adapter_roundtrip_ok="${2:-}"
+        shift 2
+      else
+        require_settlement_adapter_roundtrip_ok="1"
+        shift
+      fi
+      adapter_requirement_explicit=1
+      ;;
+    --require-settlement-adapter-signed-tx-roundtrip-ok)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_settlement_adapter_signed_tx_roundtrip_ok="${2:-}"
+        shift 2
+      else
+        require_settlement_adapter_signed_tx_roundtrip_ok="1"
+        shift
+      fi
+      ;;
+    --require-settlement-shadow-env-ok)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_settlement_shadow_env_ok="${2:-}"
+        shift 2
+      else
+        require_settlement_shadow_env_ok="1"
+        shift
+      fi
+      ;;
+    --require-settlement-shadow-status-surface-ok)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_settlement_shadow_status_surface_ok="${2:-}"
+        shift 2
+      else
+        require_settlement_shadow_status_surface_ok="1"
         shift
       fi
       ;;
@@ -472,6 +747,33 @@ while [[ $# -gt 0 ]]; do
         shift 2
       else
         require_issuer_sponsor_api_live_smoke_ok="1"
+        shift
+      fi
+      ;;
+    --require-issuer-sponsor-vpn-session-live-smoke-ok)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_issuer_sponsor_vpn_session_live_smoke_ok="${2:-}"
+        shift 2
+      else
+        require_issuer_sponsor_vpn_session_live_smoke_ok="1"
+        shift
+      fi
+      ;;
+    --require-issuer-settlement-status-live-smoke-ok)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_issuer_settlement_status_live_smoke_ok="${2:-}"
+        shift 2
+      else
+        require_issuer_settlement_status_live_smoke_ok="1"
+        shift
+      fi
+      ;;
+    --require-exit-settlement-status-live-smoke-ok)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_exit_settlement_status_live_smoke_ok="${2:-}"
+        shift 2
+      else
+        require_exit_settlement_status_live_smoke_ok="1"
         shift
       fi
       ;;
@@ -505,9 +807,15 @@ while [[ $# -gt 0 ]]; do
     --require-cross-platform-interop-ok)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         require_settlement_bridge_smoke_ok="${2:-}"
+        if [[ "$adapter_requirement_explicit" != "1" ]]; then
+          require_settlement_adapter_roundtrip_ok="$require_settlement_bridge_smoke_ok"
+        fi
         shift 2
       else
         require_settlement_bridge_smoke_ok="1"
+        if [[ "$adapter_requirement_explicit" != "1" ]]; then
+          require_settlement_adapter_roundtrip_ok="$require_settlement_bridge_smoke_ok"
+        fi
         shift
       fi
       ;;
@@ -548,9 +856,16 @@ done
 bool_arg_or_die "--require-settlement-failsoft-ok" "$require_settlement_failsoft_ok"
 bool_arg_or_die "--require-settlement-acceptance-ok" "$require_settlement_acceptance_ok"
 bool_arg_or_die "--require-settlement-bridge-smoke-ok" "$require_settlement_bridge_smoke_ok"
+bool_arg_or_die "--require-settlement-adapter-roundtrip-ok" "$require_settlement_adapter_roundtrip_ok"
+bool_arg_or_die "--require-settlement-adapter-signed-tx-roundtrip-ok" "$require_settlement_adapter_signed_tx_roundtrip_ok"
+bool_arg_or_die "--require-settlement-shadow-env-ok" "$require_settlement_shadow_env_ok"
+bool_arg_or_die "--require-settlement-shadow-status-surface-ok" "$require_settlement_shadow_status_surface_ok"
 bool_arg_or_die "--require-settlement-state-persistence-ok" "$require_settlement_state_persistence_ok"
 bool_arg_or_die "--require-settlement-dual-asset-parity-ok" "$require_settlement_dual_asset_parity_ok"
 bool_arg_or_die "--require-issuer-sponsor-api-live-smoke-ok" "$require_issuer_sponsor_api_live_smoke_ok"
+bool_arg_or_die "--require-issuer-sponsor-vpn-session-live-smoke-ok" "$require_issuer_sponsor_vpn_session_live_smoke_ok"
+bool_arg_or_die "--require-issuer-settlement-status-live-smoke-ok" "$require_issuer_settlement_status_live_smoke_ok"
+bool_arg_or_die "--require-exit-settlement-status-live-smoke-ok" "$require_exit_settlement_status_live_smoke_ok"
 bool_arg_or_die "--require-issuer-admin-blockchain-handlers-coverage-ok" "$require_issuer_admin_blockchain_handlers_coverage_ok"
 bool_arg_or_die "--show-json" "$show_json"
 
@@ -569,18 +884,32 @@ declare -a reasons=()
 settlement_failsoft_raw=""
 settlement_acceptance_raw=""
 settlement_bridge_smoke_raw=""
+settlement_adapter_roundtrip_raw=""
+settlement_adapter_signed_tx_roundtrip_raw=""
+settlement_shadow_env_raw=""
+settlement_shadow_status_surface_raw=""
 settlement_state_persistence_raw=""
 settlement_dual_asset_parity_raw=""
 issuer_sponsor_api_live_smoke_raw=""
+issuer_sponsor_vpn_session_live_smoke_raw=""
+issuer_settlement_status_live_smoke_raw=""
+exit_settlement_status_live_smoke_raw=""
 issuer_admin_blockchain_handlers_coverage_raw=""
 
 if [[ "$ci_phase5_summary_usable" == "1" ]]; then
   settlement_failsoft_raw="$(resolve_signal_raw_or_empty "$ci_phase5_summary_json" "settlement_failsoft_ok")"
   settlement_acceptance_raw="$(resolve_signal_raw_or_empty "$ci_phase5_summary_json" "settlement_acceptance_ok")"
   settlement_bridge_smoke_raw="$(resolve_signal_raw_or_empty "$ci_phase5_summary_json" "settlement_bridge_smoke_ok")"
+  settlement_adapter_roundtrip_raw="$(resolve_signal_raw_or_empty "$ci_phase5_summary_json" "settlement_adapter_roundtrip_ok")"
+  settlement_adapter_signed_tx_roundtrip_raw="$(resolve_signal_raw_or_empty "$ci_phase5_summary_json" "settlement_adapter_signed_tx_roundtrip_ok")"
+  settlement_shadow_env_raw="$(resolve_signal_raw_or_empty "$ci_phase5_summary_json" "settlement_shadow_env_ok")"
+  settlement_shadow_status_surface_raw="$(resolve_signal_raw_or_empty "$ci_phase5_summary_json" "settlement_shadow_status_surface_ok")"
   settlement_state_persistence_raw="$(resolve_signal_raw_or_empty "$ci_phase5_summary_json" "settlement_state_persistence_ok")"
   settlement_dual_asset_parity_raw="$(resolve_signal_raw_or_empty "$ci_phase5_summary_json" "settlement_dual_asset_parity_ok")"
   issuer_sponsor_api_live_smoke_raw="$(resolve_signal_raw_or_empty "$ci_phase5_summary_json" "issuer_sponsor_api_live_smoke_ok")"
+  issuer_sponsor_vpn_session_live_smoke_raw="$(resolve_signal_raw_or_empty "$ci_phase5_summary_json" "issuer_sponsor_vpn_session_live_smoke_ok")"
+  issuer_settlement_status_live_smoke_raw="$(resolve_signal_raw_or_empty "$ci_phase5_summary_json" "issuer_settlement_status_live_smoke_ok")"
+  exit_settlement_status_live_smoke_raw="$(resolve_signal_raw_or_empty "$ci_phase5_summary_json" "exit_settlement_status_live_smoke_ok")"
   issuer_admin_blockchain_handlers_coverage_raw="$(resolve_signal_raw_or_empty "$ci_phase5_summary_json" "issuer_admin_blockchain_handlers_coverage_ok")"
 else
   reasons+=("ci phase5 summary file not found or invalid JSON: $ci_phase5_summary_json")
@@ -589,9 +918,16 @@ fi
 settlement_failsoft_ok="$(normalize_boolish_or_empty "$settlement_failsoft_raw")"
 settlement_acceptance_ok="$(normalize_boolish_or_empty "$settlement_acceptance_raw")"
 settlement_bridge_smoke_ok="$(normalize_boolish_or_empty "$settlement_bridge_smoke_raw")"
+settlement_adapter_roundtrip_ok="$(normalize_boolish_or_empty "$settlement_adapter_roundtrip_raw")"
+settlement_adapter_signed_tx_roundtrip_ok="$(normalize_boolish_or_empty "$settlement_adapter_signed_tx_roundtrip_raw")"
+settlement_shadow_env_ok="$(normalize_boolish_or_empty "$settlement_shadow_env_raw")"
+settlement_shadow_status_surface_ok="$(normalize_boolish_or_empty "$settlement_shadow_status_surface_raw")"
 settlement_state_persistence_ok="$(normalize_boolish_or_empty "$settlement_state_persistence_raw")"
 settlement_dual_asset_parity_ok="$(normalize_boolish_or_empty "$settlement_dual_asset_parity_raw")"
 issuer_sponsor_api_live_smoke_ok="$(normalize_boolish_or_empty "$issuer_sponsor_api_live_smoke_raw")"
+issuer_sponsor_vpn_session_live_smoke_ok="$(normalize_boolish_or_empty "$issuer_sponsor_vpn_session_live_smoke_raw")"
+issuer_settlement_status_live_smoke_ok="$(normalize_boolish_or_empty "$issuer_settlement_status_live_smoke_raw")"
+exit_settlement_status_live_smoke_ok="$(normalize_boolish_or_empty "$exit_settlement_status_live_smoke_raw")"
 issuer_admin_blockchain_handlers_coverage_ok="$(normalize_boolish_or_empty "$issuer_admin_blockchain_handlers_coverage_raw")"
 
 if [[ -z "$settlement_failsoft_ok" ]]; then
@@ -603,6 +939,18 @@ fi
 if [[ -z "$settlement_bridge_smoke_ok" ]]; then
   settlement_bridge_smoke_ok="false"
 fi
+if [[ -z "$settlement_adapter_roundtrip_ok" ]]; then
+  settlement_adapter_roundtrip_ok="false"
+fi
+if [[ -z "$settlement_adapter_signed_tx_roundtrip_ok" ]]; then
+  settlement_adapter_signed_tx_roundtrip_ok="false"
+fi
+if [[ -z "$settlement_shadow_env_ok" ]]; then
+  settlement_shadow_env_ok="false"
+fi
+if [[ -z "$settlement_shadow_status_surface_ok" ]]; then
+  settlement_shadow_status_surface_ok="false"
+fi
 if [[ -z "$settlement_state_persistence_ok" ]]; then
   settlement_state_persistence_ok="false"
 fi
@@ -612,6 +960,15 @@ fi
 if [[ -z "$issuer_sponsor_api_live_smoke_ok" ]]; then
   issuer_sponsor_api_live_smoke_ok="false"
 fi
+if [[ -z "$issuer_sponsor_vpn_session_live_smoke_ok" ]]; then
+  issuer_sponsor_vpn_session_live_smoke_ok="false"
+fi
+if [[ -z "$issuer_settlement_status_live_smoke_ok" ]]; then
+  issuer_settlement_status_live_smoke_ok="false"
+fi
+if [[ -z "$exit_settlement_status_live_smoke_ok" ]]; then
+  exit_settlement_status_live_smoke_ok="false"
+fi
 if [[ -z "$issuer_admin_blockchain_handlers_coverage_ok" ]]; then
   issuer_admin_blockchain_handlers_coverage_ok="false"
 fi
@@ -619,17 +976,31 @@ fi
 settlement_failsoft_resolved="0"
 settlement_acceptance_resolved="0"
 settlement_bridge_smoke_resolved="0"
+settlement_adapter_roundtrip_resolved="0"
+settlement_adapter_signed_tx_roundtrip_resolved="0"
+settlement_shadow_env_resolved="0"
+settlement_shadow_status_surface_resolved="0"
 settlement_state_persistence_resolved="0"
 settlement_dual_asset_parity_resolved="0"
 issuer_sponsor_api_live_smoke_resolved="0"
+issuer_sponsor_vpn_session_live_smoke_resolved="0"
+issuer_settlement_status_live_smoke_resolved="0"
+exit_settlement_status_live_smoke_resolved="0"
 issuer_admin_blockchain_handlers_coverage_resolved="0"
 
 settlement_failsoft_status="$(stage_status_from_raw "$settlement_failsoft_raw")"
 settlement_acceptance_status="$(stage_status_from_raw "$settlement_acceptance_raw")"
 settlement_bridge_smoke_status="$(stage_status_from_raw "$settlement_bridge_smoke_raw")"
+settlement_adapter_roundtrip_status="$(stage_status_from_raw "$settlement_adapter_roundtrip_raw")"
+settlement_adapter_signed_tx_roundtrip_status="$(stage_status_from_raw "$settlement_adapter_signed_tx_roundtrip_raw")"
+settlement_shadow_env_status="$(stage_status_from_raw "$settlement_shadow_env_raw")"
+settlement_shadow_status_surface_status="$(stage_status_from_raw "$settlement_shadow_status_surface_raw")"
 settlement_state_persistence_status="$(stage_status_from_raw "$settlement_state_persistence_raw")"
 settlement_dual_asset_parity_status="$(stage_status_from_raw "$settlement_dual_asset_parity_raw")"
 issuer_sponsor_api_live_smoke_status="$(stage_status_from_raw "$issuer_sponsor_api_live_smoke_raw")"
+issuer_sponsor_vpn_session_live_smoke_status="$(stage_status_from_raw "$issuer_sponsor_vpn_session_live_smoke_raw")"
+issuer_settlement_status_live_smoke_status="$(stage_status_from_raw "$issuer_settlement_status_live_smoke_raw")"
+exit_settlement_status_live_smoke_status="$(stage_status_from_raw "$exit_settlement_status_live_smoke_raw")"
 issuer_admin_blockchain_handlers_coverage_status="$(stage_status_from_raw "$issuer_admin_blockchain_handlers_coverage_raw")"
 
 if [[ -n "$(trim "$settlement_failsoft_raw")" ]]; then
@@ -647,6 +1018,26 @@ if [[ -n "$(trim "$settlement_bridge_smoke_raw")" ]]; then
 elif [[ "$ci_phase5_summary_usable" == "1" ]]; then
   reasons+=("settlement_bridge_smoke_ok could not be resolved from ci phase5 summary")
 fi
+if [[ -n "$(trim "$settlement_adapter_roundtrip_raw")" ]]; then
+  settlement_adapter_roundtrip_resolved="1"
+elif [[ "$ci_phase5_summary_usable" == "1" ]]; then
+  reasons+=("settlement_adapter_roundtrip_ok could not be resolved from ci phase5 summary")
+fi
+if [[ -n "$(trim "$settlement_adapter_signed_tx_roundtrip_raw")" ]]; then
+  settlement_adapter_signed_tx_roundtrip_resolved="1"
+elif [[ "$ci_phase5_summary_usable" == "1" ]]; then
+  reasons+=("settlement_adapter_signed_tx_roundtrip_ok could not be resolved from ci phase5 summary")
+fi
+if [[ -n "$(trim "$settlement_shadow_env_raw")" ]]; then
+  settlement_shadow_env_resolved="1"
+elif [[ "$ci_phase5_summary_usable" == "1" ]]; then
+  reasons+=("settlement_shadow_env_ok could not be resolved from ci phase5 summary")
+fi
+if [[ -n "$(trim "$settlement_shadow_status_surface_raw")" ]]; then
+  settlement_shadow_status_surface_resolved="1"
+elif [[ "$ci_phase5_summary_usable" == "1" ]]; then
+  reasons+=("settlement_shadow_status_surface_ok could not be resolved from ci phase5 summary")
+fi
 if [[ -n "$(trim "$settlement_state_persistence_raw")" ]]; then
   settlement_state_persistence_resolved="1"
 elif [[ "$ci_phase5_summary_usable" == "1" ]]; then
@@ -661,6 +1052,21 @@ if [[ -n "$(trim "$issuer_sponsor_api_live_smoke_raw")" ]]; then
   issuer_sponsor_api_live_smoke_resolved="1"
 elif [[ "$ci_phase5_summary_usable" == "1" ]]; then
   reasons+=("issuer_sponsor_api_live_smoke_ok could not be resolved from ci phase5 summary")
+fi
+if [[ -n "$(trim "$issuer_sponsor_vpn_session_live_smoke_raw")" ]]; then
+  issuer_sponsor_vpn_session_live_smoke_resolved="1"
+elif [[ "$ci_phase5_summary_usable" == "1" ]]; then
+  reasons+=("issuer_sponsor_vpn_session_live_smoke_ok could not be resolved from ci phase5 summary")
+fi
+if [[ -n "$(trim "$issuer_settlement_status_live_smoke_raw")" ]]; then
+  issuer_settlement_status_live_smoke_resolved="1"
+elif [[ "$ci_phase5_summary_usable" == "1" ]]; then
+  reasons+=("issuer_settlement_status_live_smoke_ok could not be resolved from ci phase5 summary")
+fi
+if [[ -n "$(trim "$exit_settlement_status_live_smoke_raw")" ]]; then
+  exit_settlement_status_live_smoke_resolved="1"
+elif [[ "$ci_phase5_summary_usable" == "1" ]]; then
+  reasons+=("exit_settlement_status_live_smoke_ok could not be resolved from ci phase5 summary")
 fi
 if [[ -n "$(trim "$issuer_admin_blockchain_handlers_coverage_raw")" ]]; then
   issuer_admin_blockchain_handlers_coverage_resolved="1"
@@ -677,6 +1083,18 @@ fi
 if [[ "$require_settlement_bridge_smoke_ok" == "1" && "$settlement_bridge_smoke_ok" != "true" ]]; then
   reasons+=("settlement_bridge_smoke_ok is false")
 fi
+if [[ "$require_settlement_adapter_roundtrip_ok" == "1" && "$settlement_adapter_roundtrip_ok" != "true" ]]; then
+  reasons+=("settlement_adapter_roundtrip_ok is false")
+fi
+if [[ "$require_settlement_adapter_signed_tx_roundtrip_ok" == "1" && "$settlement_adapter_signed_tx_roundtrip_ok" != "true" ]]; then
+  reasons+=("settlement_adapter_signed_tx_roundtrip_ok is false")
+fi
+if [[ "$require_settlement_shadow_env_ok" == "1" && "$settlement_shadow_env_ok" != "true" ]]; then
+  reasons+=("settlement_shadow_env_ok is false")
+fi
+if [[ "$require_settlement_shadow_status_surface_ok" == "1" && "$settlement_shadow_status_surface_ok" != "true" ]]; then
+  reasons+=("settlement_shadow_status_surface_ok is false")
+fi
 if [[ "$require_settlement_state_persistence_ok" == "1" && "$settlement_state_persistence_ok" != "true" ]]; then
   reasons+=("settlement_state_persistence_ok is false")
 fi
@@ -685,6 +1103,15 @@ if [[ "$require_settlement_dual_asset_parity_ok" == "1" && "$settlement_dual_ass
 fi
 if [[ "$require_issuer_sponsor_api_live_smoke_ok" == "1" && "$issuer_sponsor_api_live_smoke_ok" != "true" ]]; then
   reasons+=("issuer_sponsor_api_live_smoke_ok is false")
+fi
+if [[ "$require_issuer_sponsor_vpn_session_live_smoke_ok" == "1" && "$issuer_sponsor_vpn_session_live_smoke_ok" != "true" ]]; then
+  reasons+=("issuer_sponsor_vpn_session_live_smoke_ok is false")
+fi
+if [[ "$require_issuer_settlement_status_live_smoke_ok" == "1" && "$issuer_settlement_status_live_smoke_ok" != "true" ]]; then
+  reasons+=("issuer_settlement_status_live_smoke_ok is false")
+fi
+if [[ "$require_exit_settlement_status_live_smoke_ok" == "1" && "$exit_settlement_status_live_smoke_ok" != "true" ]]; then
+  reasons+=("exit_settlement_status_live_smoke_ok is false")
 fi
 if [[ "$require_issuer_admin_blockchain_handlers_coverage_ok" == "1" && "$issuer_admin_blockchain_handlers_coverage_ok" != "true" ]]; then
   reasons+=("issuer_admin_blockchain_handlers_coverage_ok is false")
@@ -714,24 +1141,36 @@ emit_summary_json \
   "$require_settlement_failsoft_ok" \
   "$require_settlement_acceptance_ok" \
   "$require_settlement_bridge_smoke_ok" \
+  "$require_settlement_adapter_roundtrip_ok" \
   "$require_settlement_state_persistence_ok" \
   "$settlement_failsoft_status" \
   "$settlement_acceptance_status" \
   "$settlement_bridge_smoke_status" \
+  "$settlement_adapter_roundtrip_status" \
   "$settlement_state_persistence_status" \
   "$settlement_failsoft_ok" \
   "$settlement_acceptance_ok" \
   "$settlement_bridge_smoke_ok" \
+  "$settlement_adapter_roundtrip_ok" \
   "$settlement_state_persistence_ok" \
   "$settlement_failsoft_resolved" \
   "$settlement_acceptance_resolved" \
   "$settlement_bridge_smoke_resolved" \
+  "$settlement_adapter_roundtrip_resolved" \
   "$settlement_state_persistence_resolved" \
   "$reasons_json" \
   "$require_issuer_sponsor_api_live_smoke_ok" \
   "$issuer_sponsor_api_live_smoke_status" \
   "$issuer_sponsor_api_live_smoke_ok" \
   "$issuer_sponsor_api_live_smoke_resolved" \
+  "$require_issuer_settlement_status_live_smoke_ok" \
+  "$issuer_settlement_status_live_smoke_status" \
+  "$issuer_settlement_status_live_smoke_ok" \
+  "$issuer_settlement_status_live_smoke_resolved" \
+  "$require_exit_settlement_status_live_smoke_ok" \
+  "$exit_settlement_status_live_smoke_status" \
+  "$exit_settlement_status_live_smoke_ok" \
+  "$exit_settlement_status_live_smoke_resolved" \
   "$require_settlement_dual_asset_parity_ok" \
   "$settlement_dual_asset_parity_status" \
   "$settlement_dual_asset_parity_ok" \
@@ -739,7 +1178,23 @@ emit_summary_json \
   "$require_issuer_admin_blockchain_handlers_coverage_ok" \
   "$issuer_admin_blockchain_handlers_coverage_status" \
   "$issuer_admin_blockchain_handlers_coverage_ok" \
-  "$issuer_admin_blockchain_handlers_coverage_resolved"
+  "$issuer_admin_blockchain_handlers_coverage_resolved" \
+  "$require_settlement_adapter_signed_tx_roundtrip_ok" \
+  "$settlement_adapter_signed_tx_roundtrip_status" \
+  "$settlement_adapter_signed_tx_roundtrip_ok" \
+  "$settlement_adapter_signed_tx_roundtrip_resolved" \
+  "$require_settlement_shadow_env_ok" \
+  "$settlement_shadow_env_status" \
+  "$settlement_shadow_env_ok" \
+  "$settlement_shadow_env_resolved" \
+  "$require_settlement_shadow_status_surface_ok" \
+  "$settlement_shadow_status_surface_status" \
+  "$settlement_shadow_status_surface_ok" \
+  "$settlement_shadow_status_surface_resolved" \
+  "$require_issuer_sponsor_vpn_session_live_smoke_ok" \
+  "$issuer_sponsor_vpn_session_live_smoke_status" \
+  "$issuer_sponsor_vpn_session_live_smoke_ok" \
+  "$issuer_sponsor_vpn_session_live_smoke_resolved"
 
 if [[ "$show_json" == "1" ]]; then
   cat "$summary_json"

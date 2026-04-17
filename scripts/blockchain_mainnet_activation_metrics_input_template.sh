@@ -11,6 +11,7 @@ Usage:
     [--output-json PATH] \
     [--canonical-output-json PATH] \
     [--print-output-json [0|1]] \
+    [--print-summary-json [0|1]] \
     [--include-example-values [0|1]]
 
 Purpose:
@@ -101,7 +102,7 @@ while [[ $# -gt 0 ]]; do
       canonical_output_json="${2:-}"
       shift 2
       ;;
-    --print-output-json)
+    --print-output-json|--print-summary-json)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         print_output_json="${2:-}"
         shift 2
@@ -133,7 +134,7 @@ done
 
 path_arg_or_die "--output-json" "$output_json"
 path_arg_or_die "--canonical-output-json" "$canonical_output_json"
-bool_arg_or_die "--print-output-json" "$print_output_json"
+bool_arg_or_die "--print-{output|summary}-json" "$print_output_json"
 bool_arg_or_die "--include-example-values" "$include_example_values"
 
 output_json="$(abs_path "$output_json")"

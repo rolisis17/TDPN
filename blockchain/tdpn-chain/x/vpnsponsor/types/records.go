@@ -2,6 +2,7 @@ package types
 
 import (
 	"errors"
+	"strings"
 
 	chaintypes "github.com/tdpn/tdpn-chain/types"
 )
@@ -28,14 +29,36 @@ type DelegatedSessionCredit struct {
 	Status          chaintypes.ReconciliationStatus
 }
 
+// NormalizeSponsorAuthorization canonicalizes identity fields for deterministic comparisons/storage.
+func NormalizeSponsorAuthorization(record SponsorAuthorization) SponsorAuthorization {
+	record.AuthorizationID = normalizeCaseInsensitiveIdentity(record.AuthorizationID)
+	record.SponsorID = normalizeCaseInsensitiveIdentity(record.SponsorID)
+	record.AppID = normalizeCaseInsensitiveIdentity(record.AppID)
+	return record
+}
+
+// NormalizeDelegatedSessionCredit canonicalizes identity fields for deterministic comparisons/storage.
+func NormalizeDelegatedSessionCredit(record DelegatedSessionCredit) DelegatedSessionCredit {
+	record.ReservationID = normalizeCaseInsensitiveIdentity(record.ReservationID)
+	record.AuthorizationID = normalizeCaseInsensitiveIdentity(record.AuthorizationID)
+	record.SponsorID = normalizeCaseInsensitiveIdentity(record.SponsorID)
+	record.AppID = normalizeCaseInsensitiveIdentity(record.AppID)
+	// Session and end-user identifiers are treated as opaque (case-preserving) external values.
+	record.EndUserID = normalizeCaseSensitiveIdentity(record.EndUserID)
+	record.SessionID = normalizeCaseSensitiveIdentity(record.SessionID)
+	return record
+}
+
 func (a SponsorAuthorization) ValidateBasic() error {
-	if a.AuthorizationID == "" {
+	normalized := NormalizeSponsorAuthorization(a)
+
+	if normalized.AuthorizationID == "" {
 		return errors.New("authorization id is required")
 	}
-	if a.SponsorID == "" {
+	if normalized.SponsorID == "" {
 		return errors.New("sponsor id is required")
 	}
-	if a.AppID == "" {
+	if normalized.AppID == "" {
 		return errors.New("app id is required")
 	}
 	if a.MaxCredits <= 0 {
@@ -45,20 +68,30 @@ func (a SponsorAuthorization) ValidateBasic() error {
 }
 
 func (d DelegatedSessionCredit) ValidateBasic() error {
-	if d.ReservationID == "" {
+	normalized := NormalizeDelegatedSessionCredit(d)
+
+	if normalized.ReservationID == "" {
 		return errors.New("reservation id is required")
 	}
-	if d.AuthorizationID == "" {
+	if normalized.AuthorizationID == "" {
 		return errors.New("authorization id is required")
 	}
-	if d.SponsorID == "" {
+	if normalized.SponsorID == "" {
 		return errors.New("sponsor id is required")
 	}
-	if d.SessionID == "" {
+	if normalized.SessionID == "" {
 		return errors.New("session id is required")
 	}
 	if d.Credits <= 0 {
 		return errors.New("credits must be positive")
 	}
 	return nil
+}
+
+func normalizeCaseInsensitiveIdentity(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
+func normalizeCaseSensitiveIdentity(value string) string {
+	return strings.TrimSpace(value)
 }

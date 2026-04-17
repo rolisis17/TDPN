@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -61,6 +62,7 @@ type Service struct {
 	prodStrict                    bool
 	settlementReconcileSec        int
 	settlement                    settlement.Service
+	settlementStatus              settlementStatusSnapshot
 	requirePaymentProof           bool
 	sponsorAPIToken               string
 	sponsorMaxSubjectLen          int
@@ -85,11 +87,38 @@ type Service struct {
 	revocationVersion             int64
 }
 
+type settlementStatusSnapshot struct {
+	lastReport    settlement.ReconcileReport
+	lastCheckedAt time.Time
+	lastError     string
+}
+
+type issuerSettlementStatusResponse struct {
+	Enabled                   bool   `json:"enabled"`
+	Stale                     bool   `json:"stale"`
+	Status                    string `json:"status"`
+	CheckedAt                 int64  `json:"checked_at,omitempty"`
+	GeneratedAt               int64  `json:"generated_at,omitempty"`
+	PendingAdapterOperations  int    `json:"pending_adapter_operations"`
+	ShadowAdapterConfigured   bool   `json:"shadow_adapter_configured"`
+	ShadowAttemptedOperations int    `json:"shadow_attempted_operations"`
+	ShadowSubmittedOperations int    `json:"shadow_submitted_operations"`
+	ShadowFailedOperations    int    `json:"shadow_failed_operations"`
+	PendingOperations         int    `json:"pending_operations"`
+	SubmittedOperations       int    `json:"submitted_operations"`
+	ConfirmedOperations       int    `json:"confirmed_operations"`
+	FailedOperations          int    `json:"failed_operations"`
+	LastError                 string `json:"last_error,omitempty"`
+}
+
 const (
 	defaultSponsorMaxSubjectLen        = 128
 	defaultSponsorMaxIDLen             = 128
 	defaultSponsorMaxCurrencyLen       = 16
 	defaultSponsorMaxReservationMicros = int64(1000000000)
+	issueTokenRequestMaxBytes          = int64(64 * 1024)
+	revokeTokenRequestMaxBytes         = int64(8 * 1024)
+	serverReadHeaderTimeout            = 10 * time.Second
 )
 
 func New() *Service {
@@ -222,9 +251,6 @@ func New() *Service {
 	}
 	requirePaymentProof := os.Getenv("ISSUER_REQUIRE_PAYMENT_PROOF") == "1"
 	sponsorAPIToken := strings.TrimSpace(os.Getenv("ISSUER_SPONSOR_API_TOKEN"))
-	if sponsorAPIToken == "" {
-		sponsorAPIToken = "dev-sponsor-token"
-	}
 	sponsorMaxSubjectLen := defaultSponsorMaxSubjectLen
 	if v := strings.TrimSpace(os.Getenv("ISSUER_SPONSOR_MAX_SUBJECT_LEN")); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -368,7 +394,7 @@ func (s *Service) Run(ctx context.Context) error {
 	mux.HandleFunc("/v1/admin/slash/evidence", s.handleSubmitSlashEvidence)
 	mux.HandleFunc("/v1/revocations", s.handleRevocations)
 
-	s.httpSrv = &http.Server{Addr: s.addr, Handler: mux}
+	s.httpSrv = &http.Server{Addr: s.addr, Handler: mux, ReadHeaderTimeout: serverReadHeaderTimeout}
 	errCh := make(chan error, 1)
 	go func() {
 		log.Printf("issuer listening on %s", s.addr)
@@ -423,7 +449,7 @@ func (s *Service) reconcileSettlement(ctx context.Context) {
 		reconcileCtx, cancel = context.WithTimeout(reconcileCtx, 4*time.Second)
 		defer cancel()
 	}
-	report, err := s.settlementService().Reconcile(reconcileCtx)
+	report, _, err := s.reconcileSettlementStatus(reconcileCtx)
 	if err != nil {
 		log.Printf("issuer settlement reconcile warning: %v", err)
 		return
@@ -440,6 +466,27 @@ func (s *Service) reconcileSettlement(ctx context.Context) {
 	}
 }
 
+func (s *Service) reconcileSettlementStatus(ctx context.Context) (settlement.ReconcileReport, bool, error) {
+	s.mu.RLock()
+	svc := s.settlement
+	s.mu.RUnlock()
+	if svc == nil {
+		return settlement.ReconcileReport{}, false, nil
+	}
+	report, err := svc.Reconcile(ctx)
+	checkedAt := time.Now().UTC()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.settlementStatus.lastCheckedAt = checkedAt
+	if err != nil {
+		s.settlementStatus.lastError = err.Error()
+		return s.settlementStatus.lastReport, true, err
+	}
+	s.settlementStatus.lastReport = report
+	s.settlementStatus.lastError = ""
+	return report, false, nil
+}
+
 func (s *Service) validateRuntimeConfig() error {
 	if securehttp.Enabled() {
 		if err := securehttp.Validate(); err != nil {
@@ -452,6 +499,9 @@ func (s *Service) validateRuntimeConfig() error {
 	}
 	if !isLoopbackBindAddr(s.addr) && adminTokenAuthEnabled && isWeakAdminToken(s.adminToken) {
 		return fmt.Errorf("public bind requires strong ISSUER_ADMIN_TOKEN when token admin auth is enabled")
+	}
+	if !isLoopbackBindAddr(s.addr) && strings.TrimSpace(s.sponsorAPIToken) != "" && isWeakSponsorToken(s.sponsorAPIToken) {
+		return fmt.Errorf("public bind requires strong ISSUER_SPONSOR_API_TOKEN when sponsor auth is enabled")
 	}
 	if !adminTokenAuthEnabled && !s.adminRequireSigned {
 		return fmt.Errorf("issuer admin auth misconfigured: no admin auth method enabled")
@@ -530,6 +580,26 @@ func (s *Service) loadOrCreateKeypair() (ed25519.PublicKey, ed25519.PrivateKey, 
 	return pub, priv, nil
 }
 
+func decodeBoundedStrictJSON(w http.ResponseWriter, r *http.Request, dst any, maxBytes int64) error {
+	if maxBytes > 0 {
+		r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
+	}
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(dst); err != nil {
+		return err
+	}
+
+	var trailing any
+	if err := dec.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("unexpected trailing json token")
+		}
+		return err
+	}
+	return nil
+}
+
 func (s *Service) handleIssueToken(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -537,7 +607,7 @@ func (s *Service) handleIssueToken(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req proto.IssueTokenRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeBoundedStrictJSON(w, r, &req, issueTokenRequestMaxBytes); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
@@ -554,7 +624,7 @@ func (s *Service) handleSponsorIssueToken(w http.ResponseWriter, r *http.Request
 	}
 
 	var req proto.IssueTokenRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeBoundedStrictJSON(w, r, &req, issueTokenRequestMaxBytes); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
@@ -663,7 +733,7 @@ func (s *Service) handleSponsorQuote(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req proto.SponsorQuoteRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeBoundedStrictJSON(w, r, &req, issueTokenRequestMaxBytes); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
@@ -699,7 +769,7 @@ func (s *Service) handleSponsorReserve(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req proto.SponsorReserveRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeBoundedStrictJSON(w, r, &req, issueTokenRequestMaxBytes); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
@@ -767,38 +837,42 @@ func (s *Service) handleSettlementStatus(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	reconcileCtx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
-	defer cancel()
-	report, err := s.settlementService().Reconcile(reconcileCtx)
-	if err != nil {
-		log.Printf("issuer settlement status warning: %v", err)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusServiceUnavailable)
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"status": "degraded",
-			"error":  "reconcile failed",
-		})
-		return
+	resp := issuerSettlementStatusResponse{
+		Enabled: s.settlement != nil,
+		Status:  "disabled",
+	}
+	if s.settlement != nil {
+		reconcileCtx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
+		report, stale, err := s.reconcileSettlementStatus(reconcileCtx)
+		cancel()
+		if err != nil {
+			log.Printf("issuer settlement status warning: %v", err)
+		}
+		s.mu.RLock()
+		resp.CheckedAt = s.settlementStatus.lastCheckedAt.Unix()
+		resp.LastError = s.settlementStatus.lastError
+		s.mu.RUnlock()
+		resp.Stale = stale
+		resp.GeneratedAt = report.GeneratedAt.Unix()
+		resp.PendingAdapterOperations = report.PendingAdapterOperations
+		resp.ShadowAdapterConfigured = report.ShadowAdapterConfigured
+		resp.ShadowAttemptedOperations = report.ShadowAttemptedOperations
+		resp.ShadowSubmittedOperations = report.ShadowSubmittedOperations
+		resp.ShadowFailedOperations = report.ShadowFailedOperations
+		resp.PendingOperations = report.PendingOperations
+		resp.SubmittedOperations = report.SubmittedOperations
+		resp.ConfirmedOperations = report.ConfirmedOperations
+		resp.FailedOperations = report.FailedOperations
+		resp.Status = "ok"
+		if report.PendingAdapterOperations > 0 || report.PendingOperations > 0 || report.FailedOperations > 0 {
+			resp.Status = "backlog"
+		} else if stale {
+			resp.Status = "degraded"
+		}
 	}
 
-	status := "ok"
-	if report.PendingAdapterOperations > 0 || report.PendingOperations > 0 || report.FailedOperations > 0 {
-		status = "backlog"
-	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"status":                      status,
-		"generated_at":                report.GeneratedAt.Unix(),
-		"pending_adapter_operations":  report.PendingAdapterOperations,
-		"shadow_adapter_configured":   report.ShadowAdapterConfigured,
-		"shadow_attempted_operations": report.ShadowAttemptedOperations,
-		"shadow_submitted_operations": report.ShadowSubmittedOperations,
-		"shadow_failed_operations":    report.ShadowFailedOperations,
-		"pending_operations":          report.PendingOperations,
-		"submitted_operations":        report.SubmittedOperations,
-		"confirmed_operations":        report.ConfirmedOperations,
-		"failed_operations":           report.FailedOperations,
-	})
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 func sponsorReservationResponse(in settlement.SponsorCreditReservation) proto.SponsorReserveResponse {
@@ -955,7 +1029,7 @@ func (s *Service) handleUpsertSubject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req proto.UpsertSubjectRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeBoundedStrictJSON(w, r, &req, issueTokenRequestMaxBytes); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
@@ -1007,7 +1081,7 @@ func (s *Service) handlePromoteSubject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req proto.PromoteSubjectRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeBoundedStrictJSON(w, r, &req, issueTokenRequestMaxBytes); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
@@ -1048,7 +1122,7 @@ func (s *Service) handleApplyReputation(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	var req proto.ApplyReputationRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeBoundedStrictJSON(w, r, &req, issueTokenRequestMaxBytes); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
@@ -1092,7 +1166,7 @@ func (s *Service) handleApplyBond(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req proto.ApplyBondRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeBoundedStrictJSON(w, r, &req, issueTokenRequestMaxBytes); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
@@ -1136,7 +1210,7 @@ func (s *Service) handleApplyStake(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req proto.ApplyStakeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeBoundedStrictJSON(w, r, &req, issueTokenRequestMaxBytes); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
@@ -1180,7 +1254,7 @@ func (s *Service) handleRecomputeTier(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req proto.RecomputeTierRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeBoundedStrictJSON(w, r, &req, issueTokenRequestMaxBytes); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
@@ -1249,7 +1323,7 @@ func (s *Service) handleIssueAnonymousCredential(w http.ResponseWriter, r *http.
 		return
 	}
 	var req proto.IssueAnonymousCredentialRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeBoundedStrictJSON(w, r, &req, issueTokenRequestMaxBytes); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
@@ -1296,7 +1370,7 @@ func (s *Service) handleRevokeAnonymousCredential(w http.ResponseWriter, r *http
 		return
 	}
 	var req proto.RevokeAnonymousCredentialRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeBoundedStrictJSON(w, r, &req, issueTokenRequestMaxBytes); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
@@ -1338,7 +1412,7 @@ func (s *Service) handleApplyAnonymousCredentialDispute(w http.ResponseWriter, r
 		return
 	}
 	var req proto.ApplyAnonymousCredentialDisputeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeBoundedStrictJSON(w, r, &req, issueTokenRequestMaxBytes); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
@@ -1395,7 +1469,7 @@ func (s *Service) handleClearAnonymousCredentialDispute(w http.ResponseWriter, r
 		return
 	}
 	var req proto.ClearAnonymousCredentialDisputeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeBoundedStrictJSON(w, r, &req, issueTokenRequestMaxBytes); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
@@ -1462,7 +1536,7 @@ func (s *Service) handleApplyDispute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req proto.ApplyDisputeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeBoundedStrictJSON(w, r, &req, issueTokenRequestMaxBytes); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
@@ -1530,7 +1604,7 @@ func (s *Service) handleClearDispute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req proto.ClearDisputeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeBoundedStrictJSON(w, r, &req, issueTokenRequestMaxBytes); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
@@ -1580,7 +1654,7 @@ func (s *Service) handleOpenAppeal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req proto.OpenAppealRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeBoundedStrictJSON(w, r, &req, issueTokenRequestMaxBytes); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
@@ -1637,7 +1711,7 @@ func (s *Service) handleResolveAppeal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req proto.ResolveAppealRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeBoundedStrictJSON(w, r, &req, issueTokenRequestMaxBytes); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
@@ -1716,7 +1790,7 @@ func (s *Service) handleRevokeToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req proto.RevokeTokenRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeBoundedStrictJSON(w, r, &req, revokeTokenRequestMaxBytes); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
@@ -1755,7 +1829,7 @@ func (s *Service) handleSubmitSlashEvidence(w http.ResponseWriter, r *http.Reque
 	}
 
 	var req proto.SubmitSlashEvidenceRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeBoundedStrictJSON(w, r, &req, issueTokenRequestMaxBytes); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
@@ -1922,6 +1996,17 @@ func isWeakAdminToken(token string) bool {
 		return true
 	}
 	if token == "dev-admin-token" || token == "change-me" {
+		return true
+	}
+	return len(token) < 16
+}
+
+func isWeakSponsorToken(token string) bool {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return true
+	}
+	if token == "dev-sponsor-token" || token == "change-me" {
 		return true
 	}
 	return len(token) < 16

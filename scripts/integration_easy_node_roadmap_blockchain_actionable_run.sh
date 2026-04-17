@@ -19,6 +19,7 @@ HELP_OUT="$TMP_DIR/help.txt"
 STDOUT_OUT="$TMP_DIR/stdout.txt"
 STDERR_OUT="$TMP_DIR/stderr.txt"
 FAKE_SCRIPT="$TMP_DIR/fake_roadmap_blockchain_actionable_run.sh"
+FAKE_PREFILL_SCRIPT="$TMP_DIR/fake_blockchain_mainnet_activation_metrics_prefill.sh"
 
 cat >"$FAKE_SCRIPT" <<'EOF_FAKE'
 #!/usr/bin/env bash
@@ -35,6 +36,22 @@ echo "fake roadmap blockchain actionable run: $*"
 exit "${FAKE_ROADMAP_BLOCKCHAIN_ACTIONABLE_RC:-0}"
 EOF_FAKE
 chmod +x "$FAKE_SCRIPT"
+
+cat >"$FAKE_PREFILL_SCRIPT" <<'EOF_FAKE_PREFILL'
+#!/usr/bin/env bash
+set -euo pipefail
+capture_file="${BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_PREFILL_CAPTURE_FILE:?}"
+{
+  printf 'argc=%s' "$#"
+  for arg in "$@"; do
+    printf '\t%s' "$arg"
+  done
+  printf '\n'
+} >>"$capture_file"
+echo "fake blockchain mainnet activation metrics prefill: $*"
+exit "${FAKE_BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_PREFILL_RC:-0}"
+EOF_FAKE_PREFILL
+chmod +x "$FAKE_PREFILL_SCRIPT"
 
 assert_token() {
   local line="$1"
@@ -53,6 +70,11 @@ echo "[easy-node-roadmap-blockchain-actionable] help contract"
 ./scripts/easy_node.sh help >"$HELP_OUT"
 if ! grep -F -- './scripts/easy_node.sh roadmap-blockchain-actionable-run [--recommended-only [0|1]] [--max-actions N] [--action-timeout-sec N] [--parallel [0|1]] [roadmap_blockchain_actionable_run args...]' "$HELP_OUT" >/dev/null 2>&1; then
   echo "easy_node help missing roadmap-blockchain-actionable-run command contract"
+  cat "$HELP_OUT"
+  exit 1
+fi
+if ! grep -F -- './scripts/easy_node.sh blockchain-mainnet-activation-metrics-prefill [blockchain_mainnet_activation_metrics_prefill args...]' "$HELP_OUT" >/dev/null 2>&1; then
+  echo "easy_node help missing blockchain-mainnet-activation-metrics-prefill command contract"
   cat "$HELP_OUT"
   exit 1
 fi
@@ -106,6 +128,32 @@ if [[ "$rc" -ne 7 ]]; then
 fi
 if ! grep -F -- 'fake roadmap blockchain actionable run: --sample-arg boom' "$STDOUT_OUT" >/dev/null 2>&1; then
   echo "missing forwarded output text for non-zero exit contract"
+  cat "$STDOUT_OUT"
+  exit 1
+fi
+
+echo "[easy-node-roadmap-blockchain-actionable] blockchain prefill wrapper contract"
+: >"$CAPTURE"
+BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_PREFILL_SCRIPT="$FAKE_PREFILL_SCRIPT" \
+BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_PREFILL_CAPTURE_FILE="$CAPTURE" \
+./scripts/easy_node.sh blockchain-mainnet-activation-metrics-prefill \
+  --metrics-summary-json .easy-node-logs/blockchain_mainnet_activation_metrics_summary.json \
+  --output-json .easy-node-logs/blockchain_mainnet_activation_metrics_prefill.json \
+  --canonical-output-json .easy-node-logs/blockchain_mainnet_activation_metrics_prefill.json \
+  --print-output-json 1 >"$STDOUT_OUT"
+
+line="$(tail -n 1 "$CAPTURE" || true)"
+if [[ -z "$line" ]]; then
+  echo "missing prefill wrapper capture line"
+  cat "$CAPTURE"
+  exit 1
+fi
+assert_token "$line" $'\t--metrics-summary-json\t.easy-node-logs/blockchain_mainnet_activation_metrics_summary.json' "missing prefill metrics-summary forwarding"
+assert_token "$line" $'\t--output-json\t.easy-node-logs/blockchain_mainnet_activation_metrics_prefill.json' "missing prefill output-json forwarding"
+assert_token "$line" $'\t--canonical-output-json\t.easy-node-logs/blockchain_mainnet_activation_metrics_prefill.json' "missing prefill canonical-output-json forwarding"
+assert_token "$line" $'\t--print-output-json\t1' "missing prefill print-output-json forwarding"
+if ! grep -F -- 'fake blockchain mainnet activation metrics prefill:' "$STDOUT_OUT" >/dev/null 2>&1; then
+  echo "missing forwarded output text for prefill wrapper contract"
   cat "$STDOUT_OUT"
   exit 1
 fi

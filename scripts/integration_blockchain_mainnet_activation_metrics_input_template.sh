@@ -40,12 +40,14 @@ fi
 HELP_LOG="$TMP_DIR/help.log"
 DEFAULT_LOG="$TMP_DIR/default.log"
 DEFAULT_RUN_SNAPSHOT="$TMP_DIR/default_snapshot.json"
+ALIAS_LOG="$TMP_DIR/alias.log"
 EXPLICIT_LOG="$TMP_DIR/explicit.log"
 SAME_PATH_LOG="$TMP_DIR/same_path.log"
 EXAMPLES_LOG="$TMP_DIR/examples.log"
 
 EXPLICIT_OUTPUT="$TMP_DIR/template_output.json"
 EXPLICIT_CANONICAL="$TMP_DIR/template_canonical.json"
+ALIAS_OUTPUT="$TMP_DIR/template_alias_output.json"
 SAME_PATH_OUTPUT="$TMP_DIR/template_same_path.json"
 EXAMPLES_OUTPUT="$TMP_DIR/template_examples_output.json"
 EXAMPLES_CANONICAL="$TMP_DIR/template_examples_canonical.json"
@@ -140,6 +142,30 @@ if ! cmp -s "$DEFAULT_RUN_SNAPSHOT" "$DEFAULT_OUTPUT"; then
   echo "default output is not deterministic across runs"
   cat "$DEFAULT_RUN_SNAPSHOT"
   cat "$DEFAULT_OUTPUT"
+  exit 1
+fi
+
+echo "[blockchain-mainnet-activation-metrics-input-template] --print-summary-json alias compatibility"
+set +e
+bash "$SCRIPT_UNDER_TEST" \
+  --output-json "$ALIAS_OUTPUT" \
+  --print-summary-json 0 >"$ALIAS_LOG" 2>&1
+alias_rc=$?
+set -e
+if [[ "$alias_rc" -ne 0 ]]; then
+  echo "print-summary-json alias run must exit 0"
+  cat "$ALIAS_LOG"
+  exit 1
+fi
+if [[ ! -f "$ALIAS_OUTPUT" ]]; then
+  echo "alias output file missing: $ALIAS_OUTPUT"
+  cat "$ALIAS_LOG"
+  exit 1
+fi
+if ! jq -e '.status == "ok" and .include_example_values == false' "$ALIAS_OUTPUT" >/dev/null; then
+  echo "alias output contract mismatch"
+  cat "$ALIAS_OUTPUT"
+  cat "$ALIAS_LOG"
   exit 1
 fi
 

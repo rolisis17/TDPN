@@ -2,6 +2,7 @@ package types
 
 import (
 	"errors"
+	"strings"
 
 	chaintypes "github.com/tdpn/tdpn-chain/types"
 )
@@ -26,7 +27,27 @@ type DistributionRecord struct {
 	Status         chaintypes.ReconciliationStatus
 }
 
+// Canonicalize normalizes IDs and defaults for deterministic persistence and equality checks.
+func (r RewardAccrual) Canonicalize() RewardAccrual {
+	r.AccrualID = canonicalIdentifier(r.AccrualID)
+	r.SessionID = canonicalIdentifier(r.SessionID)
+	r.ProviderID = canonicalIdentifier(r.ProviderID)
+	r.AssetDenom = canonicalIdentifier(r.AssetDenom)
+	r.OperationState = canonicalStatus(r.OperationState, chaintypes.ReconciliationPending)
+	return r
+}
+
+// Canonicalize normalizes IDs and defaults for deterministic persistence and equality checks.
+func (r DistributionRecord) Canonicalize() DistributionRecord {
+	r.DistributionID = canonicalIdentifier(r.DistributionID)
+	r.AccrualID = canonicalIdentifier(r.AccrualID)
+	r.Status = canonicalStatus(r.Status, chaintypes.ReconciliationSubmitted)
+	return r
+}
+
 func (r RewardAccrual) ValidateBasic() error {
+	r = r.Canonicalize()
+
 	if r.AccrualID == "" {
 		return errors.New("accrual id is required")
 	}
@@ -40,6 +61,8 @@ func (r RewardAccrual) ValidateBasic() error {
 }
 
 func (r DistributionRecord) ValidateBasic() error {
+	r = r.Canonicalize()
+
 	if r.DistributionID == "" {
 		return errors.New("distribution id is required")
 	}
@@ -47,4 +70,16 @@ func (r DistributionRecord) ValidateBasic() error {
 		return errors.New("accrual id is required")
 	}
 	return nil
+}
+
+func canonicalIdentifier(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
+func canonicalStatus(value chaintypes.ReconciliationStatus, defaultValue chaintypes.ReconciliationStatus) chaintypes.ReconciliationStatus {
+	normalized := chaintypes.ReconciliationStatus(canonicalIdentifier(string(value)))
+	if normalized == "" {
+		return defaultValue
+	}
+	return normalized
 }

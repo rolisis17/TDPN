@@ -55,6 +55,45 @@ if [[ "${FAKE_CI_FAIL:-0}" == "1" ]]; then
   rc="$fail_rc"
 fi
 
+issuer_settlement_status_live_smoke_mode="${FAKE_CI_ISSUER_SETTLEMENT_STATUS_LIVE_SMOKE_MODE:-present}"
+issuer_settlement_status_live_smoke_stage_json=""
+if [[ "$issuer_settlement_status_live_smoke_mode" == "legacy_missing" ]]; then
+  issuer_settlement_status_live_smoke_stage_json=""
+else
+  issuer_settlement_status_live_smoke_stage_json="$(cat <<EOF_STAGE_PRESENT
+    "issuer_settlement_status_live_smoke": {
+      "status": "$status"
+    }
+EOF_STAGE_PRESENT
+)"
+fi
+
+exit_settlement_status_live_smoke_mode="${FAKE_CI_EXIT_SETTLEMENT_STATUS_LIVE_SMOKE_MODE:-present}"
+exit_settlement_status_live_smoke_stage_json=""
+if [[ "$exit_settlement_status_live_smoke_mode" == "legacy_missing" ]]; then
+  exit_settlement_status_live_smoke_stage_json=""
+else
+  exit_settlement_status_live_smoke_stage_json="$(cat <<EOF_STAGE_EXIT_PRESENT
+    "exit_settlement_status_live_smoke": {
+      "status": "$status"
+    }
+EOF_STAGE_EXIT_PRESENT
+)"
+fi
+
+optional_settlement_status_stage_json=""
+if [[ -n "$issuer_settlement_status_live_smoke_stage_json" ]]; then
+  optional_settlement_status_stage_json="$issuer_settlement_status_live_smoke_stage_json"
+fi
+if [[ -n "$exit_settlement_status_live_smoke_stage_json" ]]; then
+  if [[ -n "$optional_settlement_status_stage_json" ]]; then
+    optional_settlement_status_stage_json="$optional_settlement_status_stage_json,
+$exit_settlement_status_live_smoke_stage_json"
+  else
+    optional_settlement_status_stage_json="$exit_settlement_status_live_smoke_stage_json"
+  fi
+fi
+
 if [[ -n "$summary_json" && "${FAKE_CI_OMIT_SUMMARY:-0}" != "1" ]]; then
   mkdir -p "$(dirname "$summary_json")"
   cat >"$summary_json" <<EOF_CI_SUMMARY
@@ -79,7 +118,8 @@ if [[ -n "$summary_json" && "${FAKE_CI_OMIT_SUMMARY:-0}" != "1" ]]; then
     },
     "settlement_state_persistence": {
       "status": "$status"
-    }
+    }${optional_settlement_status_stage_json:+,}
+${optional_settlement_status_stage_json}
   }
 }
 EOF_CI_SUMMARY
@@ -118,6 +158,7 @@ Usage:
     [--require-settlement-state-persistence-ok [0|1]]
     [--require-settlement-dual-asset-parity-ok [0|1]]
     [--require-issuer-sponsor-api-live-smoke-ok [0|1]]
+    [--require-exit-settlement-status-live-smoke-ok [0|1]]
 EOF_HELP
   fi
   exit 0
@@ -163,6 +204,27 @@ if [[ "$issuer_sponsor_api_live_smoke_mode" == "legacy_missing" ]]; then
   issuer_sponsor_api_live_smoke_stage_resolved_json="false"
 fi
 
+issuer_sponsor_vpn_session_live_smoke_mode="${FAKE_CHECK_ISSUER_SPONSOR_VPN_SESSION_LIVE_SMOKE_MODE:-present}"
+issuer_sponsor_vpn_session_live_smoke_status="$status"
+issuer_sponsor_vpn_session_live_smoke_signal_json="true"
+issuer_sponsor_vpn_session_live_smoke_stage_ok_json="true"
+issuer_sponsor_vpn_session_live_smoke_stage_resolved_json="true"
+if [[ "$status" != "pass" ]]; then
+  issuer_sponsor_vpn_session_live_smoke_signal_json="false"
+  issuer_sponsor_vpn_session_live_smoke_stage_ok_json="false"
+fi
+if [[ "$issuer_sponsor_vpn_session_live_smoke_mode" == "legacy_missing" ]]; then
+  issuer_sponsor_vpn_session_live_smoke_status=""
+  issuer_sponsor_vpn_session_live_smoke_signal_json="null"
+  issuer_sponsor_vpn_session_live_smoke_stage_ok_json="null"
+  issuer_sponsor_vpn_session_live_smoke_stage_resolved_json="false"
+elif [[ "$issuer_sponsor_vpn_session_live_smoke_mode" == "fail" ]]; then
+  issuer_sponsor_vpn_session_live_smoke_status="fail"
+  issuer_sponsor_vpn_session_live_smoke_signal_json="false"
+  issuer_sponsor_vpn_session_live_smoke_stage_ok_json="false"
+  issuer_sponsor_vpn_session_live_smoke_stage_resolved_json="true"
+fi
+
 issuer_admin_blockchain_handlers_coverage_mode="${FAKE_CHECK_ISSUER_ADMIN_BLOCKCHAIN_HANDLERS_COVERAGE_MODE:-present}"
 issuer_admin_blockchain_handlers_coverage_status="$status"
 issuer_admin_blockchain_handlers_coverage_signal_json="true"
@@ -203,6 +265,7 @@ if [[ -n "$summary_json" && "${FAKE_CHECK_OMIT_SUMMARY:-0}" != "1" ]]; then
     "require_settlement_state_persistence_ok": true,
     "require_settlement_dual_asset_parity_ok": true,
     "require_issuer_sponsor_api_live_smoke_ok": true,
+    "require_issuer_sponsor_vpn_session_live_smoke_ok": true,
     "require_issuer_admin_blockchain_handlers_coverage_ok": true
   },
   "signals": {
@@ -212,6 +275,7 @@ if [[ -n "$summary_json" && "${FAKE_CHECK_OMIT_SUMMARY:-0}" != "1" ]]; then
     "settlement_state_persistence_ok": true,
     "settlement_dual_asset_parity_ok": true,
     "issuer_sponsor_api_live_smoke_ok": $issuer_sponsor_api_live_smoke_signal_json,
+    "issuer_sponsor_vpn_session_live_smoke_ok": $issuer_sponsor_vpn_session_live_smoke_signal_json,
     "issuer_admin_blockchain_handlers_coverage_ok": $issuer_admin_blockchain_handlers_coverage_signal_json
   },
   "stages": {
@@ -244,6 +308,11 @@ if [[ -n "$summary_json" && "${FAKE_CHECK_OMIT_SUMMARY:-0}" != "1" ]]; then
       "status": "$issuer_sponsor_api_live_smoke_status",
       "resolved": $issuer_sponsor_api_live_smoke_stage_resolved_json,
       "ok": $issuer_sponsor_api_live_smoke_stage_ok_json
+    },
+    "issuer_sponsor_vpn_session_live_smoke": {
+      "status": "$issuer_sponsor_vpn_session_live_smoke_status",
+      "resolved": $issuer_sponsor_vpn_session_live_smoke_stage_resolved_json,
+      "ok": $issuer_sponsor_vpn_session_live_smoke_stage_ok_json
     },
     "issuer_admin_blockchain_handlers_coverage": {
       "status": "$issuer_admin_blockchain_handlers_coverage_status",
@@ -327,6 +396,11 @@ if [[ "$check_line" != *"--require-settlement-acceptance-ok 0"* || "$check_line"
   echo "$check_line"
   exit 1
 fi
+if [[ "$check_line" != *"--require-exit-settlement-status-live-smoke-ok 0"* ]]; then
+  echo "dry-run exit settlement-status requirement relax canonicalization mismatch"
+  echo "$check_line"
+  exit 1
+fi
 if [[ "$check_line" != *"--show-json 1"* ]]; then
   echo "check show-json forwarding mismatch"
   echo "$check_line"
@@ -385,6 +459,18 @@ if ! jq -e --arg canonical "$DRY_RUN_CANONICAL_SUMMARY" '
   and .signals.issuer_sponsor_api_live_smoke_status == "pass"
   and .signals.issuer_sponsor_api_live_smoke_resolved == true
   and .signals.sources.issuer_sponsor_api_live_smoke_ok == "phase5_settlement_layer_check_summary.signals.issuer_sponsor_api_live_smoke_ok"
+  and .signals.issuer_sponsor_vpn_session_live_smoke_ok == true
+  and .signals.issuer_sponsor_vpn_session_live_smoke_status == "pass"
+  and .signals.issuer_sponsor_vpn_session_live_smoke_resolved == true
+  and .signals.sources.issuer_sponsor_vpn_session_live_smoke_ok == "phase5_settlement_layer_check_summary.signals.issuer_sponsor_vpn_session_live_smoke_ok"
+  and .signals.issuer_settlement_status_live_smoke_ok == true
+  and .signals.issuer_settlement_status_live_smoke_status == "pass"
+  and .signals.issuer_settlement_status_live_smoke_resolved == true
+  and .signals.sources.issuer_settlement_status_live_smoke_ok == "ci_phase5_settlement_layer_summary.steps.issuer_settlement_status_live_smoke.status"
+  and .signals.exit_settlement_status_live_smoke_ok == true
+  and .signals.exit_settlement_status_live_smoke_status == "pass"
+  and .signals.exit_settlement_status_live_smoke_resolved == true
+  and .signals.sources.exit_settlement_status_live_smoke_ok == "ci_phase5_settlement_layer_summary.steps.exit_settlement_status_live_smoke.status"
   and (
     if (.signals | has("issuer_admin_blockchain_handlers_coverage_ok")) then
       .signals.issuer_admin_blockchain_handlers_coverage_ok == true
@@ -408,7 +494,10 @@ PHASE5_SETTLEMENT_LAYER_RUN_CHECK_SCRIPT="$FAKE_CHECK" \
 PHASE5_SETTLEMENT_LAYER_RUN_DRY_RUN=1 \
 PHASE5_SETTLEMENT_LAYER_RUN_CANONICAL_SUMMARY_JSON="$ENV_DRY_RUN_CANONICAL_SUMMARY" \
 FAKE_CHECK_HELP_MODE=legacy \
+FAKE_CI_ISSUER_SETTLEMENT_STATUS_LIVE_SMOKE_MODE=legacy_missing \
+FAKE_CI_EXIT_SETTLEMENT_STATUS_LIVE_SMOKE_MODE=legacy_missing \
 FAKE_CHECK_ISSUER_SPONSOR_API_LIVE_SMOKE_MODE=legacy_missing \
+FAKE_CHECK_ISSUER_SPONSOR_VPN_SESSION_LIVE_SMOKE_MODE=legacy_missing \
 FAKE_CHECK_ISSUER_ADMIN_BLOCKCHAIN_HANDLERS_COVERAGE_MODE=legacy_missing \
 bash "$RUNNER" \
   --reports-dir "$TMP_DIR/reports_env_dry" \
@@ -447,6 +536,11 @@ if [[ "$check_line" == *"--require-issuer-sponsor-api-live-smoke-ok"* ]]; then
   echo "$check_line"
   exit 1
 fi
+if [[ "$check_line" == *"--require-exit-settlement-status-live-smoke-ok"* ]]; then
+  echo "exit settlement-status requirement flag leaked for legacy checker help mode"
+  echo "$check_line"
+  exit 1
+fi
 if ! jq -e '
   .status == "pass"
   and .rc == 0
@@ -457,6 +551,18 @@ if ! jq -e '
   and .signals.issuer_sponsor_api_live_smoke_status == "missing"
   and .signals.issuer_sponsor_api_live_smoke_resolved == false
   and .signals.sources.issuer_sponsor_api_live_smoke_ok == "phase5_settlement_layer_check_summary.stages.issuer_sponsor_api_live_smoke.resolved"
+  and .signals.issuer_sponsor_vpn_session_live_smoke_ok == null
+  and .signals.issuer_sponsor_vpn_session_live_smoke_status == "missing"
+  and .signals.issuer_sponsor_vpn_session_live_smoke_resolved == false
+  and .signals.sources.issuer_sponsor_vpn_session_live_smoke_ok == "phase5_settlement_layer_check_summary.stages.issuer_sponsor_vpn_session_live_smoke.resolved"
+  and .signals.issuer_settlement_status_live_smoke_ok == null
+  and .signals.issuer_settlement_status_live_smoke_status == "missing"
+  and .signals.issuer_settlement_status_live_smoke_resolved == false
+  and .signals.sources.issuer_settlement_status_live_smoke_ok == "unresolved"
+  and .signals.exit_settlement_status_live_smoke_ok == null
+  and .signals.exit_settlement_status_live_smoke_status == "missing"
+  and .signals.exit_settlement_status_live_smoke_resolved == false
+  and .signals.sources.exit_settlement_status_live_smoke_ok == "unresolved"
   and (
     if (.signals | has("issuer_admin_blockchain_handlers_coverage_ok")) then
       .signals.issuer_admin_blockchain_handlers_coverage_ok == null
@@ -481,6 +587,7 @@ PHASE5_SETTLEMENT_LAYER_RUN_CHECK_SCRIPT="$FAKE_CHECK" \
 PHASE5_SETTLEMENT_LAYER_RUN_CANONICAL_SUMMARY_JSON="$CI_FAIL_CANONICAL_SUMMARY" \
 FAKE_CI_FAIL=1 \
 FAKE_CI_FAIL_RC=27 \
+FAKE_CHECK_ISSUER_SPONSOR_VPN_SESSION_LIVE_SMOKE_MODE=fail \
 bash "$RUNNER" \
   --reports-dir "$TMP_DIR/reports_fail" \
   --ci-summary-json "$TMP_DIR/ci_fail_summary.json" \
@@ -544,6 +651,18 @@ if ! jq -e --arg canonical "$CI_FAIL_CANONICAL_SUMMARY" '
   and .signals.issuer_sponsor_api_live_smoke_status == "pass"
   and .signals.issuer_sponsor_api_live_smoke_resolved == true
   and .signals.sources.issuer_sponsor_api_live_smoke_ok == "phase5_settlement_layer_check_summary.signals.issuer_sponsor_api_live_smoke_ok"
+  and .signals.issuer_sponsor_vpn_session_live_smoke_ok == false
+  and .signals.issuer_sponsor_vpn_session_live_smoke_status == "fail"
+  and .signals.issuer_sponsor_vpn_session_live_smoke_resolved == true
+  and .signals.sources.issuer_sponsor_vpn_session_live_smoke_ok == "phase5_settlement_layer_check_summary.signals.issuer_sponsor_vpn_session_live_smoke_ok"
+  and .signals.issuer_settlement_status_live_smoke_ok == false
+  and .signals.issuer_settlement_status_live_smoke_status == "fail"
+  and .signals.issuer_settlement_status_live_smoke_resolved == true
+  and .signals.sources.issuer_settlement_status_live_smoke_ok == "ci_phase5_settlement_layer_summary.steps.issuer_settlement_status_live_smoke.status"
+  and .signals.exit_settlement_status_live_smoke_ok == false
+  and .signals.exit_settlement_status_live_smoke_status == "fail"
+  and .signals.exit_settlement_status_live_smoke_resolved == true
+  and .signals.sources.exit_settlement_status_live_smoke_ok == "ci_phase5_settlement_layer_summary.steps.exit_settlement_status_live_smoke.status"
   and (
     if (.signals | has("issuer_admin_blockchain_handlers_coverage_ok")) then
       .signals.issuer_admin_blockchain_handlers_coverage_ok == true
@@ -599,6 +718,18 @@ if ! jq -e '
   and .signals.issuer_sponsor_api_live_smoke_status == "missing"
   and .signals.issuer_sponsor_api_live_smoke_resolved == false
   and .signals.sources.issuer_sponsor_api_live_smoke_ok == "unresolved"
+  and .signals.issuer_sponsor_vpn_session_live_smoke_ok == null
+  and .signals.issuer_sponsor_vpn_session_live_smoke_status == "missing"
+  and .signals.issuer_sponsor_vpn_session_live_smoke_resolved == false
+  and .signals.sources.issuer_sponsor_vpn_session_live_smoke_ok == "unresolved"
+  and .signals.issuer_settlement_status_live_smoke_ok == true
+  and .signals.issuer_settlement_status_live_smoke_status == "pass"
+  and .signals.issuer_settlement_status_live_smoke_resolved == true
+  and .signals.sources.issuer_settlement_status_live_smoke_ok == "ci_phase5_settlement_layer_summary.steps.issuer_settlement_status_live_smoke.status"
+  and .signals.exit_settlement_status_live_smoke_ok == true
+  and .signals.exit_settlement_status_live_smoke_status == "pass"
+  and .signals.exit_settlement_status_live_smoke_resolved == true
+  and .signals.sources.exit_settlement_status_live_smoke_ok == "ci_phase5_settlement_layer_summary.steps.exit_settlement_status_live_smoke.status"
   and (
     if (.signals | has("issuer_admin_blockchain_handlers_coverage_ok")) then
       .signals.issuer_admin_blockchain_handlers_coverage_ok == null

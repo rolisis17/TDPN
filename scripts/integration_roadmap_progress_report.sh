@@ -308,13 +308,41 @@ cat >"$PHASE5_SETTLEMENT_LAYER_SUMMARY_JSON" <<'EOF_PHASE5_SUMMARY'
   "status": "pass",
   "rc": 0,
   "steps": {
+    "settlement_dual_asset_parity": {
+      "status": "pass"
+    },
+    "settlement_adapter_signed_tx_roundtrip": {
+      "status": "pass"
+    },
+    "settlement_shadow_env": {
+      "status": "pass"
+    },
+    "settlement_shadow_status_surface": {
+      "status": "pass"
+    },
     "issuer_sponsor_api_live_smoke": {
       "status": "pass"
     },
     "issuer_settlement_status_live_smoke": {
       "status": "pass"
+    },
+    "issuer_admin_blockchain_handlers_coverage": {
+      "status": "pass"
+    },
+    "exit_settlement_status_live_smoke": {
+      "status": "pass"
     }
-  }
+  },
+  "settlement_dual_asset_parity_status": "pass",
+  "settlement_dual_asset_parity_ok": true,
+  "settlement_adapter_signed_tx_roundtrip_status": "pass",
+  "settlement_adapter_signed_tx_roundtrip_ok": true,
+  "settlement_shadow_env_status": "pass",
+  "settlement_shadow_env_ok": true,
+  "settlement_shadow_status_surface_status": "pass",
+  "settlement_shadow_status_surface_ok": true,
+  "issuer_admin_blockchain_handlers_coverage_status": "pass",
+  "issuer_admin_blockchain_handlers_coverage_ok": true
 }
 EOF_PHASE5_SUMMARY
 cat >"$PHASE6_COSMOS_L1_SUMMARY_JSON" <<'EOF_PHASE6_SUMMARY'
@@ -782,6 +810,18 @@ if ! jq -e '
   and .vpn_track.phase5_settlement_layer_handoff.issuer_sponsor_api_live_smoke_ok == true
   and .vpn_track.phase5_settlement_layer_handoff.issuer_settlement_status_live_smoke_status == "pass"
   and .vpn_track.phase5_settlement_layer_handoff.issuer_settlement_status_live_smoke_ok == true
+  and .vpn_track.phase5_settlement_layer_handoff.issuer_admin_blockchain_handlers_coverage_status == "pass"
+  and .vpn_track.phase5_settlement_layer_handoff.issuer_admin_blockchain_handlers_coverage_ok == true
+  and .vpn_track.phase5_settlement_layer_handoff.settlement_dual_asset_parity_status == "pass"
+  and .vpn_track.phase5_settlement_layer_handoff.settlement_dual_asset_parity_ok == true
+  and .vpn_track.phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_status == "pass"
+  and .vpn_track.phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_ok == true
+  and .vpn_track.phase5_settlement_layer_handoff.settlement_shadow_env_status == "pass"
+  and .vpn_track.phase5_settlement_layer_handoff.settlement_shadow_env_ok == true
+  and .vpn_track.phase5_settlement_layer_handoff.settlement_shadow_status_surface_status == "pass"
+  and .vpn_track.phase5_settlement_layer_handoff.settlement_shadow_status_surface_ok == true
+  and .vpn_track.phase5_settlement_layer_handoff.exit_settlement_status_live_smoke_status == "pass"
+  and .vpn_track.phase5_settlement_layer_handoff.exit_settlement_status_live_smoke_ok == true
   and .artifacts.phase0_summary_json == "'"$PHASE0_SUMMARY_JSON"'"
   and .artifacts.manual_validation_summary_json == "'"$TEST_LOG_DIR/manual_validation_readiness_summary.json"'"
   and .artifacts.manual_validation_report_md == "'"$TEST_LOG_DIR/manual_validation_readiness_report.md"'"
@@ -862,6 +902,187 @@ if ! jq -e '
   cat "$SUMMARY_JSON"
   exit 1
 fi
+
+echo "[roadmap-progress-report] blockchain freshness fresh-vs-stale go behavior"
+MINIMAL_MANUAL_SUMMARY_JSON="$TMP_DIR/manual_validation_minimal_summary_for_gate_tests.json"
+cat >"$MINIMAL_MANUAL_SUMMARY_JSON" <<'EOF_MINIMAL_SUMMARY_GATE'
+{"version":1,"summary":{"next_action_check_id":"machine_c_vpn_smoke"},"report":{"readiness_status":"NOT_READY"}}
+EOF_MINIMAL_SUMMARY_GATE
+FRESH_MAINNET_GATE_SUMMARY_JSON="$TMP_DIR/blockchain_mainnet_activation_gate_fresh_summary.json"
+FRESH_BOOTSTRAP_GATE_SUMMARY_JSON="$TMP_DIR/blockchain_bootstrap_governance_graduation_gate_fresh_summary.json"
+STALE_MAINNET_GATE_SUMMARY_JSON="$TMP_DIR/blockchain_mainnet_activation_gate_stale_summary.json"
+current_epoch="$(date -u +%s)"
+fresh_epoch=$((current_epoch - 3600))
+stale_epoch=$((current_epoch - 172800))
+fresh_iso="$(date -u -d "@$fresh_epoch" +%Y-%m-%dT%H:%M:%SZ)"
+
+cat >"$FRESH_MAINNET_GATE_SUMMARY_JSON" <<EOF_FRESH_MAINNET
+{
+  "version": 1,
+  "schema": {
+    "id": "mainnet_activation_gate_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "generated_at": "$fresh_iso",
+  "status": "GO",
+  "decision": {
+    "pass": true,
+    "go": true,
+    "no_go": false,
+    "reasons": [
+      "fresh activation evidence"
+    ]
+  },
+  "reasons": [
+    "fresh activation evidence"
+  ],
+  "source_paths": [
+    "./artifacts/blockchain/mainnet-activation-metrics/metrics.json"
+  ]
+}
+EOF_FRESH_MAINNET
+
+cat >"$FRESH_BOOTSTRAP_GATE_SUMMARY_JSON" <<EOF_FRESH_BOOTSTRAP
+{
+  "version": 1,
+  "schema": {
+    "id": "bootstrap_governance_graduation_gate_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "generated_at": "$fresh_iso",
+  "status": "GO",
+  "decision": {
+    "pass": true,
+    "go": true,
+    "no_go": false,
+    "reasons": [
+      "fresh bootstrap governance evidence"
+    ]
+  },
+  "source_paths": [
+    "./artifacts/blockchain/bootstrap-governance-graduation/summary.json"
+  ]
+}
+EOF_FRESH_BOOTSTRAP
+
+cat >"$STALE_MAINNET_GATE_SUMMARY_JSON" <<'EOF_STALE_MAINNET'
+{
+  "version": 1,
+  "schema": {
+    "id": "mainnet_activation_gate_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "GO",
+  "decision": {
+    "pass": true,
+    "go": true,
+    "no_go": false,
+    "reasons": [
+      "stale activation evidence"
+    ]
+  },
+  "reasons": [
+    "stale activation evidence"
+  ],
+  "source_paths": [
+    "./artifacts/blockchain/mainnet-activation-metrics/metrics.json"
+  ]
+}
+EOF_STALE_MAINNET
+touch -d "@$stale_epoch" "$STALE_MAINNET_GATE_SUMMARY_JSON"
+
+FRESH_SUMMARY_JSON="$TMP_DIR/roadmap_progress_mainnet_activation_gate_fresh_summary.json"
+FRESH_REPORT_MD="$TMP_DIR/roadmap_progress_mainnet_activation_gate_fresh_report.md"
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$MINIMAL_MANUAL_SUMMARY_JSON" \
+  --phase0-summary-json "$PHASE0_SUMMARY_JSON" \
+  --phase5-settlement-layer-summary-json "$PHASE5_SETTLEMENT_LAYER_SUMMARY_JSON" \
+  --phase7-mainnet-cutover-summary-json "" \
+  --blockchain-mainnet-activation-gate-summary-json "$FRESH_MAINNET_GATE_SUMMARY_JSON" \
+  --blockchain-bootstrap-governance-graduation-gate-summary-json "$FRESH_BOOTSTRAP_GATE_SUMMARY_JSON" \
+  --single-machine-summary-json "$SINGLE_MACHINE_SUMMARY_JSON" \
+  --summary-json "$FRESH_SUMMARY_JSON" \
+  --report-md "$FRESH_REPORT_MD" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_fresh.log 2>&1; then
+  echo "expected success for fresh blockchain freshness summary"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_fresh.log
+  exit 1
+fi
+if ! jq -e --arg fresh_iso "$fresh_iso" '
+  .blockchain_track.mainnet_activation_gate.available == true
+  and .blockchain_track.mainnet_activation_gate.status == "GO"
+  and .blockchain_track.mainnet_activation_gate.decision == "GO"
+  and .blockchain_track.mainnet_activation_gate.go == true
+  and .blockchain_track.mainnet_activation_gate.no_go == false
+  and .blockchain_track.mainnet_activation_gate.summary_generated_at == $fresh_iso
+  and (.blockchain_track.mainnet_activation_gate.summary_age_sec | tonumber) >= 3500
+  and (.blockchain_track.mainnet_activation_gate.summary_age_sec | tonumber) <= 3705
+  and .blockchain_track.mainnet_activation_gate.summary_stale == false
+  and .blockchain_track.mainnet_activation_gate.summary_max_age_sec == 86400
+  and .blockchain_track.bootstrap_governance_graduation_gate.summary_generated_at == $fresh_iso
+  and (.blockchain_track.bootstrap_governance_graduation_gate.summary_age_sec | tonumber) >= 3500
+  and (.blockchain_track.bootstrap_governance_graduation_gate.summary_age_sec | tonumber) <= 3705
+  and .blockchain_track.bootstrap_governance_graduation_gate.summary_stale == false
+  and .blockchain_track.bootstrap_governance_graduation_gate.summary_max_age_sec == 86400
+  and .blockchain_track.mainnet_activation_refresh_evidence_action.available == false
+  and .blockchain_track.mainnet_activation_refresh_evidence_action.id == null
+  and .blockchain_track.mainnet_activation_refresh_evidence_action.reason == null
+  and .blockchain_track.mainnet_activation_refresh_evidence_action.command == null
+  and (((.next_actions // []) | any(.id == "blockchain_mainnet_activation_refresh_evidence")) | not)
+' "$FRESH_SUMMARY_JSON" >/dev/null; then
+  echo "fresh blockchain freshness summary missing expected fields"
+  cat "$FRESH_SUMMARY_JSON"
+  exit 1
+fi
+
+STALE_SUMMARY_JSON="$TMP_DIR/roadmap_progress_mainnet_activation_gate_stale_summary.json"
+STALE_REPORT_MD="$TMP_DIR/roadmap_progress_mainnet_activation_gate_stale_report.md"
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$MINIMAL_MANUAL_SUMMARY_JSON" \
+  --phase0-summary-json "$PHASE0_SUMMARY_JSON" \
+  --phase5-settlement-layer-summary-json "$PHASE5_SETTLEMENT_LAYER_SUMMARY_JSON" \
+  --phase7-mainnet-cutover-summary-json "" \
+  --blockchain-mainnet-activation-gate-summary-json "$STALE_MAINNET_GATE_SUMMARY_JSON" \
+  --blockchain-bootstrap-governance-graduation-gate-summary-json "$FRESH_BOOTSTRAP_GATE_SUMMARY_JSON" \
+  --single-machine-summary-json "$SINGLE_MACHINE_SUMMARY_JSON" \
+  --summary-json "$STALE_SUMMARY_JSON" \
+  --report-md "$STALE_REPORT_MD" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_stale.log 2>&1; then
+  echo "expected success for stale blockchain freshness summary"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_stale.log
+  exit 1
+fi
+if ! jq -e --arg stale_reason "stale activation evidence" '
+  .blockchain_track.mainnet_activation_gate.available == true
+  and .blockchain_track.mainnet_activation_gate.status == "GO"
+  and .blockchain_track.mainnet_activation_gate.decision == "GO"
+  and .blockchain_track.mainnet_activation_gate.go == true
+  and .blockchain_track.mainnet_activation_gate.no_go == false
+  and .blockchain_track.mainnet_activation_gate.summary_generated_at == null
+  and (.blockchain_track.mainnet_activation_gate.summary_age_sec | tonumber) >= 172800
+  and .blockchain_track.mainnet_activation_gate.summary_stale == true
+  and .blockchain_track.mainnet_activation_gate.summary_max_age_sec == 86400
+  and .blockchain_track.bootstrap_governance_graduation_gate.summary_stale == false
+  and .blockchain_track.mainnet_activation_refresh_evidence_action.available == true
+  and .blockchain_track.mainnet_activation_refresh_evidence_action.id == "blockchain_mainnet_activation_refresh_evidence"
+  and ((.blockchain_track.mainnet_activation_refresh_evidence_action.reason // "") | contains($stale_reason))
+  and (.blockchain_track.mainnet_activation_refresh_evidence_action.command // "") == "./scripts/easy_node.sh blockchain-mainnet-activation-real-evidence-run --input-json .easy-node-logs/blockchain_mainnet_activation_metrics_input.operator.json --reports-dir .easy-node-logs/blockchain_mainnet_activation_real_evidence_run --summary-json .easy-node-logs/blockchain_mainnet_activation_real_evidence_run_latest_summary.json --canonical-summary-json .easy-node-logs/blockchain_mainnet_activation_real_evidence_run_summary.json --refresh-roadmap 1 --print-summary-json 1"
+  and ((.next_actions // []) | any(.id == "blockchain_mainnet_activation_refresh_evidence"))
+' "$STALE_SUMMARY_JSON" >/dev/null; then
+  echo "stale blockchain freshness summary missing expected refresh action"
+  cat "$STALE_SUMMARY_JSON"
+  exit 1
+fi
+
 if ! rg -q '\[roadmap-progress-report\] refresh_step=manual_validation_report status=running' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
   echo "expected manual refresh running heartbeat line"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log
@@ -924,6 +1145,66 @@ if ! rg -q 'Phase-5 issuer_settlement_status_live_smoke_status: pass' "$REPORT_M
 fi
 if ! rg -q 'Phase-5 issuer_settlement_status_live_smoke_ok: true' "$REPORT_MD"; then
   echo "report markdown missing phase5 issuer_settlement_status_live_smoke_ok line"
+  cat "$REPORT_MD"
+  exit 1
+fi
+if ! rg -q 'Phase-5 issuer_admin_blockchain_handlers_coverage_status: pass' "$REPORT_MD"; then
+  echo "report markdown missing phase5 issuer_admin_blockchain_handlers_coverage_status line"
+  cat "$REPORT_MD"
+  exit 1
+fi
+if ! rg -q 'Phase-5 issuer_admin_blockchain_handlers_coverage_ok: true' "$REPORT_MD"; then
+  echo "report markdown missing phase5 issuer_admin_blockchain_handlers_coverage_ok line"
+  cat "$REPORT_MD"
+  exit 1
+fi
+if ! rg -q 'Phase-5 settlement_dual_asset_parity_status: pass' "$REPORT_MD"; then
+  echo "report markdown missing phase5 settlement_dual_asset_parity_status line"
+  cat "$REPORT_MD"
+  exit 1
+fi
+if ! rg -q 'Phase-5 settlement_dual_asset_parity_ok: true' "$REPORT_MD"; then
+  echo "report markdown missing phase5 settlement_dual_asset_parity_ok line"
+  cat "$REPORT_MD"
+  exit 1
+fi
+if ! rg -q 'Phase-5 settlement_adapter_signed_tx_roundtrip_status: pass' "$REPORT_MD"; then
+  echo "report markdown missing phase5 settlement_adapter_signed_tx_roundtrip_status line"
+  cat "$REPORT_MD"
+  exit 1
+fi
+if ! rg -q 'Phase-5 settlement_adapter_signed_tx_roundtrip_ok: true' "$REPORT_MD"; then
+  echo "report markdown missing phase5 settlement_adapter_signed_tx_roundtrip_ok line"
+  cat "$REPORT_MD"
+  exit 1
+fi
+if ! rg -q 'Phase-5 settlement_shadow_env_status: pass' "$REPORT_MD"; then
+  echo "report markdown missing phase5 settlement_shadow_env_status line"
+  cat "$REPORT_MD"
+  exit 1
+fi
+if ! rg -q 'Phase-5 settlement_shadow_env_ok: true' "$REPORT_MD"; then
+  echo "report markdown missing phase5 settlement_shadow_env_ok line"
+  cat "$REPORT_MD"
+  exit 1
+fi
+if ! rg -q 'Phase-5 settlement_shadow_status_surface_status: pass' "$REPORT_MD"; then
+  echo "report markdown missing phase5 settlement_shadow_status_surface_status line"
+  cat "$REPORT_MD"
+  exit 1
+fi
+if ! rg -q 'Phase-5 settlement_shadow_status_surface_ok: true' "$REPORT_MD"; then
+  echo "report markdown missing phase5 settlement_shadow_status_surface_ok line"
+  cat "$REPORT_MD"
+  exit 1
+fi
+if ! rg -q 'Phase-5 exit_settlement_status_live_smoke_status: pass' "$REPORT_MD"; then
+  echo "report markdown missing phase5 exit_settlement_status_live_smoke_status line"
+  cat "$REPORT_MD"
+  exit 1
+fi
+if ! rg -q 'Phase-5 exit_settlement_status_live_smoke_ok: true' "$REPORT_MD"; then
+  echo "report markdown missing phase5 exit_settlement_status_live_smoke_ok line"
   cat "$REPORT_MD"
   exit 1
 fi
@@ -1397,12 +1678,20 @@ fi
   and ((.blockchain_track.mainnet_activation_missing_metrics_action.rerun_bundle_command // "") | contains("--blockchain-mainnet-activation-metrics-input-json .easy-node-logs/blockchain_mainnet_activation_metrics_input.operator.json"))
   and ((.blockchain_track.mainnet_activation_missing_metrics_action.checklist_command // "") | startswith("./scripts/easy_node.sh blockchain-mainnet-activation-metrics-missing-checklist "))
   and ((.blockchain_track.mainnet_activation_missing_metrics_action.checklist_command // "") | contains("--metrics-summary-json .easy-node-logs/blockchain_gate_bundle_summary.json"))
+  and ((.blockchain_track.mainnet_activation_missing_metrics_action.checklist_command // "") | contains("--print-summary-json 1"))
+  and (((.blockchain_track.mainnet_activation_missing_metrics_action.checklist_command // "") | contains("--print-output-json")) | not)
     and ((.blockchain_track.mainnet_activation_missing_metrics_action.missing_input_template_command // "") | startswith("./scripts/easy_node.sh blockchain-mainnet-activation-metrics-missing-input-template "))
     and ((.blockchain_track.mainnet_activation_missing_metrics_action.missing_input_template_command // "") | contains("--metrics-summary-json .easy-node-logs/blockchain_gate_bundle_summary.json"))
+    and ((.blockchain_track.mainnet_activation_missing_metrics_action.missing_input_template_command // "") | contains("--print-summary-json 1"))
+    and (((.blockchain_track.mainnet_activation_missing_metrics_action.missing_input_template_command // "") | contains("--print-output-json")) | not)
     and ((.blockchain_track.mainnet_activation_missing_metrics_action.template_command // "") | startswith("./scripts/easy_node.sh blockchain-mainnet-activation-metrics-input-template "))
     and ((.blockchain_track.mainnet_activation_missing_metrics_action.template_command // "") | contains("--output-json .easy-node-logs/blockchain_mainnet_activation_metrics_input.template.json"))
+    and ((.blockchain_track.mainnet_activation_missing_metrics_action.template_command // "") | contains("--print-summary-json 1"))
+    and (((.blockchain_track.mainnet_activation_missing_metrics_action.template_command // "") | contains("--print-output-json")) | not)
     and ((.blockchain_track.mainnet_activation_missing_metrics_action.prefill_command // "") | startswith("./scripts/easy_node.sh blockchain-mainnet-activation-metrics-prefill "))
     and ((.blockchain_track.mainnet_activation_missing_metrics_action.prefill_command // "") | contains("--output-json .easy-node-logs/blockchain_mainnet_activation_metrics_prefill.json"))
+    and ((.blockchain_track.mainnet_activation_missing_metrics_action.prefill_command // "") | contains("--print-summary-json 1"))
+    and (((.blockchain_track.mainnet_activation_missing_metrics_action.prefill_command // "") | contains("--print-output-json")) | not)
     and ((.blockchain_track.mainnet_activation_missing_metrics_action.operator_pack_command // "") | startswith("./scripts/easy_node.sh blockchain-mainnet-activation-operator-pack "))
     and ((.blockchain_track.mainnet_activation_missing_metrics_action.operator_pack_command // "") | contains("--metrics-summary-json .easy-node-logs/blockchain_gate_bundle_summary.json"))
     and ((.blockchain_track.mainnet_activation_missing_metrics_action.operator_pack_command // "") | contains("--template-output-json .easy-node-logs/blockchain_mainnet_activation_metrics_input.template.json"))
@@ -1828,6 +2117,36 @@ if ! rg -q '\[roadmap-progress-report\] phase5_settlement_layer_handoff_issuer_s
 fi
 if ! rg -q '\[roadmap-progress-report\] phase5_settlement_layer_handoff_issuer_settlement_status_live_smoke_status=pass issuer_settlement_status_live_smoke_ok=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
   echo "expected phase5 issuer settlement status debug line in success path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log
+  exit 1
+fi
+if ! rg -q '\[roadmap-progress-report\] phase5_settlement_layer_handoff_issuer_admin_blockchain_handlers_coverage_status=pass issuer_admin_blockchain_handlers_coverage_ok=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
+  echo "expected phase5 issuer admin blockchain handlers coverage debug line in success path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log
+  exit 1
+fi
+if ! rg -q '\[roadmap-progress-report\] phase5_settlement_layer_handoff_settlement_dual_asset_parity_status=pass settlement_dual_asset_parity_ok=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
+  echo "expected phase5 settlement dual asset parity debug line in success path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log
+  exit 1
+fi
+if ! rg -q '\[roadmap-progress-report\] phase5_settlement_layer_handoff_settlement_adapter_signed_tx_roundtrip_status=pass settlement_adapter_signed_tx_roundtrip_ok=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
+  echo "expected phase5 settlement adapter signed tx roundtrip debug line in success path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log
+  exit 1
+fi
+if ! rg -q '\[roadmap-progress-report\] phase5_settlement_layer_handoff_settlement_shadow_env_status=pass settlement_shadow_env_ok=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
+  echo "expected phase5 settlement shadow env debug line in success path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log
+  exit 1
+fi
+if ! rg -q '\[roadmap-progress-report\] phase5_settlement_layer_handoff_settlement_shadow_status_surface_status=pass settlement_shadow_status_surface_ok=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
+  echo "expected phase5 settlement shadow status surface debug line in success path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log
+  exit 1
+fi
+if ! rg -q '\[roadmap-progress-report\] phase5_settlement_layer_handoff_exit_settlement_status_live_smoke_status=pass exit_settlement_status_live_smoke_ok=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
+  echo "expected phase5 exit settlement status debug line in success path"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log
   exit 1
 fi
@@ -2814,6 +3133,342 @@ fi
 
 : >"$CAPTURE"
 
+echo "[roadmap-progress-report] profile default docker source prefers live wrapper for real-host run command when A_HOST/B_HOST are set"
+PROFILE_DEFAULT_GATE_MANUAL_DOCKER_RUN_REAL_HOST_SUMMARY_JSON="$TMP_DIR/manual_validation_profile_default_docker_run_real_host_summary.json"
+cat >"$PROFILE_DEFAULT_GATE_MANUAL_DOCKER_RUN_REAL_HOST_SUMMARY_JSON" <<'EOF_PROFILE_DEFAULT_GATE_MANUAL_DOCKER_RUN_REAL_HOST_SUMMARY'
+{
+  "version": 1,
+  "checks": [
+    {
+      "check_id": "runtime_hygiene",
+      "label": "Runtime hygiene doctor",
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh runtime-doctor --show-json 1"
+    },
+    {
+      "check_id": "wg_only_stack_selftest",
+      "label": "WG-only stack selftest",
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh wg-only-stack-selftest-record --strict-beta 1 --print-summary-json 1"
+    }
+  ],
+  "summary": {
+    "next_action_check_id": "",
+    "next_action_command": "",
+    "roadmap_stage": "READY_FOR_MACHINE_C_SMOKE",
+    "single_machine_ready": true,
+    "blocking_check_ids": [],
+    "optional_check_ids": ["three_machine_docker_readiness", "real_wg_privileged_matrix"],
+    "profile_default_gate": {
+      "status": "pending",
+      "notes": "docker source should prefer live wrapper even when profile-default-gate-run already points at real-host URLs",
+      "decision": "NO-GO",
+      "recommended_profile": "balanced",
+      "next_command": "./scripts/easy_node.sh profile-default-gate-run --reports-dir .easy-node-logs --directory-a https://100.113.245.61:8081 --directory-b https://100.64.244.24:8081 --campaign-issuer-url https://100.113.245.61:8082 --campaign-entry-url https://100.113.245.61:8083 --campaign-exit-url https://100.113.245.61:8084 --subject INVITE_KEY --refresh-campaign 1 --fail-on-no-go 0 --campaign-timeout-sec 901 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1",
+      "next_command_sudo": "sudo ./scripts/easy_node.sh profile-default-gate-run --reports-dir .easy-node-logs --directory-a https://100.113.245.61:8081 --directory-b https://100.64.244.24:8081 --campaign-issuer-url https://100.113.245.61:8082 --campaign-entry-url https://100.113.245.61:8083 --campaign-exit-url https://100.113.245.61:8084 --subject INVITE_KEY --refresh-campaign 1 --fail-on-no-go 0 --campaign-timeout-sec 901 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1",
+      "next_command_source": "docker_rehearsal_artifacts",
+      "docker_rehearsal_hint_available": true
+    },
+    "docker_rehearsal_gate": {
+      "status": "pass",
+      "command": "./scripts/easy_node.sh three-machine-docker-readiness-record --path-profile balanced --soak-rounds 6 --soak-pause-sec 3 --print-summary-json 1"
+    },
+    "real_wg_privileged_gate": {
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh real-wg-privileged-matrix-record --print-summary-json 1"
+    }
+  },
+  "report": {
+    "readiness_status": "NOT_READY"
+  }
+}
+EOF_PROFILE_DEFAULT_GATE_MANUAL_DOCKER_RUN_REAL_HOST_SUMMARY
+
+if ! A_HOST="100.113.245.61" B_HOST="100.64.244.24" \
+  run_roadmap_progress_report \
+    --refresh-manual-validation 0 \
+    --refresh-single-machine-readiness 0 \
+    --manual-validation-summary-json "$PROFILE_DEFAULT_GATE_MANUAL_DOCKER_RUN_REAL_HOST_SUMMARY_JSON" \
+    --summary-json "$TMP_DIR/roadmap_progress_profile_default_docker_run_real_host_live_wrapper_summary.json" \
+    --report-md "$TMP_DIR/roadmap_progress_profile_default_docker_run_real_host_live_wrapper_report.md" \
+    --print-report 0 \
+    --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_docker_run_real_host_live_wrapper.log 2>&1; then
+  echo "expected success when docker profile-default-gate-run real-host command is converted to live wrapper under A_HOST/B_HOST"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_docker_run_real_host_live_wrapper.log
+  exit 1
+fi
+if ! jq -e '
+  def is_profile_gate_live_non_sudo_cmd($cmd):
+    (($cmd // "") | test("^\\./scripts/easy_node\\.sh profile-default-gate-live( |$)"));
+  def is_profile_gate_live_sudo_cmd($cmd):
+    (($cmd // "") | test("^sudo \\./scripts/easy_node\\.sh profile-default-gate-live( |$)"));
+  def has_hosts($cmd):
+    (($cmd // "") | test("(^| )--host-a 100\\.113\\.245\\.61( |$)"))
+    and (($cmd // "") | test("(^| )--host-b 100\\.64\\.244\\.24( |$)"));
+  def has_subject_placeholder($cmd):
+    (($cmd // "") | test("(^| )--subject INVITE_KEY( |$)"));
+  def has_refresh_campaign($cmd):
+    (($cmd // "") | test("(^| )--refresh-campaign 1( |$)"));
+  def has_fail_on_no_go($cmd):
+    (($cmd // "") | test("(^| )--fail-on-no-go 0( |$)"));
+  def has_campaign_timeout($cmd):
+    (($cmd // "") | test("(^| )--campaign-timeout-sec 901( |$)"));
+  ((.next_actions // []) | any(
+    .id == "profile_default_gate"
+    and is_profile_gate_live_non_sudo_cmd(.command)
+    and has_hosts(.command)
+    and has_subject_placeholder(.command)
+    and has_refresh_campaign(.command)
+    and has_fail_on_no_go(.command)
+    and has_campaign_timeout(.command)
+  ))
+  and (.vpn_track.optional_gate_status.profile_default_gate == "pending")
+  and ((.vpn_track.profile_default_gate.next_command_source // "") == "docker_rehearsal_artifacts")
+  and is_profile_gate_live_non_sudo_cmd(.vpn_track.profile_default_gate.next_command)
+  and is_profile_gate_live_sudo_cmd(.vpn_track.profile_default_gate.next_command_sudo)
+  and has_hosts(.vpn_track.profile_default_gate.next_command)
+  and has_hosts(.vpn_track.profile_default_gate.next_command_sudo)
+  and has_subject_placeholder(.vpn_track.profile_default_gate.next_command)
+  and has_subject_placeholder(.vpn_track.profile_default_gate.next_command_sudo)
+  and has_refresh_campaign(.vpn_track.profile_default_gate.next_command)
+  and has_refresh_campaign(.vpn_track.profile_default_gate.next_command_sudo)
+  and has_fail_on_no_go(.vpn_track.profile_default_gate.next_command)
+  and has_fail_on_no_go(.vpn_track.profile_default_gate.next_command_sudo)
+  and has_campaign_timeout(.vpn_track.profile_default_gate.next_command)
+  and has_campaign_timeout(.vpn_track.profile_default_gate.next_command_sudo)
+' "$TMP_DIR/roadmap_progress_profile_default_docker_run_real_host_live_wrapper_summary.json" >/dev/null; then
+  echo "profile default docker run real-host live-wrapper summary JSON missing expected host-aware conversion fields"
+  cat "$TMP_DIR/roadmap_progress_profile_default_docker_run_real_host_live_wrapper_summary.json"
+  exit 1
+fi
+
+: >"$CAPTURE"
+
+echo "[roadmap-progress-report] profile default docker source derives live wrapper hosts from command directories when A_HOST/B_HOST are unset"
+PROFILE_DEFAULT_GATE_MANUAL_DOCKER_RUN_REAL_HOST_NO_ENV_SUMMARY_JSON="$TMP_DIR/manual_validation_profile_default_docker_run_real_host_no_env_summary.json"
+cat >"$PROFILE_DEFAULT_GATE_MANUAL_DOCKER_RUN_REAL_HOST_NO_ENV_SUMMARY_JSON" <<'EOF_PROFILE_DEFAULT_GATE_MANUAL_DOCKER_RUN_REAL_HOST_NO_ENV_SUMMARY'
+{
+  "version": 1,
+  "checks": [
+    {
+      "check_id": "runtime_hygiene",
+      "label": "Runtime hygiene doctor",
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh runtime-doctor --show-json 1"
+    },
+    {
+      "check_id": "wg_only_stack_selftest",
+      "label": "WG-only stack selftest",
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh wg-only-stack-selftest-record --strict-beta 1 --print-summary-json 1"
+    }
+  ],
+  "summary": {
+    "next_action_check_id": "",
+    "next_action_command": "",
+    "roadmap_stage": "READY_FOR_MACHINE_C_SMOKE",
+    "single_machine_ready": true,
+    "blocking_check_ids": [],
+    "optional_check_ids": ["three_machine_docker_readiness", "real_wg_privileged_matrix"],
+    "profile_default_gate": {
+      "status": "pending",
+      "notes": "docker source should derive hosts from command directory endpoints when A_HOST/B_HOST are unset",
+      "decision": "NO-GO",
+      "recommended_profile": "balanced",
+      "next_command": "./scripts/easy_node.sh profile-default-gate-run --reports-dir .easy-node-logs --directory-a https://100.113.245.61:8081 --directory-b https://100.64.244.24:8081 --campaign-issuer-url https://100.113.245.61:8082 --campaign-entry-url https://100.113.245.61:8083 --campaign-exit-url https://100.113.245.61:8084 --subject INVITE_KEY --refresh-campaign 1 --fail-on-no-go 0 --campaign-timeout-sec 901 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1",
+      "next_command_sudo": "sudo ./scripts/easy_node.sh profile-default-gate-run --reports-dir .easy-node-logs --directory-a https://203.0.113.10:8081 --directory-b https://198.51.100.20:8081 --campaign-issuer-url https://203.0.113.10:8082 --campaign-entry-url https://203.0.113.10:8083 --campaign-exit-url https://203.0.113.10:8084 --subject INVITE_KEY --refresh-campaign 1 --fail-on-no-go 0 --campaign-timeout-sec 901 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1",
+      "next_command_source": "docker_rehearsal_artifacts",
+      "docker_rehearsal_hint_available": true
+    },
+    "docker_rehearsal_gate": {
+      "status": "pass",
+      "command": "./scripts/easy_node.sh three-machine-docker-readiness-record --path-profile balanced --soak-rounds 6 --soak-pause-sec 3 --print-summary-json 1"
+    },
+    "real_wg_privileged_gate": {
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh real-wg-privileged-matrix-record --print-summary-json 1"
+    }
+  },
+  "report": {
+    "readiness_status": "NOT_READY"
+  }
+}
+EOF_PROFILE_DEFAULT_GATE_MANUAL_DOCKER_RUN_REAL_HOST_NO_ENV_SUMMARY
+
+if ! A_HOST="" B_HOST="" \
+  run_roadmap_progress_report \
+    --refresh-manual-validation 0 \
+    --refresh-single-machine-readiness 0 \
+    --manual-validation-summary-json "$PROFILE_DEFAULT_GATE_MANUAL_DOCKER_RUN_REAL_HOST_NO_ENV_SUMMARY_JSON" \
+    --summary-json "$TMP_DIR/roadmap_progress_profile_default_docker_run_real_host_no_env_live_wrapper_summary.json" \
+    --report-md "$TMP_DIR/roadmap_progress_profile_default_docker_run_real_host_no_env_live_wrapper_report.md" \
+    --print-report 0 \
+    --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_docker_run_real_host_no_env_live_wrapper.log 2>&1; then
+  echo "expected success when docker profile-default-gate-run real-host command is converted to live wrapper without A_HOST/B_HOST"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_docker_run_real_host_no_env_live_wrapper.log
+  exit 1
+fi
+if ! jq -e '
+  def is_profile_gate_live_non_sudo_cmd($cmd):
+    (($cmd // "") | test("^\\./scripts/easy_node\\.sh profile-default-gate-live( |$)"));
+  def is_profile_gate_live_sudo_cmd($cmd):
+    (($cmd // "") | test("^sudo \\./scripts/easy_node\\.sh profile-default-gate-live( |$)"));
+  def has_hosts_real($cmd):
+    (($cmd // "") | test("(^| )--host-a 100\\.113\\.245\\.61( |$)"))
+    and (($cmd // "") | test("(^| )--host-b 100\\.64\\.244\\.24( |$)"));
+  def has_hosts_sudo($cmd):
+    (($cmd // "") | test("(^| )--host-a 203\\.0\\.113\\.10( |$)"))
+    and (($cmd // "") | test("(^| )--host-b 198\\.51\\.100\\.20( |$)"));
+  def has_subject_placeholder($cmd):
+    (($cmd // "") | test("(^| )--subject INVITE_KEY( |$)"));
+  def has_refresh_campaign($cmd):
+    (($cmd // "") | test("(^| )--refresh-campaign 1( |$)"));
+  def has_fail_on_no_go($cmd):
+    (($cmd // "") | test("(^| )--fail-on-no-go 0( |$)"));
+  def has_campaign_timeout($cmd):
+    (($cmd // "") | test("(^| )--campaign-timeout-sec 901( |$)"));
+  ((.next_actions // []) | any(
+    .id == "profile_default_gate"
+    and is_profile_gate_live_non_sudo_cmd(.command)
+    and has_hosts_real(.command)
+    and has_subject_placeholder(.command)
+    and has_refresh_campaign(.command)
+    and has_fail_on_no_go(.command)
+    and has_campaign_timeout(.command)
+  ))
+  and (.vpn_track.optional_gate_status.profile_default_gate == "pending")
+  and ((.vpn_track.profile_default_gate.next_command_source // "") == "docker_rehearsal_artifacts")
+  and is_profile_gate_live_non_sudo_cmd(.vpn_track.profile_default_gate.next_command)
+  and is_profile_gate_live_sudo_cmd(.vpn_track.profile_default_gate.next_command_sudo)
+  and has_hosts_real(.vpn_track.profile_default_gate.next_command)
+  and has_hosts_sudo(.vpn_track.profile_default_gate.next_command_sudo)
+  and has_subject_placeholder(.vpn_track.profile_default_gate.next_command)
+  and has_subject_placeholder(.vpn_track.profile_default_gate.next_command_sudo)
+  and has_refresh_campaign(.vpn_track.profile_default_gate.next_command)
+  and has_refresh_campaign(.vpn_track.profile_default_gate.next_command_sudo)
+  and has_fail_on_no_go(.vpn_track.profile_default_gate.next_command)
+  and has_fail_on_no_go(.vpn_track.profile_default_gate.next_command_sudo)
+  and has_campaign_timeout(.vpn_track.profile_default_gate.next_command)
+  and has_campaign_timeout(.vpn_track.profile_default_gate.next_command_sudo)
+' "$TMP_DIR/roadmap_progress_profile_default_docker_run_real_host_no_env_live_wrapper_summary.json" >/dev/null; then
+  echo "profile default docker run real-host no-env live-wrapper summary JSON missing expected extracted-host conversion fields"
+  cat "$TMP_DIR/roadmap_progress_profile_default_docker_run_real_host_no_env_live_wrapper_summary.json"
+  exit 1
+fi
+
+: >"$CAPTURE"
+
+echo "[roadmap-progress-report] profile default docker signoff source prefers live wrapper when A_HOST/B_HOST are set"
+PROFILE_DEFAULT_GATE_MANUAL_DOCKER_SIGNOFF_SUMMARY_JSON="$TMP_DIR/manual_validation_profile_default_docker_signoff_source_summary.json"
+cat >"$PROFILE_DEFAULT_GATE_MANUAL_DOCKER_SIGNOFF_SUMMARY_JSON" <<'EOF_PROFILE_DEFAULT_GATE_MANUAL_DOCKER_SIGNOFF_SUMMARY'
+{
+  "version": 1,
+  "checks": [
+    {
+      "check_id": "runtime_hygiene",
+      "label": "Runtime hygiene doctor",
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh runtime-doctor --show-json 1"
+    },
+    {
+      "check_id": "wg_only_stack_selftest",
+      "label": "WG-only stack selftest",
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh wg-only-stack-selftest-record --strict-beta 1 --print-summary-json 1"
+    }
+  ],
+  "summary": {
+    "next_action_check_id": "",
+    "next_action_command": "",
+    "roadmap_stage": "READY_FOR_MACHINE_C_SMOKE",
+    "single_machine_ready": true,
+    "blocking_check_ids": [],
+    "optional_check_ids": ["three_machine_docker_readiness", "real_wg_privileged_matrix"],
+    "profile_default_gate": {
+      "status": "pending",
+      "notes": "docker signoff hint should convert to host-aware live wrapper when real hosts are provided",
+      "decision": "NO-GO",
+      "recommended_profile": "balanced",
+      "next_command": "./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 0 --campaign-timeout-sec 901 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1",
+      "next_command_sudo": "sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 0 --campaign-timeout-sec 901 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1",
+      "next_command_source": "docker_rehearsal_artifacts",
+      "docker_rehearsal_hint_available": true
+    },
+    "docker_rehearsal_gate": {
+      "status": "pass",
+      "command": "./scripts/easy_node.sh three-machine-docker-readiness-record --path-profile balanced --soak-rounds 6 --soak-pause-sec 3 --print-summary-json 1"
+    },
+    "real_wg_privileged_gate": {
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh real-wg-privileged-matrix-record --print-summary-json 1"
+    }
+  },
+  "report": {
+    "readiness_status": "NOT_READY"
+  }
+}
+EOF_PROFILE_DEFAULT_GATE_MANUAL_DOCKER_SIGNOFF_SUMMARY
+
+if ! A_HOST="100.113.245.61" B_HOST="100.64.244.24" \
+  run_roadmap_progress_report \
+    --refresh-manual-validation 0 \
+    --refresh-single-machine-readiness 0 \
+    --manual-validation-summary-json "$PROFILE_DEFAULT_GATE_MANUAL_DOCKER_SIGNOFF_SUMMARY_JSON" \
+    --summary-json "$TMP_DIR/roadmap_progress_profile_default_docker_signoff_source_live_wrapper_summary.json" \
+    --report-md "$TMP_DIR/roadmap_progress_profile_default_docker_signoff_source_live_wrapper_report.md" \
+    --print-report 0 \
+    --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_docker_signoff_source_live_wrapper.log 2>&1; then
+  echo "expected success when docker signoff hint is converted to live wrapper under A_HOST/B_HOST"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_docker_signoff_source_live_wrapper.log
+  exit 1
+fi
+if ! jq -e '
+  def is_profile_gate_live_non_sudo_cmd($cmd):
+    (($cmd // "") | test("^\\./scripts/easy_node\\.sh profile-default-gate-live( |$)"));
+  def is_profile_gate_live_sudo_cmd($cmd):
+    (($cmd // "") | test("^sudo \\./scripts/easy_node\\.sh profile-default-gate-live( |$)"));
+  def has_hosts($cmd):
+    (($cmd // "") | test("(^| )--host-a 100\\.113\\.245\\.61( |$)"))
+    and (($cmd // "") | test("(^| )--host-b 100\\.64\\.244\\.24( |$)"));
+  def has_subject_placeholder($cmd):
+    (($cmd // "") | test("(^| )--subject INVITE_KEY( |$)"));
+  def has_refresh_campaign($cmd):
+    (($cmd // "") | test("(^| )--refresh-campaign 1( |$)"));
+  def has_fail_on_no_go($cmd):
+    (($cmd // "") | test("(^| )--fail-on-no-go 0( |$)"));
+  def has_campaign_timeout($cmd):
+    (($cmd // "") | test("(^| )--campaign-timeout-sec 901( |$)"));
+  ((.next_actions // []) | any(
+    .id == "profile_default_gate"
+    and is_profile_gate_live_non_sudo_cmd(.command)
+    and has_hosts(.command)
+    and has_subject_placeholder(.command)
+    and has_refresh_campaign(.command)
+    and has_fail_on_no_go(.command)
+    and has_campaign_timeout(.command)
+  ))
+  and (.vpn_track.optional_gate_status.profile_default_gate == "pending")
+  and ((.vpn_track.profile_default_gate.next_command_source // "") == "docker_rehearsal_artifacts")
+  and is_profile_gate_live_non_sudo_cmd(.vpn_track.profile_default_gate.next_command)
+  and is_profile_gate_live_sudo_cmd(.vpn_track.profile_default_gate.next_command_sudo)
+  and has_hosts(.vpn_track.profile_default_gate.next_command)
+  and has_hosts(.vpn_track.profile_default_gate.next_command_sudo)
+  and has_subject_placeholder(.vpn_track.profile_default_gate.next_command)
+  and has_subject_placeholder(.vpn_track.profile_default_gate.next_command_sudo)
+  and has_refresh_campaign(.vpn_track.profile_default_gate.next_command)
+  and has_refresh_campaign(.vpn_track.profile_default_gate.next_command_sudo)
+  and has_fail_on_no_go(.vpn_track.profile_default_gate.next_command)
+  and has_fail_on_no_go(.vpn_track.profile_default_gate.next_command_sudo)
+  and has_campaign_timeout(.vpn_track.profile_default_gate.next_command)
+  and has_campaign_timeout(.vpn_track.profile_default_gate.next_command_sudo)
+' "$TMP_DIR/roadmap_progress_profile_default_docker_signoff_source_live_wrapper_summary.json" >/dev/null; then
+  echo "profile default docker-signoff live-wrapper summary JSON missing expected host-aware conversion fields"
+  cat "$TMP_DIR/roadmap_progress_profile_default_docker_signoff_source_live_wrapper_summary.json"
+  exit 1
+fi
+
+: >"$CAPTURE"
+
 echo "[roadmap-progress-report] profile default gate derives warn from NO-GO signoff summary"
 PROFILE_DEFAULT_GATE_SIGNOFF_NO_GO_JSON="$TMP_DIR/profile_compare_campaign_signoff_no_go.json"
 cat >"$PROFILE_DEFAULT_GATE_SIGNOFF_NO_GO_JSON" <<'EOF_PROFILE_DEFAULT_GATE_SIGNOFF_NO_GO'
@@ -3632,10 +4287,22 @@ cat >"$AUTO_PHASE5_GOOD_JSON" <<'EOF_AUTO_PHASE5_GOOD'
   "settlement_state_persistence_ok": true,
   "settlement_adapter_roundtrip_ok": true,
   "settlement_adapter_roundtrip_status": "pass",
+  "settlement_dual_asset_parity_ok": true,
+  "settlement_dual_asset_parity_status": "pass",
+  "settlement_adapter_signed_tx_roundtrip_ok": true,
+  "settlement_adapter_signed_tx_roundtrip_status": "pass",
+  "settlement_shadow_env_ok": true,
+  "settlement_shadow_env_status": "pass",
+  "settlement_shadow_status_surface_ok": true,
+  "settlement_shadow_status_surface_status": "pass",
   "issuer_sponsor_api_live_smoke_ok": true,
   "issuer_sponsor_api_live_smoke_status": "pass",
   "issuer_settlement_status_live_smoke_ok": true,
-  "issuer_settlement_status_live_smoke_status": "pass"
+  "issuer_settlement_status_live_smoke_status": "pass",
+  "issuer_admin_blockchain_handlers_coverage_ok": true,
+  "issuer_admin_blockchain_handlers_coverage_status": "pass",
+  "exit_settlement_status_live_smoke_ok": true,
+  "exit_settlement_status_live_smoke_status": "pass"
 }
 EOF_AUTO_PHASE5_GOOD
 touch -t 202601010101 "$AUTO_PHASE5_GOOD_JSON"
@@ -3655,10 +4322,22 @@ cat >"$AUTO_PHASE5_CLOBBERED_JSON" <<'EOF_AUTO_PHASE5_CLOBBERED'
   "settlement_state_persistence_ok": false,
   "settlement_adapter_roundtrip_ok": false,
   "settlement_adapter_roundtrip_status": "fail",
+  "settlement_dual_asset_parity_ok": false,
+  "settlement_dual_asset_parity_status": "fail",
+  "settlement_adapter_signed_tx_roundtrip_ok": false,
+  "settlement_adapter_signed_tx_roundtrip_status": "fail",
+  "settlement_shadow_env_ok": false,
+  "settlement_shadow_env_status": "fail",
+  "settlement_shadow_status_surface_ok": false,
+  "settlement_shadow_status_surface_status": "fail",
   "issuer_sponsor_api_live_smoke_ok": false,
   "issuer_sponsor_api_live_smoke_status": "fail",
   "issuer_settlement_status_live_smoke_ok": false,
-  "issuer_settlement_status_live_smoke_status": "fail"
+  "issuer_settlement_status_live_smoke_status": "fail",
+  "issuer_admin_blockchain_handlers_coverage_ok": false,
+  "issuer_admin_blockchain_handlers_coverage_status": "fail",
+  "exit_settlement_status_live_smoke_ok": false,
+  "exit_settlement_status_live_smoke_status": "fail"
 }
 EOF_AUTO_PHASE5_CLOBBERED
 touch -t 202601020202 "$AUTO_PHASE5_CLOBBERED_JSON"
@@ -3679,10 +4358,22 @@ cat >"$AUTO_PHASE5_DRY_RUN_JSON" <<'EOF_AUTO_PHASE5_DRY_RUN'
   "settlement_state_persistence_ok": true,
   "settlement_adapter_roundtrip_ok": true,
   "settlement_adapter_roundtrip_status": "pass",
+  "settlement_dual_asset_parity_ok": true,
+  "settlement_dual_asset_parity_status": "pass",
+  "settlement_adapter_signed_tx_roundtrip_ok": true,
+  "settlement_adapter_signed_tx_roundtrip_status": "pass",
+  "settlement_shadow_env_ok": true,
+  "settlement_shadow_env_status": "pass",
+  "settlement_shadow_status_surface_ok": true,
+  "settlement_shadow_status_surface_status": "pass",
   "issuer_sponsor_api_live_smoke_ok": true,
   "issuer_sponsor_api_live_smoke_status": "pass",
   "issuer_settlement_status_live_smoke_ok": true,
-  "issuer_settlement_status_live_smoke_status": "pass"
+  "issuer_settlement_status_live_smoke_status": "pass",
+  "issuer_admin_blockchain_handlers_coverage_ok": true,
+  "issuer_admin_blockchain_handlers_coverage_status": "pass",
+  "exit_settlement_status_live_smoke_ok": true,
+  "exit_settlement_status_live_smoke_status": "pass"
 }
 EOF_AUTO_PHASE5_DRY_RUN
 touch -t 202601030303 "$AUTO_PHASE5_DRY_RUN_JSON"
@@ -3712,12 +4403,95 @@ if ! jq -e --arg src "$AUTO_PHASE5_GOOD_JSON" '
   and .vpn_track.phase5_settlement_layer_handoff.settlement_bridge_smoke_ok == true
   and .vpn_track.phase5_settlement_layer_handoff.settlement_state_persistence_ok == true
   and .vpn_track.phase5_settlement_layer_handoff.settlement_adapter_roundtrip_ok == true
+  and .vpn_track.phase5_settlement_layer_handoff.settlement_dual_asset_parity_status == "pass"
+  and .vpn_track.phase5_settlement_layer_handoff.settlement_dual_asset_parity_ok == true
+  and .vpn_track.phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_status == "pass"
+  and .vpn_track.phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_ok == true
+  and .vpn_track.phase5_settlement_layer_handoff.settlement_shadow_env_status == "pass"
+  and .vpn_track.phase5_settlement_layer_handoff.settlement_shadow_env_ok == true
+  and .vpn_track.phase5_settlement_layer_handoff.settlement_shadow_status_surface_status == "pass"
+  and .vpn_track.phase5_settlement_layer_handoff.settlement_shadow_status_surface_ok == true
   and .vpn_track.phase5_settlement_layer_handoff.issuer_sponsor_api_live_smoke_ok == true
   and .vpn_track.phase5_settlement_layer_handoff.issuer_settlement_status_live_smoke_ok == true
+  and .vpn_track.phase5_settlement_layer_handoff.issuer_admin_blockchain_handlers_coverage_status == "pass"
+  and .vpn_track.phase5_settlement_layer_handoff.issuer_admin_blockchain_handlers_coverage_ok == true
+  and .vpn_track.phase5_settlement_layer_handoff.exit_settlement_status_live_smoke_status == "pass"
+  and .vpn_track.phase5_settlement_layer_handoff.exit_settlement_status_live_smoke_ok == true
   and .artifacts.phase5_settlement_layer_summary_json == $src
 ' "$TMP_DIR/roadmap_progress_auto_phase5_summary.json" >/dev/null; then
   echo "auto phase5 source selection summary mismatch"
   cat "$TMP_DIR/roadmap_progress_auto_phase5_summary.json"
+  exit 1
+fi
+
+echo "[roadmap-progress-report] phase5 CI step-status fallback fills settlement status signals when direct fields are missing"
+PHASE5_STEP_STATUS_FALLBACK_LOGS_ROOT="$TMP_DIR/phase5_step_status_fallback_logs_root"
+mkdir -p "$PHASE5_STEP_STATUS_FALLBACK_LOGS_ROOT"
+PHASE5_STEP_STATUS_FALLBACK_JSON="$PHASE5_STEP_STATUS_FALLBACK_LOGS_ROOT/phase5_settlement_layer_handoff_check_summary.json"
+cat >"$PHASE5_STEP_STATUS_FALLBACK_JSON" <<'EOF_PHASE5_STEP_STATUS_FALLBACK'
+{
+  "schema": {
+    "id": "phase5_settlement_layer_handoff_check_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "pass",
+  "steps": {
+    "settlement_adapter_signed_tx_roundtrip": {
+      "status": "pass"
+    },
+    "settlement_shadow_env": {
+      "status": "pass"
+    },
+    "settlement_shadow_status_surface": {
+      "status": "pass"
+    }
+  }
+}
+EOF_PHASE5_STEP_STATUS_FALLBACK
+
+if ! jq -e '
+  (.settlement_adapter_signed_tx_roundtrip_status // null) == null
+  and (.settlement_adapter_signed_tx_roundtrip_ok // null) == null
+  and (.settlement_shadow_env_status // null) == null
+  and (.settlement_shadow_env_ok // null) == null
+  and (.settlement_shadow_status_surface_status // null) == null
+  and (.settlement_shadow_status_surface_ok // null) == null
+' "$PHASE5_STEP_STATUS_FALLBACK_JSON" >/dev/null; then
+  echo "phase5 step-status fallback fixture unexpectedly contains direct settlement fields"
+  cat "$PHASE5_STEP_STATUS_FALLBACK_JSON"
+  exit 1
+fi
+
+if ! ROADMAP_PROGRESS_LOGS_ROOT="$PHASE5_STEP_STATUS_FALLBACK_LOGS_ROOT" \
+  run_roadmap_progress_report \
+    --refresh-manual-validation 0 \
+    --refresh-single-machine-readiness 0 \
+    --manual-validation-summary-json "$MINIMAL_MANUAL_SUMMARY_JSON" \
+    --phase5-settlement-layer-summary-json "$PHASE5_STEP_STATUS_FALLBACK_JSON" \
+    --summary-json "$TMP_DIR/roadmap_progress_phase5_ci_step_status_fallback_summary.json" \
+    --report-md "$TMP_DIR/roadmap_progress_phase5_ci_step_status_fallback_report.md" \
+    --print-report 0 \
+    --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_phase5_ci_step_status_fallback.log 2>&1; then
+  echo "expected success for phase5 CI step-status fallback path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_phase5_ci_step_status_fallback.log
+  exit 1
+fi
+if ! jq -e --arg src "$PHASE5_STEP_STATUS_FALLBACK_JSON" '
+  .status == "warn"
+  and .rc == 0
+  and .vpn_track.phase5_settlement_layer_handoff.available == true
+  and .vpn_track.phase5_settlement_layer_handoff.source_summary_json == $src
+  and .vpn_track.phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_status == "pass"
+  and .vpn_track.phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_ok == true
+  and .vpn_track.phase5_settlement_layer_handoff.settlement_shadow_env_status == "pass"
+  and .vpn_track.phase5_settlement_layer_handoff.settlement_shadow_env_ok == true
+  and .vpn_track.phase5_settlement_layer_handoff.settlement_shadow_status_surface_status == "pass"
+  and .vpn_track.phase5_settlement_layer_handoff.settlement_shadow_status_surface_ok == true
+  and .artifacts.phase5_settlement_layer_summary_json == $src
+' "$TMP_DIR/roadmap_progress_phase5_ci_step_status_fallback_summary.json" >/dev/null; then
+  echo "phase5 CI step-status fallback summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_phase5_ci_step_status_fallback_summary.json"
   exit 1
 fi
 
@@ -3743,12 +4517,27 @@ cat >"$FALLBACK_PHASE5_RICH_JSON" <<'EOF_FALLBACK_PHASE5_RICH'
   "stages": {
     "settlement_adapter_roundtrip": {
       "status": "pass"
+    },
+    "settlement_dual_asset_parity": {
+      "status": "pass"
     }
   },
+  "settlement_dual_asset_parity_status": "pass",
+  "settlement_dual_asset_parity_ok": true,
+  "settlement_adapter_signed_tx_roundtrip_status": "pass",
+  "settlement_adapter_signed_tx_roundtrip_ok": true,
+  "settlement_shadow_env_status": "pass",
+  "settlement_shadow_env_ok": true,
+  "settlement_shadow_status_surface_status": "pass",
+  "settlement_shadow_status_surface_ok": true,
   "issuer_sponsor_api_live_smoke_status": "pass",
   "issuer_sponsor_api_live_smoke_ok": true,
   "issuer_settlement_status_live_smoke_status": "pass",
-  "issuer_settlement_status_live_smoke_ok": true
+  "issuer_settlement_status_live_smoke_ok": true,
+  "issuer_admin_blockchain_handlers_coverage_status": "pass",
+  "issuer_admin_blockchain_handlers_coverage_ok": true,
+  "exit_settlement_status_live_smoke_status": "pass",
+  "exit_settlement_status_live_smoke_ok": true
 }
 EOF_FALLBACK_PHASE5_RICH
 touch -t 202601040404 "$FALLBACK_PHASE5_RICH_JSON"
@@ -3794,8 +4583,20 @@ if ! jq -e --arg src "$FALLBACK_PHASE5_SPARSE_JSON" '
   and .vpn_track.phase5_settlement_layer_handoff.status == "pass"
   and .vpn_track.phase5_settlement_layer_handoff.settlement_adapter_roundtrip_status == "pass"
   and .vpn_track.phase5_settlement_layer_handoff.settlement_adapter_roundtrip_ok == true
+  and .vpn_track.phase5_settlement_layer_handoff.settlement_dual_asset_parity_status == "pass"
+  and .vpn_track.phase5_settlement_layer_handoff.settlement_dual_asset_parity_ok == true
+  and .vpn_track.phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_status == "pass"
+  and .vpn_track.phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_ok == true
+  and .vpn_track.phase5_settlement_layer_handoff.settlement_shadow_env_status == "pass"
+  and .vpn_track.phase5_settlement_layer_handoff.settlement_shadow_env_ok == true
+  and .vpn_track.phase5_settlement_layer_handoff.settlement_shadow_status_surface_status == "pass"
+  and .vpn_track.phase5_settlement_layer_handoff.settlement_shadow_status_surface_ok == true
   and .vpn_track.phase5_settlement_layer_handoff.issuer_settlement_status_live_smoke_status == "pass"
   and .vpn_track.phase5_settlement_layer_handoff.issuer_settlement_status_live_smoke_ok == true
+  and .vpn_track.phase5_settlement_layer_handoff.issuer_admin_blockchain_handlers_coverage_status == "pass"
+  and .vpn_track.phase5_settlement_layer_handoff.issuer_admin_blockchain_handlers_coverage_ok == true
+  and .vpn_track.phase5_settlement_layer_handoff.exit_settlement_status_live_smoke_status == "pass"
+  and .vpn_track.phase5_settlement_layer_handoff.exit_settlement_status_live_smoke_ok == true
   and .artifacts.phase5_settlement_layer_summary_json == $src
 ' "$TMP_DIR/roadmap_progress_phase5_sparse_source_fallback_summary.json" >/dev/null; then
   echo "phase5 sparse source fallback summary mismatch"

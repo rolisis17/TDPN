@@ -9,7 +9,7 @@ export GOCACHE="${GOCACHE:-$ROOT_DIR/.gocache}"
 
 (
   cd blockchain/tdpn-chain
-  timeout 60s go test ./app -count=1 -run '^(TestRegisterGRPCServicesNilInputs|TestRegisterGRPCServicesBillingAndSponsorRoundTrip|TestRegisterGRPCServicesValidatorAndGovernanceRoundTrip|TestRegisterGRPCServicesValidatorGovernanceRoundTrip)$'
+  timeout 60s go test ./app -count=1 -run '^(TestRegisterGRPCServicesNilInputs|TestRegisterGRPCServicesBillingAndSponsorRoundTrip|TestRegisterGRPCServicesSlashingViolationTypeRoundTrip|TestRegisterGRPCServicesValidatorAndGovernanceRoundTrip|TestRegisterGRPCServicesValidatorGovernanceRoundTrip)$'
 )
 
 echo "cosmos grpc app roundtrip integration check ok"

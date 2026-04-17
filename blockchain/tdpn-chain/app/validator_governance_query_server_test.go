@@ -14,7 +14,7 @@ import (
 func TestValidatorQueryServer_AccessorHappyPathAndNotFound(t *testing.T) {
 	scaffold := NewChainScaffold()
 	queryServer := scaffold.ValidatorQueryServer()
-	msgServer := validatormodule.NewMsgServer(&scaffold.ValidatorModule.Keeper)
+	msgServer := validatormodule.NewMsgServer(scaffold.ValidatorModule.Keeper)
 
 	missingEligibility, err := queryServer.GetEligibility(context.Background(), ValidatorGetEligibilityRequest{
 		ValidatorID: "missing-validator",
@@ -169,7 +169,7 @@ func TestValidatorQueryServer_NilScaffold(t *testing.T) {
 func TestGovernanceQueryServer_AccessorHappyPathAndNotFound(t *testing.T) {
 	scaffold := NewChainScaffold()
 	queryServer := scaffold.GovernanceQueryServer()
-	msgServer := governancemodule.NewMsgServer(&scaffold.GovernanceModule.Keeper)
+	msgServer := governancemodule.NewMsgServer(scaffold.GovernanceModule.Keeper)
 
 	missingPolicy, err := queryServer.GetPolicy(context.Background(), GovernanceGetPolicyRequest{
 		PolicyID: "missing-policy",

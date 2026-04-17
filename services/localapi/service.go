@@ -544,6 +544,27 @@ func (s *Service) runLifecycleCommand(ctx context.Context, rawCommand string) (s
 }
 
 func buildEasyNodeCommandWithPlatform(scriptPath string, args []string, goos string, commandRunner string) (string, []string) {
+	return buildEasyNodeCommandWithPlatformWithLookup(
+		scriptPath,
+		args,
+		goos,
+		commandRunner,
+		os.Getenv,
+		func(path string) bool {
+			info, err := os.Stat(path)
+			return err == nil && !info.IsDir()
+		},
+	)
+}
+
+func buildEasyNodeCommandWithPlatformWithLookup(
+	scriptPath string,
+	args []string,
+	goos string,
+	commandRunner string,
+	getenv func(string) string,
+	fileExists func(string) bool,
+) (string, []string) {
 	runner := strings.TrimSpace(commandRunner)
 	if runner != "" {
 		cmdArgs := append([]string{scriptPath}, args...)
@@ -556,9 +577,43 @@ func buildEasyNodeCommandWithPlatform(scriptPath string, args []string, goos str
 			return "powershell", cmdArgs
 		}
 		cmdArgs := append([]string{scriptPath}, args...)
-		return "bash", cmdArgs
+		return resolveWindowsBashRunner(getenv, fileExists), cmdArgs
 	}
 	return scriptPath, args
+}
+
+func resolveWindowsBashRunner(getenv func(string) string, fileExists func(string) bool) string {
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	if fileExists == nil {
+		fileExists = func(path string) bool {
+			info, err := os.Stat(path)
+			return err == nil && !info.IsDir()
+		}
+	}
+
+	override := strings.TrimSpace(getenv("LOCAL_CONTROL_API_GIT_BASH_PATH"))
+	if override != "" {
+		return override
+	}
+
+	preferGitBash := parseBoolWithDefault(getenv("LOCAL_CONTROL_API_PREFER_GIT_BASH"), true)
+	if preferGitBash {
+		candidates := []string{
+			`C:\Program Files\Git\bin\bash.exe`,
+			`C:\Program Files\Git\usr\bin\bash.exe`,
+			`C:\Program Files (x86)\Git\bin\bash.exe`,
+			`C:\Program Files (x86)\Git\usr\bin\bash.exe`,
+		}
+		for _, candidate := range candidates {
+			if fileExists(candidate) {
+				return candidate
+			}
+		}
+	}
+
+	return "bash"
 }
 
 func buildLifecycleCommandWithPlatform(rawCommand string, goos string) (string, []string) {

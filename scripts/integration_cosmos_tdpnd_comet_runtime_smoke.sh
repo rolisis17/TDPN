@@ -19,8 +19,11 @@ MONIKER="${COMET_RUNTIME_SMOKE_MONIKER:-tdpn-comet-smoke}"
 PROXY_APP="${COMET_RUNTIME_SMOKE_PROXY_APP:-tdpn-comet-smoke}"
 WAIT_SECONDS="${COMET_RUNTIME_SMOKE_WAIT_SECONDS:-45}"
 STOP_WAIT_SECONDS="${COMET_RUNTIME_SMOKE_STOP_WAIT_SECONDS:-15}"
+START_ATTEMPTS="${COMET_RUNTIME_SMOKE_START_ATTEMPTS:-6}"
+GRPC_AUTH_TOKEN="${COMET_RUNTIME_SMOKE_GRPC_AUTH_TOKEN:-tdpn-comet-grpc-smoke-token}"
 P2P_PORT_INPUT="${COMET_RUNTIME_SMOKE_P2P_PORT:-}"
 RPC_PORT_INPUT="${COMET_RUNTIME_SMOKE_RPC_PORT:-}"
+GRPC_PORT_INPUT="${COMET_RUNTIME_SMOKE_GRPC_PORT:-}"
 
 usage() {
   cat <<'EOF'
@@ -31,10 +34,13 @@ Environment overrides:
   COMET_RUNTIME_SMOKE_PROBE_HOST
   COMET_RUNTIME_SMOKE_MONIKER
   COMET_RUNTIME_SMOKE_PROXY_APP
+  COMET_RUNTIME_SMOKE_GRPC_AUTH_TOKEN
   COMET_RUNTIME_SMOKE_WAIT_SECONDS
   COMET_RUNTIME_SMOKE_STOP_WAIT_SECONDS
+  COMET_RUNTIME_SMOKE_START_ATTEMPTS
   COMET_RUNTIME_SMOKE_P2P_PORT
   COMET_RUNTIME_SMOKE_RPC_PORT
+  COMET_RUNTIME_SMOKE_GRPC_PORT
 EOF
 }
 
@@ -120,14 +126,207 @@ cleanup() {
 }
 trap cleanup EXIT
 
+wait_for_grpcurl_health() {
+  local port="$1"
+  for _ in $(seq 1 $((WAIT_SECONDS * 10))); do
+    if [[ -n "${TDPND_PID}" ]] && ! kill -0 "${TDPND_PID}" 2>/dev/null; then
+      echo "tdpnd exited before grpc health became ready"
+      dump_log
+      exit 1
+    fi
+    if grpcurl -plaintext -max-time 2 -d '{}' "${PROBE_HOST}:${port}" grpc.health.v1.Health/Check >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.1
+  done
+  echo "timed out waiting for grpc health on ${PROBE_HOST}:${port}"
+  dump_log
+  exit 1
+}
+
+assert_grpc_query_dispatch() {
+  local port="$1"
+  local method="$2"
+  local expected_field="$3"
+  local payload="${4:-{}}"
+  local output
+  local rc
+
+  set +e
+  output="$(grpcurl -plaintext -max-time 2 -d "${payload}" "${PROBE_HOST}:${port}" "${method}" 2>&1)"
+  rc=$?
+  set -e
+  if (( rc != 0 )); then
+    echo "expected grpc query dispatch for ${method} to succeed (rc=${rc})"
+    echo "grpc query output:"
+    echo "${output}"
+    dump_log
+    exit 1
+  fi
+  if ! grep -Eq "\"${expected_field}\"[[:space:]]*:" <<<"${output}"; then
+    echo "expected grpc query ${method} response to include ${expected_field} field"
+    echo "grpc query output:"
+    echo "${output}"
+    dump_log
+    exit 1
+  fi
+}
+
+assert_grpc_query_unauthenticated() {
+  local port="$1"
+  local method="$2"
+  local payload="${3:-{}}"
+  local output
+  local rc
+
+  set +e
+  output="$(grpcurl -plaintext -max-time 2 -d "${payload}" "${PROBE_HOST}:${port}" "${method}" 2>&1)"
+  rc=$?
+  set -e
+  if (( rc == 0 )); then
+    echo "expected grpc query ${method} without bearer token to fail, but it succeeded"
+    echo "grpc query output:"
+    echo "${output}"
+    dump_log
+    exit 1
+  fi
+  if ! grep -Eq 'Unauthenticated|missing or invalid bearer token' <<<"${output}"; then
+    echo "expected unauthenticated signal for grpc query ${method} without token"
+    echo "grpc query output:"
+    echo "${output}"
+    dump_log
+    exit 1
+  fi
+}
+
+assert_grpc_query_dispatch_with_token() {
+  local port="$1"
+  local method="$2"
+  local expected_field="$3"
+  local payload="${4:-{}}"
+  local output
+  local rc
+
+  set +e
+  output="$(grpcurl -plaintext -max-time 2 -H "authorization: Bearer ${GRPC_AUTH_TOKEN}" -d "${payload}" "${PROBE_HOST}:${port}" "${method}" 2>&1)"
+  rc=$?
+  set -e
+  if (( rc != 0 )); then
+    echo "expected grpc query dispatch for ${method} with bearer token to succeed (rc=${rc})"
+    echo "grpc query output:"
+    echo "${output}"
+    dump_log
+    exit 1
+  fi
+  if ! grep -Eq "\"${expected_field}\"[[:space:]]*:" <<<"${output}"; then
+    echo "expected grpc query ${method} response with bearer token to include ${expected_field} field"
+    echo "grpc query output:"
+    echo "${output}"
+    dump_log
+    exit 1
+  fi
+}
+
+assert_grpc_reflection_disabled() {
+  local port="$1"
+  local output
+  local rc
+
+  set +e
+  output="$(grpcurl -plaintext -max-time 2 -H "authorization: Bearer ${GRPC_AUTH_TOKEN}" "${PROBE_HOST}:${port}" list 2>&1)"
+  rc=$?
+  set -e
+  if (( rc == 0 )); then
+    echo "expected grpc reflection/list to be disabled in auth mode, but grpcurl list succeeded"
+    echo "grpc reflection output:"
+    echo "${output}"
+    dump_log
+    exit 1
+  fi
+  if ! grep -Eqi 'does not support the reflection API|unimplemented|unknown service|not implemented' <<<"${output}"; then
+    echo "expected reflection-disabled signal for grpcurl list in auth mode"
+    echo "grpc reflection output:"
+    echo "${output}"
+    dump_log
+    exit 1
+  fi
+}
+
+validate_seconds "COMET_RUNTIME_SMOKE_WAIT_SECONDS" "${WAIT_SECONDS}"
+validate_seconds "COMET_RUNTIME_SMOKE_STOP_WAIT_SECONDS" "${STOP_WAIT_SECONDS}"
+validate_seconds "COMET_RUNTIME_SMOKE_START_ATTEMPTS" "${START_ATTEMPTS}"
+
+has_auto_ports=0
+if [[ -z "${P2P_PORT_INPUT}" || -z "${RPC_PORT_INPUT}" || -z "${GRPC_PORT_INPUT}" ]]; then
+  has_auto_ports=1
+fi
+
+if [[ -n "${P2P_PORT_INPUT}" ]]; then
+  validate_port "COMET_RUNTIME_SMOKE_P2P_PORT" "${P2P_PORT_INPUT}"
+fi
+
+if [[ -n "${RPC_PORT_INPUT}" ]]; then
+  validate_port "COMET_RUNTIME_SMOKE_RPC_PORT" "${RPC_PORT_INPUT}"
+fi
+
+if [[ -n "${GRPC_PORT_INPUT}" ]]; then
+  validate_port "COMET_RUNTIME_SMOKE_GRPC_PORT" "${GRPC_PORT_INPUT}"
+fi
+
+assign_ports() {
+  local p2p rpc grpc
+  local attempt
+  for attempt in $(seq 1 40); do
+    if [[ -n "${P2P_PORT_INPUT}" ]]; then
+      p2p="${P2P_PORT_INPUT}"
+    else
+      p2p="$(pick_port || true)"
+    fi
+
+    if [[ -n "${RPC_PORT_INPUT}" ]]; then
+      rpc="${RPC_PORT_INPUT}"
+    else
+      rpc="$(pick_port || true)"
+    fi
+
+    if [[ -n "${GRPC_PORT_INPUT}" ]]; then
+      grpc="${GRPC_PORT_INPUT}"
+    else
+      grpc="$(pick_port || true)"
+    fi
+
+    if [[ -z "${p2p}" || -z "${rpc}" || -z "${grpc}" ]]; then
+      continue
+    fi
+    if [[ "${p2p}" == "${rpc}" || "${p2p}" == "${grpc}" || "${rpc}" == "${grpc}" ]]; then
+      if [[ -n "${P2P_PORT_INPUT}" && -n "${RPC_PORT_INPUT}" && -n "${GRPC_PORT_INPUT}" ]]; then
+        break
+      fi
+      continue
+    fi
+
+    P2P_PORT="${p2p}"
+    RPC_PORT="${rpc}"
+    GRPC_PORT="${grpc}"
+    return 0
+  done
+  return 1
+}
+
+is_port_conflict_log() {
+  grep -Eqi 'address already in use|bind: address already in use|failed to listen on .* bind: address already in use' "${LOG_FILE}"
+}
+
+COMET_HOME_DIR="$TMP_ROOT/comet-home"
+mkdir -p "${COMET_HOME_DIR}"
+
 wait_for_tcp_port() {
   local port="$1"
   local label="$2"
   for _ in $(seq 1 $((WAIT_SECONDS * 10))); do
     if [[ -n "${TDPND_PID}" ]] && ! kill -0 "${TDPND_PID}" 2>/dev/null; then
       echo "tdpnd exited before ${label} port became ready"
-      dump_log
-      exit 1
+      return 1
     fi
     if (echo >/dev/tcp/"${PROBE_HOST}"/"${port}") >/dev/null 2>&1; then
       return 0
@@ -135,8 +334,7 @@ wait_for_tcp_port() {
     sleep 0.1
   done
   echo "timed out waiting for ${label} port ${HOST}:${port}"
-  dump_log
-  exit 1
+  return 1
 }
 
 wait_for_rpc_status() {
@@ -144,8 +342,7 @@ wait_for_rpc_status() {
   for _ in $(seq 1 $((WAIT_SECONDS * 10))); do
     if [[ -n "${TDPND_PID}" ]] && ! kill -0 "${TDPND_PID}" 2>/dev/null; then
       echo "tdpnd exited before comet RPC status became ready"
-      dump_log
-      exit 1
+      return 1
     fi
     local code
     code="$(curl -sS -m 2 -o "${STATUS_FILE}" -w "%{http_code}" "${url}" 2>/dev/null || true)"
@@ -155,57 +352,65 @@ wait_for_rpc_status() {
     sleep 0.1
   done
   echo "timed out waiting for comet RPC status at ${url}"
+  return 1
+}
+
+started=0
+for start_attempt in $(seq 1 "${START_ATTEMPTS}"); do
+  if ! assign_ports; then
+    echo "failed to allocate distinct comet runtime smoke ports" >&2
+    exit 1
+  fi
+
+  : >"${LOG_FILE}"
+  : >"${STATUS_FILE}"
+
+  (
+    cd "${CHAIN_DIR}"
+    go run ./cmd/tdpnd \
+      --comet-home "${COMET_HOME_DIR}" \
+      --comet-moniker "${MONIKER}" \
+      --comet-p2p-laddr "tcp://${HOST}:${P2P_PORT}" \
+      --comet-rpc-laddr "tcp://${HOST}:${RPC_PORT}" \
+      --comet-proxy-app "${PROXY_APP}" \
+      --grpc-listen "${HOST}:${GRPC_PORT}" \
+      --grpc-auth-token "${GRPC_AUTH_TOKEN}"
+  ) >"${LOG_FILE}" 2>&1 &
+  TDPND_PID=$!
+
+  if wait_for_tcp_port "${P2P_PORT}" "comet p2p" \
+    && wait_for_tcp_port "${RPC_PORT}" "comet rpc" \
+    && wait_for_tcp_port "${GRPC_PORT}" "grpc" \
+    && wait_for_rpc_status "http://${PROBE_HOST}:${RPC_PORT}/status"; then
+    started=1
+    break
+  fi
+
+  signal_runtime TERM
+  wait_for_runtime_exit $((STOP_WAIT_SECONDS * 10)) || true
+  if [[ -n "${TDPND_PID}" ]]; then
+    wait "${TDPND_PID}" 2>/dev/null || true
+  fi
+  TDPND_PID=""
+
+  if (( start_attempt < START_ATTEMPTS )) && (( has_auto_ports == 1 )) && is_port_conflict_log; then
+    continue
+  fi
+
+  echo "tdpnd comet runtime failed to become ready (attempt ${start_attempt}/${START_ATTEMPTS})"
   dump_log
   if [[ -f "${STATUS_FILE}" ]]; then
     echo "--- comet RPC status response ---"
     cat "${STATUS_FILE}"
   fi
   exit 1
-}
+done
 
-validate_seconds "COMET_RUNTIME_SMOKE_WAIT_SECONDS" "${WAIT_SECONDS}"
-validate_seconds "COMET_RUNTIME_SMOKE_STOP_WAIT_SECONDS" "${STOP_WAIT_SECONDS}"
-
-if [[ -n "${P2P_PORT_INPUT}" ]]; then
-  validate_port "COMET_RUNTIME_SMOKE_P2P_PORT" "${P2P_PORT_INPUT}"
-  P2P_PORT="${P2P_PORT_INPUT}"
-else
-  P2P_PORT="$(pick_port)"
-fi
-
-if [[ -n "${RPC_PORT_INPUT}" ]]; then
-  validate_port "COMET_RUNTIME_SMOKE_RPC_PORT" "${RPC_PORT_INPUT}"
-  RPC_PORT="${RPC_PORT_INPUT}"
-else
-  RPC_PORT="$(pick_port)"
-fi
-
-if [[ -z "${P2P_PORT}" || -z "${RPC_PORT}" ]]; then
-  echo "failed to allocate comet runtime smoke ports" >&2
+if (( started != 1 )); then
+  echo "tdpnd comet runtime failed to start after ${START_ATTEMPTS} attempts"
+  dump_log
   exit 1
 fi
-if [[ "${P2P_PORT}" == "${RPC_PORT}" ]]; then
-  echo "comet runtime smoke requires distinct p2p/rpc ports (got: ${P2P_PORT})" >&2
-  exit 2
-fi
-
-COMET_HOME_DIR="$TMP_ROOT/comet-home"
-mkdir -p "${COMET_HOME_DIR}"
-
-(
-  cd "${CHAIN_DIR}"
-  go run ./cmd/tdpnd \
-    --comet-home "${COMET_HOME_DIR}" \
-    --comet-moniker "${MONIKER}" \
-    --comet-p2p-laddr "tcp://${HOST}:${P2P_PORT}" \
-    --comet-rpc-laddr "tcp://${HOST}:${RPC_PORT}" \
-    --comet-proxy-app "${PROXY_APP}"
-) >"${LOG_FILE}" 2>&1 &
-TDPND_PID=$!
-
-wait_for_tcp_port "${P2P_PORT}" "comet p2p"
-wait_for_tcp_port "${RPC_PORT}" "comet rpc"
-wait_for_rpc_status "http://${PROBE_HOST}:${RPC_PORT}/status"
 
 if ! grep -q '"network":"tdpn-comet-chain"' "${STATUS_FILE}"; then
   echo "expected comet RPC status to report chain id tdpn-comet-chain"
@@ -213,6 +418,21 @@ if ! grep -q '"network":"tdpn-comet-chain"' "${STATUS_FILE}"; then
   cat "${STATUS_FILE}"
   dump_log
   exit 1
+fi
+
+if command -v grpcurl >/dev/null 2>&1; then
+  # Health remains open even when gRPC auth token mode is enabled.
+  wait_for_grpcurl_health "${GRPC_PORT}"
+  # Module query RPCs require bearer auth in token mode.
+  assert_grpc_query_unauthenticated "${GRPC_PORT}" "tdpn.vpnbilling.v1.Query/ListCreditReservations"
+  assert_grpc_query_dispatch_with_token "${GRPC_PORT}" "tdpn.vpnbilling.v1.Query/ListCreditReservations" "reservations"
+  # Reflection/list remains disabled when auth token mode is enabled.
+  assert_grpc_reflection_disabled "${GRPC_PORT}"
+else
+  (
+    cd "${CHAIN_DIR}"
+    timeout 60s go test ./cmd/tdpnd -count=1 -run '^(TestRunTDPNDMixedCometGRPCSettlementLifecycle|TestRunTDPNDMixedCometGRPCQueryDispatchAvailability|TestRunTDPNDMixedCometGRPCAuth.*)$'
+  )
 fi
 
 signal_runtime INT

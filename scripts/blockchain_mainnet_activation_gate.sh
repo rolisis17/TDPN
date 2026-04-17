@@ -317,6 +317,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
+generated_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
 declare -a gate_json_entries=()
 declare -a failed_gate_ids=()
 declare -a failed_reasons=()
@@ -382,9 +384,11 @@ if [[ "$input_valid" != "1" ]]; then
     --argjson gates '[]' \
     --arg summary_json "$summary_json" \
     --arg metrics_json "$metrics_json" \
+    --arg generated_at "$generated_at" \
     '{
       version: 1,
       schema: {id: $schema_id, major: 1, minor: 0},
+      generated_at: $generated_at,
       decision: $decision,
       status: $status,
       rc: $rc,
@@ -540,9 +544,11 @@ else
     --argjson gates "$gates_json" \
     --arg summary_json "$summary_json" \
     --arg metrics_json "$metrics_json" \
+    --arg generated_at "$generated_at" \
     '{
       version: 1,
       schema: {id: $schema_id, major: 1, minor: 0},
+      generated_at: $generated_at,
       decision: $decision,
       status: $status,
       rc: $rc,

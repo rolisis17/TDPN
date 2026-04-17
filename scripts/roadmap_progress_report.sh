@@ -126,6 +126,32 @@ json_file_valid_01() {
   fi
 }
 
+summary_age_sec_from_path() {
+  local path="$1"
+  local now_epoch=""
+  local mtime_epoch=""
+  local age_sec=""
+
+  if [[ -z "$path" || ! -f "$path" ]]; then
+    printf '%s' ""
+    return
+  fi
+
+  now_epoch="$(date -u +%s)"
+  mtime_epoch="$(file_mtime_epoch "$path")"
+  if [[ ! "$now_epoch" =~ ^[0-9]+$ || ! "$mtime_epoch" =~ ^[0-9]+$ ]]; then
+    printf '%s' ""
+    return
+  fi
+
+  age_sec="$((now_epoch - mtime_epoch))"
+  if (( age_sec < 0 )); then
+    age_sec=0
+  fi
+
+  printf '%s' "$age_sec"
+}
+
 manual_validation_summary_usable_01() {
   local path="$1"
   if [[ ! -f "$path" ]]; then
@@ -519,6 +545,79 @@ profile_default_gate_extract_arg_value_from_cmd() {
   printf '%s' ""
 }
 
+profile_default_gate_host_from_directory_arg_value() {
+  local raw_value
+  local value
+  raw_value="$(trim "${1:-}")"
+  if [[ -z "$raw_value" ]]; then
+    printf '%s' ""
+    return
+  fi
+  value="$raw_value"
+  if [[ "$value" =~ ^\"(.*)\"$ ]]; then
+    value="${BASH_REMATCH[1]}"
+  elif [[ "$value" =~ ^\'(.*)\'$ ]]; then
+    value="${BASH_REMATCH[1]}"
+  fi
+  value="${value#http://}"
+  value="${value#https://}"
+  value="${value%%/*}"
+  value="${value%%\?*}"
+  value="${value%%\#*}"
+  if [[ -z "$value" ]]; then
+    printf '%s' ""
+    return
+  fi
+  if [[ "$value" =~ ^(\[[^][]+\])(:[0-9]+)?$ ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+    return
+  fi
+  if [[ "$value" =~ ^([^:]+):([0-9]+)$ ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+    return
+  fi
+  if [[ "$value" =~ ^[^:]+$ ]]; then
+    printf '%s' "$value"
+    return
+  fi
+  printf '%s' ""
+}
+
+profile_default_gate_extract_directory_host_from_cmd() {
+  local cmd
+  local directory_flag
+  local directory_value=""
+  cmd="$(trim "${1:-}")"
+  directory_flag="${2:-}"
+  if [[ -z "$cmd" || -z "$directory_flag" ]]; then
+    printf '%s' ""
+    return
+  fi
+  directory_value="$(profile_default_gate_extract_arg_value_from_cmd "$cmd" "$directory_flag")"
+  if [[ -z "$directory_value" ]]; then
+    printf '%s' ""
+    return
+  fi
+  profile_default_gate_host_from_directory_arg_value "$directory_value"
+}
+
+profile_default_gate_host_is_non_localhost_01() {
+  local host
+  host="$(trim "${1:-}")"
+  if [[ -z "$host" ]]; then
+    printf '%s' "0"
+    return
+  fi
+  case "${host,,}" in
+    localhost|127.*|[::1]|::1)
+      printf '%s' "0"
+      ;;
+    *)
+      printf '%s' "1"
+      ;;
+  esac
+}
+
 profile_default_gate_command_is_localhost_profile_default_run_01() {
   local cmd
   cmd="$(trim "${1:-}")"
@@ -538,18 +637,55 @@ profile_default_gate_command_is_localhost_profile_default_run_01() {
   fi
 }
 
+profile_default_gate_command_is_profile_default_run_01() {
+  local cmd
+  cmd="$(trim "${1:-}")"
+  if [[ -z "$cmd" ]]; then
+    printf '%s' "0"
+    return
+  fi
+  if [[ "$cmd" =~ ^(sudo[[:space:]]+)?\./scripts/easy_node\.sh[[:space:]]+profile-default-gate-run([[:space:]]|$) ]]; then
+    printf '%s' "1"
+  else
+    printf '%s' "0"
+  fi
+}
+
+profile_default_gate_command_is_profile_compare_signoff_01() {
+  local cmd
+  cmd="$(trim "${1:-}")"
+  if [[ -z "$cmd" ]]; then
+    printf '%s' "0"
+    return
+  fi
+  if [[ "$cmd" =~ ^(sudo[[:space:]]+)?\./scripts/easy_node\.sh[[:space:]]+profile-compare-campaign-signoff([[:space:]]|$) ]]; then
+    printf '%s' "1"
+  else
+    printf '%s' "0"
+  fi
+}
+
 profile_default_gate_command_localhost_run_to_live_wrapper() {
   local cmd
   local host_a
   local host_b
   local cmd_source
+  local docker_hint_available
   local sudo_prefix=""
   local reports_dir=""
   local summary_json=""
   local print_summary_json=""
   local campaign_timeout_sec=""
+  local heartbeat_interval_sec=""
+  local refresh_campaign=""
+  local fail_on_no_go=""
+  local campaign_execution_mode=""
+  local campaign_start_local_stack=""
   local credential_flag=""
   local credential_value=""
+  local convert_localhost_run="0"
+  local convert_signoff="0"
+  local convert_allowed="0"
   local supported_credential_flags=("--campaign-subject" "--subject" "--key" "--invite-key")
   local flag=""
   local rebuilt=""
@@ -557,6 +693,7 @@ profile_default_gate_command_localhost_run_to_live_wrapper() {
   host_a="$(trim "${2:-}")"
   host_b="$(trim "${3:-}")"
   cmd_source="$(trim "${4:-}")"
+  docker_hint_available="$(trim "${5:-}")"
   if [[ -z "$cmd" ]]; then
     printf '%s' ""
     return
@@ -565,11 +702,25 @@ profile_default_gate_command_localhost_run_to_live_wrapper() {
     printf '%s' "$cmd"
     return
   fi
-  if [[ "${cmd_source,,}" != *docker* ]]; then
+  if [[ "${cmd_source,,}" == *docker* ]]; then
+    convert_allowed="1"
+  fi
+  case "${docker_hint_available,,}" in
+    1|true|yes|on)
+      convert_allowed="1"
+      ;;
+  esac
+  if [[ "$convert_allowed" != "1" ]]; then
     printf '%s' "$cmd"
     return
   fi
-  if [[ "$(profile_default_gate_command_is_localhost_profile_default_run_01 "$cmd")" != "1" ]]; then
+  if [[ "$(profile_default_gate_command_is_profile_default_run_01 "$cmd")" == "1" ]]; then
+    convert_localhost_run="1"
+  fi
+  if [[ "$(profile_default_gate_command_is_profile_compare_signoff_01 "$cmd")" == "1" ]]; then
+    convert_signoff="1"
+  fi
+  if [[ "$convert_localhost_run" != "1" && "$convert_signoff" != "1" ]]; then
     printf '%s' "$cmd"
     return
   fi
@@ -580,6 +731,11 @@ profile_default_gate_command_localhost_run_to_live_wrapper() {
   summary_json="$(profile_default_gate_extract_arg_value_from_cmd "$cmd" "--summary-json")"
   print_summary_json="$(profile_default_gate_extract_arg_value_from_cmd "$cmd" "--print-summary-json")"
   campaign_timeout_sec="$(profile_default_gate_extract_arg_value_from_cmd "$cmd" "--campaign-timeout-sec")"
+  heartbeat_interval_sec="$(profile_default_gate_extract_arg_value_from_cmd "$cmd" "--heartbeat-interval-sec")"
+  refresh_campaign="$(profile_default_gate_extract_arg_value_from_cmd "$cmd" "--refresh-campaign")"
+  fail_on_no_go="$(profile_default_gate_extract_arg_value_from_cmd "$cmd" "--fail-on-no-go")"
+  campaign_execution_mode="$(profile_default_gate_extract_arg_value_from_cmd "$cmd" "--campaign-execution-mode")"
+  campaign_start_local_stack="$(profile_default_gate_extract_arg_value_from_cmd "$cmd" "--campaign-start-local-stack")"
   for flag in "${supported_credential_flags[@]}"; do
     credential_value="$(profile_default_gate_extract_arg_value_from_cmd "$cmd" "$flag")"
     if [[ -n "$credential_value" ]]; then
@@ -594,11 +750,26 @@ profile_default_gate_command_localhost_run_to_live_wrapper() {
   if [[ -n "$campaign_timeout_sec" ]]; then
     rebuilt+=" --campaign-timeout-sec ${campaign_timeout_sec}"
   fi
+  if [[ -n "$heartbeat_interval_sec" ]]; then
+    rebuilt+=" --heartbeat-interval-sec ${heartbeat_interval_sec}"
+  fi
   if [[ -n "$summary_json" ]]; then
     rebuilt+=" --summary-json ${summary_json}"
   fi
   if [[ -n "$print_summary_json" ]]; then
     rebuilt+=" --print-summary-json ${print_summary_json}"
+  fi
+  if [[ -n "$refresh_campaign" ]]; then
+    rebuilt+=" --refresh-campaign ${refresh_campaign}"
+  fi
+  if [[ -n "$fail_on_no_go" ]]; then
+    rebuilt+=" --fail-on-no-go ${fail_on_no_go}"
+  fi
+  if [[ -n "$campaign_execution_mode" ]]; then
+    rebuilt+=" --campaign-execution-mode ${campaign_execution_mode}"
+  fi
+  if [[ -n "$campaign_start_local_stack" ]]; then
+    rebuilt+=" --campaign-start-local-stack ${campaign_start_local_stack}"
   fi
   if [[ -n "$credential_flag" && -n "$credential_value" ]]; then
     rebuilt+=" ${credential_flag} ${credential_value}"
@@ -1160,26 +1331,38 @@ candidate_bool_signal_value_or_empty() {
     return
   fi
   value="$(jq -r --arg signal "$signal" '
-    if (.[$signal] | type) == "boolean" then .[$signal]
-    elif (.summary[$signal] | type) == "boolean" then .summary[$signal]
-    elif (.handoff[$signal] | type) == "boolean" then .handoff[$signal]
-    elif (.signals[$signal] | type) == "boolean" then .signals[$signal]
-    elif (.automation[$signal] | type) == "boolean" then .automation[$signal]
-    elif (.phase1_resilience_handoff[$signal] | type) == "boolean" then .phase1_resilience_handoff[$signal]
-    elif (.phase2_linux_prod_candidate_handoff[$signal] | type) == "boolean" then .phase2_linux_prod_candidate_handoff[$signal]
-    elif (.phase3_windows_client_beta_handoff[$signal] | type) == "boolean" then .phase3_windows_client_beta_handoff[$signal]
-    elif (.phase4_windows_full_parity_handoff[$signal] | type) == "boolean" then .phase4_windows_full_parity_handoff[$signal]
-    elif (.phase5_settlement_layer_handoff[$signal] | type) == "boolean" then .phase5_settlement_layer_handoff[$signal]
-    elif (.phase6_cosmos_l1_handoff[$signal] | type) == "boolean" then .phase6_cosmos_l1_handoff[$signal]
-    elif (.vpn_track.phase1_resilience_handoff[$signal] | type) == "boolean" then .vpn_track.phase1_resilience_handoff[$signal]
-    elif (.vpn_track.phase2_linux_prod_candidate_handoff[$signal] | type) == "boolean" then .vpn_track.phase2_linux_prod_candidate_handoff[$signal]
-    elif (.vpn_track.phase3_windows_client_beta_handoff[$signal] | type) == "boolean" then .vpn_track.phase3_windows_client_beta_handoff[$signal]
-    elif (.vpn_track.phase4_windows_full_parity_handoff[$signal] | type) == "boolean" then .vpn_track.phase4_windows_full_parity_handoff[$signal]
-    elif (.vpn_track.phase5_settlement_layer_handoff[$signal] | type) == "boolean" then .vpn_track.phase5_settlement_layer_handoff[$signal]
-    elif (.vpn_track.phase6_cosmos_l1_handoff[$signal] | type) == "boolean" then .vpn_track.phase6_cosmos_l1_handoff[$signal]
-    elif (.blockchain_track.phase6_cosmos_l1_handoff[$signal] | type) == "boolean" then .blockchain_track.phase6_cosmos_l1_handoff[$signal]
-    else empty
-    end
+    def status_to_bool:
+      ((. // "") | ascii_downcase) as $s
+      | if ($s == "pass" or $s == "ok" or $s == "success" or $s == "true" or $s == "healthy") then true
+        elif ($s == "fail" or $s == "failed" or $s == "error" or $s == "false" or $s == "degraded" or $s == "unhealthy") then false
+        else empty
+        end;
+    ($signal | if endswith("_status") then .[0:(length - 7)] elif endswith("_ok") then .[0:(length - 3)] else "" end) as $base_signal
+    | if (.[$signal] | type) == "boolean" then .[$signal]
+      elif (.summary[$signal] | type) == "boolean" then .summary[$signal]
+      elif (.handoff[$signal] | type) == "boolean" then .handoff[$signal]
+      elif (.signals[$signal] | type) == "boolean" then .signals[$signal]
+      elif (.automation[$signal] | type) == "boolean" then .automation[$signal]
+      elif (.phase1_resilience_handoff[$signal] | type) == "boolean" then .phase1_resilience_handoff[$signal]
+      elif (.phase2_linux_prod_candidate_handoff[$signal] | type) == "boolean" then .phase2_linux_prod_candidate_handoff[$signal]
+      elif (.phase3_windows_client_beta_handoff[$signal] | type) == "boolean" then .phase3_windows_client_beta_handoff[$signal]
+      elif (.phase4_windows_full_parity_handoff[$signal] | type) == "boolean" then .phase4_windows_full_parity_handoff[$signal]
+      elif (.phase5_settlement_layer_handoff[$signal] | type) == "boolean" then .phase5_settlement_layer_handoff[$signal]
+      elif (.phase6_cosmos_l1_handoff[$signal] | type) == "boolean" then .phase6_cosmos_l1_handoff[$signal]
+      elif (.vpn_track.phase1_resilience_handoff[$signal] | type) == "boolean" then .vpn_track.phase1_resilience_handoff[$signal]
+      elif (.vpn_track.phase2_linux_prod_candidate_handoff[$signal] | type) == "boolean" then .vpn_track.phase2_linux_prod_candidate_handoff[$signal]
+      elif (.vpn_track.phase3_windows_client_beta_handoff[$signal] | type) == "boolean" then .vpn_track.phase3_windows_client_beta_handoff[$signal]
+      elif (.vpn_track.phase4_windows_full_parity_handoff[$signal] | type) == "boolean" then .vpn_track.phase4_windows_full_parity_handoff[$signal]
+      elif (.vpn_track.phase5_settlement_layer_handoff[$signal] | type) == "boolean" then .vpn_track.phase5_settlement_layer_handoff[$signal]
+      elif (.vpn_track.phase6_cosmos_l1_handoff[$signal] | type) == "boolean" then .vpn_track.phase6_cosmos_l1_handoff[$signal]
+      elif (.blockchain_track.phase6_cosmos_l1_handoff[$signal] | type) == "boolean" then .blockchain_track.phase6_cosmos_l1_handoff[$signal]
+      elif (($signal | endswith("_ok")) and ((.signals[$base_signal].status | type) == "string")) then (.signals[$base_signal].status | status_to_bool)
+      elif (($signal | endswith("_ok")) and ((.steps[$base_signal].ok | type) == "boolean")) then .steps[$base_signal].ok
+      elif (($signal | endswith("_ok")) and ((.steps[$base_signal].status | type) == "string")) then (.steps[$base_signal].status | status_to_bool)
+      elif (($signal | endswith("_ok")) and ((.stages[$base_signal].ok | type) == "boolean")) then .stages[$base_signal].ok
+      elif (($signal | endswith("_ok")) and ((.stages[$base_signal].status | type) == "string")) then (.stages[$base_signal].status | status_to_bool)
+      else empty
+      end
   ' "$path" 2>/dev/null || true)"
   case "$value" in
     true|false)
@@ -1212,26 +1395,37 @@ candidate_string_signal_value_or_empty() {
     return
   fi
   value="$(jq -r --arg signal "$signal" '
-    if (.[$signal] | type) == "string" then .[$signal]
-    elif (.summary[$signal] | type) == "string" then .summary[$signal]
-    elif (.handoff[$signal] | type) == "string" then .handoff[$signal]
-    elif (.signals[$signal] | type) == "string" then .signals[$signal]
-    elif (.automation[$signal] | type) == "string" then .automation[$signal]
-    elif (.phase1_resilience_handoff[$signal] | type) == "string" then .phase1_resilience_handoff[$signal]
-    elif (.phase2_linux_prod_candidate_handoff[$signal] | type) == "string" then .phase2_linux_prod_candidate_handoff[$signal]
-    elif (.phase3_windows_client_beta_handoff[$signal] | type) == "string" then .phase3_windows_client_beta_handoff[$signal]
-    elif (.phase4_windows_full_parity_handoff[$signal] | type) == "string" then .phase4_windows_full_parity_handoff[$signal]
-    elif (.phase5_settlement_layer_handoff[$signal] | type) == "string" then .phase5_settlement_layer_handoff[$signal]
-    elif (.phase6_cosmos_l1_handoff[$signal] | type) == "string" then .phase6_cosmos_l1_handoff[$signal]
-    elif (.vpn_track.phase1_resilience_handoff[$signal] | type) == "string" then .vpn_track.phase1_resilience_handoff[$signal]
-    elif (.vpn_track.phase2_linux_prod_candidate_handoff[$signal] | type) == "string" then .vpn_track.phase2_linux_prod_candidate_handoff[$signal]
-    elif (.vpn_track.phase3_windows_client_beta_handoff[$signal] | type) == "string" then .vpn_track.phase3_windows_client_beta_handoff[$signal]
-    elif (.vpn_track.phase4_windows_full_parity_handoff[$signal] | type) == "string" then .vpn_track.phase4_windows_full_parity_handoff[$signal]
-    elif (.vpn_track.phase5_settlement_layer_handoff[$signal] | type) == "string" then .vpn_track.phase5_settlement_layer_handoff[$signal]
-    elif (.vpn_track.phase6_cosmos_l1_handoff[$signal] | type) == "string" then .vpn_track.phase6_cosmos_l1_handoff[$signal]
-    elif (.blockchain_track.phase6_cosmos_l1_handoff[$signal] | type) == "string" then .blockchain_track.phase6_cosmos_l1_handoff[$signal]
-    else empty
-    end
+    def bool_to_status:
+      if . == true then "pass"
+      elif . == false then "fail"
+      else empty
+      end;
+    ($signal | if endswith("_status") then .[0:(length - 7)] elif endswith("_ok") then .[0:(length - 3)] else "" end) as $base_signal
+    | if (.[$signal] | type) == "string" then .[$signal]
+      elif (.summary[$signal] | type) == "string" then .summary[$signal]
+      elif (.handoff[$signal] | type) == "string" then .handoff[$signal]
+      elif (.signals[$signal] | type) == "string" then .signals[$signal]
+      elif (.automation[$signal] | type) == "string" then .automation[$signal]
+      elif (.phase1_resilience_handoff[$signal] | type) == "string" then .phase1_resilience_handoff[$signal]
+      elif (.phase2_linux_prod_candidate_handoff[$signal] | type) == "string" then .phase2_linux_prod_candidate_handoff[$signal]
+      elif (.phase3_windows_client_beta_handoff[$signal] | type) == "string" then .phase3_windows_client_beta_handoff[$signal]
+      elif (.phase4_windows_full_parity_handoff[$signal] | type) == "string" then .phase4_windows_full_parity_handoff[$signal]
+      elif (.phase5_settlement_layer_handoff[$signal] | type) == "string" then .phase5_settlement_layer_handoff[$signal]
+      elif (.phase6_cosmos_l1_handoff[$signal] | type) == "string" then .phase6_cosmos_l1_handoff[$signal]
+      elif (.vpn_track.phase1_resilience_handoff[$signal] | type) == "string" then .vpn_track.phase1_resilience_handoff[$signal]
+      elif (.vpn_track.phase2_linux_prod_candidate_handoff[$signal] | type) == "string" then .vpn_track.phase2_linux_prod_candidate_handoff[$signal]
+      elif (.vpn_track.phase3_windows_client_beta_handoff[$signal] | type) == "string" then .vpn_track.phase3_windows_client_beta_handoff[$signal]
+      elif (.vpn_track.phase4_windows_full_parity_handoff[$signal] | type) == "string" then .vpn_track.phase4_windows_full_parity_handoff[$signal]
+      elif (.vpn_track.phase5_settlement_layer_handoff[$signal] | type) == "string" then .vpn_track.phase5_settlement_layer_handoff[$signal]
+      elif (.vpn_track.phase6_cosmos_l1_handoff[$signal] | type) == "string" then .vpn_track.phase6_cosmos_l1_handoff[$signal]
+      elif (.blockchain_track.phase6_cosmos_l1_handoff[$signal] | type) == "string" then .blockchain_track.phase6_cosmos_l1_handoff[$signal]
+      elif (($signal | endswith("_status")) and ((.signals[$base_signal].status | type) == "string")) then .signals[$base_signal].status
+      elif (($signal | endswith("_status")) and ((.steps[$base_signal].status | type) == "string")) then .steps[$base_signal].status
+      elif (($signal | endswith("_status")) and ((.steps[$base_signal].ok | type) == "boolean")) then (.steps[$base_signal].ok | bool_to_status)
+      elif (($signal | endswith("_status")) and ((.stages[$base_signal].status | type) == "string")) then .stages[$base_signal].status
+      elif (($signal | endswith("_status")) and ((.stages[$base_signal].ok | type) == "boolean")) then (.stages[$base_signal].ok | bool_to_status)
+      else empty
+      end
   ' "$path" 2>/dev/null || true)"
   if [[ -n "$value" && "$value" != "null" ]]; then
     printf '%s' "$value"
@@ -1391,7 +1585,7 @@ phase5_settlement_layer_summary_completeness_score() {
   local path="$1"
   local score=0
   local signal=""
-  for signal in settlement_failsoft_ok settlement_acceptance_ok settlement_bridge_smoke_ok settlement_state_persistence_ok settlement_adapter_roundtrip_ok issuer_sponsor_api_live_smoke_ok issuer_settlement_status_live_smoke_ok; do
+  for signal in settlement_failsoft_ok settlement_acceptance_ok settlement_bridge_smoke_ok settlement_state_persistence_ok settlement_dual_asset_parity_ok settlement_adapter_roundtrip_ok settlement_adapter_signed_tx_roundtrip_ok settlement_shadow_env_ok settlement_shadow_status_surface_ok issuer_sponsor_api_live_smoke_ok issuer_sponsor_vpn_session_live_smoke_ok issuer_settlement_status_live_smoke_ok issuer_admin_blockchain_handlers_coverage_ok exit_settlement_status_live_smoke_ok; do
     if [[ "$(candidate_bool_signal_present_01 "$path" "$signal")" == "1" ]]; then
       score=$((score + 1))
     fi
@@ -1408,7 +1602,7 @@ phase5_settlement_layer_summary_quality_score() {
     printf '%s' "0"
     return
   fi
-  for signal in settlement_failsoft_ok settlement_acceptance_ok settlement_bridge_smoke_ok settlement_state_persistence_ok settlement_adapter_roundtrip_ok issuer_sponsor_api_live_smoke_ok issuer_settlement_status_live_smoke_ok; do
+  for signal in settlement_failsoft_ok settlement_acceptance_ok settlement_bridge_smoke_ok settlement_state_persistence_ok settlement_dual_asset_parity_ok settlement_adapter_roundtrip_ok settlement_adapter_signed_tx_roundtrip_ok settlement_shadow_env_ok settlement_shadow_status_surface_ok issuer_sponsor_api_live_smoke_ok issuer_sponsor_vpn_session_live_smoke_ok issuer_settlement_status_live_smoke_ok issuer_admin_blockchain_handlers_coverage_ok exit_settlement_status_live_smoke_ok; do
     value="$(candidate_bool_signal_value_or_empty "$path" "$signal")"
     case "$value" in
       true)
@@ -1437,6 +1631,42 @@ phase5_settlement_layer_summary_quality_score() {
       score=$((score - 2))
       ;;
   esac
+  value="$(candidate_string_signal_value_or_empty "$path" "settlement_adapter_signed_tx_roundtrip_status")"
+  case "${value,,}" in
+    pass|ok|success)
+      score=$((score + 2))
+      ;;
+    fail|failed|error|invalid|degraded)
+      score=$((score - 2))
+      ;;
+  esac
+  value="$(candidate_string_signal_value_or_empty "$path" "settlement_shadow_env_status")"
+  case "${value,,}" in
+    pass|ok|success)
+      score=$((score + 2))
+      ;;
+    fail|failed|error|invalid|degraded)
+      score=$((score - 2))
+      ;;
+  esac
+  value="$(candidate_string_signal_value_or_empty "$path" "settlement_shadow_status_surface_status")"
+  case "${value,,}" in
+    pass|ok|success)
+      score=$((score + 2))
+      ;;
+    fail|failed|error|invalid|degraded)
+      score=$((score - 2))
+      ;;
+  esac
+  value="$(candidate_string_signal_value_or_empty "$path" "settlement_dual_asset_parity_status")"
+  case "${value,,}" in
+    pass|ok|success)
+      score=$((score + 2))
+      ;;
+    fail|failed|error|invalid|degraded)
+      score=$((score - 2))
+      ;;
+  esac
   value="$(candidate_string_signal_value_or_empty "$path" "issuer_sponsor_api_live_smoke_status")"
   case "${value,,}" in
     pass|ok|success)
@@ -1446,7 +1676,34 @@ phase5_settlement_layer_summary_quality_score() {
       score=$((score - 2))
       ;;
   esac
+  value="$(candidate_string_signal_value_or_empty "$path" "issuer_sponsor_vpn_session_live_smoke_status")"
+  case "${value,,}" in
+    pass|ok|success)
+      score=$((score + 2))
+      ;;
+    fail|failed|error|invalid|degraded)
+      score=$((score - 2))
+      ;;
+  esac
   value="$(candidate_string_signal_value_or_empty "$path" "issuer_settlement_status_live_smoke_status")"
+  case "${value,,}" in
+    pass|ok|success)
+      score=$((score + 2))
+      ;;
+    fail|failed|error|invalid|degraded)
+      score=$((score - 2))
+      ;;
+  esac
+  value="$(candidate_string_signal_value_or_empty "$path" "issuer_admin_blockchain_handlers_coverage_status")"
+  case "${value,,}" in
+    pass|ok|success)
+      score=$((score + 2))
+      ;;
+    fail|failed|error|invalid|degraded)
+      score=$((score - 2))
+      ;;
+  esac
+  value="$(candidate_string_signal_value_or_empty "$path" "exit_settlement_status_live_smoke_status")"
   case "${value,,}" in
     pass|ok|success)
       score=$((score + 2))
@@ -1473,7 +1730,7 @@ phase5_settlement_layer_summary_obviously_degraded_01() {
       return
       ;;
   esac
-  for signal in settlement_failsoft_ok settlement_acceptance_ok settlement_bridge_smoke_ok settlement_state_persistence_ok settlement_adapter_roundtrip_ok issuer_sponsor_api_live_smoke_ok issuer_settlement_status_live_smoke_ok; do
+  for signal in settlement_failsoft_ok settlement_acceptance_ok settlement_bridge_smoke_ok settlement_state_persistence_ok settlement_dual_asset_parity_ok settlement_adapter_roundtrip_ok settlement_adapter_signed_tx_roundtrip_ok settlement_shadow_env_ok settlement_shadow_status_surface_ok issuer_sponsor_api_live_smoke_ok issuer_sponsor_vpn_session_live_smoke_ok issuer_settlement_status_live_smoke_ok issuer_admin_blockchain_handlers_coverage_ok exit_settlement_status_live_smoke_ok; do
     value="$(candidate_bool_signal_value_or_empty "$path" "$signal")"
     if [[ "$value" == "false" ]]; then
       printf '%s' "1"
@@ -1487,6 +1744,34 @@ phase5_settlement_layer_summary_obviously_degraded_01() {
       return
       ;;
   esac
+  value="$(candidate_string_signal_value_or_empty "$path" "settlement_adapter_signed_tx_roundtrip_status")"
+  case "${value,,}" in
+    fail|failed|error|invalid|degraded)
+      printf '%s' "1"
+      return
+      ;;
+  esac
+  value="$(candidate_string_signal_value_or_empty "$path" "settlement_shadow_env_status")"
+  case "${value,,}" in
+    fail|failed|error|invalid|degraded)
+      printf '%s' "1"
+      return
+      ;;
+  esac
+  value="$(candidate_string_signal_value_or_empty "$path" "settlement_shadow_status_surface_status")"
+  case "${value,,}" in
+    fail|failed|error|invalid|degraded)
+      printf '%s' "1"
+      return
+      ;;
+  esac
+  value="$(candidate_string_signal_value_or_empty "$path" "settlement_dual_asset_parity_status")"
+  case "${value,,}" in
+    fail|failed|error|invalid|degraded)
+      printf '%s' "1"
+      return
+      ;;
+  esac
   value="$(candidate_string_signal_value_or_empty "$path" "issuer_sponsor_api_live_smoke_status")"
   case "${value,,}" in
     fail|failed|error|invalid|degraded)
@@ -1494,7 +1779,28 @@ phase5_settlement_layer_summary_obviously_degraded_01() {
       return
       ;;
   esac
+  value="$(candidate_string_signal_value_or_empty "$path" "issuer_sponsor_vpn_session_live_smoke_status")"
+  case "${value,,}" in
+    fail|failed|error|invalid|degraded)
+      printf '%s' "1"
+      return
+      ;;
+  esac
   value="$(candidate_string_signal_value_or_empty "$path" "issuer_settlement_status_live_smoke_status")"
+  case "${value,,}" in
+    fail|failed|error|invalid|degraded)
+      printf '%s' "1"
+      return
+      ;;
+  esac
+  value="$(candidate_string_signal_value_or_empty "$path" "issuer_admin_blockchain_handlers_coverage_status")"
+  case "${value,,}" in
+    fail|failed|error|invalid|degraded)
+      printf '%s' "1"
+      return
+      ;;
+  esac
+  value="$(candidate_string_signal_value_or_empty "$path" "exit_settlement_status_live_smoke_status")"
   case "${value,,}" in
     fail|failed|error|invalid|degraded)
       printf '%s' "1"
@@ -1925,27 +2231,27 @@ find_latest_phase5_settlement_layer_summary_json() {
     if ! [[ "$candidate_mtime" =~ ^[0-9]+$ ]]; then
       candidate_mtime=0
     fi
-    if (( candidate_score > best_score )); then
-      best_score="$candidate_score"
+    if (( candidate_non_dry > best_non_dry )); then
       best_non_dry="$candidate_non_dry"
       best_non_degraded="$candidate_non_degraded"
+      best_score="$candidate_score"
       best_quality="$candidate_quality"
       best_mtime="$candidate_mtime"
       best_path="$candidate"
-    elif (( candidate_score == best_score )); then
-      if (( candidate_non_dry > best_non_dry )); then
-        best_non_dry="$candidate_non_dry"
+    elif (( candidate_non_dry == best_non_dry )); then
+      if (( candidate_non_degraded > best_non_degraded )); then
         best_non_degraded="$candidate_non_degraded"
+        best_score="$candidate_score"
         best_quality="$candidate_quality"
         best_mtime="$candidate_mtime"
         best_path="$candidate"
-      elif (( candidate_non_dry == best_non_dry )); then
-        if (( candidate_non_degraded > best_non_degraded )); then
-          best_non_degraded="$candidate_non_degraded"
+      elif (( candidate_non_degraded == best_non_degraded )); then
+        if (( candidate_score > best_score )); then
+          best_score="$candidate_score"
           best_quality="$candidate_quality"
           best_mtime="$candidate_mtime"
           best_path="$candidate"
-        elif (( candidate_non_degraded == best_non_degraded )); then
+        elif (( candidate_score == best_score )); then
           if (( candidate_quality > best_quality )); then
             best_quality="$candidate_quality"
             best_mtime="$candidate_mtime"
@@ -1955,7 +2261,7 @@ find_latest_phase5_settlement_layer_summary_json() {
               best_mtime="$candidate_mtime"
               best_path="$candidate"
             elif (( candidate_mtime == best_mtime )) && [[ "$candidate" > "$best_path" ]]; then
-              # Deterministic tie-break when score/dryness/degradation/quality/mtime are equal.
+              # Deterministic tie-break when dryness/degradation/score/quality/mtime are equal.
               best_path="$candidate"
             fi
           fi
@@ -2065,6 +2371,7 @@ phase5_linked_summary_candidates_from_source() {
 phase5_settlement_adapter_roundtrip_status_from_summary_chain() {
   local start_path
   start_path="$(abs_path "$1")"
+  local start_non_degraded=0
   local queue_nl=""
   local seen_nl=$'\n'
   local candidate=""
@@ -2076,6 +2383,10 @@ phase5_settlement_adapter_roundtrip_status_from_summary_chain() {
   if [[ -z "$start_path" ]]; then
     printf '%s' ""
     return
+  fi
+  if [[ "$(phase5_settlement_layer_summary_usable_01 "$start_path")" == "1" ]] \
+    && [[ "$(phase5_settlement_layer_summary_obviously_degraded_01 "$start_path")" != "1" ]]; then
+    start_non_degraded=1
   fi
   queue_nl+="$start_path"$'\n'
 
@@ -2099,6 +2410,10 @@ phase5_settlement_adapter_roundtrip_status_from_summary_chain() {
     fi
     seen_nl+="$candidate"$'\n'
     if [[ "$(json_file_valid_01 "$candidate")" != "1" ]]; then
+      continue
+    fi
+    if [[ "$start_non_degraded" == "1" ]] \
+      && [[ "$(phase5_settlement_layer_summary_obviously_degraded_01 "$candidate")" == "1" ]]; then
       continue
     fi
     value="$(phase5_settlement_adapter_roundtrip_status_from_summary "$candidate")"
@@ -2128,6 +2443,7 @@ phase5_settlement_adapter_roundtrip_status_from_summary_chain() {
 phase5_settlement_adapter_roundtrip_ok_from_summary_chain() {
   local start_path
   start_path="$(abs_path "$1")"
+  local start_non_degraded=0
   local queue_nl=""
   local seen_nl=$'\n'
   local candidate=""
@@ -2139,6 +2455,10 @@ phase5_settlement_adapter_roundtrip_ok_from_summary_chain() {
   if [[ -z "$start_path" ]]; then
     printf '%s' "null"
     return
+  fi
+  if [[ "$(phase5_settlement_layer_summary_usable_01 "$start_path")" == "1" ]] \
+    && [[ "$(phase5_settlement_layer_summary_obviously_degraded_01 "$start_path")" != "1" ]]; then
+    start_non_degraded=1
   fi
   queue_nl+="$start_path"$'\n'
 
@@ -2162,6 +2482,10 @@ phase5_settlement_adapter_roundtrip_ok_from_summary_chain() {
     fi
     seen_nl+="$candidate"$'\n'
     if [[ "$(json_file_valid_01 "$candidate")" != "1" ]]; then
+      continue
+    fi
+    if [[ "$start_non_degraded" == "1" ]] \
+      && [[ "$(phase5_settlement_layer_summary_obviously_degraded_01 "$candidate")" == "1" ]]; then
       continue
     fi
     value="$(phase5_settlement_adapter_roundtrip_ok_from_summary "$candidate")"
@@ -2207,10 +2531,16 @@ phase5_best_signal_source_summary_json() {
   local best_non_dry=-1
   local best_non_degraded=-1
   local best_quality=-999999
+  local preferred_non_degraded=0
   local seen_paths_nl=$'\n'
   local -a candidates=()
 
   preferred_path="$(abs_path "$preferred_path")"
+  if [[ -n "$preferred_path" ]] \
+    && [[ "$(phase5_settlement_layer_summary_usable_01 "$preferred_path")" == "1" ]] \
+    && [[ "$(phase5_settlement_layer_summary_obviously_degraded_01 "$preferred_path")" != "1" ]]; then
+    preferred_non_degraded=1
+  fi
   if [[ -n "$preferred_path" ]]; then
     candidates+=("$preferred_path")
   fi
@@ -2224,7 +2554,9 @@ phase5_best_signal_source_summary_json() {
          -o -name 'phase5_settlement_layer_handoff_summary.json' \
          -o -name 'phase5_settlement_layer_handoff_run_summary.json' \
          -o -name 'phase5_settlement_layer_check_summary.json' \
-         -o -name 'phase5_settlement_layer_run_summary.json' \) \
+         -o -name 'phase5_settlement_layer_run_summary.json' \
+         -o -name 'ci_phase5_settlement_layer_summary.json' \
+         -o -name 'phase5_settlement_layer_ci_summary.json' \) \
       -print0 2>/dev/null || true)
   fi
 
@@ -2280,6 +2612,12 @@ phase5_best_signal_source_summary_json() {
     if [[ "$(phase5_settlement_layer_summary_obviously_degraded_01 "$candidate_abs")" == "1" ]]; then
       candidate_non_degraded=0
     fi
+    if [[ "$preferred_non_degraded" == "1" && "$candidate_non_degraded" == "0" ]]; then
+      # Do not backfill missing signal values from degraded artifacts when the
+      # selected phase5 source is healthy; preserve coherence with the chosen
+      # pass artifact.
+      continue
+    fi
     candidate_quality="$(phase5_settlement_layer_summary_quality_score "$candidate_abs")"
     if ! [[ "$candidate_quality" =~ ^-?[0-9]+$ ]]; then
       candidate_quality=0
@@ -2289,27 +2627,27 @@ phase5_best_signal_source_summary_json() {
       candidate_mtime=0
     fi
 
-    if (( candidate_score > best_score )); then
-      best_score="$candidate_score"
+    if (( candidate_non_dry > best_non_dry )); then
       best_non_dry="$candidate_non_dry"
       best_non_degraded="$candidate_non_degraded"
+      best_score="$candidate_score"
       best_quality="$candidate_quality"
       best_mtime="$candidate_mtime"
       best_path="$candidate_abs"
-    elif (( candidate_score == best_score )); then
-      if (( candidate_non_dry > best_non_dry )); then
-        best_non_dry="$candidate_non_dry"
+    elif (( candidate_non_dry == best_non_dry )); then
+      if (( candidate_non_degraded > best_non_degraded )); then
         best_non_degraded="$candidate_non_degraded"
+        best_score="$candidate_score"
         best_quality="$candidate_quality"
         best_mtime="$candidate_mtime"
         best_path="$candidate_abs"
-      elif (( candidate_non_dry == best_non_dry )); then
-        if (( candidate_non_degraded > best_non_degraded )); then
-          best_non_degraded="$candidate_non_degraded"
+      elif (( candidate_non_degraded == best_non_degraded )); then
+        if (( candidate_score > best_score )); then
+          best_score="$candidate_score"
           best_quality="$candidate_quality"
           best_mtime="$candidate_mtime"
           best_path="$candidate_abs"
-        elif (( candidate_non_degraded == best_non_degraded )); then
+        elif (( candidate_score == best_score )); then
           if (( candidate_quality > best_quality )); then
             best_quality="$candidate_quality"
             best_mtime="$candidate_mtime"
@@ -2319,7 +2657,7 @@ phase5_best_signal_source_summary_json() {
               best_mtime="$candidate_mtime"
               best_path="$candidate_abs"
             elif (( candidate_mtime == best_mtime )) && [[ "$candidate_abs" > "$best_path" ]]; then
-              # Deterministic tie-break when score/dryness/degradation/quality/mtime are equal.
+              # Deterministic tie-break when dryness/degradation/score/quality/mtime are equal.
               best_path="$candidate_abs"
             fi
           fi
@@ -2541,6 +2879,55 @@ phase7_mainnet_cutover_bool_value_or_null() {
   esac
 }
 
+blockchain_gate_summary_freshness_fields() {
+  local path="$1"
+  local max_age_sec="$2"
+  local generated_at=""
+  local reference_epoch=""
+  local age_sec=""
+  local stale="null"
+  local now_epoch=""
+
+  if [[ -f "$path" ]] && jq -e . "$path" >/dev/null 2>&1; then
+    generated_at="$(jq -r '.generated_at // ""' "$path" 2>/dev/null || true)"
+    if [[ "$generated_at" == "null" ]]; then
+      generated_at=""
+    fi
+    if [[ -n "$generated_at" ]]; then
+      reference_epoch="$(date -u -d "$generated_at" +%s 2>/dev/null || true)"
+      if ! [[ "$reference_epoch" =~ ^[0-9]+$ ]]; then
+        reference_epoch=""
+      fi
+    fi
+  fi
+
+  if [[ -z "$reference_epoch" ]]; then
+    reference_epoch="$(file_mtime_epoch "$path")"
+    if ! [[ "$reference_epoch" =~ ^[0-9]+$ ]] || [[ "$reference_epoch" == "0" ]]; then
+      reference_epoch=""
+    fi
+  fi
+
+  if [[ -n "$reference_epoch" ]]; then
+    now_epoch="$(date -u +%s 2>/dev/null || true)"
+    if [[ "$now_epoch" =~ ^[0-9]+$ ]]; then
+      age_sec=$(( now_epoch - reference_epoch ))
+      if (( age_sec < 0 )); then
+        age_sec=0
+      fi
+      if [[ "$max_age_sec" =~ ^[0-9]+$ ]]; then
+        if (( age_sec > max_age_sec )); then
+          stale="true"
+        else
+          stale="false"
+        fi
+      fi
+    fi
+  fi
+
+  printf '%s\n%s\n%s\n%s\n' "$generated_at" "${age_sec:-}" "$stale" "$max_age_sec"
+}
+
 blockchain_mainnet_activation_gate_summary_kind_from_source() {
   local path="$1"
   local schema_id=""
@@ -2562,12 +2949,70 @@ blockchain_mainnet_activation_gate_summary_kind_from_source() {
   esac
 }
 
+blockchain_gate_candidate_missing_metrics_no_go_01() {
+  local path="$1"
+  if [[ "$(json_file_valid_01 "$path")" != "1" ]]; then
+    printf '0'
+    return
+  fi
+
+  if jq -e '
+    def as_array($value):
+      if ($value | type) == "array" then
+        $value
+      elif $value == null then
+        []
+      else
+        [$value]
+      end;
+    def string_items($value):
+      as_array($value)
+      | map(tostring)
+      | map(ascii_downcase)
+      | map(select(length > 0));
+    def no_go_flag:
+      ((.no_go // false) == true)
+      or ((if (.decision | type) == "object" then (.decision.no_go // false) else false end) == true)
+      or ((.go // true) == false)
+      or ((if (.decision | type) == "object" then (.decision.go // true) else true end) == false)
+      or (
+        ((.decision // "") | tostring | ascii_downcase)
+        | test("^no-go$|^nogo$|^fail$|^failed$|^block$|^blocked$|^reject$")
+      )
+      or (
+        ((.status // "") | tostring | ascii_downcase)
+        | test("^no-go$|^nogo$|^fail$|^failed$|^invalid$|^error$")
+      );
+    def missing_metrics_signal:
+      (
+        string_items(.input.reason // "")
+        + string_items(.input.metrics_json // "")
+        + string_items(.metrics_json // "")
+        + string_items((if (.artifacts | type) == "object" then (.artifacts.metrics_json // "") else "" end))
+        + string_items(.reasons // [])
+        + string_items(.failed_reasons // [])
+        + string_items(.failed_gate_ids // [])
+        + string_items((if (.decision | type) == "object" then (.decision.reasons // []) else [] end))
+        + string_items((if (.decision | type) == "object" then (.decision.failed_reasons // []) else [] end))
+        + string_items((if (.decision | type) == "object" then (.decision.failed_gate_ids // []) else [] end))
+      )
+      | any(test("missing or invalid metric|missing required metrics|missing metrics|invalid metrics|required_metrics|metrics_json|metrics json|metrics_input"));
+    no_go_flag and missing_metrics_signal
+  ' "$path" >/dev/null 2>&1; then
+    printf '1'
+  else
+    printf '0'
+  fi
+}
+
 find_latest_blockchain_mainnet_activation_gate_summary_json() {
   local logs_root
   local candidate=""
   local candidate_mtime=0
+  local candidate_preferred=1
   local best_path=""
   local best_mtime=-1
+  local best_preferred=-1
   logs_root="$(roadmap_resilience_logs_root)"
   if [[ ! -d "$logs_root" ]]; then
     printf '%s' ""
@@ -2584,10 +3029,21 @@ find_latest_blockchain_mainnet_activation_gate_summary_json() {
     if ! [[ "$candidate_mtime" =~ ^[0-9]+$ ]]; then
       candidate_mtime=0
     fi
-    if (( candidate_mtime > best_mtime )); then
+    candidate_preferred=1
+    if [[ "$(blockchain_gate_candidate_missing_metrics_no_go_01 "$candidate")" == "1" ]]; then
+      candidate_preferred=0
+    fi
+    # Prefer evidence-backed gate summaries (GO or evidence-based NO-GO) over
+    # missing-metrics NO-GO artifacts that are typically produced by fail-close
+    # invocations without a metrics JSON input.
+    if (( candidate_preferred > best_preferred )); then
+      best_preferred="$candidate_preferred"
       best_mtime="$candidate_mtime"
       best_path="$candidate"
-    elif (( candidate_mtime == best_mtime )) && [[ "$candidate" > "$best_path" ]]; then
+    elif (( candidate_preferred == best_preferred )) && (( candidate_mtime > best_mtime )); then
+      best_mtime="$candidate_mtime"
+      best_path="$candidate"
+    elif (( candidate_preferred == best_preferred )) && (( candidate_mtime == best_mtime )) && [[ "$candidate" > "$best_path" ]]; then
       best_path="$candidate"
     fi
   done < <(find "$logs_root" -type f \
@@ -2765,8 +3221,10 @@ find_latest_blockchain_bootstrap_governance_graduation_gate_summary_json() {
   local logs_root
   local candidate=""
   local candidate_mtime=0
+  local candidate_preferred=1
   local best_path=""
   local best_mtime=-1
+  local best_preferred=-1
   logs_root="$(roadmap_resilience_logs_root)"
   if [[ ! -d "$logs_root" ]]; then
     printf '%s' ""
@@ -2783,10 +3241,18 @@ find_latest_blockchain_bootstrap_governance_graduation_gate_summary_json() {
     if ! [[ "$candidate_mtime" =~ ^[0-9]+$ ]]; then
       candidate_mtime=0
     fi
-    if (( candidate_mtime > best_mtime )); then
+    candidate_preferred=1
+    if [[ "$(blockchain_gate_candidate_missing_metrics_no_go_01 "$candidate")" == "1" ]]; then
+      candidate_preferred=0
+    fi
+    if (( candidate_preferred > best_preferred )); then
+      best_preferred="$candidate_preferred"
       best_mtime="$candidate_mtime"
       best_path="$candidate"
-    elif (( candidate_mtime == best_mtime )) && [[ "$candidate" > "$best_path" ]]; then
+    elif (( candidate_preferred == best_preferred )) && (( candidate_mtime > best_mtime )); then
+      best_mtime="$candidate_mtime"
+      best_path="$candidate"
+    elif (( candidate_preferred == best_preferred )) && (( candidate_mtime == best_mtime )) && [[ "$candidate" > "$best_path" ]]; then
       best_path="$candidate"
     fi
   done < <(find "$logs_root" -type f \
@@ -4265,10 +4731,24 @@ phase5_settlement_layer_handoff_settlement_bridge_smoke_ok_json="null"
 phase5_settlement_layer_handoff_settlement_state_persistence_ok_json="null"
 phase5_settlement_layer_handoff_settlement_adapter_roundtrip_status_json=""
 phase5_settlement_layer_handoff_settlement_adapter_roundtrip_ok_json="null"
+phase5_settlement_layer_handoff_settlement_adapter_signed_tx_roundtrip_status_json=""
+phase5_settlement_layer_handoff_settlement_adapter_signed_tx_roundtrip_ok_json="null"
+phase5_settlement_layer_handoff_settlement_shadow_env_status_json=""
+phase5_settlement_layer_handoff_settlement_shadow_env_ok_json="null"
+phase5_settlement_layer_handoff_settlement_shadow_status_surface_status_json=""
+phase5_settlement_layer_handoff_settlement_shadow_status_surface_ok_json="null"
+phase5_settlement_layer_handoff_settlement_dual_asset_parity_status_json=""
+phase5_settlement_layer_handoff_settlement_dual_asset_parity_ok_json="null"
 phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_status_json=""
 phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_ok_json="null"
+phase5_settlement_layer_handoff_issuer_sponsor_vpn_session_live_smoke_status_json=""
+phase5_settlement_layer_handoff_issuer_sponsor_vpn_session_live_smoke_ok_json="null"
 phase5_settlement_layer_handoff_issuer_settlement_status_live_smoke_status_json=""
 phase5_settlement_layer_handoff_issuer_settlement_status_live_smoke_ok_json="null"
+phase5_settlement_layer_handoff_issuer_admin_blockchain_handlers_coverage_status_json=""
+phase5_settlement_layer_handoff_issuer_admin_blockchain_handlers_coverage_ok_json="null"
+phase5_settlement_layer_handoff_exit_settlement_status_live_smoke_status_json=""
+phase5_settlement_layer_handoff_exit_settlement_status_live_smoke_ok_json="null"
 if [[ -n "$phase5_settlement_layer_summary_json" ]]; then
   phase5_settlement_layer_handoff_input_summary_json="$phase5_settlement_layer_summary_json"
   if [[ "$(phase5_settlement_layer_summary_usable_01 "$phase5_settlement_layer_summary_json")" == "1" ]]; then
@@ -4482,6 +4962,183 @@ if [[ -n "$phase5_settlement_layer_summary_json" ]]; then
             ;;
         esac
       fi
+      phase5_settlement_layer_handoff_settlement_adapter_signed_tx_roundtrip_status_json="$(jq -r '
+        if (.settlement_adapter_signed_tx_roundtrip_status | type) == "string" then .settlement_adapter_signed_tx_roundtrip_status
+        elif (.summary.settlement_adapter_signed_tx_roundtrip_status | type) == "string" then .summary.settlement_adapter_signed_tx_roundtrip_status
+        elif (.handoff.settlement_adapter_signed_tx_roundtrip_status | type) == "string" then .handoff.settlement_adapter_signed_tx_roundtrip_status
+        elif (.signals.settlement_adapter_signed_tx_roundtrip_status | type) == "string" then .signals.settlement_adapter_signed_tx_roundtrip_status
+        elif (.signals.settlement_adapter_signed_tx_roundtrip.status | type) == "string" then .signals.settlement_adapter_signed_tx_roundtrip.status
+        elif (.phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_status | type) == "string" then .phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_status
+        elif (.vpn_track.phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_status | type) == "string" then .vpn_track.phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_status
+        elif (.steps.settlement_adapter_signed_tx_roundtrip.status | type) == "string" then .steps.settlement_adapter_signed_tx_roundtrip.status
+        elif (.stages.settlement_adapter_signed_tx_roundtrip.status | type) == "string" then .stages.settlement_adapter_signed_tx_roundtrip.status
+        else empty end
+      ' "$phase5_settlement_layer_handoff_source_summary_json" 2>/dev/null || true)"
+      phase5_settlement_layer_handoff_settlement_adapter_signed_tx_roundtrip_ok_json="$(resolve_phase5_bool_with_fallback \
+        "$phase5_settlement_layer_handoff_source_summary_json" \
+        'if (.settlement_adapter_signed_tx_roundtrip_ok | type) == "boolean" then .settlement_adapter_signed_tx_roundtrip_ok
+          elif (.summary.settlement_adapter_signed_tx_roundtrip_ok | type) == "boolean" then .summary.settlement_adapter_signed_tx_roundtrip_ok
+          elif (.handoff.settlement_adapter_signed_tx_roundtrip_ok | type) == "boolean" then .handoff.settlement_adapter_signed_tx_roundtrip_ok
+          elif (.signals.settlement_adapter_signed_tx_roundtrip_ok | type) == "boolean" then .signals.settlement_adapter_signed_tx_roundtrip_ok
+          elif (.signals.settlement_adapter_signed_tx_roundtrip | type) == "boolean" then .signals.settlement_adapter_signed_tx_roundtrip
+          elif (.signals.settlement_adapter_signed_tx_roundtrip.ok | type) == "boolean" then .signals.settlement_adapter_signed_tx_roundtrip.ok
+          elif (.phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_ok | type) == "boolean" then .phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_ok
+          elif (.vpn_track.phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_ok | type) == "boolean" then .vpn_track.phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_ok
+          else empty end' \
+        'if (.stages.settlement_adapter_signed_tx_roundtrip.ok | type) == "boolean" then .stages.settlement_adapter_signed_tx_roundtrip.ok
+          else
+            ((if (.settlement_adapter_signed_tx_roundtrip_status | type) == "string" then .settlement_adapter_signed_tx_roundtrip_status
+              elif (.summary.settlement_adapter_signed_tx_roundtrip_status | type) == "string" then .summary.settlement_adapter_signed_tx_roundtrip_status
+              elif (.handoff.settlement_adapter_signed_tx_roundtrip_status | type) == "string" then .handoff.settlement_adapter_signed_tx_roundtrip_status
+              elif (.signals.settlement_adapter_signed_tx_roundtrip_status | type) == "string" then .signals.settlement_adapter_signed_tx_roundtrip_status
+              elif (.signals.settlement_adapter_signed_tx_roundtrip.status | type) == "string" then .signals.settlement_adapter_signed_tx_roundtrip.status
+              elif (.phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_status | type) == "string" then .phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_status
+              elif (.vpn_track.phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_status | type) == "string" then .vpn_track.phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_status
+              elif (.steps.settlement_adapter_signed_tx_roundtrip.status | type) == "string" then .steps.settlement_adapter_signed_tx_roundtrip.status
+              elif (.stages.settlement_adapter_signed_tx_roundtrip.status | type) == "string" then .stages.settlement_adapter_signed_tx_roundtrip.status
+              else "" end) | ascii_downcase) as $s
+            | if $s == "pass" then true
+              elif $s == "fail" then false
+              else empty end
+          end')"
+      if [[ -z "$phase5_settlement_layer_handoff_settlement_adapter_signed_tx_roundtrip_status_json" ]]; then
+        phase5_settlement_layer_handoff_settlement_adapter_signed_tx_roundtrip_status_json="$(phase5_best_string_signal_from_available \
+          "$phase5_settlement_layer_handoff_source_summary_json" \
+          "settlement_adapter_signed_tx_roundtrip_status")"
+      fi
+      if [[ "$phase5_settlement_layer_handoff_settlement_adapter_signed_tx_roundtrip_ok_json" == "null" ]]; then
+        phase5_settlement_layer_handoff_settlement_adapter_signed_tx_roundtrip_ok_json="$(phase5_best_bool_signal_from_available \
+          "$phase5_settlement_layer_handoff_source_summary_json" \
+          "settlement_adapter_signed_tx_roundtrip_ok")"
+      fi
+      if [[ "$phase5_settlement_layer_handoff_settlement_adapter_signed_tx_roundtrip_ok_json" == "null" ]]; then
+        case "${phase5_settlement_layer_handoff_settlement_adapter_signed_tx_roundtrip_status_json,,}" in
+          pass)
+            phase5_settlement_layer_handoff_settlement_adapter_signed_tx_roundtrip_ok_json="true"
+            ;;
+          fail)
+            phase5_settlement_layer_handoff_settlement_adapter_signed_tx_roundtrip_ok_json="false"
+            ;;
+        esac
+      fi
+      phase5_settlement_layer_handoff_settlement_shadow_env_status_json="$(jq -r '
+        if (.settlement_shadow_env_status | type) == "string" then .settlement_shadow_env_status
+        elif (.summary.settlement_shadow_env_status | type) == "string" then .summary.settlement_shadow_env_status
+        elif (.handoff.settlement_shadow_env_status | type) == "string" then .handoff.settlement_shadow_env_status
+        elif (.signals.settlement_shadow_env_status | type) == "string" then .signals.settlement_shadow_env_status
+        elif (.signals.settlement_shadow_env.status | type) == "string" then .signals.settlement_shadow_env.status
+        elif (.phase5_settlement_layer_handoff.settlement_shadow_env_status | type) == "string" then .phase5_settlement_layer_handoff.settlement_shadow_env_status
+        elif (.vpn_track.phase5_settlement_layer_handoff.settlement_shadow_env_status | type) == "string" then .vpn_track.phase5_settlement_layer_handoff.settlement_shadow_env_status
+        elif (.steps.settlement_shadow_env.status | type) == "string" then .steps.settlement_shadow_env.status
+        elif (.stages.settlement_shadow_env.status | type) == "string" then .stages.settlement_shadow_env.status
+        else empty end
+      ' "$phase5_settlement_layer_handoff_source_summary_json" 2>/dev/null || true)"
+      phase5_settlement_layer_handoff_settlement_shadow_env_ok_json="$(resolve_phase5_bool_with_fallback \
+        "$phase5_settlement_layer_handoff_source_summary_json" \
+        'if (.settlement_shadow_env_ok | type) == "boolean" then .settlement_shadow_env_ok
+          elif (.summary.settlement_shadow_env_ok | type) == "boolean" then .summary.settlement_shadow_env_ok
+          elif (.handoff.settlement_shadow_env_ok | type) == "boolean" then .handoff.settlement_shadow_env_ok
+          elif (.signals.settlement_shadow_env_ok | type) == "boolean" then .signals.settlement_shadow_env_ok
+          elif (.signals.settlement_shadow_env | type) == "boolean" then .signals.settlement_shadow_env
+          elif (.signals.settlement_shadow_env.ok | type) == "boolean" then .signals.settlement_shadow_env.ok
+          elif (.phase5_settlement_layer_handoff.settlement_shadow_env_ok | type) == "boolean" then .phase5_settlement_layer_handoff.settlement_shadow_env_ok
+          elif (.vpn_track.phase5_settlement_layer_handoff.settlement_shadow_env_ok | type) == "boolean" then .vpn_track.phase5_settlement_layer_handoff.settlement_shadow_env_ok
+          else empty end' \
+        'if (.stages.settlement_shadow_env.ok | type) == "boolean" then .stages.settlement_shadow_env.ok
+          else
+            ((if (.settlement_shadow_env_status | type) == "string" then .settlement_shadow_env_status
+              elif (.summary.settlement_shadow_env_status | type) == "string" then .summary.settlement_shadow_env_status
+              elif (.handoff.settlement_shadow_env_status | type) == "string" then .handoff.settlement_shadow_env_status
+              elif (.signals.settlement_shadow_env_status | type) == "string" then .signals.settlement_shadow_env_status
+              elif (.signals.settlement_shadow_env.status | type) == "string" then .signals.settlement_shadow_env.status
+              elif (.phase5_settlement_layer_handoff.settlement_shadow_env_status | type) == "string" then .phase5_settlement_layer_handoff.settlement_shadow_env_status
+              elif (.vpn_track.phase5_settlement_layer_handoff.settlement_shadow_env_status | type) == "string" then .vpn_track.phase5_settlement_layer_handoff.settlement_shadow_env_status
+              elif (.steps.settlement_shadow_env.status | type) == "string" then .steps.settlement_shadow_env.status
+              elif (.stages.settlement_shadow_env.status | type) == "string" then .stages.settlement_shadow_env.status
+              else "" end) | ascii_downcase) as $s
+            | if $s == "pass" then true
+              elif $s == "fail" then false
+              else empty end
+          end')"
+      if [[ -z "$phase5_settlement_layer_handoff_settlement_shadow_env_status_json" ]]; then
+        phase5_settlement_layer_handoff_settlement_shadow_env_status_json="$(phase5_best_string_signal_from_available \
+          "$phase5_settlement_layer_handoff_source_summary_json" \
+          "settlement_shadow_env_status")"
+      fi
+      if [[ "$phase5_settlement_layer_handoff_settlement_shadow_env_ok_json" == "null" ]]; then
+        phase5_settlement_layer_handoff_settlement_shadow_env_ok_json="$(phase5_best_bool_signal_from_available \
+          "$phase5_settlement_layer_handoff_source_summary_json" \
+          "settlement_shadow_env_ok")"
+      fi
+      if [[ "$phase5_settlement_layer_handoff_settlement_shadow_env_ok_json" == "null" ]]; then
+        case "${phase5_settlement_layer_handoff_settlement_shadow_env_status_json,,}" in
+          pass)
+            phase5_settlement_layer_handoff_settlement_shadow_env_ok_json="true"
+            ;;
+          fail)
+            phase5_settlement_layer_handoff_settlement_shadow_env_ok_json="false"
+            ;;
+        esac
+      fi
+      phase5_settlement_layer_handoff_settlement_shadow_status_surface_status_json="$(jq -r '
+        if (.settlement_shadow_status_surface_status | type) == "string" then .settlement_shadow_status_surface_status
+        elif (.summary.settlement_shadow_status_surface_status | type) == "string" then .summary.settlement_shadow_status_surface_status
+        elif (.handoff.settlement_shadow_status_surface_status | type) == "string" then .handoff.settlement_shadow_status_surface_status
+        elif (.signals.settlement_shadow_status_surface_status | type) == "string" then .signals.settlement_shadow_status_surface_status
+        elif (.signals.settlement_shadow_status_surface.status | type) == "string" then .signals.settlement_shadow_status_surface.status
+        elif (.phase5_settlement_layer_handoff.settlement_shadow_status_surface_status | type) == "string" then .phase5_settlement_layer_handoff.settlement_shadow_status_surface_status
+        elif (.vpn_track.phase5_settlement_layer_handoff.settlement_shadow_status_surface_status | type) == "string" then .vpn_track.phase5_settlement_layer_handoff.settlement_shadow_status_surface_status
+        elif (.steps.settlement_shadow_status_surface.status | type) == "string" then .steps.settlement_shadow_status_surface.status
+        elif (.stages.settlement_shadow_status_surface.status | type) == "string" then .stages.settlement_shadow_status_surface.status
+        else empty end
+      ' "$phase5_settlement_layer_handoff_source_summary_json" 2>/dev/null || true)"
+      phase5_settlement_layer_handoff_settlement_shadow_status_surface_ok_json="$(resolve_phase5_bool_with_fallback \
+        "$phase5_settlement_layer_handoff_source_summary_json" \
+        'if (.settlement_shadow_status_surface_ok | type) == "boolean" then .settlement_shadow_status_surface_ok
+          elif (.summary.settlement_shadow_status_surface_ok | type) == "boolean" then .summary.settlement_shadow_status_surface_ok
+          elif (.handoff.settlement_shadow_status_surface_ok | type) == "boolean" then .handoff.settlement_shadow_status_surface_ok
+          elif (.signals.settlement_shadow_status_surface_ok | type) == "boolean" then .signals.settlement_shadow_status_surface_ok
+          elif (.signals.settlement_shadow_status_surface | type) == "boolean" then .signals.settlement_shadow_status_surface
+          elif (.signals.settlement_shadow_status_surface.ok | type) == "boolean" then .signals.settlement_shadow_status_surface.ok
+          elif (.phase5_settlement_layer_handoff.settlement_shadow_status_surface_ok | type) == "boolean" then .phase5_settlement_layer_handoff.settlement_shadow_status_surface_ok
+          elif (.vpn_track.phase5_settlement_layer_handoff.settlement_shadow_status_surface_ok | type) == "boolean" then .vpn_track.phase5_settlement_layer_handoff.settlement_shadow_status_surface_ok
+          else empty end' \
+        'if (.stages.settlement_shadow_status_surface.ok | type) == "boolean" then .stages.settlement_shadow_status_surface.ok
+          else
+            ((if (.settlement_shadow_status_surface_status | type) == "string" then .settlement_shadow_status_surface_status
+              elif (.summary.settlement_shadow_status_surface_status | type) == "string" then .summary.settlement_shadow_status_surface_status
+              elif (.handoff.settlement_shadow_status_surface_status | type) == "string" then .handoff.settlement_shadow_status_surface_status
+              elif (.signals.settlement_shadow_status_surface_status | type) == "string" then .signals.settlement_shadow_status_surface_status
+              elif (.signals.settlement_shadow_status_surface.status | type) == "string" then .signals.settlement_shadow_status_surface.status
+              elif (.phase5_settlement_layer_handoff.settlement_shadow_status_surface_status | type) == "string" then .phase5_settlement_layer_handoff.settlement_shadow_status_surface_status
+              elif (.vpn_track.phase5_settlement_layer_handoff.settlement_shadow_status_surface_status | type) == "string" then .vpn_track.phase5_settlement_layer_handoff.settlement_shadow_status_surface_status
+              elif (.steps.settlement_shadow_status_surface.status | type) == "string" then .steps.settlement_shadow_status_surface.status
+              elif (.stages.settlement_shadow_status_surface.status | type) == "string" then .stages.settlement_shadow_status_surface.status
+              else "" end) | ascii_downcase) as $s
+            | if $s == "pass" then true
+              elif $s == "fail" then false
+              else empty end
+          end')"
+      if [[ -z "$phase5_settlement_layer_handoff_settlement_shadow_status_surface_status_json" ]]; then
+        phase5_settlement_layer_handoff_settlement_shadow_status_surface_status_json="$(phase5_best_string_signal_from_available \
+          "$phase5_settlement_layer_handoff_source_summary_json" \
+          "settlement_shadow_status_surface_status")"
+      fi
+      if [[ "$phase5_settlement_layer_handoff_settlement_shadow_status_surface_ok_json" == "null" ]]; then
+        phase5_settlement_layer_handoff_settlement_shadow_status_surface_ok_json="$(phase5_best_bool_signal_from_available \
+          "$phase5_settlement_layer_handoff_source_summary_json" \
+          "settlement_shadow_status_surface_ok")"
+      fi
+      if [[ "$phase5_settlement_layer_handoff_settlement_shadow_status_surface_ok_json" == "null" ]]; then
+        case "${phase5_settlement_layer_handoff_settlement_shadow_status_surface_status_json,,}" in
+          pass)
+            phase5_settlement_layer_handoff_settlement_shadow_status_surface_ok_json="true"
+            ;;
+          fail)
+            phase5_settlement_layer_handoff_settlement_shadow_status_surface_ok_json="false"
+            ;;
+        esac
+      fi
       phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_status_json="$(jq -r '
         if (.issuer_sponsor_api_live_smoke_status | type) == "string" then .issuer_sponsor_api_live_smoke_status
         elif (.summary.issuer_sponsor_api_live_smoke_status | type) == "string" then .summary.issuer_sponsor_api_live_smoke_status
@@ -4515,9 +5172,19 @@ if [[ -n "$phase5_settlement_layer_summary_json" ]]; then
               elif (.stages.issuer_sponsor_api_live_smoke.status | type) == "string" then .stages.issuer_sponsor_api_live_smoke.status
               else "" end) | ascii_downcase) as $s
             | if $s == "pass" then true
-              elif $s == "fail" then false
-              else empty end
-          end')"
+                  elif $s == "fail" then false
+                  else empty end
+              end')"
+      if [[ -z "$phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_status_json" ]]; then
+        phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_status_json="$(phase5_best_string_signal_from_available \
+          "$phase5_settlement_layer_handoff_source_summary_json" \
+          "issuer_sponsor_api_live_smoke_status")"
+      fi
+      if [[ "$phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_ok_json" == "null" ]]; then
+        phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_ok_json="$(phase5_best_bool_signal_from_available \
+          "$phase5_settlement_layer_handoff_source_summary_json" \
+          "issuer_sponsor_api_live_smoke_ok")"
+      fi
       if [[ "$phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_ok_json" == "null" ]]; then
         case "${phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_status_json,,}" in
           pass)
@@ -4525,6 +5192,62 @@ if [[ -n "$phase5_settlement_layer_summary_json" ]]; then
             ;;
           fail)
             phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_ok_json="false"
+            ;;
+        esac
+      fi
+      phase5_settlement_layer_handoff_issuer_sponsor_vpn_session_live_smoke_status_json="$(jq -r '
+        if (.issuer_sponsor_vpn_session_live_smoke_status | type) == "string" then .issuer_sponsor_vpn_session_live_smoke_status
+        elif (.summary.issuer_sponsor_vpn_session_live_smoke_status | type) == "string" then .summary.issuer_sponsor_vpn_session_live_smoke_status
+        elif (.handoff.issuer_sponsor_vpn_session_live_smoke_status | type) == "string" then .handoff.issuer_sponsor_vpn_session_live_smoke_status
+        elif (.signals.issuer_sponsor_vpn_session_live_smoke_status | type) == "string" then .signals.issuer_sponsor_vpn_session_live_smoke_status
+        elif (.phase5_settlement_layer_handoff.issuer_sponsor_vpn_session_live_smoke_status | type) == "string" then .phase5_settlement_layer_handoff.issuer_sponsor_vpn_session_live_smoke_status
+        elif (.vpn_track.phase5_settlement_layer_handoff.issuer_sponsor_vpn_session_live_smoke_status | type) == "string" then .vpn_track.phase5_settlement_layer_handoff.issuer_sponsor_vpn_session_live_smoke_status
+        elif (.steps.issuer_sponsor_vpn_session_live_smoke.status | type) == "string" then .steps.issuer_sponsor_vpn_session_live_smoke.status
+        elif (.stages.issuer_sponsor_vpn_session_live_smoke.status | type) == "string" then .stages.issuer_sponsor_vpn_session_live_smoke.status
+        else empty end
+      ' "$phase5_settlement_layer_handoff_source_summary_json" 2>/dev/null || true)"
+      phase5_settlement_layer_handoff_issuer_sponsor_vpn_session_live_smoke_ok_json="$(resolve_phase5_bool_with_fallback \
+        "$phase5_settlement_layer_handoff_source_summary_json" \
+        'if (.issuer_sponsor_vpn_session_live_smoke_ok | type) == "boolean" then .issuer_sponsor_vpn_session_live_smoke_ok
+          elif (.summary.issuer_sponsor_vpn_session_live_smoke_ok | type) == "boolean" then .summary.issuer_sponsor_vpn_session_live_smoke_ok
+          elif (.handoff.issuer_sponsor_vpn_session_live_smoke_ok | type) == "boolean" then .handoff.issuer_sponsor_vpn_session_live_smoke_ok
+          elif (.signals.issuer_sponsor_vpn_session_live_smoke_ok | type) == "boolean" then .signals.issuer_sponsor_vpn_session_live_smoke_ok
+          elif (.signals.issuer_sponsor_vpn_session_live_smoke | type) == "boolean" then .signals.issuer_sponsor_vpn_session_live_smoke
+          elif (.phase5_settlement_layer_handoff.issuer_sponsor_vpn_session_live_smoke_ok | type) == "boolean" then .phase5_settlement_layer_handoff.issuer_sponsor_vpn_session_live_smoke_ok
+          elif (.vpn_track.phase5_settlement_layer_handoff.issuer_sponsor_vpn_session_live_smoke_ok | type) == "boolean" then .vpn_track.phase5_settlement_layer_handoff.issuer_sponsor_vpn_session_live_smoke_ok
+          else empty end' \
+        'if (.stages.issuer_sponsor_vpn_session_live_smoke.ok | type) == "boolean" then .stages.issuer_sponsor_vpn_session_live_smoke.ok
+          else
+            ((if (.issuer_sponsor_vpn_session_live_smoke_status | type) == "string" then .issuer_sponsor_vpn_session_live_smoke_status
+              elif (.summary.issuer_sponsor_vpn_session_live_smoke_status | type) == "string" then .summary.issuer_sponsor_vpn_session_live_smoke_status
+              elif (.handoff.issuer_sponsor_vpn_session_live_smoke_status | type) == "string" then .handoff.issuer_sponsor_vpn_session_live_smoke_status
+              elif (.signals.issuer_sponsor_vpn_session_live_smoke_status | type) == "string" then .signals.issuer_sponsor_vpn_session_live_smoke_status
+              elif (.phase5_settlement_layer_handoff.issuer_sponsor_vpn_session_live_smoke_status | type) == "string" then .phase5_settlement_layer_handoff.issuer_sponsor_vpn_session_live_smoke_status
+              elif (.vpn_track.phase5_settlement_layer_handoff.issuer_sponsor_vpn_session_live_smoke_status | type) == "string" then .vpn_track.phase5_settlement_layer_handoff.issuer_sponsor_vpn_session_live_smoke_status
+              elif (.steps.issuer_sponsor_vpn_session_live_smoke.status | type) == "string" then .steps.issuer_sponsor_vpn_session_live_smoke.status
+              elif (.stages.issuer_sponsor_vpn_session_live_smoke.status | type) == "string" then .stages.issuer_sponsor_vpn_session_live_smoke.status
+              else "" end) | ascii_downcase) as $s
+            | if $s == "pass" then true
+                  elif $s == "fail" then false
+                  else empty end
+              end')"
+      if [[ -z "$phase5_settlement_layer_handoff_issuer_sponsor_vpn_session_live_smoke_status_json" ]]; then
+        phase5_settlement_layer_handoff_issuer_sponsor_vpn_session_live_smoke_status_json="$(phase5_best_string_signal_from_available \
+          "$phase5_settlement_layer_handoff_source_summary_json" \
+          "issuer_sponsor_vpn_session_live_smoke_status")"
+      fi
+      if [[ "$phase5_settlement_layer_handoff_issuer_sponsor_vpn_session_live_smoke_ok_json" == "null" ]]; then
+        phase5_settlement_layer_handoff_issuer_sponsor_vpn_session_live_smoke_ok_json="$(phase5_best_bool_signal_from_available \
+          "$phase5_settlement_layer_handoff_source_summary_json" \
+          "issuer_sponsor_vpn_session_live_smoke_ok")"
+      fi
+      if [[ "$phase5_settlement_layer_handoff_issuer_sponsor_vpn_session_live_smoke_ok_json" == "null" ]]; then
+        case "${phase5_settlement_layer_handoff_issuer_sponsor_vpn_session_live_smoke_status_json,,}" in
+          pass)
+            phase5_settlement_layer_handoff_issuer_sponsor_vpn_session_live_smoke_ok_json="true"
+            ;;
+          fail)
+            phase5_settlement_layer_handoff_issuer_sponsor_vpn_session_live_smoke_ok_json="false"
             ;;
         esac
       fi
@@ -4581,6 +5304,180 @@ if [[ -n "$phase5_settlement_layer_summary_json" ]]; then
             ;;
           fail)
             phase5_settlement_layer_handoff_issuer_settlement_status_live_smoke_ok_json="false"
+            ;;
+        esac
+      fi
+      phase5_settlement_layer_handoff_issuer_admin_blockchain_handlers_coverage_status_json="$(jq -r '
+        if (.issuer_admin_blockchain_handlers_coverage_status | type) == "string" then .issuer_admin_blockchain_handlers_coverage_status
+        elif (.summary.issuer_admin_blockchain_handlers_coverage_status | type) == "string" then .summary.issuer_admin_blockchain_handlers_coverage_status
+        elif (.handoff.issuer_admin_blockchain_handlers_coverage_status | type) == "string" then .handoff.issuer_admin_blockchain_handlers_coverage_status
+        elif (.signals.issuer_admin_blockchain_handlers_coverage_status | type) == "string" then .signals.issuer_admin_blockchain_handlers_coverage_status
+        elif (.signals.issuer_admin_blockchain_handlers_coverage.status | type) == "string" then .signals.issuer_admin_blockchain_handlers_coverage.status
+        elif (.phase5_settlement_layer_handoff.issuer_admin_blockchain_handlers_coverage_status | type) == "string" then .phase5_settlement_layer_handoff.issuer_admin_blockchain_handlers_coverage_status
+        elif (.vpn_track.phase5_settlement_layer_handoff.issuer_admin_blockchain_handlers_coverage_status | type) == "string" then .vpn_track.phase5_settlement_layer_handoff.issuer_admin_blockchain_handlers_coverage_status
+        elif (.steps.issuer_admin_blockchain_handlers_coverage.status | type) == "string" then .steps.issuer_admin_blockchain_handlers_coverage.status
+        elif (.stages.issuer_admin_blockchain_handlers_coverage.status | type) == "string" then .stages.issuer_admin_blockchain_handlers_coverage.status
+        else empty end
+      ' "$phase5_settlement_layer_handoff_source_summary_json" 2>/dev/null || true)"
+      phase5_settlement_layer_handoff_issuer_admin_blockchain_handlers_coverage_ok_json="$(resolve_phase5_bool_with_fallback \
+        "$phase5_settlement_layer_handoff_source_summary_json" \
+        'if (.issuer_admin_blockchain_handlers_coverage_ok | type) == "boolean" then .issuer_admin_blockchain_handlers_coverage_ok
+          elif (.summary.issuer_admin_blockchain_handlers_coverage_ok | type) == "boolean" then .summary.issuer_admin_blockchain_handlers_coverage_ok
+          elif (.handoff.issuer_admin_blockchain_handlers_coverage_ok | type) == "boolean" then .handoff.issuer_admin_blockchain_handlers_coverage_ok
+          elif (.signals.issuer_admin_blockchain_handlers_coverage_ok | type) == "boolean" then .signals.issuer_admin_blockchain_handlers_coverage_ok
+          elif (.signals.issuer_admin_blockchain_handlers_coverage | type) == "boolean" then .signals.issuer_admin_blockchain_handlers_coverage
+          elif (.signals.issuer_admin_blockchain_handlers_coverage.ok | type) == "boolean" then .signals.issuer_admin_blockchain_handlers_coverage.ok
+          elif (.phase5_settlement_layer_handoff.issuer_admin_blockchain_handlers_coverage_ok | type) == "boolean" then .phase5_settlement_layer_handoff.issuer_admin_blockchain_handlers_coverage_ok
+          elif (.vpn_track.phase5_settlement_layer_handoff.issuer_admin_blockchain_handlers_coverage_ok | type) == "boolean" then .vpn_track.phase5_settlement_layer_handoff.issuer_admin_blockchain_handlers_coverage_ok
+          else empty end' \
+        'if (.stages.issuer_admin_blockchain_handlers_coverage.ok | type) == "boolean" then .stages.issuer_admin_blockchain_handlers_coverage.ok
+          else
+            ((if (.issuer_admin_blockchain_handlers_coverage_status | type) == "string" then .issuer_admin_blockchain_handlers_coverage_status
+              elif (.summary.issuer_admin_blockchain_handlers_coverage_status | type) == "string" then .summary.issuer_admin_blockchain_handlers_coverage_status
+              elif (.handoff.issuer_admin_blockchain_handlers_coverage_status | type) == "string" then .handoff.issuer_admin_blockchain_handlers_coverage_status
+              elif (.signals.issuer_admin_blockchain_handlers_coverage_status | type) == "string" then .signals.issuer_admin_blockchain_handlers_coverage_status
+              elif (.signals.issuer_admin_blockchain_handlers_coverage.status | type) == "string" then .signals.issuer_admin_blockchain_handlers_coverage.status
+              elif (.phase5_settlement_layer_handoff.issuer_admin_blockchain_handlers_coverage_status | type) == "string" then .phase5_settlement_layer_handoff.issuer_admin_blockchain_handlers_coverage_status
+              elif (.vpn_track.phase5_settlement_layer_handoff.issuer_admin_blockchain_handlers_coverage_status | type) == "string" then .vpn_track.phase5_settlement_layer_handoff.issuer_admin_blockchain_handlers_coverage_status
+              elif (.steps.issuer_admin_blockchain_handlers_coverage.status | type) == "string" then .steps.issuer_admin_blockchain_handlers_coverage.status
+              elif (.stages.issuer_admin_blockchain_handlers_coverage.status | type) == "string" then .stages.issuer_admin_blockchain_handlers_coverage.status
+              else "" end) | ascii_downcase) as $s
+            | if $s == "pass" then true
+              elif $s == "fail" then false
+              else empty end
+          end')"
+      if [[ -z "$phase5_settlement_layer_handoff_issuer_admin_blockchain_handlers_coverage_status_json" ]]; then
+        phase5_settlement_layer_handoff_issuer_admin_blockchain_handlers_coverage_status_json="$(phase5_best_string_signal_from_available \
+          "$phase5_settlement_layer_handoff_source_summary_json" \
+          "issuer_admin_blockchain_handlers_coverage_status")"
+      fi
+      if [[ "$phase5_settlement_layer_handoff_issuer_admin_blockchain_handlers_coverage_ok_json" == "null" ]]; then
+        phase5_settlement_layer_handoff_issuer_admin_blockchain_handlers_coverage_ok_json="$(phase5_best_bool_signal_from_available \
+          "$phase5_settlement_layer_handoff_source_summary_json" \
+          "issuer_admin_blockchain_handlers_coverage_ok")"
+      fi
+      if [[ "$phase5_settlement_layer_handoff_issuer_admin_blockchain_handlers_coverage_ok_json" == "null" ]]; then
+        case "${phase5_settlement_layer_handoff_issuer_admin_blockchain_handlers_coverage_status_json,,}" in
+          pass)
+            phase5_settlement_layer_handoff_issuer_admin_blockchain_handlers_coverage_ok_json="true"
+            ;;
+          fail)
+            phase5_settlement_layer_handoff_issuer_admin_blockchain_handlers_coverage_ok_json="false"
+            ;;
+        esac
+      fi
+      phase5_settlement_layer_handoff_exit_settlement_status_live_smoke_status_json="$(jq -r '
+        if (.exit_settlement_status_live_smoke_status | type) == "string" then .exit_settlement_status_live_smoke_status
+        elif (.summary.exit_settlement_status_live_smoke_status | type) == "string" then .summary.exit_settlement_status_live_smoke_status
+        elif (.handoff.exit_settlement_status_live_smoke_status | type) == "string" then .handoff.exit_settlement_status_live_smoke_status
+        elif (.signals.exit_settlement_status_live_smoke_status | type) == "string" then .signals.exit_settlement_status_live_smoke_status
+        elif (.phase5_settlement_layer_handoff.exit_settlement_status_live_smoke_status | type) == "string" then .phase5_settlement_layer_handoff.exit_settlement_status_live_smoke_status
+        elif (.vpn_track.phase5_settlement_layer_handoff.exit_settlement_status_live_smoke_status | type) == "string" then .vpn_track.phase5_settlement_layer_handoff.exit_settlement_status_live_smoke_status
+        elif (.steps.exit_settlement_status_live_smoke.status | type) == "string" then .steps.exit_settlement_status_live_smoke.status
+        elif (.stages.exit_settlement_status_live_smoke.status | type) == "string" then .stages.exit_settlement_status_live_smoke.status
+        else empty end
+      ' "$phase5_settlement_layer_handoff_source_summary_json" 2>/dev/null || true)"
+      phase5_settlement_layer_handoff_exit_settlement_status_live_smoke_ok_json="$(resolve_phase5_bool_with_fallback \
+        "$phase5_settlement_layer_handoff_source_summary_json" \
+        'if (.exit_settlement_status_live_smoke_ok | type) == "boolean" then .exit_settlement_status_live_smoke_ok
+          elif (.summary.exit_settlement_status_live_smoke_ok | type) == "boolean" then .summary.exit_settlement_status_live_smoke_ok
+          elif (.handoff.exit_settlement_status_live_smoke_ok | type) == "boolean" then .handoff.exit_settlement_status_live_smoke_ok
+          elif (.signals.exit_settlement_status_live_smoke_ok | type) == "boolean" then .signals.exit_settlement_status_live_smoke_ok
+          elif (.signals.exit_settlement_status_live_smoke | type) == "boolean" then .signals.exit_settlement_status_live_smoke
+          elif (.phase5_settlement_layer_handoff.exit_settlement_status_live_smoke_ok | type) == "boolean" then .phase5_settlement_layer_handoff.exit_settlement_status_live_smoke_ok
+          elif (.vpn_track.phase5_settlement_layer_handoff.exit_settlement_status_live_smoke_ok | type) == "boolean" then .vpn_track.phase5_settlement_layer_handoff.exit_settlement_status_live_smoke_ok
+          else empty end' \
+        'if (.stages.exit_settlement_status_live_smoke.ok | type) == "boolean" then .stages.exit_settlement_status_live_smoke.ok
+          else
+            ((if (.exit_settlement_status_live_smoke_status | type) == "string" then .exit_settlement_status_live_smoke_status
+              elif (.summary.exit_settlement_status_live_smoke_status | type) == "string" then .summary.exit_settlement_status_live_smoke_status
+              elif (.handoff.exit_settlement_status_live_smoke_status | type) == "string" then .handoff.exit_settlement_status_live_smoke_status
+              elif (.signals.exit_settlement_status_live_smoke_status | type) == "string" then .signals.exit_settlement_status_live_smoke_status
+              elif (.phase5_settlement_layer_handoff.exit_settlement_status_live_smoke_status | type) == "string" then .phase5_settlement_layer_handoff.exit_settlement_status_live_smoke_status
+              elif (.vpn_track.phase5_settlement_layer_handoff.exit_settlement_status_live_smoke_status | type) == "string" then .vpn_track.phase5_settlement_layer_handoff.exit_settlement_status_live_smoke_status
+              elif (.steps.exit_settlement_status_live_smoke.status | type) == "string" then .steps.exit_settlement_status_live_smoke.status
+              elif (.stages.exit_settlement_status_live_smoke.status | type) == "string" then .stages.exit_settlement_status_live_smoke.status
+              else "" end) | ascii_downcase) as $s
+            | if $s == "pass" then true
+              elif $s == "fail" then false
+              else empty end
+          end')"
+      if [[ -z "$phase5_settlement_layer_handoff_exit_settlement_status_live_smoke_status_json" ]]; then
+        phase5_settlement_layer_handoff_exit_settlement_status_live_smoke_status_json="$(phase5_best_string_signal_from_available \
+          "$phase5_settlement_layer_handoff_source_summary_json" \
+          "exit_settlement_status_live_smoke_status")"
+      fi
+      if [[ "$phase5_settlement_layer_handoff_exit_settlement_status_live_smoke_ok_json" == "null" ]]; then
+        phase5_settlement_layer_handoff_exit_settlement_status_live_smoke_ok_json="$(phase5_best_bool_signal_from_available \
+          "$phase5_settlement_layer_handoff_source_summary_json" \
+          "exit_settlement_status_live_smoke_ok")"
+      fi
+      if [[ "$phase5_settlement_layer_handoff_exit_settlement_status_live_smoke_ok_json" == "null" ]]; then
+        case "${phase5_settlement_layer_handoff_exit_settlement_status_live_smoke_status_json,,}" in
+          pass)
+            phase5_settlement_layer_handoff_exit_settlement_status_live_smoke_ok_json="true"
+            ;;
+          fail)
+            phase5_settlement_layer_handoff_exit_settlement_status_live_smoke_ok_json="false"
+            ;;
+        esac
+      fi
+      phase5_settlement_layer_handoff_settlement_dual_asset_parity_status_json="$(jq -r '
+        if (.settlement_dual_asset_parity_status | type) == "string" then .settlement_dual_asset_parity_status
+        elif (.summary.settlement_dual_asset_parity_status | type) == "string" then .summary.settlement_dual_asset_parity_status
+        elif (.handoff.settlement_dual_asset_parity_status | type) == "string" then .handoff.settlement_dual_asset_parity_status
+        elif (.signals.settlement_dual_asset_parity_status | type) == "string" then .signals.settlement_dual_asset_parity_status
+        elif (.signals.settlement_dual_asset_parity.status | type) == "string" then .signals.settlement_dual_asset_parity.status
+        elif (.phase5_settlement_layer_handoff.settlement_dual_asset_parity_status | type) == "string" then .phase5_settlement_layer_handoff.settlement_dual_asset_parity_status
+        elif (.vpn_track.phase5_settlement_layer_handoff.settlement_dual_asset_parity_status | type) == "string" then .vpn_track.phase5_settlement_layer_handoff.settlement_dual_asset_parity_status
+        elif (.steps.settlement_dual_asset_parity.status | type) == "string" then .steps.settlement_dual_asset_parity.status
+        elif (.stages.settlement_dual_asset_parity.status | type) == "string" then .stages.settlement_dual_asset_parity.status
+        else empty end
+      ' "$phase5_settlement_layer_handoff_source_summary_json" 2>/dev/null || true)"
+      phase5_settlement_layer_handoff_settlement_dual_asset_parity_ok_json="$(resolve_phase5_bool_with_fallback \
+        "$phase5_settlement_layer_handoff_source_summary_json" \
+        'if (.settlement_dual_asset_parity_ok | type) == "boolean" then .settlement_dual_asset_parity_ok
+          elif (.summary.settlement_dual_asset_parity_ok | type) == "boolean" then .summary.settlement_dual_asset_parity_ok
+          elif (.handoff.settlement_dual_asset_parity_ok | type) == "boolean" then .handoff.settlement_dual_asset_parity_ok
+          elif (.signals.settlement_dual_asset_parity_ok | type) == "boolean" then .signals.settlement_dual_asset_parity_ok
+          elif (.signals.settlement_dual_asset_parity | type) == "boolean" then .signals.settlement_dual_asset_parity
+          elif (.signals.settlement_dual_asset_parity.ok | type) == "boolean" then .signals.settlement_dual_asset_parity.ok
+          elif (.phase5_settlement_layer_handoff.settlement_dual_asset_parity_ok | type) == "boolean" then .phase5_settlement_layer_handoff.settlement_dual_asset_parity_ok
+          elif (.vpn_track.phase5_settlement_layer_handoff.settlement_dual_asset_parity_ok | type) == "boolean" then .vpn_track.phase5_settlement_layer_handoff.settlement_dual_asset_parity_ok
+          else empty end' \
+        'if (.stages.settlement_dual_asset_parity.ok | type) == "boolean" then .stages.settlement_dual_asset_parity.ok
+          else
+            ((if (.settlement_dual_asset_parity_status | type) == "string" then .settlement_dual_asset_parity_status
+              elif (.summary.settlement_dual_asset_parity_status | type) == "string" then .summary.settlement_dual_asset_parity_status
+              elif (.handoff.settlement_dual_asset_parity_status | type) == "string" then .handoff.settlement_dual_asset_parity_status
+              elif (.signals.settlement_dual_asset_parity_status | type) == "string" then .signals.settlement_dual_asset_parity_status
+              elif (.signals.settlement_dual_asset_parity.status | type) == "string" then .signals.settlement_dual_asset_parity.status
+              elif (.phase5_settlement_layer_handoff.settlement_dual_asset_parity_status | type) == "string" then .phase5_settlement_layer_handoff.settlement_dual_asset_parity_status
+              elif (.vpn_track.phase5_settlement_layer_handoff.settlement_dual_asset_parity_status | type) == "string" then .vpn_track.phase5_settlement_layer_handoff.settlement_dual_asset_parity_status
+              elif (.steps.settlement_dual_asset_parity.status | type) == "string" then .steps.settlement_dual_asset_parity.status
+              elif (.stages.settlement_dual_asset_parity.status | type) == "string" then .stages.settlement_dual_asset_parity.status
+              else "" end) | ascii_downcase) as $s
+            | if $s == "pass" then true
+              elif $s == "fail" then false
+              else empty end
+          end')"
+      if [[ -z "$phase5_settlement_layer_handoff_settlement_dual_asset_parity_status_json" ]]; then
+        phase5_settlement_layer_handoff_settlement_dual_asset_parity_status_json="$(phase5_best_string_signal_from_available \
+          "$phase5_settlement_layer_handoff_source_summary_json" \
+          "settlement_dual_asset_parity_status")"
+      fi
+      if [[ "$phase5_settlement_layer_handoff_settlement_dual_asset_parity_ok_json" == "null" ]]; then
+        phase5_settlement_layer_handoff_settlement_dual_asset_parity_ok_json="$(phase5_best_bool_signal_from_available \
+          "$phase5_settlement_layer_handoff_source_summary_json" \
+          "settlement_dual_asset_parity_ok")"
+      fi
+      if [[ "$phase5_settlement_layer_handoff_settlement_dual_asset_parity_ok_json" == "null" ]]; then
+        case "${phase5_settlement_layer_handoff_settlement_dual_asset_parity_status_json,,}" in
+          pass)
+            phase5_settlement_layer_handoff_settlement_dual_asset_parity_ok_json="true"
+            ;;
+          fail)
+            phase5_settlement_layer_handoff_settlement_dual_asset_parity_ok_json="false"
             ;;
         esac
       fi
@@ -5213,6 +6110,57 @@ if [[ "$phase7_mainnet_cutover_summary_available_json" == "true" ]]; then
   fi
 fi
 
+blockchain_gate_summary_max_age_sec="${ROADMAP_BLOCKCHAIN_GATE_SUMMARY_MAX_AGE_SEC:-86400}"
+if ! [[ "$blockchain_gate_summary_max_age_sec" =~ ^[0-9]+$ ]]; then
+  blockchain_gate_summary_max_age_sec="86400"
+fi
+
+blockchain_mainnet_activation_gate_summary_generated_at_json=""
+blockchain_mainnet_activation_gate_summary_age_sec_json="null"
+blockchain_mainnet_activation_gate_summary_stale_json="null"
+blockchain_mainnet_activation_gate_summary_max_age_sec_json="$blockchain_gate_summary_max_age_sec"
+if [[ -n "$blockchain_mainnet_activation_gate_source_summary_json" ]]; then
+  mapfile -t blockchain_mainnet_activation_gate_freshness_lines < <(
+    blockchain_gate_summary_freshness_fields \
+      "$blockchain_mainnet_activation_gate_source_summary_json" \
+      "$blockchain_gate_summary_max_age_sec"
+  )
+  blockchain_mainnet_activation_gate_summary_generated_at_json="${blockchain_mainnet_activation_gate_freshness_lines[0]:-}"
+  blockchain_mainnet_activation_gate_summary_age_sec_json="${blockchain_mainnet_activation_gate_freshness_lines[1]:-}"
+  blockchain_mainnet_activation_gate_summary_stale_json="${blockchain_mainnet_activation_gate_freshness_lines[2]:-null}"
+  blockchain_mainnet_activation_gate_summary_max_age_sec_json="${blockchain_mainnet_activation_gate_freshness_lines[3]:-$blockchain_gate_summary_max_age_sec}"
+fi
+
+blockchain_bootstrap_governance_graduation_gate_summary_generated_at_json=""
+blockchain_bootstrap_governance_graduation_gate_summary_age_sec_json="null"
+blockchain_bootstrap_governance_graduation_gate_summary_stale_json="null"
+blockchain_bootstrap_governance_graduation_gate_summary_max_age_sec_json="$blockchain_gate_summary_max_age_sec"
+if [[ -n "$blockchain_bootstrap_governance_graduation_gate_source_summary_json" ]]; then
+  mapfile -t blockchain_bootstrap_governance_graduation_gate_freshness_lines < <(
+    blockchain_gate_summary_freshness_fields \
+      "$blockchain_bootstrap_governance_graduation_gate_source_summary_json" \
+      "$blockchain_gate_summary_max_age_sec"
+  )
+  blockchain_bootstrap_governance_graduation_gate_summary_generated_at_json="${blockchain_bootstrap_governance_graduation_gate_freshness_lines[0]:-}"
+  blockchain_bootstrap_governance_graduation_gate_summary_age_sec_json="${blockchain_bootstrap_governance_graduation_gate_freshness_lines[1]:-}"
+  blockchain_bootstrap_governance_graduation_gate_summary_stale_json="${blockchain_bootstrap_governance_graduation_gate_freshness_lines[2]:-null}"
+  blockchain_bootstrap_governance_graduation_gate_summary_max_age_sec_json="${blockchain_bootstrap_governance_graduation_gate_freshness_lines[3]:-$blockchain_gate_summary_max_age_sec}"
+fi
+
+blockchain_mainnet_activation_refresh_evidence_available_json="false"
+blockchain_mainnet_activation_refresh_evidence_id_json=""
+blockchain_mainnet_activation_refresh_evidence_command=""
+blockchain_mainnet_activation_refresh_evidence_reason=""
+if [[ "$blockchain_mainnet_activation_gate_available_json" == "true" ]] \
+  && [[ "$blockchain_mainnet_activation_gate_source_summary_kind" != "phase7-mainnet-cutover-signal" ]] \
+  && [[ "$blockchain_mainnet_activation_gate_go_json" == "true" ]] \
+  && [[ "$blockchain_mainnet_activation_gate_summary_stale_json" == "true" ]]; then
+  blockchain_mainnet_activation_refresh_evidence_available_json="true"
+  blockchain_mainnet_activation_refresh_evidence_id_json="blockchain_mainnet_activation_refresh_evidence"
+  blockchain_mainnet_activation_refresh_evidence_command="./scripts/easy_node.sh blockchain-mainnet-activation-real-evidence-run --input-json .easy-node-logs/blockchain_mainnet_activation_metrics_input.operator.json --reports-dir .easy-node-logs/blockchain_mainnet_activation_real_evidence_run --summary-json .easy-node-logs/blockchain_mainnet_activation_real_evidence_run_latest_summary.json --canonical-summary-json .easy-node-logs/blockchain_mainnet_activation_real_evidence_run_summary.json --refresh-roadmap 1 --print-summary-json 1"
+  blockchain_mainnet_activation_refresh_evidence_reason="stale activation evidence (age=${blockchain_mainnet_activation_gate_summary_age_sec_json:-null}s, max_age=${blockchain_mainnet_activation_gate_summary_max_age_sec_json}s); refresh before trusting the GO signal"
+fi
+
 blockchain_mainnet_activation_missing_metrics_action_available_json="false"
 blockchain_mainnet_activation_missing_metrics_action_id=""
 blockchain_mainnet_activation_missing_metrics_action_reason=""
@@ -5261,10 +6209,10 @@ if [[ "$blockchain_mainnet_activation_gate_source_summary_kind" != "" ]] \
   blockchain_mainnet_activation_missing_metrics_action_reason="mainnet activation gate is NO-GO because required metrics evidence is missing/invalid; normalize operator metrics input and rerun gate bundle."
   blockchain_mainnet_activation_missing_metrics_action_normalize_command="./scripts/easy_node.sh blockchain-mainnet-activation-metrics-input --input-json $blockchain_mainnet_activation_missing_metrics_action_operator_input_json_for_command --summary-json .easy-node-logs/blockchain_mainnet_activation_metrics_input_summary.json --canonical-summary-json .easy-node-logs/blockchain_mainnet_activation_metrics_input.json --print-summary-json 1"
   blockchain_mainnet_activation_missing_metrics_action_rerun_bundle_command="./scripts/easy_node.sh blockchain-gate-bundle --blockchain-mainnet-activation-metrics-input-json $blockchain_mainnet_activation_missing_metrics_action_operator_input_json_for_command --summary-json .easy-node-logs/blockchain_gate_bundle_latest_summary.json --canonical-summary-json .easy-node-logs/blockchain_gate_bundle_summary.json --print-summary-json 1"
-  blockchain_mainnet_activation_missing_metrics_action_checklist_command="./scripts/easy_node.sh blockchain-mainnet-activation-metrics-missing-checklist --metrics-summary-json $blockchain_mainnet_activation_missing_metrics_action_metrics_summary_json_for_command --output-json .easy-node-logs/blockchain_mainnet_activation_metrics_missing_checklist.json --output-md .easy-node-logs/blockchain_mainnet_activation_metrics_missing_checklist.md --print-output-json 1"
-    blockchain_mainnet_activation_missing_metrics_action_missing_input_template_command="./scripts/easy_node.sh blockchain-mainnet-activation-metrics-missing-input-template --metrics-summary-json $blockchain_mainnet_activation_missing_metrics_action_metrics_summary_json_for_command --output-json .easy-node-logs/blockchain_mainnet_activation_metrics_missing_input_template.json --canonical-output-json .easy-node-logs/blockchain_mainnet_activation_metrics_missing_input_template.canonical.json --print-output-json 1"
-    blockchain_mainnet_activation_missing_metrics_action_template_command="./scripts/easy_node.sh blockchain-mainnet-activation-metrics-input-template --output-json $blockchain_mainnet_activation_missing_metrics_action_template_output_json_for_command --canonical-output-json .easy-node-logs/blockchain_mainnet_activation_metrics_input_template.json --print-output-json 1"
-    blockchain_mainnet_activation_missing_metrics_action_prefill_command="./scripts/easy_node.sh blockchain-mainnet-activation-metrics-prefill --metrics-summary-json $blockchain_mainnet_activation_missing_metrics_action_metrics_summary_json_for_command --output-json $blockchain_mainnet_activation_missing_metrics_action_prefill_output_json_for_command --canonical-output-json .easy-node-logs/blockchain_mainnet_activation_metrics_prefill.json --print-output-json 1"
+  blockchain_mainnet_activation_missing_metrics_action_checklist_command="./scripts/easy_node.sh blockchain-mainnet-activation-metrics-missing-checklist --metrics-summary-json $blockchain_mainnet_activation_missing_metrics_action_metrics_summary_json_for_command --output-json .easy-node-logs/blockchain_mainnet_activation_metrics_missing_checklist.json --output-md .easy-node-logs/blockchain_mainnet_activation_metrics_missing_checklist.md --print-summary-json 1"
+    blockchain_mainnet_activation_missing_metrics_action_missing_input_template_command="./scripts/easy_node.sh blockchain-mainnet-activation-metrics-missing-input-template --metrics-summary-json $blockchain_mainnet_activation_missing_metrics_action_metrics_summary_json_for_command --output-json .easy-node-logs/blockchain_mainnet_activation_metrics_missing_input_template.json --canonical-output-json .easy-node-logs/blockchain_mainnet_activation_metrics_missing_input_template.canonical.json --print-summary-json 1"
+    blockchain_mainnet_activation_missing_metrics_action_template_command="./scripts/easy_node.sh blockchain-mainnet-activation-metrics-input-template --output-json $blockchain_mainnet_activation_missing_metrics_action_template_output_json_for_command --canonical-output-json .easy-node-logs/blockchain_mainnet_activation_metrics_input_template.json --print-summary-json 1"
+    blockchain_mainnet_activation_missing_metrics_action_prefill_command="./scripts/easy_node.sh blockchain-mainnet-activation-metrics-prefill --metrics-summary-json $blockchain_mainnet_activation_missing_metrics_action_metrics_summary_json_for_command --output-json $blockchain_mainnet_activation_missing_metrics_action_prefill_output_json_for_command --canonical-output-json .easy-node-logs/blockchain_mainnet_activation_metrics_prefill.json --print-summary-json 1"
     blockchain_mainnet_activation_missing_metrics_action_operator_pack_command="./scripts/easy_node.sh blockchain-mainnet-activation-operator-pack --metrics-summary-json $blockchain_mainnet_activation_missing_metrics_action_metrics_summary_json_for_command --reports-dir .easy-node-logs/blockchain_mainnet_activation_operator_pack --summary-json .easy-node-logs/blockchain_mainnet_activation_operator_pack_latest_summary.json --canonical-summary-json .easy-node-logs/blockchain_mainnet_activation_operator_pack_summary.json --template-output-json $blockchain_mainnet_activation_missing_metrics_action_template_output_json_for_command --template-canonical-output-json .easy-node-logs/blockchain_mainnet_activation_metrics_input_template.json --missing-input-template-output-json .easy-node-logs/blockchain_mainnet_activation_metrics_missing_input_template.json --missing-input-template-canonical-output-json .easy-node-logs/blockchain_mainnet_activation_metrics_missing_input_template.canonical.json --checklist-output-json .easy-node-logs/blockchain_mainnet_activation_metrics_missing_checklist.json --checklist-output-md .easy-node-logs/blockchain_mainnet_activation_metrics_missing_checklist.md --print-summary-json 1"
   blockchain_mainnet_activation_missing_metrics_action_cycle_command="./scripts/easy_node.sh blockchain-mainnet-activation-gate-cycle --input-json $blockchain_mainnet_activation_missing_metrics_action_operator_input_json_for_command --reports-dir .easy-node-logs/blockchain_mainnet_activation_gate_cycle --summary-json .easy-node-logs/blockchain_mainnet_activation_gate_cycle_latest_summary.json --canonical-summary-json .easy-node-logs/blockchain_mainnet_activation_gate_cycle_summary.json --refresh-roadmap 1 --print-summary-json 1"
   blockchain_mainnet_activation_missing_metrics_action_seeded_cycle_command="./scripts/easy_node.sh blockchain-mainnet-activation-gate-cycle-seeded --reports-dir .easy-node-logs/blockchain_mainnet_activation_gate_cycle_seeded --summary-json .easy-node-logs/blockchain_mainnet_activation_gate_cycle_seeded_latest_summary.json --canonical-summary-json .easy-node-logs/blockchain_mainnet_activation_gate_cycle_seeded_summary.json --refresh-roadmap 1 --print-summary-json 1"
@@ -5489,19 +6437,53 @@ if [[ -n "$profile_default_gate_signoff_status" ]]; then
     profile_compare_signoff_summary_json="$profile_default_gate_summary_json_manual"
   fi
 fi
+profile_default_gate_next_command_host_a_effective="$(trim "${A_HOST:-}")"
+profile_default_gate_next_command_host_b_effective="$(trim "${B_HOST:-}")"
+if [[ -z "$profile_default_gate_next_command_host_a_effective" ]]; then
+  profile_default_gate_next_command_host_a_extracted="$(profile_default_gate_extract_directory_host_from_cmd "$profile_default_gate_next_command" "--directory-a")"
+  if [[ -n "$profile_default_gate_next_command_host_a_extracted" ]] \
+     && [[ "$(profile_default_gate_host_is_non_localhost_01 "$profile_default_gate_next_command_host_a_extracted")" == "1" ]]; then
+    profile_default_gate_next_command_host_a_effective="$profile_default_gate_next_command_host_a_extracted"
+  fi
+fi
+if [[ -z "$profile_default_gate_next_command_host_b_effective" ]]; then
+  profile_default_gate_next_command_host_b_extracted="$(profile_default_gate_extract_directory_host_from_cmd "$profile_default_gate_next_command" "--directory-b")"
+  if [[ -n "$profile_default_gate_next_command_host_b_extracted" ]] \
+     && [[ "$(profile_default_gate_host_is_non_localhost_01 "$profile_default_gate_next_command_host_b_extracted")" == "1" ]]; then
+    profile_default_gate_next_command_host_b_effective="$profile_default_gate_next_command_host_b_extracted"
+  fi
+fi
 profile_default_gate_next_command="$(
   profile_default_gate_command_localhost_run_to_live_wrapper \
     "$profile_default_gate_next_command" \
-    "${A_HOST:-}" \
-    "${B_HOST:-}" \
-    "$profile_default_gate_next_command_source"
+    "$profile_default_gate_next_command_host_a_effective" \
+    "$profile_default_gate_next_command_host_b_effective" \
+    "$profile_default_gate_next_command_source" \
+    "$profile_default_gate_docker_hint_available_json"
 )"
+profile_default_gate_next_command_sudo_host_a_effective="$(trim "${A_HOST:-}")"
+profile_default_gate_next_command_sudo_host_b_effective="$(trim "${B_HOST:-}")"
+if [[ -z "$profile_default_gate_next_command_sudo_host_a_effective" ]]; then
+  profile_default_gate_next_command_sudo_host_a_extracted="$(profile_default_gate_extract_directory_host_from_cmd "$profile_default_gate_next_command_sudo" "--directory-a")"
+  if [[ -n "$profile_default_gate_next_command_sudo_host_a_extracted" ]] \
+     && [[ "$(profile_default_gate_host_is_non_localhost_01 "$profile_default_gate_next_command_sudo_host_a_extracted")" == "1" ]]; then
+    profile_default_gate_next_command_sudo_host_a_effective="$profile_default_gate_next_command_sudo_host_a_extracted"
+  fi
+fi
+if [[ -z "$profile_default_gate_next_command_sudo_host_b_effective" ]]; then
+  profile_default_gate_next_command_sudo_host_b_extracted="$(profile_default_gate_extract_directory_host_from_cmd "$profile_default_gate_next_command_sudo" "--directory-b")"
+  if [[ -n "$profile_default_gate_next_command_sudo_host_b_extracted" ]] \
+     && [[ "$(profile_default_gate_host_is_non_localhost_01 "$profile_default_gate_next_command_sudo_host_b_extracted")" == "1" ]]; then
+    profile_default_gate_next_command_sudo_host_b_effective="$profile_default_gate_next_command_sudo_host_b_extracted"
+  fi
+fi
 profile_default_gate_next_command_sudo="$(
   profile_default_gate_command_localhost_run_to_live_wrapper \
     "$profile_default_gate_next_command_sudo" \
-    "${A_HOST:-}" \
-    "${B_HOST:-}" \
-    "$profile_default_gate_next_command_source"
+    "$profile_default_gate_next_command_sudo_host_a_effective" \
+    "$profile_default_gate_next_command_sudo_host_b_effective" \
+    "$profile_default_gate_next_command_source" \
+    "$profile_default_gate_docker_hint_available_json"
 )"
 profile_default_gate_next_command="$(profile_default_gate_command_with_subject_placeholder "$profile_default_gate_next_command")"
 profile_default_gate_next_command_sudo="$(profile_default_gate_command_with_subject_placeholder "$profile_default_gate_next_command_sudo")"
@@ -5798,7 +6780,7 @@ non_blockchain_actionable_no_sudo_or_github_json="$(
 non_blockchain_recommended_gate_id="$(printf '%s\n' "$non_blockchain_actionable_no_sudo_or_github_json" | jq -r 'if length > 0 then .[0].id else "" end')"
 non_blockchain_actionable_no_sudo_or_github_count="$(printf '%s\n' "$non_blockchain_actionable_no_sudo_or_github_json" | jq -r 'length')"
 
-next_actions_json="$(jq -c --arg next_action_check_id "$next_action_check_id" --arg next_action_label "$next_action_label" --arg next_action_command "$next_action_command" --argjson profile_default_gate_needs_attention "$profile_default_gate_needs_attention_json" --arg profile_default_gate_next_command "$profile_default_gate_next_command" --argjson blockchain_mainnet_activation_missing_metrics_action_available "$blockchain_mainnet_activation_missing_metrics_action_available_json" --arg blockchain_mainnet_activation_missing_metrics_action_reason "$blockchain_mainnet_activation_missing_metrics_action_reason" --arg blockchain_mainnet_activation_missing_metrics_action_operator_pack_command "$blockchain_mainnet_activation_missing_metrics_action_operator_pack_command" --arg blockchain_mainnet_activation_missing_metrics_action_prefill_command "$blockchain_mainnet_activation_missing_metrics_action_prefill_command" --arg blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command "$blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command" '
+next_actions_json="$(jq -c --arg next_action_check_id "$next_action_check_id" --arg next_action_label "$next_action_label" --arg next_action_command "$next_action_command" --argjson profile_default_gate_needs_attention "$profile_default_gate_needs_attention_json" --arg profile_default_gate_next_command "$profile_default_gate_next_command" --argjson blockchain_mainnet_activation_missing_metrics_action_available "$blockchain_mainnet_activation_missing_metrics_action_available_json" --arg blockchain_mainnet_activation_missing_metrics_action_reason "$blockchain_mainnet_activation_missing_metrics_action_reason" --arg blockchain_mainnet_activation_missing_metrics_action_operator_pack_command "$blockchain_mainnet_activation_missing_metrics_action_operator_pack_command" --arg blockchain_mainnet_activation_missing_metrics_action_prefill_command "$blockchain_mainnet_activation_missing_metrics_action_prefill_command" --arg blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command "$blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command" --argjson blockchain_mainnet_activation_refresh_evidence_available "$blockchain_mainnet_activation_refresh_evidence_available_json" --arg blockchain_mainnet_activation_refresh_evidence_command "$blockchain_mainnet_activation_refresh_evidence_command" --arg blockchain_mainnet_activation_refresh_evidence_reason "$blockchain_mainnet_activation_refresh_evidence_reason" '
   def unique_commands_preserve_order:
     reduce .[] as $item (
       [];
@@ -5828,6 +6810,12 @@ next_actions_json="$(jq -c --arg next_action_check_id "$next_action_check_id" --
       label: (if ($blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command // "") != "" then "Blockchain missing-metrics real-evidence run" else "Blockchain missing-metrics operator pack" end),
       command: (if ($blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command // "") != "" then $blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command else $blockchain_mainnet_activation_missing_metrics_action_operator_pack_command end),
       reason: (if ($blockchain_mainnet_activation_missing_metrics_action_reason // "") != "" then $blockchain_mainnet_activation_missing_metrics_action_reason else "mainnet activation metrics evidence is missing/invalid; run the real evidence flow" end)
+    } else empty end),
+    (if ($blockchain_mainnet_activation_refresh_evidence_available == true and ($blockchain_mainnet_activation_refresh_evidence_command // "") != "") then {
+      id: "blockchain_mainnet_activation_refresh_evidence",
+      label: "Blockchain mainnet activation refresh evidence",
+      command: $blockchain_mainnet_activation_refresh_evidence_command,
+      reason: (if ($blockchain_mainnet_activation_refresh_evidence_reason // "") != "" then $blockchain_mainnet_activation_refresh_evidence_reason else "stale activation evidence; refresh before trusting the GO signal" end)
     } else empty end),
     (if ($blockchain_mainnet_activation_missing_metrics_action_available == true and ($blockchain_mainnet_activation_missing_metrics_action_prefill_command // "") != "") then {
       id: "blockchain_mainnet_activation_missing_metrics_prefill",
@@ -5968,10 +6956,24 @@ summary_payload="$(jq -n \
   --argjson phase5_settlement_layer_handoff_settlement_state_persistence_ok "$phase5_settlement_layer_handoff_settlement_state_persistence_ok_json" \
   --arg phase5_settlement_layer_handoff_settlement_adapter_roundtrip_status "$phase5_settlement_layer_handoff_settlement_adapter_roundtrip_status_json" \
   --argjson phase5_settlement_layer_handoff_settlement_adapter_roundtrip_ok "$phase5_settlement_layer_handoff_settlement_adapter_roundtrip_ok_json" \
+  --arg phase5_settlement_layer_handoff_settlement_adapter_signed_tx_roundtrip_status "$phase5_settlement_layer_handoff_settlement_adapter_signed_tx_roundtrip_status_json" \
+  --argjson phase5_settlement_layer_handoff_settlement_adapter_signed_tx_roundtrip_ok "$phase5_settlement_layer_handoff_settlement_adapter_signed_tx_roundtrip_ok_json" \
+  --arg phase5_settlement_layer_handoff_settlement_shadow_env_status "$phase5_settlement_layer_handoff_settlement_shadow_env_status_json" \
+  --argjson phase5_settlement_layer_handoff_settlement_shadow_env_ok "$phase5_settlement_layer_handoff_settlement_shadow_env_ok_json" \
+  --arg phase5_settlement_layer_handoff_settlement_shadow_status_surface_status "$phase5_settlement_layer_handoff_settlement_shadow_status_surface_status_json" \
+  --argjson phase5_settlement_layer_handoff_settlement_shadow_status_surface_ok "$phase5_settlement_layer_handoff_settlement_shadow_status_surface_ok_json" \
+  --arg phase5_settlement_layer_handoff_settlement_dual_asset_parity_status "$phase5_settlement_layer_handoff_settlement_dual_asset_parity_status_json" \
+  --argjson phase5_settlement_layer_handoff_settlement_dual_asset_parity_ok "$phase5_settlement_layer_handoff_settlement_dual_asset_parity_ok_json" \
   --arg phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_status "$phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_status_json" \
   --argjson phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_ok "$phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_ok_json" \
+  --arg phase5_settlement_layer_handoff_issuer_sponsor_vpn_session_live_smoke_status "$phase5_settlement_layer_handoff_issuer_sponsor_vpn_session_live_smoke_status_json" \
+  --argjson phase5_settlement_layer_handoff_issuer_sponsor_vpn_session_live_smoke_ok "$phase5_settlement_layer_handoff_issuer_sponsor_vpn_session_live_smoke_ok_json" \
   --arg phase5_settlement_layer_handoff_issuer_settlement_status_live_smoke_status "$phase5_settlement_layer_handoff_issuer_settlement_status_live_smoke_status_json" \
   --argjson phase5_settlement_layer_handoff_issuer_settlement_status_live_smoke_ok "$phase5_settlement_layer_handoff_issuer_settlement_status_live_smoke_ok_json" \
+  --arg phase5_settlement_layer_handoff_issuer_admin_blockchain_handlers_coverage_status "$phase5_settlement_layer_handoff_issuer_admin_blockchain_handlers_coverage_status_json" \
+  --argjson phase5_settlement_layer_handoff_issuer_admin_blockchain_handlers_coverage_ok "$phase5_settlement_layer_handoff_issuer_admin_blockchain_handlers_coverage_ok_json" \
+  --arg phase5_settlement_layer_handoff_exit_settlement_status_live_smoke_status "$phase5_settlement_layer_handoff_exit_settlement_status_live_smoke_status_json" \
+  --argjson phase5_settlement_layer_handoff_exit_settlement_status_live_smoke_ok "$phase5_settlement_layer_handoff_exit_settlement_status_live_smoke_ok_json" \
   --argjson phase6_cosmos_l1_handoff_available "$phase6_cosmos_l1_handoff_available_json" \
   --arg phase6_cosmos_l1_handoff_input_summary_json "$phase6_cosmos_l1_handoff_input_summary_json" \
   --arg phase6_cosmos_l1_handoff_source_summary_json "$phase6_cosmos_l1_handoff_source_summary_json" \
@@ -6016,6 +7018,10 @@ summary_payload="$(jq -n \
   --argjson blockchain_mainnet_activation_gate_no_go "$blockchain_mainnet_activation_gate_no_go_json" \
   --argjson blockchain_mainnet_activation_gate_reasons "$blockchain_mainnet_activation_gate_reasons_json" \
   --argjson blockchain_mainnet_activation_gate_source_paths "$blockchain_mainnet_activation_gate_source_paths_json" \
+  --arg blockchain_mainnet_activation_gate_summary_generated_at_json "$blockchain_mainnet_activation_gate_summary_generated_at_json" \
+  --arg blockchain_mainnet_activation_gate_summary_age_sec_json "$blockchain_mainnet_activation_gate_summary_age_sec_json" \
+  --arg blockchain_mainnet_activation_gate_summary_stale_json "$blockchain_mainnet_activation_gate_summary_stale_json" \
+  --argjson blockchain_mainnet_activation_gate_summary_max_age_sec_json "$blockchain_mainnet_activation_gate_summary_max_age_sec_json" \
   --argjson blockchain_bootstrap_governance_graduation_gate_available "$blockchain_bootstrap_governance_graduation_gate_available_json" \
   --arg blockchain_bootstrap_governance_graduation_gate_input_summary_json "$blockchain_bootstrap_governance_graduation_gate_input_summary_json" \
   --arg blockchain_bootstrap_governance_graduation_gate_source_summary_json "$blockchain_bootstrap_governance_graduation_gate_source_summary_json" \
@@ -6026,6 +7032,13 @@ summary_payload="$(jq -n \
   --argjson blockchain_bootstrap_governance_graduation_gate_no_go "$blockchain_bootstrap_governance_graduation_gate_no_go_json" \
   --argjson blockchain_bootstrap_governance_graduation_gate_reasons "$blockchain_bootstrap_governance_graduation_gate_reasons_json" \
   --argjson blockchain_bootstrap_governance_graduation_gate_source_paths "$blockchain_bootstrap_governance_graduation_gate_source_paths_json" \
+  --arg blockchain_bootstrap_governance_graduation_gate_summary_generated_at_json "$blockchain_bootstrap_governance_graduation_gate_summary_generated_at_json" \
+  --arg blockchain_bootstrap_governance_graduation_gate_summary_age_sec_json "$blockchain_bootstrap_governance_graduation_gate_summary_age_sec_json" \
+  --arg blockchain_bootstrap_governance_graduation_gate_summary_stale_json "$blockchain_bootstrap_governance_graduation_gate_summary_stale_json" \
+  --argjson blockchain_bootstrap_governance_graduation_gate_summary_max_age_sec_json "$blockchain_bootstrap_governance_graduation_gate_summary_max_age_sec_json" \
+  --argjson blockchain_mainnet_activation_refresh_evidence_available "$blockchain_mainnet_activation_refresh_evidence_available_json" \
+  --arg blockchain_mainnet_activation_refresh_evidence_command "$blockchain_mainnet_activation_refresh_evidence_command" \
+  --arg blockchain_mainnet_activation_refresh_evidence_reason "$blockchain_mainnet_activation_refresh_evidence_reason" \
   --argjson blockchain_mainnet_activation_missing_metrics_action_available "$blockchain_mainnet_activation_missing_metrics_action_available_json" \
   --arg blockchain_mainnet_activation_missing_metrics_action_id "$blockchain_mainnet_activation_missing_metrics_action_id" \
   --arg blockchain_mainnet_activation_missing_metrics_action_reason "$blockchain_mainnet_activation_missing_metrics_action_reason" \
@@ -6199,10 +7212,24 @@ summary_payload="$(jq -n \
         settlement_state_persistence_ok: $phase5_settlement_layer_handoff_settlement_state_persistence_ok,
         settlement_adapter_roundtrip_status: (if $phase5_settlement_layer_handoff_settlement_adapter_roundtrip_status == "" then null else $phase5_settlement_layer_handoff_settlement_adapter_roundtrip_status end),
         settlement_adapter_roundtrip_ok: $phase5_settlement_layer_handoff_settlement_adapter_roundtrip_ok,
+        settlement_adapter_signed_tx_roundtrip_status: (if $phase5_settlement_layer_handoff_settlement_adapter_signed_tx_roundtrip_status == "" then null else $phase5_settlement_layer_handoff_settlement_adapter_signed_tx_roundtrip_status end),
+        settlement_adapter_signed_tx_roundtrip_ok: $phase5_settlement_layer_handoff_settlement_adapter_signed_tx_roundtrip_ok,
+        settlement_shadow_env_status: (if $phase5_settlement_layer_handoff_settlement_shadow_env_status == "" then null else $phase5_settlement_layer_handoff_settlement_shadow_env_status end),
+        settlement_shadow_env_ok: $phase5_settlement_layer_handoff_settlement_shadow_env_ok,
+        settlement_shadow_status_surface_status: (if $phase5_settlement_layer_handoff_settlement_shadow_status_surface_status == "" then null else $phase5_settlement_layer_handoff_settlement_shadow_status_surface_status end),
+        settlement_shadow_status_surface_ok: $phase5_settlement_layer_handoff_settlement_shadow_status_surface_ok,
+        settlement_dual_asset_parity_status: (if $phase5_settlement_layer_handoff_settlement_dual_asset_parity_status == "" then null else $phase5_settlement_layer_handoff_settlement_dual_asset_parity_status end),
+        settlement_dual_asset_parity_ok: $phase5_settlement_layer_handoff_settlement_dual_asset_parity_ok,
         issuer_sponsor_api_live_smoke_status: (if $phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_status == "" then null else $phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_status end),
         issuer_sponsor_api_live_smoke_ok: $phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_ok,
+        issuer_sponsor_vpn_session_live_smoke_status: (if $phase5_settlement_layer_handoff_issuer_sponsor_vpn_session_live_smoke_status == "" then null else $phase5_settlement_layer_handoff_issuer_sponsor_vpn_session_live_smoke_status end),
+        issuer_sponsor_vpn_session_live_smoke_ok: $phase5_settlement_layer_handoff_issuer_sponsor_vpn_session_live_smoke_ok,
         issuer_settlement_status_live_smoke_status: (if $phase5_settlement_layer_handoff_issuer_settlement_status_live_smoke_status == "" then null else $phase5_settlement_layer_handoff_issuer_settlement_status_live_smoke_status end),
-        issuer_settlement_status_live_smoke_ok: $phase5_settlement_layer_handoff_issuer_settlement_status_live_smoke_ok
+        issuer_settlement_status_live_smoke_ok: $phase5_settlement_layer_handoff_issuer_settlement_status_live_smoke_ok,
+        issuer_admin_blockchain_handlers_coverage_status: (if $phase5_settlement_layer_handoff_issuer_admin_blockchain_handlers_coverage_status == "" then null else $phase5_settlement_layer_handoff_issuer_admin_blockchain_handlers_coverage_status end),
+        issuer_admin_blockchain_handlers_coverage_ok: $phase5_settlement_layer_handoff_issuer_admin_blockchain_handlers_coverage_ok,
+        exit_settlement_status_live_smoke_status: (if $phase5_settlement_layer_handoff_exit_settlement_status_live_smoke_status == "" then null else $phase5_settlement_layer_handoff_exit_settlement_status_live_smoke_status end),
+        exit_settlement_status_live_smoke_ok: $phase5_settlement_layer_handoff_exit_settlement_status_live_smoke_ok
       },
       resilience_handoff: {
         available: $resilience_handoff_available,
@@ -6299,7 +7326,17 @@ summary_payload="$(jq -n \
         go: $blockchain_mainnet_activation_gate_go,
         no_go: $blockchain_mainnet_activation_gate_no_go,
         reasons: $blockchain_mainnet_activation_gate_reasons,
-        source_paths: $blockchain_mainnet_activation_gate_source_paths
+        source_paths: $blockchain_mainnet_activation_gate_source_paths,
+        summary_generated_at: (if $blockchain_mainnet_activation_gate_summary_generated_at_json == "" then null else $blockchain_mainnet_activation_gate_summary_generated_at_json end),
+        summary_age_sec: (
+          if $blockchain_mainnet_activation_gate_summary_age_sec_json == ""
+             or $blockchain_mainnet_activation_gate_summary_age_sec_json == "null"
+          then null
+          else ($blockchain_mainnet_activation_gate_summary_age_sec_json | tonumber)
+          end
+        ),
+        summary_stale: (if $blockchain_mainnet_activation_gate_summary_stale_json == "null" then null else ($blockchain_mainnet_activation_gate_summary_stale_json == "true") end),
+        summary_max_age_sec: ($blockchain_mainnet_activation_gate_summary_max_age_sec_json | tonumber)
       },
       bootstrap_governance_graduation_gate: {
         available: $blockchain_bootstrap_governance_graduation_gate_available,
@@ -6311,7 +7348,17 @@ summary_payload="$(jq -n \
         go: $blockchain_bootstrap_governance_graduation_gate_go,
         no_go: $blockchain_bootstrap_governance_graduation_gate_no_go,
         reasons: $blockchain_bootstrap_governance_graduation_gate_reasons,
-        source_paths: $blockchain_bootstrap_governance_graduation_gate_source_paths
+        source_paths: $blockchain_bootstrap_governance_graduation_gate_source_paths,
+        summary_generated_at: (if $blockchain_bootstrap_governance_graduation_gate_summary_generated_at_json == "" then null else $blockchain_bootstrap_governance_graduation_gate_summary_generated_at_json end),
+        summary_age_sec: (
+          if $blockchain_bootstrap_governance_graduation_gate_summary_age_sec_json == ""
+             or $blockchain_bootstrap_governance_graduation_gate_summary_age_sec_json == "null"
+          then null
+          else ($blockchain_bootstrap_governance_graduation_gate_summary_age_sec_json | tonumber)
+          end
+        ),
+        summary_stale: (if $blockchain_bootstrap_governance_graduation_gate_summary_stale_json == "null" then null else ($blockchain_bootstrap_governance_graduation_gate_summary_stale_json == "true") end),
+        summary_max_age_sec: ($blockchain_bootstrap_governance_graduation_gate_summary_max_age_sec_json | tonumber)
       },
       mainnet_activation_missing_metrics_action: {
         available: $blockchain_mainnet_activation_missing_metrics_action_available,
@@ -6327,6 +7374,12 @@ summary_payload="$(jq -n \
           cycle_command: (if $blockchain_mainnet_activation_missing_metrics_action_cycle_command == "" then null else $blockchain_mainnet_activation_missing_metrics_action_cycle_command end),
           seeded_cycle_command: (if $blockchain_mainnet_activation_missing_metrics_action_seeded_cycle_command == "" then null else $blockchain_mainnet_activation_missing_metrics_action_seeded_cycle_command end),
         real_evidence_run_command: (if $blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command == "" then null else $blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command end)
+      },
+      mainnet_activation_refresh_evidence_action: {
+        available: $blockchain_mainnet_activation_refresh_evidence_available,
+        id: (if $blockchain_mainnet_activation_refresh_evidence_command == "" then null else "blockchain_mainnet_activation_refresh_evidence" end),
+        reason: (if $blockchain_mainnet_activation_refresh_evidence_reason == "" then null else $blockchain_mainnet_activation_refresh_evidence_reason end),
+        command: (if $blockchain_mainnet_activation_refresh_evidence_command == "" then null else $blockchain_mainnet_activation_refresh_evidence_command end)
       }
     },
     refresh: {
@@ -6477,10 +7530,24 @@ cat >"$report_tmp" <<EOF_MD
 - Phase-5 settlement_state_persistence_ok: $(jq -r '.vpn_track.phase5_settlement_layer_handoff.settlement_state_persistence_ok | if . == null then "null" else tostring end' "$summary_json")
 - Phase-5 settlement_adapter_roundtrip_status: $(jq -r '.vpn_track.phase5_settlement_layer_handoff.settlement_adapter_roundtrip_status // "null"' "$summary_json")
 - Phase-5 settlement_adapter_roundtrip_ok: $(jq -r '.vpn_track.phase5_settlement_layer_handoff.settlement_adapter_roundtrip_ok | if . == null then "null" else tostring end' "$summary_json")
+- Phase-5 settlement_adapter_signed_tx_roundtrip_status: $(jq -r '.vpn_track.phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_status // "null"' "$summary_json")
+- Phase-5 settlement_adapter_signed_tx_roundtrip_ok: $(jq -r '.vpn_track.phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_ok | if . == null then "null" else tostring end' "$summary_json")
+- Phase-5 settlement_shadow_env_status: $(jq -r '.vpn_track.phase5_settlement_layer_handoff.settlement_shadow_env_status // "null"' "$summary_json")
+- Phase-5 settlement_shadow_env_ok: $(jq -r '.vpn_track.phase5_settlement_layer_handoff.settlement_shadow_env_ok | if . == null then "null" else tostring end' "$summary_json")
+- Phase-5 settlement_shadow_status_surface_status: $(jq -r '.vpn_track.phase5_settlement_layer_handoff.settlement_shadow_status_surface_status // "null"' "$summary_json")
+- Phase-5 settlement_shadow_status_surface_ok: $(jq -r '.vpn_track.phase5_settlement_layer_handoff.settlement_shadow_status_surface_ok | if . == null then "null" else tostring end' "$summary_json")
+- Phase-5 settlement_dual_asset_parity_status: $(jq -r '.vpn_track.phase5_settlement_layer_handoff.settlement_dual_asset_parity_status // "null"' "$summary_json")
+- Phase-5 settlement_dual_asset_parity_ok: $(jq -r '.vpn_track.phase5_settlement_layer_handoff.settlement_dual_asset_parity_ok | if . == null then "null" else tostring end' "$summary_json")
 - Phase-5 issuer_sponsor_api_live_smoke_status: $(jq -r '.vpn_track.phase5_settlement_layer_handoff.issuer_sponsor_api_live_smoke_status // "null"' "$summary_json")
 - Phase-5 issuer_sponsor_api_live_smoke_ok: $(jq -r '.vpn_track.phase5_settlement_layer_handoff.issuer_sponsor_api_live_smoke_ok | if . == null then "null" else tostring end' "$summary_json")
+- Phase-5 issuer_sponsor_vpn_session_live_smoke_status: $(jq -r '.vpn_track.phase5_settlement_layer_handoff.issuer_sponsor_vpn_session_live_smoke_status // "null"' "$summary_json")
+- Phase-5 issuer_sponsor_vpn_session_live_smoke_ok: $(jq -r '.vpn_track.phase5_settlement_layer_handoff.issuer_sponsor_vpn_session_live_smoke_ok | if . == null then "null" else tostring end' "$summary_json")
 - Phase-5 issuer_settlement_status_live_smoke_status: $(jq -r '.vpn_track.phase5_settlement_layer_handoff.issuer_settlement_status_live_smoke_status // "null"' "$summary_json")
 - Phase-5 issuer_settlement_status_live_smoke_ok: $(jq -r '.vpn_track.phase5_settlement_layer_handoff.issuer_settlement_status_live_smoke_ok | if . == null then "null" else tostring end' "$summary_json")
+- Phase-5 issuer_admin_blockchain_handlers_coverage_status: $(jq -r '.vpn_track.phase5_settlement_layer_handoff.issuer_admin_blockchain_handlers_coverage_status // "null"' "$summary_json")
+- Phase-5 issuer_admin_blockchain_handlers_coverage_ok: $(jq -r '.vpn_track.phase5_settlement_layer_handoff.issuer_admin_blockchain_handlers_coverage_ok | if . == null then "null" else tostring end' "$summary_json")
+- Phase-5 exit_settlement_status_live_smoke_status: $(jq -r '.vpn_track.phase5_settlement_layer_handoff.exit_settlement_status_live_smoke_status // "null"' "$summary_json")
+- Phase-5 exit_settlement_status_live_smoke_ok: $(jq -r '.vpn_track.phase5_settlement_layer_handoff.exit_settlement_status_live_smoke_ok | if . == null then "null" else tostring end' "$summary_json")
 - Resilience handoff available: $(jq -r '.vpn_track.resilience_handoff.available' "$summary_json")
 - Resilience handoff source: $(jq -r '.vpn_track.resilience_handoff.source_summary_json // "none"' "$summary_json")
 - profile_matrix_stable: $(jq -r '.vpn_track.resilience_handoff.profile_matrix_stable | if . == null then "null" else tostring end' "$summary_json")
@@ -6553,6 +7620,14 @@ $pending_real_host_checks_md
 - Mainnet activation gate no_go: $(jq -r '.blockchain_track.mainnet_activation_gate.no_go | if . == null then "null" else tostring end' "$summary_json")
 - Mainnet activation gate reasons: $(jq -r '.blockchain_track.mainnet_activation_gate.reasons | if length == 0 then "none" else join("; ") end' "$summary_json")
 - Mainnet activation gate source paths: $(jq -r '.blockchain_track.mainnet_activation_gate.source_paths | if length == 0 then "none" else join(", ") end' "$summary_json")
+- Mainnet activation gate summary generated_at: $(jq -r '.blockchain_track.mainnet_activation_gate.summary_generated_at // "none"' "$summary_json")
+- Mainnet activation gate summary age_sec: $(jq -r '.blockchain_track.mainnet_activation_gate.summary_age_sec // "null"' "$summary_json")
+- Mainnet activation gate summary stale: $(jq -r '.blockchain_track.mainnet_activation_gate.summary_stale | if . == null then "null" else tostring end' "$summary_json")
+- Mainnet activation gate summary max_age_sec: $(jq -r '.blockchain_track.mainnet_activation_gate.summary_max_age_sec // "null"' "$summary_json")
+- Mainnet activation refresh evidence action available: $(jq -r '.blockchain_track.mainnet_activation_refresh_evidence_action.available | if . == null then "null" else tostring end' "$summary_json")
+- Mainnet activation refresh evidence action id: $(jq -r '.blockchain_track.mainnet_activation_refresh_evidence_action.id // "none"' "$summary_json")
+- Mainnet activation refresh evidence action reason: $(jq -r '.blockchain_track.mainnet_activation_refresh_evidence_action.reason // "none"' "$summary_json")
+- Mainnet activation refresh evidence action command: $(jq -r '.blockchain_track.mainnet_activation_refresh_evidence_action.command // "none"' "$summary_json")
 - Mainnet activation missing-metrics action available: $(jq -r '.blockchain_track.mainnet_activation_missing_metrics_action.available | if . == null then "null" else tostring end' "$summary_json")
 - Mainnet activation missing-metrics action id: $(jq -r '.blockchain_track.mainnet_activation_missing_metrics_action.id // "none"' "$summary_json")
 - Mainnet activation missing-metrics action reason: $(jq -r '.blockchain_track.mainnet_activation_missing_metrics_action.reason // "none"' "$summary_json")
@@ -6576,6 +7651,10 @@ $pending_real_host_checks_md
 - Bootstrap governance graduation gate no_go: $(jq -r '.blockchain_track.bootstrap_governance_graduation_gate.no_go | if . == null then "null" else tostring end' "$summary_json")
 - Bootstrap governance graduation gate reasons: $(jq -r '.blockchain_track.bootstrap_governance_graduation_gate.reasons | if length == 0 then "none" else join("; ") end' "$summary_json")
 - Bootstrap governance graduation gate source paths: $(jq -r '.blockchain_track.bootstrap_governance_graduation_gate.source_paths | if length == 0 then "none" else join(", ") end' "$summary_json")
+- Bootstrap governance graduation gate summary generated_at: $(jq -r '.blockchain_track.bootstrap_governance_graduation_gate.summary_generated_at // "none"' "$summary_json")
+- Bootstrap governance graduation gate summary age_sec: $(jq -r '.blockchain_track.bootstrap_governance_graduation_gate.summary_age_sec // "null"' "$summary_json")
+- Bootstrap governance graduation gate summary stale: $(jq -r '.blockchain_track.bootstrap_governance_graduation_gate.summary_stale | if . == null then "null" else tostring end' "$summary_json")
+- Bootstrap governance graduation gate summary max_age_sec: $(jq -r '.blockchain_track.bootstrap_governance_graduation_gate.summary_max_age_sec // "null"' "$summary_json")
 
 ## Next Actions
 
@@ -6639,13 +7718,21 @@ echo "[roadmap-progress-report] phase4_windows_full_parity_handoff_windows_serve
 echo "[roadmap-progress-report] phase5_settlement_layer_handoff_available=$phase5_settlement_layer_handoff_available_json source_summary_json=${phase5_settlement_layer_handoff_source_summary_json:-} source_kind=${phase5_settlement_layer_handoff_source_summary_kind:-}"
 echo "[roadmap-progress-report] phase5_settlement_layer_handoff_settlement_failsoft_ok=$phase5_settlement_layer_handoff_settlement_failsoft_ok_json settlement_acceptance_ok=$phase5_settlement_layer_handoff_settlement_acceptance_ok_json settlement_bridge_smoke_ok=$phase5_settlement_layer_handoff_settlement_bridge_smoke_ok_json settlement_state_persistence_ok=$phase5_settlement_layer_handoff_settlement_state_persistence_ok_json"
 echo "[roadmap-progress-report] phase5_settlement_layer_handoff_settlement_adapter_roundtrip_status=${phase5_settlement_layer_handoff_settlement_adapter_roundtrip_status_json:-null} settlement_adapter_roundtrip_ok=$phase5_settlement_layer_handoff_settlement_adapter_roundtrip_ok_json"
+echo "[roadmap-progress-report] phase5_settlement_layer_handoff_settlement_adapter_signed_tx_roundtrip_status=${phase5_settlement_layer_handoff_settlement_adapter_signed_tx_roundtrip_status_json:-null} settlement_adapter_signed_tx_roundtrip_ok=$phase5_settlement_layer_handoff_settlement_adapter_signed_tx_roundtrip_ok_json"
+echo "[roadmap-progress-report] phase5_settlement_layer_handoff_settlement_shadow_env_status=${phase5_settlement_layer_handoff_settlement_shadow_env_status_json:-null} settlement_shadow_env_ok=$phase5_settlement_layer_handoff_settlement_shadow_env_ok_json"
+echo "[roadmap-progress-report] phase5_settlement_layer_handoff_settlement_shadow_status_surface_status=${phase5_settlement_layer_handoff_settlement_shadow_status_surface_status_json:-null} settlement_shadow_status_surface_ok=$phase5_settlement_layer_handoff_settlement_shadow_status_surface_ok_json"
+echo "[roadmap-progress-report] phase5_settlement_layer_handoff_settlement_dual_asset_parity_status=${phase5_settlement_layer_handoff_settlement_dual_asset_parity_status_json:-null} settlement_dual_asset_parity_ok=$phase5_settlement_layer_handoff_settlement_dual_asset_parity_ok_json"
 echo "[roadmap-progress-report] phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_status=${phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_status_json:-null} issuer_sponsor_api_live_smoke_ok=$phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_ok_json"
+echo "[roadmap-progress-report] phase5_settlement_layer_handoff_issuer_sponsor_vpn_session_live_smoke_status=${phase5_settlement_layer_handoff_issuer_sponsor_vpn_session_live_smoke_status_json:-null} issuer_sponsor_vpn_session_live_smoke_ok=$phase5_settlement_layer_handoff_issuer_sponsor_vpn_session_live_smoke_ok_json"
 echo "[roadmap-progress-report] phase5_settlement_layer_handoff_issuer_settlement_status_live_smoke_status=${phase5_settlement_layer_handoff_issuer_settlement_status_live_smoke_status_json:-null} issuer_settlement_status_live_smoke_ok=$phase5_settlement_layer_handoff_issuer_settlement_status_live_smoke_ok_json"
+echo "[roadmap-progress-report] phase5_settlement_layer_handoff_issuer_admin_blockchain_handlers_coverage_status=${phase5_settlement_layer_handoff_issuer_admin_blockchain_handlers_coverage_status_json:-null} issuer_admin_blockchain_handlers_coverage_ok=$phase5_settlement_layer_handoff_issuer_admin_blockchain_handlers_coverage_ok_json"
+echo "[roadmap-progress-report] phase5_settlement_layer_handoff_exit_settlement_status_live_smoke_status=${phase5_settlement_layer_handoff_exit_settlement_status_live_smoke_status_json:-null} exit_settlement_status_live_smoke_ok=$phase5_settlement_layer_handoff_exit_settlement_status_live_smoke_ok_json"
 echo "[roadmap-progress-report] phase6_cosmos_l1_handoff_available=$phase6_cosmos_l1_handoff_available_json source_summary_json=${phase6_cosmos_l1_handoff_source_summary_json:-} source_kind=${phase6_cosmos_l1_handoff_source_summary_kind:-}"
 echo "[roadmap-progress-report] phase6_cosmos_l1_handoff_status=$phase6_cosmos_l1_handoff_status_json rc=$phase6_cosmos_l1_handoff_rc_json run_pipeline_ok=$phase6_cosmos_l1_handoff_run_pipeline_ok_json module_tx_surface_ok=$phase6_cosmos_l1_handoff_module_tx_surface_ok_json tdpnd_grpc_runtime_smoke_ok=$phase6_cosmos_l1_handoff_tdpnd_grpc_runtime_smoke_ok_json tdpnd_grpc_live_smoke_ok=$phase6_cosmos_l1_handoff_tdpnd_grpc_live_smoke_ok_json tdpnd_grpc_auth_live_smoke_ok=$phase6_cosmos_l1_handoff_tdpnd_grpc_auth_live_smoke_ok_json tdpnd_comet_runtime_smoke_ok=$phase6_cosmos_l1_handoff_tdpnd_comet_runtime_smoke_ok_json"
 echo "[roadmap-progress-report] phase7_mainnet_cutover_summary_available=$phase7_mainnet_cutover_summary_available_json source_summary_json=${phase7_mainnet_cutover_summary_source_summary_json:-} source_kind=${phase7_mainnet_cutover_summary_source_summary_kind:-}"
 echo "[roadmap-progress-report] phase7_mainnet_cutover_summary_status=$phase7_mainnet_cutover_summary_status_json rc=$phase7_mainnet_cutover_summary_rc_json check_ok=$phase7_mainnet_cutover_summary_check_ok_json run_ok=$phase7_mainnet_cutover_summary_run_ok_json handoff_check_ok=$phase7_mainnet_cutover_summary_handoff_check_ok_json handoff_run_ok=$phase7_mainnet_cutover_summary_handoff_run_ok_json mainnet_activation_gate_go_ok=$phase7_mainnet_cutover_summary_mainnet_activation_gate_go_ok_json mainnet_activation_gate_go_ok_source=${phase7_mainnet_cutover_summary_mainnet_activation_gate_go_ok_source_json:-} bootstrap_governance_graduation_gate_go_ok=$phase7_mainnet_cutover_summary_bootstrap_governance_graduation_gate_go_ok_json bootstrap_governance_graduation_gate_go_ok_source=${phase7_mainnet_cutover_summary_bootstrap_governance_graduation_gate_go_ok_source_json:-} tdpnd_grpc_live_smoke_ok=$phase7_mainnet_cutover_summary_tdpnd_grpc_live_smoke_ok_json module_tx_surface_ok=$phase7_mainnet_cutover_summary_module_tx_surface_ok_json tdpnd_grpc_auth_live_smoke_ok=$phase7_mainnet_cutover_summary_tdpnd_grpc_auth_live_smoke_ok_json tdpnd_comet_runtime_smoke_ok=$phase7_mainnet_cutover_summary_tdpnd_comet_runtime_smoke_ok_json cosmos_module_coverage_floor_ok=$phase7_mainnet_cutover_summary_cosmos_module_coverage_floor_ok_json cosmos_keeper_coverage_floor_ok=$phase7_mainnet_cutover_summary_cosmos_keeper_coverage_floor_ok_json cosmos_app_coverage_floor_ok=$phase7_mainnet_cutover_summary_cosmos_app_coverage_floor_ok_json dual_write_parity_ok=$phase7_mainnet_cutover_summary_dual_write_parity_ok_json"
-echo "[roadmap-progress-report] mainnet_activation_gate_available=$blockchain_mainnet_activation_gate_available_json source_summary_json=${blockchain_mainnet_activation_gate_source_summary_json:-} source_kind=${blockchain_mainnet_activation_gate_source_summary_kind:-} status=$blockchain_mainnet_activation_gate_status_json decision=${blockchain_mainnet_activation_gate_decision_json:-} go=$blockchain_mainnet_activation_gate_go_json no_go=$blockchain_mainnet_activation_gate_no_go_json"
+echo "[roadmap-progress-report] mainnet_activation_gate_available=$blockchain_mainnet_activation_gate_available_json source_summary_json=${blockchain_mainnet_activation_gate_source_summary_json:-} source_kind=${blockchain_mainnet_activation_gate_source_summary_kind:-} status=$blockchain_mainnet_activation_gate_status_json decision=${blockchain_mainnet_activation_gate_decision_json:-} go=$blockchain_mainnet_activation_gate_go_json no_go=$blockchain_mainnet_activation_gate_no_go_json summary_generated_at=${blockchain_mainnet_activation_gate_summary_generated_at_json:-} summary_age_sec=${blockchain_mainnet_activation_gate_summary_age_sec_json:-} summary_stale=${blockchain_mainnet_activation_gate_summary_stale_json:-null} summary_max_age_sec=${blockchain_mainnet_activation_gate_summary_max_age_sec_json:-}"
+echo "[roadmap-progress-report] mainnet_activation_refresh_evidence_available=$blockchain_mainnet_activation_refresh_evidence_available_json action_id=${blockchain_mainnet_activation_refresh_evidence_id_json:-} reason=${blockchain_mainnet_activation_refresh_evidence_reason:-} command=${blockchain_mainnet_activation_refresh_evidence_command:-}"
 echo "[roadmap-progress-report] blockchain_mainnet_activation_missing_metrics_action_available=$blockchain_mainnet_activation_missing_metrics_action_available_json action_id=${blockchain_mainnet_activation_missing_metrics_action_id:-} reason=${blockchain_mainnet_activation_missing_metrics_action_reason:-}"
 echo "[roadmap-progress-report] blockchain_mainnet_activation_missing_metrics_action_normalize_command=${blockchain_mainnet_activation_missing_metrics_action_normalize_command:-} rerun_bundle_command=${blockchain_mainnet_activation_missing_metrics_action_rerun_bundle_command:-}"
 echo "[roadmap-progress-report] blockchain_mainnet_activation_missing_metrics_action_checklist_command=${blockchain_mainnet_activation_missing_metrics_action_checklist_command:-}"
@@ -6653,7 +7740,7 @@ echo "[roadmap-progress-report] blockchain_mainnet_activation_missing_metrics_ac
 echo "[roadmap-progress-report] blockchain_mainnet_activation_missing_metrics_action_template_command=${blockchain_mainnet_activation_missing_metrics_action_template_command:-} prefill_command=${blockchain_mainnet_activation_missing_metrics_action_prefill_command:-} operator_pack_command=${blockchain_mainnet_activation_missing_metrics_action_operator_pack_command:-} cycle_command=${blockchain_mainnet_activation_missing_metrics_action_cycle_command:-}"
 echo "[roadmap-progress-report] blockchain_mainnet_activation_missing_metrics_action_seeded_cycle_command=${blockchain_mainnet_activation_missing_metrics_action_seeded_cycle_command:-}"
 echo "[roadmap-progress-report] blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command=${blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command:-}"
-echo "[roadmap-progress-report] bootstrap_governance_graduation_gate_available=$blockchain_bootstrap_governance_graduation_gate_available_json source_summary_json=${blockchain_bootstrap_governance_graduation_gate_source_summary_json:-} source_kind=${blockchain_bootstrap_governance_graduation_gate_source_summary_kind:-} status=$blockchain_bootstrap_governance_graduation_gate_status_json decision=${blockchain_bootstrap_governance_graduation_gate_decision_json:-} go=$blockchain_bootstrap_governance_graduation_gate_go_json no_go=$blockchain_bootstrap_governance_graduation_gate_no_go_json"
+echo "[roadmap-progress-report] bootstrap_governance_graduation_gate_available=$blockchain_bootstrap_governance_graduation_gate_available_json source_summary_json=${blockchain_bootstrap_governance_graduation_gate_source_summary_json:-} source_kind=${blockchain_bootstrap_governance_graduation_gate_source_summary_kind:-} status=$blockchain_bootstrap_governance_graduation_gate_status_json decision=${blockchain_bootstrap_governance_graduation_gate_decision_json:-} go=$blockchain_bootstrap_governance_graduation_gate_go_json no_go=$blockchain_bootstrap_governance_graduation_gate_no_go_json summary_generated_at=${blockchain_bootstrap_governance_graduation_gate_summary_generated_at_json:-} summary_age_sec=${blockchain_bootstrap_governance_graduation_gate_summary_age_sec_json:-} summary_stale=${blockchain_bootstrap_governance_graduation_gate_summary_stale_json:-null} summary_max_age_sec=${blockchain_bootstrap_governance_graduation_gate_summary_max_age_sec_json:-}"
 echo "[roadmap-progress-report] profile_default_gate_status=$profile_default_gate_status next_command=${profile_default_gate_next_command:-} next_command_sudo=${profile_default_gate_next_command_sudo:-} next_command_source=${profile_default_gate_next_command_source:-}"
 echo "[roadmap-progress-report] profile_default_gate_docker_hint_available=$profile_default_gate_docker_hint_available_json docker_hint_source=${profile_default_gate_docker_hint_source:-} campaign_check_summary_resolved=${profile_default_gate_campaign_check_summary_json_resolved:-} docker_matrix_summary_json=${profile_default_gate_docker_matrix_summary_json:-} docker_profile_summary_json=${profile_default_gate_docker_profile_summary_json:-}"
 echo "[roadmap-progress-report] resilience_handoff_available=$resilience_handoff_available_json source_summary_json=${resilience_handoff_source_summary_json:-}"

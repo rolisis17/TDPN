@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -124,6 +125,45 @@ func TestHandleRevokeTokenInvalidJSON(t *testing.T) {
 
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected status 400, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleRevokeTokenRejectsMalformedJSONShapes(t *testing.T) {
+	s := newAdminAuditRevokeTestService(t)
+
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "unknown field",
+			body: `{"jti":"token-abc","until":123,"unexpected":"value"}`,
+		},
+		{
+			name: "trailing json",
+			body: `{"jti":"token-abc","until":123} {"jti":"token-def"}`,
+		},
+		{
+			name: "oversized body",
+			body: `{"jti":"` + strings.Repeat("a", 9*1024) + `"}`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/v1/admin/revoke-token", bytes.NewReader([]byte(tc.body)))
+			req.Header.Set("X-Admin-Token", "admin-secret-token")
+			rr := httptest.NewRecorder()
+
+			s.handleRevokeToken(rr, req)
+
+			if rr.Code != http.StatusBadRequest {
+				t.Fatalf("expected status %d, got %d body=%s", http.StatusBadRequest, rr.Code, rr.Body.String())
+			}
+			if !strings.Contains(rr.Body.String(), "invalid json") {
+				t.Fatalf("expected invalid json error, got body=%s", rr.Body.String())
+			}
+		})
 	}
 }
 

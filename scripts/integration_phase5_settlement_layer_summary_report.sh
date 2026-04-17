@@ -97,7 +97,22 @@ cat >"$PASS_CI" <<'EOF_PASS_CI'
     "settlement_dual_asset_parity": {
       "status": "fail"
     },
+    "settlement_adapter_signed_tx_roundtrip": {
+      "status": "fail"
+    },
+    "settlement_shadow_env": {
+      "status": "fail"
+    },
+    "settlement_shadow_status_surface": {
+      "status": "fail"
+    },
     "issuer_sponsor_api_live_smoke": {
+      "status": "fail"
+    },
+    "issuer_sponsor_vpn_session_live_smoke": {
+      "status": "fail"
+    },
+    "issuer_settlement_status_live_smoke": {
       "status": "fail"
     },
     "issuer_admin_blockchain_handlers_coverage": {
@@ -120,6 +135,7 @@ cat >"$PASS_CHECK" <<'EOF_PASS_CHECK'
   "signals": {
     "settlement_dual_asset_parity_ok": false,
     "issuer_sponsor_api_live_smoke_ok": false,
+    "issuer_sponsor_vpn_session_live_smoke_ok": false,
     "issuer_admin_blockchain_handlers_coverage_ok": false
   }
 }
@@ -150,7 +166,15 @@ cat >"$PASS_HANDOFF_CHECK" <<'EOF_PASS_HANDOFF_CHECK'
   "rc": 0,
   "handoff": {
     "settlement_dual_asset_parity_ok": true,
+    "settlement_adapter_signed_tx_roundtrip_status": "pass",
+    "settlement_adapter_signed_tx_roundtrip_ok": true,
+    "settlement_shadow_env_status": "pass",
+    "settlement_shadow_env_ok": true,
+    "settlement_shadow_status_surface_status": "pass",
+    "settlement_shadow_status_surface_ok": true,
     "issuer_sponsor_api_live_smoke_ok": true,
+    "issuer_sponsor_vpn_session_live_smoke_ok": true,
+    "issuer_settlement_status_live_smoke_ok": true,
     "issuer_admin_blockchain_handlers_coverage_ok": true
   }
 }
@@ -211,6 +235,24 @@ if ! jq -e \
   and .signals.issuer_sponsor_api_live_smoke.fallback == false
   and .signals.issuer_sponsor_api_live_smoke.source_priority_index == 1
   and (.signals.issuer_sponsor_api_live_smoke.source_priority | length) == 5
+  and .signals.issuer_sponsor_vpn_session_live_smoke.status == "pass"
+  and .signals.issuer_sponsor_vpn_session_live_smoke.ok == true
+  and .signals.issuer_sponsor_vpn_session_live_smoke.resolved == true
+  and .signals.issuer_sponsor_vpn_session_live_smoke.source == "phase5_settlement_layer_handoff_check_summary"
+  and .signals.issuer_sponsor_vpn_session_live_smoke.source_field == "handoff.issuer_sponsor_vpn_session_live_smoke_ok"
+  and .signals.issuer_sponsor_vpn_session_live_smoke.source_path == $expected_signal_path
+  and .signals.issuer_sponsor_vpn_session_live_smoke.fallback == false
+  and .signals.issuer_sponsor_vpn_session_live_smoke.source_priority_index == 1
+  and (.signals.issuer_sponsor_vpn_session_live_smoke.source_priority | length) == 5
+  and .signals.issuer_settlement_status_live_smoke.status == "pass"
+  and .signals.issuer_settlement_status_live_smoke.ok == true
+  and .signals.issuer_settlement_status_live_smoke.resolved == true
+  and .signals.issuer_settlement_status_live_smoke.source == "phase5_settlement_layer_handoff_check_summary"
+  and .signals.issuer_settlement_status_live_smoke.source_field == "handoff.issuer_settlement_status_live_smoke_ok"
+  and .signals.issuer_settlement_status_live_smoke.source_path == $expected_signal_path
+  and .signals.issuer_settlement_status_live_smoke.fallback == false
+  and .signals.issuer_settlement_status_live_smoke.source_priority_index == 1
+  and (.signals.issuer_settlement_status_live_smoke.source_priority | length) == 6
   and .signals.settlement_dual_asset_parity.status == "pass"
   and .signals.settlement_dual_asset_parity.ok == true
   and .signals.settlement_dual_asset_parity.resolved == true
@@ -220,6 +262,33 @@ if ! jq -e \
   and .signals.settlement_dual_asset_parity.fallback == false
   and .signals.settlement_dual_asset_parity.source_priority_index == 1
   and (.signals.settlement_dual_asset_parity.source_priority | length) == 5
+  and .signals.settlement_adapter_signed_tx_roundtrip.status == "pass"
+  and .signals.settlement_adapter_signed_tx_roundtrip.ok == true
+  and .signals.settlement_adapter_signed_tx_roundtrip.resolved == true
+  and .signals.settlement_adapter_signed_tx_roundtrip.source == "phase5_settlement_layer_handoff_check_summary"
+  and .signals.settlement_adapter_signed_tx_roundtrip.source_field == "handoff.settlement_adapter_signed_tx_roundtrip_ok"
+  and .signals.settlement_adapter_signed_tx_roundtrip.source_path == $expected_signal_path
+  and .signals.settlement_adapter_signed_tx_roundtrip.fallback == false
+  and .signals.settlement_adapter_signed_tx_roundtrip.source_priority_index == 1
+  and (.signals.settlement_adapter_signed_tx_roundtrip.source_priority | length) == 6
+  and .signals.settlement_shadow_env.status == "pass"
+  and .signals.settlement_shadow_env.ok == true
+  and .signals.settlement_shadow_env.resolved == true
+  and .signals.settlement_shadow_env.source == "phase5_settlement_layer_handoff_check_summary"
+  and .signals.settlement_shadow_env.source_field == "handoff.settlement_shadow_env_ok"
+  and .signals.settlement_shadow_env.source_path == $expected_signal_path
+  and .signals.settlement_shadow_env.fallback == false
+  and .signals.settlement_shadow_env.source_priority_index == 1
+  and (.signals.settlement_shadow_env.source_priority | length) == 6
+  and .signals.settlement_shadow_status_surface.status == "pass"
+  and .signals.settlement_shadow_status_surface.ok == true
+  and .signals.settlement_shadow_status_surface.resolved == true
+  and .signals.settlement_shadow_status_surface.source == "phase5_settlement_layer_handoff_check_summary"
+  and .signals.settlement_shadow_status_surface.source_field == "handoff.settlement_shadow_status_surface_ok"
+  and .signals.settlement_shadow_status_surface.source_path == $expected_signal_path
+  and .signals.settlement_shadow_status_surface.fallback == false
+  and .signals.settlement_shadow_status_surface.source_priority_index == 1
+  and (.signals.settlement_shadow_status_surface.source_priority | length) == 6
   and (
     if (.signals | has("issuer_admin_blockchain_handlers_coverage")) then
       .signals.issuer_admin_blockchain_handlers_coverage.status == "pass"
@@ -237,6 +306,12 @@ if ! jq -e \
 ' "$PASS_REPORT_JSON" >/dev/null; then
   echo "phase5 summary report pass-path contract mismatch"
   cat "$PASS_REPORT_JSON"
+  cat "$PASS_LOG"
+  exit 1
+fi
+
+if ! grep -Fq "[phase5-summary] issuer_sponsor_vpn_session_live_smoke: status=pass ok=true source=phase5_settlement_layer_handoff_check_summary fallback=0 path=$PASS_HANDOFF_CHECK" "$PASS_LOG"; then
+  echo "expected issuer_sponsor_vpn_session_live_smoke log line in pass-path output"
   cat "$PASS_LOG"
   exit 1
 fi
@@ -415,6 +490,22 @@ if ! jq -e '
   and .signals.issuer_sponsor_api_live_smoke.source_path == null
   and .signals.issuer_sponsor_api_live_smoke.fallback == false
   and .signals.issuer_sponsor_api_live_smoke.source_priority_index == null
+  and .signals.issuer_sponsor_vpn_session_live_smoke.status == "missing"
+  and .signals.issuer_sponsor_vpn_session_live_smoke.ok == null
+  and .signals.issuer_sponsor_vpn_session_live_smoke.resolved == false
+  and .signals.issuer_sponsor_vpn_session_live_smoke.source == "unresolved"
+  and .signals.issuer_sponsor_vpn_session_live_smoke.source_field == null
+  and .signals.issuer_sponsor_vpn_session_live_smoke.source_path == null
+  and .signals.issuer_sponsor_vpn_session_live_smoke.fallback == false
+  and .signals.issuer_sponsor_vpn_session_live_smoke.source_priority_index == null
+  and .signals.issuer_settlement_status_live_smoke.status == "missing"
+  and .signals.issuer_settlement_status_live_smoke.ok == null
+  and .signals.issuer_settlement_status_live_smoke.resolved == false
+  and .signals.issuer_settlement_status_live_smoke.source == "unresolved"
+  and .signals.issuer_settlement_status_live_smoke.source_field == null
+  and .signals.issuer_settlement_status_live_smoke.source_path == null
+  and .signals.issuer_settlement_status_live_smoke.fallback == false
+  and .signals.issuer_settlement_status_live_smoke.source_priority_index == null
   and .signals.settlement_dual_asset_parity.status == "missing"
   and .signals.settlement_dual_asset_parity.ok == null
   and .signals.settlement_dual_asset_parity.resolved == false
@@ -423,6 +514,30 @@ if ! jq -e '
   and .signals.settlement_dual_asset_parity.source_path == null
   and .signals.settlement_dual_asset_parity.fallback == false
   and .signals.settlement_dual_asset_parity.source_priority_index == null
+  and .signals.settlement_adapter_signed_tx_roundtrip.status == "missing"
+  and .signals.settlement_adapter_signed_tx_roundtrip.ok == null
+  and .signals.settlement_adapter_signed_tx_roundtrip.resolved == false
+  and .signals.settlement_adapter_signed_tx_roundtrip.source == "unresolved"
+  and .signals.settlement_adapter_signed_tx_roundtrip.source_field == null
+  and .signals.settlement_adapter_signed_tx_roundtrip.source_path == null
+  and .signals.settlement_adapter_signed_tx_roundtrip.fallback == false
+  and .signals.settlement_adapter_signed_tx_roundtrip.source_priority_index == null
+  and .signals.settlement_shadow_env.status == "missing"
+  and .signals.settlement_shadow_env.ok == null
+  and .signals.settlement_shadow_env.resolved == false
+  and .signals.settlement_shadow_env.source == "unresolved"
+  and .signals.settlement_shadow_env.source_field == null
+  and .signals.settlement_shadow_env.source_path == null
+  and .signals.settlement_shadow_env.fallback == false
+  and .signals.settlement_shadow_env.source_priority_index == null
+  and .signals.settlement_shadow_status_surface.status == "missing"
+  and .signals.settlement_shadow_status_surface.ok == null
+  and .signals.settlement_shadow_status_surface.resolved == false
+  and .signals.settlement_shadow_status_surface.source == "unresolved"
+  and .signals.settlement_shadow_status_surface.source_field == null
+  and .signals.settlement_shadow_status_surface.source_path == null
+  and .signals.settlement_shadow_status_surface.fallback == false
+  and .signals.settlement_shadow_status_surface.source_priority_index == null
   and (
     if (.signals | has("issuer_admin_blockchain_handlers_coverage")) then
       .signals.issuer_admin_blockchain_handlers_coverage.status == "missing"
@@ -517,7 +632,15 @@ cat >"$FALLBACK_HANDOFF_CHECK_FROM_HANDOFF_RUN" <<'EOF_FALLBACK_HANDOFF_CHECK_FR
   "rc": 0,
   "handoff": {
     "settlement_dual_asset_parity_ok": true,
+    "settlement_adapter_signed_tx_roundtrip_status": "pass",
+    "settlement_adapter_signed_tx_roundtrip_ok": true,
+    "settlement_shadow_env_status": "pass",
+    "settlement_shadow_env_ok": true,
+    "settlement_shadow_status_surface_status": "pass",
+    "settlement_shadow_status_surface_ok": true,
     "issuer_sponsor_api_live_smoke_ok": true,
+    "issuer_sponsor_vpn_session_live_smoke_ok": true,
+    "issuer_settlement_status_live_smoke_ok": true,
     "issuer_admin_blockchain_handlers_coverage_ok": true
   }
 }
@@ -536,6 +659,7 @@ cat >"$FALLBACK_REPORTS_DIR/phase5_settlement_layer_check_summary.json" <<'EOF_F
   "signals": {
     "settlement_dual_asset_parity_ok": false,
     "issuer_sponsor_api_live_smoke_ok": false,
+    "issuer_sponsor_vpn_session_live_smoke_ok": false,
     "issuer_admin_blockchain_handlers_coverage_ok": false
   }
 }
@@ -603,6 +727,22 @@ if ! jq -e \
   and .signals.issuer_sponsor_api_live_smoke.source_path == $expected_signal_path
   and .signals.issuer_sponsor_api_live_smoke.fallback == true
   and .signals.issuer_sponsor_api_live_smoke.source_priority_index == 2
+  and .signals.issuer_sponsor_vpn_session_live_smoke.status == "pass"
+  and .signals.issuer_sponsor_vpn_session_live_smoke.ok == true
+  and .signals.issuer_sponsor_vpn_session_live_smoke.resolved == true
+  and .signals.issuer_sponsor_vpn_session_live_smoke.source == "phase5_settlement_layer_handoff_run_summary.artifacts.handoff_summary_json"
+  and .signals.issuer_sponsor_vpn_session_live_smoke.source_field == "handoff.issuer_sponsor_vpn_session_live_smoke_ok"
+  and .signals.issuer_sponsor_vpn_session_live_smoke.source_path == $expected_signal_path
+  and .signals.issuer_sponsor_vpn_session_live_smoke.fallback == true
+  and .signals.issuer_sponsor_vpn_session_live_smoke.source_priority_index == 2
+  and .signals.issuer_settlement_status_live_smoke.status == "pass"
+  and .signals.issuer_settlement_status_live_smoke.ok == true
+  and .signals.issuer_settlement_status_live_smoke.resolved == true
+  and .signals.issuer_settlement_status_live_smoke.source == "phase5_settlement_layer_handoff_run_summary.artifacts.handoff_summary_json"
+  and .signals.issuer_settlement_status_live_smoke.source_field == "handoff.issuer_settlement_status_live_smoke_ok"
+  and .signals.issuer_settlement_status_live_smoke.source_path == $expected_signal_path
+  and .signals.issuer_settlement_status_live_smoke.fallback == true
+  and .signals.issuer_settlement_status_live_smoke.source_priority_index == 2
   and .signals.settlement_dual_asset_parity.status == "pass"
   and .signals.settlement_dual_asset_parity.ok == true
   and .signals.settlement_dual_asset_parity.resolved == true
@@ -611,6 +751,30 @@ if ! jq -e \
   and .signals.settlement_dual_asset_parity.source_path == $expected_signal_path
   and .signals.settlement_dual_asset_parity.fallback == true
   and .signals.settlement_dual_asset_parity.source_priority_index == 2
+  and .signals.settlement_adapter_signed_tx_roundtrip.status == "pass"
+  and .signals.settlement_adapter_signed_tx_roundtrip.ok == true
+  and .signals.settlement_adapter_signed_tx_roundtrip.resolved == true
+  and .signals.settlement_adapter_signed_tx_roundtrip.source == "phase5_settlement_layer_handoff_run_summary.artifacts.handoff_summary_json"
+  and .signals.settlement_adapter_signed_tx_roundtrip.source_field == "handoff.settlement_adapter_signed_tx_roundtrip_ok"
+  and .signals.settlement_adapter_signed_tx_roundtrip.source_path == $expected_signal_path
+  and .signals.settlement_adapter_signed_tx_roundtrip.fallback == true
+  and .signals.settlement_adapter_signed_tx_roundtrip.source_priority_index == 2
+  and .signals.settlement_shadow_env.status == "pass"
+  and .signals.settlement_shadow_env.ok == true
+  and .signals.settlement_shadow_env.resolved == true
+  and .signals.settlement_shadow_env.source == "phase5_settlement_layer_handoff_run_summary.artifacts.handoff_summary_json"
+  and .signals.settlement_shadow_env.source_field == "handoff.settlement_shadow_env_ok"
+  and .signals.settlement_shadow_env.source_path == $expected_signal_path
+  and .signals.settlement_shadow_env.fallback == true
+  and .signals.settlement_shadow_env.source_priority_index == 2
+  and .signals.settlement_shadow_status_surface.status == "pass"
+  and .signals.settlement_shadow_status_surface.ok == true
+  and .signals.settlement_shadow_status_surface.resolved == true
+  and .signals.settlement_shadow_status_surface.source == "phase5_settlement_layer_handoff_run_summary.artifacts.handoff_summary_json"
+  and .signals.settlement_shadow_status_surface.source_field == "handoff.settlement_shadow_status_surface_ok"
+  and .signals.settlement_shadow_status_surface.source_path == $expected_signal_path
+  and .signals.settlement_shadow_status_surface.fallback == true
+  and .signals.settlement_shadow_status_surface.source_priority_index == 2
   and (
     if (.signals | has("issuer_admin_blockchain_handlers_coverage")) then
       .signals.issuer_admin_blockchain_handlers_coverage.status == "pass"

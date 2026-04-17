@@ -237,7 +237,8 @@ Usage:
   ./scripts/easy_node.sh local-api-session [--api-addr HOST:PORT] [--config PATH] [--config-v1-path PATH] [--service-status-command CMD] [--service-start-command CMD] [--service-stop-command CMD] [--service-restart-command CMD] [--dry-run [0|1]]
   ./scripts/easy_node.sh profile-compare-docker-matrix [--dry-run [0|1]] [profile-compare-campaign args...]
   ./scripts/easy_node.sh profile-default-gate-run [--directory-a HOST_OR_URL|--host-a HOST_OR_URL] [--directory-b HOST_OR_URL|--host-b HOST_OR_URL] [--campaign-subject INVITE_KEY|--subject INVITE_KEY] [--heartbeat-interval-sec N] [profile-compare-campaign-signoff args...]
-  ./scripts/easy_node.sh profile-default-gate-live [--host-a HOST|--directory-a HOST_OR_URL] [--host-b HOST|--directory-b HOST_OR_URL] [--campaign-subject INVITE_KEY|--subject INVITE_KEY|--key INVITE_KEY] [--heartbeat-interval-sec N] [profile-default-gate-run args...]
+  ./scripts/easy_node.sh profile-default-gate-live [--host-a HOST|--directory-a HOST_OR_URL] [--host-b HOST|--directory-b HOST_OR_URL] [--campaign-subject INVITE_KEY|--subject INVITE_KEY|--key INVITE_KEY|--invite-key INVITE_KEY] [--heartbeat-interval-sec N] [profile-default-gate-run args...]
+  ./scripts/easy_node.sh profile-default-gate-token-probe --directory-url URL --issuer-url URL --exit-url URL --campaign-subject INVITE_KEY [--reports-dir DIR] [--connect-timeout-sec N] [--max-time-sec N] [--summary-json PATH] [--print-summary-json [0|1]] [--show-json [0|1]]
   ./scripts/easy_node.sh vpn-rc-matrix-path [--reports-dir DIR] [--print-report [0|1]] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh vpn-rc-standard-path [--print-report [0|1]] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh vpn-rc-resilience-path [--docker-profile-matrix-timeout-sec N] [--rc-matrix-path-timeout-sec N] [vpn_rc_resilience_path args...]
@@ -245,6 +246,8 @@ Usage:
   ./scripts/easy_node.sh blockchain-fastlane [blockchain_fastlane args...]
   ./scripts/easy_node.sh blockchain-gate-bundle [blockchain_gate_bundle args...]
   ./scripts/easy_node.sh ci-blockchain-parallel-sweep [ci_blockchain_parallel_sweep args...]
+  ./scripts/easy_node.sh blockchain-staged-file-groups [blockchain_staged_file_groups args...]
+  ./scripts/easy_node.sh blockchain-cosmos-only-guardrail [blockchain_cosmos_only_guardrail args...]
   ./scripts/easy_node.sh blockchain-mainnet-activation-metrics-prefill [blockchain_mainnet_activation_metrics_prefill args...]
   ./scripts/easy_node.sh blockchain-mainnet-activation-metrics-input [blockchain_mainnet_activation_metrics_input args...]
   ./scripts/easy_node.sh blockchain-mainnet-activation-metrics-missing-checklist [blockchain_mainnet_activation_metrics_missing_checklist args...]
@@ -287,6 +290,7 @@ Usage:
   ./scripts/easy_node.sh phase5-settlement-layer-handoff-run [phase5_settlement_layer_handoff_run args...]
   ./scripts/easy_node.sh phase5-settlement-layer-summary-report [phase5_settlement_layer_summary_report args...]
   ./scripts/easy_node.sh issuer-sponsor-api-live-smoke [issuer_sponsor_api_live_smoke args...]
+  ./scripts/easy_node.sh issuer-sponsor-vpn-session-live-smoke [issuer_sponsor_vpn_session_live_smoke args...]
   ./scripts/easy_node.sh issuer-settlement-status-live-smoke [issuer_settlement_status_live_smoke args...]
   ./scripts/easy_node.sh ci-phase6-cosmos-l1-build-testnet [ci_phase6_cosmos_l1_build_testnet args...]
   ./scripts/easy_node.sh ci-phase6-cosmos-l1-contracts [ci_phase6_cosmos_l1_contracts args...]
@@ -351,7 +355,8 @@ Usage:
   ./scripts/easy_node.sh profile-compare-campaign-check [--campaign-summary-json PATH] [--trend-summary-json PATH] [--reports-dir DIR] [--require-status-pass [0|1]] [--require-trend-status-pass [0|1]] [--require-min-runs-total N] [--require-max-runs-fail N] [--require-max-runs-warn N] [--require-min-runs-with-summary N] [--require-recommendation-support-rate-pct N] [--require-recommended-profile PROFILE] [--allow-recommended-profiles CSV] [--disallow-experimental-default [0|1]] [--require-trend-source CSV] [--fail-on-no-go [0|1]] [--summary-json PATH] [--show-json [0|1]] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh profile-compare-campaign-signoff [--reports-dir DIR] [--campaign-summary-json PATH] [--campaign-report-md PATH] [--campaign-check-summary-json PATH] [--refresh-campaign [0|1]] [--fail-on-no-go [0|1]] [--allow-concurrent [0|1]] [--allow-summary-overwrite [0|1]] [--require-status-pass [0|1]] [--require-trend-status-pass [0|1]] [--require-min-runs-total N] [--require-max-runs-fail N] [--require-max-runs-warn N] [--require-min-runs-with-summary N] [--require-recommendation-support-rate-pct N] [--require-recommended-profile PROFILE] [--allow-recommended-profiles CSV] [--disallow-experimental-default [0|1]] [--require-trend-source CSV] [--campaign-execution-mode docker|local] [--campaign-directory-urls URL[,URL...]] [--campaign-bootstrap-directory URL] [--campaign-discovery-wait-sec N] [--campaign-issuer-url URL] [--campaign-entry-url URL] [--campaign-exit-url URL] [--campaign-subject ID|--campaign-anon-cred TOKEN] [--subject ID (alias for --campaign-subject)|--anon-cred TOKEN (alias for --campaign-anon-cred)] [--campaign-start-local-stack auto|0|1] [--campaign-timeout-sec N] [--campaign-endpoint-preflight-timeout-sec N] [--summary-json PATH] [--show-json [0|1]] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh profile-default-gate-run [--directory-a HOST_OR_URL|--host-a HOST_OR_URL] [--directory-b HOST_OR_URL|--host-b HOST_OR_URL] [--directory-a-port N] [--directory-b-port N] [--endpoint-wait-timeout-sec N] [--endpoint-wait-interval-sec N] [--endpoint-connect-timeout-sec N] [--campaign-subject INVITE_KEY|--subject INVITE_KEY] [--heartbeat-interval-sec N] [profile-compare-campaign-signoff args...]
-  ./scripts/easy_node.sh profile-default-gate-live [--host-a HOST|--directory-a HOST_OR_URL] [--host-b HOST|--directory-b HOST_OR_URL] [--campaign-subject INVITE_KEY|--subject INVITE_KEY|--key INVITE_KEY] [--reports-dir DIR] [--campaign-timeout-sec N] [--heartbeat-interval-sec N] [--summary-json PATH] [--print-summary-json [0|1]] [profile-default-gate-run args...]
+  ./scripts/easy_node.sh profile-default-gate-live [--host-a HOST|--directory-a HOST_OR_URL] [--host-b HOST|--directory-b HOST_OR_URL] [--campaign-subject INVITE_KEY|--subject INVITE_KEY|--key INVITE_KEY|--invite-key INVITE_KEY] [--reports-dir DIR] [--campaign-timeout-sec N] [--heartbeat-interval-sec N] [--summary-json PATH] [--print-summary-json [0|1]] [profile-default-gate-run args...]
+  ./scripts/easy_node.sh profile-default-gate-token-probe --directory-url URL --issuer-url URL --exit-url URL --campaign-subject INVITE_KEY [--reports-dir DIR] [--connect-timeout-sec N] [--max-time-sec N] [--summary-json PATH] [--print-summary-json [0|1]] [--show-json [0|1]]
   ./scripts/easy_node.sh client-vpn-preflight [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--issuer-url URL] [--issuer-urls URL[,URL...]] [--entry-url URL] [--exit-url URL] [--prod-profile [0|1]] [--interface IFACE] [--timeout-sec N] [--require-root [0|1]] [--operator-floor-check [0|1]] [--operator-min-operators N] [--operator-min-entry-operators N] [--operator-min-exit-operators N] [--middle-relay-check [0|1]] [--middle-relay-min-operators N] [--middle-relay-require-distinct [0|1]] [--issuer-quorum-check [0|1]] [--issuer-min-operators N] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH]
   ./scripts/easy_node.sh simple-client-vpn-preflight [--bootstrap-directory URL] [--discovery-wait-sec N] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--prod-profile [0|1]] [--interface IFACE]
   ./scripts/easy_node.sh client-vpn-up [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-urls URL[,URL...]] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--exit-country CC] [--exit-region REGION] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--beta-profile [0|1]] [--prod-profile [0|1]] [--operator-floor-check [0|1]] [--operator-min-operators N] [--operator-min-entry-operators N] [--operator-min-exit-operators N] [--issuer-quorum-check [0|1]] [--issuer-min-operators N] [--interface IFACE] [--proxy-addr HOST:PORT] [--private-key-file PATH] [--allowed-ips CIDR] [--install-route [0|1]] [--startup-sync-timeout-sec N] [--session-reuse [0|1]] [--allow-session-churn [0|1]] [--ready-timeout-sec N] [--force-restart [0|1]] [--foreground [0|1]] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH] [--log-file PATH]
@@ -386,6 +391,8 @@ Usage:
   ./scripts/easy_node.sh blockchain-fastlane [blockchain_fastlane args...]
   ./scripts/easy_node.sh blockchain-gate-bundle [blockchain_gate_bundle args...]
   ./scripts/easy_node.sh ci-blockchain-parallel-sweep [ci_blockchain_parallel_sweep args...]
+  ./scripts/easy_node.sh blockchain-staged-file-groups [blockchain_staged_file_groups args...]
+  ./scripts/easy_node.sh blockchain-cosmos-only-guardrail [blockchain_cosmos_only_guardrail args...]
   ./scripts/easy_node.sh blockchain-mainnet-activation-metrics-prefill [blockchain_mainnet_activation_metrics_prefill args...]
   ./scripts/easy_node.sh blockchain-mainnet-activation-metrics-input [blockchain_mainnet_activation_metrics_input args...]
   ./scripts/easy_node.sh blockchain-mainnet-activation-metrics-missing-checklist [blockchain_mainnet_activation_metrics_missing_checklist args...]
@@ -428,6 +435,7 @@ Usage:
   ./scripts/easy_node.sh phase5-settlement-layer-handoff-run [phase5_settlement_layer_handoff_run args...]
   ./scripts/easy_node.sh phase5-settlement-layer-summary-report [phase5_settlement_layer_summary_report args...]
   ./scripts/easy_node.sh issuer-sponsor-api-live-smoke [issuer_sponsor_api_live_smoke args...]
+  ./scripts/easy_node.sh issuer-sponsor-vpn-session-live-smoke [issuer_sponsor_vpn_session_live_smoke args...]
   ./scripts/easy_node.sh issuer-settlement-status-live-smoke [issuer_settlement_status_live_smoke args...]
   ./scripts/easy_node.sh ci-phase6-cosmos-l1-build-testnet [ci_phase6_cosmos_l1_build_testnet args...]
   ./scripts/easy_node.sh ci-phase6-cosmos-l1-contracts [ci_phase6_cosmos_l1_contracts args...]
@@ -518,6 +526,7 @@ Notes:
   - profile-compare-campaign-signoff runs campaign-check fail-closed in one command; `--refresh-campaign 1` attempts a fresh campaign run, while `--refresh-campaign 0` reuses existing campaign artifacts, and emits one signoff summary JSON for handoff. In invite-key flows, prefer `--campaign-subject` (alias `--subject`) with a real key value; fallback order is `CAMPAIGN_SUBJECT` then `INVITE_KEY`.
   - profile-default-gate-run wraps profile-compare-campaign-signoff for final optional VPN default-profile gating with A/B endpoint wait-retry preflight and roadmap docker defaults. This wrapper is invite-key subject only and rejects anon-cred flags.
   - profile-default-gate-live is a convenience wrapper for real-host runs that derives A/B hosts from `A_HOST`/`B_HOST` and subject from `INVITE_KEY` when flags are omitted, then calls `profile-default-gate-run` with standard `:8081-:8084` endpoint mapping.
+  - profile-default-gate-token-probe runs a fast live token-proof binding probe against directory/issuer/exit endpoints so operator key-binding mismatches are visible before a long campaign refresh run.
   - public path-profile contract is `1hop|2hop|3hop` with compatibility aliases `speed|balanced|private` (plus explicit experimental `speed-1hop` alias on non-strict `client-test`/`client-vpn-up` only). Legacy aliases `fast|privacy` are still accepted for compatibility but are deprecated; simple help should surface the preset aliases first and push experimental aliases into expert help.
   - wg-only-local-test runs host real-WireGuard integration checks (Linux + root required).
   - real-wg-privileged-matrix runs the host Linux root real-WG privileged matrix directly.
@@ -548,6 +557,8 @@ Notes:
   - blockchain-fastlane wraps the blockchain acceleration helper path and preserves pass-through args.
   - blockchain-gate-bundle wraps the blockchain gate bundle helper path and preserves pass-through args.
   - ci-blockchain-parallel-sweep wraps the blockchain parallel sweep helper path and preserves pass-through args.
+  - blockchain-staged-file-groups wraps the blockchain staged file groups helper path and preserves pass-through args.
+  - blockchain-cosmos-only-guardrail wraps the Cosmos-only blockchain drift guardrail helper path and preserves pass-through args.
   - blockchain-mainnet-activation-metrics-prefill wraps the blockchain metrics prefill helper path and preserves pass-through args.
   - blockchain-mainnet-activation-metrics-input wraps the blockchain metrics evidence normalizer helper path and preserves pass-through args.
   - blockchain-mainnet-activation-metrics-missing-checklist wraps the blockchain missing-metrics checklist helper path and preserves pass-through args.
@@ -590,6 +601,7 @@ Notes:
   - phase5-settlement-layer-handoff-run wraps the Phase-5 settlement-layer handoff run helper script with pass-through args.
   - phase5-settlement-layer-summary-report wraps the Phase-5 settlement summary-report helper script with pass-through args.
   - issuer-sponsor-api-live-smoke wraps the phase5 issuer sponsor API live-smoke helper script with pass-through args.
+  - issuer-sponsor-vpn-session-live-smoke wraps the phase5 issuer sponsor VPN session live-smoke helper script with pass-through args.
   - issuer-settlement-status-live-smoke wraps the phase5 issuer settlement-status live-smoke helper script with pass-through args.
   - ci-phase6-cosmos-l1-build-testnet runs the Phase-6 Cosmos L1 build-testnet gate with fail-fast behavior.
   - ci-phase6-cosmos-l1-contracts runs the Phase-6 Cosmos L1 contracts gate with fail-fast behavior.
@@ -8254,6 +8266,24 @@ blockchain_gate_bundle() {
   "$bundle_script" "$@"
 }
 
+blockchain_staged_file_groups() {
+  local staged_file_groups_script="${BLOCKCHAIN_STAGED_FILE_GROUPS_SCRIPT:-$ROOT_DIR/scripts/blockchain_staged_file_groups.sh}"
+  if [[ ! -x "$staged_file_groups_script" ]]; then
+    echo "missing helper script: $staged_file_groups_script"
+    exit 2
+  fi
+  "$staged_file_groups_script" "$@"
+}
+
+blockchain_cosmos_only_guardrail() {
+  local guardrail_script="${BLOCKCHAIN_COSMOS_ONLY_GUARDRAIL_SCRIPT:-$ROOT_DIR/scripts/blockchain_cosmos_only_guardrail.sh}"
+  if [[ ! -x "$guardrail_script" ]]; then
+    echo "missing helper script: $guardrail_script"
+    exit 2
+  fi
+  "$guardrail_script" "$@"
+}
+
 ci_blockchain_parallel_sweep() {
   local sweep_script="${CI_BLOCKCHAIN_PARALLEL_SWEEP_SCRIPT:-$ROOT_DIR/scripts/ci_blockchain_parallel_sweep.sh}"
   if [[ ! -x "$sweep_script" ]]; then
@@ -8521,6 +8551,11 @@ issuer_sponsor_api_live_smoke() {
   "$live_smoke_script" "$@"
 }
 
+issuer_sponsor_vpn_session_live_smoke() {
+  local live_smoke_script="${ISSUER_SPONSOR_VPN_SESSION_LIVE_SMOKE_SCRIPT:-$ROOT_DIR/scripts/integration_issuer_sponsor_vpn_session_live_smoke.sh}"
+  "$live_smoke_script" "$@"
+}
+
 issuer_settlement_status_live_smoke() {
   local live_smoke_script="${ISSUER_SETTLEMENT_STATUS_LIVE_SMOKE_SCRIPT:-$ROOT_DIR/scripts/integration_issuer_settlement_status_live_smoke.sh}"
   "$live_smoke_script" "$@"
@@ -8681,17 +8716,22 @@ profile_compare_campaign_signoff() {
   local campaign_subject_value=""
   local anon_alias_value=""
   local campaign_anon_value=""
+  require_flag_value_or_die() {
+    local flag="$1"
+    local value="${2:-}"
+    if [[ -z "$value" || "$value" == --* ]]; then
+      echo "$flag requires a value"
+      exit 2
+    fi
+  }
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --campaign-subject)
+        require_flag_value_or_die "$1" "${2:-}"
         forwarded+=("$1")
-        if [[ $# -ge 2 ]]; then
-          campaign_subject_value="${2:-}"
-          forwarded+=("$2")
-          shift 2
-        else
-          shift
-        fi
+        campaign_subject_value="${2:-}"
+        forwarded+=("$2")
+        shift 2
         ;;
       --campaign-subject=*)
         campaign_subject_value="${1#--campaign-subject=}"
@@ -8699,14 +8739,11 @@ profile_compare_campaign_signoff() {
         shift
         ;;
       --subject)
+        require_flag_value_or_die "$1" "${2:-}"
         forwarded+=(--campaign-subject)
-        if [[ $# -ge 2 ]]; then
-          subject_alias_value="${2:-}"
-          forwarded+=("$2")
-          shift 2
-        else
-          shift
-        fi
+        subject_alias_value="${2:-}"
+        forwarded+=("$2")
+        shift 2
         ;;
       --subject=*)
         subject_alias_value="${1#--subject=}"
@@ -8714,14 +8751,11 @@ profile_compare_campaign_signoff() {
         shift
         ;;
       --campaign-anon-cred)
+        require_flag_value_or_die "$1" "${2:-}"
         forwarded+=("$1")
-        if [[ $# -ge 2 ]]; then
-          campaign_anon_value="${2:-}"
-          forwarded+=("$2")
-          shift 2
-        else
-          shift
-        fi
+        campaign_anon_value="${2:-}"
+        forwarded+=("$2")
+        shift 2
         ;;
       --campaign-anon-cred=*)
         campaign_anon_value="${1#--campaign-anon-cred=}"
@@ -8729,14 +8763,11 @@ profile_compare_campaign_signoff() {
         shift
         ;;
       --anon-cred)
+        require_flag_value_or_die "$1" "${2:-}"
         forwarded+=(--campaign-anon-cred)
-        if [[ $# -ge 2 ]]; then
-          anon_alias_value="${2:-}"
-          forwarded+=("$2")
-          shift 2
-        else
-          shift
-        fi
+        anon_alias_value="${2:-}"
+        forwarded+=("$2")
+        shift 2
         ;;
       --anon-cred=*)
         anon_alias_value="${1#--anon-cred=}"
@@ -8765,12 +8796,17 @@ profile_default_gate_run() {
   "$profile_default_gate_run_script" "$@"
 }
 
+profile_default_gate_token_probe() {
+  local profile_default_gate_token_probe_script="${PROFILE_DEFAULT_GATE_TOKEN_PROBE_SCRIPT:-$ROOT_DIR/scripts/profile_default_gate_token_probe.sh}"
+  "$profile_default_gate_token_probe_script" "$@"
+}
+
 profile_default_gate_live() {
   local raw_host_a="${A_HOST:-}"
   local raw_host_b="${B_HOST:-}"
   local campaign_subject="${INVITE_KEY:-}"
   local reports_dir=".easy-node-logs"
-  local campaign_timeout_sec="1200"
+  local campaign_timeout_sec="2400"
   local heartbeat_interval_sec=""
   local summary_json=".easy-node-logs/profile_compare_campaign_signoff_summary.json"
   local print_summary_json="1"
@@ -8916,7 +8952,7 @@ profile_default_gate_live() {
     exit 2
   fi
   if [[ -z "$campaign_subject" ]]; then
-    echo "profile-default-gate-live requires invite subject (set --campaign-subject/--subject/--key or INVITE_KEY)"
+    echo "profile-default-gate-live requires invite subject (set --campaign-subject/--subject/--key/--invite-key or INVITE_KEY)"
     exit 2
   fi
   if ! [[ "$campaign_timeout_sec" =~ ^[0-9]+$ ]] || (( campaign_timeout_sec <= 0 )); then
@@ -15130,6 +15166,10 @@ main() {
       shift
       profile_default_gate_live "$@"
       ;;
+    profile-default-gate-token-probe)
+      shift
+      profile_default_gate_token_probe "$@"
+      ;;
     client-vpn-preflight)
       shift
       client_vpn_preflight "$@"
@@ -15245,6 +15285,14 @@ main() {
     blockchain-gate-bundle)
       shift
       blockchain_gate_bundle "$@"
+      ;;
+    blockchain-staged-file-groups)
+      shift
+      blockchain_staged_file_groups "$@"
+      ;;
+    blockchain-cosmos-only-guardrail)
+      shift
+      blockchain_cosmos_only_guardrail "$@"
       ;;
     ci-blockchain-parallel-sweep)
       shift
@@ -15417,6 +15465,10 @@ main() {
     issuer-sponsor-api-live-smoke)
       shift
       issuer_sponsor_api_live_smoke "$@"
+      ;;
+    issuer-sponsor-vpn-session-live-smoke)
+      shift
+      issuer_sponsor_vpn_session_live_smoke "$@"
       ;;
     issuer-settlement-status-live-smoke)
       shift

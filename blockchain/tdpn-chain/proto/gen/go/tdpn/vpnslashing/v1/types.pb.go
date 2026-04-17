@@ -85,6 +85,7 @@ type SlashEvidence struct {
 	Kind            string                 `protobuf:"bytes,4,opt,name=kind,proto3" json:"kind,omitempty"`
 	ProofHash       string                 `protobuf:"bytes,5,opt,name=proof_hash,json=proofHash,proto3" json:"proof_hash,omitempty"`
 	SubmittedAtUnix int64                  `protobuf:"varint,6,opt,name=submitted_at_unix,json=submittedAtUnix,proto3" json:"submitted_at_unix,omitempty"`
+	ViolationType   string                 `protobuf:"bytes,7,opt,name=violation_type,json=violationType,proto3" json:"violation_type,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -159,6 +160,13 @@ func (x *SlashEvidence) GetSubmittedAtUnix() int64 {
 		return x.SubmittedAtUnix
 	}
 	return 0
+}
+
+func (x *SlashEvidence) GetViolationType() string {
+	if x != nil {
+		return x.ViolationType
+	}
+	return ""
 }
 
 // PenaltyDecision captures slash/jail intent generated from verified evidence.
@@ -250,7 +258,7 @@ var File_tdpn_vpnslashing_v1_types_proto protoreflect.FileDescriptor
 
 const file_tdpn_vpnslashing_v1_types_proto_rawDesc = "" +
 	"\n" +
-	"\x1ftdpn/vpnslashing/v1/types.proto\x12\x13tdpn.vpnslashing.v1\"\xcf\x01\n" +
+	"\x1ftdpn/vpnslashing/v1/types.proto\x12\x13tdpn.vpnslashing.v1\"\xf6\x01\n" +
 	"\rSlashEvidence\x12\x1f\n" +
 	"\vevidence_id\x18\x01 \x01(\tR\n" +
 	"evidenceId\x12\x1d\n" +
@@ -261,7 +269,8 @@ const file_tdpn_vpnslashing_v1_types_proto_rawDesc = "" +
 	"\x04kind\x18\x04 \x01(\tR\x04kind\x12\x1d\n" +
 	"\n" +
 	"proof_hash\x18\x05 \x01(\tR\tproofHash\x12*\n" +
-	"\x11submitted_at_unix\x18\x06 \x01(\x03R\x0fsubmittedAtUnix\"\x80\x02\n" +
+	"\x11submitted_at_unix\x18\x06 \x01(\x03R\x0fsubmittedAtUnix\x12%\n" +
+	"\x0eviolation_type\x18\a \x01(\tR\rviolationType\"\x80\x02\n" +
 	"\x0fPenaltyDecision\x12\x1d\n" +
 	"\n" +
 	"penalty_id\x18\x01 \x01(\tR\tpenaltyId\x12\x1f\n" +

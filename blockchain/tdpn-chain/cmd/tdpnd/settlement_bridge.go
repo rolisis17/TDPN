@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -16,6 +17,7 @@ import (
 	governancetypes "github.com/tdpn/tdpn-chain/x/vpngovernance/types"
 	rewardtypes "github.com/tdpn/tdpn-chain/x/vpnrewards/types"
 	slashingtypes "github.com/tdpn/tdpn-chain/x/vpnslashing/types"
+	sponsormodule "github.com/tdpn/tdpn-chain/x/vpnsponsor/module"
 	sponsortypes "github.com/tdpn/tdpn-chain/x/vpnsponsor/types"
 	validatormodule "github.com/tdpn/tdpn-chain/x/vpnvalidator/module"
 	validatortypes "github.com/tdpn/tdpn-chain/x/vpnvalidator/types"
@@ -151,6 +153,8 @@ type settlementGovernanceAuditActionPayload struct {
 	EvidencePointer string    `json:"EvidencePointer"`
 	Timestamp       time.Time `json:"Timestamp"`
 }
+
+const settlementBridgeMaxJSONBodyBytes int64 = 1 << 20 // 1 MiB
 
 func runSettlementHTTPMode(
 	ctx context.Context,
@@ -584,7 +588,8 @@ func (h *settlementBridgeHandler) handleSponsorReservation(w http.ResponseWriter
 		return
 	}
 
-	resp, err := h.scaffold.SponsorMsgServer().DelegateCredit(r.Context(), app.SponsorDelegateCreditRequest{
+	delegateCtx := sponsormodule.WithCurrentTimeUnix(r.Context(), time.Now().Unix())
+	resp, err := h.scaffold.SponsorMsgServer().DelegateCredit(delegateCtx, app.SponsorDelegateCreditRequest{
 		Record: sponsortypes.DelegatedSessionCredit{
 			ReservationID:   payload.ReservationID,
 			AuthorizationID: authorizationID,
@@ -741,7 +746,32 @@ func (h *settlementBridgeHandler) handleSlashEvidence(w http.ResponseWriter, r *
 		writeJSON(w, http.StatusBadRequest, bridgeEnvelope{OK: false, Error: err.Error()})
 		return
 	}
+	evidenceID := strings.TrimSpace(payload.EvidenceID)
+	if evidenceID == "" {
+		writeJSON(w, http.StatusBadRequest, bridgeEnvelope{OK: false, Error: "evidence_id is required"})
+		return
+	}
+	subjectID := strings.TrimSpace(payload.SubjectID)
+	if subjectID == "" {
+		writeJSON(w, http.StatusBadRequest, bridgeEnvelope{OK: false, Error: "subject_id is required"})
+		return
+	}
+	sessionID := strings.TrimSpace(payload.SessionID)
+	if sessionID == "" {
+		writeJSON(w, http.StatusBadRequest, bridgeEnvelope{OK: false, Error: "session_id is required"})
+		return
+	}
+	normalizedViolationType, err := normalizeBridgeObjectiveViolationType(payload.ViolationType)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, bridgeEnvelope{OK: false, Error: err.Error()})
+		return
+	}
+	payload.ViolationType = normalizedViolationType
 	proofHash := strings.TrimSpace(payload.EvidenceRef)
+	if proofHash == "" {
+		writeJSON(w, http.StatusBadRequest, bridgeEnvelope{OK: false, Error: "evidence_ref is required"})
+		return
+	}
 	if err := validateBridgeSlashEvidenceRef(proofHash); err != nil {
 		writeJSON(w, http.StatusBadRequest, bridgeEnvelope{OK: false, Error: err.Error()})
 		return
@@ -749,9 +779,10 @@ func (h *settlementBridgeHandler) handleSlashEvidence(w http.ResponseWriter, r *
 
 	resp, err := h.scaffold.SlashingMsgServer().SubmitEvidence(r.Context(), app.SlashingSubmitEvidenceRequest{
 		Record: slashingtypes.SlashEvidence{
-			EvidenceID:      payload.EvidenceID,
-			SessionID:       payload.SessionID,
-			ProviderID:      payload.SubjectID,
+			EvidenceID:      evidenceID,
+			SessionID:       sessionID,
+			ProviderID:      subjectID,
+			ViolationType:   normalizedViolationType,
 			Kind:            slashingtypes.EvidenceKindObjective,
 			ProofHash:       proofHash,
 			SubmittedAtUnix: unixOrZero(payload.ObservedAt),
@@ -1245,7 +1276,7 @@ func (h *settlementBridgeHandler) validatorEpochSelectionPreviewQueryServer() (v
 		return validatormodule.QueryServer{}, errors.New("vpnvalidator preview query server not wired")
 	}
 
-	return validatormodule.NewQueryServer(&scaffold.ValidatorModule.Keeper), nil
+	return validatormodule.NewQueryServer(scaffold.ValidatorModule.Keeper), nil
 }
 
 func hasValidBearerTokenHeader(rawHeader, expectedToken string) bool {
@@ -1309,6 +1340,27 @@ func validateBridgeSlashEvidenceRef(proofHash string) error {
 	}).ValidateBasic()
 }
 
+var bridgeObjectiveViolationTypeSet = map[string]struct{}{
+	"double-sign":              {},
+	"downtime-proof":           {},
+	"invalid-settlement-proof": {},
+	"session-replay-proof":     {},
+	"sponsor-overdraft-proof":  {},
+}
+
+const bridgeObjectiveViolationTypeError = "violation_type must be one of: double-sign, downtime-proof, invalid-settlement-proof, session-replay-proof, sponsor-overdraft-proof"
+
+func normalizeBridgeObjectiveViolationType(raw string) (string, error) {
+	normalized := strings.ToLower(strings.TrimSpace(raw))
+	if normalized == "" {
+		return "", errors.New("violation_type is required")
+	}
+	if _, ok := bridgeObjectiveViolationTypeSet[normalized]; !ok {
+		return "", errors.New(bridgeObjectiveViolationTypeError)
+	}
+	return normalized, nil
+}
+
 func validateBridgeValidatorStatusEvidenceRef(evidenceRef string) error {
 	return (validatortypes.ValidatorStatusRecord{
 		StatusID:        "bridge-validation",
@@ -1320,9 +1372,31 @@ func validateBridgeValidatorStatusEvidenceRef(evidenceRef string) error {
 
 func decodeJSON(r *http.Request, out any) error {
 	defer r.Body.Close()
-	decoder := json.NewDecoder(r.Body)
+	if r.ContentLength > settlementBridgeMaxJSONBodyBytes {
+		return fmt.Errorf("invalid JSON payload: request body too large (max %d bytes)", settlementBridgeMaxJSONBodyBytes)
+	}
+	limitedBody := &io.LimitedReader{
+		R: r.Body,
+		N: settlementBridgeMaxJSONBodyBytes + 1,
+	}
+	decoder := json.NewDecoder(limitedBody)
+	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(out); err != nil {
+		if limitedBody.N <= 0 {
+			return fmt.Errorf("invalid JSON payload: request body too large (max %d bytes)", settlementBridgeMaxJSONBodyBytes)
+		}
 		return fmt.Errorf("invalid JSON payload: %w", err)
+	}
+
+	var trailing json.RawMessage
+	if err := decoder.Decode(&trailing); err != nil && !errors.Is(err, io.EOF) {
+		return fmt.Errorf("invalid JSON payload: %w", err)
+	}
+	if len(trailing) > 0 {
+		return fmt.Errorf("invalid JSON payload: trailing data after JSON value")
+	}
+	if limitedBody.N <= 0 {
+		return fmt.Errorf("invalid JSON payload: request body too large (max %d bytes)", settlementBridgeMaxJSONBodyBytes)
 	}
 	return nil
 }

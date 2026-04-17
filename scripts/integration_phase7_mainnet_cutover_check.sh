@@ -64,6 +64,8 @@ OP_REQUIRED_FALSE_CANONICAL="$TMP_DIR/operator_required_false_canonical_summary.
 ACTIVATION_GATE_GO_SUMMARY="$TMP_DIR/mainnet_activation_gate_go.json"
 ACTIVATION_GATE_STATUS_FAIL_SUMMARY="$TMP_DIR/mainnet_activation_gate_status_fail.json"
 ACTIVATION_GATE_DECISION_NO_GO_SUMMARY="$TMP_DIR/mainnet_activation_gate_decision_no_go.json"
+BOOTSTRAP_GATE_GO_SUMMARY="$TMP_DIR/bootstrap_governance_graduation_gate_go.json"
+BOOTSTRAP_GATE_STATUS_FAIL_SUMMARY="$TMP_DIR/bootstrap_governance_graduation_gate_status_fail.json"
 
 ACTIVATION_REQUIRED_GO_OUTPUT="$TMP_DIR/activation_required_go_output.json"
 ACTIVATION_REQUIRED_GO_LOG="$TMP_DIR/activation_required_go.log"
@@ -80,6 +82,26 @@ ACTIVATION_REQUIRED_MISSING_CANONICAL="$TMP_DIR/activation_required_missing_cano
 ACTIVATION_REQUIRED_FALSE_OUTPUT="$TMP_DIR/activation_required_false_output.json"
 ACTIVATION_REQUIRED_FALSE_LOG="$TMP_DIR/activation_required_false.log"
 ACTIVATION_REQUIRED_FALSE_CANONICAL="$TMP_DIR/activation_required_false_canonical_summary.json"
+
+BOOTSTRAP_REQUIRED_GO_OUTPUT="$TMP_DIR/bootstrap_required_go_output.json"
+BOOTSTRAP_REQUIRED_GO_LOG="$TMP_DIR/bootstrap_required_go.log"
+BOOTSTRAP_REQUIRED_GO_CANONICAL="$TMP_DIR/bootstrap_required_go_canonical_summary.json"
+
+BOOTSTRAP_REQUIRED_FALSE_OUTPUT="$TMP_DIR/bootstrap_required_false_output.json"
+BOOTSTRAP_REQUIRED_FALSE_LOG="$TMP_DIR/bootstrap_required_false.log"
+BOOTSTRAP_REQUIRED_FALSE_CANONICAL="$TMP_DIR/bootstrap_required_false_canonical_summary.json"
+
+BOOTSTRAP_REQUIRED_MISSING_OUTPUT="$TMP_DIR/bootstrap_required_missing_output.json"
+BOOTSTRAP_REQUIRED_MISSING_LOG="$TMP_DIR/bootstrap_required_missing.log"
+BOOTSTRAP_REQUIRED_MISSING_CANONICAL="$TMP_DIR/bootstrap_required_missing_canonical_summary.json"
+
+BOOTSTRAP_RELAXED_FALSE_OUTPUT="$TMP_DIR/bootstrap_relaxed_false_output.json"
+BOOTSTRAP_RELAXED_FALSE_LOG="$TMP_DIR/bootstrap_relaxed_false.log"
+BOOTSTRAP_RELAXED_FALSE_CANONICAL="$TMP_DIR/bootstrap_relaxed_false_canonical_summary.json"
+
+BOOTSTRAP_RELAXED_MISSING_OUTPUT="$TMP_DIR/bootstrap_relaxed_missing_output.json"
+BOOTSTRAP_RELAXED_MISSING_LOG="$TMP_DIR/bootstrap_relaxed_missing.log"
+BOOTSTRAP_RELAXED_MISSING_CANONICAL="$TMP_DIR/bootstrap_relaxed_missing_canonical_summary.json"
 
 cat >"$PASS_HANDOFF" <<'EOF_PASS_HANDOFF'
 {
@@ -226,6 +248,32 @@ cat >"$ACTIVATION_GATE_DECISION_NO_GO_SUMMARY" <<'EOF_ACTIVATION_GATE_DECISION_N
 }
 EOF_ACTIVATION_GATE_DECISION_NO_GO_SUMMARY
 
+cat >"$BOOTSTRAP_GATE_GO_SUMMARY" <<'EOF_BOOTSTRAP_GATE_GO_SUMMARY'
+{
+  "version": 1,
+  "schema": {
+    "id": "blockchain_bootstrap_graduation_gate_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "decision": "GO",
+  "status": "go",
+  "go": true
+}
+EOF_BOOTSTRAP_GATE_GO_SUMMARY
+
+cat >"$BOOTSTRAP_GATE_STATUS_FAIL_SUMMARY" <<'EOF_BOOTSTRAP_GATE_STATUS_FAIL_SUMMARY'
+{
+  "version": 1,
+  "schema": {
+    "id": "blockchain_bootstrap_graduation_gate_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "fail"
+}
+EOF_BOOTSTRAP_GATE_STATUS_FAIL_SUMMARY
+
 echo "[phase7-mainnet-cutover-check] pass path"
 PHASE7_MAINNET_CUTOVER_CHECK_CANONICAL_SUMMARY_JSON="$PASS_CANONICAL" \
 "$SCRIPT_UNDER_TEST" \
@@ -261,6 +309,7 @@ if ! jq -e '
   and .policy.require_cosmos_keeper_coverage_floor_ok == true
   and .policy.require_cosmos_app_coverage_floor_ok == true
   and .policy.require_mainnet_activation_gate_go == false
+  and .policy.require_bootstrap_governance_graduation_gate_go == false
   and .policy.require_rollback_path_ready == true
   and .policy.require_operator_approval_ok == false
   and .signals.run_pipeline_ok == true
@@ -274,7 +323,9 @@ if ! jq -e '
   and .signals.cosmos_keeper_coverage_floor_ok == true
   and .signals.cosmos_app_coverage_floor_ok == true
   and .signals.mainnet_activation_gate_go == null
+  and .signals.bootstrap_governance_graduation_gate_go == null
   and .stages.mainnet_activation_gate.status == "missing"
+  and .stages.bootstrap_governance_graduation_gate.status == "missing"
   and .stages.cosmos_module_coverage_floor.status == "pass"
   and .stages.cosmos_keeper_coverage_floor.status == "pass"
   and .stages.cosmos_app_coverage_floor.status == "pass"
@@ -544,6 +595,142 @@ if ! jq -e '
   echo "activation-required-false summary mismatch"
   cat "$ACTIVATION_REQUIRED_FALSE_OUTPUT"
   cat "$ACTIVATION_REQUIRED_FALSE_LOG"
+  exit 1
+fi
+
+echo "[phase7-mainnet-cutover-check] bootstrap governance graduation gate GO when required"
+PHASE7_MAINNET_CUTOVER_CHECK_CANONICAL_SUMMARY_JSON="$BOOTSTRAP_REQUIRED_GO_CANONICAL" \
+"$SCRIPT_UNDER_TEST" \
+  --phase6-handoff-summary-json "$PASS_HANDOFF" \
+  --phase6-contracts-summary-json "$PASS_CONTRACTS" \
+  --bootstrap-governance-graduation-gate-summary-json "$BOOTSTRAP_GATE_GO_SUMMARY" \
+  --require-bootstrap-governance-graduation-gate-go 1 \
+  --rollback-path-ready 1 \
+  --summary-json "$BOOTSTRAP_REQUIRED_GO_OUTPUT" \
+  --show-json 0 >"$BOOTSTRAP_REQUIRED_GO_LOG" 2>&1
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .policy.require_bootstrap_governance_graduation_gate_go == true
+  and .inputs.usable.bootstrap_governance_graduation_gate_summary_json == true
+  and .signals.bootstrap_governance_graduation_gate_go == true
+  and .stages.bootstrap_governance_graduation_gate.status == "pass"
+  and .stages.bootstrap_governance_graduation_gate.ok == true
+' "$BOOTSTRAP_REQUIRED_GO_OUTPUT" >/dev/null; then
+  echo "bootstrap-required-go summary mismatch"
+  cat "$BOOTSTRAP_REQUIRED_GO_OUTPUT"
+  cat "$BOOTSTRAP_REQUIRED_GO_LOG"
+  exit 1
+fi
+
+echo "[phase7-mainnet-cutover-check] bootstrap governance graduation gate false when required"
+set +e
+PHASE7_MAINNET_CUTOVER_CHECK_CANONICAL_SUMMARY_JSON="$BOOTSTRAP_REQUIRED_FALSE_CANONICAL" \
+"$SCRIPT_UNDER_TEST" \
+  --phase6-handoff-summary-json "$PASS_HANDOFF" \
+  --phase6-contracts-summary-json "$PASS_CONTRACTS" \
+  --bootstrap-governance-graduation-gate-summary-json "$BOOTSTRAP_GATE_STATUS_FAIL_SUMMARY" \
+  --require-bootstrap-governance-graduation-gate-go 1 \
+  --rollback-path-ready 1 \
+  --summary-json "$BOOTSTRAP_REQUIRED_FALSE_OUTPUT" \
+  --show-json 0 >"$BOOTSTRAP_REQUIRED_FALSE_LOG" 2>&1
+bootstrap_false_rc=$?
+set -e
+if [[ "$bootstrap_false_rc" -ne 1 ]]; then
+  echo "expected rc=1 when bootstrap gate required signal resolves false from status=fail, got rc=$bootstrap_false_rc"
+  cat "$BOOTSTRAP_REQUIRED_FALSE_LOG"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .policy.require_bootstrap_governance_graduation_gate_go == true
+  and .signals.bootstrap_governance_graduation_gate_go == false
+  and .stages.bootstrap_governance_graduation_gate.status == "fail"
+  and ((.decision.reasons // []) | any(test("bootstrap_governance_graduation_gate_go is false")))
+' "$BOOTSTRAP_REQUIRED_FALSE_OUTPUT" >/dev/null; then
+  echo "bootstrap-required-false summary mismatch"
+  cat "$BOOTSTRAP_REQUIRED_FALSE_OUTPUT"
+  cat "$BOOTSTRAP_REQUIRED_FALSE_LOG"
+  exit 1
+fi
+
+echo "[phase7-mainnet-cutover-check] bootstrap governance graduation gate required but missing"
+set +e
+PHASE7_MAINNET_CUTOVER_CHECK_CANONICAL_SUMMARY_JSON="$BOOTSTRAP_REQUIRED_MISSING_CANONICAL" \
+"$SCRIPT_UNDER_TEST" \
+  --phase6-handoff-summary-json "$PASS_HANDOFF" \
+  --phase6-contracts-summary-json "$PASS_CONTRACTS" \
+  --require-bootstrap-governance-graduation-gate-go 1 \
+  --rollback-path-ready 1 \
+  --summary-json "$BOOTSTRAP_REQUIRED_MISSING_OUTPUT" \
+  --show-json 0 >"$BOOTSTRAP_REQUIRED_MISSING_LOG" 2>&1
+bootstrap_missing_rc=$?
+set -e
+if [[ "$bootstrap_missing_rc" -ne 1 ]]; then
+  echo "expected rc=1 when bootstrap gate signal is required but missing, got rc=$bootstrap_missing_rc"
+  cat "$BOOTSTRAP_REQUIRED_MISSING_LOG"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .policy.require_bootstrap_governance_graduation_gate_go == true
+  and .signals.bootstrap_governance_graduation_gate_go == null
+  and .stages.bootstrap_governance_graduation_gate.status == "missing"
+  and ((.decision.reasons // []) | any(test("bootstrap_governance_graduation_gate_go unresolved")))
+' "$BOOTSTRAP_REQUIRED_MISSING_OUTPUT" >/dev/null; then
+  echo "bootstrap-required-missing summary mismatch"
+  cat "$BOOTSTRAP_REQUIRED_MISSING_OUTPUT"
+  cat "$BOOTSTRAP_REQUIRED_MISSING_LOG"
+  exit 1
+fi
+
+echo "[phase7-mainnet-cutover-check] bootstrap governance graduation gate relaxed mode ignores false"
+PHASE7_MAINNET_CUTOVER_CHECK_CANONICAL_SUMMARY_JSON="$BOOTSTRAP_RELAXED_FALSE_CANONICAL" \
+"$SCRIPT_UNDER_TEST" \
+  --phase6-handoff-summary-json "$PASS_HANDOFF" \
+  --phase6-contracts-summary-json "$PASS_CONTRACTS" \
+  --bootstrap-governance-graduation-gate-summary-json "$BOOTSTRAP_GATE_STATUS_FAIL_SUMMARY" \
+  --require-bootstrap-governance-graduation-gate-go 0 \
+  --rollback-path-ready 1 \
+  --summary-json "$BOOTSTRAP_RELAXED_FALSE_OUTPUT" \
+  --show-json 0 >"$BOOTSTRAP_RELAXED_FALSE_LOG" 2>&1
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .policy.require_bootstrap_governance_graduation_gate_go == false
+  and .signals.bootstrap_governance_graduation_gate_go == false
+  and .stages.bootstrap_governance_graduation_gate.status == "fail"
+' "$BOOTSTRAP_RELAXED_FALSE_OUTPUT" >/dev/null; then
+  echo "bootstrap-relaxed-false summary mismatch"
+  cat "$BOOTSTRAP_RELAXED_FALSE_OUTPUT"
+  cat "$BOOTSTRAP_RELAXED_FALSE_LOG"
+  exit 1
+fi
+
+echo "[phase7-mainnet-cutover-check] bootstrap governance graduation gate relaxed mode ignores missing"
+PHASE7_MAINNET_CUTOVER_CHECK_CANONICAL_SUMMARY_JSON="$BOOTSTRAP_RELAXED_MISSING_CANONICAL" \
+"$SCRIPT_UNDER_TEST" \
+  --phase6-handoff-summary-json "$PASS_HANDOFF" \
+  --phase6-contracts-summary-json "$PASS_CONTRACTS" \
+  --require-bootstrap-governance-graduation-gate-go 0 \
+  --rollback-path-ready 1 \
+  --summary-json "$BOOTSTRAP_RELAXED_MISSING_OUTPUT" \
+  --show-json 0 >"$BOOTSTRAP_RELAXED_MISSING_LOG" 2>&1
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .policy.require_bootstrap_governance_graduation_gate_go == false
+  and .signals.bootstrap_governance_graduation_gate_go == null
+  and .stages.bootstrap_governance_graduation_gate.status == "missing"
+' "$BOOTSTRAP_RELAXED_MISSING_OUTPUT" >/dev/null; then
+  echo "bootstrap-relaxed-missing summary mismatch"
+  cat "$BOOTSTRAP_RELAXED_MISSING_OUTPUT"
+  cat "$BOOTSTRAP_RELAXED_MISSING_LOG"
   exit 1
 fi
 

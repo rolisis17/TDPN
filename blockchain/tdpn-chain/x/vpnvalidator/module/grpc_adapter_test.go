@@ -221,6 +221,110 @@ func TestGRPCQueryServerAdapterFoundAndList(t *testing.T) {
 	}
 }
 
+func TestGRPCAdaptersEligibilityCanonicalWriteAndMixedCaseQuery(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	msgAdapter := NewGRPCMsgServerAdapter(&k)
+	queryAdapter := NewGRPCQueryServerAdapter(&k)
+
+	setResp, err := msgAdapter.SetValidatorEligibility(context.Background(), &validatorpb.MsgSetValidatorEligibilityRequest{
+		Eligibility: &validatorpb.ValidatorEligibility{
+			ValidatorId:     "  VAL-GRPC-ELIG-1  ",
+			OperatorAddress: "  TDPNVALOPER1GRPCELIG  ",
+			Eligible:        true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected set validator eligibility success, got %v", err)
+	}
+	if setResp.GetEligibility() == nil {
+		t.Fatal("expected eligibility in set response")
+	}
+	if setResp.GetEligibility().GetValidatorId() != "val-grpc-elig-1" {
+		t.Fatalf("expected canonical validator_id val-grpc-elig-1, got %q", setResp.GetEligibility().GetValidatorId())
+	}
+
+	queryResp, err := queryAdapter.ValidatorEligibility(context.Background(), &validatorpb.QueryValidatorEligibilityRequest{
+		ValidatorId: "  VAL-GRPC-ELIG-1  ",
+	})
+	if err != nil {
+		t.Fatalf("expected mixed-case eligibility query success, got %v", err)
+	}
+	if !queryResp.GetFound() {
+		t.Fatal("expected found=true for mixed-case eligibility query")
+	}
+	if queryResp.GetEligibility() == nil {
+		t.Fatal("expected eligibility in query response")
+	}
+	if queryResp.GetEligibility().GetValidatorId() != "val-grpc-elig-1" {
+		t.Fatalf("expected canonical queried validator_id val-grpc-elig-1, got %q", queryResp.GetEligibility().GetValidatorId())
+	}
+	if queryResp.GetEligibility().GetOperatorAddress() != "tdpnvaloper1grpcelig" {
+		t.Fatalf("expected canonical operator_address tdpnvaloper1grpcelig, got %q", queryResp.GetEligibility().GetOperatorAddress())
+	}
+}
+
+func TestGRPCAdaptersStatusCanonicalWriteAndMixedCaseQuery(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	msgAdapter := NewGRPCMsgServerAdapter(&k)
+	queryAdapter := NewGRPCQueryServerAdapter(&k)
+
+	_, err := msgAdapter.SetValidatorEligibility(context.Background(), &validatorpb.MsgSetValidatorEligibilityRequest{
+		Eligibility: &validatorpb.ValidatorEligibility{
+			ValidatorId:     "  VAL-GRPC-STATUS-1 ",
+			OperatorAddress: " tdpnvaloper1grpcstatus ",
+			Eligible:        true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected set eligibility success before recording status, got %v", err)
+	}
+
+	recordResp, err := msgAdapter.RecordValidatorStatus(context.Background(), &validatorpb.MsgRecordValidatorStatusRequest{
+		Record: &validatorpb.ValidatorStatusRecord{
+			StatusId:         "  STATUS-GRPC-1  ",
+			ValidatorId:      "  VAL-GRPC-STATUS-1  ",
+			ConsensusAddress: "  TDPNVALCONS1GRPCSTATUS  ",
+			LifecycleStatus:  "  ACTIVE ",
+			EvidenceHeight:   33,
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected record validator status success, got %v", err)
+	}
+	if recordResp.GetRecord() == nil {
+		t.Fatal("expected status record in create response")
+	}
+	if recordResp.GetRecord().GetStatusId() != "status-grpc-1" {
+		t.Fatalf("expected canonical status_id status-grpc-1, got %q", recordResp.GetRecord().GetStatusId())
+	}
+	if recordResp.GetRecord().GetValidatorId() != "val-grpc-status-1" {
+		t.Fatalf("expected canonical validator_id val-grpc-status-1, got %q", recordResp.GetRecord().GetValidatorId())
+	}
+
+	queryResp, err := queryAdapter.ValidatorStatusRecord(context.Background(), &validatorpb.QueryValidatorStatusRecordRequest{
+		StatusId: "  STATUS-GRPC-1  ",
+	})
+	if err != nil {
+		t.Fatalf("expected mixed-case status query success, got %v", err)
+	}
+	if !queryResp.GetFound() {
+		t.Fatal("expected found=true for mixed-case status query")
+	}
+	if queryResp.GetRecord() == nil {
+		t.Fatal("expected status record in query response")
+	}
+	if queryResp.GetRecord().GetStatusId() != "status-grpc-1" {
+		t.Fatalf("expected canonical queried status_id status-grpc-1, got %q", queryResp.GetRecord().GetStatusId())
+	}
+	if queryResp.GetRecord().GetValidatorId() != "val-grpc-status-1" {
+		t.Fatalf("expected canonical queried validator_id val-grpc-status-1, got %q", queryResp.GetRecord().GetValidatorId())
+	}
+}
+
 func TestGRPCQueryServerAdapterPreviewEpochSelectionDeterministic(t *testing.T) {
 	t.Parallel()
 

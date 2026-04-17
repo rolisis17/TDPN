@@ -125,7 +125,7 @@ This workspace defines the initial module boundaries for TDPN's VPN-compatible b
 - Bootstrap governance/validator RPC highlights:
   - `tdpn.vpngovernance.v1.Msg/RecordAuditAction`, `tdpn.vpngovernance.v1.Query/GovernanceAuditAction`, `tdpn.vpngovernance.v1.Query/ListGovernanceAuditActions`.
   - `tdpn.vpnvalidator.v1.Query/PreviewEpochSelection`.
-- Module stubs: `x/*/{types,keeper,module}`.
+- Module package layout: `x/*/{types,keeper,module}`.
 - Module query servers are available for get-by-id and list read-model queries under `x/*/module/query_server.go`.
 - Protobuf contracts and generated Go/grpc surfaces are available under:
   - `proto/tdpn/*/v1/{types,tx,query}.proto`

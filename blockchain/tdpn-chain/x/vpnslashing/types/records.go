@@ -2,6 +2,7 @@ package types
 
 import (
 	"errors"
+	"strings"
 
 	chaintypes "github.com/tdpn/tdpn-chain/types"
 )
@@ -11,11 +12,25 @@ const (
 	EvidenceKindObjective = "objective"
 )
 
+var objectiveViolationTypeSet = map[string]struct{}{
+	"double-sign":              {},
+	"downtime-proof":           {},
+	"invalid-settlement-proof": {},
+	"session-replay-proof":     {},
+	"sponsor-overdraft-proof":  {},
+}
+
+// NormalizeViolationType canonicalizes violation type input for validation/storage.
+func NormalizeViolationType(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
 // SlashEvidence represents objective evidence submitted for deterministic slashing.
 type SlashEvidence struct {
 	EvidenceID      string
 	SessionID       string
 	ProviderID      string
+	ViolationType   string
 	Kind            string
 	ProofHash       string
 	SubmittedAtUnix int64
@@ -44,6 +59,11 @@ func (e SlashEvidence) ValidateBasic() error {
 	}
 	if !chaintypes.IsObjectiveEvidenceFormat(e.ProofHash) {
 		return errors.New("proof hash must use objective format (sha256:<value> or obj://<value>)")
+	}
+	if canonicalViolationType := NormalizeViolationType(e.ViolationType); canonicalViolationType != "" {
+		if _, ok := objectiveViolationTypeSet[canonicalViolationType]; !ok {
+			return errors.New("violation type must be one of: double-sign, downtime-proof, invalid-settlement-proof, session-replay-proof, sponsor-overdraft-proof")
+		}
 	}
 	return nil
 }
