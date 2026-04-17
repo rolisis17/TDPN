@@ -743,11 +743,13 @@ if ! jq -e '
   and .blockchain_track.mainnet_activation_missing_metrics_action.normalize_command == null
   and .blockchain_track.mainnet_activation_missing_metrics_action.rerun_bundle_command == null
   and .blockchain_track.mainnet_activation_missing_metrics_action.checklist_command == null
-  and .blockchain_track.mainnet_activation_missing_metrics_action.missing_input_template_command == null
-  and .blockchain_track.mainnet_activation_missing_metrics_action.template_command == null
-  and .blockchain_track.mainnet_activation_missing_metrics_action.operator_pack_command == null
-  and .blockchain_track.mainnet_activation_missing_metrics_action.cycle_command == null
+    and .blockchain_track.mainnet_activation_missing_metrics_action.missing_input_template_command == null
+    and .blockchain_track.mainnet_activation_missing_metrics_action.template_command == null
+    and .blockchain_track.mainnet_activation_missing_metrics_action.prefill_command == null
+    and .blockchain_track.mainnet_activation_missing_metrics_action.operator_pack_command == null
+    and .blockchain_track.mainnet_activation_missing_metrics_action.cycle_command == null
   and .blockchain_track.mainnet_activation_missing_metrics_action.seeded_cycle_command == null
+  and (.blockchain_track.mainnet_activation_missing_metrics_action.real_evidence_run_command // null) == null
   and .blockchain_track.phase7_mainnet_cutover_summary_report.available == true
   and .blockchain_track.phase7_mainnet_cutover_summary_report.status == "pass"
   and .blockchain_track.phase7_mainnet_cutover_summary_report.mainnet_activation_gate_go_ok == false
@@ -1065,11 +1067,13 @@ if ! jq -e '
   and .blockchain_track.mainnet_activation_missing_metrics_action.normalize_command == null
   and .blockchain_track.mainnet_activation_missing_metrics_action.rerun_bundle_command == null
   and .blockchain_track.mainnet_activation_missing_metrics_action.checklist_command == null
-  and .blockchain_track.mainnet_activation_missing_metrics_action.missing_input_template_command == null
-  and .blockchain_track.mainnet_activation_missing_metrics_action.template_command == null
-  and .blockchain_track.mainnet_activation_missing_metrics_action.operator_pack_command == null
-  and .blockchain_track.mainnet_activation_missing_metrics_action.cycle_command == null
+    and .blockchain_track.mainnet_activation_missing_metrics_action.missing_input_template_command == null
+    and .blockchain_track.mainnet_activation_missing_metrics_action.template_command == null
+    and .blockchain_track.mainnet_activation_missing_metrics_action.prefill_command == null
+    and .blockchain_track.mainnet_activation_missing_metrics_action.operator_pack_command == null
+    and .blockchain_track.mainnet_activation_missing_metrics_action.cycle_command == null
   and .blockchain_track.mainnet_activation_missing_metrics_action.seeded_cycle_command == null
+  and (.blockchain_track.mainnet_activation_missing_metrics_action.real_evidence_run_command // null) == null
 ' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_missing_summary.json" >/dev/null; then
   echo "missing gate summary JSON missing expected fallback fields"
   cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_missing_summary.json"
@@ -1151,11 +1155,13 @@ if ! jq -e --arg src "$PHASE7_MAINNET_CUTOVER_CHECK_SUMMARY_JSON" '
   and .blockchain_track.mainnet_activation_missing_metrics_action.normalize_command == null
   and .blockchain_track.mainnet_activation_missing_metrics_action.rerun_bundle_command == null
   and .blockchain_track.mainnet_activation_missing_metrics_action.checklist_command == null
-  and .blockchain_track.mainnet_activation_missing_metrics_action.missing_input_template_command == null
-  and .blockchain_track.mainnet_activation_missing_metrics_action.template_command == null
-  and .blockchain_track.mainnet_activation_missing_metrics_action.operator_pack_command == null
-  and .blockchain_track.mainnet_activation_missing_metrics_action.cycle_command == null
+    and .blockchain_track.mainnet_activation_missing_metrics_action.missing_input_template_command == null
+    and .blockchain_track.mainnet_activation_missing_metrics_action.template_command == null
+    and .blockchain_track.mainnet_activation_missing_metrics_action.prefill_command == null
+    and .blockchain_track.mainnet_activation_missing_metrics_action.operator_pack_command == null
+    and .blockchain_track.mainnet_activation_missing_metrics_action.cycle_command == null
   and .blockchain_track.mainnet_activation_missing_metrics_action.seeded_cycle_command == null
+  and (.blockchain_track.mainnet_activation_missing_metrics_action.real_evidence_run_command // null) == null
   and .blockchain_track.bootstrap_governance_graduation_gate.available == true
   and .blockchain_track.bootstrap_governance_graduation_gate.status == "GO"
   and .blockchain_track.bootstrap_governance_graduation_gate.decision == "GO"
@@ -1236,6 +1242,7 @@ if ! jq -e --arg src "$PHASE7_MAINNET_CUTOVER_CHECK_NO_GO_SUMMARY_JSON" '
   and .blockchain_track.mainnet_activation_missing_metrics_action.operator_pack_command == null
   and .blockchain_track.mainnet_activation_missing_metrics_action.cycle_command == null
   and .blockchain_track.mainnet_activation_missing_metrics_action.seeded_cycle_command == null
+  and (.blockchain_track.mainnet_activation_missing_metrics_action.real_evidence_run_command // null) == null
   and .blockchain_track.bootstrap_governance_graduation_gate.available == true
   and .blockchain_track.bootstrap_governance_graduation_gate.status == "NO-GO"
   and .blockchain_track.bootstrap_governance_graduation_gate.decision == "NO-GO"
@@ -1367,6 +1374,8 @@ if ! run_roadmap_progress_report \
 fi
 if ! jq -e --arg src "$AUTO_MAINNET_GATE_SUMMARY_JSON" '
   (.blockchain_track.mainnet_activation_missing_metrics_action.operator_pack_command // "") as $operator_pack_command
+  | (.blockchain_track.mainnet_activation_missing_metrics_action.real_evidence_run_command // "") as $real_evidence_run_command
+  | (if $real_evidence_run_command != "" then $real_evidence_run_command else $operator_pack_command end) as $preferred_missing_metrics_command
   | (.blockchain_track.mainnet_activation_missing_metrics_action.reason // "") as $missing_metrics_reason
   | .blockchain_track.mainnet_activation_gate.available == true
   and .blockchain_track.mainnet_activation_gate.status == "no-go"
@@ -1400,10 +1409,13 @@ if ! jq -e --arg src "$AUTO_MAINNET_GATE_SUMMARY_JSON" '
   and ((.blockchain_track.mainnet_activation_missing_metrics_action.cycle_command // "") | contains("--input-json .easy-node-logs/blockchain_mainnet_activation_metrics_input.operator.json"))
   and ((.blockchain_track.mainnet_activation_missing_metrics_action.seeded_cycle_command // "") | startswith("./scripts/easy_node.sh blockchain-mainnet-activation-gate-cycle-seeded "))
   and ((.blockchain_track.mainnet_activation_missing_metrics_action.seeded_cycle_command // "") | contains("--refresh-roadmap 1"))
+  and ($real_evidence_run_command | startswith("./scripts/easy_node.sh blockchain-mainnet-activation-real-evidence-run "))
+  and ($real_evidence_run_command | contains("--input-json .easy-node-logs/blockchain_mainnet_activation_metrics_input.operator.json"))
+  and ($real_evidence_run_command | contains("--refresh-roadmap 1"))
   and ((.next_actions // []) | any(
     .id == "blockchain_mainnet_activation_missing_metrics"
-    and .label == "Blockchain missing-metrics operator pack"
-    and .command == $operator_pack_command
+    and ((.label // "") | test("^Blockchain missing-metrics"))
+    and .command == $preferred_missing_metrics_command
     and .reason == $missing_metrics_reason
   ))
 ' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_summary.json" >/dev/null; then
@@ -1466,6 +1478,11 @@ if ! rg -q 'blockchain-mainnet-activation-gate-cycle-seeded --reports-dir .easy-
   cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"
   exit 1
 fi
+if ! rg -q 'blockchain-mainnet-activation-real-evidence-run --input-json .easy-node-logs/blockchain_mainnet_activation_metrics_input.operator.json' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"; then
+  echo "auto-discovered report missing preferred real-evidence one-command run command"
+  cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"
+  exit 1
+fi
 if ! rg -q 'blockchain_mainnet_activation_missing_metrics_action_available=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log; then
   echo "auto-discovered log missing blockchain missing-metrics actionable line"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log
@@ -1508,6 +1525,11 @@ if ! rg -q 'blockchain_mainnet_activation_missing_metrics_action_checklist_comma
 fi
 if ! rg -q 'blockchain_mainnet_activation_missing_metrics_action_seeded_cycle_command=.*blockchain-mainnet-activation-gate-cycle-seeded ' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log; then
   echo "auto-discovered log missing seeded cycle actionable command"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log
+  exit 1
+fi
+if ! rg -q 'real_evidence_run_command=.*blockchain-mainnet-activation-real-evidence-run ' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log; then
+  echo "auto-discovered log missing preferred real-evidence actionable command"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log
   exit 1
 fi

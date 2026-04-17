@@ -21,6 +21,7 @@ FAIL1="$TMP_DIR/fail_action_1.sh"
 FAIL2="$TMP_DIR/fail_action_2.sh"
 SLOW1="$TMP_DIR/slow_action_1.sh"
 SLOW2="$TMP_DIR/slow_action_2.sh"
+PREFILL="$TMP_DIR/prefill_action_1.sh"
 
 cat >"$PASS1" <<'EOF_PASS1'
 #!/usr/bin/env bash
@@ -35,6 +36,13 @@ set -euo pipefail
 echo "pass action 2"
 EOF_PASS2
 chmod +x "$PASS2"
+
+cat >"$PREFILL" <<'EOF_PREFILL'
+#!/usr/bin/env bash
+set -euo pipefail
+echo "prefill action 1"
+EOF_PREFILL
+chmod +x "$PREFILL"
 
 cat >"$FAIL1" <<'EOF_FAIL1'
 #!/usr/bin/env bash
@@ -106,7 +114,8 @@ case "$scenario" in
   "next_actions": [
     {"id":"blockchain_pass_1","label":"Blockchain pass 1","command":"bash \"$PASS1\"","reason":"test"},
     {"id":"integration_ci_phase1_resilience","label":"Non-blockchain control","command":"bash \"$PASS2\"","reason":"ignore"},
-    {"id":"blockchain_pass_2","label":"Blockchain pass 2","command":"bash \"$PASS2\"","reason":"test"}
+    {"id":"blockchain_mainnet_activation_missing_metrics_prefill","label":"Blockchain missing-metrics prefill","command":"bash \"$PREFILL\"","reason":"test"},
+    {"id":"blockchain_pass_2","label":"Blockchain pass 2","command":"ROADMAP_MISSING_METRICS_FLOW=real-evidence bash \"$PASS2\"","reason":"test"}
   ]
 }
 JSON
@@ -117,7 +126,8 @@ JSON
   "next_actions": [
     {"id":"blockchain_pass_1","label":"Blockchain pass 1","command":"bash \"$PASS1\"","reason":"test"},
     {"id":"integration_ci_phase1_resilience","label":"Non-blockchain control","command":"bash \"$PASS2\"","reason":"ignore"},
-    {"id":"blockchain_pass_2","label":"Blockchain pass 2","command":"bash \"$PASS2\"","reason":"test"}
+    {"id":"blockchain_mainnet_activation_missing_metrics_prefill","label":"Blockchain missing-metrics prefill","command":"bash \"$PREFILL\"","reason":"test"},
+    {"id":"blockchain_pass_2","label":"Blockchain pass 2","command":"ROADMAP_MISSING_METRICS_FLOW=operator-pack bash \"$PASS2\"","reason":"test"}
   ]
 }
 JSON
@@ -222,15 +232,18 @@ if ! jq -e '
   and .inputs.parallel == false
   and .inputs.recommended_only == false
   and .roadmap.generated_this_run == true
-  and .roadmap.actions_selected_count == 2
+  and .roadmap.actions_selected_count == 3
   and .roadmap.recommended_gate_id == "blockchain_pass_2"
-  and .roadmap.selected_action_ids == ["blockchain_pass_1","blockchain_pass_2"]
-  and .summary.actions_executed == 2
-  and .summary.pass == 2
+  and .roadmap.selected_action_ids == ["blockchain_pass_1","blockchain_mainnet_activation_missing_metrics_prefill","blockchain_pass_2"]
+  and .summary.actions_executed == 3
+  and .summary.pass == 3
   and .summary.fail == 0
   and .summary.timed_out == 0
-  and ((.actions // []) | length == 2)
+  and ((.actions // []) | length == 3)
   and ((.actions // []) | all(.status == "pass" and .rc == 0 and ((.timed_out // false) == false)))
+  and .actions[1].id == "blockchain_mainnet_activation_missing_metrics_prefill"
+  and .actions[1].status == "pass"
+  and ((.actions // []) | any((.id == "blockchain_pass_2") and (((.command // "") | test("real-evidence|operator-pack")))))
 ' "$SUMMARY_PASS" >/dev/null; then
   echo "success path summary mismatch"
   cat "$SUMMARY_PASS"
@@ -289,6 +302,7 @@ if ! jq -e '
   and ((.actions // []) | length == 1)
   and .actions[0].id == "blockchain_pass_2"
   and .actions[0].status == "pass"
+  and ((.actions[0].command // "") | test("real-evidence|operator-pack"))
 ' "$SUMMARY_RECOMMENDED" >/dev/null; then
   echo "recommended-only path summary mismatch"
   cat "$SUMMARY_RECOMMENDED"
@@ -318,12 +332,15 @@ if ! jq -e '
   and .rc == 0
   and .inputs.recommended_only == true
   and .roadmap.recommended_gate_id == null
-  and .roadmap.actions_selected_count == 2
-  and .roadmap.selected_action_ids == ["blockchain_pass_1","blockchain_pass_2"]
-  and .summary.actions_executed == 2
-  and .summary.pass == 2
+  and .roadmap.actions_selected_count == 3
+  and .roadmap.selected_action_ids == ["blockchain_pass_1","blockchain_mainnet_activation_missing_metrics_prefill","blockchain_pass_2"]
+  and .summary.actions_executed == 3
+  and .summary.pass == 3
   and .summary.fail == 0
-  and ((.actions // []) | length == 2)
+  and ((.actions // []) | length == 3)
+  and .actions[1].id == "blockchain_mainnet_activation_missing_metrics_prefill"
+  and .actions[1].status == "pass"
+  and ((.actions // []) | any((.id == "blockchain_pass_2") and (((.command // "") | test("real-evidence|operator-pack")))))
 ' "$SUMMARY_RECOMMENDED_FALLBACK" >/dev/null; then
   echo "recommended-only fallback summary mismatch"
   cat "$SUMMARY_RECOMMENDED_FALLBACK"
