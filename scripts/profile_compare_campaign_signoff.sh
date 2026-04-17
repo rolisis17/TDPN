@@ -38,7 +38,7 @@ Usage:
     [--campaign-entry-url URL] \
     [--campaign-exit-url URL] \
     [--campaign-subject ID | --campaign-anon-cred TOKEN] \
-    [--subject ID | --anon-cred TOKEN] \
+    [--subject ID | --key ID | --invite-key ID | --anon-cred TOKEN] \
     [--campaign-start-local-stack auto|0|1] \
     [--campaign-timeout-sec N] \
     [--campaign-endpoint-preflight-timeout-sec N] \
@@ -56,9 +56,10 @@ Notes:
   - Reuse of an existing campaign summary happens only when refresh is disabled
     (--refresh-campaign 0).
   - --subject is a legacy alias of --campaign-subject.
+  - --key and --invite-key are aliases of --campaign-subject.
   - --anon-cred remains an alias of --campaign-anon-cred.
-  - In invite-key workflows, prefer --campaign-subject (or --subject) with an
-    actual invite key value instead of placeholder text.
+  - In invite-key workflows, prefer --campaign-subject (or --subject/--key/
+    --invite-key) with an actual invite key value instead of placeholder text.
   - If no subject flag is provided, subject falls back to env:
     CAMPAIGN_SUBJECT (preferred) then INVITE_KEY.
   - Single-instance lock is enabled by default per reports-dir; bypass only when
@@ -179,7 +180,7 @@ quote_cmd() {
 
 redact_sensitive_cmd_line() {
   local line="$1"
-  line="$(printf '%s' "$line" | sed -E 's/(--subject )[^ ]+/\1[redacted]/g; s/(--anon-cred )[^ ]+/\1[redacted]/g')"
+  line="$(printf '%s' "$line" | sed -E 's/(--campaign-subject )[^ ]+/\1[redacted]/g; s/(--subject )[^ ]+/\1[redacted]/g; s/(--key )[^ ]+/\1[redacted]/g; s/(--invite-key )[^ ]+/\1[redacted]/g; s/(--campaign-anon-cred )[^ ]+/\1[redacted]/g; s/(--anon-cred )[^ ]+/\1[redacted]/g; s/(--campaign-subject=)[^ ]+/\1[redacted]/g; s/(--subject=)[^ ]+/\1[redacted]/g; s/(--key=)[^ ]+/\1[redacted]/g; s/(--invite-key=)[^ ]+/\1[redacted]/g; s/(--campaign-anon-cred=)[^ ]+/\1[redacted]/g; s/(--anon-cred=)[^ ]+/\1[redacted]/g')"
   printf '%s' "$line"
 }
 
@@ -503,11 +504,27 @@ campaign_exit_url="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_EXIT_URL:-}"
 campaign_subject="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_SUBJECT:-}"
 campaign_anon_cred="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_ANON_CRED:-}"
 subject_alias=""
+subject_alias_flag=""
 anon_cred_alias=""
 campaign_subject_cli_provided="0"
 campaign_subject_source=""
 campaign_start_local_stack="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_START_LOCAL_STACK:-}"
 original_args=("$@")
+
+set_subject_alias_or_die() {
+  local alias_flag="$1"
+  local alias_value="$2"
+
+  if [[ -z "$subject_alias_flag" ]]; then
+    subject_alias="$alias_value"
+    subject_alias_flag="$alias_flag"
+    return
+  fi
+  if [[ "$subject_alias" != "$alias_value" ]]; then
+    echo "conflicting subject values: $subject_alias_flag and $alias_flag must match when both are provided"
+    exit 2
+  fi
+}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -660,7 +677,17 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --subject)
-      subject_alias="${2:-}"
+      set_subject_alias_or_die "--subject" "${2:-}"
+      campaign_subject_cli_provided="1"
+      shift 2
+      ;;
+    --key)
+      set_subject_alias_or_die "--key" "${2:-}"
+      campaign_subject_cli_provided="1"
+      shift 2
+      ;;
+    --invite-key)
+      set_subject_alias_or_die "--invite-key" "${2:-}"
       campaign_subject_cli_provided="1"
       shift 2
       ;;
@@ -769,7 +796,11 @@ if [[ -n "$campaign_start_local_stack" ]]; then
   esac
 fi
 if [[ -n "$subject_alias" && -n "$campaign_subject" && "$subject_alias" != "$campaign_subject" ]]; then
-  echo "conflicting subject values: --subject and --campaign-subject must match when both are provided"
+  if [[ "$subject_alias_flag" == "--subject" ]]; then
+    echo "conflicting subject values: --subject and --campaign-subject must match when both are provided"
+  else
+    echo "conflicting subject values: ${subject_alias_flag:---subject} and --campaign-subject must match when both are provided"
+  fi
   exit 2
 fi
 if [[ -n "$anon_cred_alias" && -n "$campaign_anon_cred" && "$anon_cred_alias" != "$campaign_anon_cred" ]]; then

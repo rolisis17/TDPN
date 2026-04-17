@@ -15,7 +15,7 @@ Usage:
     [--endpoint-wait-timeout-sec N] \
     [--endpoint-wait-interval-sec N] \
     [--endpoint-connect-timeout-sec N] \
-    [--campaign-subject INVITE_KEY | --subject INVITE_KEY] \
+    [--campaign-subject INVITE_KEY | --subject INVITE_KEY | --key INVITE_KEY | --invite-key INVITE_KEY] \
     [profile-compare-campaign-signoff args...]
 
 Purpose:
@@ -28,6 +28,7 @@ Notes:
   - Host-style inputs are normalized to http://HOST:PORT (default port 8081).
   - This helper requires invite-key subject mode; passthrough anon-cred flags
     (--campaign-anon-cred/--anon-cred) are rejected.
+  - --key/--invite-key are aliases for --subject.
   - Subject fallback order when CLI subject is omitted:
     CAMPAIGN_SUBJECT env, INVITE_KEY env, CAMPAIGN_SUBJECT file, INVITE_KEY file.
   - Env-file fallback default: $ROOT_DIR/deploy/.env.easy.client
@@ -304,6 +305,8 @@ env_client_file="${PROFILE_DEFAULT_GATE_RUN_ENV_CLIENT_FILE:-$ROOT_DIR/deploy/.e
 
 campaign_subject_cli=""
 subject_alias_cli=""
+key_alias_cli=""
+invite_key_alias_cli=""
 
 declare -a signoff_passthrough=()
 
@@ -362,6 +365,24 @@ while [[ $# -gt 0 ]]; do
       subject_alias_cli="${1#--subject=}"
       shift
       ;;
+    --key)
+      require_value_or_die "$1" "$#"
+      key_alias_cli="${2:-}"
+      shift 2
+      ;;
+    --key=*)
+      key_alias_cli="${1#--key=}"
+      shift
+      ;;
+    --invite-key)
+      require_value_or_die "$1" "$#"
+      invite_key_alias_cli="${2:-}"
+      shift 2
+      ;;
+    --invite-key=*)
+      invite_key_alias_cli="${1#--invite-key=}"
+      shift
+      ;;
     -h|--help|help)
       usage
       exit 0
@@ -414,8 +435,29 @@ fi
 
 campaign_subject_cli="$(trim "$campaign_subject_cli")"
 subject_alias_cli="$(trim "$subject_alias_cli")"
-if [[ -n "$campaign_subject_cli" && -n "$subject_alias_cli" && "$campaign_subject_cli" != "$subject_alias_cli" ]]; then
-  echo "conflicting subject values: --subject and --campaign-subject must match when both are provided"
+key_alias_cli="$(trim "$key_alias_cli")"
+invite_key_alias_cli="$(trim "$invite_key_alias_cli")"
+
+subject_reference=""
+subject_conflict=false
+if [[ -n "$campaign_subject_cli" ]]; then
+  subject_reference="$campaign_subject_cli"
+fi
+for subject_candidate in "$subject_alias_cli" "$key_alias_cli" "$invite_key_alias_cli"; do
+  if [[ -z "$subject_candidate" ]]; then
+    continue
+  fi
+  if [[ -z "$subject_reference" ]]; then
+    subject_reference="$subject_candidate"
+    continue
+  fi
+  if [[ "$subject_candidate" != "$subject_reference" ]]; then
+    subject_conflict=true
+    break
+  fi
+done
+if [[ "$subject_conflict" == true ]]; then
+  echo "conflicting subject values: --campaign-subject/--subject/--key/--invite-key must match when multiple are provided"
   exit 2
 fi
 
@@ -437,6 +479,12 @@ if [[ -n "$campaign_subject_cli" ]]; then
 elif [[ -n "$subject_alias_cli" ]]; then
   campaign_subject_effective="$subject_alias_cli"
   subject_source="explicit:--subject"
+elif [[ -n "$key_alias_cli" ]]; then
+  campaign_subject_effective="$key_alias_cli"
+  subject_source="explicit:--key"
+elif [[ -n "$invite_key_alias_cli" ]]; then
+  campaign_subject_effective="$invite_key_alias_cli"
+  subject_source="explicit:--invite-key"
 else
   campaign_subject_env="$(trim "${CAMPAIGN_SUBJECT:-}")"
   invite_key_env="$(trim "${INVITE_KEY:-}")"
@@ -461,7 +509,7 @@ fi
 if [[ -z "$campaign_subject_effective" ]]; then
   echo "[profile-default-gate-run] $(timestamp_utc) failure_kind=missing_invite_subject_precondition env_client_file=$env_client_file"
   echo "profile-default-gate-run failed: missing invite key subject"
-  echo "provide --campaign-subject/--subject, or set CAMPAIGN_SUBJECT/INVITE_KEY"
+  echo "provide --campaign-subject/--subject/--key/--invite-key, or set CAMPAIGN_SUBJECT/INVITE_KEY"
   echo "or define CAMPAIGN_SUBJECT/INVITE_KEY in $env_client_file"
   echo "override env file path via PROFILE_DEFAULT_GATE_RUN_ENV_CLIENT_FILE"
   exit 2
@@ -527,7 +575,9 @@ if [[ -n "$campaign_bootstrap_passthrough" ]]; then
 fi
 
 if ! array_has_arg_or_equals_prefix "--campaign-subject" "${signoff_passthrough[@]}" \
-  && ! array_has_arg_or_equals_prefix "--subject" "${signoff_passthrough[@]}"; then
+  && ! array_has_arg_or_equals_prefix "--subject" "${signoff_passthrough[@]}" \
+  && ! array_has_arg_or_equals_prefix "--key" "${signoff_passthrough[@]}" \
+  && ! array_has_arg_or_equals_prefix "--invite-key" "${signoff_passthrough[@]}"; then
   signoff_passthrough+=(--campaign-subject "$campaign_subject_effective")
 fi
 if ! array_has_arg_or_equals_prefix "--campaign-directory-urls" "${signoff_passthrough[@]}"; then

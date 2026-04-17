@@ -43,6 +43,18 @@ assert_contains() {
   fi
 }
 
+assert_not_contains() {
+  local haystack="$1"
+  local needle="$2"
+  local message="$3"
+  if [[ "$haystack" == *"$needle"* ]]; then
+    echo "$message"
+    echo "did not expect to contain: $needle"
+    echo "actual: $haystack"
+    exit 1
+  fi
+}
+
 assert_file_contains() {
   local file_path="$1"
   local pattern="$2"
@@ -236,6 +248,132 @@ fi
 file_fallback_line_sp="${file_fallback_line//$'\t'/ }"
 assert_contains "$file_fallback_line_sp" "--campaign-subject inv-file-campaign-subject" "missing forwarded file-derived campaign subject"
 assert_file_contains "$FILE_FALLBACK_LOG" "subject_source=file:CAMPAIGN_SUBJECT" "missing file-derived subject source marker"
+
+echo "[profile-default-gate-run] explicit --key alias forwards campaign subject"
+: >"$SIGNOFF_CAPTURE"
+KEY_ALIAS_LOG="$TMP_DIR/profile_default_gate_run_key_alias.log"
+set +e
+PATH="$TMP_BIN:$PATH" \
+PROFILE_DEFAULT_GATE_RUN_SIGNOFF_SCRIPT="$FAKE_SIGNOFF" \
+PROFILE_DEFAULT_GATE_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_COUNTER_FILE="$TMP_DIR/curl_counter_key_alias.txt" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_FAIL_ATTEMPTS=0 \
+CAMPAIGN_SUBJECT="" \
+INVITE_KEY="" \
+"$SCRIPT_UNDER_TEST" \
+  --host-a "dir-a.test" \
+  --host-b "dir-b.test" \
+  --key "inv-key-alias" >"$KEY_ALIAS_LOG" 2>&1
+key_alias_rc=$?
+set -e
+if [[ "$key_alias_rc" -ne 0 ]]; then
+  echo "expected explicit --key alias path rc=0, got rc=$key_alias_rc"
+  cat "$KEY_ALIAS_LOG"
+  exit 1
+fi
+key_alias_line="$(sed -n '1p' "$SIGNOFF_CAPTURE" || true)"
+if [[ -z "$key_alias_line" ]]; then
+  echo "missing captured signoff invocation in --key alias path"
+  cat "$KEY_ALIAS_LOG"
+  exit 1
+fi
+key_alias_line_sp="${key_alias_line//$'\t'/ }"
+assert_contains "$key_alias_line_sp" "--campaign-subject inv-key-alias" "missing forwarded --key alias subject"
+assert_file_contains "$KEY_ALIAS_LOG" "subject_source=explicit:--key" "missing explicit --key subject source marker"
+
+echo "[profile-default-gate-run] explicit --invite-key alias forwards campaign subject"
+: >"$SIGNOFF_CAPTURE"
+INVITE_KEY_ALIAS_LOG="$TMP_DIR/profile_default_gate_run_invite_key_alias.log"
+set +e
+PATH="$TMP_BIN:$PATH" \
+PROFILE_DEFAULT_GATE_RUN_SIGNOFF_SCRIPT="$FAKE_SIGNOFF" \
+PROFILE_DEFAULT_GATE_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_COUNTER_FILE="$TMP_DIR/curl_counter_invite_key_alias.txt" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_FAIL_ATTEMPTS=0 \
+CAMPAIGN_SUBJECT="" \
+INVITE_KEY="" \
+"$SCRIPT_UNDER_TEST" \
+  --host-a "dir-a.test" \
+  --host-b "dir-b.test" \
+  --invite-key "inv-invite-key-alias" >"$INVITE_KEY_ALIAS_LOG" 2>&1
+invite_key_alias_rc=$?
+set -e
+if [[ "$invite_key_alias_rc" -ne 0 ]]; then
+  echo "expected explicit --invite-key alias path rc=0, got rc=$invite_key_alias_rc"
+  cat "$INVITE_KEY_ALIAS_LOG"
+  exit 1
+fi
+invite_key_alias_line="$(sed -n '1p' "$SIGNOFF_CAPTURE" || true)"
+if [[ -z "$invite_key_alias_line" ]]; then
+  echo "missing captured signoff invocation in --invite-key alias path"
+  cat "$INVITE_KEY_ALIAS_LOG"
+  exit 1
+fi
+invite_key_alias_line_sp="${invite_key_alias_line//$'\t'/ }"
+assert_contains "$invite_key_alias_line_sp" "--campaign-subject inv-invite-key-alias" "missing forwarded --invite-key alias subject"
+assert_file_contains "$INVITE_KEY_ALIAS_LOG" "subject_source=explicit:--invite-key" "missing explicit --invite-key subject source marker"
+
+echo "[profile-default-gate-run] conflicting subject aliases fail clearly"
+: >"$SIGNOFF_CAPTURE"
+SUBJECT_CONFLICT_LOG="$TMP_DIR/profile_default_gate_run_subject_conflict.log"
+set +e
+PATH="$TMP_BIN:$PATH" \
+PROFILE_DEFAULT_GATE_RUN_SIGNOFF_SCRIPT="$FAKE_SIGNOFF" \
+PROFILE_DEFAULT_GATE_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_COUNTER_FILE="$TMP_DIR/curl_counter_subject_conflict.txt" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_FAIL_ATTEMPTS=0 \
+CAMPAIGN_SUBJECT="" \
+INVITE_KEY="" \
+"$SCRIPT_UNDER_TEST" \
+  --host-a "dir-a.test" \
+  --host-b "dir-b.test" \
+  --campaign-subject "inv-campaign-subject" \
+  --key "inv-key-mismatch" >"$SUBJECT_CONFLICT_LOG" 2>&1
+subject_conflict_rc=$?
+set -e
+if [[ "$subject_conflict_rc" -ne 2 ]]; then
+  echo "expected conflicting subject aliases path rc=2, got rc=$subject_conflict_rc"
+  cat "$SUBJECT_CONFLICT_LOG"
+  exit 1
+fi
+assert_file_contains "$SUBJECT_CONFLICT_LOG" "conflicting subject values" "missing conflicting subject alias rejection text"
+if [[ -s "$SIGNOFF_CAPTURE" ]]; then
+  echo "conflicting subject aliases path should not invoke signoff"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+
+echo "[profile-default-gate-run] passthrough --key suppresses duplicate subject injection"
+: >"$SIGNOFF_CAPTURE"
+PASSTHROUGH_KEY_LOG="$TMP_DIR/profile_default_gate_run_passthrough_key.log"
+set +e
+PATH="$TMP_BIN:$PATH" \
+PROFILE_DEFAULT_GATE_RUN_SIGNOFF_SCRIPT="$FAKE_SIGNOFF" \
+PROFILE_DEFAULT_GATE_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_COUNTER_FILE="$TMP_DIR/curl_counter_passthrough_key.txt" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_FAIL_ATTEMPTS=0 \
+CAMPAIGN_SUBJECT="inv-env-no-dup" \
+INVITE_KEY="" \
+"$SCRIPT_UNDER_TEST" \
+  --host-a "dir-a.test" \
+  --host-b "dir-b.test" \
+  -- --key "inv-passthrough-key" >"$PASSTHROUGH_KEY_LOG" 2>&1
+passthrough_key_rc=$?
+set -e
+if [[ "$passthrough_key_rc" -ne 0 ]]; then
+  echo "expected passthrough --key path rc=0, got rc=$passthrough_key_rc"
+  cat "$PASSTHROUGH_KEY_LOG"
+  exit 1
+fi
+passthrough_key_line="$(sed -n '1p' "$SIGNOFF_CAPTURE" || true)"
+if [[ -z "$passthrough_key_line" ]]; then
+  echo "missing captured signoff invocation in passthrough --key path"
+  cat "$PASSTHROUGH_KEY_LOG"
+  exit 1
+fi
+passthrough_key_line_sp="${passthrough_key_line//$'\t'/ }"
+assert_contains "$passthrough_key_line_sp" "--key inv-passthrough-key" "missing passthrough --key credential forwarding"
+assert_not_contains "$passthrough_key_line_sp" "--campaign-subject inv-env-no-dup" "unexpected duplicate --campaign-subject injection when passthrough --key exists"
 
 echo "[profile-default-gate-run] missing subject fails clearly"
 : >"$SIGNOFF_CAPTURE"

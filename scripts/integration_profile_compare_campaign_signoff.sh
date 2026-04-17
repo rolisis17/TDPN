@@ -242,6 +242,80 @@ if ! jq -e '.status == "ok" and .final_rc == 0 and .inputs.campaign_refresh_over
   exit 1
 fi
 
+echo "[profile-compare-campaign-signoff] --key alias forwarding works"
+: >"$SIGNOFF_CAPTURE"
+KEY_ALIAS_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_key_alias_summary.json"
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_COMPARE_CAMPAIGN_SCRIPT="$FAKE_CAMPAIGN" \
+PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT="$FAKE_CHECK" \
+FAKE_CAMPAIGN_RC=0 \
+FAKE_CHECK_RC=0 \
+FAKE_CHECK_DECISION=GO \
+./scripts/profile_compare_campaign_signoff.sh \
+  --reports-dir "$TMP_DIR/reports_key_alias" \
+  --refresh-campaign 1 \
+  --campaign-execution-mode docker \
+  --key "inv-key-alias-test" \
+  --summary-json "$KEY_ALIAS_SUMMARY" >/tmp/integration_profile_compare_campaign_signoff_key_alias.log 2>&1
+
+if ! rg -q '\[profile-compare-campaign-signoff\] status=ok final_rc=0 decision=GO' /tmp/integration_profile_compare_campaign_signoff_key_alias.log; then
+  echo "expected --key alias forwarding status line not found"
+  cat /tmp/integration_profile_compare_campaign_signoff_key_alias.log
+  exit 1
+fi
+if ! rg -q -- '--subject inv-key-alias-test' "$SIGNOFF_CAPTURE"; then
+  echo "expected --key alias to normalize to --subject forwarding flag"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+if rg -q -- '--key ' "$SIGNOFF_CAPTURE" || rg -q -- '--invite-key ' "$SIGNOFF_CAPTURE"; then
+  echo "unexpected raw key alias forwarding flag found in campaign command"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+if ! jq -e '.status == "ok" and .final_rc == 0 and .inputs.campaign_refresh_overrides.subject_source == "explicit" and .inputs.campaign_refresh_overrides.subject_configured == true and .inputs.campaign_refresh_overrides_effective.subject_configured == true' "$KEY_ALIAS_SUMMARY" >/dev/null 2>&1; then
+  echo "--key alias forwarding summary JSON missing expected fields"
+  cat "$KEY_ALIAS_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-compare-campaign-signoff] --invite-key alias forwarding works"
+: >"$SIGNOFF_CAPTURE"
+INVITE_KEY_ALIAS_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_invite_key_alias_summary.json"
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_COMPARE_CAMPAIGN_SCRIPT="$FAKE_CAMPAIGN" \
+PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT="$FAKE_CHECK" \
+FAKE_CAMPAIGN_RC=0 \
+FAKE_CHECK_RC=0 \
+FAKE_CHECK_DECISION=GO \
+./scripts/profile_compare_campaign_signoff.sh \
+  --reports-dir "$TMP_DIR/reports_invite_key_alias" \
+  --refresh-campaign 1 \
+  --campaign-execution-mode docker \
+  --invite-key "inv-invite-key-alias-test" \
+  --summary-json "$INVITE_KEY_ALIAS_SUMMARY" >/tmp/integration_profile_compare_campaign_signoff_invite_key_alias.log 2>&1
+
+if ! rg -q '\[profile-compare-campaign-signoff\] status=ok final_rc=0 decision=GO' /tmp/integration_profile_compare_campaign_signoff_invite_key_alias.log; then
+  echo "expected --invite-key alias forwarding status line not found"
+  cat /tmp/integration_profile_compare_campaign_signoff_invite_key_alias.log
+  exit 1
+fi
+if ! rg -q -- '--subject inv-invite-key-alias-test' "$SIGNOFF_CAPTURE"; then
+  echo "expected --invite-key alias to normalize to --subject forwarding flag"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+if rg -q -- '--key ' "$SIGNOFF_CAPTURE" || rg -q -- '--invite-key ' "$SIGNOFF_CAPTURE"; then
+  echo "unexpected raw invite-key alias forwarding flag found in campaign command"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+if ! jq -e '.status == "ok" and .final_rc == 0 and .inputs.campaign_refresh_overrides.subject_source == "explicit" and .inputs.campaign_refresh_overrides.subject_configured == true and .inputs.campaign_refresh_overrides_effective.subject_configured == true' "$INVITE_KEY_ALIAS_SUMMARY" >/dev/null 2>&1; then
+  echo "--invite-key alias forwarding summary JSON missing expected fields"
+  cat "$INVITE_KEY_ALIAS_SUMMARY"
+  exit 1
+fi
+
 echo "[profile-compare-campaign-signoff] anon-cred alias forwarding works"
 : >"$SIGNOFF_CAPTURE"
 ANON_CRED_ALIAS_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_anon_cred_alias_summary.json"
@@ -406,6 +480,48 @@ fi
 if ! rg -q 'conflicting subject values: --subject and --campaign-subject must match when both are provided' /tmp/integration_profile_compare_campaign_signoff_conflict_subject.log; then
   echo "expected subject conflict error message missing"
   cat /tmp/integration_profile_compare_campaign_signoff_conflict_subject.log
+  exit 1
+fi
+
+echo "[profile-compare-campaign-signoff] conflicting --key and --campaign-subject fail clearly"
+set +e
+./scripts/profile_compare_campaign_signoff.sh \
+  --reports-dir "$TMP_DIR/reports_conflict_key_campaign_subject" \
+  --refresh-campaign 1 \
+  --key inv-key-a \
+  --campaign-subject inv-key-b \
+  --summary-json "$TMP_DIR/profile_compare_campaign_signoff_conflict_key_campaign_subject.json" >/tmp/integration_profile_compare_campaign_signoff_conflict_key_campaign_subject.log 2>&1
+rc_conflict_key_campaign_subject=$?
+set -e
+if [[ "$rc_conflict_key_campaign_subject" -ne 2 ]]; then
+  echo "expected rc=2 when --key conflicts with --campaign-subject"
+  cat /tmp/integration_profile_compare_campaign_signoff_conflict_key_campaign_subject.log
+  exit 1
+fi
+if ! rg -q 'conflicting subject values: --key and --campaign-subject must match when both are provided' /tmp/integration_profile_compare_campaign_signoff_conflict_key_campaign_subject.log; then
+  echo "expected --key conflict error message missing"
+  cat /tmp/integration_profile_compare_campaign_signoff_conflict_key_campaign_subject.log
+  exit 1
+fi
+
+echo "[profile-compare-campaign-signoff] conflicting --invite-key and --subject fail clearly"
+set +e
+./scripts/profile_compare_campaign_signoff.sh \
+  --reports-dir "$TMP_DIR/reports_conflict_invite_key_subject" \
+  --refresh-campaign 1 \
+  --invite-key inv-invite-a \
+  --subject inv-subject-b \
+  --summary-json "$TMP_DIR/profile_compare_campaign_signoff_conflict_invite_key_subject.json" >/tmp/integration_profile_compare_campaign_signoff_conflict_invite_key_subject.log 2>&1
+rc_conflict_invite_key_subject=$?
+set -e
+if [[ "$rc_conflict_invite_key_subject" -ne 2 ]]; then
+  echo "expected rc=2 when --invite-key conflicts with --subject"
+  cat /tmp/integration_profile_compare_campaign_signoff_conflict_invite_key_subject.log
+  exit 1
+fi
+if ! rg -q 'conflicting subject values: --invite-key and --subject must match when both are provided' /tmp/integration_profile_compare_campaign_signoff_conflict_invite_key_subject.log; then
+  echo "expected --invite-key/--subject conflict error message missing"
+  cat /tmp/integration_profile_compare_campaign_signoff_conflict_invite_key_subject.log
   exit 1
 fi
 
