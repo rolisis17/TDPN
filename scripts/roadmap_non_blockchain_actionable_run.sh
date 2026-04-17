@@ -16,6 +16,7 @@ Usage:
     [--refresh-manual-validation [0|1]] \
     [--refresh-single-machine-readiness [0|1]] \
     [--allow-policy-no-go [0|1]] \
+    [--parallel [0|1]] \
     [--recommended-only [0|1]] \
     [--max-actions N] \
     [--print-summary-json [0|1]]
@@ -29,12 +30,13 @@ Defaults:
   --refresh-manual-validation 0
   --refresh-single-machine-readiness 0
   --allow-policy-no-go 0
+  --parallel 0
   --recommended-only 0
   --max-actions 0   (0 = no limit)
   --print-summary-json 1
 
 Exit behavior:
-  - Runs all selected commands sequentially.
+  - Runs all selected commands (sequential by default, concurrent when --parallel=1).
   - Returns rc=0 only when all selected commands pass (or no actions selected).
   - Returns first failing action command rc otherwise.
 USAGE
@@ -115,6 +117,7 @@ roadmap_report_md="${ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_REPORT_MD:-}"
 refresh_manual_validation="${ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_REFRESH_MANUAL_VALIDATION:-0}"
 refresh_single_machine_readiness="${ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_REFRESH_SINGLE_MACHINE_READINESS:-0}"
 allow_policy_no_go="${ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_ALLOW_POLICY_NO_GO:-0}"
+parallel="${ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_PARALLEL:-0}"
 recommended_only="${ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_RECOMMENDED_ONLY:-0}"
 max_actions="${ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_MAX_ACTIONS:-0}"
 print_summary_json="${ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_PRINT_SUMMARY_JSON:-1}"
@@ -174,6 +177,15 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --parallel)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        parallel="${2:-}"
+        shift 2
+      else
+        parallel="1"
+        shift
+      fi
+      ;;
     --recommended-only)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         recommended_only="${2:-}"
@@ -212,6 +224,7 @@ done
 bool_arg_or_die "--refresh-manual-validation" "$refresh_manual_validation"
 bool_arg_or_die "--refresh-single-machine-readiness" "$refresh_single_machine_readiness"
 bool_arg_or_die "--allow-policy-no-go" "$allow_policy_no_go"
+bool_arg_or_die "--parallel" "$parallel"
 bool_arg_or_die "--recommended-only" "$recommended_only"
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
 int_arg_or_die "--max-actions" "$max_actions"
@@ -282,15 +295,44 @@ recommended_id="$(jq -r '.vpn_track.non_blockchain_recommended_gate_id // ""' "$
 selected_actions_json="$(jq -c '.vpn_track.non_blockchain_actionable_no_sudo_or_github // []' "$roadmap_summary_json")"
 if [[ "$recommended_only" == "1" && -n "$recommended_id" ]]; then
   selected_actions_json="$(printf '%s\n' "$selected_actions_json" | jq -c --arg rid "$recommended_id" '[.[] | select((.id // "") == $rid)]')"
+elif [[ "$recommended_only" == "1" ]]; then
+  echo "[roadmap-non-blockchain-actionable-run] recommended-only requested but no recommended gate id was provided; falling back to full actionable list"
 fi
 if (( max_actions > 0 )); then
   selected_actions_json="$(printf '%s\n' "$selected_actions_json" | jq -c --argjson max_actions "$max_actions" '.[:$max_actions]')"
 fi
 
 actions_count="$(printf '%s\n' "$selected_actions_json" | jq -r 'length')"
+selected_action_ids="$(printf '%s\n' "$selected_actions_json" | jq -r '[.[] | .id // "" | select(length > 0)] | join(",")')"
+if [[ -z "$selected_action_ids" ]]; then
+  selected_action_ids="none"
+fi
+recommended_gate_id_not_found="false"
+if [[ "$recommended_only" == "1" && -n "$recommended_id" && "$actions_count" == "0" ]]; then
+  recommended_gate_id_not_found="true"
+fi
+echo "[roadmap-non-blockchain-actionable-run] selected_actions=$actions_count parallel=$parallel action_timeout_sec=$action_timeout_sec recommended_only=$recommended_only recommended_gate_id=${recommended_id:-none}"
+echo "[roadmap-non-blockchain-actionable-run] action_ids=$selected_action_ids"
+if (( actions_count == 0 )); then
+  if [[ "$recommended_gate_id_not_found" == "true" ]]; then
+    echo "[roadmap-non-blockchain-actionable-run] fail-closed: recommended gate id not found in actionable list (recommended_gate_id=${recommended_id})"
+  else
+    echo "[roadmap-non-blockchain-actionable-run] no actions selected; writing pass summary"
+  fi
+fi
 actions_tmp="$(mktemp)"
-trap 'rm -f "$actions_tmp"' EXIT
+actions_results_tmp_dir="$(mktemp -d)"
+trap 'rm -f "$actions_tmp"; rm -rf "$actions_results_tmp_dir"' EXIT
 : >"$actions_tmp"
+
+declare -a action_result_files
+declare -a action_pids
+declare -a action_ids
+declare -a action_labels
+declare -a action_reasons
+declare -a action_commands
+declare -a action_logs
+declare -a action_allow_policy_applied
 
 final_status="pass"
 final_rc=0
@@ -298,6 +340,10 @@ executed_count=0
 pass_count=0
 fail_count=0
 timed_out_count=0
+if [[ "$recommended_gate_id_not_found" == "true" ]]; then
+  final_status="fail"
+  final_rc=5
+fi
 
 for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
   action_json="$(printf '%s\n' "$selected_actions_json" | jq -c --argjson idx "$idx" '.[$idx]')"
@@ -308,8 +354,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
   action_allow_policy_no_go_applied="false"
   action_id_safe="$(sanitize_id "$action_id")"
   action_log="$reports_dir/action_$((idx + 1))_${action_id_safe}.log"
-  action_timed_out="false"
-  action_failure_kind="none"
+  action_result_file="$actions_results_tmp_dir/action_$((idx + 1))_${action_id_safe}.json"
 
   if [[ "$allow_policy_no_go" == "1" ]]; then
     if [[ "$action_id" == "phase1_resilience_handoff_run_dry" || "$action_command" == *"phase1_resilience_handoff_run.sh"* ]]; then
@@ -325,40 +370,274 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
     fi
   fi
 
+  action_ids[$idx]="$action_id"
+  action_labels[$idx]="$action_label"
+  action_reasons[$idx]="$action_reason"
+  action_commands[$idx]="$action_command"
+  action_logs[$idx]="$action_log"
+  action_allow_policy_applied[$idx]="$action_allow_policy_no_go_applied"
+  action_result_files[$idx]="$action_result_file"
+
   if [[ -z "$action_command" ]]; then
-    action_status="fail"
-    action_rc=4
-    command_rc=4
-    action_notes="missing command"
-    action_failure_kind="missing_command"
+    jq -cn \
+      --arg id "$action_id" \
+      --arg label "$action_label" \
+      --arg reason "$action_reason" \
+      --arg command "$action_command" \
+      --arg status "fail" \
+      --arg notes "missing command" \
+      --arg log "$action_log" \
+      --arg failure_kind "missing_command" \
+      --argjson rc 4 \
+      --argjson command_rc 4 \
+      --argjson timed_out false \
+      --argjson timeout_sec "$action_timeout_sec" \
+      --argjson allow_policy_no_go_applied "$action_allow_policy_no_go_applied" \
+      '{
+        id: $id,
+        label: $label,
+        reason: $reason,
+        command: $command,
+        allow_policy_no_go_applied: $allow_policy_no_go_applied,
+        status: $status,
+        rc: $rc,
+        command_rc: $command_rc,
+        timed_out: $timed_out,
+        timeout_sec: (if $timeout_sec > 0 then $timeout_sec else null end),
+        failure_kind: $failure_kind,
+        notes: (if $notes == "" then null else $notes end),
+        artifacts: { log: $log }
+      }' >"$action_result_file"
   else
     echo "[roadmap-non-blockchain-actionable-run] action=$action_id status=running"
-    set +e
-    if (( action_timeout_sec > 0 )); then
-      timeout --foreground "${action_timeout_sec}s" bash -lc "$action_command" >"$action_log" 2>&1
-    else
-      bash -lc "$action_command" >"$action_log" 2>&1
-    fi
-    command_rc=$?
-    set -e
-    if (( command_rc == 0 )); then
-      action_status="pass"
-      action_rc=0
-      action_notes=""
-      echo "[roadmap-non-blockchain-actionable-run] action=$action_id status=pass rc=0"
-    else
-      action_status="fail"
-      action_rc="$command_rc"
-      if (( command_rc == 124 )) && (( action_timeout_sec > 0 )); then
-        action_timed_out="true"
-        action_failure_kind="timed_out"
-        action_notes="action timed out after ${action_timeout_sec}s"
-      else
+    if [[ "$parallel" == "1" ]]; then
+      (
+        action_status="fail"
+        action_rc=125
+        command_rc=125
+        action_timed_out="false"
         action_failure_kind="command_failed"
         action_notes="command failed"
+        set +e
+        if (( action_timeout_sec > 0 )); then
+          timeout --foreground "${action_timeout_sec}s" bash -lc "$action_command" >"$action_log" 2>&1
+        else
+          bash -lc "$action_command" >"$action_log" 2>&1
+        fi
+        command_rc=$?
+        set -e
+        if (( command_rc == 0 )); then
+          action_status="pass"
+          action_rc=0
+          action_notes=""
+          action_failure_kind="none"
+        else
+          action_status="fail"
+          action_rc="$command_rc"
+          if (( command_rc == 124 )) && (( action_timeout_sec > 0 )); then
+            action_timed_out="true"
+            action_failure_kind="timed_out"
+            action_notes="action timed out after ${action_timeout_sec}s"
+          fi
+        fi
+        jq -cn \
+          --arg id "$action_id" \
+          --arg label "$action_label" \
+          --arg reason "$action_reason" \
+          --arg command "$action_command" \
+          --arg status "$action_status" \
+          --arg notes "$action_notes" \
+          --arg log "$action_log" \
+          --arg failure_kind "$action_failure_kind" \
+          --argjson rc "$action_rc" \
+          --argjson command_rc "$command_rc" \
+          --argjson timed_out "$action_timed_out" \
+          --argjson timeout_sec "$action_timeout_sec" \
+          --argjson allow_policy_no_go_applied "$action_allow_policy_no_go_applied" \
+          '{
+            id: $id,
+            label: $label,
+            reason: $reason,
+            command: $command,
+            allow_policy_no_go_applied: $allow_policy_no_go_applied,
+            status: $status,
+            rc: $rc,
+            command_rc: $command_rc,
+            timed_out: $timed_out,
+            timeout_sec: (if $timeout_sec > 0 then $timeout_sec else null end),
+            failure_kind: $failure_kind,
+            notes: (if $notes == "" then null else $notes end),
+            artifacts: { log: $log }
+          }' >"$action_result_file"
+      ) &
+      action_pids[$idx]=$!
+    else
+      action_status="fail"
+      action_rc=125
+      command_rc=125
+      action_timed_out="false"
+      action_failure_kind="command_failed"
+      action_notes="command failed"
+      set +e
+      if (( action_timeout_sec > 0 )); then
+        timeout --foreground "${action_timeout_sec}s" bash -lc "$action_command" >"$action_log" 2>&1
+      else
+        bash -lc "$action_command" >"$action_log" 2>&1
       fi
-      echo "[roadmap-non-blockchain-actionable-run] action=$action_id status=fail rc=$command_rc"
+      command_rc=$?
+      set -e
+      if (( command_rc == 0 )); then
+        action_status="pass"
+        action_rc=0
+        action_notes=""
+        action_failure_kind="none"
+      else
+        action_status="fail"
+        action_rc="$command_rc"
+        if (( command_rc == 124 )) && (( action_timeout_sec > 0 )); then
+          action_timed_out="true"
+          action_failure_kind="timed_out"
+          action_notes="action timed out after ${action_timeout_sec}s"
+        fi
+      fi
+      jq -cn \
+        --arg id "$action_id" \
+        --arg label "$action_label" \
+        --arg reason "$action_reason" \
+        --arg command "$action_command" \
+        --arg status "$action_status" \
+        --arg notes "$action_notes" \
+        --arg log "$action_log" \
+        --arg failure_kind "$action_failure_kind" \
+        --argjson rc "$action_rc" \
+        --argjson command_rc "$command_rc" \
+        --argjson timed_out "$action_timed_out" \
+        --argjson timeout_sec "$action_timeout_sec" \
+        --argjson allow_policy_no_go_applied "$action_allow_policy_no_go_applied" \
+        '{
+          id: $id,
+          label: $label,
+          reason: $reason,
+          command: $command,
+          allow_policy_no_go_applied: $allow_policy_no_go_applied,
+          status: $status,
+          rc: $rc,
+          command_rc: $command_rc,
+          timed_out: $timed_out,
+          timeout_sec: (if $timeout_sec > 0 then $timeout_sec else null end),
+          failure_kind: $failure_kind,
+          notes: (if $notes == "" then null else $notes end),
+          artifacts: { log: $log }
+        }' >"$action_result_file"
     fi
+  fi
+done
+
+if [[ "$parallel" == "1" ]]; then
+  for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
+    action_pid="${action_pids[$idx]:-}"
+    if [[ -n "$action_pid" ]]; then
+      set +e
+      wait "$action_pid"
+      wait_rc=$?
+      set -e
+      if (( wait_rc != 0 )); then
+        action_id="${action_ids[$idx]}"
+        action_label="${action_labels[$idx]}"
+        action_reason="${action_reasons[$idx]}"
+        action_command="${action_commands[$idx]}"
+        action_log="${action_logs[$idx]}"
+        action_allow_policy_no_go_applied="${action_allow_policy_applied[$idx]}"
+        action_result_file="${action_result_files[$idx]}"
+        jq -cn \
+          --arg id "$action_id" \
+          --arg label "$action_label" \
+          --arg reason "$action_reason" \
+          --arg command "$action_command" \
+          --arg status "fail" \
+          --arg notes "internal runner error (wait rc=$wait_rc)" \
+          --arg log "$action_log" \
+          --arg failure_kind "runner_error" \
+          --argjson rc "$wait_rc" \
+          --argjson command_rc "$wait_rc" \
+          --argjson timed_out false \
+          --argjson timeout_sec "$action_timeout_sec" \
+          --argjson allow_policy_no_go_applied "$action_allow_policy_no_go_applied" \
+          '{
+            id: $id,
+            label: $label,
+            reason: $reason,
+            command: $command,
+            allow_policy_no_go_applied: $allow_policy_no_go_applied,
+            status: $status,
+            rc: $rc,
+            command_rc: $command_rc,
+            timed_out: $timed_out,
+            timeout_sec: (if $timeout_sec > 0 then $timeout_sec else null end),
+            failure_kind: $failure_kind,
+            notes: (if $notes == "" then null else $notes end),
+            artifacts: { log: $log }
+          }' >"$action_result_file"
+      fi
+    fi
+  done
+fi
+
+for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
+  action_result_file="${action_result_files[$idx]}"
+  action_id="${action_ids[$idx]}"
+  action_label="${action_labels[$idx]}"
+  action_reason="${action_reasons[$idx]}"
+  action_command="${action_commands[$idx]}"
+  action_log="${action_logs[$idx]}"
+  action_allow_policy_no_go_applied="${action_allow_policy_applied[$idx]}"
+
+  if [[ ! -s "$action_result_file" ]] || ! jq -e . "$action_result_file" >/dev/null 2>&1; then
+    jq -cn \
+      --arg id "$action_id" \
+      --arg label "$action_label" \
+      --arg reason "$action_reason" \
+      --arg command "$action_command" \
+      --arg status "fail" \
+      --arg notes "internal runner error (missing or invalid action result)" \
+      --arg log "$action_log" \
+      --arg failure_kind "runner_error" \
+      --argjson rc 125 \
+      --argjson command_rc 125 \
+      --argjson timed_out false \
+      --argjson timeout_sec "$action_timeout_sec" \
+      --argjson allow_policy_no_go_applied "$action_allow_policy_no_go_applied" \
+      '{
+        id: $id,
+        label: $label,
+        reason: $reason,
+        command: $command,
+        allow_policy_no_go_applied: $allow_policy_no_go_applied,
+        status: $status,
+        rc: $rc,
+        command_rc: $command_rc,
+        timed_out: $timed_out,
+        timeout_sec: (if $timeout_sec > 0 then $timeout_sec else null end),
+        failure_kind: $failure_kind,
+        notes: (if $notes == "" then null else $notes end),
+        artifacts: { log: $log }
+      }' >"$action_result_file"
+  fi
+
+  action_status="$(jq -r '.status // "fail"' "$action_result_file")"
+  action_rc="$(jq -r '.rc // .command_rc // 125' "$action_result_file")"
+  action_timed_out="$(jq -r '.timed_out // false' "$action_result_file")"
+  action_failure_kind="$(jq -r '.failure_kind // "command_failed"' "$action_result_file")"
+  action_notes="$(jq -r '.notes // ""' "$action_result_file")"
+
+  if [[ "$action_status" == "pass" ]]; then
+    echo "[roadmap-non-blockchain-actionable-run] action=$action_id status=pass rc=0"
+  else
+    echo "[roadmap-non-blockchain-actionable-run] action=$action_id status=fail rc=$action_rc failure_kind=$action_failure_kind"
+    if [[ -n "$action_notes" ]]; then
+      echo "[roadmap-non-blockchain-actionable-run] action=$action_id notes=$action_notes"
+    fi
+    echo "[roadmap-non-blockchain-actionable-run] action=$action_id log=$action_log"
   fi
 
   executed_count=$((executed_count + 1))
@@ -375,39 +654,11 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
     fi
   fi
 
-  jq -cn \
-    --arg id "$action_id" \
-    --arg label "$action_label" \
-    --arg reason "$action_reason" \
-    --arg command "$action_command" \
-    --arg status "$action_status" \
-    --arg notes "$action_notes" \
-    --arg log "$action_log" \
-    --arg failure_kind "$action_failure_kind" \
-    --argjson rc "$action_rc" \
-    --argjson command_rc "$command_rc" \
-    --argjson timed_out "$action_timed_out" \
-    --argjson timeout_sec "$action_timeout_sec" \
-    --argjson allow_policy_no_go_applied "$action_allow_policy_no_go_applied" \
-    '{
-      id: $id,
-      label: $label,
-      reason: $reason,
-      command: $command,
-      allow_policy_no_go_applied: $allow_policy_no_go_applied,
-      status: $status,
-      rc: $rc,
-      command_rc: $command_rc,
-      timed_out: $timed_out,
-      timeout_sec: (if $timeout_sec > 0 then $timeout_sec else null end),
-      failure_kind: $failure_kind,
-      notes: (if $notes == "" then null else $notes end),
-      artifacts: { log: $log }
-    }' >>"$actions_tmp"
+  jq -c '.' "$action_result_file" >>"$actions_tmp"
 done
 
 actions_results_json="$(jq -s '.' "$actions_tmp")"
-if (( actions_count == 0 )); then
+if (( actions_count == 0 )) && [[ "$recommended_gate_id_not_found" != "true" ]]; then
   final_status="pass"
   final_rc=0
 fi
@@ -426,10 +677,12 @@ jq -n \
   --argjson refresh_manual_validation "$refresh_manual_validation" \
   --argjson refresh_single_machine_readiness "$refresh_single_machine_readiness" \
   --argjson allow_policy_no_go "$allow_policy_no_go" \
+  --argjson parallel "$parallel" \
   --argjson recommended_only "$recommended_only" \
   --argjson max_actions "$max_actions" \
   --argjson action_timeout_sec "$action_timeout_sec" \
   --argjson actions_count "$actions_count" \
+  --argjson recommended_gate_id_not_found "$recommended_gate_id_not_found" \
   --argjson executed_count "$executed_count" \
   --argjson pass_count "$pass_count" \
   --argjson fail_count "$fail_count" \
@@ -446,13 +699,15 @@ jq -n \
       refresh_manual_validation: ($refresh_manual_validation == 1),
       refresh_single_machine_readiness: ($refresh_single_machine_readiness == 1),
       allow_policy_no_go: ($allow_policy_no_go == 1),
+      parallel: ($parallel == 1),
       recommended_only: ($recommended_only == 1),
       max_actions: $max_actions,
       action_timeout_sec: $action_timeout_sec
     },
     roadmap: {
       recommended_gate_id: (if $recommended_id == "" then null else $recommended_id end),
-      actions_selected_count: $actions_count
+      actions_selected_count: $actions_count,
+      recommended_gate_id_not_found: $recommended_gate_id_not_found
     },
     summary: {
       actions_executed: $executed_count,

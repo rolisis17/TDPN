@@ -42,6 +42,9 @@ FAIL_ROADMAP="$TMP_DIR/roadmap_fail.json"
 FAIL_OUTPUT="$TMP_DIR/fail_output.json"
 FAIL_LOG="$TMP_DIR/fail.log"
 
+UNRESOLVED_STRICT_OUTPUT="$TMP_DIR/unresolved_strict_output.json"
+UNRESOLVED_STRICT_LOG="$TMP_DIR/unresolved_strict.log"
+
 MISSING_OUTPUT="$TMP_DIR/missing_output.json"
 MISSING_LOG="$TMP_DIR/missing.log"
 
@@ -417,6 +420,43 @@ if ! jq -e '
   echo "unresolved relaxed summary mismatch"
   cat "$UNRESOLVED_OUTPUT"
   cat "$UNRESOLVED_LOG"
+  exit 1
+fi
+
+echo "[phase3-windows-client-beta-handoff-check] unresolved required handoff signals are fail-closed"
+set +e
+"$SCRIPT_UNDER_TEST" \
+  --phase3-run-summary-json "$UNRESOLVED_RUN" \
+  --roadmap-summary-json "$UNRESOLVED_ROADMAP" \
+  --summary-json "$UNRESOLVED_STRICT_OUTPUT" \
+  --show-json 0 >"$UNRESOLVED_STRICT_LOG" 2>&1
+unresolved_strict_rc=$?
+set -e
+if [[ "$unresolved_strict_rc" -ne 1 ]]; then
+  echo "expected rc=1 for unresolved strict fail-close, got rc=$unresolved_strict_rc"
+  cat "$UNRESOLVED_STRICT_LOG"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .handoff.run_pipeline_ok == true
+  and .handoff.desktop_scaffold_ok == null
+  and .handoff.desktop_scaffold_resolved == false
+  and .handoff.sources.desktop_scaffold_ok == "unresolved"
+  and .handoff.failure_semantics.desktop_scaffold_ok.kind == "execution_failure"
+  and .handoff.failure_semantics.desktop_scaffold_ok.execution_failure == true
+  and .failure.kind == "execution_failure"
+  and .failure.execution_failure == true
+  and .policy_outcome.decision == "ERROR"
+  and .policy_outcome.fail_closed_no_go == false
+  and .decision.actionable.count >= 1
+  and .decision.actionable.recommended_gate_id == "phase3_windows_client_beta_desktop_scaffold_gate"
+  and ((.decision.reasons // []) | any(test("desktop_scaffold_ok unresolved from provided artifacts")))
+' "$UNRESOLVED_STRICT_OUTPUT" >/dev/null; then
+  echo "unresolved strict summary mismatch"
+  cat "$UNRESOLVED_STRICT_OUTPUT"
+  cat "$UNRESOLVED_STRICT_LOG"
   exit 1
 fi
 

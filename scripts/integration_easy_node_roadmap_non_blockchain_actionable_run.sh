@@ -115,7 +115,7 @@ assert_token() {
 
 echo "[easy-node-roadmap-actionable] help contract"
 ./scripts/easy_node.sh help >"$HELP_OUT"
-if ! grep -F -- './scripts/easy_node.sh roadmap-non-blockchain-actionable-run [--recommended-only [0|1]] [--max-actions N] [--action-timeout-sec N] [roadmap_non_blockchain_actionable_run args...]' "$HELP_OUT" >/dev/null 2>&1; then
+if ! grep -F -- './scripts/easy_node.sh roadmap-non-blockchain-actionable-run [--recommended-only [0|1]] [--max-actions N] [--action-timeout-sec N] [--allow-policy-no-go [0|1]] [--parallel [0|1]] [roadmap_non_blockchain_actionable_run args...]' "$HELP_OUT" >/dev/null 2>&1; then
   echo "easy_node help missing roadmap-non-blockchain-actionable-run command contract"
   cat "$HELP_OUT"
   exit 1

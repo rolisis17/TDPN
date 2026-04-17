@@ -42,6 +42,9 @@ FAIL_ROADMAP="$TMP_DIR/roadmap_fail.json"
 FAIL_OUTPUT="$TMP_DIR/fail_output.json"
 FAIL_LOG="$TMP_DIR/fail.log"
 
+UNRESOLVED_STRICT_OUTPUT="$TMP_DIR/unresolved_strict_output.json"
+UNRESOLVED_STRICT_LOG="$TMP_DIR/unresolved_strict.log"
+
 MISSING_OUTPUT="$TMP_DIR/missing_output.json"
 MISSING_LOG="$TMP_DIR/missing.log"
 
@@ -315,6 +318,47 @@ if ! jq -e '
   echo "unresolved relaxed summary mismatch"
   cat "$UNRESOLVED_OUTPUT"
   cat "$UNRESOLVED_LOG"
+  exit 1
+fi
+
+echo "[phase4-windows-full-parity-handoff-check] unresolved required handoff signals are fail-closed"
+set +e
+"$SCRIPT_UNDER_TEST" \
+  --phase4-run-summary-json "$UNRESOLVED_RUN" \
+  --roadmap-summary-json "$UNRESOLVED_ROADMAP" \
+  --summary-json "$UNRESOLVED_STRICT_OUTPUT" \
+  --show-json 0 >"$UNRESOLVED_STRICT_LOG" 2>&1
+unresolved_strict_rc=$?
+set -e
+if [[ "$unresolved_strict_rc" -ne 1 ]]; then
+  echo "expected rc=1 for unresolved strict fail-close, got rc=$unresolved_strict_rc"
+  cat "$UNRESOLVED_STRICT_LOG"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .handoff.run_pipeline_ok == true
+  and .handoff.windows_server_packaging_ok == null
+  and .handoff.windows_server_packaging_resolved == false
+  and .handoff.cross_platform_interop_ok == null
+  and .handoff.cross_platform_interop_resolved == false
+  and .handoff.sources.windows_server_packaging_ok == "unresolved"
+  and .handoff.sources.cross_platform_interop_ok == "unresolved"
+  and .handoff_semantics.windows_server_packaging_ok.failure_kind == "unresolved"
+  and .handoff_semantics.cross_platform_interop_ok.failure_kind == "unresolved"
+  and .decision.failure_kind == "policy_no_go"
+  and .failure.kind == "policy_no_go"
+  and ((.decision.reason_codes // []) | any(. == "windows_server_packaging_ok_unresolved"))
+  and ((.decision.reason_codes // []) | any(. == "cross_platform_interop_ok_unresolved"))
+  and ((.decision.reason_details // []) | any(.code == "windows_server_packaging_ok_unresolved" and .kind == "unresolved" and .source == "unresolved"))
+  and ((.decision.reason_details // []) | any(.code == "cross_platform_interop_ok_unresolved" and .kind == "unresolved" and .source == "unresolved"))
+  and ((.decision.reasons // []) | any(test("windows_server_packaging_ok unresolved from provided artifacts")))
+  and ((.decision.reasons // []) | any(test("cross_platform_interop_ok unresolved from provided artifacts")))
+' "$UNRESOLVED_STRICT_OUTPUT" >/dev/null; then
+  echo "unresolved strict summary mismatch"
+  cat "$UNRESOLVED_STRICT_OUTPUT"
+  cat "$UNRESOLVED_STRICT_LOG"
   exit 1
 fi
 

@@ -19,6 +19,7 @@ PASS1="$TMP_DIR/pass_action_1.sh"
 PASS2="$TMP_DIR/pass_action_2.sh"
 FAIL2="$TMP_DIR/fail_action_2.sh"
 SLOW1="$TMP_DIR/slow_action_1.sh"
+SLOW2="$TMP_DIR/slow_action_2.sh"
 
 cat >"$PASS1" <<'EOF_PASS1'
 #!/usr/bin/env bash
@@ -49,6 +50,14 @@ sleep 3
 echo "slow action 1 done"
 EOF_SLOW1
 chmod +x "$SLOW1"
+
+cat >"$SLOW2" <<'EOF_SLOW2'
+#!/usr/bin/env bash
+set -euo pipefail
+sleep 4
+echo "slow action 2 done"
+EOF_SLOW2
+chmod +x "$SLOW2"
 
 cat >"$FAKE_ROADMAP" <<'EOF_FAKE_ROADMAP'
 #!/usr/bin/env bash
@@ -102,6 +111,19 @@ JSON
 }
 JSON
     ;;
+  recommended_missing)
+    cat >"$summary_json" <<JSON
+{
+  "vpn_track": {
+    "non_blockchain_recommended_gate_id": "action_missing_1",
+    "non_blockchain_actionable_no_sudo_or_github": [
+      {"id":"action_pass_1","label":"Action pass 1","command":"bash \"$PASS1\"","reason":"test"},
+      {"id":"action_pass_2","label":"Action pass 2","command":"bash \"$PASS2\"","reason":"test"}
+    ]
+  }
+}
+JSON
+    ;;
   fail_second)
     cat >"$summary_json" <<JSON
 {
@@ -128,6 +150,19 @@ JSON
 }
 JSON
     ;;
+  parallel_two_slow)
+    cat >"$summary_json" <<JSON
+{
+  "vpn_track": {
+    "non_blockchain_recommended_gate_id": "action_slow_1",
+    "non_blockchain_actionable_no_sudo_or_github": [
+      {"id":"action_slow_1","label":"Action slow 1","command":"bash \"$SLOW1\"","reason":"test-parallel"},
+      {"id":"action_slow_2","label":"Action slow 2","command":"bash \"$SLOW2\"","reason":"test-parallel"}
+    ]
+  }
+}
+JSON
+    ;;
   *)
     echo "unknown fake scenario: $scenario"
     exit 2
@@ -137,11 +172,70 @@ echo "# fake roadmap report" >"$report_md"
 EOF_FAKE_ROADMAP
 chmod +x "$FAKE_ROADMAP"
 
+echo "[roadmap-non-blockchain-actionable-run] help contract for --parallel"
+if ! ./scripts/roadmap_non_blockchain_actionable_run.sh --help | grep -F -- "--parallel [0|1]" >/dev/null; then
+  echo "help output missing --parallel [0|1]"
+  exit 1
+fi
+
+echo "[roadmap-non-blockchain-actionable-run] --parallel forwarding contract (CLI + env)"
+SUMMARY_PARALLEL_FORWARD_CLI="$TMP_DIR/summary_parallel_forward_cli.json"
+REPORTS_PARALLEL_FORWARD_CLI="$TMP_DIR/reports_parallel_forward_cli"
+ROADMAP_ACTIONABLE_SCENARIO=pass \
+PASS1="$PASS1" PASS2="$PASS2" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
+ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+./scripts/roadmap_non_blockchain_actionable_run.sh \
+  --reports-dir "$REPORTS_PARALLEL_FORWARD_CLI" \
+  --summary-json "$SUMMARY_PARALLEL_FORWARD_CLI" \
+  --parallel 1 \
+  --max-actions 1 \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.parallel == true
+  and .roadmap.actions_selected_count == 1
+  and .summary.actions_executed == 1
+  and ((.actions // []) | length == 1)
+  and .actions[0].status == "pass"
+' "$SUMMARY_PARALLEL_FORWARD_CLI" >/dev/null; then
+  echo "parallel forwarding CLI summary mismatch"
+  cat "$SUMMARY_PARALLEL_FORWARD_CLI"
+  exit 1
+fi
+
+SUMMARY_PARALLEL_FORWARD_ENV="$TMP_DIR/summary_parallel_forward_env.json"
+REPORTS_PARALLEL_FORWARD_ENV="$TMP_DIR/reports_parallel_forward_env"
+ROADMAP_ACTIONABLE_SCENARIO=pass \
+PASS1="$PASS1" PASS2="$PASS2" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
+ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_PARALLEL=1 \
+./scripts/roadmap_non_blockchain_actionable_run.sh \
+  --reports-dir "$REPORTS_PARALLEL_FORWARD_ENV" \
+  --summary-json "$SUMMARY_PARALLEL_FORWARD_ENV" \
+  --max-actions 1 \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.parallel == true
+  and .roadmap.actions_selected_count == 1
+  and .summary.actions_executed == 1
+  and ((.actions // []) | length == 1)
+  and .actions[0].status == "pass"
+' "$SUMMARY_PARALLEL_FORWARD_ENV" >/dev/null; then
+  echo "parallel forwarding env summary mismatch"
+  cat "$SUMMARY_PARALLEL_FORWARD_ENV"
+  exit 1
+fi
+
 echo "[roadmap-non-blockchain-actionable-run] success path"
 SUMMARY_PASS="$TMP_DIR/summary_pass.json"
 REPORTS_PASS="$TMP_DIR/reports_pass"
 ROADMAP_ACTIONABLE_SCENARIO=pass \
-PASS1="$PASS1" PASS2="$PASS2" FAIL2="$FAIL2" SLOW1="$SLOW1" \
+PASS1="$PASS1" PASS2="$PASS2" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
 ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
 ./scripts/roadmap_non_blockchain_actionable_run.sh \
   --reports-dir "$REPORTS_PASS" \
@@ -152,6 +246,7 @@ if ! jq -e '
   .status == "pass"
   and .rc == 0
   and .inputs.action_timeout_sec == 0
+  and .inputs.parallel == false
   and .roadmap.actions_selected_count == 2
   and .summary.actions_executed == 2
   and .summary.pass == 2
@@ -169,7 +264,7 @@ echo "[roadmap-non-blockchain-actionable-run] recommended-only path"
 SUMMARY_RECOMMENDED="$TMP_DIR/summary_recommended.json"
 REPORTS_RECOMMENDED="$TMP_DIR/reports_recommended"
 ROADMAP_ACTIONABLE_SCENARIO=pass \
-PASS1="$PASS1" PASS2="$PASS2" FAIL2="$FAIL2" SLOW1="$SLOW1" \
+PASS1="$PASS1" PASS2="$PASS2" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
 ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
 ./scripts/roadmap_non_blockchain_actionable_run.sh \
   --reports-dir "$REPORTS_RECOMMENDED" \
@@ -181,6 +276,7 @@ if ! jq -e '
   .status == "pass"
   and .rc == 0
   and .roadmap.actions_selected_count == 1
+  and .roadmap.recommended_gate_id_not_found == false
   and .summary.actions_executed == 1
   and ((.actions // []) | length == 1)
   and .actions[0].id == "action_pass_1"
@@ -191,11 +287,46 @@ if ! jq -e '
   exit 1
 fi
 
+echo "[roadmap-non-blockchain-actionable-run] recommended-only stale id fails closed"
+SUMMARY_RECOMMENDED_MISSING="$TMP_DIR/summary_recommended_missing.json"
+REPORTS_RECOMMENDED_MISSING="$TMP_DIR/reports_recommended_missing"
+set +e
+ROADMAP_ACTIONABLE_SCENARIO=recommended_missing \
+PASS1="$PASS1" PASS2="$PASS2" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
+ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+./scripts/roadmap_non_blockchain_actionable_run.sh \
+  --reports-dir "$REPORTS_RECOMMENDED_MISSING" \
+  --summary-json "$SUMMARY_RECOMMENDED_MISSING" \
+  --recommended-only 1 \
+  --print-summary-json 0
+recommended_missing_rc=$?
+set -e
+if [[ "$recommended_missing_rc" != "5" ]]; then
+  echo "expected stale recommended-id rc=5, got rc=$recommended_missing_rc"
+  cat "$SUMMARY_RECOMMENDED_MISSING"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 5
+  and .roadmap.recommended_gate_id == "action_missing_1"
+  and .roadmap.recommended_gate_id_not_found == true
+  and .roadmap.actions_selected_count == 0
+  and .summary.actions_executed == 0
+  and .summary.pass == 0
+  and .summary.fail == 0
+  and ((.actions // []) | length == 0)
+' "$SUMMARY_RECOMMENDED_MISSING" >/dev/null; then
+  echo "recommended-only stale-id summary mismatch"
+  cat "$SUMMARY_RECOMMENDED_MISSING"
+  exit 1
+fi
+
 echo "[roadmap-non-blockchain-actionable-run] allow-policy-no-go default/off compatibility"
 SUMMARY_ALLOW_DEFAULT="$TMP_DIR/summary_allow_default.json"
 REPORTS_ALLOW_DEFAULT="$TMP_DIR/reports_allow_default"
 ROADMAP_ACTIONABLE_SCENARIO=phase1_gate \
-PASS1="$PASS1" PASS2="$PASS2" FAIL2="$FAIL2" SLOW1="$SLOW1" \
+PASS1="$PASS1" PASS2="$PASS2" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
 ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
 ./scripts/roadmap_non_blockchain_actionable_run.sh \
   --reports-dir "$REPORTS_ALLOW_DEFAULT" \
@@ -222,7 +353,7 @@ echo "[roadmap-non-blockchain-actionable-run] allow-policy-no-go forwarding for 
 SUMMARY_ALLOW_ENABLED="$TMP_DIR/summary_allow_enabled.json"
 REPORTS_ALLOW_ENABLED="$TMP_DIR/reports_allow_enabled"
 ROADMAP_ACTIONABLE_SCENARIO=phase1_gate \
-PASS1="$PASS1" PASS2="$PASS2" FAIL2="$FAIL2" SLOW1="$SLOW1" \
+PASS1="$PASS1" PASS2="$PASS2" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
 ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
 ./scripts/roadmap_non_blockchain_actionable_run.sh \
   --reports-dir "$REPORTS_ALLOW_ENABLED" \
@@ -251,7 +382,7 @@ echo "[roadmap-non-blockchain-actionable-run] max-actions limit path"
 SUMMARY_MAX="$TMP_DIR/summary_max.json"
 REPORTS_MAX="$TMP_DIR/reports_max"
 ROADMAP_ACTIONABLE_SCENARIO=pass \
-PASS1="$PASS1" PASS2="$PASS2" FAIL2="$FAIL2" SLOW1="$SLOW1" \
+PASS1="$PASS1" PASS2="$PASS2" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
 ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
 ./scripts/roadmap_non_blockchain_actionable_run.sh \
   --reports-dir "$REPORTS_MAX" \
@@ -277,7 +408,7 @@ SUMMARY_FAIL="$TMP_DIR/summary_fail.json"
 REPORTS_FAIL="$TMP_DIR/reports_fail"
 set +e
 ROADMAP_ACTIONABLE_SCENARIO=fail_second \
-PASS1="$PASS1" PASS2="$PASS2" FAIL2="$FAIL2" SLOW1="$SLOW1" \
+PASS1="$PASS1" PASS2="$PASS2" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
 ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
 ./scripts/roadmap_non_blockchain_actionable_run.sh \
   --reports-dir "$REPORTS_FAIL" \
@@ -315,7 +446,7 @@ SUMMARY_TIMEOUT="$TMP_DIR/summary_timeout.json"
 REPORTS_TIMEOUT="$TMP_DIR/reports_timeout"
 set +e
 ROADMAP_ACTIONABLE_SCENARIO=timeout_first_then_pass \
-PASS1="$PASS1" PASS2="$PASS2" FAIL2="$FAIL2" SLOW1="$SLOW1" \
+PASS1="$PASS1" PASS2="$PASS2" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
 ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
 ./scripts/roadmap_non_blockchain_actionable_run.sh \
   --reports-dir "$REPORTS_TIMEOUT" \
@@ -362,7 +493,7 @@ SUMMARY_TIMEOUT_ENV="$TMP_DIR/summary_timeout_env.json"
 REPORTS_TIMEOUT_ENV="$TMP_DIR/reports_timeout_env"
 set +e
 ROADMAP_ACTIONABLE_SCENARIO=timeout_first_then_pass \
-PASS1="$PASS1" PASS2="$PASS2" FAIL2="$FAIL2" SLOW1="$SLOW1" \
+PASS1="$PASS1" PASS2="$PASS2" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
 ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
 ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_ACTION_TIMEOUT_SEC=1 \
 ./scripts/roadmap_non_blockchain_actionable_run.sh \
@@ -398,7 +529,7 @@ echo "[roadmap-non-blockchain-actionable-run] no-timeout path unchanged for slow
 SUMMARY_NO_TIMEOUT="$TMP_DIR/summary_no_timeout.json"
 REPORTS_NO_TIMEOUT="$TMP_DIR/reports_no_timeout"
 ROADMAP_ACTIONABLE_SCENARIO=timeout_first_then_pass \
-PASS1="$PASS1" PASS2="$PASS2" FAIL2="$FAIL2" SLOW1="$SLOW1" \
+PASS1="$PASS1" PASS2="$PASS2" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
 ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
 ./scripts/roadmap_non_blockchain_actionable_run.sh \
   --reports-dir "$REPORTS_NO_TIMEOUT" \
@@ -419,6 +550,43 @@ if ! jq -e '
 ' "$SUMMARY_NO_TIMEOUT" >/dev/null; then
   echo "no-timeout path summary mismatch"
   cat "$SUMMARY_NO_TIMEOUT"
+  exit 1
+fi
+
+echo "[roadmap-non-blockchain-actionable-run] functional parallel execution contract"
+SUMMARY_PARALLEL="$TMP_DIR/summary_parallel.json"
+REPORTS_PARALLEL="$TMP_DIR/reports_parallel"
+parallel_started_epoch="$(date +%s)"
+ROADMAP_ACTIONABLE_SCENARIO=parallel_two_slow \
+PASS1="$PASS1" PASS2="$PASS2" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
+ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+./scripts/roadmap_non_blockchain_actionable_run.sh \
+  --reports-dir "$REPORTS_PARALLEL" \
+  --summary-json "$SUMMARY_PARALLEL" \
+  --parallel 1 \
+  --print-summary-json 0
+parallel_finished_epoch="$(date +%s)"
+parallel_elapsed_sec=$((parallel_finished_epoch - parallel_started_epoch))
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.parallel == true
+  and .roadmap.actions_selected_count == 2
+  and .summary.actions_executed == 2
+  and .summary.pass == 2
+  and .summary.fail == 0
+  and ((.actions // []) | length == 2)
+  and ((.actions // []) | all(.status == "pass"))
+' "$SUMMARY_PARALLEL" >/dev/null; then
+  echo "functional parallel summary mismatch"
+  cat "$SUMMARY_PARALLEL"
+  exit 1
+fi
+
+if (( parallel_elapsed_sec > 6 )); then
+  echo "functional parallel timing mismatch: expected <=6s, got ${parallel_elapsed_sec}s"
+  cat "$SUMMARY_PARALLEL"
   exit 1
 fi
 

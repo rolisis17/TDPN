@@ -255,7 +255,7 @@ Usage:
   ./scripts/easy_node.sh blockchain-mainnet-activation-gate-cycle-seeded [blockchain_mainnet_activation_gate_cycle args...]
   ./scripts/easy_node.sh blockchain-mainnet-activation-operator-pack [blockchain_mainnet_activation_operator_pack args...]
   ./scripts/easy_node.sh blockchain-bootstrap-governance-graduation-gate [blockchain_bootstrap_governance_graduation_gate args...]
-  ./scripts/easy_node.sh roadmap-non-blockchain-actionable-run [--recommended-only [0|1]] [--max-actions N] [--action-timeout-sec N] [--parallel [0|1]] [roadmap_non_blockchain_actionable_run args...]
+  ./scripts/easy_node.sh roadmap-non-blockchain-actionable-run [--recommended-only [0|1]] [--max-actions N] [--action-timeout-sec N] [--allow-policy-no-go [0|1]] [--parallel [0|1]] [roadmap_non_blockchain_actionable_run args...]
   ./scripts/easy_node.sh roadmap-blockchain-actionable-run [--recommended-only [0|1]] [--max-actions N] [--action-timeout-sec N] [--parallel [0|1]] [roadmap_blockchain_actionable_run args...]
   ./scripts/easy_node.sh roadmap-next-actions-run [--max-actions N] [--action-timeout-sec N] [--parallel [0|1]] [--allow-profile-default-gate-unreachable [0|1]] [--profile-default-gate-subject ID] [--include-id-prefix PREFIX] [--exclude-id-prefix PREFIX] [roadmap_next_actions_run args...]
   ./scripts/easy_node.sh ci-phase0 [ci_phase0 args...]
@@ -394,7 +394,7 @@ Usage:
   ./scripts/easy_node.sh blockchain-mainnet-activation-gate-cycle-seeded [blockchain_mainnet_activation_gate_cycle args...]
   ./scripts/easy_node.sh blockchain-mainnet-activation-operator-pack [blockchain_mainnet_activation_operator_pack args...]
   ./scripts/easy_node.sh blockchain-bootstrap-governance-graduation-gate [blockchain_bootstrap_governance_graduation_gate args...]
-  ./scripts/easy_node.sh roadmap-non-blockchain-actionable-run [--recommended-only [0|1]] [--max-actions N] [--action-timeout-sec N] [--parallel [0|1]] [roadmap_non_blockchain_actionable_run args...]
+  ./scripts/easy_node.sh roadmap-non-blockchain-actionable-run [--recommended-only [0|1]] [--max-actions N] [--action-timeout-sec N] [--allow-policy-no-go [0|1]] [--parallel [0|1]] [roadmap_non_blockchain_actionable_run args...]
   ./scripts/easy_node.sh roadmap-blockchain-actionable-run [--recommended-only [0|1]] [--max-actions N] [--action-timeout-sec N] [--parallel [0|1]] [roadmap_blockchain_actionable_run args...]
   ./scripts/easy_node.sh roadmap-next-actions-run [--max-actions N] [--action-timeout-sec N] [--parallel [0|1]] [--allow-profile-default-gate-unreachable [0|1]] [--profile-default-gate-subject ID] [--include-id-prefix PREFIX] [--exclude-id-prefix PREFIX] [roadmap_next_actions_run args...]
   ./scripts/easy_node.sh ci-phase0 [ci_phase0 args...]
@@ -554,7 +554,7 @@ Notes:
   - blockchain-mainnet-activation-gate-cycle-seeded wraps the blockchain mainnet activation gate cycle helper path, auto-adds `--seed-example-input 1` for quick local runs, and preserves pass-through args.
   - blockchain-mainnet-activation-operator-pack wraps the blockchain mainnet activation operator pack helper path and preserves pass-through args.
   - blockchain-bootstrap-governance-graduation-gate wraps the blockchain bootstrap governance graduation gate helper path and preserves pass-through args.
-  - roadmap-non-blockchain-actionable-run resolves and runs the current roadmap no-sudo/no-GitHub actionable gate list in one command (supports `--recommended-only 1`, `--max-actions N`, per-action timeout via `--action-timeout-sec N`, and `--parallel [0|1]`).
+  - roadmap-non-blockchain-actionable-run resolves and runs the current roadmap no-sudo/no-GitHub actionable gate list in one command (supports `--recommended-only 1`, `--max-actions N`, per-action timeout via `--action-timeout-sec N`, policy override via `--allow-policy-no-go [0|1]`, and `--parallel [0|1]`).
   - roadmap-blockchain-actionable-run resolves and runs the current roadmap blockchain actionable gate list in one command (supports `--recommended-only 1`, `--max-actions N`, per-action timeout via `--action-timeout-sec N`, and `--parallel [0|1]`).
   - roadmap-next-actions-run wraps roadmap `next_actions` in one command with optional ID-prefix filtering, per-action timeout, parallel execution controls, optional soft-fail for unreachable profile-default endpoints, and explicit profile-default subject override via `--profile-default-gate-subject ID`.
   - ci-phase0 runs the fast Phase-0 simplification gate (launcher wiring/runtime + config-v1 + local API contract checks) with fail-fast behavior.

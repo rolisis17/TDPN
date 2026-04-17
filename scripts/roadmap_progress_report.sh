@@ -5659,6 +5659,14 @@ integration_easy_node_roadmap_next_actions_run_script_exists_json="false"
 if [[ -f "$ROOT_DIR/scripts/integration_easy_node_roadmap_next_actions_run.sh" ]]; then
   integration_easy_node_roadmap_next_actions_run_script_exists_json="true"
 fi
+integration_roadmap_non_blockchain_actionable_run_script_exists_json="false"
+if [[ -f "$ROOT_DIR/scripts/integration_roadmap_non_blockchain_actionable_run.sh" ]]; then
+  integration_roadmap_non_blockchain_actionable_run_script_exists_json="true"
+fi
+integration_easy_node_roadmap_non_blockchain_actionable_run_script_exists_json="false"
+if [[ -f "$ROOT_DIR/scripts/integration_easy_node_roadmap_non_blockchain_actionable_run.sh" ]]; then
+  integration_easy_node_roadmap_non_blockchain_actionable_run_script_exists_json="true"
+fi
 
 non_blockchain_actionable_no_sudo_or_github_json="$(
   jq -n \
@@ -5686,6 +5694,8 @@ non_blockchain_actionable_no_sudo_or_github_json="$(
     --argjson integration_roadmap_progress_report_script_exists "$integration_roadmap_progress_report_script_exists_json" \
     --argjson integration_roadmap_next_actions_run_script_exists "$integration_roadmap_next_actions_run_script_exists_json" \
     --argjson integration_easy_node_roadmap_next_actions_run_script_exists "$integration_easy_node_roadmap_next_actions_run_script_exists_json" \
+    --argjson integration_roadmap_non_blockchain_actionable_run_script_exists "$integration_roadmap_non_blockchain_actionable_run_script_exists_json" \
+    --argjson integration_easy_node_roadmap_non_blockchain_actionable_run_script_exists "$integration_easy_node_roadmap_non_blockchain_actionable_run_script_exists_json" \
     --argjson phase1_completed "$( [[ "$phase1_needs_attention_json" == "false" ]] && printf 'true' || printf 'false' )" \
     --argjson phase2_completed "$( [[ "$phase2_needs_attention_json" == "false" ]] && printf 'true' || printf 'false' )" \
     --argjson phase3_completed "$( [[ "$phase3_needs_attention_json" == "false" ]] && printf 'true' || printf 'false' )" \
@@ -5749,6 +5759,18 @@ non_blockchain_actionable_no_sudo_or_github_json="$(
         label: "Roadmap report contract",
         command: "bash ./scripts/integration_roadmap_progress_report.sh",
         reason: "validates roadmap summary/report contract end-to-end"
+      } else empty end),
+      (if $integration_roadmap_non_blockchain_actionable_run_script_exists then {
+        id: "integration_roadmap_non_blockchain_actionable_run",
+        label: "Roadmap non-blockchain actionable run contract",
+        command: "bash ./scripts/integration_roadmap_non_blockchain_actionable_run.sh",
+        reason: "validates roadmap non-blockchain actionable runner contract"
+      } else empty end),
+      (if $integration_easy_node_roadmap_non_blockchain_actionable_run_script_exists then {
+        id: "integration_easy_node_roadmap_non_blockchain_actionable_run",
+        label: "Easy-node roadmap non-blockchain actionable contract",
+        command: "bash ./scripts/integration_easy_node_roadmap_non_blockchain_actionable_run.sh",
+        reason: "validates easy_node roadmap non-blockchain actionable wrapper contract"
       } else empty end),
       (if $integration_roadmap_next_actions_run_script_exists then {
         id: "integration_roadmap_next_actions_run",

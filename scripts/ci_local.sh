@@ -186,6 +186,9 @@ echo "[ci] phase-4 windows full parity handoff check integration"
 echo "[ci] phase-4 windows full parity handoff run integration"
 ./scripts/integration_phase4_windows_full_parity_handoff_run.sh
 
+echo "[ci] easy-node windows gate-wrapper integration"
+./scripts/integration_easy_node_windows_gate_wrappers.sh
+
 echo "[ci] phase-5 settlement layer gate integration"
 ./scripts/integration_ci_phase5_settlement_layer.sh
 
