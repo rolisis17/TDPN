@@ -45,6 +45,7 @@ TOGGLE_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_toggle.json"
 FAIL_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_fail.json"
 
 STAGE_ENV_NAMES=(
+  "CI_PHASE6_COSMOS_L1_BLOCKCHAIN_COSMOS_ONLY_GUARDRAIL_SCRIPT"
   "CI_PHASE6_COSMOS_L1_CHAIN_SCAFFOLD_SCRIPT"
   "CI_PHASE6_COSMOS_L1_LOCAL_TESTNET_SMOKE_SCRIPT"
   "CI_PHASE6_COSMOS_L1_PROTO_SURFACE_SCRIPT"
@@ -59,6 +60,7 @@ STAGE_ENV_NAMES=(
 )
 
 STAGE_IDS=(
+  "blockchain_cosmos_only_guardrail"
   "chain_scaffold"
   "local_testnet_smoke"
   "proto_surface"
@@ -210,7 +212,6 @@ CI_PHASE6_COSMOS_L1_BUILD_TESTNET_CANONICAL_SUMMARY_JSON="$SUCCESS_CANONICAL_SUM
 "$GATE_SCRIPT" \
   --reports-dir "$SUCCESS_REPORTS_DIR" \
   --summary-json "$SUCCESS_SUMMARY_JSON" \
-  --run-tdpnd-comet-runtime-smoke 1 \
   --print-summary-json 0 >"$SUCCESS_LOG" 2>&1
 
 assert_stage_order "$CAPTURE" "${STAGE_IDS[@]}"
@@ -227,6 +228,7 @@ if ! jq -e '
   and .schema.major == 1
   and .schema.minor == 0
   and .inputs.dry_run == false
+  and .inputs.run_cosmos_only_guardrail == true
   and .inputs.run_chain_scaffold == true
   and .inputs.run_local_testnet_smoke == true
   and .inputs.run_proto_surface == true
@@ -239,6 +241,7 @@ if ! jq -e '
   and .inputs.run_tdpnd_grpc_live_smoke == true
   and .inputs.run_tdpnd_grpc_auth_live_smoke == true
   and (.steps | to_entries | all(.value.enabled == true and .value.status == "pass" and .value.rc == 0 and .value.command != null))
+  and .steps.blockchain_cosmos_only_guardrail.status == "pass"
   and .steps.chain_scaffold.status == "pass"
   and .steps.local_testnet_smoke.status == "pass"
   and .steps.module_tx_surface.status == "pass"
@@ -264,7 +267,6 @@ CI_PHASE6_COSMOS_L1_BUILD_TESTNET_CANONICAL_SUMMARY_JSON="$SAME_PATH_CANONICAL_S
 "$GATE_SCRIPT" \
   --reports-dir "$SAME_PATH_REPORTS_DIR" \
   --summary-json "$SAME_PATH_SUMMARY_JSON" \
-  --run-tdpnd-comet-runtime-smoke 1 \
   --print-summary-json 0 >"$SAME_PATH_LOG" 2>&1
 
 assert_stage_order "$CAPTURE" "${STAGE_IDS[@]}"
@@ -325,6 +327,11 @@ if ! grep -Fq -- '[ci-phase6-cosmos-l1] status=pass rc=0 dry_run=1' "$DRY_RUN_LO
   cat "$DRY_RUN_LOG"
   exit 1
 fi
+if ! grep -Fq -- 'step=blockchain_cosmos_only_guardrail status=skip reason=dry-run' "$DRY_RUN_LOG"; then
+  echo "dry-run log missing blockchain_cosmos_only_guardrail skip signal"
+  cat "$DRY_RUN_LOG"
+  exit 1
+fi
 if ! grep -Fq -- 'step=chain_scaffold status=skip reason=dry-run' "$DRY_RUN_LOG"; then
   echo "dry-run log missing chain_scaffold skip signal"
   cat "$DRY_RUN_LOG"
@@ -340,6 +347,7 @@ CI_PHASE6_COSMOS_L1_BUILD_TESTNET_CANONICAL_SUMMARY_JSON="$TOGGLE_CANONICAL_SUMM
   --reports-dir "$TOGGLE_REPORTS_DIR" \
   --summary-json "$TOGGLE_SUMMARY_JSON" \
   --print-summary-json 0 \
+  --run-cosmos-only-guardrail 0 \
   --run-tdpnd-comet-runtime-smoke 1 \
   --run-chain-scaffold 0 \
   --run-local-testnet-smoke 0 \
@@ -360,6 +368,10 @@ fi
 if ! jq -e '
   .status == "pass"
   and .rc == 0
+  and .inputs.run_cosmos_only_guardrail == false
+  and .steps.blockchain_cosmos_only_guardrail.enabled == false
+  and .steps.blockchain_cosmos_only_guardrail.status == "skip"
+  and .steps.blockchain_cosmos_only_guardrail.reason == "disabled"
   and .inputs.run_chain_scaffold == false
   and .steps.chain_scaffold.enabled == false
   and .steps.chain_scaffold.status == "skip"
@@ -411,7 +423,7 @@ echo "[ci-phase6-cosmos-l1] first-failure rc propagation"
 : >"$CAPTURE"
 set +e
 CI_PHASE6_CAPTURE_FILE="$CAPTURE" \
-CI_PHASE6_FAIL_MATRIX="proto_surface=23,query_surface=41,module_tx_surface=53,tdpnd_comet_runtime_smoke=59,tdpnd_grpc_live_smoke=43,tdpnd_grpc_auth_live_smoke=47" \
+CI_PHASE6_FAIL_MATRIX="blockchain_cosmos_only_guardrail=19,proto_surface=23,query_surface=41,module_tx_surface=53,tdpnd_comet_runtime_smoke=59,tdpnd_grpc_live_smoke=43,tdpnd_grpc_auth_live_smoke=47" \
 CI_PHASE6_COSMOS_L1_BUILD_TESTNET_CANONICAL_SUMMARY_JSON="$FAIL_CANONICAL_SUMMARY_JSON" \
 "$GATE_SCRIPT" \
   --reports-dir "$FAIL_REPORTS_DIR" \
@@ -421,8 +433,8 @@ CI_PHASE6_COSMOS_L1_BUILD_TESTNET_CANONICAL_SUMMARY_JSON="$FAIL_CANONICAL_SUMMAR
 fail_rc=$?
 set -e
 
-if [[ "$fail_rc" -ne 23 ]]; then
-  echo "expected fail rc=23, got rc=$fail_rc"
+if [[ "$fail_rc" -ne 19 ]]; then
+  echo "expected fail rc=19, got rc=$fail_rc"
   cat "$FAIL_LOG"
   exit 1
 fi
@@ -436,8 +448,10 @@ if [[ ! -f "$FAIL_SUMMARY_JSON" ]]; then
 fi
 if ! jq -e '
   .status == "fail"
-  and .rc == 23
+  and .rc == 19
   and .inputs.dry_run == false
+  and .steps.blockchain_cosmos_only_guardrail.status == "fail"
+  and .steps.blockchain_cosmos_only_guardrail.rc == 19
   and .steps.chain_scaffold.status == "pass"
   and .steps.local_testnet_smoke.status == "pass"
   and .steps.proto_surface.status == "fail"
@@ -457,7 +471,7 @@ if ! jq -e '
   cat "$FAIL_SUMMARY_JSON"
   exit 1
 fi
-if ! grep -Fq -- '[ci-phase6-cosmos-l1] status=fail rc=23 dry_run=0' "$FAIL_LOG"; then
+if ! grep -Fq -- '[ci-phase6-cosmos-l1] status=fail rc=19 dry_run=0' "$FAIL_LOG"; then
   echo "fail log missing final fail status line"
   cat "$FAIL_LOG"
   exit 1

@@ -12,6 +12,7 @@ Usage:
     [--summary-json PATH] \
     [--print-summary-json [0|1]] \
     [--dry-run [0|1]] \
+    [--run-cosmos-only-guardrail [0|1]] \
     [--run-phase7-mainnet-cutover-check [0|1]] \
     [--run-phase7-mainnet-cutover-run [0|1]] \
     [--run-phase7-mainnet-cutover-handoff-check [0|1]] \
@@ -21,12 +22,13 @@ Usage:
 
 Purpose:
   Run the Phase-7 mainnet cutover CI gate in deterministic order:
-    1) integration_phase7_mainnet_cutover_check.sh
-    2) integration_phase7_mainnet_cutover_run.sh
-    3) integration_phase7_mainnet_cutover_handoff_check.sh
-    4) integration_phase7_mainnet_cutover_handoff_run.sh
-    5) integration_phase7_mainnet_cutover_summary_report.sh
-    6) integration_phase7_mainnet_cutover_live_smoke.sh
+    1) integration_blockchain_cosmos_only_guardrail.sh
+    2) integration_phase7_mainnet_cutover_check.sh
+    3) integration_phase7_mainnet_cutover_run.sh
+    4) integration_phase7_mainnet_cutover_handoff_check.sh
+    5) integration_phase7_mainnet_cutover_handoff_run.sh
+    6) integration_phase7_mainnet_cutover_summary_report.sh
+    7) integration_phase7_mainnet_cutover_live_smoke.sh
 
 Dry-run mode:
   --dry-run 1 skips stage execution, records deterministic skip accounting,
@@ -105,6 +107,7 @@ canonical_summary_json="${CI_PHASE7_MAINNET_CUTOVER_CANONICAL_SUMMARY_JSON:-$ROO
 print_summary_json="${CI_PHASE7_MAINNET_CUTOVER_PRINT_SUMMARY_JSON:-1}"
 dry_run="${CI_PHASE7_MAINNET_CUTOVER_DRY_RUN:-0}"
 
+run_cosmos_only_guardrail="${CI_PHASE7_MAINNET_CUTOVER_RUN_COSMOS_ONLY_GUARDRAIL:-1}"
 run_phase7_mainnet_cutover_check="${CI_PHASE7_MAINNET_CUTOVER_RUN_PHASE7_MAINNET_CUTOVER_CHECK:-1}"
 run_phase7_mainnet_cutover_run="${CI_PHASE7_MAINNET_CUTOVER_RUN_PHASE7_MAINNET_CUTOVER_RUN:-1}"
 run_phase7_mainnet_cutover_handoff_check="${CI_PHASE7_MAINNET_CUTOVER_RUN_PHASE7_MAINNET_CUTOVER_HANDOFF_CHECK:-1}"
@@ -137,6 +140,15 @@ while [[ $# -gt 0 ]]; do
         shift 2
       else
         dry_run="1"
+        shift
+      fi
+      ;;
+    --run-cosmos-only-guardrail)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        run_cosmos_only_guardrail="${2:-}"
+        shift 2
+      else
+        run_cosmos_only_guardrail="1"
         shift
       fi
       ;;
@@ -208,6 +220,7 @@ done
 
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
 bool_arg_or_die "--dry-run" "$dry_run"
+bool_arg_or_die "--run-cosmos-only-guardrail" "$run_cosmos_only_guardrail"
 bool_arg_or_die "--run-phase7-mainnet-cutover-check" "$run_phase7_mainnet_cutover_check"
 bool_arg_or_die "--run-phase7-mainnet-cutover-run" "$run_phase7_mainnet_cutover_run"
 bool_arg_or_die "--run-phase7-mainnet-cutover-handoff-check" "$run_phase7_mainnet_cutover_handoff_check"
@@ -215,6 +228,7 @@ bool_arg_or_die "--run-phase7-mainnet-cutover-handoff-run" "$run_phase7_mainnet_
 bool_arg_or_die "--run-phase7-mainnet-cutover-summary-report" "$run_phase7_mainnet_cutover_summary_report"
 bool_arg_or_die "--run-phase7-mainnet-cutover-live-smoke" "$run_phase7_mainnet_cutover_live_smoke"
 
+blockchain_cosmos_only_guardrail_script="${CI_PHASE7_MAINNET_CUTOVER_BLOCKCHAIN_COSMOS_ONLY_GUARDRAIL_SCRIPT:-$ROOT_DIR/scripts/integration_blockchain_cosmos_only_guardrail.sh}"
 phase7_mainnet_cutover_check_script="${CI_PHASE7_MAINNET_CUTOVER_PHASE7_MAINNET_CUTOVER_CHECK_SCRIPT:-$ROOT_DIR/scripts/integration_phase7_mainnet_cutover_check.sh}"
 phase7_mainnet_cutover_run_script="${CI_PHASE7_MAINNET_CUTOVER_PHASE7_MAINNET_CUTOVER_RUN_SCRIPT:-$ROOT_DIR/scripts/integration_phase7_mainnet_cutover_run.sh}"
 phase7_mainnet_cutover_handoff_check_script="${CI_PHASE7_MAINNET_CUTOVER_PHASE7_MAINNET_CUTOVER_HANDOFF_CHECK_SCRIPT:-$ROOT_DIR/scripts/integration_phase7_mainnet_cutover_handoff_check.sh}"
@@ -223,6 +237,7 @@ phase7_mainnet_cutover_summary_report_script="${CI_PHASE7_MAINNET_CUTOVER_PHASE7
 phase7_mainnet_cutover_live_smoke_script="${CI_PHASE7_MAINNET_CUTOVER_PHASE7_MAINNET_CUTOVER_LIVE_SMOKE_SCRIPT:-$ROOT_DIR/scripts/integration_phase7_mainnet_cutover_live_smoke.sh}"
 
 stage_ids=(
+  "blockchain_cosmos_only_guardrail"
   "phase7_mainnet_cutover_check"
   "phase7_mainnet_cutover_run"
   "phase7_mainnet_cutover_handoff_check"
@@ -232,6 +247,7 @@ stage_ids=(
 )
 
 declare -A stage_script=(
+  ["blockchain_cosmos_only_guardrail"]="$blockchain_cosmos_only_guardrail_script"
   ["phase7_mainnet_cutover_check"]="$phase7_mainnet_cutover_check_script"
   ["phase7_mainnet_cutover_run"]="$phase7_mainnet_cutover_run_script"
   ["phase7_mainnet_cutover_handoff_check"]="$phase7_mainnet_cutover_handoff_check_script"
@@ -241,6 +257,7 @@ declare -A stage_script=(
 )
 
 declare -A stage_enabled=(
+  ["blockchain_cosmos_only_guardrail"]="$run_cosmos_only_guardrail"
   ["phase7_mainnet_cutover_check"]="$run_phase7_mainnet_cutover_check"
   ["phase7_mainnet_cutover_run"]="$run_phase7_mainnet_cutover_run"
   ["phase7_mainnet_cutover_handoff_check"]="$run_phase7_mainnet_cutover_handoff_check"
@@ -358,6 +375,7 @@ jq -n \
   --arg canonical_summary_json "$canonical_summary_json" \
   --arg dry_run "$dry_run" \
   --arg print_summary_json "$print_summary_json" \
+  --arg run_cosmos_only_guardrail "$run_cosmos_only_guardrail" \
   --arg run_phase7_mainnet_cutover_check "$run_phase7_mainnet_cutover_check" \
   --arg run_phase7_mainnet_cutover_run "$run_phase7_mainnet_cutover_run" \
   --arg run_phase7_mainnet_cutover_handoff_check "$run_phase7_mainnet_cutover_handoff_check" \
@@ -378,6 +396,7 @@ jq -n \
     inputs: {
       dry_run: ($dry_run == "1"),
       print_summary_json: ($print_summary_json == "1"),
+      run_cosmos_only_guardrail: ($run_cosmos_only_guardrail == "1"),
       run_phase7_mainnet_cutover_check: ($run_phase7_mainnet_cutover_check == "1"),
       run_phase7_mainnet_cutover_run: ($run_phase7_mainnet_cutover_run == "1"),
       run_phase7_mainnet_cutover_handoff_check: ($run_phase7_mainnet_cutover_handoff_check == "1"),

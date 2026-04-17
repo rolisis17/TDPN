@@ -44,6 +44,7 @@ TOGGLE_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_toggle.json"
 FAIL_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_fail.json"
 
 STAGE_ENV_NAMES=(
+  "CI_PHASE7_MAINNET_CUTOVER_BLOCKCHAIN_COSMOS_ONLY_GUARDRAIL_SCRIPT"
   "CI_PHASE7_MAINNET_CUTOVER_PHASE7_MAINNET_CUTOVER_CHECK_SCRIPT"
   "CI_PHASE7_MAINNET_CUTOVER_PHASE7_MAINNET_CUTOVER_RUN_SCRIPT"
   "CI_PHASE7_MAINNET_CUTOVER_PHASE7_MAINNET_CUTOVER_HANDOFF_CHECK_SCRIPT"
@@ -53,6 +54,7 @@ STAGE_ENV_NAMES=(
 )
 
 STAGE_IDS=(
+  "blockchain_cosmos_only_guardrail"
   "phase7_mainnet_cutover_check"
   "phase7_mainnet_cutover_run"
   "phase7_mainnet_cutover_handoff_check"
@@ -214,6 +216,7 @@ if ! jq -e '
   and .schema.major == 1
   and .schema.minor == 0
   and .inputs.dry_run == false
+  and .inputs.run_cosmos_only_guardrail == true
   and .inputs.run_phase7_mainnet_cutover_check == true
   and .inputs.run_phase7_mainnet_cutover_run == true
   and .inputs.run_phase7_mainnet_cutover_handoff_check == true
@@ -221,6 +224,7 @@ if ! jq -e '
   and .inputs.run_phase7_mainnet_cutover_summary_report == true
   and .inputs.run_phase7_mainnet_cutover_live_smoke == true
   and (.steps | to_entries | all(.value.enabled == true and .value.status == "pass" and .value.rc == 0 and .value.command != null))
+  and .steps.blockchain_cosmos_only_guardrail.status == "pass"
   and .steps.phase7_mainnet_cutover_check.status == "pass"
   and .steps.phase7_mainnet_cutover_run.status == "pass"
   and .steps.phase7_mainnet_cutover_handoff_check.status == "pass"
@@ -294,12 +298,16 @@ if ! jq -e '
   .status == "pass"
   and .rc == 0
   and .inputs.dry_run == true
+  and .inputs.run_cosmos_only_guardrail == true
   and .inputs.run_phase7_mainnet_cutover_check == true
   and .inputs.run_phase7_mainnet_cutover_run == true
   and .inputs.run_phase7_mainnet_cutover_handoff_check == true
   and .inputs.run_phase7_mainnet_cutover_handoff_run == true
   and .inputs.run_phase7_mainnet_cutover_summary_report == true
   and .inputs.run_phase7_mainnet_cutover_live_smoke == true
+  and .steps.blockchain_cosmos_only_guardrail.enabled == true
+  and .steps.blockchain_cosmos_only_guardrail.status == "skip"
+  and .steps.blockchain_cosmos_only_guardrail.reason == "dry-run"
   and (.steps | to_entries | all(.value.enabled == true and .value.status == "skip" and .value.rc == 0 and .value.reason == "dry-run"))
 ' "$DRY_RUN_SUMMARY_JSON" >/dev/null; then
   echo "dry-run summary missing expected skip accounting"
@@ -311,8 +319,8 @@ if ! grep -Fq -- '[ci-phase7-mainnet-cutover] status=pass rc=0 dry_run=1' "$DRY_
   cat "$DRY_RUN_LOG"
   exit 1
 fi
-if ! grep -Fq -- 'step=phase7_mainnet_cutover_check status=skip reason=dry-run' "$DRY_RUN_LOG"; then
-  echo "dry-run log missing phase7 check skip signal"
+if ! grep -Fq -- 'step=blockchain_cosmos_only_guardrail status=skip reason=dry-run' "$DRY_RUN_LOG"; then
+  echo "dry-run log missing guardrail skip signal"
   cat "$DRY_RUN_LOG"
   exit 1
 fi
@@ -322,10 +330,11 @@ echo "[ci-phase7-mainnet-cutover] toggle path"
 : >"$CAPTURE"
 CI_PHASE7_CAPTURE_FILE="$CAPTURE" \
 CI_PHASE7_MAINNET_CUTOVER_CANONICAL_SUMMARY_JSON="$TOGGLE_CANONICAL_SUMMARY_JSON" \
-"$GATE_SCRIPT" \
+  "$GATE_SCRIPT" \
   --reports-dir "$TOGGLE_REPORTS_DIR" \
   --summary-json "$TOGGLE_SUMMARY_JSON" \
   --print-summary-json 0 \
+  --run-cosmos-only-guardrail 0 \
   --run-phase7-mainnet-cutover-check 0 \
   --run-phase7-mainnet-cutover-handoff-check 0 \
   --run-phase7-mainnet-cutover-summary-report 0 \
@@ -341,6 +350,10 @@ fi
 if ! jq -e '
   .status == "pass"
   and .rc == 0
+  and .inputs.run_cosmos_only_guardrail == false
+  and .steps.blockchain_cosmos_only_guardrail.enabled == false
+  and .steps.blockchain_cosmos_only_guardrail.status == "skip"
+  and .steps.blockchain_cosmos_only_guardrail.reason == "disabled"
   and .inputs.run_phase7_mainnet_cutover_check == false
   and .steps.phase7_mainnet_cutover_check.enabled == false
   and .steps.phase7_mainnet_cutover_check.status == "skip"
@@ -374,7 +387,7 @@ echo "[ci-phase7-mainnet-cutover] first-failure rc propagation"
 : >"$CAPTURE"
 set +e
 CI_PHASE7_CAPTURE_FILE="$CAPTURE" \
-CI_PHASE7_FAIL_MATRIX="phase7_mainnet_cutover_check=19,phase7_mainnet_cutover_run=23,phase7_mainnet_cutover_handoff_check=29,phase7_mainnet_cutover_handoff_run=31,phase7_mainnet_cutover_summary_report=41,phase7_mainnet_cutover_live_smoke=43" \
+CI_PHASE7_FAIL_MATRIX="blockchain_cosmos_only_guardrail=17,phase7_mainnet_cutover_check=19,phase7_mainnet_cutover_run=23,phase7_mainnet_cutover_handoff_check=29,phase7_mainnet_cutover_handoff_run=31,phase7_mainnet_cutover_summary_report=41,phase7_mainnet_cutover_live_smoke=43" \
 CI_PHASE7_MAINNET_CUTOVER_CANONICAL_SUMMARY_JSON="$FAIL_CANONICAL_SUMMARY_JSON" \
 "$GATE_SCRIPT" \
   --reports-dir "$FAIL_REPORTS_DIR" \
@@ -383,8 +396,8 @@ CI_PHASE7_MAINNET_CUTOVER_CANONICAL_SUMMARY_JSON="$FAIL_CANONICAL_SUMMARY_JSON" 
 fail_rc=$?
 set -e
 
-if [[ "$fail_rc" -ne 19 ]]; then
-  echo "expected fail rc=19, got rc=$fail_rc"
+if [[ "$fail_rc" -ne 17 ]]; then
+  echo "expected fail rc=17, got rc=$fail_rc"
   cat "$FAIL_LOG"
   exit 1
 fi
@@ -398,14 +411,17 @@ if [[ ! -f "$FAIL_SUMMARY_JSON" ]]; then
 fi
 if ! jq -e '
   .status == "fail"
-  and .rc == 19
+  and .rc == 17
   and .inputs.dry_run == false
+  and .inputs.run_cosmos_only_guardrail == true
   and .inputs.run_phase7_mainnet_cutover_check == true
   and .inputs.run_phase7_mainnet_cutover_run == true
   and .inputs.run_phase7_mainnet_cutover_handoff_check == true
   and .inputs.run_phase7_mainnet_cutover_handoff_run == true
   and .inputs.run_phase7_mainnet_cutover_summary_report == true
   and .inputs.run_phase7_mainnet_cutover_live_smoke == true
+  and .steps.blockchain_cosmos_only_guardrail.status == "fail"
+  and .steps.blockchain_cosmos_only_guardrail.rc == 17
   and .steps.phase7_mainnet_cutover_check.status == "fail"
   and .steps.phase7_mainnet_cutover_check.rc == 19
   and .steps.phase7_mainnet_cutover_run.status == "fail"
@@ -425,7 +441,7 @@ if ! jq -e '
   cat "$FAIL_SUMMARY_JSON"
   exit 1
 fi
-if ! grep -Fq -- '[ci-phase7-mainnet-cutover] status=fail rc=19 dry_run=0' "$FAIL_LOG"; then
+if ! grep -Fq -- '[ci-phase7-mainnet-cutover] status=fail rc=17 dry_run=0' "$FAIL_LOG"; then
   echo "fail log missing final fail status line"
   cat "$FAIL_LOG"
   exit 1

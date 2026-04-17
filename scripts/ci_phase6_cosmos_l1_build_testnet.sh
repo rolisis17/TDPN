@@ -12,6 +12,7 @@ Usage:
     [--summary-json PATH] \
     [--print-summary-json [0|1]] \
     [--dry-run [0|1]] \
+    [--run-cosmos-only-guardrail [0|1]] \
     [--run-chain-scaffold [0|1]] \
     [--run-local-testnet-smoke [0|1]] \
     [--run-proto-surface [0|1]] \
@@ -26,17 +27,18 @@ Usage:
 
 Purpose:
   Run a focused Phase-6 Cosmos L1 build/testnet CI gate:
-    1) integration_cosmos_chain_scaffold.sh
-    2) integration_cosmos_local_testnet_smoke.sh
-    3) integration_cosmos_proto_surface.sh
-    4) integration_cosmos_proto_codegen_surface.sh
-    5) integration_cosmos_query_surface.sh
-    6) integration_cosmos_module_tx_surface.sh
-    7) integration_cosmos_grpc_app_roundtrip.sh
-    8) integration_cosmos_tdpnd_grpc_runtime_smoke.sh
-    9) integration_cosmos_tdpnd_comet_runtime_smoke.sh
-    10) integration_cosmos_tdpnd_grpc_live_smoke.sh
-    11) integration_cosmos_tdpnd_grpc_auth_live_smoke.sh
+    1) integration_blockchain_cosmos_only_guardrail.sh
+    2) integration_cosmos_chain_scaffold.sh
+    3) integration_cosmos_local_testnet_smoke.sh
+    4) integration_cosmos_proto_surface.sh
+    5) integration_cosmos_proto_codegen_surface.sh
+    6) integration_cosmos_query_surface.sh
+    7) integration_cosmos_module_tx_surface.sh
+    8) integration_cosmos_grpc_app_roundtrip.sh
+    9) integration_cosmos_tdpnd_grpc_runtime_smoke.sh
+    10) integration_cosmos_tdpnd_comet_runtime_smoke.sh
+    11) integration_cosmos_tdpnd_grpc_live_smoke.sh
+    12) integration_cosmos_tdpnd_grpc_auth_live_smoke.sh
 
 Dry-run mode:
   --dry-run 1 skips stage execution, records deterministic skip accounting,
@@ -115,6 +117,7 @@ canonical_summary_json="${CI_PHASE6_COSMOS_L1_BUILD_TESTNET_CANONICAL_SUMMARY_JS
 print_summary_json="${CI_PHASE6_COSMOS_L1_PRINT_SUMMARY_JSON:-1}"
 dry_run="${CI_PHASE6_COSMOS_L1_DRY_RUN:-0}"
 
+run_cosmos_only_guardrail="${CI_PHASE6_COSMOS_L1_RUN_COSMOS_ONLY_GUARDRAIL:-1}"
 run_chain_scaffold="${CI_PHASE6_COSMOS_L1_RUN_CHAIN_SCAFFOLD:-1}"
 run_local_testnet_smoke="${CI_PHASE6_COSMOS_L1_RUN_LOCAL_TESTNET_SMOKE:-1}"
 run_proto_surface="${CI_PHASE6_COSMOS_L1_RUN_PROTO_SURFACE:-1}"
@@ -123,7 +126,7 @@ run_query_surface="${CI_PHASE6_COSMOS_L1_RUN_QUERY_SURFACE:-1}"
 run_module_tx_surface="${CI_PHASE6_COSMOS_L1_RUN_MODULE_TX_SURFACE:-1}"
 run_grpc_app_roundtrip="${CI_PHASE6_COSMOS_L1_RUN_GRPC_APP_ROUNDTRIP:-1}"
 run_tdpnd_grpc_runtime_smoke="${CI_PHASE6_COSMOS_L1_RUN_TDPND_GRPC_RUNTIME_SMOKE:-1}"
-run_tdpnd_comet_runtime_smoke="${CI_PHASE6_COSMOS_L1_RUN_TDPND_COMET_RUNTIME_SMOKE:-0}"
+run_tdpnd_comet_runtime_smoke="${CI_PHASE6_COSMOS_L1_RUN_TDPND_COMET_RUNTIME_SMOKE:-1}"
 run_tdpnd_grpc_live_smoke="${CI_PHASE6_COSMOS_L1_RUN_TDPND_GRPC_LIVE_SMOKE:-1}"
 run_tdpnd_grpc_auth_live_smoke="${CI_PHASE6_COSMOS_L1_RUN_TDPND_GRPC_AUTH_LIVE_SMOKE:-1}"
 
@@ -152,6 +155,15 @@ while [[ $# -gt 0 ]]; do
         shift 2
       else
         dry_run="1"
+        shift
+      fi
+      ;;
+    --run-cosmos-only-guardrail)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        run_cosmos_only_guardrail="${2:-}"
+        shift 2
+      else
+        run_cosmos_only_guardrail="1"
         shift
       fi
       ;;
@@ -268,6 +280,7 @@ done
 
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
 bool_arg_or_die "--dry-run" "$dry_run"
+bool_arg_or_die "--run-cosmos-only-guardrail" "$run_cosmos_only_guardrail"
 bool_arg_or_die "--run-chain-scaffold" "$run_chain_scaffold"
 bool_arg_or_die "--run-local-testnet-smoke" "$run_local_testnet_smoke"
 bool_arg_or_die "--run-proto-surface" "$run_proto_surface"
@@ -280,6 +293,7 @@ bool_arg_or_die "--run-tdpnd-comet-runtime-smoke" "$run_tdpnd_comet_runtime_smok
 bool_arg_or_die "--run-tdpnd-grpc-live-smoke" "$run_tdpnd_grpc_live_smoke"
 bool_arg_or_die "--run-tdpnd-grpc-auth-live-smoke" "$run_tdpnd_grpc_auth_live_smoke"
 
+blockchain_cosmos_only_guardrail_script="${CI_PHASE6_COSMOS_L1_BLOCKCHAIN_COSMOS_ONLY_GUARDRAIL_SCRIPT:-$ROOT_DIR/scripts/integration_blockchain_cosmos_only_guardrail.sh}"
 chain_scaffold_script="${CI_PHASE6_COSMOS_L1_CHAIN_SCAFFOLD_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_chain_scaffold.sh}"
 local_testnet_smoke_script="${CI_PHASE6_COSMOS_L1_LOCAL_TESTNET_SMOKE_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_local_testnet_smoke.sh}"
 proto_surface_script="${CI_PHASE6_COSMOS_L1_PROTO_SURFACE_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_proto_surface.sh}"
@@ -293,6 +307,7 @@ tdpnd_grpc_live_smoke_script="${CI_PHASE6_COSMOS_L1_TDPND_GRPC_LIVE_SMOKE_SCRIPT
 tdpnd_grpc_auth_live_smoke_script="${CI_PHASE6_COSMOS_L1_TDPND_GRPC_AUTH_LIVE_SMOKE_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_tdpnd_grpc_auth_live_smoke.sh}"
 
 stage_ids=(
+  "blockchain_cosmos_only_guardrail"
   "chain_scaffold"
   "local_testnet_smoke"
   "proto_surface"
@@ -307,6 +322,7 @@ stage_ids=(
 )
 
 declare -A stage_script=(
+  ["blockchain_cosmos_only_guardrail"]="$blockchain_cosmos_only_guardrail_script"
   ["chain_scaffold"]="$chain_scaffold_script"
   ["local_testnet_smoke"]="$local_testnet_smoke_script"
   ["proto_surface"]="$proto_surface_script"
@@ -321,6 +337,7 @@ declare -A stage_script=(
 )
 
 declare -A stage_enabled=(
+  ["blockchain_cosmos_only_guardrail"]="$run_cosmos_only_guardrail"
   ["chain_scaffold"]="$run_chain_scaffold"
   ["local_testnet_smoke"]="$run_local_testnet_smoke"
   ["proto_surface"]="$run_proto_surface"
@@ -438,6 +455,7 @@ jq -n \
   --arg canonical_summary_json "$canonical_summary_json" \
   --arg dry_run "$dry_run" \
   --arg print_summary_json "$print_summary_json" \
+  --arg run_cosmos_only_guardrail "$run_cosmos_only_guardrail" \
   --arg run_chain_scaffold "$run_chain_scaffold" \
   --arg run_local_testnet_smoke "$run_local_testnet_smoke" \
   --arg run_proto_surface "$run_proto_surface" \
@@ -463,6 +481,7 @@ jq -n \
     inputs: {
       dry_run: ($dry_run == "1"),
       print_summary_json: ($print_summary_json == "1"),
+      run_cosmos_only_guardrail: ($run_cosmos_only_guardrail == "1"),
       run_chain_scaffold: ($run_chain_scaffold == "1"),
       run_local_testnet_smoke: ($run_local_testnet_smoke == "1"),
       run_proto_surface: ($run_proto_surface == "1"),

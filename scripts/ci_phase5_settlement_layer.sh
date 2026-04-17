@@ -12,6 +12,7 @@ Usage:
     [--summary-json PATH] \
     [--print-summary-json [0|1]] \
     [--dry-run [0|1]] \
+    [--run-cosmos-only-guardrail [0|1]] \
     [--run-settlement-failsoft [0|1]] \
     [--run-settlement-acceptance [0|1]] \
     [--run-settlement-bridge-smoke [0|1]] \
@@ -22,6 +23,9 @@ Usage:
     [--run-settlement-shadow-env [0|1]] \
     [--run-settlement-shadow-status-surface [0|1]] \
     [--run-issuer-sponsor-api-live-smoke [0|1]] \
+    [--run-issuer-sponsor-vpn-session-live-smoke [0|1]] \
+    [--run-issuer-settlement-status-live-smoke [0|1]] \
+    [--run-exit-settlement-status-live-smoke [0|1]] \
     [--run-issuer-admin-blockchain-handlers-coverage [0|1]] \
     [--run-phase5-settlement-layer-check [0|1]] \
     [--run-phase5-settlement-layer-run [0|1]] \
@@ -31,21 +35,25 @@ Usage:
 Purpose:
   Run a focused Phase-5 settlement layer CI gate around Cosmos settlement
   integration readiness:
-    1) integration_cosmos_settlement_failsoft.sh
-    2) integration_cosmos_settlement_acceptance_paths.sh
-    3) integration_cosmos_tdpnd_settlement_bridge_smoke.sh
-    4) integration_cosmos_tdpnd_state_dir_persistence.sh
-    5) integration_cosmos_settlement_dual_asset_parity.sh
-    6) integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh
-    7) integration_cosmos_adapter_tdpnd_signed_tx_roundtrip.sh
-    8) integration_cosmos_settlement_shadow_env.sh
-    9) integration_cosmos_settlement_shadow_status_surface.sh
-    10) integration_issuer_sponsor_api_live_smoke.sh
-    11) integration_issuer_admin_blockchain_handlers_coverage_floor.sh
-    12) integration_phase5_settlement_layer_check.sh
-    13) integration_phase5_settlement_layer_run.sh
-    14) integration_phase5_settlement_layer_handoff_check.sh
-    15) integration_phase5_settlement_layer_handoff_run.sh
+    1) integration_blockchain_cosmos_only_guardrail.sh
+    2) integration_cosmos_settlement_failsoft.sh
+    3) integration_cosmos_settlement_acceptance_paths.sh (includes issuer+exit settlement-status live-smoke checks)
+    4) integration_cosmos_tdpnd_settlement_bridge_smoke.sh
+    5) integration_cosmos_tdpnd_state_dir_persistence.sh
+    6) integration_cosmos_settlement_dual_asset_parity.sh
+    7) integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh
+    8) integration_cosmos_adapter_tdpnd_signed_tx_roundtrip.sh
+    9) integration_cosmos_settlement_shadow_env.sh
+    10) integration_cosmos_settlement_shadow_status_surface.sh
+    11) integration_issuer_sponsor_api_live_smoke.sh
+    12) integration_issuer_sponsor_vpn_session_live_smoke.sh
+    13) integration_issuer_settlement_status_live_smoke.sh
+    14) integration_exit_settlement_status_live_smoke.sh
+    15) integration_issuer_admin_blockchain_handlers_coverage_floor.sh
+    16) integration_phase5_settlement_layer_check.sh
+    17) integration_phase5_settlement_layer_run.sh
+    18) integration_phase5_settlement_layer_handoff_check.sh
+    19) integration_phase5_settlement_layer_handoff_run.sh
 
 Dry-run mode:
   --dry-run 1 skips stage execution, records deterministic skip accounting,
@@ -124,6 +132,7 @@ canonical_summary_json="${CI_PHASE5_SETTLEMENT_LAYER_CANONICAL_SUMMARY_JSON:-$RO
 print_summary_json="${CI_PHASE5_SETTLEMENT_LAYER_PRINT_SUMMARY_JSON:-1}"
 dry_run="${CI_PHASE5_SETTLEMENT_LAYER_DRY_RUN:-0}"
 
+run_cosmos_only_guardrail="${CI_PHASE5_SETTLEMENT_LAYER_RUN_COSMOS_ONLY_GUARDRAIL:-1}"
 run_settlement_failsoft="${CI_PHASE5_SETTLEMENT_LAYER_RUN_SETTLEMENT_FAILSOFT:-${CI_PHASE5_SETTLEMENT_LAYER_RUN_WINDOWS_SERVER_PACKAGING:-1}}"
 run_settlement_acceptance="${CI_PHASE5_SETTLEMENT_LAYER_RUN_SETTLEMENT_ACCEPTANCE:-${CI_PHASE5_SETTLEMENT_LAYER_RUN_WINDOWS_ROLE_RUNBOOKS:-1}}"
 run_settlement_bridge_smoke="${CI_PHASE5_SETTLEMENT_LAYER_RUN_SETTLEMENT_BRIDGE_SMOKE:-${CI_PHASE5_SETTLEMENT_LAYER_RUN_CROSS_PLATFORM_INTEROP:-1}}"
@@ -134,6 +143,9 @@ run_settlement_adapter_signed_tx_roundtrip="${CI_PHASE5_SETTLEMENT_LAYER_RUN_SET
 run_settlement_shadow_env="${CI_PHASE5_SETTLEMENT_LAYER_RUN_SETTLEMENT_SHADOW_ENV:-1}"
 run_settlement_shadow_status_surface="${CI_PHASE5_SETTLEMENT_LAYER_RUN_SETTLEMENT_SHADOW_STATUS_SURFACE:-1}"
 run_issuer_sponsor_api_live_smoke="${CI_PHASE5_SETTLEMENT_LAYER_RUN_ISSUER_SPONSOR_API_LIVE_SMOKE:-1}"
+run_issuer_sponsor_vpn_session_live_smoke="${CI_PHASE5_SETTLEMENT_LAYER_RUN_ISSUER_SPONSOR_VPN_SESSION_LIVE_SMOKE:-1}"
+run_issuer_settlement_status_live_smoke="${CI_PHASE5_SETTLEMENT_LAYER_RUN_ISSUER_SETTLEMENT_STATUS_LIVE_SMOKE:-1}"
+run_exit_settlement_status_live_smoke="${CI_PHASE5_SETTLEMENT_LAYER_RUN_EXIT_SETTLEMENT_STATUS_LIVE_SMOKE:-1}"
 run_issuer_admin_blockchain_handlers_coverage="${CI_PHASE5_SETTLEMENT_LAYER_RUN_ISSUER_ADMIN_BLOCKCHAIN_HANDLERS_COVERAGE:-1}"
 run_phase5_settlement_layer_check="${CI_PHASE5_SETTLEMENT_LAYER_RUN_PHASE5_SETTLEMENT_LAYER_CHECK:-1}"
 run_phase5_settlement_layer_run="${CI_PHASE5_SETTLEMENT_LAYER_RUN_PHASE5_SETTLEMENT_LAYER_RUN:-1}"
@@ -165,6 +177,15 @@ while [[ $# -gt 0 ]]; do
         shift 2
       else
         dry_run="1"
+        shift
+      fi
+      ;;
+    --run-cosmos-only-guardrail)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        run_cosmos_only_guardrail="${2:-}"
+        shift 2
+      else
+        run_cosmos_only_guardrail="1"
         shift
       fi
       ;;
@@ -258,6 +279,33 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --run-issuer-sponsor-vpn-session-live-smoke)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        run_issuer_sponsor_vpn_session_live_smoke="${2:-}"
+        shift 2
+      else
+        run_issuer_sponsor_vpn_session_live_smoke="1"
+        shift
+      fi
+      ;;
+    --run-issuer-settlement-status-live-smoke)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        run_issuer_settlement_status_live_smoke="${2:-}"
+        shift 2
+      else
+        run_issuer_settlement_status_live_smoke="1"
+        shift
+      fi
+      ;;
+    --run-exit-settlement-status-live-smoke)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        run_exit_settlement_status_live_smoke="${2:-}"
+        shift 2
+      else
+        run_exit_settlement_status_live_smoke="1"
+        shift
+      fi
+      ;;
     --run-issuer-admin-blockchain-handlers-coverage)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         run_issuer_admin_blockchain_handlers_coverage="${2:-}"
@@ -317,6 +365,7 @@ done
 
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
 bool_arg_or_die "--dry-run" "$dry_run"
+bool_arg_or_die "--run-cosmos-only-guardrail" "$run_cosmos_only_guardrail"
 bool_arg_or_die "--run-settlement-failsoft" "$run_settlement_failsoft"
 bool_arg_or_die "--run-settlement-acceptance" "$run_settlement_acceptance"
 bool_arg_or_die "--run-settlement-bridge-smoke" "$run_settlement_bridge_smoke"
@@ -327,12 +376,16 @@ bool_arg_or_die "--run-settlement-adapter-signed-tx-roundtrip" "$run_settlement_
 bool_arg_or_die "--run-settlement-shadow-env" "$run_settlement_shadow_env"
 bool_arg_or_die "--run-settlement-shadow-status-surface" "$run_settlement_shadow_status_surface"
 bool_arg_or_die "--run-issuer-sponsor-api-live-smoke" "$run_issuer_sponsor_api_live_smoke"
+bool_arg_or_die "--run-issuer-sponsor-vpn-session-live-smoke" "$run_issuer_sponsor_vpn_session_live_smoke"
+bool_arg_or_die "--run-issuer-settlement-status-live-smoke" "$run_issuer_settlement_status_live_smoke"
+bool_arg_or_die "--run-exit-settlement-status-live-smoke" "$run_exit_settlement_status_live_smoke"
 bool_arg_or_die "--run-issuer-admin-blockchain-handlers-coverage" "$run_issuer_admin_blockchain_handlers_coverage"
 bool_arg_or_die "--run-phase5-settlement-layer-check" "$run_phase5_settlement_layer_check"
 bool_arg_or_die "--run-phase5-settlement-layer-run" "$run_phase5_settlement_layer_run"
 bool_arg_or_die "--run-phase5-settlement-layer-handoff-check" "$run_phase5_settlement_layer_handoff_check"
 bool_arg_or_die "--run-phase5-settlement-layer-handoff-run" "$run_phase5_settlement_layer_handoff_run"
 
+blockchain_cosmos_only_guardrail_script="${CI_PHASE5_SETTLEMENT_LAYER_BLOCKCHAIN_COSMOS_ONLY_GUARDRAIL_SCRIPT:-$ROOT_DIR/scripts/integration_blockchain_cosmos_only_guardrail.sh}"
 settlement_failsoft_script="${CI_PHASE5_SETTLEMENT_LAYER_SETTLEMENT_FAILSOFT_SCRIPT:-${CI_PHASE5_SETTLEMENT_LAYER_WINDOWS_SERVER_PACKAGING_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_settlement_failsoft.sh}}"
 settlement_acceptance_script="${CI_PHASE5_SETTLEMENT_LAYER_SETTLEMENT_ACCEPTANCE_SCRIPT:-${CI_PHASE5_SETTLEMENT_LAYER_WINDOWS_ROLE_RUNBOOKS_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_settlement_acceptance_paths.sh}}"
 settlement_bridge_smoke_script="${CI_PHASE5_SETTLEMENT_LAYER_SETTLEMENT_BRIDGE_SMOKE_SCRIPT:-${CI_PHASE5_SETTLEMENT_LAYER_CROSS_PLATFORM_INTEROP_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_tdpnd_settlement_bridge_smoke.sh}}"
@@ -343,6 +396,9 @@ settlement_adapter_signed_tx_roundtrip_script="${CI_PHASE5_SETTLEMENT_LAYER_SETT
 settlement_shadow_env_script="${CI_PHASE5_SETTLEMENT_LAYER_SETTLEMENT_SHADOW_ENV_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_settlement_shadow_env.sh}"
 settlement_shadow_status_surface_script="${CI_PHASE5_SETTLEMENT_LAYER_SETTLEMENT_SHADOW_STATUS_SURFACE_SCRIPT:-$ROOT_DIR/scripts/integration_cosmos_settlement_shadow_status_surface.sh}"
 issuer_sponsor_api_live_smoke_script="${CI_PHASE5_SETTLEMENT_LAYER_ISSUER_SPONSOR_API_LIVE_SMOKE_SCRIPT:-$ROOT_DIR/scripts/integration_issuer_sponsor_api_live_smoke.sh}"
+issuer_sponsor_vpn_session_live_smoke_script="${CI_PHASE5_SETTLEMENT_LAYER_ISSUER_SPONSOR_VPN_SESSION_LIVE_SMOKE_SCRIPT:-$ROOT_DIR/scripts/integration_issuer_sponsor_vpn_session_live_smoke.sh}"
+issuer_settlement_status_live_smoke_script="${CI_PHASE5_SETTLEMENT_LAYER_ISSUER_SETTLEMENT_STATUS_LIVE_SMOKE_SCRIPT:-$ROOT_DIR/scripts/integration_issuer_settlement_status_live_smoke.sh}"
+exit_settlement_status_live_smoke_script="${CI_PHASE5_SETTLEMENT_LAYER_EXIT_SETTLEMENT_STATUS_LIVE_SMOKE_SCRIPT:-$ROOT_DIR/scripts/integration_exit_settlement_status_live_smoke.sh}"
 issuer_admin_blockchain_handlers_coverage_script="${CI_PHASE5_SETTLEMENT_LAYER_ISSUER_ADMIN_BLOCKCHAIN_HANDLERS_COVERAGE_SCRIPT:-$ROOT_DIR/scripts/integration_issuer_admin_blockchain_handlers_coverage_floor.sh}"
 phase5_settlement_layer_check_script="${CI_PHASE5_SETTLEMENT_LAYER_PHASE5_SETTLEMENT_LAYER_CHECK_SCRIPT:-$ROOT_DIR/scripts/integration_phase5_settlement_layer_check.sh}"
 phase5_settlement_layer_run_script="${CI_PHASE5_SETTLEMENT_LAYER_PHASE5_SETTLEMENT_LAYER_RUN_SCRIPT:-$ROOT_DIR/scripts/integration_phase5_settlement_layer_run.sh}"
@@ -350,6 +406,7 @@ phase5_settlement_layer_handoff_check_script="${CI_PHASE5_SETTLEMENT_LAYER_PHASE
 phase5_settlement_layer_handoff_run_script="${CI_PHASE5_SETTLEMENT_LAYER_PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_SCRIPT:-$ROOT_DIR/scripts/integration_phase5_settlement_layer_handoff_run.sh}"
 
 stage_ids=(
+  "blockchain_cosmos_only_guardrail"
   "settlement_failsoft"
   "settlement_acceptance"
   "settlement_bridge_smoke"
@@ -360,6 +417,9 @@ stage_ids=(
   "settlement_shadow_env"
   "settlement_shadow_status_surface"
   "issuer_sponsor_api_live_smoke"
+  "issuer_sponsor_vpn_session_live_smoke"
+  "issuer_settlement_status_live_smoke"
+  "exit_settlement_status_live_smoke"
   "issuer_admin_blockchain_handlers_coverage"
   "phase5_settlement_layer_check"
   "phase5_settlement_layer_run"
@@ -368,6 +428,7 @@ stage_ids=(
 )
 
 declare -A stage_script=(
+  ["blockchain_cosmos_only_guardrail"]="$blockchain_cosmos_only_guardrail_script"
   ["settlement_failsoft"]="$settlement_failsoft_script"
   ["settlement_acceptance"]="$settlement_acceptance_script"
   ["settlement_bridge_smoke"]="$settlement_bridge_smoke_script"
@@ -378,6 +439,9 @@ declare -A stage_script=(
   ["settlement_shadow_env"]="$settlement_shadow_env_script"
   ["settlement_shadow_status_surface"]="$settlement_shadow_status_surface_script"
   ["issuer_sponsor_api_live_smoke"]="$issuer_sponsor_api_live_smoke_script"
+  ["issuer_sponsor_vpn_session_live_smoke"]="$issuer_sponsor_vpn_session_live_smoke_script"
+  ["issuer_settlement_status_live_smoke"]="$issuer_settlement_status_live_smoke_script"
+  ["exit_settlement_status_live_smoke"]="$exit_settlement_status_live_smoke_script"
   ["issuer_admin_blockchain_handlers_coverage"]="$issuer_admin_blockchain_handlers_coverage_script"
   ["phase5_settlement_layer_check"]="$phase5_settlement_layer_check_script"
   ["phase5_settlement_layer_run"]="$phase5_settlement_layer_run_script"
@@ -386,6 +450,7 @@ declare -A stage_script=(
 )
 
 declare -A stage_enabled=(
+  ["blockchain_cosmos_only_guardrail"]="$run_cosmos_only_guardrail"
   ["settlement_failsoft"]="$run_settlement_failsoft"
   ["settlement_acceptance"]="$run_settlement_acceptance"
   ["settlement_bridge_smoke"]="$run_settlement_bridge_smoke"
@@ -396,6 +461,9 @@ declare -A stage_enabled=(
   ["settlement_shadow_env"]="$run_settlement_shadow_env"
   ["settlement_shadow_status_surface"]="$run_settlement_shadow_status_surface"
   ["issuer_sponsor_api_live_smoke"]="$run_issuer_sponsor_api_live_smoke"
+  ["issuer_sponsor_vpn_session_live_smoke"]="$run_issuer_sponsor_vpn_session_live_smoke"
+  ["issuer_settlement_status_live_smoke"]="$run_issuer_settlement_status_live_smoke"
+  ["exit_settlement_status_live_smoke"]="$run_exit_settlement_status_live_smoke"
   ["issuer_admin_blockchain_handlers_coverage"]="$run_issuer_admin_blockchain_handlers_coverage"
   ["phase5_settlement_layer_check"]="$run_phase5_settlement_layer_check"
   ["phase5_settlement_layer_run"]="$run_phase5_settlement_layer_run"
@@ -507,6 +575,7 @@ jq -n \
   --arg canonical_summary_json "$canonical_summary_json" \
   --arg dry_run "$dry_run" \
   --arg print_summary_json "$print_summary_json" \
+  --arg run_cosmos_only_guardrail "$run_cosmos_only_guardrail" \
   --arg run_settlement_failsoft "$run_settlement_failsoft" \
   --arg run_settlement_acceptance "$run_settlement_acceptance" \
   --arg run_settlement_bridge_smoke "$run_settlement_bridge_smoke" \
@@ -517,6 +586,9 @@ jq -n \
   --arg run_settlement_shadow_env "$run_settlement_shadow_env" \
   --arg run_settlement_shadow_status_surface "$run_settlement_shadow_status_surface" \
   --arg run_issuer_sponsor_api_live_smoke "$run_issuer_sponsor_api_live_smoke" \
+  --arg run_issuer_sponsor_vpn_session_live_smoke "$run_issuer_sponsor_vpn_session_live_smoke" \
+  --arg run_issuer_settlement_status_live_smoke "$run_issuer_settlement_status_live_smoke" \
+  --arg run_exit_settlement_status_live_smoke "$run_exit_settlement_status_live_smoke" \
   --arg run_issuer_admin_blockchain_handlers_coverage "$run_issuer_admin_blockchain_handlers_coverage" \
   --arg run_phase5_settlement_layer_check "$run_phase5_settlement_layer_check" \
   --arg run_phase5_settlement_layer_run "$run_phase5_settlement_layer_run" \
@@ -536,6 +608,7 @@ jq -n \
     inputs: {
       dry_run: ($dry_run == "1"),
       print_summary_json: ($print_summary_json == "1"),
+      run_cosmos_only_guardrail: ($run_cosmos_only_guardrail == "1"),
       run_settlement_failsoft: ($run_settlement_failsoft == "1"),
       run_settlement_acceptance: ($run_settlement_acceptance == "1"),
       run_settlement_bridge_smoke: ($run_settlement_bridge_smoke == "1"),
@@ -546,6 +619,9 @@ jq -n \
       run_settlement_shadow_env: ($run_settlement_shadow_env == "1"),
       run_settlement_shadow_status_surface: ($run_settlement_shadow_status_surface == "1"),
       run_issuer_sponsor_api_live_smoke: ($run_issuer_sponsor_api_live_smoke == "1"),
+      run_issuer_sponsor_vpn_session_live_smoke: ($run_issuer_sponsor_vpn_session_live_smoke == "1"),
+      run_issuer_settlement_status_live_smoke: ($run_issuer_settlement_status_live_smoke == "1"),
+      run_exit_settlement_status_live_smoke: ($run_exit_settlement_status_live_smoke == "1"),
       run_issuer_admin_blockchain_handlers_coverage: ($run_issuer_admin_blockchain_handlers_coverage == "1"),
       run_phase5_settlement_layer_check: ($run_phase5_settlement_layer_check == "1"),
       run_phase5_settlement_layer_run: ($run_phase5_settlement_layer_run == "1"),

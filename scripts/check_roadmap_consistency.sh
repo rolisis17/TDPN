@@ -8,6 +8,11 @@ full_plan="docs/full-execution-plan-2026-2027.md"
 product_roadmap="docs/product-roadmap.md"
 roadmap_script="scripts/roadmap_progress_report.sh"
 roadmap_integration_script="scripts/integration_roadmap_progress_report.sh"
+roadmap_blockchain_actionable_run_script="scripts/roadmap_blockchain_actionable_run.sh"
+roadmap_blockchain_actionable_run_integration_script="scripts/integration_roadmap_blockchain_actionable_run.sh"
+easy_node_roadmap_blockchain_actionable_run_integration_script="scripts/integration_easy_node_roadmap_blockchain_actionable_run.sh"
+ci_blockchain_parallel_sweep_script="scripts/ci_blockchain_parallel_sweep.sh"
+ci_blockchain_parallel_sweep_integration_script="scripts/integration_ci_blockchain_parallel_sweep.sh"
 bootstrap_validator_doc="docs/blockchain-bootstrap-validator-plan.md"
 cosmos_runtime_doc="docs/cosmos-settlement-runtime.md"
 testing_guide_doc="docs/testing-guide.md"
@@ -36,10 +41,16 @@ phase5_issuer_admin_blockchain_handlers_coverage_script="scripts/integration_iss
 blockchain_fastlane_script="scripts/blockchain_fastlane.sh"
 blockchain_fastlane_integration_script="scripts/integration_blockchain_fastlane.sh"
 blockchain_mainnet_activation_metrics_integration_script="scripts/integration_blockchain_mainnet_activation_metrics.sh"
+blockchain_mainnet_activation_metrics_prefill_script="scripts/blockchain_mainnet_activation_metrics_prefill.sh"
+blockchain_mainnet_activation_metrics_prefill_integration_script="scripts/integration_blockchain_mainnet_activation_metrics_prefill.sh"
 blockchain_mainnet_activation_gate_script="scripts/blockchain_mainnet_activation_gate.sh"
 blockchain_mainnet_activation_gate_integration_script="scripts/integration_blockchain_mainnet_activation_gate.sh"
 ci_local_script="scripts/ci_local.sh"
 easy_node_script="scripts/easy_node.sh"
+blockchain_staged_file_groups_script="scripts/blockchain_staged_file_groups.sh"
+blockchain_staged_file_groups_integration_script="scripts/integration_blockchain_staged_file_groups.sh"
+easy_node_blockchain_fastlane_cohort_quick_check_shim_integration_script="scripts/integration_easy_node_blockchain_fastlane_cohort_quick_check_shim.sh"
+easy_node_blockchain_staged_file_groups_integration_script="scripts/integration_easy_node_blockchain_staged_file_groups.sh"
 easy_node_blockchain_gate_wrappers_integration_script="scripts/integration_easy_node_blockchain_gate_wrappers.sh"
 easy_node_blockchain_summary_reports_integration_script="scripts/integration_easy_node_blockchain_summary_reports.sh"
 phase6_ci_script="scripts/ci_phase6_cosmos_l1_build_testnet.sh"
@@ -133,6 +144,42 @@ check_confirmation_interface_wording() {
     echo "$label must reference canonical confirmation interface location (pkg/settlement/types.go)"
     exit 1
   fi
+}
+
+check_settlement_status_stale_live_smoke_doc_surface() {
+  local file_path="$1"
+  local label="$2"
+
+  for token in \
+    "issuer_settlement_status_live_smoke" \
+    "integration_issuer_settlement_status_live_smoke.sh" \
+    "exit_settlement_status_live_smoke" \
+    "integration_exit_settlement_status_live_smoke.sh" \
+    "last_error implies stale=true" \
+    "stale=false"
+  do
+    if ! rg -Fq "$token" "$file_path"; then
+      echo "$label must document settlement status live-smoke stale contract token: $token"
+      exit 1
+    fi
+  done
+}
+
+check_blockchain_staged_file_groups_surface() {
+  local file_path="$1"
+  local label="$2"
+
+  for token in \
+    "scripts/blockchain_staged_file_groups.sh" \
+    "./scripts/easy_node.sh blockchain-staged-file-groups" \
+    "scripts/integration_blockchain_staged_file_groups.sh" \
+    "scripts/integration_easy_node_blockchain_staged_file_groups.sh"
+  do
+    if ! rg -Fq "$token" "$file_path"; then
+      echo "$label must mention blockchain staged-file-groups surface token: $token"
+      exit 1
+    fi
+  done
 }
 
 check_phase7_roadmap_surface_cli() {
@@ -238,6 +285,28 @@ check_phase7_mainnet_activation_gate_doc_surface() {
   fi
 }
 
+check_phase7_bootstrap_governance_gate_doc_surface() {
+  local file_path="$1"
+  local label="$2"
+
+  if ! rg -Fq "bootstrap_governance_graduation_gate_go" "$file_path"; then
+    echo "$label must document phase7 bootstrap_governance_graduation_gate_go signal surfacing"
+    exit 1
+  fi
+  if ! rg -Fq "check/run/handoff-check/handoff-run" "$file_path"; then
+    echo "$label must scope bootstrap_governance_graduation_gate_go to phase7 check/run/handoff-check/handoff-run contexts"
+    exit 1
+  fi
+  if ! rg -Fq "optional by default" "$file_path"; then
+    echo "$label must document that bootstrap_governance_graduation_gate_go enforcement is optional by default"
+    exit 1
+  fi
+  if ! rg -Fq -- "--require-bootstrap-governance-graduation-gate-go" "$file_path"; then
+    echo "$label must document the phase7 bootstrap governance graduation gate requirement flag surface: --require-bootstrap-governance-graduation-gate-go"
+    exit 1
+  fi
+}
+
 check_phase7_coverage_floor_gating_doc_surface() {
   local file_path="$1"
   local label="$2"
@@ -261,6 +330,10 @@ check_phase7_coverage_floor_gating_doc_surface() {
   done
   if ! rg -Fq -- "--require-mainnet-activation-gate-go" "$file_path"; then
     echo "$label must include phase7 coverage-floor gating flag surface: --require-mainnet-activation-gate-go"
+    exit 1
+  fi
+  if ! rg -Fq -- "--require-bootstrap-governance-graduation-gate-go" "$file_path"; then
+    echo "$label must include phase7 coverage-floor gating flag surface: --require-bootstrap-governance-graduation-gate-go"
     exit 1
   fi
 }
@@ -296,6 +369,23 @@ check_phase7_summary_runtime_signal_doc_surface() {
   do
     if ! rg -Fq "$token" "$file_path"; then
       echo "$label must document phase7 summary/runtime signal surfacing token: $token"
+      exit 1
+    fi
+  done
+}
+
+check_phase7_summary_gate_signal_doc_surface() {
+  local file_path="$1"
+  local label="$2"
+
+  for token in \
+    "phase7_mainnet_cutover_summary_report.sh" \
+    "roadmap_progress_report.sh" \
+    "mainnet_activation_gate_go_ok" \
+    "bootstrap_governance_graduation_gate_go_ok"
+  do
+    if ! rg -Fq "$token" "$file_path"; then
+      echo "$label must document phase7 summary/roadmap gate signal surfacing token: $token"
       exit 1
     fi
   done
@@ -357,6 +447,11 @@ check_blockchain_fastlane_activation_gate_surface() {
     "blockchain_mainnet_activation_metrics" \
     "scripts/blockchain_mainnet_activation_metrics.sh" \
     "scripts/integration_blockchain_mainnet_activation_metrics.sh" \
+    "scripts/blockchain_bootstrap_graduation_gate.sh" \
+    "scripts/integration_blockchain_bootstrap_graduation_gate.sh" \
+    "--run-blockchain-bootstrap-governance-graduation-gate" \
+    "--blockchain-bootstrap-governance-graduation-gate-summary-json" \
+    "BLOCKCHAIN_FASTLANE_BLOCKCHAIN_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_SUMMARY_JSON" \
     "--blockchain-mainnet-activation-metrics-source-json" \
     "BLOCKCHAIN_FASTLANE_BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_SOURCE_JSONS" \
     "inputs.blockchain_mainnet_activation_metrics_source_jsons" \
@@ -398,6 +493,36 @@ check_blockchain_fastlane_activation_gate_surface() {
     echo "$label must document blockchain fastlane phase7 summary signal token: mainnet_activation_gate_go_ok (or mainnet_activation_gate_go)"
     exit 1
   fi
+  if ! rg -q -e "bootstrap_governance_graduation_gate_go(_ok)?" "$file_path"; then
+    echo "$label must document blockchain fastlane phase7 summary signal token: bootstrap_governance_graduation_gate_go_ok (or bootstrap_governance_graduation_gate_go)"
+    exit 1
+  fi
+}
+
+check_bootstrap_governance_graduation_gate_doc_surface() {
+  local file_path="$1"
+  local label="$2"
+  local token
+
+  for token in \
+    "scripts/blockchain_bootstrap_graduation_gate.sh" \
+    "scripts/integration_blockchain_bootstrap_graduation_gate.sh" \
+    "./scripts/easy_node.sh blockchain-bootstrap-governance-graduation-gate" \
+    "scripts/integration_easy_node_blockchain_gate_wrappers.sh" \
+    "--run-blockchain-bootstrap-governance-graduation-gate" \
+    "--blockchain-bootstrap-governance-graduation-gate-summary-json" \
+    "BLOCKCHAIN_FASTLANE_BLOCKCHAIN_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_SUMMARY_JSON"
+  do
+    if [[ "$token" == --* ]]; then
+      if ! rg -Fq -- "$token" "$file_path"; then
+        echo "$label must document bootstrap governance graduation gate fastlane contract token: $token"
+        exit 1
+      fi
+    elif ! rg -Fq "$token" "$file_path"; then
+      echo "$label must document bootstrap governance graduation gate fastlane/easy-node contract token: $token"
+      exit 1
+    fi
+  done
 }
 
 check_mainnet_activation_gate_surface() {
@@ -454,6 +579,61 @@ check_mainnet_activation_gate_surface() {
   fi
 }
 
+check_blockchain_gate_summary_freshness_surface() {
+  local file_path="$1"
+  local label="$2"
+  local token
+
+  for token in \
+    "blockchain_track.mainnet_activation_gate.summary_generated_at" \
+    "blockchain_track.mainnet_activation_gate.summary_age_sec" \
+    "blockchain_track.mainnet_activation_gate.summary_stale" \
+    "blockchain_track.mainnet_activation_gate.summary_max_age_sec" \
+    "blockchain_track.bootstrap_governance_graduation_gate.summary_generated_at" \
+    "blockchain_track.bootstrap_governance_graduation_gate.summary_age_sec" \
+    "blockchain_track.bootstrap_governance_graduation_gate.summary_stale" \
+    "blockchain_track.bootstrap_governance_graduation_gate.summary_max_age_sec"
+  do
+    if ! rg -Fq "$token" "$file_path"; then
+      echo "$label must document blockchain gate freshness field token: $token"
+      exit 1
+    fi
+  done
+}
+
+check_blockchain_mainnet_activation_refresh_surface() {
+  local file_path="$1"
+  local label="$2"
+
+  for token in \
+    "blockchain_mainnet_activation_refresh_evidence" \
+    "stale activation evidence" \
+    "./scripts/easy_node.sh blockchain-mainnet-activation-real-evidence-run" \
+    "blockchain-mainnet-activation-real-evidence-run"
+  do
+    if ! rg -Fq "$token" "$file_path"; then
+      echo "$label must document blockchain mainnet activation refresh token: $token"
+      exit 1
+    fi
+  done
+}
+
+check_blockchain_bootstrap_validator_plan_freshness_surface() {
+  local file_path="$1"
+  local label="$2"
+
+  for token in \
+    "summary_generated_at" \
+    "bootstrap_governance_graduation_gate_go" \
+    "blockchain-bootstrap-governance-graduation-gate-summary-json"
+  do
+    if ! rg -Fq "$token" "$file_path"; then
+      echo "$label must document bootstrap freshness token: $token"
+      exit 1
+    fi
+  done
+}
+
 check_bootstrap_governance_graduation_gate_surface() {
   local file_path="$1"
   local label="$2"
@@ -486,9 +666,215 @@ check_bootstrap_governance_graduation_gate_surface() {
   done
 }
 
-for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$roadmap_integration_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$testing_guide_doc" "$chain_readme" "$chain_scaffold_file" "$chain_grpc_registry_file" "$chain_grpc_registry_test_file" "$chain_settlement_bridge_file" "$chain_runtime_test_file" "$settlement_mapping_doc" "$blockchain_sponsor_quickstart_doc" "$phase5_ci_script" "$phase5_integration_script" "$phase5_check_script" "$phase5_run_script" "$phase5_handoff_check_script" "$phase5_handoff_run_script" "$phase5_check_integration_script" "$phase5_run_integration_script" "$phase5_handoff_check_integration_script" "$phase5_handoff_run_integration_script" "$phase5_summary_report_script" "$phase5_summary_report_integration_script" "$blockchain_fastlane_script" "$blockchain_fastlane_integration_script" "$ci_local_script" "$easy_node_script" "$easy_node_blockchain_gate_wrappers_integration_script" "$easy_node_blockchain_summary_reports_integration_script" "$phase6_ci_script" "$phase6_integration_script" "$phase6_contracts_ci_script" "$phase6_contracts_integration_script" "$phase6_contracts_live_smoke_script" "$phase6_grpc_app_roundtrip_script" "$phase6_grpc_runtime_smoke_script" "$phase6_grpc_live_smoke_script" "$phase6_grpc_auth_live_smoke_script" "$phase6_settlement_bridge_smoke_script" "$phase6_settlement_bridge_live_smoke_script" "$phase6_query_surface_script" "$phase6_module_tx_surface_script" "$phase6_proto_surface_script" "$phase6_proto_grpc_surface_script" "$phase6_proto_codegen_surface_script" "$phase6_module_coverage_floor_script" "$phase6_keeper_coverage_floor_script" "$phase6_app_coverage_floor_script" "$phase6_dual_write_parity_script" "$phase6_check_script" "$phase6_run_script" "$phase6_check_integration_script" "$phase6_run_integration_script" "$phase6_suite_script" "$phase6_suite_integration_script" "$phase6_summary_report_script" "$phase6_summary_report_integration_script" "$phase7_check_script" "$phase7_check_integration_script" "$phase7_run_script" "$phase7_run_integration_script" "$phase7_handoff_check_script" "$phase7_handoff_check_integration_script" "$phase7_handoff_run_script" "$phase7_handoff_run_integration_script" "$phase7_ci_script" "$phase7_ci_integration_script" "$phase7_summary_report_script" "$phase7_summary_report_integration_script"; do
+check_mainnet_activation_operator_pack_doc_surface() {
+  local file_path="$1"
+  local label="$2"
+  local token=""
+
+  for token in \
+    "blockchain-mainnet-activation-operator-pack" \
+    "scripts/blockchain_mainnet_activation_operator_pack.sh" \
+    "blockchain-mainnet-activation-metrics-missing-input-template" \
+    "integration_blockchain_mainnet_activation_metrics_missing_input_template.sh" \
+    "integration_blockchain_mainnet_activation_metrics_missing_checklist.sh" \
+    "scripts/integration_blockchain_mainnet_activation_operator_pack.sh" \
+    "integration_blockchain_mainnet_activation_operator_pack.sh"
+  do
+    if ! rg -Fq "$token" "$file_path"; then
+      echo "$label must document mainnet activation operator-pack token: $token"
+      exit 1
+    fi
+  done
+
+  if ! rg -iq "operator-pack.*generates.*canonical template" "$file_path"; then
+    echo "$label must document that operator-pack generates canonical template artifacts"
+    exit 1
+  fi
+  if ! rg -iq "operator-pack.*generates.*missing-input-template" "$file_path"; then
+    echo "$label must document that operator-pack generates missing-input-template artifacts"
+    exit 1
+  fi
+  if ! rg -iq "operator-pack.*generates.*missing-checklist" "$file_path"; then
+    echo "$label must document that operator-pack generates missing-checklist artifacts"
+    exit 1
+  fi
+  if ! rg -iq "when metrics summary input is available|when metrics summary is available" "$file_path"; then
+    echo "$label must scope missing-checklist generation to cases where metrics summary input is available"
+    exit 1
+  fi
+}
+
+check_mainnet_activation_prefill_doc_surface() {
+  local file_path="$1"
+  local label="$2"
+
+  for token in \
+    "blockchain-mainnet-activation-metrics-prefill" \
+    "scripts/blockchain_mainnet_activation_metrics_prefill.sh" \
+    "scripts/integration_blockchain_mainnet_activation_metrics_prefill.sh"
+  do
+    if ! rg -Fq "$token" "$file_path"; then
+      echo "$label must document mainnet activation prefill token: $token"
+      exit 1
+    fi
+  done
+
+  if ! rg -iq "prefill.*before.*normalize.*rerun.*operator-pack.*cycle" "$file_path"; then
+    echo "$label must document that prefill sits before normalize/rerun/operator-pack/cycle"
+    exit 1
+  fi
+}
+
+check_optional_fastlane_operator_pack_summary_flag_surface() {
+  local token="$1"
+
+  if rg -Fq -- "$token" "$full_plan" || rg -Fq -- "$token" "$product_roadmap"; then
+    if ! rg -Fq -- "$token" "$full_plan"; then
+      echo "full execution plan must document blockchain fastlane operator-pack summary token: $token"
+      exit 1
+    fi
+    if ! rg -Fq -- "$token" "$product_roadmap"; then
+      echo "product roadmap must document blockchain fastlane operator-pack summary token: $token"
+      exit 1
+    fi
+  fi
+}
+
+for f in "$full_plan" "$product_roadmap" "$roadmap_script" "$roadmap_integration_script" "$roadmap_blockchain_actionable_run_script" "$roadmap_blockchain_actionable_run_integration_script" "$easy_node_roadmap_blockchain_actionable_run_integration_script" "$ci_blockchain_parallel_sweep_script" "$ci_blockchain_parallel_sweep_integration_script" "$bootstrap_validator_doc" "$cosmos_runtime_doc" "$testing_guide_doc" "$chain_readme" "$chain_scaffold_file" "$chain_grpc_registry_file" "$chain_grpc_registry_test_file" "$chain_settlement_bridge_file" "$chain_runtime_test_file" "$settlement_mapping_doc" "$blockchain_sponsor_quickstart_doc" "$phase5_ci_script" "$phase5_integration_script" "$phase5_check_script" "$phase5_run_script" "$phase5_handoff_check_script" "$phase5_handoff_run_script" "$phase5_check_integration_script" "$phase5_run_integration_script" "$phase5_handoff_check_integration_script" "$phase5_handoff_run_integration_script" "$phase5_summary_report_script" "$phase5_summary_report_integration_script" "$blockchain_fastlane_script" "$blockchain_fastlane_integration_script" "$ci_local_script" "$easy_node_script" "$easy_node_blockchain_fastlane_cohort_quick_check_shim_integration_script" "$easy_node_blockchain_staged_file_groups_integration_script" "$easy_node_blockchain_gate_wrappers_integration_script" "$easy_node_blockchain_summary_reports_integration_script" "$phase6_ci_script" "$phase6_integration_script" "$phase6_contracts_ci_script" "$phase6_contracts_integration_script" "$phase6_contracts_live_smoke_script" "$phase6_grpc_app_roundtrip_script" "$phase6_grpc_runtime_smoke_script" "$phase6_grpc_live_smoke_script" "$phase6_grpc_auth_live_smoke_script" "$phase6_settlement_bridge_smoke_script" "$phase6_settlement_bridge_live_smoke_script" "$phase6_query_surface_script" "$phase6_module_tx_surface_script" "$phase6_proto_surface_script" "$phase6_proto_grpc_surface_script" "$phase6_proto_codegen_surface_script" "$phase6_module_coverage_floor_script" "$phase6_keeper_coverage_floor_script" "$phase6_app_coverage_floor_script" "$phase6_dual_write_parity_script" "$phase6_check_script" "$phase6_run_script" "$phase6_check_integration_script" "$phase6_run_integration_script" "$phase6_suite_script" "$phase6_suite_integration_script" "$phase6_handoff_check_script" "$phase6_handoff_run_script" "$phase6_handoff_check_integration_script" "$phase6_handoff_run_integration_script" "$phase6_summary_report_script" "$phase6_summary_report_integration_script" "$phase7_check_script" "$phase7_check_integration_script" "$phase7_run_script" "$phase7_run_integration_script" "$phase7_handoff_check_script" "$phase7_handoff_check_integration_script" "$phase7_handoff_run_script" "$phase7_handoff_run_integration_script" "$phase7_ci_script" "$phase7_ci_integration_script" "$phase7_summary_report_script" "$phase7_summary_report_integration_script"; do
   if [[ ! -f "$f" ]]; then
     echo "missing required file: $f"
+    exit 1
+  fi
+done
+for phase_lane_token in \
+  "bash scripts/integration_roadmap_blockchain_actionable_run.sh" \
+  "bash scripts/integration_easy_node_roadmap_blockchain_actionable_run.sh" \
+  "bash scripts/integration_easy_node_blockchain_fastlane_cohort_quick_check_shim.sh" \
+  "bash scripts/integration_easy_node_blockchain_staged_file_groups.sh" \
+  "bash scripts/integration_blockchain_mainnet_activation_metrics_prefill.sh" \
+  "bash scripts/integration_slash_violation_type_contract_consistency.sh" \
+  "bash scripts/integration_cosmos_record_normalization_contract_consistency.sh"
+do
+  if ! rg -Fq "$phase_lane_token" "$ci_blockchain_parallel_sweep_script"; then
+    echo "ci blockchain parallel sweep phase_wrappers lane must include required integration token: $phase_lane_token"
+    exit 1
+  fi
+done
+for blockchain_parallel_sweep_token in \
+  "scripts/ci_blockchain_parallel_sweep.sh" \
+  "scripts/integration_ci_blockchain_parallel_sweep.sh"
+do
+  if ! rg -Fq "$blockchain_parallel_sweep_token" "$full_plan"; then
+    echo "full execution plan must mention blockchain parallel sweep contract token: $blockchain_parallel_sweep_token"
+    exit 1
+  fi
+  if ! rg -Fq "$blockchain_parallel_sweep_token" "$product_roadmap"; then
+    echo "product roadmap must mention blockchain parallel sweep contract token: $blockchain_parallel_sweep_token"
+    exit 1
+  fi
+done
+for ci_blockchain_parallel_sweep_integration_token in \
+  "scripts/ci_blockchain_parallel_sweep.sh" \
+  "[ci-blockchain-parallel-sweep] static phase lane literal contract" \
+  "[ci-blockchain-parallel-sweep] success path" \
+  "[ci-blockchain-parallel-sweep] dry-run skip path" \
+  "[ci-blockchain-parallel-sweep] toggle path" \
+  "[ci-blockchain-parallel-sweep] first-failure rc propagation" \
+  "cmp -s"
+do
+  if ! rg -Fq "$ci_blockchain_parallel_sweep_integration_token" "$ci_blockchain_parallel_sweep_integration_script"; then
+    echo "integration ci blockchain parallel sweep script must validate contract token: $ci_blockchain_parallel_sweep_integration_token"
+    exit 1
+  fi
+done
+if ! rg -Fq "scripts/integration_slash_violation_type_contract_consistency.sh" "$full_plan"; then
+  echo "full execution plan must mention scripts/integration_slash_violation_type_contract_consistency.sh"
+  exit 1
+fi
+if ! rg -Fq "scripts/integration_slash_violation_type_contract_consistency.sh" "$product_roadmap"; then
+  echo "product roadmap must mention scripts/integration_slash_violation_type_contract_consistency.sh"
+  exit 1
+fi
+if ! rg -Fq "scripts/integration_cosmos_record_normalization_contract_consistency.sh" "$full_plan"; then
+  echo "full execution plan must mention scripts/integration_cosmos_record_normalization_contract_consistency.sh"
+  exit 1
+fi
+if ! rg -Fq "scripts/integration_cosmos_record_normalization_contract_consistency.sh" "$product_roadmap"; then
+  echo "product roadmap must mention scripts/integration_cosmos_record_normalization_contract_consistency.sh"
+  exit 1
+fi
+if ! rg -Fq "scripts/integration_cosmos_record_normalization_contract_consistency.sh" "$cosmos_runtime_doc"; then
+  echo "cosmos settlement runtime guide must mention scripts/integration_cosmos_record_normalization_contract_consistency.sh"
+  exit 1
+fi
+for normalization_stage_token in \
+  "integration_cosmos_record_normalization_contract_consistency"
+do
+  if ! rg -Fq "$normalization_stage_token" "$full_plan"; then
+    echo "full execution plan must document normalization contract stage token: $normalization_stage_token"
+    exit 1
+  fi
+  if ! rg -Fq "$normalization_stage_token" "$product_roadmap"; then
+    echo "product roadmap must document normalization contract stage token: $normalization_stage_token"
+    exit 1
+  fi
+  if ! rg -Fq "$normalization_stage_token" "$cosmos_runtime_doc"; then
+    echo "cosmos settlement runtime guide must document normalization contract stage token: $normalization_stage_token"
+    exit 1
+  fi
+done
+for slash_contract_token in \
+  "objective \`violation_type\` allowlist enforcement" \
+  "required-field rejection" \
+  "/v1/admin/slash/evidence"
+do
+  if ! rg -Fq "$slash_contract_token" "$full_plan"; then
+    echo "full execution plan must document slash-evidence contract token: $slash_contract_token"
+    exit 1
+  fi
+  if ! rg -Fq "$slash_contract_token" "$product_roadmap"; then
+    echo "product roadmap must document slash-evidence contract token: $slash_contract_token"
+    exit 1
+  fi
+done
+if ! rg -Fq "blockchain_track.mainnet_activation_missing_metrics_action" "$full_plan"; then
+  echo "full execution plan must document blockchain_track.mainnet_activation_missing_metrics_action"
+  exit 1
+fi
+if ! rg -Fq "blockchain_track.mainnet_activation_missing_metrics_action" "$product_roadmap"; then
+  echo "product roadmap must document blockchain_track.mainnet_activation_missing_metrics_action"
+  exit 1
+fi
+if ! rg -Fq "blockchain_track.mainnet_activation_missing_metrics_action" "$roadmap_script"; then
+  echo "roadmap progress report script must surface blockchain_track.mainnet_activation_missing_metrics_action"
+  exit 1
+fi
+for actionable_flag_token in "--recommended-only" "--max-actions" "--action-timeout-sec" "--parallel"; do
+  if ! rg -Fq -- "$actionable_flag_token" "$full_plan"; then
+    echo "full execution plan must document blockchain actionable runner flag: $actionable_flag_token"
+    exit 1
+  fi
+  if ! rg -Fq -- "$actionable_flag_token" "$product_roadmap"; then
+    echo "product roadmap must document blockchain actionable runner flag: $actionable_flag_token"
+    exit 1
+  fi
+  if ! rg -Fq -- "$actionable_flag_token" "$roadmap_blockchain_actionable_run_script"; then
+    echo "roadmap blockchain actionable runner must support flag: $actionable_flag_token"
+    exit 1
+  fi
+done
+for activation_helper_integration_token in \
+  "scripts/integration_blockchain_mainnet_activation_metrics_input.sh" \
+  "scripts/integration_blockchain_mainnet_activation_metrics_prefill.sh" \
+  "scripts/integration_blockchain_gate_bundle.sh" \
+  "scripts/integration_blockchain_mainnet_activation_gate_cycle.sh"
+do
+  if ! rg -Fq "$activation_helper_integration_token" "$full_plan"; then
+    echo "full execution plan must mention blockchain activation helper integration script: $activation_helper_integration_token"
+    exit 1
+  fi
+  if ! rg -Fq "$activation_helper_integration_token" "$product_roadmap"; then
+    echo "product roadmap must mention blockchain activation helper integration script: $activation_helper_integration_token"
     exit 1
   fi
 done
@@ -616,6 +1002,38 @@ if ! rg -Fq "settlement_dual_asset_parity_ok" "$full_plan"; then
   echo "full execution plan must document settlement_dual_asset_parity_ok summary signal posture"
   exit 1
 fi
+if ! rg -Fq "phase5_settlement_layer_handoff.settlement_dual_asset_parity_status" "$full_plan"; then
+  echo "full execution plan must document roadmap/report surfacing for phase5_settlement_layer_handoff.settlement_dual_asset_parity_status"
+  exit 1
+fi
+if ! rg -Fq "phase5_settlement_layer_handoff.settlement_dual_asset_parity_ok" "$full_plan"; then
+  echo "full execution plan must document roadmap/report surfacing for phase5_settlement_layer_handoff.settlement_dual_asset_parity_ok"
+  exit 1
+fi
+if ! rg -Fq "phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_status" "$full_plan"; then
+  echo "full execution plan must document roadmap/report surfacing for phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_status"
+  exit 1
+fi
+if ! rg -Fq "phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_ok" "$full_plan"; then
+  echo "full execution plan must document roadmap/report surfacing for phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_ok"
+  exit 1
+fi
+if ! rg -Fq "phase5_settlement_layer_handoff.settlement_shadow_env_status" "$full_plan"; then
+  echo "full execution plan must document roadmap/report surfacing for phase5_settlement_layer_handoff.settlement_shadow_env_status"
+  exit 1
+fi
+if ! rg -Fq "phase5_settlement_layer_handoff.settlement_shadow_env_ok" "$full_plan"; then
+  echo "full execution plan must document roadmap/report surfacing for phase5_settlement_layer_handoff.settlement_shadow_env_ok"
+  exit 1
+fi
+if ! rg -Fq "phase5_settlement_layer_handoff.settlement_shadow_status_surface_status" "$full_plan"; then
+  echo "full execution plan must document roadmap/report surfacing for phase5_settlement_layer_handoff.settlement_shadow_status_surface_status"
+  exit 1
+fi
+if ! rg -Fq "phase5_settlement_layer_handoff.settlement_shadow_status_surface_ok" "$full_plan"; then
+  echo "full execution plan must document roadmap/report surfacing for phase5_settlement_layer_handoff.settlement_shadow_status_surface_ok"
+  exit 1
+fi
 if ! rg -Fq "issuer_sponsor_api_live_smoke" "$full_plan"; then
   echo "full execution plan must document issuer_sponsor_api_live_smoke gate posture"
   exit 1
@@ -624,12 +1042,53 @@ if ! rg -Fq "integration_issuer_sponsor_api_live_smoke.sh" "$full_plan"; then
   echo "full execution plan must document issuer_sponsor_api_live_smoke integration script"
   exit 1
 fi
+if ! rg -Fq "issuer_settlement_status_live_smoke" "$full_plan"; then
+  echo "full execution plan must document issuer_settlement_status_live_smoke gate posture"
+  exit 1
+fi
+if ! rg -Fq "integration_issuer_settlement_status_live_smoke.sh" "$full_plan"; then
+  echo "full execution plan must document issuer_settlement_status_live_smoke integration script"
+  exit 1
+fi
+if ! rg -Fq "signals.issuer_settlement_status_live_smoke" "$full_plan"; then
+  echo "full execution plan must document issuer_settlement_status_live_smoke summary signal posture"
+  exit 1
+fi
+if ! rg -Fq "exit_settlement_status_live_smoke" "$full_plan"; then
+  echo "full execution plan must document exit_settlement_status_live_smoke gate posture"
+  exit 1
+fi
+if ! rg -Fq "integration_exit_settlement_status_live_smoke.sh" "$full_plan"; then
+  echo "full execution plan must document exit_settlement_status_live_smoke integration script"
+  exit 1
+fi
+if ! rg -Fq "signals.exit_settlement_status_live_smoke" "$full_plan"; then
+  echo "full execution plan must document exit_settlement_status_live_smoke summary signal posture"
+  exit 1
+fi
+if ! rg -Fq "phase5_settlement_layer_handoff.exit_settlement_status_live_smoke_status" "$full_plan"; then
+  echo "full execution plan must document roadmap/report surfacing for phase5_settlement_layer_handoff.exit_settlement_status_live_smoke_status"
+  exit 1
+fi
+if ! rg -Fq "phase5_settlement_layer_handoff.exit_settlement_status_live_smoke_ok" "$full_plan"; then
+  echo "full execution plan must document roadmap/report surfacing for phase5_settlement_layer_handoff.exit_settlement_status_live_smoke_ok"
+  exit 1
+fi
+check_settlement_status_stale_live_smoke_doc_surface "$full_plan" "full execution plan"
 if ! rg -Fq "issuer_admin_blockchain_handlers_coverage" "$full_plan"; then
   echo "full execution plan must document issuer_admin_blockchain_handlers_coverage gate posture"
   exit 1
 fi
 if ! rg -Fq "integration_issuer_admin_blockchain_handlers_coverage_floor.sh" "$full_plan"; then
   echo "full execution plan must document issuer_admin_blockchain_handlers_coverage integration script"
+  exit 1
+fi
+if ! rg -Fq "phase5_settlement_layer_handoff.issuer_admin_blockchain_handlers_coverage_status" "$full_plan"; then
+  echo "full execution plan must document roadmap/report surfacing for phase5_settlement_layer_handoff.issuer_admin_blockchain_handlers_coverage_status"
+  exit 1
+fi
+if ! rg -Fq "phase5_settlement_layer_handoff.issuer_admin_blockchain_handlers_coverage_ok" "$full_plan"; then
+  echo "full execution plan must document roadmap/report surfacing for phase5_settlement_layer_handoff.issuer_admin_blockchain_handlers_coverage_ok"
   exit 1
 fi
 if ! rg -Fq "ci_phase6_cosmos_l1_build_testnet.sh" "$full_plan"; then
@@ -772,6 +1231,14 @@ if ! rg -Fq "phase6_cosmos_l1_build_testnet_handoff_run.sh" "$full_plan"; then
   echo "full execution plan must document phase6 handoff-run wrapper script"
   exit 1
 fi
+if ! rg -Fq "integration_phase6_cosmos_l1_build_testnet_handoff_check.sh" "$full_plan"; then
+  echo "full execution plan must document phase6 handoff-check integration contract script"
+  exit 1
+fi
+if ! rg -Fq "integration_phase6_cosmos_l1_build_testnet_handoff_run.sh" "$full_plan"; then
+  echo "full execution plan must document phase6 handoff-run integration contract script"
+  exit 1
+fi
 if ! rg -Fq "phase6_cosmos_l1_summary_report.sh" "$full_plan"; then
   echo "full execution plan must document phase6 summary report helper script"
   exit 1
@@ -903,6 +1370,10 @@ if ! rg -Fq "integration_easy_node_blockchain_gate_wrappers.sh" "$full_plan"; th
   echo "full execution plan must document easy-node blockchain gate-wrapper integration coverage script"
   exit 1
 fi
+if ! rg -Fq "integration_easy_node_blockchain_fastlane_cohort_quick_check_shim.sh" "$full_plan"; then
+  echo "full execution plan must document easy-node blockchain fastlane quick-check shim integration coverage script"
+  exit 1
+fi
 if ! rg -Fq "tdpnd_grpc_auth_live_smoke_ok" "$full_plan"; then
   echo "full execution plan must document phase6 readiness/handoff tdpnd_grpc_auth_live_smoke_ok signal"
   exit 1
@@ -934,12 +1405,19 @@ check_phase7_summary_coverage_signal_doc_surface "$cosmos_runtime_doc" "cosmos s
 check_phase7_summary_runtime_signal_doc_surface "$full_plan" "full execution plan"
 check_phase7_summary_runtime_signal_doc_surface "$product_roadmap" "product roadmap"
 check_phase7_summary_runtime_signal_doc_surface "$cosmos_runtime_doc" "cosmos settlement runtime doc"
+check_phase7_summary_gate_signal_doc_surface "$full_plan" "full execution plan"
+check_phase7_summary_gate_signal_doc_surface "$product_roadmap" "product roadmap"
+check_phase7_summary_gate_signal_doc_surface "$cosmos_runtime_doc" "cosmos settlement runtime doc"
 check_phase7_roadmap_summary_coverage_signal_surface "$roadmap_script" "roadmap progress report helper"
 check_phase7_roadmap_summary_coverage_signal_surface "$roadmap_integration_script" "roadmap progress report integration script"
 check_phase7_comet_signal_surface "$full_plan" "full execution plan"
 check_phase7_comet_signal_surface "$product_roadmap" "product roadmap"
 check_phase7_mainnet_activation_gate_doc_surface "$full_plan" "full execution plan"
 check_phase7_mainnet_activation_gate_doc_surface "$product_roadmap" "product roadmap"
+check_phase7_bootstrap_governance_gate_doc_surface "$full_plan" "full execution plan"
+check_phase7_bootstrap_governance_gate_doc_surface "$product_roadmap" "product roadmap"
+check_phase7_bootstrap_governance_gate_doc_surface "$cosmos_runtime_doc" "cosmos settlement runtime doc"
+check_phase7_bootstrap_governance_gate_doc_surface "$bootstrap_validator_doc" "blockchain bootstrap validator plan"
 check_phase7_coverage_floor_gating_doc_surface "$full_plan" "full execution plan"
 check_phase7_coverage_floor_gating_doc_surface "$product_roadmap" "product roadmap"
 check_phase7_coverage_floor_gating_doc_surface "$cosmos_runtime_doc" "cosmos settlement runtime doc"
@@ -1099,6 +1577,14 @@ if ! rg -Fq "phase6_cosmos_l1_build_testnet_handoff_run.sh" "$product_roadmap"; 
   echo "product roadmap must document phase6 handoff-run wrapper script"
   exit 1
 fi
+if ! rg -Fq "integration_phase6_cosmos_l1_build_testnet_handoff_check.sh" "$product_roadmap"; then
+  echo "product roadmap must document phase6 handoff-check integration contract script"
+  exit 1
+fi
+if ! rg -Fq "integration_phase6_cosmos_l1_build_testnet_handoff_run.sh" "$product_roadmap"; then
+  echo "product roadmap must document phase6 handoff-run integration contract script"
+  exit 1
+fi
 if ! rg -Fq "phase6_cosmos_l1_summary_report.sh" "$product_roadmap"; then
   echo "product roadmap must document phase6 summary report helper script"
   exit 1
@@ -1216,6 +1702,79 @@ if ! rg -Fq "settlement_dual_asset_parity_ok" "$product_roadmap"; then
   echo "product roadmap must document phase5 settlement_dual_asset_parity_ok signal posture"
   exit 1
 fi
+if ! rg -Fq "phase5_settlement_layer_handoff.settlement_dual_asset_parity_status" "$product_roadmap"; then
+  echo "product roadmap must document roadmap/report surfacing for phase5_settlement_layer_handoff.settlement_dual_asset_parity_status"
+  exit 1
+fi
+if ! rg -Fq "phase5_settlement_layer_handoff.settlement_dual_asset_parity_ok" "$product_roadmap"; then
+  echo "product roadmap must document roadmap/report surfacing for phase5_settlement_layer_handoff.settlement_dual_asset_parity_ok"
+  exit 1
+fi
+if ! rg -Fq "phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_status" "$product_roadmap"; then
+  echo "product roadmap must document roadmap/report surfacing for phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_status"
+  exit 1
+fi
+if ! rg -Fq "phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_ok" "$product_roadmap"; then
+  echo "product roadmap must document roadmap/report surfacing for phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_ok"
+  exit 1
+fi
+if ! rg -Fq "phase5_settlement_layer_handoff.settlement_shadow_env_status" "$product_roadmap"; then
+  echo "product roadmap must document roadmap/report surfacing for phase5_settlement_layer_handoff.settlement_shadow_env_status"
+  exit 1
+fi
+if ! rg -Fq "phase5_settlement_layer_handoff.settlement_shadow_env_ok" "$product_roadmap"; then
+  echo "product roadmap must document roadmap/report surfacing for phase5_settlement_layer_handoff.settlement_shadow_env_ok"
+  exit 1
+fi
+if ! rg -Fq "phase5_settlement_layer_handoff.settlement_shadow_status_surface_status" "$product_roadmap"; then
+  echo "product roadmap must document roadmap/report surfacing for phase5_settlement_layer_handoff.settlement_shadow_status_surface_status"
+  exit 1
+fi
+if ! rg -Fq "phase5_settlement_layer_handoff.settlement_shadow_status_surface_ok" "$product_roadmap"; then
+  echo "product roadmap must document roadmap/report surfacing for phase5_settlement_layer_handoff.settlement_shadow_status_surface_ok"
+  exit 1
+fi
+if ! rg -Fq "issuer_settlement_status_live_smoke" "$product_roadmap"; then
+  echo "product roadmap must document issuer_settlement_status_live_smoke gate posture"
+  exit 1
+fi
+if ! rg -Fq "integration_issuer_settlement_status_live_smoke.sh" "$product_roadmap"; then
+  echo "product roadmap must document issuer_settlement_status_live_smoke integration script"
+  exit 1
+fi
+if ! rg -Fq "signals.issuer_settlement_status_live_smoke" "$product_roadmap"; then
+  echo "product roadmap must document issuer_settlement_status_live_smoke summary signal posture"
+  exit 1
+fi
+if ! rg -Fq "exit_settlement_status_live_smoke" "$product_roadmap"; then
+  echo "product roadmap must document exit_settlement_status_live_smoke gate posture"
+  exit 1
+fi
+if ! rg -Fq "integration_exit_settlement_status_live_smoke.sh" "$product_roadmap"; then
+  echo "product roadmap must document exit_settlement_status_live_smoke integration script"
+  exit 1
+fi
+if ! rg -Fq "signals.exit_settlement_status_live_smoke" "$product_roadmap"; then
+  echo "product roadmap must document exit_settlement_status_live_smoke summary signal posture"
+  exit 1
+fi
+if ! rg -Fq "phase5_settlement_layer_handoff.exit_settlement_status_live_smoke_status" "$product_roadmap"; then
+  echo "product roadmap must document roadmap/report surfacing for phase5_settlement_layer_handoff.exit_settlement_status_live_smoke_status"
+  exit 1
+fi
+if ! rg -Fq "phase5_settlement_layer_handoff.exit_settlement_status_live_smoke_ok" "$product_roadmap"; then
+  echo "product roadmap must document roadmap/report surfacing for phase5_settlement_layer_handoff.exit_settlement_status_live_smoke_ok"
+  exit 1
+fi
+check_settlement_status_stale_live_smoke_doc_surface "$product_roadmap" "product roadmap"
+if ! rg -Fq "phase5_settlement_layer_handoff.issuer_admin_blockchain_handlers_coverage_status" "$product_roadmap"; then
+  echo "product roadmap must document roadmap/report surfacing for phase5_settlement_layer_handoff.issuer_admin_blockchain_handlers_coverage_status"
+  exit 1
+fi
+if ! rg -Fq "phase5_settlement_layer_handoff.issuer_admin_blockchain_handlers_coverage_ok" "$product_roadmap"; then
+  echo "product roadmap must document roadmap/report surfacing for phase5_settlement_layer_handoff.issuer_admin_blockchain_handlers_coverage_ok"
+  exit 1
+fi
 if ! rg -iq "phase[[:space:]]*5 summary helper fallback discovery" "$product_roadmap" \
   || ! rg -iq "timestamped[[:space:]]+ci" "$product_roadmap" \
   || ! rg -iq "handoff-run" "$product_roadmap"; then
@@ -1240,6 +1799,10 @@ if ! rg -Fq "phase6-cosmos-l1-summary-report" "$product_roadmap"; then
 fi
 if ! rg -Fq "integration_easy_node_blockchain_gate_wrappers.sh" "$product_roadmap"; then
   echo "product roadmap must document easy-node blockchain gate-wrapper integration coverage script"
+  exit 1
+fi
+if ! rg -Fq "integration_easy_node_blockchain_fastlane_cohort_quick_check_shim.sh" "$product_roadmap"; then
+  echo "product roadmap must document easy-node blockchain fastlane quick-check shim integration coverage script"
   exit 1
 fi
 if ! rg -Fq "tdpnd_grpc_auth_live_smoke_ok" "$product_roadmap"; then
@@ -1763,6 +2326,18 @@ if ! rg -Fq "cmp -s" "$phase6_integration_script"; then
   echo "phase6 ci integration script must validate canonical and run summary content parity"
   exit 1
 fi
+if ! rg -Fq -- "--run-cosmos-only-guardrail" "$phase6_ci_script"; then
+  echo "phase6 ci script must expose cosmos-only guardrail toggle"
+  exit 1
+fi
+if ! rg -Fq "blockchain_cosmos_only_guardrail" "$phase6_ci_script"; then
+  echo "phase6 ci script must include blockchain_cosmos_only_guardrail stage wiring"
+  exit 1
+fi
+if ! rg -Fq "blockchain_cosmos_only_guardrail" "$phase6_integration_script"; then
+  echo "phase6 ci integration script must validate blockchain_cosmos_only_guardrail stage accounting"
+  exit 1
+fi
 if ! rg -Fq "[ci-phase6-cosmos-l1] same-path canonical summary path" "$phase6_integration_script"; then
   echo "phase6 ci integration script must include same-path canonical contract coverage marker"
   exit 1
@@ -2282,6 +2857,7 @@ if ! rg -Fq "integration_phase7_mainnet_cutover_summary_report.sh" "$phase7_ci_s
   exit 1
 fi
 for phase7_ci_stage_id in \
+  "blockchain_cosmos_only_guardrail" \
   "phase7_mainnet_cutover_check" \
   "phase7_mainnet_cutover_run" \
   "phase7_mainnet_cutover_handoff_check" \
@@ -2293,6 +2869,10 @@ do
     exit 1
   fi
 done
+if ! rg -Fq -- "--run-cosmos-only-guardrail" "$phase7_ci_script"; then
+  echo "phase7 ci wrapper must expose cosmos-only guardrail toggle"
+  exit 1
+fi
 if ! rg -Fq "ci_phase7_mainnet_cutover.sh" "$phase7_ci_integration_script"; then
   echo "phase7 ci integration script must execute phase7 ci wrapper"
   exit 1
@@ -2314,6 +2894,7 @@ if ! rg -qi "first[-_ ]failure|failure propagation" "$phase7_ci_integration_scri
   exit 1
 fi
 for phase7_ci_integration_stage in \
+  "blockchain_cosmos_only_guardrail" \
   "phase7_mainnet_cutover_check" \
   "phase7_mainnet_cutover_run" \
   "phase7_mainnet_cutover_handoff_check" \
@@ -2375,6 +2956,15 @@ check_mainnet_activation_gate_surface "$roadmap_script" "roadmap progress report
 check_mainnet_activation_gate_surface "$roadmap_integration_script" "roadmap progress report integration script"
 check_bootstrap_governance_graduation_gate_surface "$roadmap_script" "roadmap progress report helper"
 check_bootstrap_governance_graduation_gate_surface "$roadmap_integration_script" "roadmap progress report integration script"
+check_blockchain_gate_summary_freshness_surface "$full_plan" "full execution plan"
+check_blockchain_gate_summary_freshness_surface "$product_roadmap" "product roadmap"
+check_blockchain_gate_summary_freshness_surface "$cosmos_runtime_doc" "cosmos settlement runtime doc"
+check_blockchain_gate_summary_freshness_surface "$roadmap_script" "roadmap progress report helper"
+check_blockchain_mainnet_activation_refresh_surface "$full_plan" "full execution plan"
+check_blockchain_mainnet_activation_refresh_surface "$product_roadmap" "product roadmap"
+check_blockchain_mainnet_activation_refresh_surface "$cosmos_runtime_doc" "cosmos settlement runtime doc"
+check_blockchain_mainnet_activation_refresh_surface "$roadmap_script" "roadmap progress report helper"
+check_blockchain_bootstrap_validator_plan_freshness_surface "$bootstrap_validator_doc" "blockchain bootstrap validator plan"
 if ! rg -Fq '.blockchain_track.mainnet_activation_gate.available == true' "$roadmap_integration_script"; then
   echo "roadmap progress report integration script must validate the available mainnet activation gate path"
   exit 1
@@ -2421,6 +3011,18 @@ if ! rg -Fq "blockchain mainnet activation gate phase7 NO-GO signal fallback pat
 fi
 if ! rg -Fq '.blockchain_track.mainnet_activation_gate.source_summary_kind == "phase7-mainnet-cutover-signal"' "$roadmap_integration_script"; then
   echo "roadmap progress report integration script must validate phase7-signal source_summary_kind for mainnet activation gate fallback"
+  exit 1
+fi
+if ! rg -Fq "bootstrap_governance_graduation_gate_go signal" "$roadmap_script"; then
+  echo "roadmap progress report helper must support phase7-signal fallback for bootstrap governance graduation gate when dedicated summary is absent"
+  exit 1
+fi
+if ! rg -Fq '.blockchain_track.bootstrap_governance_graduation_gate.source_summary_kind == "phase7-mainnet-cutover-signal"' "$roadmap_integration_script"; then
+  echo "roadmap progress report integration script must validate phase7-signal source_summary_kind for bootstrap governance graduation gate fallback"
+  exit 1
+fi
+if ! rg -Fq 'derived from phase7 bootstrap_governance_graduation_gate_go signal=false' "$roadmap_integration_script"; then
+  echo "roadmap progress report integration script must validate phase7 NO-GO reason propagation for bootstrap governance graduation gate fallback"
   exit 1
 fi
 for phase7_summary_signal in \
@@ -2593,6 +3195,54 @@ if ! rg -Fq ".artifacts.phase6_cosmos_l1_summary_json" "$roadmap_script"; then
   echo "roadmap_progress_report.sh must include phase6 artifact reference field"
   exit 1
 fi
+if ! rg -Fq ".vpn_track.phase5_settlement_layer_handoff.exit_settlement_status_live_smoke_status" "$roadmap_script"; then
+  echo "roadmap_progress_report.sh must surface phase5 exit_settlement_status_live_smoke_status in output paths"
+  exit 1
+fi
+if ! rg -Fq ".vpn_track.phase5_settlement_layer_handoff.exit_settlement_status_live_smoke_ok" "$roadmap_script"; then
+  echo "roadmap_progress_report.sh must surface phase5 exit_settlement_status_live_smoke_ok in output paths"
+  exit 1
+fi
+if ! rg -Fq ".vpn_track.phase5_settlement_layer_handoff.settlement_dual_asset_parity_status" "$roadmap_script"; then
+  echo "roadmap_progress_report.sh must surface phase5 settlement_dual_asset_parity_status in output paths"
+  exit 1
+fi
+if ! rg -Fq ".vpn_track.phase5_settlement_layer_handoff.settlement_dual_asset_parity_ok" "$roadmap_script"; then
+  echo "roadmap_progress_report.sh must surface phase5 settlement_dual_asset_parity_ok in output paths"
+  exit 1
+fi
+if ! rg -Fq ".vpn_track.phase5_settlement_layer_handoff.issuer_admin_blockchain_handlers_coverage_status" "$roadmap_script"; then
+  echo "roadmap_progress_report.sh must surface phase5 issuer_admin_blockchain_handlers_coverage_status in output paths"
+  exit 1
+fi
+if ! rg -Fq ".vpn_track.phase5_settlement_layer_handoff.issuer_admin_blockchain_handlers_coverage_ok" "$roadmap_script"; then
+  echo "roadmap_progress_report.sh must surface phase5 issuer_admin_blockchain_handlers_coverage_ok in output paths"
+  exit 1
+fi
+if ! rg -Fq ".vpn_track.phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_status" "$roadmap_script"; then
+  echo "roadmap_progress_report.sh must surface phase5 settlement_adapter_signed_tx_roundtrip_status in output paths"
+  exit 1
+fi
+if ! rg -Fq ".vpn_track.phase5_settlement_layer_handoff.settlement_adapter_signed_tx_roundtrip_ok" "$roadmap_script"; then
+  echo "roadmap_progress_report.sh must surface phase5 settlement_adapter_signed_tx_roundtrip_ok in output paths"
+  exit 1
+fi
+if ! rg -Fq ".vpn_track.phase5_settlement_layer_handoff.settlement_shadow_env_status" "$roadmap_script"; then
+  echo "roadmap_progress_report.sh must surface phase5 settlement_shadow_env_status in output paths"
+  exit 1
+fi
+if ! rg -Fq ".vpn_track.phase5_settlement_layer_handoff.settlement_shadow_env_ok" "$roadmap_script"; then
+  echo "roadmap_progress_report.sh must surface phase5 settlement_shadow_env_ok in output paths"
+  exit 1
+fi
+if ! rg -Fq ".vpn_track.phase5_settlement_layer_handoff.settlement_shadow_status_surface_status" "$roadmap_script"; then
+  echo "roadmap_progress_report.sh must surface phase5 settlement_shadow_status_surface_status in output paths"
+  exit 1
+fi
+if ! rg -Fq ".vpn_track.phase5_settlement_layer_handoff.settlement_shadow_status_surface_ok" "$roadmap_script"; then
+  echo "roadmap_progress_report.sh must surface phase5 settlement_shadow_status_surface_ok in output paths"
+  exit 1
+fi
 if ! rg -q -e "--blockchain-bootstrap-governance-graduation-gate-summary-json" -e "ROADMAP_PROGRESS_BLOCKCHAIN_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_SUMMARY_JSON" "$roadmap_script"; then
   echo "roadmap_progress_report.sh must include bootstrap governance graduation gate summary argument/env wiring"
   exit 1
@@ -2716,6 +3366,7 @@ if ! rg -Fq 'GET /v1/settlement/status' "$cosmos_runtime_doc"; then
   echo "cosmos settlement runtime guide must document settlement status endpoint"
   exit 1
 fi
+check_settlement_status_stale_live_smoke_doc_surface "$cosmos_runtime_doc" "cosmos settlement runtime guide"
 for bridge_query_path in \
   "GET /x/vpnbilling/reservations" \
   "GET /x/vpnrewards/accruals" \
@@ -2946,6 +3597,14 @@ if ! rg -Fq "issuer_admin_blockchain_handlers_coverage" "$chain_readme"; then
 fi
 if ! rg -Fq "integration_issuer_admin_blockchain_handlers_coverage_floor.sh" "$chain_readme"; then
   echo "chain README must document issuer_admin_blockchain_handlers_coverage integration script"
+  exit 1
+fi
+if rg -Fq 'Module stubs: `x/*/{types,keeper,module}`.' "$chain_readme"; then
+  echo "chain README contains stale module-stubs wording"
+  exit 1
+fi
+if ! rg -Fq 'Module package layout: `x/*/{types,keeper,module}`.' "$chain_readme"; then
+  echo "chain README must document module package layout wording"
   exit 1
 fi
 if rg -Fq "Storage remains an in-memory placeholder; Cosmos SDK KV store integration is still pending." "$chain_readme"; then
@@ -3240,6 +3899,14 @@ if ! rg -Fq "integration_issuer_sponsor_api_live_smoke.sh" "$phase5_ci_script"; 
   echo "phase5 ci script must wire integration_issuer_sponsor_api_live_smoke.sh"
   exit 1
 fi
+if ! rg -Fq "issuer_settlement_status_live_smoke" "$phase5_ci_script"; then
+  echo "phase5 ci script must include issuer_settlement_status_live_smoke stage"
+  exit 1
+fi
+if ! rg -Fq "integration_issuer_settlement_status_live_smoke.sh" "$phase5_ci_script"; then
+  echo "phase5 ci script must wire integration_issuer_settlement_status_live_smoke.sh"
+  exit 1
+fi
 if ! rg -Fq "issuer_admin_blockchain_handlers_coverage" "$phase5_ci_script"; then
   echo "phase5 ci script must include issuer_admin_blockchain_handlers_coverage stage"
   exit 1
@@ -3262,6 +3929,10 @@ if [[ ! -f "$ROOT_DIR/scripts/integration_cosmos_settlement_dual_asset_parity.sh
 fi
 if [[ ! -f "$ROOT_DIR/scripts/integration_issuer_sponsor_api_live_smoke.sh" ]]; then
   echo "missing required script: scripts/integration_issuer_sponsor_api_live_smoke.sh"
+  exit 1
+fi
+if [[ ! -f "$ROOT_DIR/scripts/integration_issuer_settlement_status_live_smoke.sh" ]]; then
+  echo "missing required script: scripts/integration_issuer_settlement_status_live_smoke.sh"
   exit 1
 fi
 if [[ ! -f "$ROOT_DIR/$phase5_issuer_admin_blockchain_handlers_coverage_script" ]]; then
@@ -3320,8 +3991,17 @@ if ! rg -Fq "issuer_sponsor_api_live_smoke" "$phase5_integration_script"; then
   echo "phase5 ci integration script must validate issuer_sponsor_api_live_smoke stage"
   exit 1
 fi
+if ! rg -Fq "issuer_settlement_status_live_smoke" "$phase5_integration_script"; then
+  echo "phase5 ci integration script must validate issuer_settlement_status_live_smoke stage"
+  exit 1
+fi
 if ! rg -Fq "issuer_admin_blockchain_handlers_coverage" "$phase5_integration_script"; then
   echo "phase5 ci integration script must validate issuer_admin_blockchain_handlers_coverage stage"
+  exit 1
+fi
+if ! rg -Fq "integration_issuer_settlement_status_live_smoke.sh" "$phase5_integration_script" \
+  && ! rg -Fq "CI_PHASE5_SETTLEMENT_LAYER_ISSUER_SETTLEMENT_STATUS_LIVE_SMOKE_SCRIPT" "$phase5_integration_script"; then
+  echo "phase5 ci integration script must validate issuer_settlement_status_live_smoke stage wiring"
   exit 1
 fi
 if ! rg -Fq "integration_issuer_admin_blockchain_handlers_coverage_floor.sh" "$phase5_integration_script" \
@@ -3353,6 +4033,18 @@ if ! rg -Fq "issuer_sponsor_api_live_smoke.status == \"fail\"" "$phase5_integrat
   echo "phase5 ci integration script must validate issuer_sponsor_api_live_smoke fail accounting"
   exit 1
 fi
+if ! rg -Fq "issuer_settlement_status_live_smoke.status == \"pass\"" "$phase5_integration_script"; then
+  echo "phase5 ci integration script must validate issuer_settlement_status_live_smoke pass accounting"
+  exit 1
+fi
+if ! rg -Fq "issuer_settlement_status_live_smoke.status == \"skip\"" "$phase5_integration_script"; then
+  echo "phase5 ci integration script must validate issuer_settlement_status_live_smoke skip accounting"
+  exit 1
+fi
+if ! rg -Fq "issuer_settlement_status_live_smoke.status == \"fail\"" "$phase5_integration_script"; then
+  echo "phase5 ci integration script must validate issuer_settlement_status_live_smoke fail accounting"
+  exit 1
+fi
 if ! rg -Fq "issuer_admin_blockchain_handlers_coverage.status == \"pass\"" "$phase5_integration_script"; then
   echo "phase5 ci integration script must validate issuer_admin_blockchain_handlers_coverage pass accounting"
   exit 1
@@ -3381,6 +4073,18 @@ if ! rg -Fq "cmp -s" "$phase5_integration_script"; then
   echo "phase5 ci integration script must validate canonical and run summary content parity"
   exit 1
 fi
+if ! rg -Fq -- "--run-cosmos-only-guardrail" "$phase5_ci_script"; then
+  echo "phase5 ci script must expose cosmos-only guardrail toggle"
+  exit 1
+fi
+if ! rg -Fq "blockchain_cosmos_only_guardrail" "$phase5_ci_script"; then
+  echo "phase5 ci script must include blockchain_cosmos_only_guardrail stage wiring"
+  exit 1
+fi
+if ! rg -Fq "blockchain_cosmos_only_guardrail" "$phase5_integration_script"; then
+  echo "phase5 ci integration script must validate blockchain_cosmos_only_guardrail stage accounting"
+  exit 1
+fi
 if ! rg -Fq "[ci-phase5-settlement-layer] canonical summary same-path behavior" "$phase5_integration_script"; then
   echo "phase5 ci integration script must include same-path canonical contract coverage marker"
   exit 1
@@ -3407,6 +4111,14 @@ if ! rg -Fq "require-issuer-sponsor-api-live-smoke-ok" "$phase5_run_script"; the
 fi
 if ! rg -Fq "issuer_sponsor_api_live_smoke_ok" "$phase5_run_script"; then
   echo "phase5 run wrapper must surface issuer_sponsor_api_live_smoke_ok contract field"
+  exit 1
+fi
+if ! rg -Fq "issuer_settlement_status_live_smoke_ok" "$phase5_run_script"; then
+  echo "phase5 run wrapper must surface issuer_settlement_status_live_smoke_ok contract field"
+  exit 1
+fi
+if ! rg -Fq "issuer_settlement_status_live_smoke_status" "$phase5_run_script"; then
+  echo "phase5 run wrapper must surface issuer_settlement_status_live_smoke_status contract field"
   exit 1
 fi
 if ! rg -Fq "settlement_dual_asset_parity_ok" "$phase5_run_script"; then
@@ -3445,6 +4157,14 @@ if ! rg -Fq "issuer_sponsor_api_live_smoke_ok" "$phase5_run_integration_script";
   echo "phase5 run integration must validate issuer_sponsor_api_live_smoke_ok contract field coverage"
   exit 1
 fi
+if ! rg -Fq "issuer_settlement_status_live_smoke_ok" "$phase5_run_integration_script"; then
+  echo "phase5 run integration must validate issuer_settlement_status_live_smoke_ok contract field coverage"
+  exit 1
+fi
+if ! rg -Fq "issuer_settlement_status_live_smoke_status" "$phase5_run_integration_script"; then
+  echo "phase5 run integration must validate issuer_settlement_status_live_smoke_status contract field coverage"
+  exit 1
+fi
 if ! rg -Fq "settlement_dual_asset_parity_ok" "$phase5_run_integration_script"; then
   echo "phase5 run integration must validate settlement_dual_asset_parity_ok contract field coverage"
   exit 1
@@ -3469,8 +4189,20 @@ if ! rg -Fq "require-issuer-sponsor-api-live-smoke-ok" "$phase5_check_script"; t
   echo "phase5 check wrapper must expose issuer sponsor live-smoke requirement toggle"
   exit 1
 fi
+if ! rg -Fq "require-issuer-settlement-status-live-smoke-ok" "$phase5_check_script"; then
+  echo "phase5 check wrapper must expose issuer settlement-status live-smoke requirement toggle"
+  exit 1
+fi
 if ! rg -Fq "issuer_sponsor_api_live_smoke_ok" "$phase5_check_script"; then
   echo "phase5 check wrapper must surface issuer_sponsor_api_live_smoke_ok signal"
+  exit 1
+fi
+if ! rg -Fq "issuer_settlement_status_live_smoke_ok" "$phase5_check_script"; then
+  echo "phase5 check wrapper must surface issuer_settlement_status_live_smoke_ok signal"
+  exit 1
+fi
+if ! rg -Fq "issuer_settlement_status_live_smoke_status" "$phase5_check_script"; then
+  echo "phase5 check wrapper must surface issuer_settlement_status_live_smoke_status signal"
   exit 1
 fi
 if ! rg -Fq "settlement_dual_asset_parity_ok" "$phase5_check_script"; then
@@ -3505,6 +4237,18 @@ if ! rg -Fq "require-issuer-sponsor-api-live-smoke-ok 0" "$phase5_check_integrat
   echo "phase5 check integration must validate sponsor live-smoke policy toggle behavior"
   exit 1
 fi
+if ! rg -Fq "require-issuer-settlement-status-live-smoke-ok 0" "$phase5_check_integration_script"; then
+  echo "phase5 check integration must validate settlement-status live-smoke policy toggle behavior"
+  exit 1
+fi
+if ! rg -Fq "issuer_settlement_status_live_smoke_ok" "$phase5_check_integration_script"; then
+  echo "phase5 check integration must validate issuer_settlement_status_live_smoke_ok signal coverage"
+  exit 1
+fi
+if ! rg -Fq "issuer_settlement_status_live_smoke_status" "$phase5_check_integration_script"; then
+  echo "phase5 check integration must validate issuer_settlement_status_live_smoke_status signal coverage"
+  exit 1
+fi
 if ! rg -Fq "issuer_admin_blockchain_handlers_coverage_ok" "$phase5_check_integration_script"; then
   echo "phase5 check integration must validate issuer_admin_blockchain_handlers_coverage_ok signal coverage"
   exit 1
@@ -3535,6 +4279,14 @@ if ! rg -Fq "require-issuer-sponsor-api-live-smoke-ok" "$phase5_handoff_run_scri
 fi
 if ! rg -Fq "issuer_sponsor_api_live_smoke_ok" "$phase5_handoff_run_script"; then
   echo "phase5 handoff-run wrapper must surface issuer_sponsor_api_live_smoke_ok contract field"
+  exit 1
+fi
+if ! rg -Fq "issuer_settlement_status_live_smoke_ok" "$phase5_handoff_run_script"; then
+  echo "phase5 handoff-run wrapper must surface issuer_settlement_status_live_smoke_ok contract field"
+  exit 1
+fi
+if ! rg -Fq "issuer_settlement_status_live_smoke_status" "$phase5_handoff_run_script"; then
+  echo "phase5 handoff-run wrapper must surface issuer_settlement_status_live_smoke_status contract field"
   exit 1
 fi
 if ! rg -Fq "settlement_dual_asset_parity_ok" "$phase5_handoff_run_script"; then
@@ -3569,6 +4321,14 @@ if ! rg -Fq "issuer_sponsor_api_live_smoke_ok" "$phase5_handoff_run_integration_
   echo "phase5 handoff-run integration must validate issuer_sponsor_api_live_smoke_ok contract field coverage"
   exit 1
 fi
+if ! rg -Fq "issuer_settlement_status_live_smoke_ok" "$phase5_handoff_run_integration_script"; then
+  echo "phase5 handoff-run integration must validate issuer_settlement_status_live_smoke_ok contract field coverage"
+  exit 1
+fi
+if ! rg -Fq "issuer_settlement_status_live_smoke_status" "$phase5_handoff_run_integration_script"; then
+  echo "phase5 handoff-run integration must validate issuer_settlement_status_live_smoke_status contract field coverage"
+  exit 1
+fi
 if ! rg -Fq "settlement_dual_asset_parity_ok" "$phase5_handoff_run_integration_script"; then
   echo "phase5 handoff-run integration must validate settlement_dual_asset_parity_ok contract field coverage"
   exit 1
@@ -3593,8 +4353,20 @@ if ! rg -Fq "require-issuer-sponsor-api-live-smoke-ok" "$phase5_handoff_check_sc
   echo "phase5 handoff-check wrapper must expose issuer sponsor live-smoke requirement toggle"
   exit 1
 fi
+if ! rg -Fq "require-issuer-settlement-status-live-smoke-ok" "$phase5_handoff_check_script"; then
+  echo "phase5 handoff-check wrapper must expose issuer settlement-status live-smoke requirement toggle"
+  exit 1
+fi
 if ! rg -Fq "issuer_sponsor_api_live_smoke_ok" "$phase5_handoff_check_script"; then
   echo "phase5 handoff-check wrapper must surface issuer_sponsor_api_live_smoke_ok signal"
+  exit 1
+fi
+if ! rg -Fq "issuer_settlement_status_live_smoke_ok" "$phase5_handoff_check_script"; then
+  echo "phase5 handoff-check wrapper must surface issuer_settlement_status_live_smoke_ok signal"
+  exit 1
+fi
+if ! rg -Fq "issuer_settlement_status_live_smoke_status" "$phase5_handoff_check_script"; then
+  echo "phase5 handoff-check wrapper must surface issuer_settlement_status_live_smoke_status signal"
   exit 1
 fi
 if ! rg -Fq "settlement_dual_asset_parity_ok" "$phase5_handoff_check_script"; then
@@ -3623,6 +4395,14 @@ if ! rg -Fq "cmp -s" "$phase5_handoff_check_integration_script"; then
 fi
 if ! rg -Fq "issuer_sponsor_api_live_smoke_ok" "$phase5_handoff_check_integration_script"; then
   echo "phase5 handoff-check integration must validate issuer_sponsor_api_live_smoke_ok signal coverage"
+  exit 1
+fi
+if ! rg -Fq "issuer_settlement_status_live_smoke_ok" "$phase5_handoff_check_integration_script"; then
+  echo "phase5 handoff-check integration must validate issuer_settlement_status_live_smoke_ok signal coverage"
+  exit 1
+fi
+if ! rg -Fq "issuer_settlement_status_live_smoke_status" "$phase5_handoff_check_integration_script"; then
+  echo "phase5 handoff-check integration must validate issuer_settlement_status_live_smoke_status signal coverage"
   exit 1
 fi
 if ! rg -Fq "settlement_dual_asset_parity_ok" "$phase5_handoff_check_integration_script"; then
@@ -3659,6 +4439,14 @@ if ! rg -Fq "canonical_summary_json" "$phase5_summary_report_script"; then
 fi
 if ! rg -Fq "issuer_sponsor_api_live_smoke_ok" "$phase5_summary_report_script"; then
   echo "phase5 summary report helper must surface issuer_sponsor_api_live_smoke_ok contract field"
+  exit 1
+fi
+if ! rg -Fq "issuer_settlement_status_live_smoke_ok" "$phase5_summary_report_script"; then
+  echo "phase5 summary report helper must surface issuer_settlement_status_live_smoke_ok contract field"
+  exit 1
+fi
+if ! rg -Fq "issuer_settlement_status_live_smoke_status" "$phase5_summary_report_script"; then
+  echo "phase5 summary report helper must surface issuer_settlement_status_live_smoke_status contract field"
   exit 1
 fi
 if ! rg -Fq "settlement_dual_asset_parity_ok" "$phase5_summary_report_script"; then
@@ -3711,6 +4499,14 @@ if ! rg -Fq "cmp -s" "$phase5_summary_report_integration_script"; then
 fi
 if ! rg -Fq "issuer_sponsor_api_live_smoke_ok" "$phase5_summary_report_integration_script"; then
   echo "phase5 summary report integration script must validate issuer_sponsor_api_live_smoke_ok contract field coverage"
+  exit 1
+fi
+if ! rg -Fq ".signals.issuer_settlement_status_live_smoke.ok" "$phase5_summary_report_integration_script"; then
+  echo "phase5 summary report integration script must validate issuer_settlement_status_live_smoke.ok contract field coverage"
+  exit 1
+fi
+if ! rg -Fq ".signals.issuer_settlement_status_live_smoke.status" "$phase5_summary_report_integration_script"; then
+  echo "phase5 summary report integration script must validate issuer_settlement_status_live_smoke.status contract field coverage"
   exit 1
 fi
 if ! rg -Fq "settlement_dual_asset_parity_ok" "$phase5_summary_report_integration_script"; then
@@ -3804,6 +4600,14 @@ if ! rg -Fq "issuer_admin_blockchain_handlers_coverage_status" "$easy_node_block
   echo "integration easy-node blockchain summary reports script must validate issuer_admin_blockchain_handlers_coverage_status signal"
   exit 1
 fi
+if ! rg -Fq ".signals.issuer_settlement_status_live_smoke.ok" "$easy_node_blockchain_summary_reports_integration_script"; then
+  echo "integration easy-node blockchain summary reports script must validate .signals.issuer_settlement_status_live_smoke.ok signal"
+  exit 1
+fi
+if ! rg -Fq ".signals.issuer_settlement_status_live_smoke.status" "$easy_node_blockchain_summary_reports_integration_script"; then
+  echo "integration easy-node blockchain summary reports script must validate .signals.issuer_settlement_status_live_smoke.status signal"
+  exit 1
+fi
 if ! rg -Fq "phase5_settlement_layer_handoff_check_summary" "$easy_node_blockchain_summary_reports_integration_script"; then
   echo "integration easy-node blockchain summary reports script must validate consolidated summary node phase5_settlement_layer_handoff_check_summary"
   exit 1
@@ -3826,6 +4630,30 @@ if ! rg -Fq "phase5-settlement-layer-handoff-check" "$easy_node_script"; then
 fi
 if ! rg -Fq "phase5-settlement-layer-handoff-run" "$easy_node_script"; then
   echo "easy_node.sh must expose phase5-settlement-layer-handoff-run command text"
+  exit 1
+fi
+if ! rg -Fq "issuer-sponsor-api-live-smoke" "$easy_node_script"; then
+  echo "easy_node.sh must expose issuer-sponsor-api-live-smoke command text"
+  exit 1
+fi
+if ! rg -Fq "issuer-settlement-status-live-smoke" "$easy_node_script"; then
+  echo "easy_node.sh must expose issuer-settlement-status-live-smoke command text"
+  exit 1
+fi
+if ! rg -Fq "ISSUER_SPONSOR_API_LIVE_SMOKE_SCRIPT" "$easy_node_script"; then
+  echo "easy_node.sh must expose ISSUER_SPONSOR_API_LIVE_SMOKE_SCRIPT wrapper override"
+  exit 1
+fi
+if ! rg -Fq "ISSUER_SETTLEMENT_STATUS_LIVE_SMOKE_SCRIPT" "$easy_node_script"; then
+  echo "easy_node.sh must expose ISSUER_SETTLEMENT_STATUS_LIVE_SMOKE_SCRIPT wrapper override"
+  exit 1
+fi
+if ! rg -Fq "integration_issuer_sponsor_api_live_smoke.sh" "$easy_node_script"; then
+  echo "easy_node.sh must wire issuer sponsor live-smoke wrapper default script path"
+  exit 1
+fi
+if ! rg -Fq "integration_issuer_settlement_status_live_smoke.sh" "$easy_node_script"; then
+  echo "easy_node.sh must wire issuer settlement-status live-smoke wrapper default script path"
   exit 1
 fi
 if ! rg -Fq "ci-phase6-cosmos-l1-build-testnet" "$easy_node_script"; then
@@ -3886,6 +4714,14 @@ if ! rg -Fq "phase5-settlement-layer-handoff-check" "$easy_node_blockchain_gate_
 fi
 if ! rg -Fq "phase5-settlement-layer-handoff-run" "$easy_node_blockchain_gate_wrappers_integration_script"; then
   echo "easy-node gate-wrapper integration must validate phase5-settlement-layer-handoff-run command wiring"
+  exit 1
+fi
+if ! rg -Fq "issuer-sponsor-api-live-smoke" "$easy_node_blockchain_gate_wrappers_integration_script"; then
+  echo "easy-node gate-wrapper integration must validate issuer-sponsor-api-live-smoke command wiring"
+  exit 1
+fi
+if ! rg -Fq "issuer-settlement-status-live-smoke" "$easy_node_blockchain_gate_wrappers_integration_script"; then
+  echo "easy-node gate-wrapper integration must validate issuer-settlement-status-live-smoke command wiring"
   exit 1
 fi
 if ! rg -Fq "ci-phase6-cosmos-l1-build-testnet" "$easy_node_blockchain_gate_wrappers_integration_script"; then
@@ -3998,7 +4834,47 @@ for blockchain_fastlane_doc in "$full_plan" "$product_roadmap"; do
   fi
   check_blockchain_fastlane_activation_gate_surface "$blockchain_fastlane_doc" "$doc_label"
 done
+check_blockchain_staged_file_groups_surface "$full_plan" "full execution plan"
+check_blockchain_staged_file_groups_surface "$product_roadmap" "product roadmap"
+check_blockchain_staged_file_groups_surface "$cosmos_runtime_doc" "cosmos settlement runtime doc"
+check_bootstrap_governance_graduation_gate_doc_surface "$full_plan" "full execution plan"
+check_bootstrap_governance_graduation_gate_doc_surface "$product_roadmap" "product roadmap"
+check_bootstrap_governance_graduation_gate_doc_surface "$cosmos_runtime_doc" "cosmos settlement runtime doc"
+check_bootstrap_governance_graduation_gate_doc_surface "$bootstrap_validator_doc" "blockchain bootstrap validator plan"
+check_mainnet_activation_operator_pack_doc_surface "$full_plan" "full execution plan"
+check_mainnet_activation_operator_pack_doc_surface "$product_roadmap" "product roadmap"
+check_mainnet_activation_prefill_doc_surface "$full_plan" "full execution plan"
+check_mainnet_activation_prefill_doc_surface "$product_roadmap" "product roadmap"
+check_mainnet_activation_prefill_doc_surface "$cosmos_runtime_doc" "cosmos settlement runtime doc"
+for optional_fastlane_operator_pack_summary_token in \
+  "--blockchain-mainnet-activation-operator-pack-summary-json" \
+  "BLOCKCHAIN_FASTLANE_BLOCKCHAIN_MAINNET_ACTIVATION_OPERATOR_PACK_SUMMARY_JSON" \
+  "inputs.blockchain_mainnet_activation_operator_pack_summary_json" \
+  "artifacts.blockchain_mainnet_activation_operator_pack_summary_json"
+do
+  check_optional_fastlane_operator_pack_summary_flag_surface "$optional_fastlane_operator_pack_summary_token"
+done
+for bootstrap_fallback_doc in "$full_plan" "$product_roadmap" "$cosmos_runtime_doc" "$bootstrap_validator_doc"; do
+  doc_label="blockchain bootstrap validator plan"
+  if [[ "$bootstrap_fallback_doc" == "$full_plan" ]]; then
+    doc_label="full execution plan"
+  elif [[ "$bootstrap_fallback_doc" == "$product_roadmap" ]]; then
+    doc_label="product roadmap"
+  elif [[ "$bootstrap_fallback_doc" == "$cosmos_runtime_doc" ]]; then
+    doc_label="cosmos settlement runtime doc"
+  fi
+  if ! rg -Fq "falling back to the Phase-7 propagated \`bootstrap_governance_graduation_gate_go\` signal" "$bootstrap_fallback_doc"; then
+    echo "$doc_label must document roadmap fallback to the phase7 bootstrap_governance_graduation_gate_go signal when dedicated bootstrap summary is absent"
+    exit 1
+  fi
+done
 for f in "$blockchain_mainnet_activation_gate_script" "$blockchain_mainnet_activation_gate_integration_script"; do
+  if [[ ! -f "$f" ]]; then
+    echo "missing required file: $f"
+    exit 1
+  fi
+done
+for f in "$blockchain_staged_file_groups_script" "$blockchain_staged_file_groups_integration_script"; do
   if [[ ! -f "$f" ]]; then
     echo "missing required file: $f"
     exit 1
@@ -4006,6 +4882,14 @@ for f in "$blockchain_mainnet_activation_gate_script" "$blockchain_mainnet_activ
 done
 if [[ ! -f "$blockchain_mainnet_activation_metrics_integration_script" ]]; then
   echo "missing required file: $blockchain_mainnet_activation_metrics_integration_script"
+  exit 1
+fi
+if [[ ! -f "$blockchain_mainnet_activation_metrics_prefill_script" ]]; then
+  echo "missing required file: $blockchain_mainnet_activation_metrics_prefill_script"
+  exit 1
+fi
+if [[ ! -f "$blockchain_mainnet_activation_metrics_prefill_integration_script" ]]; then
+  echo "missing required file: $blockchain_mainnet_activation_metrics_prefill_integration_script"
   exit 1
 fi
 if ! rg -Fq "source-json env-only ingestion path" "$blockchain_mainnet_activation_metrics_integration_script"; then
@@ -4056,6 +4940,8 @@ for blockchain_fastlane_stage_script in \
   "scripts/ci_phase5_settlement_layer.sh" \
   "scripts/ci_phase6_cosmos_l1_build_testnet.sh" \
   "scripts/ci_phase6_cosmos_l1_contracts.sh" \
+  "scripts/integration_slash_violation_type_contract_consistency.sh" \
+  "scripts/integration_cosmos_record_normalization_contract_consistency.sh" \
   "scripts/ci_phase7_mainnet_cutover.sh"
 do
   if ! rg -Fq "$blockchain_fastlane_stage_script" "$blockchain_fastlane_script"; then
@@ -4063,6 +4949,34 @@ do
     exit 1
   fi
 done
+if ! rg -Fq "BLOCKCHAIN_FASTLANE_INTEGRATION_SLASH_VIOLATION_TYPE_CONTRACT_CONSISTENCY_SCRIPT" "$blockchain_fastlane_script"; then
+  echo "blockchain fastlane script must expose BLOCKCHAIN_FASTLANE_INTEGRATION_SLASH_VIOLATION_TYPE_CONTRACT_CONSISTENCY_SCRIPT stage wiring"
+  exit 1
+fi
+if ! rg -Fq "\"integration_slash_violation_type_contract_consistency\"" "$blockchain_fastlane_script"; then
+  echo "blockchain fastlane script must include integration_slash_violation_type_contract_consistency stage id wiring"
+  exit 1
+fi
+if ! rg -Fq "BLOCKCHAIN_FASTLANE_INTEGRATION_COSMOS_RECORD_NORMALIZATION_CONTRACT_CONSISTENCY_SCRIPT" "$blockchain_fastlane_script"; then
+  echo "blockchain fastlane script must expose BLOCKCHAIN_FASTLANE_INTEGRATION_COSMOS_RECORD_NORMALIZATION_CONTRACT_CONSISTENCY_SCRIPT stage wiring"
+  exit 1
+fi
+if ! rg -Fq "\"integration_cosmos_record_normalization_contract_consistency\"" "$blockchain_fastlane_script"; then
+  echo "blockchain fastlane script must include integration_cosmos_record_normalization_contract_consistency stage id wiring"
+  exit 1
+fi
+if ! rg -Fq "BLOCKCHAIN_FASTLANE_INTEGRATION_COSMOS_RECORD_NORMALIZATION_CONTRACT_CONSISTENCY_SCRIPT" "$blockchain_fastlane_integration_script"; then
+  echo "integration blockchain fastlane script must validate BLOCKCHAIN_FASTLANE_INTEGRATION_COSMOS_RECORD_NORMALIZATION_CONTRACT_CONSISTENCY_SCRIPT stage env wiring"
+  exit 1
+fi
+if ! rg -Fq "\"integration_cosmos_record_normalization_contract_consistency\"" "$blockchain_fastlane_integration_script"; then
+  echo "integration blockchain fastlane script must validate integration_cosmos_record_normalization_contract_consistency stage-id coverage"
+  exit 1
+fi
+if [[ ! -f "$ROOT_DIR/scripts/integration_cosmos_record_normalization_contract_consistency.sh" ]]; then
+  echo "missing required script: scripts/integration_cosmos_record_normalization_contract_consistency.sh"
+  exit 1
+fi
 if ! rg -Fq -- "--blockchain-mainnet-activation-gate-summary-json" "$blockchain_fastlane_script"; then
   echo "blockchain fastlane script must expose --blockchain-mainnet-activation-gate-summary-json deterministic gate summary input"
   exit 1
@@ -4162,6 +5076,8 @@ phase5_blockchain_gate_specs=(
   "settlement_shadow_status_surface|scripts/integration_cosmos_settlement_shadow_status_surface.sh"
   "settlement_dual_asset_parity|scripts/integration_cosmos_settlement_dual_asset_parity.sh"
   "issuer_sponsor_api_live_smoke|scripts/integration_issuer_sponsor_api_live_smoke.sh"
+  "issuer_settlement_status_live_smoke|scripts/integration_issuer_settlement_status_live_smoke.sh"
+  "exit_settlement_status_live_smoke|scripts/integration_exit_settlement_status_live_smoke.sh"
   "issuer_admin_blockchain_handlers_coverage|scripts/integration_issuer_admin_blockchain_handlers_coverage_floor.sh"
 )
 for gate_spec in "${phase5_blockchain_gate_specs[@]}"; do
