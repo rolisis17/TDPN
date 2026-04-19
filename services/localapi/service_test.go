@@ -3135,6 +3135,230 @@ func TestGPMServerStatus(t *testing.T) {
 	})
 }
 
+func TestGPMOperatorList(t *testing.T) {
+	newOperatorListService := func(t *testing.T) *Service {
+		t.Helper()
+		svc, _ := newFakeService(t, false)
+		svc.gpmState = newGPMRuntimeState()
+		return svc
+	}
+	putAdminSession := func(svc *Service, token string, now time.Time) {
+		svc.gpmState.putSession(gpmSession{
+			Token:          token,
+			WalletAddress:  "cosmos1operatorlistadmin",
+			WalletProvider: "keplr",
+			Role:           "admin",
+			CreatedAt:      now,
+			ExpiresAt:      now.Add(time.Hour),
+		})
+	}
+
+	t.Run("missing session token", func(t *testing.T) {
+		svc := newOperatorListService(t)
+		code, payload := callJSONHandler(t, svc.handleGPMOperatorList, http.MethodPost, "/v1/gpm/onboarding/operator/list", `{}`)
+		if code != http.StatusBadRequest {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		errMsg, _ := payload["error"].(string)
+		if !strings.Contains(errMsg, "session_token is required") {
+			t.Fatalf("error=%q payload=%v", errMsg, payload)
+		}
+	})
+
+	t.Run("invalid session", func(t *testing.T) {
+		svc := newOperatorListService(t)
+		now := time.Now().UTC()
+		svc.gpmState.putSession(gpmSession{
+			Token:          "gpm-expired-list-token",
+			WalletAddress:  "cosmos1expiredlist",
+			WalletProvider: "keplr",
+			Role:           "admin",
+			CreatedAt:      now.Add(-2 * time.Hour),
+			ExpiresAt:      now.Add(-time.Minute),
+		})
+		body := `{"session_token":"gpm-expired-list-token"}`
+		code, payload := callJSONHandler(t, svc.handleGPMOperatorList, http.MethodPost, "/v1/gpm/onboarding/operator/list", body)
+		if code != http.StatusNotFound {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		errMsg, _ := payload["error"].(string)
+		if !strings.Contains(errMsg, "session not found") {
+			t.Fatalf("error=%q payload=%v", errMsg, payload)
+		}
+	})
+
+	t.Run("non-admin session", func(t *testing.T) {
+		svc := newOperatorListService(t)
+		now := time.Now().UTC()
+		svc.gpmState.putSession(gpmSession{
+			Token:          "gpm-client-list-token",
+			WalletAddress:  "cosmos1clientlist",
+			WalletProvider: "keplr",
+			Role:           "client",
+			CreatedAt:      now,
+			ExpiresAt:      now.Add(time.Hour),
+		})
+		body := `{"session_token":"gpm-client-list-token"}`
+		code, payload := callJSONHandler(t, svc.handleGPMOperatorList, http.MethodPost, "/v1/gpm/onboarding/operator/list", body)
+		if code != http.StatusForbidden {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		errMsg, _ := payload["error"].(string)
+		if !strings.Contains(errMsg, "admin session role is required") {
+			t.Fatalf("error=%q payload=%v", errMsg, payload)
+		}
+	})
+
+	t.Run("admin list returns sorted items", func(t *testing.T) {
+		svc := newOperatorListService(t)
+		now := time.Now().UTC()
+		putAdminSession(svc, "gpm-admin-list-sorted-token", now)
+		svc.gpmState.upsertOperator(gpmOperatorApplication{
+			WalletAddress:   "cosmos1sortb",
+			ChainOperatorID: "operator-sort-b",
+			Status:          "approved",
+			UpdatedAt:       now,
+		})
+		svc.gpmState.upsertOperator(gpmOperatorApplication{
+			WalletAddress:   "cosmos1sorta",
+			ChainOperatorID: "operator-sort-a",
+			Status:          "pending",
+			UpdatedAt:       now,
+		})
+		svc.gpmState.upsertOperator(gpmOperatorApplication{
+			WalletAddress:   "cosmos1sortc",
+			ChainOperatorID: "operator-sort-c",
+			Status:          "rejected",
+			UpdatedAt:       now.Add(-time.Minute),
+		})
+
+		body := `{"session_token":"gpm-admin-list-sorted-token"}`
+		code, payload := callJSONHandler(t, svc.handleGPMOperatorList, http.MethodPost, "/v1/gpm/onboarding/operator/list", body)
+		if code != http.StatusOK {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		if count, _ := payload["count"].(float64); int(count) != 3 {
+			t.Fatalf("count=%v want=3 payload=%v", count, payload)
+		}
+		applications, _ := payload["applications"].([]any)
+		if len(applications) != 3 {
+			t.Fatalf("applications len=%d want=3 payload=%v", len(applications), payload)
+		}
+		walletAt := func(idx int) string {
+			app, _ := applications[idx].(map[string]any)
+			wallet, _ := app["wallet_address"].(string)
+			return wallet
+		}
+		if got := walletAt(0); got != "cosmos1sorta" {
+			t.Fatalf("applications[0].wallet_address=%q want=cosmos1sorta payload=%v", got, payload)
+		}
+		if got := walletAt(1); got != "cosmos1sortb" {
+			t.Fatalf("applications[1].wallet_address=%q want=cosmos1sortb payload=%v", got, payload)
+		}
+		if got := walletAt(2); got != "cosmos1sortc" {
+			t.Fatalf("applications[2].wallet_address=%q want=cosmos1sortc payload=%v", got, payload)
+		}
+	})
+
+	t.Run("admin status filter works", func(t *testing.T) {
+		svc := newOperatorListService(t)
+		now := time.Now().UTC()
+		putAdminSession(svc, "gpm-admin-list-filter-token", now)
+		svc.gpmState.upsertOperator(gpmOperatorApplication{
+			WalletAddress:   "cosmos1approvedone",
+			ChainOperatorID: "operator-approved-one",
+			Status:          "approved",
+			UpdatedAt:       now,
+		})
+		svc.gpmState.upsertOperator(gpmOperatorApplication{
+			WalletAddress:   "cosmos1pendingone",
+			ChainOperatorID: "operator-pending-one",
+			Status:          "pending",
+			UpdatedAt:       now.Add(-time.Minute),
+		})
+		svc.gpmState.upsertOperator(gpmOperatorApplication{
+			WalletAddress:   "cosmos1approvedtwo",
+			ChainOperatorID: "operator-approved-two",
+			Status:          "approved",
+			UpdatedAt:       now.Add(-2 * time.Minute),
+		})
+
+		body := `{"session_token":"gpm-admin-list-filter-token","status":"approved"}`
+		code, payload := callJSONHandler(t, svc.handleGPMOperatorList, http.MethodPost, "/v1/gpm/onboarding/operator/list", body)
+		if code != http.StatusOK {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		if count, _ := payload["count"].(float64); int(count) != 2 {
+			t.Fatalf("count=%v want=2 payload=%v", count, payload)
+		}
+		applications, _ := payload["applications"].([]any)
+		if len(applications) != 2 {
+			t.Fatalf("applications len=%d want=2 payload=%v", len(applications), payload)
+		}
+		for idx, raw := range applications {
+			app, _ := raw.(map[string]any)
+			if got, _ := app["status"].(string); got != "approved" {
+				t.Fatalf("applications[%d].status=%q want=approved payload=%v", idx, got, payload)
+			}
+		}
+	})
+
+	t.Run("limit clamp works", func(t *testing.T) {
+		svc := newOperatorListService(t)
+		now := time.Now().UTC()
+		putAdminSession(svc, "gpm-admin-list-limit-token", now)
+		for i := 0; i < 520; i++ {
+			svc.gpmState.upsertOperator(gpmOperatorApplication{
+				WalletAddress:   "cosmos1limit" + strconv.Itoa(i),
+				ChainOperatorID: "operator-limit-" + strconv.Itoa(i),
+				Status:          "pending",
+				UpdatedAt:       now.Add(-time.Duration(i) * time.Second),
+			})
+		}
+
+		body := `{"session_token":"gpm-admin-list-limit-token","limit":9999}`
+		code, payload := callJSONHandler(t, svc.handleGPMOperatorList, http.MethodPost, "/v1/gpm/onboarding/operator/list", body)
+		if code != http.StatusOK {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		if count, _ := payload["count"].(float64); int(count) != 500 {
+			t.Fatalf("count=%v want=500 payload=%v", count, payload)
+		}
+		applications, _ := payload["applications"].([]any)
+		if len(applications) != 500 {
+			t.Fatalf("applications len=%d want=500 payload=%v", len(applications), payload)
+		}
+
+		body = `{"session_token":"gpm-admin-list-limit-token","limit":0}`
+		code, payload = callJSONHandler(t, svc.handleGPMOperatorList, http.MethodPost, "/v1/gpm/onboarding/operator/list", body)
+		if code != http.StatusOK {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		if count, _ := payload["count"].(float64); int(count) != 1 {
+			t.Fatalf("count=%v want=1 payload=%v", count, payload)
+		}
+		applications, _ = payload["applications"].([]any)
+		if len(applications) != 1 {
+			t.Fatalf("applications len=%d want=1 payload=%v", len(applications), payload)
+		}
+	})
+
+	t.Run("invalid status filter", func(t *testing.T) {
+		svc := newOperatorListService(t)
+		now := time.Now().UTC()
+		putAdminSession(svc, "gpm-admin-list-invalid-status-token", now)
+		body := `{"session_token":"gpm-admin-list-invalid-status-token","status":"paused"}`
+		code, payload := callJSONHandler(t, svc.handleGPMOperatorList, http.MethodPost, "/v1/gpm/onboarding/operator/list", body)
+		if code != http.StatusBadRequest {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		errMsg, _ := payload["error"].(string)
+		if !strings.Contains(errMsg, "status must be one of") {
+			t.Fatalf("error=%q payload=%v", errMsg, payload)
+		}
+	})
+}
+
 func TestGPMOperatorApproveAuthorization(t *testing.T) {
 	newOperatorApproveService := func(t *testing.T) *Service {
 		t.Helper()

@@ -127,6 +127,12 @@ type gpmOperatorStatusRequest struct {
 	WalletAddress string `json:"wallet_address,omitempty"`
 }
 
+type gpmOperatorListRequest struct {
+	SessionToken string `json:"session_token"`
+	Status       string `json:"status,omitempty"`
+	Limit        *int   `json:"limit,omitempty"`
+}
+
 type gpmOperatorApproveRequest struct {
 	WalletAddress string `json:"wallet_address"`
 	Approved      bool   `json:"approved"`
@@ -217,6 +223,16 @@ func (st *gpmRuntimeState) getOperator(walletAddress string) (gpmOperatorApplica
 	defer st.mu.RUnlock()
 	app, ok := st.operators[walletAddress]
 	return app, ok
+}
+
+func (st *gpmRuntimeState) listOperators() []gpmOperatorApplication {
+	st.mu.RLock()
+	defer st.mu.RUnlock()
+	applications := make([]gpmOperatorApplication, 0, len(st.operators))
+	for _, app := range st.operators {
+		applications = append(applications, app)
+	}
+	return applications
 }
 
 func (s *Service) getGPMSession(token string, now time.Time) (gpmSession, bool) {
@@ -898,6 +914,85 @@ func (s *Service) handleGPMOperatorStatus(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "application": serializeGPMOperator(app)})
 }
 
+func (s *Service) handleGPMOperatorList(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false, "error": "method not allowed"})
+		return
+	}
+	if !s.requireCommandReadAuth(w, r) {
+		return
+	}
+	var in gpmOperatorListRequest
+	if err := decodeJSONBody(r, &in); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid json body"})
+		return
+	}
+	sessionToken := strings.TrimSpace(in.SessionToken)
+	if sessionToken == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "session_token is required"})
+		return
+	}
+	session, ok := s.gpmState.getSession(sessionToken, time.Now().UTC())
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]any{"ok": false, "error": "session not found"})
+		return
+	}
+	if strings.ToLower(strings.TrimSpace(session.Role)) != "admin" {
+		writeJSON(w, http.StatusForbidden, map[string]any{"ok": false, "error": "admin session role is required"})
+		return
+	}
+
+	statusFilter, validStatus := normalizeGPMOperatorListStatus(in.Status)
+	if !validStatus {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "status must be one of: pending, approved, rejected"})
+		return
+	}
+
+	limit := 100
+	if in.Limit != nil {
+		limit = *in.Limit
+		if limit < 1 {
+			limit = 1
+		}
+		if limit > 500 {
+			limit = 500
+		}
+	}
+
+	applications := s.gpmState.listOperators()
+	filtered := make([]gpmOperatorApplication, 0, len(applications))
+	for _, app := range applications {
+		status := strings.ToLower(strings.TrimSpace(app.Status))
+		if statusFilter != "" && status != statusFilter {
+			continue
+		}
+		filtered = append(filtered, app)
+	}
+	slices.SortFunc(filtered, func(a, b gpmOperatorApplication) int {
+		switch {
+		case a.UpdatedAt.After(b.UpdatedAt):
+			return -1
+		case a.UpdatedAt.Before(b.UpdatedAt):
+			return 1
+		default:
+			return strings.Compare(a.WalletAddress, b.WalletAddress)
+		}
+	})
+	if len(filtered) > limit {
+		filtered = filtered[:limit]
+	}
+
+	out := make([]map[string]any, 0, len(filtered))
+	for _, app := range filtered {
+		out = append(out, serializeGPMOperator(app))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":           true,
+		"count":        len(out),
+		"applications": out,
+	})
+}
+
 func (s *Service) handleGPMOperatorApprove(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false, "error": "method not allowed"})
@@ -1037,6 +1132,21 @@ func normalizeGPMSessionAction(raw string) string {
 		return "revoke"
 	default:
 		return ""
+	}
+}
+
+func normalizeGPMOperatorListStatus(raw string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "":
+		return "", true
+	case "pending":
+		return "pending", true
+	case "approved":
+		return "approved", true
+	case "rejected":
+		return "rejected", true
+	default:
+		return "", false
 	}
 }
 

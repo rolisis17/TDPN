@@ -299,6 +299,7 @@ func (s *Service) Run(ctx context.Context) error {
 	mux.HandleFunc("/v1/gpm/onboarding/server/status", s.handleGPMServerStatus)
 	mux.HandleFunc("/v1/gpm/onboarding/operator/apply", s.handleGPMOperatorApply)
 	mux.HandleFunc("/v1/gpm/onboarding/operator/status", s.handleGPMOperatorStatus)
+	mux.HandleFunc("/v1/gpm/onboarding/operator/list", s.handleGPMOperatorList)
 	mux.HandleFunc("/v1/gpm/onboarding/operator/approve", s.handleGPMOperatorApprove)
 
 	srv := &http.Server{

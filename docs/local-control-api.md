@@ -75,12 +75,17 @@ GPM onboarding/session endpoints (used by desktop and portal flows):
 - `POST /v1/gpm/onboarding/server/status` (returns server-tab/lifecycle readiness derived from role, operator approval state, and chain-id sync hints)
 - `POST /v1/gpm/onboarding/operator/apply`
 - `POST /v1/gpm/onboarding/operator/status`
+- `POST /v1/gpm/onboarding/operator/list` (admin-only; supports optional `status` filter (`pending|approved|rejected`) and optional `limit` (default `100`, clamped `1..500`))
 - `POST /v1/gpm/onboarding/operator/approve` (requires admin authorization: `session_token` with admin role, or legacy `admin_token` fallback when `GPM_APPROVAL_ADMIN_TOKEN` is configured)
 
 ## Authentication
 
 Mutating endpoints (`POST /v1/connect`, `POST /v1/disconnect`, `POST /v1/set_profile`, `POST /v1/update`, `POST /v1/service/start`, `POST /v1/service/stop`, `POST /v1/service/restart`) require auth by default.
 GPM server lifecycle endpoints (`POST /v1/gpm/service/start`, `POST /v1/gpm/service/stop`, `POST /v1/gpm/service/restart`) also require an approved `operator` or `admin` session issued via `/v1/gpm/session`.
+`POST /v1/gpm/onboarding/operator/list` uses command-read auth and requires a valid `admin` `session_token`:
+- missing `session_token`: `400` (`session_token is required`)
+- missing/expired session token: `404` (`session not found`)
+- non-admin session role: `403` (`admin session role is required`)
 `POST /v1/gpm/onboarding/operator/approve` also requires admin-level authorization:
 - preferred: `session_token` for a valid `admin` session.
 - compatibility fallback: `admin_token` matching `GPM_APPROVAL_ADMIN_TOKEN` (or legacy alias) when configured.
