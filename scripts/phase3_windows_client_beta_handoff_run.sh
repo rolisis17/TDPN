@@ -494,6 +494,9 @@ if [[ "$dry_run" == "1" ]]; then
   if ! array_has_arg "--require-launcher-runtime-ok" "${handoff_cmd[@]:1}"; then
     handoff_cmd+=(--require-launcher-runtime-ok 0)
   fi
+  if ! array_has_arg "--require-windows-native-bootstrap-guardrails-ok" "${handoff_cmd[@]:1}"; then
+    handoff_cmd+=(--require-windows-native-bootstrap-guardrails-ok 0)
+  fi
 fi
 handoff_command="$(print_cmd "${handoff_cmd[@]}")"
 

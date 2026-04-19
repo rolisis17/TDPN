@@ -324,6 +324,7 @@ Status:
 - `ci_phase3_windows_client_beta.sh` is the focused Phase-3 gate runner for desktop/control API/config and launcher contract checks.
 - `integration_ci_phase3_windows_client_beta.sh` validates the Phase-3 gate contract.
 - `phase3_windows_client_beta_check.sh` validates the Phase-3 readiness/check artifact contract.
+  - Includes the Windows-native bootstrap guardrails policy/signal gate: `require_windows_native_bootstrap_guardrails_ok` must align with `windows_native_bootstrap_guardrails_ok` (stage `windows_native_bootstrap_guardrails`).
 - `phase3_windows_client_beta_run.sh` runs the Phase-3 gate + check in one command.
 - `integration_windows_desktop_native_bootstrap_guardrails.sh` validates Windows-native bootstrap dry-run modes, invalid-mode failure behavior, summary-json write, and print-summary-json output contract.
 - `integration_phase3_windows_client_beta_check.sh` validates checker behavior/contract.

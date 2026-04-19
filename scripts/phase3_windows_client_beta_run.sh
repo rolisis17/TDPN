@@ -350,6 +350,9 @@ if [[ "$dry_run" == "1" ]]; then
   if ! array_has_arg "--require-launcher-runtime-ok" "${check_command_args[@]:1}"; then
     check_command_args+=(--require-launcher-runtime-ok 0)
   fi
+  if ! array_has_arg "--require-windows-native-bootstrap-guardrails-ok" "${check_command_args[@]:1}"; then
+    check_command_args+=(--require-windows-native-bootstrap-guardrails-ok 0)
+  fi
 fi
 check_command="$(print_cmd "${check_command_args[@]}")"
 set +e

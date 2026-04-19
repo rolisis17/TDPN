@@ -332,7 +332,7 @@ if [[ "$run_line" != *"--dry-run 1"* || "$run_line" != *"--theta 9"* ]]; then
   echo "$run_line"
   exit 1
 fi
-if [[ "$handoff_line" != *"--require-run-pipeline-ok 0"* || "$handoff_line" != *"--require-desktop-scaffold-ok 0"* || "$handoff_line" != *"--require-local-control-api-ok 1"* || "$handoff_line" != *"--require-local-api-config-defaults-ok 0"* || "$handoff_line" != *"--require-easy-node-config-v1-ok 0"* || "$handoff_line" != *"--require-launcher-wiring-ok 0"* || "$handoff_line" != *"--require-launcher-runtime-ok 1"* ]]; then
+if [[ "$handoff_line" != *"--require-run-pipeline-ok 0"* || "$handoff_line" != *"--require-desktop-scaffold-ok 0"* || "$handoff_line" != *"--require-local-control-api-ok 1"* || "$handoff_line" != *"--require-local-api-config-defaults-ok 0"* || "$handoff_line" != *"--require-easy-node-config-v1-ok 0"* || "$handoff_line" != *"--require-launcher-wiring-ok 0"* || "$handoff_line" != *"--require-launcher-runtime-ok 1"* || "$handoff_line" != *"--require-windows-native-bootstrap-guardrails-ok 0"* ]]; then
   echo "dry-run handoff relax/override mismatch"
   echo "$handoff_line"
   exit 1

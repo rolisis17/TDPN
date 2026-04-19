@@ -14,6 +14,7 @@ Usage:
     [--require-local-api-config-defaults-ok [0|1]] \
     [--require-easy-node-config-v1-ok [0|1]] \
     [--require-launcher-wiring-ok [0|1]] \
+    [--require-windows-native-bootstrap-guardrails-ok [0|1]] \
     [--require-launcher-runtime-ok [0|1]] \
     [--summary-json PATH] \
     [--show-json [0|1]]
@@ -26,6 +27,7 @@ Purpose:
     - local_api_config_defaults_ok
     - easy_node_config_v1_ok
     - launcher_wiring_ok
+    - windows_native_bootstrap_guardrails_ok
     - launcher_runtime_ok
   Emits canonical roadmap aliases (derived, fail-closed):
     - windows_parity_ok
@@ -187,6 +189,14 @@ resolve_signal_raw_or_empty() {
         elif (.steps.easy_mode_launcher_wiring.status? != null) then .steps.easy_mode_launcher_wiring.status
         else empty end'
       ;;
+    windows_native_bootstrap_guardrails_ok)
+      json_text_or_empty "$path" 'if (.windows_native_bootstrap_guardrails_ok? != null) then .windows_native_bootstrap_guardrails_ok
+        elif (.summary.windows_native_bootstrap_guardrails_ok? != null) then .summary.windows_native_bootstrap_guardrails_ok
+        elif (.signals.windows_native_bootstrap_guardrails_ok? != null) then .signals.windows_native_bootstrap_guardrails_ok
+        elif (.stages.windows_desktop_native_bootstrap_guardrails.status? != null) then .stages.windows_desktop_native_bootstrap_guardrails.status
+        elif (.steps.windows_desktop_native_bootstrap_guardrails.status? != null) then .steps.windows_desktop_native_bootstrap_guardrails.status
+        else empty end'
+      ;;
     launcher_runtime_ok)
       json_text_or_empty "$path" 'if (.launcher_runtime_ok? != null) then .launcher_runtime_ok
         elif (.summary.launcher_runtime_ok? != null) then .summary.launcher_runtime_ok
@@ -240,6 +250,10 @@ emit_summary_json() {
   local final_failure_kind="${36}"
   local policy_outcome_decision="${37}"
   local reasons_json="${38}"
+  local require_windows_native_bootstrap_guardrails_ok="${39}"
+  local windows_native_bootstrap_guardrails_status="${40}"
+  local windows_native_bootstrap_guardrails_ok="${41}"
+  local windows_native_bootstrap_guardrails_resolved="${42}"
 
   local summary_tmp
   summary_tmp="$(mktemp)"
@@ -257,24 +271,28 @@ emit_summary_json() {
     --argjson require_easy_node_config_v1_ok "$require_easy_node_config_v1_ok" \
     --argjson require_launcher_wiring_ok "$require_launcher_wiring_ok" \
     --argjson require_launcher_runtime_ok "$require_launcher_runtime_ok" \
+    --argjson require_windows_native_bootstrap_guardrails_ok "$require_windows_native_bootstrap_guardrails_ok" \
     --arg desktop_scaffold_status "$desktop_scaffold_status" \
     --arg local_control_api_status "$local_control_api_status" \
     --arg local_api_config_defaults_status "$local_api_config_defaults_status" \
     --arg easy_node_config_v1_status "$easy_node_config_v1_status" \
     --arg launcher_wiring_status "$launcher_wiring_status" \
     --arg launcher_runtime_status "$launcher_runtime_status" \
+    --arg windows_native_bootstrap_guardrails_status "$windows_native_bootstrap_guardrails_status" \
     --argjson desktop_scaffold_ok "$desktop_scaffold_ok" \
     --argjson local_control_api_ok "$local_control_api_ok" \
     --argjson local_api_config_defaults_ok "$local_api_config_defaults_ok" \
     --argjson easy_node_config_v1_ok "$easy_node_config_v1_ok" \
     --argjson launcher_wiring_ok "$launcher_wiring_ok" \
     --argjson launcher_runtime_ok "$launcher_runtime_ok" \
+    --argjson windows_native_bootstrap_guardrails_ok "$windows_native_bootstrap_guardrails_ok" \
     --argjson desktop_scaffold_resolved "$desktop_scaffold_resolved" \
     --argjson local_control_api_resolved "$local_control_api_resolved" \
     --argjson local_api_config_defaults_resolved "$local_api_config_defaults_resolved" \
     --argjson easy_node_config_v1_resolved "$easy_node_config_v1_resolved" \
     --argjson launcher_wiring_resolved "$launcher_wiring_resolved" \
     --argjson launcher_runtime_resolved "$launcher_runtime_resolved" \
+    --argjson windows_native_bootstrap_guardrails_resolved "$windows_native_bootstrap_guardrails_resolved" \
     --argjson windows_parity_ok "$windows_parity_ok" \
     --argjson desktop_contract_ok "$desktop_contract_ok" \
     --argjson installer_update_ok "$installer_update_ok" \
@@ -335,7 +353,8 @@ emit_summary_json() {
         require_local_api_config_defaults_ok: ($require_local_api_config_defaults_ok == 1),
         require_easy_node_config_v1_ok: ($require_easy_node_config_v1_ok == 1),
         require_launcher_wiring_ok: ($require_launcher_wiring_ok == 1),
-        require_launcher_runtime_ok: ($require_launcher_runtime_ok == 1)
+        require_launcher_runtime_ok: ($require_launcher_runtime_ok == 1),
+        require_windows_native_bootstrap_guardrails_ok: ($require_windows_native_bootstrap_guardrails_ok == 1)
       },
       stages: {
         desktop_scaffold: {
@@ -373,6 +392,12 @@ emit_summary_json() {
           status: $launcher_runtime_status,
           resolved: ($launcher_runtime_resolved == 1),
           ok: ($launcher_runtime_ok == true)
+        },
+        windows_desktop_native_bootstrap_guardrails: {
+          enabled: ($require_windows_native_bootstrap_guardrails_ok == 1),
+          status: $windows_native_bootstrap_guardrails_status,
+          resolved: ($windows_native_bootstrap_guardrails_resolved == 1),
+          ok: ($windows_native_bootstrap_guardrails_ok == true)
         }
       },
       signals: {
@@ -382,6 +407,7 @@ emit_summary_json() {
         easy_node_config_v1_ok: ($easy_node_config_v1_ok == true),
         launcher_wiring_ok: ($launcher_wiring_ok == true),
         launcher_runtime_ok: ($launcher_runtime_ok == true),
+        windows_native_bootstrap_guardrails_ok: ($windows_native_bootstrap_guardrails_ok == true),
         windows_parity_ok: ($windows_parity_ok == true),
         desktop_contract_ok: ($desktop_contract_ok == true),
         installer_update_ok: ($installer_update_ok == true),
@@ -426,6 +452,11 @@ emit_summary_json() {
             kind: failure_kind(($require_launcher_runtime_ok == 1); ($launcher_runtime_ok == true); ($launcher_runtime_resolved == 1); $launcher_runtime_status),
             policy_no_go: (failure_kind(($require_launcher_runtime_ok == 1); ($launcher_runtime_ok == true); ($launcher_runtime_resolved == 1); $launcher_runtime_status) == "policy_no_go"),
             execution_failure: (failure_kind(($require_launcher_runtime_ok == 1); ($launcher_runtime_ok == true); ($launcher_runtime_resolved == 1); $launcher_runtime_status) == "execution_failure")
+          },
+          windows_native_bootstrap_guardrails_ok: {
+            kind: failure_kind(($require_windows_native_bootstrap_guardrails_ok == 1); ($windows_native_bootstrap_guardrails_ok == true); ($windows_native_bootstrap_guardrails_resolved == 1); $windows_native_bootstrap_guardrails_status),
+            policy_no_go: (failure_kind(($require_windows_native_bootstrap_guardrails_ok == 1); ($windows_native_bootstrap_guardrails_ok == true); ($windows_native_bootstrap_guardrails_resolved == 1); $windows_native_bootstrap_guardrails_status) == "policy_no_go"),
+            execution_failure: (failure_kind(($require_windows_native_bootstrap_guardrails_ok == 1); ($windows_native_bootstrap_guardrails_ok == true); ($windows_native_bootstrap_guardrails_resolved == 1); $windows_native_bootstrap_guardrails_status) == "execution_failure")
           }
         }
       },
@@ -455,7 +486,8 @@ emit_summary_json() {
             actionable_gate("phase3_windows_client_beta_local_api_config_defaults_gate"; "local_api_config_defaults_ok"; ($require_local_api_config_defaults_ok == 1); ($local_api_config_defaults_ok == true); ($local_api_config_defaults_resolved == 1); $local_api_config_defaults_status),
             actionable_gate("phase3_windows_client_beta_easy_node_config_v1_gate"; "easy_node_config_v1_ok"; ($require_easy_node_config_v1_ok == 1); ($easy_node_config_v1_ok == true); ($easy_node_config_v1_resolved == 1); $easy_node_config_v1_status),
             actionable_gate("phase3_windows_client_beta_launcher_wiring_gate"; "launcher_wiring_ok"; ($require_launcher_wiring_ok == 1); ($launcher_wiring_ok == true); ($launcher_wiring_resolved == 1); $launcher_wiring_status),
-            actionable_gate("phase3_windows_client_beta_launcher_runtime_gate"; "launcher_runtime_ok"; ($require_launcher_runtime_ok == 1); ($launcher_runtime_ok == true); ($launcher_runtime_resolved == 1); $launcher_runtime_status)
+            actionable_gate("phase3_windows_client_beta_launcher_runtime_gate"; "launcher_runtime_ok"; ($require_launcher_runtime_ok == 1); ($launcher_runtime_ok == true); ($launcher_runtime_resolved == 1); $launcher_runtime_status),
+            actionable_gate("phase3_windows_client_beta_windows_native_bootstrap_guardrails_gate"; "windows_native_bootstrap_guardrails_ok"; ($require_windows_native_bootstrap_guardrails_ok == 1); ($windows_native_bootstrap_guardrails_ok == true); ($windows_native_bootstrap_guardrails_resolved == 1); $windows_native_bootstrap_guardrails_status)
           ] as $all_gates
           | ($all_gates | map(select(.required == true and .ok == false))) as $failed_required
           | {
@@ -481,6 +513,7 @@ require_local_control_api_ok="${PHASE3_WINDOWS_CLIENT_BETA_CHECK_REQUIRE_LOCAL_C
 require_local_api_config_defaults_ok="${PHASE3_WINDOWS_CLIENT_BETA_CHECK_REQUIRE_LOCAL_API_CONFIG_DEFAULTS_OK:-1}"
 require_easy_node_config_v1_ok="${PHASE3_WINDOWS_CLIENT_BETA_CHECK_REQUIRE_EASY_NODE_CONFIG_V1_OK:-1}"
 require_launcher_wiring_ok="${PHASE3_WINDOWS_CLIENT_BETA_CHECK_REQUIRE_LAUNCHER_WIRING_OK:-1}"
+require_windows_native_bootstrap_guardrails_ok="${PHASE3_WINDOWS_CLIENT_BETA_CHECK_REQUIRE_WINDOWS_NATIVE_BOOTSTRAP_GUARDRAILS_OK:-1}"
 require_launcher_runtime_ok="${PHASE3_WINDOWS_CLIENT_BETA_CHECK_REQUIRE_LAUNCHER_RUNTIME_OK:-1}"
 
 while [[ $# -gt 0 ]]; do
@@ -534,6 +567,15 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --require-windows-native-bootstrap-guardrails-ok)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_windows_native_bootstrap_guardrails_ok="${2:-}"
+        shift 2
+      else
+        require_windows_native_bootstrap_guardrails_ok="1"
+        shift
+      fi
+      ;;
     --require-launcher-runtime-ok)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         require_launcher_runtime_ok="${2:-}"
@@ -573,6 +615,7 @@ bool_arg_or_die "--require-local-control-api-ok" "$require_local_control_api_ok"
 bool_arg_or_die "--require-local-api-config-defaults-ok" "$require_local_api_config_defaults_ok"
 bool_arg_or_die "--require-easy-node-config-v1-ok" "$require_easy_node_config_v1_ok"
 bool_arg_or_die "--require-launcher-wiring-ok" "$require_launcher_wiring_ok"
+bool_arg_or_die "--require-windows-native-bootstrap-guardrails-ok" "$require_windows_native_bootstrap_guardrails_ok"
 bool_arg_or_die "--require-launcher-runtime-ok" "$require_launcher_runtime_ok"
 bool_arg_or_die "--show-json" "$show_json"
 
@@ -591,6 +634,7 @@ local_control_api_raw=""
 local_api_config_defaults_raw=""
 easy_node_config_v1_raw=""
 launcher_wiring_raw=""
+windows_native_bootstrap_guardrails_raw=""
 launcher_runtime_raw=""
 
 if [[ "$ci_phase3_summary_usable" == "1" ]]; then
@@ -599,6 +643,7 @@ if [[ "$ci_phase3_summary_usable" == "1" ]]; then
   local_api_config_defaults_raw="$(resolve_signal_raw_or_empty "$ci_phase3_summary_json" "local_api_config_defaults_ok")"
   easy_node_config_v1_raw="$(resolve_signal_raw_or_empty "$ci_phase3_summary_json" "easy_node_config_v1_ok")"
   launcher_wiring_raw="$(resolve_signal_raw_or_empty "$ci_phase3_summary_json" "launcher_wiring_ok")"
+  windows_native_bootstrap_guardrails_raw="$(resolve_signal_raw_or_empty "$ci_phase3_summary_json" "windows_native_bootstrap_guardrails_ok")"
   launcher_runtime_raw="$(resolve_signal_raw_or_empty "$ci_phase3_summary_json" "launcher_runtime_ok")"
 else
   reasons+=("ci phase3 summary file not found or invalid JSON: $ci_phase3_summary_json")
@@ -609,6 +654,7 @@ local_control_api_ok="$(normalize_boolish_or_empty "$local_control_api_raw")"
 local_api_config_defaults_ok="$(normalize_boolish_or_empty "$local_api_config_defaults_raw")"
 easy_node_config_v1_ok="$(normalize_boolish_or_empty "$easy_node_config_v1_raw")"
 launcher_wiring_ok="$(normalize_boolish_or_empty "$launcher_wiring_raw")"
+windows_native_bootstrap_guardrails_ok="$(normalize_boolish_or_empty "$windows_native_bootstrap_guardrails_raw")"
 launcher_runtime_ok="$(normalize_boolish_or_empty "$launcher_runtime_raw")"
 
 if [[ -z "$desktop_scaffold_ok" ]]; then
@@ -626,27 +672,30 @@ fi
 if [[ -z "$launcher_wiring_ok" ]]; then
   launcher_wiring_ok="false"
 fi
+if [[ -z "$windows_native_bootstrap_guardrails_ok" ]]; then
+  windows_native_bootstrap_guardrails_ok="false"
+fi
 if [[ -z "$launcher_runtime_ok" ]]; then
   launcher_runtime_ok="false"
 fi
 
 # Canonical Phase-3 handoff aliases for roadmap ingestion.
 # Deterministic mapping from existing readiness signals (fail-closed):
-# - windows_parity_ok       = desktop_scaffold_ok && local_control_api_ok && launcher_wiring_ok && launcher_runtime_ok
-# - desktop_contract_ok     = desktop_scaffold_ok && local_control_api_ok
-# - installer_update_ok     = easy_node_config_v1_ok && launcher_wiring_ok
+# - windows_parity_ok       = desktop_scaffold_ok && local_control_api_ok && launcher_wiring_ok && windows_native_bootstrap_guardrails_ok && launcher_runtime_ok
+# - desktop_contract_ok     = desktop_scaffold_ok && local_control_api_ok && windows_native_bootstrap_guardrails_ok
+# - installer_update_ok     = easy_node_config_v1_ok && launcher_wiring_ok && windows_native_bootstrap_guardrails_ok
 # - telemetry_stability_ok  = local_api_config_defaults_ok && launcher_runtime_ok
 windows_parity_ok="false"
 desktop_contract_ok="false"
 installer_update_ok="false"
 telemetry_stability_ok="false"
-if [[ "$desktop_scaffold_ok" == "true" && "$local_control_api_ok" == "true" && "$launcher_wiring_ok" == "true" && "$launcher_runtime_ok" == "true" ]]; then
+if [[ "$desktop_scaffold_ok" == "true" && "$local_control_api_ok" == "true" && "$launcher_wiring_ok" == "true" && "$windows_native_bootstrap_guardrails_ok" == "true" && "$launcher_runtime_ok" == "true" ]]; then
   windows_parity_ok="true"
 fi
-if [[ "$desktop_scaffold_ok" == "true" && "$local_control_api_ok" == "true" ]]; then
+if [[ "$desktop_scaffold_ok" == "true" && "$local_control_api_ok" == "true" && "$windows_native_bootstrap_guardrails_ok" == "true" ]]; then
   desktop_contract_ok="true"
 fi
-if [[ "$easy_node_config_v1_ok" == "true" && "$launcher_wiring_ok" == "true" ]]; then
+if [[ "$easy_node_config_v1_ok" == "true" && "$launcher_wiring_ok" == "true" && "$windows_native_bootstrap_guardrails_ok" == "true" ]]; then
   installer_update_ok="true"
 fi
 if [[ "$local_api_config_defaults_ok" == "true" && "$launcher_runtime_ok" == "true" ]]; then
@@ -658,6 +707,7 @@ local_control_api_resolved="0"
 local_api_config_defaults_resolved="0"
 easy_node_config_v1_resolved="0"
 launcher_wiring_resolved="0"
+windows_native_bootstrap_guardrails_resolved="0"
 launcher_runtime_resolved="0"
 
 desktop_scaffold_status="$(stage_status_from_raw "$desktop_scaffold_raw")"
@@ -665,6 +715,7 @@ local_control_api_status="$(stage_status_from_raw "$local_control_api_raw")"
 local_api_config_defaults_status="$(stage_status_from_raw "$local_api_config_defaults_raw")"
 easy_node_config_v1_status="$(stage_status_from_raw "$easy_node_config_v1_raw")"
 launcher_wiring_status="$(stage_status_from_raw "$launcher_wiring_raw")"
+windows_native_bootstrap_guardrails_status="$(stage_status_from_raw "$windows_native_bootstrap_guardrails_raw")"
 launcher_runtime_status="$(stage_status_from_raw "$launcher_runtime_raw")"
 
 if [[ -n "$(trim "$desktop_scaffold_raw")" ]]; then
@@ -692,6 +743,11 @@ if [[ -n "$(trim "$launcher_wiring_raw")" ]]; then
 elif [[ "$ci_phase3_summary_usable" == "1" ]]; then
   reasons+=("launcher_wiring_ok could not be resolved from ci phase3 summary")
 fi
+if [[ -n "$(trim "$windows_native_bootstrap_guardrails_raw")" ]]; then
+  windows_native_bootstrap_guardrails_resolved="1"
+elif [[ "$ci_phase3_summary_usable" == "1" ]]; then
+  reasons+=("windows_native_bootstrap_guardrails_ok could not be resolved from ci phase3 summary")
+fi
 if [[ -n "$(trim "$launcher_runtime_raw")" ]]; then
   launcher_runtime_resolved="1"
 elif [[ "$ci_phase3_summary_usable" == "1" ]]; then
@@ -712,6 +768,9 @@ if [[ "$require_easy_node_config_v1_ok" == "1" && "$easy_node_config_v1_ok" != "
 fi
 if [[ "$require_launcher_wiring_ok" == "1" && "$launcher_wiring_ok" != "true" ]]; then
   reasons+=("launcher_wiring_ok is false")
+fi
+if [[ "$require_windows_native_bootstrap_guardrails_ok" == "1" && "$windows_native_bootstrap_guardrails_ok" != "true" ]]; then
+  reasons+=("windows_native_bootstrap_guardrails_ok is false")
 fi
 if [[ "$require_launcher_runtime_ok" == "1" && "$launcher_runtime_ok" != "true" ]]; then
   reasons+=("launcher_runtime_ok is false")
@@ -750,6 +809,10 @@ if [[ "$status" == "fail" ]]; then
     policy_outcome_decision="ERROR"
   fi
   if [[ "$require_launcher_wiring_ok" == "1" && "$launcher_wiring_ok" != "true" && "$launcher_wiring_resolved" != "1" ]]; then
+    final_failure_kind="execution_failure"
+    policy_outcome_decision="ERROR"
+  fi
+  if [[ "$require_windows_native_bootstrap_guardrails_ok" == "1" && "$windows_native_bootstrap_guardrails_ok" != "true" && "$windows_native_bootstrap_guardrails_resolved" != "1" ]]; then
     final_failure_kind="execution_failure"
     policy_outcome_decision="ERROR"
   fi
@@ -803,7 +866,11 @@ emit_summary_json \
   "$telemetry_stability_ok" \
   "$final_failure_kind" \
   "$policy_outcome_decision" \
-  "$reasons_json"
+  "$reasons_json" \
+  "$require_windows_native_bootstrap_guardrails_ok" \
+  "$windows_native_bootstrap_guardrails_status" \
+  "$windows_native_bootstrap_guardrails_ok" \
+  "$windows_native_bootstrap_guardrails_resolved"
 
 if [[ "$show_json" == "1" ]]; then
   cat "$summary_json"

@@ -38,6 +38,7 @@ FAIL_SUMMARY_JSON="$TMP_DIR/summary_fail.json"
 
 STAGE_ENV_NAMES=(
   "CI_PHASE3_WINDOWS_CLIENT_BETA_DESKTOP_SCAFFOLD_CONTRACT_SCRIPT"
+  "CI_PHASE3_WINDOWS_CLIENT_BETA_WINDOWS_DESKTOP_NATIVE_BOOTSTRAP_GUARDRAILS_SCRIPT"
   "CI_PHASE3_WINDOWS_CLIENT_BETA_LOCAL_CONTROL_API_CONTRACT_SCRIPT"
   "CI_PHASE3_WINDOWS_CLIENT_BETA_LOCAL_API_CONFIG_DEFAULTS_SCRIPT"
   "CI_PHASE3_WINDOWS_CLIENT_BETA_EASY_NODE_CONFIG_V1_SCRIPT"
@@ -51,6 +52,7 @@ STAGE_ENV_NAMES=(
 
 STAGE_IDS=(
   "desktop_scaffold_contract"
+  "windows_desktop_native_bootstrap_guardrails"
   "local_control_api_contract"
   "local_api_config_defaults"
   "easy_node_config_v1"
@@ -188,7 +190,10 @@ if ! jq -e '
   and .inputs.run_phase3_windows_client_beta_run == true
   and .inputs.run_phase3_windows_client_beta_handoff_check == true
   and .inputs.run_phase3_windows_client_beta_handoff_run == true
+  and .inputs.run_windows_desktop_native_bootstrap_guardrails == true
   and (.steps | to_entries | all(.value.enabled == true and .value.status == "pass" and .value.rc == 0 and .value.command != null))
+  and .steps.windows_desktop_native_bootstrap_guardrails.status == "pass"
+  and .steps.windows_desktop_native_bootstrap_guardrails.rc == 0
   and .steps.phase3_windows_client_beta_check.status == "pass"
   and .steps.phase3_windows_client_beta_check.rc == 0
   and .steps.phase3_windows_client_beta_run.status == "pass"
@@ -228,6 +233,9 @@ if ! jq -e '
   .status == "pass"
   and .rc == 0
   and .inputs.dry_run == true
+  and .inputs.run_windows_desktop_native_bootstrap_guardrails == true
+  and .steps.windows_desktop_native_bootstrap_guardrails.status == "skip"
+  and .steps.windows_desktop_native_bootstrap_guardrails.reason == "dry-run"
   and .steps.phase3_windows_client_beta_check.status == "skip"
   and .steps.phase3_windows_client_beta_check.reason == "dry-run"
   and .steps.phase3_windows_client_beta_run.status == "skip"
@@ -252,6 +260,11 @@ if ! grep -Fq -- 'step=desktop_scaffold_contract status=skip reason=dry-run' "$D
   cat "$DRY_RUN_LOG"
   exit 1
 fi
+if ! grep -Fq -- 'step=windows_desktop_native_bootstrap_guardrails status=skip reason=dry-run' "$DRY_RUN_LOG"; then
+  echo "dry-run log missing windows_desktop_native_bootstrap_guardrails skip signal"
+  cat "$DRY_RUN_LOG"
+  exit 1
+fi
 
 echo "[ci-phase3-windows-client-beta] toggle path"
 : >"$CAPTURE"
@@ -261,6 +274,7 @@ CI_PHASE3_CAPTURE_FILE="$CAPTURE" \
   --summary-json "$TOGGLE_SUMMARY_JSON" \
   --print-summary-json 0 \
   --run-desktop-scaffold-contract 0 \
+  --run-windows-desktop-native-bootstrap-guardrails 0 \
   --run-local-control-api-contract 0 \
   --run-local-api-config-defaults 0 \
   --run-phase3-windows-client-beta-check 0 \
@@ -282,6 +296,10 @@ if ! jq -e '
   and .steps.desktop_scaffold_contract.enabled == false
   and .steps.desktop_scaffold_contract.status == "skip"
   and .steps.desktop_scaffold_contract.reason == "disabled"
+  and .inputs.run_windows_desktop_native_bootstrap_guardrails == false
+  and .steps.windows_desktop_native_bootstrap_guardrails.enabled == false
+  and .steps.windows_desktop_native_bootstrap_guardrails.status == "skip"
+  and .steps.windows_desktop_native_bootstrap_guardrails.reason == "disabled"
   and .steps.easy_node_config_v1.enabled == true
   and .steps.easy_node_config_v1.status == "pass"
   and .inputs.run_phase3_windows_client_beta_check == false
@@ -310,7 +328,7 @@ echo "[ci-phase3-windows-client-beta] first-failure rc propagation"
 : >"$CAPTURE"
 set +e
 CI_PHASE3_CAPTURE_FILE="$CAPTURE" \
-CI_PHASE3_FAIL_MATRIX="local_control_api_contract=23,easy_node_config_v1=41,phase3_windows_client_beta_check=47,phase3_windows_client_beta_run=53,phase3_windows_client_beta_handoff_check=55,phase3_windows_client_beta_handoff_run=59" \
+CI_PHASE3_FAIL_MATRIX="windows_desktop_native_bootstrap_guardrails=19,local_control_api_contract=23,easy_node_config_v1=41,phase3_windows_client_beta_check=47,phase3_windows_client_beta_run=53,phase3_windows_client_beta_handoff_check=55,phase3_windows_client_beta_handoff_run=59" \
 "$GATE_SCRIPT" \
   --reports-dir "$FAIL_REPORTS_DIR" \
   --summary-json "$FAIL_SUMMARY_JSON" \
@@ -318,8 +336,8 @@ CI_PHASE3_FAIL_MATRIX="local_control_api_contract=23,easy_node_config_v1=41,phas
 fail_rc=$?
 set -e
 
-if [[ "$fail_rc" -ne 23 ]]; then
-  echo "expected fail rc=23, got rc=$fail_rc"
+if [[ "$fail_rc" -ne 19 ]]; then
+  echo "expected fail rc=19, got rc=$fail_rc"
   cat "$FAIL_LOG"
   exit 1
 fi
@@ -333,8 +351,11 @@ if [[ ! -f "$FAIL_SUMMARY_JSON" ]]; then
 fi
 if ! jq -e '
   .status == "fail"
-  and .rc == 23
+  and .rc == 19
   and .inputs.dry_run == false
+  and .inputs.run_windows_desktop_native_bootstrap_guardrails == true
+  and .steps.windows_desktop_native_bootstrap_guardrails.status == "fail"
+  and .steps.windows_desktop_native_bootstrap_guardrails.rc == 19
   and .steps.local_control_api_contract.status == "fail"
   and .steps.local_control_api_contract.rc == 23
   and .steps.easy_node_config_v1.status == "fail"
@@ -353,7 +374,7 @@ if ! jq -e '
   cat "$FAIL_SUMMARY_JSON"
   exit 1
 fi
-if ! grep -Fq -- '[ci-phase3-windows-client-beta] status=fail rc=23 dry_run=0' "$FAIL_LOG"; then
+if ! grep -Fq -- '[ci-phase3-windows-client-beta] status=fail rc=19 dry_run=0' "$FAIL_LOG"; then
   echo "fail log missing final fail status line"
   cat "$FAIL_LOG"
   exit 1

@@ -148,6 +148,7 @@ if [[ -n "$summary_json" && "${FAKE_CHECK_OMIT_SUMMARY:-0}" != "1" ]]; then
   "rc": $rc,
   "policy": {
     "require_desktop_scaffold_ok": true,
+    "require_windows_native_bootstrap_guardrails_ok": true,
     "require_local_control_api_ok": true,
     "require_local_api_config_defaults_ok": true,
     "require_easy_node_config_v1_ok": true,
@@ -156,6 +157,7 @@ if [[ -n "$summary_json" && "${FAKE_CHECK_OMIT_SUMMARY:-0}" != "1" ]]; then
   },
   "signals": {
     "desktop_scaffold_ok": true,
+    "windows_native_bootstrap_guardrails_ok": true,
     "local_control_api_ok": true,
     "local_api_config_defaults_ok": true,
     "easy_node_config_v1_ok": true,
@@ -164,6 +166,11 @@ if [[ -n "$summary_json" && "${FAKE_CHECK_OMIT_SUMMARY:-0}" != "1" ]]; then
   },
   "stages": {
     "desktop_scaffold": {
+      "status": "$status",
+      "resolved": true,
+      "ok": true
+    },
+    "windows_native_bootstrap_guardrails": {
       "status": "$status",
       "resolved": true,
       "ok": true
@@ -242,6 +249,7 @@ bash "$RUNNER" \
   --print-summary-json 0 \
   --ci-run-desktop-scaffold-contract 1 \
   --check-require-desktop-scaffold-ok 1 \
+  --check-require-windows-native-bootstrap-guardrails-ok 1 \
   --check-require-launcher-runtime-ok 1 \
   --check-show-json 1 >"$DRY_RUN_LOG" 2>&1
 
@@ -273,7 +281,7 @@ if [[ "$check_line" != *"--summary-json $TMP_DIR/check_dry_summary.json"* ]]; th
   echo "$check_line"
   exit 1
 fi
-if [[ "$check_line" != *"--require-desktop-scaffold-ok 1"* || "$check_line" != *"--require-launcher-runtime-ok 1"* ]]; then
+if [[ "$check_line" != *"--require-desktop-scaffold-ok 1"* || "$check_line" != *"--require-windows-native-bootstrap-guardrails-ok 1"* || "$check_line" != *"--require-launcher-runtime-ok 1"* ]]; then
   echo "check passthrough contract mismatch"
   echo "$check_line"
   exit 1
@@ -317,6 +325,17 @@ if ! jq -e '
 ' "$DRY_RUN_RUN_SUMMARY" >/dev/null; then
   echo "dry-run combined summary contract mismatch"
   cat "$DRY_RUN_RUN_SUMMARY"
+  exit 1
+fi
+if ! jq -e '
+  .policy.require_windows_native_bootstrap_guardrails_ok == true
+  and .signals.windows_native_bootstrap_guardrails_ok == true
+  and .stages.windows_native_bootstrap_guardrails.status == "pass"
+  and .stages.windows_native_bootstrap_guardrails.resolved == true
+  and .stages.windows_native_bootstrap_guardrails.ok == true
+' "$TMP_DIR/check_dry_summary.json" >/dev/null; then
+  echo "dry-run checker summary missing windows native bootstrap guardrails contract fields"
+  cat "$TMP_DIR/check_dry_summary.json"
   exit 1
 fi
 

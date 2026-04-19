@@ -61,6 +61,9 @@ cat >"$PASS_SUMMARY" <<'EOF_PASS'
     "easy_mode_launcher_wiring": {
       "status": "pass"
     },
+    "windows_desktop_native_bootstrap_guardrails": {
+      "status": "pass"
+    },
     "easy_mode_launcher_runtime": {
       "status": "pass"
     }
@@ -92,6 +95,9 @@ cat >"$FAIL_SUMMARY" <<'EOF_FAIL'
       "status": "pass"
     },
     "easy_mode_launcher_wiring": {
+      "status": "pass"
+    },
+    "windows_desktop_native_bootstrap_guardrails": {
       "status": "pass"
     },
     "easy_mode_launcher_runtime": {
@@ -127,6 +133,9 @@ cat >"$RELAXED_SUMMARY" <<'EOF_RELAXED'
     "easy_mode_launcher_wiring": {
       "status": "pass"
     },
+    "windows_desktop_native_bootstrap_guardrails": {
+      "status": "pass"
+    },
     "easy_mode_launcher_runtime": {
       "status": "pass"
     }
@@ -151,12 +160,14 @@ if ! jq -e '
   and .policy.require_local_api_config_defaults_ok == true
   and .policy.require_easy_node_config_v1_ok == true
   and .policy.require_launcher_wiring_ok == true
+  and .policy.require_windows_native_bootstrap_guardrails_ok == true
   and .policy.require_launcher_runtime_ok == true
   and .signals.desktop_scaffold_ok == true
   and .signals.local_control_api_ok == true
   and .signals.local_api_config_defaults_ok == true
   and .signals.easy_node_config_v1_ok == true
   and .signals.launcher_wiring_ok == true
+  and .signals.windows_native_bootstrap_guardrails_ok == true
   and .signals.launcher_runtime_ok == true
   and .signals.windows_parity_ok == true
   and .signals.desktop_contract_ok == true
@@ -175,6 +186,7 @@ if ! jq -e '
   and .handoff.failure_semantics.local_api_config_defaults_ok.kind == "none"
   and .handoff.failure_semantics.easy_node_config_v1_ok.kind == "none"
   and .handoff.failure_semantics.launcher_wiring_ok.kind == "none"
+  and .handoff.failure_semantics.windows_native_bootstrap_guardrails_ok.kind == "none"
   and .handoff.failure_semantics.launcher_runtime_ok.kind == "none"
   and .failure.kind == "none"
   and .policy_outcome.decision == "GO"
@@ -209,6 +221,7 @@ if ! jq -e '
   .status == "fail"
   and .rc == 1
   and .signals.local_control_api_ok == false
+  and .signals.windows_native_bootstrap_guardrails_ok == true
   and .signals.windows_parity_ok == false
   and .signals.desktop_contract_ok == false
   and .signals.installer_update_ok == true
@@ -222,6 +235,7 @@ if ! jq -e '
   and .handoff.installer_update_ok == true
   and .handoff.telemetry_stability_ok == true
   and .handoff.failure_semantics.local_control_api_ok.kind == "policy_no_go"
+  and .handoff.failure_semantics.windows_native_bootstrap_guardrails_ok.kind == "none"
   and .failure.kind == "policy_no_go"
   and .policy_outcome.decision == "NO-GO"
   and .policy_outcome.fail_closed_no_go == true
@@ -249,7 +263,9 @@ if ! jq -e '
   .status == "pass"
   and .rc == 0
   and .policy.require_local_control_api_ok == false
+  and .policy.require_windows_native_bootstrap_guardrails_ok == true
   and .signals.local_control_api_ok == false
+  and .signals.windows_native_bootstrap_guardrails_ok == true
   and .signals.windows_parity_ok == false
   and .signals.desktop_contract_ok == false
   and .signals.installer_update_ok == true
@@ -263,6 +279,7 @@ if ! jq -e '
   and .handoff.installer_update_ok == true
   and .handoff.telemetry_stability_ok == true
   and .handoff.failure_semantics.local_control_api_ok.kind == "none"
+  and .handoff.failure_semantics.windows_native_bootstrap_guardrails_ok.kind == "none"
   and .failure.kind == "none"
   and .policy_outcome.decision == "GO"
   and .decision.actionable.count == 0
@@ -306,10 +323,11 @@ if ! jq -e '
   and .handoff.telemetry_stability_ok == false
   and .handoff.failure_semantics.desktop_scaffold_ok.kind == "execution_failure"
   and .handoff.failure_semantics.local_control_api_ok.kind == "execution_failure"
+  and .handoff.failure_semantics.windows_native_bootstrap_guardrails_ok.kind == "execution_failure"
   and .failure.kind == "execution_failure"
   and .policy_outcome.decision == "ERROR"
   and .policy_outcome.fail_closed_no_go == false
-  and .decision.actionable.count == 6
+  and .decision.actionable.count == 7
   and .decision.actionable.recommended_gate_id == "phase3_windows_client_beta_desktop_scaffold_gate"
   and ((.decision.reasons // []) | any(test("summary file not found or invalid JSON")))
 ' "$MISSING_OUTPUT" >/dev/null; then

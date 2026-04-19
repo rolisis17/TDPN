@@ -60,7 +60,8 @@ cat >"$PASS_ROADMAP" <<'EOF_PASS_ROADMAP'
       "local_api_config_defaults_ok": true,
       "easy_node_config_v1_ok": true,
       "launcher_wiring_ok": true,
-      "launcher_runtime_ok": true
+      "launcher_runtime_ok": true,
+      "windows_native_bootstrap_guardrails_ok": true
     }
   }
 }
@@ -87,6 +88,7 @@ cat >"$PASS_CHECK" <<'EOF_PASS_CHECK'
     "easy_node_config_v1_ok": true,
     "launcher_wiring_ok": true,
     "launcher_runtime_ok": true,
+    "windows_native_bootstrap_guardrails_ok": true,
     "windows_parity_ok": true,
     "desktop_contract_ok": true,
     "installer_update_ok": true,
@@ -112,6 +114,7 @@ if ! jq -e '
   and .desktop_contract_ok == true
   and .installer_update_ok == true
   and .telemetry_stability_ok == true
+  and .signals.windows_native_bootstrap_guardrails_ok == true
   and .signals.windows_parity_ok == true
   and .signals.desktop_contract_ok == true
   and .signals.installer_update_ok == true
@@ -174,6 +177,7 @@ if ! jq -e '
   and .fail_closed == true
   and .inputs.usable.phase3_run_summary_json == true
   and .inputs.usable.roadmap_summary_json == true
+  and .inputs.requirements.windows_native_bootstrap_guardrails_ok == true
   and .handoff.run_pipeline_ok == true
   and .handoff.desktop_scaffold_ok == true
   and .handoff.local_control_api_ok == true
@@ -181,6 +185,7 @@ if ! jq -e '
   and .handoff.easy_node_config_v1_ok == true
   and .handoff.launcher_wiring_ok == true
   and .handoff.launcher_runtime_ok == true
+  and .handoff.windows_native_bootstrap_guardrails_ok == true
   and .handoff.failure_semantics.run_pipeline_ok.kind == "none"
   and .handoff.failure_semantics.desktop_scaffold_ok.kind == "none"
   and .handoff.failure_semantics.local_control_api_ok.kind == "none"
@@ -188,12 +193,14 @@ if ! jq -e '
   and .handoff.failure_semantics.easy_node_config_v1_ok.kind == "none"
   and .handoff.failure_semantics.launcher_wiring_ok.kind == "none"
   and .handoff.failure_semantics.launcher_runtime_ok.kind == "none"
+  and .handoff.failure_semantics.windows_native_bootstrap_guardrails_ok.kind == "none"
   and .failure.kind == "none"
   and .policy_outcome.decision == "GO"
   and .policy_outcome.fail_closed_no_go == false
   and .decision.actionable.count == 0
   and .decision.actionable.recommended_gate_id == null
   and .handoff.sources.desktop_scaffold_ok == "roadmap_progress_summary.vpn_track.phase3_windows_client_beta_handoff.desktop_scaffold_ok"
+  and .handoff.sources.windows_native_bootstrap_guardrails_ok == "roadmap_progress_summary.vpn_track.phase3_windows_client_beta_handoff.windows_native_bootstrap_guardrails_ok"
 ' "$PASS_OUTPUT" >/dev/null; then
   echo "primary pass-path summary mismatch"
   cat "$PASS_OUTPUT"
@@ -222,6 +229,7 @@ cat >"$FALLBACK_CHECK" <<'EOF_FALLBACK_CHECK'
     "easy_node_config_v1_ok": true,
     "launcher_wiring_ok": true,
     "launcher_runtime_ok": true,
+    "windows_native_bootstrap_guardrails_ok": true,
     "windows_parity_ok": true,
     "desktop_contract_ok": true,
     "installer_update_ok": true,
@@ -247,6 +255,7 @@ if ! jq -e '
   and .desktop_contract_ok == true
   and .installer_update_ok == true
   and .telemetry_stability_ok == true
+  and .signals.windows_native_bootstrap_guardrails_ok == true
   and .signals.windows_parity_ok == true
   and .signals.desktop_contract_ok == true
   and .signals.installer_update_ok == true
@@ -323,12 +332,14 @@ if ! jq -e '
   and .handoff.easy_node_config_v1_ok == true
   and .handoff.launcher_wiring_ok == true
   and .handoff.launcher_runtime_ok == true
+  and .handoff.windows_native_bootstrap_guardrails_ok == true
   and .handoff.sources.desktop_scaffold_ok == "phase3_windows_client_beta_check_summary.desktop_scaffold_ok"
   and .handoff.sources.local_control_api_ok == "phase3_windows_client_beta_check_summary.local_control_api_ok"
   and .handoff.sources.local_api_config_defaults_ok == "phase3_windows_client_beta_check_summary.local_api_config_defaults_ok"
   and .handoff.sources.easy_node_config_v1_ok == "phase3_windows_client_beta_check_summary.easy_node_config_v1_ok"
   and .handoff.sources.launcher_wiring_ok == "phase3_windows_client_beta_check_summary.launcher_wiring_ok"
   and .handoff.sources.launcher_runtime_ok == "phase3_windows_client_beta_check_summary.launcher_runtime_ok"
+  and .handoff.sources.windows_native_bootstrap_guardrails_ok == "phase3_windows_client_beta_check_summary.windows_native_bootstrap_guardrails_ok"
   and .handoff.failure_semantics.run_pipeline_ok.kind == "none"
   and .handoff.failure_semantics.desktop_scaffold_ok.kind == "none"
   and .handoff.failure_semantics.local_control_api_ok.kind == "none"
@@ -336,6 +347,7 @@ if ! jq -e '
   and .handoff.failure_semantics.easy_node_config_v1_ok.kind == "none"
   and .handoff.failure_semantics.launcher_wiring_ok.kind == "none"
   and .handoff.failure_semantics.launcher_runtime_ok.kind == "none"
+  and .handoff.failure_semantics.windows_native_bootstrap_guardrails_ok.kind == "none"
   and .failure.kind == "none"
   and .policy_outcome.decision == "GO"
   and .decision.actionable.count == 0
@@ -401,6 +413,7 @@ echo "[phase3-windows-client-beta-handoff-check] unresolved booleans with relaxe
   --require-easy-node-config-v1-ok 0 \
   --require-launcher-wiring-ok 0 \
   --require-launcher-runtime-ok 0 \
+  --require-windows-native-bootstrap-guardrails-ok 0 \
   --show-json 0 >"$UNRESOLVED_LOG" 2>&1
 
 if ! jq -e '
@@ -413,6 +426,7 @@ if ! jq -e '
   and .handoff.easy_node_config_v1_ok == null
   and .handoff.launcher_wiring_ok == null
   and .handoff.launcher_runtime_ok == null
+  and .handoff.windows_native_bootstrap_guardrails_ok == null
   and .failure.kind == "none"
   and .policy_outcome.decision == "GO"
   and .decision.actionable.count == 0
@@ -446,6 +460,11 @@ if ! jq -e '
   and .handoff.sources.desktop_scaffold_ok == "unresolved"
   and .handoff.failure_semantics.desktop_scaffold_ok.kind == "execution_failure"
   and .handoff.failure_semantics.desktop_scaffold_ok.execution_failure == true
+  and .handoff.windows_native_bootstrap_guardrails_ok == null
+  and .handoff.windows_native_bootstrap_guardrails_resolved == false
+  and .handoff.sources.windows_native_bootstrap_guardrails_ok == "unresolved"
+  and .handoff.failure_semantics.windows_native_bootstrap_guardrails_ok.kind == "execution_failure"
+  and .handoff.failure_semantics.windows_native_bootstrap_guardrails_ok.execution_failure == true
   and .failure.kind == "execution_failure"
   and .failure.execution_failure == true
   and .policy_outcome.decision == "ERROR"
@@ -502,7 +521,8 @@ cat >"$FAIL_ROADMAP" <<'EOF_FAIL_ROADMAP'
       "local_api_config_defaults_ok": true,
       "easy_node_config_v1_ok": true,
       "launcher_wiring_ok": true,
-      "launcher_runtime_ok": true
+      "launcher_runtime_ok": true,
+      "windows_native_bootstrap_guardrails_ok": true
     }
   }
 }
