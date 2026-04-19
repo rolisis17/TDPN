@@ -38,7 +38,7 @@ Then open:
 - If `/v1/config` is unavailable, portal continues without hard failure and keeps compatibility override behavior available.
 - If `GPM_MAIN_DOMAIN` (legacy alias: `TDPN_MAIN_DOMAIN`) is set, manifest URLs are trusted only when the host matches the pinned main-domain host, including cache fallback source URLs. This hardening is skipped when the main domain is unset for dev compatibility, and it sits alongside existing signature verification and expiry checks.
 - Portal onboarding fields are persisted in browser `localStorage` and restored on reload; session refresh/revoke keeps stored token/role in sync.
-- Wallet sign-in supports wallet-extension assisted signing for Keplr/Leap in portal (`challenge -> signArbitrary -> verify`) and retains manual signature entry fallback for compatibility and troubleshooting.
+- Wallet sign-in supports wallet-extension assisted signing for Keplr/Leap in portal (`challenge -> signArbitrary -> verify`); when wallet-assisted context still matches the active `challenge_id` and `signature`, verify also sends optional signature metadata (`signature_kind`, `public_key`, `public_key_type`, `signature_source`, `chain_id`, `signed_message`, `signature_envelope`) and retains manual signature entry fallback for compatibility and troubleshooting.
 - Portal moderation UI now includes explicit `Approve Operator` and `Reject Operator` actions with a moderation reason input.
 - Rejection requires a non-empty `reason`; approval includes `reason` when provided.
 - Portal operator listing now includes `List Operators` with queue filters (`status=""` default, `limit=100` default) in addition to `List Pending Operators` (`status=pending`, `limit=25`).

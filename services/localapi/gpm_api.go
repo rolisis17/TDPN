@@ -94,13 +94,30 @@ type gpmAuthChallengeRequest struct {
 }
 
 type gpmAuthVerifyRequest struct {
-	WalletAddress  string `json:"wallet_address"`
-	WalletProvider string `json:"wallet_provider"`
-	ChallengeID    string `json:"challenge_id"`
-	Signature      string `json:"signature"`
+	WalletAddress          string `json:"wallet_address"`
+	WalletProvider         string `json:"wallet_provider"`
+	ChallengeID            string `json:"challenge_id"`
+	Signature              string `json:"signature"`
+	SignatureKind          string `json:"signature_kind,omitempty"`
+	SignaturePublicKey     string `json:"signature_public_key,omitempty"`
+	SignaturePublicKeyType string `json:"signature_public_key_type,omitempty"`
+	SignatureSource        string `json:"signature_source,omitempty"`
+	ChainID                string `json:"chain_id,omitempty"`
+	SignedMessage          string `json:"signed_message,omitempty"`
+	SignatureEnvelope      string `json:"signature_envelope,omitempty"`
 }
 
 type gpmAuthSignatureVerifier func(challenge gpmWalletChallenge, walletAddress string, walletProvider string, signature string) error
+
+type gpmAuthSignatureMetadata struct {
+	SignatureKind          string
+	SignaturePublicKey     string
+	SignaturePublicKeyType string
+	SignatureSource        string
+	ChainID                string
+	SignedMessage          string
+	SignatureEnvelope      string
+}
 
 type gpmSessionStatusRequest struct {
 	SessionToken string `json:"session_token"`
@@ -498,6 +515,15 @@ func (s *Service) handleGPMAuthVerify(w http.ResponseWriter, r *http.Request) {
 	in.WalletProvider = normalizeWalletProvider(in.WalletProvider)
 	in.ChallengeID = strings.TrimSpace(in.ChallengeID)
 	signature := strings.TrimSpace(in.Signature)
+	signatureMetadata := gpmAuthSignatureMetadata{
+		SignatureKind:          strings.TrimSpace(in.SignatureKind),
+		SignaturePublicKey:     strings.TrimSpace(in.SignaturePublicKey),
+		SignaturePublicKeyType: strings.TrimSpace(in.SignaturePublicKeyType),
+		SignatureSource:        strings.TrimSpace(in.SignatureSource),
+		ChainID:                strings.TrimSpace(in.ChainID),
+		SignedMessage:          in.SignedMessage,
+		SignatureEnvelope:      in.SignatureEnvelope,
+	}
 	if in.WalletAddress == "" || in.WalletProvider == "" || in.ChallengeID == "" || signature == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
 			"ok":    false,
@@ -514,7 +540,7 @@ func (s *Service) handleGPMAuthVerify(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "challenge identity mismatch"})
 		return
 	}
-	if err := s.verifyGPMAuthSignature(r.Context(), challenge, in.WalletAddress, in.WalletProvider, signature); err != nil {
+	if err := s.verifyGPMAuthSignature(r.Context(), challenge, in.WalletAddress, in.WalletProvider, signature, signatureMetadata); err != nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
@@ -1471,7 +1497,7 @@ func defaultGPMAuthSignatureVerifier(challenge gpmWalletChallenge, walletAddress
 	return nil
 }
 
-func (s *Service) verifyGPMAuthSignature(ctx context.Context, challenge gpmWalletChallenge, walletAddress string, walletProvider string, signature string) error {
+func (s *Service) verifyGPMAuthSignature(ctx context.Context, challenge gpmWalletChallenge, walletAddress string, walletProvider string, signature string, signatureMetadata gpmAuthSignatureMetadata) error {
 	verifier := s.gpmAuthSignatureVerifier
 	if verifier == nil {
 		verifier = defaultGPMAuthSignatureVerifier
@@ -1479,13 +1505,13 @@ func (s *Service) verifyGPMAuthSignature(ctx context.Context, challenge gpmWalle
 	if err := verifier(challenge, walletAddress, walletProvider, signature); err != nil {
 		return err
 	}
-	if err := s.runGPMAuthVerifierCommand(ctx, challenge, walletAddress, walletProvider, signature); err != nil {
+	if err := s.runGPMAuthVerifierCommand(ctx, challenge, walletAddress, walletProvider, signature, signatureMetadata); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (s *Service) runGPMAuthVerifierCommand(ctx context.Context, challenge gpmWalletChallenge, walletAddress string, walletProvider string, signature string) error {
+func (s *Service) runGPMAuthVerifierCommand(ctx context.Context, challenge gpmWalletChallenge, walletAddress string, walletProvider string, signature string, signatureMetadata gpmAuthSignatureMetadata) error {
 	commandRaw := strings.TrimSpace(s.gpmAuthVerifyCommand)
 	if commandRaw == "" {
 		return nil
@@ -1507,6 +1533,13 @@ func (s *Service) runGPMAuthVerifierCommand(ctx context.Context, challenge gpmWa
 		"GPM_AUTH_VERIFY_WALLET_ADDRESS="+strings.TrimSpace(walletAddress),
 		"GPM_AUTH_VERIFY_WALLET_PROVIDER="+strings.TrimSpace(walletProvider),
 		"GPM_AUTH_VERIFY_SIGNATURE="+strings.TrimSpace(signature),
+		"GPM_AUTH_VERIFY_SIGNATURE_KIND="+signatureMetadata.SignatureKind,
+		"GPM_AUTH_VERIFY_SIGNATURE_PUBLIC_KEY="+signatureMetadata.SignaturePublicKey,
+		"GPM_AUTH_VERIFY_SIGNATURE_PUBLIC_KEY_TYPE="+signatureMetadata.SignaturePublicKeyType,
+		"GPM_AUTH_VERIFY_SIGNATURE_SOURCE="+signatureMetadata.SignatureSource,
+		"GPM_AUTH_VERIFY_CHAIN_ID="+signatureMetadata.ChainID,
+		"GPM_AUTH_VERIFY_SIGNED_MESSAGE="+signatureMetadata.SignedMessage,
+		"GPM_AUTH_VERIFY_SIGNATURE_ENVELOPE="+signatureMetadata.SignatureEnvelope,
 	)
 	outputBuffer := newBoundedOutputBuffer(gpmAuthVerifierOutputLimit)
 	cmd.Stdout = outputBuffer

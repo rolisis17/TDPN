@@ -89,6 +89,7 @@ let operatorListActiveFilters = {
   limit: OPERATOR_LIST_ALL_LIMIT
 };
 let operatorListNextCursor = "";
+let walletSignatureContext = null;
 
 function localStore() {
   try {
@@ -1568,6 +1569,160 @@ function readWalletPayload() {
   };
 }
 
+function normalizeWalletAddressForCompare(value) {
+  const parsed = nonEmptyString(value);
+  if (!parsed) {
+    return "";
+  }
+  return parsed.toLowerCase();
+}
+
+function cloneJSONSerializable(value) {
+  if (value === undefined) {
+    return undefined;
+  }
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return undefined;
+  }
+}
+
+function extractSignArbitraryPublicKey(payload) {
+  const publicKey = nonEmptyString(
+    firstDefined(
+      payload?.pub_key?.value,
+      payload?.pubKey?.value,
+      payload?.signature?.pub_key?.value,
+      payload?.signature?.pubKey?.value,
+      payload?.result?.pub_key?.value,
+      payload?.result?.pubKey?.value,
+      payload?.result?.signature?.pub_key?.value,
+      payload?.result?.signature?.pubKey?.value,
+      payload?.pub_key,
+      payload?.pubKey
+    )
+  );
+  const publicKeyType = nonEmptyString(
+    firstDefined(
+      payload?.pub_key?.type,
+      payload?.pubKey?.type,
+      payload?.signature?.pub_key?.type,
+      payload?.signature?.pubKey?.type,
+      payload?.result?.pub_key?.type,
+      payload?.result?.pubKey?.type,
+      payload?.result?.signature?.pub_key?.type,
+      payload?.result?.signature?.pubKey?.type
+    )
+  );
+  return { publicKey, publicKeyType };
+}
+
+function setWalletSignatureContext(context) {
+  walletSignatureContext = context && typeof context === "object" ? context : null;
+}
+
+function clearWalletSignatureContext() {
+  walletSignatureContext = null;
+}
+
+function buildWalletSignatureContext({
+  walletProvider,
+  walletAddress,
+  challengeId,
+  challengeMessage,
+  chainId,
+  signature,
+  signaturePayload
+}) {
+  const normalizedProvider = normalizeWalletProviderValue(walletProvider);
+  const normalizedWalletAddress = nonEmptyString(walletAddress);
+  const normalizedChallengeId = nonEmptyString(challengeId);
+  const normalizedChallengeMessage = nonEmptyString(challengeMessage);
+  const normalizedChainId = nonEmptyString(chainId);
+  const normalizedSignature = nonEmptyString(signature);
+  if (
+    !normalizedProvider ||
+    !normalizedWalletAddress ||
+    !normalizedChallengeId ||
+    !normalizedChallengeMessage ||
+    !normalizedChainId ||
+    !normalizedSignature
+  ) {
+    return null;
+  }
+  const metadata = {
+    signature_kind: "sign_arbitrary",
+    signature_source: "wallet_extension",
+    chain_id: normalizedChainId,
+    signed_message: normalizedChallengeMessage
+  };
+  const { publicKey, publicKeyType } = extractSignArbitraryPublicKey(signaturePayload);
+  if (publicKey) {
+    metadata.public_key = publicKey;
+  }
+  if (publicKeyType) {
+    metadata.public_key_type = publicKeyType;
+  }
+  const signatureEnvelope = cloneJSONSerializable(signaturePayload);
+  if (signatureEnvelope !== undefined) {
+    metadata.signature_envelope = signatureEnvelope;
+  }
+  return {
+    wallet_provider: normalizedProvider,
+    wallet_address: normalizedWalletAddress,
+    challenge_id: normalizedChallengeId,
+    challenge_message: normalizedChallengeMessage,
+    chain_id: normalizedChainId,
+    signature: normalizedSignature,
+    metadata
+  };
+}
+
+function isWalletSignatureContextValidForRequest(context, request) {
+  if (!context || typeof context !== "object" || !request || typeof request !== "object") {
+    return false;
+  }
+  const requestWalletProvider = normalizeWalletProviderValue(request.wallet_provider);
+  const contextWalletProvider = normalizeWalletProviderValue(context.wallet_provider);
+  if (!requestWalletProvider || !contextWalletProvider || requestWalletProvider !== contextWalletProvider) {
+    return false;
+  }
+  if (
+    normalizeWalletAddressForCompare(request.wallet_address) !== normalizeWalletAddressForCompare(context.wallet_address)
+  ) {
+    return false;
+  }
+  const requestChallengeId = nonEmptyString(request.challenge_id) || "";
+  const requestSignature = nonEmptyString(request.signature) || "";
+  if (!requestChallengeId || !requestSignature) {
+    return false;
+  }
+  if (requestChallengeId !== (nonEmptyString(context.challenge_id) || "")) {
+    return false;
+  }
+  if (requestSignature !== (nonEmptyString(context.signature) || "")) {
+    return false;
+  }
+  const currentChallengeMessage = challengeMessageEl.value.trim();
+  if (currentChallengeMessage !== (nonEmptyString(context.challenge_message) || "")) {
+    return false;
+  }
+  const currentChainId = walletChainIdEl.value.trim();
+  if (currentChainId !== (nonEmptyString(context.chain_id) || "")) {
+    return false;
+  }
+  return true;
+}
+
+function authVerifySignatureContext(request) {
+  if (!isWalletSignatureContextValidForRequest(walletSignatureContext, request)) {
+    return undefined;
+  }
+  const context = walletSignatureContext?.metadata;
+  return context && typeof context === "object" ? context : undefined;
+}
+
 async function readWalletAddressFromSignerFactory(source, methodName, chainId) {
   if (!source || typeof source[methodName] !== "function") {
     return undefined;
@@ -1683,6 +1838,17 @@ async function signChallengeWithWalletExtension() {
   if (!signature) {
     throw new Error("Wallet extension returned an empty signature for signArbitrary.");
   }
+  setWalletSignatureContext(
+    buildWalletSignatureContext({
+      walletProvider: provider,
+      walletAddress,
+      challengeId,
+      challengeMessage,
+      chainId,
+      signature,
+      signaturePayload
+    })
+  );
   byId("signature").value = signature;
   persistPortalState();
   return {
@@ -1697,6 +1863,7 @@ async function signChallengeWithWalletExtension() {
 async function requestAuthChallenge() {
   const result = await post("/v1/gpm/auth/challenge", readWalletPayload());
   applyChallengePayload(result);
+  clearWalletSignatureContext();
   return result;
 }
 
@@ -1706,6 +1873,10 @@ async function requestAuthVerify() {
     challenge_id: byId("challenge_id").value.trim(),
     signature: byId("signature").value.trim()
   };
+  const signatureContext = authVerifySignatureContext(request);
+  if (signatureContext) {
+    Object.assign(request, signatureContext);
+  }
   const result = await post("/v1/gpm/auth/verify", request);
   setOperatorApplicationStatus(undefined);
   setSelectedApplicationUpdatedAt("");

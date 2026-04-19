@@ -341,6 +341,48 @@ func authVerifierCommandExpectSignature(expected string, failOutput string, fail
 	)
 }
 
+func authVerifierCommandExpectSignatureMetadata(expectedSignature string, expectedMetadata gpmAuthSignatureMetadata, failOutput string, failCode int) string {
+	expectedSignature = strings.TrimSpace(expectedSignature)
+	failOutput = strings.TrimSpace(failOutput)
+	if runtime.GOOS == "windows" {
+		escapedSignature := strings.ReplaceAll(expectedSignature, "'", "''")
+		escapedSignatureKind := strings.ReplaceAll(expectedMetadata.SignatureKind, "'", "''")
+		escapedSignaturePublicKey := strings.ReplaceAll(expectedMetadata.SignaturePublicKey, "'", "''")
+		escapedSignaturePublicKeyType := strings.ReplaceAll(expectedMetadata.SignaturePublicKeyType, "'", "''")
+		escapedSignatureSource := strings.ReplaceAll(expectedMetadata.SignatureSource, "'", "''")
+		escapedChainID := strings.ReplaceAll(expectedMetadata.ChainID, "'", "''")
+		escapedSignedMessage := strings.ReplaceAll(expectedMetadata.SignedMessage, "'", "''")
+		escapedSignatureEnvelope := strings.ReplaceAll(expectedMetadata.SignatureEnvelope, "'", "''")
+		escapedFailOutput := strings.ReplaceAll(failOutput, "'", "''")
+		return fmt.Sprintf(
+			"powershell -NoProfile -Command \"if (($env:GPM_AUTH_VERIFY_SIGNATURE -eq '%s') -and ($env:GPM_AUTH_VERIFY_SIGNATURE_KIND -eq '%s') -and ($env:GPM_AUTH_VERIFY_SIGNATURE_PUBLIC_KEY -eq '%s') -and ($env:GPM_AUTH_VERIFY_SIGNATURE_PUBLIC_KEY_TYPE -eq '%s') -and ($env:GPM_AUTH_VERIFY_SIGNATURE_SOURCE -eq '%s') -and ($env:GPM_AUTH_VERIFY_CHAIN_ID -eq '%s') -and ($env:GPM_AUTH_VERIFY_SIGNED_MESSAGE -eq '%s') -and ($env:GPM_AUTH_VERIFY_SIGNATURE_ENVELOPE -eq '%s') -and -not [string]::IsNullOrWhiteSpace($env:GPM_AUTH_VERIFY_CHALLENGE_ID)) { exit 0 }; Write-Output '%s'; exit %d\"",
+			escapedSignature,
+			escapedSignatureKind,
+			escapedSignaturePublicKey,
+			escapedSignaturePublicKeyType,
+			escapedSignatureSource,
+			escapedChainID,
+			escapedSignedMessage,
+			escapedSignatureEnvelope,
+			escapedFailOutput,
+			failCode,
+		)
+	}
+	return fmt.Sprintf(
+		"sh -c \"if [ \\\"$GPM_AUTH_VERIFY_SIGNATURE\\\" = '%s' ] && [ \\\"$GPM_AUTH_VERIFY_SIGNATURE_KIND\\\" = '%s' ] && [ \\\"$GPM_AUTH_VERIFY_SIGNATURE_PUBLIC_KEY\\\" = '%s' ] && [ \\\"$GPM_AUTH_VERIFY_SIGNATURE_PUBLIC_KEY_TYPE\\\" = '%s' ] && [ \\\"$GPM_AUTH_VERIFY_SIGNATURE_SOURCE\\\" = '%s' ] && [ \\\"$GPM_AUTH_VERIFY_CHAIN_ID\\\" = '%s' ] && [ \\\"$GPM_AUTH_VERIFY_SIGNED_MESSAGE\\\" = '%s' ] && [ \\\"$GPM_AUTH_VERIFY_SIGNATURE_ENVELOPE\\\" = '%s' ] && [ -n \\\"$GPM_AUTH_VERIFY_CHALLENGE_ID\\\" ]; then exit 0; fi; echo %s; exit %d\"",
+		expectedSignature,
+		expectedMetadata.SignatureKind,
+		expectedMetadata.SignaturePublicKey,
+		expectedMetadata.SignaturePublicKeyType,
+		expectedMetadata.SignatureSource,
+		expectedMetadata.ChainID,
+		expectedMetadata.SignedMessage,
+		expectedMetadata.SignatureEnvelope,
+		failOutput,
+		failCode,
+	)
+}
+
 func TestNormalizePathProfile(t *testing.T) {
 	tests := []struct {
 		in   string
@@ -2944,6 +2986,41 @@ func TestGPMAuthVerifyConfiguredVerifierCommandAllowsValidSignature(t *testing.T
 	}
 
 	verifyBody := `{"wallet_address":"cosmos1cmdallow","wallet_provider":"keplr","challenge_id":"` + challengeID + `","signature":"signed-proof-value"}`
+	code, payload = callJSONHandler(t, svc.handleGPMAuthVerify, http.MethodPost, "/v1/gpm/auth/verify", verifyBody)
+	if code != http.StatusOK {
+		t.Fatalf("verify status=%d body=%v", code, payload)
+	}
+	if got, _ := payload["session_token"].(string); strings.TrimSpace(got) == "" {
+		t.Fatalf("session_token missing payload=%v", payload)
+	}
+}
+
+func TestGPMAuthVerifyConfiguredVerifierCommandPropagatesSignatureMetadata(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	svc.gpmRoleDefault = "client"
+	expectedMetadata := gpmAuthSignatureMetadata{
+		SignatureKind:          "eip191",
+		SignaturePublicKey:     "04abc123",
+		SignaturePublicKeyType: "secp256k1",
+		SignatureSource:        "wallet-extension",
+		ChainID:                "evm-11155111",
+		SignedMessage:          "PleaseSignAuthProof",
+		SignatureEnvelope:      "envelope-v1",
+	}
+	svc.gpmAuthVerifyCommand = authVerifierCommandExpectSignatureMetadata("signed-proof-value", expectedMetadata, "bad-signature-metadata", 13)
+
+	challengeBody := `{"wallet_address":"cosmos1cmdmeta","wallet_provider":"keplr"}`
+	code, payload := callJSONHandler(t, svc.handleGPMAuthChallenge, http.MethodPost, "/v1/gpm/auth/challenge", challengeBody)
+	if code != http.StatusOK {
+		t.Fatalf("challenge status=%d body=%v", code, payload)
+	}
+	challengeID, _ := payload["challenge_id"].(string)
+	if strings.TrimSpace(challengeID) == "" {
+		t.Fatalf("challenge_id missing: %v", payload)
+	}
+
+	verifyBody := `{"wallet_address":"cosmos1cmdmeta","wallet_provider":"keplr","challenge_id":"` + challengeID + `","signature":"signed-proof-value","signature_kind":"eip191","signature_public_key":"04abc123","signature_public_key_type":"secp256k1","signature_source":"wallet-extension","chain_id":"evm-11155111","signed_message":"PleaseSignAuthProof","signature_envelope":"envelope-v1"}`
 	code, payload = callJSONHandler(t, svc.handleGPMAuthVerify, http.MethodPost, "/v1/gpm/auth/verify", verifyBody)
 	if code != http.StatusOK {
 		t.Fatalf("verify status=%d body=%v", code, payload)
