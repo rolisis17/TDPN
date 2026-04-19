@@ -72,6 +72,7 @@ GPM onboarding/session endpoints (used by desktop and portal flows):
 - `POST /v1/gpm/session` (`action=status|refresh|revoke`)
 - `POST /v1/gpm/onboarding/client/register`
 - `POST /v1/gpm/onboarding/client/status` (returns `registered|not_registered`, `bootstrap_directory`, and persisted `path_profile` when available)
+- `POST /v1/gpm/onboarding/server/status` (returns server-tab/lifecycle readiness derived from role, operator approval state, and chain-id sync hints)
 - `POST /v1/gpm/onboarding/operator/apply`
 - `POST /v1/gpm/onboarding/operator/status`
 - `POST /v1/gpm/onboarding/operator/approve`
@@ -175,6 +176,35 @@ Behavior:
   - `LOCAL_CONTROL_API_SERVICE_RESTART_COMMAND`
 - If command is unset, returns `501` with configuration guidance.
 - On command failure, returns `502` with `rc` and combined output.
+
+### `POST /v1/gpm/onboarding/server/status`
+Body (either field may be supplied; at least one is required):
+
+```json
+{
+  "session_token": "optional-session-token",
+  "wallet_address": "optional-wallet-address"
+}
+```
+
+Resolution and errors:
+- uses command-read auth (`requireCommandReadAuth`)
+- if `session_token` is provided but missing/expired: `404` with `{"ok":false,"error":"session not found"}`
+- if wallet cannot be resolved from request/session: `400` with `wallet_address or session_token is required`
+
+Success payload:
+- `ok`: `true`
+- `readiness.wallet_address`: resolved wallet address
+- `readiness.role`: session role when session is present, otherwise `client`
+- `readiness.session_present`: whether a valid session was resolved
+- `readiness.operator_application_status`: `not_submitted|pending|approved|rejected`
+- `readiness.chain_operator_id`: operator application chain id when present
+- `readiness.session_chain_operator_id`: chain id on resolved session when present
+- `readiness.tab_visible`: `true` for `operator|admin`, else `false`
+- `readiness.lifecycle_actions_unlocked`: `true` for `admin`, or `operator` with approved application and non-conflicting chain ids
+- `readiness.service_mutations_configured`: `true` when all legacy service lifecycle commands are configured (`LOCAL_CONTROL_API_SERVICE_START_COMMAND`, `LOCAL_CONTROL_API_SERVICE_STOP_COMMAND`, `LOCAL_CONTROL_API_SERVICE_RESTART_COMMAND`)
+- `readiness.lock_reason`: non-empty reason when lifecycle actions are locked
+- `readiness.unlock_actions`: guidance steps to unlock lifecycle actions
 
 ## Desktop Command Bridge (Scaffold)
 

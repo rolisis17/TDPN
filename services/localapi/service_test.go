@@ -2901,6 +2901,240 @@ func TestGPMClientStatusEndpointRegistrationStates(t *testing.T) {
 	})
 }
 
+func TestGPMServerStatus(t *testing.T) {
+	newServerStatusService := func(t *testing.T) *Service {
+		t.Helper()
+		svc, _ := newFakeService(t, false)
+		svc.gpmState = newGPMRuntimeState()
+		svc.serviceStart = "echo start"
+		svc.serviceStop = "echo stop"
+		svc.serviceRestart = "echo restart"
+		return svc
+	}
+	getReadiness := func(t *testing.T, payload map[string]any) map[string]any {
+		t.Helper()
+		readiness, _ := payload["readiness"].(map[string]any)
+		if readiness == nil {
+			t.Fatalf("readiness missing payload=%v", payload)
+		}
+		return readiness
+	}
+	now := time.Now().UTC()
+
+	t.Run("admin unlocked", func(t *testing.T) {
+		svc := newServerStatusService(t)
+		svc.gpmState.putSession(gpmSession{
+			Token:          "gpm-server-admin-token",
+			WalletAddress:  "cosmos1serveradmin",
+			WalletProvider: "keplr",
+			Role:           "admin",
+			CreatedAt:      now,
+			ExpiresAt:      now.Add(time.Hour),
+		})
+
+		body := `{"session_token":"gpm-server-admin-token"}`
+		code, payload := callJSONHandler(t, svc.handleGPMServerStatus, http.MethodPost, "/v1/gpm/onboarding/server/status", body)
+		if code != http.StatusOK {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		readiness := getReadiness(t, payload)
+		if got, _ := readiness["role"].(string); got != "admin" {
+			t.Fatalf("role=%q want=admin payload=%v", got, payload)
+		}
+		if got, _ := readiness["session_present"].(bool); !got {
+			t.Fatalf("session_present=%v want=true payload=%v", readiness["session_present"], payload)
+		}
+		if got, _ := readiness["tab_visible"].(bool); !got {
+			t.Fatalf("tab_visible=%v want=true payload=%v", readiness["tab_visible"], payload)
+		}
+		if got, _ := readiness["lifecycle_actions_unlocked"].(bool); !got {
+			t.Fatalf("lifecycle_actions_unlocked=%v want=true payload=%v", readiness["lifecycle_actions_unlocked"], payload)
+		}
+		if got, _ := readiness["service_mutations_configured"].(bool); !got {
+			t.Fatalf("service_mutations_configured=%v want=true payload=%v", readiness["service_mutations_configured"], payload)
+		}
+	})
+
+	t.Run("operator pending locked", func(t *testing.T) {
+		svc := newServerStatusService(t)
+		svc.gpmState.putSession(gpmSession{
+			Token:           "gpm-server-operator-pending-token",
+			WalletAddress:   "cosmos1operatorpendingstatus",
+			WalletProvider:  "keplr",
+			Role:            "operator",
+			CreatedAt:       now,
+			ExpiresAt:       now.Add(time.Hour),
+			ChainOperatorID: "operator-pending-1",
+		})
+		svc.gpmState.upsertOperator(gpmOperatorApplication{
+			WalletAddress:   "cosmos1operatorpendingstatus",
+			ChainOperatorID: "operator-pending-1",
+			Status:          "pending",
+			UpdatedAt:       now,
+		})
+
+		body := `{"session_token":"gpm-server-operator-pending-token"}`
+		code, payload := callJSONHandler(t, svc.handleGPMServerStatus, http.MethodPost, "/v1/gpm/onboarding/server/status", body)
+		if code != http.StatusOK {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		readiness := getReadiness(t, payload)
+		if got, _ := readiness["operator_application_status"].(string); got != "pending" {
+			t.Fatalf("operator_application_status=%q want=pending payload=%v", got, payload)
+		}
+		if got, _ := readiness["tab_visible"].(bool); !got {
+			t.Fatalf("tab_visible=%v want=true payload=%v", readiness["tab_visible"], payload)
+		}
+		if got, _ := readiness["lifecycle_actions_unlocked"].(bool); got {
+			t.Fatalf("lifecycle_actions_unlocked=%v want=false payload=%v", readiness["lifecycle_actions_unlocked"], payload)
+		}
+		lockReason, _ := readiness["lock_reason"].(string)
+		if !strings.Contains(lockReason, "pending") {
+			t.Fatalf("lock_reason=%q want pending message payload=%v", lockReason, payload)
+		}
+	})
+
+	t.Run("operator approved unlocked", func(t *testing.T) {
+		svc := newServerStatusService(t)
+		svc.gpmState.putSession(gpmSession{
+			Token:           "gpm-server-operator-approved-token",
+			WalletAddress:   "cosmos1operatorapprovedstatus",
+			WalletProvider:  "keplr",
+			Role:            "operator",
+			CreatedAt:       now,
+			ExpiresAt:       now.Add(time.Hour),
+			ChainOperatorID: "operator-approved-1",
+		})
+		svc.gpmState.upsertOperator(gpmOperatorApplication{
+			WalletAddress:   "cosmos1operatorapprovedstatus",
+			ChainOperatorID: "operator-approved-1",
+			Status:          "approved",
+			UpdatedAt:       now,
+		})
+
+		body := `{"session_token":"gpm-server-operator-approved-token"}`
+		code, payload := callJSONHandler(t, svc.handleGPMServerStatus, http.MethodPost, "/v1/gpm/onboarding/server/status", body)
+		if code != http.StatusOK {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		readiness := getReadiness(t, payload)
+		if got, _ := readiness["operator_application_status"].(string); got != "approved" {
+			t.Fatalf("operator_application_status=%q want=approved payload=%v", got, payload)
+		}
+		if got, _ := readiness["lifecycle_actions_unlocked"].(bool); !got {
+			t.Fatalf("lifecycle_actions_unlocked=%v want=true payload=%v", readiness["lifecycle_actions_unlocked"], payload)
+		}
+		if got, _ := readiness["chain_operator_id"].(string); got != "operator-approved-1" {
+			t.Fatalf("chain_operator_id=%q want=operator-approved-1 payload=%v", got, payload)
+		}
+		if got, _ := readiness["session_chain_operator_id"].(string); got != "operator-approved-1" {
+			t.Fatalf("session_chain_operator_id=%q want=operator-approved-1 payload=%v", got, payload)
+		}
+	})
+
+	t.Run("operator approved but chain mismatch locked", func(t *testing.T) {
+		svc := newServerStatusService(t)
+		svc.gpmState.putSession(gpmSession{
+			Token:           "gpm-server-operator-mismatch-token",
+			WalletAddress:   "cosmos1operatormismatchstatus",
+			WalletProvider:  "keplr",
+			Role:            "operator",
+			CreatedAt:       now,
+			ExpiresAt:       now.Add(time.Hour),
+			ChainOperatorID: "operator-approved-a",
+		})
+		svc.gpmState.upsertOperator(gpmOperatorApplication{
+			WalletAddress:   "cosmos1operatormismatchstatus",
+			ChainOperatorID: "operator-approved-b",
+			Status:          "approved",
+			UpdatedAt:       now,
+		})
+
+		body := `{"session_token":"gpm-server-operator-mismatch-token"}`
+		code, payload := callJSONHandler(t, svc.handleGPMServerStatus, http.MethodPost, "/v1/gpm/onboarding/server/status", body)
+		if code != http.StatusOK {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		readiness := getReadiness(t, payload)
+		if got, _ := readiness["lifecycle_actions_unlocked"].(bool); got {
+			t.Fatalf("lifecycle_actions_unlocked=%v want=false payload=%v", readiness["lifecycle_actions_unlocked"], payload)
+		}
+		lockReason, _ := readiness["lock_reason"].(string)
+		if !strings.Contains(lockReason, "out of sync") {
+			t.Fatalf("lock_reason=%q want out-of-sync message payload=%v", lockReason, payload)
+		}
+	})
+
+	t.Run("client role locked and tab hidden", func(t *testing.T) {
+		svc := newServerStatusService(t)
+		svc.gpmState.putSession(gpmSession{
+			Token:          "gpm-server-client-token",
+			WalletAddress:  "cosmos1clientstatus",
+			WalletProvider: "keplr",
+			Role:           "client",
+			CreatedAt:      now,
+			ExpiresAt:      now.Add(time.Hour),
+		})
+
+		body := `{"session_token":"gpm-server-client-token"}`
+		code, payload := callJSONHandler(t, svc.handleGPMServerStatus, http.MethodPost, "/v1/gpm/onboarding/server/status", body)
+		if code != http.StatusOK {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		readiness := getReadiness(t, payload)
+		if got, _ := readiness["role"].(string); got != "client" {
+			t.Fatalf("role=%q want=client payload=%v", got, payload)
+		}
+		if got, _ := readiness["tab_visible"].(bool); got {
+			t.Fatalf("tab_visible=%v want=false payload=%v", readiness["tab_visible"], payload)
+		}
+		if got, _ := readiness["lifecycle_actions_unlocked"].(bool); got {
+			t.Fatalf("lifecycle_actions_unlocked=%v want=false payload=%v", readiness["lifecycle_actions_unlocked"], payload)
+		}
+		lockReason, _ := readiness["lock_reason"].(string)
+		if !strings.Contains(lockReason, "operator or admin required") {
+			t.Fatalf("lock_reason=%q want operator/admin gate payload=%v", lockReason, payload)
+		}
+	})
+
+	t.Run("wallet-only path with not_submitted", func(t *testing.T) {
+		svc := newServerStatusService(t)
+
+		body := `{"wallet_address":"cosmos1walletonlystatus"}`
+		code, payload := callJSONHandler(t, svc.handleGPMServerStatus, http.MethodPost, "/v1/gpm/onboarding/server/status", body)
+		if code != http.StatusOK {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		readiness := getReadiness(t, payload)
+		if got, _ := readiness["wallet_address"].(string); got != "cosmos1walletonlystatus" {
+			t.Fatalf("wallet_address=%q want=cosmos1walletonlystatus payload=%v", got, payload)
+		}
+		if got, _ := readiness["session_present"].(bool); got {
+			t.Fatalf("session_present=%v want=false payload=%v", readiness["session_present"], payload)
+		}
+		if got, _ := readiness["operator_application_status"].(string); got != "not_submitted" {
+			t.Fatalf("operator_application_status=%q want=not_submitted payload=%v", got, payload)
+		}
+		if got, _ := readiness["role"].(string); got != "client" {
+			t.Fatalf("role=%q want=client payload=%v", got, payload)
+		}
+	})
+
+	t.Run("explicit invalid session token returns 404", func(t *testing.T) {
+		svc := newServerStatusService(t)
+
+		body := `{"session_token":"gpm-server-status-missing-token","wallet_address":"cosmos1walletprovided"}`
+		code, payload := callJSONHandler(t, svc.handleGPMServerStatus, http.MethodPost, "/v1/gpm/onboarding/server/status", body)
+		if code != http.StatusNotFound {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		errMsg, _ := payload["error"].(string)
+		if !strings.Contains(errMsg, "session not found") {
+			t.Fatalf("error=%q payload=%v", errMsg, payload)
+		}
+	})
+}
+
 func TestGPMClientRegisterRejectsPinnedMainDomainHostMismatch(t *testing.T) {
 	svc, _ := newFakeService(t, false)
 	svc.gpmState = newGPMRuntimeState()

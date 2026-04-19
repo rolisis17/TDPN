@@ -111,6 +111,11 @@ type gpmClientStatusRequest struct {
 	SessionToken string `json:"session_token"`
 }
 
+type gpmServerStatusRequest struct {
+	SessionToken  string `json:"session_token,omitempty"`
+	WalletAddress string `json:"wallet_address,omitempty"`
+}
+
 type gpmOperatorApplyRequest struct {
 	SessionToken    string `json:"session_token"`
 	ChainOperatorID string `json:"chain_operator_id"`
@@ -275,7 +280,7 @@ func (s *Service) requireGPMServiceMutationAuth(w http.ResponseWriter, r *http.R
 		}
 		sessionChainOperatorID := strings.TrimSpace(session.ChainOperatorID)
 		approvedChainOperatorID := strings.TrimSpace(app.ChainOperatorID)
-		if approvedChainOperatorID != "" && !subtleEqual(sessionChainOperatorID, approvedChainOperatorID) {
+		if !gpmOperatorChainIDsCompatible(sessionChainOperatorID, approvedChainOperatorID) {
 			writeJSON(w, http.StatusForbidden, map[string]any{
 				"ok":    false,
 				"error": "operator session is out of sync with approved application; refresh or rotate session",
@@ -685,6 +690,136 @@ func (s *Service) handleGPMClientStatus(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
+func (s *Service) handleGPMServerStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false, "error": "method not allowed"})
+		return
+	}
+	if !s.requireCommandReadAuth(w, r) {
+		return
+	}
+	var in gpmServerStatusRequest
+	if err := decodeOptionalJSONBody(r, &in); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid json body"})
+		return
+	}
+
+	sessionToken := strings.TrimSpace(in.SessionToken)
+	var (
+		session        gpmSession
+		sessionPresent bool
+	)
+	if sessionToken != "" {
+		resolved, ok := s.gpmState.getSession(sessionToken, time.Now().UTC())
+		if !ok {
+			writeJSON(w, http.StatusNotFound, map[string]any{"ok": false, "error": "session not found"})
+			return
+		}
+		session = resolved
+		sessionPresent = true
+	}
+
+	walletAddress := normalizeWalletAddress(in.WalletAddress)
+	if walletAddress == "" && sessionPresent {
+		walletAddress = normalizeWalletAddress(session.WalletAddress)
+	}
+	if walletAddress == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "wallet_address or session_token is required"})
+		return
+	}
+
+	role := "client"
+	sessionChainOperatorID := ""
+	if sessionPresent {
+		if normalizedRole := strings.ToLower(strings.TrimSpace(session.Role)); normalizedRole != "" {
+			role = normalizedRole
+		}
+		sessionChainOperatorID = strings.TrimSpace(session.ChainOperatorID)
+	}
+
+	operatorApplicationStatus := "not_submitted"
+	chainOperatorID := ""
+	if app, ok := s.gpmState.getOperator(walletAddress); ok {
+		status := strings.ToLower(strings.TrimSpace(app.Status))
+		switch status {
+		case "approved", "pending", "rejected":
+			operatorApplicationStatus = status
+		default:
+			operatorApplicationStatus = "pending"
+		}
+		chainOperatorID = strings.TrimSpace(app.ChainOperatorID)
+	}
+
+	tabVisible := role == "operator" || role == "admin"
+	serviceMutationsConfigured := strings.TrimSpace(s.serviceStart) != "" &&
+		strings.TrimSpace(s.serviceStop) != "" &&
+		strings.TrimSpace(s.serviceRestart) != ""
+
+	lifecycleActionsUnlocked := role == "admin" ||
+		(role == "operator" &&
+			operatorApplicationStatus == "approved" &&
+			gpmOperatorChainIDsCompatible(sessionChainOperatorID, chainOperatorID))
+
+	lockReason := ""
+	unlockActions := []string{}
+	if !lifecycleActionsUnlocked {
+		switch role {
+		case "admin":
+			// no-op; currently unreachable due lifecycleActionsUnlocked check.
+		case "operator":
+			switch operatorApplicationStatus {
+			case "approved":
+				lockReason = "operator session is out of sync with approved application; refresh or rotate session"
+				unlockActions = append(unlockActions,
+					"Refresh or rotate session via /v1/gpm/session",
+					"Sign in again if session/application chain IDs are still out of sync",
+				)
+			case "pending":
+				lockReason = "operator application status \"pending\" is not approved"
+				unlockActions = append(unlockActions,
+					"Wait for operator approval",
+					"Check /v1/gpm/onboarding/operator/status until status is approved",
+				)
+			case "rejected":
+				lockReason = "operator application status \"rejected\" is not approved"
+				unlockActions = append(unlockActions,
+					"Re-apply with /v1/gpm/onboarding/operator/apply",
+					"Obtain approval before using server lifecycle actions",
+				)
+			default:
+				lockReason = "operator application is not approved; submit and obtain approval before server lifecycle actions"
+				unlockActions = append(unlockActions,
+					"Submit operator application via /v1/gpm/onboarding/operator/apply",
+					"Obtain approval before using server lifecycle actions",
+				)
+			}
+		default:
+			lockReason = fmt.Sprintf("session role %q is not permitted; operator or admin required", role)
+			unlockActions = append(unlockActions,
+				"Sign in with an operator/admin session",
+				"Or apply for operator role and refresh session after approval",
+			)
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true,
+		"readiness": map[string]any{
+			"wallet_address":               walletAddress,
+			"role":                         role,
+			"session_present":              sessionPresent,
+			"operator_application_status":  operatorApplicationStatus,
+			"chain_operator_id":            chainOperatorID,
+			"session_chain_operator_id":    sessionChainOperatorID,
+			"tab_visible":                  tabVisible,
+			"lifecycle_actions_unlocked":   lifecycleActionsUnlocked,
+			"service_mutations_configured": serviceMutationsConfigured,
+			"lock_reason":                  lockReason,
+			"unlock_actions":               unlockActions,
+		},
+	})
+}
+
 func (s *Service) handleGPMOperatorApply(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false, "error": "method not allowed"})
@@ -890,6 +1025,15 @@ func normalizeGPMPathProfile(raw string) string {
 		return profile
 	}
 	return "2hop"
+}
+
+func gpmOperatorChainIDsCompatible(sessionChainOperatorID string, approvedChainOperatorID string) bool {
+	sessionChainOperatorID = strings.TrimSpace(sessionChainOperatorID)
+	approvedChainOperatorID = strings.TrimSpace(approvedChainOperatorID)
+	if sessionChainOperatorID != "" && approvedChainOperatorID != "" && !subtleEqual(sessionChainOperatorID, approvedChainOperatorID) {
+		return false
+	}
+	return true
 }
 
 func subtleEqual(a string, b string) bool {
