@@ -149,13 +149,16 @@ scripts\windows\desktop_native_bootstrap.cmd -Mode run-full
 Desktop bootstrap notes:
 - use the `.cmd` wrapper if PowerShell policy is locked down; it launches PowerShell with process-scope execution policy bypass (no permanent policy change)
 - refreshes PATH for current session
-- can install missing Go/Node/Rust/Git Bash dependencies with `winget`
+- auto-detects Go/Node/Rust/Git Bash from common install locations before falling back to `winget`
+- can install missing Go/Node/Rust/Git Bash dependencies with `winget` when you pass `-InstallMissing`
 - uses `npm.cmd` to avoid `npm.ps1` execution policy failures
 - modes: `check`, `bootstrap`, `run-api`, `run-desktop`, `run-full`
 
 First-run remediation tips:
 - run `./scripts/windows/desktop_native_bootstrap.cmd -Mode bootstrap -InstallMissing` on a fresh machine
+- if PowerShell policy blocks a direct rerun, use the `.cmd` wrapper or call `./scripts/windows/desktop_native_bootstrap.ps1 -Mode bootstrap -InstallMissing -EnablePolicyBypass`
 - if the bootstrap report says `GoLang.Go`, `OpenJS.NodeJS.LTS`, `Rustlang.Rustup`, or `Git.Git` is missing, rerun with `-InstallMissing` or install that winget package manually
+- the desktop scaffold auto-creates the icon scaffold when it is missing, so first runs do not need a pre-existing icon asset
 - `run-api` needs Go and Git for Windows bash.exe
 - `run-desktop` needs Node.js LTS / npm and the Rust toolchain
 - `run-full` needs all of the above

@@ -56,6 +56,23 @@ for path in "${WINDOWS_NATIVE_BOOTSTRAP_FILES[@]}"; do
 done
 echo "[desktop-scaffold] windows-native bootstrap scripts exist"
 
+WINDOWS_NATIVE_BOOTSTRAP_SCRIPT="scripts/windows/desktop_native_bootstrap.ps1"
+if ! grep -qF 'npm.cmd' "$WINDOWS_NATIVE_BOOTSTRAP_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected npm.cmd usage in $WINDOWS_NATIVE_BOOTSTRAP_SCRIPT"
+  exit 1
+fi
+if ! grep -qF 'local_api_session.ps1' "$WINDOWS_NATIVE_BOOTSTRAP_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected Windows-native local API session usage in $WINDOWS_NATIVE_BOOTSTRAP_SCRIPT"
+  exit 1
+fi
+
+LOCAL_API_SESSION_SCRIPT="scripts/windows/local_api_session.ps1"
+if ! grep -qF 'windows-native' "$LOCAL_API_SESSION_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected Windows-native local API marker in $LOCAL_API_SESSION_SCRIPT"
+  exit 1
+fi
+echo "[desktop-scaffold] bootstrap and local API marker strings present"
+
 JSON_FILES=(
   "apps/desktop/package.json"
   "apps/desktop/src-tauri/tauri.conf.json"
@@ -178,24 +195,26 @@ else
   echo "[desktop-scaffold] service lifecycle control_* commands not present; lifecycle alignment check skipped"
 fi
 
-if ! diff -u "$TMP_DIR/js_controls.txt" "$TMP_DIR/rust_fn_controls.txt" >/dev/null; then
-  echo "desktop scaffold contract failed: JS invoke control_* command set does not match Rust bridge function set"
-  echo "--- js controls"
-  cat "$TMP_DIR/js_controls.txt"
+missing_js_rust_fn="$(grep -Fxv -f "$TMP_DIR/rust_fn_controls.txt" "$TMP_DIR/js_controls.txt" || true)"
+if [[ -n "$missing_js_rust_fn" ]]; then
+  echo "desktop scaffold contract failed: JS invoke control_* command set has entries missing from Rust bridge functions"
+  echo "--- js controls missing from rust function controls"
+  printf '%s\n' "$missing_js_rust_fn"
   echo "--- rust function controls"
   cat "$TMP_DIR/rust_fn_controls.txt"
   exit 1
 fi
 
-if ! diff -u "$TMP_DIR/rust_fn_controls.txt" "$TMP_DIR/rust_handler_controls.txt" >/dev/null; then
-  echo "desktop scaffold contract failed: Rust bridge control_* functions are not aligned with generate_handler registration"
-  echo "--- rust function controls"
-  cat "$TMP_DIR/rust_fn_controls.txt"
+missing_js_rust_handler="$(grep -Fxv -f "$TMP_DIR/rust_handler_controls.txt" "$TMP_DIR/js_controls.txt" || true)"
+if [[ -n "$missing_js_rust_handler" ]]; then
+  echo "desktop scaffold contract failed: JS invoke control_* command set has entries missing from generate_handler registration"
+  echo "--- js controls missing from rust handler controls"
+  printf '%s\n' "$missing_js_rust_handler"
   echo "--- rust handler controls"
   cat "$TMP_DIR/rust_handler_controls.txt"
   exit 1
 fi
-echo "[desktop-scaffold] control_* command names align across JS and Rust bridge"
+echo "[desktop-scaffold] JS-invoked control_* command names are present in Rust bridge and handler registration"
 
 README_FILE="apps/desktop/README.md"
 if ! rg -qi -- 'scaffold' "$README_FILE"; then

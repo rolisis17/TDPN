@@ -34,6 +34,92 @@ function Get-CommandPath {
   return [string]$cmd.Source
 }
 
+function Quote-PowerShellSingleQuotedString {
+  param([Parameter(Mandatory = $true)][string]$Value)
+  return "'" + ($Value -replace "'", "''") + "'"
+}
+
+function Get-CommonToolDirectories {
+  $programFiles = [Environment]::GetFolderPath("ProgramFiles")
+  $programFilesX86 = [Environment]::GetFolderPath("ProgramFilesX86")
+  $userProfile = [Environment]::GetFolderPath("UserProfile")
+  $systemDrive = [Environment]::GetEnvironmentVariable("SystemDrive", "Process")
+
+  $candidates = @(
+    (Join-Path $programFiles "Go\bin"),
+    (Join-Path $programFilesX86 "Go\bin"),
+    (Join-Path $systemDrive "Go\bin"),
+    (Join-Path $programFiles "nodejs"),
+    (Join-Path $programFilesX86 "nodejs"),
+    (Join-Path $systemDrive "nodejs"),
+    (Join-Path $userProfile ".cargo\bin"),
+    (Join-Path $programFiles "Git"),
+    (Join-Path $programFiles "Git\cmd"),
+    (Join-Path $programFiles "Git\bin"),
+    (Join-Path $programFiles "Git\usr\bin"),
+    (Join-Path $programFilesX86 "Git"),
+    (Join-Path $programFilesX86 "Git\cmd"),
+    (Join-Path $programFilesX86 "Git\bin"),
+    (Join-Path $programFilesX86 "Git\usr\bin")
+  )
+
+  $dirs = @()
+  $seen = @{}
+  foreach ($candidate in $candidates) {
+    if ([string]::IsNullOrWhiteSpace($candidate)) {
+      continue
+    }
+    if (-not (Test-Path -LiteralPath $candidate -PathType Container)) {
+      continue
+    }
+    $normalized = $candidate.TrimEnd("\")
+    $key = $normalized.ToLowerInvariant()
+    if ($seen.ContainsKey($key)) {
+      continue
+    }
+    $seen[$key] = $true
+    $dirs += $normalized
+  }
+
+  return $dirs
+}
+
+function Add-SessionPathSegments {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string[]]$Segments
+  )
+
+  if ($Segments.Count -eq 0) {
+    return
+  }
+
+  $existing = @()
+  if (-not [string]::IsNullOrWhiteSpace($env:Path)) {
+    $existing = $env:Path.Split(";")
+  }
+
+  $seen = @{}
+  $normalized = @()
+  foreach ($segment in @($existing + $Segments)) {
+    if ([string]::IsNullOrWhiteSpace($segment)) {
+      continue
+    }
+    $trimmed = $segment.Trim().TrimEnd("\")
+    if ($trimmed.Length -eq 0) {
+      continue
+    }
+    $key = $trimmed.ToLowerInvariant()
+    if ($seen.ContainsKey($key)) {
+      continue
+    }
+    $seen[$key] = $true
+    $normalized += $trimmed
+  }
+
+  $env:Path = ($normalized -join ";")
+}
+
 function Refresh-SessionPath {
   $machinePath = [Environment]::GetEnvironmentVariable("Path", "Machine")
   $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
@@ -66,9 +152,119 @@ function Refresh-SessionPath {
   $env:Path = ($normalized -join ";")
 }
 
+function Resolve-ToolPath {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Name
+  )
+
+  $path = Get-CommandPath $Name
+  $allowWindowsAppsAlias = $Name.ToLowerInvariant() -eq "winget"
+  if (-not [string]::IsNullOrWhiteSpace($path) -and ($allowWindowsAppsAlias -or $path -notmatch '\\WindowsApps\\')) {
+    return $path
+  }
+
+  $programFiles = [Environment]::GetFolderPath("ProgramFiles")
+  $programFilesX86 = [Environment]::GetFolderPath("ProgramFilesX86")
+  $userProfile = [Environment]::GetFolderPath("UserProfile")
+  $systemDrive = [Environment]::GetEnvironmentVariable("SystemDrive", "Process")
+
+  $candidates = @()
+  switch ($Name.ToLowerInvariant()) {
+    "go" {
+      $candidates = @(
+        (Join-Path $programFiles "Go\bin\go.exe"),
+        (Join-Path $programFilesX86 "Go\bin\go.exe"),
+        (Join-Path $systemDrive "Go\bin\go.exe")
+      )
+    }
+    "node" {
+      $candidates = @(
+        (Join-Path $programFiles "nodejs\node.exe"),
+        (Join-Path $programFilesX86 "nodejs\node.exe"),
+        (Join-Path $systemDrive "nodejs\node.exe")
+      )
+    }
+    "npm" {
+      $candidates = @(
+        (Join-Path $programFiles "nodejs\npm.cmd"),
+        (Join-Path $programFilesX86 "nodejs\npm.cmd"),
+        (Join-Path $systemDrive "nodejs\npm.cmd")
+      )
+    }
+    "npm.cmd" {
+      $candidates = @(
+        (Join-Path $programFiles "nodejs\npm.cmd"),
+        (Join-Path $programFilesX86 "nodejs\npm.cmd"),
+        (Join-Path $systemDrive "nodejs\npm.cmd")
+      )
+    }
+    "rustc" {
+      $candidates = @(
+        (Join-Path $userProfile ".cargo\bin\rustc.exe")
+      )
+    }
+    "cargo" {
+      $candidates = @(
+        (Join-Path $userProfile ".cargo\bin\cargo.exe")
+      )
+    }
+    "git" {
+      $candidates = @(
+        (Join-Path $programFiles "Git\cmd\git.exe"),
+        (Join-Path $programFiles "Git\bin\git.exe"),
+        (Join-Path $programFiles "Git\mingw64\bin\git.exe"),
+        (Join-Path $programFilesX86 "Git\cmd\git.exe"),
+        (Join-Path $programFilesX86 "Git\bin\git.exe"),
+        (Join-Path $programFilesX86 "Git\mingw64\bin\git.exe")
+      )
+    }
+    "bash.exe" {
+      $candidates = @(
+        (Join-Path $programFiles "Git\bin\bash.exe"),
+        (Join-Path $programFiles "Git\usr\bin\bash.exe"),
+        (Join-Path $programFiles "Git\bash.exe"),
+        (Join-Path $programFilesX86 "Git\bin\bash.exe"),
+        (Join-Path $programFilesX86 "Git\usr\bin\bash.exe"),
+        (Join-Path $programFilesX86 "Git\bash.exe")
+      )
+    }
+    "git-bash.exe" {
+      $candidates = @(
+        (Join-Path $programFiles "Git\git-bash.exe"),
+        (Join-Path $programFilesX86 "Git\git-bash.exe")
+      )
+    }
+  }
+
+  foreach ($candidate in $candidates) {
+    if ([string]::IsNullOrWhiteSpace($candidate)) {
+      continue
+    }
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+      return $candidate
+    }
+  }
+
+  return ""
+}
+
 function Ensure-PolicyBypassProcess {
   if (-not $EnablePolicyBypass) {
     Write-Step "execution policy left unchanged (pass -EnablePolicyBypass to opt in)"
+    $scriptPath = Quote-PowerShellSingleQuotedString -Value $PSCommandPath
+    $modeArg = " -Mode " + (Quote-PowerShellSingleQuotedString -Value $Mode)
+    $installMissingArg = if ($InstallMissing) { " -InstallMissing" } else { "" }
+    $skipPathRefreshArg = if ($SkipPathRefresh) { " -SkipPathRefresh" } else { "" }
+    $dryRunArg = if ($DryRun) { " -DryRun" } else { "" }
+    $forceNpmInstallArg = if ($ForceNpmInstall) { " -ForceNpmInstall" } else { "" }
+    $apiAddrArg = " -ApiAddr " + (Quote-PowerShellSingleQuotedString -Value $ApiAddr)
+    $commandRunnerArg = if (-not [string]::IsNullOrWhiteSpace($CommandRunner)) {
+      " -CommandRunner " + (Quote-PowerShellSingleQuotedString -Value $CommandRunner)
+    } else {
+      ""
+    }
+    Write-Step ("rerun with process-scope bypass: powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}{1}{2}{3}{4}{5}{6}{7}" -f $scriptPath, $modeArg, $installMissingArg, $skipPathRefreshArg, $dryRunArg, $forceNpmInstallArg, $apiAddrArg, $commandRunnerArg)
     return
   }
   try {
@@ -85,29 +281,29 @@ function Resolve-GitBashPath {
     return $envOverride.Trim()
   }
 
-  $candidates = @(
-    "C:\Program Files\Git\bin\bash.exe",
-    "C:\Program Files\Git\usr\bin\bash.exe",
-    "C:\Program Files (x86)\Git\bin\bash.exe",
-    "C:\Program Files (x86)\Git\usr\bin\bash.exe"
-  )
-  foreach ($candidate in $candidates) {
-    if (Test-Path -LiteralPath $candidate -PathType Leaf) {
-      return $candidate
-    }
+  $resolved = Resolve-ToolPath "bash.exe"
+  if (-not [string]::IsNullOrWhiteSpace($resolved)) {
+    return $resolved
+  }
+
+  $resolved = Resolve-ToolPath "git-bash.exe"
+  if (-not [string]::IsNullOrWhiteSpace($resolved)) {
+    return $resolved
   }
   return ""
 }
 
 function Get-ToolReport {
-  $goPath = Get-CommandPath "go"
-  $nodePath = Get-CommandPath "node"
-  $npmCmdPath = Get-CommandPath "npm.cmd"
-  $npmPath = if (-not [string]::IsNullOrWhiteSpace($npmCmdPath)) { $npmCmdPath } else { Get-CommandPath "npm" }
-  $rustcPath = Get-CommandPath "rustc"
-  $cargoPath = Get-CommandPath "cargo"
-  $wingetPath = Get-CommandPath "winget"
-  $gitPath = Get-CommandPath "git"
+  $goPath = Resolve-ToolPath "go"
+  $nodePath = Resolve-ToolPath "node"
+  $npmPath = Resolve-ToolPath "npm.cmd"
+  if ([string]::IsNullOrWhiteSpace($npmPath)) {
+    $npmPath = Resolve-ToolPath "npm"
+  }
+  $rustcPath = Resolve-ToolPath "rustc"
+  $cargoPath = Resolve-ToolPath "cargo"
+  $wingetPath = Resolve-ToolPath "winget"
+  $gitPath = Resolve-ToolPath "git"
   $gitBashPath = Resolve-GitBashPath
 
   return [PSCustomObject]@{
@@ -321,25 +517,25 @@ function Resolve-LocalApiAddr {
     throw "ApiAddr is required"
   }
 
-  $host = ""
+  $hostName = ""
   $port = 0
   if ($Addr.StartsWith("[")) {
     if ($Addr -notmatch "^\[(.+)\]:(\d+)$") {
       throw "ApiAddr must be [host]:port for IPv6 loopback"
     }
-    $host = $matches[1]
+    $hostName = $matches[1]
     $port = [int]$matches[2]
   } else {
     if ($Addr -notmatch "^([^:]+):(\d+)$") {
       throw "ApiAddr must be host:port"
     }
-    $host = $matches[1]
+    $hostName = $matches[1]
     $port = [int]$matches[2]
   }
   if ($port -lt 1 -or $port -gt 65535) {
     throw "ApiAddr port must be in 1..65535"
   }
-  $normalizedHost = $host.Trim().ToLowerInvariant()
+  $normalizedHost = $hostName.Trim().ToLowerInvariant()
   if ($normalizedHost -ne "127.0.0.1" -and $normalizedHost -ne "localhost" -and $normalizedHost -ne "::1") {
     throw "ApiAddr must target loopback only (allowed hosts: 127.0.0.1, localhost, ::1)"
   }
@@ -450,9 +646,15 @@ function Invoke-DesktopDev {
     throw "desktop package.json not found: $desktopDir"
   }
 
-  $npmCmd = Get-CommandPath "npm.cmd"
+  $iconPath = Join-Path $desktopDir "src-tauri\icons\icon.ico"
+  Ensure-DesktopIconAsset -IconPath $iconPath
+
+  $npmCmd = Resolve-ToolPath "npm.cmd"
   if ([string]::IsNullOrWhiteSpace($npmCmd)) {
-    throw "npm.cmd not found in PATH. Install Node.js LTS first."
+    $npmCmd = Resolve-ToolPath "npm"
+  }
+  if ([string]::IsNullOrWhiteSpace($npmCmd)) {
+    throw "npm not found. Install Node.js LTS first."
   }
 
   Push-Location $desktopDir
@@ -487,6 +689,43 @@ function Invoke-DesktopDev {
   }
 }
 
+function Ensure-DesktopIconAsset {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$IconPath
+  )
+
+  if (Test-Path -LiteralPath $IconPath -PathType Leaf) {
+    return
+  }
+
+  $iconDir = Split-Path -Parent $IconPath
+  if (-not (Test-Path -LiteralPath $iconDir -PathType Container)) {
+    if ($DryRun) {
+      Write-Step "dry-run desktop asset scaffold: would create $IconPath"
+      return
+    }
+    New-Item -ItemType Directory -Path $iconDir -Force | Out-Null
+  }
+
+  if ($DryRun) {
+    Write-Step "dry-run desktop asset scaffold: would create $IconPath"
+    return
+  }
+
+  Write-Step "desktop icon missing; creating placeholder scaffold: $IconPath"
+  $icoBytes = [byte[]]@(
+    0x00,0x00,0x01,0x00,0x01,0x00,
+    0x01,0x01,0x00,0x00,0x01,0x00,0x20,0x00,0x30,0x00,0x00,0x00,0x16,0x00,0x00,0x00,
+    0x28,0x00,0x00,0x00,0x01,0x00,0x00,0x00,0x02,0x00,0x00,0x00,0x01,0x00,0x20,0x00,
+    0x00,0x00,0x00,0x00,0x04,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    0xFF,0xFF,0xFF,0xFF,
+    0x00,0x00,0x00,0x00
+  )
+  [System.IO.File]::WriteAllBytes($IconPath, $icoBytes)
+}
+
 $repoRoot = Resolve-RepoRoot
 
 Write-Step "mode=$Mode"
@@ -499,6 +738,12 @@ if (-not $SkipPathRefresh) {
   Write-Step "session PATH refreshed from machine+user PATH"
 } else {
   Write-Step "session PATH refresh skipped by flag"
+}
+
+$commonToolDirs = Get-CommonToolDirectories
+if ($commonToolDirs.Count -gt 0) {
+  Add-SessionPathSegments -Segments $commonToolDirs
+  Write-Step "session PATH augmented with common tool directories: $($commonToolDirs -join ';')"
 }
 
 $report = Get-ToolReport

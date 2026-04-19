@@ -5,6 +5,7 @@ param(
   [string]$SigningIdentity = "",
   [string]$SigningCertPath = "",
   [string]$SigningCertPassword = "",
+  [switch]$InstallMissing,
   [switch]$Help,
   [switch]$SkipBuild,
   [Parameter(ValueFromRemainingArguments = $true)]
@@ -17,7 +18,7 @@ function Show-Usage {
   Write-Host "TDPN desktop release bundle scaffold (non-production signing flow)"
   Write-Host ""
   Write-Host "Usage:"
-  Write-Host "  ./scripts/windows/desktop_release_bundle.ps1 [-Help] [-Channel stable|beta|canary] [-UpdateFeedUrl URL] [-SigningIdentity ID] [-SigningCertPath PATH] [-SkipBuild] [-- <tauri args>]"
+  Write-Host "  ./scripts/windows/desktop_release_bundle.ps1 [-Help] [-Channel stable|beta|canary] [-UpdateFeedUrl URL] [-SigningIdentity ID] [-SigningCertPath PATH] [-InstallMissing] [-SkipBuild] [-- <tauri args>]"
   Write-Host ""
   Write-Host "Examples:"
   Write-Host "  ./scripts/windows/desktop_release_bundle.ps1"
@@ -27,6 +28,7 @@ function Show-Usage {
   Write-Host "Notes:"
   Write-Host "  - This is scaffold-only and does not implement production signing/secret handling."
   Write-Host "  - Tauri build runs from apps/desktop via: npm run tauri -- build ..."
+  Write-Host "  - -InstallMissing may use winget to install missing Node.js, Rust, and Git prerequisites non-interactively."
   Write-Host "  - Sets TDPN_DESKTOP_UPDATE_CHANNEL and TDPN_DESKTOP_UPDATE_FEED_CONFIGURED for this process."
   Write-Host "  - Validates update feed URL and signing placeholder input consistency before invoking build."
   Write-Host "  - -SigningCertPassword is intentionally rejected; pass signing secrets through a secure path instead."
@@ -86,7 +88,10 @@ function Validate-SigningPlaceholders {
   }
   if ($hasCertPath) {
     if (-not (Test-Path -LiteralPath $CertPath -PathType Leaf)) {
-      throw "signing certificate file was not found: $CertPath"
+      throw (New-RemediationMessage -Headline "signing certificate file was not found: $CertPath" -Hints @(
+        "Double-check the path you passed to -SigningCertPath and ensure the file is reachable from this machine.",
+        "This scaffold only forwards signing placeholders, so the certificate path is validated locally before build starts."
+      ))
     }
   }
   if ($hasIdentity -and $hasCertPath) {
@@ -100,32 +105,151 @@ function Get-DesktopBuildMissingTools {
   if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
     $missing += "Node.js LTS / node"
   }
-  if (-not (Get-Command npm -ErrorAction SilentlyContinue) -and -not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) {
-    $missing += "npm"
+  if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) {
+    $missing += "npm.cmd"
   }
   if (-not (Get-Command rustc -ErrorAction SilentlyContinue) -or -not (Get-Command cargo -ErrorAction SilentlyContinue)) {
     $missing += "Rust toolchain (rustc + cargo)"
   }
-
   return @($missing)
 }
 
+function Refresh-DesktopProcessPath {
+  $machinePath = [Environment]::GetEnvironmentVariable("Path", "Machine")
+  $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+  $segments = @()
+
+  if (-not [string]::IsNullOrWhiteSpace($machinePath)) {
+    $segments += $machinePath
+  }
+  if (-not [string]::IsNullOrWhiteSpace($userPath)) {
+    $segments += $userPath
+  }
+
+  if ($segments.Count -eq 0) {
+    return
+  }
+
+  $env:PATH = [Environment]::ExpandEnvironmentVariables(($segments -join ";"))
+}
+
+function New-RemediationMessage {
+  param(
+    [string]$Headline,
+    [string[]]$Hints
+  )
+
+  $lines = @($Headline)
+  foreach ($hint in $Hints) {
+    $lines += "- $hint"
+  }
+  return ($lines -join [Environment]::NewLine)
+}
+
+function Assert-WingetAvailable {
+  if (Get-Command winget -ErrorAction SilentlyContinue) {
+    return
+  }
+
+  throw (New-RemediationMessage -Headline "winget was not found, so -InstallMissing cannot auto-remediate this machine." -Hints @(
+    "Install the App Installer package from Microsoft Store, or provision Node.js / Rust / Git manually and rerun the script.",
+    "After installing prerequisites, open a new terminal so PATH refreshes cleanly."
+  ))
+}
+
+function Invoke-WingetInstall {
+  param(
+    [string]$PackageId,
+    [string]$FriendlyName
+  )
+
+  $args = @(
+    "install",
+    "--id", $PackageId,
+    "--exact",
+    "--source", "winget",
+    "--silent",
+    "--accept-package-agreements",
+    "--accept-source-agreements",
+    "--disable-interactivity"
+  )
+
+  Write-Host "[desktop-release-bundle] installing $FriendlyName via winget"
+  & winget @args
+  $rc = $LASTEXITCODE
+  if ($rc -ne 0) {
+    throw (New-RemediationMessage -Headline "winget failed while installing $FriendlyName (exit code $rc)." -Hints @(
+      "Rerun with elevated permissions if the package requires machine-level installation.",
+      "If winget source or network access is unavailable, install $FriendlyName manually and rerun the script."
+    ))
+  }
+}
+
+function Install-MissingDesktopDependencies {
+  param(
+    [string[]]$MissingTools
+  )
+
+  if ($MissingTools.Count -eq 0) {
+    return
+  }
+
+  Assert-WingetAvailable
+
+  if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+    Invoke-WingetInstall -PackageId "Git.Git" -FriendlyName "Git"
+  }
+
+  foreach ($tool in $MissingTools) {
+    switch ($tool) {
+      "Node.js LTS / node" {
+        Invoke-WingetInstall -PackageId "OpenJS.NodeJS.LTS" -FriendlyName "Node.js LTS"
+      }
+      "npm.cmd" {
+        Invoke-WingetInstall -PackageId "OpenJS.NodeJS.LTS" -FriendlyName "Node.js LTS"
+      }
+      "Rust toolchain (rustc + cargo)" {
+        Invoke-WingetInstall -PackageId "Rustlang.Rustup" -FriendlyName "Rust toolchain"
+      }
+      default {
+        throw "unsupported auto-install target: $tool"
+      }
+    }
+  }
+}
+
 function Assert-DesktopBuildTools {
+  param(
+    [switch]$AutoInstallMissing
+  )
+
+  Refresh-DesktopProcessPath
   $missing = Get-DesktopBuildMissingTools
   if ($missing.Count -eq 0) {
     return
   }
 
+  if ($AutoInstallMissing) {
+    Install-MissingDesktopDependencies -MissingTools $missing
+    Refresh-DesktopProcessPath
+    $missing = Get-DesktopBuildMissingTools
+    if ($missing.Count -eq 0) {
+      return
+    }
+  }
+
   $lines = @("desktop release bundle prerequisites are missing:")
   foreach ($item in $missing) {
     switch ($item) {
-      "Node.js LTS / node" { $lines += "- Node.js LTS / npm: install with winget install --id OpenJS.NodeJS.LTS --exact" }
-      "npm" { $lines += "- npm: reinstall or repair Node.js LTS so npm is on PATH" }
+      "Node.js LTS / node" { $lines += "- Node.js LTS / node: install with winget install --id OpenJS.NodeJS.LTS --exact" }
+      "npm.cmd" { $lines += "- npm.cmd: reinstall or repair Node.js LTS so npm.cmd is on PATH" }
       "Rust toolchain (rustc + cargo)" { $lines += "- Rust toolchain: install with winget install --id Rustlang.Rustup --exact" }
+      "Git" { $lines += "- Git: install with winget install --id Git.Git --exact" }
       default { $lines += "- $item" }
     }
   }
   $lines += "- rerun the script after the missing tools are installed"
+  $lines += "- use -InstallMissing to let the script attempt non-interactive winget remediation on this machine"
 
   throw ($lines -join [Environment]::NewLine)
 }
@@ -193,7 +317,10 @@ $repoRoot = Resolve-Path (Join-Path $scriptDir "..\..")
 $desktopDir = Join-Path $repoRoot.Path "apps\desktop"
 
 if (-not (Test-Path (Join-Path $desktopDir "package.json"))) {
-  throw "apps/desktop/package.json not found at expected path: $desktopDir"
+  throw (New-RemediationMessage -Headline "apps/desktop/package.json not found at expected path: $desktopDir" -Hints @(
+    "Confirm the repository was cloned with the desktop app content present, then rerun the script.",
+    "If the workspace layout is different, update the script invocation from the repository root."
+  ))
 }
 
 $scopedEnvNames = @(
@@ -243,13 +370,15 @@ try {
     return
   }
 
-  Assert-DesktopBuildTools
+  Assert-DesktopBuildTools -AutoInstallMissing:$InstallMissing
+
+  Refresh-DesktopProcessPath
   $npmPath = Get-Command npm.cmd -ErrorAction SilentlyContinue
   if ($null -eq $npmPath) {
-    $npmPath = Get-Command npm -ErrorAction SilentlyContinue
-  }
-  if ($null -eq $npmPath) {
-    throw "npm was not found in PATH after preflight. Install Node.js LTS / npm and rerun the script."
+    throw (New-RemediationMessage -Headline "npm.cmd was not found in PATH after preflight." -Hints @(
+      "Install or repair Node.js LTS, then open a new terminal so PATH picks up the updated npm.cmd location.",
+      "If you want the script to attempt remediation, rerun with -InstallMissing."
+    ))
   }
 
   Push-Location $desktopDir
@@ -259,11 +388,14 @@ try {
       $npmArgs += $TauriArgs
     }
 
-    Write-Host "[desktop-release-bundle] running: npm $($npmArgs -join ' ')"
+    Write-Host "[desktop-release-bundle] running: npm.cmd $($npmArgs -join ' ')"
     & $npmPath.Source @npmArgs
     $rc = $LASTEXITCODE
     if ($rc -ne 0) {
-      throw "tauri build failed with exit code $rc"
+      throw (New-RemediationMessage -Headline "tauri build failed with exit code $rc." -Hints @(
+        "Check the first error in the build output above; it usually names the missing tool or broken configuration.",
+        "If this failed after automatic installs, open a new terminal and verify node, npm.cmd, rustc, cargo, and git are all on PATH before rerunning."
+      ))
     }
   } finally {
     Pop-Location
