@@ -54,6 +54,7 @@ type gpmSession struct {
 	ExpiresAt          time.Time `json:"expires_at"`
 	BootstrapDirectory string    `json:"bootstrap_directory,omitempty"`
 	InviteKey          string    `json:"invite_key,omitempty"`
+	PathProfile        string    `json:"path_profile,omitempty"`
 	ChainOperatorID    string    `json:"chain_operator_id,omitempty"`
 }
 
@@ -104,6 +105,10 @@ type gpmClientRegisterRequest struct {
 	BootstrapDirectory string `json:"bootstrap_directory,omitempty"`
 	InviteKey          string `json:"invite_key,omitempty"`
 	PathProfile        string `json:"path_profile,omitempty"`
+}
+
+type gpmClientStatusRequest struct {
+	SessionToken string `json:"session_token"`
 }
 
 type gpmOperatorApplyRequest struct {
@@ -612,15 +617,17 @@ func (s *Service) handleGPMClientRegister(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
+	pathProfile := normalizeGPMPathProfile(in.PathProfile)
 	session.BootstrapDirectory = bootstrapDirectory
 	session.InviteKey = inviteKey
+	session.PathProfile = pathProfile
 	s.gpmState.putSession(session)
 	s.persistGPMStateBestEffort("client_register")
 	s.appendGPMAudit("client_registered", map[string]any{
 		"wallet_address":      session.WalletAddress,
 		"wallet_provider":     session.WalletProvider,
 		"bootstrap_directory": bootstrapDirectory,
-		"path_profile":        normalizeGPMPathProfile(in.PathProfile),
+		"path_profile":        pathProfile,
 	})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":                 true,
@@ -629,11 +636,52 @@ func (s *Service) handleGPMClientRegister(w http.ResponseWriter, r *http.Request
 		"profile": map[string]any{
 			"wallet_address":      session.WalletAddress,
 			"wallet_provider":     session.WalletProvider,
-			"path_profile":        normalizeGPMPathProfile(in.PathProfile),
+			"path_profile":        pathProfile,
 			"bootstrap_directory": bootstrapDirectory,
 			"compat_subject_hint": inviteKey,
 		},
 		"session": serializeGPMSession(session),
+	})
+}
+
+func (s *Service) handleGPMClientStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false, "error": "method not allowed"})
+		return
+	}
+	if !s.requireCommandReadAuth(w, r) {
+		return
+	}
+	var in gpmClientStatusRequest
+	if err := decodeJSONBody(r, &in); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid json body"})
+		return
+	}
+	sessionToken := strings.TrimSpace(in.SessionToken)
+	if sessionToken == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "session_token is required"})
+		return
+	}
+	session, ok := s.gpmState.getSession(sessionToken, time.Now().UTC())
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]any{"ok": false, "error": "session not found"})
+		return
+	}
+	status := "not_registered"
+	if strings.TrimSpace(session.BootstrapDirectory) != "" && strings.TrimSpace(session.InviteKey) != "" {
+		status = "registered"
+	}
+	registration := map[string]any{
+		"wallet_address":      session.WalletAddress,
+		"status":              status,
+		"bootstrap_directory": strings.TrimSpace(session.BootstrapDirectory),
+	}
+	if profile := strings.TrimSpace(session.PathProfile); profile != "" {
+		registration["path_profile"] = profile
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":           true,
+		"registration": registration,
 	})
 }
 
@@ -784,6 +832,7 @@ func serializeGPMSession(session gpmSession) map[string]any {
 		"created_at_utc":      session.CreatedAt.Format(time.RFC3339),
 		"expires_at_utc":      session.ExpiresAt.Format(time.RFC3339),
 		"bootstrap_directory": strings.TrimSpace(session.BootstrapDirectory),
+		"path_profile":        strings.TrimSpace(session.PathProfile),
 		"chain_operator_id":   strings.TrimSpace(session.ChainOperatorID),
 	}
 }

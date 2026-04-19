@@ -66,6 +66,16 @@ Desktop scaffold defaults (`apps/desktop`):
 
 ## Endpoints
 
+GPM onboarding/session endpoints (used by desktop and portal flows):
+- `POST /v1/gpm/auth/challenge`
+- `POST /v1/gpm/auth/verify`
+- `POST /v1/gpm/session` (`action=status|refresh|revoke`)
+- `POST /v1/gpm/onboarding/client/register`
+- `POST /v1/gpm/onboarding/client/status` (returns `registered|not_registered`, `bootstrap_directory`, and persisted `path_profile` when available)
+- `POST /v1/gpm/onboarding/operator/apply`
+- `POST /v1/gpm/onboarding/operator/status`
+- `POST /v1/gpm/onboarding/operator/approve`
+
 ## Authentication
 
 Mutating endpoints (`POST /v1/connect`, `POST /v1/disconnect`, `POST /v1/set_profile`, `POST /v1/update`, `POST /v1/service/start`, `POST /v1/service/stop`, `POST /v1/service/restart`) require auth by default.

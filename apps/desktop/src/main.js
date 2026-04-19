@@ -456,6 +456,21 @@ function inferClientRegistrationFromPayload(payload) {
   return sessionValue.length > 0 || profileValue.length > 0;
 }
 
+function parseClientRegistrationStatus(payload) {
+  const status = payload?.registration?.status;
+  if (typeof status !== "string") {
+    return undefined;
+  }
+  const normalized = status.trim().toLowerCase();
+  if (normalized === "registered") {
+    return true;
+  }
+  if (normalized === "not_registered") {
+    return false;
+  }
+  return undefined;
+}
+
 function syncDesktopOnboardingSteps() {
   const hasSession = !!state.sessionToken;
   const role = (state.role || "client").toLowerCase();
@@ -711,6 +726,35 @@ async function refreshOperatorApplicationStatus(options = {}) {
   }
 }
 
+async function refreshClientRegistrationStatus(options = {}) {
+  const { quiet = true } = options;
+  if (!state.sessionToken) {
+    state.clientRegistered = false;
+    syncDesktopOnboardingSteps();
+    return undefined;
+  }
+  const request = {
+    session_token: state.sessionToken,
+    wallet_address: walletAddressEl.value.trim() || undefined
+  };
+  try {
+    const result = quiet
+      ? await invoke("control_gpm_client_status", { request })
+      : await call("gpm_client_status", "control_gpm_client_status", { request });
+    const status = parseClientRegistrationStatus(result);
+    if (status !== undefined) {
+      state.clientRegistered = status;
+    }
+    syncDesktopOnboardingSteps();
+    return result;
+  } catch (err) {
+    if (quiet) {
+      return undefined;
+    }
+    throw err;
+  }
+}
+
 async function refreshSession(action = "status") {
   if (!state.sessionToken) {
     setOperatorApplicationStatus(undefined);
@@ -728,7 +772,6 @@ async function refreshSession(action = "status") {
   });
   if (sessionAction === "refresh") {
     setSessionToken(result?.session_token || state.sessionToken);
-    state.clientRegistered = inferClientRegistrationFromPayload(result);
   }
   if (sessionAction === "revoke") {
     setSessionToken("");
@@ -736,10 +779,9 @@ async function refreshSession(action = "status") {
     setOperatorApplicationStatus(undefined);
     return result;
   }
-  if (sessionAction !== "refresh") {
-    state.clientRegistered = inferClientRegistrationFromPayload(result);
-  }
+  state.clientRegistered = inferClientRegistrationFromPayload(result);
   setRole(parseSessionRole(result));
+  await refreshClientRegistrationStatus({ quiet: true });
   await refreshOperatorApplicationStatus({ quiet: true });
   return result;
 }
@@ -757,6 +799,7 @@ async function refreshSessionOnInit() {
   } catch {
     // Startup status refresh is best-effort and should not block the scaffold.
   }
+  await refreshClientRegistrationStatus({ quiet: true });
   await refreshOperatorApplicationStatus({ quiet: true });
 }
 
@@ -804,6 +847,7 @@ byId("signin_btn").addEventListener("click", async () => {
   setSessionToken(result?.session_token || "");
   state.clientRegistered = inferClientRegistrationFromPayload(result);
   setRole(parseSessionRole(result));
+  await refreshClientRegistrationStatus({ quiet: true });
   await refreshOperatorApplicationStatus({ quiet: true });
 });
 
@@ -855,6 +899,7 @@ byId("register_client_btn").addEventListener("click", async () => {
   const result = await call("gpm_client_register", "control_gpm_client_register", { request });
   state.clientRegistered = inferClientRegistrationFromPayload(result) || true;
   setRole(parseSessionRole(result));
+  await refreshClientRegistrationStatus({ quiet: true });
 });
 
 byId("apply_operator_btn").addEventListener("click", async () => {

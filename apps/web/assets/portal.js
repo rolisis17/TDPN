@@ -33,7 +33,7 @@ const PERSISTED_FIELD_IDS = [
   "bootstrap_directory"
 ];
 let operatorApplicationStatus = undefined;
-let sessionHasConnectSecrets = false;
+let clientRegistered = false;
 
 function localStore() {
   try {
@@ -169,7 +169,7 @@ function refreshOnboardingSteps() {
   }
 
   setStepState(onboardingStepSigninEl, "done");
-  if (!sessionHasConnectSecrets) {
+  if (!clientRegistered) {
     setStepState(onboardingStepClientEl, "active");
     setStepState(onboardingStepOperatorEl, "blocked");
     return;
@@ -194,7 +194,22 @@ function syncSessionDerivedState(result) {
     result && result.profile && typeof result.profile.bootstrap_directory === "string"
       ? result.profile.bootstrap_directory.trim()
       : "";
-  sessionHasConnectSecrets = bootstrapDirectory.length > 0 || profileBootstrap.length > 0;
+  clientRegistered = bootstrapDirectory.length > 0 || profileBootstrap.length > 0;
+}
+
+function parseClientRegistrationStatus(payload) {
+  const status = payload?.registration?.status;
+  if (typeof status !== "string") {
+    return undefined;
+  }
+  const normalized = status.trim().toLowerCase();
+  if (normalized === "registered") {
+    return true;
+  }
+  if (normalized === "not_registered") {
+    return false;
+  }
+  return undefined;
 }
 
 function setOperatorReadiness(kind, statusText, guidanceText) {
@@ -311,7 +326,7 @@ function setOperatorApplicationStatus(value) {
 function bindReadinessListeners() {
   byId("session_token").addEventListener("input", () => {
     setOperatorApplicationStatus(undefined);
-    sessionHasConnectSecrets = false;
+    clientRegistered = false;
   });
 }
 
@@ -439,6 +454,37 @@ async function requestOperatorStatus() {
   return post("/v1/gpm/onboarding/operator/status", request);
 }
 
+async function requestClientStatus() {
+  const request = {
+    session_token: byId("session_token").value.trim() || undefined,
+    wallet_address: byId("wallet_address").value.trim() || undefined
+  };
+  return post("/v1/gpm/onboarding/client/status", request);
+}
+
+async function refreshClientRegistrationStatus(options = {}) {
+  const { quiet = true } = options;
+  if (!byId("session_token").value.trim()) {
+    clientRegistered = false;
+    refreshOnboardingSteps();
+    return undefined;
+  }
+  try {
+    const result = await requestClientStatus();
+    const status = parseClientRegistrationStatus(result);
+    if (status !== undefined) {
+      clientRegistered = status;
+    }
+    refreshOnboardingSteps();
+    return result;
+  } catch (err) {
+    if (!quiet) {
+      throw err;
+    }
+    return undefined;
+  }
+}
+
 async function refreshOperatorApplicationStatus(options = {}) {
   const { quiet = true } = options;
   if (!byId("session_token").value.trim()) {
@@ -492,6 +538,7 @@ byId("signin_btn").addEventListener("click", () =>
     const result = await post("/v1/gpm/auth/verify", request);
     setOperatorApplicationStatus(undefined);
     applySession(result);
+    await refreshClientRegistrationStatus({ quiet: true });
     await refreshOperatorApplicationStatus({ quiet: true });
     return result;
   })
@@ -503,6 +550,7 @@ byId("session_btn").addEventListener("click", () =>
     syncSessionDerivedState(result);
     byId("role").value = sessionRoleFromResult(result);
     refreshOperatorReadiness();
+    await refreshClientRegistrationStatus({ quiet: true });
     await refreshOperatorApplicationStatus({ quiet: true });
     persistPortalState();
     return result;
@@ -518,6 +566,7 @@ byId("session_rotate_btn").addEventListener("click", () =>
     }
     byId("role").value = sessionRoleFromResult(result);
     setOperatorApplicationStatus(undefined);
+    await refreshClientRegistrationStatus({ quiet: true });
     await refreshOperatorApplicationStatus({ quiet: true });
     persistPortalState();
     return result;
@@ -527,7 +576,7 @@ byId("session_rotate_btn").addEventListener("click", () =>
 byId("session_revoke_btn").addEventListener("click", () =>
   run("session_revoke", async () => {
     const result = await requestSessionLifecycle("revoke");
-    sessionHasConnectSecrets = false;
+    clientRegistered = false;
     byId("session_token").value = "";
     byId("role").value = "client";
     setOperatorApplicationStatus(undefined);
@@ -560,6 +609,7 @@ byId("register_client_btn").addEventListener("click", () =>
     }
     const result = await post("/v1/gpm/onboarding/client/register", request);
     applySession(result);
+    await refreshClientRegistrationStatus({ quiet: true });
     return result;
   })
 );
@@ -625,6 +675,7 @@ async function restoreSessionStatusBestEffort() {
     print("session_status (auto, non-fatal)", String(err && err.message ? err.message : err));
     setStatus("warn", "Session check skipped", "Stored session token could not be validated. You can refresh or sign in again.");
   }
+  await refreshClientRegistrationStatus({ quiet: true });
   await refreshOperatorApplicationStatus({ quiet: true });
 }
 

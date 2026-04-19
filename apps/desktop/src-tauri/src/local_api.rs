@@ -516,6 +516,14 @@ impl GPMSessionStatusRequest {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct GPMClientStatusRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wallet_address: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct GPMClientRegisterRequest {
     pub session_token: String,
     #[serde(skip_serializing_if = "Option::is_none")]

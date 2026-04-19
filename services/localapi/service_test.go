@@ -2795,6 +2795,110 @@ func TestGPMClientRegisterUsesManifestAndPersistsSessionConnectSecrets(t *testin
 	if !strings.HasPrefix(session.InviteKey, "wallet:") {
 		t.Fatalf("session invite_key=%q want wallet:* fallback", session.InviteKey)
 	}
+	if session.PathProfile != "3hop" {
+		t.Fatalf("session path_profile=%q want=3hop", session.PathProfile)
+	}
+}
+
+func TestGPMClientStatusEndpointRegistrationStates(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	now := time.Now().UTC()
+
+	svc.gpmState.putSession(gpmSession{
+		Token:              "gpm-client-status-registered",
+		WalletAddress:      "cosmos1registeredstatus",
+		WalletProvider:     "keplr",
+		Role:               "client",
+		CreatedAt:          now,
+		ExpiresAt:          now.Add(time.Hour),
+		BootstrapDirectory: "https://directory.globalprivatemesh.example:8081",
+		InviteKey:          "inv-registered",
+		PathProfile:        "3hop",
+	})
+	svc.gpmState.putSession(gpmSession{
+		Token:          "gpm-client-status-not-registered",
+		WalletAddress:  "cosmos1notregisteredstatus",
+		WalletProvider: "keplr",
+		Role:           "client",
+		CreatedAt:      now,
+		ExpiresAt:      now.Add(time.Hour),
+	})
+
+	t.Run("registered", func(t *testing.T) {
+		body := `{"session_token":"gpm-client-status-registered"}`
+		code, payload := callJSONHandler(t, svc.handleGPMClientStatus, http.MethodPost, "/v1/gpm/onboarding/client/status", body)
+		if code != http.StatusOK {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		registration, _ := payload["registration"].(map[string]any)
+		if registration == nil {
+			t.Fatalf("registration missing payload=%v", payload)
+		}
+		gotStatus, _ := registration["status"].(string)
+		if gotStatus != "registered" {
+			t.Fatalf("registration.status=%q want=registered payload=%v", gotStatus, payload)
+		}
+		gotWallet, _ := registration["wallet_address"].(string)
+		if gotWallet != "cosmos1registeredstatus" {
+			t.Fatalf("registration.wallet_address=%q want=cosmos1registeredstatus payload=%v", gotWallet, payload)
+		}
+		gotBootstrap, _ := registration["bootstrap_directory"].(string)
+		if gotBootstrap != "https://directory.globalprivatemesh.example:8081" {
+			t.Fatalf("registration.bootstrap_directory=%q payload=%v", gotBootstrap, payload)
+		}
+		gotProfile, _ := registration["path_profile"].(string)
+		if gotProfile != "3hop" {
+			t.Fatalf("registration.path_profile=%q want=3hop payload=%v", gotProfile, payload)
+		}
+	})
+
+	t.Run("not_registered", func(t *testing.T) {
+		body := `{"session_token":"gpm-client-status-not-registered"}`
+		code, payload := callJSONHandler(t, svc.handleGPMClientStatus, http.MethodPost, "/v1/gpm/onboarding/client/status", body)
+		if code != http.StatusOK {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		registration, _ := payload["registration"].(map[string]any)
+		gotStatus, _ := registration["status"].(string)
+		if gotStatus != "not_registered" {
+			t.Fatalf("registration.status=%q want=not_registered payload=%v", gotStatus, payload)
+		}
+		gotWallet, _ := registration["wallet_address"].(string)
+		if gotWallet != "cosmos1notregisteredstatus" {
+			t.Fatalf("registration.wallet_address=%q want=cosmos1notregisteredstatus payload=%v", gotWallet, payload)
+		}
+		gotBootstrap, _ := registration["bootstrap_directory"].(string)
+		if gotBootstrap != "" {
+			t.Fatalf("registration.bootstrap_directory=%q want empty payload=%v", gotBootstrap, payload)
+		}
+		if _, ok := registration["path_profile"]; ok {
+			t.Fatalf("registration.path_profile should be omitted payload=%v", payload)
+		}
+	})
+
+	t.Run("invalid_session", func(t *testing.T) {
+		body := `{"session_token":"gpm-client-status-missing"}`
+		code, payload := callJSONHandler(t, svc.handleGPMClientStatus, http.MethodPost, "/v1/gpm/onboarding/client/status", body)
+		if code != http.StatusNotFound {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		errMsg, _ := payload["error"].(string)
+		if !strings.Contains(errMsg, "session not found") {
+			t.Fatalf("error=%q payload=%v", errMsg, payload)
+		}
+	})
+
+	t.Run("missing_session_token", func(t *testing.T) {
+		code, payload := callJSONHandler(t, svc.handleGPMClientStatus, http.MethodPost, "/v1/gpm/onboarding/client/status", `{}`)
+		if code != http.StatusBadRequest {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		errMsg, _ := payload["error"].(string)
+		if !strings.Contains(errMsg, "session_token is required") {
+			t.Fatalf("error=%q payload=%v", errMsg, payload)
+		}
+	})
 }
 
 func TestGPMClientRegisterRejectsPinnedMainDomainHostMismatch(t *testing.T) {
@@ -2865,9 +2969,9 @@ func TestGPMClientRegisterRejectsPinnedCacheFallbackSourceHostMismatch(t *testin
 		FetchedAtUTC: now.Format(time.RFC3339),
 		SourceURL:    "https://cache-source.globalprivatemesh.example:8443/v1/bootstrap/manifest",
 		Manifest: gpmBootstrapManifest{
-			Version:               1,
-			GeneratedAtUTC:        now.Add(-time.Minute).Format(time.RFC3339),
-			ExpiresAtUTC:          now.Add(time.Hour).Format(time.RFC3339),
+			Version:              1,
+			GeneratedAtUTC:       now.Add(-time.Minute).Format(time.RFC3339),
+			ExpiresAtUTC:         now.Add(time.Hour).Format(time.RFC3339),
 			BootstrapDirectories: []string{"https://directory.globalprivatemesh.example:8081"},
 		},
 	}

@@ -295,6 +295,7 @@ func (s *Service) Run(ctx context.Context) error {
 	mux.HandleFunc("/v1/gpm/session", s.handleGPMSessionStatus)
 	mux.HandleFunc("/v1/gpm/audit/recent", s.handleGPMAuditRecent)
 	mux.HandleFunc("/v1/gpm/onboarding/client/register", s.handleGPMClientRegister)
+	mux.HandleFunc("/v1/gpm/onboarding/client/status", s.handleGPMClientStatus)
 	mux.HandleFunc("/v1/gpm/onboarding/operator/apply", s.handleGPMOperatorApply)
 	mux.HandleFunc("/v1/gpm/onboarding/operator/status", s.handleGPMOperatorStatus)
 	mux.HandleFunc("/v1/gpm/onboarding/operator/approve", s.handleGPMOperatorApprove)
