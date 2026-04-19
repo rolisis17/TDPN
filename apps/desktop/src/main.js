@@ -14,6 +14,10 @@ const apiHintsEl = byId("api_hints");
 const manifestSourceEl = byId("manifest_source");
 const currentRoleEl = byId("current_role");
 const sessionTokenEl = byId("session_token");
+const walletProviderEl = byId("wallet_provider");
+const walletAddressEl = byId("wallet_address");
+const chainOperatorIdEl = byId("chain_operator_id");
+const pathProfileEl = byId("path_profile");
 const serverLockHintEl = byId("server_lock_hint");
 const connectionStateEl = document.getElementById("connection_state");
 const connectionDetailEl = document.getElementById("connection_detail");
@@ -32,6 +36,14 @@ const inviteKeyEl = byId("invite_key");
 const MAX_OUTPUT_CHARS = 64 * 1024;
 const CONNECTION_DEFAULT_STATE = "Unknown";
 const CONNECTION_DEFAULT_DETAIL = "Not checked yet";
+const STORAGE_KEYS = Object.freeze({
+  sessionToken: "gpm.desktop.session_token",
+  role: "gpm.desktop.role",
+  walletAddress: "gpm.desktop.wallet_address",
+  walletProvider: "gpm.desktop.wallet_provider",
+  chainOperatorId: "gpm.desktop.chain_operator_id",
+  pathProfile: "gpm.desktop.path_profile"
+});
 
 const state = {
   sessionToken: "",
@@ -40,6 +52,37 @@ const state = {
   connectionState: CONNECTION_DEFAULT_STATE,
   connectionDetail: CONNECTION_DEFAULT_DETAIL
 };
+
+function readPersistedValue(key) {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writePersistedValue(key, value) {
+  try {
+    const normalized = typeof value === "string" ? value.trim() : "";
+    if (!normalized) {
+      window.localStorage.removeItem(key);
+      return;
+    }
+    window.localStorage.setItem(key, normalized);
+  } catch {
+    // Ignore storage failures in this scaffold-level persistence.
+  }
+}
+
+function restoreSelectValue(selectEl, value) {
+  if (!value) {
+    return;
+  }
+  const hasOption = Array.from(selectEl.options).some((option) => option.value === value);
+  if (hasOption) {
+    selectEl.value = value;
+  }
+}
 
 function formatPayloadForDisplay(payload) {
   const text = typeof payload === "string" ? payload : JSON.stringify(payload, null, 2);
@@ -346,10 +389,14 @@ function formatConfigMeta(cfg) {
   };
 }
 
-function setRole(role) {
+function setRole(role, options = {}) {
+  const { persist = true } = options;
   const normalized = (role || "client").toLowerCase();
   state.role = normalized;
   currentRoleEl.value = normalized;
+  if (persist) {
+    writePersistedValue(STORAGE_KEYS.role, normalized);
+  }
   const serverUnlocked = normalized === "operator" || normalized === "admin";
   tabServerEl.disabled = !serverUnlocked;
   tabServerEl.classList.toggle("locked", !serverUnlocked);
@@ -362,9 +409,22 @@ function setRole(role) {
     : "Server controls are available only for approved operator/admin roles.";
 }
 
-function setSessionToken(value) {
+function setSessionToken(value, options = {}) {
+  const { persist = true } = options;
   state.sessionToken = (value || "").trim();
   sessionTokenEl.value = state.sessionToken;
+  if (persist) {
+    writePersistedValue(STORAGE_KEYS.sessionToken, state.sessionToken);
+  }
+}
+
+function restorePersistedSessionErgonomics() {
+  restoreSelectValue(walletProviderEl, readPersistedValue(STORAGE_KEYS.walletProvider));
+  walletAddressEl.value = readPersistedValue(STORAGE_KEYS.walletAddress) || "";
+  chainOperatorIdEl.value = readPersistedValue(STORAGE_KEYS.chainOperatorId) || "";
+  restoreSelectValue(pathProfileEl, readPersistedValue(STORAGE_KEYS.pathProfile));
+  setSessionToken(readPersistedValue(STORAGE_KEYS.sessionToken) || "", { persist: false });
+  setRole(readPersistedValue(STORAGE_KEYS.role) || "client", { persist: false });
 }
 
 function requireSessionToken(actionLabel) {
@@ -420,8 +480,8 @@ async function call(label, command, args = {}) {
 function connectPayload() {
   const payload = {
     session_token: state.sessionToken || undefined,
-    path_profile: byId("path_profile").value,
-    policy_profile: byId("path_profile").value,
+    path_profile: pathProfileEl.value,
+    policy_profile: pathProfileEl.value,
     interface: byId("interface").value.trim() || undefined,
     discovery_wait_sec: numberOrUndefined(byId("discovery_wait_sec").value),
     ready_timeout_sec: numberOrUndefined(byId("ready_timeout_sec").value),
@@ -478,16 +538,46 @@ async function refreshSession(action = "status") {
   return result;
 }
 
+async function refreshSessionOnInit() {
+  if (!state.sessionToken) {
+    return;
+  }
+  try {
+    const result = await invoke("control_gpm_session", {
+      request: { session_token: state.sessionToken, action: "status" }
+    });
+    setRole(parseSessionRole(result));
+  } catch {
+    // Startup status refresh is best-effort and should not block the scaffold.
+  }
+}
+
 tabClientEl.addEventListener("click", () => activateTab("client"));
 tabServerEl.addEventListener("click", () => {
   if (!tabServerEl.disabled) {
     activateTab("server");
   }
 });
+sessionTokenEl.addEventListener("input", () => {
+  state.sessionToken = sessionTokenEl.value.trim();
+  writePersistedValue(STORAGE_KEYS.sessionToken, state.sessionToken);
+});
+walletProviderEl.addEventListener("change", () => {
+  writePersistedValue(STORAGE_KEYS.walletProvider, walletProviderEl.value);
+});
+walletAddressEl.addEventListener("input", () => {
+  writePersistedValue(STORAGE_KEYS.walletAddress, walletAddressEl.value);
+});
+chainOperatorIdEl.addEventListener("input", () => {
+  writePersistedValue(STORAGE_KEYS.chainOperatorId, chainOperatorIdEl.value);
+});
+pathProfileEl.addEventListener("change", () => {
+  writePersistedValue(STORAGE_KEYS.pathProfile, pathProfileEl.value);
+});
 
 byId("challenge_btn").addEventListener("click", async () => {
-  const wallet_address = byId("wallet_address").value.trim();
-  const wallet_provider = byId("wallet_provider").value;
+  const wallet_address = walletAddressEl.value.trim();
+  const wallet_provider = walletProviderEl.value;
   const result = await call("gpm_auth_challenge", "control_gpm_auth_challenge", {
     request: { wallet_address, wallet_provider }
   });
@@ -498,8 +588,8 @@ byId("challenge_btn").addEventListener("click", async () => {
 
 byId("signin_btn").addEventListener("click", async () => {
   const request = {
-    wallet_address: byId("wallet_address").value.trim(),
-    wallet_provider: byId("wallet_provider").value,
+    wallet_address: walletAddressEl.value.trim(),
+    wallet_provider: walletProviderEl.value,
     challenge_id: byId("challenge_id").value.trim(),
     signature: byId("wallet_signature").value.trim()
   };
@@ -541,7 +631,7 @@ byId("register_client_btn").addEventListener("click", async () => {
   }
   const request = {
     session_token: state.sessionToken,
-    path_profile: byId("path_profile").value
+    path_profile: pathProfileEl.value
   };
   if (compatEnableEl.checked) {
     const bootstrap = bootstrapDirectoryEl.value.trim();
@@ -564,7 +654,7 @@ byId("apply_operator_btn").addEventListener("click", async () => {
   }
   const request = {
     session_token: state.sessionToken,
-    chain_operator_id: byId("chain_operator_id").value.trim(),
+    chain_operator_id: chainOperatorIdEl.value.trim(),
     server_label: "desktop-operator"
   };
   await call("gpm_operator_apply", "control_gpm_operator_apply", { request });
@@ -573,14 +663,14 @@ byId("apply_operator_btn").addEventListener("click", async () => {
 byId("operator_status_btn").addEventListener("click", async () => {
   const request = {
     session_token: state.sessionToken || undefined,
-    wallet_address: byId("wallet_address").value.trim() || undefined
+    wallet_address: walletAddressEl.value.trim() || undefined
   };
   await call("gpm_operator_status", "control_gpm_operator_status", { request });
 });
 
 byId("approve_operator_btn").addEventListener("click", async () => {
   const request = {
-    wallet_address: byId("wallet_address").value.trim(),
+    wallet_address: walletAddressEl.value.trim(),
     approved: true
   };
   await call("gpm_operator_approve", "control_gpm_operator_approve", { request });
@@ -665,7 +755,8 @@ byId("service_restart_btn").addEventListener("click", async () => {
 });
 
 async function init() {
-  setRole("client");
+  setRole("client", { persist: false });
+  restorePersistedSessionErgonomics();
   activateTab("client");
   setCompatOverrideEnabled(false);
   applyConnectionSnapshot({
@@ -696,6 +787,8 @@ async function init() {
   } catch {
     manifestSourceEl.textContent = "Manifest: unavailable";
   }
+
+  await refreshSessionOnInit();
 }
 
 init();

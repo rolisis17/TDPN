@@ -12,6 +12,96 @@ const statusTitleEl = byId("status_title");
 const statusDetailEl = byId("status_detail");
 const statusLineEl = byId("status_line");
 const actionButtons = Array.from(document.querySelectorAll(".actions button"));
+const PORTAL_STORAGE_KEY = "gpm.portal.state.v1";
+const PERSISTED_FIELD_IDS = [
+  "api_base",
+  "session_token",
+  "role",
+  "wallet_address",
+  "wallet_provider",
+  "chain_operator_id",
+  "server_label",
+  "path_profile",
+  "bootstrap_directory"
+];
+
+function localStore() {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+function snapshotPortalState() {
+  const state = {};
+  for (const id of PERSISTED_FIELD_IDS) {
+    const el = document.getElementById(id);
+    if (!el || typeof el.value !== "string") {
+      continue;
+    }
+    state[id] = el.value;
+  }
+  return state;
+}
+
+function persistPortalState(overrides) {
+  const store = localStore();
+  if (!store) {
+    return;
+  }
+  const state = snapshotPortalState();
+  if (overrides && typeof overrides === "object") {
+    Object.assign(state, overrides);
+  }
+  try {
+    store.setItem(PORTAL_STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    // Best effort only: ignore quota or browser storage errors.
+  }
+}
+
+function restorePortalState() {
+  const store = localStore();
+  if (!store) {
+    return;
+  }
+  const raw = store.getItem(PORTAL_STORAGE_KEY);
+  if (!raw) {
+    return;
+  }
+  let state = null;
+  try {
+    state = JSON.parse(raw);
+  } catch {
+    return;
+  }
+  if (!state || typeof state !== "object") {
+    return;
+  }
+  for (const id of PERSISTED_FIELD_IDS) {
+    if (typeof state[id] !== "string") {
+      continue;
+    }
+    const el = document.getElementById(id);
+    if (!el || typeof el.value !== "string") {
+      continue;
+    }
+    el.value = state[id];
+  }
+}
+
+function bindPersistenceListeners() {
+  const persist = () => persistPortalState();
+  for (const id of PERSISTED_FIELD_IDS) {
+    const el = document.getElementById(id);
+    if (!el) {
+      continue;
+    }
+    el.addEventListener("input", persist);
+    el.addEventListener("change", persist);
+  }
+}
 
 function setBusy(isBusy) {
   document.body.classList.toggle("is-busy", isBusy);
@@ -108,6 +198,7 @@ function applySession(result) {
   byId("session_token").value = token;
   const role = result.session?.role || result.role || result.profile?.role || "client";
   byId("role").value = role;
+  persistPortalState();
 }
 
 function readWalletPayload() {
@@ -168,6 +259,7 @@ byId("session_btn").addEventListener("click", () =>
   run("session_status", async () => {
     const result = await requestSessionLifecycle("status");
     byId("role").value = sessionRoleFromResult(result);
+    persistPortalState();
     return result;
   })
 );
@@ -179,6 +271,7 @@ byId("session_rotate_btn").addEventListener("click", () =>
       byId("session_token").value = result.session_token;
     }
     byId("role").value = sessionRoleFromResult(result);
+    persistPortalState();
     return result;
   })
 );
@@ -188,6 +281,7 @@ byId("session_revoke_btn").addEventListener("click", () =>
     const result = await requestSessionLifecycle("revoke");
     byId("session_token").value = "";
     byId("role").value = "client";
+    persistPortalState();
     return result;
   })
 );
@@ -256,4 +350,30 @@ byId("approve_operator_btn").addEventListener("click", () =>
   })
 );
 
-setStatus("good", "Portal ready", "Set an absolute API base, then start with a challenge or session refresh.");
+async function restoreSessionStatusBestEffort() {
+  const token = byId("session_token").value.trim();
+  if (!token) {
+    return;
+  }
+  setStatus("warn", "Restoring session", "Checking stored session token status.");
+  try {
+    const result = await requestSessionLifecycle("status");
+    byId("role").value = sessionRoleFromResult(result);
+    persistPortalState();
+    print("session_status (auto)", result);
+    setStatus("good", "Session restored", "Stored session token is active.");
+  } catch (err) {
+    print("session_status (auto, non-fatal)", String(err && err.message ? err.message : err));
+    setStatus("warn", "Session check skipped", "Stored session token could not be validated. You can refresh or sign in again.");
+  }
+}
+
+function initializePortal() {
+  restorePortalState();
+  bindPersistenceListeners();
+  persistPortalState();
+  setStatus("good", "Portal ready", "Set an absolute API base, then start with a challenge or session refresh.");
+  void restoreSessionStatusBestEffort();
+}
+
+initializePortal();

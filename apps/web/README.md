@@ -24,4 +24,5 @@ Then open:
 - The portal calls the new GPM local API endpoints (`/v1/gpm/...`).
 - Default API base is `http://127.0.0.1:8095` and can be changed in the portal UI.
 - Session lifecycle actions now use `POST /v1/gpm/session` with `action=status|refresh|revoke`.
+- Portal onboarding fields are persisted in browser `localStorage` and restored on reload; session refresh/revoke keeps stored token/role in sync.
 - Wallet verification is currently challenge+signature contract wiring; production wallet extension integration is a follow-on milestone.
