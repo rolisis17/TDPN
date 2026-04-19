@@ -15,6 +15,8 @@ const manifestSourceEl = byId("manifest_source");
 const currentRoleEl = byId("current_role");
 const sessionTokenEl = byId("session_token");
 const serverLockHintEl = byId("server_lock_hint");
+const connectionStateEl = document.getElementById("connection_state");
+const connectionDetailEl = document.getElementById("connection_detail");
 
 const updateBtnEl = byId("update_btn");
 const serviceStartBtnEl = byId("service_start_btn");
@@ -28,11 +30,15 @@ const compatEnableEl = byId("compat_enable");
 const bootstrapDirectoryEl = byId("bootstrap_directory");
 const inviteKeyEl = byId("invite_key");
 const MAX_OUTPUT_CHARS = 64 * 1024;
+const CONNECTION_DEFAULT_STATE = "Unknown";
+const CONNECTION_DEFAULT_DETAIL = "Not checked yet";
 
 const state = {
   sessionToken: "",
   role: "client",
-  manifest: null
+  manifest: null,
+  connectionState: CONNECTION_DEFAULT_STATE,
+  connectionDetail: CONNECTION_DEFAULT_DETAIL
 };
 
 function formatPayloadForDisplay(payload) {
@@ -64,6 +70,202 @@ function firstDefined(...values) {
     }
   }
   return undefined;
+}
+
+const CONNECTION_HINT_KEYS = {
+  state: ["connection_state", "state", "status", "phase", "mode"],
+  connected: ["connected", "is_connected", "online", "active"],
+  disconnected: ["disconnected", "is_disconnected", "offline"],
+  healthy: ["healthy", "ok", "is_ok", "alive"],
+  detail: ["detail", "details", "message", "reason", "error", "description"]
+};
+
+function findHintValue(payload, keys, depth = 0) {
+  if (payload === null || payload === undefined || depth > 4) {
+    return undefined;
+  }
+  if (Array.isArray(payload)) {
+    for (const item of payload) {
+      const found = findHintValue(item, keys, depth + 1);
+      if (found !== undefined && found !== null) {
+        return found;
+      }
+    }
+    return undefined;
+  }
+  if (typeof payload !== "object") {
+    return undefined;
+  }
+  for (const [key, value] of Object.entries(payload)) {
+    if (keys.includes(key.toLowerCase()) && value !== undefined && value !== null) {
+      return value;
+    }
+  }
+  for (const value of Object.values(payload)) {
+    const found = findHintValue(value, keys, depth + 1);
+    if (found !== undefined && found !== null) {
+      return found;
+    }
+  }
+  return undefined;
+}
+
+function toBooleanLike(value) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "number") {
+    return value !== 0;
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["1", "true", "yes", "ok", "healthy", "online", "up", "connected", "ready"].includes(normalized)) {
+      return true;
+    }
+    if (["0", "false", "no", "offline", "down", "disconnected", "unhealthy", "error"].includes(normalized)) {
+      return false;
+    }
+  }
+  return undefined;
+}
+
+function normalizeConnectionState(value) {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const text = value.trim().toLowerCase();
+  if (!text) {
+    return undefined;
+  }
+  if (text.includes("connecting") || text.includes("pending") || text.includes("starting")) {
+    return "connecting";
+  }
+  if (text.includes("disconnecting") || text.includes("stopping")) {
+    return "disconnecting";
+  }
+  if (text.includes("degrad") || text.includes("unhealthy") || text.includes("error") || text.includes("failed")) {
+    return "degraded";
+  }
+  if (text.includes("disconnect") || text.includes("offline") || text === "down" || text === "stopped") {
+    return "disconnected";
+  }
+  if (text.includes("connect") || text.includes("online") || text === "up" || text === "active" || text === "ready") {
+    return "connected";
+  }
+  if (text.includes("healthy") || text === "ok" || text === "pass") {
+    return "healthy";
+  }
+  return undefined;
+}
+
+function formatConnectionStateLabel(stateKey) {
+  switch (stateKey) {
+    case "connected":
+      return "Connected";
+    case "disconnected":
+      return "Disconnected";
+    case "connecting":
+      return "Connecting";
+    case "disconnecting":
+      return "Disconnecting";
+    case "healthy":
+      return "Healthy";
+    case "degraded":
+      return "Degraded";
+    default:
+      return CONNECTION_DEFAULT_STATE;
+  }
+}
+
+function toDetailText(value) {
+  if (typeof value === "string" && value.trim()) {
+    return value.trim();
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return undefined;
+}
+
+function inferConnectionDetail(payload, source, stateKey, stateHint) {
+  const detailHint = toDetailText(findHintValue(payload, CONNECTION_HINT_KEYS.detail));
+  if (detailHint) {
+    return detailHint;
+  }
+  const stateText = toDetailText(stateHint);
+  if (stateText) {
+    return stateText;
+  }
+  const payloadText = toDetailText(payload);
+  if (payloadText) {
+    return payloadText;
+  }
+  if (source === "connect") {
+    return "Connect request completed.";
+  }
+  if (source === "disconnect") {
+    return "Disconnect request completed.";
+  }
+  if (source === "status") {
+    return "Status refreshed.";
+  }
+  if (source === "health") {
+    return stateKey === "degraded" ? "Health check reported issues." : "Health check completed.";
+  }
+  return CONNECTION_DEFAULT_DETAIL;
+}
+
+function inferConnectionSnapshot(source, payload) {
+  const stateHint = findHintValue(payload, CONNECTION_HINT_KEYS.state);
+  const connected = toBooleanLike(findHintValue(payload, CONNECTION_HINT_KEYS.connected));
+  const disconnected = toBooleanLike(findHintValue(payload, CONNECTION_HINT_KEYS.disconnected));
+  const healthy = toBooleanLike(findHintValue(payload, CONNECTION_HINT_KEYS.healthy));
+
+  let stateKey = normalizeConnectionState(stateHint);
+  if (!stateKey && connected === true) {
+    stateKey = "connected";
+  }
+  if (!stateKey && disconnected === true) {
+    stateKey = "disconnected";
+  }
+  if (!stateKey && connected === false) {
+    stateKey = "disconnected";
+  }
+  if (!stateKey && disconnected === false) {
+    stateKey = "connected";
+  }
+  if (!stateKey && source === "connect") {
+    stateKey = "connected";
+  }
+  if (!stateKey && source === "disconnect") {
+    stateKey = "disconnected";
+  }
+  if (!stateKey && source === "health" && healthy !== undefined) {
+    stateKey = healthy ? "healthy" : "degraded";
+  }
+  if (!stateKey) {
+    stateKey = normalizeConnectionState(state.connectionState) || "unknown";
+  }
+
+  return {
+    state: formatConnectionStateLabel(stateKey),
+    detail: inferConnectionDetail(payload, source, stateKey, stateHint)
+  };
+}
+
+function applyConnectionSnapshot(snapshot) {
+  state.connectionState = snapshot?.state || state.connectionState || CONNECTION_DEFAULT_STATE;
+  state.connectionDetail = snapshot?.detail || state.connectionDetail || CONNECTION_DEFAULT_DETAIL;
+  if (connectionStateEl) {
+    connectionStateEl.textContent = state.connectionState;
+  }
+  if (connectionDetailEl) {
+    connectionDetailEl.textContent = state.connectionDetail;
+  }
+}
+
+function updateConnectionDashboard(source, payload) {
+  applyConnectionSnapshot(inferConnectionSnapshot(source, payload));
 }
 
 function readConfigBoolean(cfg, candidates) {
@@ -362,7 +564,8 @@ byId("connect_btn").addEventListener("click", async () => {
     return;
   }
   inviteKeyEl.value = "";
-  await call("connect", "control_connect", { request });
+  const result = await call("connect", "control_connect", { request });
+  updateConnectionDashboard("connect", result);
 });
 
 compatEnableEl.addEventListener("change", () => {
@@ -374,15 +577,18 @@ compatEnableEl.addEventListener("change", () => {
 });
 
 byId("disconnect_btn").addEventListener("click", async () => {
-  await call("disconnect", "control_disconnect");
+  const result = await call("disconnect", "control_disconnect");
+  updateConnectionDashboard("disconnect", result);
 });
 
 byId("status_btn").addEventListener("click", async () => {
-  await call("status", "control_status");
+  const result = await call("status", "control_status");
+  updateConnectionDashboard("status", result);
 });
 
 byId("status_btn_server").addEventListener("click", async () => {
-  await call("status_server", "control_status");
+  const result = await call("status_server", "control_status");
+  updateConnectionDashboard("status", result);
 });
 
 byId("diagnostics_btn").addEventListener("click", async () => {
@@ -390,7 +596,8 @@ byId("diagnostics_btn").addEventListener("click", async () => {
 });
 
 byId("health_btn").addEventListener("click", async () => {
-  await call("health", "control_health");
+  const result = await call("health", "control_health");
+  updateConnectionDashboard("health", result);
 });
 
 byId("set_profile_btn").addEventListener("click", async () => {
@@ -431,6 +638,10 @@ async function init() {
   setRole("client");
   activateTab("client");
   setCompatOverrideEnabled(false);
+  applyConnectionSnapshot({
+    state: CONNECTION_DEFAULT_STATE,
+    detail: CONNECTION_DEFAULT_DETAIL
+  });
   try {
     const cfg = await invoke("control_config");
     const meta = formatConfigMeta(cfg || {});
