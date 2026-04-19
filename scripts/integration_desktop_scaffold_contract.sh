@@ -165,6 +165,18 @@ if ! grep -qF 'local_api_session.ps1' "$WINDOWS_NATIVE_BOOTSTRAP_SCRIPT"; then
   echo "desktop scaffold contract failed: expected Windows-native local API session usage in $WINDOWS_NATIVE_BOOTSTRAP_SCRIPT"
   exit 1
 fi
+if ! grep -qiE 'SummaryJson|summary[_-]?json' "$WINDOWS_NATIVE_BOOTSTRAP_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected summary-json parameter marker in $WINDOWS_NATIVE_BOOTSTRAP_SCRIPT"
+  exit 1
+fi
+if ! grep -qiE 'PrintSummaryJson|print[_-]?summary[_-]?json' "$WINDOWS_NATIVE_BOOTSTRAP_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected print-summary-json parameter marker in $WINDOWS_NATIVE_BOOTSTRAP_SCRIPT"
+  exit 1
+fi
+if ! grep -qiE 'summary json written|write[-_ ]*summary|Write-[A-Za-z0-9_]*Summary|Summary[[:space:]]+helper' "$WINDOWS_NATIVE_BOOTSTRAP_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected summary writing helper marker in $WINDOWS_NATIVE_BOOTSTRAP_SCRIPT"
+  exit 1
+fi
 
 LINUX_NATIVE_BOOTSTRAP_SCRIPT="scripts/linux/desktop_native_bootstrap.sh"
 if [[ ! -f "$LINUX_NATIVE_BOOTSTRAP_SCRIPT" ]]; then

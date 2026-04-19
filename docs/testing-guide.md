@@ -67,12 +67,19 @@ What this does:
    - local API config defaults contract (`integration_local_api_config_defaults.sh`)
    - local control API forwarding contract (`integration_local_control_api_contract.sh`)
    - desktop scaffold contract (`integration_desktop_scaffold_contract.sh`)
+   - windows desktop native bootstrap guardrails (`integration_windows_desktop_native_bootstrap_guardrails.sh`)
 
 Expected result:
 - final line: `[ci] ok`
 
 If it fails:
 - script prints relevant logs from `/tmp/*`.
+
+Windows desktop native bootstrap guardrails:
+
+```bash
+./scripts/integration_windows_desktop_native_bootstrap_guardrails.sh
+```
 
 ## 3a) Phase 0/1 targeted gates
 
@@ -317,6 +324,7 @@ Status:
 - `integration_ci_phase3_windows_client_beta.sh` validates the Phase-3 gate contract.
 - `phase3_windows_client_beta_check.sh` validates the Phase-3 readiness/check artifact contract.
 - `phase3_windows_client_beta_run.sh` runs the Phase-3 gate + check in one command.
+- `integration_windows_desktop_native_bootstrap_guardrails.sh` validates Windows-native bootstrap dry-run modes, invalid-mode failure behavior, summary-json write, and print-summary-json output contract.
 - `integration_phase3_windows_client_beta_check.sh` validates checker behavior/contract.
 - `integration_phase3_windows_client_beta_run.sh` validates wrapper behavior/contract.
 - `phase3_windows_client_beta_handoff_check.sh` validates the Phase-3 handoff/check artifact contract.
@@ -330,6 +338,7 @@ Usage:
 ```bash
 ./scripts/ci_phase3_windows_client_beta.sh
 ./scripts/integration_ci_phase3_windows_client_beta.sh
+./scripts/integration_windows_desktop_native_bootstrap_guardrails.sh
 ./scripts/phase3_windows_client_beta_check.sh
 ./scripts/phase3_windows_client_beta_run.sh
 ./scripts/integration_phase3_windows_client_beta_check.sh

@@ -97,6 +97,7 @@ run_step "phase-4 windows full parity handoff check integration" ./scripts/integ
 run_step "phase-4 windows full parity handoff run integration" ./scripts/integration_phase4_windows_full_parity_handoff_run.sh
 run_step "easy-node windows gate-wrapper integration" ./scripts/integration_easy_node_windows_gate_wrappers.sh
 run_step "easy-node windows desktop wrappers integration" ./scripts/integration_easy_node_windows_desktop_wrappers.sh
+run_step "windows desktop native bootstrap guardrails integration" ./scripts/integration_windows_desktop_native_bootstrap_guardrails.sh
 run_step "phase-5 settlement layer gate integration" ./scripts/integration_ci_phase5_settlement_layer.sh
 run_step "phase-5 settlement layer check integration" ./scripts/integration_phase5_settlement_layer_check.sh
 run_step "phase-5 settlement layer run integration" ./scripts/integration_phase5_settlement_layer_run.sh

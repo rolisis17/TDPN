@@ -11,7 +11,10 @@ param(
   [switch]$DryRun,
   [switch]$ForceNpmInstall,
   [string]$ApiAddr = "127.0.0.1:8095",
-  [string]$CommandRunner = ""
+  [string]$CommandRunner = "",
+  [string]$SummaryJson = "",
+  [ValidateSet(0, 1)]
+  [int]$PrintSummaryJson = 0
 )
 
 $ErrorActionPreference = "Stop"
@@ -458,6 +461,86 @@ function Show-ToolReport {
   Write-Host ("  winget: " + $(if ($Report.winget) { $Report.winget } else { "missing" }))
 }
 
+function Get-SummaryToolReport {
+  param(
+    [pscustomobject]$Report
+  )
+
+  return [ordered]@{
+    go = $(if ($null -ne $Report -and -not [string]::IsNullOrWhiteSpace($Report.go)) { $Report.go } else { "" })
+    node = $(if ($null -ne $Report -and -not [string]::IsNullOrWhiteSpace($Report.node)) { $Report.node } else { "" })
+    npm = $(if ($null -ne $Report -and -not [string]::IsNullOrWhiteSpace($Report.npm)) { $Report.npm } else { "" })
+    rustc = $(if ($null -ne $Report -and -not [string]::IsNullOrWhiteSpace($Report.rustc)) { $Report.rustc } else { "" })
+    cargo = $(if ($null -ne $Report -and -not [string]::IsNullOrWhiteSpace($Report.cargo)) { $Report.cargo } else { "" })
+    git = $(if ($null -ne $Report -and -not [string]::IsNullOrWhiteSpace($Report.git)) { $Report.git } else { "" })
+    bash = $(if ($null -ne $Report -and -not [string]::IsNullOrWhiteSpace($Report.git_bash)) { $Report.git_bash } else { "" })
+  }
+}
+
+function Write-SummaryJsonFile {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path,
+    [Parameter(Mandatory = $true)]
+    [string]$JsonText
+  )
+
+  $parent = Split-Path -Parent $Path
+  if (-not [string]::IsNullOrWhiteSpace($parent) -and -not (Test-Path -LiteralPath $parent -PathType Container)) {
+    New-Item -ItemType Directory -Path $parent -Force | Out-Null
+  }
+  Set-Content -LiteralPath $Path -Value $JsonText -Encoding UTF8
+}
+
+function Resolve-SummaryStatus {
+  param(
+    [Parameter(Mandatory = $true)]
+    [int]$ExitCode,
+    [Parameter(Mandatory = $true)]
+    [bool]$DryRunEnabled,
+    [AllowEmptyCollection()]
+    [string[]]$MissingPackageIds = @(),
+    [Parameter(Mandatory = $true)]
+    [bool]$HasError
+  )
+
+  if ($HasError) {
+    if ($MissingPackageIds.Count -gt 0) {
+      return "missing"
+    }
+    return "error"
+  }
+  if ($DryRunEnabled) {
+    return "dry-run"
+  }
+  if ($MissingPackageIds.Count -gt 0) {
+    return "missing"
+  }
+  if ($ExitCode -eq 0) {
+    return "ok"
+  }
+  return "error"
+}
+
+function Emit-Summary {
+  param(
+    [Parameter(Mandatory = $true)]
+    [hashtable]$Summary
+  )
+
+  $json = $Summary | ConvertTo-Json -Depth 8
+  if (-not [string]::IsNullOrWhiteSpace($SummaryJson)) {
+    try {
+      Write-SummaryJsonFile -Path $SummaryJson -JsonText $json
+    } catch {
+      Write-Warning "failed to write summary json at '$SummaryJson': $($_.Exception.Message)"
+    }
+  }
+  if ($PrintSummaryJson -eq 1) {
+    Write-Output $json
+  }
+}
+
 function Get-DependencyLabel {
   param(
     [Parameter(Mandatory = $true)]
@@ -898,119 +981,163 @@ function Ensure-DesktopIconAsset {
   [System.IO.File]::WriteAllBytes($IconPath, $icoBytes)
 }
 
-$repoRoot = Resolve-RepoRoot
+function Invoke-BootstrapMain {
+  $repoRoot = Resolve-RepoRoot
 
-Write-Step "mode=$Mode"
-Write-Step "desktop_launch_strategy=$DesktopLaunchStrategy"
-if (-not [string]::IsNullOrWhiteSpace($DesktopExecutableOverridePath)) {
-  Write-Step "desktop_executable_override=$DesktopExecutableOverridePath"
-}
-Write-Step "repo_root=$repoRoot"
+  Write-Step "mode=$Mode"
+  Write-Step "desktop_launch_strategy=$DesktopLaunchStrategy"
+  if (-not [string]::IsNullOrWhiteSpace($DesktopExecutableOverridePath)) {
+    Write-Step "desktop_executable_override=$DesktopExecutableOverridePath"
+  }
+  Write-Step "repo_root=$repoRoot"
 
-Ensure-PolicyBypassProcess
+  Ensure-PolicyBypassProcess
 
-if (-not $SkipPathRefresh) {
-  Refresh-SessionPath
-  Write-Step "session PATH refreshed from machine+user PATH"
-} else {
-  Write-Step "session PATH refresh skipped by flag"
-}
-
-$commonToolDirs = Get-CommonToolDirectories
-if ($commonToolDirs.Count -gt 0) {
-  Add-SessionPathSegments -Segments $commonToolDirs
-  Write-Step "session PATH augmented with common tool directories: $($commonToolDirs -join ';')"
-}
-
-$report = Get-ToolReport
-Show-ToolReport -Report $report
-
-$desktopLaunchPlan = Resolve-DesktopLaunchPlan -RepoRootPath $repoRoot -DesktopLaunchStrategy $DesktopLaunchStrategy -DesktopExecutableOverridePath $DesktopExecutableOverridePath
-Write-Step ("desktop launch resolved: strategy={0}, source={1}{2}" -f $desktopLaunchPlan.Strategy, $desktopLaunchPlan.DesktopExecutableSource, $(if (-not [string]::IsNullOrWhiteSpace($desktopLaunchPlan.DesktopExecutablePath)) { ", path=$($desktopLaunchPlan.DesktopExecutablePath)" } else { "" }))
-
-$missingPackageIds = Get-MissingIds -Report $report -SelectedMode $Mode -DesktopLaunchPlan $desktopLaunchPlan
-if ($missingPackageIds.Count -gt 0) {
-  Write-Step ("missing dependency package ids: " + ($missingPackageIds -join ", "))
-  if ($InstallMissing) {
-    Install-MissingDependencies -PackageIds $missingPackageIds
-    if (-not $SkipPathRefresh) {
-      Refresh-SessionPath
-      Write-Step "session PATH refreshed after installations"
-    }
-    $report = Get-ToolReport
-    Show-ToolReport -Report $report
+  if (-not $SkipPathRefresh) {
+    Refresh-SessionPath
+    Write-Step "session PATH refreshed from machine+user PATH"
   } else {
-    Write-Step "tip: rerun with -InstallMissing to auto-install prerequisites with winget"
+    Write-Step "session PATH refresh skipped by flag"
   }
-} else {
-  Write-Step "all primary dependencies detected"
-}
 
-if ($Mode -eq "check") {
-  Write-Step "check completed"
-  exit 0
-}
-
-if ($Mode -eq "bootstrap") {
-  if ((Get-MissingIds -Report $report -SelectedMode $Mode -DesktopLaunchPlan $desktopLaunchPlan).Count -gt 0) {
-    throw "bootstrap completed with missing prerequisites; rerun with -InstallMissing or install manually"
+  $commonToolDirs = Get-CommonToolDirectories
+  if ($commonToolDirs.Count -gt 0) {
+    Add-SessionPathSegments -Segments $commonToolDirs
+    Write-Step "session PATH augmented with common tool directories: $($commonToolDirs -join ';')"
   }
-  Write-Step "bootstrap completed"
-  exit 0
-}
 
-Assert-ToolsForMode -Report $report -SelectedMode $Mode -DesktopLaunchPlan $desktopLaunchPlan
+  $report = Get-ToolReport
+  Show-ToolReport -Report $report
+  $script:BootstrapSummary.tool_report = Get-SummaryToolReport -Report $report
 
-if ($Mode -eq "run-api") {
-  Invoke-LocalApiForeground -RepoRootPath $repoRoot -Addr $ApiAddr -RunnerPath $CommandRunner
-  exit 0
-}
+  $desktopLaunchPlan = Resolve-DesktopLaunchPlan -RepoRootPath $repoRoot -DesktopLaunchStrategy $DesktopLaunchStrategy -DesktopExecutableOverridePath $DesktopExecutableOverridePath
+  $script:BootstrapSummary.desktop_launch_strategy = $desktopLaunchPlan.Strategy
+  $script:BootstrapSummary.desktop_launch_source = $desktopLaunchPlan.DesktopExecutableSource
+  $script:BootstrapSummary.desktop_executable_path = $(if (-not [string]::IsNullOrWhiteSpace($desktopLaunchPlan.DesktopExecutablePath)) { $desktopLaunchPlan.DesktopExecutablePath } else { "" })
+  Write-Step ("desktop launch resolved: strategy={0}, source={1}{2}" -f $desktopLaunchPlan.Strategy, $desktopLaunchPlan.DesktopExecutableSource, $(if (-not [string]::IsNullOrWhiteSpace($desktopLaunchPlan.DesktopExecutablePath)) { ", path=$($desktopLaunchPlan.DesktopExecutablePath)" } else { "" }))
 
-if ($Mode -eq "run-desktop") {
-  if ($desktopLaunchPlan.Strategy -eq "packaged") {
-    Invoke-DesktopPackaged -DesktopExecutablePath $desktopLaunchPlan.DesktopExecutablePath
-  } else {
-    Invoke-DesktopDev -RepoRootPath $repoRoot
-  }
-  exit 0
-}
-
-if ($Mode -eq "run-full") {
-  Validate-LocalApiAddr -Addr $ApiAddr
-  if ($DryRun) {
-    Write-Step "dry-run run-full: would start local api on $ApiAddr"
-    if ($desktopLaunchPlan.Strategy -eq "packaged") {
-      Write-Step "dry-run run-full: would launch packaged desktop: $($desktopLaunchPlan.DesktopExecutablePath)"
+  $missingPackageIds = Get-MissingIds -Report $report -SelectedMode $Mode -DesktopLaunchPlan $desktopLaunchPlan
+  $script:BootstrapSummary.missing_package_ids = @($missingPackageIds)
+  if ($missingPackageIds.Count -gt 0) {
+    Write-Step ("missing dependency package ids: " + ($missingPackageIds -join ", "))
+    if ($InstallMissing) {
+      $script:BootstrapSummary.install_attempted = $true
+      Install-MissingDependencies -PackageIds $missingPackageIds
+      if (-not $SkipPathRefresh) {
+        Refresh-SessionPath
+        Write-Step "session PATH refreshed after installations"
+      }
+      $report = Get-ToolReport
+      Show-ToolReport -Report $report
+      $script:BootstrapSummary.tool_report = Get-SummaryToolReport -Report $report
+      $script:BootstrapSummary.missing_package_ids = @(Get-MissingIds -Report $report -SelectedMode $Mode -DesktopLaunchPlan $desktopLaunchPlan)
     } else {
-      Write-Step "dry-run run-full: would launch desktop dev with npm.cmd run tauri -- dev"
+      Write-Step "tip: rerun with -InstallMissing to auto-install prerequisites with winget"
     }
-    exit 0
+  } else {
+    Write-Step "all primary dependencies detected"
   }
-  $apiProc = Start-LocalApiBackgroundWindow -RepoRootPath $repoRoot -Addr $ApiAddr -RunnerPath $CommandRunner
-  $apiHealthy = $false
-  try {
-    $apiHealthy = [bool](Wait-LocalApiReady -Addr $ApiAddr -TimeoutSec 25)
-    if (-not $apiHealthy) {
-      throw "local api health check did not pass"
+
+  if ($Mode -eq "check") {
+    Write-Step "check completed"
+    return 0
+  }
+
+  if ($Mode -eq "bootstrap") {
+    if ((Get-MissingIds -Report $report -SelectedMode $Mode -DesktopLaunchPlan $desktopLaunchPlan).Count -gt 0) {
+      throw "bootstrap completed with missing prerequisites; rerun with -InstallMissing or install manually"
     }
+    Write-Step "bootstrap completed"
+    return 0
+  }
+
+  Assert-ToolsForMode -Report $report -SelectedMode $Mode -DesktopLaunchPlan $desktopLaunchPlan
+
+  if ($Mode -eq "run-api") {
+    Invoke-LocalApiForeground -RepoRootPath $repoRoot -Addr $ApiAddr -RunnerPath $CommandRunner
+    return 0
+  }
+
+  if ($Mode -eq "run-desktop") {
     if ($desktopLaunchPlan.Strategy -eq "packaged") {
       Invoke-DesktopPackaged -DesktopExecutablePath $desktopLaunchPlan.DesktopExecutablePath
     } else {
       Invoke-DesktopDev -RepoRootPath $repoRoot
     }
-  } finally {
-    if (-not $apiHealthy -and $null -ne $apiProc) {
-      try {
-        if (-not $apiProc.HasExited) {
-          Stop-Process -Id $apiProc.Id -Force -ErrorAction Stop
-          Write-Step "stopped local api window pid=$($apiProc.Id) after failed startup"
+    return 0
+  }
+
+  if ($Mode -eq "run-full") {
+    Validate-LocalApiAddr -Addr $ApiAddr
+    if ($DryRun) {
+      Write-Step "dry-run run-full: would start local api on $ApiAddr"
+      if ($desktopLaunchPlan.Strategy -eq "packaged") {
+        Write-Step "dry-run run-full: would launch packaged desktop: $($desktopLaunchPlan.DesktopExecutablePath)"
+      } else {
+        Write-Step "dry-run run-full: would launch desktop dev with npm.cmd run tauri -- dev"
+      }
+      return 0
+    }
+    $apiProc = Start-LocalApiBackgroundWindow -RepoRootPath $repoRoot -Addr $ApiAddr -RunnerPath $CommandRunner
+    $apiHealthy = $false
+    try {
+      $apiHealthy = [bool](Wait-LocalApiReady -Addr $ApiAddr -TimeoutSec 25)
+      if (-not $apiHealthy) {
+        throw "local api health check did not pass"
+      }
+      if ($desktopLaunchPlan.Strategy -eq "packaged") {
+        Invoke-DesktopPackaged -DesktopExecutablePath $desktopLaunchPlan.DesktopExecutablePath
+      } else {
+        Invoke-DesktopDev -RepoRootPath $repoRoot
+      }
+    } finally {
+      if (-not $apiHealthy -and $null -ne $apiProc) {
+        try {
+          if (-not $apiProc.HasExited) {
+            Stop-Process -Id $apiProc.Id -Force -ErrorAction Stop
+            Write-Step "stopped local api window pid=$($apiProc.Id) after failed startup"
+          }
+        } catch {
+          Write-Warning "failed to stop local api process pid=$($apiProc.Id): $($_.Exception.Message)"
         }
-      } catch {
-        Write-Warning "failed to stop local api process pid=$($apiProc.Id): $($_.Exception.Message)"
       }
     }
+    return 0
   }
-  exit 0
+
+  throw "unsupported mode: $Mode"
 }
 
-throw "unsupported mode: $Mode"
+$script:BootstrapSummary = [ordered]@{
+  generated_at_utc = ""
+  status = ""
+  mode = $Mode
+  dry_run = [bool]$DryRun
+  desktop_launch_strategy = $DesktopLaunchStrategy
+  desktop_launch_source = ""
+  desktop_executable_path = ""
+  api_addr = $ApiAddr
+  tool_report = (Get-SummaryToolReport -Report $null)
+  missing_package_ids = @()
+  install_missing = [bool]$InstallMissing
+  install_attempted = $false
+  error = ""
+}
+$script:BootstrapExitCode = 1
+$script:BootstrapErrorMessage = ""
+
+try {
+  $script:BootstrapExitCode = Invoke-BootstrapMain
+} catch {
+  $script:BootstrapErrorMessage = $_.Exception.Message
+  throw
+} finally {
+  if (-not [string]::IsNullOrWhiteSpace($script:BootstrapErrorMessage)) {
+    $script:BootstrapSummary.error = $script:BootstrapErrorMessage
+  }
+  $script:BootstrapSummary.generated_at_utc = (Get-Date).ToUniversalTime().ToString("o")
+  $script:BootstrapSummary.status = Resolve-SummaryStatus -ExitCode $script:BootstrapExitCode -DryRunEnabled ([bool]$DryRun) -MissingPackageIds @($script:BootstrapSummary.missing_package_ids) -HasError (-not [string]::IsNullOrWhiteSpace($script:BootstrapSummary.error))
+  Emit-Summary -Summary $script:BootstrapSummary
+}
+
+exit $script:BootstrapExitCode
