@@ -165,6 +165,20 @@ function setSessionToken(value) {
   sessionTokenEl.value = state.sessionToken;
 }
 
+function requireSessionToken(actionLabel) {
+  if (!state.sessionToken) {
+    print("validation", `session_token is required to ${actionLabel}; sign in first`);
+    return false;
+  }
+  return true;
+}
+
+function serviceLifecycleRequest() {
+  return {
+    session_token: state.sessionToken
+  };
+}
+
 function setCompatOverrideEnabled(enabled) {
   const allow = !!enabled;
   compatEnableEl.checked = allow;
@@ -393,15 +407,24 @@ byId("service_status_btn").addEventListener("click", async () => {
 });
 
 byId("service_start_btn").addEventListener("click", async () => {
-  await call("service_start", "control_service_start");
+  if (!requireSessionToken("start the service")) {
+    return;
+  }
+  await call("service_start", "control_service_start", { request: serviceLifecycleRequest() });
 });
 
 byId("service_stop_btn").addEventListener("click", async () => {
-  await call("service_stop", "control_service_stop");
+  if (!requireSessionToken("stop the service")) {
+    return;
+  }
+  await call("service_stop", "control_service_stop", { request: serviceLifecycleRequest() });
 });
 
 byId("service_restart_btn").addEventListener("click", async () => {
-  await call("service_restart", "control_service_restart");
+  if (!requireSessionToken("restart the service")) {
+    return;
+  }
+  await call("service_restart", "control_service_restart", { request: serviceLifecycleRequest() });
 });
 
 async function init() {

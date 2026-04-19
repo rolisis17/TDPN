@@ -5,12 +5,18 @@ use local_api::{
     GPMOperatorStatusRequest, GPMSessionStatusRequest, GPMWalletChallengeRequest,
     GPMWalletVerifyRequest, LocalApiClient, LocalApiConfig, ProfileRequest,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use tauri::State;
 
 struct AppState {
     local_api: LocalApiClient,
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+struct ServiceLifecycleRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    session_token: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -151,6 +157,11 @@ fn redact_sensitive_fields(value: Value) -> Value {
 
 fn sanitize_desktop_payload(value: Value) -> Value {
     redact_sensitive_fields(remove_unbounded_output_fields(value))
+}
+
+fn fallback_to_legacy_service_endpoint(error: &str) -> bool {
+    let normalized = error.to_ascii_lowercase();
+    normalized.contains("404 not found") || normalized.contains("501 not implemented")
 }
 
 fn diagnostics_allowlisted_view(payload: Value) -> Value {
@@ -309,48 +320,53 @@ async fn control_service_status(state: State<'_, AppState>) -> Result<Value, Str
 }
 
 #[tauri::command]
-async fn control_service_start(state: State<'_, AppState>) -> Result<Value, String> {
+async fn control_service_start(
+    state: State<'_, AppState>,
+    request: Option<ServiceLifecycleRequest>,
+) -> Result<Value, String> {
+    control_service_lifecycle(state, "start", request.unwrap_or_default()).await
+}
+
+async fn control_service_lifecycle(
+    state: State<'_, AppState>,
+    action: &str,
+    request: ServiceLifecycleRequest,
+) -> Result<Value, String> {
     if !state.local_api.config().allow_service_mutations {
         return Err(
             "service lifecycle actions disabled (set TDPN_LOCAL_API_ALLOW_SERVICE_MUTATIONS=1 to enable)"
                 .to_string(),
         );
     }
-    state
-        .local_api
-        .post_empty("/v1/service/start")
-        .await
-        .map(sanitize_desktop_payload)
+    let gpm_path = format!("/v1/gpm/service/{action}");
+    match state.local_api.post_json(&gpm_path, &request).await {
+        Ok(value) => Ok(sanitize_desktop_payload(value)),
+        Err(error) if fallback_to_legacy_service_endpoint(&error) => {
+            let legacy_path = format!("/v1/service/{action}");
+            state
+                .local_api
+                .post_empty(&legacy_path)
+                .await
+                .map(sanitize_desktop_payload)
+        }
+        Err(error) => Err(error),
+    }
 }
 
 #[tauri::command]
-async fn control_service_stop(state: State<'_, AppState>) -> Result<Value, String> {
-    if !state.local_api.config().allow_service_mutations {
-        return Err(
-            "service lifecycle actions disabled (set TDPN_LOCAL_API_ALLOW_SERVICE_MUTATIONS=1 to enable)"
-                .to_string(),
-        );
-    }
-    state
-        .local_api
-        .post_empty("/v1/service/stop")
-        .await
-        .map(sanitize_desktop_payload)
+async fn control_service_stop(
+    state: State<'_, AppState>,
+    request: Option<ServiceLifecycleRequest>,
+) -> Result<Value, String> {
+    control_service_lifecycle(state, "stop", request.unwrap_or_default()).await
 }
 
 #[tauri::command]
-async fn control_service_restart(state: State<'_, AppState>) -> Result<Value, String> {
-    if !state.local_api.config().allow_service_mutations {
-        return Err(
-            "service lifecycle actions disabled (set TDPN_LOCAL_API_ALLOW_SERVICE_MUTATIONS=1 to enable)"
-                .to_string(),
-        );
-    }
-    state
-        .local_api
-        .post_empty("/v1/service/restart")
-        .await
-        .map(sanitize_desktop_payload)
+async fn control_service_restart(
+    state: State<'_, AppState>,
+    request: Option<ServiceLifecycleRequest>,
+) -> Result<Value, String> {
+    control_service_lifecycle(state, "restart", request.unwrap_or_default()).await
 }
 
 #[tauri::command]

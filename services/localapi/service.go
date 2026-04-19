@@ -279,6 +279,9 @@ func (s *Service) Run(ctx context.Context) error {
 	mux.HandleFunc("/v1/service/start", s.handleServiceStart)
 	mux.HandleFunc("/v1/service/stop", s.handleServiceStop)
 	mux.HandleFunc("/v1/service/restart", s.handleServiceRestart)
+	mux.HandleFunc("/v1/gpm/service/start", s.handleGPMServiceStart)
+	mux.HandleFunc("/v1/gpm/service/stop", s.handleGPMServiceStop)
+	mux.HandleFunc("/v1/gpm/service/restart", s.handleGPMServiceRestart)
 	mux.HandleFunc("/v1/gpm/bootstrap/manifest", s.handleGPMBootstrapManifest)
 	mux.HandleFunc("/v1/gpm/auth/challenge", s.handleGPMAuthChallenge)
 	mux.HandleFunc("/v1/gpm/auth/verify", s.handleGPMAuthVerify)
@@ -764,6 +767,34 @@ func (s *Service) handleServiceMutation(w http.ResponseWriter, r *http.Request, 
 	if !s.requireMutationAuth(w, r) {
 		return
 	}
+	legacyHint := fmt.Sprintf("prefer /v1/gpm/service/%s with session_token for approved operator/admin sessions", action)
+	s.handleLifecycleMutationExecution(w, r, action, command, envVar, map[string]any{"note": legacyHint})
+}
+
+func (s *Service) handleGPMServiceStart(w http.ResponseWriter, r *http.Request) {
+	s.handleGPMServiceMutation(w, r, "start", s.serviceStart, "LOCAL_CONTROL_API_SERVICE_START_COMMAND")
+}
+
+func (s *Service) handleGPMServiceStop(w http.ResponseWriter, r *http.Request) {
+	s.handleGPMServiceMutation(w, r, "stop", s.serviceStop, "LOCAL_CONTROL_API_SERVICE_STOP_COMMAND")
+}
+
+func (s *Service) handleGPMServiceRestart(w http.ResponseWriter, r *http.Request) {
+	s.handleGPMServiceMutation(w, r, "restart", s.serviceRestart, "LOCAL_CONTROL_API_SERVICE_RESTART_COMMAND")
+}
+
+func (s *Service) handleGPMServiceMutation(w http.ResponseWriter, r *http.Request, action, command, envVar string) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false, "error": "method not allowed"})
+		return
+	}
+	if !s.requireGPMServiceMutationAuth(w, r) {
+		return
+	}
+	s.handleLifecycleMutationExecution(w, r, action, command, envVar, nil)
+}
+
+func (s *Service) handleLifecycleMutationExecution(w http.ResponseWriter, r *http.Request, action, command, envVar string, responseExtras map[string]any) {
 	command = strings.TrimSpace(command)
 	if command == "" {
 		writeJSON(w, http.StatusNotImplemented, map[string]any{
@@ -792,12 +823,18 @@ func (s *Service) handleServiceMutation(w http.ResponseWriter, r *http.Request, 
 		})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	payload := map[string]any{
 		"ok":     true,
 		"action": action,
 		"rc":     rc,
 		"output": out,
-	})
+	}
+	if responseExtras != nil {
+		if note, ok := responseExtras["note"]; ok {
+			payload["note"] = note
+		}
+	}
+	writeJSON(w, http.StatusOK, payload)
 }
 
 func (s *Service) runEasyNode(ctx context.Context, args ...string) (string, int, error) {

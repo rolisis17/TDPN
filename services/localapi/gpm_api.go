@@ -122,6 +122,10 @@ type gpmOperatorApproveRequest struct {
 	AdminToken    string `json:"admin_token,omitempty"`
 }
 
+type gpmServiceMutationRequest struct {
+	SessionToken string `json:"session_token,omitempty"`
+}
+
 func newGPMRuntimeState() *gpmRuntimeState {
 	return &gpmRuntimeState{
 		challenges: map[string]gpmWalletChallenge{},
@@ -183,6 +187,51 @@ func (st *gpmRuntimeState) getOperator(walletAddress string) (gpmOperatorApplica
 	defer st.mu.RUnlock()
 	app, ok := st.operators[walletAddress]
 	return app, ok
+}
+
+func (s *Service) getGPMSession(token string, now time.Time) (gpmSession, bool) {
+	if s == nil || s.gpmState == nil {
+		return gpmSession{}, false
+	}
+	return s.gpmState.getSession(token, now)
+}
+
+func (s *Service) resolveGPMServiceMutationToken(r *http.Request) (string, error) {
+	var in gpmServiceMutationRequest
+	if err := decodeOptionalJSONBody(r, &in); err != nil {
+		return "", err
+	}
+	token := strings.TrimSpace(in.SessionToken)
+	if token == "" {
+		token = parseBearerToken(r.Header.Get("Authorization"))
+	}
+	return token, nil
+}
+
+func (s *Service) requireGPMServiceMutationAuth(w http.ResponseWriter, r *http.Request) bool {
+	token, err := s.resolveGPMServiceMutationToken(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid json body"})
+		return false
+	}
+	if strings.TrimSpace(token) == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "session token is required"})
+		return false
+	}
+	session, ok := s.getGPMSession(token, time.Now().UTC())
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "invalid or expired session"})
+		return false
+	}
+	role := strings.ToLower(strings.TrimSpace(session.Role))
+	if role != "operator" && role != "admin" {
+		writeJSON(w, http.StatusForbidden, map[string]any{
+			"ok":    false,
+			"error": fmt.Sprintf("session role %q is not permitted; operator or admin required", role),
+		})
+		return false
+	}
+	return true
 }
 
 func (s *Service) resolveConnectSecretsFromSession(sessionToken string) (string, string, error) {

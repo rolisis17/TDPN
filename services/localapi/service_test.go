@@ -1395,6 +1395,9 @@ func TestServiceLifecycleMutationSuccess(t *testing.T) {
 			if got, _ := payload["output"].(string); got == "" {
 				t.Fatalf("output should not be empty: %v", payload)
 			}
+			if got, _ := payload["note"].(string); !strings.Contains(got, "/v1/gpm/service/") {
+				t.Fatalf("note=%q want gpm migration hint", got)
+			}
 		})
 	}
 }
@@ -1536,6 +1539,162 @@ func TestServiceLifecycleMutationAuthRequired(t *testing.T) {
 	})
 }
 
+func TestGPMServiceLifecycleMutationSessionGate(t *testing.T) {
+	t.Run("missing session token rejected", func(t *testing.T) {
+		svc, logPath := newFakeService(t, false)
+		svc.gpmState = newGPMRuntimeState()
+		svc.serviceStart = "echo gpm-start-ok"
+
+		code, payload := callJSONHandler(t, svc.handleGPMServiceStart, http.MethodPost, "/v1/gpm/service/start", "")
+		if code != http.StatusUnauthorized {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+		if got, _ := payload["error"].(string); got != "session token is required" {
+			t.Fatalf("error=%q want session-token-required", got)
+		}
+		if cmds := readCommandLog(t, logPath); len(cmds) != 0 {
+			t.Fatalf("missing token should not execute commands, got=%v", cmds)
+		}
+	})
+
+	t.Run("invalid token rejected", func(t *testing.T) {
+		svc, logPath := newFakeService(t, false)
+		svc.gpmState = newGPMRuntimeState()
+		svc.serviceStart = "echo gpm-start-ok"
+
+		code, payload := callJSONHandler(t, svc.handleGPMServiceStart, http.MethodPost, "/v1/gpm/service/start", `{"session_token":"gpm-bad-token"}`)
+		if code != http.StatusUnauthorized {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+		if got, _ := payload["error"].(string); got != "invalid or expired session" {
+			t.Fatalf("error=%q want invalid-or-expired-session", got)
+		}
+		if cmds := readCommandLog(t, logPath); len(cmds) != 0 {
+			t.Fatalf("invalid token should not execute commands, got=%v", cmds)
+		}
+	})
+
+	t.Run("expired token rejected", func(t *testing.T) {
+		svc, logPath := newFakeService(t, false)
+		svc.gpmState = newGPMRuntimeState()
+		svc.serviceStart = "echo gpm-start-ok"
+		svc.gpmState.putSession(gpmSession{
+			Token:         "gpm-expired-token",
+			Role:          "operator",
+			CreatedAt:     time.Now().UTC().Add(-2 * time.Hour),
+			ExpiresAt:     time.Now().UTC().Add(-time.Minute),
+			WalletAddress: "cosmos1expired",
+		})
+
+		code, payload := callJSONHandler(t, svc.handleGPMServiceStart, http.MethodPost, "/v1/gpm/service/start", `{"session_token":"gpm-expired-token"}`)
+		if code != http.StatusUnauthorized {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+		if got, _ := payload["error"].(string); got != "invalid or expired session" {
+			t.Fatalf("error=%q want invalid-or-expired-session", got)
+		}
+		if cmds := readCommandLog(t, logPath); len(cmds) != 0 {
+			t.Fatalf("expired token should not execute commands, got=%v", cmds)
+		}
+	})
+
+	t.Run("client role rejected", func(t *testing.T) {
+		svc, logPath := newFakeService(t, false)
+		svc.gpmState = newGPMRuntimeState()
+		svc.serviceStart = "echo gpm-start-ok"
+		svc.gpmState.putSession(gpmSession{
+			Token:         "gpm-client-token",
+			Role:          "client",
+			CreatedAt:     time.Now().UTC(),
+			ExpiresAt:     time.Now().UTC().Add(time.Hour),
+			WalletAddress: "cosmos1client",
+		})
+
+		code, payload := callJSONHandler(t, svc.handleGPMServiceStart, http.MethodPost, "/v1/gpm/service/start", `{"session_token":"gpm-client-token"}`)
+		if code != http.StatusForbidden {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+		if got, _ := payload["error"].(string); !strings.Contains(got, "operator or admin required") {
+			t.Fatalf("error=%q want role gate message", got)
+		}
+		if cmds := readCommandLog(t, logPath); len(cmds) != 0 {
+			t.Fatalf("client role should not execute commands, got=%v", cmds)
+		}
+	})
+
+	t.Run("operator role executes legacy lifecycle command", func(t *testing.T) {
+		tests := []struct {
+			name      string
+			handlerFn func(*Service) http.HandlerFunc
+			target    string
+			command   string
+		}{
+			{name: "start", handlerFn: func(s *Service) http.HandlerFunc { return s.handleGPMServiceStart }, target: "/v1/gpm/service/start", command: "echo gpm-start-ok"},
+			{name: "stop", handlerFn: func(s *Service) http.HandlerFunc { return s.handleGPMServiceStop }, target: "/v1/gpm/service/stop", command: "echo gpm-stop-ok"},
+			{name: "restart", handlerFn: func(s *Service) http.HandlerFunc { return s.handleGPMServiceRestart }, target: "/v1/gpm/service/restart", command: "echo gpm-restart-ok"},
+		}
+		for _, tc := range tests {
+			t.Run(tc.name, func(t *testing.T) {
+				svc, _ := newFakeService(t, false)
+				svc.gpmState = newGPMRuntimeState()
+				switch tc.name {
+				case "start":
+					svc.serviceStart = tc.command
+				case "stop":
+					svc.serviceStop = tc.command
+				case "restart":
+					svc.serviceRestart = tc.command
+				}
+				svc.gpmState.putSession(gpmSession{
+					Token:         "gpm-operator-token",
+					Role:          "operator",
+					CreatedAt:     time.Now().UTC(),
+					ExpiresAt:     time.Now().UTC().Add(time.Hour),
+					WalletAddress: "cosmos1operator",
+				})
+
+				code, payload := callJSONHandler(t, tc.handlerFn(svc), http.MethodPost, tc.target, `{"session_token":"gpm-operator-token"}`)
+				if code != http.StatusOK {
+					t.Fatalf("status=%d body=%v", code, payload)
+				}
+				if got, _ := payload["action"].(string); got != tc.name {
+					t.Fatalf("action=%q want=%q", got, tc.name)
+				}
+				if got, _ := payload["rc"].(float64); int(got) != 0 {
+					t.Fatalf("rc=%v want=0", payload["rc"])
+				}
+				if got, _ := payload["output"].(string); got == "" {
+					t.Fatalf("output should not be empty: %v", payload)
+				}
+			})
+		}
+	})
+
+	t.Run("admin role also executes lifecycle command", func(t *testing.T) {
+		svc, _ := newFakeService(t, false)
+		svc.gpmState = newGPMRuntimeState()
+		svc.serviceRestart = "echo gpm-admin-restart-ok"
+		svc.gpmState.putSession(gpmSession{
+			Token:         "gpm-admin-token",
+			Role:          "admin",
+			CreatedAt:     time.Now().UTC(),
+			ExpiresAt:     time.Now().UTC().Add(time.Hour),
+			WalletAddress: "cosmos1admin",
+		})
+
+		code, payload := callJSONHandler(t, svc.handleGPMServiceRestart, http.MethodPost, "/v1/gpm/service/restart", `{"session_token":"gpm-admin-token"}`)
+		if code != http.StatusOK {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+		if got, _ := payload["action"].(string); got != "restart" {
+			t.Fatalf("action=%q want=restart", got)
+		}
+		if got, _ := payload["output"].(string); got == "" {
+			t.Fatalf("output should not be empty: %v", payload)
+		}
+	})
+}
+
 func TestMethodGuards(t *testing.T) {
 	svc, _ := newFakeService(t, false)
 
@@ -1552,6 +1711,9 @@ func TestMethodGuards(t *testing.T) {
 		{name: "set_profile", handler: svc.handleSetProfile, method: http.MethodGet, target: "/v1/set_profile"},
 		{name: "diagnostics", handler: svc.handleDiagnostics, method: http.MethodPost, target: "/v1/get_diagnostics"},
 		{name: "update", handler: svc.handleUpdate, method: http.MethodGet, target: "/v1/update"},
+		{name: "gpm_service_start", handler: svc.handleGPMServiceStart, method: http.MethodGet, target: "/v1/gpm/service/start"},
+		{name: "gpm_service_stop", handler: svc.handleGPMServiceStop, method: http.MethodGet, target: "/v1/gpm/service/stop"},
+		{name: "gpm_service_restart", handler: svc.handleGPMServiceRestart, method: http.MethodGet, target: "/v1/gpm/service/restart"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
