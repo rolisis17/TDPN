@@ -98,7 +98,14 @@ run_step "phase-4 windows full parity handoff run integration" ./scripts/integra
 run_step "easy-node windows gate-wrapper integration" ./scripts/integration_easy_node_windows_gate_wrappers.sh
 run_step "easy-node windows desktop wrappers integration" ./scripts/integration_easy_node_windows_desktop_wrappers.sh
 run_step "easy-node desktop wrappers integration" ./scripts/integration_easy_node_desktop_wrappers.sh
+run_step "windows desktop doctor guardrails integration" ./scripts/integration_windows_desktop_doctor_guardrails.sh
 run_step "windows desktop native bootstrap guardrails integration" ./scripts/integration_windows_desktop_native_bootstrap_guardrails.sh
+run_step "windows desktop packaged run guardrails integration" ./scripts/integration_windows_desktop_packaged_run_guardrails.sh
+run_step "linux desktop doctor guardrails integration" ./scripts/integration_linux_desktop_doctor_guardrails.sh
+run_step "linux desktop native bootstrap guardrails integration" ./scripts/integration_linux_desktop_native_bootstrap_guardrails.sh
+run_step "linux desktop packaged run guardrails integration" ./scripts/integration_linux_desktop_packaged_run_guardrails.sh
+run_step "desktop release bundle guardrails integration" ./scripts/integration_desktop_release_bundle_guardrails.sh
+run_step "desktop linux release bundle guardrails integration" ./scripts/integration_desktop_linux_release_bundle_guardrails.sh
 run_step "phase-5 settlement layer gate integration" ./scripts/integration_ci_phase5_settlement_layer.sh
 run_step "phase-5 settlement layer check integration" ./scripts/integration_phase5_settlement_layer_check.sh
 run_step "phase-5 settlement layer run integration" ./scripts/integration_phase5_settlement_layer_run.sh

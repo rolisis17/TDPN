@@ -207,8 +207,29 @@ echo "[ci] easy-node windows desktop wrappers integration"
 echo "[ci] easy-node desktop wrappers integration"
 ./scripts/integration_easy_node_desktop_wrappers.sh
 
+echo "[ci] windows desktop doctor guardrails integration"
+./scripts/integration_windows_desktop_doctor_guardrails.sh
+
 echo "[ci] windows desktop native bootstrap guardrails integration"
 ./scripts/integration_windows_desktop_native_bootstrap_guardrails.sh
+
+echo "[ci] windows desktop packaged-run guardrails integration"
+./scripts/integration_windows_desktop_packaged_run_guardrails.sh
+
+echo "[ci] linux desktop doctor guardrails integration"
+./scripts/integration_linux_desktop_doctor_guardrails.sh
+
+echo "[ci] linux desktop native bootstrap guardrails integration"
+./scripts/integration_linux_desktop_native_bootstrap_guardrails.sh
+
+echo "[ci] linux desktop packaged-run guardrails integration"
+./scripts/integration_linux_desktop_packaged_run_guardrails.sh
+
+echo "[ci] desktop release bundle guardrails integration"
+./scripts/integration_desktop_release_bundle_guardrails.sh
+
+echo "[ci] desktop linux release bundle guardrails integration"
+./scripts/integration_desktop_linux_release_bundle_guardrails.sh
 
 echo "[ci] phase-5 settlement layer gate integration"
 ./scripts/integration_ci_phase5_settlement_layer.sh
