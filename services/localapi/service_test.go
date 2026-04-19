@@ -2541,6 +2541,91 @@ func TestGPMAuthChallengeVerifyAndSessionStatus(t *testing.T) {
 	}
 }
 
+func TestGPMSessionRefreshAndRevoke(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	now := time.Now().UTC()
+	const originalToken = "gpm-session-token-original"
+	svc.gpmState.putSession(gpmSession{
+		Token:          originalToken,
+		WalletAddress:  "cosmos1sessionuser",
+		WalletProvider: "keplr",
+		Role:           "client",
+		CreatedAt:      now,
+		ExpiresAt:      now.Add(time.Hour),
+	})
+
+	refreshBody := `{"session_token":"` + originalToken + `","action":"refresh"}`
+	code, payload := callJSONHandler(t, svc.handleGPMSessionStatus, http.MethodPost, "/v1/gpm/session", refreshBody)
+	if code != http.StatusOK {
+		t.Fatalf("refresh status=%d body=%v", code, payload)
+	}
+	action, _ := payload["action"].(string)
+	if action != "refresh" {
+		t.Fatalf("action=%q want=refresh payload=%v", action, payload)
+	}
+	refreshedToken, _ := payload["session_token"].(string)
+	if strings.TrimSpace(refreshedToken) == "" {
+		t.Fatalf("session_token missing after refresh payload=%v", payload)
+	}
+	if refreshedToken == originalToken {
+		t.Fatalf("session_token was not rotated old=%q new=%q", originalToken, refreshedToken)
+	}
+	if _, ok := svc.gpmState.getSession(originalToken, time.Now().UTC()); ok {
+		t.Fatalf("expected original token to be removed after refresh")
+	}
+	if _, ok := svc.gpmState.getSession(refreshedToken, time.Now().UTC()); !ok {
+		t.Fatalf("expected refreshed token to exist")
+	}
+
+	revokeBody := `{"session_token":"` + refreshedToken + `","action":"revoke"}`
+	code, payload = callJSONHandler(t, svc.handleGPMSessionStatus, http.MethodPost, "/v1/gpm/session", revokeBody)
+	if code != http.StatusOK {
+		t.Fatalf("revoke status=%d body=%v", code, payload)
+	}
+	revokeAction, _ := payload["action"].(string)
+	if revokeAction != "revoke" {
+		t.Fatalf("action=%q want=revoke payload=%v", revokeAction, payload)
+	}
+	revoked, _ := payload["revoked"].(bool)
+	if !revoked {
+		t.Fatalf("expected revoked=true payload=%v", payload)
+	}
+	if _, ok := svc.gpmState.getSession(refreshedToken, time.Now().UTC()); ok {
+		t.Fatalf("expected refreshed token to be removed after revoke")
+	}
+
+	statusBody := `{"session_token":"` + refreshedToken + `","action":"status"}`
+	code, payload = callJSONHandler(t, svc.handleGPMSessionStatus, http.MethodPost, "/v1/gpm/session", statusBody)
+	if code != http.StatusNotFound {
+		t.Fatalf("expected revoked token status 404 got=%d payload=%v", code, payload)
+	}
+}
+
+func TestGPMSessionActionRejectsUnknownAction(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	now := time.Now().UTC()
+	svc.gpmState.putSession(gpmSession{
+		Token:          "gpm-session-token-invalid-action",
+		WalletAddress:  "cosmos1sessionaction",
+		WalletProvider: "keplr",
+		Role:           "client",
+		CreatedAt:      now,
+		ExpiresAt:      now.Add(time.Hour),
+	})
+
+	body := `{"session_token":"gpm-session-token-invalid-action","action":"rotate"}`
+	code, payload := callJSONHandler(t, svc.handleGPMSessionStatus, http.MethodPost, "/v1/gpm/session", body)
+	if code != http.StatusBadRequest {
+		t.Fatalf("status=%d payload=%v", code, payload)
+	}
+	errMsg, _ := payload["error"].(string)
+	if !strings.Contains(errMsg, "action must be one of") {
+		t.Fatalf("error=%q payload=%v", errMsg, payload)
+	}
+}
+
 func TestGPMClientRegisterUsesManifestAndPersistsSessionConnectSecrets(t *testing.T) {
 	svc, _ := newFakeService(t, false)
 	svc.gpmState = newGPMRuntimeState()

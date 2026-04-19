@@ -407,6 +407,7 @@ async fn control_gpm_session(
     state: State<'_, AppState>,
     request: GPMSessionStatusRequest,
 ) -> Result<Value, String> {
+    request.validate()?;
     state
         .local_api
         .post_json("/v1/gpm/session", &request)

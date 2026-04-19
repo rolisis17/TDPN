@@ -452,14 +452,30 @@ async function loadManifest() {
   return result;
 }
 
-async function refreshSession() {
+async function refreshSession(action = "status") {
   if (!state.sessionToken) {
     return;
   }
-  const result = await call("gpm_session", "control_gpm_session", {
-    request: { session_token: state.sessionToken }
+  const sessionAction = action || "status";
+  const label =
+    sessionAction === "refresh"
+      ? "gpm_session_refresh"
+      : sessionAction === "revoke"
+        ? "gpm_session_revoke"
+        : "gpm_session";
+  const result = await call(label, "control_gpm_session", {
+    request: { session_token: state.sessionToken, action: sessionAction }
   });
+  if (sessionAction === "refresh") {
+    setSessionToken(result?.session_token || state.sessionToken);
+  }
+  if (sessionAction === "revoke") {
+    setSessionToken("");
+    setRole("client");
+    return result;
+  }
   setRole(parseSessionRole(result));
+  return result;
 }
 
 tabClientEl.addEventListener("click", () => activateTab("client"));
@@ -494,6 +510,20 @@ byId("signin_btn").addEventListener("click", async () => {
 
 byId("session_btn").addEventListener("click", async () => {
   await refreshSession();
+});
+
+byId("session_rotate_btn").addEventListener("click", async () => {
+  if (!requireSessionToken("rotate the session")) {
+    return;
+  }
+  await refreshSession("refresh");
+});
+
+byId("session_revoke_btn").addEventListener("click", async () => {
+  if (!requireSessionToken("revoke the session")) {
+    return;
+  }
+  await refreshSession("revoke");
 });
 
 byId("manifest_btn").addEventListener("click", async () => {

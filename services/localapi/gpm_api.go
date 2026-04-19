@@ -95,6 +95,7 @@ type gpmAuthVerifyRequest struct {
 
 type gpmSessionStatusRequest struct {
 	SessionToken string `json:"session_token"`
+	Action       string `json:"action,omitempty"`
 }
 
 type gpmClientRegisterRequest struct {
@@ -174,6 +175,23 @@ func (st *gpmRuntimeState) getSession(token string, now time.Time) (gpmSession, 
 		return gpmSession{}, false
 	}
 	return session, true
+}
+
+func (st *gpmRuntimeState) replaceSessionToken(oldToken string, session gpmSession) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	delete(st.sessions, oldToken)
+	st.sessions[session.Token] = session
+}
+
+func (st *gpmRuntimeState) deleteSession(token string) bool {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if _, ok := st.sessions[token]; !ok {
+		return false
+	}
+	delete(st.sessions, token)
+	return true
 }
 
 func (st *gpmRuntimeState) upsertOperator(app gpmOperatorApplication) {
@@ -394,24 +412,96 @@ func (s *Service) handleGPMSessionStatus(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false, "error": "method not allowed"})
 		return
 	}
-	if !s.requireCommandReadAuth(w, r) {
-		return
-	}
 	var in gpmSessionStatusRequest
 	if err := decodeOptionalJSONBody(r, &in); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid json body"})
+		return
+	}
+	action := normalizeGPMSessionAction(in.Action)
+	if action == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"ok":    false,
+			"error": "action must be one of: status, refresh, revoke",
+		})
+		return
+	}
+	if action == "status" {
+		if !s.requireCommandReadAuth(w, r) {
+			return
+		}
+	} else if !s.requireMutationAuth(w, r) {
 		return
 	}
 	token := strings.TrimSpace(in.SessionToken)
 	if token == "" {
 		token = strings.TrimSpace(parseBearerToken(r.Header.Get("Authorization")))
 	}
+	if token == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "session_token is required"})
+		return
+	}
 	session, ok := s.gpmState.getSession(token, time.Now().UTC())
 	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]any{"ok": false, "error": "session not found"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "session": serializeGPMSession(session)})
+	now := time.Now().UTC()
+	switch action {
+	case "status":
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":      true,
+			"action":  "status",
+			"session": serializeGPMSession(session),
+		})
+		return
+	case "refresh":
+		newToken, err := randomBase64URL(32)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": "failed to refresh session"})
+			return
+		}
+		refreshed := session
+		refreshed.Token = newToken
+		refreshed.CreatedAt = now
+		refreshed.ExpiresAt = now.Add(gpmSessionTTL)
+		s.gpmState.replaceSessionToken(token, refreshed)
+		s.persistGPMStateBestEffort("session_refresh")
+		s.appendGPMAudit("session_refreshed", map[string]any{
+			"wallet_address":  refreshed.WalletAddress,
+			"wallet_provider": refreshed.WalletProvider,
+			"role":            refreshed.Role,
+		})
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":            true,
+			"action":        "refresh",
+			"session_token": refreshed.Token,
+			"session":       serializeGPMSession(refreshed),
+		})
+		return
+	case "revoke":
+		if !s.gpmState.deleteSession(token) {
+			writeJSON(w, http.StatusNotFound, map[string]any{"ok": false, "error": "session not found"})
+			return
+		}
+		s.persistGPMStateBestEffort("session_revoke")
+		s.appendGPMAudit("session_revoked", map[string]any{
+			"wallet_address":  session.WalletAddress,
+			"wallet_provider": session.WalletProvider,
+			"role":            session.Role,
+		})
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":      true,
+			"action":  "revoke",
+			"revoked": true,
+		})
+		return
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"ok":    false,
+			"error": "action must be one of: status, refresh, revoke",
+		})
+		return
+	}
 }
 
 func (s *Service) handleGPMAuditRecent(w http.ResponseWriter, r *http.Request) {
@@ -699,6 +789,19 @@ func normalizeWalletProvider(raw string) string {
 		return "keplr"
 	case "leap":
 		return "leap"
+	default:
+		return ""
+	}
+}
+
+func normalizeGPMSessionAction(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", "status":
+		return "status"
+	case "refresh":
+		return "refresh"
+	case "revoke":
+		return "revoke"
 	default:
 		return ""
 	}

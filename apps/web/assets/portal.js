@@ -117,6 +117,15 @@ function readWalletPayload() {
   };
 }
 
+function sessionRoleFromResult(result) {
+  return result.session?.role || result.role || result.profile?.role || byId("role").value || "client";
+}
+
+async function requestSessionLifecycle(action = "status") {
+  const token = byId("session_token").value.trim();
+  return post("/v1/gpm/session", { session_token: token, action });
+}
+
 async function run(label, fn) {
   setBusy(true);
   setStatus("warn", `${label} in progress`, "Please wait while the portal completes the request.");
@@ -157,11 +166,28 @@ byId("signin_btn").addEventListener("click", () =>
 
 byId("session_btn").addEventListener("click", () =>
   run("session_status", async () => {
-    const token = byId("session_token").value.trim();
-    const result = await post("/v1/gpm/session", { session_token: token });
-    if (result.session?.role) {
-      byId("role").value = result.session.role;
+    const result = await requestSessionLifecycle("status");
+    byId("role").value = sessionRoleFromResult(result);
+    return result;
+  })
+);
+
+byId("session_rotate_btn").addEventListener("click", () =>
+  run("session_rotate", async () => {
+    const result = await requestSessionLifecycle("refresh");
+    if (result.session_token) {
+      byId("session_token").value = result.session_token;
     }
+    byId("role").value = sessionRoleFromResult(result);
+    return result;
+  })
+);
+
+byId("session_revoke_btn").addEventListener("click", () =>
+  run("session_revoke", async () => {
+    const result = await requestSessionLifecycle("revoke");
+    byId("session_token").value = "";
+    byId("role").value = "client";
     return result;
   })
 );

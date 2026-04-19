@@ -486,6 +486,26 @@ pub struct GPMWalletVerifyRequest {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GPMSessionStatusRequest {
     pub session_token: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub action: Option<String>,
+}
+
+impl GPMSessionStatusRequest {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.session_token.trim().is_empty() {
+            return Err("session_token is required".to_string());
+        }
+        if let Some(action) = self.action.as_deref() {
+            let normalized = action.trim().to_ascii_lowercase();
+            if normalized.is_empty() {
+                return Ok(());
+            }
+            if !matches!(normalized.as_str(), "status" | "refresh" | "revoke") {
+                return Err("action must be one of: status, refresh, revoke".to_string());
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -984,6 +1004,54 @@ mod tests {
         };
         let profile_err = bad_profile.validate().expect_err("invalid set_profile");
         assert!(profile_err.contains("1hop, 2hop, 3hop"), "{profile_err}");
+    }
+
+    #[test]
+    fn gpm_session_request_requires_token_and_valid_action() {
+        let missing_token = GPMSessionStatusRequest {
+            session_token: "   ".to_string(),
+            action: Some("status".to_string()),
+        };
+        let token_err = missing_token
+            .validate()
+            .expect_err("expected missing token validation error");
+        assert!(token_err.contains("session_token is required"), "{token_err}");
+
+        let invalid_action = GPMSessionStatusRequest {
+            session_token: "gpm-token".to_string(),
+            action: Some("rotate".to_string()),
+        };
+        let action_err = invalid_action
+            .validate()
+            .expect_err("expected invalid action validation error");
+        assert!(
+            action_err.contains("status, refresh, revoke"),
+            "{action_err}"
+        );
+
+        let valid_status = GPMSessionStatusRequest {
+            session_token: "gpm-token".to_string(),
+            action: Some("status".to_string()),
+        };
+        valid_status
+            .validate()
+            .expect("expected status action to validate");
+
+        let valid_refresh = GPMSessionStatusRequest {
+            session_token: "gpm-token".to_string(),
+            action: Some("refresh".to_string()),
+        };
+        valid_refresh
+            .validate()
+            .expect("expected refresh action to validate");
+
+        let valid_revoke = GPMSessionStatusRequest {
+            session_token: "gpm-token".to_string(),
+            action: Some("revoke".to_string()),
+        };
+        valid_revoke
+            .validate()
+            .expect("expected revoke action to validate");
     }
 
     #[test]
