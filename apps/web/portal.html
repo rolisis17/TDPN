@@ -104,6 +104,13 @@
 
       <section class="card" id="operator">
         <h2>Operator Workflow</h2>
+        <div id="operator_readiness" class="status-banner operator-readiness" data-kind="warn" role="status" aria-live="polite">
+          <div class="status-banner__label">Operator readiness</div>
+          <div id="operator_readiness_line" class="status warn">
+            <strong>Application status: <span id="operator_readiness_status">Not signed in</span></strong>
+            <span id="operator_readiness_guidance">Sign in first to unlock operator onboarding.</span>
+          </div>
+        </div>
         <div class="fields">
           <label>
             Chain operator ID

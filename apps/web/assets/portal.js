@@ -11,7 +11,12 @@ const statusBannerEl = byId("status_banner");
 const statusTitleEl = byId("status_title");
 const statusDetailEl = byId("status_detail");
 const statusLineEl = byId("status_line");
+const operatorReadinessEl = byId("operator_readiness");
+const operatorReadinessLineEl = byId("operator_readiness_line");
+const operatorReadinessStatusEl = byId("operator_readiness_status");
+const operatorReadinessGuidanceEl = byId("operator_readiness_guidance");
 const actionButtons = Array.from(document.querySelectorAll(".actions button"));
+const OPERATOR_APPLICATION_STATUSES = new Set(["not_submitted", "pending", "approved", "rejected"]);
 const PORTAL_STORAGE_KEY = "gpm.portal.state.v1";
 const PERSISTED_FIELD_IDS = [
   "api_base",
@@ -24,6 +29,7 @@ const PERSISTED_FIELD_IDS = [
   "path_profile",
   "bootstrap_directory"
 ];
+let operatorApplicationStatus = undefined;
 
 function localStore() {
   try {
@@ -101,6 +107,122 @@ function bindPersistenceListeners() {
     el.addEventListener("input", persist);
     el.addEventListener("change", persist);
   }
+}
+
+function normalizeOperatorApplicationStatus(value) {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (OPERATOR_APPLICATION_STATUSES.has(normalized)) {
+    return normalized;
+  }
+  return undefined;
+}
+
+function parseOperatorApplicationStatus(payload) {
+  return normalizeOperatorApplicationStatus(payload?.application?.status);
+}
+
+function isServerRoleUnlocked(roleValue) {
+  const role = String(roleValue || "").trim().toLowerCase();
+  return role === "operator" || role === "admin";
+}
+
+function formatOperatorApplicationStatusLabel(status) {
+  switch (status) {
+    case "not_submitted":
+      return "Not submitted";
+    case "pending":
+      return "Pending";
+    case "approved":
+      return "Approved";
+    case "rejected":
+      return "Rejected";
+    default:
+      return "Unknown";
+  }
+}
+
+function setOperatorReadiness(kind, statusText, guidanceText) {
+  operatorReadinessEl.dataset.kind = kind || "warn";
+  operatorReadinessLineEl.classList.remove("good", "warn", "bad");
+  if (kind) {
+    operatorReadinessLineEl.classList.add(kind);
+  }
+  operatorReadinessStatusEl.textContent = statusText;
+  operatorReadinessGuidanceEl.textContent = guidanceText;
+}
+
+function computeOperatorReadiness() {
+  const token = byId("session_token").value.trim();
+  const role = byId("role").value.trim().toLowerCase() || "client";
+  const statusLabel = formatOperatorApplicationStatusLabel(operatorApplicationStatus);
+
+  if (!token) {
+    return {
+      kind: "warn",
+      statusText: "Not signed in",
+      guidanceText: "Sign in first to unlock operator onboarding."
+    };
+  }
+
+  if (isServerRoleUnlocked(role)) {
+    return {
+      kind: "good",
+      statusText: statusLabel,
+      guidanceText: "Server controls are eligible for this session role."
+    };
+  }
+
+  switch (operatorApplicationStatus) {
+    case "not_submitted":
+      return {
+        kind: "warn",
+        statusText: statusLabel,
+        guidanceText: "Apply operator role to start server approval."
+      };
+    case "pending":
+      return {
+        kind: "warn",
+        statusText: statusLabel,
+        guidanceText: "Operator application is pending approval."
+      };
+    case "rejected":
+      return {
+        kind: "bad",
+        statusText: statusLabel,
+        guidanceText: "Operator application was rejected. Re-apply or contact an admin."
+      };
+    case "approved":
+      return {
+        kind: "warn",
+        statusText: statusLabel,
+        guidanceText: "Approval detected. Refresh or rotate the session to lift role to operator."
+      };
+    default:
+      return {
+        kind: "warn",
+        statusText: statusLabel,
+        guidanceText: "Check operator status to see the next unlock step."
+      };
+  }
+}
+
+function refreshOperatorReadiness() {
+  const readiness = computeOperatorReadiness();
+  setOperatorReadiness(readiness.kind, readiness.statusText, readiness.guidanceText);
+}
+
+function setOperatorApplicationStatus(value) {
+  operatorApplicationStatus = normalizeOperatorApplicationStatus(value);
+  refreshOperatorReadiness();
+}
+
+function bindReadinessListeners() {
+  byId("session_token").addEventListener("input", () => {
+    setOperatorApplicationStatus(undefined);
+  });
 }
 
 function setBusy(isBusy) {
@@ -198,6 +320,7 @@ function applySession(result) {
   byId("session_token").value = token;
   const role = result.session?.role || result.role || result.profile?.role || "client";
   byId("role").value = role;
+  refreshOperatorReadiness();
   persistPortalState();
 }
 
@@ -215,6 +338,32 @@ function sessionRoleFromResult(result) {
 async function requestSessionLifecycle(action = "status") {
   const token = byId("session_token").value.trim();
   return post("/v1/gpm/session", { session_token: token, action });
+}
+
+async function requestOperatorStatus() {
+  const request = {
+    session_token: byId("session_token").value.trim() || undefined,
+    wallet_address: byId("wallet_address").value.trim() || undefined
+  };
+  return post("/v1/gpm/onboarding/operator/status", request);
+}
+
+async function refreshOperatorApplicationStatus(options = {}) {
+  const { quiet = true } = options;
+  if (!byId("session_token").value.trim()) {
+    setOperatorApplicationStatus(undefined);
+    return undefined;
+  }
+  try {
+    const result = await requestOperatorStatus();
+    setOperatorApplicationStatus(parseOperatorApplicationStatus(result));
+    return result;
+  } catch (err) {
+    if (!quiet) {
+      throw err;
+    }
+    return undefined;
+  }
 }
 
 async function run(label, fn) {
@@ -250,7 +399,9 @@ byId("signin_btn").addEventListener("click", () =>
       signature: byId("signature").value.trim()
     };
     const result = await post("/v1/gpm/auth/verify", request);
+    setOperatorApplicationStatus(undefined);
     applySession(result);
+    await refreshOperatorApplicationStatus({ quiet: true });
     return result;
   })
 );
@@ -259,6 +410,8 @@ byId("session_btn").addEventListener("click", () =>
   run("session_status", async () => {
     const result = await requestSessionLifecycle("status");
     byId("role").value = sessionRoleFromResult(result);
+    refreshOperatorReadiness();
+    await refreshOperatorApplicationStatus({ quiet: true });
     persistPortalState();
     return result;
   })
@@ -271,6 +424,8 @@ byId("session_rotate_btn").addEventListener("click", () =>
       byId("session_token").value = result.session_token;
     }
     byId("role").value = sessionRoleFromResult(result);
+    setOperatorApplicationStatus(undefined);
+    await refreshOperatorApplicationStatus({ quiet: true });
     persistPortalState();
     return result;
   })
@@ -281,6 +436,7 @@ byId("session_revoke_btn").addEventListener("click", () =>
     const result = await requestSessionLifecycle("revoke");
     byId("session_token").value = "";
     byId("role").value = "client";
+    setOperatorApplicationStatus(undefined);
     persistPortalState();
     return result;
   })
@@ -321,17 +477,22 @@ byId("apply_operator_btn").addEventListener("click", () =>
       chain_operator_id: byId("chain_operator_id").value.trim(),
       server_label: byId("server_label").value.trim() || undefined
     };
-    return post("/v1/gpm/onboarding/operator/apply", request);
+    const result = await post("/v1/gpm/onboarding/operator/apply", request);
+    const parsedStatus = parseOperatorApplicationStatus(result);
+    if (parsedStatus) {
+      setOperatorApplicationStatus(parsedStatus);
+    } else {
+      await refreshOperatorApplicationStatus({ quiet: true });
+    }
+    return result;
   })
 );
 
 byId("operator_status_btn").addEventListener("click", () =>
   run("operator_status", async () => {
-    const request = {
-      session_token: byId("session_token").value.trim() || undefined,
-      wallet_address: byId("wallet_address").value.trim() || undefined
-    };
-    return post("/v1/gpm/onboarding/operator/status", request);
+    const result = await requestOperatorStatus();
+    setOperatorApplicationStatus(parseOperatorApplicationStatus(result));
+    return result;
   })
 );
 
@@ -346,6 +507,7 @@ byId("approve_operator_btn").addEventListener("click", () =>
       request.admin_token = adminToken;
     }
     const result = await post("/v1/gpm/onboarding/operator/approve", request);
+    await refreshOperatorApplicationStatus({ quiet: true });
     return result;
   })
 );
@@ -353,12 +515,14 @@ byId("approve_operator_btn").addEventListener("click", () =>
 async function restoreSessionStatusBestEffort() {
   const token = byId("session_token").value.trim();
   if (!token) {
+    setOperatorApplicationStatus(undefined);
     return;
   }
   setStatus("warn", "Restoring session", "Checking stored session token status.");
   try {
     const result = await requestSessionLifecycle("status");
     byId("role").value = sessionRoleFromResult(result);
+    refreshOperatorReadiness();
     persistPortalState();
     print("session_status (auto)", result);
     setStatus("good", "Session restored", "Stored session token is active.");
@@ -366,12 +530,15 @@ async function restoreSessionStatusBestEffort() {
     print("session_status (auto, non-fatal)", String(err && err.message ? err.message : err));
     setStatus("warn", "Session check skipped", "Stored session token could not be validated. You can refresh or sign in again.");
   }
+  await refreshOperatorApplicationStatus({ quiet: true });
 }
 
 function initializePortal() {
   restorePortalState();
   bindPersistenceListeners();
+  bindReadinessListeners();
   persistPortalState();
+  refreshOperatorReadiness();
   setStatus("good", "Portal ready", "Set an absolute API base, then start with a challenge or session refresh.");
   void restoreSessionStatusBestEffort();
 }

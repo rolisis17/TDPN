@@ -36,6 +36,7 @@ const inviteKeyEl = byId("invite_key");
 const MAX_OUTPUT_CHARS = 64 * 1024;
 const CONNECTION_DEFAULT_STATE = "Unknown";
 const CONNECTION_DEFAULT_DETAIL = "Not checked yet";
+const OPERATOR_APPLICATION_STATUSES = new Set(["not_submitted", "pending", "approved", "rejected"]);
 const STORAGE_KEYS = Object.freeze({
   sessionToken: "gpm.desktop.session_token",
   role: "gpm.desktop.role",
@@ -48,6 +49,7 @@ const STORAGE_KEYS = Object.freeze({
 const state = {
   sessionToken: "",
   role: "client",
+  operatorApplicationStatus: undefined,
   manifest: null,
   connectionState: CONNECTION_DEFAULT_STATE,
   connectionDetail: CONNECTION_DEFAULT_DETAIL
@@ -389,6 +391,57 @@ function formatConfigMeta(cfg) {
   };
 }
 
+function normalizeOperatorApplicationStatus(value) {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (OPERATOR_APPLICATION_STATUSES.has(normalized)) {
+    return normalized;
+  }
+  return undefined;
+}
+
+function parseOperatorApplicationStatus(payload) {
+  return normalizeOperatorApplicationStatus(payload?.application?.status);
+}
+
+function isServerRoleUnlocked(role = state.role) {
+  const normalized = (role || "client").toLowerCase();
+  return normalized === "operator" || normalized === "admin";
+}
+
+function computeServerLockHintText() {
+  if (!state.sessionToken) {
+    return "Sign in first to unlock server onboarding.";
+  }
+  if (isServerRoleUnlocked()) {
+    return "Server controls are unlocked for this role.";
+  }
+  switch (state.operatorApplicationStatus) {
+    case "pending":
+      return "Operator application pending approval.";
+    case "rejected":
+      return "Operator application rejected; re-apply or contact admin.";
+    case "approved":
+      return "Approval detected. Refresh/rotate session to lift role to operator.";
+    case "not_submitted":
+    default:
+      return "Apply operator role to start server approval.";
+  }
+}
+
+function syncServerRoleLockState() {
+  const serverUnlocked = isServerRoleUnlocked();
+  tabServerEl.disabled = !serverUnlocked;
+  tabServerEl.classList.toggle("locked", !serverUnlocked);
+  panelServerEl.classList.toggle("locked", !serverUnlocked);
+  if (!serverUnlocked && tabServerEl.classList.contains("active")) {
+    activateTab("client");
+  }
+  serverLockHintEl.textContent = computeServerLockHintText();
+}
+
 function setRole(role, options = {}) {
   const { persist = true } = options;
   const normalized = (role || "client").toLowerCase();
@@ -397,25 +450,26 @@ function setRole(role, options = {}) {
   if (persist) {
     writePersistedValue(STORAGE_KEYS.role, normalized);
   }
-  const serverUnlocked = normalized === "operator" || normalized === "admin";
-  tabServerEl.disabled = !serverUnlocked;
-  tabServerEl.classList.toggle("locked", !serverUnlocked);
-  panelServerEl.classList.toggle("locked", !serverUnlocked);
-  if (!serverUnlocked && tabServerEl.classList.contains("active")) {
-    activateTab("client");
-  }
-  serverLockHintEl.textContent = serverUnlocked
-    ? "Server controls are unlocked for this role."
-    : "Server controls are available only for approved operator/admin roles.";
+  syncServerRoleLockState();
 }
 
 function setSessionToken(value, options = {}) {
   const { persist = true } = options;
-  state.sessionToken = (value || "").trim();
+  const nextValue = (value || "").trim();
+  if (state.sessionToken !== nextValue) {
+    state.operatorApplicationStatus = undefined;
+  }
+  state.sessionToken = nextValue;
   sessionTokenEl.value = state.sessionToken;
   if (persist) {
     writePersistedValue(STORAGE_KEYS.sessionToken, state.sessionToken);
   }
+  syncServerRoleLockState();
+}
+
+function setOperatorApplicationStatus(value) {
+  state.operatorApplicationStatus = normalizeOperatorApplicationStatus(value);
+  syncServerRoleLockState();
 }
 
 function restorePersistedSessionErgonomics() {
@@ -512,8 +566,33 @@ async function loadManifest() {
   return result;
 }
 
+async function refreshOperatorApplicationStatus(options = {}) {
+  const { quiet = true } = options;
+  if (!state.sessionToken) {
+    setOperatorApplicationStatus(undefined);
+    return undefined;
+  }
+  const request = {
+    session_token: state.sessionToken || undefined,
+    wallet_address: walletAddressEl.value.trim() || undefined
+  };
+  try {
+    const result = quiet
+      ? await invoke("control_gpm_operator_status", { request })
+      : await call("gpm_operator_status", "control_gpm_operator_status", { request });
+    setOperatorApplicationStatus(parseOperatorApplicationStatus(result));
+    return result;
+  } catch (err) {
+    if (quiet) {
+      return undefined;
+    }
+    throw err;
+  }
+}
+
 async function refreshSession(action = "status") {
   if (!state.sessionToken) {
+    setOperatorApplicationStatus(undefined);
     return;
   }
   const sessionAction = action || "status";
@@ -532,9 +611,11 @@ async function refreshSession(action = "status") {
   if (sessionAction === "revoke") {
     setSessionToken("");
     setRole("client");
+    setOperatorApplicationStatus(undefined);
     return result;
   }
   setRole(parseSessionRole(result));
+  await refreshOperatorApplicationStatus({ quiet: true });
   return result;
 }
 
@@ -550,6 +631,7 @@ async function refreshSessionOnInit() {
   } catch {
     // Startup status refresh is best-effort and should not block the scaffold.
   }
+  await refreshOperatorApplicationStatus({ quiet: true });
 }
 
 tabClientEl.addEventListener("click", () => activateTab("client"));
@@ -559,8 +641,7 @@ tabServerEl.addEventListener("click", () => {
   }
 });
 sessionTokenEl.addEventListener("input", () => {
-  state.sessionToken = sessionTokenEl.value.trim();
-  writePersistedValue(STORAGE_KEYS.sessionToken, state.sessionToken);
+  setSessionToken(sessionTokenEl.value);
 });
 walletProviderEl.addEventListener("change", () => {
   writePersistedValue(STORAGE_KEYS.walletProvider, walletProviderEl.value);
@@ -596,6 +677,7 @@ byId("signin_btn").addEventListener("click", async () => {
   const result = await call("gpm_auth_verify", "control_gpm_auth_verify", { request });
   setSessionToken(result?.session_token || "");
   setRole(parseSessionRole(result));
+  await refreshOperatorApplicationStatus({ quiet: true });
 });
 
 byId("session_btn").addEventListener("click", async () => {
@@ -658,14 +740,11 @@ byId("apply_operator_btn").addEventListener("click", async () => {
     server_label: "desktop-operator"
   };
   await call("gpm_operator_apply", "control_gpm_operator_apply", { request });
+  await refreshOperatorApplicationStatus({ quiet: true });
 });
 
 byId("operator_status_btn").addEventListener("click", async () => {
-  const request = {
-    session_token: state.sessionToken || undefined,
-    wallet_address: walletAddressEl.value.trim() || undefined
-  };
-  await call("gpm_operator_status", "control_gpm_operator_status", { request });
+  await refreshOperatorApplicationStatus({ quiet: false });
 });
 
 byId("approve_operator_btn").addEventListener("click", async () => {

@@ -75,6 +75,12 @@ npm install
 npm run tauri dev
 ```
 
+Windows PowerShell policy note:
+- If `npm` is blocked by execution policy (`npm.ps1 cannot be loaded`), use one of:
+  - `scripts\windows\desktop_one_click.cmd`
+  - `npm.cmd install` and `npm.cmd run tauri -- dev`
+- The `.cmd` launchers already apply process-scope `ExecutionPolicy Bypass` automatically for the run.
+
 Windows-native local API session (no WSL shim):
 
 ```powershell

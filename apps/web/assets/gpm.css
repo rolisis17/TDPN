@@ -177,6 +177,10 @@ a {
   text-transform: uppercase;
 }
 
+.operator-readiness {
+  margin: 4px 0 12px;
+}
+
 .fields {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
