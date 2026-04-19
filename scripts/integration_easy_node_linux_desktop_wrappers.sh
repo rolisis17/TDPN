@@ -29,6 +29,7 @@ DOCTOR_FAKE="$TMP_DIR/fake_desktop_linux_doctor.sh"
 NATIVE_BOOTSTRAP_FAKE="$TMP_DIR/fake_desktop_linux_native_bootstrap.sh"
 ONE_CLICK_FAKE="$TMP_DIR/fake_desktop_linux_one_click.sh"
 PACKAGED_RUN_FAKE="$TMP_DIR/fake_desktop_linux_packaged_run.sh"
+RELEASE_BUNDLE_FAKE="$TMP_DIR/fake_desktop_linux_release_bundle.sh"
 
 create_fake_wrapper_script() {
   local target_script="$1"
@@ -132,6 +133,7 @@ run_and_assert_wrapper() {
     DESKTOP_LINUX_NATIVE_BOOTSTRAP_SCRIPT="$NATIVE_BOOTSTRAP_FAKE" \
     DESKTOP_LINUX_ONE_CLICK_SCRIPT="$ONE_CLICK_FAKE" \
     DESKTOP_LINUX_PACKAGED_RUN_SCRIPT="$PACKAGED_RUN_FAKE" \
+    DESKTOP_LINUX_RELEASE_BUNDLE_SCRIPT="$RELEASE_BUNDLE_FAKE" \
     bash "$SCRIPT_UNDER_TEST" "$command_name" "${forwarded_args[@]}" >"$STDOUT_OUT" 2>"$STDERR_OUT"
 
   assert_single_invocation "$CAPTURE" "$command_name"
@@ -142,6 +144,7 @@ create_fake_wrapper_script "$DOCTOR_FAKE" "desktop_linux_doctor" "FAKE_LINUX_DOC
 create_fake_wrapper_script "$NATIVE_BOOTSTRAP_FAKE" "desktop_linux_native_bootstrap" "FAKE_LINUX_NATIVE_BOOTSTRAP_RC"
 create_fake_wrapper_script "$ONE_CLICK_FAKE" "desktop_linux_one_click" "FAKE_LINUX_ONE_CLICK_RC"
 create_fake_wrapper_script "$PACKAGED_RUN_FAKE" "desktop_linux_packaged_run" "FAKE_LINUX_PACKAGED_RUN_RC"
+create_fake_wrapper_script "$RELEASE_BUNDLE_FAKE" "desktop_linux_release_bundle" "FAKE_LINUX_RELEASE_BUNDLE_RC"
 
 echo "[easy-node-linux-desktop-wrappers] help contract"
 bash "$SCRIPT_UNDER_TEST" help >"$HELP_OUT"
@@ -149,6 +152,7 @@ assert_help_contains "./scripts/easy_node.sh desktop-linux-doctor [desktop_docto
 assert_help_contains "./scripts/easy_node.sh desktop-linux-native-bootstrap [desktop_native_bootstrap args...]"
 assert_help_contains "./scripts/easy_node.sh desktop-linux-one-click [desktop_one_click args...]"
 assert_help_contains "./scripts/easy_node.sh desktop-linux-packaged-run [desktop_packaged_run args...]"
+assert_help_contains "./scripts/easy_node.sh desktop-linux-release-bundle [desktop_release_bundle args...]"
 
 echo "[easy-node-linux-desktop-wrappers] forwarding contract"
 run_and_assert_wrapper \
@@ -179,6 +183,12 @@ run_and_assert_wrapper \
   "--summary-json" "$TMP_DIR/summary packaged run with spaces.json" \
   "--sample-flag" "packaged run value with spaces"
 
+run_and_assert_wrapper \
+  "desktop-linux-release-bundle" \
+  "desktop_linux_release_bundle" \
+  "--bundle-dir" "$TMP_DIR/release bundle with spaces" \
+  "--sample-flag" "release bundle value with spaces"
+
 echo "[easy-node-linux-desktop-wrappers] exit semantics contract"
 set +e
 env \
@@ -187,12 +197,32 @@ env \
   DESKTOP_LINUX_NATIVE_BOOTSTRAP_SCRIPT="$NATIVE_BOOTSTRAP_FAKE" \
   DESKTOP_LINUX_ONE_CLICK_SCRIPT="$ONE_CLICK_FAKE" \
   DESKTOP_LINUX_PACKAGED_RUN_SCRIPT="$PACKAGED_RUN_FAKE" \
+  DESKTOP_LINUX_RELEASE_BUNDLE_SCRIPT="$RELEASE_BUNDLE_FAKE" \
   FAKE_LINUX_PACKAGED_RUN_RC=9 \
   bash "$SCRIPT_UNDER_TEST" desktop-linux-packaged-run --sample-flag "rc passthrough" >"$STDOUT_OUT" 2>"$STDERR_OUT"
 rc=$?
 set -e
 if [[ "$rc" -ne 9 ]]; then
   echo "expected easy_node wrapper to return fake script exit code 9, got $rc"
+  cat "$STDOUT_OUT"
+  cat "$STDERR_OUT"
+  exit 1
+fi
+
+set +e
+env \
+  EASY_NODE_LINUX_DESKTOP_WRAPPERS_CAPTURE_FILE="$CAPTURE" \
+  DESKTOP_LINUX_DOCTOR_SCRIPT="$DOCTOR_FAKE" \
+  DESKTOP_LINUX_NATIVE_BOOTSTRAP_SCRIPT="$NATIVE_BOOTSTRAP_FAKE" \
+  DESKTOP_LINUX_ONE_CLICK_SCRIPT="$ONE_CLICK_FAKE" \
+  DESKTOP_LINUX_PACKAGED_RUN_SCRIPT="$PACKAGED_RUN_FAKE" \
+  DESKTOP_LINUX_RELEASE_BUNDLE_SCRIPT="$RELEASE_BUNDLE_FAKE" \
+  FAKE_LINUX_RELEASE_BUNDLE_RC=12 \
+  bash "$SCRIPT_UNDER_TEST" desktop-linux-release-bundle --sample-flag "rc passthrough" >"$STDOUT_OUT" 2>"$STDERR_OUT"
+rc=$?
+set -e
+if [[ "$rc" -ne 12 ]]; then
+  echo "expected easy_node wrapper to return fake script exit code 12, got $rc"
   cat "$STDOUT_OUT"
   cat "$STDERR_OUT"
   exit 1

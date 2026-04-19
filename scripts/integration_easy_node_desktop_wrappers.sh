@@ -32,12 +32,14 @@ DOCTOR_LINUX_FAKE="$TMP_DIR/fake_desktop_linux_doctor.sh"
 NATIVE_BOOTSTRAP_LINUX_FAKE="$TMP_DIR/fake_desktop_linux_native_bootstrap.sh"
 ONE_CLICK_LINUX_FAKE="$TMP_DIR/fake_desktop_linux_one_click.sh"
 PACKAGED_RUN_LINUX_FAKE="$TMP_DIR/fake_desktop_linux_packaged_run.sh"
+RELEASE_BUNDLE_LINUX_FAKE="$TMP_DIR/fake_desktop_linux_release_bundle.sh"
 LOCAL_API_LINUX_FAKE="$TMP_DIR/fake_desktop_linux_local_api_session.sh"
 
 DOCTOR_WINDOWS_FAKE="$TMP_DIR/fake_desktop_windows_doctor.ps1"
 NATIVE_BOOTSTRAP_WINDOWS_FAKE="$TMP_DIR/fake_desktop_windows_native_bootstrap.ps1"
 ONE_CLICK_WINDOWS_FAKE="$TMP_DIR/fake_desktop_windows_one_click.ps1"
 PACKAGED_RUN_WINDOWS_FAKE="$TMP_DIR/fake_desktop_windows_packaged_run.ps1"
+RELEASE_BUNDLE_WINDOWS_FAKE="$TMP_DIR/fake_desktop_windows_release_bundle.ps1"
 LOCAL_API_WINDOWS_FAKE="$TMP_DIR/fake_desktop_windows_local_api_session.ps1"
 
 create_fake_posix_wrapper_script() {
@@ -290,10 +292,12 @@ run_linux_command() {
     DESKTOP_LINUX_NATIVE_BOOTSTRAP_SCRIPT="$NATIVE_BOOTSTRAP_LINUX_FAKE" \
     DESKTOP_LINUX_ONE_CLICK_SCRIPT="$ONE_CLICK_LINUX_FAKE" \
     DESKTOP_LINUX_PACKAGED_RUN_SCRIPT="$PACKAGED_RUN_LINUX_FAKE" \
+    DESKTOP_LINUX_RELEASE_BUNDLE_SCRIPT="$RELEASE_BUNDLE_LINUX_FAKE" \
     DESKTOP_WINDOWS_DOCTOR_SCRIPT="$DOCTOR_WINDOWS_FAKE" \
     DESKTOP_WINDOWS_NATIVE_BOOTSTRAP_SCRIPT="$NATIVE_BOOTSTRAP_WINDOWS_FAKE" \
     DESKTOP_WINDOWS_ONE_CLICK_SCRIPT="$ONE_CLICK_WINDOWS_FAKE" \
     DESKTOP_WINDOWS_PACKAGED_RUN_SCRIPT="$PACKAGED_RUN_WINDOWS_FAKE" \
+    DESKTOP_WINDOWS_RELEASE_BUNDLE_SCRIPT="$RELEASE_BUNDLE_WINDOWS_FAKE" \
     DESKTOP_WINDOWS_LOCAL_API_SESSION_SCRIPT="$LOCAL_API_WINDOWS_FAKE" \
     bash "$SCRIPT_UNDER_TEST" "$command_name" --platform linux "${forwarded_args[@]}" >"$STDOUT_OUT" 2>"$STDERR_OUT"
 
@@ -320,10 +324,12 @@ run_windows_command() {
     DESKTOP_LINUX_NATIVE_BOOTSTRAP_SCRIPT="$NATIVE_BOOTSTRAP_LINUX_FAKE" \
     DESKTOP_LINUX_ONE_CLICK_SCRIPT="$ONE_CLICK_LINUX_FAKE" \
     DESKTOP_LINUX_PACKAGED_RUN_SCRIPT="$PACKAGED_RUN_LINUX_FAKE" \
+    DESKTOP_LINUX_RELEASE_BUNDLE_SCRIPT="$RELEASE_BUNDLE_LINUX_FAKE" \
     DESKTOP_WINDOWS_DOCTOR_SCRIPT="$DOCTOR_WINDOWS_FAKE" \
     DESKTOP_WINDOWS_NATIVE_BOOTSTRAP_SCRIPT="$NATIVE_BOOTSTRAP_WINDOWS_FAKE" \
     DESKTOP_WINDOWS_ONE_CLICK_SCRIPT="$ONE_CLICK_WINDOWS_FAKE" \
     DESKTOP_WINDOWS_PACKAGED_RUN_SCRIPT="$PACKAGED_RUN_WINDOWS_FAKE" \
+    DESKTOP_WINDOWS_RELEASE_BUNDLE_SCRIPT="$RELEASE_BUNDLE_WINDOWS_FAKE" \
     DESKTOP_WINDOWS_LOCAL_API_SESSION_SCRIPT="$LOCAL_API_WINDOWS_FAKE" \
     PATH="$RUNTIME_DIR:$PATH" \
     bash "$SCRIPT_UNDER_TEST" "$command_name" --platform windows "${forwarded_args[@]}" >"$STDOUT_OUT" 2>"$STDERR_OUT"
@@ -336,11 +342,13 @@ create_fake_posix_wrapper_script "$DOCTOR_LINUX_FAKE" "desktop_linux_doctor" "FA
 create_fake_posix_wrapper_script "$NATIVE_BOOTSTRAP_LINUX_FAKE" "desktop_linux_native_bootstrap" "FAKE_LINUX_NATIVE_BOOTSTRAP_RC"
 create_fake_posix_wrapper_script "$ONE_CLICK_LINUX_FAKE" "desktop_linux_one_click" "FAKE_LINUX_ONE_CLICK_RC"
 create_fake_posix_wrapper_script "$PACKAGED_RUN_LINUX_FAKE" "desktop_linux_packaged_run" "FAKE_LINUX_PACKAGED_RUN_RC"
+create_fake_posix_wrapper_script "$RELEASE_BUNDLE_LINUX_FAKE" "desktop_linux_release_bundle" "FAKE_LINUX_RELEASE_BUNDLE_RC"
 create_fake_posix_wrapper_script "$LOCAL_API_LINUX_FAKE" "desktop_linux_local_api_session" "FAKE_LINUX_LOCAL_API_SESSION_RC"
 create_fake_ps1_placeholder "$DOCTOR_WINDOWS_FAKE"
 create_fake_ps1_placeholder "$NATIVE_BOOTSTRAP_WINDOWS_FAKE"
 create_fake_ps1_placeholder "$ONE_CLICK_WINDOWS_FAKE"
 create_fake_ps1_placeholder "$PACKAGED_RUN_WINDOWS_FAKE"
+create_fake_ps1_placeholder "$RELEASE_BUNDLE_WINDOWS_FAKE"
 create_fake_ps1_placeholder "$LOCAL_API_WINDOWS_FAKE"
 create_fake_go_script "$TMP_DIR/go"
 
@@ -350,6 +358,7 @@ assert_help_contains "./scripts/easy_node.sh desktop-doctor [--platform auto|lin
 assert_help_contains "./scripts/easy_node.sh desktop-native-bootstrap [--platform auto|linux|windows] [desktop_native_bootstrap args...]"
 assert_help_contains "./scripts/easy_node.sh desktop-one-click [--platform auto|linux|windows] [desktop_one_click args...]"
 assert_help_contains "./scripts/easy_node.sh desktop-packaged-run [--platform auto|linux|windows] [desktop_packaged_run args...]"
+assert_help_contains "./scripts/easy_node.sh desktop-release-bundle [--platform auto|linux|windows] [desktop_release_bundle args...]"
 assert_help_contains "./scripts/easy_node.sh desktop-local-api-session [--platform auto|linux|windows] [local_api_session args...]"
 
 echo "[easy-node-desktop-wrappers] explicit linux routing"
@@ -378,6 +387,12 @@ run_linux_command \
   "--dry-run" \
   "--sample-flag" "packaged run value with spaces"
 
+run_linux_command \
+  "desktop-release-bundle" \
+  "desktop_linux_release_bundle" \
+  "--bundle-dir" "$TMP_DIR/release bundle with spaces" \
+  "--sample-flag" "release bundle value with spaces"
+
 echo "[easy-node-desktop-wrappers] explicit windows routing"
 run_windows_command \
   "desktop-doctor" \
@@ -398,6 +413,12 @@ run_windows_command \
   "desktop-packaged-run" \
   "$PACKAGED_RUN_WINDOWS_FAKE" \
   "--sample-flag" "packaged run value with spaces"
+
+run_windows_command \
+  "desktop-release-bundle" \
+  "$RELEASE_BUNDLE_WINDOWS_FAKE" \
+  "--bundle-dir" "$TMP_DIR/release bundle with spaces" \
+  "--sample-flag" "release bundle value with spaces"
 
 echo "[easy-node-desktop-wrappers] auto mode via EASY_NODE_DESKTOP_PLATFORM"
 : >"$CAPTURE"
