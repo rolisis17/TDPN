@@ -249,6 +249,34 @@ func (s *Service) requireGPMServiceMutationAuth(w http.ResponseWriter, r *http.R
 		})
 		return false
 	}
+	if role == "operator" {
+		walletAddress := normalizeWalletAddress(session.WalletAddress)
+		app, ok := s.gpmState.getOperator(walletAddress)
+		if !ok {
+			writeJSON(w, http.StatusForbidden, map[string]any{
+				"ok":    false,
+				"error": "operator application is not approved; submit and obtain approval before server lifecycle actions",
+			})
+			return false
+		}
+		status := strings.ToLower(strings.TrimSpace(app.Status))
+		if status != "approved" {
+			writeJSON(w, http.StatusForbidden, map[string]any{
+				"ok":    false,
+				"error": fmt.Sprintf("operator application status %q is not approved", status),
+			})
+			return false
+		}
+		sessionChainOperatorID := strings.TrimSpace(session.ChainOperatorID)
+		approvedChainOperatorID := strings.TrimSpace(app.ChainOperatorID)
+		if approvedChainOperatorID != "" && !subtleEqual(sessionChainOperatorID, approvedChainOperatorID) {
+			writeJSON(w, http.StatusForbidden, map[string]any{
+				"ok":    false,
+				"error": "operator session is out of sync with approved application; refresh or rotate session",
+			})
+			return false
+		}
+	}
 	return true
 }
 

@@ -60,6 +60,7 @@ Desktop scaffold defaults (`apps/desktop`):
 ## Authentication
 
 Mutating endpoints (`POST /v1/connect`, `POST /v1/disconnect`, `POST /v1/set_profile`, `POST /v1/update`, `POST /v1/service/start`, `POST /v1/service/stop`, `POST /v1/service/restart`) require auth by default.
+GPM server lifecycle endpoints (`POST /v1/gpm/service/start`, `POST /v1/gpm/service/stop`, `POST /v1/gpm/service/restart`) also require an approved `operator` or `admin` session issued via `/v1/gpm/session`.
 
 Auth can be bypassed only in explicit developer mode when all of the following are true:
 - bind address is loopback-only, and

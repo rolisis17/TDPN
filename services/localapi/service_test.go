@@ -1622,16 +1622,49 @@ func TestGPMServiceLifecycleMutationSessionGate(t *testing.T) {
 		}
 	})
 
-	t.Run("operator role executes legacy lifecycle command", func(t *testing.T) {
+	t.Run("operator role without approved application rejected", func(t *testing.T) {
+		svc, logPath := newFakeService(t, false)
+		svc.gpmState = newGPMRuntimeState()
+		svc.serviceStart = "echo gpm-start-ok"
+		svc.gpmState.putSession(gpmSession{
+			Token:           "gpm-operator-pending-token",
+			Role:            "operator",
+			CreatedAt:       time.Now().UTC(),
+			ExpiresAt:       time.Now().UTC().Add(time.Hour),
+			WalletAddress:   "cosmos1operatorpending",
+			ChainOperatorID: "operator-pending-1",
+		})
+		svc.gpmState.upsertOperator(gpmOperatorApplication{
+			WalletAddress:   "cosmos1operatorpending",
+			ChainOperatorID: "operator-pending-1",
+			ServerLabel:     "pending-node",
+			Status:          "pending",
+			UpdatedAt:       time.Now().UTC(),
+		})
+
+		code, payload := callJSONHandler(t, svc.handleGPMServiceStart, http.MethodPost, "/v1/gpm/service/start", `{"session_token":"gpm-operator-pending-token"}`)
+		if code != http.StatusForbidden {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+		if got, _ := payload["error"].(string); !strings.Contains(got, `status "pending" is not approved`) {
+			t.Fatalf("error=%q want pending-not-approved message", got)
+		}
+		if cmds := readCommandLog(t, logPath); len(cmds) != 0 {
+			t.Fatalf("operator without approved application should not execute commands, got=%v", cmds)
+		}
+	})
+
+	t.Run("operator role with approved application executes legacy lifecycle command", func(t *testing.T) {
+		const lifecycleCommand = "go version"
 		tests := []struct {
 			name      string
 			handlerFn func(*Service) http.HandlerFunc
 			target    string
 			command   string
 		}{
-			{name: "start", handlerFn: func(s *Service) http.HandlerFunc { return s.handleGPMServiceStart }, target: "/v1/gpm/service/start", command: "echo gpm-start-ok"},
-			{name: "stop", handlerFn: func(s *Service) http.HandlerFunc { return s.handleGPMServiceStop }, target: "/v1/gpm/service/stop", command: "echo gpm-stop-ok"},
-			{name: "restart", handlerFn: func(s *Service) http.HandlerFunc { return s.handleGPMServiceRestart }, target: "/v1/gpm/service/restart", command: "echo gpm-restart-ok"},
+			{name: "start", handlerFn: func(s *Service) http.HandlerFunc { return s.handleGPMServiceStart }, target: "/v1/gpm/service/start", command: lifecycleCommand},
+			{name: "stop", handlerFn: func(s *Service) http.HandlerFunc { return s.handleGPMServiceStop }, target: "/v1/gpm/service/stop", command: lifecycleCommand},
+			{name: "restart", handlerFn: func(s *Service) http.HandlerFunc { return s.handleGPMServiceRestart }, target: "/v1/gpm/service/restart", command: lifecycleCommand},
 		}
 		for _, tc := range tests {
 			t.Run(tc.name, func(t *testing.T) {
@@ -1646,11 +1679,19 @@ func TestGPMServiceLifecycleMutationSessionGate(t *testing.T) {
 					svc.serviceRestart = tc.command
 				}
 				svc.gpmState.putSession(gpmSession{
-					Token:         "gpm-operator-token",
-					Role:          "operator",
-					CreatedAt:     time.Now().UTC(),
-					ExpiresAt:     time.Now().UTC().Add(time.Hour),
-					WalletAddress: "cosmos1operator",
+					Token:           "gpm-operator-token",
+					Role:            "operator",
+					CreatedAt:       time.Now().UTC(),
+					ExpiresAt:       time.Now().UTC().Add(time.Hour),
+					WalletAddress:   "cosmos1operator",
+					ChainOperatorID: "operator-approved-1",
+				})
+				svc.gpmState.upsertOperator(gpmOperatorApplication{
+					WalletAddress:   "cosmos1operator",
+					ChainOperatorID: "operator-approved-1",
+					ServerLabel:     "approved-node",
+					Status:          "approved",
+					UpdatedAt:       time.Now().UTC(),
 				})
 
 				code, payload := callJSONHandler(t, tc.handlerFn(svc), http.MethodPost, tc.target, `{"session_token":"gpm-operator-token"}`)
@@ -1673,7 +1714,7 @@ func TestGPMServiceLifecycleMutationSessionGate(t *testing.T) {
 	t.Run("admin role also executes lifecycle command", func(t *testing.T) {
 		svc, _ := newFakeService(t, false)
 		svc.gpmState = newGPMRuntimeState()
-		svc.serviceRestart = "echo gpm-admin-restart-ok"
+		svc.serviceRestart = "go version"
 		svc.gpmState.putSession(gpmSession{
 			Token:         "gpm-admin-token",
 			Role:          "admin",
