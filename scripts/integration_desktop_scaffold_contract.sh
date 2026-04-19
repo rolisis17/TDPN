@@ -43,6 +43,35 @@ for path in "${RELEASE_SCAFFOLD_FILES[@]}"; do
 done
 echo "[desktop-scaffold] release scaffold scripts exist"
 
+DOCTOR_SCAFFOLD_FILES=(
+  "scripts/windows/desktop_doctor.ps1"
+  "scripts/windows/desktop_doctor.cmd"
+)
+for path in "${DOCTOR_SCAFFOLD_FILES[@]}"; do
+  if [[ ! -f "$path" ]]; then
+    echo "desktop scaffold contract failed: missing doctor scaffold script: $path"
+    exit 1
+  fi
+done
+echo "[desktop-scaffold] doctor scaffold scripts exist"
+
+DOCTOR_POWERSHELL_SCRIPT="scripts/windows/desktop_doctor.ps1"
+DOCTOR_CMD_SCRIPT="scripts/windows/desktop_doctor.cmd"
+
+if ! grep -qF 'desktop_native_bootstrap' "$DOCTOR_POWERSHELL_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected bootstrap launcher reference in $DOCTOR_POWERSHELL_SCRIPT"
+  exit 1
+fi
+if ! grep -qiE 'check|fix' "$DOCTOR_POWERSHELL_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected check/fix mode marker in $DOCTOR_POWERSHELL_SCRIPT"
+  exit 1
+fi
+if ! grep -qF 'desktop_doctor.ps1' "$DOCTOR_CMD_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected PowerShell launcher reference in $DOCTOR_CMD_SCRIPT"
+  exit 1
+fi
+echo "[desktop-scaffold] doctor scaffold script markers are present"
+
 WINDOWS_NATIVE_BOOTSTRAP_FILES=(
   "scripts/windows/desktop_native_bootstrap.ps1"
   "scripts/windows/desktop_native_bootstrap.cmd"

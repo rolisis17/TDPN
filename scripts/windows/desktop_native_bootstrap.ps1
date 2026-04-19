@@ -952,7 +952,7 @@ if ($Mode -eq "check") {
 }
 
 if ($Mode -eq "bootstrap") {
-  if ((Get-MissingIds -Report $report).Count -gt 0) {
+  if ((Get-MissingIds -Report $report -SelectedMode $Mode -DesktopLaunchPlan $desktopLaunchPlan).Count -gt 0) {
     throw "bootstrap completed with missing prerequisites; rerun with -InstallMissing or install manually"
   }
   Write-Step "bootstrap completed"

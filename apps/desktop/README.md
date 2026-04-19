@@ -115,6 +115,35 @@ Other modes:
 - `-Mode run-api` (local API only)
 - `-Mode run-desktop` (desktop only)
 
+Desktop doctor remediation flow (`desktop_doctor`):
+
+This remains scaffold-only, non-production setup guidance.
+
+PowerShell (`.ps1`) form:
+
+```powershell
+scripts\windows\desktop_doctor.ps1 -Mode check
+scripts\windows\desktop_doctor.ps1 -Mode fix -InstallMissing -EnablePolicyBypass
+```
+
+From `cmd.exe` (`.cmd`) form:
+
+```cmd
+scripts\windows\desktop_doctor.cmd -Mode check
+scripts\windows\desktop_doctor.cmd -Mode fix -InstallMissing
+```
+
+What `desktop_doctor` remediates:
+- process-scope execution policy bypass when you pass `-EnablePolicyBypass`
+- current-session PATH refresh and common tool path augmentation
+- prerequisite detection for Go/Node/npm/Rust/Cargo/Git Bash
+- optional prerequisite install via `winget` when `-InstallMissing` is passed
+- optional summary artifact output via `-SummaryJson` and `-PrintSummaryJson 1`
+
+Recommended sequence on fresh machines:
+1. Run `desktop_doctor` fix/install (`-Mode fix -InstallMissing`).
+2. Then run either `desktop_one_click` or `desktop_native_bootstrap -Mode run-full`.
+
 One-click desktop launcher for scaffold/client onboarding:
 
 ```powershell

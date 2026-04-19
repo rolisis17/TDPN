@@ -154,6 +154,35 @@ Desktop bootstrap notes:
 - uses `npm.cmd` to avoid `npm.ps1` execution policy failures
 - modes: `check`, `bootstrap`, `run-api`, `run-desktop`, `run-full`
 
+Desktop doctor remediation flow (`desktop_doctor`):
+
+This remains scaffold-only, non-production setup guidance.
+
+PowerShell (`.ps1`) form:
+
+```powershell
+./scripts/windows/desktop_doctor.ps1 -Mode check
+./scripts/windows/desktop_doctor.ps1 -Mode fix -InstallMissing -EnablePolicyBypass
+```
+
+From `cmd.exe` (`.cmd`) form:
+
+```cmd
+scripts\windows\desktop_doctor.cmd -Mode check
+scripts\windows\desktop_doctor.cmd -Mode fix -InstallMissing
+```
+
+What `desktop_doctor` remediates:
+- process-scope execution policy bypass when you pass `-EnablePolicyBypass`
+- current-session PATH refresh and common tool path augmentation
+- prerequisite detection for Go/Node/npm/Rust/Cargo/Git Bash
+- optional prerequisite install via `winget` when `-InstallMissing` is passed
+- optional summary artifact output via `-SummaryJson` and `-PrintSummaryJson 1`
+
+Recommended sequence on fresh machines:
+1. Run `desktop_doctor` fix/install (`-Mode fix -InstallMissing`).
+2. Then run either `desktop_one_click` or `desktop_native_bootstrap -Mode run-full`.
+
 First-run remediation tips:
 - run `./scripts/windows/desktop_native_bootstrap.cmd -Mode bootstrap -InstallMissing` on a fresh machine
 - if PowerShell policy blocks a direct rerun, use the `.cmd` wrapper or call `./scripts/windows/desktop_native_bootstrap.ps1 -Mode bootstrap -InstallMissing -EnablePolicyBypass`
