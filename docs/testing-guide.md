@@ -79,6 +79,7 @@ Windows desktop native bootstrap guardrails:
 
 ```bash
 ./scripts/integration_windows_desktop_native_bootstrap_guardrails.sh
+./scripts/easy_node.sh desktop-windows-native-bootstrap-guardrails
 ```
 
 ## 3a) Phase 0/1 targeted gates

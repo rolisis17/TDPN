@@ -241,6 +241,7 @@ Usage:
   ./scripts/easy_node.sh desktop-linux-packaged-run [desktop_packaged_run args...]
   ./scripts/easy_node.sh desktop-windows-doctor [desktop_doctor args...]
   ./scripts/easy_node.sh desktop-windows-native-bootstrap [desktop_native_bootstrap args...]
+  ./scripts/easy_node.sh desktop-windows-native-bootstrap-guardrails [desktop_native_bootstrap_guardrails args...]
   ./scripts/easy_node.sh desktop-windows-one-click [desktop_one_click args...]
   ./scripts/easy_node.sh desktop-windows-packaged-run [desktop_packaged_run args...]
   ./scripts/easy_node.sh desktop-windows-release-bundle [desktop_release_bundle args...]
@@ -383,6 +384,7 @@ Usage:
   ./scripts/easy_node.sh desktop-linux-packaged-run [desktop_packaged_run args...]
   ./scripts/easy_node.sh desktop-windows-doctor [desktop_doctor args...]
   ./scripts/easy_node.sh desktop-windows-native-bootstrap [desktop_native_bootstrap args...]
+  ./scripts/easy_node.sh desktop-windows-native-bootstrap-guardrails [desktop_native_bootstrap_guardrails args...]
   ./scripts/easy_node.sh desktop-windows-one-click [desktop_one_click args...]
   ./scripts/easy_node.sh desktop-windows-packaged-run [desktop_packaged_run args...]
   ./scripts/easy_node.sh desktop-windows-release-bundle [desktop_release_bundle args...]
@@ -8532,6 +8534,11 @@ desktop_windows_native_bootstrap() {
   run_desktop_wrapper_script "$script" "$@"
 }
 
+desktop_windows_native_bootstrap_guardrails() {
+  local script="${DESKTOP_WINDOWS_NATIVE_BOOTSTRAP_GUARDRAILS_SCRIPT:-$ROOT_DIR/scripts/integration_windows_desktop_native_bootstrap_guardrails.sh}"
+  run_desktop_wrapper_script "$script" "$@"
+}
+
 desktop_windows_one_click() {
   local script="${DESKTOP_WINDOWS_ONE_CLICK_SCRIPT:-$ROOT_DIR/scripts/windows/desktop_one_click.ps1}"
   run_desktop_wrapper_script "$script" "$@"
@@ -15548,6 +15555,10 @@ main() {
     desktop-windows-native-bootstrap)
       shift
       desktop_windows_native_bootstrap "$@"
+      ;;
+    desktop-windows-native-bootstrap-guardrails)
+      shift
+      desktop_windows_native_bootstrap_guardrails "$@"
       ;;
     desktop-windows-one-click)
       shift

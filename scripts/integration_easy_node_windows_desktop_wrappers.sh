@@ -29,6 +29,7 @@ RUNTIME_DIR="$TMP_DIR/runtime"
 
 DOCTOR_FAKE="$TMP_DIR/fake_desktop_windows_doctor.sh"
 NATIVE_BOOTSTRAP_FAKE="$TMP_DIR/fake_desktop_windows_native_bootstrap.sh"
+NATIVE_BOOTSTRAP_GUARDRAILS_FAKE="$TMP_DIR/fake_desktop_windows_native_bootstrap_guardrails.sh"
 ONE_CLICK_FAKE="$TMP_DIR/fake_desktop_windows_one_click.sh"
 PACKAGED_RUN_FAKE="$TMP_DIR/fake_desktop_windows_packaged_run.sh"
 RELEASE_BUNDLE_FAKE="$TMP_DIR/fake_desktop_windows_release_bundle.sh"
@@ -217,6 +218,7 @@ run_and_assert_wrapper() {
     EASY_NODE_WINDOWS_DESKTOP_WRAPPERS_CAPTURE_FILE="$CAPTURE" \
     DESKTOP_WINDOWS_DOCTOR_SCRIPT="$DOCTOR_FAKE" \
     DESKTOP_WINDOWS_NATIVE_BOOTSTRAP_SCRIPT="$NATIVE_BOOTSTRAP_FAKE" \
+    DESKTOP_WINDOWS_NATIVE_BOOTSTRAP_GUARDRAILS_SCRIPT="$NATIVE_BOOTSTRAP_GUARDRAILS_FAKE" \
     DESKTOP_WINDOWS_ONE_CLICK_SCRIPT="$ONE_CLICK_FAKE" \
     DESKTOP_WINDOWS_PACKAGED_RUN_SCRIPT="$PACKAGED_RUN_FAKE" \
     DESKTOP_WINDOWS_RELEASE_BUNDLE_SCRIPT="$RELEASE_BUNDLE_FAKE" \
@@ -229,6 +231,7 @@ run_and_assert_wrapper() {
 
 create_fake_wrapper_script "$DOCTOR_FAKE" "desktop_windows_doctor" "FAKE_WINDOWS_DOCTOR_RC"
 create_fake_wrapper_script "$NATIVE_BOOTSTRAP_FAKE" "desktop_windows_native_bootstrap" "FAKE_WINDOWS_NATIVE_BOOTSTRAP_RC"
+create_fake_wrapper_script "$NATIVE_BOOTSTRAP_GUARDRAILS_FAKE" "desktop_windows_native_bootstrap_guardrails" "FAKE_WINDOWS_NATIVE_BOOTSTRAP_GUARDRAILS_RC"
 create_fake_wrapper_script "$ONE_CLICK_FAKE" "desktop_windows_one_click" "FAKE_WINDOWS_ONE_CLICK_RC"
 create_fake_wrapper_script "$PACKAGED_RUN_FAKE" "desktop_windows_packaged_run" "FAKE_WINDOWS_PACKAGED_RUN_RC"
 create_fake_wrapper_script "$RELEASE_BUNDLE_FAKE" "desktop_windows_release_bundle" "FAKE_WINDOWS_RELEASE_BUNDLE_RC"
@@ -241,6 +244,7 @@ echo "[easy-node-windows-desktop-wrappers] help contract"
 bash "$SCRIPT_UNDER_TEST" help >"$HELP_OUT"
 assert_help_contains "./scripts/easy_node.sh desktop-windows-doctor [desktop_doctor args...]"
 assert_help_contains "./scripts/easy_node.sh desktop-windows-native-bootstrap [desktop_native_bootstrap args...]"
+assert_help_contains "./scripts/easy_node.sh desktop-windows-native-bootstrap-guardrails [desktop_native_bootstrap_guardrails args...]"
 assert_help_contains "./scripts/easy_node.sh desktop-windows-one-click [desktop_one_click args...]"
 assert_help_contains "./scripts/easy_node.sh desktop-windows-packaged-run [desktop_packaged_run args...]"
 assert_help_contains "./scripts/easy_node.sh desktop-windows-release-bundle [desktop_release_bundle args...]"
@@ -258,6 +262,11 @@ run_and_assert_wrapper \
   "desktop_windows_native_bootstrap" \
   "--mode" "bootstrap" \
   "--sample-flag" "native bootstrap value with spaces"
+
+run_and_assert_wrapper \
+  "desktop-windows-native-bootstrap-guardrails" \
+  "desktop_windows_native_bootstrap_guardrails" \
+  "--sample-flag" "native bootstrap guardrails value with spaces"
 
 run_and_assert_wrapper \
   "desktop-windows-one-click" \
@@ -289,6 +298,7 @@ env \
   EASY_NODE_WINDOWS_DESKTOP_WRAPPERS_CAPTURE_FILE="$CAPTURE" \
   DESKTOP_WINDOWS_DOCTOR_SCRIPT="$DOCTOR_FAKE" \
   DESKTOP_WINDOWS_NATIVE_BOOTSTRAP_SCRIPT="$NATIVE_BOOTSTRAP_FAKE" \
+  DESKTOP_WINDOWS_NATIVE_BOOTSTRAP_GUARDRAILS_SCRIPT="$NATIVE_BOOTSTRAP_GUARDRAILS_FAKE" \
   DESKTOP_WINDOWS_ONE_CLICK_SCRIPT="$ONE_CLICK_FAKE" \
   DESKTOP_WINDOWS_PACKAGED_RUN_SCRIPT="$PACKAGED_RUN_FAKE" \
   DESKTOP_WINDOWS_RELEASE_BUNDLE_SCRIPT="$RELEASE_BUNDLE_FAKE" \
