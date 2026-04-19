@@ -21,6 +21,7 @@ const onboardingStepOperatorEl = document.getElementById("onboarding_step_operat
 const actionButtons = Array.from(document.querySelectorAll(".actions button"));
 const OPERATOR_APPLICATION_STATUSES = new Set(["not_submitted", "pending", "approved", "rejected"]);
 const OPERATOR_PENDING_LIST_LIMIT = 25;
+const OPERATOR_LOAD_NEXT_LIMIT = 1;
 const OPERATOR_LIST_ALL_LIMIT = 100;
 const PORTAL_STORAGE_KEY = "gpm.portal.state.v1";
 const PERSISTED_FIELD_IDS = [
@@ -232,6 +233,126 @@ function summarizeOperatorList(payload, fallbackStatus = "pending", fallbackLimi
       total,
       sample
     }
+  };
+}
+
+function findSessionReconciledHint(payload, depth = 0) {
+  if (payload === null || payload === undefined || depth > 4) {
+    return undefined;
+  }
+  if (Array.isArray(payload)) {
+    for (const item of payload) {
+      const found = findSessionReconciledHint(item, depth + 1);
+      if (found !== undefined && found !== null) {
+        return found;
+      }
+    }
+    return undefined;
+  }
+  if (typeof payload !== "object") {
+    return undefined;
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, "session_reconciled")) {
+    return payload.session_reconciled;
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, "sessionReconciled")) {
+    return payload.sessionReconciled;
+  }
+  for (const value of Object.values(payload)) {
+    const found = findSessionReconciledHint(value, depth + 1);
+    if (found !== undefined && found !== null) {
+      return found;
+    }
+  }
+  return undefined;
+}
+
+function formatSessionReconciledHint(payload) {
+  const hint = findSessionReconciledHint(payload);
+  if (hint === undefined || hint === null) {
+    return undefined;
+  }
+  if (typeof hint === "string") {
+    const trimmed = hint.trim();
+    return trimmed || undefined;
+  }
+  if (typeof hint === "number" || typeof hint === "boolean") {
+    return String(hint);
+  }
+  try {
+    return JSON.stringify(hint);
+  } catch {
+    return String(hint);
+  }
+}
+
+function withSessionReconciledHint(payload, hintSource = payload) {
+  const hint = formatSessionReconciledHint(hintSource);
+  if (!hint) {
+    return payload;
+  }
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+    return {
+      ...payload,
+      session_reconciled_hint: hint
+    };
+  }
+  return {
+    result: payload,
+    session_reconciled_hint: hint
+  };
+}
+
+function appendSessionReconciledDetail(detail, hintSource) {
+  const hint = formatSessionReconciledHint(hintSource);
+  if (!hint) {
+    return detail;
+  }
+  return `${detail} session_reconciled=${hint}.`;
+}
+
+function readOperatorEntryText(entry, candidates) {
+  if (!entry || typeof entry !== "object") {
+    return "";
+  }
+  const scopes = [entry, entry.application, entry.request, entry.profile, entry.operator];
+  for (const scope of scopes) {
+    if (!scope || typeof scope !== "object") {
+      continue;
+    }
+    for (const candidate of candidates) {
+      const value = nonEmptyString(scope[candidate]);
+      if (value) {
+        return value;
+      }
+    }
+  }
+  return "";
+}
+
+function extractOperatorPrefillValues(entry) {
+  if (typeof entry === "string") {
+    const chainOperatorId = entry.trim();
+    return {
+      walletAddress: "",
+      chainOperatorId
+    };
+  }
+  return {
+    walletAddress: readOperatorEntryText(entry, [
+      "wallet_address",
+      "walletAddress",
+      "address",
+      "subject_wallet",
+      "subjectWallet"
+    ]),
+    chainOperatorId: readOperatorEntryText(entry, [
+      "chain_operator_id",
+      "chainOperatorId",
+      "operator_id",
+      "operatorId",
+      "id"
+    ])
   };
 }
 
@@ -676,6 +797,79 @@ async function requestOperatorList(status, limit) {
   });
 }
 
+async function loadNextPendingOperator() {
+  const listResult = await requestOperatorList("pending", OPERATOR_LOAD_NEXT_LIMIT);
+  const entries = extractOperatorListEntries(listResult);
+  if (entries.length === 0) {
+    return withSessionReconciledHint(
+      {
+        found: false,
+        message: "No pending operator applications are currently queued.",
+        status: "pending",
+        limit: OPERATOR_LOAD_NEXT_LIMIT,
+        returned: 0
+      },
+      listResult
+    );
+  }
+  const nextEntry = entries[0];
+  const { walletAddress, chainOperatorId } = extractOperatorPrefillValues(nextEntry);
+  byId("wallet_address").value = walletAddress;
+  byId("chain_operator_id").value = chainOperatorId;
+  persistPortalState();
+  await refreshServerReadinessStatus({ quiet: true });
+  const message =
+    walletAddress || chainOperatorId
+      ? "Loaded next pending operator into wallet and chain operator fields."
+      : "Loaded next pending queue entry, but wallet/chain operator values were empty.";
+  return withSessionReconciledHint(
+    {
+      found: true,
+      message,
+      wallet_address: walletAddress || null,
+      chain_operator_id: chainOperatorId || null,
+      status: "pending",
+      limit: OPERATOR_LOAD_NEXT_LIMIT,
+      returned: entries.length
+    },
+    listResult
+  );
+}
+
+async function reconcileSessionAfterModerationDecision() {
+  const token = byId("session_token").value.trim();
+  if (!token) {
+    await refreshOperatorApplicationStatus({ quiet: true });
+    await refreshServerReadinessStatus({ quiet: true });
+    return {
+      attempted: false,
+      reason: "session token unavailable"
+    };
+  }
+  try {
+    const result = await requestSessionLifecycle("status");
+    syncSessionDerivedState(result);
+    byId("role").value = sessionRoleFromResult(result);
+    await refreshClientRegistrationStatus({ quiet: true });
+    await refreshOperatorApplicationStatus({ quiet: true });
+    await refreshServerReadinessStatus({ quiet: true });
+    persistPortalState();
+    return {
+      attempted: true,
+      ok: true,
+      session: result
+    };
+  } catch (err) {
+    await refreshOperatorApplicationStatus({ quiet: true });
+    await refreshServerReadinessStatus({ quiet: true });
+    return {
+      attempted: true,
+      ok: false,
+      error: String(err && err.message ? err.message : err)
+    };
+  }
+}
+
 async function refreshClientRegistrationStatus(options = {}) {
   const { quiet = true } = options;
   if (!byId("session_token").value.trim()) {
@@ -745,9 +939,12 @@ async function run(label, fn, options = {}) {
   setStatus("warn", `${label} in progress`, "Please wait while the portal completes the request.");
   try {
     const result = await fn();
-    const outputPayload = outputMapper ? outputMapper(result) : result;
+    const outputPayload = withSessionReconciledHint(outputMapper ? outputMapper(result) : result, result);
     print(label, outputPayload);
-    const detail = successDetail ? successDetail(result) : "The request finished successfully.";
+    const detail = appendSessionReconciledDetail(
+      successDetail ? successDetail(result) : "The request finished successfully.",
+      result
+    );
     setStatus("good", `${label} completed`, detail);
     return result;
   } catch (err) {
@@ -899,6 +1096,13 @@ byId("operator_list_pending_btn").addEventListener("click", () =>
   )
 );
 
+byId("operator_load_next_pending_btn").addEventListener("click", () =>
+  run("operator_load_next_pending", loadNextPendingOperator, {
+    successDetail: (result) =>
+      result?.message || "No pending operator applications are currently queued."
+  })
+);
+
 byId("operator_list_all_btn").addEventListener("click", () =>
   run(
     "operator_list_all",
@@ -911,52 +1115,83 @@ byId("operator_list_all_btn").addEventListener("click", () =>
 );
 
 byId("approve_operator_btn").addEventListener("click", () =>
-  run("operator_approve", async () => {
-    const request = {
-      wallet_address: byId("wallet_address").value.trim(),
-      approved: true,
-      session_token: byId("session_token").value.trim() || undefined
-    };
-    const adminToken = byId("admin_token").value.trim();
-    if (adminToken) {
-      request.admin_token = adminToken;
+  run(
+    "operator_approve",
+    async () => {
+      const request = {
+        wallet_address: byId("wallet_address").value.trim(),
+        approved: true,
+        session_token: byId("session_token").value.trim() || undefined
+      };
+      const adminToken = byId("admin_token").value.trim();
+      if (adminToken) {
+        request.admin_token = adminToken;
+      }
+      const reason = operatorModerationReason();
+      if (reason) {
+        request.reason = reason;
+      }
+      const moderationResult = await post("/v1/gpm/onboarding/operator/approve", request);
+      const sessionReconciliation = await reconcileSessionAfterModerationDecision();
+      return {
+        moderation_result: moderationResult,
+        session_reconciliation: sessionReconciliation
+      };
+    },
+    {
+      successDetail: (result) => {
+        const reconciliation = result?.session_reconciliation;
+        if (reconciliation?.attempted === false) {
+          return "Operator approved. Session status refresh skipped because no session token was available.";
+        }
+        if (reconciliation?.ok === false) {
+          return `Operator approved. Session status refresh failed (${reconciliation.error}).`;
+        }
+        return "Operator approved and session status refreshed.";
+      }
     }
-    const reason = operatorModerationReason();
-    if (reason) {
-      request.reason = reason;
-    }
-    const result = await post("/v1/gpm/onboarding/operator/approve", request);
-    await refreshOperatorApplicationStatus({ quiet: true });
-    await refreshServerReadinessStatus({ quiet: true });
-    return result;
-  })
+  )
 );
 
 byId("reject_operator_btn").addEventListener("click", () =>
-  run("operator_reject", async () => {
-    const sessionToken = byId("session_token").value.trim();
-    if (!sessionToken) {
-      throw new Error("session_token is required to reject an operator. Sign in first.");
+  run(
+    "operator_reject",
+    async () => {
+      const sessionToken = byId("session_token").value.trim();
+      if (!sessionToken) {
+        throw new Error("session_token is required to reject an operator. Sign in first.");
+      }
+      const reason = operatorModerationReason();
+      if (!reason) {
+        throw new Error("moderation reason is required to reject an operator.");
+      }
+      const request = {
+        wallet_address: byId("wallet_address").value.trim(),
+        approved: false,
+        reason,
+        session_token: sessionToken
+      };
+      const adminToken = byId("admin_token").value.trim();
+      if (adminToken) {
+        request.admin_token = adminToken;
+      }
+      const moderationResult = await post("/v1/gpm/onboarding/operator/approve", request);
+      const sessionReconciliation = await reconcileSessionAfterModerationDecision();
+      return {
+        moderation_result: moderationResult,
+        session_reconciliation: sessionReconciliation
+      };
+    },
+    {
+      successDetail: (result) => {
+        const reconciliation = result?.session_reconciliation;
+        if (reconciliation?.ok === false) {
+          return `Operator rejected. Session status refresh failed (${reconciliation.error}).`;
+        }
+        return "Operator rejected and session status refreshed.";
+      }
     }
-    const reason = operatorModerationReason();
-    if (!reason) {
-      throw new Error("moderation reason is required to reject an operator.");
-    }
-    const request = {
-      wallet_address: byId("wallet_address").value.trim(),
-      approved: false,
-      reason,
-      session_token: sessionToken
-    };
-    const adminToken = byId("admin_token").value.trim();
-    if (adminToken) {
-      request.admin_token = adminToken;
-    }
-    const result = await post("/v1/gpm/onboarding/operator/approve", request);
-    await refreshOperatorApplicationStatus({ quiet: true });
-    await refreshServerReadinessStatus({ quiet: true });
-    return result;
-  })
+  )
 );
 
 async function restoreSessionStatusBestEffort() {

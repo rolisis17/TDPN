@@ -41,6 +41,7 @@ const desktopStepClientEl = document.getElementById("desktop_step_client");
 const desktopStepOperatorEl = document.getElementById("desktop_step_operator");
 const MAX_OUTPUT_CHARS = 64 * 1024;
 const OPERATOR_PENDING_LIST_LIMIT = 25;
+const OPERATOR_LOAD_NEXT_LIMIT = 1;
 const OPERATOR_LIST_ALL_LIMIT = 100;
 const CONNECTION_DEFAULT_STATE = "Unknown";
 const CONNECTION_DEFAULT_DETAIL = "Not checked yet";
@@ -247,6 +248,73 @@ function toDetailText(value) {
   return undefined;
 }
 
+function findSessionReconciledHint(payload, depth = 0) {
+  if (payload === null || payload === undefined || depth > 4) {
+    return undefined;
+  }
+  if (Array.isArray(payload)) {
+    for (const item of payload) {
+      const found = findSessionReconciledHint(item, depth + 1);
+      if (found !== undefined && found !== null) {
+        return found;
+      }
+    }
+    return undefined;
+  }
+  if (typeof payload !== "object") {
+    return undefined;
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, "session_reconciled")) {
+    return payload.session_reconciled;
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, "sessionReconciled")) {
+    return payload.sessionReconciled;
+  }
+  for (const value of Object.values(payload)) {
+    const found = findSessionReconciledHint(value, depth + 1);
+    if (found !== undefined && found !== null) {
+      return found;
+    }
+  }
+  return undefined;
+}
+
+function formatSessionReconciledHint(payload) {
+  const hint = findSessionReconciledHint(payload);
+  if (hint === undefined || hint === null) {
+    return undefined;
+  }
+  if (typeof hint === "string") {
+    const trimmed = hint.trim();
+    return trimmed || undefined;
+  }
+  if (typeof hint === "number" || typeof hint === "boolean") {
+    return String(hint);
+  }
+  try {
+    return JSON.stringify(hint);
+  } catch {
+    return String(hint);
+  }
+}
+
+function withSessionReconciledHint(payload, hintSource = payload) {
+  const hint = formatSessionReconciledHint(hintSource);
+  if (!hint) {
+    return payload;
+  }
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+    return {
+      ...payload,
+      session_reconciled_hint: hint
+    };
+  }
+  return {
+    result: payload,
+    session_reconciled_hint: hint
+  };
+}
+
 function inferConnectionDetail(payload, source, stateKey, stateHint) {
   const detailHint = toDetailText(findHintValue(payload, CONNECTION_HINT_KEYS.detail));
   if (detailHint) {
@@ -427,6 +495,66 @@ function normalizeOperatorApplicationStatus(value) {
 
 function parseOperatorApplicationStatus(payload) {
   return normalizeOperatorApplicationStatus(payload?.application?.status);
+}
+
+function extractOperatorListEntries(payload) {
+  const containers = [payload, payload?.data, payload?.result, payload?.queue, payload?.list];
+  for (const container of containers) {
+    if (!container || typeof container !== "object") {
+      continue;
+    }
+    for (const key of ["operators", "items", "results", "entries", "applications", "queue"]) {
+      if (Array.isArray(container[key])) {
+        return container[key];
+      }
+    }
+  }
+  return [];
+}
+
+function readOperatorEntryField(entry, candidates) {
+  if (!entry || typeof entry !== "object") {
+    return "";
+  }
+  const scopes = [entry, entry.application, entry.request, entry.profile, entry.operator];
+  for (const scope of scopes) {
+    if (!scope || typeof scope !== "object") {
+      continue;
+    }
+    for (const key of candidates) {
+      const text = toDetailText(scope[key]);
+      if (text) {
+        return text;
+      }
+    }
+  }
+  return "";
+}
+
+function extractOperatorPrefillValues(entry) {
+  if (typeof entry === "string") {
+    const chainOperatorId = entry.trim();
+    return {
+      walletAddress: "",
+      chainOperatorId
+    };
+  }
+  return {
+    walletAddress: readOperatorEntryField(entry, [
+      "wallet_address",
+      "walletAddress",
+      "address",
+      "subject_wallet",
+      "subjectWallet"
+    ]),
+    chainOperatorId: readOperatorEntryField(entry, [
+      "chain_operator_id",
+      "chainOperatorId",
+      "operator_id",
+      "operatorId",
+      "id"
+    ])
+  };
 }
 
 function parseServerReadiness(payload) {
@@ -730,7 +858,7 @@ function parseSessionRole(payload) {
 async function call(label, command, args = {}) {
   try {
     const result = await invoke(command, args);
-    print(label, result);
+    print(label, withSessionReconciledHint(result));
     return result;
   } catch (err) {
     print(`${label} (error)`, err);
@@ -906,6 +1034,60 @@ async function refreshSessionOnInit() {
   await refreshServerReadinessStatus({ quiet: true });
 }
 
+async function loadNextPendingOperator() {
+  if (!requireSessionToken("load the next pending operator")) {
+    return undefined;
+  }
+  const request = {
+    session_token: state.sessionToken,
+    status: "pending",
+    limit: OPERATOR_LOAD_NEXT_LIMIT
+  };
+  const result = await call("gpm_operator_load_next_pending", "control_gpm_operator_list", { request });
+  const entries = extractOperatorListEntries(result);
+  if (entries.length === 0) {
+    print(
+      "operator_load_next_pending",
+      withSessionReconciledHint(
+        {
+          message: "No pending operator applications are currently queued.",
+          status: "pending",
+          limit: OPERATOR_LOAD_NEXT_LIMIT,
+          returned: 0
+        },
+        result
+      )
+    );
+    return result;
+  }
+  const nextEntry = entries[0];
+  const { walletAddress, chainOperatorId } = extractOperatorPrefillValues(nextEntry);
+  walletAddressEl.value = walletAddress;
+  chainOperatorIdEl.value = chainOperatorId;
+  writePersistedValue(STORAGE_KEYS.walletAddress, walletAddress);
+  writePersistedValue(STORAGE_KEYS.chainOperatorId, chainOperatorId);
+  await refreshServerReadinessStatus({ quiet: true });
+  const loadedMessage =
+    walletAddress || chainOperatorId
+      ? "Loaded next pending operator into moderation fields."
+      : "Loaded next pending queue entry, but wallet/chain operator values were empty.";
+  print(
+    "operator_load_next_pending",
+    withSessionReconciledHint(
+      {
+        message: loadedMessage,
+        wallet_address: walletAddress || null,
+        chain_operator_id: chainOperatorId || null,
+        status: "pending",
+        limit: OPERATOR_LOAD_NEXT_LIMIT,
+        returned: entries.length
+      },
+      result
+    )
+  );
+  return result;
+}
+
 tabClientEl.addEventListener("click", () => activateTab("client"));
 tabServerEl.addEventListener("click", () => {
   if (!tabServerEl.disabled) {
@@ -1038,6 +1220,10 @@ byId("operator_list_pending_btn").addEventListener("click", async () => {
   await call("gpm_operator_list_pending", "control_gpm_operator_list", { request });
 });
 
+byId("operator_load_next_pending_btn").addEventListener("click", async () => {
+  await loadNextPendingOperator();
+});
+
 byId("operator_list_all_btn").addEventListener("click", async () => {
   if (!requireSessionToken("list all operators")) {
     return;
@@ -1080,8 +1266,7 @@ byId("reject_operator_btn").addEventListener("click", async () => {
     session_token: state.sessionToken
   };
   await call("gpm_operator_reject", "control_gpm_operator_approve", { request });
-  await refreshOperatorApplicationStatus({ quiet: true });
-  await refreshServerReadinessStatus({ quiet: true });
+  await refreshSession();
 });
 
 byId("connect_btn").addEventListener("click", async () => {
