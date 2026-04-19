@@ -244,9 +244,11 @@ Success payload:
 - `readiness.chain_operator_id`: operator application chain id when present
 - `readiness.session_chain_operator_id`: chain id on resolved session when present
 - `readiness.tab_visible`: `true` for `operator|admin`, else `false`
+- `readiness.client_tab_visible`: `true` when the client tab is eligible/visible for the resolved role/session context
 - `readiness.lifecycle_actions_unlocked`: `true` for `admin`, or `operator` with approved application and non-conflicting chain ids
 - `readiness.service_mutations_configured`: `true` when all legacy service lifecycle commands are configured (`LOCAL_CONTROL_API_SERVICE_START_COMMAND`, `LOCAL_CONTROL_API_SERVICE_STOP_COMMAND`, `LOCAL_CONTROL_API_SERVICE_RESTART_COMMAND`)
 - `readiness.lock_reason`: non-empty reason when lifecycle actions are locked
+- `readiness.client_lock_reason`: non-empty reason when the client tab is role-locked
 - `readiness.unlock_actions`: guidance steps to unlock lifecycle actions
 
 ### `POST /v1/gpm/session`

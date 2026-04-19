@@ -3183,11 +3183,45 @@ func TestGPMServerStatus(t *testing.T) {
 		if got, _ := readiness["tab_visible"].(bool); !got {
 			t.Fatalf("tab_visible=%v want=true payload=%v", readiness["tab_visible"], payload)
 		}
+		if got, _ := readiness["client_tab_visible"].(bool); got {
+			t.Fatalf("client_tab_visible=%v want=false payload=%v", readiness["client_tab_visible"], payload)
+		}
 		if got, _ := readiness["lifecycle_actions_unlocked"].(bool); !got {
 			t.Fatalf("lifecycle_actions_unlocked=%v want=true payload=%v", readiness["lifecycle_actions_unlocked"], payload)
 		}
 		if got, _ := readiness["service_mutations_configured"].(bool); !got {
 			t.Fatalf("service_mutations_configured=%v want=true payload=%v", readiness["service_mutations_configured"], payload)
+		}
+		clientLockReason, _ := readiness["client_lock_reason"].(string)
+		if !strings.Contains(clientLockReason, "client registration is required") {
+			t.Fatalf("client_lock_reason=%q want client-registration gate payload=%v", clientLockReason, payload)
+		}
+	})
+
+	t.Run("admin dual-role keeps client tab visible", func(t *testing.T) {
+		svc := newServerStatusService(t)
+		svc.gpmState.putSession(gpmSession{
+			Token:              "gpm-server-admin-dual-role-token",
+			WalletAddress:      "cosmos1serveradmindualrole",
+			WalletProvider:     "keplr",
+			Role:               "admin",
+			CreatedAt:          now,
+			ExpiresAt:          now.Add(time.Hour),
+			BootstrapDirectory: "https://bootstrap.globalprivatemesh.net",
+			InviteKey:          "inv-0123456789abcdef012345",
+		})
+
+		body := `{"session_token":"gpm-server-admin-dual-role-token"}`
+		code, payload := callJSONHandler(t, svc.handleGPMServerStatus, http.MethodPost, "/v1/gpm/onboarding/server/status", body)
+		if code != http.StatusOK {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		readiness := getReadiness(t, payload)
+		if got, _ := readiness["client_tab_visible"].(bool); !got {
+			t.Fatalf("client_tab_visible=%v want=true payload=%v", readiness["client_tab_visible"], payload)
+		}
+		if got, _ := readiness["client_lock_reason"].(string); got != "" {
+			t.Fatalf("client_lock_reason=%q want empty payload=%v", got, payload)
 		}
 	})
 
@@ -3324,12 +3358,18 @@ func TestGPMServerStatus(t *testing.T) {
 		if got, _ := readiness["tab_visible"].(bool); got {
 			t.Fatalf("tab_visible=%v want=false payload=%v", readiness["tab_visible"], payload)
 		}
+		if got, _ := readiness["client_tab_visible"].(bool); !got {
+			t.Fatalf("client_tab_visible=%v want=true payload=%v", readiness["client_tab_visible"], payload)
+		}
 		if got, _ := readiness["lifecycle_actions_unlocked"].(bool); got {
 			t.Fatalf("lifecycle_actions_unlocked=%v want=false payload=%v", readiness["lifecycle_actions_unlocked"], payload)
 		}
 		lockReason, _ := readiness["lock_reason"].(string)
 		if !strings.Contains(lockReason, "operator or admin required") {
 			t.Fatalf("lock_reason=%q want operator/admin gate payload=%v", lockReason, payload)
+		}
+		if got, _ := readiness["client_lock_reason"].(string); got != "" {
+			t.Fatalf("client_lock_reason=%q want empty payload=%v", got, payload)
 		}
 	})
 

@@ -903,6 +903,17 @@ func (s *Service) handleGPMServerStatus(w http.ResponseWriter, r *http.Request) 
 	}
 
 	tabVisible := role == "operator" || role == "admin"
+	clientRegistrationReady := sessionPresent &&
+		strings.TrimSpace(session.BootstrapDirectory) != "" &&
+		strings.TrimSpace(session.InviteKey) != ""
+	clientTabVisible := true
+	clientLockReason := ""
+	if role == "operator" || role == "admin" {
+		clientTabVisible = clientRegistrationReady
+		if !clientTabVisible {
+			clientLockReason = "client registration is required for client tab access; complete /v1/gpm/onboarding/client/register with bootstrap_directory and invite_key"
+		}
+	}
 	serviceMutationsConfigured := strings.TrimSpace(s.serviceStart) != "" &&
 		strings.TrimSpace(s.serviceStop) != "" &&
 		strings.TrimSpace(s.serviceRestart) != ""
@@ -964,8 +975,10 @@ func (s *Service) handleGPMServerStatus(w http.ResponseWriter, r *http.Request) 
 			"chain_operator_id":            chainOperatorID,
 			"session_chain_operator_id":    sessionChainOperatorID,
 			"tab_visible":                  tabVisible,
+			"client_tab_visible":           clientTabVisible,
 			"lifecycle_actions_unlocked":   lifecycleActionsUnlocked,
 			"service_mutations_configured": serviceMutationsConfigured,
+			"client_lock_reason":           clientLockReason,
 			"lock_reason":                  lockReason,
 			"unlock_actions":               unlockActions,
 		},
