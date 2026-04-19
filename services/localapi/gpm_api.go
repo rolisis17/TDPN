@@ -21,6 +21,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 )
 
 const (
@@ -28,6 +29,7 @@ const (
 	gpmSessionTTL          = 12 * time.Hour
 	gpmManifestHTTPTimeout = 6 * time.Second
 	gpmManifestBodyLimit   = 1 << 20
+	gpmAuthSignatureMaxLen = 8 * 1024
 )
 
 type gpmRuntimeState struct {
@@ -94,6 +96,8 @@ type gpmAuthVerifyRequest struct {
 	ChallengeID    string `json:"challenge_id"`
 	Signature      string `json:"signature"`
 }
+
+type gpmAuthSignatureVerifier func(challenge gpmWalletChallenge, walletAddress string, walletProvider string, signature string) error
 
 type gpmSessionStatusRequest struct {
 	SessionToken string `json:"session_token"`
@@ -507,8 +511,8 @@ func (s *Service) handleGPMAuthVerify(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "challenge identity mismatch"})
 		return
 	}
-	if len(signature) < 8 {
-		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "signature is too short"})
+	if err := s.verifyGPMAuthSignature(challenge, in.WalletAddress, in.WalletProvider, signature); err != nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
 	now := time.Now().UTC()
@@ -1437,6 +1441,39 @@ func gpmOperatorChainIDsCompatible(sessionChainOperatorID string, approvedChainO
 
 func subtleEqual(a string, b string) bool {
 	return hmac.Equal([]byte(a), []byte(b))
+}
+
+func defaultGPMAuthSignatureVerifier(challenge gpmWalletChallenge, walletAddress string, walletProvider string, signature string) error {
+	signature = strings.TrimSpace(signature)
+	if signature == "" {
+		return errors.New("signature is required")
+	}
+	if len(signature) < 8 {
+		return errors.New("signature is too short")
+	}
+	if len(signature) > gpmAuthSignatureMaxLen {
+		return fmt.Errorf("signature is too long (max=%d)", gpmAuthSignatureMaxLen)
+	}
+	for _, r := range signature {
+		if unicode.IsSpace(r) || unicode.IsControl(r) {
+			return errors.New("signature contains invalid whitespace/control characters")
+		}
+	}
+	if subtleEqual(challenge.ChallengeID, signature) || subtleEqual(challenge.Message, signature) {
+		return errors.New("signature failed challenge proof validation")
+	}
+	if !subtleEqual(challenge.WalletAddress, walletAddress) || !subtleEqual(challenge.WalletProvider, walletProvider) {
+		return errors.New("challenge identity mismatch")
+	}
+	return nil
+}
+
+func (s *Service) verifyGPMAuthSignature(challenge gpmWalletChallenge, walletAddress string, walletProvider string, signature string) error {
+	verifier := s.gpmAuthSignatureVerifier
+	if verifier == nil {
+		verifier = defaultGPMAuthSignatureVerifier
+	}
+	return verifier(challenge, walletAddress, walletProvider, signature)
 }
 
 func randomHex(byteLen int) (string, error) {

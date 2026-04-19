@@ -2764,6 +2764,112 @@ func TestGPMAuthChallengeVerifyAndSessionStatus(t *testing.T) {
 	}
 }
 
+func TestGPMAuthVerifyRejectsSignatureWithWhitespaceControlCharacters(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	svc.gpmRoleDefault = "client"
+
+	challengeBody := `{"wallet_address":"cosmos1sigguard","wallet_provider":"keplr"}`
+	code, payload := callJSONHandler(t, svc.handleGPMAuthChallenge, http.MethodPost, "/v1/gpm/auth/challenge", challengeBody)
+	if code != http.StatusOK {
+		t.Fatalf("challenge status=%d body=%v", code, payload)
+	}
+	challengeID, _ := payload["challenge_id"].(string)
+	if strings.TrimSpace(challengeID) == "" {
+		t.Fatalf("challenge_id missing: %v", payload)
+	}
+
+	verifyBody := `{"wallet_address":"cosmos1sigguard","wallet_provider":"keplr","challenge_id":"` + challengeID + `","signature":"signed proofvalue"}`
+	code, payload = callJSONHandler(t, svc.handleGPMAuthVerify, http.MethodPost, "/v1/gpm/auth/verify", verifyBody)
+	if code != http.StatusUnauthorized {
+		t.Fatalf("verify status=%d want=%d body=%v", code, http.StatusUnauthorized, payload)
+	}
+	errMsg, _ := payload["error"].(string)
+	if !strings.Contains(errMsg, "whitespace/control") {
+		t.Fatalf("error=%q want contains whitespace/control payload=%v", errMsg, payload)
+	}
+}
+
+func TestGPMAuthVerifyUsesCustomSignatureVerifier(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	svc.gpmRoleDefault = "client"
+
+	verifierCalls := 0
+	svc.gpmAuthSignatureVerifier = func(challenge gpmWalletChallenge, walletAddress string, walletProvider string, signature string) error {
+		verifierCalls++
+		if strings.TrimSpace(challenge.ChallengeID) == "" {
+			return errors.New("challenge id missing")
+		}
+		if walletAddress != "cosmos1customverifier" {
+			return fmt.Errorf("wallet_address=%q", walletAddress)
+		}
+		if walletProvider != "keplr" {
+			return fmt.Errorf("wallet_provider=%q", walletProvider)
+		}
+		if signature != "signed-proof-value" {
+			return fmt.Errorf("signature=%q", signature)
+		}
+		return nil
+	}
+
+	challengeBody := `{"wallet_address":"cosmos1customverifier","wallet_provider":"keplr"}`
+	code, payload := callJSONHandler(t, svc.handleGPMAuthChallenge, http.MethodPost, "/v1/gpm/auth/challenge", challengeBody)
+	if code != http.StatusOK {
+		t.Fatalf("challenge status=%d body=%v", code, payload)
+	}
+	challengeID, _ := payload["challenge_id"].(string)
+	if strings.TrimSpace(challengeID) == "" {
+		t.Fatalf("challenge_id missing: %v", payload)
+	}
+
+	verifyBody := `{"wallet_address":"cosmos1customverifier","wallet_provider":"keplr","challenge_id":"` + challengeID + `","signature":"signed-proof-value"}`
+	code, payload = callJSONHandler(t, svc.handleGPMAuthVerify, http.MethodPost, "/v1/gpm/auth/verify", verifyBody)
+	if code != http.StatusOK {
+		t.Fatalf("verify status=%d body=%v", code, payload)
+	}
+	if verifierCalls != 1 {
+		t.Fatalf("verifierCalls=%d want=1", verifierCalls)
+	}
+	sessionToken, _ := payload["session_token"].(string)
+	if strings.TrimSpace(sessionToken) == "" {
+		t.Fatalf("session_token missing: %v", payload)
+	}
+}
+
+func TestGPMAuthVerifyCustomSignatureVerifierRejects(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	svc.gpmRoleDefault = "client"
+
+	svc.gpmAuthSignatureVerifier = func(gpmWalletChallenge, string, string, string) error {
+		return errors.New("signature verification rejected by test verifier")
+	}
+
+	challengeBody := `{"wallet_address":"cosmos1customreject","wallet_provider":"keplr"}`
+	code, payload := callJSONHandler(t, svc.handleGPMAuthChallenge, http.MethodPost, "/v1/gpm/auth/challenge", challengeBody)
+	if code != http.StatusOK {
+		t.Fatalf("challenge status=%d body=%v", code, payload)
+	}
+	challengeID, _ := payload["challenge_id"].(string)
+	if strings.TrimSpace(challengeID) == "" {
+		t.Fatalf("challenge_id missing: %v", payload)
+	}
+
+	verifyBody := `{"wallet_address":"cosmos1customreject","wallet_provider":"keplr","challenge_id":"` + challengeID + `","signature":"signed-proof-value"}`
+	code, payload = callJSONHandler(t, svc.handleGPMAuthVerify, http.MethodPost, "/v1/gpm/auth/verify", verifyBody)
+	if code != http.StatusUnauthorized {
+		t.Fatalf("verify status=%d want=%d body=%v", code, http.StatusUnauthorized, payload)
+	}
+	errMsg, _ := payload["error"].(string)
+	if !strings.Contains(errMsg, "rejected by test verifier") {
+		t.Fatalf("error=%q want verifier rejection message payload=%v", errMsg, payload)
+	}
+	if _, ok := payload["session_token"]; ok {
+		t.Fatalf("session_token unexpectedly present payload=%v", payload)
+	}
+}
+
 func TestGPMSessionRefreshAndRevoke(t *testing.T) {
 	svc, _ := newFakeService(t, false)
 	svc.gpmState = newGPMRuntimeState()

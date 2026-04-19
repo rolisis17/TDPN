@@ -80,6 +80,7 @@ type Service struct {
 	gpmManifestHMACKey            string
 	gpmRoleDefault                string
 	gpmApprovalToken              string
+	gpmAuthSignatureVerifier      gpmAuthSignatureVerifier
 	gpmStateStorePath             string
 	gpmAuditLogPath               string
 	gpmState                      *gpmRuntimeState
@@ -268,6 +269,7 @@ func New() *Service {
 		gpmManifestHMACKey:            gpmManifestHMACKey,
 		gpmRoleDefault:                gpmRoleDefault,
 		gpmApprovalToken:              gpmApprovalToken,
+		gpmAuthSignatureVerifier:      defaultGPMAuthSignatureVerifier,
 		gpmStateStorePath:             strings.TrimSpace(gpmStateStorePath),
 		gpmAuditLogPath:               strings.TrimSpace(gpmAuditLogPath),
 		gpmState:                      newGPMRuntimeState(),
