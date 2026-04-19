@@ -235,6 +235,10 @@ Usage:
   ./scripts/easy_node.sh config-v1-show [--path PATH]
   ./scripts/easy_node.sh config-v1-init [--path PATH] [--force [0|1]]
   ./scripts/easy_node.sh local-api-session [--api-addr HOST:PORT] [--config PATH] [--config-v1-path PATH] [--service-status-command CMD] [--service-start-command CMD] [--service-stop-command CMD] [--service-restart-command CMD] [--dry-run [0|1]]
+  ./scripts/easy_node.sh desktop-linux-doctor [desktop_doctor args...]
+  ./scripts/easy_node.sh desktop-linux-native-bootstrap [desktop_native_bootstrap args...]
+  ./scripts/easy_node.sh desktop-linux-one-click [desktop_one_click args...]
+  ./scripts/easy_node.sh desktop-linux-packaged-run [desktop_packaged_run args...]
   ./scripts/easy_node.sh profile-compare-docker-matrix [--dry-run [0|1]] [profile-compare-campaign args...]
   ./scripts/easy_node.sh profile-default-gate-run [--directory-a HOST_OR_URL|--host-a HOST_OR_URL] [--directory-b HOST_OR_URL|--host-b HOST_OR_URL] [--campaign-subject INVITE_KEY|--subject INVITE_KEY] [--heartbeat-interval-sec N] [profile-compare-campaign-signoff args...]
   ./scripts/easy_node.sh profile-default-gate-live [--host-a HOST|--directory-a HOST_OR_URL] [--host-b HOST|--directory-b HOST_OR_URL] [--campaign-subject INVITE_KEY|--subject INVITE_KEY|--key INVITE_KEY|--invite-key INVITE_KEY] [--heartbeat-interval-sec N] [profile-default-gate-run args...]
@@ -367,6 +371,10 @@ Usage:
   ./scripts/easy_node.sh config-v1-init [--path PATH] [--force [0|1]]
   ./scripts/easy_node.sh config-v1-set-profile --path-profile 1hop|2hop|3hop [--path PATH]
   ./scripts/easy_node.sh local-api-session [--api-addr HOST:PORT] [--config PATH] [--config-v1-path PATH] [--script-path PATH] [--allow-update [0|1]] [--command-timeout-sec N] [--service-status-command CMD] [--service-start-command CMD] [--service-stop-command CMD] [--service-restart-command CMD] [--connect-path-profile-default 1hop|2hop|3hop] [--connect-interface-default IFACE] [--connect-run-preflight-default [0|1]] [--connect-prod-profile-default auto|0|1] [--dry-run [0|1]]
+  ./scripts/easy_node.sh desktop-linux-doctor [desktop_doctor args...]
+  ./scripts/easy_node.sh desktop-linux-native-bootstrap [desktop_native_bootstrap args...]
+  ./scripts/easy_node.sh desktop-linux-one-click [desktop_one_click args...]
+  ./scripts/easy_node.sh desktop-linux-packaged-run [desktop_packaged_run args...]
   ./scripts/easy_node.sh client-vpn-logs [--follow [0|1]] [--tail N]
   ./scripts/easy_node.sh client-vpn-session [client-vpn-up args...] [--cleanup-all [0|1]]
   ./scripts/easy_node.sh simple-client-vpn-session [--bootstrap-directory URL] [--discovery-wait-sec N] [--subject ID] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--beta-profile [0|1]] [--prod-profile [0|1]] [--interface IFACE] [--ready-timeout-sec N]
@@ -8459,6 +8467,26 @@ single_machine_prod_readiness() {
   "$readiness_script" "$@"
 }
 
+desktop_linux_doctor() {
+  local script="${DESKTOP_LINUX_DOCTOR_SCRIPT:-$ROOT_DIR/scripts/linux/desktop_doctor.sh}"
+  "$script" "$@"
+}
+
+desktop_linux_native_bootstrap() {
+  local script="${DESKTOP_LINUX_NATIVE_BOOTSTRAP_SCRIPT:-$ROOT_DIR/scripts/linux/desktop_native_bootstrap.sh}"
+  "$script" "$@"
+}
+
+desktop_linux_one_click() {
+  local script="${DESKTOP_LINUX_ONE_CLICK_SCRIPT:-$ROOT_DIR/scripts/linux/desktop_one_click.sh}"
+  "$script" "$@"
+}
+
+desktop_linux_packaged_run() {
+  local script="${DESKTOP_LINUX_PACKAGED_RUN_SCRIPT:-$ROOT_DIR/scripts/linux/desktop_packaged_run.sh}"
+  "$script" "$@"
+}
+
 vpn_rc_standard_path() {
   local rc_script="${VPN_RC_STANDARD_PATH_SCRIPT:-$ROOT_DIR/scripts/vpn_rc_standard_path.sh}"
   "$rc_script" "$@"
@@ -15431,6 +15459,22 @@ main() {
     local-api-session)
       shift
       local_api_session "$@"
+      ;;
+    desktop-linux-doctor)
+      shift
+      desktop_linux_doctor "$@"
+      ;;
+    desktop-linux-native-bootstrap)
+      shift
+      desktop_linux_native_bootstrap "$@"
+      ;;
+    desktop-linux-one-click)
+      shift
+      desktop_linux_one_click "$@"
+      ;;
+    desktop-linux-packaged-run)
+      shift
+      desktop_linux_packaged_run "$@"
       ;;
     server-preflight)
       shift
