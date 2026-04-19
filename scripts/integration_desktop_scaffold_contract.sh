@@ -177,6 +177,26 @@ if ! grep -qiE 'summary json written|write[-_ ]*summary|Write-[A-Za-z0-9_]*Summa
   echo "desktop scaffold contract failed: expected summary writing helper marker in $WINDOWS_NATIVE_BOOTSTRAP_SCRIPT"
   exit 1
 fi
+if ! grep -qF 'recommended_commands' "$WINDOWS_NATIVE_BOOTSTRAP_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected recommended_commands summary marker in $WINDOWS_NATIVE_BOOTSTRAP_SCRIPT"
+  exit 1
+fi
+if ! grep -qF 'Get-RecommendedCommands' "$WINDOWS_NATIVE_BOOTSTRAP_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected recommended command helper marker in $WINDOWS_NATIVE_BOOTSTRAP_SCRIPT"
+  exit 1
+fi
+if ! grep -qF 'recommended commands (copy/paste):' "$WINDOWS_NATIVE_BOOTSTRAP_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected copy/paste remediation output marker in $WINDOWS_NATIVE_BOOTSTRAP_SCRIPT"
+  exit 1
+fi
+if ! grep -qF 'desktop_one_click.ps1' "$WINDOWS_NATIVE_BOOTSTRAP_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected one-click remediation marker in $WINDOWS_NATIVE_BOOTSTRAP_SCRIPT"
+  exit 1
+fi
+if ! grep -qF 'Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force' "$WINDOWS_NATIVE_BOOTSTRAP_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected execution-policy remediation marker in $WINDOWS_NATIVE_BOOTSTRAP_SCRIPT"
+  exit 1
+fi
 
 LINUX_NATIVE_BOOTSTRAP_SCRIPT="scripts/linux/desktop_native_bootstrap.sh"
 if [[ ! -f "$LINUX_NATIVE_BOOTSTRAP_SCRIPT" ]]; then
@@ -193,6 +213,26 @@ if ! grep -qF 'go run ./cmd/node --local-api' "$LINUX_NATIVE_BOOTSTRAP_SCRIPT"; 
 fi
 if ! grep -qiE 'scaffold|non-production' "$LINUX_NATIVE_BOOTSTRAP_SCRIPT"; then
   echo "desktop scaffold contract failed: expected scaffold/non-production marker in $LINUX_NATIVE_BOOTSTRAP_SCRIPT"
+  exit 1
+fi
+if ! grep -qF -- '--summary-json' "$LINUX_NATIVE_BOOTSTRAP_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected --summary-json marker in $LINUX_NATIVE_BOOTSTRAP_SCRIPT"
+  exit 1
+fi
+if ! grep -qF -- '--print-summary-json' "$LINUX_NATIVE_BOOTSTRAP_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected --print-summary-json marker in $LINUX_NATIVE_BOOTSTRAP_SCRIPT"
+  exit 1
+fi
+if ! grep -qF 'recommended_commands' "$LINUX_NATIVE_BOOTSTRAP_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected recommended_commands summary marker in $LINUX_NATIVE_BOOTSTRAP_SCRIPT"
+  exit 1
+fi
+if ! grep -qF 'emit_summary_payload' "$LINUX_NATIVE_BOOTSTRAP_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected summary emitter marker in $LINUX_NATIVE_BOOTSTRAP_SCRIPT"
+  exit 1
+fi
+if ! grep -qF 'recommended remediation commands' "$LINUX_NATIVE_BOOTSTRAP_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected remediation output marker in $LINUX_NATIVE_BOOTSTRAP_SCRIPT"
   exit 1
 fi
 echo "[desktop-scaffold] linux native bootstrap script markers are present"
