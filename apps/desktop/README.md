@@ -337,6 +337,9 @@ Run from repository root:
 bash ./scripts/linux/desktop_release_bundle.sh --channel beta
 ```
 
+Linux release-bundle remediation support:
+- scaffold flow supports desktop doctor prerequisite remediation using `scripts/linux/desktop_doctor.sh --mode fix --install-missing` before bundle build steps.
+
 Skip-build validation mode:
 - `--skip-build` runs scaffold validation and env-scoping checks without requiring Node.js/npm/Rust toolchain.
 - real build path (without `--skip-build`) still requires toolchain and runs the Tauri bundle build.

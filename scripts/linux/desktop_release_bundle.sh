@@ -3,37 +3,87 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DESKTOP_DIR="$ROOT_DIR/apps/desktop"
+DOCTOR_SCRIPT="$ROOT_DIR/scripts/linux/desktop_doctor.sh"
+DOCTOR_FIX_COMMAND="./scripts/linux/desktop_doctor.sh --mode fix --install-missing"
+BUILD_REQUIRED_TOOLS=(node npm rustc cargo git bash)
+MISSING_BUILD_TOOLS=()
 
 show_usage() {
   cat <<'USAGE'
 GPM desktop release bundle scaffold (non-production signing flow)
 
 Usage:
-  ./scripts/linux/desktop_release_bundle.sh [--help] [--channel stable|beta|canary] [--update-feed-url URL] [--signing-identity ID] [--signing-cert-path PATH] [--signing-cert-password VALUE] [--skip-build] [-- <tauri args>]
+  ./scripts/linux/desktop_release_bundle.sh [--help] [--channel stable|beta|canary] [--update-feed-url URL] [--signing-identity ID] [--signing-cert-path PATH] [--signing-cert-password VALUE] [--install-missing] [--skip-build] [-- <tauri args>]
 
 Examples:
   ./scripts/linux/desktop_release_bundle.sh
   ./scripts/linux/desktop_release_bundle.sh --channel beta --update-feed-url https://updates.example.invalid/gpm/beta.json
+  ./scripts/linux/desktop_release_bundle.sh --install-missing
   ./scripts/linux/desktop_release_bundle.sh --channel canary -- --bundles appimage
 
 Notes:
   - This is scaffold-only and does not implement production signing/secret handling.
   - Tauri build runs from apps/desktop via: npm run tauri -- build ...
+  - If build prerequisites are missing, --install-missing runs linux desktop_doctor in fix mode.
   - Sets GPM_DESKTOP_* vars (and TDPN_DESKTOP_* compatibility vars) for this process.
   - Validates update feed URL and signing placeholder input consistency before invoking build.
 USAGE
 }
 
-require_tool() {
+tool_install_hint() {
   local tool_name="$1"
-  local install_hint="$2"
-  if ! command -v "$tool_name" >/dev/null 2>&1; then
+  case "$tool_name" in
+    node)
+      printf '%s' "install Node.js LTS"
+      ;;
+    npm)
+      printf '%s' "install Node.js LTS so npm is on PATH"
+      ;;
+    rustc|cargo)
+      printf '%s' "install Rust with rustup"
+      ;;
+    git)
+      printf '%s' "install Git"
+      ;;
+    bash)
+      printf '%s' "install bash (GNU bash package)"
+      ;;
+    *)
+      printf '%s' ""
+      ;;
+  esac
+}
+
+collect_missing_build_tools() {
+  MISSING_BUILD_TOOLS=()
+  local tool_name
+  for tool_name in "${BUILD_REQUIRED_TOOLS[@]}"; do
+    if ! command -v "$tool_name" >/dev/null 2>&1; then
+      MISSING_BUILD_TOOLS+=("$tool_name")
+    fi
+  done
+}
+
+print_missing_build_tool_hints() {
+  local tool_name
+  local install_hint
+  for tool_name in "${MISSING_BUILD_TOOLS[@]}"; do
+    install_hint="$(tool_install_hint "$tool_name")"
     echo "desktop release bundle prerequisite missing: $tool_name" >&2
     if [[ -n "$install_hint" ]]; then
       echo "  install hint: $install_hint" >&2
     fi
-    exit 1
+  done
+  echo "  remediation hint: $DOCTOR_FIX_COMMAND" >&2
+}
+
+run_doctor_missing_tools_remediation() {
+  if [[ ! -f "$DOCTOR_SCRIPT" ]]; then
+    echo "desktop release bundle remediation helper not found: $DOCTOR_SCRIPT" >&2
+    return 1
   fi
+  echo "[desktop-release-bundle] running remediation: $DOCTOR_FIX_COMMAND"
+  bash "$DOCTOR_SCRIPT" --mode fix --install-missing
 }
 
 to_lower() {
@@ -174,6 +224,7 @@ update_feed_url=""
 signing_identity=""
 signing_cert_path=""
 signing_cert_password=""
+install_missing="0"
 skip_build="0"
 tauri_args=()
 
@@ -222,6 +273,10 @@ while [[ $# -gt 0 ]]; do
       fi
       signing_cert_password="$2"
       shift 2
+      ;;
+    --install-missing)
+      install_missing="1"
+      shift
       ;;
     --skip-build)
       skip_build="1"
@@ -311,10 +366,22 @@ if [[ "$skip_build" == "1" ]]; then
   exit 0
 fi
 
-require_tool node "install Node.js LTS"
-require_tool npm "install Node.js LTS so npm is on PATH"
-require_tool rustc "install Rust with rustup"
-require_tool cargo "install Rust with rustup"
+collect_missing_build_tools
+if [[ "${#MISSING_BUILD_TOOLS[@]}" -gt 0 ]]; then
+  echo "[desktop-release-bundle] missing build tools detected: ${MISSING_BUILD_TOOLS[*]}" >&2
+  if [[ "$install_missing" == "1" ]]; then
+    if ! run_doctor_missing_tools_remediation; then
+      print_missing_build_tool_hints
+      exit 1
+    fi
+    collect_missing_build_tools
+  fi
+fi
+
+if [[ "${#MISSING_BUILD_TOOLS[@]}" -gt 0 ]]; then
+  print_missing_build_tool_hints
+  exit 1
+fi
 
 ensure_tauri_icon_scaffold
 

@@ -91,6 +91,25 @@ if ! grep -qiE 'scaffold|non-production' "$DOCTOR_LINUX_SCRIPT"; then
 fi
 echo "[desktop-scaffold] linux doctor scaffold script markers are present"
 
+LINUX_RELEASE_BUNDLE_SCRIPT="scripts/linux/desktop_release_bundle.sh"
+if [[ ! -f "$LINUX_RELEASE_BUNDLE_SCRIPT" ]]; then
+  echo "desktop scaffold contract failed: missing linux release-bundle scaffold script: $LINUX_RELEASE_BUNDLE_SCRIPT"
+  exit 1
+fi
+if ! grep -qF 'desktop_doctor.sh' "$LINUX_RELEASE_BUNDLE_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected desktop doctor launcher reference in $LINUX_RELEASE_BUNDLE_SCRIPT"
+  exit 1
+fi
+if ! grep -qF -- '--install-missing' "$LINUX_RELEASE_BUNDLE_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected --install-missing remediation marker in $LINUX_RELEASE_BUNDLE_SCRIPT"
+  exit 1
+fi
+if ! rg -qi -- '--mode([[:space:]]+|=)fix|(^|[[:space:]])fix([[:space:]]|$)' "$LINUX_RELEASE_BUNDLE_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected desktop_doctor fix-mode marker in $LINUX_RELEASE_BUNDLE_SCRIPT"
+  exit 1
+fi
+echo "[desktop-scaffold] linux release-bundle remediation markers are present"
+
 PACKAGED_RUN_SCAFFOLD_FILES=(
   "scripts/windows/desktop_packaged_run.ps1"
   "scripts/windows/desktop_packaged_run.cmd"
@@ -629,6 +648,27 @@ if ! rg -qi -- 'non-clickable|disabled[[:space:]]+tab|role-ineligible[[:space:]]
 fi
 if ! rg -qi -- 'status reason|lock reason|unlock' "$README_FILE"; then
   echo "desktop scaffold contract failed: README must describe lock-status reason guidance"
+  exit 1
+fi
+
+README_LINUX_RELEASE_SECTION="$(
+  sed -n '/^## Linux Release Bundle Scaffold (Non-Production)/,/^## /p' "$README_FILE" \
+    | sed '$d'
+)"
+if [[ -z "$README_LINUX_RELEASE_SECTION" ]]; then
+  echo "desktop scaffold contract failed: README missing Linux release bundle section content"
+  exit 1
+fi
+if ! printf '%s\n' "$README_LINUX_RELEASE_SECTION" | rg -q -- 'desktop_doctor\.sh'; then
+  echo "desktop scaffold contract failed: README Linux release bundle section must reference desktop_doctor.sh remediation"
+  exit 1
+fi
+if ! printf '%s\n' "$README_LINUX_RELEASE_SECTION" | grep -qF -- '--install-missing'; then
+  echo "desktop scaffold contract failed: README Linux release bundle section must mention --install-missing remediation"
+  exit 1
+fi
+if ! printf '%s\n' "$README_LINUX_RELEASE_SECTION" | rg -qi -- '--mode([[:space:]]+|=)fix|(^|[[:space:]])fix([[:space:]]|$)'; then
+  echo "desktop scaffold contract failed: README Linux release bundle section must mention desktop_doctor fix mode"
   exit 1
 fi
 echo "[desktop-scaffold] README states scaffold/non-production intent"

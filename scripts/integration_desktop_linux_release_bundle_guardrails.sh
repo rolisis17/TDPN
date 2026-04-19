@@ -101,6 +101,23 @@ if [[ "$ICON_HELPER_REFERENCE_COUNT" -lt 2 ]]; then
   exit 1
 fi
 
+echo "[desktop-linux-release-bundle-guardrails] static marker: --install-missing flag is parsed"
+run_static_marker_check \
+  "install-missing argument parsing" \
+  "--install-missing)"
+
+echo "[desktop-linux-release-bundle-guardrails] static marker: doctor remediation command marker exists"
+run_static_marker_check \
+  "doctor remediation command" \
+  "./scripts/linux/desktop_doctor.sh --mode fix --install-missing"
+
+echo "[desktop-linux-release-bundle-guardrails] static marker: missing tool collection is re-checked"
+MISSING_TOOL_COLLECTION_REFERENCE_COUNT="$(grep -F -c -- "collect_missing_build_tools" "$SCRIPT_UNDER_TEST" || true)"
+if [[ "$MISSING_TOOL_COLLECTION_REFERENCE_COUNT" -lt 3 ]]; then
+  echo "desktop linux release bundle guardrails failed: expected missing tool collection definition plus pre/post remediation checks"
+  exit 1
+fi
+
 echo "[desktop-linux-release-bundle-guardrails] https update feed passes"
 run_expect_pass \
   "https_feed_pass" \
@@ -175,6 +192,14 @@ echo "[desktop-linux-release-bundle-guardrails] skip-build passes with constrain
 run_expect_pass \
   "skip_build_constrained_path_pass" \
   bash -lc "set -euo pipefail; constrained_path=$CONSTRAINED_PATH_DIR_Q; fail_log=$TMP_DIR_Q/skip_build_constrained_validation_fail.log; pass_log=$TMP_DIR_Q/skip_build_constrained_validation_pass.log; PATH=\"\$constrained_path\"; if command -v node >/dev/null 2>&1 || command -v npm >/dev/null 2>&1 || command -v rustc >/dev/null 2>&1 || command -v cargo >/dev/null 2>&1; then echo 'expected constrained PATH to omit node/npm/rustc/cargo' >&2; exit 1; fi; if $SCRIPT_UNDER_TEST_Q --channel beta --update-feed-url 'ftp://updates.example.invalid/gpm/beta.json' --skip-build >\"\$fail_log\" 2>&1; then echo 'expected invalid update feed URL to fail under --skip-build' >&2; exit 1; fi; grep -F -- 'allowed schemes: http, https' \"\$fail_log\" >/dev/null; $SCRIPT_UNDER_TEST_Q --channel beta --update-feed-url 'https://updates.example.invalid/gpm/beta.json' --skip-build >\"\$pass_log\" 2>&1; grep -F -- '[desktop-release-bundle] mode=scaffold-non-production' \"\$pass_log\" >/dev/null; grep -F -- '[desktop-release-bundle] build skipped by --skip-build' \"\$pass_log\" >/dev/null"
+
+echo "[desktop-linux-release-bundle-guardrails] --install-missing still preserves skip-build behavior"
+run_expect_pass \
+  "install_missing_skip_build_pass" \
+  "$SCRIPT_UNDER_TEST" \
+    --channel beta \
+    --install-missing \
+    --skip-build
 
 echo "[desktop-linux-release-bundle-guardrails] scoped environment restore is preserved in-process"
 run_expect_pass \
