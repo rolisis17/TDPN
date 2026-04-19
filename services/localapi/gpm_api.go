@@ -1008,6 +1008,7 @@ func (s *Service) handleGPMOperatorApprove(w http.ResponseWriter, r *http.Reques
 	}
 	sessionToken := strings.TrimSpace(in.SessionToken)
 	sessionAuth := false
+	decisionAuth := ""
 	if sessionToken != "" {
 		session, ok := s.gpmState.getSession(sessionToken, time.Now().UTC())
 		if !ok {
@@ -1020,6 +1021,7 @@ func (s *Service) handleGPMOperatorApprove(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		sessionAuth = true
+		decisionAuth = "admin_session"
 	}
 	if !sessionAuth {
 		if strings.TrimSpace(s.gpmApprovalToken) == "" {
@@ -1030,6 +1032,7 @@ func (s *Service) handleGPMOperatorApprove(w http.ResponseWriter, r *http.Reques
 			writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "invalid approval admin token"})
 			return
 		}
+		decisionAuth = "legacy_admin_token"
 	}
 	walletAddress := normalizeWalletAddress(in.WalletAddress)
 	if walletAddress == "" {
@@ -1041,12 +1044,21 @@ func (s *Service) handleGPMOperatorApprove(w http.ResponseWriter, r *http.Reques
 		writeJSON(w, http.StatusNotFound, map[string]any{"ok": false, "error": "operator application not found"})
 		return
 	}
-	if in.Approved {
-		app.Status = "approved"
-	} else {
-		app.Status = "rejected"
+	decision := "approved"
+	if !in.Approved {
+		decision = "rejected"
 	}
-	app.Reason = strings.TrimSpace(in.Reason)
+	reason := strings.TrimSpace(in.Reason)
+	if decision == "rejected" && reason == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "reason is required when approved is false"})
+		return
+	}
+	if decision == "approved" && strings.TrimSpace(app.ChainOperatorID) == "" {
+		writeJSON(w, http.StatusConflict, map[string]any{"ok": false, "error": "cannot approve operator application without chain_operator_id"})
+		return
+	}
+	app.Status = decision
+	app.Reason = reason
 	app.UpdatedAt = time.Now().UTC()
 	s.gpmState.upsertOperator(app)
 
@@ -1069,9 +1081,15 @@ func (s *Service) handleGPMOperatorApprove(w http.ResponseWriter, r *http.Reques
 		"approved":          in.Approved,
 		"status":            app.Status,
 		"reason":            app.Reason,
+		"decision_auth":     decisionAuth,
 	})
 
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "application": serializeGPMOperator(app)})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":            true,
+		"decision":      decision,
+		"decision_auth": decisionAuth,
+		"application":   serializeGPMOperator(app),
+	})
 }
 
 func serializeGPMSession(session gpmSession) map[string]any {

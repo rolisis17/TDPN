@@ -76,7 +76,7 @@ GPM onboarding/session endpoints (used by desktop and portal flows):
 - `POST /v1/gpm/onboarding/operator/apply`
 - `POST /v1/gpm/onboarding/operator/status`
 - `POST /v1/gpm/onboarding/operator/list` (admin-only; supports optional `status` filter (`pending|approved|rejected`) and optional `limit` (default `100`, clamped `1..500`))
-- `POST /v1/gpm/onboarding/operator/approve` (requires admin authorization: `session_token` with admin role, or legacy `admin_token` fallback when `GPM_APPROVAL_ADMIN_TOKEN` is configured)
+- `POST /v1/gpm/onboarding/operator/approve` (requires admin authorization: `session_token` with admin role, or legacy `admin_token` fallback when `GPM_APPROVAL_ADMIN_TOKEN` is configured; successful responses include additive `decision` (`approved|rejected`) and `decision_auth` (`admin_session|legacy_admin_token`) metadata)
 
 ## Authentication
 
@@ -90,6 +90,9 @@ GPM server lifecycle endpoints (`POST /v1/gpm/service/start`, `POST /v1/gpm/serv
 - preferred: `session_token` for a valid `admin` session.
 - compatibility fallback: `admin_token` matching `GPM_APPROVAL_ADMIN_TOKEN` (or legacy alias) when configured.
 - if `GPM_APPROVAL_ADMIN_TOKEN` is unset and no admin session token is provided, approval is rejected.
+- decision contract hardening:
+  - when `approved=false`, `reason` must be non-empty (`400` when missing).
+  - when `approved=true`, the existing operator application must have non-empty `chain_operator_id` (`409` when missing).
 
 Auth can be bypassed only in explicit developer mode when all of the following are true:
 - bind address is loopback-only, and

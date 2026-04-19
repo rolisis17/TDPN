@@ -3422,6 +3422,12 @@ func TestGPMOperatorApproveAuthorization(t *testing.T) {
 		if code != http.StatusOK {
 			t.Fatalf("status=%d payload=%v", code, payload)
 		}
+		if got, _ := payload["decision"].(string); got != "approved" {
+			t.Fatalf("decision=%q want=approved payload=%v", got, payload)
+		}
+		if got, _ := payload["decision_auth"].(string); got != "admin_session" {
+			t.Fatalf("decision_auth=%q want=admin_session payload=%v", got, payload)
+		}
 		application, _ := payload["application"].(map[string]any)
 		if got, _ := application["status"].(string); got != "approved" {
 			t.Fatalf("application.status=%q want=approved payload=%v", got, payload)
@@ -3435,6 +3441,12 @@ func TestGPMOperatorApproveAuthorization(t *testing.T) {
 		code, payload := callJSONHandler(t, svc.handleGPMOperatorApprove, http.MethodPost, "/v1/gpm/onboarding/operator/approve", body)
 		if code != http.StatusOK {
 			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		if got, _ := payload["decision"].(string); got != "approved" {
+			t.Fatalf("decision=%q want=approved payload=%v", got, payload)
+		}
+		if got, _ := payload["decision_auth"].(string); got != "legacy_admin_token" {
+			t.Fatalf("decision_auth=%q want=legacy_admin_token payload=%v", got, payload)
 		}
 		application, _ := payload["application"].(map[string]any)
 		if got, _ := application["status"].(string); got != "approved" {
@@ -3453,6 +3465,127 @@ func TestGPMOperatorApproveAuthorization(t *testing.T) {
 		errMsg, _ := payload["error"].(string)
 		if !strings.Contains(errMsg, "invalid approval admin token") {
 			t.Fatalf("error=%q payload=%v", errMsg, payload)
+		}
+	})
+}
+
+func TestGPMOperatorApproveDecisionContract(t *testing.T) {
+	newOperatorApproveDecisionService := func(t *testing.T, chainOperatorID string) *Service {
+		t.Helper()
+		svc, _ := newFakeService(t, false)
+		svc.gpmState = newGPMRuntimeState()
+		svc.gpmState.upsertOperator(gpmOperatorApplication{
+			WalletAddress:   "cosmos1approvaldecision",
+			ChainOperatorID: chainOperatorID,
+			Status:          "pending",
+			UpdatedAt:       time.Now().UTC(),
+		})
+		return svc
+	}
+
+	putAdminSession := func(svc *Service, token string) {
+		now := time.Now().UTC()
+		svc.gpmState.putSession(gpmSession{
+			Token:          token,
+			WalletAddress:  "cosmos1decisionadmin",
+			WalletProvider: "keplr",
+			Role:           "admin",
+			CreatedAt:      now,
+			ExpiresAt:      now.Add(time.Hour),
+		})
+	}
+
+	t.Run("rejection without reason returns bad request", func(t *testing.T) {
+		svc := newOperatorApproveDecisionService(t, "operator-decision-1")
+		putAdminSession(svc, "gpm-admin-decision-reject-missing-reason")
+		body := `{"wallet_address":"cosmos1approvaldecision","approved":false,"session_token":"gpm-admin-decision-reject-missing-reason"}`
+		code, payload := callJSONHandler(t, svc.handleGPMOperatorApprove, http.MethodPost, "/v1/gpm/onboarding/operator/approve", body)
+		if code != http.StatusBadRequest {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		errMsg, _ := payload["error"].(string)
+		if !strings.Contains(errMsg, "reason is required") {
+			t.Fatalf("error=%q payload=%v", errMsg, payload)
+		}
+	})
+
+	t.Run("rejection with reason returns rejected status", func(t *testing.T) {
+		svc := newOperatorApproveDecisionService(t, "operator-decision-2")
+		putAdminSession(svc, "gpm-admin-decision-reject-reason")
+		body := `{"wallet_address":"cosmos1approvaldecision","approved":false,"reason":"duplicate application","session_token":"gpm-admin-decision-reject-reason"}`
+		code, payload := callJSONHandler(t, svc.handleGPMOperatorApprove, http.MethodPost, "/v1/gpm/onboarding/operator/approve", body)
+		if code != http.StatusOK {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		if got, _ := payload["decision"].(string); got != "rejected" {
+			t.Fatalf("decision=%q want=rejected payload=%v", got, payload)
+		}
+		application, _ := payload["application"].(map[string]any)
+		if got, _ := application["status"].(string); got != "rejected" {
+			t.Fatalf("application.status=%q want=rejected payload=%v", got, payload)
+		}
+	})
+
+	t.Run("approval with empty chain operator id returns conflict", func(t *testing.T) {
+		svc := newOperatorApproveDecisionService(t, "")
+		putAdminSession(svc, "gpm-admin-decision-approve-empty-chain-id")
+		body := `{"wallet_address":"cosmos1approvaldecision","approved":true,"session_token":"gpm-admin-decision-approve-empty-chain-id"}`
+		code, payload := callJSONHandler(t, svc.handleGPMOperatorApprove, http.MethodPost, "/v1/gpm/onboarding/operator/approve", body)
+		if code != http.StatusConflict {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		errMsg, _ := payload["error"].(string)
+		if !strings.Contains(errMsg, "chain_operator_id") {
+			t.Fatalf("error=%q payload=%v", errMsg, payload)
+		}
+	})
+
+	t.Run("approval with chain operator id returns approved status", func(t *testing.T) {
+		svc := newOperatorApproveDecisionService(t, "operator-decision-4")
+		putAdminSession(svc, "gpm-admin-decision-approve-chain-id")
+		body := `{"wallet_address":"cosmos1approvaldecision","approved":true,"session_token":"gpm-admin-decision-approve-chain-id"}`
+		code, payload := callJSONHandler(t, svc.handleGPMOperatorApprove, http.MethodPost, "/v1/gpm/onboarding/operator/approve", body)
+		if code != http.StatusOK {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		if got, _ := payload["decision"].(string); got != "approved" {
+			t.Fatalf("decision=%q want=approved payload=%v", got, payload)
+		}
+		application, _ := payload["application"].(map[string]any)
+		if got, _ := application["status"].(string); got != "approved" {
+			t.Fatalf("application.status=%q want=approved payload=%v", got, payload)
+		}
+	})
+
+	t.Run("response decision metadata for admin session auth", func(t *testing.T) {
+		svc := newOperatorApproveDecisionService(t, "operator-decision-5")
+		putAdminSession(svc, "gpm-admin-decision-metadata")
+		body := `{"wallet_address":"cosmos1approvaldecision","approved":false,"reason":"policy mismatch","session_token":"gpm-admin-decision-metadata"}`
+		code, payload := callJSONHandler(t, svc.handleGPMOperatorApprove, http.MethodPost, "/v1/gpm/onboarding/operator/approve", body)
+		if code != http.StatusOK {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		if got, _ := payload["decision"].(string); got != "rejected" {
+			t.Fatalf("decision=%q want=rejected payload=%v", got, payload)
+		}
+		if got, _ := payload["decision_auth"].(string); got != "admin_session" {
+			t.Fatalf("decision_auth=%q want=admin_session payload=%v", got, payload)
+		}
+	})
+
+	t.Run("response decision metadata for legacy admin token auth", func(t *testing.T) {
+		svc := newOperatorApproveDecisionService(t, "operator-decision-6")
+		svc.gpmApprovalToken = "legacy-approval-token"
+		body := `{"wallet_address":"cosmos1approvaldecision","approved":true,"admin_token":"legacy-approval-token"}`
+		code, payload := callJSONHandler(t, svc.handleGPMOperatorApprove, http.MethodPost, "/v1/gpm/onboarding/operator/approve", body)
+		if code != http.StatusOK {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		if got, _ := payload["decision"].(string); got != "approved" {
+			t.Fatalf("decision=%q want=approved payload=%v", got, payload)
+		}
+		if got, _ := payload["decision_auth"].(string); got != "legacy_admin_token" {
+			t.Fatalf("decision_auth=%q want=legacy_admin_token payload=%v", got, payload)
 		}
 	})
 }
