@@ -13,6 +13,7 @@ done
 
 TMP_DIR="$(mktemp -d)"
 FAKE_SCRIPT="$TMP_DIR/fake_easy_node.sh"
+CALLS_FILE="$TMP_DIR/easy_node_calls.tsv"
 SERVER_LOG="$TMP_DIR/local_api_server.log"
 LOCAL_API_BASE=""
 SERVER_PID=""
@@ -33,6 +34,17 @@ cmd="${1:-}"
 if [[ -z "$cmd" ]]; then
   echo "missing command" >&2
   exit 2
+fi
+shift || true
+calls_file="${LOCAL_API_GPM_MANIFEST_TRUST_CALLS_FILE:-}"
+if [[ -n "$calls_file" ]]; then
+  {
+    printf '%s' "$cmd"
+    for arg in "$@"; do
+      printf '\t%s' "$arg"
+    done
+    printf '\n'
+  } >>"$calls_file"
 fi
 echo "$cmd ok"
 EOF_FAKE
@@ -90,6 +102,7 @@ start_local_api() {
     GPM_MAIN_DOMAIN="$main_domain" \
     GPM_BOOTSTRAP_MANIFEST_URL="$manifest_url" \
     GPM_BOOTSTRAP_MANIFEST_CACHE_PATH="$cache_path" \
+    LOCAL_API_GPM_MANIFEST_TRUST_CALLS_FILE="$CALLS_FILE" \
     GPM_STATE_STORE_PATH="$TMP_DIR/gpm_state.json" \
     GPM_AUDIT_LOG_PATH="$TMP_DIR/gpm_audit.jsonl" \
       go run ./cmd/node --local-api >"$SERVER_LOG" 2>&1 &
@@ -243,6 +256,26 @@ fi
 if ! jq -e --arg expected_bootstrap "$cache_bootstrap_directory" '.ok == true and .source == "cache" and .signature_verified == true and .profile.bootstrap_directory == $expected_bootstrap' "$cache_ok_body" >/dev/null; then
   echo "expected successful cache fallback payload markers"
   cat "$cache_ok_body"
+  exit 1
+fi
+
+echo "[local-control-api-gpm-manifest-trust] session-bound path profile rejects conflicting connect override"
+: >"$CALLS_FILE"
+connect_conflict_body="$TMP_DIR/connect_conflict.json"
+connect_conflict_code="$(curl -sS -o "$connect_conflict_body" -w '%{http_code}' -X POST -H 'Content-Type: application/json' -H "Origin: ${LOCAL_API_BASE}" --data "{\"session_token\":\"${session_token_cache_ok}\",\"path_profile\":\"1hop\",\"policy_profile\":\"1hop\",\"run_preflight\":false}" "${LOCAL_API_BASE}/v1/connect")"
+if [[ "$connect_conflict_code" != "409" && "$connect_conflict_code" != "400" ]]; then
+  echo "expected conflicting session-bound path_profile connect to fail closed with 409/400, got $connect_conflict_code"
+  cat "$connect_conflict_body"
+  exit 1
+fi
+assert_json_expr \
+  "$connect_conflict_body" \
+  '.ok == false and ((.error // "") | type == "string") and ((.error // "") | contains("path_profile")) and ((.error // "") | contains("session")) and (((.error // "") | contains("conflict")) or ((.error // "") | contains("authoritative")) or ((.error // "") | contains("must match")))' \
+  "expected clear session-bound path_profile conflict error semantics"
+if grep -E '^client-vpn-up(\t|$)' "$CALLS_FILE" >/dev/null 2>&1; then
+  echo "expected fail-closed connect rejection to avoid invoking client-vpn-up"
+  cat "$CALLS_FILE"
+  cat "$connect_conflict_body"
   exit 1
 fi
 stop_local_api

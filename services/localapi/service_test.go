@@ -1209,6 +1209,136 @@ func TestHandleConnectSessionRequiredMode(t *testing.T) {
 	})
 }
 
+func TestHandleConnectSessionPathProfilePolicyEnforcement(t *testing.T) {
+	resetConnectDefaultEnv := func(t *testing.T) {
+		t.Helper()
+		t.Setenv("LOCAL_CONTROL_API_CONNECT_PATH_PROFILE", "")
+		t.Setenv("CLIENT_PATH_PROFILE", "")
+		t.Setenv("LOCAL_CONTROL_API_CONNECT_INTERFACE", "")
+		t.Setenv("CLIENT_WG_INTERFACE", "")
+		t.Setenv("LOCAL_CONTROL_API_CONNECT_PROD_PROFILE_DEFAULT", "")
+		t.Setenv("SIMPLE_CLIENT_PROD_PROFILE_DEFAULT", "")
+	}
+
+	t.Run("session-required mode rejects conflicting request path_profile", func(t *testing.T) {
+		resetConnectDefaultEnv(t)
+		svc, logPath := newFakeService(t, false)
+		svc.gpmConnectRequireSession = true
+		svc.gpmState = newGPMRuntimeState()
+		svc.gpmState.putSession(gpmSession{
+			Token:              "gpm-connect-profile-conflict-token",
+			WalletAddress:      "cosmos1profileconflict",
+			WalletProvider:     "keplr",
+			Role:               "client",
+			CreatedAt:          time.Now().UTC(),
+			ExpiresAt:          time.Now().UTC().Add(time.Hour),
+			BootstrapDirectory: "https://dir.example:8081",
+			InviteKey:          "wallet:cosmos1profileconflict",
+			PathProfile:        "3hop",
+		})
+
+		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
+			"session_token":"gpm-connect-profile-conflict-token",
+			"path_profile":"1hop",
+			"run_preflight":false
+		}`)
+		if code != http.StatusBadRequest {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+		if got, _ := payload["error"].(string); !strings.Contains(strings.ToLower(got), "path_profile") {
+			t.Fatalf("error=%q want path_profile conflict guidance", got)
+		}
+		if cmds := readCommandLog(t, logPath); len(cmds) != 0 {
+			t.Fatalf("conflicting session/request path_profile should not execute commands, got=%v", cmds)
+		}
+	})
+
+	t.Run("session-present mode inherits missing request path_profile and applies session policy", func(t *testing.T) {
+		resetConnectDefaultEnv(t)
+		svc, logPath := newFakeService(t, false)
+		svc.gpmState = newGPMRuntimeState()
+		svc.gpmState.putSession(gpmSession{
+			Token:              "gpm-connect-profile-inherit-token",
+			WalletAddress:      "cosmos1profileinherit",
+			WalletProvider:     "keplr",
+			Role:               "client",
+			CreatedAt:          time.Now().UTC(),
+			ExpiresAt:          time.Now().UTC().Add(time.Hour),
+			BootstrapDirectory: "https://dir.example:8081",
+			InviteKey:          "wallet:cosmos1profileinherit",
+			PathProfile:        "1hop",
+		})
+
+		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
+			"session_token":"gpm-connect-profile-inherit-token",
+			"run_preflight":false
+		}`)
+		if code != http.StatusOK {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+		if got, _ := payload["profile"].(string); got != "1hop" {
+			t.Fatalf("profile=%q want=1hop", got)
+		}
+
+		cmds := readCommandLog(t, logPath)
+		if len(cmds) != 2 {
+			t.Fatalf("commands=%d want=2 (%v)", len(cmds), cmds)
+		}
+		if cmds[0][0] != "client-vpn-up" || cmds[1][0] != "client-vpn-status" {
+			t.Fatalf("unexpected command order: %v", cmds)
+		}
+		mustFlagValue(t, cmds[0], "--path-profile", "1hop")
+		mustFlagValue(t, cmds[0], "--min-operators", "1")
+		mustFlagValue(t, cmds[0], "--operator-floor-check", "0")
+		mustFlagValue(t, cmds[0], "--operator-min-operators", "1")
+		mustFlagValue(t, cmds[0], "--issuer-quorum-check", "0")
+		mustFlagValue(t, cmds[0], "--issuer-min-operators", "1")
+		mustFlagValue(t, cmds[0], "--beta-profile", "0")
+		mustFlagValue(t, cmds[0], "--prod-profile", "0")
+		mustFlagValue(t, cmds[0], "--install-route", "0")
+	})
+
+	t.Run("empty session path_profile keeps request path_profile compatibility", func(t *testing.T) {
+		resetConnectDefaultEnv(t)
+		svc, logPath := newFakeService(t, false)
+		svc.gpmState = newGPMRuntimeState()
+		svc.gpmState.putSession(gpmSession{
+			Token:              "gpm-connect-profile-compat-token",
+			WalletAddress:      "cosmos1profilecompat",
+			WalletProvider:     "keplr",
+			Role:               "client",
+			CreatedAt:          time.Now().UTC(),
+			ExpiresAt:          time.Now().UTC().Add(time.Hour),
+			BootstrapDirectory: "https://dir.example:8081",
+			InviteKey:          "wallet:cosmos1profilecompat",
+			PathProfile:        "",
+		})
+
+		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
+			"session_token":"gpm-connect-profile-compat-token",
+			"path_profile":"3hop",
+			"run_preflight":false
+		}`)
+		if code != http.StatusOK {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+		if got, _ := payload["profile"].(string); got != "3hop" {
+			t.Fatalf("profile=%q want=3hop", got)
+		}
+
+		cmds := readCommandLog(t, logPath)
+		if len(cmds) != 2 {
+			t.Fatalf("commands=%d want=2 (%v)", len(cmds), cmds)
+		}
+		if cmds[0][0] != "client-vpn-up" || cmds[1][0] != "client-vpn-status" {
+			t.Fatalf("unexpected command order: %v", cmds)
+		}
+		mustFlagValue(t, cmds[0], "--path-profile", "3hop")
+		mustFlagValue(t, cmds[0], "--min-operators", "2")
+		mustFlagValue(t, cmds[0], "--beta-profile", "1")
+	})
+}
+
 func TestHandleSetProfileNormalizationAndValidation(t *testing.T) {
 	svc, logPath := newFakeService(t, false)
 

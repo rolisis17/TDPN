@@ -421,19 +421,19 @@ func (s *Service) requireGPMServiceMutationAuth(w http.ResponseWriter, r *http.R
 	return true
 }
 
-func (s *Service) resolveConnectSecretsFromSession(sessionToken string) (string, string, error) {
+func (s *Service) resolveConnectSecretsFromSession(sessionToken string) (string, string, string, error) {
 	sessionToken = strings.TrimSpace(sessionToken)
 	if sessionToken == "" {
-		return "", "", errors.New("session token is empty")
+		return "", "", "", errors.New("session token is empty")
 	}
 	session, ok := s.gpmState.getSession(sessionToken, time.Now().UTC())
 	if !ok {
-		return "", "", errors.New("session token is missing or expired")
+		return "", "", "", errors.New("session token is missing or expired")
 	}
 	if strings.TrimSpace(session.BootstrapDirectory) == "" || strings.TrimSpace(session.InviteKey) == "" {
-		return "", "", errors.New("session is not fully registered for connect")
+		return "", "", "", errors.New("session is not fully registered for connect")
 	}
-	return session.BootstrapDirectory, session.InviteKey, nil
+	return session.BootstrapDirectory, session.InviteKey, strings.TrimSpace(session.PathProfile), nil
 }
 
 func (s *Service) handleGPMBootstrapManifest(w http.ResponseWriter, r *http.Request) {

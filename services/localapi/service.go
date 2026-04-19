@@ -461,8 +461,9 @@ func (s *Service) handleConnect(w http.ResponseWriter, r *http.Request) {
 	if in.PolicyProfile != "" && strings.TrimSpace(in.PathProfile) == "" {
 		in.PathProfile = strings.TrimSpace(in.PolicyProfile)
 	}
-	if in.BootstrapDirectory == "" || in.InviteKey == "" {
-		sessionBootstrap, sessionInvite, resolveErr := s.resolveConnectSecretsFromSession(in.SessionToken)
+	sessionPathProfile := ""
+	if in.SessionToken != "" {
+		sessionBootstrap, sessionInvite, resolvedSessionPathProfile, resolveErr := s.resolveConnectSecretsFromSession(in.SessionToken)
 		if resolveErr == nil {
 			if in.BootstrapDirectory == "" {
 				in.BootstrapDirectory = sessionBootstrap
@@ -470,6 +471,7 @@ func (s *Service) handleConnect(w http.ResponseWriter, r *http.Request) {
 			if in.InviteKey == "" {
 				in.InviteKey = sessionInvite
 			}
+			sessionPathProfile = normalizeOptionalPathProfile(resolvedSessionPathProfile)
 		}
 	}
 	if in.BootstrapDirectory == "" || in.InviteKey == "" {
@@ -478,6 +480,18 @@ func (s *Service) handleConnect(w http.ResponseWriter, r *http.Request) {
 			"error": "connect requires either bootstrap_directory+invite_key or a registered session_token",
 		})
 		return
+	}
+	if sessionPathProfile != "" {
+		requestedPathProfileRaw := strings.TrimSpace(in.PathProfile)
+		requestedPathProfile := normalizeOptionalPathProfile(in.PathProfile)
+		if requestedPathProfileRaw != "" && requestedPathProfile != sessionPathProfile {
+			writeJSON(w, http.StatusBadRequest, map[string]any{
+				"ok":    false,
+				"error": fmt.Sprintf("path_profile %q conflicts with registered session path_profile %q; omit path_profile or use the registered profile", requestedPathProfileRaw, sessionPathProfile),
+			})
+			return
+		}
+		in.PathProfile = sessionPathProfile
 	}
 	if err := validateBootstrapDirectoryURL(in.BootstrapDirectory); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
