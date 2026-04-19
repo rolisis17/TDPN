@@ -10,7 +10,7 @@
     <header class="topbar">
       <div class="wrap">
         <div class="brand">Global Private Mesh <small>(GPM)</small></div>
-        <nav class="nav">
+        <nav class="nav" aria-label="Primary">
           <a class="btn secondary" href="./index.html">Home</a>
           <a class="btn secondary" href="./portal.html">Portal</a>
           <a class="btn primary" href="./portal.html">Sign In</a>
@@ -18,60 +18,172 @@
       </div>
     </header>
 
-    <main class="wrap">
+    <main>
       <section class="hero">
-        <span class="tag">Private Overlay Network</span>
-        <h1>Build private internet surfaces with managed trust and mesh-grade transport.</h1>
-        <p>
-          Global Private Mesh gives teams a secure way to onboard clients and operators, discover
-          trusted peers, and keep connectivity stable across direct mesh paths and managed relay fallback.
-        </p>
-        <div class="hero-actions">
-          <a class="btn primary" href="./portal.html">Open GPM Portal</a>
-          <a class="btn secondary" href="./portal.html#operator">Apply as Operator</a>
-        </div>
-      </section>
-
-      <section class="section">
-        <h2>Why GPM</h2>
-        <div class="grid cols-3">
-          <article class="card">
-            <h3>Trust-First Bootstrap</h3>
-            <p>
-              First contact happens through a pinned trusted domain. After that, the network works
-              from distributed bootstrap directories and signed local cache fallback.
-            </p>
-          </article>
-          <article class="card">
-            <h3>Role-Aware Operations</h3>
-            <p>
-              Client onboarding is self-serve. Operator activation is permissioned and identity-bound,
-              with clear state transitions and approval visibility.
-            </p>
-          </article>
-          <article class="card">
-            <h3>Desktop + Web Consistency</h3>
-            <p>
-              The desktop and portal share one product language, making onboarding, support, and
-              governance workflows easier to understand.
-            </p>
-          </article>
-        </div>
-      </section>
-
-      <section class="section">
-        <h2>Release Direction</h2>
-        <div class="card">
-          <p class="meta">
-            V1 scope includes wallet-first sign in, client registration, operator application/approval
-            tracking, and role-gated client/server controls in desktop.
+        <div class="wrap hero__inner">
+          <span class="tag hero__eyebrow">Private overlay infrastructure</span>
+          <h1 class="hero__title">A governed private mesh for wallet-authenticated clients and approved operators.</h1>
+          <p class="hero__lede">
+            Global Private Mesh gives teams a clear way to onboard trusted users, register clients, and
+            manage operator access across resilient mesh paths with relay fallback when it is needed.
           </p>
+          <div class="hero-actions" aria-label="Primary actions">
+            <a class="btn primary" href="./portal.html">Open the GPM Portal</a>
+            <a class="btn secondary" href="./portal.html#operator">Review operator onboarding</a>
+          </div>
+          <ul class="hero-highlights" aria-label="Platform highlights">
+            <li class="hero-highlights__item">Wallet-first authentication</li>
+            <li class="hero-highlights__item">Client registration with policy controls</li>
+            <li class="hero-highlights__item">Operator approval and audit visibility</li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="section" aria-labelledby="gpm-value-heading">
+        <div class="wrap">
+          <div class="section__header">
+            <span class="section__eyebrow">Why GPM</span>
+            <h2 id="gpm-value-heading">Built to feel product-grade from first login to ongoing operations.</h2>
+          </div>
+          <div class="grid cols-3 feature-grid">
+            <article class="card feature-card">
+              <h3>Trusted access posture</h3>
+              <p>
+                GPM starts with a pinned trusted domain, then extends into signed directories and local
+                cache fallback so teams can keep moving with a predictable trust model.
+              </p>
+            </article>
+            <article class="card feature-card">
+              <h3>Mesh transport with graceful fallback</h3>
+              <p>
+                Direct mesh connectivity stays the preferred path, while managed relay routing preserves
+                continuity when peers are unreachable or network conditions change.
+              </p>
+            </article>
+            <article class="card feature-card">
+              <h3>Role-aware operations</h3>
+              <p>
+                Client onboarding stays self-serve, operator activation stays permissioned, and every
+                transition remains visible to the people who need to approve it.
+              </p>
+            </article>
+            <article class="card feature-card">
+              <h3>Wallet-native sign in</h3>
+              <p>
+                The portal is designed around wallet-authenticated sessions, making identity handoff clear
+                without adding unnecessary credential sprawl.
+              </p>
+            </article>
+            <article class="card feature-card">
+              <h3>One language across surfaces</h3>
+              <p>
+                Desktop and web share the same product story, which keeps onboarding, support, and
+                governance workflows easier to understand at a glance.
+              </p>
+            </article>
+            <article class="card feature-card">
+              <h3>Operator-grade visibility</h3>
+              <p>
+                Application status, approvals, and lifecycle changes are modeled as explicit states instead
+                of hidden background steps.
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" aria-labelledby="how-it-works-heading">
+        <div class="wrap">
+          <div class="section__header">
+            <span class="section__eyebrow">How it works</span>
+            <h2 id="how-it-works-heading">A simple 3-step flow from wallet auth to operator approval.</h2>
+          </div>
+          <div class="grid cols-3 steps-grid">
+            <article class="card step-card">
+              <span class="step-card__number" aria-hidden="true">01</span>
+              <h3>Authenticate with a wallet</h3>
+              <p>
+                Users begin in the portal with wallet-based sign in, establishing a verified session
+                before they request access to network functions.
+              </p>
+            </article>
+            <article class="card step-card">
+              <span class="step-card__number" aria-hidden="true">02</span>
+              <h3>Register the client</h3>
+              <p>
+                The client is registered with a chosen path profile and bootstrap information so the mesh
+                can connect through the right operating posture.
+              </p>
+            </article>
+            <article class="card step-card">
+              <span class="step-card__number" aria-hidden="true">03</span>
+              <h3>Approve the operator</h3>
+              <p>
+                Operator onboarding is reviewed and approved separately, giving admins a clean control
+                point for elevated access and server-side responsibilities.
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" aria-labelledby="governance-heading">
+        <div class="wrap">
+          <div class="section__header">
+            <span class="section__eyebrow">Trust and governance</span>
+            <h2 id="governance-heading">Clear controls for teams that need confidence, not just connectivity.</h2>
+          </div>
+          <div class="grid cols-2 governance-grid">
+            <article class="card governance-card">
+              <h3>Approval trails</h3>
+              <p>
+                Operator applications and state changes are designed to be reviewable, helping teams
+                understand who approved what and when.
+              </p>
+            </article>
+            <article class="card governance-card">
+              <h3>Least-privilege role separation</h3>
+              <p>
+                Client and operator workflows are intentionally separated so elevated access is granted
+                only when the right conditions are met.
+              </p>
+            </article>
+            <article class="card governance-card">
+              <h3>Secure bootstrap strategy</h3>
+              <p>
+                The first trusted contact is explicit, while downstream discovery relies on signed, durable
+                directories and controlled fallback behavior.
+              </p>
+            </article>
+            <article class="card governance-card">
+              <h3>Operational clarity</h3>
+              <p>
+                Status messages, portal states, and product language stay consistent so support teams and
+                operators can act quickly with fewer assumptions.
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" aria-labelledby="release-heading">
+        <div class="wrap">
+          <div class="card release-card">
+            <div class="section__header section__header--compact">
+              <span class="section__eyebrow">Current focus</span>
+              <h2 id="release-heading">Release direction</h2>
+            </div>
+            <p class="meta release-card__copy">
+              The current product surface centers on wallet-first sign in, client registration, operator
+              application and approval tracking, and role-gated controls for the desktop and portal flow.
+            </p>
+          </div>
         </div>
       </section>
     </main>
 
     <footer class="footer">
-      <div class="wrap">Global Private Mesh product surface scaffold · © GPM</div>
+      <div class="wrap">Global Private Mesh product surface for wallet-authenticated private networking.</div>
     </footer>
   </body>
 </html>

@@ -9,7 +9,7 @@
   <body>
     <header class="topbar">
       <div class="wrap">
-        <div class="brand">GPM Portal <small>Wallet-first onboarding</small></div>
+        <div class="brand">GPM Portal <small>Wallet-first onboarding console</small></div>
         <nav class="nav">
           <a class="btn secondary" href="./index.html">Home</a>
           <a class="btn primary" href="./portal.html">Portal</a>
@@ -19,7 +19,15 @@
 
     <main class="wrap portal-shell">
       <section class="card">
-        <h2>API Connection</h2>
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Console overview</p>
+            <h1>Onboard wallet, register a client, then unlock operator actions.</h1>
+          </div>
+          <p class="section-lead">
+            This portal keeps the sign-in and server workflows in one place so you can move from wallet challenge to operator approval without losing context.
+          </p>
+        </div>
         <div class="fields">
           <label>
             API base URL
@@ -44,7 +52,44 @@
       </section>
 
       <section class="card">
-        <h2>Wallet Sign In</h2>
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Onboarding steps</p>
+            <h2>Follow the console in order</h2>
+          </div>
+          <p class="section-lead">
+            Each step is visible on its own, but the flow is designed to stay linear: sign in, register the client, then complete the operator workflow if your role requires it.
+          </p>
+        </div>
+        <div class="steps-grid portal-steps">
+          <article id="onboarding_step_signin" class="step-card" data-state="active">
+            <p class="step-kicker">Step 1</p>
+            <h3>Wallet sign-in</h3>
+            <p>Choose a wallet, request a challenge, then verify with your signature to create or refresh the session.</p>
+          </article>
+          <article id="onboarding_step_client" class="step-card" data-state="idle">
+            <p class="step-kicker">Step 2</p>
+            <h3>Client registration</h3>
+            <p>Use the signed-in session to register the client, set the path profile, and optionally provide bootstrap details.</p>
+          </article>
+          <article id="onboarding_step_operator" class="step-card" data-state="idle">
+            <p class="step-kicker">Step 3</p>
+            <h3>Operator workflow</h3>
+            <p>Apply the operator role, check readiness, and approve the server workflow once the application is eligible.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Step 1</p>
+            <h2>Wallet sign-in</h2>
+          </div>
+          <p class="section-lead">
+            Start here to generate a challenge, capture the wallet signature, and establish a session the rest of the portal can use.
+          </p>
+        </div>
         <div class="fields">
           <label>
             Wallet provider
@@ -78,7 +123,15 @@
       </section>
 
       <section class="card">
-        <h2>Client Registration</h2>
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Step 2</p>
+            <h2>Client registration</h2>
+          </div>
+          <p class="section-lead">
+            Register the signed-in client against the selected path profile. Bootstrap directory and invite values stay optional for compatibility.
+          </p>
+        </div>
         <div class="fields">
           <label>
             Path profile
@@ -103,7 +156,15 @@
       </section>
 
       <section class="card" id="operator">
-        <h2>Operator Workflow</h2>
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Step 3</p>
+            <h2>Operator workflow</h2>
+          </div>
+          <p class="section-lead">
+            This is the server lane. Sign in first, then apply the operator role, check readiness, and approve only when the session is eligible.
+          </p>
+        </div>
         <div id="operator_readiness" class="status-banner operator-readiness" data-kind="warn" role="status" aria-live="polite">
           <div class="status-banner__label">Operator readiness</div>
           <div id="operator_readiness_line" class="status warn">
@@ -111,6 +172,9 @@
             <span id="operator_readiness_guidance">Sign in first to unlock operator onboarding.</span>
           </div>
         </div>
+        <p class="helper-copy">
+          Use the readiness banner to confirm whether the current session can proceed as an operator or needs another sign-in or approval cycle.
+        </p>
         <div class="fields">
           <label>
             Chain operator ID
@@ -133,12 +197,28 @@
       </section>
 
       <section class="card">
-        <h2>Output</h2>
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Console output</p>
+            <h2>Output</h2>
+          </div>
+          <p class="section-lead">
+            Action results, status updates, and API responses appear here while you move through the onboarding flow.
+          </p>
+        </div>
         <pre id="output"></pre>
       </section>
 
       <section class="card help-card">
-        <h2>Troubleshooting</h2>
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Help</p>
+            <h2>Troubleshooting</h2>
+          </div>
+          <p class="section-lead">
+            If the console stops moving, these checks usually restore the flow quickly.
+          </p>
+        </div>
         <ul class="help-list">
           <li>Use an absolute API base like <code>http://127.0.0.1:8095</code> or <code>https://api.example.com</code>.</li>
           <li>Make sure the local GPM API is running before requesting a challenge or refreshing the session.</li>

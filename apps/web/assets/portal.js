@@ -15,6 +15,9 @@ const operatorReadinessEl = byId("operator_readiness");
 const operatorReadinessLineEl = byId("operator_readiness_line");
 const operatorReadinessStatusEl = byId("operator_readiness_status");
 const operatorReadinessGuidanceEl = byId("operator_readiness_guidance");
+const onboardingStepSigninEl = document.getElementById("onboarding_step_signin");
+const onboardingStepClientEl = document.getElementById("onboarding_step_client");
+const onboardingStepOperatorEl = document.getElementById("onboarding_step_operator");
 const actionButtons = Array.from(document.querySelectorAll(".actions button"));
 const OPERATOR_APPLICATION_STATUSES = new Set(["not_submitted", "pending", "approved", "rejected"]);
 const PORTAL_STORAGE_KEY = "gpm.portal.state.v1";
@@ -30,6 +33,7 @@ const PERSISTED_FIELD_IDS = [
   "bootstrap_directory"
 ];
 let operatorApplicationStatus = undefined;
+let sessionHasConnectSecrets = false;
 
 function localStore() {
   try {
@@ -144,6 +148,55 @@ function formatOperatorApplicationStatusLabel(status) {
   }
 }
 
+function setStepState(el, state) {
+  if (!el) {
+    return;
+  }
+  el.dataset.state = state;
+}
+
+function refreshOnboardingSteps() {
+  const token = byId("session_token").value.trim();
+  const role = byId("role").value.trim().toLowerCase();
+  const hasSession = token.length > 0;
+  const step3Done = role === "admin" || (role === "operator" && operatorApplicationStatus === "approved");
+
+  if (!hasSession) {
+    setStepState(onboardingStepSigninEl, "active");
+    setStepState(onboardingStepClientEl, "blocked");
+    setStepState(onboardingStepOperatorEl, "blocked");
+    return;
+  }
+
+  setStepState(onboardingStepSigninEl, "done");
+  if (!sessionHasConnectSecrets) {
+    setStepState(onboardingStepClientEl, "active");
+    setStepState(onboardingStepOperatorEl, "blocked");
+    return;
+  }
+
+  setStepState(onboardingStepClientEl, "done");
+  if (step3Done) {
+    setStepState(onboardingStepOperatorEl, "done");
+    return;
+  }
+  if (operatorApplicationStatus === "rejected") {
+    setStepState(onboardingStepOperatorEl, "blocked");
+    return;
+  }
+  setStepState(onboardingStepOperatorEl, "active");
+}
+
+function syncSessionDerivedState(result) {
+  const session = result && result.session ? result.session : {};
+  const bootstrapDirectory = typeof session.bootstrap_directory === "string" ? session.bootstrap_directory.trim() : "";
+  const profileBootstrap =
+    result && result.profile && typeof result.profile.bootstrap_directory === "string"
+      ? result.profile.bootstrap_directory.trim()
+      : "";
+  sessionHasConnectSecrets = bootstrapDirectory.length > 0 || profileBootstrap.length > 0;
+}
+
 function setOperatorReadiness(kind, statusText, guidanceText) {
   operatorReadinessEl.dataset.kind = kind || "warn";
   operatorReadinessLineEl.classList.remove("good", "warn", "bad");
@@ -247,6 +300,7 @@ function computeOperatorReadiness() {
 function refreshOperatorReadiness() {
   const readiness = computeOperatorReadiness();
   setOperatorReadiness(readiness.kind, readiness.statusText, readiness.guidanceText);
+  refreshOnboardingSteps();
 }
 
 function setOperatorApplicationStatus(value) {
@@ -257,6 +311,7 @@ function setOperatorApplicationStatus(value) {
 function bindReadinessListeners() {
   byId("session_token").addEventListener("input", () => {
     setOperatorApplicationStatus(undefined);
+    sessionHasConnectSecrets = false;
   });
 }
 
@@ -351,6 +406,7 @@ async function get(path) {
 }
 
 function applySession(result) {
+  syncSessionDerivedState(result);
   const token = result.session_token || byId("session_token").value.trim();
   byId("session_token").value = token;
   const role = result.session?.role || result.role || result.profile?.role || "client";
@@ -444,6 +500,7 @@ byId("signin_btn").addEventListener("click", () =>
 byId("session_btn").addEventListener("click", () =>
   run("session_status", async () => {
     const result = await requestSessionLifecycle("status");
+    syncSessionDerivedState(result);
     byId("role").value = sessionRoleFromResult(result);
     refreshOperatorReadiness();
     await refreshOperatorApplicationStatus({ quiet: true });
@@ -455,6 +512,7 @@ byId("session_btn").addEventListener("click", () =>
 byId("session_rotate_btn").addEventListener("click", () =>
   run("session_rotate", async () => {
     const result = await requestSessionLifecycle("refresh");
+    syncSessionDerivedState(result);
     if (result.session_token) {
       byId("session_token").value = result.session_token;
     }
@@ -469,6 +527,7 @@ byId("session_rotate_btn").addEventListener("click", () =>
 byId("session_revoke_btn").addEventListener("click", () =>
   run("session_revoke", async () => {
     const result = await requestSessionLifecycle("revoke");
+    sessionHasConnectSecrets = false;
     byId("session_token").value = "";
     byId("role").value = "client";
     setOperatorApplicationStatus(undefined);
@@ -556,6 +615,7 @@ async function restoreSessionStatusBestEffort() {
   setStatus("warn", "Restoring session", "Checking stored session token status.");
   try {
     const result = await requestSessionLifecycle("status");
+    syncSessionDerivedState(result);
     byId("role").value = sessionRoleFromResult(result);
     refreshOperatorReadiness();
     persistPortalState();
