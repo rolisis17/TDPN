@@ -1,7 +1,9 @@
 package localapi
 
 import (
+	"bufio"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -159,4 +161,55 @@ func (s *Service) appendGPMAudit(event string, fields map[string]any) {
 	if _, err := f.Write(append(line, '\n')); err != nil {
 		log.Printf("gpm audit write skipped: append failed: %v", err)
 	}
+}
+
+func (s *Service) readGPMAuditRecent(limit int) ([]map[string]any, error) {
+	path := strings.TrimSpace(s.gpmAuditLogPath)
+	if path == "" {
+		return nil, nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	defer f.Close()
+
+	if limit <= 0 {
+		limit = 25
+	}
+	if limit > 200 {
+		limit = 200
+	}
+
+	lines := make([]string, 0, limit)
+	scanner := bufio.NewScanner(f)
+	const maxLine = 1 << 20
+	buffer := make([]byte, 64*1024)
+	scanner.Buffer(buffer, maxLine)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		lines = append(lines, line)
+		if len(lines) > limit {
+			lines = lines[1:]
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("scan audit log: %w", err)
+	}
+
+	entries := make([]map[string]any, 0, len(lines))
+	for _, line := range lines {
+		record := map[string]any{}
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			continue
+		}
+		entries = append(entries, record)
+	}
+	return entries, nil
 }

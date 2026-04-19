@@ -170,6 +170,10 @@ byId("manifest_btn").addEventListener("click", () =>
   run("bootstrap_manifest", async () => get("/v1/gpm/bootstrap/manifest"))
 );
 
+byId("audit_recent_btn").addEventListener("click", () =>
+  run("audit_recent", async () => get("/v1/gpm/audit/recent?limit=25"))
+);
+
 byId("register_client_btn").addEventListener("click", () =>
   run("client_register", async () => {
     const request = {

@@ -2523,3 +2523,32 @@ func TestGPMAuditAppendWritesJSONLine(t *testing.T) {
 		t.Fatalf("wallet_address=%v want=cosmos1audit", fields["wallet_address"])
 	}
 }
+
+func TestGPMAuditRecentHandlerReturnsMostRecentEntries(t *testing.T) {
+	auditPath := filepath.Join(t.TempDir(), "gpm_audit.jsonl")
+	svc := &Service{
+		addr:                "127.0.0.1:8095",
+		allowUnauthLoopback: true,
+		gpmAuditLogPath:     auditPath,
+		gpmState:            newGPMRuntimeState(),
+	}
+	svc.appendGPMAudit("event_one", map[string]any{"idx": 1})
+	svc.appendGPMAudit("event_two", map[string]any{"idx": 2})
+
+	code, payload := callJSONHandler(t, svc.handleGPMAuditRecent, http.MethodGet, "/v1/gpm/audit/recent?limit=1", "")
+	if code != http.StatusOK {
+		t.Fatalf("status=%d payload=%v", code, payload)
+	}
+	count, _ := payload["count"].(float64)
+	if int(count) != 1 {
+		t.Fatalf("count=%v want=1 payload=%v", count, payload)
+	}
+	entries, _ := payload["entries"].([]any)
+	if len(entries) != 1 {
+		t.Fatalf("entries len=%d want=1 payload=%v", len(entries), payload)
+	}
+	entry, _ := entries[0].(map[string]any)
+	if event, _ := entry["event"].(string); event != "event_two" {
+		t.Fatalf("event=%q want=event_two entry=%v", event, entry)
+	}
+}
