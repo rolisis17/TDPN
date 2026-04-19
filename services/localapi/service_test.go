@@ -3135,6 +3135,104 @@ func TestGPMServerStatus(t *testing.T) {
 	})
 }
 
+func TestGPMOperatorApproveAuthorization(t *testing.T) {
+	newOperatorApproveService := func(t *testing.T) *Service {
+		t.Helper()
+		svc, _ := newFakeService(t, false)
+		svc.gpmState = newGPMRuntimeState()
+		svc.gpmState.upsertOperator(gpmOperatorApplication{
+			WalletAddress:   "cosmos1approvaltarget",
+			ChainOperatorID: "operator-approval-target",
+			Status:          "pending",
+			UpdatedAt:       time.Now().UTC(),
+		})
+		return svc
+	}
+
+	t.Run("requires admin session when approval token is unset", func(t *testing.T) {
+		svc := newOperatorApproveService(t)
+		body := `{"wallet_address":"cosmos1approvaltarget","approved":true}`
+		code, payload := callJSONHandler(t, svc.handleGPMOperatorApprove, http.MethodPost, "/v1/gpm/onboarding/operator/approve", body)
+		if code != http.StatusUnauthorized {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		errMsg, _ := payload["error"].(string)
+		if !strings.Contains(errMsg, "admin session_token is required") {
+			t.Fatalf("error=%q payload=%v", errMsg, payload)
+		}
+	})
+
+	t.Run("rejects non-admin session token", func(t *testing.T) {
+		svc := newOperatorApproveService(t)
+		svc.gpmState.putSession(gpmSession{
+			Token:          "gpm-client-approval-token",
+			WalletAddress:  "cosmos1clientapprover",
+			WalletProvider: "keplr",
+			Role:           "client",
+			CreatedAt:      time.Now().UTC(),
+			ExpiresAt:      time.Now().UTC().Add(time.Hour),
+		})
+		body := `{"wallet_address":"cosmos1approvaltarget","approved":true,"session_token":"gpm-client-approval-token"}`
+		code, payload := callJSONHandler(t, svc.handleGPMOperatorApprove, http.MethodPost, "/v1/gpm/onboarding/operator/approve", body)
+		if code != http.StatusForbidden {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		errMsg, _ := payload["error"].(string)
+		if !strings.Contains(errMsg, "admin session role is required") {
+			t.Fatalf("error=%q payload=%v", errMsg, payload)
+		}
+	})
+
+	t.Run("approves with admin session token", func(t *testing.T) {
+		svc := newOperatorApproveService(t)
+		svc.gpmState.putSession(gpmSession{
+			Token:          "gpm-admin-approval-token",
+			WalletAddress:  "cosmos1adminapprover",
+			WalletProvider: "keplr",
+			Role:           "admin",
+			CreatedAt:      time.Now().UTC(),
+			ExpiresAt:      time.Now().UTC().Add(time.Hour),
+		})
+		body := `{"wallet_address":"cosmos1approvaltarget","approved":true,"session_token":"gpm-admin-approval-token"}`
+		code, payload := callJSONHandler(t, svc.handleGPMOperatorApprove, http.MethodPost, "/v1/gpm/onboarding/operator/approve", body)
+		if code != http.StatusOK {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		application, _ := payload["application"].(map[string]any)
+		if got, _ := application["status"].(string); got != "approved" {
+			t.Fatalf("application.status=%q want=approved payload=%v", got, payload)
+		}
+	})
+
+	t.Run("legacy admin token fallback still works when configured", func(t *testing.T) {
+		svc := newOperatorApproveService(t)
+		svc.gpmApprovalToken = "legacy-approval-token"
+		body := `{"wallet_address":"cosmos1approvaltarget","approved":true,"admin_token":"legacy-approval-token"}`
+		code, payload := callJSONHandler(t, svc.handleGPMOperatorApprove, http.MethodPost, "/v1/gpm/onboarding/operator/approve", body)
+		if code != http.StatusOK {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		application, _ := payload["application"].(map[string]any)
+		if got, _ := application["status"].(string); got != "approved" {
+			t.Fatalf("application.status=%q want=approved payload=%v", got, payload)
+		}
+	})
+
+	t.Run("configured legacy admin token rejects invalid token", func(t *testing.T) {
+		svc := newOperatorApproveService(t)
+		svc.gpmApprovalToken = "legacy-approval-token"
+		body := `{"wallet_address":"cosmos1approvaltarget","approved":true,"admin_token":"wrong-token"}`
+		code, payload := callJSONHandler(t, svc.handleGPMOperatorApprove, http.MethodPost, "/v1/gpm/onboarding/operator/approve", body)
+		if code != http.StatusUnauthorized {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		errMsg, _ := payload["error"].(string)
+		if !strings.Contains(errMsg, "invalid approval admin token") {
+			t.Fatalf("error=%q payload=%v", errMsg, payload)
+		}
+	})
+}
+
 func TestGPMClientRegisterRejectsPinnedMainDomainHostMismatch(t *testing.T) {
 	svc, _ := newFakeService(t, false)
 	svc.gpmState = newGPMRuntimeState()

@@ -768,7 +768,8 @@ byId("approve_operator_btn").addEventListener("click", () =>
   run("operator_approve", async () => {
     const request = {
       wallet_address: byId("wallet_address").value.trim(),
-      approved: true
+      approved: true,
+      session_token: byId("session_token").value.trim() || undefined
     };
     const adminToken = byId("admin_token").value.trim();
     if (adminToken) {

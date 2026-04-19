@@ -563,6 +563,8 @@ pub struct GPMOperatorApproveRequest {
     pub wallet_address: String,
     pub approved: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub admin_token: Option<String>,

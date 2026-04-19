@@ -131,6 +131,7 @@ type gpmOperatorApproveRequest struct {
 	WalletAddress string `json:"wallet_address"`
 	Approved      bool   `json:"approved"`
 	Reason        string `json:"reason,omitempty"`
+	SessionToken  string `json:"session_token,omitempty"`
 	AdminToken    string `json:"admin_token,omitempty"`
 }
 
@@ -910,7 +911,26 @@ func (s *Service) handleGPMOperatorApprove(w http.ResponseWriter, r *http.Reques
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid json body"})
 		return
 	}
-	if strings.TrimSpace(s.gpmApprovalToken) != "" {
+	sessionToken := strings.TrimSpace(in.SessionToken)
+	sessionAuth := false
+	if sessionToken != "" {
+		session, ok := s.gpmState.getSession(sessionToken, time.Now().UTC())
+		if !ok {
+			writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "invalid or expired admin session token"})
+			return
+		}
+		role := strings.ToLower(strings.TrimSpace(session.Role))
+		if role != "admin" {
+			writeJSON(w, http.StatusForbidden, map[string]any{"ok": false, "error": "admin session role is required for operator approval"})
+			return
+		}
+		sessionAuth = true
+	}
+	if !sessionAuth {
+		if strings.TrimSpace(s.gpmApprovalToken) == "" {
+			writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "admin session_token is required when GPM_APPROVAL_ADMIN_TOKEN is unset"})
+			return
+		}
 		if subtleEqual(strings.TrimSpace(in.AdminToken), strings.TrimSpace(s.gpmApprovalToken)) == false {
 			writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "invalid approval admin token"})
 			return

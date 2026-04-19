@@ -1022,7 +1022,8 @@ byId("operator_status_btn").addEventListener("click", async () => {
 byId("approve_operator_btn").addEventListener("click", async () => {
   const request = {
     wallet_address: walletAddressEl.value.trim(),
-    approved: true
+    approved: true,
+    session_token: state.sessionToken || undefined
   };
   await call("gpm_operator_approve", "control_gpm_operator_approve", { request });
   await refreshSession();
