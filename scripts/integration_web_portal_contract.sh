@@ -43,6 +43,10 @@ if ! grep -qF 'id="register_client_btn"' "$PORTAL_HTML"; then
   echo "web portal contract failed: missing register-client action marker id=register_client_btn in $PORTAL_HTML"
   exit 1
 fi
+if ! grep -qF 'id="compat_override_section"' "$PORTAL_HTML"; then
+  echo "web portal contract failed: missing compatibility-override section marker id=compat_override_section in $PORTAL_HTML"
+  exit 1
+fi
 if ! grep -qF 'id="client_readiness"' "$PORTAL_HTML"; then
   echo "web portal contract failed: missing client readiness marker id=client_readiness in $PORTAL_HTML"
   exit 1
@@ -83,6 +87,9 @@ JS_MARKERS=(
   'byId("register_client_btn").addEventListener'
   'session_token: byId("session_token").value.trim()'
   'compatibilityOverrideEnabled()'
+  'allowLegacyConnectOverride'
+  'function parseAllowLegacyConnectOverrideConfig('
+  'compatOverrideSectionEl.hidden = !allowLegacyConnectOverride;'
 )
 for marker in "${JS_MARKERS[@]}"; do
   if ! grep -qF "$marker" "$PORTAL_JS"; then

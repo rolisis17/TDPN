@@ -334,6 +334,10 @@ if ! grep -qF 'id="server_lock_hint"' "$DESKTOP_HTML_FILE"; then
   echo "desktop scaffold contract failed: missing server lock hint marker in $DESKTOP_HTML_FILE"
   exit 1
 fi
+if ! grep -qF 'id="legacy_compat_section"' "$DESKTOP_HTML_FILE"; then
+  echo "desktop scaffold contract failed: missing legacy compatibility section marker in $DESKTOP_HTML_FILE"
+  exit 1
+fi
 
 client_hint_marker_present="0"
 if grep -qF 'id="client_lock_hint"' "$DESKTOP_HTML_FILE"; then
@@ -361,6 +365,18 @@ if ! grep -qF 'tabServerEl.classList.toggle("locked", !serverTabVisible);' "$JS_
 fi
 if ! grep -qF 'serverLockHintEl.textContent = computeServerLockHintText();' "$JS_FILE"; then
   echo "desktop scaffold contract failed: missing server lock hint update marker in $JS_FILE"
+  exit 1
+fi
+if ! grep -qF 'state.allowLegacyConnectOverride' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: missing allowLegacyConnectOverride policy-state marker in $JS_FILE"
+  exit 1
+fi
+if ! grep -qF 'function syncCompatAdvancedVisibility()' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: missing compat advanced visibility policy marker in $JS_FILE"
+  exit 1
+fi
+if ! grep -qF 'compatAdvancedSectionEl.hidden = !visible;' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: missing compat advanced hide-by-policy marker in $JS_FILE"
   exit 1
 fi
 if ! grep -qF 'if (!tabServerEl.disabled) {' "$JS_FILE"; then
