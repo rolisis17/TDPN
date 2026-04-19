@@ -171,7 +171,7 @@ What `desktop_doctor` remediates:
 - prerequisite detection for Go/Node/npm/Rust/Cargo/Git Bash
 - optional prerequisite install via `winget` when `-InstallMissing` is passed
 - optional summary artifact output via `-SummaryJson` and `-PrintSummaryJson 1`
-- desktop doctor now prints exact copy/paste remediation commands and writes the same guidance to summary JSON `recommended_commands` (policy bypass, missing-tool `winget` installs, and one-click rerun)
+- desktop doctor now prints exact copy/paste remediation commands and writes the same guidance to summary JSON `recommended_commands` (policy bypass, `npm.cmd install`, `npm.cmd run tauri -- dev`, missing-tool `winget` installs, and one-click rerun)
 
 Recommended sequence on fresh machines:
 1. Run `desktop_doctor` fix/install (`-Mode fix -InstallMissing`).
