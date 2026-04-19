@@ -320,6 +320,27 @@ func lifecycleOversizedOutputCommand() string {
 	return "sh -c \"head -c 2097152 < /dev/zero | tr '\\000' 'B'\""
 }
 
+func authVerifierCommandExpectSignature(expected string, failOutput string, failCode int) string {
+	expected = strings.TrimSpace(expected)
+	failOutput = strings.TrimSpace(failOutput)
+	if runtime.GOOS == "windows" {
+		escapedExpected := strings.ReplaceAll(expected, "'", "''")
+		escapedFailOutput := strings.ReplaceAll(failOutput, "'", "''")
+		return fmt.Sprintf(
+			"powershell -NoProfile -Command \"if (($env:GPM_AUTH_VERIFY_SIGNATURE -eq '%s') -and -not [string]::IsNullOrWhiteSpace($env:GPM_AUTH_VERIFY_CHALLENGE_ID)) { exit 0 }; Write-Output '%s'; exit %d\"",
+			escapedExpected,
+			escapedFailOutput,
+			failCode,
+		)
+	}
+	return fmt.Sprintf(
+		"sh -c \"if [ \\\"$GPM_AUTH_VERIFY_SIGNATURE\\\" = '%s' ] && [ -n \\\"$GPM_AUTH_VERIFY_CHALLENGE_ID\\\" ]; then exit 0; fi; echo %s; exit %d\"",
+		expected,
+		failOutput,
+		failCode,
+	)
+}
+
 func TestNormalizePathProfile(t *testing.T) {
 	tests := []struct {
 		in   string
@@ -2903,6 +2924,62 @@ func TestGPMAuthVerifyCustomSignatureVerifierRejects(t *testing.T) {
 	}
 	if _, ok := payload["session_token"]; ok {
 		t.Fatalf("session_token unexpectedly present payload=%v", payload)
+	}
+}
+
+func TestGPMAuthVerifyConfiguredVerifierCommandAllowsValidSignature(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	svc.gpmRoleDefault = "client"
+	svc.gpmAuthVerifyCommand = authVerifierCommandExpectSignature("signed-proof-value", "bad-signature", 11)
+
+	challengeBody := `{"wallet_address":"cosmos1cmdallow","wallet_provider":"keplr"}`
+	code, payload := callJSONHandler(t, svc.handleGPMAuthChallenge, http.MethodPost, "/v1/gpm/auth/challenge", challengeBody)
+	if code != http.StatusOK {
+		t.Fatalf("challenge status=%d body=%v", code, payload)
+	}
+	challengeID, _ := payload["challenge_id"].(string)
+	if strings.TrimSpace(challengeID) == "" {
+		t.Fatalf("challenge_id missing: %v", payload)
+	}
+
+	verifyBody := `{"wallet_address":"cosmos1cmdallow","wallet_provider":"keplr","challenge_id":"` + challengeID + `","signature":"signed-proof-value"}`
+	code, payload = callJSONHandler(t, svc.handleGPMAuthVerify, http.MethodPost, "/v1/gpm/auth/verify", verifyBody)
+	if code != http.StatusOK {
+		t.Fatalf("verify status=%d body=%v", code, payload)
+	}
+	if got, _ := payload["session_token"].(string); strings.TrimSpace(got) == "" {
+		t.Fatalf("session_token missing payload=%v", payload)
+	}
+}
+
+func TestGPMAuthVerifyConfiguredVerifierCommandRejectsSignature(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	svc.gpmRoleDefault = "client"
+	svc.gpmAuthVerifyCommand = authVerifierCommandExpectSignature("signed-proof-value", "bad-signature", 12)
+
+	challengeBody := `{"wallet_address":"cosmos1cmdreject","wallet_provider":"keplr"}`
+	code, payload := callJSONHandler(t, svc.handleGPMAuthChallenge, http.MethodPost, "/v1/gpm/auth/challenge", challengeBody)
+	if code != http.StatusOK {
+		t.Fatalf("challenge status=%d body=%v", code, payload)
+	}
+	challengeID, _ := payload["challenge_id"].(string)
+	if strings.TrimSpace(challengeID) == "" {
+		t.Fatalf("challenge_id missing: %v", payload)
+	}
+
+	verifyBody := `{"wallet_address":"cosmos1cmdreject","wallet_provider":"keplr","challenge_id":"` + challengeID + `","signature":"signed-proof-value-invalid"}`
+	code, payload = callJSONHandler(t, svc.handleGPMAuthVerify, http.MethodPost, "/v1/gpm/auth/verify", verifyBody)
+	if code != http.StatusUnauthorized {
+		t.Fatalf("verify status=%d want=%d body=%v", code, http.StatusUnauthorized, payload)
+	}
+	errMsg, _ := payload["error"].(string)
+	if !strings.Contains(errMsg, "rejected signature") {
+		t.Fatalf("error=%q want rejected-signature marker payload=%v", errMsg, payload)
+	}
+	if !strings.Contains(errMsg, "bad-signature") {
+		t.Fatalf("error=%q want verifier command output marker payload=%v", errMsg, payload)
 	}
 }
 

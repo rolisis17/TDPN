@@ -80,6 +80,7 @@ type Service struct {
 	gpmManifestHMACKey            string
 	gpmRoleDefault                string
 	gpmApprovalToken              string
+	gpmAuthVerifyCommand          string
 	gpmAuthSignatureVerifier      gpmAuthSignatureVerifier
 	gpmStateStorePath             string
 	gpmAuditLogPath               string
@@ -224,6 +225,11 @@ func New() *Service {
 		"TDPN_OPERATOR_APPROVAL_TOKEN",
 		"",
 	)
+	gpmAuthVerifyCommand := preferredEnvValue(
+		"GPM_AUTH_VERIFY_COMMAND",
+		"TDPN_AUTH_VERIFY_COMMAND",
+		"",
+	)
 	gpmConnectRequireSession := parseBoolWithDefault(preferredEnvValue(
 		"GPM_CONNECT_REQUIRE_SESSION",
 		"TDPN_CONNECT_REQUIRE_SESSION",
@@ -269,6 +275,7 @@ func New() *Service {
 		gpmManifestHMACKey:            gpmManifestHMACKey,
 		gpmRoleDefault:                gpmRoleDefault,
 		gpmApprovalToken:              gpmApprovalToken,
+		gpmAuthVerifyCommand:          strings.TrimSpace(gpmAuthVerifyCommand),
 		gpmAuthSignatureVerifier:      defaultGPMAuthSignatureVerifier,
 		gpmStateStorePath:             strings.TrimSpace(gpmStateStorePath),
 		gpmAuditLogPath:               strings.TrimSpace(gpmAuditLogPath),

@@ -15,7 +15,9 @@ import (
 	"net/http"
 	urlpkg "net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -25,11 +27,12 @@ import (
 )
 
 const (
-	gpmChallengeTTL        = 5 * time.Minute
-	gpmSessionTTL          = 12 * time.Hour
-	gpmManifestHTTPTimeout = 6 * time.Second
-	gpmManifestBodyLimit   = 1 << 20
-	gpmAuthSignatureMaxLen = 8 * 1024
+	gpmChallengeTTL            = 5 * time.Minute
+	gpmSessionTTL              = 12 * time.Hour
+	gpmManifestHTTPTimeout     = 6 * time.Second
+	gpmManifestBodyLimit       = 1 << 20
+	gpmAuthSignatureMaxLen     = 8 * 1024
+	gpmAuthVerifierOutputLimit = 8 * 1024
 )
 
 type gpmRuntimeState struct {
@@ -511,7 +514,7 @@ func (s *Service) handleGPMAuthVerify(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "challenge identity mismatch"})
 		return
 	}
-	if err := s.verifyGPMAuthSignature(challenge, in.WalletAddress, in.WalletProvider, signature); err != nil {
+	if err := s.verifyGPMAuthSignature(r.Context(), challenge, in.WalletAddress, in.WalletProvider, signature); err != nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
@@ -1468,12 +1471,65 @@ func defaultGPMAuthSignatureVerifier(challenge gpmWalletChallenge, walletAddress
 	return nil
 }
 
-func (s *Service) verifyGPMAuthSignature(challenge gpmWalletChallenge, walletAddress string, walletProvider string, signature string) error {
+func (s *Service) verifyGPMAuthSignature(ctx context.Context, challenge gpmWalletChallenge, walletAddress string, walletProvider string, signature string) error {
 	verifier := s.gpmAuthSignatureVerifier
 	if verifier == nil {
 		verifier = defaultGPMAuthSignatureVerifier
 	}
-	return verifier(challenge, walletAddress, walletProvider, signature)
+	if err := verifier(challenge, walletAddress, walletProvider, signature); err != nil {
+		return err
+	}
+	if err := s.runGPMAuthVerifierCommand(ctx, challenge, walletAddress, walletProvider, signature); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Service) runGPMAuthVerifierCommand(ctx context.Context, challenge gpmWalletChallenge, walletAddress string, walletProvider string, signature string) error {
+	commandRaw := strings.TrimSpace(s.gpmAuthVerifyCommand)
+	if commandRaw == "" {
+		return nil
+	}
+	commandName, commandArgs, err := buildLifecycleCommandWithPlatform(commandRaw, runtime.GOOS)
+	if err != nil {
+		return fmt.Errorf("configured auth verifier command rejected: %w", err)
+	}
+	timeout := s.commandTimeout
+	if timeout <= 0 {
+		timeout = defaultCommandTimeout
+	}
+	commandCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	cmd := exec.CommandContext(commandCtx, commandName, commandArgs...)
+	cmd.Env = append(os.Environ(),
+		"GPM_AUTH_VERIFY_CHALLENGE_ID="+strings.TrimSpace(challenge.ChallengeID),
+		"GPM_AUTH_VERIFY_MESSAGE="+strings.TrimSpace(challenge.Message),
+		"GPM_AUTH_VERIFY_WALLET_ADDRESS="+strings.TrimSpace(walletAddress),
+		"GPM_AUTH_VERIFY_WALLET_PROVIDER="+strings.TrimSpace(walletProvider),
+		"GPM_AUTH_VERIFY_SIGNATURE="+strings.TrimSpace(signature),
+	)
+	outputBuffer := newBoundedOutputBuffer(gpmAuthVerifierOutputLimit)
+	cmd.Stdout = outputBuffer
+	cmd.Stderr = outputBuffer
+	err = cmd.Run()
+	if err == nil {
+		return nil
+	}
+	if errors.Is(commandCtx.Err(), context.DeadlineExceeded) {
+		return errors.New("signature verifier command timed out")
+	}
+	output := strings.TrimSpace(outputBuffer.String())
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		if output != "" {
+			return fmt.Errorf("signature verifier command rejected signature: %s", output)
+		}
+		return fmt.Errorf("signature verifier command rejected signature (rc=%d)", exitErr.ExitCode())
+	}
+	if output != "" {
+		return fmt.Errorf("signature verifier command failed: %s", output)
+	}
+	return errors.New("signature verifier command failed")
 }
 
 func randomHex(byteLen int) (string, error) {
