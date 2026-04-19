@@ -36,5 +36,8 @@ Then open:
 - Portal moderation UI now includes explicit `Approve Operator` and `Reject Operator` actions with a moderation reason input.
 - Rejection requires a non-empty `reason`; approval includes `reason` when provided.
 - Portal operator listing now includes `List All Operators` (`status=""`, `limit=100`) in addition to `List Pending Operators`.
-- Portal includes a `Load Next Pending` quick action that calls `POST /v1/gpm/onboarding/operator/list` with `status=pending` and `limit=1`, then prefills `wallet_address` and `chain_operator_id` when an item exists.
+- Portal includes a `Load Next Pending` quick action that calls `POST /v1/gpm/onboarding/operator/list` with `status=pending` and `limit=1`, then prefills `wallet_address`, `chain_operator_id`, and `selected application updated at` when an item exists.
+- Portal also updates `wallet_address`, `chain_operator_id`, and `selected application updated at` from operator status/list responses when available.
+- Approve/reject now send `if_updated_at_utc` when `selected application updated at` is present, adding optimistic stale-decision protection.
+- If approve/reject returns `409 Conflict`, portal now surfaces explicit guidance to reload pending queue (`Load Next Pending`) and retry without breaking the moderation flow.
 - After approve/reject decisions, portal now forces a session status refresh to reconcile role/readiness state immediately and surfaces backend `session_reconciled` hints in output/status messaging when present.

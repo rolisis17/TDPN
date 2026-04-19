@@ -56,8 +56,11 @@ Desktop env overrides (GPM-first, legacy TDPN alias names preserved for compatib
  
 Operator moderation UX notes:
 - Desktop now includes explicit `Approve Operator` and `Reject Operator` actions with a moderation reason input.
-- Desktop includes a `Load Next Pending` quick action that requests `POST /v1/gpm/onboarding/operator/list` with `status=pending` and `limit=1`, then prefills `wallet_address` and `chain_operator_id` when an item is available.
+- Desktop includes a `Load Next Pending` quick action that requests `POST /v1/gpm/onboarding/operator/list` with `status=pending` and `limit=1`, then prefills `wallet_address`, `chain_operator_id`, and `selected application updated at` when an item is available.
+- Desktop also updates `wallet_address`, `chain_operator_id`, and `selected application updated at` from operator status/list responses when available, so moderation decisions can use the latest selected queue item context.
 - Rejection requires a non-empty `reason`; approval includes `reason` when provided.
+- Approve/reject requests now include optimistic stale-decision protection via `if_updated_at_utc` when `selected application updated at` is populated.
+- If approve/reject returns `409 Conflict`, desktop now keeps the flow running and shows explicit guidance to reload the pending queue (`Load Next Pending`) and retry with the refreshed entry.
 - Desktop operator listing now includes `List All Operators` (`status=""`, `limit=100`) in addition to `List Pending Operators`.
 - After approve/reject decisions, desktop forces a session status refresh so role/readiness lock state reconciles immediately and surfaces backend `session_reconciled` hints when present.
 

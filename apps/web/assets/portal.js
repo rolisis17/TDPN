@@ -15,6 +15,7 @@ const operatorReadinessEl = byId("operator_readiness");
 const operatorReadinessLineEl = byId("operator_readiness_line");
 const operatorReadinessStatusEl = byId("operator_readiness_status");
 const operatorReadinessGuidanceEl = byId("operator_readiness_guidance");
+const selectedApplicationUpdatedAtEl = byId("selected_application_updated_at");
 const onboardingStepSigninEl = document.getElementById("onboarding_step_signin");
 const onboardingStepClientEl = document.getElementById("onboarding_step_client");
 const onboardingStepOperatorEl = document.getElementById("onboarding_step_operator");
@@ -23,6 +24,8 @@ const OPERATOR_APPLICATION_STATUSES = new Set(["not_submitted", "pending", "appr
 const OPERATOR_PENDING_LIST_LIMIT = 25;
 const OPERATOR_LOAD_NEXT_LIMIT = 1;
 const OPERATOR_LIST_ALL_LIMIT = 100;
+const OPERATOR_DECISION_CONFLICT_GUIDANCE =
+  "Decision conflict detected: the selected application was updated by another reviewer. Reload pending queue with Load Next Pending and retry.";
 const PORTAL_STORAGE_KEY = "gpm.portal.state.v1";
 const PERSISTED_FIELD_IDS = [
   "api_base",
@@ -31,11 +34,13 @@ const PERSISTED_FIELD_IDS = [
   "wallet_address",
   "wallet_provider",
   "chain_operator_id",
+  "selected_application_updated_at",
   "server_label",
   "path_profile",
   "bootstrap_directory"
 ];
 let operatorApplicationStatus = undefined;
+let selectedApplicationUpdatedAtUtc = "";
 let serverReadiness = null;
 let clientRegistered = false;
 
@@ -335,7 +340,8 @@ function extractOperatorPrefillValues(entry) {
     const chainOperatorId = entry.trim();
     return {
       walletAddress: "",
-      chainOperatorId
+      chainOperatorId,
+      selectedApplicationUpdatedAtUtc: ""
     };
   }
   return {
@@ -352,8 +358,63 @@ function extractOperatorPrefillValues(entry) {
       "operator_id",
       "operatorId",
       "id"
+    ]),
+    selectedApplicationUpdatedAtUtc: readOperatorEntryText(entry, [
+      "updated_at_utc",
+      "updatedAtUtc",
+      "updated_at",
+      "updatedAt",
+      "application_updated_at_utc",
+      "applicationUpdatedAtUtc",
+      "if_updated_at_utc",
+      "ifUpdatedAtUtc"
     ])
   };
+}
+
+function setSelectedApplicationUpdatedAt(value, options = {}) {
+  const { persist = true } = options;
+  const normalized = typeof value === "string" ? value.trim() : "";
+  selectedApplicationUpdatedAtUtc = normalized;
+  selectedApplicationUpdatedAtEl.value = normalized;
+  if (persist) {
+    persistPortalState();
+  }
+}
+
+function selectedApplicationUpdatedAt() {
+  return selectedApplicationUpdatedAtUtc || selectedApplicationUpdatedAtEl.value.trim();
+}
+
+function applySelectedOperatorPrefill(values, options = {}) {
+  const { mode = "merge", persist = true } = options;
+  const walletAddress = typeof values?.walletAddress === "string" ? values.walletAddress.trim() : "";
+  const chainOperatorId = typeof values?.chainOperatorId === "string" ? values.chainOperatorId.trim() : "";
+  const selectedUpdatedAtUtc =
+    typeof values?.selectedApplicationUpdatedAtUtc === "string"
+      ? values.selectedApplicationUpdatedAtUtc.trim()
+      : "";
+  if (mode === "replace" || walletAddress) {
+    byId("wallet_address").value = walletAddress;
+  }
+  if (mode === "replace" || chainOperatorId) {
+    byId("chain_operator_id").value = chainOperatorId;
+  }
+  if (mode === "replace" || selectedUpdatedAtUtc) {
+    setSelectedApplicationUpdatedAt(selectedUpdatedAtUtc, { persist: false });
+  }
+  if (persist) {
+    persistPortalState();
+  }
+}
+
+function prefillSelectedOperatorFromListPayload(payload, options = {}) {
+  const entries = extractOperatorListEntries(payload);
+  if (entries.length === 0) {
+    return false;
+  }
+  applySelectedOperatorPrefill(extractOperatorPrefillValues(entries[0]), options);
+  return true;
 }
 
 function parseBooleanLike(value) {
@@ -641,7 +702,14 @@ function bindReadinessListeners() {
   byId("session_token").addEventListener("input", () => {
     setServerReadiness(null);
     setOperatorApplicationStatus(undefined);
+    setSelectedApplicationUpdatedAt("");
     clientRegistered = false;
+  });
+  byId("wallet_address").addEventListener("input", () => {
+    setSelectedApplicationUpdatedAt("");
+  });
+  byId("chain_operator_id").addEventListener("input", () => {
+    setSelectedApplicationUpdatedAt("");
   });
 }
 
@@ -686,6 +754,23 @@ function apiBase() {
   return pathname && pathname !== "/" ? `${parsed.origin}${pathname}` : parsed.origin;
 }
 
+function createApiError(response, json) {
+  const message =
+    (typeof json?.error === "string" && json.error.trim()) || `${response.status} ${response.statusText}`;
+  const err = new Error(message);
+  err.status = response.status;
+  err.statusText = response.statusText;
+  return err;
+}
+
+function isDecisionConflictError(err) {
+  if (typeof err?.status === "number") {
+    return err.status === 409;
+  }
+  const message = String(err && err.message ? err.message : err || "");
+  return /\b409\b/.test(message);
+}
+
 async function post(path, body) {
   const token = byId("session_token").value.trim();
   const headers = {
@@ -707,7 +792,7 @@ async function post(path, body) {
     json = { ok: false, error: text || "non-json response" };
   }
   if (!response.ok) {
-    throw new Error(json.error || `${response.status} ${response.statusText}`);
+    throw createApiError(response, json);
   }
   return json;
 }
@@ -730,7 +815,7 @@ async function get(path) {
     json = { ok: false, error: text || "non-json response" };
   }
   if (!response.ok) {
-    throw new Error(json.error || `${response.status} ${response.statusText}`);
+    throw createApiError(response, json);
   }
   return json;
 }
@@ -813,10 +898,11 @@ async function loadNextPendingOperator() {
     );
   }
   const nextEntry = entries[0];
-  const { walletAddress, chainOperatorId } = extractOperatorPrefillValues(nextEntry);
-  byId("wallet_address").value = walletAddress;
-  byId("chain_operator_id").value = chainOperatorId;
-  persistPortalState();
+  const { walletAddress, chainOperatorId, selectedApplicationUpdatedAtUtc } = extractOperatorPrefillValues(nextEntry);
+  applySelectedOperatorPrefill(
+    { walletAddress, chainOperatorId, selectedApplicationUpdatedAtUtc },
+    { mode: "replace" }
+  );
   await refreshServerReadinessStatus({ quiet: true });
   const message =
     walletAddress || chainOperatorId
@@ -828,6 +914,7 @@ async function loadNextPendingOperator() {
       message,
       wallet_address: walletAddress || null,
       chain_operator_id: chainOperatorId || null,
+      selected_application_updated_at: selectedApplicationUpdatedAtUtc || null,
       status: "pending",
       limit: OPERATOR_LOAD_NEXT_LIMIT,
       returned: entries.length
@@ -902,6 +989,7 @@ async function refreshOperatorApplicationStatus(options = {}) {
   try {
     const result = await requestOperatorStatus();
     setOperatorApplicationStatus(parseOperatorApplicationStatus(result));
+    applySelectedOperatorPrefill(extractOperatorPrefillValues(result), { mode: "merge" });
     return result;
   } catch (err) {
     if (!quiet) {
@@ -935,6 +1023,7 @@ async function refreshServerReadinessStatus(options = {}) {
 async function run(label, fn, options = {}) {
   const outputMapper = typeof options.outputMapper === "function" ? options.outputMapper : null;
   const successDetail = typeof options.successDetail === "function" ? options.successDetail : null;
+  const successKind = typeof options.successKind === "function" ? options.successKind : null;
   setBusy(true);
   setStatus("warn", `${label} in progress`, "Please wait while the portal completes the request.");
   try {
@@ -945,7 +1034,7 @@ async function run(label, fn, options = {}) {
       successDetail ? successDetail(result) : "The request finished successfully.",
       result
     );
-    setStatus("good", `${label} completed`, detail);
+    setStatus(successKind ? successKind(result) : "good", `${label} completed`, detail);
     return result;
   } catch (err) {
     print(`${label} (error)`, String(err && err.message ? err.message : err));
@@ -975,6 +1064,7 @@ byId("signin_btn").addEventListener("click", () =>
     };
     const result = await post("/v1/gpm/auth/verify", request);
     setOperatorApplicationStatus(undefined);
+    setSelectedApplicationUpdatedAt("");
     applySession(result);
     await refreshClientRegistrationStatus({ quiet: true });
     await refreshOperatorApplicationStatus({ quiet: true });
@@ -1006,6 +1096,7 @@ byId("session_rotate_btn").addEventListener("click", () =>
     }
     byId("role").value = sessionRoleFromResult(result);
     setOperatorApplicationStatus(undefined);
+    setSelectedApplicationUpdatedAt("");
     await refreshClientRegistrationStatus({ quiet: true });
     await refreshOperatorApplicationStatus({ quiet: true });
     await refreshServerReadinessStatus({ quiet: true });
@@ -1021,6 +1112,7 @@ byId("session_revoke_btn").addEventListener("click", () =>
     byId("session_token").value = "";
     byId("role").value = "client";
     setOperatorApplicationStatus(undefined);
+    setSelectedApplicationUpdatedAt("");
     setServerReadiness(null);
     persistPortalState();
     return result;
@@ -1080,6 +1172,7 @@ byId("operator_status_btn").addEventListener("click", () =>
   run("operator_status", async () => {
     const result = await requestOperatorStatus();
     setOperatorApplicationStatus(parseOperatorApplicationStatus(result));
+    applySelectedOperatorPrefill(extractOperatorPrefillValues(result), { mode: "merge" });
     await refreshServerReadinessStatus({ quiet: true });
     return result;
   })
@@ -1088,7 +1181,11 @@ byId("operator_status_btn").addEventListener("click", () =>
 byId("operator_list_pending_btn").addEventListener("click", () =>
   run(
     "operator_list_pending",
-    async () => requestOperatorList("pending", OPERATOR_PENDING_LIST_LIMIT),
+    async () => {
+      const result = await requestOperatorList("pending", OPERATOR_PENDING_LIST_LIMIT);
+      prefillSelectedOperatorFromListPayload(result, { mode: "merge" });
+      return result;
+    },
     {
       outputMapper: (result) => summarizeOperatorList(result).output,
       successDetail: (result) => summarizeOperatorList(result).detail
@@ -1106,7 +1203,11 @@ byId("operator_load_next_pending_btn").addEventListener("click", () =>
 byId("operator_list_all_btn").addEventListener("click", () =>
   run(
     "operator_list_all",
-    async () => requestOperatorList("", OPERATOR_LIST_ALL_LIMIT),
+    async () => {
+      const result = await requestOperatorList("", OPERATOR_LIST_ALL_LIMIT);
+      prefillSelectedOperatorFromListPayload(result, { mode: "merge" });
+      return result;
+    },
     {
       outputMapper: (result) => summarizeOperatorList(result, "all", OPERATOR_LIST_ALL_LIMIT).output,
       successDetail: (result) => summarizeOperatorList(result, "all", OPERATOR_LIST_ALL_LIMIT).detail
@@ -1123,6 +1224,10 @@ byId("approve_operator_btn").addEventListener("click", () =>
         approved: true,
         session_token: byId("session_token").value.trim() || undefined
       };
+      const ifUpdatedAtUtc = selectedApplicationUpdatedAt();
+      if (ifUpdatedAtUtc) {
+        request.if_updated_at_utc = ifUpdatedAtUtc;
+      }
       const adminToken = byId("admin_token").value.trim();
       if (adminToken) {
         request.admin_token = adminToken;
@@ -1131,7 +1236,19 @@ byId("approve_operator_btn").addEventListener("click", () =>
       if (reason) {
         request.reason = reason;
       }
-      const moderationResult = await post("/v1/gpm/onboarding/operator/approve", request);
+      let moderationResult = null;
+      try {
+        moderationResult = await post("/v1/gpm/onboarding/operator/approve", request);
+      } catch (err) {
+        if (isDecisionConflictError(err)) {
+          return {
+            conflict: true,
+            error: String(err && err.message ? err.message : err),
+            guidance: OPERATOR_DECISION_CONFLICT_GUIDANCE
+          };
+        }
+        throw err;
+      }
       const sessionReconciliation = await reconcileSessionAfterModerationDecision();
       return {
         moderation_result: moderationResult,
@@ -1140,6 +1257,9 @@ byId("approve_operator_btn").addEventListener("click", () =>
     },
     {
       successDetail: (result) => {
+        if (result?.conflict) {
+          return result.guidance || OPERATOR_DECISION_CONFLICT_GUIDANCE;
+        }
         const reconciliation = result?.session_reconciliation;
         if (reconciliation?.attempted === false) {
           return "Operator approved. Session status refresh skipped because no session token was available.";
@@ -1148,7 +1268,8 @@ byId("approve_operator_btn").addEventListener("click", () =>
           return `Operator approved. Session status refresh failed (${reconciliation.error}).`;
         }
         return "Operator approved and session status refreshed.";
-      }
+      },
+      successKind: (result) => (result?.conflict ? "warn" : "good")
     }
   )
 );
@@ -1171,11 +1292,27 @@ byId("reject_operator_btn").addEventListener("click", () =>
         reason,
         session_token: sessionToken
       };
+      const ifUpdatedAtUtc = selectedApplicationUpdatedAt();
+      if (ifUpdatedAtUtc) {
+        request.if_updated_at_utc = ifUpdatedAtUtc;
+      }
       const adminToken = byId("admin_token").value.trim();
       if (adminToken) {
         request.admin_token = adminToken;
       }
-      const moderationResult = await post("/v1/gpm/onboarding/operator/approve", request);
+      let moderationResult = null;
+      try {
+        moderationResult = await post("/v1/gpm/onboarding/operator/approve", request);
+      } catch (err) {
+        if (isDecisionConflictError(err)) {
+          return {
+            conflict: true,
+            error: String(err && err.message ? err.message : err),
+            guidance: OPERATOR_DECISION_CONFLICT_GUIDANCE
+          };
+        }
+        throw err;
+      }
       const sessionReconciliation = await reconcileSessionAfterModerationDecision();
       return {
         moderation_result: moderationResult,
@@ -1184,12 +1321,16 @@ byId("reject_operator_btn").addEventListener("click", () =>
     },
     {
       successDetail: (result) => {
+        if (result?.conflict) {
+          return result.guidance || OPERATOR_DECISION_CONFLICT_GUIDANCE;
+        }
         const reconciliation = result?.session_reconciliation;
         if (reconciliation?.ok === false) {
           return `Operator rejected. Session status refresh failed (${reconciliation.error}).`;
         }
         return "Operator rejected and session status refreshed.";
-      }
+      },
+      successKind: (result) => (result?.conflict ? "warn" : "good")
     }
   )
 );
@@ -1199,6 +1340,7 @@ async function restoreSessionStatusBestEffort() {
   if (!token) {
     setServerReadiness(null);
     setOperatorApplicationStatus(undefined);
+    setSelectedApplicationUpdatedAt("");
     return;
   }
   setStatus("warn", "Restoring session", "Checking stored session token status.");
@@ -1221,6 +1363,7 @@ async function restoreSessionStatusBestEffort() {
 
 function initializePortal() {
   restorePortalState();
+  setSelectedApplicationUpdatedAt(selectedApplicationUpdatedAtEl.value, { persist: false });
   bindPersistenceListeners();
   bindReadinessListeners();
   persistPortalState();

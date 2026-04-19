@@ -7,6 +7,7 @@ use std::net::SocketAddr;
 
 const MAX_LOCAL_API_RESPONSE_BODY_BYTES: usize = 256 * 1024;
 const MAX_LOCAL_API_AUTH_BEARER_BYTES: usize = 4096;
+const MAX_LOCAL_API_ERROR_DETAIL_CHARS: usize = 512;
 
 #[derive(Clone, Debug)]
 pub struct LocalApiConfig {
@@ -198,8 +199,14 @@ impl LocalApiClient {
 
         if !status.is_success() {
             let reason = status.canonical_reason().unwrap_or("request failed");
-            eprintln!("local API {} {} for {}", status.as_u16(), reason, path);
-            return Err(format!("local API {} {} for {}", status.as_u16(), reason, path));
+            let context = format!("local API {} {} for {}", status.as_u16(), reason, path);
+            if let Some(error_detail) = extract_json_error_detail(&body) {
+                let detailed = format!("{context}: {error_detail}");
+                eprintln!("{detailed}");
+                return Err(detailed);
+            }
+            eprintln!("{context}");
+            return Err(context);
         }
 
         if body.trim().is_empty() {
@@ -214,6 +221,31 @@ impl LocalApiClient {
             }
         }
     }
+}
+
+fn truncate_error_detail(text: &str) -> String {
+    let trimmed = text.trim();
+    let total = trimmed.chars().count();
+    if total <= MAX_LOCAL_API_ERROR_DETAIL_CHARS {
+        return trimmed.to_string();
+    }
+    let kept: String = trimmed.chars().take(MAX_LOCAL_API_ERROR_DETAIL_CHARS).collect();
+    let omitted = total - MAX_LOCAL_API_ERROR_DETAIL_CHARS;
+    format!("{kept}...[truncated {omitted} chars]")
+}
+
+fn extract_json_error_detail(body: &str) -> Option<String> {
+    let parsed: Value = serde_json::from_str(body).ok()?;
+    let error_value = parsed.get("error")?;
+    let raw = match error_value {
+        Value::Null => return None,
+        Value::String(text) => text.trim().to_string(),
+        other => serde_json::to_string(other).ok()?.trim().to_string(),
+    };
+    if raw.is_empty() {
+        return None;
+    }
+    Some(truncate_error_detail(&raw))
 }
 
 fn is_literal_loopback_host(url: &reqwest::Url) -> bool {
@@ -573,6 +605,8 @@ pub struct GPMOperatorApproveRequest {
     pub approved: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub if_updated_at_utc: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1236,6 +1270,45 @@ mod tests {
             install_route: None,
         };
         req.validate().expect("expected valid interface");
+    }
+
+    #[test]
+    fn extract_json_error_detail_reads_error_field_when_present() {
+        let detail = extract_json_error_detail(r#"{"error":"stale operator application"}"#)
+            .expect("expected detail");
+        assert_eq!(detail, "stale operator application");
+
+        let object_detail = extract_json_error_detail(r#"{"error":{"code":"stale","retry":true}}"#)
+            .expect("expected object detail");
+        assert!(
+            object_detail.contains("\"code\":\"stale\""),
+            "expected object detail to preserve JSON structure: {object_detail}"
+        );
+    }
+
+    #[test]
+    fn extract_json_error_detail_uses_safe_truncation_and_ignores_missing_error() {
+        let long_error = "x".repeat(MAX_LOCAL_API_ERROR_DETAIL_CHARS + 7);
+        let payload = format!(r#"{{"error":"{}"}}"#, long_error);
+        let detail = extract_json_error_detail(&payload).expect("expected truncated detail");
+        assert!(
+            detail.contains("[truncated 7 chars]"),
+            "expected truncation marker: {detail}"
+        );
+        assert_eq!(
+            detail.chars().take(5).collect::<String>(),
+            "xxxxx",
+            "expected retained content prefix"
+        );
+
+        assert!(
+            extract_json_error_detail(r#"{"message":"no error key"}"#).is_none(),
+            "expected missing error field to return None"
+        );
+        assert!(
+            extract_json_error_detail(r#"{"error":"   "}"#).is_none(),
+            "expected blank error string to return None"
+        );
     }
 
     #[test]
