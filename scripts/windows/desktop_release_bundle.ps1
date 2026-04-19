@@ -15,14 +15,14 @@ param(
 $ErrorActionPreference = "Stop"
 
 function Show-Usage {
-  Write-Host "TDPN desktop release bundle scaffold (non-production signing flow)"
+  Write-Host "GPM desktop release bundle scaffold (non-production signing flow)"
   Write-Host ""
   Write-Host "Usage:"
   Write-Host "  ./scripts/windows/desktop_release_bundle.ps1 [-Help] [-Channel stable|beta|canary] [-UpdateFeedUrl URL] [-SigningIdentity ID] [-SigningCertPath PATH] [-InstallMissing] [-SkipBuild] [-- <tauri args>]"
   Write-Host ""
   Write-Host "Examples:"
   Write-Host "  ./scripts/windows/desktop_release_bundle.ps1"
-  Write-Host "  ./scripts/windows/desktop_release_bundle.ps1 -Channel beta -UpdateFeedUrl https://updates.example.invalid/tdpn/beta.json"
+  Write-Host "  ./scripts/windows/desktop_release_bundle.ps1 -Channel beta -UpdateFeedUrl https://updates.example.invalid/gpm/beta.json"
   Write-Host "  ./scripts/windows/desktop_release_bundle.ps1 -Channel canary -- --bundles nsis"
   Write-Host ""
   Write-Host "Notes:"
@@ -53,7 +53,7 @@ function Validate-UpdateFeedUrl {
 
   $parsed = $null
   if (-not [uri]::TryCreate($CandidateUrl.Trim(), [uriKind]::Absolute, [ref]$parsed)) {
-    throw "invalid -UpdateFeedUrl '$CandidateUrl' (expected absolute URL like https://updates.example.invalid/tdpn/beta.json)"
+    throw "invalid -UpdateFeedUrl '$CandidateUrl' (expected absolute URL like https://updates.example.invalid/gpm/beta.json)"
   }
   if ($parsed.Scheme -ne "https" -and $parsed.Scheme -ne "http") {
     throw "invalid -UpdateFeedUrl '$CandidateUrl' (allowed schemes: http, https)"

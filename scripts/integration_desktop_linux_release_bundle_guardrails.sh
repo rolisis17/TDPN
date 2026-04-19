@@ -73,7 +73,7 @@ run_expect_pass \
   "https_feed_pass" \
   "$SCRIPT_UNDER_TEST" \
     --channel beta \
-    --update-feed-url "https://updates.example.invalid/tdpn/beta.json" \
+    --update-feed-url "https://updates.example.invalid/gpm/beta.json" \
     --skip-build
 
 echo "[desktop-linux-release-bundle-guardrails] localhost http update feed passes"
@@ -81,7 +81,7 @@ run_expect_pass \
   "localhost_http_feed_pass" \
   "$SCRIPT_UNDER_TEST" \
     --channel beta \
-    --update-feed-url "http://localhost:18080/tdpn/beta.json" \
+    --update-feed-url "http://localhost:18080/gpm/beta.json" \
     --skip-build
 
 echo "[desktop-linux-release-bundle-guardrails] non-local http update feed fails"
@@ -90,7 +90,7 @@ run_expect_fail \
   "non-local update feeds must use https" \
   "$SCRIPT_UNDER_TEST" \
     --channel beta \
-    --update-feed-url "http://example.com/tdpn/beta.json" \
+    --update-feed-url "http://example.com/gpm/beta.json" \
     --skip-build
 
 echo "[desktop-linux-release-bundle-guardrails] unsupported update feed scheme fails"
@@ -99,7 +99,7 @@ run_expect_fail \
   "allowed schemes: http, https" \
   "$SCRIPT_UNDER_TEST" \
     --channel beta \
-    --update-feed-url "ftp://updates.example.invalid/tdpn/beta.json" \
+    --update-feed-url "ftp://updates.example.invalid/gpm/beta.json" \
     --skip-build
 
 echo "[desktop-linux-release-bundle-guardrails] signing password without cert path fails"
@@ -141,11 +141,11 @@ CONSTRAINED_PATH_DIR_Q="$(printf '%q' "$CONSTRAINED_PATH_DIR")"
 echo "[desktop-linux-release-bundle-guardrails] skip-build passes with constrained PATH and still validates scaffold inputs"
 run_expect_pass \
   "skip_build_constrained_path_pass" \
-  bash -lc "set -euo pipefail; constrained_path=$CONSTRAINED_PATH_DIR_Q; fail_log=$TMP_DIR_Q/skip_build_constrained_validation_fail.log; pass_log=$TMP_DIR_Q/skip_build_constrained_validation_pass.log; PATH=\"\$constrained_path\"; if command -v node >/dev/null 2>&1 || command -v npm >/dev/null 2>&1 || command -v rustc >/dev/null 2>&1 || command -v cargo >/dev/null 2>&1; then echo 'expected constrained PATH to omit node/npm/rustc/cargo' >&2; exit 1; fi; if $SCRIPT_UNDER_TEST_Q --channel beta --update-feed-url 'ftp://updates.example.invalid/tdpn/beta.json' --skip-build >\"\$fail_log\" 2>&1; then echo 'expected invalid update feed URL to fail under --skip-build' >&2; exit 1; fi; grep -F -- 'allowed schemes: http, https' \"\$fail_log\" >/dev/null; $SCRIPT_UNDER_TEST_Q --channel beta --update-feed-url 'https://updates.example.invalid/tdpn/beta.json' --skip-build >\"\$pass_log\" 2>&1; grep -F -- '[desktop-release-bundle] mode=scaffold-non-production' \"\$pass_log\" >/dev/null; grep -F -- '[desktop-release-bundle] build skipped by --skip-build' \"\$pass_log\" >/dev/null"
+  bash -lc "set -euo pipefail; constrained_path=$CONSTRAINED_PATH_DIR_Q; fail_log=$TMP_DIR_Q/skip_build_constrained_validation_fail.log; pass_log=$TMP_DIR_Q/skip_build_constrained_validation_pass.log; PATH=\"\$constrained_path\"; if command -v node >/dev/null 2>&1 || command -v npm >/dev/null 2>&1 || command -v rustc >/dev/null 2>&1 || command -v cargo >/dev/null 2>&1; then echo 'expected constrained PATH to omit node/npm/rustc/cargo' >&2; exit 1; fi; if $SCRIPT_UNDER_TEST_Q --channel beta --update-feed-url 'ftp://updates.example.invalid/gpm/beta.json' --skip-build >\"\$fail_log\" 2>&1; then echo 'expected invalid update feed URL to fail under --skip-build' >&2; exit 1; fi; grep -F -- 'allowed schemes: http, https' \"\$fail_log\" >/dev/null; $SCRIPT_UNDER_TEST_Q --channel beta --update-feed-url 'https://updates.example.invalid/gpm/beta.json' --skip-build >\"\$pass_log\" 2>&1; grep -F -- '[desktop-release-bundle] mode=scaffold-non-production' \"\$pass_log\" >/dev/null; grep -F -- '[desktop-release-bundle] build skipped by --skip-build' \"\$pass_log\" >/dev/null"
 
 echo "[desktop-linux-release-bundle-guardrails] scoped environment restore is preserved in-process"
 run_expect_pass \
   "scoped_env_restore_pass" \
-  bash -lc "set -euo pipefail; export TDPN_DESKTOP_UPDATE_CHANNEL='orig-tdpn-channel'; export GPM_DESKTOP_UPDATE_CHANNEL='orig-gpm-channel'; export TDPN_DESKTOP_UPDATE_FEED_URL='https://updates.example.invalid/orig-tdpn.json'; export GPM_DESKTOP_UPDATE_FEED_URL='https://updates.example.invalid/orig-gpm.json'; export TDPN_DESKTOP_SIGNING_IDENTITY='orig-tdpn-signing-identity'; export GPM_DESKTOP_SIGNING_IDENTITY='orig-gpm-signing-identity'; export TDPN_DESKTOP_SIGNING_CERT_PATH='orig-tdpn-cert-path'; export GPM_DESKTOP_SIGNING_CERT_PATH='orig-gpm-cert-path'; export TDPN_DESKTOP_SIGNING_CERT_PASSWORD='orig-tdpn-cert-password'; export GPM_DESKTOP_SIGNING_CERT_PASSWORD='orig-gpm-cert-password'; $SCRIPT_UNDER_TEST_Q --channel canary --update-feed-url 'https://updates.example.invalid/tdpn/canary.json' --signing-identity 'scaffold-signing-identity' --signing-cert-path $DUMMY_CERT_PATH_Q --signing-cert-password 'placeholder' --skip-build >/dev/null; [[ \"\${TDPN_DESKTOP_UPDATE_CHANNEL}\" == 'orig-tdpn-channel' ]]; [[ \"\${GPM_DESKTOP_UPDATE_CHANNEL}\" == 'orig-gpm-channel' ]]; [[ \"\${TDPN_DESKTOP_UPDATE_FEED_URL}\" == 'https://updates.example.invalid/orig-tdpn.json' ]]; [[ \"\${GPM_DESKTOP_UPDATE_FEED_URL}\" == 'https://updates.example.invalid/orig-gpm.json' ]]; [[ \"\${TDPN_DESKTOP_SIGNING_IDENTITY}\" == 'orig-tdpn-signing-identity' ]]; [[ \"\${GPM_DESKTOP_SIGNING_IDENTITY}\" == 'orig-gpm-signing-identity' ]]; [[ \"\${TDPN_DESKTOP_SIGNING_CERT_PATH}\" == 'orig-tdpn-cert-path' ]]; [[ \"\${GPM_DESKTOP_SIGNING_CERT_PATH}\" == 'orig-gpm-cert-path' ]]; [[ \"\${TDPN_DESKTOP_SIGNING_CERT_PASSWORD}\" == 'orig-tdpn-cert-password' ]]; [[ \"\${GPM_DESKTOP_SIGNING_CERT_PASSWORD}\" == 'orig-gpm-cert-password' ]]"
+  bash -lc "set -euo pipefail; export TDPN_DESKTOP_UPDATE_CHANNEL='orig-tdpn-channel'; export GPM_DESKTOP_UPDATE_CHANNEL='orig-gpm-channel'; export TDPN_DESKTOP_UPDATE_FEED_URL='https://updates.example.invalid/orig-tdpn.json'; export GPM_DESKTOP_UPDATE_FEED_URL='https://updates.example.invalid/orig-gpm.json'; export TDPN_DESKTOP_SIGNING_IDENTITY='orig-tdpn-signing-identity'; export GPM_DESKTOP_SIGNING_IDENTITY='orig-gpm-signing-identity'; export TDPN_DESKTOP_SIGNING_CERT_PATH='orig-tdpn-cert-path'; export GPM_DESKTOP_SIGNING_CERT_PATH='orig-gpm-cert-path'; export TDPN_DESKTOP_SIGNING_CERT_PASSWORD='orig-tdpn-cert-password'; export GPM_DESKTOP_SIGNING_CERT_PASSWORD='orig-gpm-cert-password'; $SCRIPT_UNDER_TEST_Q --channel canary --update-feed-url 'https://updates.example.invalid/gpm/canary.json' --signing-identity 'scaffold-signing-identity' --signing-cert-path $DUMMY_CERT_PATH_Q --signing-cert-password 'placeholder' --skip-build >/dev/null; [[ \"\${TDPN_DESKTOP_UPDATE_CHANNEL}\" == 'orig-tdpn-channel' ]]; [[ \"\${GPM_DESKTOP_UPDATE_CHANNEL}\" == 'orig-gpm-channel' ]]; [[ \"\${TDPN_DESKTOP_UPDATE_FEED_URL}\" == 'https://updates.example.invalid/orig-tdpn.json' ]]; [[ \"\${GPM_DESKTOP_UPDATE_FEED_URL}\" == 'https://updates.example.invalid/orig-gpm.json' ]]; [[ \"\${TDPN_DESKTOP_SIGNING_IDENTITY}\" == 'orig-tdpn-signing-identity' ]]; [[ \"\${GPM_DESKTOP_SIGNING_IDENTITY}\" == 'orig-gpm-signing-identity' ]]; [[ \"\${TDPN_DESKTOP_SIGNING_CERT_PATH}\" == 'orig-tdpn-cert-path' ]]; [[ \"\${GPM_DESKTOP_SIGNING_CERT_PATH}\" == 'orig-gpm-cert-path' ]]; [[ \"\${TDPN_DESKTOP_SIGNING_CERT_PASSWORD}\" == 'orig-tdpn-cert-password' ]]; [[ \"\${GPM_DESKTOP_SIGNING_CERT_PASSWORD}\" == 'orig-gpm-cert-password' ]]"
 
 echo "desktop linux release bundle guardrails integration check ok"

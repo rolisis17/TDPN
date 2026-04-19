@@ -90,7 +90,7 @@ run_expect_pass \
   "https_feed_pass" \
   "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -File "$SCRIPT_UNDER_TEST_PS" \
     -Channel beta \
-    -UpdateFeedUrl "https://updates.example.invalid/tdpn/beta.json" \
+    -UpdateFeedUrl "https://updates.example.invalid/gpm/beta.json" \
     -SkipBuild
 
 echo "[desktop-release-bundle-guardrails] localhost http update feed passes"
@@ -98,7 +98,7 @@ run_expect_pass \
   "localhost_http_feed_pass" \
   "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -File "$SCRIPT_UNDER_TEST_PS" \
     -Channel beta \
-    -UpdateFeedUrl "http://localhost:18080/tdpn/beta.json" \
+    -UpdateFeedUrl "http://localhost:18080/gpm/beta.json" \
     -SkipBuild
 
 echo "[desktop-release-bundle-guardrails] non-local http update feed fails"
@@ -107,7 +107,7 @@ run_expect_fail \
   "non-local update feeds must use https" \
   "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -File "$SCRIPT_UNDER_TEST_PS" \
     -Channel beta \
-    -UpdateFeedUrl "http://example.com/tdpn/beta.json" \
+    -UpdateFeedUrl "http://example.com/gpm/beta.json" \
     -SkipBuild
 
 echo "[desktop-release-bundle-guardrails] unsupported update feed scheme fails"
@@ -116,7 +116,7 @@ run_expect_fail \
   "allowed schemes: http, https" \
   "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -File "$SCRIPT_UNDER_TEST_PS" \
     -Channel beta \
-    -UpdateFeedUrl "ftp://updates.example.invalid/tdpn/beta.json" \
+    -UpdateFeedUrl "ftp://updates.example.invalid/gpm/beta.json" \
     -SkipBuild
 
 POWERSHELL_CONSTRAINED_PATH_PREFLIGHT="\$ErrorActionPreference='Stop'; \$env:PATH=''; foreach (\$tool in 'node','npm.cmd','rustc','cargo') { if (Get-Command \$tool -CommandType Application -ErrorAction SilentlyContinue) { throw \"constrained PATH unexpectedly resolved '\$tool'\" } };"
@@ -126,12 +126,12 @@ run_expect_fail \
   "constrained_path_unsupported_scheme_fail" \
   "allowed schemes: http, https" \
   "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
-    "$POWERSHELL_CONSTRAINED_PATH_PREFLIGHT & '$SCRIPT_UNDER_TEST_PS' -Channel beta -UpdateFeedUrl 'ftp://updates.example.invalid/tdpn/beta.json' -SkipBuild"
+    "$POWERSHELL_CONSTRAINED_PATH_PREFLIGHT & '$SCRIPT_UNDER_TEST_PS' -Channel beta -UpdateFeedUrl 'ftp://updates.example.invalid/gpm/beta.json' -SkipBuild"
 
 run_expect_pass \
   "constrained_path_https_skipbuild_pass" \
   "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
-    "$POWERSHELL_CONSTRAINED_PATH_PREFLIGHT & '$SCRIPT_UNDER_TEST_PS' -Channel beta -UpdateFeedUrl 'https://updates.example.invalid/tdpn/beta.json' -SkipBuild"
+    "$POWERSHELL_CONSTRAINED_PATH_PREFLIGHT & '$SCRIPT_UNDER_TEST_PS' -Channel beta -UpdateFeedUrl 'https://updates.example.invalid/gpm/beta.json' -SkipBuild"
 assert_log_contains \
   "constrained_path_https_skipbuild_pass" \
   "[desktop-release-bundle] mode=scaffold-non-production"
@@ -186,6 +186,6 @@ echo "[desktop-release-bundle-guardrails] scoped environment restore is preserve
 run_expect_pass \
   "scoped_env_restore_pass" \
   "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
-    "\$ErrorActionPreference='Stop'; \$env:TDPN_DESKTOP_UPDATE_CHANNEL='orig-tdpn-channel'; \$env:GPM_DESKTOP_UPDATE_CHANNEL='orig-gpm-channel'; \$env:TDPN_DESKTOP_UPDATE_FEED_CONFIGURED='orig-tdpn-feed-configured'; \$env:GPM_DESKTOP_UPDATE_FEED_CONFIGURED='orig-gpm-feed-configured'; & '$SCRIPT_UNDER_TEST_PS' -Channel canary -UpdateFeedUrl 'https://updates.example.invalid/tdpn/canary.json' -SkipBuild; if (\$env:TDPN_DESKTOP_UPDATE_CHANNEL -ne 'orig-tdpn-channel') { throw 'env restore failed for TDPN_DESKTOP_UPDATE_CHANNEL' }; if (\$env:GPM_DESKTOP_UPDATE_CHANNEL -ne 'orig-gpm-channel') { throw 'env restore failed for GPM_DESKTOP_UPDATE_CHANNEL' }; if (\$env:TDPN_DESKTOP_UPDATE_FEED_CONFIGURED -ne 'orig-tdpn-feed-configured') { throw 'env restore failed for TDPN_DESKTOP_UPDATE_FEED_CONFIGURED' }; if (\$env:GPM_DESKTOP_UPDATE_FEED_CONFIGURED -ne 'orig-gpm-feed-configured') { throw 'env restore failed for GPM_DESKTOP_UPDATE_FEED_CONFIGURED' }"
+    "\$ErrorActionPreference='Stop'; \$env:TDPN_DESKTOP_UPDATE_CHANNEL='orig-tdpn-channel'; \$env:GPM_DESKTOP_UPDATE_CHANNEL='orig-gpm-channel'; \$env:TDPN_DESKTOP_UPDATE_FEED_CONFIGURED='orig-tdpn-feed-configured'; \$env:GPM_DESKTOP_UPDATE_FEED_CONFIGURED='orig-gpm-feed-configured'; & '$SCRIPT_UNDER_TEST_PS' -Channel canary -UpdateFeedUrl 'https://updates.example.invalid/gpm/canary.json' -SkipBuild; if (\$env:TDPN_DESKTOP_UPDATE_CHANNEL -ne 'orig-tdpn-channel') { throw 'env restore failed for TDPN_DESKTOP_UPDATE_CHANNEL' }; if (\$env:GPM_DESKTOP_UPDATE_CHANNEL -ne 'orig-gpm-channel') { throw 'env restore failed for GPM_DESKTOP_UPDATE_CHANNEL' }; if (\$env:TDPN_DESKTOP_UPDATE_FEED_CONFIGURED -ne 'orig-tdpn-feed-configured') { throw 'env restore failed for TDPN_DESKTOP_UPDATE_FEED_CONFIGURED' }; if (\$env:GPM_DESKTOP_UPDATE_FEED_CONFIGURED -ne 'orig-gpm-feed-configured') { throw 'env restore failed for GPM_DESKTOP_UPDATE_FEED_CONFIGURED' }"
 
 echo "desktop release bundle guardrails integration check ok"

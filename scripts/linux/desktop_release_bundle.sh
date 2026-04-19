@@ -6,14 +6,14 @@ DESKTOP_DIR="$ROOT_DIR/apps/desktop"
 
 show_usage() {
   cat <<'USAGE'
-TDPN desktop release bundle scaffold (non-production signing flow)
+GPM desktop release bundle scaffold (non-production signing flow)
 
 Usage:
   ./scripts/linux/desktop_release_bundle.sh [--help] [--channel stable|beta|canary] [--update-feed-url URL] [--signing-identity ID] [--signing-cert-path PATH] [--signing-cert-password VALUE] [--skip-build] [-- <tauri args>]
 
 Examples:
   ./scripts/linux/desktop_release_bundle.sh
-  ./scripts/linux/desktop_release_bundle.sh --channel beta --update-feed-url https://updates.example.invalid/tdpn/beta.json
+  ./scripts/linux/desktop_release_bundle.sh --channel beta --update-feed-url https://updates.example.invalid/gpm/beta.json
   ./scripts/linux/desktop_release_bundle.sh --channel canary -- --bundles appimage
 
 Notes:
@@ -62,7 +62,7 @@ validate_update_feed_url() {
   fi
 
   if [[ ! "$candidate" =~ ^([a-zA-Z][a-zA-Z0-9+.-]*)://([^/]+) ]]; then
-    echo "invalid --update-feed-url '$candidate' (expected absolute URL like https://updates.example.invalid/tdpn/beta.json)" >&2
+    echo "invalid --update-feed-url '$candidate' (expected absolute URL like https://updates.example.invalid/gpm/beta.json)" >&2
     exit 2
   fi
 
