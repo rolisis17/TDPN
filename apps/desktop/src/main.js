@@ -23,6 +23,7 @@ const connectionStateEl = document.getElementById("connection_state");
 const connectionDetailEl = document.getElementById("connection_detail");
 
 const updateBtnEl = byId("update_btn");
+const setProfileBtnEl = byId("set_profile_btn");
 const serviceStartBtnEl = byId("service_start_btn");
 const serviceStopBtnEl = byId("service_stop_btn");
 const serviceRestartBtnEl = byId("service_restart_btn");
@@ -50,6 +51,7 @@ const state = {
   sessionToken: "",
   role: "client",
   operatorApplicationStatus: undefined,
+  serviceMutationsAllowed: false,
   manifest: null,
   connectionState: CONNECTION_DEFAULT_STATE,
   connectionDetail: CONNECTION_DEFAULT_DETAIL
@@ -406,39 +408,71 @@ function parseOperatorApplicationStatus(payload) {
   return normalizeOperatorApplicationStatus(payload?.application?.status);
 }
 
-function isServerRoleUnlocked(role = state.role) {
+function isServerTabVisibleRole(role = state.role) {
   const normalized = (role || "client").toLowerCase();
   return normalized === "operator" || normalized === "admin";
+}
+
+function isServerMutationRoleEligible(role = state.role, operatorApplicationStatus = state.operatorApplicationStatus) {
+  const normalized = (role || "client").toLowerCase();
+  if (normalized === "admin") {
+    return true;
+  }
+  if (normalized === "operator") {
+    return operatorApplicationStatus === "approved";
+  }
+  return false;
+}
+
+function syncServerMutationControls() {
+  const mutationsEnabled = state.serviceMutationsAllowed && isServerMutationRoleEligible();
+  setProfileBtnEl.disabled = !mutationsEnabled;
+  serviceStartBtnEl.disabled = !mutationsEnabled;
+  serviceStopBtnEl.disabled = !mutationsEnabled;
+  serviceRestartBtnEl.disabled = !mutationsEnabled;
 }
 
 function computeServerLockHintText() {
   if (!state.sessionToken) {
     return "Sign in first to unlock server onboarding.";
   }
-  if (isServerRoleUnlocked()) {
-    return "Server controls are unlocked for this role.";
+  const role = (state.role || "client").toLowerCase();
+  if (role === "admin") {
+    if (!state.serviceMutationsAllowed) {
+      return "Server tab is available. Service lifecycle actions are disabled by environment policy.";
+    }
+    return "Server controls are unlocked for admin role.";
   }
-  switch (state.operatorApplicationStatus) {
-    case "pending":
-      return "Operator application pending approval.";
-    case "rejected":
-      return "Operator application rejected; re-apply or contact admin.";
-    case "approved":
-      return "Approval detected. Refresh/rotate session to lift role to operator.";
-    case "not_submitted":
-    default:
-      return "Apply operator role to start server approval.";
+  if (role === "operator") {
+    if (state.operatorApplicationStatus === "approved") {
+      if (!state.serviceMutationsAllowed) {
+        return "Operator approved. Service lifecycle actions are disabled by environment policy.";
+      }
+      return "Operator approved. Server controls are unlocked.";
+    }
+    if (state.operatorApplicationStatus === "pending") {
+      return "Operator application pending approval. Server lifecycle actions stay locked until approved.";
+    }
+    if (state.operatorApplicationStatus === "rejected") {
+      return "Operator application rejected; re-apply or contact admin to unlock server lifecycle actions.";
+    }
+    if (state.operatorApplicationStatus === "not_submitted") {
+      return "Operator role detected but no approved application yet. Submit operator application to unlock server lifecycle actions.";
+    }
+    return "Operator role detected; check operator status and refresh session after approval to unlock server lifecycle actions.";
   }
+  return "Apply operator role to start server approval.";
 }
 
 function syncServerRoleLockState() {
-  const serverUnlocked = isServerRoleUnlocked();
-  tabServerEl.disabled = !serverUnlocked;
-  tabServerEl.classList.toggle("locked", !serverUnlocked);
-  panelServerEl.classList.toggle("locked", !serverUnlocked);
-  if (!serverUnlocked && tabServerEl.classList.contains("active")) {
+  const serverTabVisible = isServerTabVisibleRole();
+  tabServerEl.disabled = !serverTabVisible;
+  tabServerEl.classList.toggle("locked", !serverTabVisible);
+  panelServerEl.classList.toggle("locked", !serverTabVisible);
+  if (!serverTabVisible && tabServerEl.classList.contains("active")) {
     activateTab("client");
   }
+  syncServerMutationControls();
   serverLockHintEl.textContent = computeServerLockHintText();
 }
 
@@ -848,16 +882,14 @@ async function init() {
     apiBaseEl.textContent = meta.apiLine;
     apiHintsEl.textContent = meta.hintLine;
     updateBtnEl.disabled = !meta.updateMutationsEnabled;
-    serviceStartBtnEl.disabled = !meta.serviceMutationsEnabled;
-    serviceStopBtnEl.disabled = !meta.serviceMutationsEnabled;
-    serviceRestartBtnEl.disabled = !meta.serviceMutationsEnabled;
+    state.serviceMutationsAllowed = meta.serviceMutationsEnabled;
+    syncServerRoleLockState();
   } catch (err) {
     apiBaseEl.textContent = "API: unavailable";
     apiHintsEl.textContent = "";
     updateBtnEl.disabled = true;
-    serviceStartBtnEl.disabled = true;
-    serviceStopBtnEl.disabled = true;
-    serviceRestartBtnEl.disabled = true;
+    state.serviceMutationsAllowed = false;
+    syncServerRoleLockState();
     print("init (error)", err);
   }
 

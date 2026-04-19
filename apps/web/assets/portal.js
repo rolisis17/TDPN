@@ -167,12 +167,47 @@ function computeOperatorReadiness() {
     };
   }
 
-  if (isServerRoleUnlocked(role)) {
+  if (role === "admin") {
     return {
       kind: "good",
       statusText: statusLabel,
       guidanceText: "Server controls are eligible for this session role."
     };
+  }
+
+  if (role === "operator") {
+    switch (operatorApplicationStatus) {
+      case "approved":
+        return {
+          kind: "good",
+          statusText: statusLabel,
+          guidanceText: "Operator application is approved. Server controls are eligible for this session role."
+        };
+      case "rejected":
+        return {
+          kind: "bad",
+          statusText: statusLabel,
+          guidanceText: "Operator role is not fully eligible. Check operator status, then refresh or rotate session after re-approval."
+        };
+      case "pending":
+        return {
+          kind: "warn",
+          statusText: statusLabel,
+          guidanceText: "Operator role is not fully eligible yet. Check operator status and refresh or rotate session after approval."
+        };
+      case "not_submitted":
+        return {
+          kind: "warn",
+          statusText: statusLabel,
+          guidanceText: "Operator role is not fully eligible yet. Submit operator application, then refresh or rotate session after approval."
+        };
+      default:
+        return {
+          kind: "warn",
+          statusText: statusLabel,
+          guidanceText: "Operator role is not fully eligible yet. Check operator status and refresh or rotate session."
+        };
+    }
   }
 
   switch (operatorApplicationStatus) {
