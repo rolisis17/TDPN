@@ -154,6 +154,14 @@ if ! grep -qF 'winget install --id' "$SCRIPT_UNDER_TEST"; then
   echo "windows desktop doctor guardrails failed: missing winget remediation command marker in $SCRIPT_UNDER_TEST"
   exit 1
 fi
+if ! grep -qF 'npm.cmd install' "$SCRIPT_UNDER_TEST"; then
+  echo "windows desktop doctor guardrails failed: missing npm install remediation command marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
+if ! grep -qF 'npm.cmd run tauri -- dev' "$SCRIPT_UNDER_TEST"; then
+  echo "windows desktop doctor guardrails failed: missing tauri dev remediation command marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
 if ! grep -qF 'desktop_one_click.ps1' "$SCRIPT_UNDER_TEST"; then
   echo "windows desktop doctor guardrails failed: missing one-click rerun remediation marker in $SCRIPT_UNDER_TEST"
   exit 1
@@ -196,6 +204,16 @@ if ! jq -e 'type == "object"' "$SUMMARY_JSON" >/dev/null 2>&1; then
 fi
 if ! jq -e '.recommended_commands | type == "array" and length >= 2' "$SUMMARY_JSON" >/dev/null 2>&1; then
   echo "windows desktop doctor guardrails failed: summary json missing recommended_commands guidance array"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if ! jq -e '.recommended_commands | any(type == "string" and contains("npm.cmd install"))' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "windows desktop doctor guardrails failed: summary json missing npm install remediation command"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if ! jq -e '.recommended_commands | any(type == "string" and contains("npm.cmd run tauri -- dev"))' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "windows desktop doctor guardrails failed: summary json missing tauri dev remediation command"
   cat "$SUMMARY_JSON"
   exit 1
 fi
